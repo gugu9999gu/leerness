@@ -4,7 +4,7 @@
   "title": "Firebase and Cloud Functions Skill Library",
   "category": "backend",
   "description": "Firebase Functions, Firestore, Hosting, Cloud Run 연동 개발을 위한 스킬입니다.",
-  "compatibleHarness": ">=3.1.0",
+  "compatibleHarness": ">=1.1.0",
   "sensitiveDataPolicy": "env-reference-only",
   "requiresEnv": [
     "FIREBASE_PROJECT_ID"
@@ -27,5 +27,13 @@
       "env-reference-only",
       "reusability"
     ]
-  }
+  },
+  "displayNameKo": "Firebase·Cloud Functions 스킬 라이브러리",
+  "categoryKo": "백엔드/클라우드",
+  "capabilities": [
+    "Firebase Functions 배포 오류 진단",
+    "Firestore 인덱스·규칙 점검",
+    "Secret Manager/환경변수 분리",
+    "Cloud Run/Hosting 연동 검증"
+  ]
 }

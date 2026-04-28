@@ -49,7 +49,7 @@ npx leerness init --skills recommended
 필요한 스킬만 선택 설치:
 
 ```bash
-npx leerness init --skills office,commerce-api,crawling
+npx leerness init --skills office,commerce-api,crawling,ai-verified-skill-publisher
 ```
 
 특정 경로에 설치:
@@ -66,6 +66,7 @@ leerness status [path]
 leerness verify [path]
 
 leerness skill list
+leerness skill info <name>
 leerness skill add <name>
 leerness skill remove <name>
 leerness skill update <name>
@@ -76,7 +77,7 @@ leerness library status <path>
 leerness library validate <path> [--strict-ai]
 leerness library verify <path> --ai --reviewer leerness-ai
 leerness library build <path> [--out ./dist] [--package leerness-skill-name]
-leerness library update <path> --from <validated-new-skill-path> [--version 1.1.0]
+leerness library update <path> --from <validated-new-skill-path> [--version 1.2.0]
 leerness library merge <source-library> --path <project>
 leerness library migrate <path> [--version 1.0.0]
 leerness library publish <built-library> --target npm|git [--execute]
@@ -113,6 +114,26 @@ your-project/
     └── archive/
 ```
 
+
+## 한글 스킬 라이브러리 표시
+
+Leerness 1.2.0부터 `leerness skill list`는 스킬의 한글명, 가능한 작업, 최종 업데이트일, AI 검증 상태를 함께 표시합니다.
+
+```bash
+leerness skill list
+leerness skill info ai-verified-skill-publisher
+```
+
+## AI 검증 스킬 업로드 스킬
+
+검증된 스킬을 라이브러리화하고 npm/git으로 업로드하는 절차 자체도 스킬로 설치할 수 있습니다.
+
+```bash
+leerness skill add ai-verified-skill-publisher
+```
+
+이 스킬은 성공한 구현 패턴 추출, 한글명/가능 작업/최종 업데이트일 기록, 민감정보 제거, AI 검증 메타데이터 생성, strict-ai 검증, dry-run 확인, 사용자 승인 후 `--execute` 업로드 흐름을 안내합니다.
+
 ## AX 최적화 가이드
 
 설치하면 AI 에이전트가 바로 읽을 수 있는 가이드가 생성됩니다.
@@ -145,6 +166,39 @@ leerness library publish ./my-skill/dist/my-skill --target npm --execute
 ```
 
 `library publish`는 기본값이 dry-run입니다. 실제 업로드는 `--execute`가 있을 때만 실행됩니다.
+
+
+## 검증된 스킬팩 업로드 인증
+
+`leerness library publish ... --execute`는 실제 업로드 전에 access token을 확인합니다.
+
+우선순위는 다음과 같습니다.
+
+1. 명시한 환경변수: `--token-env LEERNESS_NPM_TOKEN`
+2. npm: `LEERNESS_NPM_TOKEN`, `NPM_TOKEN`, `NODE_AUTH_TOKEN`
+3. Git/GitHub: `LEERNESS_GIT_TOKEN`, `LEERNESS_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`
+4. 프로젝트 로컬 설정: `.harness/skill-publish.local.json`
+5. 위 항목이 없으면 업로드 직전에 토큰 입력 요구
+
+로컬 설정 예시:
+
+```json
+{
+  "publishAuth": {
+    "npmTokenEnv": "LEERNESS_NPM_TOKEN",
+    "gitTokenEnv": "LEERNESS_GITHUB_TOKEN",
+    "gitRemoteUrl": "https://github.com/gugu9999gu/leerness"
+  }
+}
+```
+
+`.harness/skill-publish.local.json`은 `.gitignore`에 포함됩니다. 실제 토큰값을 저장하기보다 토큰이 들어있는 환경변수 이름만 저장하는 방식을 권장합니다.
+
+Git 업로드 기본 저장소 경로는 다음과 같습니다.
+
+```text
+https://github.com/gugu9999gu/leerness
+```
 
 ## 스킬 메타데이터
 

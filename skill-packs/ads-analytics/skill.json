@@ -4,7 +4,7 @@
   "title": "Ads and Analytics Skill Library",
   "category": "marketing",
   "description": "GA4, 광고 전환, ROAS, attribution 점검을 위한 스킬입니다.",
-  "compatibleHarness": ">=3.1.0",
+  "compatibleHarness": ">=1.1.0",
   "sensitiveDataPolicy": "env-reference-only",
   "requiresEnv": [
     "GA4_PROPERTY_ID"
@@ -27,5 +27,13 @@
       "env-reference-only",
       "reusability"
     ]
-  }
+  },
+  "displayNameKo": "광고·GA4 분석 스킬 라이브러리",
+  "categoryKo": "마케팅/분석",
+  "capabilities": [
+    "GA4 이벤트·전환 디버깅",
+    "광고 ROAS/전환매출 차이 원인 분석",
+    "어트리뷰션/세션 소스 점검",
+    "광고 리포트 해석 체크리스트"
+  ]
 }

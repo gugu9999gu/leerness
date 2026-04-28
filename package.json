@@ -1,7 +1,7 @@
 {
   "name": "leerness",
-  "version": "1.0.0",
-  "description": "Leerness: AI 에이전트가 대규모 프로젝트에서도 맥락, 규율, 디자인/기능 일관성, 검증된 스킬 라이브러리를 유지하도록 돕는 AX 최적화 개발 하네스.",
+  "version": "1.2.0",
+  "description": "Leerness: 검증된 스킬팩의 npm/git 업로드 토큰 게이트, 한글 스킬 라이브러리 표시, AI 검증 업로드 스킬을 지원하는 AX 최적화 개발 하네스.",
   "keywords": [
     "leerness",
     "ai",
@@ -13,7 +13,11 @@
     "ai-verified-skill",
     "ax-guideline",
     "skill-migration",
-    "developer-tools"
+    "developer-tools",
+    "korean-skill-library",
+    "ai-skill-publisher",
+    "verified-skill-upload",
+    "skill-capabilities"
   ],
   "bin": {
     "leerness": "./bin/harness.js"
@@ -27,7 +31,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node ./bin/harness.js --help && node ./bin/harness.js init --yes --skills office,commerce-api ./tmp-harness-test && node ./bin/harness.js status ./tmp-harness-test && node ./bin/harness.js skill list && node ./bin/harness.js library guide ./tmp-harness-test && node ./bin/harness.js verify ./tmp-harness-test",
+    "test": "node ./bin/harness.js --help && node ./bin/harness.js init --yes --skills office,commerce-api,ai-verified-skill-publisher ./tmp-harness-test && node ./bin/harness.js status ./tmp-harness-test && node ./bin/harness.js skill list && node ./bin/harness.js skill info ai-verified-skill-publisher && node ./bin/harness.js library guide ./tmp-harness-test && node ./bin/harness.js verify ./tmp-harness-test",
     "prepack": "node ./bin/harness.js --version"
   },
   "repository": {

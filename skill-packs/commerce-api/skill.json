@@ -4,7 +4,7 @@
   "title": "Commerce API Integration Skill Library",
   "category": "commerce",
   "description": "쿠팡, 롯데온, 스마트스토어 등 커머스 API 연동 패턴과 보안 규칙을 담은 스킬 모음입니다.",
-  "compatibleHarness": ">=3.1.0",
+  "compatibleHarness": ">=1.1.0",
   "sensitiveDataPolicy": "env-reference-only",
   "requiresEnv": [
     "COMMERCE_API_BASE_URL",
@@ -36,5 +36,13 @@
       "env-reference-only",
       "reusability"
     ]
-  }
+  },
+  "displayNameKo": "커머스 API 연동 스킬 라이브러리",
+  "categoryKo": "커머스/외부 API",
+  "capabilities": [
+    "쿠팡·롯데온·스마트스토어 API 인증 구조 설계",
+    "주문/상품/매출 동기화 플로우 구현",
+    "환경변수 기반 민감정보 분리",
+    "API 오류·재시도·레이트리밋 대응"
+  ]
 }

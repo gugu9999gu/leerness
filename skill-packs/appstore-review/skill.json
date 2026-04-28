@@ -4,7 +4,7 @@
   "title": "App Store Review Skill Library",
   "category": "mobile",
   "description": "App Store 심사 대응, 개인정보 라벨, 웹뷰 앱 검토를 위한 스킬입니다.",
-  "compatibleHarness": ">=3.1.0",
+  "compatibleHarness": ">=1.1.0",
   "sensitiveDataPolicy": "env-reference-only",
   "requiresEnv": [],
   "files": [
@@ -25,5 +25,13 @@
       "env-reference-only",
       "reusability"
     ]
-  }
+  },
+  "displayNameKo": "앱스토어 심사 대응 스킬 라이브러리",
+  "categoryKo": "모바일/심사",
+  "capabilities": [
+    "App Store 심사 답변 초안 작성",
+    "개인정보 라벨·수집 목적 점검",
+    "웹뷰 앱 심사 이슈 대응",
+    "버그픽스 제출/리젝 사유 정리"
+  ]
 }

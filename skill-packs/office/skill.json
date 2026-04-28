@@ -4,7 +4,7 @@
   "title": "Microsoft Office Automation Skill Library",
   "category": "productivity",
   "description": "Excel, Word, PowerPoint 문서 자동화와 템플릿 기반 산출물 생성을 위한 스킬 모음입니다.",
-  "compatibleHarness": ">=3.1.0",
+  "compatibleHarness": ">=1.1.0",
   "sensitiveDataPolicy": "env-reference-only",
   "requiresEnv": [],
   "files": [
@@ -25,5 +25,13 @@
       "env-reference-only",
       "reusability"
     ]
-  }
+  },
+  "displayNameKo": "오피스 자동화 스킬 라이브러리",
+  "categoryKo": "생산성/문서 자동화",
+  "capabilities": [
+    "엑셀 데이터 정리·서식·검증 자동화",
+    "워드/문서 템플릿 기반 산출물 생성",
+    "파워포인트 발표자료 구조화·생성",
+    "문서 산출물 검증 체크리스트 작성"
+  ]
 }

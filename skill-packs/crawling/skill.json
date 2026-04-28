@@ -4,7 +4,7 @@
   "title": "Crawling and Browser Automation Skill Library",
   "category": "automation",
   "description": "API가 없거나 제한적일 때 브라우저 자동화와 다운로드 자동화를 안전하게 구현하기 위한 스킬입니다.",
-  "compatibleHarness": ">=3.1.0",
+  "compatibleHarness": ">=1.1.0",
   "sensitiveDataPolicy": "env-reference-only",
   "requiresEnv": [
     "CRAWLER_USER_ID",
@@ -28,5 +28,13 @@
       "env-reference-only",
       "reusability"
     ]
-  }
+  },
+  "displayNameKo": "크롤링·브라우저 자동화 스킬 라이브러리",
+  "categoryKo": "자동화/수집",
+  "capabilities": [
+    "Playwright 기반 브라우저 자동화",
+    "로그인 세션·다운로드 자동화 설계",
+    "클라우드 서버 실행 제약 점검",
+    "CAPTCHA/2FA/이용약관 리스크 분리"
+  ]
 }
