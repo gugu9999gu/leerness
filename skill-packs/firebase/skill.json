@@ -1,0 +1,31 @@
+{
+  "name": "firebase",
+  "version": "1.0.0",
+  "title": "Firebase and Cloud Functions Skill Library",
+  "category": "backend",
+  "description": "Firebase Functions, Firestore, Hosting, Cloud Run 연동 개발을 위한 스킬입니다.",
+  "compatibleHarness": ">=3.1.0",
+  "sensitiveDataPolicy": "env-reference-only",
+  "requiresEnv": [
+    "FIREBASE_PROJECT_ID"
+  ],
+  "files": [
+    "skills/functions-deploy.md",
+    "skills/firestore-indexes.md",
+    "skills/secrets.md"
+  ],
+  "lastUpdated": "2026-04-28",
+  "lastUpdatedAt": "2026-04-28T00:00:00.000Z",
+  "verification": {
+    "status": "passed",
+    "method": "bundled-ai-review",
+    "verifiedBy": "leerness-ai",
+    "verifiedAt": "2026-04-28T00:00:00.000Z",
+    "checks": [
+      "structure",
+      "secret-scan",
+      "env-reference-only",
+      "reusability"
+    ]
+  }
+}

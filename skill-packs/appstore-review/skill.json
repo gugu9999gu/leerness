@@ -1,0 +1,29 @@
+{
+  "name": "appstore-review",
+  "version": "1.0.0",
+  "title": "App Store Review Skill Library",
+  "category": "mobile",
+  "description": "App Store 심사 대응, 개인정보 라벨, 웹뷰 앱 검토를 위한 스킬입니다.",
+  "compatibleHarness": ">=3.1.0",
+  "sensitiveDataPolicy": "env-reference-only",
+  "requiresEnv": [],
+  "files": [
+    "skills/privacy-labels.md",
+    "skills/review-response.md",
+    "skills/webview-app.md"
+  ],
+  "lastUpdated": "2026-04-28",
+  "lastUpdatedAt": "2026-04-28T00:00:00.000Z",
+  "verification": {
+    "status": "passed",
+    "method": "bundled-ai-review",
+    "verifiedBy": "leerness-ai",
+    "verifiedAt": "2026-04-28T00:00:00.000Z",
+    "checks": [
+      "structure",
+      "secret-scan",
+      "env-reference-only",
+      "reusability"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "office",
+  "version": "1.0.0",
+  "title": "Microsoft Office Automation Skill Library",
+  "category": "productivity",
+  "description": "Excel, Word, PowerPoint 문서 자동화와 템플릿 기반 산출물 생성을 위한 스킬 모음입니다.",
+  "compatibleHarness": ">=3.1.0",
+  "sensitiveDataPolicy": "env-reference-only",
+  "requiresEnv": [],
+  "files": [
+    "skills/excel-automation.md",
+    "skills/powerpoint-generation.md",
+    "skills/word-template.md"
+  ],
+  "lastUpdated": "2026-04-28",
+  "lastUpdatedAt": "2026-04-28T00:00:00.000Z",
+  "verification": {
+    "status": "passed",
+    "method": "bundled-ai-review",
+    "verifiedBy": "leerness-ai",
+    "verifiedAt": "2026-04-28T00:00:00.000Z",
+    "checks": [
+      "structure",
+      "secret-scan",
+      "env-reference-only",
+      "reusability"
+    ]
+  }
+}

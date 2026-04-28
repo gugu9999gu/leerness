@@ -1,0 +1,50 @@
+{
+  "name": "leerness",
+  "version": "1.0.0",
+  "description": "Leerness: AI 에이전트가 대규모 프로젝트에서도 맥락, 규율, 디자인/기능 일관성, 검증된 스킬 라이브러리를 유지하도록 돕는 AX 최적화 개발 하네스.",
+  "keywords": [
+    "leerness",
+    "ai",
+    "agent",
+    "harness",
+    "harness-engineering",
+    "context-engineering",
+    "skill-library",
+    "ai-verified-skill",
+    "ax-guideline",
+    "skill-migration",
+    "developer-tools"
+  ],
+  "bin": {
+    "leerness": "./bin/harness.js"
+  },
+  "files": [
+    "bin/",
+    "skill-packs/",
+    "docs/",
+    "harness.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node ./bin/harness.js --help && node ./bin/harness.js init --yes --skills office,commerce-api ./tmp-harness-test && node ./bin/harness.js status ./tmp-harness-test && node ./bin/harness.js skill list && node ./bin/harness.js library guide ./tmp-harness-test && node ./bin/harness.js verify ./tmp-harness-test",
+    "prepack": "node ./bin/harness.js --version"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gugu9999gu/leerness.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gugu9999gu/leerness/issues"
+  },
+  "homepage": "https://github.com/gugu9999gu/leerness#readme",
+  "author": "gugu9999gu",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
