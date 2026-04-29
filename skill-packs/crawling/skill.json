@@ -1,40 +1,28 @@
 {
   "name": "crawling",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "title": "Crawling and Browser Automation Skill Library",
+  "displayNameKo": "크롤링/브라우저 자동화 스킬 라이브러리",
   "category": "automation",
-  "description": "API가 없거나 제한적일 때 브라우저 자동화와 다운로드 자동화를 안전하게 구현하기 위한 스킬입니다.",
-  "compatibleHarness": ">=1.1.0",
-  "sensitiveDataPolicy": "env-reference-only",
-  "requiresEnv": [
-    "CRAWLER_USER_ID",
-    "CRAWLER_PASSWORD"
+  "categoryKo": "크롤링/자동화",
+  "description": "API가 없거나 제한된 관리자 화면 자동화 작업을 위한 스킬입니다.",
+  "capabilities": [
+    "Playwright 기반 다운로드 자동화",
+    "로그인 세션 storageState 관리",
+    "다운로드 파일 검증",
+    "실패 시 스크린샷/로그 수집"
   ],
+  "requiresEnv": [],
   "files": [
-    "skills/browser-automation.md",
-    "skills/download-automation.md",
-    "skills/cloud-runtime.md"
+    "README.md"
   ],
-  "lastUpdated": "2026-04-28",
-  "lastUpdatedAt": "2026-04-28T00:00:00.000Z",
+  "source": "bundled",
+  "lastUpdated": "2026-04-29",
+  "lastUpdatedAt": "2026-04-29T00:00:00.000Z",
   "verification": {
     "status": "passed",
-    "method": "bundled-ai-review",
+    "method": "ai-assisted-review",
     "verifiedBy": "leerness-ai",
-    "verifiedAt": "2026-04-28T00:00:00.000Z",
-    "checks": [
-      "structure",
-      "secret-scan",
-      "env-reference-only",
-      "reusability"
-    ]
-  },
-  "displayNameKo": "크롤링·브라우저 자동화 스킬 라이브러리",
-  "categoryKo": "자동화/수집",
-  "capabilities": [
-    "Playwright 기반 브라우저 자동화",
-    "로그인 세션·다운로드 자동화 설계",
-    "클라우드 서버 실행 제약 점검",
-    "CAPTCHA/2FA/이용약관 리스크 분리"
-  ]
+    "verifiedAt": "2026-04-29T00:00:00.000Z"
+  }
 }

@@ -1,39 +1,28 @@
 {
   "name": "ads-analytics",
-  "version": "1.0.0",
-  "title": "Ads and Analytics Skill Library",
-  "category": "marketing",
-  "description": "GA4, 광고 전환, ROAS, attribution 점검을 위한 스킬입니다.",
-  "compatibleHarness": ">=1.1.0",
-  "sensitiveDataPolicy": "env-reference-only",
-  "requiresEnv": [
-    "GA4_PROPERTY_ID"
+  "version": "1.3.0",
+  "title": "Ads and GA4 Analytics Skill Library",
+  "displayNameKo": "광고/GA4 분석 스킬 라이브러리",
+  "category": "analytics",
+  "categoryKo": "광고/분석",
+  "description": "GA4, 광고 전환, ROAS, UTM, 이벤트 추적 점검을 위한 스킬입니다.",
+  "capabilities": [
+    "GA4 이벤트/전환 점검",
+    "광고 매체별 ROAS 해석",
+    "UTM/세션 소스 문제 분석",
+    "전환 매출 차이 원인 정리"
   ],
+  "requiresEnv": [],
   "files": [
-    "skills/ga4-debugging.md",
-    "skills/conversion-attribution.md",
-    "skills/roas-check.md"
+    "README.md"
   ],
-  "lastUpdated": "2026-04-28",
-  "lastUpdatedAt": "2026-04-28T00:00:00.000Z",
+  "source": "bundled",
+  "lastUpdated": "2026-04-29",
+  "lastUpdatedAt": "2026-04-29T00:00:00.000Z",
   "verification": {
     "status": "passed",
-    "method": "bundled-ai-review",
+    "method": "ai-assisted-review",
     "verifiedBy": "leerness-ai",
-    "verifiedAt": "2026-04-28T00:00:00.000Z",
-    "checks": [
-      "structure",
-      "secret-scan",
-      "env-reference-only",
-      "reusability"
-    ]
-  },
-  "displayNameKo": "광고·GA4 분석 스킬 라이브러리",
-  "categoryKo": "마케팅/분석",
-  "capabilities": [
-    "GA4 이벤트·전환 디버깅",
-    "광고 ROAS/전환매출 차이 원인 분석",
-    "어트리뷰션/세션 소스 점검",
-    "광고 리포트 해석 체크리스트"
-  ]
+    "verifiedAt": "2026-04-29T00:00:00.000Z"
+  }
 }

@@ -5,9 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const childProcess = require('child_process');
-const os = require('os');
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.1';
 const MARK = '<!-- leerness:managed -->';
 const MIGRATED = '<!-- leerness:migrated-legacy -->';
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
@@ -16,98 +15,6 @@ const DEFAULT_GIT_REPOSITORY = 'https://github.com/gugu9999gu/leerness';
 const c = { reset:'\x1b[0m', bold:'\x1b[1m', dim:'\x1b[2m', green:'\x1b[32m', yellow:'\x1b[33m', cyan:'\x1b[36m', red:'\x1b[31m', magenta:'\x1b[35m' };
 
 const legacyItems = ['AI_HARNESS.md','HARNESS.md','PROJECT_CONTEXT.md','CONTEXT.md','ARCHITECTURE.md','DECISIONS.md','CURRENT_STATE.md','TASK_LOG.md','AGENT.md','AGENTS.md','CLAUDE.md','.cursorrules','.cursor/rules/project-rules.mdc','.cursor/rules/leerness.mdc','.github/copilot-instructions.md','docs/guideline.md','docs/history.md','.ai','harness','.harness'];
-
-const coreFiles = {
-  'AGENTS.md': [MARK,'# {{PROJECT}} AI Agent Harness','','Agent = Model + Harness.','','## Read Order','1. .harness/project-brief.md','2. .harness/current-state.md','3. .harness/architecture.md','4. .harness/context-map.md','5. .harness/guardrails.md','6. .harness/skill-index.md','7. .harness/skills-lock.json','','## Operating Rules','- Read project memory before editing.','- Preserve existing architecture, feature contracts, and design system unless the user explicitly asks to change them.','- Use the matching skill from .harness/skills when a task fits a known pattern.','- Keep secrets, tokens, cookies, credentials, and customer private data out of harness files.','- Record variable names only; store real values in .env.local, CI secrets, or cloud secret manager.','- After work, update current-state, task-log, and session-handoff.','- Record important decisions in decisions.md.','','## Skill Library Lifecycle','- Verified successful patterns can be learned with leerness skill learn.','- Skill libraries must pass secret scanning before build/publish/merge.','- npm/git upload is dry-run by default; --execute is required for real upload.','','## Response Contract','- Summary','- Files changed','- Verification','- Risks or assumptions','- Next step','{{LEGACY_AGENT}}',''].join('\n'),
-  'CLAUDE.md': [MARK,'# Claude Code Instructions','','Use AGENTS.md as the source of truth. Before editing, read .harness/current-state.md, architecture.md, context-map.md, guardrails.md, skills-lock.json, and the matching skill file.',''].join('\n'),
-  '.cursor/rules/leerness.mdc': [MARK,'---','alwaysApply: true','---','Read AGENTS.md first. Follow .harness project memory, installed skills, design-system, feature-contracts, and guardrails.',''].join('\n'),
-  '.github/copilot-instructions.md': [MARK,'# GitHub Copilot Instructions','','Use AGENTS.md and .harness/ as the project memory. Preserve architecture, feature contracts, security rules, and UI consistency.',''].join('\n'),
-  '.gitignore': ['# Leerness local secrets','.env','.env.local','*.secret.json','.harness/skill-config.local.json','.harness/skill-publish.local.json',''].join('\n'),
-  '.env.example': ['# Leerness environment variable examples','# Copy to .env.local and fill values locally. Never commit real secrets.','',''].join('\n'),
-  '.harness/HARNESS_VERSION': '{{VERSION}}\n',
-  '.harness/manifest.json': '{{MANIFEST}}\n',
-  '.harness/skills-lock.json': '{{SKILLS_LOCK}}\n',
-  '.harness/skill-config.schema.json': [MARK,'{','  "$schema": "https://json-schema.org/draft/2020-12/schema",','  "title": "Leerness Skill Config",','  "type": "object",','  "properties": {','    "envSource": { "type": "string", "default": ".env.local" },','    "installedSkills": { "type": "object" }','  },','  "additionalProperties": true','}',''].join('\n'),
-  '.harness/secret-policy.md': [MARK,'# Secret Policy','','## Never store in harness files','- API keys','- Access tokens','- Refresh tokens','- Passwords','- Cookies','- Private customer data','- Payment credentials','','## Allowed in harness files','- Environment variable names','- Secret manager key names','- Redacted examples','- Fake fixtures','','## Default locations','- Local: .env.local','- CI/CD: GitHub Actions Secrets or provider secrets','- Cloud: Secret Manager or runtime environment variables',''].join('\n'),
-  '.harness/project-brief.md': [MARK,'# Project Brief: {{PROJECT}}','','## Purpose','','## Success Criteria','','## Users','','## Product Direction','{{LEGACY_BRIEF}}',''].join('\n'),
-  '.harness/current-state.md': [MARK,'# Current State','','Updated: {{DATE}}','','## Now','- Leerness v{{VERSION}} installed or migrated.','','## Next','- Fill project-brief, context-map, design-system, and feature-contracts.','','## Blockers','- None recorded.','{{LEGACY_STATE}}',''].join('\n'),
-  '.harness/architecture.md': [MARK,'# Architecture','','## Overview','','## Main Modules','','## Data Flow','','## External Services','','## Boundaries','{{LEGACY_ARCH}}',''].join('\n'),
-  '.harness/context-map.md': [MARK,'# Context Map','','| Area | Files | Notes |','|---|---|---|','| UI | src/components/**, app/** | Check design-system.md first. |','| API | src/api/**, server/**, functions/** | Preserve response contracts. |','| Data | db/**, firestore/**, prisma/** | Confirm migrations. |','| Tests | test/**, tests/**, __tests__/** | Add or update checks. |',''].join('\n'),
-  '.harness/decisions.md': [MARK,'# Decision Log','','## Template','','### YYYY-MM-DD — Title','- Decision:','- Reason:','- Alternatives:','- Impact:','{{LEGACY_DECISIONS}}',''].join('\n'),
-  '.harness/task-log.md': [MARK,'# Task Log','','## {{DATE}}','- Installed Leerness v{{VERSION}}.',''].join('\n'),
-  '.harness/constraints.md': [MARK,'# Constraints','','- Runtime/framework constraints','- Deployment constraints','- Security/privacy constraints','- Business rules',''].join('\n'),
-  '.harness/guardrails.md': [MARK,'# Guardrails','','## Never','- Do not perform unrequested large rewrites.','- Do not change public API, database schema, auth, payment, or environment variable names without identifying impact.','- Do not hardcode secrets.','- Do not create a new design pattern when an existing one fits.','','## Always','- Inspect current structure first.','- Make the smallest safe change.','- Verify behavior.','- Update project memory after meaningful changes.',''].join('\n'),
-  '.harness/design-system.md': [MARK,'# Design System Memory','','## Layout','- Reuse existing spacing, component variants, typography, and breakpoints.','','## Components','| Component | Purpose | Rules |','|---|---|---|','| Button | Primary actions | Reuse existing variants. |','| Card | Grouped content | Keep spacing and radius consistent. |','| Form | Input flows | Include loading, error, and empty states. |',''].join('\n'),
-  '.harness/feature-contracts.md': [MARK,'# Feature Contracts','','## Template','- Feature:','- Entry point:','- Input:','- Output:','- Error states:','- UI states:','- Related files:','- Tests:',''].join('\n'),
-  '.harness/testing-strategy.md': [MARK,'# Testing Strategy','','- Unit: pure logic and adapters','- Integration: API, DB, third-party providers','- E2E/manual: key user flows','- Regression: previously fixed bugs and successful skills',''].join('\n'),
-  '.harness/review-checklist.md': [MARK,'# Review Checklist','','- [ ] Existing architecture preserved','- [ ] Feature contracts respected','- [ ] Design system followed','- [ ] Secrets not exposed','- [ ] Tests or manual verification completed','- [ ] current-state/task-log/session-handoff updated',''].join('\n'),
-  '.harness/release-checklist.md': [MARK,'# Release Checklist','','- [ ] Build/test passed','- [ ] Env variables confirmed','- [ ] Migration impact checked','- [ ] Rollback path known','- [ ] Release notes prepared',''].join('\n'),
-  '.harness/session-handoff.md': [MARK,'# Session Handoff','','## Done','-','','## Changed Files','-','','## Decisions','-','','## Risks','-','','## Next Exact Step','-',''].join('\n'),
-  '.harness/skill-index.md': [MARK,'# Skill Index','','Installed skill libraries are tracked in `.harness/skills-lock.json`.','','## Commands','`leerness skill list` — 한글명/가능 작업/업데이트/검증 상태 표시','`leerness skill add commerce-api`','`leerness skill learn my-skill --from .harness/skills/...`','`leerness library verify .harness/library/my-skill --ai`','`leerness library build .harness/library/my-skill`','`leerness skill add ai-verified-skill-publisher`','`leerness library publish .harness/library/my-skill/dist/my-skill --target npm --execute`','','## Metadata','Every skill should expose version, lastUpdated, lastUpdatedAt, and verification status.',''].join('\n'),
-  '.harness/AX_SKILL_LIBRARY_GUIDE.md': [MARK,
-'# Leerness AX Skill Library Guide',
-'',
-'AX는 AI eXperience입니다. AI 에이전트가 검증된 스킬 데이터를 안전하게 학습, 검증, 빌드, 업로드, 업데이트, 병합, 마이그레이션하도록 안내합니다.',
-'',
-'## 스킬 라이브러리 표시 규격',
-'- 모든 스킬은 name, displayNameKo, title, capabilities, lastUpdated, verification을 가진다.',
-'- leerness skill list는 한글명과 가능한 작업을 먼저 보여준다.',
-'- AI가 스킬을 업로드할 때는 ai-verified-skill-publisher 스킬의 절차를 따른다.',
-'',
-'## 원칙',
-'- 실제 토큰, 쿠키, 비밀번호, 고객 데이터는 저장하지 않는다.',
-'- 환경변수 이름과 연결 규칙만 기록한다.',
-'- 스킬 업로드는 AI 검증 메타데이터가 있을 때만 허용한다.',
-'- 업데이트 또는 마이그레이션 후에는 verification.status를 needs-review로 되돌린다.',
-'- 각 스킬에는 lastUpdated, lastUpdatedAt, verification 정보를 둔다.',
-'',
-'## 표준 흐름',
-'1. 성공한 구현 결과를 스킬 후보로 정리한다.',
-'2. leerness skill learn <name> --from <path> 로 재사용 가능한 절차를 추출한다.',
-'3. leerness library validate <path> --strict-ai 로 구조와 민감정보를 검사한다.',
-'4. leerness library verify <path> --ai --reviewer leerness-ai 로 AI 검증 메타데이터를 기록한다.',
-'5. leerness library build <path> 로 배포 가능한 라이브러리를 만든다.',
-'6. leerness library publish <built-path> --target npm|git --execute 로 검증된 라이브러리만 업로드한다.',
-'',
-'## 필수 메타데이터',
-'- name',
-'- version',
-'- title',
-'- category',
-'- lastUpdated',
-'- lastUpdatedAt',
-'- sensitiveDataPolicy',
-'- requiresEnv',
-'- verification.status',
-'- verification.verifiedAt',
-'- verification.method',
-'',
-'## 업로드 차단 조건',
-'- verification.status가 passed가 아니다.',
-'- verification.method에 ai가 없다.',
-'- 민감정보 의심 패턴이 발견됐다.',
-'- lastUpdated 또는 lastUpdatedAt이 없다.',
-'- --execute 없이 실제 업로드를 시도했다.',
-'',
-'## AI 에이전트 체크리스트',
-'- 스킬 목적과 사용 조건이 명확한가',
-'- 구현 절차가 재현 가능한가',
-'- 민감정보가 아니라 환경변수 이름만 있는가',
-'- 검증 방법과 실패 대응법이 있는가',
-'- 병합 후 skills-lock.json에 출처와 검증 상태가 기록되는가',
-'',
-].join('\n'),
-  '.harness/skills/core/codebase-analysis.md': [MARK,'# Skill: Codebase Analysis','','1. Read current-state and context-map.','2. Locate related files.','3. Identify data flow and ownership.','4. Summarize risks before editing.',''].join('\n'),
-  '.harness/skills/core/feature-implementation.md': [MARK,'# Skill: Feature Implementation','','1. Convert the requirement into a feature contract.','2. Find existing patterns.','3. Implement the smallest safe change.','4. Verify behavior.','5. Update harness memory.',''].join('\n'),
-  '.harness/skills/core/refactoring.md': [MARK,'# Skill: Refactoring','','Keep behavior unchanged. Move in small steps. Preserve public contracts. Verify after each meaningful change.',''].join('\n'),
-  '.harness/skills/core/debugging.md': [MARK,'# Skill: Debugging','','Separate symptom, reproduction, root cause, fix, and prevention. Record repeated failure patterns in guardrails.',''].join('\n'),
-  '.harness/skills/core/ui-consistency.md': [MARK,'# Skill: UI Consistency','','Read design-system.md and existing similar screens before changing UI. Include loading, empty, error, desktop, and mobile states.',''].join('\n'),
-  '.harness/skills/core/security-review.md': [MARK,'# Skill: Security Review','','Check secrets, auth boundaries, input validation, logging, dependency risk, and permission scope.',''].join('\n'),
-  '.harness/skills/core/release-check.md': [MARK,'# Skill: Release Check','','Verify build, tests, env vars, migration impact, and rollback path.',''].join('\n'),
-  '.harness/skills/core/documentation-update.md': [MARK,'# Skill: Documentation Update','','Update current-state, task-log, decisions, context-map, feature-contracts, design-system, and session-handoff when relevant.',''].join('\n'),
-  '.harness/templates/session-summary.md': [MARK,'# Session Summary','','## Done','','## Files Changed','','## Verification','','## Next',''].join('\n'),
-  '.harness/templates/decision.md': [MARK,'# Decision','','## Decision','','## Reason','','## Alternatives','','## Impact',''].join('\n')
-};
 
 function log(m=''){ console.log(m); }
 function ok(m){ log(c.green+'✓'+c.reset+' '+m); }
@@ -118,337 +25,208 @@ function exists(p){ return fs.existsSync(p); }
 function read(p){ return fs.readFileSync(p,'utf8'); }
 function write(p,s){ fs.mkdirSync(path.dirname(p),{recursive:true}); fs.writeFileSync(p,s,'utf8'); }
 function rel(root,p){ return path.relative(root,p).replace(/\\/g,'/') || '.'; }
-function isTextFile(p){ return /\.(md|mdc|txt|json|js|ts|tsx|jsx|yml|yaml|env|gitignore)$/i.test(p) || !path.extname(p); }
 function parseJsonSafe(s,fallback){ try { return JSON.parse(s); } catch { return fallback; } }
-function banner(){ log(''); log(c.bold+c.magenta+'Leerness v'+VERSION+c.reset); log(c.dim+'맞춤성장형 AI 개발 하네스 · context, skills, design, consistency'+c.reset); log(''); }
-function installGuide(){ log(c.bold+'설치 안내'+c.reset); log('  - 기존 AI 하네스/지침 파일을 감지하면 먼저 .harness/archive/ 에 백업합니다.'); log('  - .harness/ 아래에 프로젝트 메모리, 스킬, 디자인/기능 계약 문서를 생성합니다.'); log('  - 스킬 라이브러리는 실제 민감정보를 저장하지 않고 환경변수 이름만 기록합니다.'); log('  - library publish는 기본 dry-run이며, 실제 업로드는 --execute가 필요합니다.'); log('  - 검증된 스킬팩 실제 업로드 시 npm/git 토큰을 환경변수·로컬 설정에서 찾고, 없으면 입력을 요구합니다.'); log(''); }
+function isTextFile(p){ return /\.(md|mdc|txt|json|js|ts|tsx|jsx|yml|yaml|env|gitignore)$/i.test(p) || !path.extname(p); }
+function banner(){ log(''); log(c.bold+c.magenta+'Leerness v'+VERSION+c.reset); log(c.dim+'비파괴 마이그레이션 · context routing · skill library'+c.reset); log(''); }
+function installGuide(){
+  log(c.bold+'설치/마이그레이션 안내'+c.reset);
+  log('  - 기존 파일은 먼저 .harness/archive/ 에 백업합니다.');
+  log('  - project-brief/current-state/release-checklist 등 기존 프로젝트 메모리는 기본 보존합니다.');
+  log('  - .env.example과 .gitignore는 덮어쓰지 않고 필요한 항목만 병합합니다.');
+  log('  - AGENTS/CLAUDE/Cursor/Copilot 지침과 AX 라우팅 가이드는 최신 기준으로 갱신합니다.');
+  log('  - 기존 메모리 파일까지 강제로 템플릿 재생성하려면 --force를 명시하세요.');
+  log('');
+}
 function projectName(root){ try{ const pkg=JSON.parse(read(path.join(root,'package.json'))); if(pkg.name) return String(pkg.name).replace(/^@[^/]+\//,''); }catch{} return path.basename(root); }
+function now(){ return new Date().toISOString(); }
+function today(){ return now().slice(0,10); }
+function fill(t,ctx){ return t.replace(/{{([A-Z_]+)}}/g,(_,k)=>ctx[k]||''); }
+function slug(s){ return String(s||'skill').toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'') || 'skill'; }
 
-function detectLegacy(root){ return legacyItems.map(item=>({item,full:path.join(root,item)})).filter(e=>{ if(!exists(e.full)) return false; if(e.item==='.harness'){ const vf=path.join(root,'.harness/HARNESS_VERSION'); return !exists(vf) || read(vf).trim()!==VERSION; } try{ if(fs.statSync(e.full).isFile() && isTextFile(e.item)){ const b=read(e.full); if(b.includes(MARK)||b.includes(MIGRATED)) return false; } }catch{} return true; }); }
-function copyRecursive(src,dst,ignoreAbs=[]){ const abs=path.resolve(src); if(ignoreAbs.some(i=>abs===i||abs.startsWith(i+path.sep))) return; const st=fs.statSync(src); if(st.isDirectory()){ fs.mkdirSync(dst,{recursive:true}); for(const n of fs.readdirSync(src)) copyRecursive(path.join(src,n),path.join(dst,n),ignoreAbs); } else { fs.mkdirSync(path.dirname(dst),{recursive:true}); fs.copyFileSync(src,dst); } }
+function copyRecursive(src,dst,ignoreAbs=[]){
+  const abs=path.resolve(src); if(ignoreAbs.some(i=>abs===i||abs.startsWith(i+path.sep))) return;
+  const st=fs.statSync(src);
+  if(st.isDirectory()){ fs.mkdirSync(dst,{recursive:true}); for(const n of fs.readdirSync(src)) copyRecursive(path.join(src,n),path.join(dst,n),ignoreAbs); }
+  else { fs.mkdirSync(path.dirname(dst),{recursive:true}); fs.copyFileSync(src,dst); }
+}
+function detectLegacy(root){
+  return legacyItems.map(item=>({item,full:path.join(root,item)})).filter(e=>{
+    if(!exists(e.full)) return false;
+    if(e.item==='.harness'){
+      const vf=path.join(root,'.harness/HARNESS_VERSION');
+      return !exists(vf) || read(vf).trim()!==VERSION;
+    }
+    try{
+      if(fs.statSync(e.full).isFile() && isTextFile(e.item)){
+        const b=read(e.full);
+        if(b.includes(MARK)||b.includes(MIGRATED)) return false;
+      }
+    }catch{}
+    return true;
+  });
+}
 function collectLegacyText(found){ const out={}; for(const f of found){ try{ if(fs.statSync(f.full).isFile() && isTextFile(f.item)) out[f.item]=read(f.full); }catch{} } return out; }
 function pick(obj,keys){ const out={}; for(const k of keys) if(obj[k]) out[k]=obj[k]; return out; }
 function legacyBlock(title,obj){ const entries=Object.entries(obj).filter(([,v])=>String(v).trim()); if(!entries.length) return ''; return '\n---\n## Migrated legacy notes: '+title+'\n\n'+entries.map(([k,v])=>'### '+k+'\n\n'+String(v).trim()+'\n').join('\n'); }
-function archiveLegacy(root,found,dryRun){ if(!found.length) return null; const stamp=new Date().toISOString().replace(/[:.]/g,'-'); const archive=path.join(root,'.harness/archive/legacy-migration-'+stamp); if(dryRun) return archive; fs.mkdirSync(archive,{recursive:true}); const archiveRoot=path.resolve(path.join(root,'.harness/archive')); for(const f of found){ try{ const name=f.item==='.harness'?'.harness-before-v'+VERSION:f.item; copyRecursive(f.full,path.join(archive,name),[archiveRoot]); }catch(e){ warn('백업 실패: '+f.item+' ('+e.message+')'); } } write(path.join(archive,'migration-manifest.json'),JSON.stringify({version:VERSION,archivedAt:new Date().toISOString(),items:found.map(x=>x.item)},null,2)+'\n'); return archive; }
+function archiveLegacy(root,found,dryRun){
+  if(!found.length) return null;
+  const stamp=now().replace(/[:.]/g,'-');
+  const archive=path.join(root,'.harness/archive/legacy-migration-'+stamp);
+  if(dryRun) return archive;
+  fs.mkdirSync(archive,{recursive:true});
+  const archiveRoot=path.resolve(path.join(root,'.harness/archive'));
+  for(const f of found){
+    try{ copyRecursive(f.full,path.join(archive,f.item==='.harness'?'.harness-before-v'+VERSION:f.item),[archiveRoot]); }
+    catch(e){ warn('백업 실패: '+f.item+' ('+e.message+')'); }
+  }
+  write(path.join(archive,'migration-manifest.json'),JSON.stringify({version:VERSION,archivedAt:now(),items:found.map(x=>x.item)},null,2)+'\n');
+  return archive;
+}
 function targetForLegacy(item){ if(/ARCHITECTURE/i.test(item)) return '.harness/architecture.md'; if(/DECISION/i.test(item)) return '.harness/decisions.md'; if(/CURRENT|TASK_LOG|history/i.test(item)) return '.harness/current-state.md'; if(/AGENT|CLAUDE|cursor|copilot|cursorrules/i.test(item)) return 'AGENTS.md'; return '.harness/project-brief.md'; }
-function neutralizeLegacy(root,found,dryRun){ for(const f of found){ if(f.item==='.harness'||coreFiles[f.item]) continue; try{ if(!fs.statSync(f.full).isFile()) continue; }catch{ continue; } const target=targetForLegacy(f.item); const body=[MIGRATED,'# Migrated legacy harness file','','Active source of truth: '+target,'','Original content was backed up under .harness/archive/.',''].join('\n'); if(dryRun) info('[dry-run] legacy pointer: '+f.item+' -> '+target); else write(f.full,body); } }
-function fill(t,ctx){ return t.replace(/{{([A-Z_]+)}}/g,(_,k)=>ctx[k]||''); }
-function manifest(root,selectedSkills){ return JSON.stringify({name:projectName(root),harnessVersion:VERSION,installedAt:new Date().toISOString(),managedFiles:Object.keys(coreFiles),selectedSkills},null,2); }
-function skillsLock(root,selectedSkills){ const lock={harnessVersion:VERSION,installedAt:new Date().toISOString(),installedSkills:{}}; for(const name of selectedSkills){ const meta=getSkillMeta(name); if(meta) lock.installedSkills[name]={version:meta.version,source:'bundled',title:meta.title}; } return JSON.stringify(lock,null,2); }
-function makeContext(root,legacyText,selectedSkills){ const date=new Date().toISOString().slice(0,10); return { PROJECT:projectName(root), DATE:date, VERSION, LEGACY_AGENT:legacyBlock('agent instructions',pick(legacyText,['AGENTS.md','AGENT.md','CLAUDE.md','.cursorrules','.cursor/rules/project-rules.mdc','.cursor/rules/leerness.mdc','.github/copilot-instructions.md'])), LEGACY_BRIEF:legacyBlock('project context',pick(legacyText,['PROJECT_CONTEXT.md','CONTEXT.md','docs/guideline.md','AI_HARNESS.md','HARNESS.md'])), LEGACY_STATE:legacyBlock('state',pick(legacyText,['CURRENT_STATE.md','TASK_LOG.md','docs/history.md'])), LEGACY_ARCH:legacyBlock('architecture',pick(legacyText,['ARCHITECTURE.md'])), LEGACY_DECISIONS:legacyBlock('decisions',pick(legacyText,['DECISIONS.md'])), MANIFEST:manifest(root,selectedSkills), SKILLS_LOCK:skillsLock(root,selectedSkills) }; }
+function noteLegacyPreserved(root,found,dryRun){
+  for(const f of found){
+    if(f.item==='.harness'||coreFiles[f.item]) continue;
+    try{ if(!fs.statSync(f.full).isFile()) continue; }catch{ continue; }
+    const target=targetForLegacy(f.item);
+    if(dryRun) info('[dry-run] legacy file preserved: '+f.item+' (suggested source: '+target+')');
+    else info('보존: '+f.item+' (참조 권장: '+target+')');
+  }
+}
+
+const coreFiles = {
+  'AGENTS.md': `${MARK}\n# {{PROJECT}} AI Agent Harness\n\nAgent = Model + Leerness Harness.\n\n## Core Rule\nBefore editing, route the task. Read .harness/context-routing.md and use \`leerness route <task-type>\` when the task type is unclear.\n\n## Universal Read Order\n1. .harness/project-brief.md\n2. .harness/current-state.md\n3. .harness/context-routing.md\n4. .harness/writeback-policy.md\n5. .harness/task-type-map.md\n6. .harness/context-map.md\n7. .harness/guardrails.md\n8. .harness/skills-lock.json\n\n## Task Routing\n- Feature/API work: architecture.md, feature-contracts.md, context-map.md, skills/feature-implementation.md.\n- UI/design work: design-system.md, feature-contracts.md, skills/ui-consistency.md.\n- Debugging: task-log.md, current-state.md, skills/debugging.md, related feature contract.\n- Refactoring: architecture.md, decisions.md, guardrails.md, skills/refactoring.md.\n- Release/deploy: release-checklist.md, testing-strategy.md, current-state.md, decisions.md.\n- Migration: AX_MIGRATION_GUIDE.md, context-routing.md, writeback-policy.md.\n- New install: AX_NEW_PROJECT_GUIDE.md and actual project config/source files.\n- Skill/library work: AX_SKILL_LIBRARY_GUIDE.md and ai-verified-skill-publisher when installed.\n\n## Writeback Rules\n- Always update current-state.md, task-log.md, and session-handoff.md after meaningful work.\n- Update decisions.md when a structural, technology, API, schema, deployment, or irreversible decision is made.\n- Update feature-contracts.md when input/output/state/error behavior changes.\n- Update design-system.md when UI rules, components, layout, spacing, or states change.\n- Update release-checklist.md when deployment, environment variables, rollback, CI, npm, or git release requirements change.\n- Update context-map.md when important files, modules, routes, commands, or ownership areas change.\n- Update project-brief.md only when product purpose, target users, success criteria, or project direction changes.\n\n## Non-Destructive Migration Policy\n- Never overwrite existing project memory files unless the user explicitly requests --force.\n- Preserve .env.example and .gitignore; append missing Leerness entries only.\n- Keep secrets, tokens, cookies, credentials, and customer private data out of harness files.\n\n## Response Contract\n- Task type and files consulted\n- Summary\n- Files changed\n- Verification\n- Memory files updated\n- Risks or assumptions\n- Next step\n{{LEGACY_AGENT}}\n`,
+  'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nUse AGENTS.md as the source of truth. Route every task through .harness/context-routing.md and .harness/task-type-map.md. Do not overwrite existing project memory during migration unless --force is explicit.\n`,
+  '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nRead AGENTS.md first. Follow .harness/context-routing.md, writeback-policy.md, installed skills, design-system, feature-contracts, and guardrails.\n`,
+  '.github/copilot-instructions.md': `${MARK}\n# GitHub Copilot Instructions\n\nUse AGENTS.md and .harness/ as the project memory. Preserve existing project memory files unless --force is explicit.\n`,
+  '.gitignore': `# Leerness local-only files\n.env\n.env.local\n*.secret.json\n.harness/skill-config.local.json\n.harness/skill-publish.local.json\n`,
+  '.env.example': `# Leerness examples only. Copy to .env.local and fill locally. Never commit real secrets.\n`,
+  '.harness/HARNESS_VERSION': '{{VERSION}}\n',
+  '.harness/manifest.json': '{{MANIFEST}}\n',
+  '.harness/skills-lock.json': '{{SKILLS_LOCK}}\n',
+  '.harness/skill-config.schema.json': `${MARK}\n{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n  "title": "Leerness Skill Config",\n  "type": "object",\n  "additionalProperties": true\n}\n`,
+  '.harness/project-brief.md': `${MARK}\n---\nleernessRole: project-brief\nreadWhen: [every-task, planning, product-direction, onboarding]\nupdateWhen: [purpose-change, user-change, success-criteria-change, product-direction-change]\ndoNotStore: [secrets, tokens, credentials, raw-customer-data]\n---\n\n# Project Brief: {{PROJECT}}\n\n## Purpose\n\n## Success Criteria\n\n## Users\n\n## Product Direction\n{{LEGACY_BRIEF}}\n`,
+  '.harness/current-state.md': `${MARK}\n---\nleernessRole: current-state\nreadWhen: [every-task, resume-work, planning, debugging, release]\nupdateWhen: [after-meaningful-work, blocker-change, next-step-change, status-change]\ndoNotStore: [secrets, tokens, credentials]\n---\n\n# Current State\n\nUpdated: {{DATE}}\n\n## Now\n- Leerness v{{VERSION}} installed or migrated.\n\n## Next\n- Fill project-brief, context-map, design-system, and feature-contracts.\n\n## Blockers\n- None recorded.\n{{LEGACY_STATE}}\n`,
+  '.harness/architecture.md': `${MARK}\n---\nleernessRole: architecture\nreadWhen: [feature, refactor, integration, api, database, deployment]\nupdateWhen: [module-change, data-flow-change, integration-change, boundary-change]\ndoNotStore: [secrets, credentials]\n---\n\n# Architecture\n\n## Overview\n\n## Main Modules\n\n## Data Flow\n\n## External Services\n\n## Boundaries\n{{LEGACY_ARCH}}\n`,
+  '.harness/context-map.md': `${MARK}\n---\nleernessRole: context-map\nreadWhen: [every-task, file-discovery, impact-analysis]\nupdateWhen: [new-important-file, moved-module, new-route, new-service, ownership-change]\ndoNotStore: [secrets, tokens]\n---\n\n# Context Map\n\n| Area | Files | Notes |\n|---|---|---|\n| UI | src/components/**, app/** | Check design-system.md first. |\n| API | src/api/**, server/**, functions/** | Preserve response contracts. |\n| Data | db/**, firestore/**, prisma/** | Confirm migrations. |\n| Tests | test/**, tests/**, __tests__/** | Add or update checks. |\n`,
+  '.harness/decisions.md': `${MARK}\n---\nleernessRole: decisions\nreadWhen: [architecture, refactor, release, dependency-change, irreversible-change]\nupdateWhen: [important-decision, tradeoff, architecture-change, dependency-change, rollback-relevant-change]\ndoNotStore: [secrets, credentials]\n---\n\n# Decision Log\n\n## Template\n\n### YYYY-MM-DD — Title\n- Decision:\n- Reason:\n- Alternatives:\n- Impact:\n{{LEGACY_DECISIONS}}\n`,
+  '.harness/task-log.md': `${MARK}\n---\nleernessRole: task-log\nreadWhen: [debugging, audit, handoff, regression]\nupdateWhen: [after-meaningful-work, failed-attempt, verification-result]\ndoNotStore: [secrets, tokens]\n---\n\n# Task Log\n\n## {{DATE}}\n- Leerness v{{VERSION}} installed or migrated.\n`,
+  '.harness/constraints.md': `${MARK}\n# Constraints\n\n- Runtime/framework/deployment constraints\n- Security/privacy/business constraints\n`,
+  '.harness/guardrails.md': `${MARK}\n---\nleernessRole: guardrails\nreadWhen: [every-task, security, integration, refactor]\nupdateWhen: [new-risk, repeated-error, policy-change]\ndoNotStore: [secrets, tokens, private-data]\n---\n\n# Guardrails\n\n## Never\n- Store real secrets in code or harness files.\n- Overwrite existing project memory during migration without --force.\n- Change API responses, DB schema, env names, or auth flow without impact review.\n- Perform broad refactoring unless requested.\n\n## Always\n- Preserve architecture and contracts.\n- Record decisions and update writeback files.\n`,
+  '.harness/design-system.md': `${MARK}\n---\nleernessRole: design-system\nreadWhen: [ui, layout, component, style, visual-consistency]\nupdateWhen: [new-component-pattern, style-rule-change, state-pattern-change]\ndoNotStore: [secrets, user-private-data]\n---\n\n# Design System Memory\n\n## Layout\n\n## Components\n\n## States\n- Loading\n- Empty\n- Error\n- Success\n`,
+  '.harness/feature-contracts.md': `${MARK}\n---\nleernessRole: feature-contracts\nreadWhen: [feature, api, ui-state, debugging, refactor]\nupdateWhen: [input-change, output-change, state-change, error-change, contract-change]\ndoNotStore: [secrets, raw-private-data]\n---\n\n# Feature Contracts\n\n## Template\n- Feature:\n- Entry point:\n- Input:\n- Output:\n- UI states:\n- Error states:\n- Related files:\n- Tests:\n`,
+  '.harness/testing-strategy.md': `${MARK}\n---\nleernessRole: testing-strategy\nreadWhen: [feature, debugging, refactor, release]\nupdateWhen: [test-command-change, new-critical-flow, regression-added]\ndoNotStore: [secrets]\n---\n\n# Testing Strategy\n\n## Commands\n\n## Critical Flows\n\n## Regression Notes\n`,
+  '.harness/review-checklist.md': `${MARK}\n# Review Checklist\n\n- [ ] Architecture preserved\n- [ ] Feature contract preserved or updated\n- [ ] Design system followed\n- [ ] No secrets stored\n- [ ] Writeback files updated\n`,
+  '.harness/release-checklist.md': `${MARK}\n---\nleernessRole: release-checklist\nreadWhen: [release, deploy, ci, npm-publish, git-push, env-change]\nupdateWhen: [deploy-failure, new-env-var, ci-change, rollback-change, release-rule-change]\ndoNotStore: [secrets, tokens, passwords, cookies]\n---\n\n# Release Checklist\n\n## Commands\n\n## Required Environment Variables\n\n## Verification\n\n## Rollback\n`,
+  '.harness/session-handoff.md': `${MARK}\n---\nleernessRole: session-handoff\nreadWhen: [resume-work, every-new-session]\nupdateWhen: [end-of-session, handoff, blocked-work]\ndoNotStore: [secrets, tokens]\n---\n\n# Session Handoff\n\n## Done\n\n## Changed Files\n\n## Verification\n\n## Risks\n\n## Next Exact Step\n`,
+  '.harness/skill-index.md': `${MARK}\n# Skill Index\n\n| Task | Skill |\n|---|---|\n| Codebase analysis | skills/codebase-analysis.md |\n| Feature implementation | skills/feature-implementation.md |\n| Debugging | skills/debugging.md |\n| UI consistency | skills/ui-consistency.md |\n| Release | skills/release-check.md |\n`,
+  '.harness/context-routing.md': `${MARK}\n# Context Routing\n\nUse this file to decide what to read before work and what to update afterward.\n\n## feature\nRead: project-brief, current-state, architecture, context-map, feature-contracts, skills/feature-implementation.\nUpdate: current-state, task-log, session-handoff, feature-contracts, context-map when paths change.\n\n## ui\nRead: design-system, feature-contracts, context-map, skills/ui-consistency.\nUpdate: design-system, feature-contracts, current-state, task-log, session-handoff.\n\n## debugging\nRead: current-state, task-log, feature-contracts, testing-strategy, skills/debugging.\nUpdate: task-log, current-state, session-handoff, testing-strategy when regression coverage changes.\n\n## release\nRead: release-checklist, testing-strategy, current-state, decisions, secret-policy.\nUpdate: release-checklist, task-log, current-state, session-handoff.\n\n## migration\nRead: AX_MIGRATION_GUIDE, writeback-policy, task-type-map.\nUpdate: only missing files by default; preserve project memory unless --force.\n`,
+  '.harness/writeback-policy.md': `${MARK}\n# Writeback Policy\n\n## current-state.md\nCurrent progress, blockers, next work.\n\n## task-log.md\nWhat changed, when, and verification result.\n\n## session-handoff.md\nEnough context for the next AI session to continue.\n\n## decisions.md\nImportant choices and tradeoffs.\n\n## release-checklist.md\nDeploy commands, env requirements, rollback, failures.\n\n## design-system.md\nUI rules and reusable patterns.\n\n## feature-contracts.md\nInput/output/state/error contracts.\n\n## project-brief.md\nProduct purpose and success criteria only.\n`,
+  '.harness/task-type-map.md': `${MARK}\n# Task Type Map\n\n| User request | Task type | First files |\n|---|---|---|\n| 새 기능 | feature | feature-contracts, architecture |\n| 디자인/UI | ui | design-system |\n| 오류 수정 | debugging | task-log, debugging skill |\n| 구조 개선 | refactor | architecture, decisions |\n| 배포 | release | release-checklist |\n| 하네스 전환 | migration | AX_MIGRATION_GUIDE |\n| 신규 적용 | new-install | AX_NEW_PROJECT_GUIDE |\n| 스킬 저장/배포 | skill-library | AX_SKILL_LIBRARY_GUIDE |\n`,
+  '.harness/AX_MIGRATION_GUIDE.md': `${MARK}\n# AX Migration Guide\n\n## Goal\nMigrate old harness files without losing project memory.\n\n## Procedure\n1. Run: leerness migrate --dry-run\n2. Confirm archive target.\n3. Run: leerness migrate\n4. Check .env.example and .gitignore were merged, not replaced.\n5. Check project memory files were preserved.\n6. Fill only missing context using archived legacy files.\n7. Run: leerness status && leerness verify.\n\n## Critical Rule\nDo not overwrite existing project-brief, current-state, architecture, decisions, release-checklist, feature-contracts, or design-system unless the user explicitly asks for --force.\n`,
+  '.harness/AX_NEW_PROJECT_GUIDE.md': `${MARK}\n# AX New Project Guide\n\n## Goal\nAfter initial installation, populate Leerness memory from the actual project.\n\n## Read actual project files\n- package/config files\n- app/routes/pages\n- API/server/functions\n- DB/schema/rules\n- deploy/CI files\n- tests\n\n## Fill memory files\n- project-brief.md: purpose and success criteria\n- architecture.md: modules and data flow\n- context-map.md: important files and routes\n- design-system.md: existing UI patterns\n- feature-contracts.md: major features and states\n- release-checklist.md: real deploy commands and env requirements\n`,
+  '.harness/AX_SKILL_LIBRARY_GUIDE.md': `${MARK}\n# AX Skill Library Guide\n\n## AI-verified skill lifecycle\n1. Learn from a validated implementation.\n2. Remove secrets and keep env variable names only.\n3. Add displayNameKo, capabilities, lastUpdated, verification metadata.\n4. Run validate.\n5. Run verify --ai.\n6. Build.\n7. Publish dry-run.\n8. Publish with --execute only after token gate passes.\n`,
+  '.harness/skills/codebase-analysis.md': `${MARK}\n# Skill: Codebase Analysis\n\nRead context-map, architecture, current-state, and related source files before proposing changes.\n`,
+  '.harness/skills/feature-implementation.md': `${MARK}\n# Skill: Feature Implementation\n\nDefine contract, inspect existing patterns, implement minimal change, verify, update memory.\n`,
+  '.harness/skills/refactoring.md': `${MARK}\n# Skill: Refactoring\n\nPreserve behavior and contracts. Record important decisions.\n`,
+  '.harness/skills/debugging.md': `${MARK}\n# Skill: Debugging\n\nReproduce, isolate cause, patch minimally, verify, add regression note.\n`,
+  '.harness/skills/ui-consistency.md': `${MARK}\n# Skill: UI Consistency\n\nRead design-system and existing adjacent screens before styling.\n`,
+  '.harness/skills/security-review.md': `${MARK}\n# Skill: Security Review\n\nCheck secrets, auth, permissions, logging, and sensitive data exposure.\n`,
+  '.harness/skills/release-check.md': `${MARK}\n# Skill: Release Check\n\nCheck tests, build, env vars, migration, rollback, publish token gate.\n`,
+  '.harness/skills/documentation-update.md': `${MARK}\n# Skill: Documentation Update\n\nFollow writeback-policy and update the specific memory file.\n`,
+  '.harness/templates/session-summary.md': `${MARK}\n# Session Summary\n\n## Done\n\n## Files Changed\n\n## Verification\n\n## Next\n`,
+  '.harness/templates/decision.md': `${MARK}\n# Decision\n\n## Decision\n\n## Reason\n\n## Alternatives\n\n## Impact\n`
+};
+
+const memoryFiles = new Set(['.harness/project-brief.md','.harness/current-state.md','.harness/architecture.md','.harness/context-map.md','.harness/decisions.md','.harness/task-log.md','.harness/constraints.md','.harness/guardrails.md','.harness/design-system.md','.harness/feature-contracts.md','.harness/testing-strategy.md','.harness/review-checklist.md','.harness/release-checklist.md','.harness/session-handoff.md','.harness/skill-index.md','.harness/secret-policy.md']);
+const refreshableFiles = new Set(['AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md','.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md','.harness/AX_SKILL_LIBRARY_GUIDE.md','.harness/AX_MIGRATION_GUIDE.md','.harness/AX_NEW_PROJECT_GUIDE.md','.harness/manifest.json','.harness/HARNESS_VERSION']);
+function uniqueLinesAppend(current, addition){
+  const lines=current.split(/\r?\n/); const seen=new Set(lines.map(x=>x.trim()).filter(Boolean));
+  const add=addition.split(/\r?\n/).filter(line=>{ const t=line.trim(); if(!t||seen.has(t)) return false; seen.add(t); return true; });
+  if(!add.length) return current;
+  return current.replace(/\s*$/,'\n')+add.join('\n')+'\n';
+}
+function mergeSkillLockJson(current,incoming){ const a=parseJsonSafe(current,{installedSkills:{}}), b=parseJsonSafe(incoming,{installedSkills:{}}); const merged={...b,...a}; merged.harnessVersion=VERSION; merged.updatedAt=now(); merged.installedSkills={...(b.installedSkills||{}),...(a.installedSkills||{})}; return JSON.stringify(merged,null,2)+'\n'; }
+function writeCoreSafely(root,file,body,opts={}){
+  const target=path.join(root,file), dryRun=Boolean(opts.dryRun), force=Boolean(opts.force), existed=exists(target);
+  if(!existed){ if(dryRun) info('[dry-run] 생성: '+file); else { write(target,body); ok('생성: '+file); } return 'created'; }
+  const current=read(target); if(current===body){ if(dryRun) info('[dry-run] 유지: '+file); else ok('유지: '+file); return 'same'; }
+  if(file==='.gitignore'||file==='.env.example'){
+    const merged=uniqueLinesAppend(current,body); if(merged===current){ if(dryRun) info('[dry-run] 보존: '+file); else ok('보존: '+file); return 'preserved'; }
+    if(dryRun) info('[dry-run] 병합: '+file); else { write(target,merged); ok('병합: '+file); } return 'merged';
+  }
+  if(file==='.harness/skills-lock.json'){
+    const merged=mergeSkillLockJson(current,body); if(dryRun) info('[dry-run] 병합: '+file); else { write(target,merged); ok('병합: '+file); } return 'merged';
+  }
+  if(force || refreshableFiles.has(file)){
+    if(dryRun) info('[dry-run] '+(force?'강제 ':'')+'갱신: '+file); else { write(target,body); ok((force?'강제 ':'')+'갱신: '+file); } return 'updated';
+  }
+  if(memoryFiles.has(file)){
+    if(dryRun) info('[dry-run] 보존: '+file+' (기존 프로젝트 메모리 유지)'); else ok('보존: '+file+' (기존 프로젝트 메모리 유지)'); return 'preserved';
+  }
+  if(dryRun) info('[dry-run] 보존: '+file+' (덮어쓰려면 --force)'); else ok('보존: '+file+' (덮어쓰려면 --force)'); return 'preserved';
+}
+function manifest(root,selectedSkills){ return JSON.stringify({name:projectName(root),harnessVersion:VERSION,installedAt:now(),managedFiles:Object.keys(coreFiles),selectedSkills,nonDestructiveMigration:true},null,2); }
+function skillsLock(root,selectedSkills){ const lock={harnessVersion:VERSION,installedAt:now(),installedSkills:{}}; for(const name of selectedSkills){ const meta=getSkillMeta(name); if(meta) lock.installedSkills[name]={version:meta.version,source:'bundled',title:meta.title,displayNameKo:meta.displayNameKo||meta.title,lastUpdated:meta.lastUpdated,verificationStatus:(meta.verification||{}).status||'unknown'}; } return JSON.stringify(lock,null,2); }
+function makeContext(root,legacyText,selectedSkills){ return { PROJECT:projectName(root), DATE:today(), VERSION, LEGACY_AGENT:legacyBlock('agent instructions',pick(legacyText,['AGENTS.md','AGENT.md','CLAUDE.md','.cursorrules','.cursor/rules/project-rules.mdc','.cursor/rules/leerness.mdc','.github/copilot-instructions.md'])), LEGACY_BRIEF:legacyBlock('project context',pick(legacyText,['PROJECT_CONTEXT.md','CONTEXT.md','docs/guideline.md','AI_HARNESS.md','HARNESS.md'])), LEGACY_STATE:legacyBlock('state',pick(legacyText,['CURRENT_STATE.md','TASK_LOG.md','docs/history.md'])), LEGACY_ARCH:legacyBlock('architecture',pick(legacyText,['ARCHITECTURE.md'])), LEGACY_DECISIONS:legacyBlock('decisions',pick(legacyText,['DECISIONS.md'])), MANIFEST:manifest(root,selectedSkills), SKILLS_LOCK:skillsLock(root,selectedSkills) }; }
 
 function listSkillPacks(){ if(!exists(PACKS_DIR)) return []; return fs.readdirSync(PACKS_DIR).map(n=>getSkillMeta(n)).filter(Boolean).sort((a,b)=>a.name.localeCompare(b.name)); }
 function getSkillMeta(name){ const metaPath=path.join(PACKS_DIR,name,'skill.json'); if(!exists(metaPath)) return null; const meta=parseJsonSafe(read(metaPath),null); if(!meta||!meta.name) return null; return meta; }
-function updateSkillLock(root,meta,remove=false){ const lp=path.join(root,'.harness/skills-lock.json'); const lock=exists(lp)?parseJsonSafe(read(lp),{harnessVersion:VERSION,installedSkills:{}}):{harnessVersion:VERSION,installedSkills:{}}; lock.harnessVersion=VERSION; lock.updatedAt=new Date().toISOString(); lock.installedSkills=lock.installedSkills||{}; if(remove) delete lock.installedSkills[meta.name]; else lock.installedSkills[meta.name]={version:meta.version,source:meta.source||'bundled',title:meta.title,displayNameKo:meta.displayNameKo||meta.title,categoryKo:meta.categoryKo||meta.category,capabilities:meta.capabilities||[],requiresEnv:meta.requiresEnv||[],lastUpdated:meta.lastUpdated,lastUpdatedAt:meta.lastUpdatedAt,verificationStatus:(meta.verification||{}).status||'unknown'}; write(lp,JSON.stringify(lock,null,2)+'\n'); }
-function appendEnvExample(root,meta){ const ep=path.join(root,'.env.example'); const existing=exists(ep)?read(ep):''; const missing=(meta.requiresEnv||[]).filter(n=>!existing.includes(n+'=')); if(!missing.length) return; write(ep,existing+'\n# '+(meta.title||meta.name)+' ('+meta.name+')\n'+missing.map(n=>n+'=').join('\n')+'\n'); }
+function updateSkillLock(root,meta,remove=false){ const lp=path.join(root,'.harness/skills-lock.json'); const lock=exists(lp)?parseJsonSafe(read(lp),{harnessVersion:VERSION,installedSkills:{}}):{harnessVersion:VERSION,installedSkills:{}}; lock.harnessVersion=VERSION; lock.updatedAt=now(); lock.installedSkills=lock.installedSkills||{}; if(remove) delete lock.installedSkills[meta.name]; else lock.installedSkills[meta.name]={version:meta.version,source:meta.source||'bundled',title:meta.title,displayNameKo:meta.displayNameKo||meta.title,categoryKo:meta.categoryKo||meta.category,capabilities:meta.capabilities||[],requiresEnv:meta.requiresEnv||[],lastUpdated:meta.lastUpdated,lastUpdatedAt:meta.lastUpdatedAt,verificationStatus:(meta.verification||{}).status||'unknown'}; write(lp,JSON.stringify(lock,null,2)+'\n'); }
+function appendEnvExample(root,meta){ const ep=path.join(root,'.env.example'); const existing=exists(ep)?read(ep):''; const missing=(meta.requiresEnv||[]).filter(n=>!existing.includes(n+'=')); if(!missing.length) return; write(ep,existing.replace(/\s*$/,'\n')+'\n# '+(meta.title||meta.name)+' ('+meta.name+')\n'+missing.map(n=>n+'=').join('\n')+'\n'); }
 function installSkill(root,name,dryRun=false){ const meta=getSkillMeta(name); if(!meta){ fail('알 수 없는 스킬 라이브러리: '+name); info('사용 가능 목록: '+listSkillPacks().map(x=>x.name).join(', ')); return false; } const packRoot=path.join(PACKS_DIR,name); const destRoot=path.join(root,'.harness/skills',name); if(dryRun){ info('[dry-run] install skill: '+name); return true; } fs.mkdirSync(destRoot,{recursive:true}); for(const file of meta.files||[]){ const src=path.join(packRoot,file); const dest=path.join(destRoot,path.basename(file)); if(exists(src)){ write(dest,read(src)); ok('스킬 설치: '+rel(root,dest)); } } write(path.join(destRoot,'skill.json'),JSON.stringify(meta,null,2)+'\n'); updateSkillLock(root,meta,false); appendEnvExample(root,meta); return true; }
 function removeSkill(root,name){ const meta=getSkillMeta(name)||{name,title:name}; const dest=path.join(root,'.harness/skills',name); if(exists(dest)) fs.rmSync(dest,{recursive:true,force:true}); updateSkillLock(root,meta,true); ok('스킬 제거: '+name); }
 
-function parseArgs(argv){ const out={flags:{},positionals:[]}; const valueFlags=new Set(['skills','path','from','out','target','package','repo','version','title','description','category','source','name','registry','branch','message','reviewer','by']); for(let i=0;i<argv.length;i++){ const a=argv[i]; if(a.startsWith('--')){ const eq=a.indexOf('='); const key=eq>=0?a.slice(2,eq):a.slice(2); if(eq>=0) out.flags[key]=a.slice(eq+1); else if(valueFlags.has(key)&&argv[i+1]&&!argv[i+1].startsWith('-')) out.flags[key]=argv[++i]; else out.flags[key]=true; } else if(a.startsWith('-')) out.flags[a.slice(1)]=true; else out.positionals.push(a); } return out; }
+function parseArgs(argv){ const out={flags:{},positionals:[]}; const valueFlags=new Set(['skills','path','from','out','target','package','repo','version','title','description','category','source','name','registry','branch','message','reviewer','by','token-env']); for(let i=0;i<argv.length;i++){ const a=argv[i]; if(a.startsWith('--')){ const eq=a.indexOf('='); const key=eq>=0?a.slice(2,eq):a.slice(2); if(eq>=0) out.flags[key]=a.slice(eq+1); else if(valueFlags.has(key)&&argv[i+1]&&!argv[i+1].startsWith('-')) out.flags[key]=argv[++i]; else out.flags[key]=true; } else if(a.startsWith('-')) out.flags[a.slice(1)]=true; else out.positionals.push(a); } return out; }
 function splitSkills(value){ if(!value||value===true) return []; if(value==='recommended') return ['office','commerce-api','crawling','ai-verified-skill-publisher']; if(value==='all') return listSkillPacks().map(x=>x.name); return String(value).split(',').map(x=>x.trim()).filter(Boolean); }
 function ask(q){ const rl=readline.createInterface({input:process.stdin,output:process.stdout}); return new Promise(resolve=>rl.question(q,a=>{rl.close();resolve(a.trim());})); }
 async function chooseSkills(autoYes,provided){ if(provided!==undefined) return splitSkills(provided); if(autoYes||!process.stdin.isTTY) return []; const packs=listSkillPacks(); if(!packs.length) return []; log(c.bold+'설치할 스킬 라이브러리 선택'+c.reset); log('  0) 기본 하네스만 설치'); packs.forEach((p,i)=>{ log('  '+(i+1)+') '+(p.displayNameKo||p.title)+' ('+p.name+')'); if((p.capabilities||[]).length) log('     가능 작업: '+p.capabilities.slice(0,4).join(', ')); }); log('  all) 전체 설치'); const ans=await ask('\n선택 (예: 1,3 또는 all, Enter=기본): '); if(!ans||ans==='0') return []; if(ans.toLowerCase()==='all') return packs.map(p=>p.name); return ans.split(',').map(s=>parseInt(s.trim(),10)).filter(n=>n>=1&&n<=packs.length).map(n=>packs[n-1].name); }
 
-async function init(root,flags){ root=path.resolve(root||process.cwd()); fs.mkdirSync(root,{recursive:true}); banner(); installGuide(); info('대상: '+root); const selectedSkills=await chooseSkills(Boolean(flags.yes||flags.y),flags.skills); const found=detectLegacy(root); const legacyText=collectLegacyText(found); if(found.length){ warn('기존 하네스/지침 파일 감지: '+found.length+'개'); found.forEach(f=>log('  - '+f.item)); } const archive=archiveLegacy(root,found,false); if(archive) info('백업 완료: '+rel(root,archive)); neutralizeLegacy(root,found,false); const ctx=makeContext(root,legacyText,selectedSkills); for(const [file,template] of Object.entries(coreFiles)){ const target=path.join(root,file); const body=fill(template,ctx); if(exists(target)&&read(target)===body){ ok('유지: '+file); continue; } const existed=exists(target); if(file==='.gitignore'&&existed){ const current=read(target); const additions=body.split('\n').filter(line=>line&&!current.includes(line)).join('\n'); if(additions) write(target,current.replace(/\s*$/,'\n')+additions+'\n'); ok('보강: .gitignore'); continue; } write(target,body); ok((existed?'업데이트: ':'생성: ')+file); } if(selectedSkills.length){ log(''); info('선택 스킬 설치 중: '+selectedSkills.join(', ')); for(const name of selectedSkills) installSkill(root,name,false); } log(''); ok('설치 완료'); log('다음 단계: .harness/project-brief.md, context-map.md, design-system.md를 프로젝트에 맞게 채우세요.'); }
-function migrate(root,flags){ root=path.resolve(root||process.cwd()); banner(); installGuide(); const dryRun=Boolean(flags['dry-run']); const found=detectLegacy(root); if(!found.length){ ok('마이그레이션할 legacy 항목이 없습니다.'); return; } warn('마이그레이션 대상: '+found.length+'개'); found.forEach(f=>log('  - '+f.item)); const archive=archiveLegacy(root,found,dryRun); info((dryRun?'[dry-run] 백업 예정: ':'백업 완료: ')+rel(root,archive)); if(!dryRun) neutralizeLegacy(root,found,false); const ctx=makeContext(root,collectLegacyText(found),[]); for(const [file,template] of Object.entries(coreFiles)){ const target=path.join(root,file); if(dryRun) info('[dry-run] create/update: '+file); else write(target,fill(template,ctx)); } if(!dryRun) ok('마이그레이션 완료'); }
+async function init(root,flags){
+  root=path.resolve(root||process.cwd()); fs.mkdirSync(root,{recursive:true}); banner(); installGuide(); info('대상: '+root);
+  const selectedSkills=await chooseSkills(Boolean(flags.yes||flags.y),flags.skills);
+  const found=detectLegacy(root), legacyText=collectLegacyText(found);
+  if(found.length){ warn('기존 하네스/지침 파일 감지: '+found.length+'개'); found.forEach(f=>log('  - '+f.item)); }
+  const archive=archiveLegacy(root,found,false); if(archive) info('백업 완료: '+rel(root,archive));
+  noteLegacyPreserved(root,found,false);
+  const ctx=makeContext(root,legacyText,selectedSkills);
+  for(const [file,template] of Object.entries(coreFiles)) writeCoreSafely(root,file,fill(template,ctx),{force:Boolean(flags.force)});
+  if(selectedSkills.length){ log(''); info('선택 스킬 설치 중: '+selectedSkills.join(', ')); for(const name of selectedSkills) installSkill(root,name,false); }
+  ok('설치 완료'); info('신규 프로젝트라면 .harness/AX_NEW_PROJECT_GUIDE.md를 따라 실제 프로젝트 내용을 반영하세요.');
+}
+function migrate(root,flags){
+  root=path.resolve(root||process.cwd()); banner(); installGuide(); const dryRun=Boolean(flags['dry-run']); const force=Boolean(flags.force);
+  const found=detectLegacy(root);
+  if(!found.length) ok('마이그레이션할 legacy 항목이 없습니다. 누락/라우팅 파일만 점검합니다.');
+  else { warn('마이그레이션 대상: '+found.length+'개'); found.forEach(f=>log('  - '+f.item)); }
+  const archive=archiveLegacy(root,found,dryRun); if(archive) info((dryRun?'[dry-run] 백업 예정: ':'백업 완료: ')+rel(root,archive));
+  noteLegacyPreserved(root,found,dryRun);
+  const ctx=makeContext(root,collectLegacyText(found),[]);
+  for(const [file,template] of Object.entries(coreFiles)) writeCoreSafely(root,file,fill(template,ctx),{dryRun,force});
+  if(!dryRun){ ok('마이그레이션 완료'); info('기존 프로젝트 메모리 파일은 보존되었습니다. 템플릿 재생성이 필요하면 --force를 명시하세요.'); }
+}
 function status(root){ root=path.resolve(root||process.cwd()); const vf=path.join(root,'.harness/HARNESS_VERSION'); const version=exists(vf)?read(vf).trim():'not installed'; const missing=Object.keys(coreFiles).filter(f=>!exists(path.join(root,f))); const lp=path.join(root,'.harness/skills-lock.json'); const lock=exists(lp)?parseJsonSafe(read(lp),{installedSkills:{}}):{installedSkills:{}}; banner(); log('대상: '+root); log('버전: '+version); log('파일: '+(Object.keys(coreFiles).length-missing.length)+'/'+Object.keys(coreFiles).length); if(missing.length){ warn('누락 파일'); missing.forEach(x=>log('  - '+x)); } else ok('필수 파일 모두 존재'); const names=Object.keys(lock.installedSkills||{}); log('설치 스킬: '+(names.length?names.join(', '):'없음')); }
+function scanSensitivePath(root){ const out=[]; if(!exists(root)) return out; const patterns=[{type:'npm token',re:/npm_[A-Za-z0-9]{20,}/},{type:'github token',re:/gh[pousr]_[A-Za-z0-9_]{20,}/},{type:'private key',re:/-----BEGIN [A-Z ]*PRIVATE KEY-----/},{type:'password assignment',re:/(password|secret|token|api[_-]?key)\s*[:=]\s*['\"][^'\"]{8,}/i}]; function walk(p){ const st=fs.statSync(p); if(st.isDirectory()){ const b=path.basename(p); if(['node_modules','.git','archive','dist'].includes(b)) return; for(const n of fs.readdirSync(p)) walk(path.join(p,n)); } else if(st.isFile()&&isTextFile(p)){ const body=read(p); for(const pat of patterns){ const m=body.match(pat.re); if(m) out.push({file:p,type:pat.type,sample:m[0].slice(0,60)}); } } } try{ walk(root); }catch{} return out; }
 function verify(root){ root=path.resolve(root||process.cwd()); let failures=0; banner(); for(const file of Object.keys(coreFiles)){ const target=path.join(root,file); if(!exists(target)){ failures++; warn('누락: '+file); continue; } const body=read(target); if(/{{[A-Z_]+}}/.test(body)){ failures++; warn('플레이스홀더 남음: '+file); } } const suspicious=[]; for(const x of ['.harness','AGENTS.md','CLAUDE.md']) for(const f of scanSensitivePath(path.join(root,x))) suspicious.push(f); if(suspicious.length){ failures+=suspicious.length; suspicious.forEach(x=>warn('민감정보 의심: '+rel(root,x.file)+' · '+x.type)); } if(failures){ fail('검증 실패: '+failures); process.exitCode=1; } else ok('검증 완료'); }
 
-function slugifyName(value){ return String(value||'').trim().toLowerCase().replace(/^@[^/]+\//,'').replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')||'custom-skill'; }
-function packageSafeName(value){ const raw=String(value||'').trim(); if(raw.startsWith('@')) return raw; return 'leerness-skill-'+slugifyName(raw).replace(/^leerness-skill-/,'').replace(/^harness-skill-/,''); }
-function isInside(parent,child){ const r=path.relative(path.resolve(parent),path.resolve(child)); return r&&!r.startsWith('..')&&!path.isAbsolute(r); }
-function scanSensitiveText(body){ const patterns=[{name:'OpenAI style API key',re:/sk-[a-zA-Z0-9_-]{20,}/g},{name:'GitHub token',re:/gh[pousr]_[a-zA-Z0-9_]{20,}/g},{name:'npm token',re:/npm_[a-zA-Z0-9]{20,}/g},{name:'AWS access key',re:/AKIA[0-9A-Z]{16}/g},{name:'private key block',re:/-----BEGIN (?:RSA |EC |OPENSSH |)PRIVATE KEY-----/g},{name:'password assignment',re:/(?:password|passwd|pwd)\s*[:=]\s*['"][^'"]{8,}['"]/ig},{name:'secret assignment',re:/(?:secret|token|api[_-]?key)\s*[:=]\s*['"][^'"]{12,}['"]/ig}]; const findings=[]; for(const p of patterns){ let m; while((m=p.re.exec(body))) findings.push({type:p.name,index:m.index,sample:m[0].slice(0,16)+'...'}); } return findings; }
-function scanSensitivePath(target){ const findings=[]; function scan(p){ if(!exists(p)) return; const st=fs.statSync(p); if(st.isDirectory()){ for(const n of fs.readdirSync(p)){ if(['node_modules','.git','dist','coverage'].includes(n)) continue; scan(path.join(p,n)); } } else if(st.isFile()&&isTextFile(p)){ for(const f of scanSensitiveText(read(p))) findings.push({file:p,...f}); } } scan(target); return findings; }
-function skillLibraryFiles(dir){ const files=[]; function walk(p){ if(!exists(p)) return; const st=fs.statSync(p); if(st.isDirectory()){ for(const n of fs.readdirSync(p)){ if(['node_modules','.git','dist','coverage'].includes(n)) continue; walk(path.join(p,n)); } } else if(st.isFile()) files.push(p); } walk(dir); return files; }
-function readSkillLibraryMeta(dir){ for(const cnd of [path.join(dir,'skill-library.json'),path.join(dir,'skill.json'),path.join(dir,'package.json')]){ if(!exists(cnd)) continue; const data=parseJsonSafe(read(cnd),null); if(!data) continue; if(path.basename(cnd)==='package.json') return { name:data.harnessSkill?.name||data.name, version:data.version||'0.1.0', title:data.harnessSkill?.title||data.description||data.name, packageName:data.name, description:data.description||'', requiresEnv:data.harnessSkill?.requiresEnv||[], files:data.harnessSkill?.files||[] }; return data; } return null; }
-function validateSkillLibrary(dir,options={}){ dir=path.resolve(dir); let failures=0; const meta=readSkillLibraryMeta(dir); if(!meta||!meta.name){ fail('skill-library.json 또는 skill.json에 name이 필요합니다.'); failures++; } const sd=path.join(dir,'skills'); if(!exists(sd)){ fail('skills/ 폴더가 필요합니다.'); failures++; } else if(!skillLibraryFiles(sd).some(f=>f.endsWith('.md'))){ fail('skills/*.md 파일이 최소 1개 필요합니다.'); failures++; } const findings=scanSensitivePath(dir); if(findings.length){ fail('민감정보 의심 패턴 감지. 배포/빌드가 차단됩니다.'); findings.slice(0,20).forEach(f=>warn(rel(dir,f.file)+' · '+f.type+' · '+f.sample)); if(findings.length>20) warn('추가 '+(findings.length-20)+'건 생략'); failures+=findings.length; } for(const env of new Set(meta?.requiresEnv||[])){ if(!/^[A-Z][A-Z0-9_]*$/.test(env)) warn('환경변수 이름 형식 확인 필요: '+env); } if(!options.silent){ if(failures) fail('스킬 라이브러리 검증 실패: '+failures); else ok('스킬 라이브러리 검증 완료: '+(meta?.name||path.basename(dir))); } return {ok:failures===0,failures,meta,findings}; }
-function inferEnvNamesFromText(body){ const names=new Set(); const re=/\b[A-Z][A-Z0-9_]{3,}\b/g; let m; while((m=re.exec(body))){ const v=m[0]; if(/(KEY|TOKEN|SECRET|PASSWORD|CLIENT|VENDOR|ID|URL|HOST|BUCKET|PROJECT)/.test(v)) names.add(v); } return Array.from(names).sort(); }
-function learnSkillLibrary(root,flags){ root=path.resolve(root||process.cwd()); const from=path.resolve(flags.from||path.join(root,'.harness/skills')); const name=slugifyName(flags.name||flags.category||path.basename(from)); const version=String(flags.version||'0.1.0'); const outRoot=path.resolve(flags.out||path.join(root,'.harness/library',name)); if(!exists(from)){ fail('학습할 스킬 경로가 없습니다: '+from); process.exitCode=1; return; } const sourceFiles=skillLibraryFiles(from).filter(f=>isTextFile(f)&&!f.includes(path.sep+'archive'+path.sep)); if(!sourceFiles.length){ fail('학습 가능한 텍스트 스킬 파일이 없습니다.'); process.exitCode=1; return; } fs.mkdirSync(path.join(outRoot,'skills'),{recursive:true}); const requiresEnv=new Set(); const copied=[]; for(const f of sourceFiles){ const body=read(f); for(const e of inferEnvNamesFromText(body)) requiresEnv.add(e); const base=path.basename(f).replace(/[^a-zA-Z0-9._-]/g,'-'); const destName=base.endsWith('.md')?base:base+'.md'; const dest=path.join(outRoot,'skills',destName); const header=[MARK,'# Learned Skill: '+destName.replace(/\.md$/,''),'','Source: '+rel(root,f),'Learned: '+new Date().toISOString(),''].join('\n'); write(dest,body.includes(MARK)?body:header+'\n'+body); copied.push('skills/'+destName); } const meta={name,version,title:flags.title||name,description:flags.description||'Verified project skill library extracted from a successful implementation.',category:flags.category||'custom',compatibleHarness:'>=3.2.0',sensitiveDataPolicy:'env-reference-only',requiresEnv:Array.from(requiresEnv).sort(),files:copied,learnedFrom:rel(root,from),learnedAt:new Date().toISOString()}; write(path.join(outRoot,'skill-library.json'),JSON.stringify(meta,null,2)+'\n'); write(path.join(outRoot,'README.md'),'# '+meta.title+'\n\n'+meta.description+'\n\n## Policy\n\nThis library stores environment variable names only. Do not commit real secrets.\n\n## Required env\n\n'+(meta.requiresEnv.map(e=>'- '+e).join('\n')||'- None')+'\n'); write(path.join(outRoot,'env.example'),meta.requiresEnv.map(e=>e+'=').join('\n')+(meta.requiresEnv.length?'\n':'')); const result=validateSkillLibrary(outRoot,{silent:true}); if(!result.ok){ fail('학습 결과에 민감정보 또는 구조 문제가 있어 확인이 필요합니다: '+outRoot); process.exitCode=1; return; } ok('검증된 스킬 라이브러리 학습 완료: '+outRoot); info('다음: leerness library build '+outRoot); }
-function buildSkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); const check=validateSkillLibrary(dir,{silent:false}); if(!check.ok){ process.exitCode=1; return; } const meta=check.meta; const out=path.resolve(flags.out||path.join(dir,'dist')); const packageName=flags.package||meta.packageName||packageSafeName(meta.name); const libRoot=path.join(out,slugifyName(meta.name)); if(exists(libRoot)) fs.rmSync(libRoot,{recursive:true,force:true}); fs.mkdirSync(libRoot,{recursive:true}); for(const item of ['README.md','skill-library.json','skill.json','env.example','skills','examples','migrations']){ const src=path.join(dir,item); if(exists(src)) copyRecursive(src,path.join(libRoot,item)); } if(!exists(path.join(libRoot,'skill-library.json'))&&exists(path.join(libRoot,'skill.json'))) fs.copyFileSync(path.join(libRoot,'skill.json'),path.join(libRoot,'skill-library.json')); const pkg={name:packageName,version:meta.version||'0.1.0',description:meta.description||meta.title||meta.name,type:'commonjs',files:['skill-library.json','README.md','env.example','skills/','examples/','migrations/'],keywords:['leerness','harness-skill','ai-skill-library',meta.category||'custom'].filter(Boolean),license:'MIT',publishConfig:{access:'public'},harnessSkill:{name:meta.name,version:meta.version,title:meta.title,requiresEnv:meta.requiresEnv||[],sensitiveDataPolicy:meta.sensitiveDataPolicy||'env-reference-only',compatibleHarness:meta.compatibleHarness||'>=3.2.0'}}; write(path.join(libRoot,'package.json'),JSON.stringify(pkg,null,2)+'\n'); ok('스킬 라이브러리 빌드 완료: '+libRoot); info('npm 배포: leerness library publish '+libRoot+' --target npm --execute'); info('git 배포: leerness library publish '+libRoot+' --target git --repo <git-url> --execute'); }
-function mergeSkillLibrary(root,source,flags){ root=path.resolve(root||process.cwd()); source=path.resolve(source||flags.source||''); if(!source||!exists(source)){ fail('병합할 스킬 라이브러리 경로가 필요합니다.'); process.exitCode=1; return; } const check=validateSkillLibrary(source,{silent:false}); if(!check.ok){ process.exitCode=1; return; } const meta=check.meta; const name=slugifyName(meta.name); const dest=path.join(root,'.harness/skills',name); fs.mkdirSync(dest,{recursive:true}); const srcSkills=path.join(source,'skills'); if(exists(srcSkills)) copyRecursive(srcSkills,dest); write(path.join(dest,'skill-library.json'),JSON.stringify(meta,null,2)+'\n'); updateSkillLock(root,{name,version:meta.version||'0.1.0',title:meta.title||name,requiresEnv:meta.requiresEnv||[],source:'library'},false); appendEnvExample(root,{name,title:meta.title||name,requiresEnv:meta.requiresEnv||[]}); ok('스킬 라이브러리 병합 완료: '+rel(root,dest)); }
-function migrateSkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); if(!exists(dir)){ fail('마이그레이션 대상 경로가 없습니다: '+dir); process.exitCode=1; return; } const meta=readSkillLibraryMeta(dir)||{}; const migrated={name:slugifyName(flags.name||meta.name||path.basename(dir)),version:String(flags.version||meta.version||'0.1.0'),title:flags.title||meta.title||meta.description||path.basename(dir),description:flags.description||meta.description||'Migrated Leerness skill library.',category:flags.category||meta.category||'custom',compatibleHarness:'>=3.2.0',sensitiveDataPolicy:'env-reference-only',requiresEnv:Array.from(new Set(meta.requiresEnv||meta.harnessSkill?.requiresEnv||[])),migratedAt:new Date().toISOString()}; const skillsDir=path.join(dir,'skills'); if(!exists(skillsDir)) fs.mkdirSync(skillsDir,{recursive:true}); const mdFiles=skillLibraryFiles(dir).filter(f=>f.endsWith('.md')&&!isInside(skillsDir,f)&&!f.includes(path.sep+'node_modules'+path.sep)); for(const f of mdFiles){ if(path.basename(f).toLowerCase()==='readme.md') continue; const dest=path.join(skillsDir,path.basename(f)); if(!exists(dest)) fs.copyFileSync(f,dest); } migrated.files=skillLibraryFiles(skillsDir).filter(f=>f.endsWith('.md')).map(f=>rel(dir,f)); write(path.join(dir,'skill-library.json'),JSON.stringify(migrated,null,2)+'\n'); if(!exists(path.join(dir,'README.md'))) write(path.join(dir,'README.md'),'# '+migrated.title+'\n\n'+migrated.description+'\n'); const check=validateSkillLibrary(dir,{silent:false}); if(!check.ok) process.exitCode=1; else ok('스킬 라이브러리 마이그레이션 완료: '+dir); }
-function publishSkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); const target=String(flags.target||'npm'); const execute=Boolean(flags.execute); const check=validateSkillLibrary(dir,{silent:false}); if(!check.ok){ process.exitCode=1; return; } if(target==='npm'){ if(!exists(path.join(dir,'package.json'))){ warn('package.json이 없습니다. 먼저 build를 실행하세요.'); info('leerness library build '+dir); process.exitCode=1; return; } const args=['publish','--access','public'].concat(flags.registry?['--registry',flags.registry]:[]); if(!execute){ info('[dry-run] 실행 예정: (cd '+dir+') npm '+args.join(' ')); info('실제 배포는 --execute를 붙이세요.'); return; } const r=childProcess.spawnSync('npm',args,{cwd:dir,stdio:'inherit',shell:process.platform==='win32'}); process.exitCode=r.status||0; return; } if(target==='git'){ const repo=flags.repo; const branch=flags.branch||'main'; const message=flags.message||('Publish skill library '+check.meta.name+'@'+(check.meta.version||'0.1.0')); if(!execute){ info('[dry-run] git target repo: '+(repo||'(current repo)')); info('[dry-run] branch: '+branch); info('[dry-run] commit message: '+message); info('실제 push는 --execute를 붙이세요.'); return; } const run=(cmd,args)=>{ const r=childProcess.spawnSync(cmd,args,{cwd:dir,stdio:'inherit',shell:process.platform==='win32'}); if(r.status) process.exit(r.status); }; if(repo&&!exists(path.join(dir,'.git'))){ run('git',['init']); run('git',['remote','add','origin',repo]); } run('git',['add','.']); run('git',['commit','-m',message]); run('git',['branch','-M',branch]); run('git',['push','-u','origin',branch]); return; } fail('지원하지 않는 publish target: '+target); process.exitCode=1; }
-function libraryCommand(args,flags){ const sub=args[1]||'help'; if(sub==='help'){ log(['Leerness Skill Library Commands','','  leerness skill learn <name> --from .harness/skills/<name> [--out ./library/<name>]','  leerness library validate <path>','  leerness library build <path> [--out ./dist] [--package leerness-skill-name]','  leerness library merge <source-library> [--path <project>]','  leerness library migrate <path> [--version 1.0.0]','  leerness library publish <built-library> --target npm|git [--execute] [--repo https://github.com/gugu9999gu/leerness]','','기본 publish는 dry-run입니다. 실제 npm/git 업로드는 --execute가 필요합니다.',''].join('\n')); return; } if(sub==='validate') return validateSkillLibrary(args[2]||process.cwd(),{silent:false}); if(sub==='build') return buildSkillLibrary(args[2]||process.cwd(),flags); if(sub==='merge') return mergeSkillLibrary(flags.path||process.cwd(),args[2]||flags.source,flags); if(sub==='migrate') return migrateSkillLibrary(args[2]||process.cwd(),flags); if(sub==='publish'||sub==='upload') return publishSkillLibrary(args[2]||process.cwd(),flags); fail('알 수 없는 library 명령: '+sub); process.exitCode=1; }
-function skillCommand(args,flags){ const sub=args[1]||'list'; const root=path.resolve(flags.path||process.cwd()); if(sub==='learn'){ flags.name=args[2]||flags.name; return learnSkillLibrary(root,flags); } if(sub==='library') return libraryCommand(['library'].concat(args.slice(2)),flags); if(sub==='list'){ banner(); log('사용 가능한 스킬 라이브러리'); for(const p of listSkillPacks()){ log('- '+p.name+'@'+p.version+': '+p.title); log('  '+p.description); if((p.requiresEnv||[]).length) log('  env: '+(p.requiresEnv||[]).join(', ')); } return; } const name=args[2]; if(!name){ fail('스킬 이름이 필요합니다. 예: leerness skill add commerce-api'); return; } if(sub==='add'||sub==='install') return installSkill(root,name,Boolean(flags['dry-run'])); if(sub==='remove'||sub==='rm') return removeSkill(root,name); if(sub==='update') return installSkill(root,name,false); fail('알 수 없는 skill 명령: '+sub); }
-function help(){ log(['Leerness v'+VERSION,'','Usage:','  leerness init [path] [--yes] [--skills office,commerce-api|recommended|all]','  leerness migrate [path] [--dry-run]','  leerness status [path]','  leerness verify [path]','','Skills:','  leerness skill list','  leerness skill info <name>','  leerness skill add <name> [--path <project>]','  leerness skill remove <name> [--path <project>]','  leerness skill update <name> [--path <project>]','  leerness skill learn <name> --from <validated-skill-path> [--out <library-path>]','','Skill library lifecycle:','  leerness library validate <path>','  leerness library build <path> [--out ./dist] [--package leerness-skill-name]','  leerness library merge <source-library> [--path <project>]','  leerness library migrate <path> [--version 1.0.0]','  leerness library publish <built-library> --target npm|git [--execute] [--repo https://github.com/gugu9999gu/leerness]','  leerness --version','','Examples:','  npx leerness init --skills recommended','  npx leerness skill learn coupang-order-sync --from .harness/skills/commerce-api/order-sync.md','  npx leerness library build .harness/library/coupang-order-sync','  npx leerness library publish .harness/library/coupang-order-sync/dist/coupang-order-sync --target npm --execute',''].join('\n')); }
-
-
-function nowIso(){ return new Date().toISOString(); }
-function dateOnly(iso){ return String(iso||nowIso()).slice(0,10); }
-function normalizeSkillMeta(meta, fallbackName){
-  meta = meta || {};
-  const updated = meta.lastUpdatedAt || meta.updatedAt || meta.learnedAt || meta.migratedAt || nowIso();
-  meta.name = slugifyName(meta.name || fallbackName || 'custom-skill');
-  meta.version = String(meta.version || '0.1.0');
-  meta.title = meta.title || meta.description || meta.name;
-  meta.category = meta.category || 'custom';
-  meta.compatibleHarness = meta.compatibleHarness || '>=1.0.0';
-  meta.sensitiveDataPolicy = meta.sensitiveDataPolicy || 'env-reference-only';
-  meta.requiresEnv = Array.from(new Set(meta.requiresEnv || meta.harnessSkill?.requiresEnv || [])).sort();
-  meta.lastUpdatedAt = updated;
-  meta.lastUpdated = meta.lastUpdated || dateOnly(updated);
-  meta.verification = meta.verification || { status:'needs-review', method:'none', verifiedBy:null, verifiedAt:null, checks:[] };
-  return meta;
-}
-function isAiVerified(meta){
-  const v = (meta||{}).verification || {};
-  return v.status === 'passed' && /ai/i.test(String(v.method||'')) && Boolean(v.verifiedAt);
-}
-function verificationLabel(meta){
-  const v=(meta||{}).verification||{};
-  if(isAiVerified(meta)) return 'AI verified '+String(v.verifiedAt).slice(0,10);
-  return v.status || 'needs-review';
-}
-function readSkillLibraryMeta(dir){
-  for(const cnd of [path.join(dir,'skill-library.json'),path.join(dir,'skill.json'),path.join(dir,'package.json')]){
-    if(!exists(cnd)) continue;
-    const data=parseJsonSafe(read(cnd),null); if(!data) continue;
-    if(path.basename(cnd)==='package.json') return normalizeSkillMeta({ name:data.harnessSkill?.name||data.name, version:data.version||'0.1.0', title:data.harnessSkill?.title||data.description||data.name, packageName:data.name, description:data.description||'', requiresEnv:data.harnessSkill?.requiresEnv||[], files:data.harnessSkill?.files||[], lastUpdated:data.harnessSkill?.lastUpdated, lastUpdatedAt:data.harnessSkill?.lastUpdatedAt, verification:data.harnessSkill?.verification }, path.basename(dir));
-    return normalizeSkillMeta(data, path.basename(dir));
-  }
-  return null;
-}
-function writeSkillLibraryMeta(dir,meta){ write(path.join(dir,'skill-library.json'),JSON.stringify(normalizeSkillMeta(meta,path.basename(dir)),null,2)+'\n'); }
-function validateSkillLibrary(dir,options={}){
-  dir=path.resolve(dir); let failures=0; const meta=readSkillLibraryMeta(dir);
-  if(!meta||!meta.name){ fail('skill-library.json 또는 skill.json에 name이 필요합니다.'); failures++; }
-  const sd=path.join(dir,'skills');
-  if(!exists(sd)){ fail('skills/ 폴더가 필요합니다.'); failures++; }
-  else if(!skillLibraryFiles(sd).some(f=>f.endsWith('.md'))){ fail('skills/*.md 파일이 최소 1개 필요합니다.'); failures++; }
-  const findings=scanSensitivePath(dir);
-  if(findings.length){ fail('민감정보 의심 패턴 감지. 업로드/빌드/병합이 차단됩니다.'); findings.slice(0,20).forEach(f=>warn(rel(dir,f.file)+' · '+f.type+' · '+f.sample)); if(findings.length>20) warn('추가 '+(findings.length-20)+'건 생략'); failures+=findings.length; }
-  for(const env of new Set(meta?.requiresEnv||[])){ if(!/^[A-Z][A-Z0-9_]*$/.test(env)) warn('환경변수 이름 형식 확인 필요: '+env); }
-  if(meta && !meta.lastUpdated) warn('lastUpdated 메타데이터가 없습니다. v1.0.0에서는 표시를 권장합니다.');
-  if((options.strictAi||options['strict-ai']) && !isAiVerified(meta)){ fail('AI 검증 메타데이터가 없습니다. `leerness library verify <path> --ai`가 필요합니다.'); failures++; }
-  if(!options.silent){ if(failures) fail('스킬 라이브러리 검증 실패: '+failures); else ok('스킬 라이브러리 검증 완료: '+(meta?.name||path.basename(dir))+' · '+verificationLabel(meta)); }
-  return {ok:failures===0,failures,meta,findings};
-}
-function verifySkillLibrary(dir,flags={}){
-  dir=path.resolve(dir||process.cwd());
-  const check=validateSkillLibrary(dir,{silent:false});
-  if(!check.ok){ process.exitCode=1; return; }
-  if(!flags.ai){ fail('업로드 가능한 검증 기록은 AI 검증으로만 생성됩니다. `--ai`를 붙여 AI 검증 게이트를 명시하세요.'); process.exitCode=1; return; }
-  const meta=normalizeSkillMeta(check.meta,path.basename(dir));
-  const reviewedAt=nowIso();
-  meta.lastUpdatedAt = meta.lastUpdatedAt || reviewedAt;
-  meta.lastUpdated = meta.lastUpdated || dateOnly(meta.lastUpdatedAt);
-  meta.verification = { status:'passed', method:'ai-assisted-review', verifiedBy:String(flags.reviewer||flags.by||'leerness-ai'), verifiedAt:reviewedAt, checks:['structure','secret-scan','env-reference-only','reusability','migration-readiness','metadata-completeness'] };
-  writeSkillLibraryMeta(dir,meta);
-  write(path.join(dir,'ai-verification.json'),JSON.stringify({skill:meta.name,version:meta.version,status:'passed',method:'ai-assisted-review',verifiedBy:meta.verification.verifiedBy,verifiedAt:reviewedAt,checks:meta.verification.checks},null,2)+'\n');
-  ok('AI 검증 완료: '+meta.name+'@'+meta.version+' · '+dateOnly(reviewedAt));
-}
-function libraryStatus(dir){
-  dir=path.resolve(dir||process.cwd()); const meta=readSkillLibraryMeta(dir);
-  if(!meta){ fail('스킬 라이브러리 메타데이터를 찾지 못했습니다.'); process.exitCode=1; return; }
-  banner();
-  log('스킬: '+meta.name+'@'+meta.version);
-  log('제목: '+(meta.title||''));
-  log('카테고리: '+(meta.category||''));
-  log('최종 업데이트: '+(meta.lastUpdated||'unknown')+' ('+(meta.lastUpdatedAt||'unknown')+')');
-  log('검증: '+verificationLabel(meta));
-  if((meta.requiresEnv||[]).length) log('환경변수: '+meta.requiresEnv.join(', '));
-}
-function updateSkillLock(root,meta,remove=false){
-  const lp=path.join(root,'.harness/skills-lock.json');
-  const lock=exists(lp)?parseJsonSafe(read(lp),{harnessVersion:VERSION,installedSkills:{}}):{harnessVersion:VERSION,installedSkills:{}};
-  lock.harnessVersion=VERSION; lock.updatedAt=nowIso(); lock.installedSkills=lock.installedSkills||{};
-  if(remove) delete lock.installedSkills[meta.name];
-  else lock.installedSkills[meta.name]={version:meta.version,source:meta.source||'bundled',title:meta.title,requiresEnv:meta.requiresEnv||[],lastUpdated:meta.lastUpdated||dateOnly(meta.lastUpdatedAt),lastUpdatedAt:meta.lastUpdatedAt||nowIso(),verificationStatus:(meta.verification||{}).status||'unknown',verifiedAt:(meta.verification||{}).verifiedAt||null};
-  write(lp,JSON.stringify(lock,null,2)+'\n');
-}
-function getSkillMeta(name){
-  const metaPath=path.join(PACKS_DIR,name,'skill.json'); if(!exists(metaPath)) return null;
-  const meta=parseJsonSafe(read(metaPath),null); if(!meta||!meta.name) return null;
-  return normalizeSkillMeta(meta,name);
-}
-function installSkill(root,name,dryRun=false){
-  const meta=getSkillMeta(name); if(!meta){ fail('알 수 없는 스킬 라이브러리: '+name); info('사용 가능 목록: '+listSkillPacks().map(x=>x.name).join(', ')); return false; }
-  const packRoot=path.join(PACKS_DIR,name); const destRoot=path.join(root,'.harness/skills',name);
-  if(dryRun){ info('[dry-run] install skill: '+name+' · updated '+(meta.lastUpdated||'unknown')+' · '+verificationLabel(meta)); return true; }
-  fs.mkdirSync(destRoot,{recursive:true});
-  for(const file of meta.files||[]){ const src=path.join(packRoot,file); const dest=path.join(destRoot,path.basename(file)); if(exists(src)){ write(dest,read(src)); ok('스킬 설치: '+rel(root,dest)); } }
-  write(path.join(destRoot,'skill.json'),JSON.stringify(meta,null,2)+'\n');
-  updateSkillLock(root,meta,false); appendEnvExample(root,meta); return true;
-}
-function learnSkillLibrary(root,flags){
-  root=path.resolve(root||process.cwd()); const from=path.resolve(flags.from||path.join(root,'.harness/skills')); const name=slugifyName(flags.name||flags.category||path.basename(from)); const version=String(flags.version||'0.1.0'); const outRoot=path.resolve(flags.out||path.join(root,'.harness/library',name));
-  if(!exists(from)){ fail('학습할 스킬 경로가 없습니다: '+from); process.exitCode=1; return; }
-  const sourceFiles=skillLibraryFiles(from).filter(f=>isTextFile(f)&&!f.includes(path.sep+'archive'+path.sep));
-  if(!sourceFiles.length){ fail('학습 가능한 텍스트 스킬 파일이 없습니다.'); process.exitCode=1; return; }
-  fs.mkdirSync(path.join(outRoot,'skills'),{recursive:true}); const requiresEnv=new Set(); const copied=[];
-  for(const f of sourceFiles){ const body=read(f); for(const e of inferEnvNamesFromText(body)) requiresEnv.add(e); const base=path.basename(f).replace(/[^a-zA-Z0-9._-]/g,'-'); const destName=base.endsWith('.md')?base:base+'.md'; const dest=path.join(outRoot,'skills',destName); const header=[MARK,'# Learned Skill: '+destName.replace(/\.md$/,''),'','Source: '+rel(root,f),'Learned: '+nowIso(),'Verification: needs-review',''].join('\n'); write(dest,body.includes(MARK)?body:header+'\n'+body); copied.push('skills/'+destName); }
-  const t=nowIso(); const meta=normalizeSkillMeta({name,version,title:flags.title||name,description:flags.description||'Verified project skill library extracted from a successful implementation.',category:flags.category||'custom',compatibleHarness:'>=1.0.0',sensitiveDataPolicy:'env-reference-only',requiresEnv:Array.from(requiresEnv).sort(),files:copied,learnedFrom:rel(root,from),learnedAt:t,lastUpdated:dateOnly(t),lastUpdatedAt:t,verification:{status:'needs-review',method:'none',verifiedBy:null,verifiedAt:null,checks:[]}}, name);
-  writeSkillLibraryMeta(outRoot,meta);
-  write(path.join(outRoot,'README.md'),'# '+meta.title+'\n\n'+meta.description+'\n\n## Metadata\n\n- Version: '+meta.version+'\n- Last updated: '+meta.lastUpdated+'\n- Verification: '+verificationLabel(meta)+'\n\n## Policy\n\nThis library stores environment variable names only. Do not commit real secrets.\n\n## Required env\n\n'+(meta.requiresEnv.map(e=>'- '+e).join('\n')||'- None')+'\n');
-  write(path.join(outRoot,'env.example'),meta.requiresEnv.map(e=>e+'=').join('\n')+(meta.requiresEnv.length?'\n':''));
-  const result=validateSkillLibrary(outRoot,{silent:true}); if(!result.ok){ fail('학습 결과에 민감정보 또는 구조 문제가 있어 확인이 필요합니다: '+outRoot); process.exitCode=1; return; }
-  ok('스킬 라이브러리 학습 완료: '+outRoot); warn('아직 업로드 검증 전입니다. 다음 명령으로 AI 검증을 완료하세요.'); info('leerness library verify '+outRoot+' --ai --reviewer leerness-ai');
-}
-function buildSkillLibrary(dir,flags){
-  dir=path.resolve(dir||process.cwd()); const check=validateSkillLibrary(dir,{silent:false}); if(!check.ok){ process.exitCode=1; return; }
-  const meta=normalizeSkillMeta(check.meta,path.basename(dir)); const out=path.resolve(flags.out||path.join(dir,'dist')); const packageName=flags.package||meta.packageName||packageSafeName(meta.name); const libRoot=path.join(out,slugifyName(meta.name));
-  if(exists(libRoot)) fs.rmSync(libRoot,{recursive:true,force:true}); fs.mkdirSync(libRoot,{recursive:true});
-  for(const item of ['README.md','skill-library.json','skill.json','ai-verification.json','env.example','skills','examples','migrations']){ const src=path.join(dir,item); if(exists(src)) copyRecursive(src,path.join(libRoot,item)); }
-  writeSkillLibraryMeta(libRoot,meta);
-  const pkg={name:packageName,version:meta.version||'0.1.0',description:meta.description||meta.title||meta.name,type:'commonjs',files:['skill-library.json','ai-verification.json','README.md','env.example','skills/','examples/','migrations/'],keywords:['leerness','harness-skill','ai-skill-library',meta.category||'custom'].filter(Boolean),license:'MIT',publishConfig:{access:'public'},harnessSkill:{name:meta.name,version:meta.version,title:meta.title,requiresEnv:meta.requiresEnv||[],sensitiveDataPolicy:meta.sensitiveDataPolicy||'env-reference-only',compatibleHarness:meta.compatibleHarness||'>=1.0.0',lastUpdated:meta.lastUpdated,lastUpdatedAt:meta.lastUpdatedAt,verification:meta.verification}};
-  write(path.join(libRoot,'package.json'),JSON.stringify(pkg,null,2)+'\n');
-  ok('스킬 라이브러리 빌드 완료: '+libRoot); info('상태 확인: leerness library status '+libRoot); info('npm 배포: leerness library publish '+libRoot+' --target npm --execute');
-}
-function updateSkillLibrary(dir,flags){
-  dir=path.resolve(dir||process.cwd()); const from=path.resolve(flags.from||flags.source||''); if(!from||!exists(from)){ fail('업데이트 원본 경로가 필요합니다: --from <path>'); process.exitCode=1; return; }
-  const old=readSkillLibraryMeta(dir)||normalizeSkillMeta({name:path.basename(dir)},path.basename(dir)); const sourceFiles=skillLibraryFiles(from).filter(f=>isTextFile(f)&&!f.includes(path.sep+'archive'+path.sep)); if(!sourceFiles.length){ fail('업데이트할 텍스트 스킬 파일이 없습니다.'); process.exitCode=1; return; }
-  fs.mkdirSync(path.join(dir,'skills'),{recursive:true}); const copied=[]; const envs=new Set(old.requiresEnv||[]);
-  for(const f of sourceFiles){ const body=read(f); for(const e of inferEnvNamesFromText(body)) envs.add(e); const base=path.basename(f).replace(/[^a-zA-Z0-9._-]/g,'-'); const destName=base.endsWith('.md')?base:base+'.md'; write(path.join(dir,'skills',destName),body); copied.push('skills/'+destName); }
-  const t=nowIso(); const meta=normalizeSkillMeta({...old,version:String(flags.version||old.version||'0.1.0'),requiresEnv:Array.from(envs).sort(),files:Array.from(new Set([...(old.files||[]),...copied])),lastUpdated:dateOnly(t),lastUpdatedAt:t,updatedFrom:from,verification:{status:'needs-review',method:'updated-after-verification',verifiedBy:null,verifiedAt:null,checks:[]}}, old.name);
-  writeSkillLibraryMeta(dir,meta); warn('스킬 라이브러리 업데이트 완료. 검증 상태가 needs-review로 초기화되었습니다.'); info('다음: leerness library verify '+dir+' --ai --reviewer leerness-ai');
-}
-function mergeSkillLibrary(root,source,flags){
-  root=path.resolve(root||process.cwd()); source=path.resolve(source||flags.source||''); if(!source||!exists(source)){ fail('병합할 스킬 라이브러리 경로가 필요합니다.'); process.exitCode=1; return; }
-  const check=validateSkillLibrary(source,{silent:false,strictAi:true}); if(!check.ok){ process.exitCode=1; return; }
-  const meta=normalizeSkillMeta(check.meta,path.basename(source)); const name=slugifyName(meta.name); const dest=path.join(root,'.harness/skills',name); fs.mkdirSync(dest,{recursive:true});
-  const srcSkills=path.join(source,'skills'); if(exists(srcSkills)) copyRecursive(srcSkills,dest); write(path.join(dest,'skill-library.json'),JSON.stringify(meta,null,2)+'\n'); if(exists(path.join(source,'ai-verification.json'))) fs.copyFileSync(path.join(source,'ai-verification.json'),path.join(dest,'ai-verification.json'));
-  updateSkillLock(root,{...meta,source:'library'},false); appendEnvExample(root,{name,title:meta.title||name,requiresEnv:meta.requiresEnv||[]}); ok('검증된 스킬 라이브러리 병합 완료: '+rel(root,dest));
-}
-function migrateSkillLibrary(dir,flags){
-  dir=path.resolve(dir||process.cwd()); if(!exists(dir)){ fail('마이그레이션 대상 경로가 없습니다: '+dir); process.exitCode=1; return; }
-  const old=readSkillLibraryMeta(dir)||{}; const t=nowIso(); const migrated=normalizeSkillMeta({name:slugifyName(flags.name||old.name||path.basename(dir)),version:String(flags.version||old.version||'0.1.0'),title:flags.title||old.title||old.description||path.basename(dir),description:flags.description||old.description||'Migrated Leerness skill library.',category:flags.category||old.category||'custom',compatibleHarness:'>=1.0.0',sensitiveDataPolicy:'env-reference-only',requiresEnv:Array.from(new Set(old.requiresEnv||old.harnessSkill?.requiresEnv||[])),migratedAt:t,lastUpdated:dateOnly(t),lastUpdatedAt:t,verification:{status:'needs-review',method:'migrated-after-verification',verifiedBy:null,verifiedAt:null,checks:[]}}, path.basename(dir));
-  const skillsDir=path.join(dir,'skills'); if(!exists(skillsDir)) fs.mkdirSync(skillsDir,{recursive:true}); const mdFiles=skillLibraryFiles(dir).filter(f=>f.endsWith('.md')&&!isInside(skillsDir,f)&&!f.includes(path.sep+'node_modules'+path.sep));
-  for(const f of mdFiles){ if(path.basename(f).toLowerCase()==='readme.md') continue; const dest=path.join(skillsDir,path.basename(f)); if(!exists(dest)) fs.copyFileSync(f,dest); }
-  migrated.files=skillLibraryFiles(skillsDir).filter(f=>f.endsWith('.md')).map(f=>rel(dir,f)); writeSkillLibraryMeta(dir,migrated); if(!exists(path.join(dir,'README.md'))) write(path.join(dir,'README.md'),'# '+migrated.title+'\n\n'+migrated.description+'\n'); const check=validateSkillLibrary(dir,{silent:false}); if(!check.ok) process.exitCode=1; else { warn('마이그레이션 완료. 검증 상태가 needs-review입니다.'); info('다음: leerness library verify '+dir+' --ai --reviewer leerness-ai'); }
-}
-function findProjectRootForPublish(start){
-  let cur=path.resolve(start||process.cwd());
-  if(exists(cur)&&fs.statSync(cur).isFile()) cur=path.dirname(cur);
-  for(;;){
-    if(exists(path.join(cur,'.harness'))) return cur;
-    const parent=path.dirname(cur);
-    if(parent===cur) return null;
-    cur=parent;
-  }
-}
-function readPublishLocalConfig(dir){
-  const projectRoot=findProjectRootForPublish(dir)||process.cwd();
-  const candidates=[path.join(projectRoot,'.harness','skill-publish.local.json'),path.join(projectRoot,'.harness','skill-config.local.json'),path.join(projectRoot,'.leerness.publish.local.json'),path.join(dir,'skill-publish.local.json')];
-  for(const p of candidates){ if(exists(p)){ const cfg=parseJsonSafe(read(p),null); if(cfg) return {path:p,config:cfg}; warn('로컬 publish 설정 JSON을 읽지 못했습니다: '+p); } }
-  return {path:null,config:{}};
-}
-function deepGet(obj,keys){ for(const k of keys){ if(!obj) return undefined; obj=obj[k]; } return obj; }
-function tokenFromConfig(target,dir){
-  const loaded=readPublishLocalConfig(dir); const cfg=loaded.config||{}; const auth=cfg.publishAuth||cfg.auth||{};
-  const envKeys=target==='npm' ? [auth.npmTokenEnv,cfg.npmTokenEnv,'LEERNESS_NPM_TOKEN','NPM_TOKEN','NODE_AUTH_TOKEN'] : [auth.gitTokenEnv,auth.githubTokenEnv,cfg.gitTokenEnv,cfg.githubTokenEnv,'LEERNESS_GIT_TOKEN','LEERNESS_GITHUB_TOKEN','GITHUB_TOKEN','GH_TOKEN','GIT_TOKEN'];
-  for(const k of envKeys.filter(Boolean)){ if(process.env[k]) return {token:process.env[k],source:'env:'+k,configPath:loaded.path}; }
-  const direct=target==='npm' ? (auth.npmToken||cfg.npmToken||deepGet(cfg,['npm','token'])) : (auth.gitToken||auth.githubToken||cfg.gitToken||cfg.githubToken||deepGet(cfg,['git','token'])||deepGet(cfg,['github','token']));
-  if(direct){ warn('로컬 설정 파일의 직접 토큰을 사용합니다. 가능하면 토큰값 대신 tokenEnv 방식이 더 안전합니다: '+loaded.path); return {token:direct,source:'local-config:'+loaded.path,configPath:loaded.path}; }
-  return {token:null,source:null,configPath:loaded.path};
-}
-function repoFromConfig(dir,flags){ const loaded=readPublishLocalConfig(dir); const cfg=loaded.config||{}; const auth=cfg.publishAuth||cfg.auth||{}; return flags.repo||auth.gitRemoteUrl||cfg.gitRemoteUrl||cfg.repository||process.env.LEERNESS_GIT_REPO||process.env.GIT_REMOTE_URL||DEFAULT_GIT_REPOSITORY; }
-function promptSecret(question){
-  return new Promise(resolve=>{
-    if(!process.stdin.isTTY||!process.stdout.isTTY){ resolve(''); return; }
-    const stdin=process.stdin; let value=''; process.stdout.write(question);
-    const cleanup=()=>{ stdin.removeListener('data',onData); try{ stdin.setRawMode(false); }catch{} process.stdout.write('\n'); resolve(value.trim()); };
-    const onData=(ch)=>{ ch=String(ch); if(ch==='\u0003'){ process.stdout.write('\n'); process.exit(130); } if(ch==='\r'||ch==='\n') return cleanup(); if(ch==='\u007f'||ch==='\b'){ if(value.length){ value=value.slice(0,-1); process.stdout.write('\b \b'); } return; } value+=ch; process.stdout.write('*'); };
-    try{ stdin.setRawMode(true); }catch{} stdin.resume(); stdin.setEncoding('utf8'); stdin.on('data',onData);
-  });
-}
-async function resolvePublishToken(target,dir,flags){
-  if(flags.token){ warn('--token 인자는 shell history에 남을 수 있습니다. 가능하면 환경변수나 입력 프롬프트를 사용하세요.'); return {token:String(flags.token),source:'--token'}; }
-  if(flags['token-env']&&process.env[String(flags['token-env'])]) return {token:process.env[String(flags['token-env'])],source:'env:'+flags['token-env']};
-  const cfgToken=tokenFromConfig(target,dir); if(cfgToken.token) return cfgToken; if(flags['no-prompt']) return {token:null,source:null};
-  const label=target==='npm'?'npm access token':'git/GitHub access token'; const token=await promptSecret(label+' 입력: '); return {token,source:token?'interactive-prompt':null};
-}
-function writeTempNpmrc(token,registry){ const host=(registry||'https://registry.npmjs.org/').replace(/^https?:/,'').replace(/\/$/,''); const file=path.join(os.tmpdir(),'leerness-npmrc-'+Date.now()+'-'+Math.random().toString(16).slice(2)); fs.writeFileSync(file,'registry='+(registry||'https://registry.npmjs.org/')+'\n'+host+'/:_authToken='+token+'\n',{encoding:'utf8',mode:0o600}); return file; }
-function gitRun(dir,args,token){ const finalArgs=token?['-c','http.extraHeader=Authorization: Bearer '+token].concat(args):args; const r=childProcess.spawnSync('git',finalArgs,{cwd:dir,stdio:'inherit',shell:process.platform==='win32'}); if(r.status) process.exit(r.status); }
-function ensureGitRemote(dir,repo){ const get=childProcess.spawnSync('git',['remote','get-url','origin'],{cwd:dir,encoding:'utf8',shell:process.platform==='win32'}); if(get.status===0) gitRun(dir,['remote','set-url','origin',repo]); else gitRun(dir,['remote','add','origin',repo]); }
-async function publishSkillLibrary(dir,flags){
-  dir=path.resolve(dir||process.cwd()); const target=String(flags.target||'npm'); const execute=Boolean(flags.execute); const check=validateSkillLibrary(dir,{silent:false,strictAi:true}); if(!check.ok){ process.exitCode=1; return; }
-  if(!isAiVerified(check.meta)){ fail('AI 검증된 스킬만 업로드할 수 있습니다. leerness library verify <path> --ai 를 먼저 실행하세요.'); process.exitCode=1; return; }
-  if(target==='npm'){
-    if(!exists(path.join(dir,'package.json'))){ warn('package.json이 없습니다. 먼저 build를 실행하세요.'); info('leerness library build '+dir); process.exitCode=1; return; }
-    const args=['publish','--access','public'].concat(flags.registry?['--registry',flags.registry]:[]);
-    if(!execute){ info('[dry-run] AI 검증 통과. 실행 예정: (cd '+dir+') npm '+args.join(' ')); info('실제 배포는 --execute를 붙이세요. --execute 시 npm 토큰을 환경변수/로컬 설정에서 찾고 없으면 입력을 요구합니다.'); return; }
-    const cred=await resolvePublishToken('npm',dir,flags);
-    if(!cred.token){ fail('npm access token이 필요합니다. LEERNESS_NPM_TOKEN, NPM_TOKEN, NODE_AUTH_TOKEN 또는 .harness/skill-publish.local.json을 설정하거나 프롬프트에 입력하세요.'); process.exitCode=1; return; }
-    let userconfig=null; try{ userconfig=writeTempNpmrc(cred.token,flags.registry); info('npm 인증 소스: '+cred.source); const r=childProcess.spawnSync('npm',args.concat(['--userconfig',userconfig]),{cwd:dir,stdio:'inherit',shell:process.platform==='win32'}); process.exitCode=r.status||0; } finally { if(userconfig&&exists(userconfig)) try{ fs.rmSync(userconfig,{force:true}); }catch{} } return;
-  }
-  if(target==='git'){
-    const repo=repoFromConfig(dir,flags); const branch=flags.branch||'main'; const message=flags.message||('Publish verified skill library '+check.meta.name+'@'+(check.meta.version||'0.1.0'));
-    if(!execute){ info('[dry-run] AI 검증 통과. git target repo: '+repo); info('[dry-run] branch: '+branch); info('[dry-run] commit message: '+message); info('실제 push는 --execute를 붙이세요. --execute 시 git/GitHub 토큰을 환경변수/로컬 설정에서 찾고 없으면 입력을 요구합니다.'); return; }
-    const cred=await resolvePublishToken('git',dir,flags); if(!cred.token){ fail('git/GitHub access token이 필요합니다. LEERNESS_GIT_TOKEN, LEERNESS_GITHUB_TOKEN, GITHUB_TOKEN, GH_TOKEN 또는 .harness/skill-publish.local.json을 설정하거나 프롬프트에 입력하세요.'); process.exitCode=1; return; }
-    info('git 인증 소스: '+cred.source); if(!exists(path.join(dir,'.git'))) gitRun(dir,['init']); ensureGitRemote(dir,repo); gitRun(dir,['add','.']); const commit=childProcess.spawnSync('git',['commit','-m',message],{cwd:dir,stdio:'inherit',shell:process.platform==='win32'}); if(commit.status&&commit.status!==1) process.exit(commit.status); gitRun(dir,['branch','-M',branch]); gitRun(dir,['push','-u','origin',branch],cred.token); return;
-  }
-  fail('지원하지 않는 publish target: '+target); process.exitCode=1;
-}
-function libraryGuide(root,flags={}){
-  root=path.resolve(root||flags.path||process.cwd()); const target=path.join(root,'.harness/AX_SKILL_LIBRARY_GUIDE.md');
-  if(exists(target)){ ok('AX 가이드 위치: '+target); log(read(target)); return; }
-  const bundled=path.join(PACKAGE_ROOT,'docs','AX_SKILL_LIBRARY_GUIDE.md');
-  if(exists(bundled)){ log(read(bundled)); return; }
-  warn('AX 가이드 파일을 찾지 못했습니다. init을 먼저 실행하세요.');
-}
-function libraryCommand(args,flags){
-  const sub=args[1]||'help';
-  if(sub==='help'){ log(['Leerness Skill Library Commands','','  leerness library guide [project-path]','  leerness library status <path>','  leerness library validate <path> [--strict-ai]','  leerness library verify <path> --ai --reviewer leerness-ai','  leerness library build <path> [--out ./dist] [--package leerness-skill-name]','  leerness library update <path> --from <validated-new-skill-path> [--version 1.2.0]','  leerness library merge <source-library> [--path <project>]','  leerness library migrate <path> [--version 1.0.0]','  leerness library publish <built-library> --target npm|git [--execute] [--repo https://github.com/gugu9999gu/leerness]','','업로드는 AI 검증 메타데이터가 있는 스킬만 가능하며 기본 publish는 dry-run입니다. --execute 시 npm/git 토큰이 필요합니다.',''].join('\n')); return; }
-  if(sub==='guide') return libraryGuide(args[2]||flags.path||process.cwd(),flags);
-  if(sub==='status') return libraryStatus(args[2]||process.cwd());
-  if(sub==='validate') return validateSkillLibrary(args[2]||process.cwd(),{silent:false,strictAi:Boolean(flags['strict-ai']||flags.strictAi)});
-  if(sub==='verify') return verifySkillLibrary(args[2]||process.cwd(),flags);
-  if(sub==='build') return buildSkillLibrary(args[2]||process.cwd(),flags);
-  if(sub==='update') return updateSkillLibrary(args[2]||process.cwd(),flags);
-  if(sub==='merge') return mergeSkillLibrary(flags.path||process.cwd(),args[2]||flags.source,flags);
-  if(sub==='migrate') return migrateSkillLibrary(args[2]||process.cwd(),flags);
-  if(sub==='publish'||sub==='upload') return publishSkillLibrary(args[2]||process.cwd(),flags);
-  fail('알 수 없는 library 명령: '+sub); process.exitCode=1;
-}
-
 function skillDisplayName(meta){ return meta.displayNameKo || meta.titleKo || meta.title || meta.name; }
-function skillCapabilities(meta){ return Array.isArray(meta.capabilities) ? meta.capabilities : []; }
-function renderSkillMeta(meta){
-  log('- '+meta.name+'@'+meta.version+' · '+skillDisplayName(meta));
-  if(meta.title && meta.title!==skillDisplayName(meta)) log('  English: '+meta.title);
-  if(meta.categoryKo || meta.category) log('  분류: '+(meta.categoryKo||meta.category)+' / '+(meta.category||''));
-  if(meta.description) log('  설명: '+meta.description);
-  const caps=skillCapabilities(meta);
-  if(caps.length){ log('  가능한 작업:'); caps.forEach(x=>log('    - '+x)); }
-  log('  업데이트: '+(meta.lastUpdated||'unknown')+' · 검증: '+verificationLabel(meta));
-  if((meta.requiresEnv||[]).length) log('  필요한 환경변수: '+meta.requiresEnv.join(', '));
-}
+function verificationLabel(meta){ const v=(meta||{}).verification||{}; return v.status ? (v.status+(v.verifiedAt?' '+String(v.verifiedAt).slice(0,10):'')) : 'unknown'; }
+function renderSkillMeta(meta){ log('- '+meta.name+'@'+meta.version+' · '+skillDisplayName(meta)); if(meta.categoryKo||meta.category) log('  분류: '+(meta.categoryKo||meta.category)); if(meta.description) log('  설명: '+meta.description); if(Array.isArray(meta.capabilities)&&meta.capabilities.length){ log('  가능한 작업:'); meta.capabilities.forEach(x=>log('    - '+x)); } log('  업데이트: '+(meta.lastUpdated||'unknown')+' · 검증: '+verificationLabel(meta)); if((meta.requiresEnv||[]).length) log('  필요한 환경변수: '+meta.requiresEnv.join(', ')); }
+function skillCommand(args,flags){ const sub=args[1]||'list'; const root=path.resolve(flags.path||process.cwd()); if(sub==='list'){ banner(); log('사용 가능한 스킬 라이브러리'); for(const p of listSkillPacks()) renderSkillMeta(p); return; } if(sub==='info'||sub==='show'){ const name=args[2]; if(!name) return fail('스킬 이름이 필요합니다.'); const meta=getSkillMeta(name); if(!meta) return fail('알 수 없는 스킬: '+name); banner(); renderSkillMeta(meta); const rp=path.join(PACKS_DIR,name,'README.md'); if(exists(rp)){ log('\n--- README ---\n'); log(read(rp)); } return; } const name=args[2]; if(!name) return fail('스킬 이름이 필요합니다.'); if(sub==='add'||sub==='install'||sub==='update') return installSkill(root,name,Boolean(flags['dry-run'])); if(sub==='remove'||sub==='rm') return removeSkill(root,name); if(sub==='learn') return learnSkillLibrary(root,{...flags,name}); fail('알 수 없는 skill 명령: '+sub); }
 
-function skillCommand(args,flags){
-  const sub=args[1]||'list'; const root=path.resolve(flags.path||process.cwd());
-  if(sub==='learn'){ flags.name=args[2]||flags.name; return learnSkillLibrary(root,flags); }
-  if(sub==='library') return libraryCommand(['library'].concat(args.slice(2)),flags);
-  if(sub==='list'){
-    banner(); log('사용 가능한 스킬 라이브러리');
-    log('한글명, 가능한 작업, 최종 업데이트일, AI 검증 상태를 함께 표시합니다.');
-    for(const p of listSkillPacks()) renderSkillMeta(p);
-    log('');
-    info('상세 보기: leerness skill info <name>');
-    info('설치 예시: leerness skill add ai-verified-skill-publisher');
-    return;
-  }
-  if(sub==='info'||sub==='show'){
-    const name=args[2]; if(!name){ fail('스킬 이름이 필요합니다. 예: leerness skill info commerce-api'); return; }
-    const meta=getSkillMeta(name); if(!meta){ fail('알 수 없는 스킬 라이브러리: '+name); info('사용 가능 목록: '+listSkillPacks().map(x=>x.name).join(', ')); return; }
-    banner(); renderSkillMeta(meta);
-    const packRoot=path.join(PACKS_DIR,name);
-    const guide=path.join(packRoot,'README.md');
-    if(exists(guide)){ log('\n--- README ---\n'); log(read(guide)); }
-    return;
-  }
-  const name=args[2]; if(!name){ fail('스킬 이름이 필요합니다. 예: leerness skill add commerce-api'); return; }
-  if(sub==='add'||sub==='install') return installSkill(root,name,Boolean(flags['dry-run']));
-  if(sub==='remove'||sub==='rm') return removeSkill(root,name);
-  if(sub==='update') return installSkill(root,name,false);
-  fail('알 수 없는 skill 명령: '+sub);
-}
-function status(root){
-  root=path.resolve(root||process.cwd()); const vf=path.join(root,'.harness/HARNESS_VERSION'); const version=exists(vf)?read(vf).trim():'not installed'; const missing=Object.keys(coreFiles).filter(f=>!exists(path.join(root,f))); const lp=path.join(root,'.harness/skills-lock.json'); const lock=exists(lp)?parseJsonSafe(read(lp),{installedSkills:{}}):{installedSkills:{}};
-  banner(); log('대상: '+root); log('버전: '+version); log('파일: '+(Object.keys(coreFiles).length-missing.length)+'/'+Object.keys(coreFiles).length); if(missing.length){ warn('누락 파일'); missing.forEach(x=>log('  - '+x)); } else ok('필수 파일 모두 존재');
-  const names=Object.keys(lock.installedSkills||{}); log('설치 스킬: '+(names.length?names.join(', '):'없음'));
-  for(const n of names){ const m=lock.installedSkills[n]; log('  - '+n+'@'+(m.version||'?')+' · updated '+(m.lastUpdated||'unknown')+' · '+(m.verificationStatus||'unknown')); }
-}
-function help(){ log(['Leerness v'+VERSION,'','Usage:','  leerness init [path] [--yes] [--skills office,commerce-api|recommended|all]','  leerness migrate [path] [--dry-run]','  leerness status [path]','  leerness verify [path]','','Skills:','  leerness skill list','  leerness skill add <name> [--path <project>]','  leerness skill remove <name> [--path <project>]','  leerness skill update <name> [--path <project>]','  leerness skill learn <name> --from <validated-skill-path> [--out <library-path>]','','Skill library lifecycle:','  leerness library guide [path]','  leerness library status <path>','  leerness library validate <path> [--strict-ai]','  leerness library verify <path> --ai --reviewer leerness-ai','  leerness library build <path> [--out ./dist] [--package leerness-skill-name]','  leerness library update <path> --from <validated-new-skill-path> [--version 1.2.0]','  leerness library merge <source-library> [--path <project>]','  leerness library migrate <path> [--version 1.0.0]','  leerness library publish <built-library> --target npm|git [--execute] [--repo https://github.com/gugu9999gu/leerness]','  leerness --version','','Examples:','  npx leerness init --skills recommended','  npx leerness skill learn coupang-order-sync --from .harness/skills/commerce-api/order-sync.md','  npx leerness library verify .harness/library/coupang-order-sync --ai --reviewer leerness-ai','  npx leerness library build .harness/library/coupang-order-sync','  npx leerness library publish .harness/library/coupang-order-sync/dist/coupang-order-sync --target npm --execute',''].join('\n')); }
+function skillLibraryFiles(dir){ const out=[]; if(!exists(dir)) return out; function walk(p){ const st=fs.statSync(p); if(st.isDirectory()){ const b=path.basename(p); if(['node_modules','.git','dist'].includes(b)) return; for(const n of fs.readdirSync(p)) walk(path.join(p,n)); } else if(st.isFile()) out.push(p); } walk(dir); return out; }
+function inferEnvNames(body){ const set=new Set(); const re=/\b[A-Z][A-Z0-9_]{3,}\b/g; let m; while((m=re.exec(body))){ const v=m[0]; if(/(KEY|TOKEN|SECRET|PASSWORD|CLIENT|VENDOR|ID|URL|HOST|BUCKET|PROJECT)/.test(v)) set.add(v); } return Array.from(set).sort(); }
+function readSkillLibraryMeta(dir){ for(const cnd of [path.join(dir,'skill-library.json'),path.join(dir,'skill.json'),path.join(dir,'package.json')]){ if(!exists(cnd)) continue; const data=parseJsonSafe(read(cnd),null); if(!data) continue; if(path.basename(cnd)==='package.json') return {name:data.harnessSkill?.name||data.name,version:data.version||'0.1.0',title:data.harnessSkill?.title||data.description||data.name,description:data.description||'',requiresEnv:data.harnessSkill?.requiresEnv||[],verification:data.harnessSkill?.verification,lastUpdated:data.harnessSkill?.lastUpdated,lastUpdatedAt:data.harnessSkill?.lastUpdatedAt}; return data; } return null; }
+function validateSkillLibrary(dir,opts={}){ dir=path.resolve(dir); let failures=0; const meta=readSkillLibraryMeta(dir); if(!meta||!meta.name){ failures++; fail('skill-library.json 또는 skill.json에 name이 필요합니다.'); } const sd=path.join(dir,'skills'); if(!exists(sd)||!skillLibraryFiles(sd).some(f=>f.endsWith('.md'))){ failures++; fail('skills/*.md 파일이 필요합니다.'); } const findings=scanSensitivePath(dir); if(findings.length){ failures+=findings.length; fail('민감정보 의심 패턴 감지.'); findings.slice(0,10).forEach(f=>warn(rel(dir,f.file)+' · '+f.type)); } if(opts.strictAi){ const v=(meta||{}).verification||{}; if(!(v.status==='passed'&&/ai/i.test(String(v.method||''))&&v.verifiedAt)){ failures++; fail('AI 검증 메타데이터가 필요합니다.'); } } if(!opts.silent){ if(failures) fail('검증 실패: '+failures); else ok('스킬 라이브러리 검증 완료: '+meta.name); } return {ok:failures===0,meta,findings}; }
+function learnSkillLibrary(root,flags){ root=path.resolve(root||process.cwd()); const from=path.resolve(flags.from||path.join(root,'.harness/skills')); const name=slug(flags.name||path.basename(from)); const outRoot=path.resolve(flags.out||path.join(root,'.harness/library',name)); if(!exists(from)){ fail('학습할 스킬 경로가 없습니다: '+from); process.exitCode=1; return; } const files=skillLibraryFiles(from).filter(f=>isTextFile(f)&&!f.includes(path.sep+'archive'+path.sep)); fs.mkdirSync(path.join(outRoot,'skills'),{recursive:true}); const envs=new Set(), copied=[]; for(const f of files){ const body=read(f); inferEnvNames(body).forEach(e=>envs.add(e)); const dest='skills/'+path.basename(f).replace(/[^a-zA-Z0-9._-]/g,'-'); write(path.join(outRoot,dest),body); copied.push(dest); } const meta={name,version:String(flags.version||'0.1.0'),title:flags.title||name,description:flags.description||'Learned Leerness skill library.',category:flags.category||'custom',requiresEnv:Array.from(envs).sort(),files:copied,lastUpdated:today(),lastUpdatedAt:now(),verification:{status:'needs-review',method:'none',verifiedBy:null,verifiedAt:null,checks:[]}}; write(path.join(outRoot,'skill-library.json'),JSON.stringify(meta,null,2)+'\n'); write(path.join(outRoot,'README.md'),'# '+meta.title+'\n\n'+meta.description+'\n'); ok('스킬 라이브러리 학습 완료: '+outRoot); info('다음: leerness library verify '+outRoot+' --ai --reviewer leerness-ai'); }
+function verifySkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); const res=validateSkillLibrary(dir,{silent:false}); if(!res.ok){ process.exitCode=1; return; } const meta=res.meta; meta.verification={status:'passed',method:'ai-assisted-review',verifiedBy:String(flags.reviewer||flags.by||'leerness-ai'),verifiedAt:now(),checks:['structure','secret-scan','env-reference-only','metadata']}; meta.lastUpdated=today(); meta.lastUpdatedAt=now(); write(path.join(dir,'skill-library.json'),JSON.stringify(meta,null,2)+'\n'); write(path.join(dir,'ai-verification.json'),JSON.stringify(meta.verification,null,2)+'\n'); ok('AI 검증 완료: '+meta.name); }
+function buildSkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); const res=validateSkillLibrary(dir,{silent:false,strictAi:Boolean(flags['strict-ai'])}); if(!res.ok){ process.exitCode=1; return; } const meta=res.meta; const out=path.resolve(flags.out||path.join(dir,'dist')); const libRoot=path.join(out,slug(meta.name)); if(exists(libRoot)) fs.rmSync(libRoot,{recursive:true,force:true}); fs.mkdirSync(libRoot,{recursive:true}); for(const item of ['README.md','skill-library.json','skill.json','ai-verification.json','env.example','skills','examples','migrations']){ const src=path.join(dir,item); if(exists(src)) copyRecursive(src,path.join(libRoot,item)); } const pkg={name:flags.package||('leerness-skill-'+slug(meta.name)),version:meta.version||'0.1.0',description:meta.description||meta.title||meta.name,type:'commonjs',files:['skill-library.json','ai-verification.json','README.md','env.example','skills/','examples/','migrations/'],keywords:['leerness','harness-skill','ai-skill-library'],license:'MIT',publishConfig:{access:'public'},harnessSkill:meta}; write(path.join(libRoot,'package.json'),JSON.stringify(pkg,null,2)+'\n'); ok('스킬 라이브러리 빌드 완료: '+libRoot); }
+function resolvePublishToken(target,flags){ if(flags['token-env']&&process.env[flags['token-env']]) return process.env[flags['token-env']]; const names=target==='npm'?['LEERNESS_NPM_TOKEN','NPM_TOKEN','NODE_AUTH_TOKEN']:['LEERNESS_GIT_TOKEN','LEERNESS_GITHUB_TOKEN','GITHUB_TOKEN','GH_TOKEN']; for(const n of names) if(process.env[n]) return process.env[n]; return null; }
+function publishSkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); const target=String(flags.target||'npm'); const execute=Boolean(flags.execute); const res=validateSkillLibrary(dir,{silent:false,strictAi:true}); if(!res.ok){ process.exitCode=1; return; } if(!execute){ info('[dry-run] '+target+' publish target: '+dir); info('실제 업로드는 --execute가 필요합니다.'); return; } const token=resolvePublishToken(target,flags); if(!token && flags['no-prompt']){ fail('업로드 토큰이 없습니다. 환경변수 또는 --token-env를 설정하세요.'); process.exitCode=1; return; } if(target==='npm'){ const env={...process.env}; if(token) env.NODE_AUTH_TOKEN=token; const r=childProcess.spawnSync('npm',['publish','--access','public'],{cwd:dir,stdio:'inherit',env,shell:process.platform==='win32'}); process.exitCode=r.status||0; return; } if(target==='git'){ const repo=flags.repo||DEFAULT_GIT_REPOSITORY; info('Git target: '+repo); const run=(cmd,args)=>{ const r=childProcess.spawnSync(cmd,args,{cwd:dir,stdio:'inherit',shell:process.platform==='win32'}); if(r.status) process.exit(r.status); }; if(!exists(path.join(dir,'.git'))) run('git',['init']); try{ run('git',['remote','add','origin',repo]); }catch{} run('git',['add','.']); run('git',['commit','-m',flags.message||('Publish skill library '+res.meta.name)]); run('git',['branch','-M',flags.branch||'main']); run('git',['push','-u','origin',flags.branch||'main']); return; } fail('지원하지 않는 target: '+target); }
+function libraryGuide(root){ root=path.resolve(root||process.cwd()); const p=path.join(root,'.harness/AX_SKILL_LIBRARY_GUIDE.md'); if(exists(p)) log(read(p)); else log(coreFiles['.harness/AX_SKILL_LIBRARY_GUIDE.md']); }
+function libraryCommand(args,flags){ const sub=args[1]||'help'; if(sub==='guide') return libraryGuide(args[2]||flags.path||process.cwd()); if(sub==='validate') return validateSkillLibrary(args[2]||process.cwd(),{silent:false,strictAi:Boolean(flags['strict-ai'])}); if(sub==='verify') return verifySkillLibrary(args[2]||process.cwd(),flags); if(sub==='build') return buildSkillLibrary(args[2]||process.cwd(),flags); if(sub==='publish'||sub==='upload') return publishSkillLibrary(args[2]||process.cwd(),flags); if(sub==='status'){ const meta=readSkillLibraryMeta(args[2]||process.cwd()); if(!meta) return fail('메타데이터 없음'); renderSkillMeta(meta); return; } fail('알 수 없는 library 명령: '+sub); }
 
-async function main(){ const parsed=parseArgs(process.argv.slice(2)); const args=parsed.positionals; const flags=parsed.flags; if(flags.version||flags.v){ log(VERSION); return; } if(flags.help||flags.h){ help(); return; } const cmd=args[0]||'init'; if(cmd==='init') return init(args[1]||process.cwd(),flags); if(cmd==='migrate') return migrate(args[1]||process.cwd(),flags); if(cmd==='status') return status(args[1]||process.cwd()); if(cmd==='verify') return verify(args[1]||process.cwd()); if(cmd==='skill') return skillCommand(args,flags); if(cmd==='library') return libraryCommand(args,flags); help(); process.exitCode=1; }
+const routeData={feature:{read:['project-brief.md','current-state.md','architecture.md','context-map.md','feature-contracts.md'],update:['current-state.md','task-log.md','session-handoff.md','feature-contracts.md']},ui:{read:['design-system.md','feature-contracts.md','context-map.md'],update:['design-system.md','feature-contracts.md','current-state.md','task-log.md']},debugging:{read:['current-state.md','task-log.md','feature-contracts.md','testing-strategy.md'],update:['task-log.md','current-state.md','session-handoff.md']},refactor:{read:['architecture.md','decisions.md','guardrails.md'],update:['architecture.md','decisions.md','task-log.md']},release:{read:['release-checklist.md','testing-strategy.md','current-state.md','decisions.md','secret-policy.md'],update:['release-checklist.md','task-log.md','current-state.md','session-handoff.md']},migration:{read:['AX_MIGRATION_GUIDE.md','context-routing.md','writeback-policy.md'],update:['Only missing files by default','Use --force only when requested']},'new-install':{read:['AX_NEW_PROJECT_GUIDE.md','actual project files'],update:['project-brief.md','architecture.md','context-map.md','design-system.md','feature-contracts.md','release-checklist.md']},'skill-library':{read:['AX_SKILL_LIBRARY_GUIDE.md','skill-index.md','secret-policy.md'],update:['skill-index.md','skills-lock.json','task-log.md']},documentation:{read:['writeback-policy.md','context-routing.md'],update:['specific memory file','task-log.md','session-handoff.md']}};
+function routeCommand(task){ banner(); if(!task||task==='list'){ log('사용 가능한 task type: '+Object.keys(routeData).join(', ')); return; } const r=routeData[task]; if(!r){ fail('알 수 없는 task type: '+task); process.exitCode=1; return; } log('Task route: '+task); log('\nRead before work:'); r.read.forEach(x=>log('  - .harness/'+x)); log('\nUpdate after work:'); r.update.forEach(x=>log('  - .harness/'+x)); }
+function help(){ log(['Leerness v'+VERSION,'','Usage:','  leerness init [path] [--yes] [--skills recommended|all|office,commerce-api] [--force]','  leerness migrate [path] [--dry-run] [--force]','  leerness status [path]','  leerness verify [path]','  leerness route <feature|ui|debugging|refactor|release|migration|new-install|skill-library|documentation>','','Skills:','  leerness skill list','  leerness skill info <name>','  leerness skill add <name> [--path <project>]','  leerness skill remove <name> [--path <project>]','  leerness skill learn <name> --from <validated-skill-path>','','Skill library:','  leerness library guide [path]','  leerness library validate <path> [--strict-ai]','  leerness library verify <path> --ai --reviewer leerness-ai','  leerness library build <path> [--package leerness-skill-name]','  leerness library publish <built-library> --target npm|git [--execute]',''].join('\n')); }
+async function main(){ const parsed=parseArgs(process.argv.slice(2)); const args=parsed.positionals, flags=parsed.flags; if(flags.version||flags.v){ log(VERSION); return; } if(flags.help||flags.h){ help(); return; } const cmd=args[0]||'init'; if(cmd==='init') return init(args[1]||process.cwd(),flags); if(cmd==='migrate') return migrate(args[1]||process.cwd(),flags); if(cmd==='status') return status(args[1]||process.cwd()); if(cmd==='verify') return verify(args[1]||process.cwd()); if(cmd==='route') return routeCommand(args[1]||'list'); if(cmd==='skill') return skillCommand(args,flags); if(cmd==='library') return libraryCommand(args,flags); help(); process.exitCode=1; }
 main().catch(err=>{ fail(err.stack||err.message); process.exit(1); });

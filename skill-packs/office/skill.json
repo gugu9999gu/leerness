@@ -1,37 +1,28 @@
 {
   "name": "office",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "title": "Microsoft Office Automation Skill Library",
-  "category": "productivity",
-  "description": "Excel, Word, PowerPoint 문서 자동화와 템플릿 기반 산출물 생성을 위한 스킬 모음입니다.",
-  "compatibleHarness": ">=1.1.0",
-  "sensitiveDataPolicy": "env-reference-only",
+  "displayNameKo": "마이크로소프트 오피스 자동화 스킬 라이브러리",
+  "category": "office",
+  "categoryKo": "문서/오피스 자동화",
+  "description": "Word, Excel, PowerPoint 문서 생성·편집·검증 작업을 위한 스킬입니다.",
+  "capabilities": [
+    "DOCX 템플릿 기반 문서 생성",
+    "PPTX 구조화 및 발표자료 생성",
+    "XLSX 데이터 정리와 서식 유지",
+    "문서 산출물 검증 체크리스트 적용"
+  ],
   "requiresEnv": [],
   "files": [
-    "skills/excel-automation.md",
-    "skills/powerpoint-generation.md",
-    "skills/word-template.md"
+    "README.md"
   ],
-  "lastUpdated": "2026-04-28",
-  "lastUpdatedAt": "2026-04-28T00:00:00.000Z",
+  "source": "bundled",
+  "lastUpdated": "2026-04-29",
+  "lastUpdatedAt": "2026-04-29T00:00:00.000Z",
   "verification": {
     "status": "passed",
-    "method": "bundled-ai-review",
+    "method": "ai-assisted-review",
     "verifiedBy": "leerness-ai",
-    "verifiedAt": "2026-04-28T00:00:00.000Z",
-    "checks": [
-      "structure",
-      "secret-scan",
-      "env-reference-only",
-      "reusability"
-    ]
-  },
-  "displayNameKo": "오피스 자동화 스킬 라이브러리",
-  "categoryKo": "생산성/문서 자동화",
-  "capabilities": [
-    "엑셀 데이터 정리·서식·검증 자동화",
-    "워드/문서 템플릿 기반 산출물 생성",
-    "파워포인트 발표자료 구조화·생성",
-    "문서 산출물 검증 체크리스트 작성"
-  ]
+    "verifiedAt": "2026-04-29T00:00:00.000Z"
+  }
 }

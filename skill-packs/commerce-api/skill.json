@@ -1,48 +1,32 @@
 {
   "name": "commerce-api",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "title": "Commerce API Integration Skill Library",
-  "category": "commerce",
-  "description": "쿠팡, 롯데온, 스마트스토어 등 커머스 API 연동 패턴과 보안 규칙을 담은 스킬 모음입니다.",
-  "compatibleHarness": ">=1.1.0",
-  "sensitiveDataPolicy": "env-reference-only",
+  "displayNameKo": "커머스 API 연동 스킬 라이브러리",
+  "category": "commerce-api",
+  "categoryKo": "커머스/API 연동",
+  "description": "쿠팡·롯데온·스마트스토어 등 커머스 API 연동 패턴을 위한 스킬입니다.",
+  "capabilities": [
+    "API 인증 구조 설계",
+    "상품/주문/매출 동기화 플로우 구현",
+    "환경변수 기반 민감정보 분리",
+    "오류·재시도·레이트리밋 대응"
+  ],
   "requiresEnv": [
-    "COMMERCE_API_BASE_URL",
-    "COUPANG_ACCESS_KEY",
-    "COUPANG_SECRET_KEY",
-    "COUPANG_VENDOR_ID",
-    "LOTTEON_CLIENT_ID",
-    "LOTTEON_CLIENT_SECRET",
-    "SMARTSTORE_CLIENT_ID",
-    "SMARTSTORE_CLIENT_SECRET"
+    "COMMERCE_CLIENT_ID",
+    "COMMERCE_CLIENT_SECRET",
+    "COMMERCE_VENDOR_ID"
   ],
   "files": [
-    "skills/common-auth.md",
-    "skills/coupang.md",
-    "skills/lotteon.md",
-    "skills/smartstore.md",
-    "skills/order-sync.md"
+    "README.md"
   ],
-  "lastUpdated": "2026-04-28",
-  "lastUpdatedAt": "2026-04-28T00:00:00.000Z",
+  "source": "bundled",
+  "lastUpdated": "2026-04-29",
+  "lastUpdatedAt": "2026-04-29T00:00:00.000Z",
   "verification": {
     "status": "passed",
-    "method": "bundled-ai-review",
+    "method": "ai-assisted-review",
     "verifiedBy": "leerness-ai",
-    "verifiedAt": "2026-04-28T00:00:00.000Z",
-    "checks": [
-      "structure",
-      "secret-scan",
-      "env-reference-only",
-      "reusability"
-    ]
-  },
-  "displayNameKo": "커머스 API 연동 스킬 라이브러리",
-  "categoryKo": "커머스/외부 API",
-  "capabilities": [
-    "쿠팡·롯데온·스마트스토어 API 인증 구조 설계",
-    "주문/상품/매출 동기화 플로우 구현",
-    "환경변수 기반 민감정보 분리",
-    "API 오류·재시도·레이트리밋 대응"
-  ]
+    "verifiedAt": "2026-04-29T00:00:00.000Z"
+  }
 }

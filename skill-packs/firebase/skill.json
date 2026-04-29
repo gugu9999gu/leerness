@@ -1,39 +1,31 @@
 {
   "name": "firebase",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "title": "Firebase and Cloud Functions Skill Library",
-  "category": "backend",
-  "description": "Firebase Functions, Firestore, Hosting, Cloud Run 연동 개발을 위한 스킬입니다.",
-  "compatibleHarness": ">=1.1.0",
-  "sensitiveDataPolicy": "env-reference-only",
+  "displayNameKo": "Firebase/Cloud Functions 스킬 라이브러리",
+  "category": "cloud",
+  "categoryKo": "Firebase/클라우드",
+  "description": "Firebase Functions, Firestore, Cloud Run 배포·디버깅을 위한 스킬입니다.",
+  "capabilities": [
+    "Functions 배포 오류 점검",
+    "Firestore rules/indexes 검토",
+    "Cloud Run 권한/IAM 체크",
+    "환경변수와 secret 분리"
+  ],
   "requiresEnv": [
+    "GOOGLE_APPLICATION_CREDENTIALS",
     "FIREBASE_PROJECT_ID"
   ],
   "files": [
-    "skills/functions-deploy.md",
-    "skills/firestore-indexes.md",
-    "skills/secrets.md"
+    "README.md"
   ],
-  "lastUpdated": "2026-04-28",
-  "lastUpdatedAt": "2026-04-28T00:00:00.000Z",
+  "source": "bundled",
+  "lastUpdated": "2026-04-29",
+  "lastUpdatedAt": "2026-04-29T00:00:00.000Z",
   "verification": {
     "status": "passed",
-    "method": "bundled-ai-review",
+    "method": "ai-assisted-review",
     "verifiedBy": "leerness-ai",
-    "verifiedAt": "2026-04-28T00:00:00.000Z",
-    "checks": [
-      "structure",
-      "secret-scan",
-      "env-reference-only",
-      "reusability"
-    ]
-  },
-  "displayNameKo": "Firebase·Cloud Functions 스킬 라이브러리",
-  "categoryKo": "백엔드/클라우드",
-  "capabilities": [
-    "Firebase Functions 배포 오류 진단",
-    "Firestore 인덱스·규칙 점검",
-    "Secret Manager/환경변수 분리",
-    "Cloud Run/Hosting 연동 검증"
-  ]
+    "verifiedAt": "2026-04-29T00:00:00.000Z"
+  }
 }
