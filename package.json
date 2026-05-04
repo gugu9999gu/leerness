@@ -1,7 +1,7 @@
 {
   "name": "leerness",
-  "version": "1.5.0",
-  "description": "Leerness: plan.md 기반 계획 수립/수정, progress-tracker 진행률 추적, guideline 참조 정책, 세션 인수인계와 AX 라우팅을 지원하는 AI 개발 하네스.",
+  "version": "1.6.0",
+  "description": "Leerness: AI 에이전트가 npm 최신 버전 확인, 안전 마이그레이션 판단, 계획/진행률/세션 인수인계를 수행하도록 돕는 AX 최적화 개발 하네스.",
   "keywords": [
     "leerness",
     "ai",
@@ -43,7 +43,12 @@
     "guideline-policy",
     "planning-router",
     "project-roadmap",
-    "scope-drop"
+    "scope-drop",
+    "version-maintenance",
+    "npm-view",
+    "safe-migration",
+    "self-check",
+    "harness-upgrade"
   ],
   "bin": {
     "leerness": "./bin/harness.js"
@@ -57,7 +62,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node ./bin/harness.js --help && node ./bin/harness.js init --yes --language ko --skills office,commerce-api,ai-verified-skill-publisher ./tmp-harness-test && node ./bin/harness.js plan add \"테스트 계획 항목\" --status planned --path ./tmp-harness-test && node ./bin/harness.js plan progress ./tmp-harness-test && node ./bin/harness.js plan drop \"테스트 계획 항목\" --reason \"테스트 제외\" --path ./tmp-harness-test && node ./bin/harness.js plan sync ./tmp-harness-test && node ./bin/harness.js task add \"테스트 예정 작업\" --status planned --path ./tmp-harness-test && node ./bin/harness.js route planning && node ./bin/harness.js session close ./tmp-harness-test && node ./bin/harness.js debug ./tmp-harness-test && node ./bin/harness.js verify ./tmp-harness-test",
+    "test": "node ./bin/harness.js --help && node ./bin/harness.js init --yes --language ko --skills office,commerce-api,ai-verified-skill-publisher ./tmp-harness-test && node ./bin/harness.js plan add \"테스트 계획 항목\" --status planned --path ./tmp-harness-test && node ./bin/harness.js plan progress ./tmp-harness-test && node ./bin/harness.js task add \"테스트 예정 작업\" --status planned --path ./tmp-harness-test && node ./bin/harness.js route harness-maintenance && node ./bin/harness.js self report ./tmp-harness-test && node ./bin/harness.js session close ./tmp-harness-test && node ./bin/harness.js debug ./tmp-harness-test && node ./bin/harness.js verify ./tmp-harness-test",
     "prepack": "node ./bin/harness.js --version"
   },
   "repository": {

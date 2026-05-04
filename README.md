@@ -152,6 +152,33 @@ AI는 의미 있는 세션이 끝날 때 아래를 정리해야 합니다.
 - 추가로 진행하면 좋은 추천 방향
 - 다음 세션에서 바로 수행할 단 하나의 정확한 작업
 
+## Leerness 최신 버전 유지
+
+AI 에이전트가 작업을 시작하기 전 또는 마이그레이션/배포/릴리즈 작업을 수행하기 전, 현재 프로젝트의 Leerness 버전과 npm registry의 최신 버전을 비교할 수 있습니다.
+
+```bash
+leerness self check .
+```
+
+이 명령은 내부적으로 아래 기준을 확인합니다.
+
+```bash
+npm view leerness version
+leerness --version
+cat .harness/HARNESS_VERSION
+```
+
+최신 버전이 감지되면 바로 덮어쓰지 않고 안전한 마이그레이션 순서를 안내합니다.
+
+```bash
+npx --yes leerness@<latest> migrate . --dry-run
+npx --yes leerness@<latest> migrate .
+npx --yes leerness@<latest> verify .
+npx --yes leerness@<latest> debug .
+```
+
+관련 방향지시는 `.harness/leerness-maintenance.md`에 생성됩니다. npm 조회 실패나 고정 버전 사용도 작업 로그와 세션 인수인계에 기록하도록 설계했습니다.
+
 ## 라이선스
 
 MIT
