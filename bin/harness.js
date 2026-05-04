@@ -6,7 +6,7 @@ const path = require('path');
 const readline = require('readline');
 const childProcess = require('child_process');
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const MARK = '<!-- leerness:managed -->';
 const MIGRATED = '<!-- leerness:migrated-legacy -->';
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
@@ -27,7 +27,7 @@ function write(p,s){ fs.mkdirSync(path.dirname(p),{recursive:true}); fs.writeFil
 function rel(root,p){ return path.relative(root,p).replace(/\\/g,'/') || '.'; }
 function parseJsonSafe(s,fallback){ try { return JSON.parse(s); } catch { return fallback; } }
 function isTextFile(p){ return /\.(md|mdc|txt|json|js|ts|tsx|jsx|yml|yaml|env|gitignore)$/i.test(p) || !path.extname(p); }
-function banner(){ log(''); log(c.bold+c.magenta+'Leerness v'+VERSION+c.reset); log(c.dim+'language policy · context routing · task tracking · debug'+c.reset); log(''); }
+function banner(){ log(''); log(c.bold+c.magenta+'Leerness v'+VERSION+c.reset); log(c.dim+'plan orchestration · progress tracking · context routing · debug'+c.reset); log(''); }
 function installGuide(){
   log(c.bold+'설치/마이그레이션 안내'+c.reset);
   log('  - 기존 파일은 먼저 .harness/archive/ 에 백업합니다.');
@@ -61,6 +61,11 @@ function detectLanguage(root){
   return 'en';
 }
 function readConfiguredLanguage(root){
+
+  const pf=path.join(root,'.harness/plan.md');
+  if(exists(pf)){ const b=read(pf); if(b.includes('## Milestones')) ok('plan.md milestones 확인'); else { warnings++; warn('plan.md에 Milestones 섹션이 없습니다.'); } }
+  const gf=path.join(root,'.harness/guideline.md');
+  if(exists(gf)){ const b=read(gf); if(b.includes('plan.md')&&b.includes('progress-tracker.md')) ok('guideline.md가 plan/progress를 참조합니다.'); else { failures++; fail('guideline.md가 plan.md/progress-tracker.md를 참조하지 않습니다.'); } }
   const mf=path.join(root,'.harness/manifest.json');
   if(exists(mf)){ const j=parseJsonSafe(read(mf),{}); if(j.language) return normalizeLanguage(j.language); }
   const lp=path.join(root,'.harness/LANGUAGE');
@@ -148,15 +153,18 @@ Agent = Model + Leerness Harness.
 Before editing, route the task. Read .harness/language-policy.md, .harness/context-routing.md, and use \`leerness route <task-type>\` when the task type is unclear.
 
 ## Universal Read Order
-1. .harness/project-brief.md
-2. .harness/current-state.md
-3. .harness/language-policy.md
-4. .harness/context-routing.md
-5. .harness/writeback-policy.md
-6. .harness/task-type-map.md
-7. .harness/context-map.md
-8. .harness/guardrails.md
-9. .harness/skills-lock.json
+1. .harness/plan.md
+2. .harness/progress-tracker.md
+3. .harness/project-brief.md
+4. .harness/current-state.md
+5. .harness/language-policy.md
+6. .harness/context-routing.md
+7. .harness/writeback-policy.md
+8. .harness/task-type-map.md
+9. .harness/context-map.md
+10. .harness/guideline.md
+11. .harness/guardrails.md
+12. .harness/skills-lock.json
 
 ## Language Rule
 - Before writing or updating any harness/skill/session document, read .harness/language-policy.md.
@@ -176,6 +184,8 @@ Before editing, route the task. Read .harness/language-policy.md, .harness/conte
 
 ## Writeback Rules
 - Always update current-state.md, task-log.md, and session-handoff.md after meaningful work.
+- Update plan.md and progress-tracker.md when user scope, milestones, task status, exclusions, or planned work changes.
+- Update guideline.md when execution standards, quality gates, or plan-following rules change.
 - Update decisions.md when a structural, technology, API, schema, deployment, or irreversible decision is made.
 - Update feature-contracts.md when input/output/state/error behavior changes.
 - Update design-system.md when UI rules, components, layout, spacing, or states change.
@@ -187,6 +197,19 @@ Before editing, route the task. Read .harness/language-policy.md, .harness/conte
 - Never overwrite existing project memory files unless the user explicitly requests --force.
 - Preserve .env.example and .gitignore; append missing Leerness entries only.
 - Keep secrets, tokens, cookies, credentials, and customer private data out of harness files.
+
+
+## Plan Rule
+- Use .harness/plan.md as the source of truth for the user's goal, project scope, milestones, included work, excluded work, and plan changes.
+- Before starting feature/release/refactor/migration work, check whether the request maps to an existing plan item.
+- If the user adds scope, update plan.md and progress-tracker.md.
+- If the user excludes scope, mark it under Dropped / Out of Scope instead of deleting history.
+- If the project looks new or lacks a usable plan, do not start broad implementation blindly. First create or ask for enough information to create .harness/plan.md.
+
+## Guideline Rule
+- Use .harness/guideline.md for execution standards.
+- guideline.md must reference plan.md and progress-tracker.md, but should not become the primary progress database.
+- Progress is tracked in plan.md milestones and progress-tracker.md task rows.
 
 ## Progress Tracker Rule
 - Track user-requested work in .harness/progress-tracker.md.
@@ -241,8 +264,79 @@ At the end of each session, list:
   '.harness/manifest.json': '{{MANIFEST}}\n',
   '.harness/skills-lock.json': '{{SKILLS_LOCK}}\n',
   '.harness/skill-config.schema.json': `${MARK}\n{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n  "title": "Leerness Skill Config",\n  "type": "object",\n  "additionalProperties": true\n}\n`,
+  '.harness/plan.md': `${MARK}
+---
+leernessRole: plan
+readWhen: [planning, every-feature, scope-change, new-project, resume-work, session-close]
+updateWhen: [new-user-request, scope-added, scope-dropped, milestone-change, progress-change, plan-reprioritized]
+doNotStore: [secrets, tokens, credentials, raw-private-data]
+---
+
+# Project Plan
+
+Updated: {{DATE}}
+
+## Project Goal
+- Define the user's requested purpose here.
+
+## Scope
+- Included work should be listed here.
+
+## Out of Scope / Dropped
+| Item | Reason | Dropped At |
+|---|---|---|
+
+## Milestones
+| ID | Milestone | Status | Progress | Related Tasks | Notes |
+|---|---|---|---:|---|---|
+| M-0001 | Establish Leerness plan | planned | 0% | T-0001 | Replace with project-specific milestones. |
+
+## Plan Change Log
+| Date | Change | Reason | Requested By |
+|---|---|---|---|
+| {{DATE}} | Plan file created | Leerness v{{VERSION}} installation or migration | Leerness |
+
+## Rules
+- Add new user-requested scope before implementation when it changes the overall plan.
+- Do not silently implement dropped or out-of-scope work.
+- Link plan milestones to progress-tracker task IDs when possible.
+- Keep this file high-level; detailed task status belongs in progress-tracker.md.
+{{LEGACY_PLAN}}
+`,
+  '.harness/guideline.md': `${MARK}
+---
+leernessRole: guideline
+readWhen: [every-task, planning, implementation, review, release]
+updateWhen: [standard-change, quality-gate-change, plan-following-rule-change, repeated-process-failure]
+doNotStore: [secrets, tokens, credentials, raw-private-data]
+---
+
+# Project Guideline
+
+## Source of Direction
+- Primary plan: .harness/plan.md
+- Task status and progress: .harness/progress-tracker.md
+- Current handoff state: .harness/current-state.md and .harness/session-handoff.md
+
+## How to Use the Plan
+1. Check whether the user request exists in plan.md.
+2. If it is new scope, add it to plan.md and progress-tracker.md before broad implementation.
+3. If it is excluded or dropped, do not implement it unless the user reopens it.
+4. Update progress after implementation or verification changes.
+
+## Progress Policy
+- guideline.md describes how progress should be handled.
+- plan.md and progress-tracker.md store actual progress values.
+- Do not duplicate detailed task tables here.
+
+## Quality Gates
+- Follow context-routing.md before editing.
+- Follow writeback-policy.md after editing.
+- Verify with project-specific commands before marking work done.
+- Never mark work done if requested scope remains incomplete.
+`,
   '.harness/project-brief.md': `${MARK}\n---\nleernessRole: project-brief\nreadWhen: [every-task, planning, product-direction, onboarding]\nupdateWhen: [purpose-change, user-change, success-criteria-change, product-direction-change]\ndoNotStore: [secrets, tokens, credentials, raw-customer-data]\n---\n\n# Project Brief: {{PROJECT}}\n\n## Purpose\n\n## Success Criteria\n\n## Users\n\n## Product Direction\n{{LEGACY_BRIEF}}\n`,
-  '.harness/current-state.md': `${MARK}\n---\nleernessRole: current-state\nreadWhen: [every-task, resume-work, planning, debugging, release]\nupdateWhen: [after-meaningful-work, blocker-change, next-step-change, status-change]\ndoNotStore: [secrets, tokens, credentials]\n---\n\n# Current State\n\nUpdated: {{DATE}}\n\n## Now\n- Leerness v{{VERSION}} installed or migrated.\n\n## Next\n- Fill project-brief, context-map, design-system, and feature-contracts.\n\n## Blockers\n- None recorded.\n{{LEGACY_STATE}}\n`,
+  '.harness/current-state.md': `${MARK}\n---\nleernessRole: current-state\nreadWhen: [every-task, resume-work, planning, debugging, release]\nupdateWhen: [after-meaningful-work, blocker-change, next-step-change, status-change]\ndoNotStore: [secrets, tokens, credentials]\n---\n\n# Current State\n\nUpdated: {{DATE}}\n\n## Now\n- Leerness v{{VERSION}} installed or migrated.\n\n## Next\n- Fill plan.md, project-brief, context-map, design-system, and feature-contracts.\n\n## Blockers\n- None recorded.\n{{LEGACY_STATE}}\n`,
   '.harness/architecture.md': `${MARK}\n---\nleernessRole: architecture\nreadWhen: [feature, refactor, integration, api, database, deployment]\nupdateWhen: [module-change, data-flow-change, integration-change, boundary-change]\ndoNotStore: [secrets, credentials]\n---\n\n# Architecture\n\n## Overview\n\n## Main Modules\n\n## Data Flow\n\n## External Services\n\n## Boundaries\n{{LEGACY_ARCH}}\n`,
   '.harness/context-map.md': `${MARK}\n---\nleernessRole: context-map\nreadWhen: [every-task, file-discovery, impact-analysis]\nupdateWhen: [new-important-file, moved-module, new-route, new-service, ownership-change]\ndoNotStore: [secrets, tokens]\n---\n\n# Context Map\n\n| Area | Files | Notes |\n|---|---|---|\n| UI | src/components/**, app/** | Check design-system.md first. |\n| API | src/api/**, server/**, functions/** | Preserve response contracts. |\n| Data | db/**, firestore/**, prisma/** | Confirm migrations. |\n| Tests | test/**, tests/**, __tests__/** | Add or update checks. |\n`,
   '.harness/decisions.md': `${MARK}\n---\nleernessRole: decisions\nreadWhen: [architecture, refactor, release, dependency-change, irreversible-change]\nupdateWhen: [important-decision, tradeoff, architecture-change, dependency-change, rollback-relevant-change]\ndoNotStore: [secrets, credentials]\n---\n\n# Decision Log\n\n## Template\n\n### YYYY-MM-DD — Title\n- Decision:\n- Reason:\n- Alternatives:\n- Impact:\n{{LEGACY_DECISIONS}}\n`,
@@ -308,7 +402,7 @@ doNotStore: [secrets, tokens, credentials, raw-private-data]
 
 # Progress Tracker
 
-Use this file to track user-requested work across sessions. Keep entries concrete and checkable. At session close, unresolved statuses must be listed.
+Use this file to track user-requested work across sessions. Keep entries concrete and checkable. Link tasks to plan.md milestones when possible. At session close, unresolved statuses must be listed.
 
 | ID | User Request | Status | Owner | Last Update | Evidence / Notes | Next Action |
 |---|---|---|---|---|---|---|
@@ -336,13 +430,48 @@ Every session-close report must list all tasks whose Status is planned, waiting,
 `,
   '.harness/anti-lazy-work-policy.md': `${MARK}\n---\nleernessRole: anti-lazy-work-policy\nreadWhen: [every-task, end-of-session, verification, planning]\nupdateWhen: [quality-failure, repeated-shortcut, missed-verification, reporting-rule-change]\ndoNotStore: [secrets, tokens, credentials]\n---\n\n# Anti-Lazy Work Policy\n\nThe AI must not appear productive while leaving important work vague or incomplete.\n\n## Required Behavior\n\n- State exactly what was done and what was not done.\n- Prefer concrete file paths, commands, checks, and outputs.\n- Do not skip obvious verification when tools are available.\n- If a check cannot be run, say so and provide the exact command to run.\n- Do not collapse multiple unfinished user requests into a generic sentence.\n- Do not overwrite project memory to avoid doing the harder merge.\n- Do not call a task complete only because files were generated. Confirm behavior or clearly label it unverified.\n\n## Laziness Warning Signs\n\n- done without changed files or verification.\n- should work without a check.\n- No mention of incomplete user-requested items.\n- No next exact action.\n- Memory files not updated after meaningful work.\n\n## Minimum Final Answer Standard\n\nA final answer after meaningful work must include:\n\n- Completed\n- In progress\n- Incomplete\n- Verification\n- Updated memory\n- Risks\n- Recommended next directions\n`,
   '.harness/templates/end-of-session-report.md': `${MARK}\n# End-of-Session Report\n\n## Completed This Session\n-\n\n## In Progress From User Requests\n-\n\n## Incomplete / Not Started From User Requests\n-\n\n## Planned Tasks\n-\n\n## Waiting Tasks\n-\n\n## On-Hold Tasks\n-\n\n## Blocked Tasks\n-\n\n## Dropped By User\n-\n\n## Verification\n-\n\n## Files Changed\n-\n\n## Memory Files Updated\n-\n\n## Risks / Assumptions / Blockers\n-\n\n## Recommended Next Directions\n-\n\n## Next Exact Step\n-\n`,
-  '.harness/debug-guide.md': `${MARK}\n# Leerness Debug Guide\n\nUse this when checking whether the harness is actually guiding the AI.\n\n## Debug Checklist\n\n- AGENTS.md references language-policy, context-routing, writeback-policy, progress-tracker, and anti-lazy policy.\n- language-policy.md exists and defines one primary language.\n- context-routing.md maps task types to read/update files.\n- writeback-policy.md explains where each kind of information goes.\n- progress-tracker.md contains a task table and unresolved status values.\n- session-close-policy.md forces active unresolved work to be listed.\n- anti-lazy-work-policy.md prevents unverified completion claims.\n- skills-lock.json records installed skills.\n\nRun: leerness debug [path]\n`,
+  '.harness/debug-guide.md': `${MARK}\n# Leerness Debug Guide\n\nUse this when checking whether the harness is actually guiding the AI.\n\n## Debug Checklist\n\n- AGENTS.md references plan.md, guideline.md, language-policy, context-routing, writeback-policy, progress-tracker, and anti-lazy policy.\n- language-policy.md exists and defines one primary language.\n- context-routing.md maps task types to read/update files.\n- writeback-policy.md explains where each kind of information goes.\n- plan.md exists and contains milestones/out-of-scope areas.
+- guideline.md references plan.md and progress-tracker.md.
+- progress-tracker.md contains a task table and unresolved status values.\n- session-close-policy.md forces active unresolved work to be listed.\n- anti-lazy-work-policy.md prevents unverified completion claims.\n- skills-lock.json records installed skills.\n\nRun: leerness debug [path]\n`,
   '.harness/skill-index.md': `${MARK}\n# Skill Index\n\n| Task | Skill |\n|---|---|\n| Codebase analysis | skills/codebase-analysis.md |\n| Feature implementation | skills/feature-implementation.md |\n| Debugging | skills/debugging.md |\n| UI consistency | skills/ui-consistency.md |\n| Release | skills/release-check.md |\n`,
   '.harness/context-routing.md': `${MARK}\n# Context Routing\n\nUse this file to decide what to read before work and what to update afterward.\n\n## feature\nRead: project-brief, current-state, architecture, context-map, feature-contracts, skills/feature-implementation.\nUpdate: current-state, task-log, session-handoff, feature-contracts, context-map when paths change.\n\n## ui\nRead: design-system, feature-contracts, context-map, skills/ui-consistency.\nUpdate: design-system, feature-contracts, current-state, task-log, session-handoff.\n\n## debugging\nRead: current-state, task-log, feature-contracts, testing-strategy, skills/debugging.\nUpdate: task-log, current-state, session-handoff, testing-strategy when regression coverage changes.\n\n## release\nRead: release-checklist, testing-strategy, current-state, decisions, secret-policy.\nUpdate: release-checklist, task-log, current-state, session-handoff.\n\n## migration\nRead: AX_MIGRATION_GUIDE, writeback-policy, task-type-map.\nUpdate: only missing files by default; preserve project memory unless --force.\n\n## session-close\nRead: session-close-policy, progress-tracker, current-state, task-log, session-handoff, anti-lazy-work-policy.\nUpdate: session-handoff, progress-tracker, current-state, task-log, and any relevant memory files changed by the session.\n`,
   '.harness/writeback-policy.md': `${MARK}\n# Writeback Policy\n\n## current-state.md\nCurrent progress, blockers, next work.\n\n## task-log.md\nWhat changed, when, and verification result.\n\n## session-handoff.md\nEnough context for the next AI session to continue.\n\n## decisions.md\nImportant choices and tradeoffs.\n\n## release-checklist.md\nDeploy commands, env requirements, rollback, failures.\n\n## design-system.md\nUI rules and reusable patterns.\n\n## feature-contracts.md\nInput/output/state/error contracts.\n\n## project-brief.md\nProduct purpose and success criteria only.\n\n## progress-tracker.md\nUser-requested work items, status, evidence, and next actions across sessions.\n\n## session-close-policy.md\nFinal response and handoff rules. Update only when the reporting standard changes.\n\n## anti-lazy-work-policy.md\nQuality guardrails that prevent vague or incomplete closure. Update when repeated failure patterns appear.\n`,
-  '.harness/task-type-map.md': `${MARK}\n# Task Type Map\n\n| User request | Task type | First files |\n|---|---|---|\n| 새 기능 | feature | feature-contracts, architecture |\n| 디자인/UI | ui | design-system |\n| 오류 수정 | debugging | task-log, debugging skill |\n| 구조 개선 | refactor | architecture, decisions |\n| 배포 | release | release-checklist |\n| 하네스 전환 | migration | AX_MIGRATION_GUIDE |\n| 신규 적용 | new-install | AX_NEW_PROJECT_GUIDE |\n| 스킬 저장/배포 | skill-library | AX_SKILL_LIBRARY_GUIDE |\n`,
+  '.harness/task-type-map.md': `${MARK}\n# Task Type Map\n\n| User request | Task type | First files |\n|---|---|---|\n| 계획 수립/수정 | planning | plan, progress-tracker, guideline |
+| 새 기능 | feature | feature-contracts, architecture |\n| 디자인/UI | ui | design-system |\n| 오류 수정 | debugging | task-log, debugging skill |\n| 구조 개선 | refactor | architecture, decisions |\n| 배포 | release | release-checklist |\n| 하네스 전환 | migration | AX_MIGRATION_GUIDE |\n| 신규 적용 | new-install | AX_NEW_PROJECT_GUIDE |\n| 스킬 저장/배포 | skill-library | AX_SKILL_LIBRARY_GUIDE |\n`,
   '.harness/AX_MIGRATION_GUIDE.md': `${MARK}\n# AX Migration Guide\n\n## Goal\nMigrate old harness files without losing project memory.\n\n## Procedure\n1. Run: leerness migrate --dry-run\n2. Confirm archive target.\n3. Run: leerness migrate\n4. Check .env.example and .gitignore were merged, not replaced.\n5. Check project memory files were preserved.\n6. Fill only missing context using archived legacy files.\n7. Run: leerness status && leerness verify.\n\n## Critical Rule\nDo not overwrite existing project-brief, current-state, architecture, decisions, release-checklist, feature-contracts, or design-system unless the user explicitly asks for --force.\n`,
-  '.harness/AX_NEW_PROJECT_GUIDE.md': `${MARK}\n# AX New Project Guide\n\n## Goal\nAfter initial installation, populate Leerness memory from the actual project.\n\n## Read actual project files\n- package/config files\n- app/routes/pages\n- API/server/functions\n- DB/schema/rules\n- deploy/CI files\n- tests\n\n## Fill memory files\n- project-brief.md: purpose and success criteria\n- architecture.md: modules and data flow\n- context-map.md: important files and routes\n- design-system.md: existing UI patterns\n- feature-contracts.md: major features and states\n- release-checklist.md: real deploy commands and env requirements\n`,
+  '.harness/AX_PLAN_GUIDE.md': `${MARK}
+# AX Plan Guide
+
+Use this guide when creating, updating, dropping, or syncing the project plan.
+
+## Purpose
+plan.md keeps the user's intended outcome, scope, milestones, exclusions, and plan changes visible across sessions. progress-tracker.md keeps concrete task states. guideline.md defines how the plan should be followed.
+
+## When a user asks for new work
+1. Check .harness/plan.md.
+2. Decide whether the request is an existing milestone, a subtask, new scope, or out of scope.
+3. If new scope, add a milestone or task reference.
+4. Add or update the matching row in progress-tracker.md.
+5. Route implementation using context-routing.md.
+
+## When a user drops work
+1. Do not delete history.
+2. Mark the task dropped in progress-tracker.md.
+3. Add it to plan.md Out of Scope / Dropped with the reason.
+4. Mention the drop in session-handoff.md.
+
+## New project detection
+If the project lacks a meaningful plan, project brief, source structure, or clear success criteria, first create a plan draft from the user request. If the user request is not enough, ask for the missing goal/scope before broad implementation.
+
+## Sync rule
+Run or follow: leerness plan sync
+- plan.md: milestones and scope
+- progress-tracker.md: concrete task statuses
+- guideline.md: execution standards and progress policy
+- current-state.md: immediate next work
+`,
+  '.harness/AX_NEW_PROJECT_GUIDE.md': `${MARK}\n# AX New Project Guide\n\n## Goal\nAfter initial installation, populate Leerness memory from the actual project.\n\n## Read actual project files\n- package/config files\n- app/routes/pages\n- API/server/functions\n- DB/schema/rules\n- deploy/CI files\n- tests\n\n## Fill memory files\n- plan.md: user goal, scope, milestones, dropped/out-of-scope work
+- project-brief.md: purpose and success criteria\n- architecture.md: modules and data flow\n- context-map.md: important files and routes\n- design-system.md: existing UI patterns\n- feature-contracts.md: major features and states\n- release-checklist.md: real deploy commands and env requirements\n`,
   '.harness/AX_SKILL_LIBRARY_GUIDE.md': `${MARK}\n# AX Skill Library Guide\n\n## AI-verified skill lifecycle\n1. Learn from a validated implementation.\n2. Remove secrets and keep env variable names only.\n3. Add displayNameKo, capabilities, lastUpdated, verification metadata.\n4. Run validate.\n5. Run verify --ai.\n6. Build.\n7. Publish dry-run.\n8. Publish with --execute only after token gate passes.\n`,
   '.harness/skills/codebase-analysis.md': `${MARK}\n# Skill: Codebase Analysis\n\nRead context-map, architecture, current-state, and related source files before proposing changes.\n`,
   '.harness/skills/feature-implementation.md': `${MARK}\n# Skill: Feature Implementation\n\nDefine contract, inspect existing patterns, implement minimal change, verify, update memory.\n`,
@@ -356,8 +485,8 @@ Every session-close report must list all tasks whose Status is planned, waiting,
   '.harness/templates/decision.md': `${MARK}\n# Decision\n\n## Decision\n\n## Reason\n\n## Alternatives\n\n## Impact\n`
 };
 
-const memoryFiles = new Set(['.harness/project-brief.md','.harness/current-state.md','.harness/architecture.md','.harness/context-map.md','.harness/decisions.md','.harness/task-log.md','.harness/constraints.md','.harness/guardrails.md','.harness/design-system.md','.harness/feature-contracts.md','.harness/testing-strategy.md','.harness/review-checklist.md','.harness/release-checklist.md','.harness/session-handoff.md','.harness/progress-tracker.md','.harness/language-policy.md','.harness/debug-guide.md','.harness/skill-index.md','.harness/secret-policy.md']);
-const refreshableFiles = new Set(['AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md','.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md','.harness/AX_SKILL_LIBRARY_GUIDE.md','.harness/AX_MIGRATION_GUIDE.md','.harness/AX_NEW_PROJECT_GUIDE.md','.harness/session-close-policy.md','.harness/anti-lazy-work-policy.md','.harness/templates/end-of-session-report.md','.harness/debug-guide.md','.harness/language-policy.md','.harness/LANGUAGE','.harness/manifest.json','.harness/HARNESS_VERSION']);
+const memoryFiles = new Set(['.harness/plan.md','.harness/guideline.md','.harness/project-brief.md','.harness/current-state.md','.harness/architecture.md','.harness/context-map.md','.harness/decisions.md','.harness/task-log.md','.harness/constraints.md','.harness/guardrails.md','.harness/design-system.md','.harness/feature-contracts.md','.harness/testing-strategy.md','.harness/review-checklist.md','.harness/release-checklist.md','.harness/session-handoff.md','.harness/progress-tracker.md','.harness/language-policy.md','.harness/debug-guide.md','.harness/skill-index.md','.harness/secret-policy.md']);
+const refreshableFiles = new Set(['AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md','.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md','.harness/AX_PLAN_GUIDE.md','.harness/AX_SKILL_LIBRARY_GUIDE.md','.harness/AX_MIGRATION_GUIDE.md','.harness/AX_NEW_PROJECT_GUIDE.md','.harness/session-close-policy.md','.harness/anti-lazy-work-policy.md','.harness/templates/end-of-session-report.md','.harness/debug-guide.md','.harness/language-policy.md','.harness/LANGUAGE','.harness/manifest.json','.harness/HARNESS_VERSION']);
 function uniqueLinesAppend(current, addition){
   const lines=current.split(/\r?\n/); const seen=new Set(lines.map(x=>x.trim()).filter(Boolean));
   const add=addition.split(/\r?\n/).filter(line=>{ const t=line.trim(); if(!t||seen.has(t)) return false; seen.add(t); return true; });
@@ -384,9 +513,9 @@ function writeCoreSafely(root,file,body,opts={}){
   }
   if(dryRun) info('[dry-run] 보존: '+file+' (덮어쓰려면 --force)'); else ok('보존: '+file+' (덮어쓰려면 --force)'); return 'preserved';
 }
-function manifest(root,selectedSkills,language){ return JSON.stringify({name:projectName(root),harnessVersion:VERSION,language,languageName:languageName(language),installedAt:now(),managedFiles:Object.keys(coreFiles),selectedSkills,nonDestructiveMigration:true,taskStatuses:['requested','planned','in-progress','waiting','on-hold','blocked','incomplete','done','dropped']},null,2); }
+function manifest(root,selectedSkills,language){ return JSON.stringify({name:projectName(root),harnessVersion:VERSION,language,languageName:languageName(language),installedAt:now(),managedFiles:Object.keys(coreFiles),selectedSkills,nonDestructiveMigration:true,taskStatuses:['requested','planned','in-progress','waiting','on-hold','blocked','incomplete','done','dropped'],planEnabled:true},null,2); }
 function skillsLock(root,selectedSkills){ const lock={harnessVersion:VERSION,installedAt:now(),installedSkills:{}}; for(const name of selectedSkills){ const meta=getSkillMeta(name); if(meta) lock.installedSkills[name]={version:meta.version,source:'bundled',title:meta.title,displayNameKo:meta.displayNameKo||meta.title,lastUpdated:meta.lastUpdated,verificationStatus:(meta.verification||{}).status||'unknown'}; } return JSON.stringify(lock,null,2); }
-function makeContext(root,legacyText,selectedSkills,language){ const lang=normalizeLanguage(language||readConfiguredLanguage(root)||detectLanguage(root)); return { PROJECT:projectName(root), DATE:today(), VERSION, LANGUAGE:lang, LANGUAGE_NAME:languageName(lang), LANGUAGE_POLICY:languagePolicyBody(lang), LEGACY_AGENT:legacyBlock('agent instructions',pick(legacyText,['AGENTS.md','AGENT.md','CLAUDE.md','.cursorrules','.cursor/rules/project-rules.mdc','.cursor/rules/leerness.mdc','.github/copilot-instructions.md'])), LEGACY_BRIEF:legacyBlock('project context',pick(legacyText,['PROJECT_CONTEXT.md','CONTEXT.md','docs/guideline.md','AI_HARNESS.md','HARNESS.md'])), LEGACY_STATE:legacyBlock('state',pick(legacyText,['CURRENT_STATE.md','TASK_LOG.md','docs/history.md'])), LEGACY_ARCH:legacyBlock('architecture',pick(legacyText,['ARCHITECTURE.md'])), LEGACY_DECISIONS:legacyBlock('decisions',pick(legacyText,['DECISIONS.md'])), MANIFEST:manifest(root,selectedSkills,lang), SKILLS_LOCK:skillsLock(root,selectedSkills) }; }
+function makeContext(root,legacyText,selectedSkills,language){ const lang=normalizeLanguage(language||readConfiguredLanguage(root)||detectLanguage(root)); return { PROJECT:projectName(root), DATE:today(), VERSION, LANGUAGE:lang, LANGUAGE_NAME:languageName(lang), LANGUAGE_POLICY:languagePolicyBody(lang), LEGACY_AGENT:legacyBlock('agent instructions',pick(legacyText,['AGENTS.md','AGENT.md','CLAUDE.md','.cursorrules','.cursor/rules/project-rules.mdc','.cursor/rules/leerness.mdc','.github/copilot-instructions.md'])), LEGACY_PLAN:legacyBlock('plan context',pick(legacyText,['PLAN.md','plan.md','.harness/plan.md'])), LEGACY_BRIEF:legacyBlock('project context',pick(legacyText,['PROJECT_CONTEXT.md','CONTEXT.md','docs/guideline.md','AI_HARNESS.md','HARNESS.md'])), LEGACY_STATE:legacyBlock('state',pick(legacyText,['CURRENT_STATE.md','TASK_LOG.md','docs/history.md'])), LEGACY_ARCH:legacyBlock('architecture',pick(legacyText,['ARCHITECTURE.md'])), LEGACY_DECISIONS:legacyBlock('decisions',pick(legacyText,['DECISIONS.md'])), MANIFEST:manifest(root,selectedSkills,lang), SKILLS_LOCK:skillsLock(root,selectedSkills) }; }
 
 function listSkillPacks(){ if(!exists(PACKS_DIR)) return []; return fs.readdirSync(PACKS_DIR).map(n=>getSkillMeta(n)).filter(Boolean).sort((a,b)=>a.name.localeCompare(b.name)); }
 function getSkillMeta(name){ const metaPath=path.join(PACKS_DIR,name,'skill.json'); if(!exists(metaPath)) return null; const meta=parseJsonSafe(read(metaPath),null); if(!meta||!meta.name) return null; return meta; }
@@ -446,6 +575,92 @@ function publishSkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); c
 function libraryGuide(root){ root=path.resolve(root||process.cwd()); const p=path.join(root,'.harness/AX_SKILL_LIBRARY_GUIDE.md'); if(exists(p)) log(read(p)); else log(coreFiles['.harness/AX_SKILL_LIBRARY_GUIDE.md']); }
 function libraryCommand(args,flags){ const sub=args[1]||'help'; if(sub==='guide') return libraryGuide(args[2]||flags.path||process.cwd()); if(sub==='validate') return validateSkillLibrary(args[2]||process.cwd(),{silent:false,strictAi:Boolean(flags['strict-ai'])}); if(sub==='verify') return verifySkillLibrary(args[2]||process.cwd(),flags); if(sub==='build') return buildSkillLibrary(args[2]||process.cwd(),flags); if(sub==='publish'||sub==='upload') return publishSkillLibrary(args[2]||process.cwd(),flags); if(sub==='status'){ const meta=readSkillLibraryMeta(args[2]||process.cwd()); if(!meta) return fail('메타데이터 없음'); renderSkillMeta(meta); return; } fail('알 수 없는 library 명령: '+sub); }
 
+
+
+function planFile(root){ return path.join(root,'.harness/plan.md'); }
+function ensurePlan(root){
+  const p=planFile(root);
+  if(!exists(p)){
+    const ctx=makeContext(root,{},[],readConfiguredLanguage(root)||detectLanguage(root));
+    writeCoreSafely(root,'.harness/plan.md',fill(coreFiles['.harness/plan.md'],ctx),{force:false,dryRun:false});
+  }
+  return p;
+}
+function readPlanText(root){ const p=ensurePlan(root); return read(p); }
+function writePlanText(root,body){ write(planFile(root),body); }
+function nextMilestoneId(body){ let max=0; for(const m of body.matchAll(/\bM-(\d+)\b/g)) max=Math.max(max,parseInt(m[1],10)); return 'M-'+String(max+1).padStart(4,'0'); }
+function appendPlanChange(body,change,reason,by){
+  const row=`| ${today()} | ${String(change).replace(/\|/g,'/')} | ${String(reason||'-').replace(/\|/g,'/')} | ${String(by||'user').replace(/\|/g,'/')} |`;
+  if(body.includes('## Plan Change Log')) return body.replace(/(## Plan Change Log[\s\S]*?\n\|---\|---\|---\|---\|\n)/, '$1'+row+'\n');
+  return body.replace(/\s*$/,'\n\n## Plan Change Log\n| Date | Change | Reason | Requested By |\n|---|---|---|---|\n'+row+'\n');
+}
+function planAdd(root,text,flags={}){
+  root=path.resolve(root||process.cwd()); const file=ensurePlan(root); let body=read(file); const id=nextMilestoneId(body);
+  const status=String(flags.status||'planned'); const progress=String(flags.progress||'0').replace(/%$/,'')+'%';
+  const row=`| ${id} | ${String(text).replace(/\|/g,'/')} | ${status} | ${progress} | - | ${String(flags.note||'Added from user request').replace(/\|/g,'/')} |`;
+  if(body.includes('## Milestones')){
+    body=body.replace(/(## Milestones[\s\S]*?\n\|---\|---\|---\|---:?\|---\|---\|\n)/, '$1'+row+'\n');
+  } else {
+    body=body.replace(/\s*$/,'\n\n## Milestones\n| ID | Milestone | Status | Progress | Related Tasks | Notes |\n|---|---|---|---:|---|---|\n'+row+'\n');
+  }
+  body=appendPlanChange(body,'Added '+id+': '+text,flags.reason||'new user request',flags.by||'user');
+  writePlanText(root,body); ok('계획 추가: '+id);
+  const tasks=readProgressTasks(root); tasks.push({id:nextTaskId(tasks),request:text,status:status==='done'?'done':'planned',owner:'AI',lastUpdate:today(),evidence:'Linked to '+id,nextAction:String(flags.next||'Start or refine this plan item')}); writeProgressTasks(root,tasks);
+}
+function planDrop(root,item,flags={}){
+  root=path.resolve(root||process.cwd()); const file=ensurePlan(root); let body=read(file); const reason=String(flags.reason||'Dropped by user');
+  const row=`| ${String(item).replace(/\|/g,'/')} | ${reason.replace(/\|/g,'/')} | ${today()} |`;
+  if(body.includes('## Out of Scope / Dropped')) body=body.replace(/(## Out of Scope \/ Dropped[\s\S]*?\n\|---\|---\|---\|\n)/, '$1'+row+'\n');
+  else body=body.replace(/\s*$/,'\n\n## Out of Scope / Dropped\n| Item | Reason | Dropped At |\n|---|---|---|\n'+row+'\n');
+  body=appendPlanChange(body,'Dropped: '+item,reason,flags.by||'user'); writePlanText(root,body); ok('계획 드랍 기록: '+item);
+  const tasks=readProgressTasks(root); let matched=false; for(const t of tasks){ if(String(t.request).includes(item)||String(item).includes(t.request)){ t.status='dropped'; t.evidence=reason; t.nextAction='None'; t.lastUpdate=today(); matched=true; } }
+  if(!matched) tasks.push({id:nextTaskId(tasks),request:item,status:'dropped',owner:'AI',lastUpdate:today(),evidence:reason,nextAction:'None'}); writeProgressTasks(root,tasks);
+}
+function planUpdate(root,id,flags={}){
+  root=path.resolve(root||process.cwd()); const file=ensurePlan(root); let body=read(file); let changed=false;
+  body=body.split(/\r?\n/).map(line=>{
+    if(!line.startsWith('| '+id+' |')) return line;
+    const cols=splitTableLine(line); if(cols.length<6) return line;
+    if(flags.title||flags.name) cols[1]=String(flags.title||flags.name).replace(/\|/g,'/');
+    if(flags.status) cols[2]=String(flags.status);
+    if(flags.progress!==undefined) cols[3]=String(flags.progress).replace(/%$/,'')+'%';
+    if(flags.tasks) cols[4]=String(flags.tasks).replace(/\|/g,'/');
+    if(flags.note) cols[5]=String(flags.note).replace(/\|/g,'/');
+    changed=true; return '| '+cols.join(' | ')+' |';
+  }).join('\n');
+  if(!changed){ fail('계획 ID를 찾을 수 없습니다: '+id); process.exitCode=1; return; }
+  body=appendPlanChange(body,'Updated '+id,flags.reason||'plan update',flags.by||'user'); writePlanText(root,body); ok('계획 업데이트: '+id);
+}
+function planProgress(root){
+  root=path.resolve(root||process.cwd()); const body=readPlanText(root); const rows=[];
+  for(const line of body.split(/\r?\n/)){ if(/^\|\s*M-/.test(line)){ const c=splitTableLine(line); if(c.length>=6) rows.push({id:c[0],milestone:c[1],status:c[2],progress:c[3],tasks:c[4],notes:c[5]}); } }
+  banner(); log('Plan progress: '+root); if(!rows.length){ warn('계획 milestone이 없습니다. leerness plan add 를 사용하세요.'); return; }
+  rows.forEach(r=>log(`  - ${r.id} [${r.status}] ${r.progress} ${r.milestone} :: tasks=${r.tasks}`));
+}
+function planSync(root){
+  root=path.resolve(root||process.cwd()); ensurePlan(root); const tasks=readProgressTasks(root);
+  const active=tasks.filter(t=>ACTIVE_TASK_STATUSES.has(t.status));
+  const done=tasks.filter(t=>t.status==='done').length; const total=tasks.filter(t=>t.status!=='dropped').length; const pct=total?Math.round(done/total*100):0;
+  const cs=path.join(root,'.harness/current-state.md');
+  if(exists(cs)){
+    let body=read(cs); const block=`\n## Plan Sync\n- Updated: ${today()}\n- Non-dropped task progress: ${done}/${total} (${pct}%)\n- Active unresolved tasks: ${active.length}\n- Source: plan.md + progress-tracker.md\n`;
+    if(body.includes('## Plan Sync')) body=body.replace(/\n## Plan Sync[\s\S]*?(?=\n## |$)/, block);
+    else body=body.replace(/\s*$/, block+'\n');
+    write(cs,body); ok('current-state.md plan sync 갱신');
+  }
+  ok('plan/progress sync 완료: '+done+'/'+total+' = '+pct+'%');
+}
+function planCommand(args,flags){
+  const sub=args[1]||'show'; const root=path.resolve(flags.path||((sub==='show'||sub==='progress'||sub==='sync'||sub==='init')?args[2]:process.cwd())||process.cwd());
+  if(sub==='show'){ log(readPlanText(root)); return; }
+  if(sub==='init'){ ensurePlan(root); if(flags.goal){ planAdd(root,String(flags.goal),{status:'planned',reason:'initial project goal',by:'user'}); } ok('plan.md 준비 완료'); return; }
+  if(sub==='add'){ const text=args[2]||flags.title||flags.name; if(!text){ fail('추가할 계획 내용을 입력하세요.'); process.exitCode=1; return; } return planAdd(root,text,flags); }
+  if(sub==='drop'||sub==='remove'){ const item=args[2]||flags.title||flags.name; if(!item){ fail('드랍할 계획 항목을 입력하세요.'); process.exitCode=1; return; } return planDrop(root,item,flags); }
+  if(sub==='update'){ const id=args[2]; if(!id){ fail('업데이트할 계획 ID를 입력하세요.'); process.exitCode=1; return; } return planUpdate(root,id,flags); }
+  if(sub==='progress') return planProgress(root);
+  if(sub==='sync') return planSync(root);
+  fail('알 수 없는 plan 명령: '+sub);
+}
 
 
 const ACTIVE_TASK_STATUSES = new Set(['requested','planned','in-progress','waiting','on-hold','blocked','incomplete']);
@@ -513,15 +728,20 @@ function taskCommand(args,flags){
 }
 function debugHarness(root){
   root=path.resolve(root||process.cwd()); banner(); let failures=0,warnings=0;
-  const required=['AGENTS.md','.harness/language-policy.md','.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md','.harness/session-close-policy.md','.harness/progress-tracker.md','.harness/anti-lazy-work-policy.md','.harness/debug-guide.md'];
+  const required=['AGENTS.md','.harness/plan.md','.harness/guideline.md','.harness/language-policy.md','.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md','.harness/session-close-policy.md','.harness/progress-tracker.md','.harness/anti-lazy-work-policy.md','.harness/debug-guide.md'];
   for(const f of required){ if(exists(path.join(root,f))) ok('존재: '+f); else { failures++; fail('누락: '+f); } }
   const ag=path.join(root,'AGENTS.md');
   if(exists(ag)){
     const body=read(ag);
-    for(const term of ['language-policy.md','context-routing.md','writeback-policy.md','progress-tracker.md','anti-lazy-work-policy.md','End-of-Session Contract']){
+    for(const term of ['plan.md','guideline.md','language-policy.md','context-routing.md','writeback-policy.md','progress-tracker.md','anti-lazy-work-policy.md','End-of-Session Contract']){
       if(body.includes(term)) ok('AGENTS 방향지시 포함: '+term); else { failures++; fail('AGENTS 방향지시 누락: '+term); }
     }
   }
+
+  const pf=path.join(root,'.harness/plan.md');
+  if(exists(pf)){ const b=read(pf); if(b.includes('## Milestones')) ok('plan.md milestones 확인'); else { warnings++; warn('plan.md에 Milestones 섹션이 없습니다.'); } }
+  const gf=path.join(root,'.harness/guideline.md');
+  if(exists(gf)){ const b=read(gf); if(b.includes('plan.md')&&b.includes('progress-tracker.md')) ok('guideline.md가 plan/progress를 참조합니다.'); else { failures++; fail('guideline.md가 plan.md/progress-tracker.md를 참조하지 않습니다.'); } }
   const mf=path.join(root,'.harness/manifest.json');
   if(exists(mf)){ const m=parseJsonSafe(read(mf),{}); if(m.language) ok('언어 설정: '+m.language+' ('+(m.languageName||languageName(m.language))+')'); else { warnings++; warn('manifest language 누락'); } }
   const tasks=readProgressTasks(root);
@@ -542,10 +762,10 @@ function closeSession(root){
   log('Session close checklist');
   log('');
   log('Read before closing:');
-  ['.harness/session-close-policy.md','.harness/progress-tracker.md','.harness/current-state.md','.harness/task-log.md','.harness/session-handoff.md','.harness/anti-lazy-work-policy.md'].forEach(x=>log('  - '+x));
+  ['.harness/session-close-policy.md','.harness/plan.md','.harness/guideline.md','.harness/progress-tracker.md','.harness/current-state.md','.harness/task-log.md','.harness/session-handoff.md','.harness/anti-lazy-work-policy.md'].forEach(x=>log('  - '+x));
   log('');
   log('Required final report sections:');
-  ['Completed This Session','In Progress From User Requests','Incomplete / Not Started From User Requests','Planned Tasks','Waiting Tasks','On-Hold Tasks','Blocked Tasks','Dropped By User','Verification','Files Changed','Memory Files Updated','Risks / Assumptions / Blockers','Recommended Next Directions','Next Exact Step'].forEach(x=>log('  - '+x));
+  ['Plan Progress Summary','Completed This Session','In Progress From User Requests','Incomplete / Not Started From User Requests','Planned Tasks','Waiting Tasks','On-Hold Tasks','Blocked Tasks','Dropped By User','Verification','Files Changed','Memory Files Updated','Risks / Assumptions / Blockers','Recommended Next Directions','Next Exact Step'].forEach(x=>log('  - '+x));
   log('');
   if(exists(template)) log(read(template));
   else log('# End-of-Session Report\n\n## Completed This Session\n-\n\n## In Progress From User Requests\n-\n\n## Incomplete / Not Started From User Requests\n-\n\n## Planned Tasks\n-\n\n## Waiting Tasks\n-\n\n## On-Hold Tasks\n-\n\n## Blocked Tasks\n-\n\n## Dropped By User\n-\n\n## Verification\n-\n\n## Files Changed\n-\n\n## Memory Files Updated\n-\n\n## Risks / Assumptions / Blockers\n-\n\n## Recommended Next Directions\n-\n\n## Next Exact Step\n-\n');
@@ -563,9 +783,9 @@ function closeSession(root){
 }
 function sessionCommand(args){ const sub=args[1]||'close'; if(sub==='close'||sub==='handoff'||sub==='end') return closeSession(args[2]||process.cwd()); fail('알 수 없는 session 명령: '+sub); }
 
-const routeData={feature:{read:['project-brief.md','current-state.md','architecture.md','context-map.md','feature-contracts.md'],update:['current-state.md','task-log.md','session-handoff.md','feature-contracts.md']},ui:{read:['design-system.md','feature-contracts.md','context-map.md'],update:['design-system.md','feature-contracts.md','current-state.md','task-log.md']},debugging:{read:['current-state.md','task-log.md','feature-contracts.md','testing-strategy.md'],update:['task-log.md','current-state.md','session-handoff.md']},refactor:{read:['architecture.md','decisions.md','guardrails.md'],update:['architecture.md','decisions.md','task-log.md']},release:{read:['release-checklist.md','testing-strategy.md','current-state.md','decisions.md','secret-policy.md'],update:['release-checklist.md','task-log.md','current-state.md','session-handoff.md']},migration:{read:['AX_MIGRATION_GUIDE.md','context-routing.md','writeback-policy.md'],update:['Only missing files by default','Use --force only when requested']},'new-install':{read:['AX_NEW_PROJECT_GUIDE.md','actual project files'],update:['project-brief.md','architecture.md','context-map.md','design-system.md','feature-contracts.md','release-checklist.md']},'skill-library':{read:['AX_SKILL_LIBRARY_GUIDE.md','skill-index.md','secret-policy.md'],update:['skill-index.md','skills-lock.json','task-log.md']},documentation:{read:['writeback-policy.md','context-routing.md'],update:['specific memory file','task-log.md','session-handoff.md']},debug:{read:['debug-guide.md','AGENTS.md','language-policy.md','context-routing.md','writeback-policy.md','progress-tracker.md','session-close-policy.md'],update:['debug findings in task-log.md','progress-tracker.md when user-requested debug work changes']},'session-close':{read:['session-close-policy.md','progress-tracker.md','current-state.md','task-log.md','session-handoff.md','anti-lazy-work-policy.md'],update:['session-handoff.md','progress-tracker.md','current-state.md','task-log.md','relevant changed memory files']}};
+const routeData={planning:{read:['plan.md','progress-tracker.md','project-brief.md','current-state.md','guideline.md'],update:['plan.md','progress-tracker.md','current-state.md','session-handoff.md']},feature:{read:['plan.md','progress-tracker.md','project-brief.md','current-state.md','architecture.md','context-map.md','feature-contracts.md'],update:['current-state.md','task-log.md','session-handoff.md','feature-contracts.md']},ui:{read:['design-system.md','feature-contracts.md','context-map.md'],update:['design-system.md','feature-contracts.md','current-state.md','task-log.md']},debugging:{read:['current-state.md','task-log.md','feature-contracts.md','testing-strategy.md'],update:['task-log.md','current-state.md','session-handoff.md']},refactor:{read:['architecture.md','decisions.md','guardrails.md'],update:['architecture.md','decisions.md','task-log.md']},release:{read:['plan.md','progress-tracker.md','release-checklist.md','testing-strategy.md','current-state.md','decisions.md','secret-policy.md'],update:['release-checklist.md','task-log.md','current-state.md','session-handoff.md']},migration:{read:['AX_MIGRATION_GUIDE.md','context-routing.md','writeback-policy.md'],update:['Only missing files by default','Use --force only when requested']},'new-install':{read:['AX_NEW_PROJECT_GUIDE.md','AX_PLAN_GUIDE.md','actual project files'],update:['plan.md','project-brief.md','architecture.md','context-map.md','design-system.md','feature-contracts.md','release-checklist.md']},'skill-library':{read:['AX_SKILL_LIBRARY_GUIDE.md','skill-index.md','secret-policy.md'],update:['skill-index.md','skills-lock.json','task-log.md']},documentation:{read:['writeback-policy.md','context-routing.md'],update:['specific memory file','task-log.md','session-handoff.md']},debug:{read:['debug-guide.md','AGENTS.md','plan.md','guideline.md','language-policy.md','context-routing.md','writeback-policy.md','progress-tracker.md','session-close-policy.md'],update:['debug findings in task-log.md','progress-tracker.md when user-requested debug work changes']},'session-close':{read:['session-close-policy.md','plan.md','guideline.md','progress-tracker.md','current-state.md','task-log.md','session-handoff.md','anti-lazy-work-policy.md'],update:['session-handoff.md','progress-tracker.md','current-state.md','task-log.md','relevant changed memory files']}};
 function routePath(x){ if(String(x).includes('/')||String(x).endsWith('.md')&&['AGENTS.md','CLAUDE.md','README.md'].includes(String(x))) return String(x); if(String(x).includes(' ')) return String(x); return '.harness/'+x; }
 function routeCommand(task){ banner(); if(!task||task==='list'){ log('사용 가능한 task type: '+Object.keys(routeData).join(', ')); return; } const r=routeData[task]; if(!r){ fail('알 수 없는 task type: '+task); process.exitCode=1; return; } log('Task route: '+task); log('\nRead before work:'); r.read.forEach(x=>log('  - '+routePath(x))); log('\nUpdate after work:'); r.update.forEach(x=>log('  - '+routePath(x))); }
-function help(){ log(['Leerness v'+VERSION,'','Usage:','  leerness init [path] [--yes] [--language auto|ko|en] [--skills recommended|all|office,commerce-api] [--force]','  leerness migrate [path] [--dry-run] [--language auto|ko|en] [--force]','  leerness status [path]','  leerness verify [path]','  leerness debug [path]','  leerness route <feature|ui|debugging|refactor|release|migration|new-install|skill-library|documentation|debug|session-close>','','Tasks:','  leerness task list [--status planned,waiting,on-hold]','  leerness task add "request" [--status planned]','  leerness task update T-0002 --status in-progress','  leerness task drop T-0002 --reason "user dropped"','','Session:','  leerness session close [path]','','Skills:','  leerness skill list','  leerness skill info <name>','  leerness skill add <name> [--path <project>]','  leerness skill remove <name> [--path <project>]','  leerness skill learn <name> --from <validated-skill-path>','','Skill library:','  leerness library guide [path]','  leerness library validate <path> [--strict-ai]','  leerness library verify <path> --ai --reviewer leerness-ai','  leerness library build <path> [--package leerness-skill-name]','  leerness library publish <built-library> --target npm|git [--execute]',''].join('\n')); }
-async function main(){ const parsed=parseArgs(process.argv.slice(2)); const args=parsed.positionals, flags=parsed.flags; if(flags.version||flags.v){ log(VERSION); return; } if(flags.help||flags.h){ help(); return; } const cmd=args[0]||'init'; if(cmd==='init') return init(args[1]||process.cwd(),flags); if(cmd==='migrate') return migrate(args[1]||process.cwd(),flags); if(cmd==='status') return status(args[1]||process.cwd()); if(cmd==='verify') return verify(args[1]||process.cwd()); if(cmd==='route') return routeCommand(args[1]||'list'); if(cmd==='debug') return debugHarness(args[1]||process.cwd()); if(cmd==='task') return taskCommand(args,flags); if(cmd==='session') return sessionCommand(args); if(cmd==='skill') return skillCommand(args,flags); if(cmd==='library') return libraryCommand(args,flags); help(); process.exitCode=1; }
+function help(){ log(['Leerness v'+VERSION,'','Usage:','  leerness init [path] [--yes] [--language auto|ko|en] [--skills recommended|all|office,commerce-api] [--force]','  leerness migrate [path] [--dry-run] [--language auto|ko|en] [--force]','  leerness status [path]','  leerness verify [path]','  leerness debug [path]','  leerness route <planning|feature|ui|debugging|refactor|release|migration|new-install|skill-library|documentation|debug|session-close>','','Plan:','  leerness plan show [path]','  leerness plan init [path] --goal "project goal"','  leerness plan add "milestone or scope" [--status planned]','  leerness plan drop "item" --reason "user excluded"','  leerness plan update M-0002 --status in-progress --progress 40','  leerness plan progress [path]','  leerness plan sync [path]','','Tasks:','  leerness task list [--status planned,waiting,on-hold]','  leerness task add "request" [--status planned]','  leerness task update T-0002 --status in-progress','  leerness task drop T-0002 --reason "user dropped"','','Session:','  leerness session close [path]','','Skills:','  leerness skill list','  leerness skill info <name>','  leerness skill add <name> [--path <project>]','  leerness skill remove <name> [--path <project>]','  leerness skill learn <name> --from <validated-skill-path>','','Skill library:','  leerness library guide [path]','  leerness library validate <path> [--strict-ai]','  leerness library verify <path> --ai --reviewer leerness-ai','  leerness library build <path> [--package leerness-skill-name]','  leerness library publish <built-library> --target npm|git [--execute]',''].join('\n')); }
+async function main(){ const parsed=parseArgs(process.argv.slice(2)); const args=parsed.positionals, flags=parsed.flags; if(flags.version||flags.v){ log(VERSION); return; } if(flags.help||flags.h){ help(); return; } const cmd=args[0]||'init'; if(cmd==='init') return init(args[1]||process.cwd(),flags); if(cmd==='migrate') return migrate(args[1]||process.cwd(),flags); if(cmd==='status') return status(args[1]||process.cwd()); if(cmd==='verify') return verify(args[1]||process.cwd()); if(cmd==='route') return routeCommand(args[1]||'list'); if(cmd==='debug') return debugHarness(args[1]||process.cwd()); if(cmd==='plan') return planCommand(args,flags); if(cmd==='task') return taskCommand(args,flags); if(cmd==='session') return sessionCommand(args); if(cmd==='skill') return skillCommand(args,flags); if(cmd==='library') return libraryCommand(args,flags); help(); process.exitCode=1; }
 main().catch(err=>{ fail(err.stack||err.message); process.exit(1); });
