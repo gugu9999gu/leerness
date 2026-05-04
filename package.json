@@ -1,7 +1,7 @@
 {
   "name": "leerness",
-  "version": "1.3.2",
-  "description": "Leerness: 세션 종료 인수인계, 진행/미완료 작업 추적, 추천 방향 제시, 게으른 작업 방지 정책을 포함한 AX 최적화 개발 하네스.",
+  "version": "1.4.0",
+  "description": "Leerness: 언어 정책, 진행 작업 드랍, 세션 종료 미완료 목록, 라우팅 디버그를 지원하는 AX 최적화 개발 하네스.",
   "keywords": [
     "leerness",
     "ai",
@@ -29,7 +29,13 @@
     "unfinished-task-tracking",
     "anti-lazy-work",
     "progress-tracker",
-    "end-of-session-report"
+    "end-of-session-report",
+    "direction-routing-debug",
+    "pending-work-tracking",
+    "language-policy",
+    "auto-language-detection",
+    "task-drop",
+    "harness-debug"
   ],
   "bin": {
     "leerness": "./bin/harness.js"
@@ -43,7 +49,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node ./bin/harness.js --help && node ./bin/harness.js route session-close && node ./bin/harness.js init --yes --skills office,commerce-api,ai-verified-skill-publisher ./tmp-harness-test && node ./bin/harness.js status ./tmp-harness-test && node ./bin/harness.js session close ./tmp-harness-test && node ./bin/harness.js verify ./tmp-harness-test",
+    "test": "node ./bin/harness.js --help && node ./bin/harness.js init --yes --language ko --skills office,commerce-api,ai-verified-skill-publisher ./tmp-harness-test && node ./bin/harness.js task add \"테스트 예정 작업\" --status planned --path ./tmp-harness-test && node ./bin/harness.js task drop T-0002 --reason \"테스트 드랍\" --path ./tmp-harness-test && node ./bin/harness.js route debug && node ./bin/harness.js session close ./tmp-harness-test && node ./bin/harness.js debug ./tmp-harness-test && node ./bin/harness.js verify ./tmp-harness-test",
     "prepack": "node ./bin/harness.js --version"
   },
   "repository": {

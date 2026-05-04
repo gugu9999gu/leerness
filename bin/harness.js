@@ -6,7 +6,7 @@ const path = require('path');
 const readline = require('readline');
 const childProcess = require('child_process');
 
-const VERSION = '1.3.2';
+const VERSION = '1.4.0';
 const MARK = '<!-- leerness:managed -->';
 const MIGRATED = '<!-- leerness:migrated-legacy -->';
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
@@ -27,7 +27,7 @@ function write(p,s){ fs.mkdirSync(path.dirname(p),{recursive:true}); fs.writeFil
 function rel(root,p){ return path.relative(root,p).replace(/\\/g,'/') || '.'; }
 function parseJsonSafe(s,fallback){ try { return JSON.parse(s); } catch { return fallback; } }
 function isTextFile(p){ return /\.(md|mdc|txt|json|js|ts|tsx|jsx|yml|yaml|env|gitignore)$/i.test(p) || !path.extname(p); }
-function banner(){ log(''); log(c.bold+c.magenta+'Leerness v'+VERSION+c.reset); log(c.dim+'비파괴 마이그레이션 · context routing · session handoff'+c.reset); log(''); }
+function banner(){ log(''); log(c.bold+c.magenta+'Leerness v'+VERSION+c.reset); log(c.dim+'language policy · context routing · task tracking · debug'+c.reset); log(''); }
 function installGuide(){
   log(c.bold+'설치/마이그레이션 안내'+c.reset);
   log('  - 기존 파일은 먼저 .harness/archive/ 에 백업합니다.');
@@ -43,6 +43,50 @@ function now(){ return new Date().toISOString(); }
 function today(){ return now().slice(0,10); }
 function fill(t,ctx){ return t.replace(/{{([A-Z_]+)}}/g,(_,k)=>ctx[k]||''); }
 function slug(s){ return String(s||'skill').toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'') || 'skill'; }
+
+function normalizeLanguage(v){
+  const raw=String(v||'auto').toLowerCase();
+  if(['ko','kr','korean','한국어','hangul'].includes(raw)) return 'ko';
+  if(['en','english'].includes(raw)) return 'en';
+  if(raw==='auto') return 'auto';
+  return raw;
+}
+function languageName(code){ return code==='ko'?'Korean':code==='en'?'English':code; }
+function hasKorean(text){ return /[가-힣]/.test(String(text||'')); }
+function detectLanguage(root){
+  const candidates=['README.md','AGENTS.md','CLAUDE.md','docs/guideline.md','.harness/project-brief.md','.harness/current-state.md'];
+  let ko=0,total=0;
+  for(const f of candidates){ const p=path.join(root,f); if(!exists(p)) continue; const body=read(p).slice(0,8000); total+=body.length; const m=body.match(/[가-힣]/g); if(m) ko+=m.length; }
+  if(ko>=20 || (total && ko/Math.max(total,1)>0.02)) return 'ko';
+  return 'en';
+}
+function readConfiguredLanguage(root){
+  const mf=path.join(root,'.harness/manifest.json');
+  if(exists(mf)){ const j=parseJsonSafe(read(mf),{}); if(j.language) return normalizeLanguage(j.language); }
+  const lp=path.join(root,'.harness/LANGUAGE');
+  if(exists(lp)) return normalizeLanguage(read(lp).trim());
+  return null;
+}
+async function chooseLanguage(root,flags){
+  const requested=normalizeLanguage(flags.language||flags.lang||'auto');
+  const configured=readConfiguredLanguage(root);
+  if(requested!=='auto') return requested;
+  if(configured) return configured;
+  const detected=detectLanguage(root);
+  if(flags.yes||flags.y||!process.stdin.isTTY) return detected;
+  log(c.bold+'문서 작성 언어 선택'+c.reset);
+  log('  1) 자동 감지: '+languageName(detected));
+  log('  2) 한국어');
+  log('  3) English');
+  const ans=await ask('\n선택 (Enter=자동 감지): ');
+  if(ans==='2') return 'ko';
+  if(ans==='3') return 'en';
+  return detected;
+}
+function languagePolicyBody(code){
+  if(code==='ko') return `${MARK}\n---\nleernessRole: language-policy\nreadWhen: [every-task, documentation, skill-writing, session-close]\nupdateWhen: [user-language-preference-change, project-language-change]\ndoNotStore: [secrets, tokens, credentials]\n---\n\n# Language Policy\n\n## Primary Language\n\nKorean\n\n## Rule\n\n- 하네스 문서, 스킬 문서, 세션 인수인계, 진행 작업 목록은 한국어로 작성한다.\n- 코드 식별자, 파일명, 명령어, API 필드명, 환경변수명은 원문을 유지한다.\n- 외부 오류 메시지는 원문을 보존하고, 필요한 경우 한국어 설명을 덧붙인다.\n- 스킬 라이브러리에는 한글명(displayNameKo)과 가능한 작업(capabilities)을 반드시 유지한다.\n`;
+  return `${MARK}\n---\nleernessRole: language-policy\nreadWhen: [every-task, documentation, skill-writing, session-close]\nupdateWhen: [user-language-preference-change, project-language-change]\ndoNotStore: [secrets, tokens, credentials]\n---\n\n# Language Policy\n\n## Primary Language\n\nEnglish\n\n## Rule\n\n- Write harness documents, skill documents, session handoffs, and progress lists in English.\n- Preserve code identifiers, filenames, commands, API fields, and environment variable names exactly.\n- Preserve external error messages verbatim and add explanations when useful.\n- Skill libraries must keep displayNameKo when available and list clear capabilities.\n`;
+}
 
 function copyRecursive(src,dst,ignoreAbs=[]){
   const abs=path.resolve(src); if(ignoreAbs.some(i=>abs===i||abs.startsWith(i+path.sep))) return;
@@ -95,18 +139,75 @@ function noteLegacyPreserved(root,found,dryRun){
 }
 
 const coreFiles = {
-  'AGENTS.md': `${MARK}\n# {{PROJECT}} AI Agent Harness\n\nAgent = Model + Leerness Harness.\n\n## Core Rule\nBefore editing, route the task. Read .harness/context-routing.md and use \`leerness route <task-type>\` when the task type is unclear.\n\n## Universal Read Order\n1. .harness/project-brief.md\n2. .harness/current-state.md\n3. .harness/context-routing.md\n4. .harness/writeback-policy.md\n5. .harness/task-type-map.md\n6. .harness/context-map.md\n7. .harness/guardrails.md\n8. .harness/skills-lock.json\n\n## Task Routing\n- Feature/API work: architecture.md, feature-contracts.md, context-map.md, skills/feature-implementation.md.\n- UI/design work: design-system.md, feature-contracts.md, skills/ui-consistency.md.\n- Debugging: task-log.md, current-state.md, skills/debugging.md, related feature contract.\n- Refactoring: architecture.md, decisions.md, guardrails.md, skills/refactoring.md.\n- Release/deploy: release-checklist.md, testing-strategy.md, current-state.md, decisions.md.\n- Migration: AX_MIGRATION_GUIDE.md, context-routing.md, writeback-policy.md.\n- New install: AX_NEW_PROJECT_GUIDE.md and actual project config/source files.\n- Skill/library work: AX_SKILL_LIBRARY_GUIDE.md and ai-verified-skill-publisher when installed.\n\n## Writeback Rules\n- Always update current-state.md, task-log.md, and session-handoff.md after meaningful work.\n- Update decisions.md when a structural, technology, API, schema, deployment, or irreversible decision is made.\n- Update feature-contracts.md when input/output/state/error behavior changes.\n- Update design-system.md when UI rules, components, layout, spacing, or states change.\n- Update release-checklist.md when deployment, environment variables, rollback, CI, npm, or git release requirements change.\n- Update context-map.md when important files, modules, routes, commands, or ownership areas change.\n- Update project-brief.md only when product purpose, target users, success criteria, or project direction changes.\n\n## Non-Destructive Migration Policy\n- Never overwrite existing project memory files unless the user explicitly requests --force.\n- Preserve .env.example and .gitignore; append missing Leerness entries only.\n- Keep secrets, tokens, cookies, credentials, and customer private data out of harness files.\n\n## End-of-Session Contract
-Every meaningful session must close with a handoff. Do not stop at \"done\". Before the final answer, check .harness/session-close-policy.md, .harness/progress-tracker.md, and .harness/anti-lazy-work-policy.md.
+  'AGENTS.md': `${MARK}
+# {{PROJECT}} AI Agent Harness
+
+Agent = Model + Leerness Harness.
+
+## Core Rule
+Before editing, route the task. Read .harness/language-policy.md, .harness/context-routing.md, and use \`leerness route <task-type>\` when the task type is unclear.
+
+## Universal Read Order
+1. .harness/project-brief.md
+2. .harness/current-state.md
+3. .harness/language-policy.md
+4. .harness/context-routing.md
+5. .harness/writeback-policy.md
+6. .harness/task-type-map.md
+7. .harness/context-map.md
+8. .harness/guardrails.md
+9. .harness/skills-lock.json
+
+## Language Rule
+- Before writing or updating any harness/skill/session document, read .harness/language-policy.md.
+- Use the configured project language consistently.
+- Preserve code names, commands, file paths, environment variables, and API field names exactly.
+
+## Task Routing
+- Feature/API work: architecture.md, feature-contracts.md, context-map.md, skills/feature-implementation.md.
+- UI/design work: design-system.md, feature-contracts.md, skills/ui-consistency.md.
+- Debugging: task-log.md, current-state.md, skills/debugging.md, related feature contract.
+- Refactoring: architecture.md, decisions.md, guardrails.md, skills/refactoring.md.
+- Release/deploy: release-checklist.md, testing-strategy.md, current-state.md, decisions.md.
+- Migration: AX_MIGRATION_GUIDE.md, context-routing.md, writeback-policy.md.
+- New install: AX_NEW_PROJECT_GUIDE.md and actual project config/source files.
+- Skill/library work: AX_SKILL_LIBRARY_GUIDE.md and ai-verified-skill-publisher when installed.
+- Harness debug: debug-guide.md, language-policy.md, context-routing.md, writeback-policy.md, progress-tracker.md.
+
+## Writeback Rules
+- Always update current-state.md, task-log.md, and session-handoff.md after meaningful work.
+- Update decisions.md when a structural, technology, API, schema, deployment, or irreversible decision is made.
+- Update feature-contracts.md when input/output/state/error behavior changes.
+- Update design-system.md when UI rules, components, layout, spacing, or states change.
+- Update release-checklist.md when deployment, environment variables, rollback, CI, npm, or git release requirements change.
+- Update context-map.md when important files, modules, routes, commands, or ownership areas change.
+- Update project-brief.md only when product purpose, target users, success criteria, or project direction changes.
+
+## Non-Destructive Migration Policy
+- Never overwrite existing project memory files unless the user explicitly requests --force.
+- Preserve .env.example and .gitignore; append missing Leerness entries only.
+- Keep secrets, tokens, cookies, credentials, and customer private data out of harness files.
+
+## Progress Tracker Rule
+- Track user-requested work in .harness/progress-tracker.md.
+- Use statuses: requested, planned, in-progress, waiting, on-hold, blocked, incomplete, done, dropped.
+- If the user drops a task, mark it as dropped with reason instead of deleting the history.
+- Every session close must list active unresolved work: requested, planned, waiting, on-hold, blocked, in-progress, incomplete.
+
+## End-of-Session Contract
+Every meaningful session must close with a handoff. Do not stop at "done". Before the final answer, check .harness/session-close-policy.md, .harness/progress-tracker.md, and .harness/anti-lazy-work-policy.md.
 
 At the end of each session, list:
 1. Completed work in this session.
 2. User-requested work still in progress.
 3. User-requested work not started or incomplete.
-4. Verification performed and results.
-5. Memory files updated.
-6. Risks, assumptions, or blockers.
-7. Recommended next directions.
-8. The single next exact action.
+4. Planned, on-hold, waiting, blocked, requested, and incomplete work from progress-tracker.md.
+5. User-dropped work, if any.
+6. Verification performed and results.
+7. Memory files updated.
+8. Risks, assumptions, or blockers.
+9. Recommended next directions.
+10. The single next exact action.
 
 ## Anti-Lazy Work Rule
 - Do not hide unfinished work behind vague summaries.
@@ -134,6 +235,8 @@ At the end of each session, list:
   '.github/copilot-instructions.md': `${MARK}\n# GitHub Copilot Instructions\n\nUse AGENTS.md and .harness/ as the project memory. Preserve existing project memory files unless --force is explicit.\n`,
   '.gitignore': `# Leerness local-only files\n.env\n.env.local\n*.secret.json\n.harness/skill-config.local.json\n.harness/skill-publish.local.json\n`,
   '.env.example': `# Leerness examples only. Copy to .env.local and fill locally. Never commit real secrets.\n`,
+  '.harness/LANGUAGE': '{{LANGUAGE}}\n',
+  '.harness/language-policy.md': '{{LANGUAGE_POLICY}}',
   '.harness/HARNESS_VERSION': '{{VERSION}}\n',
   '.harness/manifest.json': '{{MANIFEST}}\n',
   '.harness/skills-lock.json': '{{SKILLS_LOCK}}\n',
@@ -195,9 +298,45 @@ doNotStore: [secrets, tokens, raw-private-data]
 -
 `,
   '.harness/session-close-policy.md': `${MARK}\n---\nleernessRole: session-close-policy\nreadWhen: [end-of-session, every-final-response, partial-completion, handoff]\nupdateWhen: [session-close-format-change, repeated-handoff-failure, reporting-standard-change]\ndoNotStore: [secrets, tokens, credentials, raw-private-data]\n---\n\n# Session Close Policy\n\nEvery meaningful AI work session must end with a concrete handoff. This prevents hidden unfinished work and makes the next session restartable.\n\n## Required Final Checklist\n\nBefore the final answer, the AI must inspect whether the session had meaningful work. If yes, it must provide or update:\n\n1. Completed work in this session.\n2. User-requested work still in progress.\n3. User-requested work incomplete or not started.\n4. Verification performed and exact results.\n5. Files or documents changed.\n6. Harness memory files updated.\n7. Risks, assumptions, blockers, or skipped checks.\n8. Recommended next directions.\n9. The single next exact action.\n\n## Required Memory Writeback\n\nUpdate these files when meaningful work occurred:\n\n- current-state.md\n- task-log.md\n- session-handoff.md\n\nUpdate these when relevant:\n\n- decisions.md\n- feature-contracts.md\n- design-system.md\n- release-checklist.md\n- context-map.md\n- progress-tracker.md\n\n## Completion Labels\n\nUse one of these labels for each requested item:\n\n- done\n- in-progress\n- blocked\n- incomplete\n- skipped-with-reason\n\nNever mark work done if verification was not performed or if key requested scope remains unfinished.\n`,
-  '.harness/progress-tracker.md': `${MARK}\n---\nleernessRole: progress-tracker\nreadWhen: [planning, resume-work, end-of-session, multi-step-work]\nupdateWhen: [task-started, task-completed, task-blocked, scope-change, end-of-session]\ndoNotStore: [secrets, tokens, credentials, raw-private-data]\n---\n\n# Progress Tracker\n\nUse this file to track user-requested work across sessions. Keep entries concrete and checkable.\n\n| ID | User Request | Status | Owner | Last Update | Evidence / Notes | Next Action |\n|---|---|---|---|---|---|---|\n| T-0001 | Initialize Leerness project memory | done | AI | {{DATE}} | Leerness v{{VERSION}} installed or migrated. | Fill project-specific details. |\n\n## Status Values\n\n- requested\n- in-progress\n- done\n- blocked\n- incomplete\n- skipped-with-reason\n`,
+  '.harness/progress-tracker.md': `${MARK}
+---
+leernessRole: progress-tracker
+readWhen: [planning, resume-work, end-of-session, multi-step-work]
+updateWhen: [task-started, task-completed, task-blocked, task-dropped, scope-change, end-of-session]
+doNotStore: [secrets, tokens, credentials, raw-private-data]
+---
+
+# Progress Tracker
+
+Use this file to track user-requested work across sessions. Keep entries concrete and checkable. At session close, unresolved statuses must be listed.
+
+| ID | User Request | Status | Owner | Last Update | Evidence / Notes | Next Action |
+|---|---|---|---|---|---|---|
+| T-0001 | Initialize Leerness project memory | done | AI | {{DATE}} | Leerness v{{VERSION}} installed or migrated. | Fill project-specific details. |
+
+## Status Values
+
+- requested
+- planned
+- in-progress
+- waiting
+- on-hold
+- blocked
+- incomplete
+- done
+- dropped
+
+## Drop Policy
+
+Dropped tasks are not deleted. Mark Status as dropped and write the reason in Evidence / Notes.
+
+## Session Close Rule
+
+Every session-close report must list all tasks whose Status is planned, waiting, on-hold, blocked, in-progress, incomplete, or requested.
+`,
   '.harness/anti-lazy-work-policy.md': `${MARK}\n---\nleernessRole: anti-lazy-work-policy\nreadWhen: [every-task, end-of-session, verification, planning]\nupdateWhen: [quality-failure, repeated-shortcut, missed-verification, reporting-rule-change]\ndoNotStore: [secrets, tokens, credentials]\n---\n\n# Anti-Lazy Work Policy\n\nThe AI must not appear productive while leaving important work vague or incomplete.\n\n## Required Behavior\n\n- State exactly what was done and what was not done.\n- Prefer concrete file paths, commands, checks, and outputs.\n- Do not skip obvious verification when tools are available.\n- If a check cannot be run, say so and provide the exact command to run.\n- Do not collapse multiple unfinished user requests into a generic sentence.\n- Do not overwrite project memory to avoid doing the harder merge.\n- Do not call a task complete only because files were generated. Confirm behavior or clearly label it unverified.\n\n## Laziness Warning Signs\n\n- done without changed files or verification.\n- should work without a check.\n- No mention of incomplete user-requested items.\n- No next exact action.\n- Memory files not updated after meaningful work.\n\n## Minimum Final Answer Standard\n\nA final answer after meaningful work must include:\n\n- Completed\n- In progress\n- Incomplete\n- Verification\n- Updated memory\n- Risks\n- Recommended next directions\n`,
-  '.harness/templates/end-of-session-report.md': `${MARK}\n# End-of-Session Report\n\n## Completed This Session\n-\n\n## In Progress From User Requests\n-\n\n## Incomplete / Not Started From User Requests\n-\n\n## Verification\n-\n\n## Files Changed\n-\n\n## Memory Files Updated\n-\n\n## Risks / Assumptions / Blockers\n-\n\n## Recommended Next Directions\n-\n\n## Next Exact Step\n-\n`,
+  '.harness/templates/end-of-session-report.md': `${MARK}\n# End-of-Session Report\n\n## Completed This Session\n-\n\n## In Progress From User Requests\n-\n\n## Incomplete / Not Started From User Requests\n-\n\n## Planned Tasks\n-\n\n## Waiting Tasks\n-\n\n## On-Hold Tasks\n-\n\n## Blocked Tasks\n-\n\n## Dropped By User\n-\n\n## Verification\n-\n\n## Files Changed\n-\n\n## Memory Files Updated\n-\n\n## Risks / Assumptions / Blockers\n-\n\n## Recommended Next Directions\n-\n\n## Next Exact Step\n-\n`,
+  '.harness/debug-guide.md': `${MARK}\n# Leerness Debug Guide\n\nUse this when checking whether the harness is actually guiding the AI.\n\n## Debug Checklist\n\n- AGENTS.md references language-policy, context-routing, writeback-policy, progress-tracker, and anti-lazy policy.\n- language-policy.md exists and defines one primary language.\n- context-routing.md maps task types to read/update files.\n- writeback-policy.md explains where each kind of information goes.\n- progress-tracker.md contains a task table and unresolved status values.\n- session-close-policy.md forces active unresolved work to be listed.\n- anti-lazy-work-policy.md prevents unverified completion claims.\n- skills-lock.json records installed skills.\n\nRun: leerness debug [path]\n`,
   '.harness/skill-index.md': `${MARK}\n# Skill Index\n\n| Task | Skill |\n|---|---|\n| Codebase analysis | skills/codebase-analysis.md |\n| Feature implementation | skills/feature-implementation.md |\n| Debugging | skills/debugging.md |\n| UI consistency | skills/ui-consistency.md |\n| Release | skills/release-check.md |\n`,
   '.harness/context-routing.md': `${MARK}\n# Context Routing\n\nUse this file to decide what to read before work and what to update afterward.\n\n## feature\nRead: project-brief, current-state, architecture, context-map, feature-contracts, skills/feature-implementation.\nUpdate: current-state, task-log, session-handoff, feature-contracts, context-map when paths change.\n\n## ui\nRead: design-system, feature-contracts, context-map, skills/ui-consistency.\nUpdate: design-system, feature-contracts, current-state, task-log, session-handoff.\n\n## debugging\nRead: current-state, task-log, feature-contracts, testing-strategy, skills/debugging.\nUpdate: task-log, current-state, session-handoff, testing-strategy when regression coverage changes.\n\n## release\nRead: release-checklist, testing-strategy, current-state, decisions, secret-policy.\nUpdate: release-checklist, task-log, current-state, session-handoff.\n\n## migration\nRead: AX_MIGRATION_GUIDE, writeback-policy, task-type-map.\nUpdate: only missing files by default; preserve project memory unless --force.\n\n## session-close\nRead: session-close-policy, progress-tracker, current-state, task-log, session-handoff, anti-lazy-work-policy.\nUpdate: session-handoff, progress-tracker, current-state, task-log, and any relevant memory files changed by the session.\n`,
   '.harness/writeback-policy.md': `${MARK}\n# Writeback Policy\n\n## current-state.md\nCurrent progress, blockers, next work.\n\n## task-log.md\nWhat changed, when, and verification result.\n\n## session-handoff.md\nEnough context for the next AI session to continue.\n\n## decisions.md\nImportant choices and tradeoffs.\n\n## release-checklist.md\nDeploy commands, env requirements, rollback, failures.\n\n## design-system.md\nUI rules and reusable patterns.\n\n## feature-contracts.md\nInput/output/state/error contracts.\n\n## project-brief.md\nProduct purpose and success criteria only.\n\n## progress-tracker.md\nUser-requested work items, status, evidence, and next actions across sessions.\n\n## session-close-policy.md\nFinal response and handoff rules. Update only when the reporting standard changes.\n\n## anti-lazy-work-policy.md\nQuality guardrails that prevent vague or incomplete closure. Update when repeated failure patterns appear.\n`,
@@ -217,8 +356,8 @@ doNotStore: [secrets, tokens, raw-private-data]
   '.harness/templates/decision.md': `${MARK}\n# Decision\n\n## Decision\n\n## Reason\n\n## Alternatives\n\n## Impact\n`
 };
 
-const memoryFiles = new Set(['.harness/project-brief.md','.harness/current-state.md','.harness/architecture.md','.harness/context-map.md','.harness/decisions.md','.harness/task-log.md','.harness/constraints.md','.harness/guardrails.md','.harness/design-system.md','.harness/feature-contracts.md','.harness/testing-strategy.md','.harness/review-checklist.md','.harness/release-checklist.md','.harness/session-handoff.md','.harness/progress-tracker.md','.harness/skill-index.md','.harness/secret-policy.md']);
-const refreshableFiles = new Set(['AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md','.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md','.harness/AX_SKILL_LIBRARY_GUIDE.md','.harness/AX_MIGRATION_GUIDE.md','.harness/AX_NEW_PROJECT_GUIDE.md','.harness/session-close-policy.md','.harness/anti-lazy-work-policy.md','.harness/templates/end-of-session-report.md','.harness/manifest.json','.harness/HARNESS_VERSION']);
+const memoryFiles = new Set(['.harness/project-brief.md','.harness/current-state.md','.harness/architecture.md','.harness/context-map.md','.harness/decisions.md','.harness/task-log.md','.harness/constraints.md','.harness/guardrails.md','.harness/design-system.md','.harness/feature-contracts.md','.harness/testing-strategy.md','.harness/review-checklist.md','.harness/release-checklist.md','.harness/session-handoff.md','.harness/progress-tracker.md','.harness/language-policy.md','.harness/debug-guide.md','.harness/skill-index.md','.harness/secret-policy.md']);
+const refreshableFiles = new Set(['AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md','.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md','.harness/AX_SKILL_LIBRARY_GUIDE.md','.harness/AX_MIGRATION_GUIDE.md','.harness/AX_NEW_PROJECT_GUIDE.md','.harness/session-close-policy.md','.harness/anti-lazy-work-policy.md','.harness/templates/end-of-session-report.md','.harness/debug-guide.md','.harness/language-policy.md','.harness/LANGUAGE','.harness/manifest.json','.harness/HARNESS_VERSION']);
 function uniqueLinesAppend(current, addition){
   const lines=current.split(/\r?\n/); const seen=new Set(lines.map(x=>x.trim()).filter(Boolean));
   const add=addition.split(/\r?\n/).filter(line=>{ const t=line.trim(); if(!t||seen.has(t)) return false; seen.add(t); return true; });
@@ -245,9 +384,9 @@ function writeCoreSafely(root,file,body,opts={}){
   }
   if(dryRun) info('[dry-run] 보존: '+file+' (덮어쓰려면 --force)'); else ok('보존: '+file+' (덮어쓰려면 --force)'); return 'preserved';
 }
-function manifest(root,selectedSkills){ return JSON.stringify({name:projectName(root),harnessVersion:VERSION,installedAt:now(),managedFiles:Object.keys(coreFiles),selectedSkills,nonDestructiveMigration:true},null,2); }
+function manifest(root,selectedSkills,language){ return JSON.stringify({name:projectName(root),harnessVersion:VERSION,language,languageName:languageName(language),installedAt:now(),managedFiles:Object.keys(coreFiles),selectedSkills,nonDestructiveMigration:true,taskStatuses:['requested','planned','in-progress','waiting','on-hold','blocked','incomplete','done','dropped']},null,2); }
 function skillsLock(root,selectedSkills){ const lock={harnessVersion:VERSION,installedAt:now(),installedSkills:{}}; for(const name of selectedSkills){ const meta=getSkillMeta(name); if(meta) lock.installedSkills[name]={version:meta.version,source:'bundled',title:meta.title,displayNameKo:meta.displayNameKo||meta.title,lastUpdated:meta.lastUpdated,verificationStatus:(meta.verification||{}).status||'unknown'}; } return JSON.stringify(lock,null,2); }
-function makeContext(root,legacyText,selectedSkills){ return { PROJECT:projectName(root), DATE:today(), VERSION, LEGACY_AGENT:legacyBlock('agent instructions',pick(legacyText,['AGENTS.md','AGENT.md','CLAUDE.md','.cursorrules','.cursor/rules/project-rules.mdc','.cursor/rules/leerness.mdc','.github/copilot-instructions.md'])), LEGACY_BRIEF:legacyBlock('project context',pick(legacyText,['PROJECT_CONTEXT.md','CONTEXT.md','docs/guideline.md','AI_HARNESS.md','HARNESS.md'])), LEGACY_STATE:legacyBlock('state',pick(legacyText,['CURRENT_STATE.md','TASK_LOG.md','docs/history.md'])), LEGACY_ARCH:legacyBlock('architecture',pick(legacyText,['ARCHITECTURE.md'])), LEGACY_DECISIONS:legacyBlock('decisions',pick(legacyText,['DECISIONS.md'])), MANIFEST:manifest(root,selectedSkills), SKILLS_LOCK:skillsLock(root,selectedSkills) }; }
+function makeContext(root,legacyText,selectedSkills,language){ const lang=normalizeLanguage(language||readConfiguredLanguage(root)||detectLanguage(root)); return { PROJECT:projectName(root), DATE:today(), VERSION, LANGUAGE:lang, LANGUAGE_NAME:languageName(lang), LANGUAGE_POLICY:languagePolicyBody(lang), LEGACY_AGENT:legacyBlock('agent instructions',pick(legacyText,['AGENTS.md','AGENT.md','CLAUDE.md','.cursorrules','.cursor/rules/project-rules.mdc','.cursor/rules/leerness.mdc','.github/copilot-instructions.md'])), LEGACY_BRIEF:legacyBlock('project context',pick(legacyText,['PROJECT_CONTEXT.md','CONTEXT.md','docs/guideline.md','AI_HARNESS.md','HARNESS.md'])), LEGACY_STATE:legacyBlock('state',pick(legacyText,['CURRENT_STATE.md','TASK_LOG.md','docs/history.md'])), LEGACY_ARCH:legacyBlock('architecture',pick(legacyText,['ARCHITECTURE.md'])), LEGACY_DECISIONS:legacyBlock('decisions',pick(legacyText,['DECISIONS.md'])), MANIFEST:manifest(root,selectedSkills,lang), SKILLS_LOCK:skillsLock(root,selectedSkills) }; }
 
 function listSkillPacks(){ if(!exists(PACKS_DIR)) return []; return fs.readdirSync(PACKS_DIR).map(n=>getSkillMeta(n)).filter(Boolean).sort((a,b)=>a.name.localeCompare(b.name)); }
 function getSkillMeta(name){ const metaPath=path.join(PACKS_DIR,name,'skill.json'); if(!exists(metaPath)) return null; const meta=parseJsonSafe(read(metaPath),null); if(!meta||!meta.name) return null; return meta; }
@@ -256,19 +395,20 @@ function appendEnvExample(root,meta){ const ep=path.join(root,'.env.example'); c
 function installSkill(root,name,dryRun=false){ const meta=getSkillMeta(name); if(!meta){ fail('알 수 없는 스킬 라이브러리: '+name); info('사용 가능 목록: '+listSkillPacks().map(x=>x.name).join(', ')); return false; } const packRoot=path.join(PACKS_DIR,name); const destRoot=path.join(root,'.harness/skills',name); if(dryRun){ info('[dry-run] install skill: '+name); return true; } fs.mkdirSync(destRoot,{recursive:true}); for(const file of meta.files||[]){ const src=path.join(packRoot,file); const dest=path.join(destRoot,path.basename(file)); if(exists(src)){ write(dest,read(src)); ok('스킬 설치: '+rel(root,dest)); } } write(path.join(destRoot,'skill.json'),JSON.stringify(meta,null,2)+'\n'); updateSkillLock(root,meta,false); appendEnvExample(root,meta); return true; }
 function removeSkill(root,name){ const meta=getSkillMeta(name)||{name,title:name}; const dest=path.join(root,'.harness/skills',name); if(exists(dest)) fs.rmSync(dest,{recursive:true,force:true}); updateSkillLock(root,meta,true); ok('스킬 제거: '+name); }
 
-function parseArgs(argv){ const out={flags:{},positionals:[]}; const valueFlags=new Set(['skills','path','from','out','target','package','repo','version','title','description','category','source','name','registry','branch','message','reviewer','by','token-env']); for(let i=0;i<argv.length;i++){ const a=argv[i]; if(a.startsWith('--')){ const eq=a.indexOf('='); const key=eq>=0?a.slice(2,eq):a.slice(2); if(eq>=0) out.flags[key]=a.slice(eq+1); else if(valueFlags.has(key)&&argv[i+1]&&!argv[i+1].startsWith('-')) out.flags[key]=argv[++i]; else out.flags[key]=true; } else if(a.startsWith('-')) out.flags[a.slice(1)]=true; else out.positionals.push(a); } return out; }
+function parseArgs(argv){ const out={flags:{},positionals:[]}; const valueFlags=new Set(['skills','path','from','out','target','package','repo','version','title','description','category','source','name','registry','branch','message','reviewer','by','token-env','language','lang','status','reason','owner','evidence','next','action']); for(let i=0;i<argv.length;i++){ const a=argv[i]; if(a.startsWith('--')){ const eq=a.indexOf('='); const key=eq>=0?a.slice(2,eq):a.slice(2); if(eq>=0) out.flags[key]=a.slice(eq+1); else if(valueFlags.has(key)&&argv[i+1]&&!argv[i+1].startsWith('-')) out.flags[key]=argv[++i]; else out.flags[key]=true; } else if(a.startsWith('-')) out.flags[a.slice(1)]=true; else out.positionals.push(a); } return out; }
 function splitSkills(value){ if(!value||value===true) return []; if(value==='recommended') return ['office','commerce-api','crawling','ai-verified-skill-publisher']; if(value==='all') return listSkillPacks().map(x=>x.name); return String(value).split(',').map(x=>x.trim()).filter(Boolean); }
 function ask(q){ const rl=readline.createInterface({input:process.stdin,output:process.stdout}); return new Promise(resolve=>rl.question(q,a=>{rl.close();resolve(a.trim());})); }
 async function chooseSkills(autoYes,provided){ if(provided!==undefined) return splitSkills(provided); if(autoYes||!process.stdin.isTTY) return []; const packs=listSkillPacks(); if(!packs.length) return []; log(c.bold+'설치할 스킬 라이브러리 선택'+c.reset); log('  0) 기본 하네스만 설치'); packs.forEach((p,i)=>{ log('  '+(i+1)+') '+(p.displayNameKo||p.title)+' ('+p.name+')'); if((p.capabilities||[]).length) log('     가능 작업: '+p.capabilities.slice(0,4).join(', ')); }); log('  all) 전체 설치'); const ans=await ask('\n선택 (예: 1,3 또는 all, Enter=기본): '); if(!ans||ans==='0') return []; if(ans.toLowerCase()==='all') return packs.map(p=>p.name); return ans.split(',').map(s=>parseInt(s.trim(),10)).filter(n=>n>=1&&n<=packs.length).map(n=>packs[n-1].name); }
 
 async function init(root,flags){
   root=path.resolve(root||process.cwd()); fs.mkdirSync(root,{recursive:true}); banner(); installGuide(); info('대상: '+root);
+  const selectedLanguage=await chooseLanguage(root,flags); info('문서 언어: '+languageName(selectedLanguage));
   const selectedSkills=await chooseSkills(Boolean(flags.yes||flags.y),flags.skills);
   const found=detectLegacy(root), legacyText=collectLegacyText(found);
   if(found.length){ warn('기존 하네스/지침 파일 감지: '+found.length+'개'); found.forEach(f=>log('  - '+f.item)); }
   const archive=archiveLegacy(root,found,false); if(archive) info('백업 완료: '+rel(root,archive));
   noteLegacyPreserved(root,found,false);
-  const ctx=makeContext(root,legacyText,selectedSkills);
+  const ctx=makeContext(root,legacyText,selectedSkills,selectedLanguage);
   for(const [file,template] of Object.entries(coreFiles)) writeCoreSafely(root,file,fill(template,ctx),{force:Boolean(flags.force)});
   if(selectedSkills.length){ log(''); info('선택 스킬 설치 중: '+selectedSkills.join(', ')); for(const name of selectedSkills) installSkill(root,name,false); }
   ok('설치 완료'); info('신규 프로젝트라면 .harness/AX_NEW_PROJECT_GUIDE.md를 따라 실제 프로젝트 내용을 반영하세요.');
@@ -280,7 +420,8 @@ function migrate(root,flags){
   else { warn('마이그레이션 대상: '+found.length+'개'); found.forEach(f=>log('  - '+f.item)); }
   const archive=archiveLegacy(root,found,dryRun); if(archive) info((dryRun?'[dry-run] 백업 예정: ':'백업 완료: ')+rel(root,archive));
   noteLegacyPreserved(root,found,dryRun);
-  const ctx=makeContext(root,collectLegacyText(found),[]);
+  const selectedLanguage=normalizeLanguage(flags.language||flags.lang||readConfiguredLanguage(root)||detectLanguage(root)); info('문서 언어: '+languageName(selectedLanguage));
+  const ctx=makeContext(root,collectLegacyText(found),[],selectedLanguage);
   for(const [file,template] of Object.entries(coreFiles)) writeCoreSafely(root,file,fill(template,ctx),{dryRun,force});
   if(!dryRun){ ok('마이그레이션 완료'); info('기존 프로젝트 메모리 파일은 보존되었습니다. 템플릿 재생성이 필요하면 --force를 명시하세요.'); }
 }
@@ -300,11 +441,97 @@ function validateSkillLibrary(dir,opts={}){ dir=path.resolve(dir); let failures=
 function learnSkillLibrary(root,flags){ root=path.resolve(root||process.cwd()); const from=path.resolve(flags.from||path.join(root,'.harness/skills')); const name=slug(flags.name||path.basename(from)); const outRoot=path.resolve(flags.out||path.join(root,'.harness/library',name)); if(!exists(from)){ fail('학습할 스킬 경로가 없습니다: '+from); process.exitCode=1; return; } const files=skillLibraryFiles(from).filter(f=>isTextFile(f)&&!f.includes(path.sep+'archive'+path.sep)); fs.mkdirSync(path.join(outRoot,'skills'),{recursive:true}); const envs=new Set(), copied=[]; for(const f of files){ const body=read(f); inferEnvNames(body).forEach(e=>envs.add(e)); const dest='skills/'+path.basename(f).replace(/[^a-zA-Z0-9._-]/g,'-'); write(path.join(outRoot,dest),body); copied.push(dest); } const meta={name,version:String(flags.version||'0.1.0'),title:flags.title||name,description:flags.description||'Learned Leerness skill library.',category:flags.category||'custom',requiresEnv:Array.from(envs).sort(),files:copied,lastUpdated:today(),lastUpdatedAt:now(),verification:{status:'needs-review',method:'none',verifiedBy:null,verifiedAt:null,checks:[]}}; write(path.join(outRoot,'skill-library.json'),JSON.stringify(meta,null,2)+'\n'); write(path.join(outRoot,'README.md'),'# '+meta.title+'\n\n'+meta.description+'\n'); ok('스킬 라이브러리 학습 완료: '+outRoot); info('다음: leerness library verify '+outRoot+' --ai --reviewer leerness-ai'); }
 function verifySkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); const res=validateSkillLibrary(dir,{silent:false}); if(!res.ok){ process.exitCode=1; return; } const meta=res.meta; meta.verification={status:'passed',method:'ai-assisted-review',verifiedBy:String(flags.reviewer||flags.by||'leerness-ai'),verifiedAt:now(),checks:['structure','secret-scan','env-reference-only','metadata']}; meta.lastUpdated=today(); meta.lastUpdatedAt=now(); write(path.join(dir,'skill-library.json'),JSON.stringify(meta,null,2)+'\n'); write(path.join(dir,'ai-verification.json'),JSON.stringify(meta.verification,null,2)+'\n'); ok('AI 검증 완료: '+meta.name); }
 function buildSkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); const res=validateSkillLibrary(dir,{silent:false,strictAi:Boolean(flags['strict-ai'])}); if(!res.ok){ process.exitCode=1; return; } const meta=res.meta; const out=path.resolve(flags.out||path.join(dir,'dist')); const libRoot=path.join(out,slug(meta.name)); if(exists(libRoot)) fs.rmSync(libRoot,{recursive:true,force:true}); fs.mkdirSync(libRoot,{recursive:true}); for(const item of ['README.md','skill-library.json','skill.json','ai-verification.json','env.example','skills','examples','migrations']){ const src=path.join(dir,item); if(exists(src)) copyRecursive(src,path.join(libRoot,item)); } const pkg={name:flags.package||('leerness-skill-'+slug(meta.name)),version:meta.version||'0.1.0',description:meta.description||meta.title||meta.name,type:'commonjs',files:['skill-library.json','ai-verification.json','README.md','env.example','skills/','examples/','migrations/'],keywords:['leerness','harness-skill','ai-skill-library'],license:'MIT',publishConfig:{access:'public'},harnessSkill:meta}; write(path.join(libRoot,'package.json'),JSON.stringify(pkg,null,2)+'\n'); ok('스킬 라이브러리 빌드 완료: '+libRoot); }
-function resolvePublishToken(target,flags){ if(flags['token-env']&&process.env[flags['token-env']]) return process.env[flags['token-env']]; const names=target==='npm'?['LEERNESS_NPM_TOKEN','NPM_TOKEN','NODE_AUTH_TOKEN']:['LEERNESS_GIT_TOKEN','LEERNESS_GITHUB_TOKEN','GITHUB_TOKEN','GH_TOKEN']; for(const n of names) if(process.env[n]) return process.env[n]; return null; }
+function resolvePublishToken(target,flags){ if(flags['token-env','language','lang','status','reason','owner','evidence','next','action']&&process.env[flags['token-env','language','lang','status','reason','owner','evidence','next','action']]) return process.env[flags['token-env','language','lang','status','reason','owner','evidence','next','action']]; const names=target==='npm'?['LEERNESS_NPM_TOKEN','NPM_TOKEN','NODE_AUTH_TOKEN']:['LEERNESS_GIT_TOKEN','LEERNESS_GITHUB_TOKEN','GITHUB_TOKEN','GH_TOKEN']; for(const n of names) if(process.env[n]) return process.env[n]; return null; }
 function publishSkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); const target=String(flags.target||'npm'); const execute=Boolean(flags.execute); const res=validateSkillLibrary(dir,{silent:false,strictAi:true}); if(!res.ok){ process.exitCode=1; return; } if(!execute){ info('[dry-run] '+target+' publish target: '+dir); info('실제 업로드는 --execute가 필요합니다.'); return; } const token=resolvePublishToken(target,flags); if(!token && flags['no-prompt']){ fail('업로드 토큰이 없습니다. 환경변수 또는 --token-env를 설정하세요.'); process.exitCode=1; return; } if(target==='npm'){ const env={...process.env}; if(token) env.NODE_AUTH_TOKEN=token; const r=childProcess.spawnSync('npm',['publish','--access','public'],{cwd:dir,stdio:'inherit',env,shell:process.platform==='win32'}); process.exitCode=r.status||0; return; } if(target==='git'){ const repo=flags.repo||DEFAULT_GIT_REPOSITORY; info('Git target: '+repo); const run=(cmd,args)=>{ const r=childProcess.spawnSync(cmd,args,{cwd:dir,stdio:'inherit',shell:process.platform==='win32'}); if(r.status) process.exit(r.status); }; if(!exists(path.join(dir,'.git'))) run('git',['init']); try{ run('git',['remote','add','origin',repo]); }catch{} run('git',['add','.']); run('git',['commit','-m',flags.message||('Publish skill library '+res.meta.name)]); run('git',['branch','-M',flags.branch||'main']); run('git',['push','-u','origin',flags.branch||'main']); return; } fail('지원하지 않는 target: '+target); }
 function libraryGuide(root){ root=path.resolve(root||process.cwd()); const p=path.join(root,'.harness/AX_SKILL_LIBRARY_GUIDE.md'); if(exists(p)) log(read(p)); else log(coreFiles['.harness/AX_SKILL_LIBRARY_GUIDE.md']); }
 function libraryCommand(args,flags){ const sub=args[1]||'help'; if(sub==='guide') return libraryGuide(args[2]||flags.path||process.cwd()); if(sub==='validate') return validateSkillLibrary(args[2]||process.cwd(),{silent:false,strictAi:Boolean(flags['strict-ai'])}); if(sub==='verify') return verifySkillLibrary(args[2]||process.cwd(),flags); if(sub==='build') return buildSkillLibrary(args[2]||process.cwd(),flags); if(sub==='publish'||sub==='upload') return publishSkillLibrary(args[2]||process.cwd(),flags); if(sub==='status'){ const meta=readSkillLibraryMeta(args[2]||process.cwd()); if(!meta) return fail('메타데이터 없음'); renderSkillMeta(meta); return; } fail('알 수 없는 library 명령: '+sub); }
 
+
+
+const ACTIVE_TASK_STATUSES = new Set(['requested','planned','in-progress','waiting','on-hold','blocked','incomplete']);
+const ALL_TASK_STATUSES = new Set(['requested','planned','in-progress','waiting','on-hold','blocked','incomplete','done','dropped']);
+function progressFile(root){ return path.join(root,'.harness/progress-tracker.md'); }
+function splitTableLine(line){ return line.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(x=>x.trim()); }
+function readProgressTasks(root){
+  const file=progressFile(root); if(!exists(file)) return [];
+  const tasks=[];
+  for(const line of read(file).split(/\r?\n/)){
+    if(!/^\|\s*T-[0-9A-Za-z_-]+\s*\|/.test(line)) continue;
+    const cols=splitTableLine(line); if(cols.length<7) continue;
+    tasks.push({id:cols[0],request:cols[1],status:cols[2],owner:cols[3],lastUpdate:cols[4],evidence:cols[5],nextAction:cols[6]});
+  }
+  return tasks;
+}
+function taskTable(tasks){
+  return '| ID | User Request | Status | Owner | Last Update | Evidence / Notes | Next Action |\n|---|---|---|---|---|---|---|\n'+tasks.map(t=>`| ${t.id} | ${String(t.request||'').replace(/\|/g,'/')} | ${t.status||'requested'} | ${t.owner||'AI'} | ${t.lastUpdate||today()} | ${String(t.evidence||'').replace(/\|/g,'/')} | ${String(t.nextAction||'').replace(/\|/g,'/')} |`).join('\n')+'\n';
+}
+function writeProgressTasks(root,tasks){
+  const file=progressFile(root);
+  const lang=readConfiguredLanguage(root)||detectLanguage(root);
+  const intro=lang==='ko'
+    ? '# Progress Tracker\n\n사용자가 요청한 작업을 세션 간 추적합니다. 세션 종료 시 미완료/예정/보류/대기/진행중 작업은 반드시 표시합니다.\n\n'
+    : '# Progress Tracker\n\nTrack user-requested work across sessions. At session close, unresolved/planned/on-hold/waiting/in-progress tasks must be listed.\n\n';
+  const status='\n## Status Values\n\n- requested\n- planned\n- in-progress\n- waiting\n- on-hold\n- blocked\n- incomplete\n- done\n- dropped\n\n## Drop Policy\n\nDropped tasks are not deleted. Mark Status as dropped and write the reason in Evidence / Notes.\n';
+  write(file,`${MARK}\n---\nleernessRole: progress-tracker\nreadWhen: [planning, resume-work, end-of-session, multi-step-work]\nupdateWhen: [task-started, task-completed, task-blocked, task-dropped, scope-change, end-of-session]\ndoNotStore: [secrets, tokens, credentials, raw-private-data]\n---\n\n`+intro+taskTable(tasks)+status);
+}
+function nextTaskId(tasks){
+  let max=0; for(const t of tasks){ const m=String(t.id||'').match(/T-(\d+)/); if(m) max=Math.max(max,parseInt(m[1],10)); }
+  return 'T-'+String(max+1).padStart(4,'0');
+}
+function renderTasks(tasks,filterStatuses){
+  const filtered=filterStatuses?tasks.filter(t=>filterStatuses.has(t.status)):tasks;
+  if(!filtered.length){ log('  - 없음'); return; }
+  for(const t of filtered) log(`  - ${t.id} [${t.status}] ${t.request} :: next=${t.nextAction||'-'} :: note=${t.evidence||'-'}`);
+}
+function taskCommand(args,flags){
+  const sub=args[1]||'list'; const root=path.resolve(flags.path||args[3]||process.cwd());
+  const tasks=readProgressTasks(root);
+  if(sub==='list'){
+    banner();
+    const status=flags.status?new Set(String(flags.status).split(',').map(x=>x.trim()).filter(Boolean)):null;
+    log('Progress tasks: '+root); renderTasks(tasks,status); return;
+  }
+  if(sub==='add'){
+    const request=args[2]||flags.title||flags.name; if(!request){ fail('추가할 작업 내용을 입력하세요. 예: leerness task add "배포 검증" --status planned'); process.exitCode=1; return; }
+    const status=String(flags.status||'planned'); if(!ALL_TASK_STATUSES.has(status)){ fail('지원하지 않는 status: '+status); process.exitCode=1; return; }
+    const t={id:nextTaskId(tasks),request,status,owner:String(flags.owner||'AI'),lastUpdate:today(),evidence:String(flags.evidence||'added by leerness task add'),nextAction:String(flags.next||flags.action||'Define next exact step')};
+    tasks.push(t); writeProgressTasks(root,tasks); ok('작업 추가: '+t.id); return;
+  }
+  if(sub==='update'){
+    const id=args[2]; const t=tasks.find(x=>x.id===id); if(!t){ fail('작업 ID를 찾을 수 없습니다: '+id); process.exitCode=1; return; }
+    if(flags.status){ const st=String(flags.status); if(!ALL_TASK_STATUSES.has(st)){ fail('지원하지 않는 status: '+st); process.exitCode=1; return; } t.status=st; }
+    if(flags.evidence) t.evidence=String(flags.evidence);
+    if(flags.next||flags.action) t.nextAction=String(flags.next||flags.action);
+    if(flags.owner) t.owner=String(flags.owner);
+    t.lastUpdate=today(); writeProgressTasks(root,tasks); ok('작업 업데이트: '+id); return;
+  }
+  if(sub==='drop'||sub==='remove'){
+    const id=args[2]; const t=tasks.find(x=>x.id===id); if(!t){ fail('작업 ID를 찾을 수 없습니다: '+id); process.exitCode=1; return; }
+    t.status='dropped'; t.lastUpdate=today(); t.evidence=String(flags.reason||flags.evidence||'Dropped by user'); t.nextAction='None'; writeProgressTasks(root,tasks); ok('작업 드랍 처리: '+id); return;
+  }
+  fail('알 수 없는 task 명령: '+sub);
+}
+function debugHarness(root){
+  root=path.resolve(root||process.cwd()); banner(); let failures=0,warnings=0;
+  const required=['AGENTS.md','.harness/language-policy.md','.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md','.harness/session-close-policy.md','.harness/progress-tracker.md','.harness/anti-lazy-work-policy.md','.harness/debug-guide.md'];
+  for(const f of required){ if(exists(path.join(root,f))) ok('존재: '+f); else { failures++; fail('누락: '+f); } }
+  const ag=path.join(root,'AGENTS.md');
+  if(exists(ag)){
+    const body=read(ag);
+    for(const term of ['language-policy.md','context-routing.md','writeback-policy.md','progress-tracker.md','anti-lazy-work-policy.md','End-of-Session Contract']){
+      if(body.includes(term)) ok('AGENTS 방향지시 포함: '+term); else { failures++; fail('AGENTS 방향지시 누락: '+term); }
+    }
+  }
+  const mf=path.join(root,'.harness/manifest.json');
+  if(exists(mf)){ const m=parseJsonSafe(read(mf),{}); if(m.language) ok('언어 설정: '+m.language+' ('+(m.languageName||languageName(m.language))+')'); else { warnings++; warn('manifest language 누락'); } }
+  const tasks=readProgressTasks(root);
+  const active=tasks.filter(t=>ACTIVE_TASK_STATUSES.has(t.status));
+  log('\nActive unresolved tasks:'); renderTasks(active);
+  const badSensitive=scanSensitivePath(path.join(root,'.harness')).filter(x=>!x.file.includes(path.sep+'archive'+path.sep));
+  if(badSensitive.length){ failures+=badSensitive.length; badSensitive.forEach(x=>fail('민감정보 의심: '+rel(root,x.file)+' '+x.type)); } else ok('하네스 민감정보 스캔 통과');
+  log('\nDebug summary: '+(failures?'FAIL':'PASS')+' / warnings='+warnings+' / failures='+failures);
+  if(failures) process.exitCode=1;
+}
 
 function closeSession(root){
   root=path.resolve(root||process.cwd());
@@ -318,18 +545,27 @@ function closeSession(root){
   ['.harness/session-close-policy.md','.harness/progress-tracker.md','.harness/current-state.md','.harness/task-log.md','.harness/session-handoff.md','.harness/anti-lazy-work-policy.md'].forEach(x=>log('  - '+x));
   log('');
   log('Required final report sections:');
-  ['Completed This Session','In Progress From User Requests','Incomplete / Not Started From User Requests','Verification','Files Changed','Memory Files Updated','Risks / Assumptions / Blockers','Recommended Next Directions','Next Exact Step'].forEach(x=>log('  - '+x));
+  ['Completed This Session','In Progress From User Requests','Incomplete / Not Started From User Requests','Planned Tasks','Waiting Tasks','On-Hold Tasks','Blocked Tasks','Dropped By User','Verification','Files Changed','Memory Files Updated','Risks / Assumptions / Blockers','Recommended Next Directions','Next Exact Step'].forEach(x=>log('  - '+x));
   log('');
   if(exists(template)) log(read(template));
-  else log('# End-of-Session Report\n\n## Completed This Session\n-\n\n## In Progress From User Requests\n-\n\n## Incomplete / Not Started From User Requests\n-\n\n## Verification\n-\n\n## Files Changed\n-\n\n## Memory Files Updated\n-\n\n## Risks / Assumptions / Blockers\n-\n\n## Recommended Next Directions\n-\n\n## Next Exact Step\n-\n');
+  else log('# End-of-Session Report\n\n## Completed This Session\n-\n\n## In Progress From User Requests\n-\n\n## Incomplete / Not Started From User Requests\n-\n\n## Planned Tasks\n-\n\n## Waiting Tasks\n-\n\n## On-Hold Tasks\n-\n\n## Blocked Tasks\n-\n\n## Dropped By User\n-\n\n## Verification\n-\n\n## Files Changed\n-\n\n## Memory Files Updated\n-\n\n## Risks / Assumptions / Blockers\n-\n\n## Recommended Next Directions\n-\n\n## Next Exact Step\n-\n');
+  const tasks=readProgressTasks(root);
+  const active=tasks.filter(t=>ACTIVE_TASK_STATUSES.has(t.status));
+  const dropped=tasks.filter(t=>t.status==='dropped');
+  log('');
+  log('Tracked unresolved / planned / waiting / on-hold / in-progress work:');
+  renderTasks(active);
+  log('');
+  log('Dropped by user:');
+  renderTasks(dropped);
   if(!exists(policy)) warn('session-close-policy.md가 없습니다. leerness migrate를 실행하세요.');
   if(!exists(progress)) warn('progress-tracker.md가 없습니다. leerness migrate를 실행하세요.');
 }
 function sessionCommand(args){ const sub=args[1]||'close'; if(sub==='close'||sub==='handoff'||sub==='end') return closeSession(args[2]||process.cwd()); fail('알 수 없는 session 명령: '+sub); }
 
-const routeData={feature:{read:['project-brief.md','current-state.md','architecture.md','context-map.md','feature-contracts.md'],update:['current-state.md','task-log.md','session-handoff.md','feature-contracts.md']},ui:{read:['design-system.md','feature-contracts.md','context-map.md'],update:['design-system.md','feature-contracts.md','current-state.md','task-log.md']},debugging:{read:['current-state.md','task-log.md','feature-contracts.md','testing-strategy.md'],update:['task-log.md','current-state.md','session-handoff.md']},refactor:{read:['architecture.md','decisions.md','guardrails.md'],update:['architecture.md','decisions.md','task-log.md']},release:{read:['release-checklist.md','testing-strategy.md','current-state.md','decisions.md','secret-policy.md'],update:['release-checklist.md','task-log.md','current-state.md','session-handoff.md']},migration:{read:['AX_MIGRATION_GUIDE.md','context-routing.md','writeback-policy.md'],update:['Only missing files by default','Use --force only when requested']},'new-install':{read:['AX_NEW_PROJECT_GUIDE.md','actual project files'],update:['project-brief.md','architecture.md','context-map.md','design-system.md','feature-contracts.md','release-checklist.md']},'skill-library':{read:['AX_SKILL_LIBRARY_GUIDE.md','skill-index.md','secret-policy.md'],update:['skill-index.md','skills-lock.json','task-log.md']},documentation:{read:['writeback-policy.md','context-routing.md'],update:['specific memory file','task-log.md','session-handoff.md']},'session-close':{read:['session-close-policy.md','progress-tracker.md','current-state.md','task-log.md','session-handoff.md','anti-lazy-work-policy.md'],update:['session-handoff.md','progress-tracker.md','current-state.md','task-log.md','relevant changed memory files']}};
-function routeCommand(task){ banner(); if(!task||task==='list'){ log('사용 가능한 task type: '+Object.keys(routeData).join(', ')); return; } const r=routeData[task]; if(!r){ fail('알 수 없는 task type: '+task); process.exitCode=1; return; } log('Task route: '+task); log('\nRead before work:'); r.read.forEach(x=>log('  - .harness/'+x)); log('\nUpdate after work:'); r.update.forEach(x=>log('  - .harness/'+x)); }
-function help(){ log(['Leerness v'+VERSION,'','Usage:','  leerness init [path] [--yes] [--skills recommended|all|office,commerce-api] [--force]','  leerness migrate [path] [--dry-run] [--force]','  leerness status [path]','  leerness verify [path]',
-  '  leerness session close [path]','  leerness route <feature|ui|debugging|refactor|release|migration|new-install|skill-library|documentation|session-close>','','Skills:','  leerness skill list','  leerness skill info <name>','  leerness skill add <name> [--path <project>]','  leerness skill remove <name> [--path <project>]','  leerness skill learn <name> --from <validated-skill-path>','','Skill library:','  leerness library guide [path]','  leerness library validate <path> [--strict-ai]','  leerness library verify <path> --ai --reviewer leerness-ai','  leerness library build <path> [--package leerness-skill-name]','  leerness library publish <built-library> --target npm|git [--execute]',''].join('\n')); }
-async function main(){ const parsed=parseArgs(process.argv.slice(2)); const args=parsed.positionals, flags=parsed.flags; if(flags.version||flags.v){ log(VERSION); return; } if(flags.help||flags.h){ help(); return; } const cmd=args[0]||'init'; if(cmd==='init') return init(args[1]||process.cwd(),flags); if(cmd==='migrate') return migrate(args[1]||process.cwd(),flags); if(cmd==='status') return status(args[1]||process.cwd()); if(cmd==='verify') return verify(args[1]||process.cwd()); if(cmd==='route') return routeCommand(args[1]||'list'); if(cmd==='session') return sessionCommand(args); if(cmd==='skill') return skillCommand(args,flags); if(cmd==='library') return libraryCommand(args,flags); help(); process.exitCode=1; }
+const routeData={feature:{read:['project-brief.md','current-state.md','architecture.md','context-map.md','feature-contracts.md'],update:['current-state.md','task-log.md','session-handoff.md','feature-contracts.md']},ui:{read:['design-system.md','feature-contracts.md','context-map.md'],update:['design-system.md','feature-contracts.md','current-state.md','task-log.md']},debugging:{read:['current-state.md','task-log.md','feature-contracts.md','testing-strategy.md'],update:['task-log.md','current-state.md','session-handoff.md']},refactor:{read:['architecture.md','decisions.md','guardrails.md'],update:['architecture.md','decisions.md','task-log.md']},release:{read:['release-checklist.md','testing-strategy.md','current-state.md','decisions.md','secret-policy.md'],update:['release-checklist.md','task-log.md','current-state.md','session-handoff.md']},migration:{read:['AX_MIGRATION_GUIDE.md','context-routing.md','writeback-policy.md'],update:['Only missing files by default','Use --force only when requested']},'new-install':{read:['AX_NEW_PROJECT_GUIDE.md','actual project files'],update:['project-brief.md','architecture.md','context-map.md','design-system.md','feature-contracts.md','release-checklist.md']},'skill-library':{read:['AX_SKILL_LIBRARY_GUIDE.md','skill-index.md','secret-policy.md'],update:['skill-index.md','skills-lock.json','task-log.md']},documentation:{read:['writeback-policy.md','context-routing.md'],update:['specific memory file','task-log.md','session-handoff.md']},debug:{read:['debug-guide.md','AGENTS.md','language-policy.md','context-routing.md','writeback-policy.md','progress-tracker.md','session-close-policy.md'],update:['debug findings in task-log.md','progress-tracker.md when user-requested debug work changes']},'session-close':{read:['session-close-policy.md','progress-tracker.md','current-state.md','task-log.md','session-handoff.md','anti-lazy-work-policy.md'],update:['session-handoff.md','progress-tracker.md','current-state.md','task-log.md','relevant changed memory files']}};
+function routePath(x){ if(String(x).includes('/')||String(x).endsWith('.md')&&['AGENTS.md','CLAUDE.md','README.md'].includes(String(x))) return String(x); if(String(x).includes(' ')) return String(x); return '.harness/'+x; }
+function routeCommand(task){ banner(); if(!task||task==='list'){ log('사용 가능한 task type: '+Object.keys(routeData).join(', ')); return; } const r=routeData[task]; if(!r){ fail('알 수 없는 task type: '+task); process.exitCode=1; return; } log('Task route: '+task); log('\nRead before work:'); r.read.forEach(x=>log('  - '+routePath(x))); log('\nUpdate after work:'); r.update.forEach(x=>log('  - '+routePath(x))); }
+function help(){ log(['Leerness v'+VERSION,'','Usage:','  leerness init [path] [--yes] [--language auto|ko|en] [--skills recommended|all|office,commerce-api] [--force]','  leerness migrate [path] [--dry-run] [--language auto|ko|en] [--force]','  leerness status [path]','  leerness verify [path]','  leerness debug [path]','  leerness route <feature|ui|debugging|refactor|release|migration|new-install|skill-library|documentation|debug|session-close>','','Tasks:','  leerness task list [--status planned,waiting,on-hold]','  leerness task add "request" [--status planned]','  leerness task update T-0002 --status in-progress','  leerness task drop T-0002 --reason "user dropped"','','Session:','  leerness session close [path]','','Skills:','  leerness skill list','  leerness skill info <name>','  leerness skill add <name> [--path <project>]','  leerness skill remove <name> [--path <project>]','  leerness skill learn <name> --from <validated-skill-path>','','Skill library:','  leerness library guide [path]','  leerness library validate <path> [--strict-ai]','  leerness library verify <path> --ai --reviewer leerness-ai','  leerness library build <path> [--package leerness-skill-name]','  leerness library publish <built-library> --target npm|git [--execute]',''].join('\n')); }
+async function main(){ const parsed=parseArgs(process.argv.slice(2)); const args=parsed.positionals, flags=parsed.flags; if(flags.version||flags.v){ log(VERSION); return; } if(flags.help||flags.h){ help(); return; } const cmd=args[0]||'init'; if(cmd==='init') return init(args[1]||process.cwd(),flags); if(cmd==='migrate') return migrate(args[1]||process.cwd(),flags); if(cmd==='status') return status(args[1]||process.cwd()); if(cmd==='verify') return verify(args[1]||process.cwd()); if(cmd==='route') return routeCommand(args[1]||'list'); if(cmd==='debug') return debugHarness(args[1]||process.cwd()); if(cmd==='task') return taskCommand(args,flags); if(cmd==='session') return sessionCommand(args); if(cmd==='skill') return skillCommand(args,flags); if(cmd==='library') return libraryCommand(args,flags); help(); process.exitCode=1; }
 main().catch(err=>{ fail(err.stack||err.message); process.exit(1); });
