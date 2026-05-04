@@ -1,6 +1,6 @@
 # Leerness
 
-**Leerness는 AI 에이전트가 대규모 프로젝트에서도 필요한 문서를 먼저 읽고, 작업 후 적재적소에 프로젝트 메모리를 갱신하도록 만드는 AX 최적화 개발 하네스입니다.**
+**Leerness는 AI 에이전트가 대규모 프로젝트에서도 필요한 문서를 먼저 읽고, 작업 후 적재적소에 프로젝트 메모리를 갱신하며, 세션 종료마다 진행/미완료/추천 방향을 명확히 남기도록 만드는 AX 최적화 개발 하네스입니다.**
 
 Leerness의 목적은 단순히 `.md` 파일을 많이 만드는 것이 아닙니다. AI가 어떤 상황에 어떤 파일을 봐야 하는지, 어떤 작업 후 어떤 파일을 갱신해야 하는지까지 명확히 지시합니다.
 
@@ -20,6 +20,8 @@ Agent = Model + Leerness Harness
 | Project Memory | 목적, 현재 상태, 아키텍처, 결정 로그, 릴리즈 조건 유지 |
 | Skill Libraries | 검증된 성공 패턴을 재사용 가능한 스킬로 설치/배포 |
 | AX Guides | AI가 구버전 마이그레이션 또는 신규 설치를 안전하게 수행하도록 안내 |
+| Session Close Policy | 세션 종료 시 완료/진행중/미완료/검증/추천 방향을 강제 기록 |
+| Anti-Lazy Work Policy | 검증 없는 완료 선언, 모호한 요약, 미완료 작업 은폐를 방지 |
 
 ## 설치
 
@@ -48,6 +50,7 @@ leerness migrate [path] [--dry-run]
 leerness status [path]
 leerness verify [path]
 leerness route <task-type>
+leerness session close [path]
 
 leerness skill list
 leerness skill info <name>
@@ -85,6 +88,9 @@ leerness route new-install
   testing-strategy.md           # 검증 전략
   release-checklist.md          # 배포/npm/git/환경변수/롤백 조건
   session-handoff.md            # 다음 세션 인수인계
+  session-close-policy.md        # 세션 종료 보고 규칙
+  progress-tracker.md            # 사용자 요청별 진행/미완료 추적
+  anti-lazy-work-policy.md       # 게으른 작업 방지 규칙
   context-routing.md            # 작업 유형별 읽기/갱신 라우팅
   writeback-policy.md           # 어떤 정보를 어디에 기록할지
   task-type-map.md              # 사용자 요청 → 작업 유형 매핑
@@ -140,6 +146,38 @@ leerness route new-install
 - project-brief, architecture, context-map, design-system, feature-contracts 채우기
 - release-checklist와 testing-strategy를 실제 프로젝트 기준으로 작성
 - session-handoff에 다음 정확한 작업 기록
+
+
+## 세션 종료 인수인계와 게으른 작업 방지
+
+Leerness는 의미 있는 작업 세션이 끝날 때 AI가 다음 항목을 반드시 정리하도록 지시합니다.
+
+```bash
+leerness route session-close
+leerness session close
+```
+
+세션 종료 보고에는 다음이 포함되어야 합니다.
+
+- 이번 세션에서 완료한 작업
+- 사용자가 요청한 작업 중 아직 진행 중인 작업
+- 사용자가 요청했지만 아직 미완료 또는 미시작인 작업
+- 실행한 검증과 결과
+- 변경한 파일과 갱신한 하네스 메모리
+- 리스크, 가정, 블로커
+- 추가로 진행하면 좋은 추천 방향
+- 다음 세션에서 바로 수행할 단 하나의 정확한 작업
+
+관련 파일:
+
+```text
+.harness/session-close-policy.md
+.harness/progress-tracker.md
+.harness/anti-lazy-work-policy.md
+.harness/templates/end-of-session-report.md
+```
+
+이 정책은 AI가 “대충 완료”라고 말하거나, 검증하지 않은 작업을 완료로 표시하거나, 미완료 요청을 숨기는 것을 막기 위한 장치입니다.
 
 ## 스킬 라이브러리
 

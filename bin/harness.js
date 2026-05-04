@@ -6,7 +6,7 @@ const path = require('path');
 const readline = require('readline');
 const childProcess = require('child_process');
 
-const VERSION = '1.3.1';
+const VERSION = '1.3.2';
 const MARK = '<!-- leerness:managed -->';
 const MIGRATED = '<!-- leerness:migrated-legacy -->';
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
@@ -27,7 +27,7 @@ function write(p,s){ fs.mkdirSync(path.dirname(p),{recursive:true}); fs.writeFil
 function rel(root,p){ return path.relative(root,p).replace(/\\/g,'/') || '.'; }
 function parseJsonSafe(s,fallback){ try { return JSON.parse(s); } catch { return fallback; } }
 function isTextFile(p){ return /\.(md|mdc|txt|json|js|ts|tsx|jsx|yml|yaml|env|gitignore)$/i.test(p) || !path.extname(p); }
-function banner(){ log(''); log(c.bold+c.magenta+'Leerness v'+VERSION+c.reset); log(c.dim+'비파괴 마이그레이션 · context routing · skill library'+c.reset); log(''); }
+function banner(){ log(''); log(c.bold+c.magenta+'Leerness v'+VERSION+c.reset); log(c.dim+'비파괴 마이그레이션 · context routing · session handoff'+c.reset); log(''); }
 function installGuide(){
   log(c.bold+'설치/마이그레이션 안내'+c.reset);
   log('  - 기존 파일은 먼저 .harness/archive/ 에 백업합니다.');
@@ -35,6 +35,7 @@ function installGuide(){
   log('  - .env.example과 .gitignore는 덮어쓰지 않고 필요한 항목만 병합합니다.');
   log('  - AGENTS/CLAUDE/Cursor/Copilot 지침과 AX 라우팅 가이드는 최신 기준으로 갱신합니다.');
   log('  - 기존 메모리 파일까지 강제로 템플릿 재생성하려면 --force를 명시하세요.');
+  log('  - 세션 종료 시 진행/미완료/추천 방향을 반드시 session-handoff에 남깁니다.');
   log('');
 }
 function projectName(root){ try{ const pkg=JSON.parse(read(path.join(root,'package.json'))); if(pkg.name) return String(pkg.name).replace(/^@[^/]+\//,''); }catch{} return path.basename(root); }
@@ -94,7 +95,40 @@ function noteLegacyPreserved(root,found,dryRun){
 }
 
 const coreFiles = {
-  'AGENTS.md': `${MARK}\n# {{PROJECT}} AI Agent Harness\n\nAgent = Model + Leerness Harness.\n\n## Core Rule\nBefore editing, route the task. Read .harness/context-routing.md and use \`leerness route <task-type>\` when the task type is unclear.\n\n## Universal Read Order\n1. .harness/project-brief.md\n2. .harness/current-state.md\n3. .harness/context-routing.md\n4. .harness/writeback-policy.md\n5. .harness/task-type-map.md\n6. .harness/context-map.md\n7. .harness/guardrails.md\n8. .harness/skills-lock.json\n\n## Task Routing\n- Feature/API work: architecture.md, feature-contracts.md, context-map.md, skills/feature-implementation.md.\n- UI/design work: design-system.md, feature-contracts.md, skills/ui-consistency.md.\n- Debugging: task-log.md, current-state.md, skills/debugging.md, related feature contract.\n- Refactoring: architecture.md, decisions.md, guardrails.md, skills/refactoring.md.\n- Release/deploy: release-checklist.md, testing-strategy.md, current-state.md, decisions.md.\n- Migration: AX_MIGRATION_GUIDE.md, context-routing.md, writeback-policy.md.\n- New install: AX_NEW_PROJECT_GUIDE.md and actual project config/source files.\n- Skill/library work: AX_SKILL_LIBRARY_GUIDE.md and ai-verified-skill-publisher when installed.\n\n## Writeback Rules\n- Always update current-state.md, task-log.md, and session-handoff.md after meaningful work.\n- Update decisions.md when a structural, technology, API, schema, deployment, or irreversible decision is made.\n- Update feature-contracts.md when input/output/state/error behavior changes.\n- Update design-system.md when UI rules, components, layout, spacing, or states change.\n- Update release-checklist.md when deployment, environment variables, rollback, CI, npm, or git release requirements change.\n- Update context-map.md when important files, modules, routes, commands, or ownership areas change.\n- Update project-brief.md only when product purpose, target users, success criteria, or project direction changes.\n\n## Non-Destructive Migration Policy\n- Never overwrite existing project memory files unless the user explicitly requests --force.\n- Preserve .env.example and .gitignore; append missing Leerness entries only.\n- Keep secrets, tokens, cookies, credentials, and customer private data out of harness files.\n\n## Response Contract\n- Task type and files consulted\n- Summary\n- Files changed\n- Verification\n- Memory files updated\n- Risks or assumptions\n- Next step\n{{LEGACY_AGENT}}\n`,
+  'AGENTS.md': `${MARK}\n# {{PROJECT}} AI Agent Harness\n\nAgent = Model + Leerness Harness.\n\n## Core Rule\nBefore editing, route the task. Read .harness/context-routing.md and use \`leerness route <task-type>\` when the task type is unclear.\n\n## Universal Read Order\n1. .harness/project-brief.md\n2. .harness/current-state.md\n3. .harness/context-routing.md\n4. .harness/writeback-policy.md\n5. .harness/task-type-map.md\n6. .harness/context-map.md\n7. .harness/guardrails.md\n8. .harness/skills-lock.json\n\n## Task Routing\n- Feature/API work: architecture.md, feature-contracts.md, context-map.md, skills/feature-implementation.md.\n- UI/design work: design-system.md, feature-contracts.md, skills/ui-consistency.md.\n- Debugging: task-log.md, current-state.md, skills/debugging.md, related feature contract.\n- Refactoring: architecture.md, decisions.md, guardrails.md, skills/refactoring.md.\n- Release/deploy: release-checklist.md, testing-strategy.md, current-state.md, decisions.md.\n- Migration: AX_MIGRATION_GUIDE.md, context-routing.md, writeback-policy.md.\n- New install: AX_NEW_PROJECT_GUIDE.md and actual project config/source files.\n- Skill/library work: AX_SKILL_LIBRARY_GUIDE.md and ai-verified-skill-publisher when installed.\n\n## Writeback Rules\n- Always update current-state.md, task-log.md, and session-handoff.md after meaningful work.\n- Update decisions.md when a structural, technology, API, schema, deployment, or irreversible decision is made.\n- Update feature-contracts.md when input/output/state/error behavior changes.\n- Update design-system.md when UI rules, components, layout, spacing, or states change.\n- Update release-checklist.md when deployment, environment variables, rollback, CI, npm, or git release requirements change.\n- Update context-map.md when important files, modules, routes, commands, or ownership areas change.\n- Update project-brief.md only when product purpose, target users, success criteria, or project direction changes.\n\n## Non-Destructive Migration Policy\n- Never overwrite existing project memory files unless the user explicitly requests --force.\n- Preserve .env.example and .gitignore; append missing Leerness entries only.\n- Keep secrets, tokens, cookies, credentials, and customer private data out of harness files.\n\n## End-of-Session Contract
+Every meaningful session must close with a handoff. Do not stop at \"done\". Before the final answer, check .harness/session-close-policy.md, .harness/progress-tracker.md, and .harness/anti-lazy-work-policy.md.
+
+At the end of each session, list:
+1. Completed work in this session.
+2. User-requested work still in progress.
+3. User-requested work not started or incomplete.
+4. Verification performed and results.
+5. Memory files updated.
+6. Risks, assumptions, or blockers.
+7. Recommended next directions.
+8. The single next exact action.
+
+## Anti-Lazy Work Rule
+- Do not hide unfinished work behind vague summaries.
+- Do not claim completion without verification or explicit limits.
+- If partial, say exactly what is partial and what remains.
+- Prefer concrete file names, commands, and checks over generic phrases.
+- If tests or verification were skipped, state why and what should be run next.
+
+## Response Contract
+- Task type and files consulted
+- Summary
+- Completed work
+- In-progress work
+- Incomplete requested work
+- Files changed
+- Verification
+- Memory files updated
+- Risks or assumptions
+- Recommended next directions
+- Next exact step
+{{LEGACY_AGENT}}
+`,
   'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nUse AGENTS.md as the source of truth. Route every task through .harness/context-routing.md and .harness/task-type-map.md. Do not overwrite existing project memory during migration unless --force is explicit.\n`,
   '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nRead AGENTS.md first. Follow .harness/context-routing.md, writeback-policy.md, installed skills, design-system, feature-contracts, and guardrails.\n`,
   '.github/copilot-instructions.md': `${MARK}\n# GitHub Copilot Instructions\n\nUse AGENTS.md and .harness/ as the project memory. Preserve existing project memory files unless --force is explicit.\n`,
@@ -117,10 +151,56 @@ const coreFiles = {
   '.harness/testing-strategy.md': `${MARK}\n---\nleernessRole: testing-strategy\nreadWhen: [feature, debugging, refactor, release]\nupdateWhen: [test-command-change, new-critical-flow, regression-added]\ndoNotStore: [secrets]\n---\n\n# Testing Strategy\n\n## Commands\n\n## Critical Flows\n\n## Regression Notes\n`,
   '.harness/review-checklist.md': `${MARK}\n# Review Checklist\n\n- [ ] Architecture preserved\n- [ ] Feature contract preserved or updated\n- [ ] Design system followed\n- [ ] No secrets stored\n- [ ] Writeback files updated\n`,
   '.harness/release-checklist.md': `${MARK}\n---\nleernessRole: release-checklist\nreadWhen: [release, deploy, ci, npm-publish, git-push, env-change]\nupdateWhen: [deploy-failure, new-env-var, ci-change, rollback-change, release-rule-change]\ndoNotStore: [secrets, tokens, passwords, cookies]\n---\n\n# Release Checklist\n\n## Commands\n\n## Required Environment Variables\n\n## Verification\n\n## Rollback\n`,
-  '.harness/session-handoff.md': `${MARK}\n---\nleernessRole: session-handoff\nreadWhen: [resume-work, every-new-session]\nupdateWhen: [end-of-session, handoff, blocked-work]\ndoNotStore: [secrets, tokens]\n---\n\n# Session Handoff\n\n## Done\n\n## Changed Files\n\n## Verification\n\n## Risks\n\n## Next Exact Step\n`,
+  '.harness/session-handoff.md': `${MARK}
+---
+leernessRole: session-handoff
+readWhen: [resume-work, every-new-session, end-of-session]
+updateWhen: [end-of-session, handoff, blocked-work, partial-completion]
+doNotStore: [secrets, tokens, raw-private-data]
+---
+
+# Session Handoff
+
+## Session Summary
+- Date:
+- Task type:
+- User request:
+
+## Completed This Session
+-
+
+## In Progress From User Requests
+-
+
+## Incomplete / Not Started From User Requests
+-
+
+## Files Changed
+-
+
+## Verification Performed
+- Command/check:
+- Result:
+
+## Memory Files Updated
+-
+
+## Risks / Assumptions / Blockers
+-
+
+## Recommended Next Directions
+-
+
+## Next Exact Step
+-
+`,
+  '.harness/session-close-policy.md': `${MARK}\n---\nleernessRole: session-close-policy\nreadWhen: [end-of-session, every-final-response, partial-completion, handoff]\nupdateWhen: [session-close-format-change, repeated-handoff-failure, reporting-standard-change]\ndoNotStore: [secrets, tokens, credentials, raw-private-data]\n---\n\n# Session Close Policy\n\nEvery meaningful AI work session must end with a concrete handoff. This prevents hidden unfinished work and makes the next session restartable.\n\n## Required Final Checklist\n\nBefore the final answer, the AI must inspect whether the session had meaningful work. If yes, it must provide or update:\n\n1. Completed work in this session.\n2. User-requested work still in progress.\n3. User-requested work incomplete or not started.\n4. Verification performed and exact results.\n5. Files or documents changed.\n6. Harness memory files updated.\n7. Risks, assumptions, blockers, or skipped checks.\n8. Recommended next directions.\n9. The single next exact action.\n\n## Required Memory Writeback\n\nUpdate these files when meaningful work occurred:\n\n- current-state.md\n- task-log.md\n- session-handoff.md\n\nUpdate these when relevant:\n\n- decisions.md\n- feature-contracts.md\n- design-system.md\n- release-checklist.md\n- context-map.md\n- progress-tracker.md\n\n## Completion Labels\n\nUse one of these labels for each requested item:\n\n- done\n- in-progress\n- blocked\n- incomplete\n- skipped-with-reason\n\nNever mark work done if verification was not performed or if key requested scope remains unfinished.\n`,
+  '.harness/progress-tracker.md': `${MARK}\n---\nleernessRole: progress-tracker\nreadWhen: [planning, resume-work, end-of-session, multi-step-work]\nupdateWhen: [task-started, task-completed, task-blocked, scope-change, end-of-session]\ndoNotStore: [secrets, tokens, credentials, raw-private-data]\n---\n\n# Progress Tracker\n\nUse this file to track user-requested work across sessions. Keep entries concrete and checkable.\n\n| ID | User Request | Status | Owner | Last Update | Evidence / Notes | Next Action |\n|---|---|---|---|---|---|---|\n| T-0001 | Initialize Leerness project memory | done | AI | {{DATE}} | Leerness v{{VERSION}} installed or migrated. | Fill project-specific details. |\n\n## Status Values\n\n- requested\n- in-progress\n- done\n- blocked\n- incomplete\n- skipped-with-reason\n`,
+  '.harness/anti-lazy-work-policy.md': `${MARK}\n---\nleernessRole: anti-lazy-work-policy\nreadWhen: [every-task, end-of-session, verification, planning]\nupdateWhen: [quality-failure, repeated-shortcut, missed-verification, reporting-rule-change]\ndoNotStore: [secrets, tokens, credentials]\n---\n\n# Anti-Lazy Work Policy\n\nThe AI must not appear productive while leaving important work vague or incomplete.\n\n## Required Behavior\n\n- State exactly what was done and what was not done.\n- Prefer concrete file paths, commands, checks, and outputs.\n- Do not skip obvious verification when tools are available.\n- If a check cannot be run, say so and provide the exact command to run.\n- Do not collapse multiple unfinished user requests into a generic sentence.\n- Do not overwrite project memory to avoid doing the harder merge.\n- Do not call a task complete only because files were generated. Confirm behavior or clearly label it unverified.\n\n## Laziness Warning Signs\n\n- done without changed files or verification.\n- should work without a check.\n- No mention of incomplete user-requested items.\n- No next exact action.\n- Memory files not updated after meaningful work.\n\n## Minimum Final Answer Standard\n\nA final answer after meaningful work must include:\n\n- Completed\n- In progress\n- Incomplete\n- Verification\n- Updated memory\n- Risks\n- Recommended next directions\n`,
+  '.harness/templates/end-of-session-report.md': `${MARK}\n# End-of-Session Report\n\n## Completed This Session\n-\n\n## In Progress From User Requests\n-\n\n## Incomplete / Not Started From User Requests\n-\n\n## Verification\n-\n\n## Files Changed\n-\n\n## Memory Files Updated\n-\n\n## Risks / Assumptions / Blockers\n-\n\n## Recommended Next Directions\n-\n\n## Next Exact Step\n-\n`,
   '.harness/skill-index.md': `${MARK}\n# Skill Index\n\n| Task | Skill |\n|---|---|\n| Codebase analysis | skills/codebase-analysis.md |\n| Feature implementation | skills/feature-implementation.md |\n| Debugging | skills/debugging.md |\n| UI consistency | skills/ui-consistency.md |\n| Release | skills/release-check.md |\n`,
-  '.harness/context-routing.md': `${MARK}\n# Context Routing\n\nUse this file to decide what to read before work and what to update afterward.\n\n## feature\nRead: project-brief, current-state, architecture, context-map, feature-contracts, skills/feature-implementation.\nUpdate: current-state, task-log, session-handoff, feature-contracts, context-map when paths change.\n\n## ui\nRead: design-system, feature-contracts, context-map, skills/ui-consistency.\nUpdate: design-system, feature-contracts, current-state, task-log, session-handoff.\n\n## debugging\nRead: current-state, task-log, feature-contracts, testing-strategy, skills/debugging.\nUpdate: task-log, current-state, session-handoff, testing-strategy when regression coverage changes.\n\n## release\nRead: release-checklist, testing-strategy, current-state, decisions, secret-policy.\nUpdate: release-checklist, task-log, current-state, session-handoff.\n\n## migration\nRead: AX_MIGRATION_GUIDE, writeback-policy, task-type-map.\nUpdate: only missing files by default; preserve project memory unless --force.\n`,
-  '.harness/writeback-policy.md': `${MARK}\n# Writeback Policy\n\n## current-state.md\nCurrent progress, blockers, next work.\n\n## task-log.md\nWhat changed, when, and verification result.\n\n## session-handoff.md\nEnough context for the next AI session to continue.\n\n## decisions.md\nImportant choices and tradeoffs.\n\n## release-checklist.md\nDeploy commands, env requirements, rollback, failures.\n\n## design-system.md\nUI rules and reusable patterns.\n\n## feature-contracts.md\nInput/output/state/error contracts.\n\n## project-brief.md\nProduct purpose and success criteria only.\n`,
+  '.harness/context-routing.md': `${MARK}\n# Context Routing\n\nUse this file to decide what to read before work and what to update afterward.\n\n## feature\nRead: project-brief, current-state, architecture, context-map, feature-contracts, skills/feature-implementation.\nUpdate: current-state, task-log, session-handoff, feature-contracts, context-map when paths change.\n\n## ui\nRead: design-system, feature-contracts, context-map, skills/ui-consistency.\nUpdate: design-system, feature-contracts, current-state, task-log, session-handoff.\n\n## debugging\nRead: current-state, task-log, feature-contracts, testing-strategy, skills/debugging.\nUpdate: task-log, current-state, session-handoff, testing-strategy when regression coverage changes.\n\n## release\nRead: release-checklist, testing-strategy, current-state, decisions, secret-policy.\nUpdate: release-checklist, task-log, current-state, session-handoff.\n\n## migration\nRead: AX_MIGRATION_GUIDE, writeback-policy, task-type-map.\nUpdate: only missing files by default; preserve project memory unless --force.\n\n## session-close\nRead: session-close-policy, progress-tracker, current-state, task-log, session-handoff, anti-lazy-work-policy.\nUpdate: session-handoff, progress-tracker, current-state, task-log, and any relevant memory files changed by the session.\n`,
+  '.harness/writeback-policy.md': `${MARK}\n# Writeback Policy\n\n## current-state.md\nCurrent progress, blockers, next work.\n\n## task-log.md\nWhat changed, when, and verification result.\n\n## session-handoff.md\nEnough context for the next AI session to continue.\n\n## decisions.md\nImportant choices and tradeoffs.\n\n## release-checklist.md\nDeploy commands, env requirements, rollback, failures.\n\n## design-system.md\nUI rules and reusable patterns.\n\n## feature-contracts.md\nInput/output/state/error contracts.\n\n## project-brief.md\nProduct purpose and success criteria only.\n\n## progress-tracker.md\nUser-requested work items, status, evidence, and next actions across sessions.\n\n## session-close-policy.md\nFinal response and handoff rules. Update only when the reporting standard changes.\n\n## anti-lazy-work-policy.md\nQuality guardrails that prevent vague or incomplete closure. Update when repeated failure patterns appear.\n`,
   '.harness/task-type-map.md': `${MARK}\n# Task Type Map\n\n| User request | Task type | First files |\n|---|---|---|\n| 새 기능 | feature | feature-contracts, architecture |\n| 디자인/UI | ui | design-system |\n| 오류 수정 | debugging | task-log, debugging skill |\n| 구조 개선 | refactor | architecture, decisions |\n| 배포 | release | release-checklist |\n| 하네스 전환 | migration | AX_MIGRATION_GUIDE |\n| 신규 적용 | new-install | AX_NEW_PROJECT_GUIDE |\n| 스킬 저장/배포 | skill-library | AX_SKILL_LIBRARY_GUIDE |\n`,
   '.harness/AX_MIGRATION_GUIDE.md': `${MARK}\n# AX Migration Guide\n\n## Goal\nMigrate old harness files without losing project memory.\n\n## Procedure\n1. Run: leerness migrate --dry-run\n2. Confirm archive target.\n3. Run: leerness migrate\n4. Check .env.example and .gitignore were merged, not replaced.\n5. Check project memory files were preserved.\n6. Fill only missing context using archived legacy files.\n7. Run: leerness status && leerness verify.\n\n## Critical Rule\nDo not overwrite existing project-brief, current-state, architecture, decisions, release-checklist, feature-contracts, or design-system unless the user explicitly asks for --force.\n`,
   '.harness/AX_NEW_PROJECT_GUIDE.md': `${MARK}\n# AX New Project Guide\n\n## Goal\nAfter initial installation, populate Leerness memory from the actual project.\n\n## Read actual project files\n- package/config files\n- app/routes/pages\n- API/server/functions\n- DB/schema/rules\n- deploy/CI files\n- tests\n\n## Fill memory files\n- project-brief.md: purpose and success criteria\n- architecture.md: modules and data flow\n- context-map.md: important files and routes\n- design-system.md: existing UI patterns\n- feature-contracts.md: major features and states\n- release-checklist.md: real deploy commands and env requirements\n`,
@@ -137,8 +217,8 @@ const coreFiles = {
   '.harness/templates/decision.md': `${MARK}\n# Decision\n\n## Decision\n\n## Reason\n\n## Alternatives\n\n## Impact\n`
 };
 
-const memoryFiles = new Set(['.harness/project-brief.md','.harness/current-state.md','.harness/architecture.md','.harness/context-map.md','.harness/decisions.md','.harness/task-log.md','.harness/constraints.md','.harness/guardrails.md','.harness/design-system.md','.harness/feature-contracts.md','.harness/testing-strategy.md','.harness/review-checklist.md','.harness/release-checklist.md','.harness/session-handoff.md','.harness/skill-index.md','.harness/secret-policy.md']);
-const refreshableFiles = new Set(['AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md','.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md','.harness/AX_SKILL_LIBRARY_GUIDE.md','.harness/AX_MIGRATION_GUIDE.md','.harness/AX_NEW_PROJECT_GUIDE.md','.harness/manifest.json','.harness/HARNESS_VERSION']);
+const memoryFiles = new Set(['.harness/project-brief.md','.harness/current-state.md','.harness/architecture.md','.harness/context-map.md','.harness/decisions.md','.harness/task-log.md','.harness/constraints.md','.harness/guardrails.md','.harness/design-system.md','.harness/feature-contracts.md','.harness/testing-strategy.md','.harness/review-checklist.md','.harness/release-checklist.md','.harness/session-handoff.md','.harness/progress-tracker.md','.harness/skill-index.md','.harness/secret-policy.md']);
+const refreshableFiles = new Set(['AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md','.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md','.harness/AX_SKILL_LIBRARY_GUIDE.md','.harness/AX_MIGRATION_GUIDE.md','.harness/AX_NEW_PROJECT_GUIDE.md','.harness/session-close-policy.md','.harness/anti-lazy-work-policy.md','.harness/templates/end-of-session-report.md','.harness/manifest.json','.harness/HARNESS_VERSION']);
 function uniqueLinesAppend(current, addition){
   const lines=current.split(/\r?\n/); const seen=new Set(lines.map(x=>x.trim()).filter(Boolean));
   const add=addition.split(/\r?\n/).filter(line=>{ const t=line.trim(); if(!t||seen.has(t)) return false; seen.add(t); return true; });
@@ -225,8 +305,31 @@ function publishSkillLibrary(dir,flags){ dir=path.resolve(dir||process.cwd()); c
 function libraryGuide(root){ root=path.resolve(root||process.cwd()); const p=path.join(root,'.harness/AX_SKILL_LIBRARY_GUIDE.md'); if(exists(p)) log(read(p)); else log(coreFiles['.harness/AX_SKILL_LIBRARY_GUIDE.md']); }
 function libraryCommand(args,flags){ const sub=args[1]||'help'; if(sub==='guide') return libraryGuide(args[2]||flags.path||process.cwd()); if(sub==='validate') return validateSkillLibrary(args[2]||process.cwd(),{silent:false,strictAi:Boolean(flags['strict-ai'])}); if(sub==='verify') return verifySkillLibrary(args[2]||process.cwd(),flags); if(sub==='build') return buildSkillLibrary(args[2]||process.cwd(),flags); if(sub==='publish'||sub==='upload') return publishSkillLibrary(args[2]||process.cwd(),flags); if(sub==='status'){ const meta=readSkillLibraryMeta(args[2]||process.cwd()); if(!meta) return fail('메타데이터 없음'); renderSkillMeta(meta); return; } fail('알 수 없는 library 명령: '+sub); }
 
-const routeData={feature:{read:['project-brief.md','current-state.md','architecture.md','context-map.md','feature-contracts.md'],update:['current-state.md','task-log.md','session-handoff.md','feature-contracts.md']},ui:{read:['design-system.md','feature-contracts.md','context-map.md'],update:['design-system.md','feature-contracts.md','current-state.md','task-log.md']},debugging:{read:['current-state.md','task-log.md','feature-contracts.md','testing-strategy.md'],update:['task-log.md','current-state.md','session-handoff.md']},refactor:{read:['architecture.md','decisions.md','guardrails.md'],update:['architecture.md','decisions.md','task-log.md']},release:{read:['release-checklist.md','testing-strategy.md','current-state.md','decisions.md','secret-policy.md'],update:['release-checklist.md','task-log.md','current-state.md','session-handoff.md']},migration:{read:['AX_MIGRATION_GUIDE.md','context-routing.md','writeback-policy.md'],update:['Only missing files by default','Use --force only when requested']},'new-install':{read:['AX_NEW_PROJECT_GUIDE.md','actual project files'],update:['project-brief.md','architecture.md','context-map.md','design-system.md','feature-contracts.md','release-checklist.md']},'skill-library':{read:['AX_SKILL_LIBRARY_GUIDE.md','skill-index.md','secret-policy.md'],update:['skill-index.md','skills-lock.json','task-log.md']},documentation:{read:['writeback-policy.md','context-routing.md'],update:['specific memory file','task-log.md','session-handoff.md']}};
+
+function closeSession(root){
+  root=path.resolve(root||process.cwd());
+  banner();
+  const template=path.join(root,'.harness/templates/end-of-session-report.md');
+  const policy=path.join(root,'.harness/session-close-policy.md');
+  const progress=path.join(root,'.harness/progress-tracker.md');
+  log('Session close checklist');
+  log('');
+  log('Read before closing:');
+  ['.harness/session-close-policy.md','.harness/progress-tracker.md','.harness/current-state.md','.harness/task-log.md','.harness/session-handoff.md','.harness/anti-lazy-work-policy.md'].forEach(x=>log('  - '+x));
+  log('');
+  log('Required final report sections:');
+  ['Completed This Session','In Progress From User Requests','Incomplete / Not Started From User Requests','Verification','Files Changed','Memory Files Updated','Risks / Assumptions / Blockers','Recommended Next Directions','Next Exact Step'].forEach(x=>log('  - '+x));
+  log('');
+  if(exists(template)) log(read(template));
+  else log('# End-of-Session Report\n\n## Completed This Session\n-\n\n## In Progress From User Requests\n-\n\n## Incomplete / Not Started From User Requests\n-\n\n## Verification\n-\n\n## Files Changed\n-\n\n## Memory Files Updated\n-\n\n## Risks / Assumptions / Blockers\n-\n\n## Recommended Next Directions\n-\n\n## Next Exact Step\n-\n');
+  if(!exists(policy)) warn('session-close-policy.md가 없습니다. leerness migrate를 실행하세요.');
+  if(!exists(progress)) warn('progress-tracker.md가 없습니다. leerness migrate를 실행하세요.');
+}
+function sessionCommand(args){ const sub=args[1]||'close'; if(sub==='close'||sub==='handoff'||sub==='end') return closeSession(args[2]||process.cwd()); fail('알 수 없는 session 명령: '+sub); }
+
+const routeData={feature:{read:['project-brief.md','current-state.md','architecture.md','context-map.md','feature-contracts.md'],update:['current-state.md','task-log.md','session-handoff.md','feature-contracts.md']},ui:{read:['design-system.md','feature-contracts.md','context-map.md'],update:['design-system.md','feature-contracts.md','current-state.md','task-log.md']},debugging:{read:['current-state.md','task-log.md','feature-contracts.md','testing-strategy.md'],update:['task-log.md','current-state.md','session-handoff.md']},refactor:{read:['architecture.md','decisions.md','guardrails.md'],update:['architecture.md','decisions.md','task-log.md']},release:{read:['release-checklist.md','testing-strategy.md','current-state.md','decisions.md','secret-policy.md'],update:['release-checklist.md','task-log.md','current-state.md','session-handoff.md']},migration:{read:['AX_MIGRATION_GUIDE.md','context-routing.md','writeback-policy.md'],update:['Only missing files by default','Use --force only when requested']},'new-install':{read:['AX_NEW_PROJECT_GUIDE.md','actual project files'],update:['project-brief.md','architecture.md','context-map.md','design-system.md','feature-contracts.md','release-checklist.md']},'skill-library':{read:['AX_SKILL_LIBRARY_GUIDE.md','skill-index.md','secret-policy.md'],update:['skill-index.md','skills-lock.json','task-log.md']},documentation:{read:['writeback-policy.md','context-routing.md'],update:['specific memory file','task-log.md','session-handoff.md']},'session-close':{read:['session-close-policy.md','progress-tracker.md','current-state.md','task-log.md','session-handoff.md','anti-lazy-work-policy.md'],update:['session-handoff.md','progress-tracker.md','current-state.md','task-log.md','relevant changed memory files']}};
 function routeCommand(task){ banner(); if(!task||task==='list'){ log('사용 가능한 task type: '+Object.keys(routeData).join(', ')); return; } const r=routeData[task]; if(!r){ fail('알 수 없는 task type: '+task); process.exitCode=1; return; } log('Task route: '+task); log('\nRead before work:'); r.read.forEach(x=>log('  - .harness/'+x)); log('\nUpdate after work:'); r.update.forEach(x=>log('  - .harness/'+x)); }
-function help(){ log(['Leerness v'+VERSION,'','Usage:','  leerness init [path] [--yes] [--skills recommended|all|office,commerce-api] [--force]','  leerness migrate [path] [--dry-run] [--force]','  leerness status [path]','  leerness verify [path]','  leerness route <feature|ui|debugging|refactor|release|migration|new-install|skill-library|documentation>','','Skills:','  leerness skill list','  leerness skill info <name>','  leerness skill add <name> [--path <project>]','  leerness skill remove <name> [--path <project>]','  leerness skill learn <name> --from <validated-skill-path>','','Skill library:','  leerness library guide [path]','  leerness library validate <path> [--strict-ai]','  leerness library verify <path> --ai --reviewer leerness-ai','  leerness library build <path> [--package leerness-skill-name]','  leerness library publish <built-library> --target npm|git [--execute]',''].join('\n')); }
-async function main(){ const parsed=parseArgs(process.argv.slice(2)); const args=parsed.positionals, flags=parsed.flags; if(flags.version||flags.v){ log(VERSION); return; } if(flags.help||flags.h){ help(); return; } const cmd=args[0]||'init'; if(cmd==='init') return init(args[1]||process.cwd(),flags); if(cmd==='migrate') return migrate(args[1]||process.cwd(),flags); if(cmd==='status') return status(args[1]||process.cwd()); if(cmd==='verify') return verify(args[1]||process.cwd()); if(cmd==='route') return routeCommand(args[1]||'list'); if(cmd==='skill') return skillCommand(args,flags); if(cmd==='library') return libraryCommand(args,flags); help(); process.exitCode=1; }
+function help(){ log(['Leerness v'+VERSION,'','Usage:','  leerness init [path] [--yes] [--skills recommended|all|office,commerce-api] [--force]','  leerness migrate [path] [--dry-run] [--force]','  leerness status [path]','  leerness verify [path]',
+  '  leerness session close [path]','  leerness route <feature|ui|debugging|refactor|release|migration|new-install|skill-library|documentation|session-close>','','Skills:','  leerness skill list','  leerness skill info <name>','  leerness skill add <name> [--path <project>]','  leerness skill remove <name> [--path <project>]','  leerness skill learn <name> --from <validated-skill-path>','','Skill library:','  leerness library guide [path]','  leerness library validate <path> [--strict-ai]','  leerness library verify <path> --ai --reviewer leerness-ai','  leerness library build <path> [--package leerness-skill-name]','  leerness library publish <built-library> --target npm|git [--execute]',''].join('\n')); }
+async function main(){ const parsed=parseArgs(process.argv.slice(2)); const args=parsed.positionals, flags=parsed.flags; if(flags.version||flags.v){ log(VERSION); return; } if(flags.help||flags.h){ help(); return; } const cmd=args[0]||'init'; if(cmd==='init') return init(args[1]||process.cwd(),flags); if(cmd==='migrate') return migrate(args[1]||process.cwd(),flags); if(cmd==='status') return status(args[1]||process.cwd()); if(cmd==='verify') return verify(args[1]||process.cwd()); if(cmd==='route') return routeCommand(args[1]||'list'); if(cmd==='session') return sessionCommand(args); if(cmd==='skill') return skillCommand(args,flags); if(cmd==='library') return libraryCommand(args,flags); help(); process.exitCode=1; }
 main().catch(err=>{ fail(err.stack||err.message); process.exit(1); });
