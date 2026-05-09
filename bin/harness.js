@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.6';
+const VERSION = '1.9.7';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1003,7 +1003,13 @@ function lazyDetect(root) {
     const bq = (pre.match(/(?<!\\)`/g) || []).length;
     return (sq % 2 === 1) || (dq % 2 === 1) || (bq % 2 === 1);
   }
+  // 1.9.7 C: TODO 자동 추적 강화 — 위치+텍스트 캡처, known-todos 비교, --auto-track 등록
+  const knownPath = path.join(root, '.harness/known-todos.json');
+  let knownList = [];
+  if (exists(knownPath)) { try { knownList = JSON.parse(read(knownPath)); } catch {} }
+  const knownSet = new Set(knownList.map(k => `${k.file}:${k.line}:${k.text}`));
   let todoCount = 0;
+  const newTodos = [];
   const cliSelf = path.resolve(__filename);
   for (const file of walk(root)) {
     const ext = path.extname(file).toLowerCase();
@@ -1014,17 +1020,39 @@ function lazyDetect(root) {
     let text; try { text = read(file); } catch { continue; }
     const lines = text.split('\n');
     const tre = /\bTODO\b|\bFIXME\b|\bXXX\b/g;
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
       tre.lastIndex = 0;
       let m;
-      while ((m = tre.exec(line))) {
-        if (!isInsideQuote(line, m.index)) todoCount++;
+      while ((m = tre.exec(lines[i]))) {
+        if (isInsideQuote(lines[i], m.index)) continue;
+        todoCount++;
+        const txt = lines[i].trim().slice(0, 120);
+        const fileRel = rel(root, file);
+        const key = `${fileRel}:${i + 1}:${txt}`;
+        if (!knownSet.has(key)) newTodos.push({ file: fileRel, line: i + 1, text: txt });
       }
     }
   }
   if (todoCount > 0) {
     const hasTodoTask = rows.some(r => /TODO|FIXME|XXX/.test(r.request) || /TODO|FIXME|XXX/i.test(r.evidence));
-    if (!hasTodoTask) { issues++; warn(`code has ${todoCount} TODO/FIXME/XXX but no progress-tracker entry tracks them`); }
+    if (!hasTodoTask) {
+      issues++;
+      warn(`code has ${todoCount} TODO/FIXME/XXX (new: ${newTodos.length}) but no progress-tracker entry tracks them`);
+      // 새 TODO 처음 5개 표시
+      newTodos.slice(0, 5).forEach(t => log(`    ${t.file}:${t.line}  ${t.text}`));
+      if (has('--auto-track') && newTodos.length) {
+        for (const t of newTodos) {
+          const id = nextId(root, 'T');
+          upsertProgress(root, { id, status: 'requested', request: `TODO ${t.file}:${t.line}`, evidence: 'auto-tracked', nextAction: t.text.slice(0, 80) });
+        }
+        // known-todos에 추가 — 다음 detect에서 재카운트 안 하도록
+        const merged = [...knownList, ...newTodos.map(t => ({ ...t, ackAt: now() }))];
+        writeUtf8(knownPath, JSON.stringify(merged, null, 2) + '\n');
+        ok(`${newTodos.length}개 TODO를 progress-tracker에 자동 등록 + known-todos.json 갱신`);
+      } else if (newTodos.length) {
+        log(`    💡 자동 등록: leerness lazy detect --auto-track`);
+      }
+    }
   }
   const blockers = rows.filter(r => r.status === 'blocked');
   for (const b of blockers) if (b.nextAction === '없음' || /다음 액션 작성/.test(b.nextAction)) { issues++; warn(`blocker without nextAction: ${b.id}`); }
@@ -1204,6 +1232,114 @@ function gate(root) {
   log(`\n# gate summary: ${bad} 단계 실패`);
   if (bad) process.exitCode = 1;
   else ok('all gates passed');
+}
+
+// ===== 1.9.7 A: verify-code — npm scripts 자동 감지 + evidence 자동 기록 =====
+function verifyCodeCmd(root) {
+  root = absRoot(root);
+  const pkgFile = path.join(root, 'package.json');
+  if (!exists(pkgFile)) return fail('package.json 없음 — Node 프로젝트 위치에서 실행하세요.');
+  let pkg;
+  try { pkg = JSON.parse(read(pkgFile)); } catch (e) { return fail('package.json 파싱 실패: ' + e.message); }
+  const scripts = pkg.scripts || {};
+  const tasks = [];
+  if (scripts.test) tasks.push({ name: 'test', cmd: 'npm test' });
+  else if (scripts['test:smoke']) tasks.push({ name: 'test', cmd: 'npm run test:smoke' });
+  if (scripts.lint) tasks.push({ name: 'lint', cmd: 'npm run lint' });
+  if (scripts.typecheck) tasks.push({ name: 'typecheck', cmd: 'npm run typecheck' });
+  else if (scripts.tsc) tasks.push({ name: 'typecheck', cmd: 'npm run tsc' });
+  else if (exists(path.join(root, 'tsconfig.json'))) tasks.push({ name: 'typecheck', cmd: 'npx --yes tsc --noEmit', optional: true });
+  if (has('--build') && scripts.build) tasks.push({ name: 'build', cmd: 'npm run build' });
+  if (!tasks.length) {
+    warn('실행할 검증 task 없음 (package.json#scripts에 test/lint/typecheck 추가하세요)');
+    return;
+  }
+  log(`# verify-code (${tasks.length}개)`);
+  let failedCnt = 0;
+  const results = [];
+  for (const t of tasks) {
+    log(`\n## ${t.name}: ${t.cmd}`);
+    const start = Date.now();
+    const r = cp.spawnSync(t.cmd, [], { cwd: root, encoding: 'utf8', shell: true, timeout: 5 * 60 * 1000 });
+    const dur = Date.now() - start;
+    if (r.status === 0) ok(`${t.name} passed (${dur}ms)`);
+    else if (t.optional && r.status === 127) warn(`${t.name} 스킵 (${t.cmd} 없음)`);
+    else { fail(`${t.name} failed (exit ${r.status}, ${dur}ms)`); failedCnt++; }
+    const tail = (r.stdout || '').split('\n').slice(-8).join('\n').slice(0, 400);
+    results.push({ name: t.name, cmd: t.cmd, exit: r.status, durMs: dur, tail });
+  }
+  const evBlock = [
+    ``,
+    `## ${now().slice(0, 16)} verify-code (자동)`,
+    `Command: leerness verify-code`,
+    `Tasks: ${tasks.map(t => t.name).join(', ')}`,
+    ...results.map(r => `- ${r.name}: exit=${r.exit} (${r.durMs}ms) — \`${r.cmd}\``),
+    `Tail:`,
+    '```',
+    results.map(r => `[${r.name}]\n${r.tail}`).join('\n---\n').slice(0, 1500),
+    '```'
+  ].join('\n');
+  append(evidencePath(root), evBlock + '\n');
+  ok(`evidence 기록: .harness/review-evidence.md`);
+  if (failedCnt) { process.exitCode = 1; warn(`${failedCnt}개 task 실패 — progress의 해당 row를 incomplete로 표시하세요.`); }
+}
+
+// ===== 1.9.7 B: lessons — 과거 결정/실수 자동 회수 =====
+function lessonsCmd(root) {
+  root = absRoot(root);
+  const query = arg('--query', null);
+  const limit = parseInt(arg('--limit', '10'), 10);
+  const decisions = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+  const evidence = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
+  const tlog = exists(taskLogPath(root)) ? read(taskLogPath(root)) : '';
+  const handoff = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
+  const lessons = [];
+  // decisions: ### 블록 전체
+  for (const block of decisions.split(/\n(?=### )/)) {
+    if (!block.startsWith('### ')) continue;
+    const m = block.match(/^### (.+)$/m);
+    if (!m) continue;
+    lessons.push({ source: 'decisions.md', title: m[1].trim(), block });
+  }
+  // evidence: ## 블록 중 실패/롤백/버그 표지가 있는 것
+  for (const block of evidence.split(/\n(?=## )/)) {
+    if (!block.startsWith('## ')) continue;
+    if (/✗|\bfail(ed)?\b|롤백|재발|incomplete|\bbug\b|버그|warning/i.test(block)) {
+      const m = block.match(/^## (.+)$/m);
+      if (m) lessons.push({ source: 'review-evidence.md', title: m[1].trim(), block });
+    }
+  }
+  // task-log: 실패 키워드 라인
+  for (const line of tlog.split('\n')) {
+    if (line.length > 4 && /✗|\bfail|롤백|재발|incomplete|버그/i.test(line)) {
+      lessons.push({ source: 'task-log.md', title: line.replace(/^[-*]\s*/, '').slice(0, 80), block: line });
+    }
+  }
+  // handoff: 미완료/블로커 항목
+  if (handoff) {
+    const incompleteSec = handoff.match(/## Incomplete[\s\S]*?(?=\n## |$)/);
+    if (incompleteSec && incompleteSec[0].split('\n').slice(1).some(l => /^- (?!없음)/.test(l))) {
+      lessons.push({ source: 'session-handoff.md', title: 'Incomplete / Blocked from last session', block: incompleteSec[0] });
+    }
+  }
+  let filtered = lessons;
+  if (query) {
+    const q = new RegExp(escapeRegex(query), 'i');
+    filtered = lessons.filter(l => q.test(l.title) || q.test(l.block));
+  }
+  log(`# Lessons${query ? ` — query="${query}"` : ''}`);
+  if (!filtered.length) {
+    if (query) ok(`"${query}" 관련 과거 lessons 없음`);
+    else ok('과거 lessons 없음 (decisions/evidence가 비어있거나 실패 표지 없음)');
+    return;
+  }
+  log(`총 ${filtered.length}건 발견:`);
+  for (const l of filtered.slice(0, limit)) {
+    log(`\n[${l.source}] ${l.title}`);
+    const preview = l.block.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').slice(0, 240);
+    log(`  ${preview}${l.block.length > 240 ? '…' : ''}`);
+  }
+  if (filtered.length > limit) log(`\n💡 ${filtered.length - limit}개 더 있음 — --limit ${filtered.length}`);
 }
 
 // ===== 1.9.3: Causal / reuse / consistency =====
@@ -1432,6 +1568,13 @@ function guideCmd(root, target) {
   log('');
   log('## 3. UI consistency — 디자인 토큰 일치');
   uiConsistency(root);
+  log('');
+  log('## 4. Lessons — 과거 결정/실수 회수 (1.9.7)');
+  if (q) {
+    // lessonsCmd가 arg('--query')를 읽으므로 임시로 push
+    if (!process.argv.includes('--query')) { process.argv.push('--query', q); }
+    lessonsCmd(root);
+  } else log('(target/--query 없음 — lessons 검색 스킵)');
   log('\n💡 다음 단계: 위 결과를 바탕으로 작업 계획을 plan/progress에 기록 후 진행하세요.');
 }
 
@@ -1608,7 +1751,10 @@ function viewworkInstall(root) {
 }
 
 function help() {
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path]\n  leerness session close [path]\n  leerness viewwork install [path]\n  leerness viewwork emit [path] [--action a] [--note n] [--agent x] [--tool t]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n`);
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path]\n  leerness session close [path]\n  leerness viewwork install [path]\n  leerness viewwork emit [path] [--action a] [--note n] [--agent x] [--tool t]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  leerness verify-code [path] [--build]      # npm test/lint/typecheck 자동 실행 + evidence 자동 기록 (1.9.7)
+  leerness lessons [--query <키>] [--limit N]  # 과거 결정/실수 자동 회수 (1.9.7)
+  leerness lazy detect [path] [--auto-track] # --auto-track으로 새 TODO를 progress에 자동 등록 (1.9.7)\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n`);
 }
 
 async function main() {
@@ -1647,6 +1793,8 @@ async function main() {
   if (cmd === 'skill' && args[1] === 'remove')      return skillRemove(absRoot(arg('--path', process.cwd())), args[2]);
   if (cmd === 'skill' && args[1] === 'consolidate') return skillConsolidate(absRoot(arg('--path', process.cwd())));
   if (cmd === 'gate')                               return gate(args[1] || process.cwd());
+  if (cmd === 'verify-code')                        return verifyCodeCmd(args[1] || process.cwd());
+  if (cmd === 'lessons')                            return lessonsCmd(arg('--path', process.cwd()));
   if (cmd === 'impact')                             return impactCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'reuse' && args[1] === 'find')        return reuseFind(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'reuse' && args[1] === 'register')    return reuseRegister(arg('--path', process.cwd()), args[2]);

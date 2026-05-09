@@ -235,6 +235,94 @@ total++;
   if (!(strongOK && weakHint)) failed++;
 }
 
+// 1.9.7 A: verify-code — 가짜 package.json + 통과 시나리오
+total++;
+{
+  const tmpV = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpV, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  fs.writeFileSync(path.join(tmpV, 'package.json'), JSON.stringify({ name: 't', version: '0.0.1', scripts: { test: 'node -e "console.log(\\"OK\\");process.exit(0)"' } }));
+  const r = cp.spawnSync(process.execPath, [CLI, 'verify-code', tmpV], { encoding: 'utf8' });
+  const ev = fs.readFileSync(path.join(tmpV, '.harness/review-evidence.md'), 'utf8');
+  const ok = r.status === 0 && /test passed/.test(r.stdout) && /verify-code \(자동\)/.test(ev);
+  console.log(ok ? '✓ B(1.9.7-A) verify-code: 통과 + evidence 자동 기록' : `✗ A 실패\n${r.stdout}`);
+  if (!ok) failed++;
+}
+
+// 1.9.7 A: verify-code — 실패 시나리오
+total++;
+{
+  const tmpV2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc2-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpV2, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  fs.writeFileSync(path.join(tmpV2, 'package.json'), JSON.stringify({ name: 't', version: '0.0.1', scripts: { test: 'node -e "process.exit(2)"' } }));
+  const r = cp.spawnSync(process.execPath, [CLI, 'verify-code', tmpV2], { encoding: 'utf8' });
+  const ok = r.status === 1 && /test failed/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.7-A) verify-code: 실패 시 exit=1' : `✗ A2 실패 status=${r.status}`);
+  if (!ok) failed++;
+}
+
+// 1.9.7 B: lessons — decisions/evidence에 시드 후 query로 회수
+total++;
+{
+  fs.appendFileSync(path.join(tmp, '.harness/decisions.md'), `\n### 2026-05-08 — Decision: 캐시 차등 TTL 도입\n- Reason: 단일 5분 TTL이 daily 데이터에 비효율\n- Impact: open-meteo 응답 캐시 적중률 ↑\n`);
+  fs.appendFileSync(path.join(tmp, '.harness/review-evidence.md'), `\n## 2026-05-08 e2e\n✗ 캐시 키 불안정 — 좌표 정규화 부재 (롤백 후 fix)\n`);
+  const r = cp.spawnSync(process.execPath, [CLI, 'lessons', '--query', '캐시', '--path', tmp], { encoding: 'utf8' });
+  const ok = r.status === 0 && /Lessons.*query="캐시"/.test(r.stdout) && /decisions\.md/.test(r.stdout) && /review-evidence\.md/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.7-B) lessons: decisions+evidence 회수' : `✗ B 실패\n${r.stdout}`);
+  if (!ok) failed++;
+}
+
+// 1.9.7 B: guide가 lessons를 자동 통합
+total++;
+{
+  const r = cp.spawnSync(process.execPath, [CLI, 'guide', 'src/components/Card.html', '--path', tmp], { encoding: 'utf8' });
+  const ok = r.status === 0 && /## 4\. Lessons/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.7-B) guide: lessons 섹션 자동 추가' : '✗ B guide 통합 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.7 C: lazy detect --auto-track
+total++;
+{
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-c-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  // 의도된 진짜 TODO (주석)
+  fs.mkdirSync(path.join(tmpC, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(tmpC, 'src/a.js'), `// TODO: 추적해야 할 미완료 작업\nfunction foo() {}\n`);
+  // review-evidence에 npm test 키워드 추가 (lazy detect의 다른 신호 우회)
+  fs.appendFileSync(path.join(tmpC, '.harness/review-evidence.md'), '\n## seed\nCommand: npm test\n');
+  // session close로 handoff 채우기
+  cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpC], { stdio: 'ignore' });
+  // --auto-track 실행
+  const r = cp.spawnSync(process.execPath, [CLI, 'lazy', 'detect', tmpC, '--auto-track'], { encoding: 'utf8' });
+  const tracker = fs.readFileSync(path.join(tmpC, '.harness/progress-tracker.md'), 'utf8');
+  const known = fs.existsSync(path.join(tmpC, '.harness/known-todos.json')) ? JSON.parse(fs.readFileSync(path.join(tmpC, '.harness/known-todos.json'), 'utf8')) : [];
+  const ok = /TODO src\/a\.js:1/.test(tracker) && /auto-tracked/.test(tracker) && known.length === 1;
+  console.log(ok ? '✓ B(1.9.7-C) lazy detect --auto-track: 자동 등록 + known-todos.json' : `✗ C 실패\nTracker:\n${tracker.split('\n').filter(l=>l.startsWith('| T-')).slice(-3).join('\n')}\nKnown: ${JSON.stringify(known)}`);
+  if (!ok) failed++;
+}
+
+// 1.9.7 C: 같은 TODO 재실행 시 known-todos가 적용되어 newTodos 0
+total++;
+{
+  // 위 시나리오 이어서 — known-todos가 있으므로 새 TODO=0이어야 함
+  // 별도 새 tmp로 재현 (tmpC는 위에서 자동 등록됐으니 same dir에서 다시 호출)
+  // 위 tmpC는 already auto-tracked
+  const tmpC2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-c2-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC2, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  fs.mkdirSync(path.join(tmpC2, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(tmpC2, 'src/a.js'), `// TODO: 추적된 항목\n`);
+  // known-todos.json에 미리 등록
+  fs.writeFileSync(path.join(tmpC2, '.harness/known-todos.json'), JSON.stringify([{ file: 'src/a.js', line: 1, text: '// TODO: 추적된 항목', ackAt: '2026-05-08T00:00:00Z' }]));
+  fs.appendFileSync(path.join(tmpC2, '.harness/review-evidence.md'), '\n## seed\nCommand: npm test\n');
+  cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpC2], { stdio: 'ignore' });
+  const r = cp.spawnSync(process.execPath, [CLI, 'lazy', 'detect', tmpC2], { encoding: 'utf8' });
+  // newTodos가 0이므로 "new: 0" 또는 TODO 카운트가 1이지만 progress 추적에 자동 등록 안 됨
+  // 핵심: TODO 1개 잡혀도 known이라 새 항목 노출 X
+  const ok = /new: 0\b/.test(r.stdout) || !/💡 자동 등록/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.7-C) known-todos: 재카운트 회피' : `✗ C2 실패\n${r.stdout}`);
+  if (!ok) failed++;
+}
+
 // 1.9.6 회귀: task relink — 인위적 link 손실 → 자동 매칭 제안 + --apply 자동 복구
 total++;
 {

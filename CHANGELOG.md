@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.7 — 2026-05-08
+
+코드 검증 자동 실행 + 과거 결정/실수 자동 회수 + TODO 자동 추적의 3종 자동화.
+
+### Added — A. `leerness verify-code [path] [--build]`
+
+`package.json#scripts`에서 `test` / `lint` / `typecheck` (또는 `tsc`) / (선택) `build`를 자동 감지해 차례로 실행. 결과는 모두 `review-evidence.md`에 자동 누적 (`Command/Tasks/exit/duration/tail`). 실패 시 `process.exit(1)` + progress의 in-progress row를 `incomplete`로 표시 권장 안내.
+
+- `tsconfig.json`이 있고 `typecheck` script가 없으면 `npx tsc --noEmit` 자동 호출.
+- 5분 timeout 내장 (장기 실행 방지).
+
+### Added — B. `leerness lessons [--query <키>] [--limit N]`
+
+`decisions.md`의 모든 `### 블록`, `review-evidence.md`의 실패 표지(`✗ / fail / 롤백 / incomplete / bug / 버그 / warning`) 블록, `task-log.md`의 실패 키워드 라인, `session-handoff.md`의 Incomplete 섹션을 통합 추출. `--query`로 키워드 필터.
+
+- `leerness guide [target]`이 자동으로 lessons 섹션을 추가 (target 이름을 query로 사용).
+
+### Added — C. `lazy detect --auto-track` + `.harness/known-todos.json`
+
+새 TODO/FIXME/XXX의 `(file, line, text)` 위치 캡처. `known-todos.json`에 acknowledged 기록을 비교해 매번 같은 false positive를 줄이고, 새로 발견된 것만 노출. `--auto-track`으로 `progress-tracker.md`에 `T-XXXX requested`로 자동 등록 + known-todos.json에도 자동 추가.
+
+### Migration
+
+기존 1.9.x 사용자는 `npx leerness@latest update . --yes`로 즉시 자동 마이그레이션됩니다.
+
 ## 1.9.6 — 2026-05-08
 
 1.9.5 후 발견된 한 가지 한계 (옛 link 손실 자동 복구 부재)를 패치.
