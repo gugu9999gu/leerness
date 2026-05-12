@@ -14,7 +14,7 @@ let failed = 0; let total = 0;
 
 function run(label, args, opts = {}) {
   total++;
-  const r = cp.spawnSync(process.execPath, [CLI, ...args], { cwd: opts.cwd || tmp, encoding: 'utf8' });
+  const r = cp.spawnSync(process.execPath, [CLI, ...args], { cwd: opts.cwd || tmp, encoding: 'utf8', timeout: 30000 });
   const ok = (r.status === 0) === !opts.expectFail;
   process.stdout.write(`${ok ? '✓' : '✗'} ${label} (exit=${r.status})\n`);
   if (!ok) { failed++; process.stdout.write(r.stdout || ''); process.stderr.write(r.stderr || ''); }
@@ -235,6 +235,68 @@ total++;
   const weakHint = /약한 참조|영향 범위 없음/.test(r.stdout);
   console.log(strongOK && weakHint ? '✓ B(A) impact: strong/weak 구분 출력' : '✗ B(A) impact 구분 실패');
   if (!(strongOK && weakHint)) failed++;
+}
+
+// 1.9.13: retro / insights / brainstorm
+total++;
+{
+  const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-retro-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  cp.spawnSync(process.execPath, [CLI, 'plan', 'add', '캐시 helper', '--status', 'done', '--path', tmpR], { stdio: 'ignore', timeout: 10000 });
+  cp.spawnSync(process.execPath, [CLI, 'plan', 'add', '인증 helper', '--status', 'in-progress', '--path', tmpR], { stdio: 'ignore', timeout: 10000 });
+  fs.appendFileSync(path.join(tmpR, '.harness/decisions.md'), `\n### 2026-05-13 — 캐시 차등 TTL 결정\n- Reason: ...\n`);
+  fs.appendFileSync(path.join(tmpR, '.harness/review-evidence.md'), `\n## 2026-05-13 verify-code\nexit=0 (250ms)\nexit=0 (180ms)\nexit=0 (120ms)\nexit=0 (90ms)\n`);
+  const r = cp.spawnSync(process.execPath, [CLI, 'retro', tmpR], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0 && /한 줄 요약/.test(r.stdout) && /작업 상태 분포/.test(r.stdout) && /다음 우선 작업/.test(r.stdout) && /검증 시간 추세/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.13) retro: 한 줄 요약 + 다음 우선 작업 + 검증 시간 추세' : '✗ retro 실패');
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
+}
+
+total++;
+{
+  const tmpI = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ins-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpI, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'insights', tmpI], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0 && /핵심 지표/.test(r.stdout) && /누적 task/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.13) insights: 핵심 지표 출력' : '✗ insights 실패');
+  if (!ok) failed++;
+}
+
+total++;
+{
+  const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-brain-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  fs.appendFileSync(path.join(tmpB, '.harness/decisions.md'), `\n### 2026-05-13 — 캐시 차등 TTL 결정\n- Reason: open-meteo 응답 최적화\n`);
+  cp.spawnSync(process.execPath, [CLI, 'plan', 'add', '캐시 helper 구현', '--path', tmpB], { stdio: 'ignore', timeout: 10000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'brainstorm', '캐시', '--path', tmpB], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0 && /Brainstorm — "캐시"/.test(r.stdout) && /관련 결정/.test(r.stdout) && /시작 전 권장 액션/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.13) brainstorm: 주제 매칭 + 시작 컨텍스트' : `✗ brainstorm 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
+}
+
+total++;
+{
+  // session close 한 줄 요약 자동 출력
+  const tmpS = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-summary-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpS, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpS], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0 && /진행 요약/.test(r.stdout) && /자동 깊은 회고/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.13) session close: 한 줄 요약 자동 출력' : `✗ session close 요약 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(-600)); }
+}
+
+total++;
+{
+  // 5세션 마일스톤 — 자동 깊은 회고
+  const tmpD = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-deep-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpD, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  // 카운터를 4로 설정 → 다음 close가 5번째
+  fs.mkdirSync(path.join(tmpD, '.harness/cache'), { recursive: true });
+  fs.writeFileSync(path.join(tmpD, '.harness/cache/session-counter.json'), JSON.stringify({ count: 4 }));
+  const r = cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpD], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0 && /5세션 마일스톤/.test(r.stdout) && /회고 \(retro\)/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.13) 5세션 마일스톤: 자동 깊은 회고' : '✗ 5세션 자동 회고 실패');
+  if (!ok) failed++;
 }
 
 // 1.9.12: auto roadmap — install 직후 자동 생성

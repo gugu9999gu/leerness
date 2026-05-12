@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.12';
+const VERSION = '1.9.13';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -198,7 +198,7 @@ function coreFiles(root, lang = 'ko', selectedSkills = []) {
   const project = detectProjectName(root);
   const skillRows = Object.entries(skillCatalog).map(([k, v]) => `| ${k} | ${v.displayNameKo} | ${v.capabilities.join(', ')} | ${v.lastUpdated} | ${v.verification} |`).join('\n');
   return {
-    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## Mandatory read order (session start)\n1. .harness/context-routing.md\n2. .harness/session-handoff.md\n3. .harness/current-state.md\n4. .harness/plan.md\n5. .harness/progress-tracker.md\n6. .harness/guideline.md\n7. .harness/protected-files.md\n8. .harness/writeback-policy.md\n9. .harness/anti-lazy-work-policy.md\n10. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증합니다.\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 룰 처리 (1.9.8)\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용 (1.9.8)\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
+    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## Mandatory read order (session start)\n1. .harness/context-routing.md\n2. .harness/session-handoff.md\n3. .harness/current-state.md\n4. .harness/plan.md\n5. .harness/progress-tracker.md\n6. .harness/guideline.md\n7. .harness/protected-files.md\n8. .harness/writeback-policy.md\n9. .harness/anti-lazy-work-policy.md\n10. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증합니다.\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍 (1.9.13)\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리 (1.9.8)\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용 (1.9.8)\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
     'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰 (1.9.8)\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
     '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .harness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`,
     '.github/copilot-instructions.md': `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`,
@@ -1279,6 +1279,27 @@ function sessionClose(root) {
   ok(`session-handoff.md and current-state.md updated`);
   // 1.9.12: session close 끝에 roadmap.html 자동 갱신
   _autoRoadmap(root, 'session-close');
+  // 1.9.13: 세션 카운터 + 자동 한 줄 요약 + 5세션마다 깊은 회고
+  try {
+    const sc = readSessionCounter(root);
+    sc.count = (sc.count || 0) + 1;
+    sc.lastCloseAt = now();
+    writeSessionCounter(root, sc);
+    const agg = _retroAggregate(root);
+    log(`\n## 📈 진행 요약 (session #${sc.count})`);
+    log(`  ${_retroOneLine(agg)}`);
+    if (sc.count % 5 === 0) {
+      log(`\n## 🔄 ${sc.count}세션 마일스톤 — 자동 회고 (5세션마다)`);
+      retroCmd(root);
+      sc.lastDeepRetroAt = now();
+      writeSessionCounter(root, sc);
+    } else {
+      const left = 5 - (sc.count % 5);
+      log(`  💡 ${left}세션 후 자동 깊은 회고 — \`leerness retro\`로 즉시 실행 가능`);
+    }
+  } catch (e) {
+    warn('retro 요약 실패: ' + (e && e.message ? e.message : e));
+  }
 }
 
 function readmeCmd(root) { syncReadme(absRoot(root)); }
@@ -1325,6 +1346,285 @@ function gate(root) {
   log(`\n# gate summary: ${bad} 단계 실패`);
   if (bad) process.exitCode = 1;
   else ok('all gates passed');
+}
+
+// ===== 1.9.13: Retrospective / Insights / Brainstorming =====
+function sessionCounterPath(root) { return path.join(root, '.harness/cache/session-counter.json'); }
+function readSessionCounter(root) {
+  if (!exists(sessionCounterPath(root))) return { count: 0, lastCloseAt: null, lastDeepRetroAt: null };
+  try { return JSON.parse(read(sessionCounterPath(root))); } catch { return { count: 0, lastCloseAt: null, lastDeepRetroAt: null }; }
+}
+function writeSessionCounter(root, c) { writeUtf8(sessionCounterPath(root), JSON.stringify(c, null, 2) + '\n'); }
+
+function _retroAggregate(root) {
+  root = absRoot(root);
+  const rows = readProgressRows(root);
+  const decisions = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+  const tlog = exists(taskLogPath(root)) ? read(taskLogPath(root)) : '';
+  const evidence = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
+  const handoff = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
+
+  // 1) 작업 상태 분포
+  const statusCounts = {};
+  for (const s of STATUSES) statusCounts[s] = 0;
+  for (const r of rows) if (statusCounts[r.status] != null) statusCounts[r.status]++;
+
+  // 2) 결정 블록 수
+  const decisionBlocks = decisions.split(/\n(?=### )/).filter(b => b.startsWith('### '));
+  // recent decisions (날짜로 정렬 시 가장 최근)
+  const recentDecisions = decisionBlocks.slice(-5).map(b => {
+    const t = (b.match(/^### (.+)$/m) || [, ''])[1];
+    return { title: t.trim(), block: b.slice(0, 200) };
+  }).reverse();
+
+  // 3) 스킬 활용
+  const skillsDir = path.join(root, '.harness/skills');
+  const skillUsage = [];
+  if (exists(skillsDir)) {
+    for (const id of fs.readdirSync(skillsDir)) {
+      const f = path.join(skillsDir, id, 'skill.json');
+      if (!exists(f)) continue;
+      try {
+        const s = JSON.parse(read(f));
+        skillUsage.push({
+          id,
+          displayNameKo: s.displayNameKo || id,
+          count: s.usage?.count || 0,
+          lastUsed: s.usage?.lastUsed || null,
+          optimizations: (s.optimizations || []).length,
+          capabilities: (s.capabilities || []).length
+        });
+      } catch {}
+    }
+  }
+  skillUsage.sort((a, b) => (b.count - a.count) || (b.optimizations - a.optimizations));
+
+  // 4) 검증 시간 추세 — review-evidence.md에서 "exit=0 (Nms)" 또는 "(Nms)" 패턴
+  const durations = [];
+  for (const m of evidence.matchAll(/exit=\d+\s*\((\d+)ms\)/g)) durations.push(parseInt(m[1], 10));
+
+  // 5) 실패→성공 시그널 — task-log/evidence/decisions에서 "롤백" / "fail" / "재발" / "fix" / "수정" 등의 동시 등장 카운트
+  const fixSignals = (tlog + evidence + decisions).match(/\b(fix|fixed|수정|롤백|재발|incomplete|bug)\b/gi) || [];
+  const passSignals = (tlog + evidence + decisions).match(/(?:✓|pass(?:ed)?|통과|completed|done)/gi) || [];
+
+  // 6) 룰 활용
+  const rules = exists(rulesPath(root)) ? readRules(root) : [];
+  const activeRules = rules.filter(r => r.status === 'active');
+  const verifiedRules = rules.filter(r => r.lastVerified && r.lastVerified !== '-');
+
+  // 7) 최근 in-progress / incomplete (우선 권장)
+  const focusNext = rows.filter(r => r.status === 'in-progress')
+    .concat(rows.filter(r => ['incomplete', 'blocked', 'waiting', 'on-hold'].includes(r.status)));
+
+  return {
+    statusCounts,
+    rows,
+    totalTasks: rows.length,
+    doneCount: statusCounts.done,
+    decisionBlocks: decisionBlocks.length,
+    recentDecisions,
+    skillUsage,
+    totalSkillUsage: skillUsage.reduce((a, b) => a + b.count, 0),
+    totalOptimizations: skillUsage.reduce((a, b) => a + b.optimizations, 0),
+    durations,
+    fixSignals: fixSignals.length,
+    passSignals: passSignals.length,
+    activeRules: activeRules.length,
+    verifiedRules: verifiedRules.length,
+    focusNext
+  };
+}
+
+function _retroOneLine(agg) {
+  const parts = [];
+  const done = agg.statusCounts.done;
+  const total = agg.totalTasks;
+  if (total) parts.push(`완료 ${done}/${total} (${Math.round(done / total * 100)}%)`);
+  if (agg.totalSkillUsage) parts.push(`스킬 ${agg.skillUsage.length}종 / 사용 ${agg.totalSkillUsage}회 / 최적화 ${agg.totalOptimizations}건`);
+  if (agg.activeRules) parts.push(`룰 ${agg.activeRules}건 활성 (${agg.verifiedRules} 검증됨)`);
+  if (agg.durations.length >= 4) {
+    const mid = Math.floor(agg.durations.length / 2);
+    const a = agg.durations.slice(0, mid).reduce((x, y) => x + y, 0) / mid;
+    const b = agg.durations.slice(mid).reduce((x, y) => x + y, 0) / (agg.durations.length - mid);
+    if (a > 0) {
+      const delta = ((b - a) / a) * 100;
+      const sign = delta > 0 ? '+' : '';
+      parts.push(`검증 ${Math.round(a)}ms→${Math.round(b)}ms (${sign}${delta.toFixed(1)}%)`);
+    }
+  }
+  parts.push(`결정 ${agg.decisionBlocks}건 누적`);
+  return parts.join(' · ');
+}
+
+function retroCmd(root) {
+  root = absRoot(root);
+  const days = parseInt(arg('--days', '7'), 10);
+  const cutoff = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
+  const agg = _retroAggregate(root);
+  log(`# 회고 (retro) — 최근 ${days}일 (since ${cutoff})`);
+  log(`\n📈 한 줄 요약: ${_retroOneLine(agg)}`);
+
+  log(`\n## 작업 상태 분포`);
+  for (const s of STATUSES) if (agg.statusCounts[s]) log(`  - ${s}: ${agg.statusCounts[s]}`);
+
+  log(`\n## 🎯 다음 우선 작업 (top 5)`);
+  if (!agg.focusNext.length) log('  (없음 — 새 plan add 권장)');
+  else agg.focusNext.slice(0, 5).forEach(r => log(`  - ${r.id} [${r.status}] ${r.request} → ${r.nextAction}`));
+
+  log(`\n## 📚 스킬 활용 추세 (top 5)`);
+  if (!agg.skillUsage.length) log('  (등록된 스킬 없음)');
+  else agg.skillUsage.slice(0, 5).forEach(s => log(`  - ${s.id}: 사용 ${s.count}회, 최적화 ${s.optimizations}건, capabilities ${s.capabilities}개${s.lastUsed ? ' · 마지막 ' + s.lastUsed.slice(0, 10) : ''}`));
+
+  log(`\n## 🧠 최근 결정 (top 5)`);
+  if (!agg.recentDecisions.length) log('  (없음)');
+  else agg.recentDecisions.slice(0, 5).forEach(d => log(`  - ${d.title}`));
+
+  if (agg.durations.length >= 4) {
+    const mid = Math.floor(agg.durations.length / 2);
+    const a = agg.durations.slice(0, mid).reduce((x, y) => x + y, 0) / mid;
+    const b = agg.durations.slice(mid).reduce((x, y) => x + y, 0) / (agg.durations.length - mid);
+    const delta = ((b - a) / a) * 100;
+    log(`\n## ⏱ 검증 시간 추세 (review-evidence)`);
+    log(`  - 전반부 평균: ${Math.round(a)}ms`);
+    log(`  - 후반부 평균: ${Math.round(b)}ms`);
+    log(`  - 변화: ${delta > 0 ? '+' : ''}${delta.toFixed(1)}% ${delta < 0 ? '🚀 빨라짐' : delta > 10 ? '⚠ 느려짐' : ''}`);
+  }
+
+  log(`\n## ⚡ 활성 룰 / 검증 비율`);
+  log(`  - 활성 ${agg.activeRules}건 · 검증됨 ${agg.verifiedRules}건 (${agg.activeRules ? Math.round(agg.verifiedRules / agg.activeRules * 100) : 0}%)`);
+
+  log(`\n## 🔁 fix/pass 시그널`);
+  log(`  - fix 시그널 (롤백/수정/bug/incomplete): ${agg.fixSignals}회`);
+  log(`  - pass 시그널 (통과/✓/completed): ${agg.passSignals}회`);
+  if (agg.passSignals > agg.fixSignals * 2) log('  - 평가: 안정적 (pass >> fix)');
+  else if (agg.fixSignals > agg.passSignals) log('  - 평가: 디버그 비중 높음 — verify-code 자동화 검토');
+
+  log(`\n## 💡 권장 다음 단계`);
+  if (agg.focusNext.length) log(`  1. ${agg.focusNext[0].id} (${agg.focusNext[0].status}): ${agg.focusNext[0].nextAction}`);
+  if (agg.skillUsage.length && agg.skillUsage[0].count > 0) log(`  2. 가장 활발한 스킬 "${agg.skillUsage[0].id}"의 패턴을 다른 작업에 재사용 가능`);
+  if (agg.totalOptimizations > 0) log(`  3. 누적된 최적화 ${agg.totalOptimizations}건을 새 작업의 시작 전 참고 (\`leerness skill info <id>\`)`);
+  log(`  4. \`leerness brainstorm <주제>\`로 누적 데이터 기반 컨텍스트 적재`);
+}
+
+function insightsCmd(root) {
+  root = absRoot(root);
+  const agg = _retroAggregate(root);
+  const sc = readSessionCounter(root);
+  log(`# Insights — 누적 통계`);
+  log(`\n## 📊 핵심 지표`);
+  log(`  - 누적 task: ${agg.totalTasks} (done ${agg.doneCount}, in-progress ${agg.statusCounts['in-progress']}, planned ${agg.statusCounts.planned})`);
+  log(`  - 누적 결정 (decisions.md): ${agg.decisionBlocks}건`);
+  log(`  - 누적 스킬: ${agg.skillUsage.length}종`);
+  log(`  - 총 스킬 사용: ${agg.totalSkillUsage}회`);
+  log(`  - 총 최적화 누적: ${agg.totalOptimizations}건`);
+  log(`  - 활성 룰: ${agg.activeRules}건 (검증 ${agg.verifiedRules}건)`);
+  log(`  - session close 횟수: ${sc.count}회${sc.lastCloseAt ? ' (마지막: ' + sc.lastCloseAt.slice(0, 16) + ')' : ''}`);
+
+  if (agg.skillUsage.length) {
+    log(`\n## 🏆 가장 활용도 높은 스킬 (top 5)`);
+    agg.skillUsage.slice(0, 5).forEach((s, i) => log(`  ${i + 1}. ${s.id} (${s.displayNameKo}) — 사용 ${s.count}회, 최적화 ${s.optimizations}건`));
+  }
+
+  if (agg.durations.length) {
+    const total = agg.durations.reduce((a, b) => a + b, 0);
+    log(`\n## ⏱ 검증 시간 (verify-code)`);
+    log(`  - 실행: ${agg.durations.length}회 / 총 ${total}ms / 평균 ${Math.round(total / agg.durations.length)}ms`);
+    log(`  - 최소 ${Math.min(...agg.durations)}ms / 최대 ${Math.max(...agg.durations)}ms`);
+  }
+
+  log(`\n## 🔁 안정성 지표`);
+  log(`  - pass 시그널: ${agg.passSignals} · fix 시그널: ${agg.fixSignals}`);
+  const ratio = agg.fixSignals > 0 ? (agg.passSignals / agg.fixSignals).toFixed(2) : '∞';
+  log(`  - pass/fix 비율: ${ratio}${ratio === '∞' || parseFloat(ratio) > 3 ? ' (안정)' : parseFloat(ratio) < 1 ? ' (디버그 위주)' : ' (보통)'}`);
+
+  log(`\n## 📈 권장`);
+  if (agg.totalOptimizations === 0) log(`  - 스킬에 최적화 누적 없음 — \`leerness skill optimize <id> --before --after\`로 더 나은 방법 기록`);
+  if (sc.count >= 5 && sc.count % 5 === 0) log(`  - 5세션마다 자동 깊은 회고가 예정되어 있습니다 — session close가 자동 호출`);
+  if (agg.statusCounts.blocked > 0) log(`  - blocked 작업 ${agg.statusCounts.blocked}건 — \`leerness lessons --query "blocked"\`로 과거 패턴 회수`);
+}
+
+function brainstormCmd(root, topic) {
+  root = absRoot(root);
+  if (!topic) return fail('topic required (e.g., brainstorm "API rate limit")');
+  log(`# Brainstorm — "${topic}"`);
+  log(`\n누적된 leerness 데이터에서 주제 관련 자원을 회수합니다.`);
+
+  const re = new RegExp(escapeRegex(topic), 'i');
+  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [] };
+
+  // decisions
+  const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+  for (const b of dec.split(/\n(?=### )/)) {
+    if (!b.startsWith('### ')) continue;
+    if (re.test(b)) {
+      const t = (b.match(/^### (.+)$/m) || [, ''])[1];
+      hits.decisions.push({ title: t, preview: b.slice(0, 200).replace(/\n+/g, ' ') });
+    }
+  }
+  // skills
+  const skillsDir = path.join(root, '.harness/skills');
+  if (exists(skillsDir)) {
+    for (const id of fs.readdirSync(skillsDir)) {
+      const f = path.join(skillsDir, id, 'skill.json');
+      if (!exists(f)) continue;
+      try {
+        const s = JSON.parse(read(f));
+        const text = JSON.stringify(s);
+        if (re.test(text)) hits.skills.push({ id, displayNameKo: s.displayNameKo, capabilities: s.capabilities, usage: s.usage });
+      } catch {}
+    }
+  }
+  // tasks
+  const rows = readProgressRows(root);
+  for (const r of rows) if (re.test(r.request) || re.test(r.evidence) || re.test(r.nextAction)) hits.tasks.push(r);
+  // rules
+  if (exists(rulesPath(root))) {
+    for (const r of readRules(root)) if (re.test(r.rule)) hits.rules.push(r);
+  }
+  // evidence — lessons 키워드 (fail/롤백/incomplete) 동반
+  const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
+  for (const block of ev.split(/\n(?=## )/)) {
+    if (!block.startsWith('## ')) continue;
+    if (re.test(block)) {
+      const t = (block.match(/^## (.+)$/m) || [, ''])[1];
+      hits.evidence.push({ title: t.trim(), preview: block.slice(0, 200).replace(/\n+/g, ' ') });
+      if (/✗|fail|롤백|incomplete|버그/i.test(block)) hits.lessons.push({ title: t.trim() });
+    }
+  }
+
+  const total = hits.decisions.length + hits.skills.length + hits.tasks.length + hits.rules.length + hits.evidence.length;
+  log(`\n📦 총 ${total}건 발견 (decisions ${hits.decisions.length} · skills ${hits.skills.length} · tasks ${hits.tasks.length} · rules ${hits.rules.length} · evidence ${hits.evidence.length})`);
+
+  if (hits.decisions.length) {
+    log(`\n## 🧠 관련 결정 (${hits.decisions.length})`);
+    hits.decisions.slice(0, 5).forEach(d => log(`  - ${d.title}`));
+  }
+  if (hits.skills.length) {
+    log(`\n## 📚 관련 스킬 (${hits.skills.length}) — 시작 전 \`skill info <id>\` 권장`);
+    hits.skills.forEach(s => log(`  - ${s.id} (${s.displayNameKo}) · 사용 ${s.usage?.count || 0}회 · cap ${(s.capabilities || []).length}`));
+  }
+  if (hits.tasks.length) {
+    log(`\n## 📌 관련 과거 task (${hits.tasks.length})`);
+    hits.tasks.slice(0, 5).forEach(t => log(`  - ${t.id} [${t.status}] ${t.request}`));
+  }
+  if (hits.rules.length) {
+    log(`\n## ⚡ 관련 룰 (${hits.rules.length})`);
+    hits.rules.forEach(r => log(`  - ${r.id} [${r.trigger}] ${r.rule}`));
+  }
+  if (hits.evidence.length) {
+    log(`\n## 🧪 관련 검증 기록 (${hits.evidence.length})`);
+    hits.evidence.slice(0, 5).forEach(e => log(`  - ${e.title}`));
+  }
+  if (hits.lessons.length) {
+    log(`\n## ⚠ 같은 주제 과거 실패/롤백 (${hits.lessons.length}) — 같은 실수 방지`);
+    hits.lessons.slice(0, 5).forEach(l => log(`  - ${l.title}`));
+  }
+
+  log(`\n## 💡 시작 전 권장 액션`);
+  log(`  1. 위 자원을 모두 검토 후 plan add 또는 task add로 새 작업 등록`);
+  log(`  2. 가장 비슷한 과거 스킬을 \`leerness skill use <id>\`로 활성화`);
+  log(`  3. 작업 종료 시 새로 발견한 패턴을 \`skill optimize\`로 누적`);
+  if (!total) log(`  ⓘ 관련 자원 없음 — 새로운 영역. 첫 결정/스킬을 기록하면 다음 brainstorm이 더 풍부해짐.`);
 }
 
 // ===== 1.9.11: Roadmap (project-roadmap-generator 통합) =====
@@ -2595,6 +2895,9 @@ function viewworkInstall(root) {
 
 function help() {
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path]\n  leerness session close [path]\n  leerness viewwork install [path]\n  leerness viewwork emit [path] [--action a] [--note n] [--agent x] [--tool t]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  leerness retro [path] [--days 7]           # 회고 (1.9.13) — 작업/스킬/결정/검증 시간 추세 + 권장
+  leerness insights [path]                   # 누적 통계 (1.9.13) — 핵심 지표 + 안정성
+  leerness brainstorm "<주제>"             # 브레인스토밍 (1.9.13) — 누적 자원 회수 + 시작 컨텍스트
   leerness roadmap [path] [--out file.html]  # 좌→우 수평 트리 + 상하 중앙정렬 + 화이트보드 (1.9.11)
   leerness roadmap auto on|off|status [--on-every-change] [--out file.html]  # 자동 갱신 (1.9.12, install/session-close 기본 ON)
   leerness verify-code [path] [--build]      # npm test/lint/typecheck 자동 실행 + evidence 자동 기록 (1.9.7)
@@ -2645,6 +2948,9 @@ async function main() {
   if (cmd === 'gate')                               return gate(args[1] || process.cwd());
   if (cmd === 'verify-code')                        return verifyCodeCmd(args[1] || process.cwd());
   if (cmd === 'lessons')                            return lessonsCmd(arg('--path', process.cwd()));
+  if (cmd === 'retro')                              return retroCmd(args[1] || process.cwd());
+  if (cmd === 'insights')                           return insightsCmd(args[1] || process.cwd());
+  if (cmd === 'brainstorm')                         return brainstormCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'roadmap' && args[1] === 'auto')      return roadmapAutoCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'roadmap')                            return roadmapCmd(args[1] || process.cwd());
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));

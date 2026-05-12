@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.9.13 — 2026-05-13
+
+**회고·통찰·브레인스토밍** — 누적된 leerness 데이터에서 자동으로 패턴/추세/주제별 자원을 추출.
+
+### Added — 3 신규 명령
+
+- **`leerness retro [path] [--days 7]`** — 회고
+  - 작업 상태 분포 / 다음 우선 작업 / 스킬 활용 추세 / 최근 결정 / **검증 시간 추세** / 룰 검증률 / fix↔pass 시그널 비율 / 권장 다음 단계
+- **`leerness insights [path]`** — 누적 통계
+  - 핵심 지표 / top 스킬 / 검증 시간 통계 / 안정성 (pass÷fix 비율) / 권장
+- **`leerness brainstorm "<주제>"`** — 주제 기반 자원 회수
+  - decisions / skills / tasks / rules / evidence에서 매칭 → 관련 과거 실패(lessons) 포함 → 시작 전 권장 액션
+
+### Added — 자동 회고
+
+- `session close`가 매번 끝에 **한 줄 요약** 자동 출력: `완료 N/M (X%) · 스킬 N종 사용 K회 · 검증 변화 ±X% · 결정 N건 누적`
+- **5세션마다** 자동 깊은 회고 실행 (`.harness/cache/session-counter.json`로 카운팅)
+- 다음 깊은 회고까지 남은 세션 수 안내
+
+### Added — 자연어 매핑 (AGENTS.md/CLAUDE.md)
+
+| 사용자 발화 | 즉시 실행 |
+|---|---|
+| "회고해줘" / "돌아보자" | `leerness retro` |
+| "통계 / 누적 지표" | `leerness insights` |
+| "X 브레인스토밍 / X 검토" | `leerness brainstorm "X"` |
+
+### Migration
+
+기존 1.9.x 사용자는 `npx leerness@latest update . --yes`로 마이그레이션. 이후 session close부터 한 줄 요약 자동 출력.
+
 ## 1.9.12 — 2026-05-13
 
 **`leerness roadmap` 자동 생성·갱신** — 3개 트리거.
