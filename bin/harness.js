@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.7';
+const VERSION = '1.9.9';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -56,7 +56,7 @@ function arg(name, def = null) { const i = process.argv.indexOf(name); return i 
 function has(name) { return process.argv.includes(name); }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold']);
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score']);
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -141,8 +141,8 @@ function coreFiles(root, lang = 'ko', selectedSkills = []) {
   const project = detectProjectName(root);
   const skillRows = Object.entries(skillCatalog).map(([k, v]) => `| ${k} | ${v.displayNameKo} | ${v.capabilities.join(', ')} | ${v.lastUpdated} | ${v.verification} |`).join('\n');
   return {
-    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## Mandatory read order (session start)\n1. .harness/context-routing.md\n2. .harness/session-handoff.md\n3. .harness/current-state.md\n4. .harness/plan.md\n5. .harness/progress-tracker.md\n6. .harness/guideline.md\n7. .harness/protected-files.md\n8. .harness/writeback-policy.md\n9. .harness/anti-lazy-work-policy.md\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다.\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증합니다.\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증)를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n`,
-    'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n`,
+    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## Mandatory read order (session start)\n1. .harness/context-routing.md\n2. .harness/session-handoff.md\n3. .harness/current-state.md\n4. .harness/plan.md\n5. .harness/progress-tracker.md\n6. .harness/guideline.md\n7. .harness/protected-files.md\n8. .harness/writeback-policy.md\n9. .harness/anti-lazy-work-policy.md\n10. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증합니다.\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 룰 처리 (1.9.8)\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용 (1.9.8)\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
+    'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰 (1.9.8)\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
     '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .harness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`,
     '.github/copilot-instructions.md': `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`,
     '.harness/HARNESS_VERSION': VERSION + '\n',
@@ -173,6 +173,7 @@ function coreFiles(root, lang = 'ko', selectedSkills = []) {
     '.harness/release-checklist.md': fm('release-checklist', ['배포 전'], ['배포 조건/환경변수/롤백 변경'], `# Release Checklist\n\n- [ ] \`leerness verify .\`\n- [ ] \`leerness audit .\`\n- [ ] \`leerness scan secrets .\`\n- [ ] \`leerness encoding check .\`\n- [ ] 프로젝트 typecheck/lint/test\n- [ ] 환경변수 (.env.example) 동기화\n- [ ] 롤백 방법 확인\n- [ ] CHANGELOG 갱신\n`),
     '.harness/session-close-policy.md': fm('session-close-policy', ['세션 종료 전'], ['세션 종료 형식 변경'], `# Session Close Policy\n\nEvery session must list:\n- Completed\n- In progress\n- Incomplete\n- Planned\n- Waiting\n- On hold\n- Blocked\n- Dropped\n- Verification (commands run, results)\n- Recommended next direction\n- Next exact step\n\n\`leerness session close\`가 위 9개 카테고리를 자동 추출하고, session-handoff.md에 다음 세션을 위한 인수인계 블록을 자동 작성합니다.\n`),
     '.harness/anti-lazy-work-policy.md': fm('anti-lazy-work-policy', ['완료 선언 전'], ['게으른 작업 방지 기준 변경'], `# Anti Lazy Work Policy\n\n## Rules\n1. **증거 없는 완료 금지**: \"완료\"를 선언하려면 progress-tracker의 evidence 컬럼에 명령 출력/테스트 결과/스크린샷 경로 등이 있어야 합니다.\n2. **빈 핸드오프 금지**: 세션 종료 시 session-handoff.md의 Completed/In Progress/Next Exact Step이 모두 비어 있으면 close가 \"insufficient\" 상태로 표시됩니다.\n3. **부분 구현 자기보고**: 완전 구현이 아니면 status를 \`incomplete\`로, Next Exact Step에 \"무엇을 추가해야 끝나는지\" 한 줄을 적습니다.\n4. **검증 기록**: typecheck/lint/test 결과를 review-evidence.md에 누적 기록합니다.\n5. **TODO 표지**: 코드에 \`TODO\`/\`FIXME\`/\`XXX\`를 새로 도입하면 progress-tracker에 동일 ID로 추적합니다.\n6. **거짓 완료 자동 감지**: \`leerness lazy detect\`는 다음을 자동 점검합니다.\n   - progress-tracker에 done인데 evidence가 비어있는 row\n   - session-handoff의 Completed가 비어있고 Next Exact Step도 비어있음\n   - 코드에 새 TODO/FIXME 추가 + progress-tracker에 추적 항목 없음\n   - test 명령 실행 흔적 없음 (review-evidence.md 또는 task-log.md에 명령 기록)\n`),
+    '.harness/rules.md': _rulesHeader() + '\n',
     '.harness/session-handoff.md': fm('session-handoff', ['세션 시작','다음 작업 이어받기'], ['세션 종료'], `# Session Handoff\n\nLast generated: (자동)\n\n## Completed\n-\n\n## In Progress\n-\n\n## Incomplete / Waiting / On Hold / Blocked\n-\n\n## Dropped\n-\n\n## Verification\n-\n\n## Recommended Direction\n-\n\n## Next Exact Step\n-\n`),
     '.harness/leerness-maintenance.md': fm('leerness-maintenance', ['작업 시작','마이그레이션/릴리즈 전'], ['버전 정책 변경'], `# Leerness Maintenance\n\nAI agents should check:\n\n\`\`\`bash\nleerness --version\nleerness self check .\nleerness update --check       # 24h 캐시 자동 감지\nleerness update --yes         # 새 버전 발견 시 자동 마이그레이션\ncat .harness/HARNESS_VERSION\nnpm view leerness version\n\`\`\`\n`),
     '.harness/language-policy.md': fm('language-policy', ['문서 작성 전'], ['언어 변경'], `# Language Policy\n\nSelected language: ${lang}\n\n모든 Leerness 노트, 스킬 노트, 세션 보고, 작업 목록은 위 언어를 기본으로 사용합니다 (사용자가 다른 언어를 명시 요청 시 예외).\n`),
@@ -1111,6 +1112,14 @@ function handoff(root) {
   log('# Session Start Context');
   log(`Date: ${today()}`);
   log(`Project: ${detectProjectName(root)}`);
+  // 1.9.8: active rules 자동 노출 (매 세션 시작 시 AI에게 보임)
+  const activeRules = readRules(root).filter(r => r.status === 'active');
+  if (activeRules.length) {
+    log('');
+    log('## ⚡ Active User Rules (사용자가 명시 중지/제거 요청 전까지 매 세션 자동 노출)');
+    for (const r of activeRules) log(`- ${r.id} [${r.trigger}] ${r.rule} (lastVerified: ${r.lastVerified || '-'})`);
+    log('');
+  }
   log(out);
   if (exists(currentStatePath(root))) {
     const cs = read(currentStatePath(root)).replace(/Updated: \d{4}-\d{2}-\d{2}/, `Updated: ${today()}`);
@@ -1183,8 +1192,18 @@ function sessionClose(root) {
     log(`\n### ${s}`);
     log(rowsToList(buckets[s]));
   }
+  // 1.9.8: 룰 검증 자동 수행 + 보고
+  const ruleResults = verifyRules(root);
+  log('\n## ⚡ User Rules verification');
+  if (!ruleResults.length) log('- 활성 룰 없음');
+  else {
+    log('| ID | Trigger | Rule | Verified | Note |');
+    log('|---|---|---|---|---|');
+    const ic = { pass: '✓ pass', pending: '⓿ pending', manual: 'ⓘ manual', baseline: '○ baseline' };
+    for (const r of ruleResults) log(`| ${r.id} | ${r.trigger} | ${r.rule.slice(0, 40)} | ${ic[r.verified] || '?'} | ${r.note} |`);
+  }
   log('\n## Required final response sections');
-  log('- 완료 작업\n- 진행 중 작업\n- 미완료/예정/대기/보류/차단/드랍 작업\n- 검증 결과\n- 추천 방향\n- 다음 정확한 작업');
+  log('- 완료 작업\n- 진행 중 작업\n- 미완료/예정/대기/보류/차단/드랍 작업\n- 검증 결과\n- 추천 방향\n- 다음 정확한 작업\n- ⚡ 활성 룰별 검증 결과');
   ok(`session-handoff.md and current-state.md updated`);
 }
 
@@ -1232,6 +1251,306 @@ function gate(root) {
   log(`\n# gate summary: ${bad} 단계 실패`);
   if (bad) process.exitCode = 1;
   else ok('all gates passed');
+}
+
+// ===== 1.9.8: User Rules (자연어 등록 + 매 세션 자동 노출/검증) =====
+function rulesPath(root) { return path.join(root, '.harness/rules.md'); }
+function rulesArchivePath(root) { return path.join(root, '.harness/rules.archive.md'); }
+function rulesCachePath(root) { return path.join(root, '.harness/cache/rule-state.json'); }
+
+function _rulesHeader() {
+  return [
+    '---',
+    'leernessRole: rules',
+    'readWhen:',
+    '  - 세션 시작 (handoff)',
+    '  - 매 작업 시작 전',
+    '  - 매 작업 완료 전',
+    '  - 세션 종료 시 (session close)',
+    'updateWhen:',
+    '  - 사용자가 자연어로 새 룰 요청',
+    '  - 사용자가 룰 중지/제거 요청',
+    'doNotStore:',
+    '  - 실제 토큰',
+    '  - 비밀번호',
+    '  - 운영 쿠키',
+    '  - 민감한 개인정보 원문',
+    '---',
+    '<!-- leerness:managed -->',
+    '# User Rules',
+    '',
+    '매 세션·매 작업마다 AI 에이전트가 반드시 따라야 할 사용자 정의 영구 룰.',
+    '사용자가 명시적으로 "중지" / "제거"를 요청하기 전까지 모든 active 룰을 매 세션 자동 노출/검증합니다.',
+    '',
+    '## Active Rules',
+    '',
+    '| ID | Trigger | Rule | Added | Status | Last Verified |',
+    '|---|---|---|---|---|---|'
+  ].join('\n');
+}
+
+function readRules(root) {
+  const f = rulesPath(root);
+  if (!exists(f)) return [];
+  const rules = [];
+  for (const line of read(f).split('\n')) {
+    if (!/^\| R-\d{4} \|/.test(line)) continue;
+    const cells = line.split('|').slice(1, -1).map(s => s.trim());
+    if (cells.length < 6) continue;
+    rules.push({ id: cells[0], trigger: cells[1], rule: cells[2], added: cells[3], status: cells[4], lastVerified: cells[5] });
+  }
+  return rules;
+}
+
+function writeRules(root, rules) {
+  const body = rules.map(r => `| ${r.id} | ${r.trigger} | ${r.rule} | ${r.added} | ${r.status} | ${r.lastVerified || '-'} |`).join('\n');
+  writeUtf8(rulesPath(root), _rulesHeader() + '\n' + body + (body ? '\n' : ''));
+}
+
+function nextRuleId(root) {
+  const rules = readRules(root);
+  let max = 0;
+  for (const r of rules) {
+    const m = r.id.match(/^R-(\d{4})$/);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `R-${String(max + 1).padStart(4, '0')}`;
+}
+
+function ruleAdd(root, description) {
+  root = absRoot(root);
+  if (!description) return fail('rule description required (e.g., rule add "매 업데이트마다 버전 bump" --trigger every-update)');
+  if (!exists(rulesPath(root))) writeRules(root, []);
+  const trigger = arg('--trigger', 'every-session');
+  const validTriggers = new Set(['every-session','every-update','every-commit','session-start','session-close','pre-publish']);
+  if (!validTriggers.has(trigger)) {
+    warn(`unknown trigger "${trigger}" — 사용 가능: ${[...validTriggers].join(', ')}. 그대로 등록합니다.`);
+  }
+  const id = nextRuleId(root);
+  const rules = readRules(root);
+  rules.push({ id, trigger, rule: description, added: today(), status: 'active', lastVerified: '-' });
+  writeRules(root, rules);
+  ok(`rule added: ${id} [${trigger}] ${description}`);
+}
+
+function ruleList(root) {
+  root = absRoot(root);
+  const rules = readRules(root);
+  if (!rules.length) return ok('등록된 룰 없음');
+  log('| ID | Trigger | Rule | Status | Last Verified |');
+  log('|---|---|---|---|---|');
+  for (const r of rules) log(`| ${r.id} | ${r.trigger} | ${r.rule} | ${r.status} | ${r.lastVerified} |`);
+}
+
+function ruleRemove(root, id) {
+  root = absRoot(root);
+  if (!id) return fail('id required');
+  const rules = readRules(root);
+  const i = rules.findIndex(r => r.id === id);
+  if (i < 0) return fail(`rule not found: ${id}`);
+  const removed = rules.splice(i, 1)[0];
+  writeRules(root, rules);
+  const archive = exists(rulesArchivePath(root)) ? read(rulesArchivePath(root)) : '# Rules archive\n\n| ID | Trigger | Rule | Added | Status | Removed |\n|---|---|---|---|---|---|\n';
+  writeUtf8(rulesArchivePath(root), archive + `| ${removed.id} | ${removed.trigger} | ${removed.rule} | ${removed.added} | removed | ${today()} |\n`);
+  ok(`rule removed: ${id} (보존: .harness/rules.archive.md)`);
+}
+
+function rulePause(root, id) {
+  root = absRoot(root);
+  if (!id) return fail('id required');
+  const rules = readRules(root);
+  const r = rules.find(x => x.id === id);
+  if (!r) return fail(`rule not found: ${id}`);
+  r.status = 'paused';
+  writeRules(root, rules);
+  ok(`rule paused: ${id}`);
+}
+
+function ruleResume(root, id) {
+  root = absRoot(root);
+  if (!id) return fail('id required');
+  const rules = readRules(root);
+  const r = rules.find(x => x.id === id);
+  if (!r) return fail(`rule not found: ${id}`);
+  r.status = 'active';
+  writeRules(root, rules);
+  ok(`rule resumed: ${id}`);
+}
+
+function ruleStop(root) {
+  root = absRoot(root);
+  const rules = readRules(root);
+  let n = 0;
+  for (const r of rules) if (r.status === 'active') { r.status = 'paused'; n++; }
+  writeRules(root, rules);
+  ok(`${n}개 룰 일시 정지 (rule resume <id> 또는 rule resume-all로 재개)`);
+}
+
+function ruleResumeAll(root) {
+  root = absRoot(root);
+  const rules = readRules(root);
+  let n = 0;
+  for (const r of rules) if (r.status === 'paused') { r.status = 'active'; n++; }
+  writeRules(root, rules);
+  ok(`${n}개 룰 재개`);
+}
+
+function captureProjectState(root) {
+  const state = { capturedAt: now() };
+  const pkgFile = path.join(root, 'package.json');
+  if (exists(pkgFile)) { try { state.packageVersion = JSON.parse(read(pkgFile)).version; } catch {} }
+  const cl = path.join(root, 'CHANGELOG.md');
+  if (exists(cl)) { try { state.changelogMtime = fs.statSync(cl).mtime.getTime(); state.changelogSize = fs.statSync(cl).size; } catch {} }
+  const hv = path.join(root, '.harness/HARNESS_VERSION');
+  if (exists(hv)) state.harnessVersion = read(hv).trim();
+  return state;
+}
+
+function verifyRules(root) {
+  root = absRoot(root);
+  const rules = readRules(root);
+  const active = rules.filter(r => r.status === 'active');
+  if (!active.length) return [];
+  let prev = {};
+  if (exists(rulesCachePath(root))) { try { prev = JSON.parse(read(rulesCachePath(root))); } catch {} }
+  const cur = captureProjectState(root);
+  const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
+  const todayStr = today();
+  const results = [];
+  for (const r of active) {
+    let verified = 'manual';
+    let note = '';
+    const rl = r.rule.toLowerCase();
+    if (/version|버전|bump|상승/i.test(rl)) {
+      if (prev.packageVersion && cur.packageVersion && prev.packageVersion !== cur.packageVersion) {
+        verified = 'pass'; note = `${prev.packageVersion} → ${cur.packageVersion}`;
+      } else if (!prev.packageVersion) {
+        verified = 'baseline'; note = `초기 ${cur.packageVersion || '미확인'}`;
+      } else {
+        verified = 'pending'; note = '버전 변경 없음';
+      }
+    } else if (/changelog|패치노트|patch.*note|note.*추가|note.*add/i.test(rl)) {
+      if (prev.changelogMtime && cur.changelogMtime && cur.changelogMtime > prev.changelogMtime) {
+        verified = 'pass'; note = 'CHANGELOG.md 갱신 감지';
+      } else if (!prev.changelogMtime) {
+        verified = 'baseline'; note = '초기 측정';
+      } else {
+        verified = 'pending'; note = 'CHANGELOG.md 변경 없음';
+      }
+    } else if (/test|테스트|verify/i.test(rl)) {
+      const hasTest = new RegExp(`## ${todayStr}.*verify-code|## ${todayStr}.*test`, 'i').test(ev);
+      verified = hasTest ? 'pass' : 'pending';
+      note = hasTest ? '오늘 verify-code 흔적' : '오늘 verify-code 호출 없음';
+    } else if (/deploy|배포|publish|push|release/i.test(rl)) {
+      verified = 'manual'; note = '배포는 사용자 명시 호출 (leerness release publish)';
+    } else {
+      verified = 'manual'; note = '자동 검증 패턴 없음 — 수동 확인';
+    }
+    results.push({ ...r, verified, note });
+  }
+  // lastVerified 갱신 (pass인 경우만)
+  for (const r of rules) {
+    const m = results.find(x => x.id === r.id);
+    if (m && m.verified === 'pass') r.lastVerified = todayStr;
+  }
+  writeRules(root, rules);
+  writeUtf8(rulesCachePath(root), JSON.stringify(cur, null, 2));
+  return results;
+}
+
+function ruleVerifyCmd(root) {
+  root = absRoot(root);
+  const results = verifyRules(root);
+  if (!results.length) return ok('활성 룰 없음');
+  log('# Rules verification');
+  log('| ID | Trigger | Rule | Verified | Note |');
+  log('|---|---|---|---|---|');
+  const ic = { pass: '✓ pass', pending: '⓿ pending', manual: 'ⓘ manual', baseline: '○ baseline' };
+  for (const r of results) log(`| ${r.id} | ${r.trigger} | ${r.rule.slice(0, 40)} | ${ic[r.verified] || '?'} | ${r.note} |`);
+}
+
+// ===== 1.9.8: release bump / note / publish =====
+function releaseBump(root) {
+  root = absRoot(root);
+  const kind = has('--major') ? 'major' : (has('--minor') ? 'minor' : 'patch');
+  const pkgFile = path.join(root, 'package.json');
+  if (!exists(pkgFile)) return fail('package.json 없음');
+  let pkg; try { pkg = JSON.parse(read(pkgFile)); } catch (e) { return fail('package.json 파싱 실패: ' + e.message); }
+  const cur = String(pkg.version || '0.0.0');
+  const parts = cur.split('.').map(n => parseInt(n, 10) || 0);
+  const [maj, min, pat] = [parts[0]||0, parts[1]||0, parts[2]||0];
+  let next;
+  if (kind === 'major') next = `${maj + 1}.0.0`;
+  else if (kind === 'minor') next = `${maj}.${min + 1}.0`;
+  else next = `${maj}.${min}.${pat + 1}`;
+  pkg.version = next;
+  writeUtf8(pkgFile, JSON.stringify(pkg, null, 2) + '\n');
+  const hv = path.join(root, '.harness/HARNESS_VERSION');
+  if (exists(hv) && /^\d+\.\d+\.\d+/.test(read(hv).trim())) writeUtf8(hv, next + '\n');
+  ok(`version bumped: ${cur} → ${next} (${kind})`);
+}
+
+function releaseNote(root, text) {
+  root = absRoot(root);
+  if (!text) return fail('note text required (e.g., release note "내용")');
+  const pkgFile = path.join(root, 'package.json');
+  let version = 'unknown';
+  if (exists(pkgFile)) { try { version = JSON.parse(read(pkgFile)).version || 'unknown'; } catch {} }
+  const clFile = path.join(root, 'CHANGELOG.md');
+  const date = today();
+  const headerRe = new RegExp(`^## ${version.replace(/\./g, '\\.')} — `, 'm');
+  if (exists(clFile)) {
+    const cur = read(clFile);
+    if (headerRe.test(cur)) {
+      // 같은 버전 헤더가 있으면 그 바로 아래에 줄 추가
+      const m = cur.match(headerRe);
+      const headerEnd = cur.indexOf('\n', m.index + m[0].length);
+      const insertPos = headerEnd + 1;
+      // 헤더 다음 빈 줄 후 첫 list 시작 찾기
+      const beforeBlock = cur.slice(insertPos);
+      const linesAfter = beforeBlock.split('\n');
+      // 가장 단순: 헤더 다음 줄에 즉시 - text 삽입
+      writeUtf8(clFile, cur.slice(0, insertPos) + `\n- ${text}\n` + cur.slice(insertPos));
+    } else {
+      // 새 버전 헤더 추가 (# Changelog 다음)
+      const top = cur.indexOf('# Changelog');
+      const newBlock = `\n## ${version} — ${date}\n\n- ${text}\n`;
+      if (top >= 0) {
+        const after = cur.indexOf('\n', top) + 1;
+        writeUtf8(clFile, cur.slice(0, after) + newBlock + cur.slice(after));
+      } else {
+        writeUtf8(clFile, `# Changelog\n${newBlock}\n${cur}`);
+      }
+    }
+  } else {
+    writeUtf8(clFile, `# Changelog\n\n## ${version} — ${date}\n\n- ${text}\n`);
+  }
+  ok(`CHANGELOG.md 갱신: [${version}] ${text}`);
+}
+
+function releasePublish(root) {
+  root = absRoot(root);
+  const dryRun = has('--dry-run');
+  log('# release publish');
+  log(`Mode: ${dryRun ? 'dry-run' : 'live'}`);
+  const packR = cp.spawnSync('npm', ['pack'], { cwd: root, encoding: 'utf8', shell: true });
+  if (packR.status !== 0) { fail('npm pack 실패'); log(packR.stderr); process.exitCode = 1; return; }
+  ok('npm pack 완료');
+  if (has('--git-push')) {
+    log('git push:');
+    const r1 = cp.spawnSync('git', ['push'], { cwd: root, encoding: 'utf8', shell: true });
+    log(r1.stdout || r1.stderr || '(no output)');
+    const r2 = cp.spawnSync('git', ['push', '--tags'], { cwd: root, encoding: 'utf8', shell: true });
+    log(r2.stdout || r2.stderr || '(no output)');
+  }
+  if (has('--npm-publish')) {
+    const args = dryRun ? ['publish', '--dry-run'] : ['publish', '--access', 'public'];
+    log('npm ' + args.join(' '));
+    const r = cp.spawnSync('npm', args, { cwd: root, encoding: 'utf8', shell: true });
+    log((r.stdout || '').split('\n').slice(-5).join('\n'));
+    if (r.status !== 0) { fail('npm publish 실패'); process.exitCode = 1; return; }
+  }
+  ok('release publish 완료');
 }
 
 // ===== 1.9.7 A: verify-code — npm scripts 자동 감지 + evidence 자동 기록 =====
@@ -1754,7 +2073,12 @@ function help() {
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path]\n  leerness session close [path]\n  leerness viewwork install [path]\n  leerness viewwork emit [path] [--action a] [--note n] [--agent x] [--tool t]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness verify-code [path] [--build]      # npm test/lint/typecheck 자동 실행 + evidence 자동 기록 (1.9.7)
   leerness lessons [--query <키>] [--limit N]  # 과거 결정/실수 자동 회수 (1.9.7)
-  leerness lazy detect [path] [--auto-track] # --auto-track으로 새 TODO를 progress에 자동 등록 (1.9.7)\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n`);
+  leerness lazy detect [path] [--auto-track] # --auto-track으로 새 TODO를 progress에 자동 등록 (1.9.7)
+  leerness rule add "<설명>" --trigger every-session|every-update|every-commit|session-start|session-close|pre-publish  # 사용자 룰 등록 (1.9.8)
+  leerness rule list|verify|pause <id>|resume <id>|remove <id>|stop|resume-all
+  leerness release bump [--patch|--minor|--major]  # package.json 자동 bump (1.9.8)
+  leerness release note "<내용>"               # CHANGELOG.md 자동 추가 (1.9.8)
+  leerness release publish [--dry-run] [--git-push] [--npm-publish]  # 통합 배포 (1.9.8)\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n`);
 }
 
 async function main() {
@@ -1795,6 +2119,17 @@ async function main() {
   if (cmd === 'gate')                               return gate(args[1] || process.cwd());
   if (cmd === 'verify-code')                        return verifyCodeCmd(args[1] || process.cwd());
   if (cmd === 'lessons')                            return lessonsCmd(arg('--path', process.cwd()));
+  if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
+  if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
+  if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'rule' && args[1] === 'pause')        return rulePause(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'rule' && args[1] === 'resume')       return ruleResume(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'rule' && args[1] === 'stop')         return ruleStop(arg('--path', process.cwd()));
+  if (cmd === 'rule' && args[1] === 'resume-all')   return ruleResumeAll(arg('--path', process.cwd()));
+  if (cmd === 'rule' && args[1] === 'verify')       return ruleVerifyCmd(arg('--path', process.cwd()));
+  if (cmd === 'release' && args[1] === 'bump')      return releaseBump(arg('--path', process.cwd()));
+  if (cmd === 'release' && args[1] === 'note')      return releaseNote(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
+  if (cmd === 'release' && args[1] === 'publish')   return releasePublish(arg('--path', process.cwd()));
   if (cmd === 'impact')                             return impactCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'reuse' && args[1] === 'find')        return reuseFind(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'reuse' && args[1] === 'register')    return reuseRegister(arg('--path', process.cwd()), args[2]);

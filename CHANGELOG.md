@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.9.9 — 2026-05-12
+
+- 1.9.9 빌드 + GitHub 배포
+
+**1.9.8 시연 중 자체 도그푸드(dogfood)로 빌드된 패치 — 룰 시스템이 정확히 작동한 증거**.
+
+### Fixed
+- `nonFlagArgs()`의 `withValue` set에 `--trigger`, `--check`, `--set`, `--min-score` 추가. 이전에는 `rule add "..." --trigger every-update` 호출 시 `every-update`가 description 끝에 합쳐져 등록되던 작은 버그.
+
+### Demonstrated (자체 도그푸드)
+- 메인 디렉토리에 사용자 자연어 룰 3종 (버전 bump / CHANGELOG 추가 / 배포 안내) 등록
+- `leerness handoff`가 active rules 자동 노출 ✓
+- `leerness rule pause R-0003` → handoff에서 R-0003 사라짐 ✓
+- `leerness release bump --patch` → 1.9.8 → 1.9.9 자동 ✓
+- `leerness release note "..."` → 이 CHANGELOG 항목 자동 작성 ✓
+- `leerness session close`가 룰 검증 (`✓ pass / ⓘ manual / ○ baseline`) 자동 보고 ✓
+
+## 1.9.8 — 2026-05-08
+
+**자연어 룰 등록 + 매 세션 자동 노출·검증 + 코드로 자동화 가능한 release 명령군**.
+
+### Added — User Rules
+
+- `.harness/rules.md` — 사용자 정의 영구 룰의 단일 출처. AGENTS.md mandatory read order 10번에 자동 포함.
+- `leerness rule add "<설명>" --trigger every-session|every-update|every-commit|session-start|session-close|pre-publish` — 룰 등록.
+- `leerness rule list / verify / pause <id> / resume <id> / remove <id> / stop / resume-all` — 룰 라이프사이클.
+- `leerness handoff`가 **active rules를 매 세션 시작 시 자동 출력** (사용자 중지 요청 전까지).
+- `leerness session close`가 **활성 룰별 자동 검증 결과 (`✓ pass / ⓘ manual / ⓿ pending / ○ baseline`) 자동 보고**.
+
+### Added — 자연어 룰 처리 지시 (AGENTS.md / CLAUDE.md)
+
+사용자가 자연어로 "매 X마다 Y를 해줘"라고 말하면 AI 에이전트가 즉시 `leerness rule add` 명령을 호출하도록 매핑 표를 추가:
+
+| 자연어 | leerness 명령 |
+|---|---|
+| "매 업데이트마다 버전 bump" | `rule add "버전 patch bump" --trigger every-update` |
+| "매 커밋마다 패치노트" | `rule add "패치노트 추가" --trigger every-commit` |
+| "세션 종료마다 배포" | `rule add "배포" --trigger session-close` |
+| "X 룰 중지/그만" | `rule pause <id>` |
+| "X 룰 제거" | `rule remove <id>` |
+| "모든 룰 중지" | `rule stop` |
+
+### Added — release 명령군 (자동화 가능한 룰의 실행 도구)
+
+- `leerness release bump [--patch|--minor|--major]` — `package.json#version`과 `.harness/HARNESS_VERSION` 자동 bump.
+- `leerness release note "<내용>"` — CHANGELOG.md에 자동 추가 (같은 버전이면 항목만, 새 버전이면 헤더+항목).
+- `leerness release publish [--dry-run] [--git-push] [--npm-publish]` — npm pack + (선택) git push + (선택) npm publish 통합.
+
+### Added — 룰 자동 검증 휴리스틱
+
+`session close`가 매번 자동 수행:
+- **version / 버전 / bump 키워드 룰** → `package.json` version이 baseline 캐시 대비 갱신됐는지.
+- **changelog / 패치노트 키워드 룰** → CHANGELOG.md mtime이 갱신됐는지.
+- **test / 테스트 / verify 키워드 룰** → review-evidence.md에 오늘 verify-code 흔적이 있는지.
+- **deploy / 배포 / publish 키워드 룰** → 자동 검증 불가 → `ⓘ manual` (사용자 안내).
+
+### Migration
+
+기존 1.9.x 사용자는 `npx leerness@latest update . --yes`로 즉시 자동 마이그레이션됩니다. `.harness/rules.md`는 자동 생성됩니다.
+
 ## 1.9.7 — 2026-05-08
 
 코드 검증 자동 실행 + 과거 결정/실수 자동 회수 + TODO 자동 추적의 3종 자동화.

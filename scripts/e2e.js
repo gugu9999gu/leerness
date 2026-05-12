@@ -235,6 +235,91 @@ total++;
   if (!(strongOK && weakHint)) failed++;
 }
 
+// 1.9.8: rule add/list/pause/resume/remove
+total++;
+{
+  const r1 = cp.spawnSync(process.execPath, [CLI, 'rule', 'add', '매 업데이트마다 버전 patch bump', '--trigger', 'every-update', '--path', tmp], { encoding: 'utf8' });
+  const r2 = cp.spawnSync(process.execPath, [CLI, 'rule', 'add', '매 업데이트마다 패치노트 추가', '--trigger', 'every-update', '--path', tmp], { encoding: 'utf8' });
+  const r3 = cp.spawnSync(process.execPath, [CLI, 'rule', 'add', '세션 종료마다 배포', '--trigger', 'session-close', '--path', tmp], { encoding: 'utf8' });
+  const rl = cp.spawnSync(process.execPath, [CLI, 'rule', 'list', '--path', tmp], { encoding: 'utf8' });
+  const ok = r1.status === 0 && r2.status === 0 && r3.status === 0 && /R-0001/.test(rl.stdout) && /R-0003/.test(rl.stdout);
+  console.log(ok ? '✓ B(1.9.8) rule add/list: 3개 등록' : '✗ B(1.9.8) rule add/list 실패');
+  if (!ok) failed++;
+}
+total++;
+{
+  // pause + handoff에서 paused는 안 보여야 함
+  cp.spawnSync(process.execPath, [CLI, 'rule', 'pause', 'R-0001', '--path', tmp], { encoding: 'utf8' });
+  const hr = cp.spawnSync(process.execPath, [CLI, 'handoff', tmp], { encoding: 'utf8' });
+  const ok = /Active User Rules/.test(hr.stdout) && /R-0002/.test(hr.stdout) && /R-0003/.test(hr.stdout) && !/R-0001 \[/.test(hr.stdout);
+  console.log(ok ? '✓ B(1.9.8) handoff: paused 룰 제외, active만 출력' : '✗ B(1.9.8) handoff 출력 실패');
+  if (!ok) { failed++; console.log(hr.stdout); }
+  cp.spawnSync(process.execPath, [CLI, 'rule', 'resume', 'R-0001', '--path', tmp], { encoding: 'utf8' });
+}
+total++;
+{
+  // rule stop / resume-all
+  cp.spawnSync(process.execPath, [CLI, 'rule', 'stop', '--path', tmp], { encoding: 'utf8' });
+  const rl = cp.spawnSync(process.execPath, [CLI, 'rule', 'list', '--path', tmp], { encoding: 'utf8' });
+  const allPaused = (rl.stdout.match(/\| paused \|/g) || []).length >= 3;
+  cp.spawnSync(process.execPath, [CLI, 'rule', 'resume-all', '--path', tmp], { encoding: 'utf8' });
+  const rl2 = cp.spawnSync(process.execPath, [CLI, 'rule', 'list', '--path', tmp], { encoding: 'utf8' });
+  const allActive = (rl2.stdout.match(/\| active \|/g) || []).length >= 3;
+  console.log(allPaused && allActive ? '✓ B(1.9.8) rule stop / resume-all: 일괄 전환' : '✗ B(1.9.8) stop/resume-all 실패');
+  if (!(allPaused && allActive)) failed++;
+}
+
+// 1.9.8: release bump
+total++;
+{
+  const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rel-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  fs.writeFileSync(path.join(tmpR, 'package.json'), JSON.stringify({ name: 't', version: '1.0.0' }));
+  cp.spawnSync(process.execPath, [CLI, 'release', 'bump', '--patch', '--path', tmpR], { encoding: 'utf8' });
+  let v = JSON.parse(fs.readFileSync(path.join(tmpR, 'package.json'), 'utf8')).version;
+  const okPatch = v === '1.0.1';
+  cp.spawnSync(process.execPath, [CLI, 'release', 'bump', '--minor', '--path', tmpR], { encoding: 'utf8' });
+  v = JSON.parse(fs.readFileSync(path.join(tmpR, 'package.json'), 'utf8')).version;
+  const okMinor = v === '1.1.0';
+  cp.spawnSync(process.execPath, [CLI, 'release', 'bump', '--major', '--path', tmpR], { encoding: 'utf8' });
+  v = JSON.parse(fs.readFileSync(path.join(tmpR, 'package.json'), 'utf8')).version;
+  const okMajor = v === '2.0.0';
+  console.log(okPatch && okMinor && okMajor ? '✓ B(1.9.8) release bump: patch/minor/major' : `✗ B(1.9.8) bump 실패 final=${v}`);
+  if (!(okPatch && okMinor && okMajor)) failed++;
+}
+
+// 1.9.8: release note → CHANGELOG.md 자동 갱신
+total++;
+{
+  const tmpN = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-note-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpN, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  fs.writeFileSync(path.join(tmpN, 'package.json'), JSON.stringify({ name: 't', version: '0.1.0' }));
+  cp.spawnSync(process.execPath, [CLI, 'release', 'note', '첫 기능 추가', '--path', tmpN], { encoding: 'utf8' });
+  const cl = fs.readFileSync(path.join(tmpN, 'CHANGELOG.md'), 'utf8');
+  const ok = /## 0\.1\.0/.test(cl) && /첫 기능 추가/.test(cl);
+  console.log(ok ? '✓ B(1.9.8) release note: CHANGELOG 자동 갱신' : '✗ B(1.9.8) release note 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.8: session close가 rule verification 보고
+total++;
+{
+  // tmp는 위에서 rule 3개 등록됨
+  // package.json 만들기 + 버전 변경 시뮬 (rule R-0001은 every-update 버전 룰)
+  fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'tmp-e2e', version: '0.1.0' }));
+  // 첫 session close — baseline 캡처
+  cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmp], { encoding: 'utf8' });
+  // 버전 bump
+  cp.spawnSync(process.execPath, [CLI, 'release', 'bump', '--patch', '--path', tmp], { encoding: 'utf8' });
+  // CHANGELOG 갱신
+  cp.spawnSync(process.execPath, [CLI, 'release', 'note', 'e2e 검증 항목 추가', '--path', tmp], { encoding: 'utf8' });
+  // 두 번째 session close — 변경 감지
+  const sc = cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmp], { encoding: 'utf8' });
+  const ok = /User Rules verification/.test(sc.stdout) && /✓ pass/.test(sc.stdout);
+  console.log(ok ? '✓ B(1.9.8) session close: rule 검증 ✓ pass 출력' : `✗ B(1.9.8) session close 검증 실패\n${sc.stdout.split('\n').slice(-15).join('\n')}`);
+  if (!ok) failed++;
+}
+
 // 1.9.7 A: verify-code — 가짜 package.json + 통과 시나리오
 total++;
 {
