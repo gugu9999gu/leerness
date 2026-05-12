@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.9.11 — 2026-05-12
+
+**`leerness roadmap` 명령 통합 + `project-roadmap-generator` 스킬 기본 추천 + 화이트보드/토큰/상하 중앙정렬**.
+
+### Added — `leerness roadmap [path] [--out file.html]`
+
+`project-roadmap-generator` 로직을 leerness 본 패키지에 통합. 외부 의존성 없이 즉시 사용 가능.
+
+- 좌→우 수평 트리 (project → milestones → tasks → skills/rules)
+- **상하 중앙정렬**: 각 column의 노드들이 캔버스 세로 중앙 기준으로 균등 분포
+- **디자인 토큰 자동 주입**: `.harness/design-system.md`의 Tokens 표 + 프로젝트 `styles/tokens.css`의 CSS 변수를 HTML `:root`에 `--lr-*`로 주입 (h1·card·border·dot 색상이 사용자 토큰을 따름)
+- **화이트보드**: 드래그 panning, 휠 zoom (마우스 포인터 중심), 더블클릭 reset, +/-/⟳ 컨트롤 버튼
+- 7개 상태 (완료/진행/보류/검토/예정/미완료/오류) + 스킬/룰 색상
+- Milestones, 예정 작업, 보유 스킬, 활성 룰, 최근 결정, 디자인 토큰 6개 섹션 통합
+
+### Changed — `recommended` 스킬에 자동 포함
+
+`leerness init . --skills recommended` 호출 시 `project-roadmap-generator` 스킬이 기본으로 설치됩니다 (기존 4종 + 1). 별도 설치 불필요.
+
+```
+recommended = ['office','commerce-api','ai-verified-skill-publisher','feature-implementation','project-roadmap-generator']
+```
+
+### Migration
+
+기존 1.9.x 사용자는 `npx leerness@latest update . --yes`로 즉시 자동 마이그레이션됩니다. `leerness roadmap`이 바로 사용 가능합니다.
+
 ## 1.9.10 — 2026-05-12
 
 **leerness-skillpack 분리 + release publish 강화 (git remote 자동 감지 + GitHub Release + gh-pages 배포)**.

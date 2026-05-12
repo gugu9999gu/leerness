@@ -235,6 +235,52 @@ total++;
   if (!(strongOK && weakHint)) failed++;
 }
 
+// 1.9.11: roadmap 명령 통합 + 화이트보드/토큰/중앙정렬 회귀
+total++;
+{
+  const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  const r = cp.spawnSync(process.execPath, [CLI, 'roadmap', tmpR], { encoding: 'utf8' });
+  const outFile = path.join(tmpR, 'roadmap.html');
+  const ok = r.status === 0 && fs.existsSync(outFile);
+  console.log(ok ? '✓ B(1.9.11) roadmap: 명령 + 파일 생성' : `✗ roadmap 실패\n${r.stdout}\n${r.stderr}`);
+  if (!ok) failed++;
+}
+total++;
+{
+  const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm2-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  cp.spawnSync(process.execPath, [CLI, 'roadmap', tmpR], { stdio: 'ignore' });
+  const html = fs.readFileSync(path.join(tmpR, 'roadmap.html'), 'utf8');
+  const ok = /화이트보드/.test(html) && /id="roadmap-svg"/.test(html) && /viewBox="0 0/.test(html) && /window\.lrZoom/.test(html) && /window\.lrReset/.test(html);
+  console.log(ok ? '✓ B(1.9.11) roadmap: 화이트보드 (panning/zoom JS)' : '✗ 화이트보드 부재');
+  if (!ok) failed++;
+}
+total++;
+{
+  // 사용자 design-system 토큰 주입
+  const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm3-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  let ds = fs.readFileSync(path.join(tmpR, '.harness/design-system.md'), 'utf8');
+  ds = ds.replace('| color.primary | (실제 값으로 업데이트) | |', '| color.primary | #ff5722 | |');
+  fs.writeFileSync(path.join(tmpR, '.harness/design-system.md'), ds);
+  cp.spawnSync(process.execPath, [CLI, 'roadmap', tmpR], { stdio: 'ignore' });
+  const html = fs.readFileSync(path.join(tmpR, 'roadmap.html'), 'utf8');
+  const ok = /--lr-primary: #ff5722/.test(html);
+  console.log(ok ? '✓ B(1.9.11) roadmap: design-system 토큰 자동 주입' : '✗ 토큰 주입 실패');
+  if (!ok) failed++;
+}
+total++;
+{
+  // recommended에 project-roadmap-generator 자동 포함
+  const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm4-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  const skillsDir = path.join(tmpR, '.harness/skills/project-roadmap-generator');
+  const ok = fs.existsSync(skillsDir) && fs.existsSync(path.join(skillsDir, 'skill.json'));
+  console.log(ok ? '✓ B(1.9.11) recommended에 project-roadmap-generator 자동 설치' : '✗ 자동 설치 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.10 A: skillpack 동적 로드 (LEERNESS_SKILLPACK_PATH로 시뮬)
 total++;
 {

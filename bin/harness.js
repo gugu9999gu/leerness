@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.10';
+const VERSION = '1.9.11';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -71,7 +71,9 @@ const BUILTIN_CATALOG = {
   'ads-analytics':                { displayNameKo: '광고·GA4 분석 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['GA4 이벤트/전환 점검', '광고 데이터 수집 구조화', '소스/매체 분석', '리포트 자동화'] },
   'appstore-review':              { displayNameKo: '앱스토어 심사 대응 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['심사 문구 분석', '개인정보 라벨 점검', '리젝 대응 초안', '웹뷰/앱 데이터 수집 구분'] },
   'ai-verified-skill-publisher':  { displayNameKo: 'AI 검증 스킬 업로드·라이브러리화 스킬', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['검증된 스킬 정규화', '민감정보 스캔', 'AI 검증 메타데이터 작성', 'npm/git 업로드 dry-run 및 실행 게이트'] },
-  'feature-implementation':       { displayNameKo: '기능 구현 표준 스킬', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['feature-contracts 작성', '재사용 우선 검사', '테스트 증거 수집', '핸드오프 트리거'] }
+  'feature-implementation':       { displayNameKo: '기능 구현 표준 스킬', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['feature-contracts 작성', '재사용 우선 검사', '테스트 증거 수집', '핸드오프 트리거'] },
+  // 1.9.11: 기본 내장 — 로드맵 자동 생성 스킬
+  'project-roadmap-generator':    { displayNameKo: '프로젝트 로드맵 자동 생성 스킬', version: '0.2.0', lastUpdated: '2026-05-12', verification: 'passed', capabilities: ['leerness .harness/* 통합 파싱 (plan/progress/skills/rules/decisions/handoff/current-state)', '좌→우 수평 트리 + 상하 중앙정렬 SVG', '7개 상태 색상 (완료/진행/보류/검토/예정/미완료/오류)', 'design-system + CSS variables 자동 주입', '화이트보드 panning/zoom + 더블클릭 reset', '단일 HTML 출력 (외부 의존성 0)'] }
 };
 
 // 1.9.10: skillCatalog는 skillpack 우선, fallback builtin. _loadSkillCatalog 호출은 BUILTIN_CATALOG 정의 후.
@@ -350,7 +352,8 @@ function syncReadme(root) {
 function parseSkillsValue(v) {
   if (!v || v === true) return [];
   if (v === 'all') return Object.keys(skillCatalog);
-  if (v === 'recommended') return ['office','commerce-api','ai-verified-skill-publisher','feature-implementation'];
+  // 1.9.11: recommended에 project-roadmap-generator 자동 포함
+  if (v === 'recommended') return ['office','commerce-api','ai-verified-skill-publisher','feature-implementation','project-roadmap-generator'];
   return String(v).split(',').map(s => s.trim()).filter(Boolean).filter(s => skillCatalog[s]);
 }
 
@@ -1314,6 +1317,294 @@ function gate(root) {
   else ok('all gates passed');
 }
 
+// ===== 1.9.11: Roadmap (project-roadmap-generator 통합) =====
+const ROADMAP_STATUS_LABEL = { done: '완료', 'in-progress': '진행', 'on-hold': '보류', waiting: '검토', incomplete: '미완료', planned: '예정', blocked: '오류', dropped: '취소', skill: '스킬', rule: '룰', meta: '프로젝트' };
+const ROADMAP_STATUS_COLOR = { done: '#16a34a', 'in-progress': '#2563eb', 'on-hold': '#6b7280', waiting: '#eab308', incomplete: '#f97316', planned: '#94a3b8', blocked: '#dc2626', dropped: '#9ca3af', skill: '#8b5cf6', rule: '#06b6d4', meta: '#0f172a' };
+const ROADMAP_NODE_W = 220, ROADMAP_NODE_H = 72, ROADMAP_COL_GAP = 70, ROADMAP_ROW_GAP = 14;
+
+function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function _truncate(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+function _roadmapMapStatus(s) {
+  s = String(s || '').toLowerCase();
+  if (s === 'done' || s === 'in-progress' || s === 'on-hold' || s === 'waiting' || s === 'incomplete' || s === 'blocked' || s === 'dropped') return s;
+  if (s === 'planned' || s === 'requested') return 'planned';
+  return 'planned';
+}
+
+function _roadmapParseMilestones(text) {
+  const out = [];
+  for (const m of String(text || '').matchAll(/^### (M-\d{4})\.\s*(.+?)$/gm)) {
+    const after = text.slice(m.index);
+    const sm = after.match(/^Status:\s*(\S+)/m);
+    const pm = after.match(/^Progress:\s*(\d+)%/m);
+    out.push({ id: m[1], title: m[2].trim(), status: sm ? sm[1] : 'planned', progress: pm ? parseInt(pm[1], 10) : 0 });
+  }
+  return out;
+}
+
+function _roadmapParseTokens(text) {
+  const tokens = {};
+  for (const line of String(text || '').split('\n')) {
+    const m = line.match(/^\|\s*([\w.\-]+)\s*\|\s*([^|]+?)\s*\|/);
+    if (!m) continue;
+    const key = m[1].trim(), val = m[2].trim();
+    if (!key || !val || key === 'Token' || /^-+$/.test(key) || val === 'Value' || /\(실제 값으로 업데이트\)/.test(val)) continue;
+    if (val.length > 80) continue;
+    tokens[key] = val;
+  }
+  return tokens;
+}
+
+function _roadmapParseCssVars(root) {
+  const out = {};
+  const cands = ['src/styles/tokens.css', 'styles/tokens.css', 'src/styles.css', 'styles.css', 'src/styles/main.css', 'public/styles.css'];
+  for (const c of cands) {
+    const f = path.join(root, c);
+    if (!exists(f)) continue;
+    const text = read(f);
+    const m = text.match(/:root\s*\{([\s\S]*?)\}/);
+    if (!m) continue;
+    for (const line of m[1].split('\n')) {
+      const v = line.match(/--([\w-]+)\s*:\s*([^;]+);/);
+      if (v) out[v[1].trim()] = v[2].trim();
+    }
+  }
+  return out;
+}
+
+function _roadmapData(root) {
+  root = absRoot(root);
+  const milestones = _roadmapParseMilestones(exists(planPath(root)) ? read(planPath(root)) : '');
+  const tasks = readProgressRows(root).map(t => ({
+    ...t,
+    milestones: Array.from(String(t.evidence || '').matchAll(/M-\d{4}/g)).map(m => m[0])
+  }));
+  // skills
+  const skills = [];
+  const skillsDir = path.join(root, '.harness/skills');
+  if (exists(skillsDir)) {
+    for (const id of fs.readdirSync(skillsDir)) {
+      const f = path.join(skillsDir, id, 'skill.json');
+      if (!exists(f)) continue;
+      try { skills.push(JSON.parse(read(f))); } catch {}
+    }
+  }
+  // rules
+  const rulesT = exists(rulesPath(root)) ? read(rulesPath(root)) : '';
+  const rules = [];
+  for (const line of rulesT.split('\n')) {
+    if (!/^\| R-\d{4} \|/.test(line)) continue;
+    const cells = line.split('|').slice(1, -1).map(s => s.trim());
+    if (cells.length < 6) continue;
+    rules.push({ id: cells[0], trigger: cells[1], rule: cells[2], status: cells[4], lastVerified: cells[5] });
+  }
+  // currentState
+  const csT = exists(currentStatePath(root)) ? read(currentStatePath(root)) : '';
+  const now = (csT.match(/## Now\n([\s\S]*?)(?=\n## )/) || [, ''])[1].trim();
+  const next = (csT.match(/## Next\n([\s\S]*?)(?=\n## )/) || [, ''])[1].trim();
+  const blockers = (csT.match(/## Blockers\n([\s\S]*?)$/) || [, ''])[1].trim();
+  // decisions (top 6)
+  const decT = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+  const decisions = [];
+  for (const block of decT.split(/\n(?=### )/)) {
+    if (!block.startsWith('### ')) continue;
+    const tm = block.match(/^### (.+)$/m);
+    if (tm) decisions.push({ title: tm[1].trim() });
+  }
+  return {
+    project: path.basename(root),
+    version: exists(path.join(root, '.harness/HARNESS_VERSION')) ? read(path.join(root, '.harness/HARNESS_VERSION')).trim() : 'unknown',
+    milestones, tasks, skills, rules,
+    currentState: { now, next, blockers },
+    decisions,
+    designTokens: _roadmapParseTokens(exists(path.join(root, '.harness/design-system.md')) ? read(path.join(root, '.harness/design-system.md')) : ''),
+    cssVariables: _roadmapParseCssVars(root)
+  };
+}
+
+function _roadmapLayout(data) {
+  const nodes = []; const edges = [];
+  nodes.push({ id: 'project', kind: 'project', title: data.project, subtitle: `leerness ${data.version}`, meta: `M ${data.milestones.length} · T ${data.tasks.length} · S ${data.skills.length}`, status: 'meta', col: 0 });
+  for (const m of data.milestones) {
+    nodes.push({ id: m.id, kind: 'milestone', title: m.id, subtitle: m.title, meta: `${m.progress}% · ${m.status}`, status: _roadmapMapStatus(m.status), col: 1 });
+    edges.push({ from: 'project', to: m.id });
+  }
+  for (const t of data.tasks) {
+    nodes.push({ id: t.id, kind: 'task', title: t.id, subtitle: t.request, meta: t.evidence ? `evidence: ${t.evidence.slice(0, 40)}` : '', status: _roadmapMapStatus(t.status), col: 2 });
+    if (t.milestones.length) for (const mid of t.milestones) edges.push({ from: mid, to: t.id });
+    else edges.push({ from: 'project', to: t.id });
+  }
+  for (const s of data.skills) {
+    nodes.push({ id: 'skill:' + s.name, kind: 'skill', title: s.name, subtitle: s.displayNameKo || s.name, meta: `사용 ${s.usage?.count || 0}회 · cap ${(s.capabilities || []).length}`, status: 'skill', col: 3 });
+    edges.push({ from: 'project', to: 'skill:' + s.name });
+  }
+  for (const r of data.rules.filter(r => r.status === 'active')) {
+    nodes.push({ id: 'rule:' + r.id, kind: 'rule', title: r.id, subtitle: r.rule, meta: r.trigger, status: 'rule', col: 3 });
+    edges.push({ from: 'project', to: 'rule:' + r.id });
+  }
+  // 상하 중앙정렬 (1.9.11 v0.2)
+  const byCol = {};
+  for (const n of nodes) (byCol[n.col] = byCol[n.col] || []).push(n);
+  const colH = {}; let maxColH = 0; let maxCol = 0;
+  for (const c of Object.keys(byCol)) {
+    const r = byCol[c]; const h = r.length * ROADMAP_NODE_H + Math.max(0, r.length - 1) * ROADMAP_ROW_GAP;
+    colH[c] = h; maxColH = Math.max(maxColH, h); maxCol = Math.max(maxCol, parseInt(c, 10));
+  }
+  const padding = 40; const minHeight = 360;
+  const canvasHeight = Math.max(maxColH, minHeight) + padding * 2;
+  for (const c of Object.keys(byCol)) {
+    const r = byCol[c]; const h = colH[c]; const startY = (canvasHeight - h) / 2;
+    r.forEach((n, i) => {
+      n.x = parseInt(c, 10) * (ROADMAP_NODE_W + ROADMAP_COL_GAP) + padding;
+      n.y = startY + i * (ROADMAP_NODE_H + ROADMAP_ROW_GAP);
+    });
+  }
+  return { nodes, edges, width: (maxCol + 1) * (ROADMAP_NODE_W + ROADMAP_COL_GAP) + padding * 2, height: canvasHeight };
+}
+
+function _roadmapTokenStyles(designTokens, cssVariables) {
+  const vars = {};
+  const map = [
+    ['color.primary', 'color-primary', 'lr-primary'], ['color.surface', 'color-surface', 'lr-surface'],
+    ['color.text', 'color-text', 'lr-text'], ['color.muted', 'color-muted', 'lr-muted'],
+    ['space.1', 'space-1', 'lr-space-1'], ['space.2', 'space-2', 'lr-space-2'],
+    ['space.3', 'space-3', 'lr-space-3'], ['space.4', 'space-4', 'lr-space-4'],
+    ['radius', 'radius', 'lr-radius']
+  ];
+  for (const [ds, css, vn] of map) { const v = cssVariables[css] || designTokens[ds]; if (v) vars[vn] = v; }
+  for (const [k, v] of Object.entries(cssVariables)) if (!vars[`lr-${k}`]) vars[`lr-${k}`] = v;
+  if (!vars['lr-card-bg']) vars['lr-card-bg'] = vars['lr-surface'] || '#ffffff';
+  if (!vars['lr-edge']) vars['lr-edge'] = vars['lr-muted'] || '#cbd5e1';
+  if (!vars['lr-page-bg']) vars['lr-page-bg'] = '#f8fafc';
+  return ':root {\n' + Object.entries(vars).map(([k, v]) => `    --${k}: ${v};`).join('\n') + '\n  }';
+}
+
+function _roadmapHTML(data) {
+  const g = _roadmapLayout(data);
+  const edges = g.edges.map(e => {
+    const f = g.nodes.find(n => n.id === e.from), t = g.nodes.find(n => n.id === e.to);
+    if (!f || !t) return '';
+    const x1 = f.x + ROADMAP_NODE_W, y1 = f.y + ROADMAP_NODE_H / 2, x2 = t.x, y2 = t.y + ROADMAP_NODE_H / 2, mid = (x1 + x2) / 2;
+    return `<path d="M ${x1},${y1} C ${mid},${y1} ${mid},${y2} ${x2},${y2}" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>`;
+  }).join('\n');
+  const nodes = g.nodes.map(n => {
+    const c = ROADMAP_STATUS_COLOR[n.status] || 'var(--lr-text, #0f172a)';
+    const lbl = ROADMAP_STATUS_LABEL[n.status] || n.status;
+    return `<g class="node node-${n.kind} status-${n.status}" data-id="${_esc(n.id)}" transform="translate(${n.x},${n.y})">
+      <rect width="${ROADMAP_NODE_W}" height="${ROADMAP_NODE_H}" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="${c}" stroke-width="2"/>
+      <rect width="5" height="${ROADMAP_NODE_H}" fill="${c}"/>
+      <text x="14" y="22" font-size="12" fill="${c}" font-weight="600">${_esc(n.title)} · ${_esc(lbl)}</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">${_esc(_truncate(n.subtitle, 30))}</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">${_esc(_truncate(n.meta, 36))}</text>
+      <title>${_esc(n.id)} — ${_esc(n.subtitle)}${n.meta ? '\n' + _esc(n.meta) : ''}</title>
+    </g>`;
+  }).join('\n');
+  const counts = {};
+  for (const t of data.tasks) counts[t.status] = (counts[t.status] || 0) + 1;
+  const legend = ['done', 'in-progress', 'on-hold', 'waiting', 'incomplete', 'planned', 'blocked', 'skill', 'rule']
+    .map(s => `<span class="badge" style="border-color:${ROADMAP_STATUS_COLOR[s]};color:${ROADMAP_STATUS_COLOR[s]}">${ROADMAP_STATUS_LABEL[s]}</span>`).join(' ');
+  const chips = ['done', 'in-progress', 'on-hold', 'waiting', 'incomplete', 'planned', 'blocked']
+    .map(s => `<span class="chip" style="border-color:${ROADMAP_STATUS_COLOR[s]};color:${ROADMAP_STATUS_COLOR[s]}">${ROADMAP_STATUS_LABEL[s]} ${counts[s] || 0}</span>`).join(' ');
+  const upcoming = data.tasks.filter(t => ['planned', 'requested', 'in-progress'].includes(t.status)).slice(0, 10);
+  const upcomingBlock = upcoming.length ? upcoming.map(t => `<div class="row"><span class="dot" style="background:${ROADMAP_STATUS_COLOR[t.status] || '#000'}"></span><strong>${_esc(t.id)}</strong> <span class="meta">[${_esc(ROADMAP_STATUS_LABEL[t.status] || t.status)}]</span> ${_esc(t.request)} <span class="meta">→ ${_esc(t.nextAction)}</span></div>`).join('') : '<div class="empty">예정 작업 없음</div>';
+  const milestoneBlock = data.milestones.length ? data.milestones.map(m => `<div class="row"><span class="dot" style="background:${ROADMAP_STATUS_COLOR[_roadmapMapStatus(m.status)] || ROADMAP_STATUS_COLOR.planned}"></span><strong>${_esc(m.id)}</strong> <span class="meta">[${_esc(m.status)} · ${m.progress}%]</span> ${_esc(m.title)}</div>`).join('') : '<div class="empty">마일스톤 없음</div>';
+  const skillsBlock = data.skills.length ? data.skills.map(s => `<div class="row"><span class="dot" style="background:${ROADMAP_STATUS_COLOR.skill}"></span><strong>${_esc(s.name)}</strong> · ${_esc(s.displayNameKo || s.name)} <span class="meta">사용 ${s.usage?.count || 0}회 · cap ${(s.capabilities || []).length}</span></div>`).join('') : '<div class="empty">스킬 없음</div>';
+  const activeRules = data.rules.filter(r => r.status === 'active');
+  const rulesBlock = activeRules.length ? activeRules.map(r => `<div class="row"><span class="dot" style="background:${ROADMAP_STATUS_COLOR.rule}"></span><strong>${_esc(r.id)}</strong> <span class="meta">[${_esc(r.trigger)}]</span> ${_esc(r.rule)}</div>`).join('') : '<div class="empty">활성 룰 없음</div>';
+  const decisionsBlock = data.decisions.length ? data.decisions.slice(0, 6).map(d => `<div class="row"><span class="dot" style="background:var(--lr-text, #0f172a)"></span>${_esc(d.title)}</div>`).join('') : '<div class="empty">결정 없음</div>';
+  const tokensSection = (Object.keys(data.designTokens).length || Object.keys(data.cssVariables).length)
+    ? [...Object.entries(data.designTokens).slice(0, 8), ...Object.entries(data.cssVariables).slice(0, 8)]
+        .map(([k, v]) => `<div class="row"><span class="dot" style="background:${/#[0-9a-f]{3,8}/i.test(v) ? v : 'var(--lr-muted, #94a3b8)'}"></span><strong>${_esc(k)}</strong> <span class="meta">${_esc(v)}</span></div>`).join('')
+    : '<div class="empty">디자인 토큰 없음</div>';
+
+  return `<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>${_esc(data.project)} — leerness 로드맵</title>
+<style>
+  ${_roadmapTokenStyles(data.designTokens, data.cssVariables)}
+  body { font-family: var(--lr-font-body, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif); margin: 0; padding: 20px; background: var(--lr-page-bg); color: var(--lr-text); }
+  h1 { margin: 0 0 4px; font-size: 22px; color: var(--lr-primary, var(--lr-text, #0f172a)); }
+  h2 { margin: 24px 0 8px; font-size: 16px; color: var(--lr-muted, #334155); }
+  .meta { font-size: 11px; color: var(--lr-muted, #64748b); margin-left: 4px; }
+  .summary { display: flex; gap: 16px; flex-wrap: wrap; background: var(--lr-card-bg); padding: 12px 16px; border-radius: var(--lr-radius, 8px); border: 1px solid var(--lr-muted, #e2e8f0); font-size: 13px; }
+  .legend { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+  .badge, .chip { display: inline-block; padding: 2px 10px; border: 1.5px solid var(--lr-muted, #94a3b8); border-radius: 999px; font-size: 11px; font-weight: 500; background: var(--lr-card-bg); }
+  .chip { padding: 3px 10px; }
+  .block { background: var(--lr-card-bg); padding: 12px 16px; border-radius: var(--lr-radius, 8px); border: 1px solid var(--lr-muted, #e2e8f0); margin: 8px 0; }
+  .row { font-size: 13px; padding: 4px 0; border-bottom: 1px dashed var(--lr-muted, #f1f5f9); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .row:last-child { border-bottom: none; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .empty { font-size: 12px; color: var(--lr-muted, #94a3b8); font-style: italic; padding: 4px 0; }
+  .roadmap-wrap { position: relative; background: var(--lr-card-bg); border-radius: var(--lr-radius, 8px); border: 1px solid var(--lr-muted, #e2e8f0); height: 640px; overflow: hidden; cursor: grab; }
+  .roadmap-wrap.grabbing { cursor: grabbing; }
+  .roadmap-wrap svg { display: block; width: 100%; height: 100%; }
+  .node:hover rect:first-of-type { fill: var(--lr-page-bg, #f1f5f9); cursor: pointer; }
+  .node text { user-select: none; pointer-events: none; }
+  .controls { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; background: var(--lr-card-bg); padding: 6px; border-radius: 8px; border: 1px solid var(--lr-muted, #e2e8f0); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .controls button { width: 32px; height: 32px; border: 1px solid var(--lr-muted, #cbd5e1); background: var(--lr-card-bg); color: var(--lr-text); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px; }
+  .controls button:hover { background: var(--lr-page-bg); }
+  .footer { color: var(--lr-muted, #94a3b8); font-size: 11px; text-align: right; margin-top: 16px; }
+  .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .columns { grid-template-columns: 1fr; } }
+</style></head>
+<body>
+  <h1>${_esc(data.project)} — leerness 로드맵</h1>
+  <div class="meta">자동 생성 · ${new Date().toISOString().slice(0, 16).replace('T', ' ')} · leerness v${_esc(data.version)}</div>
+  <div class="summary">
+    <div><strong>milestones:</strong> ${data.milestones.length}</div>
+    <div><strong>tasks:</strong> ${data.tasks.length}</div>
+    <div><strong>skills:</strong> ${data.skills.length}</div>
+    <div><strong>active rules:</strong> ${activeRules.length}</div>
+    <div><strong>decisions:</strong> ${data.decisions.length}</div>
+    <div><strong>design tokens:</strong> ${Object.keys(data.designTokens).length + Object.keys(data.cssVariables).length}</div>
+  </div>
+  <div class="legend">${legend}</div>
+  <div class="legend">${chips}</div>
+  <h2>📍 Current State</h2>
+  <div class="block">
+    <div class="row"><strong>Now:</strong> ${_esc(data.currentState.now || '-')}</div>
+    <div class="row"><strong>Next:</strong> ${_esc(data.currentState.next || '-')}</div>
+    <div class="row"><strong>Blockers:</strong> ${_esc(data.currentState.blockers || '-')}</div>
+  </div>
+  <h2>🗺️ Roadmap — 화이트보드 (드래그 panning · 휠 zoom · 더블클릭 reset)</h2>
+  <div class="roadmap-wrap" id="roadmap-board">
+    <svg id="roadmap-svg" viewBox="0 0 ${g.width} ${g.height}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+      <g class="viewport">
+        <g class="edges">${edges}</g>
+        <g class="nodes">${nodes}</g>
+      </g>
+    </svg>
+    <div class="controls"><button onclick="lrZoom(0.9)">−</button><button onclick="lrZoom(1.1)">＋</button><button onclick="lrReset()">⟳</button></div>
+  </div>
+  <div class="columns">
+    <div>
+      <h2>🎯 Milestones (${data.milestones.length})</h2><div class="block">${milestoneBlock}</div>
+      <h2>📌 다음 예정 작업</h2><div class="block">${upcomingBlock}</div>
+      <h2>📚 보유 스킬 (${data.skills.length})</h2><div class="block">${skillsBlock}</div>
+    </div>
+    <div>
+      <h2>⚡ Active Rules (${activeRules.length})</h2><div class="block">${rulesBlock}</div>
+      <h2>🧠 최근 결정</h2><div class="block">${decisionsBlock}</div>
+      <h2>🎨 디자인 토큰</h2><div class="block">${tokensSection}</div>
+    </div>
+  </div>
+  <div class="footer">leerness roadmap · v${_esc(data.version)} · 화이트보드 + 토큰 주입 + 상하 중앙정렬</div>
+  <script>
+  (function(){var svg=document.getElementById('roadmap-svg');var board=document.getElementById('roadmap-board');var vp=svg.querySelector('.viewport');var tx=0,ty=0,scale=1;var dragging=false,sx=0,sy=0;function apply(){vp.setAttribute('transform','translate('+tx+','+ty+') scale('+scale+')');}board.addEventListener('mousedown',function(e){if(e.target.closest&&(e.target.closest('.node')||e.target.closest('.controls')))return;dragging=true;sx=e.clientX-tx;sy=e.clientY-ty;board.classList.add('grabbing');e.preventDefault();});window.addEventListener('mousemove',function(e){if(!dragging)return;tx=e.clientX-sx;ty=e.clientY-sy;apply();});window.addEventListener('mouseup',function(){dragging=false;board.classList.remove('grabbing');});board.addEventListener('wheel',function(e){e.preventDefault();var d=e.deltaY>0?0.9:1.1;var rect=board.getBoundingClientRect();var cx=e.clientX-rect.left;var cy=e.clientY-rect.top;var ns=Math.max(0.3,Math.min(3.0,scale*d));var r=ns/scale;tx=cx-(cx-tx)*r;ty=cy-(cy-ty)*r;scale=ns;apply();},{passive:false});board.addEventListener('dblclick',function(){tx=0;ty=0;scale=1;apply();});window.lrZoom=function(d){scale=Math.max(0.3,Math.min(3.0,scale*d));apply();};window.lrReset=function(){tx=0;ty=0;scale=1;apply();};})();
+  </script>
+</body></html>`;
+}
+
+function roadmapCmd(root) {
+  root = absRoot(root);
+  if (!exists(path.join(root, '.harness'))) return fail(`leerness 미설치: ${root}/.harness 없음 — 먼저 \`leerness init .\``);
+  const outFile = path.resolve(arg('--out', null) || path.join(root, 'roadmap.html'));
+  const data = _roadmapData(root);
+  writeUtf8(outFile, _roadmapHTML(data));
+  ok(`로드맵 생성: ${rel(root, outFile)}`);
+  log(`  milestones: ${data.milestones.length} · tasks: ${data.tasks.length} (done ${data.tasks.filter(t => t.status === 'done').length}) · skills: ${data.skills.length} · active rules: ${data.rules.filter(r => r.status === 'active').length} · tokens: ${Object.keys(data.designTokens).length + Object.keys(data.cssVariables).length}`);
+}
+
 // ===== 1.9.8: User Rules (자연어 등록 + 매 세션 자동 노출/검증) =====
 function rulesPath(root) { return path.join(root, '.harness/rules.md'); }
 function rulesArchivePath(root) { return path.join(root, '.harness/rules.archive.md'); }
@@ -2232,6 +2523,7 @@ function viewworkInstall(root) {
 
 function help() {
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path]\n  leerness session close [path]\n  leerness viewwork install [path]\n  leerness viewwork emit [path] [--action a] [--note n] [--agent x] [--tool t]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  leerness roadmap [path] [--out file.html]  # 좌→우 수평 트리 + 상하 중앙정렬 + 화이트보드 (1.9.11)
   leerness verify-code [path] [--build]      # npm test/lint/typecheck 자동 실행 + evidence 자동 기록 (1.9.7)
   leerness lessons [--query <키>] [--limit N]  # 과거 결정/실수 자동 회수 (1.9.7)
   leerness lazy detect [path] [--auto-track] # --auto-track으로 새 TODO를 progress에 자동 등록 (1.9.7)
@@ -2280,6 +2572,7 @@ async function main() {
   if (cmd === 'gate')                               return gate(args[1] || process.cwd());
   if (cmd === 'verify-code')                        return verifyCodeCmd(args[1] || process.cwd());
   if (cmd === 'lessons')                            return lessonsCmd(arg('--path', process.cwd()));
+  if (cmd === 'roadmap')                            return roadmapCmd(args[1] || process.cwd());
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);
