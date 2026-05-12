@@ -6,6 +6,8 @@ const os = require('os');
 const path = require('path');
 const cp = require('child_process');
 
+// 1.9.12: e2e 안정성을 위해 자식 프로세스의 npm 호출 차단 (hang 방지)
+process.env.LEERNESS_OFFLINE = process.env.LEERNESS_OFFLINE || '1';
 const CLI = path.resolve(__dirname, '..', 'bin', 'harness.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-e2e-'));
 let failed = 0; let total = 0;
@@ -233,6 +235,79 @@ total++;
   const weakHint = /약한 참조|영향 범위 없음/.test(r.stdout);
   console.log(strongOK && weakHint ? '✓ B(A) impact: strong/weak 구분 출력' : '✗ B(A) impact 구분 실패');
   if (!(strongOK && weakHint)) failed++;
+}
+
+// 1.9.12: auto roadmap — install 직후 자동 생성
+total++;
+{
+  const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto1-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  const ok = fs.existsSync(path.join(tmpA, 'roadmap.html'));
+  console.log(ok ? '✓ B(1.9.12) install 직후 roadmap.html 자동 생성' : '✗ install 후 roadmap 없음');
+  if (!ok) failed++;
+}
+
+// 1.9.12: session close 후 자동 갱신
+total++;
+{
+  const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto2-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  // 첫 mtime 캡처
+  const f = path.join(tmpA, 'roadmap.html');
+  const mt1 = fs.statSync(f).mtimeMs;
+  // 시간 차이 보장
+  const wait = Date.now() + 50; while (Date.now() < wait) {}
+  // 데이터 변경 + session close
+  cp.spawnSync(process.execPath, [CLI, 'task', 'add', '신규 작업', '--path', tmpA], { stdio: 'ignore' });
+  cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpA], { stdio: 'ignore' });
+  const mt2 = fs.statSync(f).mtimeMs;
+  const ok = mt2 > mt1;
+  console.log(ok ? '✓ B(1.9.12) session close 후 roadmap.html 자동 갱신 (mtime 증가)' : `✗ session close 후 갱신 안 됨 mt1=${mt1} mt2=${mt2}`);
+  if (!ok) failed++;
+}
+
+// 1.9.12: roadmap auto off → 더 이상 자동 갱신 안 함
+total++;
+{
+  const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto3-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  cp.spawnSync(process.execPath, [CLI, 'roadmap', 'auto', 'off', '--path', tmpA], { stdio: 'ignore' });
+  const f = path.join(tmpA, 'roadmap.html');
+  const mt1 = fs.statSync(f).mtimeMs;
+  const wait = Date.now() + 80; while (Date.now() < wait) {}
+  cp.spawnSync(process.execPath, [CLI, 'task', 'add', '비활성 후 추가', '--path', tmpA], { stdio: 'ignore' });
+  cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpA], { stdio: 'ignore' });
+  const mt2 = fs.statSync(f).mtimeMs;
+  const ok = mt2 === mt1;
+  console.log(ok ? '✓ B(1.9.12) auto off: roadmap.html 갱신 안 됨' : `✗ auto off 후에도 갱신됨`);
+  if (!ok) failed++;
+}
+
+// 1.9.12: --on-every-change 옵트인 시 task add만으로 갱신
+total++;
+{
+  const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto4-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  cp.spawnSync(process.execPath, [CLI, 'roadmap', 'auto', 'on', '--on-every-change', '--path', tmpA], { stdio: 'ignore' });
+  const f = path.join(tmpA, 'roadmap.html');
+  const mt1 = fs.statSync(f).mtimeMs;
+  const wait = Date.now() + 80; while (Date.now() < wait) {}
+  cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'on-every-change 테스트', '--path', tmpA], { stdio: 'ignore' });
+  const mt2 = fs.statSync(f).mtimeMs;
+  const ok = mt2 > mt1;
+  console.log(ok ? '✓ B(1.9.12) --on-every-change: task add만으로 즉시 갱신' : `✗ on-every-change 미작동`);
+  if (!ok) failed++;
+}
+
+// 1.9.12: status 출력
+total++;
+{
+  const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto5-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
+  const r = cp.spawnSync(process.execPath, [CLI, 'roadmap', 'auto', 'status', '--path', tmpA], { encoding: 'utf8' });
+  const ok = /enabled: true/.test(r.stdout) && /session-close.*✓/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.12) roadmap auto status: 상태 출력' : '✗ status 출력 실패');
+  if (!ok) failed++;
 }
 
 // 1.9.11: roadmap 명령 통합 + 화이트보드/토큰/중앙정렬 회귀

@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.9.12 — 2026-05-13
+
+**`leerness roadmap` 자동 생성·갱신** — 3개 트리거.
+
+### Added — 자동 roadmap
+
+- **`install` 직후 자동 생성**: `npx leerness init .` 끝에 첫 `roadmap.html` 자동 생성. `--no-auto-roadmap`으로 끔.
+- **`session close` 끝 자동 갱신**: `leerness session close .` 마지막에 자동 갱신 출력 라인(`✓ roadmap.html 자동 갱신 (session-close)`).
+- **데이터 변경 즉시 갱신** (옵트인): `--on-every-change`로 켜면 `task add/update/drop`, `plan add`, `rule add/pause/resume` 등이 호출될 때마다 즉시 갱신.
+
+### Added — `leerness roadmap auto on|off|status`
+
+- `roadmap auto on [--on-every-change] [--out file.html]` — 활성화 + 옵션 조정
+- `roadmap auto off` — 비활성화 (수동 `leerness roadmap`만 작동)
+- `roadmap auto status` — 현재 설정 표시 (enabled / onEveryChange / outFile / 트리거별 활성 여부)
+- 설정 파일: `.harness/cache/auto-roadmap.json`
+- 환경변수 옵트아웃: `LEERNESS_NO_AUTO_ROADMAP=1`
+
+### Default
+
+신규 init은 **enabled=true / onEveryChange=false**. 가장 자연스러운 워크플로우:
+1. `leerness init . --skills recommended` → 첫 roadmap.html 즉시 생성
+2. 작업 → session close → 자동 갱신
+3. 변경이 많아 즉시 갱신을 원하면 `roadmap auto on --on-every-change`
+
+### Migration
+
+기존 1.9.x 사용자는 `npx leerness@latest update . --yes`로 마이그레이션. 이후 첫 session close부터 자동 갱신.
+
 ## 1.9.11 — 2026-05-12
 
 **`leerness roadmap` 명령 통합 + `project-roadmap-generator` 스킬 기본 추천 + 화이트보드/토큰/상하 중앙정렬**.

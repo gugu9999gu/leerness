@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.11';
+const VERSION = '1.9.12';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -458,6 +458,10 @@ async function install(root, opts = {}) {
     if (!has('--no-auto-update')) {
       try { autoUpdateInstall(root); } catch (e) { warn('auto-update hook install skipped: ' + (e && e.message)); }
     }
+    // 1.9.12: install 직후 첫 roadmap.html 자동 생성
+    if (!has('--no-auto-roadmap')) {
+      try { _autoRoadmap(root, 'install'); } catch (e) { warn('auto-roadmap 실패: ' + (e && e.message)); }
+    }
   }
 }
 
@@ -689,6 +693,7 @@ function planAdd(root, text) {
   const tid = nextId(root, 'T');
   upsertProgress(root, { id: tid, status, request: text, evidence: `plan:${id}`, nextAction: arg('--next', '다음 액션 작성') });
   ok(`plan added: ${id} → progress: ${tid}`);
+  _autoRoadmap(absRoot(root), 'data-change');
 }
 function planDrop(root, text) {
   const id = nextId(root, 'D');
@@ -725,6 +730,7 @@ function taskAdd(root, text) {
   const id = nextId(root, 'T');
   upsertProgress(root, { id, status: arg('--status','requested'), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next','다음 액션 작성') });
   ok(`task added: ${id}`);
+  _autoRoadmap(absRoot(root), 'data-change');
 }
 function taskUpdate(root, id) {
   if (!id) return fail('id required (e.g., task update T-0001 --status in-progress)');
@@ -737,11 +743,13 @@ function taskUpdate(root, id) {
   if (arg('--note')) patch.request = arg('--note');
   upsertProgress(root, patch);
   ok(`task updated: ${id}`);
+  _autoRoadmap(absRoot(root), 'data-change');
 }
 function taskDrop(root, id) {
   if (!id) return fail('id required');
   upsertProgress(root, { id, status: 'dropped', evidence: arg('--reason','사용자 요청으로 제외'), nextAction: '없음' });
   ok(`task dropped: ${id}`);
+  _autoRoadmap(absRoot(root), 'data-change');
 }
 
 // 1.9.6: 옛 link 손실 row를 plan.md milestone과 자동 매칭 제안/복구.
@@ -1269,6 +1277,8 @@ function sessionClose(root) {
   log('\n## Required final response sections');
   log('- 완료 작업\n- 진행 중 작업\n- 미완료/예정/대기/보류/차단/드랍 작업\n- 검증 결과\n- 추천 방향\n- 다음 정확한 작업\n- ⚡ 활성 룰별 검증 결과');
   ok(`session-handoff.md and current-state.md updated`);
+  // 1.9.12: session close 끝에 roadmap.html 자동 갱신
+  _autoRoadmap(root, 'session-close');
 }
 
 function readmeCmd(root) { syncReadme(absRoot(root)); }
@@ -1605,6 +1615,62 @@ function roadmapCmd(root) {
   log(`  milestones: ${data.milestones.length} · tasks: ${data.tasks.length} (done ${data.tasks.filter(t => t.status === 'done').length}) · skills: ${data.skills.length} · active rules: ${data.rules.filter(r => r.status === 'active').length} · tokens: ${Object.keys(data.designTokens).length + Object.keys(data.cssVariables).length}`);
 }
 
+// 1.9.12: auto roadmap (install / session-close / 옵트인 data-change 트리거)
+function _autoRoadmapConfigPath(root) { return path.join(root, '.harness/cache/auto-roadmap.json'); }
+function _autoRoadmapConfig(root) {
+  const f = _autoRoadmapConfigPath(root);
+  const def = { enabled: true, onEveryChange: false, outFile: null };
+  if (!exists(f)) return def;
+  try { return Object.assign(def, JSON.parse(read(f))); } catch { return def; }
+}
+function _saveAutoRoadmapConfig(root, cfg) {
+  writeUtf8(_autoRoadmapConfigPath(root), JSON.stringify(cfg, null, 2) + '\n');
+}
+function _autoRoadmap(root, trigger) {
+  try {
+    if (process.env.LEERNESS_NO_AUTO_ROADMAP === '1') return false;
+    if (!exists(path.join(root, '.harness'))) return false;
+    const cfg = _autoRoadmapConfig(root);
+    if (!cfg.enabled) return false;
+    if (trigger === 'data-change' && !cfg.onEveryChange) return false;
+    const outFile = path.resolve(cfg.outFile || path.join(root, 'roadmap.html'));
+    const data = _roadmapData(root);
+    writeUtf8(outFile, _roadmapHTML(data));
+    log(`✓ roadmap.html 자동 갱신 (${trigger}) — ${rel(root, outFile)}`);
+    return true;
+  } catch (e) {
+    warn('roadmap 자동 갱신 실패: ' + (e && e.message ? e.message : e));
+    return false;
+  }
+}
+
+function roadmapAutoCmd(root, sub) {
+  root = absRoot(root);
+  if (!exists(path.join(root, '.harness'))) return fail(`leerness 미설치: ${root}/.harness 없음`);
+  const cfg = _autoRoadmapConfig(root);
+  if (sub === 'on') {
+    cfg.enabled = true;
+    if (has('--on-every-change')) cfg.onEveryChange = true;
+    if (has('--no-on-every-change')) cfg.onEveryChange = false;
+    if (arg('--out', null)) cfg.outFile = arg('--out', null);
+    _saveAutoRoadmapConfig(root, cfg);
+    ok(`auto-roadmap 활성화 (onEveryChange: ${cfg.onEveryChange}, outFile: ${cfg.outFile || './roadmap.html'})`);
+  } else if (sub === 'off') {
+    cfg.enabled = false;
+    _saveAutoRoadmapConfig(root, cfg);
+    ok('auto-roadmap 비활성화 — session close 시 갱신 안 됨');
+  } else {
+    log(`# auto-roadmap status`);
+    log(`enabled: ${cfg.enabled}`);
+    log(`onEveryChange: ${cfg.onEveryChange}`);
+    log(`outFile: ${cfg.outFile || './roadmap.html'}`);
+    log(`\n트리거:`);
+    log(`  install      : ${cfg.enabled ? '✓ 자동 생성' : '✗ 비활성'}`);
+    log(`  session-close: ${cfg.enabled ? '✓ 자동 갱신' : '✗ 비활성'}`);
+    log(`  data-change  : ${cfg.enabled && cfg.onEveryChange ? '✓ 즉시 갱신 (모든 task/plan/rule/skill 변경)' : '✗ 옵트인 필요 (--on-every-change)'}`);
+  }
+}
+
 // ===== 1.9.8: User Rules (자연어 등록 + 매 세션 자동 노출/검증) =====
 function rulesPath(root) { return path.join(root, '.harness/rules.md'); }
 function rulesArchivePath(root) { return path.join(root, '.harness/rules.archive.md'); }
@@ -1683,6 +1749,7 @@ function ruleAdd(root, description) {
   rules.push({ id, trigger, rule: description, added: today(), status: 'active', lastVerified: '-' });
   writeRules(root, rules);
   ok(`rule added: ${id} [${trigger}] ${description}`);
+  _autoRoadmap(root, 'data-change');
 }
 
 function ruleList(root) {
@@ -1716,6 +1783,7 @@ function rulePause(root, id) {
   r.status = 'paused';
   writeRules(root, rules);
   ok(`rule paused: ${id}`);
+  _autoRoadmap(root, 'data-change');
 }
 
 function ruleResume(root, id) {
@@ -1727,6 +1795,7 @@ function ruleResume(root, id) {
   r.status = 'active';
   writeRules(root, rules);
   ok(`rule resumed: ${id}`);
+  _autoRoadmap(root, 'data-change');
 }
 
 function ruleStop(root) {
@@ -2265,7 +2334,10 @@ function uiConsistency(root) {
   ok(`등록된 디자인 토큰: ${Object.keys(tokens).length}개`);
   const findings = [];
   for (const f of walkCode(root)) {
-    if (rel(root, f).startsWith('.harness/')) continue;
+    const r = rel(root, f);
+    if (r.startsWith('.harness/')) continue;
+    // 1.9.12: leerness가 자동 생성하는 roadmap.html은 ui consistency 검사 대상 아님
+    if (r === 'roadmap.html' || /\/roadmap\.html$/.test(r)) continue;
     if (!/\.(css|scss|sass|less|html|jsx|tsx|vue|svelte|js|ts)$/i.test(f)) continue;
     let text; try { text = read(f); } catch { continue; }
     const hexes = [...text.matchAll(/#[0-9a-fA-F]{3,8}\b/g)];
@@ -2524,6 +2596,7 @@ function viewworkInstall(root) {
 function help() {
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path]\n  leerness session close [path]\n  leerness viewwork install [path]\n  leerness viewwork emit [path] [--action a] [--note n] [--agent x] [--tool t]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness roadmap [path] [--out file.html]  # 좌→우 수평 트리 + 상하 중앙정렬 + 화이트보드 (1.9.11)
+  leerness roadmap auto on|off|status [--on-every-change] [--out file.html]  # 자동 갱신 (1.9.12, install/session-close 기본 ON)
   leerness verify-code [path] [--build]      # npm test/lint/typecheck 자동 실행 + evidence 자동 기록 (1.9.7)
   leerness lessons [--query <키>] [--limit N]  # 과거 결정/실수 자동 회수 (1.9.7)
   leerness lazy detect [path] [--auto-track] # --auto-track으로 새 TODO를 progress에 자동 등록 (1.9.7)
@@ -2572,6 +2645,7 @@ async function main() {
   if (cmd === 'gate')                               return gate(args[1] || process.cwd());
   if (cmd === 'verify-code')                        return verifyCodeCmd(args[1] || process.cwd());
   if (cmd === 'lessons')                            return lessonsCmd(arg('--path', process.cwd()));
+  if (cmd === 'roadmap' && args[1] === 'auto')      return roadmapAutoCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'roadmap')                            return roadmapCmd(args[1] || process.cwd());
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
