@@ -1635,13 +1635,13 @@ function deployGhPages(root, sourceFile) {
     fs.copyFileSync(src, path.join(wt, destName));
     // 원본 파일명도 보존
     if (path.basename(src) !== 'index.html') fs.copyFileSync(src, path.join(wt, path.basename(src)));
-    cp.spawnSync('git', ['add', '-A'], { cwd: wt, encoding: 'utf8', shell: true });
-    const commit = cp.spawnSync('git', ['commit', '-m', `deploy: ${path.basename(src)} ${stamp}`], { cwd: wt, encoding: 'utf8', shell: true });
+    cp.spawnSync('git', ['add', '-A'], { cwd: wt, encoding: 'utf8' });
+    const commit = cp.spawnSync('git', ['commit', '-m', `deploy: ${path.basename(src)} ${stamp}`], { cwd: wt, encoding: 'utf8' });
     if (commit.status !== 0 && !/nothing to commit/.test(commit.stdout || '')) {
       fail('commit 실패: ' + (commit.stdout || commit.stderr || '').slice(0, 200));
       process.exitCode = 1;
     } else {
-      const pushR = cp.spawnSync('git', ['push', 'origin', 'gh-pages'], { cwd: wt, encoding: 'utf8', shell: true });
+      const pushR = cp.spawnSync('git', ['push', 'origin', 'gh-pages'], { cwd: wt, encoding: 'utf8' });
       if (pushR.status !== 0) { fail('push 실패: ' + (pushR.stderr || '').slice(0, 200)); process.exitCode = 1; }
       else ok(`gh-pages push 완료 → https://${remote.owner}.github.io/${remote.repo}/`);
     }
