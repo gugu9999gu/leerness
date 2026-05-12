@@ -235,6 +235,47 @@ total++;
   if (!(strongOK && weakHint)) failed++;
 }
 
+// 1.9.10 A: skillpack 동적 로드 (LEERNESS_SKILLPACK_PATH로 시뮬)
+total++;
+{
+  const skillpackDir = path.resolve(__dirname, '..', '..', 'leerness-skillpack');
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'list', '--path', tmp], {
+    encoding: 'utf8',
+    env: Object.assign({}, process.env, { LEERNESS_SKILLPACK_PATH: skillpackDir })
+  });
+  const ok = r.status === 0 && /skillpack 출처: env/.test(r.stdout) && /\| skillpack \|/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.10) skillpack 동적 로드 (env path)' : '✗ skillpack 로드 실패');
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
+}
+// 1.9.10 A: skillpack 없을 때 builtin fallback
+total++;
+{
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'list', '--path', tmp], {
+    encoding: 'utf8',
+    env: Object.assign({}, process.env, { LEERNESS_SKILLPACK_PATH: '' })
+  });
+  const ok = r.status === 0 && /builtin fallback/.test(r.stdout) && /\| builtin \|/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.10) builtin fallback (skillpack 없을 때)' : '✗ builtin fallback 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.10 B: detectGitRemote (가짜 git remote 시뮬은 어려움 — 실제 git 명령으로 확인)
+total++;
+{
+  // tmp는 git init이 없음 → detectGitRemote는 null → publish 호출 시 'Git remote: 없음' 출력
+  // 시뮬: tmp에 git init + remote add
+  cp.spawnSync('git', ['init'], { cwd: tmp, encoding: 'utf8', shell: true });
+  cp.spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/test/repo.git'], { cwd: tmp, encoding: 'utf8', shell: true });
+  // package.json도 필요
+  if (!fs.existsSync(path.join(tmp, 'package.json'))) {
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'e2e-test', version: '0.1.0' }));
+  }
+  const r = cp.spawnSync(process.execPath, [CLI, 'release', 'publish', tmp, '--dry-run'], { encoding: 'utf8' });
+  const ok = /Git remote \(origin\): test\/repo/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.10) detectGitRemote: github owner/repo 추출' : `✗ remote 감지 실패\n${r.stdout.slice(0, 500)}`);
+  if (!ok) failed++;
+}
+
 // 1.9.8: rule add/list/pause/resume/remove
 total++;
 {

@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.10 — 2026-05-12
+
+**leerness-skillpack 분리 + release publish 강화 (git remote 자동 감지 + GitHub Release + gh-pages 배포)**.
+
+### Changed — 스킬 카탈로그 동적 로드
+
+- `leerness-skillpack`이 npm에 별도 패키지로 분리됨. leerness 본 패키지는 `_tryLoadSkillpack()`으로 다음 순서로 동적 로드:
+  1. `require('leerness-skillpack/catalog.json')` 시도
+  2. `<cwd>/node_modules/leerness-skillpack/catalog.json` 탐색
+  3. `npm root -g`의 `leerness-skillpack/catalog.json` 탐색
+  4. `LEERNESS_SKILLPACK_PATH` 환경변수 경로
+  5. 모두 실패 시 leerness 본 패키지의 내장 fallback (1.9.x 호환 유지)
+- `leerness init` 출력에 `Skill catalog source: skillpack v1.0.0 | builtin (fallback)` 안내.
+- `leerness skill list` 헤더에 카탈로그 출처 + 출처 컬럼에 `skillpack` / `builtin` / `user` 표시.
+
+### Added — release publish 강화
+
+- `detectGitRemote(root)`: 현재 디렉토리의 `git remote -v origin` 자동 감지 + GitHub owner/repo 추출.
+- `leerness release publish` 신규 플래그:
+  - `--auto` — remote 있으면 자동 `git push` (편의)
+  - `--gh-release` — gh CLI로 GitHub Release 자동 생성 (`v<version>` 태그 + 자동 노트 + tarball 첨부)
+  - `--gh-pages` — `gh-pages` branch에 정적 파일 자동 배포 (orphan 또는 기존 branch). 기본 소스는 `roadmap.html`, `--gh-pages-src <file>` 또는 `--roadmap <file>`로 지정.
+  - `--pack` — npm pack만 명시적 실행
+- `gh-pages` 배포는 임시 git worktree로 처리해 현재 작업 트리에 영향 없음. 배포 후 `https://<owner>.github.io/<repo>/` URL 안내.
+
+### Migration
+
+기존 1.9.x 사용자는 `npx leerness@latest update . --yes`로 즉시 자동 마이그레이션됩니다. leerness-skillpack은 선택 설치:
+
+```bash
+npm install leerness-skillpack    # 본 카탈로그 사용
+# 또는 그대로 두면 leerness 내장 fallback이 동작 (기존과 동일)
+```
+
 ## 1.9.9 — 2026-05-12
 
 - 1.9.9 빌드 + GitHub 배포

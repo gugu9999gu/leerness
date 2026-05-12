@@ -6,12 +6,64 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.9';
+const VERSION = '1.9.10';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
 
-const skillCatalog = {
+// 1.9.10: leerness-skillpack 동적 로드 (선택). 없으면 BUILTIN 사용.
+function _tryLoadSkillpack() {
+  // 1) 정상 require resolution
+  try { return { src: 'require', data: require('leerness-skillpack/catalog.json') }; } catch {}
+  // 2) cwd/node_modules
+  try {
+    const f = path.join(process.cwd(), 'node_modules/leerness-skillpack/catalog.json');
+    if (fs.existsSync(f)) return { src: 'cwd', data: JSON.parse(fs.readFileSync(f, 'utf8')) };
+  } catch {}
+  // 3) npm global root
+  try {
+    const root = cp.execSync('npm root -g', { encoding: 'utf8', timeout: 4000 }).trim();
+    const f = path.join(root, 'leerness-skillpack/catalog.json');
+    if (fs.existsSync(f)) return { src: 'global', data: JSON.parse(fs.readFileSync(f, 'utf8')) };
+  } catch {}
+  // 4) 환경변수 명시 경로
+  if (process.env.LEERNESS_SKILLPACK_PATH) {
+    try {
+      const f = path.resolve(process.env.LEERNESS_SKILLPACK_PATH);
+      const target = f.endsWith('.json') ? f : path.join(f, 'catalog.json');
+      if (fs.existsSync(target)) return { src: 'env', data: JSON.parse(fs.readFileSync(target, 'utf8')) };
+    } catch {}
+  }
+  return null;
+}
+
+let SKILLPACK_SOURCE = 'builtin';
+let SKILLPACK_META = null;
+function _loadSkillCatalog() {
+  const sp = _tryLoadSkillpack();
+  if (sp && sp.data && Array.isArray(sp.data.skills)) {
+    SKILLPACK_SOURCE = sp.src;
+    SKILLPACK_META = { name: sp.data.name, version: sp.data.version };
+    const out = {};
+    for (const s of sp.data.skills) {
+      out[s.id] = {
+        displayNameKo: s.displayNameKo,
+        version: s.version,
+        lastUpdated: s.lastUpdated,
+        verification: s.verification,
+        capabilities: s.capabilities,
+        _source: 'skillpack'
+      };
+    }
+    return out;
+  }
+  SKILLPACK_SOURCE = 'builtin';
+  const out = {};
+  for (const [k, v] of Object.entries(BUILTIN_CATALOG)) out[k] = { ...v, _source: 'builtin' };
+  return out;
+}
+
+const BUILTIN_CATALOG = {
   'office':                       { displayNameKo: '마이크로소프트 오피스 자동화 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['Word/Excel/PowerPoint 문서 자동화', '템플릿 기반 문서 생성', '표/차트/요약 문서화', '민감정보 제외 규칙 적용'] },
   'commerce-api':                 { displayNameKo: '커머스 API 연동 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['쿠팡·롯데온·스마트스토어 API 연동 설계', '주문/상품/매출 동기화', '환경변수 기반 인증 분리', '레이트리밋/재시도/오류 처리'] },
   'crawling':                     { displayNameKo: '크롤링·브라우저 자동화 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['Playwright 기반 자동화', '다운로드/로그인 세션 처리', '스크린샷 기반 실패 진단', '약관/권한/차단 위험 점검'] },
@@ -21,6 +73,9 @@ const skillCatalog = {
   'ai-verified-skill-publisher':  { displayNameKo: 'AI 검증 스킬 업로드·라이브러리화 스킬', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['검증된 스킬 정규화', '민감정보 스캔', 'AI 검증 메타데이터 작성', 'npm/git 업로드 dry-run 및 실행 게이트'] },
   'feature-implementation':       { displayNameKo: '기능 구현 표준 스킬', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['feature-contracts 작성', '재사용 우선 검사', '테스트 증거 수집', '핸드오프 트리거'] }
 };
+
+// 1.9.10: skillCatalog는 skillpack 우선, fallback builtin. _loadSkillCatalog 호출은 BUILTIN_CATALOG 정의 후.
+const skillCatalog = _loadSkillCatalog();
 
 const routes = {
   planning:        { read: ['.harness/plan.md','.harness/progress-tracker.md','.harness/project-brief.md','.harness/current-state.md','.harness/guideline.md'], update: ['.harness/plan.md','.harness/progress-tracker.md','.harness/current-state.md','.harness/session-handoff.md'] },
@@ -335,6 +390,9 @@ async function install(root, opts = {}) {
   log(`Target: ${root}`);
   log(`Language: ${lang}`);
   log(`Skills: ${skills.length ? skills.join(', ') : 'none'}`);
+  // 1.9.10: 스킬 카탈로그 출처 안내
+  if (SKILLPACK_SOURCE === 'builtin') log(`Skill catalog source: builtin (leerness-skillpack 미설치 — \`npm i leerness-skillpack\`로 확장 가능)`);
+  else log(`Skill catalog source: ${SKILLPACK_SOURCE} (leerness-skillpack${SKILLPACK_META ? ` v${SKILLPACK_META.version}` : ''})`);
   const files = coreFiles(root, lang, skills);
   const backup = createBackup(root, opts.force ? 'force' : (opts.migration ? 'migration' : 'init'), files, opts.dry);
   if (opts.dry) {
@@ -430,7 +488,8 @@ function saveUserSkill(root, id, data) {
 
 function listAllSkills(root) {
   const out = {};
-  for (const [k, v] of Object.entries(skillCatalog)) out[k] = { ...v, _source: 'catalog' };
+  // 1.9.10: skillCatalog의 _source('skillpack' 또는 'builtin')를 보존
+  for (const [k, v] of Object.entries(skillCatalog)) out[k] = { ...v, _source: v._source || 'builtin' };
   if (root) {
     const dir = userSkillsDir(root);
     if (exists(dir)) {
@@ -448,6 +507,8 @@ function listAllSkills(root) {
 
 function skillList(root) {
   const all = listAllSkills(root);
+  if (SKILLPACK_SOURCE !== 'builtin') log(`# skillpack 출처: ${SKILLPACK_SOURCE}${SKILLPACK_META ? ` (${SKILLPACK_META.name} v${SKILLPACK_META.version})` : ''}`);
+  else log('# skillpack 미설치 — builtin fallback 사용 (leerness 본 패키지 내장 카탈로그)');
   log('| ID | 한글명 | 출처 | 능력(요약) | 사용횟수 | 최종 |');
   log('|---|---|---|---|---|---|');
   for (const [id, v] of Object.entries(all)) {
@@ -1528,21 +1589,121 @@ function releaseNote(root, text) {
   ok(`CHANGELOG.md 갱신: [${version}] ${text}`);
 }
 
+// 1.9.10: git remote 자동 감지 + gh-release + gh-pages 배포
+function detectGitRemote(root) {
+  const r = cp.spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', shell: true });
+  if (r.status !== 0) return null;
+  const url = (r.stdout || '').trim();
+  if (!url) return null;
+  // owner/repo 추출
+  const m = url.match(/github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?/);
+  return { url, host: m ? 'github' : 'unknown', owner: m ? m[1] : null, repo: m ? m[2] : null };
+}
+
+function getCurrentVersion(root) {
+  const pkgF = path.join(root, 'package.json');
+  if (!exists(pkgF)) return null;
+  try { return JSON.parse(read(pkgF)).version || null; } catch { return null; }
+}
+
+function deployGhPages(root, sourceFile) {
+  const remote = detectGitRemote(root);
+  if (!remote || remote.host !== 'github') { fail('GitHub remote가 없습니다 — gh-pages 배포 불가'); process.exitCode = 1; return; }
+  const src = path.resolve(root, sourceFile);
+  if (!exists(src)) { fail(`소스 파일 없음: ${src}`); process.exitCode = 1; return; }
+  log(`# gh-pages deploy`);
+  log(`Source: ${rel(root, src)}`);
+  log(`Target: gh-pages branch of ${remote.owner}/${remote.repo}`);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const wt = path.join(root, '.harness/cache', `ghpages-${stamp}`);
+  mkdirp(path.dirname(wt));
+  // worktree (기존 gh-pages 있으면 fetch, 없으면 orphan)
+  const fetchR = cp.spawnSync('git', ['fetch', 'origin', 'gh-pages'], { cwd: root, encoding: 'utf8', shell: true });
+  const hasBranch = fetchR.status === 0;
+  let wtArgs;
+  if (hasBranch) wtArgs = ['worktree', 'add', wt, 'origin/gh-pages'];
+  else wtArgs = ['worktree', 'add', '--orphan', '-b', 'gh-pages', wt];
+  const wtR = cp.spawnSync('git', wtArgs, { cwd: root, encoding: 'utf8', shell: true });
+  if (wtR.status !== 0) { fail('worktree 생성 실패: ' + (wtR.stderr || '').slice(0, 200)); process.exitCode = 1; return; }
+  try {
+    // orphan인 경우 초기화
+    if (!hasBranch) {
+      cp.spawnSync('git', ['rm', '-rf', '.'], { cwd: wt, encoding: 'utf8', shell: true });
+    }
+    // 소스 복사 (index.html로 이름 변경)
+    const destName = path.basename(src) === 'index.html' ? 'index.html' : 'index.html';
+    fs.copyFileSync(src, path.join(wt, destName));
+    // 원본 파일명도 보존
+    if (path.basename(src) !== 'index.html') fs.copyFileSync(src, path.join(wt, path.basename(src)));
+    cp.spawnSync('git', ['add', '-A'], { cwd: wt, encoding: 'utf8', shell: true });
+    const commit = cp.spawnSync('git', ['commit', '-m', `deploy: ${path.basename(src)} ${stamp}`], { cwd: wt, encoding: 'utf8', shell: true });
+    if (commit.status !== 0 && !/nothing to commit/.test(commit.stdout || '')) {
+      fail('commit 실패: ' + (commit.stdout || commit.stderr || '').slice(0, 200));
+      process.exitCode = 1;
+    } else {
+      const pushR = cp.spawnSync('git', ['push', 'origin', 'gh-pages'], { cwd: wt, encoding: 'utf8', shell: true });
+      if (pushR.status !== 0) { fail('push 실패: ' + (pushR.stderr || '').slice(0, 200)); process.exitCode = 1; }
+      else ok(`gh-pages push 완료 → https://${remote.owner}.github.io/${remote.repo}/`);
+    }
+  } finally {
+    cp.spawnSync('git', ['worktree', 'remove', '--force', wt], { cwd: root, encoding: 'utf8', shell: true });
+  }
+}
+
 function releasePublish(root) {
   root = absRoot(root);
   const dryRun = has('--dry-run');
   log('# release publish');
   log(`Mode: ${dryRun ? 'dry-run' : 'live'}`);
-  const packR = cp.spawnSync('npm', ['pack'], { cwd: root, encoding: 'utf8', shell: true });
-  if (packR.status !== 0) { fail('npm pack 실패'); log(packR.stderr); process.exitCode = 1; return; }
-  ok('npm pack 완료');
-  if (has('--git-push')) {
+
+  // 1. git remote 자동 감지 (1.9.10)
+  const remote = detectGitRemote(root);
+  if (remote) log(`Git remote (origin): ${remote.host === 'github' ? `${remote.owner}/${remote.repo}` : remote.url}`);
+  else log('Git remote: 없음');
+
+  // 2. npm pack (필요한 경우 — pack-only도 의미 있음)
+  if (has('--pack') || has('--npm-publish') || (!has('--git-push') && !has('--gh-release') && !has('--gh-pages'))) {
+    const packR = cp.spawnSync('npm', ['pack'], { cwd: root, encoding: 'utf8', shell: true });
+    if (packR.status !== 0) { fail('npm pack 실패'); log(packR.stderr); process.exitCode = 1; return; }
+    ok('npm pack 완료');
+  }
+
+  // 3. git push (--git-push 또는 --auto + remote 있을 때)
+  if (has('--git-push') || (has('--auto') && remote)) {
     log('git push:');
     const r1 = cp.spawnSync('git', ['push'], { cwd: root, encoding: 'utf8', shell: true });
-    log(r1.stdout || r1.stderr || '(no output)');
+    log((r1.stdout || r1.stderr || '').slice(-200) || '(no output)');
     const r2 = cp.spawnSync('git', ['push', '--tags'], { cwd: root, encoding: 'utf8', shell: true });
-    log(r2.stdout || r2.stderr || '(no output)');
+    log((r2.stdout || r2.stderr || '').slice(-200) || '(no output)');
   }
+
+  // 4. GitHub Release (--gh-release, gh CLI 사용)
+  if (has('--gh-release')) {
+    if (!remote || remote.host !== 'github') { warn('--gh-release: GitHub remote 없음 — 스킵'); }
+    else {
+      const v = getCurrentVersion(root);
+      if (!v) { warn('--gh-release: package.json#version 없음 — 스킵'); }
+      else {
+        const tag = `v${v}`;
+        const ghArgs = ['release', 'create', tag, '--generate-notes', '--title', `${remote.repo} ${tag}`];
+        const tarball = path.join(root, `${JSON.parse(read(path.join(root, 'package.json'))).name}-${v}.tgz`);
+        if (exists(tarball)) ghArgs.push(tarball);
+        log(`gh ${ghArgs.join(' ')}`);
+        const ghR = cp.spawnSync('gh', ghArgs, { cwd: root, encoding: 'utf8', shell: true });
+        log((ghR.stdout || ghR.stderr || '').slice(-300) || '(no output)');
+        if (ghR.status !== 0) warn('gh release 생성 실패 (이미 존재할 수 있음)');
+        else ok(`GitHub Release 생성: ${tag}`);
+      }
+    }
+  }
+
+  // 5. gh-pages 배포 (--gh-pages)
+  if (has('--gh-pages')) {
+    const src = arg('--gh-pages-src', null) || arg('--roadmap', null) || 'roadmap.html';
+    deployGhPages(root, src);
+  }
+
+  // 6. npm publish (--npm-publish)
   if (has('--npm-publish')) {
     const args = dryRun ? ['publish', '--dry-run'] : ['publish', '--access', 'public'];
     log('npm ' + args.join(' '));
@@ -2078,7 +2239,7 @@ function help() {
   leerness rule list|verify|pause <id>|resume <id>|remove <id>|stop|resume-all
   leerness release bump [--patch|--minor|--major]  # package.json 자동 bump (1.9.8)
   leerness release note "<내용>"               # CHANGELOG.md 자동 추가 (1.9.8)
-  leerness release publish [--dry-run] [--git-push] [--npm-publish]  # 통합 배포 (1.9.8)\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n`);
+  leerness release publish [--dry-run] [--pack] [--git-push] [--gh-release] [--gh-pages] [--gh-pages-src file] [--npm-publish] [--auto]  # 통합 배포 (1.9.8 + 1.9.10)\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n`);
 }
 
 async function main() {
@@ -2127,9 +2288,9 @@ async function main() {
   if (cmd === 'rule' && args[1] === 'stop')         return ruleStop(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'resume-all')   return ruleResumeAll(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'verify')       return ruleVerifyCmd(arg('--path', process.cwd()));
-  if (cmd === 'release' && args[1] === 'bump')      return releaseBump(arg('--path', process.cwd()));
+  if (cmd === 'release' && args[1] === 'bump')      return releaseBump(args[2] || arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'note')      return releaseNote(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
-  if (cmd === 'release' && args[1] === 'publish')   return releasePublish(arg('--path', process.cwd()));
+  if (cmd === 'release' && args[1] === 'publish')   return releasePublish(args[2] || arg('--path', process.cwd()));
   if (cmd === 'impact')                             return impactCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'reuse' && args[1] === 'find')        return reuseFind(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'reuse' && args[1] === 'register')    return reuseRegister(arg('--path', process.cwd()), args[2]);
