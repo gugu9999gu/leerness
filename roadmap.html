@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>leerness — leerness 로드맵</title>
+<style>
+  :root { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif; }
+  body { margin: 0; padding: 20px; background: #f8fafc; color: #0f172a; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  h2 { margin: 24px 0 8px; font-size: 16px; color: #334155; }
+  .meta { font-size: 11px; color: #64748b; margin-left: 4px; }
+  .summary { display: flex; gap: 16px; flex-wrap: wrap; background: #ffffff; padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; }
+  .legend { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+  .badge, .chip { display: inline-block; padding: 2px 10px; border: 1.5px solid #94a3b8; border-radius: 999px; font-size: 11px; font-weight: 500; background: #ffffff; }
+  .chip { padding: 3px 10px; }
+  .block { background: #ffffff; padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 8px 0; }
+  .row { font-size: 13px; padding: 4px 0; border-bottom: 1px dashed #f1f5f9; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .row:last-child { border-bottom: none; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+  .empty { font-size: 12px; color: #94a3b8; font-style: italic; padding: 4px 0; }
+  .roadmap-wrap { overflow-x: auto; background: #ffffff; border-radius: 8px; border: 1px solid #e2e8f0; padding: 12px; }
+  .node:hover rect:first-of-type { fill: #f1f5f9; cursor: pointer; }
+  .footer { color: #94a3b8; font-size: 11px; text-align: right; margin-top: 16px; }
+  .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .columns { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <h1>leerness — leerness 로드맵</h1>
+  <div class="meta">자동 생성 · 2026-05-12 04:35 · leerness v1.9.9</div>
+
+  <div class="summary">
+    <div><strong>milestones:</strong> 7</div>
+    <div><strong>tasks:</strong> 20</div>
+    <div><strong>skills:</strong> 3</div>
+    <div><strong>active rules:</strong> 3</div>
+    <div><strong>decisions:</strong> 12</div>
+  </div>
+
+  <div class="legend"><span class="badge" style="border-color:#16a34a;color:#16a34a">완료</span> <span class="badge" style="border-color:#2563eb;color:#2563eb">진행</span> <span class="badge" style="border-color:#6b7280;color:#6b7280">보류</span> <span class="badge" style="border-color:#eab308;color:#eab308">검토</span> <span class="badge" style="border-color:#f97316;color:#f97316">미완료</span> <span class="badge" style="border-color:#94a3b8;color:#94a3b8">예정</span> <span class="badge" style="border-color:#dc2626;color:#dc2626">오류</span> <span class="badge" style="border-color:#8b5cf6;color:#8b5cf6">스킬</span> <span class="badge" style="border-color:#06b6d4;color:#06b6d4">룰</span></div>
+  <div class="legend"><span class="chip" style="border-color:#16a34a;color:#16a34a">완료 15</span> <span class="chip" style="border-color:#2563eb;color:#2563eb">진행 2</span> <span class="chip" style="border-color:#6b7280;color:#6b7280">보류 0</span> <span class="chip" style="border-color:#eab308;color:#eab308">검토 0</span> <span class="chip" style="border-color:#f97316;color:#f97316">미완료 0</span> <span class="chip" style="border-color:#94a3b8;color:#94a3b8">예정 2</span> <span class="chip" style="border-color:#dc2626;color:#dc2626">오류 0</span></div>
+
+  <h2>📍 Current State / Handoff</h2>
+  <div class="block">
+    <div class="row"><strong>Now:</strong> - 기능 B 구현</div>
+    <div class="row"><strong>Next:</strong> - 테스트 마일스톤 A</div>
+    <div class="row"><strong>Blockers:</strong> -</div>
+    <div class="row"><strong>Next Exact Step:</strong> - 다음 액션 작성</div>
+  </div>
+
+  <h2>🗺️ Roadmap — 좌→우 수평 트리 (project → milestones → tasks / skills · rules)</h2>
+  <div class="roadmap-wrap">
+    <svg width="1200" height="1760" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="leerness roadmap">
+      <g class="edges"><path d="M 240,56 C 275,56 275,56 310,56" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 275,56 275,142 310,142" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 275,56 275,228 310,228" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 275,56 275,314 310,314" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 275,56 275,400 310,400" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 275,56 275,486 310,486" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 275,56 275,572 310,572" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 530,142 C 565,142 565,56 600,56" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 530,228 C 565,228 565,142 600,142" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 420,56 420,228 600,228" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 420,56 420,314 600,314" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 530,314 C 565,314 565,400 600,400" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 530,400 C 565,400 565,486 600,486" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 530,486 C 565,486 565,572 600,572" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 530,572 C 565,572 565,658 600,658" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 420,56 420,744 600,744" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 420,56 420,830 600,830" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 420,56 420,916 600,916" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 420,56 420,1002 600,1002" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 420,56 420,1088 600,1088" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 530,56 C 565,56 565,1174 600,1174" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 420,56 420,1260 600,1260" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 420,56 420,1346 600,1346" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 420,56 420,1432 600,1432" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+
+
+<path d="M 240,56 C 420,56 420,1690 600,1690" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 565,56 565,56 890,56" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 565,56 565,142 890,142" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 565,56 565,228 890,228" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 565,56 565,314 890,314" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 565,56 565,400 890,400" stroke="#cbd5e1" stroke-width="1.5" fill="none"/>
+<path d="M 240,56 C 565,56 565,486 890,486" stroke="#cbd5e1" stroke-width="1.5" fill="none"/></g>
+      <g class="nodes">
+    <g class="node node-project status-meta" data-id="project" transform="translate(20,20)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#0f172a"/>
+      <text x="14" y="22" font-size="12" fill="#0f172a" font-weight="600">leerness · 프로젝트</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness 1.9.9</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">milestones 7 · tasks 20 · skills 3</text>
+      <title>project — leerness 1.9.9
+milestones 7 · tasks 20 · skills 3</title>
+    </g>
+
+    <g class="node node-milestone status-planned" data-id="M-0001" transform="translate(310,20)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">M-0001 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">프로젝트 계획 정리</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">0% · planned</text>
+      <title>M-0001 — 프로젝트 계획 정리
+0% · planned</title>
+    </g>
+
+    <g class="node node-milestone status-planned" data-id="M-0002" transform="translate(310,106)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">M-0002 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">테스트 마일스톤 A</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">0% · planned</text>
+      <title>M-0002 — 테스트 마일스톤 A
+0% · planned</title>
+    </g>
+
+    <g class="node node-milestone status-in-progress" data-id="M-0003" transform="translate(310,192)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+      <rect width="5" height="72" fill="#2563eb"/>
+      <text x="14" y="22" font-size="12" fill="#2563eb" font-weight="600">M-0003 · 진행</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">기능 B 구현</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">30% · in-progress</text>
+      <title>M-0003 — 기능 B 구현
+30% · in-progress</title>
+    </g>
+
+    <g class="node node-milestone status-done" data-id="M-0004" transform="translate(310,278)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">M-0004 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness 진단 및 leerness-plus f…</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">0% · done</text>
+      <title>M-0004 — leerness 진단 및 leerness-plus fork 빌드
+0% · done</title>
+    </g>
+
+    <g class="node node-milestone status-done" data-id="M-0005" transform="translate(310,364)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">M-0005 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">성능 벤치마크 측정</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">0% · done</text>
+      <title>M-0005 — 성능 벤치마크 측정
+0% · done</title>
+    </g>
+
+    <g class="node node-milestone status-done" data-id="M-0006" transform="translate(310,450)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">M-0006 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">Claude Code 슬래시/스킬 통합</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">0% · done</text>
+      <title>M-0006 — Claude Code 슬래시/스킬 통합
+0% · done</title>
+    </g>
+
+    <g class="node node-milestone status-done" data-id="M-0007" transform="translate(310,536)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">M-0007 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">tarball 빌드 및 검증</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">0% · done</text>
+      <title>M-0007 — tarball 빌드 및 검증
+0% · done</title>
+    </g>
+
+    <g class="node node-task status-planned" data-id="T-0002" transform="translate(600,20)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">T-0002 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">테스트 마일스톤 A</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: plan:M-0002</text>
+      <title>T-0002 — 테스트 마일스톤 A
+evidence: plan:M-0002</title>
+    </g>
+
+    <g class="node node-task status-in-progress" data-id="T-0003" transform="translate(600,106)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+      <rect width="5" height="72" fill="#2563eb"/>
+      <text x="14" y="22" font-size="12" fill="#2563eb" font-weight="600">T-0003 · 진행</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">기능 B 구현</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: plan:M-0003</text>
+      <title>T-0003 — 기능 B 구현
+evidence: plan:M-0003</title>
+    </g>
+
+    <g class="node node-task status-planned" data-id="T-0004" transform="translate(600,192)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">T-0004 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">엣지 케이스 검증</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: user-request</text>
+      <title>T-0004 — 엣지 케이스 검증
+evidence: user-request</title>
+    </g>
+
+    <g class="node node-task status-in-progress" data-id="T-0001" transform="translate(600,278)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+      <rect width="5" height="72" fill="#2563eb"/>
+      <text x="14" y="22" font-size="12" fill="#2563eb" font-weight="600">T-0001 · 진행</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">updated task</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: manual-update</text>
+      <title>T-0001 — updated task
+evidence: manual-update</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0005" transform="translate(600,364)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0005 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness 진단 및 leerness-plus f…</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: tarball/e2e 통과 (1.0.x → 1…</text>
+      <title>T-0005 — leerness 진단 및 leerness-plus fork 빌드
+evidence: tarball/e2e 통과 (1.0.x → 1.9.x 자동 마이그레이션 </title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0006" transform="translate(600,450)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0006 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">성능 벤치마크 측정</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: tarball/e2e 통과 (plan:M-00…</text>
+      <title>T-0006 — 성능 벤치마크 측정
+evidence: tarball/e2e 통과 (plan:M-0005)</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0007" transform="translate(600,536)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0007 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">Claude Code 슬래시/스킬 통합</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: Claude Code 슬래시/스킬 통합 완료 …</text>
+      <title>T-0007 — Claude Code 슬래시/스킬 통합
+evidence: Claude Code 슬래시/스킬 통합 완료 (plan:M-0006)</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0008" transform="translate(600,622)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0008 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">tarball 빌드 및 검증</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: tarball 빌드 검증 완료 (plan:M-…</text>
+      <title>T-0008 — tarball 빌드 및 검증
+evidence: tarball 빌드 검증 완료 (plan:M-0007)</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0009" transform="translate(600,708)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0009 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness-plus 1.0.0 빌드 완료</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: leerness-plus-1.0.0.tgz (…</text>
+      <title>T-0009 — leerness-plus 1.0.0 빌드 완료
+evidence: leerness-plus-1.0.0.tgz (29.8kB)</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0010" transform="translate(600,794)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0010 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness-plus 1.0.0 Iteration…</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: e2e 27/27 + npm publish -…</text>
+      <title>T-0010 — leerness-plus 1.0.0 Iteration B: viewwork hook + e2e + PATCHES + publish 준비
+evidence: e2e 27/27 + npm publish --dry-run OK + t</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0011" transform="translate(600,880)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0011 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness-plus 1.0.1 자동 업데이트 기…</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: e2e 30/30 + upgrade-demo …</text>
+      <title>T-0011 — leerness-plus 1.0.1 자동 업데이트 기능 추가
+evidence: e2e 30/30 + upgrade-demo 1.0.0→1.0.1 + m</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0012" transform="translate(600,966)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0012 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness 1.9.0 통합 재배포 빌드 완료</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: leerness-1.9.0.tgz (32.6k…</text>
+      <title>T-0012 — leerness 1.9.0 통합 재배포 빌드 완료
+evidence: leerness-1.9.0.tgz (32.6kB) + e2e 33/33 </title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0013" transform="translate(600,1052)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0013 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">memo-cli (외부 sub-project)에서 l…</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: memo-cli npm test 32/32 +…</text>
+      <title>T-0013 — memo-cli (외부 sub-project)에서 leerness@1.9.0 실측 적용
+evidence: memo-cli npm test 32/32 + leerness 5게이트 </title>
+    </g>
+
+    <g class="node node-task status-planned" data-id="T-0014" transform="translate(600,1138)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">T-0014 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">프로젝트 계획 정리</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: init default plan:M-0001</text>
+      <title>T-0014 — 프로젝트 계획 정리
+evidence: init default plan:M-0001</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0015" transform="translate(600,1224)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0015 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness 1.9.1 메타 감사 기반 패치 완료</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: e2e 38/38 + 메인/memo-cli 자…</text>
+      <title>T-0015 — leerness 1.9.1 메타 감사 기반 패치 완료
+evidence: e2e 38/38 + 메인/memo-cli 자동 업그레이드 + audit</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0016" transform="translate(600,1310)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0016 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness 1.9.2 학습 사이클 + weath…</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: e2e 49/49 + weather-cli 3…</text>
+      <title>T-0016 — leerness 1.9.2 학습 사이클 + weather-cli + 통합 시연
+evidence: e2e 49/49 + weather-cli 36/36 + skill op</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0017" transform="translate(600,1396)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0017 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness 1.9.4 — 5개 한계점 패치 + …</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: e2e 63/63 + lazy detect T…</text>
+      <title>T-0017 — leerness 1.9.4 — 5개 한계점 패치 + 메인 측정
+evidence: e2e 63/63 + lazy detect TODO 26→2(-92%) </title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0018" transform="translate(600,1482)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0018 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness 1.9.5 — F/G 패치 + 4 프…</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: e2e 66/66 + 모든 audit 0/0 …</text>
+      <title>T-0018 — leerness 1.9.5 — F/G 패치 + 4 프로젝트 0/0 달성
+evidence: e2e 66/66 + 모든 audit 0/0 + 모든 lazy detec</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0019" transform="translate(600,1568)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0019 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness 1.9.6 + GitHub 배포 (r…</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: e2e 69/69 + audit multi-l…</text>
+      <title>T-0019 — leerness 1.9.6 + GitHub 배포 (release/1.9.6 + v1.9.6 + Release)
+evidence: e2e 69/69 + audit multi-link fix + 4개 프로</title>
+    </g>
+
+    <g class="node node-task status-done" data-id="T-0020" transform="translate(600,1654)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0020 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">leerness 1.9.7 — 3종 자동화 + Git…</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">evidence: e2e 75/75 + 3개 앱 verify-c…</text>
+      <title>T-0020 — leerness 1.9.7 — 3종 자동화 + GitHub 배포
+evidence: e2e 75/75 + 3개 앱 verify-code 실측 + lesson</title>
+    </g>
+
+    <g class="node node-skill status-skill" data-id="skill:ai-verified-skill-publisher" transform="translate(890,20)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#8b5cf6" stroke-width="2"/>
+      <rect width="5" height="72" fill="#8b5cf6"/>
+      <text x="14" y="22" font-size="12" fill="#8b5cf6" font-weight="600">ai-verified-skill-publisher · 스킬</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">AI 검증 스킬 업로드·라이브러리화 스킬</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">사용 0회 · capabilities 4</text>
+      <title>skill:ai-verified-skill-publisher — AI 검증 스킬 업로드·라이브러리화 스킬
+사용 0회 · capabilities 4</title>
+    </g>
+
+    <g class="node node-skill status-skill" data-id="skill:commerce-api" transform="translate(890,106)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#8b5cf6" stroke-width="2"/>
+      <rect width="5" height="72" fill="#8b5cf6"/>
+      <text x="14" y="22" font-size="12" fill="#8b5cf6" font-weight="600">commerce-api · 스킬</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">커머스 API 연동 스킬 라이브러리</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">사용 0회 · capabilities 4</text>
+      <title>skill:commerce-api — 커머스 API 연동 스킬 라이브러리
+사용 0회 · capabilities 4</title>
+    </g>
+
+    <g class="node node-skill status-skill" data-id="skill:office" transform="translate(890,192)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#8b5cf6" stroke-width="2"/>
+      <rect width="5" height="72" fill="#8b5cf6"/>
+      <text x="14" y="22" font-size="12" fill="#8b5cf6" font-weight="600">office · 스킬</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">마이크로소프트 오피스 자동화 스킬 라이브러리</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">사용 0회 · capabilities 4</text>
+      <title>skill:office — 마이크로소프트 오피스 자동화 스킬 라이브러리
+사용 0회 · capabilities 4</title>
+    </g>
+
+    <g class="node node-rule status-rule" data-id="rule:R-0001" transform="translate(890,278)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#06b6d4" stroke-width="2"/>
+      <rect width="5" height="72" fill="#06b6d4"/>
+      <text x="14" y="22" font-size="12" fill="#06b6d4" font-weight="600">R-0001 · 룰</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">버전을 patch로 bump</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">every-update</text>
+      <title>rule:R-0001 — 버전을 patch로 bump
+every-update</title>
+    </g>
+
+    <g class="node node-rule status-rule" data-id="rule:R-0002" transform="translate(890,364)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#06b6d4" stroke-width="2"/>
+      <rect width="5" height="72" fill="#06b6d4"/>
+      <text x="14" y="22" font-size="12" fill="#06b6d4" font-weight="600">R-0002 · 룰</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">CHANGELOG에 패치노트 추가</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">every-update</text>
+      <title>rule:R-0002 — CHANGELOG에 패치노트 추가
+every-update</title>
+    </g>
+
+    <g class="node node-rule status-rule" data-id="rule:R-0003" transform="translate(890,450)">
+      <rect width="220" height="72" rx="8" ry="8" fill="#ffffff" stroke="#06b6d4" stroke-width="2"/>
+      <rect width="5" height="72" fill="#06b6d4"/>
+      <text x="14" y="22" font-size="12" fill="#06b6d4" font-weight="600">R-0003 · 룰</text>
+      <text x="14" y="42" font-size="11" fill="#1f2937" font-weight="500">배포 안내 (release publish)</text>
+      <text x="14" y="60" font-size="10" fill="#64748b">session-close</text>
+      <title>rule:R-0003 — 배포 안내 (release publish)
+session-close</title>
+    </g></g>
+    </svg>
+  </div>
+
+  <div class="columns">
+    <div>
+      <h2>📌 다음 예정 작업 (top 10)</h2>
+      <div class="block">
+        <div class="row">
+          <span class="dot" style="background:#94a3b8"></span>
+          <strong>T-0002</strong>
+          <span class="meta">[예정]</span>
+          테스트 마일스톤 A
+          <span class="meta">→ 다음 액션 작성</span>
+        </div>
+        <div class="row">
+          <span class="dot" style="background:#2563eb"></span>
+          <strong>T-0003</strong>
+          <span class="meta">[진행]</span>
+          기능 B 구현
+          <span class="meta">→ 다음 액션 작성</span>
+        </div>
+        <div class="row">
+          <span class="dot" style="background:#000"></span>
+          <strong>T-0004</strong>
+          <span class="meta">[requested]</span>
+          엣지 케이스 검증
+          <span class="meta">→ 다음 액션 작성</span>
+        </div>
+        <div class="row">
+          <span class="dot" style="background:#2563eb"></span>
+          <strong>T-0001</strong>
+          <span class="meta">[진행]</span>
+          updated task
+          <span class="meta">→ verify 실행</span>
+        </div>
+        <div class="row">
+          <span class="dot" style="background:#94a3b8"></span>
+          <strong>T-0014</strong>
+          <span class="meta">[예정]</span>
+          프로젝트 계획 정리
+          <span class="meta">→ project-brief.md를 실제 목적으로 업데이트</span>
+        </div></div>
+
+      <h2>📚 보유 스킬 (3)</h2>
+      <div class="block">
+        <div class="row">
+          <span class="dot" style="background:#8b5cf6"></span>
+          <strong>ai-verified-skill-publisher</strong> · AI 검증 스킬 업로드·라이브러리화 스킬
+          <span class="meta">사용 0회 · capabilities 4개</span>
+        </div>
+        <div class="row">
+          <span class="dot" style="background:#8b5cf6"></span>
+          <strong>commerce-api</strong> · 커머스 API 연동 스킬 라이브러리
+          <span class="meta">사용 0회 · capabilities 4개</span>
+        </div>
+        <div class="row">
+          <span class="dot" style="background:#8b5cf6"></span>
+          <strong>office</strong> · 마이크로소프트 오피스 자동화 스킬 라이브러리
+          <span class="meta">사용 0회 · capabilities 4개</span>
+        </div></div>
+    </div>
+    <div>
+      <h2>⚡ Active Rules (3)</h2>
+      <div class="block">
+        <div class="row">
+          <span class="dot" style="background:#06b6d4"></span>
+          <strong>R-0001</strong> <span class="meta">[every-update]</span>
+          버전을 patch로 bump
+          
+        </div>
+        <div class="row">
+          <span class="dot" style="background:#06b6d4"></span>
+          <strong>R-0002</strong> <span class="meta">[every-update]</span>
+          CHANGELOG에 패치노트 추가
+          
+        </div>
+        <div class="row">
+          <span class="dot" style="background:#06b6d4"></span>
+          <strong>R-0003</strong> <span class="meta">[session-close]</span>
+          배포 안내 (release publish)
+          
+        </div></div>
+
+      <h2>🧠 최근 결정 (top 6)</h2>
+      <div class="block"><div class="row"><span class="dot" style="background:#0f172a"></span>2026-05-08 — Decision</div><div class="row"><span class="dot" style="background:#0f172a"></span>2026-05-08 — Decision: leerness-plus 1.0.0 fork 발표</div><div class="row"><span class="dot" style="background:#0f172a"></span>2026-05-08 (이어 작업) — leerness-plus 1.0.0 publish 준비 완료</div><div class="row"><span class="dot" style="background:#0f172a"></span>2026-05-08 — Decision: leerness 1.9.0으로 통합 재배포</div><div class="row"><span class="dot" style="background:#0f172a"></span>2026-05-08 — Decision: leerness@1.9.0 실 적용 검증 (memo-cli)</div><div class="row"><span class="dot" style="background:#0f172a"></span>2026-05-08 — Decision: leerness 1.9.1 메타 감사 기반 패치</div></div>
+    </div>
+  </div>
+
+  <div class="footer">leerness-roadmap · skill-development · 자동 생성된 정적 HTML (외부 의존성 없음)</div>
+</body>
+</html>
