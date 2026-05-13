@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.16 — 2026-05-13
+
+**brainstorm 워크스페이스 통합 + 3 명령 JSON export + session close 워크스페이스 안내**.
+
+### Added
+
+- **`leerness brainstorm "<주제>" --all-apps` / `--include`**: retro/insights에 이어 brainstorm도 다수 프로젝트 통합 검색. 프로젝트별 결과 요약 + 워크스페이스 총합.
+- **`--json` 옵션** (retro / insights / brainstorm, 단일/워크스페이스 모두): JSON으로 export. CI/대시보드 연동 가능.
+- **session close 끝에 워크스페이스 안내**: `_apps/*/` 또는 부모 `_apps/*/`에 다른 leerness 프로젝트가 있으면 `🌐 워크스페이스에 N개 — leerness retro --all-apps` 자동 안내.
+
+### Migration
+```bash
+npx leerness@latest update . --yes
+```
+
 ## 1.9.15 — 2026-05-13
 
 **브레인스토밍 출처 표시 + 워크스페이스 통합 회고/통찰**.

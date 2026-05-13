@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.15';
+const VERSION = '1.9.16';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -113,7 +113,7 @@ function arg(name, def = null) { const i = process.argv.indexOf(name); return i 
 function has(name) { return process.argv.includes(name); }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score']);
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap']);
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -1297,6 +1297,22 @@ function sessionClose(root) {
       const left = 5 - (sc.count % 5);
       log(`  💡 ${left}세션 후 자동 깊은 회고 — \`leerness retro\`로 즉시 실행 가능`);
     }
+    // 1.9.16: 워크스페이스 안내 (다른 leerness 프로젝트가 있으면)
+    try {
+      const wsCands = [path.resolve(root, '_apps'), path.resolve(root, '..', '_apps')];
+      let wsCount = 0;
+      for (const base of wsCands) {
+        if (!exists(base)) continue;
+        try { if (!fs.statSync(base).isDirectory()) continue; } catch { continue; }
+        for (const e of fs.readdirSync(base)) {
+          try {
+            const p = path.join(base, e);
+            if (fs.statSync(p).isDirectory() && exists(path.join(p, '.harness')) && p !== root) wsCount++;
+          } catch {}
+        }
+      }
+      if (wsCount > 0) log(`  🌐 워크스페이스에 ${wsCount}개 다른 leerness 프로젝트 — \`leerness retro --all-apps\`로 통합 회고`);
+    } catch {}
   } catch (e) {
     warn('retro 요약 실패: ' + (e && e.message ? e.message : e));
   }
@@ -1504,6 +1520,11 @@ function retroCmd(root) {
   const days = parseInt(arg('--days', '7'), 10);
   const cutoff = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
   const agg = _retroAggregate(root);
+  // 1.9.16: --json
+  if (has('--json')) {
+    log(JSON.stringify({ project: path.basename(root), days, cutoff, summary: _retroOneLine(agg), data: agg }, null, 2));
+    return;
+  }
   log(`# 회고 (retro) — 최근 ${days}일 (since ${cutoff})`);
   log(`\n📈 한 줄 요약: ${_retroOneLine(agg)}`);
 
@@ -1553,6 +1574,21 @@ function retroCmd(root) {
 function _retroWorkspace(rootBase) {
   const paths = _collectWorkspacePaths(rootBase);
   if (!paths.length) return fail('대상 프로젝트 없음. --include <path1,path2> 또는 --all-apps 사용 필요.');
+  // 1.9.16: --json
+  if (has('--json')) {
+    const projects = paths.map(p => {
+      const a = _retroAggregate(p);
+      return { project: path.basename(p), path: p, summary: _retroOneLine(a), data: a };
+    });
+    const totals = projects.reduce((t, p) => ({
+      tasks: t.tasks + p.data.totalTasks, done: t.done + p.data.doneCount,
+      decisions: t.decisions + p.data.decisionBlocks, skills: t.skills + p.data.skillUsage.length,
+      usage: t.usage + p.data.totalSkillUsage, opts: t.opts + p.data.totalOptimizations,
+      activeRules: t.activeRules + p.data.activeRules, pass: t.pass + p.data.passSignals, fix: t.fix + p.data.fixSignals
+    }), { tasks: 0, done: 0, decisions: 0, skills: 0, usage: 0, opts: 0, activeRules: 0, pass: 0, fix: 0 });
+    log(JSON.stringify({ projects, totals, projectCount: paths.length }, null, 2));
+    return;
+  }
   log(`# Cross-project retro — ${paths.length}개 프로젝트`);
   const totals = { tasks: 0, done: 0, decisions: 0, skills: 0, totalSkillUsage: 0, totalOpts: 0, activeRules: 0, fixSig: 0, passSig: 0 };
   for (const p of paths) {
@@ -1588,6 +1624,12 @@ function insightsCmd(root) {
     return _insightsWorkspace(root);
   }
   const agg = _retroAggregate(root);
+  // 1.9.16: --json
+  if (has('--json')) {
+    const sc = readSessionCounter(root);
+    log(JSON.stringify({ project: path.basename(root), sessionCount: sc.count, lastCloseAt: sc.lastCloseAt, data: agg }, null, 2));
+    return;
+  }
   const sc = readSessionCounter(root);
   log(`# Insights — 누적 통계`);
   log(`\n## 📊 핵심 지표`);
@@ -1625,6 +1667,12 @@ function insightsCmd(root) {
 function _insightsWorkspace(rootBase) {
   const paths = _collectWorkspacePaths(rootBase);
   if (!paths.length) return fail('대상 프로젝트 없음. --include 또는 --all-apps 사용.');
+  // 1.9.16: --json
+  if (has('--json')) {
+    const projects = paths.map(p => ({ project: path.basename(p), path: p, data: _retroAggregate(p) }));
+    log(JSON.stringify({ projects, projectCount: paths.length }, null, 2));
+    return;
+  }
   log(`# Workspace Insights — ${paths.length}개 프로젝트`);
   log(`\n| Project | Task | Done % | Decisions | Skills | Usage | Opts | Pass/Fix |`);
   log(`|---|---|---|---|---|---|---|---|`);
@@ -1648,9 +1696,131 @@ function _insightsWorkspace(rootBase) {
   if (totals.opts === 0) log(`  - 최적화 누적 없음 — \`leerness skill optimize\` 활용 권장`);
 }
 
+// 1.9.16: brainstorm 핵심 로직 분리 — 단일 프로젝트 결과 반환
+function _brainstormFor(root, topic) {
+  function _escUnicode(s) { return String(s).replace(/[\\^$*+?.()|[\]{}]/g, '\\$&'); }
+  const tokens = String(topic).split(/\s+/).filter(t => t.length >= 2);
+  const wordRes = tokens.map(t => new RegExp(`(?<![\\p{L}\\p{N}_])${_escUnicode(t)}(?![\\p{L}\\p{N}_])`, 'iu'));
+  function matches(text) { return wordRes.every(re => re.test(text)); }
+  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [] };
+  const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+  const decLines = dec.split('\n');
+  for (const b of _extractDecisionBlocks(dec)) {
+    if (matches(b)) {
+      const t = (b.match(/^### (.+)$/m) || [, ''])[1];
+      const lineIdx = decLines.findIndex(line => line === `### ${t}`);
+      const lineNo = lineIdx >= 0 ? lineIdx + 1 : 0;
+      hits.decisions.push({ title: t, preview: b.slice(0, 200).replace(/\n+/g, ' '), line: lineNo });
+    }
+  }
+  const skillsDir = path.join(root, '.harness/skills');
+  if (exists(skillsDir)) {
+    for (const id of fs.readdirSync(skillsDir)) {
+      const f = path.join(skillsDir, id, 'skill.json');
+      if (!exists(f)) continue;
+      try {
+        const s = JSON.parse(read(f));
+        if (matches(JSON.stringify(s))) hits.skills.push({ id, displayNameKo: s.displayNameKo, capabilities: s.capabilities, usage: s.usage });
+      } catch {}
+    }
+  }
+  const rows = readProgressRows(root);
+  const progressText = exists(progressPath(root)) ? read(progressPath(root)) : '';
+  for (const r of rows) {
+    const fields = [];
+    if (matches(r.request)) fields.push('request');
+    if (matches(r.evidence)) fields.push('evidence');
+    if (matches(r.nextAction)) fields.push('nextAction');
+    if (fields.length) {
+      const idx = progressText.indexOf(`| ${r.id} |`);
+      const lineNo = idx >= 0 ? progressText.slice(0, idx).split('\n').length : 0;
+      hits.tasks.push({ ...r, _fields: fields, line: lineNo });
+    }
+  }
+  if (exists(rulesPath(root))) {
+    const rulesText = read(rulesPath(root));
+    for (const r of readRules(root)) {
+      if (matches(r.rule)) {
+        const idx = rulesText.indexOf(`| ${r.id} |`);
+        const lineNo = idx >= 0 ? rulesText.slice(0, idx).split('\n').length : 0;
+        hits.rules.push({ ...r, line: lineNo });
+      }
+    }
+  }
+  const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
+  for (const block of ev.split(/\n(?=## )/)) {
+    if (!block.startsWith('## ')) continue;
+    if (matches(block)) {
+      const t = (block.match(/^## (.+)$/m) || [, ''])[1];
+      const idx = ev.indexOf(block);
+      const lineNo = idx >= 0 ? ev.slice(0, idx).split('\n').length : 0;
+      hits.evidence.push({ title: t.trim(), preview: block.slice(0, 200).replace(/\n+/g, ' '), line: lineNo });
+      if (/✗|fail|롤백|incomplete|버그/i.test(block)) hits.lessons.push({ title: t.trim(), line: lineNo });
+    }
+  }
+  return hits;
+}
+
+function _brainstormTotal(h) { return h.decisions.length + h.skills.length + h.tasks.length + h.rules.length + h.evidence.length; }
+
+// 1.9.16: 워크스페이스 통합 brainstorm
+function _brainstormWorkspace(rootBase, topic) {
+  const paths = _collectWorkspacePaths(rootBase);
+  if (!paths.length) return fail('대상 프로젝트 없음. --include 또는 --all-apps 사용.');
+  if (has('--json')) {
+    const result = paths.map(p => ({ project: path.basename(p), path: p, hits: _brainstormFor(p, topic) }));
+    log(JSON.stringify({ topic, projects: result, total: result.reduce((a, b) => a + _brainstormTotal(b.hits), 0) }, null, 2));
+    return;
+  }
+  log(`# Cross-project Brainstorm — "${topic}" — ${paths.length}개 프로젝트`);
+  let grandTotal = 0;
+  for (const p of paths) {
+    const h = _brainstormFor(p, topic);
+    const n = _brainstormTotal(h);
+    grandTotal += n;
+    if (n === 0) continue;
+    log(`\n## ${path.basename(p)} (${n}건)`);
+    if (h.decisions.length) {
+      log(`  🧠 결정 (${h.decisions.length})`);
+      h.decisions.slice(0, 3).forEach(d => log(`    - decisions.md:${d.line || '?'} — ${d.title}`));
+    }
+    if (h.skills.length) {
+      log(`  📚 스킬 (${h.skills.length})`);
+      h.skills.slice(0, 3).forEach(s => log(`    - ${s.id} (${s.displayNameKo}) · 사용 ${s.usage?.count || 0}회`));
+    }
+    if (h.tasks.length) {
+      log(`  📌 task (${h.tasks.length})`);
+      h.tasks.slice(0, 3).forEach(t => log(`    - progress-tracker.md:${t.line || '?'} — ${t.id} [${t.status}] ${t.request.slice(0, 50)} (matched: ${t._fields.join('+')})`));
+    }
+    if (h.rules.length) {
+      log(`  ⚡ 룰 (${h.rules.length})`);
+      h.rules.slice(0, 3).forEach(r => log(`    - rules.md:${r.line || '?'} — ${r.id} [${r.trigger}]`));
+    }
+    if (h.evidence.length) {
+      log(`  🧪 evidence (${h.evidence.length})`);
+      h.evidence.slice(0, 3).forEach(e => log(`    - review-evidence.md:${e.line || '?'} — ${e.title}`));
+    }
+    if (h.lessons.length) {
+      log(`  ⚠ 과거 실패/롤백 (${h.lessons.length})`);
+    }
+  }
+  log(`\n## 📊 워크스페이스 총합: ${grandTotal}건 매치 (${paths.length} 프로젝트)`);
+  if (grandTotal === 0) log(`  ⓘ 어느 프로젝트에서도 "${topic}" 관련 자원 없음 — 새 영역. 첫 결정/스킬을 기록하면 다음 brainstorm이 풍부해짐.`);
+}
+
 function brainstormCmd(root, topic) {
   root = absRoot(root);
   if (!topic) return fail('topic required (e.g., brainstorm "API rate limit")');
+  // 1.9.16: --all-apps / --include 통합 모드
+  if (has('--all-apps') || arg('--include', null)) {
+    return _brainstormWorkspace(root, topic);
+  }
+  // 1.9.16: --json 단일 프로젝트
+  if (has('--json')) {
+    const h = _brainstormFor(root, topic);
+    log(JSON.stringify({ topic, project: path.basename(root), hits: h, total: _brainstormTotal(h) }, null, 2));
+    return;
+  }
   log(`# Brainstorm — "${topic}"`);
   log(`\n누적된 leerness 데이터에서 주제 관련 자원을 회수합니다.`);
 
@@ -3026,9 +3196,9 @@ function viewworkInstall(root) {
 
 function help() {
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path]\n  leerness session close [path]\n  leerness viewwork install [path]\n  leerness viewwork emit [path] [--action a] [--note n] [--agent x] [--tool t]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
-  leerness retro [path] [--days 7] [--all-apps] [--include p1,p2]  # 회고 (1.9.13/1.9.15)
-  leerness insights [path] [--all-apps] [--include p1,p2]         # 누적 통계 (1.9.13/1.9.15)
-  leerness brainstorm "<주제>"             # 브레인스토밍 + 파일:라인 표시 (1.9.13/1.9.15)
+  leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
+  leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
+  leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
   leerness roadmap [path] [--out file.html]  # 좌→우 수평 트리 + 상하 중앙정렬 + 화이트보드 (1.9.11)
   leerness roadmap auto on|off|status [--on-every-change] [--out file.html]  # 자동 갱신 (1.9.12, install/session-close 기본 ON)
   leerness verify-code [path] [--build]      # npm test/lint/typecheck 자동 실행 + evidence 자동 기록 (1.9.7)
