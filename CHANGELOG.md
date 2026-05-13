@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.15 — 2026-05-13
+
+**브레인스토밍 출처 표시 + 워크스페이스 통합 회고/통찰**.
+
+### Added
+
+- **brainstorm 매치 위치 표시**: 모든 결과에 `.harness/<file>:<line>` 형식의 파일 경로 + 줄 번호. task 결과는 매치된 필드(request/evidence/nextAction)도 함께 표시.
+- **`leerness retro --all-apps`**: 현재 디렉토리 + `_apps/*` (또는 부모 `_apps/*`)의 모든 leerness 프로젝트를 통합 회고. 프로젝트별 한 줄 요약 + 다음 우선 작업 + top 스킬 + 워크스페이스 총합 (task / done % / 결정 / 스킬 / 사용 / 최적화 / pass-fix 비율).
+- **`leerness retro --include <p1,p2,...>`**: 명시 경로 통합 회고. 쉼표 구분 다중 경로 지원.
+- **`leerness insights --all-apps`** / **`--include`**: 통합 통계를 표 형식으로 출력 + 안정성 평가 + 최적화 권장.
+
+### Migration
+
+```bash
+npx leerness@latest update . --yes
+```
+
+기존 명령은 모두 호환. `--all-apps` / `--include`는 선택 옵션.
+
 ## 1.9.14 — 2026-05-13
 
 **1.9.13의 retro/brainstorm 정확도 4건 fix** (city-insights 대형 프로젝트 운영 중 발견).

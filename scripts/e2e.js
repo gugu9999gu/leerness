@@ -237,6 +237,56 @@ total++;
   if (!(strongOK && weakHint)) failed++;
 }
 
+// 1.9.15 회귀: brainstorm 라인번호 / --all-apps / --include
+total++;
+{
+  const tmpL = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-line-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpL, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  fs.appendFileSync(path.join(tmpL, '.harness/decisions.md'), '\n### 2026-05-13 — 캐시 정책 결정\n- Reason: rate limit 회피\n');
+  cp.spawnSync(process.execPath, [CLI, 'plan', 'add', '캐시 helper 구현', '--path', tmpL], { stdio: 'ignore', timeout: 10000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'brainstorm', '캐시', '--path', tmpL], { encoding: 'utf8', timeout: 15000 });
+  const ok = /\.harness\/decisions\.md:\d+/.test(r.stdout) && /\.harness\/progress-tracker\.md:\d+/.test(r.stdout) && /matched: request/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.15) brainstorm: 파일:라인 + 매치 필드 표시' : `✗ 1.9.15 brainstorm 위치 실패\n${r.stdout.slice(0,500)}`);
+  if (!ok) failed++;
+}
+total++;
+{
+  // --include 다중 경로 통합
+  const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-wsA-'));
+  const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-wsB-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  cp.spawnSync(process.execPath, [CLI, 'plan', 'add', 'A 작업', '--status', 'done', '--path', tmpA], { stdio: 'ignore', timeout: 10000 });
+  cp.spawnSync(process.execPath, [CLI, 'plan', 'add', 'B 작업', '--status', 'planned', '--path', tmpB], { stdio: 'ignore', timeout: 10000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'retro', '--include', `${tmpA},${tmpB}`], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0 && /Cross-project retro — 2개 프로젝트/.test(r.stdout) && /워크스페이스 총합/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.15) retro --include: 2개 통합' : '✗ 1.9.15 retro --include 실패');
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
+}
+total++;
+{
+  // insights --include
+  const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-iA-'));
+  const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-iB-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'insights', '--include', `${tmpA},${tmpB}`], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0 && /Workspace Insights — 2개/.test(r.stdout) && /TOTAL/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.15) insights --include: 표 형식 통합' : '✗ 1.9.15 insights --include 실패');
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
+}
+total++;
+{
+  // 잘못된 --include 경로 — warn 출력 + .harness 있는 것만 처리
+  const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bad-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const bad = '/tmp/nonexistent-leerness-' + Date.now();
+  const r = cp.spawnSync(process.execPath, [CLI, 'retro', '--include', `${tmpA},${bad}`], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0 && /--include 무시/.test(r.stdout) && /Cross-project retro — 1개/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.15) --include 잘못된 경로 graceful skip' : '✗ 1.9.15 bad path 처리 실패');
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
+}
+
 // 1.9.14 회귀: A(Template 제외) / B(word boundary) / C(planned 포함) / D(코드블록 템플릿)
 total++;
 {
