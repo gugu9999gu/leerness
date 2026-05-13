@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.14 — 2026-05-13
+
+**1.9.13의 retro/brainstorm 정확도 4건 fix** (city-insights 대형 프로젝트 운영 중 발견).
+
+### Fixed
+
+- **A. decisions Template 카운트 오류**: init이 만드는 `decisions.md`의 `### YYYY-MM-DD — Decision` 템플릿 예시가 실제 결정으로 잘못 카운트되던 문제. `_extractDecisionBlocks()` 헬퍼가 코드블록(```...```) 안의 ### 와 `### (Template|템플릿)` 시작 블록을 자동 제외.
+- **B. brainstorm 토큰 매칭 부정확**: 단순 substring 매치로 인해 무관한 task가 잡히던 문제. **유니코드 word boundary** (`(?<![\p{L}\p{N}_])…(?![\p{L}\p{N}_])`) 기반 토큰 매칭으로 변경. 다중 토큰 (예: `"API rate limit"`)은 **모두** 매치되어야 결과로 표시.
+- **C. retro 다음 우선 작업이 planned 미포함**: in-progress/blocked가 비어있으면 "(없음)"으로 표시되던 문제. 우선순위 가중치 (in-progress=0, blocked/waiting/on-hold/incomplete=1, planned/requested=2)로 정렬해 planned도 포함.
+- **D. decisions.md 템플릿 형식**: init 디폴트가 실 결정과 동일한 `### YYYY-MM-DD — Decision` 형식이라 retro 카운트와 충돌. 템플릿을 **명시적 ```` ```md ```` 코드블록**으로 감싸 표시. retro/brainstorm/lessons가 일관되게 무시.
+
+### Migration
+
+```bash
+npx leerness@latest update . --yes
+```
+
+기존 프로젝트의 decisions.md는 그대로 두면 자동으로 정확히 카운트됩니다 (코드블록 처리는 양쪽 모두 동작).
+
 ## 1.9.13 — 2026-05-13
 
 **회고·통찰·브레인스토밍** — 누적된 leerness 데이터에서 자동으로 패턴/추세/주제별 자원을 추출.

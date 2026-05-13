@@ -237,6 +237,54 @@ total++;
   if (!(strongOK && weakHint)) failed++;
 }
 
+// 1.9.14 회귀: A(Template 제외) / B(word boundary) / C(planned 포함) / D(코드블록 템플릿)
+total++;
+{
+  // A: init 직후 decisions.md의 Template이 결정으로 카운트되지 않아야 함
+  const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-A-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'insights', tmpA], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0 && /누적 결정 \(decisions\.md\): 0건/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.14-A) Template 제외: 누적 결정 0건' : `✗ A 실패\n${r.stdout.slice(0, 500)}`);
+  if (!ok) failed++;
+}
+total++;
+{
+  // B: brainstorm 토큰 매칭 — "API"는 매치, "AP"는 부분 매치라 안 잡힘
+  const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-B-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  fs.appendFileSync(path.join(tmpB, '.harness/decisions.md'), '\n### 2026-05-13 — API rate limit 정책\n- Reason: ...\n');
+  // "limit" 매치
+  const r1 = cp.spawnSync(process.execPath, [CLI, 'brainstorm', 'limit', '--path', tmpB], { encoding: 'utf8', timeout: 15000 });
+  // "lim" 부분 매치 — 매치되면 안 됨
+  const r2 = cp.spawnSync(process.execPath, [CLI, 'brainstorm', 'lim', '--path', tmpB], { encoding: 'utf8', timeout: 15000 });
+  const ok = /총 1건/.test(r1.stdout) && /총 0건/.test(r2.stdout);
+  console.log(ok ? '✓ B(1.9.14-B) brainstorm word boundary: limit 매치 / lim 부분매치 안 잡힘' : `✗ B 실패\n${r1.stdout.slice(0, 200)}\n${r2.stdout.slice(0, 200)}`);
+  if (!ok) failed++;
+}
+total++;
+{
+  // C: retro 다음 우선 작업에 planned 포함
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-C-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  // 모든 task 제거 후 planned만 추가
+  fs.writeFileSync(path.join(tmpC, '.harness/progress-tracker.md'), `# Progress Tracker\nStatus values: requested, planned, in-progress, waiting, on-hold, blocked, incomplete, done, dropped\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n|---|---|---|---|---|---|\n| T-0001 | planned | 미래 작업 | plan:M-0001 | 시작 예정 | 2026-05-13 |\n`);
+  const r = cp.spawnSync(process.execPath, [CLI, 'retro', tmpC], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0 && /T-0001 \[planned\]/.test(r.stdout) && !/없음 — 새 plan add 권장/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.14-C) retro 다음 우선 작업에 planned 포함' : '✗ C 실패');
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 600)); }
+}
+total++;
+{
+  // D: init decisions.md가 ```md 코드블록으로 감싸짐
+  const tmpD = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-D-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpD, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const dec = fs.readFileSync(path.join(tmpD, '.harness/decisions.md'), 'utf8');
+  const ok = /```md\n### \d{4}-\d{2}-\d{2} — Decision/.test(dec) && /^## Template/m.test(dec);
+  console.log(ok ? '✓ B(1.9.14-D) decisions.md template 코드블록 감싸짐' : '✗ D 실패');
+  if (!ok) { failed++; console.log(dec.slice(0, 400)); }
+}
+
 // 1.9.13: retro / insights / brainstorm
 total++;
 {

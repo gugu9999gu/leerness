@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.13';
+const VERSION = '1.9.14';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -218,7 +218,7 @@ function coreFiles(root, lang = 'ko', selectedSkills = []) {
     '.harness/protected-files.md': fm('protected-files', ['파일 삭제/정리/마이그레이션 전'], ['보호 대상 변경'], `# Protected Files\n\nAI agents must not delete or reset these files without explicit user approval.\n\n- .harness/\n- .harness/skills/\n- .harness/library/\n- AGENTS.md\n- CLAUDE.md\n- .cursor/rules/leerness.mdc\n- .github/copilot-instructions.md\n- .claude/commands/\n- .claude/skills/\n- README.md Leerness managed section\n\nUse merge, archive, or deprecated markers instead of deletion.\n`),
     '.harness/architecture.md': fm('architecture', ['기능 구현','리팩토링','마이그레이션'], ['구조 변경'], `# Architecture\n\n## Overview\n- 실제 구조를 기록하세요.\n\n## Data Flow\n-\n\n## External Dependencies\n-\n`),
     '.harness/context-map.md': fm('context-map', ['관련 파일 탐색','기능 구현 전'], ['파일 구조 변경'], `# Context Map\n\n| Area | Files | Notes |\n|---|---|---|\n| App | src/** | 실제 경로로 업데이트 |\n| Tests | tests/** | 검증 경로 |\n`),
-    '.harness/decisions.md': fm('decisions', ['설계 결정 확인'], ['중요 결정 발생'], `# Decisions\n\n## Template\n### ${today()} — Decision\n- Decision:\n- Reason:\n- Alternatives:\n- Impact:\n`),
+    '.harness/decisions.md': fm('decisions', ['설계 결정 확인'], ['중요 결정 발생'], `# Decisions\n\n## Template (예시 — 실제 결정은 아래 코드블록 밖에 추가)\n\n\`\`\`md\n### ${today()} — Decision 제목\n- Decision:\n- Reason:\n- Alternatives:\n- Impact:\n\`\`\`\n`),
     '.harness/task-log.md': fm('task-log', ['작업 이력 확인'], ['모든 의미 있는 작업 후'], `# Task Log\n\n## ${today()}\n- Leerness v${VERSION} initialized.\n`),
     '.harness/guardrails.md': fm('guardrails', ['모든 작업 전','보안/권한/리팩토링 전'], ['금지 규칙 변경'], `# Guardrails\n\n- 토큰/키/비밀번호를 저장하지 않습니다. 환경변수 이름만 기록합니다.\n- 요청 없는 대규모 리팩토링을 하지 않습니다 (5개 이상 파일 변경 시 사용자 사전 승인).\n- API/DB/환경변수 변경은 영향 범위를 task-log에 기록합니다.\n- Leerness 보호 파일/관리 섹션을 삭제하지 않습니다.\n- 한글 인코딩은 BOM 없는 UTF-8을 유지합니다.\n- destructive Git 작업(\`git reset --hard\`, \`git push --force\` 등)은 사용자 명시 승인 후에만 수행합니다.\n`),
     '.harness/design-system.md': fm('design-system', ['UI 변경','컴포넌트 추가','designguide 병합'], ['디자인 기준 변경','재사용 패턴 발견'], `# Design System\n\n## Canonical File\n이 파일은 designguide.md, design-guide.md와 같은 디자인 가이드의 기준 파일입니다.\n\n## Tokens\n| Token | Value | Notes |\n|---|---|---|\n| color.primary | (실제 값으로 업데이트) | |\n| color.surface | | |\n| spacing.unit | | |\n| typography.body | | |\n\n## Reusable Patterns\n| Pattern | Where | Reuse Rule |\n|---|---|---|\n`),
@@ -1356,6 +1356,15 @@ function readSessionCounter(root) {
 }
 function writeSessionCounter(root, c) { writeUtf8(sessionCounterPath(root), JSON.stringify(c, null, 2) + '\n'); }
 
+// 1.9.14 A/D: 결정 블록 추출 — 코드 블록 안의 ### + Template 제외
+function _extractDecisionBlocks(text) {
+  // 줄 시작의 ```부터 줄 시작의 ```까지를 코드블록으로 인식 (인라인 백틱 무시)
+  const cleaned = String(text || '').replace(/^```[^\n]*\n[\s\S]*?\n```\s*$/gm, '');
+  return cleaned.split(/\n(?=### )/).filter(b =>
+    b.startsWith('### ') && !/^### (Template|템플릿)\b/.test(b.trim())
+  );
+}
+
 function _retroAggregate(root) {
   root = absRoot(root);
   const rows = readProgressRows(root);
@@ -1369,8 +1378,8 @@ function _retroAggregate(root) {
   for (const s of STATUSES) statusCounts[s] = 0;
   for (const r of rows) if (statusCounts[r.status] != null) statusCounts[r.status]++;
 
-  // 2) 결정 블록 수
-  const decisionBlocks = decisions.split(/\n(?=### )/).filter(b => b.startsWith('### '));
+  // 2) 결정 블록 수 (1.9.14: 코드블록/Template 제외)
+  const decisionBlocks = _extractDecisionBlocks(decisions);
   // recent decisions (날짜로 정렬 시 가장 최근)
   const recentDecisions = decisionBlocks.slice(-5).map(b => {
     const t = (b.match(/^### (.+)$/m) || [, ''])[1];
@@ -1412,9 +1421,10 @@ function _retroAggregate(root) {
   const activeRules = rules.filter(r => r.status === 'active');
   const verifiedRules = rules.filter(r => r.lastVerified && r.lastVerified !== '-');
 
-  // 7) 최근 in-progress / incomplete (우선 권장)
-  const focusNext = rows.filter(r => r.status === 'in-progress')
-    .concat(rows.filter(r => ['incomplete', 'blocked', 'waiting', 'on-hold'].includes(r.status)));
+  // 7) 다음 우선 작업 — 우선순위: in-progress > blocked/waiting/on-hold/incomplete > planned/requested (1.9.14 C)
+  const _priority = { 'in-progress': 0, 'blocked': 1, 'waiting': 1, 'on-hold': 1, 'incomplete': 1, 'planned': 2, 'requested': 2 };
+  const focusNext = rows.filter(r => _priority[r.status] != null)
+    .sort((a, b) => (_priority[a.status] || 9) - (_priority[b.status] || 9));
 
   return {
     statusCounts,
@@ -1549,14 +1559,17 @@ function brainstormCmd(root, topic) {
   log(`# Brainstorm — "${topic}"`);
   log(`\n누적된 leerness 데이터에서 주제 관련 자원을 회수합니다.`);
 
-  const re = new RegExp(escapeRegex(topic), 'i');
+  // 1.9.14 B: 토큰 기반 매칭 — unicode word boundary. unicode 모드에서 하이픈은 escape 불필요.
+  function _escUnicode(s) { return String(s).replace(/[\\^$*+?.()|[\]{}]/g, '\\$&'); }
+  const tokens = String(topic).split(/\s+/).filter(t => t.length >= 2);
+  const wordRes = tokens.map(t => new RegExp(`(?<![\\p{L}\\p{N}_])${_escUnicode(t)}(?![\\p{L}\\p{N}_])`, 'iu'));
+  function matches(text) { return wordRes.every(re => re.test(text)); }
   const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [] };
 
-  // decisions
+  // decisions (1.9.14: 코드블록/Template 제외)
   const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
-  for (const b of dec.split(/\n(?=### )/)) {
-    if (!b.startsWith('### ')) continue;
-    if (re.test(b)) {
+  for (const b of _extractDecisionBlocks(dec)) {
+    if (matches(b)) {
       const t = (b.match(/^### (.+)$/m) || [, ''])[1];
       hits.decisions.push({ title: t, preview: b.slice(0, 200).replace(/\n+/g, ' ') });
     }
@@ -1570,22 +1583,25 @@ function brainstormCmd(root, topic) {
       try {
         const s = JSON.parse(read(f));
         const text = JSON.stringify(s);
-        if (re.test(text)) hits.skills.push({ id, displayNameKo: s.displayNameKo, capabilities: s.capabilities, usage: s.usage });
+        if (matches(text)) hits.skills.push({ id, displayNameKo: s.displayNameKo, capabilities: s.capabilities, usage: s.usage });
       } catch {}
     }
   }
-  // tasks
+  // tasks (1.9.14: token 매칭)
   const rows = readProgressRows(root);
-  for (const r of rows) if (re.test(r.request) || re.test(r.evidence) || re.test(r.nextAction)) hits.tasks.push(r);
+  for (const r of rows) {
+    const blob = `${r.request} ${r.evidence} ${r.nextAction}`;
+    if (matches(blob)) hits.tasks.push(r);
+  }
   // rules
   if (exists(rulesPath(root))) {
-    for (const r of readRules(root)) if (re.test(r.rule)) hits.rules.push(r);
+    for (const r of readRules(root)) if (matches(r.rule)) hits.rules.push(r);
   }
   // evidence — lessons 키워드 (fail/롤백/incomplete) 동반
   const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
   for (const block of ev.split(/\n(?=## )/)) {
     if (!block.startsWith('## ')) continue;
-    if (re.test(block)) {
+    if (matches(block)) {
       const t = (block.match(/^## (.+)$/m) || [, ''])[1];
       hits.evidence.push({ title: t.trim(), preview: block.slice(0, 200).replace(/\n+/g, ' ') });
       if (/✗|fail|롤백|incomplete|버그/i.test(block)) hits.lessons.push({ title: t.trim() });
@@ -2434,9 +2450,8 @@ function lessonsCmd(root) {
   const tlog = exists(taskLogPath(root)) ? read(taskLogPath(root)) : '';
   const handoff = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
   const lessons = [];
-  // decisions: ### 블록 전체
-  for (const block of decisions.split(/\n(?=### )/)) {
-    if (!block.startsWith('### ')) continue;
+  // decisions: ### 블록 전체 (1.9.14: 코드블록/Template 제외)
+  for (const block of _extractDecisionBlocks(decisions)) {
     const m = block.match(/^### (.+)$/m);
     if (!m) continue;
     lessons.push({ source: 'decisions.md', title: m[1].trim(), block });
