@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.64';
+const VERSION = '1.9.65';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1757,24 +1757,22 @@ function handoff(root) {
         const tokens = String(latestRow.request).toLowerCase().match(/[\w가-힣]{4,}/g) || [];
         const keyword = tokens.filter(t => !stopwords.has(t)).sort((a, b) => b.length - a.length)[0];
         if (keyword) {
-          // lessons 검색 — 1.9.58: fuzzy 매칭 (substring + 어간 변형)
-          const decisions = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
-          const evidence = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
+          // 1.9.65: lessons blocks 인덱스 메모리 캐시 — mtime 기반 invalidation
+          // 같은 프로세스가 여러 번 handoff를 호출해도 split/regex 비용 1회만
+          const idx = _loadLessonsIndex(root);
           // fuzzy: keyword 또는 keyword 부분 (4자+) 일치
           // 예: "webhook" 매칭 시 "webhook-payload", "webhooks", "webhooked" 모두 매칭
           const fuzzyRe = new RegExp(escapeRegex(keyword.slice(0, Math.max(4, Math.floor(keyword.length * 0.7)))), 'i');
           const matches = [];
-          for (const block of evidence.split(/\n(?=## )/)) {
-            if (block.startsWith('## ') && fuzzyRe.test(block) && /✗|fail|롤백|버그|incomplete/i.test(block)) {
-              const titleM = block.match(/^## (.+)$/m);
-              if (titleM) matches.push({ source: 'review-evidence.md', title: titleM[1].trim(), block });
+          for (const e of idx.evidence) {
+            if (fuzzyRe.test(e.block) && /✗|fail|롤백|버그|incomplete/i.test(e.block)) {
+              matches.push({ source: 'review-evidence.md', title: e.title, block: e.block });
             }
           }
           // 1.9.58: decisions.md도 fuzzy 매칭 (실패/롤백 관련 결정만)
-          for (const block of decisions.split(/\n(?=### )/)) {
-            if (block.startsWith('### ') && fuzzyRe.test(block) && /롤백|실패|fail|취소|회귀|deprecate/i.test(block)) {
-              const titleM = block.match(/^### (.+)$/m);
-              if (titleM) matches.push({ source: 'decisions.md', title: titleM[1].trim(), block });
+          for (const d of idx.decisions) {
+            if (fuzzyRe.test(d.block) && /롤백|실패|fail|취소|회귀|deprecate/i.test(d.block)) {
+              matches.push({ source: 'decisions.md', title: d.title, block: d.block });
             }
           }
           if (matches.length) {
@@ -5520,8 +5518,9 @@ function lessonsCmd(root) {
     }
     log(`# Lessons --auto (1.9.54): 추출 키워드 "${query}"`);
   }
+  // 1.9.65: 인덱스 캐시 활용 (decisions/evidence split 1회만)
+  const _lidx = _loadLessonsIndex(root);
   const decisions = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
-  const evidence = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
   const tlog = exists(taskLogPath(root)) ? read(taskLogPath(root)) : '';
   const handoff = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
   const lessons = [];
@@ -5531,12 +5530,10 @@ function lessonsCmd(root) {
     if (!m) continue;
     lessons.push({ source: 'decisions.md', title: m[1].trim(), block });
   }
-  // evidence: ## 블록 중 실패/롤백/버그 표지가 있는 것
-  for (const block of evidence.split(/\n(?=## )/)) {
-    if (!block.startsWith('## ')) continue;
-    if (/✗|\bfail(ed)?\b|롤백|재발|incomplete|\bbug\b|버그|warning/i.test(block)) {
-      const m = block.match(/^## (.+)$/m);
-      if (m) lessons.push({ source: 'review-evidence.md', title: m[1].trim(), block });
+  // evidence: ## 블록 중 실패/롤백/버그 표지가 있는 것 (1.9.65: 인덱스 재활용)
+  for (const e of _lidx.evidence) {
+    if (/✗|\bfail(ed)?\b|롤백|재발|incomplete|\bbug\b|버그|warning/i.test(e.block)) {
+      lessons.push({ source: 'review-evidence.md', title: e.title, block: e.block });
     }
   }
   // task-log: 실패 키워드 라인
@@ -6137,12 +6134,56 @@ function driftCheckCmd(root, opts = {}) {
   if (level === '🔴 critical') process.exitCode = 1;
 }
 
+// 1.9.65: lessons blocks 인덱스 — evidence/decisions 파일 read + split을 1회로
+// key: root → { evidenceMtime, decisionsMtime, evidence: [{title, block}], decisions: [{title, block}] }
+const _LESSONS_INDEX_CACHE = new Map();
+function _loadLessonsIndex(root) {
+  const ep = evidencePath(root);
+  const dp = decisionsPath(root);
+  const em = exists(ep) ? (() => { try { return fs.statSync(ep).mtimeMs; } catch { return 0; } })() : 0;
+  const dm = exists(dp) ? (() => { try { return fs.statSync(dp).mtimeMs; } catch { return 0; } })() : 0;
+  const cacheKey = absRoot(root);
+  const cached = _LESSONS_INDEX_CACHE.get(cacheKey);
+  if (cached && cached.evidenceMtime === em && cached.decisionsMtime === dm) return cached;
+  const evidence = [];
+  if (em) {
+    const txt = read(ep);
+    for (const block of txt.split(/\n(?=## )/)) {
+      if (!block.startsWith('## ')) continue;
+      const t = block.match(/^## (.+)$/m);
+      if (t) evidence.push({ title: t[1].trim(), block });
+    }
+  }
+  const decisions = [];
+  if (dm) {
+    const txt = read(dp);
+    for (const block of txt.split(/\n(?=### )/)) {
+      if (!block.startsWith('### ')) continue;
+      const t = block.match(/^### (.+)$/m);
+      if (t) decisions.push({ title: t[1].trim(), block });
+    }
+  }
+  const idx = { evidenceMtime: em, decisionsMtime: dm, evidence, decisions };
+  _LESSONS_INDEX_CACHE.set(cacheKey, idx);
+  return idx;
+}
+
 // 1.9.38: 사용 통계 (cumulative count, command별)
+// 1.9.65: 같은 프로세스 lifetime 메모리 캐시 — 다중 호출 시 디스크 I/O 절감
+const _USAGE_CACHE = new Map(); // root → { stats, mtime }
 function _usageStatsPath(root) { return path.join(absRoot(root), '.harness', 'cache', 'usage-stats.json'); }
 function _readUsageStats(root) {
   const p = _usageStatsPath(root);
   if (!exists(p)) return { commands: {}, drift: { criticalSeen: 0, skipped: 0, autoResolved: 0 }, since: today() };
-  try { return JSON.parse(read(p)); } catch { return { commands: {}, drift: {}, since: today() }; }
+  // 1.9.65: 캐시 hit — mtime 동일 시 재파싱 skip
+  try {
+    const mtime = fs.statSync(p).mtimeMs;
+    const cached = _USAGE_CACHE.get(p);
+    if (cached && cached.mtime === mtime) return cached.stats;
+    const stats = JSON.parse(read(p));
+    _USAGE_CACHE.set(p, { stats, mtime });
+    return stats;
+  } catch { return { commands: {}, drift: {}, since: today() }; }
 }
 function _bumpUsage(root, cmdName) {
   // 가벼운 카운터 — 명령 실행마다 호출 (sync write로 작은 파일)
@@ -6156,6 +6197,8 @@ function _bumpUsage(root, cmdName) {
     const p = _usageStatsPath(root);
     mkdirp(path.dirname(p));
     writeUtf8(p, JSON.stringify(stats, null, 2) + '\n');
+    // 1.9.65: 쓰기 후 캐시 invalidate (다음 read에서 새 mtime으로 재로드)
+    try { _USAGE_CACHE.set(p, { stats, mtime: fs.statSync(p).mtimeMs }); } catch {}
   } catch {}
 }
 

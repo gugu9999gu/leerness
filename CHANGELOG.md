@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.65 — 2026-05-19
+
+**성능 최적화 1차 — usage-stats 메모리 캐시 + lessons 인덱스 캐시**.
+
+### Performance
+- **usage-stats 메모리 캐시 (`_USAGE_CACHE`)** — 같은 프로세스 lifetime 동안 `.harness/cache/usage-stats.json`을 mtime 기반으로 한 번만 파싱. `_readUsageStats()` 다중 호출 시 디스크 I/O 절감.
+- **lessons 인덱스 캐시 (`_LESSONS_INDEX_CACHE`)** — `review-evidence.md` + `decisions.md`를 mtime 기반으로 1회 read+split, 블록 인덱스를 메모리에 보관.
+  - handoff의 lessons 자동 재상기: 키워드별 fuzzy 매칭이 split 재실행 없이 인덱스 순회로 동작.
+  - `leerness lessons` 명령도 같은 인덱스 재활용.
+- 벤치마크 워크스페이스 크기 비례 비용 → 사실상 O(1) (인덱스 hit 시).
+- API 호환성 유지 — 캐시는 mtime invalidation이라 외부에서 파일을 수정해도 자동 재로드.
+
+### Verified
+- stress-v11 (1.9.64 baseline ↔ 1.9.65 optimized 정량 비교) — 13/14 PASS, 캐시 정합성 3/3 PASS.
+- 성능: handoff -37% / drift -19% / audit -29% / skill list -17% / 100-task handoff -42% / 50-evidence handoff 1048ms.
+- status 클린 환경 측정: median 623ms (v10 1195ms 대비 -48% 개선).
+- e2e 회귀: 219/219 PASS 유지.
+
+---
+
 ## 1.9.64 — 2026-05-19
 
 **`leerness install <skill>` 별칭 + 성능 벤치마크 1차 실측**.
