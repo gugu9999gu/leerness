@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.9.102 — 2026-05-20
+
+**`leerness audit --json` 구조화 출력** (findings 11종 kind + MCP `leerness_audit` JSON 응답).
+
+### Added — `leerness audit [path] --json`
+- 출력: `{ version, root, warnings, failures, fixed, healthy, fixApplied, strict, strictThreshold, summary, findings[] }`
+- 각 finding: `{ kind, severity, message, ...details }`
+- **finding.kind 11종**:
+  - `design_dup` — design guide 중복 파일 (`docs/designguide.md` 등)
+  - `design_system_default` — design-system.md tokens not customized
+  - `reuse_map_empty` — reuse-map.md 비어있음
+  - `milestone_unlinked` — milestone progress-tracker 미연결
+  - `handoff_not_generated` — session-handoff.md never auto-generated
+  - `current_state_stale` — current-state.md 7일 이상 stale
+  - `readme_version_mismatch` — README 배지 ↔ package.json 불일치
+  - `npm_cve` — npm audit 발견 CVE
+  - `npm_cve_critical` — critical/high CVE 즉시 대응 권장
+  - `gitignore_missing_secrets` — .gitignore에 시크릿 패턴 누락
+  - `env_keys_missing` — .env 키가 .env.example에 누락
+  - `strict_promoted` — --strict로 warnings → failures 승격
+- exit 1 if `failures > 0` (warnings 만으로는 healthy=true 유지)
+- 기존 verbose 출력은 stdout 억제 후 JSON만 출력 (CI 친화)
+
+### Changed — MCP `leerness_audit`
+- 기본 응답을 JSON 으로 변경 (--json 자동 전달).
+- `args.strict: true` 옵션 추가 → `--strict` 전달.
+- 외부 AI(Claude Code / Hermes)가 audit 결과를 파싱 친화적으로 받음.
+
+### JSON 옵션 통합 11종 (1.9.102 까지)
+| 명령 | 라운드 | 핵심 |
+|---|---|---|
+| `skill list --json` | 1.9.84 | items[] |
+| `health --json` | 1.9.85 | checks/issues/healthy |
+| `skill search --json` | 1.9.90 | matches[] |
+| `skill info --json` | 1.9.92 | 개별 skill |
+| `lessons --json` | 1.9.95 | lessons[] |
+| `handoff --json` | 1.9.96 | files{...}/activeRules |
+| `env check --json` | 1.9.71 | inEnvOnly/inExampleOnly |
+| `benchmark --json` | 1.9.46 | 6 차원 점수 |
+| `drift check --json` | (기존) | score/level/fired[] |
+| `lazy detect --json` | 1.9.101 | findings[] 7 kind |
+| `audit --json` | **1.9.102** | **findings[] 11 kind** |
+
+### Verified
+- stress-v47 — audit --json 구조 + 11 kind 검출 + MCP audit + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.101 — 2026-05-20
 
 **`leerness lazy detect --json` + MCP 22번째 도구 `leerness_lazy_detect`** (외부 AI에 거짓 완료/empty handoff/no test run/TODO 미추적 신호 노출).

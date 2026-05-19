@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.101';
+const VERSION = '1.9.102';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -304,6 +304,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.99+ \`leerness handoff --quiet\` (자동화/CI 모드 — 자동 회수 라인 비활성).
 - 1.9.100 🏆 마일스톤 — 30 라운드 자율 누적, stress-v45 30/30 PASS, e2e 219/219 PASS.
 - 1.9.101+ \`leerness lazy detect --json\` + MCP **22 도구** (\`leerness_lazy_detect\` 추가 — 거짓 완료/empty handoff/no test run/TODO 미추적 신호 JSON).
+- 1.9.102+ \`leerness audit --json\` 구조화 출력 (findings 11종 kind: design_dup/design_system_default/reuse_map_empty/milestone_unlinked/handoff_not_generated/current_state_stale/readme_version_mismatch/npm_cve/gitignore_missing_secrets/env_keys_missing/strict_promoted). MCP \`leerness_audit\`도 JSON 자동.
 
 ---
 
@@ -1416,26 +1417,33 @@ function debug(root) {
   if (failures) process.exitCode = 1;
 }
 
-function audit(root) {
+function audit(root, opts = {}) {
   root = absRoot(root);
   let warnings = 0, failures = 0;
   // 1.9.35 개선 #5: --fix 옵션 — 자동 수정 가능한 항목 적용
   const fix = has('--fix');
   let fixed = 0;
+  // 1.9.102: --json 모드 — stdout 억제 후 구조화 출력
+  const jsonMode = !!opts.json || has('--json');
+  const findings = [];
+  const _finding = (kind, severity, message, details = {}) => findings.push({ kind, severity, message, ...details });
+  const _origWrite = process.stdout.write.bind(process.stdout);
+  if (jsonMode) process.stdout.write = () => true;
+  try {
   const designCands = ['designguide.md','design-guide.md','docs/designguide.md','docs/design-guide.md','.harness/designguide.md'];
   const dups = designCands.filter(f => exists(path.join(root,f)));
-  if (dups.length) { warnings++; warn(`design guide duplicates outside canonical: ${dups.join(', ')} (run: leerness consistency merge-design-guide)`); }
+  if (dups.length) { warnings++; warn(`design guide duplicates outside canonical: ${dups.join(', ')} (run: leerness consistency merge-design-guide)`); _finding('design_dup', 'warn', 'design guide duplicates outside canonical', { duplicates: dups }); }
   else ok('no duplicate design guide candidates');
   // 1.9.1 P4: <!-- leerness:na --> 마커가 있는 파일은 placeholder 경고 스킵.
   const naMarker = '<!-- leerness:na';
   const ds = exists(path.join(root,'.harness/design-system.md')) ? read(path.join(root,'.harness/design-system.md')) : '';
   if (ds.includes(naMarker)) ok('design-system.md marked NA (skipped)');
-  else if (!/\| color\.primary \|/.test(ds) || /\(실제 값으로 업데이트\)/.test(ds)) { warnings++; warn('design-system.md tokens not customized'); }
+  else if (!/\| color\.primary \|/.test(ds) || /\(실제 값으로 업데이트\)/.test(ds)) { warnings++; warn('design-system.md tokens not customized'); _finding('design_system_default', 'warn', 'design-system.md tokens not customized'); }
   else ok('design-system tokens populated');
   const reuse = exists(path.join(root,'.harness/reuse-map.md')) ? read(path.join(root,'.harness/reuse-map.md')) : '';
   const reuseLines = reuse.split('\n').filter(l => l.startsWith('|') && !/Capability|---/.test(l)).length;
   if (reuse.includes(naMarker)) ok('reuse-map.md marked NA (skipped)');
-  else if (reuseLines === 0) { warnings++; warn('reuse-map.md is empty (consider populating known reusable elements)'); }
+  else if (reuseLines === 0) { warnings++; warn('reuse-map.md is empty (consider populating known reusable elements)'); _finding('reuse_map_empty', 'warn', 'reuse-map.md is empty'); }
   else ok(`reuse-map.md has ${reuseLines} entries`);
   const planText = exists(planPath(root)) ? read(planPath(root)) : '';
   const milestoneIds = Array.from(planText.matchAll(/^### (M-\d{4})\./gm)).map(m => m[1]);
@@ -1448,6 +1456,7 @@ function audit(root) {
   if (missingFromProgress.length) {
     warnings++;
     warn(`milestones without progress entry: ${missingFromProgress.join(', ')}`);
+    _finding('milestone_unlinked', 'warn', 'milestones without progress entry', { milestones: missingFromProgress });
     log(`    → 자동 매칭 제안: leerness task relink`);
     log(`    → 자동 적용:     leerness task relink --apply`);
   }
@@ -1455,6 +1464,7 @@ function audit(root) {
   const handoff = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
   if (handoff.includes('Last generated: (자동)')) {
     warnings++; warn('session-handoff.md never auto-generated (run: leerness session close .)');
+    _finding('handoff_not_generated', 'warn', 'session-handoff.md never auto-generated');
     // 1.9.35 #5: --fix → session-handoff.md 자동 생성 마커 갱신
     if (fix) {
       const stamped = handoff.replace('Last generated: (자동)', `Last generated: ${today()} (leerness audit --fix)`);
@@ -1470,6 +1480,7 @@ function audit(root) {
     const dDays = (Date.now() - new Date(updMatch[1]).getTime()) / 86400000;
     if (dDays > 7) {
       warnings++; warn(`current-state.md stale (${Math.round(dDays)} days)`);
+      _finding('current_state_stale', 'warn', 'current-state.md stale', { days: Math.round(dDays) });
       // 1.9.35 #5: --fix → current-state.md Updated 라인 갱신
       if (fix) {
         const stamped = cur.replace(/Updated: \d{4}-\d{2}-\d{2}/, `Updated: ${today()}`);
@@ -1491,6 +1502,7 @@ function audit(root) {
       if (pkg.version && m && m[1] !== pkg.version) {
         warnings++;
         warn(`README.md version badge mismatch: README=${m[1]} vs package.json=${pkg.version} (run: leerness readme sync)`);
+        _finding('readme_version_mismatch', 'warn', 'README.md version badge mismatch', { readme: m[1], pkg: pkg.version });
         if (fix) {
           const updated = readmeText.replace(/badge\/version-[\d.]+-(green|blue|red)/g, `badge/version-${pkg.version}-green`);
           writeUtf8(readmePath, updated);
@@ -1516,10 +1528,12 @@ function audit(root) {
           if (total > 0) {
             warnings++;
             warn(`npm CVE: ${total}건 (critical=${v.critical||0}, high=${v.high||0}, moderate=${v.moderate||0}, low=${v.low||0})`);
+            _finding('npm_cve', 'warn', `npm CVE: ${total}건`, { vulnerabilities: v });
             log(`    → 수정: npm audit fix · 상세: npm audit`);
             if (v.critical || v.high) {
               warnings++; // critical/high는 추가 가중
               warn(`  ⚠ critical/high CVE 즉시 대응 권장`);
+              _finding('npm_cve_critical', 'warn', 'critical/high CVE 즉시 대응 권장', { critical: v.critical, high: v.high });
             }
           } else {
             ok('npm CVE: 0건');
@@ -1543,6 +1557,7 @@ function audit(root) {
         if (missing.length) {
           warnings++;
           warn(`.gitignore에 시크릿 패턴 ${missing.length}건 누락: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ' …' : ''}`);
+          _finding('gitignore_missing_secrets', 'warn', '.gitignore에 시크릿 패턴 누락', { missing });
           if (fix) {
             // 자동 추가
             let newGi = giText;
@@ -1569,6 +1584,7 @@ function audit(root) {
         if (d.inEnvOnly.length) {
           warnings++;
           warn(`.env에 있는 키 ${d.inEnvOnly.length}건이 .env.example에 누락: ${d.inEnvOnly.slice(0, 4).join(', ')}${d.inEnvOnly.length > 4 ? ' …' : ''}`);
+          _finding('env_keys_missing', 'warn', '.env 키가 .env.example에 누락', { keys: d.inEnvOnly });
           if (fix) {
             // 자동 동기화: 누락 키만 .env.example 끝에 append (값 비움)
             let example = read(d.examplePath);
@@ -1593,9 +1609,31 @@ function audit(root) {
     if (warnings >= threshold) {
       failures++;
       warn(`--strict 활성: warnings ${warnings} ≥ threshold ${threshold} → failures 승격`);
+      _finding('strict_promoted', 'fail', `warnings ${warnings} ≥ threshold ${threshold} → failures 승격`, { warnings, threshold });
     }
   }
   log(`Audit summary: warnings=${warnings} failures=${failures}${fix ? ` fixed=${fixed}` : ''}${has('--strict') ? ` strict-threshold=${arg('--threshold', '1')}` : ''}`);
+  } finally {
+    // 1.9.102: stdout 복원
+    if (jsonMode) process.stdout.write = _origWrite;
+  }
+  // 1.9.102: JSON 모드 — 구조화 출력
+  if (jsonMode) {
+    const payload = {
+      version: VERSION,
+      root,
+      warnings,
+      failures,
+      fixed,
+      healthy: failures === 0,
+      fixApplied: fix,
+      strict: has('--strict'),
+      strictThreshold: has('--strict') ? parseInt(arg('--threshold', '1'), 10) : null,
+      summary: `warnings=${warnings} failures=${failures}${fix ? ` fixed=${fixed}` : ''}`,
+      findings,
+    };
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+  }
   if (failures) process.exitCode = 1;
 }
 
@@ -3536,6 +3574,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness health . --json') + C.dim('                         # 종합 헬스 체크 — drift + 보안 + skill + MCP (1.9.85)'));
     log('    ' + C.green('npx leerness drift check . --auto-fix') + C.dim('                # drift + 보안 자동 회복 (1.9.82)'));
     log('    ' + C.green('npx leerness lazy detect . --json') + C.dim('                   # 거짓 완료/no test run 신호 JSON (1.9.101)'));
+    log('    ' + C.green('npx leerness audit . --json') + C.dim('                         # 일관성 감사 JSON — 11 kind findings (1.9.102)'));
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
@@ -7546,7 +7585,7 @@ function mcpServeCmd(root) {
   const TOOLS = [
     { name: 'leerness_handoff', description: '워크스페이스 컨텍스트(plan/progress/decisions) 적재', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_drift_check', description: 'AI 에이전트 leerness 미사용 drift 자동 감지 (4 신호 + 4단계 레벨)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_audit', description: '워크스페이스 일관성 감사 (verify + scan + encoding + lazy 통합)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, fix: { type: 'boolean' } } } },
+    { name: 'leerness_audit', description: '1.9.102 — 워크스페이스 일관성 감사 JSON (warnings/failures/fixed/healthy + findings[]. kind 11종: design_dup/design_system_default/reuse_map_empty/milestone_unlinked/handoff_not_generated/current_state_stale/readme_version_mismatch/npm_cve/gitignore_missing_secrets/env_keys_missing/strict_promoted)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, fix: { type: 'boolean' }, strict: { type: 'boolean' } } } },
     { name: 'leerness_verify_claim', description: 'AI 거짓 완료 자동 검증 (evidence 파일 + 실 테스트 실행)', inputSchema: { type: 'object', properties: { taskId: { type: 'string' }, path: { type: 'string' }, runTests: { type: 'boolean' }, strictClaims: { type: 'boolean' } }, required: ['taskId'] } },
     { name: 'leerness_contract_verify', description: '명세 ↔ 구현 함수/필드 일치 자동 검사', inputSchema: { type: 'object', properties: { spec: { type: 'string' }, impl: { type: 'string' } }, required: ['spec', 'impl'] } },
     { name: 'leerness_agents_list', description: '외부 AI CLI 가용성 표 (claude/codex/gemini/copilot 상태 + 환경변수 활성화 여부)', inputSchema: { type: 'object', properties: {} } },
@@ -7599,7 +7638,7 @@ function mcpServeCmd(root) {
         switch (name) {
           case 'leerness_handoff':         cliArgs = ['handoff', targetPath, '--compact', '--no-drift-check']; break;
           case 'leerness_drift_check':     cliArgs = ['drift', 'check', targetPath]; break;
-          case 'leerness_audit':           cliArgs = ['audit', targetPath, ...(args.fix ? ['--fix'] : [])]; break;
+          case 'leerness_audit':           cliArgs = ['audit', targetPath, '--json', ...(args.fix ? ['--fix'] : []), ...(args.strict ? ['--strict'] : [])]; break;
           case 'leerness_verify_claim':    cliArgs = ['verify-claim', args.taskId, '--path', targetPath, ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : [])]; break;
           case 'leerness_contract_verify': cliArgs = ['contract', 'verify', args.spec, args.impl]; break;
           case 'leerness_agents_list':     cliArgs = ['agents', 'list', '--json']; break;
