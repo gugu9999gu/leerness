@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.89 — 2026-05-20
+
+**자율 모드 19 라운드 종합 검증 + 마무리** (1.9.70 ~ 1.9.88).
+
+### Verified — stress-v35 24/24 PASS
+- 19 라운드 모든 핵심 기능 (R70~R88) 개별 검증
+- MCP server 18 도구 노출 확인
+- 성능 종합 측정:
+  - handoff (전체 통합) **692ms** / health **689ms** / audit 345ms / drift check 383ms
+  - 누적에도 회귀 없음 (절대 임계 모두 통과)
+
+### Internal — 종합 보고서
+- `_reports/AUTONOMOUS_ROUNDS_1.9.70-1.9.88.md` (비공개, 사용자 검토용)
+- 19 라운드 그룹화: 보안 라인 / MCP 도구 / 학습·회고 / handoff 5단 통합
+- 디버그 기록 6건 (모두 진단 + 수정 후 PASS)
+
+### e2e
+- **219/219 PASS** 유지
+
+---
+
 ## 1.9.88 — 2026-05-20
 
 **`handoff`에 brainstorm 자동 hits 노출** (1.9.72 brainstorm 통합).
