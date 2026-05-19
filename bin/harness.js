@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.73';
+const VERSION = '1.9.74';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3242,7 +3242,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.73+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.74+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -4035,6 +4035,37 @@ function sessionClose(root) {
       const entries = Object.entries(stats.commands || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
       if (entries.length) {
         log(dim(`  📊 가장 많이 쓴 명령: ${entries.map(([c, n]) => `${c}(${n})`).join(', ')}`));
+      }
+      // 1.9.74: MCP tools/call 통계 + rare 도구 노출
+      if (stats.mcp && stats.mcp.tools) {
+        const mcpEntries = Object.entries(stats.mcp.tools).sort((a, b) => b[1] - a[1]);
+        if (mcpEntries.length) {
+          const mcpTotal = mcpEntries.reduce((s, [, n]) => s + n, 0);
+          log(dim(`  🔌 MCP 호출 (1.9.74): 총 ${mcpTotal}회, top: ${mcpEntries.slice(0, 3).map(([t, n]) => `${t}(${n})`).join(', ')}`));
+          const threshold = Math.max(1, Math.floor(mcpTotal * 0.05));
+          const rare = mcpEntries.filter(([, n]) => n <= threshold).map(([t]) => t);
+          if (rare.length && mcpTotal >= 5) log(dim(`    💡 드물게 호출된 MCP: ${rare.slice(0, 4).join(', ')}`));
+        }
+      }
+    } catch {}
+    // 1.9.74: skill match query top (skill-suggestions.md 누적)
+    try {
+      const histPath = path.join(root, '.harness', 'skill-suggestions.md');
+      if (exists(histPath)) {
+        const histTxt = read(histPath);
+        const queries = [];
+        for (const block of histTxt.split(/\n(?=## )/)) {
+          const h = block.match(/^## ([\d-]+ [\d:]+) — query "([^"]+)"/);
+          if (h) queries.push(h[2]);
+        }
+        if (queries.length) {
+          // 같은 query 개수 카운트
+          const counts = {};
+          for (const q of queries) counts[q] = (counts[q] || 0) + 1;
+          const topQueries = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+          log(dim(`  📒 skill match query 누적 (1.9.74): 총 ${queries.length}회 / 종류 ${Object.keys(counts).length}개`));
+          for (const [q, n] of topQueries) log(dim(`    • "${q.slice(0, 50)}"${n > 1 ? ` (${n}회)` : ''}`));
+        }
       }
     } catch {}
     log('');

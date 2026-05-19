@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.74 — 2026-05-20
+
+**`session close` 마감 시 누적 회고 통계 강화** (1.9.70 MCP + 1.9.68 history 결합).
+
+### Improved — session close --suggest 블록 확장
+- 기존: skill suggest 후보 / drift 상태 / 가장 많이 쓴 명령 top 3.
+- **신규** 라인:
+  - `🔌 MCP 호출 (1.9.74): 총 N회, top: tool(n), ...` + `💡 드물게 호출된 MCP: ...` (1.9.70 통계 연동).
+  - `📒 skill match query 누적 (1.9.74): 총 N회 / 종류 M개` + top 3 query 표시 (1.9.68 rolling history 집계).
+- AI 에이전트가 한 세션의 사용 패턴을 한눈에 파악 가능.
+
+### Verified
+- stress-v20 — session close 회고 통계 + 1.9.43~73 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.73 — 2026-05-20
 
 **MCP server 14번째 도구 `leerness_env_check` 추가 (1.9.71 env 보안을 외부 AI에 노출)**.
