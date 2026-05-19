@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.70 — 2026-05-19
+
+**MCP server `tools/call` 자동 사용 통계** (1.9.65 usage-stats 확장).
+
+### Added — MCP 도구별 호출 카운트
+- MCP server가 `tools/call` 요청을 받을 때마다 도구 이름별 카운트를 `.harness/cache/usage-stats.json`의 `mcp.tools` 섹션에 기록.
+- 별도 mtime 캐시 invalidation (1.9.65 _USAGE_CACHE 재활용).
+- `leerness usage stats` 출력에 MCP 섹션 자동 노출:
+  ```
+  ## 🔌 MCP tools/call 통계 (1.9.70) — last: <ISO>
+  | MCP 도구 | 호출 수 |
+  | leerness_handoff | 8 |
+  | ... |
+  💡 드물게 호출된 도구 (≤N): leerness_xxx, ...
+  ```
+- 드물게 호출되는 도구 (전체 5% 미만)를 자동 식별 — AI 에이전트가 안 쓰는 도구가 있다는 가시화.
+
+### Internal
+- 새 헬퍼: `_bumpMcpUsage(root, toolName)` — atomic write + 캐시 invalidation.
+- usage-stats.json 스키마 확장:
+  ```json
+  {
+    "commands": {...},
+    "drift": {...},
+    "mcp": { "tools": {...}, "lastTool": "...", "lastAt": "..." }
+  }
+  ```
+
+### Verified
+- stress-v16 — MCP 카운트 정합성 + 13 도구 종합 호출 + 1.9.43~69 누적 회귀 + 성능.
+- e2e 회귀: 219/219 PASS 유지.
+
+---
+
 ## 1.9.69 — 2026-05-19
 
 **handoff에 skill-suggestions.md rolling history hit 노출 (1.9.67 + 1.9.68 결합)**.

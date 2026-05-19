@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.69';
+const VERSION = '1.9.70';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3216,7 +3216,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.69+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.70+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -3224,7 +3224,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 13 도구 노출 (task_export 포함)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 13 도구 + tools/call 자동 통계 (1.9.70)'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
     log('');
   }
@@ -6319,6 +6319,23 @@ function _bumpUsage(root, cmdName) {
   } catch {}
 }
 
+// 1.9.70: MCP tools/call 자동 사용 통계 — 도구별 호출 카운트
+function _bumpMcpUsage(root, toolName) {
+  try {
+    const stats = _readUsageStats(root);
+    if (!stats.mcp) stats.mcp = { tools: {} };
+    if (!stats.mcp.tools) stats.mcp.tools = {};
+    stats.mcp.tools[toolName] = (stats.mcp.tools[toolName] || 0) + 1;
+    stats.mcp.lastTool = toolName;
+    stats.mcp.lastAt = new Date().toISOString();
+    if (!stats.since) stats.since = today();
+    const p = _usageStatsPath(root);
+    mkdirp(path.dirname(p));
+    writeUtf8(p, JSON.stringify(stats, null, 2) + '\n');
+    try { _USAGE_CACHE.set(p, { stats, mtime: fs.statSync(p).mtimeMs }); } catch {}
+  } catch {}
+}
+
 // 1.9.41: CHANGELOG.md를 파싱하여 from → to 사이 버전 차분 추출
 // 반환: [{ version, date, body, newCommands, newFlags, newFiles }]
 function _parseChangelogBetween(changelogText, fromV, toV) {
@@ -6993,6 +7010,8 @@ function mcpServeCmd(root) {
     } else if (req.method === 'tools/call') {
       const { name, arguments: args = {} } = req.params || {};
       const targetPath = args.path || root;
+      // 1.9.70: MCP tools/call 자동 사용 통계 — 어떤 도구가 자주/드물게 호출되는지 가시화
+      try { _bumpMcpUsage(targetPath, name); } catch {}
       let cliArgs;
       try {
         switch (name) {
@@ -7143,6 +7162,22 @@ function usageStatsCmd(root) {
     if ((stats.drift.skipped || 0) > 5) {
       log(`💡 drift 경고 ${stats.drift.skipped}회 스킵 → 1.9.38 학습: 임계 자동 완화 (--no-drift-check 빈도 ≥5)`);
     }
+  }
+  // 1.9.70: MCP tools/call 자동 사용 통계 — 어떤 도구가 자주/드물게 호출되는지
+  if (stats.mcp && stats.mcp.tools && Object.keys(stats.mcp.tools).length) {
+    const mcpEntries = Object.entries(stats.mcp.tools).sort((a, b) => b[1] - a[1]);
+    const mcpTotal = mcpEntries.reduce((s, [, n]) => s + n, 0);
+    log('');
+    log(`## 🔌 MCP tools/call 통계 (1.9.70) — last: ${stats.mcp.lastAt || '(none)'}`);
+    log(`| MCP 도구 | 호출 수 |`);
+    log(`|---|---:|`);
+    for (const [tool, n] of mcpEntries) log(`| ${tool} | ${n} |`);
+    log('');
+    log(`총 ${mcpTotal} 회 MCP 호출 · 도구 ${mcpEntries.length} 가지 사용`);
+    // 드물게 호출되는 도구 식별 (전체의 5% 미만 호출)
+    const threshold = Math.max(1, Math.floor(mcpTotal * 0.05));
+    const rare = mcpEntries.filter(([, n]) => n <= threshold).map(([t]) => t);
+    if (rare.length) log(`💡 드물게 호출된 도구 (≤${threshold}): ${rare.slice(0, 6).join(', ')}`);
   }
 }
 
