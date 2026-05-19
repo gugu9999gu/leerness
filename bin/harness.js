@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.81';
+const VERSION = '1.9.82';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3384,7 +3384,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.81+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.82+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -6452,8 +6452,30 @@ function driftCheckCmd(root, opts = {}) {
     }
   } catch {}
   // 1.9.39: --auto-fix — critical 시 session close 자동 실행
+  // 1.9.82: --auto-fix가 보안 신호도 자동 회복 (audit --fix 호출)
   const autoFix = has('--auto-fix');
-  if (autoFix && level === '🔴 critical') {
+  // 1.9.82: 보안 신호가 fired에 있으면 우선 audit --fix 호출
+  const hasSecurityFired = fired.some(f => /보안 위험 \(1\.9\.78\)/.test(f.label));
+  if (autoFix && hasSecurityFired) {
+    log('');
+    log(`🔒 --auto-fix 활성 (1.9.82) — 보안 신호 회복: audit --fix 자동 실행 중...`);
+    try {
+      const r = cp.spawnSync(process.execPath, [__filename, 'audit', root, '--fix'],
+        { encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
+      if (r.status === 0) {
+        log(`✓ audit --fix 완료 — .gitignore + .env.example 동기화`);
+        // 재검사 (보안 신호 회복 확인)
+        log('');
+        log(`재검사 중...`);
+        return driftCheckCmd(root); // 재귀 1회 (auto-fix 없이)
+      } else {
+        log(`⚠ audit --fix 실패 (exit ${r.status}) — 수동 \`leerness audit --fix\` 권장`);
+      }
+    } catch (e) {
+      log(`⚠ auto-fix 보안 회복 오류: ${e.message}`);
+    }
+  }
+  if (autoFix && level === '🔴 critical' && !hasSecurityFired) {
     log('');
     log(`🔧 --auto-fix 활성 — session close 자동 실행 중...`);
     try {

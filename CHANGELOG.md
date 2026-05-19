@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.82 — 2026-05-20
+
+**`drift check --auto-fix` 에 보안 회복 통합** (1.9.78 + 1.9.75 audit --fix 결합).
+
+### Added — drift --auto-fix 보안 자동 회복
+- 1.9.39 `drift check --auto-fix` 확장:
+  - 기존: critical level 시 `session close` 자동 실행.
+  - **신규 (1.9.82)**: 보안 신호 (1.9.78) 발견 시 **우선 `audit --fix` 자동 실행** → `.gitignore` + `.env.example` 동기화 → 재검사.
+- 호출 순서:
+  1. drift 신호 평가 (5개)
+  2. 보안 신호 fired → `audit --fix` 자동 실행 + 재귀 재검사
+  3. (보안 없는 critical) → `session close` 자동 실행 + 재귀 재검사
+- AI 에이전트가 `drift check --auto-fix` 한 번으로 보안 + 세션 마감 둘 다 자동 회복.
+
+### Verified
+- stress-v28 — drift --auto-fix 보안 회복 / 재검사 후 안정화 / 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.81 — 2026-05-20
 
 **`handoff` "통합 헤드라인" 한 줄 요약** (drift + 보안 + skill + MCP).
