@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.77';
+const VERSION = '1.9.78';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3309,7 +3309,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.77+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.78+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -6310,6 +6310,39 @@ function driftCheckCmd(root, opts = {}) {
       fired.push(s);
     }
   }
+  // 1.9.78: 보안 신호 (env / .gitignore 누락) — 5번째 신호
+  try {
+    const envPath = path.join(root, '.env');
+    if (exists(envPath)) {
+      let secScore = 0;
+      const secIssues = [];
+      // (a) .env vs .env.example 동기화
+      try {
+        const d = envDiff(root);
+        if (d.inEnvOnly.length) {
+          secIssues.push(`.env→.env.example 누락 ${d.inEnvOnly.length}건`);
+          secScore += 15;
+        }
+      } catch {}
+      // (b) .gitignore 시크릿 패턴
+      try {
+        const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
+        const giLines = giText.split('\n').map(l => l.trim());
+        const SECRET_PATTERNS = ['.env', '.env.local', '.env.production', '.env.*.local', '*.pem', 'credentials.json'];
+        const missing = SECRET_PATTERNS.filter(p => !giLines.some(l => l === p || l === '/' + p));
+        if (missing.length) {
+          secIssues.push(`.gitignore 시크릿 누락 ${missing.length}건`);
+          // 누락이 .env 자체면 최우선 위험 — 15점 가중
+          if (missing.includes('.env')) secScore += 30;
+          else secScore += Math.min(20, missing.length * 5);
+        }
+      } catch {}
+      if (secScore > 0) {
+        totalScore += secScore;
+        fired.push({ file: '.env / .gitignore', ageDays: null, threshold: 0, weight: secScore, label: `보안 위험 (1.9.78): ${secIssues.join(' · ')}` });
+      }
+    }
+  } catch {}
   // 신규 _apps/* 에서 task 0건도 신호로
   const appsDir = path.join(root, '_apps');
   let appsZeroTask = [];

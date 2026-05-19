@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.9.78 — 2026-05-20
+
+**`drift check`에 5번째 신호 추가 — 보안 누락이 drift score 가중** (1.9.75/76 보안 검사 통합).
+
+### Added — drift check 보안 신호
+- 기존 4 신호: session-handoff / current-state / progress-tracker / task-log.
+- **5번째 신호**: `.env` + `.gitignore` 보안 점검.
+  - `.env→.env.example` 누락 → +15 score.
+  - `.gitignore`에 `.env` 누락 → **+30 score** (최우선 위험).
+  - 기타 시크릿 패턴 (`.env.local`, `*.pem`, `credentials.json` 등) 누락 → max +20 (개당 +5).
+- `drift check --json` 의 `fired` 배열에 새 항목 추가:
+  ```json
+  {
+    "file": ".env / .gitignore",
+    "weight": 45,
+    "label": "보안 위험 (1.9.78): .env→.env.example 누락 N건 · .gitignore 시크릿 누락 M건"
+  }
+  ```
+- 보안 누락이 drift level을 critical로 승격시킬 수 있음 (CI 친화).
+
+### Use Case
+- 매 \`leerness handoff\` 시 drift 신호로 보안 위험 즉시 인지 (1.9.76 보안 요약과 동시).
+- AI 에이전트가 drift critical 시 \`drift check --auto-fix\` → `audit --fix` 호출 → 자동 회복.
+
+### Verified
+- stress-v24 — drift 보안 신호 + level 승격 + 1.9.43~77 누적 회귀 + 성능.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.77 — 2026-05-20
 
 **MCP server 15번째 도구 `leerness_brainstorm` 추가** (1.9.72 brainstorm 외부 노출).
