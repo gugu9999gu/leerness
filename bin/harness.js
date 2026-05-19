@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.94';
+const VERSION = '1.9.95';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3465,7 +3465,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.94+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.95+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -5978,6 +5978,20 @@ function lessonsCmd(root) {
     const q = new RegExp(escapeRegex(query), 'i');
     filtered = lessons.filter(l => q.test(l.title) || q.test(l.block));
   }
+  // 1.9.95: --json 옵션 (MCP 통합 / CI 친화)
+  if (has('--json')) {
+    log(JSON.stringify({
+      query: query || null,
+      total: filtered.length,
+      lessons: filtered.slice(0, limit).map(l => ({
+        source: l.source,
+        title: l.title,
+        preview: l.block.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').slice(0, 240),
+        truncated: l.block.length > 240
+      }))
+    }, null, 2));
+    return;
+  }
   log(`# Lessons${query ? ` — query="${query}"` : ''}`);
   if (!filtered.length) {
     if (query) ok(`"${query}" 관련 과거 lessons 없음`);
@@ -7509,7 +7523,7 @@ function mcpServeCmd(root) {
           case 'leerness_usage_stats':     cliArgs = ['usage', 'stats', targetPath, '--json']; break;
           case 'leerness_session_close':   cliArgs = ['session', 'close', targetPath]; break;
           case 'leerness_skill_suggest':   cliArgs = ['skill', 'suggest', '--path', targetPath, '--json', ...(args.min ? ['--min', String(args.min)] : []), ...(args.days ? ['--days', String(args.days)] : [])]; break;
-          case 'leerness_lessons':         cliArgs = ['lessons', '--path', targetPath, ...(args.auto ? ['--auto'] : []), ...(args.query ? ['--query', args.query] : []), ...(args.limit ? ['--limit', String(args.limit)] : [])]; break;
+          case 'leerness_lessons':         cliArgs = ['lessons', '--path', targetPath, '--json', ...(args.auto ? ['--auto'] : []), ...(args.query ? ['--query', args.query] : []), ...(args.limit ? ['--limit', String(args.limit)] : [])]; break;
           case 'leerness_task_export':     cliArgs = ['task', 'export', '--path', targetPath, ...(args.to ? ['--to', args.to] : ['--json'])]; break;
           case 'leerness_env_check':       cliArgs = ['env', 'check', targetPath, '--json']; break;
           case 'leerness_brainstorm':      cliArgs = ['brainstorm', args.topic || '', '--path', targetPath, '--json', ...(args.allApps ? ['--all-apps'] : [])]; break;

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.95 — 2026-05-20
+
+**`leerness lessons --json` 옵션 + MCP leerness_lessons 자동 JSON 응답**.
+
+### Added
+- `leerness lessons --json` 옵션:
+  - `{ query, total, lessons[]: { source, title, preview, truncated } }`
+- MCP `leerness_lessons` 도구가 자동으로 `--json` 적용 → 구조화 응답.
+- 외부 AI(Claude Code, Cursor)가 lessons 결과를 파싱 친화적으로 받음.
+
+### Verified
+- stress-v41 — lessons --json + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.94 — 2026-05-20
 
 **MCP server 21번째 도구 `leerness_benchmark`** (1.9.46/51 benchmark 외부 노출).
