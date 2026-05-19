@@ -950,6 +950,37 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
+// 1.9.54/55 회귀
+total++;
+{
+  // lessons --auto 키워드 자동 추출
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-la-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  fs.writeFileSync(path.join(tmpC, '.harness', 'review-evidence.md'),
+    '## 2026-04-01\nNote: ✗ payment 처리 실패 — 검수 누락\n', 'utf8');
+  cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'payment 검증 작업', '--status', 'in-progress', '--path', tmpC], { stdio: 'ignore', timeout: 10000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'lessons', '--path', tmpC, '--auto', '--limit', '5'], { encoding: 'utf8', timeout: 15000 });
+  const ok = /추출 키워드.*payment/.test(r.stdout) && /payment.*실패/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.54) lessons --auto: in-progress task 키워드 자동 추출 + 매칭' : `✗ lessons --auto 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
+total++;
+{
+  // MCP server tools/list 12 도구 (1.9.55)
+  const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], {
+    encoding: 'utf8', timeout: 8000,
+    input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n'
+  });
+  let resp = null;
+  try { resp = JSON.parse(r.stdout.split('\n').filter(Boolean)[0]); } catch {}
+  const tools = resp && resp.result && resp.result.tools;
+  const hasNew = tools && tools.some(t => t.name === 'leerness_skill_suggest') && tools.some(t => t.name === 'leerness_lessons');
+  const ok = tools && tools.length >= 12 && hasNew;
+  console.log(ok ? `✓ B(1.9.55) MCP: ${tools.length} 도구 (skill_suggest + lessons 추가)` : `✗ MCP 12 도구 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
 // 1.9.53 회귀: skill suggest 자동 학습
 total++;
 {

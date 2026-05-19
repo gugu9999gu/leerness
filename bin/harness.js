@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.53';
+const VERSION = '1.9.55';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -5354,8 +5354,34 @@ function verifyCodeCmd(root) {
 // ===== 1.9.7 B: lessons — 과거 결정/실수 자동 회수 =====
 function lessonsCmd(root) {
   root = absRoot(root);
-  const query = arg('--query', null);
+  let query = arg('--query', null);
   const limit = parseInt(arg('--limit', '10'), 10);
+  // 1.9.54: --auto 옵션 — 현재 진행 중인 task의 키워드 자동 추출 → query로 사용
+  if (has('--auto') && !query) {
+    const rows = readProgressRows(root);
+    // 가장 최근 in-progress 또는 가장 최근 row의 request에서 키워드 추출
+    const latest = rows.filter(r => r.status === 'in-progress' || r.status === 'planned').pop()
+                || rows[rows.length - 1];
+    if (latest && latest.request) {
+      // 4자+ 키워드 중 가장 긴 단어 1개 선택
+      const tokens = String(latest.request).toLowerCase().match(/[\w가-힣]{4,}/g) || [];
+      // 1.9.55: stopword 확장 — 너무 일반적인 단어 제외 (lessons 매칭에 도움 안 됨)
+      const stopwords = new Set([
+        '이런', '저런', '하다', '하고', '있는', '하지', '에서',
+        '작업', '구현', '추가', '진행', '수정', '변경', '검토', '확인',
+        '프로젝트', '관리', '기능', '시스템', '코드', '파일', '버전', '정리', '계획',
+        'next', 'action', 'task', 'todo', 'work'
+      ]);
+      const candidate = tokens.filter(t => !stopwords.has(t)).sort((a, b) => b.length - a.length)[0];
+      if (candidate) query = candidate;
+    }
+    if (!query) {
+      log('# Lessons --auto');
+      log('(현재 작업에서 추출할 키워드 없음 — 새 task 등록 후 다시 시도)');
+      return;
+    }
+    log(`# Lessons --auto (1.9.54): 추출 키워드 "${query}"`);
+  }
   const decisions = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
   const evidence = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
   const tlog = exists(taskLogPath(root)) ? read(taskLogPath(root)) : '';
@@ -6606,7 +6632,9 @@ function mcpServeCmd(root) {
     { name: 'leerness_reuse_map', description: '워크스페이스 중복 함수/capability 자동 감지 (--all-apps + fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, allApps: { type: 'boolean' }, strictElements: { type: 'boolean' } } } },
     { name: 'leerness_whats_new', description: 'CHANGELOG 차분 자동 추출 (from → to 사이 신규 명령/플래그/파일)', inputSchema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
     { name: 'leerness_usage_stats', description: 'leerness 명령별 누적 호출 통계 + drift 통계', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_session_close', description: '세션 마감 — handoff/current-state/task-log 자동 갱신', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_session_close', description: '세션 마감 — handoff/current-state/task-log 자동 갱신', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_skill_suggest', description: '1.9.53 — 사용 패턴 자동 분석 → 새 skill 후보 제안 (Hermes-style 자동 학습)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, min: { type: 'number' }, days: { type: 'number' } } } },
+    { name: 'leerness_lessons', description: '1.9.7/54 — 과거 결정·실수 자동 회수 (--auto: 현재 task 키워드 자동 추출)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, query: { type: 'string' }, auto: { type: 'boolean' }, limit: { type: 'number' } } } }
   ];
 
   function send(obj) {
@@ -6646,6 +6674,8 @@ function mcpServeCmd(root) {
           case 'leerness_whats_new':       cliArgs = ['whats-new', '--path', targetPath, ...(args.from ? ['--from', args.from] : []), ...(args.to ? ['--to', args.to] : []), '--json']; break;
           case 'leerness_usage_stats':     cliArgs = ['usage', 'stats', targetPath, '--json']; break;
           case 'leerness_session_close':   cliArgs = ['session', 'close', targetPath]; break;
+          case 'leerness_skill_suggest':   cliArgs = ['skill', 'suggest', '--path', targetPath, '--json', ...(args.min ? ['--min', String(args.min)] : []), ...(args.days ? ['--days', String(args.days)] : [])]; break;
+          case 'leerness_lessons':         cliArgs = ['lessons', '--path', targetPath, ...(args.auto ? ['--auto'] : []), ...(args.query ? ['--query', args.query] : []), ...(args.limit ? ['--limit', String(args.limit)] : [])]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }

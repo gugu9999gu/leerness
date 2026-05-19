@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.55 — 2026-05-19
+
+**MCP server 12 도구 — `leerness_skill_suggest` + `leerness_lessons` 노출**.
+
+### Added
+- **MCP `leerness_skill_suggest`** (1.9.53 자동 학습을 외부 노출):
+  - Claude Code/Hermes/Cursor가 `tools/call`로 호출 가능
+  - args: `{ path, min, days }` → JSON candidates 반환
+- **MCP `leerness_lessons`** (1.9.7/54 lessons를 외부 노출):
+  - args: `{ path, query, auto, limit }`
+- MCP 총 **10 → 12 도구**
+
+## 1.9.54 — 2026-05-19
+
+**`leerness lessons --auto` — 과거 lessons 자동 재상기**.
+
+### Added
+- **`leerness lessons --auto [--path X]`**:
+  - 가장 최근 in-progress/planned task의 `request` 컬럼에서 키워드 자동 추출
+  - 그 키워드로 lessons 자동 검색 (decisions / review-evidence / task-log / handoff)
+  - 임계: 4자+ 키워드, 가장 긴 단어 선택
+  - stopword 자동 제외 (한국어 + 영어 20+ 단어)
+- **stopword 확장** (1.9.55 패치): "프로젝트/관리/기능/시스템" 등 너무 일반적인 단어 제외
+
+### 검증 (stress-v6)
+- Q1-Q3 (lessons --auto) 3/3 PASS
+- R1-R3 (MCP 12 도구 + 신규 호출) 3/3 PASS
+- S1-S4 (1.9.43~53 누적 회귀) 4/4 PASS
+- **stress-v6: 10/10 PASS**, e2e: **208/208 PASS**
+
+### 발견·패치 (stress-v6)
+- 🟡 stopword 부족 → "프로젝트"가 default task에서 키워드로 잡혀 false positive
+- 1.9.55 패치: stopword 20+ 단어로 확장
+
 ## 1.9.53 — 2026-05-19
 
 **`leerness skill suggest` — Hermes-style 자동 학습 (사용 패턴 → skill 후보 자동 제안)**.
