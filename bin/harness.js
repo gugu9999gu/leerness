@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.79';
+const VERSION = '1.9.80';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1955,10 +1955,35 @@ function handoff(root) {
           const isTty = process.stdout && process.stdout.isTTY;
           const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
           const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+          const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
           log('');
           log(red(`## 🔒 보안 요약 (1.9.76) — ${issues.length}건 주의`));
           for (const i of issues) log(dim(`  ⚠ ${i}`));
           log(dim(`  → 자동 수정: leerness audit --fix · 상세: leerness env check / leerness audit`));
+          // 1.9.80: critical 수준 (.gitignore에 .env 자체 누락) 시 자동 회복 옵션
+          const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
+          const giLines = giText.split('\n').map(l => l.trim());
+          const envInGitignore = giLines.includes('.env') || giLines.includes('/.env');
+          if (!envInGitignore) {
+            // .env 자체 누락 → 최우선 위험
+            log(yel(`  🚨 CRITICAL (1.9.80): .env가 .gitignore에 없습니다! 시크릿 노출 위험 — 즉시 \`leerness audit --fix\` 권장.`));
+            // LEERNESS_AUTO_SECURITY_FIX=1 자동 실행 옵션
+            if (process.env.LEERNESS_AUTO_SECURITY_FIX === '1') {
+              try {
+                const r = cp.spawnSync(process.execPath, [__filename, 'audit', root, '--fix'],
+                  { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
+                if (r.status === 0) {
+                  log(dim(`  ✓ 자동 회복 (LEERNESS_AUTO_SECURITY_FIX=1): audit --fix 완료`));
+                } else {
+                  log(dim(`  ⚠ 자동 회복 실패 (exit ${r.status}) — 수동 \`leerness audit --fix\` 권장`));
+                }
+              } catch (e) {
+                log(dim(`  ⚠ 자동 회복 예외: ${e.message}`));
+              }
+            } else {
+              log(dim(`  💡 자동 실행 옵션: LEERNESS_AUTO_SECURITY_FIX=1 leerness handoff .`));
+            }
+          }
           log('');
         }
       }
@@ -3309,7 +3334,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.79+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.80+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));

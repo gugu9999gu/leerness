@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.80 — 2026-05-20
+
+**handoff에서 `.env` 보안 critical 시 자동 회복 옵션** (1.9.76 보안 요약 + 1.9.75 audit --fix 결합).
+
+### Added — 보안 critical 자동 회복
+- 1.9.76 handoff 보안 요약 블록 확장:
+  - `.env` 가 `.gitignore` 에 없으면 **🚨 CRITICAL** 경고.
+  - 즉시 `leerness audit --fix` 권장 안내.
+- **자동 실행 옵션**: `LEERNESS_AUTO_SECURITY_FIX=1` 환경변수 활성 시 handoff에서 `audit --fix` 자동 실행.
+  - 시크릿 노출 위험 즉시 회복.
+  - 성공 시 `✓ 자동 회복 (LEERNESS_AUTO_SECURITY_FIX=1)` 메시지.
+
+### Use Case
+- 사용자가 `.env` 를 무심코 만들었지만 `.gitignore` 에 추가 안 한 상태 → 다음 handoff에서 즉시 인지 + 옵션 활성 시 자동 회복.
+- 1.9.78 drift 보안 신호 + 1.9.76 handoff 요약 + 1.9.80 자동 회복 = **3중 보안 가드** 완성.
+
+### Verified
+- stress-v26 — handoff CRITICAL 메시지 / 자동 회복 / 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.79 — 2026-05-20
 
 **`leerness skill suggest` 알고리즘 강화** (1.9.68 rolling history 빈도 활용 — Hermes-style 학습 신호 보강).
