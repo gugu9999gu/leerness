@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.109 — 2026-05-20
+
+**MCP 28+29번째 도구 `leerness_rule_add` / `leerness_rule_list`** + `rule list --json` (자연어 영구 룰 R/W).
+
+### Added — `leerness rule list --json`
+- 출력: `{ version, root, total, rules[] }`
+- 각 rule: `{ id, trigger, rule, status, lastVerified }`
+- CI/외부 AI 통합 친화.
+
+### Added — MCP 28번째 도구 `leerness_rule_add`
+- 외부 AI 가 자연어 영구 룰 (1.9.8) 등록.
+- 인자: `{ description (required), trigger?, path? }`
+- trigger enum: `every-session` / `every-update` / `every-commit` / `session-start` / `session-close` / `pre-publish`
+- 등록된 룰은 매 handoff 자동 출력, session close 자동 검증.
+
+### Added — MCP 29번째 도구 `leerness_rule_list`
+- 외부 AI 가 현재 활성 룰 조회.
+- 사용 시나리오: 사용자가 "현재 활성 룰 알려줘" → 외부 AI 가 자동 회수.
+
+### Memory Write Surface 확장 (3종)
+| 영역 | WRITE 라운드 |
+|---|---|
+| Tasks (CRUD) | 1.9.105~107 |
+| Decisions | 1.9.108 |
+| **Rules** | **1.9.109** |
+
+### MCP 도구 수: 27 → 29개 (2개 추가)
+
+### Verified
+- stress-v54 — rule list --json + MCP rule_add/list + 29 도구 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.108 — 2026-05-20
 
 **`leerness decision add` 새 CLI + MCP 27번째 도구 `leerness_decision_add`** (설계 결정 영구화 — task 다음으로 메모리 write surface 확장 시작).
