@@ -950,6 +950,46 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
+// 1.9.60/61/62 회귀
+total++;
+{
+  // task export → TodoWrite JSON 호환
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tex-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'export 검증', '--status', 'done', '--path', tmpC], { stdio: 'ignore', timeout: 10000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'task', 'export', '--path', tmpC, '--json'], { encoding: 'utf8', timeout: 15000 });
+  let j = null;
+  try { j = JSON.parse(r.stdout); } catch {}
+  const ok = Array.isArray(j) && j.length >= 1 && j.some(t => t.status === 'completed' && 'content' in t && 'activeForm' in t);
+  console.log(ok ? '✓ B(1.9.60) task export: TodoWrite JSON 형식 (content/status/activeForm)' : `✗ task export 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
+total++;
+{
+  // MCP cursor 페이지네이션 (chunkSize override)
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcc-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const req = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_handoff', arguments: { path: tmpC, _cursor: '0', _chunkSize: 200 } } });
+  const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 15000, input: req + '\n' });
+  const resp = JSON.parse(r.stdout.split('\n').filter(Boolean)[0]);
+  const ok = resp.result && resp.result.nextCursor && resp.result._truncated;
+  console.log(ok ? '✓ B(1.9.61) MCP cursor 페이지네이션: nextCursor + _truncated' : `✗ cursor 실패`);
+  if (!ok) { failed++; console.log(JSON.stringify(resp).slice(0, 300)); }
+}
+
+total++;
+{
+  // audit npm CVE — OFFLINE 또는 package.json 없을 때 graceful
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ac-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  // package.json 없음 → npm audit 스킵
+  const r = cp.spawnSync(process.execPath, [CLI, 'audit', tmpC], { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_OFFLINE: '1' } });
+  const ok = r.status === 0 && !/npm CVE/.test(r.stdout) && /Audit summary/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.62) audit: package.json 없을 때 npm audit 자동 스킵' : `✗ audit CVE 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
 // 1.9.58/59 회귀
 total++;
 {

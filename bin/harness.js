@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.59';
+const VERSION = '1.9.62';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1423,6 +1423,34 @@ function audit(root) {
       }
     }
   } catch {}
+  // 1.9.62: package.json 있으면 npm audit --json 자동 호출 → CVE 보고 (opt-out: --no-npm-audit)
+  // 정책: leerness가 외부 호출하지만 사용자 컨텍스트에 이미 npm 설치되어 있음을 가정 (offline 시 자동 스킵)
+  if (exists(path.join(root, 'package.json')) && !has('--no-npm-audit') && process.env.LEERNESS_OFFLINE !== '1') {
+    try {
+      const r = cp.spawnSync('npm', ['audit', '--json'], {
+        cwd: root, encoding: 'utf8', shell: true, timeout: 30000
+      });
+      if (r.stdout) {
+        let j = null;
+        try { j = JSON.parse(r.stdout); } catch {}
+        if (j && j.metadata && j.metadata.vulnerabilities) {
+          const v = j.metadata.vulnerabilities;
+          const total = (v.critical || 0) + (v.high || 0) + (v.moderate || 0) + (v.low || 0);
+          if (total > 0) {
+            warnings++;
+            warn(`npm CVE: ${total}건 (critical=${v.critical||0}, high=${v.high||0}, moderate=${v.moderate||0}, low=${v.low||0})`);
+            log(`    → 수정: npm audit fix · 상세: npm audit`);
+            if (v.critical || v.high) {
+              warnings++; // critical/high는 추가 가중
+              warn(`  ⚠ critical/high CVE 즉시 대응 권장`);
+            }
+          } else {
+            ok('npm CVE: 0건');
+          }
+        }
+      }
+    } catch {}
+  }
   log(`Audit summary: warnings=${warnings} failures=${failures}${fix ? ` fixed=${fixed}` : ''}`);
   if (failures) process.exitCode = 1;
 }
@@ -6782,10 +6810,21 @@ function mcpServeCmd(root) {
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
         const r = callLeerness(cliArgs);
-        send({ jsonrpc: '2.0', id, result: {
-          content: [{ type: 'text', text: (r.stdout || r.stderr || '(no output)').slice(0, 50000) }],
+        // 1.9.61: cursor 기반 페이지네이션 — 긴 출력은 cursor offset로 다음 청크
+        const fullText = r.stdout || r.stderr || '(no output)';
+        const CHUNK_SIZE = (args._chunkSize && Number.isFinite(args._chunkSize)) ? args._chunkSize : 50000;
+        const cursor = (args._cursor && /^\d+$/.test(String(args._cursor))) ? parseInt(args._cursor, 10) : 0;
+        const chunk = fullText.slice(cursor, cursor + CHUNK_SIZE);
+        const nextCursor = (cursor + CHUNK_SIZE) < fullText.length ? String(cursor + CHUNK_SIZE) : null;
+        const result = {
+          content: [{ type: 'text', text: chunk }],
           isError: !r.ok
-        } });
+        };
+        if (nextCursor) {
+          result.nextCursor = nextCursor;
+          result._truncated = { totalLength: fullText.length, returned: chunk.length, hint: `args._cursor=${nextCursor} 로 다음 청크 호출 가능` };
+        }
+        send({ jsonrpc: '2.0', id, result });
       } catch (e) {
         send({ jsonrpc: '2.0', id, error: { code: -32603, message: 'Internal error: ' + e.message } });
       }
@@ -6905,6 +6944,36 @@ function usageStatsCmd(root) {
 }
 
 // 1.9.38: task sync — TodoWrite/외부 JSON에서 leerness task로 mirror
+// 1.9.60: leerness task export [--to <todo.json>] [--json]
+// progress-tracker → TodoWrite JSON 형식 (status: completed/in_progress/pending)
+function taskExportCmd(root) {
+  root = absRoot(root || process.cwd());
+  const out = arg('--to', null);
+  const rows = readProgressRows(root);
+  // leerness status → TodoWrite status 매핑
+  const statusMap = { 'done': 'completed', 'in-progress': 'in_progress', 'planned': 'pending', 'requested': 'pending', 'dropped': 'cancelled', 'in_progress': 'in_progress', 'incomplete': 'in_progress', 'blocked': 'in_progress', 'on-hold': 'pending' };
+  const todos = rows.map(r => ({
+    content: r.request,
+    status: statusMap[r.status] || 'pending',
+    activeForm: r.nextAction || r.request.slice(0, 40)
+  }));
+  if (out) {
+    writeUtf8(path.resolve(out), JSON.stringify(todos, null, 2) + '\n');
+    log(`# leerness task export (1.9.60)`);
+    log(`exported: ${todos.length} task → ${path.resolve(out)}`);
+    log(``);
+    log(`💡 다음: 메인 에이전트가 이 JSON을 TodoWrite로 import 가능`);
+    return;
+  }
+  if (has('--json')) { log(JSON.stringify(todos, null, 2)); return; }
+  log(`# leerness task export (1.9.60)`);
+  log(`총 ${todos.length} task (--to <file>로 저장)`);
+  for (const t of todos.slice(0, 10)) {
+    log(`  - [${t.status}] ${t.content.slice(0, 60)}`);
+  }
+  if (todos.length > 10) log(`  ... ${todos.length - 10}건 더`);
+}
+
 function taskSyncCmd(root) {
   root = absRoot(root || process.cwd());
   const file = arg('--from', null);
@@ -7218,6 +7287,7 @@ async function main() {
     if (sub==='fix-evidence') return taskFixEvidence(root);
     if (sub==='relink')       return taskRelink(root);
     if (sub==='sync')         return taskSyncCmd(root);
+    if (sub==='export')       return taskExportCmd(root);
   }
   return help();
 }

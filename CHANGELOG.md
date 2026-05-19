@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.9.62 — 2026-05-19
+
+**`leerness audit`에 npm CVE 자동 감지 통합**.
+
+### Added
+- **`leerness audit`** — package.json 있으면 `npm audit --json` 자동 호출 → CVE 보고:
+  - `metadata.vulnerabilities` 파싱 → critical/high/moderate/low 카운트
+  - critical/high 발견 시 warnings +2 (가중치)
+  - 0건이면 ✓ "npm CVE: 0건"
+- **스킵 조건** (자동): package.json 없음, `LEERNESS_OFFLINE=1`, `--no-npm-audit` 플래그
+
+## 1.9.61 — 2026-05-19
+
+**MCP server cursor 기반 페이지네이션**.
+
+### Added
+- **MCP `tools/call` 응답에 cursor 메타 추가** — 50KB 넘는 출력 자동 분할:
+  - `result.nextCursor` — 다음 청크 offset (`args._cursor`로 재호출)
+  - `result._truncated` — `{ totalLength, returned, hint }` 메타
+  - 청크 크기 override 가능: `args._chunkSize` (기본 50000)
+- 사용 예: 100 task 워크스페이스의 handoff → 청크 1 → cursor → 청크 2 → ... 완료
+
+## 1.9.60 — 2026-05-19
+
+**`leerness task export` — TodoWrite ↔ leerness 양방향 sync 완성**.
+
+### Added
+- **`leerness task export [--to <file>] [--json]`**:
+  - progress-tracker → TodoWrite JSON 형식 변환
+  - status 매핑: `done` → `completed`, `in-progress` → `in_progress`, `planned` → `pending`, `dropped` → `cancelled`
+  - 필드: `content` / `status` / `activeForm` (TodoWrite 호환)
+- 1.9.38 `task sync --from`(TodoWrite → leerness)과 함께 **양방향 sync 완성**
+
+### 검증 (stress-v9)
+- AA1-AA4 (task export + status 매핑 + round-trip) 4/4 PASS
+- BB1-BB3 (MCP cursor 페이지네이션, chunkSize override) 3/3 PASS
+- CC1-CC3 (audit npm CVE, OFFLINE/no-npm-audit/no-package.json 스킵) 3/3 PASS
+- DD1-DD3 (1.9.43~59 누적 회귀) 3/3 PASS
+- **stress-v9: 13/13 PASS** (BB2/BB3 BUG 발견·즉시 패치: chunkSize override 추가), e2e: **216/216 PASS**
+
 ## 1.9.59 — 2026-05-19
 
 **`session close --suggest` default 활성 — 라운드 마감 잊을 단계 없음**.

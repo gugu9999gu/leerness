@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.59-green)]() [![tests](https://img.shields.io/badge/e2e-213%2F213-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.62-green)]() [![tests](https://img.shields.io/badge/e2e-216%2F216-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.59   AI Agent Reliability Harness                      ║
+  ║  v1.9.62   AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
@@ -433,6 +433,9 @@ npm test     # = node ./scripts/e2e.js
 
 ## 변경 이력 (최근)
 
+- **1.9.62** — `leerness audit` npm CVE 자동 감지 (npm audit --json 통합, OFFLINE/no-npm-audit 스킵).
+- **1.9.61** — MCP server cursor 기반 페이지네이션 — `nextCursor` + `_chunkSize` override.
+- **1.9.60** — `leerness task export` — progress-tracker → TodoWrite JSON 형식. **양방향 sync 완성** (1.9.38 sync + 1.9.60 export).
 - **1.9.59** — `session close` **--suggest default 활성** (잊을 단계 없음, `--no-suggest`로 비활성 가능) · 설치 가이드 갱신.
 - **1.9.58** — handoff lessons **fuzzy 매칭** (어간 변형, 복합어, decisions.md 매칭 추가).
 - **1.9.57** — `session close --suggest` (마감 시 skill suggest + drift + 명령 통계 통합 보고) · install banner quickStart + session-workflow.md 갱신 (1.9.56/57 흐름 자동 안내).
