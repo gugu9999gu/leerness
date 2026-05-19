@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.83 — 2026-05-20
+
+**MCP server 16번째 도구 `leerness_skill_match` 추가** (1.9.45/50/68 skill match 외부 노출).
+
+### Added — MCP 16번째 도구
+- `leerness_skill_match` — 사용자 task 키워드에 매칭되는 설치된 skill 추천.
+  - inputSchema: `{ query: string (required), path: string, useEmbedding: boolean }`
+  - 응답: `skill match --json` 결과 (query / total / matched / top[].id/name/description/score)
+  - 1.9.68 rolling history 자동 누적 (`.harness/skill-suggestions.md`)
+  - 1.9.79 skill suggest 알고리즘에 자동 누적된 query 반영 가능
+- MCP server 도구 카운트: **15 → 16**.
+
+### Verified
+- stress-v29 — MCP 16 도구 + skill_match 호출 + rolling history 누적 + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.82 — 2026-05-20
 
 **`drift check --auto-fix` 에 보안 회복 통합** (1.9.78 + 1.9.75 audit --fix 결합).
