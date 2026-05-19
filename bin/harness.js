@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.43';
+const VERSION = '1.9.44';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -863,9 +863,11 @@ function skillConsolidate(root) {
 // 정책: 사용자 동의 (opt-in) 후에만 외부 fetch. 기본 OFF.
 
 // SKILL.md frontmatter 파싱 (---name: ... description: ... --- 본문)
+// 1.9.44 BUG-fix: UTF-8 BOM (﻿) 제거 후 파싱 (stress-v2 G2에서 발견)
 function _parseSkillMd(text) {
-  const m = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
-  if (!m) return { meta: {}, body: text };
+  const cleaned = String(text || '').replace(/^﻿/, '');
+  const m = cleaned.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+  if (!m) return { meta: {}, body: cleaned };
   const meta = {};
   for (const line of m[1].split('\n')) {
     const km = line.match(/^([a-zA-Z_-]+):\s*(.+)$/);

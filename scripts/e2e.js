@@ -950,6 +950,22 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
+// 1.9.44 회귀: BOM SKILL.md 처리 (stress-v2 G2 발견)
+total++;
+{
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bom-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const src = path.join(tmpC, 'bom.md');
+  // BOM (EF BB BF) + frontmatter
+  const buf = Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from('---\nname: bom-skill\ndescription: BOM 처리 검증\n---\n\n# Body\n', 'utf8')]);
+  fs.writeFileSync(src, buf);
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'install', src, '--path', tmpC], { encoding: 'utf8', timeout: 15000 });
+  const installedFile = path.join(tmpC, '.harness', 'skills', 'bom-skill', 'SKILL.md');
+  const ok = r.status === 0 && fs.existsSync(installedFile);
+  console.log(ok ? '✓ B(1.9.44) skill install: UTF-8 BOM 자동 제거 후 frontmatter 파싱' : `✗ BOM 처리 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
 // 1.9.43 회귀: MCP server + skill export-all + _reports 비공개
 total++;
 {

@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.44 — 2026-05-19
+
+**1.9.34~43 통합 검증 + BUG 1건 즉시 패치**.
+
+별도 `_apps/leerness-stress/bin/stress-v2.js`로 1.9.34~43의 **13종 신규 기능 + 5 edge case = 25 시나리오 통합 테스트**. 발견된 진짜 BUG 1건 즉시 패치.
+
+### Fixed
+
+- **🔴 BUG-1 (HIGH)** — `_parseSkillMd`의 UTF-8 BOM 미처리:
+  - 증상: BOM (`EF BB BF`)이 있는 SKILL.md install 시 "name 필수" 에러 (frontmatter 매칭 실패)
+  - 원인: 정규식 `^---`가 BOM 뒤로 밀린 `---`를 매칭 못 함
+  - 수정: `text.replace(/^﻿/, '')` 사전 BOM 제거
+  - 영향: Windows 메모장/일부 에디터 출력 SKILL.md 호환
+
+### Verified (1.9.34~43 13종 기능 통합 검증)
+
+| 카테고리 | 결과 |
+|---|---|
+| MCP Server (1.9.43) | ✅ 5/5 — JSON-RPC 표준, 10 도구 호출 가능, -32601/-32700 에러 정확 |
+| agentskills.io 호환 (1.9.42/43) | ✅ 5/5 — install/export/discover round-trip, BOM/한글 OK |
+| 차분 마이그레이션 (1.9.41) | ✅ 3/3 — whats-new 13 버전, migrate stdout 자동 출력, report 영구 기록 |
+| release pack (1.9.40) | ✅ 2/2 — --task-add, --parent-migrate dogfooding gap |
+| drift + workflow (1.9.37-39) | ✅ 4/4 — 4 신호 + 4 레벨, --auto-fix, session-workflow.md, 6단계 가이드 |
+| contract verify (1.9.35/36) | ✅ 2/2 — **require side-effect 차단 실측 검증** (852ms 정적 분석), tick.* 필드 grep |
+| Edge cases | ✅ 5/5 (1.9.44 BOM 패치 후) — BOM, 한글, 빈 디렉토리, 50KB MCP 제한, 동시 호출 race |
+
+### 검증
+- e2e: **196/196 PASS** (195 + BOM 회귀 1건)
+- stress-v2: **25/25 PASS** (이전 3 FAIL → BUG 1건 패치 + stress-v2 자체 결함 2건 수정)
+- 검증 보고서: `_reports/INTEGRATION_TEST_REPORT_1.9.44.md` (사용자 전용 비공개)
+
+### 결론
+**1.9.34~44의 모든 13종 신규 기능 production-ready 확인**. 신규 사용자가 `npx leerness@1.9.44 init .`로 즉시 안전 사용 가능.
+
 ## 1.9.43 — 2026-05-19
 
 **MCP 서버 + skill 일괄 export + _reports 비공개 + GitHub 배포 준비**.
