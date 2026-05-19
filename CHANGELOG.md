@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.9.106 — 2026-05-20
+
+**MCP 25번째 도구 `leerness_task_update`** (read+add+update 3종 task 제어 surface 완성).
+
+### Added — MCP 25번째 도구 `leerness_task_update`
+- 외부 AI 가 기존 task 의 상태/evidence/nextAction 을 단계적으로 갱신.
+- 인자:
+  - `id` (required) — 갱신할 task ID (`T-XXXX`)
+  - `status` — 9 status enum
+  - `evidence` — evidence 라인 갱신
+  - `nextAction` — 다음 액션 갱신
+  - `note` — task request 텍스트 자체 변경
+  - `path` — 워크스페이스 경로
+
+### read+add+update 3종 task 제어 surface 완성
+| 라운드 | MCP 도구 | 작업 |
+|---|---|---|
+| 1.9.60 | `leerness_task_export` | READ — task → TodoWrite JSON |
+| 1.9.105 | `leerness_task_add` | ADD — 새 task 등록 |
+| **1.9.106** | **`leerness_task_update`** | **UPDATE — 상태/evidence 갱신** |
+
+외부 AI 가 작업 진행에 따라 task 를 add → update(in-progress) → update(done) 사이클로 자율 관리.
+
+### MCP 도구 수: 24 → 25개
+
+### Verified
+- stress-v51 — MCP task_update + add→update 사이클 + 25 도구 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.105 — 2026-05-20
 
 **MCP 24번째 도구 `leerness_task_add`** (외부 AI 가 task 즉시 등록 — 양방향 제어 완성).
