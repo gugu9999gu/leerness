@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.57';
+const VERSION = '1.9.59';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -278,9 +278,10 @@ leerness review <file> --persona security,performance,ux
 
 ## Step 6. 세션 마감 + 인계 + 다음 라운드 추천
 \`\`\`bash
-leerness session close . --suggest   # 1.9.57+ — 마감 + 다음 라운드 추천 통합
-# 단독으로도 가능:
-leerness session close .             # handoff/current-state/task-log 자동 갱신
+leerness session close .             # 1.9.59+ — --suggest default 활성 (마감 + 다음 라운드 자동)
+leerness session close . --no-suggest  # suggest 비활성 (이전 동작)
+
+# 분리 호출도 가능:
 leerness skill suggest .             # 1.9.53 — 반복 패턴 → 새 skill 후보
 leerness drift check .               # 4 신호 + 4 레벨 점검
 leerness audit . --fix               # 누락 메타 자동 보강
@@ -1720,14 +1721,24 @@ function handoff(root) {
         const tokens = String(latestRow.request).toLowerCase().match(/[\w가-힣]{4,}/g) || [];
         const keyword = tokens.filter(t => !stopwords.has(t)).sort((a, b) => b.length - a.length)[0];
         if (keyword) {
-          // lessons 검색
+          // lessons 검색 — 1.9.58: fuzzy 매칭 (substring + 어간 변형)
           const decisions = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
           const evidence = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
+          // fuzzy: keyword 또는 keyword 부분 (4자+) 일치
+          // 예: "webhook" 매칭 시 "webhook-payload", "webhooks", "webhooked" 모두 매칭
+          const fuzzyRe = new RegExp(escapeRegex(keyword.slice(0, Math.max(4, Math.floor(keyword.length * 0.7)))), 'i');
           const matches = [];
           for (const block of evidence.split(/\n(?=## )/)) {
-            if (block.startsWith('## ') && new RegExp(escapeRegex(keyword), 'i').test(block) && /✗|fail|롤백|버그|incomplete/i.test(block)) {
+            if (block.startsWith('## ') && fuzzyRe.test(block) && /✗|fail|롤백|버그|incomplete/i.test(block)) {
               const titleM = block.match(/^## (.+)$/m);
               if (titleM) matches.push({ source: 'review-evidence.md', title: titleM[1].trim(), block });
+            }
+          }
+          // 1.9.58: decisions.md도 fuzzy 매칭 (실패/롤백 관련 결정만)
+          for (const block of decisions.split(/\n(?=### )/)) {
+            if (block.startsWith('### ') && fuzzyRe.test(block) && /롤백|실패|fail|취소|회귀|deprecate/i.test(block)) {
+              const titleM = block.match(/^### (.+)$/m);
+              if (titleM) matches.push({ source: 'decisions.md', title: titleM[1].trim(), block });
             }
           }
           if (matches.length) {
@@ -3096,7 +3107,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 적재 + 과거 lessons 자동 재상기'));
     log('    ' + C.green('npx leerness verify-claim T-0001 --run-tests') + C.dim('        # AI 거짓 완료 자동 검증'));
-    log('    ' + C.green('npx leerness session close . --suggest') + C.dim('              # 마감 + 다음 라운드 추천'));
+    log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
     log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 12 도구 노출'));
@@ -3849,7 +3860,9 @@ function sessionClose(root) {
   // 1.9.12: session close 끝에 roadmap.html 자동 갱신
   _autoRoadmap(root, 'session-close');
   // 1.9.57: --suggest 옵션 — 마감 시 skill suggest + drift check + lessons 통합 보고
-  if (has('--suggest')) {
+  // 1.9.59: default 활성 — --no-suggest로 명시 비활성 가능
+  const suggestEnabled = (has('--suggest') || (!has('--no-suggest') && process.env.LEERNESS_NO_SUGGEST !== '1'));
+  if (suggestEnabled) {
     const isTty = process.stdout && process.stdout.isTTY;
     const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
     const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;

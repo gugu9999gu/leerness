@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.9.59 — 2026-05-19
+
+**`session close --suggest` default 활성 — 라운드 마감 잊을 단계 없음**.
+
+### Changed (호환성 보장)
+- **`leerness session close`** — 1.9.57 `--suggest`를 **default 활성**으로 승격:
+  - 라운드 마감 시 자동으로 skill suggest + drift check + usage stats 통합 보고
+  - 사용자가 잊지 않도록 default 동작
+- **새 옵션 `--no-suggest`** — 이전 동작으로 복귀
+- **새 env `LEERNESS_NO_SUGGEST=1`** — CI/자동화 환경에서 suggest 강제 비활성
+- `--suggest` 명시 호출도 그대로 동작 (호환성)
+
+### 설치 가이드 갱신
+- banner quickStart에서 `--suggest` 명시 제거 (이제 default라 불필요)
+- `.harness/session-workflow.md` Step 6 갱신 — `--no-suggest`로 비활성 가능 명시
+
+## 1.9.58 — 2026-05-19
+
+**handoff lessons fuzzy 매칭 (어간 변형 + decisions.md 매칭)**.
+
+### Added
+- **fuzzy 매칭** — `escapeRegex(keyword.slice(0, max(4, len*0.7)))` 으로 부분 매칭:
+  - webhook ↔ webhooks ↔ webhook-payload ↔ webhooked 모두 매칭
+  - 한국어 어미 변화도 부분 매칭 (예: "결제" ↔ "결제처리" ↔ "결제검증")
+- **decisions.md 매칭 추가** — 이전엔 review-evidence.md만 → 이제 decisions.md의 *실패/롤백/취소/회귀* 결정도 자동 회수
+
+### 검증 (stress-v8)
+- X1-X4 (fuzzy 매칭: 어간/복합어/decisions/false positive 차단) 4/4 PASS
+- Y1-Y4 (session close default suggest + 옵션 호환) 4/4 PASS
+- Z1-Z4 (1.9.43~57 누적 회귀) 4/4 PASS
+- **stress-v8: 12/12 PASS**, e2e: **213/213 PASS**
+
 ## 1.9.57 — 2026-05-19
 
 **`session close --suggest` + 설치 가이드 갱신**.

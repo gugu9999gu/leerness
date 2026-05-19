@@ -950,6 +950,44 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
+// 1.9.58/59 회귀
+total++;
+{
+  // fuzzy 매칭 — 어간 변형 (webhook ↔ webhooks)
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fz-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  fs.writeFileSync(path.join(tmpC, '.harness', 'review-evidence.md'),
+    '## 2026-04\nNote: ✗ webhooks payload 실패\n', 'utf8');
+  cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'webhook 작업', '--status', 'in-progress', '--path', tmpC], { stdio: 'ignore', timeout: 10000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC, '--no-drift-check', '--no-workflow-guide'], { encoding: 'utf8', timeout: 15000 });
+  const ok = /lessons 자동 재상기.*webhook/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.58) lessons fuzzy: webhook ↔ webhooks 어간 변형 매칭' : `✗ fuzzy 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(-500)); }
+}
+
+total++;
+{
+  // session close default suggest
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sd-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpC], { encoding: 'utf8', timeout: 30000 });
+  // 1.9.59: default activated → "다음 라운드 추천" 자동 표시
+  const ok = /다음 라운드 추천|drift 상태/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.59) session close: --suggest default 활성' : `✗ default suggest 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(-500)); }
+}
+
+total++;
+{
+  // --no-suggest 비활성 (이전 동작 보존)
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ns-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpC, '--no-suggest'], { encoding: 'utf8', timeout: 30000 });
+  const ok = r.status === 0 && !/다음 라운드 추천/.test(r.stdout) && /진행 요약/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.59) --no-suggest: suggest 비활성 (이전 동작)' : `✗ --no-suggest 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(-300)); }
+}
+
 // 1.9.56/57 회귀
 total++;
 {
