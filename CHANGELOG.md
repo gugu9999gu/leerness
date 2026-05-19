@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.92 — 2026-05-20
+
+**`skill info --json` + MCP 20번째 도구 `leerness_skill_info`**.
+
+### Added
+- `leerness skill info <id> --json` 옵션 신규 추가 (CI 친화 + MCP 통합 기반).
+  - 출력 필드: id / displayNameKo / source / version / lastUpdated / verification / usage / capabilities / sources / patterns / optimizations
+- **MCP 20번째 도구** `leerness_skill_info`:
+  - inputSchema: `{ id: string (required), path: string }`
+  - 외부 AI가 개별 skill의 능력/사용 이력/패턴 정확 파악.
+- MCP server 도구 카운트: **19 → 20**.
+
+### Verified
+- stress-v38 — skill info --json + MCP 20 도구 + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.91 — 2026-05-20
 
 **MCP server 19번째 도구 `leerness_skill_search`** (1.9.90 외부 AI 노출).
