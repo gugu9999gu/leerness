@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.9.117 — 2026-05-20
+
+**`leerness lesson list [--tag] [--json]` 새 명령 + MCP 33번째 도구 `leerness_lesson_list`** — lessons.md 전용 조회 + tag 필터.
+
+### Added — `leerness lesson list [--tag <tag>] [--json]`
+- 새 CLI: `.harness/lessons.md` 의 모든 lesson 조회.
+- 옵션:
+  - `--tag <tag>` — 특정 태그 필터 (lesson save 시 `--tag` 로 저장된 값)
+  - `--json` — 구조화 출력
+- JSON 출력: `{ version, root, total, lessons: [{ date, text, tag }], tag? }`
+
+### Added — MCP 33번째 도구 `leerness_lesson_list`
+- 외부 AI 가 영구화된 lesson 전체 회수.
+- `leerness_lessons` 와 차이:
+  - `lessons`: review-evidence / decisions / task-log / lessons.md 다중 source fuzzy 매칭
+  - `lesson_list`: **lessons.md 전용** (사용자가 명시 save 한 lesson만) + tag 필터
+- 인자: `{ path?, tag? }`
+
+### 사용 시나리오
+사용자: "지금까지 등록된 auth 관련 lesson 알려줘"
+→ 외부 AI: `leerness_lesson_list({ tag: "auth" })`
+→ `{ total: 3, lessons: [{ date, text, tag: "auth" }, ...] }`
+
+### Memory Surface READ 확장
+| 영역 | READ | 라운드 |
+|---|---|---|
+| Tasks | task export | 1.9.60 |
+| Decisions | (lessons fuzzy + memory status 최근) | 기존 |
+| Rules | rule list | 1.9.109 |
+| Plan | (handoff 컨텍스트) | 기존 |
+| **Lessons** | **lesson list** | **1.9.117 ✓** |
+
+### MCP 도구 수: 32 → 33개
+### JSON 옵션 누적: 15 → 16종
+
+### Verified
+- stress-v62 — lesson list CLI + --tag 필터 + --json + MCP + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.116 — 2026-05-20
 
 **`leerness brainstorm` 회수 범위에 lessons.md + plan.md milestone 통합** — Memory Write Surface 5종 ↔ brainstorm 완전 통합.
