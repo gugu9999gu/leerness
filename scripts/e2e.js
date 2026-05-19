@@ -950,6 +950,23 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
+// 1.9.53 회귀: skill suggest 자동 학습
+total++;
+{
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sg-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  // 반복 키워드 6회
+  for (let i = 0; i < 6; i++) {
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', `autosuggestkw 작업 ${i}`, '--path', tmpC], { stdio: 'ignore', timeout: 10000 });
+  }
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'suggest', '--path', tmpC, '--min', '3', '--json'], { encoding: 'utf8', timeout: 15000 });
+  let j = null;
+  try { j = JSON.parse(r.stdout); } catch {}
+  const ok = j && j.candidates && j.candidates.some(c => /autosuggestkw/.test(c.keyword) && c.count >= 3);
+  console.log(ok ? '✓ B(1.9.53) skill suggest: progress-tracker 반복 패턴 자동 감지 (Hermes-style)' : `✗ suggest 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
 // 1.9.51/52 회귀
 total++;
 {

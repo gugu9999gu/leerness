@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.52';
+const VERSION = '1.9.53';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -6361,6 +6361,83 @@ function benchmarkCmd(root) {
   log('💡 시뮬레이션은 정성적 추정 — 실 측정은 별도 환경 필요 (사용자 환경)');
 }
 
+// 1.9.53: leerness skill suggest — task-log + usage-stats에서 반복 패턴 감지 → 새 skill 후보 제안
+// Hermes-style 자동 학습의 leerness 버전. 명시적 `skill learn` 호출 없이도 패턴 추출.
+function skillSuggestCmd(root) {
+  root = absRoot(root || process.cwd());
+  const minOccurrence = parseInt(arg('--min', '3'), 10);
+  const lookbackDays = parseInt(arg('--days', '30'), 10);
+  const cutoff = Date.now() - lookbackDays * 86400000;
+  const seen = {}; // keyword → { count, samples, files }
+  // 1) task-log.md 라인 분석
+  const taskLog = taskLogPath(root);
+  if (exists(taskLog)) {
+    const body = read(taskLog);
+    // 날짜 헤더 ## YYYY-MM-DD 안의 라인들
+    const blocks = body.split(/^## \d{4}-\d{2}-\d{2}/m);
+    for (const block of blocks) {
+      // 명령 인용 `leerness X` 또는 키워드 (3+ chars)
+      for (const m of block.matchAll(/`leerness\s+([a-z][\w-]+(?:\s+[a-z][\w-]+)?)`/g)) {
+        const cmd = m[1].trim();
+        seen[cmd] = seen[cmd] || { count: 0, samples: [], source: 'task-log' };
+        seen[cmd].count++;
+        if (seen[cmd].samples.length < 3) seen[cmd].samples.push(block.slice(0, 80).replace(/\n/g, ' '));
+      }
+    }
+  }
+  // 2) progress-tracker request 컬럼 분석
+  const rows = readProgressRows(root);
+  for (const row of rows) {
+    const text = (row.request || '') + ' ' + (row.nextAction || '');
+    // 도메인 키워드 (한글 + 영어 단어, 3자 이상)
+    for (const m of text.toLowerCase().matchAll(/[\w가-힣]{4,}/g)) {
+      const kw = m[0];
+      if (/^\d+$/.test(kw)) continue;
+      if (['이런', '저런', '하다', '하고', '있는', '하지', '에서'].includes(kw)) continue;
+      seen[kw] = seen[kw] || { count: 0, samples: [], source: 'progress' };
+      seen[kw].count++;
+      if (seen[kw].samples.length < 3) seen[kw].samples.push((row.request || '').slice(0, 60));
+    }
+  }
+  // 3) usage-stats의 명령 카운트
+  try {
+    const stats = _readUsageStats(root);
+    for (const [cmd, n] of Object.entries(stats.commands || {})) {
+      if (n >= minOccurrence) {
+        seen[`cmd:${cmd}`] = seen[`cmd:${cmd}`] || { count: 0, samples: [], source: 'usage' };
+        seen[`cmd:${cmd}`].count = n;
+      }
+    }
+  } catch {}
+  // 4) 임계 이상 + 기존 skill에 없는 키워드만 필터
+  const existing = new Set(Object.keys(listAllSkills(root)));
+  const installed = _readInstalledSkills(root);
+  const installedTokens = new Set(installed.flatMap(s => [..._tokenize(s.name + ' ' + s.description)]));
+  const candidates = Object.entries(seen)
+    .filter(([kw, info]) => info.count >= minOccurrence)
+    .filter(([kw]) => !existing.has(kw) && !installedTokens.has(kw.replace(/^cmd:/, '')))
+    .map(([kw, info]) => ({ keyword: kw, ...info }))
+    .sort((a, b) => b.count - a.count);
+  if (has('--json')) { log(JSON.stringify({ minOccurrence, lookbackDays, candidates: candidates.slice(0, 20) }, null, 2)); return; }
+  log(`# leerness skill suggest (1.9.53)`);
+  log(`반복 패턴 자동 감지 (최소 ${minOccurrence}회, ${lookbackDays}일 이내)`);
+  log('');
+  if (!candidates.length) {
+    log('  (아직 패턴 부족 — task-log/progress-tracker에 작업이 더 누적되면 자동 감지)');
+    return;
+  }
+  log(`발견된 후보: ${candidates.length}건`);
+  log('');
+  log('| 키워드/명령 | 출처 | 등장 횟수 | 예시 |');
+  log('|---|---|---:|---|');
+  for (const c of candidates.slice(0, 10)) {
+    log(`| ${c.keyword} | ${c.source} | ${c.count} | ${(c.samples[0] || '').replace(/\|/g, '\\|').slice(0, 50)} |`);
+  }
+  log('');
+  log(`💡 신규 skill로 등록 권장:`);
+  log(`   leerness skill learn <id> --capability "${candidates[0].keyword}" --note "1.9.53 auto-suggest"`);
+}
+
 // 1.9.45: skill match <query> — 설치된 SKILL.md description ↔ 사용자 요청 키워드 매칭 추천
 // jaccard similarity (단어 집합 교집합/합집합).
 function _tokenize(s) {
@@ -6960,6 +7037,7 @@ async function main() {
   if (cmd === 'skill' && args[1] === 'match')       return skillMatchCmd(absRoot(arg('--path', process.cwd())), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'benchmark')                          return benchmarkCmd(absRoot(args[1] || arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'publish')     return skillPublishCmd(absRoot(arg('--path', process.cwd())));
+  if (cmd === 'skill' && args[1] === 'suggest')     return skillSuggestCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'mcp' && args[1] === 'serve')         return mcpServeCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'gate')                               return gate(args[1] || process.cwd());
   if (cmd === 'verify-code')                        return verifyCodeCmd(args[1] || process.cwd());

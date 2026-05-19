@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.9.53 — 2026-05-19
+
+**`leerness skill suggest` — Hermes-style 자동 학습 (사용 패턴 → skill 후보 자동 제안)**.
+
+### 배경
+1.9.2부터 `skill learn` / `skill use` / `skill optimize` / `skill consolidate` / `lessons` / `rule add` 등 자체 학습 인프라가 있었으나, **모두 명시 호출 필요**. Hermes처럼 *사용 중* 자동으로 새 skill을 만들지 못함.
+
+### Added
+- **`leerness skill suggest [--min N] [--days N] [--json]`** — Hermes-style 자동 학습의 leerness 버전:
+  - **task-log.md** — `` `leerness X` `` 명령 인용 패턴 감지
+  - **progress-tracker.md** — request/nextAction 컬럼의 4자+ 키워드
+  - **usage-stats.json** — 명령별 누적 카운트
+  - 임계 (`--min`, 기본 3회) 이상 + **기존 skill에 없는** 키워드만 후보로
+  - `--days N` lookback (기본 30일)
+  - 출처 (`task-log` / `progress` / `usage`) 자동 분류
+- 실 워크스페이스 검증: 본 프로젝트에서 6 후보 자동 감지 (leerness 22회, publish 14회, github 5회 등)
+
+### Hermes vs leerness 학습 비교 (1.9.53 후)
+| 영역 | Hermes | leerness |
+|---|---|---|
+| 새 skill 자동 생성 | ✅ LLM 기반 | ⚠ 후보 제안만 (수동 등록 권장) |
+| **반복 패턴 감지** | ✅ | ✅ **1.9.53 신규** |
+| 사용 카운트 추적 | ✅ | ✅ 1.9.38 |
+| 중복 자동 통합 | ✅ | ✅ 1.9.2 `skill consolidate` |
+| 외부 docs 학습 | ✅ | ✅ 1.9.2 `skill learn --doc` |
+
+### 검증 (필수 stress-v5)
+- O1-O5 (skill suggest 시나리오) 5/5 PASS
+- P1-P5 (1.9.43~52 누적 회귀) 5/5 PASS
+- **stress-v5: 10/10 PASS** + e2e: **206/206 PASS**
+
 ## 1.9.52 — 2026-05-19
 
 **`skill discover` 카탈로그 형식 다양성 (JSON/RSS/Markdown/llms.txt 자동 감지)**.
