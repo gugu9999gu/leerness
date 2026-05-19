@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.77 — 2026-05-20
+
+**MCP server 15번째 도구 `leerness_brainstorm` 추가** (1.9.72 brainstorm 외부 노출).
+
+### Added — MCP 15번째 도구
+- `leerness_brainstorm` — 1.9.16/72 brainstorm 명령을 MCP 도구로 노출.
+  - inputSchema: `{ topic: string (required), path: string, allApps: boolean }`
+  - 응답: brainstorm --json 결과 (decisions + skills + tasks + rules + evidence + lessons + skillHistory + taskLogFails).
+  - 외부 AI 에이전트가 새 작업 시작 전 누적 컨텍스트 자동 회수 가능.
+- MCP server 도구 카운트: **14 → 15**.
+
+### Use Case
+- Claude Code / Cursor 가 사용자 요청을 받으면 자동으로 `brainstorm` 호출 → 같은 주제 과거 결정/스킬/실패 회수.
+- 같은 실수 반복 방지 + 누적 학습 활용.
+
+### Verified
+- stress-v23 — MCP 15 도구 + brainstorm 호출 + 1.9.43~76 누적 회귀 + 성능.
+- e2e 회귀: 219/219 PASS 유지.
+
+---
+
 ## 1.9.76 — 2026-05-20
 
 **`leerness handoff`에 보안 상태 요약 자동 표시** (1.9.71 env + 1.9.75 gitignore 결합).
