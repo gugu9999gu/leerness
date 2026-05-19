@@ -1,5 +1,773 @@
 # Changelog
 
+## 1.9.43 — 2026-05-19
+
+**MCP 서버 + skill 일괄 export + _reports 비공개 + GitHub 배포 준비**.
+
+[agentskills.io 분석](https://agentskills.io)에서 도출한 발전 로드맵의 Phase 1 즉시 후보 3건을 통합. leerness 도구를 **MCP 서버로 노출**하여 Claude Code · Hermes · Cursor 등 30+ 도구가 직접 호출 가능.
+
+### Added — MCP Server (sub-agent로서 leerness)
+
+- **`leerness mcp serve`** 신규 명령 — stdio JSON-RPC로 leerness 도구 10종 노출:
+  - `leerness_handoff` · `leerness_drift_check` · `leerness_audit` (--fix 지원)
+  - `leerness_verify_claim` (--run-tests, --strict-claims)
+  - `leerness_contract_verify` (사양 ↔ 구현)
+  - `leerness_agents_list` · `leerness_reuse_map` · `leerness_whats_new`
+  - `leerness_usage_stats` · `leerness_session_close`
+  - 표준 MCP 프로토콜 (2024-11-05) — initialize / tools/list / tools/call
+- 이제 Claude Code · Hermes · Cursor 등이 `.mcp.json`에 leerness를 등록하면 메인 에이전트가 leerness 검수를 sub-tool로 호출 가능
+
+### Added — skill 표준 export·discover
+
+- **`leerness skill export-all [--out <dir>]`** — 모든 자체 skill(9개)을 agentskills.io 표준 `SKILL.md`로 일괄 export. 다른 도구가 `skill install <path>`로 즉시 import.
+
+### Added — 내부 보고서 비공개
+
+- **`_reports/` 디렉토리 자동 비공개**:
+  - root `.gitignore`에 `_reports/`, `**/_reports/`, `*.private.md`, `*.private.json` 추가
+  - `leerness-pkg/.gitignore`에 동일 추가
+  - 신규 `leerness-pkg/.npmignore` — npm publish 시 명시적 제외
+  - `package.json#files` 화이트리스트와 이중 안전
+- 내부 검수 보고서 (`LEERNESS_VS_HERMES_AND_AGENTSKILLS.md`, `SESSION_LEERNESS_USAGE_AUDIT.md` 등)는 사용자 확인 전용이며 npm/GitHub 배포에 포함되지 않음
+
+### Verified
+- e2e: **195/195 PASS** (1.9.42 190 + 신규 5)
+- MCP server initialize/tools/list 정상 JSON-RPC 응답
+- skill export-all → 9개 SKILL.md 일괄 생성
+- .gitignore/.npmignore에 _reports/ 차단 확인
+
+### 정책
+- ✅ MCP server는 명시 호출 (`leerness mcp serve`) 시에만 작동 — 자동 시작 안 함
+- ✅ MCP 도구 호출 시 LEERNESS_NO_BANNER/NO_PROMPT/NO_DRIFT_CHECK 자동 설정 (호스트 환경 깔끔)
+- ✅ _reports 비공개 — 다중 채널 (gitignore + npmignore + files 화이트리스트)
+
+## 1.9.42 — 2026-05-19
+
+**agentskills.io 공개 표준 호환 — 30+ AI 도구와 스킬 즉시 공유**.
+
+[agentskills.io](https://agentskills.io)는 Anthropic이 만든 Agent Skills 개방 표준으로 Claude Code · Cursor · GitHub Copilot · OpenAI Codex · Gemini CLI · Hermes Agent · OpenHands · Goose 등 30+ 도구가 채택. 1.9.42부터 leerness가 이 표준의 `SKILL.md` 포맷을 import/export 가능.
+
+### Added
+
+- **`leerness skill install <url-or-path>`** 신규 명령 — `SKILL.md` 다운로드/import:
+  - URL (https://...) 또는 로컬 파일/디렉토리 모두 지원
+  - frontmatter (`name`, `description`) 파싱 → `.harness/skills/<id>/SKILL.md` 자동 배치
+  - 자체 `skill.json` 도 함께 생성 (자체 catalog 호환, `_source: 'agentskills.io'` 추적)
+- **`leerness skill discover [--query <q>] [--source <url>]`** 신규 명령 — 공개 스킬 카탈로그에서 매칭 추천:
+  - **opt-in**: `LEERNESS_SKILL_DISCOVER_URL` 환경변수 또는 `--source` 명시 필요 (자동 외부 fetch 금지 정책 유지)
+  - `--query` 키워드 매칭 + 마크다운 링크/SKILL.md URL 자동 추출
+  - `--json` 출력 지원
+- **`leerness skill export <id> [--out <dir>]`** 신규 명령 — 기존 자체 skill을 agentskills.io 표준 `SKILL.md` 포맷으로 export → 다른 도구가 `skill install`로 import 가능
+- **`.env.example`에 2개 신규 환경변수** (opt-in, 기본 OFF):
+  - `LEERNESS_SKILL_DISCOVER_URL=` — 공개 카탈로그 URL
+  - `LEERNESS_SKILL_AUTO_DISCOVER=0` — 사용자 요청 분석 시 자동 매칭 추천
+- **`_httpFetch()` 내장 HTTPS 호출자** — Node 18+ globalThis.fetch, fallback https module. 사용자 동의 명령에서만 호출.
+
+### Reports
+- `_reports/LEERNESS_VS_HERMES_AND_AGENTSKILLS.md` 작성 — 10 섹션 상세 분석:
+  - agentskills.io 표준 + Progressive Disclosure 메커니즘
+  - Hermes Agent (NousResearch, 157k ⭐, MIT) 분석
+  - leerness 4 고유 우위 (거짓 완료 검증, drift 자동 감지, 워크스페이스 가시성, 마이그레이션 인지 갭)
+  - 1.9.42 → 2.0 발전 로드맵 3 Phase
+
+### 정책
+- ❌ leerness는 외부 URL 자동 fetch 절대 금지 — opt-in (env 또는 `--source` 명시) 필수
+- ✅ `_httpFetch`는 사용자 명령 (`skill install URL` / `skill discover`)에서만 호출
+- ✅ 기존 자체 skillCatalog와 양립 — `_source: 'agentskills.io'`로 출처 추적
+
+### e2e: 190/190 PASS (1.9.41 186 + 신규 4)
+
+## 1.9.41 — 2026-05-19
+
+**디스크 마이그레이션 ↔ AI 컨텍스트 인지 갭 차단 — 맞춤형 차분 마이그레이션**.
+
+사용자 통찰: 같은 채팅 세션에서 leerness를 latest로 migrate해도, AI 에이전트는 이전 청크의 마인드셋으로 계속 작업하여 신규 도구(release pack, drift check 등)를 자동으로 호출하지 않는 패턴 발견. migrate는 파일만 업데이트, AI에겐 "새 도구가 들어왔다"는 신호 전달 부재.
+
+### Added
+
+- **`leerness whats-new [--from V] [--to V] [--json]`** 신규 명령 — CHANGELOG.md를 자동 파싱하여 두 버전 사이의 차분 추출:
+  - 신규 명령 (`leerness X` 패턴), 신규 플래그 (`--xxx`), 신규 파일 (`.harness/*.md`) 자동 분류
+  - 각 버전의 헤드라인 (`**...**` 또는 첫 라인) 추출
+  - AI 가독 권장 행동 자동 출력
+- **`migrate` 후 stdout에 AI must re-read 차분 자동 출력** — migrate 직전 이전 버전을 캡처 (`_previousVersion`) → CHANGELOG 차분 추출 → 신규 명령/파일을 stdout에 즉시 표시:
+  - "이전 청크의 기억 무효 — 새 도구 우선 시도" 명시
+  - 같은 세션 내 AI 인-컨텍스트에 신규 도구 인지 주입
+- **`migration-report.md`에 "🤖 AI must re-read" 섹션 영구 기록** — 신규 명령/플래그/파일 + 버전별 헤드라인 + 권장 행동
+- **`handoff`가 fresh migration-report (24h 내) 시 자동 알림** — "🆕 최근 N시간 전 migrate 차분" 블록 자동 표시. 같은 세션 내 매 handoff 호출이 AI에게 신규 도구 재안내.
+
+### 발견된 시스템 결함 (이번 라운드 해결)
+- ❌ **before 1.9.41**: migrate가 파일만 업데이트, AI 마인드셋 stale 유지 → 신규 도구 자동 호출 X
+- ✅ **1.9.41 이후**: migrate 직후 stdout + migration-report.md + handoff 모두 신규 도구를 AI 가독 포맷으로 노출 → "잊을 수 없는" 차분 안내
+
+### 자기 검증
+- 의도적으로 root를 1.9.37로 되돌림 → `leerness migrate .` 호출 → **AI must re-read 차분 자동 stdout 출력**:
+  - `📌 신규 명령: leerness release pack`
+  - 1.9.38/1.9.39/1.9.40 버전별 헤드라인 자동 추출
+  - 권장 행동 4단계 (--help, 신규 파일 재독, 인스트럭션 재독, whats-new --json)
+
+### e2e: 186/186 PASS (1.9.40 182 + 신규 4)
+
+### 정책
+- ✅ 차분 안내는 **AI 가독 포맷** (`**📌**`, `` `leerness X` `` 등 마크다운)
+- ✅ 같은 세션 내 다양한 채널 (stdout + report + handoff)로 *반복 노출* → 청크 stale 방지
+- ✅ 추출은 CHANGELOG.md 파싱 — 새 라운드 마다 자동 갱신
+
+## 1.9.40 — 2026-05-19
+
+**dogfooding gap 차단 — `leerness release pack` 통합 명령 + audit README mismatch 자동 감지**.
+
+세션 메타-감사(`_reports/SESSION_LEERNESS_USAGE_AUDIT.md`)에서 발견한 1.9.40 후보 4건을 모두 통합. 메인 에이전트가 "라운드 마감 = e2e/pack"으로만 끝내고 leerness 자체 마감을 잊는 패턴을 도구로 차단.
+
+### Added
+
+- **`leerness release pack [path]`** 신규 명령 — 라운드 마감 통합 워크플로:
+  - `--dry-run` — 시뮬레이션 모드
+  - `--task-add "<title>"` — progress-tracker에 라운드 마감 task 자동 등록
+  - `--parent-migrate` — 부모 워크스페이스(`..`)의 `.harness`도 함께 latest로 migrate (dogfooding gap 차단)
+  - `--close` — `session close` 자동 실행
+  - `--no-readme-sync` — README 자동 동기화 스킵 (기본은 적용)
+  - 사용 예: `leerness release pack . --task-add "1.9.41 X 통합" --parent-migrate --close`
+- **`syncReadme` 자동 갱신 강화**:
+  - `package.json#version` 또는 `.harness/HARNESS_VERSION` 기반 README의 version 배지 자동 갱신
+  - `scripts/e2e.js`의 `total++` 카운트 기반 e2e 배지 추세 반영
+
+### Fixed (audit 강화)
+
+- **`leerness audit`에 README ↔ package.json version mismatch 자동 감지** — dogfooding gap의 가장 흔한 패턴 자동 차단:
+  - `audit`: warning 출력
+  - `audit --fix`: README 배지 자동 갱신
+  - 메타 감사에서 발견한 "leerness-pkg는 1.9.40인데 README는 1.9.38" 같은 stale 사전 차단
+
+### 정책
+- ✅ `release pack`은 npm 호출 외엔 `.harness`만 갱신 (사용자 메모리 보존)
+- ✅ `--parent-migrate`는 명시 플래그 필요 (자동 부모 변경 없음)
+- ✅ README mismatch는 warning만 (failures가 아님 — 사용자 차단 X)
+
+### 실측
+- 메타 감사에서 발견한 4 후보 모두 통합
+- e2e: 182/182 PASS (1.9.39 178 + 신규 4)
+- 자체 검증: leerness-pkg에 `release pack --dry-run --task-add` 호출 → task T-0001 자동 등록
+
+## 1.9.39 — 2026-05-19
+
+**AI 하네스 엔지니어링 6단계 워크플로 자동 유도 + drift 자동 회복**.
+
+사용자 우려: "프로젝트가 복잡해지고 길어질 때 leerness를 점점 참조하지 않는다" — 1.9.37/38 drift 감지에 이어, 이번엔 **매 세션 시작 시 워크플로 자체를 자동 안내**하는 능동형 메커니즘 추가.
+
+### Added — A. 세션 워크플로 정책
+
+- **`.harness/session-workflow.md`** 신규 — AI 하네스 엔지니어링 6단계 가이드:
+  1. **요청 분석** (handoff + drift check)
+  2. **계획 수립** (plan add / TodoWrite + reuse-map)
+  3. **업무 분배** (agents list/recommend, 작업유형별 sub-agent 매핑)
+  4. **sub-agent 작업** (파일 경로 격리, mtime 검증 의무, 자체 테스트)
+  5. **종합 검증** (contract verify + verify-claim --run-tests + review --persona)
+  6. **세션 마감** (session close + audit --fix + usage stats)
+- **`handoff` 출력 끝에 6단계 가이드 자동 표시** — 매 세션 시작 시 메인 에이전트가 잊지 않도록.
+- **AGENTS.md / CLAUDE.md 템플릿 업그레이드** — "⭐ 매 세션 첫 행동: session-workflow.md 먼저 읽기" 항목 최상단 추가, Mandatory read order 1번 위치.
+- 스킵: `--no-workflow-guide` 또는 `LEERNESS_NO_WORKFLOW_GUIDE=1`.
+
+### Added — B. drift 자동 회복
+
+- **`leerness drift check --auto-fix`** — critical (≥100) 시 자동으로 `session close` 실행 + 재검증.
+  - 회복 성공 시 usage-stats의 `drift.autoResolved` 카운터 누적
+  - 실패 시 수동 실행 안내
+- **`leerness handoff --auto-recover`** — handoff 진입 시 severe drift 감지하면 inline 자동 회복.
+  - sevStale (≥3일) 시에만 발동 (안전)
+
+### 정책
+- ✅ `--auto-fix`/`--auto-recover`는 **명시적 플래그** 필요 (기본 동작은 알림만 유지)
+- ✅ 워크플로 가이드는 매 handoff 출력에 표시 → 메인 에이전트가 매 세션 6단계 인지
+- ✅ AGENTS/CLAUDE 템플릿 통합 → AI 에이전트가 세션 시작 시 자동 읽음
+
+### 실측
+- 워크플로 가이드 정상 표시 (handoff 끝에 6 단계 + .harness/session-workflow.md 링크)
+- session-workflow.md init 시 자동 생성 (6단계 + 사용 명령 + anti-pattern 명시)
+- AGENTS/CLAUDE에 session-workflow.md 참조 자동 inject
+
+### e2e: 178/178 PASS (1.9.38 174 + 신규 4)
+
+## 1.9.38 — 2026-05-18
+
+**drift 자동 reminder + 사용 통계 + TodoWrite 임포트 + drift 임계 학습**.
+
+1.9.37의 drift detection을 더 능동적으로 만든 라운드. 메인 에이전트가 leerness를 "잊는" 시나리오를 4가지 채널로 보완.
+
+### Added
+
+- **(A) `.harness/agent-reminders.md` 자동 생성** — drift 5일 이상(severe) 시 handoff 진입부에서 자동 생성. 메인 에이전트가 다음 라운드 시작 시 이 파일을 읽고 session close를 잊지 않도록.
+  - drift 회복 시 (handoff/session close) 파일 자동 청소
+- **(B) `leerness usage stats`** 신규 명령 — `.harness/cache/usage-stats.json`에 명령별 누적 카운터 + drift 통계. `--json` 출력 지원.
+  - 매 명령 호출 시 자동 누적 (`_bumpUsage`)
+  - 통계 출력: 호출 수 상위 30 + drift critical 발견/skip/자동 해소 카운트
+- **(C) `leerness task sync --from <todo.json>`** 신규 명령 — TodoWrite JSON을 leerness progress-tracker로 import. completed → done, in_progress → in-progress, pending → planned 매핑.
+  - 같은 content가 이미 있으면 status만 update, 없으면 신규 task 생성
+  - `--json` 출력 지원
+- **(D) drift 임계 학습** — `--no-drift-check` 누적 ≥5회 시 stale 임계 2일 → 4일로 자동 완화 (false alarm 감소).
+  - usage-stats.json의 `drift.skipped` 카운터로 추적
+  - 학습된 임계 활성 시 handoff 출력에 "(학습: skip N회 누적 → 임계 N일 완화)" 안내
+
+### 실측
+- 실 워크스페이스에서 4 기능 모두 작동 확인:
+  - A: 5일 stale 시뮬 → agent-reminders.md 자동 생성 (drift critical 메시지)
+  - B: status/handoff/task 명령 자동 카운트
+  - C: 2건 TodoWrite JSON → 2건 progress-tracker import
+  - D: --no-drift-check 5회 누적 → drift.skipped=5 기록
+
+### e2e: 174/174 PASS (1.9.37 170 + 신규 4)
+
+### 정책
+- ✅ 자동 reminder는 *파일 생성*만 — 메인 에이전트 자동 실행 강제 X
+- ✅ usage stats는 read-only 추적, destructive 동작 X
+- ✅ task sync는 idempotent (같은 content는 update만)
+- ✅ drift 학습은 사용자 친화 (자주 끄면 덜 짖게)
+
+## 1.9.37 — 2026-05-18
+
+**메인 에이전트의 "leerness 점점 안 쓰는" drift 현상 자동 감지·경고**.
+
+### 배경
+실 워크스페이스 분석 결과: 라운드가 길어질수록 메인 에이전트가 `session close` / `task add` 등을 점점 잊는 패턴 발견.
+- session-handoff.md 4.6일 stale
+- task-log.md 4.6일 stale
+- progress-tracker T-row 3일간 0건 업데이트
+- 신규 sub-app 4개에 task 0건 등록
+
+→ **drift score 100/200 (🔴 critical) 등급**. 사용자 우려 사실 확인.
+
+### Added
+
+- **`leerness drift check [path]`** 신규 명령:
+  - 4개 신호 측정: session-handoff.md, current-state.md, progress-tracker.md, task-log.md의 staleness
+  - 추가 신호: `_apps/*` 중 task 0건인 sub-project 수
+  - 가중치 합계 → 4단계 레벨 (🟢 healthy / 🟠 attention / 🟡 warning / 🔴 critical)
+  - 임계 0/20/50/100. 점수 ≥100 시 exit 1 (CI 친화)
+  - `--json` 출력 지원
+  - 권장 조치 자동 안내 (`session close` / `audit --fix` / `task add`)
+- **`handoff` 자동 drift 경고** — handoff 호출 시 빠른 inline check (전체 `drift check` 안 호출). session-handoff/progress-tracker 중 하나라도 2일 이상 stale이면 노랑색 경고 + 권장 명령 안내.
+- **스킵 옵션**: `--no-drift-check` 플래그 + `LEERNESS_NO_DRIFT_CHECK=1` 환경변수
+
+### 실측 (이번 라운드)
+- 실 워크스페이스: drift 100/200 (critical) → `session close` 1회 후 30/200 (attention)
+- e2e: 170/170 PASS (1.9.36 166 + 신규 4)
+
+### 정책
+- ✅ drift 경고는 *알림만* — 자동 실행 금지 (사용자/메인이 명시적 선택)
+- ✅ 빠른 inline check (handoff) vs 상세 보고 (`drift check`) 분리
+- ✅ CI 친화: `--no-drift-check` 또는 env로 끄기 가능
+
+## 1.9.36 — 2026-05-18
+
+**외부 AI CLI 오케스트레이션 강화: dispatch 안전 모드 + agents bench + 작업 유형 추천 + stress test에서 발견한 2 BUG 즉시 수정**.
+
+### Added
+
+- **`leerness agents bench "<task>" [--write] [--timeout N]`** — 활성/설치된 모든 ready CLI에 같은 task를 동시 호출. 결과: 시간/exit/응답길이/마지막 라인 비교 매트릭스 + 🏆 가장 빠른 CLI 자동 표시. `--json` 출력 지원.
+- **`agents dispatch`에 `--write` 모드 추가** — 기본은 read-only (안전). `--write` 명시 시 각 CLI에 위험 플래그 자동 첨부:
+  - claude → `--print --dangerously-skip-permissions`
+  - codex → `exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox`
+  - gemini → `-p --yolo`
+- **`_recommendAgent()` 작업 유형 기반 CLI 추천** — task 키워드 분석:
+  - 번역/요약/분석/review → **claude** (1.7× 빠름)
+  - 아키텍처/리팩터/복잡 → **codex** (가장 상세)
+  - 생성/작성/수정/구현 → **gemini --yolo** (직접 수정 정확)
+  - ready 체크 전에 출력 → 비활성이어도 추천 안내
+- **`dispatch` 출력에 CLI별 안내 추가** — codex의 POSIX path 변환 차이, gemini의 yolo 위험성 등.
+
+### Fixed (stress test에서 발견된 진짜 BUG)
+
+- 🔴 **`contract verify` require() side-effect 제거** — `require(implFile)`가 스크립트 본문 실행 → 18초 소요 + 임의 코드 실행 위험. **정적 소스 분석** (`module.exports = {...}` / `exports.foo =` 패턴 grep)으로 교체. 18,245ms → **705ms (25.9× 빠름)** + 보안 위험 제거.
+- 🟡 **`reuse autodetect` 디렉토리 제한 해제** — `src/`만 스캔 → **src/, bin/, lib/, app/ 4개 디렉토리** 스캔. require → 정적 분석.
+
+### Verified
+- 신규 프로젝트 `_apps/leerness-stress` 생성 + 31개 leerness 명령 자동 호출 stress test
+- 결과: 28 PASS / 3 의도된 BUG 감지 (false positive 0건)
+- e2e: 166/166 PASS (1.9.35 161 + 신규 5)
+
+## 1.9.35 — 2026-05-17
+
+**파이프라인 메타-감사에서 도출된 5개 개선 사항 통합**.
+
+이전 라운드(1.9.34)에서 멀티 에이전트 오케스트레이션 전체 파이프라인을 메타-검증한 결과 8개 개선점을 도출. 그 중 high-impact 5건을 1.9.35에 즉시 통합.
+
+### Added
+
+- **`leerness contract verify <spec.md> <impl.js>`** (#3) — 사양 ↔ 구현 일치 검사.
+  - spec 문서에서 `function fooBar(` / `` `bar(` `` / `tick.<field>` 패턴 추출
+  - impl의 `module.exports`와 비교 → 누락된 함수/필드 보고
+  - `--json` 출력 지원, exit code 1 if 불일치 (CI 친화)
+  - 1.9.34 멀티 에이전트 검증에서 발견한 "tick 페이로드 필드명 불일치" 자동 차단
+- **`leerness reuse autodetect [path]`** (#2) — `src/*.js`의 `module.exports`를 스캔하여 reuse-map.md 후보 자동 등록.
+  - `_internal` 헬퍼는 제외 (밑줄로 시작하는 export 자동 필터)
+  - `--apply`로 reuse-map.md에 자동 추가, 기본은 dry-run
+- **`leerness audit --fix`** (#5) — 누락된 메타 파일 자동 갱신.
+  - `session-handoff.md`의 `Last generated: (자동)` → 실제 타임스탬프
+  - `current-state.md`의 stale `Updated` 라인 → today로 갱신
+  - `--fix` 미지정 시 기존 경고 동작 유지 (안전한 opt-in)
+- **`handoff <path>` .harness 부재 자동 경고** (#1) — 신규 디렉토리에서 handoff 호출 시 즉시 노랑색 경고 + `leerness init` 명령 안내. `--no-init-check` 또는 `--all-apps` 시 스킵.
+- **`agents dispatch` 안내문에 안전 규칙 추가** (#4) — 멀티 에이전트 분배 시 파일 경로 격리, mtime 검증 요구, contract verify 권장을 안내문에 자동 포함.
+
+### Policy
+- ✅ 모든 신규 명령은 기본 read-only · destructive 동작은 명시적 플래그(`--fix`, `--apply`) 필요
+- ✅ 1.9.34 멀티 에이전트 검증의 모범 사례(파일 경로 격리, mtime 자기 검증, 사양 사전 합의)를 도구로 코드화
+- ❌ 자동 init은 destructive이므로 자동 실행 안 함 — 사용자에게 명령만 안내
+
+### 실측 (이번 라운드)
+- 메타-감사 보고서: `_reports/PIPELINE_META_AUDIT.md` (10 phases, 8 개선점)
+- rpg-replay 통합 패치: 회귀 0건 · 128/128 PASS · BUG-A/B/C 모두 해결 (별도 라운드)
+- contract verify 실 사용 사례: format.js에 spec의 `tick.effect` 필드 없음 발견
+- e2e: 161/161 PASS (1.9.34 156 + 신규 5)
+
+## 1.9.34 — 2026-05-16
+
+**방향키 + 스페이스 인터랙티브 multi-select + 256색 그라데이션 배너 + 멀티레벨 sub-agent 오케스트레이션 검증**.
+
+### Added
+
+- **`_selectOne()` / `_selectMany()` 헬퍼**: TTY raw mode + readline 이벤트 처리.
+  - 방향키 ↑↓ (또는 j/k vim binding) — 커서 이동
+  - Space — 토글 (multi-select)
+  - a / n — 전체 선택 / 전체 해제
+  - Enter — 확정
+  - q / ESC / Ctrl+C — 취소 (기본값 또는 빈 배열 반환)
+- **`resolveInstallOptions`에 적용**: 언어 선택 + 스킬 라이브러리 선택을 multi-select UI로 전환.
+- **`setupAgentsCmd`에 적용**: 4 CLI 일괄 활성화를 Space 토글로 선택 (이전엔 각각 yes/no 4번).
+- **ASCII 배너 256색 그라데이션**: 6 라인을 cyan(51) → 자주(165)로 6단계 그라데이션. ★ 강조 + magenta 색 강조 항목.
+- **`--no-interactive-select` 플래그 + `LEERNESS_NO_INTERACTIVE=1` env**: 구식 숫자 prompt 폴백.
+
+### 멀티레벨 sub-agent 오케스트레이션 검증 (실측)
+
+메인 에이전트 → sub-agent(Claude) → sub-sub-agent(외부 gemini CLI) 3단계 깊이 검증.
+
+| 항목 | 결과 |
+|---|---|
+| 단일 gemini 호출 | ✅ 15.6s, 영문 번역 정상 |
+| 병렬 ×2 | ✅ 24s, 출력 분리 정상 (quota retry 1회) |
+| 효율 (순차 3회 33s vs 병렬 3회 15s) | **2.2× 향상** (이론 3× 대비 60%) |
+| 검수 체인 (결과 → 평가) | ✅ "2" → "yes" 정상 |
+| 같은 파일 동시 쓰기 | ⚠ **last-writer-wins, 락 없음 → 데이터 손실 위험** |
+
+**결론**:
+- 3단계 오케스트레이션 안전하게 동작
+- 독립 작업(번역/평가/리뷰) 2×+ 효율 향상
+- 같은 리소스 동시 쓰기는 호출자가 파일 경로 격리 책임
+- gemini quota 동시 호출 시 retry → 병렬 확장성 ~3개로 제한
+
+### Policy
+- ❌ 비-TTY/CI/`--yes` 시 multi-select prompt 자동 스킵 (defaults 사용)
+- ❌ 같은 파일/리소스 동시 쓰기 sub-agent 분배 금지 (호출자 책임)
+- ✅ 인터랙티브 prompt는 256색 ANSI 미지원 환경에서도 동작 (`LEERNESS_NO_INTERACTIVE=1` 폴백)
+- ✅ q/ESC로 언제든 취소 가능 (기본값으로 fallback)
+
+### 실측 (이번 라운드)
+- 워크스페이스 28 프로젝트 일괄 1.9.16~1.9.31 → 1.9.33 → 1.9.34 마이그레이션
+- e2e: 156/156 PASS (1.9.33 153 + multi-select 폴백 + 배너 + --no-interactive-select 3개)
+
+## 1.9.33 — 2026-05-15
+
+**npx 캐시 함정 방지 — install 시 stale 버전 자동 경고 + 해결 안내**.
+
+### 배경
+사용자가 `npx leerness init`(@latest 없이)을 실행하면 npm/npx의 로컬 캐시에 있는 옛 버전이 무한히 재사용되는 함정이 있음. 1.9.32 publish 후에도 사용자 PC에서 1.9.21이 실행되는 사례 확인.
+
+### Added
+
+- **`_warnIfStale()` 헬퍼**: `install()` 진입 시 자동 호출.
+  - npm registry latest 비교 (`fetchNpmLatest` + 24h cache 재사용)
+  - 현재 실행 중인 VERSION이 registry latest보다 옛날이면 ⚠ 노랑색 경고 박스 출력
+  - 해결 명령 2가지 안내: `npx --yes clear-npx-cache && npx leerness@latest init .` 또는 `npm i -g leerness@latest`
+  - **init 자체는 계속 진행** (경고만 띄움 — 강제 차단 X)
+- **`--no-stale-check`** 플래그 + **`LEERNESS_NO_STALE_CHECK=1`** env 변수: 경고 스킵
+- **offline + 캐시 없음**: 비교 스킵 (네트워크 차단 환경 안전)
+- **offline + 캐시 fresh**: 캐시값으로 비교 (e2e 등 CI 환경에서도 동작)
+
+### Policy
+- ❌ 사용자 init 차단 안 함 (경고만, init은 계속 진행)
+- ✅ 24h 캐시로 매 init마다 npm view 호출 안 함 (cold-start만 12s timeout)
+- ✅ 네트워크 실패 시 silently skip — init 흐름 끊지 않음
+- ✅ `--no-stale-check`/env로 끄기 가능 (CI 친화)
+
+### 실측 (이번 라운드)
+- 사용자 PC: `npx leerness init` → 1.9.21 실행됨 (npm latest=1.9.32) — 1.9.33부터 install 시 즉시 경고
+- e2e: 153/153 PASS (1.9.32 151 + stale 경고/스킵 2)
+
+## 1.9.32 — 2026-05-15
+
+**ASCII 배너 + `leerness setup-agents` 인터랙티브 설정 + 미설치 CLI 자동 설치 시도**.
+
+### Added
+
+- **ASCII 배너 (`_banner()`)**: `leerness init` 시 자동 출력. `--version --banner`로도 호출 가능. `LEERNESS_NO_BANNER=1` 또는 콘솔 폭 <70칸이면 자동 스킵.
+  - `LEERNESS` 8글자 ANSI 시안+볼드 색상 + 박스 + 빠른 시작 4줄.
+- **`leerness setup-agents [path]`** (신규 명령): 외부 AI CLI 4종 (claude/codex/gemini/copilot) 인터랙티브 활성화.
+  - 각 CLI별: 설치 상태(🟢/⚪) + 활성 상태(🟢/🟡) 표시 → 사용자 yes/no → `.env`의 `LEERNESS_ENABLE_*` 자동 upsert.
+  - **미설치 CLI 자동 설치 시도**: 사용자 동의 후 `npm i -g @anthropic-ai/claude-code`, `npm i -g @openai/codex`, `npm i -g @google/gemini-cli`, `gh extension install github/gh-copilot` 실행.
+  - 설치 후 PATH 재확인 → 안 보이면 새 셸 안내.
+- **`init` 후 자동 prompt**: `leerness init`이 끝나면 TTY일 때 "외부 AI CLI 설정?" 질문 → yes 시 `setupAgentsCmd` 호출.
+  - `--no-setup-agents` 또는 `--yes`로 스킵 가능.
+- **`EXTERNAL_AGENTS`에 `installCmd` + `installHint` 필드 추가**: 자동 설치 시 사용.
+- **`_prompt()` / `_confirm()` / `_upsertEnvLine()` 헬퍼**: TTY 한정 readline 기반, 비대화형(--yes/CI/non-TTY)에선 안전 fallback.
+
+### Policy
+- ❌ 비-TTY/CI 환경에선 prompt 자동 스킵 (default 동작 유지)
+- ❌ 자동 설치는 사용자 명시적 yes 후에만 (--yes 시에도 prompt 스킵하므로 자동 설치 안 됨)
+- ✅ `.env` upsert는 idempotent (이미 키가 있으면 값 교체만)
+- ✅ `init --yes` + `setup-agents`로 비대화형 워크플로도 안내 표시만 (변경 없음)
+
+### 실측 (이번 라운드)
+- 신규 sub-project 3종 (rpg-craft 20/20, rpg-achievements 22/22, rpg-instance 20/20) — sub-agent 3 동시
+- e2e: 151/151 PASS (1.9.31 146 + 1.9.32 5)
+- 배너 ANSI 시각 검증 OK / 콘솔 폭 <70칸 시 1줄 폴백 / `LEERNESS_NO_BANNER=1` 스킵
+
+## 1.9.31 — 2026-05-15
+
+**`leerness agents quota` — 외부 AI CLI 사용량/한도 추정 + provider 대시보드 안내**.
+
+### Added
+
+- **`leerness agents quota`** (1.9.31): 활성 CLI별 quota/rate-limit 정보 표시.
+  - **claude**: 비대화형 quota API 없음 → `/status` 슬래시 또는 https://console.anthropic.com/settings/usage 안내.
+  - **codex**: `codex --help`에서 `usage`/`quota` 키워드 감지 시 시도 가능 표시, 미감지 시 https://platform.openai.com/account/usage 안내.
+  - **gemini**: 무료 티어 `60 req/min, 1000 req/day` 명시.
+  - **copilot (gh)**: `gh auth status`로 인증 확인 → 구독자 무제한 또는 `gh auth login` 필요 안내.
+  - `--json` 출력 지원 (`{ quota: [{id, bin, status, quota, hint, raw}, ...] }`).
+- **`agents` 사용법 메시지에 `quota` 추가**: `list|check|quota|dispatch`.
+- **`agents dispatch` 안내문에 quota 명령 cross-link** (1.9.31+).
+
+### Policy
+- ❌ leerness는 사용량을 직접 추적하지 않음 (provider 대시보드 참조)
+- ✅ sub-agent 분배 시 quota 여유 큰 CLI를 메인 에이전트가 우선 선택하도록 신호 제공
+- ✅ rate-limit/plan 차이는 provider별 다름 — leerness는 hint만 제공
+
+### 실측 (이번 라운드 사용 사례)
+- agents quota 신규 명령 검증 후 sub-agent ×3 동시 분배
+- e2e: 146/146 통과 (1.9.30 144 + quota 2)
+
+## 1.9.30 — 2026-05-15
+
+**외부 AI CLI 오케스트레이션 — 환경변수 활성화 정책 + `leerness agents list/check/dispatch`**.
+
+claude/codex/gemini/copilot CLI들을 sub-agent로 명시적 활용 가능. 사용자 동의(환경변수) + PATH 존재 둘 다 충족 시에만 ready.
+
+### Added
+
+- **`.env.example`에 4개 활성화 플래그 추가**:
+  - `LEERNESS_ENABLE_CLAUDE=1` (Anthropic Claude Code, 기본 활성)
+  - `LEERNESS_ENABLE_CODEX=0` (OpenAI Codex CLI, 격리 sandbox)
+  - `LEERNESS_ENABLE_GEMINI=0` (Google Gemini CLI, `--yolo` 모드는 워크스페이스 직접 수정 가능)
+  - `LEERNESS_ENABLE_COPILOT=0` (GitHub Copilot CLI = `gh copilot`)
+- **`leerness agents list`**: 4 CLI별 (env=1 여부) + (PATH 존재 여부) + 버전 + 상태 (ready/disabled/not-installed) 표 출력. `--json` 지원.
+- **`leerness agents check`**: alias of list (재확인 강조).
+- **`leerness agents dispatch "<task>" --to <id>`**: 활성 ready CLI에 대상 명령 자동 생성 (`claude "..."`, `codex exec "..."`, `gemini -p "..." --yolo`, `gh copilot suggest "..."`).
+  - **leerness는 자동 호출 안 함** — 사용자/메인 에이전트가 명시적 실행.
+  - 비활성/미설치 시 안내 후 `exit 1`.
+
+### Policy
+- ❌ 환경변수 미설정 또는 PATH 없으면 dispatch 거부
+- ✅ 환경변수 + PATH 둘 다 충족 시에만 ready
+- ✅ leerness는 외부 CLI 자동 호출 금지 (1.9.22 Ollama opt-in과 동일 원칙)
+
+### 실측 (이번 라운드 사용 사례)
+- Claude sub-agent ×2 (PvP 매치메이킹 + 길드 시스템) → 각각 26/26, 23/23 통과
+- Gemini CLI 외부 호출 (yolo 모드) → rpg-stats 통계 대시보드 자동 생성 (13/13, HTML 5.5KB)
+- → 3 도메인 동시 진행, 메인 에이전트가 외부 CLI를 sub-agent처럼 활용
+
+## 1.9.29 — 2026-05-15
+
+**페르소나 시스템 — 5종 내장 + `leerness review --persona` (도메인 깊이 3-4배)**.
+
+이전 라운드 sub-agent 4명 비교 실험에서 검증: 도메인 페르소나 부여 시 발견율 100% vs control 30%, 토큰 비용은 ~3%만 증가.
+
+### Added
+
+- **`leerness persona list|show <id>|add <id>`**: 페르소나 카탈로그 관리.
+  - **내장 5종**:
+    - `security` — 10년차 시니어 보안 엔지니어 (OWASP/CWE/RFC, 한국 개인정보보호법/게임산업법)
+    - `performance` — V8 엔진 내부 (hidden class/GC/이벤트 루프) 전문가
+    - `ux` — 한국어 UX 라이터 + DX 컨설턴트 (토스/카카오/Stripe/GitHub)
+    - `testing` — TDD + property-based 테스트 엔지니어 (fast-check)
+    - `docs` — 한국어 기술 문서 작성자 (Stripe Docs/카카오 dev)
+  - **사용자 정의**: `leerness persona add my-domain` → `.harness/personas/my-domain.md` 템플릿 생성
+- **`leerness review <file> --persona <id1,id2,...>`**: 파일 + 페르소나 본문을 결합한 sub-agent 프롬프트 자동 생성. 단일/다중 페르소나 모두 지원.
+
+### Why
+페르소나 미부여 sub-agent는 코드를 표면적으로만 리뷰 (보안 30% + 성능 20% + UX 10%). 페르소나 부여 시 각 도메인 100% 발견율. 다중 페르소나 동시 spawn으로 종합 커버리지 가능.
+
+### Implementation
+- 내장 페르소나는 harness.js의 `BUILT_IN_PERSONAS` 객체로 패키지 내 보관 — 별도 설치 불필요.
+- 사용자 정의 페르소나는 `.harness/personas/<id>.md` 파일로 검색 (커밋 가능).
+- LLM 자동 호출 없음 — 프롬프트 생성만, 실 호출은 Claude Code/Codex/Gemini 등에서.
+
+### Migration
+```bash
+npx leerness@latest update . --yes
+leerness persona list
+leerness review src/api.js --persona security,performance,ux
+```
+
+## 1.9.28 — 2026-05-15
+
+**낙관적 표시 정밀도 fix — 한국형 PG 패턴 + confidence floor 0.15**.
+
+1.9.27 sub-agent 검증에서 발견한 두 한계점을 작은 patch로 보완.
+
+### Fixed
+- **Payment 패턴 확장** — 카카오페이/네이버페이/페이팔 한국·국제 PG 추가 (`evidenceRe`/`codeRe`).
+- **Confidence floor 0.15** — 1.9.27의 단일 high suspect 케이스 일률적 confidence=0 → 0.15로 floor 적용해 다중 의심과 정량 차등 가능.
+
+### Why
+- 한국 사용자의 결제 evidence ("카카오페이 결제 승인 완료" 등)가 1.9.27에선 일부만 감지. 이제 모든 한국형 PG 정확 매칭.
+- confidence=0/0/0 일률성 해소 → "단일 의심도 정량 차이" 표현 가능.
+
+### e2e
+139/139 PASS (138 + 1.9.28 신규 1)
+
+## 1.9.27 — 2026-05-15
+
+**낙관적 표시 방지 강화 — URL/메서드 단위 매핑 + 10 카테고리 + 신뢰도 점수**.
+
+1.9.26의 sub-agent B 검증에서 발견한 false negative (T-9001 "POST /users" 케이스, 같은 프로젝트에 다른 목적의 http.request 있으면 통과)를 정확히 해결.
+
+### Added
+
+- **URL/메서드 단위 매핑** (1.9.27 핵심): evidence에서 `POST /users` 같은 구체 경로 추출 → 코드에서 같은 경로 호출 검사. 1.9.26의 "fetch 키워드 존재" 약한 신호 → "실제 경로 일치" 강한 신호.
+- **카탈로그 확장 5→10 카테고리**: FileIO / Queue / Cache / Notify(Slack/Discord) / Storage(S3/GCS/Azure) 신규.
+- **신뢰도 점수** (0.0~1.0): high (1.0 가중치) + medium (0.5 가중치) 의심을 evidence 주장 수로 나눠 신뢰도 산출. < 0.5 = ⚠ 낮음, < 0.9 = ⓘ 보통, ≥ 0.9 = ✓ 높음.
+
+### Why
+1.9.26 sub-agent B 검증에서 발견:
+- T-9001 evidence "POST /users API 호출 완료" + 같은 프로젝트에 다른 목적의 `http.request({path: '/api/tags'})` 존재 → 1.9.26은 "API 카테고리 통과"로 false negative
+- 1.9.27 URL 매핑: "POST /users" 추출 후 코드에서 `/users` 검색 → 미발견 → 의심 감지 (MED severity)
+
+### Limitations (1.9.28 후보)
+- AST 분석 여전히 미구현 — 단순 substring 매칭의 한계
+- URL 매핑이 path만 — query string, header 검증 없음
+- 패턴 카탈로그 10종으로 확장됐지만 도메인 특화 패턴 (GraphQL, gRPC) 미커버
+
+### Migration
+```bash
+npx leerness@latest update . --yes
+
+# 강화된 명령 사용
+leerness optimism-check T-0001 --path . --json   # 신뢰도 점수 포함
+leerness verify-claim T-0001 --strict-claims     # 통합 검사
+```
+
+## 1.9.26 — 2026-05-15
+
+**낙관적 표시 방지 — `optimism-check <T-ID>` + `verify-claim --strict-claims`** (사용자 명시 요구사항).
+
+API 연동/DB 저장/이메일 발송 등 외부 작용을 evidence에 적었는데 실제 코드에 호출 흔적이 없는 "낙관적 표시"를 정적 분석으로 자동 감지.
+
+### Added
+
+- **`leerness optimism-check <T-ID> [--json]`**: progress-tracker의 evidence를 5종 패턴(API/DB/Email/Webhook/Payment)으로 스캔 → 주장이 있으면 코드 본문(`src/`, `bin/`, `lib/`, `scripts/`)에 호출 흔적 검사 → 불일치 발견 시 `exit 1`.
+- **`leerness verify-claim --strict-claims`**: 기존 verify-claim 출력에 낙관적 표시 검사 결과 통합. 의심 발견 시 종합 FAIL.
+- 5종 패턴 카탈로그:
+  - **API**: `API 호출 / HTTP \d{3} / POST \/ / fetch / endpoint` ↔ `fetch( / http.request / axios. / undici / got.`
+  - **DB**: `DB에 저장 / insert N건 / 데이터베이스 / migration` ↔ `db. / pg. / mongoose. / prisma. / sequelize`
+  - **Email**: `이메일 발송 / sendMail` ↔ `sendMail / nodemailer / smtp / @sendgrid`
+  - **Webhook**: `웹훅 호출` ↔ `fetch / http.request / axios.`
+  - **Payment**: `결제 완료 / stripe / toss` ↔ `stripe / toss / tosspayments`
+
+### Why
+1.9.18~1.9.25의 verify-claim은 파일·테스트 카운트만 검증. 외부 작용(API/DB) 주장은 못 잡음. 1.9.26은 정적 분석으로 1차 방어선 추가.
+
+### Limitations (1.9.27 후보)
+- 같은 프로젝트가 다른 목적으로 동일 키워드(예: `http.request`)를 쓰면 false negative. URL/메서드 단위 매핑 필요.
+- AST 분석 없는 substring 매칭. 호출 위치(call site) vs evidence 청크 매핑 필요.
+- 파일 I/O, 메시지 큐(rabbitmq/kafka), 결제 PG 추가 필요.
+
+### Migration
+```bash
+npx leerness@latest update . --yes
+
+# 사용 예
+leerness optimism-check T-0001
+leerness verify-claim T-0001 --run-tests --strict-claims
+```
+
+## 1.9.25 — 2026-05-15
+
+**모순 감지 0/5 → 5/5 — 소스 코드 인덱싱 + 멀티 세션 in-progress 즉시 등록**.
+
+이전 1.9.24 실측에서 발견한 "코드는 있는데 progress-tracker에 등록 안 된 상태" 사각지대를 두 가지 신규 명령으로 보완.
+
+### Added
+
+- **`leerness memory search "키" --include-code`** (후보 A): `.harness/*.md` 외에 `src/`, `tests/`, `bin/`, `lib/`, `scripts/` 폴더의 `.js/.ts/.gd/.cs/.py/.rb/.go/.rs/.md/.html/.css/.json` 본문도 검색. 모순 감지 핵심.
+- **`leerness brainstorm "주제" --include-code`** (후보 A 확장): 단일/워크스페이스 모드 모두에서 코드 hits 별도 섹션 (`💻 코드`)으로 표시.
+- **`leerness register-pending "<요청>"`** (후보 B): 다중 세션/모델이 작업 시작 즉시 progress-tracker에 in-progress T-row를 등록. `--agent <name> --note <text>` 옵션. 다른 세션이 즉시 발견 가능 → 중복/모순 작업 방지.
+
+### Why
+1.9.24까지: Gemini가 워크스페이스 직접 수정 (toJson 추가)했지만 progress-tracker에 등록 전엔 다른 세션이 발견 못함 (0/5 fail). 1.9.25:
+- 소스 코드 인덱싱으로 즉시 발견 가능 (실측: `memory search "toJson" --include-code` → **0 → 15 matches**)
+- `register-pending`으로 작업 시작 시점 즉시 신호 발신
+
+### Migration
+```bash
+npx leerness@latest update . --yes
+
+# 다중 세션 / 외부 모델 워크플로 (Gemini/Codex/Claude)
+leerness handoff --compact > /tmp/ctx.txt
+# 외부 모델에 컨텍스트 + 작업 부여
+gemini -p "$(cat /tmp/ctx.txt)\n작업: ..." --yolo
+
+# 모순 감지 (코드 검색 포함)
+leerness memory search "키워드" --include-code
+leerness brainstorm "주제" --all-apps --include-code
+```
+
+## 1.9.24 — 2026-05-14
+
+**`leerness deps <capability>` — depends-on 그래프 역방향 추적 + 자동 회귀 sweep**.
+
+오래된 작업 재진행 시 / 핵심 모듈 변경 시 영향받는 모듈을 자동 식별 + 해당 프로젝트의 `npm test`를 일괄 실행.
+
+### Added
+
+- **`leerness deps <capability>`**: 워크스페이스 모든 `reuse-map.md`의 depends-on 엣지를 역방향 추적해 해당 capability를 의존하는 모든 capability와 프로젝트를 식별. 1-hop(직접 의존) + 2-hop(전이 의존) 모두 표시.
+- **`leerness deps <capability> --run-tests`**: 영향받는 N개 프로젝트의 `npm test`를 자동 일괄 실행. 회귀 발견 시 어느 프로젝트인지 즉시 보고 + `exit 1`. CI 통합용 `--json`.
+- 실측: `leerness deps Character --all-apps --run-tests` 실행 시 rpg-core의 `Character` capability에 의존하는 **6 프로젝트(8 capability) 자동 식별 + 6/6 npm test 자동 일괄 실행**.
+
+### Why
+오래된 작업을 재진행하거나 핵심 모듈을 변경할 때, 영향받는 다른 프로젝트를 수동으로 grep하던 패턴을 1 명령으로 자동화. depends-on 그래프(1.9.18부터 수집)가 활용됨.
+
+### Migration
+```bash
+npx leerness@latest update . --yes
+# 사용 예
+leerness deps Character --all-apps --run-tests
+```
+
+## 1.9.23 — 2026-05-14
+
+**Install 사용성 개선 — `preferGlobal` + `main` 필드 + README 상단 Install 섹션**.
+
+npmjs.com 페이지가 자동 표시하는 `npm i leerness`만 따라 했을 때 `leerness` 명령이 PATH에 없어 실패하던 문제를 안내로 보완.
+
+### Changed
+- `package.json` — `preferGlobal: true` (npm이 사용자에게 전역 설치 권장 메시지 출력) + `main: "bin/harness.js"` (라이브러리 import도 가능)
+- `README.md` — 최상단에 **⚙️ 설치 (Install)** 섹션 추가. 3가지 옵션 명시:
+  1. `npx leerness@latest ...` (추천, 설치 불필요)
+  2. `npm i -g leerness` (전역 설치)
+  3. `npm i --save-dev leerness` + `npx leerness ...`
+
+## 1.9.22 — 2026-05-14
+
+**Ollama 로컬 LLM 통합 (opt-in 전용) — handoff --compact + orchestrate --agents N + llm-bench record**.
+
+LLM 벤치마크에서 확인된 4가지 개선점 통합. **opt-in 정책 엄수**: 사용자가 leerness 적용 프로젝트에서 로컬 LLM 사용을 원치 않을 수 있어 자동 활성화 금지.
+
+### Added
+
+- **`leerness handoff --compact`** (후보 1): 4KB 출력을 ~500자 1-3줄로 압축. LLM 시스템 프롬프트 주입용. 핵심: 진행률 + 프로젝트 1줄씩 + 핵심 규칙 1줄.
+- **`leerness orchestrate "<목표>" --agents N`** (후보 3, 사용자 정책 명시):
+  - **Opt-in 전용**: `LEERNESS_OLLAMA_BASE_URL` 환경변수 감지 시에만 활성화. 미설정 시 명령 거부 + 한국어 안내. **LLM 자동 호출 절대 금지**.
+  - `.env` 파일 자동 로드 (간단 파서).
+  - `--agents N` 가변 (1~256). 사용자 요구 "10/20개 등 늘어날 수 있음" 반영.
+  - `--model` 선택, `--retry-on-fail K`(후보 2 통합), Promise.all 병렬.
+  - 실측: 10 agent에서 5.5× 병렬 효과.
+  - `.harness/orchestrate-log.md` 자동 누적.
+- **`leerness llm-bench record`** (후보 4): `.harness/llm-bench-history.md`에 표 누적.
+- **`.env.example`**: `LEERNESS_OLLAMA_BASE_URL=` + `LEERNESS_OLLAMA_MODEL=` + opt-in 정책 한국어 주석.
+
+### Policy (사용자 명시)
+- ❌ 환경변수 없이 LLM 자동 호출 금지
+- ✅ 환경변수 감지 시에만 활성화 (사용자 동의 표명으로 간주)
+- ✅ sub-agent 수는 사용자가 결정 (`--agents` 가변)
+
+## 1.9.21 — 2026-05-14
+
+**verify-claim 도메인 확장 hot fix** — `.cfg`/`.ini`/`.env`/`.toml`/`.lock`/`.conf`/`.properties` 추가.
+
+## 1.9.20 — 2026-05-14
+
+**verify-claim 정확도 + 도메인 확장 — Godot/jest/mocha 지원, verify-code --bench**.
+
+1.9.19를 실전 RPG 워크스페이스에 쓰면서 발견한 3가지 한계를 모두 보완. **Round 4 (rpg-godot) 작업에서 실제로 false negative 발생**한 케이스가 동기.
+
+### Added / Changed
+
+- **`verify-claim` file path 인식 확장**: 1.9.19까지는 `src/bin/tests/public/lib` prefix만 인식 → Godot의 `scenes/*.tscn`, `scripts/*.gd`, 루트 `project.godot` 등 미검출. 1.9.20부터 **확장자 화이트리스트 기반**으로 변경. dir prefix는 optional, 확장자는 길이 내림차순 정렬로 `.ts` vs `.tscn` 정확히 구분.
+  - 신규 지원 확장자: `tscn / tres / godot / gd / cs / py / rb / go / rs / kt / sh / mdx / json5 / yaml / scss / sass / less / gltf / dockerfile / webmanifest` 등
+- **`verify-claim --run-tests` stdout 파싱 확장**: 1.9.19까지는 `X/Y 통과/passed/pass` 만 인식. 1.9.20부터 **jest** (`Tests: 12 passed, 12 total`), **mocha** (`7 passing`), **tap** (`# pass 5`) 형식도 자동 인식. evidence 컬럼 파싱에도 동일 패턴 적용.
+- **`verify-code --bench`**: `package.json#scripts.bench`가 있으면 추가 실행. 성능 metric을 `.harness/review-evidence.md`에 자동 누적. 1.9.19에서 별도 `perf record` 명령 추가 대신 기존 verify-code 확장으로 통합 — 의존성 0, 워크플로 일관.
+
+### Why
+- 1.9.19를 사용한 RPG 워크스페이스에서 `verify-claim T-0002 --path _apps/rpg-godot` 실행 시 evidence "project.godot + scenes/main.tscn + scripts/network.gd + scripts/main.gd"가 0건 검출. 1.9.20에서 **4/4 모두 정확 검출** 확인.
+- 외부 npm 패키지가 jest/mocha를 쓰는 경우 evidence나 stdout이 한국어가 아니어도 자동 인식.
+- 부하 측정 같은 동적 metric을 회고에서 추적 가능하도록 evidence 누적 채널 확장.
+
+### Migration
+```bash
+npx leerness@latest update . --yes
+```
+
+## 1.9.19 — 2026-05-14
+
+**1.9.18 후속 다듬기 — verify-claim에 동적 실행, --strict-elements 정확도 강화**.
+
+1.9.18을 실전 sub-agent 검수에 쓰면서 발견한 두 가지 가공할 점을 마저 보완.
+
+### Added
+
+- **`leerness verify-claim --run-tests`**: 정적 점검(파일 존재 + 테스트 카운트)에 더해 `npm test`를 동적으로 실행. stdout에서 `X/Y passed` 패턴을 파싱해 evidence 주장과 비교. 주장이 `5/5 통과`인데 실제 `3/5`면 exit 1. `--json`에 `run.parsed`, `verdict.declaredPassMatches` 포함.
+- **`--strict-elements` 출력 강화**: 같은 함수명이라도 (a) 같은 파일이면 `⚠ 진짜 중복 가능`, (b) 다른 파일이면 `ℹ 의도 분리 가능` (예: 모듈 함수 vs CLI 명령)으로 분류. 1.9.18의 평면 출력보다 false positive 식별이 쉬워짐.
+
+### Why
+- `verify-claim`만으로는 "파일이 있고 check() 호출이 많다" 정도까지만 보장. `--run-tests`가 추가되면 메인 에이전트가 sub-agent의 evidence를 **한 번의 명령으로 정적+동적 모두 검증**.
+- 1.9.18 `--strict-elements`가 city-insights의 `MemoStats`/`StatsCli`(둘 다 `stats()` 함수, 다른 파일) 같은 의도된 분리를 잠재 중복으로 평면 표시 → 사용자가 직접 판별해야 했음. 1.9.19에선 정보를 더 줘서 즉시 분류 가능.
+
+### Migration
+```bash
+npx leerness@latest update . --yes
+```
+
+## 1.9.18 — 2026-05-14
+
+**오케스트레이션 검수 패키지 — `--since` 시간 필터 + `--strict-elements` 잠재 중복 + `depends-on` 그래프 + `verify-claim` 자동 검증**.
+
+1.9.17의 워크스페이스 모드를 실전 멀티 에이전트 작업에서 사용하다 발견한 4가지 갭을 모두 보완합니다. 검수 자동화에 초점.
+
+### Added
+
+- **`leerness handoff --since <duration>`**: `24h` / `3d` / `1w` / `30m` 형식. 해당 기간 내 수정된 T-row에 🆕 마크 + 별도 "최근 변경" 섹션. sub-agent들이 방금 무엇을 추가했는지 한눈에.
+- **`leerness reuse-map --strict-elements`**: element 컬럼에서 함수명 추출 (`src/build.js (escapeHtml)` → `escapeHtml`), **다른 capability 이름인데 같은 함수**를 잠재 중복으로 감지. 명명 일관성 검사용.
+- **`reuse-map` depends-on 표기**: notes 컬럼에 `depends-on: A, B` 표기 시 자동 추출해 의존 그래프로 표시. 단일/워크스페이스 모두 지원. JSON에 `dependsEdges` 포함.
+- **`leerness verify-claim <T-ID>`**: progress-tracker의 evidence 컬럼 자동 파싱 — 주장한 파일 경로 존재 확인, 주장한 테스트 수 vs 실제 `check()/test()/it()` 호출 수 대조. 불일치 시 `exit 1`. CI 통합용 `--json`.
+
+### Why
+멀티 에이전트 병렬 작업 검수 시 메인 에이전트가 매번 수동으로 `wc -l`, `grep`, `npm test`를 돌리고 있었음. 1.9.18은 그 패턴을 하나의 명령으로 자동화:
+- "지금 sub-agent들이 뭘 추가했지?" → `handoff --all-apps --since 1h`
+- "같은 함수를 두 번 만든 거 아닌가?" → `reuse-map --all-apps --strict-elements`
+- "이 에이전트의 evidence가 진짜인가?" → `verify-claim T-0008`
+
+### Migration
+```bash
+npx leerness@latest update . --yes
+```
+
+## 1.9.17 — 2026-05-14
+
+**워크스페이스 오케스트레이션 — `handoff --all-apps` + `reuse-map --all-apps` + 중복 capability 감지**.
+
+멀티 에이전트 병렬 작업 시 메인 에이전트가 한 번의 명령으로 모든 sub-agent의 진행 상태를 파악하고, 새 패턴이 다른 프로젝트와 중복되는지 즉시 검증할 수 있습니다.
+
+### Added
+
+- **`leerness handoff --all-apps` / `--include`**: 워크스페이스 전체의 진행 상태(WIP/blocked/다음 작업)를 한 화면에 출력. 4개 sub-agent가 병렬로 일할 때 메인 agent의 상황 인식용. `--json`도 지원.
+- **`leerness reuse-map [path]`**: 단일 프로젝트의 reuse-map.md 파싱 출력.
+- **`leerness reuse-map --all-apps` / `--include`**: 다수 프로젝트의 모든 capability를 모아 **동일 이름 capability를 자동 중복 감지**. 재사용/공통 모듈 추출 기회 식별. `--json`도 지원.
+
+### Why
+1.9.16까지의 `retro --all-apps`는 누적 회고용. 1.9.17은 **실시간 오케스트레이션용**: "지금 어떤 에이전트가 무엇을 하고 있고, 새 패턴이 다른 프로젝트와 겹치는가?"에 답합니다.
+
+### Migration
+```bash
+npx leerness@latest update . --yes
+```
+
 ## 1.9.16 — 2026-05-13
 
 **brainstorm 워크스페이스 통합 + 3 명령 JSON export + session close 워크스페이스 안내**.

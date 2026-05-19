@@ -10,3 +10,8 @@ Thumbs.db
 .env.local
 *.local.json
 tmp-*-test/
+
+# 1.9.43: 내부 검수 보고서 비공개
+_reports/
+*.private.md
+*.private.json

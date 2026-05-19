@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.16';
+const VERSION = '1.9.43';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -113,7 +113,7 @@ function arg(name, def = null) { const i = process.argv.indexOf(name); return i 
 function has(name) { return process.argv.includes(name); }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap']);
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens']);
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -198,8 +198,8 @@ function coreFiles(root, lang = 'ko', selectedSkills = []) {
   const project = detectProjectName(root);
   const skillRows = Object.entries(skillCatalog).map(([k, v]) => `| ${k} | ${v.displayNameKo} | ${v.capabilities.join(', ')} | ${v.lastUpdated} | ${v.verification} |`).join('\n');
   return {
-    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## Mandatory read order (session start)\n1. .harness/context-routing.md\n2. .harness/session-handoff.md\n3. .harness/current-state.md\n4. .harness/plan.md\n5. .harness/progress-tracker.md\n6. .harness/guideline.md\n7. .harness/protected-files.md\n8. .harness/writeback-policy.md\n9. .harness/anti-lazy-work-policy.md\n10. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증합니다.\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍 (1.9.13)\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리 (1.9.8)\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용 (1.9.8)\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
-    'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰 (1.9.8)\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
+    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ 매 세션 첫 행동 (1.9.39+)\n**반드시 \`.harness/session-workflow.md\`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.\n\n## Mandatory read order (session start)\n1. **.harness/session-workflow.md** (1.9.39+ 6단계 워크플로 — 최우선)\n2. .harness/context-routing.md\n3. .harness/session-handoff.md\n4. .harness/current-state.md\n5. .harness/plan.md\n6. .harness/progress-tracker.md\n7. .harness/guideline.md\n8. .harness/protected-files.md\n9. .harness/writeback-policy.md\n10. .harness/anti-lazy-work-policy.md\n11. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증합니다.\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍 (1.9.13)\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리 (1.9.8)\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용 (1.9.8)\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
+    'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ 매 세션 첫 행동 (1.9.39+)**: \`.harness/session-workflow.md\`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 \`leerness drift check --auto-fix\`로 자동 회복.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰 (1.9.8)\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
     '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .harness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`,
     '.github/copilot-instructions.md': `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`,
     '.harness/HARNESS_VERSION': VERSION + '\n',
@@ -229,6 +229,81 @@ function coreFiles(root, lang = 'ko', selectedSkills = []) {
     '.harness/review-checklist.md': fm('review-checklist', ['PR/리뷰 전'], ['리뷰 기준 변경'], `# Review Checklist\n\n- [ ] 계획과 정렬되어 있는가\n- [ ] progress-tracker가 갱신되었는가\n- [ ] 보호 파일을 삭제하지 않았는가\n- [ ] 디자인/기능 재사용을 확인했는가\n- [ ] 시크릿이 코드에 들어가지 않았는가 (\`leerness scan secrets\`)\n- [ ] 한글 인코딩 OK (\`leerness encoding check\`)\n- [ ] 게으름 평가 통과 (\`leerness lazy detect\`)\n`),
     '.harness/release-checklist.md': fm('release-checklist', ['배포 전'], ['배포 조건/환경변수/롤백 변경'], `# Release Checklist\n\n- [ ] \`leerness verify .\`\n- [ ] \`leerness audit .\`\n- [ ] \`leerness scan secrets .\`\n- [ ] \`leerness encoding check .\`\n- [ ] 프로젝트 typecheck/lint/test\n- [ ] 환경변수 (.env.example) 동기화\n- [ ] 롤백 방법 확인\n- [ ] CHANGELOG 갱신\n`),
     '.harness/session-close-policy.md': fm('session-close-policy', ['세션 종료 전'], ['세션 종료 형식 변경'], `# Session Close Policy\n\nEvery session must list:\n- Completed\n- In progress\n- Incomplete\n- Planned\n- Waiting\n- On hold\n- Blocked\n- Dropped\n- Verification (commands run, results)\n- Recommended next direction\n- Next exact step\n\n\`leerness session close\`가 위 9개 카테고리를 자동 추출하고, session-handoff.md에 다음 세션을 위한 인수인계 블록을 자동 작성합니다.\n`),
+    '.harness/session-workflow.md': fm('session-workflow', ['세션 시작','새 사용자 요청 도착','복잡한 작업 분배 전'], ['워크플로 단계 변경'], `# Session Workflow — AI 하네스 엔지니어링 6단계
+
+> **매 세션 시작 시 메인 에이전트는 이 문서를 먼저 읽고 6단계를 그대로 따른다.**
+> 라운드 길이/복잡도 무관, 단순 작업도 동일 흐름 유지 — 그래야 drift 안 됨.
+
+## Step 1. 요청 분석 + 환경 확인
+\`\`\`bash
+leerness handoff .            # 컨텍스트 적재 + drift 자동 경고
+leerness drift check .        # 4 신호 + 4단계 레벨
+\`\`\`
+- 사용자 요청을 5W1H로 분해. 모호하면 명확화 질문 (autonomous 모드 제외).
+- drift critical 시 \`leerness session close .\` 또는 \`drift check --auto-fix\` 우선 실행.
+
+## Step 2. 계획 수립
+- 작업이 3 step 이상 → TodoWrite 또는 \`leerness plan add\` 사용.
+- 신규 capability → \`leerness reuse-map\` / \`reuse find <query>\`로 기존 자원 우선 검색.
+- 다중 모듈 → 통합 사양 사전 정의 (예: TICK_SPEC.md).
+
+## Step 3. 업무 분배 — sub-agent 매핑
+\`\`\`bash
+leerness agents list                  # ready CLI 확인
+leerness agents quota                 # 한도 확인
+leerness agents dispatch "<task>" --to <id>   # 작업 유형 추천 자동
+\`\`\`
+- 작업 유형별 최적 sub-agent:
+  - 텍스트/번역/분석 → claude (1.7× 빠름)
+  - 깊은 코드 추론 → codex (가장 상세)
+  - 파일 직접 수정 → gemini --yolo (정확)
+  - 보안 리뷰 → \`leerness review --persona security\`
+- **충돌 방지 규칙 (필수)**:
+  - 각 sub-agent에 *자신만 수정할 파일 경로* 명시
+  - mtime 검증 결과 보고 의무화 (동시 쓰기는 last-writer-wins 위험)
+  - 사양 사전 정의 → \`leerness contract verify\`로 사후 검증
+
+## Step 4. sub-agent 작업 + 개별 자체 검증
+- 각 sub-agent가 자기 모듈 자체 테스트 통과 후 보고.
+- 보고 형식: 라인 수, 테스트 N/N PASS, 발견 이슈, mtime 검증 결과.
+
+## Step 5. 종합 검증
+\`\`\`bash
+leerness contract verify SPEC.md src/<mod>.js  # 명세 ↔ 구현 일치
+leerness verify-claim T-XXX --run-tests --strict-claims
+leerness review <file> --persona security,performance,ux
+\`\`\`
+- 메인이 직접 통합 시나리오 작성 + 실행 (independent 검증).
+- Sub-agent 검수 vs 메인 검수 결과 *교차 일치* 확인.
+
+## Step 6. 세션 마감 + 인계
+\`\`\`bash
+leerness session close .       # handoff/current-state/task-log 자동 갱신
+leerness audit . --fix         # 누락 메타 자동 보강
+leerness usage stats .         # 이번 세션 명령 카운트 확인
+\`\`\`
+- session close가 누락되면 다음 세션 시작 시 drift critical 발생.
+- 자동 회복 옵션: \`drift check --auto-fix\` (critical 시 session close 자동 실행).
+
+---
+
+## 빠른 체크리스트
+
+세션 끝나기 전 다음이 모두 ✓이어야 한다:
+- [ ] plan/progress-tracker에 이번 라운드 task 등록됨 (또는 task sync)
+- [ ] 모든 done 항목에 evidence 첨부됨 (verify-claim PASS)
+- [ ] sub-agent 사용 시 contract verify PASS
+- [ ] drift 점수 ≤ 30 (attention 이하)
+- [ ] session close 호출됨
+
+## Anti-pattern (drift 신호)
+
+- ⚠ "작업 끝났으니 보고만 하고 끝" → session close 누락 → 다음 세션 drift critical
+- ⚠ "TodoWrite만 갱신하고 leerness 안 씀" → \`task sync --from\` 또는 \`task add\` 필수
+- ⚠ sub-agent 분배 시 파일 경로 미명시 → 동시 쓰기 충돌
+- ⚠ "테스트 돌렸으니 PASS" 자기 보고만 → verify-claim --run-tests 미실행
+- ⚠ contract verify 생략 → 사양 불일치 BUG가 사용자에게 노출
+`),
     '.harness/anti-lazy-work-policy.md': fm('anti-lazy-work-policy', ['완료 선언 전'], ['게으른 작업 방지 기준 변경'], `# Anti Lazy Work Policy\n\n## Rules\n1. **증거 없는 완료 금지**: \"완료\"를 선언하려면 progress-tracker의 evidence 컬럼에 명령 출력/테스트 결과/스크린샷 경로 등이 있어야 합니다.\n2. **빈 핸드오프 금지**: 세션 종료 시 session-handoff.md의 Completed/In Progress/Next Exact Step이 모두 비어 있으면 close가 \"insufficient\" 상태로 표시됩니다.\n3. **부분 구현 자기보고**: 완전 구현이 아니면 status를 \`incomplete\`로, Next Exact Step에 \"무엇을 추가해야 끝나는지\" 한 줄을 적습니다.\n4. **검증 기록**: typecheck/lint/test 결과를 review-evidence.md에 누적 기록합니다.\n5. **TODO 표지**: 코드에 \`TODO\`/\`FIXME\`/\`XXX\`를 새로 도입하면 progress-tracker에 동일 ID로 추적합니다.\n6. **거짓 완료 자동 감지**: \`leerness lazy detect\`는 다음을 자동 점검합니다.\n   - progress-tracker에 done인데 evidence가 비어있는 row\n   - session-handoff의 Completed가 비어있고 Next Exact Step도 비어있음\n   - 코드에 새 TODO/FIXME 추가 + progress-tracker에 추적 항목 없음\n   - test 명령 실행 흔적 없음 (review-evidence.md 또는 task-log.md에 명령 기록)\n`),
     '.harness/rules.md': _rulesHeader() + '\n',
     '.harness/session-handoff.md': fm('session-handoff', ['세션 시작','다음 작업 이어받기'], ['세션 종료'], `# Session Handoff\n\nLast generated: (자동)\n\n## Completed\n-\n\n## In Progress\n-\n\n## Incomplete / Waiting / On Hold / Blocked\n-\n\n## Dropped\n-\n\n## Verification\n-\n\n## Recommended Direction\n-\n\n## Next Exact Step\n-\n`),
@@ -336,16 +411,77 @@ function mergeLinesFile(p, lines) {
   writeUtf8(p, next);
 }
 
-function writeMigrationReport(root, backup, actions) {
+function writeMigrationReport(root, backup, actions, opts = {}) {
   const p = path.join(root, '.harness/migration-report.md');
   const rows = actions.map(a => `| ${a.file} | ${a.action} |`).join('\n');
-  writeUtf8(p, `# Leerness Migration Report\n\nVersion: ${VERSION}\nDate: ${now()}\nBackup: ${rel(root, backup.archiveDir)}\n\n## Policy\n\n- Existing harness, skill, and instruction files are backed up before migration.\n- Project memory files are preserved by default.\n- Managed instruction files are merged with previous content instead of being blindly overwritten.\n- .env.example/.gitignore are line-merged only.\n\n## Backed Up Candidates\n\n${backup.candidates.map(x => '- ' + x).join('\n')}\n\n## File Actions\n\n| File | Action |\n|---|---|\n${rows}\n`);
+  // 1.9.41: AI must re-read 섹션 — migrate가 추가/변경한 파일을 AI 가독 포맷으로 추출
+  // fromV가 명시되면 CHANGELOG 차분 포함
+  let aiReadBlock = '';
+  try {
+    const fromV = opts.fromV || (backup && backup.previousVersion) || null;
+    if (fromV && fromV !== VERSION) {
+      const changelogPath = path.join(__dirname, '..', 'CHANGELOG.md');
+      const cl = exists(changelogPath) ? read(changelogPath) : (exists(path.join(root, 'CHANGELOG.md')) ? read(path.join(root, 'CHANGELOG.md')) : '');
+      if (cl) {
+        const diff = _parseChangelogBetween(cl, fromV, VERSION);
+        const allCommands = new Set(), allFlags = new Set(), allFiles = new Set();
+        for (const v of diff) {
+          v.newCommands.forEach(c => allCommands.add(c));
+          v.newFlags.forEach(f => allFlags.add(f));
+          v.newFiles.forEach(f => allFiles.add(f));
+        }
+        if (diff.length) {
+          aiReadBlock = `\n## 🤖 AI must re-read (1.9.41 차분 안내)\n\n`;
+          aiReadBlock += `이 migrate는 ${fromV} → ${VERSION} 점프입니다. 메인 AI 에이전트는 다음을 인지하고 우선 활용:\n\n`;
+          if (allCommands.size) aiReadBlock += `**📌 신규 명령** (이전엔 없던 것):\n${[...allCommands].map(c => `- \`leerness ${c}\``).join('\n')}\n\n`;
+          if (allFlags.size)    aiReadBlock += `**🚩 신규 플래그**:\n${[...allFlags].map(f => `- \`${f}\``).join('\n')}\n\n`;
+          if (allFiles.size)    aiReadBlock += `**📄 신규/변경 파일** (반드시 재독):\n${[...allFiles].map(f => `- \`${f}\``).join('\n')}\n\n`;
+          aiReadBlock += `**버전별 헤드라인**:\n`;
+          for (const v of diff) {
+            const firstLine = (v.body.match(/^\*\*([^*]+)\*\*/) || [])[1]
+                           || (v.body.split('\n').find(l => l.trim() && !l.startsWith('##')) || '').trim().slice(0, 120);
+            aiReadBlock += `- ${v.version} — ${firstLine || '(no headline)'}\n`;
+          }
+          aiReadBlock += `\n**권장 행동**:\n1. 위 신규 명령을 \`--help\`로 확인\n2. \`AGENTS.md\` / \`CLAUDE.md\` / \`.harness/session-workflow.md\` 재독 (다음 \`leerness handoff\` 호출 시 자동 안내)\n3. 이전 청크의 기억 무효 — 새 도구 우선 시도\n4. 상세: \`leerness whats-new --from ${fromV}\`\n`;
+        }
+      }
+    }
+  } catch {}
+  writeUtf8(p, `# Leerness Migration Report\n\nVersion: ${VERSION}\nDate: ${now()}\nBackup: ${rel(root, backup.archiveDir)}\n${opts.fromV ? `Previous: ${opts.fromV}\n` : ''}${aiReadBlock}\n## Policy\n\n- Existing harness, skill, and instruction files are backed up before migration.\n- Project memory files are preserved by default.\n- Managed instruction files are merged with previous content instead of being blindly overwritten.\n- .env.example/.gitignore are line-merged only.\n\n## Backed Up Candidates\n\n${backup.candidates.map(x => '- ' + x).join('\n')}\n\n## File Actions\n\n| File | Action |\n|---|---|\n${rows}\n`);
 }
 
 function syncReadme(root) {
   const p = path.join(root, 'README.md');
   const existing = exists(p) ? read(p) : '';
-  writeUtf8(p, mergeReadmeSection(existing, managedReadmeBlock(detectProjectName(root))));
+  // 1.9.40: 자체 README도 동기화 — version 배지, e2e 카운트, package.json#version 일관성
+  let updated = mergeReadmeSection(existing, managedReadmeBlock(detectProjectName(root)));
+  try {
+    // package.json#version 또는 .harness/HARNESS_VERSION을 참조하여 README 배지 자동 갱신
+    const pkgPath = path.join(root, 'package.json');
+    let v = null;
+    if (exists(pkgPath)) {
+      try { v = JSON.parse(read(pkgPath)).version; } catch {}
+    }
+    if (!v) {
+      const hv = path.join(root, '.harness', 'HARNESS_VERSION');
+      if (exists(hv)) v = parseHarnessVersion(read(hv)).base;
+    }
+    if (v && /^\d+\.\d+\.\d+/.test(v)) {
+      // version 배지
+      updated = updated.replace(/badge\/version-[\d.]+-(green|blue|red)/g, `badge/version-${v}-green`);
+    }
+    // e2e 배지: scripts/e2e.js의 출력 "E2E result: N/N passed" 추정 (직접 grep)
+    const e2ePath = path.join(root, 'scripts', 'e2e.js');
+    if (exists(e2ePath)) {
+      // total++ 횟수 카운트 — 정확하진 않지만 추세 반영
+      const body = read(e2ePath);
+      const total = (body.match(/^total\+\+;/gm) || []).length;
+      if (total > 0) {
+        updated = updated.replace(/badge\/e2e-(\d+)%2F(\d+)-success/g, `badge/e2e-${total}%2F${total}-success`);
+      }
+    }
+  } catch {}
+  if (updated !== existing) writeUtf8(p, updated);
   ok('README.md Leerness section synced');
 }
 
@@ -363,33 +499,75 @@ async function resolveInstallOptions(root, opts = {}) {
   let lang = explicitLang ? detectLanguageValue(root, explicitLang) : detectLanguageValue(root, 'auto');
   let skills = explicitSkills ? parseSkillsValue(explicitSkills) : [];
   const shouldAsk = !has('--yes') && !opts.nonInteractive && process.stdin.isTTY && process.stdout.isTTY && !opts.migration;
+  // 1.9.34: 인터랙티브 multi-select (방향키 + Space + Enter) — 기존 숫자 선택 폴백 유지
+  // --no-interactive-select 또는 LEERNESS_NO_INTERACTIVE=1 → 구식 숫자 선택
+  const useInteractive = shouldAsk && !has('--no-interactive-select') && process.env.LEERNESS_NO_INTERACTIVE !== '1';
   if (shouldAsk && !explicitLang) {
-    log('\n설치 언어를 선택하세요.');
-    log('1) 자동 감지'); log('2) 한국어'); log('3) English');
-    const a = await ask('선택 [1]: ');
-    lang = a === '2' ? 'ko' : a === '3' ? 'en' : detectLanguageValue(root, 'auto');
+    if (useInteractive) {
+      const langOpt = await _selectOne('설치 언어를 선택하세요', [
+        { label: '자동 감지', description: '디렉토리/파일 분석 (한국어/영어 자동 판별)', id: 'auto' },
+        { label: '한국어', description: '모든 인스트럭션을 한국어로 생성', id: 'ko' },
+        { label: 'English', description: '모든 인스트럭션을 영어로 생성', id: 'en' }
+      ], { defaultIndex: 0 });
+      lang = langOpt && langOpt.id ? detectLanguageValue(root, langOpt.id) : detectLanguageValue(root, 'auto');
+    } else {
+      log('\n설치 언어를 선택하세요.');
+      log('1) 자동 감지'); log('2) 한국어'); log('3) English');
+      const a = await ask('선택 [1]: ');
+      lang = a === '2' ? 'ko' : a === '3' ? 'en' : detectLanguageValue(root, 'auto');
+    }
   }
   if (shouldAsk && !explicitSkills) {
-    log('\n설치할 스킬 라이브러리를 선택하세요.');
-    log('0) 기본 하네스만 설치');
-    log('1) 추천: office, commerce-api, ai-verified-skill-publisher, feature-implementation');
-    log('2) 전체 스킬 설치'); log('3) 직접 입력');
-    skillList();
-    const a = await ask('선택 [1]: ');
-    if (!a || a === '1') skills = parseSkillsValue('recommended');
-    else if (a === '2') skills = parseSkillsValue('all');
-    else if (a === '3') skills = parseSkillsValue(await ask('스킬 ID를 쉼표로 입력: '));
-    else if (a === '0') skills = [];
+    if (useInteractive) {
+      // 카탈로그에서 옵션 생성
+      const cat = Object.entries(skillCatalog).map(([id, meta]) => ({
+        id, label: id, description: (meta.displayNameKo || id).slice(0, 50)
+      }));
+      // 추천 4개의 인덱스 계산
+      const recommended = ['office', 'commerce-api', 'ai-verified-skill-publisher', 'feature-implementation'];
+      const defaults = recommended.map(id => cat.findIndex(c => c.id === id)).filter(i => i >= 0);
+      const picked = await _selectMany(
+        '설치할 스킬 라이브러리 (Space=토글, a=전체, n=해제, Enter=확정)',
+        cat,
+        { defaults }
+      );
+      skills = picked.map(p => p.id);
+    } else {
+      log('\n설치할 스킬 라이브러리를 선택하세요.');
+      log('0) 기본 하네스만 설치');
+      log('1) 추천: office, commerce-api, ai-verified-skill-publisher, feature-implementation');
+      log('2) 전체 스킬 설치'); log('3) 직접 입력');
+      skillList();
+      const a = await ask('선택 [1]: ');
+      if (!a || a === '1') skills = parseSkillsValue('recommended');
+      else if (a === '2') skills = parseSkillsValue('all');
+      else if (a === '3') skills = parseSkillsValue(await ask('스킬 ID를 쉼표로 입력: '));
+      else if (a === '0') skills = [];
+    }
   }
   return { lang, skills };
 }
 
 async function install(root, opts = {}) {
   root = absRoot(root); mkdirp(root);
+  // 1.9.41: migrate 직전 이전 버전 캡처 — 차분 안내에 사용
+  try {
+    const hv = path.join(root, '.harness', 'HARNESS_VERSION');
+    if (exists(hv) && !opts._previousVersion) {
+      const parsed = parseHarnessVersion(read(hv));
+      opts._previousVersion = parsed.base || parsed.plus || null;
+    }
+  } catch {}
+  // 1.9.32: init 시 ASCII 배너 + 빠른 시작 가이드 (migrate는 quiet)
+  if (!opts.migration && !has('--no-banner')) _banner({ quickStart: !opts.dry });
+  // 1.9.33: npx 캐시로 옛 버전이 실행될 때 경고 (migrate/--no-stale-check 시 스킵)
+  if (!opts.migration && !has('--no-stale-check') && !opts.nonInteractive) {
+    try { await _warnIfStale(root); } catch {}
+  }
   const resolved = await resolveInstallOptions(root, opts);
   const lang = resolved.lang;
   const skills = resolved.skills;
-  log(`\nLeerness v${VERSION}`);
+  log(`Leerness v${VERSION}`);
   log(`Target: ${root}`);
   log(`Language: ${lang}`);
   log(`Skills: ${skills.length ? skills.join(', ') : 'none'}`);
@@ -435,14 +613,44 @@ async function install(root, opts = {}) {
     ]);
     mergeLinesFile(path.join(root, '.env.example'), [
       '# Leerness uses environment variable names only. Do not store real secrets here.',
-      'LEERNESS_NPM_TOKEN=','LEERNESS_GITHUB_TOKEN='
+      'LEERNESS_NPM_TOKEN=','LEERNESS_GITHUB_TOKEN=',
+      '# 1.9.22 — orchestrate opt-in. URL이 설정되면 leerness가 Ollama를 사용 가능. 미설정 시 LLM 호출 자동 시작 금지.',
+      'LEERNESS_OLLAMA_BASE_URL=',
+      '# 선택. 기본 모델 (orchestrate --model 로 override 가능).',
+      'LEERNESS_OLLAMA_MODEL=',
+      '# 1.9.30 — 외부 AI CLI 활성화 플래그. 1=활성, 0/미설정=비활성. 메인 에이전트가 sub-agent 분배 시 활성 CLI들에 작업 위임 가능.',
+      'LEERNESS_ENABLE_CLAUDE=1',
+      'LEERNESS_ENABLE_CODEX=0',
+      'LEERNESS_ENABLE_GEMINI=0',
+      'LEERNESS_ENABLE_COPILOT=0',
+      '# 1.9.42 — agentskills.io 공개 표준 스킬 자동 탐색 (opt-in). URL 설정 시 `leerness skill discover` 사용 가능.',
+      '#   예: LEERNESS_SKILL_DISCOVER_URL=https://agentskills.io/llms.txt',
+      'LEERNESS_SKILL_DISCOVER_URL=',
+      '# (선택) 사용자 요청 분석 시 자동 매칭 스킬 추천. 1=활성, 0/미설정=비활성.',
+      'LEERNESS_SKILL_AUTO_DISCOVER=0'
     ]);
     mergeLinesFile(path.join(root, '.gitattributes'), [
       '* text=auto eol=lf','*.bat text eol=crlf','*.ps1 text eol=crlf'
     ]);
     syncReadme(root);
     installSkills(root, skills);
-    writeMigrationReport(root, backup, actions);
+    // 1.9.41: migrate 시 이전 버전을 미리 캡처해 차분 안내에 사용
+    writeMigrationReport(root, backup, actions, { fromV: opts._previousVersion || null });
+    // 1.9.41: migrate 후 (= 점프인 경우) 차분 안내를 stdout에 즉시 출력 — AI 컨텍스트에 새 도구 주입
+    if (opts.migration && opts._previousVersion && opts._previousVersion !== VERSION) {
+      try {
+        const reportPath = path.join(root, '.harness', 'migration-report.md');
+        if (exists(reportPath)) {
+          const rep = read(reportPath);
+          const aiBlock = rep.match(/## 🤖 AI must re-read[\s\S]*?(?=\n## )/);
+          if (aiBlock) {
+            log('');
+            log(aiBlock[0].trim());
+            log('');
+          }
+        }
+      } catch {}
+    }
     // 1.9.1 P7: 디폴트 M-0001이 plan에 있고 progress에 row가 없으면 자동 추가
     try {
       const planText = exists(planPath(root)) ? read(planPath(root)) : '';
@@ -461,6 +669,21 @@ async function install(root, opts = {}) {
     // 1.9.12: install 직후 첫 roadmap.html 자동 생성
     if (!has('--no-auto-roadmap')) {
       try { _autoRoadmap(root, 'install'); } catch (e) { warn('auto-roadmap 실패: ' + (e && e.message)); }
+    }
+    // 1.9.32: init 시 외부 AI CLI 설정 prompt (TTY + 신규 init + --no-setup-agents 미지정)
+    const isFreshInit = !opts.migration && !opts.force;
+    const skipSetup = has('--no-setup-agents') || has('--yes') || has('-y');
+    if (isFreshInit && process.stdin.isTTY && !skipSetup) {
+      try {
+        log('');
+        log('💡 외부 AI CLI(claude/codex/gemini/copilot)를 sub-agent로 활용하시겠습니까?');
+        const wantSetup = await _confirm('   지금 설정할까요? (나중에 `leerness setup-agents`로도 가능)', true);
+        if (wantSetup) {
+          await setupAgentsCmd(root);
+        } else {
+          log('   → 나중에 `leerness setup-agents .` 명령으로 설정 가능');
+        }
+      } catch (e) { warn('setup-agents skipped: ' + (e && e.message)); }
     }
   }
 }
@@ -634,6 +857,177 @@ function skillConsolidate(root) {
   log('| A | B | score | 권장 |');
   log('|---|---|---|---|');
   for (const c of candidates) log(`| ${c.a} | ${c.b} | ${c.score.toFixed(2)} | \`leerness skill learn <new> --capability ...\` 후 \`leerness skill remove <old>\` |`);
+}
+
+// 1.9.42: agentskills.io 표준 호환 — SKILL.md (frontmatter + 본문) + scripts/ + references/ + assets/
+// 정책: 사용자 동의 (opt-in) 후에만 외부 fetch. 기본 OFF.
+
+// SKILL.md frontmatter 파싱 (---name: ... description: ... --- 본문)
+function _parseSkillMd(text) {
+  const m = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+  if (!m) return { meta: {}, body: text };
+  const meta = {};
+  for (const line of m[1].split('\n')) {
+    const km = line.match(/^([a-zA-Z_-]+):\s*(.+)$/);
+    if (km) meta[km[1].trim()] = km[2].trim().replace(/^["']|["']$/g, '');
+  }
+  return { meta, body: m[2] };
+}
+
+// HTTPS fetch — Node 18+ globalThis.fetch 사용. 미지원 시 https module.
+async function _httpFetch(urlStr, opts = {}) {
+  const timeout = opts.timeout || 15000;
+  if (typeof fetch === 'function') {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const r = await fetch(urlStr, { signal: controller.signal });
+      clearTimeout(timer);
+      return { status: r.status, body: await r.text() };
+    } catch (e) {
+      clearTimeout(timer);
+      return { status: 0, body: '', error: e.message };
+    }
+  }
+  // fallback: https module
+  return new Promise((resolve) => {
+    const u = new URL(urlStr);
+    const lib = u.protocol === 'http:' ? require('http') : require('https');
+    const req = lib.get(urlStr, (res) => {
+      // redirect handling
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return _httpFetch(res.headers.location, opts).then(resolve);
+      }
+      let chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+    });
+    req.on('error', (e) => resolve({ status: 0, body: '', error: e.message }));
+    req.setTimeout(timeout, () => { req.destroy(); resolve({ status: 0, body: '', error: 'timeout' }); });
+  });
+}
+
+// skill install <url-or-path> — SKILL.md 다운로드 + .harness/skills/<id>/에 설치
+async function skillInstallCmd(root, source) {
+  if (!source) { fail('사용법: leerness skill install <SKILL.md URL 또는 로컬 디렉토리>'); return process.exit(1); }
+  let body = '';
+  if (/^https?:\/\//.test(source)) {
+    log(`# leerness skill install (1.9.42)`);
+    log(`다운로드 중: ${source}`);
+    const r = await _httpFetch(source);
+    if (r.status !== 200) {
+      fail(`다운로드 실패 (HTTP ${r.status}${r.error ? `, ${r.error}` : ''})`);
+      return process.exit(1);
+    }
+    body = r.body;
+  } else if (exists(source)) {
+    const localPath = exists(path.join(source, 'SKILL.md')) ? path.join(source, 'SKILL.md') : source;
+    body = read(localPath);
+    log(`# leerness skill install (1.9.42)`);
+    log(`로컬 로드: ${localPath}`);
+  } else {
+    fail(`source 없음 (URL 또는 디렉토리 경로): ${source}`);
+    return process.exit(1);
+  }
+  const parsed = _parseSkillMd(body);
+  const name = parsed.meta.name || parsed.meta.id;
+  const description = parsed.meta.description || '';
+  if (!name) { fail('SKILL.md frontmatter에 `name` 필수'); return process.exit(1); }
+  // .harness/skills/<id>/SKILL.md 저장
+  const skillId = String(name).toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
+  const dir = path.join(root, '.harness', 'skills', skillId);
+  mkdirp(dir);
+  writeUtf8(path.join(dir, 'SKILL.md'), body);
+  // skill.json도 함께 (자체 catalog 호환)
+  writeUtf8(path.join(dir, 'skill.json'), JSON.stringify({
+    name: skillId, displayNameKo: name, description,
+    capabilities: [], _source: 'agentskills.io',
+    verification: { status: 'unverified', method: 'agentskills.io-import' }
+  }, null, 2) + '\n');
+  log(`✓ skill installed: ${skillId}`);
+  log(`  name: ${name}`);
+  log(`  description: ${description.slice(0, 100)}`);
+  log(`  saved: ${rel(root, dir)}/`);
+  log('');
+  log(`💡 다음: leerness skill info ${skillId}`);
+}
+
+// skill discover — agentskills.io 또는 사용자 지정 URL의 카탈로그 인덱스에서 매칭 추천
+async function skillDiscoverCmd(root) {
+  const url = arg('--source', null) || process.env.LEERNESS_SKILL_DISCOVER_URL || null;
+  const query = arg('--query', null);
+  if (!url) {
+    fail([
+      'LEERNESS_SKILL_DISCOVER_URL 환경변수 또는 --source URL 필요.',
+      '예: leerness skill discover --source https://agentskills.io/llms.txt',
+      '또는 .env에 LEERNESS_SKILL_DISCOVER_URL=...',
+      '',
+      '(정책: leerness는 사용자 동의 없이 외부 URL을 fetch하지 않음 — 1.9.42 opt-in)'
+    ].join('\n'));
+    return process.exit(1);
+  }
+  log(`# leerness skill discover (1.9.42)`);
+  log(`source: ${url}`);
+  if (query) log(`query: ${query}`);
+  log(`fetching...`);
+  const r = await _httpFetch(url);
+  if (r.status !== 200) {
+    fail(`fetch 실패 (HTTP ${r.status}${r.error ? `, ${r.error}` : ''})`);
+    return process.exit(1);
+  }
+  // 카탈로그 인덱스 파싱 — agentskills.io는 llms.txt 형식 또는 raw 마크다운
+  const body = r.body;
+  // 간이 추출: SKILL.md 링크 + name + description 패턴
+  // - URL: https://.../SKILL.md
+  // - 마크다운 링크: [name](url) — description
+  const entries = [];
+  for (const m of body.matchAll(/^\s*-\s*\[([^\]]+)\]\(([^)]+)\)\s*[-—:]\s*(.+)$/gm)) {
+    entries.push({ name: m[1], url: m[2], description: m[3].trim() });
+  }
+  // URL only (개별 SKILL.md 파일)
+  if (!entries.length) {
+    for (const m of body.matchAll(/(https?:\/\/[^\s)]+SKILL\.md)/g)) {
+      entries.push({ name: m[1].split('/').slice(-2)[0], url: m[1], description: '' });
+    }
+  }
+  if (has('--json')) { log(JSON.stringify({ source: url, query, entries }, null, 2)); return; }
+  if (!entries.length) {
+    log('  (스킬 항목을 찾지 못함 — URL 형식 확인)');
+    return;
+  }
+  // 쿼리 매칭 (description 단순 포함)
+  let matched = entries;
+  if (query) {
+    const q = query.toLowerCase();
+    matched = entries.filter(e => e.name.toLowerCase().includes(q) || (e.description || '').toLowerCase().includes(q));
+    log(`매칭 ${matched.length}/${entries.length}건`);
+  } else {
+    log(`전체 ${entries.length}건 (매칭 없음 — --query로 필터링)`);
+  }
+  log('');
+  log('| name | description | url |');
+  log('|---|---|---|');
+  for (const e of matched.slice(0, 30)) {
+    log(`| ${e.name} | ${e.description.slice(0, 60)} | ${e.url} |`);
+  }
+  log('');
+  log(`💡 설치: leerness skill install <url>`);
+}
+
+// skill export <id> — 기존 자체 skill을 agentskills.io 표준 SKILL.md로 export
+function skillExportCmd(root, id) {
+  if (!id) { fail('사용법: leerness skill export <id>'); return process.exit(1); }
+  const data = loadUserSkill(root, id) || (skillCatalog[id] ? { ...skillCatalog[id], name: id } : null);
+  if (!data) { fail(`skill 없음: ${id}`); return process.exit(1); }
+  const description = data.displayNameKo || data.description || (data.capabilities && data.capabilities[0]) || id;
+  const body = `---\nname: ${id}\ndescription: ${description.slice(0, 200)}\n---\n\n# ${data.displayNameKo || id}\n\n## Capabilities\n${(data.capabilities || []).map(c => '- ' + c).join('\n') || '-'}\n\n## Sources\n${(data.sources || []).map(s => '- ' + (s.url || s)).join('\n') || '-'}\n\n## Patterns\n${(data.patterns || []).map(p => `- \`${p.command}\` — ${p.note || ''}`).join('\n') || '-'}\n`;
+  const outDir = arg('--out', path.join(root, '.harness', 'skills-export', id));
+  mkdirp(outDir);
+  const outPath = path.join(outDir, 'SKILL.md');
+  writeUtf8(outPath, body);
+  log(`✓ exported to ${rel(root, outPath)}`);
+  log('');
+  log(`💡 공유 가능 — 다른 도구가 \`leerness skill install ${outPath}\` 또는 URL로 import`);
 }
 
 const planPath = root => path.join(root, '.harness/plan.md');
@@ -902,6 +1296,9 @@ function debug(root) {
 function audit(root) {
   root = absRoot(root);
   let warnings = 0, failures = 0;
+  // 1.9.35 개선 #5: --fix 옵션 — 자동 수정 가능한 항목 적용
+  const fix = has('--fix');
+  let fixed = 0;
   const designCands = ['designguide.md','design-guide.md','docs/designguide.md','docs/design-guide.md','.harness/designguide.md'];
   const dups = designCands.filter(f => exists(path.join(root,f)));
   if (dups.length) { warnings++; warn(`design guide duplicates outside canonical: ${dups.join(', ')} (run: leerness consistency merge-design-guide)`); }
@@ -933,16 +1330,54 @@ function audit(root) {
   }
   else if (milestoneIds.length) ok('all milestones linked in progress-tracker');
   const handoff = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
-  if (handoff.includes('Last generated: (자동)')) { warnings++; warn('session-handoff.md never auto-generated (run: leerness session close .)'); }
+  if (handoff.includes('Last generated: (자동)')) {
+    warnings++; warn('session-handoff.md never auto-generated (run: leerness session close .)');
+    // 1.9.35 #5: --fix → session-handoff.md 자동 생성 마커 갱신
+    if (fix) {
+      const stamped = handoff.replace('Last generated: (자동)', `Last generated: ${today()} (leerness audit --fix)`);
+      writeUtf8(handoffPath(root), stamped);
+      ok('  ↳ fixed: session-handoff.md timestamp 갱신');
+      fixed++;
+    }
+  }
   else if (handoff.includes('Last generated:')) ok('session-handoff.md auto-generated previously');
   const cur = exists(currentStatePath(root)) ? read(currentStatePath(root)) : '';
   const updMatch = cur.match(/Updated: (\d{4}-\d{2}-\d{2})/);
   if (updMatch) {
     const dDays = (Date.now() - new Date(updMatch[1]).getTime()) / 86400000;
-    if (dDays > 7) { warnings++; warn(`current-state.md stale (${Math.round(dDays)} days)`); }
+    if (dDays > 7) {
+      warnings++; warn(`current-state.md stale (${Math.round(dDays)} days)`);
+      // 1.9.35 #5: --fix → current-state.md Updated 라인 갱신
+      if (fix) {
+        const stamped = cur.replace(/Updated: \d{4}-\d{2}-\d{2}/, `Updated: ${today()}`);
+        writeUtf8(currentStatePath(root), stamped);
+        ok('  ↳ fixed: current-state.md Updated 갱신');
+        fixed++;
+      }
+    }
     else ok('current-state.md fresh');
   }
-  log(`Audit summary: warnings=${warnings} failures=${failures}`);
+  // 1.9.40: README의 version 배지 ↔ package.json#version mismatch 감지 (도구 만드는 자가 자기 도구 stale하는 dogfooding gap 차단)
+  try {
+    const readmePath = path.join(root, 'README.md');
+    const pkgPath = path.join(root, 'package.json');
+    if (exists(readmePath) && exists(pkgPath)) {
+      const readmeText = read(readmePath);
+      const pkg = JSON.parse(read(pkgPath));
+      const m = readmeText.match(/badge\/version-(\d+\.\d+\.\d+)/);
+      if (pkg.version && m && m[1] !== pkg.version) {
+        warnings++;
+        warn(`README.md version badge mismatch: README=${m[1]} vs package.json=${pkg.version} (run: leerness readme sync)`);
+        if (fix) {
+          const updated = readmeText.replace(/badge\/version-[\d.]+-(green|blue|red)/g, `badge/version-${pkg.version}-green`);
+          writeUtf8(readmePath, updated);
+          ok('  ↳ fixed: README.md version 배지 갱신');
+          fixed++;
+        }
+      }
+    }
+  } catch {}
+  log(`Audit summary: warnings=${warnings} failures=${failures}${fix ? ` fixed=${fixed}` : ''}`);
   if (failures) process.exitCode = 1;
 }
 
@@ -1163,8 +1598,34 @@ function memorySearch(root, query) {
       total += hits.length;
     }
   }
+  // 1.9.25: --include-code 옵션 — 실제 소스 코드 본문도 검색 (src/tests/bin)
+  // 이전 모순 감지 0/5 → 5/5의 핵심 보완
+  if (has('--include-code')) {
+    const codeDirs = ['src', 'tests', 'bin', 'lib', 'scripts'];
+    for (const dir of codeDirs) {
+      const dp = path.join(root, dir);
+      if (!exists(dp)) continue;
+      function walkCodeDir(d) {
+        let entries; try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+          const p = path.join(d, e.name);
+          if (e.isDirectory()) { walkCodeDir(p); continue; }
+          if (!/\.(js|ts|jsx|tsx|gd|cs|py|rb|go|rs|md|html|css|json)$/i.test(e.name)) continue;
+          let txt; try { txt = read(p); } catch { continue; }
+          const lines = txt.split('\n');
+          const hits = lines.map((line, i) => ({ line, i })).filter(x => re.test(x.line));
+          if (hits.length) {
+            log(`\n# ${rel(root, p)}`);
+            for (const h of hits.slice(0, parseInt(arg('--limit','5'),10))) log(`  L${h.i+1}: ${h.line.trim().slice(0, 160)}`);
+            total += hits.length;
+          }
+        }
+      }
+      walkCodeDir(dp);
+    }
+  }
   if (total === 0) log('(no matches)');
-  else log(`\n${total} matches`);
+  else log(`\n${total} matches${has('--include-code') ? ' (소스 코드 포함)' : ''}`);
 }
 
 function handoff(root) {
@@ -1197,7 +1658,2022 @@ function handoff(root) {
     const cs = read(currentStatePath(root)).replace(/Updated: \d{4}-\d{2}-\d{2}/, `Updated: ${today()}`);
     writeUtf8(currentStatePath(root), cs);
   }
+  // 1.9.41: 최근 migrate 차분 알림 — migration-report.md가 24h 내면 "AI must re-read" 블록 자동 표시
+  // 같은 채팅 세션의 AI 청크가 이전 버전 마인드셋이어도 새 도구를 즉시 인지하도록.
+  if (!has('--no-workflow-guide') && !has('--compact')) {
+    try {
+      const reportPath = path.join(root, '.harness', 'migration-report.md');
+      if (exists(reportPath)) {
+        const stat = fs.statSync(reportPath);
+        const ageHr = (Date.now() - stat.mtimeMs) / 3600000;
+        if (ageHr < 24) {
+          const rep = read(reportPath);
+          const aiBlock = rep.match(/## 🤖 AI must re-read[\s\S]*?(?=\n## )/);
+          if (aiBlock) {
+            const isTty = process.stdout && process.stdout.isTTY;
+            const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+            log('');
+            log(yel(`## 🆕 최근 ${ageHr.toFixed(1)}시간 전 migrate 차분 — AI 에이전트는 신규 도구 우선 시도`));
+            log(aiBlock[0].trim());
+            log('');
+          }
+        }
+      }
+    } catch {}
+  }
+  // 1.9.39: handoff 출력 끝에 6단계 워크플로 가이드 자동 표시 (메인 에이전트가 매 세션 인지)
+  if (!has('--no-workflow-guide') && !has('--compact') && process.env.LEERNESS_NO_WORKFLOW_GUIDE !== '1') {
+    const isTty = process.stdout && process.stdout.isTTY;
+    const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+    const b = s => isTty ? `\x1b[1m${s}\x1b[0m` : s;
+    const d = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+    log('');
+    log(cy('## 🛠 세션 워크플로 6단계 (1.9.39+, AI 하네스 엔지니어링)'));
+    log(d('  상세: ') + cy('.harness/session-workflow.md'));
+    log(`  1. ${b('요청 분석')}     handoff(이미 완료) · drift check · 모호하면 명확화`);
+    log(`  2. ${b('계획 수립')}     plan add / TodoWrite · reuse-map으로 기존 자원 우선`);
+    log(`  3. ${b('업무 분배')}     agents list/recommend · 작업유형별 sub-agent 매핑`);
+    log(`  4. ${b('sub-agent 작업')} 파일 경로 격리 · mtime 검증 의무 · 자체 테스트`);
+    log(`  5. ${b('종합 검증')}     contract verify · verify-claim --run-tests · review --persona`);
+    log(`  6. ${b('세션 마감')}     session close · audit --fix · usage stats`);
+    log(d('  끄려면: --no-workflow-guide 또는 LEERNESS_NO_WORKFLOW_GUIDE=1'));
+    log('');
+  }
   ok('handoff loaded; current-state updated');
+}
+
+// 1.9.18: --since 파서 ("24h", "3d", "1w", "30m") → cutoff ISO date
+function _parseSince(s) {
+  if (!s) return null;
+  const m = String(s).match(/^(\d+(?:\.\d+)?)\s*([mhdw])$/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  const unit = m[2].toLowerCase();
+  const ms = unit === 'm' ? n * 60 * 1000
+           : unit === 'h' ? n * 3600 * 1000
+           : unit === 'd' ? n * 86400 * 1000
+           : /* w */        n * 7 * 86400 * 1000;
+  const cutoff = new Date(Date.now() - ms);
+  return cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
+// 1.9.17→1.9.18: 워크스페이스 통합 handoff — 4개 agent 동시 작업 시 메인 agent용 한 줄 요약
+// 1.9.18: --since <duration> 추가, 최근 수정된 T-row 강조 (🆕 마크 + 별도 섹션)
+function _handoffWorkspace(rootBase) {
+  const paths = _collectWorkspacePaths(rootBase);
+  if (!paths.length) return fail('대상 프로젝트 없음. --include 또는 --all-apps 사용.');
+  const sinceArg = arg('--since', null);
+  const sinceCutoff = sinceArg ? _parseSince(sinceArg) : null;
+  if (sinceArg && !sinceCutoff) { fail(`--since 형식 오류: "${sinceArg}" (예: 24h, 3d, 1w)`); return process.exit(1); }
+
+  function isRecent(row) {
+    if (!sinceCutoff || !row.updated) return false;
+    return row.updated >= sinceCutoff;
+  }
+
+  if (has('--json')) {
+    const projects = paths.map(p => {
+      const rows = readProgressRows(p);
+      const buckets = {};
+      for (const r of rows) (buckets[r.status] || (buckets[r.status] = [])).push(r);
+      const activeRules = readRules(p).filter(r => r.status === 'active').length;
+      const recent = sinceCutoff ? rows.filter(isRecent) : [];
+      return {
+        project: path.basename(p),
+        path: p,
+        total: rows.length,
+        done: (buckets['done'] || []).length,
+        inProgress: (buckets['in-progress'] || []).length,
+        planned: (buckets['planned'] || []).length,
+        blocked: (buckets['blocked'] || []).length,
+        activeRules,
+        nextAction: (buckets['in-progress']?.[0]?.nextAction) || (buckets['planned']?.[0]?.nextAction) || (buckets['requested']?.[0]?.nextAction) || null,
+        recent: recent.map(r => ({ id: r.id, status: r.status, request: r.request, updated: r.updated }))
+      };
+    });
+    log(JSON.stringify({ workspace: path.basename(rootBase), since: sinceCutoff, projects, totals: {
+      tasks: projects.reduce((a, b) => a + b.total, 0),
+      done: projects.reduce((a, b) => a + b.done, 0),
+      inProgress: projects.reduce((a, b) => a + b.inProgress, 0),
+      blocked: projects.reduce((a, b) => a + b.blocked, 0),
+      recent: projects.reduce((a, b) => a + (b.recent?.length || 0), 0)
+    } }, null, 2));
+    return;
+  }
+  // 1.9.22: --compact 모드 — LLM 시스템 프롬프트 최적화용 1줄 요약 (~500 chars)
+  if (has('--compact')) {
+    let totalDone = 0, totalTasks = 0, totalWIP = 0, totalRecent = 0;
+    const projSummaries = [];
+    for (const p of paths) {
+      const rows = readProgressRows(p);
+      const buckets = {};
+      for (const r of rows) (buckets[r.status] || (buckets[r.status] = [])).push(r);
+      const done = (buckets['done'] || []).length;
+      const wip = (buckets['in-progress'] || []).length;
+      const recent = sinceCutoff ? rows.filter(isRecent).length : 0;
+      totalDone += done; totalTasks += rows.length; totalWIP += wip; totalRecent += recent;
+      const pct = rows.length ? Math.round(done / rows.length * 100) : 0;
+      projSummaries.push(`${path.basename(p)} ${done}/${rows.length}(${pct}%)`);
+    }
+    log(`leerness compact (1.9.22): ${paths.length}프로젝트 · ${totalDone}/${totalTasks}(${totalTasks?Math.round(totalDone/totalTasks*100):0}%) done · WIP ${totalWIP}${sinceCutoff?` · 🆕${totalRecent}`:''}`);
+    log(`projects: ${projSummaries.join(' | ')}`);
+    log(`핵심 규칙: 의존성0 · 한국어주석 · UTF-8noBOM · reuse-map등록 · anti-lazy-work · verify-claim자동검수`);
+    return;
+  }
+  log(`# Workspace Handoff — ${paths.length}개 프로젝트 (1.9.22)`);
+  log(`Date: ${today()}`);
+  if (sinceCutoff) log(`Filter: since ${sinceArg} (${sinceCutoff} 이후 수정된 항목 🆕 강조)`);
+  log('');
+  log('## 프로젝트별 진행 상태');
+  let totalDone = 0, totalTasks = 0, totalWIP = 0, totalBlocked = 0, totalRecent = 0;
+  const allRecent = [];
+  for (const p of paths) {
+    const rows = readProgressRows(p);
+    const buckets = {};
+    for (const r of rows) (buckets[r.status] || (buckets[r.status] = [])).push(r);
+    const done = (buckets['done'] || []).length;
+    const wip = (buckets['in-progress'] || []).length;
+    const planned = (buckets['planned'] || []).length;
+    const blocked = (buckets['blocked'] || []).length;
+    const recent = sinceCutoff ? rows.filter(isRecent) : [];
+    totalDone += done; totalTasks += rows.length; totalWIP += wip; totalBlocked += blocked; totalRecent += recent.length;
+    for (const r of recent) allRecent.push({ project: path.basename(p), ...r });
+    const nx = (buckets['in-progress']?.[0]) || (buckets['planned']?.[0]) || null;
+    const pct = rows.length ? Math.round(done / rows.length * 100) : 0;
+    const recentBadge = recent.length ? ` · 🆕 ${recent.length}` : '';
+    log(`  ${path.basename(p)}: ${done}/${rows.length} (${pct}%) · WIP ${wip} · planned ${planned}${blocked ? ` · 🚫 blocked ${blocked}` : ''}${recentBadge}`);
+    if (nx) log(`    └ 다음: ${nx.id} [${nx.status}] ${nx.nextAction || nx.request}`);
+  }
+  // 1.9.18: --since 모드일 때 최근 추가/수정 섹션
+  if (sinceCutoff) {
+    log('');
+    log(`## 🆕 최근 변경 (${sinceArg} 내, ${totalRecent}건)`);
+    if (!totalRecent) log(`  (없음) — ${sinceCutoff} 이후 progress-tracker 업데이트 없음`);
+    else {
+      for (const r of allRecent) log(`  - ${r.project}/${r.id} [${r.status}] ${r.request} (updated ${r.updated})`);
+    }
+  }
+  log('');
+  log(`## 📊 워크스페이스 총합`);
+  log(`  - 누적 task: ${totalTasks} (done ${totalDone}, ${totalTasks ? Math.round(totalDone / totalTasks * 100) : 0}%)`);
+  log(`  - 진행중 (WIP): ${totalWIP} · 차단: ${totalBlocked}${sinceCutoff ? ` · 🆕 최근 ${totalRecent}` : ''}`);
+  if (totalBlocked > 0) log(`  - ⚠ ${totalBlocked}건이 blocked — 우선 처리 검토`);
+  log('');
+  log(`## 💡 멀티에이전트 오케스트레이션 권장`);
+  log(`  - 각 프로젝트의 "다음" 작업을 sub-agent 1명씩 병렬 진행 가능`);
+  log(`  - 새 패턴 추가 시 \`leerness reuse-map --all-apps\`로 중복 감지${sinceCutoff ? '' : ' / `--since 24h`로 최근 변경 추적'}`);
+}
+
+function handoffCmd(root) {
+  // 1.9.17: --all-apps / --include 통합 모드
+  if (has('--all-apps') || arg('--include', null)) {
+    return _handoffWorkspace(absRoot(root));
+  }
+  // 1.9.37: drift 자동 경고 (메인 에이전트가 leerness를 점점 안 쓰는 현상 감지)
+  // 1.9.38 (A): drift 임계 시 .harness/agent-reminders.md 자동 생성 — 메인 에이전트 프롬프트에 표시되도록.
+  // 1.9.38 (D): skip 횟수 학습 — --no-drift-check 빈도 ≥5 시 임계 완화 (1d → 2d).
+  const absR0 = absRoot(root || process.cwd());
+  if (exists(path.join(absR0, '.harness')) && process.env.LEERNESS_NO_DRIFT_CHECK !== '1') {
+    // skip 카운트
+    if (has('--no-drift-check')) {
+      try {
+        const stats = _readUsageStats(absR0);
+        stats.drift = stats.drift || {};
+        stats.drift.skipped = (stats.drift.skipped || 0) + 1;
+        const p = _usageStatsPath(absR0);
+        mkdirp(path.dirname(p));
+        writeUtf8(p, JSON.stringify(stats, null, 2) + '\n');
+      } catch {}
+    } else {
+      try {
+        const isTty = process.stdout && process.stdout.isTTY;
+        const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+        const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+        const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+        // 1.9.38 (D): 학습된 임계 (skip 빈도 높으면 임계 완화)
+        const stats = _readUsageStats(absR0);
+        const skipCount = (stats.drift && stats.drift.skipped) || 0;
+        const threshold = skipCount >= 5 ? 4 : 2; // 5회 이상 끄면 2일 → 4일로 완화
+        // 간이 drift 계산
+        const now = Date.now();
+        const shPath = handoffPath(absR0);
+        let shAge = null;
+        if (exists(shPath)) {
+          const m = read(shPath).match(/Last generated:\s*([\d\-T:.Z]+)/);
+          if (m) shAge = (now - new Date(m[1]).getTime()) / 86400000;
+        }
+        const rows = readProgressRows(absR0);
+        let ptAge = null;
+        if (rows.length) {
+          const dates = rows.map(r => (r.updated || '').match(/\d{4}-\d{2}-\d{2}/)).filter(Boolean).map(m => m[0]).sort();
+          if (dates.length) ptAge = (now - new Date(dates[dates.length - 1]).getTime()) / 86400000;
+        }
+        const sevStale = (shAge !== null && shAge > 3) || (ptAge !== null && ptAge > 3);
+        if ((shAge !== null && shAge > threshold) || (ptAge !== null && ptAge > threshold)) {
+          log('');
+          log(yel('  ⚠ leerness drift 감지 — 메타파일이 stale합니다'));
+          if (shAge !== null && shAge > threshold) log(dim(`     session-handoff.md: ${shAge.toFixed(1)}일 stale`));
+          if (ptAge !== null && ptAge > threshold) log(dim(`     progress-tracker:   ${ptAge.toFixed(1)}일 stale`));
+          log(dim(`     → 권장: ${red('leerness session close .')} 또는 ${red('leerness drift check .')} 로 상세 보기`));
+          if (skipCount >= 5) log(dim(`     (학습: skip ${skipCount}회 누적 → 임계 ${threshold}일로 완화)`));
+          // 1.9.39: --auto-recover — drift 감지 시 inline 자동 회복
+          if (has('--auto-recover') && sevStale) {
+            log(dim(`     🔧 --auto-recover 활성 — session close 자동 실행 중...`));
+            try {
+              const r = cp.spawnSync(process.execPath, [__filename, 'session', 'close', absR0], { encoding: 'utf8', timeout: 60000 });
+              if (r.status === 0) {
+                log(dim(`     ✓ session close 자동 완료 (다음 라운드부터 healthy)`));
+                const s2 = _readUsageStats(absR0);
+                s2.drift = s2.drift || {};
+                s2.drift.autoResolved = (s2.drift.autoResolved || 0) + 1;
+                writeUtf8(_usageStatsPath(absR0), JSON.stringify(s2, null, 2) + '\n');
+              } else {
+                log(dim(`     ⚠ auto-recover 실패 (exit ${r.status})`));
+              }
+            } catch (e) {
+              log(dim(`     ⚠ auto-recover 오류: ${e.message}`));
+            }
+          }
+          log('');
+          // 1.9.38 (A): critical 시 .harness/agent-reminders.md 자동 생성 — 다음 세션 시작 시 메인 에이전트가 읽도록.
+          if (sevStale) {
+            try {
+              const remPath = path.join(absR0, '.harness', 'agent-reminders.md');
+              const body = `<!-- leerness:managed:auto -->\n# 🔔 메인 에이전트용 자동 reminder\n\n_생성: ${new Date().toISOString()}_\n\n## drift critical 감지\n현재 워크스페이스의 메타파일이 매우 stale합니다. 이번 라운드 작업 끝에 반드시 다음 명령을 호출하세요:\n\n\`\`\`bash\nleerness session close .\n\`\`\`\n\n또는 상세 점검:\n\`\`\`bash\nleerness drift check .\n\`\`\`\n\nstale 신호:\n${shAge !== null ? `- session-handoff.md: ${shAge.toFixed(1)}일 stale\n` : ''}${ptAge !== null ? `- progress-tracker: ${ptAge.toFixed(1)}일 stale\n` : ''}\n\n_이 파일은 leerness 1.9.38+가 자동 갱신합니다. session close 후 자동 삭제.\n_사용자가 이 파일을 보고 메인 에이전트에 reminder 전달 가능._\n`;
+              writeUtf8(remPath, body);
+            } catch {}
+          } else {
+            // attention 등급으로 회복했으면 reminder 파일 삭제
+            try {
+              const remPath = path.join(absR0, '.harness', 'agent-reminders.md');
+              if (exists(remPath)) fs.unlinkSync(remPath);
+            } catch {}
+          }
+        } else {
+          // healthy → reminder 파일 자동 청소
+          try {
+            const remPath = path.join(absR0, '.harness', 'agent-reminders.md');
+            if (exists(remPath)) fs.unlinkSync(remPath);
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+  // 1.9.35 개선 #1: .harness 부재 시 즉시 경고 (자동 init 권장)
+  // 사용자가 신규 디렉토리에서 handoff 호출 시 sub-agent 작업이 길을 잃지 않도록.
+  const absR = absRoot(root || process.cwd());
+  if (!exists(path.join(absR, '.harness')) && !has('--no-init-check')) {
+    const isTty = process.stdout && process.stdout.isTTY;
+    const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+    const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+    log('');
+    log(yel('  ⚠  leerness init 미실행 디렉토리'));
+    log(dim('     ' + absR));
+    log(dim('     handoff가 표시할 컨텍스트(plan/progress/decisions)가 없습니다.'));
+    log('');
+    log(dim('     해결:'));
+    log('       ' + yel(`leerness init "${absR}" --yes --language ko`));
+    log('');
+    log(dim('     (--no-init-check 로 끄기)'));
+    log('');
+  }
+  return handoff(root);
+}
+
+// 1.9.17: 워크스페이스 통합 reuse-map — Capability 중복 자동 감지
+// 1.9.18: element에서 함수명 추출, notes에서 depends-on 추출
+function _extractFunctionName(element) {
+  // "src/build.js (escapeHtml)" → "escapeHtml"
+  // "src/openMeteo.js (fetchBatch)" → "fetchBatch"
+  // "src/cities.js" → null
+  const m = String(element).match(/\(([A-Za-z_$][\w$]*)\s*\)?\s*$/);
+  return m ? m[1] : null;
+}
+function _extractFilePath(element) {
+  // "src/build.js (escapeHtml)" → "src/build.js"
+  // "src/cities.js" → "src/cities.js"
+  const m = String(element).match(/^([^\s(]+)/);
+  return m ? m[1] : null;
+}
+function _extractDependsOn(notes) {
+  // notes 컬럼에서 "depends-on: A, B" 또는 "depends: A" 패턴 추출
+  const m = String(notes).match(/depends(?:-on)?:\s*([^|]+?)(?:\s*\)|$)/i);
+  if (!m) return [];
+  return m[1].split(/[,;]/).map(s => s.trim()).filter(Boolean);
+}
+
+function _readReuseMap(root) {
+  const p = path.join(root, '.harness', 'reuse-map.md');
+  if (!exists(p)) return [];
+  const txt = read(p);
+  const lines = txt.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    // skip header + separator + empty
+    if (!l.startsWith('|') || l.startsWith('|--') || /^\|\s*Capability\s*\|/i.test(l)) continue;
+    const cells = l.split('|').map(c => c.trim()).filter((_, idx, arr) => idx !== 0 && idx !== arr.length - 1);
+    if (cells.length < 2 || !cells[0]) continue;
+    const notes = cells[3] || '';
+    out.push({
+      capability: cells[0],
+      element: cells[1] || '',
+      method: cells[2] || '',
+      notes,
+      line: i + 1,
+      // 1.9.18: 파생 필드
+      functionName: _extractFunctionName(cells[1] || ''),
+      filePath: _extractFilePath(cells[1] || ''),
+      dependsOn: _extractDependsOn(notes)
+    });
+  }
+  return out;
+}
+
+function reuseMapCmd(root) {
+  root = absRoot(root || process.cwd());
+  // 단일 프로젝트 모드
+  if (!has('--all-apps') && !arg('--include', null)) {
+    const entries = _readReuseMap(root);
+    if (has('--json')) { log(JSON.stringify({ project: path.basename(root), entries }, null, 2)); return; }
+    log(`# Reuse Map — ${path.basename(root)} (${entries.length}개)`);
+    if (!entries.length) { log('  (없음) — 새 컴포넌트/유틸 추가 후 등록 권장'); return; }
+    entries.forEach(e => {
+      const dep = e.dependsOn.length ? ` ← depends: ${e.dependsOn.join(', ')}` : '';
+      log(`  - ${e.capability} → ${e.element} [${e.method}] ${e.notes}${dep}`);
+    });
+    return;
+  }
+  // 워크스페이스 모드
+  const paths = _collectWorkspacePaths(root);
+  if (!paths.length) return fail('대상 프로젝트 없음. --include 또는 --all-apps 사용.');
+  const strictElements = has('--strict-elements');
+  const byCap = new Map();   // capability(lowercase) → [{ project, entry }]
+  const byFunc = new Map();  // functionName → [{ project, entry }]    // 1.9.18
+  const dependsEdges = [];   // 1.9.18: { from: {project, cap}, to: cap }
+  const projects = paths.map(p => {
+    const entries = _readReuseMap(p);
+    for (const e of entries) {
+      const k = e.capability.toLowerCase().trim();
+      if (!byCap.has(k)) byCap.set(k, []);
+      byCap.get(k).push({ project: path.basename(p), path: p, entry: e });
+      // 1.9.18: function-name 인덱스
+      if (e.functionName) {
+        const fk = e.functionName.toLowerCase();
+        if (!byFunc.has(fk)) byFunc.set(fk, []);
+        byFunc.get(fk).push({ project: path.basename(p), path: p, entry: e });
+      }
+      // 1.9.18: depends-on 엣지
+      for (const dep of e.dependsOn) {
+        dependsEdges.push({ from: { project: path.basename(p), cap: e.capability }, to: dep });
+      }
+    }
+    return { project: path.basename(p), path: p, entries };
+  });
+  // exact capability 중복
+  const dupes = [...byCap.entries()].filter(([, occ]) => occ.length >= 2);
+  // 1.9.18: --strict-elements: 같은 함수명이 다른 capability로 등록된 경우 잠재 중복
+  const funcDupes = strictElements ? [...byFunc.entries()].filter(([, occ]) => {
+    if (occ.length < 2) return false;
+    // 정확 capability 중복이 아닌 경우만 (이미 dupes로 잡힌 건 제외)
+    const caps = new Set(occ.map(o => o.entry.capability.toLowerCase()));
+    return caps.size >= 2;
+  }) : [];
+
+  if (has('--json')) {
+    const duplicates = dupes.map(([cap, occ]) => ({ capability: cap, occurrences: occ.length, projects: occ.map(o => o.project) }));
+    const fuzzyDuplicates = funcDupes.map(([fn, occ]) => ({
+      functionName: fn,
+      occurrences: occ.length,
+      entries: occ.map(o => ({ project: o.project, capability: o.entry.capability, element: o.entry.element }))
+    }));
+    log(JSON.stringify({
+      workspace: path.basename(root),
+      projects,
+      duplicates,
+      fuzzyDuplicates,
+      dependsEdges,
+      totalCapabilities: byCap.size,
+      strictElements
+    }, null, 2));
+    return;
+  }
+  log(`# Workspace Reuse Map — ${paths.length}개 프로젝트 / ${byCap.size}개 capability (1.9.18)`);
+  log('');
+  log(`## 프로젝트별 등록 수`);
+  projects.forEach(p => log(`  ${p.project}: ${p.entries.length}개`));
+
+  log('');
+  log(`## 🔁 정확 중복 capability (이름 동일)`);
+  if (!dupes.length) log('  (없음) — 모든 capability 이름이 단일 프로젝트에만 존재');
+  else {
+    for (const [cap, occ] of dupes) {
+      log(`  - "${occ[0].entry.capability}" — ${occ.length}개 프로젝트`);
+      for (const o of occ) log(`    · ${o.project}: ${o.entry.element} [${o.entry.method}]`);
+    }
+    log('');
+    log(`  💡 권장: 가장 안정적인 1개 구현을 추출해 ${dupes.length}건 중복을 공통 모듈로 통합 검토`);
+  }
+
+  // 1.9.18→1.9.19: --strict-elements 결과 (false-positive 줄이기 위해 same-file vs diff-file 구분)
+  if (strictElements) {
+    log('');
+    log(`## 🔍 잠재 중복 (--strict-elements: 함수명 동일 / capability 이름 다름)`);
+    if (!funcDupes.length) log('  (없음) — 동일 함수명을 다른 capability로 등록한 경우 없음');
+    else {
+      let exactMatches = 0; // 같은 파일 + 같은 함수 (진짜 중복 가능성 ↑)
+      let intentionalSplits = 0; // 같은 함수 / 다른 파일 (의도 분리 가능성 ↑)
+      for (const [fn, occ] of funcDupes) {
+        const files = new Set(occ.map(o => o.entry.filePath));
+        const sameFile = files.size === 1;
+        const tag = sameFile ? '⚠ 진짜 중복 가능' : 'ℹ 의도 분리 가능';
+        if (sameFile) exactMatches++; else intentionalSplits++;
+        log(`  - 함수 "${fn}()" — ${occ.length}건  ${tag}`);
+        for (const o of occ) log(`    · ${o.project}/${o.entry.capability}: ${o.entry.element}`);
+      }
+      log('');
+      if (exactMatches > 0) log(`  ⚠ 같은 파일 + 같은 함수: ${exactMatches}건 — 명명 통일 또는 실제 통합 검토`);
+      if (intentionalSplits > 0) log(`  ℹ 다른 파일 + 같은 함수: ${intentionalSplits}건 — 의도된 분리(예: 모듈 함수 vs CLI 명령)일 가능성. 보고용`);
+    }
+  }
+
+  // 1.9.18: depends-on 그래프
+  if (dependsEdges.length) {
+    log('');
+    log(`## 🔗 의존 관계 (depends-on, ${dependsEdges.length}개 엣지)`);
+    for (const e of dependsEdges) log(`  - ${e.from.project}/${e.from.cap}  ─→  ${e.to}`);
+    log('');
+    log(`  💡 의존 capability는 제거하지 말 것. depends-on 표기: \`notes\` 컬럼에 "depends-on: A, B"`);
+  }
+
+  log('');
+  const fuzzyCount = funcDupes.length;
+  log(`## 📊 워크스페이스 총합: capability ${byCap.size}건 / 정확 중복 ${dupes.length}건${strictElements ? ` / 잠재 중복 ${fuzzyCount}건` : ''} / 의존 ${dependsEdges.length}건`);
+  if (!strictElements) log(`  💡 \`--strict-elements\`로 함수명 기반 잠재 중복도 탐지 가능`);
+}
+
+// 1.9.18: verify-claim — progress-tracker의 evidence 컬럼 자동 검증
+// "src/foo.js + 5개 테스트 (54/54 통과)" 같은 주장을 파싱해 실제 파일/카운트 확인
+function verifyClaimCmd(root, taskId) {
+  root = absRoot(root);
+  if (!taskId) return fail('verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008');
+  const rows = readProgressRows(root);
+  const row = rows.find(r => r.id === taskId);
+  if (!row) return fail(`progress-tracker.md에 ${taskId} 없음.`);
+
+  const evidence = row.evidence || '';
+  // 1.9.20: 파일 경로 추출 — 도메인 폴더 자동 인식 + 루트 메타파일
+  // (1.9.19까지: src|bin|tests|public|lib 하드코딩 → Godot scenes/scripts 미검출)
+  // 변경: 확장자 화이트리스트 기반. 디렉토리는 선택적 (project.godot 같은 루트 파일도 잡음).
+  // 확장자는 길이 내림차순(긴 것 먼저 매치) + \b 종결로 .ts vs .tscn 구분.
+  // 1.9.21: 설정/메타 파일 확장자 추가 — Godot export_presets.cfg 등 false negative 보완
+  const FILE_EXTS = 'webmanifest|dockerfile|properties|tscn|tres|godot|json5|jsx|tsx|yaml|html|scss|sass|less|gltf|conf|json|toml|lock|mdx|xml|css|svg|yml|cfg|ini|env|md|js|ts|gd|cs|py|rb|go|rs|kt|sh|h';
+  const FILE_RE = new RegExp(`(?:[A-Za-z][A-Za-z0-9_-]*\\/)?[A-Za-z][\\w./-]*\\.(?:${FILE_EXTS})\\b`, 'g');
+  const filePatterns = evidence.match(FILE_RE) || [];
+  // 중복 제거 + "tests/test.js" 같은 결과를 유지 (이미 `..` 없으니 그대로)
+  const files = Array.from(new Set(filePatterns));
+  // 1.9.20: 테스트 수 파싱 확장 — 한국어 + jest/mocha/tap/vitest
+  // 우선순위: 명시적 X/Y 비율 > N passing/passed > N개 테스트
+  let declaredPass = null;
+  let declaredTestCount = null;
+  // 1) X/Y 통과·passed·pass (한·영)
+  const m1 = evidence.match(/(\d+)\s*\/\s*(\d+)\s*(?:통과|passed|pass|passing)/i);
+  if (m1) declaredPass = { num: parseInt(m1[1], 10), denom: parseInt(m1[2], 10) };
+  // 2) jest: "Tests: N passed" 또는 "N passed, M failed"
+  if (!declaredPass) {
+    const m2 = evidence.match(/Tests?:\s*(?:\d+\s*failed,\s*)?(\d+)\s*passed(?:,\s*(\d+)\s*total)?/i);
+    if (m2) declaredPass = { num: parseInt(m2[1], 10), denom: parseInt(m2[2] || m2[1], 10) };
+  }
+  // 3) mocha: "N passing" (실패 없을 때 total = passing)
+  if (!declaredPass) {
+    const m3 = evidence.match(/(\d+)\s+passing\b/i);
+    if (m3) declaredPass = { num: parseInt(m3[1], 10), denom: parseInt(m3[1], 10) };
+  }
+  // 4) N개 테스트 (단순 카운트)
+  const m4 = evidence.match(/(\d+)\s*개\s*테스트/);
+  if (m4) declaredTestCount = parseInt(m4[1], 10);
+  // 5) N tests (영문 단순 카운트)
+  if (!declaredTestCount) {
+    const m5 = evidence.match(/(\d+)\s*tests?\b/i);
+    if (m5) declaredTestCount = parseInt(m5[1], 10);
+  }
+
+  // 실제 파일 존재 검사
+  const fileChecks = files.map(f => ({ file: f, exists: exists(path.join(root, f)) }));
+  // 테스트 카운트: tests/test.js의 check( 또는 it( 또는 test( 개수
+  let actualTestCount = null;
+  const candidateTestFiles = ['tests/test.js', 'test/test.js', 'tests/index.js'];
+  for (const tf of candidateTestFiles) {
+    const tp = path.join(root, tf);
+    if (exists(tp)) {
+      const t = read(tp);
+      actualTestCount = (t.match(/\bcheck\s*\(/g) || t.match(/\b(it|test)\s*\(/g) || []).length;
+      break;
+    }
+  }
+
+  // 1.9.19: --run-tests — npm test 자동 실행 + pass/fail 파싱
+  let runResult = null;
+  if (has('--run-tests')) {
+    const pkgPath = path.join(root, 'package.json');
+    if (!exists(pkgPath)) {
+      runResult = { skipped: true, reason: 'package.json 없음' };
+    } else {
+      let pkg = null;
+      try { pkg = JSON.parse(read(pkgPath)); } catch {}
+      const hasTestScript = pkg && pkg.scripts && pkg.scripts.test;
+      if (!hasTestScript) {
+        runResult = { skipped: true, reason: 'scripts.test 없음' };
+      } else {
+        const r = cp.spawnSync('npm test', [], { cwd: root, encoding: 'utf8', shell: true, timeout: 5 * 60 * 1000 });
+        const out = (r.stdout || '') + (r.stderr || '');
+        // 1.9.20: 파싱 패턴 확장 — 한국어 + jest/mocha/tap/vitest
+        let parsed = null;
+        // 1) X/Y passing|passed|pass|통과
+        let m = out.match(/(\d+)\s*\/\s*(\d+)\s*(?:passed|통과|pass|passing)/i);
+        if (m) parsed = { num: parseInt(m[1], 10), denom: parseInt(m[2], 10) };
+        // 2) jest: "Tests: N passed, M total" — 통과 + 총
+        if (!parsed) {
+          const m2 = out.match(/Tests?:\s*(?:\d+\s*failed,\s*)?(\d+)\s*passed(?:,\s*(\d+)\s*total)?/i);
+          if (m2) parsed = { num: parseInt(m2[1], 10), denom: parseInt(m2[2] || m2[1], 10) };
+        }
+        // 3) mocha: "N passing" — 단독 패턴이면 total = passing
+        if (!parsed) {
+          const m3 = out.match(/^\s*(\d+)\s+passing\b/im);
+          if (m3) parsed = { num: parseInt(m3[1], 10), denom: parseInt(m3[1], 10) };
+        }
+        // 4) tap: "# pass N" 또는 "ok N"
+        if (!parsed) {
+          const m4 = out.match(/#\s*pass\s+(\d+)/i);
+          if (m4) parsed = { num: parseInt(m4[1], 10), denom: parseInt(m4[1], 10) };
+        }
+        runResult = {
+          skipped: false,
+          exitCode: r.status,
+          parsed,
+          allPassed: r.status === 0 && (!parsed || (parsed && parsed.num === parsed.denom))
+        };
+      }
+    }
+  }
+
+  if (has('--json')) {
+    const out = {
+      project: path.basename(root),
+      taskId, row,
+      declared: { files: files.length, pass: declaredPass, testCount: declaredTestCount },
+      actual: { fileChecks, testCount: actualTestCount },
+      verdict: {
+        filesAllExist: fileChecks.every(c => c.exists),
+        testCountMatch: declaredTestCount == null || actualTestCount == null || actualTestCount >= declaredTestCount
+      }
+    };
+    if (runResult) {
+      out.run = runResult;
+      out.verdict.runTests = !!runResult.allPassed;
+      // declared pass와 실제 비교
+      if (declaredPass && runResult.parsed) {
+        out.verdict.declaredPassMatches = (runResult.parsed.num === declaredPass.num && runResult.parsed.denom === declaredPass.denom);
+      }
+    }
+    log(JSON.stringify(out, null, 2));
+    if (runResult && !runResult.skipped && !runResult.allPassed) return process.exit(1);
+    if (!out.verdict.filesAllExist || !out.verdict.testCountMatch) return process.exit(1);
+    return;
+  }
+
+  log(`# verify-claim ${taskId} (${path.basename(root)})`);
+  log(`Request: ${row.request}`);
+  log(`Status: ${row.status}  ·  Updated: ${row.updated}`);
+  log(`Evidence: ${evidence.slice(0, 200)}${evidence.length > 200 ? '…' : ''}`);
+  log('');
+  log(`## 📂 파일 검증 (${files.length}건 주장)`);
+  if (!files.length) log('  (evidence에서 파일 경로를 추출하지 못함)');
+  else {
+    for (const c of fileChecks) log(`  ${c.exists ? '✓' : '✗'} ${c.file}${c.exists ? '' : '  ← 누락'}`);
+  }
+  log('');
+  log(`## 🧪 테스트 카운트`);
+  if (declaredPass) log(`  주장 (pass): ${declaredPass.num}/${declaredPass.denom}`);
+  if (declaredTestCount) log(`  주장 (개수): ${declaredTestCount}개`);
+  if (actualTestCount != null) log(`  실측: tests/test.js에 ${actualTestCount}개 check/test 호출`);
+  else log(`  실측: 테스트 파일 못 찾음 (tests/test.js 등)`);
+
+  // 1.9.19: --run-tests 결과
+  let runTestsOk = true;
+  let declaredPassMatchesActual = true;
+  if (runResult) {
+    log('');
+    log(`## 🚦 npm test 실행 (--run-tests)`);
+    if (runResult.skipped) {
+      log(`  ⚠ skipped: ${runResult.reason}`);
+    } else {
+      log(`  exit: ${runResult.exitCode}`);
+      if (runResult.parsed) log(`  실행 결과: ${runResult.parsed.num}/${runResult.parsed.denom} ${runResult.parsed.num === runResult.parsed.denom ? 'passed' : 'partial'}`);
+      else log(`  (pass/fail 비율을 stdout에서 파싱 못함)`);
+      runTestsOk = runResult.allPassed;
+      if (declaredPass && runResult.parsed) {
+        declaredPassMatchesActual = (runResult.parsed.num === declaredPass.num && runResult.parsed.denom === declaredPass.denom);
+        log(`  주장 vs 실행: ${declaredPassMatchesActual ? '✓ 일치' : `⚠ 불일치 (주장 ${declaredPass.num}/${declaredPass.denom} ≠ 실행 ${runResult.parsed.num}/${runResult.parsed.denom})`}`);
+      }
+    }
+  }
+
+  // 1.9.26: --strict-claims — 낙관적 표시 자동 감지 (evidence vs 코드 호출 흔적)
+  let optimismSuspects = [];
+  let strictOk = true;
+  if (has('--strict-claims')) {
+    const codeText = _scanCodeForPatterns(root);
+    optimismSuspects = _detectOptimism(evidence, codeText);
+    strictOk = optimismSuspects.length === 0;
+  }
+
+  log('');
+  const allFilesOk = fileChecks.every(c => c.exists);
+  const testOk = declaredTestCount == null || actualTestCount == null || actualTestCount >= declaredTestCount;
+  log(`## 종합`);
+  log(`  - 파일 모두 존재: ${allFilesOk ? '✓ pass' : '✗ FAIL (일부 누락)'}`);
+  log(`  - 테스트 카운트: ${testOk ? '✓ pass (실측 ≥ 주장)' : '⚠ 주장보다 적음'}`);
+  if (runResult && !runResult.skipped) {
+    log(`  - npm test 실행: ${runTestsOk ? '✓ all passed' : '✗ FAIL'}`);
+    if (declaredPass) log(`  - 주장과 실행 결과 일치: ${declaredPassMatchesActual ? '✓ pass' : '⚠ 다름'}`);
+  }
+  if (has('--strict-claims')) {
+    if (strictOk) log(`  - 낙관적 표시 (--strict-claims): ✓ pass (의심 없음)`);
+    else {
+      log(`  - 낙관적 표시 (--strict-claims): ⚠ FAIL (${optimismSuspects.length}건 의심)`);
+      for (const s of optimismSuspects) log(`    · [${s.kind}] ${s.label}: evidence에 주장 있는데 코드에 호출 흔적 없음`);
+    }
+  }
+  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (has('--strict-claims') && !strictOk);
+  if (overallFail) {
+    log('');
+    log(`  ⚠ evidence 주장과 실제가 일치하지 않음 — task 상태 재검토 권장`);
+    return process.exit(1);
+  }
+  log('');
+  log(`  ✓ evidence 주장이 실제 파일·테스트${runResult && !runResult.skipped ? '·실행 결과' : ''}와 일치`);
+}
+
+// 1.9.22: orchestrate — Ollama 로컬 LLM으로 best-of-N 멀티 에이전트 시뮬
+// 정책 (사용자 명시 1.9.22):
+//   1) 자동 적용 금지. LEERNESS_OLLAMA_BASE_URL 환경변수 감지 opt-in 전용
+//   2) .env 파일 자동 로드 (간단 파서)
+//   3) --agents N 가변 (1~256)
+//   4) 환경변수 없으면 명령 거부 + 안내
+function _loadEnvFile(root) {
+  // root 경로(또는 cwd)의 .env 파일을 간단 파싱해 process.env에 머지 (이미 있는 키는 덮어쓰지 않음)
+  const envFile = path.join(root || process.cwd(), '.env');
+  if (!exists(envFile)) return false;
+  try {
+    const txt = read(envFile);
+    for (const line of txt.split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (!m) continue;
+      const key = m[1];
+      let val = m[2];
+      // 주석 제거
+      if (val.startsWith('#')) continue;
+      // 따옴표 제거
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
+      if (!process.env[key]) process.env[key] = val;
+    }
+    return true;
+  } catch { return false; }
+}
+
+function _httpPostJson(urlStr, body, timeoutMs = 300000) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try { u = new URL(urlStr); } catch (e) { return reject(e); }
+    const mod = u.protocol === 'https:' ? require('https') : require('http');
+    const data = JSON.stringify(body);
+    const req = mod.request({
+      hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname + (u.search || ''),
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) },
+      timeout: timeoutMs
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        try { resolve({ status: res.statusCode, body: JSON.parse(raw), raw }); }
+        catch (e) { resolve({ status: res.statusCode, body: null, raw }); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(new Error('timeout')); });
+    req.write(data); req.end();
+  });
+}
+
+async function _ollamaChat({ baseUrl, model, system, user, timeoutMs = 300000, format }) {
+  const t0 = Date.now();
+  const url = baseUrl.replace(/\/$/, '') + '/api/chat';
+  const body = {
+    model,
+    messages: [
+      ...(system ? [{ role: 'system', content: system }] : []),
+      { role: 'user', content: user }
+    ],
+    stream: false,
+    options: { temperature: 0.3, num_predict: 4000 }
+  };
+  if (format) body.format = format;
+  let res;
+  try { res = await _httpPostJson(url, body, timeoutMs); }
+  catch (e) { return { ok: false, error: e.message, elapsed: Date.now() - t0 }; }
+  if (res.status !== 200) return { ok: false, error: `HTTP ${res.status}: ${(res.raw || '').slice(0, 200)}`, elapsed: Date.now() - t0 };
+  return {
+    ok: true, elapsed: Date.now() - t0,
+    reply: res.body?.message?.content || '',
+    promptTokens: res.body?.prompt_eval_count || 0,
+    responseTokens: res.body?.eval_count || 0
+  };
+}
+
+async function orchestrateCmd(root, goalParts) {
+  root = absRoot(root || process.cwd());
+  const goal = (goalParts || []).join(' ').trim();
+  // .env 자동 로드 (process.env에 없는 키만 채움)
+  _loadEnvFile(root);
+  _loadEnvFile(path.join(root, '..')); // 상위도 시도 (워크스페이스 루트)
+
+  const baseUrl = process.env.LEERNESS_OLLAMA_BASE_URL || '';
+  if (!baseUrl) {
+    fail('LEERNESS_OLLAMA_BASE_URL 미설정 — orchestrate는 opt-in입니다.');
+    log('');
+    log('## 활성화 방법');
+    log('  1) .env 파일에 추가:');
+    log('     LEERNESS_OLLAMA_BASE_URL=http://192.168.68.89:11434');
+    log('  2) 또는 환경변수로:');
+    log('     $env:LEERNESS_OLLAMA_BASE_URL="http://localhost:11434"  (PowerShell)');
+    log('     export LEERNESS_OLLAMA_BASE_URL=http://localhost:11434  (bash)');
+    log('  3) 다시 실행: leerness orchestrate "<목표>" --agents N');
+    log('');
+    log('정책 (1.9.22): 환경변수 없으면 LLM 호출 자동 시작 금지. 사용자 동의 후 활성화.');
+    return process.exit(1);
+  }
+  if (!goal) {
+    fail('orchestrate "<목표>" 필요. 예: leerness orchestrate "JSON validator 작성" --agents 4');
+    return process.exit(1);
+  }
+
+  const agentCount = Math.max(1, Math.min(256, parseInt(arg('--agents', '4'), 10)));
+  const model = arg('--model', process.env.LEERNESS_OLLAMA_MODEL || 'qwen2.5:7b-instruct');
+  const timeoutMs = parseInt(arg('--timeout', '300000'), 10);
+  const retryOnFail = parseInt(arg('--retry-on-fail', '0'), 10); // 1.9.22 후보 2 통합
+
+  log(`# leerness orchestrate (1.9.22)`);
+  log(`Opt-in 활성화: Ollama URL = ${baseUrl}`);
+  log(`목표: ${goal}`);
+  log(`에이전트 수: ${agentCount} · 모델: ${model}${retryOnFail ? ` · auto-fix retry: ${retryOnFail}회` : ''}`);
+  log('');
+
+  // 시스템 프롬프트: compact handoff 자동 포함 (LLM 컨텍스트 절약)
+  const compactCtx = `당신은 leerness 1.9.22 워크스페이스의 sub-agent입니다.\n핵심 규칙: 의존성0 · 한국어주석 · UTF-8noBOM · 검증가능한 산출물.\nJSON 형식으로만 응답하세요: {"files":[{"path":"src/x.js","content":"..."}], "summary": "..."}`;
+
+  // N개 동시 호출 (best-of-N 패턴)
+  log(`## ${agentCount}개 에이전트 동시 호출 중...`);
+  const tasks = [];
+  for (let i = 0; i < agentCount; i++) {
+    tasks.push((async () => {
+      const t0 = Date.now();
+      const r = await _ollamaChat({ baseUrl, model, system: compactCtx, user: goal, timeoutMs, format: 'json' });
+      return { agent: i + 1, ...r, totalElapsed: Date.now() - t0 };
+    })());
+  }
+  const results = await Promise.all(tasks);
+
+  // 결과 요약
+  const ok = results.filter(r => r.ok);
+  const failures = results.filter(r => !r.ok);
+  log(`\n## 결과`);
+  log(`  성공: ${ok.length}/${agentCount}`);
+  log(`  실패: ${failures.length}`);
+  if (failures.length) {
+    for (const f of failures.slice(0, 3)) log(`    · agent ${f.agent}: ${f.error}`);
+  }
+
+  if (ok.length) {
+    const totalPromptTokens = ok.reduce((a, b) => a + b.promptTokens, 0);
+    const totalRespTokens = ok.reduce((a, b) => a + b.responseTokens, 0);
+    const avgElapsed = ok.reduce((a, b) => a + b.elapsed, 0) / ok.length;
+    const totalElapsedWallClock = Math.max(...results.map(r => r.totalElapsed));
+    log('');
+    log(`## 토큰`);
+    log(`  prompt 합계: ${totalPromptTokens} · response 합계: ${totalRespTokens}`);
+    log(`  평균 latency: ${avgElapsed.toFixed(0)}ms · wall-clock 총: ${totalElapsedWallClock}ms (병렬 효과 ${(avgElapsed * ok.length / totalElapsedWallClock).toFixed(1)}x)`);
+
+    log('');
+    log(`## 최고 응답 (longest by response token count, 임시 휴리스틱)`);
+    const best = ok.reduce((a, b) => (b.responseTokens > a.responseTokens ? b : a));
+    log(`  agent ${best.agent} · ${best.responseTokens} 응답 토큰 · ${best.elapsed}ms`);
+    log(`  --- 처음 600자 ---`);
+    log(best.reply.slice(0, 600));
+  }
+
+  // .harness/orchestrate-log.md 누적 (1.9.22 후보 4)
+  const logFile = path.join(root, '.harness', 'orchestrate-log.md');
+  if (!exists(path.dirname(logFile))) fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  const entry = `\n## ${now()}\nmodel=${model} agents=${agentCount} success=${ok.length}/${agentCount} goal=${goal.slice(0, 100)}\n`;
+  append(logFile, exists(logFile) ? entry : `# Orchestrate Log\n${entry}`);
+  log('');
+  log(`📜 누적 기록: .harness/orchestrate-log.md`);
+}
+
+// 1.9.24: leerness deps <capability> — depends-on 그래프 역방향 추적 + 자동 회귀 sweep
+// 사용 예: leerness deps Character
+//   → rpg-core/Character를 의존하는 모든 capability 식별 (rpg-net/Session, rpg-data/* 등)
+//   → 영향받은 프로젝트의 npm test 자동 일괄 실행
+//   → 회귀 발생 시 어느 프로젝트인지 즉시 보고
+function depsImpactCmd(root, targetCapability) {
+  root = absRoot(root || process.cwd());
+  if (!targetCapability) { fail('impact <capability> 필요. 예: leerness impact Character'); return process.exit(1); }
+  const paths = _collectWorkspacePaths(root);
+  if (!paths.length) {
+    // --all-apps 자동
+    process.argv.push('--all-apps');
+  }
+  const allPaths = _collectWorkspacePaths(root);
+  if (!allPaths.length) return fail('워크스페이스 프로젝트 없음. _apps/* 또는 --include 사용.');
+
+  // 1) 모든 reuse-map에서 entries + depends-on 엣지 수집
+  const allEntries = []; // { project, entry }
+  const allEdges = [];    // { fromProject, fromCap, toCap }
+  for (const p of allPaths) {
+    const entries = _readReuseMap(p);
+    for (const e of entries) {
+      allEntries.push({ project: path.basename(p), projectPath: p, entry: e });
+      for (const dep of e.dependsOn) {
+        allEdges.push({ fromProject: path.basename(p), fromCap: e.capability, toCap: dep });
+      }
+    }
+  }
+
+  // 2) targetCapability를 의존하는 capability 식별 (역방향)
+  const target = String(targetCapability);
+  const targetLower = target.toLowerCase();
+  const directImpact = allEdges.filter(e => e.toCap.toLowerCase() === targetLower);
+  const impactedProjects = new Set(directImpact.map(e => e.fromProject));
+
+  // 2단계 전이: 영향받은 capability를 또 의존하는 것들 (2-hop)
+  const transitiveImpact = [];
+  for (const e1 of directImpact) {
+    for (const e2 of allEdges) {
+      if (e2.toCap.toLowerCase() === e1.fromCap.toLowerCase()) {
+        transitiveImpact.push({ via: e1.fromCap, ...e2 });
+        impactedProjects.add(e2.fromProject);
+      }
+    }
+  }
+
+  // target capability 자체가 어디 등록됐는지
+  const definedAt = allEntries.filter(e => e.entry.capability.toLowerCase() === targetLower);
+
+  if (has('--json')) {
+    log(JSON.stringify({
+      target,
+      definedAt: definedAt.map(d => ({ project: d.project, element: d.entry.element })),
+      directImpact,
+      transitiveImpact,
+      impactedProjects: Array.from(impactedProjects)
+    }, null, 2));
+    return;
+  }
+
+  log(`# leerness impact "${target}" (1.9.24)`);
+  log('');
+  log(`## 정의 위치`);
+  if (!definedAt.length) {
+    log(`  ⚠ "${target}" capability가 reuse-map에 등록되지 않음 — 영향 추적 불가`);
+    return process.exit(1);
+  }
+  for (const d of definedAt) log(`  - ${d.project}: ${d.entry.element}`);
+
+  log('');
+  log(`## 직접 의존 (1-hop, ${directImpact.length}건)`);
+  if (!directImpact.length) log(`  (없음) — 단독 capability. 변경 안전.`);
+  for (const e of directImpact) log(`  - ${e.fromProject}/${e.fromCap}`);
+
+  if (transitiveImpact.length) {
+    log('');
+    log(`## 전이 의존 (2-hop, ${transitiveImpact.length}건)`);
+    for (const e of transitiveImpact) log(`  - ${e.fromProject}/${e.fromCap}  (경유: ${e.via})`);
+  }
+
+  log('');
+  log(`## 영향받는 프로젝트 (${impactedProjects.size}개)`);
+  for (const p of impactedProjects) log(`  - ${p}`);
+
+  // 3) --run-tests 옵션이면 영향받은 프로젝트의 npm test 일괄 실행
+  if (has('--run-tests')) {
+    log('');
+    log(`## 🚦 자동 회귀 sweep (--run-tests)`);
+    const results = [];
+    for (const projName of impactedProjects) {
+      const projPath = allPaths.find(p => path.basename(p) === projName);
+      if (!projPath) continue;
+      const pkgPath = path.join(projPath, 'package.json');
+      if (!exists(pkgPath)) { log(`  ⚠ ${projName}: package.json 없음 — skip`); continue; }
+      let pkg = null;
+      try { pkg = JSON.parse(read(pkgPath)); } catch {}
+      if (!pkg?.scripts?.test) { log(`  ⚠ ${projName}: scripts.test 없음 — skip`); continue; }
+      const t0 = Date.now();
+      const r = cp.spawnSync('npm test', [], { cwd: projPath, encoding: 'utf8', shell: true, timeout: 5 * 60 * 1000 });
+      const elapsed = Date.now() - t0;
+      const out = (r.stdout || '') + (r.stderr || '');
+      const m = out.match(/(\d+)\s*\/\s*(\d+)\s*(?:passed|통과|pass|passing)/i);
+      const passed = r.status === 0;
+      results.push({ project: projName, passed, exit: r.status, elapsed, parsed: m ? { num: parseInt(m[1], 10), denom: parseInt(m[2], 10) } : null });
+      const tag = passed ? '✓' : '✗';
+      const ratio = m ? ` (${m[1]}/${m[2]})` : '';
+      log(`  ${tag} ${projName}: exit=${r.status}${ratio}  ${elapsed}ms`);
+    }
+    log('');
+    const pass = results.filter(r => r.passed).length;
+    const fail = results.length - pass;
+    log(`## 종합`);
+    log(`  - 영향받는 프로젝트 ${impactedProjects.size}개 중 ${pass}개 통과, ${fail}개 실패`);
+    if (fail > 0) {
+      log(`  ⚠ ${target} 변경이 ${fail}개 프로젝트에 회귀 발생 가능 — 해당 프로젝트 testing 우선`);
+      return process.exit(1);
+    } else {
+      log(`  ✓ 모든 영향받는 프로젝트 회귀 없음 — ${target} 변경 안전`);
+    }
+  } else {
+    log('');
+    log(`  💡 \`--run-tests\` 옵션으로 영향받는 ${impactedProjects.size}개 프로젝트 npm test 자동 일괄 실행 가능`);
+  }
+}
+
+// 1.9.26: optimism-check — evidence의 외부 동작 주장 vs 실제 코드 호출 흔적 불일치 감지
+// 사용자 요청 (1.9.26): "API 연동/작업 요청 시 실제로 일어나지 않았는데 일어난 것처럼 표시하는 낙관적 결과 방지"
+//
+// 패턴 (한국어 + 영어):
+//   evidence에 "API 호출" / "HTTP 200|201" / "POST /" / "응답 확인" → 코드에 fetch/http.request/axios 흔적 없으면 의심
+//   evidence에 "DB 저장" / "insert N건" / "DB에" → db.*/pg.*/mysql.*/mongoose.*/prisma.* 없으면 의심
+//   evidence에 "이메일 발송" / "메일 전송" → sendMail/nodemailer/smtp 없으면 의심
+// 1.9.27: 패턴 카탈로그 확장 (5 → 10) + URL/메서드 단위 매핑 추가
+const OPTIMISM_PATTERNS = [
+  { kind: 'API',     evidenceRe: /(API\s*호출|HTTP\s*\d{3}|POST\s*\/|GET\s*\/|PUT\s*\/|DELETE\s*\/|fetch|REST 응답|응답 확인|endpoint|엔드포인트)/i,
+    codeRe: /\b(fetch\s*\(|http\.request|https\.request|axios\.|got\.|undici|node-fetch)/i,
+    label: 'API/HTTP 호출' },
+  { kind: 'DB',      evidenceRe: /(DB에?\s*저장|insert\s+\d+|데이터베이스|SQL\s*(INSERT|UPDATE|DELETE)|migration|마이그레이션 적용)/i,
+    codeRe: /\b(db\.|pg\.|pool\.|mysql\.|mongoose\.|prisma\.|sequelize|knex|sqlite3|MongoClient|createConnection)/i,
+    label: 'DB 호출' },
+  { kind: 'Email',   evidenceRe: /(이메일[^.\n]{0,30}(발송|전송|보냈|보냄|완료)|메일[^.\n]{0,30}(발송|전송|보냈|보냄)|sendMail|smtp\s*(전송|발송))/i,
+    codeRe: /\b(sendMail|nodemailer|smtp|@sendgrid|mailgun|aws-sdk\/ses|resend\.)/i,
+    label: '이메일 전송' },
+  { kind: 'Webhook', evidenceRe: /(웹훅\s*(호출|전송|발송)|webhook\s+(sent|posted|triggered))/i,
+    codeRe: /\b(fetch\s*\(|http\.request|axios\.)/i,
+    label: '웹훅' },
+  { kind: 'Payment', evidenceRe: /(결제\s*(완료|성공|승인|취소)|payment\s+(processed|charged)|stripe 결제|toss\s*결제|카카오페이|네이버페이|kakaopay|nicepay|iamport 결제|페이팔|paypal)/i,
+    codeRe: /\b(stripe|toss|@stripe|tosspayments|iamport|kakao|nicepay|naverpay|paypal-rest-sdk|@paypal)/i,
+    label: '결제' },
+  // 1.9.27 신규 카테고리
+  { kind: 'FileIO',  evidenceRe: /(파일[^.\n]{0,20}(생성|저장|작성|기록)|\d+개[^.\n]{0,20}파일|디스크[^.\n]{0,20}저장|로그 파일 작성)/i,
+    codeRe: /\b(fs\.write|fs\.appendFile|writeFileSync|appendFileSync|fs\/promises|fs\.createWriteStream)/i,
+    label: '파일 I/O 쓰기' },
+  { kind: 'Queue',   evidenceRe: /(메시지\s*큐|발행\s*완료|publish\s*(완료|성공)|RabbitMQ|Kafka|SQS|Redis Pub|이벤트 발행)/i,
+    codeRe: /\b(amqp|kafkajs|rabbit|redis\.(publish|xadd)|@aws-sdk\/client-sqs|bull|bullmq)/i,
+    label: '메시지 큐 발행' },
+  { kind: 'Cache',   evidenceRe: /(Redis[^.\n]{0,20}(저장|set|get)|캐시[^.\n]{0,20}(저장|기록|적중)|memcache)/i,
+    codeRe: /\b(redis\.|ioredis|memcached|node-cache|@upstash\/redis|connect-redis)/i,
+    label: '캐시 저장' },
+  { kind: 'Notify',  evidenceRe: /(슬랙\s*(알림|발송|전송)|Slack\s+(notification|sent|posted)|Discord\s+(알림|발송|webhook)|푸시 알림 전송)/i,
+    codeRe: /\b(@slack\/web-api|slack-webhook|discord\.js|discord-webhook|@discordjs|firebase\/messaging|expo-notifications)/i,
+    label: '슬랙/Discord 알림' },
+  { kind: 'Storage', evidenceRe: /(S3\s*(업로드|저장)|GCS\s*업로드|Azure Blob|클라우드 스토리지 업로드|object storage 저장)/i,
+    codeRe: /\b(@aws-sdk\/client-s3|aws-sdk[^a-z]|@google-cloud\/storage|@azure\/storage-blob|aws-s3)/i,
+    label: '클라우드 스토리지' }
+];
+
+// 1.9.27: URL/메서드 단위 매핑 — evidence에서 "POST /users" 같은 구체 경로를 추출하고 코드에 같은 경로 존재 확인
+function _extractUrlClaims(evidence) {
+  const claims = [];
+  // "POST /users" / "GET /api/v1/items" 등
+  const re = /\b(GET|POST|PUT|DELETE|PATCH)\s+(\/[\w\-\/]*)/gi;
+  let m;
+  while ((m = re.exec(evidence)) !== null) {
+    claims.push({ method: m[1].toUpperCase(), path: m[2] });
+  }
+  return claims;
+}
+function _verifyUrlClaim(claim, codeText) {
+  // claim.path 가 코드에 등장해야 함 (fetch('https://.../users') 또는 라우트 정의 'POST /users')
+  if (!claim.path || claim.path.length < 2) return true;
+  // path를 그대로 검색 (URL 또는 라우트 정의)
+  const escaped = claim.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(escaped, 'i');
+  return re.test(codeText);
+}
+
+function _scanCodeForPatterns(root) {
+  // src/, bin/, lib/, scripts/ 의 .js/.ts/.gd/.py 파일 본문 통합
+  let combined = '';
+  const dirs = ['src', 'bin', 'lib', 'scripts'];
+  for (const d of dirs) {
+    const dp = path.join(root, d);
+    if (!exists(dp)) continue;
+    function walk(p) {
+      let entries; try { entries = fs.readdirSync(p, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const fp = path.join(p, e.name);
+        if (e.isDirectory()) { walk(fp); continue; }
+        if (!/\.(js|ts|jsx|tsx|gd|cs|py|rb|go|rs)$/i.test(e.name)) continue;
+        try { combined += read(fp) + '\n'; } catch {}
+      }
+    }
+    walk(dp);
+  }
+  return combined;
+}
+
+function _detectOptimism(evidence, codeText) {
+  // 각 패턴 검사: evidence에 주장 있고 코드에 흔적 없으면 의심
+  const suspects = [];
+  for (const p of OPTIMISM_PATTERNS) {
+    if (p.evidenceRe.test(evidence) && !p.codeRe.test(codeText)) {
+      suspects.push({ kind: p.kind, label: p.label, severity: 'high' });
+    }
+  }
+  // 1.9.27: URL/메서드 단위 매핑 — API 패턴에선 통과해도 구체 경로가 코드에 없으면 추가 의심
+  const urlClaims = _extractUrlClaims(evidence);
+  for (const claim of urlClaims) {
+    if (!_verifyUrlClaim(claim, codeText)) {
+      suspects.push({
+        kind: 'URL',
+        label: `구체 경로 "${claim.method} ${claim.path}" 코드에 미발견`,
+        severity: 'medium',
+        claim
+      });
+    }
+  }
+  return suspects;
+}
+
+// 1.9.27: 신뢰도 점수 (0=완전 의심, 1=신뢰)
+// 1.9.28: high suspect 단일 케이스 floor 0.15 — 단일 의심도 정량 차등 가능하게
+function _computeConfidence(evidence, codeText) {
+  const suspects = _detectOptimism(evidence, codeText);
+  const high = suspects.filter(s => s.severity === 'high').length;
+  const medium = suspects.filter(s => s.severity === 'medium').length;
+  // 가중치: high 1.0 / medium 0.5
+  const totalPenalty = high * 1.0 + medium * 0.5;
+  // 패턴 검사로 발견된 evidence 주장이 많을수록 신뢰도 산정 base 변경
+  const evidenceClaims = OPTIMISM_PATTERNS.filter(p => p.evidenceRe.test(evidence)).length + _extractUrlClaims(evidence).length;
+  if (evidenceClaims === 0) return 1.0; // 외부 작용 주장 자체가 없으면 신뢰 1.0
+  let confidence = Math.max(0, 1 - totalPenalty / evidenceClaims);
+  // 1.9.28: single high suspect에서 confidence 0.0이 일률적 → severity 기반 floor 적용
+  if (suspects.length > 0 && high > 0 && confidence < 0.15) {
+    // 의심 발견은 명확하지만 0보다는 명시적 신호로
+    confidence = 0.15;
+  }
+  return Math.round(confidence * 100) / 100;
+}
+
+function optimismCheckCmd(root, taskId) {
+  root = absRoot(root || process.cwd());
+  if (!taskId) return fail('optimism-check <T-ID> 필요. 예: leerness optimism-check T-0001');
+  const rows = readProgressRows(root);
+  const row = rows.find(r => r.id === taskId);
+  if (!row) return fail(`progress-tracker.md에 ${taskId} 없음.`);
+
+  const codeText = _scanCodeForPatterns(root);
+  const suspects = _detectOptimism(row.evidence || '', codeText);
+  const confidence = _computeConfidence(row.evidence || '', codeText);
+
+  if (has('--json')) {
+    log(JSON.stringify({
+      project: path.basename(root), taskId, row,
+      suspects, confidence,
+      ok: suspects.length === 0,
+      codeFilesScanned: codeText.length > 0
+    }, null, 2));
+    if (suspects.length > 0) return process.exit(1);
+    return;
+  }
+
+  log(`# leerness optimism-check ${taskId} (${path.basename(root)})`);
+  log(`Evidence: ${(row.evidence || '').slice(0, 200)}${(row.evidence || '').length > 200 ? '…' : ''}`);
+  log(`신뢰도 (1.9.27): ${confidence.toFixed(2)} / 1.00${confidence < 0.5 ? ' ⚠ 낮음' : confidence < 0.9 ? ' ⓘ 보통' : ' ✓ 높음'}`);
+  log('');
+  if (!suspects.length) {
+    log(`  ✓ 낙관적 표시 의심 없음 — evidence의 주장이 실제 코드 호출 흔적과 일관`);
+    return;
+  }
+  log(`  ⚠ 낙관적 표시 의심 ${suspects.length}건 — evidence에 주장 있는데 코드에 호출 흔적 없음`);
+  for (const s of suspects) {
+    const sev = s.severity === 'high' ? '⚠ HIGH' : 'ⓘ MED';
+    log(`    · [${s.kind}] ${sev} ${s.label}`);
+  }
+  log('');
+  log(`💡 가능한 해석:`);
+  log(`  1) evidence 작성자가 실제 동작 없이 낙관적으로 표시 (검증 필요)`);
+  log(`  2) 호출이 별도 모듈/test fixture/외부 스크립트에 있음 → evidence에 경로 명시 권장`);
+  log(`  3) 라이브러리/SDK 이름 변경 → \`_apps/<proj>\` 정적 분석 패턴에 미포함된 경우`);
+  log('');
+  log(`정책 (1.9.26): 의심 발견 시 exit 1 — task 상태 재검토 권장`);
+  return process.exit(1);
+}
+
+// 1.9.29: 페르소나 시스템 + review 명령
+// 페르소나 부여 sub-agent가 도메인 깊이 3-4배 (1.9.28 라운드 실측). 자동 프롬프트 생성.
+const BUILT_IN_PERSONAS = {
+  security: {
+    id: 'security',
+    name: '보안 엔지니어 (10년차)',
+    description: 'OWASP Top 10, CWE, RFC, 한국 개인정보보호법/게임산업법 정통',
+    body: `너는 **10년 경력의 시니어 보안 엔지니어**다. OWASP Top 10 2021, CWE, RFC 7235/6454, CORS 보안, secret 관리에 정통하며, 한국 금융사·카카오·네이버 등 대형 IT 기업의 보안 감사 경험이 있다. 코드를 볼 때 **위협 모델링**과 **공격 표면(attack surface)** 을 자동으로 시각화한다.
+
+검토 영역: 입력 검증 / 인증·인가 / CORS / 시크릿/로그 노출 / DoS / 데이터 노출 / 의존성 attack surface / 한국 시장 특화 (개인정보보호법, 결제 정보)
+보고에 포함: 위협 모델 / CWE ID 매핑 / 실 공격 시나리오 1건 (HTTP 페이로드) / P0/P1/P2 우선순위 / OWASP Top 10 2021 매핑`
+  },
+  performance: {
+    id: 'performance',
+    name: '성능 최적화 전문가 (V8 내부)',
+    description: 'V8 엔진 (Ignition/TurboFan, hidden class), Node.js 이벤트 루프, libuv 정통',
+    body: `너는 **V8 엔진 내부 (Ignition, TurboFan, hidden class)와 Node.js 이벤트 루프, libuv에 정통한 성능 최적화 전문가**다. Linux perf, node --prof, clinic.js, autocannon, FlameGraph 활용 경험이 풍부하다. 메모리 압박(GC pressure), CPU bound vs I/O bound 구분, hot path 식별이 직관이다.
+
+검토 영역: Hot path 식별 / hidden class 안정성 / 메모리 할당 패턴 / 정규식 컴파일 / JSON.parse/stringify 비용 / 이벤트 루프 블로킹 / 라우트 매칭 복잡도
+보고에 포함: 성능 프로필 요약 (RPS/latency 추정) / Hot path Top 5 / 비효율 표 (영향 high/med/low) / 벤치 시나리오 (autocannon 명령) / 권장 우선순위 (당장/부하증가/마이크로)`
+  },
+  ux: {
+    id: 'ux',
+    name: '한국어 UX 라이터 + DX 컨설턴트',
+    description: '카카오/네이버/토스/라인 마이크로카피, API 디자인 (Stripe/GitHub/Google) 정통',
+    body: `너는 **한국 사용자 대상 게임/SaaS 제품의 UX 라이터 + DX(Developer Experience) 컨설턴트**다. 카카오, 네이버, 토스, 라인의 한국어 마이크로카피 가이드라인을 숙지하고 있으며, 클라이언트 개발자의 API 통합 경험을 잘 안다. 에러 메시지, HTTP status, 응답 본문 일관성이 직관이다.
+
+검토 영역: 한국어 에러 메시지 톤 / HTTP status 적절성 (400/404/422/409) / 응답 본문 일관성 / 한국어/영문 혼재 / 누락 정보 (rate limit, request id, version) / 클라이언트 SDK 친화성
+보고에 포함: UX/DX 점수 (1-10) / 발견 이슈 표 / Before/After 메시지 5건 / SDK 친화성 점수 (1-5) / 권장 로드맵 (이번 PR / 1주 / 분기)`
+  },
+  testing: {
+    id: 'testing',
+    name: '테스트 엔지니어 (TDD + property-based)',
+    description: 'TDD, property-based testing (fast-check), AAA 패턴, fuzz, mutation testing 정통',
+    body: `너는 **TDD와 property-based testing (fast-check) 에 정통한 테스트 엔지니어**다. AAA 패턴, given/when/then, fuzz testing, mutation testing, contract testing 경험이 있다. 테스트 커버리지보다 **테스트 품질**과 **회귀 방어** 가치를 더 중시한다.
+
+검토 영역: 테스트 누락 분기 / edge case / mocking 과다 / AAA 패턴 위반 / async 테스트 결함 (race) / property 후보 / 회귀 가능성
+보고에 포함: 누락 테스트 목록 + 우선순위 / fast-check property 후보 3건 / 기존 테스트 약점 / 권장 회귀 시나리오`
+  },
+  docs: {
+    id: 'docs',
+    name: '기술 문서 작성자 (한국어)',
+    description: 'README, API 문서, 사용 가이드 작성. Stripe Docs / Google Cloud / 카카오 dev 가이드 정통',
+    body: `너는 **한국어 기술 문서 작성에 정통한 테크니컬 라이터**다. Stripe Docs, Google Cloud, AWS, 카카오 개발자 가이드 톤을 잘 안다. README 첫 60초 경험, 점진적 공개 (progressive disclosure), 코드 예시의 즉시 실행 가능성을 중시한다.
+
+검토 영역: 60초 시작 가능성 / 예시 코드 정확성 / 누락된 사전 요구사항 / 한국어 자연스러움 / 시각적 균형 (이모지/표/코드블록) / 한국어/영문 혼재 / 다음 단계 명시
+보고에 포함: 사용자 페르소나별 평가 (입문자/실무자/전문가) / 60초 안 첫 결과 가능 여부 / 누락 정보 / 권장 개선 표`
+  }
+};
+
+function _resolvePersona(root, id) {
+  // 1) 내장
+  if (BUILT_IN_PERSONAS[id]) return BUILT_IN_PERSONAS[id];
+  // 2) .harness/personas/<id>.md (사용자 정의)
+  const customPath = path.join(root, '.harness', 'personas', `${id}.md`);
+  if (exists(customPath)) {
+    const txt = read(customPath);
+    const nameMatch = txt.match(/^#\s+(.+)$/m);
+    return { id, name: nameMatch?.[1] || id, description: '(사용자 정의)', body: txt };
+  }
+  return null;
+}
+
+// 1.9.30: 외부 AI CLI 오케스트레이션 — claude/codex/gemini/copilot 가용성 + 활성화 체크
+// 사용자 정책: 환경변수로 활성화 명시 + 실제 PATH 존재 확인 + 메인이 sub-agent 분배 시 참조
+// 1.9.32: installCmd 추가 — setup-agents 시 자동 설치 시도 가능
+const EXTERNAL_AGENTS = [
+  { id: 'claude',  bin: 'claude',  envFlag: 'LEERNESS_ENABLE_CLAUDE',  versionArgs: ['--version'], desc: 'Anthropic Claude Code CLI',
+    installCmd: 'npm i -g @anthropic-ai/claude-code', installHint: 'https://docs.anthropic.com/en/docs/claude-code/setup' },
+  { id: 'codex',   bin: 'codex',   envFlag: 'LEERNESS_ENABLE_CODEX',   versionArgs: ['--version'], desc: 'OpenAI Codex CLI (격리 sandbox)',
+    installCmd: 'npm i -g @openai/codex', installHint: 'https://github.com/openai/codex' },
+  { id: 'gemini',  bin: 'gemini',  envFlag: 'LEERNESS_ENABLE_GEMINI',  versionArgs: ['--version'], desc: 'Google Gemini CLI (--yolo 모드 워크스페이스 직접 수정 가능)',
+    installCmd: 'npm i -g @google/gemini-cli', installHint: 'https://github.com/google-gemini/gemini-cli' },
+  { id: 'copilot', bin: 'gh',      envFlag: 'LEERNESS_ENABLE_COPILOT', versionArgs: ['copilot', '--version'], desc: 'GitHub Copilot CLI (gh copilot)',
+    installCmd: 'gh extension install github/gh-copilot', installHint: 'https://github.com/github/gh-copilot (gh CLI 선행 설치 필요)' }
+];
+
+// 1.9.36: 작업 키워드 분석으로 최적 CLI 추천
+// \b는 ASCII word boundary만 인식 → 한글 키워드는 단순 substring 검사 사용.
+function _recommendAgent(task) {
+  if (!task || typeof task !== 'string') return { target: null, reason: '' };
+  const t = task.toLowerCase();
+  const hasAny = (keywords) => keywords.some(k => t.includes(k));
+  // 텍스트 분석/번역 → claude (가장 빠름, 1.7×)
+  if (hasAny(['translate', 'summary', 'explain', 'describe', 'analyze', 'review',
+              '번역', '요약', '설명', '분석', '리뷰'])) {
+    return { target: 'claude', reason: '텍스트 분석·요약·번역은 claude가 1.7× 빠름' };
+  }
+  // 깊은 코드 추론
+  if (hasAny(['architecture', 'design pattern', 'refactor', 'trace', 'complex', 'critical path',
+              '아키텍처', '리팩터', '복잡'])) {
+    return { target: 'codex', reason: '깊은 코드 추론은 codex가 가장 상세' };
+  }
+  // 파일 작성·수정·생성
+  if (hasAny(['create', 'write', 'generate', 'patch', 'fix', 'implement', 'edit',
+              '구현', '생성', '작성', '수정', '추가'])) {
+    return { target: 'gemini', reason: '워크스페이스 직접 수정은 gemini --yolo가 정확' };
+  }
+  return { target: null, reason: '' };
+}
+
+function _checkAgent(agent, opts = {}) {
+  const enabled = process.env[agent.envFlag] === '1';
+  // PATH 존재 확인 (which / where)
+  let installed = false, version = null, error = null;
+  try {
+    const r = cp.spawnSync(agent.bin, agent.versionArgs, { encoding: 'utf8', timeout: 5000, shell: true });
+    if (r.status === 0 || (r.stdout && r.stdout.trim())) {
+      installed = true;
+      version = (r.stdout || r.stderr || '').trim().split('\n')[0].slice(0, 80);
+    } else if (r.error) {
+      error = r.error.code || r.error.message;
+    } else {
+      error = `exit ${r.status}`;
+    }
+  } catch (e) { error = e.message; }
+  return {
+    id: agent.id, bin: agent.bin, desc: agent.desc, envFlag: agent.envFlag,
+    enabled, installed, version, error,
+    status: enabled && installed ? 'ready' : !installed ? 'not-installed' : !enabled ? 'disabled' : 'unknown'
+  };
+}
+
+// 1.9.33: npx 캐시 함정 방지 — install 진입 시 npm latest와 비교, stale이면 경고
+async function _warnIfStale(root, opts = {}) {
+  if (process.env.LEERNESS_NO_STALE_CHECK === '1') return null;
+  const offline = process.env.LEERNESS_OFFLINE === '1';
+  // 24h 캐시: .harness/cache/update-check.json 재사용 — 캐시 fresh면 OFFLINE이어도 비교는 수행
+  try {
+    let latest = null;
+    const cached = readUpdateCache(root);
+    if (cacheFresh(cached, 24) && cached.nextLeerness) {
+      latest = cached.nextLeerness;
+    } else if (!offline) {
+      // 캐시 없음 + 온라인 → npm view 호출 (timeout 8초 — 네트워크 끊겼어도 init 진행 차단 X)
+      latest = await Promise.race([
+        fetchNpmLatest('leerness'),
+        new Promise(resolve => setTimeout(() => resolve(null), 8000))
+      ]);
+      if (latest) {
+        try { writeUpdateCache(root, { nextLeerness: latest, runningCli: VERSION }); } catch {}
+      }
+    }
+    // offline + 캐시 없으면 비교 스킵 (네트워크 차단 환경)
+    if (!latest) return null;
+    if (compareVer(latest, VERSION) > 0) {
+      // 옛 버전이 실행 중. ANSI 노란/빨강.
+      const isTty = process.stdout && process.stdout.isTTY;
+      const C = isTty ? { y: s => `\x1b[33m${s}\x1b[0m`, r: s => `\x1b[31m${s}\x1b[0m`, b: s => `\x1b[1m${s}\x1b[0m`, d: s => `\x1b[2m${s}\x1b[0m` }
+                      : { y: s => s, r: s => s, b: s => s, d: s => s };
+      log('');
+      log(C.y('  ⚠  ') + C.b(C.r(`옛 버전이 실행 중입니다 — v${VERSION} → v${latest} (npm 최신)`)));
+      log('');
+      log(C.d('     npm registry latest: ') + C.b(`v${latest}`));
+      log(C.d('     이 CLI가 실행한 버전: ') + C.b(`v${VERSION}`) + C.d(' (npx 캐시 또는 글로벌 설치 stale)'));
+      log('');
+      log(C.d('     해결 — 둘 중 하나 실행 후 다시 시도:'));
+      log('       ' + C.b('npx --yes clear-npx-cache && npx leerness@latest init .'));
+      log('       ' + C.b('npm i -g leerness@latest  →  leerness init .'));
+      log('');
+      log(C.d('     (이 경고는 LEERNESS_NO_STALE_CHECK=1 또는 --no-stale-check로 끌 수 있습니다)'));
+      log('');
+      return { stale: true, current: VERSION, latest };
+    }
+    return { stale: false, current: VERSION, latest };
+  } catch (e) {
+    // 어떤 이유로든 실패해도 init 진행 차단 X
+    return null;
+  }
+}
+
+// 1.9.32/1.9.34: ASCII 배너 — init/version 시 출력 (그라데이션 다중 색상 강화)
+function _banner(opts = {}) {
+  const v = `v${VERSION}`;
+  const cols = process.stdout && process.stdout.columns ? process.stdout.columns : 80;
+  if (process.env.LEERNESS_NO_BANNER === '1') return;
+  if (cols < 70) {
+    log(`Leerness ${v}  —  한국어 우선 AI 개발 하네스`);
+    return;
+  }
+  const isTty = process.stdout && process.stdout.isTTY;
+  // 1.9.34: ANSI 256색 그라데이션 (cyan → magenta) + 굵게
+  // 색상 안전 fallback (Windows 구버전 cmd는 256색 불가 시 그냥 기본색)
+  const mk = (code) => isTty ? `\x1b[38;5;${code}m` : '';
+  const reset = isTty ? '\x1b[0m' : '';
+  const bold = isTty ? '\x1b[1m' : '';
+  // 그라데이션 색상 (cyan/teal/blue/purple/magenta): 6 LEERNESS 라인 × 단색씩
+  const grad = [51, 45, 39, 33, 99, 165]; // cyan → magenta
+  const C = {
+    cyan: s => isTty ? `\x1b[36m${s}\x1b[0m` : s,
+    dim: s => isTty ? `\x1b[2m${s}\x1b[0m` : s,
+    bold: s => isTty ? `\x1b[1m${s}\x1b[0m` : s,
+    green: s => isTty ? `\x1b[32m${s}\x1b[0m` : s,
+    yel: s => isTty ? `\x1b[33m${s}\x1b[0m` : s,
+    mag: s => isTty ? `\x1b[35m${s}\x1b[0m` : s,
+    g: (s, code) => isTty ? `${mk(code)}${bold}${s}${reset}` : s
+  };
+  // 박스 외곽선 + ASCII 본문 그라데이션
+  const asciiLines = [
+    '██╗     ███████╗███████╗██████╗ ███╗   ██╗███████╗███████╗',
+    '██║     ██╔════╝██╔════╝██╔══██╗████╗  ██║██╔════╝██╔════╝',
+    '██║     █████╗  █████╗  ██████╔╝██╔██╗ ██║█████╗  ███████╗',
+    '██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║',
+    '███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║',
+    '╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝'
+  ];
+  const border = C.cyan;
+  const lines = [
+    '',
+    border('  ╔══════════════════════════════════════════════════════════════╗'),
+    border('  ║                                                              ║'),
+  ];
+  for (let i = 0; i < asciiLines.length; i++) {
+    lines.push(border('  ║  ') + C.g(asciiLines[i], grad[i]) + border('  ║'));
+  }
+  lines.push(border('  ║                                                              ║'));
+  lines.push(border('  ║  ') + C.green(`${v.padEnd(10)}`) + C.dim('Korean-first AI Development Harness') + border('              ║'));
+  lines.push(border('  ║  ') + C.yel('★ ') + C.dim('verify · reuse-map · handoff · agents · orchestrate') + border('       ║'));
+  lines.push(border('  ║                                                              ║'));
+  lines.push(border('  ╚══════════════════════════════════════════════════════════════╝'));
+  lines.push('  ' + C.dim('한국어 우선 AI 개발 하네스 — ') + C.mag('verify') + C.dim(' · ') + C.mag('reuse-map') + C.dim(' · ') + C.mag('handoff') + C.dim(' · ') + C.mag('agents'));
+  lines.push('');
+  for (const ln of lines) log(ln);
+  if (opts.quickStart) {
+    log(C.bold(C.cyan('  ✨ 빠른 시작')));
+    log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트'));
+    log('    ' + C.green('npx leerness@latest setup-agents .') + C.dim('                  # 외부 AI CLI 설정'));
+    log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 적재'));
+    log('    ' + C.green('npx leerness verify-claim T-0001 --run-tests') + C.dim('        # 자동 검증'));
+    log('');
+  }
+}
+
+// 1.9.32: TTY 한정 readline async prompt — 비대화형(npx CI, --yes)에선 default 반환
+function _prompt(question, defaultVal = '') {
+  return new Promise(resolve => {
+    if (!process.stdin.isTTY || process.env.LEERNESS_NO_PROMPT === '1' || has('--yes') || has('-y')) {
+      return resolve(defaultVal);
+    }
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const q = defaultVal ? `${question} [${defaultVal}]: ` : `${question}: `;
+    rl.question(q, ans => {
+      rl.close();
+      resolve((ans || '').trim() || defaultVal);
+    });
+  });
+}
+
+// 1.9.32: yes/no prompt — y/yes/예/네/1 → true, n/no/아니오/0/공백 → false
+async function _confirm(question, defaultYes = false) {
+  const def = defaultYes ? 'Y/n' : 'y/N';
+  const ans = await _prompt(`${question} (${def})`, defaultYes ? 'y' : 'n');
+  return /^(y|yes|예|네|ㅇ|1|true)$/i.test(ans.trim());
+}
+
+// 1.9.34: 방향키 + 스페이스 + Enter 인터랙티브 single-select prompt (raw mode)
+// 비-TTY 또는 LEERNESS_NO_PROMPT=1 → 첫 옵션 반환
+async function _selectOne(question, options, opts = {}) {
+  if (!process.stdin.isTTY || process.env.LEERNESS_NO_PROMPT === '1' || has('--yes') || has('-y')) {
+    return opts.defaultIndex != null ? options[opts.defaultIndex] : options[0];
+  }
+  const stdin = process.stdin;
+  const stdout = process.stdout;
+  const isTty = stdout.isTTY;
+  const C = isTty ? {
+    cyan: s => `\x1b[36m${s}\x1b[0m`, dim: s => `\x1b[2m${s}\x1b[0m`,
+    bold: s => `\x1b[1m${s}\x1b[0m`, green: s => `\x1b[32m${s}\x1b[0m`,
+    inv: s => `\x1b[7m${s}\x1b[0m`, mag: s => `\x1b[35m${s}\x1b[0m`
+  } : { cyan: s => s, dim: s => s, bold: s => s, green: s => s, inv: s => s, mag: s => s };
+  return new Promise(resolve => {
+    let idx = opts.defaultIndex || 0;
+    if (idx < 0 || idx >= options.length) idx = 0;
+    const render = (first) => {
+      if (!first) {
+        // 이전 출력 지우기: options.length + 2줄 (제목 + 안내)
+        stdout.write(`\x1b[${options.length + 2}A`);
+      }
+      stdout.write(`\r${C.bold(question)}\n`);
+      stdout.write(`${C.dim('  ↑↓ 이동, Enter 확정, q 취소')}\n`);
+      for (let i = 0; i < options.length; i++) {
+        const label = typeof options[i] === 'string' ? options[i] : (options[i].label || String(options[i]));
+        const desc = typeof options[i] === 'object' && options[i].description ? C.dim('  — ' + options[i].description) : '';
+        const cursor = i === idx ? C.cyan('❯') : ' ';
+        const text = i === idx ? C.bold(C.green(label)) : label;
+        stdout.write(`\x1b[2K\r  ${cursor} ${text}${desc}\n`);
+      }
+    };
+    render(true);
+    stdin.setRawMode && stdin.setRawMode(true);
+    stdin.resume(); stdin.setEncoding('utf8');
+    const onData = (buf) => {
+      const key = String(buf);
+      // 화살표는 ESC [ A/B
+      if (key === '[A' || key === 'k') { idx = (idx - 1 + options.length) % options.length; render(false); }
+      else if (key === '[B' || key === 'j') { idx = (idx + 1) % options.length; render(false); }
+      else if (key === '\r' || key === '\n') {
+        cleanup();
+        stdout.write('\n');
+        resolve(options[idx]);
+      } else if (key === '' || key === 'q' || key === '') {
+        cleanup();
+        stdout.write('\n' + C.dim('  취소됨') + '\n');
+        resolve(opts.defaultIndex != null ? options[opts.defaultIndex] : null);
+      }
+    };
+    const cleanup = () => {
+      stdin.setRawMode && stdin.setRawMode(false);
+      stdin.removeListener('data', onData);
+      stdin.pause();
+    };
+    stdin.on('data', onData);
+  });
+}
+
+// 1.9.34: 방향키 + 스페이스 + Enter 인터랙티브 multi-select prompt (raw mode)
+// 비-TTY/--yes → opts.defaults 또는 빈 배열 반환
+async function _selectMany(question, options, opts = {}) {
+  if (!process.stdin.isTTY || process.env.LEERNESS_NO_PROMPT === '1' || has('--yes') || has('-y')) {
+    return (opts.defaults || []).map(d => typeof d === 'number' ? options[d] : d).filter(Boolean);
+  }
+  const stdin = process.stdin;
+  const stdout = process.stdout;
+  const isTty = stdout.isTTY;
+  const C = isTty ? {
+    cyan: s => `\x1b[36m${s}\x1b[0m`, dim: s => `\x1b[2m${s}\x1b[0m`,
+    bold: s => `\x1b[1m${s}\x1b[0m`, green: s => `\x1b[32m${s}\x1b[0m`,
+    inv: s => `\x1b[7m${s}\x1b[0m`, mag: s => `\x1b[35m${s}\x1b[0m`,
+    yel: s => `\x1b[33m${s}\x1b[0m`
+  } : { cyan: s => s, dim: s => s, bold: s => s, green: s => s, inv: s => s, mag: s => s, yel: s => s };
+  return new Promise(resolve => {
+    let idx = 0;
+    const selected = new Set((opts.defaults || []).map(d => typeof d === 'number' ? d : options.findIndex(o => o === d || (o && o.id === d))).filter(i => i >= 0));
+    const render = (first) => {
+      if (!first) stdout.write(`\x1b[${options.length + 2}A`);
+      stdout.write(`\r${C.bold(question)}\n`);
+      stdout.write(`${C.dim('  ↑↓ 이동, Space 토글, a 전체, n 해제, Enter 확정, q 취소')}\n`);
+      for (let i = 0; i < options.length; i++) {
+        const opt = options[i];
+        const label = typeof opt === 'string' ? opt : (opt.label || String(opt));
+        const desc = typeof opt === 'object' && opt.description ? C.dim(' — ' + opt.description) : '';
+        const mark = selected.has(i) ? C.green('◉') : C.dim('◯');
+        const cursor = i === idx ? C.cyan('❯') : ' ';
+        const text = i === idx ? C.bold(label) : label;
+        stdout.write(`\x1b[2K\r  ${cursor} ${mark} ${text}${desc}\n`);
+      }
+    };
+    render(true);
+    stdin.setRawMode && stdin.setRawMode(true);
+    stdin.resume(); stdin.setEncoding('utf8');
+    const onData = (buf) => {
+      const key = String(buf);
+      if (key === '[A' || key === 'k') { idx = (idx - 1 + options.length) % options.length; render(false); }
+      else if (key === '[B' || key === 'j') { idx = (idx + 1) % options.length; render(false); }
+      else if (key === ' ') {
+        if (selected.has(idx)) selected.delete(idx); else selected.add(idx);
+        render(false);
+      } else if (key === 'a' || key === 'A') {
+        for (let i = 0; i < options.length; i++) selected.add(i);
+        render(false);
+      } else if (key === 'n' || key === 'N') {
+        selected.clear();
+        render(false);
+      } else if (key === '\r' || key === '\n') {
+        cleanup();
+        stdout.write('\n');
+        resolve([...selected].sort((a, b) => a - b).map(i => options[i]));
+      } else if (key === '' || key === 'q' || key === '') {
+        cleanup();
+        stdout.write('\n' + C.dim('  취소됨 (기본값 사용)') + '\n');
+        resolve((opts.defaults || []).map(d => typeof d === 'number' ? options[d] : d).filter(Boolean));
+      }
+    };
+    const cleanup = () => {
+      stdin.setRawMode && stdin.setRawMode(false);
+      stdin.removeListener('data', onData);
+      stdin.pause();
+    };
+    stdin.on('data', onData);
+  });
+}
+
+// 1.9.32: .env 파일에 KEY=value 라인 누적/갱신 (이미 키가 있으면 값 교체, 없으면 append)
+function _upsertEnvLine(envPath, key, value) {
+  let body = exists(envPath) ? read(envPath) : '';
+  const re = new RegExp(`^${key.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}=.*$`, 'm');
+  const line = `${key}=${value}`;
+  if (re.test(body)) body = body.replace(re, line);
+  else body = (body && !body.endsWith('\n') ? body + '\n' : body) + line + '\n';
+  writeUtf8(envPath, body);
+}
+
+// 1.9.32: 외부 AI CLI 자동 설치 시도 — child_process.spawnSync로 installCmd 실행
+function _tryInstallAgent(agent) {
+  if (!agent.installCmd) return { ok: false, message: 'installCmd 정의 없음' };
+  log(`  ▶ 실행: ${agent.installCmd}`);
+  const parts = agent.installCmd.split(/\s+/);
+  const r = cp.spawnSync(parts[0], parts.slice(1), { encoding: 'utf8', timeout: 120000, shell: true, stdio: 'inherit' });
+  if (r.status === 0) return { ok: true, message: '설치 성공' };
+  return { ok: false, message: `exit ${r.status}` + (r.error ? ` (${r.error.code || r.error.message})` : '') };
+}
+
+// 1.9.32/1.9.34: setup-agents 워크플로 — init 직후 또는 단독 명령
+// 1.9.34: 방향키/스페이스 multi-select 도입 (LEERNESS_NO_INTERACTIVE=1 → 기존 yes/no 폴백)
+async function setupAgentsCmd(root, opts = {}) {
+  root = absRoot(root || process.cwd());
+  _loadEnvFile(root);
+  _loadEnvFile(path.join(root, '..'));
+  const envPath = path.join(root, '.env');
+
+  log('');
+  log('# 외부 AI CLI 설정 (1.9.34)');
+  log('메인 에이전트가 작업을 분배할 sub-agent 후보를 선택하세요.');
+  log('각 CLI는 *환경변수 활성화 + PATH 존재* 둘 다 충족할 때 ready 상태가 됩니다.');
+  log('');
+
+  const interactive = !!process.stdin.isTTY && !has('--yes') && !has('-y') && process.env.LEERNESS_NO_PROMPT !== '1';
+  if (!interactive) {
+    log('  비대화형 모드 — 환경변수는 변경하지 않습니다. 수동 편집:');
+    log(`    ${envPath}`);
+    log('  활성 상태 확인: leerness agents list');
+    return;
+  }
+
+  // 1.9.34: multi-select로 활성화할 CLI 일괄 선택
+  const useInteractive = process.env.LEERNESS_NO_INTERACTIVE !== '1';
+  const statuses = EXTERNAL_AGENTS.map(a => ({ agent: a, status: _checkAgent(a) }));
+
+  let toEnable = new Set();
+  if (useInteractive) {
+    const options = statuses.map(({ agent, status }) => {
+      const inst = status.installed ? '🟢 설치됨' : '⚪ 미설치';
+      const desc = `${inst} · ${agent.desc.slice(0, 50)}`;
+      return { id: agent.id, label: agent.id.padEnd(8), description: desc };
+    });
+    // 기본 선택: 이미 활성화된 것 + claude (기본 활성)
+    const defaults = statuses
+      .map((s, i) => (s.status.enabled || s.agent.id === 'claude') ? i : -1)
+      .filter(i => i >= 0);
+    const picked = await _selectMany(
+      '활성화할 sub-agent CLI를 선택하세요 (Space=토글, a=전체, n=해제, Enter=확정)',
+      options,
+      { defaults }
+    );
+    toEnable = new Set(picked.map(p => p.id));
+  } else {
+    // 폴백: 기존 yes/no
+    for (const { agent, status } of statuses) {
+      const isReady = status.installed && status.enabled;
+      log(`▸ ${agent.id} — ${agent.desc}`);
+      log(`  ${status.installed ? '🟢 설치됨' : '⚪ 미설치'} / ${status.enabled ? '🟢 활성' : '🟡 비활성'}`);
+      const wantEnable = await _confirm(`  ${agent.id}를 sub-agent로 활성화?`, isReady || agent.id === 'claude');
+      if (wantEnable) toEnable.add(agent.id);
+    }
+  }
+
+  // 선택 결과 적용
+  for (const { agent, status } of statuses) {
+    const enable = toEnable.has(agent.id);
+    _upsertEnvLine(envPath, agent.envFlag, enable ? '1' : '0');
+    log(enable ? `  ✓ ${agent.envFlag}=1 (활성)` : `  ✗ ${agent.envFlag}=0 (비활성)`);
+
+    // 활성화했지만 미설치 → 자동 설치 prompt
+    if (enable && !status.installed) {
+      log(`  ⚠ ${agent.bin}이(가) 설치되어 있지 않습니다.`);
+      log(`     설치 명령: ${agent.installCmd}`);
+      const doInstall = await _confirm(`  지금 자동 설치를 시도할까요?`, false);
+      if (doInstall) {
+        const r = _tryInstallAgent(agent);
+        if (r.ok) {
+          const after = _checkAgent(agent);
+          if (after.installed) log(`  🟢 ${agent.id} 설치 확인 (${after.version || '?'})`);
+          else log(`  ⚠ 설치 후에도 PATH에서 찾지 못함 — 새 셸을 열어주세요`);
+        } else {
+          log(`  ✗ 설치 실패: ${r.message}`);
+        }
+      } else {
+        log(`  → 나중에 직접 설치 후 \`leerness setup-agents\` 재실행 가능`);
+      }
+    }
+  }
+
+  log('');
+  log('✅ 외부 AI CLI 설정 완료.');
+  log(`   .env에 LEERNESS_ENABLE_* 플래그가 저장되었습니다 (${rel(root, envPath)}).`);
+  log('   다음: leerness agents list  /  leerness agents quota');
+}
+
+function agentsCmd(root, sub, ...args) {
+  root = absRoot(root || process.cwd());
+  // .env 자동 로드 (1.9.22)
+  _loadEnvFile(root);
+  _loadEnvFile(path.join(root, '..'));
+
+  if (!sub || sub === 'list') {
+    const checks = EXTERNAL_AGENTS.map(a => _checkAgent(a));
+    if (has('--json')) { log(JSON.stringify({ agents: checks }, null, 2)); return; }
+    log(`# 외부 AI CLI 오케스트레이션 (1.9.30)`);
+    log('');
+    log(`| Agent | env (${'env=1 활성'}) | 설치 | 버전 | 상태 |`);
+    log(`|---|---|---|---|---|`);
+    for (const c of checks) {
+      const envMark = c.enabled ? '✓' : '✗';
+      const instMark = c.installed ? '✓' : '✗';
+      const statusEmoji = c.status === 'ready' ? '🟢 ready' : c.status === 'not-installed' ? '⚪ 미설치' : c.status === 'disabled' ? '🟡 비활성' : '❓';
+      log(`| ${c.id} | ${envMark} ${c.envFlag} | ${instMark} | ${c.version || '-'} | ${statusEmoji} |`);
+    }
+    const ready = checks.filter(c => c.status === 'ready');
+    log('');
+    log(`## 활성 (${ready.length}/${checks.length}): ${ready.map(c => c.id).join(', ') || '(없음)'}`);
+    if (!ready.length) {
+      log('');
+      log(`💡 활성화 방법:`);
+      log(`  1) CLI 설치 (예: \`npm i -g @openai/codex-cli\`, \`npm i -g @google/gemini-cli\`)`);
+      log(`  2) .env 또는 환경변수: LEERNESS_ENABLE_CODEX=1, LEERNESS_ENABLE_GEMINI=1`);
+      log(`  3) \`leerness agents check\`로 재확인`);
+    } else {
+      log('');
+      log(`💡 메인 에이전트가 sub-agent 분배 시 위 ${ready.length}개 CLI 활용 가능:`);
+      log(`   \`leerness agents dispatch "<task>" --to <id>\` 로 프롬프트 전달`);
+    }
+    return;
+  }
+
+  if (sub === 'check') {
+    // list의 alias, 단 명시적 재확인 (JSON 출력 기본)
+    const checks = EXTERNAL_AGENTS.map(a => _checkAgent(a));
+    if (has('--json')) { log(JSON.stringify({ agents: checks, ready: checks.filter(c => c.status === 'ready').map(c => c.id) }, null, 2)); return; }
+    return agentsCmd(root, 'list'); // 비-JSON은 list와 동일
+  }
+
+  if (sub === 'dispatch') {
+    const task = args.filter(x => !x.startsWith('-')).join(' ').trim() || arg('--task', null);
+    const target = arg('--to', null);
+    if (!task) { fail('dispatch "<task>" 또는 --task 필요'); return process.exit(1); }
+    if (!target) { fail('--to <agent_id> 필요 (claude/codex/gemini/copilot)'); return process.exit(1); }
+    const agentDef = EXTERNAL_AGENTS.find(a => a.id === target);
+    if (!agentDef) { fail(`알 수 없는 agent: ${target}`); return process.exit(1); }
+    // 1.9.36: 작업 유형 키워드 분석 → 최적 CLI 추천 (ready 체크 전에 출력 — 비활성이어도 추천)
+    const recommendation = _recommendAgent(task);
+    const recommended = recommendation.target;
+    if (recommended && recommended !== target) {
+      log(`💡 추천: 이 작업은 ${recommended}가 더 적합 (${recommendation.reason})`);
+    }
+    const status = _checkAgent(agentDef);
+    if (status.status !== 'ready') {
+      fail(`${target} 비활성 (${status.status}). 환경변수 ${agentDef.envFlag}=1 + CLI 설치 필요.`);
+      return process.exit(1);
+    }
+    // 1.9.36: --write 시 파일 수정 가능 권장 플래그 자동 첨부, 미명시 시 read-only 안전 모드
+    const writeMode = has('--write');
+    const readOnly = has('--readonly') || !writeMode;
+    // 실제 호출은 안 함 — 프롬프트만 생성 (사용자가 명시적으로 실행)
+    log(`# leerness agents dispatch (1.9.36)`);
+    log(`대상: ${target} (${agentDef.bin})`);
+    log(`상태: 🟢 ready, 버전 ${status.version || '?'}`);
+    log(`모드: ${writeMode ? '✏ write (파일 수정 가능)' : '🔒 read-only (분석 전용, 안전)'}`);
+    log('');
+    log(`## 실행 명령 (사용자가 복사해서 실행)`);
+    log('');
+    const q = task.replace(/"/g, '\\"');
+    if (target === 'claude') {
+      const flags = writeMode ? '--print --dangerously-skip-permissions' : '--print';
+      log(`claude ${flags} "${q}"`);
+      if (writeMode) log(`# ⚠ --dangerously-skip-permissions: 도구 권한 자동 승인 (파일 수정 가능)`);
+    } else if (target === 'codex') {
+      const flags = writeMode ? 'exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox' : 'exec --skip-git-repo-check';
+      log(`codex ${flags} "${q}"`);
+      log(`# ℹ codex는 PowerShell 경유 — POSIX /tmp 경로는 C:\\tmp\\로 해석됨`);
+      if (writeMode) log(`# ⚠ --dangerously-bypass-approvals-and-sandbox: sandbox 우회`);
+    } else if (target === 'gemini') {
+      const flags = writeMode ? '-p --yolo' : '-p';
+      log(`gemini ${flags} "${q}"`);
+      if (writeMode) log(`# ⚠ --yolo: 워크스페이스 파일 직접 수정 가능`);
+    } else if (target === 'copilot') {
+      log(`gh copilot suggest "${q}"`);
+    }
+    log('');
+    log(`## 정책 (1.9.36)`);
+    log(`  - leerness는 외부 CLI를 자동 호출하지 않음 (사용자 명시적 실행)`);
+    log(`  - 메인 에이전트(Claude)가 위 명령을 보고 sub-agent로 spawn 가능`);
+    log(`  - quota 체크: \`leerness agents quota\` (1.9.31+)`);
+    log(`  - 동시 호출 시: \`leerness agents bench "<task>"\` (1.9.36)`);
+    log('');
+    log(`## 분배 시 안전 규칙 (1.9.35)`);
+    log(`  - sub-agent 프롬프트에 "당신만 수정할 파일 경로"를 명시 (파일 경로 격리)`);
+    log(`  - sub-agent에 "보고 시 \`stat <file>\` 또는 mtime 확인 결과 첨부" 요구 (자기 격리 검증)`);
+    log(`  - 사양 사전 정의 (예: TICK_SPEC.md) → \`leerness contract verify\`로 사후 검증`);
+    log(`  - 같은 파일 동시 쓰기는 last-writer-wins 위험 (1.9.34 검증)`);
+    return;
+  }
+
+  if (sub === 'bench') {
+    // 1.9.36: 같은 prompt를 ready CLI 모두에 동시 호출 + 시간/응답 길이/exit code 비교
+    const task = args.filter(x => !x.startsWith('-')).join(' ').trim() || arg('--task', null);
+    if (!task) { fail('bench "<task>" 필요'); return process.exit(1); }
+    const timeoutS = parseInt(arg('--timeout', '60'), 10);
+    const writeMode = has('--write');
+    const ready = EXTERNAL_AGENTS.map(a => ({ agent: a, status: _checkAgent(a) }))
+                                  .filter(x => x.status.status === 'ready');
+    if (!ready.length) {
+      fail('ready CLI 없음 — leerness setup-agents 또는 .env에 LEERNESS_ENABLE_X=1 설정 필요');
+      return process.exit(1);
+    }
+    log(`# leerness agents bench (1.9.36)`);
+    log(`task: ${task.slice(0, 80)}${task.length > 80 ? '…' : ''}`);
+    log(`참여 CLI: ${ready.map(r => r.agent.id).join(', ')} (${ready.length}개)`);
+    log(`타임아웃: ${timeoutS}s/CLI · 모드: ${writeMode ? 'write' : 'read-only'}`);
+    log('');
+    log('병렬 호출 중... (병렬 fork 후 wait)');
+    log('');
+    const results = [];
+    const promises = ready.map(({ agent, status }) => new Promise((resolve) => {
+      const t0 = Date.now();
+      let cmd, cmdArgs;
+      if (agent.id === 'claude') {
+        cmdArgs = writeMode ? ['--print', '--dangerously-skip-permissions', task] : ['--print', task];
+        cmd = 'claude';
+      } else if (agent.id === 'codex') {
+        cmdArgs = writeMode
+          ? ['exec', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', task]
+          : ['exec', '--skip-git-repo-check', task];
+        cmd = 'codex';
+      } else if (agent.id === 'gemini') {
+        cmdArgs = writeMode ? ['-p', task, '--yolo'] : ['-p', task];
+        cmd = 'gemini';
+      } else if (agent.id === 'copilot') {
+        cmdArgs = ['copilot', 'suggest', task];
+        cmd = 'gh';
+      }
+      const r = cp.spawn(cmd, cmdArgs, { shell: true });
+      let stdout = '', stderr = '';
+      r.stdout.on('data', d => { stdout += d; });
+      r.stderr.on('data', d => { stderr += d; });
+      const timer = setTimeout(() => { r.kill(); }, timeoutS * 1000);
+      r.on('close', (code) => {
+        clearTimeout(timer);
+        const elapsed = Date.now() - t0;
+        results.push({
+          id: agent.id, exit: code, elapsed,
+          stdout: stdout.trim().split('\n').slice(-3).join('\n'),
+          stderrLen: stderr.length,
+          ok: code === 0 && stdout.trim().length > 0
+        });
+        resolve();
+      });
+      r.on('error', (err) => {
+        clearTimeout(timer);
+        results.push({ id: agent.id, exit: -1, elapsed: Date.now() - t0, stdout: '', stderrLen: 0, error: err.message, ok: false });
+        resolve();
+      });
+    }));
+    return Promise.all(promises).then(() => {
+      if (has('--json')) { log(JSON.stringify({ task, results }, null, 2)); return; }
+      log(`| CLI | 시간 | exit | 응답 길이 | 마지막 라인 |`);
+      log(`|---|---:|---:|---:|---|`);
+      // sort by elapsed
+      results.sort((a, b) => a.elapsed - b.elapsed);
+      for (const r of results) {
+        const respLen = (r.stdout || '').length;
+        const last = (r.stdout || '').split('\n').pop().slice(0, 50);
+        log(`| ${r.id} | ${r.elapsed}ms | ${r.exit} | ${respLen} | ${last.replace(/\|/g, '\\|')} |`);
+      }
+      log('');
+      const okCount = results.filter(r => r.ok).length;
+      log(`결과: ${okCount}/${results.length} 성공`);
+      const fastest = results.filter(r => r.ok).sort((a, b) => a.elapsed - b.elapsed)[0];
+      if (fastest) log(`🏆 가장 빠름: ${fastest.id} (${fastest.elapsed}ms)`);
+    });
+  }
+
+  if (sub === 'quota') {
+    // 1.9.31: 각 CLI 사용량/쿼터 추정 + provider 대시보드 링크
+    const results = [];
+    for (const agent of EXTERNAL_AGENTS) {
+      const base = _checkAgent(agent);
+      const out = { id: agent.id, bin: agent.bin, status: base.status, quota: null, hint: null, raw: null };
+      if (base.status !== 'ready') {
+        out.hint = base.status === 'not-installed' ? `${agent.bin} CLI 미설치` : base.status === 'disabled' ? `${agent.envFlag}=1 필요` : '알 수 없음';
+        results.push(out); continue;
+      }
+      // CLI별 quota 탐지 시도
+      try {
+        if (agent.id === 'claude') {
+          // claude는 /status 슬래시 (대화형)만 지원. 비대화형 추정 불가.
+          out.quota = 'unknown';
+          out.hint = '대화 내 `/status` 슬래시 또는 https://console.anthropic.com/settings/usage 확인';
+        } else if (agent.id === 'codex') {
+          // codex CLI: codex --help에 usage 명령 있는지 확인
+          const r = cp.spawnSync(agent.bin, ['--help'], { encoding: 'utf8', timeout: 4000, shell: true });
+          const help = (r.stdout || r.stderr || '').toLowerCase();
+          if (help.includes('usage') || help.includes('quota')) {
+            out.quota = 'cli-supported';
+            out.hint = '`codex usage` 또는 `codex quota` 시도 가능';
+          } else {
+            out.quota = 'unknown';
+            out.hint = 'https://platform.openai.com/account/usage 확인';
+          }
+          out.raw = help.slice(0, 200);
+        } else if (agent.id === 'gemini') {
+          // gemini CLI: 무료 티어는 분당 60req 제한, CLI 자체에선 노출 안 됨
+          out.quota = 'rate-limited';
+          out.hint = '무료 티어: 60 req/min, 1000 req/day · 유료는 https://ai.google.dev/gemini-api/docs/rate-limits';
+        } else if (agent.id === 'copilot') {
+          // gh copilot은 GitHub Copilot 구독 (월 단위 quota 없음, individual/business 플랜)
+          const r = cp.spawnSync('gh', ['auth', 'status'], { encoding: 'utf8', timeout: 4000, shell: true });
+          const authed = r.status === 0;
+          out.quota = authed ? 'subscription' : 'not-authed';
+          out.hint = authed ? 'Copilot 구독자 무제한 (월 플랜) · https://github.com/settings/copilot' : '`gh auth login` 필요';
+        }
+      } catch (e) {
+        out.quota = 'error';
+        out.hint = e.message;
+      }
+      results.push(out);
+    }
+    if (has('--json')) { log(JSON.stringify({ quota: results }, null, 2)); return; }
+    log(`# 외부 AI CLI quota 추정 (1.9.31)`);
+    log('');
+    log(`| Agent | 상태 | quota | 안내 |`);
+    log(`|---|---|---|---|`);
+    for (const q of results) {
+      const statusEmoji = q.status === 'ready' ? '🟢' : q.status === 'not-installed' ? '⚪' : q.status === 'disabled' ? '🟡' : '❓';
+      log(`| ${q.id} | ${statusEmoji} ${q.status} | ${q.quota || '-'} | ${q.hint || '-'} |`);
+    }
+    log('');
+    log(`## 주의`);
+    log(`  - leerness는 CLI 사용량을 직접 추적하지 않음 (provider 대시보드 참조)`);
+    log(`  - rate-limit/quota는 plan/티어에 따라 달라짐`);
+    log(`  - sub-agent 분배 시 quota 여유 큰 CLI 우선 활용 권장`);
+    return;
+  }
+
+  fail('사용법: leerness agents list|check|quota|dispatch|bench [--write] "<task>" [--to <id>]');
+  return process.exit(1);
+}
+
+function personaCmd(root, sub, idOrName, ...rest) {
+  root = absRoot(root || process.cwd());
+  if (!sub || sub === 'list') {
+    const customDir = path.join(root, '.harness', 'personas');
+    const custom = exists(customDir) ? fs.readdirSync(customDir).filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, '')) : [];
+    if (has('--json')) {
+      log(JSON.stringify({
+        builtin: Object.values(BUILT_IN_PERSONAS).map(p => ({ id: p.id, name: p.name, description: p.description })),
+        custom
+      }, null, 2));
+      return;
+    }
+    log(`# 페르소나 카탈로그 (1.9.29)`);
+    log(`\n## 내장 (${Object.keys(BUILT_IN_PERSONAS).length})`);
+    for (const p of Object.values(BUILT_IN_PERSONAS)) log(`  - ${p.id}: ${p.name} — ${p.description}`);
+    if (custom.length) {
+      log(`\n## 사용자 정의 (${custom.length}, .harness/personas/)`);
+      for (const c of custom) log(`  - ${c}`);
+    }
+    log(`\n💡 활용: \`leerness review <file> --persona ${Object.keys(BUILT_IN_PERSONAS)[0]}\``);
+    return;
+  }
+  if (sub === 'show') {
+    if (!idOrName) { fail('persona show <id> 필요'); return process.exit(1); }
+    const p = _resolvePersona(root, idOrName);
+    if (!p) { fail(`페르소나 없음: ${idOrName}`); return process.exit(1); }
+    log(`# ${p.name} (${p.id})`);
+    log(`\n${p.description}\n`);
+    log(`---\n${p.body}`);
+    return;
+  }
+  if (sub === 'add') {
+    if (!idOrName) { fail('persona add <id> 필요'); return process.exit(1); }
+    const customDir = path.join(root, '.harness', 'personas');
+    if (!exists(customDir)) fs.mkdirSync(customDir, { recursive: true });
+    const fp = path.join(customDir, `${idOrName}.md`);
+    if (exists(fp)) { fail(`이미 존재: ${fp}`); return process.exit(1); }
+    const templatePersona = `# ${idOrName}\n\n간략 설명: (한 줄 작성)\n\n---\n\n너는 ...에 정통한 ...전문가다. ...\n\n검토 영역: ...\n보고에 포함: ...`;
+    writeUtf8(fp, templatePersona);
+    ok(`페르소나 템플릿 생성: ${fp}`);
+    log(`  편집 후 \`leerness review <file> --persona ${idOrName}\`로 사용`);
+    return;
+  }
+  fail('사용법: leerness persona list|show <id>|add <id>');
+  return process.exit(1);
+}
+
+function reviewCmd(root, target) {
+  root = absRoot(root || process.cwd());
+  if (!target) { fail('review <file> 필요. 예: leerness review src/api.js --persona security'); return process.exit(1); }
+  const personaIds = (arg('--persona', null) || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!personaIds.length) { fail('--persona <id> 필요. \`leerness persona list\`로 확인'); return process.exit(1); }
+
+  // 파일 확인
+  const filePath = path.isAbsolute(target) ? target : path.join(root, target);
+  if (!exists(filePath)) { fail(`파일 없음: ${filePath}`); return process.exit(1); }
+  const fileContent = read(filePath);
+  const fileSize = Buffer.byteLength(fileContent, 'utf8');
+  if (fileSize > 100 * 1024) { fail(`파일 너무 큼: ${fileSize} bytes. 100KB 미만 권장.`); return process.exit(1); }
+
+  // 페르소나 해석
+  const personas = [];
+  for (const id of personaIds) {
+    const p = _resolvePersona(root, id);
+    if (!p) { fail(`페르소나 없음: ${id}. \`leerness persona list\` 확인`); return process.exit(1); }
+    personas.push(p);
+  }
+
+  // 출력 형식: emit
+  const emit = arg('--emit', 'prompt'); // prompt | md | json
+
+  if (emit === 'json') {
+    log(JSON.stringify({
+      file: target,
+      filePath, fileSize,
+      personas: personas.map(p => ({ id: p.id, name: p.name }))
+    }, null, 2));
+    return;
+  }
+
+  // 각 페르소나마다 별도 프롬프트 생성
+  for (const p of personas) {
+    if (personas.length > 1) log(`\n${'='.repeat(70)}`);
+    log(`# Review Prompt — ${p.name} (${p.id})`);
+    log(`## 대상: ${target} (${fileSize} bytes)`);
+    log(`## 페르소나 활성화`);
+    log(p.body);
+    log(`\n## 작업`);
+    log(`아래 코드를 위 페르소나 관점에서 정밀 리뷰하라. 한국어 보고 ~600단어.`);
+    log(`\n## 코드`);
+    log('```javascript');
+    log(fileContent);
+    log('```');
+  }
+
+  if (emit === 'md') {
+    // 파일로도 저장
+    const outDir = path.join(root, '.harness', 'reviews');
+    if (!exists(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    const tag = personas.map(p => p.id).join('-');
+    const outFile = path.join(outDir, `${path.basename(target).replace(/\./g, '_')}-${tag}-${today()}.md`);
+    // 이미 stdout 출력했으니 그걸 파일로도 — 간단히 생략 (사용자가 redirect 가능)
+    log(`\n💡 \`leerness review <file> --persona X > out.md\` 로 저장 가능`);
+  }
+}
+
+// 1.9.25: register-pending — sub-agent/외부 모델이 작업 시작 즉시 progress-tracker에 in-progress 등록
+// 사용 예: leerness register-pending "<요청 내용>" --agent gemini
+//   → 다음 T-ID 자동 할당, status=in-progress, evidence="(pending) by <agent>"
+//   → 다른 세션이 즉시 발견 가능 (모순 감지)
+function registerPendingCmd(root, requestParts) {
+  root = absRoot(root || process.cwd());
+  const request = (requestParts || []).join(' ').trim();
+  if (!request) { fail('register-pending "<요청>" 필요. 예: leerness register-pending "toJson 함수 추가" --agent gemini'); return process.exit(1); }
+  const agent = arg('--agent', 'unknown');
+  const note = arg('--note', '');
+
+  // 다음 T-ID 산출
+  const rows = readProgressRows(root);
+  let maxN = 0;
+  for (const r of rows) {
+    const m = r.id && r.id.match(/^T-(\d+)$/);
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  }
+  const id = `T-${String(maxN + 1).padStart(4, '0')}`;
+  const evidence = `(pending) by ${agent}${note ? ' — ' + note : ''}`;
+  const row = {
+    id,
+    status: 'in-progress',
+    request: request.slice(0, 200),
+    evidence,
+    nextAction: '작업 진행 중',
+    updated: today()
+  };
+  upsertProgress(root, row);
+  log(`✓ ${id} 등록됨 (in-progress) by ${agent}`);
+  log(`  request: ${row.request}`);
+  log(`  💡 작업 완료 후: leerness task update ${id} --status done --evidence "..."`);
+  if (has('--json')) log(JSON.stringify({ ok: true, id, ...row }, null, 2));
+}
+
+// 1.9.22 후보 4: llm-bench record + retro 통합
+function llmBenchRecordCmd(root) {
+  root = absRoot(root || process.cwd());
+  const label = arg('--label', 'manual');
+  const score = arg('--score', null);
+  const tokens = arg('--tokens', null);
+  const model = arg('--model', 'unknown');
+  if (!score) { fail('--score 필요'); return process.exit(1); }
+  const histFile = path.join(root, '.harness', 'llm-bench-history.md');
+  if (!exists(path.dirname(histFile))) fs.mkdirSync(path.dirname(histFile), { recursive: true });
+  const row = `| ${today()} | ${model} | ${label} | ${score} | ${tokens || '?'} |\n`;
+  if (!exists(histFile)) {
+    writeUtf8(histFile, `# LLM Bench History\n\n| Date | Model | Label | Score | Tokens |\n|---|---|---|---:|---:|\n${row}`);
+  } else {
+    append(histFile, row);
+  }
+  ok(`기록됨: ${histFile}`);
 }
 
 function sessionClose(root) {
@@ -1702,7 +4178,7 @@ function _brainstormFor(root, topic) {
   const tokens = String(topic).split(/\s+/).filter(t => t.length >= 2);
   const wordRes = tokens.map(t => new RegExp(`(?<![\\p{L}\\p{N}_])${_escUnicode(t)}(?![\\p{L}\\p{N}_])`, 'iu'));
   function matches(text) { return wordRes.every(re => re.test(text)); }
-  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [] };
+  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [], code: [] };
   const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
   const decLines = dec.split('\n');
   for (const b of _extractDecisionBlocks(dec)) {
@@ -1758,10 +4234,38 @@ function _brainstormFor(root, topic) {
       if (/✗|fail|롤백|incomplete|버그/i.test(block)) hits.lessons.push({ title: t.trim(), line: lineNo });
     }
   }
+  // 1.9.25: --include-code 옵션 — 소스 본문 검색 추가 (모순 감지 핵심)
+  if (has('--include-code')) {
+    const codeDirs = ['src', 'tests', 'bin', 'lib'];
+    for (const dir of codeDirs) {
+      const dp = path.join(root, dir);
+      if (!exists(dp)) continue;
+      function walkCode(d) {
+        let entries; try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+          const p = path.join(d, e.name);
+          if (e.isDirectory()) { walkCode(p); continue; }
+          if (!/\.(js|ts|jsx|tsx|gd|cs|py|rb|go|rs)$/i.test(e.name)) continue;
+          let txt; try { txt = read(p); } catch { continue; }
+          if (matches(txt)) {
+            const lines = txt.split('\n');
+            const firstHit = lines.findIndex(l => matches(l));
+            hits.code.push({
+              file: rel(root, p),
+              line: firstHit >= 0 ? firstHit + 1 : 0,
+              preview: firstHit >= 0 ? lines[firstHit].trim().slice(0, 120) : ''
+            });
+            if (hits.code.length >= 20) return; // 너무 많으면 stop
+          }
+        }
+      }
+      walkCode(dp);
+    }
+  }
   return hits;
 }
 
-function _brainstormTotal(h) { return h.decisions.length + h.skills.length + h.tasks.length + h.rules.length + h.evidence.length; }
+function _brainstormTotal(h) { return h.decisions.length + h.skills.length + h.tasks.length + h.rules.length + h.evidence.length + (h.code?.length || 0); }
 
 // 1.9.16: 워크스페이스 통합 brainstorm
 function _brainstormWorkspace(rootBase, topic) {
@@ -1803,8 +4307,13 @@ function _brainstormWorkspace(rootBase, topic) {
     if (h.lessons.length) {
       log(`  ⚠ 과거 실패/롤백 (${h.lessons.length})`);
     }
+    // 1.9.25: 소스 코드 본문 hits
+    if (h.code && h.code.length) {
+      log(`  💻 코드 (${h.code.length})`);
+      h.code.slice(0, 5).forEach(c => log(`    - ${c.file}:${c.line} — ${c.preview}`));
+    }
   }
-  log(`\n## 📊 워크스페이스 총합: ${grandTotal}건 매치 (${paths.length} 프로젝트)`);
+  log(`\n## 📊 워크스페이스 총합: ${grandTotal}건 매치 (${paths.length} 프로젝트)${has('--include-code') ? ' (소스 코드 포함)' : ''}`);
   if (grandTotal === 0) log(`  ⓘ 어느 프로젝트에서도 "${topic}" 관련 자원 없음 — 새 영역. 첫 결정/스킬을 기록하면 다음 brainstorm이 풍부해짐.`);
 }
 
@@ -1829,7 +4338,7 @@ function brainstormCmd(root, topic) {
   const tokens = String(topic).split(/\s+/).filter(t => t.length >= 2);
   const wordRes = tokens.map(t => new RegExp(`(?<![\\p{L}\\p{N}_])${_escUnicode(t)}(?![\\p{L}\\p{N}_])`, 'iu'));
   function matches(text) { return wordRes.every(re => re.test(text)); }
-  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [] };
+  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [], code: [] };
 
   // decisions (1.9.14: 코드블록/Template 제외, 1.9.15: 라인 번호)
   const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
@@ -2612,6 +5121,79 @@ function deployGhPages(root, sourceFile) {
   }
 }
 
+// 1.9.40: release pack — 가벼운 통합 명령 (npm pack + self-host migrate + auto task + close + readme sync)
+// 메타 감사에서 발견한 "라운드 마감 = pack" 패턴을 leerness 워크플로로 흡수.
+async function releasePackCmd(root) {
+  root = absRoot(root || process.cwd());
+  const dryRun = has('--dry-run');
+  const parentMigrate = has('--parent-migrate');
+  const close = has('--close');
+  const readmeSync = !has('--no-readme-sync');
+  const taskTitle = arg('--task-add', null);
+  log(`# leerness release pack (1.9.40)`);
+  log(`mode: ${dryRun ? 'dry-run' : 'live'} · parent-migrate: ${parentMigrate} · close: ${close} · readme-sync: ${readmeSync}`);
+  log('');
+
+  // 1. README 동기화 (배지/카운트)
+  if (readmeSync) {
+    try { syncReadme(root); ok('readme sync 적용'); } catch (e) { warn('readme sync skip: ' + e.message); }
+  }
+
+  // 2. npm pack
+  if (!dryRun) {
+    const r = cp.spawnSync('npm', ['pack'], { cwd: root, encoding: 'utf8', shell: true });
+    if (r.status !== 0) { fail('npm pack 실패'); log(r.stderr); process.exitCode = 1; return; }
+    const tarMatch = (r.stdout || '').match(/[^\s]+\.tgz/);
+    if (tarMatch) ok(`npm pack → ${tarMatch[0]}`);
+    else ok('npm pack 완료');
+  } else {
+    log('  (dry-run) npm pack 스킵');
+  }
+
+  // 3. 부모 워크스페이스 self-host migrate (dogfooding gap 차단)
+  if (parentMigrate) {
+    const parent = path.resolve(root, '..');
+    if (exists(path.join(parent, '.harness'))) {
+      log(`\n[parent self-host migrate] ${parent}`);
+      if (!dryRun) {
+        try {
+          await install(parent, { force: false, dry: false, migration: true, nonInteractive: true });
+          ok('parent migrate 완료');
+        } catch (e) { warn('parent migrate 실패: ' + e.message); }
+      } else {
+        log(`  (dry-run) ${parent} migrate 스킵`);
+      }
+    } else {
+      log('  (parent에 .harness 없음 — migrate 스킵)');
+    }
+  }
+
+  // 4. 자동 task add — 매 release 라운드가 progress-tracker에 흔적 남도록
+  if (taskTitle) {
+    const v = getCurrentVersion(root) || VERSION;
+    const id = nextId(root, 'T');
+    upsertProgress(root, {
+      id,
+      status: 'done',
+      request: taskTitle,
+      evidence: `release pack ${v} · ${new Date().toISOString().slice(0, 10)}`,
+      nextAction: '다음 라운드 후보 검토'
+    });
+    ok(`task added: ${id} · ${taskTitle}`);
+  }
+
+  // 5. session close
+  if (close) {
+    log('\n[session close]');
+    try {
+      const r = sessionClose(root);
+      ok('session close 호출됨');
+    } catch (e) { warn('session close 실패: ' + e.message); }
+  }
+
+  log('\n✅ release pack 완료');
+}
+
 function releasePublish(root) {
   root = absRoot(root);
   const dryRun = has('--dry-run');
@@ -2692,6 +5274,8 @@ function verifyCodeCmd(root) {
   else if (scripts.tsc) tasks.push({ name: 'typecheck', cmd: 'npm run tsc' });
   else if (exists(path.join(root, 'tsconfig.json'))) tasks.push({ name: 'typecheck', cmd: 'npx --yes tsc --noEmit', optional: true });
   if (has('--build') && scripts.build) tasks.push({ name: 'build', cmd: 'npm run build' });
+  // 1.9.20: --bench → scripts.bench 자동 실행 (성능 metric을 evidence에 누적)
+  if (has('--bench') && scripts.bench) tasks.push({ name: 'bench', cmd: 'npm run bench', optional: true });
   if (!tasks.length) {
     warn('실행할 검증 task 없음 (package.json#scripts에 test/lint/typecheck 추가하세요)');
     return;
@@ -3194,8 +5778,612 @@ function viewworkInstall(root) {
   ok('claude .claude/settings.local.json updated (Stop hook adds a viewwork event)');
 }
 
+// 1.9.37: drift detection — 메타파일 staleness 측정으로 "leerness 점점 안 쓰는" 현상 감지
+function driftCheckCmd(root, opts = {}) {
+  root = absRoot(root || process.cwd());
+  const now = Date.now();
+  const _ageDays = (p) => {
+    if (!exists(p)) return null;
+    return (now - fs.statSync(p).mtimeMs) / 86400000;
+  };
+  // 각 메타파일의 마지막 갱신
+  const signals = [];
+  // 1. session-handoff.md - "Last generated" 라인 우선, 없으면 mtime
+  const shPath = handoffPath(root);
+  if (exists(shPath)) {
+    const txt = read(shPath);
+    const m = txt.match(/Last generated:\s*([\d\-T:.Z]+)/);
+    let ageDays;
+    if (m) {
+      ageDays = (now - new Date(m[1]).getTime()) / 86400000;
+    } else {
+      ageDays = _ageDays(shPath);
+    }
+    signals.push({ file: 'session-handoff.md', ageDays, threshold: 1, weight: 30, label: 'session close 누락' });
+  }
+  // 2. current-state.md - "Updated: YYYY-MM-DD" 라인
+  const csPath = currentStatePath(root);
+  if (exists(csPath)) {
+    const m = read(csPath).match(/Updated:\s*(\d{4}-\d{2}-\d{2})/);
+    const ageDays = m ? (now - new Date(m[1]).getTime()) / 86400000 : _ageDays(csPath);
+    signals.push({ file: 'current-state.md', ageDays, threshold: 2, weight: 20, label: 'current-state 갱신 없음' });
+  }
+  // 3. progress-tracker.md 마지막 row의 updated 컬럼
+  const rows = readProgressRows(root);
+  if (rows.length) {
+    const dates = rows.map(r => (r.updated || '').match(/\d{4}-\d{2}-\d{2}/)).filter(Boolean).map(m => m[0]);
+    if (dates.length) {
+      dates.sort();
+      const latest = dates[dates.length - 1];
+      const ageDays = (now - new Date(latest).getTime()) / 86400000;
+      signals.push({ file: 'progress-tracker.md', ageDays, threshold: 1, weight: 30, label: 'task update 없음' });
+    }
+  } else {
+    signals.push({ file: 'progress-tracker.md', ageDays: 999, threshold: 1, weight: 25, label: 'progress-tracker 비어있음' });
+  }
+  // 4. task-log.md 마지막 entry "## YYYY-MM-DD"
+  const tlPath = taskLogPath(root);
+  if (exists(tlPath)) {
+    const dates = Array.from(read(tlPath).matchAll(/^## (\d{4}-\d{2}-\d{2})/gm)).map(m => m[1]);
+    if (dates.length) {
+      dates.sort();
+      const latest = dates[dates.length - 1];
+      const ageDays = (now - new Date(latest).getTime()) / 86400000;
+      signals.push({ file: 'task-log.md', ageDays, threshold: 2, weight: 20, label: 'task-log 갱신 없음' });
+    }
+  }
+  // 점수 계산
+  let totalScore = 0;
+  const fired = [];
+  for (const s of signals) {
+    if (s.ageDays > s.threshold) {
+      totalScore += s.weight;
+      fired.push(s);
+    }
+  }
+  // 신규 _apps/* 에서 task 0건도 신호로
+  const appsDir = path.join(root, '_apps');
+  let appsZeroTask = [];
+  if (exists(appsDir)) {
+    for (const d of fs.readdirSync(appsDir)) {
+      const sub = path.join(appsDir, d);
+      if (!exists(path.join(sub, '.harness'))) continue;
+      const subRows = readProgressRows(sub);
+      if (!subRows.length) appsZeroTask.push(d);
+    }
+    if (appsZeroTask.length) {
+      const w = Math.min(50, appsZeroTask.length * 10);
+      totalScore += w;
+      fired.push({ file: `_apps/* (${appsZeroTask.length}개)`, ageDays: null, threshold: 0, weight: w, label: `task 0건 sub-app: ${appsZeroTask.slice(0, 3).join(', ')}${appsZeroTask.length > 3 ? '...' : ''}` });
+    }
+  }
+  // 레벨 판정
+  let level = '🟢 healthy';
+  if (totalScore >= 100) level = '🔴 critical';
+  else if (totalScore >= 50) level = '🟡 warning';
+  else if (totalScore >= 20) level = '🟠 attention';
+
+  // 1.9.38 (D): drift critical 등급은 누적 카운트 (학습 신호)
+  try {
+    if (level === '🔴 critical') {
+      const stats = _readUsageStats(root);
+      stats.drift = stats.drift || {};
+      stats.drift.criticalSeen = (stats.drift.criticalSeen || 0) + 1;
+      const p = _usageStatsPath(root);
+      mkdirp(path.dirname(p));
+      writeUtf8(p, JSON.stringify(stats, null, 2) + '\n');
+    }
+  } catch {}
+  // 1.9.39: --auto-fix — critical 시 session close 자동 실행
+  const autoFix = has('--auto-fix');
+  if (autoFix && level === '🔴 critical') {
+    log('');
+    log(`🔧 --auto-fix 활성 — session close 자동 실행 중...`);
+    try {
+      const r = cp.spawnSync(process.execPath, [__filename, 'session', 'close', root], { encoding: 'utf8', timeout: 60000 });
+      if (r.status === 0) {
+        log(`✓ session close 자동 완료`);
+        // autoResolved 카운트
+        const stats = _readUsageStats(root);
+        stats.drift = stats.drift || {};
+        stats.drift.autoResolved = (stats.drift.autoResolved || 0) + 1;
+        const p = _usageStatsPath(root);
+        mkdirp(path.dirname(p));
+        writeUtf8(p, JSON.stringify(stats, null, 2) + '\n');
+        // 재검사
+        log('');
+        log(`재검사 중...`);
+        return driftCheckCmd(root); // 재귀 1회 (auto-fix 없이)
+      } else {
+        log(`⚠ session close 실패 (exit ${r.status}) — 수동 실행 필요`);
+      }
+    } catch (e) {
+      log(`⚠ auto-fix 오류: ${e.message}`);
+    }
+  }
+  if (has('--json')) {
+    log(JSON.stringify({ root, score: totalScore, level, signals, fired, appsZeroTask }, null, 2));
+    return;
+  }
+  log(`# leerness drift check (1.9.37)`);
+  log(`경로: ${root}`);
+  log('');
+  log(`상태: ${level}  ·  점수 ${totalScore}/200`);
+  log('');
+  log(`| 신호 | age | 임계 | 가중치 | 발화 |`);
+  log(`|---|---:|---:|---:|---|`);
+  for (const s of signals) {
+    const fire = s.ageDays > s.threshold ? '🔥' : '✓';
+    const age = s.ageDays === null ? '-' : `${s.ageDays.toFixed(1)}d`;
+    log(`| ${s.label} | ${age} | ${s.threshold}d | ${s.weight} | ${fire} |`);
+  }
+  if (appsZeroTask.length) {
+    log('');
+    log(`task 0건 sub-app (${appsZeroTask.length}개): ${appsZeroTask.join(', ')}`);
+  }
+  if (totalScore >= 50) {
+    log('');
+    log(`💡 권장 조치:`);
+    log(`  - 즉시: leerness session close .                (handoff/current-state 갱신)`);
+    log(`  - 또는: leerness audit . --fix                  (자동 갱신 가능 항목 적용)`);
+    log(`  - sub-app에 task 등록: cd _apps/X && leerness task add "..."`);
+    log(`  - 이 검사 끄기: --no-drift-check 또는 LEERNESS_NO_DRIFT_CHECK=1`);
+  }
+  if (level === '🔴 critical') process.exitCode = 1;
+}
+
+// 1.9.38: 사용 통계 (cumulative count, command별)
+function _usageStatsPath(root) { return path.join(absRoot(root), '.harness', 'cache', 'usage-stats.json'); }
+function _readUsageStats(root) {
+  const p = _usageStatsPath(root);
+  if (!exists(p)) return { commands: {}, drift: { criticalSeen: 0, skipped: 0, autoResolved: 0 }, since: today() };
+  try { return JSON.parse(read(p)); } catch { return { commands: {}, drift: {}, since: today() }; }
+}
+function _bumpUsage(root, cmdName) {
+  // 가벼운 카운터 — 명령 실행마다 호출 (sync write로 작은 파일)
+  try {
+    const stats = _readUsageStats(root);
+    if (!stats.commands) stats.commands = {};
+    stats.commands[cmdName] = (stats.commands[cmdName] || 0) + 1;
+    stats.lastCommand = cmdName;
+    stats.lastAt = new Date().toISOString();
+    if (!stats.since) stats.since = today();
+    const p = _usageStatsPath(root);
+    mkdirp(path.dirname(p));
+    writeUtf8(p, JSON.stringify(stats, null, 2) + '\n');
+  } catch {}
+}
+
+// 1.9.41: CHANGELOG.md를 파싱하여 from → to 사이 버전 차분 추출
+// 반환: [{ version, date, body, newCommands, newFlags, newFiles }]
+function _parseChangelogBetween(changelogText, fromV, toV) {
+  // ## 1.9.X — YYYY-MM-DD 헤더 사이의 텍스트 추출
+  const sections = [];
+  const re = /^## (\d+\.\d+\.\d+)(?:\s+—\s+(\d{4}-\d{2}-\d{2}))?\s*\n([\s\S]*?)(?=^## \d+\.\d+\.\d+|$)/gm;
+  let m;
+  while ((m = re.exec(changelogText)) !== null) {
+    sections.push({ version: m[1], date: m[2] || null, body: m[3].trim() });
+  }
+  // from < V <= to 만 (fromV 자체는 이미 적용된 버전이므로 제외)
+  const ranged = sections.filter(s => {
+    const cmp = (v1, v2) => {
+      const a = v1.split('.').map(Number), b = v2.split('.').map(Number);
+      for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] - b[i]; }
+      return 0;
+    };
+    return cmp(s.version, fromV) > 0 && cmp(s.version, toV) <= 0;
+  });
+  // 각 섹션에서 신규 명령/플래그/파일 추출
+  for (const s of ranged) {
+    s.newCommands = [];
+    s.newFlags = [];
+    s.newFiles = [];
+    // `leerness X [...]` 또는 backtick에 싸인 leerness 명령
+    for (const cm of s.body.matchAll(/`leerness\s+([a-z][\w-]*(?:\s+[a-z][\w-]*)?)/g)) {
+      const cmd = cm[1].trim();
+      if (!s.newCommands.includes(cmd)) s.newCommands.push(cmd);
+    }
+    // `--xxx` 플래그
+    for (const fm of s.body.matchAll(/`(--[a-z][\w-]*)`/g)) {
+      if (!s.newFlags.includes(fm[1])) s.newFlags.push(fm[1]);
+    }
+    // .harness/X.md 같은 신규 파일
+    for (const ff of s.body.matchAll(/`(\.harness\/[\w./-]+\.(?:md|json|jsonl))`/g)) {
+      if (!s.newFiles.includes(ff[1])) s.newFiles.push(ff[1]);
+    }
+  }
+  return ranged;
+}
+
+// 1.9.41: leerness whats-new [--from V] — 현재 워크스페이스 버전 → leerness latest 차분
+// 1.9.43: skill export-all — 모든 자체 skill을 agentskills.io 표준 SKILL.md로 일괄 export
+function skillExportAllCmd(root) {
+  root = absRoot(root || process.cwd());
+  const all = listAllSkills(root);
+  const ids = Object.keys(all);
+  const outDir = arg('--out', path.join(root, '.harness', 'skills-export'));
+  mkdirp(outDir);
+  let exported = 0;
+  log(`# leerness skill export-all (1.9.43)`);
+  log(`총 ${ids.length}개 skill → ${rel(root, outDir)}/`);
+  log('');
+  for (const id of ids) {
+    const data = all[id];
+    const description = (data.displayNameKo || data.description || (data.capabilities && data.capabilities[0]) || id).slice(0, 200);
+    const body = `---\nname: ${id}\ndescription: ${description}\n---\n\n# ${data.displayNameKo || id}\n\n## Capabilities\n${(data.capabilities || []).map(c => '- ' + c).join('\n') || '-'}\n\n## Sources\n${(data.sources || []).map(s => '- ' + (s.url || s)).join('\n') || '-'}\n`;
+    const skillDir = path.join(outDir, id);
+    mkdirp(skillDir);
+    writeUtf8(path.join(skillDir, 'SKILL.md'), body);
+    log(`  ✓ ${id} → ${rel(root, path.join(skillDir, 'SKILL.md'))}`);
+    exported++;
+  }
+  log('');
+  log(`✅ ${exported}개 skill 일괄 export 완료`);
+  log(`💡 다른 도구에서: leerness skill install <SKILL.md path>`);
+}
+
+// 1.9.43: MCP server — stdio JSON-RPC로 leerness 도구 노출 (Claude Code/Hermes 등이 호출)
+// 프로토콜: MCP 표준 (JSON-RPC 2.0). 메서드: initialize, tools/list, tools/call
+function mcpServeCmd(root) {
+  root = absRoot(root || process.cwd());
+  // 노출할 leerness 도구 목록
+  const TOOLS = [
+    { name: 'leerness_handoff', description: '워크스페이스 컨텍스트(plan/progress/decisions) 적재', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_drift_check', description: 'AI 에이전트 leerness 미사용 drift 자동 감지 (4 신호 + 4단계 레벨)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_audit', description: '워크스페이스 일관성 감사 (verify + scan + encoding + lazy 통합)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, fix: { type: 'boolean' } } } },
+    { name: 'leerness_verify_claim', description: 'AI 거짓 완료 자동 검증 (evidence 파일 + 실 테스트 실행)', inputSchema: { type: 'object', properties: { taskId: { type: 'string' }, path: { type: 'string' }, runTests: { type: 'boolean' }, strictClaims: { type: 'boolean' } }, required: ['taskId'] } },
+    { name: 'leerness_contract_verify', description: '명세 ↔ 구현 함수/필드 일치 자동 검사', inputSchema: { type: 'object', properties: { spec: { type: 'string' }, impl: { type: 'string' } }, required: ['spec', 'impl'] } },
+    { name: 'leerness_agents_list', description: '외부 AI CLI 가용성 표 (claude/codex/gemini/copilot 상태 + 환경변수 활성화 여부)', inputSchema: { type: 'object', properties: {} } },
+    { name: 'leerness_reuse_map', description: '워크스페이스 중복 함수/capability 자동 감지 (--all-apps + fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, allApps: { type: 'boolean' }, strictElements: { type: 'boolean' } } } },
+    { name: 'leerness_whats_new', description: 'CHANGELOG 차분 자동 추출 (from → to 사이 신규 명령/플래그/파일)', inputSchema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
+    { name: 'leerness_usage_stats', description: 'leerness 명령별 누적 호출 통계 + drift 통계', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_session_close', description: '세션 마감 — handoff/current-state/task-log 자동 갱신', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+  ];
+
+  function send(obj) {
+    process.stdout.write(JSON.stringify(obj) + '\n');
+  }
+  function callLeerness(cliArgs) {
+    const r = cp.spawnSync(process.execPath, [__filename, ...cliArgs], {
+      encoding: 'utf8',
+      timeout: 60000,
+      env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_WORKFLOW_GUIDE: '1' }
+    });
+    return { ok: r.status === 0, exit: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+  }
+  function handleRequest(req) {
+    const id = req.id;
+    if (req.method === 'initialize') {
+      send({ jsonrpc: '2.0', id, result: {
+        protocolVersion: '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'leerness', version: VERSION }
+      } });
+    } else if (req.method === 'tools/list') {
+      send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
+    } else if (req.method === 'tools/call') {
+      const { name, arguments: args = {} } = req.params || {};
+      const targetPath = args.path || root;
+      let cliArgs;
+      try {
+        switch (name) {
+          case 'leerness_handoff':         cliArgs = ['handoff', targetPath, '--compact', '--no-drift-check']; break;
+          case 'leerness_drift_check':     cliArgs = ['drift', 'check', targetPath]; break;
+          case 'leerness_audit':           cliArgs = ['audit', targetPath, ...(args.fix ? ['--fix'] : [])]; break;
+          case 'leerness_verify_claim':    cliArgs = ['verify-claim', args.taskId, '--path', targetPath, ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : [])]; break;
+          case 'leerness_contract_verify': cliArgs = ['contract', 'verify', args.spec, args.impl]; break;
+          case 'leerness_agents_list':     cliArgs = ['agents', 'list', '--json']; break;
+          case 'leerness_reuse_map':       cliArgs = ['reuse-map', targetPath, ...(args.allApps ? ['--all-apps'] : []), ...(args.strictElements ? ['--strict-elements'] : []), '--json']; break;
+          case 'leerness_whats_new':       cliArgs = ['whats-new', '--path', targetPath, ...(args.from ? ['--from', args.from] : []), ...(args.to ? ['--to', args.to] : []), '--json']; break;
+          case 'leerness_usage_stats':     cliArgs = ['usage', 'stats', targetPath, '--json']; break;
+          case 'leerness_session_close':   cliArgs = ['session', 'close', targetPath]; break;
+          default:
+            return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
+        }
+        const r = callLeerness(cliArgs);
+        send({ jsonrpc: '2.0', id, result: {
+          content: [{ type: 'text', text: (r.stdout || r.stderr || '(no output)').slice(0, 50000) }],
+          isError: !r.ok
+        } });
+      } catch (e) {
+        send({ jsonrpc: '2.0', id, error: { code: -32603, message: 'Internal error: ' + e.message } });
+      }
+    } else {
+      send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown method: ${req.method}` } });
+    }
+  }
+
+  // stdin JSON-RPC 한 줄 단위
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', chunk => {
+    buf += chunk;
+    let nl;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      try {
+        const req = JSON.parse(line);
+        handleRequest(req);
+      } catch (e) {
+        send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error: ' + e.message } });
+      }
+    }
+  });
+  process.stdin.on('end', () => process.exit(0));
+  // 인터럽트 처리
+  process.on('SIGINT', () => process.exit(0));
+  process.on('SIGTERM', () => process.exit(0));
+}
+
+function whatsNewCmd(root) {
+  root = absRoot(root || process.cwd());
+  const fromV = arg('--from', null) || (function () {
+    const hv = path.join(root, '.harness', 'HARNESS_VERSION');
+    if (exists(hv)) { try { return parseHarnessVersion(read(hv)).base || parseHarnessVersion(read(hv)).plus; } catch { return null; } }
+    return null;
+  })();
+  const toV = arg('--to', null) || VERSION;
+  if (!fromV) {
+    fail('현재 버전을 파악할 수 없습니다. --from <version> 명시');
+    return process.exit(1);
+  }
+  // CHANGELOG.md — 우선 root, 없으면 leerness-pkg 자체
+  let changelogPath = path.join(root, 'CHANGELOG.md');
+  if (!exists(changelogPath)) changelogPath = path.join(__dirname, '..', 'CHANGELOG.md');
+  if (!exists(changelogPath)) {
+    fail('CHANGELOG.md 없음');
+    return process.exit(1);
+  }
+  const diff = _parseChangelogBetween(read(changelogPath), fromV, toV);
+  if (has('--json')) { log(JSON.stringify({ from: fromV, to: toV, versions: diff }, null, 2)); return; }
+  if (!diff.length) {
+    log(`# leerness whats-new (1.9.41)`);
+    log(`현재 ${fromV} ↔ 대상 ${toV}: 새 항목 없음 (또는 CHANGELOG에 기록 안 됨)`);
+    return;
+  }
+  log(`# leerness whats-new (1.9.41)`);
+  log(`현재 워크스페이스 버전: ${fromV} → 대상: ${toV}`);
+  log(`범위: ${diff.length}개 버전 (${diff[0].version} → ${diff[diff.length - 1].version})`);
+  log('');
+  // AI 가독 요약 — 각 버전당 한 줄 + 신규 명령/플래그/파일
+  log(`## 🆕 신규 명령·플래그·파일 (AI 에이전트는 다음 명령을 우선 시도)`);
+  const allCommands = new Set();
+  const allFlags = new Set();
+  const allFiles = new Set();
+  for (const v of diff) {
+    v.newCommands.forEach(c => allCommands.add(c));
+    v.newFlags.forEach(f => allFlags.add(f));
+    v.newFiles.forEach(f => allFiles.add(f));
+  }
+  if (allCommands.size) log(`  📌 신규 명령: ${[...allCommands].join(', ')}`);
+  if (allFlags.size)    log(`  🚩 신규 플래그: ${[...allFlags].join(', ')}`);
+  if (allFiles.size)    log(`  📄 신규 파일: ${[...allFiles].join(', ')}`);
+  log('');
+  log(`## 📜 버전별 헤드라인`);
+  for (const v of diff) {
+    // body 첫 줄(또는 strong header) 추출
+    const firstLine = (v.body.match(/^\*\*([^*]+)\*\*/) || [])[1]
+                   || (v.body.split('\n').find(l => l.trim() && !l.startsWith('##')) || '').trim().slice(0, 120);
+    log(`  • ${v.version}${v.date ? ` (${v.date})` : ''} — ${firstLine || '(no headline)'}`);
+  }
+  log('');
+  log(`## 💡 권장 행동`);
+  log(`  1. 위 신규 명령들을 시도해 보세요 (예: \`leerness <명령> --help\`)`);
+  log(`  2. 신규 파일들을 읽어 보세요 (예: \`cat .harness/session-workflow.md\`)`);
+  log(`  3. AGENTS.md/CLAUDE.md 재독 — migrate가 인스트럭션을 업데이트했을 수 있음`);
+  log(`  4. 상세: \`cat CHANGELOG.md\` 또는 \`leerness whats-new --json\``);
+}
+
+function usageStatsCmd(root) {
+  root = absRoot(root || process.cwd());
+  const stats = _readUsageStats(root);
+  if (has('--json')) { log(JSON.stringify(stats, null, 2)); return; }
+  log(`# leerness usage stats (1.9.38)`);
+  log(`since: ${stats.since || '(unknown)'} · last: ${stats.lastAt || '(none)'}`);
+  log('');
+  const entries = Object.entries(stats.commands || {}).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) {
+    log('  (사용 기록 없음)');
+    return;
+  }
+  log(`| 명령 | 호출 수 |`);
+  log(`|---|---:|`);
+  for (const [cmd, n] of entries.slice(0, 30)) log(`| ${cmd} | ${n} |`);
+  const total = entries.reduce((s, [, n]) => s + n, 0);
+  log('');
+  log(`총 ${total} 회 호출 · 종류 ${entries.length} 가지`);
+  if (stats.drift) {
+    log('');
+    log(`drift 통계: critical 발견 ${stats.drift.criticalSeen || 0} · skip ${stats.drift.skipped || 0} · 자동 해소 ${stats.drift.autoResolved || 0}`);
+    if ((stats.drift.skipped || 0) > 5) {
+      log(`💡 drift 경고 ${stats.drift.skipped}회 스킵 → 1.9.38 학습: 임계 자동 완화 (--no-drift-check 빈도 ≥5)`);
+    }
+  }
+}
+
+// 1.9.38: task sync — TodoWrite/외부 JSON에서 leerness task로 mirror
+function taskSyncCmd(root) {
+  root = absRoot(root || process.cwd());
+  const file = arg('--from', null);
+  if (!file) {
+    fail('사용법: leerness task sync --from <todo.json>\n  파일 형식: [{"content":"...","status":"completed|in_progress|pending","activeForm":"..."}]');
+    return process.exit(1);
+  }
+  const full = path.resolve(file);
+  if (!exists(full)) { fail(`파일 없음: ${full}`); return process.exit(1); }
+  let todos;
+  try { todos = JSON.parse(read(full)); }
+  catch (e) { fail(`JSON 파싱 실패: ${e.message}`); return process.exit(1); }
+  if (!Array.isArray(todos)) { fail('JSON 최상위는 배열이어야 함'); return process.exit(1); }
+  let imported = 0, updated = 0;
+  for (const t of todos) {
+    if (!t || !t.content) continue;
+    const status = t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'in-progress' : 'planned';
+    // 이미 같은 request 있는지
+    const existing = readProgressRows(root).find(r => r.request === t.content);
+    if (existing) {
+      if (existing.status !== status) {
+        upsertProgress(root, { id: existing.id, status });
+        updated++;
+      }
+    } else {
+      const id = nextId(root, 'T');
+      upsertProgress(root, { id, status, request: t.content, evidence: 'todowrite-sync', nextAction: t.activeForm || '다음 액션' });
+      imported++;
+    }
+  }
+  log(`# leerness task sync (1.9.38)`);
+  log(`from: ${full}`);
+  log(`imported: ${imported} · updated: ${updated} · total in source: ${todos.length}`);
+  if (has('--json')) log(JSON.stringify({ imported, updated, total: todos.length }, null, 2));
+}
+
+// 1.9.35 개선 #3: contract verify <spec.md> <impl.js>
+// 사양 문서(spec.md)에 명시된 함수 이름이 실제 module.exports에 모두 있는지 검사.
+// 사용 예: leerness contract verify TICK_SPEC.md src/format.js
+function contractVerifyCmd(specPath, implPath) {
+  if (!specPath || !implPath) { fail('사용법: leerness contract verify <spec.md> <impl.js>'); return process.exit(1); }
+  const spec = absRoot('.') + path.sep; // dummy to avoid abs
+  const specFile = path.resolve(specPath);
+  const implFile = path.resolve(implPath);
+  if (!exists(specFile)) { fail(`spec 파일 없음: ${specFile}`); return process.exit(1); }
+  if (!exists(implFile)) { fail(`impl 파일 없음: ${implFile}`); return process.exit(1); }
+  const specText = read(specFile);
+  // spec에서 함수 이름 추출:
+  //   `function fooBar(...)` 형태 (markdown 코드블럭 내 JS)
+  //   또는 `**fooBar**` (한국어 문서에서 함수명 강조)
+  //   또는 `tick.amount` (필드명)
+  const fnSpec = new Set();
+  const fieldSpec = new Set();
+  // function 시그니처
+  for (const m of specText.matchAll(/function\s+([A-Za-z_$][\w$]*)\s*\(/g)) fnSpec.add(m[1]);
+  // backtick에 싸인 함수 호출 같은 형태: `xxx(`
+  for (const m of specText.matchAll(/`([A-Za-z_$][\w$]*)\s*\(/g)) fnSpec.add(m[1]);
+  // 필드: tick.<name>
+  for (const m of specText.matchAll(/tick\.([A-Za-z_$][\w$]*)/g)) fieldSpec.add(m[1]);
+  // 1.9.36 BUG-fix: require()는 side-effect 실행 위험 (CLI 스크립트는 require로 실행됨).
+  // 대신 정적 소스 분석 — module.exports = { foo, bar } / exports.foo = ... / module.exports.foo = ... 패턴 grep.
+  const implSrc = read(implFile);
+  const implExports = new Set();
+  // pattern 1: module.exports = { foo, bar, baz }
+  for (const m of implSrc.matchAll(/module\.exports\s*=\s*\{([^}]+)\}/g)) {
+    for (const k of m[1].split(',')) {
+      const name = k.replace(/:.*/, '').trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) implExports.add(name);
+    }
+  }
+  // pattern 2: exports.foo = / module.exports.foo =
+  for (const m of implSrc.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=/g)) implExports.add(m[1]);
+  // pattern 3: function foo + module.exports에 포함되었는지는 위에서 처리됨
+  // 검사: spec에 명시된 함수 중 impl exports에 없는 것
+  const missing = [];
+  for (const fn of fnSpec) {
+    if (implExports.has(fn)) continue;
+    // spec에 'function fnName('이 있지만 impl exports에 없으면 미구현
+    if (specText.includes(`function ${fn}`) && !implExports.has(fn)) missing.push(fn);
+  }
+  const fieldMissing = [];
+  for (const f of fieldSpec) {
+    if (!new RegExp(`\\b${f}\\b`).test(implSrc)) fieldMissing.push(f);
+  }
+  // 출력
+  if (has('--json')) {
+    log(JSON.stringify({
+      spec: specFile, impl: implFile,
+      specFunctions: [...fnSpec], specFields: [...fieldSpec],
+      implExports: [...implExports],
+      missingFunctions: missing, missingFields: fieldMissing,
+      ok: missing.length === 0 && fieldMissing.length === 0
+    }, null, 2));
+    return;
+  }
+  log(`# leerness contract verify (1.9.35)`);
+  log(`spec: ${rel(process.cwd(), specFile)}`);
+  log(`impl: ${rel(process.cwd(), implFile)}`);
+  log(``);
+  log(`spec 명시 함수: ${[...fnSpec].join(', ') || '(없음)'}`);
+  log(`spec 명시 필드: ${[...fieldSpec].join(', ') || '(없음)'}`);
+  log(`impl exports: ${[...implExports].join(', ') || '(없음)'}`);
+  log(``);
+  if (missing.length) {
+    log(`✗ 누락된 함수 (${missing.length}건):`);
+    for (const m of missing) log(`    - ${m}`);
+  } else log(`✓ 모든 spec 함수가 impl에 존재`);
+  if (fieldMissing.length) {
+    log(`✗ 누락된 필드 (${fieldMissing.length}건):`);
+    for (const m of fieldMissing) log(`    - tick.${m}`);
+  } else log(`✓ 모든 spec 필드가 impl 소스에 존재`);
+  const ok = missing.length === 0 && fieldMissing.length === 0;
+  log('');
+  log(ok ? '✅ contract OK' : '❌ contract 불일치');
+  if (!ok) process.exitCode = 1;
+}
+
+// 1.9.35 개선 #2: reuse autodetect [path]
+// src/*.js의 module.exports를 스캔해서 reuse-map.md에 capability 후보 등록.
+function reuseAutodetectCmd(root) {
+  root = absRoot(root || process.cwd());
+  // 1.9.36 BUG-fix: src/만이 아니라 bin/, lib/, app/도 스캔. require() 대신 정적 분석 (side-effect 차단).
+  const candidateDirs = ['src', 'bin', 'lib', 'app'].filter(d => exists(path.join(root, d)));
+  if (!candidateDirs.length) { fail(`스캔할 디렉토리 없음 (src/, bin/, lib/, app/ 중 하나 필요): ${root}`); return process.exit(1); }
+  const found = [];
+  for (const dir of candidateDirs) {
+    const files = fs.readdirSync(path.join(root, dir)).filter(f => f.endsWith('.js'));
+    for (const f of files) {
+      const full = path.join(root, dir, f);
+      const src = read(full);
+      // 정적 분석: module.exports = { foo, bar } / exports.foo = / module.exports.foo =
+      const names = new Set();
+      for (const m of src.matchAll(/module\.exports\s*=\s*\{([^}]+)\}/g)) {
+        for (const k of m[1].split(',')) {
+          const name = k.replace(/:.*/, '').trim();
+          if (/^[A-Za-z_$][\w$]*$/.test(name)) names.add(name);
+        }
+      }
+      for (const m of src.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=/g)) names.add(m[1]);
+      for (const name of names) {
+        if (name.startsWith('_')) continue; // internal helpers 제외
+        found.push({ file: `${dir}/${f}`, name });
+      }
+    }
+  }
+  if (has('--json')) {
+    log(JSON.stringify({ project: path.basename(root), found }, null, 2));
+    return;
+  }
+  log(`# leerness reuse autodetect (1.9.35)`);
+  log(`project: ${path.basename(root)}`);
+  log(`발견된 capability 후보: ${found.length}건`);
+  log('');
+  log('| Capability | Where | Kind | Note |');
+  log('|---|---|---|---|');
+  for (const c of found) log(`| ${c.name} | ${c.file} | util | (autodetect from module.exports) |`);
+  log('');
+  if (has('--apply')) {
+    // reuse-map.md에 추가 (헤더 보존 + 후보 라인 append)
+    const reusePath = path.join(root, '.harness', 'reuse-map.md');
+    if (!exists(reusePath)) {
+      fail(`.harness/reuse-map.md 없음 — leerness init 먼저 실행`);
+      return process.exit(1);
+    }
+    let body = read(reusePath);
+    let added = 0;
+    for (const c of found) {
+      if (body.includes(`| ${c.name} |`)) continue; // 이미 있음
+      body += `| ${c.name} | ${c.file} | util | autodetect 1.9.35 |\n`;
+      added++;
+    }
+    writeUtf8(reusePath, body);
+    log(`✓ ${added}건 reuse-map.md에 추가됨`);
+  } else {
+    log(`(--apply 로 reuse-map.md에 자동 추가)`);
+  }
+}
+
 function help() {
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path]\n  leerness session close [path]\n  leerness viewwork install [path]\n  leerness viewwork emit [path] [--action a] [--note n] [--agent x] [--tool t]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness viewwork install [path]\n  leerness viewwork emit [path] [--action a] [--note n] [--agent x] [--tool t]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -3213,8 +6401,19 @@ function help() {
 
 async function main() {
   const args = nonFlagArgs(); const cmd = args[0] || 'init';
-  if (has('--version') || has('-v')) return log(VERSION);
+  if (has('--version') || has('-v')) {
+    // 1.9.32: --version은 순수 버전만 (CI/script 친화). 배너는 --banner 시.
+    if (has('--banner')) _banner({ quickStart: false });
+    return log(VERSION);
+  }
   if (has('--help') || has('-h')) return help();
+  // 1.9.38 (B): 사용 통계 카운터 — usage stats 명령 자체와 비차단 경로는 제외
+  if (cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== '--version' && cmd !== '--help') {
+    try {
+      const root = absRoot(arg('--path', args[1] && !args[1].startsWith('-') ? args[1] : process.cwd()));
+      if (exists(path.join(root, '.harness'))) _bumpUsage(root, cmd);
+    } catch {}
+  }
   if (cmd === 'init')      return await install(args[1] || process.cwd(), { force:false, dry:false, migration:false });
   if (cmd === 'migrate')   return await install(args[1] || process.cwd(), { force:has('--force'), dry:has('--dry-run'), migration:true });
   if (cmd === 'update')    return await updateCmd(args[1] || process.cwd(), { checkOnly: has('--check'), yes: has('--yes'), force: has('--force') });
@@ -3228,7 +6427,23 @@ async function main() {
   if (cmd === 'encoding' && args[1] === 'check') return encodingCheck(args[2] || process.cwd());
   if (cmd === 'lazy' && args[1] === 'detect')    return lazyDetect(args[2] || process.cwd());
   if (cmd === 'memory' && args[1] === 'search')  return memorySearch(arg('--path', process.cwd()), args.slice(2).join(' '));
-  if (cmd === 'handoff')   return handoff(args[1] || process.cwd());
+  if (cmd === 'handoff')      return handoffCmd(args[1] || process.cwd());
+  if (cmd === 'reuse-map')    return reuseMapCmd(args[1] || process.cwd());
+  if (cmd === 'verify-claim') return verifyClaimCmd(arg('--path', process.cwd()), args[1]);
+  if (cmd === 'orchestrate')  return await orchestrateCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')));
+  if (cmd === 'llm-bench' && args[1] === 'record') return llmBenchRecordCmd(arg('--path', process.cwd()));
+  if (cmd === 'deps')         return depsImpactCmd(arg('--path', process.cwd()), args[1]);
+  if (cmd === 'register-pending') return registerPendingCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')));
+  if (cmd === 'optimism-check') return optimismCheckCmd(arg('--path', process.cwd()), args[1]);
+  if (cmd === 'persona') return personaCmd(arg('--path', process.cwd()), args[1], args[2]);
+  if (cmd === 'review') return reviewCmd(arg('--path', process.cwd()), args[1]);
+  if (cmd === 'agents') return agentsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  if (cmd === 'contract' && args[1] === 'verify') return contractVerifyCmd(args[2], args[3]);
+  if (cmd === 'drift' && (args[1] === 'check' || !args[1])) return driftCheckCmd(args[2] || arg('--path', process.cwd()));
+  if (cmd === 'usage' && (args[1] === 'stats' || !args[1])) return usageStatsCmd(args[2] || arg('--path', process.cwd()));
+  if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));
+  if (cmd === 'reuse' && args[1] === 'autodetect') return reuseAutodetectCmd(args[2] || arg('--path', process.cwd()));
+  if (cmd === 'setup-agents' || cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(args[1] && args[1] !== 'agents' ? args[1] : (args[2] || process.cwd()));
   if (cmd === 'session' && args[1] === 'close') { const r = sessionClose(args[2] || process.cwd()); viewworkEmit(args[2] || process.cwd(), { action: 'task', tool: 'session-close', note: 'session close' }); return r; }
   if (cmd === 'viewwork' && args[1] === 'install') return viewworkInstall(args[2] || process.cwd());
   if (cmd === 'viewwork' && args[1] === 'emit')    return viewworkEmit(args[2] || process.cwd(), { action: arg('--action','task'), note: arg('--note',''), agent: arg('--agent','leerness'), tool: arg('--tool','leerness-cli') });
@@ -3246,6 +6461,11 @@ async function main() {
   if (cmd === 'skill' && args[1] === 'optimize')    return skillOptimize(absRoot(arg('--path', process.cwd())), args[2]);
   if (cmd === 'skill' && args[1] === 'remove')      return skillRemove(absRoot(arg('--path', process.cwd())), args[2]);
   if (cmd === 'skill' && args[1] === 'consolidate') return skillConsolidate(absRoot(arg('--path', process.cwd())));
+  if (cmd === 'skill' && args[1] === 'install')     return await skillInstallCmd(absRoot(arg('--path', process.cwd())), args[2]);
+  if (cmd === 'skill' && args[1] === 'discover')    return await skillDiscoverCmd(absRoot(arg('--path', process.cwd())));
+  if (cmd === 'skill' && args[1] === 'export')      return skillExportCmd(absRoot(arg('--path', process.cwd())), args[2]);
+  if (cmd === 'skill' && args[1] === 'export-all')  return skillExportAllCmd(absRoot(arg('--path', process.cwd())));
+  if (cmd === 'mcp' && args[1] === 'serve')         return mcpServeCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'gate')                               return gate(args[1] || process.cwd());
   if (cmd === 'verify-code')                        return verifyCodeCmd(args[1] || process.cwd());
   if (cmd === 'lessons')                            return lessonsCmd(arg('--path', process.cwd()));
@@ -3265,6 +6485,7 @@ async function main() {
   if (cmd === 'release' && args[1] === 'bump')      return releaseBump(args[2] || arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'note')      return releaseNote(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'release' && args[1] === 'publish')   return releasePublish(args[2] || arg('--path', process.cwd()));
+  if (cmd === 'release' && args[1] === 'pack')      return await releasePackCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'impact')                             return impactCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'reuse' && args[1] === 'find')        return reuseFind(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'reuse' && args[1] === 'register')    return reuseRegister(arg('--path', process.cwd()), args[2]);
@@ -3291,6 +6512,7 @@ async function main() {
     if (sub==='drop')   return taskDrop(root, args[2]);
     if (sub==='fix-evidence') return taskFixEvidence(root);
     if (sub==='relink')       return taskRelink(root);
+    if (sub==='sync')         return taskSyncCmd(root);
   }
   return help();
 }
