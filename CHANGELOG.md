@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.69 — 2026-05-19
+
+**handoff에 skill-suggestions.md rolling history hit 노출 (1.9.67 + 1.9.68 결합)**.
+
+### Added — handoff history hit
+- 매 `leerness handoff`마다 현재 task 키워드와 매칭되는 **이전 세션의 `skill match` 결과**를 함께 노출.
+- 매칭: 현재 키워드 (≥4자, 7할 길이)의 fuzzy regex로 `skill-suggestions.md`의 query 헤더 검색.
+- 표시: 최근 2건 + 각 블록의 top 2 매치 라인.
+- AI 에이전트는 **이전 세션과 같은 결정을 일관되게 유지** 가능.
+- 끄기: 같은 `--no-skill-suggest` / `LEERNESS_NO_SKILL_SUGGEST=1`.
+
+### Internal
+- `_loadSkillHistory(root)` + `_SKILL_HISTORY_CACHE` — mtime 기반 메모리 캐시 (1.9.65/66/67 캐시 패밀리 연속).
+- 같은 프로세스에서 `_lidx` / `_SKILLS_LIST_CACHE` / `_USAGE_CACHE`와 함께 lifetime 공유.
+
+### Verified
+- stress-v15 — history hit 노출 + 비매칭 시 출력 안 함 + mtime invalidation + 누적 회귀.
+- e2e 회귀: 219/219 PASS 유지.
+
+---
+
 ## 1.9.68 — 2026-05-19
 
 **`skill match` rolling history 자동 누적 + 종합 회귀**.

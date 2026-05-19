@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.68';
+const VERSION = '1.9.69';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1844,6 +1844,26 @@ function handoff(root) {
                   log(dim(`  → 전체: leerness skill match "${String(latestRow.request).slice(0, 60)}"`));
                   log('');
                 }
+                // 1.9.69: skill-suggestions.md rolling history hit — 이전 세션 매칭 결과 노출
+                const hist = _loadSkillHistory(root);
+                if (hist.blocks.length) {
+                  const histRe = new RegExp(escapeRegex(keyword.slice(0, Math.max(4, Math.floor(keyword.length * 0.7)))), 'i');
+                  const hits = hist.blocks.filter(b => histRe.test(b.query)).slice(0, 2);
+                  if (hits.length) {
+                    const isTty = process.stdout && process.stdout.isTTY;
+                    const blu = s => isTty ? `\x1b[34m${s}\x1b[0m` : s;
+                    const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+                    log(blu(`## 📒 이전 skill match 이력 (1.9.69) — 키워드 "${keyword}" 관련`));
+                    for (const h of hits) {
+                      // 블록에서 첫 1~2개 match 줄만 추출
+                      const matchLines = (h.block.match(/^\s*-\s*\[[\d.]+\][^\n]+/gm) || []).slice(0, 2);
+                      log(dim(`  [${h.at}] query "${h.query}"`));
+                      for (const ml of matchLines) log(dim(`  ${ml.trim()}`));
+                    }
+                    log(dim(`  → 전체 이력: cat .harness/skill-suggestions.md`));
+                    log('');
+                  }
+                }
               }
             } catch {}
           }
@@ -3196,9 +3216,9 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.68+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.69+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
-    log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons 재상기 + 매칭 skill 자동 추천'));
+    log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
     log('    ' + C.green('npx leerness verify-claim T-0001 --run-tests') + C.dim('        # AI 거짓 완료 자동 검증'));
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
@@ -6189,6 +6209,33 @@ function driftCheckCmd(root, opts = {}) {
     log(`  - 이 검사 끄기: --no-drift-check 또는 LEERNESS_NO_DRIFT_CHECK=1`);
   }
   if (level === '🔴 critical') process.exitCode = 1;
+}
+
+// 1.9.69: skill-suggestions.md rolling history 인덱스 — mtime 기반 캐시
+// handoff에서 같은 키워드 과거 추천 결과를 즉시 노출 (재매칭 불필요)
+const _SKILL_HISTORY_CACHE = new Map();
+function _loadSkillHistory(root) {
+  const p = path.join(absRoot(root), '.harness', 'skill-suggestions.md');
+  if (!exists(p)) return { mtime: 0, blocks: [] };
+  let mtime = 0;
+  try { mtime = fs.statSync(p).mtimeMs; } catch {}
+  const key = absRoot(root);
+  const cached = _SKILL_HISTORY_CACHE.get(key);
+  if (cached && cached.mtime === mtime) return cached;
+  const txt = read(p);
+  const blocks = [];
+  for (const block of txt.split(/\n(?=## )/)) {
+    if (!block.startsWith('## ')) continue;
+    // 헤더에서 timestamp + query 추출
+    const h = block.match(/^## ([\d-]+ [\d:]+) — query "([^"]+)"/m);
+    if (!h) continue;
+    blocks.push({ at: h[1], query: h[2], block });
+  }
+  // 최신순 (마지막에 append되므로 reverse)
+  blocks.reverse();
+  const idx = { mtime, blocks };
+  _SKILL_HISTORY_CACHE.set(key, idx);
+  return idx;
 }
 
 // 1.9.65: lessons blocks 인덱스 — evidence/decisions 파일 read + split을 1회로
