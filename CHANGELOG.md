@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.9.107 — 2026-05-20
+
+**MCP 26번째 도구 `leerness_task_drop` — task CRUD 완성** (read/add/update/drop 4종 surface).
+
+### Added — MCP 26번째 도구 `leerness_task_drop`
+- 외부 AI 가 task 를 `dropped` 상태로 폐기 (취소).
+- 인자:
+  - `id` (required) — 폐기할 task ID
+  - `reason` — 폐기 사유 (기본 `사용자 요청으로 제외`)
+  - `path` — 워크스페이스 경로
+
+### MCP task CRUD 완성 (4종 surface)
+| 라운드 | MCP 도구 | CRUD |
+|---|---|---|
+| 1.9.60 | `leerness_task_export` | **R**ead — task → TodoWrite JSON |
+| 1.9.105 | `leerness_task_add` | **C**reate — 새 task 등록 |
+| 1.9.106 | `leerness_task_update` | **U**pdate — 상태/evidence 갱신 |
+| **1.9.107** | **`leerness_task_drop`** | **D**rop — 폐기 |
+
+이제 외부 AI 가 task 전체 라이프사이클을 자율 관리 가능.
+
+### MCP 도구 수: 25 → 26개
+
+### Verified
+- stress-v52 — MCP task_drop + CRUD 사이클 + 26 도구 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.106 — 2026-05-20
 
 **MCP 25번째 도구 `leerness_task_update`** (read+add+update 3종 task 제어 surface 완성).

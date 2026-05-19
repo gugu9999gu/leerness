@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.106';
+const VERSION = '1.9.107';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -309,6 +309,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.104+ MCP **23 도구** (\`leerness_retro\` 추가 — 4세션 누적 회고 JSON 외부 AI 노출).
 - 1.9.105+ MCP **24 도구** (\`leerness_task_add\` 추가 — 외부 AI 가 task 즉시 등록, 양방향 제어 완성).
 - 1.9.106+ MCP **25 도구** (\`leerness_task_update\` 추가 — task 상태/evidence/nextAction 갱신, read+add+update 3종 surface 완성).
+- 1.9.107+ MCP **26 도구** (\`leerness_task_drop\` 추가 — task 폐기, **task CRUD 완성**: read/add/update/drop).
 
 ---
 
@@ -3583,7 +3584,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 25 도구 (task_update 추가, 1.9.106 read+add+update 완성)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 26 도구 (task CRUD 완성: export/add/update/drop, 1.9.107)'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
     log('    ' + C.green('npx leerness skill publish --bundle-only') + C.dim('             # 보안 사전 점검 통합 publish (1.9.98)'));
     log('');
@@ -7642,7 +7643,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_lazy_detect', description: '1.9.101 — 게으른 작업 자동 감지 결과 JSON (evidence 없는 done / empty handoff / no test run / TODO 미추적 / blocker no-next-action 등). 외부 AI가 거짓 완료 신호 사전 점검', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_retro', description: '1.9.104 — 4세션 누적 회고 보고서 JSON (statusCounts/focusNext/skillUsage/recentDecisions/durations/activeRules/fixSignals/passSignals/totalOptimizations). 외부 AI가 누적 패턴 자동 학습', inputSchema: { type: 'object', properties: { path: { type: 'string' }, days: { type: 'number' }, allApps: { type: 'boolean' } } } },
     { name: 'leerness_task_add', description: '1.9.105 — progress-tracker.md 에 새 task 추가 (양방향 제어 완성). 외부 AI가 사용자 요청을 task로 즉시 등록. 인자: { text (required), status?, evidence?, nextAction?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string', enum: ['requested', 'planned', 'in-progress', 'waiting', 'on-hold', 'blocked', 'incomplete', 'done', 'dropped'] }, evidence: { type: 'string' }, nextAction: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } },
-    { name: 'leerness_task_update', description: '1.9.106 — 기존 task 상태/evidence/nextAction 갱신. 외부 AI가 작업 진행에 따라 task를 단계적으로 업데이트 (read+add+update 3종 surface 완성). 인자: { id (required), status?, evidence?, nextAction?, note?, path? }', inputSchema: { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string', enum: ['requested', 'planned', 'in-progress', 'waiting', 'on-hold', 'blocked', 'incomplete', 'done', 'dropped'] }, evidence: { type: 'string' }, nextAction: { type: 'string' }, note: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } }
+    { name: 'leerness_task_update', description: '1.9.106 — 기존 task 상태/evidence/nextAction 갱신. 외부 AI가 작업 진행에 따라 task를 단계적으로 업데이트 (read+add+update 3종 surface 완성). 인자: { id (required), status?, evidence?, nextAction?, note?, path? }', inputSchema: { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string', enum: ['requested', 'planned', 'in-progress', 'waiting', 'on-hold', 'blocked', 'incomplete', 'done', 'dropped'] }, evidence: { type: 'string' }, nextAction: { type: 'string' }, note: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
+    { name: 'leerness_task_drop', description: '1.9.107 — task를 dropped 상태로 폐기 (CRUD 완성: read/add/update/drop). 외부 AI가 사용자 요청으로 task 취소. 인자: { id (required), reason?, path? }', inputSchema: { type: 'object', properties: { id: { type: 'string' }, reason: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } }
   ];
 
   function send(obj) {
@@ -7699,6 +7701,7 @@ function mcpServeCmd(root) {
           case 'leerness_retro':           cliArgs = ['retro', targetPath, '--json', ...(args.days ? ['--days', String(args.days)] : []), ...(args.allApps ? ['--all-apps'] : [])]; break;
           case 'leerness_task_add':        cliArgs = ['task', 'add', String(args.text || ''), '--path', targetPath, ...(args.status ? ['--status', args.status] : []), ...(args.evidence ? ['--evidence', args.evidence] : []), ...(args.nextAction ? ['--next', args.nextAction] : [])]; break;
           case 'leerness_task_update':     cliArgs = ['task', 'update', String(args.id || ''), '--path', targetPath, ...(args.status ? ['--status', args.status] : []), ...(args.evidence ? ['--evidence', args.evidence] : []), ...(args.nextAction ? ['--next', args.nextAction] : []), ...(args.note ? ['--note', args.note] : [])]; break;
+          case 'leerness_task_drop':       cliArgs = ['task', 'drop', String(args.id || ''), '--path', targetPath, ...(args.reason ? ['--reason', args.reason] : [])]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
