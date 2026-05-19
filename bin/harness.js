@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.123';
+const VERSION = '1.9.124';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -324,6 +324,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.121+ handoff 6번째 자동 회수 \`🆕 최근 24h 메모리 변동\` — 5종 surface 의 24h 내 추가 항목 자동 노출.
 - 1.9.122+ \`session close --json\` 응답에도 \`memorySurface\` 필드 통합 — 마감 시 5종 메모리 상태 동시 회수.
 - 1.9.123+ \`health --json\` 응답에도 \`memorySurface\` 필드 통합 — handoff/session close/memory status 모든 JSON 명령 일관성.
+- 1.9.124+ \`leerness lesson drop <target>\` + MCP **36 도구** (\`leerness_lesson_drop\`) — 잘못 저장한 lesson 제거 (archive 자동 보존).
 
 ---
 
@@ -1450,6 +1451,39 @@ function lessonListCmd(root, opts = {}) {
     log(`\n[${l.date || '?'}]${l.tag ? ` #${l.tag}` : ''}`);
     log(`  ${l.text}`);
   }
+}
+
+// 1.9.124: lesson drop — lessons.md 에서 특정 date 또는 text 매칭 블록 제거
+function lessonDropCmd(root, target) {
+  root = absRoot(root);
+  if (!target) return fail('lesson drop <date|text-substring> 필요. 예: leerness lesson drop "2026-05-20" 또는 leerness lesson drop "JWT"');
+  const lp = lessonsPath(root);
+  if (!exists(lp)) return fail('lessons.md 없음');
+  const text = read(lp);
+  const blocks = text.split(/\n(?=### )/);
+  let removed = 0;
+  const kept = [];
+  for (const b of blocks) {
+    if (!b.startsWith('### ')) { kept.push(b); continue; }
+    // date 매칭 (정확) 또는 text substring (lesson content)
+    const dateMatch = b.match(/^### (\d{4}-\d{2}-\d{2})/);
+    const lessonMatch = b.match(/- Lesson:\s*(.+)/);
+    const isDateTarget = dateMatch && dateMatch[1] === target;
+    const isTextTarget = lessonMatch && lessonMatch[1].includes(target);
+    if (isDateTarget || isTextTarget) {
+      removed++;
+      // archive 보존 — lessons.archive.md 에 추가
+      const archivePath = path.join(root, '.harness/lessons.archive.md');
+      const archiveHeader = exists(archivePath) ? '' : '# Lessons archive\n\n';
+      append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${target}")\n${b}\n`);
+      continue;
+    }
+    kept.push(b);
+  }
+  if (removed === 0) return fail(`매칭 lesson 없음: "${target}"`);
+  writeUtf8(lp, kept.join('\n'));
+  ok(`lesson dropped: ${removed}건 (보존: .harness/lessons.archive.md)`);
+  _autoRoadmap(absRoot(root), 'data-change');
 }
 
 // 1.9.112: lesson save — .harness/lessons.md에 새 lesson 추가 (Memory Write Surface 5번째)
@@ -3950,7 +3984,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 35 도구 (plan_list 추가, 1.9.119 READ 5종 완성)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 36 도구 (lesson_drop 추가, 1.9.124)'));
     log('    ' + C.green('npx leerness lesson save "<text>" --tag "..."') + C.dim('       # lessons.md 직접 write (1.9.112 — handoff 자동 회수와 통합)'));
     log('    ' + C.green('npx leerness memory status . --json') + C.dim('                  # Memory Surface 5종 통합 상태 JSON (1.9.114)'));
     log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
@@ -8129,7 +8163,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_memory_status', description: '1.9.114 — Memory Write Surface 5종 (tasks/decisions/rules/plan/lessons) 통합 상태 JSON. 외부 AI가 한 호출로 영구화 상태 + 카운트 + 최근 항목 회수. summary 필드는 "T2/D3/R1/P5/L7" 형식', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_lesson_list', description: '1.9.117 — lessons.md 전용 list JSON ({ date, text, tag }[]). --tag 필터 지원. 외부 AI가 영구화된 lesson 전체 회수 (vs leerness_lessons 는 다중 source fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, tag: { type: 'string' } } } },
     { name: 'leerness_decision_list', description: '1.9.118 — decisions.md 전체 조회 JSON ({ date, title, decision, reason, alternatives, impact }[]). 외부 AI가 영구화된 설계 결정 전체 회수 (Decision + Reason/Alternatives/Impact 메타데이터 포함)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_plan_list', description: '1.9.119 — plan.md 의 모든 milestone (M-XXXX) 조회 JSON ({ id, title, status, progress, tasks: [{ done, text }] }[]). 외부 AI가 영구화된 계획 + 진행률 + tasks checkbox 전체 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_plan_list', description: '1.9.119 — plan.md 의 모든 milestone (M-XXXX) 조회 JSON ({ id, title, status, progress, tasks: [{ done, text }] }[]). 외부 AI가 영구화된 계획 + 진행률 + tasks checkbox 전체 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_lesson_drop', description: '1.9.124 — lessons.md 에서 특정 lesson 제거 (target: date YYYY-MM-DD 또는 text substring). 잘못 저장한 lesson 제거. 제거된 블록은 .harness/lessons.archive.md 에 자동 보존 (복구 가능)', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } }
   ];
 
   function send(obj) {
@@ -8196,6 +8231,7 @@ function mcpServeCmd(root) {
           case 'leerness_lesson_list':     cliArgs = ['lesson', 'list', '--path', targetPath, '--json', ...(args.tag ? ['--tag', args.tag] : [])]; break;
           case 'leerness_decision_list':   cliArgs = ['decision', 'list', '--path', targetPath, '--json']; break;
           case 'leerness_plan_list':       cliArgs = ['plan', 'list', '--path', targetPath, '--json']; break;
+          case 'leerness_lesson_drop':     cliArgs = ['lesson', 'drop', String(args.target || ''), '--path', targetPath]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -8948,7 +8984,16 @@ async function main() {
     if (sub === 'list') {
       return lessonListCmd(root, { json: has('--json') });
     }
-    return fail('lesson save "<text>" [--tag "..."] | lesson list [--tag "..."] [--json]');
+    // 1.9.124: lesson drop <date|text>
+    if (sub === 'drop') {
+      const targetParts = [];
+      for (let i = 2; i < args.length; i++) {
+        if (args[i].startsWith('--')) break;
+        targetParts.push(args[i]);
+      }
+      return lessonDropCmd(root, targetParts.join(' '));
+    }
+    return fail('lesson save "<text>" [--tag "..."] | lesson list [--tag "..."] [--json] | lesson drop <date|text>');
   }
   // 1.9.108: decision add — decisions.md에 새 설계 결정 추가
   // 1.9.118: decision list — decisions.md 전체 조회 + --json

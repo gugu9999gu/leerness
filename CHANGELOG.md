@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.9.124 — 2026-05-20
+
+**`leerness lesson drop <target>` CLI + MCP 36번째 도구 `leerness_lesson_drop`** — 잘못 저장한 lesson 제거 (archive 자동 보존).
+
+### Added — `leerness lesson drop <target>` CLI
+- 새 명령: `leerness lesson drop "2026-05-20"` (date 매칭) 또는 `leerness lesson drop "JWT"` (text substring 매칭)
+- 매칭된 lesson 블록을 lessons.md 에서 제거
+- 제거된 블록은 `.harness/lessons.archive.md` 에 자동 보존 (복구 가능)
+- 매칭 없을 시 `fail` (exit 1)
+
+### Added — MCP 36번째 도구 `leerness_lesson_drop`
+- 외부 AI 가 잘못 저장한 lesson 제거.
+- 인자: `{ target (required), path? }`
+- target은 date 또는 text substring 둘 다 매칭 (정확 date 우선)
+
+### 사용 시나리오
+사용자: "어제 잘못 저장한 lesson 지워줘. webhook 관련이었어"
+→ 외부 AI: `leerness_lesson_drop({ target: "webhook" })`
+→ "lesson dropped: 1건 (보존: .harness/lessons.archive.md)"
+
+### Memory CRUD 확장
+| 영역 | CREATE | READ | UPDATE | DELETE |
+|---|---|---|---|---|
+| Tasks | task_add | task_export | task_update | task_drop |
+| Decisions | decision_add | decision_list | — | — |
+| Rules | rule_add | rule_list | (status pause/resume) | rule_remove |
+| Plan | plan_add | plan_list | — | — |
+| **Lessons** | lesson_save | lesson_list | — | **lesson_drop ✓ (1.9.124)** |
+
+### MCP 도구 수: 35 → 36개
+
+### Verified
+- stress-v69 — lesson drop (date/text) + archive 보존 + MCP + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.123 — 2026-05-20
 
 **`leerness health --json` 응답에 `memorySurface` 필드 통합** — handoff (1.9.115) / session close (1.9.122) / memory status (1.9.114) 와 일관성 완성.
