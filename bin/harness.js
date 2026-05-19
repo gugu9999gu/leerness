@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.124';
+const VERSION = '1.9.125';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -325,6 +325,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.122+ \`session close --json\` 응답에도 \`memorySurface\` 필드 통합 — 마감 시 5종 메모리 상태 동시 회수.
 - 1.9.123+ \`health --json\` 응답에도 \`memorySurface\` 필드 통합 — handoff/session close/memory status 모든 JSON 명령 일관성.
 - 1.9.124+ \`leerness lesson drop <target>\` + MCP **36 도구** (\`leerness_lesson_drop\`) — 잘못 저장한 lesson 제거 (archive 자동 보존).
+- 1.9.125+ \`leerness decision drop <target>\` + MCP **37 도구** (\`leerness_decision_drop\`) — 잘못 저장한 결정 제거 (archive 보존).
 
 ---
 
@@ -1552,6 +1553,51 @@ function decisionListCmd(root, opts = {}) {
     if (d.alternatives) log(`  Alternatives: ${d.alternatives}`);
     if (d.impact) log(`  Impact: ${d.impact}`);
   }
+}
+
+// 1.9.125: decision drop — decisions.md 에서 특정 결정 제거 (date 또는 title substring 매칭)
+function decisionDropCmd(root, target) {
+  root = absRoot(root);
+  if (!target) return fail('decision drop <date|title-substring> 필요. 예: leerness decision drop "2026-05-20" 또는 leerness decision drop "PostgreSQL"');
+  const dp = decisionsPath(root);
+  if (!exists(dp)) return fail('decisions.md 없음');
+  const text = read(dp);
+  // 코드블록 제외해서 안전하게 처리 (template 제외)
+  // 단순 split: ### 으로 시작하는 블록만
+  const blocks = text.split(/\n(?=### )/);
+  let removed = 0;
+  const kept = [];
+  for (const b of blocks) {
+    if (!b.startsWith('### ')) { kept.push(b); continue; }
+    // 코드블록 내부는 건드리지 않음 — 단순화: 헤더 라인의 dateMatch / titleMatch
+    const headerMatch = b.match(/^### (.+)$/m);
+    if (!headerMatch) { kept.push(b); continue; }
+    const titleLine = headerMatch[1].trim();
+    // 형식: "YYYY-MM-DD — <title>" 또는 "<title>" 단독
+    const dateTitleMatch = titleLine.match(/^(\d{4}-\d{2}-\d{2})\s*—\s*(.+)$/);
+    const date = dateTitleMatch ? dateTitleMatch[1] : null;
+    const title = dateTitleMatch ? dateTitleMatch[2].trim() : titleLine;
+    // template 블록 제외 (`### Template (예시 ...)` 같은 경우)
+    if (/^Template(?:\s|\b|\()/i.test(titleLine) || /^템플릿/.test(titleLine)) {
+      kept.push(b);
+      continue;
+    }
+    const isDateTarget = date === target;
+    const isTitleTarget = title.includes(target);
+    if (isDateTarget || isTitleTarget) {
+      removed++;
+      // archive 보존
+      const archivePath = path.join(root, '.harness/decisions.archive.md');
+      const archiveHeader = exists(archivePath) ? '' : '# Decisions archive\n\n';
+      append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${target}")\n${b}\n`);
+      continue;
+    }
+    kept.push(b);
+  }
+  if (removed === 0) return fail(`매칭 decision 없음: "${target}"`);
+  writeUtf8(dp, kept.join('\n'));
+  ok(`decision dropped: ${removed}건 (보존: .harness/decisions.archive.md)`);
+  _autoRoadmap(absRoot(root), 'data-change');
 }
 
 // 1.9.108: decision add — decisions.md에 새 설계 결정 추가 (외부 AI/MCP 통합 메모리 영구화)
@@ -3984,7 +4030,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 36 도구 (lesson_drop 추가, 1.9.124)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 37 도구 (decision_drop 추가, 1.9.125)'));
     log('    ' + C.green('npx leerness lesson save "<text>" --tag "..."') + C.dim('       # lessons.md 직접 write (1.9.112 — handoff 자동 회수와 통합)'));
     log('    ' + C.green('npx leerness memory status . --json') + C.dim('                  # Memory Surface 5종 통합 상태 JSON (1.9.114)'));
     log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
@@ -8164,7 +8210,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_lesson_list', description: '1.9.117 — lessons.md 전용 list JSON ({ date, text, tag }[]). --tag 필터 지원. 외부 AI가 영구화된 lesson 전체 회수 (vs leerness_lessons 는 다중 source fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, tag: { type: 'string' } } } },
     { name: 'leerness_decision_list', description: '1.9.118 — decisions.md 전체 조회 JSON ({ date, title, decision, reason, alternatives, impact }[]). 외부 AI가 영구화된 설계 결정 전체 회수 (Decision + Reason/Alternatives/Impact 메타데이터 포함)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_plan_list', description: '1.9.119 — plan.md 의 모든 milestone (M-XXXX) 조회 JSON ({ id, title, status, progress, tasks: [{ done, text }] }[]). 외부 AI가 영구화된 계획 + 진행률 + tasks checkbox 전체 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_lesson_drop', description: '1.9.124 — lessons.md 에서 특정 lesson 제거 (target: date YYYY-MM-DD 또는 text substring). 잘못 저장한 lesson 제거. 제거된 블록은 .harness/lessons.archive.md 에 자동 보존 (복구 가능)', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } }
+    { name: 'leerness_lesson_drop', description: '1.9.124 — lessons.md 에서 특정 lesson 제거 (target: date YYYY-MM-DD 또는 text substring). 잘못 저장한 lesson 제거. 제거된 블록은 .harness/lessons.archive.md 에 자동 보존 (복구 가능)', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
+    { name: 'leerness_decision_drop', description: '1.9.125 — decisions.md 에서 특정 결정 제거 (target: date YYYY-MM-DD 또는 title substring). 제거된 블록은 .harness/decisions.archive.md 에 자동 보존', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } }
   ];
 
   function send(obj) {
@@ -8232,6 +8279,7 @@ function mcpServeCmd(root) {
           case 'leerness_decision_list':   cliArgs = ['decision', 'list', '--path', targetPath, '--json']; break;
           case 'leerness_plan_list':       cliArgs = ['plan', 'list', '--path', targetPath, '--json']; break;
           case 'leerness_lesson_drop':     cliArgs = ['lesson', 'drop', String(args.target || ''), '--path', targetPath]; break;
+          case 'leerness_decision_drop':   cliArgs = ['decision', 'drop', String(args.target || ''), '--path', targetPath]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -9011,7 +9059,16 @@ async function main() {
     if (sub === 'list') {
       return decisionListCmd(root, { json: has('--json') });
     }
-    return fail('decision add "<title>" --reason "..." --alternatives "..." --impact "..." | decision list [--json]');
+    // 1.9.125: decision drop <date|title>
+    if (sub === 'drop') {
+      const targetParts = [];
+      for (let i = 2; i < args.length; i++) {
+        if (args[i].startsWith('--')) break;
+        targetParts.push(args[i]);
+      }
+      return decisionDropCmd(root, targetParts.join(' '));
+    }
+    return fail('decision add "<title>" --reason "..." --alternatives "..." --impact "..." | decision list [--json] | decision drop <date|title>');
   }
   return help();
 }

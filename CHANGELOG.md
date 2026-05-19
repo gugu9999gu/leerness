@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.9.125 — 2026-05-20
+
+**`leerness decision drop <target>` CLI + MCP 37번째 도구 `leerness_decision_drop`** — 잘못 저장한 결정 제거 (archive 자동 보존).
+
+### Added — `leerness decision drop <target>` CLI
+- target: date `YYYY-MM-DD` 또는 title substring
+- 매칭된 결정 블록을 decisions.md 에서 제거
+- 제거된 블록은 `.harness/decisions.archive.md` 에 자동 보존 (복구 가능)
+- **template 블록 자동 보호** (`### Template` 등은 제거 대상에서 제외)
+- 매칭 없을 시 fail
+
+### Added — MCP 37번째 도구 `leerness_decision_drop`
+- 외부 AI 가 잘못 저장한 결정 제거.
+- 인자: `{ target (required), path? }`
+
+### 사용 시나리오
+사용자: "어제 PostgreSQL 결정 취소하고 MySQL로 다시 검토하자"
+→ 외부 AI: 
+  1. `leerness_decision_drop({ target: "PostgreSQL" })` — 기존 제거 (archive 보존)
+  2. `leerness_decision_add({ title: "MySQL 채택", reason: "...", ... })` — 새 결정 등록
+
+### Memory CRUD 진화 (decisions)
+| Operation | 라운드 |
+|---|---|
+| CREATE (add) | 1.9.108 |
+| READ (list) | 1.9.118 |
+| **DELETE (drop)** | **1.9.125 ✓** |
+
+### Memory Surface Archive 패턴 (2종)
+- `lessons.archive.md` (1.9.124)
+- `decisions.archive.md` (1.9.125)
+
+### MCP 도구 수: 36 → 37개
+
+### Verified
+- stress-v70 — decision drop (date/title) + archive 보존 + template 보호 + MCP + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.124 — 2026-05-20
 
 **`leerness lesson drop <target>` CLI + MCP 36번째 도구 `leerness_lesson_drop`** — 잘못 저장한 lesson 제거 (archive 자동 보존).
