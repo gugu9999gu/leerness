@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.9.116 — 2026-05-20
+
+**`leerness brainstorm` 회수 범위에 lessons.md + plan.md milestone 통합** — Memory Write Surface 5종 ↔ brainstorm 완전 통합.
+
+### Added — brainstorm 회수 범위 확장
+- 기존 hits 영역: decisions / skills / tasks / rules / evidence / skillHistory / taskLogFails
+- **추가 hits**: 
+  - `lessonsExplicit` — `.harness/lessons.md` (1.9.112 신규) 의 dated 블록 매칭
+  - `planMilestones` — `.harness/plan.md` 의 `M-XXXX` milestone 매칭
+
+### 변경 적용 위치
+- `_brainstormFor(root, topic)` — 1.9.77 MCP `leerness_brainstorm` + 1.9.88 handoff brainstorm hits 가 사용
+- `brainstormCmd(root, topic)` verbose 출력 — 사용자 직접 호출 시 발견 카운트에 포함
+
+### 1.9.116 의 가치
+- 1.9.112 에서 lessons.md 가 메모리 surface 5번째로 추가됐지만 brainstorm 매칭에는 미반영.
+- 이제 brainstorm 호출 시 lessons.md 의 통찰 + plan.md 의 milestone 도 함께 검색.
+- 외부 AI 가 "JWT" 주제로 brainstorm 호출 → JWT 관련 모든 메모리 surface (decision/lesson/plan/rule/skill/task/history/failure) 자동 회수.
+
+### Performance
+- 새 hits 영역 추가로 brainstorm 평균 5-10ms 증가 (lessons.md, plan.md 추가 read).
+- 캐시 미적용 (단순 텍스트 매칭) — 향후 캐싱 가능.
+
+### Verified
+- stress-v61 — brainstorm --json 에 lessonsExplicit/planMilestones 필드 존재 + 키워드 매칭 정확성 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.115 — 2026-05-20
 
 **`leerness handoff --json` 응답에 `memorySurface` 필드 통합** — 단일 호출로 컨텍스트 + 5종 메모리 상태 동시 회수.

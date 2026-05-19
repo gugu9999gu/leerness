@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.115';
+const VERSION = '1.9.116';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -317,6 +317,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.113+ handoff 통합 헤드라인에 **🧠 mem T/D/R/P/L 카운트** 추가 — 5종 메모리 영구화 상태 한눈에 확인.
 - 1.9.114+ \`leerness memory status [--json]\` + MCP **32 도구** (\`leerness_memory_status\`) — 상세 상태 + 최근 항목 조회.
 - 1.9.115+ \`leerness handoff --json\` 응답에 **\`memorySurface\` 필드 통합** — 단일 호출로 컨텍스트 + 5종 메모리 상태 동시 회수.
+- 1.9.116+ \`leerness brainstorm\` 회수 범위에 **lessons.md + plan.md** milestone 추가 — Memory Surface 5종 완전 통합.
 
 ---
 
@@ -5003,7 +5004,8 @@ function _brainstormFor(root, topic) {
   const wordRes = tokens.map(t => new RegExp(`(?<![\\p{L}\\p{N}_])${_escUnicode(t)}(?![\\p{L}\\p{N}_])`, 'iu'));
   function matches(text) { return wordRes.every(re => re.test(text)); }
   // 1.9.72: skillHistory + taskLogFails 필드 추가
-  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [], code: [], skillHistory: [], taskLogFails: [] };
+  // 1.9.116: lessonsExplicit (lessons.md 전용) + planMilestones (plan.md M-XXXX) 추가 — Memory Surface 5종 완전 통합
+  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [], code: [], skillHistory: [], taskLogFails: [], lessonsExplicit: [], planMilestones: [] };
   const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
   const decLines = dec.split('\n');
   for (const b of _extractDecisionBlocks(dec)) {
@@ -5073,6 +5075,34 @@ function _brainstormFor(root, topic) {
       }
     }
   }
+  // 1.9.116: lessons.md (전용 lessons) hits — Memory Write Surface 5번째
+  const lp_brainstorm = lessonsPath(root);
+  if (exists(lp_brainstorm)) {
+    const lessonsText = read(lp_brainstorm);
+    for (const block of lessonsText.split(/\n(?=### )/)) {
+      if (!block.startsWith('### ')) continue;
+      const lessonMatch = block.match(/- Lesson:\s*(.+)/);
+      if (lessonMatch && matches(block)) {
+        const idx = lessonsText.indexOf(block);
+        const lineNo = idx >= 0 ? lessonsText.slice(0, idx).split('\n').length : 0;
+        hits.lessonsExplicit.push({ title: lessonMatch[1].trim().slice(0, 120), preview: block.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
+      }
+    }
+  }
+  // 1.9.116: plan.md milestone hits — Memory Write Surface plan
+  const planFile_brainstorm = planPath(root);
+  if (exists(planFile_brainstorm)) {
+    const planText = read(planFile_brainstorm);
+    const milestoneBlocks = planText.split(/\n(?=### M-\d{4}\.)/);
+    for (const b of milestoneBlocks) {
+      const m = b.match(/^### (M-\d{4})\.\s*(.+?)$/m);
+      if (m && matches(b)) {
+        const idx = planText.indexOf(b);
+        const lineNo = idx >= 0 ? planText.slice(0, idx).split('\n').length : 0;
+        hits.planMilestones.push({ id: m[1], title: m[2].trim().slice(0, 120), preview: b.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
+      }
+    }
+  }
   // 1.9.72: task-log.md 실패 라인 hits
   const tlogPath = path.join(root, '.harness', 'task-log.md');
   if (exists(tlogPath)) {
@@ -5116,7 +5146,7 @@ function _brainstormFor(root, topic) {
   return hits;
 }
 
-function _brainstormTotal(h) { return h.decisions.length + h.skills.length + h.tasks.length + h.rules.length + h.evidence.length + (h.code?.length || 0) + (h.skillHistory?.length || 0) + (h.taskLogFails?.length || 0); }
+function _brainstormTotal(h) { return h.decisions.length + h.skills.length + h.tasks.length + h.rules.length + h.evidence.length + (h.code?.length || 0) + (h.skillHistory?.length || 0) + (h.taskLogFails?.length || 0) + (h.lessonsExplicit?.length || 0) + (h.planMilestones?.length || 0); }
 
 // 1.9.16: 워크스페이스 통합 brainstorm
 function _brainstormWorkspace(rootBase, topic) {
@@ -5280,9 +5310,38 @@ function brainstormCmd(root, topic) {
       }
     }
   }
+  // 1.9.116: lessons.md + plan.md milestone hits (Memory Surface 5종 완전 통합)
+  if (!hits.lessonsExplicit) hits.lessonsExplicit = [];
+  if (!hits.planMilestones) hits.planMilestones = [];
+  const lp_b2 = lessonsPath(root);
+  if (exists(lp_b2)) {
+    const lessonsText = read(lp_b2);
+    for (const block of lessonsText.split(/\n(?=### )/)) {
+      if (!block.startsWith('### ')) continue;
+      const lessonMatch = block.match(/- Lesson:\s*(.+)/);
+      if (lessonMatch && matches(block)) {
+        const idx = lessonsText.indexOf(block);
+        const lineNo = idx >= 0 ? lessonsText.slice(0, idx).split('\n').length : 0;
+        hits.lessonsExplicit.push({ title: lessonMatch[1].trim().slice(0, 120), preview: block.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
+      }
+    }
+  }
+  const planFile_b2 = planPath(root);
+  if (exists(planFile_b2)) {
+    const planText = read(planFile_b2);
+    const milestoneBlocks = planText.split(/\n(?=### M-\d{4}\.)/);
+    for (const b of milestoneBlocks) {
+      const m = b.match(/^### (M-\d{4})\.\s*(.+?)$/m);
+      if (m && matches(b)) {
+        const idx = planText.indexOf(b);
+        const lineNo = idx >= 0 ? planText.slice(0, idx).split('\n').length : 0;
+        hits.planMilestones.push({ id: m[1], title: m[2].trim().slice(0, 120), preview: b.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
+      }
+    }
+  }
 
-  const total = hits.decisions.length + hits.skills.length + hits.tasks.length + hits.rules.length + hits.evidence.length + (hits.skillHistory ? hits.skillHistory.length : 0) + (hits.taskLogFails ? hits.taskLogFails.length : 0);
-  log(`\n📦 총 ${total}건 발견 (decisions ${hits.decisions.length} · skills ${hits.skills.length} · tasks ${hits.tasks.length} · rules ${hits.rules.length} · evidence ${hits.evidence.length}${hits.skillHistory && hits.skillHistory.length ? ` · skill-history ${hits.skillHistory.length}` : ''}${hits.taskLogFails && hits.taskLogFails.length ? ` · task-log-fails ${hits.taskLogFails.length}` : ''})`);
+  const total = hits.decisions.length + hits.skills.length + hits.tasks.length + hits.rules.length + hits.evidence.length + (hits.skillHistory ? hits.skillHistory.length : 0) + (hits.taskLogFails ? hits.taskLogFails.length : 0) + (hits.lessonsExplicit ? hits.lessonsExplicit.length : 0) + (hits.planMilestones ? hits.planMilestones.length : 0);
+  log(`\n📦 총 ${total}건 발견 (decisions ${hits.decisions.length} · skills ${hits.skills.length} · tasks ${hits.tasks.length} · rules ${hits.rules.length} · evidence ${hits.evidence.length}${hits.skillHistory && hits.skillHistory.length ? ` · skill-history ${hits.skillHistory.length}` : ''}${hits.taskLogFails && hits.taskLogFails.length ? ` · task-log-fails ${hits.taskLogFails.length}` : ''}${hits.lessonsExplicit && hits.lessonsExplicit.length ? ` · lessons ${hits.lessonsExplicit.length}` : ''}${hits.planMilestones && hits.planMilestones.length ? ` · plan ${hits.planMilestones.length}` : ''})`);
 
   // 1.9.15: 모든 출력에 출처 파일:라인 표시
   if (hits.decisions.length) {
