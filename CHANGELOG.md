@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.98 — 2026-05-20
+
+**`leerness skill publish` 보안 사전 점검 통합** (사용자 글로벌 룰 보안 정책 자동화).
+
+### Added — publish 보안 사전 점검
+- `leerness skill publish` 명령 실행 전 `leerness health` 자동 호출.
+- `issues.length > 0` 시 publish 중단 + exit 1:
+  - 🚨 보안 사전 점검 (1.9.98): N건 issue 발견
+  - 권장: `leerness audit --fix`
+  - 우회: `--force` 또는 `--no-security-check`
+- 통과 시: `✓ 보안 사전 점검 (1.9.98): 통과` 후 정상 publish
+
+### Use Case
+- 사용자가 `.env` 가 `.gitignore` 에 없는 상태에서 skill publish 시도 → 자동 차단.
+- 시크릿 노출 사고 사전 방지.
+- CI 통합 시 더욱 안전.
+
+### Verified
+- stress-v43 — publish 보안 사전 점검 + --force 우회 + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.97 — 2026-05-20
 
 **자율 모드 27 라운드 종합 보고서 갱신 + 마무리** (1.9.70 ~ 1.9.96).

@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.97';
+const VERSION = '1.9.98';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3491,7 +3491,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.97+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.98+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -6862,7 +6862,26 @@ function skillPublishCmd(root) {
   const includes = arg('--include', null);
   const ghRelease = has('--gh-release');
   const bundleOnly = has('--bundle-only') || !ghRelease;
-  log(`# leerness skill publish (1.9.47)`);
+  log(`# leerness skill publish (1.9.47/98)`);
+  // 1.9.98: 보안 사전 점검 — health --strict 자동 실행, issue 있으면 publish 중단 (--force로 우회)
+  if (!has('--no-security-check') && !has('--force')) {
+    try {
+      const r = cp.spawnSync(process.execPath, [__filename, 'health', root, '--json'],
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
+      const j = JSON.parse(r.stdout.trim());
+      if (j.issues && j.issues.length > 0) {
+        log(`🚨 보안 사전 점검 (1.9.98): ${j.issues.length}건 issue 발견`);
+        for (const i of j.issues.slice(0, 5)) log(`  ⚠ ${i}`);
+        log(`💡 권장: leerness audit --fix · 우회: leerness skill publish ... --force / --no-security-check`);
+        process.exitCode = 1;
+        return;
+      } else {
+        log(`✓ 보안 사전 점검 (1.9.98): 통과`);
+      }
+    } catch (e) {
+      log(`⚠ 보안 사전 점검 오류 (계속): ${e.message}`);
+    }
+  }
   // 1) 자체 skill 모두 SKILL.md로 export (skill export-all 활용)
   const exportDir = path.join(root, '.harness', 'skills-publish');
   mkdirp(exportDir);
