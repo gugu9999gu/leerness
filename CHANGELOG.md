@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.96 — 2026-05-20
+
+**`leerness handoff --json` 옵션 추가** (외부 AI / MCP 통합용).
+
+### Added
+- `leerness handoff --json` — 구조화된 JSON 출력
+  - `{ date, project, version, files: { sessionHandoff, currentState, plan, progressTracker, decisions, taskLog }, activeRules?: [...] }`
+  - 각 file: `{ path, content }` (8000자 초과 시 truncated)
+- 자동 회수 라인 (lessons / skill 추천 / history / brainstorm / 헤드라인)은 일반 모드에서만.
+- 외부 AI(Claude Code, Cursor)가 handoff 데이터를 파싱 친화적으로 받음.
+
+### Verified
+- stress-v42 — handoff --json + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.95 — 2026-05-20
 
 **`leerness lessons --json` 옵션 + MCP leerness_lessons 자동 JSON 응답**.

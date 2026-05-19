@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.95';
+const VERSION = '1.9.96';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1842,6 +1842,32 @@ function memorySearch(root, query) {
 
 function handoff(root) {
   root = absRoot(root);
+  // 1.9.96: --json 옵션 (구조화 출력, MCP 통합 / 외부 AI 친화)
+  if (has('--json')) {
+    const result = {
+      date: today(),
+      project: detectProjectName(root),
+      version: VERSION,
+      files: {}
+    };
+    function _addFile(key, p) {
+      if (exists(p)) {
+        const content = read(p);
+        result.files[key] = { path: rel(root, p), content: content.length > 8000 ? content.slice(0, 8000) + '\n…(truncated)' : content };
+      }
+    }
+    _addFile('sessionHandoff', handoffPath(root));
+    _addFile('currentState', currentStatePath(root));
+    _addFile('plan', planPath(root));
+    _addFile('progressTracker', progressPath(root));
+    _addFile('decisions', decisionsPath(root));
+    _addFile('taskLog', taskLogPath(root));
+    // active rules
+    const activeRules = readRules(root).filter(r => r.status === 'active');
+    if (activeRules.length) result.activeRules = activeRules.map(r => ({ id: r.id, trigger: r.trigger, rule: r.rule }));
+    log(JSON.stringify(result, null, 2));
+    return;
+  }
   const sections = [];
   function block(label, p) {
     if (!exists(p)) return;
@@ -3465,7 +3491,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.95+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.96+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
