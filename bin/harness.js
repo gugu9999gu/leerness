@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.74';
+const VERSION = '1.9.75';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1476,6 +1476,39 @@ function audit(root) {
           } else {
             ok('npm CVE: 0건');
           }
+        }
+      }
+    } catch {}
+  }
+  // 1.9.75: .gitignore 보안 검증 — .env / 시크릿 파일이 .gitignore에 포함되는지 (--no-gitignore-check로 끄기)
+  if (!has('--no-gitignore-check')) {
+    try {
+      const gi = path.join(root, '.gitignore');
+      const envPath = path.join(root, '.env');
+      if (exists(envPath)) {
+        // .env가 존재하면 .gitignore가 반드시 있어야 하고, .env가 포함되어야 함
+        const giText = exists(gi) ? read(gi) : '';
+        const giLines = giText.split('\n').map(l => l.trim());
+        // 필수 보안 패턴 (글로벌 룰 .gitignore 보안 체크리스트)
+        const SECRET_PATTERNS = ['.env', '.env.local', '.env.production', '.env.*.local', '*.pem', 'credentials.json'];
+        const missing = SECRET_PATTERNS.filter(p => !giLines.some(l => l === p || l === '/' + p));
+        if (missing.length) {
+          warnings++;
+          warn(`.gitignore에 시크릿 패턴 ${missing.length}건 누락: ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ' …' : ''}`);
+          if (fix) {
+            // 자동 추가
+            let newGi = giText;
+            if (newGi && !newGi.endsWith('\n')) newGi += '\n';
+            newGi += `\n# 1.9.75 audit --fix: 시크릿 파일 보안 패턴 자동 추가 (사용자 글로벌 룰)\n`;
+            for (const p of missing) newGi += `${p}\n`;
+            writeUtf8(gi, newGi);
+            ok(`  ↳ fixed: .gitignore에 ${missing.length}건 자동 추가 (시크릿 보안 1.9.75)`);
+            fixed++;
+          } else {
+            log(`    → 자동 추가: leerness audit --fix`);
+          }
+        } else {
+          ok('.gitignore 시크릿 패턴 OK (1.9.75)');
         }
       }
     } catch {}
@@ -3242,7 +3275,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.74+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.75+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));

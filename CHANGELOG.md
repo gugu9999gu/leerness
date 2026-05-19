@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.75 — 2026-05-20
+
+**`leerness audit` 보안 강화 — `.gitignore` 시크릿 패턴 자동 검증** (사용자 글로벌 룰 ".gitignore 보안 체크리스트" 정책 자동화).
+
+### Added — audit `.gitignore` 보안 검증
+- `.env` 파일이 존재할 때 다음 패턴이 `.gitignore`에 포함되는지 자동 검증:
+  - `.env`, `.env.local`, `.env.production`, `.env.*.local`
+  - `*.pem` (private keys)
+  - `credentials.json`
+- 누락 시 warning + `--fix`로 자동 추가 (1.9.75 안내 코멘트 동반).
+- `--no-gitignore-check`로 비활성화.
+- `audit --strict` 와 결합 시 보안 누락이 failure로 승격됨 (CI 친화).
+
+### Verified
+- stress-v21 — gitignore 검증 + --fix 추가 + 1.9.43~74 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.74 — 2026-05-20
 
 **`session close` 마감 시 누적 회고 통계 강화** (1.9.70 MCP + 1.9.68 history 결합).
