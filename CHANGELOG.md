@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.9.85 — 2026-05-20
+
+**`leerness health` 새 명령** — 종합 헬스 체크 (drift + 보안 + skill + MCP + 누적 통계).
+
+### Added — `leerness health [<path>]`
+- 종합 진단 한 번에:
+  - `drift`: level + score + fired 개수
+  - `보안`: .env 존재 / .gitignore에 .env 포함 / .env.example 누락 키 / .gitignore 시크릿 패턴 누락
+  - `skills`: 설치 수 / skill query 누적 (rolling history)
+  - `usage`: 명령 호출 총수 + 종류 / MCP 호출 총수 + 종류 / since
+  - `tasks`: progress-tracker 총수 + 상태별 카운트
+- **`issues`** 배열에 발견된 모든 문제 자동 집계.
+- `--json`: 구조화된 JSON 출력 (CI 친화).
+- `--strict`: issue ≥ 1 시 exit 1.
+
+### Use Case
+- 사용자: `leerness health .` 한 줄로 워크스페이스 전체 상태 즉시 확인.
+- CI 통합: `leerness health . --strict` 로 보안/drift 문제 자동 감지.
+- 1.9.78 drift + 1.9.75/76/80 보안 + 1.9.70 MCP 통계 + 1.9.79 skill suggest의 모든 신호를 한 곳에 집계.
+
+### Verified
+- stress-v31 — health 출력 / --json / --strict / 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.84 — 2026-05-20
 
 **MCP server 17번째 도구 `leerness_skill_list` 추가** (외부 AI에 skill 목록 조회 노출).

@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.84';
+const VERSION = '1.9.85';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3398,12 +3398,13 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.84+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.85+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
     log('    ' + C.green('npx leerness verify-claim T-0001 --run-tests') + C.dim('        # AI 거짓 완료 자동 검증'));
     log('    ' + C.green('npx leerness env check .') + C.dim('                             # .env ↔ .env.example 동기화 검사 (1.9.71)'));
+    log('    ' + C.green('npx leerness health .') + C.dim('                                # 종합 헬스 체크 — drift + 보안 + skill + MCP (1.9.85)'));
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
@@ -7581,6 +7582,118 @@ function envSyncCmd(root) {
   for (const k of d.inEnvOnly) log(`  + ${k}=`);
 }
 
+// 1.9.85: leerness health — 종합 헬스 체크 (drift + 보안 + skill + MCP + 누적)
+function healthCmd(root) {
+  root = absRoot(root || process.cwd());
+  const out = { root, generatedAt: new Date().toISOString(), checks: {} };
+  // 1) drift level
+  try {
+    const r = cp.spawnSync(process.execPath, [__filename, 'drift', 'check', root, '--json'],
+      { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
+    const j = JSON.parse(r.stdout.trim());
+    out.checks.drift = { level: j.level, score: j.score, firedCount: (j.fired || []).length };
+  } catch { out.checks.drift = { error: 'drift check 실패' }; }
+  // 2) 보안 상태 (env + .gitignore)
+  try {
+    const envPath = path.join(root, '.env');
+    if (exists(envPath)) {
+      const d = envDiff(root);
+      const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
+      const giLines = giText.split('\n').map(l => l.trim());
+      const envInGi = giLines.includes('.env') || giLines.includes('/.env');
+      const SECRET_PATTERNS = ['.env', '.env.local', '.env.production', '.env.*.local', '*.pem', 'credentials.json'];
+      const missingSecrets = SECRET_PATTERNS.filter(p => !giLines.some(l => l === p || l === '/' + p));
+      out.checks.security = {
+        hasDotEnv: true,
+        envInGitignore: envInGi,
+        envExampleMissing: d.inEnvOnly,
+        gitignoreMissingSecrets: missingSecrets,
+        critical: !envInGi
+      };
+    } else {
+      out.checks.security = { hasDotEnv: false, ok: true };
+    }
+  } catch { out.checks.security = { error: '보안 점검 실패' }; }
+  // 3) skill 수 + skill query 누적
+  try {
+    const all = listAllSkills(root);
+    const skillCount = Object.keys(all).length;
+    let queryCount = 0;
+    const histPath = path.join(root, '.harness', 'skill-suggestions.md');
+    if (exists(histPath)) {
+      queryCount = (read(histPath).match(/^## [\d-]+ [\d:]+ — query/gm) || []).length;
+    }
+    out.checks.skills = { installed: skillCount, queryHistoryCount: queryCount };
+  } catch { out.checks.skills = { error: 'skill 점검 실패' }; }
+  // 4) MCP + 명령 호출 누적
+  try {
+    const stats = _readUsageStats(root);
+    const cmdTotal = Object.values(stats.commands || {}).reduce((s, n) => s + n, 0);
+    const mcpTotal = stats.mcp?.tools ? Object.values(stats.mcp.tools).reduce((s, n) => s + n, 0) : 0;
+    out.checks.usage = {
+      commandTotal: cmdTotal,
+      commandKinds: Object.keys(stats.commands || {}).length,
+      mcpTotal,
+      mcpToolKinds: stats.mcp?.tools ? Object.keys(stats.mcp.tools).length : 0,
+      since: stats.since || null
+    };
+  } catch { out.checks.usage = { error: 'usage 점검 실패' }; }
+  // 5) tasks (progress-tracker)
+  try {
+    const rows = readProgressRows(root);
+    const byStatus = {};
+    for (const r of rows) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+    out.checks.tasks = { total: rows.length, byStatus };
+  } catch { out.checks.tasks = { error: 'tasks 점검 실패' }; }
+  // 6) issues 요약 (사용자 글로벌 룰 가시화)
+  const issues = [];
+  if (out.checks.drift?.level && !/healthy/.test(out.checks.drift.level)) issues.push(`drift ${out.checks.drift.level}`);
+  if (out.checks.security?.critical) issues.push('🚨 .env가 .gitignore에 누락 (보안 CRITICAL)');
+  if (out.checks.security?.envExampleMissing?.length) issues.push(`.env→.env.example 누락 ${out.checks.security.envExampleMissing.length}건`);
+  if (out.checks.security?.gitignoreMissingSecrets?.length) issues.push(`.gitignore 시크릿 누락 ${out.checks.security.gitignoreMissingSecrets.length}건`);
+  out.issues = issues;
+  out.healthy = issues.length === 0;
+
+  // --strict: issue 있으면 exit 1
+  if (has('--strict') && !out.healthy) process.exitCode = 1;
+
+  if (has('--json')) { log(JSON.stringify(out, null, 2)); return; }
+  log(`# leerness health (1.9.85)`);
+  log(`Date: ${out.generatedAt}`);
+  log(`Status: ${out.healthy ? '✅ healthy' : `⚠ ${issues.length} issues`}`);
+  log('');
+  log(`## drift`);
+  log(`  level: ${out.checks.drift?.level || 'n/a'} (score ${out.checks.drift?.score || 0}, fired ${out.checks.drift?.firedCount || 0})`);
+  log('');
+  log(`## 보안`);
+  if (out.checks.security?.hasDotEnv) {
+    log(`  .env 존재 · .gitignore에 .env 포함: ${out.checks.security.envInGitignore ? '✓' : '✗ CRITICAL'}`);
+    log(`  .env.example 누락 키: ${out.checks.security.envExampleMissing?.length || 0}건`);
+    log(`  .gitignore 시크릿 패턴 누락: ${out.checks.security.gitignoreMissingSecrets?.length || 0}건`);
+  } else {
+    log(`  .env 없음 (검증 불필요)`);
+  }
+  log('');
+  log(`## skills`);
+  log(`  설치: ${out.checks.skills?.installed || 0}개 · skill query 누적: ${out.checks.skills?.queryHistoryCount || 0}회`);
+  log('');
+  log(`## usage`);
+  log(`  명령 호출: ${out.checks.usage?.commandTotal || 0}회 / ${out.checks.usage?.commandKinds || 0}종`);
+  log(`  MCP 호출: ${out.checks.usage?.mcpTotal || 0}회 / ${out.checks.usage?.mcpToolKinds || 0}종 도구`);
+  log(`  since: ${out.checks.usage?.since || 'unknown'}`);
+  log('');
+  log(`## tasks`);
+  const tb = out.checks.tasks?.byStatus || {};
+  log(`  총 ${out.checks.tasks?.total || 0}건: ${Object.entries(tb).map(([s, n]) => `${s}=${n}`).join(', ') || '없음'}`);
+  if (issues.length) {
+    log('');
+    log(`## ⚠ Issues (${issues.length})`);
+    for (const i of issues) log(`  - ${i}`);
+    log('');
+    log(`💡 자동 회복: leerness drift check --auto-fix · leerness audit --fix`);
+  }
+}
+
 function usageStatsCmd(root) {
   root = absRoot(root || process.cwd());
   const stats = _readUsageStats(root);
@@ -7912,6 +8025,8 @@ async function main() {
   // 1.9.71: leerness env check / sync — .env vs .env.example 자동 동기화
   if (cmd === 'env' && args[1] === 'check') return envCheckCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'env' && args[1] === 'sync')  return envSyncCmd(args[2] || arg('--path', process.cwd()));
+  // 1.9.85: leerness health — 종합 헬스 체크
+  if (cmd === 'health') return healthCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'reuse' && args[1] === 'autodetect') return reuseAutodetectCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'setup-agents' || cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(args[1] && args[1] !== 'agents' ? args[1] : (args[2] || process.cwd()));
