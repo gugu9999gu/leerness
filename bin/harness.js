@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.86';
+const VERSION = '1.9.87';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -291,6 +291,13 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.56+ handoff가 매 세션 시작 시 **과거 lessons 자동 재상기** (현재 task 키워드 기준).
 - 1.9.67+ handoff가 현재 task와 매칭되는 **설치된 skill을 자동 추천** (jaccard 기반, default ON, \`--no-skill-suggest\`로 끄기).
 - 1.9.67+ lessons 인덱스에 \`task-log.md\` 실패 라인까지 포함 → 회수 범위 확장.
+- 1.9.69+ handoff가 \`skill-suggestions.md\` rolling history (과거 같은 키워드 매칭 결과)도 자동 노출.
+- 1.9.76+ handoff에 보안 요약 1~2 line 자동 (\`.env\` ↔ \`.env.example\` 동기화 + \`.gitignore\` 시크릿 누락).
+- 1.9.80+ \`.env\` 가 \`.gitignore\` 에 누락 시 🚨 CRITICAL + \`LEERNESS_AUTO_SECURITY_FIX=1\` 환경변수 시 \`audit --fix\` 자동 실행.
+- 1.9.81+ handoff Date/Project 직후 통합 헤드라인 한 줄 (drift / 보안 / MCP / skill query / 설치 skill 수).
+- 1.9.85+ \`leerness health\` 한 줄로 종합 점검 (drift + 보안 + skills + usage + tasks).
+- 1.9.78/82+ \`leerness drift check --auto-fix\` 가 보안 신호 발견 시 \`audit --fix\` 자동 실행 → 재검사.
+- 1.9.86+ MCP server **18 도구** (handoff/drift/audit/verify_claim/contract/agents/reuse/whats_new/usage_stats/session_close/skill_suggest/lessons/task_export/env_check/brainstorm/skill_match/skill_list/health).
 
 ---
 
@@ -300,8 +307,11 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - [ ] plan/progress-tracker에 이번 라운드 task 등록됨 (또는 task sync)
 - [ ] 모든 done 항목에 evidence 첨부됨 (verify-claim PASS)
 - [ ] sub-agent 사용 시 contract verify PASS
-- [ ] drift 점수 ≤ 30 (attention 이하)
+- [ ] drift 점수 ≤ 30 (attention 이하) — \`leerness drift check\` (1.9.78: 5신호 + 보안)
 - [ ] session close 호출됨
+- [ ] (1.9.85+) \`leerness health\`로 종합 점검 — drift + 보안 + skill + MCP + tasks
+- [ ] (1.9.75/76+) \`.env\` 사용 중이면 \`.gitignore\` 시크릿 패턴 OK + \`.env.example\` 동기화
+- [ ] (1.9.80+) 보안 critical 시 \`LEERNESS_AUTO_SECURITY_FIX=1\` 또는 \`audit --fix\`로 자동 회복
 
 ## Anti-pattern (drift 신호)
 
@@ -3398,7 +3408,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.86+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.87+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));

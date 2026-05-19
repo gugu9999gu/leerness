@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.87 — 2026-05-20
+
+**`session-workflow.md` 템플릿에 1.9.69~86 누적 신규 기능 안내 추가** (init 가이드 정확성).
+
+### Updated
+- `init` 시 생성되는 `.harness/session-workflow.md` 템플릿 갱신:
+  - `📊 빠른 체크리스트` — `leerness health` / `.env` ↔ `.env.example` / `LEERNESS_AUTO_SECURITY_FIX` 라인 추가.
+  - 안내 라인 7개 추가:
+    - 1.9.69+ handoff history hit
+    - 1.9.76+ handoff 보안 요약
+    - 1.9.80+ CRITICAL + 자동 회복
+    - 1.9.81+ 통합 헤드라인
+    - 1.9.85+ `leerness health` 종합 점검
+    - 1.9.78/82+ drift `--auto-fix` 보안 회복
+    - 1.9.86+ MCP **18 도구** 목록
+- AI 에이전트가 `init` 직후 곧바로 최신 워크플로 인지 가능.
+
+### Verified
+- stress-v33 — session-workflow.md 안내 포함 확인 + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.86 — 2026-05-20
 
 **MCP server 18번째 도구 `leerness_health` 추가** (1.9.85 health 외부 AI 노출).
