@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.9.112 — 2026-05-20
+
+**`leerness lesson save` CLI + MCP 31번째 도구 `leerness_lesson_save`** — **Memory Write Surface 5종 완성** (lessons.md 전용 직접 write).
+
+### Added — `leerness lesson save "<text>"` CLI
+- 새 명령: `leerness lesson save "<text>" --tag "..."`
+- `.harness/lessons.md` 에 표준 형식으로 append:
+  ```md
+  ### YYYY-MM-DD
+  - Lesson: <text>
+  - Tag: <tag> (선택)
+  ```
+- lessons.md 가 없으면 자동 생성.
+
+### Added — MCP 31번째 도구 `leerness_lesson_save`
+- 외부 AI 가 세션 중 얻은 통찰을 즉시 영구 기록.
+- 인자: `{ text (required), tag?, path? }`
+- handoff 자동 lessons 회수와 통합 — 추후 동일 키워드 작업 시 자동 재상기.
+
+### Memory Write Surface 5종 완성
+| 영역 | WRITE 라운드 | MCP 도구 |
+|---|---|---|
+| Tasks (CRUD) | 1.9.105~107 | task_add/update/drop |
+| Decisions | 1.9.108 | decision_add |
+| Rules | 1.9.109 | rule_add/list |
+| Plan | 1.9.110 | plan_add |
+| **Lessons** | **1.9.112** | **lesson_save** |
+
+### Internal — `_loadLessonsIndex()` 확장
+- `lessons.md` 도 캐시 인덱스에 포함 → handoff 자동 회수 가 새 lessons 도 즉시 fuzzy 매칭.
+- mtime 기반 캐시 무효화 (다른 파일과 동일 패턴).
+
+### Fixed
+- `nonFlagArgs()` withValue Set 에 `--tag` 추가 — `lesson save` CLI 인자 정확히 파싱.
+
+### MCP 도구 수: 30 → 31개
+
+### Verified
+- stress-v57 — lesson save CLI + lessons.md 갱신 + MCP 31 도구 + handoff lessons 회수 통합 + Memory Write 5종 통합 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.111 — 2026-05-20
 
 **41 라운드 자율 모드 누적 보고서 마무리** (`_reports/AUTONOMOUS_ROUNDS_1.9.70-1.9.110.md`) + stress-v56 종합 회귀.

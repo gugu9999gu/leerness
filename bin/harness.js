@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.111';
+const VERSION = '1.9.112';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -113,7 +113,7 @@ function arg(name, def = null) { const i = process.argv.indexOf(name); return i 
 function has(name) { return process.argv.includes(name); }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact']);
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag']);
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -313,6 +313,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.108+ \`leerness decision add\` CLI + MCP **27 도구** (\`leerness_decision_add\` — decisions.md 영구화 + handoff lessons 회수와 통합).
 - 1.9.109+ \`leerness rule list --json\` + MCP **29 도구** (\`leerness_rule_add\` + \`leerness_rule_list\` — 자연어 영구 룰 R/W).
 - 1.9.110+ MCP **30 도구 🎉 30 도구 마일스톤** (\`leerness_plan_add\` — plan.md milestone + progress-tracker 자동 동기화).
+- 1.9.112+ MCP **31 도구** (\`leerness_lesson_save\` — lessons.md 직접 write, **Memory Write Surface 5종 완성**: tasks/decisions/rules/plan/lessons).
 
 ---
 
@@ -1169,6 +1170,8 @@ const evidencePath = root => path.join(root, '.harness/review-evidence.md');
 const handoffPath = root => path.join(root, '.harness/session-handoff.md');
 const currentStatePath = root => path.join(root, '.harness/current-state.md');
 const decisionsPath = root => path.join(root, '.harness/decisions.md');
+// 1.9.112: 전용 lessons.md (Memory Write Surface 5번째)
+const lessonsPath = root => path.join(root, '.harness/lessons.md');
 
 function nextId(root, prefix) {
   const sources = [planPath(root), progressPath(root)].map(p => exists(p) ? read(p) : '').join('\n');
@@ -1275,6 +1278,23 @@ function taskDrop(root, id) {
   if (!id) return fail('id required');
   upsertProgress(root, { id, status: 'dropped', evidence: arg('--reason','사용자 요청으로 제외'), nextAction: '없음' });
   ok(`task dropped: ${id}`);
+  _autoRoadmap(absRoot(root), 'data-change');
+}
+
+// 1.9.112: lesson save — .harness/lessons.md에 새 lesson 추가 (Memory Write Surface 5번째)
+function lessonSave(root, text) {
+  root = absRoot(root);
+  if (!text) return fail('lesson text required. 예: leerness lesson save "JWT는 refresh token도 짧게 (15분 권장)"');
+  const lp = lessonsPath(root);
+  const tag = arg('--tag', '');
+  const tagBlock = tag ? `- Tag: ${tag}\n` : '';
+  const block = `\n### ${today()}\n- Lesson: ${text}\n${tagBlock}`;
+  if (!exists(lp)) {
+    writeUtf8(lp, `# Lessons (1.9.112)\n\n과거 실수/통찰/패턴 영구 기록 — handoff 자동 회수와 통합.\n${block}`);
+  } else {
+    append(lp, block);
+  }
+  ok(`lesson saved`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
 
@@ -3606,7 +3626,8 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 🎉 30 도구 마일스톤 (plan_add 추가, 1.9.110)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 31 도구 (lesson_save 추가, 1.9.112 Memory Write 5종 완성)'));
+    log('    ' + C.green('npx leerness lesson save "<text>" --tag "..."') + C.dim('       # lessons.md 직접 write (1.9.112 — handoff 자동 회수와 통합)'));
     log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
     log('    ' + C.green('npx leerness rule add "매 X마다 Y" --trigger every-X') + C.dim('  # 자연어 영구 룰 (1.9.8) — handoff 매 세션 자동 출력'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
@@ -6135,6 +6156,10 @@ function lessonsCmd(root) {
   for (const t of (_lidx.taskLogFails || [])) {
     lessons.push({ source: 'task-log.md', title: t.title, block: t.block });
   }
+  // 1.9.112: lessons.md 전용 lessons (메모리 surface 5번째)
+  for (const l of (_lidx.lessonsExplicit || [])) {
+    lessons.push({ source: 'lessons.md', title: l.title, block: l.block });
+  }
   // handoff: 미완료/블로커 항목
   if (handoff) {
     const incompleteSec = handoff.match(/## Incomplete[\s\S]*?(?=\n## |$)/);
@@ -6836,7 +6861,10 @@ function _loadLessonsIndex(root) {
   const tm = exists(tp) ? (() => { try { return fs.statSync(tp).mtimeMs; } catch { return 0; } })() : 0;
   const cacheKey = absRoot(root);
   const cached = _LESSONS_INDEX_CACHE.get(cacheKey);
-  if (cached && cached.evidenceMtime === em && cached.decisionsMtime === dm && cached.taskLogMtime === tm) return cached;
+  // 1.9.112: lessons.md mtime도 포함 (캐시 무효화 검사)
+  const _lp = lessonsPath(root);
+  const _lm = exists(_lp) ? (() => { try { return fs.statSync(_lp).mtimeMs; } catch { return 0; } })() : 0;
+  if (cached && cached.evidenceMtime === em && cached.decisionsMtime === dm && cached.taskLogMtime === tm && cached.lessonsMtime === _lm) return cached;
   const evidence = [];
   if (em) {
     const txt = read(ep);
@@ -6865,7 +6893,19 @@ function _loadLessonsIndex(root) {
       }
     }
   }
-  const idx = { evidenceMtime: em, decisionsMtime: dm, taskLogMtime: tm, evidence, decisions, taskLogFails };
+  // 1.9.112: lessons.md (전용) 인덱스
+  const lp = lessonsPath(root);
+  const lm = exists(lp) ? (() => { try { return fs.statSync(lp).mtimeMs; } catch { return 0; } })() : 0;
+  const lessonsExplicit = [];
+  if (lm) {
+    const txt = read(lp);
+    for (const block of txt.split(/\n(?=### )/)) {
+      if (!block.startsWith('### ')) continue;
+      const lessonMatch = block.match(/- Lesson:\s*(.+)/);
+      if (lessonMatch) lessonsExplicit.push({ title: lessonMatch[1].trim(), block });
+    }
+  }
+  const idx = { evidenceMtime: em, decisionsMtime: dm, taskLogMtime: tm, lessonsMtime: lm, evidence, decisions, taskLogFails, lessonsExplicit };
   _LESSONS_INDEX_CACHE.set(cacheKey, idx);
   return idx;
 }
@@ -7677,7 +7717,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_decision_add', description: '1.9.108 — decisions.md 에 새 설계 결정 추가 (메모리 영구화). 1.9.43+ handoff lessons 자동 회수와 통합 — 추후 동일 키워드 작업 시 자동 재상기. 인자: { title (required), reason?, alternatives?, impact?, path? }', inputSchema: { type: 'object', properties: { title: { type: 'string' }, reason: { type: 'string' }, alternatives: { type: 'string' }, impact: { type: 'string' }, path: { type: 'string' } }, required: ['title'] } },
     { name: 'leerness_rule_add', description: '1.9.109 — 자연어 영구 룰 등록 (1.9.8). "매 X마다 Y를 해줘" 같은 룰을 등록 — handoff 가 매 세션 자동 출력, session close 가 자동 검증·보고. 인자: { description (required), trigger? (every-session/every-update/every-commit/session-start/session-close/pre-publish), path? }', inputSchema: { type: 'object', properties: { description: { type: 'string' }, trigger: { type: 'string', enum: ['every-session', 'every-update', 'every-commit', 'session-start', 'session-close', 'pre-publish'] }, path: { type: 'string' } }, required: ['description'] } },
     { name: 'leerness_rule_list', description: '1.9.109 — 등록된 자연어 룰 목록 JSON (id/trigger/rule/status/lastVerified). 외부 AI가 현재 활성 룰 자동 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_plan_add', description: '1.9.110 — plan.md 에 새 milestone 추가 + progress-tracker.md에 자동 동기화 task 생성. 외부 AI가 계획 단계를 직접 등록. 인자: { text (required), status?, progress?, nextAction?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string' }, progress: { type: 'string' }, nextAction: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } }
+    { name: 'leerness_plan_add', description: '1.9.110 — plan.md 에 새 milestone 추가 + progress-tracker.md에 자동 동기화 task 생성. 외부 AI가 계획 단계를 직접 등록. 인자: { text (required), status?, progress?, nextAction?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string' }, progress: { type: 'string' }, nextAction: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } },
+    { name: 'leerness_lesson_save', description: '1.9.112 — .harness/lessons.md 에 새 lesson 영구화 (Memory Write Surface 5번째). 외부 AI가 세션 중 얻은 통찰을 즉시 영구 기록 — handoff 자동 회수와 통합. 인자: { text (required), tag?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, tag: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } }
   ];
 
   function send(obj) {
@@ -7739,6 +7780,7 @@ function mcpServeCmd(root) {
           case 'leerness_rule_add':        cliArgs = ['rule', 'add', String(args.description || ''), '--path', targetPath, ...(args.trigger ? ['--trigger', args.trigger] : [])]; break;
           case 'leerness_rule_list':       cliArgs = ['rule', 'list', '--path', targetPath, '--json']; break;
           case 'leerness_plan_add':        cliArgs = ['plan', 'add', String(args.text || ''), '--path', targetPath, ...(args.status ? ['--status', args.status] : []), ...(args.progress ? ['--progress', String(args.progress)] : []), ...(args.nextAction ? ['--next', args.nextAction] : [])]; break;
+          case 'leerness_lesson_save':     cliArgs = ['lesson', 'save', String(args.text || ''), '--path', targetPath, ...(args.tag ? ['--tag', args.tag] : [])]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -8444,6 +8486,19 @@ async function main() {
     if (sub==='relink')       return taskRelink(root);
     if (sub==='sync')         return taskSyncCmd(root);
     if (sub==='export')       return taskExportCmd(root);
+  }
+  // 1.9.112: lesson save — lessons.md에 새 lesson 추가
+  if (cmd === 'lesson') {
+    const root = absRoot(arg('--path', process.cwd())); const sub = args[1] || '';
+    if (sub === 'save') {
+      const textParts = [];
+      for (let i = 2; i < args.length; i++) {
+        if (args[i].startsWith('--')) break;
+        textParts.push(args[i]);
+      }
+      return lessonSave(root, textParts.join(' '));
+    }
+    return fail('lesson save "<text>" [--tag "..."]');
   }
   // 1.9.108: decision add — decisions.md에 새 설계 결정 추가
   if (cmd === 'decision') {
