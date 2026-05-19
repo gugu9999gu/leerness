@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.121';
+const VERSION = '1.9.122';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -322,6 +322,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.118+ \`leerness decision list [--json]\` + MCP **34 도구** (\`leerness_decision_list\`) — decisions.md 전체 조회 (Decision/Reason/Alternatives/Impact 메타).
 - 1.9.119+ \`leerness plan list [--json]\` + MCP **35 도구** (\`leerness_plan_list\`) — plan.md milestone 전체 (Status/Progress/Tasks). **Memory Surface READ 5종 완전 완성**.
 - 1.9.121+ handoff 6번째 자동 회수 \`🆕 최근 24h 메모리 변동\` — 5종 surface 의 24h 내 추가 항목 자동 노출.
+- 1.9.122+ \`session close --json\` 응답에도 \`memorySurface\` 필드 통합 — 마감 시 5종 메모리 상태 동시 회수.
 
 ---
 
@@ -4836,6 +4837,30 @@ function sessionClose(root, opts = {}) {
     try {
       const sc = readSessionCounter(root);
       jsonResult.sessionNumber = sc.count;
+    } catch {}
+    // 1.9.122: memorySurface 통합 (handoff --json 1.9.115 와 동일 패턴)
+    try {
+      const rows0 = readProgressRows(root);
+      const tasksByStatus0 = {};
+      for (const s of STATUSES) tasksByStatus0[s] = 0;
+      for (const r of rows0) tasksByStatus0[r.status] = (tasksByStatus0[r.status] || 0) + 1;
+      const tasksInProgress0 = tasksByStatus0['in-progress'] || 0;
+      const dm0 = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+      const decisionsCount0 = _extractDecisionBlocks(dm0).length;
+      const rules0 = readRules(root);
+      const rulesActive0 = rules0.filter(r => r.status === 'active').length;
+      const planText0 = exists(planPath(root)) ? read(planPath(root)) : '';
+      const milestones0 = (planText0.match(/^### M-\d{4}\./gm) || []).length;
+      const lm0 = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
+      const lessonsCount0 = (lm0.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+      jsonResult.memorySurface = {
+        tasks: { inProgress: tasksInProgress0, total: rows0.length, byStatus: tasksByStatus0 },
+        decisions: { count: decisionsCount0 },
+        rules: { active: rulesActive0, total: rules0.length },
+        plan: { milestones: milestones0 },
+        lessons: { count: lessonsCount0 },
+        summary: `T${tasksInProgress0}/D${decisionsCount0}/R${rulesActive0}/P${milestones0}/L${lessonsCount0}`,
+      };
     } catch {}
     process.stdout.write(JSON.stringify(jsonResult, null, 2) + '\n');
   }

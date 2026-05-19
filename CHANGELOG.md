@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.9.122 — 2026-05-20
+
+**`session close --json` 응답에 `memorySurface` 필드 통합** — handoff --json (1.9.115) 패턴을 session close 에도 적용.
+
+### Added — `session close --json` 새 필드 `memorySurface`
+이미 1.9.103 에서 추가된 `session close --json` 응답 구조에 `memorySurface` 통합:
+```json
+{
+  "version": "1.9.122",
+  "closedAt": "...",
+  "sessionNumber": 62,
+  "taskCounts": { ... },
+  "rules": [...],
+  "skillCandidates": [...],
+  "drift": { ... },
+  "topCommands": [...],
+  "mcpStats": { ... },
+  "workspacePeers": 29,
+  "memorySurface": {
+    "tasks": { "inProgress": 2, "total": 12, "byStatus": {...} },
+    "decisions": { "count": 4 },
+    "rules": { "active": 2, "total": 2 },
+    "plan": { "milestones": 3 },
+    "lessons": { "count": 7 },
+    "summary": "T2/D4/R2/P3/L7"
+  }
+}
+```
+
+### 1.9.122 의 가치
+- 외부 AI (Claude Code / Hermes) 가 session 마감 시 단일 `session close --json` 호출로:
+  - 기존: 마감 통계 + drift + skill 후보
+  - **추가: 5종 메모리 영구화 상태 (Memory Write Surface 카운트)**
+- handoff (1.9.115) 와 session close (1.9.122) 모두 동일 `memorySurface` 패턴.
+- MCP `leerness_session_close` 응답도 자동 갱신.
+
+### Verified
+- stress-v67 — session close --json memorySurface 필드 + 카운트 정확성 + summary 포맷 + MCP + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.121 — 2026-05-20
 
 **handoff 6번째 자동 회수 라인 — `🆕 최근 24h 메모리 변동`** (5종 surface 24h 내 추가 항목 알림).
