@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.73 — 2026-05-20
+
+**MCP server 14번째 도구 `leerness_env_check` 추가 (1.9.71 env 보안을 외부 AI에 노출)**.
+
+### Added — MCP 14번째 도구
+- `leerness_env_check` — 워크스페이스 `.env` ↔ `.env.example` 동기화 검사를 외부 AI 에이전트에 노출.
+  - inputSchema: `{ path: string }`
+  - 응답: 1.9.71의 `env check --json` 결과 그대로 (envPath/examplePath/envKeys/exKeys/inEnvOnly/inExampleOnly).
+  - 외부 AI가 워크스페이스 보안 자동 점검 가능 (Claude Code/Cursor 등에서 호출).
+- MCP server 도구 카운트: 13 → **14**.
+
+### Verified
+- stress-v19 — MCP 14 도구 + env_check JSON 응답 + 1.9.43~72 누적 회귀 + 성능.
+- e2e 회귀: 219/219 PASS 유지.
+
+---
+
 ## 1.9.72 — 2026-05-20
 
 **`leerness brainstorm`에 skill-suggestions.md history + task-log 실패 라인 통합**.

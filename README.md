@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.72-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.73-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.72   AI Agent Reliability Harness                      ║
+  ║  v1.9.73   AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
@@ -433,6 +433,7 @@ npm test     # = node ./scripts/e2e.js
 
 ## 변경 이력 (최근)
 
+- **1.9.73** — **MCP server 14번째 도구 `leerness_env_check`** — 1.9.71 env 보안 검사를 외부 AI에 노출 (외부 워크스페이스 .env/.env.example 동기화 자동 점검).
 - **1.9.72** — **`leerness brainstorm`에 skill-suggestions.md history + task-log 실패 라인 통합** — 누적 컨텍스트 기반 brainstorm 강화 (이전 매칭 이력 + task-log 실패 회수).
 - **1.9.71** — **`.env` / `.env.example` 자동 동기화** — `leerness env check` / `env sync` 명령 + `audit` 통합 (`--fix`로 누락 키 자동 추가). 보안 정책: 실제 값 절대 노출 안 함 (키만 추가, 값은 빈 문자열).
 - **1.9.70** — **MCP server `tools/call` 자동 사용 통계** — 도구별 호출 카운트 (`.harness/cache/usage-stats.json#mcp.tools`) + `leerness usage stats` 출력에 MCP 섹션 + 드물게 호출되는 도구 식별.
