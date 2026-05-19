@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.109';
+const VERSION = '1.9.110';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -312,6 +312,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.107+ MCP **26 도구** (\`leerness_task_drop\` 추가 — task 폐기, **task CRUD 완성**: read/add/update/drop).
 - 1.9.108+ \`leerness decision add\` CLI + MCP **27 도구** (\`leerness_decision_add\` — decisions.md 영구화 + handoff lessons 회수와 통합).
 - 1.9.109+ \`leerness rule list --json\` + MCP **29 도구** (\`leerness_rule_add\` + \`leerness_rule_list\` — 자연어 영구 룰 R/W).
+- 1.9.110+ MCP **30 도구 🎉 30 도구 마일스톤** (\`leerness_plan_add\` — plan.md milestone + progress-tracker 자동 동기화).
 
 ---
 
@@ -3605,7 +3606,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 29 도구 (rule_add/list 추가, 1.9.109 룰 R/W)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 🎉 30 도구 마일스톤 (plan_add 추가, 1.9.110)'));
     log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
     log('    ' + C.green('npx leerness rule add "매 X마다 Y" --trigger every-X') + C.dim('  # 자연어 영구 룰 (1.9.8) — handoff 매 세션 자동 출력'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
@@ -7675,7 +7676,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_task_drop', description: '1.9.107 — task를 dropped 상태로 폐기 (CRUD 완성: read/add/update/drop). 외부 AI가 사용자 요청으로 task 취소. 인자: { id (required), reason?, path? }', inputSchema: { type: 'object', properties: { id: { type: 'string' }, reason: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
     { name: 'leerness_decision_add', description: '1.9.108 — decisions.md 에 새 설계 결정 추가 (메모리 영구화). 1.9.43+ handoff lessons 자동 회수와 통합 — 추후 동일 키워드 작업 시 자동 재상기. 인자: { title (required), reason?, alternatives?, impact?, path? }', inputSchema: { type: 'object', properties: { title: { type: 'string' }, reason: { type: 'string' }, alternatives: { type: 'string' }, impact: { type: 'string' }, path: { type: 'string' } }, required: ['title'] } },
     { name: 'leerness_rule_add', description: '1.9.109 — 자연어 영구 룰 등록 (1.9.8). "매 X마다 Y를 해줘" 같은 룰을 등록 — handoff 가 매 세션 자동 출력, session close 가 자동 검증·보고. 인자: { description (required), trigger? (every-session/every-update/every-commit/session-start/session-close/pre-publish), path? }', inputSchema: { type: 'object', properties: { description: { type: 'string' }, trigger: { type: 'string', enum: ['every-session', 'every-update', 'every-commit', 'session-start', 'session-close', 'pre-publish'] }, path: { type: 'string' } }, required: ['description'] } },
-    { name: 'leerness_rule_list', description: '1.9.109 — 등록된 자연어 룰 목록 JSON (id/trigger/rule/status/lastVerified). 외부 AI가 현재 활성 룰 자동 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_rule_list', description: '1.9.109 — 등록된 자연어 룰 목록 JSON (id/trigger/rule/status/lastVerified). 외부 AI가 현재 활성 룰 자동 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_plan_add', description: '1.9.110 — plan.md 에 새 milestone 추가 + progress-tracker.md에 자동 동기화 task 생성. 외부 AI가 계획 단계를 직접 등록. 인자: { text (required), status?, progress?, nextAction?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string' }, progress: { type: 'string' }, nextAction: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } }
   ];
 
   function send(obj) {
@@ -7736,6 +7738,7 @@ function mcpServeCmd(root) {
           case 'leerness_decision_add':    cliArgs = ['decision', 'add', String(args.title || ''), '--path', targetPath, ...(args.reason ? ['--reason', args.reason] : []), ...(args.alternatives ? ['--alternatives', args.alternatives] : []), ...(args.impact ? ['--impact', args.impact] : [])]; break;
           case 'leerness_rule_add':        cliArgs = ['rule', 'add', String(args.description || ''), '--path', targetPath, ...(args.trigger ? ['--trigger', args.trigger] : [])]; break;
           case 'leerness_rule_list':       cliArgs = ['rule', 'list', '--path', targetPath, '--json']; break;
+          case 'leerness_plan_add':        cliArgs = ['plan', 'add', String(args.text || ''), '--path', targetPath, ...(args.status ? ['--status', args.status] : []), ...(args.progress ? ['--progress', String(args.progress)] : []), ...(args.nextAction ? ['--next', args.nextAction] : [])]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }

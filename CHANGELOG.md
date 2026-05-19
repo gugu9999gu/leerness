@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.9.110 — 2026-05-20 🎉 **MCP 30 도구 마일스톤**
+
+**MCP 30번째 도구 `leerness_plan_add`** (plan.md milestone + progress-tracker 자동 동기화).
+
+### Added — MCP 30번째 도구 `leerness_plan_add`
+- 외부 AI 가 plan.md 에 새 milestone (`M-XXXX`) 추가.
+- 자동으로 progress-tracker.md 에 동기화된 task (`T-XXXX`) 생성 + `evidence: plan:M-XXXX` 링크.
+- 인자: `{ text (required), status?, progress?, nextAction?, path? }`
+- 기본값: `status=planned`, `progress=0%`, `nextAction="다음 액션 작성"`
+
+### Memory Write Surface 확장 (4종)
+| 영역 | WRITE 라운드 | MCP 도구 |
+|---|---|---|
+| Tasks (CRUD) | 1.9.105~107 | task_add/update/drop |
+| Decisions | 1.9.108 | decision_add |
+| Rules | 1.9.109 | rule_add/list |
+| **Plan** | **1.9.110** | **plan_add** |
+
+### 🎉 MCP 30 도구 마일스톤 (1.9.43 → 1.9.110)
+- **1.9.43**: 10 도구 (기본 MCP 도입)
+- **1.9.94**: 21 도구 (skill_search/info, benchmark 추가)
+- **1.9.107**: 26 도구 (task CRUD 완성)
+- **1.9.110**: **30 도구 마일스톤** 🎉
+
+### Verified
+- stress-v55 — MCP plan_add + plan.md+progress-tracker 자동 동기화 + 30 도구 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.109 — 2026-05-20
 
 **MCP 28+29번째 도구 `leerness_rule_add` / `leerness_rule_list`** + `rule list --json` (자연어 영구 룰 R/W).
