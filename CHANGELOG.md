@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.9.113 — 2026-05-20
+
+**handoff 통합 헤드라인에 Memory Write Surface 5종 카운트 추가** — 사용자가 한눈에 5종 메모리 영구화 상태 확인.
+
+### Added — `📊 헤드라인` 의 새 토큰 `🧠 mem T/D/R/P/L`
+handoff 호출 시 통합 헤드라인 끝에 다음 토큰 추가:
+- **T** — tasks in-progress 카운트
+- **D** — decisions 누적 (decisions.md `### YYYY-MM-DD` 헤더 카운트)
+- **R** — rules active 카운트
+- **P** — plan milestones 누적 (`M-XXXX` 카운트)
+- **L** — lessons 누적 (lessons.md `### YYYY-MM-DD` 헤더 카운트)
+
+예: `📊 헤드라인 (1.9.81/93/113): drift healthy (0) · 🔒 보안 OK · 🔌 MCP 5회 · 📒 skill query 3회 · 📚 12 skills · ⚕ health: ✓ · 🧠 mem T2/D3/R1/P5/L7`
+
+### 1.9.113 의 가치
+- 외부 AI 가 매 handoff 호출 시 5종 메모리 surface 의 **영구화 상태**를 한 줄로 인지.
+- "지금까지 등록된 decisions / lessons / plan milestones 가 얼마나 있나?" 를 한눈에.
+- Memory Write Surface 5종 완성 (1.9.112) 의 자연스러운 가시화.
+
+### Performance
+- inline 계산 (자식 spawn 없음) — 헤드라인 latency 영향 무시 가능 (~ +5ms).
+
+### Verified
+- stress-v58 — handoff 헤드라인 mem 토큰 출현 + 5종 카운트 정확성 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.112 — 2026-05-20
 
 **`leerness lesson save` CLI + MCP 31번째 도구 `leerness_lesson_save`** — **Memory Write Surface 5종 완성** (lessons.md 전용 직접 write).

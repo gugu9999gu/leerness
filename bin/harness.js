@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.112';
+const VERSION = '1.9.113';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -314,6 +314,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.109+ \`leerness rule list --json\` + MCP **29 도구** (\`leerness_rule_add\` + \`leerness_rule_list\` — 자연어 영구 룰 R/W).
 - 1.9.110+ MCP **30 도구 🎉 30 도구 마일스톤** (\`leerness_plan_add\` — plan.md milestone + progress-tracker 자동 동기화).
 - 1.9.112+ MCP **31 도구** (\`leerness_lesson_save\` — lessons.md 직접 write, **Memory Write Surface 5종 완성**: tasks/decisions/rules/plan/lessons).
+- 1.9.113+ handoff 통합 헤드라인에 **🧠 mem T/D/R/P/L 카운트** 추가 — 5종 메모리 영구화 상태 한눈에 확인.
 
 ---
 
@@ -2059,10 +2060,21 @@ function handoff(root) {
         // 헤드라인 끝에 health 토큰
         parts.push(healthIssue ? '⚕ health: ⚠' : '⚕ health: ✓');
       } catch {}
+      // 7) 1.9.113: Memory Write Surface 5종 카운트 (T=tasks in-progress / D=decisions / R=rules active / P=plan milestones / L=lessons)
+      try {
+        const rows = readProgressRows(root);
+        const inProgressTasks = rows.filter(r => r.status === 'in-progress').length;
+        const decisions = exists(decisionsPath(root)) ? (read(decisionsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0;
+        const rulesActive = readRules(root).filter(r => r.status === 'active').length;
+        const planText = exists(planPath(root)) ? read(planPath(root)) : '';
+        const planMilestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
+        const lessons = exists(lessonsPath(root)) ? (read(lessonsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0;
+        parts.push(`🧠 mem T${inProgressTasks}/D${decisions}/R${rulesActive}/P${planMilestones}/L${lessons}`);
+      } catch {}
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113): ${parts.join(' · ')}`));
       }
     } catch {}
   }
