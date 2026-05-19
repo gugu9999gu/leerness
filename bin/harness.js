@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.102';
+const VERSION = '1.9.103';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -305,6 +305,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.100 🏆 마일스톤 — 30 라운드 자율 누적, stress-v45 30/30 PASS, e2e 219/219 PASS.
 - 1.9.101+ \`leerness lazy detect --json\` + MCP **22 도구** (\`leerness_lazy_detect\` 추가 — 거짓 완료/empty handoff/no test run/TODO 미추적 신호 JSON).
 - 1.9.102+ \`leerness audit --json\` 구조화 출력 (findings 11종 kind: design_dup/design_system_default/reuse_map_empty/milestone_unlinked/handoff_not_generated/current_state_stale/readme_version_mismatch/npm_cve/gitignore_missing_secrets/env_keys_missing/strict_promoted). MCP \`leerness_audit\`도 JSON 자동.
+- 1.9.103+ \`leerness session close --json\` 마감 통계 JSON (taskCounts/rules/skillCandidates/drift/topCommands/mcpStats/workspacePeers). MCP \`leerness_session_close\`도 JSON 자동.
 
 ---
 
@@ -3575,6 +3576,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness drift check . --auto-fix') + C.dim('                # drift + 보안 자동 회복 (1.9.82)'));
     log('    ' + C.green('npx leerness lazy detect . --json') + C.dim('                   # 거짓 완료/no test run 신호 JSON (1.9.101)'));
     log('    ' + C.green('npx leerness audit . --json') + C.dim('                         # 일관성 감사 JSON — 11 kind findings (1.9.102)'));
+    log('    ' + C.green('npx leerness session close . --json') + C.dim('                # 마감 통계 JSON — taskCounts + drift + rules + suggestions (1.9.103)'));
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
@@ -4249,12 +4251,23 @@ function llmBenchRecordCmd(root) {
   ok(`기록됨: ${histFile}`);
 }
 
-function sessionClose(root) {
+function sessionClose(root, opts = {}) {
   root = absRoot(root);
+  // 1.9.103: --json 모드 — stdout 억제 후 구조화 출력
+  const jsonMode = !!opts.json || has('--json');
+  const _origWrite = process.stdout.write.bind(process.stdout);
+  if (jsonMode) process.stdout.write = () => true;
+  const jsonResult = { version: VERSION, root, closedAt: now() };
+  try {
   const rows = readProgressRows(root);
   const buckets = {};
   for (const s of STATUSES) buckets[s] = [];
   for (const r of rows) (buckets[r.status] || (buckets[r.status] = [])).push(r);
+  // 1.9.103: JSON 결과 누적
+  jsonResult.taskCounts = {};
+  for (const s of STATUSES) jsonResult.taskCounts[s] = (buckets[s] || []).length;
+  jsonResult.recommendedDirection = (buckets['in-progress'][0]?.request) || (buckets['planned'][0]?.request) || (buckets['requested'][0]?.request) || null;
+  jsonResult.nextExactStep = (buckets['in-progress'][0]?.nextAction) || (buckets['planned'][0]?.nextAction) || (buckets['requested'][0]?.nextAction) || null;
 
   function rowsToList(arr) {
     if (!arr || !arr.length) return '- 없음';
@@ -4315,6 +4328,7 @@ function sessionClose(root) {
   }
   // 1.9.8: 룰 검증 자동 수행 + 보고
   const ruleResults = verifyRules(root);
+  jsonResult.rules = ruleResults.map(r => ({ id: r.id, trigger: r.trigger, verified: r.verified, note: r.note }));
   log('\n## ⚡ User Rules verification');
   if (!ruleResults.length) log('- 활성 룰 없음');
   else {
@@ -4345,6 +4359,7 @@ function sessionClose(root) {
       if (j.candidates && j.candidates.length) {
         log(dim('  📌 신규 skill 후보 (Hermes-style 자동 학습):'));
         for (const c of j.candidates.slice(0, 3)) log(`    • ${c.keyword} (${c.count}회 등장, 출처: ${c.source})`);
+        jsonResult.skillCandidates = j.candidates.slice(0, 5);
       }
     } catch {}
     // 2) drift check
@@ -4355,6 +4370,7 @@ function sessionClose(root) {
       if (j.level) {
         log(dim(`  🩺 drift 상태: ${j.level} ${j.score}/200`));
         if (j.fired && j.fired.length) log(dim(`    🔥 ${j.fired.length}건 임계 초과 — \`leerness drift check\` 상세`));
+        jsonResult.drift = { level: j.level, score: j.score, fired: (j.fired || []).map(f => ({ label: f.label, weight: f.weight })) };
       }
     } catch {}
     // 3) usage stats top
@@ -4363,6 +4379,7 @@ function sessionClose(root) {
       const entries = Object.entries(stats.commands || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
       if (entries.length) {
         log(dim(`  📊 가장 많이 쓴 명령: ${entries.map(([c, n]) => `${c}(${n})`).join(', ')}`));
+        jsonResult.topCommands = entries.map(([command, count]) => ({ command, count }));
       }
       // 1.9.74: MCP tools/call 통계 + rare 도구 노출
       if (stats.mcp && stats.mcp.tools) {
@@ -4373,6 +4390,7 @@ function sessionClose(root) {
           const threshold = Math.max(1, Math.floor(mcpTotal * 0.05));
           const rare = mcpEntries.filter(([, n]) => n <= threshold).map(([t]) => t);
           if (rare.length && mcpTotal >= 5) log(dim(`    💡 드물게 호출된 MCP: ${rare.slice(0, 4).join(', ')}`));
+          jsonResult.mcpStats = { total: mcpTotal, top: mcpEntries.slice(0, 5).map(([tool, count]) => ({ tool, count })), rare: rare.slice(0, 10) };
         }
       }
     } catch {}
@@ -4431,9 +4449,23 @@ function sessionClose(root) {
         }
       }
       if (wsCount > 0) log(`  🌐 워크스페이스에 ${wsCount}개 다른 leerness 프로젝트 — \`leerness retro --all-apps\`로 통합 회고`);
+      jsonResult.workspacePeers = wsCount;
     } catch {}
   } catch (e) {
     warn('retro 요약 실패: ' + (e && e.message ? e.message : e));
+    jsonResult.retroSummaryError = e && e.message ? e.message : String(e);
+  }
+  } finally {
+    // 1.9.103: stdout 복원
+    if (jsonMode) process.stdout.write = _origWrite;
+  }
+  // 1.9.103: JSON 모드 — 구조화 출력
+  if (jsonMode) {
+    try {
+      const sc = readSessionCounter(root);
+      jsonResult.sessionNumber = sc.count;
+    } catch {}
+    process.stdout.write(JSON.stringify(jsonResult, null, 2) + '\n');
   }
 }
 
@@ -7592,7 +7624,7 @@ function mcpServeCmd(root) {
     { name: 'leerness_reuse_map', description: '워크스페이스 중복 함수/capability 자동 감지 (--all-apps + fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, allApps: { type: 'boolean' }, strictElements: { type: 'boolean' } } } },
     { name: 'leerness_whats_new', description: 'CHANGELOG 차분 자동 추출 (from → to 사이 신규 명령/플래그/파일)', inputSchema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
     { name: 'leerness_usage_stats', description: 'leerness 명령별 누적 호출 통계 + drift 통계', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_session_close', description: '세션 마감 — handoff/current-state/task-log 자동 갱신', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_session_close', description: '1.9.103 — 세션 마감 JSON (handoff/current-state/task-log 갱신 + taskCounts + rules + skillCandidates + drift + topCommands + mcpStats). 외부 AI가 마감 통계 자동 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_skill_suggest', description: '1.9.53 — 사용 패턴 자동 분석 → 새 skill 후보 제안 (Hermes-style 자동 학습)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, min: { type: 'number' }, days: { type: 'number' } } } },
     { name: 'leerness_lessons', description: '1.9.7/54 — 과거 결정·실수 자동 회수 (--auto: 현재 task 키워드 자동 추출)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, query: { type: 'string' }, auto: { type: 'boolean' }, limit: { type: 'number' } } } },
     { name: 'leerness_task_export', description: '1.9.60/66 — leerness task → Claude Code TodoWrite 호환 JSON (외부 AI 양방향 sync)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, to: { type: 'string' } } } },
@@ -7645,7 +7677,7 @@ function mcpServeCmd(root) {
           case 'leerness_reuse_map':       cliArgs = ['reuse-map', targetPath, ...(args.allApps ? ['--all-apps'] : []), ...(args.strictElements ? ['--strict-elements'] : []), '--json']; break;
           case 'leerness_whats_new':       cliArgs = ['whats-new', '--path', targetPath, ...(args.from ? ['--from', args.from] : []), ...(args.to ? ['--to', args.to] : []), '--json']; break;
           case 'leerness_usage_stats':     cliArgs = ['usage', 'stats', targetPath, '--json']; break;
-          case 'leerness_session_close':   cliArgs = ['session', 'close', targetPath]; break;
+          case 'leerness_session_close':   cliArgs = ['session', 'close', targetPath, '--json']; break;
           case 'leerness_skill_suggest':   cliArgs = ['skill', 'suggest', '--path', targetPath, '--json', ...(args.min ? ['--min', String(args.min)] : []), ...(args.days ? ['--days', String(args.days)] : [])]; break;
           case 'leerness_lessons':         cliArgs = ['lessons', '--path', targetPath, '--json', ...(args.auto ? ['--auto'] : []), ...(args.query ? ['--query', args.query] : []), ...(args.limit ? ['--limit', String(args.limit)] : [])]; break;
           case 'leerness_task_export':     cliArgs = ['task', 'export', '--path', targetPath, ...(args.to ? ['--to', args.to] : ['--json'])]; break;
@@ -8287,7 +8319,7 @@ async function main() {
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'reuse' && args[1] === 'autodetect') return reuseAutodetectCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'setup-agents' || cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(args[1] && args[1] !== 'agents' ? args[1] : (args[2] || process.cwd()));
-  if (cmd === 'session' && args[1] === 'close') { const r = sessionClose(args[2] || process.cwd()); viewworkEmit(args[2] || process.cwd(), { action: 'task', tool: 'session-close', note: 'session close' }); return r; }
+  if (cmd === 'session' && args[1] === 'close') { const r = sessionClose(args[2] || process.cwd(), { json: has('--json') }); viewworkEmit(args[2] || process.cwd(), { action: 'task', tool: 'session-close', note: 'session close' }); return r; }
   if (cmd === 'viewwork' && args[1] === 'install') return viewworkInstall(args[2] || process.cwd());
   if (cmd === 'viewwork' && args[1] === 'emit')    return viewworkEmit(args[2] || process.cwd(), { action: arg('--action','task'), note: arg('--note',''), agent: arg('--agent','leerness'), tool: arg('--tool','leerness-cli') });
   if (cmd === 'route')     return route(args[1] || 'planning');

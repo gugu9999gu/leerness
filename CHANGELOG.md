@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.9.103 — 2026-05-20
+
+**`leerness session close --json`** (세션 마감 통계 JSON + MCP `leerness_session_close` JSON 자동).
+
+### Added — `leerness session close [path] --json`
+- 출력: `{ version, root, closedAt, sessionNumber, taskCounts, recommendedDirection, nextExactStep, rules[], skillCandidates[], drift, topCommands[], mcpStats, workspacePeers, retroSummaryError? }`
+- `taskCounts`: 9개 status (requested/planned/in-progress/waiting/on-hold/blocked/incomplete/done/dropped) 카운트
+- `rules`: 활성 룰 검증 결과 (id/trigger/verified/note)
+- `skillCandidates`: Hermes-style 자동 학습 (top 5)
+- `drift`: { level, score, fired[] }
+- `topCommands`: 가장 많이 쓴 명령 top 3
+- `mcpStats`: { total, top[], rare[] }
+- `workspacePeers`: 다른 leerness 프로젝트 개수
+- stdout 억제 후 JSON만 (CI/외부 AI 통합 친화)
+
+### Changed — MCP `leerness_session_close`
+- 기본 응답을 **JSON** 으로 변경 (--json 자동 전달).
+- 외부 AI(Claude Code / Hermes)가 마감 시 통계를 파싱 친화적으로 회수.
+
+### JSON 옵션 누적 13종
+`skill list/info/search` · `health` · `lessons` · `handoff` · `env check` · `benchmark` · `drift check` · `lazy detect` · `usage stats` · `audit` · **`session close`** (신규)
+
+### Verified
+- stress-v48 — session close --json 구조 + MCP + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.102 — 2026-05-20
 
 **`leerness audit --json` 구조화 출력** (findings 11종 kind + MCP `leerness_audit` JSON 응답).
