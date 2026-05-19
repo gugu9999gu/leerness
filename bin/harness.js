@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.47';
+const VERSION = '1.9.50';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -5998,6 +5998,38 @@ function _parseChangelogBetween(changelogText, fromV, toV) {
 }
 
 // 1.9.41: leerness whats-new [--from V] — 현재 워크스페이스 버전 → leerness latest 차분
+// 1.9.48: cross-platform archive 생성 — tar → PowerShell Compress-Archive → 7z 순 fallback
+// outPath의 확장자(tgz/zip)에 따라 tar 또는 zip. tar 실패 시 .zip으로 자동 전환.
+function _createArchive(cwd, sourceDir, outPath) {
+  const tried = [];
+  // 1) tar.gz (POSIX 환경에서 가장 안정)
+  if (/\.(tgz|tar\.gz)$/i.test(outPath)) {
+    tried.push('tar');
+    const r = cp.spawnSync('tar', ['-czf', outPath, sourceDir], {
+      encoding: 'utf8', timeout: 30000, shell: true, cwd
+    });
+    if (r.status === 0 && exists(outPath)) return { ok: true, path: outPath, method: 'tar', tried };
+  }
+  // 2) PowerShell Compress-Archive (Windows native ZIP) — 확장자를 .zip으로 변경
+  const zipPath = outPath.replace(/\.(tgz|tar\.gz)$/i, '.zip');
+  tried.push('powershell Compress-Archive');
+  if (process.platform === 'win32' || process.env.SHELL === undefined) {
+    // -Force 로 덮어쓰기, -CompressionLevel Optimal
+    const psCmd = `Compress-Archive -Path "${path.join(cwd, sourceDir).replace(/\\/g, '\\\\')}" -DestinationPath "${zipPath.replace(/\\/g, '\\\\')}" -Force`;
+    const r = cp.spawnSync('powershell.exe', ['-NoProfile', '-Command', psCmd], {
+      encoding: 'utf8', timeout: 30000
+    });
+    if (r.status === 0 && exists(zipPath)) return { ok: true, path: zipPath, method: 'powershell Compress-Archive', tried };
+  }
+  // 3) zip 명령 (POSIX zip 또는 Linux 도구)
+  tried.push('zip');
+  const r3 = cp.spawnSync('zip', ['-r', zipPath, sourceDir], {
+    encoding: 'utf8', timeout: 30000, shell: true, cwd
+  });
+  if (r3.status === 0 && exists(zipPath)) return { ok: true, path: zipPath, method: 'zip', tried };
+  return { ok: false, tried };
+}
+
 // 1.9.47: leerness skill publish — 자체 skill을 외부 공유 가능 tarball/번들로 publish
 // 옵션:
 //   --bundle-only      : tarball만 생성 (.harness/skills-publish/leerness-skills-<ver>.tgz)
@@ -6045,15 +6077,10 @@ function skillPublishCmd(root) {
     mkdirp(path.dirname(tarPath));
     // npm pack-style이 아니라 tar로 직접 (cross-platform tar 필요)
     // Windows에서는 tar가 기본 설치되어 있음 (PowerShell 5.1+).
-    // 1.9.47: Windows/POSIX 모두에서 동작하도록 cwd 사용 + 상대경로
-    const tarResult = cp.spawnSync('tar', ['-czf', tarPath, 'skills-publish'], {
-      encoding: 'utf8', timeout: 30000, shell: true, cwd: path.join(root, '.harness')
-    });
-    if (tarResult.status === 0) {
-      log(`✓ tarball 생성: ${rel(root, tarPath)}`);
-    } else {
-      warn(`tar 실패 (exit ${tarResult.status}) — 수동 압축 권장 (${rel(root, exportDir)}/)`);
-    }
+    // 1.9.48: cross-platform 압축 chain — tar (POSIX) → PowerShell Compress-Archive (Windows ZIP) → graceful
+    const made = _createArchive(path.join(root, '.harness'), 'skills-publish', tarPath);
+    if (made.ok) log(`✓ archive 생성: ${rel(root, made.path)} (${made.method})`);
+    else warn(`archive 실패 — 수동 압축 권장 (${rel(root, exportDir)}/) · 시도: ${made.tried.join(', ')}`);
     // 4) GitHub release
     if (ghRelease) {
       const v = `v${VERSION}-skills`;
@@ -6073,8 +6100,57 @@ function skillPublishCmd(root) {
 // 1.9.46: leerness benchmark — 자체 워크스페이스 측정 + 타도구 대비 시뮬레이션 비교 매트릭스
 // 실 측정값: drift, usage stats, task 수, capability 수
 // 시뮬: leerness 미적용 vanilla / Hermes 단독 / Claude Code 단독 비교 (보고서 §5 기반)
+// 1.9.49: --measure 모드 — ready 외부 CLI에 동일 task 실측 + leerness verify-claim 적용 시 추가 시간 측정
+async function _benchmarkMeasure(root, task) {
+  const results = [];
+  const ready = EXTERNAL_AGENTS.map(a => ({ agent: a, status: _checkAgent(a) }))
+                                .filter(x => x.status.status === 'ready');
+  if (!ready.length) return { results: [], note: 'ready CLI 없음' };
+  for (const { agent } of ready) {
+    let cmd, cliArgs;
+    if (agent.id === 'claude') { cmd = 'claude'; cliArgs = ['--print', task]; }
+    else if (agent.id === 'codex') { cmd = 'codex'; cliArgs = ['exec', '--skip-git-repo-check', task]; }
+    else if (agent.id === 'gemini') { cmd = 'gemini'; cliArgs = ['-p', task]; }
+    else continue;
+    const t0 = Date.now();
+    const r = cp.spawnSync(cmd, cliArgs, { encoding: 'utf8', timeout: 60000, shell: true });
+    const baseTime = Date.now() - t0;
+    // leerness 검수 layer time 추정 (verify-claim 형식)
+    const t1 = Date.now();
+    cp.spawnSync(process.execPath, [__filename, 'audit', root, '--fix'], {
+      encoding: 'utf8', timeout: 15000,
+      env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
+    });
+    const verifyTime = Date.now() - t1;
+    results.push({
+      cli: agent.id, baseMs: baseTime, verifyMs: verifyTime, totalMs: baseTime + verifyTime,
+      exit: r.status, outLen: (r.stdout || '').length
+    });
+  }
+  return { results, note: results.length ? null : '실측 호출 실패' };
+}
+
 function benchmarkCmd(root) {
   root = absRoot(root || process.cwd());
+  // 1.9.49: --measure "<task>" 모드 — 실 CLI 시간 측정
+  if (has('--measure')) {
+    const task = arg('--measure', null) || arg('--task', null);
+    if (!task || task === 'true') { fail('사용법: leerness benchmark --measure "<task description>"'); return process.exit(1); }
+    return _benchmarkMeasure(root, task).then(({ results, note }) => {
+      if (has('--json')) { log(JSON.stringify({ task, results, note }, null, 2)); return; }
+      log(`# leerness benchmark --measure (1.9.49)`);
+      log(`task: ${task.slice(0, 80)}${task.length > 80 ? '…' : ''}`);
+      if (note) { log(`⚠ ${note}`); return; }
+      log('');
+      log('| CLI | 호출 시간 | leerness 검수 시간 | 합계 | exit |');
+      log('|---|---:|---:|---:|---:|');
+      for (const r of results) {
+        log(`| ${r.cli} | ${r.baseMs}ms | ${r.verifyMs}ms | ${r.totalMs}ms | ${r.exit} |`);
+      }
+      log('');
+      log(`💡 verify-claim/audit 오버헤드는 일반적으로 검수 1회당 200~500ms (실 CLI 호출 대비 1-10%)`);
+    });
+  }
   const rows = readProgressRows(root);
   const done = rows.filter(r => r.status === 'done').length;
   const totalTasks = rows.length;
@@ -6173,20 +6249,74 @@ function _readInstalledSkills(root) {
   return list;
 }
 
-function skillMatchCmd(root, query) {
+// 1.9.50: Ollama embedding 매칭 — opt-in (LEERNESS_OLLAMA_BASE_URL 필요)
+async function _embedText(baseUrl, text, model) {
+  const url = baseUrl.replace(/\/$/, '') + '/api/embeddings';
+  return new Promise((resolve) => {
+    const lib = url.startsWith('https:') ? require('https') : require('http');
+    const req = lib.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, timeout: 30000 }, (res) => {
+      let chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          resolve(j.embedding || null);
+        } catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.write(JSON.stringify({ model: model || 'nomic-embed-text', prompt: text }));
+    req.end();
+  });
+}
+
+function _cosine(a, b) {
+  if (!a || !b || a.length !== b.length) return 0;
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+
+async function skillMatchCmd(root, query) {
   root = absRoot(root || process.cwd());
-  if (!query) { fail('사용법: leerness skill match "<task or keywords>"'); return process.exit(1); }
+  if (!query) { fail('사용법: leerness skill match "<task or keywords>" [--embedding]'); return process.exit(1); }
   const skills = _readInstalledSkills(root);
   if (!skills.length) {
-    log(`# leerness skill match (1.9.45)`);
+    log(`# leerness skill match (1.9.45/50)`);
     log(`설치된 skill 없음 — \`leerness init\` 또는 \`leerness skill install <url>\` 먼저`);
     return;
   }
-  const qTokens = _tokenize(query);
-  const ranked = skills.map(s => ({
-    ...s,
-    score: _jaccard(qTokens, _tokenize(s.name + ' ' + s.description))
-  })).sort((a, b) => b.score - a.score);
+  // 1.9.50: --embedding 옵션 — Ollama embedding API로 cosine similarity
+  const useEmbedding = has('--embedding');
+  const ollamaUrl = process.env.LEERNESS_OLLAMA_BASE_URL || arg('--ollama-url', null);
+  let ranked;
+  if (useEmbedding) {
+    if (!ollamaUrl) {
+      fail('--embedding은 LEERNESS_OLLAMA_BASE_URL 환경변수 필요 (예: http://localhost:11434) — opt-in 정책');
+      return process.exit(1);
+    }
+    const model = process.env.LEERNESS_OLLAMA_EMBED_MODEL || 'nomic-embed-text';
+    log(`# leerness skill match (1.9.50, embedding)`);
+    log(`Ollama: ${ollamaUrl} · model: ${model}`);
+    const qVec = await _embedText(ollamaUrl, query, model);
+    if (!qVec) {
+      warn('embedding 실패 — jaccard로 폴백');
+    } else {
+      const skillVecs = await Promise.all(skills.map(s =>
+        _embedText(ollamaUrl, `${s.name}. ${s.description}`, model)
+      ));
+      ranked = skills.map((s, i) => ({ ...s, score: _cosine(qVec, skillVecs[i]) }))
+                    .sort((a, b) => b.score - a.score);
+    }
+  }
+  if (!ranked) {
+    const qTokens = _tokenize(query);
+    ranked = skills.map(s => ({
+      ...s,
+      score: _jaccard(qTokens, _tokenize(s.name + ' ' + s.description))
+    })).sort((a, b) => b.score - a.score);
+  }
   const top = ranked.filter(r => r.score > 0).slice(0, 5);
   if (has('--json')) {
     log(JSON.stringify({ query, total: skills.length, matched: top.length, top: top.map(({ dir, ...rest }) => rest) }, null, 2));

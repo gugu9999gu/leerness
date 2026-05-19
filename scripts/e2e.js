@@ -950,6 +950,43 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
+// 1.9.48~50 회귀
+total++;
+{
+  // 1.9.48 cross-platform archive — PowerShell ZIP or tar
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-arc-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'publish', '--path', tmpC, '--bundle-only'], { encoding: 'utf8', timeout: 30000 });
+  const tarballDir = path.join(tmpC, '.harness', 'skills-publish-tarball');
+  const files = fs.existsSync(tarballDir) ? fs.readdirSync(tarballDir) : [];
+  const archive = files.find(f => /\.(tgz|zip)$/.test(f));
+  const ok = r.status === 0 && (archive || /archive 생성/.test(r.stdout));
+  console.log(ok ? `✓ B(1.9.48) cross-platform archive (${archive || 'graceful'})` : `✗ archive 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
+total++;
+{
+  // 1.9.49 benchmark --measure 인자 검증
+  const r = cp.spawnSync(process.execPath, [CLI, 'benchmark', '--measure'], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status !== 0 && /사용법|task/.test(r.stdout + r.stderr);
+  console.log(ok ? '✓ B(1.9.49) benchmark --measure: 인자 누락 친절 안내' : `✗ --measure 인자 실패`);
+  if (!ok) { failed++; console.log((r.stdout + r.stderr).slice(0, 300)); }
+}
+
+total++;
+{
+  // 1.9.50 skill match --embedding (Ollama URL 없을 때 거부)
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-emb-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'match', 'test query', '--path', tmpC, '--embedding'], {
+    encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_OLLAMA_BASE_URL: '' }
+  });
+  const ok = r.status !== 0 && /LEERNESS_OLLAMA_BASE_URL.*필요|opt-in/.test(r.stdout + r.stderr);
+  console.log(ok ? '✓ B(1.9.50) skill match --embedding: Ollama URL 없으면 opt-in 거부' : `✗ --embedding 거부 실패`);
+  if (!ok) { failed++; console.log((r.stdout + r.stderr).slice(0, 300)); }
+}
+
 // 1.9.45 회귀: skill match — 키워드 매칭 추천 (jaccard)
 total++;
 {

@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.9.50 — 2026-05-19
+
+**`skill match --embedding` (Ollama opt-in 임베딩 매칭)**.
+
+### Added
+- **`leerness skill match <query> --embedding`** — Ollama embedding API로 cosine similarity 매칭:
+  - `LEERNESS_OLLAMA_BASE_URL` 환경변수 필요 (opt-in 정책 유지)
+  - `LEERNESS_OLLAMA_EMBED_MODEL` (기본: nomic-embed-text)
+  - 네트워크 실패 시 jaccard로 자동 fallback (사용자 차단 X)
+- 옵션 없으면 1.9.45 jaccard 그대로
+
+## 1.9.49 — 2026-05-19
+
+**`benchmark --measure` 실 측정 framework**.
+
+### Added
+- **`leerness benchmark --measure "<task>" [--json]`** — ready 외부 CLI (claude/codex/gemini)에 동일 task 호출 + 시간 측정:
+  - 각 CLI 호출 시간 + leerness audit 검수 layer 시간 별도 측정
+  - ready CLI 없으면 안내 메시지로 graceful
+  - 다른 도구 대비 leerness 오버헤드 실측 가능
+
+## 1.9.48 — 2026-05-19
+
+**Cross-platform archive — tar 실패 시 PowerShell ZIP fallback**.
+
+### Fixed
+- 🟡 **1.9.47 known issue 해결**: `skill publish`의 tar 호출이 Windows git-bash 환경에서 실패하던 문제
+- **`_createArchive()`** 헬퍼: tar (POSIX) → PowerShell Compress-Archive (Windows ZIP) → zip 명령 (Linux fallback) 순 자동 시도
+- 결과: Windows에서 `.zip` (5.7KB) 정상 생성, POSIX에서 `.tgz` 그대로
+
+### 검증 (stress-v3)
+- H1-H3 (cross-platform archive) 3/3 PASS
+- I1-I3 (benchmark --measure framework) 3/3 PASS
+- J1-J3 (embedding opt-in + fallback) 3/3 PASS
+- K1-K3 (회귀 — drift/MCP/agentskills round-trip) 3/3 PASS
+- **stress-v3: 12/12 PASS**, e2e: **202/202 PASS**
+
 ## 1.9.47 — 2026-05-19
 
 **`leerness skill publish` — 자체 skill을 외부 공유 번들로 publish**.
