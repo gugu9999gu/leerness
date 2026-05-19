@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.9.108 — 2026-05-20
+
+**`leerness decision add` 새 CLI + MCP 27번째 도구 `leerness_decision_add`** (설계 결정 영구화 — task 다음으로 메모리 write surface 확장 시작).
+
+### Added — `leerness decision add "<title>"` CLI
+- 새 명령: `leerness decision add "<title>" --reason "..." --alternatives "..." --impact "..."`
+- decisions.md 에 표준 형식으로 자동 append:
+  ```md
+  ### YYYY-MM-DD — 결정 제목
+  - Decision: 결정 제목
+  - Reason: ...
+  - Alternatives: ...
+  - Impact: ...
+  ```
+- decisions.md 가 없으면 자동 생성.
+- 1.9.43+ handoff lessons 자동 회수와 통합 — 추후 동일 키워드 작업 시 자동 재상기.
+
+### Added — MCP 27번째 도구 `leerness_decision_add`
+- 외부 AI(Claude Code / Hermes)가 설계 결정을 즉시 기록.
+- 인자: `{ title (required), reason?, alternatives?, impact?, path? }`
+- 사용 시나리오: 사용자와 토론 후 결정 사항을 외부 AI 가 자율 영구화.
+
+### Memory Write Surface 시작
+| 영역 | READ (기존) | WRITE (신규) |
+|---|---|---|
+| **Decisions** | lessons 자동 회수 (1.9.56+) | **`decision_add` (1.9.108)** |
+| **Tasks** | task_export (1.9.60) | task_add/update/drop (1.9.105~107) |
+
+다음 후보: lessons 직접 write, rules add, plan add 등.
+
+### MCP 도구 수: 26 → 27개
+
+### Verified
+- stress-v53 — decision add CLI + decisions.md 실제 갱신 + MCP 응답 + 27 도구 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.107 — 2026-05-20
 
 **MCP 26번째 도구 `leerness_task_drop` — task CRUD 완성** (read/add/update/drop 4종 surface).

@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.107-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-26-blue)]() [![json](https://img.shields.io/badge/--json-13_commands-blueviolet)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.108-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-27-blue)]() [![json](https://img.shields.io/badge/--json-13_commands-blueviolet)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.107  AI Agent Reliability Harness                      ║
+  ║  v1.9.108  AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
