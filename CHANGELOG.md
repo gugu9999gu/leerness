@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.9.67 — 2026-05-19
+
+**handoff 자동 skill 추천 default ON + lessons 인덱스에 task-log 통합**.
+
+### Added — handoff 자동 skill match (default ON)
+- 매 `leerness handoff` 시 **현재 in-progress task와 매칭되는 설치된 skill을 자동 추천** (점수 + skill id + description 미리보기).
+- 1.9.45의 `LEERNESS_SKILL_AUTO_DISCOVER=1` opt-in 환경변수 의존성 제거 → default 활성.
+- 끄기: `--no-skill-suggest` 또는 `LEERNESS_NO_SKILL_SUGGEST=1`.
+- 매칭 알고리즘: `_jaccard(task.request_tokens, skill.name+description_tokens)`, top 3.
+- 매칭 점수 0이면 출력 안 함 (잡음 최소화).
+
+### Improved — lessons 인덱스 확장
+- `_loadLessonsIndex`에 **task-log.md 실패 라인** 추가 (mtime 기반 invalidation).
+- `_lidx.taskLogFails: [{title, block}]` 새 필드.
+- handoff lessons 자동 재상기에서 task-log fuzzy 매칭도 가능.
+- `leerness lessons` 명령도 같은 인덱스 사용 (split 1회).
+
+### Updated
+- `_banner` quickStart: "13 도구 노출 (task_export 포함)" + "매칭 skill 자동 추천" 안내.
+- `.harness/session-workflow.md` 템플릿: 1.9.67 라인 추가.
+
+### Verified
+- stress-v13 (1.9.67 검증) — handoff skill match default + --no-skill-suggest + lessons task-log fuzzy.
+- e2e 회귀: 219/219 PASS 유지.
+
+---
+
 ## 1.9.66 — 2026-05-19
 
 **성능 최적화 2차 + MCP 13번째 도구**.

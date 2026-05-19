@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.66';
+const VERSION = '1.9.67';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -289,6 +289,8 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - session close가 누락되면 다음 세션 시작 시 drift critical 발생.
 - 자동 회복 옵션: \`drift check --auto-fix\` (critical 시 session close 자동 실행).
 - 1.9.56+ handoff가 매 세션 시작 시 **과거 lessons 자동 재상기** (현재 task 키워드 기준).
+- 1.9.67+ handoff가 현재 task와 매칭되는 **설치된 skill을 자동 추천** (jaccard 기반, default ON, \`--no-skill-suggest\`로 끄기).
+- 1.9.67+ lessons 인덱스에 \`task-log.md\` 실패 라인까지 포함 → 회수 범위 확장.
 
 ---
 
@@ -1802,6 +1804,12 @@ function handoff(root) {
               matches.push({ source: 'decisions.md', title: d.title, block: d.block });
             }
           }
+          // 1.9.67: task-log.md 실패 라인도 fuzzy 매칭 (회수 범위 확장)
+          for (const t of (idx.taskLogFails || [])) {
+            if (fuzzyRe.test(t.block)) {
+              matches.push({ source: 'task-log.md', title: t.title, block: t.block });
+            }
+          }
           if (matches.length) {
             const isTty = process.stdout && process.stdout.isTTY;
             const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
@@ -1814,6 +1822,30 @@ function handoff(root) {
             }
             log(dim(`  → 전체: leerness lessons --auto --path .`));
             log('');
+          }
+          // 1.9.67: 현재 task와 관련된 skill 자동 추천 (default ON, 1.9.45 opt-in → default)
+          // 끄려면: --no-skill-suggest 또는 LEERNESS_NO_SKILL_SUGGEST=1
+          if (!has('--no-skill-suggest') && process.env.LEERNESS_NO_SKILL_SUGGEST !== '1') {
+            try {
+              const installed = _readInstalledSkills(root);
+              if (installed.length) {
+                const qTokens = _tokenize(String(latestRow.request));
+                const ranked = installed.map(s => ({
+                  ...s, score: _jaccard(qTokens, _tokenize(s.name + ' ' + s.description))
+                })).filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 3);
+                if (ranked.length) {
+                  const isTty = process.stdout && process.stdout.isTTY;
+                  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+                  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+                  log(grn(`## 🎯 현재 task와 매칭되는 skill 자동 추천 (1.9.67) — 키워드 "${keyword}"`));
+                  for (const r of ranked) {
+                    log(dim(`  • [${r.score.toFixed(2)}] ${r.id} — ${(r.description || '').slice(0, 60)}`));
+                  }
+                  log(dim(`  → 전체: leerness skill match "${String(latestRow.request).slice(0, 60)}"`));
+                  log('');
+                }
+              }
+            } catch {}
           }
         }
       }
@@ -3164,14 +3196,14 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.57+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.67+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
-    log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 적재 + 과거 lessons 자동 재상기'));
+    log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons 재상기 + 매칭 skill 자동 추천'));
     log('    ' + C.green('npx leerness verify-claim T-0001 --run-tests') + C.dim('        # AI 거짓 완료 자동 검증'));
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 12 도구 노출'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 13 도구 노출 (task_export 포함)'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
     log('');
   }
@@ -5545,10 +5577,9 @@ function lessonsCmd(root) {
     }
     log(`# Lessons --auto (1.9.54): 추출 키워드 "${query}"`);
   }
-  // 1.9.65: 인덱스 캐시 활용 (decisions/evidence split 1회만)
+  // 1.9.65/67: 인덱스 캐시 활용 (decisions/evidence/task-log split 1회만)
   const _lidx = _loadLessonsIndex(root);
   const decisions = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
-  const tlog = exists(taskLogPath(root)) ? read(taskLogPath(root)) : '';
   const handoff = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
   const lessons = [];
   // decisions: ### 블록 전체 (1.9.14: 코드블록/Template 제외)
@@ -5563,11 +5594,9 @@ function lessonsCmd(root) {
       lessons.push({ source: 'review-evidence.md', title: e.title, block: e.block });
     }
   }
-  // task-log: 실패 키워드 라인
-  for (const line of tlog.split('\n')) {
-    if (line.length > 4 && /✗|\bfail|롤백|재발|incomplete|버그/i.test(line)) {
-      lessons.push({ source: 'task-log.md', title: line.replace(/^[-*]\s*/, '').slice(0, 80), block: line });
-    }
+  // task-log: 실패 키워드 라인 (1.9.67: 인덱스 재활용)
+  for (const t of (_lidx.taskLogFails || [])) {
+    lessons.push({ source: 'task-log.md', title: t.title, block: t.block });
   }
   // handoff: 미완료/블로커 항목
   if (handoff) {
@@ -6162,16 +6191,19 @@ function driftCheckCmd(root, opts = {}) {
 }
 
 // 1.9.65: lessons blocks 인덱스 — evidence/decisions 파일 read + split을 1회로
-// key: root → { evidenceMtime, decisionsMtime, evidence: [{title, block}], decisions: [{title, block}] }
+// 1.9.67: task-log.md 실패 라인도 인덱스에 포함 (mtime 기반 invalidation)
+// key: root → { evidenceMtime, decisionsMtime, taskLogMtime, evidence/decisions/taskLogFails: [{title, block}] }
 const _LESSONS_INDEX_CACHE = new Map();
 function _loadLessonsIndex(root) {
   const ep = evidencePath(root);
   const dp = decisionsPath(root);
+  const tp = taskLogPath(root);
   const em = exists(ep) ? (() => { try { return fs.statSync(ep).mtimeMs; } catch { return 0; } })() : 0;
   const dm = exists(dp) ? (() => { try { return fs.statSync(dp).mtimeMs; } catch { return 0; } })() : 0;
+  const tm = exists(tp) ? (() => { try { return fs.statSync(tp).mtimeMs; } catch { return 0; } })() : 0;
   const cacheKey = absRoot(root);
   const cached = _LESSONS_INDEX_CACHE.get(cacheKey);
-  if (cached && cached.evidenceMtime === em && cached.decisionsMtime === dm) return cached;
+  if (cached && cached.evidenceMtime === em && cached.decisionsMtime === dm && cached.taskLogMtime === tm) return cached;
   const evidence = [];
   if (em) {
     const txt = read(ep);
@@ -6190,7 +6222,17 @@ function _loadLessonsIndex(root) {
       if (t) decisions.push({ title: t[1].trim(), block });
     }
   }
-  const idx = { evidenceMtime: em, decisionsMtime: dm, evidence, decisions };
+  // 1.9.67: task-log.md 라인 중 실패/롤백 표지가 있는 라인만 인덱스
+  const taskLogFails = [];
+  if (tm) {
+    const txt = read(tp);
+    for (const line of txt.split('\n')) {
+      if (line.length > 4 && /✗|\bfail|롤백|재발|incomplete|버그/i.test(line)) {
+        taskLogFails.push({ title: line.replace(/^[-*]\s*/, '').slice(0, 100), block: line });
+      }
+    }
+  }
+  const idx = { evidenceMtime: em, decisionsMtime: dm, taskLogMtime: tm, evidence, decisions, taskLogFails };
   _LESSONS_INDEX_CACHE.set(cacheKey, idx);
   return idx;
 }
