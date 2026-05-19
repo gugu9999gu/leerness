@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.99 — 2026-05-20
+
+**`leerness handoff --quiet` 옵션** (자동화/CI 모드용 최소 출력).
+
+### Added
+- `leerness handoff --quiet` — 자동 회수 라인 모두 비활성화:
+  - 헤드라인 (1.9.81/93)
+  - lessons 자동 재상기 (1.9.56)
+  - 매칭 skill 자동 추천 (1.9.67)
+  - skill match 이력 (1.9.69)
+  - brainstorm 자동 hits (1.9.88)
+  - 보안 요약 (1.9.76) / CRITICAL (1.9.80)
+- 기본 컨텍스트 (Session Handoff, Plan, Progress Tracker, Decisions, Task Log)만 출력.
+- CI 통합 / 자동 처리 / 비대화형 환경에 적합.
+
+### Verified
+- stress-v44 — quiet 모드 출력 + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.98 — 2026-05-20
 
 **`leerness skill publish` 보안 사전 점검 통합** (사용자 글로벌 룰 보안 정책 자동화).

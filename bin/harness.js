@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.98';
+const VERSION = '1.9.99';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1885,7 +1885,7 @@ function handoff(root) {
   log(`Project: ${detectProjectName(root)}`);
   // 1.9.81: 통합 헤드라인 — drift level + 보안 상태 + skill 추천 + MCP 활동을 한 줄로 압축
   // AI 에이전트가 매 세션 시작 즉시 컨텍스트 인지. --no-headline 또는 --compact로 끄기.
-  if (!has('--no-headline') && !has('--compact')) {
+  if (!has('--no-headline') && !has('--compact') && !has('--quiet')) {
     try {
       const parts = [];
       // 1) drift level (가벼운 check)
@@ -1963,7 +1963,7 @@ function handoff(root) {
   // 1.9.56: handoff에 lessons --auto 자동 통합 — 현재 in-progress task와 관련된 과거 실수/결정 자동 재상기
   // 매 세션 시작 시 AI가 과거에 같은 키워드로 실패한 사례를 잊지 않도록.
   // 끄려면: --no-lessons 또는 LEERNESS_NO_LESSONS=1
-  if (!has('--no-lessons') && !has('--compact') && process.env.LEERNESS_NO_LESSONS !== '1') {
+  if (!has('--no-lessons') && !has('--compact') && !has('--quiet') && process.env.LEERNESS_NO_LESSONS !== '1') {
     try {
       const lrows = readProgressRows(root);
       const latestRow = lrows.filter(r => r.status === 'in-progress' || r.status === 'planned').pop() || lrows[lrows.length - 1];
@@ -2016,7 +2016,7 @@ function handoff(root) {
           }
           // 1.9.67: 현재 task와 관련된 skill 자동 추천 (default ON, 1.9.45 opt-in → default)
           // 끄려면: --no-skill-suggest 또는 LEERNESS_NO_SKILL_SUGGEST=1
-          if (!has('--no-skill-suggest') && process.env.LEERNESS_NO_SKILL_SUGGEST !== '1') {
+          if (!has('--no-skill-suggest') && !has('--quiet') && process.env.LEERNESS_NO_SKILL_SUGGEST !== '1') {
             try {
               const installed = _readInstalledSkills(root);
               if (installed.length) {
@@ -2058,7 +2058,7 @@ function handoff(root) {
                 // 1.9.88: brainstorm 자동 hits — 현재 task 키워드로 누적 컨텍스트 자동 회수
                 // decisions / lessons / skillHistory / taskLogFails 각각 1건씩 미리보기
                 // 끄기: --no-brainstorm-hits 또는 LEERNESS_NO_BRAINSTORM_HITS=1
-                if (!has('--no-brainstorm-hits') && process.env.LEERNESS_NO_BRAINSTORM_HITS !== '1') {
+                if (!has('--no-brainstorm-hits') && !has('--quiet') && process.env.LEERNESS_NO_BRAINSTORM_HITS !== '1') {
                   try {
                     const r = cp.spawnSync(process.execPath, [__filename, 'brainstorm', keyword, '--path', root, '--json'],
                       { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
@@ -2089,7 +2089,7 @@ function handoff(root) {
   }
   // 1.9.76: handoff 보안 상태 요약 — .env vs .env.example + .gitignore 시크릿 패턴 1줄 요약
   // 매 세션 시작 시 AI가 보안 위험을 즉시 인지. --no-security-summary 또는 --compact로 끄기
-  if (!has('--no-security-summary') && !has('--compact')) {
+  if (!has('--no-security-summary') && !has('--compact') && !has('--quiet')) {
     try {
       const envExists = exists(path.join(root, '.env'));
       if (envExists) {
@@ -3491,7 +3491,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.98+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.99+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
