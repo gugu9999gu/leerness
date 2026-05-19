@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.44-green)]() [![tests](https://img.shields.io/badge/e2e-196%2F196-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.47-green)]() [![tests](https://img.shields.io/badge/e2e-199%2F199-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.44   AI Agent Reliability Harness                      ║
+  ║  v1.9.47   AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
@@ -433,6 +433,9 @@ npm test     # = node ./scripts/e2e.js
 
 ## 변경 이력 (최근)
 
+- **1.9.47** — `leerness skill publish` — 자체 skill을 SKILL.md + manifest.json 번들로 export (외부 공유 가능, agentskills.io 표준).
+- **1.9.46** — `leerness benchmark` — 자체 6 차원 점수 + 6 도구 (vanilla/claude_code/hermes/leerness+claude 등) 시뮬 비교 매트릭스.
+- **1.9.45** — `leerness skill match <query>` — 사용자 요청 ↔ 설치 SKILL.md description **jaccard 매칭** + 자동 추천.
 - **1.9.44** — 1.9.34~43 13종 기능 통합 stress test 25/25 PASS · 발견된 BOM 처리 BUG 1건 즉시 패치 (`_parseSkillMd` UTF-8 BOM 자동 제거) · e2e 196/196.
 - **1.9.43** — MCP 서버로 leerness 도구 10종 노출 (`leerness mcp serve`, Claude Code/Hermes/Cursor 등이 직접 호출 가능) · `skill export-all` (9개 일괄 SKILL.md export) · 내부 보고서 자동 비공개 (`_reports/` gitignore + npmignore).
 - **1.9.42** — [agentskills.io](https://agentskills.io) 공개 표준 호환 (Claude Code · Cursor · Copilot · Codex · Gemini CLI · Hermes Agent 등 30+ 도구와 스킬 공유): `skill install <url>` · `skill discover` (opt-in) · `skill export` (SKILL.md frontmatter) · `LEERNESS_SKILL_DISCOVER_URL` .env opt-in.

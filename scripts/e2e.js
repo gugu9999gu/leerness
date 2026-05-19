@@ -950,6 +950,59 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
+// 1.9.45 회귀: skill match — 키워드 매칭 추천 (jaccard)
+total++;
+{
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-match-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'match', 'Office 문서 자동화', '--path', tmpC, '--json'], { encoding: 'utf8', timeout: 15000 });
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  const ok = parsed
+    && parsed.top
+    && parsed.top.length > 0
+    && parsed.top[0].id === 'office'; // office가 최상위 매칭
+  console.log(ok ? '✓ B(1.9.45) skill match: jaccard 매칭 → office 최상위' : `✗ skill match 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
+// 1.9.46 회귀: benchmark — 자체 6차원 점수 + 타도구 비교
+total++;
+{
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bench-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'benchmark', tmpC, '--json'], { encoding: 'utf8', timeout: 15000 });
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  const ok = parsed
+    && parsed.leernessScore
+    && parsed.total >= 400
+    && parsed.compareSimulated
+    && parsed.compareSimulated.vanilla
+    && parsed.compareSimulated['leerness+claude'];
+  console.log(ok ? `✓ B(1.9.46) benchmark: 자체 ${parsed.total}/600 + 타도구 시뮬 비교` : `✗ benchmark 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
+// 1.9.47 회귀: skill publish — 9개 SKILL.md export + manifest.json
+total++;
+{
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pub-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'publish', '--path', tmpC, '--bundle-only'], { encoding: 'utf8', timeout: 30000 });
+  const publishDir = path.join(tmpC, '.harness', 'skills-publish');
+  const manifestFile = path.join(publishDir, 'manifest.json');
+  let manifest = null;
+  try { manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8')); } catch {}
+  const ok = r.status === 0
+    && fs.existsSync(publishDir)
+    && manifest
+    && manifest.skills && manifest.skills.length >= 5
+    && manifest.format === 'agentskills.io';
+  console.log(ok ? `✓ B(1.9.47) skill publish: ${manifest ? manifest.skills.length : 0} skill + manifest 생성` : `✗ skill publish 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
 // 1.9.44 회귀: BOM SKILL.md 처리 (stress-v2 G2 발견)
 total++;
 {

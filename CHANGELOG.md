@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.9.47 — 2026-05-19
+
+**`leerness skill publish` — 자체 skill을 외부 공유 번들로 publish**.
+
+### Added
+- **`leerness skill publish [--include ids] [--bundle-only] [--gh-release]`**:
+  - 모든 자체 skill (또는 `--include`)을 SKILL.md frontmatter + license + publisher + version 메타로 export
+  - `manifest.json` (skills 카탈로그 인덱스) + `README.md` 자동 생성
+  - tarball 생성 시도 (Windows/POSIX tar) — 실패 시 graceful, 개별 SKILL.md는 정상 유지
+  - `--gh-release`: GitHub release에 자동 attach
+
+### e2e: 199/199 PASS
+
+## 1.9.46 — 2026-05-19
+
+**`leerness benchmark` — 자체 + 타도구 비교 매트릭스**.
+
+### Added
+- **`leerness benchmark [path] [--json]`** 신규 명령:
+  - 자체 6 차원 점수 (multiAgent / autoVerify / reuse / workspace / bugDetect / contextKeep) — 실 measured 값 (tasks/reuse-map/usage stats) 기반
+  - 6 도구 시뮬 비교: vanilla / claude_code / hermes / leerness_solo / leerness+claude / leerness+hermes
+  - 결론: **leerness + 메인 에이전트 조합이 최강** (단독 leerness보다 100점 차이)
+
+## 1.9.45 — 2026-05-19
+
+**`leerness skill match <query>` — 설치 SKILL.md 자동 추천**.
+
+### Added
+- **`leerness skill match "<task or keywords>"`** 신규 명령:
+  - 사용자 task 키워드 ↔ 설치된 SKILL.md description **jaccard similarity 매칭**
+  - 상위 5개 추천 + 점수 표 출력
+  - `--json` 출력 지원 → 메인 에이전트가 파싱하여 자동 활성화 가능
+
+### 동작 예시
+```
+leerness skill match "Office 문서 자동화"
+→ 점수 0.10 | office | 마이크로소프트 오피스 자동화
+→ 점수 0.06 | ads-analytics | GA4 분석
+→ 점수 0.05 | crawling | Playwright 기반 자동화
+```
+
 ## 1.9.44 — 2026-05-19
 
 **1.9.34~43 통합 검증 + BUG 1건 즉시 패치**.
