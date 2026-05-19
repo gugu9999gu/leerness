@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.118';
+const VERSION = '1.9.119';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -320,6 +320,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.116+ \`leerness brainstorm\` 회수 범위에 **lessons.md + plan.md** milestone 추가 — Memory Surface 5종 완전 통합.
 - 1.9.117+ \`leerness lesson list [--tag] [--json]\` + MCP **33 도구** (\`leerness_lesson_list\`) — lessons.md 전용 조회 + tag 필터.
 - 1.9.118+ \`leerness decision list [--json]\` + MCP **34 도구** (\`leerness_decision_list\`) — decisions.md 전체 조회 (Decision/Reason/Alternatives/Impact 메타).
+- 1.9.119+ \`leerness plan list [--json]\` + MCP **35 도구** (\`leerness_plan_list\`) — plan.md milestone 전체 (Status/Progress/Tasks). **Memory Surface READ 5종 완전 완성**.
 
 ---
 
@@ -1221,6 +1222,61 @@ function upsertProgress(root, row) {
 
 function planShow(root) { const p = planPath(root); log(exists(p) ? read(p) : 'plan.md not found'); }
 function planInit(root) { const goal = arg('--goal', ''); if (!exists(planPath(root))) return install(root); append(planPath(root), `\n## User Goal\n- ${goal || '사용자 목적을 작성하세요.'}\n`); ok('plan goal appended'); }
+// 1.9.119: plan list — plan.md 의 모든 milestone (M-XXXX) 조회 (CLI + --json + MCP)
+function planListCmd(root, opts = {}) {
+  root = absRoot(root);
+  const jsonMode = !!opts.json || has('--json');
+  const pp = planPath(root);
+  if (!exists(pp)) {
+    if (jsonMode) {
+      process.stdout.write(JSON.stringify({ version: VERSION, root, total: 0, milestones: [] }, null, 2) + '\n');
+      return;
+    }
+    return ok('plan.md 없음 — leerness plan add "<text>" 로 첫 milestone 등록');
+  }
+  const text = read(pp);
+  const milestones = [];
+  // ### M-XXXX. <title> 블록 추출
+  const blocks = text.split(/\n(?=### M-\d{4}\.)/);
+  for (const b of blocks) {
+    const headerMatch = b.match(/^### (M-\d{4})\.\s*(.+?)$/m);
+    if (!headerMatch) continue;
+    const id = headerMatch[1];
+    const title = headerMatch[2].trim();
+    const statusMatch = b.match(/^Status:\s*(.+)$/m);
+    const progressMatch = b.match(/^Progress:\s*(.+)$/m);
+    // Tasks 블록 (- [ ] 또는 - [x])
+    const tasks = [];
+    const tasksSection = b.match(/Tasks:\s*\n([\s\S]+?)(?=\n###|\n## |$)/);
+    if (tasksSection) {
+      for (const line of tasksSection[1].split('\n')) {
+        const taskMatch = line.match(/^-\s*\[([\sx])\]\s*(.+)$/);
+        if (taskMatch) tasks.push({ done: taskMatch[1] === 'x', text: taskMatch[2].trim() });
+      }
+    }
+    milestones.push({
+      id,
+      title,
+      status: statusMatch ? statusMatch[1].trim() : null,
+      progress: progressMatch ? progressMatch[1].trim() : null,
+      tasks,
+    });
+  }
+  if (jsonMode) {
+    process.stdout.write(JSON.stringify({ version: VERSION, root, total: milestones.length, milestones }, null, 2) + '\n');
+    return;
+  }
+  log(`# 🗺  Plan (1.9.119)\n`);
+  if (!milestones.length) return ok('plan milestones 비어있음');
+  log(`총 ${milestones.length}개 milestone:`);
+  for (const m of milestones) {
+    log(`\n[${m.id}] ${m.title}`);
+    if (m.status) log(`  Status: ${m.status}`);
+    if (m.progress) log(`  Progress: ${m.progress}`);
+    if (m.tasks.length) log(`  Tasks: ${m.tasks.length}개 (${m.tasks.filter(t => t.done).length} 완료)`);
+  }
+}
+
 function planAdd(root, text) {
   const id = nextId(root, 'M');
   const status = arg('--status','planned'), progress = arg('--progress','0');
@@ -3825,7 +3881,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 34 도구 (decision_list 추가, 1.9.118)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 35 도구 (plan_list 추가, 1.9.119 READ 5종 완성)'));
     log('    ' + C.green('npx leerness lesson save "<text>" --tag "..."') + C.dim('       # lessons.md 직접 write (1.9.112 — handoff 자동 회수와 통합)'));
     log('    ' + C.green('npx leerness memory status . --json') + C.dim('                  # Memory Surface 5종 통합 상태 JSON (1.9.114)'));
     log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
@@ -7979,7 +8035,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_lesson_save', description: '1.9.112 — .harness/lessons.md 에 새 lesson 영구화 (Memory Write Surface 5번째). 외부 AI가 세션 중 얻은 통찰을 즉시 영구 기록 — handoff 자동 회수와 통합. 인자: { text (required), tag?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, tag: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } },
     { name: 'leerness_memory_status', description: '1.9.114 — Memory Write Surface 5종 (tasks/decisions/rules/plan/lessons) 통합 상태 JSON. 외부 AI가 한 호출로 영구화 상태 + 카운트 + 최근 항목 회수. summary 필드는 "T2/D3/R1/P5/L7" 형식', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_lesson_list', description: '1.9.117 — lessons.md 전용 list JSON ({ date, text, tag }[]). --tag 필터 지원. 외부 AI가 영구화된 lesson 전체 회수 (vs leerness_lessons 는 다중 source fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, tag: { type: 'string' } } } },
-    { name: 'leerness_decision_list', description: '1.9.118 — decisions.md 전체 조회 JSON ({ date, title, decision, reason, alternatives, impact }[]). 외부 AI가 영구화된 설계 결정 전체 회수 (Decision + Reason/Alternatives/Impact 메타데이터 포함)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_decision_list', description: '1.9.118 — decisions.md 전체 조회 JSON ({ date, title, decision, reason, alternatives, impact }[]). 외부 AI가 영구화된 설계 결정 전체 회수 (Decision + Reason/Alternatives/Impact 메타데이터 포함)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_plan_list', description: '1.9.119 — plan.md 의 모든 milestone (M-XXXX) 조회 JSON ({ id, title, status, progress, tasks: [{ done, text }] }[]). 외부 AI가 영구화된 계획 + 진행률 + tasks checkbox 전체 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -8045,6 +8102,7 @@ function mcpServeCmd(root) {
           case 'leerness_memory_status':   cliArgs = ['memory', 'status', '--path', targetPath, '--json']; break;
           case 'leerness_lesson_list':     cliArgs = ['lesson', 'list', '--path', targetPath, '--json', ...(args.tag ? ['--tag', args.tag] : [])]; break;
           case 'leerness_decision_list':   cliArgs = ['decision', 'list', '--path', targetPath, '--json']; break;
+          case 'leerness_plan_list':       cliArgs = ['plan', 'list', '--path', targetPath, '--json']; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -8739,6 +8797,8 @@ async function main() {
     if (sub==='drop')     return planDrop(root, args.slice(2).join(' ') || '드랍 항목');
     if (sub==='progress') return planProgress(root);
     if (sub==='sync')     return planSync(root);
+    // 1.9.119: plan list — 모든 milestone JSON/verbose
+    if (sub==='list')     return planListCmd(root, { json: has('--json') });
   }
   if (cmd === 'task') {
     const root = absRoot(arg('--path', process.cwd())); const sub = args[1] || 'list';

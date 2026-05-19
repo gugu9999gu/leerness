@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.9.119 — 2026-05-20 🎯 Memory Surface READ 5종 완전 완성
+
+**`leerness plan list [--json]` + MCP 35번째 도구 `leerness_plan_list`** — plan.md milestone 전체 조회 (Status/Progress/Tasks 체크박스 포함).
+
+### Added — `leerness plan list [--json]`
+- 새 CLI: `.harness/plan.md` 의 모든 milestone (M-XXXX) 조회.
+- 출력: `{ id, title, status, progress, tasks: [{ done, text }] }`
+- JSON: `{ version, root, total, milestones[] }`
+- Tasks 체크박스 (`- [ ]` / `- [x]`) 자동 파싱 → 완료/미완료 카운트.
+
+### Added — MCP 35번째 도구 `leerness_plan_list`
+- 외부 AI 가 영구화된 milestone + Tasks 진행 상태 회수.
+- 인자: `{ path? }`
+
+### 🎯 Memory Surface READ 5종 완전 완성
+| 영역 | READ 명령 | 라운드 |
+|---|---|---|
+| Tasks | task export | 1.9.60 |
+| Rules | rule list | 1.9.109 |
+| Lessons | lesson list | 1.9.117 |
+| Decisions | decision list | 1.9.118 |
+| **Plan** | **plan list** | **1.9.119 ✓** |
+
+Memory Surface 5종은 이제 WRITE (1.9.105~112) + LIST READ (1.9.60~119) 패턴 완전 대칭:
+
+| 영역 | WRITE | LIST READ |
+|---|---|---|
+| Tasks | task_add/update/drop (1.9.105~107) | task_export (1.9.60) |
+| Decisions | decision_add (1.9.108) | decision_list (1.9.118) |
+| Rules | rule_add (1.9.109) | rule_list (1.9.109) |
+| Plan | plan_add (1.9.110) | **plan_list (1.9.119)** |
+| Lessons | lesson_save (1.9.112) | lesson_list (1.9.117) |
+
+### MCP 도구 수: 34 → 35개
+### JSON 옵션 누적: 17 → 18종
+
+### Verified
+- stress-v64 — plan list CLI + --json + status/progress/tasks 파싱 + MCP + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.118 — 2026-05-20
 
 **`leerness decision list [--json]` 새 명령 + MCP 34번째 도구 `leerness_decision_list`** — decisions.md 전체 조회 + 메타데이터.
