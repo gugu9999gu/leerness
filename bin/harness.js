@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.120';
+const VERSION = '1.9.121';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -321,6 +321,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.117+ \`leerness lesson list [--tag] [--json]\` + MCP **33 도구** (\`leerness_lesson_list\`) — lessons.md 전용 조회 + tag 필터.
 - 1.9.118+ \`leerness decision list [--json]\` + MCP **34 도구** (\`leerness_decision_list\`) — decisions.md 전체 조회 (Decision/Reason/Alternatives/Impact 메타).
 - 1.9.119+ \`leerness plan list [--json]\` + MCP **35 도구** (\`leerness_plan_list\`) — plan.md milestone 전체 (Status/Progress/Tasks). **Memory Surface READ 5종 완전 완성**.
+- 1.9.121+ handoff 6번째 자동 회수 \`🆕 최근 24h 메모리 변동\` — 5종 surface 의 24h 내 추가 항목 자동 노출.
 
 ---
 
@@ -2458,6 +2459,72 @@ function handoff(root) {
             } catch {}
           }
         }
+      }
+    } catch {}
+  }
+  // 1.9.121: 최근 메모리 변동 알림 — 24h 내 추가된 5종 surface 항목 카운트
+  // AI 에이전트가 이전 세션 종료 후 어떤 메모리가 추가됐는지 즉시 인지.
+  // 끄기: --no-mem-delta 또는 LEERNESS_NO_MEM_DELTA=1
+  if (!has('--no-mem-delta') && !has('--compact') && !has('--quiet') && process.env.LEERNESS_NO_MEM_DELTA !== '1') {
+    try {
+      const isTtyMd = process.stdout && process.stdout.isTTY;
+      const mdCy = s => isTtyMd ? `\x1b[36m${s}\x1b[0m` : s;
+      const mdDim = s => isTtyMd ? `\x1b[2m${s}\x1b[0m` : s;
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const deltas = [];
+      // tasks: progress-tracker.md row Updated 컬럼 기반 (간단 휴리스틱 — mtime이 24h내면 표시)
+      try {
+        const pp = progressPath(root);
+        if (exists(pp) && fs.statSync(pp).mtimeMs > cutoff) {
+          const rows = readProgressRows(root);
+          const recent = rows.filter(r => r.updated && (() => { try { return new Date(r.updated).getTime() > cutoff; } catch { return false; } })()).length;
+          if (recent > 0) deltas.push(`task +${recent}`);
+        }
+      } catch {}
+      // decisions.md: ### YYYY-MM-DD 헤더 중 오늘 날짜 (정확하지 않지만 휴리스틱)
+      try {
+        const dm = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+        if (dm && fs.statSync(decisionsPath(root)).mtimeMs > cutoff) {
+          // _extractDecisionBlocks 사용해서 template 제외
+          const blocks = _extractDecisionBlocks(dm);
+          const todayStr = today();
+          const recent = blocks.filter(b => {
+            const m = b.match(/^### (\d{4}-\d{2}-\d{2})/m);
+            return m && m[1] === todayStr;
+          }).length;
+          if (recent > 0) deltas.push(`decision +${recent}`);
+        }
+      } catch {}
+      // lessons.md
+      try {
+        const lp = lessonsPath(root);
+        if (exists(lp) && fs.statSync(lp).mtimeMs > cutoff) {
+          const lm = read(lp);
+          const todayStr = today();
+          const recent = (lm.match(new RegExp(`^### ${todayStr}`, 'gm')) || []).length;
+          if (recent > 0) deltas.push(`lesson +${recent}`);
+        }
+      } catch {}
+      // plan.md milestones: 최신 M-XXXX (간단: mtime 24h내면 +1로 처리)
+      try {
+        const pp = planPath(root);
+        if (exists(pp) && fs.statSync(pp).mtimeMs > cutoff) {
+          // M-XXXX 중 line이 24h내 추가됐는지 정확히는 어려움 — mtime 24h내면 "plan: 변경됨"으로 표시
+          deltas.push('plan: 변경됨');
+        }
+      } catch {}
+      // rules: rule add 후 mtime 24h내
+      try {
+        const rp = rulesPath(root);
+        if (exists(rp) && fs.statSync(rp).mtimeMs > cutoff) {
+          const recent = readRules(root).filter(r => r.added === today()).length;
+          if (recent > 0) deltas.push(`rule +${recent}`);
+        }
+      } catch {}
+      if (deltas.length) {
+        log(mdCy(`🆕 최근 24h 메모리 변동 (1.9.121): ${deltas.join(' · ')}`));
+        log(mdDim(`  → 상세: leerness memory status --json`));
+        log('');
       }
     } catch {}
   }

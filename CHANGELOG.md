@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.9.121 — 2026-05-20
+
+**handoff 6번째 자동 회수 라인 — `🆕 최근 24h 메모리 변동`** (5종 surface 24h 내 추가 항목 알림).
+
+### Added — handoff 자동 회수 6단째
+handoff 호출 시 다음 라인 자동 추가 (24h 내 메모리 surface 변경이 있을 때만):
+```
+🆕 최근 24h 메모리 변동 (1.9.121): decision +2 · lesson +1 · rule +1 · plan: 변경됨
+  → 상세: leerness memory status --json
+```
+
+### 조건
+다음 영역의 mtime 이 24h 내 또는 today() 날짜 항목이 있으면 표시:
+- **task** — progress-tracker.md `Updated:` 컬럼 24h 내 row 카운트
+- **decision** — decisions.md `### YYYY-MM-DD` 헤더 중 오늘 날짜
+- **lesson** — lessons.md `### YYYY-MM-DD` 헤더 중 오늘 날짜
+- **plan** — plan.md mtime 24h 내 (변경됨 표시)
+- **rule** — rules.md mtime 24h 내 + `added: today()` rule 카운트
+
+### 끄기
+- `--no-mem-delta`
+- `LEERNESS_NO_MEM_DELTA=1`
+- `--quiet` 또는 `--compact` 모드에서는 자동 비활성
+
+### 1.9.121 의 가치
+- AI 에이전트가 이전 세션 종료 후 어떤 메모리가 추가됐는지 **즉시 인지**.
+- 사용자 워크플로: "어제 등록한 결정과 통찰이 이번 세션 시작 시 보이게" → 자동 달성.
+- 1.9.113 (헤드라인 mem 카운트) 와 보완 — 카운트가 아니라 **delta** 표시.
+
+### handoff 자동 회수 6단 완성
+| # | 라인 | 라운드 |
+|---|---|---|
+| 1 | 🧠 lessons 자동 재상기 | 1.9.56/67 |
+| 2 | 🎯 매칭되는 skill 자동 추천 | 1.9.67 |
+| 3 | 📒 이전 skill match 이력 | 1.9.69 |
+| 4 | 🧩 brainstorm 자동 hits | 1.9.88 |
+| 5 | 📊 통합 헤드라인 (mem T/D/R/P/L) | 1.9.81/93/113 |
+| **6** | **🆕 최근 24h 메모리 변동** | **1.9.121 ✓** |
+
+### Verified
+- stress-v66 — handoff 6단 라인 + delta 카운트 정확성 + --no-mem-delta 비활성 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.120 — 2026-05-20 🏆 50 라운드 자율 모드 마일스톤
 
 **50 라운드 자율 모드 누적 마일스톤 보고서** (`_reports/AUTONOMOUS_ROUNDS_1.9.70-1.9.119.md`) + stress-v65 종합.
