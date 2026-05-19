@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.92-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.93-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.92   AI Agent Reliability Harness                      ║
+  ║  v1.9.93   AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
@@ -433,6 +433,7 @@ npm test     # = node ./scripts/e2e.js
 
 ## 변경 이력 (최근)
 
+- **1.9.93** — **handoff 헤드라인에 health 종합 상태 1 토큰 추가** — `⚕ health: ✓/⚠` (1.9.81 + 1.9.85 통합, inline 추론으로 성능 비용 없음).
 - **1.9.92** — **`skill info --json` + MCP 20번째 도구 `leerness_skill_info`** — 외부 AI가 개별 skill 상세 (능력/소스/패턴/사용 이력) 정확 파악.
 - **1.9.91** — **MCP server 19번째 도구 `leerness_skill_search`** — 1.9.90 skill search를 외부 AI에 노출.
 - **1.9.90** — **`leerness skill search <capability>` 새 명령** — capability 배열 부분 일치 검색 (skill match와 다른 정확 매칭). `--json` 옵션.

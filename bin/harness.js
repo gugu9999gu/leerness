@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.92';
+const VERSION = '1.9.93';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1900,10 +1900,24 @@ function handoff(root) {
         const skillCnt = Object.keys(all).length;
         if (skillCnt > 0) parts.push(`📚 ${skillCnt} skills`);
       } catch {}
+      // 6) 1.9.93: health 종합 (보안 + drift 결합 1 토큰)
+      // 헤드라인의 다른 신호는 이미 계산됨 → inline 추론 (자식 spawn 없음)
+      try {
+        // 보안 위험 ↔ healthy 판정 (간단)
+        const envPath = path.join(root, '.env');
+        let healthIssue = false;
+        if (exists(envPath)) {
+          const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
+          const giLines = giText.split('\n').map(l => l.trim());
+          if (!(giLines.includes('.env') || giLines.includes('/.env'))) healthIssue = true;
+        }
+        // 헤드라인 끝에 health 토큰
+        parts.push(healthIssue ? '⚕ health: ⚠' : '⚕ health: ✓');
+      } catch {}
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93): ${parts.join(' · ')}`));
       }
     } catch {}
   }
@@ -3451,7 +3465,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.92+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.93+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));

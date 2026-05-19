@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.93 — 2026-05-20
+
+**handoff 헤드라인에 health 종합 상태 1 토큰 추가** (1.9.81 + 1.9.85 통합).
+
+### Improved — 헤드라인 health 토큰
+- 1.9.81 통합 헤드라인 끝에 `⚕ health: ✓` 또는 `⚕ health: ⚠` 1 토큰 추가.
+- inline 추론 (자식 spawn 없음, 성능 비용 최소):
+  - `.env` 가 `.gitignore` 에 포함되면 ✓
+  - 누락이면 ⚠
+- 헤드라인 라벨도 `(1.9.81/93)` 으로 갱신.
+- 예:
+  ```
+  📊 헤드라인 (1.9.81/93): drift healthy (0) · 📚 9 skills · ⚕ health: ✓
+  📊 헤드라인 (1.9.81/93): drift attention (45) · 🚨 보안 위험 · 📚 9 skills · ⚕ health: ⚠
+  ```
+
+### Use Case
+- AI 에이전트가 handoff 1줄로 워크스페이스 헬스 즉시 인지 (별도 `leerness health` 호출 불필요).
+
+### Verified
+- stress-v39 — health 토큰 노출 + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.92 — 2026-05-20
 
 **`skill info --json` + MCP 20번째 도구 `leerness_skill_info`**.
