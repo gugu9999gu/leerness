@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.117';
+const VERSION = '1.9.118';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -319,6 +319,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.115+ \`leerness handoff --json\` 응답에 **\`memorySurface\` 필드 통합** — 단일 호출로 컨텍스트 + 5종 메모리 상태 동시 회수.
 - 1.9.116+ \`leerness brainstorm\` 회수 범위에 **lessons.md + plan.md** milestone 추가 — Memory Surface 5종 완전 통합.
 - 1.9.117+ \`leerness lesson list [--tag] [--json]\` + MCP **33 도구** (\`leerness_lesson_list\`) — lessons.md 전용 조회 + tag 필터.
+- 1.9.118+ \`leerness decision list [--json]\` + MCP **34 도구** (\`leerness_decision_list\`) — decisions.md 전체 조회 (Decision/Reason/Alternatives/Impact 메타).
 
 ---
 
@@ -1407,6 +1408,57 @@ function lessonSave(root, text) {
   }
   ok(`lesson saved`);
   _autoRoadmap(absRoot(root), 'data-change');
+}
+
+// 1.9.118: decision list — decisions.md 전체 조회 (CLI + --json + MCP)
+function decisionListCmd(root, opts = {}) {
+  root = absRoot(root);
+  const jsonMode = !!opts.json || has('--json');
+  const dp = decisionsPath(root);
+  if (!exists(dp)) {
+    if (jsonMode) {
+      process.stdout.write(JSON.stringify({ version: VERSION, root, total: 0, decisions: [] }, null, 2) + '\n');
+      return;
+    }
+    return ok('decisions.md 없음 — leerness decision add "<title>" 로 첫 결정 영구화');
+  }
+  const text = read(dp);
+  const blocks = _extractDecisionBlocks(text);
+  const decisions = [];
+  for (const block of blocks) {
+    const titleMatch = block.match(/^### (.+)$/m);
+    if (!titleMatch) continue;
+    const titleLine = titleMatch[1].trim();
+    // 형식: "YYYY-MM-DD — <title>" 또는 "<title>" 단독
+    const dateTitleMatch = titleLine.match(/^(\d{4}-\d{2}-\d{2})\s*—\s*(.+)$/);
+    const date = dateTitleMatch ? dateTitleMatch[1] : null;
+    const title = dateTitleMatch ? dateTitleMatch[2].trim() : titleLine;
+    const decisionMatch = block.match(/- Decision:\s*(.+)/);
+    const reasonMatch = block.match(/- Reason:\s*(.+)/);
+    const alternativesMatch = block.match(/- Alternatives:\s*(.+)/);
+    const impactMatch = block.match(/- Impact:\s*(.+)/);
+    decisions.push({
+      date,
+      title,
+      decision: decisionMatch ? decisionMatch[1].trim() : null,
+      reason: reasonMatch ? reasonMatch[1].trim() : null,
+      alternatives: alternativesMatch ? alternativesMatch[1].trim() : null,
+      impact: impactMatch ? impactMatch[1].trim() : null,
+    });
+  }
+  if (jsonMode) {
+    process.stdout.write(JSON.stringify({ version: VERSION, root, total: decisions.length, decisions }, null, 2) + '\n');
+    return;
+  }
+  log(`# 🧠 Decisions (1.9.118)\n`);
+  if (!decisions.length) return ok('decisions 비어있음');
+  log(`총 ${decisions.length}건:`);
+  for (const d of decisions) {
+    log(`\n[${d.date || '?'}] ${d.title}`);
+    if (d.reason) log(`  Reason: ${d.reason}`);
+    if (d.alternatives) log(`  Alternatives: ${d.alternatives}`);
+    if (d.impact) log(`  Impact: ${d.impact}`);
+  }
 }
 
 // 1.9.108: decision add — decisions.md에 새 설계 결정 추가 (외부 AI/MCP 통합 메모리 영구화)
@@ -3773,7 +3825,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 33 도구 (lesson_list 추가, 1.9.117 tag 필터)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 34 도구 (decision_list 추가, 1.9.118)'));
     log('    ' + C.green('npx leerness lesson save "<text>" --tag "..."') + C.dim('       # lessons.md 직접 write (1.9.112 — handoff 자동 회수와 통합)'));
     log('    ' + C.green('npx leerness memory status . --json') + C.dim('                  # Memory Surface 5종 통합 상태 JSON (1.9.114)'));
     log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
@@ -7926,7 +7978,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_plan_add', description: '1.9.110 — plan.md 에 새 milestone 추가 + progress-tracker.md에 자동 동기화 task 생성. 외부 AI가 계획 단계를 직접 등록. 인자: { text (required), status?, progress?, nextAction?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string' }, progress: { type: 'string' }, nextAction: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } },
     { name: 'leerness_lesson_save', description: '1.9.112 — .harness/lessons.md 에 새 lesson 영구화 (Memory Write Surface 5번째). 외부 AI가 세션 중 얻은 통찰을 즉시 영구 기록 — handoff 자동 회수와 통합. 인자: { text (required), tag?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, tag: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } },
     { name: 'leerness_memory_status', description: '1.9.114 — Memory Write Surface 5종 (tasks/decisions/rules/plan/lessons) 통합 상태 JSON. 외부 AI가 한 호출로 영구화 상태 + 카운트 + 최근 항목 회수. summary 필드는 "T2/D3/R1/P5/L7" 형식', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_lesson_list', description: '1.9.117 — lessons.md 전용 list JSON ({ date, text, tag }[]). --tag 필터 지원. 외부 AI가 영구화된 lesson 전체 회수 (vs leerness_lessons 는 다중 source fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, tag: { type: 'string' } } } }
+    { name: 'leerness_lesson_list', description: '1.9.117 — lessons.md 전용 list JSON ({ date, text, tag }[]). --tag 필터 지원. 외부 AI가 영구화된 lesson 전체 회수 (vs leerness_lessons 는 다중 source fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, tag: { type: 'string' } } } },
+    { name: 'leerness_decision_list', description: '1.9.118 — decisions.md 전체 조회 JSON ({ date, title, decision, reason, alternatives, impact }[]). 외부 AI가 영구화된 설계 결정 전체 회수 (Decision + Reason/Alternatives/Impact 메타데이터 포함)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -7991,6 +8044,7 @@ function mcpServeCmd(root) {
           case 'leerness_lesson_save':     cliArgs = ['lesson', 'save', String(args.text || ''), '--path', targetPath, ...(args.tag ? ['--tag', args.tag] : [])]; break;
           case 'leerness_memory_status':   cliArgs = ['memory', 'status', '--path', targetPath, '--json']; break;
           case 'leerness_lesson_list':     cliArgs = ['lesson', 'list', '--path', targetPath, '--json', ...(args.tag ? ['--tag', args.tag] : [])]; break;
+          case 'leerness_decision_list':   cliArgs = ['decision', 'list', '--path', targetPath, '--json']; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -8720,6 +8774,7 @@ async function main() {
     return fail('lesson save "<text>" [--tag "..."] | lesson list [--tag "..."] [--json]');
   }
   // 1.9.108: decision add — decisions.md에 새 설계 결정 추가
+  // 1.9.118: decision list — decisions.md 전체 조회 + --json
   if (cmd === 'decision') {
     const root = absRoot(arg('--path', process.cwd())); const sub = args[1] || '';
     if (sub === 'add') {
@@ -8731,7 +8786,10 @@ async function main() {
       }
       return decisionAdd(root, titleParts.join(' '));
     }
-    return fail('decision add "<title>" --reason "..." --alternatives "..." --impact "..."');
+    if (sub === 'list') {
+      return decisionListCmd(root, { json: has('--json') });
+    }
+    return fail('decision add "<title>" --reason "..." --alternatives "..." --impact "..." | decision list [--json]');
   }
   return help();
 }

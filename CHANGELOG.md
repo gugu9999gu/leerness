@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.9.118 — 2026-05-20
+
+**`leerness decision list [--json]` 새 명령 + MCP 34번째 도구 `leerness_decision_list`** — decisions.md 전체 조회 + 메타데이터.
+
+### Added — `leerness decision list [--json]`
+- 새 CLI: `.harness/decisions.md` 의 모든 설계 결정 조회.
+- 출력: `{ date, title, decision, reason, alternatives, impact }`
+- JSON: `{ version, root, total, decisions[] }`
+- `_extractDecisionBlocks` 사용 → template/code 블록 자동 제외.
+
+### Added — MCP 34번째 도구 `leerness_decision_list`
+- 외부 AI 가 영구화된 설계 결정 + 메타데이터 (Reason/Alternatives/Impact) 전체 회수.
+- 인자: `{ path? }`
+
+### 사용 시나리오
+사용자: "지금까지 등록된 결정들 알려줘"
+→ 외부 AI: `leerness_decision_list({ path: "." })`
+→ `[{ date, title, reason, alternatives, impact }, ...]` 전체 조회
+
+### Memory Surface READ 확장 (4종 모두 list 명령 존재)
+| 영역 | READ 명령 | 라운드 |
+|---|---|---|
+| Tasks | task export | 1.9.60 |
+| Rules | rule list | 1.9.109 |
+| Lessons | lesson list | 1.9.117 |
+| **Decisions** | **decision list** | **1.9.118 ✓** |
+
+(Plan은 plan progress가 기존 존재 — milestone 진행률 보고)
+
+### MCP 도구 수: 33 → 34개
+### JSON 옵션 누적: 16 → 17종
+
+### Verified
+- stress-v63 — decision list CLI + --json + 메타데이터 + MCP + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.117 — 2026-05-20
 
 **`leerness lesson list [--tag] [--json]` 새 명령 + MCP 33번째 도구 `leerness_lesson_list`** — lessons.md 전용 조회 + tag 필터.
