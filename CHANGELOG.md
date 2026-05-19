@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.9.100 — 2026-05-20 🏆 마일스톤 (30 라운드 자율 누적 + 100번째 패치)
+
+**1.9.70 ~ 1.9.99 자율 모드 30 라운드 누적 마일스톤** (stress-v45 30/30 PASS · e2e 219/219 PASS).
+
+### Milestone Summary
+- **버전 진화**: 1.9.70 → 1.9.100 (30 라운드, 모두 stress + e2e + GitHub release)
+- **MCP 도구**: 12 → **21개** (env_check / brainstorm / skill_match / skill_list / health / skill_search / skill_info / benchmark 추가)
+- **handoff 자동 회수 5단**: lessons + skill 추천 + history hit + brainstorm hits + 헤드라인
+- **3중 보안 가드**: drift 5번째 신호 (1.9.78) + handoff 요약 (1.9.76) + CRITICAL 자동 회복 (1.9.80)
+- **JSON 옵션 10종**: handoff, lessons, skill list/info/search, health, env check, benchmark, drift check, usage stats
+- **새 명령 3종**: `env check/sync` (1.9.71) · `health` (1.9.85) · `skill search` (1.9.90)
+- **handoff --quiet** (1.9.99) — 자동화/CI 비대화 모드
+
+### Verified — stress-v45 종합 검증 (1.9.70~99 30 라운드)
+- **총 30 / PASS 30 / FAIL 0 · 34015ms** (100% 통과)
+- R70~R99 핵심 기능 시나리오 28개 + MCP 21 도구 + 5종 시크릿 패턴 안전 검증
+- e2e 219/219 PASS 매 라운드 유지
+- 누적 회귀 0건, 신규 회귀 없음
+
+### Internal — 비공개 종합 보고서
+- `_reports/AUTONOMOUS_ROUNDS_1.9.70-1.9.99.md` — 30 라운드 자율 모드 누적 + 마일스톤 마무리
+
+### Stats (30 라운드 누적)
+- stress 시나리오 ~440개 모두 PASS
+- 디버그 기록 6건 (1차 실패 → 진단 → 수정 → PASS)
+- GitHub release/tag 30개 (v1.9.70 ~ v1.9.99 + v1.9.100)
+- 사용자 명시 정책 7개 모두 ✓
+
+### 사용자 명시 정책 준수 (verbatim)
+- ✓ 매 라운드 stress test 필수 검수
+- ✓ 이전 중요 기능 정상 작동 검증 (누적 회귀)
+- ✓ 성능 테스트 병행 (handoff median ~700ms 유지)
+- ✓ GitHub 배포 (https://github.com/gugu9999gu/leerness)
+- ✓ `_reports/` 비공개 (`.gitignore` + `.npmignore`)
+- ✓ 설치 가이드 매 라운드 동기화 (`_banner` quickStart + `session-workflow.md`)
+- ✓ 보안: `.env` 실제 값 절대 미노출, 시크릿 하드코딩 차단
+
+---
+
 ## 1.9.99 — 2026-05-20
 
 **`leerness handoff --quiet` 옵션** (자동화/CI 모드용 최소 출력).

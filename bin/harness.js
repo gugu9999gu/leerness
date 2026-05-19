@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.99';
+const VERSION = '1.9.100';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -298,6 +298,11 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.85+ \`leerness health\` 한 줄로 종합 점검 (drift + 보안 + skills + usage + tasks).
 - 1.9.78/82+ \`leerness drift check --auto-fix\` 가 보안 신호 발견 시 \`audit --fix\` 자동 실행 → 재검사.
 - 1.9.86+ MCP server **18 도구** (handoff/drift/audit/verify_claim/contract/agents/reuse/whats_new/usage_stats/session_close/skill_suggest/lessons/task_export/env_check/brainstorm/skill_match/skill_list/health).
+- 1.9.94+ MCP server **21 도구** (skill_search/skill_info/benchmark 추가).
+- 1.9.96+ \`leerness handoff --json\` (외부 AI/MCP 통합용 구조화 출력).
+- 1.9.98+ \`leerness skill publish\` 보안 사전 점검 통합 (health 통과 후 publish).
+- 1.9.99+ \`leerness handoff --quiet\` (자동화/CI 모드 — 자동 회수 라인 비활성).
+- 1.9.100 🏆 마일스톤 — 30 라운드 자율 누적, stress-v45 30/30 PASS, e2e 219/219 PASS.
 
 ---
 
@@ -3491,18 +3496,22 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.99+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.100+ 워크플로 — 30 라운드 자율 누적 마일스톤)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
-    log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
-    log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
-    log('    ' + C.green('npx leerness verify-claim T-0001 --run-tests') + C.dim('        # AI 거짓 완료 자동 검증'));
-    log('    ' + C.green('npx leerness env check .') + C.dim('                             # .env ↔ .env.example 동기화 검사 (1.9.71)'));
-    log('    ' + C.green('npx leerness health .') + C.dim('                                # 종합 헬스 체크 — drift + 보안 + skill + MCP (1.9.85)'));
+    log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
+    log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
+    log('    ' + C.green('npx leerness handoff . --json') + C.dim('                       # 외부 AI/MCP 통합 JSON 출력 (1.9.96)'));
+    log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적'));
+    log('    ' + C.green('npx leerness skill search "<capability>"') + C.dim('            # capability 부분 일치 (1.9.90)'));
+    log('    ' + C.green('npx leerness env sync .') + C.dim('                              # .env ↔ .env.example 동기화 (1.9.71 보안)'));
+    log('    ' + C.green('npx leerness health . --json') + C.dim('                         # 종합 헬스 체크 — drift + 보안 + skill + MCP (1.9.85)'));
+    log('    ' + C.green('npx leerness drift check . --auto-fix') + C.dim('                # drift + 보안 자동 회복 (1.9.82)'));
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 21 도구 (benchmark 포함, 1.9.94)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 21 도구 (benchmark/health/skill_search 포함)'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
+    log('    ' + C.green('npx leerness skill publish --bundle-only') + C.dim('             # 보안 사전 점검 통합 publish (1.9.98)'));
     log('');
   }
 }
