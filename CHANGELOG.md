@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.9.71 — 2026-05-20
+
+**`.env` / `.env.example` 자동 동기화 (보안 정책: 키만, 실제 값 절대 노출 안 함)**.
+
+### Added — `leerness env check` / `env sync` 명령
+- `leerness env check [<path>]` — `.env`에 있는데 `.env.example`에 없는 키 / 반대도 자동 감지.
+  - `--json`: 구조화된 JSON 출력 (CI 친화).
+  - exit code: `.env.example` 누락 키 ≥1 시 1 (보안 가시화).
+- `leerness env sync [<path>]` — 누락 키만 `.env.example` 끝에 append (값은 빈 문자열).
+
+### Improved — `leerness audit` 통합
+- 매 audit 시 `.env` ↔ `.env.example` 자동 비교, 누락 시 warning 추가.
+- `audit --fix` 시 누락 키 자동 추가 (보안 정책: 실제 값 미노출).
+- `--no-env-check`로 비활성화 가능.
+
+### 보안 정책 (검증됨)
+- `.env`의 실제 값은 **절대** `.env.example`로 옮기지 않음.
+- 추가되는 줄: `KEY=` (빈 문자열).
+- 사용자 글로벌 룰 (.env 보안) 준수.
+
+### Verified
+- stress-v17 — env check / sync / audit 통합 + 보안 정책 + 누적 회귀.
+- e2e 회귀: 219/219 PASS 유지.
+
+---
+
 ## 1.9.70 — 2026-05-19
 
 **MCP server `tools/call` 자동 사용 통계** (1.9.65 usage-stats 확장).

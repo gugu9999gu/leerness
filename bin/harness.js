@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.70';
+const VERSION = '1.9.71';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1476,6 +1476,32 @@ function audit(root) {
           } else {
             ok('npm CVE: 0건');
           }
+        }
+      }
+    } catch {}
+  }
+  // 1.9.71: .env / .env.example 동기화 감사 (--no-env-check로 끄기)
+  if (!has('--no-env-check')) {
+    try {
+      const d = envDiff(root);
+      if (exists(d.envPath) && exists(d.examplePath)) {
+        if (d.inEnvOnly.length) {
+          warnings++;
+          warn(`.env에 있는 키 ${d.inEnvOnly.length}건이 .env.example에 누락: ${d.inEnvOnly.slice(0, 4).join(', ')}${d.inEnvOnly.length > 4 ? ' …' : ''}`);
+          if (fix) {
+            // 자동 동기화: 누락 키만 .env.example 끝에 append (값 비움)
+            let example = read(d.examplePath);
+            if (!example.endsWith('\n')) example += '\n';
+            example += `\n# 1.9.71 audit --fix: 누락 키 자동 추가 (값은 빈 문자열, 보안 정책)\n`;
+            for (const k of d.inEnvOnly) example += `${k}=\n`;
+            writeUtf8(d.examplePath, example);
+            ok(`  ↳ fixed: .env.example에 ${d.inEnvOnly.length}건 자동 추가 (값은 빈 문자열, 1.9.71)`);
+            fixed++;
+          } else {
+            log(`    → 자동 동기화: leerness env sync 또는 leerness audit --fix`);
+          }
+        } else {
+          ok('.env ↔ .env.example 동기화됨 (1.9.71)');
         }
       }
     } catch {}
@@ -3216,11 +3242,12 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.70+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.71+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
     log('    ' + C.green('npx leerness verify-claim T-0001 --run-tests') + C.dim('        # AI 거짓 완료 자동 검증'));
+    log('    ' + C.green('npx leerness env check .') + C.dim('                             # .env ↔ .env.example 동기화 검사 (1.9.71)'));
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
@@ -7138,6 +7165,77 @@ function whatsNewCmd(root) {
   log(`  4. 상세: \`cat CHANGELOG.md\` 또는 \`leerness whats-new --json\``);
 }
 
+// 1.9.71: .env / .env.example 자동 동기화 — 누락 키 감지 + (옵션) 자동 추가
+// 보안 정책: .env의 실제 값은 절대 옮기지 않음. .env.example엔 키만 (빈 값).
+function _parseEnvKeys(text) {
+  // KEY=value 형식, comment(#) 무시, 빈 줄 무시
+  const out = new Set();
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = line.match(/^([A-Z_][A-Z0-9_]*)\s*=/i);
+    if (m) out.add(m[1]);
+  }
+  return out;
+}
+function envDiff(root) {
+  root = absRoot(root || process.cwd());
+  const envPath = path.join(root, '.env');
+  const examplePath = path.join(root, '.env.example');
+  const envKeys = exists(envPath) ? _parseEnvKeys(read(envPath)) : new Set();
+  const exKeys = exists(examplePath) ? _parseEnvKeys(read(examplePath)) : new Set();
+  const inEnvOnly = [...envKeys].filter(k => !exKeys.has(k));
+  const inExampleOnly = [...exKeys].filter(k => !envKeys.has(k));
+  return { envPath, examplePath, envKeys: [...envKeys], exKeys: [...exKeys], inEnvOnly, inExampleOnly };
+}
+function envCheckCmd(root) {
+  const d = envDiff(root);
+  const isJson = has('--json');
+  if (isJson) { log(JSON.stringify(d, null, 2)); return; }
+  log(`# leerness env check (1.9.71)`);
+  log(`.env 존재: ${exists(d.envPath)} · .env.example 존재: ${exists(d.examplePath)}`);
+  log(`총 .env 키 ${d.envKeys.length} · .env.example 키 ${d.exKeys.length}`);
+  if (d.inEnvOnly.length) {
+    log('');
+    log(`⚠ .env에 있는데 .env.example에 없는 키 ${d.inEnvOnly.length}건 (보안 정책: 값 없이 키만 추가):`);
+    for (const k of d.inEnvOnly) log(`  - ${k}`);
+  }
+  if (d.inExampleOnly.length) {
+    log('');
+    log(`ℹ .env.example에 있는데 .env에 없는 키 ${d.inExampleOnly.length}건 (런타임 누락 가능):`);
+    for (const k of d.inExampleOnly) log(`  - ${k}`);
+  }
+  if (!d.inEnvOnly.length && !d.inExampleOnly.length) {
+    log('');
+    ok('.env ↔ .env.example 동기화됨');
+  } else {
+    log('');
+    log(`💡 자동 동기화: leerness env sync${d.inEnvOnly.length ? ' (.env.example에 누락 키 추가 — 값은 빈 문자열)' : ''}`);
+  }
+  // 1.9.71: exit code = .env.example 누락 키 있으면 1 (보안 가시화)
+  if (d.inEnvOnly.length) process.exitCode = 1;
+}
+function envSyncCmd(root) {
+  const d = envDiff(root);
+  log(`# leerness env sync (1.9.71)`);
+  if (!exists(d.examplePath)) {
+    fail(`.env.example 없음 — leerness init . 먼저 실행`);
+    return;
+  }
+  if (!d.inEnvOnly.length) {
+    ok('동기화 불필요 — .env.example에 누락 키 없음');
+    return;
+  }
+  // 누락 키를 .env.example 끝에 append (값 비움, 보안 정책 코멘트 동반)
+  let example = read(d.examplePath);
+  if (!example.endsWith('\n')) example += '\n';
+  example += `\n# 1.9.71 sync: .env에서 발견된 누락 키 (값은 빈 문자열 — 보안 정책)\n`;
+  for (const k of d.inEnvOnly) example += `${k}=\n`;
+  writeUtf8(d.examplePath, example);
+  ok(`${d.inEnvOnly.length}건 추가됨 → ${rel(root, d.examplePath)}`);
+  for (const k of d.inEnvOnly) log(`  + ${k}=`);
+}
+
 function usageStatsCmd(root) {
   root = absRoot(root || process.cwd());
   const stats = _readUsageStats(root);
@@ -7466,6 +7564,9 @@ async function main() {
   if (cmd === 'contract' && args[1] === 'verify') return contractVerifyCmd(args[2], args[3]);
   if (cmd === 'drift' && (args[1] === 'check' || !args[1])) return driftCheckCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'usage' && (args[1] === 'stats' || !args[1])) return usageStatsCmd(args[2] || arg('--path', process.cwd()));
+  // 1.9.71: leerness env check / sync — .env vs .env.example 자동 동기화
+  if (cmd === 'env' && args[1] === 'check') return envCheckCmd(args[2] || arg('--path', process.cwd()));
+  if (cmd === 'env' && args[1] === 'sync')  return envSyncCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'reuse' && args[1] === 'autodetect') return reuseAutodetectCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'setup-agents' || cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(args[1] && args[1] !== 'agents' ? args[1] : (args[2] || process.cwd()));
