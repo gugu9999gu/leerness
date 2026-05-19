@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.66 — 2026-05-19
+
+**성능 최적화 2차 + MCP 13번째 도구**.
+
+### Performance
+- **`listAllSkills` 메모리 캐시 (`_SKILLS_LIST_CACHE`)** — userSkillsDir mtime 기반 캐시. `skill list/info/match/discover/suggest` 가 같은 인덱스 공유.
+- `saveUserSkill`/`skillRemove`에서 캐시 invalidate — skill 추가/제거 즉시 반영.
+
+### MCP server — 13번째 도구
+- **`leerness_task_export`** — 1.9.60 TodoWrite 호환 JSON을 외부 에이전트(Claude Code, Cursor 등)에 노출. `to: <path>` 또는 stdout JSON 모두 지원.
+- MCP server 도구 카운트: 12 → **13**.
+
+### Verified
+- stress-v12 (1.9.66 검증) — listAllSkills 캐시 정합성 + MCP 13 도구 + warm-up 1회 시나리오 보강.
+- e2e 회귀: 219/219 PASS 유지.
+
+---
+
 ## 1.9.65 — 2026-05-19
 
 **성능 최적화 1차 — usage-stats 메모리 캐시 + lessons 인덱스 캐시**.

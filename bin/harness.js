@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.65';
+const VERSION = '1.9.66';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -715,13 +715,34 @@ function loadUserSkill(root, id) {
 function saveUserSkill(root, id, data) {
   const dir = path.join(userSkillsDir(root), id); mkdirp(dir);
   writeUtf8(path.join(dir, 'skill.json'), JSON.stringify(data, null, 2) + '\n');
+  // 1.9.66: 캐시 invalidate (skill 추가/변경 즉시 반영)
+  try { _SKILLS_LIST_CACHE.delete(absRoot(root)); } catch {}
   // README mirror
   const usage = data.usage || { count: 0 };
   const readme = `# ${data.displayNameKo || id}\n\n## Capabilities\n${(data.capabilities || []).map(c => '- ' + c).join('\n') || '-'}\n\n## Sources\n${(data.sources || []).map(s => `- ${s.url || s}`).join('\n') || '-'}\n\n## Patterns (성공 명령/접근)\n${(data.patterns || []).map(p => `- \`${p.command}\` — ${p.note || ''}`).join('\n') || '-'}\n\n## Optimization history\n${(data.optimizations || []).map(o => `- ${o.at}: ${o.note || ''}${o.before||o.after?` (${o.before||'?'} → ${o.after||'?'})`:''}`).join('\n') || '-'}\n\n## Usage\n${usage.count || 0}회 사용 / 마지막: ${usage.lastUsed || '-'}\n${usage.lastNote ? '\n마지막 노트: ' + usage.lastNote : ''}\n`;
   writeUtf8(path.join(dir, 'README.md'), readme);
 }
 
+// 1.9.66: listAllSkills 메모리 캐시 — skill list/info/match/discover/suggest 가 공유
+// key: root → { mtime(skillsDir), out }
+const _SKILLS_LIST_CACHE = new Map();
 function listAllSkills(root) {
+  // 캐시 hit 확인: userSkillsDir mtime 동일 시 재구성 skip
+  if (root) {
+    try {
+      const dir = userSkillsDir(root);
+      const dirMtime = exists(dir) ? fs.statSync(dir).mtimeMs : 0;
+      const key = absRoot(root);
+      const cached = _SKILLS_LIST_CACHE.get(key);
+      if (cached && cached.dirMtime === dirMtime) return cached.out;
+      const out = _buildAllSkills(root);
+      _SKILLS_LIST_CACHE.set(key, { dirMtime, out });
+      return out;
+    } catch { return _buildAllSkills(root); }
+  }
+  return _buildAllSkills(root);
+}
+function _buildAllSkills(root) {
   const out = {};
   // 1.9.10: skillCatalog의 _source('skillpack' 또는 'builtin')를 보존
   for (const [k, v] of Object.entries(skillCatalog)) out[k] = { ...v, _source: v._source || 'builtin' };
@@ -738,6 +759,10 @@ function listAllSkills(root) {
     }
   }
   return out;
+}
+// 1.9.66: skill 추가/제거 시 캐시 invalidate (외부 helper)
+function _invalidateSkillsCache(root) {
+  try { _SKILLS_LIST_CACHE.delete(absRoot(root)); } catch {}
 }
 
 function skillList(root) {
@@ -826,6 +851,8 @@ function skillRemove(root, id) {
   if (!id) return fail('id required');
   const dir = path.join(userSkillsDir(root), id);
   if (!exists(dir)) return fail(`skill folder not found: ${id}`);
+  // 1.9.66: 캐시 invalidate
+  try { _SKILLS_LIST_CACHE.delete(absRoot(root)); } catch {}
   if (skillCatalog[id]) {
     // catalog 스킬은 로컬 메타만 제거 (카탈로그는 패키지 내장이라 영구 제거 불가)
     fs.rmSync(dir, { recursive: true, force: true });
@@ -6815,7 +6842,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_usage_stats', description: 'leerness 명령별 누적 호출 통계 + drift 통계', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_session_close', description: '세션 마감 — handoff/current-state/task-log 자동 갱신', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_skill_suggest', description: '1.9.53 — 사용 패턴 자동 분석 → 새 skill 후보 제안 (Hermes-style 자동 학습)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, min: { type: 'number' }, days: { type: 'number' } } } },
-    { name: 'leerness_lessons', description: '1.9.7/54 — 과거 결정·실수 자동 회수 (--auto: 현재 task 키워드 자동 추출)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, query: { type: 'string' }, auto: { type: 'boolean' }, limit: { type: 'number' } } } }
+    { name: 'leerness_lessons', description: '1.9.7/54 — 과거 결정·실수 자동 회수 (--auto: 현재 task 키워드 자동 추출)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, query: { type: 'string' }, auto: { type: 'boolean' }, limit: { type: 'number' } } } },
+    { name: 'leerness_task_export', description: '1.9.60/66 — leerness task → Claude Code TodoWrite 호환 JSON (외부 AI 양방향 sync)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, to: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -6857,6 +6885,7 @@ function mcpServeCmd(root) {
           case 'leerness_session_close':   cliArgs = ['session', 'close', targetPath]; break;
           case 'leerness_skill_suggest':   cliArgs = ['skill', 'suggest', '--path', targetPath, '--json', ...(args.min ? ['--min', String(args.min)] : []), ...(args.days ? ['--days', String(args.days)] : [])]; break;
           case 'leerness_lessons':         cliArgs = ['lessons', '--path', targetPath, ...(args.auto ? ['--auto'] : []), ...(args.query ? ['--query', args.query] : []), ...(args.limit ? ['--limit', String(args.limit)] : [])]; break;
+          case 'leerness_task_export':     cliArgs = ['task', 'export', '--path', targetPath, ...(args.to ? ['--to', args.to] : ['--json'])]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
