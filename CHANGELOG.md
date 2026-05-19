@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.9.111 — 2026-05-20
+
+**41 라운드 자율 모드 누적 보고서 마무리** (`_reports/AUTONOMOUS_ROUNDS_1.9.70-1.9.110.md`) + stress-v56 종합 회귀.
+
+### Internal — 비공개 종합 보고서
+- `_reports/AUTONOMOUS_ROUNDS_1.9.70-1.9.110.md` — 41 라운드 (1.9.70~1.9.110) 종합 분석
+- MCP 도구 진화 표 (10 → 30, 20개 추가)
+- Memory Write Surface 4종 완성 (tasks CRUD + decisions + rules + plan)
+- JSON 옵션 14종 누적
+- 보안 3중 가드 + audit 11 kind
+- 디버그 기록 7건
+- 성능 측정 (11개 명령 median)
+- 사용자 명시 정책 7개 모두 ✓
+
+### Verified — stress-v56 종합 (1.9.70~110 핵심 기능 회귀)
+- 마일스톤 (1.9.100/110) 핵심 시나리오 모두 PASS
+- Memory Write Surface 4종 통합 사이클 PASS
+- e2e 219/219 PASS
+
+### Badge
+- README 에 `autonomous-rounds-41` 배지 추가
+
+---
+
 ## 1.9.110 — 2026-05-20 🎉 **MCP 30 도구 마일스톤**
 
 **MCP 30번째 도구 `leerness_plan_add`** (plan.md milestone + progress-tracker 자동 동기화).
