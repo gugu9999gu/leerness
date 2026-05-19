@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.75';
+const VERSION = '1.9.76';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1930,6 +1930,40 @@ function handoff(root) {
       }
     } catch {}
   }
+  // 1.9.76: handoff 보안 상태 요약 — .env vs .env.example + .gitignore 시크릿 패턴 1줄 요약
+  // 매 세션 시작 시 AI가 보안 위험을 즉시 인지. --no-security-summary 또는 --compact로 끄기
+  if (!has('--no-security-summary') && !has('--compact')) {
+    try {
+      const envExists = exists(path.join(root, '.env'));
+      if (envExists) {
+        const issues = [];
+        // 1) env diff
+        try {
+          const d = envDiff(root);
+          if (d.inEnvOnly.length) issues.push(`.env→.env.example 누락 ${d.inEnvOnly.length}건`);
+        } catch {}
+        // 2) gitignore 시크릿 패턴
+        try {
+          const gi = path.join(root, '.gitignore');
+          const giText = exists(gi) ? read(gi) : '';
+          const giLines = giText.split('\n').map(l => l.trim());
+          const SECRET_PATTERNS = ['.env', '.env.local', '.env.production', '.env.*.local', '*.pem', 'credentials.json'];
+          const missing = SECRET_PATTERNS.filter(p => !giLines.some(l => l === p || l === '/' + p));
+          if (missing.length) issues.push(`.gitignore 시크릿 누락 ${missing.length}건`);
+        } catch {}
+        if (issues.length) {
+          const isTty = process.stdout && process.stdout.isTTY;
+          const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+          const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+          log('');
+          log(red(`## 🔒 보안 요약 (1.9.76) — ${issues.length}건 주의`));
+          for (const i of issues) log(dim(`  ⚠ ${i}`));
+          log(dim(`  → 자동 수정: leerness audit --fix · 상세: leerness env check / leerness audit`));
+          log('');
+        }
+      }
+    } catch {}
+  }
   // 1.9.41: 최근 migrate 차분 알림 — migration-report.md가 24h 내면 "AI must re-read" 블록 자동 표시
   // 같은 채팅 세션의 AI 청크가 이전 버전 마인드셋이어도 새 도구를 즉시 인지하도록.
   if (!has('--no-workflow-guide') && !has('--compact')) {
@@ -3275,7 +3309,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.75+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.76+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));

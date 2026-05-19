@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.9.76 — 2026-05-20
+
+**`leerness handoff`에 보안 상태 요약 자동 표시** (1.9.71 env + 1.9.75 gitignore 결합).
+
+### Added — handoff 보안 요약
+- 매 `leerness handoff` 시 `.env` 파일이 존재하면 다음을 자동 검증해 1-2 line으로 표시:
+  - `.env→.env.example` 누락 키 (1.9.71)
+  - `.gitignore` 시크릿 패턴 누락 (1.9.75)
+- 정상 시 출력 없음 (잡음 방지).
+- 위험 시:
+  ```
+  ## 🔒 보안 요약 (1.9.76) — N건 주의
+    ⚠ .env→.env.example 누락 X건
+    ⚠ .gitignore 시크릿 누락 Y건
+    → 자동 수정: leerness audit --fix · 상세: leerness env check / leerness audit
+  ```
+- 끄기: `--no-security-summary` 또는 `--compact` (compact mode와 자동 통합).
+
+### Use Case
+- AI 에이전트가 **세션 시작 시 즉시 보안 위험 인지** — 사용자에게 명시적으로 알리고 자동 수정 제안.
+
+### Verified
+- stress-v22 — 보안 요약 노출 / 정상 시 OK / --no-security-summary + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.75 — 2026-05-20
 
 **`leerness audit` 보안 강화 — `.gitignore` 시크릿 패턴 자동 검증** (사용자 글로벌 룰 ".gitignore 보안 체크리스트" 정책 자동화).
