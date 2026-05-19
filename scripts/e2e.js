@@ -950,6 +950,50 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
+// 1.9.51/52 회귀
+total++;
+{
+  // benchmark --scenario all → 4개 시나리오 모두 감지
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sc-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'benchmark', tmpC, '--scenario', 'all', '--json'], { encoding: 'utf8', timeout: 60000 });
+  let j = null;
+  try { j = JSON.parse(r.stdout); } catch {}
+  const ok = j && j.scenarios && j.scenarios.length === 4 && j.detectedCount === 4;
+  console.log(ok ? '✓ B(1.9.51) benchmark --scenario all: 4/4 leerness 고유 가치 자동 감지' : `✗ scenario all 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
+total++;
+{
+  // benchmark --scenario 알 수 없는 ID → 친절 안내
+  const r = cp.spawnSync(process.execPath, [CLI, 'benchmark', '--scenario', 'unknown-x'], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status !== 0 && /알 수 없는 scenario/.test(r.stdout + r.stderr);
+  console.log(ok ? '✓ B(1.9.51) benchmark --scenario unknown: 친절 안내' : `✗ scenario 안내 실패`);
+  if (!ok) { failed++; console.log((r.stdout + r.stderr).slice(0, 300)); }
+}
+
+total++;
+{
+  // _parseSkillCatalog 4 형식 인식 — node -e로 동적 평가
+  const src = fs.readFileSync(CLI, 'utf8');
+  const m = src.match(/function _parseSkillCatalog\([\s\S]*?\n\}\n/);
+  if (!m) {
+    console.log('✗ _parseSkillCatalog 함수 위치 못 찾음');
+    failed++;
+  } else {
+    const fn = eval('(' + m[0].replace('function _parseSkillCatalog', 'function') + ')');
+    const jsonR = fn(JSON.stringify({ skills: [{ name: 'a', description: 'A' }] }), null);
+    const rssR = fn('<rss><channel><item><title>X</title><link>http://x.com/s.md</link></item></channel></rss>', null);
+    const mdR = fn('- [office](o.md) — Office\n- [crawling](c.md) — Web', null);
+    const urlR = fn('https://x.com/foo/SKILL.md', null);
+    const ok = jsonR[0].format === 'json' && rssR[0].format === 'rss'
+      && mdR[0].format === 'markdown' && urlR[0].format === 'urls';
+    console.log(ok ? '✓ B(1.9.52) _parseSkillCatalog: 4 형식 (JSON/RSS/Markdown/llms.txt) 모두 인식' : `✗ catalog 형식 실패`);
+    if (!ok) { failed++; console.log(JSON.stringify({jsonR, rssR, mdR, urlR}).slice(0, 400)); }
+  }
+}
+
 // 1.9.48~50 회귀
 total++;
 {

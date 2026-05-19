@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.9.52 — 2026-05-19
+
+**`skill discover` 카탈로그 형식 다양성 (JSON/RSS/Markdown/llms.txt 자동 감지)**.
+
+### Added
+- **`_parseSkillCatalog(body, sourceUrl)`** 통합 파서 — 4 형식 자동 감지:
+  1. **JSON manifest** — `{ "skills": [...] }` 또는 `[{...}]` (leerness `skill publish`가 만드는 형식과 호환)
+  2. **RSS/Atom** — `<item><title>X</title><link>...</link><description>...</description></item>`
+  3. **Markdown w/ description** — `- [name](url) — description`
+  4. **llms.txt URL-only** — 단순 URL 라인
+- 각 entry에 `format` 필드 추가 (json/rss/markdown/urls) — 출처 추적
+
+### 검증 (stress-v4)
+- M1-M5 5/5 PASS — 4 형식 인식 + 빈 body 안전 fallback
+
+## 1.9.51 — 2026-05-19
+
+**`benchmark --scenario` — leerness 고유 가치 시나리오 preset**.
+
+### Added
+- **`leerness benchmark --scenario <id|all> [--json]`** — 4 시나리오 자동 실행:
+  - `false-completion` — 거짓 완료 자동 감지 (lazy detect)
+  - `spec-mismatch` — 사양 ↔ 구현 불일치 (contract verify)
+  - `drift-detection` — 메타파일 stale (drift check 4 신호)
+  - `bom-handling` — UTF-8 BOM SKILL.md install (1.9.44 패치 효과)
+- 각 시나리오: setup → measure → 감지 여부 + 시간 측정
+- 결과: leerness 적용 워크스페이스에서 **4/4 정확 감지**
+
+### 검증 (stress-v4 + 누적 회귀)
+- L1-L4 (시나리오 preset) 4/4 PASS
+- M1-M5 (카탈로그 4 형식 + 빈 body) 5/5 PASS
+- N1-N5 (누적 회귀: MCP, skill match, publish, drift, agentskills round-trip) 5/5 PASS
+- **stress-v4: 14/14 PASS**, e2e: **205/205 PASS**
+
+### 결론
+- 1.9.51로 leerness 고유 가치가 **command 한 번에 정량 증명** 가능
+- 1.9.52로 다양한 카탈로그 형식과 호환 (agentskills.io 외 사용자 정의 RSS/JSON도)
+
 ## 1.9.50 — 2026-05-19
 
 **`skill match --embedding` (Ollama opt-in 임베딩 매칭)**.

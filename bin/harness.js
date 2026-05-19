@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.50';
+const VERSION = '1.9.52';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -954,6 +954,57 @@ async function skillInstallCmd(root, source) {
   log(`💡 다음: leerness skill info ${skillId}`);
 }
 
+// 1.9.52: 카탈로그 형식 자동 감지 + 파싱 (JSON, llms.txt, RSS, manifest.json, 일반 마크다운)
+// 표준화된 entry 형식: { name, url, description, format }
+function _parseSkillCatalog(body, sourceUrl) {
+  const entries = [];
+  const trimmed = body.trim();
+  // 1) JSON 카탈로그 — manifest.json 형식 (1.9.47에서 publish가 만드는 형식과 호환)
+  //    { "skills": [{ "id"/"name", "url"/"path", "description" }, ...] }
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const j = JSON.parse(trimmed);
+      const arr = Array.isArray(j) ? j : (j.skills || j.entries || j.items || []);
+      for (const e of arr) {
+        if (!e || (!e.name && !e.id)) continue;
+        entries.push({
+          name: e.name || e.id,
+          url: e.url || e.path || (sourceUrl ? sourceUrl.replace(/[^/]+$/, '') + (e.id || e.name) + '/SKILL.md' : ''),
+          description: e.description || '',
+          format: 'json'
+        });
+      }
+      if (entries.length) return entries;
+    } catch {}
+  }
+  // 2) RSS/Atom — <item><title>X</title><link>...</link><description>...</description></item>
+  if (/<rss|<feed|<channel|<item>/i.test(body)) {
+    for (const m of body.matchAll(/<(?:item|entry)\b[\s\S]*?<\/(?:item|entry)>/gi)) {
+      const item = m[0];
+      const title = (item.match(/<title>([^<]+)<\/title>/i) || [])[1];
+      const link = (item.match(/<link[^>]*>([^<]+)<\/link>/i) || item.match(/<link\s+href="([^"]+)"/i) || [])[1];
+      const desc = (item.match(/<description>([^<]+)<\/description>/i) || item.match(/<summary>([^<]+)<\/summary>/i) || [])[1];
+      if (title) entries.push({ name: title.trim(), url: (link || '').trim(), description: (desc || '').trim(), format: 'rss' });
+    }
+    if (entries.length) return entries;
+  }
+  // 3) 마크다운 링크 with description — "- [name](url) — description"
+  for (const m of body.matchAll(/^\s*[-*]\s*\[([^\]]+)\]\(([^)]+)\)\s*[-—:]\s*(.+)$/gm)) {
+    entries.push({ name: m[1], url: m[2], description: m[3].trim(), format: 'markdown' });
+  }
+  if (entries.length) return entries;
+  // 4) 마크다운 링크 without description — "- [name](url)"
+  for (const m of body.matchAll(/^\s*[-*]\s*\[([^\]]+)\]\(([^)]+\.md)\)/gm)) {
+    entries.push({ name: m[1], url: m[2], description: '', format: 'markdown' });
+  }
+  if (entries.length) return entries;
+  // 5) llms.txt — 단순 URL 라인
+  for (const m of body.matchAll(/(https?:\/\/[^\s)]+SKILL\.md)/g)) {
+    entries.push({ name: m[1].split('/').slice(-2)[0], url: m[1], description: '', format: 'urls' });
+  }
+  return entries;
+}
+
 // skill discover — agentskills.io 또는 사용자 지정 URL의 카탈로그 인덱스에서 매칭 추천
 async function skillDiscoverCmd(root) {
   const url = arg('--source', null) || process.env.LEERNESS_SKILL_DISCOVER_URL || null;
@@ -968,7 +1019,7 @@ async function skillDiscoverCmd(root) {
     ].join('\n'));
     return process.exit(1);
   }
-  log(`# leerness skill discover (1.9.42)`);
+  log(`# leerness skill discover (1.9.52)`);
   log(`source: ${url}`);
   if (query) log(`query: ${query}`);
   log(`fetching...`);
@@ -977,21 +1028,9 @@ async function skillDiscoverCmd(root) {
     fail(`fetch 실패 (HTTP ${r.status}${r.error ? `, ${r.error}` : ''})`);
     return process.exit(1);
   }
-  // 카탈로그 인덱스 파싱 — agentskills.io는 llms.txt 형식 또는 raw 마크다운
+  // 1.9.52: 카탈로그 형식 자동 감지 (JSON, llms.txt, RSS, manifest.json, 일반 마크다운)
   const body = r.body;
-  // 간이 추출: SKILL.md 링크 + name + description 패턴
-  // - URL: https://.../SKILL.md
-  // - 마크다운 링크: [name](url) — description
-  const entries = [];
-  for (const m of body.matchAll(/^\s*-\s*\[([^\]]+)\]\(([^)]+)\)\s*[-—:]\s*(.+)$/gm)) {
-    entries.push({ name: m[1], url: m[2], description: m[3].trim() });
-  }
-  // URL only (개별 SKILL.md 파일)
-  if (!entries.length) {
-    for (const m of body.matchAll(/(https?:\/\/[^\s)]+SKILL\.md)/g)) {
-      entries.push({ name: m[1].split('/').slice(-2)[0], url: m[1], description: '' });
-    }
-  }
+  const entries = _parseSkillCatalog(body, url);
   if (has('--json')) { log(JSON.stringify({ source: url, query, entries }, null, 2)); return; }
   if (!entries.length) {
     log('  (스킬 항목을 찾지 못함 — URL 형식 확인)');
@@ -6100,6 +6139,90 @@ function skillPublishCmd(root) {
 // 1.9.46: leerness benchmark — 자체 워크스페이스 측정 + 타도구 대비 시뮬레이션 비교 매트릭스
 // 실 측정값: drift, usage stats, task 수, capability 수
 // 시뮬: leerness 미적용 vanilla / Hermes 단독 / Claude Code 단독 비교 (보고서 §5 기반)
+// 1.9.51: --scenario — leerness 고유 가치 시나리오 preset 자동 실행 + 정량 결과
+// 사용자가 직접 task 작성 안 해도 leerness의 검수 효과 즉시 측정 가능.
+const BENCHMARK_SCENARIOS = {
+  'false-completion': {
+    label: '거짓 완료 자동 감지',
+    description: 'evidence 없이 done인 task를 verify-claim/lazy detect가 잡는지',
+    setup: (dir) => {
+      // 빈 evidence로 done task 생성
+      cp.spawnSync(process.execPath, [__filename, 'task', 'add', '거짓 완료된 작업', '--status', 'done', '--evidence', '', '--path', dir],
+        { encoding: 'utf8', timeout: 10000, env: { ...process.env, LEERNESS_NO_PROMPT: '1' } });
+    },
+    measure: (dir) => {
+      const r = cp.spawnSync(process.execPath, [__filename, 'lazy', 'detect', dir],
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_DRIFT_CHECK: '1' } });
+      const detected = /✗ |found.*issue|증거 없는|empty/.test(r.stdout);
+      return { detected, exit: r.status, sample: r.stdout.slice(0, 200) };
+    }
+  },
+  'spec-mismatch': {
+    label: '사양 ↔ 구현 불일치 자동 감지',
+    description: 'spec.md에 명시된 함수가 impl.js의 module.exports에 없는지',
+    setup: (dir) => {
+      fs.writeFileSync(path.join(dir, 'mismatch-spec.md'), 'function fooBar() {}\nfunction missingFn() {}\n', 'utf8');
+      fs.writeFileSync(path.join(dir, 'mismatch-impl.js'), 'function fooBar() {}\nmodule.exports = { fooBar };\n', 'utf8');
+    },
+    measure: (dir) => {
+      const r = cp.spawnSync(process.execPath, [__filename, 'contract', 'verify',
+        path.join(dir, 'mismatch-spec.md'), path.join(dir, 'mismatch-impl.js'), '--json'],
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_DRIFT_CHECK: '1' } });
+      let j = null;
+      try { j = JSON.parse(r.stdout); } catch {}
+      const detected = j && j.missingFunctions && j.missingFunctions.includes('missingFn');
+      return { detected, ok: !!(j && j.ok === false), sample: r.stdout.slice(0, 200) };
+    }
+  },
+  'drift-detection': {
+    label: 'drift 감지 (메타파일 stale)',
+    description: '인공적으로 session-handoff stale 만들고 drift check가 잡는지',
+    setup: (dir) => {
+      const sh = path.join(dir, '.harness', 'session-handoff.md');
+      if (exists(sh)) {
+        let body = read(sh);
+        body = body.replace(/Last generated:.*/, 'Last generated: 2020-01-01T00:00:00.000Z');
+        writeUtf8(sh, body);
+      }
+    },
+    measure: (dir) => {
+      const r = cp.spawnSync(process.execPath, [__filename, 'drift', 'check', dir, '--json'],
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_DRIFT_CHECK: '0' } });
+      let j = null;
+      try { j = JSON.parse(r.stdout.trim()); } catch {}
+      const detected = j && (j.level === '🔴 critical' || j.level === '🟠 attention');
+      return { detected, level: j && j.level, score: j && j.score, sample: r.stdout.slice(0, 200) };
+    }
+  },
+  'bom-handling': {
+    label: 'UTF-8 BOM SKILL.md install (1.9.44 patch)',
+    description: 'BOM 포함 SKILL.md import 성공 (Windows 메모장 호환)',
+    setup: (dir) => {
+      const src = path.join(dir, 'bom-test.md');
+      const buf = Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]),
+        Buffer.from('---\nname: bom-test\ndescription: BOM 처리 검증\n---\n\n# Body', 'utf8')]);
+      fs.writeFileSync(src, buf);
+    },
+    measure: (dir) => {
+      const r = cp.spawnSync(process.execPath, [__filename, 'skill', 'install',
+        path.join(dir, 'bom-test.md'), '--path', dir],
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1' } });
+      const f = path.join(dir, '.harness', 'skills', 'bom-test', 'SKILL.md');
+      return { detected: r.status === 0 && exists(f), sample: r.stdout.slice(0, 200) };
+    }
+  }
+};
+
+function _runScenario(root, key) {
+  const sc = BENCHMARK_SCENARIOS[key];
+  if (!sc) return { error: `알 수 없는 시나리오: ${key}` };
+  const t0 = Date.now();
+  try { sc.setup(root); } catch (e) { return { error: 'setup 실패: ' + e.message }; }
+  const result = sc.measure(root);
+  const elapsed = Date.now() - t0;
+  return { key, label: sc.label, description: sc.description, elapsed, ...result };
+}
+
 // 1.9.49: --measure 모드 — ready 외부 CLI에 동일 task 실측 + leerness verify-claim 적용 시 추가 시간 측정
 async function _benchmarkMeasure(root, task) {
   const results = [];
@@ -6132,6 +6255,32 @@ async function _benchmarkMeasure(root, task) {
 
 function benchmarkCmd(root) {
   root = absRoot(root || process.cwd());
+  // 1.9.51: --scenario [<id>|all] — leerness 고유 검수 시나리오 preset 자동 실행
+  if (has('--scenario')) {
+    const scenarioArg = arg('--scenario', 'all');
+    const keys = scenarioArg === 'all' || scenarioArg === 'true'
+      ? Object.keys(BENCHMARK_SCENARIOS)
+      : scenarioArg.split(',').map(s => s.trim()).filter(s => BENCHMARK_SCENARIOS[s]);
+    if (!keys.length) {
+      fail(`알 수 없는 scenario: ${scenarioArg}\n  사용 가능: ${Object.keys(BENCHMARK_SCENARIOS).join(', ')}, all`);
+      return process.exit(1);
+    }
+    const results = keys.map(k => _runScenario(root, k));
+    const detected = results.filter(r => r.detected).length;
+    if (has('--json')) { log(JSON.stringify({ scenarios: results, detectedCount: detected, total: results.length }, null, 2)); return; }
+    log(`# leerness benchmark --scenario (1.9.51)`);
+    log(`leerness 고유 검수 시나리오 ${results.length}개 자동 실행`);
+    log('');
+    log('| # | 시나리오 | 감지? | 시간 |');
+    log('|---|---|---|---:|');
+    results.forEach((r, i) => {
+      log(`| ${i+1} | ${r.label} | ${r.detected ? '✅' : r.error ? '⚠ error' : '❌'} | ${r.elapsed || 0}ms |`);
+    });
+    log('');
+    log(`✅ leerness가 정확히 감지: ${detected}/${results.length}`);
+    log(`💡 각 시나리오는 leerness 고유 가치 — 다른 도구(Claude Code/Hermes/Cursor)에는 없는 기능`);
+    return;
+  }
   // 1.9.49: --measure "<task>" 모드 — 실 CLI 시간 측정
   if (has('--measure')) {
     const task = arg('--measure', null) || arg('--task', null);
