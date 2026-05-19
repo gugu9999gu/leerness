@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.89';
+const VERSION = '1.9.90';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3433,7 +3433,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.89+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.90+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -7245,6 +7245,49 @@ function _cosine(a, b) {
   return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
 }
 
+// 1.9.90: leerness skill search <capability> — capability 배열에서 부분 일치 검색
+// skill match (jaccard)와 다름: capability 필드 정확 매칭 (substring + case-insensitive)
+function skillSearchCmd(root, capabilityQuery) {
+  root = absRoot(root || process.cwd());
+  if (!capabilityQuery) { fail('사용법: leerness skill search "<capability keyword>" [--json]'); return process.exit(1); }
+  const all = listAllSkills(root);
+  const q = capabilityQuery.toLowerCase();
+  const matches = [];
+  for (const [id, v] of Object.entries(all)) {
+    const caps = v.capabilities || [];
+    const matched = caps.filter(c => String(c).toLowerCase().includes(q));
+    if (matched.length) {
+      matches.push({
+        id,
+        displayNameKo: v.displayNameKo || id,
+        source: v._source,
+        matchedCapabilities: matched,
+        allCapabilities: caps.length,
+        usageCount: v.usage?.count || 0
+      });
+    }
+  }
+  if (has('--json')) {
+    log(JSON.stringify({ query: capabilityQuery, total: matches.length, matches }, null, 2));
+    return;
+  }
+  log(`# leerness skill search (1.9.90)`);
+  log(`query (capability): "${capabilityQuery}"`);
+  log(`전체 ${Object.keys(all).length}개 skill 중 매칭 ${matches.length}건`);
+  log('');
+  if (!matches.length) {
+    log('  (해당 능력 없음 — 다른 키워드 시도 또는 \`leerness skill discover\`로 확장)');
+    return;
+  }
+  log(`| ID | 한글명 | 매칭 능력 | 사용 |`);
+  log(`|---|---|---|---:|`);
+  for (const m of matches) {
+    log(`| ${m.id} | ${m.displayNameKo} | ${m.matchedCapabilities.slice(0, 2).join(' / ')}${m.matchedCapabilities.length > 2 ? ' …' : ''} | ${m.usageCount}회 |`);
+  }
+  log('');
+  log(`💡 상세: \`leerness skill info <id>\` · 사용 시작: \`leerness skill use <id>\``);
+}
+
 async function skillMatchCmd(root, query) {
   root = absRoot(root || process.cwd());
   if (!query) { fail('사용법: leerness skill match "<task or keywords>" [--embedding]'); return process.exit(1); }
@@ -8089,6 +8132,8 @@ async function main() {
   if (cmd === 'skill' && args[1] === 'export')      return skillExportCmd(absRoot(arg('--path', process.cwd())), args[2]);
   if (cmd === 'skill' && args[1] === 'export-all')  return skillExportAllCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'match')       return skillMatchCmd(absRoot(arg('--path', process.cwd())), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
+  // 1.9.90: leerness skill search <capability> — capability 키워드로 검색 (substring 정확 일치)
+  if (cmd === 'skill' && args[1] === 'search')      return skillSearchCmd(absRoot(arg('--path', process.cwd())), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'benchmark')                          return benchmarkCmd(absRoot(args[1] || arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'publish')     return skillPublishCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'suggest')     return skillSuggestCmd(absRoot(arg('--path', process.cwd())));

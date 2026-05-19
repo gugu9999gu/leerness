@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.9.90 — 2026-05-20
+
+**`leerness skill search <capability>` 새 명령** — capability 배열 부분 일치 검색.
+
+### Added — `leerness skill search`
+- `leerness skill search "<capability>"` — capability 키워드로 skill 검색.
+  - substring + case-insensitive 매칭.
+  - `--json`: 구조화 출력 (`{ query, total, matches[] }`).
+- skill match (jaccard 점수 매칭)과 다름:
+  - `skill match`: 자연어 task → 점수 기반 추천
+  - `skill search`: capability 필드에 정확히 키워드 포함된 skill만
+- 예:
+  ```
+  leerness skill search "API"   → commerce-api
+  leerness skill search "검증"  → firebase, ai-verified-skill-publisher
+  ```
+
+### Use Case
+- "내가 이 능력을 가진 skill을 찾고 싶다" 명확한 의도에 사용.
+- skill match가 너무 광범위할 때 capability로 좁히기.
+
+### Verified
+- stress-v36 — search 명령 + 부분 일치 + --json + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.89 — 2026-05-20
 
 **자율 모드 19 라운드 종합 검증 + 마무리** (1.9.70 ~ 1.9.88).
