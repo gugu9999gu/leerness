@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.104 — 2026-05-20
+
+**MCP 23번째 도구 `leerness_retro`** (4세션 누적 회고 외부 AI 노출).
+
+### Added — MCP 23번째 도구 `leerness_retro`
+- 4세션 누적 회고 보고서 JSON 외부 AI 노출.
+- 인자: `{ path?, days?, allApps? }`
+- 출력 데이터: `statusCounts` / `focusNext` / `skillUsage` / `recentDecisions` / `durations` / `activeRules` / `verifiedRules` / `fixSignals` / `passSignals` / `totalOptimizations`
+- `retro` CLI 명령은 1.9.16부터 `--json` 지원했으나, MCP 노출은 1.9.104에서 추가.
+- 사용 시나리오: 외부 AI가 누적 패턴 학습 / 다음 라운드 우선순위 결정 / 디버그 비중 분석.
+
+### MCP 도구 수: 22 → 23개
+1~10 (기존) + skill_suggest / lessons / task_export / env_check / brainstorm / skill_match / skill_list / health / skill_search / skill_info / benchmark / lazy_detect / **retro** (1.9.104 신규)
+
+### Verified
+- stress-v49 — MCP retro 응답 + 23 도구 노출 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.103 — 2026-05-20
 
 **`leerness session close --json`** (세션 마감 통계 JSON + MCP `leerness_session_close` JSON 자동).

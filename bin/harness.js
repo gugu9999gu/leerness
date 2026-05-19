@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.103';
+const VERSION = '1.9.104';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -306,6 +306,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.101+ \`leerness lazy detect --json\` + MCP **22 도구** (\`leerness_lazy_detect\` 추가 — 거짓 완료/empty handoff/no test run/TODO 미추적 신호 JSON).
 - 1.9.102+ \`leerness audit --json\` 구조화 출력 (findings 11종 kind: design_dup/design_system_default/reuse_map_empty/milestone_unlinked/handoff_not_generated/current_state_stale/readme_version_mismatch/npm_cve/gitignore_missing_secrets/env_keys_missing/strict_promoted). MCP \`leerness_audit\`도 JSON 자동.
 - 1.9.103+ \`leerness session close --json\` 마감 통계 JSON (taskCounts/rules/skillCandidates/drift/topCommands/mcpStats/workspacePeers). MCP \`leerness_session_close\`도 JSON 자동.
+- 1.9.104+ MCP **23 도구** (\`leerness_retro\` 추가 — 4세션 누적 회고 JSON 외부 AI 노출).
 
 ---
 
@@ -3580,7 +3581,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 22 도구 (lazy_detect 추가, 1.9.101)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 23 도구 (retro 추가, 1.9.104)'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
     log('    ' + C.green('npx leerness skill publish --bundle-only') + C.dim('             # 보안 사전 점검 통합 publish (1.9.98)'));
     log('');
@@ -7636,7 +7637,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_skill_search', description: '1.9.90/91 — capability 배열에서 부분 일치하는 skill 검색 (substring + case-insensitive). skill match와 다른 정확 매칭', inputSchema: { type: 'object', properties: { capability: { type: 'string' }, path: { type: 'string' } }, required: ['capability'] } },
     { name: 'leerness_skill_info', description: '1.9.92 — 개별 skill 상세 조회 (version/capabilities/sources/patterns/usage/optimizations). 외부 AI가 skill 능력 정확히 파악', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
     { name: 'leerness_benchmark', description: '1.9.46/51/94 — 6 차원 점수 + 검수 시나리오 (--scenario) 결과 JSON. 외부 AI가 워크스페이스 leerness 활용 점수 확인', inputSchema: { type: 'object', properties: { path: { type: 'string' }, scenario: { type: 'string' } } } },
-    { name: 'leerness_lazy_detect', description: '1.9.101 — 게으른 작업 자동 감지 결과 JSON (evidence 없는 done / empty handoff / no test run / TODO 미추적 / blocker no-next-action 등). 외부 AI가 거짓 완료 신호 사전 점검', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_lazy_detect', description: '1.9.101 — 게으른 작업 자동 감지 결과 JSON (evidence 없는 done / empty handoff / no test run / TODO 미추적 / blocker no-next-action 등). 외부 AI가 거짓 완료 신호 사전 점검', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_retro', description: '1.9.104 — 4세션 누적 회고 보고서 JSON (statusCounts/focusNext/skillUsage/recentDecisions/durations/activeRules/fixSignals/passSignals/totalOptimizations). 외부 AI가 누적 패턴 자동 학습', inputSchema: { type: 'object', properties: { path: { type: 'string' }, days: { type: 'number' }, allApps: { type: 'boolean' } } } }
   ];
 
   function send(obj) {
@@ -7690,6 +7692,7 @@ function mcpServeCmd(root) {
           case 'leerness_skill_info':      cliArgs = ['skill', 'info', args.id || '', '--path', targetPath, '--json']; break;
           case 'leerness_benchmark':       cliArgs = ['benchmark', targetPath, '--json', ...(args.scenario ? ['--scenario', args.scenario] : [])]; break;
           case 'leerness_lazy_detect':     cliArgs = ['lazy', 'detect', targetPath, '--json']; break;
+          case 'leerness_retro':           cliArgs = ['retro', targetPath, '--json', ...(args.days ? ['--days', String(args.days)] : []), ...(args.allApps ? ['--all-apps'] : [])]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
