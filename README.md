@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.78-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.79-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.78   AI Agent Reliability Harness                      ║
+  ║  v1.9.79   AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
@@ -433,6 +433,7 @@ npm test     # = node ./scripts/e2e.js
 
 ## 변경 이력 (최근)
 
+- **1.9.79** — **`leerness skill suggest` 알고리즘 강화** — 1.9.68 rolling history 빈도 (×2 가중) 추가. 반복 검색된 키워드를 신규 skill 후보로 자동 식별 (Hermes-style 학습).
 - **1.9.78** — **`drift check` 5번째 신호** — `.env` + `.gitignore` 보안 누락을 drift score에 가중 (`.env` 자체 누락 시 +30, 동기화 누락 +15). 보안 위험이 drift critical 승격 가능.
 - **1.9.77** — **MCP server 15번째 도구 `leerness_brainstorm`** — 1.9.72 brainstorm (decisions + skills + tasks + rules + evidence + lessons + skillHistory + taskLogFails)을 외부 AI에 노출. AI가 새 작업 시작 전 누적 컨텍스트 자동 회수.
 - **1.9.76** — **`leerness handoff`에 보안 상태 요약 자동 표시** — `.env→.env.example` 누락 + `.gitignore` 시크릿 패턴 누락을 매 handoff에 1-2 line 자동 노출. AI가 세션 시작 즉시 보안 위험 인지.

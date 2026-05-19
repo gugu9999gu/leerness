@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.78';
+const VERSION = '1.9.79';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3309,7 +3309,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.78+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.79+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -6970,6 +6970,36 @@ function skillSuggestCmd(root) {
       if (n >= minOccurrence) {
         seen[`cmd:${cmd}`] = seen[`cmd:${cmd}`] || { count: 0, samples: [], source: 'usage' };
         seen[`cmd:${cmd}`].count = n;
+      }
+    }
+  } catch {}
+  // 4) 1.9.79: skill-suggestions.md rolling history 빈도 — 반복 검색된 키워드는 학습 신호로 강화
+  try {
+    const histPath = path.join(root, '.harness', 'skill-suggestions.md');
+    if (exists(histPath)) {
+      const histTxt = read(histPath);
+      const queryFreq = {};
+      for (const block of histTxt.split(/\n(?=## )/)) {
+        const h = block.match(/^## ([\d-]+ [\d:]+) — query "([^"]+)"/);
+        if (!h) continue;
+        const query = h[2];
+        // query에서 도메인 키워드 추출 (4자 이상)
+        for (const m of query.toLowerCase().matchAll(/[\w가-힣]{4,}/g)) {
+          const kw = m[0];
+          if (/^\d+$/.test(kw)) continue;
+          if (['이런','저런','하다','하고','있는','작업','구현','추가','진행','수정','변경','검토','확인','프로젝트','관리','기능','시스템','코드','파일','버전','정리','계획','next','action','task','todo','work'].includes(kw)) continue;
+          queryFreq[kw] = (queryFreq[kw] || 0) + 1;
+        }
+      }
+      // history에서 N회 이상 등장한 키워드 → 가중 (×2)
+      for (const [kw, n] of Object.entries(queryFreq)) {
+        if (n >= 2) { // history 빈도는 1회만 등장해도 의미 작음, 2회 이상부터 신호
+          seen[kw] = seen[kw] || { count: 0, samples: [], source: 'progress' };
+          // history 빈도 × 가중 (2배)
+          seen[kw].count += n * 2;
+          seen[kw].historyHits = n;
+          if (seen[kw].source === 'progress') seen[kw].source = 'progress+history';
+        }
       }
     }
   } catch {}

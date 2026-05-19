@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.79 — 2026-05-20
+
+**`leerness skill suggest` 알고리즘 강화** (1.9.68 rolling history 빈도 활용 — Hermes-style 학습 신호 보강).
+
+### Improved — skill suggest 학습 신호 확장
+- 기존 신호 (1.9.53): task-log.md / progress-tracker.md / usage-stats.commands.
+- **추가 신호 (1.9.79)**: `.harness/skill-suggestions.md` rolling history 빈도.
+  - 같은 키워드를 2회 이상 `skill match`로 검색했다면 **학습 신호로 가중** (×2).
+  - 예: 사용자가 "payment 결제 자동화" 를 3번 검색 → keyword "payment" 의 score `+6`.
+  - 출처: `progress+history` 로 표시 + `historyHits` 필드 노출.
+- 후보 점수 = task-log 매치 + progress 토큰 매치 + usage 카운트 + **history 빈도 × 2**.
+
+### Use Case
+- AI 에이전트가 반복적으로 같은 주제를 검색했다면 → **이 주제는 신규 skill로 등록할 가치가 큼** 자동 식별.
+- Hermes-style 자동 학습 강화 (`leerness skill learn` 권장 정확도 향상).
+
+### Verified
+- stress-v25 — history 가중 + 누적 회귀 + 성능.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.78 — 2026-05-20
 
 **`drift check`에 5번째 신호 추가 — 보안 누락이 drift score 가중** (1.9.75/76 보안 검사 통합).
