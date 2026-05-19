@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.100';
+const VERSION = '1.9.101';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -303,6 +303,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.98+ \`leerness skill publish\` 보안 사전 점검 통합 (health 통과 후 publish).
 - 1.9.99+ \`leerness handoff --quiet\` (자동화/CI 모드 — 자동 회수 라인 비활성).
 - 1.9.100 🏆 마일스톤 — 30 라운드 자율 누적, stress-v45 30/30 PASS, e2e 219/219 PASS.
+- 1.9.101+ \`leerness lazy detect --json\` + MCP **22 도구** (\`leerness_lazy_detect\` 추가 — 거짓 완료/empty handoff/no test run/TODO 미추적 신호 JSON).
 
 ---
 
@@ -1700,26 +1701,35 @@ function encodingCheck(root) {
   }
 }
 
-function lazyDetect(root) {
+// 1.9.101: lazy detect 결과를 JSON으로 노출 (외부 AI/MCP 통합용). opts.json=true 시 verbose 출력 억제 후 JSON만.
+function lazyDetect(root, opts = {}) {
   root = absRoot(root);
+  const jsonMode = !!opts.json || has('--json');
   let issues = 0;
+  const findings = []; // 1.9.101: { kind, severity, message, ...details }
+  const _warn = (msg, finding) => { if (finding) findings.push(finding); if (!jsonMode) warn(msg); };
   const rows = readProgressRows(root);
   // 1.9.1 P6: evidence가 단독 plan:M-XXXX 한 줄일 때만 검증 부족 처리.
   // "tests:32/32 (plan:M-0002)" 같이 검증 키워드를 같이 적은 경우는 통과.
   for (const r of rows) if (r.status === 'done' && (!r.evidence || /^(\s*|user-request|-)$/.test(r.evidence) || /^plan:M-\d{4}\s*$/.test(r.evidence))) {
-    issues++; warn(`done row without verifiable evidence: ${r.id} (${r.request})`);
+    issues++; _warn(`done row without verifiable evidence: ${r.id} (${r.request})`,
+      { kind: 'evidence_missing', severity: 'warn', taskId: r.id, request: r.request });
   }
-  if (rows.length === 0) { issues++; warn('progress-tracker is empty (no tasks tracked)'); }
+  if (rows.length === 0) { issues++; _warn('progress-tracker is empty (no tasks tracked)',
+    { kind: 'progress_empty', severity: 'warn' }); }
   const handoff = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
   if (!handoff.includes('Last generated:') || handoff.includes('Last generated: (자동)')) {
-    issues++; warn('session-handoff.md never auto-generated');
+    issues++; _warn('session-handoff.md never auto-generated',
+      { kind: 'handoff_never_generated', severity: 'warn' });
   }
   if (/^## Completed\s*\n-\s*\n/m.test(handoff) && /^## Next Exact Step\s*\n-\s*\n?/m.test(handoff)) {
-    issues++; warn('session-handoff.md has empty Completed and Next Exact Step');
+    issues++; _warn('session-handoff.md has empty Completed and Next Exact Step',
+      { kind: 'handoff_empty', severity: 'warn' });
   }
   const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
   const hasTestRun = /\b(npm test|pnpm test|yarn test|pytest|jest|vitest|tsc|eslint|playwright|cypress)\b/i.test(ev);
-  if (!hasTestRun) { issues++; warn('review-evidence.md has no recorded test/typecheck/lint run'); }
+  if (!hasTestRun) { issues++; _warn('review-evidence.md has no recorded test/typecheck/lint run',
+    { kind: 'no_test_run', severity: 'warn' }); }
   // 1.9.4 C: TODO/FIXME가 string literal 안에 있으면 제외 (정규식 패턴 자체 등 false positive).
   function isInsideQuote(line, idx) {
     const pre = line.slice(0, idx);
@@ -1762,9 +1772,10 @@ function lazyDetect(root) {
     const hasTodoTask = rows.some(r => /TODO|FIXME|XXX/.test(r.request) || /TODO|FIXME|XXX/i.test(r.evidence));
     if (!hasTodoTask) {
       issues++;
-      warn(`code has ${todoCount} TODO/FIXME/XXX (new: ${newTodos.length}) but no progress-tracker entry tracks them`);
-      // 새 TODO 처음 5개 표시
-      newTodos.slice(0, 5).forEach(t => log(`    ${t.file}:${t.line}  ${t.text}`));
+      _warn(`code has ${todoCount} TODO/FIXME/XXX (new: ${newTodos.length}) but no progress-tracker entry tracks them`,
+        { kind: 'todo_untracked', severity: 'warn', todoCount, newCount: newTodos.length, newTodos: newTodos.slice(0, 5) });
+      // 새 TODO 처음 5개 표시 (verbose 모드만)
+      if (!jsonMode) newTodos.slice(0, 5).forEach(t => log(`    ${t.file}:${t.line}  ${t.text}`));
       if (has('--auto-track') && newTodos.length) {
         for (const t of newTodos) {
           const id = nextId(root, 'T');
@@ -1773,14 +1784,32 @@ function lazyDetect(root) {
         // known-todos에 추가 — 다음 detect에서 재카운트 안 하도록
         const merged = [...knownList, ...newTodos.map(t => ({ ...t, ackAt: now() }))];
         writeUtf8(knownPath, JSON.stringify(merged, null, 2) + '\n');
-        ok(`${newTodos.length}개 TODO를 progress-tracker에 자동 등록 + known-todos.json 갱신`);
-      } else if (newTodos.length) {
+        if (!jsonMode) ok(`${newTodos.length}개 TODO를 progress-tracker에 자동 등록 + known-todos.json 갱신`);
+      } else if (newTodos.length && !jsonMode) {
         log(`    💡 자동 등록: leerness lazy detect --auto-track`);
       }
     }
   }
   const blockers = rows.filter(r => r.status === 'blocked');
-  for (const b of blockers) if (b.nextAction === '없음' || /다음 액션 작성/.test(b.nextAction)) { issues++; warn(`blocker without nextAction: ${b.id}`); }
+  for (const b of blockers) if (b.nextAction === '없음' || /다음 액션 작성/.test(b.nextAction)) {
+    issues++; _warn(`blocker without nextAction: ${b.id}`,
+      { kind: 'blocker_no_next_action', severity: 'warn', taskId: b.id });
+  }
+  // 1.9.101: JSON 모드 → 구조화 출력만 (process.exitCode는 일관 유지)
+  if (jsonMode) {
+    const payload = {
+      version: VERSION,
+      root,
+      issues,
+      healthy: issues === 0,
+      todoCount,
+      newTodoCount: newTodos.length,
+      findings,
+    };
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+    if (issues > 0) process.exitCode = 1;
+    return;
+  }
   if (issues === 0) ok('lazy detect passed (no obvious lazy work signals)');
   else { fail(`lazy detect found ${issues} issues`); process.exitCode = 1; }
 }
@@ -3506,10 +3535,11 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness env sync .') + C.dim('                              # .env ↔ .env.example 동기화 (1.9.71 보안)'));
     log('    ' + C.green('npx leerness health . --json') + C.dim('                         # 종합 헬스 체크 — drift + 보안 + skill + MCP (1.9.85)'));
     log('    ' + C.green('npx leerness drift check . --auto-fix') + C.dim('                # drift + 보안 자동 회복 (1.9.82)'));
+    log('    ' + C.green('npx leerness lazy detect . --json') + C.dim('                   # 거짓 완료/no test run 신호 JSON (1.9.101)'));
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 21 도구 (benchmark/health/skill_search 포함)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 22 도구 (lazy_detect 추가, 1.9.101)'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
     log('    ' + C.green('npx leerness skill publish --bundle-only') + C.dim('             # 보안 사전 점검 통합 publish (1.9.98)'));
     log('');
@@ -7534,7 +7564,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_health', description: '1.9.85/86 — 종합 헬스 체크 (drift + 보안 + skills + MCP + tasks + issues 배열). 외부 AI가 워크스페이스 상태 한 번에 확인', inputSchema: { type: 'object', properties: { path: { type: 'string' }, strict: { type: 'boolean' } } } },
     { name: 'leerness_skill_search', description: '1.9.90/91 — capability 배열에서 부분 일치하는 skill 검색 (substring + case-insensitive). skill match와 다른 정확 매칭', inputSchema: { type: 'object', properties: { capability: { type: 'string' }, path: { type: 'string' } }, required: ['capability'] } },
     { name: 'leerness_skill_info', description: '1.9.92 — 개별 skill 상세 조회 (version/capabilities/sources/patterns/usage/optimizations). 외부 AI가 skill 능력 정확히 파악', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
-    { name: 'leerness_benchmark', description: '1.9.46/51/94 — 6 차원 점수 + 검수 시나리오 (--scenario) 결과 JSON. 외부 AI가 워크스페이스 leerness 활용 점수 확인', inputSchema: { type: 'object', properties: { path: { type: 'string' }, scenario: { type: 'string' } } } }
+    { name: 'leerness_benchmark', description: '1.9.46/51/94 — 6 차원 점수 + 검수 시나리오 (--scenario) 결과 JSON. 외부 AI가 워크스페이스 leerness 활용 점수 확인', inputSchema: { type: 'object', properties: { path: { type: 'string' }, scenario: { type: 'string' } } } },
+    { name: 'leerness_lazy_detect', description: '1.9.101 — 게으른 작업 자동 감지 결과 JSON (evidence 없는 done / empty handoff / no test run / TODO 미추적 / blocker no-next-action 등). 외부 AI가 거짓 완료 신호 사전 점검', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -7587,6 +7618,7 @@ function mcpServeCmd(root) {
           case 'leerness_skill_search':    cliArgs = ['skill', 'search', args.capability || '', '--path', targetPath, '--json']; break;
           case 'leerness_skill_info':      cliArgs = ['skill', 'info', args.id || '', '--path', targetPath, '--json']; break;
           case 'leerness_benchmark':       cliArgs = ['benchmark', targetPath, '--json', ...(args.scenario ? ['--scenario', args.scenario] : [])]; break;
+          case 'leerness_lazy_detect':     cliArgs = ['lazy', 'detect', targetPath, '--json']; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -8192,7 +8224,7 @@ async function main() {
   if (cmd === 'check')     return preCheck(args[1] || process.cwd());
   if (cmd === 'scan' && args[1] === 'secrets')   return scanSecrets(args[2] || process.cwd());
   if (cmd === 'encoding' && args[1] === 'check') return encodingCheck(args[2] || process.cwd());
-  if (cmd === 'lazy' && args[1] === 'detect')    return lazyDetect(args[2] || process.cwd());
+  if (cmd === 'lazy' && args[1] === 'detect')    return lazyDetect(args[2] || process.cwd(), { json: has('--json') });
   if (cmd === 'memory' && args[1] === 'search')  return memorySearch(arg('--path', process.cwd()), args.slice(2).join(' '));
   if (cmd === 'handoff')      return handoffCmd(args[1] || process.cwd());
   if (cmd === 'reuse-map')    return reuseMapCmd(args[1] || process.cwd());

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.101 — 2026-05-20
+
+**`leerness lazy detect --json` + MCP 22번째 도구 `leerness_lazy_detect`** (외부 AI에 거짓 완료/empty handoff/no test run/TODO 미추적 신호 노출).
+
+### Added — `leerness lazy detect [path] --json`
+- 기존 `lazy detect` 명령에 `--json` 옵션 추가.
+- 출력: `{ version, root, issues, healthy, todoCount, newTodoCount, findings[] }`
+- 각 finding: `{ kind, severity, ...details }`
+  - `kind` 종류: `evidence_missing` / `progress_empty` / `handoff_never_generated` / `handoff_empty` / `no_test_run` / `todo_untracked` / `blocker_no_next_action`
+- exit 1 if `issues > 0` (CI 통합 친화적)
+
+### Added — MCP 22번째 도구 `leerness_lazy_detect`
+- 외부 AI가 워크스페이스의 거짓 완료/lazy 신호를 JSON으로 사전 점검.
+- 사용 시나리오: 세션 마감 전 자동 검사, CI 게이트, AI 에이전트의 "정말 끝났는지" self-check.
+- MCP 도구 수: **21 → 22개**.
+
+### Verified
+- stress-v46 — lazy detect --json 구조 + 7종 kind 검출 + MCP 22 도구 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.100 — 2026-05-20 🏆 마일스톤 (30 라운드 자율 누적 + 100번째 패치)
 
 **1.9.70 ~ 1.9.99 자율 모드 30 라운드 누적 마일스톤** (stress-v45 30/30 PASS · e2e 219/219 PASS).
