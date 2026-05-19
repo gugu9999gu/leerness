@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.114';
+const VERSION = '1.9.115';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -316,6 +316,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.112+ MCP **31 도구** (\`leerness_lesson_save\` — lessons.md 직접 write, **Memory Write Surface 5종 완성**: tasks/decisions/rules/plan/lessons).
 - 1.9.113+ handoff 통합 헤드라인에 **🧠 mem T/D/R/P/L 카운트** 추가 — 5종 메모리 영구화 상태 한눈에 확인.
 - 1.9.114+ \`leerness memory status [--json]\` + MCP **32 도구** (\`leerness_memory_status\`) — 상세 상태 + 최근 항목 조회.
+- 1.9.115+ \`leerness handoff --json\` 응답에 **\`memorySurface\` 필드 통합** — 단일 호출로 컨텍스트 + 5종 메모리 상태 동시 회수.
 
 ---
 
@@ -2046,6 +2047,31 @@ function handoff(root) {
     // active rules
     const activeRules = readRules(root).filter(r => r.status === 'active');
     if (activeRules.length) result.activeRules = activeRules.map(r => ({ id: r.id, trigger: r.trigger, rule: r.rule }));
+    // 1.9.115: memorySurface 통합 — handoff JSON에 5종 메모리 상태 동시 회수
+    try {
+      const rows = readProgressRows(root);
+      const tasksByStatus = {};
+      for (const s of STATUSES) tasksByStatus[s] = 0;
+      for (const r of rows) tasksByStatus[r.status] = (tasksByStatus[r.status] || 0) + 1;
+      const tasksInProgress = tasksByStatus['in-progress'] || 0;
+      const dm = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+      const decisionBlocks = _extractDecisionBlocks(dm);
+      const decisionsCount = decisionBlocks.length;
+      const rules = readRules(root);
+      const rulesActive = rules.filter(r => r.status === 'active').length;
+      const planText = exists(planPath(root)) ? read(planPath(root)) : '';
+      const milestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
+      const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
+      const lessonsCount = (lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+      result.memorySurface = {
+        tasks: { inProgress: tasksInProgress, total: rows.length, byStatus: tasksByStatus },
+        decisions: { count: decisionsCount },
+        rules: { active: rulesActive, total: rules.length },
+        plan: { milestones },
+        lessons: { count: lessonsCount },
+        summary: `T${tasksInProgress}/D${decisionsCount}/R${rulesActive}/P${milestones}/L${lessonsCount}`,
+      };
+    } catch {}
     log(JSON.stringify(result, null, 2));
     return;
   }

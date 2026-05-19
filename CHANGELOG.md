@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.9.115 — 2026-05-20
+
+**`leerness handoff --json` 응답에 `memorySurface` 필드 통합** — 단일 호출로 컨텍스트 + 5종 메모리 상태 동시 회수.
+
+### Added — `handoff --json` 새 필드 `memorySurface`
+출력 구조에 다음 필드 추가:
+```json
+{
+  "date": "...",
+  "project": "...",
+  "version": "1.9.115",
+  "files": { ... },
+  "activeRules": [ ... ],
+  "memorySurface": {
+    "tasks": { "inProgress": 2, "total": 12, "byStatus": {...} },
+    "decisions": { "count": 4 },
+    "rules": { "active": 2, "total": 2 },
+    "plan": { "milestones": 3 },
+    "lessons": { "count": 7 },
+    "summary": "T2/D4/R2/P3/L7"
+  }
+}
+```
+
+### 1.9.115 의 가치
+- 외부 AI(Claude Code / Hermes)가 매 세션 시작 시 단일 `handoff --json` 호출만으로:
+  - 워크스페이스 컨텍스트 (plan / progress / decisions / handoff 등 파일)
+  - active rules
+  - **5종 메모리 영구화 상태 (Memory Write Surface)**
+  를 모두 한 번에 회수.
+- MCP `leerness_handoff` 응답도 자동 갱신 (기존 도구가 --json 사용).
+
+### 1.9.114 와 차이
+- 1.9.114: 별도 `memory status` 명령으로 상세 조회 + 최근 항목까지.
+- **1.9.115**: handoff 응답에 통합 — 별도 호출 없이 동시 수신 (latest 항목은 제외, 카운트만).
+
+### Verified
+- stress-v60 — handoff --json memorySurface 필드 + 카운트 정확성 + summary 포맷 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.114 — 2026-05-20
 
 **`leerness memory status` 새 명령 + MCP 32번째 도구 `leerness_memory_status`** — Memory Write Surface 5종 통합 상세 상태 조회.
