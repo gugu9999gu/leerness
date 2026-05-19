@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.9.120 — 2026-05-20 🏆 50 라운드 자율 모드 마일스톤
+
+**50 라운드 자율 모드 누적 마일스톤 보고서** (`_reports/AUTONOMOUS_ROUNDS_1.9.70-1.9.119.md`) + stress-v65 종합.
+
+### Internal — 비공개 종합 보고서
+- `_reports/AUTONOMOUS_ROUNDS_1.9.70-1.9.119.md` — **50 라운드** 종합 분석 (1.9.70 ~ 1.9.119)
+- MCP 도구 진화 (10 → 35, 25개 추가)
+- **Memory Surface 5종 R/W 완전 대칭** (WRITE 5종 + LIST READ 5종 = 10 surfaces)
+- JSON 옵션 18종 누적
+- 보안 4중 가드 + audit 11 kind
+- 디버그 기록 8건 (1차 실패 → PASS 회복)
+- 성능 측정 (11개 명령 median)
+- 사용자 명시 정책 7개 모두 ✓
+
+### 🏆 마일스톤 진화 요약
+- 1.9.89: 19 라운드 보고서
+- 1.9.97: 27 라운드 보고서
+- 1.9.100: 🏆 30 라운드 + 100번째 패치
+- 1.9.110: 🎉 MCP 30 도구 + Memory WRITE 5종
+- 1.9.111: 41 라운드 보고서
+- 1.9.119: 🎯 Memory READ 5종 완성
+- **1.9.120: 🏆 50 라운드 마일스톤**
+
+### Verified — stress-v65 종합 (1.9.70~119 핵심 기능 회귀)
+- Memory Surface 5종 R/W 모두 PASS
+- MCP 35 도구 노출 ✓
+- handoff 5단 자동 회수 + 헤드라인 ✓
+- 보안 4중 가드 ✓
+- e2e 219/219 PASS
+
+### Badge
+- README `autonomous-rounds-50` (blueviolet 강조)
+
+---
+
 ## 1.9.119 — 2026-05-20 🎯 Memory Surface READ 5종 완전 완성
 
 **`leerness plan list [--json]` + MCP 35번째 도구 `leerness_plan_list`** — plan.md milestone 전체 조회 (Status/Progress/Tasks 체크박스 포함).
