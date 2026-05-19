@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.67';
+const VERSION = '1.9.68';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3196,9 +3196,10 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.67+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.68+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons 재상기 + 매칭 skill 자동 추천'));
+    log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
     log('    ' + C.green('npx leerness verify-claim T-0001 --run-tests') + C.dim('        # AI 거짓 완료 자동 검증'));
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
@@ -6820,6 +6821,13 @@ async function skillMatchCmd(root, query) {
     })).sort((a, b) => b.score - a.score);
   }
   const top = ranked.filter(r => r.score > 0).slice(0, 5);
+  // 1.9.68: rolling history 자동 누적 (.harness/skill-suggestions.md) — default ON
+  // 끄기: --no-save 또는 LEERNESS_NO_SKILL_HISTORY=1
+  if (!has('--no-save') && process.env.LEERNESS_NO_SKILL_HISTORY !== '1') {
+    try {
+      _appendSkillSuggestion(root, { query, useEmbedding, top });
+    } catch {}
+  }
   if (has('--json')) {
     log(JSON.stringify({ query, total: skills.length, matched: top.length, top: top.map(({ dir, ...rest }) => rest) }, null, 2));
     return;
@@ -6839,6 +6847,32 @@ async function skillMatchCmd(root, query) {
   }
   log('');
   log(`💡 사용: \`cat ${rel(root, top[0].dir)}/SKILL.md\` 또는 메인 에이전트가 이 skill 본문을 참고`);
+  log(`📒 자동 누적: .harness/skill-suggestions.md (--no-save로 끄기)`);
+}
+
+// 1.9.68: skill match rolling history append (.harness/skill-suggestions.md)
+// AI가 다음 세션에 이전 추천을 참조 가능 — readWhen: '세션 시작', 'skill 결정 전'
+function _appendSkillSuggestion(root, { query, useEmbedding, top }) {
+  const p = path.join(absRoot(root), '.harness', 'skill-suggestions.md');
+  if (!exists(p)) {
+    // 신규 파일 — frontmatter + 안내
+    const fm = `---\nleernessRole: skill-suggestions\nreadWhen:\n  - skill 결정 전\n  - 세션 시작\nupdateWhen:\n  - leerness skill match 호출 시 자동 누적 (1.9.68)\ndoNotStore:\n  - 실제 토큰\n  - 비밀번호\n  - 운영 쿠키\n  - 민감한 개인정보 원문\n---\n<!-- leerness:managed -->\n# Skill Suggestions (Rolling History)\n\n매 \`leerness skill match\` 호출이 여기 누적됩니다. AI 에이전트는 다음 세션에 같은 키워드를 다시 검색하지 말고 이력을 먼저 참조하세요.\n\n`;
+    mkdirp(path.dirname(p));
+    writeUtf8(p, fm);
+  }
+  const algo = useEmbedding ? 'embedding' : 'jaccard';
+  const ts = new Date().toISOString();
+  let block = `\n## ${ts.slice(0, 19).replace('T', ' ')} — query "${(query || '').slice(0, 80)}"\n`;
+  block += `- Algorithm: ${algo}\n`;
+  if (!top.length) {
+    block += `- Matched: 0 — 다른 키워드 또는 \`leerness skill discover\` 권장\n`;
+  } else {
+    block += `- Top ${top.length} matches:\n`;
+    for (const r of top) {
+      block += `  - [${r.score.toFixed(2)}] ${r.id} — ${(r.description || '').slice(0, 80)}\n`;
+    }
+  }
+  append(p, block);
 }
 
 // 1.9.43: skill export-all — 모든 자체 skill을 agentskills.io 표준 SKILL.md로 일괄 export

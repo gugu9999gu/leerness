@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.67-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.68-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.67   AI Agent Reliability Harness                      ║
+  ║  v1.9.68   AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
@@ -433,6 +433,7 @@ npm test     # = node ./scripts/e2e.js
 
 ## 변경 이력 (최근)
 
+- **1.9.68** — **`skill match` 결과 → `.harness/skill-suggestions.md` rolling history 자동 누적** (AI가 다음 세션에 이전 추천 참조 가능). `--no-save` / `LEERNESS_NO_SKILL_HISTORY=1`로 끄기.
 - **1.9.67** — **handoff 자동 skill 추천 default ON** (jaccard 매칭) + lessons 인덱스에 task-log.md 실패 라인 통합 (회수 범위 확장).
 - **1.9.66** — **성능 최적화 2차 + MCP 13번째 도구**. `listAllSkills` 메모리 캐시 (skill list/info/match/discover/suggest 공유) + MCP `leerness_task_export` 추가 (TodoWrite 양방향 sync 외부 노출).
 - **1.9.65** — **성능 최적화 1차** — usage-stats 메모리 캐시 + lessons 인덱스 캐시 (mtime invalidation). handoff -37% · drift -19% · audit -29% · skill list -17% · 100-task handoff -42% · status -48% (vs 1.9.64).

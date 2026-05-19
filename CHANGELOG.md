@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.9.68 — 2026-05-19
+
+**`skill match` rolling history 자동 누적 + 종합 회귀**.
+
+### Added — skill match rolling history (default ON)
+- `leerness skill match <query>` 호출 시 결과를 `.harness/skill-suggestions.md`에 append 누적.
+- frontmatter: `leernessRole: skill-suggestions`, `readWhen: ['skill 결정 전', '세션 시작']`.
+- 형식:
+  ```
+  ## YYYY-MM-DD HH:MM:SS — query "<keyword>"
+  - Algorithm: jaccard|embedding
+  - Top N matches:
+    - [점수] skill-id — description
+  ```
+- AI 에이전트가 같은 키워드를 반복 검색하지 않고 이력 참조 가능.
+- 끄기: `--no-save` 또는 `LEERNESS_NO_SKILL_HISTORY=1`.
+
+### Updated
+- `_banner` quickStart: 1.9.68 안내 라인 추가.
+
+### Verified — 종합 회귀 + 성능 측정
+- stress-v14 (1.9.68 + 1.9.43~67 누적 회귀 + 성능 벤치마크) — 모든 시나리오 PASS.
+- 이전 중요 기능 12종 정상 동작 검증:
+  - MCP 13 도구 / drift check / benchmark scenario / skill suggest / lessons --auto
+  - session close --suggest default / audit --strict / install 별칭 / task export
+  - handoff 자동 skill 추천 (1.9.67) / listAllSkills 캐시 (1.9.66) / usage-stats 캐시 (1.9.65)
+- 성능 (warm-up 적용): status / handoff / drift / audit / skill list / skill match.
+- e2e 회귀: 219/219 PASS 유지.
+
+---
+
 ## 1.9.67 — 2026-05-19
 
 **handoff 자동 skill 추천 default ON + lessons 인덱스에 task-log 통합**.
