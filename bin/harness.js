@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.122';
+const VERSION = '1.9.123';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -323,6 +323,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.119+ \`leerness plan list [--json]\` + MCP **35 도구** (\`leerness_plan_list\`) — plan.md milestone 전체 (Status/Progress/Tasks). **Memory Surface READ 5종 완전 완성**.
 - 1.9.121+ handoff 6번째 자동 회수 \`🆕 최근 24h 메모리 변동\` — 5종 surface 의 24h 내 추가 항목 자동 노출.
 - 1.9.122+ \`session close --json\` 응답에도 \`memorySurface\` 필드 통합 — 마감 시 5종 메모리 상태 동시 회수.
+- 1.9.123+ \`health --json\` 응답에도 \`memorySurface\` 필드 통합 — handoff/session close/memory status 모든 JSON 명령 일관성.
 
 ---
 
@@ -8439,6 +8440,30 @@ function healthCmd(root) {
     for (const r of rows) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
     out.checks.tasks = { total: rows.length, byStatus };
   } catch { out.checks.tasks = { error: 'tasks 점검 실패' }; }
+  // 1.9.123: memorySurface 통합 (handoff --json 1.9.115 / session close --json 1.9.122 와 동일 패턴)
+  try {
+    const rows = readProgressRows(root);
+    const tasksByStatus = {};
+    for (const s of STATUSES) tasksByStatus[s] = 0;
+    for (const r of rows) tasksByStatus[r.status] = (tasksByStatus[r.status] || 0) + 1;
+    const tasksInProgress = tasksByStatus['in-progress'] || 0;
+    const dm = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+    const decisionsCount = _extractDecisionBlocks(dm).length;
+    const rules = readRules(root);
+    const rulesActive = rules.filter(r => r.status === 'active').length;
+    const planText = exists(planPath(root)) ? read(planPath(root)) : '';
+    const milestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
+    const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
+    const lessonsCount = (lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+    out.memorySurface = {
+      tasks: { inProgress: tasksInProgress, total: rows.length, byStatus: tasksByStatus },
+      decisions: { count: decisionsCount },
+      rules: { active: rulesActive, total: rules.length },
+      plan: { milestones },
+      lessons: { count: lessonsCount },
+      summary: `T${tasksInProgress}/D${decisionsCount}/R${rulesActive}/P${milestones}/L${lessonsCount}`,
+    };
+  } catch { out.memorySurface = { error: 'memorySurface 점검 실패' }; }
   // 6) issues 요약 (사용자 글로벌 룰 가시화)
   const issues = [];
   if (out.checks.drift?.level && !/healthy/.test(out.checks.drift.level)) issues.push(`drift ${out.checks.drift.level}`);

@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.9.123 — 2026-05-20
+
+**`leerness health --json` 응답에 `memorySurface` 필드 통합** — handoff (1.9.115) / session close (1.9.122) / memory status (1.9.114) 와 일관성 완성.
+
+### Added — `health --json` 새 필드 `memorySurface`
+```json
+{
+  "root": "...",
+  "generatedAt": "...",
+  "checks": { "drift": ..., "security": ..., "skills": ..., "usage": ..., "tasks": ... },
+  "issues": [...],
+  "healthy": true,
+  "memorySurface": {
+    "tasks": { "inProgress": 2, "total": 12, "byStatus": {...} },
+    "decisions": { "count": 4 },
+    "rules": { "active": 2, "total": 2 },
+    "plan": { "milestones": 3 },
+    "lessons": { "count": 7 },
+    "summary": "T2/D4/R2/P3/L7"
+  }
+}
+```
+
+### 1.9.123 — JSON 명령 4종 일관성
+| 명령 | memorySurface 필드 | 라운드 |
+|---|---|---|
+| `handoff --json` | ✓ | 1.9.115 |
+| `memory status --json` | ✓ (상세 + latest) | 1.9.114 |
+| `session close --json` | ✓ | 1.9.122 |
+| **`health --json`** | **✓** | **1.9.123 ✓** |
+
+이제 외부 AI 가 어떤 JSON 명령을 호출해도 동일한 `memorySurface` 구조로 5종 메모리 상태 회수.
+
+### Verified
+- stress-v68 — health --json memorySurface + summary 포맷 + 카운트 + MCP + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.122 — 2026-05-20
 
 **`session close --json` 응답에 `memorySurface` 필드 통합** — handoff --json (1.9.115) 패턴을 session close 에도 적용.
