@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.94 — 2026-05-20
+
+**MCP server 21번째 도구 `leerness_benchmark`** (1.9.46/51 benchmark 외부 노출).
+
+### Added — MCP 21번째 도구
+- `leerness_benchmark` — 1.9.46 6 차원 점수 + 1.9.51 검수 시나리오 결과를 외부 AI에 노출.
+  - inputSchema: `{ path: string, scenario: string (optional) }`
+  - 응답: benchmark --json 결과
+    - `scenario` 없으면: `{ project, measured, leernessScore, total, compareSimulated }`
+    - `scenario: 'all'` 등: `{ scenarios: [...], detectedCount, total }`
+- benchmark --json 옵션은 이미 존재 (1.9.46/51) — MCP 노출만 추가.
+- MCP server 도구 카운트: **20 → 21**.
+
+### Verified
+- stress-v40 — MCP 21 도구 + benchmark 호출 + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.93 — 2026-05-20
 
 **handoff 헤드라인에 health 종합 상태 1 토큰 추가** (1.9.81 + 1.9.85 통합).
