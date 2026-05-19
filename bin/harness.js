@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.83';
+const VERSION = '1.9.84';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -769,6 +769,20 @@ function _invalidateSkillsCache(root) {
 
 function skillList(root) {
   const all = listAllSkills(root);
+  // 1.9.84: --json 옵션 (MCP 통합용)
+  if (has('--json')) {
+    const items = Object.entries(all).map(([id, v]) => ({
+      id,
+      displayNameKo: v.displayNameKo || id,
+      source: v._source,
+      capabilities: v.capabilities || [],
+      usageCount: v.usage?.count || 0,
+      lastUsed: v.usage?.lastUsed || null,
+      lastUpdated: v.lastUpdated || null
+    }));
+    log(JSON.stringify({ skillpack: SKILLPACK_SOURCE, total: items.length, items }, null, 2));
+    return;
+  }
   if (SKILLPACK_SOURCE !== 'builtin') log(`# skillpack 출처: ${SKILLPACK_SOURCE}${SKILLPACK_META ? ` (${SKILLPACK_META.name} v${SKILLPACK_META.version})` : ''}`);
   else log('# skillpack 미설치 — builtin fallback 사용 (leerness 본 패키지 내장 카탈로그)');
   log('| ID | 한글명 | 출처 | 능력(요약) | 사용횟수 | 최종 |');
@@ -3384,7 +3398,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.83+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.84+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -3393,7 +3407,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 16 도구 (skill_match 포함, 1.9.83)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 17 도구 (skill_list 포함, 1.9.84)'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
     log('');
   }
@@ -7336,7 +7350,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_task_export', description: '1.9.60/66 — leerness task → Claude Code TodoWrite 호환 JSON (외부 AI 양방향 sync)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, to: { type: 'string' } } } },
     { name: 'leerness_env_check', description: '1.9.71/73 — .env vs .env.example 동기화 검사 (보안: 키만, 값 미노출). exit 1 if 누락 키 있음', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_brainstorm', description: '1.9.16/72/77 — 누적 컨텍스트(decisions+skills+tasks+rules+evidence+lessons+skillHistory+taskLogFails) 자원 회수. 외부 AI가 새 작업 시작 전 호출', inputSchema: { type: 'object', properties: { topic: { type: 'string' }, path: { type: 'string' }, allApps: { type: 'boolean' } }, required: ['topic'] } },
-    { name: 'leerness_skill_match', description: '1.9.45/50/83 — 사용자 task 키워드에 매칭되는 설치된 skill 추천 (jaccard 또는 embedding). 1.9.68 rolling history 자동 누적', inputSchema: { type: 'object', properties: { query: { type: 'string' }, path: { type: 'string' }, useEmbedding: { type: 'boolean' } }, required: ['query'] } }
+    { name: 'leerness_skill_match', description: '1.9.45/50/83 — 사용자 task 키워드에 매칭되는 설치된 skill 추천 (jaccard 또는 embedding). 1.9.68 rolling history 자동 누적', inputSchema: { type: 'object', properties: { query: { type: 'string' }, path: { type: 'string' }, useEmbedding: { type: 'boolean' } }, required: ['query'] } },
+    { name: 'leerness_skill_list', description: '1.9.84 — 워크스페이스에 설치된 skill 목록 + 사용 횟수 + 출처 (catalog/user). 외부 AI가 사용 가능한 skill 조회', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -7384,6 +7399,7 @@ function mcpServeCmd(root) {
           case 'leerness_env_check':       cliArgs = ['env', 'check', targetPath, '--json']; break;
           case 'leerness_brainstorm':      cliArgs = ['brainstorm', args.topic || '', '--path', targetPath, '--json', ...(args.allApps ? ['--all-apps'] : [])]; break;
           case 'leerness_skill_match':     cliArgs = ['skill', 'match', args.query || '', '--path', targetPath, '--json', ...(args.useEmbedding ? ['--embedding'] : [])]; break;
+          case 'leerness_skill_list':      cliArgs = ['skill', 'list', targetPath, '--json']; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }

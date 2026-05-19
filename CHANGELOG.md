@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.84 — 2026-05-20
+
+**MCP server 17번째 도구 `leerness_skill_list` 추가** (외부 AI에 skill 목록 조회 노출).
+
+### Added — MCP 17번째 도구
+- `leerness_skill_list` — 워크스페이스에 설치된 skill 목록 조회.
+  - inputSchema: `{ path: string }`
+  - 응답: `skill list --json` 결과 (skillpack 출처 + items 배열: id/displayNameKo/source/capabilities/usageCount/lastUsed/lastUpdated)
+  - 외부 AI가 사용 가능한 skill을 즉시 인지하여 적절한 능력 활용.
+- `skill list --json` 옵션 신규 추가 (CI 친화).
+- MCP server 도구 카운트: **16 → 17**.
+
+### Use Case
+- Claude Code / Cursor 가 작업 시작 시 → `leerness_skill_list` 호출 → 사용 가능한 skill 카탈로그 파악 → 적절한 능력 활용.
+- skill_match와 결합: "이 task에 매칭되는 skill (skill_match) + 전체 skill 카탈로그 (skill_list)" 양방향 활용.
+
+### Verified
+- stress-v30 — MCP 17 도구 + skill_list 호출 + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.83 — 2026-05-20
 
 **MCP server 16번째 도구 `leerness_skill_match` 추가** (1.9.45/50/68 skill match 외부 노출).
