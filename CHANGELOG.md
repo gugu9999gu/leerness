@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.86 — 2026-05-20
+
+**MCP server 18번째 도구 `leerness_health` 추가** (1.9.85 health 외부 AI 노출).
+
+### Added — MCP 18번째 도구
+- `leerness_health` — 1.9.85 종합 헬스 체크를 외부 AI에 노출.
+  - inputSchema: `{ path: string, strict: boolean }`
+  - 응답: `health --json` 결과 (drift + security + skills + usage + tasks + issues)
+  - 외부 AI가 워크스페이스 상태 한 번에 인지.
+- MCP server 도구 카운트: **17 → 18**.
+
+### Use Case
+- Claude Code / Cursor가 사용자 워크스페이스에서 작업 시작 시 → `leerness_health` 호출 → drift/보안/skill/MCP 상태 즉시 파악 → 적절한 행동 결정.
+- "이 워크스페이스 보안 안전한가?" "어떤 skill 있나?" "MCP 호출 패턴은?" 한 호출로 답변.
+
+### Verified
+- stress-v32 — MCP 18 도구 + health 호출 + JSON 응답 + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.85 — 2026-05-20
 
 **`leerness health` 새 명령** — 종합 헬스 체크 (drift + 보안 + skill + MCP + 누적 통계).
