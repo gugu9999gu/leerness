@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.80-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.81-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.80   AI Agent Reliability Harness                      ║
+  ║  v1.9.81   AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
@@ -433,6 +433,7 @@ npm test     # = node ./scripts/e2e.js
 
 ## 변경 이력 (최근)
 
+- **1.9.81** — **`handoff` 통합 헤드라인** — drift level + 보안 상태 + MCP 활동 + skill query + 설치 skill 수를 한 줄로 압축. AI가 세션 시작 즉시 워크스페이스 상태 인지.
 - **1.9.80** — **handoff 보안 critical 자동 회복** — `.env` 가 `.gitignore` 에 없으면 🚨 CRITICAL 경고 + `LEERNESS_AUTO_SECURITY_FIX=1` 시 `audit --fix` 자동 실행.
 - **1.9.79** — **`leerness skill suggest` 알고리즘 강화** — 1.9.68 rolling history 빈도 (×2 가중) 추가. 반복 검색된 키워드를 신규 skill 후보로 자동 식별 (Hermes-style 학습).
 - **1.9.78** — **`drift check` 5번째 신호** — `.env` + `.gitignore` 보안 누락을 drift score에 가중 (`.env` 자체 누락 시 +30, 동기화 누락 +15). 보안 위험이 drift critical 승격 가능.

@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.9.81 — 2026-05-20
+
+**`handoff` "통합 헤드라인" 한 줄 요약** (drift + 보안 + skill + MCP).
+
+### Added — handoff 헤드라인
+- Date / Project 라인 직후에 한 줄 요약 자동 노출:
+  ```
+  📊 헤드라인 (1.9.81): drift healthy (0) · 🔒 보안 OK · 🔌 MCP 8회 · 📒 skill query 4회 · 📚 12 skills
+  ```
+- 표시 요소:
+  - `drift <level> (<score>)` — 1.9.78 5신호 결과
+  - `🔒 보안 OK` 또는 `🚨 보안 위험` — 1.9.76 보안 요약 압축
+  - `🔌 MCP N회` — 1.9.70 MCP 누적 카운트
+  - `📒 skill query N회` — 1.9.68 rolling history 누적
+  - `📚 N skills` — 설치된 skill 총 수
+- 데이터 없는 항목은 자동 생략 (잡음 방지).
+- 끄기: `--no-headline` 또는 `--compact`.
+
+### Use Case
+- AI 에이전트가 한 줄로 워크스페이스 상태 즉시 인지 → "drift attention인데 MCP 0회면 도구 안 쓰고 있다" 같은 빠른 판단.
+
+### Verified
+- stress-v27 — 헤드라인 노출 / --no-headline / 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.80 — 2026-05-20
 
 **handoff에서 `.env` 보안 critical 시 자동 회복 옵션** (1.9.76 보안 요약 + 1.9.75 audit --fix 결합).

@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.80';
+const VERSION = '1.9.81';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1815,6 +1815,56 @@ function handoff(root) {
   log('# Session Start Context');
   log(`Date: ${today()}`);
   log(`Project: ${detectProjectName(root)}`);
+  // 1.9.81: 통합 헤드라인 — drift level + 보안 상태 + skill 추천 + MCP 활동을 한 줄로 압축
+  // AI 에이전트가 매 세션 시작 즉시 컨텍스트 인지. --no-headline 또는 --compact로 끄기.
+  if (!has('--no-headline') && !has('--compact')) {
+    try {
+      const parts = [];
+      // 1) drift level (가벼운 check)
+      try {
+        const r = cp.spawnSync(process.execPath, [__filename, 'drift', 'check', root, '--json'],
+          { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
+        const j = JSON.parse(r.stdout.trim());
+        if (j.level) parts.push(`drift ${j.level.replace(/^[^\w]+/, '')} (${j.score})`);
+      } catch {}
+      // 2) 보안 상태
+      try {
+        const envPath = path.join(root, '.env');
+        if (exists(envPath)) {
+          const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
+          const giLines = giText.split('\n').map(l => l.trim());
+          if (giLines.includes('.env') || giLines.includes('/.env')) parts.push('🔒 보안 OK');
+          else parts.push('🚨 보안 위험');
+        }
+      } catch {}
+      // 3) MCP 활동 누적
+      try {
+        const stats = _readUsageStats(root);
+        const mcpTotal = stats.mcp?.tools ? Object.values(stats.mcp.tools).reduce((s, n) => s + n, 0) : 0;
+        if (mcpTotal > 0) parts.push(`🔌 MCP ${mcpTotal}회`);
+      } catch {}
+      // 4) skill match history 누적
+      try {
+        const histPath = path.join(root, '.harness', 'skill-suggestions.md');
+        if (exists(histPath)) {
+          const txt = read(histPath);
+          const cnt = (txt.match(/^## [\d-]+ [\d:]+ — query/gm) || []).length;
+          if (cnt > 0) parts.push(`📒 skill query ${cnt}회`);
+        }
+      } catch {}
+      // 5) 설치된 skill 수
+      try {
+        const all = listAllSkills(root);
+        const skillCnt = Object.keys(all).length;
+        if (skillCnt > 0) parts.push(`📚 ${skillCnt} skills`);
+      } catch {}
+      if (parts.length) {
+        const isTty = process.stdout && process.stdout.isTTY;
+        const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+        log(cy(`📊 헤드라인 (1.9.81): ${parts.join(' · ')}`));
+      }
+    } catch {}
+  }
   // 1.9.8: active rules 자동 노출 (매 세션 시작 시 AI에게 보임)
   const activeRules = readRules(root).filter(r => r.status === 'active');
   if (activeRules.length) {
@@ -3334,7 +3384,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.80+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.81+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
