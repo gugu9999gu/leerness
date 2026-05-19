@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.97 — 2026-05-20
+
+**자율 모드 27 라운드 종합 보고서 갱신 + 마무리** (1.9.70 ~ 1.9.96).
+
+### Internal — 비공개 종합 보고서
+- `_reports/AUTONOMOUS_ROUNDS_1.9.70-1.9.96.md` 갱신 (이전 1.9.89 보고서 확장)
+- 27 라운드 전체 요약 + 그룹화 (보안 / MCP 21개 / handoff 5단 / JSON 옵션 9종)
+- 성능 측정 (handoff 700ms · health 720ms · audit 350ms · drift 400ms)
+- 디버그 기록 6건
+- 사용자 명시 정책 7개 모두 ✓
+
+### Stats
+- 자율 모드 27 라운드 (1.9.70 ~ 1.9.96)
+- MCP 도구: 12 → 21개
+- 새 명령: env check/sync, health, skill search
+- JSON 옵션: 9종 (handoff, lessons, skill list/info/search, health, env check, benchmark, drift check)
+
+### Verified
+- e2e 219/219 매 라운드 PASS 유지
+
+---
+
 ## 1.9.96 — 2026-05-20
 
 **`leerness handoff --json` 옵션 추가** (외부 AI / MCP 통합용).
