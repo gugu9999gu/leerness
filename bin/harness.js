@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.90';
+const VERSION = '1.9.91';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3433,7 +3433,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.90+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.91+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -3443,7 +3443,7 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 18 도구 (health 포함, 1.9.86)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 19 도구 (skill_search 포함, 1.9.91)'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
     log('');
   }
@@ -7431,7 +7431,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_brainstorm', description: '1.9.16/72/77 — 누적 컨텍스트(decisions+skills+tasks+rules+evidence+lessons+skillHistory+taskLogFails) 자원 회수. 외부 AI가 새 작업 시작 전 호출', inputSchema: { type: 'object', properties: { topic: { type: 'string' }, path: { type: 'string' }, allApps: { type: 'boolean' } }, required: ['topic'] } },
     { name: 'leerness_skill_match', description: '1.9.45/50/83 — 사용자 task 키워드에 매칭되는 설치된 skill 추천 (jaccard 또는 embedding). 1.9.68 rolling history 자동 누적', inputSchema: { type: 'object', properties: { query: { type: 'string' }, path: { type: 'string' }, useEmbedding: { type: 'boolean' } }, required: ['query'] } },
     { name: 'leerness_skill_list', description: '1.9.84 — 워크스페이스에 설치된 skill 목록 + 사용 횟수 + 출처 (catalog/user). 외부 AI가 사용 가능한 skill 조회', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_health', description: '1.9.85/86 — 종합 헬스 체크 (drift + 보안 + skills + MCP + tasks + issues 배열). 외부 AI가 워크스페이스 상태 한 번에 확인', inputSchema: { type: 'object', properties: { path: { type: 'string' }, strict: { type: 'boolean' } } } }
+    { name: 'leerness_health', description: '1.9.85/86 — 종합 헬스 체크 (drift + 보안 + skills + MCP + tasks + issues 배열). 외부 AI가 워크스페이스 상태 한 번에 확인', inputSchema: { type: 'object', properties: { path: { type: 'string' }, strict: { type: 'boolean' } } } },
+    { name: 'leerness_skill_search', description: '1.9.90/91 — capability 배열에서 부분 일치하는 skill 검색 (substring + case-insensitive). skill match와 다른 정확 매칭', inputSchema: { type: 'object', properties: { capability: { type: 'string' }, path: { type: 'string' } }, required: ['capability'] } }
   ];
 
   function send(obj) {
@@ -7481,6 +7482,7 @@ function mcpServeCmd(root) {
           case 'leerness_skill_match':     cliArgs = ['skill', 'match', args.query || '', '--path', targetPath, '--json', ...(args.useEmbedding ? ['--embedding'] : [])]; break;
           case 'leerness_skill_list':      cliArgs = ['skill', 'list', targetPath, '--json']; break;
           case 'leerness_health':          cliArgs = ['health', targetPath, '--json', ...(args.strict ? ['--strict'] : [])]; break;
+          case 'leerness_skill_search':    cliArgs = ['skill', 'search', args.capability || '', '--path', targetPath, '--json']; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }

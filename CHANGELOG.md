@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.91 — 2026-05-20
+
+**MCP server 19번째 도구 `leerness_skill_search`** (1.9.90 외부 AI 노출).
+
+### Added — MCP 19번째 도구
+- `leerness_skill_search` — 1.9.90 skill search 명령을 외부 AI에 노출.
+  - inputSchema: `{ capability: string (required), path: string }`
+  - 응답: `skill search --json` 결과
+- 외부 AI가 capability 키워드로 사용 가능한 skill 직접 검색.
+- MCP server 도구 카운트: **18 → 19**.
+
+### Verified
+- stress-v37 — MCP 19 도구 + skill_search 호출 + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.90 — 2026-05-20
 
 **`leerness skill search <capability>` 새 명령** — capability 배열 부분 일치 검색.
