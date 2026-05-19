@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.9.64 — 2026-05-19
+
+**`leerness install <skill>` 별칭 + 성능 벤치마크 1차 실측**.
+
+### Added
+- **`leerness install <SKILL.md path or URL>`** — `skill install` 별칭:
+  - 자주 쓰는 명령 단축 (agentskills.io 컨벤션 맞춤)
+  - 디렉토리만 주면 init 의도로 친절 안내 (`leerness init` 권장)
+- 인자 없으면 사용법 안내
+
+### 📊 성능 벤치마크 1차 (stress-v10)
+
+10회 평균 latency (Node.js spawnSync cold start 포함):
+
+| 명령 | median | p95 |
+|---|---:|---:|
+| status | 1330ms | 1426ms |
+| handoff --compact | 1378ms | 2500ms |
+| drift check | 1303ms | 1782ms |
+| audit | 1159ms | 1806ms |
+| skill list | 1526ms | 2503ms |
+| handoff (100 task) | 1176ms | - |
+| task export (100 task) | 2163ms | - |
+| skill suggest (30 task) | 1075ms | - |
+
+### 1.9.65+ 성능 최적화 후보 (벤치마크에서 도출)
+- `.harness/cache/usage-stats.json` 파일 I/O 캐싱
+- handoff의 lessons fuzzy 매칭 워크스페이스 크기에 비례 → 키워드 캐시
+
+## 1.9.63 — 2026-05-19
+
+**`leerness audit --strict` — CI 친화 옵션 (warnings → failures 승격)**.
+
+### Added
+- **`--strict [--threshold N]`** — warnings ≥ N (기본 1) 시 failures 승격 → exit 1
+- CI 환경에서 audit warning 무시 방지
+
+### 검증 (stress-v10 + 누적 회귀)
+- EE1-EE3 (audit --strict) 3/3 PASS
+- FF1-FF3 (install 별칭) 3/3 PASS
+- GG1-GG5 (성능 벤치마크 10회 평균) 5/5 PASS
+- HH1-HH3 (큰 워크스페이스 100 task) 3/3 PASS
+- II1-II3 (1.9.43~62 회귀) 3/3 PASS
+- **stress-v10: 17/17 PASS**, e2e: **219/219 PASS**
+
 ## 1.9.62 — 2026-05-19
 
 **`leerness audit`에 npm CVE 자동 감지 통합**.

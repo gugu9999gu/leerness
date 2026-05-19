@@ -950,6 +950,43 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
+// 1.9.63/64 회귀
+total++;
+{
+  // audit --strict
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-st-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'audit', tmpC, '--strict'], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status !== 0 && /strict.*승격|failures=1/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.63) audit --strict: warnings → failures 승격' : `✗ --strict 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
+}
+
+total++;
+{
+  // audit --strict --threshold 10 → exit 0
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-st2-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'audit', tmpC, '--strict', '--threshold', '10'], { encoding: 'utf8', timeout: 15000 });
+  const ok = r.status === 0;
+  console.log(ok ? '✓ B(1.9.63) audit --strict --threshold 10: warnings 적으면 exit 0' : `✗ threshold 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(-300)); }
+}
+
+total++;
+{
+  // install 별칭
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-iv-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const src = path.join(tmpC, 'sk.md');
+  fs.writeFileSync(src, '---\nname: install-alias-test\ndescription: 별칭 검증\n---\n# Body\n', 'utf8');
+  const r = cp.spawnSync(process.execPath, [CLI, 'install', src, '--path', tmpC], { encoding: 'utf8', timeout: 15000 });
+  const f = path.join(tmpC, '.harness', 'skills', 'install-alias-test', 'SKILL.md');
+  const ok = r.status === 0 && fs.existsSync(f);
+  console.log(ok ? '✓ B(1.9.64) install <SKILL.md>: skill install 별칭 동작' : `✗ install 별칭 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 300)); }
+}
+
 // 1.9.60/61/62 회귀
 total++;
 {

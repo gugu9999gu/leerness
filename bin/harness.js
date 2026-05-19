@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.62';
+const VERSION = '1.9.64';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1451,7 +1451,15 @@ function audit(root) {
       }
     } catch {}
   }
-  log(`Audit summary: warnings=${warnings} failures=${failures}${fix ? ` fixed=${fixed}` : ''}`);
+  // 1.9.63: --strict — warnings ≥ threshold 시 failures로 승격 (CI 친화)
+  if (has('--strict')) {
+    const threshold = parseInt(arg('--threshold', '1'), 10);
+    if (warnings >= threshold) {
+      failures++;
+      warn(`--strict 활성: warnings ${warnings} ≥ threshold ${threshold} → failures 승격`);
+    }
+  }
+  log(`Audit summary: warnings=${warnings} failures=${failures}${fix ? ` fixed=${fixed}` : ''}${has('--strict') ? ` strict-threshold=${arg('--threshold', '1')}` : ''}`);
   if (failures) process.exitCode = 1;
 }
 
@@ -7185,6 +7193,23 @@ async function main() {
     } catch {}
   }
   if (cmd === 'init')      return await install(args[1] || process.cwd(), { force:false, dry:false, migration:false });
+  // 1.9.64: install <skill-id-or-url> 별칭 (= skill install). 자주 쓰는 명령 단축형.
+  // 단, init이 leerness install . 같은 형태로도 동작하던 옛 호환은 유지 — args[1]이 디렉토리면 init으로 라우팅.
+  if (cmd === 'install') {
+    const arg1 = args[1];
+    // skill source는 .md 파일 또는 URL 또는 skill id. 디렉토리면 init으로.
+    if (!arg1) { fail('사용법: leerness install <skill SKILL.md path or URL>'); return process.exit(1); }
+    if (/^https?:\/\//.test(arg1) || /\.md$/.test(arg1) || exists(path.join(arg1, 'SKILL.md'))) {
+      return await skillInstallCmd(absRoot(arg('--path', process.cwd())), arg1);
+    }
+    // 디렉토리면 안내
+    if (exists(arg1) && fs.statSync(arg1).isDirectory() && !exists(path.join(arg1, 'SKILL.md'))) {
+      fail(`디렉토리에 SKILL.md 없음: ${arg1}\n  init 의도였다면: leerness init "${arg1}"`);
+      return process.exit(1);
+    }
+    fail(`알 수 없는 install 대상: ${arg1}\n  SKILL.md 파일/URL/SKILL.md 포함 디렉토리 필요`);
+    return process.exit(1);
+  }
   if (cmd === 'migrate')   return await install(args[1] || process.cwd(), { force:has('--force'), dry:has('--dry-run'), migration:true });
   if (cmd === 'update')    return await updateCmd(args[1] || process.cwd(), { checkOnly: has('--check'), yes: has('--yes'), force: has('--force') });
   if (cmd === 'auto-update' && args[1] === 'install') return autoUpdateInstall(args[2] || process.cwd());
