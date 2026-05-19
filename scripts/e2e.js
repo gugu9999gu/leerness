@@ -950,6 +950,32 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
 }
 
+// 1.9.56/57 회귀
+total++;
+{
+  // handoff 자동 lessons 재상기
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ha-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  fs.writeFileSync(path.join(tmpC, '.harness', 'review-evidence.md'),
+    '## 2026-04-01\nNote: ✗ webhook 처리 실패\n', 'utf8');
+  cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'webhook 처리 개선', '--status', 'in-progress', '--path', tmpC], { stdio: 'ignore', timeout: 10000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC, '--no-drift-check', '--no-workflow-guide'], { encoding: 'utf8', timeout: 15000 });
+  const ok = /lessons 자동 재상기.*webhook|🧠.*webhook/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.56) handoff: lessons 자동 재상기 (현재 task 키워드 매칭)' : `✗ handoff lessons 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(-500)); }
+}
+
+total++;
+{
+  // session close --suggest
+  const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sc-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpC, '--suggest'], { encoding: 'utf8', timeout: 30000 });
+  const ok = /다음 라운드 추천|drift 상태/.test(r.stdout);
+  console.log(ok ? '✓ B(1.9.57) session close --suggest: drift + skill suggest 통합' : `✗ --suggest 실패`);
+  if (!ok) { failed++; console.log(r.stdout.slice(-500)); }
+}
+
 // 1.9.54/55 회귀
 total++;
 {

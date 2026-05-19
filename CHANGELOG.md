@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.9.57 — 2026-05-19
+
+**`session close --suggest` + 설치 가이드 갱신**.
+
+### Added
+- **`leerness session close --suggest`** — 라운드 마감 통합 보고:
+  - skill suggest 후보 (Hermes-style 자동 학습) 상위 3
+  - drift check 상태 + 임계 초과 신호
+  - usage stats 가장 많이 쓴 명령 Top 3
+
+### 설치 가이드 갱신
+- **`_banner` quickStart 재구성** — 1.9.57+ 워크플로 강조:
+  - `npx leerness handoff .` (lessons 자동 재상기 포함)
+  - `npx leerness session close . --suggest` (마감 + 다음 라운드)
+  - `npx leerness mcp serve` (메인 에이전트용 12 도구)
+- **`.harness/session-workflow.md`** Step 6 갱신 — `--suggest`/1.9.56 lessons 자동 재상기 안내
+
+## 1.9.56 — 2026-05-19
+
+**`handoff`에 `lessons --auto` 자동 통합 — 매 세션 시작 시 과거 실패 자동 재상기**.
+
+### Added
+- **handoff 자동 lessons 재상기**:
+  - 가장 최근 in-progress/planned task의 `request`에서 키워드 자동 추출
+  - 그 키워드로 review-evidence.md의 과거 실패 매칭
+  - **🧠 과거 lessons 자동 재상기** 블록 출력 (관련 실패 ≥1건 시)
+  - 끄려면: `--no-lessons` 또는 `LEERNESS_NO_LESSONS=1`
+- 매칭 실패 시 블록 자동 숨김 (false positive 차단)
+
+### 검증 (stress-v7)
+- T1-T3 (handoff 자동 lessons) 3/3 PASS
+- U1-U3 (session close --suggest) 3/3 PASS
+- V1-V2 (설치 가이드 갱신 — banner + session-workflow.md) 2/2 PASS
+- W1-W4 (1.9.43~55 누적 회귀) 4/4 PASS
+- **stress-v7: 12/12 PASS**, e2e: **210/210 PASS**
+
 ## 1.9.55 — 2026-05-19
 
 **MCP server 12 도구 — `leerness_skill_suggest` + `leerness_lessons` 노출**.

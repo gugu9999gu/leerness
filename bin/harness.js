@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.55';
+const VERSION = '1.9.57';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -276,14 +276,18 @@ leerness review <file> --persona security,performance,ux
 - 메인이 직접 통합 시나리오 작성 + 실행 (independent 검증).
 - Sub-agent 검수 vs 메인 검수 결과 *교차 일치* 확인.
 
-## Step 6. 세션 마감 + 인계
+## Step 6. 세션 마감 + 인계 + 다음 라운드 추천
 \`\`\`bash
-leerness session close .       # handoff/current-state/task-log 자동 갱신
-leerness audit . --fix         # 누락 메타 자동 보강
-leerness usage stats .         # 이번 세션 명령 카운트 확인
+leerness session close . --suggest   # 1.9.57+ — 마감 + 다음 라운드 추천 통합
+# 단독으로도 가능:
+leerness session close .             # handoff/current-state/task-log 자동 갱신
+leerness skill suggest .             # 1.9.53 — 반복 패턴 → 새 skill 후보
+leerness drift check .               # 4 신호 + 4 레벨 점검
+leerness audit . --fix               # 누락 메타 자동 보강
 \`\`\`
 - session close가 누락되면 다음 세션 시작 시 drift critical 발생.
 - 자동 회복 옵션: \`drift check --auto-fix\` (critical 시 session close 자동 실행).
+- 1.9.56+ handoff가 매 세션 시작 시 **과거 lessons 자동 재상기** (현재 task 키워드 기준).
 
 ---
 
@@ -1699,6 +1703,50 @@ function handoff(root) {
     const cs = read(currentStatePath(root)).replace(/Updated: \d{4}-\d{2}-\d{2}/, `Updated: ${today()}`);
     writeUtf8(currentStatePath(root), cs);
   }
+  // 1.9.56: handoff에 lessons --auto 자동 통합 — 현재 in-progress task와 관련된 과거 실수/결정 자동 재상기
+  // 매 세션 시작 시 AI가 과거에 같은 키워드로 실패한 사례를 잊지 않도록.
+  // 끄려면: --no-lessons 또는 LEERNESS_NO_LESSONS=1
+  if (!has('--no-lessons') && !has('--compact') && process.env.LEERNESS_NO_LESSONS !== '1') {
+    try {
+      const lrows = readProgressRows(root);
+      const latestRow = lrows.filter(r => r.status === 'in-progress' || r.status === 'planned').pop() || lrows[lrows.length - 1];
+      if (latestRow && latestRow.request) {
+        const stopwords = new Set([
+          '이런','저런','하다','하고','있는','하지','에서',
+          '작업','구현','추가','진행','수정','변경','검토','확인',
+          '프로젝트','관리','기능','시스템','코드','파일','버전','정리','계획',
+          'next','action','task','todo','work'
+        ]);
+        const tokens = String(latestRow.request).toLowerCase().match(/[\w가-힣]{4,}/g) || [];
+        const keyword = tokens.filter(t => !stopwords.has(t)).sort((a, b) => b.length - a.length)[0];
+        if (keyword) {
+          // lessons 검색
+          const decisions = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+          const evidence = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
+          const matches = [];
+          for (const block of evidence.split(/\n(?=## )/)) {
+            if (block.startsWith('## ') && new RegExp(escapeRegex(keyword), 'i').test(block) && /✗|fail|롤백|버그|incomplete/i.test(block)) {
+              const titleM = block.match(/^## (.+)$/m);
+              if (titleM) matches.push({ source: 'review-evidence.md', title: titleM[1].trim(), block });
+            }
+          }
+          if (matches.length) {
+            const isTty = process.stdout && process.stdout.isTTY;
+            const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+            const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+            log('');
+            log(yel(`## 🧠 과거 lessons 자동 재상기 (1.9.56) — 키워드 "${keyword}"`));
+            log(dim(`  현재 task와 관련된 과거 실패/롤백 ${matches.length}건 — 같은 실수 반복 방지`));
+            for (const m of matches.slice(0, 3)) {
+              log(dim(`  • [${m.source}] ${m.title}`));
+            }
+            log(dim(`  → 전체: leerness lessons --auto --path .`));
+            log('');
+          }
+        }
+      }
+    } catch {}
+  }
   // 1.9.41: 최근 migrate 차분 알림 — migration-report.md가 24h 내면 "AI must re-read" 블록 자동 표시
   // 같은 채팅 세션의 AI 청크가 이전 버전 마인드셋이어도 새 도구를 즉시 인지하도록.
   if (!has('--no-workflow-guide') && !has('--compact')) {
@@ -3044,11 +3092,15 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작')));
-    log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트'));
-    log('    ' + C.green('npx leerness@latest setup-agents .') + C.dim('                  # 외부 AI CLI 설정'));
-    log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 적재'));
-    log('    ' + C.green('npx leerness verify-claim T-0001 --run-tests') + C.dim('        # 자동 검증'));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.57+ 워크플로)')));
+    log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
+    log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 적재 + 과거 lessons 자동 재상기'));
+    log('    ' + C.green('npx leerness verify-claim T-0001 --run-tests') + C.dim('        # AI 거짓 완료 자동 검증'));
+    log('    ' + C.green('npx leerness session close . --suggest') + C.dim('              # 마감 + 다음 라운드 추천'));
+    log('');
+    log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 12 도구 노출'));
+    log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
     log('');
   }
 }
@@ -3796,6 +3848,43 @@ function sessionClose(root) {
   ok(`session-handoff.md and current-state.md updated`);
   // 1.9.12: session close 끝에 roadmap.html 자동 갱신
   _autoRoadmap(root, 'session-close');
+  // 1.9.57: --suggest 옵션 — 마감 시 skill suggest + drift check + lessons 통합 보고
+  if (has('--suggest')) {
+    const isTty = process.stdout && process.stdout.isTTY;
+    const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+    const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+    log('');
+    log(cy('## 💡 다음 라운드 추천 (1.9.57 --suggest)'));
+    // 1) skill suggest
+    try {
+      const r = cp.spawnSync(process.execPath, [__filename, 'skill', 'suggest', '--path', root, '--min', '3', '--json'],
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
+      const j = JSON.parse(r.stdout);
+      if (j.candidates && j.candidates.length) {
+        log(dim('  📌 신규 skill 후보 (Hermes-style 자동 학습):'));
+        for (const c of j.candidates.slice(0, 3)) log(`    • ${c.keyword} (${c.count}회 등장, 출처: ${c.source})`);
+      }
+    } catch {}
+    // 2) drift check
+    try {
+      const r = cp.spawnSync(process.execPath, [__filename, 'drift', 'check', root, '--json'],
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
+      const j = JSON.parse(r.stdout.trim());
+      if (j.level) {
+        log(dim(`  🩺 drift 상태: ${j.level} ${j.score}/200`));
+        if (j.fired && j.fired.length) log(dim(`    🔥 ${j.fired.length}건 임계 초과 — \`leerness drift check\` 상세`));
+      }
+    } catch {}
+    // 3) usage stats top
+    try {
+      const stats = _readUsageStats(root);
+      const entries = Object.entries(stats.commands || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      if (entries.length) {
+        log(dim(`  📊 가장 많이 쓴 명령: ${entries.map(([c, n]) => `${c}(${n})`).join(', ')}`));
+      }
+    } catch {}
+    log('');
+  }
   // 1.9.13: 세션 카운터 + 자동 한 줄 요약 + 5세션마다 깊은 회고
   try {
     const sc = readSessionCounter(root);
