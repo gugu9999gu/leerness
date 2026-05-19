@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.9.105 — 2026-05-20
+
+**MCP 24번째 도구 `leerness_task_add`** (외부 AI 가 task 즉시 등록 — 양방향 제어 완성).
+
+### Added — MCP 24번째 도구 `leerness_task_add`
+- 외부 AI(Claude Code / Hermes)가 progress-tracker.md 에 새 task 즉시 등록.
+- 인자:
+  - `text` (required) — task 설명
+  - `status` — 9 status enum (requested/planned/in-progress/waiting/on-hold/blocked/incomplete/done/dropped). 기본 `requested`
+  - `evidence` — evidence 라인 (기본 `user-request`)
+  - `nextAction` — 다음 액션 (기본 `다음 액션 작성`)
+  - `path` — 워크스페이스 경로 (기본 현재)
+- 응답: 새 task ID (`T-XXXX`) + 성공 메시지
+- 사용 시나리오: 사용자가 자연어로 "X 작업 추가해줘" → 외부 AI 가 즉시 `leerness_task_add` 호출.
+
+### 양방향 제어 완성
+- 1.9.60: `leerness_task_export` — task → TodoWrite (READ)
+- **1.9.105: `leerness_task_add` — TodoWrite → task (WRITE)**
+- 외부 AI 가 task 목록을 read + add 양방향 sync.
+
+### MCP 도구 수: 23 → 24개
+1~10 (기존) + skill_suggest / lessons / task_export / env_check / brainstorm / skill_match / skill_list / health / skill_search / skill_info / benchmark / lazy_detect / retro / **task_add** (1.9.105 신규)
+
+### Verified
+- stress-v50 — MCP task_add 응답 + progress-tracker.md 실제 갱신 + 24 도구 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.104 — 2026-05-20
 
 **MCP 23번째 도구 `leerness_retro`** (4세션 누적 회고 외부 AI 노출).
