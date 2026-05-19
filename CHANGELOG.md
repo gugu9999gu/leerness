@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.9.114 — 2026-05-20
+
+**`leerness memory status` 새 명령 + MCP 32번째 도구 `leerness_memory_status`** — Memory Write Surface 5종 통합 상세 상태 조회.
+
+### Added — `leerness memory status [--json]`
+- 새 CLI 명령: Memory Write Surface 5종 통합 상태 조회.
+- Verbose 모드:
+  ```
+  # 🧠 Memory Surface Status (1.9.114)
+  📋 Tasks: 2 in-progress / 12 total
+     - 분포: in-progress=2, done=8, ...
+  🧠 Decisions: 4 entries
+     - 최근: 2026-05-20 — PostgreSQL 채택
+  ⚡ Rules: 2 active / 0 paused
+  🗺  Plan: 3 milestones (1 in-progress)
+  💡 Lessons: 7 entries
+     - 최근: webhook 재시도 시 idempotency key 필수
+
+  📊 Summary: T2/D4/R2/P3/L7
+  ```
+- JSON 모드: `{ version, root, tasks, decisions, rules, plan, lessons, summary }` 구조.
+- summary 필드는 handoff 헤드라인 (1.9.113) 과 동일 포맷 `T/D/R/P/L`.
+
+### Added — MCP 32번째 도구 `leerness_memory_status`
+- 외부 AI 가 한 호출로 5종 메모리 영구화 상태 + 카운트 + 최근 항목 회수.
+- 인자: `{ path? }`.
+- 1.9.113 헤드라인 mem 토큰의 상세 버전 — 외부 AI 가 카운트만 아닌 **최근 결정 / 최근 lesson 내용** 까지 직접 받음.
+
+### 사용 시나리오
+사용자: "지금까지 누적된 결정과 lesson 알려줘"
+→ 외부 AI: `leerness_memory_status({ path: "." })`
+→ 외부 AI 가 receivedJSON 으로 응답:
+> "Decisions 4건, 최근: PostgreSQL 채택. Lessons 7건, 최근: webhook 재시도 시 idempotency key 필수."
+
+### MCP 도구 수: 31 → 32개
+### JSON 옵션 누적: 14 → 15종
+
+### Verified
+- stress-v59 — memory status CLI + --json + MCP 응답 + 5종 카운트 정확성 + 누적 회귀.
+- e2e 219/219 PASS.
+
+---
+
 ## 1.9.113 — 2026-05-20
 
 **handoff 통합 헤드라인에 Memory Write Surface 5종 카운트 추가** — 사용자가 한눈에 5종 메모리 영구화 상태 확인.

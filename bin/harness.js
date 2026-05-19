@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.113';
+const VERSION = '1.9.114';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -315,6 +315,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.110+ MCP **30 도구 🎉 30 도구 마일스톤** (\`leerness_plan_add\` — plan.md milestone + progress-tracker 자동 동기화).
 - 1.9.112+ MCP **31 도구** (\`leerness_lesson_save\` — lessons.md 직접 write, **Memory Write Surface 5종 완성**: tasks/decisions/rules/plan/lessons).
 - 1.9.113+ handoff 통합 헤드라인에 **🧠 mem T/D/R/P/L 카운트** 추가 — 5종 메모리 영구화 상태 한눈에 확인.
+- 1.9.114+ \`leerness memory status [--json]\` + MCP **32 도구** (\`leerness_memory_status\`) — 상세 상태 + 최근 항목 조회.
 
 ---
 
@@ -1280,6 +1281,66 @@ function taskDrop(root, id) {
   upsertProgress(root, { id, status: 'dropped', evidence: arg('--reason','사용자 요청으로 제외'), nextAction: '없음' });
   ok(`task dropped: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
+}
+
+// 1.9.114: memory status — Memory Write Surface 5종 통합 상태 조회 (CLI + --json + MCP)
+function memoryStatusCmd(root, opts = {}) {
+  root = absRoot(root);
+  const jsonMode = !!opts.json || has('--json');
+  // Tasks
+  const rows = readProgressRows(root);
+  const tasksByStatus = {};
+  for (const s of STATUSES) tasksByStatus[s] = 0;
+  for (const r of rows) tasksByStatus[r.status] = (tasksByStatus[r.status] || 0) + 1;
+  const tasksTotal = rows.length;
+  const tasksInProgress = tasksByStatus['in-progress'] || 0;
+  // Decisions (1.9.114: _extractDecisionBlocks 사용 — template/code 블록 제외)
+  const dm = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+  const decisionBlocks = _extractDecisionBlocks(dm);
+  const decisionHeaders = decisionBlocks.map(b => {
+    const m = b.match(/^### (.+)$/m);
+    return m ? '### ' + m[1].trim() : null;
+  }).filter(Boolean);
+  const decisionLatest = decisionHeaders.length ? decisionHeaders[decisionHeaders.length - 1].replace(/^### /, '') : null;
+  // Rules
+  const rules = readRules(root);
+  const rulesActive = rules.filter(r => r.status === 'active').length;
+  const rulesPaused = rules.filter(r => r.status === 'paused').length;
+  // Plan
+  const planText = exists(planPath(root)) ? read(planPath(root)) : '';
+  const milestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
+  // plan milestones in-progress: progress-tracker에서 plan:M-XXXX evidence 있고 in-progress 인 row
+  const planInProgress = rows.filter(r => /plan:M-/.test(r.evidence || '') && r.status === 'in-progress').length;
+  // Lessons (lessons.md)
+  const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
+  const lessonHeaders = lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || [];
+  const lessonsLatest = lessonHeaders.length ? (lm.split('\n').filter(l => /- Lesson:/.test(l)).pop() || '').replace(/^- Lesson:\s*/, '').slice(0, 100) : null;
+
+  const payload = {
+    version: VERSION,
+    root,
+    tasks: { inProgress: tasksInProgress, total: tasksTotal, byStatus: tasksByStatus },
+    decisions: { count: decisionHeaders.length, latest: decisionLatest },
+    rules: { active: rulesActive, paused: rulesPaused, total: rules.length },
+    plan: { milestones, inProgress: planInProgress },
+    lessons: { count: lessonHeaders.length, latest: lessonsLatest },
+    summary: `T${tasksInProgress}/D${decisionHeaders.length}/R${rulesActive}/P${milestones}/L${lessonHeaders.length}`,
+  };
+  if (jsonMode) {
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+    return;
+  }
+  log('# 🧠 Memory Surface Status (1.9.114)\n');
+  log(`📋 Tasks: ${tasksInProgress} in-progress / ${tasksTotal} total`);
+  const statusDetail = STATUSES.map(s => `${s}=${tasksByStatus[s]}`).filter(x => !/=0$/.test(x)).join(', ');
+  if (statusDetail) log(`   - 분포: ${statusDetail}`);
+  log(`🧠 Decisions: ${decisionHeaders.length} entries`);
+  if (decisionLatest) log(`   - 최근: ${decisionLatest}`);
+  log(`⚡ Rules: ${rulesActive} active / ${rulesPaused} paused`);
+  log(`🗺  Plan: ${milestones} milestones (${planInProgress} in-progress)`);
+  log(`💡 Lessons: ${lessonHeaders.length} entries`);
+  if (lessonsLatest) log(`   - 최근: ${lessonsLatest}`);
+  log(`\n📊 Summary: ${payload.summary}`);
 }
 
 // 1.9.112: lesson save — .harness/lessons.md에 새 lesson 추가 (Memory Write Surface 5번째)
@@ -3638,8 +3699,9 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 31 도구 (lesson_save 추가, 1.9.112 Memory Write 5종 완성)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 32 도구 (memory_status 추가, 1.9.114)'));
     log('    ' + C.green('npx leerness lesson save "<text>" --tag "..."') + C.dim('       # lessons.md 직접 write (1.9.112 — handoff 자동 회수와 통합)'));
+    log('    ' + C.green('npx leerness memory status . --json') + C.dim('                  # Memory Surface 5종 통합 상태 JSON (1.9.114)'));
     log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
     log('    ' + C.green('npx leerness rule add "매 X마다 Y" --trigger every-X') + C.dim('  # 자연어 영구 룰 (1.9.8) — handoff 매 세션 자동 출력'));
     log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
@@ -7730,7 +7792,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_rule_add', description: '1.9.109 — 자연어 영구 룰 등록 (1.9.8). "매 X마다 Y를 해줘" 같은 룰을 등록 — handoff 가 매 세션 자동 출력, session close 가 자동 검증·보고. 인자: { description (required), trigger? (every-session/every-update/every-commit/session-start/session-close/pre-publish), path? }', inputSchema: { type: 'object', properties: { description: { type: 'string' }, trigger: { type: 'string', enum: ['every-session', 'every-update', 'every-commit', 'session-start', 'session-close', 'pre-publish'] }, path: { type: 'string' } }, required: ['description'] } },
     { name: 'leerness_rule_list', description: '1.9.109 — 등록된 자연어 룰 목록 JSON (id/trigger/rule/status/lastVerified). 외부 AI가 현재 활성 룰 자동 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_plan_add', description: '1.9.110 — plan.md 에 새 milestone 추가 + progress-tracker.md에 자동 동기화 task 생성. 외부 AI가 계획 단계를 직접 등록. 인자: { text (required), status?, progress?, nextAction?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string' }, progress: { type: 'string' }, nextAction: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } },
-    { name: 'leerness_lesson_save', description: '1.9.112 — .harness/lessons.md 에 새 lesson 영구화 (Memory Write Surface 5번째). 외부 AI가 세션 중 얻은 통찰을 즉시 영구 기록 — handoff 자동 회수와 통합. 인자: { text (required), tag?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, tag: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } }
+    { name: 'leerness_lesson_save', description: '1.9.112 — .harness/lessons.md 에 새 lesson 영구화 (Memory Write Surface 5번째). 외부 AI가 세션 중 얻은 통찰을 즉시 영구 기록 — handoff 자동 회수와 통합. 인자: { text (required), tag?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, tag: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } },
+    { name: 'leerness_memory_status', description: '1.9.114 — Memory Write Surface 5종 (tasks/decisions/rules/plan/lessons) 통합 상태 JSON. 외부 AI가 한 호출로 영구화 상태 + 카운트 + 최근 항목 회수. summary 필드는 "T2/D3/R1/P5/L7" 형식', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -7793,6 +7856,7 @@ function mcpServeCmd(root) {
           case 'leerness_rule_list':       cliArgs = ['rule', 'list', '--path', targetPath, '--json']; break;
           case 'leerness_plan_add':        cliArgs = ['plan', 'add', String(args.text || ''), '--path', targetPath, ...(args.status ? ['--status', args.status] : []), ...(args.progress ? ['--progress', String(args.progress)] : []), ...(args.nextAction ? ['--next', args.nextAction] : [])]; break;
           case 'leerness_lesson_save':     cliArgs = ['lesson', 'save', String(args.text || ''), '--path', targetPath, ...(args.tag ? ['--tag', args.tag] : [])]; break;
+          case 'leerness_memory_status':   cliArgs = ['memory', 'status', '--path', targetPath, '--json']; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -8498,6 +8562,11 @@ async function main() {
     if (sub==='relink')       return taskRelink(root);
     if (sub==='sync')         return taskSyncCmd(root);
     if (sub==='export')       return taskExportCmd(root);
+  }
+  // 1.9.114: memory status — Memory Write Surface 5종 통합 상태
+  if (cmd === 'memory' && args[1] === 'status') {
+    const root = absRoot(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()));
+    return memoryStatusCmd(root, { json: has('--json') });
   }
   // 1.9.112: lesson save — lessons.md에 새 lesson 추가
   if (cmd === 'lesson') {
