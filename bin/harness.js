@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.87';
+const VERSION = '1.9.88';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1997,6 +1997,31 @@ function handoff(root) {
                     log('');
                   }
                 }
+                // 1.9.88: brainstorm 자동 hits — 현재 task 키워드로 누적 컨텍스트 자동 회수
+                // decisions / lessons / skillHistory / taskLogFails 각각 1건씩 미리보기
+                // 끄기: --no-brainstorm-hits 또는 LEERNESS_NO_BRAINSTORM_HITS=1
+                if (!has('--no-brainstorm-hits') && process.env.LEERNESS_NO_BRAINSTORM_HITS !== '1') {
+                  try {
+                    const r = cp.spawnSync(process.execPath, [__filename, 'brainstorm', keyword, '--path', root, '--json'],
+                      { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
+                    const bj = JSON.parse(r.stdout);
+                    const hits = bj.hits || {};
+                    const items = [];
+                    if (hits.decisions?.length) items.push(`💭 decisions: ${hits.decisions[0].title}`);
+                    if (hits.lessons?.length) items.push(`⚠ lessons: ${hits.lessons[0].title}`);
+                    if (hits.taskLogFails?.length) items.push(`📜 task-log fail: ${hits.taskLogFails[0].title}`);
+                    if (hits.skills?.length) items.push(`📚 skill: ${hits.skills[0].id} (${hits.skills[0].displayNameKo || ''})`);
+                    if (items.length) {
+                      const isTty = process.stdout && process.stdout.isTTY;
+                      const mag = s => isTty ? `\x1b[35m${s}\x1b[0m` : s;
+                      const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+                      log(mag(`## 🧩 brainstorm 자동 hits (1.9.88) — 키워드 "${keyword}" 누적 컨텍스트`));
+                      for (const it of items.slice(0, 4)) log(dim(`  ${it}`));
+                      log(dim(`  → 전체: leerness brainstorm "${keyword}" --path .`));
+                      log('');
+                    }
+                  } catch {}
+                }
               }
             } catch {}
           }
@@ -3408,7 +3433,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.87+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.88+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));

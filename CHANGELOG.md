@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.88 — 2026-05-20
+
+**`handoff`에 brainstorm 자동 hits 노출** (1.9.72 brainstorm 통합).
+
+### Added — handoff 자동 brainstorm hits
+- handoff 자동 skill 추천 (1.9.67) + history hit (1.9.69) 블록 끝에 추가:
+  - **🧩 brainstorm 자동 hits (1.9.88)** — 현재 task 키워드로 자동 호출
+  - 미리보기 1줄씩: `💭 decisions` / `⚠ lessons` / `📜 task-log fail` / `📚 skill`
+  - 최대 4건 노출.
+- 모든 데이터 없으면 출력 안 함 (잡음 방지).
+- 끄기: `--no-brainstorm-hits` 또는 `LEERNESS_NO_BRAINSTORM_HITS=1`.
+
+### Use Case
+- AI 에이전트가 세션 시작 시 같은 주제 과거 결정/실패/skill을 즉시 인지.
+- "같은 키워드로 어떤 결정을 내렸지?" "어떤 실패가 있었지?" "어떤 skill 썼지?" 한 줄씩 자동 회수.
+
+### Verified
+- stress-v34 — handoff brainstorm hits 노출 + --no-brainstorm-hits + 누적 회귀.
+- e2e 219/219 PASS 유지.
+
+---
+
 ## 1.9.87 — 2026-05-20
 
 **`session-workflow.md` 템플릿에 1.9.69~86 누적 신규 기능 안내 추가** (init 가이드 정확성).
