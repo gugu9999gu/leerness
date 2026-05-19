@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.72 — 2026-05-20
+
+**`leerness brainstorm`에 skill-suggestions.md history + task-log 실패 라인 통합**.
+
+### Improved — brainstorm 자원 회수 확장
+- 기존: decisions / skills / tasks / rules / evidence / lessons.
+- **신규**: `skillHistory` (1.9.68 rolling history) + `taskLogFails` (1.9.67 task-log 실패 라인).
+- 출력 추가 섹션:
+  - `📒 같은 주제 이전 skill match 이력` — `[timestamp] "query"` 형식
+  - `📜 task-log 실패 라인` — 실패/롤백/incomplete/버그 라인 회수
+- total 카운트에 신규 필드 합산.
+- 매칭 알고리즘: 기존 unicode word boundary regex 그대로 사용.
+
+### Verified
+- stress-v18 — brainstorm 신규 hits + 누적 회귀 + 성능.
+- e2e 회귀: 219/219 PASS 유지.
+
+---
+
 ## 1.9.71 — 2026-05-20
 
 **`.env` / `.env.example` 자동 동기화 (보안 정책: 키만, 실제 값 절대 노출 안 함)**.

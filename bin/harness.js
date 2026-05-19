@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.71';
+const VERSION = '1.9.72';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3242,7 +3242,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.71+ 워크플로)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.72+ 워크플로)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + 이전 history hit (1.9.69)'));
     log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적 (1.9.68)'));
@@ -4462,7 +4462,8 @@ function _brainstormFor(root, topic) {
   const tokens = String(topic).split(/\s+/).filter(t => t.length >= 2);
   const wordRes = tokens.map(t => new RegExp(`(?<![\\p{L}\\p{N}_])${_escUnicode(t)}(?![\\p{L}\\p{N}_])`, 'iu'));
   function matches(text) { return wordRes.every(re => re.test(text)); }
-  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [], code: [] };
+  // 1.9.72: skillHistory + taskLogFails 필드 추가
+  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [], code: [], skillHistory: [], taskLogFails: [] };
   const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
   const decLines = dec.split('\n');
   for (const b of _extractDecisionBlocks(dec)) {
@@ -4518,6 +4519,32 @@ function _brainstormFor(root, topic) {
       if (/✗|fail|롤백|incomplete|버그/i.test(block)) hits.lessons.push({ title: t.trim(), line: lineNo });
     }
   }
+  // 1.9.72: skill-suggestions.md rolling history hits
+  const histPath = path.join(root, '.harness', 'skill-suggestions.md');
+  if (exists(histPath)) {
+    const histTxt = read(histPath);
+    for (const block of histTxt.split(/\n(?=## )/)) {
+      if (!block.startsWith('## ')) continue;
+      const h = block.match(/^## ([\d-]+ [\d:]+) — query "([^"]+)"/);
+      if (h && matches(block)) {
+        const idx = histTxt.indexOf(block);
+        const lineNo = idx >= 0 ? histTxt.slice(0, idx).split('\n').length : 0;
+        hits.skillHistory.push({ at: h[1], query: h[2], preview: block.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
+      }
+    }
+  }
+  // 1.9.72: task-log.md 실패 라인 hits
+  const tlogPath = path.join(root, '.harness', 'task-log.md');
+  if (exists(tlogPath)) {
+    const tlog = read(tlogPath);
+    const lines = tlog.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.length > 4 && /✗|\bfail|롤백|재발|incomplete|버그/i.test(line) && matches(line)) {
+        hits.taskLogFails.push({ title: line.replace(/^[-*]\s*/, '').slice(0, 100), line: i + 1 });
+      }
+    }
+  }
   // 1.9.25: --include-code 옵션 — 소스 본문 검색 추가 (모순 감지 핵심)
   if (has('--include-code')) {
     const codeDirs = ['src', 'tests', 'bin', 'lib'];
@@ -4549,7 +4576,7 @@ function _brainstormFor(root, topic) {
   return hits;
 }
 
-function _brainstormTotal(h) { return h.decisions.length + h.skills.length + h.tasks.length + h.rules.length + h.evidence.length + (h.code?.length || 0); }
+function _brainstormTotal(h) { return h.decisions.length + h.skills.length + h.tasks.length + h.rules.length + h.evidence.length + (h.code?.length || 0) + (h.skillHistory?.length || 0) + (h.taskLogFails?.length || 0); }
 
 // 1.9.16: 워크스페이스 통합 brainstorm
 function _brainstormWorkspace(rootBase, topic) {
@@ -4622,7 +4649,8 @@ function brainstormCmd(root, topic) {
   const tokens = String(topic).split(/\s+/).filter(t => t.length >= 2);
   const wordRes = tokens.map(t => new RegExp(`(?<![\\p{L}\\p{N}_])${_escUnicode(t)}(?![\\p{L}\\p{N}_])`, 'iu'));
   function matches(text) { return wordRes.every(re => re.test(text)); }
-  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [], code: [] };
+  // 1.9.72: skillHistory + taskLogFails 필드 추가 (brainstorm에 누적 컨텍스트 추가 회수)
+  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [], code: [], skillHistory: [], taskLogFails: [] };
 
   // decisions (1.9.14: 코드블록/Template 제외, 1.9.15: 라인 번호)
   const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
@@ -4685,9 +4713,36 @@ function brainstormCmd(root, topic) {
       if (/✗|fail|롤백|incomplete|버그/i.test(block)) hits.lessons.push({ title: t.trim(), line: lineNo });
     }
   }
+  // 1.9.72: skill-suggestions.md rolling history hits (이전 매칭 결과 회수)
+  const histPath = path.join(root, '.harness', 'skill-suggestions.md');
+  if (exists(histPath)) {
+    const histTxt = read(histPath);
+    let pos = 0;
+    for (const block of histTxt.split(/\n(?=## )/)) {
+      if (!block.startsWith('## ')) { pos += block.length + 1; continue; }
+      const h = block.match(/^## ([\d-]+ [\d:]+) — query "([^"]+)"/);
+      if (h && matches(block)) {
+        const idx = histTxt.indexOf(block);
+        const lineNo = idx >= 0 ? histTxt.slice(0, idx).split('\n').length : 0;
+        hits.skillHistory.push({ at: h[1], query: h[2], preview: block.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
+      }
+    }
+  }
+  // 1.9.72: task-log.md 실패 라인 hits
+  const tlogPath = path.join(root, '.harness', 'task-log.md');
+  if (exists(tlogPath)) {
+    const tlog = read(tlogPath);
+    const lines = tlog.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.length > 4 && /✗|\bfail|롤백|재발|incomplete|버그/i.test(line) && matches(line)) {
+        hits.taskLogFails.push({ title: line.replace(/^[-*]\s*/, '').slice(0, 100), line: i + 1 });
+      }
+    }
+  }
 
-  const total = hits.decisions.length + hits.skills.length + hits.tasks.length + hits.rules.length + hits.evidence.length;
-  log(`\n📦 총 ${total}건 발견 (decisions ${hits.decisions.length} · skills ${hits.skills.length} · tasks ${hits.tasks.length} · rules ${hits.rules.length} · evidence ${hits.evidence.length})`);
+  const total = hits.decisions.length + hits.skills.length + hits.tasks.length + hits.rules.length + hits.evidence.length + (hits.skillHistory ? hits.skillHistory.length : 0) + (hits.taskLogFails ? hits.taskLogFails.length : 0);
+  log(`\n📦 총 ${total}건 발견 (decisions ${hits.decisions.length} · skills ${hits.skills.length} · tasks ${hits.tasks.length} · rules ${hits.rules.length} · evidence ${hits.evidence.length}${hits.skillHistory && hits.skillHistory.length ? ` · skill-history ${hits.skillHistory.length}` : ''}${hits.taskLogFails && hits.taskLogFails.length ? ` · task-log-fails ${hits.taskLogFails.length}` : ''})`);
 
   // 1.9.15: 모든 출력에 출처 파일:라인 표시
   if (hits.decisions.length) {
@@ -4713,6 +4768,16 @@ function brainstormCmd(root, topic) {
   if (hits.lessons.length) {
     log(`\n## ⚠ 같은 주제 과거 실패/롤백 (${hits.lessons.length}) — 같은 실수 방지`);
     hits.lessons.slice(0, 5).forEach(l => log(`  - .harness/review-evidence.md:${l.line || '?'} — ${l.title}`));
+  }
+  // 1.9.72: skill-suggestions.md rolling history hits
+  if (hits.skillHistory.length) {
+    log(`\n## 📒 같은 주제 이전 skill match 이력 (${hits.skillHistory.length}) — 1.9.68 누적`);
+    hits.skillHistory.slice(0, 5).forEach(h => log(`  - .harness/skill-suggestions.md:${h.line || '?'} — [${h.at}] "${h.query}"`));
+  }
+  // 1.9.72: task-log.md 실패 라인 hits
+  if (hits.taskLogFails.length) {
+    log(`\n## 📜 task-log 실패 라인 (${hits.taskLogFails.length}) — 1.9.67 인덱스 + brainstorm`);
+    hits.taskLogFails.slice(0, 5).forEach(t => log(`  - .harness/task-log.md:${t.line || '?'} — ${t.title}`));
   }
 
   log(`\n## 💡 시작 전 권장 액션`);
