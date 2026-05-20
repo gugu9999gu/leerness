@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.9.148 — 2026-05-20
+
+**사용자 명시 4종 + 3중 LLM 합의 (GPT-5.5 + Codex + Gemini) 우선 라운드 진행.**
+
+### Fixed — 방향키 선택 UI 중첩 출력 버그 (사용자 명시)
+- `_selectOne` / `_selectMany` 의 question + 안내 라인에 `\x1b[2K` (clear entire line) ANSI 추가
+- 이전: 매 render 마다 같은 위치에 question 라인이 누적되어 표시
+- 이후: 화살표 이동 시 라인 깔끔히 덮어쓰기
+
+### Changed — 스킬 prompt 제거 (사용자 명시)
+- "스킬 라이브러리 자동 설치 / 건너뛰기" 2-option prompt 완전 제거
+- leerness가 자동으로 표준 공식 5종 설치 (office / commerce-api / ai-verified-skill-publisher / feature-implementation / project-roadmap-generator)
+- 사용자 추가 설치는 `leerness skill install <id>` 명시 호출
+
+### Removed — CLI 에이전트 prompt 중복 (사용자 명시)
+- 1.9.32 에서 추가된 "외부 AI CLI 활용하시겠습니까?" prompt 제거 (install 끝부분)
+- 1.9.146 의 4지선다 prompt (resolveInstallOptions 안) 만 유지 — 모든 prompt 단일 위치 통합
+
+### Added — verify-code 다중 런타임 자동 감지 (3중 LLM 합의 — top priority)
+- Node: `vitest`/`jest`/`mocha` 의존성 자동 감지 (script 없어도)
+- Python: `pyproject.toml` / `setup.py` / `tests/` → `pytest -q`
+- Go: `go.mod` → `go test ./...`
+- Rust: `Cargo.toml` → `cargo test`
+- TypeScript: `tsconfig.json` → `tsc --noEmit`
+- `--strict` 또는 `LEERNESS_AUTONOMOUS=1`: no-test 감지 시 exit 1 (production 강제)
+
+### Added — agent 모드 고도화 (Gemini 권고)
+- `--role planner|reviewer|actor` — 자기-승인 편향 방지
+- planner: step 분해, 코드 작성 금지
+- reviewer: 비판적 검토 (cascade 가능성 지적)
+- actor: 계획대로 정확한 명령/코드만 실행 (기본값)
+- Ollama 호출 시 role prompt 자동 prepend
+
+### Validation
+- stress-v93: PASS
+- e2e: 219/219 PASS
+
 ## 1.9.147 — 2026-05-20
 
 **자동 유지보수 시스템 — 사용자 명시 요청.**

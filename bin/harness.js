@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.147';
+const VERSION = '1.9.148';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -117,7 +117,7 @@ function arg(name, def = null) { const i = process.argv.indexOf(name); return i 
 function has(name) { return process.argv.includes(name); }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action']);
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret']);
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -685,22 +685,9 @@ async function resolveInstallOptions(root, opts = {}) {
       lang = a === '2' ? 'ko' : a === '3' ? 'en' : detectLanguageValue(root, 'auto');
     }
   }
-  // 1.9.146: 스킬 라이브러리 — 표준 공식 추천 자동 설치 / 건너뛰기 2-option 단순화 (사용자 명시 요청 #1)
-  if (shouldAsk && !explicitSkills) {
-    if (useInteractive) {
-      const opt = await _selectOne('스킬 라이브러리 설치 (표준 공식 5종)', [
-        { label: '표준 공식 5종 자동 설치 (추천)', description: 'office · commerce-api · ai-verified-skill-publisher · feature-implementation · project-roadmap-generator', id: 'recommended' },
-        { label: '건너뛰기 (필요할 때 leerness skill install 로 추가)', description: '하네스만 설치, 스킬은 없음', id: 'none' }
-      ], { defaultIndex: 0 });
-      skills = (opt && opt.id === 'recommended') ? parseSkillsValue('recommended') : [];
-    } else {
-      log('\n스킬 라이브러리 설치를 선택하세요.');
-      log('1) 표준 공식 5종 자동 설치 (추천)');
-      log('2) 건너뛰기 (leerness skill install 로 추가 가능)');
-      const a = await ask('선택 [1]: ');
-      skills = (a === '2') ? [] : parseSkillsValue('recommended');
-    }
-  }
+  // 1.9.148: 스킬 prompt 제거 (사용자 명시 요청) — leerness가 자동으로 공식 표준 스킬 5종 설치.
+  //   필요할 때 사용자가 leerness skill install <id> 로 추가 가능.
+  if (!explicitSkills) skills = parseSkillsValue('recommended');
   // 1.9.146: CLI 에이전트 활성화 선택 (사용자 명시 요청 #3 — Ollama 추가)
   //   설치 마지막에 .env.example 에 활성화 옵트인 키만 기록 (실제 토큰 입력은 사용자가 직접).
   let agentsOptIn = null;
@@ -877,21 +864,9 @@ async function install(root, opts = {}) {
     if (!has('--no-auto-roadmap')) {
       try { _autoRoadmap(root, 'install'); } catch (e) { warn('auto-roadmap 실패: ' + (e && e.message)); }
     }
-    // 1.9.32: init 시 외부 AI CLI 설정 prompt (TTY + 신규 init + --no-setup-agents 미지정)
-    const isFreshInit = !opts.migration && !opts.force;
-    const skipSetup = has('--no-setup-agents') || has('--yes') || has('-y');
-    if (isFreshInit && process.stdin.isTTY && !skipSetup) {
-      try {
-        log('');
-        log('💡 외부 AI CLI(claude/codex/gemini/copilot)를 sub-agent로 활용하시겠습니까?');
-        const wantSetup = await _confirm('   지금 설정할까요? (나중에 `leerness setup-agents`로도 가능)', true);
-        if (wantSetup) {
-          await setupAgentsCmd(root);
-        } else {
-          log('   → 나중에 `leerness setup-agents .` 명령으로 설정 가능');
-        }
-      } catch (e) { warn('setup-agents skipped: ' + (e && e.message)); }
-    }
+    // 1.9.148: 1.9.32 중복 prompt 제거 (사용자 명시 — CLI 에이전트 prompt 중복).
+    //   resolveInstallOptions (1.9.146) 가 이미 모든 prompt 모은 위치에 통합된 4지선다 prompt 있음.
+    //   별도 setupAgents 명령은 사용자가 명시적으로 `leerness setup-agents` 호출 시에만.
   }
 }
 
@@ -4784,8 +4759,9 @@ async function _selectOne(question, options, opts = {}) {
         // 이전 출력 지우기: options.length + 2줄 (제목 + 안내)
         stdout.write(`\x1b[${options.length + 2}A`);
       }
-      stdout.write(`\r${C.bold(question)}\n`);
-      stdout.write(`${C.dim('  ↑↓ 이동, Enter 확정, q 취소')}\n`);
+      // 1.9.148 fix: question + 안내 라인에도 \x1b[2K (clear entire line) — 중첩 출력 방지 (사용자 명시 버그)
+      stdout.write(`\x1b[2K\r${C.bold(question)}\n`);
+      stdout.write(`\x1b[2K\r${C.dim('  ↑↓ 이동, Enter 확정, q 취소')}\n`);
       for (let i = 0; i < options.length; i++) {
         const label = typeof options[i] === 'string' ? options[i] : (options[i].label || String(options[i]));
         const desc = typeof options[i] === 'object' && options[i].description ? C.dim('  — ' + options[i].description) : '';
@@ -4841,8 +4817,9 @@ async function _selectMany(question, options, opts = {}) {
     const selected = new Set((opts.defaults || []).map(d => typeof d === 'number' ? d : options.findIndex(o => o === d || (o && o.id === d))).filter(i => i >= 0));
     const render = (first) => {
       if (!first) stdout.write(`\x1b[${options.length + 2}A`);
-      stdout.write(`\r${C.bold(question)}\n`);
-      stdout.write(`${C.dim('  ↑↓ 이동, Space 토글, a 전체, n 해제, Enter 확정, q 취소')}\n`);
+      // 1.9.148 fix: question + 안내 라인에도 \x1b[2K — 중첩 출력 방지
+      stdout.write(`\x1b[2K\r${C.bold(question)}\n`);
+      stdout.write(`\x1b[2K\r${C.dim('  ↑↓ 이동, Space 토글, a 전체, n 해제, Enter 확정, q 취소')}\n`);
       for (let i = 0; i < options.length; i++) {
         const opt = options[i];
         const label = typeof opt === 'string' ? opt : (opt.label || String(opt));
@@ -7440,25 +7417,49 @@ function releasePublish(root) {
 }
 
 // ===== 1.9.7 A: verify-code — npm scripts 자동 감지 + evidence 자동 기록 =====
+// 1.9.148: 다중 런타임 자동 감지 강화 (3중 LLM 합의 — Codex+Gemini+GPT-5.5)
+//   Node (vitest/jest/mocha), Python (pytest), Go (go test), Rust (cargo test), TypeScript (tsc)
 function verifyCodeCmd(root) {
   root = absRoot(root);
-  const pkgFile = path.join(root, 'package.json');
-  if (!exists(pkgFile)) return fail('package.json 없음 — Node 프로젝트 위치에서 실행하세요.');
-  let pkg;
-  try { pkg = JSON.parse(read(pkgFile)); } catch (e) { return fail('package.json 파싱 실패: ' + e.message); }
-  const scripts = pkg.scripts || {};
   const tasks = [];
-  if (scripts.test) tasks.push({ name: 'test', cmd: 'npm test' });
-  else if (scripts['test:smoke']) tasks.push({ name: 'test', cmd: 'npm run test:smoke' });
-  if (scripts.lint) tasks.push({ name: 'lint', cmd: 'npm run lint' });
-  if (scripts.typecheck) tasks.push({ name: 'typecheck', cmd: 'npm run typecheck' });
-  else if (scripts.tsc) tasks.push({ name: 'typecheck', cmd: 'npm run tsc' });
-  else if (exists(path.join(root, 'tsconfig.json'))) tasks.push({ name: 'typecheck', cmd: 'npx --yes tsc --noEmit', optional: true });
-  if (has('--build') && scripts.build) tasks.push({ name: 'build', cmd: 'npm run build' });
-  // 1.9.20: --bench → scripts.bench 자동 실행 (성능 metric을 evidence에 누적)
-  if (has('--bench') && scripts.bench) tasks.push({ name: 'bench', cmd: 'npm run bench', optional: true });
+  // (1) Node: package.json 우선
+  const pkgFile = path.join(root, 'package.json');
+  if (exists(pkgFile)) {
+    let pkg = {};
+    try { pkg = JSON.parse(read(pkgFile)); } catch (e) { return fail('package.json 파싱 실패: ' + e.message); }
+    const scripts = pkg.scripts || {};
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    if (scripts.test) tasks.push({ name: 'test', cmd: 'npm test', runtime: 'node' });
+    else if (scripts['test:smoke']) tasks.push({ name: 'test', cmd: 'npm run test:smoke', runtime: 'node' });
+    // 1.9.148: 명시 script 없어도 인기 러너 의존성 발견 시 시도
+    else if (deps.vitest) tasks.push({ name: 'test', cmd: 'npx --yes vitest run', runtime: 'node' });
+    else if (deps.jest) tasks.push({ name: 'test', cmd: 'npx --yes jest --ci', runtime: 'node' });
+    else if (deps.mocha) tasks.push({ name: 'test', cmd: 'npx --yes mocha', runtime: 'node' });
+    if (scripts.lint) tasks.push({ name: 'lint', cmd: 'npm run lint', runtime: 'node' });
+    if (scripts.typecheck) tasks.push({ name: 'typecheck', cmd: 'npm run typecheck', runtime: 'node' });
+    else if (scripts.tsc) tasks.push({ name: 'typecheck', cmd: 'npm run tsc', runtime: 'node' });
+    else if (exists(path.join(root, 'tsconfig.json'))) tasks.push({ name: 'typecheck', cmd: 'npx --yes tsc --noEmit', runtime: 'node', optional: true });
+    if (has('--build') && scripts.build) tasks.push({ name: 'build', cmd: 'npm run build', runtime: 'node' });
+    if (has('--bench') && scripts.bench) tasks.push({ name: 'bench', cmd: 'npm run bench', runtime: 'node', optional: true });
+  }
+  // (2) Python: pyproject.toml / setup.py / tests/ 존재 시 pytest 시도
+  if (exists(path.join(root, 'pyproject.toml')) || exists(path.join(root, 'setup.py')) || exists(path.join(root, 'tests'))) {
+    if (!tasks.find(t => t.name === 'test')) tasks.push({ name: 'test', cmd: 'pytest -q', runtime: 'python', optional: true });
+  }
+  // (3) Go: go.mod 존재 시 go test ./...
+  if (exists(path.join(root, 'go.mod'))) {
+    tasks.push({ name: 'test:go', cmd: 'go test ./...', runtime: 'go' });
+  }
+  // (4) Rust: Cargo.toml 존재 시 cargo test
+  if (exists(path.join(root, 'Cargo.toml'))) {
+    tasks.push({ name: 'test:rust', cmd: 'cargo test', runtime: 'rust' });
+  }
   if (!tasks.length) {
-    warn('실행할 검증 task 없음 (package.json#scripts에 test/lint/typecheck 추가하세요)');
+    // 1.9.148: --strict 또는 LEERNESS_AUTONOMOUS=1 시 no-test 도 실패로 (3중 LLM 합의: production-grade test 강제)
+    const strict = has('--strict') || process.env.LEERNESS_AUTONOMOUS === '1';
+    const msg = '검증 task 없음 (package.json#scripts test/lint/typecheck, pytest, go test, cargo test 중 하나도 미발견)';
+    if (strict) { fail(msg + ' — --strict/autonomous 모드: 실패 처리 (exit 1)'); process.exitCode = 1; return; }
+    warn(msg);
     return;
   }
   log(`# verify-code (${tasks.length}개)`);
@@ -9972,16 +9973,25 @@ async function _ollamaChat(prompt, model) {
     } catch (e) { resolve({ ok: false, error: e.message, model: mdl }); }
   });
 }
+// 1.9.148: planner/reviewer/actor 역할 시스템 프롬프트 (Gemini 권고 — 자기-승인 편향 방지)
+const _AGENT_ROLE_PROMPTS = {
+  planner: '역할: planner. task를 step 3-6개로 분해, 각 step의 입출력/검증 방법 명시. 코드 작성 금지, 계획만.',
+  reviewer: '역할: reviewer. planner 의 계획 또는 actor 의 결과를 비판적으로 검토. 누락된 검증, 잠재 cascade, 오류 가능성 지적. 동의/수정 결론 명시.',
+  actor: '역할: actor. 계획에 따라 정확한 명령/코드만 실행. evidence(파일 경로 + 테스트 결과) 함께 기록. 새 계획 생성 금지.'
+};
 async function agentCmd(root, taskArg) {
   root = absRoot(root || process.cwd());
   const task = (taskArg || arg('--task', '') || '').trim();
   if (!task) {
-    log('# leerness agent (1.9.146) — 오픈소스 CLI 에이전트 모드');
+    log('# leerness agent (1.9.146/148) — 오픈소스 CLI 에이전트 모드');
     log('');
     log('사용법:');
-    log('  leerness agent "<task 설명>"      # 1회 위임');
-    log('  leerness agent --provider ollama  # 명시적 provider 선택');
-    log('  leerness agent --dry-run           # LLM 호출 없이 흐름만 확인');
+    log('  leerness agent "<task>"                    # 1회 위임 (actor 역할 기본)');
+    log('  leerness agent "<task>" --role planner     # 계획만, 코드 작성 없음 (1.9.148)');
+    log('  leerness agent "<task>" --role reviewer    # 비판적 검토 (1.9.148)');
+    log('  leerness agent "<task>" --role actor       # 계획대로 실행');
+    log('  leerness agent "<task>" --provider ollama  # provider 선택');
+    log('  leerness agent "<task>" --dry-run          # LLM 호출 없이 흐름만');
     log('');
     log('현재 활성 provider: ' + (_activeCliAgents().join(', ') || '(없음) — .env에서 LEERNESS_ENABLE_* 활성화'));
     log('권한 모드: ' + (_readPermissions(root).mode || 'basic'));
@@ -9989,10 +9999,13 @@ async function agentCmd(root, taskArg) {
   }
   const dryRun = has('--dry-run');
   const providerArg = arg('--provider', null);
+  const role = arg('--role', 'actor');  // 1.9.148
+  const rolePrompt = _AGENT_ROLE_PROMPTS[role] || _AGENT_ROLE_PROMPTS.actor;
   const active = _activeCliAgents();
   const provider = providerArg || active[0] || null;
-  log(`# leerness agent (1.9.146)`);
+  log(`# leerness agent (1.9.146/148)`);
   log(`task: ${task.slice(0, 120)}${task.length > 120 ? '…' : ''}`);
+  log(`role: ${role}  (${rolePrompt.split('. ')[1] || rolePrompt.slice(0, 60)})`);
   log(`provider: ${provider || '(없음 — .env 에서 LEERNESS_ENABLE_* 활성화 필요)'}`);
   const perms = _readPermissions(root);
   log(`permission mode: ${perms.mode || 'basic'}`);
@@ -10009,13 +10022,15 @@ async function agentCmd(root, taskArg) {
   // MVP: Ollama 지원 (로컬). 다른 CLI 는 사용자가 직접 호출 (leerness agents dispatch 이미 존재).
   if (provider === 'ollama') {
     log('\n[ollama 호출 중...]');
-    const r = await _ollamaChat(task);
+    // 1.9.148: role prompt 자동 prepend
+    const finalPrompt = `${rolePrompt}\n\nTask: ${task}`;
+    const r = await _ollamaChat(finalPrompt);
     if (r.ok) {
-      log('\n[response (model=' + r.model + ')]\n' + r.response);
+      log('\n[response (model=' + r.model + ', role=' + role + ')]\n' + r.response);
       // task-log 자동 기록
       try {
         const tlp = taskLogPath(root);
-        const block = `\n## ${today()} leerness agent (ollama:${r.model})\n- task: ${task.slice(0, 200)}\n- response (preview): ${r.response.slice(0, 240).replace(/\n+/g, ' ')}\n`;
+        const block = `\n## ${today()} leerness agent (ollama:${r.model}, role=${role})\n- task: ${task.slice(0, 200)}\n- response (preview): ${r.response.slice(0, 240).replace(/\n+/g, ' ')}\n`;
         append(tlp, block);
       } catch {}
     } else {
