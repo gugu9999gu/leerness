@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.129';
+const VERSION = '1.9.130';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -330,6 +330,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.127+ \`leerness memory archive list [--surface decisions|lessons|plan] [--json]\` + MCP **39 도구** (\`leerness_memory_archive_list\`) — DELETE 5종 archive 통합 조회 (복원 후보 회수).
 - 1.9.128+ \`leerness memory restore <surface> <target>\` + MCP **40 도구 🎉** (\`leerness_memory_restore\`) — archive → active 복귀 (DELETE→RESTORE cycle 완성). **MCP 40 도구 마일스톤**.
 - 1.9.129+ handoff **7번째 자동 회수** — \`🗑 최근 24h archive\` (D/L/P 카운트 + 복원 후보 안내). DELETE 활동 자동 인지.
+- 1.9.130+ 🎉 **60 라운드 자율 모드 마일스톤** — JSON 4종 (handoff/memory status/session close/health) \`memorySurface.archive\` 필드 통합. MCP 40 / handoff auto-recovery 7 / DELETE-RESTORE cycle 완성.
 
 ---
 
@@ -1425,6 +1426,19 @@ function memoryStatusCmd(root, opts = {}) {
   const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
   const lessonHeaders = lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || [];
   const lessonsLatest = lessonHeaders.length ? (lm.split('\n').filter(l => /- Lesson:/.test(l)).pop() || '').replace(/^- Lesson:\s*/, '').slice(0, 100) : null;
+  // 1.9.130: DELETE 5종 archive entry counts
+  const archiveCounts = { decisions: 0, lessons: 0, plan: 0, total: 0 };
+  try {
+    const hd = path.join(root, '.harness');
+    for (const [key, file] of [['decisions', 'decisions.archive.md'], ['lessons', 'lessons.archive.md'], ['plan', 'plan.archive.md']]) {
+      const fp = path.join(hd, file);
+      if (exists(fp)) {
+        const entries = _parseArchiveBlocks(read(fp));
+        archiveCounts[key] = entries.length;
+        archiveCounts.total += entries.length;
+      }
+    }
+  } catch {}
 
   const payload = {
     version: VERSION,
@@ -1434,6 +1448,7 @@ function memoryStatusCmd(root, opts = {}) {
     rules: { active: rulesActive, paused: rulesPaused, total: rules.length },
     plan: { milestones, inProgress: planInProgress },
     lessons: { count: lessonHeaders.length, latest: lessonsLatest },
+    archive: archiveCounts,  // 1.9.130
     summary: `T${tasksInProgress}/D${decisionHeaders.length}/R${rulesActive}/P${milestones}/L${lessonHeaders.length}`,
   };
   if (jsonMode) {
@@ -1450,6 +1465,7 @@ function memoryStatusCmd(root, opts = {}) {
   log(`🗺  Plan: ${milestones} milestones (${planInProgress} in-progress)`);
   log(`💡 Lessons: ${lessonHeaders.length} entries`);
   if (lessonsLatest) log(`   - 최근: ${lessonsLatest}`);
+  if (archiveCounts.total > 0) log(`🗑  Archive: D${archiveCounts.decisions}/L${archiveCounts.lessons}/P${archiveCounts.plan} (${archiveCounts.total}건)`);
   log(`\n📊 Summary: ${payload.summary}`);
 }
 
@@ -2484,12 +2500,26 @@ function handoff(root) {
       const milestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
       const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
       const lessonsCount = (lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+      // 1.9.130: archive 카운트 통합
+      const archiveCountsH = { decisions: 0, lessons: 0, plan: 0, total: 0 };
+      try {
+        const hdH = path.join(root, '.harness');
+        for (const [key, file] of [['decisions', 'decisions.archive.md'], ['lessons', 'lessons.archive.md'], ['plan', 'plan.archive.md']]) {
+          const fpH = path.join(hdH, file);
+          if (exists(fpH)) {
+            const entries = _parseArchiveBlocks(read(fpH));
+            archiveCountsH[key] = entries.length;
+            archiveCountsH.total += entries.length;
+          }
+        }
+      } catch {}
       result.memorySurface = {
         tasks: { inProgress: tasksInProgress, total: rows.length, byStatus: tasksByStatus },
         decisions: { count: decisionsCount },
         rules: { active: rulesActive, total: rules.length },
         plan: { milestones },
         lessons: { count: lessonsCount },
+        archive: archiveCountsH,  // 1.9.130
         summary: `T${tasksInProgress}/D${decisionsCount}/R${rulesActive}/P${milestones}/L${lessonsCount}`,
       };
     } catch {}
@@ -4238,7 +4268,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.129+ handoff 7 자동 회수 🗑 archive 알림 — 59 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.130+ 🎉 60 라운드 마일스톤 archive 필드 통합 — 60 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -5160,12 +5190,26 @@ function sessionClose(root, opts = {}) {
       const milestones0 = (planText0.match(/^### M-\d{4}\./gm) || []).length;
       const lm0 = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
       const lessonsCount0 = (lm0.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+      // 1.9.130: archive 카운트 통합
+      const archiveCountsS = { decisions: 0, lessons: 0, plan: 0, total: 0 };
+      try {
+        const hdS = path.join(root, '.harness');
+        for (const [key, file] of [['decisions', 'decisions.archive.md'], ['lessons', 'lessons.archive.md'], ['plan', 'plan.archive.md']]) {
+          const fpS = path.join(hdS, file);
+          if (exists(fpS)) {
+            const entries = _parseArchiveBlocks(read(fpS));
+            archiveCountsS[key] = entries.length;
+            archiveCountsS.total += entries.length;
+          }
+        }
+      } catch {}
       jsonResult.memorySurface = {
         tasks: { inProgress: tasksInProgress0, total: rows0.length, byStatus: tasksByStatus0 },
         decisions: { count: decisionsCount0 },
         rules: { active: rulesActive0, total: rules0.length },
         plan: { milestones: milestones0 },
         lessons: { count: lessonsCount0 },
+        archive: archiveCountsS,  // 1.9.130
         summary: `T${tasksInProgress0}/D${decisionsCount0}/R${rulesActive0}/P${milestones0}/L${lessonsCount0}`,
       };
     } catch {}
@@ -8777,6 +8821,22 @@ function healthCmd(root) {
       rules: { active: rulesActive, total: rules.length },
       plan: { milestones },
       lessons: { count: lessonsCount },
+      archive: (() => {
+        // 1.9.130: archive 카운트 통합
+        const a = { decisions: 0, lessons: 0, plan: 0, total: 0 };
+        try {
+          const hdHe = path.join(root, '.harness');
+          for (const [key, file] of [['decisions', 'decisions.archive.md'], ['lessons', 'lessons.archive.md'], ['plan', 'plan.archive.md']]) {
+            const fpHe = path.join(hdHe, file);
+            if (exists(fpHe)) {
+              const entries = _parseArchiveBlocks(read(fpHe));
+              a[key] = entries.length;
+              a.total += entries.length;
+            }
+          }
+        } catch {}
+        return a;
+      })(),
       summary: `T${tasksInProgress}/D${decisionsCount}/R${rulesActive}/P${milestones}/L${lessonsCount}`,
     };
   } catch { out.memorySurface = { error: 'memorySurface 점검 실패' }; }

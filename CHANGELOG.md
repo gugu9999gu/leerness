@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.130 — 2026-05-20 🎉 **60 라운드 자율 모드 마일스톤**
+
+**JSON 4종 통합에 `memorySurface.archive` 필드 추가** + 60 라운드 자율 누적 보고서.
+
+### Added — archive 필드 (JSON 4종)
+- `handoff --json` / `memory status --json` / `session close --json` / `health --json` 모두 `memorySurface.archive: { decisions, lessons, plan, total }` 노출
+- `memory status` 텍스트 모드: `🗑 Archive: D1/L1/P0 (2건)` 라인 추가
+- 외부 AI 가 한 JSON 호출로 모든 메모리 상태 (active + archive) 동시 회수
+
+### 60 라운드 마일스톤
+- 라운드: 60 (1.9.70 → 1.9.130)
+- MCP 도구: 11 → **40 🎉** (1.9.128 마일스톤)
+- --json 명령: 6 → **19**
+- handoff 자동 회수: 1 → **7**
+- Memory Surface: WRITE 5 + READ 5 + DELETE 5 + RESTORE 3 + Archive 3
+- stress 시나리오: v16 → v74 (58 추가)
+- e2e: 안정 219/219
+
+상세: `_reports/AUTONOMOUS_ROUNDS_60_MILESTONE.md` (비공개)
+
 ## 1.9.129 — 2026-05-20
 
 **handoff 7번째 자동 회수 — 🗑 최근 24h archive 알림** — DELETE 5종 archive 활동을 매 세션 시작 시 자동 노출.
