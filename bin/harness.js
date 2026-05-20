@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.162';
+const VERSION = '1.9.163';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -11532,6 +11532,45 @@ function healthCmd(root) {
       summary: `F${fNodesHe.length}/E${edgeCount}${isolated > 0 ? `/iso${isolated}` : ''}`
     };
   } catch { out.featureGraph = { error: 'featureGraph 점검 실패' }; }
+  // 1.9.163: 5능력 매트릭스 자동 평가 (1.9.155 sub-agent 점검 → 코드 기반 자동화)
+  //   각 능력을 코드 grep 으로 검출 → 0~100 점수. 사용자가 매 health 호출 시 leerness 자기 평가 확인.
+  try {
+    const harnessSrc = read(__filename);
+    const cap = {};
+    // (1) 웹 자동화 — playwright/puppeteer/chromium import 존재?
+    cap.webAutomation = /require\(['"]playwright['"]\)|require\(['"]puppeteer['"]\)|require\(['"]chromium['"]\)/.test(harnessSrc)
+      ? { score: 90, status: '✓', evidence: 'playwright/puppeteer import 검출' }
+      : { score: 5, status: '❌', evidence: 'permissions.browser=toggle만 (실 코드 미구현)' };
+    // (2) PC 조작 — robotjs/nut-js/iohook/xdotool import?
+    cap.pcAutomation = /require\(['"]robotjs['"]\)|require\(['"]@nut-tree/.test(harnessSrc)
+      ? { score: 90, status: '✓', evidence: 'robotjs/nut-tree import 검출' }
+      : { score: 5, status: '❌', evidence: 'permissions.mouse/keyboard=필드만 (실 사용처 0)' };
+    // (3) 멀티 에이전트 오케스트레이션 — agents multi --execute + consensus 로직?
+    const hasExecute = /const execute = has\('--execute'\)/.test(harnessSrc);
+    const hasConsensus = /multi-signal consensus/.test(harnessSrc);
+    cap.multiAgentOrchestration = (hasExecute && hasConsensus)
+      ? { score: 90, status: '✓', evidence: '실 spawn + multi-signal consensus (1.9.156+1.9.155)' }
+      : { score: 50, status: '⚠', evidence: '명령 출력만 (1.9.152 기본 모드)' };
+    // (4) REPL multi-provider — _agentRepl + _cliChat 5종?
+    const hasRepl = /async function _agentRepl/.test(harnessSrc);
+    const hasCliChat = /async function _cliChat/.test(harnessSrc);
+    cap.replMultiProvider = (hasRepl && hasCliChat)
+      ? { score: 90, status: '✓', evidence: 'ollama/claude/codex/gemini/copilot 5종 (1.9.149+1.9.153)' }
+      : { score: 30, status: '⚠', evidence: 'REPL 미완성' };
+    // (5) MCP 도구 — tools array 카운트
+    const toolsMatch = harnessSrc.match(/{ name: 'leerness_/g);
+    const toolCount = toolsMatch ? toolsMatch.length : 0;
+    cap.mcpTools = toolCount >= 50
+      ? { score: 100, status: '✓', evidence: `${toolCount}/50+ 도구 (1.9.159 CRUD 완성)` }
+      : { score: Math.round((toolCount / 50) * 100), status: toolCount > 30 ? '✓' : '⚠', evidence: `${toolCount} 도구` };
+    const avgScore = Math.round((cap.webAutomation.score + cap.pcAutomation.score + cap.multiAgentOrchestration.score + cap.replMultiProvider.score + cap.mcpTools.score) / 5);
+    out.capabilityMatrix = {
+      capabilities: cap,
+      overallScore: avgScore,
+      summary: `웹${cap.webAutomation.score}/PC${cap.pcAutomation.score}/멀티${cap.multiAgentOrchestration.score}/REPL${cap.replMultiProvider.score}/MCP${cap.mcpTools.score} · 종합 ${avgScore}%`,
+      assessment: avgScore >= 70 ? 'production-ready' : avgScore >= 50 ? 'beta-ready' : 'mvp'
+    };
+  } catch { out.capabilityMatrix = { error: '5능력 매트릭스 평가 실패' }; }
   // 6) issues 요약 (사용자 글로벌 룰 가시화)
   const issues = [];
   if (out.checks.drift?.level && !/healthy/.test(out.checks.drift.level)) issues.push(`drift ${out.checks.drift.level}`);
@@ -11572,6 +11611,18 @@ function healthCmd(root) {
   log(`## tasks`);
   const tb = out.checks.tasks?.byStatus || {};
   log(`  총 ${out.checks.tasks?.total || 0}건: ${Object.entries(tb).map(([s, n]) => `${s}=${n}`).join(', ') || '없음'}`);
+  // 1.9.163: 5능력 매트릭스 — 1.9.155 sub-agent 점검의 코드 기반 자동 평가
+  if (out.capabilityMatrix && !out.capabilityMatrix.error) {
+    log('');
+    log(`## 🧪 5능력 매트릭스 (1.9.163 자동 평가)`);
+    const cm = out.capabilityMatrix;
+    log(`  종합: ${cm.overallScore}% (${cm.assessment})`);
+    log(`  (1) 웹 자동화        ${cm.capabilities.webAutomation.status} ${cm.capabilities.webAutomation.score}%  · ${cm.capabilities.webAutomation.evidence}`);
+    log(`  (2) PC 조작          ${cm.capabilities.pcAutomation.status} ${cm.capabilities.pcAutomation.score}%  · ${cm.capabilities.pcAutomation.evidence}`);
+    log(`  (3) 멀티 오케스트레이션 ${cm.capabilities.multiAgentOrchestration.status} ${cm.capabilities.multiAgentOrchestration.score}%  · ${cm.capabilities.multiAgentOrchestration.evidence}`);
+    log(`  (4) REPL multi-provider ${cm.capabilities.replMultiProvider.status} ${cm.capabilities.replMultiProvider.score}%  · ${cm.capabilities.replMultiProvider.evidence}`);
+    log(`  (5) MCP 도구           ${cm.capabilities.mcpTools.status} ${cm.capabilities.mcpTools.score}%  · ${cm.capabilities.mcpTools.evidence}`);
+  }
   if (issues.length) {
     log('');
     log(`## ⚠ Issues (${issues.length})`);

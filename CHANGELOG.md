@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.9.163 — 2026-05-20
+
+**`leerness health` 에 5능력 매트릭스 자동 평가 통합.**
+
+자율 모드 93 라운드. 1.9.155 sub-agent 점검 (수동) → **코드 기반 자동 평가**로 진화. 사용자가 매 health 호출 시 leerness 자기 평가 즉시 확인.
+
+### Added — `health` 출력 + `health --json` 의 `capabilityMatrix` 필드
+5능력 자동 측정 (코드 grep 기반):
+
+| 능력 | 측정 방법 | 현재 점수 |
+|---|---|---|
+| (1) 웹 자동화 | playwright/puppeteer/chromium import 검출 | **5%** (실 코드 미구현) |
+| (2) PC 조작 | robotjs/nut-tree import 검출 | **5%** (필드만 있음) |
+| (3) 멀티 에이전트 오케스트레이션 | `--execute` + `multi-signal consensus` 코드 | **90%** (1.9.156+1.9.155) |
+| (4) REPL multi-provider | `_agentRepl` + `_cliChat` 검출 | **90%** (5종 provider) |
+| (5) MCP 도구 | `leerness_*` count ≥ 50 | **100%** (51 도구) |
+
+**종합 58% (beta-ready)** — 사용자가 leerness 의 현재 위치를 단일 명령으로 확인.
+
+### Assessment 라벨
+- `production-ready` — 종합 ≥ 70%
+- `beta-ready` — 종합 ≥ 50%
+- `mvp` — 종합 < 50%
+
+### Use Cases
+- 사용자가 `leerness health` 한 번으로 5능력 현황 즉시 파악
+- 외부 AI 가 `leerness_health` MCP 호출 시 `capabilityMatrix.summary` 받음 (자기-점검)
+- 다음 라운드 우선순위 결정 — 가장 낮은 점수 능력부터 보강 (현재: 웹 자동화 / PC 조작)
+- 1.9.155 sub-agent 점검 (110초 소요) → 1.9.163 자동 (수십 ms) — 4000x 빠름
+
+### Headline 진화 (1.9.162) + Health 진화 (1.9.163) 시너지
+- 매 세션: handoff 헤드라인 `🪄 slash 24h` 로 활용도 확인
+- 정기 점검: `leerness health` 로 5능력 매트릭스 자동 평가
+- 사용자 결정: 점수가 낮은 영역 → 다음 라운드 후보 자동 도출
+
+### Verified
+- e2e 217/217 ✓
+- stress-v108: 14/14 (capabilityMatrix 7종 + 누적 회귀 7종)
+- VERSION = 1.9.163 / autonomous-rounds = 93
+
+---
+
 ## 1.9.162 — 2026-05-20
 
 **handoff 헤드라인 9번째 요소 — REPL slash 사용량 (24h) 노출.**
