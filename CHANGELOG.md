@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.9.152 — 2026-05-20
+
+**`agents multi` — 활성 N개 에이전트 일괄 dispatch + handoff 헤드라인 활성 에이전트 카운트 (1.9.151 복수 선택 후속).**
+
+자율 모드 82 라운드. 1.9.151 install 복수 선택의 자연스러운 후속 — 실제 사용 시점에 선택된 에이전트들을 동시에 활용.
+
+### Added — `leerness agents multi "<task>"` 신규 명령
+- 활성 (ready) 에이전트들에 **일괄 dispatch 명령** 자동 생성 (claude/codex/gemini/copilot/ollama)
+- `--only c1,c2` — 활성 중에서 추가 필터링
+- `--write` — 파일 수정 권한 플래그 (각 CLI 별 적절한 옵션 자동 적용)
+- `--json` — 구조화 출력 (`{ task, count, agents, commands }`)
+- 메인 에이전트가 N개 sub-agent로 spawn 후 결과 합의/투표 → 가장 안정적인 답 선택
+
+### Added — `agents dispatch --multi` / `--to all` alias routing
+- 기존 `dispatch --to <id>` 와 동일한 인터페이스로 multi 모드 진입 가능
+- `--to all` 또는 `--to *` 또는 `--multi` 플래그로 자동 routing
+
+### Added — `_dispatchCommand(agentId, task, writeMode)` 공유 헬퍼
+- single dispatch + multi dispatch 가 동일한 명령 빌더 사용 — 일관성 보장
+- 5종 CLI 모두 지원 (claude/codex/gemini/copilot/ollama)
+
+### Added — handoff 헤드라인 8번째 항목 — 활성 에이전트 카운트
+- `🤖 agents N (claude,codex,...)` — 메인 에이전트가 매 세션 즉시 sub-agent 분배 가능성 인지
+- 활성 0개면 표시 안 함 (노이즈 최소화)
+- 1.9.151 복수 선택 결과가 .env 활성화 → 즉시 헤드라인 반영
+
+### Verified
+- e2e 217/217 ✓
+- stress-v97: 18/18 (agents multi 6종 + handoff 헤드라인 3종 + help/fail-fast 2종 + 누적 회귀 7종)
+- VERSION = 1.9.152 / autonomous-rounds = 82
+
+---
+
 ## 1.9.151 — 2026-05-20
 
 **install 흐름 — CLI 에이전트 복수 선택 + REPL 자동 시작 prompt + viewwork 제거 + help 검증 (사용자 명시 3종).**

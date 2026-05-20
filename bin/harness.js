@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.151';
+const VERSION = '1.9.152';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -2914,10 +2914,18 @@ function handoff(root) {
         const lessons = exists(lessonsPath(root)) ? (read(lessonsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0;
         parts.push(`🧠 mem T${inProgressTasks}/D${decisions}/R${rulesActive}/P${planMilestones}/L${lessons}`);
       } catch {}
+      // 8) 1.9.152: 활성 외부 AI CLI 카운트 (1.9.151 복수 선택 결과 반영) — 메인 에이전트가 sub-agent 분배 가능성 즉시 인지
+      try {
+        _loadEnvFile(root);  // .env 자동 로드 (handoff 컨텍스트)
+        const ready = EXTERNAL_AGENTS.map(a => _checkAgent(a)).filter(c => c.status === 'ready');
+        if (ready.length > 0) {
+          parts.push(`🤖 agents ${ready.length} (${ready.map(c => c.id).join(',')})`);
+        }
+      } catch {}
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113/152): ${parts.join(' · ')}`));
       }
     } catch {}
   }
@@ -5016,6 +5024,17 @@ async function setupAgentsCmd(root, opts = {}) {
   log('   다음: leerness agents list  /  leerness agents quota');
 }
 
+// 1.9.152: 단일 agent dispatch 명령 빌더 — agents dispatch (단일) + agents multi (복수) 가 공유
+function _dispatchCommand(agentId, task, writeMode) {
+  const q = String(task || '').replace(/"/g, '\\"');
+  if (agentId === 'claude') return `claude ${writeMode ? '--print --dangerously-skip-permissions' : '--print'} "${q}"`;
+  if (agentId === 'codex')  return `codex ${writeMode ? 'exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox' : 'exec --skip-git-repo-check'} "${q}"`;
+  if (agentId === 'gemini') return `gemini ${writeMode ? '-p --yolo' : '-p'} "${q}"`;
+  if (agentId === 'copilot') return `gh copilot suggest "${q}"`;
+  if (agentId === 'ollama') return `# ollama — leerness agent "${q}" --provider ollama 로 직접 호출 (REPL: leerness agent)`;
+  return `# ${agentId}: 명령 빌더 미정의`;
+}
+
 function agentsCmd(root, sub, ...args) {
   root = absRoot(root || process.cwd());
   // .env 자동 로드 (1.9.22)
@@ -5059,11 +5078,61 @@ function agentsCmd(root, sub, ...args) {
     return agentsCmd(root, 'list'); // 비-JSON은 list와 동일
   }
 
+  // 1.9.152: agents multi — 1.9.151 install 복수 선택된 ready 에이전트들에 일괄 dispatch 명령 생성
+  // 단일 task → 활성 N개 에이전트 동시 dispatch 명령들. 사용자가 한 번에 복사 실행하거나 메인 에이전트가 spawn.
+  if (sub === 'multi') {
+    const task = args.filter(x => !x.startsWith('-')).join(' ').trim() || arg('--task', null);
+    if (!task) { fail('multi "<task>" 또는 --task 필요'); return process.exit(1); }
+    const onlyArg = arg('--only', null);  // 'claude,codex' 처럼 콤마 구분 — 활성 중에서 추가 필터
+    const writeMode = has('--write');
+    const checks = EXTERNAL_AGENTS.map(a => ({ def: a, status: _checkAgent(a) }));
+    let ready = checks.filter(x => x.status.status === 'ready');
+    if (onlyArg) {
+      const wanted = new Set(onlyArg.split(/[,\s]+/).filter(Boolean));
+      ready = ready.filter(x => wanted.has(x.def.id));
+    }
+    if (!ready.length) {
+      fail('활성 (ready) 에이전트 없음 — `leerness agents list` 로 확인. 1.9.151 install 흐름에서 복수 선택 후 .env 활성화 필요.');
+      return process.exit(1);
+    }
+    if (has('--json')) {
+      log(JSON.stringify({
+        task, count: ready.length,
+        agents: ready.map(x => ({ id: x.def.id, version: x.status.version })),
+        commands: ready.map(x => _dispatchCommand(x.def.id, task, writeMode))
+      }, null, 2));
+      return;
+    }
+    log(`# leerness agents multi (1.9.152) — ${ready.length}개 활성 에이전트 일괄 dispatch`);
+    log(`task: ${task.slice(0, 120)}${task.length > 120 ? '…' : ''}`);
+    log(`mode: ${writeMode ? '✏ write (파일 수정 가능)' : '🔒 read-only (분석 전용, 안전)'}`);
+    log(`대상: ${ready.map(x => x.def.id).join(', ')}`);
+    log('');
+    log('## 각 에이전트 실행 명령 (사용자가 병렬 실행 또는 메인 에이전트가 spawn)');
+    log('');
+    for (const { def, status } of ready) {
+      log(`### [${def.id}]  (v${status.version || '?'})`);
+      log('```sh');
+      log(_dispatchCommand(def.id, task, writeMode));
+      log('```');
+      log('');
+    }
+    log('## 정책 (1.9.152)');
+    log(`  - leerness는 외부 CLI를 자동 호출하지 않음 (사용자/메인 에이전트가 명시적으로 실행)`);
+    log(`  - 메인 에이전트(Claude)가 위 ${ready.length}개 명령을 보고 ${ready.length}개 sub-agent로 spawn — 결과 합의/투표로 가장 안정적인 답 선택`);
+    log(`  - 활성 에이전트 변경: \`.env\`에서 LEERNESS_ENABLE_<CLI>=1/0 또는 \`leerness setup-agents\` 재실행`);
+    log(`  - quota 체크: \`leerness agents quota\``);
+    return;
+  }
   if (sub === 'dispatch') {
     const task = args.filter(x => !x.startsWith('-')).join(' ').trim() || arg('--task', null);
     const target = arg('--to', null);
     if (!task) { fail('dispatch "<task>" 또는 --task 필요'); return process.exit(1); }
-    if (!target) { fail('--to <agent_id> 필요 (claude/codex/gemini/copilot)'); return process.exit(1); }
+    // 1.9.152: --multi 또는 --to=all 또는 --to 없음 + 활성 ≥2 → multi 모드로 routing
+    if (has('--multi') || target === 'all' || target === '*') {
+      return agentsCmd(root, 'multi', ...args);
+    }
+    if (!target) { fail('--to <agent_id> 필요 (claude/codex/gemini/copilot) — 활성 전체에 일괄 분배는 `leerness agents multi`'); return process.exit(1); }
     const agentDef = EXTERNAL_AGENTS.find(a => a.id === target);
     if (!agentDef) { fail(`알 수 없는 agent: ${target}`); return process.exit(1); }
     // 1.9.36: 작업 유형 키워드 분석 → 최적 CLI 추천 (ready 체크 전에 출력 — 비활성이어도 추천)
@@ -11151,7 +11220,7 @@ function reuseAutodetectCmd(root) {
 }
 
 function help() {
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write]   # 1.9.152 활성 N개 에이전트 일괄 dispatch 명령 (복수 선택 후속)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
