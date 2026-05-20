@@ -6969,7 +6969,23 @@ function releaseSyncMainCmd(root) {
   // 2) origin/main pull (최신화)
   cp.spawnSync('git', ['pull', '--ff-only', remoteName, 'main'], { cwd: root, encoding: 'utf8' });
   // 3) release branch merge (fast-forward 우선, 안 되면 no-ff merge commit)
-  const mergeR = cp.spawnSync('git', ['merge', '--no-edit', fromBranch], { cwd: root, encoding: 'utf8' });
+  // 1.9.140+: --allow-unrelated 또는 LEERNESS_ALLOW_UNRELATED=1 (최초 main 동기화 시 release branch와 history 분리)
+  const allowUnrelated = has('--allow-unrelated') || process.env.LEERNESS_ALLOW_UNRELATED === '1';
+  let mergeArgs = ['merge', '--no-edit', fromBranch];
+  let mergeR = cp.spawnSync('git', mergeArgs, { cwd: root, encoding: 'utf8' });
+  if (mergeR.status !== 0 && /unrelated histories/.test(mergeR.stderr || mergeR.stdout || '')) {
+    if (allowUnrelated) {
+      warn('unrelated histories 감지 — --allow-unrelated 재시도');
+      cp.spawnSync('git', ['merge', '--abort'], { cwd: root, encoding: 'utf8' });
+      mergeR = cp.spawnSync('git', ['merge', '--no-edit', '--allow-unrelated-histories', fromBranch], { cwd: root, encoding: 'utf8' });
+    } else {
+      fail('main merge 실패 — unrelated histories: --allow-unrelated 옵션 추가하세요 (또는 LEERNESS_ALLOW_UNRELATED=1)');
+      cp.spawnSync('git', ['merge', '--abort'], { cwd: root, encoding: 'utf8' });
+      cp.spawnSync('git', ['checkout', fromBranch], { cwd: root, encoding: 'utf8' });
+      process.exitCode = 1;
+      return;
+    }
+  }
   if (mergeR.status !== 0) {
     fail('main merge 실패 — 충돌 가능성: ' + (mergeR.stderr || mergeR.stdout || '').slice(0, 300));
     // checkout back to original
