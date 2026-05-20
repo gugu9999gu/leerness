@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.9.164 — 2026-05-20
+
+**`leerness which` 진단 명령 + REPL provider 전환 UX 강화 (사용자 명시 2종).**
+
+자율 모드 94 라운드.
+
+### Added — `leerness which` (사용자 명시: 구버전 충돌 해결)
+사용자가 "최신 버전 작동 안 함" 의심 시 한 번에 진단:
+- **현재 실행 경로** — `__filename` 그대로 표시 (어떤 leerness 가 실행되는지 정확히)
+- **버전 / Node / Platform**
+- **`npm root -g`** — 글로벌 설치 경로
+- **`npm cache`** — npx 캐싱 디렉토리
+- **글로벌 설치 버전** — `npm ls -g leerness`
+- **PATH 후보** — `where`/`which -a` 결과 (Windows/Unix 자동)
+- **자동 진단** — 글로벌 ≠ 현재 실행 시 ⚠ 경고 + 강제 최신 명령 3종
+  - `npx --yes leerness@latest <command>`
+  - `npm i -g leerness@latest`
+  - `npm cache clean --force`
+- `--json` 옵션 — 구조화 출력
+
+### Added — REPL UX: Ollama 실패 시 다른 CLI 즉시 전환 안내 (사용자 명시)
+- **시작 시**: Ollama 미가동 + 활성 외부 CLI 발견 → 즉시 번호 선택 prompt 추가
+  - `1) claude  2) codex  ...` 형태로 즉시 전환 가능
+  - Enter 누르면 Ollama fallback (기존 동작 유지)
+- **메시지 호출 실패 시**: `:provider claude / :provider codex` 즉시 가이드 1줄 추가
+- 사용자 명시 "모델은 codex cli 같은 에이전트로 간편하게 전환 가능" 해결
+
+### Diagnostic 실제 사용 예시
+```
+# leerness which (1.9.164)
+현재 실행: /usr/local/lib/node_modules/leerness/bin/harness.js
+버전:      v1.9.164
+Node:      v24.11.1 (linux/x64)
+
+## npm 환경
+  글로벌 설치: leerness@1.9.139    ← 옛 버전!
+
+## ⚠ 진단
+  ⚠ 글로벌 설치 1.9.139 ≠ 현재 실행 1.9.164 — npx 캐시 또는 PATH 충돌 의심
+    → 강제 최신: npm i -g leerness@latest  /  또는 npx --yes leerness@latest <command>
+```
+
+### Verified
+- e2e 217/217 ✓
+- stress-v109: 16/16 (which 6종 + REPL UX 3종 + 누적 회귀 7종)
+- VERSION = 1.9.164 / autonomous-rounds = 94
+
+---
+
 ## 1.9.163 — 2026-05-20
 
 **`leerness health` 에 5능력 매트릭스 자동 평가 통합.**
