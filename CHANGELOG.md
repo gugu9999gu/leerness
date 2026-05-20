@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.9.173 — 2026-05-21
+
+**🌐 LSP 어댑터 다국어 확장 — JavaScript + Python + Go + Rust + Java (5개 언어 regex fallback).**
+
+자율 모드 103 라운드. 1.9.167 codeIntel (JS/TS only) → 5개 언어 확장.
+
+### `_LSP_LANG_PATTERNS` — 5개 언어 패턴
+| 언어 | 추출 가능 |
+|---|---|
+| **javascript** (.ts/.tsx/.js/.jsx/.mjs/.cjs) | function, class, interface, type, enum, arrow function |
+| **python** (.py/.pyw/.pyi) | def, async def, class |
+| **go** (.go) | func (receiver 포함), type struct/interface, type alias |
+| **rust** (.rs) | fn (pub/async), struct, enum, trait, impl, type |
+| **java** (.java/.kt/.scala) | class (public/private/abstract), interface, enum, method |
+
+### `_detectLspLang(file)` — 확장자 자동 라우팅
+파일 확장자 기반 언어 자동 감지. 미지원 확장자는 javascript 기본 (1.9.167 호환).
+
+### 사용 예시
+```bash
+$ leerness lsp symbols src/api.py
+# leerness lsp symbols (1.9.173 다국어)
+file: src/api.py  · lang: python
+mode: regex-fallback (python) · 12 symbols · 4ms
+      1:function   parse_request
+      8:function   fetch_data
+     15:class      Handler
+     16:function   __init__
+     ...
+
+$ leerness lsp symbols src/main.rs
+# leerness lsp symbols (1.9.173 다국어)
+file: src/main.rs  · lang: rust
+mode: regex-fallback (rust) · 9 symbols · 5ms
+      1:function   hello
+      5:struct     User
+      9:impl       User
+     15:trait      Greeter
+     ...
+```
+
+### 키워드 false-positive 제거
+Java method 정규식이 `if(`, `for(`, `while(`, `switch(`, `catch(`, `return(`, `throw(`, `new(` 등 키워드에 매치되는 경우 필터.
+
+### references 다국어 파일 스캔
+`leerness lsp references <name>` 가 `.py/.go/.rs/.java/.kt/.scala` 파일도 스캔 (기존 `.ts/.js/.md` 에 추가).
+
+### 실측 (regex fallback)
+- Python (5 symbols): 472ms
+- Go (4 symbols): 566ms
+- Rust (6 symbols): 531ms
+- Java (4 symbols): 1229ms
+
+### Verified
+- e2e 217/217 baseline 유지
+- stress-v118: **15/15** (패턴 정의 4 + Python 1 + Go 1 + Rust 1 + Java 1 + JS 호환 1 + references 1 + 누적 회귀 5)
+- VERSION = 1.9.173 / autonomous-rounds = 103 / main 자동 push 34 라운드 연속
+
+---
+
 ## 1.9.172 — 2026-05-21
 
 **🎨 스트리밍 UX 강화 — spinner + Claude tool_use 가시화 + diff 패턴 자동 색깔 (사용자 명시 강화).**

@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.172';
+const VERSION = '1.9.173';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -12560,22 +12560,69 @@ function _tryLoadLSP() {
   return { ok: false, error: 'typescript 미설치 — `npm i -g typescript` 후 다시 시도 (또는 정규식 fallback 사용)' };
 }
 
-// 정규식 fallback — TypeScript/JavaScript symbol 추출 (LSP 없이도 동작)
-function _lspRegexSymbols(content) {
-  const symbols = [];
-  const lines = content.split(/\r?\n/);
-  const patterns = [
+// 1.9.173: 다국어 확장 — Python/Go/Rust/Java 패턴 추가 (regex fallback)
+//   파일 확장자 기반 자동 라우팅. TypeScript Compiler API 미설치 시에도 5개 언어 지원.
+const _LSP_LANG_PATTERNS = {
+  javascript: [
     { re: /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/, kind: 'function' },
     { re: /^\s*(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/, kind: 'class' },
     { re: /^\s*(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)/, kind: 'interface' },
     { re: /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function|\()/, kind: 'function' },
     { re: /^\s*(?:export\s+)?type\s+([A-Za-z_$][\w$]*)\s*=/, kind: 'type' },
-    { re: /^\s*(?:export\s+)?enum\s+([A-Za-z_$][\w$]*)/, kind: 'enum' },
-  ];
+    { re: /^\s*(?:export\s+)?enum\s+([A-Za-z_$][\w$]*)/, kind: 'enum' }
+  ],
+  python: [
+    { re: /^\s*async\s+def\s+([A-Za-z_][\w]*)\s*\(/, kind: 'function' },
+    { re: /^\s*def\s+([A-Za-z_][\w]*)\s*\(/, kind: 'function' },
+    { re: /^\s*class\s+([A-Za-z_][\w]*)\s*[(:]/, kind: 'class' }
+  ],
+  go: [
+    { re: /^\s*func\s+(?:\([^)]*\)\s+)?([A-Za-z_][\w]*)\s*\(/, kind: 'function' },
+    { re: /^\s*type\s+([A-Za-z_][\w]*)\s+struct\b/, kind: 'struct' },
+    { re: /^\s*type\s+([A-Za-z_][\w]*)\s+interface\b/, kind: 'interface' },
+    { re: /^\s*type\s+([A-Za-z_][\w]*)\s+[A-Za-z]/, kind: 'type' }
+  ],
+  rust: [
+    { re: /^\s*(?:pub(?:\([^)]+\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][\w]*)/, kind: 'function' },
+    { re: /^\s*(?:pub(?:\([^)]+\))?\s+)?struct\s+([A-Za-z_][\w]*)/, kind: 'struct' },
+    { re: /^\s*(?:pub(?:\([^)]+\))?\s+)?enum\s+([A-Za-z_][\w]*)/, kind: 'enum' },
+    { re: /^\s*(?:pub(?:\([^)]+\))?\s+)?trait\s+([A-Za-z_][\w]*)/, kind: 'trait' },
+    { re: /^\s*impl\s+(?:[^{]+\s+for\s+)?([A-Za-z_][\w]*)/, kind: 'impl' },
+    { re: /^\s*(?:pub(?:\([^)]+\))?\s+)?type\s+([A-Za-z_][\w]*)\s*=/, kind: 'type' }
+  ],
+  java: [
+    { re: /^\s*(?:public|private|protected)?\s*(?:final\s+)?(?:abstract\s+)?class\s+([A-Za-z_][\w]*)/, kind: 'class' },
+    { re: /^\s*(?:public|private|protected)?\s*(?:abstract\s+)?interface\s+([A-Za-z_][\w]*)/, kind: 'interface' },
+    { re: /^\s*(?:public|private|protected)?\s*(?:static\s+)?(?:final\s+)?enum\s+([A-Za-z_][\w]*)/, kind: 'enum' },
+    // method: visibility + return type + name(  (heuristic — 첫 번째 ( 매칭, 키워드 필터)
+    { re: /^\s*(?:public|private|protected)\s+(?:static\s+)?(?:final\s+)?(?:[A-Za-z_<>,\s\[\]]+\s+)?([A-Za-z_][\w]*)\s*\(/, kind: 'method' }
+  ]
+};
+
+function _detectLspLang(file) {
+  const ext = (file.match(/\.[a-zA-Z0-9]+$/) || [''])[0].toLowerCase();
+  if (/^\.(py|pyw|pyi)$/.test(ext)) return 'python';
+  if (ext === '.go') return 'go';
+  if (ext === '.rs') return 'rust';
+  if (/^\.(java|kt|scala)$/.test(ext)) return 'java';
+  if (/^\.(ts|tsx|js|jsx|mjs|cjs)$/.test(ext)) return 'javascript';
+  return 'javascript';  // default — 기본 JS 패턴 (.txt/.md 등 미지원 확장자)
+}
+
+// 정규식 fallback — 5개 언어 (JS/TS/Python/Go/Rust/Java) symbol 추출 (LSP 없이도 동작)
+// 1.9.173: lang 인자 추가 — 미지정 시 javascript 패턴 (1.9.167 호환).
+function _lspRegexSymbols(content, lang) {
+  const symbols = [];
+  const lines = content.split(/\r?\n/);
+  const patterns = _LSP_LANG_PATTERNS[lang || 'javascript'] || _LSP_LANG_PATTERNS.javascript;
   lines.forEach((line, idx) => {
     for (const p of patterns) {
       const m = line.match(p.re);
-      if (m) { symbols.push({ name: m[1], kind: p.kind, line: idx + 1 }); break; }
+      // 키워드 false-positive 제거 (예: java method 정규식이 `if(`, `for(` 등에 매치되는 경우)
+      if (m && !/^(if|for|while|switch|catch|return|throw|new)$/.test(m[1])) {
+        symbols.push({ name: m[1], kind: p.kind, line: idx + 1 });
+        break;
+      }
     }
   });
   return symbols;
@@ -12641,31 +12688,32 @@ function lspCmd(root, sub, ...args) {
     if (!fs.existsSync(file)) return fail(`파일 없음: ${file}`);
     const content = fs.readFileSync(file, 'utf8');
     const t0 = Date.now();
+    const lang = _detectLspLang(file);  // 1.9.173: 언어 자동 감지
     const r = _tryLoadLSP();
     let symbols, mode;
     try {
-      if (r.ok && /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(file)) {
+      if (r.ok && lang === 'javascript' && /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(file)) {
         symbols = _lspTsSymbols(r.lib, content, file);
         mode = 'typescript-compiler';
       } else {
-        symbols = _lspRegexSymbols(content);
-        mode = 'regex-fallback';
+        symbols = _lspRegexSymbols(content, lang);  // 1.9.173: lang 전달
+        mode = `regex-fallback (${lang})`;
       }
     } catch (e) {
-      symbols = _lspRegexSymbols(content);
-      mode = 'regex-fallback (after error: ' + e.message + ')';
+      symbols = _lspRegexSymbols(content, lang);
+      mode = `regex-fallback (${lang}, after error: ${e.message})`;
     }
     const dt = Date.now() - t0;
     if (has('--json')) {
-      log(JSON.stringify({ file, symbols, count: symbols.length, mode, durationMs: dt }, null, 2));
+      log(JSON.stringify({ file, lang, symbols, count: symbols.length, mode, durationMs: dt }, null, 2));
     } else {
-      log(`# leerness lsp symbols (1.9.167)`);
-      log(`file: ${file}`);
+      log(`# leerness lsp symbols (1.9.173 다국어)`);
+      log(`file: ${file}  · lang: ${lang}`);
       log(`mode: ${mode} · ${symbols.length} symbols · ${dt}ms`);
       symbols.slice(0, 50).forEach(s => log(`  ${String(s.line).padStart(5)}:${s.kind.padEnd(10)} ${s.name}`));
       if (symbols.length > 50) log(`  ... ${symbols.length - 50} more`);
     }
-    try { _recordRun(root, { kind: 'lsp_symbols', file, count: symbols.length, mode, durationMs: dt, ok: true }); } catch {}
+    try { _recordRun(root, { kind: 'lsp_symbols', file, lang, count: symbols.length, mode, durationMs: dt, ok: true }); } catch {}
     return;
   }
   if (sub === 'references') {
@@ -12683,7 +12731,7 @@ function lspCmd(root, sub, ...args) {
         if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'dist' || e.name === 'build') continue;
         const p = path.join(d, e.name);
         if (e.isDirectory()) walk(p);
-        else if (/\.(ts|tsx|js|jsx|mjs|cjs|md)$/.test(e.name)) {
+        else if (/\.(ts|tsx|js|jsx|mjs|cjs|md|py|pyw|pyi|go|rs|java|kt|scala)$/.test(e.name)) {
           try {
             const lines = fs.readFileSync(p, 'utf8').split(/\r?\n/);
             lines.forEach((ln, idx) => {
