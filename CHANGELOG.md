@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.137 — 2026-05-20
+
+**`.harness/session-workflow.md` 템플릿 갱신 — Memory CRUD Quick Reference 추가** — 신규 \`init\` 워크스페이스의 AI 에이전트에 5 surface CRUD 매트릭스 + archive cycle 가이드 제공.
+
+### Updated — session-workflow.md
+- Step 6 (세션 마감) 뒤에 **🧠 Memory CRUD Quick Reference** 섹션 추가
+- 5 surface (tasks/decisions/lessons/plan/rules) × CRUD ops 표
+- archive cycle workflow 3 단계 예시
+- DELETE→RESTORE 복구 사용 시나리오
+
+### 영향
+- 신규 `leerness init` 워크스페이스: 새 템플릿 적용
+- 기존 워크스페이스: `leerness audit --fix` 으로 갱신 가능
+
 ## 1.9.136 — 2026-05-20
 
 **MCP `leerness_drift_check` JSON 응답 fix** — drift check CLI 는 `--json` 옵션을 지원하지만 MCP 라우팅이 plain 텍스트를 반환하던 버그 fix.

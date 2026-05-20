@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.136';
+const VERSION = '1.9.137';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -286,6 +286,31 @@ leerness skill suggest .             # 1.9.53 — 반복 패턴 → 새 skill �
 leerness drift check .               # 4 신호 + 4 레벨 점검
 leerness audit . --fix               # 누락 메타 자동 보강
 \`\`\`
+
+## 🧠 Memory CRUD Quick Reference (1.9.107~135)
+
+5 Memory Surface 모두 CRUD CLI + MCP 노출 완성:
+
+| Surface | CREATE | READ | DELETE | RESTORE |
+|---|---|---|---|---|
+| **tasks** | task add | task list --json (1.9.134) | task drop | task update |
+| **decisions** | decision add | decision list --json | decision drop | memory restore decisions |
+| **lessons** | lesson save | lesson list [--tag] | lesson drop | memory restore lessons |
+| **plan** | plan add | plan list --json | plan remove | memory restore plan |
+| **rules** | rule add | rule list --json | rule remove | (rule pause/resume) |
+
+\`\`\`bash
+leerness memory status [--json]              # 5종 상태 통합 조회 (T/D/R/P/L 카운트)
+leerness memory archive list [--surface s]   # DELETE archive 통합 조회 (복원 후보)
+leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE→RESTORE cycle, 1.9.128)
+\`\`\`
+
+**잘못 저장한 항목 복구**:
+1. \`memory archive list\` — 복원 후보 확인
+2. \`memory restore decisions "PostgreSQL"\` — archive → active
+3. handoff 가 매 세션 자동으로 24h 내 archive 활동 알림 (1.9.129)
+
+
 - session close가 누락되면 다음 세션 시작 시 drift critical 발생.
 - 자동 회복 옵션: \`drift check --auto-fix\` (critical 시 session close 자동 실행).
 - 1.9.56+ handoff가 매 세션 시작 시 **과거 lessons 자동 재상기** (현재 task 키워드 기준).
@@ -337,6 +362,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.134+ \`leerness task list --json\` + MCP **41 도구** (\`leerness_task_list\`) — progress-tracker.md task 전체 JSON 조회 + \`--status\` 필터. Task surface CRUD MCP 완전 완성 (add/list/update/drop).
 - 1.9.135+ MCP **42 도구** (\`leerness_rule_remove\`) — rules.md 에서 특정 rule 제거 + archive 보존. **5 surface CRUD MCP 완전 완성** (task/decision/lesson/plan/rule 모두 add/list/delete MCP 노출).
 - 1.9.136+ MCP \`leerness_drift_check\` JSON 응답 fix — \`--json\` 플래그 자동 추가하여 외부 AI가 구조화된 drift 신호 회수 (score, level, signals[], healthy).
+- 1.9.137+ \`.harness/session-workflow.md\` 템플릿에 **🧠 Memory CRUD Quick Reference** 섹션 추가 — 5 surface × CRUD 매트릭스 + archive cycle 워크플로 가이드. 신규 \`init\` 워크스페이스 즉시 적용.
 
 ---
 
@@ -4295,7 +4321,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.136+ MCP drift_check JSON fix — 66 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.137+ session-workflow Memory CRUD ref — 67 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
