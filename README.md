@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.169-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v114-14%2F14-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-53-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-99-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-30_rounds-success)]() [![hotfix](https://img.shields.io/badge/1.9.169-include_explicit--only-success)]() [![mcp-bridge](https://img.shields.io/badge/MCP_bridge-web%2Fpc%2Flsp_노출-success)]() [![lsp-bridge](https://img.shields.io/badge/lsp_bridge-typescript_opt--in%2Bregex_fallback-success)]() [![pc-bridge](https://img.shields.io/badge/pc_bridge-robotjs%2Fnut--tree_opt--in-success)]() [![web-bridge](https://img.shields.io/badge/playwright_bridge-opt--in_MVP-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.170-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v115-23%2F23-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-53-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-100🎉-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-31_rounds-success)]() [![repl-tab](https://img.shields.io/badge/REPL-Tab_cycle%2B실시간_스트리밍-success)]() [![mcp-bridge](https://img.shields.io/badge/MCP_bridge-web%2Fpc%2Flsp_노출-success)]() [![lsp-bridge](https://img.shields.io/badge/lsp_bridge-typescript_opt--in%2Bregex_fallback-success)]() [![pc-bridge](https://img.shields.io/badge/pc_bridge-robotjs%2Fnut--tree_opt--in-success)]() [![web-bridge](https://img.shields.io/badge/playwright_bridge-opt--in_MVP-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.169  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.170  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  hotfix --include explicit-only · 30 라운드 main 자동 push   ║
+  ║  🎉 100 라운드 자율 마일스톤 · REPL Tab cycle + 실시간 스트림 ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

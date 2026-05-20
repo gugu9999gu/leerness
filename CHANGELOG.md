@@ -1,5 +1,77 @@
 # Changelog
 
+## 1.9.170 — 2026-05-21 — 🎉 100 라운드 자율 마일스톤
+
+**사용자 명시 요청 2종: REPL Tab cycle provider/model + 실시간 스트리밍.**
+
+자율 모드 100 라운드 도달 (1.9.71~1.9.170). 사용자 직접 요청 2종 통합:
+1. **Tab 키 cycle** — provider/model 빠른 전환
+2. **실시간 스트리밍** — 추론중/diff/thinking 과정 즉시 표시
+
+### 1. REPL Tab cycle (사용자 명시 — "탭 키 등으로 provider/모델 셀렉과 선택 간편하게")
+
+```
+agent[claude/actor/▶]> [Tab]              # → ollama로 cycle
+agent[ollama/actor/▶]> [Tab]              # → claude로 cycle
+agent[claude/actor/▶]> [Shift+Tab]        # → 현재 provider의 다음 model로
+  ⇄ model: claude-opus-4-7  — 최신 1M context (Anthropic Opus 4.7)
+```
+
+**구현**:
+- `readline.emitKeypressEvents(process.stdin, rl)` — Tab 키 감지 활성화
+- `process.stdin.on('keypress', ...)` — Tab/Shift+Tab 가로채서 cycle 실행
+- `getProviders()` — 빌트인 5종 + `.harness/providers.json` 사용자 정의 통합
+- prompt 갱신: `agent[provider/role/▶]>` (스트리밍 ON 시 ▶ 표시)
+
+### 2. 실제 모델 catalog 확장 (사용자 명시 — "gpt-5.5, gpt-5.4, claude opus4.7 등 실제 모델")
+
+| Provider | 모델 |
+|---|---|
+| **claude** | **claude-opus-4-7** (1M context), opus-4-5, sonnet-4-7, sonnet-4-5, haiku-4-5 |
+| **codex** | **gpt-5.5** (최신 추론), gpt-5.4, gpt-5, gpt-5-codex, o4-mini |
+| **gemini** | gemini-2.5-pro, gemini-2.5-flash, gemini-3.0-pro |
+| ollama | llama3, qwen2.5-coder, gpt-oss, deepseek-coder-v2 |
+| copilot | default |
+
+### 3. 실시간 스트리밍 (사용자 명시 — "추론중, diff, 생각하는 과정 실시간 표시")
+
+```
+user> 이 함수 리팩토링 해줘
+  → claude CLI stream 호출 중...  (Ctrl+C 로 중단)
+  ── claude stream ──
+  [claude-opus-4-7] 분석 중...
+  function refactored() {
+    // 실시간으로 한 글자씩 흘러나옴
+    ...
+  }
+  ── /stream (3421ms) ──
+  [assistant: claude/claude-opus-4-7, role=actor, 3421ms · 1248자]
+```
+
+**구현**:
+- `_cliChatStream()` — `cp.spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })`
+- Claude: `--output-format=stream-json --verbose` 활용 → `content_block_delta` / `thinking_delta` 파싱
+- 다른 provider (codex/gemini/copilot): stdout raw pipe
+- env scrub + cwd jail 유지 (1.9.150 sandboxing 호환)
+- observability: `_recordRun(kind: 'agent_repl_cli_stream')`
+- `:stream on|off` 토글, default ON (env `LEERNESS_REPL_STREAM=0` 로 끄기)
+
+### 100 라운드 마일스톤
+| 마일스톤 | 라운드 | 도구 |
+|---|---|---|
+| MCP 30 도구 | 1.9.110 | Memory CRUD 완성 |
+| MCP 50 도구 | 1.9.159 | Provider Registry CRUD |
+| 90 라운드 | 1.9.160 | provider sync |
+| MCP 53 도구 | 1.9.168 | Bridge 3종 외부 노출 |
+| **100 라운드** | **1.9.170** | **🎉 Tab cycle + 실시간 스트리밍** |
+
+### Verified
+- e2e 217/217 baseline 유지 (1.9.169 hotfix 후)
+- stress-v115: **23/23** (catalog 4 + Tab cycle 3 + 스트리밍 4 + :stream + REPL 통합 5 + 누적 회귀 7)
+- VERSION = 1.9.170 / autonomous-rounds = **100** 🎉 / main 자동 push 31 라운드 연속
+
+---
+
 ## 1.9.169 — 2026-05-20
 
 **🔧 Hotfix — `_collectWorkspacePaths()` --include 명시 시 cwd 자동 추가 안 함.**

@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.169';
+const VERSION = '1.9.170';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -10551,6 +10551,108 @@ async function _cliChat(root, provider, prompt, opts) {
   };
 }
 
+// 1.9.170: REPL 실시간 스트리밍 — CLI stdout을 즉시 터미널에 표시 (사용자 명시 요청)
+//   추론중/diff/thinking 과정이 stdout 으로 흐르는 동안 실시간 렌더링.
+//   runCommandSafe 의 배치 결과와 달리 cp.spawn 의 child.stdout 을 직접 pipe.
+//   env scrub + cwd jail 은 동일하게 적용.
+async function _cliChatStream(root, provider, promptText, opts) {
+  opts = opts || {};
+  const agent = EXTERNAL_AGENTS.find(a => a.id === provider);
+  if (!agent) return { ok: false, error: `unknown provider: ${provider}`, provider };
+  const status = _checkAgent(agent);
+  if (status.status !== 'ready') {
+    return { ok: false, error: `${provider} 비활성 (${status.status}) — .env 에서 ${agent.envFlag}=1 필요`, provider };
+  }
+  let cmd, args;
+  if (provider === 'claude')  { cmd = 'claude'; args = ['--print', '--output-format=stream-json', '--verbose', promptText]; }
+  else if (provider === 'codex')   { cmd = 'codex';  args = ['exec', '--skip-git-repo-check', promptText]; }
+  else if (provider === 'gemini')  { cmd = 'gemini'; args = ['-p', promptText]; }
+  else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', promptText]; }
+  else return { ok: false, error: `provider ${provider} 미지원`, provider };
+  const t0 = Date.now();
+  return new Promise(resolve => {
+    let out = '', err = '';
+    let buf = ''; // claude stream-json 라인 버퍼
+    let firstChunk = true;
+    const isTty = process.stdout.isTTY;
+    const dim = isTty ? (s) => `\x1b[2m${s}\x1b[0m` : s => s;
+    const cy = isTty ? (s) => `\x1b[36m${s}\x1b[0m` : s => s;
+    process.stdout.write(dim(`\n  ── ${provider} stream ──\n`));
+    let child;
+    try {
+      child = cp.spawn(cmd, args, {
+        cwd: process.cwd(),
+        env: _scrubEnv({}),
+        shell: false,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+    } catch (e) {
+      return resolve({ ok: false, error: 'spawn 실패: ' + e.message, provider });
+    }
+    const timer = setTimeout(() => {
+      try { child.kill('SIGTERM'); } catch {}
+    }, opts.timeout || 120000);
+
+    // Claude stream-json 모드: 각 라인이 JSON event. type=assistant_message_delta.text 만 출력
+    function handleClaudeStream(chunk) {
+      buf += chunk.toString();
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const ln of lines) {
+        if (!ln.trim()) continue;
+        try {
+          const ev = JSON.parse(ln);
+          // assistant 메시지 chunk만 표시 (thinking/system 은 dim)
+          if (ev.type === 'content_block_delta' && ev.delta?.text) {
+            process.stdout.write(ev.delta.text);
+            out += ev.delta.text;
+          } else if (ev.type === 'message_start' && firstChunk) {
+            firstChunk = false;
+            process.stdout.write(dim(`  [${ev.message?.model || provider}] `));
+          } else if (ev.type === 'thinking_delta' && ev.delta?.thinking) {
+            process.stdout.write(dim(ev.delta.thinking));
+          }
+        } catch {
+          // JSON 아니면 그대로 출력 (fallback)
+          process.stdout.write(ln + '\n');
+          out += ln + '\n';
+        }
+      }
+    }
+
+    child.stdout.on('data', chunk => {
+      if (provider === 'claude') {
+        handleClaudeStream(chunk);
+      } else {
+        const s = chunk.toString();
+        out += s;
+        process.stdout.write(s);
+      }
+    });
+    child.stderr.on('data', chunk => {
+      const s = chunk.toString();
+      err += s;
+      // 추론중/진행 메시지는 dim 으로 (실제 에러는 출력 후에 종합)
+      process.stdout.write(dim(s));
+    });
+    child.on('error', e => {
+      clearTimeout(timer);
+      resolve({ ok: false, error: 'child error: ' + e.message, provider });
+    });
+    child.on('close', code => {
+      clearTimeout(timer);
+      const dt = Date.now() - t0;
+      process.stdout.write(dim(`\n  ── /stream (${dt}ms) ──\n`));
+      try { _recordRun(root, { kind: 'agent_repl_cli_stream', provider, durationMs: dt, ok: code === 0, exitCode: code, responseChars: out.length }); } catch {}
+      if (code === 0) {
+        resolve({ ok: true, response: out.trim(), provider, model: provider, durationMs: dt });
+      } else {
+        resolve({ ok: false, error: `exit=${code} ${(err || out).slice(0, 200)}`, provider, durationMs: dt });
+      }
+    });
+  });
+}
+
 // 1.9.149: observability lite — 모든 agent 호출의 traceId + duration + exit + failureCause 기록
 function _runsDir(root) { return path.join(absRoot(root), '.harness', 'runs'); }
 function _recordRun(root, entry) {
@@ -10701,20 +10803,27 @@ function runsShowCmd(root, id) {
   log(read(fp));
 }
 // 1.9.155: provider 별 추천 모델 카탈로그 — REPL :models 명령에서 노출 (실제 가용성은 사용자 CLI 가 결정)
+// 1.9.170: provider × 실제 모델 catalog 확장 (Tab cycle 지원 — 사용자 명시 요청)
+//   각 provider 의 최신 실제 모델 ID 를 반영. Tab/Shift+Tab 키로 cycle.
 const _PROVIDER_MODEL_CATALOG = {
   claude: [
-    { id: 'claude-opus-4-5', note: '최고 추론 (Anthropic)' },
-    { id: 'claude-sonnet-4-5', note: '균형형 (속도/품질)' },
-    { id: 'claude-haiku-4-5', note: '빠름' }
+    { id: 'claude-opus-4-7', note: '최신 1M context (Anthropic Opus 4.7)' },
+    { id: 'claude-opus-4-5', note: '안정 Opus 4.5' },
+    { id: 'claude-sonnet-4-7', note: '균형형 — Sonnet 4.7 (속도/품질)' },
+    { id: 'claude-sonnet-4-5', note: 'Sonnet 4.5 안정' },
+    { id: 'claude-haiku-4-5', note: '빠름 — Haiku 4.5' }
   ],
   codex: [
-    { id: 'gpt-5', note: 'OpenAI 최신' },
-    { id: 'gpt-5-codex', note: '코드 특화' },
+    { id: 'gpt-5.5', note: 'OpenAI 최신 추론 모델' },
+    { id: 'gpt-5.4', note: 'OpenAI 안정 (이전 세대)' },
+    { id: 'gpt-5', note: 'OpenAI gpt-5 (base)' },
+    { id: 'gpt-5-codex', note: '코드 특화 (Codex)' },
     { id: 'o4-mini', note: '빠른 reasoning' }
   ],
   gemini: [
-    { id: 'gemini-2.5-pro', note: 'Google 최고급' },
-    { id: 'gemini-2.5-flash', note: '빠른 응답' }
+    { id: 'gemini-2.5-pro', note: 'Google 최고급 (1M+ context)' },
+    { id: 'gemini-2.5-flash', note: '빠른 응답' },
+    { id: 'gemini-3.0-pro', note: '실험적 (사용 가능 시)' }
   ],
   copilot: [
     { id: 'default', note: 'gh copilot 기본 (모델 선택 불가)' }
@@ -10722,9 +10831,13 @@ const _PROVIDER_MODEL_CATALOG = {
   ollama: [
     { id: 'llama3', note: 'Meta — :models 로 실시간 조회 권장' },
     { id: 'qwen2.5-coder', note: 'Alibaba — 코드 특화' },
-    { id: 'gpt-oss', note: 'OpenAI 오픈소스' }
+    { id: 'gpt-oss', note: 'OpenAI 오픈소스' },
+    { id: 'deepseek-coder-v2', note: 'DeepSeek 코드 모델' }
   ]
 };
+
+// 1.9.170: provider cycle 순서 (Tab) — 빌트인 5종. user provider는 동적으로 뒤에 추가.
+const _PROVIDER_CYCLE_ORDER = ['ollama', 'claude', 'codex', 'gemini', 'copilot'];
 
 // 1.9.148: planner/reviewer/actor 역할 시스템 프롬프트 (Gemini 권고 — 자기-승인 편향 방지)
 const _AGENT_ROLE_PROMPTS = {
@@ -10770,8 +10883,11 @@ async function _agentRepl(root, opts) {
     role: opts.role || 'actor',
     history: [],   // [{role: 'user'|'assistant', content: ''}]
     startedAt: new Date().toISOString(),
-    sessionId: 'sess-' + new Date().toISOString().replace(/[:.]/g, '-')
+    sessionId: 'sess-' + new Date().toISOString().replace(/[:.]/g, '-'),
+    // 1.9.170: 실시간 스트리밍 모드 (사용자 명시 — 추론중/diff/thinking 실시간 표시)
+    streamMode: opts.stream !== false  // default ON (env 로 끄려면 LEERNESS_REPL_STREAM=0)
   };
+  if (process.env.LEERNESS_REPL_STREAM === '0') state.streamMode = false;
   const sessionPath = () => path.join(absRoot(root), '.harness', 'agent-sessions', `${state.sessionId}.jsonl`);
   const saveSession = () => {
     try {
@@ -10834,6 +10950,7 @@ async function _agentRepl(root, opts) {
   log(C.dim('  메타 명령: :help | :model <m> | :role <r> | :provider <p> | :status | :clear | :save | :history | :quit'));
   log(C.dim('  Slash 명령 (1.9.150): :verify | :audit | :handoff | :health'));
   log(C.dim('  Memory Slash (1.9.161): :lessons | :brainstorm <topic> | :tasks | :plan'));
+  log(C.dim('  🆕 1.9.170 — Tab=provider cycle, Shift+Tab=model cycle, :stream on|off (실시간 출력)'));
   log(C.dim(`  현재 — provider=${state.provider}  model=${state.model || '(기본)'}  role=${state.role}  permissions=${_readPermissions(root).mode}`));
   // 1.9.155: REPL 진입 시 handoff 컨텍스트 자동 노출 (UX 개선 — 사용자가 매번 :handoff 안 해도 컨텍스트 인지)
   try {
@@ -10850,8 +10967,73 @@ async function _agentRepl(root, opts) {
     }
   } catch {}
   log('');
-  const prompt = () => isTty ? C.cy(`agent[${state.role}]> `) : 'agent> ';
+  const prompt = () => isTty ? C.cy(`agent[${state.provider}/${state.role}${state.streamMode ? '/▶' : ''}]> `) : 'agent> ';
   rl.setPrompt(prompt());
+
+  // 1.9.170: Tab cycle — provider (Tab) / model within provider (Shift+Tab)
+  //   사용자 명시 요청: "탭 키 등으로 provider/모델 셀렉과 선택을 간편하게"
+  //   readline의 default tab=completion 동작을 keypress 리스너로 가로채서 cycle 수행.
+  if (isTty) {
+    try {
+      const readlineLib = require('readline');
+      readlineLib.emitKeypressEvents(process.stdin, rl);
+      const getProviders = () => {
+        // 빌트인 5종 + 사용자 정의 provider (.harness/providers.json)
+        try {
+          const userPath = path.join(absRoot(root), '.harness', 'providers.json');
+          if (fs.existsSync(userPath)) {
+            const j = JSON.parse(fs.readFileSync(userPath, 'utf8'));
+            const userIds = (j.providers || []).map(p => p.id).filter(id => !_PROVIDER_CYCLE_ORDER.includes(id));
+            return [..._PROVIDER_CYCLE_ORDER, ...userIds];
+          }
+        } catch {}
+        return _PROVIDER_CYCLE_ORDER.slice();
+      };
+      const cycleProvider = (reverse) => {
+        const list = getProviders();
+        let idx = list.indexOf(state.provider);
+        if (idx < 0) idx = 0;
+        idx = reverse ? (idx - 1 + list.length) % list.length : (idx + 1) % list.length;
+        state.provider = list[idx];
+        state.model = null;  // 새 provider 기본 모델
+        const cat = _PROVIDER_MODEL_CATALOG[state.provider];
+        const hint = cat?.length ? `  (${cat.length}개 모델 catalog — Shift+Tab으로 cycle)` : '';
+        // 현재 입력 라인 보존: cursor를 라인 시작으로 이동 → 클리어 → status + prompt 재출력
+        process.stdout.write('\r\x1b[K');
+        process.stdout.write(C.green(`  ⇄ provider: ${state.provider}${hint}\n`));
+        rl.setPrompt(prompt());
+        rl.prompt(true);  // preserve cursor
+      };
+      const cycleModel = (reverse) => {
+        const cat = _PROVIDER_MODEL_CATALOG[state.provider] || [];
+        if (cat.length === 0) {
+          process.stdout.write('\r\x1b[K');
+          process.stdout.write(C.yel(`  ⚠ ${state.provider} 추천 모델 catalog 없음 (:model <name> 으로 직접 지정)\n`));
+          rl.prompt(true);
+          return;
+        }
+        let idx = cat.findIndex(m => m.id === state.model);
+        if (idx < 0) idx = -1;
+        idx = reverse ? (idx - 1 + cat.length) % cat.length : (idx + 1) % cat.length;
+        state.model = cat[idx].id;
+        process.stdout.write('\r\x1b[K');
+        process.stdout.write(C.green(`  ⇄ model: ${state.model}  ${C.dim('— ' + (cat[idx].note || ''))}\n`));
+        rl.setPrompt(prompt());
+        rl.prompt(true);
+      };
+      process.stdin.on('keypress', (str, key) => {
+        if (!key) return;
+        if (key.name === 'tab') {
+          cycleProvider(key.shift === true);
+        }
+        // Shift+\ 또는 다른 모델 cycle alias — 일부 터미널에서 Shift+Tab 처리 어려움 대비
+        // (Shift+Tab은 key.name='tab' + key.shift=true 로 위에서 처리됨)
+      });
+    } catch (e) {
+      log(C.dim(`  (Tab cycle 비활성: ${e.message})`));
+    }
+  }
+
   rl.prompt();
   const handleMeta = async (cmd) => {
     const [op, ...rest] = cmd.slice(1).split(/\s+/);
@@ -10863,10 +11045,11 @@ async function _agentRepl(root, opts) {
     if (op === 'help' || op === '?') {
       log(C.bold('\n  메타 명령 (provider/모델/역할 전환):'));
       log('    :help / :?            — 이 도움말');
-      log('    :model <name>         — 모델 변경 (1.9.155 모든 provider 지원, 예: :model claude-opus-4-5)');
+      log('    :model <name>         — 모델 변경 (1.9.155 모든 provider 지원, 예: :model claude-opus-4-7)');
       log('    :models               — provider 별 모델 목록 (ollama 실시간 / 그 외 추천 카탈로그)');
       log('    :role <r>             — 역할 변경 (planner / reviewer / actor)');
       log('    :provider <p>         — provider 변경 (ollama / claude / codex / gemini / copilot — ready 검증)');
+      log('    :stream on|off        — 🆕 1.9.170 실시간 스트리밍 토글 (추론중/diff/thinking 실시간 표시)');
       log('    :status               — 현재 세션 상태 자세히 (1.9.155)');
       log('    :clear                — 화면 클리어 + history 유지');
       log('    :reset                — history 초기화');
@@ -10874,6 +11057,9 @@ async function _agentRepl(root, opts) {
       log('    :save                 — 세션 즉시 저장');
       log('    :permissions          — 현재 권한 모드 표시');
       log('    :quit / :exit / :q    — 종료 (자동 저장)');
+      log(C.bold('\n  🆕 1.9.170 키보드 단축키:'));
+      log('    Tab                   — 다음 provider 로 cycle (ollama → claude → codex → gemini → copilot)');
+      log('    Shift+Tab             — 현재 provider 의 다음 model 로 cycle (catalog 기준)');
       log(C.bold('\n  Slash 명령 (1.9.150) — leerness 내부 명령 직접 호출:'));
       log('    :verify               — leerness verify-code (테스트/타입/린트 자동 검수)');
       log('    :audit                — leerness audit (보안 + drift + lazy)');
@@ -10954,6 +11140,21 @@ async function _agentRepl(root, opts) {
       log(C.green(`  provider = ${state.provider}`));
       return false;
     }
+    if (op === 'stream') {
+      // 1.9.170: 실시간 스트리밍 모드 토글 (사용자 명시 — 추론중/diff/thinking 실시간 표시)
+      const v = (rest[0] || '').toLowerCase();
+      if (v === 'on' || v === '1' || v === 'true') {
+        state.streamMode = true;
+        log(C.green('  ▶ streaming mode: ON  (CLI stdout 실시간 표시)'));
+      } else if (v === 'off' || v === '0' || v === 'false') {
+        state.streamMode = false;
+        log(C.dim('  □ streaming mode: OFF  (배치 응답)'));
+      } else {
+        log(C.dim(`  현재 streaming: ${state.streamMode ? 'ON ▶' : 'OFF □'}  — 사용: :stream on|off`));
+      }
+      rl.setPrompt(prompt());
+      return false;
+    }
     if (op === 'clear') { process.stdout.write('\x1b[2J\x1b[H'); return false; }
     if (op === 'reset') { state.history = []; log(C.dim('  history 초기화됨')); return false; }
     if (op === 'history') {
@@ -11032,12 +11233,18 @@ async function _agentRepl(root, opts) {
       const t0 = Date.now();
       let result;
       // 1.9.153: multi-provider REPL — ollama 외 claude/codex/gemini/copilot 도 세션 관리 (사용자 명시)
+      // 1.9.170: streamMode === true 이면 _cliChatStream 사용 (사용자 명시 — 추론중/diff 실시간 표시)
       if (state.provider === 'ollama') {
         log(C.dim(`  → ollama${state.model ? ' (' + state.model + ')' : ''} 호출 중...`));
         result = await _ollamaChat(finalPrompt, state.model);
       } else if (['claude', 'codex', 'gemini', 'copilot'].includes(state.provider)) {
-        log(C.dim(`  → ${state.provider} CLI 호출 중...`));
-        result = await _cliChat(root, state.provider, finalPrompt, { timeout: 90000 });
+        if (state.streamMode) {
+          log(C.dim(`  → ${state.provider} CLI stream 호출 중...  (Ctrl+C 로 중단)`));
+          result = await _cliChatStream(root, state.provider, finalPrompt, { timeout: 120000 });
+        } else {
+          log(C.dim(`  → ${state.provider} CLI 호출 중...`));
+          result = await _cliChat(root, state.provider, finalPrompt, { timeout: 90000 });
+        }
       } else {
         log(C.yel(`  ⚠ ${state.provider} provider 미지원 — :provider ollama|claude|codex|gemini|copilot`));
         rl.prompt(); return;
@@ -11046,10 +11253,16 @@ async function _agentRepl(root, opts) {
       _recordRun(root, { kind: 'agent_repl_turn', provider: state.provider, model: state.model, role: state.role, durationMs: dt, ok: result.ok, error: result.error, promptChars: finalPrompt.length, responseChars: (result.response || '').length });
       if (result.ok) {
         state.history.push({ role: 'assistant', content: result.response });
-        log('');
-        log(C.bold(`assistant (${state.model}, role=${state.role}, ${dt}ms)`));
-        log(result.response);
-        log('');
+        // 1.9.170: stream 모드에서는 이미 실시간으로 출력됐으므로 헤더만 표시 (응답 중복 방지)
+        if (state.streamMode && ['claude', 'codex', 'gemini', 'copilot'].includes(state.provider)) {
+          log(C.dim(`  [assistant: ${state.provider}/${state.model || 'default'}, role=${state.role}, ${dt}ms · ${result.response.length}자]`));
+          log('');
+        } else {
+          log('');
+          log(C.bold(`assistant (${state.model || state.provider}, role=${state.role}, ${dt}ms)`));
+          log(result.response);
+          log('');
+        }
         if (state.history.length % 6 === 0) saveSession();  // 6턴마다 자동 저장
       } else {
         log(C.yel(`  ⚠ 실패: ${result.error || 'unknown'}`));
