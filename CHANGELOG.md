@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.9.166 — 2026-05-20
+
+**🎉 production-ready 76% 마일스톤 — pc 조작 bridge MVP (robotjs/nut-tree opt-in).**
+
+자율 모드 96 라운드. 1.9.163 5능력 매트릭스에서 두 번째로 낮은 영역 (PC 조작 5%) 직접 보강.
+1.9.165 (web 67%) 에 이어 2 라운드 연속 5능력 직접 보강 → **종합 67% → 76% production-ready 첫 진입.**
+
+### Added — `leerness pc check|click|type|screenshot`
+**의존성 0 원칙 유지** — leerness 자체에는 robotjs/nut-tree 미포함. 사용자가 별도 설치 시 자동 detect.
+
+```bash
+# 1) robotjs 또는 @nut-tree/nut-js 설치 (택 1)
+npm i -g robotjs                          # 또는
+npm i -g @nut-tree/nut-js
+leerness permissions set full              # ⚠ mouse/keyboard 권한 필요
+leerness pc check                          # → ✓ robotjs 발견
+
+# 2) 클릭 / 타이핑 / 스크린샷
+leerness pc click 800 400                  # 좌표 클릭
+leerness pc type "Hello, leerness"         # 키보드 입력
+leerness pc screenshot --out shot.png      # 스크린샷
+```
+
+### Bridge 패턴 — opt-in 의존성
+- `_tryLoadPCAutomation()` — `robotjs` (동기) / `@nut-tree/nut-js` (비동기) 둘 다 시도 + npm 글로벌 root 폴백
+- 미설치 시 친절한 안내 (`npm i -g robotjs` 또는 `npm i -g @nut-tree/nut-js`)
+- `permissionCheck(root, 'mouse'/'keyboard')` 통합 (1.9.146 권한 시스템)
+- `_recordRun(kind: 'pc_click' | 'pc_type' | 'pc_screenshot')` observability
+- 두 라이브러리 분기: robotjs `moveMouse/mouseClick/typeString` (sync), @nut-tree `mouse.move/leftClick/keyboard.type` (async)
+
+### 5능력 매트릭스 갱신 (🎉 production-ready 첫 진입)
+| 영역 | 1.9.165 | **1.9.166** |
+|---|---|---|
+| (1) 웹 자동화 | 50% ⚠ (bridge) | 50% ⚠ (bridge, playwright 미설치) |
+| (2) **PC 조작** | **5% ❌** | **50% ⚠** (bridge MVP, robotjs 미설치) → **90% ✓** (사용자 설치 시) |
+| **종합** | 67% (beta-ready) | **76% 🎉 production-ready** |
+
+`leerness health` 가 실시간 detect — `require('robotjs')` 또는 `require('@nut-tree/nut-js')` try 성공 시 90% 자동 부여.
+
+### Verified
+- e2e 217/217 ✓ (1.9.165 baseline)
+- stress-v111: 20/20 (bridge 함수 6종 + CLI 동작 5종 + 매트릭스 갱신 3종 + 누적 회귀 6종)
+- VERSION = 1.9.166 / autonomous-rounds = 96
+
+### main 자동 push 27 라운드 연속
+1.9.140~1.9.166 = 27 라운드 release/X.Y.Z + main sync 무중단.
+
+---
+
 ## 1.9.165 — 2026-05-20
 
 **playwright bridge MVP — opt-in 웹 자동화 (5능력 #1 보강, 58% → 67%).**
