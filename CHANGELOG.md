@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.9.162 — 2026-05-20
+
+**handoff 헤드라인 9번째 요소 — REPL slash 사용량 (24h) 노출.**
+
+자율 모드 92 라운드. 1.9.149 observability `runs/*.jsonl` 의 실용화 — REPL 활용도 가시화.
+
+### Added — 헤드라인 `🪄 slash 24h N회`
+- 1.9.150/161 REPL slash 명령 8종 (`:verify` `:audit` `:handoff` `:health` `:lessons` `:brainstorm` `:tasks` `:plan`) 호출 빈도
+- `.harness/runs/*.jsonl` 에서 `kind: 'agent_repl_slash'` + 24h 이내 entry 카운트
+- 최근 200 파일만 스캔 (성능 보호)
+- 슬래시 호출 없으면 노출 안 함 (노이즈 최소화)
+
+### Headline 진화
+| 요소 | 도입 |
+|---|---|
+| drift level | 1.9.81 |
+| 🔒 보안 | 1.9.81 |
+| 🔌 MCP N회 | 1.9.81 |
+| 📒 skill query | 1.9.81 |
+| 📚 N skills | 1.9.81 |
+| ⚕ health | 1.9.93 |
+| 🧠 mem T/D/R/P/L | 1.9.113 |
+| 🤖 agents N | 1.9.152 |
+| **🪄 slash 24h** | **1.9.162** |
+
+### Use Cases
+- 메인 에이전트가 매 세션 시작 시 "어제 REPL을 N회 사용했군 → 메모리 누적 신호" 즉시 인지
+- 사용자가 leerness 도입 효과 추이 가시화
+- observability lite (1.9.149) 의 첫 실용 application
+
+### Verified
+- e2e 217/217 ✓
+- stress-v107: 13/13 (헤드라인 9번째 6종 + 누적 회귀 7종)
+- VERSION = 1.9.162 / autonomous-rounds = 92
+
+---
+
 ## 1.9.161 — 2026-05-20
 
 **REPL Memory Slash 4종 추가 — Memory Surface 즉시 조회 (1.9.150 slash 패턴 확장).**

@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.161';
+const VERSION = '1.9.162';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -2965,10 +2965,30 @@ function handoff(root) {
           parts.push(`🤖 agents ${ready.length} (${ready.map(c => c.id).join(',')})`);
         }
       } catch {}
+      // 9) 1.9.162: REPL slash 사용량 (24h) — 1.9.149 observability runs/*.jsonl 활용
+      // REPL slash 명령 (1.9.150 + 1.9.161 = 8종) 사용 빈도 노출 → 사용자가 REPL 활용도 인지
+      try {
+        const runsDir = _runsDir(root);
+        if (exists(runsDir)) {
+          const cutoff = Date.now() - 24 * 3600 * 1000;
+          const files = fs.readdirSync(runsDir).filter(f => f.endsWith('.jsonl'));
+          let slashCount = 0;
+          for (const f of files.slice(-200)) {  // 최근 200 파일만 (성능)
+            try {
+              const txt = read(path.join(runsDir, f));
+              for (const line of txt.split('\n').filter(Boolean)) {
+                const j = JSON.parse(line);
+                if (j.kind === 'agent_repl_slash' && j.at && new Date(j.at).getTime() >= cutoff) slashCount++;
+              }
+            } catch {}
+          }
+          if (slashCount > 0) parts.push(`🪄 slash 24h ${slashCount}회`);
+        }
+      } catch {}
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113/152): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162): ${parts.join(' · ')}`));
       }
     } catch {}
   }
