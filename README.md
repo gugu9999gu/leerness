@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.174-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v119-20%2F20-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-53-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-104-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-35_rounds-success)]() [![repl-perm](https://img.shields.io/badge/REPL_:permissions-즉시_변경_가능-success)]() [![lsp-multi](https://img.shields.io/badge/LSP_다국어-JS%2FPython%2FGo%2FRust%2FJava-success)]() [![mcp-bridge](https://img.shields.io/badge/MCP_bridge-web%2Fpc%2Flsp_노출-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.175-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v120-17%2F17-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-53-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-105-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-36_rounds-success)]() [![repl-slash](https://img.shields.io/badge/REPL_slash-:web%2F:pc%2F:lsp_즉시_호출-success)]() [![repl-perm](https://img.shields.io/badge/REPL_:permissions-즉시_변경-success)]() [![lsp-multi](https://img.shields.io/badge/LSP_다국어-JS%2FPython%2FGo%2FRust%2FJava-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.174  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.175  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🔐 install 권한 prompt 제거 · REPL :permissions 즉시 변경    ║
+  ║  🌉 REPL :web/:pc/:lsp slash — Bridge 3종 즉시 호출            ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

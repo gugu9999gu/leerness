@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.174';
+const VERSION = '1.9.175';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -11006,6 +11006,7 @@ async function _agentRepl(root, opts) {
   log(C.dim('  Memory Slash (1.9.161): :lessons | :brainstorm <topic> | :tasks | :plan'));
   log(C.dim('  🆕 1.9.170 — Tab=provider cycle, Shift+Tab=model cycle, :stream on|off (실시간 출력)'));
   log(C.dim('  🆕 1.9.174 — :permissions [basic|extended|full] 로 즉시 권한 변경 (default: basic 안전)'));
+  log(C.dim('  🆕 1.9.175 — :web / :pc / :lsp 으로 Bridge 3종 REPL 안에서 즉시 호출 (코드 분석/웹/PC)'));
   log(C.dim(`  현재 — provider=${state.provider}  model=${state.model || '(기본)'}  role=${state.role}  permissions=${_readPermissions(root).mode}`));
   // 1.9.155: REPL 진입 시 handoff 컨텍스트 자동 노출 (UX 개선 — 사용자가 매번 :handoff 안 해도 컨텍스트 인지)
   try {
@@ -11126,6 +11127,17 @@ async function _agentRepl(root, opts) {
       log('    :brainstorm <topic>   — leerness brainstorm "topic" (관련 컨텍스트 회수)');
       log('    :tasks                — leerness task list (현재 task 상태)');
       log('    :plan                 — leerness plan show (현재 milestone)');
+      log(C.bold('\n  🆕 Bridge Slash (1.9.175) — REPL 안에서 즉시 Bridge 호출:'));
+      log('    :web check                            — playwright 설치 확인 (opt-in)');
+      log('    :web screenshot <url> [--out f.png]   — URL → PNG');
+      log('    :web extract <url> --selector "css"   — DOM 텍스트 추출');
+      log('    :pc check                             — robotjs/nut-tree 설치 확인 (⚠ full 권한)');
+      log('    :pc click <x> <y>                     — 좌표 클릭');
+      log('    :pc type "<text>"                     — 키보드 입력');
+      log('    :pc screenshot --out shot.png         — PC 화면 캡처');
+      log('    :lsp check                            — typescript 설치 + 다국어 fallback');
+      log('    :lsp symbols <file>                   — 심볼 추출 (JS/TS/Py/Go/Rust/Java)');
+      log('    :lsp references <name> [--in <dir>]   — 심볼 참조 검색');
       return false;
     }
     if (op === 'model') {
@@ -11272,6 +11284,39 @@ async function _agentRepl(root, opts) {
       log('');
       return false;
     }
+    // 1.9.175: Bridge 3종 slash — :web / :pc / :lsp (REPL 안에서 즉시 Bridge 호출)
+    //   사용 예:
+    //     :web check                              — playwright 설치 확인
+    //     :web screenshot https://example.com     — URL → PNG
+    //     :pc check                               — robotjs 설치 확인
+    //     :pc click 800 400                       — 좌표 클릭 (full 권한 필요)
+    //     :lsp symbols src/api.ts                 — 파일 심볼 추출
+    //     :lsp references myFunc --in src         — 심볼 참조 검색
+    if (op === 'web' || op === 'pc' || op === 'lsp') {
+      const subParts = rest.length ? rest : ['check'];  // 인자 없으면 check 기본
+      const cliArgs = [op, ...subParts];
+      // permissions 사전 안내 (full 모드 필요한 sub 만)
+      if (op === 'pc' && ['click', 'type', 'screenshot'].includes(subParts[0])) {
+        const p = _readPermissions(root);
+        if (p.mode !== 'full') {
+          log(C.yel(`  ⚠ :pc ${subParts[0]} 은 permissions=full 필요 (현재: ${p.mode})`));
+          log(C.dim(`     :permissions full  로 즉시 변경 가능 (1.9.174)`));
+          return false;
+        }
+      }
+      log(C.dim(`  → leerness ${cliArgs.join(' ')}`));
+      const t0 = Date.now();
+      const r = runCommandSafe(process.execPath, [__filename, ...cliArgs, '--path', root], {
+        cwd: root, root, timeout: 60000, kind: 'agent_repl_slash', label: `repl-${op}`,
+        env: { LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
+      });
+      const dt = Date.now() - t0;
+      if (r.stdout) log(r.stdout.trim().split('\n').slice(0, 50).join('\n'));
+      if (r.status === 0) log(C.green(`  ✓ :${op} ${subParts[0] || ''} 완료 (${dt}ms)`));
+      else log(C.yel(`  ⚠ :${op} 실패 (exit ${r.status}, ${dt}ms)`));
+      return false;
+    }
+
     // 1.9.150: leerness 내부 명령 slash-commands — :verify / :audit / :handoff / :health
     // 1.9.161: Memory Surface 조회 slash 추가 — :lessons / :brainstorm / :tasks / :plan
     if (op === 'verify' || op === 'audit' || op === 'handoff' || op === 'health'

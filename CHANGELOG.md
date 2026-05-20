@@ -1,5 +1,66 @@
 # Changelog
 
+## 1.9.175 — 2026-05-21
+
+**🌉 REPL Bridge Slash 3종 — `:web` / `:pc` / `:lsp` 즉시 호출.**
+
+자율 모드 105 라운드. 1.9.165~167 Bridge 3종이 1.9.168 MCP로 외부 AI 직접 호출 가능. **1.9.175: REPL 안에서도 직접 호출 가능** — 사용자 + AI 가 같은 REPL 세션에서 코드 분석/웹/PC 자동화 즉시 사용.
+
+### 사용 예시
+```
+agent[claude/actor/▶]> :lsp symbols src/api.ts
+  → leerness lsp symbols src/api.ts
+# leerness lsp symbols (1.9.173 다국어)
+file: src/api.ts  · lang: javascript
+mode: typescript-compiler · 24 symbols · 12ms
+      3:function   parseRequest
+      8:class      User
+     ...
+  ✓ :lsp symbols 완료 (132ms)
+
+agent[claude/actor/▶]> :web screenshot https://example.com --out shot.png
+  → leerness web screenshot https://example.com --out shot.png
+✓ screenshot saved: shot.png · 1842ms
+  ✓ :web screenshot 완료 (2014ms)
+
+agent[claude/actor/▶]> :pc click 800 400
+  ⚠ :pc click 은 permissions=full 필요 (현재: basic)
+     :permissions full  로 즉시 변경 가능 (1.9.174)
+
+agent[claude/actor/▶]> :permissions full
+  ✓ 권한 모드 변경: full
+agent[claude/actor/▶]> :pc click 800 400
+  ✓ click (800, 400) — 23ms
+  ✓ :pc click 완료 (35ms)
+```
+
+### 통합 흐름 — 사용자 명시 4 라운드 누적
+| 라운드 | 강화 |
+|---|---|
+| 1.9.170 | Tab/Shift+Tab cycle + 실시간 스트리밍 |
+| 1.9.172 | 스트리밍 spinner + tool_use + diff 색깔 |
+| 1.9.174 | install 권한 prompt 제거 + REPL `:permissions` 변경 |
+| **1.9.175** | **REPL `:web` / `:pc` / `:lsp` slash 3종 즉시 호출** |
+
+→ **REPL 안에서 leerness 의 모든 capability 사용 가능** (AI 대화 + 코드 분석 + 웹 + PC + 권한 변경, 한 세션).
+
+### 위험 sub 사전 권한 검사
+`:pc click/type/screenshot` 시 `permissions !== 'full'` 이면 즉시 경고 + 변경 안내 (1.9.174 `:permissions full` 연동).
+
+### 구현
+- `op === 'web' || op === 'pc' || op === 'lsp'` 핸들러 추가 (Memory slash 분기 직전)
+- `subParts = rest.length ? rest : ['check']` (인자 없으면 check 기본)
+- `runCommandSafe(process.execPath, [__filename, ...cliArgs, '--path', root], ...)` 통합 호출
+- observability: `kind: 'agent_repl_slash'`, `label: 'repl-<op>'`
+- stdout 50줄 까지 표시 (Memory slash 30줄보다 확장 — symbol/diff 출력 용도)
+
+### Verified
+- e2e 217/217 baseline 유지
+- stress-v120: **17/17** (slash 핸들러 4 + :pc 권한 사전 검사 2 + :help/환영 5 + 누적 회귀 6)
+- VERSION = 1.9.175 / autonomous-rounds = 105 / main 자동 push 36 라운드 연속
+
+---
+
 ## 1.9.174 — 2026-05-21
 
 **🔐 사용자 명시 — install 권한 prompt 제거 + REPL `:permissions` 즉시 변경.**
