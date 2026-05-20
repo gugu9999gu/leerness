@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.135';
+const VERSION = '1.9.136';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -336,6 +336,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.133+ \`brainstorm\` 텍스트 모드 lessonsExplicit / planMilestones display 추가 — 1.9.116에서 데이터 수집은 했지만 display 누락된 pre-existing gap fix.
 - 1.9.134+ \`leerness task list --json\` + MCP **41 도구** (\`leerness_task_list\`) — progress-tracker.md task 전체 JSON 조회 + \`--status\` 필터. Task surface CRUD MCP 완전 완성 (add/list/update/drop).
 - 1.9.135+ MCP **42 도구** (\`leerness_rule_remove\`) — rules.md 에서 특정 rule 제거 + archive 보존. **5 surface CRUD MCP 완전 완성** (task/decision/lesson/plan/rule 모두 add/list/delete MCP 노출).
+- 1.9.136+ MCP \`leerness_drift_check\` JSON 응답 fix — \`--json\` 플래그 자동 추가하여 외부 AI가 구조화된 drift 신호 회수 (score, level, signals[], healthy).
 
 ---
 
@@ -4294,7 +4295,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.135+ MCP 42 rule_remove (5 surface CRUD 완성) — 65 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.136+ MCP drift_check JSON fix — 66 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -8573,7 +8574,7 @@ function mcpServeCmd(root) {
   // 노출할 leerness 도구 목록
   const TOOLS = [
     { name: 'leerness_handoff', description: '워크스페이스 컨텍스트(plan/progress/decisions) 적재', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_drift_check', description: 'AI 에이전트 leerness 미사용 drift 자동 감지 (4 신호 + 4단계 레벨)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_drift_check', description: '1.9.136 — AI 에이전트 leerness 미사용 drift 자동 감지 JSON ({ root, score, level, signals[], healthy }). 5+ 신호 + 4단계 레벨 (🟢 healthy / 🟡 warning / 🟠 caution / 🔴 critical). 보안 신호 통합 (1.9.78)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_audit', description: '1.9.102 — 워크스페이스 일관성 감사 JSON (warnings/failures/fixed/healthy + findings[]. kind 11종: design_dup/design_system_default/reuse_map_empty/milestone_unlinked/handoff_not_generated/current_state_stale/readme_version_mismatch/npm_cve/gitignore_missing_secrets/env_keys_missing/strict_promoted)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, fix: { type: 'boolean' }, strict: { type: 'boolean' } } } },
     { name: 'leerness_verify_claim', description: 'AI 거짓 완료 자동 검증 (evidence 파일 + 실 테스트 실행)', inputSchema: { type: 'object', properties: { taskId: { type: 'string' }, path: { type: 'string' }, runTests: { type: 'boolean' }, strictClaims: { type: 'boolean' } }, required: ['taskId'] } },
     { name: 'leerness_contract_verify', description: '명세 ↔ 구현 함수/필드 일치 자동 검사', inputSchema: { type: 'object', properties: { spec: { type: 'string' }, impl: { type: 'string' } }, required: ['spec', 'impl'] } },
@@ -8646,7 +8647,7 @@ function mcpServeCmd(root) {
       try {
         switch (name) {
           case 'leerness_handoff':         cliArgs = ['handoff', targetPath, '--compact', '--no-drift-check']; break;
-          case 'leerness_drift_check':     cliArgs = ['drift', 'check', targetPath]; break;
+          case 'leerness_drift_check':     cliArgs = ['drift', 'check', targetPath, '--json']; break;
           case 'leerness_audit':           cliArgs = ['audit', targetPath, '--json', ...(args.fix ? ['--fix'] : []), ...(args.strict ? ['--strict'] : [])]; break;
           case 'leerness_verify_claim':    cliArgs = ['verify-claim', args.taskId, '--path', targetPath, ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : [])]; break;
           case 'leerness_contract_verify': cliArgs = ['contract', 'verify', args.spec, args.impl]; break;

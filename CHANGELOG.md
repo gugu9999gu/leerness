@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.136 — 2026-05-20
+
+**MCP `leerness_drift_check` JSON 응답 fix** — drift check CLI 는 `--json` 옵션을 지원하지만 MCP 라우팅이 plain 텍스트를 반환하던 버그 fix.
+
+### Fixed — leerness_drift_check JSON 응답
+- MCP 라우팅에 `--json` 플래그 자동 추가
+- 응답 schema: `{ root, score, level, signals[], healthy }`
+- 외부 AI 가 drift 상태를 정확한 구조화 데이터로 회수
+
+### MCP 도구 JSON 일관성
+이제 모든 MCP 도구가 plain 텍스트 대신 JSON 응답:
+- handoff, health, audit, session_close, lazy_detect, benchmark, retro, lessons, memory_status, brainstorm, **drift_check (1.9.136 fix)**, 외 listing 도구 다수
+
 ## 1.9.135 — 2026-05-20
 
 **MCP 42번째 도구 `leerness_rule_remove`** — Rule surface CRUD MCP 완전 완성.
