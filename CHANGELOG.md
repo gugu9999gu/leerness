@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.9.171 — 2026-05-21
+
+**AGENTS.md / CLAUDE.md / session-workflow.md 1.9.88~170 누적 갱신 (drift 차단).**
+
+자율 모드 101 라운드. 1.9.87 마지막 metadata 갱신 후 84 라운드 간격 — 다음 세션에서 새 기능 (REPL/Bridge/Tab cycle/53 MCP/6 능력) 인지 못 할 위험 차단.
+
+### Updated
+- **session-workflow.md**: 1.9.140~170 31 라운드 누적 변경사항 추가
+  - release sync-main 자동 (31 라운드 연속 main 자동 push)
+  - Feature Causality Graph (1.9.141~143)
+  - env detect (1.9.145)
+  - CLI 에이전트 모드 + 3-tier 권한 시스템 (1.9.146)
+  - REPL agent + Sandboxing runCommandSafe (1.9.149~150)
+  - REPL UX 강화 (1.9.151~155)
+  - agents multi --execute + consensus (1.9.156)
+  - Provider Registry CRUD CLI + MCP **50 도구 마일스톤** (1.9.157~159)
+  - 90 라운드 마일스톤 (1.9.160)
+  - REPL slash 4종 (1.9.161~162)
+  - 5능력 매트릭스 health 통합 (1.9.163)
+  - leerness which 진단 (1.9.164)
+  - web/pc/lsp bridge 3종 (1.9.165~167)
+  - MCP **53 도구 마일스톤** + Bridge 외부 노출 (1.9.168)
+  - --include explicit-only hotfix (1.9.169)
+  - **100 라운드 + Tab cycle + 실시간 스트리밍** (1.9.170)
+
+- **AGENTS.md**: 
+  - "REPL Agent + Bridge 명령 (1.9.149~170)" 섹션 신설 (자연어 매핑 11종)
+  - "6 능력 매트릭스 (1.9.167+)" 섹션 — overallScore + production-ready/beta-ready/mvp 라벨
+
+- **CLAUDE.md**: 
+  - REPL Agent 100 라운드 자율 마일스톤 섹션 (Tab/Shift+Tab/스트리밍)
+  - Bridge 3종 opt-in 안내
+  - 6 능력 매트릭스 72% production-ready
+
+### 자연어 매핑 신규 추가 (AGENTS.md)
+| 사용자 발화 | 즉시 실행 |
+|---|---|
+| "에이전트 켜줘 / REPL 모드" | `leerness agent .` |
+| "Claude/Codex 대화" | `leerness agent . --provider claude` |
+| "다른 provider / Tab" | REPL에서 `Tab` / `Shift+Tab` |
+| "웹 스크린샷 / URL 캡처" | `leerness web screenshot <url>` |
+| "마우스 클릭 / 자동화" | `leerness pc click <x> <y>` |
+| "함수 찾아줘 / 심볼 추출" | `leerness lsp symbols <file>` |
+| "참조 검색" | `leerness lsp references <name> --in <dir>` |
+| "권한 모드 확인" | `leerness permissions list` |
+| "최신 버전 작동 확인" | `leerness which` |
+
+### Verified
+- e2e 217/217 baseline 유지
+- stress-v116: **20/20** (session-workflow 6 + AGENTS 4 + CLAUDE 3 + 누적 회귀 7)
+- VERSION = 1.9.171 / autonomous-rounds = 101 / main 자동 push 32 라운드 연속
+
+---
+
 ## 1.9.170 — 2026-05-21 — 🎉 100 라운드 자율 마일스톤
 
 **사용자 명시 요청 2종: REPL Tab cycle provider/model + 실시간 스트리밍.**
