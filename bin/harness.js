@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.168';
+const VERSION = '1.9.169';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -6343,9 +6343,16 @@ function _retroOneLine(agg) {
 }
 
 // 1.9.15: --all-apps / --include 경로 모음
+// 1.9.169 fix: --include 명시되면 cwd 자동 추가 안 함 (explicit-only).
+//   기존: cwd/.harness 자동 추가 → 잔존 .harness 시 의도치 않은 카운트 증가 (e2e flake 원인)
+//   변경: --include 시 사용자가 명시한 경로만 사용. --all-apps 단독은 기존 동작 유지.
 function _collectWorkspacePaths(rootBase) {
   const set = new Set();
-  if (exists(path.join(rootBase, '.harness'))) set.add(rootBase);
+  const include = arg('--include', null);
+  // --include 명시 시 cwd 자동 추가 스킵 (explicit-only 보장)
+  if (!include) {
+    if (exists(path.join(rootBase, '.harness'))) set.add(rootBase);
+  }
   if (has('--all-apps')) {
     const baseCandidates = [path.resolve(rootBase, '_apps'), path.resolve(rootBase, '..', '_apps')];
     for (const base of baseCandidates) {
@@ -6360,7 +6367,6 @@ function _collectWorkspacePaths(rootBase) {
       }
     }
   }
-  const include = arg('--include', null);
   if (include) {
     for (const p of String(include).split(',')) {
       const abs = path.resolve(p.trim());

@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.9.169 — 2026-05-20
+
+**🔧 Hotfix — `_collectWorkspacePaths()` --include 명시 시 cwd 자동 추가 안 함.**
+
+자율 모드 99 라운드. 1.9.168 release 후 발견된 e2e flake (209/217) 의 영구 해결.
+
+### 문제 진단
+- `cwd: os.tmpdir()` 명령 실행 시 leerness가 cwd의 `.harness` 자동 발견 → 카운트 +1
+- `os.tmpdir()` 에 잔존 `.harness` 디렉토리 존재 시 `--include` 명시했어도 cwd 추가됨
+- 결과: `brainstorm --include p1,p2` 호출 시 "3개 프로젝트" (cwd + p1 + p2) 잘못 카운트
+- 1.9.168 회귀 아님 — 1.9.15 이래 누적된 잠재 버그 (환경 의존 flake)
+- 24,877개 누적 leerness-* 임시 디렉토리 + 잔존 `Temp/.harness` 가 트리거
+
+### Fix — _collectWorkspacePaths() (harness.js, 1.9.15 도입 함수)
+```javascript
+function _collectWorkspacePaths(rootBase) {
+  const set = new Set();
+  const include = arg('--include', null);
+  // 1.9.169 fix: --include 명시 시 cwd 자동 추가 스킵 (explicit-only)
+  if (!include) {
+    if (exists(path.join(rootBase, '.harness'))) set.add(rootBase);
+  }
+  // ... --all-apps 동작 유지
+  if (include) { /* explicit paths only */ }
+  return Array.from(set);
+}
+```
+
+**원칙**: `--include` 가 명시되면 사용자가 의도한 explicit 경로만 사용. `--all-apps` 단독 또는 인자 없는 경우 기존 동작 (cwd 자동 추가) 유지.
+
+### 영향 범위
+- `brainstorm --include`, `insights --include`, `handoff --include`, `reuse-map --include`, `retro --include`
+- 모든 `--include` / 다중 프로젝트 명령 정확한 카운트
+
+### Verified
+- e2e **217/217 ✓** (1.9.168 시점 209/217 → 1.9.169 217/217 회복)
+- stress-v114: 14/14 (hotfix 4 + e2e 회복 3 + 누적 회귀 7)
+- 진단 검증: `os.tmpdir()/.harness` 시뮬 환경에서도 정확 카운트
+- VERSION = 1.9.169 / autonomous-rounds = 99 / main 자동 push 30 라운드 연속
+
+### 다음 라운드 (1.9.170) — 🎉 100 라운드 마일스톤 도달
+
+---
+
 ## 1.9.168 — 2026-05-20
 
 **MCP bridge 3종 노출 (web/pc/lsp) — 50 → 53 도구 + 외부 AI 자동화 능력 직결.**
