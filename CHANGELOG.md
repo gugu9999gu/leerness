@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.9.160 — 2026-05-20
+
+**🎉 자율 모드 90 라운드 마일스톤 + `provider sync` (외부 catalog 자동 동기화).**
+
+### Added — `leerness provider sync <url>` (1.9.157 Provider Registry 확장)
+- 외부 URL 에서 provider catalog 자동 가져오기 — OpenRouter llms.txt / GitHub raw JSON / 자체 호스트
+- **의존성 0 유지** — Node built-in `https.get` 사용
+- 2가지 형식 자동 인식:
+  1. **JSON array** — `[{ id, bin, envFlag?, desc?, ... }, ...]` 또는 `{ providers: [...] }`
+  2. **llms.txt** — 한 줄당 `"id|bin|desc"` (`#` 주석 무시)
+- `--dry-run` — 파일 쓰기 스킵하고 결과만 미리보기
+- 보안:
+  - `LEERNESS_OFFLINE=1` 시 거부
+  - http:// 또는 https:// 강제
+  - response 1MB 제한
+  - timeout 15s
+  - 3xx redirect 자동 follow (1단계)
+  - id 정규식 검증 (영문자/숫자/_- 만 — sync 도 add 와 동일)
+- 같은 id 두 번 → 갱신 (덮어쓰기) / 잘못된 id → skip
+
+### Use Case — OpenRouter / Bedrock 일괄 흡수
+```bash
+# 가상의 leerness-providers catalog
+leerness provider sync https://raw.githubusercontent.com/example/leerness-providers/main/openrouter.json
+
+# 또는 llms.txt 형식
+leerness provider sync https://example.com/providers.txt --dry-run
+```
+
+### Verified — 🎉 90 라운드 마일스톤 보고서
+- `_reports/1.9.160-90-rounds-milestone.md` (비공개)
+- 1.9.140 ~ 1.9.160 — 21 라운드 진화 타임라인 (사용자 명시 11 / 자율 후속 10)
+- MCP 도구 진화: 8 → 30 🎉 → 40 🎉 → 47 → 48 → **50 🎉**
+- **21 라운드 연속 `main` 자동 sync** 안정성
+- 5능력 매트릭스 갱신: 55% → **65%**
+
+### Pending — 다음 10 라운드 전망 (1.9.161 ~ 1.9.170)
+1. LSP 어댑터 MVP (TypeScript) — 5능력 #2
+2. playwright/computer-use bridge — 5능력 #4
+3. i18n + 영어 docs 토글
+4. REPL slash 추가 (`:lessons`, `:brainstorm`)
+
+### Verified
+- e2e 217/217 ✓
+- stress-v105: 20/20 (provider sync 10종 + 마일스톤 보고서 3종 + 누적 회귀 7종) 🎉 **90 라운드 마일스톤**
+- VERSION = 1.9.160 / autonomous-rounds = 90
+
+---
+
 ## 1.9.159 — 2026-05-20
 
 **🎉 MCP 50 도구 마일스톤 — Provider Registry CRUD MCP 완성 (list/add/remove).**

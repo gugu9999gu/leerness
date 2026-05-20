@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.159';
+const VERSION = '1.9.160';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -4694,7 +4694,93 @@ function providerCmd(root, sub, ...args) {
     ok(`provider 제거: ${id}`);
     return;
   }
-  fail(`알 수 없는 sub: ${sub} (list / add / remove)`);
+  if (sub === 'sync') {
+    // 1.9.160: 외부 catalog URL 에서 provider 자동 등록 (의존성 0 — Node built-in https)
+    //   형식 1: llms.txt — 한 줄당 "id|bin|desc" (예: "openrouter|openrouter-cli|OpenRouter 200+ models")
+    //   형식 2: JSON [{ id, bin, envFlag?, desc?, installHint? }, ...]
+    //   보안: LEERNESS_OFFLINE=1 시 거부
+    const url = (args[0] || arg('--url', '')).trim();
+    if (!url) return fail('provider sync <url> 필요 (예: https://raw.githubusercontent.com/.../providers.json 또는 llms.txt)');
+    if (process.env.LEERNESS_OFFLINE === '1') return fail('LEERNESS_OFFLINE=1 — 외부 fetch 거부 (보안 정책)');
+    if (!/^https?:\/\//.test(url)) return fail(`URL 형식 오류: ${url} (http:// 또는 https://)`);
+    const dryRun = has('--dry-run');
+    return (async () => {
+      const lib = url.startsWith('https:') ? require('https') : require('http');
+      const fetchUrl = (u) => new Promise((resolve) => {
+        try {
+          const req = lib.get(u, { timeout: 15000, headers: { 'User-Agent': `leerness/${VERSION}` } }, (res) => {
+            // redirect handling (3xx)
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              return resolve(fetchUrl(res.headers.location));
+            }
+            if (res.statusCode !== 200) return resolve({ ok: false, error: `HTTP ${res.statusCode}` });
+            let data = '';
+            res.on('data', c => { data += c; if (data.length > 1024 * 1024) { req.destroy(); resolve({ ok: false, error: 'response > 1MB' }); } });
+            res.on('end', () => resolve({ ok: true, body: data, contentType: res.headers['content-type'] || '' }));
+          });
+          req.on('error', e => resolve({ ok: false, error: e.message }));
+          req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }); });
+        } catch (e) { resolve({ ok: false, error: e.message }); }
+      });
+      log(`# leerness provider sync (1.9.160)`);
+      log(`URL: ${url}`);
+      const r = await fetchUrl(url);
+      if (!r.ok) { fail(`fetch 실패: ${r.error}`); process.exitCode = 1; return; }
+      // 파싱: JSON 우선 → llms.txt fallback
+      let entries = null;
+      try {
+        const j = JSON.parse(r.body);
+        if (Array.isArray(j)) entries = j;
+        else if (Array.isArray(j.providers)) entries = j.providers;
+      } catch {}
+      if (!entries) {
+        // llms.txt 형식 — "id|bin|desc" 한 줄당
+        entries = r.body.split('\n')
+          .map(l => l.trim())
+          .filter(l => l && !l.startsWith('#'))
+          .map(l => {
+            const parts = l.split('|').map(s => s.trim());
+            if (parts.length < 2) return null;
+            return { id: parts[0], bin: parts[1], desc: parts[2] || `(synced from ${url})` };
+          })
+          .filter(Boolean);
+      }
+      if (!entries.length) { fail(`URL 응답에서 provider 추출 실패 (JSON array 또는 llms.txt "id|bin|desc" 형식 기대)`); process.exitCode = 1; return; }
+      log(`발견 ${entries.length}개 후보`);
+      log('');
+      const userList = _readUserProviders(root);
+      const existingIds = new Set(userList.map(u => u.id));
+      const validIdRegex = /^[a-z][a-z0-9_-]*$/i;
+      let added = 0, updated = 0, skipped = 0;
+      for (const e of entries) {
+        if (!e.id || !e.bin || !validIdRegex.test(e.id)) { skipped++; continue; }
+        const entry = {
+          id: e.id,
+          bin: e.bin,
+          envFlag: e.envFlag || `LEERNESS_ENABLE_${String(e.id).toUpperCase()}`,
+          versionArgs: Array.isArray(e.versionArgs) ? e.versionArgs : (typeof e.versionArgs === 'string' ? e.versionArgs.split(/\s+/) : ['--version']),
+          desc: e.desc || `(synced) ${e.id}`,
+          installHint: e.installHint || ''
+        };
+        if (existingIds.has(e.id)) {
+          const idx = userList.findIndex(u => u.id === e.id);
+          if (!dryRun) userList[idx] = entry;
+          updated++;
+          log(`  ↺ ${e.id} (갱신)`);
+        } else {
+          if (!dryRun) userList.push(entry);
+          existingIds.add(e.id);
+          added++;
+          log(`  + ${e.id} (신규)`);
+        }
+      }
+      if (!dryRun) _writeUserProviders(root, userList);
+      log('');
+      log(`✓ sync 완료: 신규 ${added} · 갱신 ${updated} · 무시 ${skipped}${dryRun ? ' (--dry-run)' : ''}`);
+      if (!dryRun) log(`   .env 에 LEERNESS_ENABLE_<X>=1 설정 후 \`leerness agents list\` 로 확인`);
+    })();
+  }
+  fail(`알 수 없는 sub: ${sub} (list / add / remove / sync)`);
 }
 
 // 1.9.36: 작업 키워드 분석으로 최적 CLI 추천

@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.159-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v104-16%2F16-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-50%20%F0%9F%8E%89-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-89-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-auto-success)]() [![provider-crud](https://img.shields.io/badge/provider_registry-CRUD_MCP_complete-success)]() [![multi-execute](https://img.shields.io/badge/agents_multi-real_spawn%2Bconsensus-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.160-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v105-20%2F20-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-50-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-90%20%F0%9F%8E%89-brightgreen)]() [![main-push](https://img.shields.io/badge/release--main--push-21_rounds-success)]() [![provider-crud](https://img.shields.io/badge/provider_registry-CRUD%2Bsync-success)]() [![multi-execute](https://img.shields.io/badge/agents_multi-real_spawn%2Bconsensus-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.159  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.160  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
