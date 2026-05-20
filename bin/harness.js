@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.164';
+const VERSION = '1.9.165';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -11574,10 +11574,19 @@ function healthCmd(root) {
   try {
     const harnessSrc = read(__filename);
     const cap = {};
-    // (1) 웹 자동화 — playwright/puppeteer/chromium import 존재?
-    cap.webAutomation = /require\(['"]playwright['"]\)|require\(['"]puppeteer['"]\)|require\(['"]chromium['"]\)/.test(harnessSrc)
-      ? { score: 90, status: '✓', evidence: 'playwright/puppeteer import 검출' }
-      : { score: 5, status: '❌', evidence: 'permissions.browser=toggle만 (실 코드 미구현)' };
+    // (1) 웹 자동화 — 1.9.165 playwright bridge 통합 + 실제 playwright 설치 detect
+    const hasWebBridge = /function webCmd\(root, sub/.test(harnessSrc);
+    // 사용자가 playwright 설치했는지 실시간 detect (require try)
+    let playwrightInstalled = false;
+    try { require('playwright'); playwrightInstalled = true; }
+    catch { try { require('playwright-core'); playwrightInstalled = true; } catch {} }
+    if (hasWebBridge && playwrightInstalled) {
+      cap.webAutomation = { score: 90, status: '✓', evidence: 'playwright 설치 + leerness web bridge (1.9.165)' };
+    } else if (hasWebBridge) {
+      cap.webAutomation = { score: 50, status: '⚠', evidence: 'leerness web bridge 있음, playwright 미설치 (npm i -g playwright)' };
+    } else {
+      cap.webAutomation = { score: 5, status: '❌', evidence: 'permissions.browser=toggle만 (실 코드 미구현)' };
+    }
     // (2) PC 조작 — robotjs/nut-js/iohook/xdotool import?
     cap.pcAutomation = /require\(['"]robotjs['"]\)|require\(['"]@nut-tree/.test(harnessSrc)
       ? { score: 90, status: '✓', evidence: 'robotjs/nut-tree import 검출' }
@@ -11921,6 +11930,122 @@ function reuseAutodetectCmd(root) {
   }
 }
 
+// 1.9.165: leerness web — playwright bridge MVP (opt-in 의존성, 5능력 #1 보강)
+//   leerness 자체에는 playwright 미포함 (의존성 0 원칙 유지). 사용자가 `npm i -g playwright` 별도 설치 시 자동 detect.
+//   permissions.browser=true 필요 (1.9.146 권한 시스템 통합).
+function _tryLoadPlaywright() {
+  // 사용자 글로벌 + 로컬 모두 시도
+  const candidates = ['playwright', 'playwright-core'];
+  for (const id of candidates) {
+    try { return { ok: true, lib: require(id), name: id }; } catch {}
+  }
+  // 글로벌 npm root 시도
+  try {
+    const r = cp.spawnSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 5000, shell: true });
+    if (r.status === 0) {
+      const globalRoot = (r.stdout || '').trim();
+      for (const id of candidates) {
+        try { return { ok: true, lib: require(path.join(globalRoot, id)), name: id, source: 'global' }; } catch {}
+      }
+    }
+  } catch {}
+  return { ok: false, error: 'playwright 미설치 — `npm i -g playwright` 또는 프로젝트에 `npm i playwright` 후 다시 시도' };
+}
+function webCmd(root, sub, ...args) {
+  root = absRoot(root || process.cwd());
+  if (!sub || sub === 'check') {
+    const r = _tryLoadPlaywright();
+    if (has('--json')) {
+      log(JSON.stringify({ installed: r.ok, name: r.name || null, source: r.source || 'local', error: r.error || null, permissions: _readPermissions(root).browser || false }, null, 2));
+      return;
+    }
+    log(`# leerness web check (1.9.165)`);
+    if (r.ok) {
+      log(`✓ playwright 발견: ${r.name}${r.source ? ` (${r.source})` : ''}`);
+      log(`  → leerness web screenshot <url> --out file.png 사용 가능`);
+    } else {
+      log(`✗ ${r.error}`);
+    }
+    const perms = _readPermissions(root);
+    log(`permissions.browser: ${perms.browser ? '✓ 허용' : '✗ 거부 (basic 모드)'}`);
+    if (!perms.browser) log(`  → leerness permissions set extended  또는  set full`);
+    return;
+  }
+  if (sub === 'screenshot') {
+    const url = args[0] || arg('--url', '');
+    const outPath = arg('--out', '');
+    if (!url) return fail('leerness web screenshot <url> --out <file.png> 필요');
+    if (!outPath) return fail('--out <file.png> 경로 필요');
+    if (!/^https?:\/\//.test(url)) return fail(`URL 형식 오류 (http:// 또는 https://): ${url}`);
+    if (!permissionCheck(root, 'browser', url)) {
+      return fail(`permissions.browser=false (현재: ${_readPermissions(root).mode}) — leerness permissions set extended 또는 full 권장`);
+    }
+    const r = _tryLoadPlaywright();
+    if (!r.ok) { fail(r.error); process.exitCode = 1; return; }
+    const t0 = Date.now();
+    log(`# leerness web screenshot (1.9.165)`);
+    log(`URL: ${url}  →  ${outPath}`);
+    return (async () => {
+      let browser;
+      try {
+        const { chromium } = r.lib;
+        if (!chromium) { fail('playwright.chromium 없음 — `npx playwright install chromium` 필요'); process.exitCode = 1; return; }
+        browser = await chromium.launch({ headless: true });
+        const page = await browser.newPage();
+        await page.goto(url, { timeout: 30000, waitUntil: 'networkidle' });
+        await page.screenshot({ path: outPath, fullPage: true });
+        await browser.close();
+        const dt = Date.now() - t0;
+        ok(`screenshot 완료: ${outPath} (${dt}ms)`);
+        try { _recordRun(root, { kind: 'web_screenshot', url, outPath, durationMs: dt, ok: true }); } catch {}
+      } catch (e) {
+        fail(`screenshot 실패: ${e.message}`);
+        if (browser) try { await browser.close(); } catch {}
+        try { _recordRun(root, { kind: 'web_screenshot', url, durationMs: Date.now() - t0, ok: false, error: e.message }); } catch {}
+        process.exitCode = 1;
+      }
+    })();
+  }
+  if (sub === 'extract') {
+    const url = args[0] || arg('--url', '');
+    const selector = arg('--selector', '');
+    if (!url || !selector) return fail('leerness web extract <url> --selector "css-selector" 필요');
+    if (!/^https?:\/\//.test(url)) return fail(`URL 형식 오류: ${url}`);
+    if (!permissionCheck(root, 'browser', url)) {
+      return fail(`permissions.browser=false — leerness permissions set extended 또는 full`);
+    }
+    const r = _tryLoadPlaywright();
+    if (!r.ok) { fail(r.error); process.exitCode = 1; return; }
+    const t0 = Date.now();
+    return (async () => {
+      let browser;
+      try {
+        const { chromium } = r.lib;
+        if (!chromium) { fail('playwright.chromium 없음 — `npx playwright install chromium`'); process.exitCode = 1; return; }
+        browser = await chromium.launch({ headless: true });
+        const page = await browser.newPage();
+        await page.goto(url, { timeout: 30000, waitUntil: 'networkidle' });
+        const elements = await page.$$eval(selector, els => els.slice(0, 50).map(el => el.textContent?.trim() || ''));
+        await browser.close();
+        const dt = Date.now() - t0;
+        const out = { url, selector, count: elements.length, elements, durationMs: dt };
+        if (has('--json')) log(JSON.stringify(out, null, 2));
+        else {
+          log(`# leerness web extract (1.9.165)`);
+          log(`URL: ${url} · selector: ${selector} · ${elements.length}개 (${dt}ms)`);
+          elements.slice(0, 20).forEach((t, i) => log(`  ${i+1}. ${t.slice(0, 200)}${t.length > 200 ? '…' : ''}`));
+        }
+        try { _recordRun(root, { kind: 'web_extract', url, selector, count: elements.length, durationMs: dt, ok: true }); } catch {}
+      } catch (e) {
+        fail(`extract 실패: ${e.message}`);
+        if (browser) try { await browser.close(); } catch {}
+        process.exitCode = 1;
+      }
+    })();
+  }
+  fail(`알 수 없는 sub: ${sub} (check / screenshot / extract)`);
+}
+
 // 1.9.164: leerness which — 진단 도구 (구버전 충돌 / npx 캐시 / PATH 충돌 해결)
 //   사용자가 "최신 버전 작동 안 함" 의심 시: 실제 실행 중인 leerness 의 경로 / 버전 / npm 캐시 / PATH 후보 표시.
 function whichCmd() {
@@ -12002,7 +12127,7 @@ function whichCmd() {
 }
 
 function help() {
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -12078,6 +12203,8 @@ async function main() {
   if (cmd === 'provider') return providerCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.164: leerness which — 진단 도구 (구버전 충돌 / npx 캐시 / PATH 후보)
   if (cmd === 'which') return whichCmd();
+  // 1.9.165: leerness web — playwright bridge (opt-in 의존성)
+  if (cmd === 'web') return webCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   if (cmd === 'contract' && args[1] === 'verify') return contractVerifyCmd(args[2], args[3]);
   if (cmd === 'drift' && (args[1] === 'check' || !args[1])) return driftCheckCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'usage' && (args[1] === 'stats' || !args[1])) return usageStatsCmd(args[2] || arg('--path', process.cwd()));

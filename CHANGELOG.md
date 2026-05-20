@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.9.165 — 2026-05-20
+
+**playwright bridge MVP — opt-in 웹 자동화 (5능력 #1 보강, 58% → 67%).**
+
+자율 모드 95 라운드. 1.9.163 5능력 매트릭스에서 가장 낮은 영역 (웹 자동화 5%) 직접 보강.
+
+### Added — `leerness web check|screenshot|extract`
+**의존성 0 원칙 유지** — leerness 자체에는 playwright 미포함. 사용자가 `npm i -g playwright` 별도 설치 시 자동 detect.
+
+```bash
+# 1) playwright 설치 + 사용 가능 확인
+npm i -g playwright
+npx playwright install chromium
+leerness permissions set extended    # 또는 full
+leerness web check                    # → ✓ playwright 발견
+
+# 2) 스크린샷
+leerness web screenshot https://example.com --out shot.png
+
+# 3) DOM 추출
+leerness web extract https://example.com --selector "h1,h2" --json
+```
+
+### Bridge 패턴 — opt-in 의존성
+- `_tryLoadPlaywright()` — `playwright` / `playwright-core` 둘 다 시도 + npm 글로벌 root 폴백
+- 미설치 시 친절한 안내 (`npm i -g playwright`)
+- `permissionCheck(root, 'browser')` 통합 (1.9.146 권한 시스템)
+- `_recordRun(kind: 'web_screenshot' | 'web_extract')` observability
+
+### 5능력 매트릭스 갱신
+| 영역 | 1.9.164 | **1.9.165** |
+|---|---|---|
+| (1) 웹 자동화 | 5% ❌ | **50% ⚠** (bridge MVP, playwright 미설치) → **90% ✓** (사용자 설치 시) |
+| **종합** | 58% (beta-ready) | **67%** (beta-ready, production-ready 임박) |
+
+`leerness health` 가 실시간 detect — `require('playwright')` try 성공 시 90% 자동 부여.
+
+### Verified
+- e2e 217/217 ✓
+- stress-v110: 20/20 (bridge 함수 6종 + CLI 동작 6종 + 매트릭스 갱신 2종 + 누적 회귀 6종)
+- VERSION = 1.9.165 / autonomous-rounds = 95
+
+---
+
 ## 1.9.164 — 2026-05-20
 
 **`leerness which` 진단 명령 + REPL provider 전환 UX 강화 (사용자 명시 2종).**
