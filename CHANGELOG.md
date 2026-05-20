@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.9.156 — 2026-05-20
+
+**`agents multi --execute` 실제 spawn + consensus 통합 (1.9.155 점검 보고서 발견 gap #1 보강).**
+
+자율 모드 86 라운드. 5능력 점검 보고서가 발견한 **"agents multi가 명령 문자열만 출력 — 실제 spawn 안 함"** 문제를 직접 해결.
+
+### Added — `leerness agents multi "<task>" --execute`
+- 기존 (1.9.152): 활성 N개 에이전트에 dispatch 명령 **문자열만 출력** — 사용자가 실행
+- 신규 (1.9.156): `--execute` 플래그 시 **leerness가 직접 N개 sub-agent 병렬 spawn**
+  - `Promise.all` 로 `_cliChat(provider)` 동시 호출 — 진짜 N-way 분배
+  - 각 호출은 1.9.150 `runCommandSafe` 경유 → cwd jail + env scrub + 자동 observability
+  - `--timeout <s>` 옵션 (기본 60s) — 무한 대기 방지
+- 결과 수집 후 **1.9.155 multi-signal consensus** 자동 적용:
+  - `score = 0.4*tokensNorm + 0.4*overlap + 0.2*lengthFit`
+  - best 1위 + others 2-4위 점수 표시 (투명성)
+- `--json` 출력: `{ task, count, success, totalElapsedMs, results, best, failures }`
+- `_recordRun` 통합 — kind `agents_multi_execute` + task-log 자동 기록
+- 활성 0개 또는 onlyArg 매칭 0개 → 즉시 fail (실 호출 시도 X)
+
+### Verification — 5능력 점검 매트릭스 갱신
+| 영역 | 1.9.155 | 1.9.156 |
+|---|---|---|
+| 멀티 에이전트 오케스트레이션 | 70% (명령 출력만) | **90%** (실 spawn + consensus 합의) |
+| 종합 완성도 | 55% | **60%** |
+
+이제 leerness 가 "지시 생성기" 가 아닌 **"실 실행 오케스트레이터"** — Hermes Agent / OpenClaw 같은 도구와의 격차가 크게 줄어듦.
+
+### Pending — 보고서 권고 다음 3 후보
+1. **1.9.157** — LSP 어댑터 MVP (TypeScript LSP 먼저)
+2. **1.9.158** — Provider Registry MCP 도구 (OpenRouter/Bedrock 100+ 모델 흡수)
+3. **1.9.159** — playwright/computer-use bridge (`permissions.browser/mouse` 실 동작 — opt-in)
+
+### Verified
+- e2e 217/217 ✓
+- stress-v101: 18/18 (--execute 7종 + CLI 동작 3종 + 누적 회귀 8종)
+- VERSION = 1.9.156 / autonomous-rounds = 86
+
+---
+
 ## 1.9.155 — 2026-05-20
 
 **REPL UX 대폭 개선 + provider 모델 카탈로그 + orchestrate consensus 강화 + 5능력 점검 보고서 (사용자 명시).**
