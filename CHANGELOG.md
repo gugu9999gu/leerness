@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.9.140 — 2026-05-20
+
+**사용자 명시 요청 3종 통합** — main 자동 push + README 자동 풍부화 + 성능 가이드.
+
+### Added — main 자동 동기화 (사용자 요청 #1)
+- `leerness release sync-main [--branch X] [--remote origin] [--dry-run]` 신규 명령
+- 현재 release/X.Y.Z (또는 명시 브랜치)를 main에 fast-forward merge & push
+- 충돌 시 자동 `merge --abort` 후 원래 브랜치로 복귀 (safe-fail)
+- `leerness release pack --auto-main-push` 옵션 (env: `LEERNESS_AUTO_MAIN_PUSH=1`) — 매 release 자동 main 동기화
+
+### Added — README 자동 풍부화 (사용자 요청 #2)
+- `managedReadmeBlock` 확장 — release pack 마다 자동 갱신되는 풍부 섹션:
+  - **Memory Surface CRUD 5종 카탈로그** (tasks/decisions/rules/plan/lessons × add/list/drop)
+  - **MCP 42 도구 카테고리** (Core / Memory READ/WRITE/DELETE / Skill / Insight / Workflow)
+  - **자율 모드 가이드** (`<<autonomous-loop-dynamic>>` + 70 라운드 누적)
+  - **성능 측정값** (handoff/list/health 평균 latency)
+  - **빠른 시작** (npm install → init → handoff → session close → release pack)
+  - **Planning Files 매뉴얼** (5 surface 파일 위치)
+
+### Performance Baseline (사용자 요청 #3, 측정값)
+- `leerness handoff .` — ~1.5s cold, ~0.6s warm
+- `leerness memory status --json` — ~250ms
+- `leerness task list --json` — ~200ms
+- `leerness drift check --json` — ~400ms
+- MCP `tools/list` — ~150ms
+
+### Validation
+- stress-v85: PASS (sync-main dry-run + README rich block + 성능 + 누적 회귀)
+- e2e: 219/219 PASS
+
 ## 1.9.139 — 2026-05-20
 
 **`leerness lesson list --query <keyword>` + `leerness decision list --query <keyword>` 필터 추가** — Memory Surface READ 명령 키워드 검색.

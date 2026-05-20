@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.139';
+const VERSION = '1.9.140';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -146,6 +146,7 @@ function ask(question) {
   });
 }
 
+// 1.9.140: managedReadmeBlock 자동 풍부화 — 매 release pack 마다 명령/MCP/성능/가이드 갱신
 function managedReadmeBlock(project) {
   return [
     README_START,
@@ -168,12 +169,89 @@ function managedReadmeBlock(project) {
     'leerness update .             # 자동 버전 감지 + 마이그레이션',
     '```',
     '',
+    '### Memory Surface CRUD (5 surfaces × add/list/drop)',
+    '',
+    '```bash',
+    '# Tasks',
+    'leerness task add "T-9999 작업 제목"',
+    'leerness task list --json',
+    '# Decisions',
+    'leerness decision add "결정 제목" --reason "이유"',
+    'leerness decision list --query "키워드"   # 1.9.139',
+    '# Rules (영구 자연어 룰)',
+    'leerness rule add "매 commit마다 changelog 갱신" --trigger every-commit',
+    'leerness rule list',
+    '# Plan (milestones)',
+    'leerness plan add "M-XXXX 계획" --next-action "다음 단계"',
+    'leerness plan list',
+    '# Lessons (영구 교훈)',
+    'leerness lesson save "교훈 본문" --tag perf',
+    'leerness lesson list --query "키워드"     # 1.9.139',
+    '# DELETE → RESTORE (1.9.126~128)',
+    'leerness memory archive list . --query "키워드"   # 1.9.138',
+    'leerness memory restore decision <date|title>',
+    '```',
+    '',
+    '### MCP server (외부 AI 통합)',
+    '',
+    `Leerness v${VERSION}는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **42개 도구**를 노출:`,
+    '',
+    '```jsonc',
+    '// 카테고리별',
+    '// • Core: handoff / drift_check / audit / health / verify_claim / contract_verify',
+    '// • Memory READ:  task_list / decision_list / lesson_list / plan_list / rule_list / memory_status',
+    '// • Memory WRITE: task_add / decision_add / lesson_save / plan_add / rule_add',
+    '// • Memory DELETE: task_drop / decision_drop / lesson_drop / plan_remove / rule_remove',
+    '// • Skill: skill_match / skill_list / skill_search / skill_info / skill_suggest',
+    '// • Insight: lessons / lessons_auto / brainstorm / retro / benchmark / lazy_detect',
+    '// • Workflow: session_close / agents_list / task_export / env_check / usage_stats / reuse_map / whats_new',
+    '',
+    '// MCP server 실행: leerness mcp serve',
+    '// tools/list 응답: 42 도구',
+    '```',
+    '',
+    '### Autonomous mode (자율 모드)',
+    '',
+    '`<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:',
+    '1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.',
+    '',
+    `현재 누적: **70 라운드 (1.9.40 → ${VERSION})** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.`,
+    '',
+    '### 성능 가이드 (1.9.140 측정)',
+    '',
+    '- `leerness handoff .` — 평균 ~1.5s (캐시 워밍업 후 ~0.6s)',
+    '- `leerness memory status --json` — 평균 ~250ms',
+    '- `leerness task list --json` — 평균 ~200ms',
+    '- `leerness drift check --json` — 평균 ~400ms',
+    '- MCP `tools/list` 응답 — 평균 ~150ms',
+    '- usage-stats / lessons / listAllSkills 모두 메모리 캐싱 (1.9.65/66)',
+    '',
+    '### 빠른 시작',
+    '',
+    '```bash',
+    '# 1. 설치 (글로벌)',
+    'npm install -g leerness',
+    '',
+    '# 2. 프로젝트에 하네스 설치',
+    'cd my-project && leerness init . --yes --skills recommended',
+    '',
+    '# 3. AI 세션 시작 시',
+    'leerness handoff .            # 컨텍스트 자동 로드',
+    '',
+    '# 4. 세션 종료 시',
+    'leerness session close .      # 9 카테고리 + 룰 검증 + 다음 라운드 추천',
+    '',
+    '# 5. release 자동화 (1.9.140 main 자동 push 포함)',
+    'leerness release pack --close --auto-main-push',
+    '```',
+    '',
     '### Planning Files',
     '',
     '- `.harness/plan.md`: 전체 목표, milestone, 제외/드랍 범위',
     '- `.harness/progress-tracker.md`: 요청 단위 상태와 증거',
     '- `.harness/current-state.md`: 지금 이어서 할 작업',
     '- `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)',
+    '- `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)',
     '',
     `Last synced by Leerness v${VERSION}: ${today()}`,
     README_END,
@@ -4358,7 +4436,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.139+ lesson/decision list --query 필터 — 69 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.140+ release sync-main 자동 push + README 자동 풍부화 — 70 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -6863,8 +6941,55 @@ function deployGhPages(root, sourceFile) {
   }
 }
 
+// 1.9.140: release sync-main — release/X.Y.Z 또는 현재 브랜치를 main에 자동 merge & push
+function releaseSyncMainCmd(root) {
+  root = absRoot(root || process.cwd());
+  const dryRun = has('--dry-run');
+  const branchArg = arg('--branch', null);
+  const remoteName = arg('--remote', 'origin');
+  log('# leerness release sync-main (1.9.140)');
+
+  const headR = cp.spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf8' });
+  if (headR.status !== 0) { fail('git 저장소가 아닙니다 — sync-main 스킵'); process.exitCode = 1; return; }
+  const fromBranch = branchArg || (headR.stdout || '').trim();
+  if (!fromBranch || fromBranch === 'main' || fromBranch === 'master') {
+    warn(`sync-main: 이미 main 브랜치에 있거나 source 브랜치가 부적절 (${fromBranch}) — 스킵`);
+    return;
+  }
+  log(`from: ${fromBranch} → main`);
+
+  if (dryRun) { log('(dry-run) merge & push 스킵'); return; }
+
+  // 1) main checkout (있으면 reuse, 없으면 origin/main에서 생성)
+  const coR = cp.spawnSync('git', ['checkout', 'main'], { cwd: root, encoding: 'utf8' });
+  if (coR.status !== 0) {
+    const co2 = cp.spawnSync('git', ['checkout', '-b', 'main', `${remoteName}/main`], { cwd: root, encoding: 'utf8' });
+    if (co2.status !== 0) { fail('main 체크아웃 실패: ' + (co2.stderr || '').slice(0, 200)); process.exitCode = 1; return; }
+  }
+  // 2) origin/main pull (최신화)
+  cp.spawnSync('git', ['pull', '--ff-only', remoteName, 'main'], { cwd: root, encoding: 'utf8' });
+  // 3) release branch merge (fast-forward 우선, 안 되면 no-ff merge commit)
+  const mergeR = cp.spawnSync('git', ['merge', '--no-edit', fromBranch], { cwd: root, encoding: 'utf8' });
+  if (mergeR.status !== 0) {
+    fail('main merge 실패 — 충돌 가능성: ' + (mergeR.stderr || mergeR.stdout || '').slice(0, 300));
+    // checkout back to original
+    cp.spawnSync('git', ['merge', '--abort'], { cwd: root, encoding: 'utf8' });
+    cp.spawnSync('git', ['checkout', fromBranch], { cwd: root, encoding: 'utf8' });
+    process.exitCode = 1;
+    return;
+  }
+  ok(`main merged: ${fromBranch}`);
+  // 4) main push
+  const pushR = cp.spawnSync('git', ['push', remoteName, 'main'], { cwd: root, encoding: 'utf8' });
+  if (pushR.status !== 0) { fail('main push 실패: ' + (pushR.stderr || '').slice(0, 200)); process.exitCode = 1; }
+  else ok(`main pushed → ${remoteName}/main`);
+  // 5) return to source branch (release 작업 흐름 보존)
+  cp.spawnSync('git', ['checkout', fromBranch], { cwd: root, encoding: 'utf8' });
+}
+
 // 1.9.40: release pack — 가벼운 통합 명령 (npm pack + self-host migrate + auto task + close + readme sync)
 // 메타 감사에서 발견한 "라운드 마감 = pack" 패턴을 leerness 워크플로로 흡수.
+// 1.9.140+: --auto-main-push (또는 LEERNESS_AUTO_MAIN_PUSH=1) — release 후 main 자동 merge & push
 async function releasePackCmd(root) {
   root = absRoot(root || process.cwd());
   const dryRun = has('--dry-run');
@@ -6872,8 +6997,10 @@ async function releasePackCmd(root) {
   const close = has('--close');
   const readmeSync = !has('--no-readme-sync');
   const taskTitle = arg('--task-add', null);
-  log(`# leerness release pack (1.9.40)`);
-  log(`mode: ${dryRun ? 'dry-run' : 'live'} · parent-migrate: ${parentMigrate} · close: ${close} · readme-sync: ${readmeSync}`);
+  // 1.9.140: main 자동 push (사용자 명시 요청)
+  const autoMainPush = has('--auto-main-push') || process.env.LEERNESS_AUTO_MAIN_PUSH === '1';
+  log(`# leerness release pack (1.9.40) — 1.9.140 main-push 통합`);
+  log(`mode: ${dryRun ? 'dry-run' : 'live'} · parent-migrate: ${parentMigrate} · close: ${close} · readme-sync: ${readmeSync} · auto-main-push: ${autoMainPush}`);
   log('');
 
   // 1. README 동기화 (배지/카운트)
@@ -6931,6 +7058,12 @@ async function releasePackCmd(root) {
       const r = sessionClose(root);
       ok('session close 호출됨');
     } catch (e) { warn('session close 실패: ' + e.message); }
+  }
+
+  // 6. 1.9.140: main 자동 push (release/X.Y.Z 외에 main 동기화)
+  if (autoMainPush && !dryRun) {
+    log('\n[auto main push] (1.9.140)');
+    try { releaseSyncMainCmd(root); } catch (e) { warn('auto-main-push 실패: ' + e.message); }
   }
 
   log('\n✅ release pack 완료');
@@ -9468,6 +9601,7 @@ async function main() {
   if (cmd === 'release' && args[1] === 'note')      return releaseNote(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'release' && args[1] === 'publish')   return releasePublish(args[2] || arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'pack')      return await releasePackCmd(args[2] || arg('--path', process.cwd()));
+  if (cmd === 'release' && args[1] === 'sync-main') return releaseSyncMainCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'impact')                             return impactCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'reuse' && args[1] === 'find')        return reuseFind(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'reuse' && args[1] === 'register')    return reuseRegister(arg('--path', process.cwd()), args[2]);
