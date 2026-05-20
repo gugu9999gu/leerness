@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.9.149 — 2026-05-20
+
+**REPL agent (Hermes/OpenClaw/OpenCode 스타일) + observability lite — 사용자 명시 요청 + 3중 LLM 합의 #2.**
+
+### Added — `leerness agent` REPL 모드
+- 인자 없이 `leerness agent` (또는 `--interactive` / `--repl`) → 대화형 REPL 진입
+- 시작 시 **Ollama 모델 자동 감지** (`/api/tags`) → 사용자가 번호로 선택
+- 모델 없으면 `LEERNESS_OLLAMA_MODEL` env 또는 `llama3` fallback
+- 대화 history 유지 (마지막 6턴까지 컨텍스트로 전송)
+- 6턴마다 `.harness/agent-sessions/sess-<ts>.jsonl` 자동 저장
+- 종료 시 (`:quit` / `:exit` / `:q` / Ctrl+D) 최종 저장
+
+### Added — REPL 메타 명령 (Hermes/OpenClaw 패턴)
+- `:help` / `:?` — 도움말
+- `:model <name>` — 모델 변경 (예: `:model qwen2.5-coder`)
+- `:models` — Ollama 사용 가능 모델 목록
+- `:role <r>` — planner/reviewer/actor 즉시 전환 (프롬프트 색상 변경)
+- `:provider <p>` — provider 전환 (ollama/claude/codex/gemini)
+- `:clear` — 화면 클리어
+- `:reset` — history 초기화
+- `:history` — 최근 10턴 표시
+- `:save` — 세션 즉시 저장
+- `:permissions` — 현재 권한 모드 표시
+- `:quit` / `:exit` / `:q` — 종료 (자동 저장)
+
+### Added — observability lite (3중 LLM 합의 #2)
+- `.harness/runs/run-<ts>.jsonl` — 모든 agent 호출 자동 기록
+- 필드: `traceId / kind / provider / model / role / durationMs / ok / error / responseChars`
+- `leerness runs list [--json]` — 최근 50건 (시간 역순)
+- `leerness runs show <id>` — 단일 run 상세
+- agent REPL 매 턴 + 1회 호출 + 세션 전체 모두 자동 기록
+
+### Security
+- `.gitignore` 자동 추가: `.harness/agent-sessions/` (대화 내용 보호), `.harness/runs/` (실행 메타데이터 보호)
+
+### Validation
+- stress-v94: PASS
+- e2e: 219/219 PASS
+
 ## 1.9.148 — 2026-05-20
 
 **사용자 명시 4종 + 3중 LLM 합의 (GPT-5.5 + Codex + Gemini) 우선 라운드 진행.**

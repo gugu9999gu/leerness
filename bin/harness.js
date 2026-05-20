@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.148';
+const VERSION = '1.9.149';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -795,7 +795,9 @@ async function install(root, opts = {}) {
       '.harness/skill-publish.local.json','.harness/**/*.local.json','.env.local',
       '.harness/archive/','.harness/migration-report.md','.harness/cache/',
       // 1.9.147: 자동 유지보수 — 자격증명 + incident 페이로드 비공개 (보안)
-      '.harness/credentials.local.json','.harness/incidents/'
+      '.harness/credentials.local.json','.harness/incidents/',
+      // 1.9.149: agent REPL 세션 + observability runs 비공개 (대화 내용 보호)
+      '.harness/agent-sessions/','.harness/runs/'
     ]);
     // 1.9.146: agentsOptIn 선택에 따라 LEERNESS_ENABLE_* 플래그 자동 설정 (사용자 명시 요청 #3 — Ollama 추가)
     const a = resolved.agentsOptIn || 'none';
@@ -9973,25 +9975,249 @@ async function _ollamaChat(prompt, model) {
     } catch (e) { resolve({ ok: false, error: e.message, model: mdl }); }
   });
 }
+
+// 1.9.149: Ollama 사용 가능 모델 목록 — /api/tags
+async function _ollamaListModels() {
+  const url = (process.env.LEERNESS_OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/+$/, '') + '/api/tags';
+  return new Promise((resolve) => {
+    try {
+      const u = new URL(url);
+      const lib = u.protocol === 'https:' ? require('https') : require('http');
+      const req = lib.request({ hostname: u.hostname, port: u.port || 11434, path: u.pathname, method: 'GET', timeout: 4000 }, (res) => {
+        let data = ''; res.on('data', c => data += c);
+        res.on('end', () => {
+          try { const j = JSON.parse(data); resolve({ ok: true, models: (j.models || []).map(m => m.name || m) }); }
+          catch { resolve({ ok: false, models: [] }); }
+        });
+      });
+      req.on('error', () => resolve({ ok: false, models: [] }));
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false, models: [] }); });
+      req.end();
+    } catch { resolve({ ok: false, models: [] }); }
+  });
+}
+
+// 1.9.149: observability lite — 모든 agent 호출의 traceId + duration + exit + failureCause 기록
+function _runsDir(root) { return path.join(absRoot(root), '.harness', 'runs'); }
+function _recordRun(root, entry) {
+  try {
+    const dir = _runsDir(root); mkdirp(dir);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const id = `run-${ts}`;
+    const fp = path.join(dir, `${id}.jsonl`);
+    const line = JSON.stringify({ id, at: new Date().toISOString(), ...entry }) + '\n';
+    fs.appendFileSync(fp, line);
+    return id;
+  } catch { return null; }
+}
+function runsListCmd(root) {
+  root = absRoot(root || process.cwd());
+  const dir = _runsDir(root);
+  if (!exists(dir)) { log('(runs 없음 — leerness agent 호출 시 자동 기록됨)'); return; }
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort().reverse();
+  if (has('--json')) {
+    const items = files.slice(0, 50).map(f => {
+      try { const c = read(path.join(dir, f)).trim().split('\n').map(l => JSON.parse(l)); return { file: f, entries: c }; }
+      catch { return null; }
+    }).filter(Boolean);
+    log(JSON.stringify({ total: files.length, items }, null, 2));
+    return;
+  }
+  log(`# leerness runs list (1.9.149)`);
+  log(`총 ${files.length}건${files.length > 20 ? ' (최근 20)' : ''}`);
+  for (const f of files.slice(0, 20)) {
+    try {
+      const lines = read(path.join(dir, f)).trim().split('\n');
+      const first = JSON.parse(lines[0]);
+      const dur = first.durationMs ? ` ${first.durationMs}ms` : '';
+      const ok = first.ok === false ? ' ⚠fail' : '';
+      log(`  ${first.id}  ·  ${first.kind || '?'}${dur}${ok}  ·  ${first.model || first.provider || ''}`);
+    } catch {}
+  }
+}
+function runsShowCmd(root, id) {
+  root = absRoot(root || process.cwd());
+  const fp = path.join(_runsDir(root), `${id}.jsonl`);
+  if (!exists(fp)) return fail(`run 없음: ${id}`);
+  log(read(fp));
+}
 // 1.9.148: planner/reviewer/actor 역할 시스템 프롬프트 (Gemini 권고 — 자기-승인 편향 방지)
 const _AGENT_ROLE_PROMPTS = {
   planner: '역할: planner. task를 step 3-6개로 분해, 각 step의 입출력/검증 방법 명시. 코드 작성 금지, 계획만.',
   reviewer: '역할: reviewer. planner 의 계획 또는 actor 의 결과를 비판적으로 검토. 누락된 검증, 잠재 cascade, 오류 가능성 지적. 동의/수정 결론 명시.',
   actor: '역할: actor. 계획에 따라 정확한 명령/코드만 실행. evidence(파일 경로 + 테스트 결과) 함께 기록. 새 계획 생성 금지.'
 };
+// 1.9.149: REPL 모드 — Hermes/OpenClaw/OpenCode 스타일 자율형 CLI 에이전트
+async function _agentRepl(root, opts) {
+  const readline = require('readline');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const isTty = process.stdout.isTTY;
+  const C = isTty ? {
+    cy: s => `\x1b[36m${s}\x1b[0m`, dim: s => `\x1b[2m${s}\x1b[0m`,
+    bold: s => `\x1b[1m${s}\x1b[0m`, green: s => `\x1b[32m${s}\x1b[0m`,
+    yel: s => `\x1b[33m${s}\x1b[0m`, mag: s => `\x1b[35m${s}\x1b[0m`
+  } : { cy:s=>s, dim:s=>s, bold:s=>s, green:s=>s, yel:s=>s, mag:s=>s };
+  // 세션 state
+  let state = {
+    provider: opts.provider || 'ollama',
+    model: opts.model || process.env.LEERNESS_OLLAMA_MODEL || null,
+    role: opts.role || 'actor',
+    history: [],   // [{role: 'user'|'assistant', content: ''}]
+    startedAt: new Date().toISOString(),
+    sessionId: 'sess-' + new Date().toISOString().replace(/[:.]/g, '-')
+  };
+  const sessionPath = () => path.join(absRoot(root), '.harness', 'agent-sessions', `${state.sessionId}.jsonl`);
+  const saveSession = () => {
+    try {
+      mkdirp(path.dirname(sessionPath()));
+      const lines = state.history.map(m => JSON.stringify({ at: new Date().toISOString(), ...m })).join('\n');
+      writeUtf8(sessionPath(), lines + '\n');
+    } catch {}
+  };
+  // 환영 메시지 + 모델 선택
+  log('');
+  log(C.bold(C.cy('  ╔════════════════════════════════════════════════════╗')));
+  log(C.bold(C.cy('  ║  leerness agent — REPL mode (1.9.149)              ║')));
+  log(C.bold(C.cy('  ║  Hermes / OpenClaw / OpenCode 스타일 채팅 에이전트     ║')));
+  log(C.bold(C.cy('  ╚════════════════════════════════════════════════════╝')));
+  log('');
+  // Ollama 모델 자동 감지 — model이 명시되지 않았으면 사용자에게 선택지 제공
+  if (state.provider === 'ollama' && !state.model) {
+    log(C.dim('  Ollama 모델 목록 조회 중...'));
+    const r = await _ollamaListModels();
+    if (r.ok && r.models.length) {
+      log(C.green(`  사용 가능 모델 ${r.models.length}개:`));
+      r.models.slice(0, 8).forEach((m, i) => log(`    ${i + 1}) ${m}`));
+      const choice = await new Promise(res => rl.question(C.cy('\n  모델 번호 선택 (Enter=1): '), res));
+      const idx = parseInt(choice, 10) - 1;
+      state.model = (idx >= 0 && idx < r.models.length) ? r.models[idx] : r.models[0];
+      log(C.green(`  ✓ 모델 선택: ${state.model}`));
+    } else {
+      log(C.yel(`  ⚠ Ollama 미가동 또는 모델 없음 — ollama serve + ollama pull <model>`));
+      state.model = process.env.LEERNESS_OLLAMA_MODEL || 'llama3';
+      log(C.dim(`     fallback: ${state.model}`));
+    }
+  }
+  log('');
+  log(C.dim('  메타 명령: :help | :model <m> | :role <r> | :provider <p> | :clear | :save | :history | :quit'));
+  log(C.dim(`  현재 — provider=${state.provider}  model=${state.model || '(없음)'}  role=${state.role}  permissions=${_readPermissions(root).mode}`));
+  log('');
+  const prompt = () => isTty ? C.cy(`agent[${state.role}]> `) : 'agent> ';
+  rl.setPrompt(prompt());
+  rl.prompt();
+  const handleMeta = async (cmd) => {
+    const [op, ...rest] = cmd.slice(1).split(/\s+/);
+    if (op === 'quit' || op === 'exit' || op === 'q') {
+      saveSession();
+      log(C.dim(`  세션 저장: ${rel(root, sessionPath())}`));
+      rl.close(); return true;
+    }
+    if (op === 'help' || op === '?') {
+      log(C.bold('\n  메타 명령:'));
+      log('    :help / :?            — 이 도움말');
+      log('    :model <name>         — 모델 변경 (예: :model qwen2.5-coder)');
+      log('    :models               — Ollama 사용 가능 모델 목록');
+      log('    :role <r>             — 역할 변경 (planner / reviewer / actor)');
+      log('    :provider <p>         — provider 변경 (ollama / claude / codex / gemini)');
+      log('    :clear                — 화면 클리어 + history 유지');
+      log('    :reset                — history 초기화');
+      log('    :history              — 대화 history 표시');
+      log('    :save                 — 세션 즉시 저장');
+      log('    :permissions          — 현재 권한 모드 표시');
+      log('    :quit / :exit / :q    — 종료 (자동 저장)');
+      return false;
+    }
+    if (op === 'model') { state.model = rest.join(' ') || state.model; log(C.green(`  model = ${state.model}`)); return false; }
+    if (op === 'models') {
+      const r = await _ollamaListModels();
+      if (r.ok && r.models.length) { log(C.green(`  ${r.models.length}개:`)); r.models.forEach(m => log('    • ' + m)); }
+      else log(C.yel('  ⚠ Ollama 미가동'));
+      return false;
+    }
+    if (op === 'role') {
+      const r = rest[0] || 'actor';
+      if (!['planner', 'reviewer', 'actor'].includes(r)) { log(C.yel(`  ⚠ role 은 planner/reviewer/actor`)); return false; }
+      state.role = r; rl.setPrompt(prompt()); log(C.green(`  role = ${r}`)); return false;
+    }
+    if (op === 'provider') { state.provider = rest[0] || state.provider; log(C.green(`  provider = ${state.provider}`)); return false; }
+    if (op === 'clear') { process.stdout.write('\x1b[2J\x1b[H'); return false; }
+    if (op === 'reset') { state.history = []; log(C.dim('  history 초기화됨')); return false; }
+    if (op === 'history') {
+      log(C.bold(`\n  대화 history ${state.history.length}건:`));
+      state.history.slice(-10).forEach((m, i) => log(`    [${m.role}] ${m.content.slice(0, 80)}${m.content.length > 80 ? '…' : ''}`));
+      return false;
+    }
+    if (op === 'save') { saveSession(); log(C.dim(`  → ${rel(root, sessionPath())}`)); return false; }
+    if (op === 'permissions') { permissionsListCmd(root); return false; }
+    log(C.yel(`  알 수 없는 명령: :${op}  (:help 참고)`));
+    return false;
+  };
+  return new Promise(resolve => {
+    rl.on('line', async (line) => {
+      const input = line.trim();
+      if (!input) { rl.prompt(); return; }
+      if (input.startsWith(':')) {
+        const shouldQuit = await handleMeta(input);
+        if (shouldQuit) { resolve(); return; }
+        rl.prompt(); return;
+      }
+      // LLM 호출
+      state.history.push({ role: 'user', content: input });
+      const rolePrompt = _AGENT_ROLE_PROMPTS[state.role] || _AGENT_ROLE_PROMPTS.actor;
+      const finalPrompt = `${rolePrompt}\n\nConversation so far:\n${state.history.slice(-6).map(m => `[${m.role}] ${m.content}`).join('\n')}\n\nRespond as ${state.role}:`;
+      const t0 = Date.now();
+      let result;
+      if (state.provider === 'ollama') {
+        log(C.dim(`  → ollama (${state.model}) 호출 중...`));
+        result = await _ollamaChat(finalPrompt, state.model);
+      } else {
+        log(C.yel(`  ⚠ ${state.provider} REPL 미지원 — leerness agents dispatch 사용 권장`));
+        rl.prompt(); return;
+      }
+      const dt = Date.now() - t0;
+      _recordRun(root, { kind: 'agent_repl_turn', provider: state.provider, model: state.model, role: state.role, durationMs: dt, ok: result.ok, error: result.error, promptChars: finalPrompt.length, responseChars: (result.response || '').length });
+      if (result.ok) {
+        state.history.push({ role: 'assistant', content: result.response });
+        log('');
+        log(C.bold(`assistant (${state.model}, role=${state.role}, ${dt}ms)`));
+        log(result.response);
+        log('');
+        if (state.history.length % 6 === 0) saveSession();  // 6턴마다 자동 저장
+      } else {
+        log(C.yel(`  ⚠ 실패: ${result.error || 'unknown'}`));
+      }
+      rl.prompt();
+    });
+    rl.on('close', () => { saveSession(); resolve(); });
+  });
+}
+
 async function agentCmd(root, taskArg) {
   root = absRoot(root || process.cwd());
   const task = (taskArg || arg('--task', '') || '').trim();
-  if (!task) {
-    log('# leerness agent (1.9.146/148) — 오픈소스 CLI 에이전트 모드');
+  // 1.9.149: REPL 진입 — 인자 없거나 --interactive 명시 (Hermes/OpenClaw 스타일)
+  if (!task || has('--interactive') || has('--repl')) {
+    if (process.stdin.isTTY && !has('--no-repl') && process.env.LEERNESS_NO_PROMPT !== '1') {
+      const t0 = Date.now();
+      await _agentRepl(root, {
+        provider: arg('--provider', null),
+        model: arg('--model', null),
+        role: arg('--role', 'actor')
+      });
+      _recordRun(root, { kind: 'agent_repl_session', durationMs: Date.now() - t0, ok: true });
+      return;
+    }
+    // non-TTY: 사용법만 출력
+    log('# leerness agent (1.9.146/148/149) — Hermes/OpenClaw 스타일 CLI 에이전트');
     log('');
     log('사용법:');
-    log('  leerness agent "<task>"                    # 1회 위임 (actor 역할 기본)');
-    log('  leerness agent "<task>" --role planner     # 계획만, 코드 작성 없음 (1.9.148)');
-    log('  leerness agent "<task>" --role reviewer    # 비판적 검토 (1.9.148)');
-    log('  leerness agent "<task>" --role actor       # 계획대로 실행');
-    log('  leerness agent "<task>" --provider ollama  # provider 선택');
-    log('  leerness agent "<task>" --dry-run          # LLM 호출 없이 흐름만');
+    log('  leerness agent                              # 🆕 1.9.149 REPL 모드 (모델 선택 + 채팅)');
+    log('  leerness agent "<task>"                     # 1회 위임 (actor 역할 기본)');
+    log('  leerness agent "<task>" --role planner      # 계획만 (1.9.148)');
+    log('  leerness agent "<task>" --role reviewer     # 비판적 검토 (1.9.148)');
+    log('  leerness agent --interactive --model qwen2.5-coder  # 명시적 REPL + model 선택');
+    log('');
+    log('REPL 메타 명령: :help / :model / :role / :provider / :history / :save / :quit');
     log('');
     log('현재 활성 provider: ' + (_activeCliAgents().join(', ') || '(없음) — .env에서 LEERNESS_ENABLE_* 활성화'));
     log('권한 모드: ' + (_readPermissions(root).mode || 'basic'));
@@ -10024,10 +10250,13 @@ async function agentCmd(root, taskArg) {
     log('\n[ollama 호출 중...]');
     // 1.9.148: role prompt 자동 prepend
     const finalPrompt = `${rolePrompt}\n\nTask: ${task}`;
+    const t0 = Date.now();
     const r = await _ollamaChat(finalPrompt);
+    const dt = Date.now() - t0;
+    // 1.9.149: observability 기록
+    _recordRun(root, { kind: 'agent_one_shot', provider: 'ollama', model: r.model, role, durationMs: dt, ok: r.ok, error: r.error, task: task.slice(0, 200), responseChars: (r.response || '').length });
     if (r.ok) {
-      log('\n[response (model=' + r.model + ', role=' + role + ')]\n' + r.response);
-      // task-log 자동 기록
+      log('\n[response (model=' + r.model + ', role=' + role + ', ' + dt + 'ms)]\n' + r.response);
       try {
         const tlp = taskLogPath(root);
         const block = `\n## ${today()} leerness agent (ollama:${r.model}, role=${role})\n- task: ${task.slice(0, 200)}\n- response (preview): ${r.response.slice(0, 240).replace(/\n+/g, ' ')}\n`;
@@ -10876,6 +11105,9 @@ async function main() {
   if (cmd === 'creds' && args[1] === 'check')     return credsCheckCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'creds' && args[1] === 'refresh')   return credsRefreshTimestampCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'deploy' && args[1] === 'auto')     return deployAutoCmd(arg('--path', process.cwd()), args[2]);
+  // 1.9.149: observability lite + runs list/show
+  if (cmd === 'runs' && args[1] === 'list')       return runsListCmd(arg('--path', process.cwd()));
+  if (cmd === 'runs' && args[1] === 'show')       return runsShowCmd(arg('--path', process.cwd()), args[2]);
   // 1.9.85: leerness health — 종합 헬스 체크
   if (cmd === 'health') return healthCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));
