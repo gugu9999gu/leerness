@@ -1,5 +1,66 @@
 # Changelog
 
+## 1.9.176 — 2026-05-21
+
+**⚠ 사용자 명시: `leerness review-request` — 사용자 요구를 무조건 구현 전 사전 검토.**
+
+사용자 명시: *"leerness가 적용된 프로젝트는 사용자의 요구를 무조건적으로 구현하기 전에, 충돌이 발생할 수 있는 부분이나 제작하고자 하는 기능 등을 구현하거나 설계할 때 더 효율적인 단계가 있는지 검토해보고 제시할 수도 있도록 설계"*.
+
+### `leerness review-request "<request>"` — 9개 신호 분석
+| 신호 | 데이터 소스 |
+|---|---|
+| **estimatedType** | route 키워드 매핑 (feature/bugfix/refactor/research/planning/release/consistency) |
+| **conflicts** | lessons 실패 패턴 + 진행 중 task + taskLogFails |
+| **reuseCandidates** | skills 매칭 + reuse-map 키워드 검색 |
+| **lessonsRecall** | 과거 decisions + 관련 lessons |
+| **planConflicts** | 진행 중 milestone (plan.md) |
+| **featureConflicts** | feature_graph.md 영역 겹침 |
+| **recommendedSteps** | 작업 유형별 3-4단계 권장 흐름 |
+| **efficiencyHints** | 재사용/sub-agent/skill 활용 제안 |
+| **proceed** | true (안전) / false (사용자 확인 필요) |
+
+### 사용 예
+```bash
+$ leerness review-request "OAuth 로그인 구현해줘"
+# leerness review-request (1.9.176 사전 검토)
+요청: "OAuth 로그인 구현해줘"
+추정 작업 유형: feature
+
+## 💡 효율 제안
+  👥 leerness agents recommend feature — 작업 유형별 sub-agent 매핑 활용 가능
+
+## 📍 권장 단계 (feature)
+  1) leerness reuse find "<핵심 capability>" — 중복 구현 사전 차단
+  2) leerness plan add "<milestone>" — 진행 추적
+  3) leerness contract verify SPEC.md src/<mod>.js — 사양 ↔ 구현 일치 검증
+  4) verify-claim --run-tests 로 evidence 의무화
+
+## ▶ 진행 권장: ✓ 진행 안전
+   사유: 안전 — 충돌 신호 < 3 + plan 충돌 0
+   분석 소요: 938ms
+```
+
+### 통합 — 3 진입점
+- **CLI**: `leerness review-request "<request>"` (또는 단축 `review-req`)
+- **REPL**: `:review "<request>"` slash (1.9.175 흐름 연장)
+- **MCP**: `leerness_review_request` (외부 AI 직접 호출 — **54번째 도구**)
+
+### AGENTS.md / CLAUDE.md 강제 안내
+```markdown
+## ⚠ 사용자 요청 사전 검토 의무 (1.9.176 — 사용자 명시)
+**사용자가 "X 구현해줘 / X 만들어줘 / X 추가해줘" 같은 요청을 줬을 때 무조건 즉시 구현하지 말 것.**
+먼저 `leerness review-request "<요청>"` 호출 → 분석 결과 표시 → 사용자 확인 후 구현.
+"그냥 바로 해줘 / review 건너뛰어줘" 명시 옵트아웃 시에만 review 생략.
+```
+
+### Verified
+- e2e 217/217 baseline 유지
+- stress-v121: **23/23** (함수 정의 4 + router/help 2 + 실 동작 6 + REPL/MCP 3 + metadata 2 + 누적 회귀 6)
+- 작업 유형 추정 정확도: feature/bugfix/refactor/research 4종 100% 매칭
+- VERSION = 1.9.176 · MCP **54 도구** · autonomous-rounds = 106 · main 자동 push 37 라운드 연속
+
+---
+
 ## 1.9.175 — 2026-05-21
 
 **🌉 REPL Bridge Slash 3종 — `:web` / `:pc` / `:lsp` 즉시 호출.**

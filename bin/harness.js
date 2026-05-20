@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.175';
+const VERSION = '1.9.176';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -9845,7 +9845,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_provider_remove', description: '1.9.159 — Provider Registry 에서 사용자 정의 provider 제거. 인자: { id (required), path? }. 빌트인 5종 id 는 제거 불가 (override 만 제거 가능). 🎉 MCP 50 도구 마일스톤 — Provider Registry CRUD MCP 완성 (list/add/remove)', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
     { name: 'leerness_web', description: '1.9.168 — Web Bridge (1.9.165 playwright opt-in). sub: check (설치 + permissions.browser 확인) | screenshot (URL → PNG) | extract (URL + CSS selector → DOM 텍스트). 외부 AI가 leerness 의 웹 자동화 능력을 직접 호출. playwright 미설치 시 친절 안내 (graceful). 인자: { sub (required), url?, out?, selector?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'screenshot', 'extract'] }, url: { type: 'string' }, out: { type: 'string' }, selector: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } },
     { name: 'leerness_pc', description: '1.9.168 — PC Bridge (1.9.166 robotjs/nut-tree opt-in). sub: check (설치 + permissions.mouse/keyboard) | click (x,y) | type (text) | screenshot (out). ⚠ full permissions 권장 (mouse/keyboard 접근). 외부 AI가 데스크탑 자동화 능력을 직접 호출. 인자: { sub (required), x?, y?, text?, out?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'click', 'type', 'screenshot'] }, x: { type: 'number' }, y: { type: 'number' }, text: { type: 'string' }, out: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } },
-    { name: 'leerness_lsp', description: '1.9.168 — LSP Bridge (1.9.167 typescript opt-in + regex fallback). sub: check (설치 여부) | symbols (file → function/class/interface/type/enum 목록) | references (name + in 디렉토리 → 호출 위치). 외부 AI가 코드 인텔리전스를 직접 호출 (의존성 0 fallback 동작). 🎉 MCP 53 도구 마일스톤. 인자: { sub (required), file?, name?, in?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'symbols', 'references'] }, file: { type: 'string' }, name: { type: 'string' }, in: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } }
+    { name: 'leerness_lsp', description: '1.9.168 — LSP Bridge (1.9.167 typescript opt-in + regex fallback). sub: check (설치 여부) | symbols (file → function/class/interface/type/enum 목록) | references (name + in 디렉토리 → 호출 위치). 외부 AI가 코드 인텔리전스를 직접 호출 (의존성 0 fallback 동작). 🎉 MCP 53 도구 마일스톤. 인자: { sub (required), file?, name?, in?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'symbols', 'references'] }, file: { type: 'string' }, name: { type: 'string' }, in: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } },
+    { name: 'leerness_review_request', description: '1.9.176 — 사용자 요청 사전 검토 (사용자 명시 요청). AI 에이전트가 사용자 요구를 **무조건 구현 전**에 호출. 분석: 1) estimatedType (route 추정), 2) conflicts (lesson 실패/진행중 task), 3) reuseCandidates (skill/reuse-map 매칭), 4) lessonsRecall (과거 결정), 5) planConflicts (진행중 milestone), 6) featureConflicts (feature graph 영역 겹침), 7) recommendedSteps (작업 유형별 3-5 단계), 8) efficiencyHints, 9) proceed (true/false). 사용자 결정 도움. 인자: { request (required), path? }', inputSchema: { type: 'object', properties: { request: { type: 'string' }, path: { type: 'string' } }, required: ['request'] } }
   ];
 
   function send(obj) {
@@ -9972,6 +9973,10 @@ function mcpServeCmd(root) {
             if (args.file) cliArgs.splice(2, 0, String(args.file));
             if (args.name) cliArgs.splice(2, 0, String(args.name));
             if (args.in) cliArgs.push('--in', String(args.in));
+            break;
+          case 'leerness_review_request':
+            // 1.9.176: 사용자 요청 사전 검토 (사용자 명시 요청)
+            cliArgs = ['review-request', String(args.request || ''), '--path', targetPath, '--json'];
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
@@ -11007,6 +11012,7 @@ async function _agentRepl(root, opts) {
   log(C.dim('  🆕 1.9.170 — Tab=provider cycle, Shift+Tab=model cycle, :stream on|off (실시간 출력)'));
   log(C.dim('  🆕 1.9.174 — :permissions [basic|extended|full] 로 즉시 권한 변경 (default: basic 안전)'));
   log(C.dim('  🆕 1.9.175 — :web / :pc / :lsp 으로 Bridge 3종 REPL 안에서 즉시 호출 (코드 분석/웹/PC)'));
+  log(C.dim('  🆕 1.9.176 — :review "<요청>" 으로 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계)'));
   log(C.dim(`  현재 — provider=${state.provider}  model=${state.model || '(기본)'}  role=${state.role}  permissions=${_readPermissions(root).mode}`));
   // 1.9.155: REPL 진입 시 handoff 컨텍스트 자동 노출 (UX 개선 — 사용자가 매번 :handoff 안 해도 컨텍스트 인지)
   try {
@@ -11127,6 +11133,8 @@ async function _agentRepl(root, opts) {
       log('    :brainstorm <topic>   — leerness brainstorm "topic" (관련 컨텍스트 회수)');
       log('    :tasks                — leerness task list (현재 task 상태)');
       log('    :plan                 — leerness plan show (현재 milestone)');
+      log(C.bold('\n  🆕 Review Slash (1.9.176) — 사용자 요청 사전 검토:'));
+      log('    :review "<request>"   — 충돌/재사용/효율/권장 단계 분석 후 구현 권장');
       log(C.bold('\n  🆕 Bridge Slash (1.9.175) — REPL 안에서 즉시 Bridge 호출:'));
       log('    :web check                            — playwright 설치 확인 (opt-in)');
       log('    :web screenshot <url> [--out f.png]   — URL → PNG');
@@ -11314,6 +11322,27 @@ async function _agentRepl(root, opts) {
       if (r.stdout) log(r.stdout.trim().split('\n').slice(0, 50).join('\n'));
       if (r.status === 0) log(C.green(`  ✓ :${op} ${subParts[0] || ''} 완료 (${dt}ms)`));
       else log(C.yel(`  ⚠ :${op} 실패 (exit ${r.status}, ${dt}ms)`));
+      return false;
+    }
+
+    // 1.9.176: :review <request> — 사용자 요청 사전 검토 slash (사용자 명시)
+    //   "이거 구현해줘" 같은 요청을 받으면 AI 가 먼저 :review 호출 → 충돌/재사용/효율 분석.
+    if (op === 'review') {
+      const reqText = rest.join(' ').trim();
+      if (!reqText) {
+        log(C.yel(`  ⚠ :review 는 요청 텍스트 필요 — 예: :review "OAuth 로그인 추가"`));
+        return false;
+      }
+      log(C.dim(`  → leerness review-request "${reqText.slice(0, 60)}${reqText.length > 60 ? '…' : ''}"`));
+      const t0 = Date.now();
+      const r = runCommandSafe(process.execPath, [__filename, 'review-request', reqText, '--path', root], {
+        cwd: root, root, timeout: 30000, kind: 'agent_repl_slash', label: 'repl-review',
+        env: { LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
+      });
+      const dt = Date.now() - t0;
+      if (r.stdout) log(r.stdout.trim().split('\n').slice(0, 60).join('\n'));
+      if (r.status === 0) log(C.green(`  ✓ :review 완료 (${dt}ms)`));
+      else log(C.yel(`  ⚠ :review 실패 (exit ${r.status}, ${dt}ms)`));
       return false;
     }
 
@@ -12825,6 +12854,274 @@ function lspCmd(root, sub, ...args) {
   fail(`알 수 없는 sub: ${sub} (check / symbols / references)`);
 }
 
+// 1.9.176: 사용자 요청 사전 검토 (사용자 명시 요청)
+//   AI 에이전트가 사용자 요구를 **무조건 구현하기 전**에 먼저:
+//     1) 충돌 위험 (같은 키워드의 과거 실패/lessons)
+//     2) 기존 자원 재사용 후보 (reuse-map / skills)
+//     3) 더 효율적인 단계 제안 (route + plan)
+//     4) 권장 단계 리스트 (작업 유형별)
+//   를 분석하여 사용자에게 제시. 사용자 결정 후 구현 진행.
+//
+//   사용 예:
+//     leerness review-request "OAuth 로그인 구현해줘"
+//     leerness review-request "..." --json   # MCP/외부 AI 통합
+//
+//   REPL: :review <request> (1.9.175 slash 패턴)
+//   MCP : leerness_review_request (외부 AI 직접 호출)
+function reviewRequestCmd(root, request) {
+  root = absRoot(root || process.cwd());
+  if (!request || !String(request).trim()) {
+    return fail('leerness review-request "<request>" — 사용자 요청 텍스트 필요');
+  }
+  const t0 = Date.now();
+  const text = String(request).trim();
+
+  // 1) 작업 유형 추정 (route 기반 키워드 매핑)
+  const lower = text.toLowerCase();
+  const routeKw = {
+    bugfix:      ['버그', '오류', '에러', '수정', '고쳐', '실패', 'fix', 'bug', 'error'],
+    refactor:    ['리팩토', '재구성', '정리', '개선', 'refactor', 'cleanup'],
+    feature:     ['추가', '구현', '만들', '새', '기능', 'add', 'implement', 'feature', 'create', 'new'],
+    research:    ['조사', '분석', '비교', '검토', '연구', 'research', 'analyze', 'compare', 'investigate'],
+    planning:    ['계획', '설계', '로드맵', 'plan', 'design', 'architecture', 'roadmap'],
+    release:     ['배포', '릴리즈', '버전', 'release', 'deploy', 'publish'],
+    consistency: ['일관성', '통합', '동기화', '맞춰', 'consistency', 'sync', 'align']
+  };
+  let estimatedType = 'feature';  // default
+  let maxScore = 0;
+  for (const [type, kws] of Object.entries(routeKw)) {
+    const score = kws.filter(k => lower.includes(k)).length;
+    if (score > maxScore) { maxScore = score; estimatedType = type; }
+  }
+
+  // 2) 기존 자원 회수 — brainstorm spawn (모든 surface 통합 회수)
+  const conflictHints = [];  // ⚠ 같은 키워드 + 실패/오류 패턴
+  const reuseCandidates = []; // 🔁 기존 skill / reuse-map / decision 후보
+  const lessonsRecall = [];   // 🧠 과거 lesson
+  const planConflicts = [];   // 📋 진행 중 milestone과 충돌 가능
+
+  // brainstorm 호출 (1.9.13~) — JSON 결과 회수
+  try {
+    const r = cp.spawnSync(process.execPath, [__filename, 'brainstorm', text, '--path', root, '--json'], {
+      encoding: 'utf8', timeout: 12000,
+      env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
+    });
+    if (r.stdout) {
+      const j = JSON.parse(r.stdout);
+      const hits = j.hits || {};
+      // decisions — 과거 결정 후보
+      (hits.decisions || []).slice(0, 5).forEach(d => {
+        lessonsRecall.push({ kind: 'decision', title: d.title, line: d.line, preview: (d.preview || '').slice(0, 100) });
+      });
+      // lessons — 과거 교훈 (특히 실패 키워드)
+      (hits.lessons || []).slice(0, 5).forEach(l => {
+        const preview = (l.text || l.preview || '').slice(0, 100);
+        const isFailure = /실패|오류|에러|fail|error|bug|문제|warning/i.test(preview);
+        if (isFailure) {
+          conflictHints.push({ kind: 'lesson-failure', preview, tags: l.tags });
+        } else {
+          lessonsRecall.push({ kind: 'lesson', preview, tags: l.tags });
+        }
+      });
+      // skills — 기존 skill 후보
+      (hits.skills || []).slice(0, 3).forEach(s => {
+        reuseCandidates.push({ kind: 'skill', id: s.id, displayNameKo: s.displayNameKo, capabilities: s.capabilities });
+      });
+      // tasks — 진행 중 task 충돌
+      (hits.tasks || []).slice(0, 3).forEach(tsk => {
+        if (tsk.status && /in-progress|진행/.test(String(tsk.status))) {
+          conflictHints.push({ kind: 'task-in-progress', id: tsk.id, title: tsk.title });
+        }
+      });
+      // plan milestones — 진행 중 milestone
+      (hits.planMilestones || []).slice(0, 3).forEach(m => {
+        if (m.status && /in-progress|진행/.test(String(m.status))) {
+          planConflicts.push({ kind: 'milestone-in-progress', id: m.id, title: m.title });
+        }
+      });
+      // taskLogFails — 과거 같은 키워드 실패 흔적
+      (hits.taskLogFails || []).slice(0, 3).forEach(f => {
+        conflictHints.push({ kind: 'task-log-failure', preview: (f.preview || f.text || '').slice(0, 100) });
+      });
+    }
+  } catch {}
+
+  // 3) reuse-map 매칭 — 기존 capability 등록 후보
+  try {
+    const reusePath = path.join(root, '.harness/reuse-map.md');
+    if (exists(reusePath)) {
+      const reuseLines = read(reusePath).split('\n');
+      const tokens = lower.split(/\s+/).filter(t => t.length >= 3);
+      for (const line of reuseLines) {
+        if (!/^\| /.test(line)) continue;  // 테이블 row만
+        const ll = line.toLowerCase();
+        const matched = tokens.filter(t => ll.includes(t)).length;
+        if (matched > 0) {
+          const cols = line.split('|').map(s => s.trim());
+          if (cols[1]) {
+            reuseCandidates.push({ kind: 'reuse-map', capability: cols[1], where: cols[2] || '', note: cols[3] || '' });
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 4) feature_graph — 같은 영역 변경 가능성
+  const featureConflicts = [];
+  try {
+    const fgPath = path.join(root, '.harness/feature_graph.md');
+    if (exists(fgPath)) {
+      const fg = read(fgPath);
+      const tokens = lower.split(/\s+/).filter(t => t.length >= 4);
+      // F-XXXX 노드 라인 추출
+      const nodeBlocks = fg.split(/\n### /);
+      for (const blk of nodeBlocks.slice(1)) {
+        const bl = blk.toLowerCase();
+        const matched = tokens.filter(t => bl.includes(t)).length;
+        if (matched > 0) {
+          const titleMatch = blk.match(/^([^\n]+)/);
+          const idMatch = blk.match(/F-\d+/);
+          if (titleMatch && idMatch) {
+            featureConflicts.push({ kind: 'feature', id: idMatch[0], title: titleMatch[1].trim() });
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 5) 권장 단계 (작업 유형별)
+  const recommendedSteps = {
+    feature: [
+      '1) leerness reuse find "<핵심 capability>" — 중복 구현 사전 차단',
+      '2) leerness plan add "<milestone>" — 진행 추적',
+      '3) leerness contract verify SPEC.md src/<mod>.js — 사양 ↔ 구현 일치 검증',
+      '4) verify-claim --run-tests 로 evidence 의무화'
+    ],
+    bugfix: [
+      '1) leerness brainstorm "<버그 키워드>" — 과거 같은 영역 lesson 회수',
+      '2) leerness verify-claim T-XXX --strict-claims — 낙관적 표시 사전 감지',
+      '3) verify-code --run-tests — 재현 + fix 검증',
+      '4) leerness lesson save "<root cause>" — 같은 실수 재발 차단'
+    ],
+    refactor: [
+      '1) leerness reuse-map — 영향 범위 파악',
+      '2) leerness impact <file> — 강한/약한 참조 분리',
+      '3) leerness contract verify — 외부 인터페이스 보존 확인',
+      '4) verify-code --run-tests + 회귀 테스트'
+    ],
+    research: [
+      '1) leerness brainstorm "<주제>" — 누적 컨텍스트 회수',
+      '2) leerness lessons --query "<주제>" — 과거 같은 영역 결정',
+      '3) leerness review <file> --persona research — 깊이 검토',
+      '4) leerness decision add "<결론>" — 회수 가능하게 영구화'
+    ],
+    planning: [
+      '1) leerness plan add "<milestone>" — 분해 시작',
+      '2) leerness reuse-map — 기존 자원 인벤토리',
+      '3) leerness agents recommend planning — sub-agent 분배',
+      '4) leerness session close — 결정 영구화'
+    ],
+    release: [
+      '1) leerness health — production-ready 확인',
+      '2) leerness audit + verify-code — 보안 + 검수',
+      '3) leerness release bump + note + publish'
+    ],
+    consistency: [
+      '1) leerness audit — design/reuse/handoff 일관성 검사',
+      '2) leerness consistency check — 잠재 일관성 위반',
+      '3) leerness drift check --auto-fix — 자동 회복'
+    ]
+  }[estimatedType] || [];
+
+  // 6) 효율 제안 (적용 가능한 sub-agent + skill)
+  const efficiencyHints = [];
+  if (reuseCandidates.length > 0) {
+    efficiencyHints.push(`🔁 기존 자원 ${reuseCandidates.length}건 발견 — 신규 구현 전 재사용 검토 권장`);
+  }
+  if (conflictHints.length > 0) {
+    efficiencyHints.push(`⚠ 충돌 신호 ${conflictHints.length}건 — 과거 실패 lesson / 진행 중 task 확인 필요`);
+  }
+  if (planConflicts.length > 0) {
+    efficiencyHints.push(`📋 진행 중 milestone ${planConflicts.length}건과 영역 겹침 가능 — plan 정렬 권장`);
+  }
+  if (featureConflicts.length > 0) {
+    efficiencyHints.push(`🕸 Feature Graph ${featureConflicts.length}건 영역 겹침 — 의존성 사전 확인`);
+  }
+  // 다중 에이전트 분배 추천
+  if (estimatedType === 'feature' || estimatedType === 'planning') {
+    efficiencyHints.push(`👥 leerness agents recommend ${estimatedType} — 작업 유형별 sub-agent 매핑 활용 가능`);
+  }
+  if (efficiencyHints.length === 0) {
+    efficiencyHints.push('✨ 충돌 신호 없음 — 즉시 진행 안전');
+  }
+
+  // 7) proceed 권장 (충돌 critical 시 false)
+  const proceed = conflictHints.length < 3 && planConflicts.length === 0;
+
+  const dt = Date.now() - t0;
+  const out = {
+    request: text,
+    estimatedType,
+    conflicts: conflictHints,
+    reuseCandidates,
+    lessonsRecall,
+    planConflicts,
+    featureConflicts,
+    recommendedSteps,
+    efficiencyHints,
+    proceed,
+    proceedReason: proceed ? '안전 — 충돌 신호 < 3 + plan 충돌 0' : '⚠ 충돌 critical — 사용자 확인 후 진행',
+    durationMs: dt
+  };
+
+  try { _recordRun(root, { kind: 'review_request', estimatedType, conflicts: conflictHints.length, reuse: reuseCandidates.length, durationMs: dt, ok: true }); } catch {}
+
+  if (has('--json')) {
+    log(JSON.stringify(out, null, 2));
+    return;
+  }
+
+  log(`# leerness review-request (1.9.176 사전 검토)`);
+  log(`요청: "${text.slice(0, 200)}${text.length > 200 ? '…' : ''}"`);
+  log(`추정 작업 유형: ${estimatedType}`);
+  log('');
+  if (conflictHints.length) {
+    log(`## ⚠ 충돌 신호 (${conflictHints.length})`);
+    conflictHints.slice(0, 5).forEach(c => log(`  - [${c.kind}] ${c.title || c.id || ''} ${c.preview || ''}`.trim()));
+    log('');
+  }
+  if (reuseCandidates.length) {
+    log(`## 🔁 재사용 후보 (${reuseCandidates.length}) — 신규 구현 전 검토`);
+    reuseCandidates.slice(0, 5).forEach(r => {
+      if (r.kind === 'skill') log(`  - [skill] ${r.id}${r.displayNameKo ? ' · ' + r.displayNameKo : ''}`);
+      else if (r.kind === 'reuse-map') log(`  - [reuse] ${r.capability} @ ${r.where}`);
+    });
+    log('');
+  }
+  if (lessonsRecall.length) {
+    log(`## 🧠 과거 컨텍스트 (${lessonsRecall.length}) — 관련 결정/교훈`);
+    lessonsRecall.slice(0, 3).forEach(l => log(`  - [${l.kind}] ${l.title || l.preview}`));
+    log('');
+  }
+  if (planConflicts.length || featureConflicts.length) {
+    log(`## 📋 진행 중 영역 (${planConflicts.length + featureConflicts.length})`);
+    planConflicts.forEach(m => log(`  - [milestone] ${m.id}: ${m.title}`));
+    featureConflicts.slice(0, 5).forEach(f => log(`  - [feature] ${f.id}: ${f.title}`));
+    log('');
+  }
+  log(`## 💡 효율 제안`);
+  efficiencyHints.forEach(h => log(`  ${h}`));
+  log('');
+  if (recommendedSteps.length) {
+    log(`## 📍 권장 단계 (${estimatedType})`);
+    recommendedSteps.forEach(s => log(`  ${s}`));
+    log('');
+  }
+  log(`## ▶ 진행 권장: ${proceed ? '✓ 진행 안전' : '⚠ 사용자 확인 필요'}`);
+  log(`   사유: ${out.proceedReason}`);
+  log(`   분석 소요: ${dt}ms`);
+}
+
 // 1.9.164: leerness which — 진단 도구 (구버전 충돌 / npx 캐시 / PATH 충돌 해결)
 //   사용자가 "최신 버전 작동 안 함" 의심 시: 실제 실행 중인 leerness 의 경로 / 버전 / npm 캐시 / PATH 후보 표시.
 function whichCmd() {
@@ -12906,7 +13203,7 @@ function whichCmd() {
 }
 
 function help() {
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -12988,6 +13285,13 @@ async function main() {
   if (cmd === 'pc') return pcCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
 
   if (cmd === 'lsp') return lspCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+
+  // 1.9.176: leerness review-request "<request>" — 사용자 요청 사전 검토 (사용자 명시)
+  //   AI 에이전트가 무조건 구현 전에 충돌/재사용/효율/권장 단계 분석.
+  if (cmd === 'review-request' || cmd === 'review-req') {
+    const reqText = args.slice(1).filter(x => !x.startsWith('-')).join(' ');
+    return reviewRequestCmd(arg('--path', process.cwd()), reqText);
+  }
   if (cmd === 'contract' && args[1] === 'verify') return contractVerifyCmd(args[2], args[3]);
   if (cmd === 'drift' && (args[1] === 'check' || !args[1])) return driftCheckCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'usage' && (args[1] === 'stats' || !args[1])) return usageStatsCmd(args[2] || arg('--path', process.cwd()));

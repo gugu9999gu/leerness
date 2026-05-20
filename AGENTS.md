@@ -64,6 +64,23 @@ leerness가 자동 검증 가능한 trigger:
 
 자동 검증 가능한 룰의 실행은 `leerness release bump`, `leerness release note "..."`, `leerness release publish`를 사용해 자동화합니다.
 
+## ⚠ 사용자 요청 사전 검토 의무 (1.9.176 — 사용자 명시)
+**사용자가 "X 구현해줘 / X 만들어줘 / X 추가해줘" 같은 요청을 줬을 때 무조건 즉시 구현하지 말 것.**
+먼저 `leerness review-request "<요청>"` (또는 REPL `:review "<요청>"`) 를 호출해 다음을 분석한 후 사용자에게 결과 요약 제시:
+1. 추정 작업 유형 (route)
+2. 충돌 신호 (과거 실패 lesson + 진행 중 task)
+3. 재사용 후보 (skill / reuse-map)
+4. 더 효율적인 단계 제안 (sub-agent 분배 / plan add)
+5. 권장 단계 (작업 유형별)
+6. `proceed`: true → 즉시 진행 / false → 사용자 확인 필요
+
+| 사용자 발화 | 즉시 실행할 명령 |
+|---|---|
+| "X 구현해줘 / X 추가해줘 / X 만들어줘" | `leerness review-request "<요청>"` → 분석 결과 표시 → 사용자 확인 후 구현 |
+| "그냥 바로 해줘 / review 건너뛰어줘" | review 생략하고 즉시 진행 (사용자 명시 옵트아웃) |
+
+REPL 안에서 `:review "<request>"` slash 즉시 호출. MCP 도구 `leerness_review_request` 로 외부 AI 도 동일 분석 가능.
+
 ## REPL Agent + Bridge 명령 (1.9.149~170)
 사용자가 "에이전트 켜줘 / REPL 모드 / 대화형" 또는 코드 인텔리전스/웹/PC 자동화를 요청하면 즉시 호출합니다.
 

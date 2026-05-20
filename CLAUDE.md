@@ -12,6 +12,15 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 
 자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.
 
+## ⚠ 사용자 요청 사전 검토 의무 (1.9.176 사용자 명시)
+사용자가 새 기능/구현 요청을 주면 **무조건 구현 전**에:
+```bash
+leerness review-request "<사용자 요청>"
+# 또는 REPL: :review "<request>"
+```
+→ 충돌/재사용/효율/권장 단계 분석 결과를 사용자에게 제시 → 사용자 결정 후 구현.
+*"그냥 바로 해줘"* 같은 명시적 옵트아웃 시에만 review 생략.
+
 ## REPL Agent (1.9.149~170) — 🎉 100 라운드 자율 마일스톤
 사용자가 "에이전트 / REPL / 대화형 모드"를 요청하면 `leerness agent .` 실행:
 - **Tab** → provider cycle (ollama ⇄ claude ⇄ codex ⇄ gemini ⇄ copilot)
