@@ -807,13 +807,14 @@ total++;
     && /\| gemini \|/.test(r1.stdout)
     && /\| copilot \|/.test(r1.stdout);
   // env 모두 0 → 비활성
-  const env2 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_GEMINI: '0', LEERNESS_ENABLE_COPILOT: '0' };
+  // 1.9.146: Ollama 추가 → 5 CLI
+  const env2 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_GEMINI: '0', LEERNESS_ENABLE_COPILOT: '0', LEERNESS_ENABLE_OLLAMA: '0' };
   const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'list', '--json'], { encoding: 'utf8', timeout: 15000, env: env2 });
   let parsed = null;
   try { parsed = JSON.parse(r2.stdout); } catch {}
-  const okJson = parsed && Array.isArray(parsed.agents) && parsed.agents.length === 4 && parsed.agents.every(a => a.status !== 'ready');
+  const okJson = parsed && Array.isArray(parsed.agents) && parsed.agents.length === 5 && parsed.agents.every(a => a.status !== 'ready');
   const ok = okList && okJson;
-  console.log(ok ? '✓ B(1.9.30) agents list: 4 CLI 정의 + env 0 시 모두 비활성' : `✗ agents list 실패 (list=${okList} json=${okJson})`);
+  console.log(ok ? '✓ B(1.9.30+1.9.146) agents list: 5 CLI 정의 (claude/codex/gemini/copilot/ollama)' : `✗ agents list 실패 (list=${okList} json=${okJson})`);
   if (!ok) { failed++; console.log(r1.stdout.slice(0, 500)); }
 }
 
@@ -851,10 +852,11 @@ total++;
   const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota', '--json'], { encoding: 'utf8', timeout: 15000, env });
   let parsed = null;
   try { parsed = JSON.parse(r2.stdout); } catch {}
-  const okJson = parsed && Array.isArray(parsed.quota) && parsed.quota.length === 4
+  // 1.9.146: Ollama 추가 → 5 CLI
+  const okJson = parsed && Array.isArray(parsed.quota) && parsed.quota.length === 5
     && parsed.quota.every(q => typeof q.id === 'string' && typeof q.status === 'string' && (q.hint === null || typeof q.hint === 'string'));
   const ok = okText && okJson;
-  console.log(ok ? '✓ B(1.9.31) agents quota: 4 CLI 사용량/안내 + JSON 출력' : `✗ quota 실패 (text=${okText} json=${okJson})`);
+  console.log(ok ? '✓ B(1.9.31+1.9.146) agents quota: 5 CLI 사용량/안내' : `✗ quota 실패 (text=${okText} json=${okJson})`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 

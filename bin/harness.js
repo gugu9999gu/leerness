@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.145';
+const VERSION = '1.9.146';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -681,35 +681,61 @@ async function resolveInstallOptions(root, opts = {}) {
       lang = a === '2' ? 'ko' : a === '3' ? 'en' : detectLanguageValue(root, 'auto');
     }
   }
+  // 1.9.146: 스킬 라이브러리 — 표준 공식 추천 자동 설치 / 건너뛰기 2-option 단순화 (사용자 명시 요청 #1)
   if (shouldAsk && !explicitSkills) {
     if (useInteractive) {
-      // 카탈로그에서 옵션 생성
-      const cat = Object.entries(skillCatalog).map(([id, meta]) => ({
-        id, label: id, description: (meta.displayNameKo || id).slice(0, 50)
-      }));
-      // 추천 4개의 인덱스 계산
-      const recommended = ['office', 'commerce-api', 'ai-verified-skill-publisher', 'feature-implementation'];
-      const defaults = recommended.map(id => cat.findIndex(c => c.id === id)).filter(i => i >= 0);
-      const picked = await _selectMany(
-        '설치할 스킬 라이브러리 (Space=토글, a=전체, n=해제, Enter=확정)',
-        cat,
-        { defaults }
-      );
-      skills = picked.map(p => p.id);
+      const opt = await _selectOne('스킬 라이브러리 설치 (표준 공식 5종)', [
+        { label: '표준 공식 5종 자동 설치 (추천)', description: 'office · commerce-api · ai-verified-skill-publisher · feature-implementation · project-roadmap-generator', id: 'recommended' },
+        { label: '건너뛰기 (필요할 때 leerness skill install 로 추가)', description: '하네스만 설치, 스킬은 없음', id: 'none' }
+      ], { defaultIndex: 0 });
+      skills = (opt && opt.id === 'recommended') ? parseSkillsValue('recommended') : [];
     } else {
-      log('\n설치할 스킬 라이브러리를 선택하세요.');
-      log('0) 기본 하네스만 설치');
-      log('1) 추천: office, commerce-api, ai-verified-skill-publisher, feature-implementation');
-      log('2) 전체 스킬 설치'); log('3) 직접 입력');
-      skillList();
+      log('\n스킬 라이브러리 설치를 선택하세요.');
+      log('1) 표준 공식 5종 자동 설치 (추천)');
+      log('2) 건너뛰기 (leerness skill install 로 추가 가능)');
       const a = await ask('선택 [1]: ');
-      if (!a || a === '1') skills = parseSkillsValue('recommended');
-      else if (a === '2') skills = parseSkillsValue('all');
-      else if (a === '3') skills = parseSkillsValue(await ask('스킬 ID를 쉼표로 입력: '));
-      else if (a === '0') skills = [];
+      skills = (a === '2') ? [] : parseSkillsValue('recommended');
     }
   }
-  return { lang, skills };
+  // 1.9.146: CLI 에이전트 활성화 선택 (사용자 명시 요청 #3 — Ollama 추가)
+  //   설치 마지막에 .env.example 에 활성화 옵트인 키만 기록 (실제 토큰 입력은 사용자가 직접).
+  let agentsOptIn = null;
+  if (shouldAsk && !opts._skipAgentsPrompt) {
+    if (useInteractive) {
+      const aOpt = await _selectOne('CLI 에이전트 활성화 (sub-agent 위임용, opt-in)', [
+        { label: '활성화 안함 (나중에 .env에서 직접 설정)', description: '권장 — 토큰/모델은 사용자가 직접 관리', id: 'none' },
+        { label: 'Claude (LEERNESS_CLAUDE_ENABLED=1)', description: 'claude CLI 또는 ANTHROPIC_API_KEY', id: 'claude' },
+        { label: 'Ollama (LEERNESS_OLLAMA_ENABLED=1) — 로컬 LLM', description: 'http://localhost:11434 (모델: llama3/qwen 등)', id: 'ollama' },
+        { label: '여러 개 (claude+codex+gemini+copilot+ollama)', description: '전체 후보 활성화 (각각 별도 토큰 필요)', id: 'all' }
+      ], { defaultIndex: 0 });
+      agentsOptIn = aOpt ? aOpt.id : 'none';
+    } else {
+      log('\nCLI 에이전트 활성화 (opt-in, 나중에 .env에서 변경 가능):');
+      log('1) 활성화 안함  2) Claude  3) Ollama  4) 전체');
+      const a = await ask('선택 [1]: ');
+      agentsOptIn = a === '2' ? 'claude' : a === '3' ? 'ollama' : a === '4' ? 'all' : 'none';
+    }
+  }
+  // 1.9.146: 권한 모드 (사용자 명시 요청 #5 — agent IDE 모드 사전 prompt)
+  let permissionMode = null;
+  if (shouldAsk && !opts._skipPermissionsPrompt) {
+    if (useInteractive) {
+      const pOpt = await _selectOne('agent 권한 모드 (leerness agent 사용 시 적용)', [
+        { label: 'basic (안전) — 읽기/쓰기 .harness/ 만', description: '권장 — 파일시스템/네트워크 거부, .harness 안만 쓰기', id: 'basic' },
+        { label: 'extended — 프로젝트 폴더 + shell allowlist', description: '프로젝트 폴더 read/write, 사전 정의된 명령만 exec', id: 'extended' },
+        { label: 'full — 전체 (마우스/키보드/웹/관리자) ⚠ 위험', description: '⚠ IDE 통합 시에만 권장 — 모든 PC 작업 가능', id: 'full' }
+      ], { defaultIndex: 0 });
+      permissionMode = pOpt ? pOpt.id : 'basic';
+    } else {
+      log('\nagent 권한 모드 (leerness agent 명령 사용 시):');
+      log('1) basic (안전) — .harness/ 만');
+      log('2) extended — 프로젝트 폴더 + shell allowlist');
+      log('3) full ⚠ — 마우스/키보드/웹/관리자 전체 (IDE 통합 시에만)');
+      const a = await ask('선택 [1]: ');
+      permissionMode = a === '2' ? 'extended' : a === '3' ? 'full' : 'basic';
+    }
+  }
+  return { lang, skills, agentsOptIn, permissionMode };
 }
 
 async function install(root, opts = {}) {
@@ -731,10 +757,13 @@ async function install(root, opts = {}) {
   const resolved = await resolveInstallOptions(root, opts);
   const lang = resolved.lang;
   const skills = resolved.skills;
-  log(`Leerness v${VERSION}`);
+  // 1.9.146: 사용자 명시 요청 #2 — 모든 prompt 끝난 후 한꺼번에 설치 단계 진입 (응답 수집과 파일 쓰기 분리)
+  log(`\n📦 응답 수집 완료 — leerness 파일 설치 시작 (Leerness v${VERSION})`);
   log(`Target: ${root}`);
   log(`Language: ${lang}`);
-  log(`Skills: ${skills.length ? skills.join(', ') : 'none'}`);
+  log(`Skills: ${skills.length ? skills.join(', ') : 'none (건너뜀)'}`);
+  if (resolved.agentsOptIn && resolved.agentsOptIn !== 'none') log(`Agents 활성화: ${resolved.agentsOptIn}`);
+  if (resolved.permissionMode) log(`Agent 권한 모드: ${resolved.permissionMode}`);
   // 1.9.10: 스킬 카탈로그 출처 안내
   if (SKILLPACK_SOURCE === 'builtin') log(`Skill catalog source: builtin (leerness-skillpack 미설치 — \`npm i leerness-skillpack\`로 확장 가능)`);
   else log(`Skill catalog source: ${SKILLPACK_SOURCE} (leerness-skillpack${SKILLPACK_META ? ` v${SKILLPACK_META.version}` : ''})`);
@@ -775,24 +804,32 @@ async function install(root, opts = {}) {
       '.harness/skill-publish.local.json','.harness/**/*.local.json','.env.local',
       '.harness/archive/','.harness/migration-report.md','.harness/cache/'
     ]);
+    // 1.9.146: agentsOptIn 선택에 따라 LEERNESS_ENABLE_* 플래그 자동 설정 (사용자 명시 요청 #3 — Ollama 추가)
+    const a = resolved.agentsOptIn || 'none';
+    const enable = (cli) => a === 'all' || a === cli;
     mergeLinesFile(path.join(root, '.env.example'), [
       '# Leerness uses environment variable names only. Do not store real secrets here.',
       'LEERNESS_NPM_TOKEN=','LEERNESS_GITHUB_TOKEN=',
       '# 1.9.22 — orchestrate opt-in. URL이 설정되면 leerness가 Ollama를 사용 가능. 미설정 시 LLM 호출 자동 시작 금지.',
-      'LEERNESS_OLLAMA_BASE_URL=',
-      '# 선택. 기본 모델 (orchestrate --model 로 override 가능).',
+      `LEERNESS_OLLAMA_BASE_URL=${enable('ollama') ? 'http://localhost:11434' : ''}`,
+      '# 선택. 기본 모델 (orchestrate --model 로 override 가능). 예: llama3 / qwen2.5-coder / gpt-oss',
       'LEERNESS_OLLAMA_MODEL=',
-      '# 1.9.30 — 외부 AI CLI 활성화 플래그. 1=활성, 0/미설정=비활성. 메인 에이전트가 sub-agent 분배 시 활성 CLI들에 작업 위임 가능.',
-      'LEERNESS_ENABLE_CLAUDE=1',
-      'LEERNESS_ENABLE_CODEX=0',
-      'LEERNESS_ENABLE_GEMINI=0',
-      'LEERNESS_ENABLE_COPILOT=0',
+      '# 1.9.30+1.9.146 — 외부 AI CLI 활성화 플래그. 1=활성, 0/미설정=비활성. 메인 에이전트가 sub-agent 분배 시 활성 CLI들에 작업 위임 가능.',
+      `LEERNESS_ENABLE_CLAUDE=${enable('claude') ? 1 : 0}`,
+      `LEERNESS_ENABLE_CODEX=${enable('all') ? 1 : 0}`,
+      `LEERNESS_ENABLE_GEMINI=${enable('all') ? 1 : 0}`,
+      `LEERNESS_ENABLE_COPILOT=${enable('all') ? 1 : 0}`,
+      `LEERNESS_ENABLE_OLLAMA=${enable('ollama') ? 1 : 0}`,
       '# 1.9.42 — agentskills.io 공개 표준 스킬 자동 탐색 (opt-in). URL 설정 시 `leerness skill discover` 사용 가능.',
       '#   예: LEERNESS_SKILL_DISCOVER_URL=https://agentskills.io/llms.txt',
       'LEERNESS_SKILL_DISCOVER_URL=',
       '# (선택) 사용자 요청 분석 시 자동 매칭 스킬 추천. 1=활성, 0/미설정=비활성.',
       'LEERNESS_SKILL_AUTO_DISCOVER=0'
     ]);
+    // 1.9.146: agent 권한 파일 자동 생성 (사용자 명시 요청 #5)
+    if (resolved.permissionMode) {
+      try { _writePermissionsPreset(root, resolved.permissionMode); } catch (e) { warn('permissions 생성 실패: ' + e.message); }
+    }
     mergeLinesFile(path.join(root, '.gitattributes'), [
       '* text=auto eol=lf','*.bat text eol=crlf','*.ps1 text eol=crlf'
     ]);
@@ -4430,7 +4467,10 @@ const EXTERNAL_AGENTS = [
   { id: 'gemini',  bin: 'gemini',  envFlag: 'LEERNESS_ENABLE_GEMINI',  versionArgs: ['--version'], desc: 'Google Gemini CLI (--yolo 모드 워크스페이스 직접 수정 가능)',
     installCmd: 'npm i -g @google/gemini-cli', installHint: 'https://github.com/google-gemini/gemini-cli' },
   { id: 'copilot', bin: 'gh',      envFlag: 'LEERNESS_ENABLE_COPILOT', versionArgs: ['copilot', '--version'], desc: 'GitHub Copilot CLI (gh copilot)',
-    installCmd: 'gh extension install github/gh-copilot', installHint: 'https://github.com/github/gh-copilot (gh CLI 선행 설치 필요)' }
+    installCmd: 'gh extension install github/gh-copilot', installHint: 'https://github.com/github/gh-copilot (gh CLI 선행 설치 필요)' },
+  // 1.9.146: Ollama 추가 (사용자 명시 요청 #3) — 로컬 LLM, HTTP API 11434
+  { id: 'ollama',  bin: 'ollama',  envFlag: 'LEERNESS_ENABLE_OLLAMA',  versionArgs: ['--version'], desc: 'Ollama 로컬 LLM (http://localhost:11434, llama3/qwen 등)',
+    installCmd: 'curl -fsSL https://ollama.com/install.sh | sh (또는 https://ollama.com/download)', installHint: 'ollama serve 실행 + ollama pull <model>' }
 ];
 
 // 1.9.36: 작업 키워드 분석으로 최적 CLI 추천
@@ -9786,6 +9826,203 @@ function envDetectCmd(root, opts = {}) {
   if (diff.missing && diff.missing.length) process.exitCode = 1;
 }
 
+// ===== 1.9.146: Agent 권한 시스템 (사용자 명시 요청 #5) =====
+// .harness/agent-permissions.json — leerness agent 명령 실행 시 적용. 기본 deny-by-default.
+function _permissionsPath(root) { return path.join(absRoot(root), '.harness', 'agent-permissions.json'); }
+function _permissionsPreset(mode) {
+  // basic: 안전 — .harness/ 안만 쓰기
+  // extended: 프로젝트 폴더 + shell allowlist
+  // full: 전체 (mouse/keyboard/web/admin) — IDE 통합 시
+  const presets = {
+    basic: {
+      mode: 'basic',
+      filesystem: { read: true, write: true, restrictTo: ['.harness/', 'progress-tracker.md', 'session-handoff.md'], delete: false },
+      shell: { exec: false, allowList: [] },
+      network: { fetch: false, outboundAllowList: [] },
+      mouse: false, keyboard: false, browser: false, admin: false,
+      requireConfirmation: ['shell.exec', 'filesystem.delete', 'network.fetch']
+    },
+    extended: {
+      mode: 'extended',
+      filesystem: { read: true, write: true, restrictTo: ['./'], delete: false },
+      shell: { exec: true, allowList: ['npm', 'git', 'node', 'pnpm', 'yarn', 'pytest', 'jest', 'tsc'] },
+      network: { fetch: true, outboundAllowList: ['localhost', 'github.com', 'api.github.com', 'npmjs.org'] },
+      mouse: false, keyboard: false, browser: false, admin: false,
+      requireConfirmation: ['filesystem.delete', 'shell.exec_outside_allowlist']
+    },
+    full: {
+      mode: 'full',
+      filesystem: { read: true, write: true, restrictTo: ['./'], delete: true },
+      shell: { exec: true, allowList: ['*'] },
+      network: { fetch: true, outboundAllowList: ['*'] },
+      mouse: true, keyboard: true, browser: true, admin: true,
+      requireConfirmation: ['filesystem.delete_outside_project', 'admin_action']
+    }
+  };
+  return presets[mode] || presets.basic;
+}
+function _writePermissionsPreset(root, mode) {
+  const preset = _permissionsPreset(mode);
+  preset.generatedAt = new Date().toISOString();
+  preset.leernessVersion = VERSION;
+  mkdirp(path.dirname(_permissionsPath(root)));
+  writeUtf8(_permissionsPath(root), JSON.stringify(preset, null, 2) + '\n');
+  return preset;
+}
+function _readPermissions(root) {
+  const p = _permissionsPath(root);
+  if (!exists(p)) return _permissionsPreset('basic');
+  try { return JSON.parse(read(p)); } catch { return _permissionsPreset('basic'); }
+}
+function permissionsListCmd(root) {
+  root = absRoot(root || process.cwd());
+  const p = _readPermissions(root);
+  if (has('--json')) { log(JSON.stringify(p, null, 2)); return; }
+  log(`# leerness permissions (1.9.146)`);
+  log(`mode: ${p.mode || 'basic'}  ·  generated: ${p.generatedAt || '(없음)'}`);
+  log('');
+  log(`📂 filesystem: read=${p.filesystem?.read} write=${p.filesystem?.write} delete=${p.filesystem?.delete}`);
+  if (p.filesystem?.restrictTo?.length) log(`   restrict to: ${p.filesystem.restrictTo.join(', ')}`);
+  log(`💻 shell.exec: ${p.shell?.exec}  ·  allowList: ${(p.shell?.allowList || []).join(', ') || '(없음)'}`);
+  log(`🌐 network.fetch: ${p.network?.fetch}  ·  outbound: ${(p.network?.outboundAllowList || []).join(', ') || '(없음)'}`);
+  log(`🖱  mouse=${p.mouse}  ⌨ keyboard=${p.keyboard}  🌐 browser=${p.browser}  👑 admin=${p.admin}`);
+  if (p.requireConfirmation?.length) log(`\n⚠ 확인 필요: ${p.requireConfirmation.join(', ')}`);
+}
+function permissionsSetCmd(root, mode) {
+  root = absRoot(root || process.cwd());
+  if (!['basic', 'extended', 'full'].includes(mode)) {
+    return fail(`mode 는 basic / extended / full — 받음: ${mode || '(없음)'}`);
+  }
+  const p = _writePermissionsPreset(root, mode);
+  ok(`permissions mode set: ${p.mode}`);
+  log(`   → 수정: ${_permissionsPath(root).replace(root, '.').replace(/\\/g, '/')}`);
+  if (mode === 'full') warn(`⚠ full 모드 — IDE 통합 외 환경에서는 위험. agent 작업 시작 전 leerness permissions list 로 재확인 권장.`);
+}
+function permissionCheck(root, action, target) {
+  // leerness agent 호출 시 권한 검증 — true(허용) / false(거부) 반환
+  const p = _readPermissions(root);
+  try {
+    if (action === 'filesystem.read') return !!p.filesystem?.read;
+    if (action === 'filesystem.write') {
+      if (!p.filesystem?.write) return false;
+      const restrict = p.filesystem?.restrictTo || [];
+      if (!restrict.length || restrict.includes('./') || restrict.includes('*')) return true;
+      return restrict.some(prefix => (target || '').startsWith(prefix));
+    }
+    if (action === 'filesystem.delete') return !!p.filesystem?.delete;
+    if (action === 'shell.exec') {
+      if (!p.shell?.exec) return false;
+      const allow = p.shell?.allowList || [];
+      if (allow.includes('*')) return true;
+      const first = String(target || '').split(/\s+/)[0];
+      return allow.includes(first);
+    }
+    if (action === 'network.fetch') return !!p.network?.fetch;
+    if (action === 'mouse') return !!p.mouse;
+    if (action === 'keyboard') return !!p.keyboard;
+    if (action === 'browser') return !!p.browser;
+    if (action === 'admin') return !!p.admin;
+  } catch {}
+  return false;
+}
+
+// ===== 1.9.146: leerness agent — OpenClaw/Hermes 스타일 오픈소스 CLI 에이전트 모드 (사용자 명시 요청 #4) =====
+// MVP: handoff 컨텍스트 자동 로드 → 활성 CLI (claude/codex/gemini/ollama) 1개에 작업 위임.
+// 권한은 .harness/agent-permissions.json 기준. 실제 LLM 호출은 외부 CLI 또는 Ollama HTTP API.
+function _activeCliAgents() {
+  const out = [];
+  if (process.env.LEERNESS_ENABLE_CLAUDE === '1') out.push('claude');
+  if (process.env.LEERNESS_ENABLE_CODEX === '1') out.push('codex');
+  if (process.env.LEERNESS_ENABLE_GEMINI === '1') out.push('gemini');
+  if (process.env.LEERNESS_ENABLE_COPILOT === '1') out.push('copilot');
+  if (process.env.LEERNESS_ENABLE_OLLAMA === '1') out.push('ollama');
+  return out;
+}
+async function _ollamaChat(prompt, model) {
+  // Ollama HTTP API — 기본 http://localhost:11434/api/generate
+  const url = (process.env.LEERNESS_OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/+$/, '') + '/api/generate';
+  const mdl = model || process.env.LEERNESS_OLLAMA_MODEL || 'llama3';
+  return new Promise((resolve) => {
+    try {
+      const body = JSON.stringify({ model: mdl, prompt, stream: false });
+      const u = new URL(url);
+      const lib = u.protocol === 'https:' ? require('https') : require('http');
+      const req = lib.request({
+        hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: u.pathname + (u.search || ''), method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        timeout: 60000
+      }, (res) => {
+        let data = '';
+        res.on('data', c => { data += c; });
+        res.on('end', () => {
+          try { const j = JSON.parse(data); resolve({ ok: res.statusCode === 200, response: j.response || '', model: mdl }); }
+          catch { resolve({ ok: false, error: 'invalid JSON response', model: mdl }); }
+        });
+      });
+      req.on('error', e => resolve({ ok: false, error: e.message, model: mdl }));
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout', model: mdl }); });
+      req.write(body); req.end();
+    } catch (e) { resolve({ ok: false, error: e.message, model: mdl }); }
+  });
+}
+async function agentCmd(root, taskArg) {
+  root = absRoot(root || process.cwd());
+  const task = (taskArg || arg('--task', '') || '').trim();
+  if (!task) {
+    log('# leerness agent (1.9.146) — 오픈소스 CLI 에이전트 모드');
+    log('');
+    log('사용법:');
+    log('  leerness agent "<task 설명>"      # 1회 위임');
+    log('  leerness agent --provider ollama  # 명시적 provider 선택');
+    log('  leerness agent --dry-run           # LLM 호출 없이 흐름만 확인');
+    log('');
+    log('현재 활성 provider: ' + (_activeCliAgents().join(', ') || '(없음) — .env에서 LEERNESS_ENABLE_* 활성화'));
+    log('권한 모드: ' + (_readPermissions(root).mode || 'basic'));
+    return;
+  }
+  const dryRun = has('--dry-run');
+  const providerArg = arg('--provider', null);
+  const active = _activeCliAgents();
+  const provider = providerArg || active[0] || null;
+  log(`# leerness agent (1.9.146)`);
+  log(`task: ${task.slice(0, 120)}${task.length > 120 ? '…' : ''}`);
+  log(`provider: ${provider || '(없음 — .env 에서 LEERNESS_ENABLE_* 활성화 필요)'}`);
+  const perms = _readPermissions(root);
+  log(`permission mode: ${perms.mode || 'basic'}`);
+  // handoff 자동 회수 (compact 모드)
+  try {
+    const hf = cp.spawnSync(process.execPath, [__filename, 'handoff', root, '--compact', '--no-drift-check'], { encoding: 'utf8', timeout: 10000, env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1' } });
+    if (hf.status === 0 && hf.stdout) {
+      const preview = hf.stdout.split('\n').slice(0, 6).join('\n');
+      log('\n[handoff context (preview)]\n' + preview);
+    }
+  } catch {}
+  if (dryRun) { log('\n(dry-run) LLM 호출 스킵 — provider/권한/컨텍스트만 출력'); return; }
+  if (!provider) { fail('활성 provider 없음 — .env 에서 LEERNESS_ENABLE_OLLAMA=1 또는 LEERNESS_ENABLE_CLAUDE=1 활성화'); process.exitCode = 1; return; }
+  // MVP: Ollama 지원 (로컬). 다른 CLI 는 사용자가 직접 호출 (leerness agents dispatch 이미 존재).
+  if (provider === 'ollama') {
+    log('\n[ollama 호출 중...]');
+    const r = await _ollamaChat(task);
+    if (r.ok) {
+      log('\n[response (model=' + r.model + ')]\n' + r.response);
+      // task-log 자동 기록
+      try {
+        const tlp = taskLogPath(root);
+        const block = `\n## ${today()} leerness agent (ollama:${r.model})\n- task: ${task.slice(0, 200)}\n- response (preview): ${r.response.slice(0, 240).replace(/\n+/g, ' ')}\n`;
+        append(tlp, block);
+      } catch {}
+    } else {
+      fail(`ollama 호출 실패: ${r.error || 'unknown'}`);
+      log(`  → ollama serve 실행 + LEERNESS_OLLAMA_BASE_URL 확인`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+  // 그 외 provider: 사용자에게 직접 dispatch 안내
+  log(`\n💡 ${provider} provider 는 \`leerness agents dispatch "<task>" --to ${provider}\` 또는 외부 CLI 직접 호출 권장`);
+}
+
 // 1.9.85: leerness health — 종합 헬스 체크 (drift + 보안 + skill + MCP + 누적)
 function healthCmd(root) {
   root = absRoot(root || process.cwd());
@@ -10287,6 +10524,10 @@ async function main() {
   if (cmd === 'env' && args[1] === 'sync')  return envSyncCmd(args[2] || arg('--path', process.cwd()));
   // 1.9.145: 실행 환경 자동 감지 + 변동 추적 (사용자 명시)
   if (cmd === 'env' && args[1] === 'detect') return envDetectCmd(args[2] || arg('--path', process.cwd()));
+  // 1.9.146: agent 권한 시스템 + CLI 에이전트 모드 (사용자 명시 요청 #4, #5)
+  if (cmd === 'permissions' && args[1] === 'list') return permissionsListCmd(arg('--path', process.cwd()));
+  if (cmd === 'permissions' && args[1] === 'set')  return permissionsSetCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'agent') return agentCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('--')).join(' '));
   // 1.9.85: leerness health — 종합 헬스 체크
   if (cmd === 'health') return healthCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));

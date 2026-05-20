@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.9.146 — 2026-05-20
+
+**사용자 명시 요청 5종 통합** — CLI 에이전트 모드 + 권한 시스템 + install 흐름 재구성.
+
+### 설계 결정 (사용자 질문에 대한 답)
+- **agent 모드는 별도 명령** (`leerness agent`) — 기존 명령에 영향 없음
+- **권한은 공유 시스템** (`.harness/agent-permissions.json`) — basic/extended/full 프리셋
+- **IDE 통합은 자동** — IDE가 leerness CLI 호출 시 `agent-permissions.json` 자동 적용 (별도 모드 불필요)
+
+### ① 스킬 라이브러리 단순화 (사용자 요청)
+- 인터랙티브 옵션 2개로 축소: **"표준 공식 5종 자동 설치"** / **"건너뛰기"**
+- 이전: 빌트인 카탈로그 전체 + 추천 default + 직접 입력 등
+- 비대화형 (--yes / --skills) 동작은 그대로
+
+### ② install 흐름 재구성 (사용자 요청)
+- 모든 prompt (언어 / 스킬 / agent 활성화 / 권한 모드) 응답 완료 후 → 일괄 설치
+- 응답 수집 단계와 파일 생성 단계 명확히 분리
+- "📦 응답 수집 완료 — leerness 파일 설치 시작" 메시지
+
+### ③ Ollama CLI 에이전트 활성화 추가 (사용자 요청)
+- `EXTERNAL_AGENTS` 에 ollama 추가 — `LEERNESS_ENABLE_OLLAMA=1`
+- HTTP API (기본 `http://localhost:11434`), 모델 env: `LEERNESS_OLLAMA_MODEL`
+- `agents list` 표에 표시
+- install prompt: "Claude 단일 / Ollama 단일 / 전체 / 활성화 안함" 4지선다
+
+### ④ leerness agent — 오픈소스 CLI 에이전트 모드 (사용자 요청)
+- `leerness agent "<task 설명>"` — OpenClaw/Hermes 스타일
+- handoff context 자동 회수 (compact preview)
+- Ollama HTTP API 직접 호출 (MVP) — `_ollamaChat(prompt, model)`
+- 다른 provider 는 `leerness agents dispatch` 또는 외부 CLI 직접 호출 안내
+- `--dry-run` / `--provider <name>` 지원
+- task-log 자동 기록
+
+### ⑤ Agent 권한 시스템 (사용자 요청)
+- `.harness/agent-permissions.json` — basic / extended / full 프리셋
+- **basic**: `.harness/` 만 read/write, shell/network/mouse/keyboard/browser/admin 거부 (deny-by-default)
+- **extended**: 프로젝트 폴더 + shell allowlist (npm/git/node/pnpm/yarn/pytest/jest/tsc), network localhost/github/npm 만
+- **full**: 마우스/키보드/웹/관리자 전체 ⚠ IDE 통합 시에만 권장
+- `leerness permissions list --json` 조회
+- `leerness permissions set <mode>` 변경
+- `permissionCheck(root, action, target)` 내부 헬퍼 — agent 작업 시 사전 검증
+
+### Validation
+- stress-v91: PASS
+- e2e: 219/219 PASS
+
 ## 1.9.145 — 2026-05-20
 
 **실행 환경 자동 감지 — 사용자 명시 요청.**
