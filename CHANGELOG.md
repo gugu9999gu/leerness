@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.9.150 — 2026-05-20
+
+**Sandboxing — `runCommandSafe()` wrapper + REPL slash-commands (3중 LLM 합의 #3 / Codex 권고).**
+
+자율 모드 80 라운드 마일스톤. 1.9.149 REPL 위에 **샌드박스 보안 레이어** + **leerness 내부 명령 직접 호출**을 추가.
+
+### Added — `runCommandSafe(cmd, args, opts)` sandbox wrapper
+- **cwd jail** — `cwd` 가 root 밖 (path traversal) 이면 즉시 exit 126 + `blocked: 'cwd_jail'` 기록
+- **shell:false 기본** — shell injection 표면 차단. `allowShell: true` 시만 shell:true (npm/pytest 호환)
+- **env scrub** — 안전 화이트리스트만 통과 (`PATH`, `HOME`, `TMP`, `LEERNESS_*`, `NPM_CONFIG_*`, ...)
+  - 시크릿 환경변수 (DB_PASSWORD, API_KEY 등) 자식 프로세스에 누출 방지
+- **timeout 한도** — 기본 5분, max 10분 (clamp)
+- **permissions 검증** — 1.9.146 `permissions.shell.allowList` 자동 연동
+  - basic 모드 (`shell.exec=false`) 에선 핵심 도구 (git/npm/node/pnpm/yarn) 만 허용
+  - allowList 외 명령은 즉시 reject + `blocked: 'permissions'` 기록
+- **자동 observability** — 호출마다 `_recordRun` 으로 cmd/args/durationMs/status/cwd 자동 기록
+
+### Changed — 위험 호출 sandbox 치환
+- `verify-code` (line ~7473): `cp.spawnSync(t.cmd, [], { shell: true })` → `runCommandSafe(t.cmd, ...)`
+- `deploy auto` (line ~10580): `cp.spawnSync(meta.deployCommand, [], { shell: true })` → `runCommandSafe(...)`
+- `agents bench` (line ~8866): `cp.spawnSync(cmd, cliArgs, { shell: true })` → `runCommandSafe(...)`
+- 3 곳 모두 env scrub + cwd jail + observability 자동 적용
+
+### Added — REPL slash-commands (1.9.149 위에)
+- `:verify` — `leerness verify-code` 직접 호출 (sandboxed)
+- `:audit` — `leerness audit` (보안 + drift + lazy)
+- `:handoff` — `leerness handoff --quiet --no-drift-check`
+- `:health` — `leerness health --json`
+- 모두 `runCommandSafe` 경유 — 자식 leerness 호출도 sandbox 적용
+- REPL 안에서 agent가 "현재 상태 점검해줘" 같은 메타 명령으로 leerness 기능을 즉시 호출 가능
+
+### Security
+- 시크릿 환경변수 누출 표면 대폭 축소 — `runCommandSafe` 호출 시 화이트리스트 외 env 미전달
+- 사용자 글로벌 룰 준수: API 키/DB 비밀번호 절대 자식 프로세스에 자동 전파 금지
+- `_reports/`, `.harness/agent-sessions/`, `.harness/runs/`, `.harness/credentials.local.json` 비공개 정책 유지
+
+### Verified
+- e2e 220/220 (slash-commands handleMeta 통합 + sandbox wrapper)
+- stress-v95: 19/19 (sandbox 5종 + REPL slash 4종 + 누적 회귀 1.9.146~149)
+- VERSION = 1.9.150 / autonomous-rounds = 80
+
+---
+
 ## 1.9.149 — 2026-05-20
 
 **REPL agent (Hermes/OpenClaw/OpenCode 스타일) + observability lite — 사용자 명시 요청 + 3중 LLM 합의 #2.**

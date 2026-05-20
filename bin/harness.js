@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.149';
+const VERSION = '1.9.150';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -7470,7 +7470,8 @@ function verifyCodeCmd(root) {
   for (const t of tasks) {
     log(`\n## ${t.name}: ${t.cmd}`);
     const start = Date.now();
-    const r = cp.spawnSync(t.cmd, [], { cwd: root, encoding: 'utf8', shell: true, timeout: 5 * 60 * 1000 });
+    // 1.9.150: runCommandSafe — cwd jail + env scrub + observability 자동 (shell:true 유지 — npm/pytest 호환)
+    const r = runCommandSafe(t.cmd, [], { cwd: root, root, timeout: 5 * 60 * 1000, allowShell: true, kind: 'verify_code_task', label: `verify-${t.name}` });
     const dur = Date.now() - start;
     if (r.status === 0) ok(`${t.name} passed (${dur}ms)`);
     else if (t.optional && r.status === 127) warn(`${t.name} 스킵 (${t.cmd} 없음)`);
@@ -8862,7 +8863,8 @@ async function _benchmarkMeasure(root, task) {
     else if (agent.id === 'gemini') { cmd = 'gemini'; cliArgs = ['-p', task]; }
     else continue;
     const t0 = Date.now();
-    const r = cp.spawnSync(cmd, cliArgs, { encoding: 'utf8', timeout: 60000, shell: true });
+    // 1.9.150: runCommandSafe — agent CLI bench sandbox (env scrub + observability)
+    const r = runCommandSafe(cmd, cliArgs, { cwd: process.cwd(), root, timeout: 60000, allowShell: true, kind: 'agent_bench', label: `bench-${agent.id}`, allowOutsideCwd: true });
     const baseTime = Date.now() - t0;
     // leerness 검수 layer time 추정 (verify-claim 형식)
     const t1 = Date.now();
@@ -10010,6 +10012,111 @@ function _recordRun(root, entry) {
     return id;
   } catch { return null; }
 }
+
+// 1.9.150: Sandboxing — runCommandSafe wrapper (Codex 권고: 3중 LLM 합의 #3)
+// cwd jail (root 밖 거부) + shell:false 기본 + timeout + env scrub + permissions allowList 검증 + _recordRun 자동
+const _ENV_SAFE_KEYS = new Set([
+  'PATH', 'HOME', 'USERPROFILE', 'TEMP', 'TMP', 'TMPDIR', 'NODE_PATH', 'NODE_ENV',
+  'LANG', 'LC_ALL', 'LC_CTYPE', 'SHELL', 'COMSPEC', 'SYSTEMROOT', 'WINDIR', 'OS',
+  'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'NUMBER_OF_PROCESSORS',
+  'PROGRAMFILES', 'PROGRAMFILES(X86)', 'APPDATA', 'LOCALAPPDATA',
+  'GITHUB_TOKEN', 'NPM_TOKEN', 'CI', 'GH_TOKEN'
+]);
+function _scrubEnv(extraEnv) {
+  const out = {};
+  for (const k of Object.keys(process.env || {})) {
+    if (_ENV_SAFE_KEYS.has(k) || k.startsWith('LEERNESS_') || k.startsWith('NPM_CONFIG_')) {
+      out[k] = process.env[k];
+    }
+  }
+  if (extraEnv && typeof extraEnv === 'object') {
+    for (const k of Object.keys(extraEnv)) {
+      // Allow caller overrides — explicit opt-in
+      if (extraEnv[k] !== undefined) out[k] = String(extraEnv[k]);
+    }
+  }
+  return out;
+}
+function _isCwdSafe(root, cwd) {
+  try {
+    if (!cwd) return true;
+    const r = path.resolve(absRoot(root));
+    const c = path.resolve(cwd);
+    if (c === r) return true;
+    const rel = path.relative(r, c);
+    return !rel.startsWith('..') && !path.isAbsolute(rel);
+  } catch { return false; }
+}
+function runCommandSafe(cmd, args, opts) {
+  // opts: { cwd, root, timeout, env, stdio, kind, label, allowShell, encoding, input, allowOutsideCwd }
+  opts = opts || {};
+  const root = opts.root || opts.cwd || process.cwd();
+  const cwd = opts.cwd || root;
+  const cmdStr = String(cmd || '').trim();
+  const argList = Array.isArray(args) ? args.slice() : [];
+  const t0 = Date.now();
+  const label = opts.label || opts.kind || 'shell_exec';
+  // 1) cwd jail
+  if (!opts.allowOutsideCwd && !_isCwdSafe(root, cwd)) {
+    const r = { status: 126, stdout: '', stderr: `runCommandSafe: cwd outside root rejected (${cwd})`, error: 'cwd_jail', blocked: true };
+    try { _recordRun(root, { kind: label, cmd: cmdStr, args: argList, durationMs: Date.now() - t0, ok: false, blocked: 'cwd_jail' }); } catch {}
+    return r;
+  }
+  // 2) permissions allowList (1.9.146)
+  try {
+    const perms = _readPermissions(root);
+    const exec = perms.shell?.exec !== false;  // basic 에선 false
+    const allow = perms.shell?.allowList || [];
+    if (!exec && !opts.allowOutsideCwd) {
+      // basic 모드 — git/npm/node 같은 핵심 도구는 허용 (release/install 흐름 유지)
+      const coreAllow = ['git', 'npm', 'npx', 'node', 'pnpm', 'yarn'];
+      const first = cmdStr.split(/\s+/)[0];
+      if (!coreAllow.includes(first) && !allow.includes('*') && !allow.includes(first)) {
+        const r = { status: 126, stdout: '', stderr: `runCommandSafe: shell.exec=false (mode=${perms.mode}). allowList: ${allow.join(',') || '(없음)'} / core: ${coreAllow.join(',')}`, error: 'permissions', blocked: true };
+        try { _recordRun(root, { kind: label, cmd: cmdStr, args: argList, durationMs: Date.now() - t0, ok: false, blocked: 'permissions', mode: perms.mode }); } catch {}
+        return r;
+      }
+    }
+  } catch {}
+  // 3) spawn — shell:false 기본 (shell injection 차단). allowShell=true 시만 shell:true (deploy/build 호환)
+  const useShell = !!opts.allowShell;
+  const timeout = Math.min(opts.timeout || 5 * 60 * 1000, 10 * 60 * 1000);
+  const spawnOpts = {
+    cwd,
+    encoding: opts.encoding || 'utf8',
+    timeout,
+    shell: useShell,
+    env: _scrubEnv(opts.env),
+    input: opts.input,
+    stdio: opts.stdio || 'pipe'
+  };
+  let r;
+  try {
+    if (useShell) {
+      // shell:true 모드 — 인자가 cmd 안에 포함된 단일 문자열인 경우 처리
+      r = cp.spawnSync(cmdStr + (argList.length ? ' ' + argList.join(' ') : ''), [], spawnOpts);
+    } else {
+      // 단일 명령어로 들어온 경우 자동 분리
+      let bin = cmdStr, finalArgs = argList;
+      if (!argList.length && /\s/.test(cmdStr)) {
+        const parts = cmdStr.split(/\s+/);
+        bin = parts[0]; finalArgs = parts.slice(1);
+      }
+      r = cp.spawnSync(bin, finalArgs, spawnOpts);
+    }
+  } catch (e) {
+    r = { status: 1, stdout: '', stderr: e.message, error: 'spawn_exception' };
+  }
+  const dt = Date.now() - t0;
+  try {
+    _recordRun(root, {
+      kind: label, cmd: cmdStr, args: argList,
+      durationMs: dt, status: r.status, ok: r.status === 0,
+      shell: useShell, cwd: path.relative(absRoot(root), cwd) || '.'
+    });
+  } catch {}
+  return r;
+}
 function runsListCmd(root) {
   root = absRoot(root || process.cwd());
   const dir = _runsDir(root);
@@ -10077,8 +10184,8 @@ async function _agentRepl(root, opts) {
   // 환영 메시지 + 모델 선택
   log('');
   log(C.bold(C.cy('  ╔════════════════════════════════════════════════════╗')));
-  log(C.bold(C.cy('  ║  leerness agent — REPL mode (1.9.149)              ║')));
-  log(C.bold(C.cy('  ║  Hermes / OpenClaw / OpenCode 스타일 채팅 에이전트     ║')));
+  log(C.bold(C.cy('  ║  leerness agent — REPL mode (1.9.150)              ║')));
+  log(C.bold(C.cy('  ║  Hermes / OpenClaw / OpenCode 스타일 + Sandbox     ║')));
   log(C.bold(C.cy('  ╚════════════════════════════════════════════════════╝')));
   log('');
   // Ollama 모델 자동 감지 — model이 명시되지 않았으면 사용자에게 선택지 제공
@@ -10100,6 +10207,7 @@ async function _agentRepl(root, opts) {
   }
   log('');
   log(C.dim('  메타 명령: :help | :model <m> | :role <r> | :provider <p> | :clear | :save | :history | :quit'));
+  log(C.dim('  Slash 명령 (1.9.150): :verify | :audit | :handoff | :health'));
   log(C.dim(`  현재 — provider=${state.provider}  model=${state.model || '(없음)'}  role=${state.role}  permissions=${_readPermissions(root).mode}`));
   log('');
   const prompt = () => isTty ? C.cy(`agent[${state.role}]> `) : 'agent> ';
@@ -10125,6 +10233,11 @@ async function _agentRepl(root, opts) {
       log('    :save                 — 세션 즉시 저장');
       log('    :permissions          — 현재 권한 모드 표시');
       log('    :quit / :exit / :q    — 종료 (자동 저장)');
+      log(C.bold('\n  Slash 명령 (1.9.150) — leerness 내부 명령 직접 호출:'));
+      log('    :verify               — leerness verify-code (테스트/타입/린트 자동 검수)');
+      log('    :audit                — leerness audit (보안 + drift + lazy)');
+      log('    :handoff              — leerness handoff --quiet (현재 컨텍스트 요약)');
+      log('    :health               — leerness health --json (종합 헬스 체크)');
       return false;
     }
     if (op === 'model') { state.model = rest.join(' ') || state.model; log(C.green(`  model = ${state.model}`)); return false; }
@@ -10149,6 +10262,26 @@ async function _agentRepl(root, opts) {
     }
     if (op === 'save') { saveSession(); log(C.dim(`  → ${rel(root, sessionPath())}`)); return false; }
     if (op === 'permissions') { permissionsListCmd(root); return false; }
+    // 1.9.150: leerness 내부 명령 slash-commands — :verify / :audit / :handoff / :health
+    if (op === 'verify' || op === 'audit' || op === 'handoff' || op === 'health') {
+      const subArgs = {
+        verify: ['verify-code', root],
+        audit: ['audit', root],
+        handoff: ['handoff', root, '--quiet', '--no-drift-check'],
+        health: ['health', root, '--json']
+      }[op];
+      log(C.dim(`  → leerness ${subArgs.join(' ')}`));
+      const t0 = Date.now();
+      const r = runCommandSafe(process.execPath, [__filename, ...subArgs], {
+        cwd: root, root, timeout: 60000, kind: 'agent_repl_slash', label: `repl-${op}`,
+        env: { LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
+      });
+      const dt = Date.now() - t0;
+      if (r.stdout) log(r.stdout.trim().split('\n').slice(0, 30).join('\n'));
+      if (r.status === 0) log(C.green(`  ✓ :${op} 완료 (${dt}ms)`));
+      else log(C.yel(`  ⚠ :${op} 실패 (exit ${r.status}, ${dt}ms)`));
+      return false;
+    }
     log(C.yel(`  알 수 없는 명령: :${op}  (:help 참고)`));
     return false;
   };
@@ -10208,16 +10341,17 @@ async function agentCmd(root, taskArg) {
       return;
     }
     // non-TTY: 사용법만 출력
-    log('# leerness agent (1.9.146/148/149) — Hermes/OpenClaw 스타일 CLI 에이전트');
+    log('# leerness agent (1.9.146/148/149/150) — Hermes/OpenClaw 스타일 CLI 에이전트 + Sandbox');
     log('');
     log('사용법:');
-    log('  leerness agent                              # 🆕 1.9.149 REPL 모드 (모델 선택 + 채팅)');
+    log('  leerness agent                              # 1.9.149 REPL 모드 (모델 선택 + 채팅)');
     log('  leerness agent "<task>"                     # 1회 위임 (actor 역할 기본)');
     log('  leerness agent "<task>" --role planner      # 계획만 (1.9.148)');
     log('  leerness agent "<task>" --role reviewer     # 비판적 검토 (1.9.148)');
     log('  leerness agent --interactive --model qwen2.5-coder  # 명시적 REPL + model 선택');
     log('');
     log('REPL 메타 명령: :help / :model / :role / :provider / :history / :save / :quit');
+    log('REPL Slash 명령 (1.9.150): :verify / :audit / :handoff / :health  (sandboxed runCommandSafe)');
     log('');
     log('현재 활성 provider: ' + (_activeCliAgents().join(', ') || '(없음) — .env에서 LEERNESS_ENABLE_* 활성화'));
     log('권한 모드: ' + (_readPermissions(root).mode || 'basic'));
@@ -10575,7 +10709,8 @@ async function deployAutoCmd(root, service) {
   log(`service: ${service}  ·  command: ${meta.deployCommand}`);
   if (has('--dry-run')) { log('(dry-run) 실제 실행 스킵'); return; }
   const t0 = Date.now();
-  const r = cp.spawnSync(meta.deployCommand, [], { cwd: root, encoding: 'utf8', shell: true, timeout: 10 * 60 * 1000, stdio: 'inherit' });
+  // 1.9.150: runCommandSafe — deploy 명령 sandbox (env scrub + permissions 검증 + observability)
+  const r = runCommandSafe(meta.deployCommand, [], { cwd: root, root, timeout: 10 * 60 * 1000, allowShell: true, stdio: 'inherit', kind: 'deploy_auto', label: `deploy-${service}` });
   const dt = Date.now() - t0;
   if (r.status === 0) {
     ok(`deploy 성공: ${service} (${dt}ms)`);

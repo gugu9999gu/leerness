@@ -15,3 +15,5 @@ tmp-*-test/
 _reports/
 *.private.md
 *.private.json
+.harness/skill-publish.local.json
+.harness/**/*.local.json
