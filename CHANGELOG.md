@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.9.151 — 2026-05-20
+
+**install 흐름 — CLI 에이전트 복수 선택 + REPL 자동 시작 prompt + viewwork 제거 + help 검증 (사용자 명시 3종).**
+
+자율 모드 81 라운드.
+
+### Added — install: CLI 에이전트 복수 선택 (사용자 명시)
+- 기존 4지 단일 선택 (`none`/`claude`/`ollama`/`all`) → **5개 후보 다중 선택**
+  - Claude / Codex / Gemini / Copilot / Ollama
+  - Space 토글, `a` 전체, `n` 해제, Enter 확정
+- non-TTY fallback: 콤마 구분 (예: `1,5` 또는 `claude,ollama` 또는 `all` 또는 `none`)
+- `.env.example` LEERNESS_ENABLE_* 플래그가 선택된 에이전트별로 정확히 활성화 (이전엔 `all` 외에는 단일만)
+- 배열/문자열/'all'/'none' 모두 처리하는 `enabledSet` Set 기반 헬퍼 (back-compat)
+
+### Added — install 종료 후 REPL 자동 시작 prompt (사용자 명시)
+- 모든 문항 (언어/에이전트/권한) 끝난 후 — **에이전트가 선택된 경우만** REPL 활성화 여부 묻기
+- "예" 선택 시 설치 완료 직후 1.9.149 `_agentRepl` 자동 진입 (Ollama provider / actor 역할)
+- 기본값 "아니오" (안전) — 사용자가 토큰/모델 설정 후 별도로 `leerness agent` 실행
+
+### Removed — viewwork 관련 (사용자 명시 — leerness 와 무관)
+- `viewworkEmit()` / `viewworkInstall()` 함수 정의 삭제
+- 라우터 분기 `cmd === 'viewwork'` 2종 제거
+- `session close` 의 자동 `viewworkEmit` 콜 제거
+- help 텍스트에서 `leerness viewwork install/emit` 2줄 제거
+- `scripts/e2e.js` 의 `viewwork install` + `viewwork emit` 테스트 라인 제거
+- 기존 프로젝트의 `.viewwork/` 디렉토리는 leerness 가 삭제하지 않음 (사용자 책임)
+
+### Verified — help 모든 명령어 통과
+- sub-agent 병렬 검증: **39/39 명령어 모두 exit 0 또는 1 (정상)** — TypeError / ReferenceError / unknown command 0건
+- 검증 명령어: init / migrate / update / status / verify / debug / audit / check / scan / encoding / lazy / memory / handoff / orchestrate / deps / persona / agents / setup-agents / reuse-map / session / route / self / readme / consistency / plan / task / skill / gate / retro / insights / brainstorm / roadmap / verify-code / lessons / rule / release / health / runs / permissions / env / creds / decision / lesson / plan list / agent
+
+### Verified
+- e2e 217/217 (viewwork 2건 삭제로 219→217)
+- stress-v96: 26/26 (복수선택 4종 + REPL prompt 4종 + viewwork 제거 6종 + help 5종 + 누적 회귀 7종)
+- VERSION = 1.9.151 / autonomous-rounds = 81
+
+---
+
 ## 1.9.150 — 2026-05-20
 
 **Sandboxing — `runCommandSafe()` wrapper + REPL slash-commands (3중 LLM 합의 #3 / Codex 권고).**

@@ -145,8 +145,7 @@ total++;
   if (!ok) failed++;
 }
 
-run('viewwork install',    ['viewwork', 'install', tmp]);
-run('viewwork emit',       ['viewwork', 'emit', tmp, '--action', 'note', '--note', 'e2e ping']);
+// 1.9.151: viewwork 명령 제거 (사용자 명시 — leerness 와 무관)
 run('route planning',      ['route', 'planning']);
 run('route bugfix',        ['route', 'bugfix']);
 run('skill list',          ['skill', 'list']);

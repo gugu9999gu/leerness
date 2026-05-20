@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.150';
+const VERSION = '1.9.151';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -688,23 +688,30 @@ async function resolveInstallOptions(root, opts = {}) {
   // 1.9.148: 스킬 prompt 제거 (사용자 명시 요청) — leerness가 자동으로 공식 표준 스킬 5종 설치.
   //   필요할 때 사용자가 leerness skill install <id> 로 추가 가능.
   if (!explicitSkills) skills = parseSkillsValue('recommended');
-  // 1.9.146: CLI 에이전트 활성화 선택 (사용자 명시 요청 #3 — Ollama 추가)
-  //   설치 마지막에 .env.example 에 활성화 옵트인 키만 기록 (실제 토큰 입력은 사용자가 직접).
-  let agentsOptIn = null;
+  // 1.9.151: CLI 에이전트 활성화 — 복수 선택 (사용자 명시 요청)
+  //   _selectMany 로 Space 토글, a 전체, n 해제, Enter 확정. 선택된 에이전트들만 .env.example에 LEERNESS_ENABLE_* 활성화.
+  let agentsOptIn = null;   // string[] (다중) 또는 'none' (선택 안함)
   if (shouldAsk && !opts._skipAgentsPrompt) {
     if (useInteractive) {
-      const aOpt = await _selectOne('CLI 에이전트 활성화 (sub-agent 위임용, opt-in)', [
-        { label: '활성화 안함 (나중에 .env에서 직접 설정)', description: '권장 — 토큰/모델은 사용자가 직접 관리', id: 'none' },
-        { label: 'Claude (LEERNESS_CLAUDE_ENABLED=1)', description: 'claude CLI 또는 ANTHROPIC_API_KEY', id: 'claude' },
-        { label: 'Ollama (LEERNESS_OLLAMA_ENABLED=1) — 로컬 LLM', description: 'http://localhost:11434 (모델: llama3/qwen 등)', id: 'ollama' },
-        { label: '여러 개 (claude+codex+gemini+copilot+ollama)', description: '전체 후보 활성화 (각각 별도 토큰 필요)', id: 'all' }
-      ], { defaultIndex: 0 });
-      agentsOptIn = aOpt ? aOpt.id : 'none';
+      const picked = await _selectMany('CLI 에이전트 활성화 (복수 선택, Space 토글) — sub-agent 위임용', [
+        { label: 'Claude (ANTHROPIC_API_KEY 또는 claude CLI)', description: '추론력 최고 — 코드 작성/리뷰 기본', id: 'claude' },
+        { label: 'Codex (OpenAI codex CLI)', description: 'OpenAI 코드 모델', id: 'codex' },
+        { label: 'Gemini (gemini CLI)', description: 'Google 멀티모달 모델', id: 'gemini' },
+        { label: 'Copilot (gh extension)', description: 'GitHub Copilot CLI', id: 'copilot' },
+        { label: 'Ollama (로컬 LLM — llama3/qwen 등)', description: 'http://localhost:11434 — 무료/오프라인', id: 'ollama' }
+      ], { defaults: [] });
+      agentsOptIn = picked.length ? picked.map(p => p.id) : 'none';
     } else {
-      log('\nCLI 에이전트 활성화 (opt-in, 나중에 .env에서 변경 가능):');
-      log('1) 활성화 안함  2) Claude  3) Ollama  4) 전체');
-      const a = await ask('선택 [1]: ');
-      agentsOptIn = a === '2' ? 'claude' : a === '3' ? 'ollama' : a === '4' ? 'all' : 'none';
+      log('\nCLI 에이전트 활성화 (복수 선택 — 콤마로 구분, opt-in):');
+      log('  1) claude  2) codex  3) gemini  4) copilot  5) ollama  (예: 1,5 또는 all 또는 none)');
+      const a = (await ask('선택 [none]: ')).trim().toLowerCase();
+      if (a === 'all') agentsOptIn = ['claude', 'codex', 'gemini', 'copilot', 'ollama'];
+      else if (!a || a === 'none' || a === '0') agentsOptIn = 'none';
+      else {
+        const map = { '1': 'claude', '2': 'codex', '3': 'gemini', '4': 'copilot', '5': 'ollama' };
+        const picks = a.split(/[,\s]+/).map(t => map[t] || (['claude','codex','gemini','copilot','ollama'].includes(t) ? t : null)).filter(Boolean);
+        agentsOptIn = picks.length ? picks : 'none';
+      }
     }
   }
   // 1.9.146: 권한 모드 (사용자 명시 요청 #5 — agent IDE 모드 사전 prompt)
@@ -726,7 +733,24 @@ async function resolveInstallOptions(root, opts = {}) {
       permissionMode = a === '2' ? 'extended' : a === '3' ? 'full' : 'basic';
     }
   }
-  return { lang, skills, agentsOptIn, permissionMode };
+  // 1.9.151: 모든 문항 종료 후 — REPL 모드 즉시 활성화 여부 (사용자 명시 요청)
+  //   선택된 에이전트가 있을 때만 표시. 설치 완료 후 install() 가 처리.
+  let startRepl = false;
+  const hasAgents = Array.isArray(agentsOptIn) && agentsOptIn.length > 0;
+  if (shouldAsk && hasAgents && !opts._skipReplPrompt) {
+    if (useInteractive) {
+      const rOpt = await _selectOne('설치 완료 후 REPL agent 모드를 즉시 시작할까요?', [
+        { label: '아니오 — 설치만 완료 (나중에 `leerness agent` 로 실행)', description: '권장 — 토큰/모델 설정 후 사용', id: 'no' },
+        { label: '예 — 설치 직후 REPL 모드 진입 (Hermes/OpenClaw 스타일)', description: 'Ollama 우선 — 가능하면 자동 모델 선택', id: 'yes' }
+      ], { defaultIndex: 0 });
+      startRepl = rOpt && rOpt.id === 'yes';
+    } else {
+      log('\n설치 완료 후 REPL agent 모드를 즉시 시작할까요? (y/N)');
+      const a = (await ask('선택 [N]: ')).trim().toLowerCase();
+      startRepl = a === 'y' || a === 'yes';
+    }
+  }
+  return { lang, skills, agentsOptIn, permissionMode, startRepl };
 }
 
 async function install(root, opts = {}) {
@@ -753,7 +777,11 @@ async function install(root, opts = {}) {
   log(`Target: ${root}`);
   log(`Language: ${lang}`);
   log(`Skills: ${skills.length ? skills.join(', ') : 'none (건너뜀)'}`);
-  if (resolved.agentsOptIn && resolved.agentsOptIn !== 'none') log(`Agents 활성화: ${resolved.agentsOptIn}`);
+  if (resolved.agentsOptIn && resolved.agentsOptIn !== 'none') {
+    const list = Array.isArray(resolved.agentsOptIn) ? resolved.agentsOptIn.join(', ') : String(resolved.agentsOptIn);
+    log(`Agents 활성화: ${list}`);
+  }
+  if (resolved.startRepl) log(`REPL 자동 시작: 예 (설치 완료 후 \`leerness agent\` 진입)`);
   if (resolved.permissionMode) log(`Agent 권한 모드: ${resolved.permissionMode}`);
   // 1.9.10: 스킬 카탈로그 출처 안내
   if (SKILLPACK_SOURCE === 'builtin') log(`Skill catalog source: builtin (leerness-skillpack 미설치 — \`npm i leerness-skillpack\`로 확장 가능)`);
@@ -799,9 +827,15 @@ async function install(root, opts = {}) {
       // 1.9.149: agent REPL 세션 + observability runs 비공개 (대화 내용 보호)
       '.harness/agent-sessions/','.harness/runs/'
     ]);
-    // 1.9.146: agentsOptIn 선택에 따라 LEERNESS_ENABLE_* 플래그 자동 설정 (사용자 명시 요청 #3 — Ollama 추가)
+    // 1.9.151: agentsOptIn 복수 선택 지원 — 배열 또는 'none' 또는 'all' (back-compat) 모두 처리
     const a = resolved.agentsOptIn || 'none';
-    const enable = (cli) => a === 'all' || a === cli;
+    const enabledSet = (() => {
+      if (Array.isArray(a)) return new Set(a);
+      if (a === 'all') return new Set(['claude', 'codex', 'gemini', 'copilot', 'ollama']);
+      if (a === 'none' || !a) return new Set();
+      return new Set([a]);  // back-compat: 단일 문자열
+    })();
+    const enable = (cli) => enabledSet.has(cli);
     mergeLinesFile(path.join(root, '.env.example'), [
       '# Leerness uses environment variable names only. Do not store real secrets here.',
       'LEERNESS_NPM_TOKEN=','LEERNESS_GITHUB_TOKEN=',
@@ -809,11 +843,11 @@ async function install(root, opts = {}) {
       `LEERNESS_OLLAMA_BASE_URL=${enable('ollama') ? 'http://localhost:11434' : ''}`,
       '# 선택. 기본 모델 (orchestrate --model 로 override 가능). 예: llama3 / qwen2.5-coder / gpt-oss',
       'LEERNESS_OLLAMA_MODEL=',
-      '# 1.9.30+1.9.146 — 외부 AI CLI 활성화 플래그. 1=활성, 0/미설정=비활성. 메인 에이전트가 sub-agent 분배 시 활성 CLI들에 작업 위임 가능.',
+      '# 1.9.30+1.9.146+1.9.151 — 외부 AI CLI 활성화 플래그 (복수 선택). 1=활성, 0/미설정=비활성. 메인 에이전트가 sub-agent 분배 시 활성 CLI들에 작업 위임 가능.',
       `LEERNESS_ENABLE_CLAUDE=${enable('claude') ? 1 : 0}`,
-      `LEERNESS_ENABLE_CODEX=${enable('all') ? 1 : 0}`,
-      `LEERNESS_ENABLE_GEMINI=${enable('all') ? 1 : 0}`,
-      `LEERNESS_ENABLE_COPILOT=${enable('all') ? 1 : 0}`,
+      `LEERNESS_ENABLE_CODEX=${enable('codex') ? 1 : 0}`,
+      `LEERNESS_ENABLE_GEMINI=${enable('gemini') ? 1 : 0}`,
+      `LEERNESS_ENABLE_COPILOT=${enable('copilot') ? 1 : 0}`,
       `LEERNESS_ENABLE_OLLAMA=${enable('ollama') ? 1 : 0}`,
       '# 1.9.42 — agentskills.io 공개 표준 스킬 자동 탐색 (opt-in). URL 설정 시 `leerness skill discover` 사용 가능.',
       '#   예: LEERNESS_SKILL_DISCOVER_URL=https://agentskills.io/llms.txt',
@@ -869,6 +903,15 @@ async function install(root, opts = {}) {
     // 1.9.148: 1.9.32 중복 prompt 제거 (사용자 명시 — CLI 에이전트 prompt 중복).
     //   resolveInstallOptions (1.9.146) 가 이미 모든 prompt 모은 위치에 통합된 4지선다 prompt 있음.
     //   별도 setupAgents 명령은 사용자가 명시적으로 `leerness setup-agents` 호출 시에만.
+    // 1.9.151: 설치 완료 직후 — startRepl 선택 시 REPL agent 모드 즉시 진입 (사용자 명시 요청)
+    if (resolved.startRepl && !opts.migration && process.stdin.isTTY && process.env.LEERNESS_NO_PROMPT !== '1') {
+      log('');
+      log('🚀 설치 완료 — REPL agent 모드를 시작합니다 (1.9.149 Hermes/OpenClaw 스타일)...');
+      log('');
+      try {
+        await _agentRepl(root, { provider: 'ollama', role: 'actor' });
+      } catch (e) { warn('REPL 진입 실패: ' + e.message); }
+    }
   }
 }
 
@@ -8193,48 +8236,10 @@ function autoUpdateInstall(root) {
   ok('/update slash command added');
 }
 
-// ===== ViewWork hook =====
-function viewworkEmit(root, ev) {
-  root = absRoot(root);
-  const dir = path.join(root, '.viewwork');
-  if (!exists(dir)) return;
-  const file = path.join(dir, 'agent-events.jsonl');
-  const line = JSON.stringify({
-    at: Date.now(),
-    agent: ev.agent || 'leerness',
-    agentKind: ev.agentKind || 'system',
-    action: ev.action || 'task',
-    path: ev.path || '/.harness',
-    tool: ev.tool || 'leerness-cli',
-    toolKind: ev.toolKind || 'task',
-    note: ev.note || ''
-  }) + '\n';
-  try { fs.appendFileSync(file, line, 'utf8'); } catch {}
-}
-
-function viewworkInstall(root) {
-  root = absRoot(root);
-  const dir = path.join(root, '.viewwork');
-  mkdirp(dir);
-  if (!exists(path.join(dir, 'agent-events.jsonl'))) writeUtf8(path.join(dir, 'agent-events.jsonl'), '');
-  if (!exists(path.join(dir, 'config.json'))) writeUtf8(path.join(dir, 'config.json'), JSON.stringify({ schemaVersion: 2 }, null, 2) + '\n');
-  if (!exists(path.join(dir, 'version'))) writeUtf8(path.join(dir, 'version'), '2\n');
-  const settingsDir = path.join(root, '.claude');
-  mkdirp(settingsDir);
-  const settingsFile = path.join(settingsDir, 'settings.local.json');
-  let settings = {};
-  if (exists(settingsFile)) { try { settings = JSON.parse(read(settingsFile)); } catch {} }
-  settings.hooks = settings.hooks || {};
-  if (!settings.hooks.Stop) settings.hooks.Stop = [];
-  if (!settings.hooks.Stop.some(h => h.command && h.command.includes('leerness viewwork'))) {
-    settings.hooks.Stop.push({ matcher: '*', command: 'leerness viewwork emit . --action task --note "claude session stop"' });
-  }
-  writeUtf8(settingsFile, JSON.stringify(settings, null, 2) + '\n');
-  writeUtf8(path.join(root, '.claude/commands/viewwork-ping.md'),
-    `# /viewwork-ping\n\nViewWork 이벤트를 수동으로 기록합니다.\n\n\`\`\`\n!leerness viewwork emit . --action note --note \"manual ping\"\n\`\`\`\n`);
-  ok('viewwork hook installed');
-  ok('claude .claude/settings.local.json updated (Stop hook adds a viewwork event)');
-}
+// 1.9.151: ViewWork hook 제거 (사용자 명시 — leerness와 무관한 외부 도구)
+// 이전 1.9.0~1.9.150 에서 .viewwork/ 디렉토리에 hook 으로 이벤트 기록했으나, ViewWork는 leerness 의존 산출물이
+// 아닌 별도 도구임. 사용자가 직접 ViewWork 를 사용하지 않으면 leerness 가 이를 강제할 이유가 없음.
+// 기존 프로젝트의 .viewwork/ 폴더는 그대로 유지 (leerness 가 삭제하지 않음 — 사용자 책임).
 
 // 1.9.37: drift detection — 메타파일 staleness 측정으로 "leerness 점점 안 쓰는" 현상 감지
 function driftCheckCmd(root, opts = {}) {
@@ -11146,7 +11151,7 @@ function reuseAutodetectCmd(root) {
 }
 
 function help() {
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness viewwork install [path]\n  leerness viewwork emit [path] [--action a] [--note n] [--agent x] [--tool t]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -11248,9 +11253,8 @@ async function main() {
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'reuse' && args[1] === 'autodetect') return reuseAutodetectCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'setup-agents' || cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(args[1] && args[1] !== 'agents' ? args[1] : (args[2] || process.cwd()));
-  if (cmd === 'session' && args[1] === 'close') { const r = sessionClose(args[2] || process.cwd(), { json: has('--json') }); viewworkEmit(args[2] || process.cwd(), { action: 'task', tool: 'session-close', note: 'session close' }); return r; }
-  if (cmd === 'viewwork' && args[1] === 'install') return viewworkInstall(args[2] || process.cwd());
-  if (cmd === 'viewwork' && args[1] === 'emit')    return viewworkEmit(args[2] || process.cwd(), { action: arg('--action','task'), note: arg('--note',''), agent: arg('--agent','leerness'), tool: arg('--tool','leerness-cli') });
+  if (cmd === 'session' && args[1] === 'close') return sessionClose(args[2] || process.cwd(), { json: has('--json') });
+  // 1.9.151: viewwork 명령 제거 (사용자 명시 — leerness 와 무관). session close 의 viewworkEmit 콜도 함께 제거.
   if (cmd === 'route')     return route(args[1] || 'planning');
   if (cmd === 'self' && args[1] === 'check')   return await selfCheck(absRoot(args[2] || process.cwd()));
   if (cmd === 'self' && args[1] === 'migrate') return log('Run: npx --yes leerness@latest migrate . --dry-run, then migrate without --dry-run after review.');
