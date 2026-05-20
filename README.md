@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.131-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-40_🎉-blue)]() [![json](https://img.shields.io/badge/--json-19_commands-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-61-blueviolet)]() [![brainstorm](https://img.shields.io/badge/brainstorm--sources-11-blueviolet)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.132-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-40_🎉-blue)]() [![json](https://img.shields.io/badge/--json-19_commands-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-62-blueviolet)]() [![archive](https://img.shields.io/badge/archive--visibility-6_surfaces-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.131  AI Agent Reliability Harness                      ║
+  ║  v1.9.132  AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```

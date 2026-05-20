@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.132 — 2026-05-20
+
+**session close 텍스트 모드에 archive 누적 라인 추가** — 마감 시점 DELETE 활동 가시화 (handoff archive 알림과 symmetric).
+
+### Added
+- `leerness session close` 텍스트 모드에 1줄 archive 요약 추가:
+  ```
+  🗑 archive 누적: D1/L1/P0 (2건) — 복원 후보: leerness memory archive list
+  ```
+- 진행 요약 (session #N) 라인 바로 아래 출력
+- archive 없으면 라인 비표시
+- handoff 7번째 자동 회수 (1.9.129) 와 symmetric — 시작/마감 양쪽에서 archive 가시성
+
+### Archive 가시성 매트릭스 (1.9.132 시점)
+| 명령 | 텍스트 | JSON |
+|---|---|---|
+| `handoff` | ✓ (1.9.129) | ✓ (1.9.130) |
+| `session close` | **✓ (1.9.132)** | ✓ (1.9.130) |
+| `memory status` | ✓ (1.9.130) | ✓ (1.9.130) |
+| `health` | (N/A) | ✓ (1.9.130) |
+| `memory archive list` | ✓ (1.9.127) | ✓ (1.9.127) |
+| `brainstorm` | ✓ (1.9.131) | ✓ (1.9.131) |
+
 ## 1.9.131 — 2026-05-20
 
 **brainstorm 회수 범위에 3 archive 파일 통합** — 과거에 제거됐던 ideas 가 새 brainstorm 시 다시 후보로 노출.

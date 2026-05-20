@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.131';
+const VERSION = '1.9.132';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -332,6 +332,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.129+ handoff **7번째 자동 회수** — \`🗑 최근 24h archive\` (D/L/P 카운트 + 복원 후보 안내). DELETE 활동 자동 인지.
 - 1.9.130+ 🎉 **60 라운드 자율 모드 마일스톤** — JSON 4종 (handoff/memory status/session close/health) \`memorySurface.archive\` 필드 통합. MCP 40 / handoff auto-recovery 7 / DELETE-RESTORE cycle 완성.
 - 1.9.131+ \`brainstorm\` 회수 범위에 3 archive 파일 (decisions/lessons/plan archive) 통합 — 과거 제거된 ideas 가 새 brainstorm 시 다시 후보로 노출. \`hits.archive\` 필드 + 복원 안내 라인.
+- 1.9.132+ \`session close\` 텍스트 모드에 archive 누적 라인 추가 — 마감 시점 DELETE 활동 가시화 (handoff 7번째 회수와 symmetric). archive 가시성 6 surface 완성.
 
 ---
 
@@ -4269,7 +4270,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.131+ brainstorm + archive 통합 — 61 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.132+ session close archive 라인 — 62 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -5136,6 +5137,22 @@ function sessionClose(root, opts = {}) {
     const agg = _retroAggregate(root);
     log(`\n## 📈 진행 요약 (session #${sc.count})`);
     log(`  ${_retroOneLine(agg)}`);
+    // 1.9.132: archive 활동 1줄 요약 — 마감 시점에 DELETE 활동 가시화 (handoff 7번째 회수와 symmetric)
+    try {
+      const hdSC = path.join(root, '.harness');
+      const arc = { d: 0, l: 0, p: 0, total: 0 };
+      for (const [k, f] of [['d', 'decisions.archive.md'], ['l', 'lessons.archive.md'], ['p', 'plan.archive.md']]) {
+        const fp = path.join(hdSC, f);
+        if (exists(fp)) {
+          const entries = _parseArchiveBlocks(read(fp));
+          arc[k] = entries.length;
+          arc.total += entries.length;
+        }
+      }
+      if (arc.total > 0) {
+        log(`  🗑  archive 누적: D${arc.d}/L${arc.l}/P${arc.p} (${arc.total}건) — 복원 후보: leerness memory archive list`);
+      }
+    } catch {}
     if (sc.count % 5 === 0) {
       log(`\n## 🔄 ${sc.count}세션 마일스톤 — 자동 회고 (5세션마다)`);
       retroCmd(root);
