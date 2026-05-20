@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.127';
+const VERSION = '1.9.128';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -328,6 +328,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.125+ \`leerness decision drop <target>\` + MCP **37 도구** (\`leerness_decision_drop\`) — 잘못 저장한 결정 제거 (archive 보존).
 - 1.9.126+ \`leerness plan remove <M-XXXX|title>\` + MCP **38 도구** (\`leerness_plan_remove\`) — milestone 영구 제거 (archive 보존). **Memory Surface DELETE 5종 완전 완성** 🎉.
 - 1.9.127+ \`leerness memory archive list [--surface decisions|lessons|plan] [--json]\` + MCP **39 도구** (\`leerness_memory_archive_list\`) — DELETE 5종 archive 통합 조회 (복원 후보 회수).
+- 1.9.128+ \`leerness memory restore <surface> <target>\` + MCP **40 도구 🎉** (\`leerness_memory_restore\`) — archive → active 복귀 (DELETE→RESTORE cycle 완성). **MCP 40 도구 마일스톤**.
 
 ---
 
@@ -1528,6 +1529,64 @@ function memoryArchiveListCmd(root, opts = {}) {
     }
   }
   log(`\n📊 Total archived: ${totals.all} entries (D${totals.decisions}/L${totals.lessons}/P${totals.plan})`);
+}
+
+// 1.9.128: memory restore — archive 의 블록을 active 파일로 복귀 (DELETE→RESTORE cycle 완성)
+//   surface: decisions|lessons|plan
+//   target: date (YYYY-MM-DD) 또는 target substring 매칭
+//   매칭 archive 블록을 active 파일 끝에 추가 + archive 에서 제거
+function memoryRestoreCmd(root, surface, target) {
+  root = absRoot(root);
+  if (!surface || !['decisions', 'lessons', 'plan'].includes(surface)) {
+    return fail('memory restore <decisions|lessons|plan> <target> 필요 (target: date YYYY-MM-DD 또는 substring)');
+  }
+  if (!target) return fail('memory restore <surface> <target> — target 누락');
+  const hd = path.join(root, '.harness');
+  const archivePath = path.join(hd, `${surface}.archive.md`);
+  if (!exists(archivePath)) return fail(`${surface}.archive.md 없음 — 복원할 항목 없음`);
+  const text = read(archivePath);
+  // archive 헤더 (# X archive) 와 본문 분리
+  const headerMatch = text.match(/^(# [^\n]*\n+)([\s\S]*)$/);
+  const archiveHeader = headerMatch ? headerMatch[1] : '';
+  const body = headerMatch ? headerMatch[2] : text;
+  // body 를 "## 제거 " 단위로 split
+  const blocks = body.split(/\n(?=## 제거 )/);
+  const kept = [];
+  const restoredBlocks = [];
+  for (const b of blocks) {
+    if (!b.trim()) continue;
+    const m = b.match(/^## 제거 (\d{4}-\d{2}-\d{2})\s*\(target:\s*"([^"]*)"\)/);
+    if (!m) { kept.push(b); continue; }
+    const date = m[1];
+    const blockTarget = m[2];
+    const isDateTarget = date === target;
+    const isSubstring = blockTarget.includes(target);
+    if (isDateTarget || isSubstring) {
+      // archive 블록에서 원래 active 블록만 추출 (## 제거 ... 한 줄 + 다음 line부터)
+      const content = b.replace(/^## 제거 [^\n]*\n+/, '');
+      if (content.trim()) restoredBlocks.push(content.trim());
+    } else {
+      kept.push(b);
+    }
+  }
+  if (restoredBlocks.length === 0) return fail(`매칭 archive entry 없음: surface=${surface}, target="${target}"`);
+  // active 파일 경로
+  const activePath = surface === 'decisions' ? decisionsPath(root)
+                    : surface === 'lessons'   ? lessonsPath(root)
+                    : planPath(root);
+  // active 파일에 복귀 (헤더 보존)
+  for (const blk of restoredBlocks) {
+    append(activePath, '\n' + blk + '\n');
+  }
+  // archive 재작성 — 모두 제거되면 파일 비움 (헤더만 남김 또는 삭제)
+  if (kept.length === 0) {
+    // archive 헤더만 남겨도 의미 있음 — 향후 다시 사용 가능
+    writeUtf8(archivePath, archiveHeader);
+  } else {
+    writeUtf8(archivePath, archiveHeader + kept.join('\n'));
+  }
+  ok(`${surface} restored: ${restoredBlocks.length}건 (archive에서 active로 복귀)`);
+  _autoRoadmap(absRoot(root), 'data-change');
 }
 
 // 1.9.117: lesson list — lessons.md 의 모든 항목 조회 + --tag 필터 + --json
@@ -4136,7 +4195,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.127+ memory archive list — 57 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.128+ MCP 40 도구 🎉 DELETE→RESTORE cycle — 58 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -4152,9 +4211,9 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 39 도구 (memory_archive_list 추가, 1.9.127)'));
-    log('    ' + C.green('npx leerness plan remove <M-XXXX|title>') + C.dim('             # milestone 영구 제거 (archive 보존, 1.9.126) — Memory DELETE 5종 완성'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 40 도구 🎉 (memory_restore 추가, 1.9.128)'));
     log('    ' + C.green('npx leerness memory archive list --json') + C.dim('              # DELETE 5종 archive 통합 조회 (1.9.127) — D/L/P entries + 복원 후보'));
+    log('    ' + C.green('npx leerness memory restore <surface> <target>') + C.dim('       # archive → active 복원 (1.9.128) — DELETE→RESTORE cycle'));
     log('    ' + C.green('npx leerness lesson save "<text>" --tag "..."') + C.dim('       # lessons.md 직접 write (1.9.112 — handoff 자동 회수와 통합)'));
     log('    ' + C.green('npx leerness memory status . --json') + C.dim('                  # Memory Surface 5종 통합 상태 JSON (1.9.114)'));
     log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
@@ -8337,7 +8396,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_lesson_drop', description: '1.9.124 — lessons.md 에서 특정 lesson 제거 (target: date YYYY-MM-DD 또는 text substring). 잘못 저장한 lesson 제거. 제거된 블록은 .harness/lessons.archive.md 에 자동 보존 (복구 가능)', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
     { name: 'leerness_decision_drop', description: '1.9.125 — decisions.md 에서 특정 결정 제거 (target: date YYYY-MM-DD 또는 title substring). 제거된 블록은 .harness/decisions.archive.md 에 자동 보존', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
     { name: 'leerness_plan_remove', description: '1.9.126 — plan.md 에서 특정 milestone 블록 (### M-XXXX) 제거 (target: M-XXXX 또는 title substring). 제거된 블록은 .harness/plan.archive.md 에 자동 보존. Memory Surface DELETE 5종 완전 완성', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
-    { name: 'leerness_memory_archive_list', description: '1.9.127 — DELETE 5종 archive 파일 통합 조회 JSON ({ decisions: [], lessons: [], plan: [], totals: { decisions, lessons, plan, all } }). 외부 AI가 과거에 제거된 항목을 회수/복원 후보로 참조. --surface 필터: decisions|lessons|plan', inputSchema: { type: 'object', properties: { surface: { type: 'string' }, path: { type: 'string' } } } }
+    { name: 'leerness_memory_archive_list', description: '1.9.127 — DELETE 5종 archive 파일 통합 조회 JSON ({ decisions: [], lessons: [], plan: [], totals: { decisions, lessons, plan, all } }). 외부 AI가 과거에 제거된 항목을 회수/복원 후보로 참조. --surface 필터: decisions|lessons|plan', inputSchema: { type: 'object', properties: { surface: { type: 'string' }, path: { type: 'string' } } } },
+    { name: 'leerness_memory_restore', description: '1.9.128 — archive 의 항목을 active 파일로 복귀 (DELETE→RESTORE cycle). surface: decisions|lessons|plan. target: date YYYY-MM-DD 또는 target substring 매칭. 복원된 블록은 archive 에서 제거됨. 🎉 MCP 40 도구 마일스톤', inputSchema: { type: 'object', properties: { surface: { type: 'string', enum: ['decisions', 'lessons', 'plan'] }, target: { type: 'string' }, path: { type: 'string' } }, required: ['surface', 'target'] } }
   ];
 
   function send(obj) {
@@ -8408,6 +8468,7 @@ function mcpServeCmd(root) {
           case 'leerness_decision_drop':   cliArgs = ['decision', 'drop', String(args.target || ''), '--path', targetPath]; break;
           case 'leerness_plan_remove':     cliArgs = ['plan', 'remove', String(args.target || ''), '--path', targetPath]; break;
           case 'leerness_memory_archive_list': cliArgs = ['memory', 'archive', 'list', '--path', targetPath, '--json', ...(args.surface ? ['--surface', args.surface] : [])]; break;
+          case 'leerness_memory_restore':  cliArgs = ['memory', 'restore', String(args.surface || ''), String(args.target || ''), '--path', targetPath]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -9150,6 +9211,11 @@ async function main() {
   if (cmd === 'memory' && args[1] === 'archive' && args[2] === 'list') {
     const root = absRoot(arg('--path', args[3] && !args[3].startsWith('-') ? args[3] : process.cwd()));
     return memoryArchiveListCmd(root, { json: has('--json') });
+  }
+  // 1.9.128: memory restore — archive 블록을 active 파일로 복귀 (DELETE→RESTORE cycle)
+  if (cmd === 'memory' && args[1] === 'restore') {
+    const root = absRoot(arg('--path', process.cwd()));
+    return memoryRestoreCmd(root, args[2], args[3]);
   }
   // 1.9.112: lesson save — lessons.md에 새 lesson 추가
   // 1.9.117: lesson list — lessons.md 조회 + --tag 필터 + --json

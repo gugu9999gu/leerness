@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.9.128 — 2026-05-20
+
+**`leerness memory restore` CLI + MCP 40번째 도구 `leerness_memory_restore`** 🎉 **MCP 40 도구 마일스톤** — DELETE→RESTORE cycle 완성.
+
+### Added — `leerness memory restore <surface> <target>` CLI
+- surface: `decisions` | `lessons` | `plan`
+- target: date YYYY-MM-DD 또는 substring 매칭
+- archive 의 매칭 블록을 active 파일 끝에 복귀
+- archive 에서 제거 (또는 다 비면 헤더만 남김)
+- 여러 매칭 동시 복원 가능
+- Invalid surface / 미매칭 → fail
+
+### Added — MCP 40번째 도구 `leerness_memory_restore` 🎉
+- 외부 AI 가 직접 archive 복원
+- 인자: `{ surface (required), target (required), path? }`
+
+### DELETE → RESTORE cycle 완성
+1. `decision drop "PostgreSQL"` → 제거 + archive
+2. `memory archive list --surface decisions` → 후보 회수
+3. `memory restore decisions "PostgreSQL"` → 복원
+
+### 사용 시나리오
+사용자: "어제 잘못 취소한 PostgreSQL 결정 다시 살려줘"
+→ 외부 AI: `leerness_memory_restore({ surface: "decisions", target: "PostgreSQL" })` — archive에서 active로 복귀
+
+### MCP 도구 누계: 40 🎉 (1.9.127: 39 + leerness_memory_restore — MCP 40 마일스톤)
+
 ## 1.9.127 — 2026-05-20
 
 **`leerness memory archive list` CLI + MCP 39번째 도구 `leerness_memory_archive_list`** — DELETE 5종 archive 통합 조회 (decisions/lessons/plan).
