@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.9.154 — 2026-05-20
+
+**agent 1-shot multi-provider + REPL `:provider` 활성 검증 (1.9.153 후속, 일관성 강화).**
+
+자율 모드 84 라운드.
+
+### Added — `leerness agent "<task>" --provider <p>` 1-shot multi-provider
+- 기존: 1-shot 모드는 Ollama 만 호출, 다른 CLI 는 `agents dispatch` 안내만
+- 변경: **claude / codex / gemini / copilot 도 직접 호출** (1.9.153 `_cliChat` 재사용)
+- `_recordRun` observability — provider/model 필드 동적 (`agent_one_shot` kind)
+- task-log 기록도 provider 동적 (`leerness agent (claude:claude, role=actor)` 형식)
+- 실패 시 provider 별 friendly 안내 (Ollama: BASE_URL 확인 / 외부 CLI: `LEERNESS_ENABLE_<X>=1` + 설치)
+
+### Added — REPL `:provider <p>` 전환 시 활성 사전 검증
+- validProviders 화이트리스트 5종 — 알 수 없는 provider 거부
+- **비활성 (`ready` 아님) provider 전환 시 즉시 거부** — 실제 호출 시 실패 방지
+- `_checkAgent` 결과로 status/installed/enabled 종합 판정
+- Ollama 는 `LEERNESS_OLLAMA_BASE_URL` 미설정 시 친절한 안내 (블록 아님 — fallback URL 시도)
+- 전환 성공 시 `rl.setPrompt(prompt())` 으로 프롬프트 즉시 갱신
+
+### Verified — setup-agents `_selectMany` 일관성 (회귀 방지)
+- 1.9.34 이래 setup-agents 이미 `_selectMany` 사용 중 — 1.9.151 install 흐름과 일관
+- stress-v99 회귀 테스트 추가 (사용자 명시 요청 일관성 보장)
+
+### Verified
+- e2e 217/217 ✓
+- stress-v99: 18/18 (1-shot multi-provider 6종 + REPL :provider 검증 4종 + setup-agents 1종 + 누적 회귀 7종)
+- VERSION = 1.9.154 / autonomous-rounds = 84
+
+---
+
 ## 1.9.153 — 2026-05-20
 
 **`.env` 직접 생성/마이그레이션 + REPL 배너 leerness 고유 문구 + multi-provider REPL (사용자 명시 3종).**

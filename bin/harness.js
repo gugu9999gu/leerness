@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.153';
+const VERSION = '1.9.154';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -10425,7 +10425,36 @@ async function _agentRepl(root, opts) {
       if (!['planner', 'reviewer', 'actor'].includes(r)) { log(C.yel(`  ⚠ role 은 planner/reviewer/actor`)); return false; }
       state.role = r; rl.setPrompt(prompt()); log(C.green(`  role = ${r}`)); return false;
     }
-    if (op === 'provider') { state.provider = rest[0] || state.provider; log(C.green(`  provider = ${state.provider}`)); return false; }
+    if (op === 'provider') {
+      const newProv = rest[0] || state.provider;
+      const validProviders = ['ollama', 'claude', 'codex', 'gemini', 'copilot'];
+      if (!validProviders.includes(newProv)) {
+        log(C.yel(`  ⚠ provider 는 ${validProviders.join(' / ')} (받음: ${newProv})`));
+        return false;
+      }
+      // 1.9.154: provider 전환 시 활성 ready 사전 검증 — 비활성/미설치이면 친절한 안내 후 거부 (실제 호출 시 실패 방지)
+      if (newProv === 'ollama') {
+        // Ollama 는 HTTP 기반 — 단순히 LEERNESS_OLLAMA_BASE_URL 확인
+        const url = process.env.LEERNESS_OLLAMA_BASE_URL || '';
+        if (!url) {
+          log(C.yel(`  ⚠ ollama base URL 미설정 (LEERNESS_OLLAMA_BASE_URL) — 기본 http://localhost:11434 시도`));
+        }
+      } else {
+        const agent = EXTERNAL_AGENTS.find(a => a.id === newProv);
+        if (agent) {
+          const st = _checkAgent(agent);
+          if (st.status !== 'ready') {
+            log(C.yel(`  ⚠ ${newProv} 비활성 (${st.status}) — .env 에서 LEERNESS_ENABLE_${newProv.toUpperCase()}=1 + CLI 설치 필요`));
+            log(C.dim(`     (leerness agents list 로 상태 확인)  — provider 전환 취소`));
+            return false;
+          }
+        }
+      }
+      state.provider = newProv;
+      rl.setPrompt(prompt());
+      log(C.green(`  provider = ${state.provider}`));
+      return false;
+    }
     if (op === 'clear') { process.stdout.write('\x1b[2J\x1b[H'); return false; }
     if (op === 'reset') { state.history = []; log(C.dim('  history 초기화됨')); return false; }
     if (op === 'history') {
@@ -10558,32 +10587,39 @@ async function agentCmd(root, taskArg) {
   } catch {}
   if (dryRun) { log('\n(dry-run) LLM 호출 스킵 — provider/권한/컨텍스트만 출력'); return; }
   if (!provider) { fail('활성 provider 없음 — .env 에서 LEERNESS_ENABLE_OLLAMA=1 또는 LEERNESS_ENABLE_CLAUDE=1 활성화'); process.exitCode = 1; return; }
-  // MVP: Ollama 지원 (로컬). 다른 CLI 는 사용자가 직접 호출 (leerness agents dispatch 이미 존재).
+  // 1.9.148: role prompt 자동 prepend (모든 provider 공통)
+  const finalPrompt = `${rolePrompt}\n\nTask: ${task}`;
+  const t0 = Date.now();
+  // 1.9.154: 1-shot 모드도 multi-provider — Ollama 외 claude/codex/gemini/copilot 직접 호출 (1.9.153 _cliChat 재사용)
+  let r;
   if (provider === 'ollama') {
     log('\n[ollama 호출 중...]');
-    // 1.9.148: role prompt 자동 prepend
-    const finalPrompt = `${rolePrompt}\n\nTask: ${task}`;
-    const t0 = Date.now();
-    const r = await _ollamaChat(finalPrompt);
-    const dt = Date.now() - t0;
-    // 1.9.149: observability 기록
-    _recordRun(root, { kind: 'agent_one_shot', provider: 'ollama', model: r.model, role, durationMs: dt, ok: r.ok, error: r.error, task: task.slice(0, 200), responseChars: (r.response || '').length });
-    if (r.ok) {
-      log('\n[response (model=' + r.model + ', role=' + role + ', ' + dt + 'ms)]\n' + r.response);
-      try {
-        const tlp = taskLogPath(root);
-        const block = `\n## ${today()} leerness agent (ollama:${r.model}, role=${role})\n- task: ${task.slice(0, 200)}\n- response (preview): ${r.response.slice(0, 240).replace(/\n+/g, ' ')}\n`;
-        append(tlp, block);
-      } catch {}
-    } else {
-      fail(`ollama 호출 실패: ${r.error || 'unknown'}`);
-      log(`  → ollama serve 실행 + LEERNESS_OLLAMA_BASE_URL 확인`);
-      process.exitCode = 1;
-    }
+    r = await _ollamaChat(finalPrompt);
+  } else if (['claude', 'codex', 'gemini', 'copilot'].includes(provider)) {
+    log(`\n[${provider} CLI 호출 중...]`);
+    r = await _cliChat(root, provider, finalPrompt, { timeout: 90000 });
+    if (r.ok && !r.model) r.model = provider;  // _cliChat 결과 보강
+  } else {
+    fail(`알 수 없는 provider: ${provider} (ollama/claude/codex/gemini/copilot)`);
+    process.exitCode = 1;
     return;
   }
-  // 그 외 provider: 사용자에게 직접 dispatch 안내
-  log(`\n💡 ${provider} provider 는 \`leerness agents dispatch "<task>" --to ${provider}\` 또는 외부 CLI 직접 호출 권장`);
+  const dt = Date.now() - t0;
+  // 1.9.149: observability 기록
+  _recordRun(root, { kind: 'agent_one_shot', provider, model: r.model || provider, role, durationMs: dt, ok: r.ok, error: r.error, task: task.slice(0, 200), responseChars: (r.response || '').length });
+  if (r.ok) {
+    log(`\n[response (provider=${provider}, model=${r.model || provider}, role=${role}, ${dt}ms)]\n${r.response}`);
+    try {
+      const tlp = taskLogPath(root);
+      const block = `\n## ${today()} leerness agent (${provider}:${r.model || provider}, role=${role})\n- task: ${task.slice(0, 200)}\n- response (preview): ${(r.response || '').slice(0, 240).replace(/\n+/g, ' ')}\n`;
+      append(tlp, block);
+    } catch {}
+  } else {
+    fail(`${provider} 호출 실패: ${r.error || 'unknown'}`);
+    if (provider === 'ollama') log(`  → ollama serve 실행 + LEERNESS_OLLAMA_BASE_URL 확인`);
+    else log(`  → .env 에서 LEERNESS_ENABLE_${provider.toUpperCase()}=1 + CLI 설치 확인 (leerness agents list)`);
+    process.exitCode = 1;
+  }
 }
 
 // ===== 1.9.147: 자동 유지보수 시스템 (사용자 명시 요청) =====
