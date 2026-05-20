@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.133 — 2026-05-20
+
+**brainstorm 텍스트 모드에 lessonsExplicit / planMilestones display 추가** — 1.9.116에서 데이터 수집은 했지만 display는 누락된 pre-existing gap fix.
+
+### Fixed
+- `brainstorm` 텍스트 모드에 두 섹션 추가:
+  ```
+  💡 관련 lessons (N) — Memory Surface lessons.md 직접 매칭
+    - .harness/lessons.md:L — <title>
+  🗺  관련 plan milestones (N) — plan.md 매칭
+    - .harness/plan.md:L — M-XXXX <title>
+  ```
+- 1.9.116에서 lessons/plan 데이터는 수집했지만 출력 누락 → 1.9.133에서 fix
+
+### brainstorm 텍스트 display 완성 매트릭스
+| 섹션 | 라운드 |
+|---|---|
+| decisions / skills / tasks / rules / evidence / lessons (legacy) | (기존) |
+| skillHistory / taskLogFails | 1.9.72 |
+| **lessonsExplicit** | **1.9.133 ✓** |
+| **planMilestones** | **1.9.133 ✓** |
+| archive (D/L/P) | 1.9.131 |
+
 ## 1.9.132 — 2026-05-20
 
 **session close 텍스트 모드에 archive 누적 라인 추가** — 마감 시점 DELETE 활동 가시화 (handoff archive 알림과 symmetric).

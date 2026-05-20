@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.132';
+const VERSION = '1.9.133';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -333,6 +333,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.130+ 🎉 **60 라운드 자율 모드 마일스톤** — JSON 4종 (handoff/memory status/session close/health) \`memorySurface.archive\` 필드 통합. MCP 40 / handoff auto-recovery 7 / DELETE-RESTORE cycle 완성.
 - 1.9.131+ \`brainstorm\` 회수 범위에 3 archive 파일 (decisions/lessons/plan archive) 통합 — 과거 제거된 ideas 가 새 brainstorm 시 다시 후보로 노출. \`hits.archive\` 필드 + 복원 안내 라인.
 - 1.9.132+ \`session close\` 텍스트 모드에 archive 누적 라인 추가 — 마감 시점 DELETE 활동 가시화 (handoff 7번째 회수와 symmetric). archive 가시성 6 surface 완성.
+- 1.9.133+ \`brainstorm\` 텍스트 모드 lessonsExplicit / planMilestones display 추가 — 1.9.116에서 데이터 수집은 했지만 display 누락된 pre-existing gap fix.
 
 ---
 
@@ -4270,7 +4271,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.132+ session close archive 라인 — 62 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.133+ brainstorm display 완성 — 63 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -6052,6 +6053,16 @@ function brainstormCmd(root, topic) {
   if (hits.taskLogFails.length) {
     log(`\n## 📜 task-log 실패 라인 (${hits.taskLogFails.length}) — 1.9.67 인덱스 + brainstorm`);
     hits.taskLogFails.slice(0, 5).forEach(t => log(`  - .harness/task-log.md:${t.line || '?'} — ${t.title}`));
+  }
+  // 1.9.133: lessonsExplicit display (데이터는 1.9.116에서 수집, display 누락 fix)
+  if (hits.lessonsExplicit && hits.lessonsExplicit.length) {
+    log(`\n## 💡 관련 lessons (${hits.lessonsExplicit.length}) — Memory Surface lessons.md 직접 매칭 (1.9.116)`);
+    hits.lessonsExplicit.slice(0, 5).forEach(l => log(`  - .harness/lessons.md:${l.line || '?'} — ${l.title}`));
+  }
+  // 1.9.133: planMilestones display (데이터는 1.9.116에서 수집, display 누락 fix)
+  if (hits.planMilestones && hits.planMilestones.length) {
+    log(`\n## 🗺  관련 plan milestones (${hits.planMilestones.length}) — plan.md 매칭 (1.9.116)`);
+    hits.planMilestones.slice(0, 5).forEach(m => log(`  - .harness/plan.md:${m.line || '?'} — ${m.id} ${m.title}`));
   }
   // 1.9.131: 3 archive 파일 hits — DELETE 5종 archive 도 brainstorm 후보
   if (hits.archive) {
