@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.9.145 — 2026-05-20
+
+**실행 환경 자동 감지 — 사용자 명시 요청.**
+
+> 사용자 시나리오: 실행파일 빌드 / 데이터 형식 매칭 작업 중 "X은(는) 내부 또는 외부 명령, 실행할 수 있는 프로그램, 또는 배치 파일이 아닙니다" 같은 PATH/도구 누락 오류를 사전 방지.
+
+### Added — `leerness env detect` 명령
+- `.harness/environment.json` 자동 기록 (보안: 절대경로 사용자명 마스킹 `<user>`)
+- 캡처 내용:
+  - **OS**: platform / type / release / arch
+  - **하드웨어**: cpuCount / cpuModel / totalMemoryGB / freeMemoryGB
+  - **로케일/Shell**: lang / encoding / shell name
+  - **Node**: version / path (masked)
+  - **도구 18종 자동 감지**: npm/pnpm/yarn/git/python/python3/pip/docker/gh/java/go/rustc/cargo/deno/bun/tsc/next/vite
+  - **scriptDependencies**: `package.json#scripts` 첫 토큰을 PATH에서 검증
+- `--json` JSON 출력, `--no-write` 읽기 전용 모드
+- exit 1 if PATH 누락 (CI 가시화)
+
+### Added — 환경 변동 자동 감지
+- 이전 캡처 vs 현재 비교:
+  - OS platform/arch 변경 (머신 이동)
+  - Node 버전 변경
+  - 도구 추가/제거/버전 변경
+  - package.json scripts 의존 도구 PATH 누락
+
+### Added — handoff 9번째 자동 회수 🖥
+- 매 세션 시작 시 환경 변동/PATH 누락 즉시 노출
+- 첫 캡처는 silent persist (signal 없음)
+- 변동/누락 시에만 magenta 알림 + `leerness env detect . --json` 안내
+- opt-out: `LEERNESS_NO_ENV_DETECT=1` 또는 `--no-env-detect`
+
+### Added — MCP 47번째 도구 `leerness_env_detect`
+- 외부 AI가 코드 작성 전 PATH 검증
+- 응답: `{ snapshot, diff, persisted }`
+
+### Validation
+- stress-v90: PASS (env detect + 변동 감지 + PATH 누락 + handoff 9번째 + MCP 47 + 누적 회귀)
+- e2e: 219/219 PASS
+
 ## 1.9.144 — 2026-05-20
 
 **사용자 명시 요청 3종 — 배너 문구 변경 + 1초 홀드 + quickStart UI/UX 전면 개선.**

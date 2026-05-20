@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.144';
+const VERSION = '1.9.145';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -3141,6 +3141,38 @@ function handoff(root) {
             log('');
           }
         }
+      }
+    } catch {}
+  }
+  // 1.9.145: handoff 9번째 자동 회수 — 🖥 실행 환경 변동 + PATH 누락 알림 (사용자 명시)
+  //   "X은(는) 내부 또는 외부 명령... 아닙니다" 사전 방지: package.json scripts 의존 도구가 PATH에 있는지 + 머신 변경 감지
+  //   첫 실행에선 자동 캡처 (silent), 이후엔 변동/누락 시에만 노출.
+  if (!has('--no-env-detect') && !has('--compact') && !has('--quiet') && process.env.LEERNESS_NO_ENV_DETECT !== '1') {
+    try {
+      const isTtyEd = process.stdout && process.stdout.isTTY;
+      const edCy = s => isTtyEd ? `\x1b[35m${s}\x1b[0m` : s; // magenta
+      const edDim = s => isTtyEd ? `\x1b[2m${s}\x1b[0m` : s;
+      const prev = _readEnvSnapshot(root);
+      const curr = _detectEnvironment(root);
+      const diff = _diffEnvSnapshots(prev, curr);
+      // 첫 캡처면 silent persist (signal 없음)
+      const snapPath = _envSnapshotPath(root);
+      if (!prev) {
+        try { mkdirp(path.dirname(snapPath)); writeUtf8(snapPath, JSON.stringify(curr, null, 2) + '\n'); } catch {}
+      } else if (diff.changes.length || (diff.missing && diff.missing.length)) {
+        // 변동/누락 알림
+        if (diff.missing && diff.missing.length) {
+          log(edCy(`🖥  실행 환경 (1.9.145): ⚠ PATH 누락 ${diff.missing.length}건 — npm run 시 실패 가능`));
+          for (const m of diff.missing.slice(0, 3)) log(edDim(`  • ${m.command} (used by: npm run ${m.usedBy})`));
+        }
+        if (diff.changes.length) {
+          log(edCy(`🖥  실행 환경 (1.9.145): 변동 ${diff.changes.length}건 감지`));
+          for (const c of diff.changes.slice(0, 3)) log(edDim(`  • ${c}`));
+        }
+        log(edDim(`  → 상세: leerness env detect . --json`));
+        log('');
+        // 갱신 (다음 비교 baseline)
+        try { writeUtf8(snapPath, JSON.stringify(curr, null, 2) + '\n'); } catch {}
       }
     } catch {}
   }
@@ -9293,7 +9325,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_feature_impact', description: '1.9.141 — Feature Causality Graph 인과관계 영향 추적 JSON ({ feature, total, impacted: [{ id, title, depth, via, files, errorModes }] }). 신규 기능 추가/형식 변경 전 호출: id 변경으로 영향받는 다른 feature를 transitive (affects + co-changes + reverse depends-on) 으로 회수. 1+1=20 cascade 방지', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
     { name: 'leerness_feature_list', description: '1.9.141 — 전체 Feature Graph 노드 + 엣지 JSON. 외부 AI가 시스템 내 기능 의존성을 한 번에 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_feature_add', description: '1.9.142 — Feature Graph 에 새 노드 추가 (외부 AI가 코드 작성 중 직접 feature 등록). 인자: { title (required), dependsOn?, affects?, coChangesWith?, files?, path? }. 자동 F-XXXX ID 부여. CRUD 완성에 기여', inputSchema: { type: 'object', properties: { title: { type: 'string' }, dependsOn: { type: 'string' }, affects: { type: 'string' }, coChangesWith: { type: 'string' }, files: { type: 'string' }, path: { type: 'string' } }, required: ['title'] } },
-    { name: 'leerness_feature_link', description: '1.9.142 — 기존 feature 노드에 의존/영향/공변경 엣지 추가. 인자: { id (required, F-XXXX), dependsOn?, affects?, coChangesWith?, path? }. 외부 AI가 코드 변경 도중 발견한 인과관계를 즉시 그래프에 반영', inputSchema: { type: 'object', properties: { id: { type: 'string' }, dependsOn: { type: 'string' }, affects: { type: 'string' }, coChangesWith: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } }
+    { name: 'leerness_feature_link', description: '1.9.142 — 기존 feature 노드에 의존/영향/공변경 엣지 추가. 인자: { id (required, F-XXXX), dependsOn?, affects?, coChangesWith?, path? }. 외부 AI가 코드 변경 도중 발견한 인과관계를 즉시 그래프에 반영', inputSchema: { type: 'object', properties: { id: { type: 'string' }, dependsOn: { type: 'string' }, affects: { type: 'string' }, coChangesWith: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
+    { name: 'leerness_env_detect', description: '1.9.145 — 실행 환경 자동 감지 + 변동 추적 JSON ({ snapshot: { os, hardware, locale, shell, node, tools, scriptDependencies }, diff: { firstCapture, changes, missing }, persisted }). "X은(는) 내부 또는 외부 명령... 아닙니다" 사전 방지: package.json scripts 의존 도구가 PATH에 있는지 검증 + 머신/Node/도구 변경 감지. 절대경로 마스킹 (보안). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -9384,6 +9417,8 @@ function mcpServeCmd(root) {
             if (args.affects) cliArgs.push('--affects', String(args.affects));
             if (args.coChangesWith) cliArgs.push('--co-changes-with', String(args.coChangesWith));
             break;
+          // 1.9.145: 실행 환경 자동 감지
+          case 'leerness_env_detect': cliArgs = ['env', 'detect', targetPath, '--json']; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -9563,6 +9598,192 @@ function envSyncCmd(root) {
   writeUtf8(d.examplePath, example);
   ok(`${d.inEnvOnly.length}건 추가됨 → ${rel(root, d.examplePath)}`);
   for (const k of d.inEnvOnly) log(`  + ${k}=`);
+}
+
+// ===== 1.9.145: 실행 환경 자동 감지 (사용자 명시 요청) =====
+// 사용자 시나리오: "X은(는) 내부 또는 외부 명령... 아닙니다" 같은 PATH/도구 누락 오류 사전 방지.
+// .harness/environment.json 에 OS/하드웨어/언어/도구를 기록 + 변동 감지.
+function _envSnapshotPath(root) { return path.join(absRoot(root), '.harness', 'environment.json'); }
+// 보안 정책: 절대경로 토큰 (사용자명 등)을 마스킹 (시크릿 정책)
+function _maskPath(p) {
+  if (!p || typeof p !== 'string') return p;
+  // Windows: C:\Users\<name>\...  → C:\Users\<masked>\...
+  let m = p.replace(/([A-Z]:\\Users\\)[^\\]+/i, '$1<user>');
+  // Unix: /home/<name>/... or /Users/<name>/...
+  m = m.replace(/(\/(?:home|Users)\/)[^\/]+/i, '$1<user>');
+  return m;
+}
+// 단일 도구 감지 — 있으면 { version, path }, 없으면 null
+function _detectTool(cmd, versionArgs = ['--version'], maxLen = 80) {
+  const r = cp.spawnSync(cmd, versionArgs, { encoding: 'utf8', timeout: 4000, shell: false });
+  if (r.error || r.status !== 0) return null;
+  // Windows where / Unix which 로 경로 추출
+  const isWin = process.platform === 'win32';
+  const locator = cp.spawnSync(isWin ? 'where' : 'which', [cmd], { encoding: 'utf8', timeout: 3000, shell: false });
+  const toolPath = locator.status === 0 ? (locator.stdout || '').split(/\r?\n/)[0].trim() : null;
+  const version = (r.stdout || r.stderr || '').split(/\r?\n/)[0].trim().slice(0, maxLen);
+  return { version, path: toolPath ? _maskPath(toolPath) : null };
+}
+function _detectEnvironment(root) {
+  const _os = require('os');
+  const snap = {
+    capturedAt: new Date().toISOString(),
+    leernessVersion: VERSION,
+    os: {
+      platform: process.platform,            // 'win32' | 'darwin' | 'linux'
+      type: _os.type(),                       // 'Windows_NT' | 'Darwin' | 'Linux'
+      release: _os.release(),
+      arch: process.arch,                     // 'x64' | 'arm64'
+      version: _os.version ? _os.version() : null
+    },
+    hardware: {
+      cpuCount: _os.cpus().length,
+      cpuModel: (_os.cpus()[0] || {}).model || null,
+      totalMemoryGB: Math.round(_os.totalmem() / (1024**3) * 10) / 10,
+      freeMemoryGB: Math.round(_os.freemem() / (1024**3) * 10) / 10
+    },
+    locale: {
+      lang: process.env.LANG || process.env.LC_ALL || process.env.LC_CTYPE
+            || (process.platform === 'win32' ? (process.env.LANGUAGE || null) : null),
+      encoding: process.env.LC_CTYPE || (process.platform === 'win32' ? 'cp949(default)' : 'UTF-8')
+    },
+    shell: {
+      name: process.platform === 'win32' ? (process.env.ComSpec ? path.basename(process.env.ComSpec) : 'cmd.exe')
+                                         : (process.env.SHELL ? path.basename(process.env.SHELL) : 'sh')
+    },
+    node: { version: process.version, path: _maskPath(process.execPath) },
+    tools: {}  // 발견된 도구만 (version + masked path)
+  };
+  // 자주 쓰이는 도구 자동 감지 — 없으면 entry 없음 (audit에서 활용)
+  const toolList = [
+    { name: 'npm', args: ['--version'] },
+    { name: 'pnpm', args: ['--version'] },
+    { name: 'yarn', args: ['--version'] },
+    { name: 'git', args: ['--version'] },
+    { name: 'python', args: ['--version'] },
+    { name: 'python3', args: ['--version'] },
+    { name: 'pip', args: ['--version'] },
+    { name: 'docker', args: ['--version'] },
+    { name: 'gh', args: ['--version'] },
+    { name: 'java', args: ['-version'] },
+    { name: 'go', args: ['version'] },
+    { name: 'rustc', args: ['--version'] },
+    { name: 'cargo', args: ['--version'] },
+    { name: 'deno', args: ['--version'] },
+    { name: 'bun', args: ['--version'] },
+    { name: 'tsc', args: ['--version'] },
+    { name: 'next', args: ['--version'] },
+    { name: 'vite', args: ['--version'] }
+  ];
+  for (const t of toolList) {
+    const info = _detectTool(t.name, t.args);
+    if (info) snap.tools[t.name] = info;
+  }
+  // package.json scripts 에서 참조되는 실제 명령들 → PATH 검증
+  snap.scriptDependencies = [];
+  try {
+    const pkgPath = path.join(root, 'package.json');
+    if (exists(pkgPath)) {
+      const pkg = JSON.parse(read(pkgPath));
+      const scripts = pkg.scripts || {};
+      // 각 script 첫 토큰을 추출 (단순 토큰 — &&/||/;/| 등으로 split)
+      const seen = new Set();
+      for (const [name, body] of Object.entries(scripts)) {
+        const tokens = String(body).split(/[\s;&|]+/).map(t => t.trim()).filter(Boolean);
+        for (const tk of tokens.slice(0, 4)) {
+          if (/^[a-z][a-z0-9_-]*$/i.test(tk) && !seen.has(tk)) {
+            // 흔한 빌트인은 스킵 (echo, set, cd, exit)
+            if (['echo', 'set', 'cd', 'exit', 'rm', 'mv', 'cp', 'ls', 'mkdir', 'true', 'false'].includes(tk)) continue;
+            seen.add(tk);
+            const found = !!snap.tools[tk] || (cp.spawnSync(process.platform === 'win32' ? 'where' : 'which', [tk], { encoding: 'utf8', timeout: 3000 }).status === 0);
+            snap.scriptDependencies.push({ command: tk, foundInPath: found, usedBy: name });
+          }
+        }
+      }
+    }
+  } catch {}
+  return snap;
+}
+function _readEnvSnapshot(root) {
+  const p = _envSnapshotPath(root);
+  if (!exists(p)) return null;
+  try { return JSON.parse(read(p)); } catch { return null; }
+}
+function _diffEnvSnapshots(prev, curr) {
+  // 1.9.145 fix: 첫 캡처에서도 현재 PATH 누락은 즉시 노출 (CI exit 가시화)
+  const currentMissing = (curr.scriptDependencies || []).filter(d => !d.foundInPath).map(d => ({ command: d.command, usedBy: d.usedBy }));
+  if (!prev) return { firstCapture: true, changes: [], missing: currentMissing };
+  const changes = [];
+  // OS 변화 (사용자가 다른 머신에서 실행 시 즉시 감지)
+  if (prev.os && curr.os) {
+    if (prev.os.platform !== curr.os.platform) changes.push(`os.platform: ${prev.os.platform} → ${curr.os.platform}`);
+    if (prev.os.arch !== curr.os.arch) changes.push(`os.arch: ${prev.os.arch} → ${curr.os.arch}`);
+  }
+  // Node 버전 변화
+  if (prev.node && curr.node && prev.node.version !== curr.node.version) {
+    changes.push(`node: ${prev.node.version} → ${curr.node.version}`);
+  }
+  // 도구 추가/제거/버전 변경
+  const prevTools = new Set(Object.keys(prev.tools || {}));
+  const currTools = new Set(Object.keys(curr.tools || {}));
+  for (const t of currTools) {
+    if (!prevTools.has(t)) changes.push(`tool added: ${t} (${(curr.tools[t]||{}).version || ''})`);
+    else if ((prev.tools[t]||{}).version !== (curr.tools[t]||{}).version) {
+      changes.push(`tool changed: ${t} ${prev.tools[t].version} → ${curr.tools[t].version}`);
+    }
+  }
+  for (const t of prevTools) {
+    if (!currTools.has(t)) changes.push(`tool removed: ${t}`);
+  }
+  // package.json scripts 의존 도구 누락 (현재 PATH 기준)
+  const missing = [];
+  for (const dep of (curr.scriptDependencies || [])) {
+    if (!dep.foundInPath) missing.push({ command: dep.command, usedBy: dep.usedBy });
+  }
+  return { firstCapture: false, changes, missing };
+}
+function envDetectCmd(root, opts = {}) {
+  root = absRoot(root || process.cwd());
+  const jsonMode = has('--json') || opts.json;
+  const writeMode = !has('--no-write');  // default: 캡처 후 .harness/environment.json 에 저장
+  const snap = _detectEnvironment(root);
+  const prev = _readEnvSnapshot(root);
+  const diff = _diffEnvSnapshots(prev, snap);
+  if (writeMode) {
+    mkdirp(path.dirname(_envSnapshotPath(root)));
+    writeUtf8(_envSnapshotPath(root), JSON.stringify(snap, null, 2) + '\n');
+  }
+  // 1.9.145 fix: exit code 를 JSON early-return 전에 설정 — CI 가시화
+  if (diff.missing && diff.missing.length) process.exitCode = 1;
+  if (jsonMode) {
+    log(JSON.stringify({ snapshot: snap, diff, persisted: writeMode }, null, 2));
+    return;
+  }
+  log(`# leerness env detect (1.9.145)`);
+  log(`OS: ${snap.os.type} ${snap.os.release} · ${snap.os.platform}/${snap.os.arch}`);
+  log(`CPU: ${snap.hardware.cpuCount} cores · Memory: ${snap.hardware.totalMemoryGB} GB (free ${snap.hardware.freeMemoryGB})`);
+  log(`Node: ${snap.node.version}  ·  Shell: ${snap.shell.name}  ·  Locale: ${snap.locale.lang || '(unset)'} / ${snap.locale.encoding}`);
+  const toolNames = Object.keys(snap.tools);
+  log(`도구 감지: ${toolNames.length}건 — ${toolNames.slice(0, 10).join(', ')}${toolNames.length > 10 ? ` …+${toolNames.length-10}` : ''}`);
+  if (snap.scriptDependencies.length) {
+    const missing = snap.scriptDependencies.filter(d => !d.foundInPath);
+    log(`package.json scripts 의존: ${snap.scriptDependencies.length}건${missing.length ? ` · ⚠ PATH 누락 ${missing.length}건` : ' · ✓ 모두 PATH에 있음'}`);
+    for (const m of missing) log(`  ⚠ ${m.command} (used by: npm run ${m.usedBy})`);
+  }
+  if (diff.firstCapture) {
+    log('');
+    ok('첫 환경 캡처 — 다음 실행부터 변동을 자동 비교 (1.9.145)');
+  } else if (diff.changes.length) {
+    log('');
+    warn(`환경 변동 ${diff.changes.length}건 감지:`);
+    for (const c of diff.changes) log(`  • ${c}`);
+  } else {
+    log('');
+    ok('환경 변동 없음 (이전 캡처와 동일)');
+  }
+  if (writeMode) log(`\n📁 .harness/environment.json 갱신됨`);
+  // missing 1건 이상이면 exit 1 (CI 가시화)
+  if (diff.missing && diff.missing.length) process.exitCode = 1;
 }
 
 // 1.9.85: leerness health — 종합 헬스 체크 (drift + 보안 + skill + MCP + 누적)
@@ -10064,6 +10285,8 @@ async function main() {
   // 1.9.71: leerness env check / sync — .env vs .env.example 자동 동기화
   if (cmd === 'env' && args[1] === 'check') return envCheckCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'env' && args[1] === 'sync')  return envSyncCmd(args[2] || arg('--path', process.cwd()));
+  // 1.9.145: 실행 환경 자동 감지 + 변동 추적 (사용자 명시)
+  if (cmd === 'env' && args[1] === 'detect') return envDetectCmd(args[2] || arg('--path', process.cwd()));
   // 1.9.85: leerness health — 종합 헬스 체크
   if (cmd === 'health') return healthCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));
