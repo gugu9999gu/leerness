@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.9.159 — 2026-05-20
+
+**🎉 MCP 50 도구 마일스톤 — Provider Registry CRUD MCP 완성 (list/add/remove).**
+
+자율 모드 89 라운드. 1.9.158 (list) 의 자연스러운 후속 — add/remove 까지 MCP 로 노출 → 외부 AI 가 자가 확장 가능.
+
+### Added — MCP `leerness_provider_add` (49번째 도구)
+- 외부 AI 가 새 provider 동적 등록 — OpenRouter / Bedrock / Groq / Hugging Face 등
+- 인자: `{ id (required), bin?, envFlag?, versionArgs?, desc?, installHint?, path? }`
+- 같은 id 두 번 → 갱신 / 빌트인 id → user override
+- id 정규식 검증 (영문자/숫자/_- 만)
+
+### Added — MCP `leerness_provider_remove` (50번째 도구) 🎉
+- 사용자 정의 provider 만 제거 (빌트인 5종 → 거부)
+- 인자: `{ id (required), path? }`
+
+### Provider Registry CRUD MCP 완성
+| 작업 | CLI | MCP | 마일스톤 |
+|---|---|---|---|
+| Read | `leerness provider list` | `leerness_provider_list` | 1.9.158 (48번째) |
+| Write | `leerness provider add` | `leerness_provider_add` | 1.9.159 (49번째) |
+| Delete | `leerness provider remove` | `leerness_provider_remove` | 1.9.159 (50번째) 🎉 |
+
+### Use Cases — 외부 AI 자가 확장
+```javascript
+// 메인 에이전트가 OpenRouter 발견 시 자가 등록
+await mcp.callTool('leerness_provider_add', {
+  id: 'openrouter', bin: 'openrouter-cli',
+  desc: 'OpenRouter 200+ models aggregator'
+});
+
+// 잘못 등록한 provider 자가 정리
+await mcp.callTool('leerness_provider_remove', { id: 'broken-provider' });
+```
+
+### MCP 도구 카운트 진화
+- 1.9.43: 8 → 1.9.110: **30** 🎉 → 1.9.128: **40** 🎉 → 1.9.145: 47 → 1.9.158: 48 → **1.9.159: 50** 🎉
+
+### Verified
+- e2e 217/217 ✓
+- stress-v104: 16/16 (MCP tools/list 50개 3종 + provider_add 3종 + provider_remove 3종 + 누적 회귀 7종) 🎉 **MCP 50 도구 마일스톤**
+- VERSION = 1.9.159 / autonomous-rounds = 89
+
+---
+
 ## 1.9.158 — 2026-05-20
 
 **🎉 MCP 48번째 도구 `leerness_provider_list` — Provider Registry 외부 AI 노출 마일스톤.**
