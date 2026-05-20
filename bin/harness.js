@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.152';
+const VERSION = '1.9.153';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -579,6 +579,31 @@ function mergeLinesFile(p, lines) {
   writeUtf8(p, next);
 }
 
+// 1.9.153: env 파일 전용 key-aware merge — KEY=VALUE 줄을 키 기준 처리 (기존 값 보존, 빈 키만 추가)
+//   사용자가 .env 의 LEERNESS_NPM_TOKEN=abc123 처럼 직접 편집한 값을 절대 덮어쓰지 않음.
+//   주석 / 빈 줄은 substring includes 로 중복 방지 (mergeLinesFile 와 동일).
+function mergeEnvFile(p, lines) {
+  const current = exists(p) ? read(p) : '';
+  const existingKeys = new Set();
+  for (const ln of current.split(/\r?\n/)) {
+    const m = ln.match(/^\s*([A-Z][A-Z0-9_]+)\s*=/);
+    if (m) existingKeys.add(m[1]);
+  }
+  let next = current;
+  for (const line of lines) {
+    const km = line.match(/^\s*([A-Z][A-Z0-9_]+)\s*=/);
+    if (km) {
+      if (existingKeys.has(km[1])) continue;  // 기존 키 값 보존 (덮어쓰기 X)
+      next += (next.endsWith('\n') || !next ? '' : '\n') + line + '\n';
+      existingKeys.add(km[1]);
+    } else {
+      // 주석 또는 빈 줄 — substring 미포함 시만 append
+      if (!next.includes(line)) next += (next.endsWith('\n') || !next ? '' : '\n') + line + '\n';
+    }
+  }
+  writeUtf8(p, next);
+}
+
 function writeMigrationReport(root, backup, actions, opts = {}) {
   const p = path.join(root, '.harness/migration-report.md');
   const rows = actions.map(a => `| ${a.file} | ${a.action} |`).join('\n');
@@ -820,7 +845,10 @@ async function install(root, opts = {}) {
   }
   if (!opts.dry) {
     mergeLinesFile(path.join(root, '.gitignore'), [
-      '.harness/skill-publish.local.json','.harness/**/*.local.json','.env.local',
+      // 1.9.153: .env 직접 생성 + 사용자 글로벌 룰 SECRET_PATTERNS 6종 일괄 ignore (audit 통합)
+      //   audit 가 검사하는 6 패턴: .env / .env.local / .env.production / .env.*.local / *.pem / credentials.json
+      '.env', '.env.local', '.env.production', '.env.*.local', '*.pem', 'credentials.json',
+      '.harness/skill-publish.local.json','.harness/**/*.local.json',
       '.harness/archive/','.harness/migration-report.md','.harness/cache/',
       // 1.9.147: 자동 유지보수 — 자격증명 + incident 페이로드 비공개 (보안)
       '.harness/credentials.local.json','.harness/incidents/',
@@ -836,8 +864,12 @@ async function install(root, opts = {}) {
       return new Set([a]);  // back-compat: 단일 문자열
     })();
     const enable = (cli) => enabledSet.has(cli);
-    mergeLinesFile(path.join(root, '.env.example'), [
-      '# Leerness uses environment variable names only. Do not store real secrets here.',
+    // 1.9.153: .env.example 은 템플릿 (배포 가능, 실제 시크릿 값 없음)
+    //   .env 는 실 사용 파일 — 사용자가 토큰 채워 넣음. 보안 정책: 토큰 값은 절대 자동 채우지 않음 (키만).
+    //   .gitignore 에 .env 가 들어가 있어야 함 (audit 가 자동 검증). mergeLinesFile 은 기존 키 유지 + 신규 추가.
+    const envLines = [
+      '# Leerness — environment variable names only. Do not commit real secrets (this file is in .gitignore).',
+      `# Generated/migrated by leerness v${VERSION} at ${new Date().toISOString().slice(0, 10)}.`,
       'LEERNESS_NPM_TOKEN=','LEERNESS_GITHUB_TOKEN=',
       '# 1.9.22 — orchestrate opt-in. URL이 설정되면 leerness가 Ollama를 사용 가능. 미설정 시 LLM 호출 자동 시작 금지.',
       `LEERNESS_OLLAMA_BASE_URL=${enable('ollama') ? 'http://localhost:11434' : ''}`,
@@ -850,11 +882,22 @@ async function install(root, opts = {}) {
       `LEERNESS_ENABLE_COPILOT=${enable('copilot') ? 1 : 0}`,
       `LEERNESS_ENABLE_OLLAMA=${enable('ollama') ? 1 : 0}`,
       '# 1.9.42 — agentskills.io 공개 표준 스킬 자동 탐색 (opt-in). URL 설정 시 `leerness skill discover` 사용 가능.',
-      '#   예: LEERNESS_SKILL_DISCOVER_URL=https://agentskills.io/llms.txt',
+      '#   예시 URL: https://agentskills.io/llms.txt',
       'LEERNESS_SKILL_DISCOVER_URL=',
       '# (선택) 사용자 요청 분석 시 자동 매칭 스킬 추천. 1=활성, 0/미설정=비활성.',
       'LEERNESS_SKILL_AUTO_DISCOVER=0'
-    ]);
+    ];
+    mergeLinesFile(path.join(root, '.env.example'), envLines);
+    // 1.9.153: .env 직접 생성/마이그레이션 (사용자 명시 요청). 보안 = 빈 값만 — 사용자가 직접 토큰 채움.
+    //   기존 .env 가 있으면 mergeEnvFile 이 KEY 기준 처리:
+    //     - 기존 키 (사용자가 채운 값 포함) 는 절대 덮어쓰지 않음
+    //     - 누락된 키만 빈 값으로 추가
+    //   .env 가 .gitignore 에 등록되어 있는지 audit 가 검증 (1.9.75+).
+    try {
+      mergeEnvFile(path.join(root, '.env'), envLines);
+    } catch (e) {
+      warn(`.env 생성/마이그레이션 실패 (계속 진행): ${e.message}`);
+    }
     // 1.9.146: agent 권한 파일 자동 생성 (사용자 명시 요청 #5)
     if (resolved.permissionMode) {
       try { _writePermissionsPreset(root, resolved.permissionMode); } catch (e) { warn('permissions 생성 실패: ' + e.message); }
@@ -10073,6 +10116,41 @@ async function _ollamaListModels() {
   });
 }
 
+// 1.9.153: 외부 CLI 채팅 호출 (multi-provider REPL — 사용자 명시 요청)
+//   claude/codex/gemini/copilot 를 child_process 로 호출 후 stdout 캡처.
+//   runCommandSafe 경유 — env scrub + permissions + observability 자동 적용.
+async function _cliChat(root, provider, prompt, opts) {
+  opts = opts || {};
+  const agent = EXTERNAL_AGENTS.find(a => a.id === provider);
+  if (!agent) return { ok: false, error: `unknown provider: ${provider}`, provider };
+  const status = _checkAgent(agent);
+  if (status.status !== 'ready') {
+    return { ok: false, error: `${provider} 비활성 (${status.status}) — .env 에서 ${agent.envFlag}=1 + CLI 설치 필요`, provider };
+  }
+  // CLI 별 비-인터랙티브 호출 인자 매핑 (read-only 모드 — REPL 안에서 파일 수정 X)
+  let cmd, args;
+  if (provider === 'claude')  { cmd = 'claude'; args = ['--print', prompt]; }
+  else if (provider === 'codex')   { cmd = 'codex';  args = ['exec', '--skip-git-repo-check', prompt]; }
+  else if (provider === 'gemini')  { cmd = 'gemini'; args = ['-p', prompt]; }
+  else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', prompt]; }
+  else return { ok: false, error: `provider ${provider} 미지원`, provider };
+  // runCommandSafe — env scrub + observability 자동
+  const r = runCommandSafe(cmd, args, {
+    cwd: process.cwd(), root,
+    timeout: opts.timeout || 60000,
+    allowOutsideCwd: true,  // CLI 가 cwd 밖에서 실행될 수 있음
+    kind: 'agent_repl_cli', label: `repl-${provider}`
+  });
+  if (r.status === 0) {
+    return { ok: true, response: (r.stdout || '').trim(), provider, model: provider };
+  }
+  return {
+    ok: false,
+    error: `exit=${r.status} ${(r.stderr || r.stdout || '').slice(0, 200)}`,
+    provider
+  };
+}
+
 // 1.9.149: observability lite — 모든 agent 호출의 traceId + duration + exit + failureCause 기록
 function _runsDir(root) { return path.join(absRoot(root), '.harness', 'runs'); }
 function _recordRun(root, entry) {
@@ -10228,8 +10306,10 @@ const _AGENT_ROLE_PROMPTS = {
   reviewer: '역할: reviewer. planner 의 계획 또는 actor 의 결과를 비판적으로 검토. 누락된 검증, 잠재 cascade, 오류 가능성 지적. 동의/수정 결론 명시.',
   actor: '역할: actor. 계획에 따라 정확한 명령/코드만 실행. evidence(파일 경로 + 테스트 결과) 함께 기록. 새 계획 생성 금지.'
 };
-// 1.9.149: REPL 모드 — Hermes/OpenClaw/OpenCode 스타일 자율형 CLI 에이전트
+// 1.9.149+1.9.153: REPL 모드 — leerness 자율 AI 에이전트 (multi-provider 세션)
 async function _agentRepl(root, opts) {
+  // 1.9.153: .env 자동 로드 (REPL 진입 직전) — install 직후 LEERNESS_ENABLE_* 즉시 반영
+  try { _loadEnvFile(root); } catch {}
   const readline = require('readline');
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const isTty = process.stdout.isTTY;
@@ -10238,9 +10318,28 @@ async function _agentRepl(root, opts) {
     bold: s => `\x1b[1m${s}\x1b[0m`, green: s => `\x1b[32m${s}\x1b[0m`,
     yel: s => `\x1b[33m${s}\x1b[0m`, mag: s => `\x1b[35m${s}\x1b[0m`
   } : { cy:s=>s, dim:s=>s, bold:s=>s, green:s=>s, yel:s=>s, mag:s=>s };
+  // 1.9.153: provider 자동 선택 — opts.provider 명시 안 됨 + 활성 CLI 가 있으면 사용자에게 선택지 표시
+  let initialProvider = opts.provider;
+  if (!initialProvider) {
+    const ready = EXTERNAL_AGENTS.map(a => ({ def: a, status: _checkAgent(a) }))
+                                  .filter(x => x.status.status === 'ready');
+    if (ready.length === 1) {
+      initialProvider = ready[0].def.id;  // 단일 활성 → 자동 선택
+    } else if (ready.length > 1 && isTty) {
+      // 복수 활성 → 사용자에게 선택지 (Ollama 우선이 아닌, 활성된 CLI 중 선택)
+      console.log('');
+      console.log(`  사용 가능한 CLI 에이전트 ${ready.length}개:`);
+      ready.forEach((x, i) => console.log(`    ${i + 1}) ${x.def.id}${x.status.version ? ' (v' + x.status.version + ')' : ''}`));
+      const choice = await new Promise(res => rl.question(`\n  provider 선택 (Enter=1): `, res));
+      const idx = parseInt(choice, 10) - 1;
+      initialProvider = (idx >= 0 && idx < ready.length) ? ready[idx].def.id : ready[0].def.id;
+    } else {
+      initialProvider = 'ollama';  // 활성 0개 → fallback (사용 시 friendly 경고)
+    }
+  }
   // 세션 state
   let state = {
-    provider: opts.provider || 'ollama',
+    provider: initialProvider,
     model: opts.model || process.env.LEERNESS_OLLAMA_MODEL || null,
     role: opts.role || 'actor',
     history: [],   // [{role: 'user'|'assistant', content: ''}]
@@ -10258,8 +10357,8 @@ async function _agentRepl(root, opts) {
   // 환영 메시지 + 모델 선택
   log('');
   log(C.bold(C.cy('  ╔════════════════════════════════════════════════════╗')));
-  log(C.bold(C.cy('  ║  leerness agent — REPL mode (1.9.150)              ║')));
-  log(C.bold(C.cy('  ║  Hermes / OpenClaw / OpenCode 스타일 + Sandbox     ║')));
+  log(C.bold(C.cy('  ║  leerness agent — REPL mode                        ║')));
+  log(C.bold(C.cy('  ║  검수·기억·샌드박스 통합 자율 AI 에이전트             ║')));
   log(C.bold(C.cy('  ╚════════════════════════════════════════════════════╝')));
   log('');
   // Ollama 모델 자동 감지 — model이 명시되지 않았으면 사용자에게 선택지 제공
@@ -10374,11 +10473,15 @@ async function _agentRepl(root, opts) {
       const finalPrompt = `${rolePrompt}\n\nConversation so far:\n${state.history.slice(-6).map(m => `[${m.role}] ${m.content}`).join('\n')}\n\nRespond as ${state.role}:`;
       const t0 = Date.now();
       let result;
+      // 1.9.153: multi-provider REPL — ollama 외 claude/codex/gemini/copilot 도 세션 관리 (사용자 명시)
       if (state.provider === 'ollama') {
-        log(C.dim(`  → ollama (${state.model}) 호출 중...`));
+        log(C.dim(`  → ollama${state.model ? ' (' + state.model + ')' : ''} 호출 중...`));
         result = await _ollamaChat(finalPrompt, state.model);
+      } else if (['claude', 'codex', 'gemini', 'copilot'].includes(state.provider)) {
+        log(C.dim(`  → ${state.provider} CLI 호출 중...`));
+        result = await _cliChat(root, state.provider, finalPrompt, { timeout: 90000 });
       } else {
-        log(C.yel(`  ⚠ ${state.provider} REPL 미지원 — leerness agents dispatch 사용 권장`));
+        log(C.yel(`  ⚠ ${state.provider} provider 미지원 — :provider ollama|claude|codex|gemini|copilot`));
         rl.prompt(); return;
       }
       const dt = Date.now() - t0;
@@ -10415,17 +10518,19 @@ async function agentCmd(root, taskArg) {
       return;
     }
     // non-TTY: 사용법만 출력
-    log('# leerness agent (1.9.146/148/149/150) — Hermes/OpenClaw 스타일 CLI 에이전트 + Sandbox');
+    log('# leerness agent — 검수·기억·샌드박스 통합 자율 AI 에이전트');
     log('');
     log('사용법:');
-    log('  leerness agent                              # 1.9.149 REPL 모드 (모델 선택 + 채팅)');
+    log('  leerness agent                              # REPL 모드 (provider 자동 선택 + 채팅)');
     log('  leerness agent "<task>"                     # 1회 위임 (actor 역할 기본)');
     log('  leerness agent "<task>" --role planner      # 계획만 (1.9.148)');
     log('  leerness agent "<task>" --role reviewer     # 비판적 검토 (1.9.148)');
-    log('  leerness agent --interactive --model qwen2.5-coder  # 명시적 REPL + model 선택');
+    log('  leerness agent --provider claude            # provider 명시 (ollama/claude/codex/gemini/copilot)');
+    log('  leerness agent --interactive --model qwen2.5-coder  # 명시적 REPL + Ollama 모델 선택');
     log('');
     log('REPL 메타 명령: :help / :model / :role / :provider / :history / :save / :quit');
     log('REPL Slash 명령 (1.9.150): :verify / :audit / :handoff / :health  (sandboxed runCommandSafe)');
+    log('REPL Multi-provider (1.9.153): ollama / claude / codex / gemini / copilot — 활성 CLI 자동 감지');
     log('');
     log('현재 활성 provider: ' + (_activeCliAgents().join(', ') || '(없음) — .env에서 LEERNESS_ENABLE_* 활성화'));
     log('권한 모드: ' + (_readPermissions(root).mode || 'basic'));

@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.9.153 — 2026-05-20
+
+**`.env` 직접 생성/마이그레이션 + REPL 배너 leerness 고유 문구 + multi-provider REPL (사용자 명시 3종).**
+
+자율 모드 83 라운드.
+
+### Added — install 흐름에서 `.env` 직접 생성/마이그레이션 (사용자 명시)
+- 기존 `.env.example` 만 작성 → **이제 `.env` 도 직접 생성** (보안 = 빈 키만)
+- `mergeEnvFile()` — KEY 기준 처리:
+  - 기존 키 (사용자가 채운 값 포함) **절대 덮어쓰지 않음**
+  - 누락된 키만 빈 값으로 추가
+  - 주석/빈 줄은 substring 미포함 시만 append
+- `.gitignore` 에 `.env` 자동 등록 (1.9.71/75 audit 검증과 통합)
+- `.env.example` 은 계속 생성 (참조 템플릿)
+
+### Changed — REPL 배너 leerness 고유 문구 (사용자 명시)
+- 기존: `Hermes / OpenClaw / OpenCode 스타일 + Sandbox`
+- 변경: `검수·기억·샌드박스 통합 자율 AI 에이전트`
+- agent 사용법 (non-TTY) 헤더도 동일 — leerness 자체 정체성 강화
+
+### Added — REPL multi-provider 세션 관리 (사용자 명시)
+- 기존: Ollama 전용 채팅
+- 변경: **ollama / claude / codex / gemini / copilot** 5종 세션 관리
+- `_cliChat(root, provider, prompt, opts)` — 외부 CLI 호출 헬퍼
+  - 각 CLI 별 비-인터랙티브 호출 인자 자동 매핑
+  - `runCommandSafe` 경유 (env scrub + permissions + observability 자동)
+  - 활성 (`_checkAgent` ready) 확인 후 실행 — 비활성 시 friendly 에러
+- REPL 진입 시:
+  - `.env` 자동 로드 (LEERNESS_ENABLE_* 즉시 반영)
+  - 활성 CLI 단일 → 자동 선택 / 복수 → 사용자 번호 선택 / 0개 → Ollama fallback
+- `:provider <p>` 메타 명령으로 세션 중 전환 가능
+- `:role <r>` 와 조합하여 planner=claude / actor=codex 같은 multi-CLI 워크플로 가능
+
+### Security
+- `.env` 가 `.gitignore` 에 등록 (실제 시크릿 누출 방지)
+- `_cliChat` 가 `runCommandSafe` 경유 → env scrub 화이트리스트만 자식 프로세스에 전파
+- `.harness/runs/run-*.jsonl` 에 `kind: 'agent_repl_cli'` 로 모든 외부 CLI 호출 기록
+
+### Verified
+- e2e 217/217 ✓
+- stress-v98: 23/23 (env 생성 7종 + REPL 배너 3종 + multi-provider 6종 + 누적 회귀 7종)
+- VERSION = 1.9.153 / autonomous-rounds = 83
+
+---
+
 ## 1.9.152 — 2026-05-20
 
 **`agents multi` — 활성 N개 에이전트 일괄 dispatch + handoff 헤드라인 활성 에이전트 카운트 (1.9.151 복수 선택 후속).**
