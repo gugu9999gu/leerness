@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.138 — 2026-05-20
+
+**`leerness memory archive list --query <keyword>` 필터 추가** — archive 항목 키워드 검색.
+
+### Added — --query 필터
+- `target` 또는 `originalHeader` 에 키워드 case-insensitive 매칭
+- 정규식 특수문자는 자동 escape
+- 텍스트 모드 헤더에 `— query: "..."` 표시
+- JSON 모드 응답에 `query` 필드 추가
+- 매칭 0건 시 안내 메시지
+
+### Updated — MCP leerness_memory_archive_list
+- 신규 인자: `{ query? }` (optional)
+- 외부 AI 가 archive 에서 특정 주제 항목만 회수 가능
+
+### 사용 시나리오
+```
+leerness memory archive list --query PostgreSQL --json
+# → decisions/lessons/plan 중 PostgreSQL 매칭만 반환
+```
+
 ## 1.9.137 — 2026-05-20
 
 **`.harness/session-workflow.md` 템플릿 갱신 — Memory CRUD Quick Reference 추가** — 신규 \`init\` 워크스페이스의 AI 에이전트에 5 surface CRUD 매트릭스 + archive cycle 가이드 제공.
