@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.134';
+const VERSION = '1.9.135';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -335,6 +335,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.132+ \`session close\` 텍스트 모드에 archive 누적 라인 추가 — 마감 시점 DELETE 활동 가시화 (handoff 7번째 회수와 symmetric). archive 가시성 6 surface 완성.
 - 1.9.133+ \`brainstorm\` 텍스트 모드 lessonsExplicit / planMilestones display 추가 — 1.9.116에서 데이터 수집은 했지만 display 누락된 pre-existing gap fix.
 - 1.9.134+ \`leerness task list --json\` + MCP **41 도구** (\`leerness_task_list\`) — progress-tracker.md task 전체 JSON 조회 + \`--status\` 필터. Task surface CRUD MCP 완전 완성 (add/list/update/drop).
+- 1.9.135+ MCP **42 도구** (\`leerness_rule_remove\`) — rules.md 에서 특정 rule 제거 + archive 보존. **5 surface CRUD MCP 완전 완성** (task/decision/lesson/plan/rule 모두 add/list/delete MCP 노출).
 
 ---
 
@@ -4293,7 +4294,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.134+ task list --json + MCP 41 — 64 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.135+ MCP 42 rule_remove (5 surface CRUD 완성) — 65 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -8611,7 +8612,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_plan_remove', description: '1.9.126 — plan.md 에서 특정 milestone 블록 (### M-XXXX) 제거 (target: M-XXXX 또는 title substring). 제거된 블록은 .harness/plan.archive.md 에 자동 보존. Memory Surface DELETE 5종 완전 완성', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
     { name: 'leerness_memory_archive_list', description: '1.9.127 — DELETE 5종 archive 파일 통합 조회 JSON ({ decisions: [], lessons: [], plan: [], totals: { decisions, lessons, plan, all } }). 외부 AI가 과거에 제거된 항목을 회수/복원 후보로 참조. --surface 필터: decisions|lessons|plan', inputSchema: { type: 'object', properties: { surface: { type: 'string' }, path: { type: 'string' } } } },
     { name: 'leerness_memory_restore', description: '1.9.128 — archive 의 항목을 active 파일로 복귀 (DELETE→RESTORE cycle). surface: decisions|lessons|plan. target: date YYYY-MM-DD 또는 target substring 매칭. 복원된 블록은 archive 에서 제거됨. 🎉 MCP 40 도구 마일스톤', inputSchema: { type: 'object', properties: { surface: { type: 'string', enum: ['decisions', 'lessons', 'plan'] }, target: { type: 'string' }, path: { type: 'string' } }, required: ['surface', 'target'] } },
-    { name: 'leerness_task_list', description: '1.9.134 — progress-tracker.md 전체 task 조회 JSON ({ total, tasks: [{ id, status, request, evidence, nextAction, updated }] }). --status 필터 지원 (planned|in-progress|done 등). 외부 AI가 task 상태 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' }, status: { type: 'string' } } } }
+    { name: 'leerness_task_list', description: '1.9.134 — progress-tracker.md 전체 task 조회 JSON ({ total, tasks: [{ id, status, request, evidence, nextAction, updated }] }). --status 필터 지원 (planned|in-progress|done 등). 외부 AI가 task 상태 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' }, status: { type: 'string' } } } },
+    { name: 'leerness_rule_remove', description: '1.9.135 — rules.md 에서 특정 rule 제거 (id: R-XXXX). 제거된 rule 은 .harness/rules.archive.md 에 자동 보존 (복구 가능). Rule surface CRUD MCP 완성 (add/list/remove)', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } }
   ];
 
   function send(obj) {
@@ -8684,6 +8686,7 @@ function mcpServeCmd(root) {
           case 'leerness_memory_archive_list': cliArgs = ['memory', 'archive', 'list', '--path', targetPath, '--json', ...(args.surface ? ['--surface', args.surface] : [])]; break;
           case 'leerness_memory_restore':  cliArgs = ['memory', 'restore', String(args.surface || ''), String(args.target || ''), '--path', targetPath]; break;
           case 'leerness_task_list':       cliArgs = ['task', 'list', '--path', targetPath, '--json', ...(args.status ? ['--status', args.status] : [])]; break;
+          case 'leerness_rule_remove':     cliArgs = ['rule', 'remove', String(args.id || ''), '--path', targetPath]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }

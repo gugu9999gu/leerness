@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.135 — 2026-05-20
+
+**MCP 42번째 도구 `leerness_rule_remove`** — Rule surface CRUD MCP 완전 완성.
+
+### Added — MCP leerness_rule_remove
+- 인자: `{ id (required), path? }`
+- rules.md 에서 특정 rule 제거 + `.harness/rules.archive.md` 자동 보존
+- 외부 AI 가 직접 rule 제거
+
+### Rule surface CRUD MCP 완전 완성
+| Op | MCP |
+|---|---|
+| CREATE | leerness_rule_add (1.9.109) |
+| READ | leerness_rule_list (1.9.109) |
+| **DELETE** | **leerness_rule_remove (1.9.135) ✓** |
+
+### MCP CRUD 완성 surface 확장
+- task: add/list/update/drop (1.9.105/134/106/107) ✓
+- decision: add/list/drop (1.9.108/118/125) ✓
+- lesson: save/list/drop (1.9.112/117/124) ✓
+- plan: add/list/remove (1.9.110/119/126) ✓
+- **rule: add/list/remove (1.9.109/109/135) ✓**
+
+### MCP 도구 누계: 42 (1.9.134: 41 → 1.9.135: 42)
+
 ## 1.9.134 — 2026-05-20
 
 **`leerness task list --json` + MCP 41번째 도구 `leerness_task_list`** — progress-tracker.md 전체 task JSON 조회.
