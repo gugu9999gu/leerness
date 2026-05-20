@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.126';
+const VERSION = '1.9.127';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -113,7 +113,7 @@ function arg(name, def = null) { const i = process.argv.indexOf(name); return i 
 function has(name) { return process.argv.includes(name); }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag']);
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface']);
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -327,6 +327,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.124+ \`leerness lesson drop <target>\` + MCP **36 도구** (\`leerness_lesson_drop\`) — 잘못 저장한 lesson 제거 (archive 자동 보존).
 - 1.9.125+ \`leerness decision drop <target>\` + MCP **37 도구** (\`leerness_decision_drop\`) — 잘못 저장한 결정 제거 (archive 보존).
 - 1.9.126+ \`leerness plan remove <M-XXXX|title>\` + MCP **38 도구** (\`leerness_plan_remove\`) — milestone 영구 제거 (archive 보존). **Memory Surface DELETE 5종 완전 완성** 🎉.
+- 1.9.127+ \`leerness memory archive list [--surface decisions|lessons|plan] [--json]\` + MCP **39 도구** (\`leerness_memory_archive_list\`) — DELETE 5종 archive 통합 조회 (복원 후보 회수).
 
 ---
 
@@ -1448,6 +1449,85 @@ function memoryStatusCmd(root, opts = {}) {
   log(`💡 Lessons: ${lessonHeaders.length} entries`);
   if (lessonsLatest) log(`   - 최근: ${lessonsLatest}`);
   log(`\n📊 Summary: ${payload.summary}`);
+}
+
+// 1.9.127: memory archive list — DELETE 5종 archive 파일 통합 조회
+//   .harness/decisions.archive.md / lessons.archive.md / plan.archive.md 의 "## 제거 YYYY-MM-DD" 블록 파싱
+//   --surface decisions|lessons|plan 필터, --json 옵션
+function _parseArchiveBlocks(text) {
+  // archive 형식: "## 제거 YYYY-MM-DD (target: \"...\")\n<원래 블록>"
+  // 첫 번째 "## 제거" 이전의 헤더(# Plan archive 등)는 skip
+  const entries = [];
+  if (!text) return entries;
+  const blocks = text.split(/\n(?=## 제거 )/);
+  for (const b of blocks) {
+    const m = b.match(/^## 제거 (\d{4}-\d{2}-\d{2})\s*\(target:\s*"([^"]*)"\)/);
+    if (!m) continue;
+    const date = m[1];
+    const target = m[2];
+    // 원래 헤더 추출 (### …)
+    const headerMatch = b.match(/^### (.+)$/m);
+    const originalHeader = headerMatch ? headerMatch[1].trim() : null;
+    entries.push({ date, target, originalHeader });
+  }
+  return entries;
+}
+function memoryArchiveListCmd(root, opts = {}) {
+  root = absRoot(root);
+  const jsonMode = !!opts.json || has('--json');
+  const surfaceFilter = arg('--surface', '');
+  const hd = path.join(root, '.harness');
+  const archives = {
+    decisions: { path: path.join(hd, 'decisions.archive.md'), entries: [] },
+    lessons:   { path: path.join(hd, 'lessons.archive.md'),   entries: [] },
+    plan:      { path: path.join(hd, 'plan.archive.md'),      entries: [] }
+  };
+  for (const k of Object.keys(archives)) {
+    if (surfaceFilter && surfaceFilter !== k) continue;
+    const a = archives[k];
+    if (exists(a.path)) a.entries = _parseArchiveBlocks(read(a.path));
+  }
+  const totals = {
+    decisions: archives.decisions.entries.length,
+    lessons:   archives.lessons.entries.length,
+    plan:      archives.plan.entries.length
+  };
+  totals.all = totals.decisions + totals.lessons + totals.plan;
+  if (jsonMode) {
+    const payload = {
+      version: VERSION, root,
+      decisions: archives.decisions.entries,
+      lessons:   archives.lessons.entries,
+      plan:      archives.plan.entries,
+      totals
+    };
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+    return;
+  }
+  log('# 🗑 Memory Archive List (1.9.127)\n');
+  if (totals.all === 0) {
+    log('(archive 파일 없음 — 아직 제거된 항목 없음)');
+    return;
+  }
+  if ((!surfaceFilter || surfaceFilter === 'decisions') && archives.decisions.entries.length) {
+    log(`🧠 Decisions archive: ${archives.decisions.entries.length} entries`);
+    for (const e of archives.decisions.entries) {
+      log(`   - ${e.date} — target: "${e.target}"${e.originalHeader ? ' — ' + e.originalHeader : ''}`);
+    }
+  }
+  if ((!surfaceFilter || surfaceFilter === 'lessons') && archives.lessons.entries.length) {
+    log(`💡 Lessons archive: ${archives.lessons.entries.length} entries`);
+    for (const e of archives.lessons.entries) {
+      log(`   - ${e.date} — target: "${e.target}"${e.originalHeader ? ' — ' + e.originalHeader : ''}`);
+    }
+  }
+  if ((!surfaceFilter || surfaceFilter === 'plan') && archives.plan.entries.length) {
+    log(`🗺  Plan archive: ${archives.plan.entries.length} entries`);
+    for (const e of archives.plan.entries) {
+      log(`   - ${e.date} — target: "${e.target}"${e.originalHeader ? ' — ' + e.originalHeader : ''}`);
+    }
+  }
+  log(`\n📊 Total archived: ${totals.all} entries (D${totals.decisions}/L${totals.lessons}/P${totals.plan})`);
 }
 
 // 1.9.117: lesson list — lessons.md 의 모든 항목 조회 + --tag 필터 + --json
@@ -4056,7 +4136,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.126+ Memory Surface DELETE 5종 완성 — 56 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.127+ memory archive list — 57 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -4072,8 +4152,9 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 38 도구 (plan_remove 추가, 1.9.126)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 39 도구 (memory_archive_list 추가, 1.9.127)'));
     log('    ' + C.green('npx leerness plan remove <M-XXXX|title>') + C.dim('             # milestone 영구 제거 (archive 보존, 1.9.126) — Memory DELETE 5종 완성'));
+    log('    ' + C.green('npx leerness memory archive list --json') + C.dim('              # DELETE 5종 archive 통합 조회 (1.9.127) — D/L/P entries + 복원 후보'));
     log('    ' + C.green('npx leerness lesson save "<text>" --tag "..."') + C.dim('       # lessons.md 직접 write (1.9.112 — handoff 자동 회수와 통합)'));
     log('    ' + C.green('npx leerness memory status . --json') + C.dim('                  # Memory Surface 5종 통합 상태 JSON (1.9.114)'));
     log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
@@ -8255,7 +8336,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_plan_list', description: '1.9.119 — plan.md 의 모든 milestone (M-XXXX) 조회 JSON ({ id, title, status, progress, tasks: [{ done, text }] }[]). 외부 AI가 영구화된 계획 + 진행률 + tasks checkbox 전체 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_lesson_drop', description: '1.9.124 — lessons.md 에서 특정 lesson 제거 (target: date YYYY-MM-DD 또는 text substring). 잘못 저장한 lesson 제거. 제거된 블록은 .harness/lessons.archive.md 에 자동 보존 (복구 가능)', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
     { name: 'leerness_decision_drop', description: '1.9.125 — decisions.md 에서 특정 결정 제거 (target: date YYYY-MM-DD 또는 title substring). 제거된 블록은 .harness/decisions.archive.md 에 자동 보존', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
-    { name: 'leerness_plan_remove', description: '1.9.126 — plan.md 에서 특정 milestone 블록 (### M-XXXX) 제거 (target: M-XXXX 또는 title substring). 제거된 블록은 .harness/plan.archive.md 에 자동 보존. Memory Surface DELETE 5종 완전 완성', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } }
+    { name: 'leerness_plan_remove', description: '1.9.126 — plan.md 에서 특정 milestone 블록 (### M-XXXX) 제거 (target: M-XXXX 또는 title substring). 제거된 블록은 .harness/plan.archive.md 에 자동 보존. Memory Surface DELETE 5종 완전 완성', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
+    { name: 'leerness_memory_archive_list', description: '1.9.127 — DELETE 5종 archive 파일 통합 조회 JSON ({ decisions: [], lessons: [], plan: [], totals: { decisions, lessons, plan, all } }). 외부 AI가 과거에 제거된 항목을 회수/복원 후보로 참조. --surface 필터: decisions|lessons|plan', inputSchema: { type: 'object', properties: { surface: { type: 'string' }, path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -8325,6 +8407,7 @@ function mcpServeCmd(root) {
           case 'leerness_lesson_drop':     cliArgs = ['lesson', 'drop', String(args.target || ''), '--path', targetPath]; break;
           case 'leerness_decision_drop':   cliArgs = ['decision', 'drop', String(args.target || ''), '--path', targetPath]; break;
           case 'leerness_plan_remove':     cliArgs = ['plan', 'remove', String(args.target || ''), '--path', targetPath]; break;
+          case 'leerness_memory_archive_list': cliArgs = ['memory', 'archive', 'list', '--path', targetPath, '--json', ...(args.surface ? ['--surface', args.surface] : [])]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -9062,6 +9145,11 @@ async function main() {
   if (cmd === 'memory' && args[1] === 'status') {
     const root = absRoot(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()));
     return memoryStatusCmd(root, { json: has('--json') });
+  }
+  // 1.9.127: memory archive list — DELETE 5종 archive 통합 조회
+  if (cmd === 'memory' && args[1] === 'archive' && args[2] === 'list') {
+    const root = absRoot(arg('--path', args[3] && !args[3].startsWith('-') ? args[3] : process.cwd()));
+    return memoryArchiveListCmd(root, { json: has('--json') });
   }
   // 1.9.112: lesson save — lessons.md에 새 lesson 추가
   // 1.9.117: lesson list — lessons.md 조회 + --tag 필터 + --json

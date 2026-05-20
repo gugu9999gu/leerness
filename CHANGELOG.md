@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.127 — 2026-05-20
+
+**`leerness memory archive list` CLI + MCP 39번째 도구 `leerness_memory_archive_list`** — DELETE 5종 archive 통합 조회 (decisions/lessons/plan).
+
+### Added — `leerness memory archive list` CLI
+- DELETE 5종 archive 파일 (`.harness/decisions.archive.md`, `lessons.archive.md`, `plan.archive.md`) 통합 조회
+- 각 archive entry 파싱: `{ date, target, originalHeader }`
+- `--surface decisions|lessons|plan` 필터 지원
+- `--json` 옵션 — totals + 각 surface 별 entries
+- archive 파일 없으면 안내 메시지
+
+### Added — MCP 39번째 도구 `leerness_memory_archive_list`
+- 외부 AI 가 과거에 제거된 항목 회수 — 복원 후보 참조 / 의사결정 변경 흐름 추적.
+- 인자: `{ surface?, path? }` (surface optional)
+
+### 사용 시나리오
+1. **복원 후보 회수**: "이전에 PostgreSQL 채택 결정 취소했었지? 어떤 게 있었나"
+   → 외부 AI: `leerness_memory_archive_list({ surface: "decisions" })` — 모든 제거된 결정 회수
+2. **의사결정 변경 패턴 분석**: 자주 변경되는 surface 의 빈도 추적
+3. **복구**: archive entry 참조 후 다시 `decision add` 로 재등록
+
+### MCP 도구 누계: 39 (1.9.126: 38 + leerness_memory_archive_list)
+
 ## 1.9.126 — 2026-05-20
 
 **`leerness plan remove <target>` CLI + MCP 38번째 도구 `leerness_plan_remove`** — milestone 블록 영구 제거 (archive 자동 보존). **Memory Surface DELETE 5종 완전 완성** 🎉
