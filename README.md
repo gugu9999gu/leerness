@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.176-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v121-23%2F23-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-106-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-37_rounds-success)]() [![review-request](https://img.shields.io/badge/review--request-사전_검토_9_신호-success)]() [![repl-slash](https://img.shields.io/badge/REPL_slash-:web%2F:pc%2F:lsp%2F:review-success)]() [![lsp-multi](https://img.shields.io/badge/LSP_다국어-JS%2FPython%2FGo%2FRust%2FJava-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.177-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v122-18%2F18-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-107-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-38_rounds-success)]() [![auto-review](https://img.shields.io/badge/task_add-자동_review_trigger-success)]() [![review-request](https://img.shields.io/badge/review--request-사전_검토_9_신호-success)]() [![repl-slash](https://img.shields.io/badge/REPL_slash-:web%2F:pc%2F:lsp%2F:review-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.176  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.177  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  ⚠ review-request — 무조건 구현 전 충돌/효율 사전 검토        ║
+  ║  🔁 task add 자동 review trigger — default 사전 검토          ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

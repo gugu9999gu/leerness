@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.9.177 — 2026-05-21
+
+**🔁 `task add` 자동 review-request trigger — 사용자 명시 1.9.176 자동화.**
+
+자율 모드 107 라운드. 1.9.176 (사용자 명시: 무조건 구현 전 사전 검토) 의 자동화 — 사용자/AI가 `task add` 호출 시 review를 직접 실행하지 않아도 자동 trigger.
+
+### 통합 흐름
+```bash
+$ leerness task add "OAuth 로그인 구현해줘"
+✓ task added: T-0001
+
+🔍 review-request (1.9.177 자동): type=feature · ✓ 진행 안전 (705ms)
+   권장 단계:
+     1) leerness reuse find "<핵심 capability>" — 중복 구현 사전 차단
+     2) leerness plan add "<milestone>" — 진행 추적
+     ... +2건 (leerness review-request "OAuth 로그인 구현해줘" 으로 전체 보기)
+   💡 👥 leerness agents recommend feature — 작업 유형별 sub-agent 매핑 활용 가능
+```
+
+→ 사용자/AI가 명시적으로 `:review` 호출 안 해도, `task add` 만으로 자동 사전 검토 완료. **1.9.176 사용자 명시 의도가 default 동작에 통합**.
+
+### Opt-out (3 가지)
+1. CLI 플래그: `leerness task add "..." --no-review`
+2. 환경변수: `LEERNESS_NO_AUTO_REVIEW=1`
+3. 운영 메타: `--status done|dropped|blocked` (이미 종료된 작업은 review 불필요)
+
+### 표시 정책 (간결)
+- 헤더 1줄: `type=X · ⚠ N 충돌 · 🔁 N 재사용 후보 · ✓ 진행 안전 / ⚠ 확인 필요 (ms)`
+- 권장 단계 첫 2건 (나머지는 `leerness review-request` 직접 호출 안내)
+- 효율 제안 1건 (가장 중요한 hint)
+- `proceed=false` 시 ⚠ 사유 노출
+
+### MCP 호환성
+`leerness_task_add` (MCP) 호출 시에도 자동 review 동작 — 외부 AI (Claude/Codex/Gemini)가 task 등록 시 자동으로 사전 검토 결과 받음.
+
+### 성능
+실측: ~1.1초 task add (이전 ~30ms + review 1초 추가). brainstorm/reuse-map 회수 비용 — opt-out 가능.
+
+### Verified
+- e2e 217/217 baseline 유지
+- stress-v122: **18/18** (taskAdd 통합 4 + 실 동작 7 + MCP 호환 1 + 누적 회귀 6)
+- VERSION = 1.9.177 / autonomous-rounds = 107 / main 자동 push 38 라운드 연속
+
+---
+
 ## 1.9.176 — 2026-05-21
 
 **⚠ 사용자 명시: `leerness review-request` — 사용자 요구를 무조건 구현 전 사전 검토.**

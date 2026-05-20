@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.176';
+const VERSION = '1.9.177';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -1600,6 +1600,42 @@ function taskAdd(root, text) {
   upsertProgress(root, { id, status: arg('--status','requested'), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next','다음 액션 작성') });
   ok(`task added: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
+  // 1.9.177: task add 자동 review-request trigger (사용자 명시 1.9.176 자동화).
+  //   사용자가 task 추가 시 자동으로 사전 검토 — 충돌/재사용/효율/권장 단계 결과를 등록 직후 표시.
+  //   opt-out: --no-review 또는 env LEERNESS_NO_AUTO_REVIEW=1, 또는 status=in-progress/done 같은 운영 메타.
+  if (!has('--no-review')
+      && process.env.LEERNESS_NO_AUTO_REVIEW !== '1'
+      && !/^(done|dropped|blocked)$/i.test(arg('--status', 'requested'))
+      && text && text.trim()) {
+    try {
+      const t0 = Date.now();
+      const r = cp.spawnSync(process.execPath, [__filename, 'review-request', text, '--path', absRoot(root), '--json'], {
+        encoding: 'utf8', timeout: 15000,
+        env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
+      });
+      if (r.status === 0 && r.stdout) {
+        const j = JSON.parse(r.stdout);
+        log('');
+        log(`🔍 review-request (1.9.177 자동): type=${j.estimatedType}` +
+            (j.conflicts.length ? ` · ⚠ ${j.conflicts.length} 충돌` : '') +
+            (j.reuseCandidates.length ? ` · 🔁 ${j.reuseCandidates.length} 재사용 후보` : '') +
+            ` · ${j.proceed ? '✓ 진행 안전' : '⚠ 확인 필요'} (${Date.now() - t0}ms)`);
+        // 권장 단계 첫 2건 노출
+        if (j.recommendedSteps && j.recommendedSteps.length) {
+          log('   권장 단계:');
+          j.recommendedSteps.slice(0, 2).forEach(s => log('     ' + s));
+          if (j.recommendedSteps.length > 2) log(`     ... +${j.recommendedSteps.length - 2}건 (leerness review-request "${text.slice(0, 30)}" 으로 전체 보기)`);
+        }
+        // 효율 제안 1건만
+        if (j.efficiencyHints && j.efficiencyHints.length) {
+          log(`   💡 ${j.efficiencyHints[0]}`);
+        }
+        if (!j.proceed) {
+          log(`   ⚠ ${j.proceedReason}`);
+        }
+      }
+    } catch {}  // review 실패는 task add 자체에 영향 X
+  }
 }
 function taskUpdate(root, id) {
   if (!id) return fail('id required (e.g., task update T-0001 --status in-progress)');
