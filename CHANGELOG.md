@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.9.141 — 2026-05-20
+
+**ASCII 배너 모션 + Feature Causality Graph (인과관계 추적) — 사용자 요청 2종.**
+
+### Added — ASCII 배너 wave 애니메이션 (사용자 요청 #1)
+- `_banner` 함수에 그라데이션 wave 모션 추가 (TTY only, ~340ms 총 4 frames)
+- LEERNESS 글자 위로 cyan→magenta 그라데이션이 흘러내림
+- `Atomics.wait`로 sync sleep (CPU 무부담)
+- opt-out: `LEERNESS_NO_ANIMATE=1` 또는 `--no-animate` 플래그
+- non-TTY (CI/pipe/`LEERNESS_NO_PROMPT`) 자동 정적 fallback
+
+### Added — Feature Causality Graph (사용자 요청 #2 핵심)
+**"1개 추가 → 10개 오류, 1개 수정 → 20개 오류" cascade 방지를 위한 인과관계 추적 시스템.**
+
+새 파일: `.harness/feature-graph.md` (init 자동 생성). 각 노드:
+- `## F-XXXX <title>` + `depends-on` / `affects` / `co-changes-with` / `files` / `input` / `output` / `error-modes` / `tests` / `notes`
+
+신규 CLI:
+- `leerness feature add "<title>" [--depends-on ...] [--affects ...] [--co-changes-with ...] [--files ...]` — F-XXXX 자동 부여
+- `leerness feature link <id> --depends-on <ids> --affects <ids> --co-changes-with <ids>` — 엣지 추가
+- `leerness feature impact <id>` — BFS transitive closure (affects + co-changes + reverse depends-on)
+- `leerness feature list --json`, `leerness feature show <id> --json`
+
+신규 MCP 도구 2종 (43+44 = **44 도구**):
+- `leerness_feature_impact` — 외부 AI가 코드 변경 전 호출 → JSON
+- `leerness_feature_list` — 전체 그래프 회수
+
+handoff 8번째 자동 회수:
+- 현재 in-progress task 키워드로 feature 자동 매칭 → 영향 범위 카운트 + 첫 5개 ID + 상세 명령 안내
+- opt-out: `LEERNESS_NO_FEATURE_IMPACT=1` 또는 `--no-feature-impact`
+
+### Fixed — 파서 정확성
+- `_parseFeatureGraph` 의 `\s*` 가 newline까지 매칭하던 버그 → `[ \t]*` 로 horizontal-only
+- `nonFlagArgs` withValue 셋에 `--depends-on / --affects / --co-changes-with / --files / --branch / --remote / --task-add / --next-action` 추가 — 인자 값이 title에 흡수되던 회귀 차단
+
+### Validation
+- stress-v86: PASS (배너 모션 + feature CRUD + impact BFS + MCP 44 도구 + 누적 회귀)
+- e2e: 219/219 PASS
+
 ## 1.9.140 — 2026-05-20
 
 **사용자 명시 요청 3종 통합** — main 자동 push + README 자동 풍부화 + 성능 가이드.

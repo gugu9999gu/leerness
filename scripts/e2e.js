@@ -1166,7 +1166,8 @@ total++;
 {
   // _parseSkillCatalog 4 형식 인식 — node -e로 동적 평가
   const src = fs.readFileSync(CLI, 'utf8');
-  const m = src.match(/function _parseSkillCatalog\([\s\S]*?\n\}\n/);
+  // 1.9.141 fix: Windows CRLF 대응 — \r?\n 으로 양쪽 line ending 모두 매칭
+  const m = src.match(/function _parseSkillCatalog\([\s\S]*?\r?\n\}\r?\n/);
   if (!m) {
     console.log('✗ _parseSkillCatalog 함수 위치 못 찾음');
     failed++;

@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.140';
+const VERSION = '1.9.141';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -113,7 +113,7 @@ function arg(name, def = null) { const i = process.argv.indexOf(name); return i 
 function has(name) { return process.argv.includes(name); }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface']);
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action']);
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -303,6 +303,8 @@ function coreFiles(root, lang = 'ko', selectedSkills = []) {
     '.harness/consistency-policy.md': fm('consistency-policy', ['UI/기능 중복 생성 전','재사용 판단'], ['일관성 정책 변경'], `# Consistency Policy\n\n동일한 기능을 하는 요소는 새로 만들기 전에 기존 구현을 찾아 재사용/확장/연결합니다.\n\n## Recursive Reuse Rule\n1. 같은 기능의 기존 요소를 찾습니다.\n2. 자기 참조/기저 규칙/재귀 흐름이 필요한지 확인합니다.\n3. 기존 요소를 재사용하거나 확장합니다.\n4. 불가피하게 새로 만들면 reuse-map.md에 이유를 기록합니다.\n\n## Audit Trigger\n\`leerness audit\`는 다음을 검사합니다:\n- 디자인 가이드 중복 파일\n- design-system.md 토큰 미정의\n- reuse-map.md 비어있음 + 컴포넌트/유틸 ≥3개 발견\n- plan vs progress 정렬\n`),
     '.harness/reuse-map.md': fm('reuse-map', ['새 컴포넌트/API/helper 생성 전','중복 기능 감지'], ['재사용 가능한 요소 추가'], `# Reuse Map\n\n| Capability | Existing Element | Reuse Method | Notes |\n|---|---|---|---|\n`),
     '.harness/feature-contracts.md': fm('feature-contracts', ['기능 구현/수정 전'], ['기능 입출력/상태/오류 변경'], `# Feature Contracts\n\n## Template\n- Feature:\n- Input:\n- Output:\n- States:\n- Errors:\n- Related files:\n- Test evidence ID:\n`),
+    // 1.9.141: Feature Causality Graph — 신규 기능/형식 변경 시 영향 범위 자동 추적 (사용자 요청)
+    '.harness/feature-graph.md': fm('feature-graph', ['신규 기능 추가 전','데이터 형식 변경 전','외부 API 매칭 작업 전'], ['feature 등록 / 링크 / impact 회수'], `# Feature Graph (1.9.141)\n\n> **목적**: 각 기능의 인과관계를 정확히 정리해서 코드 작성 전 영향 범위를 자동 추적.\n> 신규 기능 추가, 데이터 형식 변경, 외부 API 매칭 작업 전 \`leerness feature impact <id>\`로 확인.\n> handoff가 현재 task 키워드로 자동 매칭해서 영향받는 feature 목록을 회수.\n\n## How to use\n\n\`\`\`bash\nleerness feature add "User Auth"                           # F-0001 자동 부여\nleerness feature link F-0002 --depends-on F-0001           # 의존 관계\nleerness feature link F-0001 --affects F-0002,F-0005        # 영향 관계 (다수)\nleerness feature link F-0001 --co-changes-with F-0011       # 함께 변해야 하는 기능\nleerness feature impact F-0001                              # 영향받는 전체 (transitive)\nleerness feature list --json                                # 그래프 JSON\nleerness feature show F-0001                                # 단일 상세\n\`\`\`\n\n## Nodes\n\n`),
     '.harness/testing-strategy.md': fm('testing-strategy', ['검증 전','릴리즈 전'], ['테스트 전략 변경'], `# Testing Strategy\n\n- Typecheck (\`tsc --noEmit\` 또는 동등)\n- Lint (\`npm run lint\` 등)\n- Unit/Integration/E2E\n- Manual smoke test\n- Browser/UI smoke (frontend 변경 시)\n\n## Evidence Format\nEach completed task must reference an evidence ID stored in .harness/review-evidence.md.\n`),
     '.harness/review-checklist.md': fm('review-checklist', ['PR/리뷰 전'], ['리뷰 기준 변경'], `# Review Checklist\n\n- [ ] 계획과 정렬되어 있는가\n- [ ] progress-tracker가 갱신되었는가\n- [ ] 보호 파일을 삭제하지 않았는가\n- [ ] 디자인/기능 재사용을 확인했는가\n- [ ] 시크릿이 코드에 들어가지 않았는가 (\`leerness scan secrets\`)\n- [ ] 한글 인코딩 OK (\`leerness encoding check\`)\n- [ ] 게으름 평가 통과 (\`leerness lazy detect\`)\n`),
     '.harness/release-checklist.md': fm('release-checklist', ['배포 전'], ['배포 조건/환경변수/롤백 변경'], `# Release Checklist\n\n- [ ] \`leerness verify .\`\n- [ ] \`leerness audit .\`\n- [ ] \`leerness scan secrets .\`\n- [ ] \`leerness encoding check .\`\n- [ ] 프로젝트 typecheck/lint/test\n- [ ] 환경변수 (.env.example) 동기화\n- [ ] 롤백 방법 확인\n- [ ] CHANGELOG 갱신\n`),
@@ -3032,6 +3034,44 @@ function handoff(root) {
       }
     } catch {}
   }
+  // 1.9.141: handoff 8번째 자동 회수 — 🔗 Feature Causality Graph impact (현재 task 키워드 자동 매칭)
+  //   .harness/feature-graph.md 의 노드를 현재 in-progress task의 키워드로 매칭 → 영향받는 feature 목록을 즉시 노출.
+  //   1+10=20 cascade 방지 위해 코드 작성 전 영향 범위 인지가 최우선.
+  if (!has('--no-feature-impact') && !has('--compact') && !has('--quiet') && process.env.LEERNESS_NO_FEATURE_IMPACT !== '1') {
+    try {
+      const { nodes: fNodes } = _readFeatureGraph(root);
+      if (fNodes.length > 0) {
+        const rows = readProgressRows(root);
+        // 1.9.141 fix: requested/planned/in-progress 모두 활성 작업으로 간주 — 가장 최근 row 우선
+        const activeStatuses = new Set(['requested', 'planned', 'in-progress', 'waiting']);
+        const current = [...rows].reverse().find(r => activeStatuses.has(r.status))
+                     || rows[rows.length - 1];
+        if (current && current.request) {
+          const tokens = String(current.request).toLowerCase().match(/[\w가-힣]{3,}/g) || [];
+          // feature title 단어 부분일치 (case-insensitive)
+          const matched = fNodes.filter(n => {
+            const titleLow = n.title.toLowerCase();
+            return tokens.some(t => titleLow.includes(t));
+          });
+          if (matched.length > 0) {
+            const isTtyFi = process.stdout && process.stdout.isTTY;
+            const fiCy = s => isTtyFi ? `\x1b[33m${s}\x1b[0m` : s; // yellow
+            const fiDim = s => isTtyFi ? `\x1b[2m${s}\x1b[0m` : s;
+            // 첫 매칭 feature의 impact 카운트만 노출 (간결)
+            const main = matched[0];
+            const impacted = _featureImpactBfs(fNodes, main.id);
+            log(fiCy(`🔗 Feature Graph (1.9.141): "${current.request.slice(0, 40)}" → ${main.id} ${main.title} (impact: ${impacted.length} features)`));
+            if (impacted.length > 0) {
+              const previewIds = impacted.slice(0, 5).map(it => it.id).join(', ');
+              log(fiDim(`  → 영향 범위: ${previewIds}${impacted.length > 5 ? ` …+${impacted.length - 5}` : ''}`));
+              log(fiDim(`  → 상세: leerness feature impact ${main.id} --json`));
+            }
+            log('');
+          }
+        }
+      }
+    } catch {}
+  }
   // 1.9.76: handoff 보안 상태 요약 — .env vs .env.example + .gitignore 시크릿 패턴 1줄 요약
   // 매 세션 시작 시 AI가 보안 위험을 즉시 인지. --no-security-summary 또는 --compact로 끄기
   if (!has('--no-security-summary') && !has('--compact') && !has('--quiet')) {
@@ -4434,9 +4474,59 @@ function _banner(opts = {}) {
   lines.push(border('  ╚══════════════════════════════════════════════════════════════╝'));
   lines.push('  ' + C.dim('한국어 우선 AI 개발 하네스 — ') + C.mag('verify') + C.dim(' · ') + C.mag('reuse-map') + C.dim(' · ') + C.mag('handoff') + C.dim(' · ') + C.mag('agents'));
   lines.push('');
-  for (const ln of lines) log(ln);
+
+  // 1.9.141: ASCII 배너 모션 — 그라데이션이 LEERNESS 글자 위로 흐르는 wave 효과 (TTY only, opt-out via LEERNESS_NO_ANIMATE)
+  const animate = isTty && process.env.LEERNESS_NO_ANIMATE !== '1'
+    && process.env.LEERNESS_NO_PROMPT !== '1' && !opts.noAnimate
+    && !has('--no-animate');
+  // 헬퍼: ASCII line index (3..8) 에 해당하는 그라데이션 lines 재생성
+  const renderFrame = (shift) => {
+    const out = [];
+    out.push('');
+    out.push(border('  ╔══════════════════════════════════════════════════════════════╗'));
+    out.push(border('  ║                                                              ║'));
+    for (let i = 0; i < asciiLines.length; i++) {
+      const colorIdx = (i + shift) % grad.length;
+      out.push(border('  ║  ') + C.g(asciiLines[i], grad[colorIdx]) + border('  ║'));
+    }
+    // remaining static lines copied from the original `lines` (indices 9..)
+    for (let k = 9; k < lines.length; k++) out.push(lines[k]);
+    return out;
+  };
+  const sleepSync = (ms) => {
+    try {
+      const sab = new SharedArrayBuffer(4);
+      const arr = new Int32Array(sab);
+      Atomics.wait(arr, 0, 0, ms);
+    } catch {
+      const end = Date.now() + ms; while (Date.now() < end) {}
+    }
+  };
+  if (animate) {
+    // Frame 1: initial render
+    const frame0 = renderFrame(0);
+    for (const ln of frame0) log(ln);
+    // Wave frames: 1..3 shifts
+    for (let shift = 1; shift <= 3; shift++) {
+      sleepSync(85);
+      // Move cursor up by total frame lines
+      process.stdout.write(`\x1b[${frame0.length}A`);
+      const f = renderFrame(shift);
+      for (const ln of f) {
+        process.stdout.write('\x1b[2K\r' + ln + '\n');
+      }
+    }
+    // Settle to original (shift=0) for final static visual
+    sleepSync(85);
+    process.stdout.write(`\x1b[${frame0.length}A`);
+    for (const ln of lines) {
+      process.stdout.write('\x1b[2K\r' + ln + '\n');
+    }
+  } else {
+    for (const ln of lines) log(ln);
+  }
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.140+ release sync-main 자동 push + README 자동 풍부화 — 70 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.141+ ASCII 배너 wave 모션 + Feature Causality Graph — 71 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -7298,6 +7388,239 @@ function lessonsCmd(root) {
   if (filtered.length > limit) log(`\n💡 ${filtered.length - limit}개 더 있음 — --limit ${filtered.length}`);
 }
 
+// ===== 1.9.141: Feature Causality Graph — 인과관계 추적 (사용자 요청) =====
+// 신규 기능 추가 / 데이터 형식 변경 시 영향 범위 자동 감지. 코드 작성 전 참조 우선순위 1순위.
+// File: .harness/feature-graph.md
+// Format per node (markdown):
+//   ## F-XXXX <title>
+//   - depends-on: F-YYYY, F-ZZZZ
+//   - affects: F-AAAA, F-BBBB
+//   - co-changes-with: F-CCCC
+//   - files: src/foo/*, src/bar.ts
+//   - input: { fields }
+//   - output: { fields }
+//   - error-modes: e1, e2
+//   - tests: tests/foo.test.ts
+//   - notes: 자유 메모
+function featureGraphPath(root) { return path.join(absRoot(root), '.harness', 'feature-graph.md'); }
+function _featureGraphTemplate() {
+  return `# Feature Graph (1.9.141)\n\n` +
+    `> **목적**: 각 기능의 인과관계를 정확히 정리해서 코드 작성 전 영향 범위를 자동 추적.\n` +
+    `> 신규 기능 추가, 데이터 형식 변경, 외부 API 매칭 작업 전 \`leerness feature impact <id>\`로 확인.\n` +
+    `> handoff가 현재 task 키워드로 자동 매칭해서 영향받는 feature 목록을 회수.\n\n` +
+    `## How to use\n\n` +
+    `\`\`\`bash\n` +
+    `leerness feature add "User Auth"                           # F-0001 자동 부여\n` +
+    `leerness feature link F-0002 --depends-on F-0001           # 의존 관계\n` +
+    `leerness feature link F-0001 --affects F-0002,F-0005        # 영향 관계 (다수)\n` +
+    `leerness feature link F-0001 --co-changes-with F-0011       # 함께 변해야 하는 기능\n` +
+    `leerness feature impact F-0001                              # 영향받는 전체 (transitive)\n` +
+    `leerness feature list --json                                # 그래프 JSON\n` +
+    `leerness feature show F-0001                                # 단일 상세\n` +
+    `\`\`\`\n\n` +
+    `## Nodes\n\n`;
+}
+function _parseFeatureGraph(text) {
+  if (!text) return [];
+  const nodes = [];
+  const re = /^## (F-\d{4})\s+(.+?)\s*$/gm;
+  const positions = [];
+  let m;
+  while ((m = re.exec(text)) !== null) positions.push({ id: m[1], title: m[2], start: m.index });
+  for (let i = 0; i < positions.length; i++) {
+    const start = positions[i].start;
+    const end = i + 1 < positions.length ? positions[i + 1].start : text.length;
+    const block = text.slice(start, end);
+    const parseField = (key) => {
+      // 1.9.141 fix: \s 은 \n 도 포함하므로 [ \t]* 로 newline 비포함 horizontal whitespace 만 매칭
+      const r = new RegExp(`^- ${key}:[ \\t]*(.*?)$`, 'mi');
+      const mm = block.match(r);
+      return mm ? mm[1].trim() : '';
+    };
+    const parseList = (key) => {
+      const v = parseField(key);
+      if (!v) return [];
+      return v.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+    };
+    nodes.push({
+      id: positions[i].id,
+      title: positions[i].title,
+      dependsOn: parseList('depends-on'),
+      affects: parseList('affects'),
+      coChangesWith: parseList('co-changes-with'),
+      files: parseList('files'),
+      input: parseField('input'),
+      output: parseField('output'),
+      errorModes: parseList('error-modes'),
+      tests: parseList('tests'),
+      notes: parseField('notes')
+    });
+  }
+  return nodes;
+}
+function _readFeatureGraph(root) {
+  const p = featureGraphPath(root);
+  if (!exists(p)) return { nodes: [], text: '' };
+  const text = read(p);
+  return { nodes: _parseFeatureGraph(text), text };
+}
+function _ensureFeatureGraph(root) {
+  const p = featureGraphPath(root);
+  if (!exists(p)) writeUtf8(p, _featureGraphTemplate());
+  return p;
+}
+function _nextFeatureId(nodes) {
+  const used = new Set(nodes.map(n => parseInt(n.id.slice(2), 10)));
+  let n = 1; while (used.has(n)) n++;
+  return 'F-' + String(n).padStart(4, '0');
+}
+function _featureBlock(node) {
+  return `## ${node.id} ${node.title}\n` +
+    `- depends-on: ${(node.dependsOn || []).join(', ')}\n` +
+    `- affects: ${(node.affects || []).join(', ')}\n` +
+    `- co-changes-with: ${(node.coChangesWith || []).join(', ')}\n` +
+    `- files: ${(node.files || []).join(', ')}\n` +
+    `- input: ${node.input || ''}\n` +
+    `- output: ${node.output || ''}\n` +
+    `- error-modes: ${(node.errorModes || []).join(', ')}\n` +
+    `- tests: ${(node.tests || []).join(', ')}\n` +
+    `- notes: ${node.notes || ''}\n\n`;
+}
+function _writeFeatureGraph(root, nodes) {
+  const p = _ensureFeatureGraph(root);
+  const header = _featureGraphTemplate();
+  const body = nodes.map(_featureBlock).join('');
+  writeUtf8(p, header + body);
+}
+function featureAddCmd(root, title) {
+  root = absRoot(root);
+  if (!title) return fail('feature add: title 필요 — leerness feature add "<title>"');
+  _ensureFeatureGraph(root);
+  const { nodes } = _readFeatureGraph(root);
+  if (nodes.some(n => n.title.toLowerCase() === title.toLowerCase())) {
+    return warn(`이미 존재: "${title}"`);
+  }
+  const id = _nextFeatureId(nodes);
+  const node = {
+    id, title,
+    dependsOn: [], affects: [], coChangesWith: [],
+    files: [], input: '', output: '', errorModes: [], tests: [], notes: ''
+  };
+  // 옵션 인자 — 한 번에 의존/영향 등록 가능
+  const depends = arg('--depends-on', '');
+  const affects = arg('--affects', '');
+  const coChanges = arg('--co-changes-with', '');
+  const files = arg('--files', '');
+  if (depends) node.dependsOn = depends.split(/[,\s]+/).filter(Boolean);
+  if (affects) node.affects = affects.split(/[,\s]+/).filter(Boolean);
+  if (coChanges) node.coChangesWith = coChanges.split(/[,\s]+/).filter(Boolean);
+  if (files) node.files = files.split(/[,\s]+/).filter(Boolean);
+  nodes.push(node);
+  _writeFeatureGraph(root, nodes);
+  ok(`feature added: ${id} · ${title}`);
+}
+function featureLinkCmd(root, fromId) {
+  root = absRoot(root);
+  if (!fromId || !/^F-\d{4}$/.test(fromId)) return fail('feature link: 첫 인자는 F-XXXX 형식 ID');
+  const { nodes } = _readFeatureGraph(root);
+  const node = nodes.find(n => n.id === fromId);
+  if (!node) return fail(`feature ${fromId} 없음 — feature add 먼저`);
+  const dep = arg('--depends-on', '');
+  const aff = arg('--affects', '');
+  const co = arg('--co-changes-with', '');
+  let changes = 0;
+  if (dep) { const ids = dep.split(/[,\s]+/).filter(Boolean); for (const id of ids) if (!node.dependsOn.includes(id)) { node.dependsOn.push(id); changes++; } }
+  if (aff) { const ids = aff.split(/[,\s]+/).filter(Boolean); for (const id of ids) if (!node.affects.includes(id)) { node.affects.push(id); changes++; } }
+  if (co)  { const ids =  co.split(/[,\s]+/).filter(Boolean); for (const id of ids) if (!node.coChangesWith.includes(id)) { node.coChangesWith.push(id); changes++; } }
+  if (!changes) return warn('변경 없음 — --depends-on / --affects / --co-changes-with 중 하나 이상 지정');
+  _writeFeatureGraph(root, nodes);
+  ok(`feature ${fromId} 링크 ${changes}건 추가`);
+}
+function _featureImpactBfs(nodes, startId) {
+  // affects + co-changes-with 양방향 transitive closure
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const visited = new Set();
+  const queue = [{ id: startId, depth: 0, via: 'self' }];
+  const result = [];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (visited.has(cur.id)) continue;
+    visited.add(cur.id);
+    const node = byId.get(cur.id);
+    if (!node) continue;
+    if (cur.depth > 0) result.push({ id: cur.id, title: node.title, depth: cur.depth, via: cur.via, files: node.files, errorModes: node.errorModes });
+    for (const next of node.affects || []) queue.push({ id: next, depth: cur.depth + 1, via: 'affects' });
+    for (const next of node.coChangesWith || []) queue.push({ id: next, depth: cur.depth + 1, via: 'co-changes-with' });
+  }
+  // 역방향: 이 feature에 depends-on 하는 노드도 영향받음
+  for (const n of nodes) {
+    if (visited.has(n.id)) continue;
+    if ((n.dependsOn || []).includes(startId)) {
+      result.push({ id: n.id, title: n.title, depth: 1, via: 'depends-on(reverse)', files: n.files, errorModes: n.errorModes });
+      visited.add(n.id);
+    }
+  }
+  return result;
+}
+function featureImpactCmd(root, fromId) {
+  root = absRoot(root);
+  if (!fromId || !/^F-\d{4}$/.test(fromId)) return fail('feature impact: F-XXXX ID 필요');
+  const { nodes } = _readFeatureGraph(root);
+  const node = nodes.find(n => n.id === fromId);
+  if (!node) return fail(`feature ${fromId} 없음`);
+  const impacted = _featureImpactBfs(nodes, fromId);
+  if (has('--json')) {
+    log(JSON.stringify({ feature: { id: node.id, title: node.title }, total: impacted.length, impacted }, null, 2));
+    return;
+  }
+  log(`# Feature Impact: ${node.id} · ${node.title}`);
+  if (!impacted.length) { ok('영향받는 다른 feature 없음 (또는 link 미설정)'); return; }
+  log(`\n총 ${impacted.length} feature에 영향:\n`);
+  for (const it of impacted) {
+    log(`  ${it.id} · ${it.title}  [depth=${it.depth}, via=${it.via}]`);
+    if (it.files && it.files.length) log(`    files: ${it.files.join(', ')}`);
+    if (it.errorModes && it.errorModes.length) log(`    error-modes: ${it.errorModes.join(', ')}`);
+  }
+  log(`\n💡 코드 변경 전 위 ${impacted.length}개 feature의 테스트/계약 확인 권장`);
+}
+function featureListCmd(root) {
+  root = absRoot(root);
+  const { nodes } = _readFeatureGraph(root);
+  if (has('--json')) {
+    log(JSON.stringify({ total: nodes.length, features: nodes }, null, 2));
+    return;
+  }
+  log(`# Features (${nodes.length}개)`);
+  if (!nodes.length) {
+    log('  (없음) — leerness feature add "<title>"');
+    return;
+  }
+  for (const n of nodes) {
+    log(`  ${n.id} · ${n.title}`);
+    if (n.dependsOn.length) log(`    ↓ depends-on: ${n.dependsOn.join(', ')}`);
+    if (n.affects.length) log(`    → affects: ${n.affects.join(', ')}`);
+    if (n.coChangesWith.length) log(`    ↔ co-changes-with: ${n.coChangesWith.join(', ')}`);
+  }
+}
+function featureShowCmd(root, fromId) {
+  root = absRoot(root);
+  if (!fromId || !/^F-\d{4}$/.test(fromId)) return fail('feature show: F-XXXX ID 필요');
+  const { nodes } = _readFeatureGraph(root);
+  const node = nodes.find(n => n.id === fromId);
+  if (!node) return fail(`feature ${fromId} 없음`);
+  if (has('--json')) { log(JSON.stringify(node, null, 2)); return; }
+  log(`# ${node.id} · ${node.title}`);
+  log(`  depends-on:      ${node.dependsOn.join(', ') || '(없음)'}`);
+  log(`  affects:         ${node.affects.join(', ') || '(없음)'}`);
+  log(`  co-changes-with: ${node.coChangesWith.join(', ') || '(없음)'}`);
+  log(`  files:           ${node.files.join(', ') || '(없음)'}`);
+  log(`  input:           ${node.input || '(없음)'}`);
+  log(`  output:          ${node.output || '(없음)'}`);
+  log(`  error-modes:     ${node.errorModes.join(', ') || '(없음)'}`);
+  log(`  tests:           ${node.tests.join(', ') || '(없음)'}`);
+  log(`  notes:           ${node.notes || '(없음)'}`);
+}
+
 // ===== 1.9.3: Causal / reuse / consistency =====
 const CODE_EXT = new Set(['.js','.ts','.jsx','.tsx','.mjs','.cjs','.css','.scss','.sass','.less','.html','.htm','.vue','.svelte','.md','.json','.py','.rb','.go','.rs','.java','.kt','.swift','.cs','.php']);
 function* walkCode(root, base = root, depth = 0, extras = null) {
@@ -8826,7 +9149,9 @@ function mcpServeCmd(root) {
     { name: 'leerness_memory_archive_list', description: '1.9.127 — DELETE 5종 archive 파일 통합 조회 JSON ({ decisions: [], lessons: [], plan: [], totals: { decisions, lessons, plan, all } }). 외부 AI가 과거에 제거된 항목을 회수/복원 후보로 참조. --surface 필터: decisions|lessons|plan. 1.9.138+ --query 키워드 필터 (target/originalHeader case-insensitive 매칭)', inputSchema: { type: 'object', properties: { surface: { type: 'string' }, query: { type: 'string' }, path: { type: 'string' } } } },
     { name: 'leerness_memory_restore', description: '1.9.128 — archive 의 항목을 active 파일로 복귀 (DELETE→RESTORE cycle). surface: decisions|lessons|plan. target: date YYYY-MM-DD 또는 target substring 매칭. 복원된 블록은 archive 에서 제거됨. 🎉 MCP 40 도구 마일스톤', inputSchema: { type: 'object', properties: { surface: { type: 'string', enum: ['decisions', 'lessons', 'plan'] }, target: { type: 'string' }, path: { type: 'string' } }, required: ['surface', 'target'] } },
     { name: 'leerness_task_list', description: '1.9.134 — progress-tracker.md 전체 task 조회 JSON ({ total, tasks: [{ id, status, request, evidence, nextAction, updated }] }). --status 필터 지원 (planned|in-progress|done 등). 외부 AI가 task 상태 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' }, status: { type: 'string' } } } },
-    { name: 'leerness_rule_remove', description: '1.9.135 — rules.md 에서 특정 rule 제거 (id: R-XXXX). 제거된 rule 은 .harness/rules.archive.md 에 자동 보존 (복구 가능). Rule surface CRUD MCP 완성 (add/list/remove)', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } }
+    { name: 'leerness_rule_remove', description: '1.9.135 — rules.md 에서 특정 rule 제거 (id: R-XXXX). 제거된 rule 은 .harness/rules.archive.md 에 자동 보존 (복구 가능). Rule surface CRUD MCP 완성 (add/list/remove)', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
+    { name: 'leerness_feature_impact', description: '1.9.141 — Feature Causality Graph 인과관계 영향 추적 JSON ({ feature, total, impacted: [{ id, title, depth, via, files, errorModes }] }). 신규 기능 추가/형식 변경 전 호출: id 변경으로 영향받는 다른 feature를 transitive (affects + co-changes + reverse depends-on) 으로 회수. 1+1=20 cascade 방지', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
+    { name: 'leerness_feature_list', description: '1.9.141 — 전체 Feature Graph 노드 + 엣지 JSON. 외부 AI가 시스템 내 기능 의존성을 한 번에 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -8900,6 +9225,9 @@ function mcpServeCmd(root) {
           case 'leerness_memory_restore':  cliArgs = ['memory', 'restore', String(args.surface || ''), String(args.target || ''), '--path', targetPath]; break;
           case 'leerness_task_list':       cliArgs = ['task', 'list', '--path', targetPath, '--json', ...(args.status ? ['--status', args.status] : [])]; break;
           case 'leerness_rule_remove':     cliArgs = ['rule', 'remove', String(args.id || ''), '--path', targetPath]; break;
+          // 1.9.141: Feature Causality Graph
+          case 'leerness_feature_impact':  cliArgs = ['feature', 'impact', String(args.id || ''), '--path', targetPath, '--json']; break;
+          case 'leerness_feature_list':    cliArgs = ['feature', 'list', '--path', targetPath, '--json']; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -9618,6 +9946,12 @@ async function main() {
   if (cmd === 'release' && args[1] === 'publish')   return releasePublish(args[2] || arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'pack')      return await releasePackCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'sync-main') return releaseSyncMainCmd(args[2] || arg('--path', process.cwd()));
+  // 1.9.141: feature causality graph
+  if (cmd === 'feature' && args[1] === 'add')    return featureAddCmd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('--')).join(' '));
+  if (cmd === 'feature' && args[1] === 'link')   return featureLinkCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'feature' && args[1] === 'impact') return featureImpactCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'feature' && args[1] === 'list')   return featureListCmd(arg('--path', process.cwd()));
+  if (cmd === 'feature' && args[1] === 'show')   return featureShowCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'impact')                             return impactCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'reuse' && args[1] === 'find')        return reuseFind(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'reuse' && args[1] === 'register')    return reuseRegister(arg('--path', process.cwd()), args[2]);
