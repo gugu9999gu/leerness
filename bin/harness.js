@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.157';
+const VERSION = '1.9.158';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -9741,7 +9741,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_feature_list', description: '1.9.141 — 전체 Feature Graph 노드 + 엣지 JSON. 외부 AI가 시스템 내 기능 의존성을 한 번에 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_feature_add', description: '1.9.142 — Feature Graph 에 새 노드 추가 (외부 AI가 코드 작성 중 직접 feature 등록). 인자: { title (required), dependsOn?, affects?, coChangesWith?, files?, path? }. 자동 F-XXXX ID 부여. CRUD 완성에 기여', inputSchema: { type: 'object', properties: { title: { type: 'string' }, dependsOn: { type: 'string' }, affects: { type: 'string' }, coChangesWith: { type: 'string' }, files: { type: 'string' }, path: { type: 'string' } }, required: ['title'] } },
     { name: 'leerness_feature_link', description: '1.9.142 — 기존 feature 노드에 의존/영향/공변경 엣지 추가. 인자: { id (required, F-XXXX), dependsOn?, affects?, coChangesWith?, path? }. 외부 AI가 코드 변경 도중 발견한 인과관계를 즉시 그래프에 반영', inputSchema: { type: 'object', properties: { id: { type: 'string' }, dependsOn: { type: 'string' }, affects: { type: 'string' }, coChangesWith: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
-    { name: 'leerness_env_detect', description: '1.9.145 — 실행 환경 자동 감지 + 변동 추적 JSON ({ snapshot: { os, hardware, locale, shell, node, tools, scriptDependencies }, diff: { firstCapture, changes, missing }, persisted }). "X은(는) 내부 또는 외부 명령... 아닙니다" 사전 방지: package.json scripts 의존 도구가 PATH에 있는지 검증 + 머신/Node/도구 변경 감지. 절대경로 마스킹 (보안). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_env_detect', description: '1.9.145 — 실행 환경 자동 감지 + 변동 추적 JSON ({ snapshot: { os, hardware, locale, shell, node, tools, scriptDependencies }, diff: { firstCapture, changes, missing }, persisted }). "X은(는) 내부 또는 외부 명령... 아닙니다" 사전 방지: package.json scripts 의존 도구가 PATH에 있는지 검증 + 머신/Node/도구 변경 감지. 절대경로 마스킹 (보안). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_provider_list', description: '1.9.157/158 — Provider Registry 조회 JSON ({ total, builtin, user, providers: [{ id, bin, envFlag, source, desc }] }). 빌트인 5종 (claude/codex/gemini/copilot/ollama) + .harness/providers.json 사용자 정의 통합. 외부 AI가 sub-agent 분배 가능한 provider 전체 회수 (OpenRouter/Bedrock 등 등록되어 있으면 같이 노출). 🎉 MCP 48 도구 마일스톤', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -9834,6 +9835,8 @@ function mcpServeCmd(root) {
             break;
           // 1.9.145: 실행 환경 자동 감지
           case 'leerness_env_detect': cliArgs = ['env', 'detect', targetPath, '--json']; break;
+          // 1.9.158: Provider Registry — 외부 AI 가 등록된 provider 회수
+          case 'leerness_provider_list': cliArgs = ['provider', 'list', '--path', targetPath, '--json']; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }

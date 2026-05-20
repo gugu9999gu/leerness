@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.9.158 — 2026-05-20
+
+**🎉 MCP 48번째 도구 `leerness_provider_list` — Provider Registry 외부 AI 노출 마일스톤.**
+
+자율 모드 88 라운드. 1.9.157 Provider Registry CLI 의 자연스러운 후속 — MCP 노출.
+
+### Added — MCP `leerness_provider_list` (48번째 도구)
+- 외부 AI (Claude / Codex / Gemini 등) 가 MCP 통해 등록된 provider 전체 회수 가능
+- 응답 JSON: `{ total, builtin, user, providers: [{ id, bin, envFlag, source, desc }] }`
+- 빌트인 5종 (claude/codex/gemini/copilot/ollama) + `.harness/providers.json` 사용자 정의 통합
+- 외부 AI 활용 사례:
+  - 메인 에이전트가 sub-agent 분배 전 사용 가능한 provider 확인
+  - OpenRouter/Bedrock 등 등록되어 있으면 자동 발견
+  - sub-agent 가 "내가 사용 가능한 도구가 무엇인지" 자기-점검
+
+### MCP 도구 카운트 진화
+- 1.9.43 → 1.9.84 (READ 5종 완성): 17 도구
+- 1.9.85 → 1.9.110 (health + Memory CRUD): 30 도구 마일스톤
+- 1.9.112 → 1.9.119 (Memory READ 5종): 35 도구
+- 1.9.128 (DELETE/RESTORE 5종): 40 도구 마일스톤
+- 1.9.142 (Feature Graph): 45 도구
+- 1.9.145 (env detect): 47 도구
+- **1.9.158: 48 도구 🎉**
+
+### Pending — 1.9.158 권고 다음 후보
+- **1.9.159** — `leerness_provider_add` MCP 도구 (49번째) — 외부 AI 가 자가 확장 가능
+- **1.9.160** — `provider sync` (OpenRouter llms.txt 자동 동기화)
+- **1.9.161** — LSP 어댑터 MVP
+
+### Verified
+- e2e 217/217 ✓
+- stress-v103: 12/12 (MCP tools/list 48개 3종 + tools/call 실호출 2종 + 누적 회귀 7종) 🎉 **MCP 48 도구 마일스톤**
+- VERSION = 1.9.158 / autonomous-rounds = 88
+
+---
+
 ## 1.9.157 — 2026-05-20
 
 **Provider Registry CLI MVP — 사용자 정의 provider 동적 추가 (점검 보고서 권고 #3 — Provider Registry MCP의 CLI 단계).**
