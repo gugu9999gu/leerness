@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.9.129 — 2026-05-20
+
+**handoff 7번째 자동 회수 — 🗑 최근 24h archive 알림** — DELETE 5종 archive 활동을 매 세션 시작 시 자동 노출.
+
+### Added — handoff archive 알림
+- handoff 출력에 archive 활동 라인 추가:
+  ```
+  🗑 최근 24h archive (1.9.129): D2/L1/P0 (3건 archived) — 복원 후보
+    → 회수: leerness memory archive list --json
+    → 복원: leerness memory restore <surface> <target>
+  ```
+- 3 archive 파일 (`decisions.archive.md`, `lessons.archive.md`, `plan.archive.md`) 의 mtime 24h 내 + entry date 24h 내만 카운트
+- `--no-mem-delta` / `--compact` / `--quiet` / `LEERNESS_NO_MEM_DELTA=1` 로 끄기
+
+### 7개 handoff 자동 회수
+| # | 라운드 | 자동 회수 |
+|---|---|---|
+| 1 | (기존) | lessons matching |
+| 2 | 1.9.45 | skill match 추천 |
+| 3 | 1.9.69 | history hit |
+| 4 | 1.9.88 | brainstorm hits |
+| 5 | 1.9.81 | 통합 헤드라인 |
+| 6 | 1.9.121 | 🆕 24h 메모리 변동 |
+| **7** | **1.9.129** | **🗑 24h archive 알림** |
+
+### 사용 시나리오
+세션 시작 시 handoff:
+```
+🆕 최근 24h 메모리 변동 (1.9.121): task +3 · decision +1 · plan: 변경됨
+🗑 최근 24h archive (1.9.129): D1/L0/P1 (2건 archived) — 복원 후보
+  → 회수: leerness memory archive list --json
+  → 복원: leerness memory restore <surface> <target>
+```
+AI 가 즉시 "어제 PostgreSQL 결정 취소했었네 — 다시 검토해야 할까?" 판단 가능.
+
 ## 1.9.128 — 2026-05-20
 
 **`leerness memory restore` CLI + MCP 40번째 도구 `leerness_memory_restore`** 🎉 **MCP 40 도구 마일스톤** — DELETE→RESTORE cycle 완성.

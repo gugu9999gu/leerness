@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.128';
+const VERSION = '1.9.129';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -329,6 +329,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.126+ \`leerness plan remove <M-XXXX|title>\` + MCP **38 도구** (\`leerness_plan_remove\`) — milestone 영구 제거 (archive 보존). **Memory Surface DELETE 5종 완전 완성** 🎉.
 - 1.9.127+ \`leerness memory archive list [--surface decisions|lessons|plan] [--json]\` + MCP **39 도구** (\`leerness_memory_archive_list\`) — DELETE 5종 archive 통합 조회 (복원 후보 회수).
 - 1.9.128+ \`leerness memory restore <surface> <target>\` + MCP **40 도구 🎉** (\`leerness_memory_restore\`) — archive → active 복귀 (DELETE→RESTORE cycle 완성). **MCP 40 도구 마일스톤**.
+- 1.9.129+ handoff **7번째 자동 회수** — \`🗑 최근 24h archive\` (D/L/P 카운트 + 복원 후보 안내). DELETE 활동 자동 인지.
 
 ---
 
@@ -2791,6 +2792,48 @@ function handoff(root) {
       }
     } catch {}
   }
+  // 1.9.129: handoff 7번째 자동 회수 — 🗑 최근 24h archive 알림
+  //   DELETE 5종 archive 파일 (.harness/decisions.archive.md, lessons.archive.md, plan.archive.md)
+  //   에 최근 24h 내 추가된 entry 카운트를 노출. AI가 잘못 제거한 항목을 즉시 인지 + restore 후보 회수.
+  //   `leerness memory archive list` / `leerness memory restore <surface> <target>` 안내 포함.
+  if (!has('--no-mem-delta') && !has('--compact') && !has('--quiet') && process.env.LEERNESS_NO_MEM_DELTA !== '1') {
+    try {
+      const isTtyArc = process.stdout && process.stdout.isTTY;
+      const arcCy = s => isTtyArc ? `\x1b[36m${s}\x1b[0m` : s;
+      const arcDim = s => isTtyArc ? `\x1b[2m${s}\x1b[0m` : s;
+      const hd = path.join(root, '.harness');
+      const cutoffArchive = Date.now() - 24 * 60 * 60 * 1000;
+      const today = new Date().toISOString().slice(0, 10);
+      const yest = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const surfaces = [
+        { key: 'D', label: 'decisions', file: 'decisions.archive.md' },
+        { key: 'L', label: 'lessons',   file: 'lessons.archive.md' },
+        { key: 'P', label: 'plan',      file: 'plan.archive.md' }
+      ];
+      const archiveDeltas = [];
+      let totalRecent = 0;
+      for (const s of surfaces) {
+        const fp = path.join(hd, s.file);
+        if (!exists(fp)) continue;
+        try {
+          const stat = fs.statSync(fp);
+          if (stat.mtimeMs < cutoffArchive) continue; // 파일 자체가 24h 외면 skip
+          const entries = _parseArchiveBlocks(read(fp));
+          const recent = entries.filter(e => e.date === today || e.date === yest).length;
+          if (recent > 0) {
+            archiveDeltas.push(`${s.key}${recent}`);
+            totalRecent += recent;
+          }
+        } catch {}
+      }
+      if (totalRecent > 0) {
+        log(arcCy(`🗑  최근 24h archive (1.9.129): ${archiveDeltas.join('/')} (${totalRecent}건 archived) — 복원 후보`));
+        log(arcDim(`  → 회수: leerness memory archive list --json`));
+        log(arcDim(`  → 복원: leerness memory restore <surface> <target>`));
+        log('');
+      }
+    } catch {}
+  }
   // 1.9.76: handoff 보안 상태 요약 — .env vs .env.example + .gitignore 시크릿 패턴 1줄 요약
   // 매 세션 시작 시 AI가 보안 위험을 즉시 인지. --no-security-summary 또는 --compact로 끄기
   if (!has('--no-security-summary') && !has('--compact') && !has('--quiet')) {
@@ -4195,7 +4238,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.128+ MCP 40 도구 🎉 DELETE→RESTORE cycle — 58 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.129+ handoff 7 자동 회수 🗑 archive 알림 — 59 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
