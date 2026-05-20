@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.143-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-46-blue)]() [![json](https://img.shields.io/badge/--json-20_commands-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-73-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-auto-success)]() [![feature-graph-json](https://img.shields.io/badge/feature--graph--JSON--4cmds-complete-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.144-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-46-blue)]() [![json](https://img.shields.io/badge/--json-20_commands-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-74-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-auto-success)]() [![banner-ux](https://img.shields.io/badge/installer--UX-1.9.144_polished-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.143  AI Agent Reliability Harness                      ║
+  ║  v1.9.144  AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
@@ -529,7 +529,7 @@ MIT — © leerness contributors
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.9.40 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.9.144 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### Core Commands
 
@@ -546,13 +546,90 @@ leerness session close .      # 세션 종료 + handoff 자동 작성
 leerness update .             # 자동 버전 감지 + 마이그레이션
 ```
 
+### Memory Surface CRUD (5 surfaces × add/list/drop)
+
+```bash
+# Tasks
+leerness task add "T-9999 작업 제목"
+leerness task list --json
+# Decisions
+leerness decision add "결정 제목" --reason "이유"
+leerness decision list --query "키워드"   # 1.9.139
+# Rules (영구 자연어 룰)
+leerness rule add "매 commit마다 changelog 갱신" --trigger every-commit
+leerness rule list
+# Plan (milestones)
+leerness plan add "M-XXXX 계획" --next-action "다음 단계"
+leerness plan list
+# Lessons (영구 교훈)
+leerness lesson save "교훈 본문" --tag perf
+leerness lesson list --query "키워드"     # 1.9.139
+# DELETE → RESTORE (1.9.126~128)
+leerness memory archive list . --query "키워드"   # 1.9.138
+leerness memory restore decision <date|title>
+```
+
+### MCP server (외부 AI 통합)
+
+Leerness v1.9.144는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **42개 도구**를 노출:
+
+```jsonc
+// 카테고리별
+// • Core: handoff / drift_check / audit / health / verify_claim / contract_verify
+// • Memory READ:  task_list / decision_list / lesson_list / plan_list / rule_list / memory_status
+// • Memory WRITE: task_add / decision_add / lesson_save / plan_add / rule_add
+// • Memory DELETE: task_drop / decision_drop / lesson_drop / plan_remove / rule_remove
+// • Skill: skill_match / skill_list / skill_search / skill_info / skill_suggest
+// • Insight: lessons / lessons_auto / brainstorm / retro / benchmark / lazy_detect
+// • Workflow: session_close / agents_list / task_export / env_check / usage_stats / reuse_map / whats_new
+
+// MCP server 실행: leerness mcp serve
+// tools/list 응답: 42 도구
+```
+
+### Autonomous mode (자율 모드)
+
+`<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
+1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.
+
+현재 누적: **70 라운드 (1.9.40 → 1.9.144)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
+
+### 성능 가이드 (1.9.140 측정)
+
+- `leerness handoff .` — 평균 ~1.5s (캐시 워밍업 후 ~0.6s)
+- `leerness memory status --json` — 평균 ~250ms
+- `leerness task list --json` — 평균 ~200ms
+- `leerness drift check --json` — 평균 ~400ms
+- MCP `tools/list` 응답 — 평균 ~150ms
+- usage-stats / lessons / listAllSkills 모두 메모리 캐싱 (1.9.65/66)
+
+### 빠른 시작
+
+```bash
+# 1. 설치 (글로벌)
+npm install -g leerness
+
+# 2. 프로젝트에 하네스 설치
+cd my-project && leerness init . --yes --skills recommended
+
+# 3. AI 세션 시작 시
+leerness handoff .            # 컨텍스트 자동 로드
+
+# 4. 세션 종료 시
+leerness session close .      # 9 카테고리 + 룰 검증 + 다음 라운드 추천
+
+# 5. release 자동화 (1.9.140 main 자동 push 포함)
+leerness release pack --close --auto-main-push
+```
+
 ### Planning Files
 
 - `.harness/plan.md`: 전체 목표, milestone, 제외/드랍 범위
 - `.harness/progress-tracker.md`: 요청 단위 상태와 증거
 - `.harness/current-state.md`: 지금 이어서 할 작업
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
+- `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.9.40: 2026-05-19
+Last synced by Leerness v1.9.144: 2026-05-20
 <!-- leerness:project-readme:end -->
 

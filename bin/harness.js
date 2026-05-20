@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.143';
+const VERSION = '1.9.144';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -4501,7 +4501,7 @@ function _banner(opts = {}) {
   const cols = process.stdout && process.stdout.columns ? process.stdout.columns : 80;
   if (process.env.LEERNESS_NO_BANNER === '1') return;
   if (cols < 70) {
-    log(`Leerness ${v}  —  한국어 우선 AI 개발 하네스`);
+    log(`Leerness ${v}  —  AI 에이전트 검수·기억·드리프트 방지 하네스`);
     return;
   }
   const isTty = process.stdout && process.stdout.isTTY;
@@ -4540,11 +4540,11 @@ function _banner(opts = {}) {
     lines.push(border('  ║  ') + C.g(asciiLines[i], grad[i]) + border('  ║'));
   }
   lines.push(border('  ║                                                              ║'));
-  lines.push(border('  ║  ') + C.green(`${v.padEnd(10)}`) + C.dim('Korean-first AI Development Harness') + border('              ║'));
+  lines.push(border('  ║  ') + C.green(`${v.padEnd(10)}`) + C.dim('AI Agent Reliability Harness') + border('                      ║'));
   lines.push(border('  ║  ') + C.yel('★ ') + C.dim('verify · reuse-map · handoff · agents · orchestrate') + border('       ║'));
   lines.push(border('  ║                                                              ║'));
   lines.push(border('  ╚══════════════════════════════════════════════════════════════╝'));
-  lines.push('  ' + C.dim('한국어 우선 AI 개발 하네스 — ') + C.mag('verify') + C.dim(' · ') + C.mag('reuse-map') + C.dim(' · ') + C.mag('handoff') + C.dim(' · ') + C.mag('agents'));
+  lines.push('  ' + C.dim('AI 에이전트 검수·기억·드리프트 방지 하네스 — ') + C.mag('verify') + C.dim(' · ') + C.mag('remember') + C.dim(' · ') + C.mag('orchestrate') + C.dim(' · ') + C.mag('audit'));
   lines.push('');
 
   // 1.9.141: ASCII 배너 모션 — 그라데이션이 LEERNESS 글자 위로 흐르는 wave 효과 (TTY only, opt-out via LEERNESS_NO_ANIMATE)
@@ -4594,36 +4594,70 @@ function _banner(opts = {}) {
     for (const ln of lines) {
       process.stdout.write('\x1b[2K\r' + ln + '\n');
     }
+    // 1.9.144: 사용자 명시 요청 — 모션 완료 후 1초 홀드 (배너가 시선에 자리잡도록)
+    //   환경변수 LEERNESS_BANNER_HOLD_MS 로 조정 가능 (기본 1000ms, 0 또는 음수면 스킵)
+    const holdMs = (() => {
+      const env = parseInt(process.env.LEERNESS_BANNER_HOLD_MS || '1000', 10);
+      return Number.isFinite(env) && env > 0 ? Math.min(env, 5000) : 0;
+    })();
+    if (holdMs > 0) sleepSync(holdMs);
   } else {
     for (const ln of lines) log(ln);
   }
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.143+ JSON 4종 featureGraph 통합 완성 + drift 신호 — 73 라운드 자율 누적)')));
-    log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
-    log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
-    log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
-    log('    ' + C.green('npx leerness handoff . --json') + C.dim('                       # 외부 AI/MCP 통합 JSON 출력 (1.9.96)'));
-    log('    ' + C.green('npx leerness skill match "<query>"') + C.dim('                  # 매칭 skill + rolling history 자동 누적'));
-    log('    ' + C.green('npx leerness skill search "<capability>"') + C.dim('            # capability 부분 일치 (1.9.90)'));
-    log('    ' + C.green('npx leerness env sync .') + C.dim('                              # .env ↔ .env.example 동기화 (1.9.71 보안)'));
-    log('    ' + C.green('npx leerness health . --json') + C.dim('                         # 종합 헬스 체크 — drift + 보안 + skill + MCP (1.9.85)'));
-    log('    ' + C.green('npx leerness drift check . --auto-fix') + C.dim('                # drift + 보안 자동 회복 (1.9.82)'));
-    log('    ' + C.green('npx leerness lazy detect . --json') + C.dim('                   # 거짓 완료/no test run 신호 JSON (1.9.101)'));
-    log('    ' + C.green('npx leerness audit . --json') + C.dim('                         # 일관성 감사 JSON — 11 kind findings (1.9.102)'));
-    log('    ' + C.green('npx leerness session close . --json') + C.dim('                # 마감 통계 JSON — taskCounts + drift + rules + suggestions (1.9.103)'));
-    log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
-    log('');
-    log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 40 도구 🎉 (memory_restore 추가, 1.9.128)'));
-    log('    ' + C.green('npx leerness memory archive list --json') + C.dim('              # DELETE 5종 archive 통합 조회 (1.9.127) — D/L/P entries + 복원 후보'));
-    log('    ' + C.green('npx leerness memory restore <surface> <target>') + C.dim('       # archive → active 복원 (1.9.128) — DELETE→RESTORE cycle'));
-    log('    ' + C.green('npx leerness lesson save "<text>" --tag "..."') + C.dim('       # lessons.md 직접 write (1.9.112 — handoff 자동 회수와 통합)'));
-    log('    ' + C.green('npx leerness memory status . --json') + C.dim('                  # Memory Surface 5종 통합 상태 JSON (1.9.114)'));
-    log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
-    log('    ' + C.green('npx leerness rule add "매 X마다 Y" --trigger every-X') + C.dim('  # 자연어 영구 룰 (1.9.8) — handoff 매 세션 자동 출력'));
-    log('    ' + C.green('npx leerness agents bench "<task>"') + C.dim('                  # 3 CLI 동시 비교'));
-    log('    ' + C.green('npx leerness skill publish --bundle-only') + C.dim('             # 보안 사전 점검 통합 publish (1.9.98)'));
-    log('');
+    // 1.9.144: quickStart UI/UX 개선 — 카테고리 그룹 + 부드러운 cascade 표시 + 핵심 3단계 우선
+    //   • TTY 모션 시 각 라인 사이 짧은 fade (8ms) 로 부드러운 cascade
+    //   • non-TTY 시 즉시 출력 (CI/pipe 호환)
+    //   • 카테고리: 신규 프로젝트 / 매 세션 / 메모리 5종 / MCP·외부 AI / 보안·회복
+    const cascade = animate;
+    const cascadeMs = parseInt(process.env.LEERNESS_CASCADE_MS || '8', 10);
+    const cascadeStep = Number.isFinite(cascadeMs) && cascadeMs >= 0 ? Math.min(cascadeMs, 100) : 8;
+    const cprint = (s) => { log(s); if (cascade && cascadeStep > 0) sleepSync(cascadeStep); };
+    const section = (title) => { cprint(''); cprint(C.bold(C.cyan(`  ${title}`))); };
+    const cmd = (run, desc) => {
+      // 명령 컬럼 폭 = 42 (정렬을 위해 padEnd) — 가독성 향상
+      const padded = run.length >= 42 ? run + ' ' : run.padEnd(42);
+      cprint('    ' + C.green(padded) + C.dim('# ' + desc));
+    };
+
+    cprint('');
+    cprint(C.bold(C.cyan('  ✨ 시작하기 (3단계면 끝)')));
+    cmd('npx leerness init .',         '1️⃣  하네스 설치 + AI 도구 자동 연결');
+    cmd('npx leerness handoff .',      '2️⃣  세션 시작 — 컨텍스트·기억·feature impact 자동 회수');
+    cmd('npx leerness session close .', '3️⃣  세션 종료 — 마감 통계 + 다음 라운드 추천');
+
+    section('🧠 메모리 5종 CRUD (1.9.142 — cascade 방지)');
+    cmd('leerness task add "<제목>"',         'progress-tracker 등록');
+    cmd('leerness decision add "<제목>" --reason "..."', '되돌리기 어려운 결정 영구화');
+    cmd('leerness lesson save "<교훈>" --tag "..."',     '재발견 가능한 통찰 저장');
+    cmd('leerness plan add "<milestone>"',     '계획 단계 등록');
+    cmd('leerness rule add "<룰>" --trigger every-X',    '자연어 영구 룰');
+    cmd('leerness feature add "<기능>" --files "..."',   'Feature Graph 노드 (1.9.141)');
+
+    section('🔗 인과관계 + 영향 추적 (1.9.141~143)');
+    cmd('leerness feature impact <F-XXXX>',  '코드 변경 전 영향받는 feature 자동 회수');
+    cmd('leerness feature list --json',      '전체 그래프 + 엣지');
+    cmd('leerness audit . --json',           'orphan/cycle 무결성 검증');
+
+    section('🛡 보안·드리프트·게으름 가드');
+    cmd('leerness drift check . --auto-fix', 'drift + 보안 자동 회복');
+    cmd('leerness lazy detect . --json',     '거짓 완료/no test run 감지');
+    cmd('leerness env sync .',               '.env ↔ .env.example 동기화');
+    cmd('leerness health . --json',          '종합 헬스 (drift+보안+skill+feature)');
+
+    section('🤖 외부 AI 통합 (MCP 46 도구)');
+    cmd('npx leerness mcp serve',                 'stdio JSON-RPC server');
+    cmd('leerness memory status . --json',        '5 surface + featureGraph 한 호출');
+    cmd('leerness memory archive list --query "kw"', 'DELETE 5종 archive 검색');
+    cmd('leerness memory restore <surface> <target>', 'archive → active 복원');
+
+    section('🚀 Release 자동화');
+    cmd('leerness release pack --close --auto-main-push', '한 줄 release (1.9.140 main push 통합)');
+    cmd('leerness release sync-main .',          'release branch → main 자동 fast-forward');
+
+    cprint('');
+    cprint(C.dim('  📚 자세히: `leerness --help` · 자율 모드: `<<autonomous-loop-dynamic>>` 신호로 진행'));
+    cprint('');
   }
 }
 

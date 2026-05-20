@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.9.144 — 2026-05-20
+
+**사용자 명시 요청 3종 — 배너 문구 변경 + 1초 홀드 + quickStart UI/UX 전면 개선.**
+
+### Changed — 슬로건/배너 문구 변경 (사용자 요청 #1)
+- 기존: "한국어 우선 AI 개발 하네스" / "Korean-first AI Development Harness"
+- 신규: **"AI 에이전트 검수·기억·드리프트 방지 하네스"** / "AI Agent Reliability Harness"
+- 배너 슬로건 라인: `verify · remember · orchestrate · audit` (실제 leerness 동작 반영)
+- 박스 폭 보존 (padding 재조정)
+
+### Added — 배너 모션 후 1초 홀드 (사용자 요청 #2)
+- ASCII wave 애니메이션 settle 후 **1000ms 홀드** — 사용자 시선이 배너에 자리잡도록
+- `LEERNESS_BANNER_HOLD_MS` 환경변수로 조정 (기본 1000, max 5000, 0 시 스킵)
+- non-TTY / `LEERNESS_NO_ANIMATE` / `--no-animate` 시 홀드 없음
+
+### Added — quickStart 부드러운 cascade 표시
+- 각 라인 사이 8ms cascade (~기본값) — 부드러운 표시
+- `LEERNESS_CASCADE_MS` 로 조정 (0~100ms, 기본 8)
+- non-TTY 시 즉시 출력 (CI/pipe 호환 보장)
+
+### Changed — quickStart UI/UX 전면 개선 (사용자 요청 #3)
+- 카테고리 6개 그룹 (이전: 2개 그룹):
+  1. **✨ 시작하기 (3단계면 끝)** — init / handoff / session close 핵심 트리오
+  2. **🧠 메모리 5종 CRUD (1.9.142 — cascade 방지)** — task/decision/lesson/plan/rule/feature
+  3. **🔗 인과관계 + 영향 추적 (1.9.141~143)** — feature impact/list/audit
+  4. **🛡 보안·드리프트·게으름 가드** — drift/lazy/env/health
+  5. **🤖 외부 AI 통합 (MCP 46 도구)** — mcp serve/memory status/archive
+  6. **🚀 Release 자동화** — release pack/sync-main
+- 명령 컬럼 폭 42 char padEnd 정렬 (가독성 향상)
+- 1️⃣ 2️⃣ 3️⃣ 단계 표시 (3-step quickest path)
+- 설명 짧고 의미 중심 (실제 효과 강조)
+- 끝에 CTA: "자세히: leerness --help · 자율 모드: `<<autonomous-loop-dynamic>>`"
+
+### Validation
+- stress-v89: PASS (phrase 변경 + cascade 환경변수 + UI 카테고리 + 누적 회귀)
+- e2e: 219/219 PASS
+
 ## 1.9.143 — 2026-05-20
 
 **JSON 4종 featureGraph 통합 완성 + drift check feature 신호** — 1.9.142 session close --json 패턴을 handoff/health에 확장.

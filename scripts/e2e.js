@@ -870,13 +870,12 @@ total++;
 // 1.9.32 회귀: 배너 + setup-agents (비대화형 모드 안전)
 total++;
 {
-  // --version --banner: LEERNESS ASCII + 한국어 표시
+  // --version --banner: LEERNESS ASCII + 신규 슬로건 (1.9.144+ "AI 에이전트 검수·기억·드리프트 방지 하네스")
   const r = cp.spawnSync(process.execPath, [CLI, '--version', '--banner'], { encoding: 'utf8', timeout: 10000, env: { ...process.env, TERM: 'dumb' } });
-  // ASCII art 일부 문자 + 한국어 우선 + 1.9.32 + 박스
   const ok = r.status === 0
     && /╔═+╗/.test(r.stdout)
     && /███████╗/.test(r.stdout)
-    && /한국어 우선/.test(r.stdout)
+    && /AI 에이전트 검수.기억.드리프트 방지 하네스/.test(r.stdout)
     && new RegExp(`v${require('../package.json').version}`).test(r.stdout);
   console.log(ok ? '✓ B(1.9.32) --version --banner: LEERNESS ASCII 배너' : `✗ 배너 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 800)); }
@@ -1891,13 +1890,12 @@ total++;
 
 total++;
 {
-  // 1.9.34 배너 256색 그라데이션 — TTY 강제 + --banner
-  // 비-TTY일 때는 ANSI 코드 없이 순수 텍스트만 출력
+  // 1.9.34 배너 256색 그라데이션 — TTY 강제 + --banner (1.9.144+ 신규 슬로건)
   const r = cp.spawnSync(process.execPath, [CLI, '--version', '--banner'], { encoding: 'utf8', timeout: 10000 });
   const ok = r.status === 0
     && /███████╗/.test(r.stdout)
-    && /verify · reuse-map/.test(r.stdout)
-    && /한국어 우선 AI 개발 하네스/.test(r.stdout)
+    && /verify · remember/.test(r.stdout)
+    && /AI 에이전트 검수.기억.드리프트 방지 하네스/.test(r.stdout)
     && /v1\.9\.\d+/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.34) 배너 색상 + ASCII + 한국어' : `✗ 배너 색상 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
