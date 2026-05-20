@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.9.131 — 2026-05-20
+
+**brainstorm 회수 범위에 3 archive 파일 통합** — 과거에 제거됐던 ideas 가 새 brainstorm 시 다시 후보로 노출.
+
+### Added — brainstorm + archive 통합
+- `hits.archive: { decisions: [], lessons: [], plan: [] }` 추가
+- 3 archive 파일 (`.harness/decisions.archive.md`, `lessons.archive.md`, `plan.archive.md`) 본문 키워드 매칭
+- entry 구조: `{ date, target, originalHeader, preview, line }`
+- 텍스트 모드: `🗑 archive 후보 (N)` 섹션 + 복원 안내 라인
+- `_brainstormFor` (helper) + `brainstormCmd` (CLI) 양쪽 동일 구현
+
+### 사용 시나리오
+사용자: `leerness brainstorm "PostgreSQL"`
+→ 응답에 과거 archive 후보 포함:
+```
+🗑 archive 후보 (2) — 과거에 제거됐던 ideas; 복원 검토 가능 (1.9.131)
+  - 🧠 .harness/decisions.archive.md:4 — 2026-05-20 "PostgreSQL"
+  - 💡 .harness/lessons.archive.md:4 — 2026-05-20 "PostgreSQL"
+  → 복원: leerness memory restore <decisions|lessons|plan> <target>
+```
+
+### brainstorm 누적 source 진화
+| 라운드 | source |
+|---|---|
+| (기존) | decisions / skills / tasks / rules / evidence / lessons / code |
+| 1.9.72 | skillHistory / taskLogFails |
+| 1.9.116 | lessonsExplicit / planMilestones |
+| **1.9.131** | **archive (decisions/lessons/plan)** |
+
 ## 1.9.130 — 2026-05-20 🎉 **60 라운드 자율 모드 마일스톤**
 
 **JSON 4종 통합에 `memorySurface.archive` 필드 추가** + 60 라운드 자율 누적 보고서.

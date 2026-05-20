@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.130';
+const VERSION = '1.9.131';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -331,6 +331,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.128+ \`leerness memory restore <surface> <target>\` + MCP **40 도구 🎉** (\`leerness_memory_restore\`) — archive → active 복귀 (DELETE→RESTORE cycle 완성). **MCP 40 도구 마일스톤**.
 - 1.9.129+ handoff **7번째 자동 회수** — \`🗑 최근 24h archive\` (D/L/P 카운트 + 복원 후보 안내). DELETE 활동 자동 인지.
 - 1.9.130+ 🎉 **60 라운드 자율 모드 마일스톤** — JSON 4종 (handoff/memory status/session close/health) \`memorySurface.archive\` 필드 통합. MCP 40 / handoff auto-recovery 7 / DELETE-RESTORE cycle 완성.
+- 1.9.131+ \`brainstorm\` 회수 범위에 3 archive 파일 (decisions/lessons/plan archive) 통합 — 과거 제거된 ideas 가 새 brainstorm 시 다시 후보로 노출. \`hits.archive\` 필드 + 복원 안내 라인.
 
 ---
 
@@ -4268,7 +4269,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.130+ 🎉 60 라운드 마일스톤 archive 필드 통합 — 60 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.131+ brainstorm + archive 통합 — 61 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -5713,6 +5714,36 @@ function _brainstormFor(root, topic) {
       }
     }
   }
+  // 1.9.131: 3 archive 파일 (decisions/lessons/plan) hits — DELETE 5종 archive 도 brainstorm 후보로
+  //   archived ideas 가 새 brainstorm 시점에 다시 후보로 노출 → "이전에 검토한 건데 다시 볼까?"
+  hits.archive = { decisions: [], lessons: [], plan: [] };
+  const archiveSources_bsFor = [
+    { key: 'decisions', file: 'decisions.archive.md' },
+    { key: 'lessons',   file: 'lessons.archive.md' },
+    { key: 'plan',      file: 'plan.archive.md' }
+  ];
+  for (const src of archiveSources_bsFor) {
+    const fp = path.join(root, '.harness', src.file);
+    if (!exists(fp)) continue;
+    const txt = read(fp);
+    const blocks = txt.split(/\n(?=## 제거 )/);
+    for (const b of blocks) {
+      const m = b.match(/^## 제거 (\d{4}-\d{2}-\d{2})\s*\(target:\s*"([^"]*)"\)/);
+      if (!m) continue;
+      if (matches(b)) {
+        const headerMatch = b.match(/^### (.+)$/m);
+        const idx = txt.indexOf(b);
+        const lineNo = idx >= 0 ? txt.slice(0, idx).split('\n').length : 0;
+        hits.archive[src.key].push({
+          date: m[1],
+          target: m[2],
+          originalHeader: headerMatch ? headerMatch[1].trim() : null,
+          preview: b.slice(0, 220).replace(/\n+/g, ' '),
+          line: lineNo
+        });
+      }
+    }
+  }
   // 1.9.25: --include-code 옵션 — 소스 본문 검색 추가 (모순 감지 핵심)
   if (has('--include-code')) {
     const codeDirs = ['src', 'tests', 'bin', 'lib'];
@@ -5908,6 +5939,35 @@ function brainstormCmd(root, topic) {
       }
     }
   }
+  // 1.9.131: 3 archive 파일 hits (brainstormCmd 변종) — DELETE 5종 archive 도 brainstorm 후보로
+  if (!hits.archive) hits.archive = { decisions: [], lessons: [], plan: [] };
+  const archiveSources_bsCmd = [
+    { key: 'decisions', file: 'decisions.archive.md' },
+    { key: 'lessons',   file: 'lessons.archive.md' },
+    { key: 'plan',      file: 'plan.archive.md' }
+  ];
+  for (const src of archiveSources_bsCmd) {
+    const fp = path.join(root, '.harness', src.file);
+    if (!exists(fp)) continue;
+    const txt = read(fp);
+    const blocks = txt.split(/\n(?=## 제거 )/);
+    for (const b of blocks) {
+      const m = b.match(/^## 제거 (\d{4}-\d{2}-\d{2})\s*\(target:\s*"([^"]*)"\)/);
+      if (!m) continue;
+      if (matches(b)) {
+        const headerMatch = b.match(/^### (.+)$/m);
+        const idx = txt.indexOf(b);
+        const lineNo = idx >= 0 ? txt.slice(0, idx).split('\n').length : 0;
+        hits.archive[src.key].push({
+          date: m[1],
+          target: m[2],
+          originalHeader: headerMatch ? headerMatch[1].trim() : null,
+          preview: b.slice(0, 220).replace(/\n+/g, ' '),
+          line: lineNo
+        });
+      }
+    }
+  }
   // 1.9.116: lessons.md + plan.md milestone hits (Memory Surface 5종 완전 통합)
   if (!hits.lessonsExplicit) hits.lessonsExplicit = [];
   if (!hits.planMilestones) hits.planMilestones = [];
@@ -5975,6 +6035,22 @@ function brainstormCmd(root, topic) {
   if (hits.taskLogFails.length) {
     log(`\n## 📜 task-log 실패 라인 (${hits.taskLogFails.length}) — 1.9.67 인덱스 + brainstorm`);
     hits.taskLogFails.slice(0, 5).forEach(t => log(`  - .harness/task-log.md:${t.line || '?'} — ${t.title}`));
+  }
+  // 1.9.131: 3 archive 파일 hits — DELETE 5종 archive 도 brainstorm 후보
+  if (hits.archive) {
+    const archiveTotal = (hits.archive.decisions?.length || 0) + (hits.archive.lessons?.length || 0) + (hits.archive.plan?.length || 0);
+    if (archiveTotal > 0) {
+      log(`\n## 🗑  archive 후보 (${archiveTotal}) — 과거에 제거됐던 ideas; 복원 검토 가능 (1.9.131)`);
+      for (const [key, label, emoji] of [['decisions', 'decisions.archive.md', '🧠'], ['lessons', 'lessons.archive.md', '💡'], ['plan', 'plan.archive.md', '🗺']]) {
+        const items = hits.archive[key] || [];
+        if (items.length) {
+          for (const a of items.slice(0, 3)) {
+            log(`  - ${emoji} .harness/${label}:${a.line || '?'} — ${a.date} "${a.target}"${a.originalHeader ? ' (orig: ' + a.originalHeader.slice(0, 80) + ')' : ''}`);
+          }
+        }
+      }
+      log(`  → 복원: leerness memory restore <decisions|lessons|plan> <target>`);
+    }
   }
 
   log(`\n## 💡 시작 전 권장 액션`);
