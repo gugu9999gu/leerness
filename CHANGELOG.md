@@ -1,5 +1,62 @@
 # Changelog
 
+## 1.9.172 — 2026-05-21
+
+**🎨 스트리밍 UX 강화 — spinner + Claude tool_use 가시화 + diff 패턴 자동 색깔 (사용자 명시 강화).**
+
+자율 모드 102 라운드. 1.9.170 사용자 명시 ("터미널 화면 계속 갱신, 추론중/diff/생각하는 과정 실시간 표시") 의 진짜 의도 보강.
+
+### 1. 추론중 Spinner — Visual Feedback
+- `_cliChatStream` 안에 `setInterval(120ms)` spinner — stdout idle 800ms+ 시 깜빡임
+- `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` 10 frames + 경과 시간 표시 ("⠙ 추론중... (3s)")
+- `\r\x1b[K` ANSI escape — 현재 라인 클리어 + spinner 갱신
+- `stopSpinner()` — stdout/stderr data 도착 시 즉시 spinner 라인 클리어
+- 옵션: `opts.noSpinner: true` 또는 비-TTY 환경에선 자동 비활성
+
+### 2. Claude tool_use 가시화
+- Claude `--output-format=stream-json` 의 `content_block_start` 이벤트에서 `type='tool_use'` 감지
+- 표시: `🔧 Tool: Read 호출 중...` (cyan 색)
+- AI가 파일 읽기/쓰기/Bash 호출 시 사용자가 즉시 인지
+
+### 3. diff 패턴 자동 색깔 (writeColored)
+```diff
+diff --git a/file.js b/file.js    # yellow (헤더)
+--- a/file.js                       # yellow
++++ b/file.js                       # yellow
+@@ -10,3 +10,3 @@                  # cyan (hunk)
+- old line                          # red
++ new line                          # green
+  context                           # 기본 색
+```
+- 라인 단위 처리 (`lineBuf` 버퍼링)
+- 정규식 매칭: `/^\+(?!\+\+)/` → green, `/^-(?!--)/` → red, `/^@@.*@@/` → cyan
+- `flushLineBuf()` — 종료 시 잔여 라인 출력
+
+### 통합 흐름
+```
+user> 이 함수 리팩토링 + diff 보여줘
+  → claude CLI stream 호출 중...  (Ctrl+C 로 중단)
+  ── claude stream ──
+⠹ 추론중... (2s)                   # 응답 시작 전 spinner
+  [claude-opus-4-7]
+  🔧 Tool: Read 호출 중...          # tool_use 감지
+  
+  분석 결과:
+  
+  diff --git a/utils.js b/utils.js  # yellow
+  @@ -5,3 +5,3 @@                   # cyan
+  - function bad() { return null; } # red
+  + function good() { return {}; }  # green
+  ── /stream (4521ms) ──
+```
+
+### Verified
+- e2e 217/217 baseline 유지
+- stress-v117: **20/20** (spinner 4 + tool_use 2 + diff 4 + ANSI helpers 2 + 통합 2 + 누적 회귀 6)
+- VERSION = 1.9.172 / autonomous-rounds = 102 / main 자동 push 33 라운드 연속
+
+---
+
 ## 1.9.171 — 2026-05-21
 
 **AGENTS.md / CLAUDE.md / session-workflow.md 1.9.88~170 누적 갱신 (drift 차단).**

@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.171';
+const VERSION = '1.9.172';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -10552,6 +10552,7 @@ async function _cliChat(root, provider, prompt, opts) {
 }
 
 // 1.9.170: REPL 실시간 스트리밍 — CLI stdout을 즉시 터미널에 표시 (사용자 명시 요청)
+// 1.9.172: 추론중 spinner + Claude tool_use 가시화 + diff 패턴 자동 색깔 (사용자 명시 강화)
 //   추론중/diff/thinking 과정이 stdout 으로 흐르는 동안 실시간 렌더링.
 //   runCommandSafe 의 배치 결과와 달리 cp.spawn 의 child.stdout 을 직접 pipe.
 //   env scrub + cwd jail 은 동일하게 적용.
@@ -10574,9 +10575,55 @@ async function _cliChatStream(root, provider, promptText, opts) {
     let out = '', err = '';
     let buf = ''; // claude stream-json 라인 버퍼
     let firstChunk = true;
+    let lineBuf = ''; // 1.9.172: diff 패턴 색깔 위한 라인 버퍼
     const isTty = process.stdout.isTTY;
     const dim = isTty ? (s) => `\x1b[2m${s}\x1b[0m` : s => s;
     const cy = isTty ? (s) => `\x1b[36m${s}\x1b[0m` : s => s;
+    const green = isTty ? (s) => `\x1b[32m${s}\x1b[0m` : s => s;
+    const red = isTty ? (s) => `\x1b[31m${s}\x1b[0m` : s => s;
+    const yel = isTty ? (s) => `\x1b[33m${s}\x1b[0m` : s => s;
+
+    // 1.9.172: 추론중 spinner — stdout이 일정 시간 idle 하면 깜빡이는 visual feedback
+    //   AI가 응답 시작하기 전 (preprocessing/thinking) 동안 사용자가 "동작 중" 인지 확인.
+    const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    let spinnerIdx = 0;
+    let spinnerActive = false;
+    let lastActivity = Date.now();
+    const spinnerInterval = isTty && !opts.noSpinner ? setInterval(() => {
+      const idle = Date.now() - lastActivity;
+      if (idle > 800) {
+        if (!spinnerActive) { spinnerActive = true; }
+        // 현재 라인을 클리어하고 spinner 표시
+        process.stdout.write(`\r\x1b[K${dim(spinnerFrames[spinnerIdx % spinnerFrames.length] + ' 추론중... (' + Math.floor(idle / 1000) + 's)')}`);
+        spinnerIdx++;
+      }
+    }, 120) : null;
+    const stopSpinner = () => {
+      if (spinnerActive) {
+        process.stdout.write('\r\x1b[K');  // spinner 라인 클리어
+        spinnerActive = false;
+      }
+      lastActivity = Date.now();
+    };
+
+    // 1.9.172: diff 패턴 자동 색깔 — `+ ` / `- ` / `@@` 라인을 green/red/cyan
+    function writeColored(s) {
+      // 라인 단위로 처리 (라인 끝까지 모은 후 색깔 입히기)
+      lineBuf += s;
+      const lines = lineBuf.split('\n');
+      lineBuf = lines.pop() || '';
+      for (const ln of lines) {
+        if (/^\+(?!\+\+)/.test(ln)) process.stdout.write(green(ln) + '\n');
+        else if (/^-(?!--)/.test(ln)) process.stdout.write(red(ln) + '\n');
+        else if (/^@@.*@@/.test(ln)) process.stdout.write(cy(ln) + '\n');
+        else if (/^(diff --git|---|\+\+\+|index )/.test(ln)) process.stdout.write(yel(ln) + '\n');
+        else process.stdout.write(ln + '\n');
+      }
+    }
+    function flushLineBuf() {
+      if (lineBuf) { process.stdout.write(lineBuf); lineBuf = ''; }
+    }
+
     process.stdout.write(dim(`\n  ── ${provider} stream ──\n`));
     let child;
     try {
@@ -10587,6 +10634,7 @@ async function _cliChatStream(root, provider, promptText, opts) {
         stdio: ['ignore', 'pipe', 'pipe']
       });
     } catch (e) {
+      if (spinnerInterval) clearInterval(spinnerInterval);
       return resolve({ ok: false, error: 'spawn 실패: ' + e.message, provider });
     }
     const timer = setTimeout(() => {
@@ -10594,6 +10642,7 @@ async function _cliChatStream(root, provider, promptText, opts) {
     }, opts.timeout || 120000);
 
     // Claude stream-json 모드: 각 라인이 JSON event. type=assistant_message_delta.text 만 출력
+    // 1.9.172: tool_use 가시화 추가 (Read/Write/Bash 호출 시 "🔧 Tool: <name>" 표시)
     function handleClaudeStream(chunk) {
       buf += chunk.toString();
       const lines = buf.split('\n');
@@ -10602,44 +10651,63 @@ async function _cliChatStream(root, provider, promptText, opts) {
         if (!ln.trim()) continue;
         try {
           const ev = JSON.parse(ln);
-          // assistant 메시지 chunk만 표시 (thinking/system 은 dim)
+          // assistant 메시지 chunk
           if (ev.type === 'content_block_delta' && ev.delta?.text) {
-            process.stdout.write(ev.delta.text);
+            stopSpinner();
+            writeColored(ev.delta.text);
             out += ev.delta.text;
           } else if (ev.type === 'message_start' && firstChunk) {
             firstChunk = false;
+            stopSpinner();
             process.stdout.write(dim(`  [${ev.message?.model || provider}] `));
           } else if (ev.type === 'thinking_delta' && ev.delta?.thinking) {
+            stopSpinner();
             process.stdout.write(dim(ev.delta.thinking));
+          } else if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
+            // 1.9.172: tool_use 시작 시 "🔧 Tool: Read" 같은 안내
+            stopSpinner();
+            const toolName = ev.content_block.name || 'tool';
+            process.stdout.write(cy(`\n  🔧 Tool: ${toolName} 호출 중...\n`));
+          } else if (ev.type === 'tool_use' || ev.type === 'content_block_stop') {
+            // 도구 완료 시그널 (필요시 활동 표시)
           }
         } catch {
           // JSON 아니면 그대로 출력 (fallback)
-          process.stdout.write(ln + '\n');
+          stopSpinner();
+          writeColored(ln + '\n');
           out += ln + '\n';
         }
       }
     }
 
     child.stdout.on('data', chunk => {
+      lastActivity = Date.now();
       if (provider === 'claude') {
         handleClaudeStream(chunk);
       } else {
+        stopSpinner();
         const s = chunk.toString();
         out += s;
-        process.stdout.write(s);
+        writeColored(s);
       }
     });
     child.stderr.on('data', chunk => {
+      lastActivity = Date.now();
+      stopSpinner();
       const s = chunk.toString();
       err += s;
       // 추론중/진행 메시지는 dim 으로 (실제 에러는 출력 후에 종합)
       process.stdout.write(dim(s));
     });
     child.on('error', e => {
+      if (spinnerInterval) clearInterval(spinnerInterval);
       clearTimeout(timer);
       resolve({ ok: false, error: 'child error: ' + e.message, provider });
     });
     child.on('close', code => {
+      if (spinnerInterval) clearInterval(spinnerInterval);
+      stopSpinner();
+      flushLineBuf();  // 1.9.172: lineBuf 잔여 flush
       clearTimeout(timer);
       const dt = Date.now() - t0;
       process.stdout.write(dim(`\n  ── /stream (${dt}ms) ──\n`));
