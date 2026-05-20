@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.146-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-47-blue)]() [![json](https://img.shields.io/badge/--json-20_commands-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-76-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-auto-success)]() [![cli-agent](https://img.shields.io/badge/leerness--agent-1.9.146-success)]() [![permissions](https://img.shields.io/badge/agent--permissions-basic%2Fextended%2Ffull-orange)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.147-green)]() [![tests](https://img.shields.io/badge/e2e-219%2F219-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-47-blue)]() [![json](https://img.shields.io/badge/--json-20_commands-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-77-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-auto-success)]() [![auto-maintenance](https://img.shields.io/badge/auto--maintenance-webhook%2Bincident%2Bcreds%2Bdeploy-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,7 +12,7 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.146  AI Agent Reliability Harness                      ║
+  ║  v1.9.147  AI Agent Reliability Harness                      ║
   ║  verify · remember · orchestrate · audit · prevent drift     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```

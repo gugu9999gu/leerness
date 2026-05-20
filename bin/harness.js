@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.146';
+const VERSION = '1.9.147';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -101,7 +101,11 @@ function warn(s) { log('⚠ ' + s); }
 function fail(s) { log('✗ ' + s); }
 function absRoot(p) { return path.resolve(p || process.cwd()); }
 function exists(p) { return fs.existsSync(p); }
-function read(p) { return fs.readFileSync(p, 'utf8'); }
+function read(p) {
+  // 1.9.147: UTF-8 BOM 자동 strip — Windows PowerShell Out-File 등이 BOM 붙이는 경우 JSON.parse 실패 방지
+  const text = fs.readFileSync(p, 'utf8');
+  return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+}
 function readBuf(p) { return fs.readFileSync(p); }
 function mkdirp(p) { fs.mkdirSync(p, { recursive: true }); }
 function writeUtf8(p, s) { mkdirp(path.dirname(p)); fs.writeFileSync(p, s, { encoding: 'utf8' }); }
@@ -802,7 +806,9 @@ async function install(root, opts = {}) {
   if (!opts.dry) {
     mergeLinesFile(path.join(root, '.gitignore'), [
       '.harness/skill-publish.local.json','.harness/**/*.local.json','.env.local',
-      '.harness/archive/','.harness/migration-report.md','.harness/cache/'
+      '.harness/archive/','.harness/migration-report.md','.harness/cache/',
+      // 1.9.147: 자동 유지보수 — 자격증명 + incident 페이로드 비공개 (보안)
+      '.harness/credentials.local.json','.harness/incidents/'
     ]);
     // 1.9.146: agentsOptIn 선택에 따라 LEERNESS_ENABLE_* 플래그 자동 설정 (사용자 명시 요청 #3 — Ollama 추가)
     const a = resolved.agentsOptIn || 'none';
@@ -10023,6 +10029,323 @@ async function agentCmd(root, taskArg) {
   log(`\n💡 ${provider} provider 는 \`leerness agents dispatch "<task>" --to ${provider}\` 또는 외부 CLI 직접 호출 권장`);
 }
 
+// ===== 1.9.147: 자동 유지보수 시스템 (사용자 명시 요청) =====
+//
+// 4 컴포넌트:
+//   1) webhook listener — HTTP + HMAC 검증으로 외부 에러 보고 수신
+//   2) incident handler — 받은 페이로드를 leerness 컨텍스트로 분석/fix/test
+//   3) credentials registry — 환경변수 이름만 등록 (값은 사용자 .env / OS keychain — 보안 정책)
+//   4) deploy auto — Firebase/Cloudflare/Vercel adapter (24h 토큰 만료 알림)
+//
+// 보안 정책 (1.9.71/75 연장):
+//   - .harness/credentials.local.json 에 실제 토큰 절대 미저장 (env-ref 만)
+//   - .gitignore + .npmignore 자동 등록
+//   - .harness/incidents/*.json 도 비공개 (시크릿 페이로드 누출 방지)
+
+// ---- (1) Credentials Registry ----
+function _credentialsPath(root) { return path.join(absRoot(root), '.harness', 'credentials.local.json'); }
+function _readCredentials(root) {
+  const p = _credentialsPath(root);
+  if (!exists(p)) return { schemaVersion: 1, services: {} };
+  try { return JSON.parse(read(p)); } catch { return { schemaVersion: 1, services: {} }; }
+}
+function _writeCredentials(root, data) {
+  const p = _credentialsPath(root);
+  mkdirp(path.dirname(p));
+  writeUtf8(p, JSON.stringify(data, null, 2) + '\n');
+  // 1.9.147: gitignore + npmignore 자동 보강 (보안)
+  try {
+    const giPath = path.join(absRoot(root), '.gitignore');
+    if (exists(giPath)) {
+      const gi = read(giPath);
+      if (!gi.includes('credentials.local.json')) {
+        writeUtf8(giPath, gi.trimEnd() + '\n.harness/credentials.local.json\n');
+      }
+    }
+  } catch {}
+}
+function credsListCmd(root) {
+  root = absRoot(root || process.cwd());
+  const j = _readCredentials(root);
+  if (has('--json')) { log(JSON.stringify(j, null, 2)); return; }
+  log(`# leerness creds list (1.9.147)`);
+  const services = Object.entries(j.services || {});
+  if (!services.length) { log('(등록된 자격증명 없음 — leerness creds register <service> --env-var <NAME>)'); return; }
+  log(`총 ${services.length}개 서비스 (값 미저장 — env-ref 만)`);
+  for (const [name, meta] of services) {
+    const present = meta.envVars.every(v => process.env[v] !== undefined && process.env[v] !== '');
+    const last = meta.lastRefreshed ? new Date(meta.lastRefreshed) : null;
+    const ageDays = last ? Math.floor((Date.now() - last.getTime()) / 86400000) : null;
+    const ageWarn = (meta.tokenLifetimeHours && last && (Date.now() - last.getTime()) > meta.tokenLifetimeHours * 3600 * 1000);
+    log(`  ${name}: env=${meta.envVars.join(',')} · ${present ? '✓ 환경변수 있음' : '⚠ 미설정'}${ageDays !== null ? ` · ${ageDays}일 전 refresh${ageWarn ? ' (만료 가능)' : ''}` : ''}`);
+    if (meta.deployCommand) log(`    deploy: ${meta.deployCommand}`);
+  }
+}
+function credsRegisterCmd(root, service) {
+  root = absRoot(root || process.cwd());
+  if (!service) return fail('service 이름 필요 — leerness creds register <service> --env-var <NAME[,NAME2]>');
+  const envVarArg = arg('--env-var', null);
+  if (!envVarArg) return fail('--env-var <NAME> 필요 (콤마 구분 가능)');
+  const envVars = envVarArg.split(',').map(s => s.trim()).filter(Boolean);
+  const deployCmd = arg('--deploy', null);
+  const lifetime = parseInt(arg('--token-lifetime-hours', '0'), 10) || null;
+  const j = _readCredentials(root);
+  j.services = j.services || {};
+  j.services[service] = {
+    envVars,
+    deployCommand: deployCmd || j.services[service]?.deployCommand || null,
+    tokenLifetimeHours: lifetime || j.services[service]?.tokenLifetimeHours || null,
+    lastRefreshed: j.services[service]?.lastRefreshed || null,
+    registeredAt: j.services[service]?.registeredAt || new Date().toISOString()
+  };
+  _writeCredentials(root, j);
+  ok(`creds registered: ${service} · env=${envVars.join(',')}${deployCmd ? ` · deploy="${deployCmd}"` : ''}`);
+  // 환경변수 즉시 확인
+  const missing = envVars.filter(v => !process.env[v]);
+  if (missing.length) warn(`⚠ 다음 환경변수가 현재 셸에 설정되지 않음: ${missing.join(', ')} — .env 또는 OS keychain에서 export 필요`);
+}
+function credsCheckCmd(root, service) {
+  root = absRoot(root || process.cwd());
+  const j = _readCredentials(root);
+  const result = { service: service || null, services: {}, ok: true };
+  const targets = service ? (j.services[service] ? { [service]: j.services[service] } : {}) : (j.services || {});
+  if (!Object.keys(targets).length) { fail(`등록된 서비스 없음${service ? ` (${service})` : ''}`); return; }
+  for (const [name, meta] of Object.entries(targets)) {
+    const missing = (meta.envVars || []).filter(v => !process.env[v]);
+    const expired = meta.tokenLifetimeHours && meta.lastRefreshed
+      ? (Date.now() - new Date(meta.lastRefreshed).getTime()) > meta.tokenLifetimeHours * 3600 * 1000
+      : false;
+    result.services[name] = { envSet: !missing.length, missing, expired };
+    if (missing.length || expired) result.ok = false;
+  }
+  if (has('--json')) { log(JSON.stringify(result, null, 2)); if (!result.ok) process.exitCode = 1; return; }
+  log(`# leerness creds check (1.9.147)`);
+  for (const [name, r] of Object.entries(result.services)) {
+    if (r.envSet && !r.expired) log(`  ✓ ${name}: 사용 준비됨`);
+    else {
+      log(`  ⚠ ${name}: ${r.missing.length ? `누락 ${r.missing.join(',')}` : ''}${r.expired ? ' · 토큰 만료 (재로그인 필요)' : ''}`);
+    }
+  }
+  if (!result.ok) process.exitCode = 1;
+}
+function credsRefreshTimestampCmd(root, service) {
+  root = absRoot(root || process.cwd());
+  if (!service) return fail('service 이름 필요');
+  const j = _readCredentials(root);
+  if (!j.services[service]) return fail(`등록된 서비스 없음: ${service} — leerness creds register 먼저`);
+  j.services[service].lastRefreshed = new Date().toISOString();
+  _writeCredentials(root, j);
+  ok(`creds refreshed: ${service} · lastRefreshed=${j.services[service].lastRefreshed}`);
+}
+
+// ---- (2) Incident Handler ----
+function _incidentsDir(root) { return path.join(absRoot(root), '.harness', 'incidents'); }
+function _saveIncident(root, payload) {
+  const dir = _incidentsDir(root);
+  mkdirp(dir);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const id = `inc-${ts}`;
+  const fp = path.join(dir, `${id}.json`);
+  writeUtf8(fp, JSON.stringify({ id, receivedAt: new Date().toISOString(), payload }, null, 2) + '\n');
+  return { id, path: fp };
+}
+function incidentListCmd(root) {
+  root = absRoot(root || process.cwd());
+  const dir = _incidentsDir(root);
+  if (!exists(dir)) { log('(incidents 없음 — leerness webhook serve 로 수신 가능)'); return; }
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort().reverse();
+  if (has('--json')) {
+    const items = files.slice(0, 50).map(f => { try { return JSON.parse(read(path.join(dir, f))); } catch { return null; } }).filter(Boolean);
+    log(JSON.stringify({ total: files.length, items }, null, 2));
+    return;
+  }
+  log(`# leerness incident list (1.9.147)`);
+  log(`총 ${files.length}건${files.length > 20 ? ' (최근 20)' : ''}`);
+  for (const f of files.slice(0, 20)) {
+    try {
+      const j = JSON.parse(read(path.join(dir, f)));
+      const e = j.payload?.error || j.payload?.message || '(no description)';
+      log(`  ${j.id}  ·  ${String(e).slice(0, 80)}`);
+    } catch {}
+  }
+}
+function incidentShowCmd(root, id) {
+  root = absRoot(root || process.cwd());
+  const fp = path.join(_incidentsDir(root), `${id}.json`);
+  if (!exists(fp)) return fail(`incident 없음: ${id}`);
+  log(read(fp));
+}
+async function incidentHandleCmd(root, id) {
+  root = absRoot(root || process.cwd());
+  const dir = _incidentsDir(root);
+  let target = id;
+  if (!target) {
+    if (!exists(dir)) return fail('incidents 없음');
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort();
+    if (!files.length) return fail('incidents 없음');
+    target = files[files.length - 1].replace('.json', '');
+  }
+  const fp = path.join(dir, `${target}.json`);
+  if (!exists(fp)) return fail(`incident 없음: ${target}`);
+  const j = JSON.parse(read(fp));
+  const p = _readPermissions(root);
+  log(`# leerness incident handle (1.9.147)`);
+  log(`incident: ${j.id}  ·  permission mode: ${p.mode || 'basic'}`);
+  const err = j.payload?.error || j.payload?.message || '';
+  const stack = j.payload?.stack || '';
+  log(`error: ${String(err).slice(0, 200)}`);
+  if (stack) log(`stack head:\n${String(stack).split('\n').slice(0, 4).join('\n')}`);
+  // (1) feature impact 자동 회수 — error 키워드 매칭
+  try {
+    const { nodes: fn } = _readFeatureGraph(root);
+    if (fn.length) {
+      const keywords = String(err).toLowerCase().match(/[\w가-힣]{3,}/g) || [];
+      const matched = fn.find(n => keywords.some(k => n.title.toLowerCase().includes(k)));
+      if (matched) {
+        const impacted = _featureImpactBfs(fn, matched.id);
+        log(`\n🔗 feature impact: ${matched.id} ${matched.title} → ${impacted.length} feature 영향`);
+        for (const it of impacted.slice(0, 5)) log(`  • ${it.id} ${it.title}`);
+      }
+    }
+  } catch {}
+  // (2) lessons 자동 회수
+  try {
+    const keywords = String(err).toLowerCase().match(/[\w가-힣]{4,}/g) || [];
+    if (keywords.length) {
+      const r = cp.spawnSync(process.execPath, [__filename, 'lessons', '--path', root, '--query', keywords[0], '--limit', '3'],
+        { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_NO_PROMPT: '1' } });
+      if (r.status === 0 && /총 \d+건 발견/.test(r.stdout)) {
+        const block = r.stdout.split('\n').slice(0, 12).join('\n');
+        log(`\n📚 관련 lessons:\n${block}`);
+      }
+    }
+  } catch {}
+  // (3) 권한 확인 후 자동 fix 시도 (MVP: dry-run — 실제 LLM 호출은 사용자가 leerness agent 로)
+  log(`\n💡 자동 fix 시도:`);
+  if (permissionCheck(root, 'shell.exec', 'npm')) {
+    log(`  • 권한 OK — verify-code 실행 권장: leerness verify-code .`);
+  } else {
+    log(`  ⚠ basic 권한 모드 — fix/test 자동 실행 불가. extended/full 로 변경: leerness permissions set extended`);
+  }
+  // (4) incident 상태 갱신
+  j.handledAt = new Date().toISOString();
+  j.permissionMode = p.mode || 'basic';
+  writeUtf8(fp, JSON.stringify(j, null, 2) + '\n');
+  ok(`incident handled: ${j.id} (분석/회수 완료)`);
+  log(`  → 후속: leerness agent "fix: ${String(err).slice(0, 80)}" / leerness verify-code . / leerness deploy auto`);
+}
+
+// ---- (3) Webhook Listener ----
+function _hmacSha256(key, body) {
+  const crypto = require('crypto');
+  return crypto.createHmac('sha256', key).update(body).digest('hex');
+}
+async function webhookServeCmd(root) {
+  root = absRoot(root || process.cwd());
+  const port = parseInt(arg('--port', process.env.LEERNESS_WEBHOOK_PORT || '9876'), 10);
+  const secret = arg('--secret', process.env.LEERNESS_WEBHOOK_SECRET || '');
+  const http = require('http');
+  log(`# leerness webhook serve (1.9.147)`);
+  log(`port: ${port}  ·  HMAC: ${secret ? '활성 (X-Leerness-Signature)' : '비활성 — LEERNESS_WEBHOOK_SECRET 권장'}`);
+  log(`incidents dir: ${rel(root, _incidentsDir(root))}`);
+  log(`POST endpoint: http://localhost:${port}/incident`);
+  log(`헬스 체크: curl http://localhost:${port}/health`);
+  const server = http.createServer(async (req, res) => {
+    const url = req.url || '';
+    if (req.method === 'GET' && url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, version: VERSION, port }));
+      return;
+    }
+    if (req.method === 'POST' && url === '/incident') {
+      let body = '';
+      req.on('data', c => { body += c; if (body.length > 100000) { req.destroy(); } });
+      req.on('end', () => {
+        try {
+          if (secret) {
+            const sig = req.headers['x-leerness-signature'] || '';
+            const expected = _hmacSha256(secret, body);
+            if (sig !== expected) {
+              res.writeHead(401, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: 'invalid signature' }));
+              return;
+            }
+          }
+          let payload;
+          try { payload = JSON.parse(body); } catch { payload = { raw: body }; }
+          const saved = _saveIncident(root, payload);
+          res.writeHead(202, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, incident: saved.id }));
+          log(`📥 incident received: ${saved.id} · error="${String(payload?.error || payload?.message || '').slice(0, 80)}"`);
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: e.message }));
+        }
+      });
+      return;
+    }
+    res.writeHead(404); res.end('Not Found');
+  });
+  server.listen(port, () => {
+    ok(`listening on port ${port}`);
+    log(`(Ctrl+C 로 종료)`);
+  });
+  // 종료 시그널 (SIGINT/SIGTERM) 대기 — auto-close 안 함
+  process.on('SIGINT', () => { log('\n중단 신호 — 서버 종료'); server.close(); process.exit(0); });
+  process.on('SIGTERM', () => { server.close(); process.exit(0); });
+}
+
+// ---- (4) Deploy Auto ----
+async function deployAutoCmd(root, service) {
+  root = absRoot(root || process.cwd());
+  const j = _readCredentials(root);
+  if (!service) {
+    log('# leerness deploy auto (1.9.147)');
+    log('사용법: leerness deploy auto <service>');
+    log('등록된 서비스:');
+    for (const [name, meta] of Object.entries(j.services || {})) {
+      log(`  ${name}: ${meta.deployCommand || '(deploy 명령 미설정)'}`);
+    }
+    if (!Object.keys(j.services || {}).length) log('  (없음 — leerness creds register <service> --env-var <NAME> --deploy "<cmd>")');
+    return;
+  }
+  const meta = j.services?.[service];
+  if (!meta) return fail(`등록된 서비스 없음: ${service} — leerness creds register 먼저`);
+  if (!meta.deployCommand) return fail(`deploy 명령 미설정: ${service} — leerness creds register --deploy "<cmd>"`);
+  // 환경변수 + 만료 검증
+  const missing = (meta.envVars || []).filter(v => !process.env[v]);
+  if (missing.length) { fail(`환경변수 누락: ${missing.join(', ')} — .env 또는 OS keychain에서 export`); process.exitCode = 1; return; }
+  if (meta.tokenLifetimeHours && meta.lastRefreshed) {
+    const age = Date.now() - new Date(meta.lastRefreshed).getTime();
+    if (age > meta.tokenLifetimeHours * 3600 * 1000) {
+      warn(`⚠ ${service} 토큰 만료 가능 (${Math.floor(age / 3600000)}시간 경과 vs 한도 ${meta.tokenLifetimeHours}h)`);
+      log(`  → 재로그인 후: leerness creds refresh ${service}`);
+      if (!has('--force')) { process.exitCode = 1; return; }
+    }
+  }
+  // 권한 확인
+  if (!permissionCheck(root, 'shell.exec', meta.deployCommand.split(/\s+/)[0])) {
+    return fail(`shell.exec 권한 부족 (현재: ${_readPermissions(root).mode}) — leerness permissions set extended 권장`);
+  }
+  log(`# leerness deploy auto (1.9.147)`);
+  log(`service: ${service}  ·  command: ${meta.deployCommand}`);
+  if (has('--dry-run')) { log('(dry-run) 실제 실행 스킵'); return; }
+  const t0 = Date.now();
+  const r = cp.spawnSync(meta.deployCommand, [], { cwd: root, encoding: 'utf8', shell: true, timeout: 10 * 60 * 1000, stdio: 'inherit' });
+  const dt = Date.now() - t0;
+  if (r.status === 0) {
+    ok(`deploy 성공: ${service} (${dt}ms)`);
+    // lastRefreshed 자동 갱신 — 성공 시 만료 카운터 reset
+    j.services[service].lastRefreshed = new Date().toISOString();
+    _writeCredentials(root, j);
+    // task-log 기록
+    try { append(taskLogPath(root), `\n## ${today()} deploy auto (1.9.147)\n- service: ${service}\n- duration: ${dt}ms\n- status: success\n`); } catch {}
+  } else {
+    fail(`deploy 실패: ${service} (exit ${r.status}, ${dt}ms)`);
+    process.exitCode = 1;
+  }
+}
+
 // 1.9.85: leerness health — 종합 헬스 체크 (drift + 보안 + skill + MCP + 누적)
 function healthCmd(root) {
   root = absRoot(root || process.cwd());
@@ -10528,6 +10851,16 @@ async function main() {
   if (cmd === 'permissions' && args[1] === 'list') return permissionsListCmd(arg('--path', process.cwd()));
   if (cmd === 'permissions' && args[1] === 'set')  return permissionsSetCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'agent') return agentCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('--')).join(' '));
+  // 1.9.147: 자동 유지보수 시스템 (사용자 명시 요청)
+  if (cmd === 'webhook' && args[1] === 'serve')   return webhookServeCmd(arg('--path', process.cwd()));
+  if (cmd === 'incident' && args[1] === 'list')   return incidentListCmd(arg('--path', process.cwd()));
+  if (cmd === 'incident' && args[1] === 'show')   return incidentShowCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'incident' && args[1] === 'handle') return incidentHandleCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'creds' && args[1] === 'list')      return credsListCmd(arg('--path', process.cwd()));
+  if (cmd === 'creds' && args[1] === 'register')  return credsRegisterCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'creds' && args[1] === 'check')     return credsCheckCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'creds' && args[1] === 'refresh')   return credsRefreshTimestampCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'deploy' && args[1] === 'auto')     return deployAutoCmd(arg('--path', process.cwd()), args[2]);
   // 1.9.85: leerness health — 종합 헬스 체크
   if (cmd === 'health') return healthCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));

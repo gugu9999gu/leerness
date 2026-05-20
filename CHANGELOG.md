@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.9.147 — 2026-05-20
+
+**자동 유지보수 시스템 — 사용자 명시 요청.**
+
+> 사용자 시나리오: "프로그램 개발/이용/디버그 중 오류 발생 시 자동으로 웹훅으로 받아 leerness를 참조해서 버그 픽스/테스트/검수/배포 자동, 자격증명까지 자동, 모든 오류 실시간 감지"
+
+### 보안 정책 (1.9.71/75 연장)
+- **실제 자격증명은 절대 leerness 파일에 저장하지 않음** — `.harness/credentials.local.json` 에는 **환경변수 이름만**
+- 실제 토큰은 사용자가 OS keychain 또는 `.env` 파일에 직접 보관
+- `.gitignore` + `.npmignore` 자동 추가 (incidents/, credentials.local.json)
+- HMAC SHA-256 시그니처 검증 (`LEERNESS_WEBHOOK_SECRET`)
+
+### Added — webhook listener (`leerness webhook serve`)
+- HTTP 서버 (기본 9876, `--port` / `LEERNESS_WEBHOOK_PORT`)
+- POST `/incident` — JSON 페이로드 받아 `.harness/incidents/inc-<ts>.json` 저장
+- GET `/health` — 헬스 체크
+- HMAC: `X-Leerness-Signature` 헤더 (옵션, `LEERNESS_WEBHOOK_SECRET` 설정 시 활성)
+- 외부 시스템 (Sentry, Datadog, GitHub Actions, Stripe webhooks 등) 연결 가능
+
+### Added — incident handler (`leerness incident list/show/handle`)
+- `incident list [--json]` — 최근 incidents 50건 (시간 역순)
+- `incident show <id>` — 단일 incident JSON 출력
+- `incident handle [id]` — 자동 분석:
+  1. error 키워드 → **feature graph 매칭** + 영향 범위 (1.9.141~)
+  2. error 키워드 → **lessons 자동 회수** (1.9.54)
+  3. **권한 검증** (1.9.146) — basic 모드면 자동 fix 거부, extended/full 만 진행
+  4. 후속 명령 안내: `leerness agent "fix: ..."` / `verify-code` / `deploy auto`
+  5. incident JSON 에 `handledAt` + `permissionMode` 기록
+
+### Added — credentials registry (`leerness creds list/register/check/refresh`)
+- **환경변수 이름만 저장** — 실제 값 보유 0 (보안)
+- `creds register <service> --env-var <NAME[,NAME2]> --deploy "<cmd>" --token-lifetime-hours 24`
+  - 예: `firebase --env-var FIREBASE_TOKEN --token-lifetime-hours 24`
+- `creds list` — 등록된 서비스 + 환경변수 설정 여부 + 토큰 만료 여부
+- `creds check <service>` — 환경변수 누락 / 만료 → exit 1 (CI 가시화)
+- `creds refresh <service>` — 사용자 재로그인 후 lastRefreshed 갱신
+- 24h 토큰 만료 자동 감지 + 알림
+
+### Added — deploy auto (`leerness deploy auto <service>`)
+- `creds register` 의 `--deploy` 명령 실행 wrapper
+- 사전 검증:
+  - 환경변수 존재 (`creds check`)
+  - 토큰 만료 여부 (lastRefreshed + tokenLifetimeHours)
+  - **agent 권한** (1.9.146 — shell.exec + allowList)
+- `--dry-run` / `--force` 지원
+- 성공 시 `lastRefreshed` 자동 갱신 + task-log 기록
+
+### Fixed
+- `read()` 함수 UTF-8 BOM 자동 strip — Windows PowerShell `Out-File` BOM JSON.parse 실패 방지
+
+### Validation
+- stress-v92: PASS
+- e2e: 219/219 PASS
+
 ## 1.9.146 — 2026-05-20
 
 **사용자 명시 요청 5종 통합** — CLI 에이전트 모드 + 권한 시스템 + install 흐름 재구성.
