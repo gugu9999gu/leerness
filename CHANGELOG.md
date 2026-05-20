@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.9.126 — 2026-05-20
+
+**`leerness plan remove <target>` CLI + MCP 38번째 도구 `leerness_plan_remove`** — milestone 블록 영구 제거 (archive 자동 보존). **Memory Surface DELETE 5종 완전 완성** 🎉
+
+### Added — `leerness plan remove <target>` CLI
+- target: M-XXXX 또는 title substring (예: `plan remove M-0003`, `plan remove "alpha"`)
+- 매칭된 milestone 블록 (`### M-XXXX. 제목 …`) 을 plan.md 에서 영구 제거
+- 제거된 블록은 `.harness/plan.archive.md` 에 자동 보존 (복구 가능)
+- **template 블록 자동 보호** (`### Template`, `### 템플릿` 등은 제거 대상에서 제외)
+- 매칭 없을 시 fail (`매칭 milestone 없음`)
+- 기존 `plan drop` (Out of Scope 표 추가, 소프트 폐기) 와는 별개. `plan remove` 는 하드 제거.
+
+### Added — MCP 38번째 도구 `leerness_plan_remove`
+- 외부 AI 가 잘못 저장한 milestone 제거.
+- 인자: `{ target (required), path? }`
+
+### 사용 시나리오
+사용자: "M-0007 마일스톤 잘못 등록했으니 제거해줘"
+→ 외부 AI: `leerness_plan_remove({ target: "M-0007" })` — plan.md 에서 제거, archive 보존
+
+### Memory Surface DELETE 5종 완전 완성 🎉
+| Surface | DELETE 명령 | 라운드 |
+|---|---|---|
+| tasks (progress-tracker.md) | `task drop` | 1.9.107 |
+| decisions.md | `decision drop` | 1.9.125 |
+| rules.md | `rule remove` | (기존) |
+| **plan.md** | **`plan remove`** | **1.9.126 ✓** |
+| lessons.md | `lesson drop` | 1.9.124 |
+
+전 Surface 가 CREATE/READ/DELETE 대칭 구조 완비.
+
+### MCP 도구 누계: 38 (1.9.125: 37 + leerness_plan_remove)
+
 ## 1.9.125 — 2026-05-20
 
 **`leerness decision drop <target>` CLI + MCP 37번째 도구 `leerness_decision_drop`** — 잘못 저장한 결정 제거 (archive 자동 보존).

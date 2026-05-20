@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.125';
+const VERSION = '1.9.126';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -326,6 +326,7 @@ leerness audit . --fix               # 누락 메타 자동 보강
 - 1.9.123+ \`health --json\` 응답에도 \`memorySurface\` 필드 통합 — handoff/session close/memory status 모든 JSON 명령 일관성.
 - 1.9.124+ \`leerness lesson drop <target>\` + MCP **36 도구** (\`leerness_lesson_drop\`) — 잘못 저장한 lesson 제거 (archive 자동 보존).
 - 1.9.125+ \`leerness decision drop <target>\` + MCP **37 도구** (\`leerness_decision_drop\`) — 잘못 저장한 결정 제거 (archive 보존).
+- 1.9.126+ \`leerness plan remove <M-XXXX|title>\` + MCP **38 도구** (\`leerness_plan_remove\`) — milestone 영구 제거 (archive 보존). **Memory Surface DELETE 5종 완전 완성** 🎉.
 
 ---
 
@@ -1312,6 +1313,47 @@ function planProgress(root) {
   const counts = {}; for (const s of STATUSES) counts[s] = 0;
   for (const r of rows) if (counts[r.status] != null) counts[r.status]++;
   log(JSON.stringify(counts, null, 2));
+}
+// 1.9.126: plan remove — milestone 블록을 plan.md에서 제거 + archive 보존
+//   Memory Surface DELETE 5종 완전 완성 (task drop / decision drop / lesson drop / rule remove / plan remove)
+function planRemoveCmd(root, target) {
+  root = absRoot(root);
+  if (!target) return fail('plan remove <M-XXXX|title-substring> 필요 — 매칭되는 milestone 블록을 제거하고 .harness/plan.archive.md에 보존');
+  const pp = planPath(root);
+  if (!exists(pp)) return fail('plan.md 없음');
+  const text = read(pp);
+  // milestone 블록은 "### M-XXXX. 제목" 으로 시작; "## " (Out of Scope 등) 헤더 또는 EOF 이전까지
+  const blocks = text.split(/\n(?=### )/);
+  let removed = 0;
+  const kept = [];
+  for (const b of blocks) {
+    if (!b.startsWith('### ')) { kept.push(b); continue; }
+    const headerMatch = b.match(/^### (.+)$/m);
+    if (!headerMatch) { kept.push(b); continue; }
+    const titleLine = headerMatch[1].trim();
+    // M-XXXX. 제목 형태 파싱
+    const mMatch = titleLine.match(/^(M-\d+)\.\s*(.+)$/);
+    const mid = mMatch ? mMatch[1] : null;
+    const title = mMatch ? mMatch[2].trim() : titleLine;
+    // Template / 템플릿 블록 자동 보호
+    if (/^Template(?:\s|\b|\()/i.test(titleLine) || /^템플릿/.test(titleLine)) {
+      kept.push(b); continue;
+    }
+    const isIdTarget = mid === target;
+    const isTitleTarget = title.includes(target);
+    if (isIdTarget || isTitleTarget) {
+      removed++;
+      const archivePath = path.join(root, '.harness/plan.archive.md');
+      const archiveHeader = exists(archivePath) ? '' : '# Plan archive\n\n';
+      append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${target}")\n${b}\n`);
+      continue;
+    }
+    kept.push(b);
+  }
+  if (removed === 0) return fail(`매칭 milestone 없음: "${target}"`);
+  writeUtf8(pp, kept.join('\n'));
+  ok(`milestone removed: ${removed}건 (보존: .harness/plan.archive.md)`);
+  _autoRoadmap(absRoot(root), 'data-change');
 }
 function planSync(root) { append(taskLogPath(root), `\n## ${today()}\n- Synced plan.md and progress-tracker.md.\n`); ok('plan/progress sync noted'); }
 
@@ -4014,7 +4056,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.100+ 워크플로 — 30 라운드 자율 누적 마일스톤)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.126+ Memory Surface DELETE 5종 완성 — 56 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -4030,7 +4072,8 @@ function _banner(opts = {}) {
     log('    ' + C.green('npx leerness session close .') + C.dim('                        # 마감 + 다음 라운드 추천 (default)'));
     log('');
     log(C.bold(C.cyan('  🤖 메인 에이전트 (Claude/Cursor/Copilot)용')));
-    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 37 도구 (decision_drop 추가, 1.9.125)'));
+    log('    ' + C.green('npx leerness mcp serve') + C.dim('                              # MCP 서버 — 38 도구 (plan_remove 추가, 1.9.126)'));
+    log('    ' + C.green('npx leerness plan remove <M-XXXX|title>') + C.dim('             # milestone 영구 제거 (archive 보존, 1.9.126) — Memory DELETE 5종 완성'));
     log('    ' + C.green('npx leerness lesson save "<text>" --tag "..."') + C.dim('       # lessons.md 직접 write (1.9.112 — handoff 자동 회수와 통합)'));
     log('    ' + C.green('npx leerness memory status . --json') + C.dim('                  # Memory Surface 5종 통합 상태 JSON (1.9.114)'));
     log('    ' + C.green('npx leerness decision add "<title>" --reason "..."') + C.dim('   # 설계 결정 영구화 (1.9.108) — handoff lessons 자동 회수와 통합'));
@@ -8211,7 +8254,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_decision_list', description: '1.9.118 — decisions.md 전체 조회 JSON ({ date, title, decision, reason, alternatives, impact }[]). 외부 AI가 영구화된 설계 결정 전체 회수 (Decision + Reason/Alternatives/Impact 메타데이터 포함)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_plan_list', description: '1.9.119 — plan.md 의 모든 milestone (M-XXXX) 조회 JSON ({ id, title, status, progress, tasks: [{ done, text }] }[]). 외부 AI가 영구화된 계획 + 진행률 + tasks checkbox 전체 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_lesson_drop', description: '1.9.124 — lessons.md 에서 특정 lesson 제거 (target: date YYYY-MM-DD 또는 text substring). 잘못 저장한 lesson 제거. 제거된 블록은 .harness/lessons.archive.md 에 자동 보존 (복구 가능)', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
-    { name: 'leerness_decision_drop', description: '1.9.125 — decisions.md 에서 특정 결정 제거 (target: date YYYY-MM-DD 또는 title substring). 제거된 블록은 .harness/decisions.archive.md 에 자동 보존', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } }
+    { name: 'leerness_decision_drop', description: '1.9.125 — decisions.md 에서 특정 결정 제거 (target: date YYYY-MM-DD 또는 title substring). 제거된 블록은 .harness/decisions.archive.md 에 자동 보존', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
+    { name: 'leerness_plan_remove', description: '1.9.126 — plan.md 에서 특정 milestone 블록 (### M-XXXX) 제거 (target: M-XXXX 또는 title substring). 제거된 블록은 .harness/plan.archive.md 에 자동 보존. Memory Surface DELETE 5종 완전 완성', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } }
   ];
 
   function send(obj) {
@@ -8280,6 +8324,7 @@ function mcpServeCmd(root) {
           case 'leerness_plan_list':       cliArgs = ['plan', 'list', '--path', targetPath, '--json']; break;
           case 'leerness_lesson_drop':     cliArgs = ['lesson', 'drop', String(args.target || ''), '--path', targetPath]; break;
           case 'leerness_decision_drop':   cliArgs = ['decision', 'drop', String(args.target || ''), '--path', targetPath]; break;
+          case 'leerness_plan_remove':     cliArgs = ['plan', 'remove', String(args.target || ''), '--path', targetPath]; break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -8996,6 +9041,7 @@ async function main() {
     if (sub==='init')     return planInit(root);
     if (sub==='add')      return planAdd(root, args.slice(2).join(' ') || '새 계획');
     if (sub==='drop')     return planDrop(root, args.slice(2).join(' ') || '드랍 항목');
+    if (sub==='remove')   return planRemoveCmd(root, args[2]);
     if (sub==='progress') return planProgress(root);
     if (sub==='sync')     return planSync(root);
     // 1.9.119: plan list — 모든 milestone JSON/verbose
