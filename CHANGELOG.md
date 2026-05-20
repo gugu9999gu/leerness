@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.143 — 2026-05-20
+
+**JSON 4종 featureGraph 통합 완성 + drift check feature 신호** — 1.9.142 session close --json 패턴을 handoff/health에 확장.
+
+### Added — handoff --json featureGraph 통합
+- `result.featureGraph = { total, edges, isolated, summary: "F<n>/E<n>[/iso<n>]" }`
+- 외부 AI가 handoff 한 번에 컨텍스트 + memory surface + featureGraph 동시 회수
+
+### Added — health --json featureGraph 통합
+- `out.featureGraph = { total, edges, isolated, summary }`
+- JSON 4종 (handoff/memory status/session close/health) featureGraph 일관성 완성 (memorySurface 1.9.123 패턴과 동형)
+
+### Added — drift check feature graph 신호 (6번째 신호)
+- 노드 ≥ 3개 + edges == 0 → weight 25
+- 노드 ≥ 3개 + isolated 비율 ≥ 50% → weight 15
+- `drift check --json` `fired` 배열에 노출
+- 사용자 cascade 방지 의지 + 실제 사용 사이 gap 자동 감지
+
+### Validation
+- stress-v88: PASS (handoff/health featureGraph + drift 신호 + 누적 회귀)
+- e2e: 219/219 PASS
+
 ## 1.9.142 — 2026-05-20
 
 **Feature Graph 통합 라운드** — 1.9.141 인과관계 시스템을 audit / MCP CRUD / session close 에 통합.

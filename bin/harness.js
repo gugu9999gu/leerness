@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.142';
+const VERSION = '1.9.143';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -2748,6 +2748,22 @@ function handoff(root) {
         archive: archiveCountsH,  // 1.9.130
         summary: `T${tasksInProgress}/D${decisionsCount}/R${rulesActive}/P${milestones}/L${lessonsCount}`,
       };
+      // 1.9.143: handoff --json featureGraph 통합 (session close 1.9.142 와 동일 패턴)
+      try {
+        const { nodes: fNodesH } = _readFeatureGraph(root);
+        const edgeCount = fNodesH.reduce((s, n) => s + (n.dependsOn?.length || 0) + (n.affects?.length || 0) + (n.coChangesWith?.length || 0), 0);
+        const linkedSet = new Set();
+        for (const n of fNodesH) {
+          for (const x of [...(n.dependsOn||[]), ...(n.affects||[]), ...(n.coChangesWith||[])]) { linkedSet.add(n.id); linkedSet.add(x); }
+        }
+        const isolated = fNodesH.length ? (fNodesH.length - linkedSet.size) : 0;
+        result.featureGraph = {
+          total: fNodesH.length,
+          edges: edgeCount,
+          isolated: Math.max(0, isolated),
+          summary: `F${fNodesH.length}/E${edgeCount}${isolated > 0 ? `/iso${isolated}` : ''}`
+        };
+      } catch {}
     } catch {}
     log(JSON.stringify(result, null, 2));
     return;
@@ -4582,7 +4598,7 @@ function _banner(opts = {}) {
     for (const ln of lines) log(ln);
   }
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.142+ Feature Graph 통합: MCP CRUD + audit 검증 + session close — 72 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.143+ JSON 4종 featureGraph 통합 완성 + drift 신호 — 73 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -8200,6 +8216,24 @@ function driftCheckCmd(root, opts = {}) {
       }
     }
   } catch {}
+  // 1.9.143: Feature Graph 미사용 신호 — 노드는 있는데 edges 비율 낮으면 인과관계 정리 미진
+  try {
+    const { nodes: fGraphNodes } = _readFeatureGraph(root);
+    if (fGraphNodes.length >= 3) {
+      const edgeCount = fGraphNodes.reduce((s, n) => s + (n.dependsOn?.length || 0) + (n.affects?.length || 0) + (n.coChangesWith?.length || 0), 0);
+      const linkedSet = new Set();
+      for (const n of fGraphNodes) {
+        for (const x of [...(n.dependsOn||[]), ...(n.affects||[]), ...(n.coChangesWith||[])]) { linkedSet.add(n.id); linkedSet.add(x); }
+      }
+      const isolatedCount = Math.max(0, fGraphNodes.length - linkedSet.size);
+      const isolatedRatio = isolatedCount / fGraphNodes.length;
+      if (edgeCount === 0 || isolatedRatio >= 0.5) {
+        const fgScore = edgeCount === 0 ? 25 : 15;
+        totalScore += fgScore;
+        fired.push({ file: '.harness/feature-graph.md', ageDays: null, threshold: 0, weight: fgScore, label: `Feature Graph 미정리 (1.9.143): ${fGraphNodes.length} 노드, edges=${edgeCount}, isolated=${isolatedCount}` });
+      }
+    }
+  } catch {}
   // 신규 _apps/* 에서 task 0건도 신호로
   const appsDir = path.join(root, '_apps');
   let appsZeroTask = [];
@@ -9600,6 +9634,22 @@ function healthCmd(root) {
       summary: `T${tasksInProgress}/D${decisionsCount}/R${rulesActive}/P${milestones}/L${lessonsCount}`,
     };
   } catch { out.memorySurface = { error: 'memorySurface 점검 실패' }; }
+  // 1.9.143: health --json featureGraph 통합 (handoff/session close 와 동일 패턴 — JSON 4종 완성)
+  try {
+    const { nodes: fNodesHe } = _readFeatureGraph(root);
+    const edgeCount = fNodesHe.reduce((s, n) => s + (n.dependsOn?.length || 0) + (n.affects?.length || 0) + (n.coChangesWith?.length || 0), 0);
+    const linkedSet = new Set();
+    for (const n of fNodesHe) {
+      for (const x of [...(n.dependsOn||[]), ...(n.affects||[]), ...(n.coChangesWith||[])]) { linkedSet.add(n.id); linkedSet.add(x); }
+    }
+    const isolated = fNodesHe.length ? (fNodesHe.length - linkedSet.size) : 0;
+    out.featureGraph = {
+      total: fNodesHe.length,
+      edges: edgeCount,
+      isolated: Math.max(0, isolated),
+      summary: `F${fNodesHe.length}/E${edgeCount}${isolated > 0 ? `/iso${isolated}` : ''}`
+    };
+  } catch { out.featureGraph = { error: 'featureGraph 점검 실패' }; }
   // 6) issues 요약 (사용자 글로벌 룰 가시화)
   const issues = [];
   if (out.checks.drift?.level && !/healthy/.test(out.checks.drift.level)) issues.push(`drift ${out.checks.drift.level}`);
