@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.9.142 — 2026-05-20
+
+**Feature Graph 통합 라운드** — 1.9.141 인과관계 시스템을 audit / MCP CRUD / session close 에 통합.
+
+### Added — MCP feature CRUD 완성
+- `leerness_feature_add` (MCP 45) — 외부 AI가 코드 작성 중 feature 등록
+- `leerness_feature_link` (MCP 46) — 의존/영향/공변경 엣지 추가
+- 이제 외부 AI (Claude Code/Cursor 등) 가 leerness 워크플로 밖에서도 인과관계를 직접 갱신
+- 인자: `title/dependsOn/affects/coChangesWith/files/path`
+
+### Added — audit Feature Graph 무결성 검증 (kind 13종으로 확장)
+- `feature_graph_orphan` — 다른 노드가 참조하는데 정의 없는 ID (예: F-0001 → F-0099 missing)
+- `feature_graph_cycle` — affects/depends-on 그래프 순환 감지 (DFS 3-color)
+- 둘 다 warning (--strict 시 failures 승격)
+- `--no-feature-check` 옵션으로 끄기
+- `audit --json` findings 에 `count/orphans[]/cycles[]` 상세 포함
+
+### Added — session close --json featureGraph 통합
+- `{ total, edges, isolated, summary: "F<n>/E<n>[/iso<n>]" }` 추가
+- 마감 시 Feature Graph 통계 자동 보고
+
+### Validation
+- stress-v87: PASS (MCP feature_add/link + audit orphan/cycle + session close featureGraph + 누적 회귀)
+- e2e: 219/219 PASS
+- MCP tools: **46** (+2 from 44)
+
 ## 1.9.141 — 2026-05-20
 
 **ASCII 배너 모션 + Feature Causality Graph (인과관계 추적) — 사용자 요청 2종.**

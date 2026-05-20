@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.141';
+const VERSION = '1.9.142';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -2320,6 +2320,62 @@ function audit(root, opts = {}) {
       }
     } catch {}
   }
+  // 1.9.142: Feature Graph 무결성 검증 — orphan/cycle 자동 감지 (--no-feature-check로 끄기)
+  if (!has('--no-feature-check')) {
+    try {
+      const { nodes: fNodes } = _readFeatureGraph(root);
+      if (fNodes.length > 0) {
+        const ids = new Set(fNodes.map(n => n.id));
+        // (1) orphan: 다른 노드가 참조하는데 정의가 없는 ID
+        const orphans = [];
+        for (const n of fNodes) {
+          for (const ref of [...(n.dependsOn || []), ...(n.affects || []), ...(n.coChangesWith || [])]) {
+            if (!ids.has(ref)) orphans.push({ from: n.id, missingRef: ref });
+          }
+        }
+        if (orphans.length) {
+          warnings++;
+          warn(`Feature Graph: orphan 참조 ${orphans.length}건 — ${orphans.slice(0, 3).map(o => `${o.from}→${o.missingRef}`).join(', ')}${orphans.length > 3 ? ' …' : ''}`);
+          _finding('feature_graph_orphan', 'warn', 'Feature Graph 에 정의되지 않은 ID 참조', { count: orphans.length, orphans: orphans.slice(0, 10) });
+          log(`    → 수정: leerness feature add 또는 link 제거`);
+        }
+        // (2) cycle: affects 그래프에서 순환 의존성 감지 (DFS)
+        const cycles = [];
+        const WHITE = 0, GRAY = 1, BLACK = 2;
+        const color = new Map();
+        for (const n of fNodes) color.set(n.id, WHITE);
+        const byId = new Map(fNodes.map(n => [n.id, n]));
+        const dfs = (nodeId, path) => {
+          color.set(nodeId, GRAY);
+          const node = byId.get(nodeId);
+          if (!node) { color.set(nodeId, BLACK); return; }
+          for (const next of [...(node.affects || []), ...(node.dependsOn || [])]) {
+            if (!byId.has(next)) continue;
+            const c = color.get(next);
+            if (c === GRAY) {
+              // 순환 발견 — path 에 next 까지 자르기
+              const idx = path.indexOf(next);
+              const cyc = idx >= 0 ? path.slice(idx).concat([next]) : [...path, next];
+              if (!cycles.some(existing => existing.join() === cyc.join())) cycles.push(cyc);
+            } else if (c === WHITE) {
+              dfs(next, [...path, next]);
+            }
+          }
+          color.set(nodeId, BLACK);
+        };
+        for (const n of fNodes) if (color.get(n.id) === WHITE) dfs(n.id, [n.id]);
+        if (cycles.length) {
+          warnings++;
+          warn(`Feature Graph: 순환 의존 ${cycles.length}건 — ${cycles[0].join(' → ')}${cycles.length > 1 ? ` (외 ${cycles.length-1}건)` : ''}`);
+          _finding('feature_graph_cycle', 'warn', 'Feature Graph 에 순환 의존', { count: cycles.length, cycles: cycles.slice(0, 5) });
+          log(`    → 수정: feature link 재구성 (affects/depends-on 방향 정리)`);
+        }
+        if (!orphans.length && !cycles.length) {
+          ok(`Feature Graph OK (${fNodes.length} 노드, orphan/cycle 없음, 1.9.142)`);
+        }
+      }
+    } catch {}
+  }
   // 1.9.63: --strict — warnings ≥ threshold 시 failures로 승격 (CI 친화)
   if (has('--strict')) {
     const threshold = parseInt(arg('--threshold', '1'), 10);
@@ -4526,7 +4582,7 @@ function _banner(opts = {}) {
     for (const ln of lines) log(ln);
   }
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.141+ ASCII 배너 wave 모션 + Feature Causality Graph — 71 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.142+ Feature Graph 통합: MCP CRUD + audit 검증 + session close — 72 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -5486,6 +5542,22 @@ function sessionClose(root, opts = {}) {
         archive: archiveCountsS,  // 1.9.130
         summary: `T${tasksInProgress0}/D${decisionsCount0}/R${rulesActive0}/P${milestones0}/L${lessonsCount0}`,
       };
+      // 1.9.142: featureCounts 통합 — session close JSON에 Feature Graph 통계
+      try {
+        const { nodes: fNodesC } = _readFeatureGraph(root);
+        const edgeCount = fNodesC.reduce((s, n) => s + (n.dependsOn?.length || 0) + (n.affects?.length || 0) + (n.coChangesWith?.length || 0), 0);
+        const linkedIds = new Set();
+        for (const n of fNodesC) {
+          for (const x of [...(n.dependsOn||[]), ...(n.affects||[]), ...(n.coChangesWith||[])]) { linkedIds.add(n.id); linkedIds.add(x); }
+        }
+        const isolated = fNodesC.length ? (fNodesC.length - linkedIds.size) : 0;
+        jsonResult.featureGraph = {
+          total: fNodesC.length,
+          edges: edgeCount,
+          isolated: Math.max(0, isolated),
+          summary: `F${fNodesC.length}/E${edgeCount}${isolated > 0 ? `/iso${isolated}` : ''}`
+        };
+      } catch {}
     } catch {}
     process.stdout.write(JSON.stringify(jsonResult, null, 2) + '\n');
   }
@@ -9151,7 +9223,9 @@ function mcpServeCmd(root) {
     { name: 'leerness_task_list', description: '1.9.134 — progress-tracker.md 전체 task 조회 JSON ({ total, tasks: [{ id, status, request, evidence, nextAction, updated }] }). --status 필터 지원 (planned|in-progress|done 등). 외부 AI가 task 상태 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' }, status: { type: 'string' } } } },
     { name: 'leerness_rule_remove', description: '1.9.135 — rules.md 에서 특정 rule 제거 (id: R-XXXX). 제거된 rule 은 .harness/rules.archive.md 에 자동 보존 (복구 가능). Rule surface CRUD MCP 완성 (add/list/remove)', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
     { name: 'leerness_feature_impact', description: '1.9.141 — Feature Causality Graph 인과관계 영향 추적 JSON ({ feature, total, impacted: [{ id, title, depth, via, files, errorModes }] }). 신규 기능 추가/형식 변경 전 호출: id 변경으로 영향받는 다른 feature를 transitive (affects + co-changes + reverse depends-on) 으로 회수. 1+1=20 cascade 방지', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
-    { name: 'leerness_feature_list', description: '1.9.141 — 전체 Feature Graph 노드 + 엣지 JSON. 외부 AI가 시스템 내 기능 의존성을 한 번에 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_feature_list', description: '1.9.141 — 전체 Feature Graph 노드 + 엣지 JSON. 외부 AI가 시스템 내 기능 의존성을 한 번에 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_feature_add', description: '1.9.142 — Feature Graph 에 새 노드 추가 (외부 AI가 코드 작성 중 직접 feature 등록). 인자: { title (required), dependsOn?, affects?, coChangesWith?, files?, path? }. 자동 F-XXXX ID 부여. CRUD 완성에 기여', inputSchema: { type: 'object', properties: { title: { type: 'string' }, dependsOn: { type: 'string' }, affects: { type: 'string' }, coChangesWith: { type: 'string' }, files: { type: 'string' }, path: { type: 'string' } }, required: ['title'] } },
+    { name: 'leerness_feature_link', description: '1.9.142 — 기존 feature 노드에 의존/영향/공변경 엣지 추가. 인자: { id (required, F-XXXX), dependsOn?, affects?, coChangesWith?, path? }. 외부 AI가 코드 변경 도중 발견한 인과관계를 즉시 그래프에 반영', inputSchema: { type: 'object', properties: { id: { type: 'string' }, dependsOn: { type: 'string' }, affects: { type: 'string' }, coChangesWith: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } }
   ];
 
   function send(obj) {
@@ -9228,6 +9302,20 @@ function mcpServeCmd(root) {
           // 1.9.141: Feature Causality Graph
           case 'leerness_feature_impact':  cliArgs = ['feature', 'impact', String(args.id || ''), '--path', targetPath, '--json']; break;
           case 'leerness_feature_list':    cliArgs = ['feature', 'list', '--path', targetPath, '--json']; break;
+          // 1.9.142: Feature Graph WRITE CRUD
+          case 'leerness_feature_add':
+            cliArgs = ['feature', 'add', String(args.title || ''), '--path', targetPath];
+            if (args.dependsOn) cliArgs.push('--depends-on', String(args.dependsOn));
+            if (args.affects) cliArgs.push('--affects', String(args.affects));
+            if (args.coChangesWith) cliArgs.push('--co-changes-with', String(args.coChangesWith));
+            if (args.files) cliArgs.push('--files', String(args.files));
+            break;
+          case 'leerness_feature_link':
+            cliArgs = ['feature', 'link', String(args.id || ''), '--path', targetPath];
+            if (args.dependsOn) cliArgs.push('--depends-on', String(args.dependsOn));
+            if (args.affects) cliArgs.push('--affects', String(args.affects));
+            if (args.coChangesWith) cliArgs.push('--co-changes-with', String(args.coChangesWith));
+            break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
