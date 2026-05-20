@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.154';
+const VERSION = '1.9.155';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -4158,9 +4158,43 @@ async function orchestrateCmd(root, goalParts) {
     log(`  평균 latency: ${avgElapsed.toFixed(0)}ms · wall-clock 총: ${totalElapsedWallClock}ms (병렬 효과 ${(avgElapsed * ok.length / totalElapsedWallClock).toFixed(1)}x)`);
 
     log('');
-    log(`## 최고 응답 (longest by response token count, 임시 휴리스틱)`);
-    const best = ok.reduce((a, b) => (b.responseTokens > a.responseTokens ? b : a));
-    log(`  agent ${best.agent} · ${best.responseTokens} 응답 토큰 · ${best.elapsed}ms`);
+    log(`## 최고 응답 (1.9.155 multi-signal consensus — 토큰 + 단어중복도 + 길이 정규화)`);
+    // 1.9.155: 단순 token-max → multi-signal scoring
+    //   1) responseTokens (information density) — 정규화 0~1
+    //   2) wordOverlap (agreement with others) — 다른 응답과의 단어 교집합 비율 평균
+    //   3) lengthZ (적정 길이 가중) — 평균에서 너무 짧지/길지 않음
+    const tokenizer = (s) => new Set(String(s || '').toLowerCase().match(/[\w가-힣]{3,}/g) || []);
+    const wordsOf = ok.map(o => tokenizer(o.reply));
+    const maxTokens = Math.max(...ok.map(o => o.responseTokens), 1);
+    const avgLen = ok.reduce((s, o) => s + o.reply.length, 0) / ok.length;
+    const stdLen = Math.sqrt(ok.reduce((s, o) => s + (o.reply.length - avgLen) ** 2, 0) / ok.length) || 1;
+    const scored = ok.map((o, i) => {
+      const tokensNorm = o.responseTokens / maxTokens;
+      // 다른 응답들과 단어 교집합 비율 평균
+      const myWords = wordsOf[i];
+      let overlapSum = 0;
+      for (let j = 0; j < wordsOf.length; j++) {
+        if (i === j) continue;
+        const other = wordsOf[j];
+        if (!myWords.size || !other.size) continue;
+        let inter = 0;
+        for (const w of myWords) if (other.has(w)) inter++;
+        overlapSum += inter / Math.max(myWords.size, 1);
+      }
+      const overlap = (ok.length > 1) ? overlapSum / (ok.length - 1) : 0;
+      // length z-score (적정 길이 가산: |z| <= 1.5 일 때 가산)
+      const z = Math.abs((o.reply.length - avgLen) / stdLen);
+      const lengthFit = z <= 1.5 ? (1 - z / 1.5) : 0;
+      const score = 0.4 * tokensNorm + 0.4 * overlap + 0.2 * lengthFit;
+      return { ...o, score, tokensNorm, overlap, lengthFit };
+    });
+    scored.sort((a, b) => b.score - a.score);
+    const best = scored[0];
+    log(`  best: agent ${best.agent} · score=${best.score.toFixed(3)} (tokens=${best.tokensNorm.toFixed(2)} · overlap=${best.overlap.toFixed(2)} · lengthFit=${best.lengthFit.toFixed(2)})`);
+    log(`  → ${best.responseTokens} 응답 토큰 · ${best.elapsed}ms`);
+    if (scored.length > 1) {
+      log(`  others: ${scored.slice(1, 4).map(s => `${s.agent}=${s.score.toFixed(2)}`).join(', ')}`);
+    }
     log(`  --- 처음 600자 ---`);
     log(best.reply.slice(0, 600));
   }
@@ -10300,6 +10334,32 @@ function runsShowCmd(root, id) {
   if (!exists(fp)) return fail(`run 없음: ${id}`);
   log(read(fp));
 }
+// 1.9.155: provider 별 추천 모델 카탈로그 — REPL :models 명령에서 노출 (실제 가용성은 사용자 CLI 가 결정)
+const _PROVIDER_MODEL_CATALOG = {
+  claude: [
+    { id: 'claude-opus-4-5', note: '최고 추론 (Anthropic)' },
+    { id: 'claude-sonnet-4-5', note: '균형형 (속도/품질)' },
+    { id: 'claude-haiku-4-5', note: '빠름' }
+  ],
+  codex: [
+    { id: 'gpt-5', note: 'OpenAI 최신' },
+    { id: 'gpt-5-codex', note: '코드 특화' },
+    { id: 'o4-mini', note: '빠른 reasoning' }
+  ],
+  gemini: [
+    { id: 'gemini-2.5-pro', note: 'Google 최고급' },
+    { id: 'gemini-2.5-flash', note: '빠른 응답' }
+  ],
+  copilot: [
+    { id: 'default', note: 'gh copilot 기본 (모델 선택 불가)' }
+  ],
+  ollama: [
+    { id: 'llama3', note: 'Meta — :models 로 실시간 조회 권장' },
+    { id: 'qwen2.5-coder', note: 'Alibaba — 코드 특화' },
+    { id: 'gpt-oss', note: 'OpenAI 오픈소스' }
+  ]
+};
+
 // 1.9.148: planner/reviewer/actor 역할 시스템 프롬프트 (Gemini 권고 — 자기-승인 편향 방지)
 const _AGENT_ROLE_PROMPTS = {
   planner: '역할: planner. task를 step 3-6개로 분해, 각 step의 입출력/검증 방법 명시. 코드 작성 금지, 계획만.',
@@ -10379,9 +10439,23 @@ async function _agentRepl(root, opts) {
     }
   }
   log('');
-  log(C.dim('  메타 명령: :help | :model <m> | :role <r> | :provider <p> | :clear | :save | :history | :quit'));
+  log(C.dim('  메타 명령: :help | :model <m> | :role <r> | :provider <p> | :status | :clear | :save | :history | :quit'));
   log(C.dim('  Slash 명령 (1.9.150): :verify | :audit | :handoff | :health'));
-  log(C.dim(`  현재 — provider=${state.provider}  model=${state.model || '(없음)'}  role=${state.role}  permissions=${_readPermissions(root).mode}`));
+  log(C.dim(`  현재 — provider=${state.provider}  model=${state.model || '(기본)'}  role=${state.role}  permissions=${_readPermissions(root).mode}`));
+  // 1.9.155: REPL 진입 시 handoff 컨텍스트 자동 노출 (UX 개선 — 사용자가 매번 :handoff 안 해도 컨텍스트 인지)
+  try {
+    const hf = cp.spawnSync(process.execPath, [__filename, 'handoff', root, '--compact', '--no-drift-check', '--no-headline'], {
+      encoding: 'utf8', timeout: 8000,
+      env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_LESSONS: '1' }
+    });
+    if (hf.status === 0 && hf.stdout) {
+      const preview = hf.stdout.split('\n').slice(0, 4).map(l => l.replace(/^\s+/, '')).filter(Boolean).slice(0, 3).join(' · ');
+      if (preview) {
+        log('');
+        log(C.dim(`  📍 context: ${preview.slice(0, 220)}${preview.length > 220 ? '…' : ''}`));
+      }
+    }
+  } catch {}
   log('');
   const prompt = () => isTty ? C.cy(`agent[${state.role}]> `) : 'agent> ';
   rl.setPrompt(prompt());
@@ -10394,12 +10468,13 @@ async function _agentRepl(root, opts) {
       rl.close(); return true;
     }
     if (op === 'help' || op === '?') {
-      log(C.bold('\n  메타 명령:'));
+      log(C.bold('\n  메타 명령 (provider/모델/역할 전환):'));
       log('    :help / :?            — 이 도움말');
-      log('    :model <name>         — 모델 변경 (예: :model qwen2.5-coder)');
-      log('    :models               — Ollama 사용 가능 모델 목록');
+      log('    :model <name>         — 모델 변경 (1.9.155 모든 provider 지원, 예: :model claude-opus-4-5)');
+      log('    :models               — provider 별 모델 목록 (ollama 실시간 / 그 외 추천 카탈로그)');
       log('    :role <r>             — 역할 변경 (planner / reviewer / actor)');
-      log('    :provider <p>         — provider 변경 (ollama / claude / codex / gemini)');
+      log('    :provider <p>         — provider 변경 (ollama / claude / codex / gemini / copilot — ready 검증)');
+      log('    :status               — 현재 세션 상태 자세히 (1.9.155)');
       log('    :clear                — 화면 클리어 + history 유지');
       log('    :reset                — history 초기화');
       log('    :history              — 대화 history 표시');
@@ -10413,11 +10488,37 @@ async function _agentRepl(root, opts) {
       log('    :health               — leerness health --json (종합 헬스 체크)');
       return false;
     }
-    if (op === 'model') { state.model = rest.join(' ') || state.model; log(C.green(`  model = ${state.model}`)); return false; }
+    if (op === 'model') {
+      // 1.9.155: provider 별 모델 명시 (사용자 명시 요청 — 선택한 CLI 모델 변경 가능)
+      const m = rest.join(' ').trim();
+      if (!m) {
+        log(C.dim(`  현재 model: ${state.model || '(provider 기본)'} · provider: ${state.provider}`));
+        log(C.dim(`  사용: :model <name> — 예: :model qwen2.5-coder (ollama) / :model claude-opus-4-5 (claude) / :model gpt-5 (codex)`));
+        return false;
+      }
+      state.model = m;
+      log(C.green(`  model = ${state.model}  (provider: ${state.provider})`));
+      log(C.dim(`     ※ 다음 메시지부터 새 모델로 호출. provider 가 ${state.provider} 인지 :provider 로 재확인 권장.`));
+      return false;
+    }
     if (op === 'models') {
-      const r = await _ollamaListModels();
-      if (r.ok && r.models.length) { log(C.green(`  ${r.models.length}개:`)); r.models.forEach(m => log('    • ' + m)); }
-      else log(C.yel('  ⚠ Ollama 미가동'));
+      // 1.9.155: provider 별 모델 목록 — ollama 는 실시간 조회, 그 외는 추천 카탈로그 노출
+      if (state.provider === 'ollama') {
+        const r = await _ollamaListModels();
+        if (r.ok && r.models.length) {
+          log(C.green(`  [ollama 실시간] ${r.models.length}개 모델:`));
+          r.models.forEach(m => log('    • ' + m));
+        } else log(C.yel('  ⚠ Ollama 미가동 — ollama serve + ollama pull <model>'));
+      } else {
+        const catalog = _PROVIDER_MODEL_CATALOG[state.provider] || [];
+        if (catalog.length) {
+          log(C.green(`  [${state.provider} 추천 모델 카탈로그]`));
+          catalog.forEach(m => log(`    • ${m.id}${m.note ? '  — ' + m.note : ''}`));
+          log(C.dim('     ※ 실제 가용 모델은 해당 CLI 의 --help / 공식 문서 참고. :model <name> 으로 변경.'));
+        } else {
+          log(C.dim(`  ${state.provider} 의 추천 모델 카탈로그 없음 — :model <name> 으로 직접 지정`));
+        }
+      }
       return false;
     }
     if (op === 'role') {
@@ -10464,6 +10565,23 @@ async function _agentRepl(root, opts) {
     }
     if (op === 'save') { saveSession(); log(C.dim(`  → ${rel(root, sessionPath())}`)); return false; }
     if (op === 'permissions') { permissionsListCmd(root); return false; }
+    if (op === 'status') {
+      // 1.9.155: REPL 안에서 현재 세션 상태 자세히 (provider/model/role/permissions/history/runs)
+      log(C.bold('\n  📊 REPL 세션 상태 (1.9.155)'));
+      log(`    provider:    ${state.provider}`);
+      log(`    model:       ${state.model || '(기본)'}`);
+      log(`    role:        ${state.role}  (${_AGENT_ROLE_PROMPTS[state.role]?.slice(0, 60) || ''}...)`);
+      log(`    permissions: ${_readPermissions(root).mode || 'basic'}`);
+      log(`    history:     ${state.history.length}턴 (마지막: ${state.history[state.history.length - 1]?.role || '-'})`);
+      log(`    session ID:  ${state.sessionId}`);
+      log(`    started:     ${state.startedAt}`);
+      try {
+        const ready = EXTERNAL_AGENTS.map(a => _checkAgent(a)).filter(c => c.status === 'ready');
+        log(`    활성 CLI:    ${ready.length ? ready.map(c => c.id).join(', ') : '(없음)'}`);
+      } catch {}
+      log('');
+      return false;
+    }
     // 1.9.150: leerness 내부 명령 slash-commands — :verify / :audit / :handoff / :health
     if (op === 'verify' || op === 'audit' || op === 'handoff' || op === 'health') {
       const subArgs = {

@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.9.155 — 2026-05-20
+
+**REPL UX 대폭 개선 + provider 모델 카탈로그 + orchestrate consensus 강화 + 5능력 점검 보고서 (사용자 명시).**
+
+자율 모드 85 라운드. 사용자 명시 점검 요청 — sub-agent 2개 병렬로 비교/실측 후 정직한 보고서 산출 + 발견 gap 1건 즉시 보강.
+
+### Added — REPL UX (사용자 명시: 선택한 CLI 모델 변경 가능)
+- **`:model <name>` 모든 provider 지원** — claude/codex/gemini/copilot/ollama 모두 가능 (1.9.149 → 1.9.155)
+- **`_PROVIDER_MODEL_CATALOG`** — provider 별 추천 모델 카탈로그
+  - claude: `claude-opus-4-5` / `claude-sonnet-4-5` / `claude-haiku-4-5`
+  - codex: `gpt-5` / `gpt-5-codex` / `o4-mini`
+  - gemini: `gemini-2.5-pro` / `gemini-2.5-flash`
+  - copilot: `default` (모델 선택 불가)
+  - ollama: `llama3` / `qwen2.5-coder` / `gpt-oss` (실시간 조회 권장)
+- **`:models`** — provider 별 분기 (ollama 실시간 / 그 외 카탈로그)
+- **`:status`** — 현재 세션 상태 자세히 (provider/model/role/permissions/history/sessionId/activeCli)
+- **REPL 진입 시 handoff context 자동 노출** — 매번 `:handoff` 안 해도 즉시 컨텍스트 인지
+- `:help` 에 1.9.155 명령 안내 통합
+
+### Added — orchestrate consensus 강화 (sub-agent 점검 발견 gap 보강)
+- 기존: "응답 토큰 수가 가장 긴 응답 = best" 임시 휴리스틱
+- 변경: **multi-signal scoring**
+  - `tokensNorm` (0~1) — 정보 밀도
+  - `overlap` — 다른 응답과의 단어 교집합 비율 평균 (합의도)
+  - `lengthFit` — 평균 길이 z-score 기반 적정 가중 (`|z| <= 1.5` 가산)
+  - `score = 0.4*tokens + 0.4*overlap + 0.2*lengthFit`
+- 출력: best 1위 + others 2-4위 점수 표시 (투명성)
+
+### Verified — 5능력 점검 보고서 (`_reports/1.9.155-capability-audit.md`)
+sub-agent 2 병렬 분석 (약 110초):
+
+**경쟁 비교 (sub-agent #1)** — OpenClaw / Hermes Agent / OpenCode WebSearch 실측:
+- leerness 비교우위: 한국어+신뢰도 하네스, MCP 47도구+Memory 5종, Feature Causality Graph, 의존성 0, 자율 release
+- 부족 영역: 모델/프로바이더 폭(5종 vs 200+), LSP 통합 미흡, GUI/멀티채널 부재
+- 권고: LSP 어댑터, Provider Registry MCP, i18n+영어 docs
+
+**5능력 매트릭스 (sub-agent #2 코드 실측)**:
+| 영역 | 평가 | 완성도 |
+|---|---|---|
+| 웹 띄워 검수 | ❌ | 5% (permissions.browser=toggle만, 실 코드 0) |
+| 권한 따른 PC 조작 | ❌ | 5% (mouse/keyboard/admin 필드만, 실 사용처 0) |
+| 멀티 에이전트 오케스트레이션 | ⚠ → ✓ (1.9.155 보강) | 70% → 80% |
+| REPL multi-provider | ✓ | 90% |
+| MCP 47도구 일관성 | ✓ | 100% |
+
+**종합 ~55% — "검수·기억·드리프트 방지 하네스" 본질은 95%, "범용 PC 자동화"는 30%**. 정직한 포지셔닝.
+
+### Pending — 보고서가 제안한 다음 4 라운드 후보
+1. 1.9.156 — `agents multi --execute` (단순 명령 출력 → 실제 spawn + consensus 통합)
+2. 1.9.157 — LSP 어댑터 MVP (TypeScript LSP 먼저)
+3. 1.9.158 — Provider Registry MCP 도구 (OpenRouter/Bedrock 흡수)
+4. 1.9.159 — playwright/computer-use bridge (permissions.browser/mouse 실 동작 — opt-in)
+
+### Verified
+- e2e 217/217 ✓
+- stress-v100: 18/18 (REPL :model 3종 + :status/UX 3종 + consensus 2종 + 점검 보고서 3종 + 누적 회귀 7종) 🎉 **100번째 stress 마일스톤**
+- VERSION = 1.9.155 / autonomous-rounds = 85
+
+---
+
 ## 1.9.154 — 2026-05-20
 
 **agent 1-shot multi-provider + REPL `:provider` 활성 검증 (1.9.153 후속, 일관성 강화).**
