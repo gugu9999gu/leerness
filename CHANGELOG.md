@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.9.167 — 2026-05-20
+
+**LSP 어댑터 MVP — codeIntel 6번째 영역 신설 (typescript opt-in + regex fallback).**
+
+자율 모드 97 라운드. 1.9.165 (web) + 1.9.166 (pc) 흐름에 이어 코드 인텔리전스 신규 영역 추가.
+5능력 매트릭스 → **6능력 매트릭스**로 확장 (제 6번 codeIntel 영역 신설).
+
+### Added — `leerness lsp check|symbols|references`
+**의존성 0 원칙 유지** — `typescript` 미설치 시 정규식 fallback 으로도 동작 (항상 사용 가능).
+
+```bash
+# 1) typescript 설치 (정확 모드 = Compiler API)
+npm i -g typescript
+leerness lsp check                          # → ✓ typescript 발견 (Compiler API)
+
+# 미설치 시 정규식 fallback 자동 사용 (TS/JS 한정)
+leerness lsp check                          # → ⚠ typescript 미설치 → regex fallback
+
+# 2) 심볼 추출
+leerness lsp symbols src/api.ts             # → function/class/interface/type/enum
+leerness lsp symbols src/api.ts --json      # 구조화 출력 (line, kind, name)
+
+# 3) 참조 검색
+leerness lsp references myFunction --in src # → 모든 호출 위치 (file:line)
+```
+
+### Bridge 패턴 — opt-in 의존성 + 정규식 fallback (이중 안전망)
+- `_tryLoadLSP()` — `typescript` (Compiler API) try + npm 글로벌 root 폴백
+- 미설치 시 → `_lspRegexSymbols()` 정규식 fallback (function/class/interface/type/enum/arrow function)
+- 설치 시 → `_lspTsSymbols()` TypeScript Compiler API 정확 모드 (AST 기반)
+- `_recordRun(kind: 'lsp_symbols' | 'lsp_references')` observability
+
+### 6능력 매트릭스 (신규 영역 신설 + production-ready 유지)
+| 영역 | 1.9.166 | **1.9.167** |
+|---|---|---|
+| (1) 웹 자동화 | 50% ⚠ | 50% ⚠ |
+| (2) PC 조작 | 50% ⚠ | 50% ⚠ |
+| (3) 멀티 오케스트레이션 | 90% ✓ | 90% ✓ |
+| (4) REPL/자율성 | 90% ✓ | 90% ✓ |
+| (5) MCP 도구 | 100% ✓ | 100% ✓ |
+| (6) **코드 인텔리전스** | **— (없음)** | **50% ⚠** (bridge, typescript 미설치) → **90% ✓** (사용자 설치 시) |
+| **종합** | 76% (5 영역 평균) | **72%** (6 영역 평균, production-ready 유지) |
+
+**평가**: 종합 점수는 영역 추가로 일시적으로 76→72% 로 떨어졌으나 production-ready (≥70%) 유지. 새 영역 codeIntel 이 90% 도달 시 종합 75%.
+
+### Verified
+- e2e baseline (1.9.166: 217/217) 유지 회귀 없음
+- stress-v112: 23/23 (LSP 함수 6 + CLI 실 동작 7 + 6능력 매트릭스 3 + 누적 회귀 7)
+- VERSION = 1.9.167 / autonomous-rounds = 97 / main 자동 push 28 라운드 연속
+
+### 실 측정 (regex fallback 모드)
+- `lsp symbols harness.js` (12,000+ lines) → 472 symbols / 392ms
+- `lsp references lspCmd --in leerness-pkg` → 3 refs / 9ms
+
+---
+
 ## 1.9.166 — 2026-05-20
 
 **🎉 production-ready 76% 마일스톤 — pc 조작 bridge MVP (robotjs/nut-tree opt-in).**

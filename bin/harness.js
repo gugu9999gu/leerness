@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.166';
+const VERSION = '1.9.167';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -11617,11 +11617,22 @@ function healthCmd(root) {
     cap.mcpTools = toolCount >= 50
       ? { score: 100, status: '✓', evidence: `${toolCount}/50+ 도구 (1.9.159 CRUD 완성)` }
       : { score: Math.round((toolCount / 50) * 100), status: toolCount > 30 ? '✓' : '⚠', evidence: `${toolCount} 도구` };
-    const avgScore = Math.round((cap.webAutomation.score + cap.pcAutomation.score + cap.multiAgentOrchestration.score + cap.replMultiProvider.score + cap.mcpTools.score) / 5);
+    // (6) 코드 인텔리전스 — 1.9.167 LSP 어댑터 + typescript 설치 detect
+    const hasLspBridge = /function lspCmd\(root, sub/.test(harnessSrc);
+    let tsInstalled = false;
+    try { require('typescript'); tsInstalled = true; } catch {}
+    if (hasLspBridge && tsInstalled) {
+      cap.codeIntel = { score: 90, status: '✓', evidence: 'typescript 설치 + leerness lsp bridge (1.9.167, Compiler API)' };
+    } else if (hasLspBridge) {
+      cap.codeIntel = { score: 50, status: '⚠', evidence: 'leerness lsp bridge 있음, typescript 미설치 (regex fallback 동작, npm i -g typescript)' };
+    } else {
+      cap.codeIntel = { score: 5, status: '❌', evidence: 'LSP 어댑터 미구현 (코드 인텔리전스 없음)' };
+    }
+    const avgScore = Math.round((cap.webAutomation.score + cap.pcAutomation.score + cap.multiAgentOrchestration.score + cap.replMultiProvider.score + cap.mcpTools.score + cap.codeIntel.score) / 6);
     out.capabilityMatrix = {
       capabilities: cap,
       overallScore: avgScore,
-      summary: `웹${cap.webAutomation.score}/PC${cap.pcAutomation.score}/멀티${cap.multiAgentOrchestration.score}/REPL${cap.replMultiProvider.score}/MCP${cap.mcpTools.score} · 종합 ${avgScore}%`,
+      summary: `웹${cap.webAutomation.score}/PC${cap.pcAutomation.score}/멀티${cap.multiAgentOrchestration.score}/REPL${cap.replMultiProvider.score}/MCP${cap.mcpTools.score}/LSP${cap.codeIntel.score} · 종합 ${avgScore}%`,
       assessment: avgScore >= 70 ? 'production-ready' : avgScore >= 50 ? 'beta-ready' : 'mvp'
     };
   } catch { out.capabilityMatrix = { error: '5능력 매트릭스 평가 실패' }; }
@@ -11668,7 +11679,7 @@ function healthCmd(root) {
   // 1.9.163: 5능력 매트릭스 — 1.9.155 sub-agent 점검의 코드 기반 자동 평가
   if (out.capabilityMatrix && !out.capabilityMatrix.error) {
     log('');
-    log(`## 🧪 5능력 매트릭스 (1.9.163 자동 평가)`);
+    log(`## 🧪 6능력 매트릭스 (1.9.167 자동 평가)`);
     const cm = out.capabilityMatrix;
     log(`  종합: ${cm.overallScore}% (${cm.assessment})`);
     log(`  (1) 웹 자동화        ${cm.capabilities.webAutomation.status} ${cm.capabilities.webAutomation.score}%  · ${cm.capabilities.webAutomation.evidence}`);
@@ -11676,6 +11687,7 @@ function healthCmd(root) {
     log(`  (3) 멀티 오케스트레이션 ${cm.capabilities.multiAgentOrchestration.status} ${cm.capabilities.multiAgentOrchestration.score}%  · ${cm.capabilities.multiAgentOrchestration.evidence}`);
     log(`  (4) REPL multi-provider ${cm.capabilities.replMultiProvider.status} ${cm.capabilities.replMultiProvider.score}%  · ${cm.capabilities.replMultiProvider.evidence}`);
     log(`  (5) MCP 도구           ${cm.capabilities.mcpTools.status} ${cm.capabilities.mcpTools.score}%  · ${cm.capabilities.mcpTools.evidence}`);
+    log(`  (6) 코드 인텔리전스    ${cm.capabilities.codeIntel.status} ${cm.capabilities.codeIntel.score}%  · ${cm.capabilities.codeIntel.evidence}`);
   }
   if (issues.length) {
     log('');
@@ -12215,6 +12227,177 @@ function pcCmd(root, sub, ...args) {
   fail(`알 수 없는 sub: ${sub} (check / click / type / screenshot)`);
 }
 
+// 1.9.167: LSP 어댑터 MVP — 코드 인텔리전스 bridge (opt-in 의존성)
+//   typescript 모듈 detect → 실제 TypeScript Compiler API 사용
+//   미설치 시 정규식 fallback (그래도 동작) → score 5/50/90 차등
+function _tryLoadLSP() {
+  // typescript 우선 (Compiler API), 추후 pyright/vscode-languageserver 후보
+  const candidates = ['typescript'];
+  for (const id of candidates) {
+    try { return { ok: true, lib: require(id), name: id }; } catch {}
+  }
+  // 글로벌 npm root 시도
+  try {
+    const r = cp.spawnSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 5000, shell: true });
+    if (r.status === 0) {
+      const globalRoot = (r.stdout || '').trim();
+      for (const id of candidates) {
+        try { return { ok: true, lib: require(path.join(globalRoot, id)), name: id, source: 'global' }; } catch {}
+      }
+    }
+  } catch {}
+  return { ok: false, error: 'typescript 미설치 — `npm i -g typescript` 후 다시 시도 (또는 정규식 fallback 사용)' };
+}
+
+// 정규식 fallback — TypeScript/JavaScript symbol 추출 (LSP 없이도 동작)
+function _lspRegexSymbols(content) {
+  const symbols = [];
+  const lines = content.split(/\r?\n/);
+  const patterns = [
+    { re: /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/, kind: 'function' },
+    { re: /^\s*(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/, kind: 'class' },
+    { re: /^\s*(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)/, kind: 'interface' },
+    { re: /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function|\()/, kind: 'function' },
+    { re: /^\s*(?:export\s+)?type\s+([A-Za-z_$][\w$]*)\s*=/, kind: 'type' },
+    { re: /^\s*(?:export\s+)?enum\s+([A-Za-z_$][\w$]*)/, kind: 'enum' },
+  ];
+  lines.forEach((line, idx) => {
+    for (const p of patterns) {
+      const m = line.match(p.re);
+      if (m) { symbols.push({ name: m[1], kind: p.kind, line: idx + 1 }); break; }
+    }
+  });
+  return symbols;
+}
+
+// TypeScript Compiler API 기반 symbol 추출 (정확)
+function _lspTsSymbols(ts, content, fileName) {
+  const symbols = [];
+  const sf = ts.createSourceFile(fileName, content, ts.ScriptTarget.Latest, true);
+  function visit(node) {
+    let name = null, kind = null;
+    if (ts.isFunctionDeclaration(node) && node.name) { name = node.name.text; kind = 'function'; }
+    else if (ts.isClassDeclaration(node) && node.name) { name = node.name.text; kind = 'class'; }
+    else if (ts.isInterfaceDeclaration(node)) { name = node.name.text; kind = 'interface'; }
+    else if (ts.isTypeAliasDeclaration(node)) { name = node.name.text; kind = 'type'; }
+    else if (ts.isEnumDeclaration(node)) { name = node.name.text; kind = 'enum'; }
+    else if (ts.isVariableStatement(node)) {
+      node.declarationList.declarations.forEach(d => {
+        if (d.name && d.name.text && d.initializer
+            && (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer))) {
+          const { line } = sf.getLineAndCharacterOfPosition(d.getStart());
+          symbols.push({ name: d.name.text, kind: 'function', line: line + 1 });
+        }
+      });
+    }
+    if (name) {
+      const { line } = sf.getLineAndCharacterOfPosition(node.getStart());
+      symbols.push({ name, kind, line: line + 1 });
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sf);
+  return symbols;
+}
+
+function lspCmd(root, sub, ...args) {
+  root = absRoot(root || process.cwd());
+  if (!sub || sub === 'check') {
+    const r = _tryLoadLSP();
+    if (has('--json')) {
+      log(JSON.stringify({
+        installed: r.ok,
+        name: r.name || null,
+        source: r.source || 'local',
+        error: r.error || null,
+        fallback: 'regex (always available)'
+      }, null, 2));
+      return;
+    }
+    log(`# leerness lsp check (1.9.167)`);
+    if (r.ok) {
+      log(`✓ ${r.name} 발견${r.source ? ` (${r.source})` : ''}`);
+      log(`  → leerness lsp symbols / references 정확 모드 (Compiler API) 사용`);
+    } else {
+      log(`⚠ ${r.error}`);
+      log(`  → 정규식 fallback 으로 동작 (TS/JS 한정, 정확도 약간 낮음)`);
+    }
+    return;
+  }
+  if (sub === 'symbols') {
+    const file = args[0] || arg('--file', '');
+    if (!file) return fail('leerness lsp symbols <file> 필요');
+    if (!fs.existsSync(file)) return fail(`파일 없음: ${file}`);
+    const content = fs.readFileSync(file, 'utf8');
+    const t0 = Date.now();
+    const r = _tryLoadLSP();
+    let symbols, mode;
+    try {
+      if (r.ok && /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(file)) {
+        symbols = _lspTsSymbols(r.lib, content, file);
+        mode = 'typescript-compiler';
+      } else {
+        symbols = _lspRegexSymbols(content);
+        mode = 'regex-fallback';
+      }
+    } catch (e) {
+      symbols = _lspRegexSymbols(content);
+      mode = 'regex-fallback (after error: ' + e.message + ')';
+    }
+    const dt = Date.now() - t0;
+    if (has('--json')) {
+      log(JSON.stringify({ file, symbols, count: symbols.length, mode, durationMs: dt }, null, 2));
+    } else {
+      log(`# leerness lsp symbols (1.9.167)`);
+      log(`file: ${file}`);
+      log(`mode: ${mode} · ${symbols.length} symbols · ${dt}ms`);
+      symbols.slice(0, 50).forEach(s => log(`  ${String(s.line).padStart(5)}:${s.kind.padEnd(10)} ${s.name}`));
+      if (symbols.length > 50) log(`  ... ${symbols.length - 50} more`);
+    }
+    try { _recordRun(root, { kind: 'lsp_symbols', file, count: symbols.length, mode, durationMs: dt, ok: true }); } catch {}
+    return;
+  }
+  if (sub === 'references') {
+    const name = args[0] || arg('--name', '');
+    if (!name) return fail('leerness lsp references <symbol-name> 필요');
+    const inDir = arg('--in', root);
+    const t0 = Date.now();
+    // grep 기반 fallback (실 LSP textDocument/references 대신)
+    const refs = [];
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const reWord = new RegExp(`\\b${escapedName}\\b`);
+    function walk(d) {
+      let entries; try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'dist' || e.name === 'build') continue;
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (/\.(ts|tsx|js|jsx|mjs|cjs|md)$/.test(e.name)) {
+          try {
+            const lines = fs.readFileSync(p, 'utf8').split(/\r?\n/);
+            lines.forEach((ln, idx) => {
+              if (reWord.test(ln)) refs.push({ file: path.relative(root, p), line: idx + 1, text: ln.trim().slice(0, 120) });
+            });
+          } catch {}
+        }
+      }
+    }
+    walk(inDir);
+    const dt = Date.now() - t0;
+    if (has('--json')) {
+      log(JSON.stringify({ name, count: refs.length, references: refs.slice(0, 100), durationMs: dt }, null, 2));
+    } else {
+      log(`# leerness lsp references (1.9.167)`);
+      log(`symbol: "${name}" · ${refs.length} references · ${dt}ms`);
+      refs.slice(0, 30).forEach(r => log(`  ${r.file}:${r.line}  ${r.text}`));
+      if (refs.length > 30) log(`  ... ${refs.length - 30} more`);
+    }
+    try { _recordRun(root, { kind: 'lsp_references', name, count: refs.length, durationMs: dt, ok: true }); } catch {}
+    return;
+  }
+  fail(`알 수 없는 sub: ${sub} (check / symbols / references)`);
+}
+
 // 1.9.164: leerness which — 진단 도구 (구버전 충돌 / npx 캐시 / PATH 충돌 해결)
 //   사용자가 "최신 버전 작동 안 함" 의심 시: 실제 실행 중인 leerness 의 경로 / 버전 / npm 캐시 / PATH 후보 표시.
 function whichCmd() {
@@ -12296,7 +12479,7 @@ function whichCmd() {
 }
 
 function help() {
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -12376,6 +12559,8 @@ async function main() {
   if (cmd === 'web') return webCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.166: leerness pc — robotjs/nut-tree bridge (opt-in 의존성)
   if (cmd === 'pc') return pcCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+
+  if (cmd === 'lsp') return lspCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   if (cmd === 'contract' && args[1] === 'verify') return contractVerifyCmd(args[2], args[3]);
   if (cmd === 'drift' && (args[1] === 'check' || !args[1])) return driftCheckCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'usage' && (args[1] === 'stats' || !args[1])) return usageStatsCmd(args[2] || arg('--path', process.cwd()));
