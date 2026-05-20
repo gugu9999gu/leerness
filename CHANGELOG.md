@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.134 — 2026-05-20
+
+**`leerness task list --json` + MCP 41번째 도구 `leerness_task_list`** — progress-tracker.md 전체 task JSON 조회.
+
+### Added — `task list --json`
+- `--json` 옵션: `{ version, root, total, tasks: [{ id, status, request, evidence, nextAction, updated }] }`
+- `--status` 필터: planned/requested/in-progress/done/dropped/incomplete/blocked
+- 필터 적용 시 `statusFilter` 필드 포함
+
+### Added — MCP 41번째 도구 `leerness_task_list`
+- 외부 AI 가 task 전체 상태 회수 (memory_status 보다 task 전용 + 필터 지원)
+- 인자: `{ path?, status? }`
+
+### Task surface JSON 명령 매트릭스
+| Op | CLI | MCP |
+|---|---|---|
+| CREATE | task add | leerness_task_add (1.9.105) |
+| READ | **task list --json** | **leerness_task_list (1.9.134)** ✓ |
+| UPDATE | task update | leerness_task_update (1.9.106) |
+| DELETE | task drop | leerness_task_drop (1.9.107) |
+
+### MCP 도구 누계: 41 (1.9.128: 40 → 1.9.134: 41)
+
 ## 1.9.133 — 2026-05-20
 
 **brainstorm 텍스트 모드에 lessonsExplicit / planMilestones display 추가** — 1.9.116에서 데이터 수집은 했지만 display는 누락된 pre-existing gap fix.
