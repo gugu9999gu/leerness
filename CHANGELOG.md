@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.9.157 — 2026-05-20
+
+**Provider Registry CLI MVP — 사용자 정의 provider 동적 추가 (점검 보고서 권고 #3 — Provider Registry MCP의 CLI 단계).**
+
+자율 모드 87 라운드. 1.9.155 점검 보고서가 발견한 "모델/프로바이더 폭 5종 vs 200+" gap 보강의 첫 단계.
+
+### Added — `leerness provider list|add|remove` 신규 명령
+- 빌트인 5종 (claude/codex/gemini/copilot/ollama) + **사용자 정의 provider 동적 추가**
+- `.harness/providers.json` — 사용자 정의 저장 (schemaVersion 1)
+- `_allProviders(root)` — 빌트인 + 사용자 정의 merge
+  - 같은 id 의 user override 적용 → 빌트인 설정 변경 가능
+  - 빌트인에 없는 user-only provider 추가
+
+### CLI
+```bash
+leerness provider list                       # 빌트인 + 사용자 정의 통합 표시
+leerness provider list --json                # 구조화 출력 (total/builtin/user/providers)
+leerness provider add openrouter --bin openrouter-cli --desc "OpenRouter aggregator"
+leerness provider add bedrock --bin aws-bedrock-cli --env-flag LEERNESS_ENABLE_BEDROCK
+leerness provider remove openrouter          # 사용자 정의만 제거 가능 (빌트인 거부)
+```
+
+### Changed — `agents list/check` Provider Registry 통합
+- 표 출력에 `source` 컬럼 추가 (builtin / user / user(override))
+- JSON 응답에 `source` 필드 추가
+- 활성 없을 때 "1.9.157: 빌트인 외 CLI 추가" hint 표시
+- 헤더 `(1.9.30)` 유지 — 기존 e2e regex 호환
+
+### Use Cases
+- **OpenRouter 200+ 모델 흡수**: `provider add openrouter --bin openrouter-cli` 후 `LEERNESS_ENABLE_OPENROUTER=1` 설정
+- **AWS Bedrock 통합**: `provider add bedrock --bin aws-bedrock-cli`
+- **Groq / Hugging Face / 자체 LLM CLI**: 모두 동일 패턴
+- **자동 발견**: 1.9.158 에서 OpenRouter llms.txt 자동 동기화 예정
+
+### Verified — 5능력 매트릭스 갱신
+| 영역 | 1.9.156 | 1.9.157 |
+|---|---|---|
+| Provider 폭 | 5종 고정 | **무제한 (동적 등록)** |
+| 종합 완성도 | 60% | **62%** |
+
+### Pending — 보고서 권고 남은 후보
+- **1.9.158** — `leerness provider sync` (OpenRouter llms.txt 자동 동기화) + MCP `leerness_provider_list` (48번째 도구)
+- **1.9.159** — LSP 어댑터 MVP (TypeScript LSP)
+- **1.9.160** — playwright/computer-use bridge (`permissions.browser/mouse` 실 동작)
+
+### Verified
+- e2e 217/217 ✓
+- stress-v102: 19/19 (Provider Registry 함수 3종 + list 2종 + add/remove 6종 + agents 통합 2종 + 누적 회귀 6종)
+- VERSION = 1.9.157 / autonomous-rounds = 87
+
+---
+
 ## 1.9.156 — 2026-05-20
 
 **`agents multi --execute` 실제 spawn + consensus 통합 (1.9.155 점검 보고서 발견 gap #1 보강).**
