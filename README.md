@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.167-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v112-23%2F23-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-50-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-97-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-28_rounds-success)]() [![lsp-bridge](https://img.shields.io/badge/lsp_bridge-typescript_opt--in%2Bregex_fallback-success)]() [![pc-bridge](https://img.shields.io/badge/pc_bridge-robotjs%2Fnut--tree_opt--in-success)]() [![web-bridge](https://img.shields.io/badge/playwright_bridge-opt--in_MVP-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.168-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v113-17%2F17-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-53-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-98-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-29_rounds-success)]() [![mcp-bridge](https://img.shields.io/badge/MCP_bridge-web%2Fpc%2Flsp_노출-success)]() [![lsp-bridge](https://img.shields.io/badge/lsp_bridge-typescript_opt--in%2Bregex_fallback-success)]() [![pc-bridge](https://img.shields.io/badge/pc_bridge-robotjs%2Fnut--tree_opt--in-success)]() [![web-bridge](https://img.shields.io/badge/playwright_bridge-opt--in_MVP-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.167  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.168  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  6 capability 72% production-ready (web/pc/lsp opt-in MVP)   ║
+  ║  53 MCP tools · web/pc/lsp bridge 외부 AI 직접 호출 가능     ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

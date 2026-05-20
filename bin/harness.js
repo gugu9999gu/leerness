@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.167';
+const VERSION = '1.9.168';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -9850,7 +9850,10 @@ function mcpServeCmd(root) {
     { name: 'leerness_env_detect', description: '1.9.145 — 실행 환경 자동 감지 + 변동 추적 JSON ({ snapshot: { os, hardware, locale, shell, node, tools, scriptDependencies }, diff: { firstCapture, changes, missing }, persisted }). "X은(는) 내부 또는 외부 명령... 아닙니다" 사전 방지: package.json scripts 의존 도구가 PATH에 있는지 검증 + 머신/Node/도구 변경 감지. 절대경로 마스킹 (보안). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_provider_list', description: '1.9.157/158 — Provider Registry 조회 JSON ({ total, builtin, user, providers: [{ id, bin, envFlag, source, desc }] }). 빌트인 5종 (claude/codex/gemini/copilot/ollama) + .harness/providers.json 사용자 정의 통합. 외부 AI가 sub-agent 분배 가능한 provider 전체 회수 (OpenRouter/Bedrock 등 등록되어 있으면 같이 노출). 🎉 MCP 48 도구 마일스톤', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_provider_add', description: '1.9.159 — Provider Registry 에 새 provider 동적 추가. 인자: { id (required), bin?, envFlag?, versionArgs?, desc?, path? }. 외부 AI가 새 CLI 발견 시 자가 확장 (OpenRouter / Bedrock / Groq / Hugging Face 등 등록). 같은 id 두 번 호출 → 갱신. 빌트인 id 호출 → user override. id 는 영문자/숫자/_- 만 허용.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, bin: { type: 'string' }, envFlag: { type: 'string' }, versionArgs: { type: 'string' }, desc: { type: 'string' }, installHint: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
-    { name: 'leerness_provider_remove', description: '1.9.159 — Provider Registry 에서 사용자 정의 provider 제거. 인자: { id (required), path? }. 빌트인 5종 id 는 제거 불가 (override 만 제거 가능). 🎉 MCP 50 도구 마일스톤 — Provider Registry CRUD MCP 완성 (list/add/remove)', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } }
+    { name: 'leerness_provider_remove', description: '1.9.159 — Provider Registry 에서 사용자 정의 provider 제거. 인자: { id (required), path? }. 빌트인 5종 id 는 제거 불가 (override 만 제거 가능). 🎉 MCP 50 도구 마일스톤 — Provider Registry CRUD MCP 완성 (list/add/remove)', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
+    { name: 'leerness_web', description: '1.9.168 — Web Bridge (1.9.165 playwright opt-in). sub: check (설치 + permissions.browser 확인) | screenshot (URL → PNG) | extract (URL + CSS selector → DOM 텍스트). 외부 AI가 leerness 의 웹 자동화 능력을 직접 호출. playwright 미설치 시 친절 안내 (graceful). 인자: { sub (required), url?, out?, selector?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'screenshot', 'extract'] }, url: { type: 'string' }, out: { type: 'string' }, selector: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } },
+    { name: 'leerness_pc', description: '1.9.168 — PC Bridge (1.9.166 robotjs/nut-tree opt-in). sub: check (설치 + permissions.mouse/keyboard) | click (x,y) | type (text) | screenshot (out). ⚠ full permissions 권장 (mouse/keyboard 접근). 외부 AI가 데스크탑 자동화 능력을 직접 호출. 인자: { sub (required), x?, y?, text?, out?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'click', 'type', 'screenshot'] }, x: { type: 'number' }, y: { type: 'number' }, text: { type: 'string' }, out: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } },
+    { name: 'leerness_lsp', description: '1.9.168 — LSP Bridge (1.9.167 typescript opt-in + regex fallback). sub: check (설치 여부) | symbols (file → function/class/interface/type/enum 목록) | references (name + in 디렉토리 → 호출 위치). 외부 AI가 코드 인텔리전스를 직접 호출 (의존성 0 fallback 동작). 🎉 MCP 53 도구 마일스톤. 인자: { sub (required), file?, name?, in?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'symbols', 'references'] }, file: { type: 'string' }, name: { type: 'string' }, in: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } }
   ];
 
   function send(obj) {
@@ -9956,6 +9959,27 @@ function mcpServeCmd(root) {
             break;
           case 'leerness_provider_remove':
             cliArgs = ['provider', 'remove', String(args.id || ''), '--path', targetPath];
+            break;
+          // 1.9.168: Bridge 3종 MCP 노출 (web/pc/lsp) — 외부 AI 가 직접 호출
+          case 'leerness_web':
+            cliArgs = ['web', String(args.sub || 'check'), '--path', targetPath, '--json'];
+            if (args.url) cliArgs.splice(2, 0, String(args.url));
+            if (args.out) cliArgs.push('--out', String(args.out));
+            if (args.selector) cliArgs.push('--selector', String(args.selector));
+            break;
+          case 'leerness_pc':
+            cliArgs = ['pc', String(args.sub || 'check'), '--path', targetPath, '--json'];
+            if (typeof args.x === 'number' && typeof args.y === 'number') {
+              cliArgs.splice(2, 0, String(args.x), String(args.y));
+            }
+            if (args.text) cliArgs.splice(2, 0, String(args.text));
+            if (args.out) cliArgs.push('--out', String(args.out));
+            break;
+          case 'leerness_lsp':
+            cliArgs = ['lsp', String(args.sub || 'check'), '--path', targetPath, '--json'];
+            if (args.file) cliArgs.splice(2, 0, String(args.file));
+            if (args.name) cliArgs.splice(2, 0, String(args.name));
+            if (args.in) cliArgs.push('--in', String(args.in));
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });

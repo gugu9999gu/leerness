@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.9.168 — 2026-05-20
+
+**MCP bridge 3종 노출 (web/pc/lsp) — 50 → 53 도구 + 외부 AI 자동화 능력 직결.**
+
+자율 모드 98 라운드. 1.9.165~167 에서 leerness CLI 에 추가한 web/pc/lsp bridge 3종을 MCP 도구로 노출 → 외부 AI (Claude, Codex, Gemini, Copilot)가 leerness 의 웹/PC/LSP 자동화 능력을 **직접 호출** 가능.
+
+### Added — MCP 도구 3종
+| 도구 | 라우팅 | 설명 |
+|---|---|---|
+| `leerness_web` | `web check\|screenshot\|extract` | 1.9.165 playwright bridge MCP 노출 |
+| `leerness_pc` | `pc check\|click\|type\|screenshot` | 1.9.166 robotjs/nut-tree bridge MCP 노출 |
+| `leerness_lsp` | `lsp check\|symbols\|references` | 1.9.167 LSP 어댑터 MCP 노출 (typescript opt-in + regex fallback) |
+
+### 멀티 에이전트 오케스트레이션 강화
+1.9.156 `agents multi --execute` (실제 spawn + multi-signal consensus) 와 결합하면:
+- 외부 AI 1 (Claude) → `leerness_web screenshot` (검수 자료 캡처)
+- 외부 AI 2 (Codex) → `leerness_lsp symbols` (코드 인텔리전스)
+- 외부 AI 3 (Gemini) → `leerness_pc screenshot` (UI 테스트 자동화)
+
+→ **leerness 가 모든 외부 AI의 도구 공급망 역할** (= 진정한 범용 AI 하네스).
+
+### MCP 53 도구 마일스톤
+| 라운드 | 도구 수 | 마일스톤 |
+|---|---|---|
+| 1.9.110 | 30 | Memory CRUD 5종 완성 |
+| 1.9.159 | 50 | Provider Registry CRUD 완성 |
+| **1.9.168** | **53** | **Bridge 3종 외부 노출 (web/pc/lsp)** |
+
+### 사용 예시 (MCP tools/call)
+```json
+{ "name": "leerness_lsp", "arguments": { "sub": "symbols", "file": "src/api.ts" } }
+{ "name": "leerness_web", "arguments": { "sub": "screenshot", "url": "https://example.com", "out": "shot.png" } }
+{ "name": "leerness_pc", "arguments": { "sub": "click", "x": 800, "y": 400 } }
+```
+
+### Verified
+- e2e 217/217 baseline (1.9.167 유지)
+- stress-v113: 17/17 (MCP 등록 4 + tools/call 실 동작 4 + 6능력 매트릭스 2 + 누적 회귀 7)
+- 실측: `leerness_lsp symbols harness.js` (MCP) → 472 symbols
+- VERSION = 1.9.168 / autonomous-rounds = 98 / main 자동 push 29 라운드 연속
+
+### 6능력 매트릭스 (영향 없음, 100 라운드 마일스톤 임박)
+| 영역 | 1.9.167 | **1.9.168** |
+|---|---|---|
+| (5) MCP 도구 | 100% (50+ 50 도구) | **100% (53 도구)** |
+| 종합 | 72% | **72%** (production-ready 유지) |
+
+다음 라운드 (1.9.169~170): 100 라운드 마일스톤 임박 (2 라운드 남음).
+
+---
+
 ## 1.9.167 — 2026-05-20
 
 **LSP 어댑터 MVP — codeIntel 6번째 영역 신설 (typescript opt-in + regex fallback).**
