@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.138';
+const VERSION = '1.9.139';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -364,6 +364,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 - 1.9.136+ MCP \`leerness_drift_check\` JSON 응답 fix — \`--json\` 플래그 자동 추가하여 외부 AI가 구조화된 drift 신호 회수 (score, level, signals[], healthy).
 - 1.9.137+ \`.harness/session-workflow.md\` 템플릿에 **🧠 Memory CRUD Quick Reference** 섹션 추가 — 5 surface × CRUD 매트릭스 + archive cycle 워크플로 가이드. 신규 \`init\` 워크스페이스 즉시 적용.
 - 1.9.138+ \`leerness memory archive list --query <keyword>\` + MCP \`leerness_memory_archive_list\` query 인자 — archive 항목 키워드 case-insensitive 검색 (target/originalHeader 매칭).
+- 1.9.139+ \`leerness lesson list --query\` + \`leerness decision list --query\` + MCP 동일 인자 — active Memory 항목 키워드 검색 (lesson: text/tag, decision: title/decision/reason/alternatives/impact).
 
 ---
 
@@ -1677,10 +1678,15 @@ function lessonListCmd(root, opts = {}) {
   root = absRoot(root);
   const jsonMode = !!opts.json || has('--json');
   const tagFilter = arg('--tag', null);
+  // 1.9.139: --query 필터 (lesson text case-insensitive 매칭)
+  const queryFilter = arg('--query', null);
+  const queryRe = queryFilter ? new RegExp(queryFilter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
   const lp = lessonsPath(root);
   if (!exists(lp)) {
     if (jsonMode) {
-      process.stdout.write(JSON.stringify({ version: VERSION, root, total: 0, lessons: [], tag: tagFilter }, null, 2) + '\n');
+      const empty = { version: VERSION, root, total: 0, lessons: [], tag: tagFilter };
+      if (queryFilter) empty.query = queryFilter;
+      process.stdout.write(JSON.stringify(empty, null, 2) + '\n');
       return;
     }
     return ok('lessons.md 없음 — leerness lesson save "<text>" 로 첫 lesson 영구화');
@@ -1699,19 +1705,24 @@ function lessonListCmd(root, opts = {}) {
       tag: tagMatch ? tagMatch[1].trim() : null,
     };
     if (tagFilter && lesson.tag !== tagFilter) continue;
+    // 1.9.139: query 필터 — lesson text 또는 tag 매칭
+    if (queryRe && !queryRe.test(lesson.text) && !queryRe.test(lesson.tag || '')) continue;
     lessons.push(lesson);
   }
   if (jsonMode) {
-    process.stdout.write(JSON.stringify({ version: VERSION, root, total: lessons.length, lessons, tag: tagFilter }, null, 2) + '\n');
+    const payload = { version: VERSION, root, total: lessons.length, lessons, tag: tagFilter };
+    if (queryFilter) payload.query = queryFilter;
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
     return;
   }
-  log(`# 💡 Lessons (1.9.117)${tagFilter ? ` — tag: ${tagFilter}` : ''}\n`);
+  log(`# 💡 Lessons (1.9.117)${tagFilter ? ` — tag: ${tagFilter}` : ''}${queryFilter ? ` — query: "${queryFilter}"` : ''}\n`);
   if (!lessons.length) {
-    if (tagFilter) ok(`"${tagFilter}" 태그 lesson 없음`);
+    if (queryFilter) ok(`"${queryFilter}" 매칭 lesson 없음`);
+    else if (tagFilter) ok(`"${tagFilter}" 태그 lesson 없음`);
     else ok('lessons 비어있음');
     return;
   }
-  log(`총 ${lessons.length}건${tagFilter ? ` (tag: ${tagFilter})` : ''}:`);
+  log(`총 ${lessons.length}건${tagFilter ? ` (tag: ${tagFilter})` : ''}${queryFilter ? ` (query: "${queryFilter}")` : ''}:`);
   for (const l of lessons) {
     log(`\n[${l.date || '?'}]${l.tag ? ` #${l.tag}` : ''}`);
     log(`  ${l.text}`);
@@ -1772,10 +1783,15 @@ function lessonSave(root, text) {
 function decisionListCmd(root, opts = {}) {
   root = absRoot(root);
   const jsonMode = !!opts.json || has('--json');
+  // 1.9.139: --query 필터 (title/decision/reason case-insensitive 매칭)
+  const queryFilter = arg('--query', null);
+  const queryRe = queryFilter ? new RegExp(queryFilter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
   const dp = decisionsPath(root);
   if (!exists(dp)) {
     if (jsonMode) {
-      process.stdout.write(JSON.stringify({ version: VERSION, root, total: 0, decisions: [] }, null, 2) + '\n');
+      const empty = { version: VERSION, root, total: 0, decisions: [] };
+      if (queryFilter) empty.query = queryFilter;
+      process.stdout.write(JSON.stringify(empty, null, 2) + '\n');
       return;
     }
     return ok('decisions.md 없음 — leerness decision add "<title>" 로 첫 결정 영구화');
@@ -1795,22 +1811,30 @@ function decisionListCmd(root, opts = {}) {
     const reasonMatch = block.match(/- Reason:\s*(.+)/);
     const alternativesMatch = block.match(/- Alternatives:\s*(.+)/);
     const impactMatch = block.match(/- Impact:\s*(.+)/);
-    decisions.push({
+    const entry = {
       date,
       title,
       decision: decisionMatch ? decisionMatch[1].trim() : null,
       reason: reasonMatch ? reasonMatch[1].trim() : null,
       alternatives: alternativesMatch ? alternativesMatch[1].trim() : null,
       impact: impactMatch ? impactMatch[1].trim() : null,
-    });
+    };
+    // 1.9.139: query 필터 — title/decision/reason 매칭
+    if (queryRe) {
+      const hay = [entry.title, entry.decision, entry.reason, entry.alternatives, entry.impact].filter(Boolean).join(' ');
+      if (!queryRe.test(hay)) continue;
+    }
+    decisions.push(entry);
   }
   if (jsonMode) {
-    process.stdout.write(JSON.stringify({ version: VERSION, root, total: decisions.length, decisions }, null, 2) + '\n');
+    const payload = { version: VERSION, root, total: decisions.length, decisions };
+    if (queryFilter) payload.query = queryFilter;
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
     return;
   }
-  log(`# 🧠 Decisions (1.9.118)\n`);
-  if (!decisions.length) return ok('decisions 비어있음');
-  log(`총 ${decisions.length}건:`);
+  log(`# 🧠 Decisions (1.9.118)${queryFilter ? ` — query: "${queryFilter}"` : ''}\n`);
+  if (!decisions.length) return ok(queryFilter ? `"${queryFilter}" 매칭 decision 없음` : 'decisions 비어있음');
+  log(`총 ${decisions.length}건${queryFilter ? ` (query: "${queryFilter}")` : ''}:`);
   for (const d of decisions) {
     log(`\n[${d.date || '?'}] ${d.title}`);
     if (d.reason) log(`  Reason: ${d.reason}`);
@@ -4334,7 +4358,7 @@ function _banner(opts = {}) {
   lines.push('');
   for (const ln of lines) log(ln);
   if (opts.quickStart) {
-    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.138+ archive list --query 필터 — 68 라운드 자율 누적)')));
+    log(C.bold(C.cyan('  ✨ 빠른 시작 (1.9.139+ lesson/decision list --query 필터 — 69 라운드 자율 누적)')));
     log('    ' + C.green('npx leerness@latest init .') + C.dim('                          # 신규 프로젝트 + 외부 AI CLI 설정'));
     log('    ' + C.green('npx leerness handoff .') + C.dim('                              # 컨텍스트 + lessons + 매칭 skill + history hit + brainstorm hits + 헤드라인'));
     log('    ' + C.green('npx leerness handoff . --quiet') + C.dim('                      # 자동화/CI 모드 (1.9.99) — 자동 회수 라인 비활성'));
@@ -8644,8 +8668,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_plan_add', description: '1.9.110 — plan.md 에 새 milestone 추가 + progress-tracker.md에 자동 동기화 task 생성. 외부 AI가 계획 단계를 직접 등록. 인자: { text (required), status?, progress?, nextAction?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string' }, progress: { type: 'string' }, nextAction: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } },
     { name: 'leerness_lesson_save', description: '1.9.112 — .harness/lessons.md 에 새 lesson 영구화 (Memory Write Surface 5번째). 외부 AI가 세션 중 얻은 통찰을 즉시 영구 기록 — handoff 자동 회수와 통합. 인자: { text (required), tag?, path? }', inputSchema: { type: 'object', properties: { text: { type: 'string' }, tag: { type: 'string' }, path: { type: 'string' } }, required: ['text'] } },
     { name: 'leerness_memory_status', description: '1.9.114 — Memory Write Surface 5종 (tasks/decisions/rules/plan/lessons) 통합 상태 JSON. 외부 AI가 한 호출로 영구화 상태 + 카운트 + 최근 항목 회수. summary 필드는 "T2/D3/R1/P5/L7" 형식', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_lesson_list', description: '1.9.117 — lessons.md 전용 list JSON ({ date, text, tag }[]). --tag 필터 지원. 외부 AI가 영구화된 lesson 전체 회수 (vs leerness_lessons 는 다중 source fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, tag: { type: 'string' } } } },
-    { name: 'leerness_decision_list', description: '1.9.118 — decisions.md 전체 조회 JSON ({ date, title, decision, reason, alternatives, impact }[]). 외부 AI가 영구화된 설계 결정 전체 회수 (Decision + Reason/Alternatives/Impact 메타데이터 포함)', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_lesson_list', description: '1.9.117 — lessons.md 전용 list JSON ({ date, text, tag }[]). --tag 필터 지원. 1.9.139+ --query 키워드 필터 (text/tag case-insensitive). 외부 AI가 영구화된 lesson 전체 회수 (vs leerness_lessons 는 다중 source fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, tag: { type: 'string' }, query: { type: 'string' } } } },
+    { name: 'leerness_decision_list', description: '1.9.118 — decisions.md 전체 조회 JSON ({ date, title, decision, reason, alternatives, impact }[]). 1.9.139+ --query 키워드 필터 (title/decision/reason/alternatives/impact case-insensitive). 외부 AI가 영구화된 설계 결정 전체 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' }, query: { type: 'string' } } } },
     { name: 'leerness_plan_list', description: '1.9.119 — plan.md 의 모든 milestone (M-XXXX) 조회 JSON ({ id, title, status, progress, tasks: [{ done, text }] }[]). 외부 AI가 영구화된 계획 + 진행률 + tasks checkbox 전체 회수', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_lesson_drop', description: '1.9.124 — lessons.md 에서 특정 lesson 제거 (target: date YYYY-MM-DD 또는 text substring). 잘못 저장한 lesson 제거. 제거된 블록은 .harness/lessons.archive.md 에 자동 보존 (복구 가능)', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
     { name: 'leerness_decision_drop', description: '1.9.125 — decisions.md 에서 특정 결정 제거 (target: date YYYY-MM-DD 또는 title substring). 제거된 블록은 .harness/decisions.archive.md 에 자동 보존', inputSchema: { type: 'object', properties: { target: { type: 'string' }, path: { type: 'string' } }, required: ['target'] } },
@@ -8717,8 +8741,8 @@ function mcpServeCmd(root) {
           case 'leerness_plan_add':        cliArgs = ['plan', 'add', String(args.text || ''), '--path', targetPath, ...(args.status ? ['--status', args.status] : []), ...(args.progress ? ['--progress', String(args.progress)] : []), ...(args.nextAction ? ['--next', args.nextAction] : [])]; break;
           case 'leerness_lesson_save':     cliArgs = ['lesson', 'save', String(args.text || ''), '--path', targetPath, ...(args.tag ? ['--tag', args.tag] : [])]; break;
           case 'leerness_memory_status':   cliArgs = ['memory', 'status', '--path', targetPath, '--json']; break;
-          case 'leerness_lesson_list':     cliArgs = ['lesson', 'list', '--path', targetPath, '--json', ...(args.tag ? ['--tag', args.tag] : [])]; break;
-          case 'leerness_decision_list':   cliArgs = ['decision', 'list', '--path', targetPath, '--json']; break;
+          case 'leerness_lesson_list':     cliArgs = ['lesson', 'list', '--path', targetPath, '--json', ...(args.tag ? ['--tag', args.tag] : []), ...(args.query ? ['--query', args.query] : [])]; break;
+          case 'leerness_decision_list':   cliArgs = ['decision', 'list', '--path', targetPath, '--json', ...(args.query ? ['--query', args.query] : [])]; break;
           case 'leerness_plan_list':       cliArgs = ['plan', 'list', '--path', targetPath, '--json']; break;
           case 'leerness_lesson_drop':     cliArgs = ['lesson', 'drop', String(args.target || ''), '--path', targetPath]; break;
           case 'leerness_decision_drop':   cliArgs = ['decision', 'drop', String(args.target || ''), '--path', targetPath]; break;

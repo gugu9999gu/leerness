@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.9.139 — 2026-05-20
+
+**`leerness lesson list --query <keyword>` + `leerness decision list --query <keyword>` 필터 추가** — Memory Surface READ 명령 키워드 검색.
+
+### Added — --query 필터
+- `lesson list --query` — text/tag case-insensitive 매칭
+- `decision list --query` — title/decision/reason/alternatives/impact 매칭
+- 정규식 특수문자 자동 escape
+- JSON 응답 `query` 필드, 텍스트 모드 헤더 표시
+
+### Updated MCP
+- `leerness_lesson_list` 인자에 `query` 추가
+- `leerness_decision_list` 인자에 `query` 추가
+
+### 사용 시나리오
+```bash
+leerness decision list --query PostgreSQL --json
+leerness lesson list --query auth --json
+```
+
+### --query 필터 매트릭스 (1.9.139)
+| 명령 | --query 도입 |
+|---|---|
+| `memory archive list` | 1.9.138 |
+| `lesson list` | **1.9.139** |
+| `decision list` | **1.9.139** |
+| `task list` | (--status 필터만) |
+| `plan list` | (필터 없음, 미래 후보) |
+| `rule list` | (필터 없음, 미래 후보) |
+
 ## 1.9.138 — 2026-05-20
 
 **`leerness memory archive list --query <keyword>` 필터 추가** — archive 항목 키워드 검색.
