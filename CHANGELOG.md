@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.9.161 — 2026-05-20
+
+**REPL Memory Slash 4종 추가 — Memory Surface 즉시 조회 (1.9.150 slash 패턴 확장).**
+
+자율 모드 91 라운드. REPL 안에서 leerness 메모리 (lessons / brainstorm / tasks / plan) 즉시 조회 가능 → 대화 중 컨텍스트 회수 마찰 0.
+
+### Added — REPL `:lessons` / `:brainstorm` / `:tasks` / `:plan`
+- `:lessons [query]` — `leerness lessons --query <q>` 또는 인자 없이 전체 회수
+- `:brainstorm <topic>` — `leerness brainstorm "topic"` (키워드 필수, 누락 시 안내)
+- `:tasks` — `leerness task list` (현재 task 상태)
+- `:plan` — `leerness plan show` (현재 milestone)
+
+### 동작 방식
+- 1.9.150 slash 패턴 재사용 — `runCommandSafe` 경유 (sandbox 자동 적용)
+- `_recordRun` observability — `kind: 'agent_repl_slash'` 자동 기록
+- 출력 30줄로 제한 (REPL 화면 보호)
+- 60초 timeout
+
+### REPL Slash 명령 카탈로그 갱신
+| 1.9.150 (검수) | 1.9.161 (메모리) |
+|---|---|
+| `:verify` | `:lessons` |
+| `:audit` | `:brainstorm` |
+| `:handoff` | `:tasks` |
+| `:health` | `:plan` |
+
+### Use Cases
+- 메인 에이전트가 새 task 시작 전 `:lessons "auth"` 로 과거 실수 회수
+- `:brainstorm "deployment"` 로 관련 task-log / decisions / lessons 통합 검색
+- `:tasks` 로 진행 중 task 즉시 확인 후 :provider claude 로 sub-agent 분배
+- `:plan` 으로 현재 milestone 진행률 확인
+
+### Verified
+- e2e 217/217 ✓
+- stress-v106: 13/13 (handleMeta 분기 4종 + REPL 시작 배너/help 안내 2종 + 누적 회귀 7종)
+- VERSION = 1.9.161 / autonomous-rounds = 91
+
+---
+
 ## 1.9.160 — 2026-05-20
 
 **🎉 자율 모드 90 라운드 마일스톤 + `provider sync` (외부 catalog 자동 동기화).**

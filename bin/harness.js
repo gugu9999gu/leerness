@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.160';
+const VERSION = '1.9.161';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -10757,6 +10757,7 @@ async function _agentRepl(root, opts) {
   log('');
   log(C.dim('  메타 명령: :help | :model <m> | :role <r> | :provider <p> | :status | :clear | :save | :history | :quit'));
   log(C.dim('  Slash 명령 (1.9.150): :verify | :audit | :handoff | :health'));
+  log(C.dim('  Memory Slash (1.9.161): :lessons | :brainstorm <topic> | :tasks | :plan'));
   log(C.dim(`  현재 — provider=${state.provider}  model=${state.model || '(기본)'}  role=${state.role}  permissions=${_readPermissions(root).mode}`));
   // 1.9.155: REPL 진입 시 handoff 컨텍스트 자동 노출 (UX 개선 — 사용자가 매번 :handoff 안 해도 컨텍스트 인지)
   try {
@@ -10802,6 +10803,11 @@ async function _agentRepl(root, opts) {
       log('    :audit                — leerness audit (보안 + drift + lazy)');
       log('    :handoff              — leerness handoff --quiet (현재 컨텍스트 요약)');
       log('    :health               — leerness health --json (종합 헬스 체크)');
+      log(C.bold('\n  Memory Slash (1.9.161) — Memory Surface 즉시 조회:'));
+      log('    :lessons [query]      — leerness lessons (과거 결정/실수 회수)');
+      log('    :brainstorm <topic>   — leerness brainstorm "topic" (관련 컨텍스트 회수)');
+      log('    :tasks                — leerness task list (현재 task 상태)');
+      log('    :plan                 — leerness plan show (현재 milestone)');
       return false;
     }
     if (op === 'model') {
@@ -10899,13 +10905,26 @@ async function _agentRepl(root, opts) {
       return false;
     }
     // 1.9.150: leerness 내부 명령 slash-commands — :verify / :audit / :handoff / :health
-    if (op === 'verify' || op === 'audit' || op === 'handoff' || op === 'health') {
+    // 1.9.161: Memory Surface 조회 slash 추가 — :lessons / :brainstorm / :tasks / :plan
+    if (op === 'verify' || op === 'audit' || op === 'handoff' || op === 'health'
+        || op === 'lessons' || op === 'brainstorm' || op === 'tasks' || op === 'plan') {
+      const query = rest.join(' ').trim();
       const subArgs = {
         verify: ['verify-code', root],
         audit: ['audit', root],
         handoff: ['handoff', root, '--quiet', '--no-drift-check'],
-        health: ['health', root, '--json']
+        health: ['health', root, '--json'],
+        // 1.9.161 Memory Surface slash 4종
+        lessons: query ? ['lessons', '--query', query, '--path', root] : ['lessons', '--path', root],
+        brainstorm: query ? ['brainstorm', query, '--path', root] : ['brainstorm', '--path', root],
+        tasks: ['task', 'list', '--path', root],
+        plan: ['plan', 'show', '--path', root]
       }[op];
+      // 인자 필요한데 누락 시 안내 (brainstorm 은 인자 필수)
+      if (op === 'brainstorm' && !query) {
+        log(C.yel(`  ⚠ :brainstorm 은 키워드 필요 — 예: :brainstorm "auth bug"`));
+        return false;
+      }
       log(C.dim(`  → leerness ${subArgs.join(' ')}`));
       const t0 = Date.now();
       const r = runCommandSafe(process.execPath, [__filename, ...subArgs], {
