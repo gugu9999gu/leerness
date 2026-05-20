@@ -1,5 +1,64 @@
 # Changelog
 
+## 1.9.174 — 2026-05-21
+
+**🔐 사용자 명시 — install 권한 prompt 제거 + REPL `:permissions` 즉시 변경.**
+
+자율 모드 104 라운드. 사용자 명시: *"권한 설정 문항은 제거하고 REPL 모드에서 간편하게 권한 변경할 수 있도록"*.
+
+### 1. Install 권한 prompt 제거
+이전 (1.9.146): install 시 3-tier 권한 모드 선택 prompt (basic/extended/full).
+**문제**: 사용자 경험 복잡도 증가 + 잘못된 선택 (full) 시 위험.
+
+**1.9.174**:
+- install 시 권한 **항상 `basic` 자동 적용** (안전 default).
+- prompt 코드 (resolveInstallOptions 안 권한 모드 _selectOne 블록) 완전 제거.
+- 안내 라인: `Agent 권한 모드: basic (1.9.174 — REPL에서 :permissions extended|full 로 즉시 변경 가능)`.
+
+### 2. REPL `:permissions` 즉시 변경 가능
+이전 (1.9.146~1.9.173): `:permissions` 메타 명령은 list 만 (조회).
+
+**1.9.174**:
+```
+agent[claude/actor/▶]> :permissions
+  🔐 현재 권한 모드: basic
+
+  변경:
+    :permissions basic     — 안전 (.harness 만 쓰기, 권장)
+    :permissions extended  — 프로젝트 폴더 + shell allowlist
+    :permissions full      — ⚠ 전체 (마우스/키보드/웹, IDE 통합 시만)
+
+  세부 권한 (mouse/keyboard/browser/admin):
+    mouse: ✗ 거부
+    keyboard: ✗ 거부
+    browser: ✗ 거부
+    admin: ✗ 거부
+
+agent[claude/actor/▶]> :permissions extended
+  ✓ 권한 모드 변경: extended  (즉시 적용 — 다음 명령부터)
+
+agent[claude/actor/▶]> :permissions full
+  ✓ 권한 모드 변경: full  (즉시 적용 — 다음 명령부터)
+  ⚠ full 모드 — 마우스/키보드/웹/관리자 전체 허용. IDE 통합 외 환경에서는 위험.
+```
+
+- 인자 없음 → 현재 모드 + 세부 권한 (mouse/keyboard/browser/admin) 표시 + 변경 옵션 안내
+- `:permissions basic|extended|full` → 즉시 변경 (`permissionsSetCmd` 호출)
+- `:perm` alias 추가 (단축)
+- `full` 모드 변경 시 ⚠ 명시적 경고
+- 잘못된 모드 → 친절한 안내 (`잘못된 모드: xyz (basic | extended | full)`)
+
+### 호환성
+- CLI 명령 `leerness permissions list|set` 그대로 유지 (1.9.146 호환).
+- 기존 `.harness/agent-permissions.json` 형식 그대로 (mode + 4-tier 세부).
+
+### Verified
+- e2e 217/217 baseline 유지
+- stress-v119: **20/20** (install 제거 5 + REPL :permissions 7 + CLI 호환 2 + 누적 회귀 6)
+- VERSION = 1.9.174 / autonomous-rounds = 104 / main 자동 push 35 라운드 연속
+
+---
+
 ## 1.9.173 — 2026-05-21
 
 **🌐 LSP 어댑터 다국어 확장 — JavaScript + Python + Go + Rust + Java (5개 언어 regex fallback).**

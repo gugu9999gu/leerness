@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.173';
+const VERSION = '1.9.174';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -739,25 +739,11 @@ async function resolveInstallOptions(root, opts = {}) {
       }
     }
   }
-  // 1.9.146: 권한 모드 (사용자 명시 요청 #5 — agent IDE 모드 사전 prompt)
-  let permissionMode = null;
-  if (shouldAsk && !opts._skipPermissionsPrompt) {
-    if (useInteractive) {
-      const pOpt = await _selectOne('agent 권한 모드 (leerness agent 사용 시 적용)', [
-        { label: 'basic (안전) — 읽기/쓰기 .harness/ 만', description: '권장 — 파일시스템/네트워크 거부, .harness 안만 쓰기', id: 'basic' },
-        { label: 'extended — 프로젝트 폴더 + shell allowlist', description: '프로젝트 폴더 read/write, 사전 정의된 명령만 exec', id: 'extended' },
-        { label: 'full — 전체 (마우스/키보드/웹/관리자) ⚠ 위험', description: '⚠ IDE 통합 시에만 권장 — 모든 PC 작업 가능', id: 'full' }
-      ], { defaultIndex: 0 });
-      permissionMode = pOpt ? pOpt.id : 'basic';
-    } else {
-      log('\nagent 권한 모드 (leerness agent 명령 사용 시):');
-      log('1) basic (안전) — .harness/ 만');
-      log('2) extended — 프로젝트 폴더 + shell allowlist');
-      log('3) full ⚠ — 마우스/키보드/웹/관리자 전체 (IDE 통합 시에만)');
-      const a = await ask('선택 [1]: ');
-      permissionMode = a === '2' ? 'extended' : a === '3' ? 'full' : 'basic';
-    }
-  }
+  // 1.9.174: 권한 prompt 제거 (사용자 명시) — install 시 항상 basic 자동 적용.
+  //   REPL 안에서 `:permissions <basic|extended|full>` 로 즉시 변경 가능 (REPL UX 강화).
+  //   이전 1.9.146 의 3-tier 선택 prompt 는 사용자 경험 복잡도 증가 + 잘못된 선택 (full) 시 위험 →
+  //   안전한 기본 (basic) 자동 시작 + REPL 진입 시점에 필요 시 변경하는 흐름이 더 안전하고 간편.
+  const permissionMode = 'basic';
   // 1.9.151: 모든 문항 종료 후 — REPL 모드 즉시 활성화 여부 (사용자 명시 요청)
   //   선택된 에이전트가 있을 때만 표시. 설치 완료 후 install() 가 처리.
   let startRepl = false;
@@ -807,7 +793,7 @@ async function install(root, opts = {}) {
     log(`Agents 활성화: ${list}`);
   }
   if (resolved.startRepl) log(`REPL 자동 시작: 예 (설치 완료 후 \`leerness agent\` 진입)`);
-  if (resolved.permissionMode) log(`Agent 권한 모드: ${resolved.permissionMode}`);
+  if (resolved.permissionMode) log(`Agent 권한 모드: ${resolved.permissionMode}  (1.9.174 — REPL에서 \`:permissions extended|full\` 로 즉시 변경 가능)`);
   // 1.9.10: 스킬 카탈로그 출처 안내
   if (SKILLPACK_SOURCE === 'builtin') log(`Skill catalog source: builtin (leerness-skillpack 미설치 — \`npm i leerness-skillpack\`로 확장 가능)`);
   else log(`Skill catalog source: ${SKILLPACK_SOURCE} (leerness-skillpack${SKILLPACK_META ? ` v${SKILLPACK_META.version}` : ''})`);
@@ -11019,6 +11005,7 @@ async function _agentRepl(root, opts) {
   log(C.dim('  Slash 명령 (1.9.150): :verify | :audit | :handoff | :health'));
   log(C.dim('  Memory Slash (1.9.161): :lessons | :brainstorm <topic> | :tasks | :plan'));
   log(C.dim('  🆕 1.9.170 — Tab=provider cycle, Shift+Tab=model cycle, :stream on|off (실시간 출력)'));
+  log(C.dim('  🆕 1.9.174 — :permissions [basic|extended|full] 로 즉시 권한 변경 (default: basic 안전)'));
   log(C.dim(`  현재 — provider=${state.provider}  model=${state.model || '(기본)'}  role=${state.role}  permissions=${_readPermissions(root).mode}`));
   // 1.9.155: REPL 진입 시 handoff 컨텍스트 자동 노출 (UX 개선 — 사용자가 매번 :handoff 안 해도 컨텍스트 인지)
   try {
@@ -11123,7 +11110,8 @@ async function _agentRepl(root, opts) {
       log('    :reset                — history 초기화');
       log('    :history              — 대화 history 표시');
       log('    :save                 — 세션 즉시 저장');
-      log('    :permissions          — 현재 권한 모드 표시');
+      log('    :permissions [mode]   — 🆕 1.9.174 현재 모드 표시 / 또는 즉시 변경 (basic/extended/full)');
+      log('    :perm [mode]          — :permissions 단축 alias');
       log('    :quit / :exit / :q    — 종료 (자동 저장)');
       log(C.bold('\n  🆕 1.9.170 키보드 단축키:'));
       log('    Tab                   — 다음 provider 로 cycle (ollama → claude → codex → gemini → copilot)');
@@ -11231,7 +11219,42 @@ async function _agentRepl(root, opts) {
       return false;
     }
     if (op === 'save') { saveSession(); log(C.dim(`  → ${rel(root, sessionPath())}`)); return false; }
-    if (op === 'permissions') { permissionsListCmd(root); return false; }
+    if (op === 'permissions' || op === 'perm') {
+      // 1.9.174: REPL에서 권한 변경 가능 (사용자 명시 요청).
+      //   :permissions       — 현재 모드 표시 + 변경 옵션 안내
+      //   :permissions basic — 권한 모드 즉시 변경
+      const target = (rest[0] || '').toLowerCase();
+      if (!target) {
+        const p = _readPermissions(root);
+        log('');
+        log(C.bold(`  🔐 현재 권한 모드: ${C.cy(p.mode || 'basic')}`));
+        log('');
+        log(C.dim('  변경:'));
+        log(`    ${C.green(':permissions basic')}     — 안전 (.harness 만 쓰기, 권장)`);
+        log(`    ${C.yel(':permissions extended')}  — 프로젝트 폴더 + shell allowlist`);
+        log(`    ${C.mag(':permissions full')}      — ⚠ 전체 (마우스/키보드/웹, IDE 통합 시만)`);
+        log('');
+        log(C.dim('  세부 권한 (mouse/keyboard/browser/admin):'));
+        Object.entries(p).filter(([k]) => k !== 'mode' && typeof p[k] === 'boolean').forEach(([k, v]) => {
+          log(`    ${k}: ${v ? C.green('✓ 허용') : C.dim('✗ 거부')}`);
+        });
+        return false;
+      }
+      if (!['basic', 'extended', 'full'].includes(target)) {
+        log(C.yel(`  ⚠ 잘못된 모드: ${target}  (basic | extended | full)`));
+        return false;
+      }
+      try {
+        permissionsSetCmd(root, target);
+        log(C.green(`  ✓ 권한 모드 변경: ${target}  (즉시 적용 — 다음 명령부터)`));
+        if (target === 'full') {
+          log(C.yel('  ⚠ full 모드 — 마우스/키보드/웹/관리자 전체 허용. IDE 통합 외 환경에서는 위험.'));
+        }
+      } catch (e) {
+        log(C.yel(`  ⚠ 권한 변경 실패: ${e.message}`));
+      }
+      return false;
+    }
     if (op === 'status') {
       // 1.9.155: REPL 안에서 현재 세션 상태 자세히 (provider/model/role/permissions/history/runs)
       log(C.bold('\n  📊 REPL 세션 상태 (1.9.155)'));
