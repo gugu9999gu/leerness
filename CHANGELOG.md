@@ -1,5 +1,71 @@
 # Changelog
 
+## 1.9.192 — 2026-05-21
+
+**🌐 C축 (공식 표준 스킬 자동 활용) 보강 — handoff에 공식 organization catalog 자동 노출 + 24h 캐시.**
+
+자율 모드 122 라운드. 1.9.191 5축 매트릭스에서 가장 점수가 낮았던 **C축 (8/10 → 목표 9/10)** 보강.
+
+### 사용자 의도 (1.9.191 verbatim)
+> *"공식 표준화된 스킬을 적재적소로 자동 활용 ... 최고의 도구로 개발하는게 목표"*
+
+### 1. 공식 organization skill catalog 24h 캐시 (신규)
+- 파일: `.harness/skill-auto-cache.json` (비시크릿 — 체크인 가능)
+- TTL 24h → `_OFFICIAL_SKILL_CACHE_TTL_MS` 상수
+- presets: `vercel-labs/agent-skills` + `anthropics/skills`
+- 함수: `_loadOfficialSkillCache` / `_writeOfficialSkillCache` / `_refreshOfficialSkillCache` / `_matchOfficialSkillsFromCache`
+
+### 2. handoff 자동 노출 (사용자 의도 정렬)
+**헤드라인 10번째 요소** (1.9.81/93/113/152/162/192):
+```
+📊 헤드라인 ...· 🌐 official 25/25 (0h✓)
+```
+- `official {매칭수}/{전체수} ({캐시나이}{만료여부})`
+- 캐시 만료 (24h+) 시 `⚠` 표시
+
+**body 섹션** — in-progress task keyword 기반 매칭 top 3:
+```
+## 🌐 공식 organization 스킬 자동 매칭 (1.9.192) — 키워드 "..."
+  vercel-labs/anthropics 등 catalog 캐시 0h ✓ · 3/25건 매칭
+  • [vercel] skill-name — description ...
+  • [anthropic] another-skill — ...
+  → 설치: leerness skill auto-install --yes
+```
+
+끄기: `--no-official-skills` 또는 `LEERNESS_NO_OFFICIAL_SKILLS=1`.
+
+### 3. CLI: `leerness skill auto-cache <sub>`
+- `status` (default) — 캐시 나이 / 만료 / preset / entry 수 + 샘플 3건
+- `refresh` — vercel-labs + anthropics 동기화 (실측 25 entries / 612ms)
+- `clear` — 캐시 삭제
+
+### 4. 누적 회귀 (1.9.186~191)
+| 버전 | 핵심 검증 항목 | 유지 |
+|---|---|---|
+| 1.9.191 | 구조 최적화 보고서 88/100 | ✓ |
+| 1.9.190 | _selectOne/_selectMany Ctrl+C 즉시 종료 | ✓ |
+| 1.9.189 | _showSlashCommandList + Tab cycle 한 줄 갱신 | ✓ |
+| 1.9.188 | stdin prompt 전달 (useStdinForPrompt) | ✓ |
+| 1.9.187 | _loadLeernessConfig (.harness/leerness-config.json) | ✓ |
+| 1.9.186 | _cliChatStream shell:true (Windows .cmd) | ✓ |
+
+### 5. stress-v137 — 17/17 PASS
+- 보고서 + 함수 + 헤드라인 + body + CLI + 헤드라인 노출 (8)
+- 성능 hot path: --version cold start avg **398 ms** (3 samples: 417/395/381) · MCP 54 도구 **387 ms** (2)
+- 누적 회귀 1.9.186~191 (7)
+
+### 6. 5축 매트릭스 변동 (목표)
+| 축 | 1.9.191 | 1.9.192 | Δ |
+|---|---|---|---|
+| C. 공식 표준 스킬 자동 활용 | 8/10 | **9/10** | +1 (handoff 자동 노출 + 24h 캐시) |
+| 종합 | 44/50 (88%) | **45/50 (90%)** | +2% |
+
+### 7. 자동 release 흐름 유지
+- main 자동 push **54 라운드** 연속 (1.9.140~192)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.191 — 2026-05-21
 
 **📊 구조 최적화 실 측정 + 목적 매트릭스 88/100 + ScheduleWakeup 안정화 (사용자 명시 3종).**

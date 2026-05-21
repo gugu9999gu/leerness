@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.191';
+const VERSION = '1.9.192';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1618,6 +1618,50 @@ async function skillAutoInstallCmd(root) {
   log(`✓ auto-install 완료: ${installed}건 설치 / ${failed}건 실패 / ${matched.length - installed - failed}건 skip`);
 }
 
+// 1.9.192: skill auto-cache CLI — refresh|status|clear (C축 보강 사용자 명시)
+async function skillAutoCacheCmd(root, sub) {
+  root = absRoot(root);
+  const fp = _officialSkillCachePath(root);
+  if (sub === 'refresh') {
+    log(`# leerness skill auto-cache refresh (1.9.192)`);
+    log(`  presets: ${Object.keys(SKILL_CATALOG_PRESETS).join(', ')}`);
+    log(`  fetching...`);
+    const t0 = Date.now();
+    const entries = await _refreshOfficialSkillCache(root);
+    const dt = Date.now() - t0;
+    if (entries.length > 0) {
+      log(`✓ 캐시 갱신 완료: ${entries.length}개 entry / ${dt}ms`);
+      log(`  → ${rel(root, fp)}`);
+    } else {
+      log(`⚠ 캐시 갱신 실패 (network/offline?) — 0 entries`);
+    }
+    return;
+  }
+  if (sub === 'clear') {
+    if (exists(fp)) { fs.unlinkSync(fp); log(`✓ 캐시 삭제: ${rel(root, fp)}`); }
+    else log(`(캐시 없음)`);
+    return;
+  }
+  // status (default)
+  log(`# leerness skill auto-cache status (1.9.192)`);
+  const c = _loadOfficialSkillCache(root);
+  if (!c) {
+    log(`  ⚠ 캐시 없음 — \`leerness skill auto-cache refresh\` 로 생성`);
+    return;
+  }
+  const ageH = Math.floor(c.ageMs / 3600000);
+  log(`  파일: ${rel(root, fp)}`);
+  log(`  생성: ${c.at} (${ageH}h ago)${c.expired ? ' ⚠ 만료 (24h+)' : ' ✓'}`);
+  log(`  presets: ${(c.presets || []).join(', ')}`);
+  log(`  entries: ${c.entries.length}건`);
+  log('');
+  log(`  샘플 3건:`);
+  for (const e of c.entries.slice(0, 3)) {
+    log(`    • [${e.preset || e.source || '?'}] ${e.name} — ${(e.description || '').slice(0, 60)}`);
+  }
+  if (c.expired) log(`  → 갱신: leerness skill auto-cache refresh`);
+}
+
 // 1.9.182: handoff 컨텍스트 (현재 in-progress task) 에서 자동 query 추출
 function _autoInstallQueryFromHandoff(root) {
   try {
@@ -1626,6 +1670,67 @@ function _autoInstallQueryFromHandoff(root) {
     if (active) return (active.request || '').split(/\s+/).slice(0, 3).join(' ');
   } catch {}
   return null;
+}
+
+// 1.9.192: 공식 organization skill catalog 24h 캐시 — C축 (공식 표준 스킬 자동 활용) 보강
+//   사용자 명시 (1.9.191): "공식 표준화된 스킬을 적재적소로 자동 활용 ... 게으름 방지등등 최고의 도구"
+//   handoff 마다 GitHub Contents API 호출하지 않도록 24h TTL → offline / rate-limit 회피
+//   캐시 위치: .harness/skill-auto-cache.json (체크인 가능 — 비시크릿)
+const _OFFICIAL_SKILL_CACHE_TTL_MS = 24 * 3600 * 1000;
+function _officialSkillCachePath(root) { return path.join(root, '.harness', 'skill-auto-cache.json'); }
+function _loadOfficialSkillCache(root) {
+  try {
+    const fp = _officialSkillCachePath(root);
+    if (!exists(fp)) return null;
+    const j = JSON.parse(read(fp));
+    if (!j.at || !Array.isArray(j.entries)) return null;
+    const ageMs = Date.now() - new Date(j.at).getTime();
+    return { ...j, ageMs, expired: ageMs > _OFFICIAL_SKILL_CACHE_TTL_MS };
+  } catch { return null; }
+}
+function _writeOfficialSkillCache(root, entries, presets) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    writeUtf8(_officialSkillCachePath(root), JSON.stringify({ at: new Date().toISOString(), presets, entries }, null, 2));
+    return true;
+  } catch { return false; }
+}
+async function _refreshOfficialSkillCache(root) {
+  const presets = Object.keys(SKILL_CATALOG_PRESETS);
+  const allEntries = [];
+  for (const key of presets) {
+    const p = SKILL_CATALOG_PRESETS[key];
+    if (!p) continue;
+    try {
+      const r = await _fetchGitHubSkills(p.owner, p.repo, p.branch, p.path);
+      if (r.ok) {
+        for (const s of r.skills) allEntries.push({ ...s, preset: key });
+      }
+    } catch {}
+  }
+  if (allEntries.length > 0) _writeOfficialSkillCache(root, allEntries, presets);
+  return allEntries;
+}
+// query (in-progress task keyword) 와 매칭되는 entries 추출
+function _matchOfficialSkillsFromCache(root, query, max) {
+  max = max || 3;
+  const cache = _loadOfficialSkillCache(root);
+  if (!cache || !cache.entries || cache.entries.length === 0) return { entries: [], total: 0, ageHours: null, expired: false, cacheTotal: 0 };
+  const q = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  let matched = cache.entries;
+  if (q.length > 0) {
+    matched = cache.entries.filter(e => {
+      const hay = ((e.name || '') + ' ' + (e.description || '')).toLowerCase();
+      return q.some(token => token.length >= 2 && hay.includes(token));
+    });
+  }
+  return {
+    entries: matched.slice(0, max),
+    total: matched.length,
+    ageHours: Math.floor(cache.ageMs / 3600000),
+    expired: cache.expired,
+    cacheTotal: cache.entries.length
+  };
 }
 
 // skill export <id> — 기존 자체 skill을 agentskills.io 표준 SKILL.md로 export
@@ -3265,10 +3370,21 @@ function handoff(root) {
           if (slashCount > 0) parts.push(`🪄 slash 24h ${slashCount}회`);
         }
       } catch {}
+      // 10) 1.9.192: 공식 organization skill catalog 캐시 매칭 (C축 보강 — 사용자 명시)
+      //     handoff 마다 GitHub API 호출 X (24h TTL 캐시) → in-progress task keyword 와 매칭되는 공식 스킬 수 노출
+      try {
+        const q = _autoInstallQueryFromHandoff(root);
+        const m = _matchOfficialSkillsFromCache(root, q, 3);
+        if (m.cacheTotal > 0) {
+          const ageStr = m.ageHours != null ? (m.ageHours < 24 ? `${m.ageHours}h` : `${Math.floor(m.ageHours/24)}d`) : '?';
+          const status = m.expired ? '⚠' : '✓';
+          parts.push(`🌐 official ${m.total}/${m.cacheTotal} (${ageStr}${status})`);
+        }
+      } catch {}
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192): ${parts.join(' · ')}`));
       }
     } catch {}
   }
@@ -3402,6 +3518,34 @@ function handoff(root) {
                       for (const it of items.slice(0, 4)) log(dim(`  ${it}`));
                       log(dim(`  → 전체: leerness brainstorm "${keyword}" --path .`));
                       log('');
+                    }
+                  } catch {}
+                }
+                // 1.9.192: 공식 organization skill catalog 자동 매칭 (C축 보강 — 사용자 의도)
+                //   "공식 표준화된 스킬을 적재적소로 자동 활용 ... 최고의 도구" — handoff 시 keyword 기반 자동 추천
+                //   캐시 (.harness/skill-auto-cache.json, 24h TTL) 사용 → GitHub API 부담 X
+                //   끄기: --no-official-skills 또는 LEERNESS_NO_OFFICIAL_SKILLS=1
+                if (!has('--no-official-skills') && !has('--quiet') && process.env.LEERNESS_NO_OFFICIAL_SKILLS !== '1') {
+                  try {
+                    const ofm = _matchOfficialSkillsFromCache(root, latestRow.request, 3);
+                    if (ofm.entries.length > 0) {
+                      const isTty = process.stdout && process.stdout.isTTY;
+                      const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+                      const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+                      const cacheAge = ofm.ageHours != null ? (ofm.ageHours < 24 ? `${ofm.ageHours}h` : `${Math.floor(ofm.ageHours/24)}d`) : '?';
+                      log(cyan(`## 🌐 공식 organization 스킬 자동 매칭 (1.9.192) — 키워드 "${keyword}"`));
+                      log(dim(`  vercel-labs/anthropics 등 catalog 캐시 ${cacheAge}${ofm.expired ? ' ⚠ 만료' : ''} · ${ofm.total}/${ofm.cacheTotal}건 매칭`));
+                      for (const e of ofm.entries) {
+                        log(dim(`  • [${e.preset || e.source || '?'}] ${e.name} — ${(e.description || '').slice(0, 70)}`));
+                      }
+                      log(dim(`  → 설치: leerness skill auto-install --yes`));
+                      if (ofm.expired) log(dim(`  → 갱신: leerness skill auto-cache refresh`));
+                      log('');
+                    } else if (ofm.cacheTotal === 0) {
+                      // 캐시 없음 — 첫 사용 안내
+                      const isTty = process.stdout && process.stdout.isTTY;
+                      const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+                      log(dim(`  💡 공식 스킬 catalog 캐시 없음 — \`leerness skill auto-cache refresh\` 로 vercel-labs/anthropics 캐시 생성 (1.9.192)`));
                     }
                   } catch {}
                 }
@@ -14105,6 +14249,8 @@ async function main() {
   if (cmd === 'skill' && args[1] === 'suggest')     return skillSuggestCmd(absRoot(arg('--path', process.cwd())));
   // 1.9.182: leerness skill auto-install — 공식 catalog 자동 탐색 + skill match 매칭 시 자동 install (사용자 명시)
   if (cmd === 'skill' && args[1] === 'auto-install') return await skillAutoInstallCmd(absRoot(arg('--path', process.cwd())));
+  // 1.9.192: skill auto-cache — 공식 organization catalog 24h 캐시 관리 (C축 보강)
+  if (cmd === 'skill' && args[1] === 'auto-cache')   return await skillAutoCacheCmd(absRoot(arg('--path', process.cwd())), args[2] || 'status');
   if (cmd === 'mcp' && args[1] === 'serve')         return mcpServeCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'gate')                               return gate(args[1] || process.cwd());
   if (cmd === 'verify-code')                        return verifyCodeCmd(args[1] || process.cwd());
