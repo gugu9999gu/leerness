@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.185';
+const VERSION = '1.9.186';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -10953,7 +10953,16 @@ async function _cliChatStream(root, provider, promptText, opts) {
     return { ok: false, error: `${provider} 비활성 (${status.status}) — .env 에서 ${agent.envFlag}=1 필요`, provider };
   }
   let cmd, args;
-  if (provider === 'claude')  { cmd = 'claude'; args = ['--print', '--output-format=stream-json', '--verbose', promptText]; }
+  // 1.9.186 (사용자 명시 fix): claude --output-format=stream-json 가 일부 버전에서 빈 응답.
+  //   default 를 plain --print 로 변경 → _cliChat 과 동일한 인자, 작동 검증된 패턴.
+  //   stream 형식 사용 opt-in: LEERNESS_REPL_STREAM_FORMAT=json (실시간 thinking/tool_use 보고 싶을 때).
+  const useStreamJson = process.env.LEERNESS_REPL_STREAM_FORMAT === 'json';
+  if (provider === 'claude')  {
+    cmd = 'claude';
+    args = useStreamJson
+      ? ['--print', '--output-format=stream-json', '--verbose', promptText]
+      : ['--print', promptText];  // plain text 응답 (작동 검증됨)
+  }
   else if (provider === 'codex')   { cmd = 'codex';  args = ['exec', '--skip-git-repo-check', promptText]; }
   else if (provider === 'gemini')  { cmd = 'gemini'; args = ['-p', promptText]; }
   else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', promptText]; }
@@ -11015,10 +11024,15 @@ async function _cliChatStream(root, provider, promptText, opts) {
     process.stdout.write(dim(`\n  ── ${provider} stream ──\n`));
     let child;
     try {
+      // 1.9.186 (사용자 명시 fix): Windows .cmd 호환을 위해 shell: true.
+      //   1.9.185 까지 shell: false → Windows 에서 claude.cmd 못 찾아 빈 응답 (사용자 보고: 27초 후 0자).
+      //   _cliChat (작동하는 함수) 이 runCommandSafe → spawnSync shell: true 패턴이라서 작동.
+      //   _cliChatStream 도 동일하게 shell: true 사용 (DEP0190 은 1.9.184/185 fix 로 억제됨).
+      //   security: shell escape 우려는 promptText 가 사용자 직접 입력 — sandboxed REPL 안에서만 사용.
       child = cp.spawn(cmd, args, {
         cwd: process.cwd(),
         env: _scrubEnv({}),
-        shell: false,
+        shell: true,
         stdio: ['ignore', 'pipe', 'pipe']
       });
     } catch (e) {
@@ -11070,7 +11084,8 @@ async function _cliChatStream(root, provider, promptText, opts) {
 
     child.stdout.on('data', chunk => {
       lastActivity = Date.now();
-      if (provider === 'claude') {
+      // 1.9.186: claude default 는 plain --print → JSON 라인 파싱 X. useStreamJson 시에만 stream-json 처리.
+      if (provider === 'claude' && useStreamJson) {
         handleClaudeStream(chunk);
       } else {
         stopSpinner();

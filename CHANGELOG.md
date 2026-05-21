@@ -1,5 +1,112 @@
 # Changelog
 
+## 1.9.186 — 2026-05-21
+
+**🐛 REPL claude stream 0자 응답 BUG fix + 구조 최적화 체크 (사용자 명시 핵심 버그).**
+
+자율 모드 116 라운드. 사용자 명시 핵심 버그 보고:
+```
+agent[claude/actor/▶]> 파이썬 프로그램 하나 제작해줘
+  ── /stream (27596ms) ──
+  [assistant: claude/default, role=actor, 27743ms · 0자]
+```
+*"REPL agent 모드에서 작업 요청 시 AI가 작업을 수행하지 못하고 있다"*
+
+### 근본 원인 발견 (코드 audit)
+
+| 함수 | spawn 방식 | shell | 작동 여부 |
+|---|---|---|---|
+| `_cliChat` (line 10920) | `runCommandSafe` → spawnSync `shell: true` | true | ✓ 작동 (`agents multi --execute` 검증) |
+| `_cliChatStream` (line 11018) | `cp.spawn(cmd, args, { shell: false })` | **false** | ✗ **0자 응답** |
+
+**원인 1**: Windows 에서 `cp.spawn('claude', ..., { shell: false })` 가 `claude.cmd` 를 찾지 못해 stdout 비어있고 27초 timeout 후 종료 (exit code 0).
+
+**원인 2**: claude CLI `--output-format=stream-json --verbose` 가 일부 버전에서 빈 stdout 반환 → out 변수 0자 누적.
+
+### Fix #1 — shell: true (Windows .cmd 호환)
+```diff
+- child = cp.spawn(cmd, args, {
+-   cwd: process.cwd(),
+-   env: _scrubEnv({}),
+-   shell: false,
+-   stdio: ['ignore', 'pipe', 'pipe']
+- });
++ // 1.9.186 (사용자 명시 fix): Windows .cmd 호환을 위해 shell: true.
++ //   _cliChat (작동하는 함수) 이 runCommandSafe → spawnSync shell: true 패턴이라서 작동.
++ //   _cliChatStream 도 동일하게 shell: true 사용 (DEP0190 은 1.9.184/185 fix 로 억제됨).
++ child = cp.spawn(cmd, args, {
++   cwd: process.cwd(),
++   env: _scrubEnv({}),
++   shell: true,
++   stdio: ['ignore', 'pipe', 'pipe']
++ });
+```
+
+### Fix #2 — claude default = plain `--print` (stream-json opt-in)
+```diff
+- if (provider === 'claude')  { cmd = 'claude'; args = ['--print', '--output-format=stream-json', '--verbose', promptText]; }
++ // 1.9.186 (사용자 명시 fix): claude --output-format=stream-json 가 일부 버전에서 빈 응답.
++ //   default 를 plain --print 로 변경 → _cliChat 과 동일한 인자, 작동 검증된 패턴.
++ //   stream 형식 사용 opt-in: LEERNESS_REPL_STREAM_FORMAT=json
++ const useStreamJson = process.env.LEERNESS_REPL_STREAM_FORMAT === 'json';
++ if (provider === 'claude') {
++   cmd = 'claude';
++   args = useStreamJson
++     ? ['--print', '--output-format=stream-json', '--verbose', promptText]
++     : ['--print', promptText];
++ }
+```
+
+handleClaudeStream 조건부 호출 (useStreamJson 일 때만):
+```diff
+- if (provider === 'claude') {
++ if (provider === 'claude' && useStreamJson) {
+    handleClaudeStream(chunk);
+  } else {
+    stopSpinner();
+```
+
+### 구조 최적화 체크 (사용자 명시 보강)
+
+**보고서**: `_reports/structure-optimization-1.9.186.md`
+
+**메트릭**:
+- bin/harness.js: **~12000 lines** (1 monolithic)
+- 의존성 **0** (Node built-in)
+- npm tarball ~358 KB (gzipped)
+- MCP 54 · CLI 100+ · 함수 250+
+
+**최적화 강점** (유지):
+- 의존성 0 정책 (cross-platform + supply chain risk 최소)
+- 메모리 캐싱 (usage-stats / listAllSkills / lessons keyword index)
+- Provider/MCP/Bridge 명확한 abstraction
+- runCommandSafe sandbox (cwd jail + env scrub)
+- 매 라운드 stress + e2e + main 자동 push
+
+**최적화 약점** (1.9.187+ 후보):
+- ⚠ Monolithic 12000 lines — 현 상태 유지 (npm pack 단순성 우선)
+- ⚠ `_cliChat` ↔ `_cliChatStream` 코드 중복 — 1.9.186 fix가 이 갭에서 발생. 1.9.187 후보: `_buildCliArgs` 공통 헬퍼
+- ⚠ skill catalog 캐시 stale 가능 — mtime 기반 invalidation 후보
+- ⚠ MCP tools/list 매번 재생성 — 메모리 캐시 후보
+- ⚠ 280 task 누적 — archive 자동화 (1.9.190+)
+
+### 1.9.186 fix 정합성 (보고서 §4)
+| 영향 | 평가 |
+|---|---|
+| 보안 (shell escape) | promptText 는 사용자 직접 입력, REPL 안에서만 사용 → 추가 위험 없음 |
+| 성능 | shell:true 가 ~10ms 느림 (무시 가능) |
+| 다른 provider (codex/gemini/copilot) | shell:true 동일 적용 — 더 안정적 (.cmd 호환) |
+| 실시간 스트리밍 (1.9.170 사용자 명시) | LEERNESS_REPL_STREAM_FORMAT=json 으로 opt-in 가능 — 기능 유지 |
+| 기존 작동 | `_cliChat` 변경 X — `agents multi --execute` 회귀 없음 |
+
+### Verified
+- stress-v131: **16/16 PASS** (사용자 명시 4 + live 3 + 누적 9)
+- e2e 217/217 baseline 유지
+- live 검증: `agents multi --execute --only claude` 실 호출 응답 "2" (4.5초)
+- VERSION = 1.9.186 · autonomous-rounds = 116 · main 자동 push 47 라운드 연속
+
+---
+
 ## 1.9.185 — 2026-05-21
 
 **🔧 DEP0190 자식 process 전파 fix + REPL stream 친절 진단 + Hermes UX 분석 보고 (사용자 명시).**

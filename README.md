@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.185-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v130-15%2F15-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-115-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-46_rounds-success)]() [![dep-child](https://img.shields.io/badge/DEP0190-부모%2B자식_전파-success)]() [![repl-diag](https://img.shields.io/badge/REPL_실패-친절_진단_안내-success)]() [![hermes-ux](https://img.shields.io/badge/Hermes_UX-분석_완료-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.186-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v131-16%2F16-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-116-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-47_rounds-success)]() [![repl-fix](https://img.shields.io/badge/REPL_stream-0자_응답_BUG_fix-success)]() [![structure](https://img.shields.io/badge/구조_최적화-체크_완료-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![dep-child](https://img.shields.io/badge/DEP0190-부모%2B자식_전파-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.185  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.186  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🔧 DEP0190 자식 전파·REPL 친절 진단·Hermes UX 분석           ║
+  ║  🐛 REPL stream 0자 응답 BUG fix · 구조 최적화 체크           ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 
