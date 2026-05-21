@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
+const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
 const VERSION = '1.9.178';
