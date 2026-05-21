@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.179';
+const VERSION = '1.9.180';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -11053,7 +11053,13 @@ async function _agentRepl(root, opts) {
   // 1.9.153: .env 자동 로드 (REPL 진입 직전) — install 직후 LEERNESS_ENABLE_* 즉시 반영
   try { _loadEnvFile(root); } catch {}
   const readline = require('readline');
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  // 1.9.180: completer no-op — readline 의 Tab completion 가로채기를 차단해 keypress 리스너가 Tab cycle을 처리.
+  //   (사용자 명시: "모델/프로바이더 전환이 원활하지 않다" — readline Tab completion이 cycle 키를 가로채는 경우 fix)
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    completer: (line) => [[], line]  // 빈 completion + 원본 line 반환 → Tab은 keypress 리스너로만 처리
+  });
   const isTty = process.stdout.isTTY;
   const C = isTty ? {
     cy: s => `\x1b[36m${s}\x1b[0m`, dim: s => `\x1b[2m${s}\x1b[0m`,
@@ -11187,6 +11193,11 @@ async function _agentRepl(root, opts) {
     + C.green(`role=${state.role}`) + '  ·  '
     + C.yel(`perms=${permMode}`) + '  ·  '
     + (state.streamMode ? C.green('▶ stream=on') : C.dim('□ stream=off')));
+  // 1.9.180: 채팅 영역 진입 separator (사용자 명시 — "고정 헤더 + 채팅 형식")
+  //   환영 화면 끝에 명확한 구분선 + 안내 → 채팅 시작 명확.
+  log('');
+  log(C.dim('  ─────────────────────────────  채팅 시작  ─────────────────────────────'));
+  log(C.dim('  메시지 입력 후 Enter · :help 으로 명령 목록 · Ctrl+C 로 종료'));
   // 1.9.155: REPL 진입 시 handoff 컨텍스트 자동 노출 (UX 개선 — 사용자가 매번 :handoff 안 해도 컨텍스트 인지)
   try {
     const hf = cp.spawnSync(process.execPath, [__filename, 'handoff', root, '--compact', '--no-drift-check', '--no-headline'], {
@@ -11224,20 +11235,34 @@ async function _agentRepl(root, opts) {
         } catch {}
         return _PROVIDER_CYCLE_ORDER.slice();
       };
+      // 1.9.180: cycleProvider/cycleModel — 시각 피드백 강화 (사용자 명시 "원활하지 않다").
+      //   이전: 한 줄 ⇄ 메시지만. 1.9.180: provider 위치 표시 [1/5] + bold highlight + 활성 여부 표시.
       const cycleProvider = (reverse) => {
         const list = getProviders();
         let idx = list.indexOf(state.provider);
         if (idx < 0) idx = 0;
         idx = reverse ? (idx - 1 + list.length) % list.length : (idx + 1) % list.length;
         state.provider = list[idx];
-        state.model = null;  // 새 provider 기본 모델
+        state.model = null;
         const cat = _PROVIDER_MODEL_CATALOG[state.provider];
-        const hint = cat?.length ? `  (${cat.length}개 모델 catalog — Shift+Tab으로 cycle)` : '';
-        // 현재 입력 라인 보존: cursor를 라인 시작으로 이동 → 클리어 → status + prompt 재출력
+        // 활성 여부 사전 확인 (1.9.180 UX — 사용자가 즉시 인지)
+        let activeMark = '';
+        try {
+          if (state.provider !== 'ollama') {
+            const agent = EXTERNAL_AGENTS.find(a => a.id === state.provider);
+            if (agent) {
+              const st = _checkAgent(agent);
+              activeMark = st.status === 'ready' ? C.green(' ✓ ready') : C.yel(` ⚠ ${st.status}`);
+            }
+          }
+        } catch {}
         process.stdout.write('\r\x1b[K');
-        process.stdout.write(C.green(`  ⇄ provider: ${state.provider}${hint}\n`));
+        process.stdout.write(C.bold(C.green(`  ⇄ provider [${idx + 1}/${list.length}]: ${state.provider}`)) + activeMark + '\n');
+        if (cat?.length) {
+          process.stdout.write(C.dim(`    └ ${cat.length}개 모델 catalog · Shift+Tab으로 model cycle\n`));
+        }
         rl.setPrompt(prompt());
-        rl.prompt(true);  // preserve cursor
+        rl.prompt(true);
       };
       const cycleModel = (reverse) => {
         const cat = _PROVIDER_MODEL_CATALOG[state.provider] || [];
@@ -11252,17 +11277,25 @@ async function _agentRepl(root, opts) {
         idx = reverse ? (idx - 1 + cat.length) % cat.length : (idx + 1) % cat.length;
         state.model = cat[idx].id;
         process.stdout.write('\r\x1b[K');
-        process.stdout.write(C.green(`  ⇄ model: ${state.model}  ${C.dim('— ' + (cat[idx].note || ''))}\n`));
+        process.stdout.write(C.bold(C.mag(`  ⇄ model [${idx + 1}/${cat.length}]: ${state.model}`)) + '\n');
+        if (cat[idx].note) {
+          process.stdout.write(C.dim(`    └ ${cat[idx].note}\n`));
+        }
         rl.setPrompt(prompt());
         rl.prompt(true);
       };
       process.stdin.on('keypress', (str, key) => {
         if (!key) return;
         if (key.name === 'tab') {
-          cycleProvider(key.shift === true);
+          // 1.9.180 fix: Shift+Tab → cycleModel (사용자 명시 의도).
+          //   이전 (1.9.170): cycleProvider(key.shift) — Shift+Tab 시 provider reverse cycle만 되어 model 전환이 불가능했음.
+          //   사용자 명시: "Tab=provider, Shift+Tab=model 선택과 전환이 간편하게".
+          if (key.shift === true) {
+            cycleModel(false);  // Shift+Tab → 현재 provider의 다음 model
+          } else {
+            cycleProvider(false);  // Tab → 다음 provider
+          }
         }
-        // Shift+\ 또는 다른 모델 cycle alias — 일부 터미널에서 Shift+Tab 처리 어려움 대비
-        // (Shift+Tab은 key.name='tab' + key.shift=true 로 위에서 처리됨)
       });
     } catch (e) {
       log(C.dim(`  (Tab cycle 비활성: ${e.message})`));

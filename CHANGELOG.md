@@ -1,5 +1,73 @@
 # Changelog
 
+## 1.9.180 — 2026-05-21
+
+**🔧 REPL Tab cycle 핵심 fix + 채팅 영역 separator — 사용자 명시 (직접 구동 테스트 결과).**
+
+자율 모드 110 라운드. 사용자 명시: *"REPL agent 모드를 네가 직접 구동해서 테스트해줘 / REPL agent 모드는 고정된 헤더와 채팅형식이어야해 / 그리고 모델이나 프로바이더 전환이 원활하지않은거같아"*.
+
+### 핵심 fix — Tab cycle 실 동작 보장
+
+#### 1. readline `completer` no-op
+```js
+// 1.9.180: completer no-op — readline의 자체 Tab completion이 keypress 리스너를 가로채는 문제 차단
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  completer: (line) => [[], line]
+});
+```
+이전: 사용자가 Tab을 누르면 readline 기본 completer가 빈 결과를 표시하며 prompt를 재출력해 keypress 리스너가 동작하지 않을 때가 있었음.
+지금: `completer: () => [[], line]` 명시로 readline의 Tab 가로채기 차단 → keypress 리스너가 항상 발동.
+
+#### 2. Shift+Tab → `cycleModel(false)` 매핑 수정 (CRITICAL)
+```js
+process.stdin.on('keypress', (str, key) => {
+  if (!key) return;
+  if (key.name === 'tab') {
+    // 1.9.180 fix: Shift+Tab → cycleModel (이전 cycleProvider 잘못)
+    if (key.shift === true) {
+      cycleModel(false);  // Shift+Tab → 현재 provider의 모델 cycle
+    } else {
+      cycleProvider(false);  // Tab → 다음 provider
+    }
+  }
+});
+```
+이전 (1.9.170): `cycleProvider(key.shift)` — Shift+Tab은 provider reverse 였고 model cycle 키가 없었음.
+지금: 사용자 의도대로 `Tab=provider`, `Shift+Tab=model`.
+
+### 시각 피드백 강화 (사용자 명시: "원활하지 않음")
+```
+⇄ provider [3/5]: claude ✓ ready
+└ 7개 모델 catalog · Shift+Tab으로 model cycle
+
+⇄ model [2/7]: claude-opus-4
+└ 최신 thinking 모델
+```
+- bold green provider · bold magenta model
+- `[idx/total]` 위치/총수 표시
+- ready/⚠ status 활성 여부 표시
+- catalog 모델 수 노출
+
+### 채팅 영역 separator (사용자 명시: "고정된 헤더와 채팅형식")
+```
+[... 환영 화면 (헤더 + Tips + What's new + Slash + 키보드 + 상태바) ...]
+
+  ─────────────────────────────  채팅 시작  ─────────────────────────────
+  메시지 입력 후 Enter · :help 으로 명령 목록 · Ctrl+C 로 종료
+
+agent[ollama/actor/▶]> _
+```
+환영 화면 (고정 헤더) 과 입력 영역 (채팅) 의 시각적 구분을 명확하게.
+
+### Verified
+- e2e 217/217 baseline 유지
+- stress-v125: **17/17** (Tab cycle fix 3 + 시각 피드백 4 + 채팅 영역 3 + 누적 회귀 7)
+- VERSION = 1.9.180 · autonomous-rounds = 110 · main 자동 push 41 라운드 연속
+
+---
+
 ## 1.9.179 — 2026-05-21
 
 **🎨 REPL 환영 화면 재디자인 — Hermes/Claude/Codex/Gemini CLI 스타일 (사용자 명시).**

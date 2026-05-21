@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.179-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v124-19%2F19-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-109-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-40_rounds-success)]() [![repl-design](https://img.shields.io/badge/REPL_환영-Hermes%2FClaude%2FCodex_스타일-success)]() [![npm-auto](https://img.shields.io/badge/npm_auto--publish-NPM__TOKEN_통합-success)]() [![auto-review](https://img.shields.io/badge/task_add-자동_review_trigger-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.180-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v125-17%2F17-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-110-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-41_rounds-success)]() [![repl-tab](https://img.shields.io/badge/REPL_Tab_cycle-completer_no--op%2BShift_fix-success)]() [![repl-chat](https://img.shields.io/badge/REPL_고정헤더-채팅영역_separator-success)]() [![npm-auto](https://img.shields.io/badge/npm_auto--publish-NPM__TOKEN_통합-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.179  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.180  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🎨 REPL 환영 화면 재디자인 (Hermes/Claude/Codex 스타일)      ║
+  ║  🔧 REPL Tab cycle fix · 채팅 영역 separator (고정 헤더+채팅) ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 
