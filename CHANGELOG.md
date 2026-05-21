@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.9.194 — 2026-05-21
+
+**🎯 E축 (게으름 방지) 보강 — handoff 다음 단계 자동 제안 + 24h+ 무진척 lazy 감지.**
+
+자율 모드 124 라운드. 1.9.192 C축 / 1.9.193 B축 보강에 이어 **E축 (9/10 → 목표 9.5/10)** 보강.
+
+### 사용자 의도 정렬 (1.9.191 verbatim)
+> *"게으름 방지등등 최고의 도구"*
+
+### 1. handoff 다음 단계 자동 제안 (E축 핵심)
+- 현재 in-progress task description + Memory Surface (decisions/lessons/plan) 조합 → 다음 단계 1-3개 제안
+- 사용자/AI 가 "Next Exact Step" 을 직접 채우지 않아도 즉시 노출
+- **7개 휴리스틱**:
+  1. lessons.md 실패 매칭 → 회피 전략 적용 (`leerness lessons --auto`)
+  2. plan.md milestone 매칭 → milestone 검증 (`leerness plan list`)
+  3. decisions.md 결정 매칭 → 영향 확인 (`leerness decision list`)
+  4. review-evidence.md 부재 → e2e 실행 (`node ./scripts/e2e.js`)
+  5. 24h+ 정체 → task status 갱신 (`leerness task update`)
+  6. 버전 변동 task → CHANGELOG/README 갱신 확인 (`leerness whats-new`)
+  7. stress test 누락 → 새 stress 작성 권장
+- 끄기: `--no-next-actions` 또는 `LEERNESS_NO_NEXT_ACTIONS=1`
+
+### 2. 24h+ 무 진척 lazy 감지
+- progress-tracker.md mtime ≥ 24h → `## ⚠ 진척 정체 감지` 자동 출력
+- 현재 in-progress task ID + request 요약 표시
+- 권장 명령: `leerness task update <id> --status` / `leerness lazy detect --json`
+- 끄기: `--no-lazy-warn` 또는 `LEERNESS_NO_LAZY_WARN=1`
+
+### 3. 누적 회귀 (1.9.188~193) — 모두 유지
+- [1.9.193] agents multi consensus → lessons.md 자동
+- [1.9.192] _loadOfficialSkillCache + 24h 캐시
+- [1.9.191] 구조 최적화 보고서 88/100
+- [1.9.190] _selectOne/_selectMany Ctrl+C 즉시 종료
+- [1.9.189] _showSlashCommandList + Tab cycle 한 줄 갱신
+- [1.9.188] stdin prompt 전달
+
+### 4. stress-v139 — 15/15 PASS
+- E축 보강 (6: 함수 + 섹션 + 임시 워크스페이스 통합) + 성능 (2) + 누적 회귀 (7)
+- 임시 워크스페이스 mtime 25h 강제 → ⚠ 진척 정체 감지 ✓
+- 성능: --version cold start avg **479 ms** · MCP 54 도구 **416 ms**
+
+### 5. 5축 매트릭스 변동
+| 축 | 1.9.193 | 1.9.194 | Δ |
+|---|---|---|---|
+| E. 게으름 방지 | 9/10 | **9.5/10** | +0.5 (다음 단계 자동 제안 + lazy 감지) |
+| 종합 | 45.5/50 (91%) | **46/50 (92%)** | +1% |
+
+### 6. 자동 release 흐름
+- main 자동 push **56 라운드 연속** (1.9.140~194)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.193 — 2026-05-21
 
 **🤖 B축 (멀티 Sub-Agent 오케스트라) 보강 — agents multi consensus 결과 자동 lessons.md 저장 + 캐시 7일 stale hint.**

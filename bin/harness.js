@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.193';
+const VERSION = '1.9.194';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1660,6 +1660,112 @@ async function skillAutoCacheCmd(root, sub) {
     log(`    • [${e.preset || e.source || '?'}] ${e.name} — ${(e.description || '').slice(0, 60)}`);
   }
   if (c.expired) log(`  → 갱신: leerness skill auto-cache refresh`);
+}
+
+// 1.9.194: E축 (게으름 방지) — handoff 에서 다음 단계 1-3개 자동 제안
+//   현재 in-progress task description + Memory Surface (decisions/lessons/plan) 조합 →
+//   "다음 단계로 무엇을 할지" 추론 (사용자/AI 직접 입력 없이 즉시 노출)
+//   알고리즘:
+//     1) lessons.md 에 keyword 매칭 + 실패/롤백 키워드 → "회피 전략 적용"
+//     2) plan.md 에 keyword 매칭 + M-XXXX → "계획 milestone 검증"
+//     3) decisions.md 에 keyword 매칭 → "결정 N 영향 확인"
+//     4) review-evidence.md 부재 → "verify-code 또는 e2e 실행"
+//     5) progress-tracker.md 24h+ 정체 → "task status 갱신"
+//     6) CHANGELOG 보강 부재 → "버전 변경 시 CHANGELOG 갱신"
+//     7) stress-vXXX 누락 → "stress test 작성"
+//   1.9.116 brainstorm 회수와 다른 점: brainstorm 은 "관련 hits 회수" / next-actions 는 "다음 실행 명령 제안"
+function _suggestNextActions(root, latestRow, keyword) {
+  const actions = [];
+  const taskText = String(latestRow.request || '').toLowerCase();
+  const fuzzyRe = keyword ? new RegExp(escapeRegex(keyword.slice(0, Math.max(4, Math.floor(keyword.length * 0.7)))), 'i') : null;
+
+  // 1) lessons.md 실패 매칭 → 회피 전략
+  try {
+    if (fuzzyRe && exists(lessonsPath(root))) {
+      const lt = read(lessonsPath(root));
+      const blocks = lt.split(/\n### /);
+      const hits = blocks.filter(b => fuzzyRe.test(b) && /(실패|fail|롤백|버그|incomplete)/i.test(b));
+      if (hits.length > 0) {
+        actions.push({ icon: '🛡', title: `과거 실패 회피 — lessons.md 에 "${keyword}" 관련 ${hits.length}건`, command: `leerness lessons --auto --path .` });
+      }
+    }
+  } catch {}
+
+  // 2) plan.md milestone 매칭 → milestone 검증
+  try {
+    if (fuzzyRe && exists(planPath(root))) {
+      const pt = read(planPath(root));
+      const milestones = (pt.match(/^### (M-\d{4})\..*$/gm) || []).filter(l => fuzzyRe.test(l));
+      if (milestones.length > 0) {
+        const m = milestones[0].match(/M-\d{4}/);
+        if (m) actions.push({ icon: '🎯', title: `plan.md milestone ${m[0]} 검증 — "${keyword}" 관련`, command: `leerness plan list --filter "${keyword}"` });
+      }
+    }
+  } catch {}
+
+  // 3) decisions.md 결정 매칭
+  try {
+    if (fuzzyRe && exists(decisionsPath(root))) {
+      const dt = read(decisionsPath(root));
+      const blocks = _extractDecisionBlocks(dt);
+      const hits = blocks.filter(b => fuzzyRe.test(b));
+      if (hits.length > 0) {
+        actions.push({ icon: '💭', title: `decisions.md "${keyword}" 관련 결정 ${hits.length}건 영향 확인`, command: `leerness decision list --filter "${keyword}"` });
+      }
+    }
+  } catch {}
+
+  // 4) review-evidence.md 부재 → e2e
+  try {
+    if (!exists(evidencePath(root)) || fs.statSync(evidencePath(root)).size < 100) {
+      actions.push({ icon: '🧪', title: `review-evidence.md 비어있음 — e2e 또는 verify-code 실행`, command: `node ./scripts/e2e.js` });
+    }
+  } catch {}
+
+  // 5) 24h+ 정체 → task status 갱신 (handoff lazy-warn 과 별개 — 다음 단계 명령)
+  try {
+    const pp = progressPath(root);
+    if (exists(pp)) {
+      const ageHours = Math.floor((Date.now() - fs.statSync(pp).mtimeMs) / 3600000);
+      if (ageHours >= 24 && latestRow.id) {
+        actions.push({ icon: '🔄', title: `progress-tracker ${ageHours}h 정체 — task ${latestRow.id} status 갱신`, command: `leerness task update ${latestRow.id} --status completed` });
+      }
+    }
+  } catch {}
+
+  // 6) CHANGELOG / README 버전 일치 확인 (1.9.X bump 후 자주 누락되는 단계)
+  try {
+    if (/(\d\.\d\.\d+)/.test(taskText) || /(bump|version|release)/i.test(taskText)) {
+      actions.push({ icon: '📝', title: `버전 변동 task — CHANGELOG.md / README.md 갱신 확인`, command: `node ./bin/harness.js whats-new .` });
+    }
+  } catch {}
+
+  // 7) stress test 누락 (자율 라운드 자주 누락)
+  try {
+    const stressDir = path.resolve(root, '..', '_apps', 'leerness-stress', 'bin');
+    if (exists(stressDir)) {
+      const files = fs.readdirSync(stressDir).filter(f => /^stress-v\d+\.js$/.test(f));
+      if (files.length > 0) {
+        const versions = files.map(f => Number(f.match(/v(\d+)/)[1])).sort((a, b) => b - a);
+        const latest = versions[0];
+        // 현재 라운드 = 1.9.X 에서 stress-v(X-55) 정도? 단순히 최신 stress 가 7일+ 오래되면 권장
+        const latestFile = path.join(stressDir, `stress-v${latest}.js`);
+        const ageHours = Math.floor((Date.now() - fs.statSync(latestFile).mtimeMs) / 3600000);
+        if (ageHours >= 24 && /(bump|version|보강|추가|기능)/.test(taskText)) {
+          actions.push({ icon: '🧬', title: `stress-v${latest} 마지막 갱신 ${ageHours}h 전 — 새 stress test 작성 권장`, command: `node _apps/leerness-stress/bin/stress-v${latest+1}.js` });
+        }
+      }
+    }
+  } catch {}
+
+  // 중복 제거 (icon+title 기준) + top 3
+  const seen = new Set();
+  return actions.filter(a => {
+    const key = a.icon + a.title.slice(0, 30);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 3);
 }
 
 // 1.9.182: handoff 컨텍스트 (현재 in-progress task) 에서 자동 query 추출
@@ -3553,6 +3659,51 @@ function handoff(root) {
                       log(dim(`  💡 공식 스킬 catalog 캐시 없음 — \`leerness skill auto-cache refresh\` 로 vercel-labs/anthropics 캐시 생성 (1.9.192)`));
                     }
                   } catch {}
+                }
+              }
+            } catch {}
+          }
+          // 1.9.194: E축 (게으름 방지) 보강 — handoff 다음 단계 1-3개 자동 제안
+          //   현재 in-progress task description + Memory Surface (decisions/lessons/plan) 조합 →
+          //   "다음 단계로 무엇을 할지" 3개를 즉시 제안 (사용자가 직접 채우지 않아도 AI에게 노출됨)
+          //   skill installed 여부와 무관 — keyword 만 있으면 동작 (게으름 방지는 모든 워크스페이스 필수)
+          //   끄기: --no-next-actions 또는 LEERNESS_NO_NEXT_ACTIONS=1
+          if (!has('--no-next-actions') && !has('--quiet') && process.env.LEERNESS_NO_NEXT_ACTIONS !== '1') {
+            try {
+              const actions = _suggestNextActions(root, latestRow, keyword);
+              if (actions.length > 0) {
+                const isTty = process.stdout && process.stdout.isTTY;
+                const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+                const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+                log(grn(`## 🎯 다음 단계 자동 제안 (1.9.194 E축 — 게으름 방지) — 키워드 "${keyword}"`));
+                for (const a of actions) {
+                  log(dim(`  ${a.icon} ${a.title}`));
+                  if (a.command) log(dim(`     \`${a.command}\``));
+                }
+                log(dim(`  → 직접 입력: leerness next-action add "<text>"`));
+                log('');
+              }
+            } catch {}
+          }
+          // 1.9.194: 24h+ 무 진척 lazy 감지 — progress-tracker mtime 기반
+          //   현재 in-progress task 가 24h 이상 변동 없으면 "lazy 의심" hint
+          //   끄기: --no-lazy-warn 또는 LEERNESS_NO_LAZY_WARN=1
+          if (!has('--no-lazy-warn') && !has('--quiet') && process.env.LEERNESS_NO_LAZY_WARN !== '1') {
+            try {
+              const pp = progressPath(root);
+              if (exists(pp)) {
+                const ageMs = Date.now() - fs.statSync(pp).mtimeMs;
+                const ageHours = Math.floor(ageMs / 3600000);
+                if (ageHours >= 24) {
+                  const isTty = process.stdout && process.stdout.isTTY;
+                  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+                  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+                  const ageLabel = ageHours < 48 ? `${ageHours}h` : `${Math.floor(ageHours/24)}d`;
+                  log(yel(`## ⚠ 진척 정체 감지 (1.9.194 E축) — progress-tracker 마지막 변동 ${ageLabel} 전`));
+                  log(dim(`  현재 in-progress task: ${latestRow.id} ${(latestRow.request || '').slice(0, 60)}`));
+                  log(dim(`  → 변경: leerness task update ${latestRow.id} --status in-progress  또는  --status completed`));
+                  log(dim(`  → 회고: leerness lazy detect --json`));
+                  log('');
                 }
               }
             } catch {}
