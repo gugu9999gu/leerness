@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.195';
+const VERSION = '1.9.196';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -3704,10 +3704,78 @@ function handoff(root) {
                   log(dim(`  → 변경: leerness task update ${latestRow.id} --status in-progress  또는  --status completed`));
                   log(dim(`  → 회고: leerness lazy detect --json`));
                   log('');
+                  // 1.9.196: D축 (장기 맥락) 보강 — 7일+ critical 단계 알림 + 자동 회고 권장
+                  if (ageHours >= 24 * 7) {
+                    const days = Math.floor(ageHours / 24);
+                    log(yel(`  🔴 7일+ 장기 정체 (${days}d) — 장기 맥락 손실 위험 (1.9.196 D축)`));
+                    log(dim(`     → 즉시 회고: leerness retro . --since ${days}d`));
+                    log(dim(`     → 또는 archive: leerness task drop ${latestRow.id}`));
+                    log('');
+                  }
                 }
               }
             } catch {}
           }
+          // 1.9.196: D축 (장기 맥락 유지) 보강 — 30일+ 전 lessons 자동 회고 (long-term memory recall)
+          //   keyword 와 매칭되는 30일+ 오래된 lessons 1건 노출 → 잊혀진 과거 교훈 재상기
+          //   끄기: --no-longterm-recall 또는 LEERNESS_NO_LONGTERM_RECALL=1
+          if (!has('--no-longterm-recall') && !has('--quiet') && process.env.LEERNESS_NO_LONGTERM_RECALL !== '1') {
+            try {
+              const lp = lessonsPath(root);
+              if (exists(lp)) {
+                const lt = read(lp);
+                const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+                const fuzzyRe = new RegExp(escapeRegex(keyword.slice(0, Math.max(4, Math.floor(keyword.length * 0.7)))), 'i');
+                // ### YYYY-MM-DD 블록 분리 → 30일+ 이전 + keyword 매칭
+                const blocks = lt.split(/\n### /).slice(1).map(b => '### ' + b);
+                const matches = [];
+                for (const b of blocks) {
+                  const m = b.match(/^### (\d{4}-\d{2}-\d{2})/);
+                  if (!m) continue;
+                  const blockDate = new Date(m[1]).getTime();
+                  if (isNaN(blockDate) || blockDate > cutoff) continue;
+                  if (fuzzyRe.test(b)) matches.push({ date: m[1], title: (b.split('\n')[0] || '').slice(0, 80) });
+                }
+                if (matches.length > 0) {
+                  const isTty = process.stdout && process.stdout.isTTY;
+                  const blu = s => isTty ? `\x1b[34m${s}\x1b[0m` : s;
+                  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+                  const oldest = matches[matches.length - 1];
+                  const ageDays = Math.floor((Date.now() - new Date(oldest.date).getTime()) / (24 * 3600 * 1000));
+                  log(blu(`## 🗄 장기 lessons 회고 (1.9.196 D축) — 키워드 "${keyword}" 관련 30일+ ${matches.length}건`));
+                  log(dim(`  최오래된: ${oldest.date} (${ageDays}일 전) — ${oldest.title}`));
+                  if (matches.length > 1) {
+                    log(dim(`  최근30일+: ${matches[0].date} — ${matches[0].title}`));
+                  }
+                  log(dim(`  → 전체 회고: cat .harness/lessons.md`));
+                  log('');
+                }
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+  }
+  // 1.9.196: ScheduleWakeup miss detector — 자율 모드 사용자 명시 "못일어나는 경우 종종 있음" (1.9.191) 후속
+  //   마지막 session 시간 (handoff mtime 또는 task-log 마지막 entry) > 2h ago 시 알림
+  //   끄기: LEERNESS_NO_WAKEUP_MISS=1
+  if (process.env.LEERNESS_NO_WAKEUP_MISS !== '1' && !has('--quiet') && !has('--no-wakeup-miss')) {
+    try {
+      const tlp = taskLogPath(root);
+      if (exists(tlp)) {
+        const ageMs = Date.now() - fs.statSync(tlp).mtimeMs;
+        const ageMin = Math.floor(ageMs / 60000);
+        // 자율 모드는 ~15분 cycle. 60분 이상 무 활동이면 wakeup miss 의심 (CronCreate 13min 백업과 함께)
+        if (ageMin >= 60) {
+          const isTty = process.stdout && process.stdout.isTTY;
+          const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+          const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+          const label = ageMin < 120 ? `${ageMin}분` : (ageMin < 1440 ? `${Math.floor(ageMin/60)}시간` : `${Math.floor(ageMin/1440)}일`);
+          log(yel(`## ⏰ ScheduleWakeup miss 의심 (1.9.196) — 마지막 활동 ${label} 전`));
+          log(dim(`  자율 모드 정상 cycle: ~15분. 60분 이상 무 활동 → 시스템 sleep 또는 wakeup 누락 가능성`));
+          log(dim(`  → 재개: 사용자가 "다음 라운드" 또는 "/loop" 입력`));
+          log('');
         }
       }
     } catch {}

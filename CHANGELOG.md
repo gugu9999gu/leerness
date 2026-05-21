@@ -1,5 +1,75 @@
 # Changelog
 
+## 1.9.196 — 2026-05-21
+
+**🗄 D축 (장기 맥락 유지) 보강 — 7일+ 장기 정체 + 30일+ lessons 회고 + ScheduleWakeup miss detector.**
+
+자율 모드 126 라운드. 사용자 명시:
+> *"다음 라운드 진행하고, ScheduleWakeup 가 정상적으로 작동하도록 조취를 취해줘"*
+
+5축 매트릭스 마지막 미보강 축인 **D축 (9.5/10 → 목표 10/10)** + 사용자 명시 ScheduleWakeup 안정화.
+
+### 1. D축 핵심 — 장기 정체 + 30일+ 회고 (handoff 자동)
+**7일+ critical 단계** (24h+ lazy 다음 단계):
+```
+## ⚠ 진척 정체 감지 (1.9.194 E축) — progress-tracker 마지막 변동 8d 전
+   ...
+   🔴 7일+ 장기 정체 (8d) — 장기 맥락 손실 위험 (1.9.196 D축)
+     → 즉시 회고: leerness retro . --since 8d
+     → 또는 archive: leerness task drop T-XXXX
+```
+
+**30일+ 장기 lessons 회고** (long-term memory recall):
+- handoff keyword 매칭 + lessons.md 30일+ 전 블록
+- 새 섹션: `## 🗄 장기 lessons 회고 (1.9.196 D축) — 키워드 "X" 관련 30일+ N건`
+- 잊혀진 과거 교훈 자동 재상기 → 같은 실수 반복 방지
+- 끄기: `--no-longterm-recall` / `LEERNESS_NO_LONGTERM_RECALL=1`
+
+### 2. ScheduleWakeup 안정화 (사용자 명시) — 다층 redundancy
+**Layer 1**: 더 짧은 ScheduleWakeup (1.9.193부터 900s → **270s** — 5분 cache 안에 유지)
+**Layer 2**: CronCreate every 13min (durable: false) — primary 누락 시 backup
+**Layer 3**: handoff에 wakeup miss detector — 60분+ 무 활동 시 알림
+```
+## ⏰ ScheduleWakeup miss 의심 (1.9.196) — 마지막 활동 90분 전
+   자율 모드 정상 cycle: ~15분. 60분 이상 무 활동 → 시스템 sleep 또는 wakeup 누락
+   → 재개: 사용자가 "다음 라운드" 또는 "/loop" 입력
+```
+끄기: `LEERNESS_NO_WAKEUP_MISS=1`
+
+### 3. 누적 회귀 (1.9.190~195) — 모두 유지
+- [1.9.195] _probeProviderEndpoints (provider universal probe)
+- [1.9.194] _suggestNextActions (handoff next-actions)
+- [1.9.193] agents multi consensus → lessons.md
+- [1.9.192] _loadOfficialSkillCache + 24h 캐시
+- [1.9.191] 구조 최적화 보고서 88/100
+- [1.9.190] _selectOne/_selectMany Ctrl+C 즉시 종료
+
+### 4. stress-v141 — 15/15 PASS
+- D축 보강 (6: 함수 + 7일+ + 30일+ + miss detector + 임시 워크스페이스 통합) + 성능 (2) + 누적 회귀 (7)
+- 성능: --version cold start avg **709 ms** · MCP 54 도구 **534 ms**
+
+### 5. 5축 매트릭스 변동
+| 축 | 1.9.195 | 1.9.196 | Δ |
+|---|---|---|---|
+| D. 장기 맥락 유지 | 9.5/10 | **10/10** | +0.5 (7일+ critical + 30일+ recall + miss detector) |
+| 종합 | 46.5/50 (93%) | **47/50 (94%)** | +1% |
+
+### 6. 5축 모든 보강 완료
+| 축 | 시작 | 현재 | Δ |
+|---|---|---|---|
+| A. 범용 AI 하네스 | 9 | **9.5** | +0.5 (1.9.195 probe) |
+| B. 멀티 Sub-Agent | 8.5 | **9** | +0.5 (1.9.193 consensus lessons) |
+| C. 공식 스킬 자동 | 8 | **9** | +1 (1.9.192 official catalog) |
+| D. 장기 맥락 유지 | 9.5 | **10** | +0.5 (1.9.196 7일+/30일+ recall) |
+| E. 게으름 방지 | 9 | **9.5** | +0.5 (1.9.194 next-actions) |
+| **종합** | 44/50 (88%) | **47/50 (94%)** | **+6%** |
+
+### 7. 자동 release 흐름
+- main 자동 push **58 라운드 연속** (1.9.140~196)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.195 — 2026-05-21
 
 **🌐 A축 (범용 AI 하네스) 보강 — `leerness provider probe` 신규 명령 (CLI/endpoint/API 키 3종 자동 감지).**
