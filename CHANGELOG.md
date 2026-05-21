@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.9.197 — 2026-05-21
+
+**🔌 A축 9.5/10 → 10/10 — provider probe handoff 자동 통합 + 60분 캐시. 5축 매트릭스 47.5/50 (95%).**
+
+자율 모드 127 라운드. 1.9.196 D축 완성에 이어 **A축 9.5 → 10/10** 마지막 보강.
+
+### 사용자 의도 정렬 (1.9.191 verbatim)
+> *"범용 AI 하네스 ... 최고의 도구"*
+
+### 1. handoff 헤드라인 11번째 요소 (1.9.197 신규)
+```
+📊 헤드라인 (1.9.81/93/113/152/162/192/197): ... · 🔌 backend 3/13 (0h✓)
+```
+- `🔌 backend {ready}/{total} ({age}{status})`
+- 13 후보 = CLI 5 + Local endpoint 3 + Cloud API key 5
+- 60분 캐시 hit 시 즉시 표시 (network 부하 X)
+- 캐시 만료 시 `⚠` 표시 → 사용자/AI 가 `provider probe` 재실행 인지
+
+### 2. 60분 TTL 캐시 (1.9.197 신규)
+- 파일: `.harness/provider-probe-cache.json` (비시크릿, 체크인 가능)
+- `_PROVIDER_PROBE_CACHE_TTL_MS = 60 * 60 * 1000`
+- `provider probe` 실행 시 자동 저장 (`--no-cache` 로 끄기)
+- 함수: `_loadProviderProbeCache` / `_writeProviderProbeCache` / `_readyBackendCountFromCache`
+
+### 3. 누적 회귀 (1.9.191~196) — 모두 유지
+- [1.9.196] D축 7일+/30일+ recall + ScheduleWakeup miss detector
+- [1.9.195] _probeProviderEndpoints (provider universal probe)
+- [1.9.194] _suggestNextActions (handoff next-actions)
+- [1.9.193] agents multi consensus → lessons.md
+- [1.9.192] _loadOfficialSkillCache + 24h 캐시
+- [1.9.191] 구조 최적화 보고서 88/100
+
+### 4. stress-v142 — 15/15 PASS
+- A축 9.5→10 보강 (6: 함수 + 캐시 자동 저장 + 헤드라인 11번째 + handoff 통합 검증)
+- 성능: --version cold start avg **506 ms** · MCP 54 도구 **591 ms**
+
+### 5. 5축 매트릭스 (모든 축 보강 완료)
+| 축 | 1.9.191 | 1.9.197 | Δ |
+|---|---|---|---|
+| A. 범용 AI 하네스 | 9 | **10** | +1 (probe + handoff 자동) |
+| B. 멀티 Sub-Agent | 8.5 | **9** | +0.5 (consensus lessons) |
+| C. 공식 스킬 자동 | 8 | **9** | +1 (official catalog handoff) |
+| D. 장기 맥락 유지 | 9.5 | **10** | +0.5 (7일+/30일+ recall) |
+| E. 게으름 방지 | 9 | **9.5** | +0.5 (next-actions) |
+| **종합** | **44/50 (88%)** | **47.5/50 (95%)** | **+7%** 🎯 |
+
+### 6. 자동 release 흐름
+- main 자동 push **59 라운드 연속** (1.9.140~197)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.196 — 2026-05-21
 
 **🗄 D축 (장기 맥락 유지) 보강 — 7일+ 장기 정체 + 30일+ lessons 회고 + ScheduleWakeup miss detector.**

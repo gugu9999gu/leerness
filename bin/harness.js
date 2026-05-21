@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.196';
+const VERSION = '1.9.197';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -3487,10 +3487,19 @@ function handoff(root) {
           parts.push(`🌐 official ${m.total}/${m.cacheTotal} (${ageStr}${status})`);
         }
       } catch {}
+      // 11) 1.9.197: A축 (범용 AI 하네스) 9.5→10 보강 — provider probe 60분 캐시 자동 노출
+      //     사용자 명시: "범용 AI 하네스 ... 최고의 도구" — 매 handoff 시 11 backend ready 상태 즉시 노출
+      try {
+        const pb = _readyBackendCountFromCache(root);
+        if (pb.hasCache) {
+          const ageLabel = pb.ageHours != null ? (pb.ageHours < 24 ? `${pb.ageHours}h` : `${Math.floor(pb.ageHours/24)}d`) : '?';
+          parts.push(`🔌 backend ${pb.ready}/${pb.total} (${ageLabel}${pb.expired ? '⚠' : '✓'})`);
+        }
+      } catch {}
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197): ${parts.join(' · ')}`));
       }
     } catch {}
   }
@@ -5586,6 +5595,8 @@ function providerCmd(root, sub, ...args) {
       const json = has('--json');
       const timeoutMs = Number(arg('--timeout', '1500'));
       const results = await _probeProviderEndpoints(root, timeoutMs);
+      // 1.9.197: 캐시 자동 저장 (handoff 자동 통합용)
+      if (!has('--no-cache')) _writeProviderProbeCache(root, results);
       if (json) { log(JSON.stringify(results, null, 2)); return; }
       log(`# leerness provider probe (1.9.195 — A축 범용 AI 하네스 보강)`);
       log(`타임아웃: ${timeoutMs}ms`);
@@ -5663,6 +5674,41 @@ async function _probeProviderEndpoints(root, timeoutMs) {
     result.cloudKeys.push({ key: k, present, mask: present ? `${val.slice(0, 4)}...${val.slice(-2)}` : null });
   }
   return result;
+}
+
+// 1.9.197: A축 9.5→10 보강 — provider probe 결과 60분 캐시 (handoff 자동 통합)
+//   사용자 명시 (1.9.191): "범용 AI 하네스 ... 최고의 도구"
+//   매 handoff 마다 11 backend probe 비용 (~1.5초)을 캐시로 흡수 → 1/60 라운드만 실제 probe
+//   캐시 위치: .harness/provider-probe-cache.json (비시크릿, 체크인 가능)
+const _PROVIDER_PROBE_CACHE_TTL_MS = 60 * 60 * 1000;
+function _providerProbeCachePath(root) { return path.join(root, '.harness', 'provider-probe-cache.json'); }
+function _loadProviderProbeCache(root) {
+  try {
+    const fp = _providerProbeCachePath(root);
+    if (!exists(fp)) return null;
+    const j = JSON.parse(read(fp));
+    if (!j.at || !j.result) return null;
+    const ageMs = Date.now() - new Date(j.at).getTime();
+    return { ...j, ageMs, expired: ageMs > _PROVIDER_PROBE_CACHE_TTL_MS };
+  } catch { return null; }
+}
+function _writeProviderProbeCache(root, result) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    writeUtf8(_providerProbeCachePath(root), JSON.stringify({ at: new Date().toISOString(), result }, null, 2));
+    return true;
+  } catch { return false; }
+}
+// handoff 헤드라인용 — 캐시 hit 시 즉시 반환, miss 시 null (async probe trigger 는 handoff 가 직접)
+function _readyBackendCountFromCache(root) {
+  const c = _loadProviderProbeCache(root);
+  if (!c || !c.result) return { ready: 0, total: 11, ageHours: null, expired: false, hasCache: false };
+  const r = c.result;
+  const ready = (r.cli || []).filter(x => x.found).length
+              + (r.endpoints || []).filter(x => x.reachable).length
+              + (r.cloudKeys || []).filter(x => x.present).length;
+  const total = (r.cli || []).length + (r.endpoints || []).length + (r.cloudKeys || []).length;
+  return { ready, total, ageHours: Math.floor(c.ageMs / 3600000), expired: c.expired, hasCache: true };
 }
 
 // 1.9.195: HTTP endpoint reachability check (의존성 0)
