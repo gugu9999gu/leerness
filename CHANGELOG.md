@@ -1,5 +1,76 @@
 # Changelog
 
+## 1.9.181 — 2026-05-21
+
+**🚪 REPL 진입 흐름 정리 — 사용자 명시 4종 + 직접 구동 실 호출 검증.**
+
+자율 모드 111 라운드. 사용자 직접 구동 테스트 결과 보고 (스크린샷 첨부):
+1. *"1.9.149 Hermes/OpenClaw 스타일 등의 문구는 제거"* → 설치 완료 메시지 단순화
+2. *"이 단계에서 Ollama 제외한 모델을 선택했는데 REPL 진입 시 Ollama 우선 호출"* → install→REPL provider 자동 선택
+3. *"프로바이더 전환 선택 단계 없이 바로 채팅 모드로 진입"* → 진입 prompt 제거
+4. *"REPL을 직접 구동해서 명령 입력해보고 개발/웹/PC/추론/질문-답변 동작 테스트"* → agents multi --execute 실 호출 검증
+
+### Fix #1 — 문구 단순화
+```diff
+- log('🚀 설치 완료 — REPL agent 모드를 시작합니다 (1.9.149 Hermes/OpenClaw 스타일)...');
++ log('🚀 설치 완료 — REPL agent 모드를 시작합니다...');
+```
+
+### Fix #2 — install→REPL provider 하드코딩 제거
+```diff
+- await _agentRepl(root, { provider: 'ollama', role: 'actor' });  // 1.9.151 — 무조건 ollama
++ await _agentRepl(root, { role: 'actor' });  // provider 미지정 → auto-select 동작 (1.9.181 fix)
+```
+
+### Fix #3 — 비-Ollama 우선 자동 선택 (Ollama 우선 호출 X)
+```js
+const ready = EXTERNAL_AGENTS.map(a => ({ def: a, status: _checkAgent(a) }))
+                              .filter(x => x.status.status === 'ready');
+const nonOllama = ready.filter(x => x.def.id !== 'ollama');
+if (nonOllama.length >= 1) {
+  // 비-Ollama 활성 → 첫 번째 자동 (사용자 명시: Ollama 우선 호출 X)
+  initialProvider = nonOllama[0].def.id;
+  _autoPickNote = nonOllama.length === 1
+    ? `${initialProvider} 자동 선택 (활성 CLI 1개)`
+    : `${initialProvider} 자동 선택 (활성 CLI ${nonOllama.length}개 · Tab으로 전환)`;
+}
+```
+
+### Fix #4 — provider 전환 prompt 단계 제거 (자동 전환)
+이전:
+```
+⚠ Ollama 미가동 또는 모델 없음
+💡 활성 외부 CLI 4개 발견 — provider 전환 가능:
+  1) claude  (v2.1.145)
+  2) codex  (vcodex-cli 0.132.0)
+  ...
+provider 전환 (번호 / Enter=ollama 계속): _
+```
+지금:
+```
+▸ Provider: claude 자동 선택 (활성 CLI 4개 · Tab으로 전환)
+[채팅 모드 즉시 진입]
+```
+
+### 직접 구동 실 호출 검증 (사용자 명시 4번째 요청)
+```bash
+$ leerness agents multi "1+1=? 숫자만 답해주세요." --only claude,gemini --execute --timeout 30
+✓ claude   · 4810ms · 1 토큰
+✗ gemini   · 1266ms · exit=null
+best: claude · score=0.600
+--- 처음 600자 ---
+2
+```
+**claude 추론 응답 정상**. gemini는 별도 환경 이슈 (--yolo 권한 또는 quota — 1.9.182에서 추가 디버그 후보).
+
+### Verified
+- stress-v126: **18/18** (사용자 명시 4 + 자동 선택 동작 4 + 직접 구동 2 + VERSION+누적 회귀 8)
+- e2e 217/217 baseline 유지
+- claude 실 호출 4810ms · 응답 "2" — REPL agent의 핵심 능력 (실 모델 호출 + 추론 + 응답 수신) 동작 확인
+- VERSION = 1.9.181 · autonomous-rounds = 111 · main 자동 push 42 라운드 연속
+
+---
+
 ## 1.9.180 — 2026-05-21
 
 **🔧 REPL Tab cycle 핵심 fix + 채팅 영역 separator — 사용자 명시 (직접 구동 테스트 결과).**

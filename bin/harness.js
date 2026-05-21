@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.180';
+const VERSION = '1.9.181';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -934,12 +934,13 @@ async function install(root, opts = {}) {
     //   resolveInstallOptions (1.9.146) 가 이미 모든 prompt 모은 위치에 통합된 4지선다 prompt 있음.
     //   별도 setupAgents 명령은 사용자가 명시적으로 `leerness setup-agents` 호출 시에만.
     // 1.9.151: 설치 완료 직후 — startRepl 선택 시 REPL agent 모드 즉시 진입 (사용자 명시 요청)
+    // 1.9.181: 문구 단순화 + provider 하드코딩 제거 (사용자 명시 — install 선택한 CLI를 REPL이 자동 선택)
     if (resolved.startRepl && !opts.migration && process.stdin.isTTY && process.env.LEERNESS_NO_PROMPT !== '1') {
       log('');
-      log('🚀 설치 완료 — REPL agent 모드를 시작합니다 (1.9.149 Hermes/OpenClaw 스타일)...');
+      log('🚀 설치 완료 — REPL agent 모드를 시작합니다...');
       log('');
       try {
-        await _agentRepl(root, { provider: 'ollama', role: 'actor' });
+        await _agentRepl(root, { role: 'actor' });  // provider 미지정 → _agentRepl 의 auto-select 동작 (1.9.181 fix)
       } catch (e) { warn('REPL 진입 실패: ' + e.message); }
     }
   }
@@ -11066,23 +11067,28 @@ async function _agentRepl(root, opts) {
     bold: s => `\x1b[1m${s}\x1b[0m`, green: s => `\x1b[32m${s}\x1b[0m`,
     yel: s => `\x1b[33m${s}\x1b[0m`, mag: s => `\x1b[35m${s}\x1b[0m`
   } : { cy:s=>s, dim:s=>s, bold:s=>s, green:s=>s, yel:s=>s, mag:s=>s };
-  // 1.9.153: provider 자동 선택 — opts.provider 명시 안 됨 + 활성 CLI 가 있으면 사용자에게 선택지 표시
+  // 1.9.181 fix: provider 자동 선택 — prompt 단계 제거하고 즉시 채팅 모드 진입 (사용자 명시).
+  //   정책: 비-Ollama 활성 CLI 우선 → Ollama → fallback. 복수 활성 시 prompt 없이 첫 비-Ollama 자동 선택.
+  //   사용자 의도: "프로바이더 전환 선택 단계없이 바로 채팅 모드로 진입해도 될거같아" + "Ollama를 우선 호출 X".
+  //   Tab 으로 언제든 cycle 가능하므로 자동 선택해도 사용자가 즉시 전환 가능.
   let initialProvider = opts.provider;
+  let _autoPickNote = '';
   if (!initialProvider) {
     const ready = EXTERNAL_AGENTS.map(a => ({ def: a, status: _checkAgent(a) }))
                                   .filter(x => x.status.status === 'ready');
-    if (ready.length === 1) {
-      initialProvider = ready[0].def.id;  // 단일 활성 → 자동 선택
-    } else if (ready.length > 1 && isTty) {
-      // 복수 활성 → 사용자에게 선택지 (Ollama 우선이 아닌, 활성된 CLI 중 선택)
-      console.log('');
-      console.log(`  사용 가능한 CLI 에이전트 ${ready.length}개:`);
-      ready.forEach((x, i) => console.log(`    ${i + 1}) ${x.def.id}${x.status.version ? ' (v' + x.status.version + ')' : ''}`));
-      const choice = await new Promise(res => rl.question(`\n  provider 선택 (Enter=1): `, res));
-      const idx = parseInt(choice, 10) - 1;
-      initialProvider = (idx >= 0 && idx < ready.length) ? ready[idx].def.id : ready[0].def.id;
+    const nonOllama = ready.filter(x => x.def.id !== 'ollama');
+    if (nonOllama.length >= 1) {
+      // 비-Ollama 활성 → 첫 번째 자동 (사용자 명시: Ollama 우선 호출 X)
+      initialProvider = nonOllama[0].def.id;
+      _autoPickNote = nonOllama.length === 1
+        ? `${initialProvider} 자동 선택 (활성 CLI 1개)`
+        : `${initialProvider} 자동 선택 (활성 CLI ${nonOllama.length}개 · Tab으로 전환)`;
+    } else if (ready.length === 1) {
+      initialProvider = ready[0].def.id;  // ollama 단독
+      _autoPickNote = `${initialProvider} 자동 선택`;
     } else {
-      initialProvider = 'ollama';  // 활성 0개 → fallback (사용 시 friendly 경고)
+      initialProvider = 'ollama';  // 활성 0개 → fallback
+      _autoPickNote = 'fallback ollama (활성 CLI 없음 — .env 에서 LEERNESS_ENABLE_* 활성화 권장)';
     }
   }
   // 세션 state
@@ -11116,47 +11122,27 @@ async function _agentRepl(root, opts) {
   log('');
   log(C.dim(`  ▸ Welcome back  ·  ${wsName} (${rel(process.cwd(), absRoot(root))})`));
   log(C.dim(`  ▸ Session: ${state.sessionId}`));
+  if (_autoPickNote) log(C.dim(`  ▸ Provider: ${_autoPickNote}`));
   log('');
-  // Ollama 모델 자동 감지 — model이 명시되지 않았으면 사용자에게 선택지 제공
+  // 1.9.181 fix: provider 진입 시점 prompt 단계 제거 — 자동 전환만 수행 (사용자 명시 — 바로 채팅 모드 진입).
   if (state.provider === 'ollama' && !state.model) {
-    log(C.dim('  Ollama 모델 목록 조회 중...'));
+    // Ollama 사용 가능 → 첫 모델 자동 선택 (사용자 prompt 없음)
     const r = await _ollamaListModels();
     if (r.ok && r.models.length) {
-      log(C.green(`  사용 가능 모델 ${r.models.length}개:`));
-      r.models.slice(0, 8).forEach((m, i) => log(`    ${i + 1}) ${m}`));
-      const choice = await new Promise(res => rl.question(C.cy('\n  모델 번호 선택 (Enter=1): '), res));
-      const idx = parseInt(choice, 10) - 1;
-      state.model = (idx >= 0 && idx < r.models.length) ? r.models[idx] : r.models[0];
-      log(C.green(`  ✓ 모델 선택: ${state.model}`));
+      state.model = process.env.LEERNESS_OLLAMA_MODEL || r.models[0];
+      log(C.dim(`  ▸ Model: ${state.model}  (Ollama ${r.models.length}개 catalog · Shift+Tab으로 변경)`));
     } else {
-      log(C.yel(`  ⚠ Ollama 미가동 또는 모델 없음`));
-      // 1.9.164: Ollama 실패 시 다른 활성 CLI 즉시 제안 (UX 개선 — 사용자 명시 요청)
-      try {
-        const readyCli = EXTERNAL_AGENTS.filter(a => a.id !== 'ollama')
-                                         .map(a => ({ def: a, status: _checkAgent(a) }))
-                                         .filter(x => x.status.status === 'ready');
-        if (readyCli.length) {
-          log('');
-          log(C.cy(`  💡 활성 외부 CLI ${readyCli.length}개 발견 — provider 전환 가능:`));
-          readyCli.forEach((x, i) => log(`    ${i + 1}) ${x.def.id}  (v${x.status.version || '?'})`));
-          const choice = await new Promise(res => rl.question(C.cy('\n  provider 전환 (번호 / Enter=ollama 계속): '), res));
-          const idx = parseInt(choice, 10) - 1;
-          if (idx >= 0 && idx < readyCli.length) {
-            state.provider = readyCli[idx].def.id;
-            state.model = null;  // 새 provider 기본 모델 사용
-            log(C.green(`  ✓ provider 전환: ${state.provider}  (메시지 입력 즉시 사용)`));
-          } else {
-            state.model = process.env.LEERNESS_OLLAMA_MODEL || 'llama3';
-            log(C.dim(`     ollama fallback: ${state.model} — 추후 :provider <이름> 으로 전환 가능`));
-          }
-        } else {
-          log(C.dim(`     ollama serve + ollama pull <model>  /  또는 .env 에서 LEERNESS_ENABLE_CLAUDE=1 등 활성화`));
-          state.model = process.env.LEERNESS_OLLAMA_MODEL || 'llama3';
-          log(C.dim(`     fallback: ${state.model}  (실 호출 실패 시 :provider 메뉴 또는 :quit)`));
-        }
-      } catch {
+      // Ollama 미가동 → 비-Ollama 활성 CLI 가 있으면 자동 전환, 없으면 fallback ollama (warn)
+      const readyCli = EXTERNAL_AGENTS.filter(a => a.id !== 'ollama')
+                                       .map(a => ({ def: a, status: _checkAgent(a) }))
+                                       .filter(x => x.status.status === 'ready');
+      if (readyCli.length) {
+        state.provider = readyCli[0].def.id;
+        state.model = null;
+        log(C.green(`  ▸ Ollama 미가동 → ${state.provider} 자동 전환 (Tab으로 다른 provider 전환 가능)`));
+      } else {
         state.model = process.env.LEERNESS_OLLAMA_MODEL || 'llama3';
-        log(C.dim(`     fallback: ${state.model}`));
+        log(C.yel(`  ⚠ Ollama 미가동 + 활성 CLI 없음 — fallback ${state.model} (실 호출 실패 시 :quit 또는 :provider)`));
       }
     }
   }
@@ -11658,7 +11644,7 @@ async function _agentRepl(root, opts) {
 async function agentCmd(root, taskArg) {
   root = absRoot(root || process.cwd());
   const task = (taskArg || arg('--task', '') || '').trim();
-  // 1.9.149: REPL 진입 — 인자 없거나 --interactive 명시 (Hermes/OpenClaw 스타일)
+  // 1.9.149+1.9.181: REPL 진입 — 인자 없거나 --interactive 명시 (provider 자동 선택)
   if (!task || has('--interactive') || has('--repl')) {
     if (process.stdin.isTTY && !has('--no-repl') && process.env.LEERNESS_NO_PROMPT !== '1') {
       const t0 = Date.now();
