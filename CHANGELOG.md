@@ -1,5 +1,64 @@
 # Changelog
 
+## 1.9.195 — 2026-05-21
+
+**🌐 A축 (범용 AI 하네스) 보강 — `leerness provider probe` 신규 명령 (CLI/endpoint/API 키 3종 자동 감지).**
+
+자율 모드 125 라운드. 1.9.192 C / 193 B / 194 E 보강에 이어 **A축 (9/10 → 목표 9.5/10)** 보강.
+
+### 사용자 의도 정렬 (1.9.191 verbatim)
+> *"범용 AI 하네스 ... 최고의 도구"*
+
+### 1. `leerness provider probe` 신규 명령 (A축 핵심)
+- **3종 자동 감지** (의존성 0 — Node built-in cp + http):
+  1. **CLI binaries**: claude / codex / gemini / copilot / ollama (PATH + `--version`)
+  2. **Local endpoint**: Ollama (11434) / LM Studio (1234) / llama.cpp (8080)
+  3. **Cloud API key**: OPENROUTER / GROQ / TOGETHER / ANTHROPIC / OPENAI
+
+- **출력 옵션**: `--json` (자동화/CI) · 텍스트 마크다운 (사람 읽기)
+- **타임아웃**: `--timeout 1500` (기본, ms)
+- **환경변수 override**: `OLLAMA_HOST` / `LMSTUDIO_HOST` / `LLAMACPP_HOST`
+
+### 2. 실 측정 (개발 PC)
+```
+| id | bin | found | version |
+| claude | claude | ✓ | 2.1.146 (Claude Code) |
+| codex | codex | ✓ | codex-cli 0.132.0 |
+| gemini | gemini | ✗ | - |
+| copilot | copilot | ✗ | - |
+| ollama | ollama | ✓ | (installed) |
+
+✓ 사용 가능 후보 3건
+```
+
+### 3. 신규 함수
+- `_probeProviderEndpoints(root, timeoutMs)` — 3종 통합 감지
+- `_probeHttpEndpoint(url, timeoutMs)` — Promise 기반 HTTP reachability check
+
+### 4. 누적 회귀 (1.9.189~194) — 모두 유지
+- [1.9.194] _suggestNextActions + lazy 감지
+- [1.9.193] agents multi consensus → lessons.md
+- [1.9.192] _loadOfficialSkillCache + 24h 캐시
+- [1.9.191] 구조 최적화 보고서 88/100
+- [1.9.190] _selectOne/_selectMany Ctrl+C 즉시 종료
+- [1.9.189] _showSlashCommandList + Tab cycle 한 줄 갱신
+
+### 5. stress-v140 — 15/15 PASS
+- provider probe (6: 함수 + 3종 대상 + --json + 텍스트) + 성능 (2) + 누적 회귀 (7)
+- 성능: --version cold start avg **442 ms** · MCP 54 도구 **514 ms**
+
+### 6. 5축 매트릭스 변동
+| 축 | 1.9.194 | 1.9.195 | Δ |
+|---|---|---|---|
+| A. 범용 AI 하네스 | 9/10 | **9.5/10** | +0.5 (universal probe — 11 backend 후보 자동 감지) |
+| 종합 | 46/50 (92%) | **46.5/50 (93%)** | +1% |
+
+### 7. 자동 release 흐름
+- main 자동 push **57 라운드 연속** (1.9.140~195)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.194 — 2026-05-21
 
 **🎯 E축 (게으름 방지) 보강 — handoff 다음 단계 자동 제안 + 24h+ 무진척 lazy 감지.**

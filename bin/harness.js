@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.194';
+const VERSION = '1.9.195';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -5506,7 +5506,113 @@ function providerCmd(root, sub, ...args) {
       if (!dryRun) log(`   .env 에 LEERNESS_ENABLE_<X>=1 설정 후 \`leerness agents list\` 로 확인`);
     })();
   }
-  fail(`알 수 없는 sub: ${sub} (list / add / remove / sync)`);
+  // 1.9.195: provider probe — A축 (범용 AI 하네스) 보강. 사용자 의도: "범용 AI 하네스 ... 최고의 도구"
+  //   시스템에 사용 가능한 provider 자동 감지 (PATH 명령 + 로컬 endpoint + API 키 환경변수)
+  //   감지 대상:
+  //     - CLI: claude / codex / gemini / copilot / ollama (PATH check)
+  //     - Local endpoint: Ollama (11434) / LM Studio (1234) / llama.cpp server (8080)
+  //     - Cloud API key: OPENROUTER_API_KEY / GROQ_API_KEY / TOGETHER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY
+  //   결과 → table + LEERNESS_ENABLE_* 설정 권장
+  if (sub === 'probe') {
+    return (async () => {
+      const json = has('--json');
+      const timeoutMs = Number(arg('--timeout', '1500'));
+      const results = await _probeProviderEndpoints(root, timeoutMs);
+      if (json) { log(JSON.stringify(results, null, 2)); return; }
+      log(`# leerness provider probe (1.9.195 — A축 범용 AI 하네스 보강)`);
+      log(`타임아웃: ${timeoutMs}ms`);
+      log('');
+      log('## CLI binaries (PATH)');
+      log('| id | bin | found | version |');
+      log('|---|---|---|---|');
+      for (const r of results.cli) {
+        log(`| ${r.id} | ${r.bin} | ${r.found ? '✓' : '✗'} | ${r.version || '-'} |`);
+      }
+      log('');
+      log('## Local endpoint (HTTP)');
+      log('| name | url | reachable | latency |');
+      log('|---|---|---|---|');
+      for (const r of results.endpoints) {
+        log(`| ${r.name} | ${r.url} | ${r.reachable ? '✓' : '✗'} | ${r.latencyMs != null ? r.latencyMs + 'ms' : '-'} |`);
+      }
+      log('');
+      log('## Cloud API keys (.env)');
+      log('| key | present | mask |');
+      log('|---|---|---|');
+      for (const r of results.cloudKeys) {
+        log(`| ${r.key} | ${r.present ? '✓' : '✗'} | ${r.mask || '-'} |`);
+      }
+      log('');
+      const total = results.cli.filter(x => x.found).length + results.endpoints.filter(x => x.reachable).length + results.cloudKeys.filter(x => x.present).length;
+      log(`✓ 사용 가능 후보 ${total}건`);
+      log('   → 활성화: .env 에 LEERNESS_ENABLE_<ID>=1 + ENDPOINT/API 키 설정');
+      log('   → 확인: leerness agents list');
+    })();
+  }
+  fail(`알 수 없는 sub: ${sub} (list / add / remove / sync / probe)`);
+}
+
+// 1.9.195: provider probe 핵심 — CLI/endpoint/API 키 3종 감지
+//   의존성 0 — Node built-in cp.spawnSync (CLI version) + http.get (endpoint) + process.env (API key)
+async function _probeProviderEndpoints(root, timeoutMs) {
+  const result = { cli: [], endpoints: [], cloudKeys: [], at: new Date().toISOString() };
+  // 1) CLI binaries — PATH + --version
+  const cliTargets = [
+    { id: 'claude', bin: 'claude' },
+    { id: 'codex', bin: 'codex' },
+    { id: 'gemini', bin: 'gemini' },
+    { id: 'copilot', bin: 'copilot' },
+    { id: 'ollama', bin: 'ollama' }
+  ];
+  for (const t of cliTargets) {
+    try {
+      const r = cp.spawnSync(t.bin, ['--version'], { encoding: 'utf8', timeout: timeoutMs, shell: true });
+      // exit 0 또는 stdout 에 "vX.Y.Z" 비슷한 형태가 있으면 found 처리
+      const out = (r.stdout || '').trim();
+      const errOut = (r.stderr || '').trim();
+      const looksLikeVersion = /\d+\.\d+\.\d+|\bversion\b/i.test(out);
+      const found = r.status === 0 || looksLikeVersion;
+      result.cli.push({ id: t.id, bin: t.bin, found, version: found ? (out.split('\n')[0].slice(0, 40) || null) : null });
+    } catch (e) {
+      result.cli.push({ id: t.id, bin: t.bin, found: false, version: null });
+    }
+  }
+  // 2) Local endpoints — http GET (의존성 0)
+  const endpointTargets = [
+    { name: 'ollama', url: process.env.OLLAMA_HOST || 'http://localhost:11434', path: '/api/tags' },
+    { name: 'lmstudio', url: process.env.LMSTUDIO_HOST || 'http://localhost:1234', path: '/v1/models' },
+    { name: 'llama.cpp', url: process.env.LLAMACPP_HOST || 'http://localhost:8080', path: '/health' }
+  ];
+  for (const t of endpointTargets) {
+    const reach = await _probeHttpEndpoint(t.url + t.path, timeoutMs);
+    result.endpoints.push({ name: t.name, url: t.url + t.path, reachable: reach.ok, latencyMs: reach.latencyMs, status: reach.status });
+  }
+  // 3) Cloud API keys — .env
+  const cloudKeys = ['OPENROUTER_API_KEY', 'GROQ_API_KEY', 'TOGETHER_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
+  for (const k of cloudKeys) {
+    const val = process.env[k] || '';
+    const present = val.length >= 10;
+    result.cloudKeys.push({ key: k, present, mask: present ? `${val.slice(0, 4)}...${val.slice(-2)}` : null });
+  }
+  return result;
+}
+
+// 1.9.195: HTTP endpoint reachability check (의존성 0)
+function _probeHttpEndpoint(url, timeoutMs) {
+  return new Promise((resolve) => {
+    try {
+      const lib = url.startsWith('https:') ? require('https') : require('http');
+      const t0 = Date.now();
+      const req = lib.get(url, { timeout: timeoutMs }, (res) => {
+        res.on('data', () => {});
+        res.on('end', () => resolve({ ok: res.statusCode < 500, status: res.statusCode, latencyMs: Date.now() - t0 }));
+      });
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false, latencyMs: null, status: null }); });
+      req.on('error', () => resolve({ ok: false, latencyMs: null, status: null }));
+    } catch {
+      resolve({ ok: false, latencyMs: null, status: null });
+    }
+  });
 }
 
 // 1.9.36: 작업 키워드 분석으로 최적 CLI 추천
