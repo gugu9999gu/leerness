@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.188';
+const VERSION = '1.9.189';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -11609,7 +11609,7 @@ async function _agentRepl(root, opts) {
   //   환영 화면 끝에 명확한 구분선 + 안내 → 채팅 시작 명확.
   log('');
   log(C.dim('  ─────────────────────────────  채팅 시작  ─────────────────────────────'));
-  log(C.dim('  메시지 입력 후 Enter · :help 으로 명령 목록 · Ctrl+C 로 종료'));
+  log(C.dim('  메시지 입력 후 Enter · ') + C.cy('"/"') + C.dim(' 입력 시 명령 list · ') + C.cy(':help') + C.dim(' 으로도 가능 · Ctrl+C 로 종료'));
   // 1.9.155: REPL 진입 시 handoff 컨텍스트 자동 노출 (UX 개선 — 사용자가 매번 :handoff 안 해도 컨텍스트 인지)
   try {
     const hf = cp.spawnSync(process.execPath, [__filename, 'handoff', root, '--compact', '--no-drift-check', '--no-headline'], {
@@ -11664,17 +11664,31 @@ async function _agentRepl(root, opts) {
         } catch {}
         return _PROVIDER_CYCLE_ORDER.slice();
       };
-      // 1.9.180: cycleProvider/cycleModel — 시각 피드백 강화 (사용자 명시 "원활하지 않다").
-      //   이전: 한 줄 ⇄ 메시지만. 1.9.180: provider 위치 표시 [1/5] + bold highlight + 활성 여부 표시.
+      // 1.9.180+1.9.189: cycleProvider/cycleModel — 한 줄 갱신 (in-place overwrite).
+      //   1.9.180까지: 매 Tab 누름마다 새 줄 출력 → 채팅 이력으로 누적 (사용자 명시: "지져분해보여").
+      //   1.9.189: ANSI cursor up + line clear 로 이전 cycle 라인 덮어씀 → 마지막 1건만 표시.
+      let _lastCycleLines = 0;  // 직전 cycle 출력 라인 수 (overwrite 용)
+      const _clearLastCycle = () => {
+        if (!isTty || _lastCycleLines === 0) return;
+        // 현재 prompt 라인 + 이전 cycle 라인들 클리어
+        // 현재 cursor는 prompt 줄. 위로 _lastCycleLines+1 만큼 올라가서 클리어.
+        process.stdout.write('\r\x1b[K');                  // 현재 prompt 줄 클리어
+        for (let i = 0; i < _lastCycleLines; i++) {
+          process.stdout.write('\x1b[1A\x1b[K');           // 한 줄 위로 + 클리어
+        }
+        _lastCycleLines = 0;
+      };
       const cycleProvider = (reverse) => {
+        _clearLastCycle();
         const list = getProviders();
         let idx = list.indexOf(state.provider);
         if (idx < 0) idx = 0;
         idx = reverse ? (idx - 1 + list.length) % list.length : (idx + 1) % list.length;
         state.provider = list[idx];
         state.model = null;
+        // 1.9.188: state.model auto-default → 다음 cycle/prompt 에 catalog 첫 모델
         const cat = _PROVIDER_MODEL_CATALOG[state.provider];
-        // 활성 여부 사전 확인 (1.9.180 UX — 사용자가 즉시 인지)
+        if (cat && cat.length) state.model = cat[0].id;
         let activeMark = '';
         try {
           if (state.provider !== 'ollama') {
@@ -11685,19 +11699,21 @@ async function _agentRepl(root, opts) {
             }
           }
         } catch {}
-        process.stdout.write('\r\x1b[K');
         process.stdout.write(C.bold(C.green(`  ⇄ provider [${idx + 1}/${list.length}]: ${state.provider}`)) + activeMark + '\n');
+        _lastCycleLines = 1;
         if (cat?.length) {
           process.stdout.write(C.dim(`    └ ${cat.length}개 모델 catalog · Shift+Tab으로 model cycle\n`));
+          _lastCycleLines = 2;
         }
         rl.setPrompt(prompt());
         rl.prompt(true);
       };
       const cycleModel = (reverse) => {
+        _clearLastCycle();
         const cat = _PROVIDER_MODEL_CATALOG[state.provider] || [];
         if (cat.length === 0) {
-          process.stdout.write('\r\x1b[K');
-          process.stdout.write(C.yel(`  ⚠ ${state.provider} 추천 모델 catalog 없음 (:model <name> 으로 직접 지정)\n`));
+          process.stdout.write(C.yel(`  ⚠ ${state.provider} 추천 모델 catalog 없음 (/model <name> 으로 직접 지정)\n`));
+          _lastCycleLines = 1;
           rl.prompt(true);
           return;
         }
@@ -11705,14 +11721,17 @@ async function _agentRepl(root, opts) {
         if (idx < 0) idx = -1;
         idx = reverse ? (idx - 1 + cat.length) % cat.length : (idx + 1) % cat.length;
         state.model = cat[idx].id;
-        process.stdout.write('\r\x1b[K');
         process.stdout.write(C.bold(C.mag(`  ⇄ model [${idx + 1}/${cat.length}]: ${state.model}`)) + '\n');
+        _lastCycleLines = 1;
         if (cat[idx].note) {
           process.stdout.write(C.dim(`    └ ${cat[idx].note}\n`));
+          _lastCycleLines = 2;
         }
         rl.setPrompt(prompt());
         rl.prompt(true);
       };
+      // 1.9.189: 사용자가 다른 입력 시작하면 cycle line clear 흔적 정리 (다음 Tab까지 유지하면 cycle 위치 보임)
+      // 단순화: 사용자가 enter 누르면 _lastCycleLines=0 으로 reset (응답 후 다시 cycle 출력 시 새로 시작).
       process.stdin.on('keypress', (str, key) => {
         if (!key) return;
         if (key.name === 'tab') {
@@ -11731,6 +11750,55 @@ async function _agentRepl(root, opts) {
     }
   }
 
+  // 1.9.189 (사용자 명시): "/" 입력만으로 명령 list 표시 (claude code 영감 — autocomplete UX).
+  //   "/" 또는 "/?" → 명령 카탈로그 출력 후 prompt 복귀. 이미지 같은 list 스타일 (명령 + 한 줄 설명).
+  const _showSlashCommandList = () => {
+    log('');
+    log(C.bold('  Available commands') + C.dim('  (also accepts ":" prefix)'));
+    log(C.dim('  ────────────────────────────────────────────────────────────────────────────────'));
+    const groups = [
+      { title: 'meta', items: [
+        ['/help', '명령 목록 (이 화면) — 또는 ":?"'],
+        ['/quit', 'REPL 종료 (세션 자동 저장)'],
+        ['/clear', '대화 히스토리 초기화'],
+        ['/status', '현재 provider / model / role / perms 상태'],
+        ['/provider <id>', 'provider 전환 (ollama, claude, codex, gemini, copilot)'],
+        ['/model <id>', '현재 provider의 모델 전환'],
+        ['/role <id>', '역할 전환 (actor / planner / reviewer)'],
+        ['/stream on|off', '실시간 스트리밍 토글 (default ON)']
+      ]},
+      { title: 'review', items: [
+        ['/review "<req>"', '무조건 구현 전 사전 검토 (1.9.176)'],
+        ['/permissions <m>', '권한 변경 basic|extended|full (1.9.174)']
+      ]},
+      { title: 'internal', items: [
+        ['/verify', 'task evidence 검증'],
+        ['/audit', 'audit 실행'],
+        ['/handoff', 'handoff context 출력'],
+        ['/health', 'health check']
+      ]},
+      { title: 'memory', items: [
+        ['/lessons', 'lessons.md 회수'],
+        ['/brainstorm <q>', 'brainstorm 회수 (memory + code + tasks)'],
+        ['/tasks', '현재 task list'],
+        ['/plan', 'plan.md milestones']
+      ]},
+      { title: 'bridge', items: [
+        ['/web <op>', 'playwright bridge (check/screenshot/extract)'],
+        ['/pc <op>', 'robotjs bridge (check/click/type/screenshot)'],
+        ['/lsp <op>', 'LSP adapter (check/symbols/references)']
+      ]}
+    ];
+    for (const g of groups) {
+      log(C.bold(`  ${g.title}`));
+      for (const [name, desc] of g.items) {
+        log('    ' + C.cy(name.padEnd(22)) + C.dim(desc));
+      }
+    }
+    log(C.dim('  ────────────────────────────────────────────────────────────────────────────────'));
+    log(C.dim('  💡 메시지는 직접 입력 · "/" 또는 ":" 접두사로 명령 호출 · Tab=provider · Shift+Tab=model'));
+    log('');
+  };
   rl.prompt();
   const handleMeta = async (cmd) => {
     const [op, ...rest] = cmd.slice(1).split(/\s+/);
@@ -12020,7 +12088,21 @@ async function _agentRepl(root, opts) {
   return new Promise(resolve => {
     rl.on('line', async (line) => {
       const input = line.trim();
+      _lastCycleLines = 0;  // 1.9.189: 사용자 입력 시 cycle overwrite 추적 reset
       if (!input) { rl.prompt(); return; }
+      // 1.9.189 (사용자 명시): "/" slash 입력만으로 명령 list 표시 (claude code 영감).
+      //   "/" 단독 → 명령 list 출력 후 prompt 복귀.
+      //   "/help", "/quit" 등 "/" 접두사 → ":" 동등 처리 (alias).
+      if (input === '/' || input === '/?') {
+        _showSlashCommandList();
+        rl.prompt(); return;
+      }
+      // 1.9.189: "/" 접두사를 ":" 와 동등하게 처리 (사용자 명시 — "/ 가 모든 모델 공통 권한 trigger default")
+      if (input.startsWith('/') && !input.startsWith('//')) {
+        const shouldQuit = await handleMeta(':' + input.slice(1));
+        if (shouldQuit) { resolve(); return; }
+        rl.prompt(); return;
+      }
       if (input.startsWith(':')) {
         const shouldQuit = await handleMeta(input);
         if (shouldQuit) { resolve(); return; }

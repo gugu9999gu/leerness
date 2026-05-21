@@ -1,5 +1,104 @@
 # Changelog
 
+## 1.9.189 — 2026-05-21
+
+**⌨️ "/" slash 명령 자동 list + Tab cycle 한 줄 갱신 (사용자 명시 3종).**
+
+자율 모드 119 라운드. 사용자 명시:
+1. *"권한 기본값 설정을 / 으로 설정해둘 수 있고 (모든 모델 공통)"* — `/` slash default trigger
+2. *"/ 를 입력하면 관련 명령어가 첨부이미지처럼 나열"* — claude code 영감 UX
+3. *"탭키로 모델 변경시, 채팅 이력으로 남아서 지져분"* — 한 줄 갱신 (in-place)
+
+### Fix #1 — `/` slash 명령 자동 list
+
+**Before** (claude code 화면 처럼 자동 안 됨):
+```
+agent[claude/actor/▶]> /
+(처리 안 됨 또는 에러)
+```
+
+**After** (claude code 스타일):
+```
+agent[claude · opus-4-7/actor/▶]> /
+
+  Available commands  (also accepts ":" prefix)
+  ────────────────────────────────────────────────...
+  meta
+    /help                  명령 목록
+    /quit                  REPL 종료 (세션 자동 저장)
+    /clear                 대화 히스토리 초기화
+    /status                현재 provider / model / role / perms 상태
+    /provider <id>         provider 전환
+    /model <id>            현재 provider의 모델 전환
+    /stream on|off         실시간 스트리밍 토글
+  review
+    /review "<req>"        무조건 구현 전 사전 검토
+    /permissions <m>       권한 변경 basic|extended|full
+  internal
+    /verify  /audit  /handoff  /health
+  memory
+    /lessons  /brainstorm <q>  /tasks  /plan
+  bridge
+    /web <op>  /pc <op>  /lsp <op>
+  ────────────────────────────────────────────────...
+  💡 "/" 또는 ":" 접두사로 명령 호출
+```
+
+`/` 와 `:` **양쪽 동등** (alias 처리). 모든 모델 공통.
+
+### Fix #2 — Tab cycle 한 줄 갱신 (in-place overwrite)
+
+**Before** (1.9.188까지) — 매 Tab마다 새 줄 누적 → 채팅 이력 지저분:
+```
+⇄ provider [3/5]: codex ✓ ready
+  └ 5개 모델 catalog · Shift+Tab으로 model cycle
+⇄ provider [4/5]: gemini ✓ ready
+  └ 3개 모델 catalog · Shift+Tab으로 model cycle
+⇄ provider [5/5]: copilot ✓ ready
+  └ 1개 모델 catalog · Shift+Tab으로 model cycle
+⇄ provider [1/5]: ollama
+  └ 4개 모델 catalog · Shift+Tab으로 model cycle
+...
+(채팅 영역이 cycle 흔적으로 가득 참)
+```
+
+**After** (1.9.189) — 마지막 1건만 보임:
+```
+⇄ provider [2/5]: claude ✓ ready
+  └ 5개 모델 catalog · Shift+Tab으로 model cycle
+agent[claude · opus-4-7/actor/▶]> _
+```
+
+```js
+// 1.9.189: ANSI cursor up + line clear 로 이전 cycle 라인 덮어씀
+let _lastCycleLines = 0;
+const _clearLastCycle = () => {
+  if (!isTty || _lastCycleLines === 0) return;
+  process.stdout.write('\r\x1b[K');  // 현재 prompt 줄 클리어
+  for (let i = 0; i < _lastCycleLines; i++) {
+    process.stdout.write('\x1b[1A\x1b[K');  // 한 줄 위로 + 클리어
+  }
+  _lastCycleLines = 0;
+};
+// cycleProvider/cycleModel 시작 시 호출 → 이전 cycle 출력 제거 → 새 cycle 출력
+// 사용자 line 입력 시 _lastCycleLines = 0 reset (cycle 흔적 더 이상 클리어 X)
+```
+
+### Fix #3 — Welcome 안내 갱신
+```
+─────────────────────────────  채팅 시작  ─────────────────────────────
+메시지 입력 후 Enter · "/" 입력 시 명령 list · :help 으로도 가능 · Ctrl+C 로 종료
+```
+
+### Verified
+- stress-v134: **15/15 PASS** (사용자 명시 7 + live 2 + 누적 6)
+- e2e 217/217 baseline 유지
+- `/` 접두사 7개 명령 모두 정상 동작 (alias 처리)
+- Tab cycle in-place overwrite — 채팅 영역 깔끔 유지
+- VERSION = 1.9.189 · autonomous-rounds = 119 · main 자동 push 50 라운드 연속
+
+---
+
 ## 1.9.188 — 2026-05-21
 
 **🐛 REPL 한글 prompt 전달 BUG fix (stdin) + 세부 모델 표시 + 입력 구분선 (사용자 명시 3종).**
