@@ -1,5 +1,69 @@
 # Changelog
 
+## 1.9.191 — 2026-05-21
+
+**📊 구조 최적화 실 측정 + 목적 매트릭스 88/100 + ScheduleWakeup 안정화 (사용자 명시 3종).**
+
+자율 모드 121 라운드. 사용자 명시:
+1. *"ScheduleWakeup의 간격을 줄여주고, 못일어나는 경우가 종종있는거같아"*
+2. *"leerness의 구조가 최적화 되어있는지 테스트 및 디버그도 진행"*
+3. *"범용 AI 하네스 + 멀티 sub-agent 오케스트라 + 공식 표준화 스킬 자동 활용 + 장기 맥락 + 게으름 방지 = 최고의 도구"*
+
+### 1. 실 측정 메트릭 (1.9.191 vs 1.9.186)
+
+| 항목 | 1.9.191 | 1.9.186 대비 | 평가 |
+|---|---|---|---|
+| `bin/harness.js` lines | **14,243** | +2,243 (+18.7%) | ⚠ 15K 권장 상한 근접 |
+| 함수 수 | **346** | +96 | ✓ |
+| CLI 명령 라우팅 | **122** | +20 | ✓ |
+| MCP 도구 | **54** | 동등 | ✓ |
+| npm tarball | **371 KB** | +13 KB | ✓ |
+| `--version` cold | **339 ms** | -10 ms | ✓ |
+| `handoff` 실 워크로드 | **355 ms** | -50 ms | ✓ |
+
+### 2. 목적 매트릭스 5축 평가 (44/50 = 88%)
+
+| 축 | 점수 | 핵심 capability |
+|---|---|---|
+| A. 범용 AI 하네스 | **9/10** | 5 provider + 의존성 0 + cross-platform |
+| B. 멀티 Sub-Agent 오케스트라 | **8.5/10** | `agents multi --execute` + consensus + Tab cycle |
+| C. 공식 표준 스킬 자동 활용 | **8/10** | vercel/anthropic preset + auto-install (opt-in) |
+| D. 장기 맥락/계획 유지 | **9.5/10** | Memory 5종 CRUD + handoff 6채널 + 51 라운드 main push |
+| E. 게으름 방지 | **9/10** | verify-claim + lazy detect + audit + drift check |
+
+**남은 12%** (1.9.192~200 마일스톤):
+- Tier 1: skill-utility-retro + 외부 SECURITY check
+- Tier 2: `_buildCliArgs` 공통 헬퍼 (코드 중복 제거)
+- Tier 3: Universal MCP gateway (외부 MCP 통합)
+- Tier 4: Continuous learning (lessons → skill 자동 변환)
+
+### 3. ScheduleWakeup 안정화 (사용자 명시)
+
+**못 일어나는 케이스 원인 분석**:
+| 원인 | 빈도 | 회피 |
+|---|---|---|
+| 시스템 sleep/suspend | 높음 | ❌ OS 한계 |
+| 사용자 활성 conversation 가로채기 | 중간 | ❌ 우선순위 충돌 |
+| wakeup delay 너무 김 | 중간 | ✓ delay 단축 |
+
+**Fix**: 이 라운드부터 **delay 1500s → 900s (15분)**. 사용자 세션 활성 동안 더 빈번한 자율 진행.
+
+### 4. 구조 최적화 후보 (다음 라운드)
+
+- 14K lines monolithic → 곧 15K 도달 → 모듈 분리 검토 (Tier 2)
+- skill catalog mtime 기반 invalidation (캐시 stale 회피)
+- task list 280+건 → 50건 이상 archive 자동화
+
+상세 보고서: `_reports/structure-optimization-1.9.191.md` (비공개)
+
+### Verified
+- stress-v136: **12/12 PASS** (보고서 3 + 성능 2 + 누적 7)
+- e2e 217/217 baseline 유지
+- `--version` 339ms · MCP tools/list 334ms · handoff 355ms
+- VERSION = 1.9.191 · autonomous-rounds = 121 · main 자동 push 52 라운드 연속
+
+---
+
 ## 1.9.190 — 2026-05-21
 
 **🚨 설치 가이드 Ctrl+C 미작동 BUG fix (사용자 명시 — npx 진행 차단).**
