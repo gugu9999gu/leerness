@@ -7876,8 +7876,11 @@ function _publishToNpm(root, opts = {}) {
     const tmpNpmrc = path.join(tmpDir, '.npmrc');
     fs.writeFileSync(tmpNpmrc, `//registry.npmjs.org/:_authToken=${token}\n`, { mode: 0o600 });
     // 3) npm publish (--userconfig 로 임시 .npmrc 사용, --access public)
-    const args = opts.dryRun ? ['publish', '--userconfig', tmpNpmrc, '--access', 'public', '--dry-run'] :
-                                ['publish', '--userconfig', tmpNpmrc, '--access', 'public'];
+    // 1.9.178+: 2FA OTP 지원 — LEERNESS_NPM_OTP 환경변수 또는 --npm-otp 인자
+    const otp = process.env.LEERNESS_NPM_OTP || arg('--npm-otp', null) || opts.otp;
+    const baseArgs = ['publish', '--userconfig', tmpNpmrc, '--access', 'public'];
+    if (otp) baseArgs.push(`--otp=${otp}`);
+    const args = opts.dryRun ? [...baseArgs, '--dry-run'] : baseArgs;
     log(`   ${opts.dryRun ? '(dry-run) ' : ''}npm publish 시도 중...`);
     const pubR = cp.spawnSync('npm', args, {
       cwd: root, encoding: 'utf8', shell: true, timeout: 60000,
@@ -7890,6 +7893,12 @@ function _publishToNpm(root, opts = {}) {
       const errOut = (pubR.stderr || pubR.stdout || '').slice(-400);
       if (/EPUBLISHCONFLICT|already exists|cannot publish over/i.test(errOut)) {
         log(`   ✓ 이미 publish됨 (race condition) — skip`);
+      } else if (/EOTP|one-time password|--otp=/i.test(errOut)) {
+        // 1.9.178+: 2FA 활성화된 계정 — Automation 토큰 또는 OTP 필요
+        warn(`npm publish 실패: 2FA OTP 필요 (NPM 계정에 2FA 활성화됨).`);
+        log(`     해결 1: LEERNESS_NPM_OTP=<6자리코드> 또는 --npm-otp <code> 옵션 사용`);
+        log(`     해결 2: Automation 토큰 발급 — npm token create --read-only=false (2FA bypass)`);
+        log(`            발급 후 .env 의 NPM_TOKEN 을 새 토큰으로 교체`);
       } else if (/EAUTH|forbidden|401|403/i.test(errOut)) {
         warn(`npm publish 실패: 토큰 권한 부족 또는 만료 — .env NPM_TOKEN 재발급 필요`);
       } else if (/ENEEDAUTH/i.test(errOut)) {
