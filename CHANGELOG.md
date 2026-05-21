@@ -1,5 +1,118 @@
 # Changelog
 
+## 1.9.187 — 2026-05-21
+
+**🔓 비시크릿 LEERNESS_* 설정을 .env → .harness/leerness-config.json 으로 분리 (AI 가시성).**
+
+자율 모드 117 라운드. 사용자 명시: *".env에 입력되어서 AI 에이전트가 참조하거나 읽을 수 없는 위치하면 입력되는 위치를 변경"*.
+
+### 배경 & 분리 정책
+
+| 위치 | 보안 정책 | 용도 |
+|---|---|---|
+| `.env` (.gitignore) | 시크릿 only | NPM_TOKEN, GITHUB_TOKEN, *_API_KEY |
+| `.harness/leerness-config.json` (git checked-in) | 비시크릿 only | 활성화 플래그, 공개 URL, 모델 이름 |
+
+**핵심**: `.env`는 .gitignore + 시크릿용 → 다른 AI 에이전트(Claude Code, Cursor, Copilot 등)가 워크스페이스 읽을 때 자동 노출 X. 비시크릿 LEERNESS_* 설정을 AI 가시 위치로 옮겨 **AI 에이전트 인지도 ↑**.
+
+### 분리 대상 (11개 비시크릿 키)
+```js
+const _LEERNESS_NONSECRET_KEYS = new Set([
+  'LEERNESS_OLLAMA_BASE_URL',    // localhost URL — 비밀 X
+  'LEERNESS_OLLAMA_MODEL',       // 모델 이름 — 비밀 X
+  'LEERNESS_ENABLE_CLAUDE',      // 활성화 플래그
+  'LEERNESS_ENABLE_CODEX',
+  'LEERNESS_ENABLE_GEMINI',
+  'LEERNESS_ENABLE_COPILOT',
+  'LEERNESS_ENABLE_OLLAMA',
+  'LEERNESS_SKILL_DISCOVER_URL', // 공개 URL
+  'LEERNESS_SKILL_AUTO_DISCOVER',
+  'LEERNESS_SKILL_AUTO_INSTALL',
+  'LEERNESS_SKILL_AUTO_PRESETS'
+]);
+```
+
+### .harness/leerness-config.json 예시
+```json
+{
+  "_comment": "leerness 비시크릿 설정. AI 에이전트가 읽을 수 있는 위치 (git checked-in). 시크릿(TOKEN/SECRET/PASSWORD)은 .env 사용.",
+  "_docs": "https://github.com/gugu9999gu/leerness#config",
+  "_version": "1.9.187",
+  "LEERNESS_OLLAMA_BASE_URL": "http://localhost:11434",
+  "LEERNESS_OLLAMA_MODEL": "llama3",
+  "LEERNESS_ENABLE_CLAUDE": "1",
+  "LEERNESS_ENABLE_CODEX": "1",
+  "LEERNESS_ENABLE_GEMINI": "0",
+  "LEERNESS_ENABLE_COPILOT": "0",
+  "LEERNESS_ENABLE_OLLAMA": "0",
+  "LEERNESS_SKILL_DISCOVER_URL": "",
+  "LEERNESS_SKILL_AUTO_DISCOVER": "0",
+  "LEERNESS_SKILL_AUTO_INSTALL": "0",
+  "LEERNESS_SKILL_AUTO_PRESETS": "vercel,anthropic"
+}
+```
+
+### .env (simplified)
+```
+# Leerness — SECRET 환경변수만 (TOKEN/SECRET/PASSWORD). 비시크릿 설정은 .harness/leerness-config.json 사용.
+# .env 는 .gitignore — AI 에이전트(Claude Code, Cursor 등)에 노출되지 않음. 시크릿 안전 보관.
+# 비시크릿 (활성화 플래그/모델 이름/공개 URL) 은 .harness/leerness-config.json 참조 → AI 가시성 ↑.
+
+# === 시크릿 (TOKEN/KEY) ===
+LEERNESS_NPM_TOKEN=
+LEERNESS_GITHUB_TOKEN=
+```
+
+### 보안 가드 (이중 안전망)
+- **load 가드**: `_loadLeernessConfig` 에서 `_isSecretKey(k)` 매치 시 inject 차단
+- **write 가드**: `_writeLeernessConfig` 에서 시크릿 패턴 자동 제거 (잘못 들어간 키 sanitize)
+- **정규식**: `/TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE/i`
+
+### 자동 마이그레이션 (1.9.186 이전 .env)
+`_migrateNonsecretFromEnv(root)` — 기존 .env 에 비시크릿 LEERNESS_* 가 있으면:
+1. config 파일로 자동 이동
+2. .env 에서 제거 (직전 # 주석도 함께)
+3. 시크릿 (TOKEN/KEY/PASSWORD) 은 절대 건드리지 않음 (보안 first)
+
+### 우선순위 (호환성)
+```
+1. process.env (이미 설정된 환경변수)
+2. .env 파일
+3. .harness/leerness-config.json
+4. 코드 defaults
+```
+
+기존 `process.env.LEERNESS_*` 직접 접근 코드는 변경 X. leerness 시작 시 `_loadEnvFile()` 가 `_loadLeernessConfig()` 도 자동 호출 → config 값을 process.env 로 inject.
+
+### Live 검증 (사용자 워크스페이스 시뮬레이션)
+```bash
+# Before (1.9.186 .env)
+LEERNESS_NPM_TOKEN=test-token-12345
+LEERNESS_OLLAMA_BASE_URL=http://localhost:11434
+LEERNESS_OLLAMA_MODEL=llama3
+LEERNESS_ENABLE_CLAUDE=1
+...
+
+# After leerness init (1.9.187)
+.env:
+  LEERNESS_NPM_TOKEN=test-token-12345  ← 시크릿 보존
+  LEERNESS_GITHUB_TOKEN=
+
+.harness/leerness-config.json:
+  LEERNESS_OLLAMA_BASE_URL: "http://localhost:11434"
+  LEERNESS_OLLAMA_MODEL: "llama3"
+  LEERNESS_ENABLE_CLAUDE: "1"
+  ...
+```
+
+### Verified
+- stress-v132: **19/19 PASS** (사용자 명시 7 + live 3 + 누적 9)
+- e2e 217/217 baseline 유지
+- live 마이그레이션 검증: 시크릿 손실 0건, 비시크릿 100% 이동
+- VERSION = 1.9.187 · autonomous-rounds = 117 · main 자동 push 48 라운드 연속
+
+---
+
 ## 1.9.186 — 2026-05-21
 
 **🐛 REPL claude stream 0자 응답 BUG fix + 구조 최적화 체크 (사용자 명시 핵심 버그).**

@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.186';
+const VERSION = '1.9.187';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -904,43 +904,49 @@ async function install(root, opts = {}) {
       return new Set([a]);  // back-compat: 단일 문자열
     })();
     const enable = (cli) => enabledSet.has(cli);
-    // 1.9.153: .env.example 은 템플릿 (배포 가능, 실제 시크릿 값 없음)
-    //   .env 는 실 사용 파일 — 사용자가 토큰 채워 넣음. 보안 정책: 토큰 값은 절대 자동 채우지 않음 (키만).
-    //   .gitignore 에 .env 가 들어가 있어야 함 (audit 가 자동 검증). mergeLinesFile 은 기존 키 유지 + 신규 추가.
+    // 1.9.187 (사용자 명시): .env 에는 시크릿만, 비시크릿 LEERNESS_* 는 .harness/leerness-config.json 으로 분리.
+    //   배경: .env 는 .gitignore + 시크릿용 → AI 에이전트 가시성 없음.
+    //   비시크릿 (활성화 플래그, 모델, 공개 URL) 은 git checked-in 위치 (.harness/) 에 두면 AI 가 자동 읽음.
+    //   호환성: leerness 시작 시 _loadLeernessConfig() 가 config → process.env inject. 기존 코드 그대로 작동.
     const envLines = [
-      '# Leerness — environment variable names only. Do not commit real secrets (this file is in .gitignore).',
+      '# Leerness — SECRET 환경변수만 (TOKEN/SECRET/PASSWORD). 비시크릿 설정은 .harness/leerness-config.json 사용.',
       `# Generated/migrated by leerness v${VERSION} at ${new Date().toISOString().slice(0, 10)}.`,
-      'LEERNESS_NPM_TOKEN=','LEERNESS_GITHUB_TOKEN=',
-      '# 1.9.22 — orchestrate opt-in. URL이 설정되면 leerness가 Ollama를 사용 가능. 미설정 시 LLM 호출 자동 시작 금지.',
-      `LEERNESS_OLLAMA_BASE_URL=${enable('ollama') ? 'http://localhost:11434' : ''}`,
-      '# 선택. 기본 모델 (orchestrate --model 로 override 가능). 예: llama3 / qwen2.5-coder / gpt-oss',
-      'LEERNESS_OLLAMA_MODEL=',
-      '# 1.9.30+1.9.146+1.9.151 — 외부 AI CLI 활성화 플래그 (복수 선택). 1=활성, 0/미설정=비활성. 메인 에이전트가 sub-agent 분배 시 활성 CLI들에 작업 위임 가능.',
-      `LEERNESS_ENABLE_CLAUDE=${enable('claude') ? 1 : 0}`,
-      `LEERNESS_ENABLE_CODEX=${enable('codex') ? 1 : 0}`,
-      `LEERNESS_ENABLE_GEMINI=${enable('gemini') ? 1 : 0}`,
-      `LEERNESS_ENABLE_COPILOT=${enable('copilot') ? 1 : 0}`,
-      `LEERNESS_ENABLE_OLLAMA=${enable('ollama') ? 1 : 0}`,
-      '# 1.9.42 — agentskills.io 공개 표준 스킬 자동 탐색 (opt-in). URL 설정 시 `leerness skill discover` 사용 가능.',
-      '#   예시 URL: https://agentskills.io/llms.txt',
-      'LEERNESS_SKILL_DISCOVER_URL=',
-      '# (선택) 사용자 요청 분석 시 자동 매칭 스킬 추천. 1=활성, 0/미설정=비활성.',
-      'LEERNESS_SKILL_AUTO_DISCOVER=0',
-      '# 1.9.182 — handoff 시 공식 catalog (vercel-labs, anthropics) 자동 탐색 + 매칭 시 자동 install. 1=활성 (opt-in 보안).',
-      'LEERNESS_SKILL_AUTO_INSTALL=0',
-      '# 1.9.182 — handoff 자동 탐색 대상 preset (콤마 구분). 예: vercel,anthropic',
-      'LEERNESS_SKILL_AUTO_PRESETS=vercel,anthropic'
+      `# .env 는 .gitignore — AI 에이전트(Claude Code, Cursor 등)에 노출되지 않음. 시크릿 안전 보관.`,
+      `# 비시크릿 (활성화 플래그/모델 이름/공개 URL) 은 .harness/leerness-config.json 참조 → AI 가시성 ↑.`,
+      '',
+      '# === 시크릿 (TOKEN/KEY) ===',
+      'LEERNESS_NPM_TOKEN=',
+      'LEERNESS_GITHUB_TOKEN=',
     ];
     mergeLinesFile(path.join(root, '.env.example'), envLines);
-    // 1.9.153: .env 직접 생성/마이그레이션 (사용자 명시 요청). 보안 = 빈 값만 — 사용자가 직접 토큰 채움.
-    //   기존 .env 가 있으면 mergeEnvFile 이 KEY 기준 처리:
-    //     - 기존 키 (사용자가 채운 값 포함) 는 절대 덮어쓰지 않음
-    //     - 누락된 키만 빈 값으로 추가
-    //   .env 가 .gitignore 에 등록되어 있는지 audit 가 검증 (1.9.75+).
     try {
       mergeEnvFile(path.join(root, '.env'), envLines);
     } catch (e) {
       warn(`.env 생성/마이그레이션 실패 (계속 진행): ${e.message}`);
+    }
+    // 1.9.187: 비시크릿 LEERNESS_* 설정 → .harness/leerness-config.json (AI 가시성)
+    try {
+      _writeLeernessConfig(root, {
+        LEERNESS_OLLAMA_BASE_URL: enable('ollama') ? 'http://localhost:11434' : '',
+        LEERNESS_OLLAMA_MODEL: '',
+        LEERNESS_ENABLE_CLAUDE: enable('claude') ? '1' : '0',
+        LEERNESS_ENABLE_CODEX: enable('codex') ? '1' : '0',
+        LEERNESS_ENABLE_GEMINI: enable('gemini') ? '1' : '0',
+        LEERNESS_ENABLE_COPILOT: enable('copilot') ? '1' : '0',
+        LEERNESS_ENABLE_OLLAMA: enable('ollama') ? '1' : '0',
+        LEERNESS_SKILL_DISCOVER_URL: '',
+        LEERNESS_SKILL_AUTO_DISCOVER: '0',
+        LEERNESS_SKILL_AUTO_INSTALL: '0',
+        LEERNESS_SKILL_AUTO_PRESETS: 'vercel,anthropic'
+      });
+    } catch (e) {
+      warn(`.harness/leerness-config.json 생성 실패 (계속 진행): ${e.message}`);
+    }
+    // 1.9.187: 기존 .env에 비시크릿 LEERNESS_* 가 있으면 .harness/leerness-config.json 으로 마이그레이션 후 .env에서 제거.
+    try {
+      _migrateNonsecretFromEnv(root);
+    } catch (e) {
+      warn(`.env 비시크릿 마이그레이션 실패 (계속 진행): ${e.message}`);
     }
     // 1.9.146: agent 권한 파일 자동 생성 (사용자 명시 요청 #5)
     if (resolved.permissionMode) {
@@ -4310,22 +4316,148 @@ function verifyClaimCmd(root, taskId) {
 function _loadEnvFile(root) {
   // root 경로(또는 cwd)의 .env 파일을 간단 파싱해 process.env에 머지 (이미 있는 키는 덮어쓰지 않음)
   const envFile = path.join(root || process.cwd(), '.env');
-  if (!exists(envFile)) return false;
+  let loadedEnv = false;
+  if (exists(envFile)) {
+    try {
+      const txt = read(envFile);
+      for (const line of txt.split(/\r?\n/)) {
+        const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+        if (!m) continue;
+        const key = m[1];
+        let val = m[2];
+        // 주석 제거
+        if (val.startsWith('#')) continue;
+        // 따옴표 제거
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
+        if (!process.env[key]) process.env[key] = val;
+      }
+      loadedEnv = true;
+    } catch {}
+  }
+  // 1.9.187: .env 로드 후 비시크릿 LEERNESS_* 도 .harness/leerness-config.json 에서 자동 inject.
+  //   우선순위: process.env (이미 있음) > .env > .harness/leerness-config.json > defaults.
+  try { _loadLeernessConfig(root); } catch {}
+  return loadedEnv;
+}
+
+// 1.9.187 (사용자 명시): 비시크릿 LEERNESS_* 설정을 .env에서 .harness/leerness-config.json 으로 분리.
+//   배경: .env 는 .gitignore + 시크릿용 → 다른 AI 에이전트 (Claude Code, Cursor 등) 가 워크스페이스 읽을 때 보안 정책상 자동 노출 X.
+//   비시크릿 (활성화 플래그, 모델 이름, 공개 URL) 은 .harness/leerness-config.json (git checked-in) 으로 옮기면 AI 가시성 ↑.
+//   호환성: 시작 시점에 config 파일 읽어서 process.env에 inject. 기존 process.env.LEERNESS_* 코드 그대로 작동.
+//   우선순위: 1) process.env (이미 설정된 값) > 2) .env 파일 > 3) .harness/leerness-config.json > 4) defaults.
+const _LEERNESS_NONSECRET_KEYS = new Set([
+  'LEERNESS_OLLAMA_BASE_URL',    // 일반 localhost URL — 비밀 X
+  'LEERNESS_OLLAMA_MODEL',       // 모델 이름 — 비밀 X
+  'LEERNESS_ENABLE_CLAUDE',      // 활성화 플래그
+  'LEERNESS_ENABLE_CODEX',
+  'LEERNESS_ENABLE_GEMINI',
+  'LEERNESS_ENABLE_COPILOT',
+  'LEERNESS_ENABLE_OLLAMA',
+  'LEERNESS_SKILL_DISCOVER_URL', // 공개 URL
+  'LEERNESS_SKILL_AUTO_DISCOVER',
+  'LEERNESS_SKILL_AUTO_INSTALL',
+  'LEERNESS_SKILL_AUTO_PRESETS'
+]);
+// 시크릿은 절대 .harness/leerness-config.json 으로 옮기지 않음 (TOKEN 패턴 자동 차단)
+function _isSecretKey(k) {
+  return /TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE/i.test(k);
+}
+function _leernessConfigPath(root) { return path.join(absRoot(root || process.cwd()), '.harness', 'leerness-config.json'); }
+function _loadLeernessConfig(root) {
+  const f = _leernessConfigPath(root);
+  if (!exists(f)) return false;
   try {
-    const txt = read(envFile);
-    for (const line of txt.split(/\r?\n/)) {
-      const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
-      if (!m) continue;
-      const key = m[1];
-      let val = m[2];
-      // 주석 제거
-      if (val.startsWith('#')) continue;
-      // 따옴표 제거
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
-      if (!process.env[key]) process.env[key] = val;
+    const j = JSON.parse(read(f));
+    // _comment 같은 메타 키는 무시. 실제 LEERNESS_* 키만 inject.
+    for (const k of Object.keys(j || {})) {
+      if (k.startsWith('_')) continue;
+      if (_isSecretKey(k)) continue;  // 보안 가드 — 잘못 들어간 시크릿 차단
+      if (typeof j[k] !== 'string' && typeof j[k] !== 'number' && typeof j[k] !== 'boolean') continue;
+      if (!process.env[k]) process.env[k] = String(j[k]);
     }
     return true;
   } catch { return false; }
+}
+// 1.9.187: 기존 .env 에 비시크릿 LEERNESS_* 가 있으면 → .harness/leerness-config.json 으로 옮기고 .env 에서 제거.
+//   사용자가 1.9.186 이전 버전으로 만든 .env 를 1.9.187 로 마이그레이트할 때 자동 정리.
+//   .env 의 시크릿 (TOKEN/KEY/PASSWORD) 은 절대 건드리지 않음. 보안 first.
+function _migrateNonsecretFromEnv(root) {
+  const envFile = path.join(absRoot(root || process.cwd()), '.env');
+  if (!exists(envFile)) return { migrated: 0, kept: 0 };
+  const txt = read(envFile);
+  const lines = txt.split(/\r?\n/);
+  const migrated = {};
+  const remaining = [];
+  let movedCount = 0;
+  let pendingComment = null;  // 직전 # 주석 라인 추적 (비시크릿 키 이동 시 함께 제거)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*#/.test(line) || /^\s*$/.test(line)) {
+      // 주석/빈줄 — 일단 보관, 비시크릿 키 발견 시 직전 주석도 제거 대상
+      if (/^\s*#/.test(line)) pendingComment = remaining.length;
+      remaining.push(line);
+      continue;
+    }
+    const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!m) { remaining.push(line); pendingComment = null; continue; }
+    const key = m[1];
+    const val = m[2].replace(/^["']|["']$/g, '');
+    if (_LEERNESS_NONSECRET_KEYS.has(key) && !_isSecretKey(key)) {
+      // 비시크릿 → config 로 이동, .env 에서 제거 (직전 # 주석도 제거)
+      migrated[key] = val;
+      movedCount++;
+      if (pendingComment !== null) {
+        // pendingComment 라인부터 직전까지 제거 (단, 시작 라인 보호)
+        // 단순화: 그냥 직전 1줄만 제거 (대부분 주석 1줄 + 키 1줄 패턴)
+        if (remaining.length > 0 && /^\s*#/.test(remaining[remaining.length - 1])) {
+          remaining.pop();
+        }
+      }
+      pendingComment = null;
+      continue;
+    }
+    remaining.push(line);
+    pendingComment = null;
+  }
+  if (movedCount === 0) return { migrated: 0, kept: lines.length };
+  // .env 다시 쓰기 (시크릿 + 주석만 유지)
+  // 연속된 빈 줄 정리
+  const cleaned = [];
+  let prevEmpty = false;
+  for (const ln of remaining) {
+    const isEmpty = /^\s*$/.test(ln);
+    if (isEmpty && prevEmpty) continue;
+    cleaned.push(ln);
+    prevEmpty = isEmpty;
+  }
+  writeUtf8(envFile, cleaned.join('\n').replace(/\n+$/, '\n'));
+  // config 에 머지
+  _writeLeernessConfig(root, migrated);
+  return { migrated: movedCount, kept: cleaned.length };
+}
+
+function _writeLeernessConfig(root, kv) {
+  const f = _leernessConfigPath(root);
+  mkdirp(path.dirname(f));
+  // 기존 파일 머지 (사용자가 수동 편집한 값 보존)
+  let existing = {};
+  if (exists(f)) {
+    try { existing = JSON.parse(read(f)); } catch {}
+  }
+  const merged = {
+    _comment: 'leerness 비시크릿 설정. AI 에이전트가 읽을 수 있는 위치 (git checked-in). 시크릿(TOKEN/SECRET/PASSWORD)은 .env 사용.',
+    _docs: 'https://github.com/gugu9999gu/leerness#config',
+    _version: VERSION,
+    ...existing,
+    ...kv
+  };
+  // 보안 가드 — 시크릿 패턴 자동 제거
+  for (const k of Object.keys(merged)) {
+    if (k.startsWith('_')) continue;
+    if (_isSecretKey(k)) { delete merged[k]; }
+  }
+  writeUtf8(f, JSON.stringify(merged, null, 2) + '\n');
+  return f;
 }
 
 function _httpPostJson(urlStr, body, timeoutMs = 300000) {
