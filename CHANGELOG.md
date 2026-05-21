@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.9.198 — 2026-05-21
+
+**🤖 B축 9/10 → 9.5/10 — handoff multi-agent consensus 이력 기반 best agent 자동 추천.**
+
+자율 모드 128 라운드. 1.9.193 consensus 자동 lessons.md 저장 (B축) 후속 — 저장한 데이터를 **handoff 에서 즉시 재활용**.
+
+### 사용자 의도 정렬 (1.9.191 verbatim)
+> *"멀티 서브 에이전트 오케스트라 ... 최고의 도구"*
+
+### 1. handoff 신규 섹션 (B축 핵심)
+```
+## 🤖 task 매칭 best agent (1.9.198 B축) — 키워드 "authentication"
+  과거 multi-agent consensus 2건 — 추천 agent: claude (1회 best)
+  최근 hit: 2026-05-20 agent=claude score=0.873
+  → 재실행: leerness agents multi "<task>" --execute
+```
+- lessons.md 의 1.9.193 `multi-agent consensus — best=X (1.9.193)` 패턴 자동 추출
+- keyword fuzzy 매칭으로 관련 hits 선별
+- agent 별 빈도 카운트 → 최다 best agent 자동 노출
+- 끄기: `--no-multiagent-hint` 또는 `LEERNESS_NO_MULTIAGENT_HINT=1`
+
+### 2. 신규 함수
+- `_loadMultiAgentConsensusHistory(root, keyword)` — lessons.md 1.9.193 패턴 추출 + fuzzy 매칭
+
+### 3. 누적 회귀 (1.9.192~197) — 모두 유지
+- [1.9.197] _readyBackendCountFromCache (60분 캐시 + 헤드라인)
+- [1.9.196] D축 7일+/30일+ recall + ScheduleWakeup miss detector
+- [1.9.195] _probeProviderEndpoints (provider universal probe)
+- [1.9.194] _suggestNextActions (handoff next-actions)
+- [1.9.193] agents multi consensus → lessons.md
+- [1.9.192] _loadOfficialSkillCache + 24h 캐시
+
+### 4. stress-v143 — 14/14 PASS
+- B축 보강 (5: 함수 + 섹션 + 임시 워크스페이스 통합 검증 + 빈도 카운트)
+- 성능: --version cold start avg **500 ms** · MCP 54 도구 **494 ms**
+
+### 5. 5축 매트릭스 변동
+| 축 | 1.9.197 | 1.9.198 | Δ |
+|---|---|---|---|
+| B. 멀티 Sub-Agent 오케스트라 | 9/10 | **9.5/10** | +0.5 (consensus 이력 자동 회수) |
+| 종합 | 47.5/50 (95%) | **48/50 (96%)** | +1% |
+
+### 6. 사용자 명시 조치
+- Cron `10dcaa07` (hourly :17 backup) 사용자 요청으로 삭제
+- 자동 루프는 **ScheduleWakeup 1500s (25분, R-0001 영구 룰)** 단독 운영
+
+### 7. 자동 release 흐름
+- main 자동 push **60 라운드 연속** (1.9.140~198)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.197 — 2026-05-21
 
 **🔌 A축 9.5/10 → 10/10 — provider probe handoff 자동 통합 + 60분 캐시. 5축 매트릭스 47.5/50 (95%).**

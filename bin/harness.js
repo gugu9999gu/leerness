@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.197';
+const VERSION = '1.9.198';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1660,6 +1660,39 @@ async function skillAutoCacheCmd(root, sub) {
     log(`    • [${e.preset || e.source || '?'}] ${e.name} — ${(e.description || '').slice(0, 60)}`);
   }
   if (c.expired) log(`  → 갱신: leerness skill auto-cache refresh`);
+}
+
+// 1.9.198: B축 (멀티 Sub-Agent 오케스트라) 보강 — handoff 에서 task keyword 매칭 best agent 추천
+//   1.9.193 에서 agents multi --execute 결과를 lessons.md 에 기록 → 이를 keyword 매칭하여 추출
+//   사용자/AI 가 같은 task 재시도 시 "과거 best agent 우선 시도" 즉시 인지
+function _loadMultiAgentConsensusHistory(root, keyword) {
+  try {
+    const lp = lessonsPath(root);
+    if (!exists(lp)) return [];
+    const lt = read(lp);
+    // 1.9.193 패턴: ### YYYY-MM-DD multi-agent consensus — best=<agent> (1.9.193)
+    // blocks 분리 후 keyword 매칭 + best agent 추출
+    const blocks = lt.split(/\n### /).slice(1).map(b => '### ' + b);
+    const re193 = /multi-agent consensus — best=(\S+) \(1\.9\.193\)/;
+    const fuzzyRe = keyword ? new RegExp(escapeRegex(keyword.slice(0, Math.max(4, Math.floor(keyword.length * 0.7)))), 'i') : null;
+    const hits = [];
+    for (const b of blocks) {
+      const m = re193.exec(b);
+      if (!m) continue;
+      if (fuzzyRe && !fuzzyRe.test(b)) continue;
+      // task / score 추출
+      const taskM = b.match(/- task: ([^\n]+)/);
+      const scoreM = b.match(/- best agent: \S+, score=([\d.]+)/);
+      const dateM = b.match(/^### (\d{4}-\d{2}-\d{2})/);
+      hits.push({
+        date: dateM ? dateM[1] : '?',
+        agent: m[1],
+        task: taskM ? taskM[1].slice(0, 80) : '',
+        score: scoreM ? Number(scoreM[1]) : null
+      });
+    }
+    return hits;
+  } catch { return []; }
 }
 
 // 1.9.194: E축 (게으름 방지) — handoff 에서 다음 단계 1-3개 자동 제안
@@ -3722,6 +3755,29 @@ function handoff(root) {
                     log('');
                   }
                 }
+              }
+            } catch {}
+          }
+          // 1.9.198: B축 (멀티 Sub-Agent 오케스트라) 보강 — handoff 에서 keyword 매칭 best agent 자동 추천
+          //   1.9.193 lessons.md 기록을 회수 → "이 task 키워드는 이전에 agent X 가 best 였다" 표시
+          //   끄기: --no-multiagent-hint 또는 LEERNESS_NO_MULTIAGENT_HINT=1
+          if (!has('--no-multiagent-hint') && !has('--quiet') && process.env.LEERNESS_NO_MULTIAGENT_HINT !== '1') {
+            try {
+              const maHits = _loadMultiAgentConsensusHistory(root, keyword);
+              if (maHits.length > 0) {
+                // 가장 최근 hit 1 + 동일 agent 빈도 카운트
+                const recent = maHits[maHits.length - 1];
+                const agentCounts = {};
+                for (const h of maHits) { agentCounts[h.agent] = (agentCounts[h.agent] || 0) + 1; }
+                const topAgent = Object.entries(agentCounts).sort((a, b) => b[1] - a[1])[0];
+                const isTty = process.stdout && process.stdout.isTTY;
+                const blu = s => isTty ? `\x1b[34m${s}\x1b[0m` : s;
+                const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+                log(blu(`## 🤖 task 매칭 best agent (1.9.198 B축) — 키워드 "${keyword}"`));
+                log(dim(`  과거 multi-agent consensus ${maHits.length}건 — 추천 agent: ${topAgent[0]} (${topAgent[1]}회 best)`));
+                log(dim(`  최근 hit: ${recent.date} agent=${recent.agent}${recent.score != null ? ` score=${recent.score.toFixed(3)}` : ''}`));
+                log(dim(`  → 재실행: leerness agents multi "${(latestRow.request || '').slice(0, 60)}" --execute`));
+                log('');
               }
             } catch {}
           }
