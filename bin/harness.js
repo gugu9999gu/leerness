@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.192';
+const VERSION = '1.9.193';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -3524,6 +3524,7 @@ function handoff(root) {
                 // 1.9.192: 공식 organization skill catalog 자동 매칭 (C축 보강 — 사용자 의도)
                 //   "공식 표준화된 스킬을 적재적소로 자동 활용 ... 최고의 도구" — handoff 시 keyword 기반 자동 추천
                 //   캐시 (.harness/skill-auto-cache.json, 24h TTL) 사용 → GitHub API 부담 X
+                //   1.9.193: cache age > 7일 → 자동 refresh 권장 hint 강화
                 //   끄기: --no-official-skills 또는 LEERNESS_NO_OFFICIAL_SKILLS=1
                 if (!has('--no-official-skills') && !has('--quiet') && process.env.LEERNESS_NO_OFFICIAL_SKILLS !== '1') {
                   try {
@@ -3532,14 +3533,18 @@ function handoff(root) {
                       const isTty = process.stdout && process.stdout.isTTY;
                       const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
                       const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+                      const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
                       const cacheAge = ofm.ageHours != null ? (ofm.ageHours < 24 ? `${ofm.ageHours}h` : `${Math.floor(ofm.ageHours/24)}d`) : '?';
-                      log(cyan(`## 🌐 공식 organization 스킬 자동 매칭 (1.9.192) — 키워드 "${keyword}"`));
-                      log(dim(`  vercel-labs/anthropics 등 catalog 캐시 ${cacheAge}${ofm.expired ? ' ⚠ 만료' : ''} · ${ofm.total}/${ofm.cacheTotal}건 매칭`));
+                      // 1.9.193: cache age 7일 이상이면 강조 표시 (week stale)
+                      const veryStale = ofm.ageHours != null && ofm.ageHours >= 24 * 7;
+                      log(cyan(`## 🌐 공식 organization 스킬 자동 매칭 (1.9.192/193) — 키워드 "${keyword}"`));
+                      const ageLabel = veryStale ? yel(`${cacheAge} ⚠ 7일+`) : (ofm.expired ? yel(`${cacheAge} ⚠ 만료`) : `${cacheAge} ✓`);
+                      log(dim(`  vercel-labs/anthropics 등 catalog 캐시 ${ageLabel} · ${ofm.total}/${ofm.cacheTotal}건 매칭`));
                       for (const e of ofm.entries) {
                         log(dim(`  • [${e.preset || e.source || '?'}] ${e.name} — ${(e.description || '').slice(0, 70)}`));
                       }
                       log(dim(`  → 설치: leerness skill auto-install --yes`));
-                      if (ofm.expired) log(dim(`  → 갱신: leerness skill auto-cache refresh`));
+                      if (ofm.expired || veryStale) log(yel(`  → 갱신 권장: leerness skill auto-cache refresh  (1.9.193 ${veryStale ? '7일+ stale' : '24h+ expired'})`));
                       log('');
                     } else if (ofm.cacheTotal === 0) {
                       // 캐시 없음 — 첫 사용 안내
@@ -6047,6 +6052,21 @@ function agentsCmd(root, sub, ...args) {
             const block = `\n## ${today()} agents multi --execute (1.9.156)\n- task: ${task.slice(0, 200)}\n- agents: ${ready.map(x => x.def.id).join(', ')}\n- success: ${ok.length}/${ready.length}\n- best: ${best.agent} (score=${best.score.toFixed(3)})\n`;
             append(tlp, block);
           } catch {}
+          // 1.9.193: B축 (멀티 Sub-Agent 오케스트라) 보강 — consensus 결과를 lessons.md 에 자동 기록
+          //   같은 task 재시도 시 과거 best agent + score 가 handoff lessons auto-recall 에서 매칭
+          //   끄기: LEERNESS_NO_MULTIAGENT_LESSON=1
+          if (process.env.LEERNESS_NO_MULTIAGENT_LESSON !== '1') {
+            try {
+              const lp = lessonsPath(root);
+              const lessonBlock = `\n### ${today()} multi-agent consensus — best=${best.agent} (1.9.193)\n`
+                + `- task: ${task.slice(0, 200)}\n`
+                + `- agents: ${ready.map(x => x.def.id).join(', ')} (${ok.length}/${ready.length} success)\n`
+                + `- best agent: ${best.agent}, score=${best.score.toFixed(3)}\n`
+                + (scored.length > 1 ? `- others: ${scored.slice(1, 4).map(s => `${s.agent}=${s.score.toFixed(2)}`).join(', ')}\n` : '')
+                + `- lesson: 같은 keyword 재발 시 ${best.agent} 우선 시도 (multi-signal consensus 입증)\n`;
+              append(lp, lessonBlock);
+            } catch {}
+          }
         }
         if (failures.length && !best) {
           process.exitCode = 1;

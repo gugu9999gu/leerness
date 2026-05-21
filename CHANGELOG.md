@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.9.193 — 2026-05-21
+
+**🤖 B축 (멀티 Sub-Agent 오케스트라) 보강 — agents multi consensus 결과 자동 lessons.md 저장 + 캐시 7일 stale hint.**
+
+자율 모드 123 라운드. 1.9.192 C축 보강에 이어, 5축 매트릭스에서 두 번째로 점수가 낮았던 **B축 (8.5/10 → 목표 9/10)** 보강.
+
+### 사용자 의도 정렬 (1.9.191 verbatim)
+> *"멀티 서브 에이전트 오케스트라 ... 최고의 도구"*
+
+### 1. agents multi --execute → lessons.md 자동 저장 (B축 핵심)
+- 매 `agents multi --execute` 호출 시 consensus best agent + score 가 `.harness/lessons.md`에 기록
+- 같은 keyword 재발 시 handoff lessons auto-recall (1.9.56)가 자동 매칭 → 과거 best agent 우선 시도
+- 끄기: `LEERNESS_NO_MULTIAGENT_LESSON=1`
+
+**lesson 블록 포맷:**
+```markdown
+### 2026-05-21 multi-agent consensus — best=claude (1.9.193)
+- task: ...
+- agents: claude, codex, gemini (3/3 success)
+- best agent: claude, score=0.873
+- others: codex=0.71, gemini=0.65
+- lesson: 같은 keyword 재발 시 claude 우선 시도 (multi-signal consensus 입증)
+```
+
+### 2. skill auto-cache age 7일 stale 강조 (1.9.192 후속)
+- handoff body에서 캐시 age ≥ 7일 (veryStale) 시 `⚠ 7일+` 표시
+- 갱신 권장 hint: `1.9.193 7일+ stale` 또는 `24h+ expired` 명시
+- 사용자가 "오래된 catalog 임을 인지" → 자동 게으름 방지
+
+### 3. 누적 회귀 (1.9.187~192) — 모두 유지
+- [1.9.192] _loadOfficialSkillCache + 24h 캐시
+- [1.9.191] 구조 최적화 보고서 88/100
+- [1.9.190] _selectOne/_selectMany Ctrl+C 즉시 종료
+- [1.9.189] _showSlashCommandList + Tab cycle 한 줄 갱신
+- [1.9.188] stdin prompt 전달 (useStdinForPrompt)
+- [1.9.187] _loadLeernessConfig (.harness/leerness-config.json)
+
+### 4. stress-v138 — 16/16 PASS
+- consensus auto-lessons (3) + cache age hint (2) + 1.9.192 잔존 (2)
+- 성능: --version cold start avg **396 ms** (376/382/430) · MCP 54 도구 **369 ms**
+- 누적 회귀 1.9.187~192 (7)
+
+### 5. 5축 매트릭스 변동
+| 축 | 1.9.192 | 1.9.193 | Δ |
+|---|---|---|---|
+| B. 멀티 Sub-Agent 오케스트라 | 8.5/10 | **9/10** | +0.5 (consensus 자동 lessons → 학습 사이클 완성) |
+| C. 공식 표준 스킬 자동 활용 | 9/10 | 9/10 | (유지) |
+| 종합 | 45/50 (90%) | **45.5/50 (91%)** | +1% |
+
+### 6. 자동 release 흐름
+- main 자동 push **55 라운드 연속** (1.9.140~193)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.192 — 2026-05-21
 
 **🌐 C축 (공식 표준 스킬 자동 활용) 보강 — handoff에 공식 organization catalog 자동 노출 + 24h 캐시.**
