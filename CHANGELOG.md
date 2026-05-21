@@ -1,5 +1,100 @@
 # Changelog
 
+## 1.9.182 — 2026-05-21
+
+**🌐 공식 조직 스킬 catalog 자동 탐색 — vercel-labs/agent-skills + anthropics/skills 직접 통합 (사용자 명시).**
+
+자율 모드 112 라운드. 사용자 명시: *"공식 조직의 스킬 모음을 탐색해서 다운로드 받아서 스킬을 사용하는지 확인 (vercel-labs/agent-skills, anthropics/skills) + 지금 설계하는 방향이 올바른지 판단도 너가 해줘"*.
+
+### 핵심 추가
+
+#### 1. `SKILL_CATALOG_PRESETS` — 내장 공식 catalog
+```js
+const SKILL_CATALOG_PRESETS = {
+  'vercel':    { owner: 'vercel-labs', repo: 'agent-skills', branch: 'main', path: 'skills' },
+  'anthropic': { owner: 'anthropics',  repo: 'skills',       branch: 'main', path: 'skills' }
+};
+```
+
+#### 2. `_fetchGitHubSkills(owner, repo, branch, dirPath)` — GitHub Contents API 직접 호출
+- rate limit: 60 req/hr (LEERNESS_GITHUB_TOKEN 시 5000 req/hr)
+- 응답을 표준 entry 형식으로 변환 (name, url, description, source, homepage)
+- raw.githubusercontent.com URL 자동 구성
+
+#### 3. `leerness skill discover` 확장
+```bash
+$ leerness skill discover --preset anthropic
+# leerness skill discover (1.9.182 — GitHub presets)
+targets: anthropics/skills#main:skills
+  fetching anthropics/skills...
+  ✓ anthropics/skills: 17개 skill 발견
+전체 17건 (전체 표시 — 매칭 없음)
+
+| name | source | url |
+|---|---|---|
+| algorithmic-art | github:anthropics/skills | https://raw.githubusercontent.com/anthropics/skills/main/skills/algorithmic-art/SKILL.md |
+| mcp-builder | github:anthropics/skills | https://raw.githubusercontent.com/anthropics/skills/main/skills/mcp-builder/SKILL.md |
+| ...
+```
+
+신규 옵션:
+- `--preset <name>` — 내장 catalog (vercel, anthropic)
+- `--all-presets` — 모든 preset 동시 탐색
+- `--github owner/repo[#branch][:path]` — 직접 GitHub repo 지정
+
+#### 4. `leerness skill auto-install` — 신규 명령 (사용자 명시 핵심)
+```bash
+$ leerness skill auto-install --query "mcp"
+# leerness skill auto-install (1.9.182)
+presets: vercel, anthropic
+query: mcp
+mode: 🟡 dry-run (LEERNESS_SKILL_AUTO_INSTALL=1 또는 --yes 필요)
+  fetching anthropics/skills...
+  ✓ anthropics/skills: 17개 skill
+매칭 1/17건 (query: mcp)
+| mcp-builder | github:anthropics/skills | https://raw.githubusercontent.com/anthropics/skills/main/skills/mcp-builder/SKILL.md |
+
+💡 자동 install 활성화: .env 에 LEERNESS_SKILL_AUTO_INSTALL=1 또는 leerness skill auto-install --yes
+```
+
+- handoff 컨텍스트에서 자동 query 추출 (진행 task 키워드)
+- LEERNESS_SKILL_AUTO_INSTALL=1 시 실제 다운로드 (보안 opt-in)
+- 미설정 시 dry-run (추천만)
+
+#### 5. .env.example 보강
+```
+LEERNESS_SKILL_AUTO_INSTALL=0
+LEERNESS_SKILL_AUTO_PRESETS=vercel,anthropic
+```
+
+### 실 검증 (live GitHub API)
+- **anthropics/skills 17개 skill 자동 발견**:
+  algorithmic-art, brand-guidelines, canvas-design, claude-api, doc-coauthoring, **docx**, frontend-design, internal-comms, **mcp-builder**, **pdf**, **pptx**, skill-creator, slack-gif-creator, theme-factory, web-artifacts-builder, **webapp-testing**, **xlsx**
+- **mcp-builder 실 다운로드 + 설치 성공**:
+  `leerness-stress/.harness/skills/mcp-builder/SKILL.md` 다운로드 검증
+  description: "Guide for creating high-quality MCP (Model Context Protocol) servers..."
+
+### 방향성 평가 보고서 (사용자 명시)
+사용자 요청: *"지금 설계하는 방향이 올바른 방향인지 판단도 너가 해줘"*. 보고서: `_reports/direction-1.9.182.md` (비공개).
+
+**결론**:
+| 평가 항목 | 점수 |
+|---|---|
+| 자율성 (auto loop · review · install) | 8.5/10 |
+| 성장성 (learn · suggest · skill catalog) | 8/10 |
+| 안전성 (sandbox · permissions · env opt-in) | 9/10 |
+| 범용성 (multi-provider · MCP · bridges) | 8/10 |
+| 검증 가능성 (verify-claim · stress · e2e) | 9.5/10 |
+
+**종합**: 86/100. **올바른 방향**. 약점은 *스킬 적용 후 회고 부재 + 외부 스킬 신뢰성 검증* — 1.9.183~190 마일스톤.
+
+### Verified
+- stress-v127: **16/16** (preset 4 + .env 라우팅 2 + 실 GitHub fetch 3 + VERSION+누적 회귀 7)
+- e2e 217/217 baseline 유지
+- VERSION = 1.9.182 · autonomous-rounds = 112 · main 자동 push 43 라운드 연속
+
+---
+
 ## 1.9.181 — 2026-05-21
 
 **🚪 REPL 진입 흐름 정리 — 사용자 명시 4종 + 직접 구동 실 호출 검증.**

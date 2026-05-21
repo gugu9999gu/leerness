@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.181';
+const VERSION = '1.9.182';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -872,7 +872,11 @@ async function install(root, opts = {}) {
       '#   예시 URL: https://agentskills.io/llms.txt',
       'LEERNESS_SKILL_DISCOVER_URL=',
       '# (선택) 사용자 요청 분석 시 자동 매칭 스킬 추천. 1=활성, 0/미설정=비활성.',
-      'LEERNESS_SKILL_AUTO_DISCOVER=0'
+      'LEERNESS_SKILL_AUTO_DISCOVER=0',
+      '# 1.9.182 — handoff 시 공식 catalog (vercel-labs, anthropics) 자동 탐색 + 매칭 시 자동 install. 1=활성 (opt-in 보안).',
+      'LEERNESS_SKILL_AUTO_INSTALL=0',
+      '# 1.9.182 — handoff 자동 탐색 대상 preset (콤마 구분). 예: vercel,anthropic',
+      'LEERNESS_SKILL_AUTO_PRESETS=vercel,anthropic'
     ];
     mergeLinesFile(path.join(root, '.env.example'), envLines);
     // 1.9.153: .env 직접 생성/마이그레이션 (사용자 명시 요청). 보안 = 빈 값만 — 사용자가 직접 토큰 채움.
@@ -1322,15 +1326,135 @@ function _parseSkillCatalog(body, sourceUrl) {
   return entries;
 }
 
-// skill discover — agentskills.io 또는 사용자 지정 URL의 카탈로그 인덱스에서 매칭 추천
+// 1.9.182: 공식 조직 스킬 catalog presets — 사용자 명시 (vercel-labs, anthropics 같은 1st-party 자동 탐색).
+//   각 entry: GitHub repo의 skills/ 디렉토리에 SKILL.md 들이 있는 표준 구조.
+//   sync: leerness skill discover --preset <name>  ·  --all-presets  ·  --github <owner/repo>[#branch]
+const SKILL_CATALOG_PRESETS = {
+  'vercel':    { owner: 'vercel-labs', repo: 'agent-skills', branch: 'main', path: 'skills',
+                  homepage: 'https://github.com/vercel-labs/agent-skills' },
+  'anthropic': { owner: 'anthropics',  repo: 'skills',       branch: 'main', path: 'skills',
+                  homepage: 'https://github.com/anthropics/skills' }
+};
+
+// 1.9.182: GitHub repo 의 skills/ 디렉토리 자동 탐색.
+//   GitHub Contents API (no auth 60req/hr, .env GITHUB_TOKEN 시 5000req/hr) 사용.
+//   응답을 표준 entry 형식으로 변환: { name, url, description, format: 'github', source }
+async function _fetchGitHubSkills(owner, repo, branch, dirPath) {
+  branch = branch || 'main'; dirPath = dirPath || 'skills';
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${dirPath}?ref=${branch}`;
+  const token = process.env.LEERNESS_GITHUB_TOKEN || process.env.GITHUB_TOKEN || '';
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  // _httpFetch 가 headers를 지원하지 않으면 raw https 사용
+  let body, status;
+  try {
+    const https = require('https');
+    const u = new URL(apiUrl);
+    body = await new Promise((resolve, reject) => {
+      const req = https.get({
+        hostname: u.hostname, path: u.pathname + u.search,
+        headers: { 'User-Agent': `leerness/${VERSION}`, ...headers }
+      }, res => {
+        status = res.statusCode;
+        const chunks = [];
+        res.on('data', c => chunks.push(c));
+        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      });
+      req.on('error', reject);
+      req.setTimeout(10000, () => { req.destroy(new Error('timeout')); });
+    });
+  } catch (e) { return { ok: false, error: e.message, skills: [] }; }
+  if (status !== 200) return { ok: false, error: `HTTP ${status}`, skills: [] };
+  let items; try { items = JSON.parse(body); } catch { return { ok: false, error: 'invalid JSON', skills: [] }; }
+  if (!Array.isArray(items)) return { ok: false, error: 'not array', skills: [] };
+  const skills = items
+    .filter(i => i && i.type === 'dir')
+    .map(i => ({
+      name: i.name,
+      url: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${i.path}/SKILL.md`,
+      description: '',
+      format: 'github',
+      source: `github:${owner}/${repo}`,
+      homepage: i.html_url
+    }));
+  return { ok: true, skills };
+}
+
+// skill discover — agentskills.io / GitHub repo / 공식 preset 카탈로그 인덱스에서 매칭 추천
 async function skillDiscoverCmd(root) {
-  const url = arg('--source', null) || process.env.LEERNESS_SKILL_DISCOVER_URL || null;
+  // 1.9.182: --preset / --all-presets / --github 추가 (사용자 명시 — vercel-labs/agent-skills, anthropics/skills 등)
+  const preset = arg('--preset', null);
+  const allPresets = has('--all-presets');
+  const github = arg('--github', null);  // 예: vercel-labs/agent-skills 또는 owner/repo#branch:path
   const query = arg('--query', null);
+
+  // preset / --all-presets / --github 처리 — 단일 source URL과 별개 흐름
+  if (preset || allPresets || github) {
+    const targets = [];
+    if (allPresets) for (const k of Object.keys(SKILL_CATALOG_PRESETS)) targets.push({ key: k, ...SKILL_CATALOG_PRESETS[k] });
+    else if (preset) {
+      const p = SKILL_CATALOG_PRESETS[preset];
+      if (!p) { fail(`알 수 없는 preset: ${preset} (사용 가능: ${Object.keys(SKILL_CATALOG_PRESETS).join(', ')})`); return process.exit(1); }
+      targets.push({ key: preset, ...p });
+    }
+    if (github) {
+      // owner/repo 또는 owner/repo#branch 또는 owner/repo#branch:path
+      const m = github.match(/^([^/]+)\/([^#:]+)(?:#([^:]+))?(?::(.+))?$/);
+      if (!m) { fail(`--github 형식 오류 (예: vercel-labs/agent-skills 또는 owner/repo#main:skills)`); return process.exit(1); }
+      targets.push({ key: 'custom', owner: m[1], repo: m[2], branch: m[3] || 'main', path: m[4] || 'skills', homepage: `https://github.com/${m[1]}/${m[2]}` });
+    }
+    log(`# leerness skill discover (1.9.182 — GitHub presets)`);
+    if (query) log(`query: ${query}`);
+    log(`targets: ${targets.map(t => `${t.owner}/${t.repo}#${t.branch}:${t.path}`).join(', ')}`);
+    log('');
+    const allEntries = [];
+    for (const t of targets) {
+      log(`  fetching ${t.owner}/${t.repo}...`);
+      const r = await _fetchGitHubSkills(t.owner, t.repo, t.branch, t.path);
+      if (!r.ok) {
+        log(`  ⚠ ${t.owner}/${t.repo}: ${r.error}`);
+        continue;
+      }
+      log(`  ✓ ${t.owner}/${t.repo}: ${r.skills.length}개 skill 발견`);
+      for (const s of r.skills) allEntries.push(s);
+    }
+    log('');
+    if (has('--json')) { log(JSON.stringify({ presets: targets.map(t => t.key), query, entries: allEntries }, null, 2)); return; }
+    if (!allEntries.length) {
+      log('  (스킬 0건 — preset/path/branch 확인 또는 rate limit 가능)');
+      return;
+    }
+    let matched = allEntries;
+    if (query) {
+      const q = query.toLowerCase();
+      matched = allEntries.filter(e => e.name.toLowerCase().includes(q) || (e.description || '').toLowerCase().includes(q));
+      log(`매칭 ${matched.length}/${allEntries.length}건 (query: ${query})`);
+    } else {
+      log(`전체 ${allEntries.length}건 (전체 표시 — 매칭 없음)`);
+    }
+    log('');
+    log('| name | source | url |');
+    log('|---|---|---|');
+    for (const e of matched.slice(0, 40)) {
+      log(`| ${e.name} | ${e.source} | ${e.url} |`);
+    }
+    log('');
+    log(`💡 설치: leerness skill install <url>  ·  자동 install (env opt-in): LEERNESS_SKILL_AUTO_INSTALL=1`);
+    return;
+  }
+
+  // 기존 단일 URL 흐름 (1.9.42)
+  const url = arg('--source', null) || process.env.LEERNESS_SKILL_DISCOVER_URL || null;
   if (!url) {
     fail([
       'LEERNESS_SKILL_DISCOVER_URL 환경변수 또는 --source URL 필요.',
+      '',
+      '또는 (1.9.182 신규) — 공식 조직 catalog presets:',
+      '  leerness skill discover --preset vercel        # vercel-labs/agent-skills',
+      '  leerness skill discover --preset anthropic     # anthropics/skills',
+      '  leerness skill discover --all-presets          # 모든 preset 동시 탐색',
+      '  leerness skill discover --github owner/repo    # 직접 GitHub repo 지정',
+      '',
       '예: leerness skill discover --source https://agentskills.io/llms.txt',
-      '또는 .env에 LEERNESS_SKILL_DISCOVER_URL=...',
       '',
       '(정책: leerness는 사용자 동의 없이 외부 URL을 fetch하지 않음 — 1.9.42 opt-in)'
     ].join('\n'));
@@ -1370,6 +1494,78 @@ async function skillDiscoverCmd(root) {
   }
   log('');
   log(`💡 설치: leerness skill install <url>`);
+}
+
+// 1.9.182: skill auto-install — 공식 organization catalog 자동 탐색 → skill match → 자동 install.
+//   사용자 명시: "스킬을 사용하거나 적용해두면 좋을 부분들을 알아서 웹에서 공식 조직의 스킬 모음을 탐색해서 다운로드 받아서 사용"
+//   정책: LEERNESS_SKILL_AUTO_INSTALL=1 일 때만 실제 install (보안 opt-in). 미설정 시 dry-run (추천만).
+async function skillAutoInstallCmd(root) {
+  root = absRoot(root);
+  const presets = (process.env.LEERNESS_SKILL_AUTO_PRESETS || arg('--presets', 'vercel,anthropic') || '').split(',').map(s => s.trim()).filter(Boolean);
+  const autoInstall = process.env.LEERNESS_SKILL_AUTO_INSTALL === '1' || has('--yes');
+  const query = arg('--query', null) || _autoInstallQueryFromHandoff(root);
+  const maxInstall = Number(arg('--max', '3'));
+  log(`# leerness skill auto-install (1.9.182)`);
+  log(`presets: ${presets.join(', ') || '(none)'}`);
+  log(`query: ${query || '(auto — handoff 컨텍스트)'}`);
+  log(`mode: ${autoInstall ? '🟢 자동 install' : '🟡 dry-run (LEERNESS_SKILL_AUTO_INSTALL=1 또는 --yes 필요)'}`);
+  log('');
+  const allEntries = [];
+  for (const key of presets) {
+    const p = SKILL_CATALOG_PRESETS[key];
+    if (!p) { log(`  ⚠ 알 수 없는 preset: ${key}`); continue; }
+    log(`  fetching ${p.owner}/${p.repo}...`);
+    const r = await _fetchGitHubSkills(p.owner, p.repo, p.branch, p.path);
+    if (!r.ok) { log(`  ⚠ ${p.owner}/${p.repo}: ${r.error}`); continue; }
+    log(`  ✓ ${p.owner}/${p.repo}: ${r.skills.length}개 skill`);
+    for (const s of r.skills) allEntries.push(s);
+  }
+  log('');
+  // query 매칭 (substring) — query 없으면 모든 항목
+  let matched = allEntries;
+  if (query) {
+    const q = String(query).toLowerCase();
+    matched = allEntries.filter(e => e.name.toLowerCase().includes(q) || (e.description || '').toLowerCase().includes(q));
+    log(`매칭 ${matched.length}/${allEntries.length}건 (query: ${query})`);
+  } else {
+    log(`전체 ${allEntries.length}건 (모든 항목)`);
+  }
+  if (!matched.length) { log('  (매칭 0건 — query 변경 또는 --presets 추가)'); return; }
+  log('');
+  log('| name | source | url |');
+  log('|---|---|---|');
+  for (const e of matched.slice(0, maxInstall)) {
+    log(`| ${e.name} | ${e.source} | ${e.url} |`);
+  }
+  log('');
+  if (!autoInstall) {
+    log(`💡 자동 install 활성화: .env 에 LEERNESS_SKILL_AUTO_INSTALL=1 또는 \`leerness skill auto-install --yes\``);
+    log(`   현재 ${Math.min(maxInstall, matched.length)}건이 install 대상 (실제 다운로드 X — dry-run)`);
+    return;
+  }
+  log(`📥 자동 install 시작 — 최대 ${maxInstall}건`);
+  let installed = 0, failed = 0;
+  for (const e of matched.slice(0, maxInstall)) {
+    try {
+      await skillInstallCmd(root, e.url);
+      installed++;
+    } catch (err) {
+      log(`  ⚠ ${e.name} install 실패: ${err.message}`);
+      failed++;
+    }
+  }
+  log('');
+  log(`✓ auto-install 완료: ${installed}건 설치 / ${failed}건 실패 / ${matched.length - installed - failed}건 skip`);
+}
+
+// 1.9.182: handoff 컨텍스트 (현재 in-progress task) 에서 자동 query 추출
+function _autoInstallQueryFromHandoff(root) {
+  try {
+    const rows = readProgressRows(root);
+    const active = rows.find(r => r.status === '[진행]' || r.status === '[in-progress]' || r.status === 'in_progress');
+    if (active) return (active.request || '').split(/\s+/).slice(0, 3).join(' ');
+  } catch {}
+  return null;
 }
 
 // skill export <id> — 기존 자체 skill을 agentskills.io 표준 SKILL.md로 export
@@ -13540,6 +13736,8 @@ async function main() {
   if (cmd === 'benchmark')                          return benchmarkCmd(absRoot(args[1] || arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'publish')     return skillPublishCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'suggest')     return skillSuggestCmd(absRoot(arg('--path', process.cwd())));
+  // 1.9.182: leerness skill auto-install — 공식 catalog 자동 탐색 + skill match 매칭 시 자동 install (사용자 명시)
+  if (cmd === 'skill' && args[1] === 'auto-install') return await skillAutoInstallCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'mcp' && args[1] === 'serve')         return mcpServeCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'gate')                               return gate(args[1] || process.cwd());
   if (cmd === 'verify-code')                        return verifyCodeCmd(args[1] || process.cwd());
