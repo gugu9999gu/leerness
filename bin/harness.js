@@ -7,7 +7,17 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.183';
+const VERSION = '1.9.184';
+
+// 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
+//   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
+//   인자 escape 가 필요한 위치는 검증된 입력만 spawnSync 에 전달. REPL agent 진입 시 _checkAgent 가 발산하는 노이즈 제거.
+process.removeAllListeners('warning');
+process.on('warning', (w) => {
+  if (w && (w.code === 'DEP0190' || /DEP0190/.test(String(w.message || '')))) return;
+  process.stderr.write(`(node:${process.pid}) ${w.name || 'Warning'}: ${w.message || w}\n`);
+});
+
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -767,6 +777,26 @@ async function resolveInstallOptions(root, opts = {}) {
 
 async function install(root, opts = {}) {
   root = absRoot(root); mkdirp(root);
+  // 1.9.184 (사용자 명시): 설치 도중 Ctrl+C 시 종료 확인 prompt.
+  //   첫 Ctrl+C → 안내 (2초 이내 한 번 더 → 종료, 그 외 → 계속).
+  //   readline raw mode 시 readline 이 'SIGINT' 이벤트로 흡수할 수 있어 process-level + finally 해제.
+  let _sigintCount = 0; let _sigintTimer = null;
+  const _sigintHandler = () => {
+    _sigintCount++;
+    if (_sigintCount === 1) {
+      try { process.stdout.write('\n\n  ⚠ 설치 중단하시겠습니까? Ctrl+C 를 2초 이내에 한 번 더 누르면 종료됩니다. (그 외 → 계속 진행)\n'); } catch {}
+      clearTimeout(_sigintTimer);
+      _sigintTimer = setTimeout(() => { _sigintCount = 0; }, 2000);
+      return;
+    }
+    clearTimeout(_sigintTimer);
+    try { process.stdout.write('\n  ✗ 설치 중단됨 (사용자 요청)\n'); } catch {}
+    process.exit(130);
+  };
+  if (!opts.migration && !opts.nonInteractive && process.stdin.isTTY) {
+    process.on('SIGINT', _sigintHandler);
+  }
+  const _cleanupSigint = () => { try { process.removeListener('SIGINT', _sigintHandler); clearTimeout(_sigintTimer); } catch {} };
   // 1.9.41: migrate 직전 이전 버전 캡처 — 차분 안내에 사용
   try {
     const hv = path.join(root, '.harness', 'HARNESS_VERSION');
@@ -796,8 +826,7 @@ async function install(root, opts = {}) {
   if (resolved.startRepl) log(`REPL 자동 시작: 예 (설치 완료 후 \`leerness agent\` 진입)`);
   if (resolved.permissionMode) log(`Agent 권한 모드: ${resolved.permissionMode}  (1.9.174 — REPL에서 \`:permissions extended|full\` 로 즉시 변경 가능)`);
   // 1.9.10: 스킬 카탈로그 출처 안내
-  if (SKILLPACK_SOURCE === 'builtin') log(`Skill catalog source: builtin (leerness-skillpack 미설치 — \`npm i leerness-skillpack\`로 확장 가능)`);
-  else log(`Skill catalog source: ${SKILLPACK_SOURCE} (leerness-skillpack${SKILLPACK_META ? ` v${SKILLPACK_META.version}` : ''})`);
+  // 1.9.184 (사용자 명시): leerness-skillpack 미사용 정책 — 안내 메시지 제거. builtin catalog 만 사용.
   const files = coreFiles(root, lang, skills);
   const backup = createBackup(root, opts.force ? 'force' : (opts.migration ? 'migration' : 'init'), files, opts.dry);
   if (opts.dry) {
@@ -816,7 +845,20 @@ async function install(root, opts = {}) {
     '.claude/commands/handoff.md','.claude/commands/session-close.md','.claude/commands/audit.md','.claude/commands/lazy-detect.md','.claude/commands/update.md',
     '.claude/skills/leerness.md'
   ]);
+  // 1.9.184 (사용자 명시): 파일 설치 — 생성 목록 나열 X, 로딩바 + 단일 완료 메시지.
   const actions = [];
+  const totalFiles = Object.keys(files).length;
+  const isTty = process.stdout.isTTY && !opts.dry;
+  const drawProgress = (done, file) => {
+    if (!isTty) return;
+    const pct = Math.round(done * 100 / totalFiles);
+    const filled = Math.floor(pct / 5);
+    const bar = '\x1b[36m' + '█'.repeat(filled) + '\x1b[2m' + '░'.repeat(20 - filled) + '\x1b[0m';
+    const truncFile = (file || '').length > 32 ? '...' + file.slice(-29) : (file || '');
+    process.stdout.write(`\r  ${bar} \x1b[1m${done}/${totalFiles}\x1b[0m (${pct}%) \x1b[2m${truncFile}\x1b[0m\x1b[K`);
+  };
+  drawProgress(0, '');
+  let _done = 0;
   for (const [f, c] of Object.entries(files)) {
     const existsNow = exists(path.join(root, f));
     const mergeManaged = managedOverwrite.has(f);
@@ -828,7 +870,12 @@ async function install(root, opts = {}) {
     }
     const r = writeIfSafe(root, f, c, { force: opts.force, mergeManaged, archiveDir: backup.archiveDir });
     actions.push(r);
-    ok(`${r.action}: ${r.file}`);
+    _done++;
+    drawProgress(_done, f);
+  }
+  if (isTty) {
+    process.stdout.write('\r\x1b[K');  // clear progress line
+    log(`  \x1b[32m✓\x1b[0m leerness 파일 설치 완료 (${totalFiles}개)`);
   }
   if (!opts.dry) {
     mergeLinesFile(path.join(root, '.gitignore'), [
@@ -943,11 +990,13 @@ async function install(root, opts = {}) {
       log('');
       log('🚀 설치 완료 — REPL agent 모드를 시작합니다...');
       log('');
+      _cleanupSigint();  // 1.9.184: REPL 진입 전 SIGINT handler 해제 (readline 이 자체 처리)
       try {
         await _agentRepl(root, { role: 'actor' });  // provider 미지정 → _agentRepl 의 auto-select 동작 (1.9.181 fix)
       } catch (e) { warn('REPL 진입 실패: ' + e.message); }
     }
   }
+  _cleanupSigint();  // 1.9.184: install 함수 종료 시 SIGINT handler 해제 (모든 종료 경로)
 }
 
 function installSkills(root, skills) { for (const name of skills) addSkill(root, name, true); }

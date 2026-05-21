@@ -1,5 +1,92 @@
 # Changelog
 
+## 1.9.184 — 2026-05-21
+
+**🎨 설치 UX 4종 — Ctrl+C 확인 prompt + 로딩바 + skillpack 제외 + DEP0190 억제 (사용자 명시).**
+
+자율 모드 114 라운드. 사용자 명시 4종:
+1. *"설치 가이드에서 Ctrl+C 입력 시 설치 종료 여부 확인 로직 추가"* → SIGINT handler (2단계 confirm)
+2. *"leerness 파일 설치 시작 시 로딩바로 구현 + 생성 목록 나열 X"* → progress bar (TTY)
+3. *"leerness-skillpack 미사용 예정 → 제외"* → 안내 메시지 제거
+4. *"REPL agent 모드 진입 시 DEP0190 deprecation warning 제거"* → process warning handler
+
+### Fix #1 — Ctrl+C 종료 확인 prompt
+```js
+// 1.9.184 (사용자 명시): 설치 도중 Ctrl+C 시 종료 확인 prompt.
+//   첫 Ctrl+C → 안내 (2초 이내 한 번 더 → 종료, 그 외 → 계속).
+let _sigintCount = 0; let _sigintTimer = null;
+const _sigintHandler = () => {
+  _sigintCount++;
+  if (_sigintCount === 1) {
+    process.stdout.write('\n\n  ⚠ 설치 중단하시겠습니까? Ctrl+C 를 2초 이내에 한 번 더 누르면 종료됩니다. (그 외 → 계속 진행)\n');
+    _sigintTimer = setTimeout(() => { _sigintCount = 0; }, 2000);
+    return;
+  }
+  process.exit(130);
+};
+```
+install 시작에 등록, 종료/REPL 진입 시 cleanup.
+
+### Fix #2 — 파일 설치 progress bar (생성 목록 미표시)
+**Before** (line by line):
+```
+✓ create: AGENTS.md
+✓ create: CLAUDE.md
+✓ create: .harness/HARNESS_VERSION
+✓ create: .harness/manifest.json
+... (수십 줄)
+```
+
+**After** (single progress bar):
+```
+  ████████████████░░░░ 24/30 (80%) .harness/skills/office/SKILL.md
+```
+완료 시:
+```
+  ✓ leerness 파일 설치 완료 (30개)
+```
+
+### Fix #3 — leerness-skillpack 안내 제거
+```diff
+- if (SKILLPACK_SOURCE === 'builtin') log(`Skill catalog source: builtin (leerness-skillpack 미설치 — npm i leerness-skillpack 로 확장 가능)`);
+- else log(`Skill catalog source: ${SKILLPACK_SOURCE} (leerness-skillpack${SKILLPACK_META ? ` v${SKILLPACK_META.version}` : ''})`);
++ // 1.9.184 (사용자 명시): leerness-skillpack 미사용 정책 — 안내 메시지 제거. builtin catalog 만 사용.
+```
+
+### Fix #4 — DEP0190 DeprecationWarning 억제
+파일 최상단에서 process warning handler 등록:
+```js
+// 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
+//   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용.
+process.removeAllListeners('warning');
+process.on('warning', (w) => {
+  if (w && (w.code === 'DEP0190' || /DEP0190/.test(String(w.message || '')))) return;
+  process.stderr.write(`(node:${process.pid}) ${w.name || 'Warning'}: ${w.message || w}\n`);
+});
+```
+
+**Before** (REPL 진입 시):
+```
+agent[claude/actor/▶]> (node:54076) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true...
+```
+
+**After** (REPL 진입 시):
+```
+agent[claude/actor/▶]> _
+```
+깔끔.
+
+### Verified
+- stress-v129: **14/14 PASS** (사용자 명시 4 + live install 3 + 누적 7)
+- e2e 217/217 baseline 유지
+- live install 검증:
+  - DEP0190 출력 안 됨 ✓
+  - "Skill catalog source: builtin" 안내 없음 ✓
+  - 파일 생성 목록 0건 (non-TTY) ✓
+- VERSION = 1.9.184 · autonomous-rounds = 114 · main 자동 push 45 라운드 연속
+
+---
+
 ## 1.9.183 — 2026-05-21
 
 **📦 npm i leerness + 구버전 자동 감지/경고/업데이트 명령어 안내 (사용자 명시 3종).**
