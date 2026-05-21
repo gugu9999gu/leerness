@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.9.199 — 2026-05-21
+
+**⏰ wakeup miss 자동 회복 강화 — last-handoff timestamp 정밀 측정 + R-0001 룰 (25분) 대비 강한 알림.**
+
+자율 모드 129 라운드. 사용자 보고 "22:01에 라운드에 자동진입되지않았어" 대응.
+
+### 1. last-handoff timestamp 기록 (`.harness/last-handoff.json`)
+- handoff 진입 시 자동 기록 — `last` + `history` (최근 10개)
+- 함수: `_recordLastHandoff(root)` / `_getLastHandoffGap(root)` / `_lastHandoffPath(root)`
+- 기록 순서: 1) 이전 timestamp 보존 → 2) 현재 timestamp 기록 → 3) 보존된 값으로 gap 측정
+
+### 2. 강한 의심 알림 (1.9.196 task-log 기반 → 1.9.199 정밀)
+**R-0001 영구 룰 (25분) 대비:**
+- gap > 60분 → 🔴 강한 의심 ("시스템 sleep / wakeup 누락 확실")
+- gap 35~60분 → ⚠ 의심 ("buffer 초과, 한 cycle 누락 가능성")
+- gap ≤ 30분 + history ≥ 2 → ✓ 정상
+
+```
+## ⏰ ScheduleWakeup miss 강한 의심 (1.9.199) — 이전 handoff 90분 전
+  R-0001 영구 룰 (25분) 대비 3× 초과 — 시스템 sleep / wakeup 누락 확실
+  → 회복: 사용자가 "다음 라운드" 입력 또는 leerness rule list 로 룰 확인
+  → handoff 이력: 09:30:21 → 10:55:14 → 12:25:33
+```
+
+### 3. 누적 회귀 (1.9.193~198) — 모두 유지
+
+### 4. stress-v144 — 16/16 PASS
+- last-handoff 측정 (5) + 임시 워크스페이스 통합 (2) + 성능 (2) + 누적 회귀 (7)
+- 성능: --version cold start avg **1065 ms** · MCP 54 도구 **717 ms**
+
+### 5. 다층 redundancy (사용자 보고 대응)
+세션 내 활성 cron jobs:
+- `3f617fbc` — Every 25 minutes (R-0001 sync)
+- `33a4ed9f` — 3,28,53 * * * * (offset backup)
+- ScheduleWakeup 1500s primary
+
+### 6. 자동 release 흐름
+- main 자동 push **61 라운드 연속** (1.9.140~199)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.198 — 2026-05-21
 
 **🤖 B축 9/10 → 9.5/10 — handoff multi-agent consensus 이력 기반 best agent 자동 추천.**

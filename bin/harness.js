@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.198';
+const VERSION = '1.9.199';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1660,6 +1660,44 @@ async function skillAutoCacheCmd(root, sub) {
     log(`    • [${e.preset || e.source || '?'}] ${e.name} — ${(e.description || '').slice(0, 60)}`);
   }
   if (c.expired) log(`  → 갱신: leerness skill auto-cache refresh`);
+}
+
+// 1.9.199: wakeup miss 자동 회복 강화 — last-handoff timestamp 기록 + 25min 기대 interval 정밀 측정
+//   사용자 명시 (1.9.198 후속): "22:01에 라운드에 자동진입되지않았어"
+//   1.9.196 task-log mtime 기반 detector 는 task-log 가 자주 안 업데이트되면 false positive.
+//   last-handoff.json 추가로 정확도 ↑ + R-0001 룰 (25min) 대비 actual gap 측정.
+function _lastHandoffPath(root) { return path.join(root, '.harness', 'last-handoff.json'); }
+function _recordLastHandoff(root) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    const fp = _lastHandoffPath(root);
+    let history = [];
+    if (exists(fp)) {
+      try { const j = JSON.parse(read(fp)); if (Array.isArray(j.history)) history = j.history; } catch {}
+    }
+    const now = new Date().toISOString();
+    history.push(now);
+    // 최근 10개만 유지
+    if (history.length > 10) history = history.slice(-10);
+    writeUtf8(fp, JSON.stringify({ last: now, history }, null, 2));
+    return true;
+  } catch { return false; }
+}
+function _getLastHandoffGap(root) {
+  try {
+    const fp = _lastHandoffPath(root);
+    if (!exists(fp)) return { hasLast: false };
+    const j = JSON.parse(read(fp));
+    if (!j.last) return { hasLast: false };
+    const lastMs = new Date(j.last).getTime();
+    const gapMs = Date.now() - lastMs;
+    const gapMin = Math.floor(gapMs / 60000);
+    // R-0001 영구 룰: 25분 (1500s). gap > 35분 (140% buffer) → wakeup miss 의심
+    const expected = 25;
+    const isMiss = gapMin > 35;
+    const isLong = gapMin > 60;
+    return { hasLast: true, lastAt: j.last, gapMin, expected, isMiss, isLong, history: j.history || [] };
+  } catch { return { hasLast: false }; }
 }
 
 // 1.9.198: B축 (멀티 Sub-Agent 오케스트라) 보강 — handoff 에서 task keyword 매칭 best agent 추천
@@ -3317,6 +3355,11 @@ function memorySearch(root, query) {
 
 function handoff(root) {
   root = absRoot(root);
+  // 1.9.199: handoff 진입 시 1) 이전 timestamp 보존 → 2) 현재 timestamp 기록
+  //   detector 가 prior gap 을 정확히 측정 (overwrite 전 값 필요). 함수 최상단에 선언.
+  let _priorHandoffGap = { hasLast: false };
+  try { _priorHandoffGap = _getLastHandoffGap(root); } catch {}
+  try { _recordLastHandoff(root); } catch {}
   // 1.9.96: --json 옵션 (구조화 출력, MCP 통합 / 외부 AI 친화)
   if (has('--json')) {
     const result = {
@@ -3822,25 +3865,51 @@ function handoff(root) {
       }
     } catch {}
   }
-  // 1.9.196: ScheduleWakeup miss detector — 자율 모드 사용자 명시 "못일어나는 경우 종종 있음" (1.9.191) 후속
-  //   마지막 session 시간 (handoff mtime 또는 task-log 마지막 entry) > 2h ago 시 알림
+  // 1.9.196/199: ScheduleWakeup miss detector — 자율 모드 사용자 명시 "못일어나는 경우 종종 있음"
+  //   1.9.196: task-log mtime 기반 (60min+) — false positive 가능
+  //   1.9.199: last-handoff.json 정밀 측정 — R-0001 룰 (25min) 대비 gap 측정
   //   끄기: LEERNESS_NO_WAKEUP_MISS=1
   if (process.env.LEERNESS_NO_WAKEUP_MISS !== '1' && !has('--quiet') && !has('--no-wakeup-miss')) {
     try {
-      const tlp = taskLogPath(root);
-      if (exists(tlp)) {
-        const ageMs = Date.now() - fs.statSync(tlp).mtimeMs;
-        const ageMin = Math.floor(ageMs / 60000);
-        // 자율 모드는 ~15분 cycle. 60분 이상 무 활동이면 wakeup miss 의심 (CronCreate 13min 백업과 함께)
-        if (ageMin >= 60) {
-          const isTty = process.stdout && process.stdout.isTTY;
-          const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
-          const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
-          const label = ageMin < 120 ? `${ageMin}분` : (ageMin < 1440 ? `${Math.floor(ageMin/60)}시간` : `${Math.floor(ageMin/1440)}일`);
-          log(yel(`## ⏰ ScheduleWakeup miss 의심 (1.9.196) — 마지막 활동 ${label} 전`));
-          log(dim(`  자율 모드 정상 cycle: ~15분. 60분 이상 무 활동 → 시스템 sleep 또는 wakeup 누락 가능성`));
-          log(dim(`  → 재개: 사용자가 "다음 라운드" 또는 "/loop" 입력`));
+      // 1.9.199 신규: 이전 handoff 시점 (overwrite 전 보존된 값) 사용
+      const gapInfo = _priorHandoffGap;
+      const isTty = process.stdout && process.stdout.isTTY;
+      const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+      const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+      const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+      const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+      if (gapInfo.hasLast) {
+        // 마지막 handoff 시점 알고 있음 — 정확한 측정 (1.9.199)
+        if (gapInfo.isLong) {
+          // 60분+ → 강한 알림
+          log(red(`## ⏰ ScheduleWakeup miss 강한 의심 (1.9.199) — 이전 handoff ${gapInfo.gapMin}분 전`));
+          log(dim(`  R-0001 영구 룰 (25분) 대비 ${Math.floor(gapInfo.gapMin/25)}× 초과 — 시스템 sleep / wakeup 누락 확실`));
+          log(dim(`  → 회복: 사용자가 "다음 라운드" 입력 또는 leerness rule list 로 룰 확인`));
+          log(dim(`  → handoff 이력: ${(gapInfo.history || []).slice(-3).map(t => t.slice(11, 19)).join(' → ')}`));
           log('');
+        } else if (gapInfo.isMiss) {
+          // 35~60분 → 의심
+          log(yel(`## ⏰ ScheduleWakeup 지연 (1.9.199) — 이전 handoff ${gapInfo.gapMin}분 전 (룰: 25분)`));
+          log(dim(`  ±10분 buffer 초과 — wakeup 한 cycle 누락 가능성`));
+          log('');
+        } else if (gapInfo.gapMin >= 0 && gapInfo.gapMin <= 30) {
+          // 정상 범위 (handoff_history.length >= 2 일 때만 의미 있음 — 첫 진입 제외)
+          if ((gapInfo.history || []).length >= 2) {
+            log(dim(`  ✓ ScheduleWakeup cycle 정상 (gap ${gapInfo.gapMin}분, 룰 25분 — 1.9.199)`));
+          }
+        }
+      } else {
+        // last-handoff.json 부재 — 1.9.196 fallback (task-log mtime)
+        const tlp = taskLogPath(root);
+        if (exists(tlp)) {
+          const ageMs = Date.now() - fs.statSync(tlp).mtimeMs;
+          const ageMin = Math.floor(ageMs / 60000);
+          if (ageMin >= 60) {
+            const label = ageMin < 120 ? `${ageMin}분` : (ageMin < 1440 ? `${Math.floor(ageMin/60)}시간` : `${Math.floor(ageMin/1440)}일`);
+            log(yel(`## ⏰ ScheduleWakeup miss 의심 (1.9.196 fallback) — task-log 마지막 ${label} 전`));
+            log(dim(`  1.9.199 last-handoff.json 첫 기록 — 다음 handoff 부터 정확 측정`));
+            log('');
+          }
         }
       }
     } catch {}
@@ -4253,6 +4322,7 @@ function handoffCmd(root) {
   if (has('--all-apps') || arg('--include', null)) {
     return _handoffWorkspace(absRoot(root));
   }
+  // 1.9.199: timestamp 기록/측정은 handoff() 내부에서 수행 (중복 방지)
   // 1.9.37: drift 자동 경고 (메인 에이전트가 leerness를 점점 안 쓰는 현상 감지)
   // 1.9.38 (A): drift 임계 시 .harness/agent-reminders.md 자동 생성 — 메인 에이전트 프롬프트에 표시되도록.
   // 1.9.38 (D): skip 횟수 학습 — --no-drift-check 빈도 ≥5 시 임계 완화 (1d → 2d).
