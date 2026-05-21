@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.184';
+const VERSION = '1.9.185';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -17,6 +17,12 @@ process.on('warning', (w) => {
   if (w && (w.code === 'DEP0190' || /DEP0190/.test(String(w.message || '')))) return;
   process.stderr.write(`(node:${process.pid}) ${w.name || 'Warning'}: ${w.message || w}\n`);
 });
+// 1.9.185 (사용자 명시): REPL 진입 후 user input 시점에도 DEP0190 발생 (claude/ollama CLI 가 Node 자식 spawn 시 자식의 노이즈).
+//   부모 핸들러는 자식에 상속 X → NODE_OPTIONS=--no-deprecation 으로 모든 Node child 까지 전파.
+//   process.env 변경은 자식 spawn 시 상속 (이미 시작된 부모에는 영향 X, 부모는 위의 'warning' 핸들러로 처리).
+if (!/--no-deprecation/.test(process.env.NODE_OPTIONS || '')) {
+  process.env.NODE_OPTIONS = ((process.env.NODE_OPTIONS || '') + ' --no-deprecation').trim();
+}
 
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
@@ -11868,14 +11874,25 @@ async function _agentRepl(root, opts) {
         }
         if (state.history.length % 6 === 0) saveSession();  // 6턴마다 자동 저장
       } else {
-        log(C.yel(`  ⚠ 실패: ${result.error || 'unknown'}`));
-        // 1.9.164: 실패 시 즉시 전환 가능 provider 안내 (UX 개선 — 사용자 명시 요청)
+        // 1.9.185 (사용자 명시): REPL 호출 실패 친절한 진단 — 어느 단계에서 실패했는지 + 즉시 검증 명령 안내
+        const errMsg = result.error || 'unknown';
+        log(C.yel(`  ⚠ ${state.provider} CLI 응답 실패: ${errMsg}`));
+        // 실패 원인 분류
+        if (/exit=null/.test(errMsg) || /timeout/i.test(errMsg)) {
+          log(C.dim(`     ↳ 가능 원인: (1) ${state.provider} CLI 응답 시간 초과 (모델 로딩/큰 응답 대기 중)`));
+          log(C.dim(`                  (2) network/auth 문제 (특히 codex/gemini 는 인터넷 + 토큰 필요)`));
+          log(C.dim(`     ↳ 직접 검증: ${state.provider} --print "ping" ${state.provider === 'gemini' ? '--yolo' : ''}`));
+        } else if (/exit=1/.test(errMsg) || /unauth/i.test(errMsg) || /login/i.test(errMsg)) {
+          log(C.dim(`     ↳ 가능 원인: 인증 누락 (login 필요)`));
+          log(C.dim(`     ↳ 해결: ${state.provider} login ${state.provider === 'copilot' ? '(gh auth login)' : ''}`));
+        }
+        // 전환 가능 provider 안내
         try {
           const others = EXTERNAL_AGENTS.filter(a => a.id !== state.provider)
                                          .map(a => ({ def: a, status: _checkAgent(a) }))
                                          .filter(x => x.status.status === 'ready');
           if (others.length) {
-            log(C.dim(`     💡 전환 가능: ${others.map(x => `:provider ${x.def.id}`).join(' / ')}`));
+            log(C.dim(`     💡 즉시 전환: ${others.map(x => `:provider ${x.def.id}`).join(' · ')}  또는 Tab 키`));
           } else {
             log(C.dim(`     💡 다른 provider 활성화: .env 에서 LEERNESS_ENABLE_<CLAUDE|CODEX|GEMINI|COPILOT>=1`));
           }

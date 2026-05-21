@@ -1,5 +1,79 @@
 # Changelog
 
+## 1.9.185 — 2026-05-21
+
+**🔧 DEP0190 자식 process 전파 fix + REPL stream 친절 진단 + Hermes UX 분석 보고 (사용자 명시).**
+
+자율 모드 115 라운드. 사용자 명시 3종:
+1. *"REPL 에이전트 모드 구동 실패 + 추론내용/diff 미표시"* → 친절한 진단 메시지
+2. *"agent[claude/actor/▶]> (node:54076) [DEP0190] ..."* → 자식 process 전파 fix
+3. *"SSH duffy@192.168.68.89 의 hermes REPL UX 확인 → 유사 구현"* → 보고서 작성
+
+### Fix #1 — DEP0190 자식 process 전파
+1.9.184 의 `process.on('warning')` 핸들러는 부모만. claude/codex/gemini CLI 가 내부 Node child 를 spawn할 때 자식에 상속 X → 사용자 REPL 입력 후에도 DEP0190 출력.
+
+```js
+// 1.9.185 (사용자 명시): NODE_OPTIONS=--no-deprecation 자동 설정 → 모든 Node child 까지 전파.
+if (!/--no-deprecation/.test(process.env.NODE_OPTIONS || '')) {
+  process.env.NODE_OPTIONS = ((process.env.NODE_OPTIONS || '') + ' --no-deprecation').trim();
+}
+```
+
+`process.env` 변경은 자식 spawn 시 상속. 부모는 1.9.184 의 `process.on('warning')` 으로 처리.
+
+### Fix #2 — REPL stream 실패 친절 진단
+**Before**:
+```
+agent[claude/actor/▶]> 웹개발을 진행해줘
+  ── /stream (120053ms) ──
+  ⚠ 실패: exit=null
+     💡 전환 가능: :provider codex / :provider gemini / :provider copilot
+```
+
+**After**:
+```
+agent[claude/actor/▶]> 웹개발을 진행해줘
+  ── /stream (120053ms) ──
+  ⚠ claude CLI 응답 실패: exit=null
+     ↳ 가능 원인: (1) claude CLI 응답 시간 초과 (모델 로딩/큰 응답 대기 중)
+                  (2) network/auth 문제 (특히 codex/gemini 는 인터넷 + 토큰 필요)
+     ↳ 직접 검증: claude --print "ping"
+     💡 즉시 전환: :provider codex · :provider gemini · :provider copilot  또는 Tab 키
+```
+
+실패 케이스 분기:
+- `exit=null` / `timeout` → 응답 시간 초과 + 직접 검증 명령
+- `exit=1` / `unauth` / `login` → 인증 누락 + login 명령 (claude/codex/gemini login, copilot=gh auth login)
+
+### #3 — Hermes UX 분석 (사용자 SSH 접속 요청)
+
+**SSH 보안 정책**: 패스워드는 `LEERNESS_SSH_PASS` env 변수로만 전달. paramiko 임시 스크립트는 분석 완료 후 즉시 삭제. 코드/로그에 절대 저장 X.
+
+**Hermes 사양 확인** (v0.14.0, Python 3.11, 89 commands · 29 tools · 85 skills):
+- 위치: `~/.local/bin/hermes` (Ollama hermes-gemma:latest)
+- 2-column Welcome 박스 (logo + toolsets/skills catalog)
+- 실시간 상태바: `⚕ model │ ctx % │ [progress bar] │ elapsed │ ⏲ timer`
+- minimal prompt: `❯ `
+- slash commands: `/help`, `/compress`, `/quit`
+- `-z/--oneshot` 스크립트 모드 (배너/스피너/세션ID 모두 제거)
+
+**leerness 차용 후보** (1.9.186+):
+1. 상태바 실시간 갱신 (`⚡ provider │ ctx N% │ [bar] │ elapsed │ ⏲ timer`)
+2. `:compress` slash command — context 압축
+3. 2-column Welcome 박스 재디자인
+4. `--oneshot/-z` 명확화 (배너/스피너 제거)
+5. Tip 라인 (`✦ Tip: ...`)
+
+상세 보고서: `_reports/hermes-ux-analysis-1.9.185.md` (비공개)
+
+### Verified
+- stress-v130: **15/15 PASS** (사용자 명시 4 + live 3 + 누적 8)
+- e2e 217/217 baseline 유지
+- `agents list` 호출: DEP0190 출력 없음 ✓
+- VERSION = 1.9.185 · autonomous-rounds = 115 · main 자동 push 46 라운드 연속
+
+---
+
 ## 1.9.184 — 2026-05-21
 
 **🎨 설치 UX 4종 — Ctrl+C 확인 prompt + 로딩바 + skillpack 제외 + DEP0190 억제 (사용자 명시).**
