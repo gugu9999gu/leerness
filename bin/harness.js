@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.189';
+const VERSION = '1.9.190';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -163,6 +163,13 @@ function fm(role, readWhen, updateWhen, body) {
 function ask(question) {
   return new Promise(resolve => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    // 1.9.190 (사용자 명시 BUG fix): readline 의 자체 SIGINT 처리 — Ctrl+C 시 즉시 종료.
+    //   process.on('SIGINT') 핸들러는 readline raw mode 에 가려져 호출 안 됨 → 여기서 명시 처리.
+    rl.on('SIGINT', () => {
+      try { rl.close(); } catch {}
+      process.stdout.write('\n  \x1b[31m✗ 설치 중단됨 (Ctrl+C)\x1b[0m\n');
+      process.exit(130);
+    });
     rl.question(question, answer => { rl.close(); resolve(String(answer || '').trim()); });
   });
 }
@@ -783,20 +790,12 @@ async function resolveInstallOptions(root, opts = {}) {
 
 async function install(root, opts = {}) {
   root = absRoot(root); mkdirp(root);
-  // 1.9.184 (사용자 명시): 설치 도중 Ctrl+C 시 종료 확인 prompt.
-  //   첫 Ctrl+C → 안내 (2초 이내 한 번 더 → 종료, 그 외 → 계속).
-  //   readline raw mode 시 readline 이 'SIGINT' 이벤트로 흡수할 수 있어 process-level + finally 해제.
-  let _sigintCount = 0; let _sigintTimer = null;
+  // 1.9.184+1.9.190: 설치 도중 Ctrl+C 시 즉시 종료 (사용자 명시 BUG fix — npx 설치 진행 차단).
+  //   1.9.184 의 2단계 confirm 은 readline raw mode 가 SIGINT 가로채서 호출 안 됨 → 1.9.190 즉시 종료로 단순화.
+  //   _selectOne/_selectMany 는 stdin '\x03' 직접 처리, ask() 는 rl.on('SIGINT') 처리, 이 핸들러는 fallback.
+  let _sigintTimer = null;  // back-compat: 1.9.184 placeholder
   const _sigintHandler = () => {
-    _sigintCount++;
-    if (_sigintCount === 1) {
-      try { process.stdout.write('\n\n  ⚠ 설치 중단하시겠습니까? Ctrl+C 를 2초 이내에 한 번 더 누르면 종료됩니다. (그 외 → 계속 진행)\n'); } catch {}
-      clearTimeout(_sigintTimer);
-      _sigintTimer = setTimeout(() => { _sigintCount = 0; }, 2000);
-      return;
-    }
-    clearTimeout(_sigintTimer);
-    try { process.stdout.write('\n  ✗ 설치 중단됨 (사용자 요청)\n'); } catch {}
+    try { process.stdout.write('\n  \x1b[31m✗ 설치 중단됨 (Ctrl+C)\x1b[0m\n'); } catch {}
     process.exit(130);
   };
   if (!opts.migration && !opts.nonInteractive && process.stdin.isTTY) {
@@ -5539,7 +5538,13 @@ async function _selectOne(question, options, opts = {}) {
         cleanup();
         stdout.write('\n');
         resolve(options[idx]);
-      } else if (key === '' || key === 'q' || key === '') {
+      } else if (key === '') {
+        // 1.9.190 (사용자 명시 BUG fix): raw mode 에서 Ctrl+C → 즉시 설치 종료 (npx 진행 차단).
+        //   이전 (1.9.34~1.9.189): default 값 반환 → install 흐름 계속 진행 (사용자 BUG 보고).
+        cleanup();
+        stdout.write('\n  \x1b[31m✗ 설치 중단됨 (Ctrl+C)\x1b[0m\n');
+        process.exit(130);
+      } else if (key === '' || key === 'q' || key === 'Q') {
         cleanup();
         stdout.write('\n' + C.dim('  취소됨') + '\n');
         resolve(opts.defaultIndex != null ? options[opts.defaultIndex] : null);
@@ -5607,7 +5612,13 @@ async function _selectMany(question, options, opts = {}) {
         cleanup();
         stdout.write('\n');
         resolve([...selected].sort((a, b) => a - b).map(i => options[i]));
-      } else if (key === '' || key === 'q' || key === '') {
+      } else if (key === '') {
+        // 1.9.190 (사용자 명시 BUG fix): raw mode 에서 Ctrl+C → 즉시 설치 종료 (npx 진행 차단).
+        //   이전 (1.9.34~1.9.189): default 값 반환 → install 흐름 계속 진행 (사용자 BUG 보고).
+        cleanup();
+        stdout.write('\n  \x1b[31m✗ 설치 중단됨 (Ctrl+C)\x1b[0m\n');
+        process.exit(130);
+      } else if (key === '' || key === 'q' || key === 'Q') {
         cleanup();
         stdout.write('\n' + C.dim('  취소됨 (기본값 사용)') + '\n');
         resolve((opts.defaults || []).map(d => typeof d === 'number' ? options[d] : d).filter(Boolean));

@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.189-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v134-15%2F15-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-119-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-50_rounds-success)]() [![slash-list](https://img.shields.io/badge/"/"_slash-자동_명령_list-success)]() [![cycle-clean](https://img.shields.io/badge/Tab_cycle-한_줄_갱신-success)]() [![hangul](https://img.shields.io/badge/한글_prompt-stdin_정확전달-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.190-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v135-13%2F13-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-120-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-51_rounds-success)]() [![ctrl-c](https://img.shields.io/badge/설치_Ctrl%2BC-즉시_종료_BUG_fix-success)]() [![slash-list](https://img.shields.io/badge/"/"_slash-자동_명령_list-success)]() [![cycle-clean](https://img.shields.io/badge/Tab_cycle-한_줄_갱신-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.189  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.190  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  ⌨ "/" slash 자동 list · Tab cycle 한 줄 갱신 · 50 라운드     ║
+  ║  🚨 설치 Ctrl+C 즉시 종료 BUG fix · 51 라운드 main push       ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

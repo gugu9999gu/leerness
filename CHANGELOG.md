@@ -1,5 +1,115 @@
 # Changelog
 
+## 1.9.190 — 2026-05-21
+
+**🚨 설치 가이드 Ctrl+C 미작동 BUG fix (사용자 명시 — npx 진행 차단).**
+
+자율 모드 120 라운드. 사용자 명시 BUG:
+> `npx --yes leerness@latest init` 으로 설치 가이드에서 Ctrl+C 누르면 설치 진행이 취소되어야 하는데, 진행되는 버그.
+
+### 근본 원인 (코드 audit)
+
+1.9.34~1.9.189 의 `_selectOne` / `_selectMany` 의 raw mode 코드:
+```js
+} else if (key === '\x03' || key === 'q' || key === '\x1b') {
+  cleanup();
+  stdout.write('\n  취소됨\n');
+  resolve(opts.defaultIndex != null ? options[opts.defaultIndex] : null);  // ← BUG
+}
+```
+
+Ctrl+C (`\x03`)가 `q`/`\x1b`(ESC)와 같은 분기로 들어가서 **default 값 반환** → install 흐름이 default 옵션으로 계속 진행 → 사용자 의도(취소)와 정반대 동작.
+
+또한 1.9.184에서 추가한 `process.on('SIGINT', _sigintHandler)` 의 2단계 confirm 은 readline raw mode 가 SIGINT signal 자체를 가로채서 호출되지 않음.
+
+### Fix #1 — `_selectOne` / `_selectMany`: Ctrl+C 명시 분기 + 즉시 종료
+
+```diff
+} else if (key === '\x03') {
++  // 1.9.190 (사용자 명시 BUG fix): raw mode 에서 Ctrl+C → 즉시 설치 종료 (npx 진행 차단).
++  //   이전 (1.9.34~1.9.189): default 값 반환 → install 흐름 계속 진행 (사용자 BUG 보고).
+   cleanup();
+   stdout.write('\n  \x1b[31m✗ 설치 중단됨 (Ctrl+C)\x1b[0m\n');
+   process.exit(130);
++} else if (key === '\x1b' || key === 'q' || key === 'Q') {
++  // ESC/q/Q → 단순 취소 (default 반환, install 흐름 계속)
+   cleanup();
+   stdout.write('\n  취소됨\n');
+   resolve(opts.defaultIndex != null ? options[opts.defaultIndex] : null);
+}
+```
+
+Ctrl+C (\x03) 와 ESC/q 분기를 **완전 분리**:
+- **Ctrl+C** → `process.exit(130)` 즉시 종료
+- **ESC/q/Q** → default 값 반환 (취소만, 흐름 계속)
+
+### Fix #2 — `ask()` readline SIGINT 명시 처리
+
+```js
+function ask(question) {
+  return new Promise(resolve => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    // 1.9.190: readline 의 자체 SIGINT 처리 — Ctrl+C 시 즉시 종료.
+    rl.on('SIGINT', () => {
+      try { rl.close(); } catch {}
+      process.stdout.write('\n  \x1b[31m✗ 설치 중단됨 (Ctrl+C)\x1b[0m\n');
+      process.exit(130);
+    });
+    rl.question(question, answer => { rl.close(); resolve(String(answer || '').trim()); });
+  });
+}
+```
+
+readline 의 `'SIGINT'` 이벤트 → 명시 처리 → 즉시 exit.
+
+### Fix #3 — `install()` SIGINT 핸들러 단순화 (2단계 confirm 제거)
+
+```diff
+- // 1.9.184: 2단계 confirm (첫 누름 → 안내, 2초 내 두 번째 → 종료)
+- let _sigintCount = 0; let _sigintTimer = null;
+- const _sigintHandler = () => {
+-   _sigintCount++;
+-   if (_sigintCount === 1) {
+-     process.stdout.write('Ctrl+C 를 2초 이내에 한 번 더 누르면 종료됩니다...');
+-     _sigintTimer = setTimeout(() => { _sigintCount = 0; }, 2000);
+-     return;
+-   }
+-   process.exit(130);
+- };
++ // 1.9.184+1.9.190: 설치 도중 Ctrl+C 시 즉시 종료 (사용자 명시 BUG fix — npx 진행 차단).
++ //   readline raw mode 가 SIGINT 가로채서 1.9.184 2단계 confirm 동작 안 함 → 즉시 종료로 단순화.
++ const _sigintHandler = () => {
++   process.stdout.write('\n  \x1b[31m✗ 설치 중단됨 (Ctrl+C)\x1b[0m\n');
++   process.exit(130);
++ };
+```
+
+### 시각 효과 (모든 fix 통합)
+
+```
+$ npx --yes leerness@latest init
+🎁 leerness 설치 시작...
+설치 언어를 선택하세요
+  ↑↓ 이동, Enter 확정, q 취소
+  ❯ 자동 감지
+    한국어
+    English
+^C
+  ✗ 설치 중단됨 (Ctrl+C)
+$
+```
+
+(이전엔 Ctrl+C 후에도 설치가 계속 진행되어 default 값으로 모든 파일 생성됨 → 사용자 의도와 정반대)
+
+### Verified
+- stress-v135: **13/13 PASS** (사용자 명시 5 + 회귀 2 + 누적 6)
+- e2e 217/217 baseline 유지
+- `--yes` non-interactive install: 회귀 없음
+- ESC/q 단순 취소: 회귀 없음 (default 반환)
+- VERSION = 1.9.190 · autonomous-rounds = 120 · main 자동 push 51 라운드 연속
+
+---
+
 ## 1.9.189 — 2026-05-21
 
 **⌨️ "/" slash 명령 자동 list + Tab cycle 한 줄 갱신 (사용자 명시 3종).**
