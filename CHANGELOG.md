@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.9.178 — 2026-05-21
+
+**📦 사용자 명시: `release sync-main` 자동 npm publish — .env NPM_TOKEN 사용.**
+
+자율 모드 108 라운드. 사용자 명시: *"NPM 액세스 토큰 .env에 입력해뒀음. 업데이트될 때마다 깃허브처럼 NPM에도 자동 배포"*.
+
+### 통합 흐름
+```bash
+$ leerness release sync-main .
+# leerness release sync-main (1.9.140)
+from: release/1.9.178 → main
+✓ main merged: release/1.9.178
+✓ main pushed → origin/main
+
+📦 npm publish 자동 trigger (1.9.178)
+   leerness@1.9.178
+   npm publish 시도 중...
+✓ npm publish 완료: leerness@1.9.178
+```
+
+→ git push 후 NPM 자동 publish — git 워크플로와 NPM 워크플로 완전 통합.
+
+### 보안 설계 (3중 안전망)
+1. **토큰 환경변수만 사용**: `process.env.LEERNESS_NPM_TOKEN || process.env.NPM_TOKEN` (값 절대 로그 X)
+2. **임시 `.npmrc` 격리**: `mkdtempSync` → `.npmrc` (mode 0o600 소유자만 읽기) → publish → **finally 즉시 삭제**
+3. **`.env` 자동 보호**: 1.9.75+ audit이 `.gitignore`에 `.env` 등록 강제 (시크릿 누락 감지)
+
+### 중복 publish 차단
+- `npm view <pkg>@<version> version` 사전 호출
+- 이미 publish된 버전이면 skip + 알림 (race condition도 후속 처리)
+
+### 친절한 에러 안내
+- `EPUBLISHCONFLICT` → "이미 publish됨 — skip"
+- `EAUTH / 401 / 403` → "토큰 권한 부족 또는 만료 — .env NPM_TOKEN 재발급 필요"
+- `ENEEDAUTH` → "인증 미작동 — 토큰 형식 확인 (npm_xxxxx)"
+- 기타 → 마지막 3줄 stderr 노출
+
+### Opt-out (3가지)
+1. `--no-npm` 플래그
+2. `LEERNESS_NO_NPM_PUBLISH=1` 환경변수
+3. `--dry-run-npm` 플래그 (dry-run mode)
+
+### Observability
+`_recordRun(kind: 'npm_publish')` — 모든 publish 시도 (성공/실패) 자동 기록.
+
+### Verified
+- e2e 217/217 baseline 유지 (LEERNESS_NO_NPM_PUBLISH=1 환경)
+- stress-v123: **22/22** (함수 정의 6 + 중복 차단 4 + release 통합 3 + 친절한 안내 3 + 누적 회귀 6)
+- VERSION = 1.9.178 / autonomous-rounds = 108 / main 자동 push 39 라운드 연속 + **NPM 자동 publish 1 라운드 시작**
+
+---
+
 ## 1.9.177 — 2026-05-21
 
 **🔁 `task add` 자동 review-request trigger — 사용자 명시 1.9.176 자동화.**

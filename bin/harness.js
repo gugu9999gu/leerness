@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 const readline = require('readline');
 
-const VERSION = '1.9.177';
+const VERSION = '1.9.178';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -7806,6 +7806,94 @@ function releaseSyncMainCmd(root) {
   else ok(`main pushed → ${remoteName}/main`);
   // 5) return to source branch (release 작업 흐름 보존)
   cp.spawnSync('git', ['checkout', fromBranch], { cwd: root, encoding: 'utf8' });
+
+  // 1.9.178: 자동 npm publish (사용자 명시 — .env NPM_TOKEN 있으면 자동 배포).
+  //   opt-out: --no-npm 또는 LEERNESS_NO_NPM_PUBLISH=1
+  //   토큰 미설정 시 친절한 안내 후 skip (실패 X).
+  if (!has('--no-npm') && process.env.LEERNESS_NO_NPM_PUBLISH !== '1') {
+    try { _publishToNpm(root, { dryRun: has('--dry-run-npm') }); } catch (e) { warn('npm publish 시도 실패 (계속): ' + e.message); }
+  }
+}
+
+// 1.9.178: NPM 자동 배포 (사용자 명시 — release sync-main 후 자동 trigger).
+//   보안:
+//     - NPM_TOKEN 또는 LEERNESS_NPM_TOKEN 환경변수에서만 읽음 (값 절대 로그 X)
+//     - 임시 .npmrc 파일 (mkdtempSync) 생성 → publish → 즉시 삭제 (finally)
+//     - 이미 publish된 버전 자동 detect → skip (중복 publish 차단)
+function _publishToNpm(root, opts = {}) {
+  root = absRoot(root || process.cwd());
+  // .env 자동 로드 (사용자 명시 패턴 — 1.9.153)
+  try { _loadEnvFile(root); } catch {}
+  const token = process.env.LEERNESS_NPM_TOKEN || process.env.NPM_TOKEN;
+  if (!token) {
+    log(`  ⚠ npm 자동 배포 스킵: NPM_TOKEN 미설정 (.env 에 NPM_TOKEN=npm_xxxxx 추가)`);
+    return;
+  }
+  // package.json 확인
+  const pkgPath = path.join(root, 'package.json');
+  if (!exists(pkgPath)) {
+    log(`  ⚠ npm 자동 배포 스킵: package.json 없음 (${rel(root, pkgPath)})`);
+    return;
+  }
+  let pkg;
+  try { pkg = JSON.parse(read(pkgPath)); } catch (e) { warn(`package.json 파싱 실패: ${e.message}`); return; }
+  if (!pkg.name || !pkg.version) {
+    log(`  ⚠ npm 자동 배포 스킵: name/version 누락`);
+    return;
+  }
+  const pkgName = pkg.name;
+  const pkgVersion = pkg.version;
+  log('');
+  log(`📦 npm publish 자동 trigger (1.9.178)`);
+  log(`   ${pkgName}@${pkgVersion}`);
+
+  // 1) 이미 publish된 버전인지 확인 (npm view <pkg>@<version> version)
+  try {
+    const viewR = cp.spawnSync('npm', ['view', `${pkgName}@${pkgVersion}`, 'version'], {
+      cwd: root, encoding: 'utf8', shell: true, timeout: 15000
+    });
+    if (viewR.status === 0 && (viewR.stdout || '').trim() === pkgVersion) {
+      log(`   ✓ 이미 npm registry에 publish됨 — skip`);
+      return;
+    }
+  } catch {}  // 네트워크 실패 시 그냥 publish 시도
+
+  // 2) 임시 .npmrc 생성 (토큰 노출 방지)
+  let tmpDir;
+  try {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-npmrc-'));
+    const tmpNpmrc = path.join(tmpDir, '.npmrc');
+    fs.writeFileSync(tmpNpmrc, `//registry.npmjs.org/:_authToken=${token}\n`, { mode: 0o600 });
+    // 3) npm publish (--userconfig 로 임시 .npmrc 사용, --access public)
+    const args = opts.dryRun ? ['publish', '--userconfig', tmpNpmrc, '--access', 'public', '--dry-run'] :
+                                ['publish', '--userconfig', tmpNpmrc, '--access', 'public'];
+    log(`   ${opts.dryRun ? '(dry-run) ' : ''}npm publish 시도 중...`);
+    const pubR = cp.spawnSync('npm', args, {
+      cwd: root, encoding: 'utf8', shell: true, timeout: 60000,
+      env: { ...process.env, npm_config_loglevel: 'warn' }
+    });
+    if (pubR.status === 0) {
+      ok(`npm publish 완료: ${pkgName}@${pkgVersion}`);
+      try { _recordRun(root, { kind: 'npm_publish', package: pkgName, version: pkgVersion, dryRun: !!opts.dryRun, ok: true }); } catch {}
+    } else {
+      const errOut = (pubR.stderr || pubR.stdout || '').slice(-400);
+      if (/EPUBLISHCONFLICT|already exists|cannot publish over/i.test(errOut)) {
+        log(`   ✓ 이미 publish됨 (race condition) — skip`);
+      } else if (/EAUTH|forbidden|401|403/i.test(errOut)) {
+        warn(`npm publish 실패: 토큰 권한 부족 또는 만료 — .env NPM_TOKEN 재발급 필요`);
+      } else if (/ENEEDAUTH/i.test(errOut)) {
+        warn(`npm publish 실패: 인증 미작동 — 토큰 형식 확인 (npm_xxxxx)`);
+      } else {
+        warn(`npm publish 실패 (exit ${pubR.status}): ${errOut.split('\n').slice(0, 3).join(' ')}`);
+      }
+      try { _recordRun(root, { kind: 'npm_publish', package: pkgName, version: pkgVersion, ok: false, error: errOut.slice(0, 200) }); } catch {}
+    }
+  } finally {
+    // 4) 임시 .npmrc 즉시 삭제 (토큰 잔존 방지)
+    if (tmpDir) {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
+  }
 }
 
 // 1.9.40: release pack — 가벼운 통합 명령 (npm pack + self-host migrate + auto task + close + readme sync)
