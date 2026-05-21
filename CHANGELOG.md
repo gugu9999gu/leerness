@@ -1,5 +1,72 @@
 # Changelog
 
+## 1.9.179 — 2026-05-21
+
+**🎨 REPL 환영 화면 재디자인 — Hermes/Claude/Codex/Gemini CLI 스타일 (사용자 명시).**
+
+자율 모드 109 라운드. 사용자 명시: 첨부 이미지 (Hermes Agent v0.7.0 / Claude Code v2.1.126 / OpenAI Codex v0.132.0 / Gemini CLI v0.42.0) 처럼 구조화된 환영 화면.
+
+### 디자인 구성 — 5 섹션
+```
+╭────────────────────────────────────────────────────────────────────────╮
+│  Leerness Agent  v1.9.179  (2026-05-21)  ·  검수·기억·샌드박스 통합 AI │
+╰────────────────────────────────────────────────────────────────────────╯
+
+  ▸ Welcome back  ·  leerness (.)
+  ▸ Session: sess-2026-05-21T13-41-23
+
+  ┌─ Tips for getting started ──────────────────────────────────────────┐
+  │  Tab / Shift+Tab    — provider / model 전환 (1.9.170)                │
+  │  :review "<req>"    — 무조건 구현 전 사전 검토 (1.9.176)             │
+  │  :permissions <m>   — 즉시 권한 변경 basic|extended|full (1.9.174)   │
+  │  :stream on|off     — 실시간 스트리밍 토글 (default ON, 1.9.170/172) │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  ┌─ What's new (1.9.170~178) ─────────────────────────────────────────┐
+  │  • REPL Tab cycle + 실시간 스트리밍 (spinner / tool_use / diff 색깔) │
+  │  • Bridge slash :web/:pc/:lsp REPL 즉시 호출 + LSP 다국어 5종        │
+  │  • review-request 사전 검토 + task add 자동 trigger                  │
+  │  • release sync-main 자동 npm publish (.env NPM_TOKEN)               │
+  │  • 6 능력 매트릭스 72% production-ready · MCP 54 도구                │
+  └────────────────────────────────────────────────────────────────────┘
+
+  Available Slash (5 그룹)
+    • meta:        :help :model :role :provider :status :stream :clear :quit
+    • internal:    :verify :audit :handoff :health
+    • memory:      :lessons :brainstorm :tasks :plan
+    • bridge:      :web :pc :lsp (각 sub: check/symbols/click/screenshot/...)
+    • review:      :review "<request>"  ·  :permissions [basic|extended|full]
+
+  ⌨  Tab=provider cycle  ·  Shift+Tab=model  ·  Ctrl+C=quit
+
+  ⚡ provider=ollama  ·  model=llama3  ·  role=actor  ·  perms=basic  ·  ▶ stream=on
+
+agent[ollama/actor/▶]> _
+```
+
+### 디자인 결정
+- **둥근 모서리** (`╭ ╰`) 헤더 박스 → 친근한 인상
+- **사각 모서리** (`┌ └`) Tips/What's new 박스 → 정보 박스 구분
+- **색깔 토큰**: cy(헤더), yel(Tips), green(What's new), mag(model), bold(중요 라벨)
+- **5 그룹 Slash 카탈로그**: Hermes-style "Available Tools / Skills" 영감
+- **상태바 ⚡**: provider/model/role/perms/stream 5요소 + 색깔 구분
+- **키보드 단축키 ⌨**: Tab/Shift+Tab/Ctrl+C 명시
+
+### 첨부 이미지 참고 spirit (정확히 복제 X)
+| 이미지 | 적용된 요소 |
+|---|---|
+| Hermes Agent v0.7.0 | "Available ..." 카탈로그 5 그룹 |
+| Claude Code v2.1.126 | "Welcome back" + "Tips/What's new" 박스 |
+| OpenAI Codex v0.132.0 | 모델/디렉토리 박스 + Tips |
+| Gemini CLI v0.42.0 | 상태바 (sandbox/model/quota → provider/model/perms/stream) |
+
+### Verified
+- e2e 217/217 baseline 유지
+- stress-v124: **19/19** (헤더 박스 4 + Slash 5그룹 3 + 상태바 3 + 1.9.179 주석 2 + 누적 회귀 7)
+- VERSION = 1.9.179 · autonomous-rounds = 109 · main 자동 push 40 라운드 연속
+
+---
+
 ## 1.9.178 — 2026-05-21
 
 **📦 사용자 명시: `release sync-main` 자동 npm publish — .env NPM_TOKEN 사용.**

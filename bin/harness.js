@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.178';
+const VERSION = '1.9.179';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -11099,12 +11099,17 @@ async function _agentRepl(root, opts) {
       writeUtf8(sessionPath(), lines + '\n');
     } catch {}
   };
-  // 환영 메시지 + 모델 선택
+  // 1.9.179: 환영 화면 재디자인 (사용자 명시 — Hermes/Claude/Codex/Gemini 스타일).
+  //   기존 단순 박스 → 헤더 박스 + Tips / What's new 박스 + Slash 카탈로그 5 그룹.
+  const today = new Date().toISOString().slice(0, 10);
+  const wsName = path.basename(absRoot(root));
   log('');
-  log(C.bold(C.cy('  ╔════════════════════════════════════════════════════╗')));
-  log(C.bold(C.cy('  ║  leerness agent — REPL mode                        ║')));
-  log(C.bold(C.cy('  ║  검수·기억·샌드박스 통합 자율 AI 에이전트             ║')));
-  log(C.bold(C.cy('  ╚════════════════════════════════════════════════════╝')));
+  log(C.bold(C.cy('  ╭────────────────────────────────────────────────────────────────────────╮')));
+  log(C.bold(C.cy(`  │  Leerness Agent  v${VERSION}  (${today})  ·  검수·기억·샌드박스 통합 AI  │`)));
+  log(C.bold(C.cy('  ╰────────────────────────────────────────────────────────────────────────╯')));
+  log('');
+  log(C.dim(`  ▸ Welcome back  ·  ${wsName} (${rel(process.cwd(), absRoot(root))})`));
+  log(C.dim(`  ▸ Session: ${state.sessionId}`));
   log('');
   // Ollama 모델 자동 감지 — model이 명시되지 않았으면 사용자에게 선택지 제공
   if (state.provider === 'ollama' && !state.model) {
@@ -11149,15 +11154,39 @@ async function _agentRepl(root, opts) {
       }
     }
   }
+  // 1.9.179: Tips + What's new 박스 (사용자 명시 — 첨부 이미지 spirit 반영)
   log('');
-  log(C.dim('  메타 명령: :help | :model <m> | :role <r> | :provider <p> | :status | :clear | :save | :history | :quit'));
-  log(C.dim('  Slash 명령 (1.9.150): :verify | :audit | :handoff | :health'));
-  log(C.dim('  Memory Slash (1.9.161): :lessons | :brainstorm <topic> | :tasks | :plan'));
-  log(C.dim('  🆕 1.9.170 — Tab=provider cycle, Shift+Tab=model cycle, :stream on|off (실시간 출력)'));
-  log(C.dim('  🆕 1.9.174 — :permissions [basic|extended|full] 로 즉시 권한 변경 (default: basic 안전)'));
-  log(C.dim('  🆕 1.9.175 — :web / :pc / :lsp 으로 Bridge 3종 REPL 안에서 즉시 호출 (코드 분석/웹/PC)'));
-  log(C.dim('  🆕 1.9.176 — :review "<요청>" 으로 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계)'));
-  log(C.dim(`  현재 — provider=${state.provider}  model=${state.model || '(기본)'}  role=${state.role}  permissions=${_readPermissions(root).mode}`));
+  log(C.bold(C.yel('  ┌─ Tips for getting started ──────────────────────────────────────────┐')));
+  log(C.yel('  │  ') + C.dim('Tab / Shift+Tab') + '   ' + C.dim('— provider / model 전환 (1.9.170)') + C.yel(' '.repeat(Math.max(1, 17)) + '│'));
+  log(C.yel('  │  ') + C.dim(':review "<req>"') + '   ' + C.dim('— 무조건 구현 전 사전 검토 (1.9.176)') + C.yel(' '.repeat(Math.max(1, 13)) + '│'));
+  log(C.yel('  │  ') + C.dim(':permissions <m>') + '  ' + C.dim('— 즉시 권한 변경 basic|extended|full (1.9.174)') + C.yel(' │'));
+  log(C.yel('  │  ') + C.dim(':stream on|off') + '    ' + C.dim('— 실시간 스트리밍 토글 (default ON, 1.9.170/172)') + C.yel(' │'));
+  log(C.bold(C.yel('  └─────────────────────────────────────────────────────────────────────┘')));
+  log('');
+  log(C.bold(C.green('  ┌─ What\'s new (1.9.170~178) ─────────────────────────────────────────┐')));
+  log(C.green('  │  ') + C.dim('• REPL Tab cycle + 실시간 스트리밍 (spinner / tool_use / diff 색깔)') + C.green('  │'));
+  log(C.green('  │  ') + C.dim('• Bridge slash :web/:pc/:lsp REPL 즉시 호출 + LSP 다국어 5종') + C.green('        │'));
+  log(C.green('  │  ') + C.dim('• review-request 사전 검토 + task add 자동 trigger') + C.green('                  │'));
+  log(C.green('  │  ') + C.dim('• release sync-main 자동 npm publish (.env NPM_TOKEN)') + C.green('               │'));
+  log(C.green('  │  ') + C.dim('• 6 능력 매트릭스 72% production-ready · MCP 54 도구') + C.green('               │'));
+  log(C.bold(C.green('  └─────────────────────────────────────────────────────────────────────┘')));
+  log('');
+  log(C.bold('  Available Slash (5 그룹)'));
+  log(C.dim('    • meta:        ') + ':help :model :role :provider :status :stream :clear :quit');
+  log(C.dim('    • internal:    ') + ':verify :audit :handoff :health');
+  log(C.dim('    • memory:      ') + ':lessons :brainstorm :tasks :plan');
+  log(C.dim('    • bridge:      ') + ':web :pc :lsp ' + C.dim('(각 sub: check/symbols/click/screenshot/...)'));
+  log(C.dim('    • review:      ') + ':review "<request>"  ·  :permissions [basic|extended|full]');
+  log('');
+  log(C.dim('  ⌨  Tab=provider cycle  ·  Shift+Tab=model  ·  Ctrl+C=quit'));
+  log('');
+  // 1.9.179: 상태바 한 줄 — 색깔/구분자 강화
+  const permMode = _readPermissions(root).mode || 'basic';
+  log('  ' + C.bold('⚡ ') + C.cy(`provider=${state.provider}`) + '  ·  '
+    + C.mag(`model=${state.model || '(기본)'}`) + '  ·  '
+    + C.green(`role=${state.role}`) + '  ·  '
+    + C.yel(`perms=${permMode}`) + '  ·  '
+    + (state.streamMode ? C.green('▶ stream=on') : C.dim('□ stream=off')));
   // 1.9.155: REPL 진입 시 handoff 컨텍스트 자동 노출 (UX 개선 — 사용자가 매번 :handoff 안 해도 컨텍스트 인지)
   try {
     const hf = cp.spawnSync(process.execPath, [__filename, 'handoff', root, '--compact', '--no-drift-check', '--no-headline'], {

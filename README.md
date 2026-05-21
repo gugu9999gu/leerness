@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.178-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v123-22%2F22-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-108-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-39_rounds-success)]() [![npm-auto](https://img.shields.io/badge/npm_auto--publish-NPM__TOKEN_통합-success)]() [![auto-review](https://img.shields.io/badge/task_add-자동_review_trigger-success)]() [![repl-slash](https://img.shields.io/badge/REPL_slash-:web%2F:pc%2F:lsp%2F:review-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.179-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v124-19%2F19-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-109-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-40_rounds-success)]() [![repl-design](https://img.shields.io/badge/REPL_환영-Hermes%2FClaude%2FCodex_스타일-success)]() [![npm-auto](https://img.shields.io/badge/npm_auto--publish-NPM__TOKEN_통합-success)]() [![auto-review](https://img.shields.io/badge/task_add-자동_review_trigger-success)]() [![capability](https://img.shields.io/badge/6_capability-72%25_production--ready-brightgreen)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.178  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.179  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  📦 release sync-main 자동 npm publish (NPM_TOKEN .env 통합)  ║
+  ║  🎨 REPL 환영 화면 재디자인 (Hermes/Claude/Codex 스타일)      ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 
