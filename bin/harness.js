@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.182';
+const VERSION = '1.9.183';
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
@@ -5102,9 +5102,10 @@ async function _warnIfStale(root, opts = {}) {
       log(C.d('     npm registry latest: ') + C.b(`v${latest}`));
       log(C.d('     이 CLI가 실행한 버전: ') + C.b(`v${VERSION}`) + C.d(' (npx 캐시 또는 글로벌 설치 stale)'));
       log('');
-      log(C.d('     해결 — 둘 중 하나 실행 후 다시 시도:'));
+      log(C.d('     해결 — 셋 중 하나 실행 후 다시 시도:'));
+      log('       ' + C.b('npm i leerness@latest') + C.d('              # 프로젝트 로컬 설치 (1.9.183 권장)'));
+      log('       ' + C.b('npm i -g leerness@latest') + C.d('           # 글로벌 설치'));
       log('       ' + C.b('npx --yes clear-npx-cache && npx leerness@latest init .'));
-      log('       ' + C.b('npm i -g leerness@latest  →  leerness init .'));
       log('');
       log(C.d('     (이 경고는 LEERNESS_NO_STALE_CHECK=1 또는 --no-stale-check로 끌 수 있습니다)'));
       log('');
@@ -13620,6 +13621,22 @@ async function main() {
     try {
       const root = absRoot(arg('--path', args[1] && !args[1].startsWith('-') ? args[1] : process.cwd()));
       if (exists(path.join(root, '.harness'))) _bumpUsage(root, cmd);
+    } catch {}
+  }
+  // 1.9.183 (사용자 명시): 모든 명령 시점에서 구버전 감지 + 경고 + 업데이트 명령어 안내.
+  //   init/migrate 는 이미 _warnIfStale 호출하므로 제외. mcp/version/help 등 출력 민감 명령도 제외.
+  //   24h 캐시 (.harness/cache/update-check.json) 활용 — 네트워크 비차단.
+  const _staleSkip = new Set(['init', 'migrate', 'usage', 'mcp', 'release', 'session-close', '--version', '--help', 'help', 'update', 'whats-new']);
+  if (!_staleSkip.has(cmd) && process.env.LEERNESS_NO_STALE_CHECK !== '1' && !has('--no-stale-check')) {
+    try {
+      const root = absRoot(arg('--path', args[1] && !args[1].startsWith('-') ? args[1] : process.cwd()));
+      // 캐시 fresh 시에만 즉시 비교 (네트워크 호출 X — 비차단). offline + cache 없으면 skip.
+      const cached = readUpdateCache(root);
+      if (cacheFresh(cached, 24) && cached.nextLeerness && compareVer(cached.nextLeerness, VERSION) > 0) {
+        const isTty = process.stdout && process.stdout.isTTY;
+        const C = isTty ? { y: s => `\x1b[33m${s}\x1b[0m`, b: s => `\x1b[1m${s}\x1b[0m`, d: s => `\x1b[2m${s}\x1b[0m` } : { y: s => s, b: s => s, d: s => s };
+        process.stderr.write(C.y('  ⚠ ') + C.b(`leerness v${VERSION} → v${cached.nextLeerness} 사용 가능`) + C.d(` · ${C.b('npm i leerness@latest')} 권장 (LEERNESS_NO_STALE_CHECK=1 로 끄기)`) + '\n');
+      }
     } catch {}
   }
   if (cmd === 'init')      return await install(args[1] || process.cwd(), { force:false, dry:false, migration:false });

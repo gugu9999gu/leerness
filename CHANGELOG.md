@@ -1,5 +1,85 @@
 # Changelog
 
+## 1.9.183 — 2026-05-21
+
+**📦 npm i leerness + 구버전 자동 감지/경고/업데이트 명령어 안내 (사용자 명시 3종).**
+
+자율 모드 113 라운드. 사용자 명시:
+1. *"(vercel/anthropic) 표기는 제거"* → 일반화
+2. *"vercel/anthropic 포함한 다른 공식 스킬도 자동 탐색하는 게 맞는지 확인"* → 검증 통과
+3. *"npm i leerness 사용 가능하게 + 구버전 감지/경고/업데이트 명령어 안내"* → 모든 명령에 stale check 진입
+
+### 1. 표기 일반화
+```diff
+- 🌐 공식 catalog 자동 탐색 (vercel/anthropic) · 자가 성장형
++ 🌐 공식 catalog 자동 탐색 · 자가 성장형 · 구버전 감지/안내
+```
+
+### 2. 다른 공식 catalog 자동 탐색 확인 (live)
+```bash
+$ leerness skill discover --all-presets
+  fetching vercel-labs/agent-skills...
+  ✓ vercel-labs/agent-skills: 8개 skill 발견
+  fetching anthropics/skills...
+  ✓ anthropics/skills: 17개 skill 발견
+전체 25건
+```
+**vercel + anthropic 모두 정상 작동**. 다른 공식 organization은 `--github <owner/repo>` 옵션으로 즉시 추가 가능 (`vercel-labs/agent-skills`, `anthropics/skills` 외에 새 공식 등장 시 preset 등록).
+
+조사 결과 — 1.9.183 시점 표준 SKILL.md 카탈로그를 갖춘 공식 organization:
+- `vercel-labs/agent-skills` (8개) ← preset `vercel`
+- `anthropics/skills` (17개) ← preset `anthropic`
+- `modelcontextprotocol/servers` — SKILL.md 형식 아님 (MCP server 구현 — leerness skill 호환성 X)
+- 기타 — 미발견. 새 공식 등장 시 즉시 preset 등록 가능.
+
+### 3. 구버전 자동 감지 강화 (모든 명령)
+**Before**: init/migrate 시점만 stale check (다른 명령은 skip)
+**After**: 거의 모든 명령 시점에 stale check (init/migrate/mcp/release/version/help 제외 — 출력 민감 명령은 skip)
+
+```js
+// 1.9.183 (사용자 명시): 모든 명령 시점에서 구버전 감지 + 경고 + 업데이트 명령어 안내
+const _staleSkip = new Set(['init', 'migrate', 'usage', 'mcp', 'release', 'session-close', '--version', '--help', 'help', 'update', 'whats-new']);
+if (!_staleSkip.has(cmd) && process.env.LEERNESS_NO_STALE_CHECK !== '1' && !has('--no-stale-check')) {
+  const cached = readUpdateCache(root);
+  if (cacheFresh(cached, 24) && cached.nextLeerness && compareVer(cached.nextLeerness, VERSION) > 0) {
+    process.stderr.write(`  ⚠ leerness v${VERSION} → v${cached.nextLeerness} 사용 가능 · npm i leerness@latest 권장 ...`);
+  }
+}
+```
+
+**실 동작 검증** (캐시 시뮬레이션):
+```
+$ leerness audit .
+  ⚠ leerness v1.9.183 → v1.9.999 사용 가능 · npm i leerness@latest 권장 (LEERNESS_NO_STALE_CHECK=1 로 끄기)
+✓ no duplicate design guide candidates
+[...]
+```
+
+### 4. `npm i leerness` 첫 권장 (글로벌 → 로컬 우선)
+init 시점 stale 메시지도 갱신:
+```
+해결 — 셋 중 하나 실행 후 다시 시도:
+  npm i leerness@latest                  # 프로젝트 로컬 설치 (1.9.183 권장)
+  npm i -g leerness@latest               # 글로벌 설치
+  npx --yes clear-npx-cache && npx leerness@latest init .
+```
+
+### npm registry 상태
+```bash
+$ npm view leerness version
+1.9.182  ← 직전 publish
+$ npm view leerness dist-tags
+{ latest: '1.9.182' }
+```
+이번 라운드 release sync-main 후 `latest: '1.9.183'` 으로 자동 갱신.
+
+### Verified
+- stress-v128: **16/16** (사용자 명시 3 + 구버전 감지 4 + npm 배포 2 + VERSION+누적 7)
+- e2e 217/217 baseline 유지
+- VERSION = 1.9.183 · autonomous-rounds = 113 · main 자동 push 44 라운드 연속
+
+---
+
 ## 1.9.182 — 2026-05-21
 
 **🌐 공식 조직 스킬 catalog 자동 탐색 — vercel-labs/agent-skills + anthropics/skills 직접 통합 (사용자 명시).**
