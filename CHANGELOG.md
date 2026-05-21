@@ -1,5 +1,102 @@
 # Changelog
 
+## 1.9.188 — 2026-05-21
+
+**🐛 REPL 한글 prompt 전달 BUG fix (stdin) + 세부 모델 표시 + 입력 구분선 (사용자 명시 3종).**
+
+자율 모드 118 라운드. 사용자 명시 핵심 버그:
+```
+agent[claude/actor/▶]> 이 폴더에 파이썬 프로그램을 하나 제작해줘
+  ── claude stream ──
+저는 이 프로젝트의 **수석 개발자이자 프로젝트 매니저**입니다.
+...
+메시지가 "역할:"로만 끝나서 의도를 확신하기 어렵습니다.
+```
+사용자 의도와 무관한 응답 — **claude가 한글 prompt 끝부분("역할:") fragment만 받음**.
+
+### 근본 원인 (코드 audit)
+
+`cp.spawn(cmd, args, { shell: true })` + Windows cmd.exe + 한글/특수문자 promptText:
+- shell:true 일 때 args 가 join되어 shell command line 형성
+- Windows cmd.exe가 한글/공백 escape 실패 → claude에 일부 fragment만 전달
+
+### Fix #1 — prompt를 stdin으로 전달 (shell escape 우회)
+
+```diff
+- if (provider === 'claude')  { cmd = 'claude'; args = ['--print', promptText]; }
++ // 1.9.188: promptText 는 stdin 으로 → args 에서 제거 (한글/특수문자 안전)
++ let useStdinForPrompt = false;
++ if (provider === 'claude') {
++   cmd = 'claude';
++   args = ['--print'];  // promptText 제거
++   useStdinForPrompt = true;
++ }
+```
+
+spawn 시:
+```js
+child = cp.spawn(cmd, args, {
+  stdio: [useStdinForPrompt ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+  shell: true
+});
+if (useStdinForPrompt && child.stdin) {
+  child.stdin.write(promptText);
+  child.stdin.end();
+}
+```
+
+`_cliChat` 도 동일하게 `runCommandSafe(..., { input: stdinInput })` 으로 변경.
+
+### Live 검증 (한글 prompt 정확 전달)
+```bash
+$ leerness agents multi "이 폴더에 파이썬 hello world 프로그램 제작 (응답만 코드)" --only claude --execute
+✓ claude   · 8279ms · 9 토큰
+  --- 처음 600자 ---
+`hello.py` 생성 권한이 필요합니다. 승인해 주세요.
+```
+**1.9.187까지**: "수석 개발자/프로젝트 매니저..." 같은 무관한 응답 (역할 fragment만 받음)
+**1.9.188**: `hello.py 생성 권한 필요` — 정확한 요청 이해 ✓
+
+### Fix #2 — 세부 모델 표시
+**Before**: `⚡ provider=claude · model=(기본)`
+**After**: `⚡ provider=claude · model=claude-opus-4-7`
+
+```js
+// 1.9.188 (사용자 명시): state.model 자동 default (catalog 첫 모델)
+if (!state.model) {
+  const cat = _PROVIDER_MODEL_CATALOG[state.provider];
+  if (cat && cat.length) state.model = cat[0].id;
+}
+```
+
+prompt 도 세부 모델 명시:
+```
+Before: agent[claude/actor/▶]>
+After:  agent[claude · opus-4-7/actor/▶]>
+```
+
+### Fix #3 — 입력 구분선 (Hermes UX 영감)
+각 응답 끝에 가로 디바이더 자동 출력 → 입력 영역 시각 명확:
+
+```
+[assistant: claude/claude-opus-4-7, role=actor, 4598ms · 425자]
+
+  ────────────────────────────────────────────────...
+agent[claude · opus-4-7/actor/▶]> _
+```
+
+`_printInputDivider()` 함수 도입 — 터미널 width 기준 자동 길이.
+
+### Verified
+- stress-v133: **15/15 PASS** (사용자 명시 6 + live 2 + 누적 7)
+- e2e 217/217 baseline 유지
+- live 검증:
+  - 한글 prompt "이 폴더에 파이썬 hello world 제작" → claude 정확 응답 (12.5초)
+  - 영문 prompt "1+1=?" → claude 응답 (9.3초, 회귀 없음)
+- VERSION = 1.9.188 · autonomous-rounds = 118 · main 자동 push 49 라운드 연속
+
+---
+
 ## 1.9.187 — 2026-05-21
 
 **🔓 비시크릿 LEERNESS_* 설정을 .env → .harness/leerness-config.json 으로 분리 (AI 가시성).**

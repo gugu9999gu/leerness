@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.187';
+const VERSION = '1.9.188';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -11048,10 +11048,11 @@ async function _cliChat(root, provider, prompt, opts) {
     return { ok: false, error: `${provider} 비활성 (${status.status}) — .env 에서 ${agent.envFlag}=1 + CLI 설치 필요`, provider };
   }
   // CLI 별 비-인터랙티브 호출 인자 매핑 (read-only 모드 — REPL 안에서 파일 수정 X)
-  let cmd, args;
-  if (provider === 'claude')  { cmd = 'claude'; args = ['--print', prompt]; }
-  else if (provider === 'codex')   { cmd = 'codex';  args = ['exec', '--skip-git-repo-check', prompt]; }
-  else if (provider === 'gemini')  { cmd = 'gemini'; args = ['-p', prompt]; }
+  // 1.9.188 (사용자 명시 fix): 한글/특수문자 prompt 시 shell escape 실패 회피 → stdin 으로 전달.
+  let cmd, args, stdinInput = null;
+  if (provider === 'claude')  { cmd = 'claude'; args = ['--print']; stdinInput = prompt; }
+  else if (provider === 'codex')   { cmd = 'codex';  args = ['exec', '--skip-git-repo-check', '-']; stdinInput = prompt; }
+  else if (provider === 'gemini')  { cmd = 'gemini'; args = ['-p', prompt]; }  // gemini 는 인자 only
   else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', prompt]; }
   else return { ok: false, error: `provider ${provider} 미지원`, provider };
   // runCommandSafe — env scrub + observability 자동
@@ -11059,7 +11060,8 @@ async function _cliChat(root, provider, prompt, opts) {
     cwd: process.cwd(), root,
     timeout: opts.timeout || 60000,
     allowOutsideCwd: true,  // CLI 가 cwd 밖에서 실행될 수 있음
-    kind: 'agent_repl_cli', label: `repl-${provider}`
+    kind: 'agent_repl_cli', label: `repl-${provider}`,
+    input: stdinInput  // 1.9.188: claude/codex 는 stdin 전달
   });
   if (r.status === 0) {
     return { ok: true, response: (r.stdout || '').trim(), provider, model: provider };
@@ -11088,15 +11090,25 @@ async function _cliChatStream(root, provider, promptText, opts) {
   // 1.9.186 (사용자 명시 fix): claude --output-format=stream-json 가 일부 버전에서 빈 응답.
   //   default 를 plain --print 로 변경 → _cliChat 과 동일한 인자, 작동 검증된 패턴.
   //   stream 형식 사용 opt-in: LEERNESS_REPL_STREAM_FORMAT=json (실시간 thinking/tool_use 보고 싶을 때).
+  // 1.9.188 (사용자 명시 fix): shell:true + Windows cmd.exe + 한글/특수문자 promptText → args escape 실패.
+  //   사용자 보고: "이 폴더에 파이썬 프로그램 제작" 보냈으나 claude는 "역할:" fragment만 받음.
+  //   해결: promptText 를 args 에서 제거하고 stdin 으로 전달 (shell escape 우회).
   const useStreamJson = process.env.LEERNESS_REPL_STREAM_FORMAT === 'json';
+  let useStdinForPrompt = false;  // 1.9.188: claude/codex 는 stdin 으로 prompt 전달 (shell escape 우회)
   if (provider === 'claude')  {
     cmd = 'claude';
+    // 1.9.188: promptText 는 stdin 으로 → args 에서 제거 (한글/특수문자 안전)
     args = useStreamJson
-      ? ['--print', '--output-format=stream-json', '--verbose', promptText]
-      : ['--print', promptText];  // plain text 응답 (작동 검증됨)
+      ? ['--print', '--output-format=stream-json', '--verbose']
+      : ['--print'];
+    useStdinForPrompt = true;
   }
-  else if (provider === 'codex')   { cmd = 'codex';  args = ['exec', '--skip-git-repo-check', promptText]; }
-  else if (provider === 'gemini')  { cmd = 'gemini'; args = ['-p', promptText]; }
+  else if (provider === 'codex')   {
+    cmd = 'codex';
+    args = ['exec', '--skip-git-repo-check', '-'];  // - = stdin from claude/codex convention
+    useStdinForPrompt = true;
+  }
+  else if (provider === 'gemini')  { cmd = 'gemini'; args = ['-p', promptText]; }  // gemini -p 는 인자 모드만 지원
   else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', promptText]; }
   else return { ok: false, error: `provider ${provider} 미지원`, provider };
   const t0 = Date.now();
@@ -11156,17 +11168,26 @@ async function _cliChatStream(root, provider, promptText, opts) {
     process.stdout.write(dim(`\n  ── ${provider} stream ──\n`));
     let child;
     try {
-      // 1.9.186 (사용자 명시 fix): Windows .cmd 호환을 위해 shell: true.
-      //   1.9.185 까지 shell: false → Windows 에서 claude.cmd 못 찾아 빈 응답 (사용자 보고: 27초 후 0자).
-      //   _cliChat (작동하는 함수) 이 runCommandSafe → spawnSync shell: true 패턴이라서 작동.
-      //   _cliChatStream 도 동일하게 shell: true 사용 (DEP0190 은 1.9.184/185 fix 로 억제됨).
-      //   security: shell escape 우려는 promptText 가 사용자 직접 입력 — sandboxed REPL 안에서만 사용.
+      // 1.9.186 + 1.9.188 (사용자 명시 fix):
+      //   Windows .cmd 호환을 위해 shell: true 유지.
+      //   1.9.188: promptText 가 한글/특수문자일 때 shell escape 실패 → stdin 으로 전달.
+      //     useStdinForPrompt=true 시 stdio[0]='pipe' + child.stdin.write(promptText) + end().
+      //     shell 인자에는 escape-safe flags 만 남김 ('--print' 등).
       child = cp.spawn(cmd, args, {
         cwd: process.cwd(),
         env: _scrubEnv({}),
         shell: true,
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: [useStdinForPrompt ? 'pipe' : 'ignore', 'pipe', 'pipe']
       });
+      // 1.9.188: promptText 를 stdin 으로 안전 전달
+      if (useStdinForPrompt && child.stdin) {
+        try {
+          child.stdin.write(promptText);
+          child.stdin.end();
+        } catch (e) {
+          // stdin 쓰기 실패 시 child 가 stdin 안 받을 수도 — 무시하고 진행
+        }
+      }
     } catch (e) {
       if (spinnerInterval) clearInterval(spinnerInterval);
       return resolve({ ok: false, error: 'spawn 실패: ' + e.message, provider });
@@ -11571,10 +11592,16 @@ async function _agentRepl(root, opts) {
   log('');
   log(C.dim('  ⌨  Tab=provider cycle  ·  Shift+Tab=model  ·  Ctrl+C=quit'));
   log('');
-  // 1.9.179: 상태바 한 줄 — 색깔/구분자 강화
+  // 1.9.188 (사용자 명시): state.model 이 비어있으면 catalog 첫 모델 자동 설정 → 세부 모델 표시.
+  //   "model=(기본)" 같은 모호한 표시 대신 실제 사용될 모델 이름 (예: claude-opus-4-7) 명시.
+  if (!state.model) {
+    const cat = _PROVIDER_MODEL_CATALOG[state.provider];
+    if (cat && cat.length) state.model = cat[0].id;
+  }
+  // 1.9.179+1.9.188: 상태바 한 줄 — 세부 모델 + 색깔/구분자 강화
   const permMode = _readPermissions(root).mode || 'basic';
   log('  ' + C.bold('⚡ ') + C.cy(`provider=${state.provider}`) + '  ·  '
-    + C.mag(`model=${state.model || '(기본)'}`) + '  ·  '
+    + C.mag(`model=${state.model || '(unknown)'}`) + '  ·  '
     + C.green(`role=${state.role}`) + '  ·  '
     + C.yel(`perms=${permMode}`) + '  ·  '
     + (state.streamMode ? C.green('▶ stream=on') : C.dim('□ stream=off')));
@@ -11598,7 +11625,24 @@ async function _agentRepl(root, opts) {
     }
   } catch {}
   log('');
-  const prompt = () => isTty ? C.cy(`agent[${state.provider}/${state.role}${state.streamMode ? '/▶' : ''}]> `) : 'agent> ';
+  // 1.9.188 (사용자 명시): prompt 위/아래 구분선 + 세부 모델 명시 (사용자 입력칸 시각 강조).
+  //   매 응답 직후 readline.question 호출 전에 _printInputDivider() 호출하여 입력 영역 명확화.
+  const _termCols = () => {
+    try { return Math.max(40, (process.stdout.columns || 80)); } catch { return 80; }
+  };
+  const _printInputDivider = () => {
+    if (!isTty) return;
+    const cols = _termCols();
+    const line = '─'.repeat(Math.min(cols - 4, 120));
+    process.stdout.write('\n' + C.dim('  ' + line) + '\n');
+  };
+  // prompt 에 세부 모델 표시 (사용자 명시): agent[claude · claude-opus-4-7 / actor / ▶]>
+  const prompt = () => {
+    if (!isTty) return 'agent> ';
+    const modelShort = (state.model || '').replace(/^(claude|gpt|gemini)-/, '').slice(0, 18);
+    const modelTag = modelShort ? C.dim(' · ') + C.mag(modelShort) : '';
+    return C.cy(`agent[${state.provider}${modelTag}${C.cy('/' + state.role)}${state.streamMode ? C.cy('/▶') : ''}${C.cy(']>')} `);
+  };
   rl.setPrompt(prompt());
 
   // 1.9.170: Tab cycle — provider (Tab) / model within provider (Shift+Tab)
@@ -12012,13 +12056,13 @@ async function _agentRepl(root, opts) {
         // 1.9.170: stream 모드에서는 이미 실시간으로 출력됐으므로 헤더만 표시 (응답 중복 방지)
         if (state.streamMode && ['claude', 'codex', 'gemini', 'copilot'].includes(state.provider)) {
           log(C.dim(`  [assistant: ${state.provider}/${state.model || 'default'}, role=${state.role}, ${dt}ms · ${result.response.length}자]`));
-          log('');
         } else {
           log('');
           log(C.bold(`assistant (${state.model || state.provider}, role=${state.role}, ${dt}ms)`));
           log(result.response);
-          log('');
         }
+        // 1.9.188 (사용자 명시): 응답 끝 + 입력 구분선 (입력칸 시각 명확)
+        _printInputDivider();
         if (state.history.length % 6 === 0) saveSession();  // 6턴마다 자동 저장
       } else {
         // 1.9.185 (사용자 명시): REPL 호출 실패 친절한 진단 — 어느 단계에서 실패했는지 + 즉시 검증 명령 안내
