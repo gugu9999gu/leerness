@@ -1,5 +1,63 @@
 # Changelog
 
+## 1.9.201 — 2026-05-22
+
+**🎯 E축 (게으름 방지) 9.5/10 → 10/10 보강 — next-action queue + leerness next-action take 명령.**
+
+자율 모드 131 라운드. 200 마일스톤 후속 — 100% 매트릭스를 향한 다음 단계.
+
+### 사용자 의도 정렬 (1.9.191 verbatim)
+> *"게으름 방지등등 최고의 도구"*
+
+### 1. handoff next-action 자동 큐잉 (E축 핵심)
+- `_suggestNextActions` (1.9.194) 가 제안한 항목을 `.harness/next-action-queue.json` 에 자동 저장
+- 중복 방지 (이미 있는 title skip), 최근 20개만 유지
+- 함수: `_enqueueNextActions(root, actions)` / `_loadNextActionQueue(root)` / `_writeNextActionQueue(root, queue)`
+
+### 2. `leerness next-action` 신규 CLI
+- `next-action list [--json]` — 큐 전체 (default sub)
+- `next-action take [N]` — 큐에서 가져와서 `leerness task add` 자동 호출 (N 생략 시 최신)
+- `next-action add "<text>"` — 수동 추가
+- `next-action clear` — 큐 초기화
+
+### 3. 1-step 게으름 방지 흐름
+```
+$ leerness handoff .
+  ## 🎯 다음 단계 자동 제안 (1.9.194 E축) — 키워드 "X"
+    🛡 과거 실패 회피 — lessons.md "X" 관련 N건
+       `leerness lessons --auto --path .`
+    → 즉시 task add: leerness next-action take  (큐 +1건 저장됨, 1.9.201)
+
+$ leerness next-action take
+  ✓ task 추가: T-0042 — "과거 실패 회피 — lessons.md..."
+  💡 실행 명령: leerness lessons --auto --path .
+```
+
+### 4. 누적 회귀 (1.9.195~200) — 모두 유지
+
+### 5. stress-v146 — 16/16 PASS
+- next-action CLI (7) + 임시 워크스페이스 통합 (1) + 성능 (2) + 누적 회귀 (7)
+- 성능: --version cold start avg **436 ms** · MCP 54 도구 **442 ms**
+
+### 6. 5축 매트릭스 변동
+| 축 | 1.9.200 | 1.9.201 | Δ |
+|---|---|---|---|
+| E. 게으름 방지 | 9.5/10 | **10/10** ✓ | +0.5 (next-action 1-step 자동 task add) |
+| **종합** | 48/50 (96%) | **48.5/50 (97%)** | +1% |
+
+### 7. 5축 모두 9 이상 + 3축 10/10
+- A 10/10 ✓ (1.9.197)
+- D 10/10 ✓ (1.9.196)
+- E 10/10 ✓ (1.9.201) — 신규
+- B 9.5/10 (1.9.198)
+- C 9.0/10 (1.9.192)
+
+### 8. 자동 release 흐름
+- main 자동 push **63 라운드 연속** (1.9.140~201)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.200 — 2026-05-22
 
 **🎉 200 마일스톤 — 60 라운드 자율 누적 + 5축 매트릭스 96/100.**

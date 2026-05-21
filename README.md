@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.200-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v145-13%2F13-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-130-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-62_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-96%2F100_(5축)-brightgreen)]() [![milestone](https://img.shields.io/badge/🎉-1.9.200_60_라운드_마일스톤-gold)]() [![perf](https://img.shields.io/badge/cold_start-1022ms-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.201-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v146-16%2F16-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-131-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-63_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-97%2F100_(5축)-brightgreen)]() [![next-action](https://img.shields.io/badge/next--action-1step_자동_task_add-success)]() [![perf](https://img.shields.io/badge/cold_start-436ms-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.200  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.201  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🎉 200 마일스톤 · 매트릭스 96/100 · 130 라운드 · 62 push 연속    ║
+  ║  🎯 next-action 1step · 매트릭스 97/100 · A·D·E 10/10           ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

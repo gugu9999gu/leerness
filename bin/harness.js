@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.200';
+const VERSION = '1.9.201';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1731,6 +1731,110 @@ function _loadMultiAgentConsensusHistory(root, keyword) {
     }
     return hits;
   } catch { return []; }
+}
+
+// 1.9.201: E축 (게으름 방지) 9.5→10 보강 — next-action queue 자동 저장 + take 명령
+//   handoff 가 제안한 next-action top 항목을 .harness/next-action-queue.json 에 저장 →
+//   `leerness next-action take` 호출 시 큐에서 pop + leerness task add 자동 실행 →
+//   AI/사용자가 직접 추적/타이핑 없이 1-step 으로 task 진입
+function _nextActionQueuePath(root) { return path.join(root, '.harness', 'next-action-queue.json'); }
+function _loadNextActionQueue(root) {
+  try {
+    const fp = _nextActionQueuePath(root);
+    if (!exists(fp)) return { queue: [], at: null };
+    const j = JSON.parse(read(fp));
+    return { queue: Array.isArray(j.queue) ? j.queue : [], at: j.at || null };
+  } catch { return { queue: [], at: null }; }
+}
+function _writeNextActionQueue(root, queue) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    writeUtf8(_nextActionQueuePath(root), JSON.stringify({ queue, at: new Date().toISOString() }, null, 2));
+    return true;
+  } catch { return false; }
+}
+// handoff 에서 제안된 next-action 들을 큐에 자동 저장 (중복 방지: 이미 있는 title 은 skip)
+function _enqueueNextActions(root, actions) {
+  if (!Array.isArray(actions) || actions.length === 0) return 0;
+  const state = _loadNextActionQueue(root);
+  const existingTitles = new Set(state.queue.map(a => a.title));
+  let added = 0;
+  for (const a of actions) {
+    if (existingTitles.has(a.title)) continue;
+    state.queue.push({ ...a, addedAt: new Date().toISOString() });
+    existingTitles.add(a.title);
+    added++;
+  }
+  // 최근 20개만 유지
+  if (state.queue.length > 20) state.queue = state.queue.slice(-20);
+  if (added > 0) _writeNextActionQueue(root, state.queue);
+  return added;
+}
+
+// 1.9.201: next-action CLI 명령 — handoff 가 저장한 queue 에서 take/list/clear
+async function nextActionCmd(root, sub, ...rest) {
+  root = absRoot(root);
+  const state = _loadNextActionQueue(root);
+  if (!sub || sub === 'list') {
+    if (has('--json')) { log(JSON.stringify(state, null, 2)); return; }
+    log(`# leerness next-action list (1.9.201)`);
+    if (state.queue.length === 0) {
+      log('  (큐 비어있음)');
+      log(`  → handoff 가 자동으로 큐에 저장합니다. \`leerness handoff .\` 후 다시 확인.`);
+      return;
+    }
+    log(`  큐 ${state.queue.length}건 (생성: ${state.at || '?'})`);
+    log('');
+    for (let i = 0; i < state.queue.length; i++) {
+      const a = state.queue[i];
+      log(`  [${i}] ${a.icon || '•'} ${a.title}`);
+      if (a.command) log(`      \`${a.command}\``);
+    }
+    log('');
+    log(`  → 가져오기: leerness next-action take [N]  (N 생략 시 최신 [${state.queue.length - 1}])`);
+    return;
+  }
+  if (sub === 'take') {
+    const n = rest[0] !== undefined ? Number(rest[0]) : state.queue.length - 1;
+    if (state.queue.length === 0) { fail('큐 비어있음 — handoff 먼저 실행'); return process.exit(1); }
+    if (isNaN(n) || n < 0 || n >= state.queue.length) { fail(`잘못된 index: ${n} (0~${state.queue.length - 1})`); return process.exit(1); }
+    const action = state.queue[n];
+    log(`# leerness next-action take [${n}] (1.9.201)`);
+    log(`  ${action.icon || '•'} ${action.title}`);
+    if (action.command) log(`  \`${action.command}\``);
+    // task add 자동 호출
+    try {
+      const taskTitle = action.title.replace(/^[^\w가-힣]+/, '').slice(0, 100);
+      // 큐에서 제거 → write
+      state.queue.splice(n, 1);
+      _writeNextActionQueue(root, state.queue);
+      // leerness task add 호출
+      const taskResult = cp.spawnSync(process.execPath, [__filename, 'task', 'add', taskTitle, '--path', root], { encoding: 'utf8', timeout: 8000 });
+      if (taskResult.status === 0) {
+        const m = (taskResult.stdout || '').match(/T-\d{4}/);
+        log(`  ✓ task 추가: ${m ? m[0] : '?'} — "${taskTitle}"`);
+        if (action.command) log(`  💡 실행 명령: ${action.command}`);
+      } else {
+        log(`  ⚠ task add 실패 (exit ${taskResult.status}) — 수동: leerness task add "${taskTitle}"`);
+      }
+    } catch (e) {
+      log(`  ⚠ 처리 실패: ${e.message}`);
+    }
+    return;
+  }
+  if (sub === 'clear') {
+    _writeNextActionQueue(root, []);
+    ok(`next-action 큐 초기화 (${state.queue.length}건 제거)`);
+    return;
+  }
+  if (sub === 'add') {
+    const title = rest.filter(x => !x.startsWith('-')).join(' ').trim();
+    if (!title) return fail('사용법: leerness next-action add "<text>"');
+    _enqueueNextActions(root, [{ icon: '📝', title, command: null }]);
+    ok(`next-action 추가: ${title}`);
+    return;
+  }
+  fail(`알 수 없는 sub: ${sub} (list / take / clear / add)`);
 }
 
 // 1.9.194: E축 (게으름 방지) — handoff 에서 다음 단계 1-3개 자동 제안
@@ -3765,6 +3869,11 @@ function handoff(root) {
                   log(dim(`  ${a.icon} ${a.title}`));
                   if (a.command) log(dim(`     \`${a.command}\``));
                 }
+                // 1.9.201: queue 자동 저장 — `leerness next-action take` 로 즉시 task add 가능
+                try {
+                  const added = _enqueueNextActions(root, actions);
+                  if (added > 0) log(dim(`  → 즉시 task add: leerness next-action take  (큐 +${added}건 저장됨, 1.9.201)`));
+                } catch {}
                 log(dim(`  → 직접 입력: leerness next-action add "<text>"`));
                 log('');
               }
@@ -14777,6 +14886,8 @@ async function main() {
   if (cmd === 'brainstorm')                         return brainstormCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'roadmap' && args[1] === 'auto')      return roadmapAutoCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'roadmap')                            return roadmapCmd(args[1] || process.cwd());
+  // 1.9.201: next-action queue CLI (E축 9.5→10)
+  if (cmd === 'next-action')                        return nextActionCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);
