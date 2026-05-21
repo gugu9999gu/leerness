@@ -7822,8 +7822,18 @@ function releaseSyncMainCmd(root) {
 //     - 이미 publish된 버전 자동 detect → skip (중복 publish 차단)
 function _publishToNpm(root, opts = {}) {
   root = absRoot(root || process.cwd());
-  // .env 자동 로드 (사용자 명시 패턴 — 1.9.153)
-  try { _loadEnvFile(root); } catch {}
+  // .env 자동 로드 — root + 상위 3단계까지 탐색 (워크스페이스 root 의 .env 도 인식).
+  //   예: leerness-pkg/ 에서 sync-main 호출 시 ../leerness/.env 도 자동 탐색.
+  {
+    let dir = root;
+    for (let i = 0; i < 4; i++) {
+      try { _loadEnvFile(dir); } catch {}
+      if (process.env.LEERNESS_NPM_TOKEN || process.env.NPM_TOKEN) break;
+      const parent = path.resolve(dir, '..');
+      if (parent === dir) break;  // 루트 도달
+      dir = parent;
+    }
+  }
   const token = process.env.LEERNESS_NPM_TOKEN || process.env.NPM_TOKEN;
   if (!token) {
     log(`  ⚠ npm 자동 배포 스킵: NPM_TOKEN 미설정 (.env 에 NPM_TOKEN=npm_xxxxx 추가)`);
