@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.207';
+const VERSION = '1.9.208';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2006,6 +2006,111 @@ function _auditUserRequests(root) {
   };
 }
 
+// 1.9.208: 플랫폼/API 제약 사전 체크 (사용자 명시)
+//   "사용자의 명령을 받으면, 고려해야하는 부분을 먼저 확인하고 진행하게 하면 어떨지"
+//   "특정 플랫폼의 API ... 호출속도가 초당 5회 이하로만 해야한다는 규정을 먼저 확인"
+//   .harness/platform-constraints.json 에 플랫폼별 제약 catalog 저장 → 요청 텍스트 키워드 매칭 → 적용 가능한 제약 보고
+//   기본 catalog 6종: Stripe / OpenAI / Anthropic / GitHub / Discord / Twitter
+function _platformConstraintsPath(root) { return path.join(root, '.harness', 'platform-constraints.json'); }
+const _DEFAULT_PLATFORM_CONSTRAINTS = {
+  version: '1.9.208',
+  platforms: {
+    stripe: {
+      aliases: ['stripe', 'stripe api', 'payment', '결제'],
+      docs: 'https://stripe.com/docs/rate-limits',
+      constraints: [
+        { kind: 'rate-limit', detail: 'read: 100 req/s, write: 100 req/s (live mode), test mode: 25 req/s' },
+        { kind: 'idempotency', detail: 'Idempotency-Key 헤더 24h 유지 — 중복 결제 방지 필수' },
+        { kind: 'webhook', detail: 'webhook 서명 검증 필수 (Stripe-Signature header + endpoint secret)' }
+      ]
+    },
+    openai: {
+      aliases: ['openai', 'gpt', 'chatgpt', 'gpt-4', 'gpt-3'],
+      docs: 'https://platform.openai.com/docs/guides/rate-limits',
+      constraints: [
+        { kind: 'rate-limit', detail: 'tier-based: Free 3 RPM / Tier 1 500 RPM / Tier 5 10,000 RPM' },
+        { kind: 'token-limit', detail: 'TPM (tokens/min) 별도 — 큰 입력 시 RPM 도달 전 차단 가능' },
+        { kind: 'cost', detail: 'gpt-4: $30/$60 per 1M input/output tokens — 대량 호출 전 비용 추정 필수' }
+      ]
+    },
+    anthropic: {
+      aliases: ['anthropic', 'claude', 'claude api', 'sonnet', 'opus', 'haiku'],
+      docs: 'https://docs.anthropic.com/claude/reference/rate-limits',
+      constraints: [
+        { kind: 'rate-limit', detail: 'tier-based: Free 5 RPM / Tier 1 50 RPM / Tier 4 4,000 RPM' },
+        { kind: 'context-window', detail: 'claude-sonnet 200K context, claude-opus 200K, 1M tier 별도' },
+        { kind: 'cost', detail: 'sonnet: $3/$15 per 1M tokens (1M context tier 2x)' }
+      ]
+    },
+    github: {
+      aliases: ['github', 'github api', 'gh api', 'octokit'],
+      docs: 'https://docs.github.com/en/rest/rate-limit',
+      constraints: [
+        { kind: 'rate-limit', detail: 'authenticated: 5,000 req/hr, unauthenticated: 60 req/hr' },
+        { kind: 'rate-limit', detail: 'search API: 30 req/min (authenticated)' },
+        { kind: 'secondary', detail: 'secondary rate limit — concurrent + content creation 별도 가드' }
+      ]
+    },
+    discord: {
+      aliases: ['discord', 'discord api', 'discord bot'],
+      docs: 'https://discord.com/developers/docs/topics/rate-limits',
+      constraints: [
+        { kind: 'rate-limit', detail: 'global: 50 req/s, per-route 별도' },
+        { kind: 'invalid', detail: '10,000 invalid req/10min → 1h ban 위험' }
+      ]
+    },
+    twitter: {
+      aliases: ['twitter', 'twitter api', 'x api', 'x.com api'],
+      docs: 'https://developer.twitter.com/en/docs/twitter-api/rate-limits',
+      constraints: [
+        { kind: 'rate-limit', detail: 'tier-based: Free 1,500 posts/month, Basic 50,000 posts/month' },
+        { kind: 'auth', detail: 'OAuth 2.0 PKCE 필수 (user context), App-only는 별도 endpoint' }
+      ]
+    }
+  }
+};
+function _loadPlatformConstraints(root) {
+  try {
+    const fp = _platformConstraintsPath(root);
+    if (!exists(fp)) return _DEFAULT_PLATFORM_CONSTRAINTS;
+    const j = JSON.parse(read(fp));
+    // user catalog 와 default merge — user override 우선
+    const merged = { ...JSON.parse(JSON.stringify(_DEFAULT_PLATFORM_CONSTRAINTS)) };
+    if (j.platforms) {
+      for (const k of Object.keys(j.platforms)) {
+        merged.platforms[k] = j.platforms[k];
+      }
+    }
+    return merged;
+  } catch { return _DEFAULT_PLATFORM_CONSTRAINTS; }
+}
+function _writePlatformConstraints(root, catalog) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    writeUtf8(_platformConstraintsPath(root), JSON.stringify({ ...catalog, updatedAt: new Date().toISOString() }, null, 2));
+    return true;
+  } catch { return false; }
+}
+// 사용자 요청 텍스트에서 플랫폼 alias 매칭 → 적용 제약 목록 반환
+function _checkRequestConstraints(root, text) {
+  if (!text || typeof text !== 'string') return { matched: [], suggestions: [] };
+  const catalog = _loadPlatformConstraints(root);
+  const lower = text.toLowerCase();
+  const matched = [];
+  for (const [pid, plat] of Object.entries(catalog.platforms)) {
+    const aliases = plat.aliases || [];
+    const hit = aliases.find(a => lower.includes(a.toLowerCase()));
+    if (hit) matched.push({ platform: pid, matchedAlias: hit, docs: plat.docs, constraints: plat.constraints });
+  }
+  // suggestions — 보편 키워드 (api/rate/limit/integration) 시 catalog 검토 권장
+  const suggestions = [];
+  const generic = /\bapi\b|연동|integration|호출|rate|limit|quota|webhook/i.test(text);
+  if (generic && matched.length === 0) {
+    suggestions.push('일반적 API 연동 키워드 감지 — leerness constraints list 로 사전 등록된 플랫폼 catalog 확인 권장');
+  }
+  return { matched, suggestions, totalPlatforms: Object.keys(catalog.platforms).length };
+}
+
 // 1.9.203: 자동 라운드 plan 정리 — 사용자 명시
 //   "백그라운드에 다음 작업이 시작가능한 예상 시간 + 일어났을때 해야하는 일을 정리"
 //   라운드 마무리 시 .harness/auto-resume-plan.json 자동 저장 → 다음 wakeup 시 즉시 실행 가능
@@ -2228,6 +2333,104 @@ function requestsCmd(root, sub, ...rest) {
 
   console.error(`Unknown subcommand: ${sub}`);
   console.error(`Run: leerness requests help`);
+  process.exit(1);
+}
+
+// 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 CLI (사용자 명시)
+//   "특정 플랫폼의 API ... 호출속도가 초당 5회 이하로만 해야한다는 규정을 먼저 확인"
+//   list           → 등록된 모든 플랫폼 catalog 출력
+//   check "<req>"  → 사용자 요청 텍스트에서 플랫폼 매칭 → 제약 보고 (--json 가능)
+//   add <id> --aliases ... --constraint "kind:detail" → 사용자 정의 플랫폼 추가
+function constraintsCmd(root, sub, ...rest) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+
+  if (!sub || sub === 'help' || sub === '--help') {
+    log(`# leerness constraints (1.9.208) — 플랫폼/API 제약 사전 체크`);
+    log('');
+    log(`  list                  → 등록된 모든 플랫폼 catalog 출력 (--json 가능)`);
+    log(`  check "<request>"     → 사용자 요청에서 플랫폼 매칭 → 제약 보고 (--json 가능)`);
+    log(`  add <id> --constraint "kind:detail" --alias name`);
+    log('');
+    log(dim(`  예: leerness constraints check "Stripe API 연동 결제 모듈"`));
+    return;
+  }
+
+  if (sub === 'list') {
+    const catalog = _loadPlatformConstraints(root);
+    if (has('--json')) { log(JSON.stringify(catalog, null, 2)); return; }
+    log(cyan(`# leerness constraints list (1.9.208)`));
+    log(`  total platforms: ${Object.keys(catalog.platforms).length}`);
+    log('');
+    for (const [pid, plat] of Object.entries(catalog.platforms)) {
+      log(grn(`  📦 ${pid}`) + dim(`  aliases: ${(plat.aliases || []).join(', ')}`));
+      log(dim(`     docs: ${plat.docs || '-'}`));
+      for (const c of plat.constraints || []) {
+        const icon = c.kind === 'rate-limit' ? '🚦' : (c.kind === 'cost' ? '💰' : (c.kind === 'auth' ? '🔐' : '📋'));
+        log(`     ${icon} [${c.kind}] ${c.detail}`);
+      }
+      log('');
+    }
+    return;
+  }
+
+  if (sub === 'check') {
+    const text = rest.filter(x => !x.startsWith('-')).join(' ');
+    if (!text) { console.error('Usage: leerness constraints check "<request text>"'); process.exit(1); }
+    const result = _checkRequestConstraints(root, text);
+    if (has('--json')) { log(JSON.stringify({ query: text, ...result }, null, 2)); return; }
+    log(cyan(`# leerness constraints check (1.9.208)`));
+    log(`  query: ${text.slice(0, 80)}${text.length > 80 ? '…' : ''}`);
+    log('');
+    if (result.matched.length === 0) {
+      log(grn(`  ✓ 매칭된 플랫폼 없음 (catalog ${result.totalPlatforms}종 검토 완료)`));
+      if (result.suggestions.length) {
+        log('');
+        log(yel(`  💡 제안:`));
+        result.suggestions.forEach(s => log(`     • ${s}`));
+      }
+      return;
+    }
+    log(red(`  ⚠ ${result.matched.length}개 플랫폼 매칭 — 제약 사전 확인 필요:`));
+    log('');
+    for (const m of result.matched) {
+      log(grn(`  📦 ${m.platform}`) + dim(` (matched: "${m.matchedAlias}")`));
+      log(dim(`     docs: ${m.docs || '-'}`));
+      for (const c of m.constraints || []) {
+        const icon = c.kind === 'rate-limit' ? '🚦' : (c.kind === 'cost' ? '💰' : (c.kind === 'auth' ? '🔐' : '📋'));
+        log(`     ${icon} [${c.kind}] ${c.detail}`);
+      }
+      log('');
+    }
+    log(dim(`  → 구현 전 위 제약을 반영한 설계 권장 (rate limiter / idempotency key / 비용 추정)`));
+    return;
+  }
+
+  if (sub === 'add') {
+    const id = rest[0];
+    if (!id) { console.error('Usage: leerness constraints add <platform-id> --constraint "kind:detail"'); process.exit(1); }
+    const catalog = _loadPlatformConstraints(root);
+    const aliases = (arg('--alias', '') || '').split(',').map(s => s.trim()).filter(Boolean);
+    const detailRaw = arg('--constraint', '');
+    if (!detailRaw) { console.error('--constraint "kind:detail" required'); process.exit(1); }
+    const [kind, ...rest2] = detailRaw.split(':');
+    const detail = rest2.join(':').trim();
+    if (!catalog.platforms[id]) catalog.platforms[id] = { aliases: [], constraints: [] };
+    if (aliases.length) catalog.platforms[id].aliases = [...new Set([...(catalog.platforms[id].aliases || []), ...aliases])];
+    if (kind && detail) catalog.platforms[id].constraints.push({ kind: kind.trim(), detail });
+    _writePlatformConstraints(root, catalog);
+    if (has('--json')) { log(JSON.stringify(catalog.platforms[id], null, 2)); return; }
+    log(grn(`✓ platform "${id}" 갱신 — constraints: ${catalog.platforms[id].constraints.length}`));
+    return;
+  }
+
+  console.error(`Unknown subcommand: ${sub}`);
+  console.error(`Run: leerness constraints help`);
   process.exit(1);
 }
 
@@ -15238,6 +15441,15 @@ function reviewRequestCmd(root, request) {
     efficiencyHints.push('✨ 충돌 신호 없음 — 즉시 진행 안전');
   }
 
+  // 6.5) 1.9.208: 플랫폼/API 제약 사전 체크 — 사용자 명시 ("호출속도 초당 5회" 같은 규정 사전 확인)
+  let constraintsCheck = { matched: [], suggestions: [] };
+  try {
+    constraintsCheck = _checkRequestConstraints(root, text);
+    if (constraintsCheck.matched.length > 0) {
+      efficiencyHints.push(`⚠ 플랫폼 제약 ${constraintsCheck.matched.length}건 — leerness constraints check 로 상세 확인`);
+    }
+  } catch {}
+
   // 7) proceed 권장 (충돌 critical 시 false)
   const proceed = conflictHints.length < 3 && planConflicts.length === 0;
 
@@ -15252,6 +15464,8 @@ function reviewRequestCmd(root, request) {
     featureConflicts,
     recommendedSteps,
     efficiencyHints,
+    platformConstraints: constraintsCheck.matched,
+    constraintSuggestions: constraintsCheck.suggestions,
     proceed,
     proceedReason: proceed ? '안전 — 충돌 신호 < 3 + plan 충돌 0' : '⚠ 충돌 critical — 사용자 확인 후 진행',
     durationMs: dt
@@ -15295,6 +15509,18 @@ function reviewRequestCmd(root, request) {
   log(`## 💡 효율 제안`);
   efficiencyHints.forEach(h => log(`  ${h}`));
   log('');
+  // 1.9.208: 플랫폼/API 제약 사전 노출 (사용자 명시)
+  if (constraintsCheck.matched.length > 0) {
+    log(`## 🚦 플랫폼/API 제약 사전 체크 (${constraintsCheck.matched.length})`);
+    for (const m of constraintsCheck.matched) {
+      log(`  - 📦 ${m.platform}  (docs: ${m.docs || '-'})`);
+      for (const c of (m.constraints || []).slice(0, 3)) {
+        log(`     • [${c.kind}] ${c.detail}`);
+      }
+    }
+    log(`  → leerness constraints check "${text.slice(0, 40)}…" 로 상세 확인`);
+    log('');
+  }
   if (recommendedSteps.length) {
     log(`## 📍 권장 단계 (${estimatedType})`);
     recommendedSteps.forEach(s => log(`  ${s}`));
@@ -15568,6 +15794,8 @@ async function main() {
   if (cmd === 'resume')                             return resumeCmd(arg('--path', process.cwd()));
   // 1.9.207: leerness requests <audit|add|list|complete|drop> — 사용자 요청 누락 확인 절차 (사용자 명시)
   if (cmd === 'requests')                           return requestsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
+  if (cmd === 'constraints')                        return constraintsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);

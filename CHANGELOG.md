@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.9.208 — 2026-05-22
+
+**🚦 플랫폼/API 제약 사전 체크 (사용자 명시).**
+
+### 사용자 명시
+> *"사용자의 명령을 받으면, 고려해야하는 부분을 먼저 확인하고 진행하게 하면 어떨지 / 특정 플랫폼의 API ... 호출속도가 초당 5회 이하로만 해야한다는 규정을 먼저 확인"*
+
+### 1. `.harness/platform-constraints.json` + 기본 catalog 6종
+- **stripe** (rate: 100 req/s, idempotency key, webhook signing)
+- **openai** (tier-based RPM, TPM, cost per 1M tokens)
+- **anthropic** (claude tier, context-window, cost)
+- **github** (5K req/hr auth, search 30 req/min, secondary)
+- **discord** (50 req/s global, invalid ban)
+- **twitter** (tier-based, OAuth 2.0 PKCE)
+- 각 alias array 매칭 + docs URL 동봉
+
+### 2. 헬퍼 함수
+- `_loadPlatformConstraints(root)` — default merge user override
+- `_writePlatformConstraints(root, catalog)` — 사용자 catalog 저장
+- `_checkRequestConstraints(root, text)` — 텍스트 → 매칭 플랫폼 + 제약 + suggestions
+
+### 3. `leerness constraints <list|check|add>` CLI
+- `list` — 등록 catalog 출력 (--json)
+- `check "<req>"` — 사용자 요청 매칭 → 제약 보고 (--json)
+- `add <id> --alias name --constraint "kind:detail"` — 사용자 정의
+
+### 4. review-request 자동 통합
+- `_checkRequestConstraints()` review-request 내부에서 자동 호출
+- JSON 출력에 `platformConstraints` + `constraintSuggestions` 필드 추가
+- human 출력에 `## 🚦 플랫폼/API 제약 사전 체크` 섹션
+- efficiencyHints 에 매칭 N건 알림
+
+### 5. 누적 회귀 (1.9.200~207) — 모두 유지
+
+### 6. stress-v153 — 18/18 PASS
+- 1.9.208 (9) + 성능 (2) + 누적 회귀 (7)
+- 기본 6 catalog + 사용자 정의 add + review-request 통합 검증
+- 성능: --version cold start avg 483ms · MCP 54 도구 431ms
+
+### 7. 자동 release (70 라운드 main-push streak · 31 라운드 npm publish streak)
+- `release sync-main` 자동 → main merge + npm publish leerness@1.9.208
+
+---
+
 ## 1.9.207 — 2026-05-22
 
 **📥 사용자 요청 누락 확인 절차 MVP (사용자 명시).**
