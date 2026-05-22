@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.221 — 2026-05-22
+
+**🎉 MCP 60 도구 마일스톤 + abnormalShutdown JSON 통합 (handoff/session close).**
+
+### 1. MCP 60번째 도구 — `leerness_session_resume`
+- 1.9.220 비정상 종료 감지 시스템을 외부 AI에 노출
+- 인자: `{ path? }`
+- 응답: `{ abnormalShutdown, severity, signals[], resumeGuide[] }`
+- 5신호 분석 (last-handoff/wakeup-missed/in-progress-stale/auto-resume-plan/release-branch)
+
+### 2. handoff --json `abnormalShutdown` 필드 추가
+- `{ detected, severity, signalCount, signals[], resumeGuide[] }`
+- 외부 모니터링 도구 / CI 가 비정상 종료 자동 감지
+- 1.9.218 통합 패턴 확장 (handoff JSON 4종 필드 완성: userRequests/preWake/idempotency/abnormalShutdown)
+
+### 3. session close --json 동일 통합
+- 마감 시 다음 라운드 진입 시 재개 가이드 자동 회수
+- CI 마감 후 비정상 종료 detect 가능
+
+### 4. 누적 회귀 (1.9.207~220) — 모두 유지
+
+### 5. stress-v166 — 16/16 PASS
+- 1.9.221 (4): VERSION + MCP 60 + session_resume 등록 + 실 호출 (high severity 응답)
+- abnormalShutdown JSON 통합 (3): handoff/session close + wakeup miss 시나리오
+- 성능 (2): cold_start 374ms / MCP 60 도구 385ms
+- 누적 회귀 (7): 1.9.207~220
+
+### 6. 자동 release (83 라운드 main-push streak · 44 라운드 npm publish streak)
+
+🎉 **MCP 60 도구 도달** (53 → 60, +7: 1.9.168 +3 / 1.9.216 +5 / 1.9.221 +1)
+🎉 **handoff/session close JSON 4 통합 필드 완성** (userRequests/preWake/idempotency/abnormalShutdown)
+
+---
+
 ## 1.9.220 — 2026-05-22
 
 **🔌 비정상 종료 후 자율 재개 시스템 (사용자 명시).**

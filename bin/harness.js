@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.220';
+const VERSION = '1.9.221';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -5697,6 +5697,17 @@ function handoff(root) {
         overall: idemp.summary.overall
       };
     } catch {}
+    // 1.9.221: abnormalShutdown 자동 감지 (1.9.220 통합)
+    try {
+      const ad = _detectAbnormalShutdown(root);
+      result.abnormalShutdown = {
+        detected: ad.abnormalShutdown,
+        severity: ad.severity,
+        signalCount: ad.signals.length,
+        signals: ad.signals.map(s => ({ kind: s.kind, severity: s.severity, detail: s.detail })),
+        resumeGuide: ad.resumeGuide
+      };
+    } catch {}
     log(JSON.stringify(result, null, 2));
     return;
   }
@@ -9723,6 +9734,17 @@ function sessionClose(root, opts = {}) {
         overall: idemp.summary.overall
       };
     } catch {}
+    try {
+      // 1.9.221: abnormalShutdown 자동 감지 (1.9.220 통합) — session close 시 다음 재개 가이드 회수
+      const ad = _detectAbnormalShutdown(root);
+      jsonResult.abnormalShutdown = {
+        detected: ad.abnormalShutdown,
+        severity: ad.severity,
+        signalCount: ad.signals.length,
+        signals: ad.signals.map(s => ({ kind: s.kind, severity: s.severity, detail: s.detail })),
+        resumeGuide: ad.resumeGuide
+      };
+    } catch {}
 
     process.stdout.write(JSON.stringify(jsonResult, null, 2) + '\n');
   } else {
@@ -13598,7 +13620,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_constraints_check', description: '1.9.216 (1.9.208 사용자 명시) — 플랫폼/API 제약 사전 체크. 사용자 요청 텍스트에서 플랫폼 alias 매칭 (stripe/openai/anthropic/github/discord/twitter 6종 + 사용자 정의) → 각 플랫폼의 rate-limit / idempotency / auth / cost 제약 노출. 외부 AI가 "이 기능 구현 전 어떤 규정을 봐야 하나?"를 직접 회수. 인자: { request (required), path? }', inputSchema: { type: 'object', properties: { request: { type: 'string' }, path: { type: 'string' } }, required: ['request'] } },
     { name: 'leerness_pre_wake_audit', description: '1.9.216 (1.9.209 사용자 명시) — sleep 전 sub-agent audit. 6 영역 점검: missing-user-requests / stale-in-progress / drift-handoff-stale / wakeup-missed / next-action-pending / auto-resume-plan. 외부 AI가 "깨어나기 전 점검할 부분"을 회수. 응답: { auditedAt, findings: {critical, warning, info}, summary }. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_intent_classify', description: '1.9.216 (1.9.213 사용자 명시) — 사용자 의도 파악 + scope expansion 게이트. 응답: { intent: precise|broad|default, signals, domain, explicitMentions, expansionCandidates, mode: dry-run }. 3원칙 안전: (1) Always-Off Opt-In, (2) Dry-run 기본 (실행 X), (3) 명시 vs 추론 분리 라벨링. 5 도메인 (game/web/api/cli/data). 외부 AI가 "이 요청은 정확히 그것만 / 포괄적 / 기본인가?"를 회수. 인자: { request (required), path? }', inputSchema: { type: 'object', properties: { request: { type: 'string' }, path: { type: 'string' } }, required: ['request'] } },
-    { name: 'leerness_idempotency_audit', description: '1.9.216 (1.9.212 사용자 명시) — 멱등성 위반 탐지. 4영역 점검: rule-duplicate (medium) / task-duplicate-request (medium) / user-request-duplicate (low) / wakeup-duplicate (high). 응답: { violations[], verified[], summary: {totalViolations, high/medium/low, overall} }. 외부 AI가 "워크스페이스에 중복/충돌이 있나?"를 회수. 🎉 MCP 58 도구 마일스톤 (50→58). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_idempotency_audit', description: '1.9.216 (1.9.212 사용자 명시) — 멱등성 위반 탐지. 4영역 점검: rule-duplicate (medium) / task-duplicate-request (medium) / user-request-duplicate (low) / wakeup-duplicate (high). 응답: { violations[], verified[], summary: {totalViolations, high/medium/low, overall} }. 외부 AI가 "워크스페이스에 중복/충돌이 있나?"를 회수. 🎉 MCP 58 도구 마일스톤 (50→58). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_session_resume', description: '1.9.221 (1.9.220 사용자 명시) — 비정상 종료 감지 + 자율 재개. 5신호 분석: last-handoff-stale / wakeup-missed / in-progress-stale / auto-resume-plan-unused / release-branch-pending. 응답: { abnormalShutdown, severity (none/low/medium/high), signals[], resumeGuide[] }. 외부 AI가 "절전/시스템종료/세션종료 후 leerness 상태가 정상인가? 어떻게 재개?"를 회수. 🎉 MCP 60 도구 마일스톤 (53→60, +7 in 1.9.168/216/221). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -13749,6 +13772,10 @@ function mcpServeCmd(root) {
           case 'leerness_idempotency_audit':
             // 1.9.216 (1.9.212): 멱등성 감사 (rule/task/user-requests/wakeups 4영역)
             cliArgs = ['idempotency', 'audit', '--path', targetPath, '--json'];
+            break;
+          case 'leerness_session_resume':
+            // 1.9.221 (1.9.220): 비정상 종료 감지 + 자율 재개
+            cliArgs = ['session-resume', '--path', targetPath, '--json'];
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
