@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.9.222 — 2026-05-22
+
+**🛡 session-resume --auto-fix 안전 회복 + handoff 본문 비정상 종료 자동 노출.**
+
+### 1. `leerness session-resume --auto-fix` — 안전한 자동 회복
+- 1.9.220 detect / 1.9.221 MCP / 1.9.222 **auto-fix**
+- `wakeup-missed` 신호 감지 시 → 30분+ 지난 pending wakeup 자동 `superseded`
+- `state.supersededReason: 'auto-fix-1.9.222-abnormal-shutdown'`
+- 사용자/AI가 수동 정리할 필요 없이 다음 wakeup이 정상 동작
+- `--auto-fix` 옵션이 없으면 기존 동작 그대로 (감지만, 변경 X)
+
+### 2. handoff 본문 자동 노출 — 비정상 종료 섹션
+- 1.9.220 헤드라인 (`🔌 비정상종료 <severity>`) + 1.9.222 **본문**
+- `severity: high` → `## 🚨 비정상 종료 감지 (1.9.220, severity: high)` 본문 섹션 자동
+- `severity: medium` → `## ⚠ 비정상 종료 감지` 본문 섹션 자동
+- 본문 출력 위치: pre-wake-audit 섹션 다음, 활성 룰 이전
+- top 3 신호 + 재개 가이드 + auto-fix 가이드 한 번에 노출
+
+### 3. CLAUDE.md / AGENTS.md 1.9.214~221 운영 강화 8 라운드 통합
+- drift 차단을 위한 `## 운영 강화 8 라운드 (1.9.214~221)` 섹션 누적
+- 9 라운드 (drift 차단 / handoff 헤드라인 / MCP 5종 / session close / handoff JSON 4 통합 / 80 라운드 / 비정상 종료 / MCP 60 / auto-fix) 모두 단일 시야 노출
+
+### 4. 누적 회귀 (1.9.207~221) — 모두 유지
+
+### 5. stress-v167 — 14/14 PASS
+- 1.9.222 (6): VERSION + auto-fix (격리) + auto-fix 미지정 시 동작 + handoff 본문 노출 + handoff 정상 시 미노출 + CLAUDE 8 라운드 섹션
+- 성능 (2): cold_start avg 408ms / MCP 60 도구 413ms
+- 누적 회귀 (6): 1.9.207~221
+
+### 6. 자동 release (84 라운드 main-push streak · 45 라운드 npm publish streak)
+
+🛡 **비정상 종료 시스템 완성**: 1.9.220 detect → 1.9.221 MCP → 1.9.222 **auto-fix** + **본문 자동 노출** (3 라운드 누적)
+
+---
+
 ## 1.9.221 — 2026-05-22
 
 **🎉 MCP 60 도구 마일스톤 + abnormalShutdown JSON 통합 (handoff/session close).**

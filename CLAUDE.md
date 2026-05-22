@@ -48,6 +48,43 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 - 3원칙 안전: (1) Always-Off Opt-In, (2) Dry-run 기본 (실행 X), (3) 명시 vs 추론 분리 라벨링
 - 예: `leerness intent expand "맵+캐릭터+기본 게임 기능"` → `game` 도메인 자동 탐지 + 8 확장 후보 dry-run
 
+## 운영 강화 8 라운드 (1.9.214~221)
+
+### 1.9.214 — drift 차단 + AGENTS/CLAUDE 7 라운드 통합
+- CLAUDE.md 신규 7 라운드 누적 갱신
+
+### 1.9.215 — handoff 헤드라인 통합
+- 현재 활성 task에서 constraints/intent 자동 분석
+- `🚦 N 플랫폼 제약` / `🎯 intent broad/<domain>`
+
+### 1.9.216 — MCP 5종 추가 (54→59)
+- requests_audit / constraints_check / pre_wake_audit / intent_classify / idempotency_audit
+
+### 1.9.217 — session close 자동 통합
+- 마감 시 자동 호출: requests / pre-wake / idempotency
+- `--no-pre-wake` opt-out
+
+### 1.9.218 — handoff JSON 통합 강화 + 5축 100/100
+- handoff --json: userRequestsAudit / preWakeAudit / idempotencyAudit
+- 5축 매트릭스 100/100 도달
+
+### 1.9.219 — 80 라운드 마일스톤
+- `_reports/milestone-1.9.219-80-rounds.md`
+- session-workflow.md 신규 기능 통합
+
+### 1.9.220 — 비정상 종료 자율 재개 ⭐ (사용자 명시)
+- `leerness session-resume` — 5신호 감지 (last-handoff/wakeup-missed/in-progress-stale/auto-resume-plan/release-branch)
+- handoff 헤드라인: `🔌 비정상종료 severity (N신호)`
+- 절전/시스템종료/AI 세션종료 후 재시작 시 자동 진단
+
+### 1.9.221 — MCP 60 도구 마일스톤 🎉
+- `leerness_session_resume` MCP 도구 (60번째)
+- handoff/session close JSON 4 통합 필드 완성 (userRequests/preWake/idempotency/abnormalShutdown)
+
+### 1.9.222 — session-resume --auto-fix + handoff 본문 자동 노출
+- `leerness session-resume --auto-fix` — 오래된 wakeup 자동 supersede (안전 회복)
+- handoff 본문에 `## 🚨/⚠ 비정상 종료 감지` 섹션 자동 (high/medium severity 시)
+
 ---
 <!-- leerness:migration-preserved -->
 ## Preserved previous content

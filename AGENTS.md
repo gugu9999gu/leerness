@@ -88,6 +88,34 @@ leerness가 자동 검증 가능한 trigger:
 - **Dry-run 기본**: 실제 task add 절대 X
 - **명시 vs 추론 분리 라벨링**: `👤 사용자 명시` vs `🤖 AI 추론 확장`
 
+## 운영 강화 8 라운드 (1.9.214~221) + auto-fix (1.9.222)
+
+| 버전 | 핵심 기능 | CLI / 통합 |
+|---|---|---|
+| 1.9.214 | drift 차단 + AGENTS/CLAUDE 7 라운드 누적 | (drift baseline) |
+| 1.9.215 | handoff 헤드라인 통합 | `🚦 constraints` / `🎯 intent` 자동 |
+| 1.9.216 | MCP 5종 추가 (54→59) | `requests_audit` / `constraints_check` / `pre_wake_audit` / `intent_classify` / `idempotency_audit` |
+| 1.9.217 | session close 자동 통합 | `requests` / `pre-wake` / `idempotency` 자동 + `--no-pre-wake` |
+| 1.9.218 | handoff JSON 통합 강화 + 5축 100/100 | `--json` 4 필드 (userR/preW/idemp/abnormal) |
+| 1.9.219 | 🎉 80 라운드 마일스톤 | `_reports/milestone-1.9.219-80-rounds.md` |
+| 1.9.220 | 🔌 비정상 종료 자율 재개 (사용자 명시) | `session-resume` (5신호) + handoff 헤드라인 |
+| 1.9.221 | 🎉 MCP 60 도구 마일스톤 | `leerness_session_resume` MCP + handoff/session close JSON 4 통합 |
+| 1.9.222 | 🛡 session-resume --auto-fix + 본문 자동 노출 | `session-resume --auto-fix` (wakeup supersede) + handoff `## 🚨/⚠ 비정상 종료 감지` 본문 |
+
+### 비정상 종료 자율 재개 워크플로 (1.9.220~222)
+1. 깨어남 후 handoff 첫 출력 → 헤드라인 `🔌 비정상종료 <severity>` 자동 노출
+2. severity high/medium 시 → 본문 `## 🚨/⚠ 비정상 종료 감지` 자동 섹션
+3. `leerness session-resume` → 5신호 분석 + 재개 가이드 7단계 출력
+4. `leerness session-resume --auto-fix` (1.9.222) → 30분+ 지난 pending wakeup 자동 `superseded`
+5. 안전 재개 후 다음 라운드 진입
+
+### 5축 매트릭스 (1.9.218 — 100/100 달성)
+- A. agent 자동화 — 10/10
+- B. multi-agent consensus — 10/10
+- C. skill 자동 회수 — 10/10
+- D. task 회고 + 7일+ stale — 10/10
+- E. next-action queue + lazy detect — 10/10
+
 ---
 <!-- leerness:migration-preserved -->
 ## Preserved previous content

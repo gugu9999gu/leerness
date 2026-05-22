@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.221';
+const VERSION = '1.9.222';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -3055,6 +3055,7 @@ function requestsCmd(root, sub, ...rest) {
 }
 
 // 1.9.220: leerness session-resume — 비정상 종료 감지 + 자율 재개 가이드 (사용자 명시)
+// 1.9.222: --auto-fix 옵션 추가 — 안전한 자동 회복 (wakeup supersede)
 function sessionResumeCmd(root) {
   root = absRoot(root);
   const isTty = process.stdout && process.stdout.isTTY;
@@ -3065,6 +3066,45 @@ function sessionResumeCmd(root) {
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
 
   const result = _detectAbnormalShutdown(root);
+
+  // 1.9.222: --auto-fix — 안전한 신호별 자동 회복
+  const autoFix = has('--auto-fix');
+  if (autoFix && result.abnormalShutdown) {
+    result.autoFixed = [];
+    // 1) wakeup-missed → 오래된 pending wakeup supersede (안전: 단순 상태 변경)
+    if (result.signals.some(s => s.kind === 'wakeup-missed')) {
+      try {
+        const state = _loadActiveWakeups(root);
+        let fixed = 0;
+        state.wakeups = state.wakeups.map(w => {
+          if (w.status === 'pending') {
+            const expectedMs = new Date(w.expectedFireAt).getTime();
+            const deltaMin = Math.floor((Date.now() - expectedMs) / 60000);
+            if (deltaMin > 30) {
+              w.status = 'superseded';
+              w.supersededReason = 'auto-fix-1.9.222-abnormal-shutdown';
+              w.supersededAt = new Date().toISOString();
+              fixed++;
+            }
+          }
+          return w;
+        });
+        if (fixed > 0) {
+          _writeActiveWakeups(root, state.wakeups);
+          result.autoFixed.push({ kind: 'wakeup-missed', action: 'superseded', count: fixed });
+        }
+      } catch {}
+    }
+    // 2) auto-resume-plan-unused → 60min+ 미사용은 안내만 (자동 삭제 X, 사용자가 검토해야 함)
+    if (result.signals.some(s => s.kind === 'auto-resume-plan-unused')) {
+      result.autoFixed.push({ kind: 'auto-resume-plan-unused', action: 'guidance-only', detail: 'leerness resume 으로 적용 검토' });
+    }
+    // 3) in-progress-stale → drop 결정은 사용자 영역 (자동 X)
+    if (result.signals.some(s => s.kind === 'in-progress-stale')) {
+      result.autoFixed.push({ kind: 'in-progress-stale', action: 'guidance-only', detail: 'leerness task list --status in-progress 후 사용자 결정 필요' });
+    }
+  }
+
   if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
   log(cyan(`# leerness session-resume (1.9.220) — 비정상 종료 감지 + 자율 재개`));
   log(`  detected at: ${result.detectedAt}`);
@@ -3092,6 +3132,18 @@ function sessionResumeCmd(root) {
   log(`## 재개 가이드`);
   for (const g of result.resumeGuide) {
     log(`  ${g}`);
+  }
+  // 1.9.222: --auto-fix 결과 노출
+  if (result.autoFixed && result.autoFixed.length > 0) {
+    log('');
+    log(grn(`## 🔧 auto-fix 결과 (${result.autoFixed.length})`));
+    for (const af of result.autoFixed) {
+      const icon = af.action === 'superseded' ? '✓' : 'ℹ';
+      log(`  ${icon} [${af.kind}] ${af.action}${af.count ? ` (count: ${af.count})` : ''}`);
+      if (af.detail) log(dim(`     ${af.detail}`));
+    }
+  } else if (autoFix) {
+    log(dim(`  (auto-fix 적용 대상 없음)`));
   }
 }
 
@@ -5956,6 +6008,30 @@ function handoff(root) {
       }
     }
   } catch {}
+
+  // 1.9.222: 비정상 종료 감지 본문 자동 노출 (handoff 직후 — 가장 먼저 봐야 함)
+  //   high/medium severity 시 즉시 노출, low/none 은 무시
+  try {
+    const ad = _detectAbnormalShutdown(root);
+    if (ad.abnormalShutdown && (ad.severity === 'high' || ad.severity === 'medium')) {
+      const isTty = process.stdout && process.stdout.isTTY;
+      const cy3 = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+      const rd3 = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+      const yl3 = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+      const dm3 = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+      log('');
+      const sevIcon = ad.severity === 'high' ? '🚨' : '⚠';
+      const sevColor = ad.severity === 'high' ? rd3 : yl3;
+      log(sevColor(`## ${sevIcon} 비정상 종료 감지 (1.9.220, severity: ${ad.severity})`));
+      ad.signals.slice(0, 3).forEach(s => {
+        const ic = s.severity === 'high' ? '🚨' : (s.severity === 'medium' ? '⚠' : 'ℹ');
+        log(`  ${ic} [${s.kind}] ${s.detail}`);
+      });
+      log(dm3(`  → 재개 가이드: leerness session-resume`));
+      log(dm3(`  → 자동 회복: leerness session-resume --auto-fix (1.9.222)`));
+    }
+  } catch {}
+
   // 1.9.8: active rules 자동 노출 (매 세션 시작 시 AI에게 보임)
   const activeRules = readRules(root).filter(r => r.status === 'active');
   if (activeRules.length) {
