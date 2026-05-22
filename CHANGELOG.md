@@ -1,5 +1,72 @@
 # Changelog
 
+## 1.9.203 — 2026-05-22
+
+**📋 자동 라운드 plan 자동 정리 + `leerness resume` 신규 CLI (사용자 명시).**
+
+### 사용자 명시
+> *"자동모드는 백그라운드에 다음 작업이 시작가능한 예상 시간을 설정해서 백그라운드에서 알람 트리거 같은걸 구현하고 일어났을때 해야하는 일을 정리해서 또 진행하고 반복으로 하는건 어떨까"*
+
+### 1. `.harness/auto-resume-plan.json` 자동 저장
+- 라운드 마무리 (release sync-main 시 npm publish 완료 후) **자동 저장**
+- plan 구조:
+  - `savedAt`, `nextRoundVersion`, `expectedFireAt`, `intervalMin`
+  - `focus` (자유 텍스트)
+  - `contextSnapshot` (currentVersion, activeTaskId, activeTaskRequest, memorySurface, r0001Rule)
+  - `nextActions` (1.9.201 next-action-queue snapshot)
+- 함수: `_loadAutoResumePlan` / `_writeAutoResumePlan` / `_buildAutoResumePlan` / `_autoResumePlanPath`
+
+### 2. `leerness resume` 신규 CLI
+일어났을 때 즉시 무엇부터 할지 한눈에:
+```
+$ leerness resume
+# 🔄 leerness resume (1.9.203 자동 라운드 plan 적용)
+  📅 plan 저장: 2026-05-22T00:10:10.797Z  (15분 전)
+  ⏰ 예상 fire: 2026-05-22T00:35:10.797Z  (정시)
+  🎯 focus: 다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강
+
+## 다음 라운드: next after 1.9.203
+  현재 버전: 1.9.203
+  활성 task: T-9999 — ...
+  memory: T2/D15/R1/L3
+  룰: 25분 간격 (사용자 명시, R-0001)
+
+## 사전 정리된 next-actions (3건)
+  🛡 lessons.md "X" 관련 ...
+     `leerness lessons --auto --path .`
+  ...
+  → 즉시 task 추가: leerness next-action take
+
+✓ resume 준비 완료 — 권장: leerness handoff . 또는 leerness next-action take
+```
+- `--json` 옵션 (자동화/MCP)
+
+### 3. handoff 자동 plan 알림
+handoff 진입 시 plan 존재 시 자동 노출:
+```
+## 📋 auto-resume-plan 로드 (1.9.203) — 15분 전 저장 (정시)
+  🎯 focus: 다음 라운드: ...
+  📦 다음 버전: next after 1.9.203
+  📥 사전 정리된 actions: 3건 → leerness next-action take
+  → 상세: leerness resume
+```
+끄기: `LEERNESS_NO_RESUME_PLAN=1`
+
+### 4. 자율 모드 cycle 완성
+- 라운드 마무리 → plan 자동 저장 → ScheduleWakeup 25분 → wakeup → handoff plan 자동 로드 → resume / next-action take → 즉시 진입
+
+### 5. 누적 회귀 (1.9.197~202) — 모두 유지
+
+### 6. stress-v148 — 17/17 PASS
+- auto-resume-plan 5 + resume CLI 3 + handoff 통합 + 성능 2 + 누적 회귀 7
+- 성능: --version cold start avg **464 ms** · MCP 54 도구 **449 ms**
+
+### 7. 자동 release 흐름
+- main 자동 push **65 라운드 연속** (1.9.140~203)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.202 — 2026-05-22
 
 **🌐 C축 (공식 표준 스킬 자동 활용) 9.0/10 → 9.5/10 보강 — matched skill 설치 상태 표시 + leerness skill install-top.**

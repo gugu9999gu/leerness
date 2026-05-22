@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.202';
+const VERSION = '1.9.203';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1731,6 +1731,115 @@ async function skillAutoCacheCmd(root, sub) {
     log(`    • [${e.preset || e.source || '?'}] ${e.name} — ${(e.description || '').slice(0, 60)}`);
   }
   if (c.expired) log(`  → 갱신: leerness skill auto-cache refresh`);
+}
+
+// 1.9.203: 자동 라운드 plan 정리 — 사용자 명시
+//   "백그라운드에 다음 작업이 시작가능한 예상 시간 + 일어났을때 해야하는 일을 정리"
+//   라운드 마무리 시 .harness/auto-resume-plan.json 자동 저장 → 다음 wakeup 시 즉시 실행 가능
+//   plan 구조: { savedAt, nextRoundVersion, expectedFireAt, focus, contextSnapshot, nextActions }
+function _autoResumePlanPath(root) { return path.join(root, '.harness', 'auto-resume-plan.json'); }
+function _loadAutoResumePlan(root) {
+  try {
+    const fp = _autoResumePlanPath(root);
+    if (!exists(fp)) return null;
+    const j = JSON.parse(read(fp));
+    if (!j.savedAt) return null;
+    const ageMs = Date.now() - new Date(j.savedAt).getTime();
+    const expiredMs = j.expectedFireAt ? Date.now() - new Date(j.expectedFireAt).getTime() : 0;
+    return { ...j, ageMs, ageMin: Math.floor(ageMs / 60000), elapsedFromExpected: Math.floor(expiredMs / 60000) };
+  } catch { return null; }
+}
+function _writeAutoResumePlan(root, plan) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    const payload = { savedAt: new Date().toISOString(), ...plan };
+    writeUtf8(_autoResumePlanPath(root), JSON.stringify(payload, null, 2));
+    return true;
+  } catch { return false; }
+}
+// 현재 워크스페이스 상태에서 다음 라운드 plan 자동 생성 (현재 task / matrix / handoff gap / next-action queue 결합)
+function _buildAutoResumePlan(root, opts) {
+  opts = opts || {};
+  const intervalMin = opts.intervalMin || 25;  // R-0001 영구 룰
+  const now = Date.now();
+  const expectedFireAt = new Date(now + intervalMin * 60 * 1000).toISOString();
+  // 현재 in-progress task
+  const rows = readProgressRows(root);
+  const active = rows.find(r => r.status === 'in-progress' || r.status === '[진행]');
+  // 현재 VERSION
+  const currentVersion = VERSION;
+  // next-action queue snapshot
+  const queueState = _loadNextActionQueue(root);
+  const queueTop = queueState.queue.length > 0 ? queueState.queue[queueState.queue.length - 1] : null;
+  // memory surface counts
+  const memorySurface = {
+    tasksInProgress: rows.filter(r => r.status === 'in-progress').length,
+    decisions: exists(decisionsPath(root)) ? (read(decisionsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0,
+    rulesActive: readRules(root).filter(r => r.status === 'active').length,
+    lessons: exists(lessonsPath(root)) ? (read(lessonsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0
+  };
+  return {
+    nextRoundVersion: opts.nextRoundVersion || `next after ${currentVersion}`,
+    expectedFireAt,
+    intervalMin,
+    focus: opts.focus || (active ? `${active.id} — ${(active.request || '').slice(0, 80)}` : '사용자 명시 대기 또는 5축 매트릭스 보강'),
+    contextSnapshot: {
+      currentVersion,
+      activeTaskId: active ? active.id : null,
+      activeTaskRequest: active ? (active.request || '').slice(0, 200) : null,
+      memorySurface,
+      r0001Rule: '25분 간격 (사용자 명시, R-0001)'
+    },
+    nextActions: (queueState.queue || []).slice(-3).map(a => ({ icon: a.icon, title: a.title, command: a.command || null })),
+    note: opts.note || '다음 wakeup 시 leerness resume 또는 leerness handoff 실행 → plan 자동 적용'
+  };
+}
+
+// 1.9.203: leerness resume 신규 CLI — auto-resume-plan 읽고 즉시 진행할 일 안내
+function resumeCmd(root) {
+  root = absRoot(root);
+  const plan = _loadAutoResumePlan(root);
+  if (!plan) {
+    log(`# leerness resume (1.9.203)`);
+    log(`  (auto-resume-plan 없음 — 첫 라운드)`);
+    log(`  → leerness handoff . 로 시작`);
+    return;
+  }
+  if (has('--json')) { log(JSON.stringify(plan, null, 2)); return; }
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  log(cyan(`# 🔄 leerness resume (1.9.203 자동 라운드 plan 적용)`));
+  log('');
+  log(`  📅 plan 저장: ${plan.savedAt}  (${plan.ageMin}분 전)`);
+  log(`  ⏰ 예상 fire: ${plan.expectedFireAt}` + (plan.elapsedFromExpected > 0 ? yel(`  (${plan.elapsedFromExpected}분 지연)`) : ' (정시)'));
+  log(`  🎯 focus: ${plan.focus}`);
+  log('');
+  log(grn(`## 다음 라운드: ${plan.nextRoundVersion}`));
+  if (plan.contextSnapshot) {
+    const c = plan.contextSnapshot;
+    log(`  현재 버전: ${c.currentVersion}`);
+    if (c.activeTaskId) log(`  활성 task: ${c.activeTaskId} — ${(c.activeTaskRequest || '').slice(0, 70)}`);
+    const m = c.memorySurface || {};
+    log(`  memory: T${m.tasksInProgress || 0}/D${m.decisions || 0}/R${m.rulesActive || 0}/L${m.lessons || 0}`);
+    log(`  룰: ${c.r0001Rule || '-'}`);
+  }
+  if (plan.nextActions && plan.nextActions.length > 0) {
+    log('');
+    log(grn(`## 사전 정리된 next-actions (${plan.nextActions.length}건)`));
+    for (const a of plan.nextActions) {
+      log(`  ${a.icon || '•'} ${a.title}`);
+      if (a.command) log(dim(`     \`${a.command}\``));
+    }
+    log('');
+    log(dim(`  → 즉시 task 추가: leerness next-action take`));
+  }
+  log('');
+  log(dim(plan.note || ''));
+  log('');
+  log(grn(`✓ resume 준비 완료 — 권장: leerness handoff . 또는 leerness next-action take`));
 }
 
 // 1.9.199: wakeup miss 자동 회복 강화 — last-handoff timestamp 기록 + 25min 기대 interval 정밀 측정
@@ -3535,6 +3644,9 @@ function handoff(root) {
   let _priorHandoffGap = { hasLast: false };
   try { _priorHandoffGap = _getLastHandoffGap(root); } catch {}
   try { _recordLastHandoff(root); } catch {}
+  // 1.9.203: auto-resume-plan 자동 로드 (사용자 명시 — 자동 모드 알람 트리거)
+  let _autoResumePlan = null;
+  try { _autoResumePlan = _loadAutoResumePlan(root); } catch {}
   // 1.9.96: --json 옵션 (구조화 출력, MCP 통합 / 외부 AI 친화)
   if (has('--json')) {
     const result = {
@@ -4047,6 +4159,26 @@ function handoff(root) {
           }
         }
       }
+    } catch {}
+  }
+  // 1.9.203: auto-resume-plan 알림 — 라운드 마무리 시 저장된 plan 자동 노출
+  //   사용자 명시: "백그라운드에 다음 작업이 시작가능한 예상 시간 + 일어났을때 해야하는 일을 정리"
+  if (_autoResumePlan && !has('--quiet') && process.env.LEERNESS_NO_RESUME_PLAN !== '1') {
+    try {
+      const isTty = process.stdout && process.stdout.isTTY;
+      const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+      const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+      const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+      const elapsed = _autoResumePlan.elapsedFromExpected || 0;
+      const status = elapsed > 5 ? yel(`(${elapsed}분 지연)`) : (elapsed > -5 ? '(정시)' : dim(`(${Math.abs(elapsed)}분 일찍)`));
+      log(cy(`## 📋 auto-resume-plan 로드 (1.9.203) — ${_autoResumePlan.ageMin}분 전 저장 ${status}`));
+      log(dim(`  🎯 focus: ${_autoResumePlan.focus || '(none)'}`));
+      log(dim(`  📦 다음 버전: ${_autoResumePlan.nextRoundVersion || '(none)'}`));
+      if (_autoResumePlan.nextActions && _autoResumePlan.nextActions.length > 0) {
+        log(dim(`  📥 사전 정리된 actions: ${_autoResumePlan.nextActions.length}건 → leerness next-action take`));
+      }
+      log(dim(`  → 상세: leerness resume`));
+      log('');
     } catch {}
   }
   // 1.9.196/199: ScheduleWakeup miss detector — 자율 모드 사용자 명시 "못일어나는 경우 종종 있음"
@@ -9130,6 +9262,16 @@ function _publishToNpm(root, opts = {}) {
     if (pubR.status === 0) {
       ok(`npm publish 완료: ${pkgName}@${pkgVersion}`);
       try { _recordRun(root, { kind: 'npm_publish', package: pkgName, version: pkgVersion, dryRun: !!opts.dryRun, ok: true }); } catch {}
+      // 1.9.203: 라운드 마무리 시 다음 라운드 plan 자동 저장
+      try {
+        const plan = _buildAutoResumePlan(root, {
+          nextRoundVersion: `next after ${pkgVersion}`,
+          focus: '다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강',
+          intervalMin: 25,
+          note: `다음 wakeup 시: 1) leerness resume . 으로 plan 확인  2) leerness handoff . 실행  3) leerness next-action take 로 즉시 task 진입`
+        });
+        _writeAutoResumePlan(root, plan);
+      } catch {}
     } else {
       const errOut = (pubR.stderr || pubR.stdout || '').slice(-400);
       if (/EPUBLISHCONFLICT|already exists|cannot publish over/i.test(errOut)) {
@@ -14965,6 +15107,8 @@ async function main() {
   if (cmd === 'roadmap')                            return roadmapCmd(args[1] || process.cwd());
   // 1.9.201: next-action queue CLI (E축 9.5→10)
   if (cmd === 'next-action')                        return nextActionCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  // 1.9.203: leerness resume — auto-resume-plan 읽고 다음 라운드 즉시 안내 (사용자 명시)
+  if (cmd === 'resume')                             return resumeCmd(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);
