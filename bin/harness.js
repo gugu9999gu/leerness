@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.212';
+const VERSION = '1.9.213';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2526,6 +2526,175 @@ function _buildWorkspaceReferenceGuide(root, dirName) {
   return lines.join('\n');
 }
 
+// 1.9.213: intent inference + scope expansion 게이트 (사용자 명시)
+//   "사용자가 말한 내용만 수정해야하는 경우도 있지만, 관련있는것이나 보강하면 좋을 부분을 파악하여 진행"
+//   "게임 개발에서 맵+캐릭터+기본기능 요청 시 의도 파악"
+//   3원칙: (1) Always-Off Opt-In, (2) Dry-run 기본 (실행 X), (3) 명시 vs 추론 분리 라벨링
+//   .harness/domain-catalog.json 사용자 편집 가능 + default catalog 5종 (game/web/api/cli/data)
+function _domainCatalogPath(root) { return path.join(root, '.harness', 'domain-catalog.json'); }
+const _DEFAULT_DOMAIN_CATALOG = {
+  version: '1.9.213',
+  domains: {
+    game: {
+      aliases: ['게임', 'game', 'unity', 'unreal', 'godot', 'phaser', 'gamedev'],
+      components: [
+        { key: 'map', desc: '맵/타일 시스템 + 영역/스폰' },
+        { key: 'character', desc: '캐릭터/스프라이트 + 애니메이션 상태머신' },
+        { key: 'gameLoop', desc: '게임 루프 (tick/render/update)' },
+        { key: 'collision', desc: '충돌 감지 (AABB/SAT/grid)' },
+        { key: 'camera', desc: '카메라 follow + 영역 제한' },
+        { key: 'hud', desc: 'HUD/UI (HP/score/inventory)' },
+        { key: 'audio', desc: '사운드 매니저 (BGM/SFX)' },
+        { key: 'save', desc: '저장/로드 (slot 시스템)' },
+        { key: 'menu', desc: '메뉴 (메인/일시정지/설정)' },
+        { key: 'input', desc: '입력 핸들러 (키보드/패드/터치)' }
+      ]
+    },
+    web: {
+      aliases: ['웹', 'web', 'website', 'webapp', 'nextjs', 'react', 'vue', 'svelte', 'frontend'],
+      components: [
+        { key: 'routing', desc: '라우팅 (path/dynamic/nested)' },
+        { key: 'state', desc: '상태 관리 (context/redux/zustand)' },
+        { key: 'auth', desc: '인증 (OAuth/JWT/session)' },
+        { key: 'api', desc: 'API 클라이언트 (fetch/axios/tanstack-query)' },
+        { key: 'db', desc: 'DB 연동 (ORM/migration/seed)' },
+        { key: 'ui', desc: 'UI 컴포넌트 라이브러리' },
+        { key: 'test', desc: '테스트 (unit/e2e/visual)' },
+        { key: 'deploy', desc: '배포 (Vercel/Netlify/Cloudflare)' }
+      ]
+    },
+    api: {
+      aliases: ['api', 'rest', 'graphql', 'endpoint', 'backend', 'server'],
+      components: [
+        { key: 'endpoint', desc: '엔드포인트 라우팅 + HTTP method' },
+        { key: 'auth', desc: '인증/인가 (API key/OAuth/JWT)' },
+        { key: 'rate-limit', desc: 'rate limit (RPS/RPM/token bucket)' },
+        { key: 'validation', desc: '입력 검증 (zod/joi/yup)' },
+        { key: 'error', desc: '에러 핸들링 + 응답 형식' },
+        { key: 'logging', desc: '로깅 + 모니터링 (structured logs)' },
+        { key: 'docs', desc: 'API 문서 (OpenAPI/Swagger)' }
+      ]
+    },
+    cli: {
+      aliases: ['cli', 'command-line', 'tool', 'utility', 'shell'],
+      components: [
+        { key: 'argParser', desc: '인자 파싱 (yargs/commander/clipanion)' },
+        { key: 'help', desc: 'help / man / examples 텍스트' },
+        { key: 'config', desc: '설정 파일 + env 변수' },
+        { key: 'output', desc: '출력 (TTY 색상/JSON/quiet)' },
+        { key: 'error', desc: '에러 처리 + exit code 규약' },
+        { key: 'completion', desc: 'shell completion (bash/zsh/fish)' }
+      ]
+    },
+    data: {
+      aliases: ['data', 'pipeline', 'etl', 'analytics', 'ingest'],
+      components: [
+        { key: 'ingest', desc: '데이터 수집 (file/API/stream)' },
+        { key: 'transform', desc: '변환 (cleaning/normalization/joining)' },
+        { key: 'storage', desc: '저장소 (parquet/db/blob)' },
+        { key: 'query', desc: '쿼리/분석 (SQL/aggregations)' },
+        { key: 'validation', desc: '데이터 검증 (schema/contracts)' },
+        { key: 'lineage', desc: '데이터 lineage 추적' }
+      ]
+    }
+  }
+};
+function _loadDomainCatalog(root) {
+  try {
+    const fp = _domainCatalogPath(root);
+    if (!exists(fp)) return _DEFAULT_DOMAIN_CATALOG;
+    const j = JSON.parse(read(fp));
+    // user catalog merge — user override 우선
+    const merged = JSON.parse(JSON.stringify(_DEFAULT_DOMAIN_CATALOG));
+    if (j.domains) {
+      for (const k of Object.keys(j.domains)) merged.domains[k] = j.domains[k];
+    }
+    return merged;
+  } catch { return _DEFAULT_DOMAIN_CATALOG; }
+}
+function _writeDomainCatalog(root, catalog) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    writeUtf8(_domainCatalogPath(root), JSON.stringify({ ...catalog, updatedAt: new Date().toISOString() }, null, 2));
+    return true;
+  } catch { return false; }
+}
+// intent 분류: precise / broad / default
+function _classifyIntent(text) {
+  if (!text || typeof text !== 'string') return { intent: 'default', signals: [] };
+  const signals = [];
+  // precise 신호: "정확히 / 그것만 / 그대로 / only / just / 만"
+  const preciseKws = ['정확히', '그것만', '그대로', 'only', 'just only', '말한대로', '말한 그대로'];
+  for (const kw of preciseKws) {
+    if (text.toLowerCase().includes(kw.toLowerCase())) signals.push({ kind: 'precise', match: kw });
+  }
+  // broad 신호: "기본 / 포괄적 / 등등 / 다양한 / 전체 / 기본적인 / etc / overall"
+  const broadKws = ['기본', '포괄적', '등등', '다양한', '전체', '기본적인', 'etc', 'overall', '필요한', '관련', 'comprehensive', 'including'];
+  for (const kw of broadKws) {
+    if (text.toLowerCase().includes(kw.toLowerCase())) signals.push({ kind: 'broad', match: kw });
+  }
+  // 결정
+  const preciseCount = signals.filter(s => s.kind === 'precise').length;
+  const broadCount = signals.filter(s => s.kind === 'broad').length;
+  let intent;
+  if (preciseCount > broadCount && preciseCount >= 1) intent = 'precise';
+  else if (broadCount >= 1) intent = 'broad';
+  else intent = 'default';
+  return { intent, signals, preciseCount, broadCount };
+}
+function _detectDomain(text, root) {
+  if (!text) return { domain: null, alias: null };
+  const lower = text.toLowerCase();
+  const catalog = _loadDomainCatalog(root);
+  for (const [domain, info] of Object.entries(catalog.domains)) {
+    for (const a of info.aliases || []) {
+      if (lower.includes(a.toLowerCase())) {
+        return { domain, alias: a, components: info.components };
+      }
+    }
+  }
+  return { domain: null, alias: null };
+}
+function _inferScopeExpansion(text, root) {
+  const classify = _classifyIntent(text);
+  const det = _detectDomain(text, root);
+  const result = {
+    text,
+    intent: classify.intent,
+    intentSignals: classify.signals,
+    domain: det.domain,
+    matchedAlias: det.alias,
+    explicitMentions: [],
+    expansionCandidates: [],
+    mode: 'dry-run'  // 항상 dry-run — 실행 X
+  };
+  if (!det.domain || !det.components) {
+    result.note = '도메인 미탐지 — 명시 요청만 진행 (확장 후보 없음)';
+    return result;
+  }
+  // 사용자 텍스트에서 component key 직접 언급 추출
+  const lowerText = text.toLowerCase();
+  for (const c of det.components) {
+    const mentionPatterns = [c.key.toLowerCase(), ...(c.desc.split(/[\s/()]/).filter(w => w.length >= 2).map(w => w.toLowerCase()))];
+    const mentioned = mentionPatterns.some(p => lowerText.includes(p));
+    if (mentioned) {
+      result.explicitMentions.push({ key: c.key, desc: c.desc, source: 'user-explicit' });
+    } else {
+      result.expansionCandidates.push({ key: c.key, desc: c.desc, source: 'ai-inference' });
+    }
+  }
+  // intent === precise 면 expansion 비어있게 (의도 보호)
+  if (classify.intent === 'precise') {
+    result.expansionCandidates = [];
+    result.note = `intent: precise — 명시 요청만 진행, AI 추론 확장 비활성 (사용자 의도 보호)`;
+  } else if (classify.intent === 'broad') {
+    result.note = `intent: broad — ${result.expansionCandidates.length} 확장 후보 제시 (--expand-all 또는 --select N 으로 명시 승인 필요)`;
+  } else {
+    result.note = `intent: default — 명시 ${result.explicitMentions.length}건만 우선, 확장 후보 ${result.expansionCandidates.length}건 검토용`;
+  }
+  return result;
+}
+
 // 1.9.203: 자동 라운드 plan 정리 — 사용자 명시
 //   "백그라운드에 다음 작업이 시작가능한 예상 시간 + 일어났을때 해야하는 일을 정리"
 //   라운드 마무리 시 .harness/auto-resume-plan.json 자동 저장 → 다음 wakeup 시 즉시 실행 가능
@@ -3314,6 +3483,99 @@ function idempotencyCmd(root, sub) {
 
   console.error(`Unknown subcommand: ${sub}`);
   console.error(`Run: leerness idempotency help`);
+  process.exit(1);
+}
+
+// 1.9.213: leerness intent <classify|expand|domains> CLI — intent inference + scope expansion (사용자 명시)
+function intentCmd(root, sub, ...rest) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+
+  if (!sub || sub === 'help' || sub === '--help') {
+    log(`# leerness intent (1.9.213) — 사용자 의도 파악 + scope expansion 게이트`);
+    log('');
+    log(`  classify "<request>"      → intent 분류 (precise/broad/default) + 신호 (--json 가능)`);
+    log(`  expand "<request>"        → 도메인 탐지 + 확장 후보 dry-run (--json 가능)`);
+    log(`  domains                   → 등록된 도메인 catalog 출력 (game/web/api/cli/data)`);
+    log('');
+    log(dim(`  3원칙: (1) Always-Off Opt-In  (2) Dry-run 기본 (실행 X)  (3) 명시 vs 추론 분리 라벨링`));
+    log(dim(`  예: leerness intent expand "맵과 캐릭터 + 기본 게임 기능 만들어줘"`));
+    return;
+  }
+
+  if (sub === 'classify') {
+    const text = rest.filter(x => !x.startsWith('-')).join(' ');
+    if (!text) { console.error('Usage: leerness intent classify "<request text>"'); process.exit(1); }
+    const result = _classifyIntent(text);
+    if (has('--json')) { log(JSON.stringify({ text, ...result }, null, 2)); return; }
+    log(cyan(`# leerness intent classify (1.9.213)`));
+    log(`  text: ${text.slice(0, 100)}${text.length > 100 ? '…' : ''}`);
+    log('');
+    const icon = result.intent === 'precise' ? '🎯' : (result.intent === 'broad' ? '🌐' : '🔍');
+    log(`  ${icon} intent: ${grn(result.intent)} (precise=${result.preciseCount} / broad=${result.broadCount})`);
+    if (result.signals.length) {
+      log('');
+      log(`  📡 신호:`);
+      result.signals.forEach(s => log(dim(`     • [${s.kind}] "${s.match}"`)));
+    }
+    return;
+  }
+
+  if (sub === 'expand') {
+    const text = rest.filter(x => !x.startsWith('-')).join(' ');
+    if (!text) { console.error('Usage: leerness intent expand "<request text>"'); process.exit(1); }
+    const result = _inferScopeExpansion(text, root);
+    if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
+    log(cyan(`# leerness intent expand (1.9.213) [DRY-RUN]`));
+    log(`  text: ${text.slice(0, 100)}${text.length > 100 ? '…' : ''}`);
+    log('');
+    const iIcon = result.intent === 'precise' ? '🎯' : (result.intent === 'broad' ? '🌐' : '🔍');
+    log(`  ${iIcon} intent: ${grn(result.intent)}` + (result.domain ? `  📦 domain: ${grn(result.domain)}` + (result.matchedAlias ? dim(` (matched: "${result.matchedAlias}")`) : '') : `  ${dim('domain 미탐지')}`));
+    log('');
+    if (result.explicitMentions.length) {
+      log(grn(`## 👤 사용자 명시 (${result.explicitMentions.length})`));
+      result.explicitMentions.forEach(m => log(`  • ${m.key} — ${m.desc}`));
+      log('');
+    }
+    if (result.expansionCandidates.length) {
+      log(yel(`## 🤖 AI 추론 확장 후보 (${result.expansionCandidates.length}, dry-run)`));
+      result.expansionCandidates.forEach((c, i) => log(`  [${i + 1}] ${c.key} — ${c.desc}`));
+      log('');
+      log(dim(`  → 진행 시 명시 승인 필요: leerness task add "<선택한 후보 요청>"`));
+      log(dim(`  → 전부 무시하려면 추가 task add 없이 명시 요청만 진행`));
+    } else if (result.domain && result.intent === 'precise') {
+      log(red(`  🛡 intent: precise — AI 추론 확장 비활성 (사용자 의도 보호)`));
+    }
+    if (result.note) {
+      log('');
+      log(dim(`  ℹ ${result.note}`));
+    }
+    return;
+  }
+
+  if (sub === 'domains') {
+    const catalog = _loadDomainCatalog(root);
+    if (has('--json')) { log(JSON.stringify(catalog, null, 2)); return; }
+    log(cyan(`# leerness intent domains (1.9.213)`));
+    log(`  total domains: ${Object.keys(catalog.domains).length}`);
+    log('');
+    for (const [name, info] of Object.entries(catalog.domains)) {
+      log(grn(`  📦 ${name}`) + dim(`  aliases: ${(info.aliases || []).join(', ')}`));
+      for (const c of info.components || []) {
+        log(`     • ${c.key.padEnd(12)} ${dim(c.desc)}`);
+      }
+      log('');
+    }
+    return;
+  }
+
+  console.error(`Unknown subcommand: ${sub}`);
+  console.error(`Run: leerness intent help`);
   process.exit(1);
 }
 
@@ -16760,6 +17022,8 @@ async function main() {
   if (cmd === 'migrate-workspace-dir')              return migrateWorkspaceDirCmd(arg('--path', process.cwd()));
   // 1.9.212: leerness idempotency audit — 멱등성 위반 탐지 (사용자 명시)
   if (cmd === 'idempotency')                        return idempotencyCmd(arg('--path', process.cwd()), args[1]);
+  // 1.9.213: leerness intent <classify|expand|domains> — intent inference + scope expansion (사용자 명시)
+  if (cmd === 'intent')                             return intentCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);

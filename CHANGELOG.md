@@ -1,5 +1,80 @@
 # Changelog
 
+## 1.9.213 — 2026-05-22
+
+**🎯 intent inference + scope expansion 게이트 (사용자 명시) — 마지막 pending task 완성.**
+
+### 사용자 명시
+> *"사용자가 말한 내용만 수정해야하는 경우도 있지만, 관련있는것이나 보강하면 좋을 부분을 파악하여 진행 / 게임 개발에서 맵+캐릭터+기본기능 요청 시 의도 파악"*
+
+### 1. 3원칙 안전 설계
+1. **Always-Off, Opt-In** — 기본 비활성, 명시적 호출 (`leerness intent expand`) 또는 review-request 통합 시만 작동
+2. **Dry-run 기본** — 실제 task add **절대 X**, 모든 출력은 후보 보고만
+3. **명시 vs 추론 분리 라벨링** — `👤 사용자 명시` vs `🤖 AI 추론 확장` 항상 구분
+
+### 2. `_classifyIntent(text)` — 3단계 분류
+- **precise** ("정확히", "그것만", "그대로", "말한대로", "only") → AI 추론 확장 **비활성**
+- **broad** ("기본", "포괄적", "등등", "다양한", "전체", "필요한") → 확장 후보 N건 dry-run 제시
+- **default** (명시 없음) → 명시 우선, 확장 후보 검토용으로 표시
+
+### 3. `.harness/domain-catalog.json` — 5 default + user 편집 가능
+- **game** (10 컴포넌트): map, character, gameLoop, collision, camera, hud, audio, save, menu, input
+- **web** (8 컴포넌트): routing, state, auth, api, db, ui, test, deploy
+- **api** (7 컴포넌트): endpoint, auth, rate-limit, validation, error, logging, docs
+- **cli** (6 컴포넌트): argParser, help, config, output, error, completion
+- **data** (6 컴포넌트): ingest, transform, storage, query, validation, lineage
+
+### 4. `_inferScopeExpansion(text, root)` — 확장 후보 dry-run
+- 도메인 자동 탐지 (alias 매칭)
+- 사용자 명시 mention 추출
+- 나머지 → AI 추론 확장 후보
+- **mode: 'dry-run' 강제** (실행 X)
+
+### 5. `leerness intent <classify|expand|domains>` CLI
+- `classify "<req>"` — 의도 분류 + 신호
+- `expand "<req>"` — 도메인 탐지 + 확장 후보 dry-run
+- `domains` — catalog 출력
+- 모두 `--json` 지원
+
+### 6. 사용자 게임 예시 검증
+```
+$ leerness intent expand "맵과 캐릭터 + 기본 게임 기능 포괄적으로 만들어줘"
+🌐 intent: broad  📦 domain: game (matched: "게임")
+
+## 👤 사용자 명시 (2)
+  • character — 캐릭터/스프라이트 + 애니메이션 상태머신
+  • gameLoop — 게임 루프 (tick/render/update)
+
+## 🤖 AI 추론 확장 후보 (8, dry-run)
+  [1] map / [2] collision / [3] camera / [4] hud / [5] audio / [6] save / [7] menu / [8] input
+
+→ 진행 시 명시 승인 필요: leerness task add "<선택한 후보 요청>"
+→ 전부 무시하려면 추가 task add 없이 명시 요청만 진행
+```
+
+### 7. precise 의도 보호 검증
+```
+$ leerness intent expand "정확히 게임의 맵만 수정해줘 그것만"
+🛡 intent: precise — AI 추론 확장 비활성 (사용자 의도 보호)
+```
+
+### 8. 누적 회귀 (1.9.200~212) — 모두 유지
+
+### 9. stress-v158 — 19/19 PASS
+- 1.9.213 (10) + 성능 (2) + 누적 회귀 (7)
+- 게임 예시 broad → 8 확장 후보 / precise → 0 확장 (의도 보호) / web 도메인 탐지
+- 성능: --version cold start avg 388ms · MCP 54 도구 434ms
+
+### 10. 자동 release (75 라운드 main-push streak · 36 라운드 npm publish streak)
+
+### 11. 🎉 사용자 명시 task 백로그 **완전 소진** (#307까지 모두 completed)
+- 1.9.207~213 7 라운드 연속 사용자 명시 요청 처리:
+  - 207 user-requests audit / 208 platform constraints / 209 pre-wake audit
+  - 210 adaptive wakeup / 211 .harness→.leerness migration / 212 idempotency dedup
+  - 213 intent inference + scope expansion 게이트
+
+---
+
 ## 1.9.212 — 2026-05-22
 
 **🔁 멱등성 감사 + ruleAdd/taskAdd dedup 보강 (사용자 명시).**
