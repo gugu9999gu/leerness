@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.229';
+const VERSION = '1.9.230';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -6006,6 +6006,16 @@ function handoff(root) {
           avgRoundsPerDay: rh.avgRoundsPerDay
         };
       } catch {}
+      // 1.9.230: milestones 통합 (handoff JSON 7번째 통합 필드) — 도달 마일스톤 + ETA
+      try {
+        const ms = _computeMilestones(root);
+        result.milestones = {
+          reachedCount: ms.reached.length,
+          reached: ms.reached.map(m => ({ milestone: m.milestone, version: m.version, reachedAt: m.reachedAt })),
+          next: ms.next,
+          avgRoundsPerDay: ms.avgRoundsPerDay
+        };
+      } catch {}
     } catch {}
     try {
       const pwState = _loadPreWakeReport(root);
@@ -6169,6 +6179,7 @@ function handoff(root) {
         }
       } catch {}
       // 17) 1.9.226: round-history 헤드라인 — 자율 라운드 카운터 + 다음 마일스톤 (5 라운드 이상 시만 표시)
+      // 1.9.230: 다음 마일스톤 ETA (10R 이내 + ETA 7일 이내일 때 강조)
       try {
         const rh = _computeRoundHistory(root);
         if (rh.roundCount >= 5) {
@@ -6177,6 +6188,13 @@ function handoff(root) {
             label += ` → R${rh.nextMilestone} (${rh.roundsToNextMilestone}R 남음)`;
           }
           parts.push(label);
+          // 1.9.230: 임박 마일스톤 ETA 별도 노출 (다음 마일스톤이 매우 가까울 때만)
+          try {
+            const ms = _computeMilestones(root);
+            if (ms.next && ms.next.roundsRemaining <= 10 && ms.next.etaDays != null && ms.next.etaDays <= 7) {
+              parts.push(`🎯 R${ms.next.milestone} ETA ${ms.next.etaDate}`);
+            }
+          } catch {}
         }
       } catch {}
       // 12) 1.9.204: 자동 모드 활성 표시 (사용자 명시) — R-0001 every-round 룰 활성 시 헤드라인 노출
@@ -10141,6 +10159,16 @@ function sessionClose(root, opts = {}) {
           roundsToNextMilestone: rh.roundsToNextMilestone,
           daysActive: rh.daysActive,
           avgRoundsPerDay: rh.avgRoundsPerDay
+        };
+      } catch {}
+      // 1.9.230: milestones 통합 (session close JSON 7번째 통합 필드)
+      try {
+        const ms = _computeMilestones(root);
+        jsonResult.milestones = {
+          reachedCount: ms.reached.length,
+          reached: ms.reached.map(m => ({ milestone: m.milestone, version: m.version, reachedAt: m.reachedAt })),
+          next: ms.next,
+          avgRoundsPerDay: ms.avgRoundsPerDay
         };
       } catch {}
     } catch {}
@@ -16474,6 +16502,16 @@ function healthCmd(root) {
       avgRoundsPerDay: rh.avgRoundsPerDay
     };
   } catch { out.roundHistory = { error: 'roundHistory 점검 실패' }; }
+  // 1.9.230: health --json milestones 통합 (handoff/session close/health 3 명령 일관성 유지)
+  try {
+    const ms = _computeMilestones(root);
+    out.milestones = {
+      reachedCount: ms.reached.length,
+      reached: ms.reached.map(m => ({ milestone: m.milestone, version: m.version, reachedAt: m.reachedAt })),
+      next: ms.next,
+      avgRoundsPerDay: ms.avgRoundsPerDay
+    };
+  } catch { out.milestones = { error: 'milestones 점검 실패' }; }
   // 1.9.163: 5능력 매트릭스 자동 평가 (1.9.155 sub-agent 점검 → 코드 기반 자동화)
   //   각 능력을 코드 grep 으로 검출 → 0~100 점수. 사용자가 매 health 호출 시 leerness 자기 평가 확인.
   try {

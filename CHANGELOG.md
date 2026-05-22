@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.9.230 — 2026-05-23
+
+**📊 handoff/session close/health --json milestones 통합 (7 필드 완성) + 헤드라인 ETA 임박 표시.**
+
+### 1. handoff/session close/health --json 7번째 통합 필드 `milestones`
+- 1.9.229 milestones 데이터를 JSON 3 명령 모두에 통합
+- 동일 형식: `{ reachedCount, reached: [{milestone, version, reachedAt}], next, avgRoundsPerDay }`
+- 1.9.218 (4 필드) → 1.9.223 (5) → 1.9.227 (6) → 1.9.230 (**7 필드**)
+
+### 2. 3 명령 milestones 동일 형식 일관성
+- handoff/session close/health 모두 동일한 `milestones` 객체 반환
+- 외부 자동화/CI 가 어느 명령으로 조회해도 동일 결과
+- 일관성 매트릭스: 3 명령 × 7 필드 = **21 통합 포인트**
+
+### 3. handoff 헤드라인 임박 ETA 표시 (1.9.230)
+- 다음 마일스톤이 **10R 이내** + ETA가 **7일 이내** 일 때만 별도 노출
+- `🎯 R200 ETA 2026-05-24` 형식 (현재는 14R 남아 보호 가드 발동 X)
+- 마일스톤 임박 시 자동 강조 (스팸 방지: 조건 충족 시만)
+
+### 4. 누적 회귀 (1.9.207~229) — 모두 유지
+
+### 5. stress-v175 — 17/17 PASS
+- 1.9.230 (7): VERSION + handoff/session close/health JSON + 3 명령 일관성 + 7 필드 검증 + 헤드라인 ETA
+- 성능 (2): cold_start avg 439ms / handoff --json (7 필드) 1019ms
+- 누적 회귀 (8): 1.9.207~229
+
+### 6. 자동 release (92 라운드 main-push streak · 53 라운드 npm publish streak)
+
+📊 **JSON 통합 매트릭스 7 필드 완성** — 외부 자동화가 leerness 상태를 7 차원 동기 회수 (3 명령 일관성)
+
+---
+
 ## 1.9.229 — 2026-05-23
 
 **🎯 leerness milestones CLI + MCP 63번째 도구 (도달 마일스톤 + ETA 예측).**
