@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.218-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v163-16%2F16-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-59-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-148-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-80_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-100%2F100_(5축)-brightgreen)]() [![handoff-json](https://img.shields.io/badge/handoff_JSON-3종_통합-success)]() [![perf](https://img.shields.io/badge/cold_start-450ms-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.219-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v164-15%2F15-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-59-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-149-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-81_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-100%2F100_(5축)-brightgreen)]() [![milestone](https://img.shields.io/badge/🎉_milestone-80_라운드-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-618ms-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.218  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.219  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🎉 5축 매트릭스 100/100 · handoff JSON 3종 통합 (외부 자동화)     ║
+  ║  🎉 80 라운드 자율 마일스톤 · 5축 100/100 · MCP 59 · 백로그 0    ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

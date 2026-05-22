@@ -192,6 +192,32 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 - [ ] (1.9.85+) `leerness health`로 종합 점검 — drift + 보안 + skill + MCP + tasks
 - [ ] (1.9.75/76+) `.env` 사용 중이면 `.gitignore` 시크릿 패턴 OK + `.env.example` 동기화
 - [ ] (1.9.80+) 보안 critical 시 `LEERNESS_AUTO_SECURITY_FIX=1` 또는 `audit --fix`로 자동 회복
+- [ ] (1.9.217+) **session close 자동 호출 3종 결과 확인**:
+  - `userRequestsAudit.missing` ≥ 1 → `leerness requests audit` (1.9.207)
+  - `preWakeAudit.critical` ≥ 1 → `leerness pre-wake-audit --last` (1.9.209)
+  - `idempotencyAudit.violations` ≥ 1 → `leerness idempotency audit` (1.9.212)
+
+## 사용자 명시 요청 처리 (1.9.207~213)
+
+사용자가 새 요청을 주면 **무조건 다음 순서로**:
+
+1. **`leerness requests add "<요청>"`** (1.9.207) — UR-XXXX 자동 기록
+2. **`leerness review-request "<요청>"`** (1.9.176) — 충돌/재사용/효율 분석
+3. **`leerness intent classify "<요청>"`** (1.9.213, opt-in) — precise/broad/default 분류
+   - `precise` → 명시 요청만 진행 (확장 비활성)
+   - `broad` → `leerness intent expand` 로 후보 검토 → 사용자 명시 승인 시만 추가 task add
+4. **`leerness constraints check "<요청>"`** (1.9.208) — 플랫폼 API 제약 사전 확인
+5. **`leerness task add "<요청>"`** — 자동 dedup (1.9.212), 자동 review-request trigger (1.9.177)
+
+handoff 헤드라인에서 `📥 미답 요청 N건` 표시 시 즉시 #1 호출.
+
+## adaptive wakeup interval (1.9.210)
+
+자동 모드에서 `leerness wakeup-interval get` 으로 권장 간격 회수:
+- 활동량 3+/2h → 10~15min 자동 단축
+- 활동 없음 → 35~45min 자동 연장
+- pre-wake critical → 20min 단축
+- opt-out: `LEERNESS_FIXED_INTERVAL=1500` env 또는 `leerness wakeup-interval set <secs>`
 
 ## Anti-pattern (drift 신호)
 

@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.219 — 2026-05-22
+
+**🎉 80 라운드 자율 모드 마일스톤 + session-workflow.md 통합 갱신.**
+
+### 1. 80 라운드 마일스톤 보고서
+- `_reports/milestone-1.9.219-80-rounds.md` (private, npm 제외)
+- 1.9.140 main 자동 push streak 시작 이후 **80 라운드 정확 도달**
+- Phase 1~5 단계별 요약 (자동화 인프라 → 자율 마일스톤 → 5축 완성 → 사용자 명시 소진 → 운영 강화)
+- 5축 매트릭스 100/100 달성 기록 (1.9.218)
+- 사용자 명시 7 라운드 (1.9.207~213) 완전 소진 표
+
+### 2. session-workflow.md 통합 갱신 (drift 차단)
+- `(1.9.217+) session close 자동 호출 3종 결과 확인` 체크리스트 추가
+- `## 사용자 명시 요청 처리 (1.9.207~213)` 신설 섹션 — 5단계 순서:
+  1. `leerness requests add` (1.9.207)
+  2. `leerness review-request` (1.9.176)
+  3. `leerness intent classify` (1.9.213, opt-in)
+  4. `leerness constraints check` (1.9.208)
+  5. `leerness task add` (자동 dedup + auto review trigger)
+- `## adaptive wakeup interval (1.9.210)` 신설 — opt-out 가이드
+
+### 3. 누적 회귀 (1.9.207~218) — 모두 유지
+
+### 4. stress-v164 — 15/15 PASS
+- 1.9.219 (3): VERSION + 마일스톤 보고서 + session-workflow 통합 검증
+- 성능 (2): cold_start 618ms / MCP 59 도구 501ms
+- 누적 회귀 (10): 1.9.207~218 전체
+
+### 5. 자동 release (81 라운드 main-push streak · 42 라운드 npm publish streak)
+
+🎉 **80 라운드 자율 모드 마일스톤** + 5축 100/100 + 백로그 0 + MCP 59 도구
+
+---
+
 ## 1.9.218 — 2026-05-22
 
 **🔁 handoff --json 통합 강화 + 5축 매트릭스 보강 (98→100 후보).**
