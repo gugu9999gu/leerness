@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.9.228 — 2026-05-23
+
+**📊 health --json roundHistory 통합 (JSON 3 명령 일관성) + session-workflow.md drift 차단 + 헤드라인 label 갱신.**
+
+### 1. health --json `roundHistory` 필드 통합
+- handoff/session close에 이어 health도 통합 → **JSON 3 명령 일관성**
+- `{ roundCount, baselineVersion, nextMilestone, roundsToNextMilestone, daysActive, avgRoundsPerDay }`
+- 외부 자동화가 health 단일 호출로 진행도까지 회수
+
+### 2. session-workflow.md drift 차단 갱신 (1.9.220~228)
+- 신규 섹션 4개:
+  - 비정상 종료 자율 재개 (1.9.220~222)
+  - 사용자 요청 자동 완료 (1.9.223~225)
+  - 라운드 진행도 가시화 (1.9.226~228)
+  - JSON 통합 매트릭스 (handoff/session close 6 필드)
+- 마지막 업데이트 1.9.171 → 1.9.228 (57 라운드 누적 정리)
+
+### 3. handoff 헤드라인 label list 갱신
+- 기존: `(1.9.81/93/113/152/162/192/197/204/207/209/215/220)` (12 버전)
+- 신규: `(1.9.81/93/113/152/162/192/197/204/207/209/215/220/223/226)` (**14 버전**, +1.9.223 delivered-requests, +1.9.226 round-counter)
+- AI가 헤드라인 출처 추적하기 쉬움 (메타 가시성)
+
+### 4. 누적 회귀 (1.9.207~227) — 모두 유지
+
+### 5. stress-v173 — 15/15 PASS
+- 1.9.228 (5): VERSION + health roundHistory + 3 명령 일관성 + 헤드라인 label + session-workflow.md
+- 성능 (2): cold_start avg 414ms / health --json 1132ms
+- 누적 회귀 (8): 1.9.207~227
+
+### 6. 자동 release (90 라운드 main-push streak · 51 라운드 npm publish streak)
+
+📊 **JSON 일관성 매트릭스 완성** (handoff/session close/health 3 명령 — `roundHistory` 필드 동일 형식)
+
+---
+
 ## 1.9.227 — 2026-05-23
 
 **📊 handoff/session close --json roundHistory 통합 (6 필드 완성) + CLAUDE/AGENTS drift 차단.**

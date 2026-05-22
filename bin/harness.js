@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.227';
+const VERSION = '1.9.228';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -6185,7 +6185,7 @@ function handoff(root) {
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207/209/215/220): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207/209/215/220/223/226): ${parts.join(' · ')}`));
       }
     } catch {}
   }
@@ -16366,6 +16366,18 @@ function healthCmd(root) {
       summary: `F${fNodesHe.length}/E${edgeCount}${isolated > 0 ? `/iso${isolated}` : ''}`
     };
   } catch { out.featureGraph = { error: 'featureGraph 점검 실패' }; }
+  // 1.9.228: health --json roundHistory 통합 (handoff/session close 와 동일 — JSON 3 명령 일관성 + 6 통합 필드 완성)
+  try {
+    const rh = _computeRoundHistory(root);
+    out.roundHistory = {
+      roundCount: rh.roundCount,
+      baselineVersion: rh.baselineVersion,
+      nextMilestone: rh.nextMilestone,
+      roundsToNextMilestone: rh.roundsToNextMilestone,
+      daysActive: rh.daysActive,
+      avgRoundsPerDay: rh.avgRoundsPerDay
+    };
+  } catch { out.roundHistory = { error: 'roundHistory 점검 실패' }; }
   // 1.9.163: 5능력 매트릭스 자동 평가 (1.9.155 sub-agent 점검 → 코드 기반 자동화)
   //   각 능력을 코드 grep 으로 검출 → 0~100 점수. 사용자가 매 health 호출 시 leerness 자기 평가 확인.
   try {

@@ -226,3 +226,38 @@ handoff 헤드라인에서 `📥 미답 요청 N건` 표시 시 즉시 #1 호출
 - ⚠ sub-agent 분배 시 파일 경로 미명시 → 동시 쓰기 충돌
 - ⚠ "테스트 돌렸으니 PASS" 자기 보고만 → verify-claim --run-tests 미실행
 - ⚠ contract verify 생략 → 사양 불일치 BUG가 사용자에게 노출
+
+## 비정상 종료 자율 재개 (1.9.220~222)
+
+자율 모드에서 절전/시스템종료/세션종료 후 깨어났을 때 자동 감지 + 재개:
+- handoff 헤드라인: `🔌 비정상종료 <severity>` 자동 노출 (5 신호)
+- handoff 본문: `## 🚨/⚠ 비정상 종료 감지` 섹션 (high/medium severity)
+- `leerness session-resume` — 재개 가이드 7단계
+- `leerness session-resume --auto-fix` (1.9.222) — 30분+ 지난 pending wakeup 자동 supersede
+
+## 사용자 요청 자동 완료 (1.9.223~225)
+
+운영 중 누적된 "Round X.Y.Z — 구현 완료" 패턴을 자동 정리:
+- `leerness requests auto-complete` (1.9.223) — dry-run 기본, `--apply`로 적용
+- handoff 헤드라인 `📥 자동완료가능 N건` 우선 노출
+- handoff 본문 `## 📥 사용자 요청 자동 완료 가능` 섹션
+- `session close --auto-apply-delivered` (1.9.224) — 마감 시 자동 완료
+- `drift check --auto-fix` (1.9.225) — drift 회복 시 자동 적용
+- `LEERNESS_AUTO_APPLY_DELIVERED=1` env (1.9.225) — 자율 모드 자동 적용
+
+## 라운드 진행도 가시화 (1.9.226~228)
+
+`leerness round-history` — git tag 기반 자율 라운드 통계:
+- handoff 헤드라인: `🔄 R<N> → R<milestone> (<X>R 남음)`
+- 마일스톤 자동 감지: 50/75/100/125/150/175/200/250/300/400/500
+- handoff/session close/health --json 모두 `roundHistory` 필드 통합 (1.9.227~228 — 3 명령 일관성)
+
+## JSON 통합 매트릭스 (handoff/session close 6 필드 — 1.9.218~227)
+
+외부 자동화/CI가 leerness 상태를 6 차원 동기 회수:
+- `userRequestsAudit` (1.9.207/218)
+- `preWakeAudit` (1.9.209/218)
+- `idempotencyAudit` (1.9.212/218)
+- `abnormalShutdown` (1.9.220/221)
+- `deliveredRequests` (1.9.223)
+- `roundHistory` (1.9.226/227) — health 도 추가 (1.9.228)
