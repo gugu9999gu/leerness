@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.210';
+const VERSION = '1.9.211';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2364,6 +2364,168 @@ function _computeAdaptiveInterval(root) {
   };
 }
 
+// 1.9.211: .harness → .leerness rename + migration + AI 참조 가이드 (사용자 명시)
+//   "leerness설치시 생성되는 .harness를 .leerness으로 변경할 수 있을까 / 기존 버전에서도 마이그레이션시 AI가 참조할 수 있기도하면 어떨까"
+//   접근 방식: opt-in 마이그레이션 (breaking change 최소화)
+//   - default: .harness 유지 (226+ path reference 안정)
+//   - LEERNESS_WORKSPACE_DIR env 또는 .leerness/MARKER 존재 시 .leerness 사용
+//   - leerness migrate-workspace-dir CLI: .harness → .leerness copy + AI reference guide 생성
+//   - AI 참조 가이드: WHERE_TO_FIND.md (디렉토리 구조 + 파일별 역할 + 마이그레이션 history)
+function _workspaceDirName(root) {
+  // 1) env override
+  if (process.env.LEERNESS_WORKSPACE_DIR) {
+    const v = process.env.LEERNESS_WORKSPACE_DIR.trim();
+    if (v) return v;
+  }
+  // 2) .leerness 마이그레이션 마커 존재 시 .leerness 우선
+  try {
+    if (root && exists(path.join(root, '.leerness', 'MIGRATED_FROM_HARNESS'))) {
+      return '.leerness';
+    }
+  } catch {}
+  // 3) default
+  return '.harness';
+}
+function _workspaceDirAbs(root) {
+  return path.join(root, _workspaceDirName(root));
+}
+// .harness → .leerness 마이그레이션 (copy + reference guide 생성)
+function _migrateWorkspaceDir(root, opts = {}) {
+  const dryRun = opts.dryRun === true;
+  const srcDir = path.join(root, '.harness');
+  const dstDir = path.join(root, '.leerness');
+  const report = {
+    at: new Date().toISOString(),
+    version: VERSION,
+    src: srcDir,
+    dst: dstDir,
+    srcExists: exists(srcDir),
+    dstExists: exists(dstDir),
+    copiedFiles: [],
+    skippedFiles: [],
+    errors: [],
+    dryRun
+  };
+  if (!report.srcExists) {
+    report.errors.push('source .harness not found');
+    return report;
+  }
+  if (!dryRun) {
+    mkdirp(dstDir);
+  }
+  // 재귀 copy 헬퍼
+  function copyRec(rel) {
+    const srcAbs = path.join(srcDir, rel);
+    const dstAbs = path.join(dstDir, rel);
+    let stat;
+    try { stat = fs.statSync(srcAbs); } catch (e) { report.errors.push(`stat ${rel}: ${e.message}`); return; }
+    if (stat.isDirectory()) {
+      if (!dryRun) mkdirp(dstAbs);
+      let entries;
+      try { entries = fs.readdirSync(srcAbs); } catch (e) { report.errors.push(`readdir ${rel}: ${e.message}`); return; }
+      for (const e of entries) copyRec(path.join(rel, e));
+    } else if (stat.isFile()) {
+      // 기존 dst 파일이 있고 우리가 force가 아니면 skip
+      if (exists(dstAbs) && !opts.force) {
+        report.skippedFiles.push(rel);
+        return;
+      }
+      if (!dryRun) {
+        try {
+          fs.copyFileSync(srcAbs, dstAbs);
+          report.copiedFiles.push(rel);
+        } catch (e) {
+          report.errors.push(`copy ${rel}: ${e.message}`);
+        }
+      } else {
+        report.copiedFiles.push(rel);
+      }
+    }
+  }
+  copyRec('');
+  // 마이그레이션 마커 + AI 참조 가이드 작성
+  if (!dryRun) {
+    const marker = `Migrated from .harness at ${report.at} by leerness ${VERSION}\n`;
+    try { writeUtf8(path.join(dstDir, 'MIGRATED_FROM_HARNESS'), marker); } catch (e) { report.errors.push(`marker: ${e.message}`); }
+    const guide = _buildWorkspaceReferenceGuide(root, '.leerness');
+    try { writeUtf8(path.join(dstDir, 'WHERE_TO_FIND.md'), guide); } catch (e) { report.errors.push(`guide: ${e.message}`); }
+    // .harness 에도 redirect 안내 추가 (AI가 .harness 먼저 봐도 .leerness 로 가게)
+    try {
+      const redirect = `# .harness → .leerness migration (${report.at})\n\n` +
+        `이 워크스페이스는 \`.harness\` → \`.leerness\` 로 마이그레이션되었습니다 (leerness ${VERSION}).\n\n` +
+        `**AI 에이전트는 ${'.leerness/'} 디렉토리를 우선 참조하십시오.**\n\n` +
+        `- 신규 메타파일 위치: \`.leerness/\`\n` +
+        `- 참조 가이드: \`.leerness/WHERE_TO_FIND.md\`\n` +
+        `- 마이그레이션 마커: \`.leerness/MIGRATED_FROM_HARNESS\`\n\n` +
+        `\`.harness/\` 는 backward compatibility 를 위해 보존됩니다 (read-only 권장).\n`;
+      writeUtf8(path.join(srcDir, 'MIGRATED_TO_LEERNESS.md'), redirect);
+    } catch (e) { report.errors.push(`redirect: ${e.message}`); }
+  }
+  return report;
+}
+// AI 참조 가이드 빌더 — 워크스페이스 디렉토리 구조 + 파일별 역할 매핑
+function _buildWorkspaceReferenceGuide(root, dirName) {
+  const lines = [];
+  lines.push(`# Leerness Workspace Reference Guide`);
+  lines.push('');
+  lines.push(`> AI 에이전트가 leerness 워크스페이스에서 어떤 파일을 어디서 찾는지 안내합니다 (1.9.211).`);
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()} by leerness ${VERSION}`);
+  lines.push(`Workspace dir: \`${dirName}/\``);
+  lines.push('');
+  lines.push(`## 📁 디렉토리 구조 (핵심)`);
+  lines.push('');
+  lines.push('```');
+  lines.push(`${dirName}/`);
+  lines.push(`├── plan.md                    ← 무엇을 할 것인가 (사용자 메모리)`);
+  lines.push(`├── progress-tracker.md        ← 무엇을 했는가 (증거 포함, 사용자 메모리)`);
+  lines.push(`├── decisions.md               ← 왜 그렇게 했는가 (사용자 메모리)`);
+  lines.push(`├── session-handoff.md         ← 다음 세션 인계 (사용자 메모리)`);
+  lines.push(`├── lessons.md                 ← 과거 교훈 (자동 fuzzy 회수)`);
+  lines.push(`├── rules.md                   ← 자연어 룰 (매 세션 자동 노출, R-XXXX)`);
+  lines.push(`├── task-log.md                ← in-progress / dropped task 이력`);
+  lines.push(`├── reuse-map.md               ← 워크스페이스 capability 매핑`);
+  lines.push(`├── skill-suggestions.md       ← skill rolling history`);
+  lines.push(`├── feature-graph.md           ← 기능 의존 그래프 (F-XXXX)`);
+  lines.push(`├── manifest.json              ← 워크스페이스 메타`);
+  lines.push(`├── leerness-config.json       ← 비시크릿 LEERNESS_* 설정 (1.9.187, AI 가시)`);
+  lines.push(`├── user-requests.json         ← 사용자 명시 요청 누적 (1.9.207)`);
+  lines.push(`├── active-wakeups.json        ← ScheduleWakeup 상태 (1.9.205)`);
+  lines.push(`├── pre-wake-report.json       ← sleep 전 sub-agent audit (1.9.209)`);
+  lines.push(`├── wakeup-history.json        ← adaptive wakeup 이력 (1.9.210)`);
+  lines.push(`├── platform-constraints.json  ← API 제약 catalog (1.9.208)`);
+  lines.push(`├── auto-resume-plan.json      ← 다음 라운드 plan (1.9.203)`);
+  lines.push(`├── next-action-queue.json     ← 다음 next-action 큐 (1.9.201)`);
+  lines.push(`├── last-handoff.json          ← 마지막 handoff timestamp`);
+  lines.push(`├── environment.json           ← 환경 변동 추적 (1.9.145)`);
+  lines.push(`├── skills/                    ← 설치된 skill 디렉토리`);
+  lines.push(`└── templates/                 ← 워크스페이스 템플릿`);
+  lines.push('```');
+  lines.push('');
+  lines.push(`## 🧭 자주 묻는 위치`);
+  lines.push('');
+  lines.push(`| 찾는 것 | 위치 |`);
+  lines.push(`|---|---|`);
+  lines.push(`| 현재 진행 중인 task | \`${dirName}/progress-tracker.md\` (status: in-progress) |`);
+  lines.push(`| 사용자가 명시한 영구 룰 | \`${dirName}/rules.md\` (active R-XXXX) |`);
+  lines.push(`| 직전 sleep 전 audit 결과 | \`${dirName}/pre-wake-report.json\` (1.9.209) |`);
+  lines.push(`| 미답 사용자 요청 | \`${dirName}/user-requests.json\` (status: open) |`);
+  lines.push(`| 다음 라운드 권장 단계 | \`${dirName}/auto-resume-plan.json\` (1.9.203) |`);
+  lines.push(`| API 제약 catalog | \`${dirName}/platform-constraints.json\` (1.9.208) |`);
+  lines.push(`| 자동 wakeup 권장 간격 | \`${dirName}/wakeup-history.json\` (1.9.210) |`);
+  lines.push('');
+  lines.push(`## 🔄 마이그레이션 안내`);
+  lines.push('');
+  lines.push(`이 워크스페이스는 \`.harness\` → \`.leerness\` 로 마이그레이션되었을 수 있습니다.`);
+  lines.push(`- \`.leerness/MIGRATED_FROM_HARNESS\` 존재 → 마이그레이션 완료, \`.leerness\` 우선 사용`);
+  lines.push(`- \`.harness/MIGRATED_TO_LEERNESS.md\` 존재 → \`.leerness/\` 로 가야 함`);
+  lines.push(`- 양쪽 모두 없음 → 기본 \`.harness\` 사용 중`);
+  lines.push('');
+  lines.push(`AI 에이전트는 \`leerness handoff .\` 결과를 신뢰하십시오 — 자동으로 올바른 디렉토리를 사용합니다.`);
+  lines.push('');
+  return lines.join('\n');
+}
+
 // 1.9.203: 자동 라운드 plan 정리 — 사용자 명시
 //   "백그라운드에 다음 작업이 시작가능한 예상 시간 + 일어났을때 해야하는 일을 정리"
 //   라운드 마무리 시 .harness/auto-resume-plan.json 자동 저장 → 다음 wakeup 시 즉시 실행 가능
@@ -2873,6 +3035,98 @@ function wakeupIntervalCmd(root, sub, val) {
   console.error(`Unknown subcommand: ${sub}`);
   console.error(`Run: leerness wakeup-interval help`);
   process.exit(1);
+}
+
+// 1.9.211: leerness workspace-dir <get|guide> — 워크스페이스 디렉토리 정보 + AI 참조 가이드 (사용자 명시)
+function workspaceDirCmd(root, sub) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+
+  if (!sub || sub === 'get') {
+    const dirName = _workspaceDirName(root);
+    const dirAbs = _workspaceDirAbs(root);
+    const hasHarness = exists(path.join(root, '.harness'));
+    const hasLeerness = exists(path.join(root, '.leerness'));
+    const migrated = exists(path.join(root, '.leerness', 'MIGRATED_FROM_HARNESS'));
+    const result = { current: dirName, abs: dirAbs, hasHarness, hasLeerness, migrated };
+    if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
+    log(cyan(`# leerness workspace-dir (1.9.211)`));
+    log(`  현재 디렉토리: ${grn(dirName + '/')}`);
+    log(`  abs: ${dirAbs}`);
+    log(`  .harness 존재: ${hasHarness ? '✓' : '✗'}`);
+    log(`  .leerness 존재: ${hasLeerness ? '✓' : '✗'}`);
+    log(`  마이그레이션 완료: ${migrated ? '✓' : '✗'}`);
+    log('');
+    if (hasHarness && !hasLeerness) {
+      log(dim(`  → 마이그레이션: leerness migrate-workspace-dir`));
+    } else if (migrated) {
+      log(dim(`  → AI 참조 가이드: leerness workspace-dir guide`));
+    }
+    return;
+  }
+
+  if (sub === 'guide') {
+    const dirName = _workspaceDirName(root);
+    const guide = _buildWorkspaceReferenceGuide(root, dirName);
+    if (has('--json')) { log(JSON.stringify({ workspaceDir: dirName, guide }, null, 2)); return; }
+    log(guide);
+    return;
+  }
+
+  console.error(`Usage: leerness workspace-dir [get|guide]`);
+  process.exit(1);
+}
+
+// 1.9.211: leerness migrate-workspace-dir — .harness → .leerness 마이그레이션 (사용자 명시)
+function migrateWorkspaceDirCmd(root) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+
+  const dryRun = has('--dry-run');
+  const force = has('--force');
+  const report = _migrateWorkspaceDir(root, { dryRun, force });
+
+  if (has('--json')) { log(JSON.stringify(report, null, 2)); return; }
+  log(cyan(`# leerness migrate-workspace-dir (1.9.211)${dryRun ? ' [DRY-RUN]' : ''}`));
+  log(`  src: ${report.src}  ${report.srcExists ? '✓' : red('✗ 없음')}`);
+  log(`  dst: ${report.dst}  ${report.dstExists ? yel('⚠ 이미 존재') : '(생성)'}`);
+  log('');
+  log(`  📊 copied: ${grn(report.copiedFiles.length)}, skipped: ${report.skippedFiles.length}, errors: ${report.errors.length}`);
+  if (report.copiedFiles.length > 0 && report.copiedFiles.length <= 30) {
+    log('');
+    log(`  복사된 파일:`);
+    report.copiedFiles.slice(0, 20).forEach(f => log(dim(`    + ${f}`)));
+    if (report.copiedFiles.length > 20) log(dim(`    ... +${report.copiedFiles.length - 20}건`));
+  } else if (report.copiedFiles.length > 30) {
+    log(dim(`    (${report.copiedFiles.length}개 — 상세는 --json)`));
+  }
+  if (report.skippedFiles.length > 0) {
+    log('');
+    log(yel(`  스킵된 파일 (이미 존재, --force 로 덮어쓰기 가능):`));
+    report.skippedFiles.slice(0, 5).forEach(f => log(dim(`    - ${f}`)));
+    if (report.skippedFiles.length > 5) log(dim(`    ... +${report.skippedFiles.length - 5}건`));
+  }
+  if (report.errors.length > 0) {
+    log('');
+    log(red(`  ⚠ 에러:`));
+    report.errors.forEach(e => log(red(`    - ${e}`)));
+  }
+  log('');
+  if (!dryRun && report.copiedFiles.length > 0) {
+    log(grn(`✓ 마이그레이션 완료 — .leerness/WHERE_TO_FIND.md + MIGRATED_FROM_HARNESS 마커 생성`));
+    log(dim(`  → 다음 handoff부터 .leerness 우선 사용`));
+    log(dim(`  → .harness/MIGRATED_TO_LEERNESS.md 안내 추가됨 (backward compat 보존)`));
+  } else if (dryRun) {
+    log(yel(`  (dry-run — 실제 변경 없음. 실행: leerness migrate-workspace-dir)`));
+  }
 }
 
 // 1.9.199: wakeup miss 자동 회복 강화 — last-handoff timestamp 기록 + 25min 기대 interval 정밀 측정
@@ -16280,6 +16534,10 @@ async function main() {
   if (cmd === 'pre-wake-audit')                     return preWakeAuditCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.210: leerness wakeup-interval <get|set|auto|history|record> — adaptive interval (사용자 명시)
   if (cmd === 'wakeup-interval')                    return wakeupIntervalCmd(arg('--path', process.cwd()), args[1], args[2]);
+  // 1.9.211: leerness workspace-dir <get|guide> — 현재 워크스페이스 디렉토리 / AI 참조 가이드 (사용자 명시)
+  if (cmd === 'workspace-dir')                      return workspaceDirCmd(arg('--path', process.cwd()), args[1]);
+  // 1.9.211: leerness migrate-workspace-dir — .harness → .leerness 마이그레이션 (사용자 명시)
+  if (cmd === 'migrate-workspace-dir')              return migrateWorkspaceDirCmd(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);

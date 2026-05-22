@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.9.211 — 2026-05-22
+
+**📂 `.harness` → `.leerness` opt-in 마이그레이션 + AI 참조 가이드 (사용자 명시).**
+
+### 사용자 명시
+> *"leerness설치시 생성되는 .harness를 .leerness으로 변경할 수 있을까 / 기존 버전에서도 마이그레이션시 AI가 참조할 수 있기도하면 어떨까"*
+
+### 1. workspace-dir 헬퍼 (default-safe opt-in)
+- `_workspaceDirName(root)` — env `LEERNESS_WORKSPACE_DIR` > `.leerness/MIGRATED_FROM_HARNESS` 마커 > default `.harness`
+- `_workspaceDirAbs(root)` — 절대 경로
+- 기본 동작: **`.harness` 유지** (226+ path reference 안정) — breaking change 0
+
+### 2. 마이그레이션 시스템
+- `_migrateWorkspaceDir(root, opts)` — `.harness` 전체 재귀 copy → `.leerness`
+  · `--dry-run` 지원
+  · `--force` (기존 dst 덮어쓰기)
+  · skip / errors / copiedFiles 분류 보고
+- 마이그레이션 결과물:
+  · `.leerness/MIGRATED_FROM_HARNESS` 마커
+  · `.leerness/WHERE_TO_FIND.md` AI 참조 가이드 (자동 생성)
+  · `.harness/MIGRATED_TO_LEERNESS.md` redirect 안내 (backward compat 유지)
+
+### 3. AI 참조 가이드 (`_buildWorkspaceReferenceGuide`)
+- 디렉토리 구조 시각화 (핵심 파일 25개)
+- "자주 묻는 위치" 매핑 표 (현재 task / 영구 룰 / pre-wake / 미답 요청 / 다음 라운드 plan / API 제약 / wakeup 권장)
+- 마이그레이션 안내 (3가지 상태 분기)
+- 1.9.207~210 신규 메타파일 위치 명시
+
+### 4. `leerness workspace-dir <get|guide>` CLI
+- `get` — 현재 디렉토리 + .harness/.leerness 존재 여부 + 마이그레이션 상태
+- `guide` — AI 참조 가이드 출력
+
+### 5. `leerness migrate-workspace-dir` CLI
+- `--dry-run` / `--force` 지원
+- copied / skipped / errors 분류
+- 자동 마커 + 가이드 + redirect 생성
+
+### 6. 누적 회귀 (1.9.200~210) — 모두 유지
+
+### 7. stress-v156 — 19/19 PASS
+- 1.9.211 (10) + 성능 (2) + 누적 회귀 (7)
+- 격리 tmp dir 전체 사이클 (default → dry-run → migrate → auto-detect → env override)
+- AI 가이드 키 섹션 검증
+- 성능: --version cold start avg 452ms · MCP 54 도구 445ms
+
+### 8. 자동 release (73 라운드 main-push streak · 34 라운드 npm publish streak)
+
+### 9. 후속 라운드 로드맵
+- 이번 라운드는 **opt-in 헬퍼 + CLI**만 추가 (breaking change 0)
+- 후속에서 226+ path reference 를 `_workspaceDirAbs(root)` 로 점진 전환
+
+---
+
 ## 1.9.210 — 2026-05-22
 
 **⚡ adaptive wakeup interval — 사용자 활동 기반 자동 조절 (사용자 명시).**
