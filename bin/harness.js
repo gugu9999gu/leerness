@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.219';
+const VERSION = '1.9.220';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2251,6 +2251,140 @@ function _saveAndAppendPreWakeReport(root, audit) {
   return audit;
 }
 
+// 1.9.220: 비정상 종료 감지 + 자율 재개 (사용자 명시)
+//   "절전모드/시스템종료/AI에이전트 세션종료로 비정상 종료된 후 재실행 시 중단지점/누락작업 감지"
+//   5신호 종합 분석:
+//     1) last-handoff gap > 60min (1.9.199, 25min interval 기대 대비 2.4배+)
+//     2) wakeup miss (active-wakeups pending → 30min+ 지남, 1.9.205)
+//     3) in-progress task 24h+ 갱신 없음 (stale, progress-tracker mtime)
+//     4) auto-resume-plan 존재 + ageMin > 60min (1.9.203, 사용 안 됨)
+//     5) release/X.X.X branch 있음 + main 미머지 (release sync-main 누락)
+//   결과: { abnormalShutdown: true/false, signals: [...], severity, resumeGuide }
+function _detectAbnormalShutdown(root) {
+  const result = {
+    detectedAt: new Date().toISOString(),
+    signals: [],
+    severity: 'none',
+    abnormalShutdown: false,
+    resumeGuide: []
+  };
+  const now = Date.now();
+
+  // 1) last-handoff gap > 60min (정상 25min interval 대비)
+  try {
+    const lhFp = path.join(root, '.harness', 'last-handoff.json');
+    if (exists(lhFp)) {
+      const j = JSON.parse(read(lhFp));
+      const last = j.lastAt || (j.history && j.history.length > 0 ? j.history[j.history.length - 1] : null);
+      if (last) {
+        const lastMs = new Date(last).getTime();
+        const gapMin = Math.floor((now - lastMs) / 60000);
+        if (gapMin > 60) {
+          result.signals.push({
+            kind: 'last-handoff-stale',
+            gapMin,
+            detail: `last handoff ${gapMin}분 전 (정상 25min 간격 대비 ${Math.round(gapMin/25)}x 초과) — 절전/종료 의심`,
+            severity: gapMin > 240 ? 'high' : 'medium'
+          });
+        }
+      }
+    }
+  } catch {}
+
+  // 2) wakeup miss (active-wakeups pending → 30min+ 지남)
+  try {
+    const wkStat = _analyzeWakeupStatus(root);
+    if (wkStat.hasWakeup && wkStat.deltaMin > 30 && wkStat.kind === 'missed') {
+      result.signals.push({
+        kind: 'wakeup-missed',
+        gapMin: wkStat.deltaMin,
+        detail: `wakeup ${wkStat.deltaMin}분 지남 (status=pending) — 자동 재개 실패`,
+        severity: wkStat.deltaMin > 120 ? 'high' : 'medium'
+      });
+    }
+  } catch {}
+
+  // 3) in-progress task 24h+ stale (progress-tracker mtime + 활성 task 카운트)
+  try {
+    const ptPath = path.join(root, '.harness', 'progress-tracker.md');
+    if (exists(ptPath)) {
+      const stat = fs.statSync(ptPath);
+      const ageMin = Math.floor((now - stat.mtimeMs) / 60000);
+      const content = read(ptPath);
+      const inProgress = (content.match(/^\|\s*T-\d{4,}\s*\|\s*in-progress\s*\|/gm) || []).length;
+      if (inProgress > 0 && ageMin > 24 * 60) {
+        result.signals.push({
+          kind: 'in-progress-stale',
+          inProgressCount: inProgress,
+          ageMin,
+          detail: `${inProgress}건 in-progress task, progress-tracker ${Math.floor(ageMin/60)}h 갱신 없음`,
+          severity: 'high'
+        });
+      }
+    }
+  } catch {}
+
+  // 4) auto-resume-plan 존재 + ageMin > 60min (사용 안 됨)
+  try {
+    const plan = _loadAutoResumePlan(root);
+    if (plan && plan.ageMin > 60) {
+      result.signals.push({
+        kind: 'auto-resume-plan-unused',
+        ageMin: plan.ageMin,
+        nextRound: plan.nextRoundVersion,
+        detail: `auto-resume-plan ${plan.ageMin}분 전 작성 (${plan.nextRoundVersion}) — 사용 안 됨`,
+        severity: plan.ageMin > 240 ? 'medium' : 'low'
+      });
+    }
+  } catch {}
+
+  // 5) release/X.X.X branch 있음 + main 미머지 (git 상태)
+  try {
+    const r = cp.spawnSync('git', ['branch', '--list', 'release/*'], { cwd: root, encoding: 'utf8', timeout: 3000 });
+    if (r.status === 0) {
+      const branches = (r.stdout || '').split('\n').map(s => s.trim().replace(/^\*?\s*/, '')).filter(b => b.startsWith('release/'));
+      if (branches.length >= 2) {  // 2개 이상이면 누락 가능성
+        result.signals.push({
+          kind: 'release-branch-pending',
+          count: branches.length,
+          recent: branches.slice(-3),
+          detail: `${branches.length}건 release/* branch (sync-main 누락 가능)`,
+          severity: 'low'
+        });
+      }
+    }
+  } catch {}
+
+  // 종합 판단
+  const high = result.signals.filter(s => s.severity === 'high').length;
+  const medium = result.signals.filter(s => s.severity === 'medium').length;
+  if (high > 0) { result.severity = 'high'; result.abnormalShutdown = true; }
+  else if (medium > 0) { result.severity = 'medium'; result.abnormalShutdown = true; }
+  else if (result.signals.length > 0) result.severity = 'low';
+
+  // 재개 가이드
+  if (result.abnormalShutdown) {
+    result.resumeGuide.push('1. leerness handoff . — 현재 상태 종합 확인');
+    if (result.signals.some(s => s.kind === 'auto-resume-plan-unused')) {
+      result.resumeGuide.push('2. leerness resume — 저장된 auto-resume-plan 적용 (1.9.203)');
+    }
+    if (result.signals.some(s => s.kind === 'in-progress-stale')) {
+      result.resumeGuide.push('3. leerness task list --status in-progress — stale task 검토 (drop or 재개)');
+    }
+    if (result.signals.some(s => s.kind === 'wakeup-missed')) {
+      result.resumeGuide.push('4. ScheduleWakeup 재등록 (사용자 트리거 또는 R-0001 룰)');
+    }
+    if (result.signals.some(s => s.kind === 'release-branch-pending')) {
+      result.resumeGuide.push('5. git branch -a로 release/* 확인 + leerness release sync-main 재실행');
+    }
+    result.resumeGuide.push('6. leerness pre-wake-audit — 누락 작업 / 충돌 종합 점검');
+    result.resumeGuide.push('7. leerness requests audit — 미답 사용자 요청 확인');
+  } else {
+    result.resumeGuide.push('정상 운영 중 — 비정상 종료 신호 없음');
+  }
+  return result;
+}
+
 // 1.9.210: adaptive wakeup interval (사용자 명시)
 //   "wakeup 30분등 긴 시간이 필요없다면 간격을 타이트하게 자동으로 조절하도록"
 //   사용자 활동량 기반 권장 interval 계산 → ScheduleWakeup 시 자동 적용 (R-0001 룰 외 동적 보정)
@@ -2918,6 +3052,47 @@ function requestsCmd(root, sub, ...rest) {
   console.error(`Unknown subcommand: ${sub}`);
   console.error(`Run: leerness requests help`);
   process.exit(1);
+}
+
+// 1.9.220: leerness session-resume — 비정상 종료 감지 + 자율 재개 가이드 (사용자 명시)
+function sessionResumeCmd(root) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+
+  const result = _detectAbnormalShutdown(root);
+  if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
+  log(cyan(`# leerness session-resume (1.9.220) — 비정상 종료 감지 + 자율 재개`));
+  log(`  detected at: ${result.detectedAt}`);
+  log('');
+  if (!result.abnormalShutdown) {
+    log(grn(`  ✓ 비정상 종료 신호 없음 — 정상 운영 중`));
+    if (result.signals.length > 0) {
+      log(dim(`     (low-severity 신호 ${result.signals.length}건 — 무시 가능)`));
+    }
+    log('');
+    log(dim(`  → 평소대로 leerness handoff . 로 시작`));
+    return;
+  }
+  const sevIcon = result.severity === 'high' ? '🚨' : '⚠';
+  const sevColor = result.severity === 'high' ? red : yel;
+  log(sevColor(`  ${sevIcon} 비정상 종료 감지 — severity: ${result.severity} (signals: ${result.signals.length})`));
+  log('');
+  log(`## 감지 신호`);
+  for (const s of result.signals) {
+    const icon = s.severity === 'high' ? '🚨' : (s.severity === 'medium' ? '⚠' : 'ℹ');
+    const c = s.severity === 'high' ? red : (s.severity === 'medium' ? yel : dim);
+    log(c(`  ${icon} [${s.kind}] ${s.detail}`));
+  }
+  log('');
+  log(`## 재개 가이드`);
+  for (const g of result.resumeGuide) {
+    log(`  ${g}`);
+  }
 }
 
 // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 CLI (사용자 명시)
@@ -5694,6 +5869,13 @@ function handoff(root) {
           }
         }
       } catch {}
+      // 16) 1.9.220: 비정상 종료 감지 (사용자 명시) — 깨어남 직후 자동 노출
+      try {
+        const ad = _detectAbnormalShutdown(root);
+        if (ad.abnormalShutdown) {
+          parts.push(`🔌 비정상종료 ${ad.severity} (${ad.signals.length}신호)`);
+        }
+      } catch {}
       // 15) 1.9.215: 현재 활성 task에서 constraints/intent 자동 분석 (1.9.208/213 통합)
       try {
         // progress-tracker.md 의 첫 active task request 추출
@@ -5732,7 +5914,7 @@ function handoff(root) {
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207/209/215): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207/209/215/220): ${parts.join(' · ')}`));
       }
     } catch {}
   }
@@ -17197,6 +17379,8 @@ async function main() {
   if (cmd === 'resume')                             return resumeCmd(arg('--path', process.cwd()));
   // 1.9.207: leerness requests <audit|add|list|complete|drop> — 사용자 요청 누락 확인 절차 (사용자 명시)
   if (cmd === 'requests')                           return requestsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  // 1.9.220: leerness session-resume — 비정상 종료 감지 + 자율 재개 가이드 (사용자 명시)
+  if (cmd === 'session-resume')                     return sessionResumeCmd(arg('--path', process.cwd()));
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
   if (cmd === 'constraints')                        return constraintsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit (사용자 명시)

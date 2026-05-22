@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.9.220 — 2026-05-22
+
+**🔌 비정상 종료 후 자율 재개 시스템 (사용자 명시).**
+
+### 사용자 명시
+> *"자율모드일때 절전모드였거나, 시스템종료나 AI에이전트 세션종료등으로 자율개발모드가 비정상적으로 종료되었다가 다시 실행하여 세션을 이어갈때, 감지하고 작업이 중단된지점이나 누락된작업을 감지하고 개발을이어가거나 자율모드를 다시 진행"*
+
+### 1. `_detectAbnormalShutdown(root)` — 5신호 종합 감지
+| # | 신호 | 트리거 | severity |
+|---|---|---|---|
+| 1 | `last-handoff-stale` | gap > 60min (정상 25min 대비) | gap > 240min: high / else medium |
+| 2 | `wakeup-missed` | active-wakeups pending → 30min+ 지남 | gap > 120min: high |
+| 3 | `in-progress-stale` | in-progress task + progress-tracker 24h+ stale | high |
+| 4 | `auto-resume-plan-unused` | auto-resume-plan 60min+ 미사용 | ageMin > 240: medium |
+| 5 | `release-branch-pending` | 2+ release/* branch (sync-main 누락) | low |
+
+### 2. `leerness session-resume` CLI
+- 비정상 종료 감지 + 5신호 분석
+- 자동 재개 가이드 출력 (7단계)
+- `--json` 옵션 (외부 자동화)
+
+### 3. handoff 헤드라인 16번째 요소
+- 비정상 종료 감지 시: `🔌 비정상종료 <severity> (N신호)`
+- 헤드라인 라벨: `1.9.81/93/113/152/162/192/197/204/207/209/215/220`
+
+### 4. 재개 가이드 7단계 (자동 생성)
+신호별 맞춤 가이드:
+1. `leerness handoff .` — 현재 상태 종합
+2. `leerness resume` — auto-resume-plan 적용 (auto-resume-plan-unused 시)
+3. `leerness task list --status in-progress` — stale task 검토 (in-progress-stale 시)
+4. ScheduleWakeup 재등록 (wakeup-missed 시)
+5. `git branch -a` → `leerness release sync-main` (release-branch-pending 시)
+6. `leerness pre-wake-audit` — 누락 작업 / 충돌 점검
+7. `leerness requests audit` — 미답 사용자 요청 확인
+
+### 5. 실 검증 시나리오
+- **정상 워크스페이스** → `abnormalShutdown: false / severity: none`
+- **wakeup 2024분 지남** (시뮬레이션) → `severity: high / wakeup-missed 1신호 + 가이드 4단계 자동 생성`
+
+### 6. 누적 회귀 (1.9.207~219) — 모두 유지
+
+### 7. stress-v165 — 18/18 PASS
+- 1.9.220 (7): VERSION + 5신호 등록 + 정상/비정상 시나리오 + handoff 통합 + CLI 라우팅
+- 성능 (2): cold_start 461ms / MCP 59 도구 424ms
+- 누적 회귀 (9): 1.9.207~219
+
+### 8. 자동 release (82 라운드 main-push streak · 43 라운드 npm publish streak)
+
+🎉 **자율 모드 복원력 강화** — 절전/종료/세션종료 무관, 재시작 시 자동 진단 + 재개 가능
+
+---
+
 ## 1.9.219 — 2026-05-22
 
 **🎉 80 라운드 자율 모드 마일스톤 + session-workflow.md 통합 갱신.**
