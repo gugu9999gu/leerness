@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.9.214 — 2026-05-22
+
+**🛠 운영 안정화 라운드 — drift 차단 + AGENTS/CLAUDE 7 라운드 누적 갱신 + 종합 회귀.**
+
+> **백로그 소진 후 운영 강화** — 1.9.207~213 7 라운드의 신규 기능을 AI/문서 인지도에 통합, drift warning 해소
+
+### 1. CLAUDE.md 7 라운드 누적 통합 (drift 차단)
+- `## 사용자 명시 신규 7종 (1.9.207~213)` 섹션 신설
+- 각 버전별 CLI + 핵심 기능 요약 (3~5 라인)
+- AI 에이전트가 1.9.207~213 신규 기능을 즉시 인지
+
+### 2. stress-v159 — **15/15 PASS** (1.9.207~213 7 라운드 통합 회귀)
+- 1.9.214 운영 (2)
+- 1.9.207 requests 라이프사이클 (1) — add/audit/list/complete/drop
+- 1.9.208 constraints (2) — stripe/openai 매칭 + review-request 통합
+- 1.9.209 pre-wake-audit (1) — 실행 + --last 저장 검증
+- 1.9.210 wakeup-interval (1) — adaptive ↔ override ↔ auto 토글
+- 1.9.211 workspace-dir (1) — dry-run + migrate + auto-detect
+- 1.9.212 idempotency (1) — rule/task dedup + audit clean
+- 1.9.213 intent (2) — game 확장 + precise 의도 보호
+- 성능 (2) + handoff (1) + release (1)
+
+### 3. 누적 회귀 (1.9.200~213) — 모두 유지
+
+### 4. 자동 release (76 라운드 main-push streak · 37 라운드 npm publish streak)
+
+### 5. 핸드오프 (백로그 status)
+- 사용자 명시 task 백로그 **0건 pending** (#298, #302~307 모두 completed)
+- 다음 라운드: 새 사용자 요청 대기 또는 마일스톤 1.9.220 후보 준비
+
+---
+
 ## 1.9.213 — 2026-05-22
 
 **🎯 intent inference + scope expansion 게이트 (사용자 명시) — 마지막 pending task 완성.**
