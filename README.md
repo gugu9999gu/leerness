@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.211-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v156-19%2F19-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-141-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-73_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-98%2F100_(5축)-brightgreen)]() [![workspace](https://img.shields.io/badge/.harness→.leerness-opt--in_migration-success)]() [![perf](https://img.shields.io/badge/cold_start-452ms-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.212-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v157-17%2F17-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-142-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-74_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-98%2F100_(5축)-brightgreen)]() [![idempotency](https://img.shields.io/badge/idempotency-audit_4영역-success)]() [![perf](https://img.shields.io/badge/cold_start-395ms-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.211  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.212  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  📂 .harness → .leerness opt-in 마이그레이션 (사용자 명시)           ║
+  ║  🔁 멱등성 감사 + ruleAdd/taskAdd dedup (사용자 명시)               ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

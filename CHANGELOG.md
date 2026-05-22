@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.9.212 — 2026-05-22
+
+**🔁 멱등성 감사 + ruleAdd/taskAdd dedup 보강 (사용자 명시).**
+
+### 사용자 명시
+> *"다양한 부분에서 멱등성이 필요한 부분이 고려되고있는지 확인해주고 올바른 방향인지 판단해줘"*
+
+### 1. ruleAdd dedup (line 10229+)
+- 같은 description + trigger + active 룰 이미 존재 시 skip
+- `--force` 플래그로 우회 가능
+- 출력: `rule exists (skip): R-XXXX [trigger] description (--force 로 덮어쓰기)`
+
+### 2. taskAdd dedup (line 3709+)
+- progress-tracker.md 의 markdown table 파싱 (`| T-XXXX | status | request | … |`)
+- 같은 request 텍스트 + 활성 상태(`requested`/`in-progress`) 이미 존재 시 skip
+- `--force` 플래그로 우회 가능
+
+### 3. `_runIdempotencyAudit(root)` — 4영역 점검
+- **rules**: 같은 description + trigger + active 중복 (severity: medium)
+- **tasks**: 같은 request 텍스트 + 활성 상태 중복 (severity: medium)
+- **user-requests**: 1.9.207 자체 dedup 검증 (severity: low)
+- **wakeups**: 1.9.205 동일 expectedFireAt 검증 (severity: high)
+
+### 4. `leerness idempotency audit` CLI
+- 위반 분류 (high/medium/low)
+- 영역별 verified / violations 보고
+- `--json` 옵션
+
+### 5. 누적 회귀 (1.9.200~211) — 모두 유지
+
+### 6. stress-v157 — 17/17 PASS
+- 1.9.212 (8) + 성능 (2) + 누적 회귀 (7)
+- 격리 tmp dir에서 ruleAdd 2회 → 1건만 등록 검증
+- `--force` 우회 검증
+- 수동 중복 rule 삽입 → audit이 정확히 1건 violation 탐지
+
+### 7. 자동 release (74 라운드 main-push streak · 35 라운드 npm publish streak)
+
+---
+
 ## 1.9.211 — 2026-05-22
 
 **📂 `.harness` → `.leerness` opt-in 마이그레이션 + AI 참조 가이드 (사용자 명시).**

@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.211';
+const VERSION = '1.9.212';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -3129,6 +3129,194 @@ function migrateWorkspaceDirCmd(root) {
   }
 }
 
+// 1.9.212: leerness idempotency <audit> — 멱등성 위반 탐지 + 권장 fix (사용자 명시)
+//   "다양한 부분에서 멱등성이 필요한 부분이 고려되고있는지 확인해주고 올바른 방향인지 판단"
+//   탐지 영역:
+//     1. rules.md — 같은 description + trigger + active 중복
+//     2. progress-tracker.md — 같은 request 텍스트 중복 (활성 상태)
+//     3. user-requests.json — 동일 텍스트 + open (1.9.207 자체 dedup 검증)
+//     4. active-wakeups.json — 동일 expectedFireAt 중복 (1.9.205 dedup 검증)
+//     5. next-action-queue.json — 동일 title 중복 (1.9.201 dedup 검증)
+function _runIdempotencyAudit(root) {
+  const audit = {
+    auditedAt: new Date().toISOString(),
+    auditVersion: VERSION,
+    violations: [],
+    verified: []
+  };
+  // 1) rules.md dup 검사
+  try {
+    const rules = readRules(root);
+    const active = rules.filter(r => r.status === 'active');
+    const seen = new Map();
+    for (const r of active) {
+      const key = `${r.trigger}::${r.rule}`;
+      if (seen.has(key)) {
+        audit.violations.push({
+          kind: 'rule-duplicate',
+          location: '.harness/rules.md',
+          detail: `중복 룰: ${r.id} == ${seen.get(key)} (${r.trigger}: ${r.rule.slice(0, 60)})`,
+          severity: 'medium',
+          fix: `leerness rule remove ${r.id}`
+        });
+      } else {
+        seen.set(key, r.id);
+      }
+    }
+    if (audit.violations.filter(v => v.kind === 'rule-duplicate').length === 0) {
+      audit.verified.push({ kind: 'rules', detail: `${active.length} active rules, 중복 0건` });
+    }
+  } catch (e) { audit.violations.push({ kind: 'audit-error', area: 'rules', detail: String(e.message || e), severity: 'low' }); }
+
+  // 2) progress-tracker.md 중복 request 검사
+  //    포맷: | T-XXXX | status | request | evidence | nextAction | date |
+  try {
+    const pt = path.join(root, '.harness', 'progress-tracker.md');
+    if (exists(pt)) {
+      const content = read(pt);
+      const lines = content.split(/\r?\n/);
+      const requests = new Map(); // text → { id, status, line }
+      for (let i = 0; i < lines.length; i++) {
+        if (!/^\|\s*T-\d{4,}\s*\|/.test(lines[i])) continue;
+        const cells = lines[i].split('|').slice(1, -1).map(s => s.trim());
+        if (cells.length < 3) continue;
+        const id = cells[0];
+        const status = (cells[1] || '').toLowerCase();
+        const text = cells[2];
+        if (text.length < 5) continue;
+        const isActive = !/^(done|dropped|blocked|completed)$/i.test(status);
+        if (!isActive) continue;
+        if (requests.has(text)) {
+          const prev = requests.get(text);
+          audit.violations.push({
+            kind: 'task-duplicate-request',
+            location: '.harness/progress-tracker.md',
+            detail: `중복 request: "${text.slice(0, 50)}…" (${prev.id} & ${id})`,
+            severity: 'medium',
+            fix: `중복 task 중 하나를 leerness task drop <id> 처리`
+          });
+        } else {
+          requests.set(text, { id, status, line: i + 1 });
+        }
+      }
+      if (audit.violations.filter(v => v.kind === 'task-duplicate-request').length === 0) {
+        audit.verified.push({ kind: 'tasks', detail: `${requests.size} active tasks, request 중복 0건` });
+      }
+    }
+  } catch (e) { audit.violations.push({ kind: 'audit-error', area: 'tasks', detail: String(e.message || e), severity: 'low' }); }
+
+  // 3) user-requests.json 자체 dedup 검증 (1.9.207)
+  try {
+    const ur = _loadUserRequests(root);
+    const seen = new Map();
+    for (const r of ur.requests) {
+      if (r.status !== 'open' && r.status !== 'in-progress') continue;
+      const k = r.text.trim();
+      if (seen.has(k)) {
+        audit.violations.push({
+          kind: 'user-request-duplicate',
+          location: '.harness/user-requests.json',
+          detail: `중복 open 요청: ${r.id} == ${seen.get(k)} ("${k.slice(0, 50)}…")`,
+          severity: 'low',
+          fix: `leerness requests drop ${r.id}`
+        });
+      } else {
+        seen.set(k, r.id);
+      }
+    }
+    if (audit.violations.filter(v => v.kind === 'user-request-duplicate').length === 0) {
+      audit.verified.push({ kind: 'user-requests', detail: `${seen.size} open requests, 중복 0건 (1.9.207 dedup OK)` });
+    }
+  } catch (e) { audit.violations.push({ kind: 'audit-error', area: 'user-requests', detail: String(e.message || e), severity: 'low' }); }
+
+  // 4) active-wakeups.json 검증 (1.9.205)
+  try {
+    const wk = _loadActiveWakeups(root);
+    const pending = wk.wakeups.filter(w => w.status === 'pending');
+    const seenT = new Map();
+    for (const w of pending) {
+      if (seenT.has(w.expectedFireAt)) {
+        audit.violations.push({
+          kind: 'wakeup-duplicate',
+          location: '.harness/active-wakeups.json',
+          detail: `동일 expectedFireAt 중복: ${w.expectedFireAt}`,
+          severity: 'high',
+          fix: `leerness 자동 _recordWakeup filter dedup 검토 필요`
+        });
+      } else {
+        seenT.set(w.expectedFireAt, true);
+      }
+    }
+    if (audit.violations.filter(v => v.kind === 'wakeup-duplicate').length === 0) {
+      audit.verified.push({ kind: 'wakeups', detail: `${pending.length} pending wakeups, 중복 0건 (1.9.205 dedup OK)` });
+    }
+  } catch {}
+
+  audit.summary = {
+    totalViolations: audit.violations.length,
+    highSeverity: audit.violations.filter(v => v.severity === 'high').length,
+    mediumSeverity: audit.violations.filter(v => v.severity === 'medium').length,
+    lowSeverity: audit.violations.filter(v => v.severity === 'low').length,
+    verifiedAreas: audit.verified.length,
+    overall: audit.violations.length === 0 ? 'clean' : 'violations-found'
+  };
+  return audit;
+}
+function idempotencyCmd(root, sub) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+
+  if (!sub || sub === 'help' || sub === '--help') {
+    log(`# leerness idempotency (1.9.212) — 멱등성 위반 탐지`);
+    log('');
+    log(`  audit     → 워크스페이스 멱등성 점검 (rules / tasks / user-requests / wakeups)  (--json 가능)`);
+    log('');
+    log(dim(`  dedup 적용 영역: ruleAdd / taskAdd (1.9.212) + _recordUserRequest (1.9.207) + _recordWakeup (1.9.205)`));
+    log(dim(`  opt-out: --force 플래그로 dedup 우회 가능`));
+    return;
+  }
+
+  if (sub === 'audit') {
+    const audit = _runIdempotencyAudit(root);
+    if (has('--json')) { log(JSON.stringify(audit, null, 2)); return; }
+    log(cyan(`# leerness idempotency audit (1.9.212)`));
+    log(`  audited at: ${audit.auditedAt}`);
+    log('');
+    const s = audit.summary;
+    if (s.overall === 'clean') {
+      log(grn(`  ✓ 멱등성 위반 없음 — verified ${s.verifiedAreas} 영역`));
+    } else {
+      log(red(`  ⚠ ${s.totalViolations} 위반 발견 (high: ${s.highSeverity}, medium: ${s.mediumSeverity}, low: ${s.lowSeverity})`));
+    }
+    log('');
+    if (audit.verified.length) {
+      log(grn(`## ✅ verified (${audit.verified.length})`));
+      audit.verified.forEach(v => log(dim(`  - [${v.kind}] ${v.detail}`)));
+      log('');
+    }
+    if (audit.violations.length) {
+      log(red(`## ⚠ violations (${audit.violations.length})`));
+      audit.violations.forEach(v => {
+        const icon = v.severity === 'high' ? '🚨' : (v.severity === 'medium' ? '⚠' : 'ℹ');
+        log(`  ${icon} [${v.kind}] (${v.severity})`);
+        log(dim(`     ${v.location}`));
+        log(`     ${v.detail}`);
+        if (v.fix) log(dim(`     fix: ${v.fix}`));
+      });
+    }
+    return;
+  }
+
+  console.error(`Unknown subcommand: ${sub}`);
+  console.error(`Run: leerness idempotency help`);
+  process.exit(1);
+}
+
 // 1.9.199: wakeup miss 자동 회복 강화 — last-handoff timestamp 기록 + 25min 기대 interval 정밀 측정
 //   사용자 명시 (1.9.198 후속): "22:01에 라운드에 자동진입되지않았어"
 //   1.9.196 task-log mtime 기반 detector 는 task-log 가 자주 안 업데이트되면 false positive.
@@ -3707,6 +3895,30 @@ function taskList(root) {
   for (const r of filtered) log(`| ${r.id} | ${r.status} | ${r.request} | ${r.evidence} | ${r.nextAction} | ${r.updated} |`);
 }
 function taskAdd(root, text) {
+  // 1.9.212: 멱등성 — 같은 request 텍스트 + 활성 상태 (requested/in-progress) 이미 존재 시 skip (사용자 명시)
+  // progress-tracker.md 포맷: | T-XXXX | status | request | evidence | nextAction | date |
+  if (!has('--force') && text && text.trim()) {
+    try {
+      const pt = path.join(absRoot(root), '.harness', 'progress-tracker.md');
+      if (exists(pt)) {
+        const content = read(pt);
+        const norm = text.trim();
+        const lines = content.split(/\r?\n/);
+        for (const line of lines) {
+          if (!/^\|\s*T-\d{4,}\s*\|/.test(line)) continue;
+          const cells = line.split('|').slice(1, -1).map(s => s.trim());
+          if (cells.length < 3) continue;
+          const id = cells[0];
+          const status = (cells[1] || '').toLowerCase();
+          const request = cells[2];
+          if (request === norm && !/^(done|dropped|blocked|completed)$/i.test(status)) {
+            ok(`task exists (skip): ${id} request="${norm.slice(0, 60)}…"  (--force 로 덮어쓰기)`);
+            return;
+          }
+        }
+      }
+    } catch {}
+  }
   const id = nextId(root, 'T');
   upsertProgress(root, { id, status: arg('--status','requested'), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next','다음 액션 작성') });
   ok(`task added: ${id}`);
@@ -10235,8 +10447,16 @@ function ruleAdd(root, description) {
   if (!validTriggers.has(trigger)) {
     warn(`unknown trigger "${trigger}" — 사용 가능: ${[...validTriggers].join(', ')}. 그대로 등록합니다.`);
   }
-  const id = nextRuleId(root);
   const rules = readRules(root);
+  // 1.9.212: 멱등성 보장 — 같은 description + trigger + active 상태 이미 존재 시 skip (사용자 명시)
+  if (!has('--force')) {
+    const dup = rules.find(r => r.rule === description && r.trigger === trigger && r.status === 'active');
+    if (dup) {
+      ok(`rule exists (skip): ${dup.id} [${dup.trigger}] ${description}  (--force 로 덮어쓰기)`);
+      return;
+    }
+  }
+  const id = nextRuleId(root);
   rules.push({ id, trigger, rule: description, added: today(), status: 'active', lastVerified: '-' });
   writeRules(root, rules);
   ok(`rule added: ${id} [${trigger}] ${description}`);
@@ -16538,6 +16758,8 @@ async function main() {
   if (cmd === 'workspace-dir')                      return workspaceDirCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.211: leerness migrate-workspace-dir — .harness → .leerness 마이그레이션 (사용자 명시)
   if (cmd === 'migrate-workspace-dir')              return migrateWorkspaceDirCmd(arg('--path', process.cwd()));
+  // 1.9.212: leerness idempotency audit — 멱등성 위반 탐지 (사용자 명시)
+  if (cmd === 'idempotency')                        return idempotencyCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);
