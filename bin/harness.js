@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.209';
+const VERSION = '1.9.210';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2251,6 +2251,119 @@ function _saveAndAppendPreWakeReport(root, audit) {
   return audit;
 }
 
+// 1.9.210: adaptive wakeup interval (사용자 명시)
+//   "wakeup 30분등 긴 시간이 필요없다면 간격을 타이트하게 자동으로 조절하도록"
+//   사용자 활동량 기반 권장 interval 계산 → ScheduleWakeup 시 자동 적용 (R-0001 룰 외 동적 보정)
+//   .harness/wakeup-history.json 에 fire 이력 누적 → 최근 N개 사이 평균 user-trigger gap 분석
+//   opt-out: LEERNESS_FIXED_INTERVAL=1 (env) 또는 leerness wakeup-interval set <secs>
+function _wakeupHistoryPath(root) { return path.join(root, '.harness', 'wakeup-history.json'); }
+function _loadWakeupHistory(root) {
+  try {
+    const fp = _wakeupHistoryPath(root);
+    if (!exists(fp)) return { fires: [], override: null };
+    const j = JSON.parse(read(fp));
+    return { fires: Array.isArray(j.fires) ? j.fires : [], override: j.override || null };
+  } catch { return { fires: [], override: null }; }
+}
+function _writeWakeupHistory(root, state) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    writeUtf8(_wakeupHistoryPath(root), JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2));
+    return true;
+  } catch { return false; }
+}
+function _recordWakeupFire(root, kind) {
+  // kind: 'auto' (scheduled), 'user-trigger' (사용자 명시 다음라운드), 'wakeup-miss'
+  const state = _loadWakeupHistory(root);
+  state.fires.push({ at: new Date().toISOString(), kind: kind || 'auto' });
+  // 최근 50개만 유지
+  if (state.fires.length > 50) state.fires = state.fires.slice(-50);
+  _writeWakeupHistory(root, state);
+  return state;
+}
+// 권장 interval 계산 (sec)
+//   user-trigger 빈도 + pre-wake critical + 최근 평균 gap 기반
+//   범위: 600 (10min) ~ 2700 (45min)
+function _computeAdaptiveInterval(root) {
+  const DEFAULT = 1500; // 25min
+  const MIN = 600;      // 10min
+  const MAX = 2700;     // 45min
+
+  // 1) opt-out — env or override
+  if (process.env.LEERNESS_FIXED_INTERVAL && process.env.LEERNESS_FIXED_INTERVAL !== '0') {
+    const fixed = Number(process.env.LEERNESS_FIXED_INTERVAL);
+    if (!isNaN(fixed) && fixed >= 60) return { interval: fixed, reason: 'env LEERNESS_FIXED_INTERVAL', adaptive: false };
+    return { interval: DEFAULT, reason: 'env override (default)', adaptive: false };
+  }
+  const state = _loadWakeupHistory(root);
+  if (state.override && Number(state.override) >= 60) {
+    return { interval: Number(state.override), reason: 'wakeup-history.json override', adaptive: false };
+  }
+
+  // 2) 활동량 분석 — 최근 2시간 user-trigger 수
+  const now = Date.now();
+  const recent = state.fires.filter(f => (now - new Date(f.at).getTime()) < 2 * 60 * 60 * 1000);
+  const userTriggers = recent.filter(f => f.kind === 'user-trigger').length;
+  const totalRecent = recent.length;
+
+  // 3) 평균 user-trigger gap (분)
+  const userFires = state.fires.filter(f => f.kind === 'user-trigger').slice(-5);
+  let avgGapMin = null;
+  if (userFires.length >= 2) {
+    let totalGap = 0;
+    for (let i = 1; i < userFires.length; i++) {
+      totalGap += new Date(userFires[i].at).getTime() - new Date(userFires[i - 1].at).getTime();
+    }
+    avgGapMin = Math.floor((totalGap / (userFires.length - 1)) / 60000);
+  }
+
+  // 4) pre-wake critical signal (1.9.209)
+  let criticalSignal = false;
+  try {
+    const pw = _loadPreWakeReport(root);
+    if (pw.reports.length > 0) {
+      const latest = pw.reports[pw.reports.length - 1];
+      if (latest.summary && latest.summary.criticalCount > 0) criticalSignal = true;
+    }
+  } catch {}
+
+  // 5) 계산
+  let interval = DEFAULT;
+  const reasons = [];
+  if (userTriggers >= 3) {
+    interval = Math.max(MIN, 900); // 15min — 활발한 사용자 활동
+    reasons.push(`user-trigger ${userTriggers}회 (2h)`);
+  } else if (userTriggers === 0 && totalRecent <= 1) {
+    interval = Math.min(MAX, 2100); // 35min — 한산
+    reasons.push('user-trigger 없음 (2h)');
+  } else {
+    interval = DEFAULT;
+    reasons.push('default 25min');
+  }
+  // avgGap 기반 미세 조정
+  if (avgGapMin !== null && avgGapMin < 20) {
+    interval = Math.max(MIN, Math.min(interval, avgGapMin * 60));
+    reasons.push(`avg user gap ${avgGapMin}min`);
+  }
+  // critical 신호 시 짧게
+  if (criticalSignal && interval > 1200) {
+    interval = 1200; // 20min
+    reasons.push('pre-wake critical detected');
+  }
+
+  return {
+    interval,
+    reason: reasons.join(' + '),
+    adaptive: true,
+    stats: {
+      recentTotal: totalRecent,
+      userTriggers,
+      avgUserGapMin: avgGapMin,
+      criticalSignal
+    }
+  };
+}
+
 // 1.9.203: 자동 라운드 plan 정리 — 사용자 명시
 //   "백그라운드에 다음 작업이 시작가능한 예상 시간 + 일어났을때 해야하는 일을 정리"
 //   라운드 마무리 시 .harness/auto-resume-plan.json 자동 저장 → 다음 wakeup 시 즉시 실행 가능
@@ -2659,6 +2772,107 @@ function preWakeAuditCmd(root, sub) {
   }
   log(dim(`  → 저장: .harness/pre-wake-report.json (최근 10개 유지)`));
   log(dim(`  → 깨어난 후: leerness pre-wake-audit --last`));
+}
+
+// 1.9.210: leerness wakeup-interval <get|set|auto|history|record> — adaptive wakeup interval (사용자 명시)
+//   "wakeup 30분등 긴 시간이 필요없다면 간격을 타이트하게 자동으로 조절하도록"
+//   get      → 현재 권장 interval + 분석 stats (--json 가능)
+//   set N    → wakeup-history.json override 설정 (초)
+//   auto     → override 해제 (자동 계산 모드 복귀)
+//   history  → 최근 fire 이력 출력
+//   record <kind> → fire 기록 (user-trigger / auto / wakeup-miss)
+function wakeupIntervalCmd(root, sub, val) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+
+  if (!sub || sub === 'help' || sub === '--help') {
+    log(`# leerness wakeup-interval (1.9.210) — adaptive wakeup 간격`);
+    log('');
+    log(`  get              → 현재 권장 interval + stats (--json 가능)`);
+    log(`  set <secs>       → override 설정 (예: leerness wakeup-interval set 900)`);
+    log(`  auto             → override 해제 + 자동 계산 모드`);
+    log(`  history          → 최근 fire 이력 출력`);
+    log(`  record <kind>    → fire 기록 (user-trigger / auto / wakeup-miss)`);
+    log('');
+    log(dim(`  opt-out: env LEERNESS_FIXED_INTERVAL=1500 (초) 또는 set <secs>`));
+    return;
+  }
+
+  if (sub === 'get') {
+    const result = _computeAdaptiveInterval(root);
+    if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
+    log(cyan(`# leerness wakeup-interval get (1.9.210)`));
+    log(`  📊 권장 interval: ${grn(`${result.interval}s (${Math.round(result.interval/60)}min)`)}`);
+    log(`  mode: ${result.adaptive ? grn('adaptive') : yel('fixed')}`);
+    log(`  reason: ${result.reason}`);
+    if (result.stats) {
+      log('');
+      log(`  📈 stats (recent 2h):`);
+      log(`     • total fires: ${result.stats.recentTotal}`);
+      log(`     • user triggers: ${result.stats.userTriggers}`);
+      if (result.stats.avgUserGapMin !== null) log(`     • avg user gap: ${result.stats.avgUserGapMin}min`);
+      if (result.stats.criticalSignal) log(yel(`     • pre-wake critical 감지`));
+    }
+    log('');
+    log(dim(`  → ScheduleWakeup(delaySeconds: ${result.interval}) 권장`));
+    return;
+  }
+
+  if (sub === 'set') {
+    const n = Number(val);
+    if (!val || isNaN(n) || n < 60) { console.error('Usage: leerness wakeup-interval set <secs ≥ 60>'); process.exit(1); }
+    const state = _loadWakeupHistory(root);
+    state.override = n;
+    _writeWakeupHistory(root, state);
+    if (has('--json')) { log(JSON.stringify({ override: n }, null, 2)); return; }
+    log(grn(`✓ wakeup-interval override 설정: ${n}s (${Math.round(n/60)}min)`));
+    log(dim(`  해제: leerness wakeup-interval auto`));
+    return;
+  }
+
+  if (sub === 'auto') {
+    const state = _loadWakeupHistory(root);
+    state.override = null;
+    _writeWakeupHistory(root, state);
+    const result = _computeAdaptiveInterval(root);
+    if (has('--json')) { log(JSON.stringify({ override: null, current: result }, null, 2)); return; }
+    log(grn(`✓ override 해제 — 자동 계산 모드`));
+    log(`  현재 권장: ${result.interval}s (${Math.round(result.interval/60)}min) — ${result.reason}`);
+    return;
+  }
+
+  if (sub === 'history') {
+    const state = _loadWakeupHistory(root);
+    if (has('--json')) { log(JSON.stringify({ override: state.override, fires: state.fires.slice(-20) }, null, 2)); return; }
+    log(cyan(`# leerness wakeup-interval history (1.9.210)`));
+    log(`  total fires: ${state.fires.length}${state.override ? ` · override: ${state.override}s` : ''}`);
+    log('');
+    const recent = state.fires.slice(-15);
+    if (recent.length === 0) { log(dim('  (없음)')); return; }
+    for (const f of recent) {
+      const icon = f.kind === 'user-trigger' ? '👆' : (f.kind === 'wakeup-miss' ? '❗' : '⏰');
+      log(`  ${icon} ${f.at}  ${dim(f.kind)}`);
+    }
+    return;
+  }
+
+  if (sub === 'record') {
+    const kind = val || 'auto';
+    const validKinds = ['auto', 'user-trigger', 'wakeup-miss'];
+    if (!validKinds.includes(kind)) { console.error(`kind must be: ${validKinds.join('/')}`); process.exit(1); }
+    _recordWakeupFire(root, kind);
+    if (has('--json')) { log(JSON.stringify({ recorded: kind, at: new Date().toISOString() }, null, 2)); return; }
+    log(grn(`✓ wakeup fire 기록: ${kind}`));
+    return;
+  }
+
+  console.error(`Unknown subcommand: ${sub}`);
+  console.error(`Run: leerness wakeup-interval help`);
+  process.exit(1);
 }
 
 // 1.9.199: wakeup miss 자동 회복 강화 — last-handoff timestamp 기록 + 25min 기대 interval 정밀 측정
@@ -16064,6 +16278,8 @@ async function main() {
   if (cmd === 'constraints')                        return constraintsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit (사용자 명시)
   if (cmd === 'pre-wake-audit')                     return preWakeAuditCmd(arg('--path', process.cwd()), args[1]);
+  // 1.9.210: leerness wakeup-interval <get|set|auto|history|record> — adaptive interval (사용자 명시)
+  if (cmd === 'wakeup-interval')                    return wakeupIntervalCmd(arg('--path', process.cwd()), args[1], args[2]);
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);

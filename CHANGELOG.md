@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.9.210 — 2026-05-22
+
+**⚡ adaptive wakeup interval — 사용자 활동 기반 자동 조절 (사용자 명시).**
+
+### 사용자 명시
+> *"wakeup 30분등 긴 시간이 필요없다면 간격을 타이트하게 자동으로 조절하도록"*
+
+### 1. `.harness/wakeup-history.json` — fire 이력 누적
+- `_wakeupHistoryPath / _loadWakeupHistory / _writeWakeupHistory` — 파일 I/O
+- `_recordWakeupFire(root, kind)` — kind: 'auto' / 'user-trigger' / 'wakeup-miss'
+- 최근 50개 rotate
+
+### 2. `_computeAdaptiveInterval(root)` — 활동량 기반 권장 interval
+- 범위: **600s (10min) ~ 2700s (45min)**, default 1500s
+- 분석 차원:
+  - 최근 2시간 user-trigger 빈도 (3+ → 15min, 0 → 35min)
+  - 최근 5건 user-trigger 평균 gap (avg < 20min → 단축)
+  - pre-wake critical 신호 (1.9.209 통합) → 20min 단축
+- opt-out:
+  - env `LEERNESS_FIXED_INTERVAL=1500`
+  - `leerness wakeup-interval set 900` (override)
+
+### 3. `leerness wakeup-interval <get|set|auto|history|record>` CLI
+- `get` — 권장 interval + stats (--json)
+- `set <secs>` — override 설정
+- `auto` — override 해제 + 자동 계산 복귀
+- `history` — 최근 fire 이력 (--json)
+- `record <kind>` — fire 기록 (테스트/외부 통합용)
+
+### 4. 자동 단축 시나리오 검증
+- 신규 워크스페이스 idle → **35min**
+- user-trigger 3회/2h → **10min** (1500 → 600)
+- pre-wake critical + 활동 보통 → **20min**
+
+### 5. 누적 회귀 (1.9.200~209) — 모두 유지
+
+### 6. stress-v155 — 18/18 PASS
+- 1.9.210 (9) + 성능 (2) + 누적 회귀 (7)
+- 격리 tmp dir 라이프사이클 + override 토글 + rotate to 50
+- 성능: --version cold start avg 440ms · MCP 54 도구 421ms
+
+### 7. 자동 release (72 라운드 main-push streak · 33 라운드 npm publish streak)
+
+---
+
 ## 1.9.209 — 2026-05-22
 
 **🔍 pre-wake sub-agent audit + 깨어남 직후 자동 노출 (사용자 명시).**
