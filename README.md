@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.215-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v160-17%2F17-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-145-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-77_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-98%2F100_(5축)-brightgreen)]() [![handoff-auto](https://img.shields.io/badge/handoff_헤드라인-15요소-success)]() [![perf](https://img.shields.io/badge/cold_start-677ms-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.216-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v161-19%2F19-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-59-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-146-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-78_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-98%2F100_(5축)-brightgreen)]() [![mcp-7r](https://img.shields.io/badge/MCP_7라운드-5종_추가-success)]() [![perf](https://img.shields.io/badge/cold_start-544ms-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.215  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.216  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🎯 handoff 헤드라인 constraints/intent 자동 통합 (15요소)         ║
+  ║  🔌 MCP 59 도구 (1.9.207~213 외부 AI 노출 +5종)                  ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

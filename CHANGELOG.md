@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.9.216 — 2026-05-22
+
+**🔌 MCP 5종 추가 — 1.9.207~213 외부 AI 노출 (54 → 59 도구).**
+
+> 백로그 소진 후 외부 AI 통합 가치 강화 — Claude/Codex/Gemini 등이 신규 7 라운드 기능을 직접 호출 가능
+
+### 1. MCP 신규 5종 (1.9.216 라벨)
+| 도구 | 출처 | 인자 |
+|---|---|---|
+| `leerness_requests_audit` | 1.9.207 | `{ path? }` → missing/tracked/stale 회수 |
+| `leerness_constraints_check` | 1.9.208 | `{ request, path? }` → 플랫폼 alias 매칭 |
+| `leerness_pre_wake_audit` | 1.9.209 | `{ path? }` → 6영역 audit |
+| `leerness_intent_classify` | 1.9.213 | `{ request, path? }` → intent + 도메인 + dry-run 확장 |
+| `leerness_idempotency_audit` | 1.9.212 | `{ path? }` → 4영역 멱등성 검사 |
+
+### 2. 5축 매트릭스 B축 (멀티 Sub-Agent) 가치 강화
+- 외부 AI 가 leerness 의 7 라운드 신규 기능을 MCP 로 직접 호출
+- Claude Desktop / Cursor / Codex CLI 등에서 leerness MCP server 등록 → 즉시 사용 가능
+- "사용자가 했던 요청 중 누락된 게 있나?" "이 기능 구현 전 어떤 API 규정?" "이 요청은 정확히 그것만 / 포괄적?" 등을 외부 AI가 회수
+
+### 3. 누적 회귀 (1.9.207~215) — 모두 유지
+
+### 4. stress-v161 — 19/19 PASS
+- 1.9.216 (8): VERSION + tools/list 59개 + 5종 등록 + 4종 실 호출 검증
+- leerness_intent_classify("맵+캐릭터+게임 기능") → broad/game/8 candidates ✓
+- leerness_constraints_check("Stripe API") → stripe matched ✓
+- leerness_pre_wake_audit → audited 0 ✓
+- leerness_idempotency_audit → clean ✓
+- leerness_requests_audit → total=0 ✓
+- 성능 (2): cold_start 544ms / MCP 59도구 541ms
+- 누적 회귀 (9): 1.9.207~215
+
+### 5. 자동 release (78 라운드 main-push streak · 39 라운드 npm publish streak)
+
+🎉 **MCP 58 도구 마일스톤** (이전 53 → 59, +6 in 1.9.158/159/168/216)
+
+---
+
 ## 1.9.215 — 2026-05-22
 
 **🎯 handoff 헤드라인에 constraints/intent 자동 통합 + AGENTS.md 7 라운드 누적.**

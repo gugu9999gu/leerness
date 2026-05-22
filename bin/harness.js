@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.215';
+const VERSION = '1.9.216';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -13284,7 +13284,12 @@ function mcpServeCmd(root) {
     { name: 'leerness_web', description: '1.9.168 — Web Bridge (1.9.165 playwright opt-in). sub: check (설치 + permissions.browser 확인) | screenshot (URL → PNG) | extract (URL + CSS selector → DOM 텍스트). 외부 AI가 leerness 의 웹 자동화 능력을 직접 호출. playwright 미설치 시 친절 안내 (graceful). 인자: { sub (required), url?, out?, selector?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'screenshot', 'extract'] }, url: { type: 'string' }, out: { type: 'string' }, selector: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } },
     { name: 'leerness_pc', description: '1.9.168 — PC Bridge (1.9.166 robotjs/nut-tree opt-in). sub: check (설치 + permissions.mouse/keyboard) | click (x,y) | type (text) | screenshot (out). ⚠ full permissions 권장 (mouse/keyboard 접근). 외부 AI가 데스크탑 자동화 능력을 직접 호출. 인자: { sub (required), x?, y?, text?, out?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'click', 'type', 'screenshot'] }, x: { type: 'number' }, y: { type: 'number' }, text: { type: 'string' }, out: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } },
     { name: 'leerness_lsp', description: '1.9.168 — LSP Bridge (1.9.167 typescript opt-in + regex fallback). sub: check (설치 여부) | symbols (file → function/class/interface/type/enum 목록) | references (name + in 디렉토리 → 호출 위치). 외부 AI가 코드 인텔리전스를 직접 호출 (의존성 0 fallback 동작). 🎉 MCP 53 도구 마일스톤. 인자: { sub (required), file?, name?, in?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'symbols', 'references'] }, file: { type: 'string' }, name: { type: 'string' }, in: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } },
-    { name: 'leerness_review_request', description: '1.9.176 — 사용자 요청 사전 검토 (사용자 명시 요청). AI 에이전트가 사용자 요구를 **무조건 구현 전**에 호출. 분석: 1) estimatedType (route 추정), 2) conflicts (lesson 실패/진행중 task), 3) reuseCandidates (skill/reuse-map 매칭), 4) lessonsRecall (과거 결정), 5) planConflicts (진행중 milestone), 6) featureConflicts (feature graph 영역 겹침), 7) recommendedSteps (작업 유형별 3-5 단계), 8) efficiencyHints, 9) proceed (true/false). 사용자 결정 도움. 인자: { request (required), path? }', inputSchema: { type: 'object', properties: { request: { type: 'string' }, path: { type: 'string' } }, required: ['request'] } }
+    { name: 'leerness_review_request', description: '1.9.176 — 사용자 요청 사전 검토 (사용자 명시 요청). AI 에이전트가 사용자 요구를 **무조건 구현 전**에 호출. 분석: 1) estimatedType (route 추정), 2) conflicts (lesson 실패/진행중 task), 3) reuseCandidates (skill/reuse-map 매칭), 4) lessonsRecall (과거 결정), 5) planConflicts (진행중 milestone), 6) featureConflicts (feature graph 영역 겹침), 7) recommendedSteps (작업 유형별 3-5 단계), 8) efficiencyHints, 9) proceed (true/false). 사용자 결정 도움. 인자: { request (required), path? }', inputSchema: { type: 'object', properties: { request: { type: 'string' }, path: { type: 'string' } }, required: ['request'] } },
+    { name: 'leerness_requests_audit', description: '1.9.216 (1.9.207 사용자 명시) — 사용자 명시 요청 누락 확인 절차. .harness/user-requests.json 의 open/in-progress 요청을 task-log/plan/decisions 와 매칭 → missing/tracked/stale 분류. 외부 AI가 "사용자가 했던 요청 중 누락된 게 있나?"를 직접 회수. 응답: { total, open, missing[], tracked[], stale[], completed, dropped }. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_constraints_check', description: '1.9.216 (1.9.208 사용자 명시) — 플랫폼/API 제약 사전 체크. 사용자 요청 텍스트에서 플랫폼 alias 매칭 (stripe/openai/anthropic/github/discord/twitter 6종 + 사용자 정의) → 각 플랫폼의 rate-limit / idempotency / auth / cost 제약 노출. 외부 AI가 "이 기능 구현 전 어떤 규정을 봐야 하나?"를 직접 회수. 인자: { request (required), path? }', inputSchema: { type: 'object', properties: { request: { type: 'string' }, path: { type: 'string' } }, required: ['request'] } },
+    { name: 'leerness_pre_wake_audit', description: '1.9.216 (1.9.209 사용자 명시) — sleep 전 sub-agent audit. 6 영역 점검: missing-user-requests / stale-in-progress / drift-handoff-stale / wakeup-missed / next-action-pending / auto-resume-plan. 외부 AI가 "깨어나기 전 점검할 부분"을 회수. 응답: { auditedAt, findings: {critical, warning, info}, summary }. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_intent_classify', description: '1.9.216 (1.9.213 사용자 명시) — 사용자 의도 파악 + scope expansion 게이트. 응답: { intent: precise|broad|default, signals, domain, explicitMentions, expansionCandidates, mode: dry-run }. 3원칙 안전: (1) Always-Off Opt-In, (2) Dry-run 기본 (실행 X), (3) 명시 vs 추론 분리 라벨링. 5 도메인 (game/web/api/cli/data). 외부 AI가 "이 요청은 정확히 그것만 / 포괄적 / 기본인가?"를 회수. 인자: { request (required), path? }', inputSchema: { type: 'object', properties: { request: { type: 'string' }, path: { type: 'string' } }, required: ['request'] } },
+    { name: 'leerness_idempotency_audit', description: '1.9.216 (1.9.212 사용자 명시) — 멱등성 위반 탐지. 4영역 점검: rule-duplicate (medium) / task-duplicate-request (medium) / user-request-duplicate (low) / wakeup-duplicate (high). 응답: { violations[], verified[], summary: {totalViolations, high/medium/low, overall} }. 외부 AI가 "워크스페이스에 중복/충돌이 있나?"를 회수. 🎉 MCP 58 도구 마일스톤 (50→58). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -13415,6 +13420,26 @@ function mcpServeCmd(root) {
           case 'leerness_review_request':
             // 1.9.176: 사용자 요청 사전 검토 (사용자 명시 요청)
             cliArgs = ['review-request', String(args.request || ''), '--path', targetPath, '--json'];
+            break;
+          case 'leerness_requests_audit':
+            // 1.9.216 (1.9.207): 사용자 요청 누락 확인 절차
+            cliArgs = ['requests', 'audit', '--path', targetPath, '--json'];
+            break;
+          case 'leerness_constraints_check':
+            // 1.9.216 (1.9.208): 플랫폼/API 제약 사전 체크
+            cliArgs = ['constraints', 'check', String(args.request || ''), '--path', targetPath, '--json'];
+            break;
+          case 'leerness_pre_wake_audit':
+            // 1.9.216 (1.9.209): pre-wake sub-agent audit
+            cliArgs = ['pre-wake-audit', '--path', targetPath, '--json'];
+            break;
+          case 'leerness_intent_classify':
+            // 1.9.216 (1.9.213): intent inference + scope expansion (dry-run)
+            cliArgs = ['intent', 'expand', String(args.request || ''), '--path', targetPath, '--json'];
+            break;
+          case 'leerness_idempotency_audit':
+            // 1.9.216 (1.9.212): 멱등성 감사 (rule/task/user-requests/wakeups 4영역)
+            cliArgs = ['idempotency', 'audit', '--path', targetPath, '--json'];
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
