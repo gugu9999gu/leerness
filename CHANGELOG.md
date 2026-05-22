@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.9.226 — 2026-05-23
+
+**🔄 round-history CLI + handoff 헤드라인 라운드 카운터 + MCP 62번째 도구.**
+
+### 1. `leerness round-history` 새 명령 — 자율 라운드 통계
+- git tag `v1.9.X` 기반 누적 라운드 카운트 (graceful fallback: git 없으면 0)
+- 응답: `{ currentVersion, roundCount, baselineVersion, latestTags[], nextMilestone, roundsToNextMilestone, firstTagAt, latestTagAt, daysActive, avgRoundsPerDay }`
+- 마일스톤 자동 감지: 50/75/100/125/150/175/200/250/300/400/500
+- `--json` 옵션 (외부 자동화)
+
+### 2. handoff 헤드라인 17번째 요소
+- 5 라운드 이상 누적 시 `🔄 R<N>` 자동 노출
+- 다음 마일스톤이 20 라운드 이내일 때: `🔄 R182 → R200 (18R 남음)` 강조
+- 자율 모드 진행도 한눈에
+
+### 3. MCP 62번째 도구 — `leerness_round_history`
+- 외부 AI가 "이 프로젝트는 얼마나 진행됐고 다음 마일스톤까지 몇 라운드 남았나?"를 회수
+- MCP 61 → 62 (+1)
+
+### 4. 실 측정 (leerness 자체 프로젝트)
+- 누적 라운드: **182R** (baseline v1.9.6 → v1.9.225)
+- 활동 기간: 14일 / 평균 **13 rounds/day**
+- 다음 마일스톤: **R200 (18 라운드 남음)**
+
+### 5. 누적 회귀 (1.9.207~225) — 모두 유지
+
+### 6. stress-v171 — 16/16 PASS
+- 1.9.226 (7): VERSION + round-history CLI + --json + git 없는 fallback + handoff 헤드라인 + MCP 62 등록 + MCP 실 호출
+- 성능 (2): cold_start avg 336ms / round-history 535ms
+- 누적 회귀 (7): 1.9.207~225
+
+### 7. 자동 release (88 라운드 main-push streak · 49 라운드 npm publish streak)
+
+🔄 **자율 라운드 진행도 가시화** — handoff 한 줄에서 마일스톤 예측 가능
+
+---
+
 ## 1.9.225 — 2026-05-22
 
 **🔧 drift check --auto-fix delivered 통합 + LEERNESS_AUTO_APPLY_DELIVERED env opt-in.**
