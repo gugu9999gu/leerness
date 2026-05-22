@@ -17,3 +17,11 @@ _reports/
 *.private.json
 .harness/skill-publish.local.json
 .harness/**/*.local.json
+.env.production
+.env.*.local
+*.pem
+credentials.json
+.harness/credentials.local.json
+.harness/incidents/
+.harness/agent-sessions/
+.harness/runs/

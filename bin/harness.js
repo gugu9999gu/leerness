@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.205';
+const VERSION = '1.9.206';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -766,19 +766,24 @@ async function resolveInstallOptions(root, opts = {}) {
   // --no-interactive-select 또는 LEERNESS_NO_INTERACTIVE=1 → 구식 숫자 선택
   const useInteractive = shouldAsk && !has('--no-interactive-select') && process.env.LEERNESS_NO_INTERACTIVE !== '1';
   if (shouldAsk && !explicitLang) {
+    // 1.9.206: 언어 선택 자체는 항상 ko (사용자가 언어를 모르므로) → 선택 후 후속은 선택된 언어
     if (useInteractive) {
-      const langOpt = await _selectOne('설치 언어를 선택하세요', [
-        { label: '자동 감지', description: '디렉토리/파일 분석 (한국어/영어 자동 판별)', id: 'auto' },
-        { label: '한국어', description: '모든 인스트럭션을 한국어로 생성', id: 'ko' },
-        { label: 'English', description: '모든 인스트럭션을 영어로 생성', id: 'en' }
+      const langOpt = await _selectOne(_t('install.lang.title', 'ko'), [
+        { label: _t('install.lang.auto', 'ko'), description: _t('install.lang.auto.desc', 'ko'), id: 'auto' },
+        { label: _t('install.lang.ko', 'ko'), description: _t('install.lang.ko.desc', 'ko'), id: 'ko' },
+        { label: _t('install.lang.en', 'ko'), description: _t('install.lang.en.desc', 'ko'), id: 'en' }
       ], { defaultIndex: 0 });
       lang = langOpt && langOpt.id ? detectLanguageValue(root, langOpt.id) : detectLanguageValue(root, 'auto');
     } else {
-      log('\n설치 언어를 선택하세요.');
-      log('1) 자동 감지'); log('2) 한국어'); log('3) English');
-      const a = await ask('선택 [1]: ');
+      log('\n' + _t('install.lang.title', 'ko') + '.');
+      log('1) ' + _t('install.lang.auto', 'ko'));
+      log('2) ' + _t('install.lang.ko', 'ko'));
+      log('3) ' + _t('install.lang.en', 'ko'));
+      const a = await ask('Select / 선택 [1]: ');
       lang = a === '2' ? 'ko' : a === '3' ? 'en' : detectLanguageValue(root, 'auto');
     }
+    // 1.9.206: 영어 선택 시 후속 prompt 영어 표시 환경변수 즉시 설정
+    if (lang === 'en') process.env.LEERNESS_LANG = 'en';
   }
   // 1.9.148: 스킬 prompt 제거 (사용자 명시 요청) — leerness가 자동으로 공식 표준 스킬 5종 설치.
   //   필요할 때 사용자가 leerness skill install <id> 로 추가 가능.
@@ -787,8 +792,10 @@ async function resolveInstallOptions(root, opts = {}) {
   //   _selectMany 로 Space 토글, a 전체, n 해제, Enter 확정. 선택된 에이전트들만 .env.example에 LEERNESS_ENABLE_* 활성화.
   let agentsOptIn = null;   // string[] (다중) 또는 'none' (선택 안함)
   if (shouldAsk && !opts._skipAgentsPrompt) {
+    // 1.9.206: 선택된 언어로 prompt 표시
+    const _agLang = lang === 'en' ? 'en' : 'ko';
     if (useInteractive) {
-      const picked = await _selectMany('CLI 에이전트 활성화 (복수 선택, Space 토글) — sub-agent 위임용', [
+      const picked = await _selectMany(_t('install.agents.title', _agLang), [
         { label: 'Claude (ANTHROPIC_API_KEY 또는 claude CLI)', description: '추론력 최고 — 코드 작성/리뷰 기본', id: 'claude' },
         { label: 'Codex (OpenAI codex CLI)', description: 'OpenAI 코드 모델', id: 'codex' },
         { label: 'Gemini (gemini CLI)', description: 'Google 멀티모달 모델', id: 'gemini' },
@@ -1778,6 +1785,84 @@ async function skillAutoCacheCmd(root, sub) {
   }
   if (c.expired) log(`  → 갱신: leerness skill auto-cache refresh`);
 }
+
+// 1.9.206: i18n 시스템 (사용자 명시) — 설치 가이드 / REPL agent 다국어 + UI/UX 개선
+//   사용자 명시: "설치 가이드에서 언어 선택에 따라 설치 가이드 및 REPL agent 모드 등 설정된 언어로 표시"
+//   설계: 핵심 string table (ko/en) + _t(key, lang) helper. 설치 시 선택 언어 → .harness/LANGUAGE 저장.
+//   lang 결정: explicit > .harness/LANGUAGE > LEERNESS_LANG env > 'ko' (default)
+const STRINGS = {
+  // 설치 가이드 prompt
+  'install.lang.title': { ko: '설치 언어를 선택하세요', en: 'Select install language' },
+  'install.lang.auto':  { ko: '자동 감지', en: 'Auto detect' },
+  'install.lang.auto.desc': { ko: '디렉토리/파일 분석 (한국어/영어 자동 판별)', en: 'Analyze dir/files (auto KO/EN)' },
+  'install.lang.ko': { ko: '한국어', en: 'Korean' },
+  'install.lang.ko.desc': { ko: '모든 인스트럭션을 한국어로 생성', en: 'All instructions in Korean' },
+  'install.lang.en': { ko: 'English', en: 'English' },
+  'install.lang.en.desc': { ko: '모든 인스트럭션을 영어로 생성', en: 'All instructions in English' },
+  'install.agents.title': { ko: 'CLI 에이전트 활성화 (복수 선택, Space 토글) — sub-agent 위임용',
+                            en: 'Enable CLI agents (multi-select, Space toggle) — for sub-agent dispatch' },
+  'install.agents.none': { ko: '선택 안함 (나중에 setup-agents)', en: 'None (later setup-agents)' },
+  'install.complete': { ko: '✓ 설치 완료', en: '✓ Install complete' },
+  // REPL agent 모드
+  'repl.welcome.title': { ko: 'leerness REPL agent', en: 'leerness REPL agent' },
+  'repl.welcome.subtitle': { ko: 'Tab provider · Shift+Tab model · :help · /slash', en: 'Tab provider · Shift+Tab model · :help · /slash' },
+  'repl.welcome.start': { ko: '시작하려면 메시지를 입력하세요', en: 'Type a message to start' },
+  // 공통
+  'common.cancel': { ko: '취소됨', en: 'Cancelled' },
+  'common.confirm': { ko: '확인', en: 'Confirm' },
+  'common.ready': { ko: '준비 완료', en: 'Ready' }
+};
+// 현재 사용 언어 결정 (env > config > 'ko')
+function _currentLang(root) {
+  if (process.env.LEERNESS_LANG) return process.env.LEERNESS_LANG === 'en' ? 'en' : 'ko';
+  try {
+    if (root) {
+      const fp = path.join(root, '.harness', 'LANGUAGE');
+      if (exists(fp)) {
+        const v = read(fp).trim().toLowerCase();
+        if (v === 'en' || v === 'english') return 'en';
+        if (v === 'ko' || v === 'korean' || v === 'kr') return 'ko';
+      }
+    }
+  } catch {}
+  return 'ko';  // default
+}
+function _t(key, lang) {
+  const entry = STRINGS[key];
+  if (!entry) return key;  // fallback: 키 자체 반환
+  return entry[lang || 'ko'] || entry.ko || key;
+}
+
+// 1.9.206: UI/UX 개선 — typewriter / fade-in 효과 (opt-in via LEERNESS_TYPEWRITER=1)
+function _typewrite(text, delayMs) {
+  delayMs = delayMs || 15;
+  if (process.env.LEERNESS_TYPEWRITER !== '1' || !process.stdout.isTTY) {
+    process.stdout.write(text);
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let i = 0;
+    const step = () => {
+      if (i >= text.length) return resolve();
+      process.stdout.write(text[i++]);
+      setTimeout(step, delayMs);
+    };
+    step();
+  });
+}
+// 색상 helper (TTY 시 ANSI, 비-TTY 시 plain)
+const _ui = {
+  bold: s => process.stdout.isTTY ? `\x1b[1m${s}\x1b[0m` : s,
+  dim: s => process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s,
+  cyan: s => process.stdout.isTTY ? `\x1b[36m${s}\x1b[0m` : s,
+  green: s => process.stdout.isTTY ? `\x1b[32m${s}\x1b[0m` : s,
+  yellow: s => process.stdout.isTTY ? `\x1b[33m${s}\x1b[0m` : s,
+  // 구분선 정렬 (터미널 width 고려)
+  hr: (char) => {
+    const w = process.stdout.columns || 60;
+    return (char || '─').repeat(Math.min(w - 2, 60));
+  }
+};
 
 // 1.9.205: ScheduleWakeup 등록 추적 (사용자 명시)
 //   "예정된 알람이전에 사용자 요청이 들어오면 백그라운드의 알람을 종료후 다시 갱신"

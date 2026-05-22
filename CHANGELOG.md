@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.9.206 — 2026-05-22
+
+**🌐 i18n MVP + UI/UX 헬퍼 (사용자 명시 2종).**
+
+### 사용자 명시
+> 1. *"설치 가이드에서 언어 선택에 따라 설치 가이드 및 REPL agent 모드 등 설정된 언어로 표시되어야"*
+> 2. *"설치 가이드 및 REPL agent 모드 UI UX를 개선해줘, 모션이나, 텍스트 출력방식 등등"*
+
+### 1. i18n 시스템 MVP (10 핵심 keys)
+- `STRINGS` table (ko/en) — install.lang.* / install.agents.* / repl.welcome.* / common.*
+- `_currentLang(root)` — `LEERNESS_LANG` env → `.harness/LANGUAGE` → 'ko' fallback
+- `_t(key, lang)` — i18n lookup helper
+
+### 2. 영어 선택 시 후속 prompt 자동 영어 표시
+- 언어 선택 자체는 한국어 (사용자가 언어를 모르므로)
+- 'en' 선택 시 `process.env.LEERNESS_LANG = 'en'` 즉시 설정 → agents prompt 등 자동 영어 변환
+
+### 3. UI/UX 헬퍼 (`_typewrite`, `_ui`)
+- `_typewrite(text, delayMs)` — opt-in via `LEERNESS_TYPEWRITER=1` (TTY 만)
+- `_ui.bold/dim/cyan/green/yellow/hr` — 색상 + 구분선 표준화
+- 비-TTY 환경 자동 fallback (plain text)
+
+### 4. 누적 회귀 (1.9.200~205) — 모두 유지
+
+### 5. stress-v151 — 16/16 PASS
+- i18n (3) + UI helpers (1) + install 다국어 적용 (3) + 성능 (2) + 누적 (7)
+- 성능: --version cold start avg **1049 ms** · MCP 54 도구 **768 ms**
+
+### 6. MVP 노트 (확장 가능 설계)
+- 현재: 10 핵심 keys (설치 가이드 + REPL welcome + common)
+- 추후: REPL agent 모드 전체 메뉴 / handoff / resume 등 확장 가능 (점진적)
+
+### 7. 자동 release
+- main 자동 push **68 라운드 연속** (1.9.140~206)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.205 — 2026-05-22
 
 **⚡ ScheduleWakeup 사용자 요청 우선 갱신 (사용자 명시) — wakeup miss 실측 후속.**
