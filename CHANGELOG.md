@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.9.209 — 2026-05-22
+
+**🔍 pre-wake sub-agent audit + 깨어남 직후 자동 노출 (사용자 명시).**
+
+### 사용자 명시
+> *"메인 에이전트가 슬립전에 서브에이전트를 호출해서 미비된 부분이 있는지, 충돌나는 부분이 있는지, 이전에 누락된 작업이 있는지 등등 여러부분을 탐색하면서 필요한 내용을 정리하고 메인 에이전트가 깨어났을때, 서브에이전트가 정리한 내용을 확인해보거나 하는 기능"*
+
+### 1. `.harness/pre-wake-report.json` — sleep 전 audit 누적
+- `_preWakeReportPath/_loadPreWakeReport/_writePreWakeReport` 파일 I/O 헬퍼
+- 최근 10개만 유지 (rotate)
+- 구조: `{ auditedAt, auditVersion, findings: {critical/warning/info}, summary }`
+
+### 2. `_runPreWakeAudit(root)` — sub-agent audit 6영역
+- **missing-user-requests** (1.9.207 통합) — task-log/plan/decisions 매칭 안 된 요청
+- **stale-user-requests** — 7일+ open 요청
+- **stale-in-progress** — 24h+ 진척 없는 task
+- **drift-handoff-stale** — session-handoff.md 5일+ stale
+- **wakeup-missed** — wakeup miss 감지 (1.9.205)
+- **next-action-pending** — next-action queue 대기
+- **auto-resume-plan-ready/stale** — 1.9.203 plan 상태
+
+### 3. `leerness pre-wake-audit` CLI
+- 기본: 새 audit 실행 + 저장
+- `--last` / `show` / `review` — 가장 최근 저장된 audit 표시
+- `--json` — JSON 출력
+
+### 4. handoff 자동 노출 (사용자 명시 "깨어났을때 확인")
+- 헤드라인 14번째 요소: `🔍 pre-wake NC/MW (ageMin)` — critical N건 + warning M건
+- 본문 자동 섹션: `## 🔍 직전 sleep pre-wake-audit (1.9.209, N분 전)`
+  · critical/warning 최대 3개씩 노출
+  · 4시간 이내 보고서만 (stale 자동 hide)
+- 헤드라인 라벨: `1.9.81/93/113/152/162/192/197/204/207/209`
+
+### 5. 누적 회귀 (1.9.200~208) — 모두 유지
+
+### 6. stress-v154 — 18/18 PASS
+- 1.9.209 (9) + 성능 (2) + 누적 회귀 (7)
+- 격리 tmp dir 라이프사이클 검증 (실행 → 저장 → --last → rotate to 10)
+- 6 findings kind 키워드 검증
+- 성능: --version cold start avg 517ms · MCP 54 도구 574ms
+
+### 7. 자동 release (71 라운드 main-push streak · 32 라운드 npm publish streak)
+
+---
+
 ## 1.9.208 — 2026-05-22
 
 **🚦 플랫폼/API 제약 사전 체크 (사용자 명시).**

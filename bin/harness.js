@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.208';
+const VERSION = '1.9.209';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2111,6 +2111,146 @@ function _checkRequestConstraints(root, text) {
   return { matched, suggestions, totalPlatforms: Object.keys(catalog.platforms).length };
 }
 
+// 1.9.209: pre-wake sub-agent audit (사용자 명시)
+//   "메인 에이전트가 슬립전에 서브에이전트를 호출해서 미비된 부분이 있는지, 충돌나는 부분이 있는지,
+//    이전에 누락된 작업이 있는지 등등 여러부분을 탐색하면서 필요한 내용을 정리하고
+//    메인 에이전트가 깨어났을때, 서브에이전트가 정리한 내용을 확인해보거나 하는 기능"
+//   .harness/pre-wake-report.json 에 sleep 전 audit 결과 누적 (최근 10개 유지) →
+//   다음 handoff 에서 자동 노출 → 깨어남 직후 메인 에이전트가 검토 가능
+//   audit 영역: 미답 요청 / 24h+ 무진척 task / drift 신호 / feature_graph 충돌 / 플랫폼 제약 누락
+function _preWakeReportPath(root) { return path.join(root, '.harness', 'pre-wake-report.json'); }
+function _loadPreWakeReport(root) {
+  try {
+    const fp = _preWakeReportPath(root);
+    if (!exists(fp)) return { reports: [] };
+    const j = JSON.parse(read(fp));
+    return { reports: Array.isArray(j.reports) ? j.reports : [] };
+  } catch { return { reports: [] }; }
+}
+function _writePreWakeReport(root, reports) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    writeUtf8(_preWakeReportPath(root), JSON.stringify({ reports, updatedAt: new Date().toISOString() }, null, 2));
+    return true;
+  } catch { return false; }
+}
+// 실제 audit 실행 — sub-agent 역할 (단일 프로세스에서 sync로 다양한 신호 수집)
+function _runPreWakeAudit(root) {
+  const audit = {
+    auditedAt: new Date().toISOString(),
+    auditVersion: VERSION,
+    findings: { critical: [], warning: [], info: [] }
+  };
+  // 1) 미답 사용자 요청 (1.9.207)
+  try {
+    const reqAudit = _auditUserRequests(root);
+    if (reqAudit.missing && reqAudit.missing.length > 0) {
+      audit.findings.critical.push({
+        kind: 'missing-user-requests',
+        count: reqAudit.missing.length,
+        detail: `${reqAudit.missing.length}건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨`,
+        items: reqAudit.missing.slice(0, 5).map(r => ({ id: r.id, text: r.text.slice(0, 80) }))
+      });
+    }
+    if (reqAudit.stale && reqAudit.stale.length > 0) {
+      audit.findings.warning.push({
+        kind: 'stale-user-requests',
+        count: reqAudit.stale.length,
+        detail: `${reqAudit.stale.length}건 사용자 요청이 7일+ open 상태`
+      });
+    }
+  } catch (e) { audit.findings.info.push({ kind: 'audit-error', area: 'user-requests', error: String(e.message || e) }); }
+
+  // 2) 24h+ 무진척 task — progress-tracker 검사
+  try {
+    const ptPath = path.join(root, '.harness', 'progress-tracker.md');
+    if (exists(ptPath)) {
+      const content = read(ptPath);
+      const stat = fs.statSync(ptPath);
+      const ageMin = Math.floor((Date.now() - stat.mtimeMs) / 60000);
+      // in-progress 태그가 있는데 24h+ 갱신 없음
+      const inProgressCount = (content.match(/status:\s*in-progress/gi) || []).length;
+      if (inProgressCount > 0 && ageMin > 24 * 60) {
+        audit.findings.warning.push({
+          kind: 'stale-in-progress',
+          count: inProgressCount,
+          detail: `${inProgressCount}건 in-progress task, ${Math.floor(ageMin/60)}h 갱신 없음`,
+          ageMin
+        });
+      }
+    }
+  } catch {}
+
+  // 3) drift 신호 — session-handoff/progress-tracker stale 검사
+  try {
+    const handoffPath = path.join(root, '.harness', 'session-handoff.md');
+    if (exists(handoffPath)) {
+      const stat = fs.statSync(handoffPath);
+      const ageDay = (Date.now() - stat.mtimeMs) / 86400000;
+      if (ageDay > 5) {
+        audit.findings.warning.push({
+          kind: 'drift-handoff-stale',
+          ageDay: Math.round(ageDay * 10) / 10,
+          detail: `session-handoff.md ${ageDay.toFixed(1)}일 stale — drift 위험`
+        });
+      }
+    }
+  } catch {}
+
+  // 4) 다음 라운드 plan 적용 가능 여부 (1.9.203)
+  try {
+    const plan = _loadAutoResumePlan(root);
+    if (!plan) {
+      audit.findings.info.push({ kind: 'no-auto-resume-plan', detail: 'auto-resume-plan.json 없음 — 다음 라운드 진입 시 manual context' });
+    } else if (plan.ageMin > 12 * 60) {
+      audit.findings.warning.push({ kind: 'auto-resume-plan-stale', detail: `plan ${plan.ageMin}분 전 작성 — outdated 가능` });
+    } else {
+      audit.findings.info.push({ kind: 'auto-resume-plan-ready', detail: `nextRoundVersion=${plan.nextRoundVersion}, focus=${(plan.focus||'').slice(0,50)}` });
+    }
+  } catch {}
+
+  // 5) Active wakeup 상태 (1.9.205)
+  try {
+    const wkStat = _analyzeWakeupStatus(root);
+    if (wkStat.hasWakeup && wkStat.kind === 'missed') {
+      audit.findings.critical.push({
+        kind: 'wakeup-missed',
+        deltaMin: wkStat.deltaMin,
+        detail: `wakeup ${wkStat.deltaMin}분 지남 — 다음 라운드 진입 늦음`
+      });
+    }
+  } catch {}
+
+  // 6) next-action queue 잔여 (1.9.201)
+  try {
+    const q = _loadNextActionQueue(root);
+    if (q && q.pending && q.pending.length > 0) {
+      audit.findings.info.push({
+        kind: 'next-action-pending',
+        count: q.pending.length,
+        detail: `${q.pending.length}건 next-action 대기 — leerness next-action take 로 즉시 처리`
+      });
+    }
+  } catch {}
+
+  // 7) 통합 요약
+  audit.summary = {
+    criticalCount: audit.findings.critical.length,
+    warningCount: audit.findings.warning.length,
+    infoCount: audit.findings.info.length,
+    needsAttention: audit.findings.critical.length > 0 || audit.findings.warning.length >= 2
+  };
+  return audit;
+}
+function _saveAndAppendPreWakeReport(root, audit) {
+  const state = _loadPreWakeReport(root);
+  state.reports.push(audit);
+  // 최근 10개만 유지
+  if (state.reports.length > 10) state.reports = state.reports.slice(-10);
+  _writePreWakeReport(root, state.reports);
+  return audit;
+}
+
 // 1.9.203: 자동 라운드 plan 정리 — 사용자 명시
 //   "백그라운드에 다음 작업이 시작가능한 예상 시간 + 일어났을때 해야하는 일을 정리"
 //   라운드 마무리 시 .harness/auto-resume-plan.json 자동 저장 → 다음 wakeup 시 즉시 실행 가능
@@ -2432,6 +2572,93 @@ function constraintsCmd(root, sub, ...rest) {
   console.error(`Unknown subcommand: ${sub}`);
   console.error(`Run: leerness constraints help`);
   process.exit(1);
+}
+
+// 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit CLI (사용자 명시)
+//   "메인 에이전트가 슬립전에 서브에이전트를 호출해서 미비된 부분이 있는지, 충돌나는 부분이 있는지,
+//    이전에 누락된 작업이 있는지 등등 여러부분을 탐색하면서 필요한 내용을 정리"
+//   기본: 새 audit 실행 + 저장 + 출력
+//   --last: 최근 저장된 audit 표시 (사용자 깨어났을 때 검토용)
+//   --json: JSON 출력
+function preWakeAuditCmd(root, sub) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+
+  // --last 또는 review/show — 가장 최근 audit 표시 (실행 안 함)
+  if (has('--last') || sub === 'show' || sub === 'review') {
+    const state = _loadPreWakeReport(root);
+    if (state.reports.length === 0) {
+      log(cyan(`# leerness pre-wake-audit (1.9.209) — review`));
+      log(dim(`  (저장된 audit 없음 — leerness pre-wake-audit 으로 새 실행)`));
+      return;
+    }
+    const latest = state.reports[state.reports.length - 1];
+    if (has('--json')) { log(JSON.stringify(latest, null, 2)); return; }
+    log(cyan(`# leerness pre-wake-audit (1.9.209) — review (latest)`));
+    log(dim(`  audited at: ${latest.auditedAt}  (version ${latest.auditVersion})`));
+    log('');
+    const sum = latest.summary || {};
+    log(`  📊 ${red(`critical ${sum.criticalCount || 0}`)} · ${yel(`warning ${sum.warningCount || 0}`)} · info ${sum.infoCount || 0}`);
+    if (sum.needsAttention) log(yel(`  ⚠ needsAttention=true — 메인 에이전트 검토 필요`));
+    log('');
+    if (latest.findings.critical && latest.findings.critical.length) {
+      log(red(`## 🚨 critical (${latest.findings.critical.length})`));
+      latest.findings.critical.forEach(f => log(`  - [${f.kind}] ${f.detail}`));
+      log('');
+    }
+    if (latest.findings.warning && latest.findings.warning.length) {
+      log(yel(`## ⚠ warning (${latest.findings.warning.length})`));
+      latest.findings.warning.forEach(f => log(`  - [${f.kind}] ${f.detail}`));
+      log('');
+    }
+    if (latest.findings.info && latest.findings.info.length) {
+      log(dim(`## ℹ info (${latest.findings.info.length})`));
+      latest.findings.info.forEach(f => log(dim(`  - [${f.kind}] ${f.detail}`)));
+    }
+    return;
+  }
+
+  // 기본: 새 audit 실행 + 저장
+  const audit = _runPreWakeAudit(root);
+  _saveAndAppendPreWakeReport(root, audit);
+
+  if (has('--json')) { log(JSON.stringify(audit, null, 2)); return; }
+  log(cyan(`# leerness pre-wake-audit (1.9.209) — sleep 전 sub-agent audit`));
+  log(dim(`  audited at: ${audit.auditedAt}`));
+  log('');
+  const sum = audit.summary;
+  log(`  📊 ${red(`critical ${sum.criticalCount}`)} · ${yel(`warning ${sum.warningCount}`)} · info ${sum.infoCount}`);
+  if (sum.needsAttention) {
+    log(yel(`  ⚠ needsAttention=true — 깨어난 후 메인 에이전트 검토 필수`));
+  } else {
+    log(grn(`  ✓ 잠재 이슈 없음 — sleep 안전`));
+  }
+  log('');
+  if (audit.findings.critical.length) {
+    log(red(`## 🚨 critical (${audit.findings.critical.length})`));
+    audit.findings.critical.forEach(f => {
+      log(`  - [${f.kind}] ${f.detail}`);
+      if (f.items) f.items.forEach(i => log(dim(`       • ${i.id}: ${i.text}`)));
+    });
+    log('');
+  }
+  if (audit.findings.warning.length) {
+    log(yel(`## ⚠ warning (${audit.findings.warning.length})`));
+    audit.findings.warning.forEach(f => log(`  - [${f.kind}] ${f.detail}`));
+    log('');
+  }
+  if (audit.findings.info.length) {
+    log(dim(`## ℹ info (${audit.findings.info.length})`));
+    audit.findings.info.forEach(f => log(dim(`  - [${f.kind}] ${f.detail}`)));
+    log('');
+  }
+  log(dim(`  → 저장: .harness/pre-wake-report.json (최근 10개 유지)`));
+  log(dim(`  → 깨어난 후: leerness pre-wake-audit --last`));
 }
 
 // 1.9.199: wakeup miss 자동 회복 강화 — last-handoff timestamp 기록 + 25min 기대 interval 정밀 측정
@@ -4477,13 +4704,52 @@ function handoff(root) {
           parts.push(`📥 요청 ${audit.open} (tracked)`);
         }
       } catch {}
+      // 14) 1.9.209: pre-wake-audit 최근 보고서 (사용자 명시) — 깨어남 직후 자동 노출
+      try {
+        const pwState = _loadPreWakeReport(root);
+        if (pwState.reports.length > 0) {
+          const latest = pwState.reports[pwState.reports.length - 1];
+          const sum = latest.summary || {};
+          if (sum.criticalCount > 0 || sum.warningCount > 0) {
+            const ageMin = Math.floor((Date.now() - new Date(latest.auditedAt).getTime()) / 60000);
+            parts.push(`🔍 pre-wake ${sum.criticalCount}C/${sum.warningCount}W (${ageMin}m)`);
+          }
+        }
+      } catch {}
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207/209): ${parts.join(' · ')}`));
       }
     } catch {}
   }
+
+  // 1.9.209: pre-wake-audit 본문 자동 노출 (handoff 마지막 부분, 사용자 명시)
+  //   "메인 에이전트가 깨어났을때, 서브에이전트가 정리한 내용을 확인"
+  try {
+    const pwState = _loadPreWakeReport(root);
+    if (pwState.reports.length > 0) {
+      const latest = pwState.reports[pwState.reports.length - 1];
+      const ageMin = Math.floor((Date.now() - new Date(latest.auditedAt).getTime()) / 60000);
+      // 4시간 이내 보고서만 자동 노출 (오래된 건 stale)
+      if (ageMin < 240 && (latest.summary.criticalCount > 0 || latest.summary.warningCount > 0)) {
+        const isTty = process.stdout && process.stdout.isTTY;
+        const cy2 = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+        const rd2 = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+        const yl2 = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+        const dm2 = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+        log('');
+        log(cy2(`## 🔍 직전 sleep pre-wake-audit (1.9.209, ${ageMin}분 전)`));
+        if (latest.findings.critical && latest.findings.critical.length) {
+          latest.findings.critical.slice(0, 3).forEach(f => log(rd2(`  🚨 [${f.kind}] ${f.detail}`)));
+        }
+        if (latest.findings.warning && latest.findings.warning.length) {
+          latest.findings.warning.slice(0, 3).forEach(f => log(yl2(`  ⚠ [${f.kind}] ${f.detail}`)));
+        }
+        log(dm2(`  → 상세: leerness pre-wake-audit --last`));
+      }
+    }
+  } catch {}
   // 1.9.8: active rules 자동 노출 (매 세션 시작 시 AI에게 보임)
   const activeRules = readRules(root).filter(r => r.status === 'active');
   if (activeRules.length) {
@@ -15796,6 +16062,8 @@ async function main() {
   if (cmd === 'requests')                           return requestsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
   if (cmd === 'constraints')                        return constraintsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  // 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit (사용자 명시)
+  if (cmd === 'pre-wake-audit')                     return preWakeAuditCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);
