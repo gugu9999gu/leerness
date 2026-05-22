@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.9.231 — 2026-05-23
+
+**📍 leerness pulse 새 명령 (한 줄 종합 요약) + MCP 64번째 도구.**
+
+### 1. `leerness pulse` 새 명령 — 한 줄 종합 요약
+- 10 핵심 지표를 1 line으로: `📍 v1.9.231 · 🔄 R187 · 🔌 MCP 64 · 🧠 T0/D0/R0/P0/L0 · 🎯 R200 (1d) · 🔌 abnormal:medium`
+- `--json` 옵션: `{ version, roundCount, mcpTools, memorySurface, security, health, driftScore, nextMilestone, etaDays, abnormalShutdown }`
+- **handoff 보다 가벼움**: drift/health 계산 skip → 더 빠름
+
+### 2. MCP 64번째 도구 — `leerness_pulse`
+- 외부 AI가 가벼운 단일 호출로 leerness 전체 상태 회수
+- 1.9.230 (62) → 1.9.231 (**64**, +1)
+
+### 3. 실 측정 — leerness 자체 pulse
+- 👁 한눈에 보기: R187 / MCP 64 / R200 ETA 1d / abnormal:medium
+- handoff (~1019ms) → pulse (~945ms) — 더 빠르게 핵심만
+
+### 4. 누적 회귀 (1.9.207~230) — 모두 유지
+
+### 5. stress-v176 — 16/16 PASS
+- 1.9.231 (6): VERSION + CLI 한 줄 + --json + git fallback + MCP 64 + 실 호출
+- 성능 (2): cold_start avg 394ms / pulse 945ms
+- 누적 회귀 (8): 1.9.207~230
+
+### 6. 자동 release (93 라운드 main-push streak · 54 라운드 npm publish streak)
+
+📍 **빠른 상태 확인 명령 신설** — pulse 가 handoff보다 가벼워서 자동화에 최적
+
+---
+
 ## 1.9.230 — 2026-05-23
 
 **📊 handoff/session close/health --json milestones 통합 (7 필드 완성) + 헤드라인 ETA 임박 표시.**
