@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.206';
+const VERSION = '1.9.207';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1918,6 +1918,94 @@ function _analyzeWakeupStatus(root) {
   return { hasWakeup: true, latest, deltaMin, kind, pending: pending.length };
 }
 
+// 1.9.207: 사용자 요청 누락 확인 절차 — 사용자 명시
+//   "최근에 명령받아 진행한 것중에 누락된게 없는지 확인하는 절차도 있는지"
+//   .harness/user-requests.json 에 사용자 명시 요청을 누적 기록 → audit 시 task-log/plan/decisions 와 매칭 → 누락 보고
+//   레코드 구조: { id, text, recordedAt, status: 'open'|'in-progress'|'completed'|'dropped',
+//                  linkedTaskIds?, linkedPlanIds?, linkedDecisionIds?, notes?, completedAt?, droppedAt? }
+function _userRequestsPath(root) { return path.join(root, '.harness', 'user-requests.json'); }
+function _loadUserRequests(root) {
+  try {
+    const fp = _userRequestsPath(root);
+    if (!exists(fp)) return { requests: [] };
+    const j = JSON.parse(read(fp));
+    return { requests: Array.isArray(j.requests) ? j.requests : [] };
+  } catch { return { requests: [] }; }
+}
+function _writeUserRequests(root, requests) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    writeUtf8(_userRequestsPath(root), JSON.stringify({ requests, updatedAt: new Date().toISOString() }, null, 2));
+    return true;
+  } catch { return false; }
+}
+function _recordUserRequest(root, text, opts = {}) {
+  if (!text || typeof text !== 'string') return null;
+  const state = _loadUserRequests(root);
+  // 중복 방지: 동일 텍스트 + open 상태 이미 존재 시 skip
+  const norm = text.trim().slice(0, 500);
+  const dup = state.requests.find(r => r.text === norm && (r.status === 'open' || r.status === 'in-progress'));
+  if (dup) return dup;
+  const id = 'UR-' + String(state.requests.length + 1).padStart(4, '0');
+  const entry = {
+    id, text: norm, recordedAt: new Date().toISOString(),
+    status: opts.status || 'open',
+    linkedTaskIds: opts.linkedTaskIds || [],
+    linkedPlanIds: opts.linkedPlanIds || [],
+    linkedDecisionIds: opts.linkedDecisionIds || [],
+    notes: opts.notes || ''
+  };
+  state.requests.push(entry);
+  // 최근 200개만 유지
+  if (state.requests.length > 200) state.requests = state.requests.slice(-200);
+  _writeUserRequests(root, state.requests);
+  return entry;
+}
+function _updateUserRequest(root, id, patch) {
+  const state = _loadUserRequests(root);
+  const idx = state.requests.findIndex(r => r.id === id);
+  if (idx < 0) return null;
+  state.requests[idx] = { ...state.requests[idx], ...patch, updatedAt: new Date().toISOString() };
+  if (patch.status === 'completed' && !state.requests[idx].completedAt) state.requests[idx].completedAt = new Date().toISOString();
+  if (patch.status === 'dropped' && !state.requests[idx].droppedAt) state.requests[idx].droppedAt = new Date().toISOString();
+  _writeUserRequests(root, state.requests);
+  return state.requests[idx];
+}
+// audit: open/in-progress 요청 중 task-log 에 매칭되는 작업이 없는 항목을 "누락 후보"로 보고
+function _auditUserRequests(root) {
+  const state = _loadUserRequests(root);
+  const open = state.requests.filter(r => r.status === 'open' || r.status === 'in-progress');
+  const taskLog = (() => { try { return read(path.join(root, '.harness', 'task-log.md')); } catch { return ''; } })();
+  const plan = (() => { try { return read(path.join(root, '.harness', 'plan.md')); } catch { return ''; } })();
+  const decisions = (() => { try { return read(path.join(root, '.harness', 'decisions.md')); } catch { return ''; } })();
+  const haystack = (taskLog + '\n' + plan + '\n' + decisions).toLowerCase();
+  const missing = [];
+  const tracked = [];
+  open.forEach(req => {
+    const linked = (req.linkedTaskIds && req.linkedTaskIds.length > 0)
+      || (req.linkedPlanIds && req.linkedPlanIds.length > 0)
+      || (req.linkedDecisionIds && req.linkedDecisionIds.length > 0);
+    // 키워드 매칭 — 요청 텍스트의 처음 8단어 중 3단어 이상 task-log/plan/decisions 에 존재 → tracked
+    const words = req.text.toLowerCase().split(/[\s,.()/\\-]+/).filter(w => w.length >= 2).slice(0, 12);
+    const hits = words.filter(w => haystack.includes(w)).length;
+    const matched = hits >= Math.min(3, Math.ceil(words.length * 0.5));
+    if (linked || matched) tracked.push({ ...req, hits, words: words.length });
+    else missing.push({ ...req, hits, words: words.length });
+  });
+  // 7일 이상 묵은 open 요청 (stale)
+  const now = Date.now();
+  const stale = open.filter(r => (now - new Date(r.recordedAt).getTime()) > 7 * 24 * 60 * 60 * 1000);
+  return {
+    total: state.requests.length,
+    open: open.length,
+    missing,
+    tracked,
+    stale,
+    completed: state.requests.filter(r => r.status === 'completed').length,
+    dropped: state.requests.filter(r => r.status === 'dropped').length
+  };
+}
+
 // 1.9.203: 자동 라운드 plan 정리 — 사용자 명시
 //   "백그라운드에 다음 작업이 시작가능한 예상 시간 + 일어났을때 해야하는 일을 정리"
 //   라운드 마무리 시 .harness/auto-resume-plan.json 자동 저장 → 다음 wakeup 시 즉시 실행 가능
@@ -2025,6 +2113,122 @@ function resumeCmd(root) {
   log(dim(plan.note || ''));
   log('');
   log(grn(`✓ resume 준비 완료 — 권장: leerness handoff . 또는 leerness next-action take`));
+}
+
+// 1.9.207: leerness requests <sub> — 사용자 요청 누락 확인 절차 CLI (사용자 명시)
+//   audit  → open 요청 중 task-log/plan/decisions 에 매칭 안 되는 항목 보고 (누락 후보)
+//   add    → 사용자 요청 수동 기록 (예: leerness requests add "API rate limit 5/s 적용")
+//   list   → 모든 요청 출력 (--json 옵션)
+//   complete <id> → 요청 완료 표시
+//   drop <id>     → 요청 드롭 표시 (사용자 명시 취소)
+function requestsCmd(root, sub, ...rest) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+
+  if (!sub || sub === 'help' || sub === '--help') {
+    log(`# leerness requests (1.9.207) — 사용자 요청 누락 확인 절차`);
+    log('');
+    log(`  audit          → 누락 후보 + tracked + stale 보고 (--json 가능)`);
+    log(`  add "<text>"   → 사용자 요청 수동 기록`);
+    log(`  list           → 전체 요청 출력 (--json 가능, --status open|completed|dropped)`);
+    log(`  complete <id>  → 요청 완료 표시 (예: UR-0003)`);
+    log(`  drop <id>      → 요청 드롭 표시`);
+    return;
+  }
+
+  if (sub === 'add') {
+    const text = rest.filter(x => !x.startsWith('-')).join(' ');
+    if (!text) { console.error('Usage: leerness requests add "<request text>"'); process.exit(1); }
+    const entry = _recordUserRequest(root, text);
+    if (!entry) { console.error('failed to record'); process.exit(1); }
+    if (has('--json')) { log(JSON.stringify(entry, null, 2)); return; }
+    log(grn(`✓ recorded ${entry.id}: ${entry.text}`));
+    return;
+  }
+
+  if (sub === 'list') {
+    const state = _loadUserRequests(root);
+    const filterStatus = arg('--status', null);
+    let list = state.requests;
+    if (filterStatus) list = list.filter(r => r.status === filterStatus);
+    if (has('--json')) { log(JSON.stringify({ total: state.requests.length, filtered: list.length, requests: list }, null, 2)); return; }
+    log(cyan(`# leerness requests list (1.9.207)`));
+    log(`  total ${state.requests.length}${filterStatus ? ` · filter status=${filterStatus} → ${list.length}` : ''}`);
+    log('');
+    if (list.length === 0) { log(dim('  (없음)')); return; }
+    for (const r of list) {
+      const statusIcon = r.status === 'completed' ? '✓' : (r.status === 'dropped' ? '✗' : (r.status === 'in-progress' ? '▶' : '◯'));
+      const recordedDay = (r.recordedAt || '').slice(0, 10);
+      log(`  ${statusIcon} [${r.id}] ${dim(recordedDay)} ${r.text.slice(0, 100)}${r.text.length > 100 ? '…' : ''}`);
+      if (r.linkedTaskIds && r.linkedTaskIds.length > 0) log(dim(`       linked tasks: ${r.linkedTaskIds.join(', ')}`));
+    }
+    return;
+  }
+
+  if (sub === 'complete') {
+    const id = rest[0];
+    if (!id) { console.error('Usage: leerness requests complete <id>'); process.exit(1); }
+    const updated = _updateUserRequest(root, id, { status: 'completed' });
+    if (!updated) { console.error(`request not found: ${id}`); process.exit(1); }
+    if (has('--json')) { log(JSON.stringify(updated, null, 2)); return; }
+    log(grn(`✓ completed ${updated.id}`));
+    return;
+  }
+
+  if (sub === 'drop') {
+    const id = rest[0];
+    if (!id) { console.error('Usage: leerness requests drop <id>'); process.exit(1); }
+    const updated = _updateUserRequest(root, id, { status: 'dropped' });
+    if (!updated) { console.error(`request not found: ${id}`); process.exit(1); }
+    if (has('--json')) { log(JSON.stringify(updated, null, 2)); return; }
+    log(yel(`✗ dropped ${updated.id}`));
+    return;
+  }
+
+  if (sub === 'audit') {
+    const audit = _auditUserRequests(root);
+    if (has('--json')) { log(JSON.stringify(audit, null, 2)); return; }
+    log(cyan(`# leerness requests audit (1.9.207) — 사용자 요청 누락 확인 절차`));
+    log('');
+    log(`  📊 통계: total ${audit.total} · open ${audit.open} · completed ${audit.completed} · dropped ${audit.dropped}`);
+    log('');
+    if (audit.missing.length === 0) {
+      log(grn(`  ✓ 누락 없음 — open 요청 모두 task-log/plan/decisions 에 흔적 있음`));
+    } else {
+      log(red(`  ⚠ 누락 후보 ${audit.missing.length}건 (open 상태이나 task/plan/decisions 매칭 없음):`));
+      for (const m of audit.missing) {
+        log(`    • [${m.id}] ${m.text.slice(0, 90)}${m.text.length > 90 ? '…' : ''}`);
+        log(dim(`         ${m.recordedAt.slice(0, 10)} · hits=${m.hits}/${m.words}`));
+      }
+      log('');
+      log(dim(`  → 권장: 누락 항목별 leerness task add "<요청>" 또는 leerness requests complete <id>`));
+    }
+    if (audit.tracked.length > 0) {
+      log('');
+      log(grn(`  ✓ tracked ${audit.tracked.length}건 (open + task/plan/decisions 매칭됨):`));
+      for (const t of audit.tracked.slice(0, 5)) {
+        log(`    • [${t.id}] ${t.text.slice(0, 80)}${t.text.length > 80 ? '…' : ''} ${dim(`(hits=${t.hits})`)}`);
+      }
+    }
+    if (audit.stale.length > 0) {
+      log('');
+      log(yel(`  ⏳ stale ${audit.stale.length}건 (7일+ open):`));
+      for (const s of audit.stale.slice(0, 5)) {
+        const days = Math.floor((Date.now() - new Date(s.recordedAt).getTime()) / 86400000);
+        log(`    • [${s.id}] ${days}일 ${s.text.slice(0, 70)}…`);
+      }
+    }
+    return;
+  }
+
+  console.error(`Unknown subcommand: ${sub}`);
+  console.error(`Run: leerness requests help`);
+  process.exit(1);
 }
 
 // 1.9.199: wakeup miss 자동 회복 강화 — last-handoff timestamp 기록 + 25min 기대 interval 정밀 측정
@@ -4061,10 +4265,19 @@ function handoff(root) {
           parts.push(`🔌 backend ${pb.ready}/${pb.total} (${ageLabel}${pb.expired ? '⚠' : '✓'})`);
         }
       } catch {}
+      // 13) 1.9.207: 사용자 요청 누락 확인 절차 (사용자 명시) — 누락 후보 ≥ 1 시 헤드라인 노출
+      try {
+        const audit = _auditUserRequests(root);
+        if (audit.missing && audit.missing.length > 0) {
+          parts.push(`📥 미답 요청 ${audit.missing.length}건`);
+        } else if (audit.open > 0) {
+          parts.push(`📥 요청 ${audit.open} (tracked)`);
+        }
+      } catch {}
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207): ${parts.join(' · ')}`));
       }
     } catch {}
   }
@@ -15353,6 +15566,8 @@ async function main() {
   if (cmd === 'next-action')                        return nextActionCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.203: leerness resume — auto-resume-plan 읽고 다음 라운드 즉시 안내 (사용자 명시)
   if (cmd === 'resume')                             return resumeCmd(arg('--path', process.cwd()));
+  // 1.9.207: leerness requests <audit|add|list|complete|drop> — 사용자 요청 누락 확인 절차 (사용자 명시)
+  if (cmd === 'requests')                           return requestsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);

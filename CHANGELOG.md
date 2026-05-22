@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.9.207 — 2026-05-22
+
+**📥 사용자 요청 누락 확인 절차 MVP (사용자 명시).**
+
+### 사용자 명시
+> *"leerness가 적용된 프로젝트에서, 최근에 명령받아 진행한 것중에 누락된게 없는지 확인하는 절차도 있는지 확인해줘 / 다음 라운드시 참조"*
+
+### 1. `.harness/user-requests.json` — 사용자 요청 누적 기록
+- `_userRequestsPath/_loadUserRequests/_writeUserRequests` 파일 I/O 헬퍼
+- `_recordUserRequest(root, text, opts)` — 자동 ID 부여(UR-XXXX) + 중복 방지(동일 텍스트 + open 상태)
+- `_updateUserRequest(root, id, patch)` — status 전환 (open → in-progress → completed/dropped)
+- 최근 200개 유지 (rotate)
+
+### 2. `_auditUserRequests(root)` — 누락 후보 탐지
+- open/in-progress 요청 텍스트의 첫 12 단어 추출 → task-log/plan/decisions 와 비교
+- hits ≥ min(3, words×0.5) → **tracked** (어딘가 작업이 시작됨)
+- 그 외 → **missing** (누락 후보, AI/사용자가 잊은 가능성)
+- 7일+ open → **stale** (재검토 필요)
+
+### 3. `leerness requests <sub>` CLI (사용자 명시 — "확인 절차")
+- `audit` — missing/tracked/stale 보고 (--json 가능)
+- `add "<text>"` — 사용자 요청 수동 기록
+- `list [--status open|completed|dropped]` — 전체 출력
+- `complete <UR-id>` / `drop <UR-id>` — 상태 전환
+
+### 4. handoff 헤드라인 통합 (13번째 요소)
+- missing ≥ 1 시: `📥 미답 요청 N건` (red)
+- open > 0 (모두 tracked) 시: `📥 요청 N (tracked)` (green)
+- 헤드라인 라벨: `1.9.81/93/113/152/162/192/197/204/207`
+
+### 5. 누적 회귀 (1.9.200~206) — 모두 유지
+
+### 6. stress-v152 — 17/17 PASS
+- 1.9.207 (8) + 성능 (2) + 누적 회귀 (7)
+- 사용자 요청 라이프사이클 격리 tmpdir 테스트 (add → list → audit → complete → drop)
+- 중복 방지 확인
+- 성능: --version cold start avg 2206ms · MCP 54 도구 1597ms
+
+### 7. 자동 release (69 라운드 main-push streak · 30 라운드 npm publish streak)
+- `release sync-main` 자동 → main merge + npm publish leerness@1.9.207
+- 1.9.140부터 main 자동 push (69 라운드 무중단)
+- 1.9.178부터 npm publish (30 라운드 무중단)
+
+---
+
 ## 1.9.206 — 2026-05-22
 
 **🌐 i18n MVP + UI/UX 헬퍼 (사용자 명시 2종).**
