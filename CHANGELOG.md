@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.9.224 — 2026-05-22
+
+**🔌 MCP 61 도구 (leerness_requests_auto_complete) + handoff 본문 + session close --auto-apply-delivered.**
+
+### 1. MCP 61번째 도구 — `leerness_requests_auto_complete`
+- 1.9.223 delivered 패턴 자동 감지를 외부 AI에 노출
+- 인자: `{ path?, apply? (default false) }`
+- 응답: `{ total, candidates: [{id, text, claimedVersion, currentVersion, deliveredKeyword, recordedAt}], currentVersion, applied, completedIds[] }`
+- MCP 60 (1.9.221) → 61 도구 (+1)
+
+### 2. handoff 본문 자동 노출
+- delivered 후보 ≥ 1건 시: `## 📥 사용자 요청 자동 완료 가능 (1.9.224, N건)` 본문 섹션
+- top 5 후보 노출 (overflow는 `... +N건 더`)
+- 자동 권장: `→ leerness requests auto-complete --apply`
+- 1.9.222 비정상 종료 본문 다음, 활성 룰 이전 위치
+
+### 3. `session close --auto-apply-delivered` 플래그
+- 마감 시 delivered 후보 자동 완료 (안전: 패턴 매칭 + 버전 가드)
+- `autoCompleteReason: 'session-close-auto-apply-1.9.224'` 추적
+- 플래그 없으면 기존 동작 (안내만)
+
+### 4. 누적 회귀 (1.9.207~223) — 모두 유지
+
+### 5. stress-v169 — 16/16 PASS
+- 1.9.224 (7): VERSION + MCP 61 + 실 호출 + handoff 본문 + 본문 미노출 + session close auto-apply + 기본 보존
+- 성능 (2): cold_start avg 556ms / MCP 61 tools/list 417ms
+- 누적 회귀 (7): 1.9.207~223
+
+### 6. 자동 release (86 라운드 main-push streak · 47 라운드 npm publish streak)
+
+🔌 **사용자 요청 자동 완료 시스템 완성** (3 라운드 누적):
+- 1.9.223 CLI auto-complete
+- 1.9.224 MCP 61 + handoff 본문 + session close 자동 적용
+
+---
+
 ## 1.9.223 — 2026-05-22
 
 **📥 사용자 요청 auto-complete (delivered 패턴 자동 감지) + handoff/session close 통합.**

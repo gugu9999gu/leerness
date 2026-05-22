@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.223';
+const VERSION = '1.9.224';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -6139,6 +6139,28 @@ function handoff(root) {
     }
   } catch {}
 
+  // 1.9.224: handoff 본문 자동 노출 — delivered 패턴 후보 ≥ 1건 시 (1.9.223 확장)
+  //   "Round X.Y.Z — 구현 완료" 패턴이 누적되면 본문 섹션으로 자동 안내 (헤드라인만으로는 놓치기 쉬움)
+  try {
+    const delivered = _detectDeliveredRequests(root);
+    if (delivered.candidates && delivered.candidates.length > 0) {
+      const isTty = process.stdout && process.stdout.isTTY;
+      const cy4 = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+      const yl4 = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+      const dm4 = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+      log('');
+      log(yl4(`## 📥 사용자 요청 자동 완료 가능 (1.9.224, ${delivered.candidates.length}건)`));
+      delivered.candidates.slice(0, 5).forEach(c => {
+        log(`  • [${c.id}] v${c.claimedVersion} (${c.deliveredKeyword}) — ${c.text.slice(0, 70)}${c.text.length > 70 ? '…' : ''}`);
+      });
+      if (delivered.candidates.length > 5) {
+        log(dm4(`  ... +${delivered.candidates.length - 5}건 더`));
+      }
+      log(dm4(`  → 검토: leerness requests auto-complete`));
+      log(dm4(`  → 적용: leerness requests auto-complete --apply (안전 정리)`));
+    }
+  } catch {}
+
   // 1.9.8: active rules 자동 노출 (매 세션 시작 시 AI에게 보임)
   const activeRules = readRules(root).filter(r => r.status === 'active');
   if (activeRules.length) {
@@ -9950,15 +9972,25 @@ function sessionClose(root, opts = {}) {
 
       log('');
       log(`## 🔚 session close 자동 통합 보고 (1.9.217)`);
-      // 1.9.207 + 1.9.223 (delivered 패턴 자동 권장)
+      // 1.9.207 + 1.9.223 (delivered 패턴 자동 권장) + 1.9.224 (--auto-apply-delivered 옵션)
       try {
         const reqAudit = _auditUserRequests(root);
         const missCnt = reqAudit.missing ? reqAudit.missing.length : 0;
         let delivered = { candidates: [] };
         try { delivered = _detectDeliveredRequests(root); } catch {}
         if (delivered.candidates && delivered.candidates.length > 0) {
-          log(yel(`  📥 delivered 패턴 ${delivered.candidates.length}건 (1.9.223) — 자동 완료 가능`));
-          log(dim(`     → leerness requests auto-complete --apply (안전 정리)`));
+          if (has('--auto-apply-delivered')) {
+            // 1.9.224: 자동 정리 (마감 시 호출 — 안전: 패턴 매칭 + 버전 가드)
+            let ok = 0;
+            for (const c of delivered.candidates) {
+              const u = _updateUserRequest(root, c.id, { status: 'completed', autoCompletedAt: new Date().toISOString(), autoCompleteReason: 'session-close-auto-apply-1.9.224' });
+              if (u) ok++;
+            }
+            log(grn(`  ✓ delivered 패턴 ${ok}건 자동 완료 (--auto-apply-delivered 1.9.224)`));
+          } else {
+            log(yel(`  📥 delivered 패턴 ${delivered.candidates.length}건 (1.9.223) — 자동 완료 가능`));
+            log(dim(`     → leerness requests auto-complete --apply (수동) 또는 session close --auto-apply-delivered (1.9.224)`));
+          }
         } else if (missCnt > 0) {
           log(red(`  ⚠ 미답 사용자 요청 ${missCnt}건 (task-log/plan/decisions 매칭 안 됨)`));
         } else if (reqAudit.open > 0) {
@@ -13818,7 +13850,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_pre_wake_audit', description: '1.9.216 (1.9.209 사용자 명시) — sleep 전 sub-agent audit. 6 영역 점검: missing-user-requests / stale-in-progress / drift-handoff-stale / wakeup-missed / next-action-pending / auto-resume-plan. 외부 AI가 "깨어나기 전 점검할 부분"을 회수. 응답: { auditedAt, findings: {critical, warning, info}, summary }. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_intent_classify', description: '1.9.216 (1.9.213 사용자 명시) — 사용자 의도 파악 + scope expansion 게이트. 응답: { intent: precise|broad|default, signals, domain, explicitMentions, expansionCandidates, mode: dry-run }. 3원칙 안전: (1) Always-Off Opt-In, (2) Dry-run 기본 (실행 X), (3) 명시 vs 추론 분리 라벨링. 5 도메인 (game/web/api/cli/data). 외부 AI가 "이 요청은 정확히 그것만 / 포괄적 / 기본인가?"를 회수. 인자: { request (required), path? }', inputSchema: { type: 'object', properties: { request: { type: 'string' }, path: { type: 'string' } }, required: ['request'] } },
     { name: 'leerness_idempotency_audit', description: '1.9.216 (1.9.212 사용자 명시) — 멱등성 위반 탐지. 4영역 점검: rule-duplicate (medium) / task-duplicate-request (medium) / user-request-duplicate (low) / wakeup-duplicate (high). 응답: { violations[], verified[], summary: {totalViolations, high/medium/low, overall} }. 외부 AI가 "워크스페이스에 중복/충돌이 있나?"를 회수. 🎉 MCP 58 도구 마일스톤 (50→58). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_session_resume', description: '1.9.221 (1.9.220 사용자 명시) — 비정상 종료 감지 + 자율 재개. 5신호 분석: last-handoff-stale / wakeup-missed / in-progress-stale / auto-resume-plan-unused / release-branch-pending. 응답: { abnormalShutdown, severity (none/low/medium/high), signals[], resumeGuide[] }. 외부 AI가 "절전/시스템종료/세션종료 후 leerness 상태가 정상인가? 어떻게 재개?"를 회수. 🎉 MCP 60 도구 마일스톤 (53→60, +7 in 1.9.168/216/221). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_session_resume', description: '1.9.221 (1.9.220 사용자 명시) — 비정상 종료 감지 + 자율 재개. 5신호 분석: last-handoff-stale / wakeup-missed / in-progress-stale / auto-resume-plan-unused / release-branch-pending. 응답: { abnormalShutdown, severity (none/low/medium/high), signals[], resumeGuide[] }. 외부 AI가 "절전/시스템종료/세션종료 후 leerness 상태가 정상인가? 어떻게 재개?"를 회수. 🎉 MCP 60 도구 마일스톤 (53→60, +7 in 1.9.168/216/221). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_requests_auto_complete', description: '1.9.224 (1.9.223 자동 회수) — delivered 패턴 자동 감지 + 자동 완료. "Round X.Y.Z — 구현 완료" / "implemented" / "delivered" 패턴이 있는 open 요청 중 현재 버전 이하인 것을 후보로 분류. 응답: { total, candidates: [{id, text, claimedVersion, currentVersion, deliveredKeyword, recordedAt}], currentVersion, applied (apply=true 시), completedIds[] }. 외부 AI가 "운영 누적된 가짜 미답 신호 정리 가능한가?"를 회수. 기본 dry-run, apply: true 명시 시에만 실 적용. 인자: { path?, apply? (default false) }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, apply: { type: 'boolean' } } } }
   ];
 
   function send(obj) {
@@ -13973,6 +14006,11 @@ function mcpServeCmd(root) {
           case 'leerness_session_resume':
             // 1.9.221 (1.9.220): 비정상 종료 감지 + 자율 재개
             cliArgs = ['session-resume', '--path', targetPath, '--json'];
+            break;
+          case 'leerness_requests_auto_complete':
+            // 1.9.224 (1.9.223): delivered 패턴 자동 감지 + 자동 완료
+            cliArgs = ['requests', 'auto-complete', '--path', targetPath, '--json'];
+            if (args.apply === true) cliArgs.push('--apply');
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
