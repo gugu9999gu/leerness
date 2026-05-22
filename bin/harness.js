@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.224';
+const VERSION = '1.9.225';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -6141,8 +6141,25 @@ function handoff(root) {
 
   // 1.9.224: handoff 본문 자동 노출 — delivered 패턴 후보 ≥ 1건 시 (1.9.223 확장)
   //   "Round X.Y.Z — 구현 완료" 패턴이 누적되면 본문 섹션으로 자동 안내 (헤드라인만으로는 놓치기 쉬움)
+  // 1.9.225: LEERNESS_AUTO_APPLY_DELIVERED=1 env 활성 시 handoff 첫 호출에서 자동 적용 (자율 모드용 opt-in)
   try {
-    const delivered = _detectDeliveredRequests(root);
+    let delivered = _detectDeliveredRequests(root);
+    const envAutoApply = process.env.LEERNESS_AUTO_APPLY_DELIVERED === '1';
+    if (envAutoApply && delivered.candidates && delivered.candidates.length > 0) {
+      let appliedCnt = 0;
+      for (const c of delivered.candidates) {
+        const u = _updateUserRequest(root, c.id, { status: 'completed', autoCompletedAt: new Date().toISOString(), autoCompleteReason: 'env-auto-apply-1.9.225' });
+        if (u) appliedCnt++;
+      }
+      if (appliedCnt > 0) {
+        const isTty = process.stdout && process.stdout.isTTY;
+        const gr5 = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+        log('');
+        log(gr5(`## 📥 사용자 요청 자동 완료 (1.9.225, env LEERNESS_AUTO_APPLY_DELIVERED=1, ${appliedCnt}건)`));
+        // 적용 후 재조회
+        delivered = _detectDeliveredRequests(root);
+      }
+    }
     if (delivered.candidates && delivered.candidates.length > 0) {
       const isTty = process.stdout && process.stdout.isTTY;
       const cy4 = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
@@ -6158,6 +6175,7 @@ function handoff(root) {
       }
       log(dm4(`  → 검토: leerness requests auto-complete`));
       log(dm4(`  → 적용: leerness requests auto-complete --apply (안전 정리)`));
+      log(dm4(`  → 자율 모드 자동 적용: export LEERNESS_AUTO_APPLY_DELIVERED=1 (1.9.225)`));
     }
   } catch {}
 
@@ -12865,6 +12883,26 @@ function driftCheckCmd(root, opts = {}) {
       }
     } catch (e) {
       log(`⚠ auto-fix 보안 회복 오류: ${e.message}`);
+    }
+  }
+  // 1.9.225: drift check --auto-fix 에 delivered 패턴 자동 적용 통합 (1.9.223/224 시스템 회수)
+  //   사용자 요청에 "구현 완료" 패턴이 누적되면 가짜 미답 신호가 drift score 를 가중시킬 수 있음 → 자동 정리.
+  //   1.9.82 audit --fix 패턴과 동일: --auto-fix 시 즉시 적용, 적용 후 재검사.
+  if (autoFix) {
+    try {
+      const delivered = _detectDeliveredRequests(root);
+      if (delivered.candidates && delivered.candidates.length > 0) {
+        log('');
+        log(`📥 --auto-fix 활성 (1.9.225) — delivered 패턴 ${delivered.candidates.length}건 자동 완료 중...`);
+        let ok = 0;
+        for (const c of delivered.candidates) {
+          const u = _updateUserRequest(root, c.id, { status: 'completed', autoCompletedAt: new Date().toISOString(), autoCompleteReason: 'drift-auto-fix-1.9.225' });
+          if (u) ok++;
+        }
+        log(`✓ delivered 자동 완료 ${ok}/${delivered.candidates.length}건`);
+      }
+    } catch (e) {
+      log(`⚠ delivered auto-apply 오류 (1.9.225): ${e.message}`);
     }
   }
   if (autoFix && level === '🔴 critical' && !hasSecurityFired) {

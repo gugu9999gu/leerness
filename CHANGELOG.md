@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.9.225 — 2026-05-22
+
+**🔧 drift check --auto-fix delivered 통합 + LEERNESS_AUTO_APPLY_DELIVERED env opt-in.**
+
+### 1. `drift check --auto-fix` delivered 패턴 자동 적용 (1.9.82 패턴 확장)
+- 1.9.82 보안 신호 → audit --fix 자동 호출 패턴을 delivered 시스템에도 적용
+- `--auto-fix` 플래그 사용 시 `_detectDeliveredRequests` → 후보 자동 완료
+- `autoCompleteReason: 'drift-auto-fix-1.9.225'` 추적
+- drift score 가중치 가짜 미답 신호 제거 → drift 회복 완성도 향상
+
+### 2. `LEERNESS_AUTO_APPLY_DELIVERED=1` env opt-in (자율 모드용)
+- handoff 첫 호출 시 자동 적용 (`autoCompleteReason: 'env-auto-apply-1.9.225'`)
+- 자율 모드에서 매 라운드마다 자동 정리 → AI가 신경 쓸 필요 X
+- env 미설정 시 기존 동작 (안내만)
+
+### 3. handoff 본문 가이드 추가
+- 1.9.224 본문 섹션에 `→ 자율 모드 자동 적용: export LEERNESS_AUTO_APPLY_DELIVERED=1` 안내
+- 사용자가 자율 모드 opt-in 발견하기 쉽게
+
+### 4. 사용자 요청 자동 완료 시스템 — 4 라운드 누적 완성
+- 1.9.223 CLI auto-complete (수동 호출)
+- 1.9.224 MCP 61 + handoff 본문 + session close 자동 적용
+- 1.9.225 drift --auto-fix 통합 + env opt-in 자동화
+
+### 5. 누적 회귀 (1.9.207~224) — 모두 유지
+
+### 6. stress-v170 — 14/14 PASS
+- 1.9.225 (5): VERSION + drift auto-fix 통합 + drift 기본 보존 + env auto-apply + env 없으면 미적용
+- 성능 (2): cold_start avg 367ms / drift auto-fix 383ms
+- 누적 회귀 (7): 1.9.207~224
+
+### 7. 자동 release (87 라운드 main-push streak · 48 라운드 npm publish streak)
+
+🔧 **drift 회복 시스템 누적 강화** (1.9.39/82/225 — 3 라운드)
+
+---
+
 ## 1.9.224 — 2026-05-22
 
 **🔌 MCP 61 도구 (leerness_requests_auto_complete) + handoff 본문 + session close --auto-apply-delivered.**
