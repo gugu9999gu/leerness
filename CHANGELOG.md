@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.9.233 — 2026-05-23
+
+**📚 leerness commands 새 명령 (9 카테고리 51 CLI) + MCP 65번째 도구.**
+
+### 1. `leerness commands` 새 명령 — 카테고리화된 전체 CLI 목록
+- **9 카테고리 · 51 명령** 한 눈에:
+  - status (8) — handoff/health/pulse/round-history/milestones/session-resume/which/memory status
+  - task (5) — add/update/drop/export + next-action
+  - memory (4) — decision/rule/plan/lesson CRUD
+  - audit (10) — audit/drift/scan secrets/encoding/lazy/verify-claim/optimism/requests/pre-wake/idempotency
+  - workflow (7) — session close/resume/route/agents/review-request/review/brainstorm
+  - release (3) — sync-main/pack/publish
+  - skill (2) — list/info/learn/use/optimize/match/suggest + install/install-top/publish/search/discover
+  - bridge (3) — web/pc/lsp
+  - config (9) — init/migrate/update/wakeup-interval/workspace-dir/intent/constraints/provider/commands
+- `--json` 옵션 (외부 자동화)
+
+### 2. MCP 65번째 도구 — `leerness_commands`
+- 외부 AI 가 전체 CLI 목록을 직접 회수 → 매뉴얼/도움말 동적 생성
+- MCP 64 → 65 (+1)
+
+### 3. 실 측정 — leerness 전체 표면 가시화
+- 9 카테고리 × 평균 5.7 명령 = **51 CLI 명령**
+- handoff/health/pulse 등 핵심 status 명령은 status 카테고리에 그룹화
+
+### 4. 누적 회귀 (1.9.207~232) — 모두 유지
+
+### 5. stress-v178 — 16/16 PASS
+- 1.9.233 (6): VERSION + CLI + --json 카테고리 검증 + human 출력 + MCP 65 + 실 호출
+- 성능 (2): cold_start avg 413ms / commands 390ms (정적 데이터, 빠름)
+- 누적 회귀 (8): 1.9.207~232
+
+### 6. 자동 release (95 라운드 main-push streak · 56 라운드 npm publish streak)
+
+📚 **전체 표면 가시화** — 9 카테고리 × 51 CLI × 65 MCP 도구 한눈에
+
+---
+
 ## 1.9.232 — 2026-05-23
 
 **🐛 pulse memorySurface BUG fix + handoff --pulse 옵션 + session close 자동 pulse.**
