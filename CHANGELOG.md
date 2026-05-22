@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.9.202 — 2026-05-22
+
+**🌐 C축 (공식 표준 스킬 자동 활용) 9.0/10 → 9.5/10 보강 — matched skill 설치 상태 표시 + leerness skill install-top.**
+
+자율 모드 132 라운드. 100% 매트릭스 도전 — C축 마지막 0.5 보강 (97 → 97.5).
+
+### 1. install 이력 기록 + 설치 상태 표시
+- `.harness/skill-installed-log.json` (비시크릿, 체크인 가능)
+- 함수: `_loadSkillInstalledLog` / `_appendSkillInstalledLog` / `_isSkillInstalled`
+- handoff matched entry 에 `✓ 설치됨` 또는 `🆕` 태그 자동 표시
+
+### 2. `leerness skill install-top` 신규 CLI
+- handoff 컨텍스트 (in-progress task) 의 keyword 로 official skill 매칭
+- top 1 (이미 설치된 것 자동 skip) 즉시 download + install
+- 설치 후 자동 이력 기록 → 중복 install 방지
+- `--force`: 이미 설치된 것 강제 재설치
+
+### 3. handoff body 통합
+```
+## 🌐 공식 organization 스킬 자동 매칭 (1.9.192/193) — 키워드 "X"
+   ✓ 설치됨 [vercel] skill-A — ...
+   🆕 [anthropic] skill-B — ...
+   → 1개 즉시: leerness skill install-top  (1.9.202)
+   → 전체 설치: leerness skill auto-install --yes
+```
+
+### 4. 누적 회귀 (1.9.196~201) — 모두 유지
+
+### 5. stress-v147 — 15/15 PASS
+- 설치 이력 (6) + 성능 (2) + 누적 회귀 (7)
+- 성능: --version cold start avg **457 ms** · MCP 54 도구 **468 ms**
+
+### 6. 5축 매트릭스
+| 축 | 1.9.201 | 1.9.202 | 상태 |
+|---|---|---|---|
+| C. 공식 표준 스킬 자동 활용 | 9.0 | **9.5** | +0.5 (설치 상태 + install-top) |
+| **종합** | 48.5/50 (97%) | **49/50 (98%)** | **+1%** |
+
+### 7. 자동 release
+- main 자동 push **64 라운드 연속** (1.9.140~202)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.201 — 2026-05-22
 
 **🎯 E축 (게으름 방지) 9.5/10 → 10/10 보강 — next-action queue + leerness next-action take 명령.**

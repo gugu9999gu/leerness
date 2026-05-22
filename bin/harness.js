@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.201';
+const VERSION = '1.9.202';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1554,6 +1554,77 @@ async function skillDiscoverCmd(root) {
   }
   log('');
   log(`💡 설치: leerness skill install <url>`);
+}
+
+// 1.9.202: C축 (공식 표준 스킬 자동 활용) 9.0→9.5 보강 — install 이력 기록 + 설치 상태 표시
+//   1.9.192 official catalog 매칭 시 "이미 설치됨" / "신규" 구분 → 중복 install 방지 + 사용자 인지 도움
+//   파일: .harness/skill-installed-log.json (비시크릿)
+function _skillInstalledLogPath(root) { return path.join(root, '.harness', 'skill-installed-log.json'); }
+function _loadSkillInstalledLog(root) {
+  try {
+    const fp = _skillInstalledLogPath(root);
+    if (!exists(fp)) return { installed: [] };
+    const j = JSON.parse(read(fp));
+    return { installed: Array.isArray(j.installed) ? j.installed : [] };
+  } catch { return { installed: [] }; }
+}
+function _appendSkillInstalledLog(root, entry) {
+  try {
+    const state = _loadSkillInstalledLog(root);
+    const e = { name: entry.name, source: entry.source || entry.preset || '?', url: entry.url || '', at: new Date().toISOString() };
+    // 중복 (같은 name + source) 제거 후 append
+    state.installed = state.installed.filter(x => !(x.name === e.name && x.source === e.source));
+    state.installed.push(e);
+    mkdirp(path.join(root, '.harness'));
+    writeUtf8(_skillInstalledLogPath(root), JSON.stringify({ installed: state.installed }, null, 2));
+    return true;
+  } catch { return false; }
+}
+function _isSkillInstalled(root, entry) {
+  try {
+    const state = _loadSkillInstalledLog(root);
+    const src = entry.source || entry.preset || '?';
+    return state.installed.some(x => x.name === entry.name && x.source === src);
+  } catch { return false; }
+}
+
+// 1.9.202: leerness skill install-top — handoff matched 의 top 1 entry 를 즉시 install
+async function skillInstallTopCmd(root) {
+  root = absRoot(root);
+  // handoff context 의 keyword 추출
+  const rows = readProgressRows(root);
+  const active = rows.find(r => r.status === 'in-progress' || r.status === '[진행]') || rows[rows.length - 1];
+  if (!active || !active.request) { fail('in-progress task 없음 — leerness handoff . 먼저'); return process.exit(1); }
+  const m = _matchOfficialSkillsFromCache(root, active.request, 3);
+  if (m.entries.length === 0) {
+    fail(`매칭된 official skill 없음 (keyword: "${(active.request || '').slice(0, 40)}", cache total: ${m.cacheTotal || 0})`);
+    return process.exit(1);
+  }
+  // 이미 설치된 것 skip
+  const candidates = m.entries.filter(e => !_isSkillInstalled(root, e));
+  if (candidates.length === 0) {
+    log(`✓ 모든 매칭된 skill 이미 설치됨 (1.9.202 log 기준):`);
+    for (const e of m.entries) log(`  • ${e.name} (${e.preset || e.source}) — 이미 설치`);
+    log(`  → leerness skill install-top --force 로 재설치`);
+    return;
+  }
+  const top = has('--force') ? m.entries[0] : candidates[0];
+  log(`# leerness skill install-top (1.9.202 C축 보강)`);
+  log(`  task: ${(active.request || '').slice(0, 80)}`);
+  log(`  매칭: ${m.total}/${m.cacheTotal}건 · top 1 → ${top.name} (${top.preset || top.source})`);
+  log(`  URL: ${top.url || '(none)'}`);
+  log('');
+  if (!top.url) { fail(`top entry url 부재 — install 불가`); return process.exit(1); }
+  try {
+    log(`📥 install 시작...`);
+    await skillInstallCmd(root, top.url);
+    _appendSkillInstalledLog(root, top);
+    log('');
+    log(`✓ 설치 + 이력 기록 완료 (.harness/skill-installed-log.json)`);
+  } catch (e) {
+    fail(`install 실패: ${e.message}`);
+    return process.exit(1);
+  }
 }
 
 // 1.9.182: skill auto-install — 공식 organization catalog 자동 탐색 → skill match → 자동 install.
@@ -3835,10 +3906,14 @@ function handoff(root) {
                       log(cyan(`## 🌐 공식 organization 스킬 자동 매칭 (1.9.192/193) — 키워드 "${keyword}"`));
                       const ageLabel = veryStale ? yel(`${cacheAge} ⚠ 7일+`) : (ofm.expired ? yel(`${cacheAge} ⚠ 만료`) : `${cacheAge} ✓`);
                       log(dim(`  vercel-labs/anthropics 등 catalog 캐시 ${ageLabel} · ${ofm.total}/${ofm.cacheTotal}건 매칭`));
+                      // 1.9.202: 각 entry 의 설치 상태 표시 (installed/new)
                       for (const e of ofm.entries) {
-                        log(dim(`  • [${e.preset || e.source || '?'}] ${e.name} — ${(e.description || '').slice(0, 70)}`));
+                        const installed = _isSkillInstalled(root, e);
+                        const tag = installed ? '✓ 설치됨' : '🆕';
+                        log(dim(`  ${tag} [${e.preset || e.source || '?'}] ${e.name} — ${(e.description || '').slice(0, 65)}`));
                       }
-                      log(dim(`  → 설치: leerness skill auto-install --yes`));
+                      log(dim(`  → 1개 즉시: leerness skill install-top  (1.9.202)`));
+                      log(dim(`  → 전체 설치: leerness skill auto-install --yes`));
                       if (ofm.expired || veryStale) log(yel(`  → 갱신 권장: leerness skill auto-cache refresh  (1.9.193 ${veryStale ? '7일+ stale' : '24h+ expired'})`));
                       log('');
                     } else if (ofm.cacheTotal === 0) {
@@ -14875,6 +14950,8 @@ async function main() {
   if (cmd === 'skill' && args[1] === 'suggest')     return skillSuggestCmd(absRoot(arg('--path', process.cwd())));
   // 1.9.182: leerness skill auto-install — 공식 catalog 자동 탐색 + skill match 매칭 시 자동 install (사용자 명시)
   if (cmd === 'skill' && args[1] === 'auto-install') return await skillAutoInstallCmd(absRoot(arg('--path', process.cwd())));
+  // 1.9.202: leerness skill install-top — handoff matched top 1 즉시 install (C축 9→9.5 보강)
+  if (cmd === 'skill' && args[1] === 'install-top') return await skillInstallTopCmd(absRoot(arg('--path', process.cwd())));
   // 1.9.192: skill auto-cache — 공식 organization catalog 24h 캐시 관리 (C축 보강)
   if (cmd === 'skill' && args[1] === 'auto-cache')   return await skillAutoCacheCmd(absRoot(arg('--path', process.cwd())), args[2] || 'status');
   if (cmd === 'mcp' && args[1] === 'serve')         return mcpServeCmd(absRoot(arg('--path', process.cwd())));
