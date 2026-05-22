@@ -64,6 +64,30 @@ leerness가 자동 검증 가능한 trigger:
 
 자동 검증 가능한 룰의 실행은 `leerness release bump`, `leerness release note "..."`, `leerness release publish`를 사용해 자동화합니다.
 
+## 사용자 명시 신규 7종 (1.9.207~213) — 백로그 완전 소진
+
+| 버전 | 핵심 기능 | CLI |
+|---|---|---|
+| 1.9.207 | 사용자 요청 누락 확인 절차 (UR-XXXX 추적) | `requests audit\|add\|list\|complete\|drop` |
+| 1.9.208 | 플랫폼/API 제약 사전 체크 (6종 기본) | `constraints list\|check\|add` |
+| 1.9.209 | pre-wake sub-agent audit (6 영역) | `pre-wake-audit [--last]` |
+| 1.9.210 | adaptive wakeup interval (10~45min) | `wakeup-interval get\|set\|auto\|history\|record` |
+| 1.9.211 | .harness → .leerness opt-in migration | `migrate-workspace-dir [--dry-run]` + `workspace-dir get\|guide` |
+| 1.9.212 | 멱등성 감사 + ruleAdd/taskAdd dedup | `idempotency audit` + `rule add` / `task add` 자동 dedup |
+| 1.9.213 | intent inference + 5도메인 scope expansion | `intent classify\|expand\|domains` |
+
+### handoff 헤드라인 자동 노출 (1.9.215+)
+- 1.9.207 `📥 미답 요청 N건` / `📥 요청 N (tracked)`
+- 1.9.208 `🚦 N 플랫폼 제약` (현재 task에서 매칭 시)
+- 1.9.209 `🔍 pre-wake NC/MW` + 본문 자동 섹션
+- 1.9.210 적응 적용된 interval (handoff시 권장값 표시)
+- 1.9.213 `🎯 intent broad/<domain>` 또는 `🎯 intent precise` (현재 task 자동 분류)
+
+### 의도 보호 원칙 (1.9.213)
+- **Always-Off Opt-In**: intent expansion 기본 비활성
+- **Dry-run 기본**: 실제 task add 절대 X
+- **명시 vs 추론 분리 라벨링**: `👤 사용자 명시` vs `🤖 AI 추론 확장`
+
 ---
 <!-- leerness:migration-preserved -->
 ## Preserved previous content

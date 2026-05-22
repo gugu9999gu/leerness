@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.9.215 — 2026-05-22
+
+**🎯 handoff 헤드라인에 constraints/intent 자동 통합 + AGENTS.md 7 라운드 누적.**
+
+> 백로그 소진 후 운영 가치 강화 — 현재 진행 중 task에서 자동으로 플랫폼 제약 + 의도 분류 노출
+
+### 1. handoff 헤드라인 15번째 요소 (1.9.215)
+- progress-tracker.md 의 **첫 활성 task** request 자동 추출
+- **1.9.208 constraints 통합**: 플랫폼 alias 매칭 시 `🚦 N 플랫폼 제약` 노출
+  - 예: "Stripe API 결제 모듈" → `🚦 1 플랫폼 제약`
+- **1.9.213 intent 통합**: 의도 자동 분류 시 `🎯 intent broad/<domain>` 또는 `🎯 intent precise` 노출
+  - 예: "게임 만들어줘 ... 포괄적" → `🎯 intent broad/game`
+- 헤드라인 라벨: `1.9.81/93/113/152/162/192/197/204/207/209/215`
+- done/dropped/blocked/completed task는 무시 (활성만 분석)
+
+### 2. AGENTS.md 7 라운드 누적 갱신 (CLAUDE.md 등가)
+- `## 사용자 명시 신규 7종 (1.9.207~213)` 표 형식 (버전 / 기능 / CLI)
+- `### handoff 헤드라인 자동 노출 (1.9.215+)` 섹션
+- `### 의도 보호 원칙 (1.9.213)` 명시
+
+### 3. 누적 회귀 (1.9.207~214) — 모두 유지
+
+### 4. stress-v160 — 17/17 PASS
+- 1.9.215 (6): VERSION + 헤드라인 코드 + AGENTS.md + 격리 검증 3종
+- stripe task → 🚦 자동 / broad+game task → 🎯 자동 / done task 무시
+- 성능 (2) + 누적 회귀 (9)
+- 성능: --version cold start avg 677ms · MCP 54 도구 453ms
+
+### 5. 자동 release (77 라운드 main-push streak · 38 라운드 npm publish streak)
+
+---
+
 ## 1.9.214 — 2026-05-22
 
 **🛠 운영 안정화 라운드 — drift 차단 + AGENTS/CLAUDE 7 라운드 누적 갱신 + 종합 회귀.**

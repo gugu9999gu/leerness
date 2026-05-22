@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.214';
+const VERSION = '1.9.215';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -5658,10 +5658,45 @@ function handoff(root) {
           }
         }
       } catch {}
+      // 15) 1.9.215: 현재 활성 task에서 constraints/intent 자동 분석 (1.9.208/213 통합)
+      try {
+        // progress-tracker.md 의 첫 active task request 추출
+        const ptPath = path.join(root, '.harness', 'progress-tracker.md');
+        if (exists(ptPath)) {
+          const content = read(ptPath);
+          for (const line of content.split(/\r?\n/)) {
+            if (!/^\|\s*T-\d{4,}\s*\|/.test(line)) continue;
+            const cells = line.split('|').slice(1, -1).map(s => s.trim());
+            if (cells.length < 3) continue;
+            const status = (cells[1] || '').toLowerCase();
+            const req = cells[2];
+            if (!/^(done|dropped|blocked|completed)$/i.test(status) && req.length >= 5) {
+              // 1.9.208 constraints 매칭
+              try {
+                const cc = _checkRequestConstraints(root, req);
+                if (cc.matched && cc.matched.length > 0) {
+                  parts.push(`🚦 ${cc.matched.length} 플랫폼 제약`);
+                }
+              } catch {}
+              // 1.9.213 intent classify
+              try {
+                const cls = _classifyIntent(req);
+                if (cls.intent === 'broad') {
+                  const det = _detectDomain(req, root);
+                  if (det.domain) parts.push(`🎯 intent broad/${det.domain}`);
+                } else if (cls.intent === 'precise') {
+                  parts.push(`🎯 intent precise`);
+                }
+              } catch {}
+              break; // 첫 active만 분석
+            }
+          }
+        }
+      } catch {}
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207/209): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207/209/215): ${parts.join(' · ')}`));
       }
     } catch {}
   }
