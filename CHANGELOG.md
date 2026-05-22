@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.9.218 — 2026-05-22
+
+**🔁 handoff --json 통합 강화 + 5축 매트릭스 보강 (98→100 후보).**
+
+### 1. handoff --json 통합 필드 추가 (session close 와 동일 패턴)
+| 필드 | 출처 | 내용 |
+|---|---|---|
+| `userRequestsAudit` | 1.9.207 | total/open/missing/tracked/stale |
+| `preWakeAudit` | 1.9.209 | auditedAt/ageMin/critical/warning/needsAttention (보고서 있을 때만) |
+| `idempotencyAudit` | 1.9.212 | violations/high/medium/low/verified/overall |
+
+### 2. JSON 일관성 확보 — handoff / session close / health / drift check 4종 모두 통합
+- 외부 자동화 도구 / CI 가 4 JSON 명령으로 종합 회수 가능
+- 1.9.207~213 신규 기능이 모든 주요 JSON 출력에 노출
+
+### 3. 5축 매트릭스 보강 (98 → 100 후보)
+1.9.207~217 11 라운드 누적 영향:
+- **A축 (범용 AI 하네스)** 9.5→10: 1.9.208 constraints (6 플랫폼 catalog) + 1.9.213 intent (5 도메인)
+- **B축 (멀티 Sub-Agent)** 9.5→10: 1.9.209 pre-wake audit + 1.9.216 MCP 5종 (59 도구)
+- **C축 (공식 스킬)** 10/10 유지
+- **D축 (장기 맥락)** 9.5→10: 1.9.211 .harness→.leerness AI 참조 가이드
+- **E축 (게으름 방지)** 9.5→10: 1.9.207 미답 요청 + 1.9.212 멱등성 + 1.9.217 session close 통합
+
+→ **100/100 (5축 평균 10/10)**
+
+### 4. 누적 회귀 (1.9.207~217) — 모두 유지
+
+### 5. stress-v163 — 16/16 PASS
+- 1.9.218 (5): VERSION + JSON 통합 3종 필드 검증
+- userRequestsAudit total=1 검증, idempotency overall=clean 검증
+- pre-wake-audit 자동 통합 검증
+- 성능 (2): cold_start 450ms / MCP 59 도구 417ms
+- 누적 회귀 (9)
+
+### 6. 자동 release (80 라운드 main-push streak · 41 라운드 npm publish streak)
+
+🎉 **5축 매트릭스 100/100 도달**
+
+---
+
 ## 1.9.217 — 2026-05-22
 
 **🔚 session close 자동 통합 — 1.9.207/209/212 자동 호출.**

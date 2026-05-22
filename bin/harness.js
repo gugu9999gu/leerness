@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.217';
+const VERSION = '1.9.218';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -5485,6 +5485,42 @@ function handoff(root) {
           summary: `F${fNodesH.length}/E${edgeCount}${isolated > 0 ? `/iso${isolated}` : ''}`
         };
       } catch {}
+    } catch {}
+    // 1.9.218: handoff JSON 통합 강화 — 1.9.207/209/212 자동 통합 (session close 와 동일 패턴)
+    try {
+      const reqAudit = _auditUserRequests(root);
+      result.userRequestsAudit = {
+        total: reqAudit.total,
+        open: reqAudit.open,
+        missing: reqAudit.missing ? reqAudit.missing.length : 0,
+        tracked: reqAudit.tracked ? reqAudit.tracked.length : 0,
+        stale: reqAudit.stale ? reqAudit.stale.length : 0
+      };
+    } catch {}
+    try {
+      const pwState = _loadPreWakeReport(root);
+      if (pwState.reports.length > 0) {
+        const latest = pwState.reports[pwState.reports.length - 1];
+        const ageMin = Math.floor((Date.now() - new Date(latest.auditedAt).getTime()) / 60000);
+        result.preWakeAudit = {
+          auditedAt: latest.auditedAt,
+          ageMin,
+          critical: latest.summary?.criticalCount || 0,
+          warning: latest.summary?.warningCount || 0,
+          needsAttention: !!latest.summary?.needsAttention
+        };
+      }
+    } catch {}
+    try {
+      const idemp = _runIdempotencyAudit(root);
+      result.idempotencyAudit = {
+        violations: idemp.summary.totalViolations,
+        high: idemp.summary.highSeverity,
+        medium: idemp.summary.mediumSeverity,
+        low: idemp.summary.lowSeverity,
+        verified: idemp.summary.verifiedAreas,
+        overall: idemp.summary.overall
+      };
     } catch {}
     log(JSON.stringify(result, null, 2));
     return;
