@@ -109,6 +109,20 @@ leerness가 자동 검증 가능한 trigger:
 4. `leerness session-resume --auto-fix` (1.9.222) → 30분+ 지난 pending wakeup 자동 `superseded`
 5. 안전 재개 후 다음 라운드 진입
 
+### 사용자 요청 자동 완료 시스템 (1.9.223~225) — 4 라운드 완성
+
+| 버전 | 핵심 기능 | CLI / Trigger |
+|---|---|---|
+| 1.9.223 | delivered 패턴 자동 감지 | `requests auto-complete [--apply]` + handoff 헤드라인 `📥 자동완료가능 N건` |
+| 1.9.224 | MCP 61 + handoff 본문 + session close auto-apply | `leerness_requests_auto_complete` MCP + `session close --auto-apply-delivered` |
+| 1.9.225 | drift --auto-fix 통합 + env opt-in | `drift check --auto-fix` 자동 / `LEERNESS_AUTO_APPLY_DELIVERED=1` env |
+
+### 라운드 진행도 가시화 (1.9.226~227)
+- `leerness round-history` 새 명령 (git tag v1.9.X 기반)
+- handoff 헤드라인 17번째: `🔄 R<N> → R<milestone> (<X>R 남음)`
+- handoff/session close --json **6 통합 필드**: userRequests / preWake / idempotency / abnormalShutdown / deliveredRequests / **roundHistory** (1.9.227)
+- MCP **62 도구** (`leerness_round_history` 1.9.226)
+
 ### 5축 매트릭스 (1.9.218 — 100/100 달성)
 - A. agent 자동화 — 10/10
 - B. multi-agent consensus — 10/10

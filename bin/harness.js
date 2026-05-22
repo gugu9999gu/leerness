@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.226';
+const VERSION = '1.9.227';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -5903,6 +5903,18 @@ function handoff(root) {
           ids: delivered.candidates.map(c => c.id)
         };
       } catch {}
+      // 1.9.227: roundHistory 통합 (handoff JSON 6번째 통합 필드) — 자율 진행도 외부 회수
+      try {
+        const rh = _computeRoundHistory(root);
+        result.roundHistory = {
+          roundCount: rh.roundCount,
+          baselineVersion: rh.baselineVersion,
+          nextMilestone: rh.nextMilestone,
+          roundsToNextMilestone: rh.roundsToNextMilestone,
+          daysActive: rh.daysActive,
+          avgRoundsPerDay: rh.avgRoundsPerDay
+        };
+      } catch {}
     } catch {}
     try {
       const pwState = _loadPreWakeReport(root);
@@ -10026,6 +10038,18 @@ function sessionClose(root, opts = {}) {
           candidates: delivered.candidates.length,
           currentVersion: delivered.currentVersion,
           autoCompleteAvailable: delivered.candidates.length > 0
+        };
+      } catch {}
+      // 1.9.227: roundHistory 통합 (session close JSON 6번째 통합 필드)
+      try {
+        const rh = _computeRoundHistory(root);
+        jsonResult.roundHistory = {
+          roundCount: rh.roundCount,
+          baselineVersion: rh.baselineVersion,
+          nextMilestone: rh.nextMilestone,
+          roundsToNextMilestone: rh.roundsToNextMilestone,
+          daysActive: rh.daysActive,
+          avgRoundsPerDay: rh.avgRoundsPerDay
         };
       } catch {}
     } catch {}

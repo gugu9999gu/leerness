@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.9.227 — 2026-05-23
+
+**📊 handoff/session close --json roundHistory 통합 (6 필드 완성) + CLAUDE/AGENTS drift 차단.**
+
+### 1. handoff --json 6번째 통합 필드 `roundHistory`
+- `{ roundCount, baselineVersion, nextMilestone, roundsToNextMilestone, daysActive, avgRoundsPerDay }`
+- 외부 CI/모니터링이 라운드 진행도 + 다음 마일스톤 직접 회수
+- 1.9.218 (4 필드) → 1.9.223 (5 필드) → 1.9.227 (**6 필드 완성**)
+
+### 2. session close --json 6번째 통합 필드 `roundHistory`
+- 마감 시 진행도 통계 동기 노출
+- handoff/session close JSON 동일 패턴 유지
+
+### 3. CLAUDE.md / AGENTS.md drift 차단 갱신
+- 1.9.222~227 6 라운드 누적 통합 (이전 갱신: 1.9.214)
+- 신규 섹션: "사용자 요청 자동 완료 시스템 (1.9.223~225)" + "라운드 진행도 가시화 (1.9.226~227)"
+- 새 메타파일 (last update: 1.9.214 → 1.9.227, 6 라운드 누적)
+
+### 4. 6 통합 필드 매트릭스 완성 (handoff/session close --json 일관성)
+- userRequestsAudit (1.9.207/218)
+- preWakeAudit (1.9.209/218)
+- idempotencyAudit (1.9.212/218)
+- abnormalShutdown (1.9.220/221)
+- deliveredRequests (1.9.223)
+- **roundHistory** (1.9.226/227) ⭐
+
+### 5. 누적 회귀 (1.9.207~226) — 모두 유지
+
+### 6. stress-v172 — 17/17 PASS
+- 1.9.227 (7): VERSION + handoff JSON + session close JSON + 6 필드 검증 (handoff) + 6 필드 검증 (session close) + CLAUDE 누적 + AGENTS 누적
+- 성능 (2): cold_start avg 400ms / handoff --json 641ms
+- 누적 회귀 (8): 1.9.207~226
+
+### 7. 자동 release (89 라운드 main-push streak · 50 라운드 npm publish streak 🎉)
+
+📊 **JSON 통합 매트릭스 완성** — 외부 자동화/CI 가 leerness 상태 6 차원 동기 회수
+
+🎉 **50 라운드 npm publish streak 달성**
+
+---
+
 ## 1.9.226 — 2026-05-23
 
 **🔄 round-history CLI + handoff 헤드라인 라운드 카운터 + MCP 62번째 도구.**

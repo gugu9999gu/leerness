@@ -85,6 +85,37 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 - `leerness session-resume --auto-fix` — 오래된 wakeup 자동 supersede (안전 회복)
 - handoff 본문에 `## 🚨/⚠ 비정상 종료 감지` 섹션 자동 (high/medium severity 시)
 
+## 사용자 요청 자동 완료 시스템 (1.9.223~225) — 4 라운드 누적 완성
+
+### 1.9.223 — requests auto-complete by pattern
+- `leerness requests auto-complete` — "Round X.Y.Z — 구현 완료" 패턴 자동 감지
+- 기본 dry-run, `--apply` 명시 시 적용
+- 안전 가드: 현재 버전 이하만 후보 (미래 버전 무시)
+- handoff 헤드라인 `📥 자동완료가능 N건` + JSON 5번째 통합 필드 `deliveredRequests`
+
+### 1.9.224 — MCP 61 + handoff 본문 + session close --auto-apply-delivered
+- MCP 도구 60 → 61 (`leerness_requests_auto_complete`)
+- handoff 본문에 `## 📥 사용자 요청 자동 완료 가능` 자동 섹션
+- `session close --auto-apply-delivered` 플래그 (마감 시 자동 완료)
+
+### 1.9.225 — drift check --auto-fix 통합 + env opt-in
+- `drift check --auto-fix` 시 delivered 패턴 자동 적용 (1.9.82 패턴 확장)
+- `LEERNESS_AUTO_APPLY_DELIVERED=1` env opt-in (자율 모드용)
+- handoff 첫 호출 시 자동 정리
+
+## 라운드 진행도 가시화 (1.9.226~227)
+
+### 1.9.226 — round-history CLI + handoff 헤드라인 + MCP 62
+- `leerness round-history` 새 명령 (git tag v1.9.X 기반)
+- 마일스톤 자동 감지 (50/75/100/125/150/175/200/250/300/400/500)
+- handoff 헤드라인 17번째 요소: `🔄 R182 → R200 (18R 남음)`
+- MCP 도구 61 → 62 (`leerness_round_history`)
+
+### 1.9.227 — handoff/session close --json roundHistory 통합 + CLAUDE/AGENTS 누적
+- handoff --json 6번째 통합 필드: `roundHistory`
+- session close --json 6번째 통합 필드: `roundHistory`
+- CLAUDE.md / AGENTS.md drift 차단 갱신 (1.9.222~226)
+
 ---
 <!-- leerness:migration-preserved -->
 ## Preserved previous content
