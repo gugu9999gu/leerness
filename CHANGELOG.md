@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.9.232 — 2026-05-23
+
+**🐛 pulse memorySurface BUG fix + handoff --pulse 옵션 + session close 자동 pulse.**
+
+### 1. pulse memorySurface BUG fix (1.9.231 → 1.9.232)
+- 1.9.231 pulse 의 T/D/R/P/L 카운트가 잘못된 정규식으로 늘 0 출력
+- 1.9.232: `memoryStatusCmd` 와 동일한 패턴 사용 (`readProgressRows`, `_extractDecisionBlocks`, `readRules`, `### M-` regex, `### YYYY-MM-DD` regex)
+- 검증: leerness-pkg → 기존 `T0/D0/R0/P0/L0` → 정상 `T0/D0/R1/P1/L0` (active rule + milestone 반영)
+
+### 2. `leerness handoff --pulse` 옵션 신설
+- handoff 대신 pulse 1 line 형식 출력
+- AI 가 빠른 상태 확인 시 사용 (`handoff` 전체 호출 대신)
+- 내부: `pulseCmd` 직접 호출
+
+### 3. session close 자동 pulse 한 줄 노출
+- 마감 시 1.9.217 통합 보고 끝에 pulse 한 줄 자동 추가
+- 다음 라운드 진입 시 즉시 상태 인지: `📍 v1.9.232 · 🔄 R188 · 🧠 T0/D0/R1/P1/L0 · 🎯 R200 (1d)`
+- AI 가 한 줄로 컨텍스트 확보
+
+### 4. 누적 회귀 (1.9.207~231) — 모두 유지
+
+### 5. stress-v177 — 13/13 PASS
+- 1.9.232 (4): VERSION + pulse BUG fix + handoff --pulse + session close 자동 pulse
+- 성능 (2): cold_start avg 389ms / pulse 1009ms
+- 누적 회귀 (7): 1.9.207~231
+
+### 6. 자동 release (94 라운드 main-push streak · 55 라운드 npm publish streak)
+
+🐛 **1 라운드 BUG fix + 2 UX 개선** — pulse 시스템 안정성 강화
+
+---
+
 ## 1.9.231 — 2026-05-23
 
 **📍 leerness pulse 새 명령 (한 줄 종합 요약) + MCP 64번째 도구.**

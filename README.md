@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.231-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v176-16%2F16-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-64-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-187-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-93_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-100%2F100_(5축)-brightgreen)]() [![pulse](https://img.shields.io/badge/📍_pulse-한_줄_종합_요약-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-394ms-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.232-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v177-13%2F13-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-64-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-188-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-94_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-100%2F100_(5축)-brightgreen)]() [![bugfix](https://img.shields.io/badge/🐛_pulse-BUG_fix-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-389ms-success)]() [![install](https://img.shields.io/badge/npm_i_leerness-즉시_사용_가능-success)]() [![sandbox](https://img.shields.io/badge/runCommandSafe-cwd_jail%2Benv_scrub-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.231  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.232  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  📍 leerness pulse — 한 줄 종합 요약 + MCP 64 도구              ║
+  ║  🐛 pulse BUG fix · handoff --pulse · session close 자동      ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

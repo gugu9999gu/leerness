@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.231';
+const VERSION = '1.9.232';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2227,14 +2227,22 @@ function pulseCmd(root) {
     const matches = src.match(/name: 'leerness_[a-z_]+'/g) || [];
     data.mcpTools = matches.length;
   } catch {}
-  // Memory Surface (T/D/R/P/L)
+  // Memory Surface (T/D/R/P/L) — 1.9.232 BUG fix: memoryStatusCmd 와 동일한 패턴 사용
   try {
-    const tasks = (read(progressTrackerPath(root)).split('\n').filter(l => /\|\s*in-progress\s*\|/.test(l)) || []).length;
-    const decisions = ((read(path.join(root, '.harness', 'decisions.md')) || '').match(/^##\s/gm) || []).length;
-    const rules = readRules(root).filter(r => r.status === 'active').length;
-    const milestonesCnt = ((read(path.join(root, '.harness', 'plan.md')) || '').match(/^- M-\d+/gm) || []).length;
-    const lessons = ((read(path.join(root, '.harness', 'lessons.md')) || '').match(/^###\s/gm) || []).length;
-    data.memorySurface = `T${tasks}/D${decisions}/R${rules}/P${milestonesCnt}/L${lessons}`;
+    const rows = readProgressRows(root);
+    const tasksInProgress = rows.filter(r => r.status === 'in-progress').length;
+    const dm = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+    const decisionBlocks = _extractDecisionBlocks(dm);
+    const decisionCount = decisionBlocks.map(b => {
+      const m = b.match(/^### (.+)$/m);
+      return m ? '### ' + m[1].trim() : null;
+    }).filter(Boolean).length;
+    const rulesActive = readRules(root).filter(r => r.status === 'active').length;
+    const planText = exists(planPath(root)) ? read(planPath(root)) : '';
+    const milestonesCnt = (planText.match(/^### M-\d{4}\./gm) || []).length;
+    const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
+    const lessonsCount = (lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+    data.memorySurface = `T${tasksInProgress}/D${decisionCount}/R${rulesActive}/P${milestonesCnt}/L${lessonsCount}`;
   } catch {}
   // 마일스톤 + ETA
   try {
@@ -2263,7 +2271,7 @@ function pulseCmd(root) {
   if (data.abnormalShutdown !== 'none') {
     line += ` · 🔌 abnormal:${data.abnormalShutdown}`;
   }
-  log(cy(`# leerness pulse (1.9.231) — 한 줄 종합 요약`));
+  log(cy(`# leerness pulse (1.9.231/1.9.232) — 한 줄 종합 요약`));
   log('');
   log(`  ${line}`);
   log('');
@@ -7265,6 +7273,10 @@ function _handoffWorkspace(rootBase) {
 }
 
 function handoffCmd(root) {
+  // 1.9.232: --pulse 옵션 — pulse 1 line 형식으로 출력 (handoff 전체 대신)
+  if (has('--pulse')) {
+    return pulseCmd(absRoot(root));
+  }
   // 1.9.17: --all-apps / --include 통합 모드
   if (has('--all-apps') || arg('--include', null)) {
     return _handoffWorkspace(absRoot(root));
@@ -10348,6 +10360,28 @@ function sessionClose(root, opts = {}) {
         } else {
           log(grn(`  ✓ 멱등성 검사 통과 — verified ${idemp.summary.verifiedAreas} 영역`));
         }
+      } catch {}
+      // 1.9.232: 마감 시 pulse 한 줄 자동 노출 — 다음 라운드 진입 시 즉시 상태 인지
+      try {
+        const rh = _computeRoundHistory(root);
+        const ms = _computeMilestones(root);
+        const rows = readProgressRows(root);
+        const tIn = rows.filter(r => r.status === 'in-progress').length;
+        const dm = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
+        const dCnt = _extractDecisionBlocks(dm).length;
+        const rActive = readRules(root).filter(r => r.status === 'active').length;
+        const planText = exists(planPath(root)) ? read(planPath(root)) : '';
+        const pCnt = (planText.match(/^### M-\d{4}\./gm) || []).length;
+        const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
+        const lCnt = (lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+        const mem = `T${tIn}/D${dCnt}/R${rActive}/P${pCnt}/L${lCnt}`;
+        let pulseLine = `📍 v${VERSION} · 🔄 R${rh.roundCount} · 🧠 ${mem}`;
+        if (ms.next) {
+          const eta = ms.next.etaDays != null ? ` (${ms.next.etaDays}d)` : '';
+          pulseLine += ` · 🎯 R${ms.next.milestone}${eta}`;
+        }
+        log('');
+        log(`  ${pulseLine}  ${dim('— leerness pulse (1.9.232)')}`);
       } catch {}
     } catch {}
   }
