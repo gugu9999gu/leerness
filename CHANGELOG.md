@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.9.204 — 2026-05-22
+
+**⏰ timezone 보강 + 🔄 auto-loop 활성 라벨 (사용자 명시 2종).**
+
+### 사용자 명시
+> 1. *"시간관련 기능 등은 해당 국가의 시간대를 고려해서 작업이 될 수 있는지"*
+> 2. *"자동으로 깨어나서 작업하는 모드도 활성룰에 표시되어야 할 것 같은데, 활성 룰 에 표시되는 기능 점검"*
+
+### 1. timezone 시스템 (Intl.DateTimeFormat 기반, 의존성 0)
+- `_getLocalTz()` — `process.env.LEERNESS_TZ` → 시스템 timezone → `Asia/Seoul` fallback
+- `_formatLocal(iso, opts)` — ISO UTC → 사용자 local time (예: `2026-05-22 10:13 KST`)
+- 단축 라벨: KST / JST / UTC / 자동 추출
+- **저장은 UTC ISO 유지** (이식성/일관성), **display 만 local time 변환**
+
+### 2. resume CLI local time 표시
+```
+$ leerness resume
+  📅 plan 저장: 2026-05-22 09:48 KST  (29분 전)
+  ⏰ 예상 fire: 2026-05-22 10:13 KST  (정시)
+```
+이전: `2026-05-22T00:48:23.298Z` (한국 사용자 +9 머릿속 변환 필요)
+이후: `2026-05-22 09:48 KST` (즉시 인지 가능)
+
+### 3. 자동 모드 활성 라벨 (헤드라인 12번째)
+```
+📊 헤드라인 (1.9.81/93/113/152/162/192/197/204): ... · 🔄 auto-loop 25min · ...
+```
+- `_getAutoLoopRule(root)` — `R-XXXX [every-round]` 활성 룰 자동 감지
+- 룰 텍스트에서 `25분` 또는 `1500초` 패턴 추출 → 분 단위 표시
+
+### 4. 누적 회귀 (1.9.198~203) — 모두 유지
+
+### 5. stress-v149 — 16/16 PASS
+- timezone (3) + resume display (1) + headline label (2) + 실 검증 (1) + 성능 (2) + 누적 (7)
+- 성능: --version cold start avg **471 ms** · MCP 54 도구 **438 ms**
+
+### 6. 자동 release 흐름
+- main 자동 push **66 라운드 연속** (1.9.140~204)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.203 — 2026-05-22
 
 **📋 자동 라운드 plan 자동 정리 + `leerness resume` 신규 CLI (사용자 명시).**

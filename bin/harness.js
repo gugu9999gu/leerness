@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.203';
+const VERSION = '1.9.204';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -130,6 +130,52 @@ function append(p, s) { mkdirp(path.dirname(p)); fs.appendFileSync(p, s, 'utf8')
 function rel(root, p) { return path.relative(root, p).replace(/\\/g, '/') || '.'; }
 function today() { return new Date().toISOString().slice(0, 10); }
 function now() { return new Date().toISOString(); }
+// 1.9.204: timezone 보강 (사용자 명시)
+//   ISO UTC timestamp 저장은 유지 (이식성/일관성) → display 시 사용자 local time 변환
+//   환경변수: LEERNESS_TZ (default = 시스템 timezone, fallback: 'Asia/Seoul')
+function _getLocalTz() {
+  if (process.env.LEERNESS_TZ) return process.env.LEERNESS_TZ;
+  try {
+    const sys = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (sys && sys !== 'UTC') return sys;
+  } catch {}
+  return 'Asia/Seoul';
+}
+// ISO timestamp → local time 표시 (예: "2026-05-22 10:13 KST")
+function _formatLocal(iso, opts) {
+  if (!iso) return '?';
+  opts = opts || {};
+  const tz = opts.tz || _getLocalTz();
+  try {
+    const d = typeof iso === 'string' ? new Date(iso) : iso;
+    if (isNaN(d.getTime())) return String(iso);
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+      hour12: false
+    });
+    const parts = fmt.formatToParts(d);
+    const get = (t) => (parts.find(p => p.type === t) || {}).value || '';
+    const date = `${get('year')}-${get('month')}-${get('day')}`;
+    const time = `${get('hour')}:${get('minute')}`;
+    // tz 약어 (KST/JST/UTC 등) — 간단 추출
+    const tzShort = tz === 'Asia/Seoul' ? 'KST' : tz === 'Asia/Tokyo' ? 'JST' : tz === 'UTC' ? 'UTC' : tz.split('/').pop().slice(0, 3);
+    return opts.dateOnly ? date : `${date} ${time} ${tzShort}`;
+  } catch { return String(iso); }
+}
+// 자동 모드 활성 여부 (R-XXXX every-round 룰 존재 시 true)
+function _isAutoLoopActive(root) {
+  try {
+    const rules = readRules(root);
+    return rules.some(r => r.status === 'active' && /every-round|every-session/i.test(r.trigger || ''));
+  } catch { return false; }
+}
+function _getAutoLoopRule(root) {
+  try {
+    return readRules(root).find(r => r.status === 'active' && /every-round/i.test(r.trigger || '')) || null;
+  } catch { return null; }
+}
 function arg(name, def = null) { const i = process.argv.indexOf(name); return i >= 0 ? (process.argv[i + 1] || true) : def; }
 function has(name) { return process.argv.includes(name); }
 function nonFlagArgs() {
@@ -1813,8 +1859,8 @@ function resumeCmd(root) {
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   log(cyan(`# 🔄 leerness resume (1.9.203 자동 라운드 plan 적용)`));
   log('');
-  log(`  📅 plan 저장: ${plan.savedAt}  (${plan.ageMin}분 전)`);
-  log(`  ⏰ 예상 fire: ${plan.expectedFireAt}` + (plan.elapsedFromExpected > 0 ? yel(`  (${plan.elapsedFromExpected}분 지연)`) : ' (정시)'));
+  log(`  📅 plan 저장: ${_formatLocal(plan.savedAt)}  (${plan.ageMin}분 전)`);
+  log(`  ⏰ 예상 fire: ${_formatLocal(plan.expectedFireAt)}` + (plan.elapsedFromExpected > 0 ? yel(`  (${plan.elapsedFromExpected}분 지연)`) : ' (정시)'));
   log(`  🎯 focus: ${plan.focus}`);
   log('');
   log(grn(`## 다음 라운드: ${plan.nextRoundVersion}`));
@@ -3850,6 +3896,23 @@ function handoff(root) {
           parts.push(`🌐 official ${m.total}/${m.cacheTotal} (${ageStr}${status})`);
         }
       } catch {}
+      // 12) 1.9.204: 자동 모드 활성 표시 (사용자 명시) — R-0001 every-round 룰 활성 시 헤드라인 노출
+      try {
+        const autoRule = _getAutoLoopRule(root);
+        if (autoRule) {
+          // 룰 텍스트에서 "25분" 우선, 없으면 "1500초" 패턴 추출 (분 우선순위)
+          const txt = autoRule.rule || '';
+          const minMatch = txt.match(/(\d+)\s*분/);
+          const secMatch = txt.match(/(\d+)\s*초/);
+          let label = '🔄 auto-loop';
+          if (minMatch) {
+            label = `🔄 auto-loop ${minMatch[1]}min`;
+          } else if (secMatch) {
+            label = `🔄 auto-loop ${Math.round(Number(secMatch[1]) / 60)}min`;
+          }
+          parts.push(label);
+        }
+      } catch {}
       // 11) 1.9.197: A축 (범용 AI 하네스) 9.5→10 보강 — provider probe 60분 캐시 자동 노출
       //     사용자 명시: "범용 AI 하네스 ... 최고의 도구" — 매 handoff 시 11 backend ready 상태 즉시 노출
       try {
@@ -3862,7 +3925,7 @@ function handoff(root) {
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197): ${parts.join(' · ')}`));
+        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204): ${parts.join(' · ')}`));
       }
     } catch {}
   }
