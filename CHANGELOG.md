@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.9.217 — 2026-05-22
+
+**🔚 session close 자동 통합 — 1.9.207/209/212 자동 호출.**
+
+### 1. session close 자동 호출 3종 (마감 시)
+| 영역 | 출처 | 동작 |
+|---|---|---|
+| `userRequestsAudit` | 1.9.207 | open/in-progress 요청 → missing/tracked/stale 분류 |
+| `preWakeAudit` | 1.9.209 | sleep 전 6 영역 audit + .harness/pre-wake-report.json 자동 저장 |
+| `idempotencyAudit` | 1.9.212 | 4영역 멱등성 검사 (rule/task/user-requests/wakeups) |
+
+### 2. JSON 모드 (`--json`) 통합 필드 추가
+- `userRequestsAudit: { total, open, missing, tracked, stale }`
+- `preWakeAudit: { auditedAt, critical, warning, info, needsAttention }`
+- `idempotencyAudit: { violations, high, medium, low, verified, overall }`
+
+### 3. human 출력 자동 섹션
+```
+## 🔚 session close 자동 통합 보고 (1.9.217)
+  ⚠ 미답 사용자 요청 N건 (task-log/plan/decisions 매칭 안 됨)
+  🚨 pre-wake-audit: critical N (다음 깨어남 시 점검 필요)
+  ✓ 멱등성 검사 통과 — verified 4 영역
+```
+
+### 4. opt-out 옵션
+- `--no-pre-wake` — pre-wake audit 스킵
+- 옵션 외 다른 통합은 항상 실행 (가벼움)
+
+### 5. 누적 회귀 (1.9.207~216) — 모두 유지
+
+### 6. stress-v162 — 18/18 PASS
+- 1.9.217 (7): VERSION + JSON 필드 + human 섹션 + 자동 저장 + opt-out + 필드 구조 + clean
+- 성능 (2): cold_start 489ms / MCP 59 도구 785ms
+- 누적 회귀 (9)
+
+### 7. 자동 release (79 라운드 main-push streak · 40 라운드 npm publish streak)
+
+🎉 **session close 강화** — 매 마감 시 운영 안전 자동 점검
+
+---
+
 ## 1.9.216 — 2026-05-22
 
 **🔌 MCP 5종 추가 — 1.9.207~213 외부 AI 노출 (54 → 59 도구).**

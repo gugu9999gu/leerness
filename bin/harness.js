@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.216';
+const VERSION = '1.9.217';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -9465,7 +9465,98 @@ function sessionClose(root, opts = {}) {
         };
       } catch {}
     } catch {}
+
+    // 1.9.217: session close 자동 통합 — 1.9.207 + 1.9.209 + 1.9.212
+    //   마감 시 미답 요청 / pre-wake audit / 멱등성 검사 자동 실행 + JSON 통합
+    try {
+      // 1.9.207: 미답 사용자 요청 audit
+      const reqAudit = _auditUserRequests(root);
+      jsonResult.userRequestsAudit = {
+        total: reqAudit.total,
+        open: reqAudit.open,
+        missing: reqAudit.missing ? reqAudit.missing.length : 0,
+        tracked: reqAudit.tracked ? reqAudit.tracked.length : 0,
+        stale: reqAudit.stale ? reqAudit.stale.length : 0
+      };
+    } catch {}
+    try {
+      // 1.9.209: pre-wake-audit 자동 실행 + 저장 (sleep 전 자동 점검)
+      if (!opts.noPreWake && !has('--no-pre-wake')) {
+        const audit = _runPreWakeAudit(root);
+        _saveAndAppendPreWakeReport(root, audit);
+        jsonResult.preWakeAudit = {
+          auditedAt: audit.auditedAt,
+          critical: audit.summary.criticalCount,
+          warning: audit.summary.warningCount,
+          info: audit.summary.infoCount,
+          needsAttention: audit.summary.needsAttention
+        };
+      }
+    } catch {}
+    try {
+      // 1.9.212: 멱등성 검사 자동 실행 (rule/task/user-requests/wakeups 4영역)
+      const idemp = _runIdempotencyAudit(root);
+      jsonResult.idempotencyAudit = {
+        violations: idemp.summary.totalViolations,
+        high: idemp.summary.highSeverity,
+        medium: idemp.summary.mediumSeverity,
+        low: idemp.summary.lowSeverity,
+        verified: idemp.summary.verifiedAreas,
+        overall: idemp.summary.overall
+      };
+    } catch {}
+
     process.stdout.write(JSON.stringify(jsonResult, null, 2) + '\n');
+  } else {
+    // 1.9.217: human 출력 모드에서도 통합 보고 노출 (마감 직전)
+    try {
+      const isTty = process.stdout.isTTY;
+      const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+      const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+      const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+      const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+
+      log('');
+      log(`## 🔚 session close 자동 통합 보고 (1.9.217)`);
+      // 1.9.207
+      try {
+        const reqAudit = _auditUserRequests(root);
+        const missCnt = reqAudit.missing ? reqAudit.missing.length : 0;
+        if (missCnt > 0) {
+          log(red(`  ⚠ 미답 사용자 요청 ${missCnt}건 (task-log/plan/decisions 매칭 안 됨)`));
+        } else if (reqAudit.open > 0) {
+          log(grn(`  ✓ 사용자 요청 ${reqAudit.open}건 모두 tracked`));
+        } else {
+          log(dim(`  ℹ 사용자 요청 없음 (UR 백로그 비어있음)`));
+        }
+      } catch {}
+      // 1.9.209
+      try {
+        if (!opts.noPreWake && !has('--no-pre-wake')) {
+          const audit = _runPreWakeAudit(root);
+          _saveAndAppendPreWakeReport(root, audit);
+          const sum = audit.summary;
+          if (sum.criticalCount > 0) {
+            log(red(`  🚨 pre-wake-audit: critical ${sum.criticalCount} (다음 깨어남 시 점검 필요)`));
+          } else if (sum.warningCount > 0) {
+            log(yel(`  ⚠ pre-wake-audit: warning ${sum.warningCount}`));
+          } else {
+            log(grn(`  ✓ pre-wake-audit: clean (sleep 안전)`));
+          }
+        }
+      } catch {}
+      // 1.9.212
+      try {
+        const idemp = _runIdempotencyAudit(root);
+        const v = idemp.summary.totalViolations;
+        if (v > 0) {
+          log(red(`  ⚠ 멱등성 위반 ${v}건 (high: ${idemp.summary.highSeverity})`));
+          log(dim(`     → leerness idempotency audit 으로 상세 확인`));
+        } else {
+          log(grn(`  ✓ 멱등성 검사 통과 — verified ${idemp.summary.verifiedAreas} 영역`));
+        }
+      } catch {}
+    } catch {}
   }
 }
 
