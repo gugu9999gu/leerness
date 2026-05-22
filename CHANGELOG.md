@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.9.229 — 2026-05-23
+
+**🎯 leerness milestones CLI + MCP 63번째 도구 (도달 마일스톤 + ETA 예측).**
+
+### 1. `leerness milestones` 새 명령
+- git tag 순차 분석으로 25/50/75/100/125/150/175/200/250/300/400/500 마일스톤 도달 시점 회수
+- 각 마일스톤별: `{milestone, version, reachedAt, daysFromBaseline}`
+- 다음 마일스톤 ETA 계산 (현재 속도 기준): `{milestone, roundsRemaining, etaDays, etaDate}`
+- `--json` 옵션
+- 1.9.226 round-history 확장 (간단 통계 → 도달 이력 + ETA)
+
+### 2. MCP 63번째 도구 — `leerness_milestones`
+- 외부 AI가 "프로젝트 마일스톤 진척도 + 다음 달성 예상일" 직접 회수
+- MCP 62 → 63 (+1)
+
+### 3. 실 측정 — leerness 자체 마일스톤 이력 (7개 달성)
+- R25 → v1.9.68 (2026-05-19, +11d)
+- R50 → v1.9.93 (2026-05-20, +11d)
+- R75 → v1.9.118 (2026-05-20, +11d)
+- R100 → v1.9.143 (2026-05-20, +11d)
+- R125 → v1.9.168 (2026-05-20, +12d)
+- R150 → v1.9.193 (2026-05-21, +12d)
+- R175 → v1.9.218 (2026-05-22, +14d)
+- **다음: R200** — 2026-05-24 ETA (15 라운드 남음, ~2일 후)
+
+### 4. 누적 회귀 (1.9.207~228) — 모두 유지
+
+### 5. stress-v174 — 17/17 PASS
+- 1.9.229 (7): VERSION + CLI + reached 형태 + next ETA + git fallback + MCP 63 + 실 호출
+- 성능 (2): cold_start avg 442ms / milestones 717ms
+- 누적 회귀 (8): 1.9.207~228
+
+### 6. 자동 release (91 라운드 main-push streak · 52 라운드 npm publish streak)
+
+🎯 **자율 모드 진척도 시각화 완성** — 도달 이력 + 예측 ETA 모두 가시화
+
+---
+
 ## 1.9.228 — 2026-05-23
 
 **📊 health --json roundHistory 통합 (JSON 3 명령 일관성) + session-workflow.md drift 차단 + 헤드라인 label 갱신.**

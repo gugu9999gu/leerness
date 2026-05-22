@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.228';
+const VERSION = '1.9.229';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2103,6 +2103,97 @@ function _computeRoundHistory(root) {
     result.avgRoundsPerDay = Math.round((result.roundCount / days) * 100) / 100;
   } catch {}
   return result;
+}
+
+// 1.9.229: milestones — 도달한 마일스톤 일자 + 다음 마일스톤 예상 시점 (1.9.226 round-history 확장)
+//   git tag 순차 분석 → 50/75/100/... 도달 시점의 tag 와 일자 회수
+//   응답: { reached: [{milestone, version, reachedAt, daysFromBaseline}], next: {milestone, roundsRemaining, eta}, totalRounds, avgRoundsPerDay }
+function _computeMilestones(root) {
+  const result = {
+    totalRounds: 0,
+    reached: [],
+    next: null,
+    avgRoundsPerDay: 0,
+    baselineAt: null
+  };
+  try {
+    const r = cp.spawnSync('git', ['tag', '--list', 'v1.9.*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
+      cwd: root, encoding: 'utf8', timeout: 5000
+    });
+    if (r.status !== 0 || !r.stdout) return result;
+    const lines = r.stdout.split('\n').filter(l => l.trim() && /^v\d+\.\d+\.\d+\|/.test(l));
+    if (lines.length === 0) return result;
+    const tags = lines.map(l => {
+      const [name, date] = l.split('|');
+      return { name: name.trim(), version: name.replace(/^v/, '').trim(), date: date.trim() };
+    });
+    result.totalRounds = tags.length;
+    result.baselineAt = tags[0].date;
+    const milestones = [25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500];
+    const baselineTime = new Date(tags[0].date).getTime();
+    // 1-indexed: tags[0] is round 1
+    for (const m of milestones) {
+      if (m <= tags.length) {
+        const t = tags[m - 1];
+        const reachedTime = new Date(t.date).getTime();
+        const daysFromBaseline = Math.floor((reachedTime - baselineTime) / 86400000);
+        result.reached.push({
+          milestone: m,
+          version: t.version,
+          reachedAt: t.date.split(' ')[0],
+          daysFromBaseline
+        });
+      }
+    }
+    // 다음 마일스톤 + 평균 속도로 ETA 계산
+    const lastTime = new Date(tags[tags.length - 1].date).getTime();
+    const days = Math.max(1, Math.floor((lastTime - baselineTime) / 86400000));
+    const avgPerDay = (tags.length / days);
+    result.avgRoundsPerDay = Math.round(avgPerDay * 100) / 100;
+    const nextM = milestones.find(m => m > tags.length);
+    if (nextM != null) {
+      const roundsRemaining = nextM - tags.length;
+      const etaDays = avgPerDay > 0 ? Math.ceil(roundsRemaining / avgPerDay) : null;
+      const etaDate = etaDays != null ? new Date(Date.now() + etaDays * 86400000).toISOString().split('T')[0] : null;
+      result.next = { milestone: nextM, roundsRemaining, etaDays, etaDate };
+    }
+  } catch {}
+  return result;
+}
+
+function milestonesCmd(root) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const data = _computeMilestones(root);
+  if (has('--json')) { log(JSON.stringify(data, null, 2)); return; }
+  log(cy(`# leerness milestones (1.9.229) — 도달 마일스톤 + 다음 ETA`));
+  log('');
+  log(`  📦 총 라운드: ${gr(String(data.totalRounds))}`);
+  if (data.baselineAt) log(`  📍 baseline: ${(data.baselineAt || '').split(' ')[0]}`);
+  if (data.avgRoundsPerDay) log(`  📊 평균: ${gr(data.avgRoundsPerDay + ' rounds/day')}`);
+  log('');
+  if (data.reached.length === 0) {
+    log(dm(`  (도달 마일스톤 없음 — 첫 R25 마일스톤 진행 중)`));
+  } else {
+    log(`  도달 마일스톤 ${data.reached.length}개:`);
+    for (const m of data.reached) {
+      log(`    ✓ R${m.milestone} ${gr(`(v${m.version}, ${m.reachedAt}, +${m.daysFromBaseline}d)`)}`);
+    }
+  }
+  log('');
+  if (data.next) {
+    log(yl(`  🎯 다음 마일스톤: R${data.next.milestone}`));
+    log(`    • ${data.next.roundsRemaining} 라운드 남음`);
+    if (data.next.etaDays != null) {
+      log(`    • ETA: ${data.next.etaDate} (~${data.next.etaDays}일 후, 현재 속도 기준)`);
+    }
+  } else {
+    log(gr(`  🎉 모든 마일스톤 달성 (500+)`));
+  }
 }
 
 function roundHistoryCmd(root) {
@@ -14003,7 +14094,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_idempotency_audit', description: '1.9.216 (1.9.212 사용자 명시) — 멱등성 위반 탐지. 4영역 점검: rule-duplicate (medium) / task-duplicate-request (medium) / user-request-duplicate (low) / wakeup-duplicate (high). 응답: { violations[], verified[], summary: {totalViolations, high/medium/low, overall} }. 외부 AI가 "워크스페이스에 중복/충돌이 있나?"를 회수. 🎉 MCP 58 도구 마일스톤 (50→58). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_session_resume', description: '1.9.221 (1.9.220 사용자 명시) — 비정상 종료 감지 + 자율 재개. 5신호 분석: last-handoff-stale / wakeup-missed / in-progress-stale / auto-resume-plan-unused / release-branch-pending. 응답: { abnormalShutdown, severity (none/low/medium/high), signals[], resumeGuide[] }. 외부 AI가 "절전/시스템종료/세션종료 후 leerness 상태가 정상인가? 어떻게 재개?"를 회수. 🎉 MCP 60 도구 마일스톤 (53→60, +7 in 1.9.168/216/221). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_requests_auto_complete', description: '1.9.224 (1.9.223 자동 회수) — delivered 패턴 자동 감지 + 자동 완료. "Round X.Y.Z — 구현 완료" / "implemented" / "delivered" 패턴이 있는 open 요청 중 현재 버전 이하인 것을 후보로 분류. 응답: { total, candidates: [{id, text, claimedVersion, currentVersion, deliveredKeyword, recordedAt}], currentVersion, applied (apply=true 시), completedIds[] }. 외부 AI가 "운영 누적된 가짜 미답 신호 정리 가능한가?"를 회수. 기본 dry-run, apply: true 명시 시에만 실 적용. 인자: { path?, apply? (default false) }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, apply: { type: 'boolean' } } } },
-    { name: 'leerness_round_history', description: '1.9.226 — 자율 라운드 통계. git tag v1.9.X 기반 누적 라운드 카운트 + 다음 마일스톤 (50/75/100/125/150/175/200/250/300/400/500) + 평균 rounds/day. 응답: { currentVersion, roundCount, baselineVersion, latestTags[], nextMilestone, roundsToNextMilestone, firstTagAt, latestTagAt, daysActive, avgRoundsPerDay }. 외부 AI가 "이 프로젝트는 얼마나 진행됐고 다음 마일스톤까지 몇 라운드 남았나?"를 회수. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_round_history', description: '1.9.226 — 자율 라운드 통계. git tag v1.9.X 기반 누적 라운드 카운트 + 다음 마일스톤 (50/75/100/125/150/175/200/250/300/400/500) + 평균 rounds/day. 응답: { currentVersion, roundCount, baselineVersion, latestTags[], nextMilestone, roundsToNextMilestone, firstTagAt, latestTagAt, daysActive, avgRoundsPerDay }. 외부 AI가 "이 프로젝트는 얼마나 진행됐고 다음 마일스톤까지 몇 라운드 남았나?"를 회수. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_milestones', description: '1.9.229 (1.9.226 확장) — 도달 마일스톤 + 다음 ETA. git tag 순차 분석으로 25/50/75/100/125/150/175/200/250/300/400/500 마일스톤 도달 일자 + 다음 마일스톤 ETA (현재 속도 기준) 계산. 응답: { totalRounds, reached: [{milestone, version, reachedAt, daysFromBaseline}], next: {milestone, roundsRemaining, etaDays, etaDate}, baselineAt, avgRoundsPerDay }. 외부 AI가 "지금까지 어떤 마일스톤을 언제 달성했고 다음 마일스톤 예상 도달일은?"을 회수. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -14167,6 +14259,10 @@ function mcpServeCmd(root) {
           case 'leerness_round_history':
             // 1.9.226: 자율 라운드 통계 + 다음 마일스톤
             cliArgs = ['round-history', '--path', targetPath, '--json'];
+            break;
+          case 'leerness_milestones':
+            // 1.9.229: 도달 마일스톤 + 다음 ETA
+            cliArgs = ['milestones', '--path', targetPath, '--json'];
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
@@ -17813,6 +17909,8 @@ async function main() {
   if (cmd === 'session-resume')                     return sessionResumeCmd(arg('--path', process.cwd()));
   // 1.9.226: leerness round-history — 자율 라운드 통계 + 다음 마일스톤
   if (cmd === 'round-history')                      return roundHistoryCmd(arg('--path', process.cwd()));
+  // 1.9.229: leerness milestones — 도달 마일스톤 + 다음 ETA (1.9.226 확장)
+  if (cmd === 'milestones')                         return milestonesCmd(arg('--path', process.cwd()));
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
   if (cmd === 'constraints')                        return constraintsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit (사용자 명시)
