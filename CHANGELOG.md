@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.9.205 — 2026-05-22
+
+**⚡ ScheduleWakeup 사용자 요청 우선 갱신 (사용자 명시) — wakeup miss 실측 후속.**
+
+### 사용자 명시 + 보고
+> *"자동모드로 진행할때, 예정된 알람이전에 사용자 요청이 들어오면 백그라운드의 알람을 종료후 다시 갱신하는 방식은 어떤지"*
+> *"ScheduleWakeup 10:51 KST 가 지났어"* — 사용자가 명시 보고한 wakeup miss 사례
+
+### 1. `.harness/active-wakeups.json` 등록 추적
+- release sync-main 마무리 시 다음 wakeup 자동 등록
+- 구조: `{ expectedFireAt, intervalMin, source, status: pending/fired/missed/superseded, registeredAt }`
+- 최근 20개 유지
+- 함수: `_loadActiveWakeups` / `_writeActiveWakeups` / `_recordWakeup` / `_activeWakeupsPath`
+
+### 2. handoff 진입 시 wakeup 상태 분석 (`_analyzeWakeupStatus`)
+| kind | 조건 | 알림 |
+|---|---|---|
+| `early` | delta < -5min (미래) | `## ⚡ 사용자 조기 진입 감지` |
+| `on-time` | -5 ~ +5min | `✓ ScheduleWakeup 정시 진입` |
+| `late` | +5 ~ +30min | (조용히) |
+| `missed` | > +30min | `## ⏰ ScheduleWakeup miss 확정` + status 자동 갱신 |
+
+### 3. 조기 진입 시 자동 갱신 가이드
+사용자가 wakeup 예정 시각 이전 진입 → "라운드 마무리 시 새 wakeup 등록 (이전 자동 superseded)" 안내
+
+### 4. miss 자동 status 갱신
+fire 시간 지남 + 30분 이상 → status `pending` → `missed` 자동 업데이트 → 통계 누적
+
+### 5. 누적 회귀 (1.9.199~204) — 모두 유지
+
+### 6. stress-v150 — 16/16 PASS
+- 등록 추적 (3) + 상태 분석 (2) + 임시 워크스페이스 통합 (2) + 성능 (2) + 누적 (7)
+- 성능: --version cold start avg **464 ms** · MCP 54 도구 **460 ms**
+
+### 7. 자동 release
+- main 자동 push **67 라운드 연속** (1.9.140~205)
+- npm publish 자동 (1.9.178~)
+
+---
+
 ## 1.9.204 — 2026-05-22
 
 **⏰ timezone 보강 + 🔄 auto-loop 활성 라벨 (사용자 명시 2종).**

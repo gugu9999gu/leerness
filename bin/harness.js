@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.204';
+const VERSION = '1.9.205';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1777,6 +1777,60 @@ async function skillAutoCacheCmd(root, sub) {
     log(`    • [${e.preset || e.source || '?'}] ${e.name} — ${(e.description || '').slice(0, 60)}`);
   }
   if (c.expired) log(`  → 갱신: leerness skill auto-cache refresh`);
+}
+
+// 1.9.205: ScheduleWakeup 등록 추적 (사용자 명시)
+//   "예정된 알람이전에 사용자 요청이 들어오면 백그라운드의 알람을 종료후 다시 갱신"
+//   라운드 마무리 시 등록된 wakeup id/expectedFireAt 을 .harness/active-wakeups.json 에 기록 →
+//   handoff/resume 진입 시 expected fire 가 과거이면 "wakeup miss 또는 사용자 조기 진입" 감지 →
+//   메인 에이전트가 새 wakeup 호출하라는 명확한 안내
+function _activeWakeupsPath(root) { return path.join(root, '.harness', 'active-wakeups.json'); }
+function _loadActiveWakeups(root) {
+  try {
+    const fp = _activeWakeupsPath(root);
+    if (!exists(fp)) return { wakeups: [] };
+    const j = JSON.parse(read(fp));
+    return { wakeups: Array.isArray(j.wakeups) ? j.wakeups : [] };
+  } catch { return { wakeups: [] }; }
+}
+function _writeActiveWakeups(root, wakeups) {
+  try {
+    mkdirp(path.join(root, '.harness'));
+    writeUtf8(_activeWakeupsPath(root), JSON.stringify({ wakeups, updatedAt: new Date().toISOString() }, null, 2));
+    return true;
+  } catch { return false; }
+}
+function _recordWakeup(root, entry) {
+  const state = _loadActiveWakeups(root);
+  // entry: { expectedFireAt, intervalMin, source, status: 'pending'|'fired'|'missed'|'superseded' }
+  const e = { ...entry, registeredAt: new Date().toISOString() };
+  // 같은 expectedFireAt 중복 시 replace
+  state.wakeups = state.wakeups.filter(w => w.expectedFireAt !== e.expectedFireAt);
+  state.wakeups.push(e);
+  // 최근 20개만 유지
+  if (state.wakeups.length > 20) state.wakeups = state.wakeups.slice(-20);
+  _writeActiveWakeups(root, state.wakeups);
+  return e;
+}
+// wakeup miss / 사용자 조기 진입 감지 — 활성 wakeup 중 가장 가까운 미래/과거 fire 분석
+function _analyzeWakeupStatus(root) {
+  const state = _loadActiveWakeups(root);
+  const pending = state.wakeups.filter(w => w.status === 'pending');
+  if (pending.length === 0) return { hasWakeup: false };
+  // 가장 최근 등록된 pending wakeup
+  const latest = pending.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime())[0];
+  const now = Date.now();
+  const expectedMs = new Date(latest.expectedFireAt).getTime();
+  const deltaMin = Math.floor((now - expectedMs) / 60000);
+  // deltaMin < 0 → 아직 fire 시간 전 (사용자 조기 진입)
+  // deltaMin >= 0 → fire 시간 지남 (정시 또는 miss)
+  // |deltaMin| < 5 → 정시 부근
+  let kind;
+  if (deltaMin < -5) kind = 'early';        // 사용자 조기 진입
+  else if (deltaMin > 30) kind = 'missed';   // wakeup miss
+  else if (deltaMin > 5) kind = 'late';      // 약간 지연
+  else kind = 'on-time';
+  return { hasWakeup: true, latest, deltaMin, kind, pending: pending.length };
 }
 
 // 1.9.203: 자동 라운드 plan 정리 — 사용자 명시
@@ -4220,6 +4274,40 @@ function handoff(root) {
               }
             } catch {}
           }
+        }
+      }
+    } catch {}
+  }
+  // 1.9.205: ScheduleWakeup 상태 분석 + 사용자 조기 진입 / miss 감지 (사용자 명시)
+  if (process.env.LEERNESS_NO_WAKEUP_STATUS !== '1' && !has('--quiet')) {
+    try {
+      const wakeup = _analyzeWakeupStatus(root);
+      if (wakeup.hasWakeup) {
+        const isTty = process.stdout && process.stdout.isTTY;
+        const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+        const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+        const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+        const expectedLocal = _formatLocal(wakeup.latest.expectedFireAt);
+        if (wakeup.kind === 'early') {
+          // 사용자 조기 진입 — 기존 wakeup 갱신 권장
+          log(yel(`## ⚡ 사용자 조기 진입 감지 (1.9.205) — 등록된 wakeup ${Math.abs(wakeup.deltaMin)}분 후 fire 예정`));
+          log(dim(`  예정 fire: ${expectedLocal} (${wakeup.latest.source})`));
+          log(dim(`  → 권장: 라운드 마무리 시 새 wakeup 등록 (이전 자동 superseded)`));
+          log('');
+        } else if (wakeup.kind === 'missed') {
+          // wakeup miss — fire 시간 지남
+          log(yel(`## ⏰ ScheduleWakeup miss 확정 (1.9.205) — 예정 fire ${wakeup.deltaMin}분 전`));
+          log(dim(`  예정 fire: ${expectedLocal} (${wakeup.latest.source})`));
+          log(dim(`  → 회복: 라운드 마무리 시 새 wakeup 자동 등록`));
+          // 자동으로 status 를 'missed' 로 업데이트
+          try {
+            const s = _loadActiveWakeups(root);
+            const idx = s.wakeups.findIndex(w => w.expectedFireAt === wakeup.latest.expectedFireAt);
+            if (idx >= 0) { s.wakeups[idx].status = 'missed'; _writeActiveWakeups(root, s.wakeups); }
+          } catch {}
+          log('');
+        } else if (wakeup.kind === 'on-time') {
+          log(grn(`  ✓ ScheduleWakeup 정시 진입 (1.9.205, delta ${wakeup.deltaMin}분)`));
         }
       }
     } catch {}
@@ -9334,6 +9422,14 @@ function _publishToNpm(root, opts = {}) {
           note: `다음 wakeup 시: 1) leerness resume . 으로 plan 확인  2) leerness handoff . 실행  3) leerness next-action take 로 즉시 task 진입`
         });
         _writeAutoResumePlan(root, plan);
+        // 1.9.205: 다음 wakeup 등록 추적 (사용자 명시 갱신용)
+        _recordWakeup(root, {
+          expectedFireAt: plan.expectedFireAt,
+          intervalMin: plan.intervalMin || 25,
+          source: 'release-sync-main',
+          status: 'pending',
+          fromVersion: pkgVersion
+        });
       } catch {}
     } else {
       const errOut = (pubR.stderr || pubR.stdout || '').slice(-400);
