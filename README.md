@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.233-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v178-16%2F16-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-65-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-51-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-189-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-95_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-100%2F100_(5축)-brightgreen)]() [![commands](https://img.shields.io/badge/📚_commands-9_카테고리_51_명령-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-413ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.234-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v179-17%2F17-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-65-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-51-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-190-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-96_rounds-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-100%2F100_(5축)-brightgreen)]() [![json-8fields](https://img.shields.io/badge/📜_JSON_통합-8%2F8_필드-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-376ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.233  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.234  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  📚 leerness commands · 9 카테고리 · 51 CLI · MCP 65          ║
+  ║  📜 JSON 8 필드 완성 (3 명령 × 8 = 24 통합 포인트)            ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

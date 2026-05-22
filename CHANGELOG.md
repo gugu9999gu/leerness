@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.9.234 — 2026-05-23
+
+**📜 handoff/session close/health --json recentChanges 통합 (8 필드 완성) — 외부 AI 최근 5 라운드 즉시 인지.**
+
+### 1. handoff/session close/health --json 8번째 통합 필드 `recentChanges`
+- git tag 기반 최근 5 라운드의 핵심 변경 자동 회수
+- 형식: `[{ version, date, subject }]` (가장 최근부터)
+- AI 가 "최근 무엇이 바뀌었나?"를 단일 호출로 인지 → 컨텍스트 절약
+- 1.9.218 (4 필드) → 1.9.223 (5) → 1.9.227 (6) → 1.9.230 (7) → 1.9.234 (**8 필드**)
+
+### 2. 3 명령 일관성 매트릭스 — 3 × 8 = 24 통합 포인트
+- handoff/session close/health 동일 형식 + 동일 결과
+- 외부 자동화/CI 어느 명령으로 조회해도 동일 응답
+
+### 3. AI 인지 비용 절감
+- 기존: AI 가 CHANGELOG.md 읽기 → 토큰 다량 소비
+- 1.9.234: handoff --json 한 번에 최근 5 라운드 자동 회수 → ~500 토큰 절약
+
+### 4. 누적 회귀 (1.9.207~233) — 모두 유지
+
+### 5. stress-v179 — 17/17 PASS
+- 1.9.234 (7): VERSION + handoff/session close/health JSON + 3 명령 일관성 + 8 필드 검증 + 형태 검증
+- 성능 (2): cold_start avg 376ms / handoff --json (8 필드) 1109ms
+- 누적 회귀 (8): 1.9.207~233
+
+### 6. 자동 release (96 라운드 main-push streak · 57 라운드 npm publish streak)
+
+📜 **JSON 통합 매트릭스 8 필드 완성** — 외부 AI 가 leerness 상태 + 최근 변경 모두 한 번에 회수
+
+---
+
 ## 1.9.233 — 2026-05-23
 
 **📚 leerness commands 새 명령 (9 카테고리 51 CLI) + MCP 65번째 도구.**

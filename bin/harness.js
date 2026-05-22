@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.233';
+const VERSION = '1.9.234';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2194,6 +2194,36 @@ function milestonesCmd(root) {
   } else {
     log(gr(`  🎉 모든 마일스톤 달성 (500+)`));
   }
+}
+
+// 1.9.234: recentChanges — 최근 N 라운드의 핵심 변경 요약 (git tag commit subject)
+//   응답: [{ version, date, subject }] (가장 최근부터)
+function _computeRecentChanges(root, limit = 5) {
+  const items = [];
+  try {
+    const r = cp.spawnSync('git', ['log', '--tags', '--simplify-by-decoration', '--pretty=format:%H|%D|%ad|%s', '--date=short', '-n', String(limit * 3)], {
+      cwd: root, encoding: 'utf8', timeout: 5000
+    });
+    if (r.status !== 0 || !r.stdout) return items;
+    const lines = r.stdout.split('\n').filter(l => l.trim());
+    for (const line of lines) {
+      const idx1 = line.indexOf('|');
+      if (idx1 < 0) continue;
+      const idx2 = line.indexOf('|', idx1 + 1);
+      const idx3 = line.indexOf('|', idx2 + 1);
+      if (idx2 < 0 || idx3 < 0) continue;
+      const refs = line.slice(idx1 + 1, idx2);
+      const date = line.slice(idx2 + 1, idx3);
+      const subject = line.slice(idx3 + 1);
+      const m = refs.match(/tag: v(\d+\.\d+\.\d+)/);
+      if (!m) continue;
+      const version = m[1];
+      const cleanSubject = subject.replace(/^\d+\.\d+\.\d+\s*[—-]\s*/, '').trim();
+      items.push({ version, date, subject: cleanSubject.slice(0, 100) });
+      if (items.length >= limit) break;
+    }
+  } catch {}
+  return items;
 }
 
 // 1.9.231: leerness pulse — 한 줄 종합 요약 (10 핵심 지표)
@@ -6205,6 +6235,10 @@ function handoff(root) {
           next: ms.next,
           avgRoundsPerDay: ms.avgRoundsPerDay
         };
+      } catch {}
+      // 1.9.234: recentChanges 통합 (handoff JSON 8번째 통합 필드) — 최근 5 라운드 변경 요약
+      try {
+        result.recentChanges = _computeRecentChanges(root, 5);
       } catch {}
     } catch {}
     try {
@@ -10364,6 +10398,10 @@ function sessionClose(root, opts = {}) {
           next: ms.next,
           avgRoundsPerDay: ms.avgRoundsPerDay
         };
+      } catch {}
+      // 1.9.234: recentChanges 통합 (session close JSON 8번째 통합 필드) — 최근 5 라운드 변경
+      try {
+        jsonResult.recentChanges = _computeRecentChanges(root, 5);
       } catch {}
     } catch {}
     try {
@@ -16738,6 +16776,10 @@ function healthCmd(root) {
       avgRoundsPerDay: ms.avgRoundsPerDay
     };
   } catch { out.milestones = { error: 'milestones 점검 실패' }; }
+  // 1.9.234: health --json recentChanges 통합 (3 명령 8 필드 일관성)
+  try {
+    out.recentChanges = _computeRecentChanges(root, 5);
+  } catch { out.recentChanges = { error: 'recentChanges 점검 실패' }; }
   // 1.9.163: 5능력 매트릭스 자동 평가 (1.9.155 sub-agent 점검 → 코드 기반 자동화)
   //   각 능력을 코드 grep 으로 검출 → 0~100 점수. 사용자가 매 health 호출 시 leerness 자기 평가 확인.
   try {
