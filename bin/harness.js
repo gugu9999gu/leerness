@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.222';
+const VERSION = '1.9.223';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2006,6 +2006,54 @@ function _auditUserRequests(root) {
   };
 }
 
+// 1.9.223: delivered-by-pattern 감지 — 사용자 요청 본문에 "Round X.Y.Z — 구현 완료" 같은 자기-기록 패턴이 있고
+//   해당 버전이 이미 출시된 경우, 자동 완료 후보로 분류. 운영 중 누적된 ◯ 신호 정리용.
+//   안전 원칙: 기본 dry-run (목록만), --apply 시에만 실제 상태 변경.
+function _detectDeliveredRequests(root) {
+  const state = _loadUserRequests(root);
+  const open = state.requests.filter(r => r.status === 'open' || r.status === 'in-progress');
+  // 패턴: "Round 1.9.123" 또는 "1.9.123" + ("구현 완료" | "implemented" | "delivered" | "shipped" | "ROUND … 완료")
+  const versionRe = /(?:Round\s+)?(\d+\.\d+\.\d+)/i;
+  const doneRe = /(구현\s*완료|구현완료|implemented|delivered|shipped|ship\s*완료|배포\s*완료)/i;
+  let currentMajor = '0.0.0';
+  try {
+    const pkg = JSON.parse(read(path.join(root, 'package.json')));
+    if (pkg && pkg.version) currentMajor = pkg.version;
+  } catch {}
+  const candidates = [];
+  open.forEach(req => {
+    const text = req.text || '';
+    const vMatch = text.match(versionRe);
+    const dMatch = text.match(doneRe);
+    if (vMatch && dMatch) {
+      const claimedVer = vMatch[1];
+      // 현재 버전 이하인지 (자기-기록 시점의 버전이 이미 출시됨)
+      const cmp = _compareSemver(claimedVer, currentMajor);
+      if (cmp <= 0) {
+        candidates.push({
+          id: req.id,
+          text: text.slice(0, 120),
+          claimedVersion: claimedVer,
+          currentVersion: currentMajor,
+          deliveredKeyword: dMatch[0],
+          recordedAt: req.recordedAt
+        });
+      }
+    }
+  });
+  return { total: open.length, candidates, currentVersion: currentMajor };
+}
+
+function _compareSemver(a, b) {
+  const pa = String(a).split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+    if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+  }
+  return 0;
+}
+
 // 1.9.208: 플랫폼/API 제약 사전 체크 (사용자 명시)
 //   "사용자의 명령을 받으면, 고려해야하는 부분을 먼저 확인하고 진행하게 하면 어떨지"
 //   "특정 플랫폼의 API ... 호출속도가 초당 5회 이하로만 해야한다는 규정을 먼저 확인"
@@ -2956,11 +3004,55 @@ function requestsCmd(root, sub, ...rest) {
   if (!sub || sub === 'help' || sub === '--help') {
     log(`# leerness requests (1.9.207) — 사용자 요청 누락 확인 절차`);
     log('');
-    log(`  audit          → 누락 후보 + tracked + stale 보고 (--json 가능)`);
-    log(`  add "<text>"   → 사용자 요청 수동 기록`);
-    log(`  list           → 전체 요청 출력 (--json 가능, --status open|completed|dropped)`);
-    log(`  complete <id>  → 요청 완료 표시 (예: UR-0003)`);
-    log(`  drop <id>      → 요청 드롭 표시`);
+    log(`  audit            → 누락 후보 + tracked + stale 보고 (--json 가능)`);
+    log(`  add "<text>"     → 사용자 요청 수동 기록`);
+    log(`  list             → 전체 요청 출력 (--json 가능, --status open|completed|dropped)`);
+    log(`  complete <id>    → 요청 완료 표시 (예: UR-0003)`);
+    log(`  drop <id>        → 요청 드롭 표시`);
+    log(`  auto-complete    → "Round X.Y.Z — 구현 완료" 패턴 자동 감지 (default: dry-run, --apply 시 적용) [1.9.223]`);
+    return;
+  }
+
+  // 1.9.223: auto-complete — 자기-기록된 "구현 완료" 패턴 자동 정리 (default dry-run)
+  if (sub === 'auto-complete') {
+    const apply = has('--apply');
+    const detected = _detectDeliveredRequests(root);
+    if (has('--json')) {
+      const result = { ...detected, applied: false, completedIds: [] };
+      if (apply) {
+        for (const c of detected.candidates) {
+          const u = _updateUserRequest(root, c.id, { status: 'completed', autoCompletedAt: new Date().toISOString(), autoCompleteReason: 'delivered-pattern-1.9.223' });
+          if (u) result.completedIds.push(c.id);
+        }
+        result.applied = true;
+      }
+      log(JSON.stringify(result, null, 2));
+      return;
+    }
+    log(cyan(`# leerness requests auto-complete (1.9.223) — delivered pattern 자동 감지`));
+    log('');
+    log(`  현재 버전: ${detected.currentVersion} · open ${detected.total} · 후보 ${detected.candidates.length}건`);
+    log('');
+    if (detected.candidates.length === 0) {
+      log(grn(`  ✓ delivered 패턴 후보 없음 — open 요청은 모두 새로운 작업`));
+      return;
+    }
+    log(yel(`  📥 delivered 패턴 후보 ${detected.candidates.length}건:`));
+    detected.candidates.forEach(c => {
+      log(`    • [${c.id}] v${c.claimedVersion} (${c.deliveredKeyword}) — ${c.text.slice(0, 80)}…`);
+    });
+    log('');
+    if (apply) {
+      let ok = 0;
+      for (const c of detected.candidates) {
+        const u = _updateUserRequest(root, c.id, { status: 'completed', autoCompletedAt: new Date().toISOString(), autoCompleteReason: 'delivered-pattern-1.9.223' });
+        if (u) ok++;
+      }
+      log(grn(`  ✓ 자동 완료 ${ok}/${detected.candidates.length}건`));
+    } else {
+      log(dim(`  → 적용하려면: leerness requests auto-complete --apply`));
+      log(dim(`  → 안전 원칙: 기본 dry-run (변경 X), --apply 명시 시에만 적용`));
+    }
     return;
   }
 
@@ -5723,6 +5815,16 @@ function handoff(root) {
         tracked: reqAudit.tracked ? reqAudit.tracked.length : 0,
         stale: reqAudit.stale ? reqAudit.stale.length : 0
       };
+      // 1.9.223: delivered 패턴 자동 감지 통합 (handoff JSON 5번째 통합 필드)
+      try {
+        const delivered = _detectDeliveredRequests(root);
+        result.deliveredRequests = {
+          candidates: delivered.candidates.length,
+          currentVersion: delivered.currentVersion,
+          autoCompleteAvailable: delivered.candidates.length > 0,
+          ids: delivered.candidates.map(c => c.id)
+        };
+      } catch {}
     } catch {}
     try {
       const pwState = _loadPreWakeReport(root);
@@ -5912,9 +6014,14 @@ function handoff(root) {
         }
       } catch {}
       // 13) 1.9.207: 사용자 요청 누락 확인 절차 (사용자 명시) — 누락 후보 ≥ 1 시 헤드라인 노출
+      // 1.9.223: delivered 패턴 후보 시 `📥 자동완료가능 N건` 우선 노출 (수동 정리 부담 감소)
       try {
         const audit = _auditUserRequests(root);
-        if (audit.missing && audit.missing.length > 0) {
+        let detected = { candidates: [] };
+        try { detected = _detectDeliveredRequests(root); } catch {}
+        if (detected.candidates && detected.candidates.length > 0) {
+          parts.push(`📥 자동완료가능 ${detected.candidates.length}건 (1.9.223)`);
+        } else if (audit.missing && audit.missing.length > 0) {
           parts.push(`📥 미답 요청 ${audit.missing.length}건`);
         } else if (audit.open > 0) {
           parts.push(`📥 요청 ${audit.open} (tracked)`);
@@ -9783,6 +9890,15 @@ function sessionClose(root, opts = {}) {
         tracked: reqAudit.tracked ? reqAudit.tracked.length : 0,
         stale: reqAudit.stale ? reqAudit.stale.length : 0
       };
+      // 1.9.223: delivered 패턴 자동 감지 통합
+      try {
+        const delivered = _detectDeliveredRequests(root);
+        jsonResult.deliveredRequests = {
+          candidates: delivered.candidates.length,
+          currentVersion: delivered.currentVersion,
+          autoCompleteAvailable: delivered.candidates.length > 0
+        };
+      } catch {}
     } catch {}
     try {
       // 1.9.209: pre-wake-audit 자동 실행 + 저장 (sleep 전 자동 점검)
@@ -9834,11 +9950,16 @@ function sessionClose(root, opts = {}) {
 
       log('');
       log(`## 🔚 session close 자동 통합 보고 (1.9.217)`);
-      // 1.9.207
+      // 1.9.207 + 1.9.223 (delivered 패턴 자동 권장)
       try {
         const reqAudit = _auditUserRequests(root);
         const missCnt = reqAudit.missing ? reqAudit.missing.length : 0;
-        if (missCnt > 0) {
+        let delivered = { candidates: [] };
+        try { delivered = _detectDeliveredRequests(root); } catch {}
+        if (delivered.candidates && delivered.candidates.length > 0) {
+          log(yel(`  📥 delivered 패턴 ${delivered.candidates.length}건 (1.9.223) — 자동 완료 가능`));
+          log(dim(`     → leerness requests auto-complete --apply (안전 정리)`));
+        } else if (missCnt > 0) {
           log(red(`  ⚠ 미답 사용자 요청 ${missCnt}건 (task-log/plan/decisions 매칭 안 됨)`));
         } else if (reqAudit.open > 0) {
           log(grn(`  ✓ 사용자 요청 ${reqAudit.open}건 모두 tracked`));

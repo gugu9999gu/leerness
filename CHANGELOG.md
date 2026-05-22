@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.9.223 — 2026-05-22
+
+**📥 사용자 요청 auto-complete (delivered 패턴 자동 감지) + handoff/session close 통합.**
+
+### 1. `leerness requests auto-complete` — delivered 패턴 자동 정리
+- 1.9.207 시스템 운영 중 누적된 "Round X.Y.Z — 구현 완료" 패턴의 자기-기록 요청을 자동 감지
+- 정규식: `(Round\s+)?\d+\.\d+\.\d+` + `(구현 완료|implemented|delivered|shipped|배포 완료)`
+- 현재 package.json 버전 이하만 후보 (미래 버전 무시) — 안전 가드
+- 기본 dry-run (목록만), `--apply` 명시 시에만 실제 상태 변경
+- 상태 변경 시 `autoCompletedAt` + `autoCompleteReason: 'delivered-pattern-1.9.223'` 추적 기록
+
+### 2. handoff 헤드라인 자동 노출
+- delivered 후보 ≥ 1건 시: `📥 자동완료가능 N건 (1.9.223)` — 미답 요청 신호 대신 우선 노출
+- 운영 중 누적된 가짜 미답 신호 (실제는 모두 처리됨) 자동 정리 권장
+
+### 3. handoff/session close JSON 5번째 통합 필드 — `deliveredRequests`
+- `{ candidates, currentVersion, autoCompleteAvailable, ids[] }`
+- 1.9.218 4 필드 (userRequests/preWake/idempotency/abnormalShutdown) → **5 필드 완성**
+- 외부 모니터링/CI 자동 감지
+
+### 4. session close 자동 통합 본문 노출
+- 1.9.207/209/212/220 통합 패턴에 1.9.223 추가
+- delivered 후보 시: `📥 delivered 패턴 N건 (1.9.223) — 자동 완료 가능`
+- `→ leerness requests auto-complete --apply` 가이드 자동
+
+### 5. 실 운영 검증 — 누적 8건 정리 완료
+- UR-0004~UR-0011 (1.9.208~213 라운드 자기-기록) — 모두 수동 정리 완료
+- 1.9.223 시스템은 향후 재발 시 1줄 명령으로 즉시 정리
+
+### 6. 누적 회귀 (1.9.207~222) — 모두 유지
+
+### 7. stress-v168 — 15/15 PASS
+- 1.9.223 (6): VERSION + 자동 감지 + --apply + dry-run + handoff JSON + session close JSON
+- 성능 (2): cold_start avg 401ms / auto-complete 432ms
+- 누적 회귀 (7): 1.9.207~222
+
+### 8. 자동 release (85 라운드 main-push streak · 46 라운드 npm publish streak)
+
+📥 **사용자 요청 라이프사이클 완성**: 1.9.207 (수동 audit) → 1.9.217 (마감 자동) → **1.9.223 (자동 완료)** — 3 라운드 누적
+
+---
+
 ## 1.9.222 — 2026-05-22
 
 **🛡 session-resume --auto-fix 안전 회복 + handoff 본문 비정상 종료 자동 노출.**
