@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.235 — 2026-05-23
+
+**🗑 leerness release cleanup CLI — local release/* branches 정리 + --keep BUG fix.**
+
+### 1. `leerness release cleanup` 새 명령
+- local `release/*` branches 중 main 에 merge된 것 자동 정리
+- 기본 dry-run (목록만), `--apply` 명시 시 실 삭제
+- `--keep N` (default 5) — 최근 N개 유지
+- 안전 가드: merged 만 삭제, unmerged 보호, 현재 branch 보호
+- `--json` 옵션
+
+### 2. 실 측정 — leerness 자체 누적 191개
+- merged: 191개 / unmerged: 0개
+- keep 5 → 삭제 후보 186개 (1.9.6~229)
+- 유지: 1.9.234, 1.9.233, 1.9.232, 1.9.231, 1.9.230 (top 5 최신)
+- handoff abnormal-shutdown `release-branch-pending` 신호 가중치 해소 가능
+
+### 3. 🐛 `--keep` 플래그 nonFlagArgs 등록 (BUG fix)
+- 기존: `--keep 10`의 `10`이 non-flag arg 로 잘못 분류 → root 인자 됨
+- 1.9.235 fix: `withValue.Set` 에 `--keep` 추가 → 정상 인식
+
+### 4. 누적 회귀 (1.9.207~234) — 모두 유지
+
+### 5. stress-v180 — 16/16 PASS
+- 1.9.235 (7): VERSION + dry-run + --keep + 정렬 + 안전 가드 + git fallback + human 출력
+- 성능 (2): cold_start avg 353ms / release cleanup 701ms
+- 누적 회귀 (7): 1.9.207~234
+
+### 6. 자동 release (97 라운드 main-push streak · 58 라운드 npm publish streak)
+
+🗑 **운영 누적 정리 시스템** — 191 branches 누적 → 5개 유지 가능 (handoff 신호 해소)
+
+---
+
 ## 1.9.234 — 2026-05-23
 
 **📜 handoff/session close/health --json recentChanges 통합 (8 필드 완성) — 외부 AI 최근 5 라운드 즉시 인지.**

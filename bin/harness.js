@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.234';
+const VERSION = '1.9.235';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -180,7 +180,7 @@ function arg(name, def = null) { const i = process.argv.indexOf(name); return i 
 function has(name) { return process.argv.includes(name); }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret']);
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep']);
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -12156,6 +12156,95 @@ function releaseSyncMainCmd(root) {
   }
 }
 
+// 1.9.235: leerness release cleanup — local release/* branches 정리 (main 에 merge된 것)
+//   문제: 매 라운드 release/X.Y.Z 가 누적 → handoff abnormal-shutdown release-branch-pending 신호 가중
+//   기본: dry-run (삭제 후보 표시) · --apply 명시 시 실 삭제 · --keep N (최근 N개 유지, default 5)
+//   안전: main 에 merge되지 않은 branch 는 절대 삭제 X · 현재 branch 도 보호
+function releaseCleanupCmd(root) {
+  root = absRoot(root || process.cwd());
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const apply = has('--apply');
+  const keep = parseInt(arg('--keep', '5'), 10) || 5;
+  // 1) git 저장소 확인
+  const headR = cp.spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf8' });
+  if (headR.status !== 0) {
+    log(rd('# leerness release cleanup (1.9.235) — git 저장소 아님'));
+    return;
+  }
+  const currentBranch = (headR.stdout || '').trim();
+  // 2) local release/* branches + merged 상태 회수
+  const branchR = cp.spawnSync('git', ['branch', '--merged', 'main', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
+  const mergedBranches = (branchR.stdout || '').split('\n')
+    .map(l => l.replace(/^\*?\s+/, '').trim())
+    .filter(l => l && /^release\/\d+\.\d+\.\d+$/.test(l));
+  // 3) 모든 release/* 도 회수 (unmerged 분석용)
+  const allR = cp.spawnSync('git', ['branch', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
+  const allBranches = (allR.stdout || '').split('\n')
+    .map(l => l.replace(/^\*?\s+/, '').trim())
+    .filter(l => l && /^release\/\d+\.\d+\.\d+$/.test(l));
+  const unmergedBranches = allBranches.filter(b => !mergedBranches.includes(b));
+  // 4) 정렬 (semver desc) + keep N + 현재 branch 제외
+  mergedBranches.sort((a, b) => {
+    const va = a.replace('release/', '').split('.').map(n => parseInt(n, 10) || 0);
+    const vb = b.replace('release/', '').split('.').map(n => parseInt(n, 10) || 0);
+    for (let i = 0; i < 3; i++) if (va[i] !== vb[i]) return vb[i] - va[i];
+    return 0;
+  });
+  const recent = mergedBranches.slice(0, keep);
+  const toDelete = mergedBranches.slice(keep).filter(b => b !== currentBranch);
+  // 5) JSON
+  if (has('--json')) {
+    log(JSON.stringify({
+      apply, keep, total: allBranches.length, merged: mergedBranches.length,
+      unmerged: unmergedBranches.length, deleteCount: toDelete.length,
+      toDelete, recent: recent.slice(0, keep), unmergedSample: unmergedBranches.slice(0, 5)
+    }, null, 2));
+    return;
+  }
+  // 6) Human 출력
+  log(cy(`# leerness release cleanup (1.9.235) — local release/* branches 정리`));
+  log('');
+  log(`  📊 총 ${allBranches.length}개 · merged ${mergedBranches.length}개 · unmerged ${unmergedBranches.length}개`);
+  log(`  📍 현재 branch: ${currentBranch}${currentBranch.startsWith('release/') ? yl(' (보호)') : ''}`);
+  log(`  🛡 keep 최근 ${keep}개 유지`);
+  log('');
+  if (toDelete.length === 0) {
+    log(gr(`  ✓ 정리 대상 없음 (merged ${mergedBranches.length} ≤ keep ${keep})`));
+    if (unmergedBranches.length > 0) {
+      log('');
+      log(yl(`  ⚠ unmerged ${unmergedBranches.length}개 — sync-main 미진행. 정리 대상 아님:`));
+      unmergedBranches.slice(0, 5).forEach(b => log(`    • ${b}`));
+      if (unmergedBranches.length > 5) log(dm(`    ... +${unmergedBranches.length - 5}개`));
+    }
+    return;
+  }
+  log(yl(`  🗑 삭제 후보 ${toDelete.length}개 (merged + keep 범위 외):`));
+  toDelete.slice(0, 10).forEach(b => log(`    • ${b}`));
+  if (toDelete.length > 10) log(dm(`    ... +${toDelete.length - 10}개`));
+  log('');
+  log(`  📍 유지 ${recent.length}개:`);
+  recent.slice(0, 5).forEach(b => log(`    ✓ ${b}`));
+  if (recent.length > 5) log(dm(`    ... +${recent.length - 5}개`));
+  log('');
+  if (apply) {
+    let ok = 0, fail = 0;
+    for (const b of toDelete) {
+      const r = cp.spawnSync('git', ['branch', '-d', b], { cwd: root, encoding: 'utf8' });
+      if (r.status === 0) ok++;
+      else fail++;
+    }
+    log(gr(`  ✓ 삭제 완료: ${ok}/${toDelete.length}건`) + (fail > 0 ? rd(` · 실패 ${fail}`) : ''));
+  } else {
+    log(dm(`  → 적용: leerness release cleanup --apply (안전: merged만 삭제, 현재 branch 보호)`));
+    log(dm(`  → --keep N: 최근 N개 유지 (default 5)`));
+  }
+}
+
 // 1.9.178: NPM 자동 배포 (사용자 명시 — release sync-main 후 자동 trigger).
 //   보안:
 //     - NPM_TOKEN 또는 LEERNESS_NPM_TOKEN 환경변수에서만 읽음 (값 절대 로그 X)
@@ -18248,6 +18337,8 @@ async function main() {
   if (cmd === 'release' && args[1] === 'publish')   return releasePublish(args[2] || arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'pack')      return await releasePackCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'sync-main') return releaseSyncMainCmd(args[2] || arg('--path', process.cwd()));
+  // 1.9.235: leerness release cleanup — local release/* branches 정리 (merged 만, --apply 시 실 삭제)
+  if (cmd === 'release' && args[1] === 'cleanup')   return releaseCleanupCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()));
   // 1.9.141: feature causality graph
   if (cmd === 'feature' && args[1] === 'add')    return featureAddCmd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('--')).join(' '));
   if (cmd === 'feature' && args[1] === 'link')   return featureLinkCmd(arg('--path', process.cwd()), args[2]);
