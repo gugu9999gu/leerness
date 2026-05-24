@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.9.237 — 2026-05-24
+
+**🗑 session close --auto-cleanup-branches + handoff body 50+ branches 경고.**
+
+### 1. `session close --auto-cleanup-branches` 옵션 (1.9.224 패턴 확장)
+- 50+ release/* merged branches 시 자동 정리 (keep 10)
+- 안전: 1.9.235 가드 (merged 만, 현재 branch 보호)
+- `--auto-apply-delivered` (1.9.224) 와 동일한 자율 모드 패턴
+
+### 2. handoff body 50+ branches 경고 자동 노출
+- `## 🗑 release/* branches 누적 N개 (50+) (1.9.237)` 본문 섹션 자동
+- 3 가지 정리 옵션 자동 안내:
+  - 수동: `leerness release cleanup --apply --keep 10`
+  - 마감 자동: `session close --auto-cleanup-branches`
+  - drift 자동: `drift check --auto-fix` (1.9.236)
+- AI/사용자 누적 폐기물 가시화
+
+### 3. release cleanup 생태계 완성 (3 라운드 누적)
+| 라운드 | 기능 |
+|---|---|
+| 1.9.235 | CLI 신설 (수동) |
+| 1.9.236 | MCP 66 + drift --auto-fix 통합 |
+| **1.9.237** | **session close 자동 + handoff body 경고** ⭐ |
+
+### 4. 누적 회귀 (1.9.207~236) — 모두 유지
+
+### 5. stress-v182 — 15/15 PASS
+- 1.9.237 (5): VERSION + flag 코드 + session close 안내 + handoff body 경고 + 격리 no-warning
+- 성능 (2): cold_start avg 387ms / handoff 4706ms
+- 누적 회귀 (8): 1.9.207~236
+
+### 6. 자동 release (99 라운드 main-push streak · 60 라운드 npm publish streak 🎉)
+
+🎉 **60 라운드 npm publish streak 달성** + 1 라운드 후 **R100 main-push streak 도달**
+
+---
+
 ## 1.9.236 — 2026-05-24
 
 **🔌 MCP 66번째 도구 (release_cleanup) + drift check --auto-fix 통합 (50+ branches 자동 정리).**

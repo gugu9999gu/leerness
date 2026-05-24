@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.236';
+const VERSION = '1.9.237';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -6573,6 +6573,25 @@ function handoff(root) {
     }
   } catch {}
 
+  // 1.9.237: handoff 본문 release/* 누적 경고 — 50+ branches merged 시 자동 안내
+  //   1.9.220 비정상종료 release-branch-pending 신호의 본문 보강 (handoff 헤드라인은 ‘🔌 비정상종료’ 만 표시)
+  try {
+    const branchR = cp.spawnSync('git', ['branch', '--merged', 'main', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
+    if (branchR.status === 0) {
+      const mergedCnt = (branchR.stdout || '').split('\n').filter(l => l.trim() && /release\/\d+\.\d+\.\d+/.test(l)).length;
+      if (mergedCnt > 50) {
+        const isTty = process.stdout && process.stdout.isTTY;
+        const yl5 = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+        const dm5 = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+        log('');
+        log(yl5(`## 🗑 release/* branches 누적 ${mergedCnt}개 (50+) (1.9.237)`));
+        log(dm5(`  → 수동 정리: leerness release cleanup --apply --keep 10`));
+        log(dm5(`  → 마감 시 자동: session close --auto-cleanup-branches`));
+        log(dm5(`  → drift 자동 회복: drift check --auto-fix (1.9.236, 50+ 시)`));
+      }
+    }
+  } catch {}
+
   // 1.9.224: handoff 본문 자동 노출 — delivered 패턴 후보 ≥ 1건 시 (1.9.223 확장)
   //   "Round X.Y.Z — 구현 완료" 패턴이 누적되면 본문 섹션으로 자동 안내 (헤드라인만으로는 놓치기 쉬움)
   // 1.9.225: LEERNESS_AUTO_APPLY_DELIVERED=1 env 활성 시 handoff 첫 호출에서 자동 적용 (자율 모드용 opt-in)
@@ -10505,6 +10524,40 @@ function sessionClose(root, opts = {}) {
           log(dim(`     → leerness idempotency audit 으로 상세 확인`));
         } else {
           log(grn(`  ✓ 멱등성 검사 통과 — verified ${idemp.summary.verifiedAreas} 영역`));
+        }
+      } catch {}
+      // 1.9.237: session close --auto-cleanup-branches — 50+ release/* branches 시 자동 정리
+      //   1.9.224 패턴 (--auto-apply-delivered) 확장 — 마감 시 운영 누적 폐기물 자동 정리
+      //   안전: keep 10, merged 만, 현재 branch 보호
+      try {
+        const branchR = cp.spawnSync('git', ['branch', '--merged', 'main', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
+        if (branchR.status === 0) {
+          const merged = (branchR.stdout || '').split('\n')
+            .map(l => l.replace(/^\*?\s+/, '').trim())
+            .filter(l => l && /^release\/\d+\.\d+\.\d+$/.test(l));
+          if (merged.length > 50) {
+            if (has('--auto-cleanup-branches')) {
+              merged.sort((a, b) => {
+                const va = a.replace('release/', '').split('.').map(n => parseInt(n, 10) || 0);
+                const vb = b.replace('release/', '').split('.').map(n => parseInt(n, 10) || 0);
+                for (let i = 0; i < 3; i++) if (va[i] !== vb[i]) return vb[i] - va[i];
+                return 0;
+              });
+              const curR = cp.spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf8' });
+              const cur = (curR.stdout || '').trim();
+              const toDelete = merged.slice(10).filter(b => b !== cur);
+              let okCnt = 0;
+              for (const b of toDelete) {
+                const r = cp.spawnSync('git', ['branch', '-d', b], { cwd: root, encoding: 'utf8' });
+                if (r.status === 0) okCnt++;
+              }
+              log(grn(`  ✓ release 정리 ${okCnt}/${toDelete.length}건 (--auto-cleanup-branches 1.9.237, keep 10)`));
+            } else {
+              log(yel(`  🗑 release/* merged ${merged.length}개 (50+) — cleanup 가능 (1.9.235)`));
+              log(dim(`     → leerness release cleanup --apply --keep 10 (수동)`));
+              log(dim(`     → 또는 session close --auto-cleanup-branches (1.9.237 자동)`));
+            }
+          }
         }
       } catch {}
       // 1.9.232: 마감 시 pulse 한 줄 자동 노출 — 다음 라운드 진입 시 즉시 상태 인지
