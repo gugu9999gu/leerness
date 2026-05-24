@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.235';
+const VERSION = '1.9.236';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -13480,6 +13480,42 @@ function driftCheckCmd(root, opts = {}) {
       log(`⚠ delivered auto-apply 오류 (1.9.225): ${e.message}`);
     }
   }
+  // 1.9.236: drift check --auto-fix 에 release cleanup 통합 (1.9.235 회수)
+  //   누적된 50개+ release/* branches → abnormal-shutdown release-branch-pending 신호 가중
+  //   안전: keep 10 (최근 10개 유지), merged 만 삭제 (1.9.235 안전 가드)
+  //   임계: 50개 초과 시만 자동 정리 (소량 누적은 정상 운영)
+  if (autoFix) {
+    try {
+      const branchR = cp.spawnSync('git', ['branch', '--merged', 'main', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
+      if (branchR.status === 0) {
+        const merged = (branchR.stdout || '').split('\n')
+          .map(l => l.replace(/^\*?\s+/, '').trim())
+          .filter(l => l && /^release\/\d+\.\d+\.\d+$/.test(l));
+        if (merged.length > 50) {
+          log('');
+          log(`🗑 --auto-fix 활성 (1.9.236) — release/* merged ${merged.length}개 (50+) 자동 정리 (keep 10)...`);
+          // 정렬 (semver desc)
+          merged.sort((a, b) => {
+            const va = a.replace('release/', '').split('.').map(n => parseInt(n, 10) || 0);
+            const vb = b.replace('release/', '').split('.').map(n => parseInt(n, 10) || 0);
+            for (let i = 0; i < 3; i++) if (va[i] !== vb[i]) return vb[i] - va[i];
+            return 0;
+          });
+          const currentBranchR = cp.spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf8' });
+          const currentBranch = (currentBranchR.stdout || '').trim();
+          const toDelete = merged.slice(10).filter(b => b !== currentBranch);
+          let ok = 0;
+          for (const b of toDelete) {
+            const r = cp.spawnSync('git', ['branch', '-d', b], { cwd: root, encoding: 'utf8' });
+            if (r.status === 0) ok++;
+          }
+          log(`✓ release cleanup 자동 완료 ${ok}/${toDelete.length}건 (keep 10)`);
+        }
+      }
+    } catch (e) {
+      log(`⚠ release cleanup auto-fix 오류 (1.9.236): ${e.message}`);
+    }
+  }
   if (autoFix && level === '🔴 critical' && !hasSecurityFired) {
     log('');
     log(`🔧 --auto-fix 활성 — session close 자동 실행 중...`);
@@ -14468,7 +14504,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_round_history', description: '1.9.226 — 자율 라운드 통계. git tag v1.9.X 기반 누적 라운드 카운트 + 다음 마일스톤 (50/75/100/125/150/175/200/250/300/400/500) + 평균 rounds/day. 응답: { currentVersion, roundCount, baselineVersion, latestTags[], nextMilestone, roundsToNextMilestone, firstTagAt, latestTagAt, daysActive, avgRoundsPerDay }. 외부 AI가 "이 프로젝트는 얼마나 진행됐고 다음 마일스톤까지 몇 라운드 남았나?"를 회수. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_milestones', description: '1.9.229 (1.9.226 확장) — 도달 마일스톤 + 다음 ETA. git tag 순차 분석으로 25/50/75/100/125/150/175/200/250/300/400/500 마일스톤 도달 일자 + 다음 마일스톤 ETA (현재 속도 기준) 계산. 응답: { totalRounds, reached: [{milestone, version, reachedAt, daysFromBaseline}], next: {milestone, roundsRemaining, etaDays, etaDate}, baselineAt, avgRoundsPerDay }. 외부 AI가 "지금까지 어떤 마일스톤을 언제 달성했고 다음 마일스톤 예상 도달일은?"을 회수. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_pulse', description: '1.9.231 — 한 줄 종합 요약 (10 핵심 지표). 응답: { version, roundCount, mcpTools, memorySurface, security, health, driftScore, nextMilestone, etaDays, abnormalShutdown }. 외부 AI가 "leerness 상태 한 눈에 보기"를 가벼운 단일 호출로 회수. handoff 보다 5배 빠름 (drift/health 계산 skip). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_commands', description: '1.9.233 — 카테고리화된 전체 CLI 명령 목록 (9 카테고리). 응답: { version, totalCommands, categories: { status, task, memory, audit, workflow, release, skill, bridge, config } }. 외부 AI가 "leerness 가 제공하는 명령이 뭐가 있나"를 직접 회수. 매뉴얼/도움말 동적 생성. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_commands', description: '1.9.233 — 카테고리화된 전체 CLI 명령 목록 (9 카테고리). 응답: { version, totalCommands, categories: { status, task, memory, audit, workflow, release, skill, bridge, config } }. 외부 AI가 "leerness 가 제공하는 명령이 뭐가 있나"를 직접 회수. 매뉴얼/도움말 동적 생성. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_release_cleanup', description: '1.9.236 (1.9.235 자동 회수) — local release/* branches 정리. main 에 merge된 것만 후보 (unmerged 보호, 현재 branch 보호). 응답: { apply, keep, total, merged, unmerged, deleteCount, toDelete[], recent[], unmergedSample[] }. 외부 AI가 "운영 누적 release branches 정리 가능?"을 회수. 기본 dry-run, apply: true 시에만 실 삭제. 인자: { path?, apply? (default false), keep? (default 5) }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, apply: { type: 'boolean' }, keep: { type: 'number' } } } }
   ];
 
   function send(obj) {
@@ -14644,6 +14681,12 @@ function mcpServeCmd(root) {
           case 'leerness_commands':
             // 1.9.233: 카테고리화된 전체 CLI 명령 목록
             cliArgs = ['commands', '--json'];
+            break;
+          case 'leerness_release_cleanup':
+            // 1.9.236 (1.9.235): local release/* branches 정리
+            cliArgs = ['release', 'cleanup', '--json'];
+            if (args.apply === true) cliArgs.push('--apply');
+            if (typeof args.keep === 'number') cliArgs.push('--keep', String(args.keep));
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });

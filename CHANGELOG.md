@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.9.236 — 2026-05-24
+
+**🔌 MCP 66번째 도구 (release_cleanup) + drift check --auto-fix 통합 (50+ branches 자동 정리).**
+
+### 1. MCP 66번째 도구 — `leerness_release_cleanup`
+- 1.9.235 release cleanup CLI 를 외부 AI 에 노출
+- 인자: `{ path?, apply? (default false), keep? (default 5) }`
+- 응답: `{ apply, keep, total, merged, unmerged, deleteCount, toDelete[], recent[], unmergedSample[] }`
+- MCP 65 → **66** (+1)
+
+### 2. `drift check --auto-fix` release cleanup 통합 (1.9.82/225 패턴 확장)
+- merged `release/*` branches 50개 초과 시 자동 정리
+- 안전: keep 10 (최근 10개 유지), merged 만 삭제 (unmerged 보호)
+- 1.9.82 audit --fix → 1.9.225 delivered → 1.9.236 release cleanup (3 라운드 누적)
+
+### 3. drift 회복 시스템 확장 매트릭스 (4 자동 회복 통합)
+| 라운드 | 신호 | 자동 회복 |
+|---|---|---|
+| 1.9.39 | critical | session close 자동 |
+| 1.9.82 | 보안 | audit --fix |
+| 1.9.225 | delivered | requests 자동 완료 |
+| **1.9.236** | **release-branch** | **release cleanup --keep 10** ⭐ |
+
+### 4. 누적 회귀 (1.9.207~235) — 모두 유지
+
+### 5. stress-v181 — 15/15 PASS
+- 1.9.236 (5): VERSION + MCP 66 등록 + 실 호출 + keep 파라미터 + drift 통합 코드
+- 성능 (2): cold_start avg 389ms / MCP 66 tools/list 363ms
+- 누적 회귀 (8): 1.9.207~235
+
+### 6. 자동 release (98 라운드 main-push streak · 59 라운드 npm publish streak)
+
+🔌 **drift 자동 회복 4 통합** — leerness 가 스스로 누적 폐기물 정리
+
+---
+
 ## 1.9.235 — 2026-05-23
 
 **🗑 leerness release cleanup CLI — local release/* branches 정리 + --keep BUG fix.**
