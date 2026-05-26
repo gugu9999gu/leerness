@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.246';
+const VERSION = '1.9.247';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -6491,6 +6491,35 @@ function audit(root, opts = {}) {
       }
     } catch {}
   }
+  // 1.9.247 (UR-0015 2단계): api-skill 참조 audit — API 관련 task 인데 .harness/api-skills/ 미참조 시 경고
+  //   사용자 명시 (UR-0015): "AI가 정리해둔 파일이 참조되는지 확인"
+  //   현재 in-progress task 의 request/nextAction 에 API 키워드 (URL, "API", "endpoint", "REST", "GraphQL", "OAuth", "webhook") 있는데
+  //   _matchAPISkills() 결과가 0 이면 → 경고 + leerness api-skill add <url> 안내
+  try {
+    const rows = readProgressRows(root);
+    const ip = rows.find(r => r.status === 'in-progress');
+    if (ip) {
+      const taskText = (ip.request || '') + ' ' + (ip.nextAction || '') + ' ' + (ip.evidence || '');
+      const apiKeywords = /\bAPI\b|endpoint|REST|GraphQL|OAuth|webhook|https?:\/\/[^\s]+/i;
+      if (apiKeywords.test(taskText)) {
+        const matched = _matchAPISkills(root, taskText);
+        const allSkills = _listAPISkills(root);
+        if (matched.length === 0) {
+          warnings++;
+          warn(`API 관련 task 감지 (현재: "${(ip.request || '').slice(0, 60)}") — .harness/api-skills/ 매칭 0건 (저장 ${allSkills.length})`);
+          warn(`  → leerness api-skill add <url> --direction "구현 방향" 으로 정리 권장 (1.9.245 UR-0015 / 1.9.247 audit)`);
+          _finding('api_skill_missing', 'warn', 'API 관련 task 인데 .harness/api-skills/ 매칭 없음', {
+            taskRequest: (ip.request || '').slice(0, 100),
+            apiSkillsTotal: allSkills.length,
+            matched: 0,
+            hint: 'leerness api-skill add <url> --direction "..."'
+          });
+        } else {
+          ok(`API skill 매칭 OK (현재 task → ${matched.length}건 매칭 in .harness/api-skills/, 1.9.247 UR-0015 2단계)`);
+        }
+      }
+    }
+  } catch {}
   // 1.9.63: --strict — warnings ≥ threshold 시 failures로 승격 (CI 친화)
   if (has('--strict')) {
     const threshold = parseInt(arg('--threshold', '1'), 10);
@@ -16679,7 +16708,9 @@ async function _agentRepl(root, opts) {
     startedAt: new Date().toISOString(),
     sessionId: 'sess-' + new Date().toISOString().replace(/[:.]/g, '-'),
     // 1.9.170: 실시간 스트리밍 모드 (사용자 명시 — 추론중/diff/thinking 실시간 표시)
-    streamMode: opts.stream !== false  // default ON (env 로 끄려면 LEERNESS_REPL_STREAM=0)
+    streamMode: opts.stream !== false,  // default ON (env 로 끄려면 LEERNESS_REPL_STREAM=0)
+    // 1.9.247 (UR-0016 2단계): multi-provider auto-fallback — default OFF (opt-in)
+    autoFallback: opts.autoFallback === true || process.env.LEERNESS_REPL_AUTO_FALLBACK === '1'
   };
   if (process.env.LEERNESS_REPL_STREAM === '0') state.streamMode = false;
   const sessionPath = () => path.join(absRoot(root), '.harness', 'agent-sessions', `${state.sessionId}.jsonl`);
@@ -17167,6 +17198,20 @@ async function _agentRepl(root, opts) {
       rl.setPrompt(prompt());
       return false;
     }
+    // 1.9.247 (UR-0016 2단계): :fallback on|off — provider 실패 시 다음 ready agent 자동 전환 (opt-in)
+    if (op === 'fallback') {
+      const v = (rest[0] || '').toLowerCase();
+      if (v === 'on' || v === '1' || v === 'true') {
+        state.autoFallback = true;
+        log(C.green('  ↪ auto-fallback: ON (1.9.247) — 현재 provider transient 실패 (timeout/exit=null) 시 다음 ready agent 자동 전환 + 재시도'));
+      } else if (v === 'off' || v === '0' || v === 'false') {
+        state.autoFallback = false;
+        log(C.dim('  ↪ auto-fallback: OFF — 실패 시 사용자가 직접 :provider 전환'));
+      } else {
+        log(C.dim(`  현재 auto-fallback: ${state.autoFallback ? 'ON ↪' : 'OFF'}  — 사용: :fallback on|off`));
+      }
+      return false;
+    }
     if (op === 'clear') { process.stdout.write('\x1b[2J\x1b[H'); return false; }
     if (op === 'reset') { state.history = []; log(C.dim('  history 초기화됨')); return false; }
     if (op === 'history') {
@@ -17393,6 +17438,47 @@ async function _agentRepl(root, opts) {
           log(C.dim(`     ↳ 가능 원인: 인증 누락 (login 필요)`));
           log(C.dim(`     ↳ 해결: ${state.provider} login ${state.provider === 'copilot' ? '(gh auth login)' : ''}`));
         }
+        // 1.9.247 (UR-0016 2단계): 자동 fallback — 사용자 명시 (`:fallback on` 또는 LEERNESS_REPL_AUTO_FALLBACK=1) 시
+        //   현재 provider 가 transient 실패 (timeout/exit=null/network) 시 다음 ready agent 로 자동 전환 + 1회 재시도.
+        //   사용자 명시 (이전 codex CLI exit=null 보고): "멀티 provider auto-fallback 도 검토".
+        const isTransient = /exit=null|timeout/i.test(errMsg);
+        if (state.autoFallback && isTransient) {
+          try {
+            const others = EXTERNAL_AGENTS.filter(a => a.id !== state.provider)
+                                           .map(a => ({ def: a, status: _checkAgent(a) }))
+                                           .filter(x => x.status.status === 'ready');
+            if (others.length > 0) {
+              const next = others[0].def.id;
+              log(C.green(`  ↪ auto-fallback (1.9.247): ${state.provider} 실패 → ${next} 자동 전환 + 재시도 중...`));
+              state.provider = next;
+              state.model = null;
+              const cat = _PROVIDER_MODEL_CATALOG[state.provider];
+              if (cat && cat.length) state.model = cat[0].id;
+              rl.setPrompt(prompt());
+              const t1 = Date.now();
+              let retry;
+              if (state.streamMode) retry = await _cliChatStream(root, state.provider, finalPrompt, { timeout: 120000 });
+              else retry = await _cliChat(root, state.provider, finalPrompt, { timeout: 90000 });
+              const dt1 = Date.now() - t1;
+              _recordRun(root, { kind: 'agent_repl_turn_fallback', provider: state.provider, model: state.model, role: state.role, durationMs: dt1, ok: retry.ok, error: retry.error, promptChars: finalPrompt.length, responseChars: (retry.response || '').length });
+              if (retry.ok) {
+                state.history.push({ role: 'assistant', content: retry.response });
+                log(C.green(`  ✓ fallback 성공 [${state.provider}/${state.model || 'default'}, ${dt1}ms · ${retry.response.length}자]`));
+                if (!state.streamMode) log(retry.response);
+                _printInputDivider();
+                if (state.history.length % 6 === 0) saveSession();
+                promptWithStatus();
+                return;
+              } else {
+                log(C.yel(`  ⚠ fallback 도 실패 (${next}): ${retry.error || 'unknown'}`));
+              }
+            } else {
+              log(C.dim(`     (auto-fallback: 다른 ready provider 없음)`));
+            }
+          } catch (e) {
+            log(C.dim(`     (auto-fallback 오류: ${e.message})`));
+          }
+        }
         // 전환 가능 provider 안내
         try {
           const others = EXTERNAL_AGENTS.filter(a => a.id !== state.provider)
@@ -17400,6 +17486,7 @@ async function _agentRepl(root, opts) {
                                          .filter(x => x.status.status === 'ready');
           if (others.length) {
             log(C.dim(`     💡 즉시 전환: ${others.map(x => `:provider ${x.def.id}`).join(' · ')}  또는 Tab 키`));
+            if (!state.autoFallback) log(C.dim(`     💡 다음 실패 시 자동 전환: \`:fallback on\` (1.9.247 UR-0016 2단계)`));
           } else {
             log(C.dim(`     💡 다른 provider 활성화: .env 에서 LEERNESS_ENABLE_<CLAUDE|CODEX|GEMINI|COPILOT>=1`));
           }

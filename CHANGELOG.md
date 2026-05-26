@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.9.247 — 2026-05-26 — UR-0016 2단계 + UR-0015 2단계
+
+**🔁 REPL multi-provider auto-fallback + 📚 api-skill audit 통합.**
+
+### 1. UR-0016 2단계 — REPL multi-provider auto-fallback
+사용자 보고 (1.9.246 스크린샷): `codex CLI 응답 실패 (exit=null)` → 멀티 provider auto-fallback 검토.
+
+**구현:**
+- `state.autoFallback` 필드 추가 (default OFF — opt-in)
+- 활성화: `:fallback on` (REPL slash) 또는 `LEERNESS_REPL_AUTO_FALLBACK=1` env
+- transient 실패 (`exit=null|timeout`) 감지 시 next ready agent 로 자동 전환 + 재시도 1회
+- 응답 헤더: `↪ auto-fallback (1.9.247): codex 실패 → claude 자동 전환 + 재시도 중...`
+- 성공 시 `✓ fallback 성공 [claude/...]`, 실패 시 친절한 진단 + 수동 :provider 안내
+
+### 2. UR-0015 2단계 — api-skill audit 통합
+사용자 명시 (UR-0015): *"AI가 정리해둔 파일이 참조되는지 확인"*
+
+**구현:**
+- `audit` 명령에 새 finding 추가: `api_skill_missing`
+- 현재 in-progress task 의 request/nextAction/evidence 에 API 키워드 (`API|endpoint|REST|GraphQL|OAuth|webhook|http[s]?://`) 감지
+- 매칭되는 api-skill 0건 → `warn` + `leerness api-skill add <url> --direction "..."` 안내
+- 매칭 1+건 → `✓ API skill 매칭 OK (현재 task → N건)` 로그
+- non-API task 는 영향 없음
+
+### 3. 누적 회귀 (1.9.207~246) — 모두 유지
+- REPL UX status bar (1.9.246) · api-skill cache (1.9.245) · _lastCycleLines HOTFIX (1.9.244)
+- CJK 분류 (1.9.243) · env encoding --apply (1.9.242) · 모두 유지
+- handoff JSON 11 필드 · MCP 70 도구 · agents dispatch 거부 회귀 (1.9.246 flake 방지) 검증
+
+### 4. stress-v192 — **20/20 PASS · 100%**
+- 1.9.247 (8): VERSION + autoFallback state + :fallback slash + 재시도 로직 + audit api_skill_missing + 실제 동작 (3 시나리오)
+- 성능 (1): cold start avg 588ms
+- 누적 회귀 (11): 1.9.207~246 + 보안 + e2e flake 방지
+
+### 5. 자동 release (109 main-push streak · 70 npm publish streak · R203)
+
+🔁 **사용자 실 환경 대응 보강** — 1.9.246 보고된 codex CLI exit=null 케이스 자동 회복 + 후속 API task UR-0015 자동 참조 확인.
+
+---
+
 ## 1.9.246 — 2026-05-26 — UR-0016 REPL UX/UI 개선
 
 **🎯 사용자 명시 (UR-0016): REPL agent 채팅 입력칸 옆 컨텍스트 게이지 + 서브 에이전트 가시화 + 정상 완료 초록색 강조.**
