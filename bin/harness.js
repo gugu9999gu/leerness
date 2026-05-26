@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.244';
+const VERSION = '1.9.245';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2586,6 +2586,338 @@ function envCmd(root, sub) {
   log('');
   log(dm(`  → 인코딩 검사: leerness env encoding-check (셸 스크립트 .ps1/.bat 위험 감지)`));
   log(dm(`  → JSON 출력: leerness env --json`));
+}
+
+// 1.9.245: API skill cache — 공식 문서 + 관련 링크 자동 정리 (사용자 명시 UR-0015)
+//   .harness/api-skills/<id>.md 에 frontmatter + 본문 저장. handoff 자동 매칭.
+//   Node built-in https (의존성 0), depth=1 same-domain crawl, max 10 links.
+function _apiSkillsDir(root) {
+  return path.join(absRoot(root), '.harness', 'api-skills');
+}
+function _apiSkillId(url, name) {
+  // 도메인 + path slug 로 id 생성. 예: developers.coupangcorp.com/articles/360033877853 → coupang-articles-360033877853
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '').split('.').slice(0, -1).join('-') || u.hostname;
+    const pathSlug = u.pathname.replace(/^\/+|\/+$/g, '').replace(/[^a-z0-9가-힣\-_]+/gi, '-').slice(-50);
+    const base = `${host}-${pathSlug}`.replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return (name ? base + '-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30) : base).replace(/-+/g, '-');
+  } catch { return 'api-' + Date.now(); }
+}
+function _fetchUrl(url, opts = {}) {
+  // Node https.get with timeout, follow redirects (max 5), max body 1MB
+  const https = require('https');
+  const http = require('http');
+  const maxRedirects = opts.maxRedirects != null ? opts.maxRedirects : 5;
+  const timeout = opts.timeout || 10000;
+  return new Promise((resolve, reject) => {
+    function go(u, redirects) {
+      let parsed;
+      try { parsed = new URL(u); } catch { return reject(new Error('invalid URL: ' + u)); }
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return reject(new Error('unsupported protocol: ' + parsed.protocol));
+      const lib = parsed.protocol === 'https:' ? https : http;
+      const req = lib.get({
+        hostname: parsed.hostname, port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: parsed.pathname + parsed.search, timeout,
+        // 1.9.245: 일부 사이트 (Cloudflare/AWS WAF) 가 비-브라우저 UA 차단 → Mozilla 호환 UA 로 호환성 ↑
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 leerness/1.9.245',
+          'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept-Encoding': 'identity'
+        }
+      }, res => {
+        // 3xx → follow
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirects < maxRedirects) {
+          const next = new URL(res.headers.location, u).toString();
+          res.resume(); return go(next, redirects + 1);
+        }
+        let body = ''; let size = 0; const MAX = 1024 * 1024;
+        res.on('data', chunk => { size += chunk.length; if (size > MAX) { res.destroy(); return reject(new Error('body > 1MB')); } body += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body, finalUrl: u }));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout ' + timeout + 'ms')); });
+    }
+    go(url, 0);
+  });
+}
+function _htmlToText(html) {
+  if (!html) return '';
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?(p|div|li|h[1-6]|tr|td|pre)[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*\n+/g, '\n\n').trim();
+}
+function _extractTitle(html) {
+  const m = (html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (!m) return '';
+  return _htmlToText(m[1]).slice(0, 200);
+}
+function _extractLinks(html, baseUrl, maxLinks) {
+  if (!html) return [];
+  const base = new URL(baseUrl);
+  const found = new Map();
+  const re = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    let href = m[1];
+    if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) continue;
+    let abs;
+    try { abs = new URL(href, baseUrl).toString(); } catch { continue; }
+    const u = new URL(abs);
+    if (u.hostname !== base.hostname) continue; // same-domain only
+    if (abs === baseUrl) continue;
+    if (found.has(abs)) continue;
+    const text = _htmlToText(m[2]).slice(0, 120);
+    found.set(abs, { url: abs, text });
+    if (found.size >= (maxLinks || 10)) break;
+  }
+  return Array.from(found.values());
+}
+async function _collectAPIDoc(url, opts = {}) {
+  const direction = opts.direction || '';
+  const noCrawl = opts.noCrawl;
+  const r0 = await _fetchUrl(url);
+  if (r0.status >= 400) throw new Error('fetch ' + url + ' → status ' + r0.status);
+  const html = r0.body;
+  const title = _extractTitle(html);
+  const text = _htmlToText(html);
+  const result = { url, title, text: text.slice(0, 8000), related_links: [] };
+  if (!noCrawl) {
+    const links = _extractLinks(html, r0.finalUrl || url, 10);
+    for (const lk of links) {
+      try {
+        const rr = await _fetchUrl(lk.url, { timeout: 8000 });
+        if (rr.status < 400) {
+          const t = _extractTitle(rr.body) || lk.text;
+          const excerpt = _htmlToText(rr.body).slice(0, 400);
+          result.related_links.push({ url: lk.url, title: t.slice(0, 200), excerpt });
+        }
+      } catch {}
+    }
+  }
+  result.direction = direction;
+  result.captured_at = new Date().toISOString();
+  return result;
+}
+function _serializeAPISkill(id, name, urls, direction, doc) {
+  const lines = [];
+  lines.push('---');
+  lines.push(`id: ${id}`);
+  lines.push(`name: ${name}`);
+  lines.push(`urls:`);
+  urls.forEach(u => lines.push(`  - ${u}`));
+  lines.push(`direction: ${JSON.stringify(direction || '')}`);
+  lines.push(`captured_at: ${doc.captured_at}`);
+  if (doc.related_links && doc.related_links.length) {
+    lines.push(`related_links:`);
+    doc.related_links.forEach(rl => lines.push(`  - { url: ${JSON.stringify(rl.url)}, title: ${JSON.stringify(rl.title || '')} }`));
+  }
+  lines.push('---');
+  lines.push('');
+  lines.push(`# ${name}`);
+  lines.push('');
+  if (direction) { lines.push('## 🎯 방향 지시 (사용자 또는 AI)'); lines.push(''); lines.push(direction); lines.push(''); }
+  lines.push('## 📄 본 URL 내용 (정리)');
+  lines.push('');
+  if (doc.title) { lines.push(`**Title:** ${doc.title}`); lines.push(''); }
+  lines.push('```');
+  lines.push(doc.text.slice(0, 6000));
+  lines.push('```');
+  lines.push('');
+  if (doc.related_links && doc.related_links.length) {
+    lines.push('## 🔗 관련 링크 (depth=1, same-domain, max 10)');
+    lines.push('');
+    doc.related_links.forEach(rl => {
+      lines.push(`### ${rl.title || rl.url}`);
+      lines.push(`URL: ${rl.url}`);
+      lines.push('');
+      if (rl.excerpt) { lines.push(rl.excerpt); lines.push(''); }
+    });
+  }
+  return lines.join('\n');
+}
+function _loadAPISkill(root, id) {
+  const fp = path.join(_apiSkillsDir(root), id + '.md');
+  if (!fs.existsSync(fp)) return null;
+  const content = fs.readFileSync(fp, 'utf8');
+  const fm = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!fm) return { id, content, urls: [], name: id };
+  const meta = {};
+  fm[1].split('\n').forEach(l => {
+    const m = l.match(/^(\w+):\s*(.*)$/);
+    if (m) meta[m[1]] = m[2];
+  });
+  const urls = [];
+  const urlMatch = fm[1].match(/urls:\n((?:\s+-\s+.+\n?)+)/);
+  if (urlMatch) urlMatch[1].split('\n').forEach(l => { const u = l.match(/^\s+-\s+(.+)$/); if (u) urls.push(u[1].trim()); });
+  return { id: meta.id || id, name: meta.name || id, urls, direction: (meta.direction || '').replace(/^"|"$/g, ''), captured_at: meta.captured_at, body: fm[2] };
+}
+function _listAPISkills(root) {
+  const dir = _apiSkillsDir(root);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter(f => f.endsWith('.md')).map(f => f.slice(0, -3))
+    .map(id => _loadAPISkill(root, id)).filter(Boolean);
+}
+function _matchAPISkills(root, query) {
+  if (!query) return [];
+  const q = String(query).toLowerCase();
+  // 1.9.245: CJK 한글/한자 토큰 (2자+) 허용, ASCII 토큰 (3자+)
+  const tokens = q.split(/[\s,.;:/\(\)\[\]\{\}"'`]+/).filter(t => {
+    if (!t) return false;
+    const isCJK = /[　-鿿가-힯]/.test(t);
+    return isCJK ? t.length >= 2 : t.length >= 3;
+  });
+  const skills = _listAPISkills(root);
+  const scored = skills.map(s => {
+    let score = 0;
+    const haystack = (s.name + ' ' + (s.direction || '') + ' ' + s.urls.join(' ') + ' ' + s.body.slice(0, 3000)).toLowerCase();
+    tokens.forEach(t => { if (haystack.includes(t)) score += 1; });
+    return { skill: s, score };
+  }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+  return scored.map(x => x.skill);
+}
+async function apiSkillCmd(root, sub) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const dir = _apiSkillsDir(root);
+  if (sub === 'list') {
+    if (!fs.existsSync(dir)) {
+      if (has('--json')) { log(JSON.stringify({ skills: [] })); return; }
+      log(dm(`(아직 API skill 없음 — leerness api-skill add <url> 으로 생성)`));
+      return;
+    }
+    const skills = _listAPISkills(root);
+    if (has('--json')) {
+      log(JSON.stringify({ skills: skills.map(s => ({ id: s.id, name: s.name, urls: s.urls, captured_at: s.captured_at })) }, null, 2));
+      return;
+    }
+    log(cy(`# leerness api-skill list (1.9.245, UR-0015)`));
+    log('');
+    if (skills.length === 0) { log(dm(`(없음)`)); return; }
+    skills.forEach(s => {
+      log(`  • ${gr(s.id)} — ${s.name}`);
+      if (s.urls && s.urls.length) log(dm(`       ${s.urls[0]}${s.urls.length > 1 ? ` (+${s.urls.length - 1})` : ''}`));
+      if (s.direction) log(dm(`       방향: ${s.direction.slice(0, 80)}`));
+    });
+    return;
+  }
+  // 1.9.245: 위치 인자 robust 추출 — argv 에서 cmd/sub 뒤 첫 non-flag (flag value 도 skip)
+  const _positionalAfterSub = () => {
+    const argv = process.argv.slice(2);  // ['api-skill', sub, ...]
+    let i = 2;  // skip cmd + sub
+    while (i < argv.length) {
+      const a = argv[i];
+      if (a.startsWith('--')) {
+        // --key value 패턴이면 value 도 skip
+        if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) i += 2;
+        else i += 1;
+        continue;
+      }
+      return a;
+    }
+    return null;
+  };
+  if (sub === 'show') {
+    const id = arg('--id') || _positionalAfterSub();
+    if (!id) { log(rd('id 필요: leerness api-skill show <id>')); return; }
+    const s = _loadAPISkill(root, id);
+    if (!s) { log(rd(`api-skill 없음: ${id}`)); return; }
+    if (has('--json')) { log(JSON.stringify(s, null, 2)); return; }
+    log(fs.readFileSync(path.join(dir, id + '.md'), 'utf8'));
+    return;
+  }
+  if (sub === 'match') {
+    const query = arg('--query') || _positionalAfterSub() || '';
+    const matches = _matchAPISkills(root, query);
+    if (has('--json')) {
+      log(JSON.stringify({ query, matches: matches.map(s => ({ id: s.id, name: s.name })) }, null, 2));
+      return;
+    }
+    log(cy(`# leerness api-skill match "${query}" — ${matches.length}건`));
+    matches.forEach(s => log(`  • ${gr(s.id)} — ${s.name}`));
+    if (matches.length === 0) log(dm(`(매칭 없음)`));
+    return;
+  }
+  if (sub === 'drop') {
+    const id = arg('--id') || _positionalAfterSub();
+    if (!id) { log(rd('id 필요: leerness api-skill drop <id>')); return; }
+    const fp = path.join(dir, id + '.md');
+    if (!fs.existsSync(fp)) { log(rd(`없음: ${id}`)); return; }
+    fs.unlinkSync(fp);
+    log(gr(`✓ 삭제: ${id}`));
+    return;
+  }
+  if (sub === 'add') {
+    const url = arg('--url') || _positionalAfterSub();
+    if (!url) { log(rd('URL 필요: leerness api-skill add <url> [--direction "..."]')); return; }
+    const direction = arg('--direction', '');
+    const name = arg('--name', '');
+    const noCrawl = has('--no-crawl');
+    log(cy(`# leerness api-skill add (1.9.245, UR-0015)`));
+    log(`  URL: ${url}`);
+    if (direction) log(`  방향: ${direction}`);
+    log(dm(`  Fetch + crawl (depth=1, same-domain, max 10)...`));
+    try {
+      const doc = await _collectAPIDoc(url, { direction, noCrawl });
+      const skillName = name || doc.title || new URL(url).hostname;
+      const id = _apiSkillId(url, name);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const md = _serializeAPISkill(id, skillName, [url], direction, doc);
+      fs.writeFileSync(path.join(dir, id + '.md'), md, 'utf8');
+      log(gr(`✓ 저장: .harness/api-skills/${id}.md`));
+      log(dm(`  title: ${doc.title || '(none)'}`));
+      log(dm(`  related links: ${(doc.related_links || []).length}`));
+      log(dm(`  text size: ${doc.text.length} chars`));
+      if (has('--json')) log(JSON.stringify({ id, name: skillName, url, related_count: (doc.related_links || []).length }, null, 2));
+    } catch (e) {
+      log(rd(`✗ Fetch 실패: ${e.message}`));
+      // 1.9.245: --skeleton fallback — Cloudflare/WAF 차단된 URL 도 빈 .md 골격 생성 → 사용자가 수동 채움
+      if (has('--skeleton') || /403|401|429/.test(e.message)) {
+        const skillName = name || new URL(url).hostname;
+        const id = _apiSkillId(url, name);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const stub = {
+          url, title: skillName, text: `(fetch 실패 — 사용자가 직접 ${url} 에서 내용을 복사해 채워주세요)`,
+          related_links: [], captured_at: new Date().toISOString(), direction
+        };
+        const md = _serializeAPISkill(id, skillName, [url], direction, stub);
+        fs.writeFileSync(path.join(dir, id + '.md'), md, 'utf8');
+        log(yl(`⚠ 빈 골격 생성 (--skeleton fallback): .harness/api-skills/${id}.md`));
+        log(dm(`  → 직접 ${url} 내용을 복사해서 .md 파일에 채워넣어주세요`));
+        log(dm(`  → 이후 leerness handoff 가 매칭 시 참조됩니다`));
+        if (has('--json')) log(JSON.stringify({ id, skeleton: true, url, name: skillName }, null, 2));
+      } else {
+        process.exitCode = 1;
+      }
+    }
+    return;
+  }
+  // help
+  log(cy(`# leerness api-skill (1.9.245, UR-0015) — API 문서·관련링크 자동 정리`));
+  log('');
+  log(`  add <url> [--direction "..."] [--name "..."] [--no-crawl]`);
+  log(`     URL 페치 + same-domain 관련 링크 1단계 crawl (max 10) → .harness/api-skills/<id>.md`);
+  log(`  list [--json]                  → 저장된 api-skill 목록`);
+  log(`  show <id>                      → 특정 skill 본문 출력`);
+  log(`  match <query> [--json]         → task 키워드 매칭`);
+  log(`  drop <id>                      → 삭제`);
+  log('');
+  log(dm(`  저장: .harness/api-skills/<id>.md (frontmatter: id/name/urls/direction/captured_at/related_links)`));
+  log(dm(`  fetch: Node built-in https (의존성 0), max 1MB body, 10s timeout, 5 redirect`));
+  log(dm(`  자동 참조: handoff body 에 매칭 N건 자동 노출 (현재 task 키워드)`));
 }
 
 // 1.9.231: leerness pulse — 한 줄 종합 요약 (10 핵심 지표)
@@ -6629,6 +6961,25 @@ function handoff(root) {
           encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file)
         };
       } catch {}
+      // 1.9.245: apiSkills 통합 (handoff JSON 11번째 통합 필드) — UR-0015 API 문서 캐시
+      //   현재 task 키워드 기반 매칭 + 전체 카운트
+      try {
+        const allSkills = _listAPISkills(root);
+        // 현재 task description 추출 (간단 휴리스틱: progress-tracker in-progress 첫 row)
+        let currentTaskText = '';
+        try {
+          const rows = readProgressRows(root);
+          const ip = rows.find(r => r.status === 'in-progress');
+          if (ip) currentTaskText = (ip.title || '') + ' ' + (ip.notes || '');
+        } catch {}
+        const matched = currentTaskText ? _matchAPISkills(root, currentTaskText) : [];
+        result.apiSkills = {
+          total: allSkills.length,
+          matched: matched.length,
+          matchedIds: matched.slice(0, 5).map(s => s.id),
+          ids: allSkills.slice(0, 10).map(s => s.id)
+        };
+      } catch {}
     } catch {}
     try {
       const pwState = _loadPreWakeReport(root);
@@ -6992,6 +7343,40 @@ function handoff(root) {
       log(dm5(`  → 상세: leerness env encoding`));
       log(dm5(`  → 자동 회복: leerness env encoding --apply (UTF-8 BOM 자동 추가, 1.9.242)`));
       log(dm5(`  → 마감 시 자동: session close --auto-fix-encoding (1.9.243)`));
+    }
+  } catch {}
+
+  // 1.9.245: API skill cache 자동 참조 (사용자 명시 UR-0015)
+  //   현재 task 키워드 기반으로 .harness/api-skills/ 매칭 → 사용자가 정리해둔 API 문서 자동 노출
+  try {
+    const allSkills = _listAPISkills(root);
+    if (allSkills.length > 0) {
+      let currentTaskText = '';
+      try {
+        const rows = readProgressRows(root);
+        const ip = rows.find(r => r.status === 'in-progress');
+        if (ip) currentTaskText = (ip.title || '') + ' ' + (ip.notes || '');
+      } catch {}
+      const matched = currentTaskText ? _matchAPISkills(root, currentTaskText) : [];
+      if (matched.length > 0) {
+        const isTty = process.stdout && process.stdout.isTTY;
+        const cy5 = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+        const gr5 = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+        const dm5 = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+        log('');
+        log(cy5(`## 📚 관련 API skill ${matched.length}건 발견 (1.9.245, UR-0015) — 참조 권장`));
+        matched.slice(0, 3).forEach(s => {
+          log(gr5(`  • ${s.id} — ${s.name}`));
+          if (s.urls && s.urls.length) log(dm5(`       ${s.urls[0]}${s.urls.length > 1 ? ` (+${s.urls.length - 1})` : ''}`));
+          if (s.direction) log(dm5(`       방향: ${s.direction.slice(0, 100)}`));
+        });
+        if (matched.length > 3) log(dm5(`  ... +${matched.length - 3}건 더`));
+        log(dm5(`  → 본문: leerness api-skill show <id> | leerness api-skill list`));
+      } else {
+        const isTty = process.stdout && process.stdout.isTTY;
+        const dm5 = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+        log(dm5(`📚 API skill ${allSkills.length}건 저장됨 (현재 task 매칭 0 — leerness api-skill list)`));
+      }
     }
   } catch {}
 
@@ -10869,6 +11254,23 @@ function sessionClose(root, opts = {}) {
           shellScriptsScanned: encScan.scanned,
           encodingRiskCount: encScan.atRisk.length,
           encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file)
+        };
+      } catch {}
+      // 1.9.245: apiSkills 통합 (session close JSON 11번째 통합 필드) — UR-0015
+      try {
+        const allSkills = _listAPISkills(root);
+        let currentTaskText = '';
+        try {
+          const rows = readProgressRows(root);
+          const ip = rows.find(r => r.status === 'in-progress');
+          if (ip) currentTaskText = (ip.title || '') + ' ' + (ip.notes || '');
+        } catch {}
+        const matched = currentTaskText ? _matchAPISkills(root, currentTaskText) : [];
+        jsonResult.apiSkills = {
+          total: allSkills.length,
+          matched: matched.length,
+          matchedIds: matched.slice(0, 5).map(s => s.id),
+          ids: allSkills.slice(0, 10).map(s => s.id)
         };
       } catch {}
     } catch {}
@@ -15060,7 +15462,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_release_cleanup', description: '1.9.236 (1.9.235 자동 회수) — local release/* branches 정리. main 에 merge된 것만 후보 (unmerged 보호, 현재 branch 보호). 응답: { apply, keep, total, merged, unmerged, deleteCount, toDelete[], recent[], unmergedSample[] }. 외부 AI가 "운영 누적 release branches 정리 가능?"을 회수. 기본 dry-run, apply: true 시에만 실 삭제. 인자: { path?, apply? (default false), keep? (default 5) }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, apply: { type: 'boolean' }, keep: { type: 'number' } } } },
     { name: 'leerness_py_check', description: '1.9.239 (사용자 명시 UR-0013) — Python 파일 분석. 의존성 0 regex fallback. .md 외 .py 도 leerness 인지. 응답: { totalFiles, totalLOC, totalImports, totalFuncs, totalClasses, totalTodos, biggest: [{ file, loc, funcs, classes }] }. 외부 AI가 "이 프로젝트 Python 표면이 얼마나 되나"를 회수. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_agent_mode', description: '1.9.239 (사용자 명시 UR-0013) — 자율 모드 전용 통합 명령. start: handoff + drift --auto-fix + session-resume --auto-fix (진입). tick: pulse 한 줄 (매 라운드). stop: session close --auto-apply-delivered --auto-cleanup-branches (마감). 외부 AI 가 자율 라운드 진입/매 라운드/마감을 단일 호출로 수행. 인자: { path?, sub (required: "start"|"tick"|"stop"|"help") }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['start', 'tick', 'stop', 'help'] } }, required: ['sub'] } },
-    { name: 'leerness_env_info', description: '1.9.241 (사용자 명시 UR-0014) — 환경 종합 정보 회수. OS / 언어 (LANG, 코드페이지) / 한국어 Windows / 하드웨어 / 터미널 (TTY, PowerShell 버전) / 도구 버전 (git, npm, python). 외부 AI 가 환경 호환성을 미리 인지 → 인코딩 오류 예방. 응답: { os, node, locale, hardware, terminal, tools }. 인자: { path?, encodingCheck? }. encodingCheck: true 시 셸 스크립트 (.ps1/.bat/.cmd/.sh) BOM 없는 비-ASCII 위험 감지', inputSchema: { type: 'object', properties: { path: { type: 'string' }, encodingCheck: { type: 'boolean' } } } }
+    { name: 'leerness_env_info', description: '1.9.241 (사용자 명시 UR-0014) — 환경 종합 정보 회수. OS / 언어 (LANG, 코드페이지) / 한국어 Windows / 하드웨어 / 터미널 (TTY, PowerShell 버전) / 도구 버전 (git, npm, python). 외부 AI 가 환경 호환성을 미리 인지 → 인코딩 오류 예방. 응답: { os, node, locale, hardware, terminal, tools }. 인자: { path?, encodingCheck? }. encodingCheck: true 시 셸 스크립트 (.ps1/.bat/.cmd/.sh) BOM 없는 비-ASCII 위험 감지', inputSchema: { type: 'object', properties: { path: { type: 'string' }, encodingCheck: { type: 'boolean' } } } },
+    { name: 'leerness_api_skill', description: '1.9.245 (사용자 명시 UR-0015) — API 문서·관련링크 자동 캐시. 공식 API 문서 URL을 fetch 하고 1단계 same-domain 관련 링크까지 정리 → .harness/api-skills/<id>.md 저장. 후속 같은 API 관련 작업 시 자동 참조. 응답: list (skills 배열) / show (전체 본문) / match (task 매칭 결과). 인자: { path?, sub ("list"|"show"|"match"|"add"|"drop"), url? (add), id? (show/drop), query? (match), direction? (add: 구현 방향 텍스트) }. 외부 AI가 "이 프로젝트 어떤 API 문서가 정리되어 있나?" / "내 작업과 매칭되는 API skill 있나?" 회수.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['list', 'show', 'match', 'add', 'drop'] }, url: { type: 'string' }, id: { type: 'string' }, query: { type: 'string' }, direction: { type: 'string' } }, required: ['sub'] } }
   ];
 
   function send(obj) {
@@ -15248,6 +15651,14 @@ function mcpServeCmd(root) {
           case 'leerness_env_info':
             // 1.9.241 (UR-0014): 환경 종합 + 인코딩 위험 감지
             cliArgs = ['env', args.encodingCheck === true ? 'encoding' : 'summary', '--path', targetPath, '--json'];
+            break;
+          case 'leerness_api_skill':
+            // 1.9.245 (UR-0015): API skill cache — list/show/match/add/drop
+            cliArgs = ['api-skill', args.sub || 'list', '--path', targetPath, '--json'];
+            if (args.sub === 'add' && args.url) cliArgs.push('--url', args.url);
+            if (args.sub === 'add' && args.direction) cliArgs.push('--direction', args.direction);
+            if ((args.sub === 'show' || args.sub === 'drop') && args.id) cliArgs.push('--id', args.id);
+            if (args.sub === 'match' && args.query) cliArgs.push('--query', args.query);
             break;
           case 'leerness_release_cleanup':
             // 1.9.236 (1.9.235): local release/* branches 정리
@@ -17511,6 +17922,23 @@ function healthCmd(root) {
       encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file)
     };
   } catch { out.envInfo = { error: 'envInfo 점검 실패' }; }
+  // 1.9.245: health --json apiSkills 통합 (3 명령 11 필드 — UR-0015)
+  try {
+    const allSkills = _listAPISkills(root);
+    let currentTaskText = '';
+    try {
+      const rows = readProgressRows(root);
+      const ip = rows.find(r => r.status === 'in-progress');
+      if (ip) currentTaskText = (ip.title || '') + ' ' + (ip.notes || '');
+    } catch {}
+    const matched = currentTaskText ? _matchAPISkills(root, currentTaskText) : [];
+    out.apiSkills = {
+      total: allSkills.length,
+      matched: matched.length,
+      matchedIds: matched.slice(0, 5).map(s => s.id),
+      ids: allSkills.slice(0, 10).map(s => s.id)
+    };
+  } catch { out.apiSkills = { error: 'apiSkills 점검 실패' }; }
   // 1.9.163: 5능력 매트릭스 자동 평가 (1.9.155 sub-agent 점검 → 코드 기반 자동화)
   //   각 능력을 코드 grep 으로 검출 → 0~100 점수. 사용자가 매 health 호출 시 leerness 자기 평가 확인.
   try {
@@ -18960,6 +19388,8 @@ async function main() {
   //   기존 env check/sync/detect (1.9.71) 와 충돌하지 않음 — summary/encoding 신규 서브
   if (cmd === 'env' && (args[1] === 'summary' || args[1] === 'encoding' || args[1] === 'encoding-check'))
     return envCmd(arg('--path', process.cwd()), args[1] === 'summary' ? null : 'encoding-check');
+  // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
+  if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
   if (cmd === 'constraints')                        return constraintsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit (사용자 명시)

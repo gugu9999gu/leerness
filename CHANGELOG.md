@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.9.245 — 2026-05-26 — UR-0015 API skill cache
+
+**📚 사용자 명시 (UR-0015): API 문서/관련링크 자동 정리 + AI 자동 참조 시스템.**
+
+### 사용자 명시 (UR-0015)
+> *"API 문서/기능 요청 시 공식 문서·AI 탐색 내용을 스킬처럼 .harness/api-skills/ 에 정리하고 방향 지시도 함께 기록. 이후 같은 API 관련 수정/구현 요청 시 AI 가 정리해둔 파일이 자동 참조. URL 제공 시 본 URL + 관련 링크의 기능까지 참조."*
+
+검증 예시: 쿠팡 상품 생성 API (https://developers.coupangcorp.com/hc/ko/articles/360033877853) — 실 fetch 성공 (title "상품 생성 - Open APIs" + 7 관련 링크 자동 수집).
+
+### 1. `leerness api-skill` CLI 5종
+- `add <url> [--direction "방향"] [--name "..."] [--no-crawl] [--skeleton]` — fetch + same-domain 관련 링크 1단계 crawl (max 10) → `.harness/api-skills/<id>.md`
+- `list [--json]` — 저장된 skill 목록
+- `show <id>` — 특정 skill 본문 출력 (AI 컨텍스트 적재용)
+- `match <query> [--json]` — task 키워드 매칭 (CJK 한글 2자+ / ASCII 3자+ 모두 지원)
+- `drop <id>` — 삭제
+
+### 2. URL Fetch 방식 — 의존성 0 (Node built-in https)
+- Mozilla 호환 User-Agent (Cloudflare/WAF 차단 회피)
+- timeout 10s · max body 1MB · max 5 redirects
+- HTML→text 변환 (script/style 제거, entity decode)
+- same-domain 관련 링크 추출 (max 10, depth=1)
+- 차단 시 (403/401/429) `--skeleton` fallback → 빈 .md 골격 생성
+
+### 3. 자동 참조 — handoff body 자동 노출
+- 현재 in-progress task description 키워드 + skill 매칭 → `## 📚 관련 API skill N건 발견 (참조 권장)`
+- 본 URL + 방향 + 도메인 표시 (top 3)
+- 매칭 0 시: 저장된 skill 수만 hint 표시
+
+### 4. JSON 11번째 통합 필드 `apiSkills` (handoff/session close/health)
+- `{ total, matched, matchedIds, ids }` — 외부 AI 가 단일 호출에서 API skill 컨텍스트 회수
+- JSON 통합 매트릭스 10 → **11 필드** (3 명령 × 11 = 33 통합 포인트)
+
+### 5. MCP **70번째 도구** `leerness_api_skill` 🎉
+- sub: list / show / match / add / drop (외부 AI 가 MCP 호출로 직접 사용)
+
+### 6. 누적 회귀 (1.9.207~244) — 모두 유지
+- REPL HOTFIX (1.9.244) + CJK 분류 (1.9.243) + env encoding --apply (1.9.242) + 모두 유지
+
+### 7. stress-v190 — **26/26 PASS · 100%**
+- 1.9.245 신규 (15): VERSION + helper 함수 + CLI 5종 + 실 fetch + JSON 11 필드 × 3명령 + body 매칭 + skeleton fallback + MCP 70
+- 성능 (1): cold start avg 331ms
+- 누적 회귀 (10): 1.9.207~244
+
+### 8. 자동 release (107 라운드 main-push streak · 68 라운드 npm publish streak)
+
+📚 **API 지식 자동 누적·재사용** — 사용자가 한 번 정리하면 AI가 영구 기억. R201 진입.
+
+---
+
 ## 1.9.244 — 2026-05-26 🎉 R200 + 🚨 HOTFIX
 
 **🚨 HOTFIX: REPL agent ReferenceError `_lastCycleLines` (1.9.189 회귀 버그) + 🎉 R200 마일스톤 도달.**
