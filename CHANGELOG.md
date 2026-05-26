@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.9.239 — 2026-05-24
+
+**🐍 leerness py-check + 🤖 agent-mode + MCP 67/68 (사용자 명시 UR-0013).**
+
+### 사용자 명시 (UR-0013)
+> *"leerness가 md뿐만 아니라 py를 포함한 파이썬 스크립트 등이 효율적이라거나, 에이전트 모드를 위한 장치 등 더 효율적으로 작동할 수 있도록 구현"*
+
+### 1. `leerness py-check` 새 명령 — Python 파일 분석
+- 의존성 0, regex fallback (Node 내장만)
+- 분석: 파일 수 / LOC / imports / functions / classes / TODO/FIXME
+- Top 5 파일 (LOC 기준)
+- `--json` 옵션 (외부 자동화)
+- `.harness` / `node_modules` / `venv` / `__pycache__` 등 자동 skip
+- leerness 가 .md 외에도 **.py 인지** — 다중 언어 워크스페이스 지원
+
+### 2. `leerness agent-mode <start|tick|stop>` — 자율 모드 전용 통합
+- **start**: handoff + drift --auto-fix + session-resume --auto-fix (진입 자동화)
+- **tick**: pulse 한 줄 (매 라운드 가벼움)
+- **stop**: session close --auto-apply-delivered --auto-cleanup-branches (마감 통합)
+- AI 자율 라운드 진입/매 라운드/마감을 **1 명령으로 압축** → 호출 비용 절감
+
+### 3. MCP 67/68번째 도구
+- `leerness_py_check` — 외부 AI 가 Python 표면 분석
+- `leerness_agent_mode` — 외부 AI 가 자율 모드 단일 호출
+- MCP 66 → 68 (+2)
+
+### 4. 검증 — 실 Python 파일 (격리)
+- 2 파일 → 22 LOC / 4 imports / 4 funcs / 2 classes / 2 TODOs (정확 회수)
+- 200 file limit 안전 가드 + heavy dir skip
+
+### 5. 누적 회귀 (1.9.207~238) — 모두 유지
+
+### 6. stress-v184 — 18/18 PASS
+- 1.9.239 (8): VERSION + py-check (격리/human/fallback) + agent-mode (help/tick) + MCP 68 + 실 호출
+- 성능 (2): cold_start avg 372ms / py-check 387ms
+- 누적 회귀 (8): 1.9.207~238
+
+### 7. 자동 release (101 라운드 main-push streak · 62 라운드 npm publish streak)
+
+🐍 **leerness 다중 언어 지원 신설** — .md → .md + .py (확장 가능 베이스)
+🤖 **agent-mode 통합** — 자율 모드 진입/매라운드/마감을 3 명령으로 단축
+
+---
+
 ## 1.9.238 — 2026-05-24
 
 **🎉 R100 main-push streak 달성 + CLAUDE/AGENTS/session-workflow drift 차단 (1.9.228~237 9 라운드 누적).**

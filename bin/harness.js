@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.238';
+const VERSION = '1.9.239';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2194,6 +2194,156 @@ function milestonesCmd(root) {
   } else {
     log(gr(`  🎉 모든 마일스톤 달성 (500+)`));
   }
+}
+
+// 1.9.239: Python 파일 분석 (사용자 명시 UR-0013) — 의존성 0 regex fallback
+//   leerness 가 .md 외에 .py 파이썬 스크립트도 효율적으로 인지하도록.
+//   분석: 파일 수 / import 수 / 함수 수 / class 수 / 복잡도(approx LOC) / TODO/FIXME
+//   응답 (--json): { totalFiles, totalLOC, imports[], funcs[], classes[], complexity, todoCount }
+function _collectPyFiles(root, limit = 100) {
+  const out = [];
+  function walk(dir) {
+    if (out.length >= limit) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { return; }
+    for (const e of entries) {
+      if (out.length >= limit) return;
+      const fp = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        // skip common heavy dirs
+        if (/^(node_modules|\.git|__pycache__|\.harness|venv|\.venv|dist|build|_apps|_reports)$/.test(e.name)) continue;
+        walk(fp);
+      } else if (e.isFile() && /\.py$/i.test(e.name)) {
+        out.push(fp);
+      }
+    }
+  }
+  walk(root);
+  return out;
+}
+
+function _analyzePyFile(fp) {
+  let txt = '';
+  try { txt = fs.readFileSync(fp, 'utf8'); } catch { return null; }
+  const lines = txt.split('\n');
+  const importRe = /^\s*(?:from\s+\S+\s+)?import\s+\S+/;
+  const funcRe = /^\s*(?:async\s+)?def\s+(\w+)\s*\(/;
+  const classRe = /^\s*class\s+(\w+)/;
+  const todoRe = /#\s*(TODO|FIXME|XXX|HACK)\b/;
+  let imports = 0, funcs = [], classes = [], todos = 0;
+  for (const line of lines) {
+    if (importRe.test(line)) imports++;
+    const fm = line.match(funcRe); if (fm) funcs.push(fm[1]);
+    const cm = line.match(classRe); if (cm) classes.push(cm[1]);
+    if (todoRe.test(line)) todos++;
+  }
+  return {
+    file: fp,
+    loc: lines.length,
+    imports,
+    funcs: funcs.length,
+    classes: classes.length,
+    todos
+  };
+}
+
+function pyCheckCmd(root) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const files = _collectPyFiles(root, 200);
+  const analyses = files.map(f => _analyzePyFile(f)).filter(Boolean);
+  const totalLOC = analyses.reduce((s, a) => s + a.loc, 0);
+  const totalImports = analyses.reduce((s, a) => s + a.imports, 0);
+  const totalFuncs = analyses.reduce((s, a) => s + a.funcs, 0);
+  const totalClasses = analyses.reduce((s, a) => s + a.classes, 0);
+  const totalTodos = analyses.reduce((s, a) => s + a.todos, 0);
+  const result = {
+    totalFiles: analyses.length,
+    totalLOC, totalImports, totalFuncs, totalClasses, totalTodos,
+    biggest: analyses.slice().sort((a, b) => b.loc - a.loc).slice(0, 5).map(a => ({ file: path.relative(root, a.file), loc: a.loc, funcs: a.funcs, classes: a.classes }))
+  };
+  if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
+  log(cy(`# leerness py-check (1.9.239) — Python 파일 분석 (사용자 명시 UR-0013)`));
+  log('');
+  if (analyses.length === 0) {
+    log(dm(`  Python 파일 없음 (.py 검색됨: ${files.length}, 분석 가능: 0)`));
+    log(dm(`  → leerness 는 .md/.py 모두 분석 가능 (1.9.239)`));
+    return;
+  }
+  log(`  📊 통계:`);
+  log(`    파일 ${gr(String(analyses.length))} · LOC ${gr(String(totalLOC))} · 평균 ${gr(String(Math.round(totalLOC / analyses.length)))} loc/file`);
+  log(`    imports ${totalImports} · functions ${totalFuncs} · classes ${totalClasses}`);
+  if (totalTodos > 0) log(yl(`    ⚠ TODO/FIXME ${totalTodos}건`));
+  log('');
+  if (result.biggest.length > 0) {
+    log(`  Top 5 파일 (LOC 기준):`);
+    result.biggest.forEach(f => log(`    • ${f.file} — ${f.loc} loc / ${f.funcs} func / ${f.classes} class`));
+  }
+  log('');
+  log(dm(`  → JSON 출력: leerness py-check --json`));
+}
+
+// 1.9.239: agent-mode — 자율 모드 전용 통합 명령 (사용자 명시 UR-0013)
+//   handoff + pulse + drift auto-fix + session-resume 를 1 명령으로
+//   start: 진입 (handoff + drift auto-fix + 비정상종료 자동 회복)
+//   tick: 매 라운드 (pulse + 1 line)
+//   stop: 마감 (session close + auto-apply-delivered + auto-cleanup-branches)
+function agentModeCmd(root, sub) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  function spawnChild(args, opts) {
+    return cp.spawnSync(process.execPath, [__filename, ...args], Object.assign({ encoding: 'utf8', cwd: root, env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1' } }, opts || {}));
+  }
+  if (!sub || sub === 'help') {
+    log(cy(`# leerness agent-mode (1.9.239) — 자율 모드 전용 통합 명령`));
+    log('');
+    log(`  start   진입 (handoff + drift --auto-fix + session-resume --auto-fix)`);
+    log(`  tick    매 라운드 (pulse + 핵심 신호)`);
+    log(`  stop    마감 (session close --auto-apply-delivered --auto-cleanup-branches)`);
+    log('');
+    log(dm(`  사용자 명시 UR-0013 (Python + agent-mode 효율화)`));
+    return;
+  }
+  if (sub === 'start') {
+    log(cy(`# leerness agent-mode start (1.9.239)`));
+    log(dm(`  → 1. drift check --auto-fix (보안 + delivered + release cleanup)`));
+    const r1 = spawnChild(['drift', 'check', root, '--auto-fix']);
+    if (r1.status === 0) log(gr(`  ✓ drift auto-fix 완료`)); else log(yl(`  ⚠ drift auto-fix 종료 ${r1.status}`));
+    log(dm(`  → 2. session-resume --auto-fix (비정상종료 자동 회복)`));
+    const r2 = spawnChild(['session-resume', '--path', root, '--auto-fix']);
+    if (r2.status === 0) log(gr(`  ✓ session-resume 완료`)); else log(yl(`  ⚠ session-resume 종료 ${r2.status}`));
+    log(dm(`  → 3. handoff (컨텍스트 적재)`));
+    const r3 = spawnChild(['handoff', root]);
+    if (r3.status === 0) log(gr(`  ✓ handoff 출력 완료 (위 참조)`)); else log(yl(`  ⚠ handoff 종료 ${r3.status}`));
+    log('');
+    log(gr(`✓ agent-mode start 완료 — 자율 라운드 진행 준비`));
+    return;
+  }
+  if (sub === 'tick') {
+    // 가벼움 우선 — pulse 만 호출
+    log(cy(`# leerness agent-mode tick (1.9.239) — 가벼운 상태 확인`));
+    const r = spawnChild(['pulse', '--path', root]);
+    process.stdout.write(r.stdout || '');
+    return;
+  }
+  if (sub === 'stop') {
+    log(cy(`# leerness agent-mode stop (1.9.239) — 통합 마감`));
+    log(dm(`  → session close --auto-apply-delivered --auto-cleanup-branches`));
+    const r = spawnChild(['session', 'close', root, '--auto-apply-delivered', '--auto-cleanup-branches']);
+    process.stdout.write(r.stdout || '');
+    return;
+  }
+  log(yl(`unknown subcommand: ${sub}`));
+  log(dm(`  → leerness agent-mode help`));
 }
 
 // 1.9.234: recentChanges — 최근 N 라운드의 핵심 변경 요약 (git tag commit subject)
@@ -14558,7 +14708,9 @@ function mcpServeCmd(root) {
     { name: 'leerness_milestones', description: '1.9.229 (1.9.226 확장) — 도달 마일스톤 + 다음 ETA. git tag 순차 분석으로 25/50/75/100/125/150/175/200/250/300/400/500 마일스톤 도달 일자 + 다음 마일스톤 ETA (현재 속도 기준) 계산. 응답: { totalRounds, reached: [{milestone, version, reachedAt, daysFromBaseline}], next: {milestone, roundsRemaining, etaDays, etaDate}, baselineAt, avgRoundsPerDay }. 외부 AI가 "지금까지 어떤 마일스톤을 언제 달성했고 다음 마일스톤 예상 도달일은?"을 회수. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_pulse', description: '1.9.231 — 한 줄 종합 요약 (10 핵심 지표). 응답: { version, roundCount, mcpTools, memorySurface, security, health, driftScore, nextMilestone, etaDays, abnormalShutdown }. 외부 AI가 "leerness 상태 한 눈에 보기"를 가벼운 단일 호출로 회수. handoff 보다 5배 빠름 (drift/health 계산 skip). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_commands', description: '1.9.233 — 카테고리화된 전체 CLI 명령 목록 (9 카테고리). 응답: { version, totalCommands, categories: { status, task, memory, audit, workflow, release, skill, bridge, config } }. 외부 AI가 "leerness 가 제공하는 명령이 뭐가 있나"를 직접 회수. 매뉴얼/도움말 동적 생성. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_release_cleanup', description: '1.9.236 (1.9.235 자동 회수) — local release/* branches 정리. main 에 merge된 것만 후보 (unmerged 보호, 현재 branch 보호). 응답: { apply, keep, total, merged, unmerged, deleteCount, toDelete[], recent[], unmergedSample[] }. 외부 AI가 "운영 누적 release branches 정리 가능?"을 회수. 기본 dry-run, apply: true 시에만 실 삭제. 인자: { path?, apply? (default false), keep? (default 5) }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, apply: { type: 'boolean' }, keep: { type: 'number' } } } }
+    { name: 'leerness_release_cleanup', description: '1.9.236 (1.9.235 자동 회수) — local release/* branches 정리. main 에 merge된 것만 후보 (unmerged 보호, 현재 branch 보호). 응답: { apply, keep, total, merged, unmerged, deleteCount, toDelete[], recent[], unmergedSample[] }. 외부 AI가 "운영 누적 release branches 정리 가능?"을 회수. 기본 dry-run, apply: true 시에만 실 삭제. 인자: { path?, apply? (default false), keep? (default 5) }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, apply: { type: 'boolean' }, keep: { type: 'number' } } } },
+    { name: 'leerness_py_check', description: '1.9.239 (사용자 명시 UR-0013) — Python 파일 분석. 의존성 0 regex fallback. .md 외 .py 도 leerness 인지. 응답: { totalFiles, totalLOC, totalImports, totalFuncs, totalClasses, totalTodos, biggest: [{ file, loc, funcs, classes }] }. 외부 AI가 "이 프로젝트 Python 표면이 얼마나 되나"를 회수. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_agent_mode', description: '1.9.239 (사용자 명시 UR-0013) — 자율 모드 전용 통합 명령. start: handoff + drift --auto-fix + session-resume --auto-fix (진입). tick: pulse 한 줄 (매 라운드). stop: session close --auto-apply-delivered --auto-cleanup-branches (마감). 외부 AI 가 자율 라운드 진입/매 라운드/마감을 단일 호출로 수행. 인자: { path?, sub (required: "start"|"tick"|"stop"|"help") }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['start', 'tick', 'stop', 'help'] } }, required: ['sub'] } }
   ];
 
   function send(obj) {
@@ -14734,6 +14886,14 @@ function mcpServeCmd(root) {
           case 'leerness_commands':
             // 1.9.233: 카테고리화된 전체 CLI 명령 목록
             cliArgs = ['commands', '--json'];
+            break;
+          case 'leerness_py_check':
+            // 1.9.239 (UR-0013): Python 파일 분석
+            cliArgs = ['py-check', '--path', targetPath, '--json'];
+            break;
+          case 'leerness_agent_mode':
+            // 1.9.239 (UR-0013): 자율 모드 통합 (start/tick/stop)
+            cliArgs = ['agent-mode', String(args.sub || 'help'), '--path', targetPath];
             break;
           case 'leerness_release_cleanup':
             // 1.9.236 (1.9.235): local release/* branches 정리
@@ -18406,6 +18566,10 @@ async function main() {
   if (cmd === 'pulse')                              return pulseCmd(arg('--path', process.cwd()));
   // 1.9.233: leerness commands — 카테고리화된 전체 CLI 명령 목록
   if (cmd === 'commands')                           return commandsCmd(arg('--path', process.cwd()));
+  // 1.9.239: leerness py-check — Python 파일 분석 (사용자 명시 UR-0013)
+  if (cmd === 'py-check')                           return pyCheckCmd(arg('--path', process.cwd()));
+  // 1.9.239: leerness agent-mode <start|tick|stop> — 자율 모드 전용 통합 명령 (사용자 명시 UR-0013)
+  if (cmd === 'agent-mode')                         return agentModeCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
   if (cmd === 'constraints')                        return constraintsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit (사용자 명시)
