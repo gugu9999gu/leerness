@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.9.241 — 2026-05-24
+
+**🌐 leerness env + 한국어 PowerShell 인코딩 위험 사전 감지 (사용자 명시 UR-0014).**
+
+### 사용자 명시 (UR-0014)
+> *"leerness 설치 프로젝트에서 PowerShell/터미널 한국어 인코딩 오류 사전 감지 — OS/언어설정/하드웨어/터미널/SW 버전 데이터 숙지로 개발/테스트/디버깅 시 환경 호환성 보장"*
+
+배경: 사용자가 `3d-map-maker` 프로젝트에서 `npm run setup` → `setup.ps1` 파싱 오류 (한국어 + BOM 없는 UTF-8 → PowerShell CP949 오인식)
+
+### 1. `leerness env summary` 새 명령 (1.9.145 envCheck 와 별개)
+- 환경 종합 출력: OS / Node / Locale / 한국어 Windows 감지 / Hardware / Terminal (PowerShell 버전) / Tools (git/npm/python)
+- `chcp` 출력으로 코드페이지 자동 감지 (949 = 한국어)
+- `--json` 옵션
+- 신규 helper: `_collectRuntimeEnv()` (기존 `_detectEnvironment` 와 명명 분리)
+
+### 2. `leerness env encoding` 새 명령 — 셸 스크립트 인코딩 위험 감지
+- `.ps1` / `.bat` / `.cmd` / `.sh` 자동 스캔
+- BOM 없는 비-ASCII 바이트 검출 (재귀, 4096 byte 이내)
+- 위험 시: `Windows 한국어 PowerShell 에서 CP949 로 오인식 가능 (BOM 추가 권장)`
+- 해결책 자동 제시 (UTF-8 BOM 추가 또는 `$OutputEncoding` 설정)
+
+### 3. handoff body 자동 노출
+- `## ⚠ 셸 스크립트 인코딩 위험 N건 (1.9.241, UR-0014)` 본문 섹션
+- top 3 위험 파일 + 해결 안내 (BOM 추가)
+- `leerness env encoding` 가이드 자동
+
+### 4. MCP 69번째 도구 — `leerness_env_info`
+- 외부 AI 가 환경 호환성 사전 인지 → 인코딩 오류 예방
+- `encodingCheck: true` 옵션 시 셸 스크립트 스캔
+- MCP 68 → **69** (+1)
+
+### 5. 누적 회귀 (1.9.207~240) — 모두 유지
+- 기존 `_detectEnvironment(root)` (1.9.145) 와 충돌 없이 공존
+
+### 6. stress-v186 — 16/16 PASS
+- 1.9.241 (7): VERSION + env summary + JSON + encoding 위험 감지 + 안전 시 위험 0 + handoff body + MCP 69
+- 성능 (1): cold_start avg 598ms
+- 누적 회귀 (8): 1.9.207~240
+
+### 7. 자동 release (103 라운드 main-push streak · 64 라운드 npm publish streak)
+
+🌐 **한국어 Windows 환경 호환성 보강** — 사용자 보고 .ps1 파싱 오류 같은 케이스 사전 감지
+
+---
+
 ## 1.9.240 — 2026-05-24
 
 **🐍 UR-0013 2단계: handoff/session close/health --json pyFiles (9 필드) + 헤드라인 자동.**

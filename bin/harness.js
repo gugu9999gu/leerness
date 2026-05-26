@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.240';
+const VERSION = '1.9.241';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2374,6 +2374,157 @@ function _computeRecentChanges(root, limit = 5) {
     }
   } catch {}
   return items;
+}
+
+// 1.9.241: 환경 정보 종합 수집 + 셸 스크립트 인코딩 위험 감지 (사용자 명시 UR-0014)
+//   사용자 보고: Windows + 한국어 PowerShell 에서 .ps1 UTF-8 (no BOM) 파일이 CP949 로 잘못 인식되어 파싱 오류
+//   해결: leerness 가 환경 정보 + 셸 스크립트 인코딩을 사전 감지 → handoff body 경고
+//   주의: 기존 _detectEnvironment (1.9.145) 와 명명 충돌 → _collectRuntimeEnv 로 분리
+function _collectRuntimeEnv() {
+  const env = {
+    os: { platform: os.platform(), release: os.release(), arch: os.arch() },
+    node: { version: process.version, exe: process.execPath },
+    locale: {
+      LANG: process.env.LANG || null,
+      LC_ALL: process.env.LC_ALL || null,
+      LC_CTYPE: process.env.LC_CTYPE || null,
+      // Windows 한국어 환경 detect
+      OEMCP: process.env.OEMCP || null,  // CP949 = 949
+      isKoreanWindows: false
+    },
+    hardware: {
+      cpus: os.cpus().length,
+      memGB: Math.round(os.totalmem() / 1024 / 1024 / 1024),
+      hostname: os.hostname()
+    },
+    terminal: {
+      isTTY: !!(process.stdout && process.stdout.isTTY),
+      term: process.env.TERM || null,
+      shell: process.env.SHELL || process.env.ComSpec || null,
+      powershell: null
+    },
+    tools: { git: null, npm: null, python: null, python3: null }
+  };
+  // 한국어 Windows 감지
+  try {
+    if (env.os.platform === 'win32') {
+      // chcp 출력으로 코드페이지 확인
+      const r = cp.spawnSync('chcp', [], { encoding: 'utf8', shell: true, timeout: 3000 });
+      const m = (r.stdout || '').match(/(\d{3,4})/);
+      if (m) {
+        const cp_num = parseInt(m[1], 10);
+        env.locale.codepage = cp_num;
+        if (cp_num === 949 || cp_num === 51949) env.locale.isKoreanWindows = true;
+      }
+    }
+  } catch {}
+  // PowerShell 감지
+  try {
+    if (env.os.platform === 'win32') {
+      const r = cp.spawnSync('powershell', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8', timeout: 5000 });
+      if (r.status === 0) env.terminal.powershell = (r.stdout || '').trim().split('\n')[0];
+    }
+  } catch {}
+  // 도구 버전 감지
+  for (const [tool, cmd] of [['git', 'git --version'], ['npm', 'npm --version'], ['python', 'python --version'], ['python3', 'python3 --version']]) {
+    try {
+      const r = cp.spawnSync(cmd.split(' ')[0], cmd.split(' ').slice(1), { encoding: 'utf8', shell: true, timeout: 3000 });
+      if (r.status === 0) {
+        const v = (r.stdout || r.stderr || '').trim().split('\n')[0];
+        env.tools[tool] = v;
+      }
+    } catch {}
+  }
+  return env;
+}
+
+// 셸 스크립트 (.ps1/.bat/.cmd/.sh) 인코딩 위험 감지
+//   위험 시그널: 한국어 (또는 비-ASCII) 문자 + BOM 없음 + Windows 환경
+function _scanShellScriptsEncoding(root) {
+  const result = { scanned: 0, atRisk: [], notes: [] };
+  function walk(dir, depth = 0) {
+    if (depth > 3) return;  // 너무 깊이 들어가지 않음
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const fp = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (/^(node_modules|\.git|__pycache__|venv|\.venv|dist|build)$/.test(e.name)) continue;
+        walk(fp, depth + 1);
+      } else if (e.isFile() && /\.(ps1|bat|cmd|sh)$/i.test(e.name)) {
+        result.scanned++;
+        try {
+          const buf = fs.readFileSync(fp);
+          const hasBOM = buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF;
+          // 비-ASCII (≥ 0x80) 바이트 존재 여부 검사
+          let nonAscii = false;
+          for (let i = 0; i < Math.min(buf.length, 4096); i++) {
+            if (buf[i] >= 0x80) { nonAscii = true; break; }
+          }
+          if (nonAscii && !hasBOM) {
+            result.atRisk.push({
+              file: path.relative(root, fp),
+              ext: path.extname(fp),
+              hasBOM: false,
+              nonAscii: true,
+              risk: 'Windows 한국어 PowerShell 에서 CP949 로 오인식 가능 (BOM 추가 권장)'
+            });
+          }
+        } catch {}
+      }
+    }
+  }
+  walk(root);
+  if (result.atRisk.length > 0) {
+    result.notes.push('해결: 파일 시작에 UTF-8 BOM 추가 (EF BB BF) 또는 .ps1 첫 줄에 $OutputEncoding/[Console]::OutputEncoding 설정');
+  }
+  return result;
+}
+
+function envCmd(root, sub) {
+  root = absRoot(root);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  if (sub === 'encoding-check') {
+    const result = _scanShellScriptsEncoding(root);
+    if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
+    log(cy(`# leerness env encoding-check (1.9.241, UR-0014) — 셸 스크립트 인코딩 위험 감지`));
+    log('');
+    log(`  스캔: ${gr(String(result.scanned))} 파일 (.ps1/.bat/.cmd/.sh)`);
+    if (result.atRisk.length === 0) {
+      log(gr(`  ✓ 인코딩 위험 없음`));
+    } else {
+      log(rd(`  ⚠ 위험 ${result.atRisk.length}건 (BOM 없는 비-ASCII):`));
+      result.atRisk.slice(0, 10).forEach(r => {
+        log(`    • ${r.file}`);
+        log(dm(`         ${r.risk}`));
+      });
+      log('');
+      result.notes.forEach(n => log(yl(`  💡 ${n}`)));
+    }
+    return;
+  }
+  // default: env summary
+  const env = _collectRuntimeEnv();
+  if (has('--json')) { log(JSON.stringify(env, null, 2)); return; }
+  log(cy(`# leerness env (1.9.241, UR-0014) — 환경 종합`));
+  log('');
+  log(`  💻 OS: ${gr(env.os.platform)} ${env.os.release} (${env.os.arch})`);
+  log(`  📦 Node: ${gr(env.node.version)}`);
+  log(`  🌐 Locale: LANG=${env.locale.LANG || 'unset'} · CP=${env.locale.codepage || 'unknown'}${env.locale.isKoreanWindows ? yl(' (한국어 Windows)') : ''}`);
+  log(`  🖥 Hardware: ${env.hardware.cpus} CPUs · ${env.hardware.memGB} GB RAM`);
+  log(`  🖱 Terminal: TTY=${env.terminal.isTTY}${env.terminal.powershell ? ` · PowerShell v${env.terminal.powershell}` : ''}`);
+  log(`  🔧 Tools:`);
+  for (const [k, v] of Object.entries(env.tools)) {
+    log(`    ${v ? gr('✓') : dm('✗')} ${k}: ${v || dm('not found')}`);
+  }
+  log('');
+  log(dm(`  → 인코딩 검사: leerness env encoding-check (셸 스크립트 .ps1/.bat 위험 감지)`));
+  log(dm(`  → JSON 출력: leerness env --json`));
 }
 
 // 1.9.231: leerness pulse — 한 줄 종합 요약 (10 핵심 지표)
@@ -6740,6 +6891,27 @@ function handoff(root) {
       });
       log(dm3(`  → 재개 가이드: leerness session-resume`));
       log(dm3(`  → 자동 회복: leerness session-resume --auto-fix (1.9.222)`));
+    }
+  } catch {}
+
+  // 1.9.241: handoff body 셸 스크립트 인코딩 위험 감지 (사용자 명시 UR-0014)
+  //   한국어 Windows + .ps1/.bat 비-ASCII + BOM 없음 → CP949 오인식 위험
+  try {
+    const scan = _scanShellScriptsEncoding(root);
+    if (scan.atRisk && scan.atRisk.length > 0) {
+      const isTty = process.stdout && process.stdout.isTTY;
+      const rd5 = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+      const yl5 = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+      const dm5 = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+      log('');
+      log(rd5(`## ⚠ 셸 스크립트 인코딩 위험 ${scan.atRisk.length}건 (1.9.241, UR-0014)`));
+      scan.atRisk.slice(0, 3).forEach(r => {
+        log(yl5(`  • ${r.file}`));
+        log(dm5(`       ${r.risk}`));
+      });
+      if (scan.atRisk.length > 3) log(dm5(`  ... +${scan.atRisk.length - 3}건 더`));
+      log(dm5(`  → 상세: leerness env encoding`));
+      log(dm5(`  → 해결: 파일 시작에 UTF-8 BOM (EF BB BF) 추가`));
     }
   } catch {}
 
@@ -14743,7 +14915,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_commands', description: '1.9.233 — 카테고리화된 전체 CLI 명령 목록 (9 카테고리). 응답: { version, totalCommands, categories: { status, task, memory, audit, workflow, release, skill, bridge, config } }. 외부 AI가 "leerness 가 제공하는 명령이 뭐가 있나"를 직접 회수. 매뉴얼/도움말 동적 생성. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_release_cleanup', description: '1.9.236 (1.9.235 자동 회수) — local release/* branches 정리. main 에 merge된 것만 후보 (unmerged 보호, 현재 branch 보호). 응답: { apply, keep, total, merged, unmerged, deleteCount, toDelete[], recent[], unmergedSample[] }. 외부 AI가 "운영 누적 release branches 정리 가능?"을 회수. 기본 dry-run, apply: true 시에만 실 삭제. 인자: { path?, apply? (default false), keep? (default 5) }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, apply: { type: 'boolean' }, keep: { type: 'number' } } } },
     { name: 'leerness_py_check', description: '1.9.239 (사용자 명시 UR-0013) — Python 파일 분석. 의존성 0 regex fallback. .md 외 .py 도 leerness 인지. 응답: { totalFiles, totalLOC, totalImports, totalFuncs, totalClasses, totalTodos, biggest: [{ file, loc, funcs, classes }] }. 외부 AI가 "이 프로젝트 Python 표면이 얼마나 되나"를 회수. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_agent_mode', description: '1.9.239 (사용자 명시 UR-0013) — 자율 모드 전용 통합 명령. start: handoff + drift --auto-fix + session-resume --auto-fix (진입). tick: pulse 한 줄 (매 라운드). stop: session close --auto-apply-delivered --auto-cleanup-branches (마감). 외부 AI 가 자율 라운드 진입/매 라운드/마감을 단일 호출로 수행. 인자: { path?, sub (required: "start"|"tick"|"stop"|"help") }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['start', 'tick', 'stop', 'help'] } }, required: ['sub'] } }
+    { name: 'leerness_agent_mode', description: '1.9.239 (사용자 명시 UR-0013) — 자율 모드 전용 통합 명령. start: handoff + drift --auto-fix + session-resume --auto-fix (진입). tick: pulse 한 줄 (매 라운드). stop: session close --auto-apply-delivered --auto-cleanup-branches (마감). 외부 AI 가 자율 라운드 진입/매 라운드/마감을 단일 호출로 수행. 인자: { path?, sub (required: "start"|"tick"|"stop"|"help") }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['start', 'tick', 'stop', 'help'] } }, required: ['sub'] } },
+    { name: 'leerness_env_info', description: '1.9.241 (사용자 명시 UR-0014) — 환경 종합 정보 회수. OS / 언어 (LANG, 코드페이지) / 한국어 Windows / 하드웨어 / 터미널 (TTY, PowerShell 버전) / 도구 버전 (git, npm, python). 외부 AI 가 환경 호환성을 미리 인지 → 인코딩 오류 예방. 응답: { os, node, locale, hardware, terminal, tools }. 인자: { path?, encodingCheck? }. encodingCheck: true 시 셸 스크립트 (.ps1/.bat/.cmd/.sh) BOM 없는 비-ASCII 위험 감지', inputSchema: { type: 'object', properties: { path: { type: 'string' }, encodingCheck: { type: 'boolean' } } } }
   ];
 
   function send(obj) {
@@ -14927,6 +15100,10 @@ function mcpServeCmd(root) {
           case 'leerness_agent_mode':
             // 1.9.239 (UR-0013): 자율 모드 통합 (start/tick/stop)
             cliArgs = ['agent-mode', String(args.sub || 'help'), '--path', targetPath];
+            break;
+          case 'leerness_env_info':
+            // 1.9.241 (UR-0014): 환경 종합 + 인코딩 위험 감지
+            cliArgs = ['env', args.encodingCheck === true ? 'encoding' : 'summary', '--path', targetPath, '--json'];
             break;
           case 'leerness_release_cleanup':
             // 1.9.236 (1.9.235): local release/* branches 정리
@@ -18616,6 +18793,10 @@ async function main() {
   if (cmd === 'py-check')                           return pyCheckCmd(arg('--path', process.cwd()));
   // 1.9.239: leerness agent-mode <start|tick|stop> — 자율 모드 전용 통합 명령 (사용자 명시 UR-0013)
   if (cmd === 'agent-mode')                         return agentModeCmd(arg('--path', process.cwd()), args[1]);
+  // 1.9.241: leerness env summary|encoding — 환경 종합 + 셸 스크립트 인코딩 위험 (사용자 명시 UR-0014)
+  //   기존 env check/sync/detect (1.9.71) 와 충돌하지 않음 — summary/encoding 신규 서브
+  if (cmd === 'env' && (args[1] === 'summary' || args[1] === 'encoding' || args[1] === 'encoding-check'))
+    return envCmd(arg('--path', process.cwd()), args[1] === 'summary' ? null : 'encoding-check');
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
   if (cmd === 'constraints')                        return constraintsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit (사용자 명시)
