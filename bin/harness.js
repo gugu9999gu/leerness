@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.241';
+const VERSION = '1.9.242';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2491,8 +2491,25 @@ function envCmd(root, sub) {
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   if (sub === 'encoding-check') {
     const result = _scanShellScriptsEncoding(root);
+    // 1.9.242: --apply 옵션 — 위험 파일에 UTF-8 BOM 자동 추가 (사용자 명시 UR-0014 2단계)
+    const apply = has('--apply') || has('--auto-fix-bom');
+    if (apply) result.applied = [];
+    if (apply && result.atRisk.length > 0) {
+      for (const r of result.atRisk) {
+        try {
+          const fullPath = path.join(root, r.file);
+          const orig = fs.readFileSync(fullPath);
+          const bom = Buffer.from([0xEF, 0xBB, 0xBF]);
+          const fixed = Buffer.concat([bom, orig]);
+          fs.writeFileSync(fullPath, fixed);
+          result.applied.push({ file: r.file, action: 'utf8-bom-added' });
+        } catch (e) {
+          result.applied.push({ file: r.file, action: 'failed', error: e.message });
+        }
+      }
+    }
     if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
-    log(cy(`# leerness env encoding-check (1.9.241, UR-0014) — 셸 스크립트 인코딩 위험 감지`));
+    log(cy(`# leerness env encoding-check (1.9.241/242, UR-0014) — 셸 스크립트 인코딩 위험 감지`));
     log('');
     log(`  스캔: ${gr(String(result.scanned))} 파일 (.ps1/.bat/.cmd/.sh)`);
     if (result.atRisk.length === 0) {
@@ -2504,7 +2521,14 @@ function envCmd(root, sub) {
         log(dm(`         ${r.risk}`));
       });
       log('');
-      result.notes.forEach(n => log(yl(`  💡 ${n}`)));
+      if (apply) {
+        const okCnt = (result.applied || []).filter(a => a.action === 'utf8-bom-added').length;
+        const failCnt = (result.applied || []).filter(a => a.action === 'failed').length;
+        log(gr(`  ✓ UTF-8 BOM 추가 ${okCnt}건${failCnt > 0 ? ` (실패 ${failCnt}건)` : ''} (1.9.242 --apply)`));
+      } else {
+        result.notes.forEach(n => log(yl(`  💡 ${n}`)));
+        log(dm(`  → 자동 수정: leerness env encoding --apply (BOM 자동 추가)`));
+      }
     }
     return;
   }
@@ -6552,6 +6576,20 @@ function handoff(root) {
           totalImports: analyses.reduce((s, a) => s + a.imports, 0),
           totalFuncs: analyses.reduce((s, a) => s + a.funcs, 0),
           totalClasses: analyses.reduce((s, a) => s + a.classes, 0)
+        };
+      } catch {}
+      // 1.9.242: envInfo 통합 (handoff JSON 10번째 통합 필드) — 환경 + 인코딩 위험 (UR-0014 2단계)
+      try {
+        const runtimeEnv = _collectRuntimeEnv();
+        const encScan = _scanShellScriptsEncoding(root);
+        result.envInfo = {
+          os: runtimeEnv.os.platform,
+          isKoreanWindows: runtimeEnv.locale.isKoreanWindows || false,
+          codepage: runtimeEnv.locale.codepage || null,
+          nodeVersion: runtimeEnv.node.version,
+          shellScriptsScanned: encScan.scanned,
+          encodingRiskCount: encScan.atRisk.length,
+          encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file)
         };
       } catch {}
     } catch {}
@@ -10777,6 +10815,20 @@ function sessionClose(root, opts = {}) {
           totalClasses: analyses.reduce((s, a) => s + a.classes, 0)
         };
       } catch {}
+      // 1.9.242: envInfo 통합 (session close JSON 10번째 통합 필드) — UR-0014 2단계
+      try {
+        const runtimeEnv = _collectRuntimeEnv();
+        const encScan = _scanShellScriptsEncoding(root);
+        jsonResult.envInfo = {
+          os: runtimeEnv.os.platform,
+          isKoreanWindows: runtimeEnv.locale.isKoreanWindows || false,
+          codepage: runtimeEnv.locale.codepage || null,
+          nodeVersion: runtimeEnv.node.version,
+          shellScriptsScanned: encScan.scanned,
+          encodingRiskCount: encScan.atRisk.length,
+          encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file)
+        };
+      } catch {}
     } catch {}
     try {
       // 1.9.209: pre-wake-audit 자동 실행 + 저장 (sleep 전 자동 점검)
@@ -13866,6 +13918,31 @@ function driftCheckCmd(root, opts = {}) {
       }
     } catch (e) {
       log(`⚠ auto-fix 보안 회복 오류: ${e.message}`);
+    }
+  }
+  // 1.9.242: drift check --auto-fix 에 env encoding BOM 자동 추가 통합 (사용자 명시 UR-0014 2단계)
+  //   1.9.82 패턴 확장 — drift 회복 시 셸 스크립트 인코딩 위험도 자동 해결
+  if (autoFix) {
+    try {
+      const encScan = _scanShellScriptsEncoding(root);
+      if (encScan.atRisk && encScan.atRisk.length > 0) {
+        log('');
+        log(`🌐 --auto-fix 활성 (1.9.242) — 셸 스크립트 인코딩 위험 ${encScan.atRisk.length}건 BOM 자동 추가 중...`);
+        let ok = 0;
+        for (const r of encScan.atRisk) {
+          try {
+            const fullPath = path.join(root, r.file);
+            const orig = fs.readFileSync(fullPath);
+            const bom = Buffer.from([0xEF, 0xBB, 0xBF]);
+            const fixed = Buffer.concat([bom, orig]);
+            fs.writeFileSync(fullPath, fixed);
+            ok++;
+          } catch {}
+        }
+        log(`✓ UTF-8 BOM 추가 ${ok}/${encScan.atRisk.length}건 (1.9.242 UR-0014)`);
+      }
+    } catch (e) {
+      log(`⚠ env encoding auto-fix 오류 (1.9.242): ${e.message}`);
     }
   }
   // 1.9.225: drift check --auto-fix 에 delivered 패턴 자동 적용 통합 (1.9.223/224 시스템 회수)
@@ -17348,6 +17425,20 @@ function healthCmd(root) {
       totalClasses: analyses.reduce((s, a) => s + a.classes, 0)
     };
   } catch { out.pyFiles = { error: 'pyFiles 점검 실패' }; }
+  // 1.9.242: health --json envInfo 통합 (3 명령 10 필드 — UR-0014 2단계)
+  try {
+    const runtimeEnv = _collectRuntimeEnv();
+    const encScan = _scanShellScriptsEncoding(root);
+    out.envInfo = {
+      os: runtimeEnv.os.platform,
+      isKoreanWindows: runtimeEnv.locale.isKoreanWindows || false,
+      codepage: runtimeEnv.locale.codepage || null,
+      nodeVersion: runtimeEnv.node.version,
+      shellScriptsScanned: encScan.scanned,
+      encodingRiskCount: encScan.atRisk.length,
+      encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file)
+    };
+  } catch { out.envInfo = { error: 'envInfo 점검 실패' }; }
   // 1.9.163: 5능력 매트릭스 자동 평가 (1.9.155 sub-agent 점검 → 코드 기반 자동화)
   //   각 능력을 코드 grep 으로 검출 → 0~100 점수. 사용자가 매 health 호출 시 leerness 자기 평가 확인.
   try {

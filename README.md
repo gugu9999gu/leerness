@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.241-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v186-16%2F16-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-69-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-56-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-197-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-103_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-64_streak-success)]() [![encoding](https://img.shields.io/badge/🌐_env_encoding-한국어_PS_위험_감지-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-598ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.242-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v187-22%2F22-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-69-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-56-brightgreen)]() [![json-fields](https://img.shields.io/badge/JSON_통합-10_필드-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-198-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-104_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-65_streak-success)]() [![encoding](https://img.shields.io/badge/🌐_env_encoding-BOM_자동추가-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-371ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.241  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.242  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🌐 env encoding 위험 사전 감지 (사용자 명시 UR-0014)         ║
+  ║  🌐 env encoding --apply BOM 자동 추가 (UR-0014 2단계)        ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

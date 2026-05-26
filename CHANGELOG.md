@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.9.242 — 2026-05-26
+
+**🌐 UR-0014 2단계: env encoding --apply (BOM 자동 추가) + JSON 10 필드 envInfo + drift --auto-fix 통합.**
+
+### 사용자 명시 (UR-0014) — 2단계 자동 회복
+
+1.9.241 에서 감지만 제공했던 위험을 1.9.242 가 **실제 자동 수정**으로 확장:
+
+### 1. `leerness env encoding --apply` 자동 BOM 추가
+- `.ps1` / `.bat` / `.cmd` / `.sh` 의 위험 파일에 UTF-8 BOM (`EF BB BF`) 자동 prepend
+- `--auto-fix-bom` 별칭 동일 동작
+- 기본 dry-run 유지 (--apply 명시 시에만 변경) — 안전 원칙
+- 적용 결과 `result.applied` 배열로 노출 (file/action: utf8-bom-added | failed)
+
+### 2. handoff/session close/health --json **10 필드** envInfo 통합
+- JSON 통합 매트릭스 9 → **10 필드** 진화 (3 명령 × 10 = 30 통합 포인트)
+- `envInfo`: os / isKoreanWindows / codepage / nodeVersion / shellScriptsScanned / encodingRiskCount / encodingRiskFiles[0..5]
+- 외부 AI 가 환경 컨텍스트 + 인코딩 위험을 단일 호출에서 회수
+
+### 3. drift check --auto-fix env encoding BOM 통합
+- 1.9.82 보안 회복 + 1.9.225 delivered + 1.9.236 release cleanup 자동 회복 패턴 확장
+- `drift check --auto-fix` 시 셸 스크립트 위험 자동 BOM 추가
+- log: `🌐 --auto-fix 활성 (1.9.242) — 셸 스크립트 인코딩 위험 N건 BOM 자동 추가 중...`
+
+### 4. 누적 회귀 (1.9.207~241) — 모두 유지
+- MCP 69 도구 유지 (1.9.242 는 신규 CLI 옵션 + 통합, 도구 증가 X)
+- handoff JSON: userRequestsAudit + preWakeAudit + idempotencyAudit + abnormalShutdown + deliveredRequests + roundHistory + milestones + recentChanges + pyFiles + **envInfo** (10)
+
+### 5. stress-v187 — **22/22 PASS · 100%**
+- 1.9.242 (8): VERSION + env --apply (격리) + --auto-fix-bom 별칭 + handoff/session close/health 10필드 envInfo + drift --auto-fix BOM 통합 + envInfo 스키마
+- 성능 (2): cold_start avg 371ms · env --apply 372ms
+- 누적 회귀 (12): 1.9.207~241
+
+### 6. 자동 release (104 라운드 main-push streak · 65 라운드 npm publish streak)
+
+🌐 **UR-0014 완전 자동화** — 감지 (1.9.241) → 자동 수정 (1.9.242)
+
+---
+
 ## 1.9.241 — 2026-05-24
 
 **🌐 leerness env + 한국어 PowerShell 인코딩 위험 사전 감지 (사용자 명시 UR-0014).**
