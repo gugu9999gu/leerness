@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.239-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v184-18%2F18-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-68-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-195-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-101_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-62_streak-success)]() [![langs](https://img.shields.io/badge/🐍_supported-md_%2B_py-blueviolet)]() [![agent-mode](https://img.shields.io/badge/🤖_agent--mode-start%2Ftick%2Fstop-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-372ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.240-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v185-16%2F16-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-68-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-54-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-196-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-102_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-63_streak-success)]() [![json-9fields](https://img.shields.io/badge/📜_JSON_통합-9%2F9_필드-blueviolet)]() [![langs](https://img.shields.io/badge/🐍_md_%2B_py-자동_detect-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-386ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.239  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.240  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🐍 py-check · 🤖 agent-mode · MCP 68 (사용자 명시 UR-0013)   ║
+  ║  🐍 JSON 9 필드 (3 명령 × 9 = 27 통합 — UR-0013 2단계)        ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

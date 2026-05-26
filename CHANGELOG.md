@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.9.240 — 2026-05-24
+
+**🐍 UR-0013 2단계: handoff/session close/health --json pyFiles (9 필드) + 헤드라인 자동.**
+
+### 1. handoff/session close/health --json 9번째 통합 필드 `pyFiles`
+- Python 파일 자동 detect (1.9.239 `_collectPyFiles` 재사용)
+- 형식: `{ total, analyzed, totalLOC, totalImports, totalFuncs, totalClasses }`
+- 3 명령 일관성 매트릭스 진화: 7 → 8 → **9 필드** (3 × 9 = 27 통합 포인트)
+- AI 가 다중 언어 워크스페이스 (.md + .py) 인지
+
+### 2. handoff 헤드라인 18번째 요소
+- `.py` 파일 ≥ 1 시: `🐍 py N` 자동 노출
+- 0개일 때 미노출 (조용함)
+
+### 3. UR-0013 2단계 완료
+- 1.9.239 1단계: py-check CLI + agent-mode CLI + MCP 67/68
+- **1.9.240 2단계**: JSON 9 필드 + 헤드라인 자동
+- 다중 언어 표면 (.md + .py) 자동 가시화
+
+### 4. 누적 회귀 (1.9.207~239) — 모두 유지
+
+### 5. stress-v185 — 16/16 PASS
+- 1.9.240 (7): VERSION + handoff/session close/health JSON + 9 필드 + 헤드라인 (있음/없음)
+- 성능 (1): cold_start avg 386ms
+- 누적 회귀 (8): 1.9.207~239
+
+### 6. 자동 release (102 라운드 main-push streak · 63 라운드 npm publish streak)
+
+🐍 **다중 언어 표면 가시화** — .md + .py 자동 통합 (외부 AI 가 두 표면 모두 회수)
+
+---
+
 ## 1.9.239 — 2026-05-24
 
 **🐍 leerness py-check + 🤖 agent-mode + MCP 67/68 (사용자 명시 UR-0013).**

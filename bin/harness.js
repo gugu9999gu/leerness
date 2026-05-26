@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.239';
+const VERSION = '1.9.240';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -6390,6 +6390,19 @@ function handoff(root) {
       try {
         result.recentChanges = _computeRecentChanges(root, 5);
       } catch {}
+      // 1.9.240: pyFiles 통합 (handoff JSON 9번째 통합 필드) — Python 다중 언어 가시화 (UR-0013 2단계)
+      try {
+        const pyFiles = _collectPyFiles(root, 200);
+        const analyses = pyFiles.slice(0, 200).map(f => _analyzePyFile(f)).filter(Boolean);
+        result.pyFiles = {
+          total: pyFiles.length,
+          analyzed: analyses.length,
+          totalLOC: analyses.reduce((s, a) => s + a.loc, 0),
+          totalImports: analyses.reduce((s, a) => s + a.imports, 0),
+          totalFuncs: analyses.reduce((s, a) => s + a.funcs, 0),
+          totalClasses: analyses.reduce((s, a) => s + a.classes, 0)
+        };
+      } catch {}
     } catch {}
     try {
       const pwState = _loadPreWakeReport(root);
@@ -6550,6 +6563,13 @@ function handoff(root) {
           const ageStr = m.ageHours != null ? (m.ageHours < 24 ? `${m.ageHours}h` : `${Math.floor(m.ageHours/24)}d`) : '?';
           const status = m.expired ? '⚠' : '✓';
           parts.push(`🌐 official ${m.total}/${m.cacheTotal} (${ageStr}${status})`);
+        }
+      } catch {}
+      // 18) 1.9.240: pyFiles 헤드라인 — Python 다중 언어 가시화 (UR-0013 2단계, .py 파일 ≥ 1)
+      try {
+        const pyFiles = _collectPyFiles(root, 200);
+        if (pyFiles.length > 0) {
+          parts.push(`🐍 py ${pyFiles.length}`);
         }
       } catch {}
       // 17) 1.9.226: round-history 헤드라인 — 자율 라운드 카운터 + 다음 마일스톤 (5 라운드 이상 시만 표시)
@@ -10571,6 +10591,19 @@ function sessionClose(root, opts = {}) {
       // 1.9.234: recentChanges 통합 (session close JSON 8번째 통합 필드) — 최근 5 라운드 변경
       try {
         jsonResult.recentChanges = _computeRecentChanges(root, 5);
+      } catch {}
+      // 1.9.240: pyFiles 통합 (session close JSON 9번째 통합 필드) — UR-0013 2단계
+      try {
+        const pyFiles = _collectPyFiles(root, 200);
+        const analyses = pyFiles.slice(0, 200).map(f => _analyzePyFile(f)).filter(Boolean);
+        jsonResult.pyFiles = {
+          total: pyFiles.length,
+          analyzed: analyses.length,
+          totalLOC: analyses.reduce((s, a) => s + a.loc, 0),
+          totalImports: analyses.reduce((s, a) => s + a.imports, 0),
+          totalFuncs: analyses.reduce((s, a) => s + a.funcs, 0),
+          totalClasses: analyses.reduce((s, a) => s + a.classes, 0)
+        };
       } catch {}
     } catch {}
     try {
@@ -17125,6 +17158,19 @@ function healthCmd(root) {
   try {
     out.recentChanges = _computeRecentChanges(root, 5);
   } catch { out.recentChanges = { error: 'recentChanges 점검 실패' }; }
+  // 1.9.240: health --json pyFiles 통합 (3 명령 9 필드 — UR-0013 2단계)
+  try {
+    const pyFiles = _collectPyFiles(root, 200);
+    const analyses = pyFiles.slice(0, 200).map(f => _analyzePyFile(f)).filter(Boolean);
+    out.pyFiles = {
+      total: pyFiles.length,
+      analyzed: analyses.length,
+      totalLOC: analyses.reduce((s, a) => s + a.loc, 0),
+      totalImports: analyses.reduce((s, a) => s + a.imports, 0),
+      totalFuncs: analyses.reduce((s, a) => s + a.funcs, 0),
+      totalClasses: analyses.reduce((s, a) => s + a.classes, 0)
+    };
+  } catch { out.pyFiles = { error: 'pyFiles 점검 실패' }; }
   // 1.9.163: 5능력 매트릭스 자동 평가 (1.9.155 sub-agent 점검 → 코드 기반 자동화)
   //   각 능력을 코드 grep 으로 검출 → 0~100 점수. 사용자가 매 health 호출 시 leerness 자기 평가 확인.
   try {
