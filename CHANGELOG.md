@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.9.238 — 2026-05-24
+
+**🎉 R100 main-push streak 달성 + CLAUDE/AGENTS/session-workflow drift 차단 (1.9.228~237 9 라운드 누적).**
+
+### 1. CLAUDE.md drift 차단 갱신 (1.9.228~237 — 10 버전 통합)
+- 신규 섹션: "가시화 + 자동화 9 라운드 (1.9.228~237)"
+- 9 라운드 개별 항목 + 자율 모드 마일스톤 요약
+
+### 2. AGENTS.md drift 차단 갱신
+- "라운드 진행도 가시화 (1.9.226~234)" 섹션 확장 (8 필드 / MCP 66 / 51 CLI)
+- "release cleanup 생태계 (1.9.235~237 — 3 라운드 완성)" 신규 섹션
+
+### 3. session-workflow.md drift 차단 갱신
+- "라운드 진행도 가시화 + 상태 명령 (1.9.226~234)" — 4 신규 명령
+- "JSON 통합 매트릭스 8 필드 (1.9.218~234)" — 진화 history
+- "release cleanup 생태계 (1.9.235~237)" — 3 라운드 완성
+
+### 4. 🎉 R100 main-push streak 달성 (1.9.140 → 1.9.238)
+- 1.9.140 (main 자동 push) 사용자 명시 부터 시작
+- 100 라운드 연속 무손실 자동 commit + tag + push + main sync
+- 1.9.178 부터 npm publish 자동 통합 (61 라운드 연속)
+
+### 5. 누적 회귀 (1.9.207~237) — 모두 유지
+
+### 6. stress-v183 — 13/13 PASS
+- 1.9.238 (4): VERSION + CLAUDE 10 버전 + AGENTS 갱신 + session-workflow 갱신
+- 성능 (1): cold_start avg 312ms
+- 종합 누적 회귀 (8): 1.9.207~237 모든 시스템
+
+### 7. 자동 release (100 라운드 main-push streak 🎉 · 61 라운드 npm publish streak)
+
+🎉 **R100 main-push streak 달성** — leerness 자체가 안정성 검증 인스턴스
+
+---
+
 ## 1.9.237 — 2026-05-24
 
 **🗑 session close --auto-cleanup-branches + handoff body 50+ branches 경고.**

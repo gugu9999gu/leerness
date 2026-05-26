@@ -117,11 +117,19 @@ leerness가 자동 검증 가능한 trigger:
 | 1.9.224 | MCP 61 + handoff 본문 + session close auto-apply | `leerness_requests_auto_complete` MCP + `session close --auto-apply-delivered` |
 | 1.9.225 | drift --auto-fix 통합 + env opt-in | `drift check --auto-fix` 자동 / `LEERNESS_AUTO_APPLY_DELIVERED=1` env |
 
-### 라운드 진행도 가시화 (1.9.226~227)
+### 라운드 진행도 가시화 (1.9.226~234)
 - `leerness round-history` 새 명령 (git tag v1.9.X 기반)
+- `leerness milestones` (1.9.229) — 도달 + ETA
+- `leerness pulse` (1.9.231) — 한 줄 종합 요약
+- `leerness commands` (1.9.233) — 9 카테고리 51 CLI
 - handoff 헤드라인 17번째: `🔄 R<N> → R<milestone> (<X>R 남음)`
-- handoff/session close --json **6 통합 필드**: userRequests / preWake / idempotency / abnormalShutdown / deliveredRequests / **roundHistory** (1.9.227)
-- MCP **62 도구** (`leerness_round_history` 1.9.226)
+- handoff/session close/health --json **8 통합 필드** (1.9.234): userRequests / preWake / idempotency / abnormalShutdown / deliveredRequests / roundHistory / milestones / recentChanges
+- MCP **66 도구** (1.9.226 round_history / 1.9.229 milestones / 1.9.231 pulse / 1.9.233 commands / 1.9.236 release_cleanup)
+
+### release cleanup 생태계 (1.9.235~237 — 3 라운드 완성)
+- 1.9.235 `leerness release cleanup --apply --keep N` (수동)
+- 1.9.236 MCP 66 + `drift check --auto-fix` 자동 통합 (50+ 시)
+- 1.9.237 `session close --auto-cleanup-branches` + handoff body 50+ 경고
 
 ### 5축 매트릭스 (1.9.218 — 100/100 달성)
 - A. agent 자동화 — 10/10

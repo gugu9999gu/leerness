@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.237-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v182-15%2F15-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-66-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-52-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-193-blueviolet)]() [![main-push](https://img.shields.io/badge/release--main--push-99_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-60_streak-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-100%2F100_(5축)-brightgreen)]() [![cleanup](https://img.shields.io/badge/🗑_release--cleanup-3_라운드_완성-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-387ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.238-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v183-13%2F13-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-66-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-52-brightgreen)]() [![rounds](https://img.shields.io/badge/autonomous--rounds-194-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-100_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-61_streak-success)]() [![goal-matrix](https://img.shields.io/badge/목적_매트릭스-100%2F100_(5축)-brightgreen)]() [![drift-prevent](https://img.shields.io/badge/📚_drift--차단-9_라운드_갱신-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-312ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.237  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.238  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🎉 60 npm publish streak · release cleanup 3 라운드 완성    ║
+  ║  🎉 R100 main-push streak · 9 라운드 doc drift 차단          ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

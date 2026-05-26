@@ -116,6 +116,57 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 - session close --json 6번째 통합 필드: `roundHistory`
 - CLAUDE.md / AGENTS.md drift 차단 갱신 (1.9.222~226)
 
+## 가시화 + 자동화 9 라운드 (1.9.228~237) ⭐
+
+### 1.9.228 — health --json roundHistory + session-workflow.md drift 차단
+- health --json 6번째 통합 필드: `roundHistory` (3 명령 일관성)
+- session-workflow.md 갱신 (마지막 1.9.171 → 1.9.228)
+- handoff 헤드라인 label list 갱신 (12 → 14 버전)
+
+### 1.9.229 — leerness milestones CLI + MCP 63
+- 도달 마일스톤 + ETA 예측 (25/50/.../500)
+- MCP 도구 62 → 63 (+leerness_milestones)
+
+### 1.9.230 — handoff/session close/health --json milestones 통합 + 헤드라인 ETA
+- JSON 7번째 통합 필드: `milestones` (3 명령 일관성)
+
+### 1.9.231 — leerness pulse 새 명령 + MCP 64
+- 한 줄 종합 요약 (10 핵심 지표)
+- MCP 63 → 64 (+leerness_pulse)
+
+### 1.9.232 — pulse BUG fix + handoff --pulse + session close 자동 pulse
+- pulse memorySurface BUG fix (T0/D0/R0/P0/L0 → 실제 카운트)
+- `handoff --pulse` 옵션 신설
+- session close 끝에 pulse 한 줄 자동
+
+### 1.9.233 — leerness commands CLI + MCP 65
+- 9 카테고리 51 CLI 명령 목록
+- MCP 64 → 65 (+leerness_commands)
+
+### 1.9.234 — handoff/session close/health --json recentChanges (8 필드)
+- JSON 8번째 통합 필드: `recentChanges` (최근 5 라운드 자동 회수)
+- AI 컨텍스트 절약 (~500 토큰)
+
+### 1.9.235 — leerness release cleanup CLI
+- 50+ release/* branches 정리 (수동, --apply --keep N)
+
+### 1.9.236 — MCP 66 (release_cleanup) + drift --auto-fix 통합
+- MCP 65 → 66 (+leerness_release_cleanup)
+- `drift check --auto-fix` 50+ branches 자동 정리
+
+### 1.9.237 — session close --auto-cleanup-branches + handoff body 50+ 경고
+- 마감 시 자동 정리 (1.9.224 패턴 확장)
+- handoff body 50+ branches 누적 경고 자동
+
+## 자율 모드 마일스톤 — 1.9.237 시점
+
+- **R193 누적 라운드** (baseline v1.9.6)
+- **100 main-push streak 진입** (1.9.140 부터)
+- **🎉 60 npm publish streak** (1.9.178 부터)
+- **handoff/session close/health JSON 8 필드** (3 × 8 = 24 통합 포인트)
+- **MCP 66 도구**
+- **9 카테고리 51 CLI 명령**
+
 ---
 <!-- leerness:migration-preserved -->
 ## Preserved previous content

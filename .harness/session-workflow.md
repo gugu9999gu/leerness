@@ -245,19 +245,33 @@ handoff 헤드라인에서 `📥 미답 요청 N건` 표시 시 즉시 #1 호출
 - `drift check --auto-fix` (1.9.225) — drift 회복 시 자동 적용
 - `LEERNESS_AUTO_APPLY_DELIVERED=1` env (1.9.225) — 자율 모드 자동 적용
 
-## 라운드 진행도 가시화 (1.9.226~228)
+## 라운드 진행도 가시화 + 상태 명령 (1.9.226~234)
 
-`leerness round-history` — git tag 기반 자율 라운드 통계:
-- handoff 헤드라인: `🔄 R<N> → R<milestone> (<X>R 남음)`
-- 마일스톤 자동 감지: 50/75/100/125/150/175/200/250/300/400/500
-- handoff/session close/health --json 모두 `roundHistory` 필드 통합 (1.9.227~228 — 3 명령 일관성)
+신규 status 명령 4종 — leerness 전체 상태 즉시 회수:
+- `leerness round-history` (1.9.226) — git tag 기반 라운드 통계 + 다음 마일스톤
+- `leerness milestones` (1.9.229) — 도달 마일스톤 + ETA (50/75/100/.../500)
+- `leerness pulse` (1.9.231) — 한 줄 종합 요약 (10 지표) / `handoff --pulse` 옵션 (1.9.232)
+- `leerness commands` (1.9.233) — 9 카테고리 51 CLI 명령 목록
 
-## JSON 통합 매트릭스 (handoff/session close 6 필드 — 1.9.218~227)
+handoff 헤드라인 17번째 요소 (1.9.226): `🔄 R<N> → R<milestone> (<X>R 남음)`
 
-외부 자동화/CI가 leerness 상태를 6 차원 동기 회수:
+## JSON 통합 매트릭스 (handoff/session close/health 8 필드 — 1.9.218~234)
+
+외부 자동화/CI 가 leerness 상태를 8 차원 동기 회수 (3 × 8 = 24 통합 포인트):
 - `userRequestsAudit` (1.9.207/218)
 - `preWakeAudit` (1.9.209/218)
 - `idempotencyAudit` (1.9.212/218)
 - `abnormalShutdown` (1.9.220/221)
 - `deliveredRequests` (1.9.223)
-- `roundHistory` (1.9.226/227) — health 도 추가 (1.9.228)
+- `roundHistory` (1.9.226/227/228)
+- `milestones` (1.9.229/230)
+- `recentChanges` (1.9.234) — 최근 5 라운드 자동 회수
+
+## release cleanup 생태계 (1.9.235~237 — 3 라운드 누적)
+
+자율 모드 운영 중 누적되는 `release/*` 폐기 branches 자동 정리:
+- 1.9.235 — `leerness release cleanup --apply --keep N` (수동 CLI)
+- 1.9.236 — MCP 66 (`leerness_release_cleanup`) + `drift check --auto-fix` 자동 통합 (50+ 시)
+- 1.9.237 — `session close --auto-cleanup-branches` + handoff body 50+ 경고 자동
+
+50+ branches 시 handoff body 자동 노출 → AI/사용자 폐기물 즉시 인지
