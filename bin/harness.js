@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.243';
+const VERSION = '1.9.244';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -16393,6 +16393,11 @@ async function _agentRepl(root, opts) {
   };
   rl.setPrompt(prompt());
 
+  // 1.9.244 HOTFIX: _lastCycleLines 를 outer 스코프로 hoist
+  //   1.9.189 회귀 버그 fix — rl.on('line') 핸들러가 try 블록 외부에서 접근 시 ReferenceError 발생했음.
+  //   사용자 보고: REPL agent 진입 후 채팅 입력 시 "_lastCycleLines is not defined" 크래시.
+  let _lastCycleLines = 0;  // 직전 cycle 출력 라인 수 (overwrite 용) — 1.9.189/244
+
   // 1.9.170: Tab cycle — provider (Tab) / model within provider (Shift+Tab)
   //   사용자 명시 요청: "탭 키 등으로 provider/모델 셀렉과 선택을 간편하게"
   //   readline의 default tab=completion 동작을 keypress 리스너로 가로채서 cycle 수행.
@@ -16415,7 +16420,7 @@ async function _agentRepl(root, opts) {
       // 1.9.180+1.9.189: cycleProvider/cycleModel — 한 줄 갱신 (in-place overwrite).
       //   1.9.180까지: 매 Tab 누름마다 새 줄 출력 → 채팅 이력으로 누적 (사용자 명시: "지져분해보여").
       //   1.9.189: ANSI cursor up + line clear 로 이전 cycle 라인 덮어씀 → 마지막 1건만 표시.
-      let _lastCycleLines = 0;  // 직전 cycle 출력 라인 수 (overwrite 용)
+      //   1.9.244: _lastCycleLines 는 outer 스코프 (위)에서 선언 — rl.on('line') 핸들러와 공유.
       const _clearLastCycle = () => {
         if (!isTty || _lastCycleLines === 0) return;
         // 현재 prompt 라인 + 이전 cycle 라인들 클리어

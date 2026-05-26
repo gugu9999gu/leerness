@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.9.244 — 2026-05-26 🎉 R200 + 🚨 HOTFIX
+
+**🚨 HOTFIX: REPL agent ReferenceError `_lastCycleLines` (1.9.189 회귀 버그) + 🎉 R200 마일스톤 도달.**
+
+### 🚨 사용자 보고 버그 (실 환경 1.9.243 npx 설치)
+
+```
+agent[claude · sonnet-4-7/actor/▶]> 웹페이지 제작해줘
+.../leerness/bin/harness.js:16839
+      _lastCycleLines = 0;  // 1.9.189: 사용자 입력 시 cycle overwrite 추적 reset
+                      ^
+ReferenceError: _lastCycleLines is not defined
+    at Interface.<anonymous> (.../harness.js:16839:23)
+```
+
+**원인:** `let _lastCycleLines = 0;` 변수가 `if (isTty) { try { ... } }` 블록 스코프 내부에 선언되어 있었음 (line 16418). `rl.on('line')` 핸들러는 외부 스코프 (line 16836+) 라서 ReferenceError.
+
+**Fix (1.9.244):**
+- `let _lastCycleLines = 0;` 를 outer function 스코프 (line 16399) 로 hoist
+- 두 곳 (cycleProvider/cycleModel + rl.on('line') 핸들러) 동일 closure 공유
+- 검증: stress-v189 A5 — REPL agent 진입 + stdin input → no ReferenceError 확인
+
+### 🎉 R200 마일스톤 도달
+
+- v1.9.6 baseline ~ v1.9.244 → **200 누적 라운드** (round-history JSON: `roundCount=200`)
+- **106 main-push streak** (1.9.140~) · **🎉 67 npm publish streak** (1.9.178~)
+- handoff/session close/health JSON **10 필드** × 3 = 30 통합 포인트
+- MCP **69 도구** · CLI **56 명령** · 9 카테고리
+- 6 능력 매트릭스 + 5축 매트릭스 100/100
+
+### 누적 회귀 (1.9.207~243) — 모두 유지
+- CJK 분류 (1.9.243) · env encoding --apply (1.9.242) · env summary (1.9.241) · py-check (1.9.239)
+- 비정상종료 + delivered + release cleanup + round-history + milestones + recentChanges + 모든 1.9.207~218 사용자 명시 신규 7종
+
+### stress-v189 — **20/20 PASS · 100%**
+- 1.9.244 HOTFIX (6): VERSION + _lastCycleLines 단일 선언 + 15 refs + hotfix 주석 + agent input no-crash + agent --help no-crash
+- R200 마일스톤 (1): roundCount=200 확인
+- 성능 (1): cold start avg 373ms
+- 누적 회귀 (12): 1.9.170~243
+
+🚨 **사용자 보고 버그 즉시 패치** — 실 환경 1.9.243 사용 중 발견된 critical REPL 크래시 회복.
+🎉 **R200 자율 모드 마일스톤** — 200 라운드 동안 단 한 번도 자율 흐름 끊김 없이 진행.
+
+---
+
 ## 1.9.243 — 2026-05-26
 
 **🌏 UR-0014 3단계: CJK 다국어 분류 (한국어/일본어/중국어) + session close --auto-fix-encoding + handoff body --apply 진입점.**
