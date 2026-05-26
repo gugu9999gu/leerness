@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.245';
+const VERSION = '1.9.246';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -16802,6 +16802,74 @@ async function _agentRepl(root, opts) {
     const modelTag = modelShort ? C.dim(' · ') + C.mag(modelShort) : '';
     return C.cy(`agent[${state.provider}${modelTag}${C.cy('/' + state.role)}${state.streamMode ? C.cy('/▶') : ''}${C.cy(']>')} `);
   };
+  // 1.9.246: REPL UX/UI 개선 (사용자 명시 UR-0016) — 컨텍스트 게이지 + 서브 에이전트 가시화 + 정상 작업 강조
+  //   3종 통합 status bar를 채팅 입력칸 직전에 표시.
+  const _maxContextTokens = (provider, model) => {
+    // provider/model 별 컨텍스트 윈도우 (대략값, 사용자 정보 제공용)
+    const m = (model || '').toLowerCase();
+    if (provider === 'claude') {
+      if (m.includes('opus-4-7') || m.includes('sonnet-4-7') || m.includes('4-7')) return 1000000; // 1M extended
+      if (m.includes('opus') || m.includes('sonnet') || m.includes('haiku')) return 200000;
+      return 200000;
+    }
+    if (provider === 'codex' || provider === 'openai') {
+      if (m.includes('gpt-5') || m.includes('5.5')) return 200000;
+      if (m.includes('gpt-4-1') || m.includes('4.1')) return 1000000;
+      if (m.includes('gpt-4')) return 128000;
+      return 128000;
+    }
+    if (provider === 'gemini') return 1000000;       // 2M까지 가능하지만 보수적으로 1M
+    if (provider === 'copilot') return 64000;
+    if (provider === 'ollama') return 8000;          // 모델별 다르나 default 8k
+    return 100000;
+  };
+  const _estimateTokens = (history) => {
+    // 단순 휴리스틱: 영문 4chars=1tok, CJK 2chars=1tok 평균치 → 3.5chars/tok
+    let totalChars = 0;
+    for (const m of (history || [])) totalChars += (m.content || '').length;
+    return Math.round(totalChars / 3.5);
+  };
+  const _renderStatusBar = () => {
+    if (!isTty) return;
+    try {
+      // (1) 컨텍스트 게이지
+      const msgs = (state.history || []).length;
+      const tokens = _estimateTokens(state.history);
+      const maxTok = _maxContextTokens(state.provider, state.model);
+      const ratio = Math.min(1, tokens / maxTok);
+      const pct = Math.round(ratio * 100);
+      const barWidth = 14;
+      const filled = Math.round(ratio * barWidth);
+      const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
+      const barColor = pct >= 80 ? C.yel : (pct >= 50 ? C.cy : C.green);
+      const tokStr = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;
+      const maxStr = maxTok >= 1000 ? `${Math.round(maxTok / 1000)}k` : `${maxTok}`;
+      // (2) 서브 에이전트 활성화 — EXTERNAL_AGENTS 5종 + ollama
+      let ready = [];
+      try {
+        ready = EXTERNAL_AGENTS
+          .map(a => ({ id: a.id, st: _checkAgent(a).status }))
+          .filter(x => x.st === 'ready');
+      } catch {}
+      const allAgents = ['claude', 'codex', 'gemini', 'copilot'];
+      const subBar = allAgents.map(id => {
+        if (id === state.provider) return C.bold(C.green(`*${id}`));
+        const isReady = ready.find(r => r.id === id);
+        return isReady ? C.green(`✓${id}`) : C.dim(`·${id}`);
+      }).join(' ');
+      // (3) 한 줄 출력
+      const line = '  ' + C.dim('💬 ctx ') + C.bold(`${msgs}msg`) + C.dim(` ~${tokStr}/${maxStr} `) + barColor(bar) + C.dim(` ${pct}%`)
+                 + C.dim('  ·  agents: ') + subBar
+                 + C.dim('  ·  ') + (state.streamMode ? C.green('▶stream') : C.dim('□stream'));
+      process.stdout.write(line + '\n');
+    } catch {}
+  };
+  // 1.9.246: rl.prompt() wrapper — status bar 자동 표시 (사용자 명시 UR-0016)
+  const promptWithStatus = (forceRedraw) => {
+    _renderStatusBar();
+    if (forceRedraw === true) rl.prompt(true);
+    else rl.prompt();
+  };
   rl.setPrompt(prompt());
 
   // 1.9.244 HOTFIX: _lastCycleLines 를 outer 스코프로 hoist
@@ -16963,7 +17031,8 @@ async function _agentRepl(root, opts) {
     log(C.dim('  💡 메시지는 직접 입력 · "/" 또는 ":" 접두사로 명령 호출 · Tab=provider · Shift+Tab=model'));
     log('');
   };
-  rl.prompt();
+  // 1.9.246: 첫 prompt 표시 전에도 status bar 노출 (사용자 명시 UR-0016)
+  promptWithStatus();
   const handleMeta = async (cmd) => {
     const [op, ...rest] = cmd.slice(1).split(/\s+/);
     if (op === 'quit' || op === 'exit' || op === 'q') {
@@ -17253,24 +17322,24 @@ async function _agentRepl(root, opts) {
     rl.on('line', async (line) => {
       const input = line.trim();
       _lastCycleLines = 0;  // 1.9.189: 사용자 입력 시 cycle overwrite 추적 reset
-      if (!input) { rl.prompt(); return; }
+      if (!input) { promptWithStatus(); return; }
       // 1.9.189 (사용자 명시): "/" slash 입력만으로 명령 list 표시 (claude code 영감).
       //   "/" 단독 → 명령 list 출력 후 prompt 복귀.
       //   "/help", "/quit" 등 "/" 접두사 → ":" 동등 처리 (alias).
       if (input === '/' || input === '/?') {
         _showSlashCommandList();
-        rl.prompt(); return;
+        promptWithStatus(); return;
       }
       // 1.9.189: "/" 접두사를 ":" 와 동등하게 처리 (사용자 명시 — "/ 가 모든 모델 공통 권한 trigger default")
       if (input.startsWith('/') && !input.startsWith('//')) {
         const shouldQuit = await handleMeta(':' + input.slice(1));
         if (shouldQuit) { resolve(); return; }
-        rl.prompt(); return;
+        promptWithStatus(); return;
       }
       if (input.startsWith(':')) {
         const shouldQuit = await handleMeta(input);
         if (shouldQuit) { resolve(); return; }
-        rl.prompt(); return;
+        promptWithStatus(); return;
       }
       // LLM 호출
       state.history.push({ role: 'user', content: input });
@@ -17293,18 +17362,19 @@ async function _agentRepl(root, opts) {
         }
       } else {
         log(C.yel(`  ⚠ ${state.provider} provider 미지원 — :provider ollama|claude|codex|gemini|copilot`));
-        rl.prompt(); return;
+        promptWithStatus(); return;
       }
       const dt = Date.now() - t0;
       _recordRun(root, { kind: 'agent_repl_turn', provider: state.provider, model: state.model, role: state.role, durationMs: dt, ok: result.ok, error: result.error, promptChars: finalPrompt.length, responseChars: (result.response || '').length });
       if (result.ok) {
         state.history.push({ role: 'assistant', content: result.response });
         // 1.9.170: stream 모드에서는 이미 실시간으로 출력됐으므로 헤더만 표시 (응답 중복 방지)
+        // 1.9.246: 정상 완료 작업은 초록색 ✓ 강조 (사용자 명시 UR-0016)
         if (state.streamMode && ['claude', 'codex', 'gemini', 'copilot'].includes(state.provider)) {
-          log(C.dim(`  [assistant: ${state.provider}/${state.model || 'default'}, role=${state.role}, ${dt}ms · ${result.response.length}자]`));
+          log(C.green(`  ✓ [assistant: ${state.provider}/${state.model || 'default'}, role=${state.role}, ${dt}ms · ${result.response.length}자]`));
         } else {
           log('');
-          log(C.bold(`assistant (${state.model || state.provider}, role=${state.role}, ${dt}ms)`));
+          log(C.green(`✓ assistant (${state.model || state.provider}, role=${state.role}, ${dt}ms)`));
           log(result.response);
         }
         // 1.9.188 (사용자 명시): 응답 끝 + 입력 구분선 (입력칸 시각 명확)
@@ -17335,7 +17405,7 @@ async function _agentRepl(root, opts) {
           }
         } catch {}
       }
-      rl.prompt();
+      promptWithStatus();
     });
     rl.on('close', () => { saveSession(); resolve(); });
   });

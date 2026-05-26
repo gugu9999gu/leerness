@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.245-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v190-26%2F26-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-70-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-57-brightgreen)]() [![json-fields](https://img.shields.io/badge/JSON_통합-11_필드-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous_R-201-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-107_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-68_streak-success)]() [![api-skill](https://img.shields.io/badge/📚_API_skill_cache-UR--0015-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-331ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.246-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v191-23%2F23-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-70-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-57-brightgreen)]() [![json-fields](https://img.shields.io/badge/JSON_통합-11_필드-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous_R-202-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-108_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-69_streak-success)]() [![repl-ux](https://img.shields.io/badge/🎯_REPL_UX-status_bar-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-378ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.245  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.246  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  📚 API skill cache (UR-0015) — 공식 문서 자동 정리 + AI 참조  ║
+  ║  🎯 REPL UX (UR-0016) — 컨텍스트 게이지 + 에이전트 + 초록색 ✓ ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

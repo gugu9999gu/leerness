@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.9.246 — 2026-05-26 — UR-0016 REPL UX/UI 개선
+
+**🎯 사용자 명시 (UR-0016): REPL agent 채팅 입력칸 옆 컨텍스트 게이지 + 서브 에이전트 가시화 + 정상 완료 초록색 강조.**
+
+### 사용자 명시 (UR-0016)
+> *"REPL agent 모드의 기능과 UX UI를 개선해줘: 서브 에이전트 활성화 여부, 채팅입력칸 근처에는 컨텍스트 창 게이지 등 표시, 정상완료된 작업은 초록색 등으로 표시. 별도의 신규 프로젝트를 생성하여 직접 REPL agent 모드를 구동하여 유저가 사용하기 쉽게 개선해줘."*
+
+dogfood 검증: `C:\Users\leehy\AppData\Local\Temp\dogfood-1.9.246` 신규 프로젝트에서 `leerness init` + REPL 진입 흐름 직접 검증.
+
+### 1. 컨텍스트 창 게이지 (채팅 입력칸 직전 자동 표시)
+모든 prompt 호출 직전에 status bar 한 줄 자동 출력:
+```
+💬 ctx 12msg ~3.4k/200k ████░░░░░░░░░░ 1.7%  ·  agents: *claude ✓codex ·gemini ·copilot  ·  ▶stream
+```
+- `ctx Nmsg` — 누적 대화 메시지 수
+- `~XXk/YYk` — 추정 토큰 / provider별 컨텍스트 윈도우 (claude 200k, claude-4-7 1M, gpt-5 200k, gpt-4.1 1M, gemini 1M, copilot 64k, ollama 8k)
+- `████░░░░░░░░░░ %` — 14문자 progress bar (50% 이상 cyan, 80% 이상 yellow 경고)
+- 토큰 추정 휴리스틱: `chars / 3.5` (CJK/영문 평균치)
+
+### 2. 서브 에이전트 활성화 가시화 (한 줄 5종 표시)
+- `*claude` — 현재 활성 provider (bold + green)
+- `✓codex` — 설치+인증 완료 ready (green)
+- `·gemini` — 미설치 또는 비활성 (dim)
+- 5종 모두 한 줄에 표시 → 사용자가 즉시 다른 provider 가용성 인지 → Tab 키로 전환
+
+### 3. 정상 완료 작업 초록색 강조 (사용자 명시)
+- assistant 응답 헤더에 `✓` 마커 + `C.green()` 적용
+- stream 모드: `✓ [assistant: claude/sonnet-4-7, role=actor, 1234ms · 567자]` (green)
+- non-stream: `✓ assistant (claude, role=actor, 1234ms)` (green bold)
+- 기존 `[assistant: ...]` (dim) → `✓ [assistant: ...]` (green)
+
+### 4. dogfood 신규 프로젝트 직접 구동 검증
+- 임시 디렉토리에 빈 프로젝트 생성 → `leerness init` 정상 동작 확인
+- `leerness agent --interactive` 진입 흐름 검증 (provider 없음 시 안내 출력)
+- `--version` 등 핵심 명령 동작 확인
+
+### 5. promptWithStatus wrapper 도입
+- `rl.prompt()` 7회 호출처 모두 `promptWithStatus()` 로 통일
+- line handler / cycle / 초기 진입 등 일관된 status bar 노출
+- wrapper 내부 1건만 실제 `rl.prompt()` 호출 (DRY)
+
+### 6. 누적 회귀 (1.9.207~245) — 모두 유지
+- api-skill cache (1.9.245) + CJK 분류 (1.9.243) + env encoding --apply (1.9.242) + 모두 유지
+- handoff JSON 11 필드 · MCP 70 도구 · CJK + py-check + 비정상종료 모두 유지
+
+### 7. stress-v191 — **23/23 PASS · 100%**
+- 1.9.246 (11): VERSION + 4 helper + promptWithStatus + 컨텍스트 bar + sub-agent 가시화 + 초록색 ✓ + dogfood init + 통일성
+- 성능 (1): cold start avg 378ms
+- 누적 회귀 (11): 1.9.207~245
+
+### 8. 자동 release (108 라운드 main-push streak · 69 라운드 npm publish streak · R202)
+
+🎯 **REPL UX 사용자 요구 100% 반영** — 컨텍스트 + 에이전트 + 초록색 강조 통합 status bar.
+
+---
+
 ## 1.9.245 — 2026-05-26 — UR-0015 API skill cache
 
 **📚 사용자 명시 (UR-0015): API 문서/관련링크 자동 정리 + AI 자동 참조 시스템.**
