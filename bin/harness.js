@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.242';
+const VERSION = '1.9.243';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2308,7 +2308,7 @@ function agentModeCmd(root, sub) {
     log('');
     log(`  start   진입 (handoff + drift --auto-fix + session-resume --auto-fix)`);
     log(`  tick    매 라운드 (pulse + 핵심 신호)`);
-    log(`  stop    마감 (session close --auto-apply-delivered --auto-cleanup-branches)`);
+    log(`  stop    마감 (session close --auto-apply-delivered --auto-cleanup-branches --auto-fix-encoding)`);
     log('');
     log(dm(`  사용자 명시 UR-0013 (Python + agent-mode 효율화)`));
     return;
@@ -2337,8 +2337,8 @@ function agentModeCmd(root, sub) {
   }
   if (sub === 'stop') {
     log(cy(`# leerness agent-mode stop (1.9.239) — 통합 마감`));
-    log(dm(`  → session close --auto-apply-delivered --auto-cleanup-branches`));
-    const r = spawnChild(['session', 'close', root, '--auto-apply-delivered', '--auto-cleanup-branches']);
+    log(dm(`  → session close --auto-apply-delivered --auto-cleanup-branches --auto-fix-encoding`));
+    const r = spawnChild(['session', 'close', root, '--auto-apply-delivered', '--auto-cleanup-branches', '--auto-fix-encoding']);
     process.stdout.write(r.stdout || '');
     return;
   }
@@ -2442,6 +2442,35 @@ function _collectRuntimeEnv() {
 //   위험 시그널: 한국어 (또는 비-ASCII) 문자 + BOM 없음 + Windows 환경
 function _scanShellScriptsEncoding(root) {
   const result = { scanned: 0, atRisk: [], notes: [] };
+  // 1.9.243: CJK 분류 — Korean/Japanese/Chinese 비-ASCII 패턴 통계 (UR-0014 3단계)
+  function _classifyCJK(buf, len) {
+    let korean = 0, japanese = 0, chinese = 0, other = 0;
+    for (let i = 0; i < Math.min(buf.length, len); i++) {
+      const b = buf[i];
+      if (b < 0x80) continue;
+      // UTF-8 3-byte 시퀀스 시작 바이트 분류
+      // Korean Hangul Syllables U+AC00-D7AF → 3-byte: EA B0 80 ~ ED 9F BF
+      if (b >= 0xEA && b <= 0xED) korean++;
+      // Japanese Hiragana/Katakana U+3040-30FF → 3-byte: E3 81 80 ~ E3 83 BF
+      else if (b === 0xE3) japanese++;
+      // CJK Unified Ideographs U+4E00-9FFF → 3-byte: E4 B8 80 ~ E9 BF BF
+      else if (b >= 0xE4 && b <= 0xE9) chinese++;
+      else other++;
+    }
+    return { korean, japanese, chinese, other };
+  }
+  function _riskLabel(cjk) {
+    if (cjk.korean >= cjk.japanese && cjk.korean >= cjk.chinese && cjk.korean > 0) {
+      return { type: 'korean', risk: 'Windows 한국어 PowerShell 에서 CP949 로 오인식 가능 (BOM 추가 권장)' };
+    }
+    if (cjk.japanese > cjk.korean && cjk.japanese >= cjk.chinese) {
+      return { type: 'japanese', risk: 'Windows 일본어 PowerShell 에서 CP932 (Shift-JIS) 로 오인식 가능 (BOM 추가 권장)' };
+    }
+    if (cjk.chinese > 0) {
+      return { type: 'chinese', risk: 'Windows 중국어 PowerShell 에서 CP936 (GBK) 로 오인식 가능 (BOM 추가 권장)' };
+    }
+    return { type: 'non-ascii', risk: 'Windows 비-ASCII 셸 스크립트 — BOM 없는 UTF-8 인코딩 오인식 가능 (BOM 추가 권장)' };
+  }
   function walk(dir, depth = 0) {
     if (depth > 3) return;  // 너무 깊이 들어가지 않음
     let entries;
@@ -2462,12 +2491,17 @@ function _scanShellScriptsEncoding(root) {
             if (buf[i] >= 0x80) { nonAscii = true; break; }
           }
           if (nonAscii && !hasBOM) {
+            // 1.9.243: CJK 분류 추가
+            const cjk = _classifyCJK(buf, 4096);
+            const label = _riskLabel(cjk);
             result.atRisk.push({
               file: path.relative(root, fp),
               ext: path.extname(fp),
               hasBOM: false,
               nonAscii: true,
-              risk: 'Windows 한국어 PowerShell 에서 CP949 로 오인식 가능 (BOM 추가 권장)'
+              riskType: label.type,
+              cjk,
+              risk: label.risk
             });
           }
         } catch {}
@@ -2478,6 +2512,9 @@ function _scanShellScriptsEncoding(root) {
   if (result.atRisk.length > 0) {
     result.notes.push('해결: 파일 시작에 UTF-8 BOM 추가 (EF BB BF) 또는 .ps1 첫 줄에 $OutputEncoding/[Console]::OutputEncoding 설정');
   }
+  // 1.9.243: 분류별 통계 요약
+  const types = result.atRisk.reduce((m, r) => { m[r.riskType] = (m[r.riskType] || 0) + 1; return m; }, {});
+  result.riskTypeCounts = types;
   return result;
 }
 
@@ -6948,8 +6985,13 @@ function handoff(root) {
         log(dm5(`       ${r.risk}`));
       });
       if (scan.atRisk.length > 3) log(dm5(`  ... +${scan.atRisk.length - 3}건 더`));
+      // 1.9.243: CJK 분류 요약 (UR-0014 3단계)
+      const types = scan.riskTypeCounts || {};
+      const tList = Object.entries(types).filter(([_, c]) => c > 0).map(([t, c]) => `${t}=${c}`);
+      if (tList.length > 0) log(dm5(`  분류: ${tList.join(', ')} (1.9.243 CJK)`));
       log(dm5(`  → 상세: leerness env encoding`));
-      log(dm5(`  → 해결: 파일 시작에 UTF-8 BOM (EF BB BF) 추가`));
+      log(dm5(`  → 자동 회복: leerness env encoding --apply (UTF-8 BOM 자동 추가, 1.9.242)`));
+      log(dm5(`  → 마감 시 자동: session close --auto-fix-encoding (1.9.243)`));
     }
   } catch {}
 
@@ -10964,6 +11006,31 @@ function sessionClose(root, opts = {}) {
               log(dim(`     → leerness release cleanup --apply --keep 10 (수동)`));
               log(dim(`     → 또는 session close --auto-cleanup-branches (1.9.237 자동)`));
             }
+          }
+        }
+      } catch {}
+      // 1.9.243: session close --auto-fix-encoding — 셸 스크립트 인코딩 위험 자동 회복 (UR-0014 3단계)
+      //   1.9.224 (--auto-apply-delivered) / 1.9.237 (--auto-cleanup-branches) 패턴 확장
+      //   마감 시 한국어/일본어/중국어 PowerShell 인코딩 위험 자동 BOM 추가
+      try {
+        const encScan = _scanShellScriptsEncoding(root);
+        if (encScan.atRisk && encScan.atRisk.length > 0) {
+          if (has('--auto-fix-encoding')) {
+            let ok = 0;
+            for (const r of encScan.atRisk) {
+              try {
+                const fullPath = path.join(root, r.file);
+                const orig = fs.readFileSync(fullPath);
+                const bom = Buffer.from([0xEF, 0xBB, 0xBF]);
+                const fixed = Buffer.concat([bom, orig]);
+                fs.writeFileSync(fullPath, fixed);
+                ok++;
+              } catch {}
+            }
+            log(grn(`  ✓ 인코딩 위험 ${ok}/${encScan.atRisk.length}건 UTF-8 BOM 자동 추가 (--auto-fix-encoding 1.9.243)`));
+          } else {
+            log(yel(`  ⚠ 셸 스크립트 인코딩 위험 ${encScan.atRisk.length}건 (1.9.241) — 자동 회복 가능`));
+            log(dim(`     → leerness env encoding --apply (수동) 또는 session close --auto-fix-encoding (1.9.243 자동)`));
           }
         }
       } catch {}

@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.9.243 — 2026-05-26
+
+**🌏 UR-0014 3단계: CJK 다국어 분류 (한국어/일본어/중국어) + session close --auto-fix-encoding + handoff body --apply 진입점.**
+
+### 사용자 명시 (UR-0014) — 3단계 다국어 보강 + 마감 자동화
+
+1.9.241 (감지) → 1.9.242 (자동 수정) → 1.9.243 (다국어 + 마감 자동 통합):
+
+### 1. CJK 분류 — Korean/Japanese/Chinese 자동 식별
+- `_scanShellScriptsEncoding()` 에 `riskType` 필드 추가
+- UTF-8 byte range 분류:
+  - Korean (Hangul U+AC00-D7AF) → 0xEA-0xED 시작 → CP949 위험
+  - Japanese (Hiragana/Katakana U+3040-30FF) → 0xE3 시작 → CP932 (Shift-JIS) 위험
+  - Chinese (CJK Unified U+4E00-9FFF) → 0xE4-0xE9 시작 → CP936 (GBK) 위험
+- `atRisk[].cjk`: { korean, japanese, chinese, other } 세부 카운트
+- `result.riskTypeCounts`: 분류별 요약 통계
+- Locale 별 정확한 위험 메시지 ("Windows 한국어/일본어/중국어 PowerShell 에서 CPxxx 로 오인식 가능")
+
+### 2. session close --auto-fix-encoding 마감 자동 회복
+- 1.9.224 (--auto-apply-delivered) + 1.9.237 (--auto-cleanup-branches) 패턴 확장
+- 마감 시 셸 스크립트 인코딩 위험 자동 BOM 추가
+- 기본: 안내만 (`자동 회복 가능` hint) · `--auto-fix-encoding` 명시 시에만 변경
+- agent-mode stop 흐름에 자동 chain (`session close --auto-apply-delivered --auto-cleanup-branches --auto-fix-encoding`)
+
+### 3. handoff body --apply 진입점 표시
+- 인코딩 위험 발견 시 본문에 자동 안내 2줄 추가:
+  - `→ 자동 회복: leerness env encoding --apply (UTF-8 BOM 자동 추가, 1.9.242)`
+  - `→ 마감 시 자동: session close --auto-fix-encoding (1.9.243)`
+- CJK 분류 요약 표시: `분류: korean=N, japanese=M, chinese=K (1.9.243 CJK)`
+
+### 4. 누적 회귀 (1.9.207~242) — 모두 유지
+- MCP 69 도구 유지
+- JSON 통합 10 필드 (envInfo) 유지
+- drift check --auto-fix env encoding 통합 유지
+
+### 5. stress-v188 — **24/24 PASS · 100%**
+- 1.9.243 (8): VERSION + CJK 3종 분류 정확도 + riskTypeCounts + atRisk[].cjk + session close 자동/기본 모드 + handoff body 진입점 + agent-mode stop chain
+- 성능 (2): cold_start avg 333ms · session close --auto-fix 438ms
+- 누적 회귀 (14): 1.9.207~242 + 보안 + npm publish
+
+### 6. 자동 release (105 라운드 main-push streak · 66 라운드 npm publish streak)
+
+🌏 **다국어 CJK 완전 자동화** — Korean/Japanese/Chinese PowerShell 인코딩 오인식 사전 차단
+
+---
+
 ## 1.9.242 — 2026-05-26
 
 **🌐 UR-0014 2단계: env encoding --apply (BOM 자동 추가) + JSON 10 필드 envInfo + drift --auto-fix 통합.**
