@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.9.248 — 2026-05-26 — UR-0017 Gemini CLI 제거 + Antigravity CLI (agy) 도입
+
+**🔄 사용자 명시 (UR-0017): Gemini CLI 제거 + Antigravity (agy) CLI 전체 교체.**
+
+### 변경 범위 (65 occurrences case-insensitive)
+- **EXTERNAL_AGENTS**: `gemini` → `agy` (bin/envFlag/install 안내 모두 교체)
+- **_PROVIDER_CYCLE_ORDER**: `['ollama', 'claude', 'codex', 'agy', 'copilot']` (Tab cycle)
+- **_PROVIDER_MODEL_CATALOG.agy**: `antigravity-pro/flash/experimental` 모델 (1M+ context)
+- **환경변수**: `LEERNESS_ENABLE_GEMINI` → `LEERNESS_ENABLE_AGY`
+- **CLI bin**: `gemini -p` → `agy -p` (1-shot + REPL stream + dispatch)
+- **agents dispatch --write**: `gemini --yolo` → `agy --yolo`
+- **setup-agents UI**: "Gemini (gemini CLI)" → "Antigravity (agy CLI)"
+- **handoff body sub-agent display** (1.9.246 status bar): allAgents = ['claude', 'codex', 'agy', 'copilot']
+- **MCP description**: agents_list / provider_list 등 5종 → agy 명시
+- **REPL :provider validation**: validProviders = ['ollama', 'claude', 'codex', 'agy', 'copilot']
+- **.harness/leerness-config.json**: LEERNESS_ENABLE_AGY 기본값 "0"
+- **scripts/e2e.js**: 회귀 테스트 — agents quota/dispatch/list/register-pending 모두 agy
+- **install hint**: `npm i -g @google/antigravity-cli` (https://antigravity.google.com)
+
+### 영향 받지 않은 영역
+- 1.9.247 multi-provider fallback (agy 도 자동 fallback 대상)
+- 1.9.246 status bar (agy 5종 한 줄 표시)
+- handoff JSON 11 필드 (apiSkills/envInfo 등) 유지
+
+### stress-v193 — **23/23 PASS · 100%**
+- 1.9.248 (12): VERSION + EXTERNAL_AGENTS 교체 + 모델 catalog + Tab cycle + setup-agents UI + handoff status bar + dispatch + quota + list + config.json + validation + nonsecret keys
+- 성능 (1): cold start avg 419ms
+- 누적 회귀 (10): 1.9.207~247
+
+### 자동 release (110 main-push streak · 71 npm publish streak · R204)
+
+🔄 **Gemini CLI 단계적 제거 → Antigravity (agy) 전환** — 사용자 환경 변화 즉시 반영
+
+---
+
 ## 1.9.247 — 2026-05-26 — UR-0016 2단계 + UR-0015 2단계
 
 **🔁 REPL multi-provider auto-fallback + 📚 api-skill audit 통합.**

@@ -605,11 +605,11 @@ total++;
   // register-pending
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-regp-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  const r = cp.spawnSync(process.execPath, [CLI, 'register-pending', 'JSON export 기능', '--agent', 'gemini', '--path', tmpR], { encoding: 'utf8', timeout: 10000 });
-  const okReg = r.status === 0 && /등록됨 \(in-progress\) by gemini/.test(r.stdout);
+  const r = cp.spawnSync(process.execPath, [CLI, 'register-pending', 'JSON export 기능', '--agent', 'agy', '--path', tmpR], { encoding: 'utf8', timeout: 10000 });
+  const okReg = r.status === 0 && /등록됨 \(in-progress\) by agy/.test(r.stdout);
   // 즉시 progress-tracker에서 검색 가능
   const r2 = cp.spawnSync(process.execPath, [CLI, 'memory', 'search', 'JSON export', '--path', tmpR], { encoding: 'utf8', timeout: 10000 });
-  const okSearch = /in-progress/.test(r2.stdout) && /pending.*gemini/.test(r2.stdout);
+  const okSearch = /in-progress/.test(r2.stdout) && /pending.*agy/.test(r2.stdout);
   const ok = okReg && okSearch;
   console.log(ok ? '✓ B(1.9.25) register-pending: 즉시 등록 + 검색 가능' : `✗ register-pending 실패 (reg=${okReg} search=${okSearch})`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
@@ -797,23 +797,23 @@ total++;
 total++;
 {
   // agents list — claude가 환경변수 + PATH 둘 다 충족 시 ready
-  const env1 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '1', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_GEMINI: '0', LEERNESS_ENABLE_COPILOT: '0' };
+  const env1 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '1', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_COPILOT: '0' };
   const r1 = cp.spawnSync(process.execPath, [CLI, 'agents', 'list'], { encoding: 'utf8', timeout: 15000, env: env1 });
   const okList = r1.status === 0
     && /외부 AI CLI 오케스트레이션 \(1\.9\.30\)/.test(r1.stdout)
     && /\| claude \|/.test(r1.stdout)
     && /\| codex \|/.test(r1.stdout)
-    && /\| gemini \|/.test(r1.stdout)
+    && /\| agy \|/.test(r1.stdout)
     && /\| copilot \|/.test(r1.stdout);
   // env 모두 0 → 비활성
   // 1.9.146: Ollama 추가 → 5 CLI
-  const env2 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_GEMINI: '0', LEERNESS_ENABLE_COPILOT: '0', LEERNESS_ENABLE_OLLAMA: '0' };
+  const env2 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_COPILOT: '0', LEERNESS_ENABLE_OLLAMA: '0' };
   const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'list', '--json'], { encoding: 'utf8', timeout: 15000, env: env2 });
   let parsed = null;
   try { parsed = JSON.parse(r2.stdout); } catch {}
   const okJson = parsed && Array.isArray(parsed.agents) && parsed.agents.length === 5 && parsed.agents.every(a => a.status !== 'ready');
   const ok = okList && okJson;
-  console.log(ok ? '✓ B(1.9.30+1.9.146) agents list: 5 CLI 정의 (claude/codex/gemini/copilot/ollama)' : `✗ agents list 실패 (list=${okList} json=${okJson})`);
+  console.log(ok ? '✓ B(1.9.30+1.9.146) agents list: 5 CLI 정의 (claude/codex/agy/copilot/ollama)' : `✗ agents list 실패 (list=${okList} json=${okJson})`);
   if (!ok) { failed++; console.log(r1.stdout.slice(0, 500)); }
 }
 
@@ -838,13 +838,13 @@ total++;
 total++;
 {
   // agents quota — env=0 시 모두 disabled/not-installed, 안내 메시지 포함
-  const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_GEMINI: '0', LEERNESS_ENABLE_COPILOT: '0' };
+  const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_COPILOT: '0' };
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota'], { encoding: 'utf8', timeout: 15000, env });
   const okText = r.status === 0
     && /외부 AI CLI quota 추정 \(1\.9\.31\)/.test(r.stdout)
     && /\| claude \|/.test(r.stdout)
     && /\| codex \|/.test(r.stdout)
-    && /\| gemini \|/.test(r.stdout)
+    && /\| agy \|/.test(r.stdout)
     && /\| copilot \|/.test(r.stdout)
     && /provider 대시보드 참조/.test(r.stdout);
   // JSON 출력
@@ -1752,13 +1752,13 @@ total++;
 // 1.9.36 회귀: dispatch 권장 플래그 + bench + 작업 유형 추천
 total++;
 {
-  // dispatch --write 시 gemini --yolo 자동 추가
-  const env = { ...process.env, LEERNESS_ENABLE_GEMINI: '1' };
-  const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', '코드 분석해서 요약', '--to', 'gemini', '--write'], { encoding: 'utf8', timeout: 15000, env });
-  // gemini가 ready면 명령 출력에 --yolo 포함, 비-ready면 거부 — 둘 다 OK
+  // dispatch --write 시 agy --yolo 자동 추가
+  const env = { ...process.env, LEERNESS_ENABLE_AGY: '1' };
+  const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', '코드 분석해서 요약', '--to', 'agy', '--write'], { encoding: 'utf8', timeout: 15000, env });
+  // agy가 ready면 명령 출력에 --yolo 포함, 비-ready면 거부 — 둘 다 OK
   const ok = (r.status === 0 && /--yolo/.test(r.stdout) && /write \(파일 수정 가능\)/.test(r.stdout))
           || (r.status !== 0 && /비활성|disabled|not-installed/.test(r.stdout));
-  console.log(ok ? '✓ B(1.9.36) dispatch --write: gemini --yolo 자동 첨부 또는 비활성 거부' : `✗ dispatch --write 실패`);
+  console.log(ok ? '✓ B(1.9.36) dispatch --write: agy --yolo 자동 첨부 또는 비활성 거부' : `✗ dispatch --write 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
@@ -1777,8 +1777,8 @@ total++;
 total++;
 {
   // 작업 유형 추천 — 비활성 CLI에도 추천 메시지 우선 출력
-  const env = { ...process.env, LEERNESS_ENABLE_GEMINI: '0', LEERNESS_ENABLE_CLAUDE: '0' };
-  const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', '번역해줘 한국어를 영어로', '--to', 'gemini'], { encoding: 'utf8', timeout: 15000, env });
+  const env = { ...process.env, LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_CLAUDE: '0' };
+  const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', '번역해줘 한국어를 영어로', '--to', 'agy'], { encoding: 'utf8', timeout: 15000, env });
   // 번역 → claude 추천. ready 체크 전에 추천 출력 → stdout에 "추천...claude" 포함
   const ok = /추천.*claude/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.36) 작업 유형 추천: 번역→claude 추천 (비활성이어도 출력)' : `✗ 추천 실패`);
@@ -1788,7 +1788,7 @@ total++;
 total++;
 {
   // bench 명령: ready CLI 없을 때 거부
-  const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_GEMINI: '0', LEERNESS_ENABLE_COPILOT: '0' };
+  const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_COPILOT: '0' };
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'bench', 'test'], { encoding: 'utf8', timeout: 15000, env });
   const ok = r.status !== 0 && /ready CLI 없음/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.36) agents bench: ready 없을 때 거부' : `✗ bench 거부 실패`);

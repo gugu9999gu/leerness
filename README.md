@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.247-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v192-20%2F20-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-70-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-57-brightgreen)]() [![json-fields](https://img.shields.io/badge/JSON_통합-11_필드-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous_R-203-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-109_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-70_streak-success)]() [![fallback](https://img.shields.io/badge/🔁_REPL_fallback-multi--provider-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-588ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.248-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v193-23%2F23-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-70-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-57-brightgreen)]() [![json-fields](https://img.shields.io/badge/JSON_통합-11_필드-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous_R-204-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-110_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-71_streak-success)]() [![agy](https://img.shields.io/badge/🔄_Gemini→Antigravity-agy_CLI-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-419ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.247  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.248  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🔁 REPL multi-provider fallback + 📚 api-skill audit         ║
+  ║  🔄 Gemini CLI 제거 → Antigravity (agy) CLI 도입 (UR-0017)    ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 

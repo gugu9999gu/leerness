@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.247';
+const VERSION = '1.9.248';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -410,7 +410,7 @@ leerness agents dispatch "<task>" --to <id>   # 작업 유형 추천 자동
 - 작업 유형별 최적 sub-agent:
   - 텍스트/번역/분석 → claude (1.7× 빠름)
   - 깊은 코드 추론 → codex (가장 상세)
-  - 파일 직접 수정 → gemini --yolo (정확)
+  - 파일 직접 수정 → agy --yolo (정확, Antigravity CLI 1.9.248)
   - 보안 리뷰 → \`leerness review --persona security\`
 - **충돌 방지 규칙 (필수)**:
   - 각 sub-agent에 *자신만 수정할 파일 경로* 명시
@@ -798,20 +798,20 @@ async function resolveInstallOptions(root, opts = {}) {
       const picked = await _selectMany(_t('install.agents.title', _agLang), [
         { label: 'Claude (ANTHROPIC_API_KEY 또는 claude CLI)', description: '추론력 최고 — 코드 작성/리뷰 기본', id: 'claude' },
         { label: 'Codex (OpenAI codex CLI)', description: 'OpenAI 코드 모델', id: 'codex' },
-        { label: 'Gemini (gemini CLI)', description: 'Google 멀티모달 모델', id: 'gemini' },
+        { label: 'Antigravity (agy CLI)', description: 'Google Antigravity 멀티모달 에이전트 (1.9.248~)', id: 'agy' },
         { label: 'Copilot (gh extension)', description: 'GitHub Copilot CLI', id: 'copilot' },
         { label: 'Ollama (로컬 LLM — llama3/qwen 등)', description: 'http://localhost:11434 — 무료/오프라인', id: 'ollama' }
       ], { defaults: [] });
       agentsOptIn = picked.length ? picked.map(p => p.id) : 'none';
     } else {
       log('\nCLI 에이전트 활성화 (복수 선택 — 콤마로 구분, opt-in):');
-      log('  1) claude  2) codex  3) gemini  4) copilot  5) ollama  (예: 1,5 또는 all 또는 none)');
+      log('  1) claude  2) codex  3) agy (Antigravity)  4) copilot  5) ollama  (예: 1,5 또는 all 또는 none)');
       const a = (await ask('선택 [none]: ')).trim().toLowerCase();
-      if (a === 'all') agentsOptIn = ['claude', 'codex', 'gemini', 'copilot', 'ollama'];
+      if (a === 'all') agentsOptIn = ['claude', 'codex', 'agy', 'copilot', 'ollama'];
       else if (!a || a === 'none' || a === '0') agentsOptIn = 'none';
       else {
-        const map = { '1': 'claude', '2': 'codex', '3': 'gemini', '4': 'copilot', '5': 'ollama' };
-        const picks = a.split(/[,\s]+/).map(t => map[t] || (['claude','codex','gemini','copilot','ollama'].includes(t) ? t : null)).filter(Boolean);
+        const map = { '1': 'claude', '2': 'codex', '3': 'agy', '4': 'copilot', '5': 'ollama' };
+        const picks = a.split(/[,\s]+/).map(t => map[t] || (['claude','codex','agy','copilot','ollama'].includes(t) ? t : null)).filter(Boolean);
         agentsOptIn = picks.length ? picks : 'none';
       }
     }
@@ -951,7 +951,7 @@ async function install(root, opts = {}) {
     const a = resolved.agentsOptIn || 'none';
     const enabledSet = (() => {
       if (Array.isArray(a)) return new Set(a);
-      if (a === 'all') return new Set(['claude', 'codex', 'gemini', 'copilot', 'ollama']);
+      if (a === 'all') return new Set(['claude', 'codex', 'agy', 'copilot', 'ollama']);
       if (a === 'none' || !a) return new Set();
       return new Set([a]);  // back-compat: 단일 문자열
     })();
@@ -983,7 +983,7 @@ async function install(root, opts = {}) {
         LEERNESS_OLLAMA_MODEL: '',
         LEERNESS_ENABLE_CLAUDE: enable('claude') ? '1' : '0',
         LEERNESS_ENABLE_CODEX: enable('codex') ? '1' : '0',
-        LEERNESS_ENABLE_GEMINI: enable('gemini') ? '1' : '0',
+        LEERNESS_ENABLE_AGY: enable('agy') ? '1' : '0',
         LEERNESS_ENABLE_COPILOT: enable('copilot') ? '1' : '0',
         LEERNESS_ENABLE_OLLAMA: enable('ollama') ? '1' : '0',
         LEERNESS_SKILL_DISCOVER_URL: '',
@@ -8808,7 +8808,7 @@ const _LEERNESS_NONSECRET_KEYS = new Set([
   'LEERNESS_OLLAMA_MODEL',       // 모델 이름 — 비밀 X
   'LEERNESS_ENABLE_CLAUDE',      // 활성화 플래그
   'LEERNESS_ENABLE_CODEX',
-  'LEERNESS_ENABLE_GEMINI',
+  'LEERNESS_ENABLE_AGY',
   'LEERNESS_ENABLE_COPILOT',
   'LEERNESS_ENABLE_OLLAMA',
   'LEERNESS_SKILL_DISCOVER_URL', // 공개 URL
@@ -9452,7 +9452,7 @@ function _resolvePersona(root, id) {
   return null;
 }
 
-// 1.9.30: 외부 AI CLI 오케스트레이션 — claude/codex/gemini/copilot 가용성 + 활성화 체크
+// 1.9.30: 외부 AI CLI 오케스트레이션 — claude/codex/agy/copilot 가용성 + 활성화 체크
 // 사용자 정책: 환경변수로 활성화 명시 + 실제 PATH 존재 확인 + 메인이 sub-agent 분배 시 참조
 // 1.9.32: installCmd 추가 — setup-agents 시 자동 설치 시도 가능
 const EXTERNAL_AGENTS = [
@@ -9460,8 +9460,11 @@ const EXTERNAL_AGENTS = [
     installCmd: 'npm i -g @anthropic-ai/claude-code', installHint: 'https://docs.anthropic.com/en/docs/claude-code/setup' },
   { id: 'codex',   bin: 'codex',   envFlag: 'LEERNESS_ENABLE_CODEX',   versionArgs: ['--version'], desc: 'OpenAI Codex CLI (격리 sandbox)',
     installCmd: 'npm i -g @openai/codex', installHint: 'https://github.com/openai/codex' },
-  { id: 'gemini',  bin: 'gemini',  envFlag: 'LEERNESS_ENABLE_GEMINI',  versionArgs: ['--version'], desc: 'Google Gemini CLI (--yolo 모드 워크스페이스 직접 수정 가능)',
-    installCmd: 'npm i -g @google/gemini-cli', installHint: 'https://github.com/google-gemini/gemini-cli' },
+  // 1.9.248 (사용자 명시 UR-0017): Gemini CLI 제거 + Antigravity CLI (agy 명령어) 교체
+  //   Google Antigravity 는 IDE 기반 멀티 모달 에이전트 도구. agy CLI 는 워크스페이스 직접 수정 가능 모드 지원.
+  //   기존 LEERNESS_ENABLE_AGY 환경변수는 LEERNESS_ENABLE_AGY 로 교체. provider id 도 'agy' 로 통일.
+  { id: 'agy',     bin: 'agy',     envFlag: 'LEERNESS_ENABLE_AGY',     versionArgs: ['--version'], desc: 'Google Antigravity CLI (멀티모달 에이전트, --yolo 워크스페이스 수정 가능)',
+    installCmd: 'npm i -g @google/antigravity-cli', installHint: 'https://antigravity.google.com (Antigravity IDE/CLI)' },
   { id: 'copilot', bin: 'gh',      envFlag: 'LEERNESS_ENABLE_COPILOT', versionArgs: ['copilot', '--version'], desc: 'GitHub Copilot CLI (gh copilot)',
     installCmd: 'gh extension install github/gh-copilot', installHint: 'https://github.com/github/gh-copilot (gh CLI 선행 설치 필요)' },
   // 1.9.146: Ollama 추가 (사용자 명시 요청 #3) — 로컬 LLM, HTTP API 11434
@@ -9668,7 +9671,7 @@ function providerCmd(root, sub, ...args) {
   // 1.9.195: provider probe — A축 (범용 AI 하네스) 보강. 사용자 의도: "범용 AI 하네스 ... 최고의 도구"
   //   시스템에 사용 가능한 provider 자동 감지 (PATH 명령 + 로컬 endpoint + API 키 환경변수)
   //   감지 대상:
-  //     - CLI: claude / codex / gemini / copilot / ollama (PATH check)
+  //     - CLI: claude / codex / agy / copilot / ollama (PATH check)
   //     - Local endpoint: Ollama (11434) / LM Studio (1234) / llama.cpp server (8080)
   //     - Cloud API key: OPENROUTER_API_KEY / GROQ_API_KEY / TOGETHER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY
   //   결과 → table + LEERNESS_ENABLE_* 설정 권장
@@ -9721,7 +9724,7 @@ async function _probeProviderEndpoints(root, timeoutMs) {
   const cliTargets = [
     { id: 'claude', bin: 'claude' },
     { id: 'codex', bin: 'codex' },
-    { id: 'gemini', bin: 'gemini' },
+    { id: 'agy', bin: 'agy' },
     { id: 'copilot', bin: 'copilot' },
     { id: 'ollama', bin: 'ollama' }
   ];
@@ -9830,7 +9833,7 @@ function _recommendAgent(task) {
   // 파일 작성·수정·생성
   if (hasAny(['create', 'write', 'generate', 'patch', 'fix', 'implement', 'edit',
               '구현', '생성', '작성', '수정', '추가'])) {
-    return { target: 'gemini', reason: '워크스페이스 직접 수정은 gemini --yolo가 정확' };
+    return { target: 'agy', reason: '워크스페이스 직접 수정은 agy --yolo (Antigravity) 가 정확' };
   }
   return { target: null, reason: '' };
 }
@@ -10346,7 +10349,7 @@ function _dispatchCommand(agentId, task, writeMode) {
   const q = String(task || '').replace(/"/g, '\\"');
   if (agentId === 'claude') return `claude ${writeMode ? '--print --dangerously-skip-permissions' : '--print'} "${q}"`;
   if (agentId === 'codex')  return `codex ${writeMode ? 'exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox' : 'exec --skip-git-repo-check'} "${q}"`;
-  if (agentId === 'gemini') return `gemini ${writeMode ? '-p --yolo' : '-p'} "${q}"`;
+  if (agentId === 'agy') return `agy ${writeMode ? '-p --yolo' : '-p'} "${q}"`;
   if (agentId === 'copilot') return `gh copilot suggest "${q}"`;
   if (agentId === 'ollama') return `# ollama — leerness agent "${q}" --provider ollama 로 직접 호출 (REPL: leerness agent)`;
   return `# ${agentId}: 명령 빌더 미정의`;
@@ -10380,8 +10383,8 @@ function agentsCmd(root, sub, ...args) {
     if (!ready.length) {
       log('');
       log(`💡 활성화 방법:`);
-      log(`  1) CLI 설치 (예: \`npm i -g @openai/codex-cli\`, \`npm i -g @google/gemini-cli\`)`);
-      log(`  2) .env 또는 환경변수: LEERNESS_ENABLE_CODEX=1, LEERNESS_ENABLE_GEMINI=1`);
+      log(`  1) CLI 설치 (예: \`npm i -g @openai/codex-cli\`, \`npm i -g @google/antigravity-cli\`)`);
+      log(`  2) .env 또는 환경변수: LEERNESS_ENABLE_CODEX=1, LEERNESS_ENABLE_AGY=1`);
       log(`  3) \`leerness agents check\`로 재확인`);
       log(`  💡 1.9.157: 빌트인 외 CLI 추가: \`leerness provider add <id> --bin <cmd>\``);
     } else {
@@ -10564,7 +10567,7 @@ function agentsCmd(root, sub, ...args) {
     if (has('--multi') || target === 'all' || target === '*') {
       return agentsCmd(root, 'multi', ...args);
     }
-    if (!target) { fail('--to <agent_id> 필요 (claude/codex/gemini/copilot) — 활성 전체에 일괄 분배는 `leerness agents multi`'); return process.exit(1); }
+    if (!target) { fail('--to <agent_id> 필요 (claude/codex/agy/copilot) — 활성 전체에 일괄 분배는 `leerness agents multi`'); return process.exit(1); }
     const agentDef = EXTERNAL_AGENTS.find(a => a.id === target);
     if (!agentDef) { fail(`알 수 없는 agent: ${target}`); return process.exit(1); }
     // 1.9.36: 작업 유형 키워드 분석 → 최적 CLI 추천 (ready 체크 전에 출력 — 비활성이어도 추천)
@@ -10599,9 +10602,9 @@ function agentsCmd(root, sub, ...args) {
       log(`codex ${flags} "${q}"`);
       log(`# ℹ codex는 PowerShell 경유 — POSIX /tmp 경로는 C:\\tmp\\로 해석됨`);
       if (writeMode) log(`# ⚠ --dangerously-bypass-approvals-and-sandbox: sandbox 우회`);
-    } else if (target === 'gemini') {
+    } else if (target === 'agy') {
       const flags = writeMode ? '-p --yolo' : '-p';
-      log(`gemini ${flags} "${q}"`);
+      log(`agy ${flags} "${q}"`);
       if (writeMode) log(`# ⚠ --yolo: 워크스페이스 파일 직접 수정 가능`);
     } else if (target === 'copilot') {
       log(`gh copilot suggest "${q}"`);
@@ -10652,9 +10655,9 @@ function agentsCmd(root, sub, ...args) {
           ? ['exec', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', task]
           : ['exec', '--skip-git-repo-check', task];
         cmd = 'codex';
-      } else if (agent.id === 'gemini') {
+      } else if (agent.id === 'agy') {
         cmdArgs = writeMode ? ['-p', task, '--yolo'] : ['-p', task];
-        cmd = 'gemini';
+        cmd = 'agy';
       } else if (agent.id === 'copilot') {
         cmdArgs = ['copilot', 'suggest', task];
         cmd = 'gh';
@@ -10728,10 +10731,10 @@ function agentsCmd(root, sub, ...args) {
             out.hint = 'https://platform.openai.com/account/usage 확인';
           }
           out.raw = help.slice(0, 200);
-        } else if (agent.id === 'gemini') {
-          // gemini CLI: 무료 티어는 분당 60req 제한, CLI 자체에선 노출 안 됨
+        } else if (agent.id === 'agy') {
+          // agy CLI (Antigravity): 무료 티어는 분당 60req 제한, CLI 자체에선 노출 안 됨
           out.quota = 'rate-limited';
-          out.hint = '무료 티어: 60 req/min, 1000 req/day · 유료는 https://ai.google.dev/gemini-api/docs/rate-limits';
+          out.hint = '무료 티어: 60 req/min, 1000 req/day · Antigravity 유료 플랜은 https://antigravity.google.com';
         } else if (agent.id === 'copilot') {
           // gh copilot은 GitHub Copilot 구독 (월 단위 quota 없음, individual/business 플랜)
           const r = cp.spawnSync('gh', ['auth', 'status'], { encoding: 'utf8', timeout: 4000, shell: true });
@@ -10873,13 +10876,13 @@ function reviewCmd(root, target) {
 }
 
 // 1.9.25: register-pending — sub-agent/외부 모델이 작업 시작 즉시 progress-tracker에 in-progress 등록
-// 사용 예: leerness register-pending "<요청 내용>" --agent gemini
+// 사용 예: leerness register-pending "<요청 내용>" --agent agy
 //   → 다음 T-ID 자동 할당, status=in-progress, evidence="(pending) by <agent>"
 //   → 다른 세션이 즉시 발견 가능 (모순 감지)
 function registerPendingCmd(root, requestParts) {
   root = absRoot(root || process.cwd());
   const request = (requestParts || []).join(' ').trim();
-  if (!request) { fail('register-pending "<요청>" 필요. 예: leerness register-pending "toJson 함수 추가" --agent gemini'); return process.exit(1); }
+  if (!request) { fail('register-pending "<요청>" 필요. 예: leerness register-pending "toJson 함수 추가" --agent agy'); return process.exit(1); }
   const agent = arg('--agent', 'unknown');
   const note = arg('--note', '');
 
@@ -14952,7 +14955,7 @@ async function _benchmarkMeasure(root, task) {
     let cmd, cliArgs;
     if (agent.id === 'claude') { cmd = 'claude'; cliArgs = ['--print', task]; }
     else if (agent.id === 'codex') { cmd = 'codex'; cliArgs = ['exec', '--skip-git-repo-check', task]; }
-    else if (agent.id === 'gemini') { cmd = 'gemini'; cliArgs = ['-p', task]; }
+    else if (agent.id === 'agy') { cmd = 'agy'; cliArgs = ['-p', task]; }
     else continue;
     const t0 = Date.now();
     // 1.9.150: runCommandSafe — agent CLI bench sandbox (env scrub + observability)
@@ -15428,7 +15431,7 @@ function mcpServeCmd(root) {
     { name: 'leerness_audit', description: '1.9.102 — 워크스페이스 일관성 감사 JSON (warnings/failures/fixed/healthy + findings[]. kind 11종: design_dup/design_system_default/reuse_map_empty/milestone_unlinked/handoff_not_generated/current_state_stale/readme_version_mismatch/npm_cve/gitignore_missing_secrets/env_keys_missing/strict_promoted)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, fix: { type: 'boolean' }, strict: { type: 'boolean' } } } },
     { name: 'leerness_verify_claim', description: 'AI 거짓 완료 자동 검증 (evidence 파일 + 실 테스트 실행)', inputSchema: { type: 'object', properties: { taskId: { type: 'string' }, path: { type: 'string' }, runTests: { type: 'boolean' }, strictClaims: { type: 'boolean' } }, required: ['taskId'] } },
     { name: 'leerness_contract_verify', description: '명세 ↔ 구현 함수/필드 일치 자동 검사', inputSchema: { type: 'object', properties: { spec: { type: 'string' }, impl: { type: 'string' } }, required: ['spec', 'impl'] } },
-    { name: 'leerness_agents_list', description: '외부 AI CLI 가용성 표 (claude/codex/gemini/copilot 상태 + 환경변수 활성화 여부)', inputSchema: { type: 'object', properties: {} } },
+    { name: 'leerness_agents_list', description: '외부 AI CLI 가용성 표 (claude/codex/agy/copilot 상태 + 환경변수 활성화 여부)', inputSchema: { type: 'object', properties: {} } },
     { name: 'leerness_reuse_map', description: '워크스페이스 중복 함수/capability 자동 감지 (--all-apps + fuzzy 매칭)', inputSchema: { type: 'object', properties: { path: { type: 'string' }, allApps: { type: 'boolean' }, strictElements: { type: 'boolean' } } } },
     { name: 'leerness_whats_new', description: 'CHANGELOG 차분 자동 추출 (from → to 사이 신규 명령/플래그/파일)', inputSchema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
     { name: 'leerness_usage_stats', description: 'leerness 명령별 누적 호출 통계 + drift 통계', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
@@ -15470,7 +15473,7 @@ function mcpServeCmd(root) {
     { name: 'leerness_feature_add', description: '1.9.142 — Feature Graph 에 새 노드 추가 (외부 AI가 코드 작성 중 직접 feature 등록). 인자: { title (required), dependsOn?, affects?, coChangesWith?, files?, path? }. 자동 F-XXXX ID 부여. CRUD 완성에 기여', inputSchema: { type: 'object', properties: { title: { type: 'string' }, dependsOn: { type: 'string' }, affects: { type: 'string' }, coChangesWith: { type: 'string' }, files: { type: 'string' }, path: { type: 'string' } }, required: ['title'] } },
     { name: 'leerness_feature_link', description: '1.9.142 — 기존 feature 노드에 의존/영향/공변경 엣지 추가. 인자: { id (required, F-XXXX), dependsOn?, affects?, coChangesWith?, path? }. 외부 AI가 코드 변경 도중 발견한 인과관계를 즉시 그래프에 반영', inputSchema: { type: 'object', properties: { id: { type: 'string' }, dependsOn: { type: 'string' }, affects: { type: 'string' }, coChangesWith: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
     { name: 'leerness_env_detect', description: '1.9.145 — 실행 환경 자동 감지 + 변동 추적 JSON ({ snapshot: { os, hardware, locale, shell, node, tools, scriptDependencies }, diff: { firstCapture, changes, missing }, persisted }). "X은(는) 내부 또는 외부 명령... 아닙니다" 사전 방지: package.json scripts 의존 도구가 PATH에 있는지 검증 + 머신/Node/도구 변경 감지. 절대경로 마스킹 (보안). 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
-    { name: 'leerness_provider_list', description: '1.9.157/158 — Provider Registry 조회 JSON ({ total, builtin, user, providers: [{ id, bin, envFlag, source, desc }] }). 빌트인 5종 (claude/codex/gemini/copilot/ollama) + .harness/providers.json 사용자 정의 통합. 외부 AI가 sub-agent 분배 가능한 provider 전체 회수 (OpenRouter/Bedrock 등 등록되어 있으면 같이 노출). 🎉 MCP 48 도구 마일스톤', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_provider_list', description: '1.9.157/158 — Provider Registry 조회 JSON ({ total, builtin, user, providers: [{ id, bin, envFlag, source, desc }] }). 빌트인 5종 (claude/codex/agy/copilot/ollama) + .harness/providers.json 사용자 정의 통합. 외부 AI가 sub-agent 분배 가능한 provider 전체 회수 (OpenRouter/Bedrock 등 등록되어 있으면 같이 노출). 🎉 MCP 48 도구 마일스톤', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_provider_add', description: '1.9.159 — Provider Registry 에 새 provider 동적 추가. 인자: { id (required), bin?, envFlag?, versionArgs?, desc?, path? }. 외부 AI가 새 CLI 발견 시 자가 확장 (OpenRouter / Bedrock / Groq / Hugging Face 등 등록). 같은 id 두 번 호출 → 갱신. 빌트인 id 호출 → user override. id 는 영문자/숫자/_- 만 허용.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, bin: { type: 'string' }, envFlag: { type: 'string' }, versionArgs: { type: 'string' }, desc: { type: 'string' }, installHint: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
     { name: 'leerness_provider_remove', description: '1.9.159 — Provider Registry 에서 사용자 정의 provider 제거. 인자: { id (required), path? }. 빌트인 5종 id 는 제거 불가 (override 만 제거 가능). 🎉 MCP 50 도구 마일스톤 — Provider Registry CRUD MCP 완성 (list/add/remove)', inputSchema: { type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } }, required: ['id'] } },
     { name: 'leerness_web', description: '1.9.168 — Web Bridge (1.9.165 playwright opt-in). sub: check (설치 + permissions.browser 확인) | screenshot (URL → PNG) | extract (URL + CSS selector → DOM 텍스트). 외부 AI가 leerness 의 웹 자동화 능력을 직접 호출. playwright 미설치 시 친절 안내 (graceful). 인자: { sub (required), url?, out?, selector?, path? }', inputSchema: { type: 'object', properties: { sub: { type: 'string', enum: ['check', 'screenshot', 'extract'] }, url: { type: 'string' }, out: { type: 'string' }, selector: { type: 'string' }, path: { type: 'string' } }, required: ['sub'] } },
@@ -16163,13 +16166,13 @@ function permissionCheck(root, action, target) {
 }
 
 // ===== 1.9.146: leerness agent — OpenClaw/Hermes 스타일 오픈소스 CLI 에이전트 모드 (사용자 명시 요청 #4) =====
-// MVP: handoff 컨텍스트 자동 로드 → 활성 CLI (claude/codex/gemini/ollama) 1개에 작업 위임.
+// MVP: handoff 컨텍스트 자동 로드 → 활성 CLI (claude/codex/agy/ollama) 1개에 작업 위임.
 // 권한은 .harness/agent-permissions.json 기준. 실제 LLM 호출은 외부 CLI 또는 Ollama HTTP API.
 function _activeCliAgents() {
   const out = [];
   if (process.env.LEERNESS_ENABLE_CLAUDE === '1') out.push('claude');
   if (process.env.LEERNESS_ENABLE_CODEX === '1') out.push('codex');
-  if (process.env.LEERNESS_ENABLE_GEMINI === '1') out.push('gemini');
+  if (process.env.LEERNESS_ENABLE_AGY === '1') out.push('agy');
   if (process.env.LEERNESS_ENABLE_COPILOT === '1') out.push('copilot');
   if (process.env.LEERNESS_ENABLE_OLLAMA === '1') out.push('ollama');
   return out;
@@ -16225,7 +16228,7 @@ async function _ollamaListModels() {
 }
 
 // 1.9.153: 외부 CLI 채팅 호출 (multi-provider REPL — 사용자 명시 요청)
-//   claude/codex/gemini/copilot 를 child_process 로 호출 후 stdout 캡처.
+//   claude/codex/agy/copilot 를 child_process 로 호출 후 stdout 캡처.
 //   runCommandSafe 경유 — env scrub + permissions + observability 자동 적용.
 async function _cliChat(root, provider, prompt, opts) {
   opts = opts || {};
@@ -16240,7 +16243,7 @@ async function _cliChat(root, provider, prompt, opts) {
   let cmd, args, stdinInput = null;
   if (provider === 'claude')  { cmd = 'claude'; args = ['--print']; stdinInput = prompt; }
   else if (provider === 'codex')   { cmd = 'codex';  args = ['exec', '--skip-git-repo-check', '-']; stdinInput = prompt; }
-  else if (provider === 'gemini')  { cmd = 'gemini'; args = ['-p', prompt]; }  // gemini 는 인자 only
+  else if (provider === 'agy')  { cmd = 'agy'; args = ['-p', prompt]; }  // agy (Antigravity) 는 인자 only
   else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', prompt]; }
   else return { ok: false, error: `provider ${provider} 미지원`, provider };
   // runCommandSafe — env scrub + observability 자동
@@ -16296,7 +16299,7 @@ async function _cliChatStream(root, provider, promptText, opts) {
     args = ['exec', '--skip-git-repo-check', '-'];  // - = stdin from claude/codex convention
     useStdinForPrompt = true;
   }
-  else if (provider === 'gemini')  { cmd = 'gemini'; args = ['-p', promptText]; }  // gemini -p 는 인자 모드만 지원
+  else if (provider === 'agy')  { cmd = 'agy'; args = ['-p', promptText]; }  // agy -p 는 인자 모드만 지원
   else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', promptText]; }
   else return { ok: false, error: `provider ${provider} 미지원`, provider };
   const t0 = Date.now();
@@ -16632,10 +16635,10 @@ const _PROVIDER_MODEL_CATALOG = {
     { id: 'gpt-5-codex', note: '코드 특화 (Codex)' },
     { id: 'o4-mini', note: '빠른 reasoning' }
   ],
-  gemini: [
-    { id: 'gemini-2.5-pro', note: 'Google 최고급 (1M+ context)' },
-    { id: 'gemini-2.5-flash', note: '빠른 응답' },
-    { id: 'gemini-3.0-pro', note: '실험적 (사용 가능 시)' }
+  agy: [
+    { id: 'antigravity-pro', note: 'Antigravity 최고급 (1M+ context)' },
+    { id: 'antigravity-flash', note: '빠른 응답' },
+    { id: 'antigravity-experimental', note: '실험적 (사용 가능 시)' }
   ],
   copilot: [
     { id: 'default', note: 'gh copilot 기본 (모델 선택 불가)' }
@@ -16649,7 +16652,7 @@ const _PROVIDER_MODEL_CATALOG = {
 };
 
 // 1.9.170: provider cycle 순서 (Tab) — 빌트인 5종. user provider는 동적으로 뒤에 추가.
-const _PROVIDER_CYCLE_ORDER = ['ollama', 'claude', 'codex', 'gemini', 'copilot'];
+const _PROVIDER_CYCLE_ORDER = ['ollama', 'claude', 'codex', 'agy', 'copilot'];
 
 // 1.9.148: planner/reviewer/actor 역할 시스템 프롬프트 (Gemini 권고 — 자기-승인 편향 방지)
 const _AGENT_ROLE_PROMPTS = {
@@ -16829,7 +16832,7 @@ async function _agentRepl(root, opts) {
   // prompt 에 세부 모델 표시 (사용자 명시): agent[claude · claude-opus-4-7 / actor / ▶]>
   const prompt = () => {
     if (!isTty) return 'agent> ';
-    const modelShort = (state.model || '').replace(/^(claude|gpt|gemini)-/, '').slice(0, 18);
+    const modelShort = (state.model || '').replace(/^(claude|gpt|gemini|antigravity)-/, '').slice(0, 18);
     const modelTag = modelShort ? C.dim(' · ') + C.mag(modelShort) : '';
     return C.cy(`agent[${state.provider}${modelTag}${C.cy('/' + state.role)}${state.streamMode ? C.cy('/▶') : ''}${C.cy(']>')} `);
   };
@@ -16849,7 +16852,7 @@ async function _agentRepl(root, opts) {
       if (m.includes('gpt-4')) return 128000;
       return 128000;
     }
-    if (provider === 'gemini') return 1000000;       // 2M까지 가능하지만 보수적으로 1M
+    if (provider === 'agy') return 1000000;       // 2M까지 가능하지만 보수적으로 1M
     if (provider === 'copilot') return 64000;
     if (provider === 'ollama') return 8000;          // 모델별 다르나 default 8k
     return 100000;
@@ -16882,7 +16885,7 @@ async function _agentRepl(root, opts) {
           .map(a => ({ id: a.id, st: _checkAgent(a).status }))
           .filter(x => x.st === 'ready');
       } catch {}
-      const allAgents = ['claude', 'codex', 'gemini', 'copilot'];
+      const allAgents = ['claude', 'codex', 'agy', 'copilot'];
       const subBar = allAgents.map(id => {
         if (id === state.provider) return C.bold(C.green(`*${id}`));
         const isReady = ready.find(r => r.id === id);
@@ -17025,7 +17028,7 @@ async function _agentRepl(root, opts) {
         ['/quit', 'REPL 종료 (세션 자동 저장)'],
         ['/clear', '대화 히스토리 초기화'],
         ['/status', '현재 provider / model / role / perms 상태'],
-        ['/provider <id>', 'provider 전환 (ollama, claude, codex, gemini, copilot)'],
+        ['/provider <id>', 'provider 전환 (ollama, claude, codex, agy, copilot)'],
         ['/model <id>', '현재 provider의 모델 전환'],
         ['/role <id>', '역할 전환 (actor / planner / reviewer)'],
         ['/stream on|off', '실시간 스트리밍 토글 (default ON)']
@@ -17077,7 +17080,7 @@ async function _agentRepl(root, opts) {
       log('    :model <name>         — 모델 변경 (1.9.155 모든 provider 지원, 예: :model claude-opus-4-7)');
       log('    :models               — provider 별 모델 목록 (ollama 실시간 / 그 외 추천 카탈로그)');
       log('    :role <r>             — 역할 변경 (planner / reviewer / actor)');
-      log('    :provider <p>         — provider 변경 (ollama / claude / codex / gemini / copilot — ready 검증)');
+      log('    :provider <p>         — provider 변경 (ollama / claude / codex / agy / copilot — ready 검증)');
       log('    :stream on|off        — 🆕 1.9.170 실시간 스트리밍 토글 (추론중/diff/thinking 실시간 표시)');
       log('    :status               — 현재 세션 상태 자세히 (1.9.155)');
       log('    :clear                — 화면 클리어 + history 유지');
@@ -17088,7 +17091,7 @@ async function _agentRepl(root, opts) {
       log('    :perm [mode]          — :permissions 단축 alias');
       log('    :quit / :exit / :q    — 종료 (자동 저장)');
       log(C.bold('\n  🆕 1.9.170 키보드 단축키:'));
-      log('    Tab                   — 다음 provider 로 cycle (ollama → claude → codex → gemini → copilot)');
+      log('    Tab                   — 다음 provider 로 cycle (ollama → claude → codex → agy → copilot)');
       log('    Shift+Tab             — 현재 provider 의 다음 model 로 cycle (catalog 기준)');
       log(C.bold('\n  Slash 명령 (1.9.150) — leerness 내부 명령 직접 호출:'));
       log('    :verify               — leerness verify-code (테스트/타입/린트 자동 검수)');
@@ -17155,7 +17158,7 @@ async function _agentRepl(root, opts) {
     }
     if (op === 'provider') {
       const newProv = rest[0] || state.provider;
-      const validProviders = ['ollama', 'claude', 'codex', 'gemini', 'copilot'];
+      const validProviders = ['ollama', 'claude', 'codex', 'agy', 'copilot'];
       if (!validProviders.includes(newProv)) {
         log(C.yel(`  ⚠ provider 는 ${validProviders.join(' / ')} (받음: ${newProv})`));
         return false;
@@ -17392,12 +17395,12 @@ async function _agentRepl(root, opts) {
       const finalPrompt = `${rolePrompt}\n\nConversation so far:\n${state.history.slice(-6).map(m => `[${m.role}] ${m.content}`).join('\n')}\n\nRespond as ${state.role}:`;
       const t0 = Date.now();
       let result;
-      // 1.9.153: multi-provider REPL — ollama 외 claude/codex/gemini/copilot 도 세션 관리 (사용자 명시)
+      // 1.9.153: multi-provider REPL — ollama 외 claude/codex/agy/copilot 도 세션 관리 (사용자 명시)
       // 1.9.170: streamMode === true 이면 _cliChatStream 사용 (사용자 명시 — 추론중/diff 실시간 표시)
       if (state.provider === 'ollama') {
         log(C.dim(`  → ollama${state.model ? ' (' + state.model + ')' : ''} 호출 중...`));
         result = await _ollamaChat(finalPrompt, state.model);
-      } else if (['claude', 'codex', 'gemini', 'copilot'].includes(state.provider)) {
+      } else if (['claude', 'codex', 'agy', 'copilot'].includes(state.provider)) {
         if (state.streamMode) {
           log(C.dim(`  → ${state.provider} CLI stream 호출 중...  (Ctrl+C 로 중단)`));
           result = await _cliChatStream(root, state.provider, finalPrompt, { timeout: 120000 });
@@ -17406,7 +17409,7 @@ async function _agentRepl(root, opts) {
           result = await _cliChat(root, state.provider, finalPrompt, { timeout: 90000 });
         }
       } else {
-        log(C.yel(`  ⚠ ${state.provider} provider 미지원 — :provider ollama|claude|codex|gemini|copilot`));
+        log(C.yel(`  ⚠ ${state.provider} provider 미지원 — :provider ollama|claude|codex|agy|copilot`));
         promptWithStatus(); return;
       }
       const dt = Date.now() - t0;
@@ -17415,7 +17418,7 @@ async function _agentRepl(root, opts) {
         state.history.push({ role: 'assistant', content: result.response });
         // 1.9.170: stream 모드에서는 이미 실시간으로 출력됐으므로 헤더만 표시 (응답 중복 방지)
         // 1.9.246: 정상 완료 작업은 초록색 ✓ 강조 (사용자 명시 UR-0016)
-        if (state.streamMode && ['claude', 'codex', 'gemini', 'copilot'].includes(state.provider)) {
+        if (state.streamMode && ['claude', 'codex', 'agy', 'copilot'].includes(state.provider)) {
           log(C.green(`  ✓ [assistant: ${state.provider}/${state.model || 'default'}, role=${state.role}, ${dt}ms · ${result.response.length}자]`));
         } else {
           log('');
@@ -17432,8 +17435,8 @@ async function _agentRepl(root, opts) {
         // 실패 원인 분류
         if (/exit=null/.test(errMsg) || /timeout/i.test(errMsg)) {
           log(C.dim(`     ↳ 가능 원인: (1) ${state.provider} CLI 응답 시간 초과 (모델 로딩/큰 응답 대기 중)`));
-          log(C.dim(`                  (2) network/auth 문제 (특히 codex/gemini 는 인터넷 + 토큰 필요)`));
-          log(C.dim(`     ↳ 직접 검증: ${state.provider} --print "ping" ${state.provider === 'gemini' ? '--yolo' : ''}`));
+          log(C.dim(`                  (2) network/auth 문제 (특히 codex/agy 는 인터넷 + 토큰 필요)`));
+          log(C.dim(`     ↳ 직접 검증: ${state.provider} --print "ping" ${state.provider === 'agy' ? '--yolo' : ''}`));
         } else if (/exit=1/.test(errMsg) || /unauth/i.test(errMsg) || /login/i.test(errMsg)) {
           log(C.dim(`     ↳ 가능 원인: 인증 누락 (login 필요)`));
           log(C.dim(`     ↳ 해결: ${state.provider} login ${state.provider === 'copilot' ? '(gh auth login)' : ''}`));
@@ -17488,7 +17491,7 @@ async function _agentRepl(root, opts) {
             log(C.dim(`     💡 즉시 전환: ${others.map(x => `:provider ${x.def.id}`).join(' · ')}  또는 Tab 키`));
             if (!state.autoFallback) log(C.dim(`     💡 다음 실패 시 자동 전환: \`:fallback on\` (1.9.247 UR-0016 2단계)`));
           } else {
-            log(C.dim(`     💡 다른 provider 활성화: .env 에서 LEERNESS_ENABLE_<CLAUDE|CODEX|GEMINI|COPILOT>=1`));
+            log(C.dim(`     💡 다른 provider 활성화: .env 에서 LEERNESS_ENABLE_<CLAUDE|CODEX|AGY|COPILOT>=1`));
           }
         } catch {}
       }
@@ -17521,12 +17524,12 @@ async function agentCmd(root, taskArg) {
     log('  leerness agent "<task>"                     # 1회 위임 (actor 역할 기본)');
     log('  leerness agent "<task>" --role planner      # 계획만 (1.9.148)');
     log('  leerness agent "<task>" --role reviewer     # 비판적 검토 (1.9.148)');
-    log('  leerness agent --provider claude            # provider 명시 (ollama/claude/codex/gemini/copilot)');
+    log('  leerness agent --provider claude            # provider 명시 (ollama/claude/codex/agy/copilot)');
     log('  leerness agent --interactive --model qwen2.5-coder  # 명시적 REPL + Ollama 모델 선택');
     log('');
     log('REPL 메타 명령: :help / :model / :role / :provider / :history / :save / :quit');
     log('REPL Slash 명령 (1.9.150): :verify / :audit / :handoff / :health  (sandboxed runCommandSafe)');
-    log('REPL Multi-provider (1.9.153): ollama / claude / codex / gemini / copilot — 활성 CLI 자동 감지');
+    log('REPL Multi-provider (1.9.153): ollama / claude / codex / agy / copilot — 활성 CLI 자동 감지');
     log('');
     log('현재 활성 provider: ' + (_activeCliAgents().join(', ') || '(없음) — .env에서 LEERNESS_ENABLE_* 활성화'));
     log('권한 모드: ' + (_readPermissions(root).mode || 'basic'));
@@ -17557,17 +17560,17 @@ async function agentCmd(root, taskArg) {
   // 1.9.148: role prompt 자동 prepend (모든 provider 공통)
   const finalPrompt = `${rolePrompt}\n\nTask: ${task}`;
   const t0 = Date.now();
-  // 1.9.154: 1-shot 모드도 multi-provider — Ollama 외 claude/codex/gemini/copilot 직접 호출 (1.9.153 _cliChat 재사용)
+  // 1.9.154: 1-shot 모드도 multi-provider — Ollama 외 claude/codex/agy/copilot 직접 호출 (1.9.153 _cliChat 재사용)
   let r;
   if (provider === 'ollama') {
     log('\n[ollama 호출 중...]');
     r = await _ollamaChat(finalPrompt);
-  } else if (['claude', 'codex', 'gemini', 'copilot'].includes(provider)) {
+  } else if (['claude', 'codex', 'agy', 'copilot'].includes(provider)) {
     log(`\n[${provider} CLI 호출 중...]`);
     r = await _cliChat(root, provider, finalPrompt, { timeout: 90000 });
     if (r.ok && !r.model) r.model = provider;  // _cliChat 결과 보강
   } else {
-    fail(`알 수 없는 provider: ${provider} (ollama/claude/codex/gemini/copilot)`);
+    fail(`알 수 없는 provider: ${provider} (ollama/claude/codex/agy/copilot)`);
     process.exitCode = 1;
     return;
   }
@@ -18136,7 +18139,7 @@ function healthCmd(root) {
     const hasRepl = /async function _agentRepl/.test(harnessSrc);
     const hasCliChat = /async function _cliChat/.test(harnessSrc);
     cap.replMultiProvider = (hasRepl && hasCliChat)
-      ? { score: 90, status: '✓', evidence: 'ollama/claude/codex/gemini/copilot 5종 (1.9.149+1.9.153)' }
+      ? { score: 90, status: '✓', evidence: 'ollama/claude/codex/agy/copilot 5종 (1.9.149+1.9.153)' }
       : { score: 30, status: '⚠', evidence: 'REPL 미완성' };
     // (5) MCP 도구 — tools array 카운트
     const toolsMatch = harnessSrc.match(/{ name: 'leerness_/g);
@@ -19345,7 +19348,7 @@ function whichCmd() {
 }
 
 function help() {
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/gemini/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/agy/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
