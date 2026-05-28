@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.251';
+const VERSION = '1.9.252';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2358,6 +2358,14 @@ function agentModeCmd(root, sub) {
   }
   if (sub === 'start') {
     log(cy(`# leerness agent-mode start (1.9.239)`));
+    // 1.9.252 (UR-0018 마무리): 자율 모드 진입 시에도 터미널 인코딩 점검 (init 과 동일 — 한국어 출력 깨짐 사전 고지)
+    try {
+      const enc = _terminalEncodingNotice();
+      if (!enc.ok && enc.lines.length > 0) {
+        log(yl(`  🌐 터미널 인코딩 점검 (1.9.252, UR-0018)`));
+        enc.lines.forEach(l => log(l));
+      }
+    } catch {}
     log(dm(`  → 1. drift check --auto-fix (보안 + delivered + release cleanup)`));
     const r1 = spawnChild(['drift', 'check', root, '--auto-fix']);
     if (r1.status === 0) log(gr(`  ✓ drift auto-fix 완료`)); else log(yl(`  ⚠ drift auto-fix 종료 ${r1.status}`));
@@ -2677,27 +2685,12 @@ function envCmd(root, sub) {
   log(`  💻 OS: ${gr(env.os.platform)} ${env.os.release} (${env.os.arch})`);
   log(`  📦 Node: ${gr(env.node.version)}`);
   log(`  🌐 Locale: LANG=${env.locale.LANG || 'unset'} · CP=${env.locale.codepage || 'unknown'}${env.locale.isKoreanWindows ? yl(' (한국어 Windows)') : ''}`);
-  // 1.9.249 (UR-0018): 터미널 출력 인코딩 자동 점검 — 한국어 Windows + 비-65001 → 경고 + 자동 회복 결과
-  if (env.locale.isKoreanWindows && env.locale.codepage !== 65001) {
-    log(yl(`  ⚠ 터미널 코드페이지 ${env.locale.codepage} (CP949) — 한국어 출력 깨짐 위험`));
-    if (process.env._LEERNESS_AUTOCHCP_APPLIED) {
-      log(gr(`     ✓ chcp 65001 자동 적용됨 (이전: ${process.env._LEERNESS_AUTOCHCP_APPLIED}, 1.9.249)`));
-    } else {
-      log(dm(`     → 수동: chcp 65001  (또는 LEERNESS_NO_AUTOCHCP=0)`));
-    }
-  } else if (env.locale.codepage === 65001) {
-    log(gr(`  ✓ 터미널 인코딩 UTF-8 (65001) — 한국어 출력 안전`));
-  }
-  // 1.9.250 (UR-0018 2단계): POSIX (Linux/macOS/WSL) terminal encoding 점검
-  if (env.os.platform === 'linux' || env.os.platform === 'darwin') {
-    const wslTag = env.locale.isWSL ? yl(' (WSL)') : '';
-    if (env.locale.posixEncodingOk === true) {
-      log(gr(`  ✓ POSIX locale UTF-8 — ${env.os.platform === 'darwin' ? 'macOS' : 'Linux'}${wslTag} 한국어 출력 안전`));
-    } else if (env.locale.posixEncodingOk === false) {
-      log(yl(`  ⚠ POSIX locale에 UTF-8 없음 (LANG=${env.locale.LANG || 'unset'}) — 한국어 출력 깨질 위험`));
-      log(dm(`     → 권장: export LANG=ko_KR.UTF-8  (또는 export LC_ALL=C.UTF-8)`));
-    }
-  }
+  // 1.9.252 (UR-0018 마무리): 인라인 Windows/POSIX 인코딩 분기를 _terminalEncodingNotice() 헬퍼로 통합 (DRY).
+  //   이전 (1.9.249/250) 에는 env summary / handoff / install 에 거의 동일한 분기가 중복 → 단일 소스로 일원화.
+  try {
+    const enc = _terminalEncodingNotice();
+    enc.lines.forEach(l => log(l));
+  } catch {}
   log(`  🖥 Hardware: ${env.hardware.cpus} CPUs · ${env.hardware.memGB} GB RAM`);
   log(`  🖱 Terminal: TTY=${env.terminal.isTTY}${env.terminal.powershell ? ` · PowerShell v${env.terminal.powershell}` : ''}`);
   log(`  🔧 Tools:`);

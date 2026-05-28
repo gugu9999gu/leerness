@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.9.252 — 2026-05-29 — UR-0018 마무리: env DRY 통합 + agent-mode 인코딩 점검
+
+**🧹 UR-0018 코드 정리: 1.9.249~251 누적된 인코딩 분기 중복을 단일 헬퍼로 일원화.**
+
+### 배경
+1.9.249(Windows)/1.9.250(POSIX)/1.9.251(헬퍼 신설) 진행 중, `env summary`에는 여전히 인라인 Windows/POSIX 분기가 중복으로 남아 있었음 (1.9.251에서 헬퍼는 만들었으나 env summary는 미적용). 코드 일관성(DRY)과 자율 모드 진입점 보강.
+
+### 구현
+1. **env summary DRY 통합**:
+   - 인라인 Windows(CP949) + POSIX(LANG UTF-8) 분기 ~20줄 → `_terminalEncodingNotice()` 단일 호출로 교체
+   - 출력 동일성 유지 (회귀 테스트 A6/A8로 검증) — 단일 소스로 일원화
+2. **agent-mode start 인코딩 점검 추가**:
+   - 자율 모드 진입(`leerness agent-mode start`) 시에도 인코딩 점검 (init과 동일 정책)
+   - `!enc.ok` 가드 — 위험할 때만 노출 (정상 환경 노이즈 0)
+   - `🌐 터미널 인코딩 점검 (1.9.252, UR-0018)` 헤더
+
+### 영향 받지 않은 영역
+- _terminalEncodingNotice 헬퍼 (1.9.251) · install 호출 (1.9.251) 유지
+- JSON envInfo 4 필드 (1.9.249/250) · IIFE chcp 자동회복 (1.9.249) 유지
+- handoff JSON 11 필드 매트릭스 유지
+
+### stress-v197 — **21/21 PASS · 100%**
+- 1.9.252 (8): VERSION + env DRY 통합 + 인라인 제거 검증 + agent-mode 점검 + 가드 + 출력 회귀 + 헬퍼 단일정의 + 구조 보존
+- 성능 (1): cold start avg 394ms
+- 누적 회귀 (12): 1.9.207~251
+
+### 자동 release (114 main-push streak · 75 npm publish streak · R208)
+
+🧹 **UR-0018 코드 일관성 완결** — 4 라운드(1.9.249~252) 누적 인코딩 로직을 단일 헬퍼로 정리, 진입점 3곳(init/agent-mode/env) 일관 적용.
+
+---
+
 ## 1.9.251 — 2026-05-29 — UR-0018 3단계 init 터미널 인코딩 점검 안내
 
 **🌐 UR-0018 완성: 자동 회복(1.9.249/250)에 이어 `leerness init` 시 사용자 즉시 고지.**
