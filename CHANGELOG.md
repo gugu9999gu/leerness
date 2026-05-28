@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.9.249 — 2026-05-28 — UR-0018 터미널 인코딩 자동 회복 (한국어 Windows)
+
+**🌐 사용자 명시 (UR-0018): "leerness가 적용된 프로젝트에서 터미널 출력이 깨지지 않게, 하드웨어의 언어 등을 사전에 참고하여 진행".**
+
+### 배경
+사용자 보고: `.harness/protected-files.md` 출력에서 "?뚯씪 ??젣/?뺣━" 패턴 (UTF-8 → CP949 오해석) 발생. 한국어 Windows 기본 코드페이지(CP949, 949)에서 leerness가 UTF-8로 출력한 한글이 깨져 보이는 문제.
+
+### 구현 (bootstrap 자동 회복 + 가시화)
+1. **`_ensureStdoutEncoding()` IIFE** (harness.js bootstrap, DEP0190 다음):
+   - `process.stdout/stderr.setEncoding('utf8')` 즉시 강제
+   - Windows + 비-65001 코드페이지 감지 시 → `chcp.com 65001` 자동 호출 (best-effort)
+   - 결과를 `process.env._LEERNESS_AUTOCHCP_APPLIED` 에 기록
+   - 무한 재호출 방지: `_LEERNESS_CHCP_DONE='1'` 자식 process 가드
+   - opt-out: `LEERNESS_NO_AUTOCHCP=1`
+2. **env summary** 강화:
+   - "터미널 인코딩 UTF-8 (65001) — 안전" / "터미널 코드페이지 CP949 — 한국어 출력 깨짐 위험" 명시
+3. **handoff body** 한국어 Windows + 비-65001 시 경고 섹션 추가
+4. **JSON envInfo** 신규 2필드:
+   - `terminalEncodingOk: codepage === 65001`
+   - `autoChcpApplied: process.env._LEERNESS_AUTOCHCP_APPLIED` (적용된 이전 코드페이지)
+5. **BUG fix** (`_collectRuntimeEnv`): chcp 출력 파싱 regex `\d{3,4}` → `\d{3,5}` (65001 5자리 캡처)
+
+### 영향 받지 않은 영역
+- 1.9.248 agy / 1.9.247 fallback / 1.9.246 status bar / 1.9.245 api-skill / 1.9.244 HOTFIX 모두 유지
+- handoff JSON 11 필드 매트릭스 유지 (envInfo 확장)
+
+### stress-v194 — **23/23 PASS · 100%**
+- 1.9.249 (10): VERSION + IIFE bootstrap + chcp 자동/opt-out/재호출 가드 + env summary + handoff body + JSON envInfo 2필드 + 실제 응답 (terminalEncodingOk=true) + env summary 실제 출력
+- 성능 (2): cold start avg 385ms (autochcp 포함) · 357ms (opt-out)
+- 누적 회귀 (11): 1.9.207~248 + 보안
+
+### 자동 release (111 main-push streak · 72 npm publish streak · R205)
+
+🌐 **사용자 환경 자동 회복** — Windows 한국어 사용자의 한글 깨짐을 코드페이지 차원에서 사전 차단.
+
+---
+
 ## 1.9.248 — 2026-05-26 — UR-0017 Gemini CLI 제거 + Antigravity CLI (agy) 도입
 
 **🔄 사용자 명시 (UR-0017): Gemini CLI 제거 + Antigravity (agy) CLI 전체 교체.**

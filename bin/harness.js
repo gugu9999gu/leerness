@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.248';
+const VERSION = '1.9.249';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -23,6 +23,36 @@ process.on('warning', (w) => {
 if (!/--no-deprecation/.test(process.env.NODE_OPTIONS || '')) {
   process.env.NODE_OPTIONS = ((process.env.NODE_OPTIONS || '') + ' --no-deprecation').trim();
 }
+
+// 1.9.249 (사용자 명시 UR-0018): 터미널 출력 한국어 깨짐 사전 방지
+//   사용자 보고: protected-files.md 같은 한국어 텍스트가 ? / 한자 조각으로 깨짐 (UTF-8 → CP949 오인식)
+//   조치: (1) stdout/stderr UTF-8 명시  (2) Windows + 한국어 OS + 비-65001 코드페이지 시 chcp 65001 자동 시도
+//   안전: 1회만 시도 (LEERNESS_NO_AUTOCHCP=1 로 opt-out), 실패 시 무시
+(function _ensureStdoutEncoding() {
+  try {
+    if (process.stdout && process.stdout.setEncoding) process.stdout.setEncoding('utf8');
+    if (process.stderr && process.stderr.setEncoding) process.stderr.setEncoding('utf8');
+  } catch {}
+  // Windows + 한국어 사용자 환경 (chcp 949 = CP949) → 한국어 콘솔 자동 65001 (UTF-8)
+  if (process.platform !== 'win32') return;
+  if (process.env.LEERNESS_NO_AUTOCHCP === '1') return;
+  if (process.env._LEERNESS_CHCP_DONE === '1') return;  // 자식 spawn 무한 재호출 방지
+  try {
+    const r = cp.spawnSync('chcp.com', [], { encoding: 'utf8', timeout: 2000, shell: true });
+    const out = (r.stdout || '') + (r.stderr || '');
+    const m = out.match(/(\d+)\s*$/m);
+    const code = m ? parseInt(m[1], 10) : null;
+    // 65001 = UTF-8, 949 = CP949 (한국), 932 = CP932 (일본), 936 = CP936 (중국)
+    if (code && code !== 65001) {
+      // 자동 chcp 65001 시도 (실패해도 무시 — 출력 방향 X 인 비-TTY 등)
+      try {
+        cp.spawnSync('chcp.com', ['65001'], { encoding: 'utf8', timeout: 2000, shell: true, stdio: 'ignore' });
+        process.env._LEERNESS_AUTOCHCP_APPLIED = String(code);  // 진단용 — handoff body 에서 노출
+      } catch {}
+    }
+    process.env._LEERNESS_CHCP_DONE = '1';
+  } catch {}
+})();
 
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
@@ -2408,9 +2438,9 @@ function _collectRuntimeEnv() {
   // 한국어 Windows 감지
   try {
     if (env.os.platform === 'win32') {
-      // chcp 출력으로 코드페이지 확인
+      // chcp 출력으로 코드페이지 확인 (1.9.249 fix: 65001 (5자리) 까지 매칭 — 이전 \d{3,4} 는 "6500" 만 캡처 BUG)
       const r = cp.spawnSync('chcp', [], { encoding: 'utf8', shell: true, timeout: 3000 });
-      const m = (r.stdout || '').match(/(\d{3,4})/);
+      const m = (r.stdout || '').match(/(\d{3,5})/);
       if (m) {
         const cp_num = parseInt(m[1], 10);
         env.locale.codepage = cp_num;
@@ -2577,6 +2607,17 @@ function envCmd(root, sub) {
   log(`  💻 OS: ${gr(env.os.platform)} ${env.os.release} (${env.os.arch})`);
   log(`  📦 Node: ${gr(env.node.version)}`);
   log(`  🌐 Locale: LANG=${env.locale.LANG || 'unset'} · CP=${env.locale.codepage || 'unknown'}${env.locale.isKoreanWindows ? yl(' (한국어 Windows)') : ''}`);
+  // 1.9.249 (UR-0018): 터미널 출력 인코딩 자동 점검 — 한국어 Windows + 비-65001 → 경고 + 자동 회복 결과
+  if (env.locale.isKoreanWindows && env.locale.codepage !== 65001) {
+    log(yl(`  ⚠ 터미널 코드페이지 ${env.locale.codepage} (CP949) — 한국어 출력 깨짐 위험`));
+    if (process.env._LEERNESS_AUTOCHCP_APPLIED) {
+      log(gr(`     ✓ chcp 65001 자동 적용됨 (이전: ${process.env._LEERNESS_AUTOCHCP_APPLIED}, 1.9.249)`));
+    } else {
+      log(dm(`     → 수동: chcp 65001  (또는 LEERNESS_NO_AUTOCHCP=0)`));
+    }
+  } else if (env.locale.codepage === 65001) {
+    log(gr(`  ✓ 터미널 인코딩 UTF-8 (65001) — 한국어 출력 안전`));
+  }
   log(`  🖥 Hardware: ${env.hardware.cpus} CPUs · ${env.hardware.memGB} GB RAM`);
   log(`  🖱 Terminal: TTY=${env.terminal.isTTY}${env.terminal.powershell ? ` · PowerShell v${env.terminal.powershell}` : ''}`);
   log(`  🔧 Tools:`);
@@ -6977,6 +7018,7 @@ function handoff(root) {
         };
       } catch {}
       // 1.9.242: envInfo 통합 (handoff JSON 10번째 통합 필드) — 환경 + 인코딩 위험 (UR-0014 2단계)
+      // 1.9.249: terminalEncodingOk + autoChcpApplied 필드 추가 (UR-0018)
       try {
         const runtimeEnv = _collectRuntimeEnv();
         const encScan = _scanShellScriptsEncoding(root);
@@ -6987,7 +7029,10 @@ function handoff(root) {
           nodeVersion: runtimeEnv.node.version,
           shellScriptsScanned: encScan.scanned,
           encodingRiskCount: encScan.atRisk.length,
-          encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file)
+          encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file),
+          // 1.9.249 (UR-0018): 터미널 출력 인코딩 안전 여부 + 자동 회복 결과
+          terminalEncodingOk: runtimeEnv.locale.codepage === 65001 || !runtimeEnv.locale.isKoreanWindows,
+          autoChcpApplied: process.env._LEERNESS_AUTOCHCP_APPLIED || null
         };
       } catch {}
       // 1.9.245: apiSkills 통합 (handoff JSON 11번째 통합 필드) — UR-0015 API 문서 캐시
@@ -7372,6 +7417,26 @@ function handoff(root) {
       log(dm5(`  → 상세: leerness env encoding`));
       log(dm5(`  → 자동 회복: leerness env encoding --apply (UTF-8 BOM 자동 추가, 1.9.242)`));
       log(dm5(`  → 마감 시 자동: session close --auto-fix-encoding (1.9.243)`));
+    }
+  } catch {}
+
+  // 1.9.249 (UR-0018): 터미널 코드페이지 자동 점검 + 자동 회복 노출
+  //   한국어 Windows + 비-65001 → leerness 출력 깨짐 위험 → 자동 chcp 65001 (bootstrap), 결과 본문 노출
+  try {
+    const runtimeEnv = _collectRuntimeEnv();
+    if (runtimeEnv.locale.isKoreanWindows && runtimeEnv.locale.codepage !== 65001) {
+      const isTty5 = process.stdout && process.stdout.isTTY;
+      const yl6 = s => isTty5 ? `\x1b[33m${s}\x1b[0m` : s;
+      const gr6 = s => isTty5 ? `\x1b[32m${s}\x1b[0m` : s;
+      const dm6 = s => isTty5 ? `\x1b[2m${s}\x1b[0m` : s;
+      log('');
+      log(yl6(`## ⚠ 터미널 인코딩 — 한국어 Windows + CP${runtimeEnv.locale.codepage} (1.9.249, UR-0018)`));
+      log(dm6(`  leerness 출력의 한국어가 ?/한자 조각으로 깨질 수 있음 (UTF-8 → CP949 오인식)`));
+      if (process.env._LEERNESS_AUTOCHCP_APPLIED) {
+        log(gr6(`  ✓ 자동 회복: chcp 65001 적용됨 (이전: ${process.env._LEERNESS_AUTOCHCP_APPLIED})`));
+      } else {
+        log(dm6(`  → 수동: chcp 65001 + 새 터미널 또는 LEERNESS_NO_AUTOCHCP 미설정 시 다음 호출 자동 회복`));
+      }
     }
   } catch {}
 
