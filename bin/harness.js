@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.249';
+const VERSION = '1.9.250';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2420,7 +2420,10 @@ function _collectRuntimeEnv() {
       LC_CTYPE: process.env.LC_CTYPE || null,
       // Windows 한국어 환경 detect
       OEMCP: process.env.OEMCP || null,  // CP949 = 949
-      isKoreanWindows: false
+      isKoreanWindows: false,
+      // 1.9.250 (UR-0018 2단계): POSIX (Linux/macOS/WSL) terminal encoding 점검
+      isWSL: false,
+      posixEncodingOk: null  // POSIX 전용: LANG/LC_ALL 에 UTF-8 포함 시 true
     },
     hardware: {
       cpus: os.cpus().length,
@@ -2445,6 +2448,22 @@ function _collectRuntimeEnv() {
         const cp_num = parseInt(m[1], 10);
         env.locale.codepage = cp_num;
         if (cp_num === 949 || cp_num === 51949) env.locale.isKoreanWindows = true;
+      }
+    }
+  } catch {}
+  // 1.9.250 (UR-0018 2단계): POSIX (Linux/macOS) + WSL terminal encoding 점검
+  //   LANG/LC_ALL 에 UTF-8 포함 시 안전, 그렇지 않으면 macOS/Linux 한국어 터미널 깨질 위험
+  try {
+    if (env.os.platform === 'linux' || env.os.platform === 'darwin') {
+      const langStr = (env.locale.LANG || '') + ' ' + (env.locale.LC_ALL || '') + ' ' + (env.locale.LC_CTYPE || '');
+      env.locale.posixEncodingOk = /UTF-?8/i.test(langStr);
+      // WSL 감지 (Linux 환경에서 /proc/version 에 microsoft 포함 시)
+      if (env.os.platform === 'linux') {
+        try {
+          const procVer = fs.readFileSync('/proc/version', 'utf8');
+          if (/microsoft|wsl/i.test(procVer)) env.locale.isWSL = true;
+        } catch {}
+        if (process.env.WSL_DISTRO_NAME) env.locale.isWSL = true;
       }
     }
   } catch {}
@@ -2617,6 +2636,16 @@ function envCmd(root, sub) {
     }
   } else if (env.locale.codepage === 65001) {
     log(gr(`  ✓ 터미널 인코딩 UTF-8 (65001) — 한국어 출력 안전`));
+  }
+  // 1.9.250 (UR-0018 2단계): POSIX (Linux/macOS/WSL) terminal encoding 점검
+  if (env.os.platform === 'linux' || env.os.platform === 'darwin') {
+    const wslTag = env.locale.isWSL ? yl(' (WSL)') : '';
+    if (env.locale.posixEncodingOk === true) {
+      log(gr(`  ✓ POSIX locale UTF-8 — ${env.os.platform === 'darwin' ? 'macOS' : 'Linux'}${wslTag} 한국어 출력 안전`));
+    } else if (env.locale.posixEncodingOk === false) {
+      log(yl(`  ⚠ POSIX locale에 UTF-8 없음 (LANG=${env.locale.LANG || 'unset'}) — 한국어 출력 깨질 위험`));
+      log(dm(`     → 권장: export LANG=ko_KR.UTF-8  (또는 export LC_ALL=C.UTF-8)`));
+    }
   }
   log(`  🖥 Hardware: ${env.hardware.cpus} CPUs · ${env.hardware.memGB} GB RAM`);
   log(`  🖱 Terminal: TTY=${env.terminal.isTTY}${env.terminal.powershell ? ` · PowerShell v${env.terminal.powershell}` : ''}`);
@@ -7032,7 +7061,10 @@ function handoff(root) {
           encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file),
           // 1.9.249 (UR-0018): 터미널 출력 인코딩 안전 여부 + 자동 회복 결과
           terminalEncodingOk: runtimeEnv.locale.codepage === 65001 || !runtimeEnv.locale.isKoreanWindows,
-          autoChcpApplied: process.env._LEERNESS_AUTOCHCP_APPLIED || null
+          autoChcpApplied: process.env._LEERNESS_AUTOCHCP_APPLIED || null,
+          // 1.9.250 (UR-0018 2단계): POSIX (Linux/macOS/WSL) terminal encoding 점검
+          posixEncodingOk: runtimeEnv.locale.posixEncodingOk,
+          isWSL: runtimeEnv.locale.isWSL || false
         };
       } catch {}
       // 1.9.245: apiSkills 통합 (handoff JSON 11번째 통합 필드) — UR-0015 API 문서 캐시
@@ -7437,6 +7469,18 @@ function handoff(root) {
       } else {
         log(dm6(`  → 수동: chcp 65001 + 새 터미널 또는 LEERNESS_NO_AUTOCHCP 미설정 시 다음 호출 자동 회복`));
       }
+    }
+    // 1.9.250 (UR-0018 2단계): POSIX (Linux/macOS/WSL) terminal encoding 경고
+    if (runtimeEnv.locale.posixEncodingOk === false) {
+      const isTty6 = process.stdout && process.stdout.isTTY;
+      const yl7 = s => isTty6 ? `\x1b[33m${s}\x1b[0m` : s;
+      const dm7 = s => isTty6 ? `\x1b[2m${s}\x1b[0m` : s;
+      const wslTag = runtimeEnv.locale.isWSL ? ' (WSL)' : '';
+      log('');
+      log(yl7(`## ⚠ 터미널 인코딩 — POSIX${wslTag} locale에 UTF-8 없음 (1.9.250, UR-0018 2단계)`));
+      log(dm7(`  LANG=${runtimeEnv.locale.LANG || 'unset'} · LC_ALL=${runtimeEnv.locale.LC_ALL || 'unset'}`));
+      log(dm7(`  → 권장: export LANG=ko_KR.UTF-8  (또는 export LC_ALL=C.UTF-8)`));
+      log(dm7(`  → 영구 적용: ~/.bashrc 또는 ~/.zshrc 에 추가`));
     }
   } catch {}
 
@@ -11350,7 +11394,13 @@ function sessionClose(root, opts = {}) {
           nodeVersion: runtimeEnv.node.version,
           shellScriptsScanned: encScan.scanned,
           encodingRiskCount: encScan.atRisk.length,
-          encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file)
+          encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file),
+          // 1.9.249 (UR-0018): 터미널 출력 인코딩 안전 여부 + 자동 회복 결과
+          terminalEncodingOk: runtimeEnv.locale.codepage === 65001 || !runtimeEnv.locale.isKoreanWindows,
+          autoChcpApplied: process.env._LEERNESS_AUTOCHCP_APPLIED || null,
+          // 1.9.250 (UR-0018 2단계): POSIX (Linux/macOS/WSL) terminal encoding 점검
+          posixEncodingOk: runtimeEnv.locale.posixEncodingOk,
+          isWSL: runtimeEnv.locale.isWSL || false
         };
       } catch {}
       // 1.9.245: apiSkills 통합 (session close JSON 11번째 통합 필드) — UR-0015
@@ -18144,7 +18194,13 @@ function healthCmd(root) {
       nodeVersion: runtimeEnv.node.version,
       shellScriptsScanned: encScan.scanned,
       encodingRiskCount: encScan.atRisk.length,
-      encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file)
+      encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file),
+      // 1.9.249 (UR-0018): 터미널 출력 인코딩 안전 여부 + 자동 회복 결과
+      terminalEncodingOk: runtimeEnv.locale.codepage === 65001 || !runtimeEnv.locale.isKoreanWindows,
+      autoChcpApplied: process.env._LEERNESS_AUTOCHCP_APPLIED || null,
+      // 1.9.250 (UR-0018 2단계): POSIX (Linux/macOS/WSL) terminal encoding 점검
+      posixEncodingOk: runtimeEnv.locale.posixEncodingOk,
+      isWSL: runtimeEnv.locale.isWSL || false
     };
   } catch { out.envInfo = { error: 'envInfo 점검 실패' }; }
   // 1.9.245: health --json apiSkills 통합 (3 명령 11 필드 — UR-0015)

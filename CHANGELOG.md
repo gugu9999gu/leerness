@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.9.250 — 2026-05-28 — UR-0018 2단계 POSIX 인코딩 자동 회복 (Linux/macOS/WSL)
+
+**🌐 UR-0018 후속: Windows + POSIX 양방향 인코딩 보호 완성.**
+
+### 배경
+1.9.249는 Windows (CP949 → 65001) 에 집중. POSIX (Linux/macOS) 한국어 환경 + WSL 사용자도 LANG/LC_ALL 미설정 시 동일한 한글 깨짐 발생.
+
+### 구현
+1. **`_collectRuntimeEnv` 확장** (locale 필드):
+   - `posixEncodingOk: boolean | null` — LANG/LC_ALL/LC_CTYPE 에 UTF-8 포함 여부
+   - `isWSL: boolean` — `/proc/version` "microsoft" 매칭 또는 `WSL_DISTRO_NAME` env
+2. **env summary**:
+   - `✓ POSIX locale UTF-8 — Linux/macOS (WSL) 한국어 출력 안전`
+   - `⚠ POSIX locale에 UTF-8 없음 (LANG=…) — 한국어 출력 깨질 위험`
+   - `→ 권장: export LANG=ko_KR.UTF-8 (또는 export LC_ALL=C.UTF-8)`
+3. **handoff body**:
+   - `## ⚠ 터미널 인코딩 — POSIX(WSL) locale에 UTF-8 없음 (1.9.250, UR-0018 2단계)`
+   - `~/.bashrc 또는 ~/.zshrc 에 추가` 영구 적용 안내
+4. **JSON envInfo 4필드 propagate** (handoff/session close/health 3 명령 일관성):
+   - `terminalEncodingOk` (1.9.249) — 이전 라운드에서 handoff 만 적용 → session close/health 추가
+   - `autoChcpApplied` (1.9.249) — 동일 propagate
+   - `posixEncodingOk` (1.9.250 신규)
+   - `isWSL` (1.9.250 신규)
+
+### 영향 받지 않은 영역
+- Windows chcp 65001 자동 회복 (1.9.249) 유지
+- 1.9.248 agy / 1.9.247 fallback / 1.9.246 status bar / 1.9.245 api-skill 모두 유지
+- handoff JSON 11 필드 매트릭스 유지
+
+### stress-v195 — **26/26 PASS · 100%**
+- 1.9.250 (12): VERSION + IIFE + POSIX UTF-8 검사 + WSL 감지 + env summary + handoff body + JSON 3 명령 propagate (4 필드)
+- 성능 (2): cold start avg 368ms · env summary --json avg 1120ms
+- 누적 회귀 (12): 1.9.207~249
+
+### 자동 release (112 main-push streak · 73 npm publish streak · R206)
+
+🌐 **양방향 인코딩 보호 완성** — Windows + POSIX 모두 leerness 자체 출력 한글 깨짐 사전 차단.
+
+---
+
 ## 1.9.249 — 2026-05-28 — UR-0018 터미널 인코딩 자동 회복 (한국어 Windows)
 
 **🌐 사용자 명시 (UR-0018): "leerness가 적용된 프로젝트에서 터미널 출력이 깨지지 않게, 하드웨어의 언어 등을 사전에 참고하여 진행".**
