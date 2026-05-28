@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.250';
+const VERSION = '1.9.251';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1053,6 +1053,19 @@ async function install(root, opts = {}) {
             log(aiBlock[0].trim());
             log('');
           }
+        }
+      } catch {}
+    }
+    // 1.9.251 (UR-0018 3단계): init 완료 시 터미널 인코딩 점검 안내 — 사용자 명시 ("leerness init 시 터미널 인코딩 점검 안내")
+    //   Windows CP949 / POSIX non-UTF-8 환경에서 leerness 한국어 출력 깨짐을 설치 직후 사용자에게 즉시 고지.
+    if (!opts.migration) {
+      try {
+        const enc = _terminalEncodingNotice();
+        if (enc.lines.length > 0) {
+          log('');
+          log(`\x1b[36m🌐 터미널 인코딩 점검 (1.9.251, UR-0018)\x1b[0m`);
+          enc.lines.forEach(l => log(l));
+          if (!enc.ok) log(`\x1b[2m   상세: leerness env  ·  셸 스크립트 검사: leerness env encoding\x1b[0m`);
         }
       } catch {}
     }
@@ -2485,6 +2498,44 @@ function _collectRuntimeEnv() {
     } catch {}
   }
   return env;
+}
+
+// 1.9.251 (UR-0018 3단계): leerness init/명령 시 터미널 인코딩 점검 안내 (재사용 헬퍼)
+//   Windows (CP949) + POSIX (Linux/macOS/WSL) 양방향 — leerness 한국어 출력 깨짐 사전 점검.
+//   반환: { ok, lines:[] } — lines 는 색상 적용된 출력 라인 배열 (호출측이 log() 로 출력).
+function _terminalEncodingNotice(opts = {}) {
+  const isTty = opts.isTty != null ? opts.isTty : !!(process.stdout && process.stdout.isTTY);
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const lines = [];
+  let ok = true;
+  let env;
+  try { env = _collectRuntimeEnv(); } catch { return { ok: true, lines: [] }; }
+  // Windows 한국어 + 비-65001 코드페이지
+  if (env.locale.isKoreanWindows && env.locale.codepage !== 65001) {
+    ok = false;
+    lines.push(yl(`  ⚠ 터미널 코드페이지 CP${env.locale.codepage} (CP949) — leerness 한국어 출력 깨짐 위험`));
+    if (process.env._LEERNESS_AUTOCHCP_APPLIED) {
+      lines.push(gr(`     ✓ chcp 65001 자동 적용됨 (이전: ${process.env._LEERNESS_AUTOCHCP_APPLIED}, 1.9.249)`));
+    } else {
+      lines.push(dm(`     → 수동: chcp 65001  (또는 자동: LEERNESS_NO_AUTOCHCP 미설정)`));
+    }
+  } else if (env.locale.codepage === 65001) {
+    lines.push(gr(`  ✓ 터미널 인코딩 UTF-8 (65001) — 한국어 출력 안전`));
+  }
+  // POSIX (Linux/macOS/WSL) locale UTF-8 점검
+  if (env.locale.posixEncodingOk === false) {
+    ok = false;
+    const wslTag = env.locale.isWSL ? ' (WSL)' : '';
+    lines.push(yl(`  ⚠ POSIX${wslTag} locale에 UTF-8 없음 (LANG=${env.locale.LANG || 'unset'}) — 한국어 출력 깨질 위험`));
+    lines.push(dm(`     → 권장: export LANG=ko_KR.UTF-8  (또는 export LC_ALL=C.UTF-8)`));
+    lines.push(dm(`     → 영구: ~/.bashrc 또는 ~/.zshrc 에 추가`));
+  } else if (env.locale.posixEncodingOk === true) {
+    const wslTag = env.locale.isWSL ? ' (WSL)' : '';
+    lines.push(gr(`  ✓ POSIX locale UTF-8${wslTag} — 한국어 출력 안전`));
+  }
+  return { ok, lines };
 }
 
 // 셸 스크립트 (.ps1/.bat/.cmd/.sh) 인코딩 위험 감지

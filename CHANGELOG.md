@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.251 — 2026-05-29 — UR-0018 3단계 init 터미널 인코딩 점검 안내
+
+**🌐 UR-0018 완성: 자동 회복(1.9.249/250)에 이어 `leerness init` 시 사용자 즉시 고지.**
+
+### 배경
+UR-0018 원문에 명시된 *"leerness init 시 터미널 인코딩 점검 안내"* 부분이 미구현 상태. 1.9.249(Windows chcp)/1.9.250(POSIX)는 자동 회복에 집중했으나, 설치 직후 사용자에게 현재 인코딩 상태를 보여주는 가시화는 빠져 있었음.
+
+### 구현
+1. **`_terminalEncodingNotice()` 재사용 헬퍼 신설**:
+   - Windows(CP949) + POSIX(Linux/macOS/WSL) 양방향 점검을 한 곳에 통합
+   - 반환 `{ ok, lines[] }` — 색상 적용된 출력 라인 (호출측이 `log()`)
+   - TTY 자동 감지 → 비-TTY 시 색상 코드 생략
+2. **`leerness init` 완료 시 자동 호출** (`!opts.migration` 가드):
+   - `🌐 터미널 인코딩 점검 (1.9.251, UR-0018)` 헤더 + 상태 라인
+   - 위험 시 `상세: leerness env · 셸 스크립트 검사: leerness env encoding` 안내
+   - 안전(65001/UTF-8) 시 `✓` 초록 표시
+3. migration(재설치)에서는 노이즈 방지를 위해 skip
+
+### 영향 받지 않은 영역
+- 1.9.249 chcp 65001 자동 회복 + 1.9.250 POSIX posixEncodingOk/isWSL 모두 유지
+- JSON envInfo 4 필드 (terminalEncodingOk/autoChcpApplied/posixEncodingOk/isWSL) 유지
+- env summary 인라인 인코딩 라인 (1.9.249/250) 유지 — 헬퍼와 독립
+
+### stress-v196 — **21/21 PASS · 100%**
+- 1.9.251 (8): VERSION + 헬퍼 + 반환구조 + install 호출 + Windows/POSIX 분기 + migration skip + 실제 init 출력
+- 성능 (1): cold start avg 471ms
+- 누적 회귀 (12): 1.9.207~250
+
+### 자동 release (113 main-push streak · 74 npm publish streak · R207)
+
+🌐 **UR-0018 3단계 완성** — 자동 회복 + 설치 시 가시화로 한국어 인코딩 보호 전체 사이클 완결.
+
+---
+
 ## 1.9.250 — 2026-05-28 — UR-0018 2단계 POSIX 인코딩 자동 회복 (Linux/macOS/WSL)
 
 **🌐 UR-0018 후속: Windows + POSIX 양방향 인코딩 보호 완성.**
