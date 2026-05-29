@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.9.256 — 2026-05-29 — 단위 테스트 인프라 확대 (보안/정확성-핵심 순수 함수)
+
+**🧪 1.9.255 require.main 가드 기반 확장: 소스 regex 가 아닌 실제 함수 동작을 검증하는 단위 테스트로 회귀 강화.**
+
+### 배경
+기존 stress 테스트는 대부분 `/regex/.test(src)` (소스 문자열 존재 확인) — 약한 회귀. 1.9.255의 `require.main` 가드로 내부 함수를 직접 import 가능해졌으므로, 보안/정확성-핵심 순수 함수의 **실 동작**을 검증.
+
+### 구현 (export 3종 추가 — 코드 동작 변경 없음, 테스트 표면만 확장)
+1. **`_isSecretKey`** (보안-핵심): config inject 시 시크릿 키 차단. 실 동작 검증:
+   - TOKEN/SECRET/PASSWORD/API_KEY/PRIVATE 차단 (대소문자 무관, 부분 매칭)
+   - 비시크릿 LEERNESS_* 통과
+2. **`compareVer`** (정확성-핵심): stale-check/업데이트 감지의 버전 비교. 실 동작 검증:
+   - major/minor/patch 대소 + 누락 파트 0 처리 + null/빈 문자열 안전
+3. **`parseHarnessVersion`**: canonical/legacy-plus/legacy/빈 입력 파싱
+
+### stress-v201 — **24/24 PASS · 100%**
+- 1.9.256 (12): export + _isSecretKey (3) + compareVer (4) + parseHarnessVersion (4)
+- 성능 (1): cold start avg 346ms
+- 누적 회귀 (11): 1.9.207~255 — 특히 보안 회귀를 소스 regex → **실 함수 호출**로 전환 (강한 회귀)
+
+### 자동 release (118 main-push streak · 79 npm publish streak · R212)
+
+🧪 **회귀 신뢰도 강화** — 보안(_isSecretKey)·버전 비교(compareVer) 등 핵심 로직을 실 동작으로 검증, 소스 문자열 의존 약점 보완.
+
+---
+
 ## 1.9.255 — 2026-05-29 — UR-0019 2단계: PATH 등록 실제 테스트/디버그 + require.main 가드
 
 **🧪 사용자 명시 (UR-0019 후속 "테스트 및 디버그 다음라운드 참고"): PATH 자동 등록 실제 동작 검증 + 테스트 인프라.**

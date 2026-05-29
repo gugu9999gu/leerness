@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.255';
+const VERSION = '1.9.256';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -20047,8 +20047,11 @@ if (require.main === module) {
 
 // 1.9.255: 테스트/디버그용 내부 함수 export (require.main 가드 덕분에 require 시 CLI 미실행).
 //   PATH 등록 (UR-0019) 검증 + 향후 단위 테스트 확장에 사용.
+// 1.9.256: 보안/정확성-핵심 순수 함수 추가 export — 실 동작 단위 테스트로 회귀 강화.
+//   _isSecretKey (시크릿 차단, 보안), compareVer (버전 비교, stale-check 정확성), parseHarnessVersion (버전 파싱).
 module.exports = {
   VERSION,
   _npmGlobalBin, _dirInPath, _leernessResolvable, _pathDiagnose, _registerPath,
-  _winPathPsScript, _unixPathBlock, pathSetupCmd
+  _winPathPsScript, _unixPathBlock, pathSetupCmd,
+  _isSecretKey, compareVer, parseHarnessVersion
 };
