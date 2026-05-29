@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.253 — 2026-05-29 — CLAUDE/AGENTS 문서 누적 갱신 (1.9.238~252 drift 차단)
+
+**📚 문서 drift 차단: 메타 지침서가 1.9.237에 멈춰 있어 15 라운드(1.9.238~252) 미반영 → 누적 갱신.**
+
+### 배경
+CLAUDE.md / AGENTS.md(AI 에이전트 핸드오프 핵심 지침)가 마지막으로 1.9.237까지만 반영. 1.9.238~252의 사용자 명시 백로그 UR-0013~0018 6 요청이 문서에 없어, 새 세션 AI가 최신 기능(py-check, env encoding, api-skill, agy, 인코딩 자동회복)을 인지 못 할 drift 위험. (기존 패턴: 1.9.171/214/238 doc-sync 라운드 계승)
+
+### 구현 (문서 전용 — 코드 변경 없음, VERSION bump만)
+1. **CLAUDE.md**: "사용자 명시 백로그 UR-0013~0018 (1.9.239~252)" 섹션 추가
+   - UR-0013 py/agent-mode · UR-0014 env encoding · UR-0015 api-skill · UR-0016 REPL UX · UR-0017 agy · UR-0018 인코딩 자동회복(4 라운드 상세)
+   - 마일스톤 1.9.237→1.9.252 갱신 (R208 · 114 main-push · 75 npm · JSON 11 필드 · MCP 70 · CLI 57)
+2. **AGENTS.md**: UR-0013~0018 백로그 테이블 + UR-0018 4 라운드 상세 + 5축 매트릭스 유지 표기 + 마일스톤 1.9.252
+3. session-workflow.md는 gitignored 생성 메타파일(6단계 워크플로 템플릿) — 기능 로그 대상 아님, 갱신 제외
+
+### stress-v198 — **21/21 PASS · 100%**
+- 1.9.253 (8): VERSION + CLAUDE/AGENTS 백로그·UR-0018·마일스톤·11필드·stale 참조 해소
+- 성능 (1): cold start avg 394ms
+- 누적 회귀 (12): 1.9.207~252
+
+### 자동 release (115 main-push streak · 76 npm publish streak · R209)
+
+📚 **AI 핸드오프 지침 최신화** — 새 세션 에이전트가 UR-0013~0018 기능을 즉시 인지, drift 0 유지.
+
+---
+
 ## 1.9.252 — 2026-05-29 — UR-0018 마무리: env DRY 통합 + agent-mode 인코딩 점검
 
 **🧹 UR-0018 코드 정리: 1.9.249~251 누적된 인코딩 분기 중복을 단일 헬퍼로 일원화.**

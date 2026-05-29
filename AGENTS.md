@@ -131,12 +131,34 @@ leerness가 자동 검증 가능한 trigger:
 - 1.9.236 MCP 66 + `drift check --auto-fix` 자동 통합 (50+ 시)
 - 1.9.237 `session close --auto-cleanup-branches` + handoff body 50+ 경고
 
-### 5축 매트릭스 (1.9.218 — 100/100 달성)
+### 사용자 명시 백로그 UR-0013~0018 (1.9.239~252 — 6 요청 완전 소진)
+
+| UR | 버전 | 핵심 기능 | CLI / 동작 |
+|---|---|---|---|
+| UR-0013 | 1.9.239~240 | py 스크립트 + agent 모드 효율화 | `py-check` / `agent-mode start\|tick` + MCP 67/68 + JSON `pyFiles` |
+| UR-0014 | 1.9.241~243 | 한국어 셸 인코딩 사전 감지 | `env` / `env encoding [--apply]` + JSON `envInfo` + CJK 분류 |
+| UR-0015 | 1.9.245 | API skill cache | `api-skill add <url> --direction` + handoff 매칭 + audit finding |
+| UR-0016 | 1.9.246~247 | REPL UX/UI | 컨텍스트 게이지 + 서브에이전트 가시화 + multi-provider fallback |
+| UR-0017 | 1.9.248 | Gemini → Antigravity (agy) | EXTERNAL_AGENTS/provider/MCP/dispatch 전체 교체 |
+| UR-0018 | 1.9.249~252 | 터미널 인코딩 자동 회복 | Windows chcp 65001 + POSIX/WSL LANG + init/agent-mode/env 점검 |
+
+### UR-0018 터미널 인코딩 자동 회복 — 4 라운드 상세
+1. **1.9.249** (Windows): `_ensureStdoutEncoding()` IIFE — chcp 65001 자동 + setEncoding('utf8'). opt-out `LEERNESS_NO_AUTOCHCP=1`
+2. **1.9.250** (POSIX/WSL): `posixEncodingOk` + `isWSL` 감지 → JSON envInfo 4 필드 (terminalEncodingOk/autoChcpApplied/posixEncodingOk/isWSL) 3 명령 propagate
+3. **1.9.251** (init 안내): `_terminalEncodingNotice()` 헬퍼 + `leerness init` 완료 시 점검
+4. **1.9.252** (DRY): env summary 통합 + `agent-mode start` 점검 (진입점 3곳 일관)
+
+### 5축 매트릭스 (1.9.218 — 100/100 달성, 1.9.252 유지)
 - A. agent 자동화 — 10/10
 - B. multi-agent consensus — 10/10
 - C. skill 자동 회수 — 10/10
 - D. task 회고 + 7일+ stale — 10/10
 - E. next-action queue + lazy detect — 10/10
+
+### 자율 모드 마일스톤 — 1.9.252 시점
+- **R208 누적 라운드** · **114 main-push streak** · **75 npm publish streak**
+- handoff/session close/health JSON **11 통합 필드** (3 × 11 = 33 포인트): + pyFiles / envInfo / apiSkills
+- MCP **70 도구** · 9 카테고리 **57 CLI 명령** · 사용자 백로그 UR-0013~0018 완전 소진
 
 ---
 <!-- leerness:migration-preserved -->

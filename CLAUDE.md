@@ -158,14 +158,43 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 - 마감 시 자동 정리 (1.9.224 패턴 확장)
 - handoff body 50+ branches 누적 경고 자동
 
-## 자율 모드 마일스톤 — 1.9.237 시점
+## 사용자 명시 백로그 UR-0013~0018 (1.9.239~252) — 6 요청 완전 소진
 
-- **R193 누적 라운드** (baseline v1.9.6)
-- **100 main-push streak 진입** (1.9.140 부터)
-- **🎉 60 npm publish streak** (1.9.178 부터)
-- **handoff/session close/health JSON 8 필드** (3 × 8 = 24 통합 포인트)
-- **MCP 66 도구**
-- **9 카테고리 51 CLI 명령**
+### 1.9.239~240 — UR-0013: py 스크립트 + agent 모드 효율화
+- `leerness py-check` / `agent-mode start|tick` 명령 + MCP 67/68
+- handoff py auto-detect + JSON 9번째 필드 `pyFiles` + 헤드라인 통합
+
+### 1.9.241~243 — UR-0014: 한국어 PowerShell/셸 인코딩 사전 감지
+- `leerness env` + `env encoding [--apply]` — .ps1/.bat 비-ASCII + BOM 없음 → CP949 오인식 감지
+- JSON 10번째 필드 `envInfo` + drift --auto-fix 통합 + CJK 분류 (Korean/Japanese/Chinese)
+
+### 1.9.245 — UR-0015: API skill cache
+- `leerness api-skill add <url> --direction "..."` — 공식 문서 + 관련 링크 자동 정리 (`.harness/api-skills/`)
+- handoff 자동 매칭 노출 + audit `api_skill_missing` finding (1.9.247)
+
+### 1.9.246~247 — UR-0016: REPL agent UX/UI
+- 컨텍스트 게이지 + 서브에이전트 가시화 + 정상완료 초록색 강조 (status bar)
+- multi-provider auto-fallback (`:fallback on` / transient 실패 시 자동 전환)
+
+### 1.9.248 — UR-0017: Gemini CLI 제거 → Antigravity (agy)
+- EXTERNAL_AGENTS / provider cycle / setup-agents / MCP / dispatch 전체 교체
+- `LEERNESS_ENABLE_GEMINI` → `LEERNESS_ENABLE_AGY` · install hint `npm i -g @google/antigravity-cli`
+
+### 1.9.249~252 — UR-0018: 터미널 출력 인코딩 자동 회복 (4 라운드)
+- **1.9.249** (Windows): `_ensureStdoutEncoding()` IIFE — chcp 65001 자동 + stdout/stderr setEncoding('utf8'). opt-out `LEERNESS_NO_AUTOCHCP=1`
+- **1.9.250** (POSIX): `posixEncodingOk` + `isWSL` 감지 (`/proc/version` microsoft / `WSL_DISTRO_NAME`) → JSON envInfo 4 필드 (terminalEncodingOk/autoChcpApplied/posixEncodingOk/isWSL) 3 명령 propagate
+- **1.9.251** (init 안내): `_terminalEncodingNotice()` 헬퍼 신설 + `leerness init` 완료 시 인코딩 점검 노출
+- **1.9.252** (DRY): env summary 인라인 분기를 헬퍼로 통합 + `agent-mode start` 인코딩 점검 (진입점 3곳 일관)
+
+## 자율 모드 마일스톤 — 1.9.252 시점
+
+- **R208 누적 라운드** (baseline v1.9.6)
+- **🎉 114 main-push streak** (1.9.140 부터)
+- **🎉 75 npm publish streak** (1.9.178 부터)
+- **handoff/session close/health JSON 11 필드** (3 × 11 = 33 통합 포인트)
+- **MCP 70 도구**
+- **사용자 명시 백로그 UR-0013~0018 완전 소진**
+- **9 카테고리 57 CLI 명령**
 
 ---
 <!-- leerness:migration-preserved -->
