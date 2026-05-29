@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.9.254 — 2026-05-29 — UR-0019 leerness CLI PATH 자동 등록
+
+**🔗 사용자 명시 (UR-0019): "leerness 설치 시 leerness CLI가 PATH를 자동으로 등록될 수 있게 구현". (테스트/디버그는 다음 라운드 참고)**
+
+### 배경
+`npm i -g leerness` 설치 후 npm global bin 디렉토리가 PATH에 없으면 `leerness` 명령이 동작하지 않음 (특히 Windows nvm/수동 Node 설치 환경). 설치 직후 자동 감지 + 안전 등록.
+
+### 구현 (`leerness path-setup [--apply] [--json]` + install 자동 안내)
+1. **진단 헬퍼 5종**:
+   - `_npmGlobalBin()` — `npm prefix -g` 기반 global bin 감지 (Windows=prefix, Unix=prefix/bin, fallback=node dir)
+   - `_dirInPath(dir)` — 플랫폼별 정규화(대소문자/구분자/trailing slash) 후 PATH 포함 확인
+   - `_leernessResolvable()` — `where`/`which` 로 실제 실행 가능 여부
+   - `_pathDiagnose()` — globalBin/inPath/resolvable/shellRc 종합
+   - `_registerPath(diag)` — 플랫폼별 안전 등록
+2. **플랫폼별 안전 등록**:
+   - **Windows**: PowerShell `[Environment]::SetEnvironmentVariable('PATH', ..., 'User')` — User scope (관리자 권한 불요), `setx`의 1024자 truncation 회피, 멱등(중복 시 EXISTS)
+   - **Unix**: shell rc(`.zshrc`/`.bashrc`/`.profile`) 에 `export PATH` 블록 append — 마커(`# >>> leerness PATH`)로 멱등
+3. **안전 원칙** (글로벌 룰: 안정성 > 성능, 엄격 처리):
+   - **dry-run 기본** — `--apply` 명시해야 실제 등록
+   - **멱등** — 이미 등록/PATH 포함 시 "등록 불필요"
+   - **append-only** — 기존 PATH 덮어쓰기 절대 없음
+4. **install 완료 자동 안내**: PATH 미등록 감지 시 `🔗 leerness CLI PATH 미등록` + `path-setup --apply` 안내. opt-out `LEERNESS_NO_PATH_CHECK=1`
+5. **env summary 힌트** + `path` 별칭
+
+### 다음 라운드 참고 (사용자 명시)
+- 실제 `--apply` 등록 동작 깊은 테스트/디버그 (Windows User PATH 반영 확인, Unix rc source 후 동작)
+- 신규 셸 세션에서 PATH 반영 검증
+
+### stress-v199 — **25/25 PASS · 100%**
+- 1.9.254 (12): VERSION + 헬퍼 5종 + dispatch + Windows PS/Unix rc 등록 + dry-run + install 안내 + 실제 실행(진단/json/별칭/정규화) + env 힌트
+- 성능 (1): cold start avg 434ms
+- 누적 회귀 (12): 1.9.207~253
+
+### 자동 release (116 main-push streak · 77 npm publish streak · R210)
+
+🔗 **설치 후 즉시 사용 가능** — npm global bin PATH 누락 자동 감지 + 안전 등록 (opt-in).
+
+---
+
 ## 1.9.253 — 2026-05-29 — CLAUDE/AGENTS 문서 누적 갱신 (1.9.238~252 drift 차단)
 
 **📚 문서 drift 차단: 메타 지침서가 1.9.237에 멈춰 있어 15 라운드(1.9.238~252) 미반영 → 누적 갱신.**

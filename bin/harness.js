@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.253';
+const VERSION = '1.9.254';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1066,6 +1066,19 @@ async function install(root, opts = {}) {
           log(`\x1b[36m🌐 터미널 인코딩 점검 (1.9.251, UR-0018)\x1b[0m`);
           enc.lines.forEach(l => log(l));
           if (!enc.ok) log(`\x1b[2m   상세: leerness env  ·  셸 스크립트 검사: leerness env encoding\x1b[0m`);
+        }
+      } catch {}
+    }
+    // 1.9.254 (UR-0019): init 완료 시 leerness CLI 가 PATH 에서 안 찾아지면 자동 등록 안내 (사용자 명시)
+    //   opt-out: LEERNESS_NO_PATH_CHECK=1. 자동 등록은 강제하지 않고 안내만 (--apply 명시 필요).
+    if (!opts.migration && process.env.LEERNESS_NO_PATH_CHECK !== '1') {
+      try {
+        const diag = _pathDiagnose();
+        if (!diag.resolvable && !diag.inPath && diag.globalBin) {
+          log('');
+          log(`\x1b[33m🔗 leerness CLI PATH 미등록 (1.9.254, UR-0019)\x1b[0m`);
+          log(`\x1b[2m   npm global bin (${diag.globalBin}) 이 PATH 에 없어 'leerness' 명령이 안 먹힐 수 있음\x1b[0m`);
+          log(`\x1b[36m   → 자동 등록: leerness path-setup --apply\x1b[0m`);
         }
       } catch {}
     }
@@ -2699,7 +2712,161 @@ function envCmd(root, sub) {
   }
   log('');
   log(dm(`  → 인코딩 검사: leerness env encoding-check (셸 스크립트 .ps1/.bat 위험 감지)`));
+  log(dm(`  → PATH 등록: leerness path-setup (leerness CLI 가 PATH 에서 안 찾아질 때)`));
   log(dm(`  → JSON 출력: leerness env --json`));
+}
+
+// 1.9.254: leerness CLI PATH 자동 등록 (사용자 명시 UR-0019)
+//   배경: `npm i -g leerness` 했는데 npm global bin 이 PATH 에 없으면 `leerness` 명령이 안 먹힘.
+//   해결: global bin 경로 감지 + PATH 포함 여부 확인 → 미등록 시 플랫폼별 안전 등록 (opt-in --apply).
+//   안전 원칙 (글로벌 룰: 안정성 > 성능, 엄격 처리): dry-run 기본 / 멱등 / append-only / 덮어쓰기 금지.
+
+// npm global bin 디렉토리 감지 (npm prefix -g + bin, fallback: process.execPath 기반)
+function _npmGlobalBin() {
+  // 1) npm prefix -g (가장 정확) — Windows 는 prefix 자체가 bin, Unix 는 prefix/bin
+  try {
+    const r = cp.spawnSync('npm', ['prefix', '-g'], { encoding: 'utf8', shell: true, timeout: 5000 });
+    if (r.status === 0) {
+      const prefix = (r.stdout || '').trim().split(/\r?\n/).pop();
+      if (prefix) return process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
+    }
+  } catch {}
+  // 2) fallback: 현재 실행 중인 node 의 디렉토리 (global bin 이 보통 같은 위치)
+  try { return path.dirname(process.execPath); } catch {}
+  return null;
+}
+
+// 주어진 디렉토리가 현재 PATH 에 포함되어 있는지 (대소문자/구분자 정규화)
+function _dirInPath(dir) {
+  if (!dir) return false;
+  const sep = process.platform === 'win32' ? ';' : ':';
+  const norm = s => {
+    let p = (s || '').trim().replace(/["']/g, '');
+    try { p = path.normalize(p); } catch {}
+    p = p.replace(/[\\/]+$/, '');
+    return process.platform === 'win32' ? p.toLowerCase() : p;
+  };
+  const want = norm(dir);
+  return (process.env.PATH || '').split(sep).map(norm).filter(Boolean).includes(want);
+}
+
+// leerness 가 PATH 에서 실행 가능한지 (which/where 사용)
+function _leernessResolvable() {
+  try {
+    const probe = process.platform === 'win32' ? 'where' : 'which';
+    const r = cp.spawnSync(probe, ['leerness'], { encoding: 'utf8', shell: true, timeout: 5000 });
+    return r.status === 0 && /leerness/i.test((r.stdout || ''));
+  } catch { return false; }
+}
+
+// PATH 등록 상태 진단 (반환: { globalBin, inPath, resolvable, platform, shellRc })
+function _pathDiagnose() {
+  const globalBin = _npmGlobalBin();
+  const inPath = _dirInPath(globalBin);
+  const resolvable = _leernessResolvable();
+  let shellRc = null;
+  if (process.platform !== 'win32') {
+    const home = os.homedir();
+    const shell = process.env.SHELL || '';
+    if (/zsh/.test(shell)) shellRc = path.join(home, '.zshrc');
+    else if (/bash/.test(shell)) shellRc = path.join(home, '.bashrc');
+    else shellRc = path.join(home, '.profile');
+  }
+  return { globalBin, inPath, resolvable, platform: process.platform, shellRc };
+}
+
+// PATH 에 globalBin 등록 (플랫폼별 안전 방법). 반환: { ok, method, detail }
+function _registerPath(diag) {
+  const bin = diag.globalBin;
+  if (!bin) return { ok: false, method: 'none', detail: 'npm global bin 경로를 찾을 수 없음' };
+  if (process.platform === 'win32') {
+    // Windows: PowerShell [Environment]::SetEnvironmentVariable User scope — setx 의 1024자 truncation 회피
+    //   현재 User PATH 를 읽어 중복 없으면 append (멱등). 시스템 PATH 는 건드리지 않음 (관리자 권한 불요).
+    try {
+      const ps = [
+        "$b = " + JSON.stringify(bin) + ";",
+        "$u = [Environment]::GetEnvironmentVariable('PATH','User'); if (-not $u) { $u = '' }",
+        "$parts = $u.Split(';') | Where-Object { $_ -ne '' }",
+        "if ($parts -notcontains $b) {",
+        "  $nu = if ($u -eq '') { $b } else { $u.TrimEnd(';') + ';' + $b }",
+        "  [Environment]::SetEnvironmentVariable('PATH', $nu, 'User')",
+        "  Write-Output 'ADDED'",
+        "} else { Write-Output 'EXISTS' }"
+      ].join(' ');
+      const r = cp.spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', timeout: 10000 });
+      const out = (r.stdout || '').trim();
+      if (r.status === 0 && /ADDED/.test(out)) return { ok: true, method: 'powershell-user-path', detail: `User PATH 에 추가됨 (새 터미널부터 적용): ${bin}` };
+      if (r.status === 0 && /EXISTS/.test(out)) return { ok: true, method: 'already', detail: `User PATH 에 이미 존재: ${bin}` };
+      return { ok: false, method: 'powershell-user-path', detail: `등록 실패 (exit ${r.status}): ${(r.stderr || out || '').trim().slice(0, 200)}` };
+    } catch (e) { return { ok: false, method: 'powershell-user-path', detail: `예외: ${e.message}` }; }
+  }
+  // Unix: shell rc 파일에 export 블록 append (멱등 — 마커로 중복 차단)
+  try {
+    const rc = diag.shellRc;
+    const MARKER = '# >>> leerness PATH (1.9.254) >>>';
+    const END = '# <<< leerness PATH <<<';
+    let cur = '';
+    try { cur = fs.readFileSync(rc, 'utf8'); } catch {}
+    if (cur.includes(MARKER)) return { ok: true, method: 'already', detail: `${rc} 에 이미 등록됨` };
+    const block = `\n${MARKER}\nexport PATH="$PATH:${bin}"\n${END}\n`;
+    fs.appendFileSync(rc, block, 'utf8');
+    return { ok: true, method: 'shell-rc', detail: `${rc} 에 추가됨 (source 또는 새 터미널부터 적용): ${bin}` };
+  } catch (e) { return { ok: false, method: 'shell-rc', detail: `예외: ${e.message}` }; }
+}
+
+function pathSetupCmd(root, opts = {}) {
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const diag = _pathDiagnose();
+  if (opts.json) {
+    let applied = null;
+    if (opts.apply && !diag.resolvable && !diag.inPath) applied = _registerPath(diag);
+    log(JSON.stringify({ ...diag, applied }, null, 2));
+    return;
+  }
+  log(cy(`# leerness path-setup (1.9.254, UR-0019) — CLI PATH 자동 등록`));
+  log('');
+  log(`  npm global bin: ${diag.globalBin ? gr(diag.globalBin) : yl('감지 실패')}`);
+  log(`  PATH 포함 여부: ${diag.inPath ? gr('✓ 포함됨') : yl('✗ 미포함')}`);
+  log(`  leerness 실행 가능: ${diag.resolvable ? gr('✓ 가능 (which/where 성공)') : yl('✗ 불가')}`);
+  log('');
+  if (diag.resolvable || diag.inPath) {
+    log(gr(`  ✓ leerness CLI 가 이미 PATH 에서 정상 동작합니다 — 등록 불필요`));
+    return;
+  }
+  if (!diag.globalBin) {
+    log(yl(`  ⚠ npm global bin 경로를 찾을 수 없어 자동 등록 불가`));
+    log(dm(`     → 수동: npm prefix -g 로 경로 확인 후 PATH 에 추가`));
+    return;
+  }
+  if (!opts.apply) {
+    // dry-run (기본)
+    log(yl(`  ⚠ leerness 가 PATH 에 없습니다 — 'leerness' 명령이 동작하지 않을 수 있음`));
+    log(`  ${dm('적용 시 추가될 경로:')} ${diag.globalBin}`);
+    if (diag.platform === 'win32') {
+      log(dm(`     방법: PowerShell [Environment]::SetEnvironmentVariable('PATH', ..., 'User')  (관리자 권한 불요)`));
+    } else {
+      log(dm(`     방법: ${diag.shellRc} 에 export PATH 블록 append (멱등)`));
+    }
+    log('');
+    log(cy(`  → 자동 등록: leerness path-setup --apply`));
+    return;
+  }
+  // --apply
+  const res = _registerPath(diag);
+  if (res.ok) {
+    log(gr(`  ✓ PATH 등록 완료 (${res.method})`));
+    log(`     ${res.detail}`);
+    log('');
+    if (diag.platform === 'win32') log(dm(`  → 새 터미널을 열면 'leerness' 명령을 바로 쓸 수 있습니다.`));
+    else log(dm(`  → source ${diag.shellRc} 또는 새 터미널에서 'leerness' 명령 사용 가능.`));
+  } else {
+    log(yl(`  ⚠ 자동 등록 실패 (${res.method}): ${res.detail}`));
+    log(dm(`     → 수동 등록: PATH 에 ${diag.globalBin} 추가`));
+  }
 }
 
 // 1.9.245: API skill cache — 공식 문서 + 관련 링크 자동 정리 (사용자 명시 UR-0015)
@@ -19713,6 +19880,9 @@ async function main() {
   //   기존 env check/sync/detect (1.9.71) 와 충돌하지 않음 — summary/encoding 신규 서브
   if (cmd === 'env' && (args[1] === 'summary' || args[1] === 'encoding' || args[1] === 'encoding-check'))
     return envCmd(arg('--path', process.cwd()), args[1] === 'summary' ? null : 'encoding-check');
+  // 1.9.254: leerness path-setup [--apply] — CLI PATH 자동 등록 (사용자 명시 UR-0019)
+  //   npm global bin 경로 감지 + leerness 가 PATH 에서 찾아지는지 확인 → 미등록 시 플랫폼별 등록
+  if (cmd === 'path-setup' || cmd === 'path')        return pathSetupCmd(arg('--path', process.cwd()), { apply: has('--apply'), json: has('--json') });
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
