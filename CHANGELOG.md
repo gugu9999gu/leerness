@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.9.255 — 2026-05-29 — UR-0019 2단계: PATH 등록 실제 테스트/디버그 + require.main 가드
+
+**🧪 사용자 명시 (UR-0019 후속 "테스트 및 디버그 다음라운드 참고"): PATH 자동 등록 실제 동작 검증 + 테스트 인프라.**
+
+### 배경
+1.9.254에서 `path-setup` 구현 후, 실제 `--apply` 등록 로직(Unix shell-rc append, Windows PS-script)의 깊은 테스트/디버그가 필요. 단, 실 PATH 변경은 위험 → 단위 테스트 가능하도록 리팩터링.
+
+### 구현 (테스트 가능성 + 안전 검증)
+1. **`require.main === module` 가드** (footgun fix):
+   - `node harness.js` / `npx leerness` CLI 직접 실행 시에만 `main()` 호출
+   - `require('harness.js')` 시 init 부작용 없이 내부 함수 import 가능 → 단위 테스트 활성화
+   - 기존 CLI 동작 100% 보존 (e2e 217 검증)
+2. **순수 함수 추출** (테스트/디버그 가능):
+   - `_winPathPsScript(bin)` — Windows User PATH 등록 PowerShell 스크립트 생성 (실행과 분리)
+   - `_unixPathBlock(bin)` — Unix shell-rc export 블록 생성 (마커 멱등)
+   - `_registerPath` — `process.platform` → `diag.platform` (테스트 시 플랫폼 주입 가능)
+3. **8종 헬퍼 module.exports** (test 인프라)
+
+### 실제 테스트/디버그 결과 (stress-v200, 실 PATH 미변경)
+- **Unix shell-rc 실제 등록**: temp 파일에 1차 등록(shell-rc) → 2차 멱등(already, export 1줄만) → 마커 존재 → 기존 rc 내용 보존(append-only) ✓
+- **Windows PS-script**: User scope SetEnvironmentVariable / setx 미사용(truncation 회피) / -notcontains 멱등 가드 / bin JSON 이스케이프 ✓
+- **edge**: globalBin null → ok=false / shellRc null → ok=false / _dirInPath trailing-slash 정규화 ✓
+
+### stress-v200 — **27/27 PASS · 100%**
+- 테스트 인프라 (4): require.main 가드 + 8종 export + CLI 동작
+- Unix 실제 등록 (5) + Windows PS (4) + edge (5) + 성능/누적 회귀 (9)
+
+### 자동 release (117 main-push streak · 78 npm publish streak · R211)
+
+🧪 **PATH 등록 실증 + 테스트 인프라** — require.main 가드로 내부 함수 단위 테스트 가능 (이후 라운드 회귀 강화 기반).
+
+---
+
 ## 1.9.254 — 2026-05-29 — UR-0019 leerness CLI PATH 자동 등록
 
 **🔗 사용자 명시 (UR-0019): "leerness 설치 시 leerness CLI가 PATH를 자동으로 등록될 수 있게 구현". (테스트/디버그는 다음 라운드 참고)**

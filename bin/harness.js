@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.254';
+const VERSION = '1.9.255';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2775,24 +2775,39 @@ function _pathDiagnose() {
   return { globalBin, inPath, resolvable, platform: process.platform, shellRc };
 }
 
+// 1.9.255 (UR-0019 2단계): Windows User PATH 등록용 PowerShell 스크립트 생성 (순수 함수 — 테스트/디버그 가능)
+//   setx 의 1024자 truncation 회피 위해 [Environment]::SetEnvironmentVariable User scope 사용.
+//   멱등: 현재 User PATH 에 이미 있으면 EXISTS, 없으면 append 후 ADDED. 시스템 PATH 불변 (관리자 권한 불요).
+function _winPathPsScript(bin) {
+  return [
+    "$b = " + JSON.stringify(bin) + ";",
+    "$u = [Environment]::GetEnvironmentVariable('PATH','User'); if (-not $u) { $u = '' }",
+    "$parts = $u.Split(';') | Where-Object { $_ -ne '' }",
+    "if ($parts -notcontains $b) {",
+    "  $nu = if ($u -eq '') { $b } else { $u.TrimEnd(';') + ';' + $b }",
+    "  [Environment]::SetEnvironmentVariable('PATH', $nu, 'User')",
+    "  Write-Output 'ADDED'",
+    "} else { Write-Output 'EXISTS' }"
+  ].join(' ');
+}
+
+// 1.9.255 (UR-0019 2단계): Unix shell rc 등록 블록 마커 (순수 — 테스트/디버그 가능, 멱등 키)
+const _UNIX_PATH_MARKER = '# >>> leerness PATH (managed) >>>';
+const _UNIX_PATH_END = '# <<< leerness PATH <<<';
+function _unixPathBlock(bin) {
+  return `\n${_UNIX_PATH_MARKER}\nexport PATH="$PATH:${bin}"\n${_UNIX_PATH_END}\n`;
+}
+
 // PATH 에 globalBin 등록 (플랫폼별 안전 방법). 반환: { ok, method, detail }
+//   1.9.255: process.platform → diag.platform 으로 변경 (테스트 가능 — diag.platform 은 실사용 시 process.platform 과 동일).
 function _registerPath(diag) {
   const bin = diag.globalBin;
   if (!bin) return { ok: false, method: 'none', detail: 'npm global bin 경로를 찾을 수 없음' };
-  if (process.platform === 'win32') {
-    // Windows: PowerShell [Environment]::SetEnvironmentVariable User scope — setx 의 1024자 truncation 회피
-    //   현재 User PATH 를 읽어 중복 없으면 append (멱등). 시스템 PATH 는 건드리지 않음 (관리자 권한 불요).
+  const platform = diag.platform || process.platform;
+  if (platform === 'win32') {
+    // Windows: PowerShell [Environment]::SetEnvironmentVariable User scope (멱등, 관리자 권한 불요)
     try {
-      const ps = [
-        "$b = " + JSON.stringify(bin) + ";",
-        "$u = [Environment]::GetEnvironmentVariable('PATH','User'); if (-not $u) { $u = '' }",
-        "$parts = $u.Split(';') | Where-Object { $_ -ne '' }",
-        "if ($parts -notcontains $b) {",
-        "  $nu = if ($u -eq '') { $b } else { $u.TrimEnd(';') + ';' + $b }",
-        "  [Environment]::SetEnvironmentVariable('PATH', $nu, 'User')",
-        "  Write-Output 'ADDED'",
-        "} else { Write-Output 'EXISTS' }"
-      ].join(' ');
+      const ps = _winPathPsScript(bin);
       const r = cp.spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', timeout: 10000 });
       const out = (r.stdout || '').trim();
       if (r.status === 0 && /ADDED/.test(out)) return { ok: true, method: 'powershell-user-path', detail: `User PATH 에 추가됨 (새 터미널부터 적용): ${bin}` };
@@ -2803,13 +2818,11 @@ function _registerPath(diag) {
   // Unix: shell rc 파일에 export 블록 append (멱등 — 마커로 중복 차단)
   try {
     const rc = diag.shellRc;
-    const MARKER = '# >>> leerness PATH (1.9.254) >>>';
-    const END = '# <<< leerness PATH <<<';
+    if (!rc) return { ok: false, method: 'shell-rc', detail: 'shell rc 경로 미확인' };
     let cur = '';
     try { cur = fs.readFileSync(rc, 'utf8'); } catch {}
-    if (cur.includes(MARKER)) return { ok: true, method: 'already', detail: `${rc} 에 이미 등록됨` };
-    const block = `\n${MARKER}\nexport PATH="$PATH:${bin}"\n${END}\n`;
-    fs.appendFileSync(rc, block, 'utf8');
+    if (cur.includes(_UNIX_PATH_MARKER)) return { ok: true, method: 'already', detail: `${rc} 에 이미 등록됨` };
+    fs.appendFileSync(rc, _unixPathBlock(bin), 'utf8');
     return { ok: true, method: 'shell-rc', detail: `${rc} 에 추가됨 (source 또는 새 터미널부터 적용): ${bin}` };
   } catch (e) { return { ok: false, method: 'shell-rc', detail: `예외: ${e.message}` }; }
 }
@@ -20024,6 +20037,18 @@ async function main() {
 }
 
 // 1.9.4 B: main 종료 후 exitCode를 명시적으로 process.exit으로 강제 (셸/wrapper 차 무시).
-main()
-  .then(() => { if (process.exitCode && process.exitCode !== 0) process.exit(process.exitCode); })
-  .catch(err => { fail(err && err.message ? err.message : String(err)); process.exit(1); });
+// 1.9.255 (UR-0019 2단계): require.main 가드 — `require('harness.js')` 시 main() 미실행 (init 부작용 차단 + 내부 함수 단위 테스트 가능).
+//   CLI 직접 실행 (node harness.js / npx leerness) 시에만 main() 호출. 기존 동작 100% 보존.
+if (require.main === module) {
+  main()
+    .then(() => { if (process.exitCode && process.exitCode !== 0) process.exit(process.exitCode); })
+    .catch(err => { fail(err && err.message ? err.message : String(err)); process.exit(1); });
+}
+
+// 1.9.255: 테스트/디버그용 내부 함수 export (require.main 가드 덕분에 require 시 CLI 미실행).
+//   PATH 등록 (UR-0019) 검증 + 향후 단위 테스트 확장에 사용.
+module.exports = {
+  VERSION,
+  _npmGlobalBin, _dirInPath, _leernessResolvable, _pathDiagnose, _registerPath,
+  _winPathPsScript, _unixPathBlock, pathSetupCmd
+};
