@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.257 — 2026-05-30 — CJK 분류 함수 추출+단위테스트 + release 브랜치 정리 (🎉 80 npm streak)
+
+**🧪 1.9.255/256 테스트 인프라 연장 + 🧹 누적 release 브랜치 정리 (handoff 장기 경고 해소).**
+
+### 구현
+1. **CJK 분류 순수 함수 모듈 스코프 추출** (테스트 가능성):
+   - `_classifyCJK(buf, len)` / `_riskLabel(cjk)` — `_scanShellScriptsEncoding` 내부 중첩 → 모듈 스코프로 추출 + export
+   - UTF-8 lead byte 기반 Korean(EA-ED)/Japanese(E3)/Chinese(E4-E9) 분류 → CP949/CP932/CP936 위험 판정 (UR-0014 계열)
+   - 실 동작 단위 테스트: 한국어/일본어/중국어/ASCII 버퍼 분류 + 동률 시 korean 우선 + len 범위 제한 + risk label 4종
+   - env encoding 명령 동작 보존 (추출 부작용 0 — e2e + A3 검증)
+2. **release 브랜치 누적 정리** (🧹 maintenance):
+   - 로컬 release/* 브랜치 **213 → 20** (`release cleanup --apply --keep 12`)
+   - handoff 가 수십 라운드 경고하던 "50+ branches 누적" 해소. 태그 + 원격이 히스토리 보존 → 로컬 정리 안전.
+
+### stress-v202 — **24/24 PASS · 100%**
+- 1.9.257 (13): export + _classifyCJK (5) + _riskLabel (5) + env encoding 보존
+- 성능 (1): cold start avg 385ms
+- 누적 회귀 (10): 1.9.207~256 — 실 함수 호출 검증 (_isSecretKey/PATH/posix 등)
+
+### 자동 release (119 main-push streak · 🎉 80 npm publish streak · R213)
+
+🎉 **80 npm publish streak** — 테스트 인프라 3 라운드 누적(1.9.255 require.main + 1.9.256 보안/버전 + 1.9.257 CJK) + 누적 브랜치 정리.
+
+---
+
 ## 1.9.256 — 2026-05-29 — 단위 테스트 인프라 확대 (보안/정확성-핵심 순수 함수)
 
 **🧪 1.9.255 require.main 가드 기반 확장: 소스 regex 가 아닌 실제 함수 동작을 검증하는 단위 테스트로 회귀 강화.**

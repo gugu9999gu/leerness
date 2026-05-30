@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.256';
+const VERSION = '1.9.257';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2559,39 +2559,41 @@ function _terminalEncodingNotice(opts = {}) {
   return { ok, lines };
 }
 
+// 1.9.243: CJK 분류 — Korean/Japanese/Chinese 비-ASCII 패턴 통계 (UR-0014 3단계)
+//   1.9.257: _scanShellScriptsEncoding 내부 중첩 → 모듈 스코프로 추출 (순수 함수 — 단위 테스트 가능).
+//   UTF-8 3-byte 시퀀스 시작 바이트로 CJK 언어 분류 (인코딩 오인식 위험 판단용).
+function _classifyCJK(buf, len) {
+  let korean = 0, japanese = 0, chinese = 0, other = 0;
+  for (let i = 0; i < Math.min(buf.length, len); i++) {
+    const b = buf[i];
+    if (b < 0x80) continue;
+    // Korean Hangul Syllables U+AC00-D7AF → 3-byte: EA B0 80 ~ ED 9F BF
+    if (b >= 0xEA && b <= 0xED) korean++;
+    // Japanese Hiragana/Katakana U+3040-30FF → 3-byte: E3 81 80 ~ E3 83 BF
+    else if (b === 0xE3) japanese++;
+    // CJK Unified Ideographs U+4E00-9FFF → 3-byte: E4 B8 80 ~ E9 BF BF
+    else if (b >= 0xE4 && b <= 0xE9) chinese++;
+    else other++;
+  }
+  return { korean, japanese, chinese, other };
+}
+function _riskLabel(cjk) {
+  if (cjk.korean >= cjk.japanese && cjk.korean >= cjk.chinese && cjk.korean > 0) {
+    return { type: 'korean', risk: 'Windows 한국어 PowerShell 에서 CP949 로 오인식 가능 (BOM 추가 권장)' };
+  }
+  if (cjk.japanese > cjk.korean && cjk.japanese >= cjk.chinese) {
+    return { type: 'japanese', risk: 'Windows 일본어 PowerShell 에서 CP932 (Shift-JIS) 로 오인식 가능 (BOM 추가 권장)' };
+  }
+  if (cjk.chinese > 0) {
+    return { type: 'chinese', risk: 'Windows 중국어 PowerShell 에서 CP936 (GBK) 로 오인식 가능 (BOM 추가 권장)' };
+  }
+  return { type: 'non-ascii', risk: 'Windows 비-ASCII 셸 스크립트 — BOM 없는 UTF-8 인코딩 오인식 가능 (BOM 추가 권장)' };
+}
+
 // 셸 스크립트 (.ps1/.bat/.cmd/.sh) 인코딩 위험 감지
 //   위험 시그널: 한국어 (또는 비-ASCII) 문자 + BOM 없음 + Windows 환경
 function _scanShellScriptsEncoding(root) {
   const result = { scanned: 0, atRisk: [], notes: [] };
-  // 1.9.243: CJK 분류 — Korean/Japanese/Chinese 비-ASCII 패턴 통계 (UR-0014 3단계)
-  function _classifyCJK(buf, len) {
-    let korean = 0, japanese = 0, chinese = 0, other = 0;
-    for (let i = 0; i < Math.min(buf.length, len); i++) {
-      const b = buf[i];
-      if (b < 0x80) continue;
-      // UTF-8 3-byte 시퀀스 시작 바이트 분류
-      // Korean Hangul Syllables U+AC00-D7AF → 3-byte: EA B0 80 ~ ED 9F BF
-      if (b >= 0xEA && b <= 0xED) korean++;
-      // Japanese Hiragana/Katakana U+3040-30FF → 3-byte: E3 81 80 ~ E3 83 BF
-      else if (b === 0xE3) japanese++;
-      // CJK Unified Ideographs U+4E00-9FFF → 3-byte: E4 B8 80 ~ E9 BF BF
-      else if (b >= 0xE4 && b <= 0xE9) chinese++;
-      else other++;
-    }
-    return { korean, japanese, chinese, other };
-  }
-  function _riskLabel(cjk) {
-    if (cjk.korean >= cjk.japanese && cjk.korean >= cjk.chinese && cjk.korean > 0) {
-      return { type: 'korean', risk: 'Windows 한국어 PowerShell 에서 CP949 로 오인식 가능 (BOM 추가 권장)' };
-    }
-    if (cjk.japanese > cjk.korean && cjk.japanese >= cjk.chinese) {
-      return { type: 'japanese', risk: 'Windows 일본어 PowerShell 에서 CP932 (Shift-JIS) 로 오인식 가능 (BOM 추가 권장)' };
-    }
-    if (cjk.chinese > 0) {
-      return { type: 'chinese', risk: 'Windows 중국어 PowerShell 에서 CP936 (GBK) 로 오인식 가능 (BOM 추가 권장)' };
-    }
-    return { type: 'non-ascii', risk: 'Windows 비-ASCII 셸 스크립트 — BOM 없는 UTF-8 인코딩 오인식 가능 (BOM 추가 권장)' };
-  }
   function walk(dir, depth = 0) {
     if (depth > 3) return;  // 너무 깊이 들어가지 않음
     let entries;
@@ -20053,5 +20055,7 @@ module.exports = {
   VERSION,
   _npmGlobalBin, _dirInPath, _leernessResolvable, _pathDiagnose, _registerPath,
   _winPathPsScript, _unixPathBlock, pathSetupCmd,
-  _isSecretKey, compareVer, parseHarnessVersion
+  _isSecretKey, compareVer, parseHarnessVersion,
+  // 1.9.257: CJK 인코딩 분류 (UR-0014 계열) 순수 함수 — 단위 테스트
+  _classifyCJK, _riskLabel
 };
