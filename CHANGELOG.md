@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.261 — 2026-05-31 — UR-0020 2단계: MCP leerness_shell_guard (72 도구) + selftest 케이스
+
+**🐚🔌 1.9.260 shell-guard 를 외부 AI(MCP) + 무결성 검증(selftest)에 통합.**
+
+### 구현
+1. **MCP 72번째 도구 `leerness_shell_guard`** (71 → 72):
+   - 외부 AI(Claude Code 등)가 명령 실행 **전에** `tools/call` 로 셸 호환성 점검
+   - 예: `npm run build && npm test` on PowerShell 5.1 → ps5-chain error + `;` 제안
+   - 응답: `{ shell, psVersion, issues[], pastSame, pastSimilar, ok }` · 인자 `{ command (required), path? }`
+   - 실 stdio JSON-RPC 검증: tools/list 72 + tools/call shell_guard 응답 OK
+2. **selftest 케이스 +2** (13 → 15):
+   - `_shellGuardAnalyze`: PS5.1 `&&` → ps5-chain error · bash `&&` → 문제 없음
+   - 코어 무결성 검증에 셸 린터 포함 (CLI + MCP + npm test 게이트 모두 자동 검증)
+
+### stress-v206 — **18/18 PASS · 100%**
+- 1.9.261 (7): VERSION + MCP 72 정의/핸들러 + 실 서버 list/call + selftest 15 케이스
+- 성능 (1): cold start avg 440ms
+- 누적 회귀 (10): 1.9.207~260 + MCP initialize 프로토콜
+
+### 자동 release (123 main-push streak · 84 npm publish streak · R217)
+
+🐚🔌 **shell-guard 3중 노출** — CLI(1.9.260) + MCP 도구(1.9.261) + selftest 케이스. 외부 AI 가 명령 실행 전 셸 실패를 사전 차단.
+
+---
+
 ## 1.9.260 — 2026-05-31 — 🎉 1.9.260 / UR-0020 shell-guard (터미널 셸 호환성 린터 + 실패 메모리)
 
 **🐚 사용자 명시 (UR-0020): 터미널 명령 실패를 파악·기록하고 다음 실행 시 셸 호환성(PowerShell 5.1 && 미지원 등)을 참조.**

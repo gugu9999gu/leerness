@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.260';
+const VERSION = '1.9.261';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2903,6 +2903,8 @@ function _selfTestCases() {
     { name: '_dirInPath: 정규화 (trailing slash)', run: () => { const sep = process.platform === 'win32' ? ';' : ':'; const old = process.env.PATH; process.env.PATH = '/usr/bin' + sep + '/opt/x/bin'; const r = _dirInPath('/opt/x/bin/') === true && _dirInPath('/no/such') === false; process.env.PATH = old; return r; } },
     { name: '_winPathPsScript: User scope + setx 미사용', run: () => { const ps = _winPathPsScript('C:\\npm'); return /SetEnvironmentVariable\('PATH', \$nu, 'User'\)/.test(ps) && !/setx/i.test(ps); } },
     { name: '_unixPathBlock: 멱등 마커 + export', run: () => { const b = _unixPathBlock('/x/bin'); return b.includes('managed') && /export PATH="\$PATH:\/x\/bin"/.test(b); } },
+    { name: '_shellGuardAnalyze: PS5.1 && → ps5-chain error', run: () => { const r = _shellGuardAnalyze('a && b', { shell: 'powershell', psVersion: '5' }); return r.issues.some(i => i.rule === 'ps5-chain' && i.severity === 'error'); } },
+    { name: '_shellGuardAnalyze: bash && → 문제 없음', run: () => _shellGuardAnalyze('a && b', { shell: 'bash' }).issues.length === 0 },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -16038,7 +16040,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_agent_mode', description: '1.9.239 (사용자 명시 UR-0013) — 자율 모드 전용 통합 명령. start: handoff + drift --auto-fix + session-resume --auto-fix (진입). tick: pulse 한 줄 (매 라운드). stop: session close --auto-apply-delivered --auto-cleanup-branches (마감). 외부 AI 가 자율 라운드 진입/매 라운드/마감을 단일 호출로 수행. 인자: { path?, sub (required: "start"|"tick"|"stop"|"help") }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['start', 'tick', 'stop', 'help'] } }, required: ['sub'] } },
     { name: 'leerness_env_info', description: '1.9.241 (사용자 명시 UR-0014) — 환경 종합 정보 회수. OS / 언어 (LANG, 코드페이지) / 한국어 Windows / 하드웨어 / 터미널 (TTY, PowerShell 버전) / 도구 버전 (git, npm, python). 외부 AI 가 환경 호환성을 미리 인지 → 인코딩 오류 예방. 응답: { os, node, locale, hardware, terminal, tools }. 인자: { path?, encodingCheck? }. encodingCheck: true 시 셸 스크립트 (.ps1/.bat/.cmd/.sh) BOM 없는 비-ASCII 위험 감지', inputSchema: { type: 'object', properties: { path: { type: 'string' }, encodingCheck: { type: 'boolean' } } } },
     { name: 'leerness_api_skill', description: '1.9.245 (사용자 명시 UR-0015) — API 문서·관련링크 자동 캐시. 공식 API 문서 URL을 fetch 하고 1단계 same-domain 관련 링크까지 정리 → .harness/api-skills/<id>.md 저장. 후속 같은 API 관련 작업 시 자동 참조. 응답: list (skills 배열) / show (전체 본문) / match (task 매칭 결과). 인자: { path?, sub ("list"|"show"|"match"|"add"|"drop"), url? (add), id? (show/drop), query? (match), direction? (add: 구현 방향 텍스트) }. 외부 AI가 "이 프로젝트 어떤 API 문서가 정리되어 있나?" / "내 작업과 매칭되는 API skill 있나?" 회수.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['list', 'show', 'match', 'add', 'drop'] }, url: { type: 'string' }, id: { type: 'string' }, query: { type: 'string' }, direction: { type: 'string' } }, required: ['sub'] } },
-    { name: 'leerness_selftest', description: '1.9.258/259 — 설치된 leerness 바이너리의 코어 함수(보안 _isSecretKey / 버전 compareVer / 인코딩 _classifyCJK 등) 무결성 자가 검증. 응답: { version, total, pass, fail, ok, results[] }. 외부 AI/CI 가 "이 leerness 설치가 정상인가?(npx 캐시 손상·부분 설치 감지)" 를 1초 내 확인. 인자: 없음.', inputSchema: { type: 'object', properties: {} } }
+    { name: 'leerness_selftest', description: '1.9.258/259 — 설치된 leerness 바이너리의 코어 함수(보안 _isSecretKey / 버전 compareVer / 인코딩 _classifyCJK 등) 무결성 자가 검증. 응답: { version, total, pass, fail, ok, results[] }. 외부 AI/CI 가 "이 leerness 설치가 정상인가?(npx 캐시 손상·부분 설치 감지)" 를 1초 내 확인. 인자: 없음.', inputSchema: { type: 'object', properties: {} } },
+    { name: 'leerness_shell_guard', description: '1.9.260/261 (사용자 명시 UR-0020) — 터미널 명령 셸 호환성 린터. 외부 AI 가 명령을 실행하기 전에 셸 호환성 문제를 사전 점검. 예: Windows PowerShell 5.1 은 && / || 미지원 → A; if ($?) { B } 제안. 6 규칙(ps5-chain/ps-devnull/ps-inline-env/ps-rm-rf/cmd-semicolon/ps-version-unknown) + 과거 실패 회수(.harness/shell-failures.json). 응답: { shell, psVersion, issues[{rule,severity,detail,suggestion}], pastSame, pastSimilar, ok }. 인자: { command (required), path? }. 현재 셸/PS 버전 자동 감지.', inputSchema: { type: 'object', properties: { command: { type: 'string' }, path: { type: 'string' } }, required: ['command'] } }
   ];
 
   function send(obj) {
@@ -16244,6 +16247,10 @@ function mcpServeCmd(root) {
           case 'leerness_selftest':
             // 1.9.259 (1.9.258): 코어 함수 무결성 자가 검증
             cliArgs = ['selftest', '--json'];
+            break;
+          case 'leerness_shell_guard':
+            // 1.9.261 (1.9.260, UR-0020): 터미널 명령 셸 호환성 린터
+            cliArgs = ['shell-guard', String(args.command || ''), '--path', targetPath, '--json'];
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
