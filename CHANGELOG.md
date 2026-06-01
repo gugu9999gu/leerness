@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.9.260 — 2026-05-31 — 🎉 1.9.260 / UR-0020 shell-guard (터미널 셸 호환성 린터 + 실패 메모리)
+
+**🐚 사용자 명시 (UR-0020): 터미널 명령 실패를 파악·기록하고 다음 실행 시 셸 호환성(PowerShell 5.1 && 미지원 등)을 참조.**
+
+### 개발 방향 분석 (사용자 요청 "알맞는 방향 고민")
+leerness 는 0-dependency Node CLI 라 셸을 직접 가로챌 수 없음 → 가장 안전·유용한 방향은 **(1) 실행 전 정적 린터 + (2) 실패 메모리 + (3) 환경 버전 변동 감지**. 기존 인프라(`_collectRuntimeEnv` 1.9.241 PS 버전 감지 + `environment.json` 1.9.145 스냅샷) 재사용.
+
+### 구현 (`leerness shell-guard "<command>"`)
+1. **정적 셸 호환성 린터** `_shellGuardAnalyze(cmd, ctx)` (순수 함수, 6 규칙):
+   - **ps5-chain** (error): Windows PowerShell 5.1 `&&`/`||` 미지원 → `A; if ($?) { B }` 제안 (핵심 시나리오)
+   - **ps-devnull** (error): `2>/dev/null` → `2>$null`
+   - **ps-inline-env** (error): `VAR=x cmd` → `$env:VAR='x'; cmd`
+   - **ps-rm-rf** (warn): `rm -rf` → `Remove-Item -Recurse -Force`
+   - **cmd-semicolon** (warn): CMD `;` 구분자 아님 → `&` / `&&`
+   - **ps-version-unknown** (info): PS 버전 미상 + `&&` → 안전 패턴 권장
+2. **실패 메모리** `.harness/shell-failures.json` (200건 cap):
+   - `shell-guard --record --cmd "..." --exit N` 기록 → 다음 분석 시 동일/유사(첫 토큰) 실패 회수
+3. **환경 버전 변동 감지**: `environment.json` 스냅샷 vs 현재 node/PowerShell 버전 비교 → 변동 시 경고
+4. PS 버전·셸 자동 판별 (`_detectShellCtx`) + `--json` (error 시 exit 1) + 순수 함수 export (단위 테스트)
+
+### 다음 라운드 참조 (UR-0020 후속 후보)
+- handoff/agent-mode 에 shell-failures 요약 자동 노출 · MCP leerness_shell_guard 도구 · selftest 케이스 추가
+
+### stress-v205 — **27/27 PASS · 100%**
+- 1.9.260 (16): 6 규칙 분석 + record/advise 회수 + 200 cap + CLI/json/help
+- 성능 (1): cold start avg 441ms
+- 누적 회귀 (10): 1.9.207~259
+
+### 자동 release (122 main-push streak · 83 npm publish streak · R216)
+
+🐚 **셸 실패 예방** — Windows PowerShell 5.1 `&&` 등 셸 차이로 인한 터미널 실패를 실행 전 감지 + 과거 실패 회수.
+
+---
+
 ## 1.9.259 — 2026-05-30 — MCP leerness_selftest (71 도구) + npm test 무결성 게이트
 
 **🔌 1.9.258 selftest 를 워크플로에 통합: 외부 AI(MCP) + 배포 파이프라인(npm test) 양쪽에서 무결성 검증.**
