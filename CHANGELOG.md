@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.9.259 — 2026-05-30 — MCP leerness_selftest (71 도구) + npm test 무결성 게이트
+
+**🔌 1.9.258 selftest 를 워크플로에 통합: 외부 AI(MCP) + 배포 파이프라인(npm test) 양쪽에서 무결성 검증.**
+
+### 구현
+1. **MCP 71번째 도구 `leerness_selftest`** (70 → 71):
+   - 외부 AI(Claude Code 등)가 `tools/call` 로 leerness 무결성 확인 → `{ version, total, pass, fail, ok, results[] }`
+   - tools/list 71 도구 노출 + 핸들러 → `selftest --json`
+   - 실제 stdio JSON-RPC 라운드트립 검증: tools/list 71 + tools/call ok=true 13/13
+2. **npm test 무결성 게이트**:
+   - `test`: `--version && selftest && e2e` — selftest 가 e2e 보다 먼저 (fast-fail)
+   - 배포/CI 시 코어 함수 손상을 e2e 전에 즉시 감지 (release sync-main 자동 publish 안전망)
+
+### stress-v204 — **18/18 PASS · 100%**
+- 1.9.259 (7): VERSION + MCP 71 정의/핸들러 + 실 서버 list/call + npm test 게이트 순서
+- 성능 (1): cold start avg 371ms
+- 누적 회귀 (10): 1.9.207~258 + MCP initialize 프로토콜 회귀
+
+### 자동 release (121 main-push streak · 82 npm publish streak · R215)
+
+🔌 **selftest 3중 노출 완성** — CLI(1.9.258) + MCP 도구 + npm test 게이트. 외부 AI·CI·배포 모두 무결성 자동 검증.
+
+---
+
 ## 1.9.258 — 2026-05-30 — leerness selftest 명령 (코어 함수 무결성 자가 검증)
 
 **🩺 사용자/CI 가 설치된 leerness 바이너리의 건강 상태를 1초 내 검증하는 신규 명령.**

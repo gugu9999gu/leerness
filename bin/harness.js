@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.258';
+const VERSION = '1.9.259';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -15893,7 +15893,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_py_check', description: '1.9.239 (사용자 명시 UR-0013) — Python 파일 분석. 의존성 0 regex fallback. .md 외 .py 도 leerness 인지. 응답: { totalFiles, totalLOC, totalImports, totalFuncs, totalClasses, totalTodos, biggest: [{ file, loc, funcs, classes }] }. 외부 AI가 "이 프로젝트 Python 표면이 얼마나 되나"를 회수. 인자: { path? }', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
     { name: 'leerness_agent_mode', description: '1.9.239 (사용자 명시 UR-0013) — 자율 모드 전용 통합 명령. start: handoff + drift --auto-fix + session-resume --auto-fix (진입). tick: pulse 한 줄 (매 라운드). stop: session close --auto-apply-delivered --auto-cleanup-branches (마감). 외부 AI 가 자율 라운드 진입/매 라운드/마감을 단일 호출로 수행. 인자: { path?, sub (required: "start"|"tick"|"stop"|"help") }', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['start', 'tick', 'stop', 'help'] } }, required: ['sub'] } },
     { name: 'leerness_env_info', description: '1.9.241 (사용자 명시 UR-0014) — 환경 종합 정보 회수. OS / 언어 (LANG, 코드페이지) / 한국어 Windows / 하드웨어 / 터미널 (TTY, PowerShell 버전) / 도구 버전 (git, npm, python). 외부 AI 가 환경 호환성을 미리 인지 → 인코딩 오류 예방. 응답: { os, node, locale, hardware, terminal, tools }. 인자: { path?, encodingCheck? }. encodingCheck: true 시 셸 스크립트 (.ps1/.bat/.cmd/.sh) BOM 없는 비-ASCII 위험 감지', inputSchema: { type: 'object', properties: { path: { type: 'string' }, encodingCheck: { type: 'boolean' } } } },
-    { name: 'leerness_api_skill', description: '1.9.245 (사용자 명시 UR-0015) — API 문서·관련링크 자동 캐시. 공식 API 문서 URL을 fetch 하고 1단계 same-domain 관련 링크까지 정리 → .harness/api-skills/<id>.md 저장. 후속 같은 API 관련 작업 시 자동 참조. 응답: list (skills 배열) / show (전체 본문) / match (task 매칭 결과). 인자: { path?, sub ("list"|"show"|"match"|"add"|"drop"), url? (add), id? (show/drop), query? (match), direction? (add: 구현 방향 텍스트) }. 외부 AI가 "이 프로젝트 어떤 API 문서가 정리되어 있나?" / "내 작업과 매칭되는 API skill 있나?" 회수.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['list', 'show', 'match', 'add', 'drop'] }, url: { type: 'string' }, id: { type: 'string' }, query: { type: 'string' }, direction: { type: 'string' } }, required: ['sub'] } }
+    { name: 'leerness_api_skill', description: '1.9.245 (사용자 명시 UR-0015) — API 문서·관련링크 자동 캐시. 공식 API 문서 URL을 fetch 하고 1단계 same-domain 관련 링크까지 정리 → .harness/api-skills/<id>.md 저장. 후속 같은 API 관련 작업 시 자동 참조. 응답: list (skills 배열) / show (전체 본문) / match (task 매칭 결과). 인자: { path?, sub ("list"|"show"|"match"|"add"|"drop"), url? (add), id? (show/drop), query? (match), direction? (add: 구현 방향 텍스트) }. 외부 AI가 "이 프로젝트 어떤 API 문서가 정리되어 있나?" / "내 작업과 매칭되는 API skill 있나?" 회수.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['list', 'show', 'match', 'add', 'drop'] }, url: { type: 'string' }, id: { type: 'string' }, query: { type: 'string' }, direction: { type: 'string' } }, required: ['sub'] } },
+    { name: 'leerness_selftest', description: '1.9.258/259 — 설치된 leerness 바이너리의 코어 함수(보안 _isSecretKey / 버전 compareVer / 인코딩 _classifyCJK 등) 무결성 자가 검증. 응답: { version, total, pass, fail, ok, results[] }. 외부 AI/CI 가 "이 leerness 설치가 정상인가?(npx 캐시 손상·부분 설치 감지)" 를 1초 내 확인. 인자: 없음.', inputSchema: { type: 'object', properties: {} } }
   ];
 
   function send(obj) {
@@ -16095,6 +16096,10 @@ function mcpServeCmd(root) {
             cliArgs = ['release', 'cleanup', '--json'];
             if (args.apply === true) cliArgs.push('--apply');
             if (typeof args.keep === 'number') cliArgs.push('--keep', String(args.keep));
+            break;
+          case 'leerness_selftest':
+            // 1.9.259 (1.9.258): 코어 함수 무결성 자가 검증
+            cliArgs = ['selftest', '--json'];
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
