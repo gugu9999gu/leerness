@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.9.262 — 2026-05-31 — CLAUDE/AGENTS 문서 누적 갱신 (1.9.253~261 drift 차단)
+
+**📚 메타 지침서가 1.9.252 에 멈춰 있어 9 라운드(1.9.253~261) 미반영 → 누적 갱신.**
+
+### 배경
+CLAUDE.md / AGENTS.md (AI 핸드오프 핵심 지침)가 마지막으로 1.9.252까지만 반영. UR-0019(PATH 자동 등록)·UR-0020(shell-guard)·selftest·require.main 가드·테스트 인프라가 문서에 없어, 새 세션 AI 가 최신 기능을 인지 못 할 drift 위험. (기존 1.9.171/214/238/253 doc-sync 라운드 계승)
+
+### 구현 (문서 전용 — 코드 변경 없음, VERSION bump만)
+1. **CLAUDE.md**: "UR-0019~0020 + 테스트 인프라 (1.9.253~261)" 섹션 추가
+   - UR-0019 path-setup + require.main 가드 · 단위 테스트 인프라 · selftest(CLI/MCP/npm test) · UR-0020 shell-guard(6 규칙)
+   - 마일스톤 1.9.252 → 1.9.261 (R217 · 123 main-push · 84 npm · MCP 72 · CLI 59 · UR-0013~0020 소진)
+2. **AGENTS.md**: UR-0019~0020 테이블 + shell-guard 6 규칙 + require.main 가드 설명 + 마일스톤 1.9.261
+
+### stress-v207 — **20/20 PASS · 100%**
+- 1.9.262 (9): CLAUDE/AGENTS 섹션·path-setup·shell-guard·selftest·마일스톤·UR-0013~0020 소진·stale 해소
+- 성능 (1): cold start avg 410ms
+- 누적 회귀 (10): 1.9.207~261
+
+### 자동 release (124 main-push streak · 85 npm publish streak · R218)
+
+📚 **AI 핸드오프 지침 최신화** — 새 세션 에이전트가 UR-0019~0020·selftest·shell-guard 를 즉시 인지, drift 0.
+
+---
+
 ## 1.9.261 — 2026-05-31 — UR-0020 2단계: MCP leerness_shell_guard (72 도구) + selftest 케이스
 
 **🐚🔌 1.9.260 shell-guard 를 외부 AI(MCP) + 무결성 검증(selftest)에 통합.**

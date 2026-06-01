@@ -186,15 +186,43 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 - **1.9.251** (init 안내): `_terminalEncodingNotice()` 헬퍼 신설 + `leerness init` 완료 시 인코딩 점검 노출
 - **1.9.252** (DRY): env summary 인라인 분기를 헬퍼로 통합 + `agent-mode start` 인코딩 점검 (진입점 3곳 일관)
 
-## 자율 모드 마일스톤 — 1.9.252 시점
+## UR-0019~0020 + 테스트 인프라 (1.9.253~261) — 9 라운드
 
-- **R208 누적 라운드** (baseline v1.9.6)
-- **🎉 114 main-push streak** (1.9.140 부터)
-- **🎉 75 npm publish streak** (1.9.178 부터)
+### 1.9.253 — CLAUDE/AGENTS 문서 누적 갱신 (1.9.238~252 drift 차단)
+
+### 1.9.254~255 — UR-0019: leerness CLI PATH 자동 등록 (사용자 명시)
+- `leerness path-setup [--apply]` — npm global bin 감지 + PATH 미등록 시 안전 등록
+  - Windows: PowerShell `SetEnvironmentVariable User scope` (setx truncation 회피, 멱등) · Unix: shell rc append (마커 멱등)
+  - dry-run 기본 / append-only / install 완료 시 자동 안내 (opt-out `LEERNESS_NO_PATH_CHECK=1`)
+- **`require.main === module` 가드** (1.9.255): CLI 직접 실행 시에만 main() → `require()` 시 내부 함수 단위 테스트 가능 (footgun fix)
+
+### 1.9.256~257 — 단위 테스트 인프라 확대 (require.main 가드 활용)
+- 보안/정확성/인코딩-핵심 순수 함수 export + 실 동작 단위 테스트 (소스 regex → 실제 호출)
+- `_isSecretKey` / `compareVer` / `parseHarnessVersion` / `_classifyCJK` / `_riskLabel` (모듈 스코프 추출)
+- release/* 로컬 브랜치 정리 (213 → 20, `release cleanup --apply --keep 12`)
+
+### 1.9.258~259 — leerness selftest (코어 함수 무결성 자가 검증)
+- `leerness selftest [--json]` — 15 케이스 (보안/버전/인코딩/PATH/shell-guard) · 실패 시 exit 1 (CI 친화)
+- **MCP 71번째 `leerness_selftest`** + **npm test 무결성 게이트** (`--version && selftest && e2e`, fast-fail)
+
+### 1.9.260~261 — UR-0020: 터미널 셸 호환성 린터 (사용자 명시)
+- `leerness shell-guard "<command>"` — 실행 전 셸 호환성 정적 분석 6 규칙:
+  - **ps5-chain**: Windows PowerShell 5.1 `&&`/`||` 미지원 → `A; if ($?) { B }` 제안
+  - ps-devnull / ps-inline-env / ps-rm-rf / cmd-semicolon / ps-version-unknown
+- `.harness/shell-failures.json` 실패 메모리 (200 cap) + 환경 버전 변동 감지 (environment.json 스냅샷 대비)
+- **MCP 72번째 `leerness_shell_guard`** (외부 AI 실행 전 점검) + selftest 케이스 통합 (CLI+MCP+selftest 3중 노출)
+
+## 자율 모드 마일스톤 — 1.9.261 시점
+
+- **R217 누적 라운드** (baseline v1.9.6)
+- **🎉 123 main-push streak** (1.9.140 부터)
+- **🎉 84 npm publish streak** (1.9.178 부터)
 - **handoff/session close/health JSON 11 필드** (3 × 11 = 33 통합 포인트)
-- **MCP 70 도구**
-- **사용자 명시 백로그 UR-0013~0018 완전 소진**
-- **9 카테고리 57 CLI 명령**
+- **MCP 72 도구**
+- **사용자 명시 백로그 UR-0013~0020 완전 소진**
+- **selftest 무결성 자가 검증** (CLI + MCP + npm test 게이트, 15 케이스)
+- **9 카테고리 59 CLI 명령**
+- **require.main 가드 + 14종 순수 함수 export** (단위 테스트 가능)
 
 ---
 <!-- leerness:migration-preserved -->

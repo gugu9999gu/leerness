@@ -155,10 +155,25 @@ leerness가 자동 검증 가능한 trigger:
 - D. task 회고 + 7일+ stale — 10/10
 - E. next-action queue + lazy detect — 10/10
 
-### 자율 모드 마일스톤 — 1.9.252 시점
-- **R208 누적 라운드** · **114 main-push streak** · **75 npm publish streak**
-- handoff/session close/health JSON **11 통합 필드** (3 × 11 = 33 포인트): + pyFiles / envInfo / apiSkills
-- MCP **70 도구** · 9 카테고리 **57 CLI 명령** · 사용자 백로그 UR-0013~0018 완전 소진
+### UR-0019~0020 + 테스트 인프라 (1.9.253~261 — 9 라운드)
+
+| 버전 | 기능 | 비고 |
+|---|---|---|
+| 1.9.253 | CLAUDE/AGENTS 문서 1.9.238~252 누적 갱신 | drift 차단 |
+| 1.9.254~255 | UR-0019 `leerness path-setup [--apply]` — CLI PATH 자동 등록 | Windows User PATH(setx 회피)/Unix rc, dry-run 기본 + require.main 가드 |
+| 1.9.256~257 | 단위 테스트 인프라 — 순수 함수 export + 실 동작 검증 | _isSecretKey/compareVer/_classifyCJK 등 + release 브랜치 213→20 정리 |
+| 1.9.258~259 | `leerness selftest` — 코어 함수 무결성 (15 케이스) | MCP 71 + npm test 게이트 (fast-fail) |
+| 1.9.260~261 | UR-0020 `leerness shell-guard "<cmd>"` — 셸 호환성 린터 | PS5.1 && 미지원 등 6 규칙 + 실패 메모리 + MCP 72 (CLI+MCP+selftest 3중) |
+
+**require.main 가드** (1.9.255): CLI 직접 실행 시에만 main() → `require('harness.js')` 로 내부 함수 단위 테스트 가능 (init 부작용 0).
+
+**shell-guard 6 규칙**: ps5-chain(PS5.1 &&→`A; if ($?) {B}`) / ps-devnull(`2>$null`) / ps-inline-env(`$env:VAR`) / ps-rm-rf(`Remove-Item`) / cmd-semicolon / ps-version-unknown. `.harness/shell-failures.json` 실패 메모리 + environment.json 버전 변동 감지.
+
+### 자율 모드 마일스톤 — 1.9.261 시점
+- **R217 누적 라운드** · **123 main-push streak** · **84 npm publish streak**
+- handoff/session close/health JSON **11 통합 필드** (3 × 11 = 33 포인트)
+- MCP **72 도구** · 9 카테고리 **59 CLI 명령** · 사용자 백로그 **UR-0013~0020 완전 소진**
+- **selftest 무결성** (CLI + MCP + npm test 게이트) · **require.main 가드 + 14종 export**
 
 ---
 <!-- leerness:migration-preserved -->

@@ -2,7 +2,7 @@
 
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.261-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v206-18%2F18-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-72-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-59-brightgreen)]() [![json-fields](https://img.shields.io/badge/JSON_통합-11_필드-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous_R-217-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-123_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-84_streak-success)]() [![encoding](https://img.shields.io/badge/🌐_인코딩보호-Windows%2BPOSIX-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-368ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.262-green)]() [![tests](https://img.shields.io/badge/e2e-217%2F217-success)]() [![stress](https://img.shields.io/badge/stress--v207-20%2F20-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-72-brightgreen)]() [![cli](https://img.shields.io/badge/CLI_commands-59-brightgreen)]() [![json-fields](https://img.shields.io/badge/JSON_통합-11_필드-blueviolet)]() [![rounds](https://img.shields.io/badge/autonomous_R-218-blueviolet)]() [![main-push](https://img.shields.io/badge/🎉_main--push_streak-124_rounds-success)]() [![npm-streak](https://img.shields.io/badge/🎉_npm--publish-85_streak-success)]() [![encoding](https://img.shields.io/badge/🌐_인코딩보호-Windows%2BPOSIX-blueviolet)]() [![perf](https://img.shields.io/badge/cold_start-368ms-success)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -12,9 +12,9 @@
   ║  ██║     ██╔══╝  ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ╚════██║  ║
   ║  ███████╗███████╗███████╗██║  ██║██║ ╚████║███████╗███████║  ║
   ║  ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝  ║
-  ║  v1.9.261  AI Agent Reliability Harness + Sandbox            ║
+  ║  v1.9.262  AI Agent Reliability Harness + Sandbox            ║
   ║  verify · remember · orchestrate · audit · sandbox · drift   ║
-  ║  🔌 MCP 72 — shell-guard 외부 AI 노출 (UR-0020 · R217)        ║
+  ║  📚 AI 핸드오프 지침 최신화 (1.9.253~261 · R218)              ║
   ╚══════════════════════════════════════════════════════════════╝
 ```
 
