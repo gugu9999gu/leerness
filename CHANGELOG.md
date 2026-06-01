@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.263 — 2026-06-01 — UR-0020 3단계: handoff 셸 실패 메모리 + 환경 버전 변동 자동 노출
+
+**🐚 과거 터미널 셸 실패 기록 + 환경 버전 변동을 매 세션 handoff 본문에 자동 표면화 (사용자 명시 UR-0020 완성).**
+
+### 배경
+UR-0020 1·2단계에서 shell-guard 린터(6 규칙)·실패 메모리(`.harness/shell-failures.json`)·MCP 도구(72번째)를 구축했으나, 기록된 실패가 handoff 본문에 자동 노출되지 않아 새 세션 AI 가 "과거에 `&&` 가 실패했다"는 맥락을 능동적으로 못 봄. 사용자 요청 핵심("다음 터미널 실행 시 과거 실패를 고려")을 완성하려면 handoff 자동 표면화가 필요.
+
+### 구현
+1. **handoff 본문 셸 가드 섹션** (`## 🐚 터미널 셸 가드`): 기록된 셸 실패가 있거나 환경 버전이 변동되면 자동 노출
+   - `_loadShellFailures(root)` — 최근 3건 표시 (명령 50자 + exit code + shell + 감지 규칙)
+   - `_shellEnvDrift(root)` — `environment.json` 스냅샷 ↔ 현재 비교 (node·PowerShell 버전 변동 시 "과거 실패 재검토 권장" 경고)
+   - 실패·변동이 모두 없으면 섹션 미노출 (false-positive 차단)
+2. **exports 확대**: `_shellFailuresPath`·`_loadShellFailures`·`_recordShellFailure`·`_shellEnvDrift` 4종 → 단위 테스트 가능 (require.main 가드로 init 미실행)
+
+### stress-v208 — **25/25 PASS · 100%**
+- 1.9.263 (12): exports 4종·경로·빈 워크스페이스·기록·200 cap·env drift null/변동 감지·CLI record 영속·handoff 노출/비노출/drift 경고
+- 성능 (2): cold start avg 391ms · 200건 write 104ms
+- 누적 회귀 (11): 1.9.207~262 (MCP 72·shell-guard·selftest 15·require.main 가드·path-setup·handoff JSON 11·posixEncoding·CJK·_isSecretKey·shell-guard summary)
+
 ## 1.9.262 — 2026-05-31 — CLAUDE/AGENTS 문서 누적 갱신 (1.9.253~261 drift 차단)
 
 **📚 메타 지침서가 1.9.252 에 멈춰 있어 9 라운드(1.9.253~261) 미반영 → 누적 갱신.**

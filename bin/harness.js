@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.262';
+const VERSION = '1.9.263';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -7910,6 +7910,35 @@ function handoff(root) {
       log(dm7(`  LANG=${runtimeEnv.locale.LANG || 'unset'} · LC_ALL=${runtimeEnv.locale.LC_ALL || 'unset'}`));
       log(dm7(`  → 권장: export LANG=ko_KR.UTF-8  (또는 export LC_ALL=C.UTF-8)`));
       log(dm7(`  → 영구 적용: ~/.bashrc 또는 ~/.zshrc 에 추가`));
+    }
+  } catch {}
+
+  // 1.9.263 (UR-0020 3단계): handoff body 에 터미널 셸 실패 메모리 + 환경 버전 변동 자동 노출.
+  //   새 세션 AI 가 과거 셸 명령 실패(예: PowerShell 5.1 && 미지원)를 즉시 인지 → 같은 실패 반복 차단.
+  try {
+    const sf = _loadShellFailures(root);
+    const drift = _shellEnvDrift(root);
+    const hasFailures = sf.failures && sf.failures.length > 0;
+    const hasDrift = drift && drift.changes && drift.changes.length > 0;
+    if (hasFailures || hasDrift) {
+      const isTty8 = process.stdout && process.stdout.isTTY;
+      const yl8 = s => isTty8 ? `\x1b[33m${s}\x1b[0m` : s;
+      const dm8 = s => isTty8 ? `\x1b[2m${s}\x1b[0m` : s;
+      const cy8 = s => isTty8 ? `\x1b[36m${s}\x1b[0m` : s;
+      log('');
+      log(cy8(`## 🐚 터미널 셸 가드 (1.9.263, UR-0020)`));
+      if (hasDrift) {
+        log(yl8(`  ⚠ 환경 버전 변동 — 과거 셸 실패 기록 재검토 권장:`));
+        drift.changes.forEach(ch => log(dm8(`     ${ch.what}: ${ch.from} → ${ch.to}`)));
+      }
+      if (hasFailures) {
+        log(dm8(`  최근 셸 실패 ${sf.failures.length}건 (최대 3 표시):`));
+        sf.failures.slice(-3).reverse().forEach(f => {
+          const rules = (f.issues && f.issues.length) ? ` [${f.issues.join(',')}]` : '';
+          log(dm8(`     • ${(f.cmd || '').slice(0, 50)} (exit=${f.exitCode}, ${f.shell})${rules}`));
+        });
+        log(dm8(`  → 명령 실행 전 점검: leerness shell-guard "<command>"`));
+      }
     }
   } catch {}
 
@@ -20282,5 +20311,7 @@ module.exports = {
   // 1.9.258: selftest — 코어 함수 무결성 검증
   _selfTestCases, selfTestCmd,
   // 1.9.260: shell-guard — 셸 호환성 린터 (UR-0020) 순수 분석 함수 — 단위 테스트
-  _shellGuardAnalyze, _detectShellCtx, shellGuardCmd
+  _shellGuardAnalyze, _detectShellCtx, shellGuardCmd,
+  // 1.9.263: shell 실패 메모리 + 환경 버전 변동 (UR-0020 3단계) — handoff 통합 단위 테스트
+  _shellFailuresPath, _loadShellFailures, _recordShellFailure, _shellEnvDrift
 };
