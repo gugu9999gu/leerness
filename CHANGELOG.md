@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.266 — 2026-06-01 — UR-0021 2단계: dispatch 슬래시 명령 자동 주입 + handoff 노출 + MCP 73
+
+**🤖 서브에이전트 dispatch/handoff 에 각 에이전트 슬래시 명령을 자동 노출 — "알맞은 슬래시 명령으로 작업" (사용자 명시 UR-0021 2단계).**
+
+### 배경
+1단계(1.9.265)에서 레지스트리·CLI·`_agentSlashHint` 헬퍼를 구축. 2단계는 사용자 요구 핵심 — "서브에이전트 호출 시 각 에이전트에 알맞는 슬래시 명령이 적절히 사용" — 을 실제 dispatch 경로 + 세션 시작(handoff)에 연결.
+
+### 구현
+1. **`agents dispatch <task> --to <id>` 슬래시 힌트 주입** — 실행 명령 아래에 대상 에이전트 슬래시 명령 노출 (subcommand 타입은 "하위명령" 라벨).
+2. **`agents multi` 슬래시 힌트** — 각 에이전트 명령마다 `🤖 슬래시: ...` 한 줄 + `--json` 에 `slashCommands` 필드 (`{ <id>: { invoke, commands[] } }`).
+3. **handoff 본문 활성 에이전트 슬래시 섹션** — env flag(`LEERNESS_ENABLE_*`) 활성 에이전트별 슬래시 명령 요약. **spawn 없이 env 점검만** (handoff 속도 보존, 오버헤드 측정값 ~0). 활성 0이면 미노출.
+4. **MCP 73번째 도구 `leerness_slash_commands`** — 외부 AI(메인)가 sub-agent 호출 전 각 에이전트 슬래시 명령 회수. 인자 `{ path?, agent? }`.
+5. **grok 범위 메모**: grok 은 슬래시 레지스트리에 포함(CLI/MCP/hint 조회 가능)되나, 아직 `EXTERNAL_AGENTS` 정식 provider 는 아님 → dispatch/handoff 활성 목록은 claude/codex/agy/copilot/ollama 기준. grok 정식 provider 승격(install 흐름 1~5 선택지 확장 포함)은 별도 후속 task.
+
+### stress-v211 — **21/21 PASS · 100%**
+- 1.9.266 (8): MCP 73·handoff 노출/비노출·MCP round-trip(grok/전체)·dispatch·multi·json 주입 경로·hint
+- 성능 (2): cold start + handoff 활성 섹션 오버헤드 측정(WITH−WITHOUT delta, ~0)
+- 누적 회귀 (11): 1.9.207~265 (slash-commands CLI·레지스트리·record·shellGuard JSON·handoff 12필드·selftest 17·require.main·agy/gemini·ps5-chain·_isSecretKey·CJK)
+
 ## 1.9.265 — 2026-06-01 — UR-0021 1단계: CLI 에이전트 슬래시 명령어 레지스트리 (claude/codex/agy/grok/copilot)
 
 **🤖 각 CLI AI 에이전트의 슬래시 명령어를 큐레이션·기록하고, 서브에이전트 호출 시 알맞게 참조 (사용자 명시 UR-0021 1단계).**

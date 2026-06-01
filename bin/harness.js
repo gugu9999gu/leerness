@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.265';
+const VERSION = '1.9.266';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -7956,6 +7956,31 @@ function handoff(root) {
     }
   } catch {}
 
+  // 1.9.266 (UR-0021 2단계): 활성(env 활성화) CLI 에이전트별 슬래시 명령 요약 — sub-agent dispatch 시 알맞은 슬래시 참조
+  //   spawn 없이 env flag 만 점검 (handoff 속도 보존). 활성 에이전트 0 이면 미노출.
+  try {
+    const enabledAgents = EXTERNAL_AGENTS.filter(a => {
+      const v = process.env[a.envFlag];
+      return v && v !== '0' && String(v).toLowerCase() !== 'false';
+    });
+    if (enabledAgents.length > 0) {
+      const isTtyS = process.stdout && process.stdout.isTTY;
+      const cyS = s => isTtyS ? `\x1b[36m${s}\x1b[0m` : s;
+      const dmS = s => isTtyS ? `\x1b[2m${s}\x1b[0m` : s;
+      log('');
+      log(cyS(`## 🤖 CLI 에이전트 슬래시 명령 (1.9.265~266, UR-0021)`));
+      log(dmS(`  활성 에이전트 ${enabledAgents.length}개 — sub-agent 호출 시 각자 슬래시 명령 사용:`));
+      for (const a of enabledAgents) {
+        const hint = _agentSlashHint(root, a.id);
+        if (hint && hint.commands.length) {
+          const top = hint.commands.slice(0, 8).map(c => c.cmd).join(' ');
+          log(dmS(`     ${a.id.padEnd(8)} ${top}${hint.invoke === 'subcommand' ? ' (하위명령)' : ''}`));
+        }
+      }
+      log(dmS(`  → 전체/기록/최신화: leerness slash-commands [agent] [--record]`));
+    }
+  } catch {}
+
   // 1.9.245: API skill cache 자동 참조 (사용자 명시 UR-0015)
   //   현재 task 키워드 기반으로 .harness/api-skills/ 매칭 → 사용자가 정리해둔 API 문서 자동 노출
   try {
@@ -11312,7 +11337,9 @@ function agentsCmd(root, sub, ...args) {
       log(JSON.stringify({
         task, count: ready.length,
         agents: ready.map(x => ({ id: x.def.id, version: x.status.version })),
-        commands: ready.map(x => _dispatchCommand(x.def.id, task, writeMode))
+        commands: ready.map(x => _dispatchCommand(x.def.id, task, writeMode)),
+        // 1.9.266 (UR-0021 2단계): 각 에이전트 슬래시 명령 힌트 — sub-agent 가 알맞은 슬래시 사용
+        slashCommands: ready.reduce((acc, x) => { const h = _agentSlashHint(root, x.def.id); if (h) acc[x.def.id] = { invoke: h.invoke, commands: h.commands.map(c => c.cmd) }; return acc; }, {})
       }, null, 2));
       return;
     }
@@ -11328,6 +11355,11 @@ function agentsCmd(root, sub, ...args) {
       log('```sh');
       log(_dispatchCommand(def.id, task, writeMode));
       log('```');
+      // 1.9.266 (UR-0021 2단계): 에이전트별 슬래시 명령 힌트
+      try {
+        const hint = _agentSlashHint(root, def.id);
+        if (hint && hint.commands.length) log(`  🤖 슬래시: ${hint.commands.slice(0, 8).map(c => c.cmd).join(' ')}${hint.invoke === 'subcommand' ? ' (하위명령)' : ''}`);
+      } catch {}
       log('');
     }
     log('## 정책 (1.9.152 / 1.9.156)');
@@ -11388,6 +11420,17 @@ function agentsCmd(root, sub, ...args) {
     } else if (target === 'copilot') {
       log(`gh copilot suggest "${q}"`);
     }
+    // 1.9.266 (UR-0021 2단계): 대상 에이전트의 슬래시 명령 힌트 — sub-agent 작업 시 알맞은 슬래시 명령 참조
+    try {
+      const hint = _agentSlashHint(root, target);
+      if (hint && hint.commands.length) {
+        log('');
+        log(`## 🤖 ${target} 슬래시 명령 (1.9.265, UR-0021)`);
+        if (hint.invoke === 'subcommand') log(`  ※ 슬래시가 아닌 하위명령: ${hint.commands.map(c => c.cmd).join(' / ')}`);
+        else log(`  세션 내 사용 가능: ${hint.commands.slice(0, 10).map(c => c.cmd).join('  ')}`);
+        log(`  → 전체/기록: leerness slash-commands ${target} [--record]`);
+      }
+    } catch {}
     log('');
     log(`## 정책 (1.9.36)`);
     log(`  - leerness는 외부 CLI를 자동 호출하지 않음 (사용자 명시적 실행)`);
@@ -16308,7 +16351,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_env_info', description: '1.9.241 (사용자 명시 UR-0014) — 환경 종합 정보 회수. OS / 언어 (LANG, 코드페이지) / 한국어 Windows / 하드웨어 / 터미널 (TTY, PowerShell 버전) / 도구 버전 (git, npm, python). 외부 AI 가 환경 호환성을 미리 인지 → 인코딩 오류 예방. 응답: { os, node, locale, hardware, terminal, tools }. 인자: { path?, encodingCheck? }. encodingCheck: true 시 셸 스크립트 (.ps1/.bat/.cmd/.sh) BOM 없는 비-ASCII 위험 감지', inputSchema: { type: 'object', properties: { path: { type: 'string' }, encodingCheck: { type: 'boolean' } } } },
     { name: 'leerness_api_skill', description: '1.9.245 (사용자 명시 UR-0015) — API 문서·관련링크 자동 캐시. 공식 API 문서 URL을 fetch 하고 1단계 same-domain 관련 링크까지 정리 → .harness/api-skills/<id>.md 저장. 후속 같은 API 관련 작업 시 자동 참조. 응답: list (skills 배열) / show (전체 본문) / match (task 매칭 결과). 인자: { path?, sub ("list"|"show"|"match"|"add"|"drop"), url? (add), id? (show/drop), query? (match), direction? (add: 구현 방향 텍스트) }. 외부 AI가 "이 프로젝트 어떤 API 문서가 정리되어 있나?" / "내 작업과 매칭되는 API skill 있나?" 회수.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['list', 'show', 'match', 'add', 'drop'] }, url: { type: 'string' }, id: { type: 'string' }, query: { type: 'string' }, direction: { type: 'string' } }, required: ['sub'] } },
     { name: 'leerness_selftest', description: '1.9.258/259 — 설치된 leerness 바이너리의 코어 함수(보안 _isSecretKey / 버전 compareVer / 인코딩 _classifyCJK 등) 무결성 자가 검증. 응답: { version, total, pass, fail, ok, results[] }. 외부 AI/CI 가 "이 leerness 설치가 정상인가?(npx 캐시 손상·부분 설치 감지)" 를 1초 내 확인. 인자: 없음.', inputSchema: { type: 'object', properties: {} } },
-    { name: 'leerness_shell_guard', description: '1.9.260/261 (사용자 명시 UR-0020) — 터미널 명령 셸 호환성 린터. 외부 AI 가 명령을 실행하기 전에 셸 호환성 문제를 사전 점검. 예: Windows PowerShell 5.1 은 && / || 미지원 → A; if ($?) { B } 제안. 6 규칙(ps5-chain/ps-devnull/ps-inline-env/ps-rm-rf/cmd-semicolon/ps-version-unknown) + 과거 실패 회수(.harness/shell-failures.json). 응답: { shell, psVersion, issues[{rule,severity,detail,suggestion}], pastSame, pastSimilar, ok }. 인자: { command (required), path? }. 현재 셸/PS 버전 자동 감지.', inputSchema: { type: 'object', properties: { command: { type: 'string' }, path: { type: 'string' } }, required: ['command'] } }
+    { name: 'leerness_shell_guard', description: '1.9.260/261 (사용자 명시 UR-0020) — 터미널 명령 셸 호환성 린터. 외부 AI 가 명령을 실행하기 전에 셸 호환성 문제를 사전 점검. 예: Windows PowerShell 5.1 은 && / || 미지원 → A; if ($?) { B } 제안. 6 규칙(ps5-chain/ps-devnull/ps-inline-env/ps-rm-rf/cmd-semicolon/ps-version-unknown) + 과거 실패 회수(.harness/shell-failures.json). 응답: { shell, psVersion, issues[{rule,severity,detail,suggestion}], pastSame, pastSimilar, ok }. 인자: { command (required), path? }. 현재 셸/PS 버전 자동 감지.', inputSchema: { type: 'object', properties: { command: { type: 'string' }, path: { type: 'string' } }, required: ['command'] } },
+    { name: 'leerness_slash_commands', description: '1.9.265/266 (사용자 명시 UR-0021) — CLI AI 에이전트별 슬래시 명령어 레지스트리. 외부 AI(메인)가 sub-agent(codex/agy/claude/grok/copilot)를 호출할 때 각 에이전트에 알맞는 슬래시 명령을 참조. 빌트인 + 사용자 .harness/agent-slash-commands.json override 병합. 응답: { agents: { <id>: { label, asOf, invoke(slash|subcommand), note, source, count, commands[{cmd,desc}] } } }. 인자: { path?, agent? (생략 시 전체) }. agent 지정 시 단일.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, agent: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -16518,6 +16562,10 @@ function mcpServeCmd(root) {
           case 'leerness_shell_guard':
             // 1.9.261 (1.9.260, UR-0020): 터미널 명령 셸 호환성 린터
             cliArgs = ['shell-guard', String(args.command || ''), '--path', targetPath, '--json'];
+            break;
+          case 'leerness_slash_commands':
+            // 1.9.266 (1.9.265, UR-0021): CLI 에이전트 슬래시 명령 레지스트리
+            cliArgs = ['slash-commands', ...(args.agent ? [String(args.agent)] : []), '--path', targetPath, '--json'];
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
