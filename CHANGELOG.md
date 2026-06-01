@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.9.258 — 2026-05-30 — leerness selftest 명령 (코어 함수 무결성 자가 검증)
+
+**🩺 사용자/CI 가 설치된 leerness 바이너리의 건강 상태를 1초 내 검증하는 신규 명령.**
+
+### 배경
+`npx` 캐시 손상, 부분 설치, 버전 충돌 등으로 leerness 가 비정상 동작할 수 있음. 1.9.255~257에서 export 한 보안/정확성/인코딩-핵심 순수 함수를 실제 호출해 무결성을 자가 검증.
+
+### 구현 (`leerness selftest [--json]`)
+1. **`_selfTestCases()`** — 13개 코어 함수 무결성 케이스 (순수 함수만, 파일/네트워크 부작용 0):
+   - `_isSecretKey` (시크릿 차단 3종) · `compareVer` (대소/null 2종) · `parseHarnessVersion`
+   - `_classifyCJK` (한/중/일) · `_riskLabel` (CP949/CP936) · `_dirInPath` · `_winPathPsScript` · `_unixPathBlock` · VERSION 형식
+2. **`selfTestCmd`** — 사람용 ✓/✗ 리스트 + `--json` (기계 판독)
+   - 전체 통과 → exit 0 / 1건이라도 실패 → **exit 1** (CI 친화) + 재설치 안내
+3. **`self-test` 별칭** + help 노출 + `selfTestCmd`/`_selfTestCases` export
+
+### stress-v203 — **21/21 PASS · 100%**
+- 1.9.258 (10): export + 13 케이스 무결성 + CLI exit 0/json/별칭 + 실패시 감지 + help + 성능(<1.5s)
+- 성능 (1): cold start avg 400ms
+- 누적 회귀 (10): 1.9.207~257
+
+### 자동 release (120 main-push streak · 81 npm publish streak · R214)
+
+🩺 **설치 건강 진단** — `leerness selftest` 로 사용자/CI 가 바이너리 무결성을 즉시 확인 (손상 시 exit 1 + 재설치 안내).
+
+---
+
 ## 1.9.257 — 2026-05-30 — CJK 분류 함수 추출+단위테스트 + release 브랜치 정리 (🎉 80 npm streak)
 
 **🧪 1.9.255/256 테스트 인프라 연장 + 🧹 누적 release 브랜치 정리 (handoff 장기 경고 해소).**

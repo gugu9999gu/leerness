@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.257';
+const VERSION = '1.9.258';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2881,6 +2881,63 @@ function pathSetupCmd(root, opts = {}) {
   } else {
     log(yl(`  ⚠ 자동 등록 실패 (${res.method}): ${res.detail}`));
     log(dm(`     → 수동 등록: PATH 에 ${diag.globalBin} 추가`));
+  }
+}
+
+// 1.9.258: leerness selftest — 설치된 leerness 바이너리의 코어 순수 함수 자가 검증.
+//   1.9.255~257 에서 export 한 보안/정확성/인코딩-핵심 함수를 실제 호출해 무결성 확인.
+//   사용자/CI 가 "내 leerness 가 정상인가?" 를 1초 내 검증 (npm 캐시 손상/부분 설치 감지).
+//   --json: 기계 판독. 실패 시 exit 1 (CI 친화).
+function _selfTestCases() {
+  // 각 케이스: { name, run: () => boolean }  — 순수 함수만 (파일/네트워크 부작용 0)
+  return [
+    { name: '_isSecretKey: NPM_TOKEN 차단', run: () => _isSecretKey('NPM_TOKEN') === true },
+    { name: '_isSecretKey: API_KEY/SECRET/PASSWORD 차단', run: () => _isSecretKey('OPENAI_API_KEY') && _isSecretKey('MY_SECRET') && _isSecretKey('db_PASSWORD') },
+    { name: '_isSecretKey: 비시크릿 LEERNESS_* 통과', run: () => _isSecretKey('LEERNESS_ENABLE_AGY') === false && _isSecretKey('LANG') === false },
+    { name: 'compareVer: 대소 비교', run: () => compareVer('1.9.258', '1.9.257') === 1 && compareVer('1.9.0', '1.10.0') === -1 && compareVer('2.0.0', '2.0.0') === 0 },
+    { name: 'compareVer: 누락 파트/null 안전', run: () => compareVer('1.9', '1.9.0') === 0 && compareVer(null, '0.0.0') === 0 },
+    { name: 'parseHarnessVersion: canonical + legacy plus', run: () => parseHarnessVersion('1.9.0').base === '1.9.0' && parseHarnessVersion('leerness@1.8.0+plus@1.0.1').plus === '1.0.1' },
+    { name: '_classifyCJK: 한국어 감지', run: () => { const b = Buffer.from('안녕', 'utf8'); return _classifyCJK(b, b.length).korean > 0; } },
+    { name: '_classifyCJK: 중국어/일본어 구분', run: () => { const z = Buffer.from('中', 'utf8'), j = Buffer.from('ひ', 'utf8'); return _classifyCJK(z, z.length).chinese > 0 && _classifyCJK(j, j.length).japanese > 0; } },
+    { name: '_riskLabel: korean→CP949 / chinese→CP936', run: () => /CP949/.test(_riskLabel({ korean: 3, japanese: 0, chinese: 0, other: 0 }).risk) && /CP936/.test(_riskLabel({ korean: 0, japanese: 0, chinese: 3, other: 0 }).risk) },
+    { name: '_dirInPath: 정규화 (trailing slash)', run: () => { const sep = process.platform === 'win32' ? ';' : ':'; const old = process.env.PATH; process.env.PATH = '/usr/bin' + sep + '/opt/x/bin'; const r = _dirInPath('/opt/x/bin/') === true && _dirInPath('/no/such') === false; process.env.PATH = old; return r; } },
+    { name: '_winPathPsScript: User scope + setx 미사용', run: () => { const ps = _winPathPsScript('C:\\npm'); return /SetEnvironmentVariable\('PATH', \$nu, 'User'\)/.test(ps) && !/setx/i.test(ps); } },
+    { name: '_unixPathBlock: 멱등 마커 + export', run: () => { const b = _unixPathBlock('/x/bin'); return b.includes('managed') && /export PATH="\$PATH:\/x\/bin"/.test(b); } },
+    { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
+  ];
+}
+function selfTestCmd(opts = {}) {
+  const isTty = process.stdout && process.stdout.isTTY;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const cases = _selfTestCases();
+  const results = cases.map(c => {
+    let ok = false, err = null;
+    try { ok = c.run() === true; } catch (e) { ok = false; err = e.message; }
+    return { name: c.name, ok, err };
+  });
+  const pass = results.filter(r => r.ok).length;
+  const fail = results.length - pass;
+  if (opts.json) {
+    log(JSON.stringify({ version: VERSION, total: results.length, pass, fail, ok: fail === 0, results }, null, 2));
+    if (fail > 0) process.exitCode = 1;
+    return;
+  }
+  log(cy(`# leerness selftest (1.9.258) — 코어 함수 무결성 검증 (v${VERSION})`));
+  log('');
+  results.forEach(r => {
+    if (r.ok) log(`  ${gr('✓')} ${r.name}`);
+    else log(`  ${rd('✗')} ${r.name}${r.err ? dm(' — ' + r.err) : ''}`);
+  });
+  log('');
+  if (fail === 0) {
+    log(gr(`  ✓ 전체 ${results.length}건 통과 — leerness 설치 정상`));
+  } else {
+    log(rd(`  ✗ ${fail}/${results.length}건 실패 — 설치 손상 의심`));
+    log(dm(`     → 재설치: npm i -g leerness@latest  ·  진단: leerness which`));
+    process.exitCode = 1;
   }
 }
 
@@ -19695,7 +19752,7 @@ function whichCmd() {
 }
 
 function help() {
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/agy/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/agy/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -19898,6 +19955,8 @@ async function main() {
   // 1.9.254: leerness path-setup [--apply] — CLI PATH 자동 등록 (사용자 명시 UR-0019)
   //   npm global bin 경로 감지 + leerness 가 PATH 에서 찾아지는지 확인 → 미등록 시 플랫폼별 등록
   if (cmd === 'path-setup' || cmd === 'path')        return pathSetupCmd(arg('--path', process.cwd()), { apply: has('--apply'), json: has('--json') });
+  // 1.9.258: leerness selftest — 설치된 바이너리 코어 함수 무결성 자가 검증 (CI/사용자 진단)
+  if (cmd === 'selftest' || cmd === 'self-test')     return selfTestCmd({ json: has('--json') });
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
@@ -20057,5 +20116,7 @@ module.exports = {
   _winPathPsScript, _unixPathBlock, pathSetupCmd,
   _isSecretKey, compareVer, parseHarnessVersion,
   // 1.9.257: CJK 인코딩 분류 (UR-0014 계열) 순수 함수 — 단위 테스트
-  _classifyCJK, _riskLabel
+  _classifyCJK, _riskLabel,
+  // 1.9.258: selftest — 코어 함수 무결성 검증
+  _selfTestCases, selfTestCmd
 };
