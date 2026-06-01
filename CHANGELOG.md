@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.265 — 2026-06-01 — UR-0021 1단계: CLI 에이전트 슬래시 명령어 레지스트리 (claude/codex/agy/grok/copilot)
+
+**🤖 각 CLI AI 에이전트의 슬래시 명령어를 큐레이션·기록하고, 서브에이전트 호출 시 알맞게 참조 (사용자 명시 UR-0021 1단계).**
+
+### 배경
+codex/agy/claude/grok 등 CLI 로 구동되는 AI 에이전트는 각자 다른 슬래시 명령(`/init`, `/compact`, `/diff` …)을 쓴다. 서브에이전트로 dispatch 할 때 각 에이전트에 맞는 슬래시 명령을 알맞게 써야 작업이 제대로 된다. 이를 위해 명령어를 항상 최신화·기록하는 레지스트리가 필요. (review-request: ✓ 진행 안전 / reuse: 기존 레지스트리 없음 — 신규)
+
+### 구현 (1단계 — 레지스트리 + CLI + dispatch 헬퍼)
+1. **`AGENT_SLASH_COMMANDS` 빌트인 레지스트리** — claude(13)/codex(10)/agy(6)/**grok(6)**/copilot(3). 각 명령 `{cmd, desc}` + `asOf` 버전 + `invoke`(slash|subcommand) + `note`.
+   - **Grok CLI** 사용자 명시 반영 (`/help /clear /model /new /login /exit`)
+   - copilot 은 슬래시가 아닌 `gh copilot <sub>` 하위명령 → `invoke: 'subcommand'` 라벨
+2. **항상 최신화 3중 경로**: (1) 빌트인은 릴리스마다 갱신(`asOf`), (2) 사용자 `.harness/agent-slash-commands.json` override 병합(기존 agent 명령 교체 + 신규 agent 추가), (3) [2~3단계 예정] CLI `--help` probe 자동 refresh.
+3. **`leerness slash-commands [agent]` CLI**: 전체/단일 목록 · `--json` · `--record`(워크스페이스 기록) · `--detect`(설치된 CLI 표시) · 별칭 `slash`/`agent-slash`.
+4. **`_agentSlashHint(root, agentId)` 헬퍼 export** — 서브에이전트 dispatch 시 주입할 1줄 요약 + 명령 배열 (2단계에서 agents multi/agent 가 활용).
+5. **selftest 2종 추가** (15→17): 레지스트리 5종 보유 + hint 요약/하위명령 라벨.
+
+### 2~3단계 예정
+- 2단계: `agents multi`/`agent` dispatch 시 대상 에이전트 슬래시 명령 자동 주입 + handoff 노출
+- 3단계: 설치된 CLI 의 `--help`/`/help` 를 probe 해 레지스트리 자동 refresh
+
+### stress-v210 — **26/26 PASS · 100%**
+- 1.9.265 (13): 레지스트리 5종·grok·load/merge(builtin/user/신규)·record·hint·copilot subcommand·CLI list/json/record/unknown
+- 성능 (2): cold start avg 370ms · load 100회 4ms
+- 누적 회귀 (11): 1.9.207~264 (selftest 17·shellGuard JSON·handoff 12필드·MCP 72·shell-guard·require.main·agy/gemini·CJK·_isSecretKey·path-setup)
+
 ## 1.9.264 — 2026-06-01 — shellGuard JSON 12번째 통합 필드 (handoff/session close/health) + session close 본문 셸 요약
 
 **🐚 UR-0020 셸 실패 메모리를 `--json` 표면 3 명령에 일관되게 통합 — 외부 AI/자동화가 셸 호환성 상태를 구조적으로 소비.**

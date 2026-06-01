@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.264';
+const VERSION = '1.9.265';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2905,6 +2905,8 @@ function _selfTestCases() {
     { name: '_unixPathBlock: 멱등 마커 + export', run: () => { const b = _unixPathBlock('/x/bin'); return b.includes('managed') && /export PATH="\$PATH:\/x\/bin"/.test(b); } },
     { name: '_shellGuardAnalyze: PS5.1 && → ps5-chain error', run: () => { const r = _shellGuardAnalyze('a && b', { shell: 'powershell', psVersion: '5' }); return r.issues.some(i => i.rule === 'ps5-chain' && i.severity === 'error'); } },
     { name: '_shellGuardAnalyze: bash && → 문제 없음', run: () => _shellGuardAnalyze('a && b', { shell: 'bash' }).issues.length === 0 },
+    { name: 'AGENT_SLASH_COMMANDS: claude/codex/agy/grok/copilot 5종 + 명령 보유', run: () => { const ids = Object.keys(AGENT_SLASH_COMMANDS); return ['claude', 'codex', 'agy', 'grok', 'copilot'].every(id => ids.includes(id) && AGENT_SLASH_COMMANDS[id].commands.length > 0); } },
+    { name: '_agentSlashHint: grok 슬래시 요약 + copilot 하위명령 라벨', run: () => { const g = _agentSlashHint('.', 'grok'); const c = _agentSlashHint('.', 'copilot'); return !!g && g.count > 0 && /Grok/.test(g.summary) && !!c && c.invoke === 'subcommand' && /하위명령/.test(c.summary); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3560,6 +3562,7 @@ function commandsCmd(root) {
       { cmd: 'resume [path]', desc: 'auto-resume-plan 적용 (1.9.203)' },
       { cmd: 'route <task-type>', desc: '작업 유형 분류 (11종)' },
       { cmd: 'agents list|check|quota|dispatch|multi', desc: '외부 AI CLI 오케스트레이션' },
+      { cmd: 'slash-commands [agent] [--json --record --detect]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 (1.9.265, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
       { cmd: 'brainstorm "<topic>" [--include-code]', desc: '워크스페이스 회수 + 코드 grep' }
@@ -10049,6 +10052,204 @@ const EXTERNAL_AGENTS = [
   { id: 'ollama',  bin: 'ollama',  envFlag: 'LEERNESS_ENABLE_OLLAMA',  versionArgs: ['--version'], desc: 'Ollama 로컬 LLM (http://localhost:11434, llama3/qwen 등)',
     installCmd: 'curl -fsSL https://ollama.com/install.sh | sh (또는 https://ollama.com/download)', installHint: 'ollama serve 실행 + ollama pull <model>' }
 ];
+
+// 1.9.265 (사용자 명시 UR-0021): CLI AI 에이전트별 슬래시 명령어 레지스트리.
+//   목적: 각 CLI (claude/codex/agy/grok/copilot) 의 슬래시 명령어를 큐레이션·기록하고, 서브에이전트 dispatch 시 알맞게 참조.
+//   "항상 최신화" 3중 경로: (1) 빌트인은 leerness 릴리스마다 갱신(asOf), (2) 사용자 .harness/agent-slash-commands.json override 병합,
+//   (3) [2~3단계 예정] CLI `--help`/`/help` probe 자동 refresh. 0-dep·offline-first 라서 1단계는 (1)+(2) 큐레이션 기반.
+//   주의: 외부 CLI 의 슬래시 명령은 버전마다 변동 → asOf 표기 + 사용자 override 우선. type='subcommand' 는 슬래시가 아닌 하위명령(예: gh copilot).
+const AGENT_SLASH_COMMANDS = {
+  claude: {
+    label: 'Anthropic Claude Code', asOf: '1.9.265', invoke: 'slash',
+    commands: [
+      { cmd: '/help', desc: '명령 목록' },
+      { cmd: '/clear', desc: '대화 컨텍스트 초기화' },
+      { cmd: '/compact', desc: '대화 압축 (컨텍스트 절약)' },
+      { cmd: '/init', desc: 'CLAUDE.md 생성/갱신' },
+      { cmd: '/model', desc: '모델 전환' },
+      { cmd: '/review', desc: 'PR/변경 리뷰' },
+      { cmd: '/agents', desc: '서브에이전트 관리' },
+      { cmd: '/mcp', desc: 'MCP 서버 상태/관리' },
+      { cmd: '/memory', desc: '메모리 파일 편집' },
+      { cmd: '/permissions', desc: '권한 설정' },
+      { cmd: '/cost', desc: '토큰 비용 표시' },
+      { cmd: '/resume', desc: '이전 세션 재개' },
+      { cmd: '/config', desc: '설정' }
+    ]
+  },
+  codex: {
+    label: 'OpenAI Codex CLI', asOf: '1.9.265', invoke: 'slash',
+    commands: [
+      { cmd: '/init', desc: '프로젝트 컨텍스트 초기화' },
+      { cmd: '/compact', desc: '대화 압축' },
+      { cmd: '/diff', desc: '작업 트리 diff 표시' },
+      { cmd: '/mention', desc: '파일 멘션/첨부' },
+      { cmd: '/status', desc: '세션 상태/사용량' },
+      { cmd: '/model', desc: '모델 전환' },
+      { cmd: '/approvals', desc: '승인 모드 변경 (sandbox)' },
+      { cmd: '/new', desc: '새 대화 시작' },
+      { cmd: '/clear', desc: '컨텍스트 초기화' },
+      { cmd: '/quit', desc: '종료' }
+    ]
+  },
+  agy: {
+    label: 'Google Antigravity CLI', asOf: '1.9.265', invoke: 'slash',
+    note: '큐레이션(best-effort) — agy CLI 는 신규 도구라 슬래시 명령이 변동 가능. --refresh(2단계) 또는 사용자 override 권장.',
+    commands: [
+      { cmd: '/help', desc: '명령 목록' },
+      { cmd: '/init', desc: '워크스페이스 초기화' },
+      { cmd: '/model', desc: '모델 전환' },
+      { cmd: '/new', desc: '새 세션' },
+      { cmd: '/clear', desc: '컨텍스트 초기화' },
+      { cmd: '/status', desc: '상태 표시' }
+    ]
+  },
+  grok: {
+    label: 'xAI Grok CLI', asOf: '1.9.265', invoke: 'slash',
+    note: '커뮤니티/공식 Grok CLI 들 (예: @vibe-kit/grok-cli) 기준 큐레이션 — 배포판마다 차이 가능. 사용자 override 권장.',
+    commands: [
+      { cmd: '/help', desc: '명령 목록' },
+      { cmd: '/clear', desc: '대화 초기화' },
+      { cmd: '/model', desc: '모델 전환 (grok-beta 등)' },
+      { cmd: '/new', desc: '새 대화' },
+      { cmd: '/login', desc: 'xAI API 키 로그인' },
+      { cmd: '/exit', desc: '종료' }
+    ]
+  },
+  copilot: {
+    label: 'GitHub Copilot CLI (gh copilot)', asOf: '1.9.265', invoke: 'subcommand',
+    note: '슬래시가 아닌 gh 하위명령. 호출 형식: gh copilot <sub> "<질의>".',
+    commands: [
+      { cmd: 'suggest', desc: '명령/코드 제안 (gh copilot suggest "...")' },
+      { cmd: 'explain', desc: '명령 설명 (gh copilot explain "...")' },
+      { cmd: 'config', desc: 'gh copilot 설정' }
+    ]
+  }
+};
+function _agentSlashFile(root) { return path.join(absRoot(root), '.harness', 'agent-slash-commands.json'); }
+// 사용자 override 병합 — .harness/agent-slash-commands.json 에 동일 agent id 가 있으면 commands 를 교체(최신화).
+//   파일 형식: { schemaVersion:1, agents: { <id>: { label?, asOf?, invoke?, note?, commands:[{cmd,desc}] } } }
+function _loadAgentSlashCommands(root) {
+  const merged = {};
+  for (const [id, def] of Object.entries(AGENT_SLASH_COMMANDS)) {
+    merged[id] = { id, label: def.label, asOf: def.asOf, invoke: def.invoke || 'slash', note: def.note || null, source: 'builtin', commands: def.commands.slice() };
+  }
+  try {
+    const f = _agentSlashFile(root);
+    if (exists(f)) {
+      const j = JSON.parse(read(f));
+      const userAgents = (j && j.agents && typeof j.agents === 'object') ? j.agents : {};
+      for (const [id, def] of Object.entries(userAgents)) {
+        if (!def || !Array.isArray(def.commands)) continue;
+        const cmds = def.commands.filter(c => c && typeof c.cmd === 'string').map(c => ({ cmd: c.cmd, desc: c.desc || '' }));
+        merged[id] = {
+          id,
+          label: def.label || (merged[id] && merged[id].label) || id,
+          asOf: def.asOf || (merged[id] && merged[id].asOf) || null,
+          invoke: def.invoke || (merged[id] && merged[id].invoke) || 'slash',
+          note: def.note || (merged[id] && merged[id].note) || null,
+          source: merged[id] ? 'builtin+user' : 'user',
+          commands: cmds.length ? cmds : (merged[id] ? merged[id].commands : [])
+        };
+      }
+    }
+  } catch {}
+  return merged;
+}
+// 워크스페이스 기록 — 빌트인 레지스트리를 .harness/agent-slash-commands.json 으로 출력 (사용자가 편집해 최신화 가능).
+//   기존 사용자 override 가 있으면 보존(병합 결과 기록). force 시 빌트인으로 덮어쓰기.
+function _recordAgentSlashCommands(root, opts = {}) {
+  const f = _agentSlashFile(root);
+  let agents;
+  if (opts.force || !exists(f)) {
+    agents = {};
+    for (const [id, def] of Object.entries(AGENT_SLASH_COMMANDS)) {
+      agents[id] = { label: def.label, asOf: def.asOf, invoke: def.invoke || 'slash', note: def.note || undefined, commands: def.commands.slice() };
+    }
+  } else {
+    const merged = _loadAgentSlashCommands(root);
+    agents = {};
+    for (const [id, def] of Object.entries(merged)) {
+      agents[id] = { label: def.label, asOf: def.asOf, invoke: def.invoke, note: def.note || undefined, commands: def.commands };
+    }
+  }
+  mkdirp(path.dirname(f));
+  writeUtf8(f, JSON.stringify({ schemaVersion: 1, recordedAt: new Date().toISOString(), agents }, null, 2) + '\n');
+  return { file: f, agentCount: Object.keys(agents).length };
+}
+// dispatch 참조용 — 특정 agent 의 슬래시 명령어 힌트 (서브에이전트 프롬프트에 주입할 1줄 요약 + 배열).
+//   2단계에서 agents multi/agent dispatch 가 이 헬퍼로 각 에이전트에 맞는 슬래시 명령을 안내.
+function _agentSlashHint(root, agentId) {
+  const all = _loadAgentSlashCommands(root);
+  const def = all[agentId];
+  if (!def) return null;
+  const top = def.commands.slice(0, 8).map(c => c.cmd).join(' ');
+  const invokeNote = def.invoke === 'subcommand' ? ' (슬래시 아님, 하위명령)' : '';
+  return {
+    agent: agentId,
+    label: def.label,
+    invoke: def.invoke,
+    count: def.commands.length,
+    commands: def.commands,
+    summary: `${def.label}${invokeNote}: ${top}${def.commands.length > 8 ? ' …' : ''}`
+  };
+}
+// 1.9.265 (UR-0021): leerness slash-commands [agent] [--json --record --detect]
+//   인자 없음 → 전체 에이전트 슬래시 명령 목록. <agent> → 단일. --record → 워크스페이스 기록. --detect → 설치된 CLI 만 표시.
+function slashCommandsCmd(root, agentArg, opts = {}) {
+  const all = _loadAgentSlashCommands(root);
+  // --detect: 실제 PATH 에 설치된 CLI 만 (EXTERNAL_AGENTS bin 기준)
+  let installed = null;
+  if (opts.detect) {
+    installed = {};
+    for (const a of EXTERNAL_AGENTS) {
+      try { const r = cp.spawnSync(a.bin, a.versionArgs || ['--version'], { encoding: 'utf8', timeout: 4000 }); installed[a.id] = !r.error && (r.status === 0 || !!(r.stdout || '').trim()); }
+      catch { installed[a.id] = false; }
+    }
+  }
+  // --record: 워크스페이스에 기록
+  if (opts.record) {
+    const res = _recordAgentSlashCommands(root, { force: opts.force });
+    if (opts.json) { log(JSON.stringify({ recorded: true, file: res.file, agentCount: res.agentCount }, null, 2)); return; }
+    log(`✓ 슬래시 명령어 레지스트리 기록: ${res.file} (${res.agentCount} 에이전트)`);
+    log(`  → 사용자 편집으로 최신화 가능 (agents.<id>.commands 배열)`);
+    return;
+  }
+  const ids = agentArg ? [agentArg] : Object.keys(all);
+  if (agentArg && !all[agentArg]) {
+    if (opts.json) { log(JSON.stringify({ error: `unknown agent: ${agentArg}`, known: Object.keys(all) }, null, 2)); return; }
+    fail(`알 수 없는 에이전트: ${agentArg} (가능: ${Object.keys(all).join(', ')})`);
+    return;
+  }
+  if (opts.json) {
+    const out = { schemaVersion: 1, agents: {} };
+    for (const id of ids) {
+      const d = all[id];
+      out.agents[id] = { label: d.label, asOf: d.asOf, invoke: d.invoke, note: d.note, source: d.source, count: d.commands.length, commands: d.commands };
+      if (installed) out.agents[id].installed = !!installed[id];
+    }
+    log(JSON.stringify(out, null, 2));
+    return;
+  }
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  log(cy(`# leerness slash-commands (1.9.265, UR-0021) — CLI 에이전트별 슬래시 명령어`));
+  log(dm(`  서브에이전트 호출 시 각 에이전트에 맞는 슬래시 명령을 참조하세요. 사용자 override: ${_agentSlashFile(root)}`));
+  log('');
+  for (const id of ids) {
+    const d = all[id];
+    const instLabel = installed ? (installed[id] ? gr(' [설치됨]') : dm(' [미설치]')) : '';
+    const srcLabel = d.source === 'builtin' ? '' : yl(` [${d.source}]`);
+    log(`${cy('▸ ' + id)} — ${d.label}${instLabel}${srcLabel} ${dm('(asOf ' + (d.asOf || '?') + ', ' + d.commands.length + '개' + (d.invoke === 'subcommand' ? ', 하위명령' : '') + ')')}`);
+    if (d.note) log(dm(`    ⓘ ${d.note}`));
+    for (const c of d.commands) log(`    ${gr((c.cmd || '').padEnd(14))} ${dm(c.desc || '')}`);
+    log('');
+  }
+  log(dm(`  기록: leerness slash-commands --record  ·  단일: leerness slash-commands claude  ·  설치 감지: --detect`));
+}
 
 // 1.9.157: Provider Registry — 사용자 정의 provider 동적 추가 (.harness/providers.json)
 //   빌트인 5종 (EXTERNAL_AGENTS) + 사용자 정의를 merge. OpenRouter / Bedrock / Groq 등 새 CLI 즉시 흡수 가능.
@@ -20196,6 +20397,11 @@ async function main() {
     const exitRaw = arg('--exit', null);
     return shellGuardCmd(arg('--path', process.cwd()), cmdArg, { record: has('--record'), exit: exitRaw != null ? parseInt(exitRaw, 10) : null, json: has('--json') });
   }
+  // 1.9.265: leerness slash-commands [agent] — CLI 에이전트별 슬래시 명령어 레지스트리 (사용자 명시 UR-0021)
+  if (cmd === 'slash-commands' || cmd === 'slash' || cmd === 'agent-slash') {
+    const agentArg = args[1] && !args[1].startsWith('-') ? args[1] : null;
+    return slashCommandsCmd(arg('--path', process.cwd()), agentArg, { json: has('--json'), record: has('--record'), force: has('--force'), detect: has('--detect') });
+  }
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
@@ -20361,5 +20567,7 @@ module.exports = {
   // 1.9.260: shell-guard — 셸 호환성 린터 (UR-0020) 순수 분석 함수 — 단위 테스트
   _shellGuardAnalyze, _detectShellCtx, shellGuardCmd,
   // 1.9.263: shell 실패 메모리 + 환경 버전 변동 (UR-0020 3단계) — handoff 통합 단위 테스트
-  _shellFailuresPath, _loadShellFailures, _recordShellFailure, _shellEnvDrift
+  _shellFailuresPath, _loadShellFailures, _recordShellFailure, _shellEnvDrift,
+  // 1.9.265: CLI 에이전트 슬래시 명령어 레지스트리 (UR-0021 1단계) — 단위 테스트
+  AGENT_SLASH_COMMANDS, _agentSlashFile, _loadAgentSlashCommands, _recordAgentSlashCommands, _agentSlashHint, slashCommandsCmd
 };
