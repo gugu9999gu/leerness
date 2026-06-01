@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.263';
+const VERSION = '1.9.264';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -7515,6 +7515,17 @@ function handoff(root) {
           ids: allSkills.slice(0, 10).map(s => s.id)
         };
       } catch {}
+      // 1.9.264: shellGuard 통합 (handoff JSON 12번째 통합 필드) — UR-0020 셸 실패 메모리 + 환경 변동 외부 회수
+      try {
+        const sf = _loadShellFailures(root);
+        const drift = _shellEnvDrift(root);
+        result.shellGuard = {
+          failureCount: sf.failures.length,
+          recent: sf.failures.slice(-3).map(f => ({ cmd: (f.cmd || '').slice(0, 50), exitCode: f.exitCode, shell: f.shell, rules: f.issues || [] })),
+          envDriftChanges: drift && drift.changes ? drift.changes.length : 0,
+          envDrift: drift ? drift.changes : null
+        };
+      } catch {}
     } catch {}
     try {
       const pwState = _loadPreWakeReport(root);
@@ -11878,6 +11889,17 @@ function sessionClose(root, opts = {}) {
           ids: allSkills.slice(0, 10).map(s => s.id)
         };
       } catch {}
+      // 1.9.264: shellGuard 통합 (session close JSON 12번째 통합 필드) — UR-0020 셸 실패 메모리 + 환경 변동
+      try {
+        const sf = _loadShellFailures(root);
+        const drift = _shellEnvDrift(root);
+        jsonResult.shellGuard = {
+          failureCount: sf.failures.length,
+          recent: sf.failures.slice(-3).map(f => ({ cmd: (f.cmd || '').slice(0, 50), exitCode: f.exitCode, shell: f.shell, rules: f.issues || [] })),
+          envDriftChanges: drift && drift.changes ? drift.changes.length : 0,
+          envDrift: drift ? drift.changes : null
+        };
+      } catch {}
     } catch {}
     try {
       // 1.9.209: pre-wake-audit 자동 실행 + 저장 (sleep 전 자동 점검)
@@ -11980,6 +12002,21 @@ function sessionClose(root, opts = {}) {
           log(dim(`     → leerness idempotency audit 으로 상세 확인`));
         } else {
           log(grn(`  ✓ 멱등성 검사 통과 — verified ${idemp.summary.verifiedAreas} 영역`));
+        }
+      } catch {}
+      // 1.9.264: 셸 실패 메모리 + 환경 변동 요약 (UR-0020) — 마감 시 이번 세션 셸 실패를 회고에 노출
+      try {
+        const sf = _loadShellFailures(root);
+        const drift = _shellEnvDrift(root);
+        const driftN = drift && drift.changes ? drift.changes.length : 0;
+        if (sf.failures.length > 0 || driftN > 0) {
+          if (driftN > 0) log(yel(`  ⚠ 환경 버전 변동 ${driftN}건 — 다음 세션 셸 실패 기록 재검토 권장`));
+          if (sf.failures.length > 0) {
+            log(yel(`  🐚 셸 실패 누적 ${sf.failures.length}건 — 다음 handoff 가 자동 노출`));
+            log(dim(`     → 명령 실행 전 점검: leerness shell-guard "<command>"`));
+          }
+        } else {
+          log(grn(`  ✓ 셸 실패 기록 없음 (터미널 호환성 양호)`));
         }
       } catch {}
       // 1.9.237: session close --auto-cleanup-branches — 50+ release/* branches 시 자동 정리
@@ -18688,6 +18725,17 @@ function healthCmd(root) {
       ids: allSkills.slice(0, 10).map(s => s.id)
     };
   } catch { out.apiSkills = { error: 'apiSkills 점검 실패' }; }
+  // 1.9.264: shellGuard 통합 (health JSON 12번째 통합 필드 — handoff/session close 와 JSON 3 명령 일관성) — UR-0020
+  try {
+    const sf = _loadShellFailures(root);
+    const drift = _shellEnvDrift(root);
+    out.shellGuard = {
+      failureCount: sf.failures.length,
+      recent: sf.failures.slice(-3).map(f => ({ cmd: (f.cmd || '').slice(0, 50), exitCode: f.exitCode, shell: f.shell, rules: f.issues || [] })),
+      envDriftChanges: drift && drift.changes ? drift.changes.length : 0,
+      envDrift: drift ? drift.changes : null
+    };
+  } catch { out.shellGuard = { error: 'shellGuard 점검 실패' }; }
   // 1.9.163: 5능력 매트릭스 자동 평가 (1.9.155 sub-agent 점검 → 코드 기반 자동화)
   //   각 능력을 코드 grep 으로 검출 → 0~100 점수. 사용자가 매 health 호출 시 leerness 자기 평가 확인.
   try {

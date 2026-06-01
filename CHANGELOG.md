@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.264 — 2026-06-01 — shellGuard JSON 12번째 통합 필드 (handoff/session close/health) + session close 본문 셸 요약
+
+**🐚 UR-0020 셸 실패 메모리를 `--json` 표면 3 명령에 일관되게 통합 — 외부 AI/자동화가 셸 호환성 상태를 구조적으로 소비.**
+
+### 배경
+1.9.263에서 셸 실패 메모리를 handoff *본문 텍스트*에 노출했으나, `--json` 표면에는 없어 외부 AI/CI 가 구조적으로 못 읽음. leerness JSON 표면은 handoff/session close/health 3 명령이 동일 필드를 carry 하는 일관성 패턴(1.9.227/230/234 등)이 확립돼 있음 — `shellGuard` 를 12번째 필드로 추가해 그 패턴을 완성.
+
+### 구현
+1. **`shellGuard` JSON 12번째 통합 필드** — handoff/session close/health 3 명령 모두 동일 스키마:
+   - `failureCount` · `recent`(최근 3건: cmd 50자/exitCode/shell/rules) · `envDriftChanges` · `envDrift`(node/PS 버전 변동 배열 또는 null)
+2. **session close 본문 셸 요약** (1.9.217 통합 보고에 추가): 실패 누적 시 "🐚 셸 실패 누적 N건 — 다음 handoff 가 자동 노출" + env drift 경고, 깨끗하면 "✓ 셸 실패 기록 없음". `_loadShellFailures`/`_shellEnvDrift` 재사용 (1.9.263 export).
+
+### stress-v209 — **22/22 PASS · 100%**
+- 1.9.264 (9): shellGuard 스키마·실패 반영·3 명령 일관성·envDrift 반영·session close 본문 노출/비노출
+- 성능 (2): cold start avg 403ms · handoff --json 1540ms
+- 누적 회귀 (11): 1.9.207~263 (handoff 본문 셸 가드·JSON 12 필드·MCP 72·shell-guard·selftest 15·require.main·path-setup·CJK·_isSecretKey·posixEncoding)
+
 ## 1.9.263 — 2026-06-01 — UR-0020 3단계: handoff 셸 실패 메모리 + 환경 버전 변동 자동 노출
 
 **🐚 과거 터미널 셸 실패 기록 + 환경 버전 변동을 매 세션 handoff 본문에 자동 표면화 (사용자 명시 UR-0020 완성).**
