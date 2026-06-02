@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.267 — 2026-06-02 — UR-0021 3단계: CLI `--help` probe 슬래시 레지스트리 자동 refresh
+
+**🔄 UR-0021 백로그 완전 소진 — 설치된 CLI 의 `--help` 출력을 probe 해 슬래시 명령 레지스트리를 자동 갱신 (best-effort, offline-first).**
+
+### 배경
+1단계(1.9.265)는 큐레이션 빌트인 레지스트리 + 사용자 override, 2단계(1.9.266)는 dispatch/handoff 자동 주입을 구축. 3단계는 처음부터 예정됐던 "항상 최신화 3중 경로"의 마지막 — CLI `--help` probe 자동 refresh. 외부 CLI 의 슬래시 명령은 버전마다 변동하므로, 큐레이션(빌트인)·수동(override)에 더해 *설치된 실제 CLI 에서 직접 회수*하는 경로를 완성.
+
+### 구현
+1. **`_parseSlashFromHelp(text, invoke)` 순수 파서** — `--help` 출력에서 슬래시 명령(`/cmd  desc`) 또는 하위명령(들여쓰기 `cmd  desc`) best-effort 추출. ANSI 색상 제거 · CLI 플래그(`--foo`)·옵션 의도적 제외 · cmd 길이 24자 가드 · 중복 제거. 부작용 0 → selftest 가능.
+2. **`_probeAgentSlash(extDef, opts)`** — EXTERNAL_AGENTS 항목의 `bin` 을 `--help` 로 spawn (타임아웃 5s, `windowsHide`). copilot 처럼 subcommand 인 경우 `versionArgs` 의 base(예: `['copilot']`) 재사용. 실패(ENOENT)/0건 검출 시 `ok:false` + 한국어 reason → **호출부가 큐레이션 빌트인 유지(파괴적 덮어쓰기 방지)**.
+3. **`_refreshAgentSlashCommands(root, targets, opts)`** — probe 성공 agent 만 `.harness/agent-slash-commands.json` 으로 병합 기록(나머지 보존), `note: "probed via …"` + `asOf: VERSION`. grok/ollama 등 EXTERNAL_AGENTS 미포함은 큐레이션/override 만.
+4. **`slash-commands [agent] --refresh [--dry-run]` CLI** — 전체/단일 agent probe. dry-run 기본 미적용(실 기록은 `--refresh` 단독). `--json` 기계 판독.
+5. **MCP `leerness_slash_commands` 확장** — `refresh`/`dryRun` 인자 추가(외부 AI 가 sub-agent 호출 전 레지스트리 자동 갱신).
+6. **selftest 17 → 19** — `_parseSlashFromHelp` 슬래시 검출+플래그 제외 · subcommand 들여쓰기 파싱 2종 추가.
+
+### 검증
+- **selftest 19/19 PASS** · **E2E 217/217 PASS** (회귀 0).
+- probe 성공 경로 단위 검증: 가짜 CLI(`--help` 슬래시 출력) → 2건 검출, `--version` 플래그 정상 제외.
+- graceful fallback 검증: claude/codex/agy 미설치(ENOENT) + grok(대상 외) + copilot(gh ext 미설치, 0건) → 큐레이션 유지, 파일 미기록.
+
+### UR-0021 완료
+1단계(레지스트리/CLI/hint) → 2단계(dispatch/handoff 주입/MCP 73) → **3단계(--help probe 자동 refresh)** 로 "항상 최신화 3중 경로" 완성.
+
 ## 1.9.266 — 2026-06-01 — UR-0021 2단계: dispatch 슬래시 명령 자동 주입 + handoff 노출 + MCP 73
 
 **🤖 서브에이전트 dispatch/handoff 에 각 에이전트 슬래시 명령을 자동 노출 — "알맞은 슬래시 명령으로 작업" (사용자 명시 UR-0021 2단계).**

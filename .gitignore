@@ -25,3 +25,6 @@ credentials.json
 .harness/incidents/
 .harness/agent-sessions/
 .harness/runs/
+
+# npm 인증 토큰 보호 (1.9.267)
+.npmrc

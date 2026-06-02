@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.266';
+const VERSION = '1.9.267';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2907,6 +2907,8 @@ function _selfTestCases() {
     { name: '_shellGuardAnalyze: bash && → 문제 없음', run: () => _shellGuardAnalyze('a && b', { shell: 'bash' }).issues.length === 0 },
     { name: 'AGENT_SLASH_COMMANDS: claude/codex/agy/grok/copilot 5종 + 명령 보유', run: () => { const ids = Object.keys(AGENT_SLASH_COMMANDS); return ['claude', 'codex', 'agy', 'grok', 'copilot'].every(id => ids.includes(id) && AGENT_SLASH_COMMANDS[id].commands.length > 0); } },
     { name: '_agentSlashHint: grok 슬래시 요약 + copilot 하위명령 라벨', run: () => { const g = _agentSlashHint('.', 'grok'); const c = _agentSlashHint('.', 'copilot'); return !!g && g.count > 0 && /Grok/.test(g.summary) && !!c && c.invoke === 'subcommand' && /하위명령/.test(c.summary); } },
+    { name: '_parseSlashFromHelp: 슬래시 검출 + 플래그 제외 (1.9.267)', run: () => { const r = _parseSlashFromHelp('  /help   show help\n  /model  switch model\n  --version  print version\n', 'slash'); return r.length === 2 && r[0].cmd === '/help' && /show help/.test(r[0].desc) && !r.some(c => /version/.test(c.cmd)); } },
+    { name: '_parseSlashFromHelp: subcommand 모드 들여쓰기 파싱 (1.9.267)', run: () => { const r = _parseSlashFromHelp('Commands:\n  suggest    제안\n  explain    설명\n', 'subcommand'); return r.length >= 2 && r.some(c => c.cmd === 'suggest') && r.some(c => c.cmd === 'explain'); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3562,7 +3564,7 @@ function commandsCmd(root) {
       { cmd: 'resume [path]', desc: 'auto-resume-plan 적용 (1.9.203)' },
       { cmd: 'route <task-type>', desc: '작업 유형 분류 (11종)' },
       { cmd: 'agents list|check|quota|dispatch|multi', desc: '외부 AI CLI 오케스트레이션' },
-      { cmd: 'slash-commands [agent] [--json --record --detect]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 (1.9.265, UR-0021)' },
+      { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
       { cmd: 'brainstorm "<topic>" [--include-code]', desc: '워크스페이스 회수 + 코드 grep' }
@@ -10081,7 +10083,7 @@ const EXTERNAL_AGENTS = [
 // 1.9.265 (사용자 명시 UR-0021): CLI AI 에이전트별 슬래시 명령어 레지스트리.
 //   목적: 각 CLI (claude/codex/agy/grok/copilot) 의 슬래시 명령어를 큐레이션·기록하고, 서브에이전트 dispatch 시 알맞게 참조.
 //   "항상 최신화" 3중 경로: (1) 빌트인은 leerness 릴리스마다 갱신(asOf), (2) 사용자 .harness/agent-slash-commands.json override 병합,
-//   (3) [2~3단계 예정] CLI `--help`/`/help` probe 자동 refresh. 0-dep·offline-first 라서 1단계는 (1)+(2) 큐레이션 기반.
+//   (3) [1.9.267 완료] `slash-commands --refresh` — 설치된 CLI 의 `--help` probe 로 자동 갱신(best-effort, 검출 0건이면 큐레이션 유지). 0-dep·offline-first.
 //   주의: 외부 CLI 의 슬래시 명령은 버전마다 변동 → asOf 표기 + 사용자 override 우선. type='subcommand' 는 슬래시가 아닌 하위명령(예: gh copilot).
 const AGENT_SLASH_COMMANDS = {
   claude: {
@@ -10219,6 +10221,90 @@ function _agentSlashHint(root, agentId) {
     summary: `${def.label}${invokeNote}: ${top}${def.commands.length > 8 ? ' …' : ''}`
   };
 }
+// 1.9.267 (UR-0021 3단계): CLI `--help` 출력에서 슬래시 명령/하위명령을 best-effort 파싱.
+//   순수 함수 (부작용 0, selftest 가능). invoke='slash' → `/cmd  desc` 패턴, invoke='subcommand' → 들여쓰기 `cmd  desc` 패턴.
+//   CLI 플래그(--foo)·옵션은 의도적으로 제외. 검출 0건이면 큐레이션 빌트인을 그대로 유지(파괴적 덮어쓰기 방지).
+function _parseSlashFromHelp(text, invoke = 'slash') {
+  const out = [];
+  const seen = new Set();
+  const lines = String(text || '').split(/\r?\n/);
+  for (const raw of lines) {
+    const ln = raw.replace(/\x1b\[[0-9;]*m/g, ''); // ANSI 색상 제거
+    if (invoke === 'subcommand') {
+      // 들여쓰기된 하위명령: "  suggest    설명" — 슬래시/대시 시작 제외, 2칸+ 공백 구분
+      const m = ln.match(/^\s{2,}([a-z][a-z0-9][\w-]*)\s{2,}(\S.*)$/);
+      if (m && !/^--/.test(m[1])) {
+        const cmd = m[1];
+        if (!seen.has(cmd) && cmd.length <= 24) { seen.add(cmd); out.push({ cmd, desc: m[2].trim().slice(0, 80) }); }
+      }
+      continue;
+    }
+    // 슬래시 명령: "/help   설명" 또는 "  /help - 설명"
+    const m = ln.match(/^\s*(\/[a-zA-Z][\w-]*)(?:\s+[-–:]?\s*(.*))?$/);
+    if (m) {
+      const cmd = m[1];
+      if (!seen.has(cmd) && cmd.length <= 24) { seen.add(cmd); out.push({ cmd, desc: (m[2] || '').trim().slice(0, 80) }); }
+    }
+  }
+  return out;
+}
+// 1.9.267 (UR-0021 3단계): 설치된 CLI 의 `--help` 를 spawn 해 슬래시 명령을 probe (best-effort, offline-first).
+//   extDef: EXTERNAL_AGENTS 항목 (bin/versionArgs 보유). copilot 처럼 subcommand 인 경우 versionArgs 의 base(예: ['copilot']) + '--help'.
+//   실패/0건이면 ok:false + reason — 호출부가 큐레이션 빌트인 유지. 타임아웃 5s (행 방지).
+function _probeAgentSlash(extDef, opts = {}) {
+  const invoke = opts.invoke || 'slash';
+  const timeout = opts.timeout || 5000;
+  if (!extDef || !extDef.bin) return { ok: false, commands: [], reason: 'probe 대상 정보 없음' };
+  // versionArgs 가 ['copilot','--version'] 처럼 base 를 가지면 그 base 를 help 에 재사용
+  const base = Array.isArray(extDef.versionArgs) ? extDef.versionArgs.filter(a => !/^--?(version|v)$/i.test(a)) : [];
+  const probeArgs = [...base, '--help'];
+  let r;
+  try {
+    r = cp.spawnSync(extDef.bin, probeArgs, { encoding: 'utf8', timeout, windowsHide: true });
+  } catch (e) {
+    return { ok: false, commands: [], reason: `spawn 예외: ${e.message}` };
+  }
+  if (r.error) return { ok: false, commands: [], reason: `spawn 실패: ${r.error.code || r.error.message}` };
+  const text = `${r.stdout || ''}\n${r.stderr || ''}`;
+  const commands = _parseSlashFromHelp(text, invoke);
+  if (!commands.length) return { ok: false, commands: [], reason: `${extDef.bin} --help 출력에서 ${invoke === 'subcommand' ? '하위명령' : '슬래시 명령'} 미검출 (큐레이션 유지)` };
+  return { ok: true, commands, reason: `${commands.length}건 검출`, probeArgs: probeArgs.join(' ') };
+}
+// 1.9.267 (UR-0021 3단계): probe 결과를 .harness/agent-slash-commands.json 으로 병합 기록 (성공 agent 만 갱신, 나머지 보존).
+function _refreshAgentSlashCommands(root, targets, opts = {}) {
+  const merged = _loadAgentSlashCommands(root); // 현재(builtin+user) 상태 보존 기반
+  const results = [];
+  const agents = {};
+  for (const [id, d] of Object.entries(merged)) {
+    agents[id] = { label: d.label, asOf: d.asOf, invoke: d.invoke, note: d.note || undefined, commands: d.commands };
+  }
+  for (const id of targets) {
+    const ext = EXTERNAL_AGENTS.find(a => a.id === id);
+    const def = merged[id] || AGENT_SLASH_COMMANDS[id];
+    if (!ext) { results.push({ id, ok: false, reason: 'probe 대상 아님 (EXTERNAL_AGENTS 미포함 — grok/ollama 등은 큐레이션/override 만)' }); continue; }
+    const pr = _probeAgentSlash(ext, { invoke: (def && def.invoke) || 'slash', timeout: opts.timeout });
+    if (pr.ok) {
+      agents[id] = {
+        label: (def && def.label) || id,
+        asOf: VERSION,
+        invoke: (def && def.invoke) || 'slash',
+        note: `probed via "${ext.bin} ${pr.probeArgs}" @ ${new Date().toISOString().slice(0, 10)}`,
+        commands: pr.commands
+      };
+      results.push({ id, ok: true, count: pr.commands.length, reason: pr.reason });
+    } else {
+      results.push({ id, ok: false, reason: pr.reason });
+    }
+  }
+  const anyOk = results.some(r => r.ok);
+  let file = null;
+  if (anyOk && !opts.dryRun) {
+    file = _agentSlashFile(root);
+    mkdirp(path.dirname(file));
+    writeUtf8(file, JSON.stringify({ schemaVersion: 1, recordedAt: new Date().toISOString(), refreshedAt: new Date().toISOString(), agents }, null, 2) + '\n');
+  }
+  return { results, file, anyOk };
+}
 // 1.9.265 (UR-0021): leerness slash-commands [agent] [--json --record --detect]
 //   인자 없음 → 전체 에이전트 슬래시 명령 목록. <agent> → 단일. --record → 워크스페이스 기록. --detect → 설치된 CLI 만 표시.
 function slashCommandsCmd(root, agentArg, opts = {}) {
@@ -10238,6 +10324,28 @@ function slashCommandsCmd(root, agentArg, opts = {}) {
     if (opts.json) { log(JSON.stringify({ recorded: true, file: res.file, agentCount: res.agentCount }, null, 2)); return; }
     log(`✓ 슬래시 명령어 레지스트리 기록: ${res.file} (${res.agentCount} 에이전트)`);
     log(`  → 사용자 편집으로 최신화 가능 (agents.<id>.commands 배열)`);
+    return;
+  }
+  // 1.9.267 (UR-0021 3단계): --refresh — 설치된 CLI 의 `--help` probe 로 레지스트리 자동 갱신.
+  if (opts.refresh) {
+    const targets = agentArg ? [agentArg] : Object.keys(all);
+    const ref = _refreshAgentSlashCommands(root, targets, { dryRun: opts.dryRun });
+    if (opts.json) {
+      log(JSON.stringify({ refreshed: ref.anyOk && !opts.dryRun, dryRun: !!opts.dryRun, file: ref.file, results: ref.results }, null, 2));
+      return;
+    }
+    const isTty0 = process.stdout && process.stdout.isTTY;
+    const g0 = s => isTty0 ? `\x1b[32m${s}\x1b[0m` : s;
+    const y0 = s => isTty0 ? `\x1b[33m${s}\x1b[0m` : s;
+    const d0 = s => isTty0 ? `\x1b[2m${s}\x1b[0m` : s;
+    log(`# leerness slash-commands --refresh (1.9.267, UR-0021 3단계)${opts.dryRun ? ' [dry-run]' : ''}`);
+    for (const r of ref.results) {
+      if (r.ok) log(`  ${g0('✓')} ${r.id} — ${r.count}건 probe 검출`);
+      else log(`  ${y0('·')} ${r.id} — ${d0(r.reason)}`);
+    }
+    if (ref.anyOk && !opts.dryRun) log(g0(`\n✓ 갱신 기록: ${ref.file}`));
+    else if (ref.anyOk && opts.dryRun) log(d0(`\n(dry-run — 기록 안 함. --refresh 만 주면 실제 기록)`));
+    else log(y0(`\n⚠ probe 검출 0 — 큐레이션 빌트인 유지 (CLI 미설치 또는 --help 에 슬래시 명령 미노출)`));
     return;
   }
   const ids = agentArg ? [agentArg] : Object.keys(all);
@@ -10273,7 +10381,7 @@ function slashCommandsCmd(root, agentArg, opts = {}) {
     for (const c of d.commands) log(`    ${gr((c.cmd || '').padEnd(14))} ${dm(c.desc || '')}`);
     log('');
   }
-  log(dm(`  기록: leerness slash-commands --record  ·  단일: leerness slash-commands claude  ·  설치 감지: --detect`));
+  log(dm(`  기록: leerness slash-commands --record  ·  단일: leerness slash-commands claude  ·  설치 감지: --detect  ·  자동 갱신: --refresh [--dry-run]`));
 }
 
 // 1.9.157: Provider Registry — 사용자 정의 provider 동적 추가 (.harness/providers.json)
@@ -16352,7 +16460,7 @@ function mcpServeCmd(root) {
     { name: 'leerness_api_skill', description: '1.9.245 (사용자 명시 UR-0015) — API 문서·관련링크 자동 캐시. 공식 API 문서 URL을 fetch 하고 1단계 same-domain 관련 링크까지 정리 → .harness/api-skills/<id>.md 저장. 후속 같은 API 관련 작업 시 자동 참조. 응답: list (skills 배열) / show (전체 본문) / match (task 매칭 결과). 인자: { path?, sub ("list"|"show"|"match"|"add"|"drop"), url? (add), id? (show/drop), query? (match), direction? (add: 구현 방향 텍스트) }. 외부 AI가 "이 프로젝트 어떤 API 문서가 정리되어 있나?" / "내 작업과 매칭되는 API skill 있나?" 회수.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['list', 'show', 'match', 'add', 'drop'] }, url: { type: 'string' }, id: { type: 'string' }, query: { type: 'string' }, direction: { type: 'string' } }, required: ['sub'] } },
     { name: 'leerness_selftest', description: '1.9.258/259 — 설치된 leerness 바이너리의 코어 함수(보안 _isSecretKey / 버전 compareVer / 인코딩 _classifyCJK 등) 무결성 자가 검증. 응답: { version, total, pass, fail, ok, results[] }. 외부 AI/CI 가 "이 leerness 설치가 정상인가?(npx 캐시 손상·부분 설치 감지)" 를 1초 내 확인. 인자: 없음.', inputSchema: { type: 'object', properties: {} } },
     { name: 'leerness_shell_guard', description: '1.9.260/261 (사용자 명시 UR-0020) — 터미널 명령 셸 호환성 린터. 외부 AI 가 명령을 실행하기 전에 셸 호환성 문제를 사전 점검. 예: Windows PowerShell 5.1 은 && / || 미지원 → A; if ($?) { B } 제안. 6 규칙(ps5-chain/ps-devnull/ps-inline-env/ps-rm-rf/cmd-semicolon/ps-version-unknown) + 과거 실패 회수(.harness/shell-failures.json). 응답: { shell, psVersion, issues[{rule,severity,detail,suggestion}], pastSame, pastSimilar, ok }. 인자: { command (required), path? }. 현재 셸/PS 버전 자동 감지.', inputSchema: { type: 'object', properties: { command: { type: 'string' }, path: { type: 'string' } }, required: ['command'] } },
-    { name: 'leerness_slash_commands', description: '1.9.265/266 (사용자 명시 UR-0021) — CLI AI 에이전트별 슬래시 명령어 레지스트리. 외부 AI(메인)가 sub-agent(codex/agy/claude/grok/copilot)를 호출할 때 각 에이전트에 알맞는 슬래시 명령을 참조. 빌트인 + 사용자 .harness/agent-slash-commands.json override 병합. 응답: { agents: { <id>: { label, asOf, invoke(slash|subcommand), note, source, count, commands[{cmd,desc}] } } }. 인자: { path?, agent? (생략 시 전체) }. agent 지정 시 단일.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, agent: { type: 'string' } } } }
+    { name: 'leerness_slash_commands', description: '1.9.265/266 (사용자 명시 UR-0021) — CLI AI 에이전트별 슬래시 명령어 레지스트리. 외부 AI(메인)가 sub-agent(codex/agy/claude/grok/copilot)를 호출할 때 각 에이전트에 알맞는 슬래시 명령을 참조. 빌트인 + 사용자 .harness/agent-slash-commands.json override 병합. 응답: { agents: { <id>: { label, asOf, invoke(slash|subcommand), note, source, count, commands[{cmd,desc}] } } }. 인자: { path?, agent? (생략 시 전체), refresh? (1.9.267 — 설치된 CLI --help probe 자동 갱신), dryRun? }. agent 지정 시 단일.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, agent: { type: 'string' }, refresh: { type: 'boolean' }, dryRun: { type: 'boolean' } } } }
   ];
 
   function send(obj) {
@@ -16566,6 +16674,8 @@ function mcpServeCmd(root) {
           case 'leerness_slash_commands':
             // 1.9.266 (1.9.265, UR-0021): CLI 에이전트 슬래시 명령 레지스트리
             cliArgs = ['slash-commands', ...(args.agent ? [String(args.agent)] : []), '--path', targetPath, '--json'];
+            if (args.refresh === true) cliArgs.push('--refresh');
+            if (args.dryRun === true) cliArgs.push('--dry-run');
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
@@ -20448,7 +20558,7 @@ async function main() {
   // 1.9.265: leerness slash-commands [agent] — CLI 에이전트별 슬래시 명령어 레지스트리 (사용자 명시 UR-0021)
   if (cmd === 'slash-commands' || cmd === 'slash' || cmd === 'agent-slash') {
     const agentArg = args[1] && !args[1].startsWith('-') ? args[1] : null;
-    return slashCommandsCmd(arg('--path', process.cwd()), agentArg, { json: has('--json'), record: has('--record'), force: has('--force'), detect: has('--detect') });
+    return slashCommandsCmd(arg('--path', process.cwd()), agentArg, { json: has('--json'), record: has('--record'), force: has('--force'), detect: has('--detect'), refresh: has('--refresh'), dryRun: has('--dry-run') });
   }
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
@@ -20617,5 +20727,6 @@ module.exports = {
   // 1.9.263: shell 실패 메모리 + 환경 버전 변동 (UR-0020 3단계) — handoff 통합 단위 테스트
   _shellFailuresPath, _loadShellFailures, _recordShellFailure, _shellEnvDrift,
   // 1.9.265: CLI 에이전트 슬래시 명령어 레지스트리 (UR-0021 1단계) — 단위 테스트
-  AGENT_SLASH_COMMANDS, _agentSlashFile, _loadAgentSlashCommands, _recordAgentSlashCommands, _agentSlashHint, slashCommandsCmd
+  AGENT_SLASH_COMMANDS, _agentSlashFile, _loadAgentSlashCommands, _recordAgentSlashCommands, _agentSlashHint, slashCommandsCmd,
+  _parseSlashFromHelp, _probeAgentSlash, _refreshAgentSlashCommands
 };
