@@ -797,23 +797,24 @@ total++;
 total++;
 {
   // agents list — claude가 환경변수 + PATH 둘 다 충족 시 ready
-  const env1 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '1', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_COPILOT: '0' };
+  const env1 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '1', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_GROK: '0', LEERNESS_ENABLE_COPILOT: '0' };
   const r1 = cp.spawnSync(process.execPath, [CLI, 'agents', 'list'], { encoding: 'utf8', timeout: 15000, env: env1 });
   const okList = r1.status === 0
     && /외부 AI CLI 오케스트레이션 \(1\.9\.30\)/.test(r1.stdout)
     && /\| claude \|/.test(r1.stdout)
     && /\| codex \|/.test(r1.stdout)
     && /\| agy \|/.test(r1.stdout)
+    && /\| grok \|/.test(r1.stdout)
     && /\| copilot \|/.test(r1.stdout);
   // env 모두 0 → 비활성
-  // 1.9.146: Ollama 추가 → 5 CLI
-  const env2 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_COPILOT: '0', LEERNESS_ENABLE_OLLAMA: '0' };
+  // 1.9.146: Ollama 추가 → 5 CLI · 1.9.268: grok 정식 승격 → 6 CLI
+  const env2 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_GROK: '0', LEERNESS_ENABLE_COPILOT: '0', LEERNESS_ENABLE_OLLAMA: '0' };
   const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'list', '--json'], { encoding: 'utf8', timeout: 15000, env: env2 });
   let parsed = null;
   try { parsed = JSON.parse(r2.stdout); } catch {}
-  const okJson = parsed && Array.isArray(parsed.agents) && parsed.agents.length === 5 && parsed.agents.every(a => a.status !== 'ready');
+  const okJson = parsed && Array.isArray(parsed.agents) && parsed.agents.length === 6 && parsed.agents.every(a => a.status !== 'ready');
   const ok = okList && okJson;
-  console.log(ok ? '✓ B(1.9.30+1.9.146) agents list: 5 CLI 정의 (claude/codex/agy/copilot/ollama)' : `✗ agents list 실패 (list=${okList} json=${okJson})`);
+  console.log(ok ? '✓ B(1.9.30+1.9.268) agents list: 6 CLI 정의 (claude/codex/agy/grok/copilot/ollama)' : `✗ agents list 실패 (list=${okList} json=${okJson})`);
   if (!ok) { failed++; console.log(r1.stdout.slice(0, 500)); }
 }
 
@@ -838,24 +839,25 @@ total++;
 total++;
 {
   // agents quota — env=0 시 모두 disabled/not-installed, 안내 메시지 포함
-  const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_COPILOT: '0' };
+  const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_GROK: '0', LEERNESS_ENABLE_COPILOT: '0' };
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota'], { encoding: 'utf8', timeout: 15000, env });
   const okText = r.status === 0
     && /외부 AI CLI quota 추정 \(1\.9\.31\)/.test(r.stdout)
     && /\| claude \|/.test(r.stdout)
     && /\| codex \|/.test(r.stdout)
     && /\| agy \|/.test(r.stdout)
+    && /\| grok \|/.test(r.stdout)
     && /\| copilot \|/.test(r.stdout)
     && /provider 대시보드 참조/.test(r.stdout);
   // JSON 출력
   const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota', '--json'], { encoding: 'utf8', timeout: 15000, env });
   let parsed = null;
   try { parsed = JSON.parse(r2.stdout); } catch {}
-  // 1.9.146: Ollama 추가 → 5 CLI
-  const okJson = parsed && Array.isArray(parsed.quota) && parsed.quota.length === 5
+  // 1.9.146: Ollama 추가 → 5 CLI · 1.9.268: grok 정식 승격 → 6 CLI
+  const okJson = parsed && Array.isArray(parsed.quota) && parsed.quota.length === 6
     && parsed.quota.every(q => typeof q.id === 'string' && typeof q.status === 'string' && (q.hint === null || typeof q.hint === 'string'));
   const ok = okText && okJson;
-  console.log(ok ? '✓ B(1.9.31+1.9.146) agents quota: 5 CLI 사용량/안내' : `✗ quota 실패 (text=${okText} json=${okJson})`);
+  console.log(ok ? '✓ B(1.9.31+1.9.268) agents quota: 6 CLI 사용량/안내' : `✗ quota 실패 (text=${okText} json=${okJson})`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 

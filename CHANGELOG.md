@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.268 — 2026-06-02 — grok 정식 EXTERNAL_AGENTS provider 승격 (1.9.266 후속 task)
+
+**🤖 grok 을 슬래시 레지스트리 전용에서 정식 provider 로 승격 — provider cycle / setup-agents / dispatch / `--help` probe 가 grok 도 자동 처리.**
+
+### 배경
+1.9.265~267(UR-0021)에서 grok 은 `AGENT_SLASH_COMMANDS` 슬래시 레지스트리에만 포함됐을 뿐 `EXTERNAL_AGENTS` 정식 provider 는 아니었음(1.9.266 CHANGELOG 명시 후속 task). 그 결과 `slash-commands --refresh` probe 대상에서 제외되고, install 흐름 6선택지·provider cycle·setup-agents 에서도 빠졌음. 1.9.267 의 `--help` probe(3단계)가 완성되면서 grok 을 정식 편입할 자연스러운 시점.
+
+### 구현
+1. **`EXTERNAL_AGENTS` 에 grok 추가** — `{ id:'grok', bin:'grok', envFlag:'LEERNESS_ENABLE_GROK', versionArgs:['--version'], installCmd:'npm i -g @vibe-kit/grok-cli' }`. 빌트인 5종 → **6종** (claude/codex/agy/**grok**/copilot/ollama).
+2. **자동 전파** — EXTERNAL_AGENTS 를 순회하는 모든 소비처가 grok 흡수: `_checkAgent`(ready 감지)·`provider list`(6 builtin)·`slash-commands --refresh`(probe 대상)·`setup-agents`·`agents dispatch`·`agents list/quota`.
+3. **install 흐름 6선택지 확장** — 대화형 `_selectMany` + 비대화형 `1~6` 맵에 grok 추가(`all` 배열 포함). `4) grok (xAI)` 신설로 5→6 선택지.
+4. **비시크릿 키 + config 템플릿** — `_LEERNESS_NONSECRET_KEYS` 및 `.harness/leerness-config.json` 템플릿에 `LEERNESS_ENABLE_GROK` 추가(AI 가시성 유지, 시크릿 아님).
+5. **슬래시 레지스트리 note 갱신** — grok `asOf: 1.9.268` + "정식 provider 승격 — --refresh 자동 probe 가능".
+6. **selftest 19 → 20** — grok EXTERNAL_AGENTS 편입(bin/envFlag/length===6) 검증.
+
+### 검증
+- **selftest 20/20 PASS** · **E2E 217/217 PASS** (회귀 0).
+- `provider list` → 총 6개(빌트인 6), grok=builtin 확인.
+- `slash-commands grok --refresh --dry-run` → 이전 "probe 대상 아님" → 이제 probe 시도(미설치 시 ENOENT graceful fallback) — 3단계 probe 통합 확인.
+
 ## 1.9.267 — 2026-06-02 — UR-0021 3단계: CLI `--help` probe 슬래시 레지스트리 자동 refresh
 
 **🔄 UR-0021 백로그 완전 소진 — 설치된 CLI 의 `--help` 출력을 probe 해 슬래시 명령 레지스트리를 자동 갱신 (best-effort, offline-first).**

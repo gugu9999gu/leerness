@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.267';
+const VERSION = '1.9.268';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -829,19 +829,20 @@ async function resolveInstallOptions(root, opts = {}) {
         { label: 'Claude (ANTHROPIC_API_KEY 또는 claude CLI)', description: '추론력 최고 — 코드 작성/리뷰 기본', id: 'claude' },
         { label: 'Codex (OpenAI codex CLI)', description: 'OpenAI 코드 모델', id: 'codex' },
         { label: 'Antigravity (agy CLI)', description: 'Google Antigravity 멀티모달 에이전트 (1.9.248~)', id: 'agy' },
+        { label: 'Grok (xAI grok-cli)', description: 'xAI Grok CLI — grok-beta 등 (1.9.268~)', id: 'grok' },
         { label: 'Copilot (gh extension)', description: 'GitHub Copilot CLI', id: 'copilot' },
         { label: 'Ollama (로컬 LLM — llama3/qwen 등)', description: 'http://localhost:11434 — 무료/오프라인', id: 'ollama' }
       ], { defaults: [] });
       agentsOptIn = picked.length ? picked.map(p => p.id) : 'none';
     } else {
       log('\nCLI 에이전트 활성화 (복수 선택 — 콤마로 구분, opt-in):');
-      log('  1) claude  2) codex  3) agy (Antigravity)  4) copilot  5) ollama  (예: 1,5 또는 all 또는 none)');
+      log('  1) claude  2) codex  3) agy (Antigravity)  4) grok (xAI)  5) copilot  6) ollama  (예: 1,6 또는 all 또는 none)');
       const a = (await ask('선택 [none]: ')).trim().toLowerCase();
-      if (a === 'all') agentsOptIn = ['claude', 'codex', 'agy', 'copilot', 'ollama'];
+      if (a === 'all') agentsOptIn = ['claude', 'codex', 'agy', 'grok', 'copilot', 'ollama'];
       else if (!a || a === 'none' || a === '0') agentsOptIn = 'none';
       else {
-        const map = { '1': 'claude', '2': 'codex', '3': 'agy', '4': 'copilot', '5': 'ollama' };
-        const picks = a.split(/[,\s]+/).map(t => map[t] || (['claude','codex','agy','copilot','ollama'].includes(t) ? t : null)).filter(Boolean);
+        const map = { '1': 'claude', '2': 'codex', '3': 'agy', '4': 'grok', '5': 'copilot', '6': 'ollama' };
+        const picks = a.split(/[,\s]+/).map(t => map[t] || (['claude','codex','agy','grok','copilot','ollama'].includes(t) ? t : null)).filter(Boolean);
         agentsOptIn = picks.length ? picks : 'none';
       }
     }
@@ -1014,6 +1015,7 @@ async function install(root, opts = {}) {
         LEERNESS_ENABLE_CLAUDE: enable('claude') ? '1' : '0',
         LEERNESS_ENABLE_CODEX: enable('codex') ? '1' : '0',
         LEERNESS_ENABLE_AGY: enable('agy') ? '1' : '0',
+        LEERNESS_ENABLE_GROK: enable('grok') ? '1' : '0',
         LEERNESS_ENABLE_COPILOT: enable('copilot') ? '1' : '0',
         LEERNESS_ENABLE_OLLAMA: enable('ollama') ? '1' : '0',
         LEERNESS_SKILL_DISCOVER_URL: '',
@@ -2909,6 +2911,7 @@ function _selfTestCases() {
     { name: '_agentSlashHint: grok 슬래시 요약 + copilot 하위명령 라벨', run: () => { const g = _agentSlashHint('.', 'grok'); const c = _agentSlashHint('.', 'copilot'); return !!g && g.count > 0 && /Grok/.test(g.summary) && !!c && c.invoke === 'subcommand' && /하위명령/.test(c.summary); } },
     { name: '_parseSlashFromHelp: 슬래시 검출 + 플래그 제외 (1.9.267)', run: () => { const r = _parseSlashFromHelp('  /help   show help\n  /model  switch model\n  --version  print version\n', 'slash'); return r.length === 2 && r[0].cmd === '/help' && /show help/.test(r[0].desc) && !r.some(c => /version/.test(c.cmd)); } },
     { name: '_parseSlashFromHelp: subcommand 모드 들여쓰기 파싱 (1.9.267)', run: () => { const r = _parseSlashFromHelp('Commands:\n  suggest    제안\n  explain    설명\n', 'subcommand'); return r.length >= 2 && r.some(c => c.cmd === 'suggest') && r.some(c => c.cmd === 'explain'); } },
+    { name: 'EXTERNAL_AGENTS: grok 정식 provider 승격 (1.9.268)', run: () => { const g = EXTERNAL_AGENTS.find(a => a.id === 'grok'); return !!g && g.bin === 'grok' && g.envFlag === 'LEERNESS_ENABLE_GROK' && EXTERNAL_AGENTS.length === 6; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -9417,6 +9420,7 @@ const _LEERNESS_NONSECRET_KEYS = new Set([
   'LEERNESS_ENABLE_CLAUDE',      // 활성화 플래그
   'LEERNESS_ENABLE_CODEX',
   'LEERNESS_ENABLE_AGY',
+  'LEERNESS_ENABLE_GROK',
   'LEERNESS_ENABLE_COPILOT',
   'LEERNESS_ENABLE_OLLAMA',
   'LEERNESS_SKILL_DISCOVER_URL', // 공개 URL
@@ -10073,6 +10077,10 @@ const EXTERNAL_AGENTS = [
   //   기존 LEERNESS_ENABLE_AGY 환경변수는 LEERNESS_ENABLE_AGY 로 교체. provider id 도 'agy' 로 통일.
   { id: 'agy',     bin: 'agy',     envFlag: 'LEERNESS_ENABLE_AGY',     versionArgs: ['--version'], desc: 'Google Antigravity CLI (멀티모달 에이전트, --yolo 워크스페이스 수정 가능)',
     installCmd: 'npm i -g @google/antigravity-cli', installHint: 'https://antigravity.google.com (Antigravity IDE/CLI)' },
+  // 1.9.268: grok 정식 provider 승격 (1.9.266 후속 task) — 기존 슬래시 레지스트리(grok)만 보유하던 상태에서 EXTERNAL_AGENTS 로 편입.
+  //   → provider cycle / setup-agents / dispatch / slash-commands --refresh probe 가 grok 도 자동 처리.
+  { id: 'grok',    bin: 'grok',    envFlag: 'LEERNESS_ENABLE_GROK',    versionArgs: ['--version'], desc: 'xAI Grok CLI (커뮤니티 grok-cli, /model grok-beta 등)',
+    installCmd: 'npm i -g @vibe-kit/grok-cli', installHint: 'https://github.com/superagent-ai/grok-cli (xAI API 키 필요 — /login 또는 GROK_API_KEY)' },
   { id: 'copilot', bin: 'gh',      envFlag: 'LEERNESS_ENABLE_COPILOT', versionArgs: ['copilot', '--version'], desc: 'GitHub Copilot CLI (gh copilot)',
     installCmd: 'gh extension install github/gh-copilot', installHint: 'https://github.com/github/gh-copilot (gh CLI 선행 설치 필요)' },
   // 1.9.146: Ollama 추가 (사용자 명시 요청 #3) — 로컬 LLM, HTTP API 11434
@@ -10132,8 +10140,8 @@ const AGENT_SLASH_COMMANDS = {
     ]
   },
   grok: {
-    label: 'xAI Grok CLI', asOf: '1.9.265', invoke: 'slash',
-    note: '커뮤니티/공식 Grok CLI 들 (예: @vibe-kit/grok-cli) 기준 큐레이션 — 배포판마다 차이 가능. 사용자 override 권장.',
+    label: 'xAI Grok CLI', asOf: '1.9.268', invoke: 'slash',
+    note: '1.9.268 정식 provider 승격 — slash-commands --refresh 로 자동 probe 가능. 커뮤니티 Grok CLI(@vibe-kit/grok-cli) 기준 큐레이션, 배포판마다 차이 가능.',
     commands: [
       { cmd: '/help', desc: '명령 목록' },
       { cmd: '/clear', desc: '대화 초기화' },
@@ -10281,7 +10289,7 @@ function _refreshAgentSlashCommands(root, targets, opts = {}) {
   for (const id of targets) {
     const ext = EXTERNAL_AGENTS.find(a => a.id === id);
     const def = merged[id] || AGENT_SLASH_COMMANDS[id];
-    if (!ext) { results.push({ id, ok: false, reason: 'probe 대상 아님 (EXTERNAL_AGENTS 미포함 — grok/ollama 등은 큐레이션/override 만)' }); continue; }
+    if (!ext) { results.push({ id, ok: false, reason: 'probe 대상 아님 (EXTERNAL_AGENTS 미포함 — 사용자 override 전용 agent)' }); continue; }
     const pr = _probeAgentSlash(ext, { invoke: (def && def.invoke) || 'slash', timeout: opts.timeout });
     if (pr.ok) {
       agents[id] = {
@@ -10385,7 +10393,7 @@ function slashCommandsCmd(root, agentArg, opts = {}) {
 }
 
 // 1.9.157: Provider Registry — 사용자 정의 provider 동적 추가 (.harness/providers.json)
-//   빌트인 5종 (EXTERNAL_AGENTS) + 사용자 정의를 merge. OpenRouter / Bedrock / Groq 등 새 CLI 즉시 흡수 가능.
+//   빌트인 6종 (EXTERNAL_AGENTS: claude/codex/agy/grok/copilot/ollama) + 사용자 정의를 merge. OpenRouter / Bedrock 등 새 CLI 즉시 흡수 가능.
 //   파일 형식: { "schemaVersion": 1, "providers": [{ id, bin, envFlag, versionArgs, desc, installHint }] }
 function _providersFile(root) { return path.join(absRoot(root), '.harness', 'providers.json'); }
 function _readUserProviders(root) {
