@@ -2766,5 +2766,22 @@ total++;
   if (!ok) { failed++; console.log((rJson.stdout || '').slice(0, 300)); }
 }
 
+// 1.9.273 회귀 (UR-0027): 빠른 테스트 인프라 존재 검증 (smoke.js + test:fast script). 실제 smoke 실행은 별도(npm run test:fast).
+total++;
+{
+  const smokePath = path.resolve(__dirname, 'smoke.js');
+  const smokeExists = fs.existsSync(smokePath);
+  // 구문 유효성 (node --check)
+  const syn = smokeExists ? cp.spawnSync(process.execPath, ['--check', smokePath], { encoding: 'utf8', timeout: 15000 }) : { status: 1 };
+  let scriptOk = false;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
+    scriptOk = !!(pkg.scripts && pkg.scripts['test:fast'] && /smoke\.js/.test(pkg.scripts['test:fast']));
+  } catch {}
+  const ok = smokeExists && syn.status === 0 && scriptOk;
+  console.log(ok ? '✓ B(1.9.273) test:fast 인프라: smoke.js 존재 + 구문 + package script' : `✗ test:fast 실패 (exists=${smokeExists} syntax=${syn.status === 0} script=${scriptOk})`);
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

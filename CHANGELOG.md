@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.273 — 2026-06-03 — UR-0027: 빠른 테스트 서브셋 (test:fast smoke) — npm test 5분 초과 해소
+
+**⚡ 전체 e2e(220+, 수 분) 외에 핵심-경로만 빠르게 확인하는 `npm run test:fast`(~10초) 추가 (GPT-5.5 리뷰 반영).**
+
+### 배경
+GPT-5.5 외부 리뷰에서 `npm test`(전체 e2e)가 5분 제한 안에 끝나지 않아 외부 환경에서 완료 확인이 어렵다고 지적(UR-0027). 전체 e2e 는 신뢰도(CI/릴리스 게이트)에 필요하므로 유지하되, 개발 중 빠른 피드백용 경량 smoke 를 분리.
+
+### 구현
+1. **`scripts/smoke.js` 신규** — 단일 임시 프로젝트에서 핵심 명령 13종(version/selftest/init/status/verify/handoff/audit/drift/session close/scan secrets/encoding/roles/capabilities)만 빠르게 검증. 실패 시 exit 1. **~10초** (전체 e2e 5분+ 대비).
+2. **`npm run test:fast`** — `selftest + smoke.js`. README 기여 섹션에 안내.
+3. **CI 빠른 잡** — `.github/workflows/ci.yml` 에 `fast`(selftest+smoke, ubuntu/node20) 잡 추가 → PR 즉시 피드백, 전체 e2e 매트릭스는 병행.
+4. **e2e +1 (220→221)** — test:fast 인프라(smoke.js 존재+구문+package script) 회귀 검증.
+
+### 검증
+- **test:fast 13/13 PASS · ~10.7초** · **selftest 25/25** · **E2E 221/221 PASS** (회귀 0).
+
 ## 1.9.272 — 2026-06-03 — 공개 신뢰도·투명성 강화 (GPT-5.5 외부 리뷰 반영)
 
 **🔒 외부 평가(GPT-5.5 직접 실행/검사, 7/10)에서 지적된 공개 패키지 신뢰도·투명성 항목을 반영.**

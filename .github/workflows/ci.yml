@@ -11,6 +11,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  fast:
+    name: fast (selftest + smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Quick feedback (<30s) — full e2e runs in the `test` matrix below.
+      - name: test:fast
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: npm run test:fast
+
   test:
     name: gate (selftest + e2e)
     runs-on: ${{ matrix.os }}
