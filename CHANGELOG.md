@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.291 — 2026-06-03 — UR-0025 (2단계): 외부 에이전트 레지스트리 → lib/agent-registry.js 모듈 분리
+
+**🧩 GPT-5.5 + Codex 두 리뷰가 공통 지적한 #1 유지보수 이슈(단일 1.2MB 파일)를 비파괴 모듈 분리로 점진 해소. 1.9.274의 lib/pure-utils.js 패턴 계승.**
+
+### 배경
+`bin/harness.js` 단일 대형 파일은 외부 리뷰 2건(GPT-5.5·Codex)이 모두 지적한 유지보수/리뷰가능성 이슈. 1.9.274(UR-0025 1단계)에서 순수 함수 14종을 `lib/pure-utils.js`로 분리했고, 이번 2단계는 **순수 데이터 카탈로그**를 별도 모듈로 분리.
+
+### 구현 (UR-0025 2단계)
+1. **`lib/agent-registry.js` 신설** — `EXTERNAL_AGENTS`(10종 CLI: claude/codex/agy/grok/opencode/qwen/aider/goose/copilot/ollama) + `AGENT_SLASH_COMMANDS`(9종 슬래시/하위명령 레지스트리) 데이터 이동(140줄).
+2. **비파괴 require-based 분리** — harness.js 는 `require('../lib/agent-registry')` 구조분해로 동일 바인딩 사용. 런타임 변형 0 검증(사용자 override 는 `_loadAgentSlashCommands` 가 별도 객체에 병합, base 불변).
+3. **harness.js 21663→21525줄** (138줄 감소). `package.json` files 에 이미 `lib` 포함 → npm 배포 자동 반영.
+4. selftest 38→39 (`m.EXTERNAL_AGENTS === EXTERNAL_AGENTS` 단일출처 동일참조 + 인라인 정의 제거 검증) · e2e 235→236 (모듈 standalone require + harness 단일출처 + 인라인 제거 실측).
+
+### 검증
+- **selftest 39/39 PASS** · **E2E 236/236 PASS** (회귀 0).
+- 기존 카탈로그 selftest(EXTERNAL_AGENTS 10종 / AGENT_SLASH_COMMANDS 5종 / _agentSlashHint)가 추출 정합성 즉시 검증.
+- 남은 UR-0025 후속: ROLE_CATALOG/CAPABILITY_SURFACE/ADAPTERS/REUSE 등 잔여 카탈로그 점진 분리(다음 라운드 후보).
+
 ## 1.9.290 — 2026-06-03 — UR-0037 (Codex #4): require 시 top-level side effect 격리 — Codex 5건 완전 수렴 🎉
 
 **🧩 `require('leerness/bin/harness.js')` 가 호스트 프로세스를 오염시키던 마지막 갭 수정 (Codex gpt-5.5 #4). 이로써 Codex 코드 리뷰 5건 전부 수렴 완료.**

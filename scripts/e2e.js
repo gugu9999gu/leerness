@@ -3115,5 +3115,26 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.291 회귀 (UR-0025 2단계): lib/agent-registry.js 모듈 분리 — 단일출처 + 부작용 0
+total++;
+{
+  let ok = false;
+  try {
+    const reg = require(path.resolve(__dirname, '..', 'lib', 'agent-registry.js'));
+    const h = require(path.resolve(__dirname, '..', 'bin', 'harness.js'));
+    const dataOk = Array.isArray(reg.EXTERNAL_AGENTS) && reg.EXTERNAL_AGENTS.length === 10 &&
+      reg.EXTERNAL_AGENTS.every(a => a.id && a.bin && a.envFlag) &&
+      reg.AGENT_SLASH_COMMANDS && Object.keys(reg.AGENT_SLASH_COMMANDS).length === 9;
+    // harness 가 모듈을 단일출처로 사용 (같은 객체 참조)
+    const singleSource = h.AGENT_SLASH_COMMANDS === reg.AGENT_SLASH_COMMANDS;
+    // harness.js 소스에 인라인 정의가 더 이상 없음 (모듈로 이동 완료)
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const movedOut = !/const EXTERNAL_AGENTS = \[/.test(harnessSrc) && /require\('\.\.\/lib\/agent-registry'\)/.test(harnessSrc);
+    ok = dataOk && singleSource && movedOut;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.291) lib/agent-registry 모듈 분리: 단일출처 + 인라인 제거 (UR-0025)' : '✗ agent-registry 모듈 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
