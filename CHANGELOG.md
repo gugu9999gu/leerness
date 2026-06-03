@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.287 — 2026-06-03 — Codex 외부 리뷰 수렴: 허위 완료 차단 강화 + handoff 펜스 + status minimal
+
+**🛡️ 다른 AI(Codex)가 실측한 핵심 한계 "테스트만 통과하면 미구현도 done 통과"를 보강 + 발견된 품질 버그 2건 수정.**
+
+### 배경 (Codex 직접 테스트 결과 수렴)
+Codex 가 별도 프로젝트에 설치해 평가: 메모리/인계/추적은 쓸 만하나, (1) **허위 완료 태스크가 `verify-claim --strict-claims`/`gate` 를 통과**(테스트 통과 = 구현 인정 아님), (2) `session-handoff.md` 가 evidence 코드펜스를 끌어와 **마크다운 깨짐**, (3) `--minimal` 설치인데 `status` 가 전체 기준 누락 파일을 경고(UX 혼란). 타당한 지적을 수렴.
+
+### 구현
+1. **`verify-claim --require-evidence`** (허위 완료 갭) — `_evidenceQuality()` 로 done 주장의 evidence 완전성 강제: **수정 파일 경로 + 테스트명/개수** 가 없으면 FAIL (테스트 통과만으로 불충분). Codex 의 명시 권고("evidence 에 수정 파일/테스트명/개수/로그 강제") 반영. + **정직한 한계 고지**("테스트 통과 ≠ 의미적 구현 정확성").
+2. **handoff 코드펜스 sanitize** — `_sanitizeFences()`: session-handoff 임베딩 시 inner ``` → `'''` 중립화 → wrapper 펜스 균형 유지, 마크다운 안 깨짐.
+3. **`status` minimal 인지** — `manifest.json` 에 `minimal` 플래그 기록 + `status` 가 minimal 설치 시 생략 파일을 missing 으로 경고 안 함 ("minimal set" 표기).
+4. selftest 33→35 (evidence 완전성 + 펜스 sanitize) + e2e 231→232.
+
+### 검증
+- **selftest 35/35 PASS** · **E2E 232/232 PASS** (회귀 0) · 허위("테스트 통과함")=exit 1 차단 / 완전(파일+테스트+실제파일)=exit 0 통과 / 펜스 균형 / status "minimal set" 실측.
+
+### Codex 평가 중 인지 (즉시 조치 외)
+- 단일 대형 파일 → UR-0025 진행 중(lib/ 14종 추출). 잦은 릴리스 → dist-tag(1.9.275). e2e 시간 → handoff 회귀 수정(1.9.284) + test:fast.
+
 ## 1.9.286 — 2026-06-03 — UR-0024: 스킬 설치 영향 경량 상관추적 + HuggingFace 안내 (백로그 완전 소진)
 
 **📊 "설치 스킬이 코딩 성능/정확도에 도움?" — 무거운 벤치 없이 기존 데이터로 정직한 상관 advisory (GPT-5.5 / 사용자 요청). 마지막 추적 백로그.**

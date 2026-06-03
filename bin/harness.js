@@ -10,7 +10,7 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 
-const VERSION = '1.9.286';
+const VERSION = '1.9.287';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -149,6 +149,9 @@ function log(s = '') { console.log(s); }
 function ok(s) { log('✓ ' + s); }
 function warn(s) { log('⚠ ' + s); }
 function fail(s) { log('✗ ' + s); }
+// 1.9.287 (Codex 리뷰 수렴): 임베딩 텍스트의 코드펜스(```)를 중립화해 외부 마크다운(session-handoff)이 깨지지 않게.
+//   ``` → ''' (펜스가 아닌 표시), 인라인 백틱은 보존. 순수 함수.
+function _sanitizeFences(s) { return String(s || '').replace(/```+/g, "'''"); }
 function absRoot(p) { return path.resolve(p || process.cwd()); }
 function exists(p) { return fs.existsSync(p); }
 function read(p) {
@@ -415,7 +418,7 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
     '.github/copilot-instructions.md': `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`,
     '.harness/HARNESS_VERSION': VERSION + '\n',
     '.harness/LANGUAGE': lang + '\n',
-    '.harness/manifest.json': JSON.stringify({ project, leernessVersion: VERSION, language: lang, installedAt: now() }, null, 2) + '\n',
+    '.harness/manifest.json': JSON.stringify({ project, leernessVersion: VERSION, language: lang, installedAt: now(), minimal: !!opts.minimal }, null, 2) + '\n',
     '.harness/skills-lock.json': skillLock(selectedSkills),
     '.harness/project-brief.md': fm('project-brief', ['프로젝트 목적 확인','신규 기능 판단','계획 수립'], ['프로젝트 목적 변경','사용자/범위 변경'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- 이 프로젝트의 목적을 실제 내용으로 업데이트하세요.\n\n## Users\n-\n\n## Success Criteria\n-\n`),
     '.harness/plan.md': fm('plan', ['작업 시작 전','새 요청 접수','범위 변경','신규 프로젝트 감지'], ['계획 추가/수정/드랍','milestone 변경','목표 변경'], `# Plan\n\n## Goal\n- 사용자 목적을 기준으로 전체 계획을 유지합니다.\n\n## Scope\n- 포함 범위를 기록합니다.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. 프로젝트 계획 정리\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] project-brief.md를 실제 프로젝트 목적에 맞게 작성\n- [ ] context-map.md를 실제 파일 구조에 맞게 작성\n`),
@@ -805,6 +808,11 @@ function syncReadme(root) {
         updated = updated.replace(/badge\/e2e-(\d+)%2F(\d+)-success/g, `badge/e2e-${total}%2F${total}-success`);
       }
     }
+    // 1.9.287: selftest 배지 자동 동기화 — _selfTestCases() 실제 케이스 수 직접 카운트(정확). 배지 stale 방지(GPT 지적).
+    try {
+      const stCount = _selfTestCases().length;
+      if (stCount > 0) updated = updated.replace(/badge\/selftest-\d+(?:%2F\d+)?/g, `badge/selftest-${stCount}`);
+    } catch {}
   } catch {}
   if (updated !== existing) writeUtf8(p, updated);
   ok('README.md Leerness section synced');
@@ -2963,6 +2971,8 @@ function _selfTestCases() {
     { name: '_pickModel: top/code/fast 등급 선택 (1.9.270)', run: () => { return _pickModel('codex', 'code') === 'gpt-5-codex' && _pickModel('claude', 'top') === 'claude-opus-4-7' && /haiku/.test(_pickModel('claude', 'fast')); } },
     { name: 'CAPABILITY_SURFACE: 6 영역 + risk/optOut + 주의명령 (1.9.272)', run: () => { const ks = Object.keys(CAPABILITY_SURFACE); return ks.length === 6 && ks.includes('automationBridges') && Object.values(CAPABILITY_SURFACE).every(v => ['low','medium','high'].includes(v.risk) && v.optOut && v.desc) && POWERFUL_COMMANDS.length >= 5; } },
     { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
+    { name: '_sanitizeFences: 코드펜스 중립화 (Codex 수렴 1.9.287)', run: () => { const out = _sanitizeFences('text\n```js\ncode\n```\nmore'); return !/```/.test(out) && /'''/.test(out) && /code/.test(out); } },
+    { name: '_evidenceQuality: 파일+테스트 근거 강제 (Codex 수렴 1.9.287)', run: () => { const good = _evidenceQuality('src/api.js 수정, npm test 12/12 통과 (Exit: 0)'); const weak = _evidenceQuality('테스트 통과함'); const noFile = _evidenceQuality('12 tests passed'); return good.ok === true && good.hasFile && good.hasTest && weak.ok === false && weak.missing.includes('수정 파일 경로') && noFile.ok === false; } },
     { name: '_parseEvidenceStats: review-evidence pass/fail 집계 (1.9.286)', run: () => { const s = _parseEvidenceStats('## 2026-06-03\nCommand: npm test\nExit: 0\n\n## 2026-06-03\nCommand: build\nExit: 1\n\n## 2026-06-03\nverify PASS 통과\n'); return s.entries === 3 && s.pass === 2 && s.fail === 1 && s.rate === 67; } },
     { name: '_reuseDetect: 키워드→OSS 카테고리 + 체크리스트 (1.9.285)', run: () => { const a = _reuseDetect('JWT 인증 구현'); const b = _reuseDetect('날짜 포맷 date'); const c = _reuseDetect('전혀무관한xyzzy'); return a.some(x => x.key === 'auth') && b.some(x => x.key === 'date') && c.length === 0 && REUSE_CHECKLIST.length >= 5 && REUSE_CATEGORIES.length >= 12; } },
     { name: 'AGENTS.md: 정적 vs 동적 leerness 역할 경계 (1.9.282)', run: () => { const a = coreFiles('.', 'ko', [])['AGENTS.md']; return /정적 vs 동적/.test(a) && /대체하지 않고 \*\*보완\*\*|대체하지 않고 보완/.test(a) && /leerness state/.test(a) && /\.leerness\//.test(a); } },
@@ -3614,7 +3624,7 @@ function commandsCmd(root) {
       { cmd: 'scan secrets [path]', desc: '시크릿 탐지' },
       { cmd: 'encoding check [path]', desc: '인코딩 검증' },
       { cmd: 'lazy detect [path] [--json]', desc: '게으른 작업 감지 (1.9.101)' },
-      { cmd: 'verify-claim <T-ID> [--run-tests] [--strict-claims]', desc: '주장 검증 (1.9.18~26)' },
+      { cmd: 'verify-claim <T-ID> [--run-tests] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287)' },
       { cmd: 'optimism-check <T-ID>', desc: '낙관적 API 감지 (1.9.26)' },
       { cmd: 'requests audit|list|complete|drop|auto-complete', desc: '사용자 요청 추적 (1.9.207/223)' },
       { cmd: 'pre-wake-audit [path] [--last]', desc: 'sleep 전 점검 (1.9.209)' },
@@ -6793,12 +6803,15 @@ function status(root) {
   const verF = path.join(root,'.harness/HARNESS_VERSION');
   const ver = exists(verF) ? read(verF).trim() : 'not installed';
   const lang = exists(path.join(root,'.harness/LANGUAGE')) ? read(path.join(root,'.harness/LANGUAGE')).trim() : 'ko';
-  const files = Object.keys(coreFiles(root, lang));
+  // 1.9.287 (Codex 리뷰 수렴): --minimal 설치는 manifest.minimal=true → 의도적으로 생략된 파일을 missing 으로 경고하지 않음.
+  let isMinimal = false;
+  try { const mf = path.join(root, '.harness/manifest.json'); if (exists(mf)) isMinimal = !!JSON.parse(read(mf)).minimal; } catch {}
+  const files = Object.keys(coreFiles(root, lang, [], { minimal: isMinimal }));
   const missing = files.filter(f => !exists(path.join(root,f)));
-  log(`Leerness: ${ver}`);
+  log(`Leerness: ${ver}${isMinimal ? ' (minimal)' : ''}`);
   log(`Files: ${files.length - missing.length}/${files.length}`);
   if (missing.length) missing.forEach(x => warn('missing: ' + x));
-  else ok('required files present');
+  else ok(`required files present${isMinimal ? ' (minimal set)' : ''}`);
 }
 function verify(root) {
   root = absRoot(root);
@@ -9243,6 +9256,19 @@ function reuseMapCmd(root) {
 
 // 1.9.18: verify-claim — progress-tracker의 evidence 컬럼 자동 검증
 // "src/foo.js + 5개 테스트 (54/54 통과)" 같은 주장을 파싱해 실제 파일/카운트 확인
+// 1.9.287 (Codex 리뷰 수렴): evidence 완전성 평가 — "테스트 통과만으로 done" 차단.
+//   done 주장은 (a) 수정 파일 경로 (b) 테스트명/개수 가 evidence 에 있어야 신뢰 가능. 순수 함수(selftest).
+function _evidenceQuality(evidence) {
+  const e = String(evidence || '');
+  const hasFile = /(?:[A-Za-z][\w-]*[\/\\])?[A-Za-z][\w./\\-]*\.(?:js|ts|tsx|jsx|mjs|cjs|py|go|rs|rb|kt|cs|gd|java|php|swift|c|cpp|h|html|css|scss|vue|svelte|json|yaml|yml|toml|md|sql|sh)\b/i.test(e);
+  const hasTest = /(\d+)\s*(?:\/\s*\d+\s*)?(?:통과|passed|passing|개\s*테스트)|\btests?\b\s*[:=]?\s*\d|Tests?:\s*\d|\b\d+\s*tests?\b/i.test(e);
+  const hasLog = /Exit\s*[:=]|exit\s*code|Command\s*[:=]|npm\s+(?:test|run)|pytest|cargo\s+test|go\s+test/i.test(e);
+  const missing = [];
+  if (!hasFile) missing.push('수정 파일 경로');
+  if (!hasTest) missing.push('테스트명/개수');
+  if (!hasLog) missing.push('실행 로그(Command/Exit)');
+  return { hasFile, hasTest, hasLog, ok: hasFile && hasTest, missing };
+}
 function verifyClaimCmd(root, taskId) {
   root = absRoot(root);
   if (!taskId) return fail('verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008');
@@ -9434,7 +9460,23 @@ function verifyClaimCmd(root, taskId) {
       for (const s of optimismSuspects) log(`    · [${s.kind}] ${s.label}: evidence에 주장 있는데 코드에 호출 흔적 없음`);
     }
   }
-  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (has('--strict-claims') && !strictOk);
+  // 1.9.287 (Codex 리뷰 수렴): --require-evidence — done 주장의 evidence 완전성(파일+테스트) 강제.
+  //   "테스트 통과만으로 done" 차단 — Codex 가 발견한 허위 완료 통과 갭 보강.
+  const reqEvidence = has('--require-evidence');
+  const isDoneClaim = /done|완료/i.test(row.status || '');
+  let evidenceQualityOk = true;
+  if (reqEvidence) {
+    const evq = _evidenceQuality(evidence);
+    evidenceQualityOk = !isDoneClaim || evq.ok;
+    log(`  - evidence 완전성 (--require-evidence): ${evidenceQualityOk ? '✓ pass (파일+테스트 근거 있음)' : `✗ FAIL (누락: ${evq.missing.join(', ')})`}`);
+    if (!evidenceQualityOk) log(`    · done 주장은 수정 파일 경로 + 테스트명/개수 가 evidence 에 있어야 함 (테스트 통과만으로는 불충분)`);
+  }
+  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (has('--strict-claims') && !strictOk) || !evidenceQualityOk;
+  // 1.9.287: 정직한 한계 고지 — 테스트 통과 ≠ 의미적 구현 정확성
+  if (has('--strict-claims') || reqEvidence) {
+    log('');
+    log(`  ℹ 한계: 테스트 통과는 "의미적 구현 정확성"을 보장하지 않음 — evidence 가 해당 주장(수정 파일/테스트)을 직접 링크해야 신뢰도↑.`);
+  }
   if (overallFail) {
     log('');
     log(`  ⚠ evidence 주장과 실제가 일치하지 않음 — task 상태 재검토 권장`);
@@ -11997,7 +12039,8 @@ function sessionClose(root, opts = {}) {
     return arr.map(r => `- ${r.id} ${r.request} → next: ${r.nextAction}`).join('\n');
   }
 
-  const evidenceSummary = exists(evidencePath(root)) ? (read(evidencePath(root)).split('\n').slice(-30).join('\n')) : '(no review-evidence.md)';
+  // 1.9.287 (Codex 리뷰 수렴): evidence 임베딩 시 코드펜스(```) 가 session-handoff.md 마크다운을 깨뜨리는 품질 버그 수정.
+  const evidenceSummary = _sanitizeFences(exists(evidencePath(root)) ? (read(evidencePath(root)).split('\n').slice(-30).join('\n')) : '(no review-evidence.md)');
   const block = [
     `# Session Handoff`,
     ``,
@@ -21566,5 +21609,7 @@ module.exports = {
   // 1.9.285: 외부 OSS 재사용 게이트 (UR-0023) — 단위 테스트
   REUSE_CATEGORIES, REUSE_CHECKLIST, _reuseDetect, reuseCheckCmd,
   // 1.9.286: 스킬 영향 상관추적 (UR-0024) — 단위 테스트
-  _parseEvidenceStats, skillImpactCmd
+  _parseEvidenceStats, skillImpactCmd,
+  // 1.9.287: evidence 완전성 + 코드펜스 sanitize (Codex 리뷰 수렴) — 단위 테스트
+  _evidenceQuality, _sanitizeFences
 };

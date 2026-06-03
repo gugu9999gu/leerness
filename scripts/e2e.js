@@ -3007,5 +3007,40 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.287 회귀 (Codex 리뷰 수렴): verify-claim --require-evidence + handoff 펜스 sanitize + status minimal
+total++;
+{
+  const cDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-codex-'));
+  const env = { ...process.env, LEERNESS_OFFLINE: '1' };
+  cp.spawnSync(process.execPath, [CLI, 'init', cDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000, env });
+  // A) 허위 완료(테스트 통과만) → --require-evidence FAIL (exit 1)
+  cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'fake done', '--path', cDir], { encoding: 'utf8', timeout: 15000, env });
+  cp.spawnSync(process.execPath, [CLI, 'task', 'update', 'T-0002', '--status', 'done', '--evidence', '테스트 통과함', '--path', cDir], { encoding: 'utf8', timeout: 15000, env });
+  const rFake = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--require-evidence', '--path', cDir], { encoding: 'utf8', timeout: 20000, env });
+  const fakeBlocked = rFake.status === 1 && /evidence 완전성.*FAIL/.test(rFake.stdout);
+  // 완전한 evidence(파일+테스트) + 실제 파일 존재 → pass (exit 0)
+  fs.mkdirSync(path.join(cDir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(cDir, 'src', 'api.js'), 'module.exports = {};\n');
+  cp.spawnSync(process.execPath, [CLI, 'task', 'update', 'T-0002', '--evidence', 'src/api.js 구현, npm test 5/5 통과 (Exit: 0)', '--path', cDir], { encoding: 'utf8', timeout: 15000, env });
+  const rGood = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--require-evidence', '--path', cDir], { encoding: 'utf8', timeout: 20000, env });
+  const goodPass = rGood.status === 0 && /evidence 완전성.*pass/.test(rGood.stdout);
+  // B) handoff 펜스 sanitize — review-evidence 에 ``` 넣고 session close → session-handoff 에 ``` 불균형 없음
+  fs.appendFileSync(path.join(cDir, '.harness', 'review-evidence.md'), '\n## 2026-06-03\n```js\nconst x=1;\n```\n');
+  cp.spawnSync(process.execPath, [CLI, 'session', 'close', cDir], { encoding: 'utf8', timeout: 20000, env });
+  // 펜스 균형: 감싸는 wrapper ``` 는 허용하되, review-evidence 의 inner ``` 는 '''로 sanitize 되어 불균형이 없어야 함.
+  let fenceOk = false;
+  try {
+    const sh = fs.readFileSync(path.join(cDir, '.harness', 'session-handoff.md'), 'utf8');
+    const bareFences = sh.split('\n').filter(l => l.trim() === '`'.repeat(3)).length;
+    fenceOk = (bareFences % 2 === 0) && sh.includes("'''");  // 균형(짝수) + inner sanitize 적용 확인
+  } catch {}
+  // C) status minimal 인지 — minimal set 표기 + missing 경고 없음
+  const rStat = cp.spawnSync(process.execPath, [CLI, 'status', cDir], { encoding: 'utf8', timeout: 15000, env });
+  const statOk = /minimal/.test(rStat.stdout) && !/missing:/.test(rStat.stdout);
+  const ok = fakeBlocked && goodPass && fenceOk && statOk;
+  console.log(ok ? '✓ B(1.9.287) Codex 수렴: require-evidence(허위차단/완전통과) + 펜스 sanitize + status minimal' : `✗ Codex 수렴 실패 (fake=${fakeBlocked} good=${goodPass} fence=${fenceOk} stat=${statOk})`);
+  if (!ok) { failed++; console.log((rFake.stdout || '').slice(-300)); }
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
