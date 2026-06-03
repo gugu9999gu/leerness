@@ -6,8 +6,10 @@ const path = require('path');
 const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
+// 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
+const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp } = require('../lib/pure-utils');
 
-const VERSION = '1.9.273';
+const VERSION = '1.9.274';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -228,22 +230,7 @@ function detectProjectName(root) { try { const pkg = JSON.parse(read(path.join(r
 // 1.9.269 (UR-0022): OS 시스템 언어 감지 — 신규 init(빈 디렉토리, 프로젝트 콘텐츠 없음)에서 OS locale 로 설치 언어 판별.
 //   우선순위: POSIX 환경변수(LC_ALL>LC_CTYPE>LANG>LANGUAGE) > Intl ICU resolvedOptions().locale(Windows 등 LANG 미설정 시) > null.
 //   순수 함수(부작용 0) — env 주입 가능(selftest). 판별 불가 시 null 반환 → 호출부가 en 폴백.
-function _detectSystemLang(env) {
-  env = env || process.env;
-  const raw = String(env.LC_ALL || env.LC_CTYPE || env.LANG || env.LANGUAGE || '').toLowerCase();
-  if (raw && raw !== 'c' && raw !== 'posix') {
-    if (/(^|[^a-z])ko([_\-.]|$)|korean|[_-]kr([_\-.]|$)/.test(raw)) return 'ko';
-    if (/(^|[^a-z])en([_\-.]|$)|english|[_-](us|gb)([_\-.]|$)/.test(raw)) return 'en';
-  }
-  // POSIX env 없거나 미매칭 → Node ICU locale (Windows 는 LANG 보통 미설정 → 여기서 OS 언어 회수)
-  try {
-    const loc = (Intl.DateTimeFormat().resolvedOptions().locale || '').toLowerCase();
-    const primary = loc.split('-')[0];
-    if (primary === 'ko') return 'ko';
-    if (primary === 'en') return 'en';
-  } catch {}
-  return null;
-}
+// _detectSystemLang → lib/pure-utils.js 로 이동 (1.9.274 UR-0025 1단계)
 function detectLanguageValue(root, value = 'auto') {
   const v = String(value || 'auto').toLowerCase();
   if (v === 'ko' || v === 'en') return v;
@@ -2598,33 +2585,7 @@ function _terminalEncodingNotice(opts = {}) {
 // 1.9.243: CJK 분류 — Korean/Japanese/Chinese 비-ASCII 패턴 통계 (UR-0014 3단계)
 //   1.9.257: _scanShellScriptsEncoding 내부 중첩 → 모듈 스코프로 추출 (순수 함수 — 단위 테스트 가능).
 //   UTF-8 3-byte 시퀀스 시작 바이트로 CJK 언어 분류 (인코딩 오인식 위험 판단용).
-function _classifyCJK(buf, len) {
-  let korean = 0, japanese = 0, chinese = 0, other = 0;
-  for (let i = 0; i < Math.min(buf.length, len); i++) {
-    const b = buf[i];
-    if (b < 0x80) continue;
-    // Korean Hangul Syllables U+AC00-D7AF → 3-byte: EA B0 80 ~ ED 9F BF
-    if (b >= 0xEA && b <= 0xED) korean++;
-    // Japanese Hiragana/Katakana U+3040-30FF → 3-byte: E3 81 80 ~ E3 83 BF
-    else if (b === 0xE3) japanese++;
-    // CJK Unified Ideographs U+4E00-9FFF → 3-byte: E4 B8 80 ~ E9 BF BF
-    else if (b >= 0xE4 && b <= 0xE9) chinese++;
-    else other++;
-  }
-  return { korean, japanese, chinese, other };
-}
-function _riskLabel(cjk) {
-  if (cjk.korean >= cjk.japanese && cjk.korean >= cjk.chinese && cjk.korean > 0) {
-    return { type: 'korean', risk: 'Windows 한국어 PowerShell 에서 CP949 로 오인식 가능 (BOM 추가 권장)' };
-  }
-  if (cjk.japanese > cjk.korean && cjk.japanese >= cjk.chinese) {
-    return { type: 'japanese', risk: 'Windows 일본어 PowerShell 에서 CP932 (Shift-JIS) 로 오인식 가능 (BOM 추가 권장)' };
-  }
-  if (cjk.chinese > 0) {
-    return { type: 'chinese', risk: 'Windows 중국어 PowerShell 에서 CP936 (GBK) 로 오인식 가능 (BOM 추가 권장)' };
-  }
-  return { type: 'non-ascii', risk: 'Windows 비-ASCII 셸 스크립트 — BOM 없는 UTF-8 인코딩 오인식 가능 (BOM 추가 권장)' };
-}
+// _classifyCJK, _riskLabel → lib/pure-utils.js 로 이동 (1.9.274 UR-0025 1단계)
 
 // 셸 스크립트 (.ps1/.bat/.cmd/.sh) 인코딩 위험 감지
 //   위험 시그널: 한국어 (또는 비-ASCII) 문자 + BOM 없음 + Windows 환경
@@ -9470,9 +9431,7 @@ const _LEERNESS_NONSECRET_KEYS = new Set([
   'LEERNESS_SKILL_AUTO_PRESETS'
 ]);
 // 시크릿은 절대 .harness/leerness-config.json 으로 옮기지 않음 (TOKEN 패턴 자동 차단)
-function _isSecretKey(k) {
-  return /TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE/i.test(k);
-}
+// _isSecretKey → lib/pure-utils.js 로 이동 (1.9.274 UR-0025 1단계)
 function _leernessConfigPath(root) { return path.join(absRoot(root || process.cwd()), '.harness', 'leerness-config.json'); }
 function _loadLeernessConfig(root) {
   const f = _leernessConfigPath(root);
@@ -10273,30 +10232,7 @@ function _agentSlashHint(root, agentId) {
 // 1.9.267 (UR-0021 3단계): CLI `--help` 출력에서 슬래시 명령/하위명령을 best-effort 파싱.
 //   순수 함수 (부작용 0, selftest 가능). invoke='slash' → `/cmd  desc` 패턴, invoke='subcommand' → 들여쓰기 `cmd  desc` 패턴.
 //   CLI 플래그(--foo)·옵션은 의도적으로 제외. 검출 0건이면 큐레이션 빌트인을 그대로 유지(파괴적 덮어쓰기 방지).
-function _parseSlashFromHelp(text, invoke = 'slash') {
-  const out = [];
-  const seen = new Set();
-  const lines = String(text || '').split(/\r?\n/);
-  for (const raw of lines) {
-    const ln = raw.replace(/\x1b\[[0-9;]*m/g, ''); // ANSI 색상 제거
-    if (invoke === 'subcommand') {
-      // 들여쓰기된 하위명령: "  suggest    설명" — 슬래시/대시 시작 제외, 2칸+ 공백 구분
-      const m = ln.match(/^\s{2,}([a-z][a-z0-9][\w-]*)\s{2,}(\S.*)$/);
-      if (m && !/^--/.test(m[1])) {
-        const cmd = m[1];
-        if (!seen.has(cmd) && cmd.length <= 24) { seen.add(cmd); out.push({ cmd, desc: m[2].trim().slice(0, 80) }); }
-      }
-      continue;
-    }
-    // 슬래시 명령: "/help   설명" 또는 "  /help - 설명"
-    const m = ln.match(/^\s*(\/[a-zA-Z][\w-]*)(?:\s+[-–:]?\s*(.*))?$/);
-    if (m) {
-      const cmd = m[1];
-      if (!seen.has(cmd) && cmd.length <= 24) { seen.add(cmd); out.push({ cmd, desc: (m[2] || '').trim().slice(0, 80) }); }
-    }
-  }
-  return out;
-}
+// _parseSlashFromHelp → lib/pure-utils.js 로 이동 (1.9.274 UR-0025 1단계)
 // 1.9.267 (UR-0021 3단계): 설치된 CLI 의 `--help` 를 spawn 해 슬래시 명령을 probe (best-effort, offline-first).
 //   extDef: EXTERNAL_AGENTS 항목 (bin/versionArgs 보유). copilot 처럼 subcommand 인 경우 versionArgs 의 base(예: ['copilot']) + '--help'.
 //   실패/0건이면 ok:false + reason — 호출부가 큐레이션 빌트인 유지. 타임아웃 5s (행 방지).
@@ -15134,28 +15070,7 @@ function guideCmd(root, target) {
 }
 
 // ===== Auto update =====
-function compareVer(a, b) {
-  const sa = String(a || '0').split('.').map(n => parseInt(n || '0', 10));
-  const sb = String(b || '0').split('.').map(n => parseInt(n || '0', 10));
-  for (let i = 0; i < 3; i++) {
-    const x = sa[i] || 0, y = sb[i] || 0;
-    if (x > y) return 1;
-    if (x < y) return -1;
-  }
-  return 0;
-}
-function parseHarnessVersion(text) {
-  const t = String(text || '').trim();
-  // canonical: "1.9.0", legacy plus: "leerness@1.8.0+plus@1.0.1", legacy bare: "1.8.0", legacy "leerness@1.8.0"
-  const plus = t.match(/plus@(\d+\.\d+\.\d+)/);
-  const baseAt = t.match(/leerness@(\d+\.\d+\.\d+)/);
-  const bare = t.match(/^(\d+\.\d+\.\d+)\s*$/);
-  return {
-    plus: plus ? plus[1] : null,
-    base: baseAt ? baseAt[1] : (bare ? bare[1] : null),
-    raw: t || '(not installed)'
-  };
-}
+// compareVer, parseHarnessVersion → lib/pure-utils.js 로 이동 (1.9.274 UR-0025 1단계)
 function updateCachePath(root) { return path.join(root, '.harness/cache/update-check.json'); }
 function readUpdateCache(root) { try { const p = updateCachePath(root); if (!exists(p)) return null; return JSON.parse(read(p)); } catch { return null; } }
 function writeUpdateCache(root, obj) { writeUtf8(updateCachePath(root), JSON.stringify({ at: Date.now(), ...obj }, null, 2) + '\n'); }

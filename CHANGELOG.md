@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.274 — 2026-06-03 — UR-0025 1단계: bin/harness.js 모듈 분리 시작 (lib/ 순수 유틸 추출)
+
+**🧩 단일 대형 파일(1.2MB) 모듈 분리의 비파괴 1단계 — `lib/` 모듈화 패턴 확립 + 순수 유틸 7종 추출 (GPT-5.5 리뷰).**
+
+### 배경
+GPT-5.5 리뷰: 거의 모든 기능이 `bin/harness.js` 한 파일(~20k줄)에 있어 유지보수성·리뷰 가능성이 낮음(UR-0025). 한 번에 전부 분리하면 고위험이므로, **점진적·비파괴**로 진행: 먼저 require 기반 `lib/` 모듈화 패턴을 확립하고, 부작용 0인 순수 함수부터 추출. selftest 가 추출 함수 전부를 검증하므로 회귀를 즉시 포착.
+
+### 구현
+1. **`lib/pure-utils.js` 신규** — 순수 함수 7종 추출: `_isSecretKey` / `compareVer` / `parseHarnessVersion` / `_classifyCJK` / `_riskLabel` / `_detectSystemLang` / `_parseSlashFromHelp`. harness 내부 상태·타 함수 의존 0.
+2. **harness.js require 재연결** — 상단에서 `require('../lib/pure-utils')` 로 동일 이름 바인딩, 인라인 정의 제거. `module.exports` 재노출 유지(단위 테스트 호환).
+3. **`package.json files` 에 `lib` 추가** — npm tarball 포함 확인(`npm pack --dry-run`: `lib/pure-utils.js` 4.6kB 포함). 미포함 시 require 실패 → 검증으로 차단.
+4. **e2e +1 (221→222)** — lib 모듈 존재 + 7종 export + 동작 + files 포함 회귀 검증.
+
+### 다음 단계 (UR-0025 계속)
+- 2단계+: 모델 catalog/roles/슬래시 레지스트리 등 응집도 높은 클러스터를 순차 추출 (매 단계 selftest+e2e 녹색 유지).
+
+### 검증
+- **selftest 25/25 PASS** · **E2E 222/222 PASS** (회귀 0) · `npm pack` tarball 에 lib 포함 확인. 동작 동일(비파괴).
+
 ## 1.9.273 — 2026-06-03 — UR-0027: 빠른 테스트 서브셋 (test:fast smoke) — npm test 5분 초과 해소
 
 **⚡ 전체 e2e(220+, 수 분) 외에 핵심-경로만 빠르게 확인하는 `npm run test:fast`(~10초) 추가 (GPT-5.5 리뷰 반영).**

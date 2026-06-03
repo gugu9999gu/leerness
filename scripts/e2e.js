@@ -2783,5 +2783,23 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.274 회귀 (UR-0025 1단계): lib/ 모듈 분리 — pure-utils.js 존재 + require + 7종 export + 패키지 files 포함.
+total++;
+{
+  const libPath = path.resolve(__dirname, '..', 'lib', 'pure-utils.js');
+  const libExists = fs.existsSync(libPath);
+  let exportsOk = false;
+  try {
+    const m = require(libPath);
+    exportsOk = ['_isSecretKey','compareVer','parseHarnessVersion','_classifyCJK','_riskLabel','_detectSystemLang','_parseSlashFromHelp']
+      .every(n => typeof m[n] === 'function') && m.compareVer('1.9.1','1.9.0') === 1 && m._detectSystemLang({ LANG: 'ko_KR.UTF-8' }) === 'ko';
+  } catch {}
+  let filesOk = false;
+  try { const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8')); filesOk = Array.isArray(pkg.files) && pkg.files.includes('lib'); } catch {}
+  const ok = libExists && exportsOk && filesOk;
+  console.log(ok ? '✓ B(1.9.274) lib 모듈 분리: pure-utils 7종 export + 동작 + files 포함' : `✗ lib 분리 실패 (exists=${libExists} exports=${exportsOk} files=${filesOk})`);
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);
