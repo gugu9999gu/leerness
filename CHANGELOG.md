@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.269 — 2026-06-02 — UR-0022: init 시 OS 시스템 언어 감지 → 설치 가이드 자동 언어 선택
+
+**🌐 `npx leerness init` 등 설치 시 OS 시스템 언어를 감지해 설치 가이드/생성 문서를 알맞은 언어로 표시 (사용자 명시 UR-0022).**
+
+### 배경
+기존 `detectLanguageValue(root, 'auto')`는 프로젝트 파일(README/guideline 등)의 **한글 포함 여부만** 판별했음. 그 결과 빈 디렉토리에서 신규 `npx leerness init` 시 콘텐츠가 없어 한국어 OS 에서도 항상 영어(en)로 폴백됐음. 사용자 요청은 OS locale 기반으로 설치 언어를 자동 결정하는 것.
+
+### 구현
+1. **`_detectSystemLang(env)` 순수 함수 신설** — OS locale 감지. 우선순위: POSIX 환경변수(`LC_ALL`>`LC_CTYPE`>`LANG`>`LANGUAGE`) > Node ICU `Intl.DateTimeFormat().resolvedOptions().locale`(Windows 등 LANG 미설정 시 OS 언어 회수) > `null`. `C`/`POSIX` 로케일은 스킵. env 주입 가능(테스트).
+2. **`detectLanguageValue` auto 우선순위 개선** — ① 프로젝트 콘텐츠 한글 → ② **콘텐츠가 비어있을 때만**(신규/빈 디렉토리 init) OS 시스템 언어 → ③ en 폴백. **콘텐츠가 있는 영어 프로젝트는 en 유지**(기존 프로젝트 회귀 방지).
+3. **비대화형 설치 투명성 안내** — `npx leerness init --yes`(auto) 시 `🌐 시스템 언어 감지: KO (→ KO)` 한 줄 노출. `--language` 명시 시 미발화.
+4. **언어 선택 UI 설명 갱신** — `install.lang.auto.desc` 에 "시스템(OS) 언어 자동 판별" 반영.
+5. **selftest 20 → 22** — `_detectSystemLang` POSIX 파싱(ko_KR/en_US) + LC_ALL 우선/LANGUAGE 폴백 2종.
+6. **e2e +1 (217 → 218)** — 빈 디렉토리 init auto + `LANG=en_US`/`ko_KR` → `.harness/LANGUAGE` 가 각각 en/ko 로 결정되는지 통합 검증.
+
+### 검증
+- **selftest 22/22 PASS** · **E2E 218/218 PASS** (회귀 0).
+- 기존 init e2e 는 모두 `--language ko` 명시 → auto 변경 영향 없음(회귀 0 확인).
+
 ## 1.9.268 — 2026-06-02 — grok 정식 EXTERNAL_AGENTS provider 승격 (1.9.266 후속 task)
 
 **🤖 grok 을 슬래시 레지스트리 전용에서 정식 provider 로 승격 — provider cycle / setup-agents / dispatch / `--help` probe 가 grok 도 자동 처리.**

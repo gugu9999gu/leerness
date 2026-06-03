@@ -2704,5 +2704,23 @@ run('consistency check',   ['consistency', 'check', tmp]);
 run('--version',           ['--version']);
 run('--help',              ['--help']);
 
+// 1.9.269 회귀 (UR-0022): 빈 디렉토리 신규 init + auto → OS 시스템 언어로 .harness/LANGUAGE 결정
+total++;
+{
+  const tmpEn = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lang-en-'));
+  const tmpKo = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lang-ko-'));
+  // LANG 명시 (POSIX) — Windows 에서도 _detectSystemLang 이 LANG 우선 읽음
+  const envEn = { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8', LANGUAGE: '' };
+  const envKo = { ...process.env, LANG: 'ko_KR.UTF-8', LC_ALL: 'ko_KR.UTF-8', LANGUAGE: '' };
+  // --language 미지정(auto) + 빈 디렉토리 → 시스템 언어 적용
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpEn, '--yes', '--skills', 'recommended'], { encoding: 'utf8', env: envEn, timeout: 30000 });
+  cp.spawnSync(process.execPath, [CLI, 'init', tmpKo, '--yes', '--skills', 'recommended'], { encoding: 'utf8', env: envKo, timeout: 30000 });
+  const langEn = fs.existsSync(path.join(tmpEn, '.harness', 'LANGUAGE')) ? fs.readFileSync(path.join(tmpEn, '.harness', 'LANGUAGE'), 'utf8').trim() : '';
+  const langKo = fs.existsSync(path.join(tmpKo, '.harness', 'LANGUAGE')) ? fs.readFileSync(path.join(tmpKo, '.harness', 'LANGUAGE'), 'utf8').trim() : '';
+  const ok = langEn === 'en' && langKo === 'ko';
+  console.log(ok ? '✓ B(1.9.269) init auto: 빈 디렉토리 → OS 시스템 언어 (en→en, ko→ko)' : `✗ system-lang init 실패 (en=${langEn} ko=${langKo})`);
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

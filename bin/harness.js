@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.268';
+const VERSION = '1.9.269';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -225,13 +225,41 @@ function argAll(name) {
   return out;
 }
 function detectProjectName(root) { try { const pkg = JSON.parse(read(path.join(root, 'package.json'))); if (pkg.name) return pkg.name; } catch {} return path.basename(root); }
+// 1.9.269 (UR-0022): OS 시스템 언어 감지 — 신규 init(빈 디렉토리, 프로젝트 콘텐츠 없음)에서 OS locale 로 설치 언어 판별.
+//   우선순위: POSIX 환경변수(LC_ALL>LC_CTYPE>LANG>LANGUAGE) > Intl ICU resolvedOptions().locale(Windows 등 LANG 미설정 시) > null.
+//   순수 함수(부작용 0) — env 주입 가능(selftest). 판별 불가 시 null 반환 → 호출부가 en 폴백.
+function _detectSystemLang(env) {
+  env = env || process.env;
+  const raw = String(env.LC_ALL || env.LC_CTYPE || env.LANG || env.LANGUAGE || '').toLowerCase();
+  if (raw && raw !== 'c' && raw !== 'posix') {
+    if (/(^|[^a-z])ko([_\-.]|$)|korean|[_-]kr([_\-.]|$)/.test(raw)) return 'ko';
+    if (/(^|[^a-z])en([_\-.]|$)|english|[_-](us|gb)([_\-.]|$)/.test(raw)) return 'en';
+  }
+  // POSIX env 없거나 미매칭 → Node ICU locale (Windows 는 LANG 보통 미설정 → 여기서 OS 언어 회수)
+  try {
+    const loc = (Intl.DateTimeFormat().resolvedOptions().locale || '').toLowerCase();
+    const primary = loc.split('-')[0];
+    if (primary === 'ko') return 'ko';
+    if (primary === 'en') return 'en';
+  } catch {}
+  return null;
+}
 function detectLanguageValue(root, value = 'auto') {
   const v = String(value || 'auto').toLowerCase();
   if (v === 'ko' || v === 'en') return v;
+  // ① 프로젝트 콘텐츠 한글 우선 — 콘텐츠가 있으면 그 의도를 존중 (기존 동작 보존).
   const candidates = ['README.md', 'docs/guideline.md', '.harness/project-brief.md', '.harness/plan.md'];
   let text = '';
   for (const c of candidates) { const p = path.join(root, c); if (exists(p)) text += read(p).slice(0, 3000); }
-  return /[가-힣]/.test(text) ? 'ko' : 'en';
+  if (/[가-힣]/.test(text)) return 'ko';
+  // 1.9.269 (UR-0022): ② 콘텐츠가 비어있으면(신규/빈 디렉토리 init) OS 시스템 언어로 판별.
+  //   콘텐츠가 있는데 한글이 아니면(영어 프로젝트) en 유지 — 기존 프로젝트 회귀 방지.
+  if (text.trim().length === 0) {
+    const sys = _detectSystemLang();
+    if (sys) return sys;
+  }
+  // ③ en 폴백
+  return 'en';
 }
 function fm(role, readWhen, updateWhen, body) {
   return `---\nleernessRole: ${role}\nreadWhen:\n${readWhen.map(x => '  - ' + x).join('\n')}\nupdateWhen:\n${updateWhen.map(x => '  - ' + x).join('\n')}\ndoNotStore:\n  - 실제 토큰\n  - 비밀번호\n  - 운영 쿠키\n  - 민감한 개인정보 원문\n---\n${MARK}\n${body}`;
@@ -792,6 +820,11 @@ async function resolveInstallOptions(root, opts = {}) {
   let lang = explicitLang ? detectLanguageValue(root, explicitLang) : detectLanguageValue(root, 'auto');
   let skills = explicitSkills ? parseSkillsValue(explicitSkills) : [];
   const shouldAsk = !has('--yes') && !opts.nonInteractive && process.stdin.isTTY && process.stdout.isTTY && !opts.migration;
+  // 1.9.269 (UR-0022): 비대화형 auto 설치(npx leerness init --yes 등)에서 OS 시스템 언어가 적용됐으면 투명성 안내.
+  //   --language 명시 시 미발화 (explicitLang). 대화형은 이후 언어 prompt 가 처리.
+  if (!shouldAsk && !explicitLang) {
+    try { const sysLang = _detectSystemLang(); if (sysLang) log(`🌐 ${_t('install.lang.sysNotice', lang)}: ${sysLang.toUpperCase()} (→ ${lang.toUpperCase()})`); } catch {}
+  }
   // 1.9.34: 인터랙티브 multi-select (방향키 + Space + Enter) — 기존 숫자 선택 폴백 유지
   // --no-interactive-select 또는 LEERNESS_NO_INTERACTIVE=1 → 구식 숫자 선택
   const useInteractive = shouldAsk && !has('--no-interactive-select') && process.env.LEERNESS_NO_INTERACTIVE !== '1';
@@ -1852,7 +1885,8 @@ const STRINGS = {
   // 설치 가이드 prompt
   'install.lang.title': { ko: '설치 언어를 선택하세요', en: 'Select install language' },
   'install.lang.auto':  { ko: '자동 감지', en: 'Auto detect' },
-  'install.lang.auto.desc': { ko: '디렉토리/파일 분석 (한국어/영어 자동 판별)', en: 'Analyze dir/files (auto KO/EN)' },
+  'install.lang.auto.desc': { ko: '디렉토리/파일 + 시스템(OS) 언어 자동 판별 (한국어/영어)', en: 'Auto-detect from dir/files + system (OS) locale (KO/EN)' },
+  'install.lang.sysNotice': { ko: '시스템 언어 감지', en: 'System language detected' },
   'install.lang.ko': { ko: '한국어', en: 'Korean' },
   'install.lang.ko.desc': { ko: '모든 인스트럭션을 한국어로 생성', en: 'All instructions in Korean' },
   'install.lang.en': { ko: 'English', en: 'English' },
@@ -2912,6 +2946,8 @@ function _selfTestCases() {
     { name: '_parseSlashFromHelp: 슬래시 검출 + 플래그 제외 (1.9.267)', run: () => { const r = _parseSlashFromHelp('  /help   show help\n  /model  switch model\n  --version  print version\n', 'slash'); return r.length === 2 && r[0].cmd === '/help' && /show help/.test(r[0].desc) && !r.some(c => /version/.test(c.cmd)); } },
     { name: '_parseSlashFromHelp: subcommand 모드 들여쓰기 파싱 (1.9.267)', run: () => { const r = _parseSlashFromHelp('Commands:\n  suggest    제안\n  explain    설명\n', 'subcommand'); return r.length >= 2 && r.some(c => c.cmd === 'suggest') && r.some(c => c.cmd === 'explain'); } },
     { name: 'EXTERNAL_AGENTS: grok 정식 provider 승격 (1.9.268)', run: () => { const g = EXTERNAL_AGENTS.find(a => a.id === 'grok'); return !!g && g.bin === 'grok' && g.envFlag === 'LEERNESS_ENABLE_GROK' && EXTERNAL_AGENTS.length === 6; } },
+    { name: '_detectSystemLang: POSIX LANG ko_KR/en_US 판별 (1.9.269)', run: () => _detectSystemLang({ LANG: 'ko_KR.UTF-8' }) === 'ko' && _detectSystemLang({ LANG: 'en_US.UTF-8' }) === 'en' },
+    { name: '_detectSystemLang: LC_ALL 우선 + LANGUAGE 폴백 (1.9.269)', run: () => _detectSystemLang({ LC_ALL: 'ko_KR.UTF-8', LANG: 'en_US.UTF-8' }) === 'ko' && _detectSystemLang({ LANGUAGE: 'en_GB' }) === 'en' },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -20736,5 +20772,7 @@ module.exports = {
   _shellFailuresPath, _loadShellFailures, _recordShellFailure, _shellEnvDrift,
   // 1.9.265: CLI 에이전트 슬래시 명령어 레지스트리 (UR-0021 1단계) — 단위 테스트
   AGENT_SLASH_COMMANDS, _agentSlashFile, _loadAgentSlashCommands, _recordAgentSlashCommands, _agentSlashHint, slashCommandsCmd,
-  _parseSlashFromHelp, _probeAgentSlash, _refreshAgentSlashCommands
+  _parseSlashFromHelp, _probeAgentSlash, _refreshAgentSlashCommands,
+  // 1.9.269: 시스템(OS) 언어 감지 (UR-0022) + 언어 판별 — 단위 테스트
+  _detectSystemLang, detectLanguageValue
 };
