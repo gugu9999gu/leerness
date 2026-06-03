@@ -3079,5 +3079,22 @@ total++;
   if (!ok) { failed++; console.log((rRel.stdout || '').slice(0, 300)); }
 }
 
+// 1.9.289 회귀 (Codex #3): _shellQuoteArg — REPL agy/copilot 프롬프트 셸 주입 중립화
+total++;
+{
+  let ok = false;
+  try {
+    const h = require(path.resolve(__dirname, '..', 'bin', 'harness.js'));
+    const q = h._shellQuoteArg('a; rm -rf / && echo $(whoami)');
+    const win = process.platform === 'win32';
+    // 따옴표로 감싸 메타문자가 단일 리터럴 인자가 됨 (POSIX 단일/Windows 이중)
+    const wrapped = win ? (q.startsWith('"') && q.endsWith('"')) : (q.startsWith("'") && q.endsWith("'"));
+    const neutral = win ? !/^[^"]*[;&|][^"]*$/.test(q.slice(1, -1)) || q.includes('"') : true;
+    ok = wrapped && q.includes('rm -rf') && typeof h._shellQuoteArg === 'function';
+  } catch {}
+  console.log(ok ? '✓ B(1.9.289) _shellQuoteArg: 프롬프트 셸 주입 중립화 (agy/copilot args)' : '✗ _shellQuoteArg 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

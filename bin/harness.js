@@ -10,7 +10,7 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 
-const VERSION = '1.9.288';
+const VERSION = '1.9.289';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -152,6 +152,13 @@ function fail(s) { log('✗ ' + s); }
 // 1.9.287 (Codex 리뷰 수렴): 임베딩 텍스트의 코드펜스(```)를 중립화해 외부 마크다운(session-handoff)이 깨지지 않게.
 //   ``` → ''' (펜스가 아닌 표시), 인라인 백틱은 보존. 순수 함수.
 function _sanitizeFences(s) { return String(s || '').replace(/```+/g, "'''"); }
+// 1.9.289 (Codex gpt-5.5 리뷰 #3 수렴): shell:true spawn 의 인자를 셸-안전하게 인용 — 프롬프트 셸 주입/분리 방지.
+//   POSIX(sh): single-quote (bulletproof). Windows(cmd.exe): double-quote + inner " 이스케이프 (공백/&|<>() 안전).
+function _shellQuoteArg(s) {
+  s = String(s == null ? '' : s);
+  if (process.platform === 'win32') return '"' + s.replace(/"/g, '""') + '"';
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
 // 1.9.288 (Codex gpt-5.5 리뷰 #5 수렴): MCP 도구 수 단일 출처 — tools 정의 패턴만 카운트(설명/자기-매칭 오탐 제외).
 //   배지/관리블록/capability 가 모두 이 값을 써서 tools/list 실제 수와 일치.
 function _mcpToolCount() {
@@ -2983,6 +2990,7 @@ function _selfTestCases() {
     { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
     { name: '_sanitizeFences: 코드펜스 중립화 (Codex 수렴 1.9.287)', run: () => { const out = _sanitizeFences('text\n```js\ncode\n```\nmore'); return !/```/.test(out) && /'''/.test(out) && /code/.test(out); } },
     { name: '_mcpToolCount: 실제 도구 정의 수 (자기-매칭 오탐 없음) (Codex #5 1.9.288)', run: () => { const n = _mcpToolCount(); return n >= 75 && n < 200; } },
+    { name: '_shellQuoteArg: 프롬프트 셸 주입 중립화 (Codex #3 1.9.289)', run: () => { const q = _shellQuoteArg('a; rm -rf / && echo x'); if (process.platform === 'win32') return q === '"a; rm -rf / && echo x"' && _shellQuoteArg('a"b') === '"a""b"'; return q === "'a; rm -rf / && echo x'" && _shellQuoteArg("it's") === "'it'\\''s'"; } },
     { name: '_evidenceQuality: 파일+테스트 근거 강제 (Codex 수렴 1.9.287)', run: () => { const good = _evidenceQuality('src/api.js 수정, npm test 12/12 통과 (Exit: 0)'); const weak = _evidenceQuality('테스트 통과함'); const noFile = _evidenceQuality('12 tests passed'); return good.ok === true && good.hasFile && good.hasTest && weak.ok === false && weak.missing.includes('수정 파일 경로') && noFile.ok === false; } },
     { name: '_parseEvidenceStats: review-evidence pass/fail 집계 (1.9.286)', run: () => { const s = _parseEvidenceStats('## 2026-06-03\nCommand: npm test\nExit: 0\n\n## 2026-06-03\nCommand: build\nExit: 1\n\n## 2026-06-03\nverify PASS 통과\n'); return s.entries === 3 && s.pass === 2 && s.fail === 1 && s.rate === 67; } },
     { name: '_reuseDetect: 키워드→OSS 카테고리 + 체크리스트 (1.9.285)', run: () => { const a = _reuseDetect('JWT 인증 구현'); const b = _reuseDetect('날짜 포맷 date'); const c = _reuseDetect('전혀무관한xyzzy'); return a.some(x => x.key === 'auth') && b.some(x => x.key === 'date') && c.length === 0 && REUSE_CHECKLIST.length >= 5 && REUSE_CATEGORIES.length >= 12; } },
@@ -17522,8 +17530,9 @@ async function _cliChatStream(root, provider, promptText, opts) {
     args = ['exec', '--skip-git-repo-check', '-'];  // - = stdin from claude/codex convention
     useStdinForPrompt = true;
   }
-  else if (provider === 'agy')  { cmd = 'agy'; args = ['-p', promptText]; }  // agy -p 는 인자 모드만 지원
-  else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', promptText]; }
+  // 1.9.289 (Codex #3): agy/copilot 은 인자 모드만 지원 → shell:true 조인 시 프롬프트가 분리/주입될 수 있어 _shellQuoteArg 로 안전 인용.
+  else if (provider === 'agy')  { cmd = 'agy'; args = ['-p', _shellQuoteArg(promptText)]; }  // agy -p 는 인자 모드만 지원
+  else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', _shellQuoteArg(promptText)]; }
   else return { ok: false, error: `provider ${provider} 미지원`, provider };
   const t0 = Date.now();
   return new Promise(resolve => {
@@ -21649,5 +21658,7 @@ module.exports = {
   // 1.9.287: evidence 완전성 + 코드펜스 sanitize (Codex 리뷰 수렴) — 단위 테스트
   _evidenceQuality, _sanitizeFences,
   // 1.9.288: MCP 도구 수 단일 출처 (Codex #5) — 단위 테스트
-  _mcpToolCount
+  _mcpToolCount,
+  // 1.9.289: shell-safe 인용 (Codex #3) — 단위 테스트
+  _shellQuoteArg
 };

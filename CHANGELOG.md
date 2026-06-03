@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.289 — 2026-06-03 — UR-0036 (Codex #3): REPL agy/copilot 프롬프트 셸 주입 차단
+
+**🔒 REPL 스트리밍에서 agy/copilot 프롬프트가 `shell:true` 인자로 raw 전달돼 셸 분리/주입되던 보안 갭 수정 (Codex gpt-5.5 #3).**
+
+### 배경
+claude/codex 는 1.9.188 에서 프롬프트를 stdin 으로 전달(셸 escape 우회)하나, agy(`-p`)/copilot(`gh copilot suggest`)은 인자 모드만 지원해 `promptText` 를 args 에 raw 로 넣었음. `cp.spawn(cmd, args, {shell:true})` 는 args 를 따옴표 없이 조인하므로 `agy -p hello; rm -rf` 처럼 프롬프트의 `;`/`&&`/`$(...)`/공백이 셸에 해석됨.
+
+### 구현
+1. **`_shellQuoteArg(s)` 순수 헬퍼** — POSIX(sh): single-quote(bulletproof, 내부 `'`→`'\''`). Windows(cmd.exe): double-quote + 내부 `"`→`""` (공백/`&`/`|`/`<`/`>`/`(`/`)`/`;`/`$()` 모두 리터럴화).
+2. **agy/copilot args 안전 인용** — `['-p', _shellQuoteArg(promptText)]` / `['copilot','suggest',_shellQuoteArg(promptText)]`. 프롬프트가 단일 리터럴 인자로 전달.
+3. selftest 36→37 + e2e 233→234.
+
+### 검증
+- **selftest 37/37 PASS** · **E2E 234/234 PASS** (회귀 0) · `a; rm -rf / && echo $(whoami)` → 단일 인용 리터럴 확인 (POSIX/Windows 분기).
+- 남은 백로그: UR-0037(#4) require 시 top-level side effect 격리.
+
 ## 1.9.288 — 2026-06-03 — Codex gpt-5.5 코드 리뷰 수렴: MCP policy enforce + release dry-run + 도구수 정합
 
 **🔒 Codex(gpt-5.5, xhigh)가 실제 코드 라인 근거로 제시한 5건 중 검증된 high/med 3건 수렴 + 나머지 2건 백로그.**
