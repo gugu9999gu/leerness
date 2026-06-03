@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.293 — 2026-06-04 — idempotency auto-fix + progress-tracker 복제 버그 근본 수정 🐛
+
+**🔁 idempotency 위반(task/요청 중복)을 자동 회복하는 `--auto-fix` 신설 + 중복이 매 세션 누적되던 근본 버그(헤더 유실 시 전체 복제) 수정. 라이브 프로젝트 progress-tracker.md 69행→6행 복구.**
+
+### 배경 (자기 발견 — session-close가 보고한 멱등성 위반 4→11 증가 추적)
+세션마다 멱등성 위반이 증가(4→11)해 원인을 추적한 결과 **근본 버그** 발견: `progressHeader()`가 `|---|` 분리자를 못 찾으면(헤더 유실/손상) **파일 전체 텍스트를 헤더로 반환** → `writeProgressRows()`가 `header + rows` 로 기록하며 **기존 모든 행을 복제**. `taskAdd`/`upsertProgress`가 호출될 때마다 progress-tracker.md 가 배로 부풀며 중복 누적. 실제 라이브 파일은 헤더가 유실된 채 69행(고유 6행)까지 손상돼 있었음.
+
+### 구현
+1. **근본 버그 fix** — `progressHeader()` 가 분리자 부재 시 전체 텍스트 대신 **`_canonicalProgressHeader()` (frontmatter + 표 헤더 + 분리자 재구성)** 반환 → 다음 write 시 헤더 자동 복구, 복제 중단. `coreFiles` 템플릿도 동일 헬퍼로 DRY(단일 출처).
+2. **`leerness idempotency audit --auto-fix`** — (a) 완전 동일 행 제거(순수 중복), (b) active 동일텍스트는 `status=dropped` 로 보존(id/히스토리 유지, 삭제 X), (c) user-requests open 중복 정리. 멱등(2회=no-op) · git 회복 가능.
+3. **`drift check --auto-fix` 통합** — 기존 자동 회복 흐름(1.9.82/225/236 패턴)에 idempotency dedup 추가 → 자동 self-healing.
+4. **라이브 복구** — 손상된 progress-tracker.md 에 auto-fix 적용: 완전중복 63행 제거 + 헤더 재구성 → 69행→6행, 멱등성 위반 0.
+5. selftest 40→41 · e2e 237→238.
+
+### 검증
+- **selftest 41/41 PASS** · **E2E 238/238 PASS** (회귀 0).
+- e2e: 헤더 유실+중복 시뮬레이션 → auto-fix → 헤더 재구성 + 완전중복 3→1 + 재검사 clean 실측.
+- 라이브: `idempotency audit --path . --auto-fix` → "완전중복 63행 제거", 6개 실제 task(T-0001~0006) 보존, 헤더 정상 복원.
+- MCP `leerness_idempotency_audit` 는 read-only 유지(쓰기 경로는 CLI/drift 전용 — 정책 tier 일관성).
+
 ## 1.9.292 — 2026-06-03 — UR-0031: get_project_context — MCP 시맨틱 verb (에이전트 온보딩 1콜 집약)
 
 **🧭 GPT-5.5 "MCP-first 범용 하네스" 전략의 핵심 — 어떤 에이전트든 leerness 내부 명령을 몰라도 단 1콜로 "지금 무엇을 알아야 하는가"를 파악하는 집약 컨텍스트 verb 신설.**

@@ -3154,5 +3154,32 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.293 회귀: idempotency audit --auto-fix + progressHeader 복제버그 fix
+total++;
+{
+  let ok = false;
+  try {
+    const idemDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-idem-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', idemDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const pt = path.join(idemDir, '.harness', 'progress-tracker.md');
+    // (1) 헤더 유실 + 완전중복 + 동일텍스트 중복 시뮬레이션 (과거 손상 패턴)
+    const dupRow = '| T-7001 | in-progress | 중복작업ABC | - | - | 2026-06-04 |';
+    const sameText = '| T-7002 | in-progress | 중복작업ABC | - | - | 2026-06-04 |';
+    fs.writeFileSync(pt, [dupRow, dupRow, dupRow, sameText].join('\n') + '\n', 'utf8');  // 헤더 없음(손상)
+    // (2) auto-fix
+    const r = cp.spawnSync(process.execPath, [CLI, 'idempotency', 'audit', '--path', idemDir, '--auto-fix'], { encoding: 'utf8', timeout: 20000 });
+    const after = fs.readFileSync(pt, 'utf8');
+    const headerRestored = /\|---\|/.test(after) && /leernessRole: progress-tracker/.test(after);  // 헤더 재구성
+    const exactCollapsed = (after.match(/\| T-7001 \|/g) || []).length === 1;  // 완전중복 3→1
+    // (3) 재검사 clean
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'idempotency', 'audit', '--path', idemDir, '--json'], { encoding: 'utf8', timeout: 20000 });
+    const audit = JSON.parse(r2.stdout);
+    const taskDupGone = !audit.violations.some(v => v.kind === 'task-duplicate-request');
+    ok = r.status === 0 && headerRestored && exactCollapsed && taskDupGone;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.293) idempotency --auto-fix: 헤더 재구성 + 완전중복 제거 + dedup clean (복제버그 fix)' : '✗ idempotency auto-fix 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

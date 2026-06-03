@@ -10,7 +10,7 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 
-const VERSION = '1.9.292';
+const VERSION = '1.9.293';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -431,7 +431,7 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
     '.harness/skills-lock.json': skillLock(selectedSkills),
     '.harness/project-brief.md': fm('project-brief', ['프로젝트 목적 확인','신규 기능 판단','계획 수립'], ['프로젝트 목적 변경','사용자/범위 변경'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- 이 프로젝트의 목적을 실제 내용으로 업데이트하세요.\n\n## Users\n-\n\n## Success Criteria\n-\n`),
     '.harness/plan.md': fm('plan', ['작업 시작 전','새 요청 접수','범위 변경','신규 프로젝트 감지'], ['계획 추가/수정/드랍','milestone 변경','목표 변경'], `# Plan\n\n## Goal\n- 사용자 목적을 기준으로 전체 계획을 유지합니다.\n\n## Scope\n- 포함 범위를 기록합니다.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. 프로젝트 계획 정리\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] project-brief.md를 실제 프로젝트 목적에 맞게 작성\n- [ ] context-map.md를 실제 파일 구조에 맞게 작성\n`),
-    '.harness/progress-tracker.md': fm('progress-tracker', ['세션 시작','세션 종료','사용자 요청 상태 확인'], ['작업 상태 변경','검증 결과 추가','사용자 요청 드랍'], `# Progress Tracker\n\nStatus values: requested, planned, in-progress, waiting, on-hold, blocked, incomplete, done, dropped\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n|---|---|---|---|---|---|\n`),
+    '.harness/progress-tracker.md': _canonicalProgressHeader() + '\n',  // 1.9.293: _canonicalProgressHeader 단일 출처 (progressHeader 폴백과 동일)
     '.harness/guideline.md': fm('guideline', ['구현 전 품질 기준 확인','계획 이행 기준 확인'], ['개발 기준 변경','검증 루틴 변경'], `# Guideline\n\n## Operating Principle\n- plan.md의 목표와 범위를 기준으로 작업합니다.\n- progress-tracker.md의 요청 상태를 기준으로 완료/미완료를 판단합니다.\n- guideline.md에는 진행률 수치를 직접 기록하지 않습니다. 진행률은 plan.md/progress-tracker.md가 단일 출처입니다.\n\n## Quality Gate\n- 변경 전 관련 route를 확인합니다 (\`leerness route <task-type>\`).\n- 변경 후 \`leerness verify\`, \`leerness audit\`, \`leerness check\`을 실행합니다.\n- 완료 선언 전 \`leerness lazy detect\`을 실행합니다.\n- 세션 종료 시 \`leerness session close\`를 실행합니다.\n`),
     '.harness/plan-progress-boundary.md': fm('plan-progress-boundary', ['계획과 진행률이 중복될 때','작업 추적 구조 변경'], ['역할 분리 기준 변경'], `# Plan / Progress Boundary\n\n## plan.md\n- 전체 목표, milestone, 포함/제외 범위, 계획 변경 이력.\n\n## progress-tracker.md\n- 사용자 요청 단위의 상태, 증거, 다음 액션.\n- ID 규칙: T-0001부터 단조 증가. plan add 시 부여되는 ID는 plan/progress 양쪽에서 고유합니다.\n\n## guideline.md\n- plan/progress를 수행할 때 지켜야 할 실행 기준.\n`),
     '.harness/current-state.md': fm('current-state', ['세션 시작','작업 이어받기'], ['현재 상태 변경','다음 작업 변경'], `# Current State\n\nUpdated: ${today()}\n\n## Now\n-\n\n## Next\n-\n\n## Blockers\n-\n`),
@@ -2999,6 +2999,7 @@ function _selfTestCases() {
     { name: '_cliBootstrap: CLI 부작용 require.main 가드 격리 (Codex #4 UR-0037 1.9.290)', run: () => { if (typeof _cliBootstrap !== 'function' || typeof _ensureStdoutEncoding !== 'function') return false; const src = read(__filename); const guarded = /if \(require\.main === module\) _cliBootstrap\(\);/.test(src); const inFn = /function _cliBootstrap\(\)\s*\{[\s\S]*?removeAllListeners\('warning'\)[\s\S]*?NODE_OPTIONS[\s\S]*?_ensureStdoutEncoding\(\);[\s\S]*?\n\}/.test(src); const noTopIife = !/\}\)\(\);\s*\n\n\/\/ 1\.9\.184/.test(src); return guarded && inFn && noTopIife; } },
     { name: 'lib/agent-registry: EXTERNAL_AGENTS/AGENT_SLASH_COMMANDS 모듈 단일출처 분리 (UR-0025 1.9.291)', run: () => { const m = require('../lib/agent-registry'); return m.EXTERNAL_AGENTS === EXTERNAL_AGENTS && m.AGENT_SLASH_COMMANDS === AGENT_SLASH_COMMANDS && m.EXTERNAL_AGENTS.length === 10 && Object.keys(m.AGENT_SLASH_COMMANDS).length === 9 && !/const EXTERNAL_AGENTS = \[/.test(read(__filename)); } },
     { name: 'get_project_context: MCP 시맨틱 verb 등록 + CLI context 디스패치 (UR-0031 1.9.292)', run: () => { const src = read(__filename); const mcpDef = /name: 'leerness_get_project_context'/.test(src); const mcpCase = /case 'leerness_get_project_context':[\s\S]*?cliArgs = \['context'/.test(src); const cliDisp = /if \(cmd === 'context'\)\s+return contextCmd/.test(src); return typeof contextCmd === 'function' && mcpDef && mcpCase && cliDisp && _mcpToolCount() >= 80; } },
+    { name: '_canonicalProgressHeader + idempotency auto-fix (근본 복제버그 fix 1.9.293)', run: () => { const h = _canonicalProgressHeader(); const headerOk = /leernessRole: progress-tracker/.test(h) && /\| ID \| Status \| Request \|/.test(h) && /\|---\|/.test(h); const src = read(__filename); const fnOk = typeof _autoFixIdempotency === 'function'; const noWholeTextFallback = /if \(idx < 0\) return _canonicalProgressHeader\(\);/.test(src); const driftWired = /_autoFixIdempotency\(root\)/.test(src) && /idempotency 중복/.test(src); return headerOk && fnOk && noWholeTextFallback && driftWired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -5435,6 +5436,62 @@ function _runIdempotencyAudit(root) {
   };
   return audit;
 }
+// 1.9.293: idempotency audit --auto-fix — task/user-request 중복 자동 회복.
+//   배경: 룰(1.9.212)/wakeup(1.9.205)은 dedup 보유하나 task/user-request 누적 중복은 탐지만 됐음(수동 drop 필요).
+//   안전: (1) 완전 동일 행만 제거(순수 중복), (2) active 동일-텍스트는 status=dropped 로 보존(id/히스토리 유지, 삭제 X),
+//         (3) git-tracked 파일이라 회복 가능, (4) 멱등(2회 실행 = no-op).
+function _autoFixIdempotency(root) {
+  const fixed = [];
+  // 1) progress-tracker.md task 중복
+  try {
+    const pt = path.join(root, '.harness', 'progress-tracker.md');
+    if (exists(pt)) {
+      const header = progressHeader(root);
+      const rows = readProgressRows(root);
+      const seenExact = new Set();
+      const seenActiveText = new Map();
+      const kept = [];
+      let removedExact = 0, droppedSameText = 0;
+      for (const r of rows) {
+        const exactKey = `${r.id}|${r.status}|${r.request}|${r.evidence}|${r.nextAction}|${r.updated}`;
+        if (seenExact.has(exactKey)) { removedExact++; continue; }  // 완전 동일 행 = 순수 중복 → 제거
+        seenExact.add(exactKey);
+        const isActive = !/^(done|dropped|blocked|completed|\[완료\]|\[드랍\]|\[보류\])/i.test(r.status || '');
+        if (isActive && r.request && r.request.length >= 5) {
+          if (seenActiveText.has(r.request)) {
+            r.status = 'dropped';
+            r.nextAction = `(auto-dedup 1.9.293 — ${seenActiveText.get(r.request)} 와 동일)`;
+            droppedSameText++;
+          } else {
+            seenActiveText.set(r.request, r.id);
+          }
+        }
+        kept.push(r);
+      }
+      if (removedExact > 0 || droppedSameText > 0) {
+        writeProgressRows(root, header, kept);
+        fixed.push({ kind: 'task-duplicate-request', action: 'deduped', removedExact, droppedSameText });
+      }
+    }
+  } catch (e) { fixed.push({ kind: 'task-duplicate-request', action: 'error', detail: String(e.message || e) }); }
+  // 2) user-requests.json open 중복 — 동일 텍스트 중 최초만 open 유지, 나머지 dropped(보존)
+  try {
+    const ur = _loadUserRequests(root);
+    const seen = new Map();
+    let droppedReq = 0;
+    for (const r of ur.requests) {
+      if (r.status !== 'open' && r.status !== 'in-progress') continue;
+      const k = (r.text || '').trim();
+      if (seen.has(k)) { r.status = 'dropped'; r.droppedReason = `auto-dedup-1.9.293 (== ${seen.get(k)})`; droppedReq++; }
+      else seen.set(k, r.id);
+    }
+    if (droppedReq > 0) {
+      _writeUserRequests(root, ur.requests);
+      fixed.push({ kind: 'user-request-duplicate', action: 'dropped', count: droppedReq });
+    }
+  } catch (e) { fixed.push({ kind: 'user-request-duplicate', action: 'error', detail: String(e.message || e) }); }
+  return fixed;
+}
 function idempotencyCmd(root, sub) {
   root = absRoot(root);
   const isTty = process.stdout && process.stdout.isTTY;
@@ -5447,15 +5504,21 @@ function idempotencyCmd(root, sub) {
   if (!sub || sub === 'help' || sub === '--help') {
     log(`# leerness idempotency (1.9.212) — 멱등성 위반 탐지`);
     log('');
-    log(`  audit     → 워크스페이스 멱등성 점검 (rules / tasks / user-requests / wakeups)  (--json 가능)`);
+    log(`  audit               → 워크스페이스 멱등성 점검 (rules / tasks / user-requests / wakeups)  (--json 가능)`);
+    log(`  audit --auto-fix    → task 완전중복 행 제거 + active 동일텍스트 dropped 처리 + user-request open 중복 정리 (1.9.293)`);
     log('');
     log(dim(`  dedup 적용 영역: ruleAdd / taskAdd (1.9.212) + _recordUserRequest (1.9.207) + _recordWakeup (1.9.205)`));
+    log(dim(`  --auto-fix 안전: 완전 동일 행만 제거 / 동일텍스트는 status=dropped 로 보존(id 유지) / git 회복 가능 / 멱등`));
+    log(dim(`  자동화: drift check --auto-fix 가 idempotency 중복도 자동 정리 (1.9.293)`));
     log(dim(`  opt-out: --force 플래그로 dedup 우회 가능`));
     return;
   }
 
   if (sub === 'audit') {
-    const audit = _runIdempotencyAudit(root);
+    const autoFix = has('--auto-fix');
+    const fixes = autoFix ? _autoFixIdempotency(root) : [];
+    const audit = _runIdempotencyAudit(root);  // auto-fix 후 상태 반영
+    if (autoFix) audit.autoFixed = fixes;
     if (has('--json')) { log(JSON.stringify(audit, null, 2)); return; }
     log(cyan(`# leerness idempotency audit (1.9.212)`));
     log(`  audited at: ${audit.auditedAt}`);
@@ -5481,6 +5544,19 @@ function idempotencyCmd(root, sub) {
         log(`     ${v.detail}`);
         if (v.fix) log(dim(`     fix: ${v.fix}`));
       });
+    }
+    if (autoFix) {
+      log('');
+      if (fixes.length) {
+        log(grn(`## 🔧 auto-fix 적용 (${fixes.length})`));
+        fixes.forEach(f => {
+          if (f.kind === 'task-duplicate-request') log(`  - [tasks] 완전중복 ${f.removedExact || 0}행 제거 · 동일텍스트 ${f.droppedSameText || 0}건 dropped 처리`);
+          else if (f.kind === 'user-request-duplicate') log(`  - [user-requests] open 중복 ${f.count || 0}건 dropped 처리`);
+          else log(dim(`  - [${f.kind}] ${f.action}${f.detail ? ' — ' + f.detail : ''}`));
+        });
+      } else {
+        log(dim('  🔧 auto-fix: 적용할 중복 없음 (이미 정합)'));
+      }
     }
     return;
   }
@@ -5980,10 +6056,17 @@ function readProgressRows(root) {
   }
   return rows;
 }
+// 1.9.293: progress-tracker 정식 헤더 (frontmatter + 표 헤더 + 분리자). coreFiles 와 단일 출처.
+function _canonicalProgressHeader() {
+  return fm('progress-tracker', ['세션 시작', '세션 종료', '사용자 요청 상태 확인'], ['작업 상태 변경', '검증 결과 추가', '사용자 요청 드랍'],
+    `# Progress Tracker\n\nStatus values: requested, planned, in-progress, waiting, on-hold, blocked, incomplete, done, dropped\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n|---|---|---|---|---|---|\n`).trimEnd();
+}
 function progressHeader(root) {
   const text = exists(progressPath(root)) ? read(progressPath(root)) : '';
   const idx = text.indexOf('|---|');
-  if (idx < 0) return text.trim();
+  // 1.9.293 (근본 버그 fix): 분리자 없음(손상/헤더유실) 시 전체 텍스트 반환은 writeProgressRows 가 행을 복제 →
+  //   세션마다 중복 누적의 원인이었음. 정식 헤더를 재구성해 반환 → 다음 write 시 자동 복구.
+  if (idx < 0) return _canonicalProgressHeader();
   return text.slice(0, text.indexOf('\n', idx)).trimEnd();
 }
 function writeProgressRows(root, header, rows) {
@@ -15491,6 +15574,20 @@ function driftCheckCmd(root, opts = {}) {
       }
     } catch (e) {
       log(`⚠ delivered auto-apply 오류 (1.9.225): ${e.message}`);
+    }
+  }
+  // 1.9.293: drift check --auto-fix 에 idempotency task/user-request 중복 자동 정리 통합
+  //   누적 중복 task/요청이 idempotency 위반(medium)을 가중 → drift/handoff 노이즈. 안전: 완전중복 행 제거 + 동일텍스트 dropped 보존(id 유지).
+  if (autoFix) {
+    try {
+      const idemFixes = _autoFixIdempotency(root);
+      const totalFixed = idemFixes.reduce((n, f) => n + (f.removedExact || 0) + (f.droppedSameText || 0) + (f.count || 0), 0);
+      if (totalFixed > 0) {
+        log('');
+        log(`🔁 --auto-fix 활성 (1.9.293) — idempotency 중복 ${totalFixed}건 자동 정리 (task/user-request dedup)`);
+      }
+    } catch (e) {
+      log(`⚠ idempotency auto-fix 오류 (1.9.293): ${e.message}`);
     }
   }
   // 1.9.236: drift check --auto-fix 에 release cleanup 통합 (1.9.235 회수)
