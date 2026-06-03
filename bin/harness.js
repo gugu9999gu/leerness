@@ -9,7 +9,7 @@ const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp } = require('../lib/pure-utils');
 
-const VERSION = '1.9.278';
+const VERSION = '1.9.279';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -16570,7 +16570,13 @@ function mcpServeCmd(root) {
     { name: 'leerness_selftest', description: '1.9.258/259 — 설치된 leerness 바이너리의 코어 함수(보안 _isSecretKey / 버전 compareVer / 인코딩 _classifyCJK 등) 무결성 자가 검증. 응답: { version, total, pass, fail, ok, results[] }. 외부 AI/CI 가 "이 leerness 설치가 정상인가?(npx 캐시 손상·부분 설치 감지)" 를 1초 내 확인. 인자: 없음.', inputSchema: { type: 'object', properties: {} } },
     { name: 'leerness_shell_guard', description: '1.9.260/261 (사용자 명시 UR-0020) — 터미널 명령 셸 호환성 린터. 외부 AI 가 명령을 실행하기 전에 셸 호환성 문제를 사전 점검. 예: Windows PowerShell 5.1 은 && / || 미지원 → A; if ($?) { B } 제안. 6 규칙(ps5-chain/ps-devnull/ps-inline-env/ps-rm-rf/cmd-semicolon/ps-version-unknown) + 과거 실패 회수(.harness/shell-failures.json). 응답: { shell, psVersion, issues[{rule,severity,detail,suggestion}], pastSame, pastSimilar, ok }. 인자: { command (required), path? }. 현재 셸/PS 버전 자동 감지.', inputSchema: { type: 'object', properties: { command: { type: 'string' }, path: { type: 'string' } }, required: ['command'] } },
     { name: 'leerness_slash_commands', description: '1.9.265/266 (사용자 명시 UR-0021) — CLI AI 에이전트별 슬래시 명령어 레지스트리. 외부 AI(메인)가 sub-agent(codex/agy/claude/grok/copilot)를 호출할 때 각 에이전트에 알맞는 슬래시 명령을 참조. 빌트인 + 사용자 .harness/agent-slash-commands.json override 병합. 응답: { agents: { <id>: { label, asOf, invoke(slash|subcommand), note, source, count, commands[{cmd,desc}] } } }. 인자: { path?, agent? (생략 시 전체), refresh? (1.9.267 — 설치된 CLI --help probe 자동 갱신), dryRun? }. agent 지정 시 단일.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, agent: { type: 'string' }, refresh: { type: 'boolean' }, dryRun: { type: 'boolean' } } } },
-    { name: 'leerness_roles', description: '1.9.270 (사용자 명시) — 모델별 역할 부여. 여러 AI 에이전트 활성 시 역할(commander/reviewer/coder/architect/designer/debugger/dispatcher)을 provider+model 에 매핑하고, agents dispatch --role 로 라우팅. sub=suggest 면 활성 에이전트 기반 최적 배치 + 근거 반환(방향성 판단). sub=set 시 role/provider/model 필요. 응답: list/suggest/verify 별 JSON. 인자: { path?, sub(list|set|unset|catalog|suggest|verify), role?, provider?, model?, apply? }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string' }, role: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, apply: { type: 'boolean' } } } }
+    { name: 'leerness_roles', description: '1.9.270 (사용자 명시) — 모델별 역할 부여. 여러 AI 에이전트 활성 시 역할(commander/reviewer/coder/architect/designer/debugger/dispatcher)을 provider+model 에 매핑하고, agents dispatch --role 로 라우팅. sub=suggest 면 활성 에이전트 기반 최적 배치 + 근거 반환(방향성 판단). sub=set 시 role/provider/model 필요. 응답: list/suggest/verify 별 JSON. 인자: { path?, sub(list|set|unset|catalog|suggest|verify), role?, provider?, model?, apply? }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string' }, role: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, apply: { type: 'boolean' } } } },
+    // 1.9.279 (UR-0031, GPT-5.5 범용 하네스): 상태 substrate(.leerness/, 1.9.278)를 MCP 시맨틱 verb 로 노출 — 모든 에이전트 공통 호출 표면.
+    { name: 'leerness_state_show', description: '1.9.279 (UR-0031) — get_project_context / get_current_task. .leerness/ 구조화 상태(현재 run + 누적)를 회수. 외부 에이전트가 작업 시작 전 "지금 무슨 작업이 진행 중인가 / 무엇을 읽고 무엇이 변경됐나"를 JSON 으로 파악. 응답: { state, currentRun }. 인자: { path? }.', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_state_start', description: '1.9.279 (UR-0031) — start_task. 새 작업 run 시작 (.leerness/runs/run-NNNN.json 생성). 인자: { path?, goal (required), agent?, model?, task? }. 응답: { started, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, goal: { type: 'string' }, agent: { type: 'string' }, model: { type: 'string' }, task: { type: 'string' } }, required: ['goal'] } },
+    { name: 'leerness_state_record', description: '1.9.279 (UR-0031) — record_file_change / record_decision. 진행 중 run 에 변경 파일/명령/테스트/결정을 누적. 인자: { path?, filesChanged? (콤마), filesRead?, commands?, tests?, errors?, decision? }. 응답: { recorded, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, filesChanged: { type: 'string' }, filesRead: { type: 'string' }, commands: { type: 'string' }, tests: { type: 'string' }, errors: { type: 'string' }, decision: { type: 'string' } } } },
+    { name: 'leerness_state_verify', description: '1.9.279 (UR-0031) — request_verification / verify_done. 현재 run 의 검증 결과 기록. 인자: { path?, result (required: "pass"|"fail"), note? }. 응답: { verified, result, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, result: { type: 'string', enum: ['pass', 'fail'] }, note: { type: 'string' } }, required: ['result'] } },
+    { name: 'leerness_state_handoff', description: '1.9.279 (UR-0031) — create_handoff / make_handoff. 현재 run 을 마감하고 다음 에이전트용 .leerness/handoff/latest.{md,json} 작성 (Claude→Goose→Codex 인수인계 표준). 인자: { path?, summary (required) }. 응답: { handoff, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, summary: { type: 'string' } }, required: ['summary'] } }
   ];
 
   function send(obj) {
@@ -16793,6 +16799,32 @@ function mcpServeCmd(root) {
             if (args.provider) cliArgs.push('--provider', String(args.provider));
             if (args.model) cliArgs.push('--model', String(args.model));
             if (args.apply === true) cliArgs.push('--apply');
+            break;
+          // 1.9.279 (UR-0031): 상태 substrate MCP 시맨틱 verb
+          case 'leerness_state_show':
+            cliArgs = ['state', 'show', '--path', targetPath, '--json'];
+            break;
+          case 'leerness_state_start':
+            cliArgs = ['state', 'start', String(args.goal || ''), '--path', targetPath, '--json'];
+            if (args.agent) cliArgs.push('--agent', String(args.agent));
+            if (args.model) cliArgs.push('--model', String(args.model));
+            if (args.task) cliArgs.push('--task', String(args.task));
+            break;
+          case 'leerness_state_record':
+            cliArgs = ['state', 'record', '--path', targetPath, '--json'];
+            if (args.filesChanged) cliArgs.push('--files-changed', String(args.filesChanged));
+            if (args.filesRead) cliArgs.push('--files-read', String(args.filesRead));
+            if (args.commands) cliArgs.push('--commands', String(args.commands));
+            if (args.tests) cliArgs.push('--tests', String(args.tests));
+            if (args.errors) cliArgs.push('--errors', String(args.errors));
+            if (args.decision) cliArgs.push('--decision', String(args.decision));
+            break;
+          case 'leerness_state_verify':
+            cliArgs = ['state', 'verify', '--result', String(args.result || ''), '--path', targetPath, '--json'];
+            if (args.note) cliArgs.push('--note', String(args.note));
+            break;
+          case 'leerness_state_handoff':
+            cliArgs = ['state', 'handoff', String(args.summary || ''), '--path', targetPath, '--json'];
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });

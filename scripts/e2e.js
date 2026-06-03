@@ -2875,5 +2875,27 @@ total++;
   if (!ok) { failed++; console.log((rShow.stdout || '').slice(0, 300)); }
 }
 
+// 1.9.279 회귀 (UR-0031): 상태 substrate MCP 시맨틱 verb (state_start → state_show 라운드트립)
+total++;
+{
+  const mDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcpstate-'));
+  const mcpCall = (req) => {
+    const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 10000, input: JSON.stringify(req) + '\n' });
+    try { const line = r.stdout.split('\n').filter(Boolean)[0]; const j = JSON.parse(line); return JSON.parse(j.result.content[0].text); } catch { return null; }
+  };
+  // tools/list 에 5개 state verb 노출
+  const rList = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 10000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n' });
+  let verbsOk = false;
+  try { const tools = JSON.parse(rList.stdout.split('\n').filter(Boolean)[0]).result.tools.map(t => t.name); verbsOk = ['leerness_state_show', 'leerness_state_start', 'leerness_state_record', 'leerness_state_verify', 'leerness_state_handoff'].every(n => tools.includes(n)); } catch {}
+  const started = mcpCall({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'leerness_state_start', arguments: { path: mDir, goal: 'MCP verb 테스트', agent: 'claude', model: 'claude-opus-4-7' } } });
+  mcpCall({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'leerness_state_record', arguments: { path: mDir, filesChanged: 'a.js,b.js', tests: '3 passed' } } });
+  const shown = mcpCall({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'leerness_state_show', arguments: { path: mDir } } });
+  const startOk = started && started.started === 'run-0001' && started.run && started.run.agent_name === 'claude';
+  const showOk = shown && shown.currentRun && shown.currentRun.run_id === 'run-0001' && shown.currentRun.files_changed.length === 2;
+  const ok = verbsOk && startOk && showOk;
+  console.log(ok ? '✓ B(1.9.279) MCP 상태 verb: tools/list 5종 + state_start→record→show 라운드트립' : `✗ MCP state verb 실패 (verbs=${verbsOk} start=${startOk} show=${showOk})`);
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.279 — 2026-06-03 — UR-0031: 상태 substrate MCP 시맨틱 verb 노출 (모든 에이전트 공통 호출 표면)
+
+**🔌 1.9.278 의 `.leerness/` 상태 substrate 를 MCP 도구 5종으로 노출 — Claude Code/Goose/Codex/Cursor 가 동일한 verb 로 작업 상태를 읽고 쓴다 (GPT-5.5 범용 하네스 핵심).**
+
+### 배경
+GPT-5.5: "지금처럼 '이 파일 읽어'가 아니라 leerness 가 MCP 서버로 동작해 에이전트가 직접 호출(get_context/record_decision/verify_done/make_handoff)할 수 있어야 범용성을 얻는다." 1.9.278 substrate 가 CLI 만 있었던 것을 MCP 표면으로 승격.
+
+### 구현 (MCP 75 → 80 도구)
+1. **`leerness_state_show`** — get_project_context / get_current_task (현재 run + 누적 상태 JSON).
+2. **`leerness_state_start`** — start_task (goal/agent/model/task → run-NNNN 생성).
+3. **`leerness_state_record`** — record_file_change / record_decision (filesChanged/commands/tests/decision 누적).
+4. **`leerness_state_verify`** — request_verification / verify_done (result pass|fail).
+5. **`leerness_state_handoff`** — create_handoff (summary → `.leerness/handoff/latest.{md,json}`).
+- 각 MCP 도구는 `state` CLI 로 매핑(서버는 CLI shell-out 패턴 유지) → 단일 출처.
+
+### 검증
+- **selftest 28/28 PASS** · **E2E 226/226 PASS** (회귀 0).
+- MCP JSON-RPC 라운드트립 실측: `tools/list` 5 verb 노출 + `state_start→record→show` (서버 재spawn 간 `.leerness/` 지속) 인수인계 확인.
+
+### 다음 단계
+- UR-0033: `leerness adapter <tool>` (도구별 .mcp.json/지침 선택 생성) · UR-0034: 권한 등급 enforced.
+
 ## 1.9.278 — 2026-06-03 — UR-0032: .leerness/ JSON 상태 스키마 (범용 하네스 substrate 1단계)
 
 **🧱 GPT-5.5 가 최우선으로 꼽은 "상태 스키마" — 에이전트 간 구조화 인수인계 substrate. 마크다운(.harness)과 병행, 비파괴.**
