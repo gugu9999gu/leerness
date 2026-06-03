@@ -2942,5 +2942,19 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.282 회귀 (UR-0035): AGENTS.md 정적 vs 동적(leerness) 역할 경계 포지셔닝
+total++;
+{
+  const gDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pos-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', gDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000 });
+  let ok = false;
+  try {
+    const a = fs.readFileSync(path.join(gDir, 'AGENTS.md'), 'utf8');
+    ok = /정적 vs 동적/.test(a) && /leerness state/.test(a) && /\.leerness\//.test(a) && /대체하지 않고/.test(a);
+  } catch {}
+  console.log(ok ? '✓ B(1.9.282) AGENTS.md: 정적(지침) vs 동적(leerness 상태) 역할 경계 포지셔닝' : `✗ AGENTS.md 포지셔닝 실패`);
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

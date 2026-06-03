@@ -3,7 +3,7 @@
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 > **A CLI harness that stops AI coding agents from faking completion, duplicating work, forgetting context, and colliding.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.281-green)]() [![tests](https://img.shields.io/badge/e2e-228%2F228-success)]() [![selftest](https://img.shields.io/badge/selftest-24%2F24-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-80-brightgreen)]() [![providers](https://img.shields.io/badge/AI_providers-10-brightgreen)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.282-green)]() [![tests](https://img.shields.io/badge/e2e-229%2F229-success)]() [![selftest](https://img.shields.io/badge/selftest-24%2F24-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-80-brightgreen)]() [![providers](https://img.shields.io/badge/AI_providers-10-brightgreen)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -106,6 +106,17 @@ leerness drift check .
   → 🔴 critical (110/200) — session close 11일 누락
   → 권장: leerness session close .   (1회 실행으로 🟠 attention 회복)
 ```
+
+### AGENTS.md(정적) vs leerness(동적) — 보완 관계
+
+leerness는 [AGENTS.md](https://agents.md)를 **대체하지 않고 보완**합니다.
+
+| 정적 — AGENTS.md | 동적 — leerness |
+|---|---|
+| 코딩 규칙·테스트 명령·금지·배포 절차 (자주 안 변함) | 현재 목표·수정 파일·실패 시도·검증 결과·다음 인수인계 (매 작업 변함) |
+| 사람이 작성 | `leerness state`/MCP `leerness_state_*` 가 `.leerness/` 에 기록 |
+
+→ 규칙은 AGENTS.md, **작업 상태/기억/검증/인수인계는 leerness** (모든 에이전트 공통 운영 레이어).
 
 ---
 
@@ -303,6 +314,17 @@ leerness drift check .
   → recommended: leerness session close .   (one run recovers to 🟠 attention)
 ```
 
+### AGENTS.md (static) vs leerness (dynamic) — complementary
+
+leerness **complements, not replaces** [AGENTS.md](https://agents.md).
+
+| Static — AGENTS.md | Dynamic — leerness |
+|---|---|
+| coding rules, test commands, prohibitions, deploy steps (rarely change) | current goal, files changed, failed attempts, verification, next handoff (change every task) |
+| written by humans | recorded to `.leerness/` via `leerness state` / MCP `leerness_state_*` |
+
+→ Rules live in AGENTS.md; **work state/memory/verification/handoff live in leerness** (the shared operating layer for any agent).
+
 ---
 
 ## 📊 Measured impact
@@ -449,7 +471,7 @@ MIT — © leerness contributors
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.9.281 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.9.282 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### Core Commands
 
@@ -491,7 +513,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.9.281는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **42개 도구**를 노출:
+Leerness v1.9.282는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **42개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -512,7 +534,7 @@ Leerness v1.9.281는 stdio JSON-RPC MCP server를 내장합니다 — Claude Cod
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **70 라운드 (1.9.40 → 1.9.281)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
+현재 누적: **70 라운드 (1.9.40 → 1.9.282)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
 
 ### 성능 가이드 (1.9.140 측정)
 
@@ -550,6 +572,6 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.9.281: 2026-06-03
+Last synced by Leerness v1.9.282: 2026-06-03
 <!-- leerness:project-readme:end -->
 

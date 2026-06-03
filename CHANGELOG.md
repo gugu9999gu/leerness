@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.282 — 2026-06-03 — UR-0035: AGENTS.md(정적) vs leerness(동적) 포지셔닝 — 범용 하네스 전략 완성
+
+**🧭 GPT-5.5 마지막 전략 항목 — leerness 는 AGENTS.md 를 대체하지 않고 보완. 정적 지침 vs 동적 상태 역할 경계 명시.**
+
+### 배경
+GPT-5.5: "AGENTS.md = 정적 프로젝트 지침, leerness = 동적 작업 상태/기억/검증/인수인계. 이 구분이 명확해야 한다 — 대체가 아니라 보완." 전략 백로그(UR-0030~0035)의 마지막.
+
+### 구현
+1. **AGENTS.md 템플릿에 "정적 vs 동적 — leerness 역할 경계" 섹션** — 모든 init/adapter 생성 AGENTS.md 상단(워크플로 직후)에 포함: 규칙/명령/금지는 AGENTS.md, 진행 상태/검증/인수인계는 `leerness state`/MCP `leerness_state_*` → `.leerness/`. "대체하지 않고 보완" 명시.
+2. **README 포지셔닝 섹션(한/영)** — 정적 vs 동적 비교표 + "모든 에이전트 공통 운영 레이어".
+3. selftest 30→31 + e2e 228→229.
+
+### 검증
+- **selftest 31/31 PASS** · **E2E 229/229 PASS** (회귀 0) · init AGENTS.md 경계 섹션 포함 실측.
+
+### 🎉 범용 하네스 전략 백로그(UR-0030~0035) 완전 소진
+GPT-5.5 "모든 AI 에이전트에 적용되는 범용 하네스" 방향 6항목 전부 구현:
+- UR-0030 운영 레이어 정체성 · UR-0031 MCP verb · UR-0032 상태 스키마 · UR-0033 어댑터 · UR-0034 권한 등급 · **UR-0035 포지셔닝**.
+- GPT 로드맵 5단계(최소 하네스/어댑터/MCP 서버/검증/권한) 충족.
+
 ## 1.9.281 — 2026-06-03 — UR-0034: 권한 등급(permission tiers) — opt-in enforced
 
 **🛡️ GPT-5.5 "안전성 핵심" — capabilities(1.9.272 공개)를 8단계 enforced 등급으로 확장. 기본 OFF(advisory)라 기존 동작 불변.**
