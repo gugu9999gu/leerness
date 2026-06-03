@@ -10,7 +10,7 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 
-const VERSION = '1.9.287';
+const VERSION = '1.9.288';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -152,6 +152,11 @@ function fail(s) { log('✗ ' + s); }
 // 1.9.287 (Codex 리뷰 수렴): 임베딩 텍스트의 코드펜스(```)를 중립화해 외부 마크다운(session-handoff)이 깨지지 않게.
 //   ``` → ''' (펜스가 아닌 표시), 인라인 백틱은 보존. 순수 함수.
 function _sanitizeFences(s) { return String(s || '').replace(/```+/g, "'''"); }
+// 1.9.288 (Codex gpt-5.5 리뷰 #5 수렴): MCP 도구 수 단일 출처 — tools 정의 패턴만 카운트(설명/자기-매칭 오탐 제외).
+//   배지/관리블록/capability 가 모두 이 값을 써서 tools/list 실제 수와 일치.
+function _mcpToolCount() {
+  try { return (read(__filename).match(/\{ name: 'leerness_[a-z_]+', description:/g) || []).length; } catch { return 0; }
+}
 function absRoot(p) { return path.resolve(p || process.cwd()); }
 function exists(p) { return fs.existsSync(p); }
 function read(p) {
@@ -317,7 +322,7 @@ function managedReadmeBlock(project) {
     '',
     '### MCP server (외부 AI 통합)',
     '',
-    `Leerness v${VERSION}는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **42개 도구**를 노출:`,
+    `Leerness v${VERSION}는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **${_mcpToolCount()}개 도구**를 노출:`,
     '',
     '```jsonc',
     '// 카테고리별',
@@ -330,7 +335,7 @@ function managedReadmeBlock(project) {
     '// • Workflow: session_close / agents_list / task_export / env_check / usage_stats / reuse_map / whats_new',
     '',
     '// MCP server 실행: leerness mcp serve',
-    '// tools/list 응답: 42 도구',
+    `// tools/list 응답: ${_mcpToolCount()} 도구`,
     '```',
     '',
     '### Autonomous mode (자율 모드)',
@@ -812,6 +817,11 @@ function syncReadme(root) {
     try {
       const stCount = _selfTestCases().length;
       if (stCount > 0) updated = updated.replace(/badge\/selftest-\d+(?:%2F\d+)?/g, `badge/selftest-${stCount}`);
+    } catch {}
+    // 1.9.288 (Codex #5): MCP 도구 배지 자동 동기화 — tools/list 실제 수와 일치 (badge 80↔실제 79 불일치 해소).
+    try {
+      const mcpN = _mcpToolCount();
+      if (mcpN > 0) updated = updated.replace(/badge\/MCP--tools-\d+/g, `badge/MCP--tools-${mcpN}`);
     } catch {}
   } catch {}
   if (updated !== existing) writeUtf8(p, updated);
@@ -2972,6 +2982,7 @@ function _selfTestCases() {
     { name: 'CAPABILITY_SURFACE: 6 영역 + risk/optOut + 주의명령 (1.9.272)', run: () => { const ks = Object.keys(CAPABILITY_SURFACE); return ks.length === 6 && ks.includes('automationBridges') && Object.values(CAPABILITY_SURFACE).every(v => ['low','medium','high'].includes(v.risk) && v.optOut && v.desc) && POWERFUL_COMMANDS.length >= 5; } },
     { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
     { name: '_sanitizeFences: 코드펜스 중립화 (Codex 수렴 1.9.287)', run: () => { const out = _sanitizeFences('text\n```js\ncode\n```\nmore'); return !/```/.test(out) && /'''/.test(out) && /code/.test(out); } },
+    { name: '_mcpToolCount: 실제 도구 정의 수 (자기-매칭 오탐 없음) (Codex #5 1.9.288)', run: () => { const n = _mcpToolCount(); return n >= 75 && n < 200; } },
     { name: '_evidenceQuality: 파일+테스트 근거 강제 (Codex 수렴 1.9.287)', run: () => { const good = _evidenceQuality('src/api.js 수정, npm test 12/12 통과 (Exit: 0)'); const weak = _evidenceQuality('테스트 통과함'); const noFile = _evidenceQuality('12 tests passed'); return good.ok === true && good.hasFile && good.hasTest && weak.ok === false && weak.missing.includes('수정 파일 경로') && noFile.ok === false; } },
     { name: '_parseEvidenceStats: review-evidence pass/fail 집계 (1.9.286)', run: () => { const s = _parseEvidenceStats('## 2026-06-03\nCommand: npm test\nExit: 0\n\n## 2026-06-03\nCommand: build\nExit: 1\n\n## 2026-06-03\nverify PASS 통과\n'); return s.entries === 3 && s.pass === 2 && s.fail === 1 && s.rate === 67; } },
     { name: '_reuseDetect: 키워드→OSS 카테고리 + 체크리스트 (1.9.285)', run: () => { const a = _reuseDetect('JWT 인증 구현'); const b = _reuseDetect('날짜 포맷 date'); const c = _reuseDetect('전혀무관한xyzzy'); return a.some(x => x.key === 'auth') && b.some(x => x.key === 'date') && c.length === 0 && REUSE_CHECKLIST.length >= 5 && REUSE_CATEGORIES.length >= 12; } },
@@ -14562,20 +14573,31 @@ function releasePublish(root) {
   if (remote) log(`Git remote (origin): ${remote.host === 'github' ? `${remote.owner}/${remote.repo}` : remote.url}`);
   else log('Git remote: 없음');
 
+  // 1.9.288 (Codex gpt-5.5 리뷰 #2 수렴): dry-run 은 모든 외부 side effect 를 계획 출력으로만 + 각 단계 status 실패 시 non-zero.
+  let pubFail = false;
   // 2. npm pack (필요한 경우 — pack-only도 의미 있음)
   if (has('--pack') || has('--npm-publish') || (!has('--git-push') && !has('--gh-release') && !has('--gh-pages'))) {
-    const packR = cp.spawnSync('npm', ['pack'], { cwd: root, encoding: 'utf8', shell: true });
-    if (packR.status !== 0) { fail('npm pack 실패'); log(packR.stderr); process.exitCode = 1; return; }
-    ok('npm pack 완료');
+    if (dryRun) { log('(dry-run) npm pack 생략 (실행 안 함)'); }
+    else {
+      const packR = cp.spawnSync('npm', ['pack'], { cwd: root, encoding: 'utf8', shell: true });
+      if (packR.status !== 0) { fail('npm pack 실패'); log(packR.stderr); process.exitCode = 1; return; }
+      ok('npm pack 완료');
+    }
   }
 
   // 3. git push (--git-push 또는 --auto + remote 있을 때)
   if (has('--git-push') || (has('--auto') && remote)) {
-    log('git push:');
-    const r1 = cp.spawnSync('git', ['push'], { cwd: root, encoding: 'utf8', shell: true });
-    log((r1.stdout || r1.stderr || '').slice(-200) || '(no output)');
-    const r2 = cp.spawnSync('git', ['push', '--tags'], { cwd: root, encoding: 'utf8', shell: true });
-    log((r2.stdout || r2.stderr || '').slice(-200) || '(no output)');
+    if (dryRun) {
+      log('(dry-run) git push / git push --tags 생략 (실행 안 함)');
+    } else {
+      log('git push:');
+      const r1 = cp.spawnSync('git', ['push'], { cwd: root, encoding: 'utf8', shell: true });
+      log((r1.stdout || r1.stderr || '').slice(-200) || '(no output)');
+      if (r1.status !== 0) { fail('git push 실패'); pubFail = true; }
+      const r2 = cp.spawnSync('git', ['push', '--tags'], { cwd: root, encoding: 'utf8', shell: true });
+      log((r2.stdout || r2.stderr || '').slice(-200) || '(no output)');
+      if (r2.status !== 0) { fail('git push --tags 실패'); pubFail = true; }
+    }
   }
 
   // 4. GitHub Release (--gh-release, gh CLI 사용)
@@ -14584,6 +14606,7 @@ function releasePublish(root) {
     else {
       const v = getCurrentVersion(root);
       if (!v) { warn('--gh-release: package.json#version 없음 — 스킵'); }
+      else if (dryRun) { log(`(dry-run) gh release create v${v} 생략 (실행 안 함)`); }
       else {
         const tag = `v${v}`;
         const ghArgs = ['release', 'create', tag, '--generate-notes', '--title', `${remote.repo} ${tag}`];
@@ -14600,8 +14623,11 @@ function releasePublish(root) {
 
   // 5. gh-pages 배포 (--gh-pages)
   if (has('--gh-pages')) {
-    const src = arg('--gh-pages-src', null) || arg('--roadmap', null) || 'roadmap.html';
-    deployGhPages(root, src);
+    if (dryRun) { log('(dry-run) gh-pages 배포 생략 (실행 안 함)'); }
+    else {
+      const src = arg('--gh-pages-src', null) || arg('--roadmap', null) || 'roadmap.html';
+      deployGhPages(root, src);
+    }
   }
 
   // 6. npm publish (--npm-publish)
@@ -14614,7 +14640,9 @@ function releasePublish(root) {
     log((r.stdout || '').split('\n').slice(-5).join('\n'));
     if (r.status !== 0) { fail('npm publish 실패'); process.exitCode = 1; return; }
   }
-  ok('release publish 완료');
+  // 1.9.288 (Codex #2): 단계 실패가 있으면 완료를 성공으로 출력하지 않고 non-zero 종료.
+  if (pubFail) { fail('release publish: 일부 단계 실패 (위 로그 확인)'); process.exitCode = 1; return; }
+  ok(`release publish 완료${dryRun ? ' (dry-run — 실제 변경 없음)' : ''}`);
 }
 
 // ===== 1.9.7 A: verify-code — npm scripts 자동 감지 + evidence 자동 기록 =====
@@ -16887,6 +16915,15 @@ function mcpServeCmd(root) {
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
+        // 1.9.288 (Codex gpt-5.5 리뷰 #1 수렴): MCP 도구도 policy enforce 적용 — read-only enforce 시 write 도구 차단.
+        //   이전: _policyEnforce 는 agents multi --execute 한 곳뿐 → MCP state_start 등이 정책 우회하고 .leerness 기록.
+        //   cliArgs(실제 실행 명령) 로 required tier 판정 → enforce ON 이고 초과 시 JSON-RPC error 반환(실행 안 함).
+        try {
+          const pol = _policyEnforce(targetPath, cliArgs.join(' '));
+          if (!pol.allowed) {
+            return send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `정책 차단(policy): ${pol.reason}` }], isError: true } });
+          }
+        } catch {}
         const r = callLeerness(cliArgs);
         // 1.9.61: cursor 기반 페이지네이션 — 긴 출력은 cursor offset로 다음 청크
         const fullText = r.stdout || r.stderr || '(no output)';
@@ -19976,9 +20013,8 @@ function healthCmd(root) {
     cap.replMultiProvider = (hasRepl && hasCliChat)
       ? { score: 90, status: '✓', evidence: 'ollama/claude/codex/agy/copilot 5종 (1.9.149+1.9.153)' }
       : { score: 30, status: '⚠', evidence: 'REPL 미완성' };
-    // (5) MCP 도구 — tools array 카운트
-    const toolsMatch = harnessSrc.match(/{ name: 'leerness_/g);
-    const toolCount = toolsMatch ? toolsMatch.length : 0;
+    // (5) MCP 도구 — tools array 카운트 (1.9.288: 정확한 도구 정의 패턴 — 자기-매칭 오탐 제거, Codex #5)
+    const toolCount = _mcpToolCount();
     cap.mcpTools = toolCount >= 50
       ? { score: 100, status: '✓', evidence: `${toolCount}/50+ 도구 (1.9.159 CRUD 완성)` }
       : { score: Math.round((toolCount / 50) * 100), status: toolCount > 30 ? '✓' : '⚠', evidence: `${toolCount} 도구` };
@@ -21611,5 +21647,7 @@ module.exports = {
   // 1.9.286: 스킬 영향 상관추적 (UR-0024) — 단위 테스트
   _parseEvidenceStats, skillImpactCmd,
   // 1.9.287: evidence 완전성 + 코드펜스 sanitize (Codex 리뷰 수렴) — 단위 테스트
-  _evidenceQuality, _sanitizeFences
+  _evidenceQuality, _sanitizeFences,
+  // 1.9.288: MCP 도구 수 단일 출처 (Codex #5) — 단위 테스트
+  _mcpToolCount
 };

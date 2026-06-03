@@ -3042,5 +3042,42 @@ total++;
   if (!ok) { failed++; console.log((rFake.stdout || '').slice(-300)); }
 }
 
+// 1.9.288 회귀 (Codex gpt-5.5 리뷰 수렴): MCP policy enforce + release dry-run + 도구수 정합
+total++;
+{
+  const env = { ...process.env, LEERNESS_OFFLINE: '1' };
+  // #1 MCP policy: read-only enforce → state_start(write) 차단 + state.json 미생성
+  const pDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcppol-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', pDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000, env });
+  cp.spawnSync(process.execPath, [CLI, 'policy', 'set', 'read-only', '--enforce', '--path', pDir], { encoding: 'utf8', timeout: 15000, env });
+  const req = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_state_start', arguments: { path: pDir, goal: 'x' } } });
+  const rMcp = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 15000, input: req + '\n', env });
+  let blocked = false;
+  try { const j = JSON.parse(rMcp.stdout.split('\n').filter(Boolean)[0]); blocked = j.result.isError === true && /정책 차단/.test(j.result.content[0].text); } catch {}
+  const noWrite = !fs.existsSync(path.join(pDir, '.leerness', 'state.json'));
+  // enforce 해제 시 통과(회귀 방지 — 정상 동작 보존)
+  cp.spawnSync(process.execPath, [CLI, 'policy', 'set', 'project-write', '--no-enforce', '--path', pDir], { encoding: 'utf8', timeout: 15000, env });
+  const rMcp2 = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 15000, input: req + '\n', env });
+  let allowed = false;
+  try { const j = JSON.parse(rMcp2.stdout.split('\n').filter(Boolean)[0]); allowed = j.result.isError !== true && /run-0001/.test(j.result.content[0].text); } catch {}
+  // #2 release publish --dry-run --git-push: push 시도 안 함(생략 출력) + exit 0
+  const rDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-reldry-'));
+  fs.writeFileSync(path.join(rDir, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.1' }) + '\n');
+  const rRel = cp.spawnSync(process.execPath, [CLI, 'release', 'publish', rDir, '--dry-run', '--git-push'], { encoding: 'utf8', timeout: 20000, env });
+  const dryOk = rRel.status === 0 && /\(dry-run\)/.test(rRel.stdout) && /생략/.test(rRel.stdout) && !/git push:/.test(rRel.stdout);
+  // #5 도구수 정합: 배지 == 관리블록 == tools/list
+  let countOk = false;
+  try {
+    const rl = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 10000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n', env });
+    const live = JSON.parse(rl.stdout.split('\n').filter(Boolean)[0]).result.tools.length;
+    const readme = fs.readFileSync(path.resolve(__dirname, '..', 'README.md'), 'utf8');
+    const badge = (readme.match(/MCP--tools-(\d+)/) || [])[1];
+    countOk = String(live) === badge;
+  } catch {}
+  const ok = blocked && noWrite && allowed && dryOk && countOk;
+  console.log(ok ? '✓ B(1.9.288) Codex 수렴: MCP policy 차단/허용 + release dry-run 무push + 도구수 정합' : `✗ Codex 수렴 실패 (blocked=${blocked} noWrite=${noWrite} allowed=${allowed} dry=${dryOk} count=${countOk})`);
+  if (!ok) { failed++; console.log((rRel.stdout || '').slice(0, 300)); }
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

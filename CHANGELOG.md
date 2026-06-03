@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.288 — 2026-06-03 — Codex gpt-5.5 코드 리뷰 수렴: MCP policy enforce + release dry-run + 도구수 정합
+
+**🔒 Codex(gpt-5.5, xhigh)가 실제 코드 라인 근거로 제시한 5건 중 검증된 high/med 3건 수렴 + 나머지 2건 백로그.**
+
+### 배경
+codex CLI(gpt-5.5)로 leerness@1.9.287 을 직접 리뷰(샌드박스 우회로 파일 접근, 285k 토큰). 5건 모두 코드 라인 근거의 타당한 지적. 이번 라운드에 검증·테스트 가능한 3건 반영.
+
+### 구현 (Codex 지적 → 수렴)
+1. **#1 (high) MCP policy enforce 우회** — `_policyEnforce` 가 `agents multi --execute` 한 곳뿐이라 MCP `state_start` 등 write 도구가 정책을 우회. → MCP `tools/call` 의 `callLeerness` 직전에 **중앙 정책 게이트** 추가. enforce ON 시 허용 등급 초과 도구는 JSON-RPC `isError` 로 차단(실행 안 함). read-only enforce 에서 MCP state_start 차단 + state.json 미생성 실측.
+2. **#2 (high) `release publish --dry-run` 이 실제 push + 실패도 성공 처리** — dry-run 인데 npm pack/git push 실행, status 미검사로 실패 시에도 exit 0. → dry-run 은 모든 외부 side effect(pack/push/gh/pages)를 **계획 출력만**, live 는 git push status 실패 시 **non-zero 종료**.
+3. **#5 (med) 도구 수 불일치** — 배지 80 / 관리블록 42 / capability 카운트 자기-매칭 80 vs 실제 tools/list 79. → `_mcpToolCount()` 단일 출처(정확한 도구 정의 패턴)로 배지·관리블록·capability·CHANGELOG 카운트 통일. syncReadme 가 MCP 배지 자동 동기화(stale 방지).
+
+### 백로그 (Codex #3/#4)
+- **UR-0036** (#3): REPL agy/copilot prompt 가 shell:true args 전달(셸 주입 위험) → stdin/shell-safe 통일.
+- **UR-0037** (#4): require.main 가드에도 top-level side effect(warning listener/NODE_OPTIONS/chcp) 가 require 시 실행 → main() 내부 이동.
+
+### 검증
+- **selftest 36/36 PASS** · **E2E 233/233 PASS** (회귀 0) · MCP 정책 차단(write)/허용(enforce off) + release dry-run 무push exit 0 + 배지==tools/list(79) 실측.
+
 ## 1.9.287 — 2026-06-03 — Codex 외부 리뷰 수렴: 허위 완료 차단 강화 + handoff 펜스 + status minimal
 
 **🛡️ 다른 AI(Codex)가 실측한 핵심 한계 "테스트만 통과하면 미구현도 done 통과"를 보강 + 발견된 품질 버그 2건 수정.**
