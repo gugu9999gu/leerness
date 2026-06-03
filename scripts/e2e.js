@@ -2793,13 +2793,19 @@ total++;
   let exportsOk = false;
   try {
     const m = require(libPath);
-    exportsOk = ['_isSecretKey','compareVer','parseHarnessVersion','_classifyCJK','_riskLabel','_detectSystemLang','_parseSlashFromHelp']
-      .every(n => typeof m[n] === 'function') && m.compareVer('1.9.1','1.9.0') === 1 && m._detectSystemLang({ LANG: 'ko_KR.UTF-8' }) === 'ko';
+    // 1.9.283: 1단계 7종 + 2단계 7종(권한등급/dist-tag/run스키마/mcp.json)
+    exportsOk = ['_isSecretKey','compareVer','parseHarnessVersion','_classifyCJK','_riskLabel','_detectSystemLang','_parseSlashFromHelp',
+      '_tierRank','_requiredTier','_policyAllows','_resolveNpmTag','_mcpJsonContent','_newRunRecord']
+      .every(n => typeof m[n] === 'function')
+      && m.compareVer('1.9.1','1.9.0') === 1 && m._detectSystemLang({ LANG: 'ko_KR.UTF-8' }) === 'ko'
+      && Array.isArray(m.PERMISSION_TIERS) && m.PERMISSION_TIERS.length === 8
+      && m._requiredTier('release publish') === 'publish' && m._resolveNpmTag(null, {}) === 'latest'
+      && m._newRunRecord({ run_id: 'r1' }).schemaVersion === 1;
   } catch {}
   let filesOk = false;
   try { const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8')); filesOk = Array.isArray(pkg.files) && pkg.files.includes('lib'); } catch {}
   const ok = libExists && exportsOk && filesOk;
-  console.log(ok ? '✓ B(1.9.274) lib 모듈 분리: pure-utils 7종 export + 동작 + files 포함' : `✗ lib 분리 실패 (exists=${libExists} exports=${exportsOk} files=${filesOk})`);
+  console.log(ok ? '✓ B(1.9.274/283) lib 모듈 분리: pure-utils 14종 export + 동작 + files 포함' : `✗ lib 분리 실패 (exists=${libExists} exports=${exportsOk} files=${filesOk})`);
   if (!ok) failed++;
 }
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.283 — 2026-06-03 — UR-0025 2단계: 순수 함수 추가 모듈 분리 (lib/pure-utils 7→14종)
+
+**🧩 GPT-5.5 "1.2MB 단일 파일" 지적의 점진적·비파괴 모듈화 계속 — 최근 추가한 순수 로직을 lib/ 로 추출.**
+
+### 구현
+1. **`lib/pure-utils.js` 7 → 14 export** — 권한 등급(`PERMISSION_TIERS`/`_tierRank`/`_requiredTier`/`_policyAllows`) + dist-tag(`_resolveNpmTag`) + run 스키마(`_newRunRecord`) + mcp.json(`_mcpJsonContent`) 추가 이동. 모두 harness 내부 상태 의존 0(순수).
+2. **harness.js require 재연결** — 상단 destructure 확장 + 인라인 정의 7개 제거(`module.exports` 재노출 유지). 동작 동일.
+3. e2e lib 테스트 7 → 14종 export + 동작 검증. selftest 31/31 그대로(이미 해당 함수 커버).
+
+### 검증
+- **selftest 31/31 PASS** · **E2E 229/229 PASS** (회귀 0) · `npm pack` tarball lib 포함 · require 무결성(14종 함수 + PERMISSION_TIERS) 확인.
+
 ## 1.9.282 — 2026-06-03 — UR-0035: AGENTS.md(정적) vs leerness(동적) 포지셔닝 — 범용 하네스 전략 완성
 
 **🧭 GPT-5.5 마지막 전략 항목 — leerness 는 AGENTS.md 를 대체하지 않고 보완. 정적 지침 vs 동적 상태 역할 경계 명시.**

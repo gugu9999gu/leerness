@@ -7,9 +7,10 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
-const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp } = require('../lib/pure-utils');
+const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
+  PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 
-const VERSION = '1.9.282';
+const VERSION = '1.9.283';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -14279,12 +14280,7 @@ function releaseCleanupCmd(root) {
 //     - NPM_TOKEN 또는 LEERNESS_NPM_TOKEN 환경변수에서만 읽음 (값 절대 로그 X)
 //     - 임시 .npmrc 파일 (mkdtempSync) 생성 → publish → 즉시 삭제 (finally)
 //     - 이미 publish된 버전 자동 detect → skip (중복 publish 차단)
-// 1.9.275 (UR-0026, GPT-5.5 리뷰): npm dist-tag 결정 — latest(안정, 기본) / next(실험). 잘못된 형식은 latest 폴백. 순수 함수.
-function _resolveNpmTag(explicit, env) {
-  env = env || process.env;
-  const raw = String(explicit || env.LEERNESS_NPM_TAG || 'latest').trim().toLowerCase();
-  return /^[a-z][a-z0-9-]{0,38}$/.test(raw) ? raw : 'latest';
-}
+// _resolveNpmTag → lib/pure-utils.js 로 이동 (1.9.283 UR-0025 2단계)
 // 1.9.275 (UR-0026): leerness release channel — 안정/실험 채널 정책 + 버전 고정 안내 (npm dist-tag).
 function releaseChannelCmd(root) {
   root = absRoot(root || process.cwd());
@@ -18068,21 +18064,7 @@ function capabilitiesCmd(root, opts = {}) {
 // ===== 1.9.281 (UR-0034, GPT-5.5 범용 하네스): 권한 등급(permission tiers) =====
 //   capabilities(1.9.272 공개)를 enforced 등급으로 확장. 기본 OFF(opt-in) — enforce 켤 때만 차단.
 //   등급 오름차순(왼→오 위험↑). 허용 등급 이하의 명령만 통과. 기본 허용 'project-write'(파일 작업까지, 셸/git/publish 차단).
-const PERMISSION_TIERS = ['read-only', 'safe-write', 'project-write', 'shell-read', 'shell-write', 'git-write', 'network', 'publish'];
-function _tierRank(t) { const i = PERMISSION_TIERS.indexOf(String(t || '')); return i < 0 ? PERMISSION_TIERS.length : i; }
-// 명령/capability → 요구 등급 (순수 함수, selftest)
-function _requiredTier(cmd) {
-  const c = String(cmd || '').toLowerCase();
-  if (/release\s+publish|npm\s+publish|\bpublish\b/.test(c)) return 'publish';
-  if (/\bweb\b/.test(c)) return 'network';
-  if (/git\s+push|sync-main/.test(c)) return 'git-write';
-  if (/multi\s+--execute|dispatch\s+--write|--yolo|\bpc\b/.test(c)) return 'shell-write';
-  if (/agents\s+(list|quota|bench)|--run-tests/.test(c)) return 'shell-read';
-  if (/\binit\b|\badapter\b|update\s+--yes|\bmigrate\b/.test(c)) return 'project-write';
-  if (/state\s+(start|record|verify|handoff)|decision|lesson|plan\s+add|task\s+add|rule\s+add/.test(c)) return 'safe-write';
-  return 'read-only';
-}
-function _policyAllows(allowedTier, requiredTier) { return _tierRank(requiredTier) <= _tierRank(allowedTier); }
+// PERMISSION_TIERS / _tierRank / _requiredTier / _policyAllows → lib/pure-utils.js 로 이동 (1.9.283 UR-0025 2단계)
 function _policyFile(root) { return path.join(_leernessStateDir(root), 'policy.json'); }
 function _loadPolicy(root) {
   const f = _policyFile(root);
@@ -18148,28 +18130,7 @@ function policyCmd(root, sub, ...args) {
 //   Claude Code 가 한 작업을 Goose/Codex 가 JSON 으로 정확히 이어받음. 비파괴 (신규 .leerness/ 디렉토리).
 //   향후 UR-0031(MCP verb)/UR-0033(adapter) 가 이 스키마를 공통 호출 표면으로 사용.
 function _leernessStateDir(root) { return path.join(absRoot(root), '.leerness'); }
-// 순수 함수: run 레코드 빌더 (모든 필드 기본값 — GPT-5.5 권고 스키마). startedAt 주입 가능(selftest).
-function _newRunRecord(opts = {}) {
-  return {
-    schemaVersion: 1,
-    run_id: opts.run_id || null,
-    task_id: opts.task_id || null,
-    agent_name: opts.agent_name || null,
-    model_name: opts.model_name || null,
-    started_at: opts.started_at || new Date().toISOString(),
-    ended_at: opts.ended_at || null,
-    goal: opts.goal || '',
-    files_read: Array.isArray(opts.files_read) ? opts.files_read : [],
-    files_changed: Array.isArray(opts.files_changed) ? opts.files_changed : [],
-    commands_run: Array.isArray(opts.commands_run) ? opts.commands_run : [],
-    tests_run: Array.isArray(opts.tests_run) ? opts.tests_run : [],
-    errors: Array.isArray(opts.errors) ? opts.errors : [],
-    decisions: Array.isArray(opts.decisions) ? opts.decisions : [],
-    verification_result: opts.verification_result || null,  // 'pass' | 'fail' | null
-    handoff_summary: opts.handoff_summary || null,
-    status: opts.status || 'in-progress'                    // in-progress | verified | handed-off
-  };
-}
+// _newRunRecord → lib/pure-utils.js 로 이동 (1.9.283 UR-0025 2단계)
 function _loadLeernessState(root) {
   const f = path.join(_leernessStateDir(root), 'state.json');
   if (!exists(f)) return { schemaVersion: 1, project: detectProjectName(root), currentRunId: null, runCounter: 0, updatedAt: null };
@@ -18296,9 +18257,7 @@ const ADAPTERS = {
   aider:    { label: 'Aider', keys: ['AGENTS.md'], mcp: false },
   qwen:     { label: 'Qwen Code', keys: ['AGENTS.md'], mcp: false }
 };
-function _mcpJsonContent() {
-  return JSON.stringify({ mcpServers: { leerness: { command: 'npx', args: ['leerness', 'mcp', 'serve'] } } }, null, 2) + '\n';
-}
+// _mcpJsonContent → lib/pure-utils.js 로 이동 (1.9.283 UR-0025 2단계)
 // .mcp.json 병합 — 기존 mcpServers 보존하고 leerness 항목만 추가/갱신.
 function _mergeMcpJson(root) {
   const f = path.join(absRoot(root), '.mcp.json');
