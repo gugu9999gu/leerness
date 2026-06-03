@@ -2986,5 +2986,26 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.286 회귀 (UR-0024): skill impact — 영향 경량 상관추적 + 정직한 advisory
+total++;
+{
+  const iDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-impact-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', iDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_OFFLINE: '1' } });
+  // 표본 부족 (검증 0건) → 판단 보류 advisory
+  let lowOk = false;
+  try { const j = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'skill', 'impact', iDir, '--json'], { encoding: 'utf8', timeout: 15000 }).stdout); lowOk = Array.isArray(j.skills) && j.sampleSize === 0 && /표본 부족/.test(j.advisory) && j.network === false; } catch {}
+  // review-evidence 에 pass/fail 6건 시드 → 통과율 계산
+  const evFile = path.join(iDir, '.harness', 'review-evidence.md');
+  let seed = '# Review Evidence\n';
+  for (let k = 0; k < 5; k++) seed += `\n## 2026-06-03 0${k}:00\nCommand: npm test\nExit: 0\n`;
+  seed += `\n## 2026-06-03 06:00\nCommand: build\nExit: 1\n`;
+  fs.appendFileSync(evFile, seed);
+  let rateOk = false;
+  try { const j = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'skill', 'impact', iDir, '--json'], { encoding: 'utf8', timeout: 15000 }).stdout); rateOk = j.sampleSize >= 6 && j.evidence.pass === 5 && j.evidence.fail === 1 && j.evidence.rate === 83 && /상관추적/.test(j.advisory); } catch {}
+  const ok = lowOk && rateOk;
+  console.log(ok ? '✓ B(1.9.286) skill impact: 표본부족 advisory + 검증 통과율 상관 + json' : `✗ skill impact 실패 (low=${lowOk} rate=${rateOk})`);
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

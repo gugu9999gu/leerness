@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.9.286 — 2026-06-03 — UR-0024: 스킬 설치 영향 경량 상관추적 + HuggingFace 안내 (백로그 완전 소진)
+
+**📊 "설치 스킬이 코딩 성능/정확도에 도움?" — 무거운 벤치 없이 기존 데이터로 정직한 상관 advisory (GPT-5.5 / 사용자 요청). 마지막 추적 백로그.**
+
+### 배경 + 설계 판단
+사용자 요청(UR-0024): 스킬 소스(HuggingFace) + 설치 영향 측정. **권고대로**: (1) 설치는 이미 존재(skill install/discover) → HF 는 모델/데이터셋 중심이라 agent-skill 가치 낮음 → **discover --github 안내만**(저우선), (2) 영향 측정은 **경량 상관추적**(인과 아님, 표본 부족 시 판단 보류)으로 honest 구현.
+
+### 구현
+1. **`leerness skill impact [--json]`** — 설치 스킬 × 사용 빈도(skill-suggestions 이력) + `review-evidence.md` 검증 통과율 상관. **정직한 advisory**: 표본<5 시 "판단 보류", 그 외 "상관추적(인과 아님)".
+2. **`_parseEvidenceStats(text)` 순수 함수** — review-evidence 의 Exit code / PASS·FAIL 키워드로 통과율 집계.
+3. **HuggingFace 안내** — `skill discover` 도움말에 "HF 는 모델/데이터셋 중심 → agent-skill 은 GitHub 미러 repo 를 --github 로 지정 권장".
+4. **offline-first 유지** — 실제 외부 스킬 탐색은 호스트 AI, leerness 는 네트워크 자동 호출 안 함.
+5. selftest 32→33 + e2e 230→231.
+
+### 디버그 (테스트 인프라)
+- `skill impact` 가 id 없는 skill 엔트리에서 `.replace` crash → `Object.entries` + 가드로 수정.
+- e2e exit 127 크래시 추적 → **누적 temp 디렉토리 6409개**(세션 내 e2e 반복 실행 잔재)로 인한 OS spawn 자원 고갈 확인. 정리 후 정상(코드/CI 무관 — CI 는 fresh runner). 
+
+### 검증
+- **selftest 33/33 PASS** · **E2E 231/231 PASS** (회귀 0).
+
+### 🎉 전체 백로그 완전 소진
+GPT-5.5 1차 리뷰(UR-0025~0027) + 2차 리뷰(설치부담/모듈화/e2e) + 범용 하네스 전략(UR-0030~0035) + 사용자 요청(UR-0022~0024) — **전부 구현·배포 완료**.
+
 ## 1.9.285 — 2026-06-03 — UR-0023: 외부 OSS "빌드 vs 재사용" 결정 게이트 (오프라인)
 
 **🔍 기능 계획 시 "이미 검증된 OSS 가 있는데 새로 만드는가?" 를 묻는 오프라인 구조적 게이트 (GPT-5.5 / 사용자 요청). 네트워크 크롤러 아님 — offline-first 유지.**

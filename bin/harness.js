@@ -10,7 +10,7 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 
-const VERSION = '1.9.285';
+const VERSION = '1.9.286';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -1692,8 +1692,10 @@ async function skillDiscoverCmd(root) {
       '  leerness skill discover --preset anthropic     # anthropics/skills',
       '  leerness skill discover --all-presets          # 모든 preset 동시 탐색',
       '  leerness skill discover --github owner/repo    # 직접 GitHub repo 지정',
+      '  leerness skill discover --github <hf-owner>/<repo>  # HuggingFace 미러/agent-skills repo 도 동일 방식 (1.9.286)',
       '',
       '예: leerness skill discover --source https://agentskills.io/llms.txt',
+      '※ HuggingFace 는 모델/데이터셋 중심 — agent-skill 은 GitHub 미러 repo 를 --github 로 지정 권장 (1.9.286 UR-0024).',
       '',
       '(정책: leerness는 사용자 동의 없이 외부 URL을 fetch하지 않음 — 1.9.42 opt-in)'
     ].join('\n'));
@@ -2961,6 +2963,7 @@ function _selfTestCases() {
     { name: '_pickModel: top/code/fast 등급 선택 (1.9.270)', run: () => { return _pickModel('codex', 'code') === 'gpt-5-codex' && _pickModel('claude', 'top') === 'claude-opus-4-7' && /haiku/.test(_pickModel('claude', 'fast')); } },
     { name: 'CAPABILITY_SURFACE: 6 영역 + risk/optOut + 주의명령 (1.9.272)', run: () => { const ks = Object.keys(CAPABILITY_SURFACE); return ks.length === 6 && ks.includes('automationBridges') && Object.values(CAPABILITY_SURFACE).every(v => ['low','medium','high'].includes(v.risk) && v.optOut && v.desc) && POWERFUL_COMMANDS.length >= 5; } },
     { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
+    { name: '_parseEvidenceStats: review-evidence pass/fail 집계 (1.9.286)', run: () => { const s = _parseEvidenceStats('## 2026-06-03\nCommand: npm test\nExit: 0\n\n## 2026-06-03\nCommand: build\nExit: 1\n\n## 2026-06-03\nverify PASS 통과\n'); return s.entries === 3 && s.pass === 2 && s.fail === 1 && s.rate === 67; } },
     { name: '_reuseDetect: 키워드→OSS 카테고리 + 체크리스트 (1.9.285)', run: () => { const a = _reuseDetect('JWT 인증 구현'); const b = _reuseDetect('날짜 포맷 date'); const c = _reuseDetect('전혀무관한xyzzy'); return a.some(x => x.key === 'auth') && b.some(x => x.key === 'date') && c.length === 0 && REUSE_CHECKLIST.length >= 5 && REUSE_CATEGORIES.length >= 12; } },
     { name: 'AGENTS.md: 정적 vs 동적 leerness 역할 경계 (1.9.282)', run: () => { const a = coreFiles('.', 'ko', [])['AGENTS.md']; return /정적 vs 동적/.test(a) && /대체하지 않고 \*\*보완\*\*|대체하지 않고 보완/.test(a) && /leerness state/.test(a) && /\.leerness\//.test(a); } },
     { name: '권한 등급: _requiredTier + _policyAllows 순서 (1.9.281)', run: () => { return _requiredTier('release publish') === 'publish' && _requiredTier('agents multi --execute') === 'shell-write' && _requiredTier('handoff') === 'read-only' && _requiredTier('init') === 'project-write' && _policyAllows('project-write', 'safe-write') === true && _policyAllows('project-write', 'publish') === false && _tierRank('read-only') < _tierRank('publish'); } },
@@ -3628,6 +3631,7 @@ function commandsCmd(root) {
       { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280' },
       { cmd: 'policy show|set|check', desc: '권한 등급 (read-only…publish) — opt-in enforced (위험 명령 차단) — 1.9.281' },
       { cmd: 'reuse-check "<기능>"', desc: '외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인 카테고리+체크리스트) — 1.9.285' },
+      { cmd: 'skill impact', desc: '스킬 설치 영향 경량 상관추적 (사용 빈도 ↔ 검증 통과율, advisory) — 1.9.286' },
       { cmd: 'release channel [--json]', desc: '릴리스 채널 정책 (latest 안정 / next 실험 / 버전 고정) — 1.9.275' },
       { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
@@ -18381,6 +18385,56 @@ function reuseCheckCmd(root, feature, opts = {}) {
   return;
 }
 
+// ===== 1.9.286 (UR-0024, GPT-5.5): 스킬 설치 영향 경량 상관추적 =====
+//   "설치한 스킬이 코딩 성능/정확도에 긍정 영향?" — 무거운 벤치 harness 가 아니라, 기존 데이터
+//   (skill 사용 빈도 + review-evidence 검증 통과율)를 상관(인과 아님)으로 advisory 제시. offline.
+// review-evidence.md 파싱 (순수) — 검증 항목 수 + pass/fail 추정 (Exit 0 / 'PASS' vs 'fail'/Exit !=0).
+function _parseEvidenceStats(text) {
+  const t = String(text || '');
+  const blocks = t.split(/\n(?=## )/).filter(b => /Command:|Exit:|verify|test/i.test(b));
+  let pass = 0, fail = 0;
+  for (const b of blocks) {
+    const exitM = b.match(/Exit:\s*(-?\d+)/i);
+    if (exitM) { (parseInt(exitM[1], 10) === 0 ? pass++ : fail++); continue; }
+    if (/\bPASS\b|통과|성공|✓/i.test(b)) pass++;
+    else if (/\bFAIL\b|실패|오류|error|✗/i.test(b)) fail++;
+  }
+  const entries = blocks.length;
+  return { entries, pass, fail, rate: (pass + fail) ? Math.round(pass / (pass + fail) * 100) : null };
+}
+function skillImpactCmd(root) {
+  root = absRoot(root || process.cwd());
+  const json = has('--json');
+  // 설치 스킬 + 사용 빈도 (skill-suggestions.md rolling history 의 id 언급 카운트)
+  let skills = [];
+  try { skills = Object.entries(listAllSkills(root)).map(([k, s]) => ({ id: (s && (s.id || s.name)) || k, name: (s && (s.displayNameKo || s.name)) || k })).filter(s => s.id); } catch {}
+  const histPath = path.join(absRoot(root), '.harness', 'skill-suggestions.md');
+  const hist = exists(histPath) ? read(histPath) : '';
+  const uses = {};
+  for (const s of skills) { const re = new RegExp(String(s.id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'); uses[s.id] = (hist.match(re) || []).length; }
+  const ranked = skills.map(s => ({ ...s, uses: uses[s.id] || 0 })).sort((a, b) => b.uses - a.uses);
+  const ev = _parseEvidenceStats(exists(evidencePath(root)) ? read(evidencePath(root)) : '');
+  const sampleSize = ev.entries;
+  const advisory = sampleSize < 5
+    ? '표본 부족 (검증 기록 < 5) — 판단 보류. 더 많은 verify-code 누적 후 재확인.'
+    : '상관추적(인과 아님): 스킬 사용 빈도와 검증 통과율은 참고 신호일 뿐, 인과관계를 보장하지 않음.';
+  if (json) { log(JSON.stringify({ skills: ranked, usedCount: ranked.filter(s => s.uses > 0).length, evidence: ev, sampleSize, advisory, network: false }, null, 2)); return; }
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s; const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  log(cy(`# leerness skill impact (1.9.286, UR-0024) — 스킬 영향 경량 상관추적`));
+  log(`설치 스킬: ${skills.length} · 사용 이력 있는 스킬: ${ranked.filter(s => s.uses > 0).length}`);
+  log(`검증 기록(review-evidence): ${ev.entries}건 · 통과율: ${ev.rate === null ? 'N/A' : ev.rate + '%'} (pass ${ev.pass} / fail ${ev.fail})`);
+  if (ranked.filter(s => s.uses > 0).length) {
+    log('');
+    log(`## 사용 빈도 top (skill-suggestions 이력)`);
+    for (const s of ranked.filter(x => x.uses > 0).slice(0, 8)) log(`  ${String(s.uses).padStart(3)}× ${s.id} ${dm(s.name)}`);
+  }
+  log('');
+  log(dm(`  ⚠ ${advisory}`));
+  log(dm(`  ※ HuggingFace/외부 스킬 소스 탐색은 호스트 AI 가 수행 (leerness 는 네트워크 자동 호출 안 함).`));
+  return;
+}
+
 // 1.9.149+1.9.153: REPL 모드 — leerness 자율 AI 에이전트 (multi-provider 세션)
 async function _agentRepl(root, opts) {
   // 1.9.153: .env 자동 로드 (REPL 진입 직전) — install 직후 LEERNESS_ENABLE_* 즉시 반영
@@ -21241,6 +21295,8 @@ async function main() {
   if (cmd === 'skill' && args[1] === 'consolidate') return skillConsolidate(absRoot(arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'install')     return await skillInstallCmd(absRoot(arg('--path', process.cwd())), args[2]);
   if (cmd === 'skill' && args[1] === 'discover')    return await skillDiscoverCmd(absRoot(arg('--path', process.cwd())));
+  // 1.9.286 (UR-0024): leerness skill impact — 스킬 설치 영향 경량 상관추적
+  if (cmd === 'skill' && args[1] === 'impact')      return skillImpactCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'skill' && args[1] === 'export')      return skillExportCmd(absRoot(arg('--path', process.cwd())), args[2]);
   if (cmd === 'skill' && args[1] === 'export-all')  return skillExportAllCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'match')       return skillMatchCmd(absRoot(arg('--path', process.cwd())), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
@@ -21508,5 +21564,7 @@ module.exports = {
   // 1.9.281: 권한 등급 (UR-0034) — 단위 테스트
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _loadPolicy, _savePolicy, _policyEnforce, policyCmd,
   // 1.9.285: 외부 OSS 재사용 게이트 (UR-0023) — 단위 테스트
-  REUSE_CATEGORIES, REUSE_CHECKLIST, _reuseDetect, reuseCheckCmd
+  REUSE_CATEGORIES, REUSE_CHECKLIST, _reuseDetect, reuseCheckCmd,
+  // 1.9.286: 스킬 영향 상관추적 (UR-0024) — 단위 테스트
+  _parseEvidenceStats, skillImpactCmd
 };
