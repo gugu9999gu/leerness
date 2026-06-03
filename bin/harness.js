@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.269';
+const VERSION = '1.9.270';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2948,6 +2948,8 @@ function _selfTestCases() {
     { name: 'EXTERNAL_AGENTS: grok 정식 provider 승격 (1.9.268)', run: () => { const g = EXTERNAL_AGENTS.find(a => a.id === 'grok'); return !!g && g.bin === 'grok' && g.envFlag === 'LEERNESS_ENABLE_GROK' && EXTERNAL_AGENTS.length === 6; } },
     { name: '_detectSystemLang: POSIX LANG ko_KR/en_US 판별 (1.9.269)', run: () => _detectSystemLang({ LANG: 'ko_KR.UTF-8' }) === 'ko' && _detectSystemLang({ LANG: 'en_US.UTF-8' }) === 'en' },
     { name: '_detectSystemLang: LC_ALL 우선 + LANGUAGE 폴백 (1.9.269)', run: () => _detectSystemLang({ LC_ALL: 'ko_KR.UTF-8', LANG: 'en_US.UTF-8' }) === 'ko' && _detectSystemLang({ LANGUAGE: 'en_GB' }) === 'en' },
+    { name: 'ROLE_CATALOG + _normalizeRole: 7종 + 한국어 별칭 (1.9.270)', run: () => { const keys = Object.keys(ROLE_CATALOG); return keys.length === 7 && keys.includes('coder') && keys.includes('reviewer') && _normalizeRole('코딩') === 'coder' && _normalizeRole('검수자') === 'reviewer' && _normalizeRole('지휘관') === 'commander'; } },
+    { name: '_pickModel: top/code/fast 등급 선택 (1.9.270)', run: () => { return _pickModel('codex', 'code') === 'gpt-5-codex' && _pickModel('claude', 'top') === 'claude-opus-4-7' && /haiku/.test(_pickModel('claude', 'fast')); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3602,7 +3604,8 @@ function commandsCmd(root) {
       { cmd: 'session close [path] [--json] [--auto-apply-delivered]', desc: '세션 마감 + 9 카테고리 + 자동 통합' },
       { cmd: 'resume [path]', desc: 'auto-resume-plan 적용 (1.9.203)' },
       { cmd: 'route <task-type>', desc: '작업 유형 분류 (11종)' },
-      { cmd: 'agents list|check|quota|dispatch|multi', desc: '외부 AI CLI 오케스트레이션' },
+      { cmd: 'agents list|check|quota|dispatch|multi', desc: '외부 AI CLI 오케스트레이션 (dispatch --role 모델 라우팅 1.9.270)' },
+      { cmd: 'roles list|set|unset|catalog|suggest|verify', desc: '모델별 역할 부여 (코딩/검수/지휘/디자인/디버그/설계/분배) — 1.9.270' },
       { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
@@ -11301,13 +11304,16 @@ async function setupAgentsCmd(root, opts = {}) {
 }
 
 // 1.9.152: 단일 agent dispatch 명령 빌더 — agents dispatch (단일) + agents multi (복수) 가 공유
-function _dispatchCommand(agentId, task, writeMode) {
+// 1.9.270: model 인자 추가 — 역할(roles) 기반 dispatch 시 provider 별 모델 플래그 주입 (없으면 기존 동작 그대로).
+function _dispatchCommand(agentId, task, writeMode, model) {
   const q = String(task || '').replace(/"/g, '\\"');
-  if (agentId === 'claude') return `claude ${writeMode ? '--print --dangerously-skip-permissions' : '--print'} "${q}"`;
-  if (agentId === 'codex')  return `codex ${writeMode ? 'exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox' : 'exec --skip-git-repo-check'} "${q}"`;
-  if (agentId === 'agy') return `agy ${writeMode ? '-p --yolo' : '-p'} "${q}"`;
+  const m = model ? String(model).replace(/"/g, '') : '';
+  if (agentId === 'claude') return `claude ${writeMode ? '--print --dangerously-skip-permissions' : '--print'}${m ? ` --model ${m}` : ''} "${q}"`;
+  if (agentId === 'codex')  return `codex ${writeMode ? 'exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox' : 'exec --skip-git-repo-check'}${m ? ` -m ${m}` : ''} "${q}"`;
+  if (agentId === 'agy') return `agy ${writeMode ? '-p --yolo' : '-p'}${m ? ` --model ${m}` : ''} "${q}"`;
+  if (agentId === 'grok') return `grok${writeMode ? ' --yolo' : ''}${m ? ` --model ${m}` : ''} "${q}"`;
   if (agentId === 'copilot') return `gh copilot suggest "${q}"`;
-  if (agentId === 'ollama') return `# ollama — leerness agent "${q}" --provider ollama 로 직접 호출 (REPL: leerness agent)`;
+  if (agentId === 'ollama') return `# ollama — leerness agent "${q}" --provider ollama${m ? ` --model ${m}` : ''} 로 직접 호출 (REPL: leerness agent)`;
   return `# ${agentId}: 명령 빌더 미정의`;
 }
 
@@ -11524,13 +11530,26 @@ function agentsCmd(root, sub, ...args) {
   }
   if (sub === 'dispatch') {
     const task = args.filter(x => !x.startsWith('-')).join(' ').trim() || arg('--task', null);
-    const target = arg('--to', null);
+    let target = arg('--to', null);
     if (!task) { fail('dispatch "<task>" 또는 --task 필요'); return process.exit(1); }
     // 1.9.152: --multi 또는 --to=all 또는 --to 없음 + 활성 ≥2 → multi 모드로 routing
     if (has('--multi') || target === 'all' || target === '*') {
       return agentsCmd(root, 'multi', ...args);
     }
-    if (!target) { fail('--to <agent_id> 필요 (claude/codex/agy/copilot) — 활성 전체에 일괄 분배는 `leerness agents multi`'); return process.exit(1); }
+    // 1.9.270: --role <role> — 설정된 역할 → provider+model 라우팅 (--to 없을 때)
+    const roleArg = arg('--role', null);
+    let roleModel = arg('--model', null);
+    let rolePersona = '';
+    if (roleArg && !target) {
+      const resolved = _resolveRole(root, roleArg);
+      if (!resolved) { fail(`역할 미설정: ${_normalizeRole(roleArg)} — leerness roles set ${_normalizeRole(roleArg)} --provider <id> 또는 roles suggest --apply`); return process.exit(1); }
+      target = resolved.provider;
+      if (!roleModel) roleModel = resolved.model;
+      rolePersona = resolved.persona || '';
+      log(`🎭 역할 ${_normalizeRole(roleArg)} → ${target}${roleModel ? ' / ' + roleModel : ''}`);
+      if (rolePersona) log(`   persona: ${rolePersona}`);
+    }
+    if (!target) { fail('--to <agent_id> 또는 --role <role> 필요 (claude/codex/agy/grok/copilot) — 활성 전체 일괄은 `leerness agents multi`'); return process.exit(1); }
     const agentDef = EXTERNAL_AGENTS.find(a => a.id === target);
     if (!agentDef) { fail(`알 수 없는 agent: ${target}`); return process.exit(1); }
     // 1.9.36: 작업 유형 키워드 분석 → 최적 CLI 추천 (ready 체크 전에 출력 — 비활성이어도 추천)
@@ -11554,24 +11573,14 @@ function agentsCmd(root, sub, ...args) {
     log(`모드: ${writeMode ? '✏ write (파일 수정 가능)' : '🔒 read-only (분석 전용, 안전)'}`);
     log('');
     log(`## 실행 명령 (사용자가 복사해서 실행)`);
+    if (roleModel) log(`# 🎭 모델: ${roleModel} (역할 기반 라우팅, 1.9.270)`);
     log('');
-    const q = task.replace(/"/g, '\\"');
-    if (target === 'claude') {
-      const flags = writeMode ? '--print --dangerously-skip-permissions' : '--print';
-      log(`claude ${flags} "${q}"`);
-      if (writeMode) log(`# ⚠ --dangerously-skip-permissions: 도구 권한 자동 승인 (파일 수정 가능)`);
-    } else if (target === 'codex') {
-      const flags = writeMode ? 'exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox' : 'exec --skip-git-repo-check';
-      log(`codex ${flags} "${q}"`);
-      log(`# ℹ codex는 PowerShell 경유 — POSIX /tmp 경로는 C:\\tmp\\로 해석됨`);
-      if (writeMode) log(`# ⚠ --dangerously-bypass-approvals-and-sandbox: sandbox 우회`);
-    } else if (target === 'agy') {
-      const flags = writeMode ? '-p --yolo' : '-p';
-      log(`agy ${flags} "${q}"`);
-      if (writeMode) log(`# ⚠ --yolo: 워크스페이스 파일 직접 수정 가능`);
-    } else if (target === 'copilot') {
-      log(`gh copilot suggest "${q}"`);
-    }
+    // 1.9.270: _dispatchCommand 로 통일 (roleModel 주입) — 명령 빌더 단일화
+    log(_dispatchCommand(target, task, writeMode, roleModel));
+    if (target === 'claude' && writeMode) log(`# ⚠ --dangerously-skip-permissions: 도구 권한 자동 승인 (파일 수정 가능)`);
+    if (target === 'codex') { log(`# ℹ codex는 PowerShell 경유 — POSIX /tmp 경로는 C:\\tmp\\로 해석됨`); if (writeMode) log(`# ⚠ --dangerously-bypass-approvals-and-sandbox: sandbox 우회`); }
+    if (target === 'agy' && writeMode) log(`# ⚠ --yolo: 워크스페이스 파일 직접 수정 가능`);
+    if (target === 'grok' && writeMode) log(`# ⚠ grok --yolo: 자동 승인 (배포판에 따라 플래그 상이 가능)`);
     // 1.9.266 (UR-0021 2단계): 대상 에이전트의 슬래시 명령 힌트 — sub-agent 작업 시 알맞은 슬래시 명령 참조
     try {
       const hint = _agentSlashHint(root, target);
@@ -16504,7 +16513,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_api_skill', description: '1.9.245 (사용자 명시 UR-0015) — API 문서·관련링크 자동 캐시. 공식 API 문서 URL을 fetch 하고 1단계 same-domain 관련 링크까지 정리 → .harness/api-skills/<id>.md 저장. 후속 같은 API 관련 작업 시 자동 참조. 응답: list (skills 배열) / show (전체 본문) / match (task 매칭 결과). 인자: { path?, sub ("list"|"show"|"match"|"add"|"drop"), url? (add), id? (show/drop), query? (match), direction? (add: 구현 방향 텍스트) }. 외부 AI가 "이 프로젝트 어떤 API 문서가 정리되어 있나?" / "내 작업과 매칭되는 API skill 있나?" 회수.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string', enum: ['list', 'show', 'match', 'add', 'drop'] }, url: { type: 'string' }, id: { type: 'string' }, query: { type: 'string' }, direction: { type: 'string' } }, required: ['sub'] } },
     { name: 'leerness_selftest', description: '1.9.258/259 — 설치된 leerness 바이너리의 코어 함수(보안 _isSecretKey / 버전 compareVer / 인코딩 _classifyCJK 등) 무결성 자가 검증. 응답: { version, total, pass, fail, ok, results[] }. 외부 AI/CI 가 "이 leerness 설치가 정상인가?(npx 캐시 손상·부분 설치 감지)" 를 1초 내 확인. 인자: 없음.', inputSchema: { type: 'object', properties: {} } },
     { name: 'leerness_shell_guard', description: '1.9.260/261 (사용자 명시 UR-0020) — 터미널 명령 셸 호환성 린터. 외부 AI 가 명령을 실행하기 전에 셸 호환성 문제를 사전 점검. 예: Windows PowerShell 5.1 은 && / || 미지원 → A; if ($?) { B } 제안. 6 규칙(ps5-chain/ps-devnull/ps-inline-env/ps-rm-rf/cmd-semicolon/ps-version-unknown) + 과거 실패 회수(.harness/shell-failures.json). 응답: { shell, psVersion, issues[{rule,severity,detail,suggestion}], pastSame, pastSimilar, ok }. 인자: { command (required), path? }. 현재 셸/PS 버전 자동 감지.', inputSchema: { type: 'object', properties: { command: { type: 'string' }, path: { type: 'string' } }, required: ['command'] } },
-    { name: 'leerness_slash_commands', description: '1.9.265/266 (사용자 명시 UR-0021) — CLI AI 에이전트별 슬래시 명령어 레지스트리. 외부 AI(메인)가 sub-agent(codex/agy/claude/grok/copilot)를 호출할 때 각 에이전트에 알맞는 슬래시 명령을 참조. 빌트인 + 사용자 .harness/agent-slash-commands.json override 병합. 응답: { agents: { <id>: { label, asOf, invoke(slash|subcommand), note, source, count, commands[{cmd,desc}] } } }. 인자: { path?, agent? (생략 시 전체), refresh? (1.9.267 — 설치된 CLI --help probe 자동 갱신), dryRun? }. agent 지정 시 단일.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, agent: { type: 'string' }, refresh: { type: 'boolean' }, dryRun: { type: 'boolean' } } } }
+    { name: 'leerness_slash_commands', description: '1.9.265/266 (사용자 명시 UR-0021) — CLI AI 에이전트별 슬래시 명령어 레지스트리. 외부 AI(메인)가 sub-agent(codex/agy/claude/grok/copilot)를 호출할 때 각 에이전트에 알맞는 슬래시 명령을 참조. 빌트인 + 사용자 .harness/agent-slash-commands.json override 병합. 응답: { agents: { <id>: { label, asOf, invoke(slash|subcommand), note, source, count, commands[{cmd,desc}] } } }. 인자: { path?, agent? (생략 시 전체), refresh? (1.9.267 — 설치된 CLI --help probe 자동 갱신), dryRun? }. agent 지정 시 단일.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, agent: { type: 'string' }, refresh: { type: 'boolean' }, dryRun: { type: 'boolean' } } } },
+    { name: 'leerness_roles', description: '1.9.270 (사용자 명시) — 모델별 역할 부여. 여러 AI 에이전트 활성 시 역할(commander/reviewer/coder/architect/designer/debugger/dispatcher)을 provider+model 에 매핑하고, agents dispatch --role 로 라우팅. sub=suggest 면 활성 에이전트 기반 최적 배치 + 근거 반환(방향성 판단). sub=set 시 role/provider/model 필요. 응답: list/suggest/verify 별 JSON. 인자: { path?, sub(list|set|unset|catalog|suggest|verify), role?, provider?, model?, apply? }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, sub: { type: 'string' }, role: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, apply: { type: 'boolean' } } } }
   ];
 
   function send(obj) {
@@ -16720,6 +16730,13 @@ function mcpServeCmd(root) {
             cliArgs = ['slash-commands', ...(args.agent ? [String(args.agent)] : []), '--path', targetPath, '--json'];
             if (args.refresh === true) cliArgs.push('--refresh');
             if (args.dryRun === true) cliArgs.push('--dry-run');
+            break;
+          case 'leerness_roles':
+            // 1.9.270 (사용자 명시): 모델별 역할 부여
+            cliArgs = ['roles', String(args.sub || 'list'), ...(args.role ? [String(args.role)] : []), '--path', targetPath, '--json'];
+            if (args.provider) cliArgs.push('--provider', String(args.provider));
+            if (args.model) cliArgs.push('--model', String(args.model));
+            if (args.apply === true) cliArgs.push('--apply');
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
@@ -17663,6 +17680,11 @@ const _PROVIDER_MODEL_CATALOG = {
     { id: 'antigravity-flash', note: '빠른 응답' },
     { id: 'antigravity-experimental', note: '실험적 (사용 가능 시)' }
   ],
+  grok: [
+    { id: 'grok-beta', note: 'xAI 최신 (1.9.268 provider 승격)' },
+    { id: 'grok-2', note: 'xAI Grok 2' },
+    { id: 'grok-2-mini', note: '빠른 응답' }
+  ],
   copilot: [
     { id: 'default', note: 'gh copilot 기본 (모델 선택 불가)' }
   ],
@@ -17674,8 +17696,8 @@ const _PROVIDER_MODEL_CATALOG = {
   ]
 };
 
-// 1.9.170: provider cycle 순서 (Tab) — 빌트인 5종. user provider는 동적으로 뒤에 추가.
-const _PROVIDER_CYCLE_ORDER = ['ollama', 'claude', 'codex', 'agy', 'copilot'];
+// 1.9.170: provider cycle 순서 (Tab) — 빌트인 6종(1.9.268 grok 추가). user provider는 동적으로 뒤에 추가.
+const _PROVIDER_CYCLE_ORDER = ['ollama', 'claude', 'codex', 'agy', 'grok', 'copilot'];
 
 // 1.9.148: planner/reviewer/actor 역할 시스템 프롬프트 (Gemini 권고 — 자기-승인 편향 방지)
 const _AGENT_ROLE_PROMPTS = {
@@ -17683,6 +17705,194 @@ const _AGENT_ROLE_PROMPTS = {
   reviewer: '역할: reviewer. planner 의 계획 또는 actor 의 결과를 비판적으로 검토. 누락된 검증, 잠재 cascade, 오류 가능성 지적. 동의/수정 결론 명시.',
   actor: '역할: actor. 계획에 따라 정확한 명령/코드만 실행. evidence(파일 경로 + 테스트 결과) 함께 기록. 새 계획 생성 금지.'
 };
+// ===== 1.9.270: Agent Roles — 모델별 역할 부여 (사용자 명시) =====
+//   여러 AI 에이전트 활성 시 역할(코딩/검수/지휘/디자인/디버그/설계/분배)을 provider+model 에 매핑.
+//   사용자 설정: .harness/agent-roles.json { schemaVersion, roles: { <role>: { provider, model, persona } } }
+//   dispatch --role <role> → 역할 기반 provider+model 라우팅. roles suggest → 활성 에이전트 기반 최적 배치 판단.
+//   방향성 판단(사용자 요청): 모델별 강점이 분명하고(추론/코드/멀티모달) 작업이 분해 가능할 때, 역할 특화는
+//   품질·정확도를 올림 — 강추론 모델의 독립 검수는 자기승인 편향을 차단, 코드 특화 모델은 구현 정확도↑.
+//   단 조율 오버헤드 < 이득이어야 하므로 opt-in + verify(비활성 provider 배정 경고)로 오설정을 방지.
+const ROLE_CATALOG = {
+  commander:  { ko: '지휘관', desc: '전체 계획 수립·작업 분해·최종 의사결정', prefer: ['claude', 'codex', 'grok'], modelKind: 'top',  why: '최강 추론 모델이 전체 맥락을 쥐고 분해/결정 → 일관성↑' },
+  reviewer:   { ko: '검수자', desc: '구현 결과 비판적 검수·버그/누락 적발',   prefer: ['claude', 'codex', 'grok'], modelKind: 'top',  why: '독립 강추론 모델의 적대적 검수가 자기승인 편향 차단 → 정확도↑' },
+  coder:      { ko: '코딩 담당', desc: '구현·패치·리팩터',                   prefer: ['codex', 'agy', 'claude', 'grok'], modelKind: 'code', why: '코드 특화 모델이 구현 정확도/속도↑' },
+  architect:  { ko: '설계 담당', desc: '아키텍처·데이터 모델·인터페이스 설계', prefer: ['codex', 'claude'],         modelKind: 'top',  why: '깊은 코드 추론 모델이 설계 트레이드오프 분석' },
+  designer:   { ko: '디자인 담당', desc: 'UI/UX·시각 디자인·레이아웃',        prefer: ['agy', 'claude', 'grok'],   modelKind: 'top',  why: '멀티모달/시각 역량 모델이 디자인 산출물↑' },
+  debugger:   { ko: '디버그 담당', desc: '버그 진단·근본원인·재현',          prefer: ['codex', 'claude', 'grok'], modelKind: 'top',  why: '깊은 추론 모델의 가설-검증이 디버깅 효율↑' },
+  dispatcher: { ko: '하위 분배 담당', desc: '서브에이전트 업무 분배·병렬 조율', prefer: ['claude', 'grok', 'codex'], modelKind: 'fast', why: '빠른 응답 모델이 분배 오버헤드↓' }
+};
+const _ROLE_ALIASES = {
+  '코딩': 'coder', '코더': 'coder', '코딩담당': 'coder',
+  '검수': 'reviewer', '검수자': 'reviewer', '리뷰': 'reviewer', '리뷰어': 'reviewer',
+  '지휘': 'commander', '지휘관': 'commander', '사령관': 'commander',
+  '디자인': 'designer', '디자인담당': 'designer',
+  '디버그': 'debugger', '디버거': 'debugger', '디버깅': 'debugger',
+  '설계': 'architect', '설계담당': 'architect', '아키텍트': 'architect',
+  '분배': 'dispatcher', '분배담당': 'dispatcher', '오케스트레이터': 'dispatcher'
+};
+function _normalizeRole(name) {
+  const raw = String(name || '').trim();
+  if (_ROLE_ALIASES[raw]) return _ROLE_ALIASES[raw];
+  const low = raw.toLowerCase();
+  return _ROLE_ALIASES[low] || low;
+}
+// 역할 modelKind 에 맞는 모델 선택 — top(최상위) / code(코드 특화) / fast(빠른). 순수 함수(selftest).
+function _pickModel(provider, kind) {
+  const list = _PROVIDER_MODEL_CATALOG[provider] || [];
+  if (!list.length) return null;
+  if (kind === 'code') { const m = list.find(x => /codex|coder|code/i.test(x.id)); return (m || list[0]).id; }
+  if (kind === 'fast') { const m = list.find(x => /haiku|mini|flash|oss/i.test(x.id)); return (m || list[list.length - 1]).id; }
+  return list[0].id; // top
+}
+function _rolesFile(root) { return path.join(absRoot(root), '.harness', 'agent-roles.json'); }
+function _loadRoles(root) {
+  const f = _rolesFile(root);
+  if (!exists(f)) return {};
+  try { const j = JSON.parse(read(f)); return (j && j.roles && typeof j.roles === 'object') ? j.roles : {}; } catch { return {}; }
+}
+function _saveRoles(root, roles) {
+  const f = _rolesFile(root);
+  mkdirp(path.dirname(f));
+  writeUtf8(f, JSON.stringify({ schemaVersion: 1, updatedAt: new Date().toISOString(), roles }, null, 2) + '\n');
+  return f;
+}
+// 역할 → {role, provider, model, persona, source} 해석 (사용자 설정 전용; 미설정 시 null).
+function _resolveRole(root, name) {
+  const role = _normalizeRole(name);
+  const roles = _loadRoles(root);
+  if (roles[role] && roles[role].provider) return { role, provider: roles[role].provider, model: roles[role].model || null, persona: roles[role].persona || '', source: 'user' };
+  return null;
+}
+// 활성(ready) 에이전트 기반 최적 역할 배치 제안 — "올바른 방향성 판단" (사용자 요청).
+function _suggestRoles(root) {
+  const ready = EXTERNAL_AGENTS.map(a => ({ id: a.id, status: _checkAgent(a) })).filter(x => x.status.status === 'ready').map(x => x.id);
+  const readySet = new Set(ready);
+  const suggestions = [];
+  for (const [role, def] of Object.entries(ROLE_CATALOG)) {
+    const provider = def.prefer.find(p => readySet.has(p)) || null;
+    const model = provider ? _pickModel(provider, def.modelKind) : null;
+    suggestions.push({ role, ko: def.ko, desc: def.desc, provider, model, ready: !!provider, why: def.why, prefer: def.prefer });
+  }
+  return { ready, suggestions };
+}
+// leerness roles <list|set|unset|catalog|suggest|verify>
+function rolesCmd(root, sub, ...args) {
+  root = absRoot(root || process.cwd());
+  try { _loadEnvFile(root); _loadEnvFile(path.join(root, '..')); } catch {}
+  const json = has('--json');
+  sub = sub || 'list';
+
+  if (sub === 'catalog') {
+    if (json) { log(JSON.stringify({ roles: ROLE_CATALOG }, null, 2)); return; }
+    log(`# leerness roles catalog (1.9.270) — 알려진 역할 ${Object.keys(ROLE_CATALOG).length}종`);
+    for (const [role, d] of Object.entries(ROLE_CATALOG)) {
+      log(`  ${role.padEnd(11)} ${d.ko.padEnd(8)} — ${d.desc}`);
+      log(`     선호 provider: ${d.prefer.join(' > ')} · 모델 등급: ${d.modelKind} · 근거: ${d.why}`);
+    }
+    log(`\n  설정: leerness roles set <role> --provider <id> [--model <m>] [--persona "..."]`);
+    log(`  자동 제안: leerness roles suggest [--apply]`);
+    return;
+  }
+
+  if (sub === 'set') {
+    const roleRaw = args.find(a => a && !a.startsWith('-'));
+    const role = _normalizeRole(roleRaw);
+    if (!role) return fail('roles set <role> 필요 (예: coder, reviewer, commander)');
+    if (!ROLE_CATALOG[role] && !has('--force')) return fail(`알 수 없는 역할: ${role} (catalog: ${Object.keys(ROLE_CATALOG).join(', ')}) — 커스텀 역할은 --force`);
+    const provider = arg('--provider', null) || arg('--to', null);
+    if (!provider) return fail('--provider <id> 필요 (claude/codex/agy/grok/copilot/ollama)');
+    if (!_allProviders(root).some(p => p.id === provider) && !has('--force')) return fail(`알 수 없는 provider: ${provider} — 커스텀은 --force 또는 provider add`);
+    let model = arg('--model', null);
+    if (!model) model = _pickModel(provider, (ROLE_CATALOG[role] || {}).modelKind || 'top');
+    const persona = arg('--persona', null) || (ROLE_CATALOG[role] ? ROLE_CATALOG[role].desc : '');
+    const roles = _loadRoles(root);
+    roles[role] = { provider, model: model || null, persona };
+    const f = _saveRoles(root, roles);
+    // 비활성 provider 경고 (verify 사전 노출)
+    let warnMsg = '';
+    try { const st = _checkAgent(EXTERNAL_AGENTS.find(a => a.id === provider) || { id: provider, bin: provider, versionArgs: ['--version'], envFlag: `LEERNESS_ENABLE_${provider.toUpperCase()}` }); if (st.status !== 'ready') warnMsg = `⚠ ${provider} 현재 비활성(${st.status}) — 활성화: LEERNESS_ENABLE_${provider.toUpperCase()}=1 + CLI 설치`; } catch {}
+    if (json) { log(JSON.stringify({ set: role, provider, model: model || null, persona, file: f, warning: warnMsg || null }, null, 2)); return; }
+    ok(`역할 설정: ${role} (${ROLE_CATALOG[role] ? ROLE_CATALOG[role].ko : 'custom'}) → ${provider}${model ? ' / ' + model : ''}`);
+    if (persona) log(`  persona: ${persona}`);
+    if (warnMsg) warn(warnMsg);
+    log(`  파일: ${f}  ·  사용: leerness agents dispatch "<task>" --role ${role}`);
+    return;
+  }
+
+  if (sub === 'unset' || sub === 'remove' || sub === 'rm') {
+    const role = _normalizeRole(args.find(a => a && !a.startsWith('-')));
+    const roles = _loadRoles(root);
+    if (!roles[role]) return fail(`설정되지 않은 역할: ${role}`);
+    delete roles[role];
+    const f = _saveRoles(root, roles);
+    if (json) { log(JSON.stringify({ removed: role, file: f }, null, 2)); return; }
+    ok(`역할 제거: ${role}`);
+    return;
+  }
+
+  if (sub === 'suggest') {
+    const { ready, suggestions } = _suggestRoles(root);
+    if (has('--apply')) {
+      const roles = _loadRoles(root);
+      let applied = 0;
+      for (const s of suggestions) { if (s.ready) { roles[s.role] = { provider: s.provider, model: s.model, persona: ROLE_CATALOG[s.role].desc }; applied++; } }
+      const f = _saveRoles(root, roles);
+      if (json) { log(JSON.stringify({ applied, ready, file: f, suggestions }, null, 2)); return; }
+      ok(`제안 적용: ${applied}개 역할 → ${f}`);
+      for (const s of suggestions.filter(x => x.ready)) log(`  ${s.role.padEnd(11)} → ${s.provider} / ${s.model}`);
+      const unready = suggestions.filter(x => !x.ready);
+      if (unready.length) log(`  (미배정 ${unready.length}: ${unready.map(x => x.role).join(', ')} — 활성 provider 없음)`);
+      return;
+    }
+    if (json) { log(JSON.stringify({ ready, suggestions }, null, 2)); return; }
+    log(`# leerness roles suggest (1.9.270) — 활성 에이전트 기반 최적 역할 배치`);
+    log(`활성(ready): ${ready.join(', ') || '(없음 — LEERNESS_ENABLE_* + CLI 설치 필요)'}`);
+    log('');
+    for (const s of suggestions) {
+      const mark = s.ready ? '✓' : '·';
+      log(`  ${mark} ${s.role.padEnd(11)} ${s.ko.padEnd(8)} → ${s.ready ? `${s.provider} / ${s.model}` : '(미배정 — 선호 ' + s.prefer.join('>') + ' 비활성)'}`);
+      log(`       근거: ${s.why}`);
+    }
+    log(`\n  적용: leerness roles suggest --apply  ·  개별: leerness roles set <role> --provider <id>`);
+    return;
+  }
+
+  if (sub === 'verify') {
+    const roles = _loadRoles(root);
+    const entries = Object.entries(roles);
+    const results = entries.map(([role, def]) => {
+      let status = 'unknown';
+      try { const a = EXTERNAL_AGENTS.find(x => x.id === def.provider); status = a ? _checkAgent(a).status : 'unknown-provider'; } catch {}
+      return { role, provider: def.provider, model: def.model || null, status, ok: status === 'ready' };
+    });
+    const bad = results.filter(r => !r.ok);
+    if (json) { log(JSON.stringify({ total: entries.length, ready: results.filter(r => r.ok).length, issues: bad, results }, null, 2)); return; }
+    log(`# leerness roles verify (1.9.270)`);
+    if (!entries.length) { log('  (설정된 역할 없음 — leerness roles suggest --apply 또는 roles set)'); return; }
+    for (const r of results) log(`  ${r.ok ? '🟢' : '🔴'} ${r.role.padEnd(11)} → ${r.provider}${r.model ? ' / ' + r.model : ''}  [${r.status}]`);
+    if (bad.length) { log(`\n  ⚠ ${bad.length}개 역할이 비활성 provider 배정 — 활성화 또는 roles set 으로 재배정`); process.exitCode = 1; }
+    else log(`\n  ✓ 모든 역할이 활성 provider 에 배정됨`);
+    return;
+  }
+
+  // default: list
+  const roles = _loadRoles(root);
+  const entries = Object.entries(roles);
+  if (json) { log(JSON.stringify({ roles, count: entries.length }, null, 2)); return; }
+  log(`# leerness roles (1.9.270) — 설정된 역할 ${entries.length}개`);
+  if (!entries.length) {
+    log(`  (없음) — leerness roles suggest 로 활성 에이전트 기반 제안 확인 → roles suggest --apply`);
+    log(`  또는: leerness roles set coder --provider codex --model gpt-5.5`);
+    return;
+  }
+  for (const [role, def] of entries) {
+    const ko = ROLE_CATALOG[role] ? ROLE_CATALOG[role].ko : 'custom';
+    log(`  ${role.padEnd(11)} ${ko.padEnd(8)} → ${def.provider}${def.model ? ' / ' + def.model : ''}`);
+    if (def.persona) log(`       ${def.persona}`);
+  }
+  log(`\n  사용: leerness agents dispatch "<task>" --role <role>  ·  검증: leerness roles verify`);
+}
+
 // 1.9.149+1.9.153: REPL 모드 — leerness 자율 AI 에이전트 (multi-provider 세션)
 async function _agentRepl(root, opts) {
   // 1.9.153: .env 자동 로드 (REPL 진입 직전) — install 직후 LEERNESS_ENABLE_* 즉시 반영
@@ -20604,6 +20814,8 @@ async function main() {
     const agentArg = args[1] && !args[1].startsWith('-') ? args[1] : null;
     return slashCommandsCmd(arg('--path', process.cwd()), agentArg, { json: has('--json'), record: has('--record'), force: has('--force'), detect: has('--detect'), refresh: has('--refresh'), dryRun: has('--dry-run') });
   }
+  // 1.9.270: leerness roles <list|set|unset|catalog|suggest|verify> — 모델별 역할 부여 (사용자 명시)
+  if (cmd === 'roles' || cmd === 'role')             return rolesCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
@@ -20774,5 +20986,7 @@ module.exports = {
   AGENT_SLASH_COMMANDS, _agentSlashFile, _loadAgentSlashCommands, _recordAgentSlashCommands, _agentSlashHint, slashCommandsCmd,
   _parseSlashFromHelp, _probeAgentSlash, _refreshAgentSlashCommands,
   // 1.9.269: 시스템(OS) 언어 감지 (UR-0022) + 언어 판별 — 단위 테스트
-  _detectSystemLang, detectLanguageValue
+  _detectSystemLang, detectLanguageValue,
+  // 1.9.270: agent roles — 모델별 역할 부여 (사용자 명시) — 단위 테스트
+  ROLE_CATALOG, _normalizeRole, _pickModel, _rolesFile, _loadRoles, _saveRoles, _resolveRole, _suggestRoles, rolesCmd, _dispatchCommand
 };

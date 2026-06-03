@@ -2722,5 +2722,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.270 회귀: agent roles — 모델별 역할 부여 (사용자 명시)
+total++;
+{
+  const tmpRole = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-roles-'));
+  // set (한국어 별칭) + model
+  const rSet = cp.spawnSync(process.execPath, [CLI, 'roles', 'set', '코딩', '--provider', 'codex', '--model', 'gpt-5.5', '--path', tmpRole, '--json'], { encoding: 'utf8', timeout: 15000 });
+  let setOk = false;
+  try { const j = JSON.parse(rSet.stdout); setOk = j.set === 'coder' && j.provider === 'codex' && j.model === 'gpt-5.5'; } catch {}
+  // list JSON
+  const rList = cp.spawnSync(process.execPath, [CLI, 'roles', 'list', '--path', tmpRole, '--json'], { encoding: 'utf8', timeout: 15000 });
+  let listOk = false;
+  try { const j = JSON.parse(rList.stdout); listOk = j.count === 1 && j.roles.coder && j.roles.coder.provider === 'codex'; } catch {}
+  // dispatch --role → 모델 라우팅 (claude 활성; claude 미설치 환경이면 비활성 메시지 허용)
+  cp.spawnSync(process.execPath, [CLI, 'roles', 'set', 'reviewer', '--provider', 'claude', '--model', 'claude-opus-4-7', '--path', tmpRole], { encoding: 'utf8', timeout: 15000 });
+  const envC = { ...process.env, LEERNESS_ENABLE_CLAUDE: '1' };
+  const rRoute = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', '검수', '--role', 'reviewer', '--path', tmpRole], { encoding: 'utf8', timeout: 15000, env: envC });
+  const routeOk = /역할 reviewer → claude/.test(rRoute.stdout) && (/--model claude-opus-4-7/.test(rRoute.stdout) || /claude 비활성/.test(rRoute.stdout));
+  // catalog 7종
+  const rCat = cp.spawnSync(process.execPath, [CLI, 'roles', 'catalog', '--path', tmpRole, '--json'], { encoding: 'utf8', timeout: 15000 });
+  let catOk = false;
+  try { const j = JSON.parse(rCat.stdout); catOk = Object.keys(j.roles).length === 7 && j.roles.coder && j.roles.commander; } catch {}
+  const ok = setOk && listOk && routeOk && catOk;
+  console.log(ok ? '✓ B(1.9.270) agent roles: set(별칭)/list/dispatch --role 라우팅/catalog 7종' : `✗ roles 실패 (set=${setOk} list=${listOk} route=${routeOk} cat=${catOk})`);
+  if (!ok) { failed++; console.log((rRoute.stdout || '').slice(0, 400)); }
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

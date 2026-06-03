@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.270 — 2026-06-02 — agent roles: 모델별 역할 부여 (코딩/검수/지휘/디자인/디버그/설계/분배)
+
+**🎭 여러 AI 에이전트 활성 시 역할을 provider+model 에 매핑하고 `dispatch --role` 로 라우팅 — 사용자가 선택적으로 역할 룰 설정 (사용자 명시).**
+
+### 배경 + 방향성 판단 (사용자 요청)
+사용자 요청: Codex gpt-5.5=코딩, Claude Opus=지휘/검수, Gemini=디자인 등 **모델별 역할 부여**가 leerness 프로젝트의 성능/정확도를 올리는지 판단하고 올바른 방향으로 구현.
+
+**판단**: 역할 특화는 다음 조건에서 품질·정확도를 **유의미하게 향상**시킨다 —
+1. **모델 강점이 분명할 때** — 코드 특화 모델(코딩)·강추론 모델(설계/검수)·멀티모달(디자인)을 적재적소 배치.
+2. **독립 검수 분리** — 구현자와 다른 강추론 모델이 검수하면 **자기승인 편향(self-approval bias)** 차단 → 버그 적발률↑ (기존 `_AGENT_ROLE_PROMPTS` planner/reviewer/actor 분리 원칙의 모델 레벨 확장).
+3. **작업 분해 가능 + 조율 오버헤드 < 이득**일 때.
+→ 따라서 **opt-in(기본 미설정) + `roles verify`(비활성 provider 배정 경고) + `roles suggest`(활성 에이전트 기반 자동 배치 + 근거 제시)** 로 오설정을 막고 안전하게 도입. 단일 에이전트만 활성이면 모든 역할이 그 에이전트로 수렴(무해).
+
+### 구현
+1. **`ROLE_CATALOG` 7종** — commander(지휘)/reviewer(검수)/coder(코딩)/architect(설계)/designer(디자인)/debugger(디버그)/dispatcher(분배). 각 역할: 선호 provider 우선순위 + 모델 등급(top/code/fast) + **근거(why)**.
+2. **`.harness/agent-roles.json`** 사용자 설정 — `{ roles: { <role>: { provider, model, persona } } }`.
+3. **`leerness roles <list|set|unset|catalog|suggest|verify>`** CLI — 한국어 별칭(코딩→coder, 검수자→reviewer 등) · `set` 시 모델 미지정이면 등급 기반 자동 선택(`_pickModel`) · `suggest [--apply]` 활성 에이전트 기반 최적 배치 + 근거 · `verify` 비활성 provider 배정 적발(exit 1).
+4. **`agents dispatch --role <role>`** — 역할 → provider+model 라우팅, `_dispatchCommand` 가 provider 별 모델 플래그 주입(claude `--model`, codex `-m`, agy/grok `--model`). `--model` 직접 override 도 지원.
+5. **grok 통합 보완** (1.9.268 후속) — `_PROVIDER_MODEL_CATALOG`/`_PROVIDER_CYCLE_ORDER`/`_dispatchCommand` 에 grok 추가.
+6. **MCP `leerness_roles`** (외부 AI 가 역할 배치/조회) + selftest 22 → 24 + e2e 218 → 219.
+
+### 검증
+- **selftest 24/24 PASS** · **E2E 219/219 PASS** (회귀 0).
+- 실측: `roles set 코딩 --provider codex --model gpt-5.5` → coder/codex/gpt-5.5 · `dispatch --role reviewer` → `claude --print --model claude-opus-4-7 "..."` 모델 주입 확인 · `verify` 비활성 provider 🔴 적발 · `suggest` 활성 기반 배치 + 근거.
+
 ## 1.9.269 — 2026-06-02 — UR-0022: init 시 OS 시스템 언어 감지 → 설치 가이드 자동 언어 선택
 
 **🌐 `npx leerness init` 등 설치 시 OS 시스템 언어를 감지해 설치 가이드/생성 문서를 알맞은 언어로 표시 (사용자 명시 UR-0022).**
