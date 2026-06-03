@@ -2748,5 +2748,23 @@ total++;
   if (!ok) { failed++; console.log((rRoute.stdout || '').slice(0, 400)); }
 }
 
+// 1.9.272 회귀: capabilities — 권한/보안 표면 공개 (GPT-5.5 리뷰 반영)
+total++;
+{
+  const rJson = cp.spawnSync(process.execPath, [CLI, 'capabilities', '--json'], { encoding: 'utf8', timeout: 15000 });
+  let jsonOk = false;
+  try {
+    const j = JSON.parse(rJson.stdout);
+    jsonOk = j.surface && Object.keys(j.surface).length === 6 && j.surface.automationBridges
+      && j.surface.automationBridges.risk === 'high' && Array.isArray(j.powerfulCommands) && j.powerfulCommands.length >= 5
+      && Array.isArray(j.principles);
+  } catch {}
+  const rTxt = cp.spawnSync(process.execPath, [CLI, 'security-surface'], { encoding: 'utf8', timeout: 15000 });
+  const txtOk = rTxt.status === 0 && /권한·보안 표면/.test(rTxt.stdout) && /opt-out/.test(rTxt.stdout);
+  const ok = jsonOk && txtOk;
+  console.log(ok ? '✓ B(1.9.272) capabilities: 6 영역 surface + 주의명령 + alias(security-surface)' : `✗ capabilities 실패 (json=${jsonOk} txt=${txtOk})`);
+  if (!ok) { failed++; console.log((rJson.stdout || '').slice(0, 300)); }
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

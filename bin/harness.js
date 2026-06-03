@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.271';
+const VERSION = '1.9.272';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2950,6 +2950,7 @@ function _selfTestCases() {
     { name: '_detectSystemLang: LC_ALL 우선 + LANGUAGE 폴백 (1.9.269)', run: () => _detectSystemLang({ LC_ALL: 'ko_KR.UTF-8', LANG: 'en_US.UTF-8' }) === 'ko' && _detectSystemLang({ LANGUAGE: 'en_GB' }) === 'en' },
     { name: 'ROLE_CATALOG + _normalizeRole: 7종 + 한국어 별칭 (1.9.270)', run: () => { const keys = Object.keys(ROLE_CATALOG); return keys.length === 7 && keys.includes('coder') && keys.includes('reviewer') && _normalizeRole('코딩') === 'coder' && _normalizeRole('검수자') === 'reviewer' && _normalizeRole('지휘관') === 'commander'; } },
     { name: '_pickModel: top/code/fast 등급 선택 (1.9.270)', run: () => { return _pickModel('codex', 'code') === 'gpt-5-codex' && _pickModel('claude', 'top') === 'claude-opus-4-7' && /haiku/.test(_pickModel('claude', 'fast')); } },
+    { name: 'CAPABILITY_SURFACE: 6 영역 + risk/optOut + 주의명령 (1.9.272)', run: () => { const ks = Object.keys(CAPABILITY_SURFACE); return ks.length === 6 && ks.includes('automationBridges') && Object.values(CAPABILITY_SURFACE).every(v => ['low','medium','high'].includes(v.risk) && v.optOut && v.desc) && POWERFUL_COMMANDS.length >= 5; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3606,6 +3607,7 @@ function commandsCmd(root) {
       { cmd: 'route <task-type>', desc: '작업 유형 분류 (11종)' },
       { cmd: 'agents list|check|quota|dispatch|multi', desc: '외부 AI CLI 오케스트레이션 (dispatch --role 모델 라우팅 1.9.270)' },
       { cmd: 'roles list|set|unset|catalog|suggest|verify', desc: '모델별 역할 부여 (코딩/검수/지휘/디자인/디버그/설계/분배) — 1.9.270' },
+      { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272' },
       { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
@@ -15258,6 +15260,9 @@ function autoUpdateInstall(root) {
   ok('auto-update SessionStart hook installed (.claude/settings.local.json)');
   if (removedLegacy) ok(`legacy hook 제거: ${removedLegacy}건 (leerness-plus → leerness 통합)`);
   ok('/update slash command added');
+  // 1.9.272 (GPT-5.5 외부 리뷰 반영): hook 설치 투명성 — 무엇을/왜/어떻게 끄는지 명시.
+  log(`  ⓘ 이 hook 은 Claude Code 세션 시작 시 \`leerness update --check\` 를 1회 실행합니다 (네트워크: npm 최신 버전 비교, 자동 설치는 안 함).`);
+  log(`  ⓘ 제거: ${rel(root, settingsFile)} 의 hooks.SessionStart 항목 삭제  ·  설치 시 끄기: leerness init . --no-auto-update`);
 }
 
 // 1.9.151: ViewWork hook 제거 (사용자 명시 — leerness와 무관한 외부 도구)
@@ -17891,6 +17896,56 @@ function rolesCmd(root, sub, ...args) {
     if (def.persona) log(`       ${def.persona}`);
   }
   log(`\n  사용: leerness agents dispatch "<task>" --role <role>  ·  검증: leerness roles verify`);
+}
+
+// ===== 1.9.272: Capability / Security Surface 공개 (GPT-5.5 외부 리뷰 반영) =====
+//   leerness 는 권한이 큰 CLI 하네스(child_process/git/외부 CLI/automation 브리지/hook 설치)이므로,
+//   무엇을 할 수 있고 어떻게 끄는지를 명시적으로 공개해 신뢰도를 높인다. SECURITY.md 와 동일 출처.
+const CAPABILITY_SURFACE = {
+  filesystem:        { risk: 'low',    desc: '.harness/ 메타파일 생성·갱신, 변경 전 .harness/archive/ 자동 백업. 소스코드는 직접 수정 안 함.', optOut: '핵심 동작 (백업으로 보호)' },
+  network:           { risk: 'low',    desc: 'npm 최신 버전 비교(update --check)만. 그 외 외부 URL 자동 fetch 안 함.', optOut: 'LEERNESS_OFFLINE=1' },
+  childProcess:      { risk: 'medium', desc: 'git(명시 명령 시 status/commit/push), npm test(verify-code), 외부 CLI --version 감지. 셸 spawn.', optOut: 'verify 계열 한정 · 외부 CLI 는 opt-in' },
+  externalAgents:    { risk: 'medium', desc: 'agents dispatch/multi — 외부 AI CLI(claude/codex/agy/grok/copilot) 호출. 기본은 명령 텍스트만 생성, multi --execute 시 실제 spawn.', optOut: 'LEERNESS_ENABLE_* 미설정 시 비활성 (기본 off)' },
+  automationBridges: { risk: 'high',   desc: 'web(playwright)/pc(robotjs)/lsp(typescript) 브리지 — opt-in 의존성. pc 는 마우스/키보드 제어(full 권한).', optOut: '의존성 미설치 시 비활성 (기본 off, 명시 설치 필요)' },
+  claudeHook:        { risk: 'low',    desc: 'init 시 .claude/settings.local.json 에 SessionStart hook(update --check) 설치.', optOut: 'leerness init . --no-auto-update' }
+};
+const POWERFUL_COMMANDS = [
+  { cmd: 'init',                   note: '.harness/ 50+ 파일 + .claude hook 생성 (변경 전 백업)' },
+  { cmd: 'update --yes',           note: '자동 마이그레이션 — 메타파일 갱신' },
+  { cmd: 'agents multi --execute', note: '외부 AI CLI 실제 spawn (병렬 실행)' },
+  { cmd: 'release publish / sync-main', note: 'git push + npm publish + GitHub release' },
+  { cmd: 'pc <click|type|...>',    note: '마우스/키보드 제어 (robotjs, full 권한)' },
+  { cmd: 'web <...>',              note: '헤드리스 브라우저 자동화 (playwright)' },
+  { cmd: 'setup-agents',           note: '외부 CLI 활성화 + 자동 설치 시도' }
+];
+function capabilitiesCmd(root, opts = {}) {
+  if (opts.json) {
+    log(JSON.stringify({ version: VERSION, surface: CAPABILITY_SURFACE, powerfulCommands: POWERFUL_COMMANDS,
+      principles: ['0 런타임 의존성', 'postinstall 없음', '사용자 동의 없이 외부 LLM/API/CLI 자동 호출 안 함', '변경 전 자동 백업'] }, null, 2));
+    return;
+  }
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const riskMark = r => r === 'high' ? '🔴 high' : r === 'medium' ? '🟡 medium' : '🟢 low';
+  log(cy(`# leerness capabilities (1.9.272) — 권한·보안 표면 공개`));
+  log(dm(`  leerness 는 권한이 큰 CLI 하네스입니다. 아래가 할 수 있는 전부이며, 각 항목의 opt-out 을 함께 표기합니다.`));
+  log('');
+  log(`## 원칙`);
+  log(`  ✓ 런타임 의존성 0 · postinstall 없음 · 변경 전 자동 백업`);
+  log(`  ✓ 사용자 동의 없이 외부 LLM/API/CLI 를 자동 호출하지 않음`);
+  log('');
+  log(`## 권한 표면`);
+  for (const [k, v] of Object.entries(CAPABILITY_SURFACE)) {
+    log(`  ${riskMark(v.risk)}  ${cy(k)}`);
+    log(`     ${v.desc}`);
+    log(dm(`     opt-out: ${v.optOut}`));
+  }
+  log('');
+  log(`## ⚠ 주의해서 쓸 명령 (회사/운영 코드)`);
+  for (const c of POWERFUL_COMMANDS) log(`  • ${c.cmd.padEnd(22)} ${dm(c.note)}`);
+  log('');
+  log(dm(`  전체 정책: SECURITY.md  ·  기계 판독: leerness capabilities --json`));
 }
 
 // 1.9.149+1.9.153: REPL 모드 — leerness 자율 AI 에이전트 (multi-provider 세션)
@@ -20816,6 +20871,8 @@ async function main() {
   }
   // 1.9.270: leerness roles <list|set|unset|catalog|suggest|verify> — 모델별 역할 부여 (사용자 명시)
   if (cmd === 'roles' || cmd === 'role')             return rolesCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  // 1.9.272: leerness capabilities — 권한/보안 표면 공개 (GPT-5.5 외부 리뷰 반영)
+  if (cmd === 'capabilities' || cmd === 'security-surface') return capabilitiesCmd(arg('--path', process.cwd()), { json: has('--json') });
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
@@ -20988,5 +21045,7 @@ module.exports = {
   // 1.9.269: 시스템(OS) 언어 감지 (UR-0022) + 언어 판별 — 단위 테스트
   _detectSystemLang, detectLanguageValue,
   // 1.9.270: agent roles — 모델별 역할 부여 (사용자 명시) — 단위 테스트
-  ROLE_CATALOG, _normalizeRole, _pickModel, _rolesFile, _loadRoles, _saveRoles, _resolveRole, _suggestRoles, rolesCmd, _dispatchCommand
+  ROLE_CATALOG, _normalizeRole, _pickModel, _rolesFile, _loadRoles, _saveRoles, _resolveRole, _suggestRoles, rolesCmd, _dispatchCommand,
+  // 1.9.272: 권한/보안 표면 공개 (GPT-5.5 리뷰) — 단위 테스트
+  CAPABILITY_SURFACE, POWERFUL_COMMANDS, capabilitiesCmd
 };

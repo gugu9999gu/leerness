@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.9.272 — 2026-06-03 — 공개 신뢰도·투명성 강화 (GPT-5.5 외부 리뷰 반영)
+
+**🔒 외부 평가(GPT-5.5 직접 실행/검사, 7/10)에서 지적된 공개 패키지 신뢰도·투명성 항목을 반영.**
+
+### 배경
+GPT-5.5 가 패키지를 직접 받아 실행·검사한 외부 리뷰: 기능은 실용적이나 (1) README 배지 버전 불일치, (2) `.claude` hook 자동 설치 명시성 부족, (3) 권한이 큰 CLI(child_process/git/외부CLI/automation)인데 표면 비공개, (4) CI 공개 부재로 e2e 신뢰도, (5) 잦은 릴리스·단일 대형 파일·e2e 5분 초과를 지적. 실행 가능한 신뢰도 항목을 이번 라운드에 반영하고 나머지는 백로그(UR-0025~0027)에 기록.
+
+### 구현
+1. **`leerness capabilities` (alias `security-surface`) 신규 명령** — 권한 표면 6영역(filesystem/network/childProcess/externalAgents/automationBridges/claudeHook) + risk/opt-out + ⚠ 주의 명령 7종 공개. `--json` 기계 판독. (GPT #3 반영)
+2. **`SECURITY.md` 신규** (npm `files` 포함) — 동일 표면 + 설계원칙(0-dep/no-postinstall/백업/무동의 호출금지) + 권장 도입 방식. (GPT #3)
+3. **`.claude` hook 투명성** — 설치 시 "무엇을/왜/끄는 법(`--no-auto-update`, 파일 경로)" 명시 안내. (GPT #2/#4)
+4. **README 버전 배지 불일치 영구 방지** — `prepack` 에 `readme sync` 추가 → 매 publish 시 배지가 현재 버전/e2e 결과와 자동 일치. ASCII 배너 버전 숫자 제거(drift-proof). (GPT #1 근본 해결)
+5. **GitHub Actions CI** — `.github/workflows/ci.yml` (ubuntu+windows × node 18/20/22, selftest+e2e). 공개 CI 로 e2e 배지 신뢰도. (GPT #4)
+6. **README 보안·투명성 섹션** (한/영) + selftest 24→25 + e2e 219→220.
+
+### 백로그 기록 (GPT 장기 항목)
+- UR-0025: `bin/harness.js` 단일 대형 파일 모듈 분리 (점진적·비파괴).
+- UR-0026: 릴리스 채널 (npm dist-tag latest/next 안정·실험 구분).
+- UR-0027: `npm test` 5분 초과 → `test:fast` 서브셋 분리 + CI 전체.
+
+### 검증
+- **selftest 25/25 PASS** · **E2E 220/220 PASS** (회귀 0).
+- `capabilities --json` 6영역/주의명령/원칙 + alias 확인 · 배지 자동 동기화(1.9.272 / e2e 220) 확인.
+
 ## 1.9.271 — 2026-06-02 — README 한/영 이중 사용자 친화 재작성 (가독성) + e2e 배지 카운트 정확화
 
 **📖 README 를 한국어/영어 이중 버전으로 가독성 좋게 재작성 (사용자 명시).**

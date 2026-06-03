@@ -1,0 +1,35 @@
+name: CI
+
+# leerness CI — runs the full integrity gate (version + selftest + e2e) on every push/PR.
+# Public CI result raises trust: the e2e badge in README reflects this workflow.
+
+on:
+  push:
+    branches: [main, "release/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: gate (selftest + e2e)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # No dependencies to install (zero runtime deps) — run the integrity gate directly.
+      - name: version
+        run: node ./bin/harness.js --version
+      - name: selftest
+        run: node ./bin/harness.js selftest
+      - name: e2e
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: node ./scripts/e2e.js
