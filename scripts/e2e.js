@@ -2843,5 +2843,37 @@ total++;
   if (!ok) { failed++; console.log((rVerify.stdout || '').slice(0, 300)); }
 }
 
+// 1.9.278 회귀 (UR-0032): .leerness/ 상태 스키마 라이프사이클 (start→record→verify→handoff→show)
+total++;
+{
+  const sDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-state-'));
+  const run = (a) => cp.spawnSync(process.execPath, [CLI, 'state', ...a, '--path', sDir], { encoding: 'utf8', timeout: 15000 });
+  run(['start', 'API 구현', '--agent', 'claude', '--model', 'claude-opus-4-7', '--task', 'T-0001']);
+  run(['record', '--files-changed', 'src/api.js,src/db.js', '--commands', 'npm test', '--tests', '12 passed', '--decision', 'retry 3']);
+  run(['verify', '--result', 'pass']);
+  run(['handoff', 'API 완료, db 마이그레이션은 다음 에이전트']);
+  // 다음 에이전트가 JSON 으로 인수
+  const rShow = run(['show', '--json']);
+  let recOk = false, handoffOk = false;
+  try {
+    const j = JSON.parse(rShow.stdout);
+    // handoff 후 currentRun 은 null, 누적 runs=1
+    recOk = j.state && j.state.runCounter === 1 && j.state.currentRunId === null;
+  } catch {}
+  const runFile = path.join(sDir, '.leerness', 'runs', 'run-0001.json');
+  const hJson = path.join(sDir, '.leerness', 'handoff', 'latest.json');
+  try {
+    const rec = JSON.parse(fs.readFileSync(runFile, 'utf8'));
+    const hf = JSON.parse(fs.readFileSync(hJson, 'utf8'));
+    handoffOk = rec.status === 'handed-off' && rec.verification_result === 'pass'
+      && rec.files_changed.length === 2 && rec.model_name === 'claude-opus-4-7'
+      && rec.task_id === 'T-0001' && hf.handoff_summary && hf.run_id === 'run-0001'
+      && fs.existsSync(path.join(sDir, '.leerness', 'handoff', 'latest.md'));
+  } catch {}
+  const ok = recOk && handoffOk;
+  console.log(ok ? '✓ B(1.9.278) state substrate: start→record→verify→handoff→show (.leerness JSON 인수인계)' : `✗ state 실패 (show=${recOk} handoff=${handoffOk})`);
+  if (!ok) { failed++; console.log((rShow.stdout || '').slice(0, 300)); }
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

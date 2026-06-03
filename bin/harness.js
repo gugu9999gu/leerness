@@ -9,7 +9,7 @@ const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp } = require('../lib/pure-utils');
 
-const VERSION = '1.9.277';
+const VERSION = '1.9.278';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2960,6 +2960,7 @@ function _selfTestCases() {
     { name: '_pickModel: top/code/fast 등급 선택 (1.9.270)', run: () => { return _pickModel('codex', 'code') === 'gpt-5-codex' && _pickModel('claude', 'top') === 'claude-opus-4-7' && /haiku/.test(_pickModel('claude', 'fast')); } },
     { name: 'CAPABILITY_SURFACE: 6 영역 + risk/optOut + 주의명령 (1.9.272)', run: () => { const ks = Object.keys(CAPABILITY_SURFACE); return ks.length === 6 && ks.includes('automationBridges') && Object.values(CAPABILITY_SURFACE).every(v => ['low','medium','high'].includes(v.risk) && v.optOut && v.desc) && POWERFUL_COMMANDS.length >= 5; } },
     { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
+    { name: '_newRunRecord: GPT-5.5 권고 스키마 14필드 + 기본값 (1.9.278)', run: () => { const r = _newRunRecord({ run_id: 'run-0001', goal: 'g', started_at: '2026-06-03T00:00:00Z' }); return r.schemaVersion === 1 && r.run_id === 'run-0001' && r.started_at === '2026-06-03T00:00:00Z' && Array.isArray(r.files_changed) && Array.isArray(r.commands_run) && Array.isArray(r.tests_run) && Array.isArray(r.decisions) && r.verification_result === null && r.status === 'in-progress' && 'handoff_summary' in r && 'model_name' in r && 'task_id' in r; } },
     { name: 'coreFiles --minimal: 핵심 유지 + 비핵심 제외 + verify 필수 보존 (1.9.276)', run: () => { const full = coreFiles('.', 'ko', []); const min = coreFiles('.', 'ko', [], { minimal: true }); const keep = ['.harness/plan.md','.harness/progress-tracker.md','.harness/session-handoff.md','AGENTS.md','CLAUDE.md','.harness/consistency-policy.md','.harness/reuse-map.md','.harness/encoding-policy.md','.harness/secret-policy.md']; const drop = ['.cursor/rules/leerness.mdc','.harness/skill-index.md','.harness/architecture.md']; const verifyReq = ['.harness/design-system.md','.harness/protected-files.md','.harness/current-state.md']; if (!verifyReq.every(k => min[k])) return false; return Object.keys(min).length < Object.keys(full).length && keep.every(k => min[k]) && drop.every(k => !min[k]); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -3618,6 +3619,7 @@ function commandsCmd(root) {
       { cmd: 'agents list|check|quota|dispatch|multi', desc: '외부 AI CLI 오케스트레이션 (dispatch --role 모델 라우팅 1.9.270)' },
       { cmd: 'roles list|set|unset|catalog|suggest|verify', desc: '모델별 역할 부여 (코딩/검수/지휘/디자인/디버그/설계/분배) — 1.9.270' },
       { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272' },
+      { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278' },
       { cmd: 'release channel [--json]', desc: '릴리스 채널 정책 (latest 안정 / next 실험 / 버전 고정) — 1.9.275' },
       { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
@@ -18020,6 +18022,144 @@ function capabilitiesCmd(root, opts = {}) {
   log(dm(`  전체 정책: SECURITY.md  ·  기계 판독: leerness capabilities --json`));
 }
 
+// ===== 1.9.278 (UR-0032, GPT-5.5 범용 하네스 방향): .leerness/ JSON 상태 스키마 =====
+//   목적: 마크다운(.harness/)과 병행하는 "구조화 상태 substrate". 에이전트 간 인수인계 표준 —
+//   Claude Code 가 한 작업을 Goose/Codex 가 JSON 으로 정확히 이어받음. 비파괴 (신규 .leerness/ 디렉토리).
+//   향후 UR-0031(MCP verb)/UR-0033(adapter) 가 이 스키마를 공통 호출 표면으로 사용.
+function _leernessStateDir(root) { return path.join(absRoot(root), '.leerness'); }
+// 순수 함수: run 레코드 빌더 (모든 필드 기본값 — GPT-5.5 권고 스키마). startedAt 주입 가능(selftest).
+function _newRunRecord(opts = {}) {
+  return {
+    schemaVersion: 1,
+    run_id: opts.run_id || null,
+    task_id: opts.task_id || null,
+    agent_name: opts.agent_name || null,
+    model_name: opts.model_name || null,
+    started_at: opts.started_at || new Date().toISOString(),
+    ended_at: opts.ended_at || null,
+    goal: opts.goal || '',
+    files_read: Array.isArray(opts.files_read) ? opts.files_read : [],
+    files_changed: Array.isArray(opts.files_changed) ? opts.files_changed : [],
+    commands_run: Array.isArray(opts.commands_run) ? opts.commands_run : [],
+    tests_run: Array.isArray(opts.tests_run) ? opts.tests_run : [],
+    errors: Array.isArray(opts.errors) ? opts.errors : [],
+    decisions: Array.isArray(opts.decisions) ? opts.decisions : [],
+    verification_result: opts.verification_result || null,  // 'pass' | 'fail' | null
+    handoff_summary: opts.handoff_summary || null,
+    status: opts.status || 'in-progress'                    // in-progress | verified | handed-off
+  };
+}
+function _loadLeernessState(root) {
+  const f = path.join(_leernessStateDir(root), 'state.json');
+  if (!exists(f)) return { schemaVersion: 1, project: detectProjectName(root), currentRunId: null, runCounter: 0, updatedAt: null };
+  try { return JSON.parse(read(f)); } catch { return { schemaVersion: 1, project: detectProjectName(root), currentRunId: null, runCounter: 0, updatedAt: null }; }
+}
+function _saveLeernessState(root, state) {
+  const dir = _leernessStateDir(root); mkdirp(dir);
+  state.updatedAt = new Date().toISOString();
+  writeUtf8(path.join(dir, 'state.json'), JSON.stringify(state, null, 2) + '\n');
+}
+function _runFile(root, id) { return path.join(_leernessStateDir(root), 'runs', `${id}.json`); }
+function _loadRun(root, id) { const f = _runFile(root, id); if (!exists(f)) return null; try { return JSON.parse(read(f)); } catch { return null; } }
+function _saveRun(root, rec) { const f = _runFile(root, rec.run_id); mkdirp(path.dirname(f)); writeUtf8(f, JSON.stringify(rec, null, 2) + '\n'); }
+function _splitList(v) { return String(v || '').split(',').map(s => s.trim()).filter(Boolean); }
+
+// leerness state <show|start|record|verify|handoff>
+function stateCmd(root, sub, ...args) {
+  root = absRoot(root || process.cwd());
+  const json = has('--json');
+  sub = sub || 'show';
+
+  if (sub === 'start') {
+    const goal = (args.find(a => a && !a.startsWith('-')) || arg('--goal', '')).trim();
+    const state = _loadLeernessState(root);
+    state.runCounter = (state.runCounter || 0) + 1;
+    const run_id = `run-${String(state.runCounter).padStart(4, '0')}`;
+    const rec = _newRunRecord({
+      run_id, goal,
+      task_id: arg('--task', null),
+      agent_name: arg('--agent', null),
+      model_name: arg('--model', null)
+    });
+    _saveRun(root, rec);
+    state.currentRunId = run_id;
+    _saveLeernessState(root, state);
+    if (json) { log(JSON.stringify({ started: run_id, run: rec }, null, 2)); return; }
+    ok(`run 시작: ${run_id}${rec.agent_name ? ' · agent=' + rec.agent_name : ''}${rec.model_name ? ' · model=' + rec.model_name : ''}`);
+    if (goal) log(`  goal: ${goal}`);
+    log(`  → 기록: leerness state record --files-changed "a,b" --commands "npm test" --decision "..."`);
+    return;
+  }
+
+  const state = _loadLeernessState(root);
+  const curId = state.currentRunId;
+  if ((sub === 'record' || sub === 'verify' || sub === 'handoff') && !curId) {
+    return fail('진행 중 run 없음 — 먼저 leerness state start "<goal>"');
+  }
+
+  if (sub === 'record') {
+    const rec = _loadRun(root, curId); if (!rec) return fail(`run 없음: ${curId}`);
+    for (const [flag, key] of [['--files-read', 'files_read'], ['--files-changed', 'files_changed'], ['--commands', 'commands_run'], ['--tests', 'tests_run'], ['--errors', 'errors'], ['--decision', 'decisions']]) {
+      const v = arg(flag, null); if (v) rec[key] = Array.from(new Set([...(rec[key] || []), ..._splitList(v)]));
+    }
+    _saveRun(root, rec);
+    if (json) { log(JSON.stringify({ recorded: curId, run: rec }, null, 2)); return; }
+    ok(`기록: ${curId} (files_changed ${rec.files_changed.length} · commands ${rec.commands_run.length} · tests ${rec.tests_run.length} · decisions ${rec.decisions.length})`);
+    return;
+  }
+
+  if (sub === 'verify') {
+    const rec = _loadRun(root, curId); if (!rec) return fail(`run 없음: ${curId}`);
+    const result = (arg('--result', '') || (args.find(a => a && !a.startsWith('-')) || '')).toLowerCase();
+    if (result !== 'pass' && result !== 'fail') return fail('--result pass|fail 필요');
+    rec.verification_result = result;
+    rec.status = result === 'pass' ? 'verified' : 'in-progress';
+    const note = arg('--note', null); if (note) rec.decisions = [...(rec.decisions || []), `verify(${result}): ${note}`];
+    _saveRun(root, rec);
+    if (json) { log(JSON.stringify({ verified: curId, result, run: rec }, null, 2)); return; }
+    (result === 'pass' ? ok : warn)(`검증 결과: ${curId} → ${result}`);
+    return;
+  }
+
+  if (sub === 'handoff') {
+    const rec = _loadRun(root, curId); if (!rec) return fail(`run 없음: ${curId}`);
+    const summary = (args.find(a => a && !a.startsWith('-')) || arg('--summary', '')).trim();
+    rec.handoff_summary = summary || rec.handoff_summary || '(요약 없음)';
+    rec.ended_at = new Date().toISOString();
+    rec.status = 'handed-off';
+    _saveRun(root, rec);
+    // 다음 에이전트가 읽을 latest handoff (json + md)
+    const hdir = path.join(_leernessStateDir(root), 'handoff'); mkdirp(hdir);
+    writeUtf8(path.join(hdir, 'latest.json'), JSON.stringify(rec, null, 2) + '\n');
+    writeUtf8(path.join(hdir, 'latest.md'),
+      `# Handoff — ${rec.run_id}\n\n- task: ${rec.task_id || '-'}\n- agent: ${rec.agent_name || '-'} · model: ${rec.model_name || '-'}\n- goal: ${rec.goal || '-'}\n- files_changed: ${rec.files_changed.join(', ') || '-'}\n- tests_run: ${rec.tests_run.join(', ') || '-'}\n- verification: ${rec.verification_result || '-'}\n\n## Summary\n${rec.handoff_summary}\n`);
+    state.currentRunId = null;  // 다음 에이전트가 새 run 시작
+    _saveLeernessState(root, state);
+    if (json) { log(JSON.stringify({ handoff: rec.run_id, run: rec }, null, 2)); return; }
+    ok(`handoff 작성: ${rec.run_id} → .leerness/handoff/latest.{md,json}`);
+    return;
+  }
+
+  // default: show
+  const rec = curId ? _loadRun(root, curId) : null;
+  if (json) { log(JSON.stringify({ state, currentRun: rec }, null, 2)); return; }
+  log(`# leerness state (1.9.278, UR-0032) — .leerness/ 구조화 상태`);
+  log(`project: ${state.project} · runs 누적: ${state.runCounter || 0} · 현재 run: ${curId || '(없음)'}`);
+  if (rec) {
+    log('');
+    log(`## ${rec.run_id} [${rec.status}]`);
+    log(`  goal: ${rec.goal || '-'}`);
+    log(`  agent/model: ${rec.agent_name || '-'} / ${rec.model_name || '-'}`);
+    log(`  files_changed: ${rec.files_changed.join(', ') || '-'}`);
+    log(`  commands_run: ${rec.commands_run.join(', ') || '-'}`);
+    log(`  tests_run: ${rec.tests_run.join(', ') || '-'} · verification: ${rec.verification_result || '-'}`);
+    if (rec.decisions.length) log(`  decisions: ${rec.decisions.length}`);
+  } else {
+    log(`  → 시작: leerness state start "<goal>" [--agent claude --model claude-opus-4-7 --task T-0001]`);
+  }
+  return;
+}
+
 // 1.9.149+1.9.153: REPL 모드 — leerness 자율 AI 에이전트 (multi-provider 세션)
 async function _agentRepl(root, opts) {
   // 1.9.153: .env 자동 로드 (REPL 진입 직전) — install 직후 LEERNESS_ENABLE_* 즉시 반영
@@ -20946,6 +21086,8 @@ async function main() {
   if (cmd === 'roles' || cmd === 'role')             return rolesCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.272: leerness capabilities — 권한/보안 표면 공개 (GPT-5.5 외부 리뷰 반영)
   if (cmd === 'capabilities' || cmd === 'security-surface') return capabilitiesCmd(arg('--path', process.cwd()), { json: has('--json') });
+  // 1.9.278 (UR-0032): leerness state <show|start|record|verify|handoff> — .leerness/ 구조화 상태 substrate
+  if (cmd === 'state')                              return stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
@@ -21126,5 +21268,7 @@ module.exports = {
   // 1.9.275: 릴리스 채널 (npm dist-tag, GPT-5.5 리뷰) — 단위 테스트
   _resolveNpmTag, releaseChannelCmd,
   // 1.9.276: init --minimal 파일 필터 (GPT-5.5 2차 리뷰) — 단위 테스트
-  MINIMAL_SKIP_KEYS, coreFiles
+  MINIMAL_SKIP_KEYS, coreFiles,
+  // 1.9.278: .leerness/ 상태 스키마 (UR-0032, GPT-5.5 범용 하네스) — 단위 테스트
+  _newRunRecord, _leernessStateDir, _loadLeernessState, _saveLeernessState, _loadRun, _saveRun, stateCmd
 };

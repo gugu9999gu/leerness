@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.278 — 2026-06-03 — UR-0032: .leerness/ JSON 상태 스키마 (범용 하네스 substrate 1단계)
+
+**🧱 GPT-5.5 가 최우선으로 꼽은 "상태 스키마" — 에이전트 간 구조화 인수인계 substrate. 마크다운(.harness)과 병행, 비파괴.**
+
+### 배경
+GPT-5.5: "범용 하네스가 되려면 파일 생성 도구가 아니라 프로토콜/상태 관리 도구가 돼야 한다. `.leerness/` JSON 스키마(runs/state/decisions)에 task_id/agent/model/files_changed/verification/handoff 가 있어야 Claude Code 작업을 Goose 가 이어받는다." → 전략 백로그 중 substrate 라서 **최우선** 구현.
+
+### 구현
+1. **`.leerness/` 상태 디렉토리** (신규, 비파괴 — 기존 `.harness` markdown 과 병행).
+2. **`_newRunRecord()` 순수 스키마 빌더** — GPT-5.5 권고 14필드: `schemaVersion/run_id/task_id/agent_name/model_name/started_at/ended_at/goal/files_read/files_changed/commands_run/tests_run/errors/decisions/verification_result/handoff_summary/status`.
+3. **`leerness state <show|start|record|verify|handoff>`** CLI (전 서브 `--json`):
+   - `start "<goal>" [--agent --model --task]` → `runs/run-NNNN.json` 생성 + `state.json` currentRun 갱신
+   - `record --files-changed/--commands/--tests/--decision/...` → 배열 누적(dedup)
+   - `verify --result pass|fail` → verification_result + status
+   - `handoff "<summary>"` → ended_at/status=handed-off + **`.leerness/handoff/latest.{md,json}`** (다음 에이전트 인수) + currentRun 해제
+   - `show [--json]` → 현재 상태 + 진행 run
+4. **selftest 27→28 + e2e 224→225** — 스키마 14필드 + 전체 라이프사이클(start→record→verify→handoff→show) JSON 인수인계 검증.
+
+### 다음 단계 (전략 백로그 연계)
+- UR-0031: 이 스키마를 MCP 시맨틱 verb(get_context/record_decision/verify_done/make_handoff)로 노출.
+- UR-0033: `leerness adapter` 가 도구별로 이 substrate 를 가리키게.
+
+### 검증
+- **selftest 28/28 PASS** · **E2E 225/225 PASS** (회귀 0) · 라이프사이클 실측(.leerness/state·runs·handoff 생성, 다음 에이전트 JSON 인수).
+
 ## 1.9.277 — 2026-06-03 — 신규 provider 4종(opencode/qwen/aider/goose) + GPT-5.5 범용 하네스 방향 백로그 등록
 
 **🤝 CLI 에이전트 4종을 정식 provider 로 추가 (설치 선택지 + 모델 catalog + dispatch/roles 라우팅). 빌트인 6 → 10종.**
