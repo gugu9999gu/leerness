@@ -10,33 +10,17 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 
-const VERSION = '1.9.289';
+const VERSION = '1.9.290';
 
-// 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
-//   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
-//   인자 escape 가 필요한 위치는 검증된 입력만 spawnSync 에 전달. REPL agent 진입 시 _checkAgent 가 발산하는 노이즈 제거.
-process.removeAllListeners('warning');
-process.on('warning', (w) => {
-  if (w && (w.code === 'DEP0190' || /DEP0190/.test(String(w.message || '')))) return;
-  process.stderr.write(`(node:${process.pid}) ${w.name || 'Warning'}: ${w.message || w}\n`);
-});
-// 1.9.185 (사용자 명시): REPL 진입 후 user input 시점에도 DEP0190 발생 (claude/ollama CLI 가 Node 자식 spawn 시 자식의 노이즈).
-//   부모 핸들러는 자식에 상속 X → NODE_OPTIONS=--no-deprecation 으로 모든 Node child 까지 전파.
-//   process.env 변경은 자식 spawn 시 상속 (이미 시작된 부모에는 영향 X, 부모는 위의 'warning' 핸들러로 처리).
-if (!/--no-deprecation/.test(process.env.NODE_OPTIONS || '')) {
-  process.env.NODE_OPTIONS = ((process.env.NODE_OPTIONS || '') + ' --no-deprecation').trim();
-}
-
-// 1.9.249 (사용자 명시 UR-0018): 터미널 출력 한국어 깨짐 사전 방지
-//   사용자 보고: protected-files.md 같은 한국어 텍스트가 ? / 한자 조각으로 깨짐 (UTF-8 → CP949 오인식)
-//   조치: (1) stdout/stderr UTF-8 명시  (2) Windows + 한국어 OS + 비-65001 코드페이지 시 chcp 65001 자동 시도
-//   안전: 1회만 시도 (LEERNESS_NO_AUTOCHCP=1 로 opt-out), 실패 시 무시
-(function _ensureStdoutEncoding() {
+// 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
+//   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
+//   해결: 부작용을 _cliBootstrap() 으로 묶고 파일 끝 require.main 가드에서만 호출. import/단위테스트는 부작용 0.
+// 1.9.249 (UR-0018): 터미널 출력 한국어 깨짐 사전 방지 (stdout UTF-8 + Windows 비-65001 시 chcp 65001 자동, opt-out LEERNESS_NO_AUTOCHCP=1).
+function _ensureStdoutEncoding() {
   try {
     if (process.stdout && process.stdout.setEncoding) process.stdout.setEncoding('utf8');
     if (process.stderr && process.stderr.setEncoding) process.stderr.setEncoding('utf8');
   } catch {}
-  // Windows + 한국어 사용자 환경 (chcp 949 = CP949) → 한국어 콘솔 자동 65001 (UTF-8)
   if (process.platform !== 'win32') return;
   if (process.env.LEERNESS_NO_AUTOCHCP === '1') return;
   if (process.env._LEERNESS_CHCP_DONE === '1') return;  // 자식 spawn 무한 재호출 방지
@@ -47,7 +31,6 @@ if (!/--no-deprecation/.test(process.env.NODE_OPTIONS || '')) {
     const code = m ? parseInt(m[1], 10) : null;
     // 65001 = UTF-8, 949 = CP949 (한국), 932 = CP932 (일본), 936 = CP936 (중국)
     if (code && code !== 65001) {
-      // 자동 chcp 65001 시도 (실패해도 무시 — 출력 방향 X 인 비-TTY 등)
       try {
         cp.spawnSync('chcp.com', ['65001'], { encoding: 'utf8', timeout: 2000, shell: true, stdio: 'ignore' });
         process.env._LEERNESS_AUTOCHCP_APPLIED = String(code);  // 진단용 — handoff body 에서 노출
@@ -55,7 +38,21 @@ if (!/--no-deprecation/.test(process.env.NODE_OPTIONS || '')) {
     }
     process.env._LEERNESS_CHCP_DONE = '1';
   } catch {}
-})();
+}
+// 1.9.184/185: DEP0190 (shell:true) 경고 억제 — cross-platform .cmd resolution 위해 shell:true 의도 사용.
+//   warning listener 제거 + NODE_OPTIONS=--no-deprecation (자식 spawn 까지 전파). CLI 전용 → _cliBootstrap 내부.
+function _cliBootstrap() {
+  process.removeAllListeners('warning');
+  process.on('warning', (w) => {
+    if (w && (w.code === 'DEP0190' || /DEP0190/.test(String(w.message || '')))) return;
+    process.stderr.write(`(node:${process.pid}) ${w.name || 'Warning'}: ${w.message || w}\n`);
+  });
+  if (!/--no-deprecation/.test(process.env.NODE_OPTIONS || '')) {
+    process.env.NODE_OPTIONS = ((process.env.NODE_OPTIONS || '') + ' --no-deprecation').trim();
+  }
+  _ensureStdoutEncoding();
+}
+if (require.main === module) _cliBootstrap();
 
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
@@ -2999,6 +2996,7 @@ function _selfTestCases() {
     { name: 'ADAPTERS + _mcpJsonContent: 도구 매핑 + .mcp.json 등록 (1.9.280)', run: () => { const ids = Object.keys(ADAPTERS); const okMap = ['claude','cursor','codex','goose','opencode'].every(id => ADAPTERS[id] && Array.isArray(ADAPTERS[id].keys) && ADAPTERS[id].keys.length); const m = JSON.parse(_mcpJsonContent()); return ids.length >= 9 && okMap && ADAPTERS.claude.mcp === true && ADAPTERS.copilot.mcp === false && m.mcpServers.leerness.command === 'npx' && m.mcpServers.leerness.args.join(' ') === 'leerness mcp serve'; } },
     { name: '_newRunRecord: GPT-5.5 권고 스키마 14필드 + 기본값 (1.9.278)', run: () => { const r = _newRunRecord({ run_id: 'run-0001', goal: 'g', started_at: '2026-06-03T00:00:00Z' }); return r.schemaVersion === 1 && r.run_id === 'run-0001' && r.started_at === '2026-06-03T00:00:00Z' && Array.isArray(r.files_changed) && Array.isArray(r.commands_run) && Array.isArray(r.tests_run) && Array.isArray(r.decisions) && r.verification_result === null && r.status === 'in-progress' && 'handoff_summary' in r && 'model_name' in r && 'task_id' in r; } },
     { name: 'coreFiles --minimal: 핵심 유지 + 비핵심 제외 + verify 필수 보존 (1.9.276)', run: () => { const full = coreFiles('.', 'ko', []); const min = coreFiles('.', 'ko', [], { minimal: true }); const keep = ['.harness/plan.md','.harness/progress-tracker.md','.harness/session-handoff.md','AGENTS.md','CLAUDE.md','.harness/consistency-policy.md','.harness/reuse-map.md','.harness/encoding-policy.md','.harness/secret-policy.md']; const drop = ['.cursor/rules/leerness.mdc','.harness/skill-index.md','.harness/architecture.md']; const verifyReq = ['.harness/design-system.md','.harness/protected-files.md','.harness/current-state.md']; if (!verifyReq.every(k => min[k])) return false; return Object.keys(min).length < Object.keys(full).length && keep.every(k => min[k]) && drop.every(k => !min[k]); } },
+    { name: '_cliBootstrap: CLI 부작용 require.main 가드 격리 (Codex #4 UR-0037 1.9.290)', run: () => { if (typeof _cliBootstrap !== 'function' || typeof _ensureStdoutEncoding !== 'function') return false; const src = read(__filename); const guarded = /if \(require\.main === module\) _cliBootstrap\(\);/.test(src); const inFn = /function _cliBootstrap\(\)\s*\{[\s\S]*?removeAllListeners\('warning'\)[\s\S]*?NODE_OPTIONS[\s\S]*?_ensureStdoutEncoding\(\);[\s\S]*?\n\}/.test(src); const noTopIife = !/\}\)\(\);\s*\n\n\/\/ 1\.9\.184/.test(src); return guarded && inFn && noTopIife; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }

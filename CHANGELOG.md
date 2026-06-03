@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.290 — 2026-06-03 — UR-0037 (Codex #4): require 시 top-level side effect 격리 — Codex 5건 완전 수렴 🎉
+
+**🧩 `require('leerness/bin/harness.js')` 가 호스트 프로세스를 오염시키던 마지막 갭 수정 (Codex gpt-5.5 #4). 이로써 Codex 코드 리뷰 5건 전부 수렴 완료.**
+
+### 배경
+1.9.184/249 에서 (1) `process.removeAllListeners('warning')` + warning 핸들러 재등록, (2) `process.env.NODE_OPTIONS += ' --no-deprecation'`, (3) chcp 65001 IIFE 가 **파일 최상단에서 즉시 실행**됐음. CLI 로는 정상이나, leerness 를 라이브러리로 `require()` 하거나 단위 테스트(`require.main` 가드로 노출한 14종 순수 함수)에서 불러오면 호스트 프로세스의 warning 리스너가 통째로 제거되고 NODE_OPTIONS 가 변형됨 → side-effect-free import 원칙 위반.
+
+### 구현 (Codex #4 → 수렴)
+1. **`_cliBootstrap()` 로 CLI 전용 부작용 격리** — warning listener 제거/재등록 + NODE_OPTIONS 변형 + `_ensureStdoutEncoding()` 호출을 한 함수로 묶고, 파일 끝의 기존 `if (require.main === module)` 가드(1.9.255)와 동일하게 **상단에서도 `if (require.main === module) _cliBootstrap();`** 로만 호출.
+2. **`_ensureStdoutEncoding()` IIFE → named 함수** — 즉시실행 제거, `_cliBootstrap` 내부에서만 호출 (chcp/encoding 부작용도 CLI 한정).
+3. selftest 37→38 (소스 가드 정합 + named 함수 존재 검증) · e2e 234→235 (깨끗한 자식에서 require 후 warning listener 보존 + NODE_OPTIONS 미오염 실측).
+
+### 검증
+- **selftest 38/38 PASS** · **E2E 235/235 PASS** (회귀 0).
+- 실측: `node -e "process.on('warning',L); require('harness'); ..."` → listener 보존 `true` · NODE_OPTIONS 오염 `false`. CLI(`selftest`/`--version`)는 부트스트랩 정상 실행.
+- **🎉 Codex gpt-5.5 코드 리뷰 5건(#1 MCP policy / #2 release dry-run / #3 셸 주입 / #4 side effect / #5 도구수) 전부 수렴 완료.**
+
 ## 1.9.289 — 2026-06-03 — UR-0036 (Codex #3): REPL agy/copilot 프롬프트 셸 주입 차단
 
 **🔒 REPL 스트리밍에서 agy/copilot 프롬프트가 `shell:true` 인자로 raw 전달돼 셸 분리/주입되던 보안 갭 수정 (Codex gpt-5.5 #3).**

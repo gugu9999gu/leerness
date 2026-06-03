@@ -3096,5 +3096,24 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.290 회귀 (Codex #4 UR-0037): require('harness') 가 호스트 프로세스 오염 X (top-level side effect 격리)
+total++;
+{
+  let ok = false;
+  try {
+    // 깨끗한 자식에서: 내 warning listener 등록 → require → 보존 확인 + NODE_OPTIONS 미변경
+    const probe = "const L=()=>{};process.on('warning',L);const o=process.env.NODE_OPTIONS||'';" +
+      "require(process.argv[1]);" +
+      "const survived=process.listeners('warning').includes(L);" +
+      "const polluted=(process.env.NODE_OPTIONS||'')!==o;" +
+      "process.exit(survived&&!polluted?0:1);";
+    const harnessPath = path.resolve(__dirname, '..', 'bin', 'harness.js');
+    const r = cp.spawnSync(process.execPath, ['-e', probe, harnessPath], { encoding: 'utf8', timeout: 20000 });
+    ok = r.status === 0;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.290) require 부작용 격리: warning listener 보존 + NODE_OPTIONS 미오염 (Codex #4)' : '✗ require 부작용 격리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
