@@ -10,7 +10,7 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 
-const VERSION = '1.9.291';
+const VERSION = '1.9.292';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2998,6 +2998,7 @@ function _selfTestCases() {
     { name: 'coreFiles --minimal: 핵심 유지 + 비핵심 제외 + verify 필수 보존 (1.9.276)', run: () => { const full = coreFiles('.', 'ko', []); const min = coreFiles('.', 'ko', [], { minimal: true }); const keep = ['.harness/plan.md','.harness/progress-tracker.md','.harness/session-handoff.md','AGENTS.md','CLAUDE.md','.harness/consistency-policy.md','.harness/reuse-map.md','.harness/encoding-policy.md','.harness/secret-policy.md']; const drop = ['.cursor/rules/leerness.mdc','.harness/skill-index.md','.harness/architecture.md']; const verifyReq = ['.harness/design-system.md','.harness/protected-files.md','.harness/current-state.md']; if (!verifyReq.every(k => min[k])) return false; return Object.keys(min).length < Object.keys(full).length && keep.every(k => min[k]) && drop.every(k => !min[k]); } },
     { name: '_cliBootstrap: CLI 부작용 require.main 가드 격리 (Codex #4 UR-0037 1.9.290)', run: () => { if (typeof _cliBootstrap !== 'function' || typeof _ensureStdoutEncoding !== 'function') return false; const src = read(__filename); const guarded = /if \(require\.main === module\) _cliBootstrap\(\);/.test(src); const inFn = /function _cliBootstrap\(\)\s*\{[\s\S]*?removeAllListeners\('warning'\)[\s\S]*?NODE_OPTIONS[\s\S]*?_ensureStdoutEncoding\(\);[\s\S]*?\n\}/.test(src); const noTopIife = !/\}\)\(\);\s*\n\n\/\/ 1\.9\.184/.test(src); return guarded && inFn && noTopIife; } },
     { name: 'lib/agent-registry: EXTERNAL_AGENTS/AGENT_SLASH_COMMANDS 모듈 단일출처 분리 (UR-0025 1.9.291)', run: () => { const m = require('../lib/agent-registry'); return m.EXTERNAL_AGENTS === EXTERNAL_AGENTS && m.AGENT_SLASH_COMMANDS === AGENT_SLASH_COMMANDS && m.EXTERNAL_AGENTS.length === 10 && Object.keys(m.AGENT_SLASH_COMMANDS).length === 9 && !/const EXTERNAL_AGENTS = \[/.test(read(__filename)); } },
+    { name: 'get_project_context: MCP 시맨틱 verb 등록 + CLI context 디스패치 (UR-0031 1.9.292)', run: () => { const src = read(__filename); const mcpDef = /name: 'leerness_get_project_context'/.test(src); const mcpCase = /case 'leerness_get_project_context':[\s\S]*?cliArgs = \['context'/.test(src); const cliDisp = /if \(cmd === 'context'\)\s+return contextCmd/.test(src); return typeof contextCmd === 'function' && mcpDef && mcpCase && cliDisp && _mcpToolCount() >= 80; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -16531,7 +16532,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_state_start', description: '1.9.279 (UR-0031) — start_task. 새 작업 run 시작 (.leerness/runs/run-NNNN.json 생성). 인자: { path?, goal (required), agent?, model?, task? }. 응답: { started, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, goal: { type: 'string' }, agent: { type: 'string' }, model: { type: 'string' }, task: { type: 'string' } }, required: ['goal'] } },
     { name: 'leerness_state_record', description: '1.9.279 (UR-0031) — record_file_change / record_decision. 진행 중 run 에 변경 파일/명령/테스트/결정을 누적. 인자: { path?, filesChanged? (콤마), filesRead?, commands?, tests?, errors?, decision? }. 응답: { recorded, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, filesChanged: { type: 'string' }, filesRead: { type: 'string' }, commands: { type: 'string' }, tests: { type: 'string' }, errors: { type: 'string' }, decision: { type: 'string' } } } },
     { name: 'leerness_state_verify', description: '1.9.279 (UR-0031) — request_verification / verify_done. 현재 run 의 검증 결과 기록. 인자: { path?, result (required: "pass"|"fail"), note? }. 응답: { verified, result, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, result: { type: 'string', enum: ['pass', 'fail'] }, note: { type: 'string' } }, required: ['result'] } },
-    { name: 'leerness_state_handoff', description: '1.9.279 (UR-0031) — create_handoff / make_handoff. 현재 run 을 마감하고 다음 에이전트용 .leerness/handoff/latest.{md,json} 작성 (Claude→Goose→Codex 인수인계 표준). 인자: { path?, summary (required) }. 응답: { handoff, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, summary: { type: 'string' } }, required: ['summary'] } }
+    { name: 'leerness_state_handoff', description: '1.9.279 (UR-0031) — create_handoff / make_handoff. 현재 run 을 마감하고 다음 에이전트용 .leerness/handoff/latest.{md,json} 작성 (Claude→Goose→Codex 인수인계 표준). 인자: { path?, summary (required) }. 응답: { handoff, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, summary: { type: 'string' } }, required: ['summary'] } },
+    { name: 'leerness_get_project_context', description: '1.9.292 (UR-0031) — get_project_context. 외부 에이전트가 작업 시작 전 단 1콜로 "지금 무엇을 알아야 하는가"를 파악하는 집약 컨텍스트. 여러 소스(현재 작업/미답 사용자 요청/최근 결정/활성 룰/next-actions/memory surface/프로젝트 의도)를 한 번에 구조화 회수. read-only. 인자: { path? }. 응답: { version, project, currentTask, openRequests, recentDecisions, activeRules, nextActions, memory }.', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
   ];
 
   function send(obj) {
@@ -16780,6 +16782,9 @@ function mcpServeCmd(root) {
             break;
           case 'leerness_state_handoff':
             cliArgs = ['state', 'handoff', String(args.summary || ''), '--path', targetPath, '--json'];
+            break;
+          case 'leerness_get_project_context':
+            cliArgs = ['context', '--path', targetPath, '--json'];
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
@@ -18105,6 +18110,77 @@ function _saveRun(root, rec) { const f = _runFile(root, rec.run_id); mkdirp(path
 function _splitList(v) { return String(v || '').split(',').map(s => s.trim()).filter(Boolean); }
 
 // leerness state <show|start|record|verify|handoff>
+// 1.9.292 (UR-0031): get_project_context — 외부 에이전트 온보딩용 단일 집약 컨텍스트.
+//   1콜로 현재 작업/미답 요청/최근 결정/활성 룰/next-actions/memory/프로젝트 의도를 구조화 회수.
+//   MCP leerness_get_project_context 가 이 명령(--json)을 호출. handoff(인간용 장문)와 달리 기계 친화 lean payload.
+function contextCmd(root, opts = {}) {
+  root = absRoot(root);
+  const rows = readProgressRows(root);
+  const active = rows.find(r => r.status === 'in-progress' || r.status === '[진행]');
+  const activeRules = readRules(root).filter(r => r.status === 'active');
+  const openReqs = (_loadUserRequests(root).requests || []).filter(r => r.status === 'open' || r.status === 'in-progress');
+  // 최근 결정 (last 3, 최신순) — decisionListCmd 와 동일 파서 재사용
+  const decFile = decisionsPath(root);
+  let recentDecisions = [];
+  let decisionCount = 0;
+  if (exists(decFile)) {
+    const dtext = read(decFile);
+    decisionCount = (dtext.match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length;
+    const blocks = _extractDecisionBlocks(dtext);
+    recentDecisions = blocks.slice(-3).reverse().map(block => {
+      const tm = (block.match(/^### (.+)$/m) || [])[1] || '';
+      const dt = tm.match(/^(\d{4}-\d{2}-\d{2})\s*—\s*(.+)$/);
+      return { date: dt ? dt[1] : null, title: (dt ? dt[2] : tm).trim().slice(0, 100) };
+    });
+  }
+  const queueState = _loadNextActionQueue(root);
+  const nextActions = (queueState.queue || []).slice(-3).reverse().map(a => ({ title: a.title, command: a.command || null }));
+  const memory = {
+    tasksInProgress: rows.filter(r => r.status === 'in-progress').length,
+    decisions: decisionCount,
+    rulesActive: activeRules.length,
+    lessons: exists(lessonsPath(root)) ? (read(lessonsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0
+  };
+  // 프로젝트 의도 (best-effort) — .harness/project-brief.md 의 ## Purpose 첫 줄
+  let intent = null;
+  const briefPath = path.join(root, '.harness', 'project-brief.md');
+  if (exists(briefPath)) {
+    const m = read(briefPath).match(/##\s*Purpose\s*\n+\s*[-*]?\s*([^\n#].*)/);
+    if (m && !/업데이트하세요/.test(m[1])) intent = m[1].trim().slice(0, 200);
+  }
+  const ctx = {
+    schemaVersion: 1,
+    version: VERSION,
+    project: { root, intent },
+    currentTask: active ? { id: active.id, request: (active.request || '').slice(0, 200), status: active.status, nextAction: (active.nextAction || '').slice(0, 160) || null } : null,
+    openRequests: { count: openReqs.length, items: openReqs.slice(0, 5).map(r => ({ id: r.id, text: (r.text || '').slice(0, 120) })) },
+    recentDecisions,
+    activeRules: activeRules.map(r => ({ id: r.id, trigger: r.trigger, rule: r.rule })),
+    nextActions,
+    memory
+  };
+  if (opts.json || has('--json')) { process.stdout.write(JSON.stringify(ctx, null, 2) + '\n'); return ctx; }
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  log(cy(`# leerness context (1.9.292) — 에이전트 온보딩 컨텍스트 (v${VERSION})`));
+  if (intent) log(`  🎯 의도: ${intent}`);
+  log('');
+  if (ctx.currentTask) {
+    log(gr(`▶ 현재 작업: ${ctx.currentTask.id} — ${ctx.currentTask.request}`));
+    if (ctx.currentTask.nextAction) log(dm(`    다음: ${ctx.currentTask.nextAction}`));
+  } else log(dm('▶ 현재 진행 중 작업 없음'));
+  log('');
+  log(`📥 미답 요청: ${ctx.openRequests.count}건`);
+  ctx.openRequests.items.forEach(r => log(dm(`    • [${r.id}] ${r.text}`)));
+  log('');
+  log(`🧠 메모리: 진행 ${memory.tasksInProgress} / 결정 ${memory.decisions} / 룰 ${memory.rulesActive} / 교훈 ${memory.lessons}`);
+  if (recentDecisions.length) { log(''); log('🗂 최근 결정:'); recentDecisions.forEach(d => log(dm(`    • ${d.date || '?'} — ${d.title}`))); }
+  if (ctx.activeRules.length) { log(''); log('⚡ 활성 룰:'); ctx.activeRules.forEach(r => log(dm(`    • [${r.id}] (${r.trigger}) ${r.rule}`))); }
+  if (nextActions.length) { log(''); log('👉 다음 액션:'); nextActions.forEach(a => log(dm(`    • ${a.title}${a.command ? ' → ' + a.command : ''}`))); }
+  return ctx;
+}
 function stateCmd(root, sub, ...args) {
   root = absRoot(root || process.cwd());
   const json = has('--json');
@@ -21315,6 +21391,7 @@ async function main() {
   if (cmd === 'capabilities' || cmd === 'security-surface') return capabilitiesCmd(arg('--path', process.cwd()), { json: has('--json') });
   // 1.9.278 (UR-0032): leerness state <show|start|record|verify|handoff> — .leerness/ 구조화 상태 substrate
   if (cmd === 'state')                              return stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  if (cmd === 'context')                            return contextCmd(arg('--path', process.cwd()), { json: has('--json') });
   // 1.9.281 (UR-0034): leerness policy <show|set|check> — 권한 등급 (opt-in enforced)
   if (cmd === 'policy')                             return policyCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.285 (UR-0023): leerness reuse-check "<기능>" — 외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인)

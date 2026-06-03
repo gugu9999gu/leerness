@@ -3136,5 +3136,23 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.292 회귀 (UR-0031): leerness context — get_project_context 집약 시맨틱 verb
+total++;
+{
+  let ok = false;
+  try {
+    const r = cp.spawnSync(process.execPath, [CLI, 'context', tmp, '--json'], { cwd: tmp, encoding: 'utf8', timeout: 30000 });
+    const j = JSON.parse(r.stdout);
+    const structOk = r.status === 0 && j.schemaVersion === 1 && !!j.version && !!j.project && ('currentTask' in j) &&
+      j.openRequests && typeof j.openRequests.count === 'number' && Array.isArray(j.recentDecisions) &&
+      Array.isArray(j.activeRules) && Array.isArray(j.nextActions) && j.memory && typeof j.memory.rulesActive === 'number';
+    const h = require(path.resolve(__dirname, '..', 'bin', 'harness.js'));
+    const mcpOk = h._mcpToolCount && h._mcpToolCount() >= 80;
+    ok = structOk && mcpOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.292) leerness context: get_project_context 집약 JSON 구조 + MCP 80 도구 (UR-0031)' : '✗ context 집약 verb 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.292 — 2026-06-03 — UR-0031: get_project_context — MCP 시맨틱 verb (에이전트 온보딩 1콜 집약)
+
+**🧭 GPT-5.5 "MCP-first 범용 하네스" 전략의 핵심 — 어떤 에이전트든 leerness 내부 명령을 몰라도 단 1콜로 "지금 무엇을 알아야 하는가"를 파악하는 집약 컨텍스트 verb 신설.**
+
+### 배경
+1.9.279에서 `leerness_state_*` 도구 설명문에 시맨틱 verb(get_project_context 등)를 표기했으나, 실제 호출 가능한 이름은 여전히 `leerness_state_*` → MCP 클라이언트가 `tools/list`에서 의도 기반 이름을 못 봄. 또한 에이전트가 작업 시작 전 컨텍스트를 모으려면 handoff/state/task/decision/rule 여러 도구를 따로 호출해야 했음.
+
+### 구현 (UR-0031)
+1. **`leerness context [path] [--json]` CLI 신설** — 현재 작업(in-progress task) / 미답 사용자 요청 / 최근 결정 3건 / 활성 룰 / next-actions / memory surface(진행·결정·룰·교훈) / 프로젝트 의도(project-brief Purpose)를 **단일 구조화 객체**로 집약. 기존 헬퍼(readProgressRows·readRules·_loadUserRequests·_extractDecisionBlocks·_loadNextActionQueue) 재사용 — 신규 가치(집약)이지 단일 도구 중복 아님.
+2. **MCP `leerness_get_project_context` (80번째 도구)** — `context --json` 호출. read-only. handoff(인간용 장문)와 달리 기계 친화 lean payload. 응답: `{ version, project, currentTask, openRequests, recentDecisions, activeRules, nextActions, memory }`.
+3. selftest 39→40 (MCP verb 등록 + CLI 디스패치 + `_mcpToolCount()≥80` 소스 정합) · e2e 236→237 (init된 프로젝트에서 집약 JSON 구조 + MCP 80 도구 실측). README MCP 배지 79→80 자동 동기화.
+
+### 검증
+- **selftest 40/40 PASS** · **E2E 237/237 PASS** (회귀 0).
+- B(1.9.288) 도구수 정합 테스트가 배지-live 불일치(79 vs 80)를 즉시 검출 → readme sync로 80 정합(Codex #5 가드 정상 동작 확인).
+- 실측: `context --json` → openRequests 3건(전략 백로그) + activeRules R-0001 + memory 집약. MCP tools/list 80개에 `leerness_get_project_context` 노출.
+
 ## 1.9.291 — 2026-06-03 — UR-0025 (2단계): 외부 에이전트 레지스트리 → lib/agent-registry.js 모듈 분리
 
 **🧩 GPT-5.5 + Codex 두 리뷰가 공통 지적한 #1 유지보수 이슈(단일 1.2MB 파일)를 비파괴 모듈 분리로 점진 해소. 1.9.274의 lib/pure-utils.js 패턴 계승.**
