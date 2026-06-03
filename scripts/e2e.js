@@ -2920,5 +2920,27 @@ total++;
   if (!ok) { failed++; console.log((rCur.stdout || '').slice(0, 200)); }
 }
 
+// 1.9.281 회귀 (UR-0034): 권한 등급 policy (show/set/check + enforce)
+total++;
+{
+  const pDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-policy-'));
+  const run = (a) => cp.spawnSync(process.execPath, [CLI, 'policy', ...a, '--path', pDir], { encoding: 'utf8', timeout: 15000 });
+  // 기본: enforce OFF + 8 등급
+  let showOk = false;
+  try { const j = JSON.parse(run(['show', '--json']).stdout); showOk = j.tiers.length === 8 && j.enforce === false && j.allowedTier === 'project-write'; } catch {}
+  // read-only + enforce → publish 차단, handoff 허용
+  run(['set', 'read-only', '--enforce']);
+  let blockOk = false, allowOk = false;
+  try { blockOk = JSON.parse(run(['check', 'release publish', '--json']).stdout).allowed === false; } catch {}
+  try { allowOk = JSON.parse(run(['check', 'handoff', '--json']).stdout).allowed === true; } catch {}
+  // enforce OFF 로 되돌리면 advisory(allowed true)
+  run(['set', 'read-only', '--no-enforce']);
+  let advisoryOk = false;
+  try { const j = JSON.parse(run(['check', 'release publish', '--json']).stdout); advisoryOk = j.allowed === true && j.advisory === true; } catch {}
+  const ok = showOk && blockOk && allowOk && advisoryOk;
+  console.log(ok ? '✓ B(1.9.281) policy: 8등급 + set/check + enforce 차단/advisory' : `✗ policy 실패 (show=${showOk} block=${blockOk} allow=${allowOk} advisory=${advisoryOk})`);
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

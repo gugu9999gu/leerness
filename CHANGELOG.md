@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.281 — 2026-06-03 — UR-0034: 권한 등급(permission tiers) — opt-in enforced
+
+**🛡️ GPT-5.5 "안전성 핵심" — capabilities(1.9.272 공개)를 8단계 enforced 등급으로 확장. 기본 OFF(advisory)라 기존 동작 불변.**
+
+### 배경
+GPT-5.5: "범용 하네스가 되려면 안전성이 핵심. read-only/safe-write/.../publish 등급 + 기본 보수적(위험 명령 차단)." 1.9.272 capabilities 가 표면을 *공개*만 했던 것을 *등급 기반 차단*으로 승격하되, 사용자 워크플로(릴리스 등)를 깨지 않도록 **opt-in**.
+
+### 구현
+1. **`PERMISSION_TIERS` 8등급** (위험 오름차순): read-only < safe-write < project-write < shell-read < shell-write < git-write < network < publish.
+2. **`_requiredTier(cmd)` 순수 매핑** — release publish→publish, agents multi --execute/pc→shell-write, sync-main/git push→git-write, web→network, init/adapter→project-write, state/decision→safe-write, handoff/audit→read-only.
+3. **`leerness policy <show|set|check>`** — `set <tier> [--enforce]`(.leerness/policy.json) · `check "<command>"` allow/deny · `show` 등급+주의명령 매핑. 기본 허용 `project-write`, enforce OFF.
+4. **opt-in 차단** — `_policyEnforce()` 가 enforce ON(또는 `LEERNESS_ENFORCE_POLICY=1`) 시 허용 등급 초과 명령 차단. **`agents multi --execute`** 진입점에 게이트(기본 OFF → 동작 불변, advisory 경고만).
+5. selftest 29→30 + e2e 227→228.
+
+### 검증
+- **selftest 30/30 PASS** · **E2E 228/228 PASS** (회귀 0).
+- 실측: policy set read-only --enforce → `release publish` 🔴 차단 / `handoff` 🟢 허용 · enforce OFF → advisory(통과).
+
+### 범용 하네스 로드맵 (GPT 5단계) — 거의 완성
+✅ 최소 하네스(--minimal) · ✅ 어댑터(UR-0033) · ✅ MCP verb(UR-0031) · ✅ 상태 스키마(UR-0032) · ✅ **권한 등급(UR-0034)**. 남음: UR-0035 AGENTS.md(정적) vs leerness(동적) 포지셔닝.
+
 ## 1.9.280 — 2026-06-03 — UR-0033: leerness adapter <tool> — 도구별 선택 설치 + .mcp.json
 
 **🔌 GPT-5.5 로드맵 2단계 "어댑터" — init 전체 대신 특정 도구의 지침/연결 파일만 생성. `--minimal` + `adapter` 로 침투성↓·범용성↑.**

@@ -9,7 +9,7 @@ const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp } = require('../lib/pure-utils');
 
-const VERSION = '1.9.280';
+const VERSION = '1.9.281';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2960,6 +2960,7 @@ function _selfTestCases() {
     { name: '_pickModel: top/code/fast 등급 선택 (1.9.270)', run: () => { return _pickModel('codex', 'code') === 'gpt-5-codex' && _pickModel('claude', 'top') === 'claude-opus-4-7' && /haiku/.test(_pickModel('claude', 'fast')); } },
     { name: 'CAPABILITY_SURFACE: 6 영역 + risk/optOut + 주의명령 (1.9.272)', run: () => { const ks = Object.keys(CAPABILITY_SURFACE); return ks.length === 6 && ks.includes('automationBridges') && Object.values(CAPABILITY_SURFACE).every(v => ['low','medium','high'].includes(v.risk) && v.optOut && v.desc) && POWERFUL_COMMANDS.length >= 5; } },
     { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
+    { name: '권한 등급: _requiredTier + _policyAllows 순서 (1.9.281)', run: () => { return _requiredTier('release publish') === 'publish' && _requiredTier('agents multi --execute') === 'shell-write' && _requiredTier('handoff') === 'read-only' && _requiredTier('init') === 'project-write' && _policyAllows('project-write', 'safe-write') === true && _policyAllows('project-write', 'publish') === false && _tierRank('read-only') < _tierRank('publish'); } },
     { name: 'ADAPTERS + _mcpJsonContent: 도구 매핑 + .mcp.json 등록 (1.9.280)', run: () => { const ids = Object.keys(ADAPTERS); const okMap = ['claude','cursor','codex','goose','opencode'].every(id => ADAPTERS[id] && Array.isArray(ADAPTERS[id].keys) && ADAPTERS[id].keys.length); const m = JSON.parse(_mcpJsonContent()); return ids.length >= 9 && okMap && ADAPTERS.claude.mcp === true && ADAPTERS.copilot.mcp === false && m.mcpServers.leerness.command === 'npx' && m.mcpServers.leerness.args.join(' ') === 'leerness mcp serve'; } },
     { name: '_newRunRecord: GPT-5.5 권고 스키마 14필드 + 기본값 (1.9.278)', run: () => { const r = _newRunRecord({ run_id: 'run-0001', goal: 'g', started_at: '2026-06-03T00:00:00Z' }); return r.schemaVersion === 1 && r.run_id === 'run-0001' && r.started_at === '2026-06-03T00:00:00Z' && Array.isArray(r.files_changed) && Array.isArray(r.commands_run) && Array.isArray(r.tests_run) && Array.isArray(r.decisions) && r.verification_result === null && r.status === 'in-progress' && 'handoff_summary' in r && 'model_name' in r && 'task_id' in r; } },
     { name: 'coreFiles --minimal: 핵심 유지 + 비핵심 제외 + verify 필수 보존 (1.9.276)', run: () => { const full = coreFiles('.', 'ko', []); const min = coreFiles('.', 'ko', [], { minimal: true }); const keep = ['.harness/plan.md','.harness/progress-tracker.md','.harness/session-handoff.md','AGENTS.md','CLAUDE.md','.harness/consistency-policy.md','.harness/reuse-map.md','.harness/encoding-policy.md','.harness/secret-policy.md']; const drop = ['.cursor/rules/leerness.mdc','.harness/skill-index.md','.harness/architecture.md']; const verifyReq = ['.harness/design-system.md','.harness/protected-files.md','.harness/current-state.md']; if (!verifyReq.every(k => min[k])) return false; return Object.keys(min).length < Object.keys(full).length && keep.every(k => min[k]) && drop.every(k => !min[k]); } },
@@ -3622,6 +3623,7 @@ function commandsCmd(root) {
       { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272' },
       { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278' },
       { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280' },
+      { cmd: 'policy show|set|check', desc: '권한 등급 (read-only…publish) — opt-in enforced (위험 명령 차단) — 1.9.281' },
       { cmd: 'release channel [--json]', desc: '릴리스 채널 정책 (latest 안정 / next 실험 / 버전 고정) — 1.9.275' },
       { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
@@ -11429,6 +11431,12 @@ function agentsCmd(root, sub, ...args) {
       fail('활성 (ready) 에이전트 없음 — `leerness agents list` 로 확인. 1.9.151 install 흐름에서 복수 선택 후 .env 활성화 필요.');
       return process.exit(1);
     }
+    // 1.9.281 (UR-0034): 권한 등급 게이트 — enforce ON 시 shell-write 초과 차단 (기본 OFF, 동작 불변)
+    if (execute) {
+      const pol = _policyEnforce(root, 'agents multi --execute');
+      if (!pol.allowed) { fail(pol.reason); return process.exit(1); }
+      if (pol.advisory) warn(`정책 advisory: 'agents multi --execute' 요구 등급 ${pol.required} > 허용 ${pol.allowedTier} (enforce OFF — 진행). leerness policy 로 등급 확인`);
+    }
     // 1.9.156: --execute 모드 — 실제 spawn + 결과 수집 + multi-signal consensus
     if (execute) {
       return (async () => {
@@ -18053,7 +18061,85 @@ function capabilitiesCmd(root, opts = {}) {
   log(`## ⚠ 주의해서 쓸 명령 (회사/운영 코드)`);
   for (const c of POWERFUL_COMMANDS) log(`  • ${c.cmd.padEnd(22)} ${dm(c.note)}`);
   log('');
-  log(dm(`  전체 정책: SECURITY.md  ·  기계 판독: leerness capabilities --json`));
+  log(dm(`  전체 정책: SECURITY.md  ·  기계 판독: leerness capabilities --json  ·  권한 등급: leerness policy`));
+}
+
+// ===== 1.9.281 (UR-0034, GPT-5.5 범용 하네스): 권한 등급(permission tiers) =====
+//   capabilities(1.9.272 공개)를 enforced 등급으로 확장. 기본 OFF(opt-in) — enforce 켤 때만 차단.
+//   등급 오름차순(왼→오 위험↑). 허용 등급 이하의 명령만 통과. 기본 허용 'project-write'(파일 작업까지, 셸/git/publish 차단).
+const PERMISSION_TIERS = ['read-only', 'safe-write', 'project-write', 'shell-read', 'shell-write', 'git-write', 'network', 'publish'];
+function _tierRank(t) { const i = PERMISSION_TIERS.indexOf(String(t || '')); return i < 0 ? PERMISSION_TIERS.length : i; }
+// 명령/capability → 요구 등급 (순수 함수, selftest)
+function _requiredTier(cmd) {
+  const c = String(cmd || '').toLowerCase();
+  if (/release\s+publish|npm\s+publish|\bpublish\b/.test(c)) return 'publish';
+  if (/\bweb\b/.test(c)) return 'network';
+  if (/git\s+push|sync-main/.test(c)) return 'git-write';
+  if (/multi\s+--execute|dispatch\s+--write|--yolo|\bpc\b/.test(c)) return 'shell-write';
+  if (/agents\s+(list|quota|bench)|--run-tests/.test(c)) return 'shell-read';
+  if (/\binit\b|\badapter\b|update\s+--yes|\bmigrate\b/.test(c)) return 'project-write';
+  if (/state\s+(start|record|verify|handoff)|decision|lesson|plan\s+add|task\s+add|rule\s+add/.test(c)) return 'safe-write';
+  return 'read-only';
+}
+function _policyAllows(allowedTier, requiredTier) { return _tierRank(requiredTier) <= _tierRank(allowedTier); }
+function _policyFile(root) { return path.join(_leernessStateDir(root), 'policy.json'); }
+function _loadPolicy(root) {
+  const f = _policyFile(root);
+  const def = { schemaVersion: 1, allowedTier: 'project-write', enforce: false };
+  if (!exists(f)) return def;
+  try { const j = JSON.parse(read(f)); return { schemaVersion: 1, allowedTier: PERMISSION_TIERS.includes(j.allowedTier) ? j.allowedTier : def.allowedTier, enforce: !!j.enforce }; } catch { return def; }
+}
+function _savePolicy(root, p) { const d = _leernessStateDir(root); mkdirp(d); writeUtf8(_policyFile(root), JSON.stringify({ schemaVersion: 1, allowedTier: p.allowedTier, enforce: !!p.enforce, updatedAt: new Date().toISOString() }, null, 2) + '\n'); }
+// 위험 진입점이 호출 — enforce ON 이고 요구등급 > 허용등급이면 {allowed:false}. 기본 OFF → 항상 allowed:true(+advisory).
+// env LEERNESS_ENFORCE_POLICY=1 로 강제 ON 가능.
+function _policyEnforce(root, cmd) {
+  const p = _loadPolicy(root);
+  const enforce = p.enforce || process.env.LEERNESS_ENFORCE_POLICY === '1';
+  const required = _requiredTier(cmd);
+  const allowed = _policyAllows(p.allowedTier, required);
+  if (enforce && !allowed) return { allowed: false, required, allowedTier: p.allowedTier, reason: `정책 차단: '${cmd}' 는 '${required}' 등급 필요 (허용 '${p.allowedTier}'). 해제: leerness policy set ${required} 또는 LEERNESS_ENFORCE_POLICY 해제` };
+  return { allowed: true, required, allowedTier: p.allowedTier, advisory: !allowed };
+}
+// leerness policy <show|set|check>
+function policyCmd(root, sub, ...args) {
+  root = absRoot(root || process.cwd());
+  const json = has('--json');
+  sub = sub || 'show';
+  if (sub === 'set') {
+    const tier = (args.find(a => a && !a.startsWith('-')) || arg('--tier', '')).trim();
+    if (!PERMISSION_TIERS.includes(tier)) return fail(`등급 필요: ${PERMISSION_TIERS.join(' < ')}`);
+    const p = _loadPolicy(root);
+    p.allowedTier = tier;
+    if (has('--enforce')) p.enforce = true;
+    if (has('--no-enforce')) p.enforce = false;
+    _savePolicy(root, p);
+    if (json) { log(JSON.stringify({ set: tier, enforce: p.enforce, file: _policyFile(root) }, null, 2)); return; }
+    ok(`정책: 허용 등급 ${tier} · enforce ${p.enforce ? 'ON' : 'OFF'}`);
+    return;
+  }
+  if (sub === 'check') {
+    const cmd = (args.find(a => a && !a.startsWith('-')) || arg('--cmd', '')).trim();
+    if (!cmd) return fail('policy check "<command>" 필요');
+    const res = _policyEnforce(root, cmd);
+    if (json) { log(JSON.stringify({ cmd, ...res }, null, 2)); return; }
+    log(`# policy check: ${cmd}`);
+    log(`  요구 등급: ${res.required} · 허용 등급: ${res.allowedTier} · ${res.allowed ? '🟢 허용' : '🔴 차단'}${res.advisory ? ' (advisory — enforce OFF)' : ''}`);
+    if (!res.allowed && !res.advisory) log(`  ${res.reason}`);
+    return;
+  }
+  // show
+  const p = _loadPolicy(root);
+  if (json) { log(JSON.stringify({ tiers: PERMISSION_TIERS, allowedTier: p.allowedTier, enforce: p.enforce, powerfulCommands: POWERFUL_COMMANDS.map(c => ({ cmd: c.cmd, requiredTier: _requiredTier(c.cmd) })) }, null, 2)); return; }
+  log(`# leerness policy (1.9.281, UR-0034) — 권한 등급`);
+  log(`등급(위험 오름차순): ${PERMISSION_TIERS.join(' < ')}`);
+  log(`허용 등급: ${p.allowedTier} · enforce: ${p.enforce ? '🔴 ON (초과 명령 차단)' : '🟢 OFF (advisory only, 기본)'}`);
+  log('');
+  log(`## 주의 명령 요구 등급`);
+  for (const c of POWERFUL_COMMANDS) { const rt = _requiredTier(c.cmd); const al = _policyAllows(p.allowedTier, rt); log(`  ${al ? '🟢' : (p.enforce ? '🔴' : '🟡')} ${c.cmd.padEnd(22)} → ${rt}`); }
+  log('');
+  log(`  설정: leerness policy set <tier> [--enforce]  ·  확인: leerness policy check "<command>"`);
+  log(`  강제 ON(임시): LEERNESS_ENFORCE_POLICY=1`);
+  return;
 }
 
 // ===== 1.9.278 (UR-0032, GPT-5.5 범용 하네스 방향): .leerness/ JSON 상태 스키마 =====
@@ -21194,6 +21280,8 @@ async function main() {
   if (cmd === 'capabilities' || cmd === 'security-surface') return capabilitiesCmd(arg('--path', process.cwd()), { json: has('--json') });
   // 1.9.278 (UR-0032): leerness state <show|start|record|verify|handoff> — .leerness/ 구조화 상태 substrate
   if (cmd === 'state')                              return stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  // 1.9.281 (UR-0034): leerness policy <show|set|check> — 권한 등급 (opt-in enforced)
+  if (cmd === 'policy')                             return policyCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.280 (UR-0033): leerness adapter <tool> [path] — 도구별 지침/.mcp.json 선택 생성 (path: 위치 args[2] 또는 --path)
   if (cmd === 'adapter') {
     const _aTool = args[1] && !args[1].startsWith('-') ? args[1] : 'list';
@@ -21384,5 +21472,7 @@ module.exports = {
   // 1.9.278: .leerness/ 상태 스키마 (UR-0032, GPT-5.5 범용 하네스) — 단위 테스트
   _newRunRecord, _leernessStateDir, _loadLeernessState, _saveLeernessState, _loadRun, _saveRun, stateCmd,
   // 1.9.280: adapter (UR-0033) — 단위 테스트
-  ADAPTERS, _mcpJsonContent, _mergeMcpJson, adapterCmd
+  ADAPTERS, _mcpJsonContent, _mergeMcpJson, adapterCmd,
+  // 1.9.281: 권한 등급 (UR-0034) — 단위 테스트
+  PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _loadPolicy, _savePolicy, _policyEnforce, policyCmd
 };
