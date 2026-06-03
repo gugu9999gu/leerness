@@ -2815,5 +2815,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.276 회귀 (GPT-5.5 2차 리뷰): init --dry-run / --minimal / --no-env
+total++;
+{
+  // --dry-run: 파일 0개 생성 + 요약 출력
+  const dDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dry-'));
+  const rDry = cp.spawnSync(process.execPath, [CLI, 'init', dDir, '--dry-run', '--yes'], { encoding: 'utf8', timeout: 30000 });
+  const dryNoFiles = fs.readdirSync(dDir).length === 0;
+  const drySummary = /\[dry-run\] 요약/.test(rDry.stdout) && !fs.existsSync(path.join(dDir, '.harness'));
+  // --minimal --no-env: 핵심 유지 + 비핵심/.env/.cursor/roadmap 제외
+  const mDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-min-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', mDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000 });
+  const fDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-full-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', fDir, '--yes'], { encoding: 'utf8', timeout: 30000 });
+  const minCount = fs.existsSync(path.join(mDir, '.harness')) ? fs.readdirSync(path.join(mDir, '.harness')).length : 0;
+  const fullCount = fs.existsSync(path.join(fDir, '.harness')) ? fs.readdirSync(path.join(fDir, '.harness')).length : 0;
+  const minimalOk = minCount > 0 && minCount < fullCount
+    && fs.existsSync(path.join(mDir, '.harness', 'plan.md')) && fs.existsSync(path.join(mDir, 'AGENTS.md'))
+    && !fs.existsSync(path.join(mDir, '.env')) && !fs.existsSync(path.join(mDir, '.cursor')) && !fs.existsSync(path.join(mDir, 'roadmap.html'));
+  // minimal 이어도 verify 통과(필수 파일 보존)
+  const rVerify = cp.spawnSync(process.execPath, [CLI, 'verify', mDir], { encoding: 'utf8', timeout: 20000 });
+  const verifyOk = rVerify.status === 0;
+  const ok = dryNoFiles && drySummary && minimalOk && verifyOk;
+  console.log(ok ? '✓ B(1.9.276) init --dry-run(0파일)/--minimal(축소+verify통과)/--no-env(.env 제외)' : `✗ init 옵션 실패 (dry=${dryNoFiles} drySum=${drySummary} min=${minimalOk}(${minCount}<${fullCount}) verify=${verifyOk})`);
+  if (!ok) { failed++; console.log((rVerify.stdout || '').slice(0, 300)); }
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

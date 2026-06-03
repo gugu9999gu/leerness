@@ -9,7 +9,7 @@ const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp } = require('../lib/pure-utils');
 
-const VERSION = '1.9.275';
+const VERSION = '1.9.276';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -391,10 +391,23 @@ function skillLock(skills) {
   return JSON.stringify(data, null, 2) + '\n';
 }
 
-function coreFiles(root, lang = 'ko', selectedSkills = []) {
+// 1.9.276 (GPT-5.5 2차 리뷰): init --minimal 시 제외하는 키 — 에디터 통합/가이드/템플릿/스킬/특화 체크리스트 등
+//   "코어 워크플로(handoff/verify/audit/session close)"가 요구하지 않는 파일만 제외 (verify 필수 파일은 유지).
+const MINIMAL_SKIP_KEYS = new Set([
+  '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md',
+  '.harness/project-brief.md', '.harness/task-type-map.md', '.harness/architecture.md', '.harness/context-map.md',
+  '.harness/guardrails.md', '.harness/feature-contracts.md', '.harness/feature-graph.md',
+  '.harness/testing-strategy.md', '.harness/review-checklist.md', '.harness/release-checklist.md',
+  '.harness/session-close-policy.md', '.harness/language-policy.md', '.harness/test-evidence-policy.md',
+  '.harness/AX_PLAN_GUIDE.md', '.harness/AX_MIGRATION_GUIDE.md', '.harness/AX_NEW_PROJECT_GUIDE.md', '.harness/AX_SKILL_LIBRARY_GUIDE.md',
+  '.harness/skill-index.md',
+  '.harness/templates/end-of-session-report.md', '.harness/templates/decision.md', '.harness/templates/task-row.md',
+  '.claude/skills/leerness.md'
+]);
+function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
   const project = detectProjectName(root);
   const skillRows = Object.entries(skillCatalog).map(([k, v]) => `| ${k} | ${v.displayNameKo} | ${v.capabilities.join(', ')} | ${v.lastUpdated} | ${v.verification} |`).join('\n');
-  return {
+  const _files = {
     'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ 매 세션 첫 행동 (1.9.39+)\n**반드시 \`.harness/session-workflow.md\`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.\n\n## Mandatory read order (session start)\n1. **.harness/session-workflow.md** (1.9.39+ 6단계 워크플로 — 최우선)\n2. .harness/context-routing.md\n3. .harness/session-handoff.md\n4. .harness/current-state.md\n5. .harness/plan.md\n6. .harness/progress-tracker.md\n7. .harness/guideline.md\n8. .harness/protected-files.md\n9. .harness/writeback-policy.md\n10. .harness/anti-lazy-work-policy.md\n11. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증합니다.\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍 (1.9.13)\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리 (1.9.8)\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용 (1.9.8)\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
     'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ 매 세션 첫 행동 (1.9.39+)**: \`.harness/session-workflow.md\`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 \`leerness drift check --auto-fix\`로 자동 회복.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰 (1.9.8)\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
     '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .harness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`,
@@ -611,6 +624,9 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
     '.claude/commands/update.md': `# /update\n\nleerness 자동 업데이트를 실행합니다 (감지 → 마이그레이션 → 검증).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n`,
     '.claude/skills/leerness.md': `---\nname: leerness\ndescription: Leerness harness commands - handoff, audit, scan secrets, encoding check, lazy detect, session close, update. Use when the user asks to load project context, verify work quality, scan secrets, check encoding, or end a session.\n---\n\n# leerness skill\n\n## When to use\n- 사용자가 프로젝트 컨텍스트를 로드해달라고 할 때\n- 완료 선언 전 자기 검증을 요청할 때\n- 세션을 종료하거나 인수인계를 요청할 때\n- 시크릿/한글 인코딩 점검을 요청할 때\n- 새 leerness 버전 적용을 요청할 때\n\n## Commands\n\n\`\`\`bash\nleerness handoff .             # 컨텍스트 로드\nleerness check .               # pre-action 체크\nleerness audit .               # 일관성/계획 정렬 감사\nleerness scan secrets .        # 시크릿 패턴 스캔\nleerness encoding check .      # UTF-8/BOM/CRLF\nleerness lazy detect .         # 게으름 평가\nleerness memory search "key"   # 결정/이력 검색\nleerness session close .       # 종료 보고 + handoff 자동 생성\nleerness update --yes          # 자동 업데이트\n\`\`\`\n`,
   };
+  // 1.9.276: minimal 모드 — 코어가 요구하지 않는 파일 제외 (verify 필수 파일은 유지).
+  if (opts.minimal) { for (const k of MINIMAL_SKIP_KEYS) delete _files[k]; }
+  return _files;
 }
 
 function copyRecursiveSafe(src, dst) {
@@ -917,7 +933,8 @@ async function install(root, opts = {}) {
   // 1.9.32: init 시 ASCII 배너 + 빠른 시작 가이드 (migrate는 quiet)
   if (!opts.migration && !has('--no-banner')) _banner({ quickStart: !opts.dry });
   // 1.9.33: npx 캐시로 옛 버전이 실행될 때 경고 (migrate/--no-stale-check 시 스킵)
-  if (!opts.migration && !has('--no-stale-check') && !opts.nonInteractive) {
+  // 1.9.276: dry-run 시 스킵 — 캐시 파일(.harness/cache) 생성 방지 (dry = 부작용 0 보장)
+  if (!opts.migration && !has('--no-stale-check') && !opts.nonInteractive && !opts.dry) {
     try { await _warnIfStale(root); } catch {}
   }
   const resolved = await resolveInstallOptions(root, opts);
@@ -936,7 +953,7 @@ async function install(root, opts = {}) {
   if (resolved.permissionMode) log(`Agent 권한 모드: ${resolved.permissionMode}  (1.9.174 — REPL에서 \`:permissions extended|full\` 로 즉시 변경 가능)`);
   // 1.9.10: 스킬 카탈로그 출처 안내
   // 1.9.184 (사용자 명시): leerness-skillpack 미사용 정책 — 안내 메시지 제거. builtin catalog 만 사용.
-  const files = coreFiles(root, lang, skills);
+  const files = coreFiles(root, lang, skills, { minimal: !!opts.minimal });
   const backup = createBackup(root, opts.force ? 'force' : (opts.migration ? 'migration' : 'init'), files, opts.dry);
   if (opts.dry) {
     log(`Backup target: ${backup.archiveDir}`);
@@ -986,6 +1003,19 @@ async function install(root, opts = {}) {
     process.stdout.write('\r\x1b[K');  // clear progress line
     log(`  \x1b[32m✓\x1b[0m leerness 파일 설치 완료 (${totalFiles}개)`);
   }
+  // 1.9.276 (GPT-5.5 2차 리뷰): dry-run 요약 + 조기 종료 (파일 미생성). 실제 적용 안내.
+  if (opts.dry) {
+    const created = actions.filter(a => a.action === 'create').length;
+    const merged = actions.filter(a => a.action === 'merge/update').length;
+    const preserved = actions.filter(a => a.action === 'preserve').length;
+    log('');
+    log(`# [dry-run] 요약${opts.minimal ? ' (--minimal)' : ''} — 실제 파일은 생성/수정되지 않았습니다`);
+    log(`  생성 ${created} · 머지/갱신 ${merged} · 보존 ${preserved} · 총 ${totalFiles}`);
+    if (!opts.noEnv && !opts.minimal) log(`  + .env/.env.example, .gitignore, roadmap.html, .claude hook (실제 실행 시)`);
+    log(`  → 실제 적용: leerness init ${rel(process.cwd(), root) || '.'}${opts.minimal ? ' --minimal' : ''}${opts.noEnv ? ' --no-env' : ''} --yes`);
+    _cleanupSigint();
+    return;
+  }
   if (!opts.dry) {
     mergeLinesFile(path.join(root, '.gitignore'), [
       // 1.9.153: .env 직접 생성 + 사용자 글로벌 룰 SECRET_PATTERNS 6종 일괄 ignore (audit 통합)
@@ -1021,11 +1051,16 @@ async function install(root, opts = {}) {
       'LEERNESS_NPM_TOKEN=',
       'LEERNESS_GITHUB_TOKEN=',
     ];
-    mergeLinesFile(path.join(root, '.env.example'), envLines);
-    try {
-      mergeEnvFile(path.join(root, '.env'), envLines);
-    } catch (e) {
-      warn(`.env 생성/마이그레이션 실패 (계속 진행): ${e.message}`);
+    // 1.9.276 (GPT-5.5 2차 리뷰): --no-env 또는 --minimal 시 .env/.env.example 자동 생성 건너뜀 (호불호 + 침투성 완화).
+    if (opts.noEnv || opts.minimal) {
+      log(`  ⏭ .env/.env.example 생성 건너뜀 (${opts.minimal ? '--minimal' : '--no-env'}) — 토큰 필요 시 .env.example 참고해 수동 생성`);
+    } else {
+      mergeLinesFile(path.join(root, '.env.example'), envLines);
+      try {
+        mergeEnvFile(path.join(root, '.env'), envLines);
+      } catch (e) {
+        warn(`.env 생성/마이그레이션 실패 (계속 진행): ${e.message}`);
+      }
     }
     // 1.9.187: 비시크릿 LEERNESS_* 설정 → .harness/leerness-config.json (AI 가시성)
     try {
@@ -1116,11 +1151,14 @@ async function install(root, opts = {}) {
         }
       }
     } catch {}
-    if (!has('--no-auto-update')) {
+    // 1.9.276: --minimal 시 .claude SessionStart hook 도 건너뜀 (침투성 완화)
+    if (!has('--no-auto-update') && !opts.minimal) {
       try { autoUpdateInstall(root); } catch (e) { warn('auto-update hook install skipped: ' + (e && e.message)); }
+    } else if (opts.minimal) {
+      log(`  ⏭ .claude SessionStart hook 건너뜀 (--minimal) — 필요 시 leerness auto-update install .`);
     }
-    // 1.9.12: install 직후 첫 roadmap.html 자동 생성
-    if (!has('--no-auto-roadmap')) {
+    // 1.9.12: install 직후 첫 roadmap.html 자동 생성 (1.9.276: --minimal 시 건너뜀 — 침투성/용량 완화)
+    if (!has('--no-auto-roadmap') && !opts.minimal) {
       try { _autoRoadmap(root, 'install'); } catch (e) { warn('auto-roadmap 실패: ' + (e && e.message)); }
     }
     // 1.9.148: 1.9.32 중복 prompt 제거 (사용자 명시 — CLI 에이전트 prompt 중복).
@@ -2913,6 +2951,7 @@ function _selfTestCases() {
     { name: '_pickModel: top/code/fast 등급 선택 (1.9.270)', run: () => { return _pickModel('codex', 'code') === 'gpt-5-codex' && _pickModel('claude', 'top') === 'claude-opus-4-7' && /haiku/.test(_pickModel('claude', 'fast')); } },
     { name: 'CAPABILITY_SURFACE: 6 영역 + risk/optOut + 주의명령 (1.9.272)', run: () => { const ks = Object.keys(CAPABILITY_SURFACE); return ks.length === 6 && ks.includes('automationBridges') && Object.values(CAPABILITY_SURFACE).every(v => ['low','medium','high'].includes(v.risk) && v.optOut && v.desc) && POWERFUL_COMMANDS.length >= 5; } },
     { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
+    { name: 'coreFiles --minimal: 핵심 유지 + 비핵심 제외 + verify 필수 보존 (1.9.276)', run: () => { const full = coreFiles('.', 'ko', []); const min = coreFiles('.', 'ko', [], { minimal: true }); const keep = ['.harness/plan.md','.harness/progress-tracker.md','.harness/session-handoff.md','AGENTS.md','CLAUDE.md','.harness/consistency-policy.md','.harness/reuse-map.md','.harness/encoding-policy.md','.harness/secret-policy.md']; const drop = ['.cursor/rules/leerness.mdc','.harness/skill-index.md','.harness/architecture.md']; const verifyReq = ['.harness/design-system.md','.harness/protected-files.md','.harness/current-state.md']; if (!verifyReq.every(k => min[k])) return false; return Object.keys(min).length < Object.keys(full).length && keep.every(k => min[k]) && drop.every(k => !min[k]); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -20649,7 +20688,8 @@ async function main() {
       }
     } catch {}
   }
-  if (cmd === 'init')      return await install(args[1] || process.cwd(), { force:false, dry:false, migration:false });
+  // 1.9.276 (GPT-5.5 2차 리뷰): init --dry-run(미리보기) / --minimal(핵심 파일만) / --no-env(.env 생략)
+  if (cmd === 'init')      return await install(args[1] || process.cwd(), { force:has('--force'), dry:has('--dry-run'), migration:false, minimal:has('--minimal'), noEnv:has('--no-env') });
   // 1.9.64: install <skill-id-or-url> 별칭 (= skill install). 자주 쓰는 명령 단축형.
   // 단, init이 leerness install . 같은 형태로도 동작하던 옛 호환은 유지 — args[1]이 디렉토리면 init으로 라우팅.
   if (cmd === 'install') {
@@ -21000,5 +21040,7 @@ module.exports = {
   // 1.9.272: 권한/보안 표면 공개 (GPT-5.5 리뷰) — 단위 테스트
   CAPABILITY_SURFACE, POWERFUL_COMMANDS, capabilitiesCmd,
   // 1.9.275: 릴리스 채널 (npm dist-tag, GPT-5.5 리뷰) — 단위 테스트
-  _resolveNpmTag, releaseChannelCmd
+  _resolveNpmTag, releaseChannelCmd,
+  // 1.9.276: init --minimal 파일 필터 (GPT-5.5 2차 리뷰) — 단위 테스트
+  MINIMAL_SKIP_KEYS, coreFiles
 };

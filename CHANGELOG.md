@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.276 — 2026-06-03 — 설치 부담 완화: init --dry-run / --minimal / --no-env (GPT-5.5 2차 리뷰)
+
+**📦 GPT-5.5 2차 외부 평가(7/10)의 핵심 지적 "init이 너무 침투적 + 미리보기 부재"를 직접 해결.**
+
+### 배경
+GPT-5.5 가 1.9.275 를 직접 실행: 기능은 실용적이나 `init` 한 번에 50+ 파일 + `.claude`/`.cursor`/`.github`/`.env`/`README` 까지 건드려 "가볍게 설치"가 아님(#1). `init --dry-run` 부재(#2). `.env` 자동 생성 호불호(#6).
+
+### 구현
+1. **`init --dry-run`** — 생성/수정될 파일 목록 + 요약(생성/머지/보존 카운트) 미리보기 후 **조기 종료, 실제 변경 0**. dry 시 `_warnIfStale` 캐시 기록도 차단(부작용 0 보장). 기존 init 은 `dry:false` 하드코딩이라 미지원이던 것을 수정.
+2. **`init --minimal`** — 코어 워크플로(handoff/verify/audit/session close)가 요구하지 않는 ~25개(에디터 통합 `.cursor`/`.github`, AX 가이드, 템플릿, 스킬, 특화 체크리스트 등) + `roadmap.html` + `.env` + `.claude` SessionStart hook 을 생략. **verify 필수 파일은 전부 보존** → minimal 설치도 verify 통과 (49→31 .harness 파일).
+3. **`init --no-env`** — `.env`/`.env.example` 자동 생성만 생략 (토큰 자동 파일 호불호 대응).
+4. **`MINIMAL_SKIP_KEYS` denylist** — verify required 목록(plan/progress/guideline/protected-files/design-system/anti-lazy/session-handoff/current-state/AGENTS)을 침범하지 않도록 설계.
+5. **README/문서** — 한/영 보안 섹션에 설치 부담 완화 옵션 안내.
+6. **selftest 26→27 + e2e 223→224** — minimal 필터(핵심 보존+비핵심 제외+verify 필수 보존) + dry-run(0파일)/minimal(verify 통과)/no-env(.env 제외) 통합 검증.
+
+### 백로그 (GPT 2차 장기 항목)
+- 위험 명령 별도 패키지 분리(release/pc/web), e2e 5분 내 완료 안정화, bin/harness.js 추가 모듈화(UR-0025 계속), README 첫 화면 단순화.
+
+### 검증
+- **selftest 27/27 PASS** · **E2E 224/224 PASS** (회귀 0). dry-run 실측 0 파일 생성 · minimal verify 통과 확인.
+
 ## 1.9.275 — 2026-06-03 — UR-0026: 릴리스 채널 (npm dist-tag 안정/실험)
 
 **🚦 잦은 1.9.x 릴리스에 안정(latest)/실험(next) 채널 + 버전 고정 안내 — 사용자가 안정성을 제어 (GPT-5.5 리뷰).**
