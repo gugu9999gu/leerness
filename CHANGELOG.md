@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.285 — 2026-06-03 — UR-0023: 외부 OSS "빌드 vs 재사용" 결정 게이트 (오프라인)
+
+**🔍 기능 계획 시 "이미 검증된 OSS 가 있는데 새로 만드는가?" 를 묻는 오프라인 구조적 게이트 (GPT-5.5 / 사용자 요청). 네트워크 크롤러 아님 — offline-first 유지.**
+
+### 배경 + 설계 판단
+사용자 요청(이전 라운드 기록 UR-0023): 기능 계획 시 GitHub/HuggingFace 등에 유사 OSS 존재 여부 파악 → 재사용 vs 신규. **권고대로 opt-in·offline 게이트**로 구현: leerness 는 네트워크 자동 호출 안 함(호스트 AI 가 실제 탐색), 대신 카테고리 후보 + 적합성 체크리스트를 제공해 **"재사용 검토 생략"을 방지**. 기존 `reuse`(내부 자원)와 명확히 구분.
+
+### 구현
+1. **`leerness reuse-check "<기능>"`** — 키워드→OSS 카테고리 14종(auth/http/date/validation/state/ui/markdown/cli/db/test/pdf/csv/queue/i18n/logging) 매칭 → 잘 알려진 후보 라이브러리 제시 + **6항 적합성 체크리스트**(라이선스/유지보수/보안/적합성/통합비용/제어) + 결정 템플릿. `--json`.
+2. **`review-request` feature 권장 단계 통합** — feature 요청 시 1단계로 `reuse-check` 자동 안내 (게이트 자동 노출).
+3. **offline 명시** — "실제 GitHub/HuggingFace 탐색은 호스트 AI 수행, leerness 는 네트워크 자동 호출 안 함".
+4. selftest 31→32 + e2e 229→230.
+
+### 검증
+- **selftest 32/32 PASS** · **E2E 230/230 PASS · 301s** (회귀 0) · auth/date 카테고리 감지 + 체크리스트 + 인자 누락 exit 1 실측.
+
 ## 1.9.284 — 2026-06-03 — UR-0029: handoff 성능 회귀 수정 (10 provider 전부 spawn → 활성만) + e2e 단축
 
 **⚡ GPT-5.5 "e2e 5분 초과" 추적 중 발견 — `handoff` 가 매번 10개 provider 의 `--version` 을 전부 spawn(≈5.5s 오버헤드). 활성(env=1) provider 만 체크하도록 수정 → handoff 7.3s → 2.6s.**

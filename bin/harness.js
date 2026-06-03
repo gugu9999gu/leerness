@@ -10,7 +10,7 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 
-const VERSION = '1.9.284';
+const VERSION = '1.9.285';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2961,6 +2961,7 @@ function _selfTestCases() {
     { name: '_pickModel: top/code/fast 등급 선택 (1.9.270)', run: () => { return _pickModel('codex', 'code') === 'gpt-5-codex' && _pickModel('claude', 'top') === 'claude-opus-4-7' && /haiku/.test(_pickModel('claude', 'fast')); } },
     { name: 'CAPABILITY_SURFACE: 6 영역 + risk/optOut + 주의명령 (1.9.272)', run: () => { const ks = Object.keys(CAPABILITY_SURFACE); return ks.length === 6 && ks.includes('automationBridges') && Object.values(CAPABILITY_SURFACE).every(v => ['low','medium','high'].includes(v.risk) && v.optOut && v.desc) && POWERFUL_COMMANDS.length >= 5; } },
     { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
+    { name: '_reuseDetect: 키워드→OSS 카테고리 + 체크리스트 (1.9.285)', run: () => { const a = _reuseDetect('JWT 인증 구현'); const b = _reuseDetect('날짜 포맷 date'); const c = _reuseDetect('전혀무관한xyzzy'); return a.some(x => x.key === 'auth') && b.some(x => x.key === 'date') && c.length === 0 && REUSE_CHECKLIST.length >= 5 && REUSE_CATEGORIES.length >= 12; } },
     { name: 'AGENTS.md: 정적 vs 동적 leerness 역할 경계 (1.9.282)', run: () => { const a = coreFiles('.', 'ko', [])['AGENTS.md']; return /정적 vs 동적/.test(a) && /대체하지 않고 \*\*보완\*\*|대체하지 않고 보완/.test(a) && /leerness state/.test(a) && /\.leerness\//.test(a); } },
     { name: '권한 등급: _requiredTier + _policyAllows 순서 (1.9.281)', run: () => { return _requiredTier('release publish') === 'publish' && _requiredTier('agents multi --execute') === 'shell-write' && _requiredTier('handoff') === 'read-only' && _requiredTier('init') === 'project-write' && _policyAllows('project-write', 'safe-write') === true && _policyAllows('project-write', 'publish') === false && _tierRank('read-only') < _tierRank('publish'); } },
     { name: 'ADAPTERS + _mcpJsonContent: 도구 매핑 + .mcp.json 등록 (1.9.280)', run: () => { const ids = Object.keys(ADAPTERS); const okMap = ['claude','cursor','codex','goose','opencode'].every(id => ADAPTERS[id] && Array.isArray(ADAPTERS[id].keys) && ADAPTERS[id].keys.length); const m = JSON.parse(_mcpJsonContent()); return ids.length >= 9 && okMap && ADAPTERS.claude.mcp === true && ADAPTERS.copilot.mcp === false && m.mcpServers.leerness.command === 'npx' && m.mcpServers.leerness.args.join(' ') === 'leerness mcp serve'; } },
@@ -3626,6 +3627,7 @@ function commandsCmd(root) {
       { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278' },
       { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280' },
       { cmd: 'policy show|set|check', desc: '권한 등급 (read-only…publish) — opt-in enforced (위험 명령 차단) — 1.9.281' },
+      { cmd: 'reuse-check "<기능>"', desc: '외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인 카테고리+체크리스트) — 1.9.285' },
       { cmd: 'release channel [--json]', desc: '릴리스 채널 정책 (latest 안정 / next 실험 / 버전 고정) — 1.9.275' },
       { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
@@ -18314,6 +18316,71 @@ function adapterCmd(root, tool, opts = {}) {
   return;
 }
 
+// ===== 1.9.285 (UR-0023, GPT-5.5): 외부 OSS "빌드 vs 재사용" 결정 게이트 =====
+//   기능 계획 시 "이미 검증된 OSS 가 있는데 새로 만드는가?" 를 묻는 오프라인 구조적 게이트.
+//   네트워크 크롤러가 아님(offline-first 유지) — 호스트 AI(메인)가 실제 OSS 탐색을 하되, 이 게이트가
+//   카테고리 후보 + 적합성 체크리스트를 제공해 "재사용 검토 생략"을 방지. 기존 `reuse`(내부 자원)와 구분.
+const REUSE_CATEGORIES = [
+  { key: 'auth', kw: ['auth', 'login', 'oauth', 'jwt', 'session', '인증', '로그인', '토큰'], candidates: 'auth.js(NextAuth), lucia, passport, jose(JWT)' },
+  { key: 'http', kw: ['http client', 'fetch', 'api client', 'request', 'rest client', 'axios'], candidates: 'axios, ky, got, undici(내장 fetch)' },
+  { key: 'date', kw: ['date', 'time', 'datetime', 'timezone', '날짜', '시간', '달력'], candidates: 'date-fns, dayjs, luxon, Temporal(표준)' },
+  { key: 'validation', kw: ['validation', 'schema', 'validate', 'parse input', '검증', '유효성', '스키마'], candidates: 'zod, valibot, yup, joi' },
+  { key: 'state', kw: ['state management', 'store', 'global state', '상태 관리', '스토어'], candidates: 'zustand, redux-toolkit, jotai, nanostores' },
+  { key: 'ui', kw: ['ui component', 'design system', 'button', 'modal', 'component library', '컴포넌트', '디자인 시스템'], candidates: 'shadcn/ui, radix, MUI, Ark UI' },
+  { key: 'markdown', kw: ['markdown', 'md parser', 'mdx', '마크다운'], candidates: 'marked, markdown-it, remark/unified' },
+  { key: 'cli', kw: ['cli', 'command line', 'argv', 'arg parser', '명령행', '인자 파싱'], candidates: 'commander, yargs, clipanion, citty' },
+  { key: 'db', kw: ['orm', 'database', 'sql', 'query builder', 'migration', 'db', '데이터베이스', '쿼리'], candidates: 'prisma, drizzle, kysely' },
+  { key: 'test', kw: ['test', 'unit test', 'e2e', 'mock', '테스트', '목'], candidates: 'vitest, jest, playwright, node:test' },
+  { key: 'pdf', kw: ['pdf', 'generate pdf', 'pdf 생성'], candidates: 'pdf-lib, pdfkit, puppeteer(렌더)' },
+  { key: 'csv', kw: ['csv', 'excel', 'xlsx', 'spreadsheet', '스프레드시트'], candidates: 'papaparse, csv-parse, exceljs' },
+  { key: 'queue', kw: ['queue', 'job', 'worker', 'cron', 'scheduler', '큐', '작업 스케줄'], candidates: 'bullmq, p-queue, node-cron, croner' },
+  { key: 'i18n', kw: ['i18n', 'translation', 'localization', '국제화', '다국어'], candidates: 'i18next, lingui, format.js' },
+  { key: 'logging', kw: ['log', 'logger', 'logging', '로깅'], candidates: 'pino, winston, consola' }
+];
+function _reuseDetect(feature) {
+  const t = String(feature || '').toLowerCase();
+  return REUSE_CATEGORIES.filter(c => c.kw.some(k => t.includes(k)));
+}
+const REUSE_CHECKLIST = [
+  '라이선스: 프로젝트와 호환되는가 (MIT/Apache vs GPL 등)',
+  '유지보수: 최근 커밋/릴리스가 활발한가, 이슈 응답이 있는가',
+  '보안: 알려진 취약점이 없는가 (npm audit / advisory)',
+  '적합성: 요구사항의 80%+ 를 충족하는가 (과한 의존성/기능 과잉 아닌가)',
+  '통합 비용: 학습+통합 비용 < 직접 구현 비용인가',
+  '제어: 핵심 로직이면 외부 의존 리스크를 감수할 가치가 있는가'
+];
+function reuseCheckCmd(root, feature, opts = {}) {
+  const json = has('--json');
+  feature = String(feature || '').trim();
+  if (!feature) { fail('reuse-check "<구현하려는 기능>" 필요 (예: leerness reuse-check "JWT 인증")'); process.exitCode = 1; return; }
+  const matched = _reuseDetect(feature);
+  if (json) {
+    log(JSON.stringify({ feature, categories: matched.map(c => ({ key: c.key, candidates: c.candidates })), checklist: REUSE_CHECKLIST, network: false, note: '오프라인 게이트 — 실제 OSS 탐색/검증은 호스트 AI(GitHub/HuggingFace 등)가 수행' }, null, 2));
+    return;
+  }
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  log(cy(`# leerness reuse-check (1.9.285, UR-0023) — 빌드 vs 재사용 결정 게이트`));
+  log(`기능: ${feature}`);
+  log('');
+  if (matched.length) {
+    log(`## 먼저 검토할 OSS 카테고리 (${matched.length})`);
+    for (const c of matched) log(`  • ${c.key.padEnd(11)} 후보: ${c.candidates}`);
+  } else {
+    log(`## 일반 카테고리 미매칭 — 그래도 아래를 검토`);
+    log(dm(`  GitHub/HuggingFace/awesome-* 목록에서 유사 구현을 먼저 검색하세요.`));
+  }
+  log('');
+  log(`## 적합성 체크리스트 (재사용 결정 전)`);
+  for (const q of REUSE_CHECKLIST) log(`  [ ] ${q}`);
+  log('');
+  log(`## 결정`);
+  log(`  → 위 체크 통과하는 OSS 가 있으면 재사용, 없으면 신규 구현 (이유를 .harness/reuse-map.md 또는 decisions 에 기록).`);
+  log(dm(`  ※ 오프라인 게이트입니다. 실제 GitHub/HuggingFace 탐색·검증은 호스트 AI 가 수행하세요 (leerness 는 네트워크 자동 호출 안 함).`));
+  return;
+}
+
 // 1.9.149+1.9.153: REPL 모드 — leerness 자율 AI 에이전트 (multi-provider 세션)
 async function _agentRepl(root, opts) {
   // 1.9.153: .env 자동 로드 (REPL 진입 직전) — install 직후 LEERNESS_ENABLE_* 즉시 반영
@@ -20785,10 +20852,11 @@ function reviewRequestCmd(root, request) {
   // 5) 권장 단계 (작업 유형별)
   const recommendedSteps = {
     feature: [
-      '1) leerness reuse find "<핵심 capability>" — 중복 구현 사전 차단',
-      '2) leerness plan add "<milestone>" — 진행 추적',
-      '3) leerness contract verify SPEC.md src/<mod>.js — 사양 ↔ 구현 일치 검증',
-      '4) verify-claim --run-tests 로 evidence 의무화'
+      '1) leerness reuse-check "<기능>" — 외부 OSS 빌드 vs 재사용 판단 (1.9.285)',
+      '2) leerness reuse find "<핵심 capability>" — 내부 중복 구현 사전 차단',
+      '3) leerness plan add "<milestone>" — 진행 추적',
+      '4) leerness contract verify SPEC.md src/<mod>.js — 사양 ↔ 구현 일치 검증',
+      '5) verify-claim --run-tests 로 evidence 의무화'
     ],
     bugfix: [
       '1) leerness brainstorm "<버그 키워드>" — 과거 같은 영역 lesson 회수',
@@ -21244,6 +21312,8 @@ async function main() {
   if (cmd === 'state')                              return stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.281 (UR-0034): leerness policy <show|set|check> — 권한 등급 (opt-in enforced)
   if (cmd === 'policy')                             return policyCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  // 1.9.285 (UR-0023): leerness reuse-check "<기능>" — 외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인)
+  if (cmd === 'reuse-check')                        return reuseCheckCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')).join(' '));
   // 1.9.280 (UR-0033): leerness adapter <tool> [path] — 도구별 지침/.mcp.json 선택 생성 (path: 위치 args[2] 또는 --path)
   if (cmd === 'adapter') {
     const _aTool = args[1] && !args[1].startsWith('-') ? args[1] : 'list';
@@ -21436,5 +21506,7 @@ module.exports = {
   // 1.9.280: adapter (UR-0033) — 단위 테스트
   ADAPTERS, _mcpJsonContent, _mergeMcpJson, adapterCmd,
   // 1.9.281: 권한 등급 (UR-0034) — 단위 테스트
-  PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _loadPolicy, _savePolicy, _policyEnforce, policyCmd
+  PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _loadPolicy, _savePolicy, _policyEnforce, policyCmd,
+  // 1.9.285: 외부 OSS 재사용 게이트 (UR-0023) — 단위 테스트
+  REUSE_CATEGORIES, REUSE_CHECKLIST, _reuseDetect, reuseCheckCmd
 };

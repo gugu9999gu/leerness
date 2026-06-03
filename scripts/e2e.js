@@ -2970,5 +2970,21 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.285 회귀 (UR-0023): reuse-check — 외부 OSS 빌드 vs 재사용 게이트
+total++;
+{
+  const r1 = cp.spawnSync(process.execPath, [CLI, 'reuse-check', 'JWT 인증 로그인', '--json'], { encoding: 'utf8', timeout: 15000 });
+  let jsonOk = false;
+  try { const j = JSON.parse(r1.stdout); jsonOk = j.feature && j.categories.some(c => c.key === 'auth') && Array.isArray(j.checklist) && j.checklist.length >= 5 && j.network === false; } catch {}
+  const r2 = cp.spawnSync(process.execPath, [CLI, 'reuse-check', '날짜 date 포맷'], { encoding: 'utf8', timeout: 15000 });
+  const txtOk = r2.status === 0 && /빌드 vs 재사용/.test(r2.stdout) && /date-fns/.test(r2.stdout) && /체크리스트/.test(r2.stdout);
+  // 인자 없으면 실패
+  const r3 = cp.spawnSync(process.execPath, [CLI, 'reuse-check'], { encoding: 'utf8', timeout: 10000 });
+  const failOk = r3.status !== 0;
+  const ok = jsonOk && txtOk && failOk;
+  console.log(ok ? '✓ B(1.9.285) reuse-check: 카테고리 감지 + 체크리스트 + json/인자검증' : `✗ reuse-check 실패 (json=${jsonOk} txt=${txtOk} fail=${failOk})`);
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
