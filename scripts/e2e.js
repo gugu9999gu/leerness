@@ -2801,5 +2801,19 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.275 회귀 (UR-0026): release channel — 안정/실험 채널 정책 (npm dist-tag)
+total++;
+{
+  const r = cp.spawnSync(process.execPath, [CLI, 'release', 'channel', tmp, '--json', '--offline'], { encoding: 'utf8', timeout: 15000 });
+  let jsonOk = false;
+  try { const j = JSON.parse(r.stdout); jsonOk = j.defaultPublishTag === 'latest' && j.policy && j.policy.stable === 'latest' && j.policy.experimental === 'next'; } catch {}
+  const r2 = cp.spawnSync(process.execPath, [CLI, 'release', 'channel', tmp, '--json', '--offline'], { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NPM_TAG: 'next' } });
+  let nextOk = false;
+  try { nextOk = JSON.parse(r2.stdout).defaultPublishTag === 'next'; } catch {}
+  const ok = jsonOk && nextOk;
+  console.log(ok ? '✓ B(1.9.275) release channel: latest 기본 + LEERNESS_NPM_TAG=next 반영 + 정책' : `✗ release channel 실패 (json=${jsonOk} next=${nextOk})`);
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

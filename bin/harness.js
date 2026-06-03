@@ -9,7 +9,7 @@ const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp } = require('../lib/pure-utils');
 
-const VERSION = '1.9.274';
+const VERSION = '1.9.275';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2912,6 +2912,7 @@ function _selfTestCases() {
     { name: 'ROLE_CATALOG + _normalizeRole: 7종 + 한국어 별칭 (1.9.270)', run: () => { const keys = Object.keys(ROLE_CATALOG); return keys.length === 7 && keys.includes('coder') && keys.includes('reviewer') && _normalizeRole('코딩') === 'coder' && _normalizeRole('검수자') === 'reviewer' && _normalizeRole('지휘관') === 'commander'; } },
     { name: '_pickModel: top/code/fast 등급 선택 (1.9.270)', run: () => { return _pickModel('codex', 'code') === 'gpt-5-codex' && _pickModel('claude', 'top') === 'claude-opus-4-7' && /haiku/.test(_pickModel('claude', 'fast')); } },
     { name: 'CAPABILITY_SURFACE: 6 영역 + risk/optOut + 주의명령 (1.9.272)', run: () => { const ks = Object.keys(CAPABILITY_SURFACE); return ks.length === 6 && ks.includes('automationBridges') && Object.values(CAPABILITY_SURFACE).every(v => ['low','medium','high'].includes(v.risk) && v.optOut && v.desc) && POWERFUL_COMMANDS.length >= 5; } },
+    { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3569,6 +3570,7 @@ function commandsCmd(root) {
       { cmd: 'agents list|check|quota|dispatch|multi', desc: '외부 AI CLI 오케스트레이션 (dispatch --role 모델 라우팅 1.9.270)' },
       { cmd: 'roles list|set|unset|catalog|suggest|verify', desc: '모델별 역할 부여 (코딩/검수/지휘/디자인/디버그/설계/분배) — 1.9.270' },
       { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272' },
+      { cmd: 'release channel [--json]', desc: '릴리스 채널 정책 (latest 안정 / next 실험 / 버전 고정) — 1.9.275' },
       { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
@@ -14164,6 +14166,34 @@ function releaseCleanupCmd(root) {
 //     - NPM_TOKEN 또는 LEERNESS_NPM_TOKEN 환경변수에서만 읽음 (값 절대 로그 X)
 //     - 임시 .npmrc 파일 (mkdtempSync) 생성 → publish → 즉시 삭제 (finally)
 //     - 이미 publish된 버전 자동 detect → skip (중복 publish 차단)
+// 1.9.275 (UR-0026, GPT-5.5 리뷰): npm dist-tag 결정 — latest(안정, 기본) / next(실험). 잘못된 형식은 latest 폴백. 순수 함수.
+function _resolveNpmTag(explicit, env) {
+  env = env || process.env;
+  const raw = String(explicit || env.LEERNESS_NPM_TAG || 'latest').trim().toLowerCase();
+  return /^[a-z][a-z0-9-]{0,38}$/.test(raw) ? raw : 'latest';
+}
+// 1.9.275 (UR-0026): leerness release channel — 안정/실험 채널 정책 + 버전 고정 안내 (npm dist-tag).
+function releaseChannelCmd(root) {
+  root = absRoot(root || process.cwd());
+  const json = has('--json');
+  let v = null; try { v = JSON.parse(read(path.join(root, 'package.json'))).version; } catch {}
+  const tag = _resolveNpmTag(arg('--npm-tag', null));
+  let distTags = null;
+  if (!has('--offline') && process.env.LEERNESS_OFFLINE !== '1') {
+    try { const r = cp.spawnSync('npm', ['view', 'leerness', 'dist-tags', '--json'], { encoding: 'utf8', timeout: 10000, shell: true }); if (r.status === 0 && r.stdout) distTags = JSON.parse(r.stdout); } catch {}
+  }
+  if (json) { log(JSON.stringify({ version: v, defaultPublishTag: tag, distTags, policy: { stable: 'latest', experimental: 'next' } }, null, 2)); return; }
+  log(`# leerness release channel (1.9.275, UR-0026)`);
+  log(`현재 버전: ${v || '?'}  ·  기본 publish 태그: ${tag}`);
+  if (distTags) { log('npm dist-tags:'); for (const [k, val] of Object.entries(distTags)) log(`  ${k}: ${val}`); }
+  log('');
+  log(`## 채널 정책 (안정 vs 실험)`);
+  log(`  • latest (안정) — npm i leerness            ← 일반 사용자 기본`);
+  log(`  • next  (실험)  — npm i leerness@next        ← 조기 검증용`);
+  log(`  • 버전 고정     — npm i leerness@${v || '1.9.275'}   ← 재현성 (권장: 운영 코드)`);
+  log('');
+  log(`  실험 채널 publish: leerness release sync-main --npm-tag next  (또는 LEERNESS_NPM_TAG=next)`);
+}
 function _publishToNpm(root, opts = {}) {
   root = absRoot(root || process.cwd());
   // .env 자동 로드 — root + 상위 3단계까지 탐색 (워크스페이스 root 의 .env 도 인식).
@@ -14221,10 +14251,12 @@ function _publishToNpm(root, opts = {}) {
     // 3) npm publish (--userconfig 로 임시 .npmrc 사용, --access public)
     // 1.9.178+: 2FA OTP 지원 — LEERNESS_NPM_OTP 환경변수 또는 --npm-otp 인자
     const otp = process.env.LEERNESS_NPM_OTP || arg('--npm-otp', null) || opts.otp;
-    const baseArgs = ['publish', '--userconfig', tmpNpmrc, '--access', 'public'];
+    // 1.9.275 (UR-0026): dist-tag — latest(안정)/next(실험). 기본 latest.
+    const npmTag = _resolveNpmTag(opts.tag || arg('--npm-tag', null));
+    const baseArgs = ['publish', '--userconfig', tmpNpmrc, '--access', 'public', '--tag', npmTag];
     if (otp) baseArgs.push(`--otp=${otp}`);
     const args = opts.dryRun ? [...baseArgs, '--dry-run'] : baseArgs;
-    log(`   ${opts.dryRun ? '(dry-run) ' : ''}npm publish 시도 중...`);
+    log(`   ${opts.dryRun ? '(dry-run) ' : ''}npm publish 시도 중... (dist-tag: ${npmTag})`);
     const pubR = cp.spawnSync('npm', args, {
       cwd: root, encoding: 'utf8', shell: true, timeout: 60000,
       env: { ...process.env, npm_config_loglevel: 'warn' }
@@ -14414,7 +14446,9 @@ function releasePublish(root) {
 
   // 6. npm publish (--npm-publish)
   if (has('--npm-publish')) {
-    const args = dryRun ? ['publish', '--dry-run'] : ['publish', '--access', 'public'];
+    // 1.9.275 (UR-0026): dist-tag 지원 (latest/next)
+    const npmTag = _resolveNpmTag(arg('--npm-tag', null));
+    const args = dryRun ? ['publish', '--dry-run', '--tag', npmTag] : ['publish', '--access', 'public', '--tag', npmTag];
     log('npm ' + args.join(' '));
     const r = cp.spawnSync('npm', args, { cwd: root, encoding: 'utf8', shell: true });
     log((r.stdout || '').split('\n').slice(-5).join('\n'));
@@ -20819,6 +20853,8 @@ async function main() {
   if (cmd === 'release' && args[1] === 'sync-main') return releaseSyncMainCmd(args[2] || arg('--path', process.cwd()));
   // 1.9.235: leerness release cleanup — local release/* branches 정리 (merged 만, --apply 시 실 삭제)
   if (cmd === 'release' && args[1] === 'cleanup')   return releaseCleanupCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()));
+  // 1.9.275 (UR-0026): leerness release channel — 안정/실험 채널 정책 (npm dist-tag)
+  if (cmd === 'release' && args[1] === 'channel')   return releaseChannelCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()));
   // 1.9.141: feature causality graph
   if (cmd === 'feature' && args[1] === 'add')    return featureAddCmd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('--')).join(' '));
   if (cmd === 'feature' && args[1] === 'link')   return featureLinkCmd(arg('--path', process.cwd()), args[2]);
@@ -20962,5 +20998,7 @@ module.exports = {
   // 1.9.270: agent roles — 모델별 역할 부여 (사용자 명시) — 단위 테스트
   ROLE_CATALOG, _normalizeRole, _pickModel, _rolesFile, _loadRoles, _saveRoles, _resolveRole, _suggestRoles, rolesCmd, _dispatchCommand,
   // 1.9.272: 권한/보안 표면 공개 (GPT-5.5 리뷰) — 단위 테스트
-  CAPABILITY_SURFACE, POWERFUL_COMMANDS, capabilitiesCmd
+  CAPABILITY_SURFACE, POWERFUL_COMMANDS, capabilitiesCmd,
+  // 1.9.275: 릴리스 채널 (npm dist-tag, GPT-5.5 리뷰) — 단위 테스트
+  _resolveNpmTag, releaseChannelCmd
 };

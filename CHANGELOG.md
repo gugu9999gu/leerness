@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.275 — 2026-06-03 — UR-0026: 릴리스 채널 (npm dist-tag 안정/실험)
+
+**🚦 잦은 1.9.x 릴리스에 안정(latest)/실험(next) 채널 + 버전 고정 안내 — 사용자가 안정성을 제어 (GPT-5.5 리뷰).**
+
+### 배경
+GPT-5.5 리뷰: 릴리스가 매우 잦아 사용자가 안정/실험 버전을 구분하기 어려움(UR-0026). npm dist-tag 로 채널을 분리하고, 운영 코드는 버전 고정을 안내.
+
+### 구현
+1. **`_resolveNpmTag(explicit, env)` 순수 함수** — `--npm-tag` / `LEERNESS_NPM_TAG` / 기본 `latest`. 형식 검증(소문자/숫자/-, ≤39자), 잘못된 값은 latest 폴백.
+2. **publish 경로 dist-tag 지원** — `_publishToNpm` + `release publish --npm-publish` 가 `--tag <tag>` 적용. `release sync-main --npm-tag next` 또는 `LEERNESS_NPM_TAG=next` 로 실험 채널 publish 가능 (기본은 latest 안정).
+3. **`leerness release channel [--json]` 신규** — 현재 버전/기본 publish 태그/정책(latest=안정, next=실험) + 버전 고정 안내. 온라인 시 `npm view dist-tags` 회수(offline 시 생략).
+4. **README 릴리스 채널 섹션(한/영)** — `npm i leerness` / `@next` / `@<버전>` 설치 가이드.
+5. **selftest 25→26 + e2e 222→223** — `_resolveNpmTag` 검증 + `release channel` JSON/env 반영.
+
+### 검증
+- **selftest 26/26 PASS** · **E2E 223/223 PASS** (회귀 0). 기본 publish 채널은 latest 유지(기존 동작 불변).
+
 ## 1.9.274 — 2026-06-03 — UR-0025 1단계: bin/harness.js 모듈 분리 시작 (lib/ 순수 유틸 추출)
 
 **🧩 단일 대형 파일(1.2MB) 모듈 분리의 비파괴 1단계 — `lib/` 모듈화 패턴 확립 + 순수 유틸 7종 추출 (GPT-5.5 리뷰).**
