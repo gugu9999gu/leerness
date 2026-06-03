@@ -3,7 +3,7 @@
 > **AI 코딩 에이전트의 거짓 완료·중복·망각·충돌을 막아주는 검수·기억·협업 CLI 하네스.**
 > **A CLI harness that stops AI coding agents from faking completion, duplicating work, forgetting context, and colliding.**
 
-[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.276-green)]() [![tests](https://img.shields.io/badge/e2e-224%2F224-success)]() [![selftest](https://img.shields.io/badge/selftest-24%2F24-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-75-brightgreen)]() [![providers](https://img.shields.io/badge/AI_providers-6-brightgreen)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![npm](https://img.shields.io/badge/npm-leerness-blue)](https://www.npmjs.com/package/leerness) [![version](https://img.shields.io/badge/version-1.9.277-green)]() [![tests](https://img.shields.io/badge/e2e-224%2F224-success)]() [![selftest](https://img.shields.io/badge/selftest-24%2F24-success)]() [![mcp](https://img.shields.io/badge/MCP--tools-75-brightgreen)]() [![providers](https://img.shields.io/badge/AI_providers-10-brightgreen)]() [![license](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ```
   ╔══════════════════════════════════════════════════════════════╗
@@ -28,7 +28,7 @@
 
 ## 한눈에 보기
 
-`leerness`는 **Claude Code · Cursor · Copilot · Codex · Antigravity · Grok** 같은 AI 코딩 에이전트와 함께 일할 때 생기는 구조적 문제를 자동으로 막아주는 CLI 도구입니다.
+`leerness`는 **Claude Code · Cursor · Copilot · Codex · Antigravity · Grok · opencode · Qwen · Aider · Goose** 같은 AI 코딩 에이전트와 함께 일할 때 생기는 구조적 문제를 자동으로 막아주는 CLI 도구입니다.
 
 AI는 코드를 빠르게 쓰지만, 다음 **5가지 함정**에 반복해서 빠집니다 — leerness는 이를 모두 자동으로 감지·차단·회복합니다.
 
@@ -139,7 +139,7 @@ leerness session close [path]        # 세션 마감 + 다음 세션 인계
 leerness drift check [path]          # leerness 미사용 drift 점수
 
 # 멀티 AI 에이전트 · 역할
-leerness setup-agents                # 활성화 (claude/codex/agy/grok/copilot/ollama)
+leerness setup-agents                # 활성화 (claude/codex/agy/grok/opencode/qwen/aider/goose/copilot/ollama)
 leerness agents list | quota         # 상태 / 한도
 leerness agents dispatch "<task>" --role coder   # 역할 기반 모델 라우팅
 leerness agents bench "<task>"       # 여러 CLI 동시 호출 + 비교
@@ -215,7 +215,7 @@ leerness release channel  # 현재 채널/정책 확인 (--json)
 
 ## At a glance
 
-`leerness` is a CLI harness that automatically prevents the structural problems that arise when working with AI coding agents like **Claude Code · Cursor · Copilot · Codex · Antigravity · Grok**.
+`leerness` is a CLI harness that automatically prevents the structural problems that arise when working with AI coding agents like **Claude Code · Cursor · Copilot · Codex · Antigravity · Grok · opencode · Qwen · Aider · Goose**.
 
 AI writes code fast, but repeatedly falls into **5 traps** — leerness detects, blocks, and recovers from all of them.
 
@@ -326,7 +326,7 @@ leerness session close [path]        # close session + hand off
 leerness drift check [path]          # leerness-disuse drift score
 
 # Multi AI agents · roles
-leerness setup-agents                # enable (claude/codex/agy/grok/copilot/ollama)
+leerness setup-agents                # enable (claude/codex/agy/grok/opencode/qwen/aider/goose/copilot/ollama)
 leerness agents list | quota         # status / limits
 leerness agents dispatch "<task>" --role coder   # role-based model routing
 leerness agents bench "<task>"       # call several CLIs at once + compare
@@ -440,7 +440,7 @@ MIT — © leerness contributors
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.9.276 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.9.277 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### Core Commands
 
@@ -482,7 +482,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.9.276는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **42개 도구**를 노출:
+Leerness v1.9.277는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **42개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -503,7 +503,7 @@ Leerness v1.9.276는 stdio JSON-RPC MCP server를 내장합니다 — Claude Cod
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **70 라운드 (1.9.40 → 1.9.276)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
+현재 누적: **70 라운드 (1.9.40 → 1.9.277)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
 
 ### 성능 가이드 (1.9.140 측정)
 
@@ -541,6 +541,6 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.9.276: 2026-06-03
+Last synced by Leerness v1.9.277: 2026-06-03
 <!-- leerness:project-readme:end -->
 

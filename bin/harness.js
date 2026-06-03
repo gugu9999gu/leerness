@@ -9,7 +9,7 @@ const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp } = require('../lib/pure-utils');
 
-const VERSION = '1.9.276';
+const VERSION = '1.9.277';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -866,19 +866,24 @@ async function resolveInstallOptions(root, opts = {}) {
         { label: 'Codex (OpenAI codex CLI)', description: 'OpenAI 코드 모델', id: 'codex' },
         { label: 'Antigravity (agy CLI)', description: 'Google Antigravity 멀티모달 에이전트 (1.9.248~)', id: 'agy' },
         { label: 'Grok (xAI grok-cli)', description: 'xAI Grok CLI — grok-beta 등 (1.9.268~)', id: 'grok' },
+        { label: 'opencode', description: '오픈소스 터미널 AI 코딩 에이전트 (1.9.277~)', id: 'opencode' },
+        { label: 'Qwen Code (qwen)', description: 'Alibaba Qwen Code CLI (1.9.277~)', id: 'qwen' },
+        { label: 'Aider', description: 'git-aware 페어 프로그래밍 CLI (1.9.277~)', id: 'aider' },
+        { label: 'Goose (Block)', description: '오픈소스 범용 로컬 AI 에이전트 — MCP 확장 (1.9.277~)', id: 'goose' },
         { label: 'Copilot (gh extension)', description: 'GitHub Copilot CLI', id: 'copilot' },
         { label: 'Ollama (로컬 LLM — llama3/qwen 등)', description: 'http://localhost:11434 — 무료/오프라인', id: 'ollama' }
       ], { defaults: [] });
       agentsOptIn = picked.length ? picked.map(p => p.id) : 'none';
     } else {
       log('\nCLI 에이전트 활성화 (복수 선택 — 콤마로 구분, opt-in):');
-      log('  1) claude  2) codex  3) agy (Antigravity)  4) grok (xAI)  5) copilot  6) ollama  (예: 1,6 또는 all 또는 none)');
+      log('  1) claude  2) codex  3) agy  4) grok  5) opencode  6) qwen  7) aider  8) goose  9) copilot  10) ollama  (예: 1,8 또는 all 또는 none)');
       const a = (await ask('선택 [none]: ')).trim().toLowerCase();
-      if (a === 'all') agentsOptIn = ['claude', 'codex', 'agy', 'grok', 'copilot', 'ollama'];
+      const ALL_IDS = ['claude', 'codex', 'agy', 'grok', 'opencode', 'qwen', 'aider', 'goose', 'copilot', 'ollama'];
+      if (a === 'all') agentsOptIn = ALL_IDS.slice();
       else if (!a || a === 'none' || a === '0') agentsOptIn = 'none';
       else {
-        const map = { '1': 'claude', '2': 'codex', '3': 'agy', '4': 'grok', '5': 'copilot', '6': 'ollama' };
-        const picks = a.split(/[,\s]+/).map(t => map[t] || (['claude','codex','agy','grok','copilot','ollama'].includes(t) ? t : null)).filter(Boolean);
+        const map = { '1': 'claude', '2': 'codex', '3': 'agy', '4': 'grok', '5': 'opencode', '6': 'qwen', '7': 'aider', '8': 'goose', '9': 'copilot', '10': 'ollama' };
+        const picks = a.split(/[,\s]+/).map(t => map[t] || (ALL_IDS.includes(t) ? t : null)).filter(Boolean);
         agentsOptIn = picks.length ? picks : 'none';
       }
     }
@@ -1071,6 +1076,10 @@ async function install(root, opts = {}) {
         LEERNESS_ENABLE_CODEX: enable('codex') ? '1' : '0',
         LEERNESS_ENABLE_AGY: enable('agy') ? '1' : '0',
         LEERNESS_ENABLE_GROK: enable('grok') ? '1' : '0',
+        LEERNESS_ENABLE_OPENCODE: enable('opencode') ? '1' : '0',
+        LEERNESS_ENABLE_QWEN: enable('qwen') ? '1' : '0',
+        LEERNESS_ENABLE_AIDER: enable('aider') ? '1' : '0',
+        LEERNESS_ENABLE_GOOSE: enable('goose') ? '1' : '0',
         LEERNESS_ENABLE_COPILOT: enable('copilot') ? '1' : '0',
         LEERNESS_ENABLE_OLLAMA: enable('ollama') ? '1' : '0',
         LEERNESS_SKILL_DISCOVER_URL: '',
@@ -2944,7 +2953,7 @@ function _selfTestCases() {
     { name: '_agentSlashHint: grok 슬래시 요약 + copilot 하위명령 라벨', run: () => { const g = _agentSlashHint('.', 'grok'); const c = _agentSlashHint('.', 'copilot'); return !!g && g.count > 0 && /Grok/.test(g.summary) && !!c && c.invoke === 'subcommand' && /하위명령/.test(c.summary); } },
     { name: '_parseSlashFromHelp: 슬래시 검출 + 플래그 제외 (1.9.267)', run: () => { const r = _parseSlashFromHelp('  /help   show help\n  /model  switch model\n  --version  print version\n', 'slash'); return r.length === 2 && r[0].cmd === '/help' && /show help/.test(r[0].desc) && !r.some(c => /version/.test(c.cmd)); } },
     { name: '_parseSlashFromHelp: subcommand 모드 들여쓰기 파싱 (1.9.267)', run: () => { const r = _parseSlashFromHelp('Commands:\n  suggest    제안\n  explain    설명\n', 'subcommand'); return r.length >= 2 && r.some(c => c.cmd === 'suggest') && r.some(c => c.cmd === 'explain'); } },
-    { name: 'EXTERNAL_AGENTS: grok 정식 provider 승격 (1.9.268)', run: () => { const g = EXTERNAL_AGENTS.find(a => a.id === 'grok'); return !!g && g.bin === 'grok' && g.envFlag === 'LEERNESS_ENABLE_GROK' && EXTERNAL_AGENTS.length === 6; } },
+    { name: 'EXTERNAL_AGENTS: 10종 (grok + opencode/qwen/aider/goose 포함) (1.9.277)', run: () => { const ids = EXTERNAL_AGENTS.map(a => a.id); return EXTERNAL_AGENTS.length === 10 && ['grok','opencode','qwen','aider','goose'].every(id => ids.includes(id)) && EXTERNAL_AGENTS.find(a => a.id === 'goose').envFlag === 'LEERNESS_ENABLE_GOOSE'; } },
     { name: '_detectSystemLang: POSIX LANG ko_KR/en_US 판별 (1.9.269)', run: () => _detectSystemLang({ LANG: 'ko_KR.UTF-8' }) === 'ko' && _detectSystemLang({ LANG: 'en_US.UTF-8' }) === 'en' },
     { name: '_detectSystemLang: LC_ALL 우선 + LANGUAGE 폴백 (1.9.269)', run: () => _detectSystemLang({ LC_ALL: 'ko_KR.UTF-8', LANG: 'en_US.UTF-8' }) === 'ko' && _detectSystemLang({ LANGUAGE: 'en_GB' }) === 'en' },
     { name: 'ROLE_CATALOG + _normalizeRole: 7종 + 한국어 별칭 (1.9.270)', run: () => { const keys = Object.keys(ROLE_CATALOG); return keys.length === 7 && keys.includes('coder') && keys.includes('reviewer') && _normalizeRole('코딩') === 'coder' && _normalizeRole('검수자') === 'reviewer' && _normalizeRole('지휘관') === 'commander'; } },
@@ -9464,6 +9473,10 @@ const _LEERNESS_NONSECRET_KEYS = new Set([
   'LEERNESS_ENABLE_CODEX',
   'LEERNESS_ENABLE_AGY',
   'LEERNESS_ENABLE_GROK',
+  'LEERNESS_ENABLE_OPENCODE',
+  'LEERNESS_ENABLE_QWEN',
+  'LEERNESS_ENABLE_AIDER',
+  'LEERNESS_ENABLE_GOOSE',
   'LEERNESS_ENABLE_COPILOT',
   'LEERNESS_ENABLE_OLLAMA',
   'LEERNESS_SKILL_DISCOVER_URL', // 공개 URL
@@ -10122,6 +10135,15 @@ const EXTERNAL_AGENTS = [
   //   → provider cycle / setup-agents / dispatch / slash-commands --refresh probe 가 grok 도 자동 처리.
   { id: 'grok',    bin: 'grok',    envFlag: 'LEERNESS_ENABLE_GROK',    versionArgs: ['--version'], desc: 'xAI Grok CLI (커뮤니티 grok-cli, /model grok-beta 등)',
     installCmd: 'npm i -g @vibe-kit/grok-cli', installHint: 'https://github.com/superagent-ai/grok-cli (xAI API 키 필요 — /login 또는 GROK_API_KEY)' },
+  // 1.9.277 (사용자 명시): 신규 CLI 에이전트 4종 — opencode/qwen/aider/goose. 활성 시 sub-agent dispatch/roles 라우팅 대상.
+  { id: 'opencode', bin: 'opencode', envFlag: 'LEERNESS_ENABLE_OPENCODE', versionArgs: ['--version'], desc: 'opencode — 오픈소스 터미널 AI 코딩 에이전트 (provider-agnostic)',
+    installCmd: 'npm i -g opencode-ai', installHint: 'https://opencode.ai (또는 curl -fsSL https://opencode.ai/install | bash)' },
+  { id: 'qwen',    bin: 'qwen',    envFlag: 'LEERNESS_ENABLE_QWEN',    versionArgs: ['--version'], desc: 'Qwen Code CLI (Alibaba qwen3-coder 등)',
+    installCmd: 'npm i -g @qwen-code/qwen-code', installHint: 'https://github.com/QwenLM/qwen-code (DASHSCOPE/OpenAI 호환 키)' },
+  { id: 'aider',   bin: 'aider',   envFlag: 'LEERNESS_ENABLE_AIDER',   versionArgs: ['--version'], desc: 'Aider — git-aware 페어 프로그래밍 CLI (--model 임의 지정)',
+    installCmd: 'python -m pip install aider-install && aider-install', installHint: 'https://aider.chat (pip install aider-chat · API 키 env)' },
+  { id: 'goose',   bin: 'goose',   envFlag: 'LEERNESS_ENABLE_GOOSE',   versionArgs: ['--version'], desc: 'Goose — Block 오픈소스 범용 로컬 AI 에이전트 (MCP 확장)',
+    installCmd: 'curl -fsSL https://github.com/block/goose/releases/latest/download/download_cli.sh | bash', installHint: 'https://block.github.io/goose (goose configure 로 provider/model 설정)' },
   { id: 'copilot', bin: 'gh',      envFlag: 'LEERNESS_ENABLE_COPILOT', versionArgs: ['copilot', '--version'], desc: 'GitHub Copilot CLI (gh copilot)',
     installCmd: 'gh extension install github/gh-copilot', installHint: 'https://github.com/github/gh-copilot (gh CLI 선행 설치 필요)' },
   // 1.9.146: Ollama 추가 (사용자 명시 요청 #3) — 로컬 LLM, HTTP API 11434
@@ -10199,6 +10221,40 @@ const AGENT_SLASH_COMMANDS = {
       { cmd: 'suggest', desc: '명령/코드 제안 (gh copilot suggest "...")' },
       { cmd: 'explain', desc: '명령 설명 (gh copilot explain "...")' },
       { cmd: 'config', desc: 'gh copilot 설정' }
+    ]
+  },
+  // 1.9.277: 신규 4종 슬래시/세션 명령 (best-effort 큐레이션 — 배포판마다 차이 가능, 사용자 override 권장)
+  opencode: {
+    label: 'opencode', asOf: '1.9.277', invoke: 'slash',
+    note: 'TUI 세션 슬래시 — 배포판마다 차이 가능.',
+    commands: [
+      { cmd: '/help', desc: '명령 목록' }, { cmd: '/new', desc: '새 세션' }, { cmd: '/models', desc: '모델 선택' },
+      { cmd: '/init', desc: '프로젝트 컨텍스트' }, { cmd: '/undo', desc: '되돌리기' }, { cmd: '/share', desc: '세션 공유' }, { cmd: '/exit', desc: '종료' }
+    ]
+  },
+  qwen: {
+    label: 'Qwen Code CLI', asOf: '1.9.277', invoke: 'slash',
+    note: 'Gemini CLI 계열 슬래시(qwen-code) 기준 큐레이션.',
+    commands: [
+      { cmd: '/help', desc: '명령 목록' }, { cmd: '/clear', desc: '컨텍스트 초기화' }, { cmd: '/memory', desc: '메모리 관리' },
+      { cmd: '/tools', desc: '도구 목록' }, { cmd: '/model', desc: '모델 전환' }, { cmd: '/quit', desc: '종료' }
+    ]
+  },
+  aider: {
+    label: 'Aider', asOf: '1.9.277', invoke: 'slash',
+    note: 'aider 세션 내 슬래시 명령 (in-chat commands).',
+    commands: [
+      { cmd: '/add', desc: '파일 컨텍스트 추가' }, { cmd: '/drop', desc: '파일 제거' }, { cmd: '/ask', desc: '코드 수정 없이 질문' },
+      { cmd: '/run', desc: '셸 명령 실행' }, { cmd: '/test', desc: '테스트 실행' }, { cmd: '/diff', desc: '변경 diff' },
+      { cmd: '/commit', desc: '커밋' }, { cmd: '/undo', desc: '마지막 커밋 취소' }, { cmd: '/help', desc: '도움말' }
+    ]
+  },
+  goose: {
+    label: 'Goose (Block)', asOf: '1.9.277', invoke: 'slash',
+    note: 'goose 세션 내 명령 (배포판마다 차이 가능).',
+    commands: [
+      { cmd: '/?', desc: '도움말' }, { cmd: '/mode', desc: '모드 전환(auto/approve/chat)' }, { cmd: '/extension', desc: 'MCP 확장 관리' },
+      { cmd: '/builtin', desc: '빌트인 확장' }, { cmd: '/exit', desc: '종료' }
     ]
   }
 };
@@ -10411,7 +10467,7 @@ function slashCommandsCmd(root, agentArg, opts = {}) {
 }
 
 // 1.9.157: Provider Registry — 사용자 정의 provider 동적 추가 (.harness/providers.json)
-//   빌트인 6종 (EXTERNAL_AGENTS: claude/codex/agy/grok/copilot/ollama) + 사용자 정의를 merge. OpenRouter / Bedrock 등 새 CLI 즉시 흡수 가능.
+//   빌트인 10종 (EXTERNAL_AGENTS: claude/codex/agy/grok/opencode/qwen/aider/goose/copilot/ollama) + 사용자 정의를 merge. OpenRouter / Bedrock 등 새 CLI 즉시 흡수 가능.
 //   파일 형식: { "schemaVersion": 1, "providers": [{ id, bin, envFlag, versionArgs, desc, installHint }] }
 function _providersFile(root) { return path.join(absRoot(root), '.harness', 'providers.json'); }
 function _readUserProviders(root) {
@@ -11291,6 +11347,11 @@ function _dispatchCommand(agentId, task, writeMode, model) {
   if (agentId === 'codex')  return `codex ${writeMode ? 'exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox' : 'exec --skip-git-repo-check'}${m ? ` -m ${m}` : ''} "${q}"`;
   if (agentId === 'agy') return `agy ${writeMode ? '-p --yolo' : '-p'}${m ? ` --model ${m}` : ''} "${q}"`;
   if (agentId === 'grok') return `grok${writeMode ? ' --yolo' : ''}${m ? ` --model ${m}` : ''} "${q}"`;
+  // 1.9.277: 신규 provider 4종 — best-effort 비대화형 호출 (실제 실행은 사용자/메인)
+  if (agentId === 'opencode') return `opencode run${m ? ` --model ${m}` : ''} "${q}"`;
+  if (agentId === 'qwen') return `qwen -p "${q}"${m ? `  # --model ${m} (env/설정)` : ''}`;
+  if (agentId === 'aider') return `aider --message "${q}"${writeMode ? ' --yes' : ' --no-auto-commits'}${m ? ` --model ${m}` : ''}`;
+  if (agentId === 'goose') return `goose run -t "${q}"${m && m !== 'default' ? `  # provider/model: goose configure` : ''}`;
   if (agentId === 'copilot') return `gh copilot suggest "${q}"`;
   if (agentId === 'ollama') return `# ollama — leerness agent "${q}" --provider ollama${m ? ` --model ${m}` : ''} 로 직접 호출 (REPL: leerness agent)`;
   return `# ${agentId}: 명령 빌더 미정의`;
@@ -17678,6 +17739,29 @@ const _PROVIDER_MODEL_CATALOG = {
     { id: 'grok-2', note: 'xAI Grok 2' },
     { id: 'grok-2-mini', note: '빠른 응답' }
   ],
+  // 1.9.277: 신규 provider 4종 모델 (provider-agnostic 인 도구는 default + 설정 안내)
+  opencode: [
+    { id: 'default', note: 'opencode 설정 모델 (opencode auth/models 로 provider별 지정)' },
+    { id: 'anthropic/claude-sonnet', note: 'Anthropic 경유' },
+    { id: 'openai/gpt-5', note: 'OpenAI 경유' }
+  ],
+  qwen: [
+    { id: 'qwen3-coder-plus', note: '코드 특화 최신' },
+    { id: 'qwen-max', note: '최고 성능' },
+    { id: 'qwen-plus', note: '균형' },
+    { id: 'qwen-turbo', note: '빠름' }
+  ],
+  aider: [
+    { id: 'sonnet', note: 'Anthropic Sonnet (aider --model)' },
+    { id: 'gpt-5', note: 'OpenAI' },
+    { id: 'deepseek', note: 'DeepSeek (가성비)' },
+    { id: 'o1-mini', note: '빠른 reasoning' }
+  ],
+  goose: [
+    { id: 'default', note: 'goose configure 로 설정한 provider/model' },
+    { id: 'claude-sonnet', note: 'Anthropic 경유' },
+    { id: 'gpt-5', note: 'OpenAI 경유' }
+  ],
   copilot: [
     { id: 'default', note: 'gh copilot 기본 (모델 선택 불가)' }
   ],
@@ -17690,7 +17774,7 @@ const _PROVIDER_MODEL_CATALOG = {
 };
 
 // 1.9.170: provider cycle 순서 (Tab) — 빌트인 6종(1.9.268 grok 추가). user provider는 동적으로 뒤에 추가.
-const _PROVIDER_CYCLE_ORDER = ['ollama', 'claude', 'codex', 'agy', 'grok', 'copilot'];
+const _PROVIDER_CYCLE_ORDER = ['ollama', 'claude', 'codex', 'agy', 'grok', 'opencode', 'qwen', 'aider', 'goose', 'copilot'];
 
 // 1.9.148: planner/reviewer/actor 역할 시스템 프롬프트 (Gemini 권고 — 자기-승인 편향 방지)
 const _AGENT_ROLE_PROMPTS = {

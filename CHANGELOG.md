@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.277 — 2026-06-03 — 신규 provider 4종(opencode/qwen/aider/goose) + GPT-5.5 범용 하네스 방향 백로그 등록
+
+**🤝 CLI 에이전트 4종을 정식 provider 로 추가 (설치 선택지 + 모델 catalog + dispatch/roles 라우팅). 빌트인 6 → 10종.**
+
+### 신규 provider (사용자 명시)
+1. **EXTERNAL_AGENTS +4** — `opencode`(오픈소스 터미널 에이전트) · `qwen`(Qwen Code) · `aider`(git-aware 페어프로그래밍) · `goose`(Block 범용 에이전트, MCP 확장). 각 `bin`/`envFlag`/`installCmd` 포함.
+2. **자동 전파** — provider list(10)/cycle/setup-agents/`agents dispatch`/`roles`/`slash-commands` 가 4종 자동 흡수.
+3. **install 흐름 10선택지** — 대화형 `_selectMany` + 비대화형 `1~10` 맵 확장.
+4. **모델 catalog** — opencode(default/anthropic/openai) · qwen(qwen3-coder-plus/max/plus/turbo) · aider(sonnet/gpt-5/deepseek/o1-mini) · goose(default/claude/gpt).
+5. **`_dispatchCommand`** — `opencode run` · `qwen -p` · `aider --message [--yes]` · `goose run -t` (모델 플래그 주입, best-effort).
+6. **슬래시 레지스트리** — 4종 세션 슬래시/명령 큐레이션(opencode/qwen/aider/goose).
+7. **config/nonsecret 키** — `LEERNESS_ENABLE_OPENCODE/QWEN/AIDER/GOOSE`.
+
+### GPT-5.5 "범용 하네스 성장 방향" 판단 → 작업 스케줄 등록
+GPT-5.5: leerness 는 실행 에이전트(Goose 등)와 경쟁하지 말고, 그들이 공통 의존하는 **운영 레이어(Memory+Policy+Handoff+Verification+Audit)**가 되면 범용 하네스로 성장 가능. **판단: 방향 타당 — leerness 는 이미 MCP 75도구/handoff/capabilities 로 상당 부분 정합**. 적용 항목을 백로그 등록:
+- **UR-0030** 운영 레이어 정체성 포지셔닝 (실행기 경쟁 지양)
+- **UR-0031** MCP 시맨틱 verb 정비 (get_context/start_task/record_decision/verify_done/make_handoff …)
+- **UR-0032** `.leerness/` JSON 상태 스키마 (runs/tasks/decisions — 에이전트 간 인수인계 표준)
+- **UR-0033** `leerness adapter <tool>` 도구별 선택 생성 (--minimal 확장)
+- **UR-0034** 권한 등급 enforced (read-only…publish, 기본 보수적) — capabilities 확장
+- **UR-0035** AGENTS.md(정적) vs leerness(동적) 역할 분리 포지셔닝
+
+### 검증
+- **selftest 27/27 PASS** · **E2E 224/224 PASS** (회귀 0) — agents list/quota 10 CLI · provider list 10.
+
 ## 1.9.276 — 2026-06-03 — 설치 부담 완화: init --dry-run / --minimal / --no-env (GPT-5.5 2차 리뷰)
 
 **📦 GPT-5.5 2차 외부 평가(7/10)의 핵심 지적 "init이 너무 침투적 + 미리보기 부재"를 직접 해결.**
