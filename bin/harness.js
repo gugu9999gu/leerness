@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 
-const VERSION = '1.9.270';
+const VERSION = '1.9.271';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -794,9 +794,9 @@ function syncReadme(root) {
     // e2e 배지: scripts/e2e.js의 출력 "E2E result: N/N passed" 추정 (직접 grep)
     const e2ePath = path.join(root, 'scripts', 'e2e.js');
     if (exists(e2ePath)) {
-      // total++ 횟수 카운트 — 정확하진 않지만 추세 반영
+      // 1.9.271: e2e 테스트 수 = `total++;` 블록 + `run(...)` 호출 (run 헬퍼가 내부에서 total++ 수행) → 실제 결과와 일치.
       const body = read(e2ePath);
-      const total = (body.match(/^total\+\+;/gm) || []).length;
+      const total = (body.match(/^total\+\+;/gm) || []).length + (body.match(/^run\(/gm) || []).length;
       if (total > 0) {
         updated = updated.replace(/badge\/e2e-(\d+)%2F(\d+)-success/g, `badge/e2e-${total}%2F${total}-success`);
       }
