@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.284 — 2026-06-03 — UR-0029: handoff 성능 회귀 수정 (10 provider 전부 spawn → 활성만) + e2e 단축
+
+**⚡ GPT-5.5 "e2e 5분 초과" 추적 중 발견 — `handoff` 가 매번 10개 provider 의 `--version` 을 전부 spawn(≈5.5s 오버헤드). 활성(env=1) provider 만 체크하도록 수정 → handoff 7.3s → 2.6s.**
+
+### 배경 (프로파일 기반 디버그)
+GPT-5.5 가 두 번 "npm test(e2e) 5분 내 미완료" 지적. 실측 336s. `node --prof` 프로파일 결과 **handoff 시간의 90%가 `spawnSync`** — handoff 헤드라인이 `EXTERNAL_AGENTS.map(_checkAgent)` 로 **10개 provider 의 `--version` 을 매번 전부 실행**(1.9.277 provider 6→10 으로 악화). 'ready'(=활성+설치) 는 **활성(env flag=1) 일 때만** 가능하므로 비활성 provider spawn 은 순수 낭비.
+
+### 구현
+1. **handoff 헤드라인 agent 체크 — 활성 필터 선행** (bin/harness.js:7723): `EXTERNAL_AGENTS.filter(a => process.env[a.envFlag]==='1').map(_checkAgent)`. 결과 동일(비활성은 ready 불가), spawn 만 제거. **활성 0(대부분/모든 e2e) → spawn 0**.
+   - 효과: handoff **7.3s → 2.6s** (회당 4.6s↓). 실사용에서도 매 handoff 5초 절감 + provider 확장 회귀 영구 해결.
+2. **e2e roadmap 기본 OFF** (roadmap 전용 블록만 ON) + **총 소요시간 출력**(투명성).
+3. e2e 총 **336s → 306s**. (구조적으로 133 init × ~1.1s 가 잔여 비용 — init 은 I/O 바운드.)
+
+### 재현성 (GPT 우려 해소)
+- 빠른 게이트: **`npm run test:fast`** (selftest + smoke 13종, ~10s) — 로컬/PR 즉시 검증.
+- 전체 e2e: 229 케이스(subprocess 바운드 ~5min) — CI 매트릭스(ubuntu+windows × node 18/20/22) 병렬 실행으로 재현.
+
+### 검증
+- **selftest 31/31 PASS** · **E2E 229/229 PASS** (회귀 0) · handoff 활성 0 시 spawn 0 실측.
+
 ## 1.9.283 — 2026-06-03 — UR-0025 2단계: 순수 함수 추가 모듈 분리 (lib/pure-utils 7→14종)
 
 **🧩 GPT-5.5 "1.2MB 단일 파일" 지적의 점진적·비파괴 모듈화 계속 — 최근 추가한 순수 로직을 lib/ 로 추출.**

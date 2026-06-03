@@ -8,9 +8,13 @@ const cp = require('child_process');
 
 // 1.9.12: e2e 안정성을 위해 자식 프로세스의 npm 호출 차단 (hang 방지)
 process.env.LEERNESS_OFFLINE = process.env.LEERNESS_OFFLINE || '1';
+// 1.9.284 (UR-0029): e2e 속도 — 기본 roadmap.html(70KB HTML) 자동 생성 OFF (roadmap 전용 테스트 블록만 일시 ON).
+//   대부분의 init/session 테스트는 roadmap 을 검증하지 않으므로 생성 비용 제거 → 5분 내 완료.
+process.env.LEERNESS_NO_AUTO_ROADMAP = '1';
 const CLI = path.resolve(__dirname, '..', 'bin', 'harness.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-e2e-'));
 let failed = 0; let total = 0;
+const _e2eStart = Date.now();  // 1.9.284 (UR-0029): 총 소요시간 투명성
 
 function run(label, args, opts = {}) {
   total++;
@@ -2217,6 +2221,8 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.284: roadmap 전용 테스트 블록 — roadmap 생성 일시 ON (이후 다시 OFF)
+process.env.LEERNESS_NO_AUTO_ROADMAP = '0';
 // 1.9.12: auto roadmap — install 직후 자동 생성
 total++;
 {
@@ -2278,6 +2284,8 @@ total++;
   console.log(ok ? '✓ B(1.9.12) --on-every-change: task add만으로 즉시 갱신' : `✗ on-every-change 미작동`);
   if (!ok) failed++;
 }
+// 1.9.284: roadmap 전용 블록 종료 — 다시 OFF (나머지 테스트 속도)
+process.env.LEERNESS_NO_AUTO_ROADMAP = '1';
 
 // 1.9.12: status 출력
 total++;
@@ -2962,5 +2970,5 @@ total++;
   if (!ok) failed++;
 }
 
-console.log(`\nE2E result: ${total - failed}/${total} passed`);
+console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

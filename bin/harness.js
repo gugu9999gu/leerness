@@ -10,7 +10,7 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 
-const VERSION = '1.9.283';
+const VERSION = '1.9.284';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -7720,7 +7720,9 @@ function handoff(root) {
       // 8) 1.9.152: 활성 외부 AI CLI 카운트 (1.9.151 복수 선택 결과 반영) — 메인 에이전트가 sub-agent 분배 가능성 즉시 인지
       try {
         _loadEnvFile(root);  // .env 자동 로드 (handoff 컨텍스트)
-        const ready = EXTERNAL_AGENTS.map(a => _checkAgent(a)).filter(c => c.status === 'ready');
+        // 1.9.284 (UR-0029) 성능: 'ready'(=활성+설치)는 활성(env=1)일 때만 가능 → 활성 agent 만 --version spawn.
+        //   비활성(대부분/모든 e2e) 은 spawn 0 (이전: 10개 전부 spawn = handoff 5.5s 병목, provider 6→10 으로 악화).
+        const ready = EXTERNAL_AGENTS.filter(a => process.env[a.envFlag] === '1').map(a => _checkAgent(a)).filter(c => c.status === 'ready');
         if (ready.length > 0) {
           parts.push(`🤖 agents ${ready.length} (${ready.map(c => c.id).join(',')})`);
         }
