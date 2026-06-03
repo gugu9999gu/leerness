@@ -2897,5 +2897,28 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.280 회귀 (UR-0033): leerness adapter — 도구별 선택 생성 + .mcp.json
+total++;
+{
+  const aDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-adapter-'));
+  cp.spawnSync(process.execPath, [CLI, 'init', aDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000 });
+  // adapter cursor: .cursor + .mcp.json 생성, .claude 미생성(minimal이라 commands는 있으나 cursor adapter는 안 건드림)
+  const rCur = cp.spawnSync(process.execPath, [CLI, 'adapter', 'cursor', aDir], { encoding: 'utf8', timeout: 15000 });
+  const cursorOk = rCur.status === 0 && fs.existsSync(path.join(aDir, '.cursor', 'rules', 'leerness.mdc'));
+  let mcpOk = false;
+  try { const m = JSON.parse(fs.readFileSync(path.join(aDir, '.mcp.json'), 'utf8')); mcpOk = m.mcpServers && m.mcpServers.leerness && m.mcpServers.leerness.args.join(' ') === 'leerness mcp serve'; } catch {}
+  // adapter list --json: 9종
+  const rList = cp.spawnSync(process.execPath, [CLI, 'adapter', 'list', '--json', '--path', aDir], { encoding: 'utf8', timeout: 15000 });
+  let listOk = false;
+  try { const j = JSON.parse(rList.stdout); listOk = Object.keys(j.adapters).length >= 9 && j.adapters.claude.mcp === true && j.adapters.copilot.mcp === false; } catch {}
+  // adapter --dry-run: 파일 미생성
+  const dDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-adapterdry-'));
+  const rDry = cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--dry-run', '--path', dDir], { encoding: 'utf8', timeout: 15000 });
+  const dryOk = /\[dry-run\]/.test(rDry.stdout) && fs.readdirSync(dDir).length === 0;
+  const ok = cursorOk && mcpOk && listOk && dryOk;
+  console.log(ok ? '✓ B(1.9.280) adapter: cursor(.cursor+.mcp.json)/list 9종/dry-run(0파일)' : `✗ adapter 실패 (cursor=${cursorOk} mcp=${mcpOk} list=${listOk} dry=${dryOk})`);
+  if (!ok) { failed++; console.log((rCur.stdout || '').slice(0, 200)); }
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed`);
 if (failed > 0) process.exit(1);

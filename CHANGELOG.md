@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.280 — 2026-06-03 — UR-0033: leerness adapter <tool> — 도구별 선택 설치 + .mcp.json
+
+**🔌 GPT-5.5 로드맵 2단계 "어댑터" — init 전체 대신 특정 도구의 지침/연결 파일만 생성. `--minimal` + `adapter` 로 침투성↓·범용성↑.**
+
+### 배경
+GPT-5.5: "leerness adapter claude/cursor/codex/goose/gemini — 각 도구별로 필요한 지침 파일만 선택 생성." 범용 하네스는 모든 에이전트 환경을 한꺼번에 심지 말고 사용자가 쓰는 도구만 연결해야 함.
+
+### 구현
+1. **`ADAPTERS` 레지스트리 9종** — claude/cursor/copilot/codex/goose/gemini/opencode/aider/qwen. 각 도구가 소유하는 파일 키(coreFiles 재사용 — 단일 출처) + MCP 지원 여부.
+2. **`leerness adapter <tool> [path] [--dry-run]`** — 해당 도구의 지침 파일만 `writeIfSafe`(비파괴 mergeManaged) 로 생성. `--dry-run` 미리보기(0 변경). `adapter list` 레지스트리 표.
+3. **`.mcp.json` 자동 등록** — MCP 지원 도구(claude/cursor/codex/goose/opencode)는 `.mcp.json` 에 `leerness mcp serve` 를 병합 등록(기존 mcpServers 보존) → 그 도구가 **UR-0031 상태 verb(state_show/start/record/verify/handoff)를 즉시 호출**.
+4. **권장 흐름** — `leerness init . --minimal --no-env` → `leerness adapter <내 도구>` (최소 설치 + 내 에이전트만 연결).
+5. selftest 28→29 + e2e 226→227.
+
+### 검증
+- **selftest 29/29 PASS** · **E2E 227/227 PASS** (회귀 0).
+- 디버그: adapter 가 `--path` 만 읽어 위치 인자 path 무시 → CWD 오염 버그 발견·수정(위치 args[2] 우선) + stray 정리. 실측: `adapter cursor` → .cursor + .mcp.json, list 9종, dry-run 0파일.
+
 ## 1.9.279 — 2026-06-03 — UR-0031: 상태 substrate MCP 시맨틱 verb 노출 (모든 에이전트 공통 호출 표면)
 
 **🔌 1.9.278 의 `.leerness/` 상태 substrate 를 MCP 도구 5종으로 노출 — Claude Code/Goose/Codex/Cursor 가 동일한 verb 로 작업 상태를 읽고 쓴다 (GPT-5.5 범용 하네스 핵심).**

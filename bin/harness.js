@@ -9,7 +9,7 @@ const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp } = require('../lib/pure-utils');
 
-const VERSION = '1.9.279';
+const VERSION = '1.9.280';
 
 // 1.9.184: DEP0190 (child_process shell: true) deprecation warning 억제 (사용자 명시).
 //   leerness 는 cross-platform PATH resolution 을 위해 shell: true 를 의도적으로 사용 (claude.cmd / ollama.cmd 등 Windows .cmd 처리).
@@ -2960,6 +2960,7 @@ function _selfTestCases() {
     { name: '_pickModel: top/code/fast 등급 선택 (1.9.270)', run: () => { return _pickModel('codex', 'code') === 'gpt-5-codex' && _pickModel('claude', 'top') === 'claude-opus-4-7' && /haiku/.test(_pickModel('claude', 'fast')); } },
     { name: 'CAPABILITY_SURFACE: 6 영역 + risk/optOut + 주의명령 (1.9.272)', run: () => { const ks = Object.keys(CAPABILITY_SURFACE); return ks.length === 6 && ks.includes('automationBridges') && Object.values(CAPABILITY_SURFACE).every(v => ['low','medium','high'].includes(v.risk) && v.optOut && v.desc) && POWERFUL_COMMANDS.length >= 5; } },
     { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
+    { name: 'ADAPTERS + _mcpJsonContent: 도구 매핑 + .mcp.json 등록 (1.9.280)', run: () => { const ids = Object.keys(ADAPTERS); const okMap = ['claude','cursor','codex','goose','opencode'].every(id => ADAPTERS[id] && Array.isArray(ADAPTERS[id].keys) && ADAPTERS[id].keys.length); const m = JSON.parse(_mcpJsonContent()); return ids.length >= 9 && okMap && ADAPTERS.claude.mcp === true && ADAPTERS.copilot.mcp === false && m.mcpServers.leerness.command === 'npx' && m.mcpServers.leerness.args.join(' ') === 'leerness mcp serve'; } },
     { name: '_newRunRecord: GPT-5.5 권고 스키마 14필드 + 기본값 (1.9.278)', run: () => { const r = _newRunRecord({ run_id: 'run-0001', goal: 'g', started_at: '2026-06-03T00:00:00Z' }); return r.schemaVersion === 1 && r.run_id === 'run-0001' && r.started_at === '2026-06-03T00:00:00Z' && Array.isArray(r.files_changed) && Array.isArray(r.commands_run) && Array.isArray(r.tests_run) && Array.isArray(r.decisions) && r.verification_result === null && r.status === 'in-progress' && 'handoff_summary' in r && 'model_name' in r && 'task_id' in r; } },
     { name: 'coreFiles --minimal: 핵심 유지 + 비핵심 제외 + verify 필수 보존 (1.9.276)', run: () => { const full = coreFiles('.', 'ko', []); const min = coreFiles('.', 'ko', [], { minimal: true }); const keep = ['.harness/plan.md','.harness/progress-tracker.md','.harness/session-handoff.md','AGENTS.md','CLAUDE.md','.harness/consistency-policy.md','.harness/reuse-map.md','.harness/encoding-policy.md','.harness/secret-policy.md']; const drop = ['.cursor/rules/leerness.mdc','.harness/skill-index.md','.harness/architecture.md']; const verifyReq = ['.harness/design-system.md','.harness/protected-files.md','.harness/current-state.md']; if (!verifyReq.every(k => min[k])) return false; return Object.keys(min).length < Object.keys(full).length && keep.every(k => min[k]) && drop.every(k => !min[k]); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
@@ -3620,6 +3621,7 @@ function commandsCmd(root) {
       { cmd: 'roles list|set|unset|catalog|suggest|verify', desc: '모델별 역할 부여 (코딩/검수/지휘/디자인/디버그/설계/분배) — 1.9.270' },
       { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272' },
       { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278' },
+      { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280' },
       { cmd: 'release channel [--json]', desc: '릴리스 채널 정책 (latest 안정 / next 실험 / 버전 고정) — 1.9.275' },
       { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
@@ -18192,6 +18194,78 @@ function stateCmd(root, sub, ...args) {
   return;
 }
 
+// ===== 1.9.280 (UR-0033, GPT-5.5 범용 하네스): leerness adapter <tool> =====
+//   목적: 도구별로 "필요한 지침/연결 파일만" 선택 생성 (전체 init 대신). --minimal + adapter 조합으로 침투성↓·범용성↑.
+//   MCP 지원 도구는 .mcp.json (leerness mcp serve 등록) 도 생성 → UR-0031 상태 verb 를 즉시 호출 가능.
+//   파일 템플릿은 coreFiles() 재사용(단일 출처). 비파괴(writeIfSafe + mergeManaged).
+const ADAPTERS = {
+  claude:   { label: 'Anthropic Claude Code', keys: ['CLAUDE.md', '.claude/commands/handoff.md', '.claude/commands/session-close.md', '.claude/commands/audit.md', '.claude/commands/lazy-detect.md', '.claude/commands/update.md', '.claude/skills/leerness.md'], mcp: true },
+  cursor:   { label: 'Cursor', keys: ['.cursor/rules/leerness.mdc'], mcp: true },
+  copilot:  { label: 'GitHub Copilot', keys: ['.github/copilot-instructions.md'], mcp: false },
+  codex:    { label: 'OpenAI Codex CLI', keys: ['AGENTS.md'], mcp: true },
+  goose:    { label: 'Goose (Block)', keys: ['AGENTS.md'], mcp: true },
+  gemini:   { label: 'Gemini CLI / Antigravity', keys: ['AGENTS.md'], mcp: false },
+  opencode: { label: 'opencode', keys: ['AGENTS.md'], mcp: true },
+  aider:    { label: 'Aider', keys: ['AGENTS.md'], mcp: false },
+  qwen:     { label: 'Qwen Code', keys: ['AGENTS.md'], mcp: false }
+};
+function _mcpJsonContent() {
+  return JSON.stringify({ mcpServers: { leerness: { command: 'npx', args: ['leerness', 'mcp', 'serve'] } } }, null, 2) + '\n';
+}
+// .mcp.json 병합 — 기존 mcpServers 보존하고 leerness 항목만 추가/갱신.
+function _mergeMcpJson(root) {
+  const f = path.join(absRoot(root), '.mcp.json');
+  let obj = {};
+  if (exists(f)) { try { obj = JSON.parse(read(f)); } catch { obj = {}; } }
+  obj.mcpServers = obj.mcpServers || {};
+  const already = !!obj.mcpServers.leerness;
+  obj.mcpServers.leerness = { command: 'npx', args: ['leerness', 'mcp', 'serve'] };
+  writeUtf8(f, JSON.stringify(obj, null, 2) + '\n');
+  return { file: '.mcp.json', action: already ? 'updated' : 'created' };
+}
+function adapterCmd(root, tool, opts = {}) {
+  root = absRoot(root || process.cwd());
+  const json = has('--json');
+  const dry = has('--dry-run') || opts.dryRun;
+  if (!tool || tool === 'list') {
+    if (json) { log(JSON.stringify({ adapters: Object.fromEntries(Object.entries(ADAPTERS).map(([k, v]) => [k, { label: v.label, files: v.keys, mcp: v.mcp }])) }, null, 2)); return; }
+    log(`# leerness adapter (1.9.280, UR-0033) — 도구별 선택 설치`);
+    log(`  init 전체 대신 특정 도구의 지침/연결 파일만 생성합니다. (권장: leerness init . --minimal 후 adapter)`);
+    log('');
+    for (const [id, a] of Object.entries(ADAPTERS)) {
+      log(`  ${id.padEnd(9)} ${a.label}${a.mcp ? '  [+.mcp.json]' : ''}`);
+      log(`     ${a.keys.join(', ')}`);
+    }
+    log(`\n  사용: leerness adapter <tool> [--dry-run]`);
+    return;
+  }
+  const a = ADAPTERS[tool];
+  if (!a) return fail(`알 수 없는 adapter: ${tool} (가능: ${Object.keys(ADAPTERS).join(', ')})`);
+  const lang = exists(path.join(root, '.harness/LANGUAGE')) ? read(path.join(root, '.harness/LANGUAGE')).trim() : 'ko';
+  const files = coreFiles(root, lang === 'en' ? 'en' : 'ko', []);
+  const managedOverwrite = new Set(['AGENTS.md', 'CLAUDE.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md']);
+  const planned = a.keys.filter(k => files[k] != null);
+  if (a.mcp) planned.push('.mcp.json');
+  if (dry) {
+    if (json) { log(JSON.stringify({ adapter: tool, dryRun: true, files: planned }, null, 2)); return; }
+    log(`# leerness adapter ${tool} [dry-run] — 생성/갱신 예정 ${planned.length}개 (실제 변경 0)`);
+    planned.forEach(f => log(`  - ${f}`));
+    log(`  → 실제 적용: leerness adapter ${tool}`);
+    return;
+  }
+  const results = [];
+  for (const k of a.keys) {
+    if (files[k] == null) continue;
+    results.push(writeIfSafe(root, k, files[k], { mergeManaged: managedOverwrite.has(k) }));
+  }
+  if (a.mcp) results.push(_mergeMcpJson(root));
+  if (json) { log(JSON.stringify({ adapter: tool, files: results }, null, 2)); return; }
+  ok(`adapter ${tool} (${a.label}) 적용 — ${results.length}개 파일`);
+  for (const r of results) log(`  ${r.action}: ${r.file}`);
+  if (a.mcp) log(`  ℹ .mcp.json 등록 — 이 도구가 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`);
+  return;
+}
+
 // 1.9.149+1.9.153: REPL 모드 — leerness 자율 AI 에이전트 (multi-provider 세션)
 async function _agentRepl(root, opts) {
   // 1.9.153: .env 자동 로드 (REPL 진입 직전) — install 직후 LEERNESS_ENABLE_* 즉시 반영
@@ -21120,6 +21194,12 @@ async function main() {
   if (cmd === 'capabilities' || cmd === 'security-surface') return capabilitiesCmd(arg('--path', process.cwd()), { json: has('--json') });
   // 1.9.278 (UR-0032): leerness state <show|start|record|verify|handoff> — .leerness/ 구조화 상태 substrate
   if (cmd === 'state')                              return stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  // 1.9.280 (UR-0033): leerness adapter <tool> [path] — 도구별 지침/.mcp.json 선택 생성 (path: 위치 args[2] 또는 --path)
+  if (cmd === 'adapter') {
+    const _aTool = args[1] && !args[1].startsWith('-') ? args[1] : 'list';
+    const _aRoot = (args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd());
+    return adapterCmd(_aRoot, _aTool);
+  }
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
@@ -21302,5 +21382,7 @@ module.exports = {
   // 1.9.276: init --minimal 파일 필터 (GPT-5.5 2차 리뷰) — 단위 테스트
   MINIMAL_SKIP_KEYS, coreFiles,
   // 1.9.278: .leerness/ 상태 스키마 (UR-0032, GPT-5.5 범용 하네스) — 단위 테스트
-  _newRunRecord, _leernessStateDir, _loadLeernessState, _saveLeernessState, _loadRun, _saveRun, stateCmd
+  _newRunRecord, _leernessStateDir, _loadLeernessState, _saveLeernessState, _loadRun, _saveRun, stateCmd,
+  // 1.9.280: adapter (UR-0033) — 단위 테스트
+  ADAPTERS, _mcpJsonContent, _mergeMcpJson, adapterCmd
 };
