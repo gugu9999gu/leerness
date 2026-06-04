@@ -3791,7 +3791,7 @@ total++;
       && m._extractTitle('<title>T &amp; U</title>') === 'T & U'
       && m._extractLinks('<a href="/x">x</a><a href="https://o.com/y">y</a>', 'https://h.com/').length === 1;  // same-domain only
     const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
-    const movedOut = !/function _htmlToText\(html\) \{/.test(harnessSrc) && /_htmlToText, _extractTitle, _extractLinks \} = require\('\.\.\/lib\/pure-utils'\)/.test(harnessSrc);
+    const movedOut = !/function _htmlToText\(html\) \{/.test(harnessSrc) && harnessSrc.includes('_htmlToText, _extractTitle, _extractLinks') && /require\('\.\.\/lib\/pure-utils'\)/.test(harnessSrc);  // 1.9.324: import 순서 비의존(이후 import 추가 허용)
     const r = cp.spawnSync(process.execPath, [CLI, 'api-skill'], { encoding: 'utf8', timeout: 15000 });  // 소비 명령 로드
     const cmdOk = /api-skill/.test(r.stdout || '');
     ok = fnOk && work && movedOut && cmdOk;
@@ -3891,6 +3891,31 @@ total++;
     fs.rmSync(fg, { recursive: true, force: true });
   } catch {}
   console.log(ok ? '✓ B(1.9.323) fresh-init gate: lazy detect 부재신호 비차단(통과) + 거짓완료 차단 유지 (UR-0054 ⑥)' : '✗ fresh-init gate 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.324 회귀 (UR-0025 모듈화): 메모리 MD 파서 2종 lib/pure-utils 분리 + harness 인라인 제거 + _compareSemver 중복제거 + 소비명령
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const fnOk = typeof m._countDatedBlocks === 'function' && typeof m._extractDecisionBlocks === 'function';
+    const work = m._countDatedBlocks('```md\n### 2026-01-01 — T\n```\n### 2026-06-05 — R\n') === 1
+      && m._extractDecisionBlocks('### 2026-06-05 — A\n- Decision: x\n').length === 1;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const movedOut = !/function _countDatedBlocks\(/.test(harnessSrc) && !/function _compareSemver\(/.test(harnessSrc)
+      && /_countDatedBlocks, _extractDecisionBlocks \} = require\('\.\.\/lib\/pure-utils'\)/.test(harnessSrc);
+    // 소비 명령 회귀: context 의 decisions count (_countDatedBlocks 사용)
+    const cd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-memparse-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', cd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'X', '--path', cd, '--reason', 'r'], { encoding: 'utf8', timeout: 20000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'context', '--path', cd, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let decOk = false; try { decOk = JSON.parse(r.stdout).memory.decisions === 1; } catch {}
+    ok = fnOk && work && movedOut && decOk;
+    fs.rmSync(cd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.324) lib/pure-utils 메모리 파서 분리: 모듈 단일출처 + 인라인/중복 제거 + context count (UR-0025)' : '✗ 메모리 파서 분리 실패');
   if (!ok) failed++;
 }
 

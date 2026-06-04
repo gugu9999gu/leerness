@@ -9,13 +9,14 @@ const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
-  _htmlToText, _extractTitle, _extractLinks } = require('../lib/pure-utils');  // 1.9.318 (UR-0025): 순수 HTML 파싱 유틸 분리
+  _htmlToText, _extractTitle, _extractLinks,
+  _countDatedBlocks, _extractDecisionBlocks } = require('../lib/pure-utils');  // 1.9.318/324 (UR-0025): 순수 HTML/메모리 파서 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.323';
+const VERSION = '1.9.324';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2245,7 +2246,7 @@ function _detectDeliveredRequests(root) {
     if (vMatch && dMatch) {
       const claimedVer = vMatch[1];
       // 현재 버전 이하인지 (자기-기록 시점의 버전이 이미 출시됨)
-      const cmp = _compareSemver(claimedVer, currentMajor);
+      const cmp = compareVer(claimedVer, currentMajor);  // 1.9.324 (UR-0025): 중복 _compareSemver 제거 → pure-utils compareVer 사용
       if (cmp <= 0) {
         candidates.push({
           id: req.id,
@@ -2261,15 +2262,7 @@ function _detectDeliveredRequests(root) {
   return { total: open.length, candidates, currentVersion: currentMajor };
 }
 
-function _compareSemver(a, b) {
-  const pa = String(a).split('.').map(n => parseInt(n, 10) || 0);
-  const pb = String(b).split('.').map(n => parseInt(n, 10) || 0);
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) < (pb[i] || 0)) return -1;
-    if ((pa[i] || 0) > (pb[i] || 0)) return 1;
-  }
-  return 0;
-}
+// 1.9.324 (UR-0025): _compareSemver 제거 — pure-utils compareVer 와 동일 기능(중복) → compareVer 단일화.
 
 // 1.9.226: round-history — git tag v1.9.X 기반 자율 라운드 통계 + 다음 마일스톤
 //   git이 없거나 tag가 없으면 graceful fallback (current version + 0 history)
@@ -3123,6 +3116,7 @@ function _selfTestCases() {
     { name: 'decision/lesson 필드 파싱: 빈 필드가 다음 줄로 안 샘 ([ \\t]* 사용) (UR-0053 1.9.321)', run: () => { const block = '### 2026-06-05 — X\n- Decision: X\n- Reason: r\n- Alternatives: \n- Impact: 보안\n'; const alt = block.match(/- Alternatives:[ \t]*(.+)/); const imp = block.match(/- Impact:[ \t]*(.+)/); const altNoBleed = !alt || !/Impact/.test(alt[1]); const impOk = !!imp && imp[1].trim() === '보안'; const src = read(__filename); const fixedOk = src.includes('- Alternatives:[ \\t]*(.+)') && src.includes('- Lesson:[ \\t]*(.+)') && src.includes('- Impact:[ \\t]*(.+)'); return altNoBleed && impOk && fixedOk; } },
     { name: 'MCP handler 통합: _mcpToCliArgs 단일 함수 + mcpServeCmd 호출 + 인라인 switch 단일화 (UR-0044 1.9.322)', run: () => { const src = read(__filename); const fnDef = /function _mcpToCliArgs\(name, args, targetPath\) \{/.test(src); const called = src.includes('cliArgs = _mcpToCliArgs(name, args, targetPath)'); const switchCount = (src.match(/switch \(name\) \{/g) || []).length; const nullPath = src.includes('if (cliArgs === null) return send('); return fnDef && called && switchCount === 1 && nullPath; } },
     { name: 'fresh-init gate 통과: lazy detect 부재신호(handoff/test/progress) done-work 없으면 비차단 (UR-0054 ⑥ 1.9.323)', run: () => { const src = read(__filename); const doneWork = src.includes("const _hasDoneWork = rows.some(r => /^(done|completed|verified)$/i.test(r.status))"); const advisory = src.includes('_ADVISORY_KINDS') && src.includes("'handoff_never_generated'") && src.includes("'no_test_run'"); const blocking = src.includes('const blockingIssues = Math.max(0, issues - advisoryCount)') && src.includes('if (blockingIssues > 0) process.exitCode = 1'); return doneWork && advisory && blocking; } },
+    { name: 'lib/pure-utils: 메모리 MD 파서 분리(_countDatedBlocks/_extractDecisionBlocks) + _compareSemver 중복제거 (UR-0025 1.9.324)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._countDatedBlocks === 'function' && typeof m._extractDecisionBlocks === 'function'; const work = m._countDatedBlocks('```md\n### 2026-01-01 — T\n```\n### 2026-06-05 — R\n') === 1 && m._extractDecisionBlocks('### 2026-06-05 — A\n- Decision: x\n').length === 1; const src = read(__filename); const moved = m._countDatedBlocks === _countDatedBlocks && m._extractDecisionBlocks === _extractDecisionBlocks && !/^function _countDatedBlocks\(/m.test(src) && !/^function _compareSemver\(/m.test(src); return fnOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -12828,20 +12822,7 @@ function readSessionCounter(root) {
 }
 function writeSessionCounter(root, c) { writeUtf8(sessionCounterPath(root), JSON.stringify(c, null, 2) + '\n'); }
 
-// 1.9.14 A/D: 결정 블록 추출 — 코드 블록 안의 ### + Template 제외
-// 1.9.320 (UR-0053, 설치리뷰): 날짜 블록(### YYYY-MM-DD) 카운트 단일 진실소스 — 코드펜스(```md 템플릿 예시) 제거 후 카운트.
-//   배경: decisions/lessons 카운터 6곳이 raw regex 로 코드펜스 안 Template 예시까지 세어 count drift(decisions=2 실제1) 발생.
-function _countDatedBlocks(text) {
-  const cleaned = String(text || '').replace(/^```[^\n]*\n[\s\S]*?\n```\s*$/gm, '');  // 코드펜스(템플릿) 제거
-  return (cleaned.match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length;
-}
-function _extractDecisionBlocks(text) {
-  // 줄 시작의 ```부터 줄 시작의 ```까지를 코드블록으로 인식 (인라인 백틱 무시)
-  const cleaned = String(text || '').replace(/^```[^\n]*\n[\s\S]*?\n```\s*$/gm, '');
-  return cleaned.split(/\n(?=### )/).filter(b =>
-    b.startsWith('### ') && !/^### (Template|템플릿)\b/.test(b.trim())
-  );
-}
+// 1.9.324 (UR-0025): _countDatedBlocks / _extractDecisionBlocks → lib/pure-utils.js 로 이동 (순수 메모리 MD 파서, require 사용).
 
 function _retroAggregate(root) {
   root = absRoot(root);

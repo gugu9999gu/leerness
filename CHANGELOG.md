@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.324 — 2026-06-05 — UR-0025(증분): 메모리 MD 파서 분리 + _compareSemver 중복 제거
+
+**🧩 점진적 비파괴 모듈화 — 순수 메모리 파서 2종을 lib/pure-utils 로 이전 + 중복 버전비교 함수 통합.**
+
+### 구현 (UR-0025)
+1. **순수 메모리 MD 파서 → `lib/pure-utils.js` 분리**: `_countDatedBlocks`(코드펜스 제거 후 날짜 블록 카운트) + `_extractDecisionBlocks`(결정 블록 추출, Template 제외). decisions/lessons count 의 단일 진실소스. harness.js 인라인 제거 → require.
+2. **`_compareSemver` 중복 제거**: pure-utils 의 `compareVer` 와 기능 동일(중복) → `compareVer` 단일화(호출 1곳 교체, 함수 삭제).
+3. selftest 71→72 · e2e 268→269.
+4. 테스트 견고화: B(1.9.318) HTML 분리 테스트의 import 순서 의존 정규식 → 순서 비의존(이후 import 추가 허용)으로 수정.
+
+### 검증
+- **selftest 72/72 PASS** · **E2E 269/269 PASS** (회귀 0).
+- 실측: 모듈 `_countDatedBlocks`(펜스 템플릿 제외)·`_extractDecisionBlocks` 동작 · harness 인라인/`_compareSemver` 제거 확인 · context decisions count 정상 · 소비 명령 회귀 없음.
+- ⚠️ 첫 e2e 268/269(B(1.9.318) 정규식이 require 라인 변경에 취약) → 정규식 견고화 후 269/269.
+
 ## 1.9.323 — 2026-06-05 — UR-0054 ⑥: fresh-init gate 통과 (lazy detect 부재신호 비차단)
 
 **🚀 `leerness init` 직후 `leerness gate` 가 빈 트래커/미생성 handoff 때문에 즉시 실패하던 UX 결함 수정.**
