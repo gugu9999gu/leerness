@@ -3477,5 +3477,29 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.306 회귀 (UR-0045 설치리뷰): exit code 일관성 — 오류 경로 exit 1, 정상/help exit 0
+total++;
+{
+  let ok = false;
+  try {
+    const eDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-exit-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', eDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const ex = (args) => cp.spawnSync(process.execPath, [CLI, ...args], { cwd: eDir, encoding: 'utf8', timeout: 20000 }).status;
+    // 오류 경로 → exit 1
+    const unknownOk = ex(['definitely-not-a-cmd']) === 1;
+    const missingArgOk = ex(['decision', 'add', '--path', eDir]) === 1;
+    const badSubOk = ex(['task', 'zzznotreal', '--path', eDir]) === 1;
+    // 정상/help/version → exit 0 (fail() 변경 회귀 방지)
+    const okStatus = ex(['status', eDir]) === 0;
+    const okList = ex(['task', 'list', '--path', eDir]) === 0;
+    const okHelp = ex(['--help']) === 0;
+    const okVer = ex(['--version']) === 0;
+    ok = unknownOk && missingArgOk && badSubOk && okStatus && okList && okHelp && okVer;
+    fs.rmSync(eDir, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.306) exit code 일관성: 오류 exit 1(unknown/인자누락/badsub) + 정상·help·version exit 0 (UR-0045)' : '✗ exit code 일관성 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.306 — 2026-06-04 — UR-0045: exit code 일관성 (설치리뷰 3중수렴 high)
+
+**🚦 clean-install 리뷰에서 Codex·Sonnet·Opus 가 공통 high 로 지적한 "실패가 exit 0" 문제 수정 — CI·MCP·AI 에이전트가 실패를 성공으로 오판하던 근본 신뢰 결함. (직전 라운드의 인식론적 정직성과 직결: 에이전트가 거짓 성공을 믿지 않게.)**
+
+### 배경 (Codex#1 · Sonnet#1 · Opus)
+설치 후 실측: `leerness unknowncmd`/`decision add`(인자 누락)/`task badsubcmd` 가 오류 메시지를 내면서도 **exit 0** 반환. 원인: `fail(s)` 가 `✗ s` 로그만 하고 exit code 미설정(243개 호출 전부), unknown 명령은 help 로 fall-through. CI/스크립트/MCP/에이전트가 실패를 성공으로 오인.
+
+### 구현 (UR-0045)
+1. **`fail()` → `process.exitCode = 1`** — 243개 모든 오류 경로가 실패 신호. `process.exit` 즉시종료가 아니라 exitCode 설정(후속 출력/정리 보존, main 종료 wrapper 가 강제). 비치명 경고는 기존 `warn()` 유지.
+2. **unknown 명령 fall-through** — 명시적 `help`/`commands`/`--help` 는 exit 0(의도), 그 외 미인식 명령은 `✗ 알 수 없는 명령: <cmd>` 안내 + exit 1. unknown 서브커맨드(task badsubcmd 등)도 fall-through → exit 1.
+3. selftest 53→54 · e2e 250→251.
+
+### 검증
+- **selftest 54/54 PASS** · **E2E 251/251 PASS** (회귀 0).
+- **fail() 변경 회귀 0 실증**: 251개 e2e 중 정상 종료해야 할 명령(status/task list/verify/audit/context/about/handoff/selftest…) 전부 exit 0 유지. 오류 경로(unknown/인자누락/badsub) exit 1, --help/--version exit 0.
+- 범위: 입력값 스키마 검증(rule trigger/task status 등 무효값 거부)은 UR-0046(별도), 이번은 exit code 신호 일관성에 집중.
+
 ## 1.9.305 — 2026-06-04 — honesty-check: AI 인식론적 정직성 점검 (사용자 명시)
 
 **🧠 사용자 요청 — AI 가 (1) 모르는 걸 아는 척, (2) 정보를 안 모으고, (3) 검증 없이 섣부르게 판단하는지를 점검하는 인식론적 정직성 가드 신설.**

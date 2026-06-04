@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.305';
+const VERSION = '1.9.306';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -149,7 +149,9 @@ const STATUSES = ['requested','planned','in-progress','waiting','on-hold','block
 function log(s = '') { console.log(s); }
 function ok(s) { log('✓ ' + s); }
 function warn(s) { log('⚠ ' + s); }
-function fail(s) { log('✗ ' + s); }
+// 1.9.306 (UR-0045, 설치리뷰 3중수렴): fail() 은 오류 신호 → exit code 1 설정 (CI/MCP/에이전트가 실패를 성공으로 오판 방지).
+//   비치명 경고는 warn() 사용. process.exit 즉시종료가 아니라 exitCode 설정(후속 출력/정리 보존, main 종료 wrapper 가 강제).
+function fail(s) { log('✗ ' + s); process.exitCode = 1; }
 // 1.9.287 (Codex 리뷰 수렴): 임베딩 텍스트의 코드펜스(```)를 중립화해 외부 마크다운(session-handoff)이 깨지지 않게.
 //   ``` → ''' (펜스가 아닌 표시), 인라인 백틱은 보존. 순수 함수.
 function _sanitizeFences(s) { return String(s || '').replace(/```+/g, "'''"); }
@@ -3072,6 +3074,7 @@ function _selfTestCases() {
     { name: '_withLock/_updateRun: lost-update 락(O_EXCL+재진입) + 적용 (UR-0043 외부리뷰 1.9.303)', run: () => { const src = read(__filename); const fnOk = typeof _withLock === 'function' && typeof _sleepSyncMs === 'function' && typeof _updateRun === 'function'; const reentrant = /if \(_heldLocks\.has\(lockPath\)\) return fn\(\)/.test(src); const excl = /fs\.openSync\(lockPath, 'wx'\)/.test(src); const applied = /const id = _withLock\(progressPath\(root\)/.test(src) && /_updateRun\(root, curId/.test(src); return fnOk && reentrant && excl && applied; } },
     { name: 'lib/analyzers: 분석/검증 함수 4종 모듈 단일출처 분리 (UR-0025 1.9.304)', run: () => { const m = require('../lib/analyzers'); return m._evidenceQuality === _evidenceQuality && m._shellGuardAnalyze === _shellGuardAnalyze && m._parseEvidenceStats === _parseEvidenceStats && m._claimFileInGit === _claimFileInGit && !/function _evidenceQuality\(evidence\) \{/.test(read(__filename)) && !/function _shellGuardAnalyze\(cmd, ctx\) \{/.test(read(__filename)); } },
     { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
+    { name: 'exit code 일관성: fail()→exitCode 1 + unknown 명령 안내 (UR-0045 설치리뷰 1.9.306)', run: () => { const src = read(__filename); return /function fail\(s\) \{ log\('✗ ' \+ s\); process\.exitCode = 1; \}/.test(src) && /알 수 없는 명령: \$\{cmd\}/.test(src) && /if \(cmd === 'help' \|\| cmd === 'commands'/.test(src); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -21605,7 +21608,10 @@ async function main() {
     }
     return fail('decision add "<title>" --reason "..." --alternatives "..." --impact "..." | decision list [--json] | decision drop <date|title>');
   }
-  return help();
+  // 1.9.306 (UR-0045): 명시적 help 요청은 exit 0, 그 외 미인식 명령은 안내 + exit 1 (실패를 성공으로 오판 방지).
+  if (cmd === 'help' || cmd === 'commands' || cmd === '--help' || cmd === '-h') { help(); return; }
+  fail(`알 수 없는 명령: ${cmd}  (leerness --help 로 전체 명령 확인)`);
+  return;
 }
 
 // 1.9.4 B: main 종료 후 exitCode를 명시적으로 process.exit으로 강제 (셸/wrapper 차 무시).
