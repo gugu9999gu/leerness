@@ -3202,5 +3202,28 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.295 회귀 (UR-0025 4단계): lib/catalogs.js 모듈 분리 — 단일출처 + 부작용 0 + 소비 명령 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const reg = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const dataOk = reg.CAPABILITY_SURFACE && Object.keys(reg.CAPABILITY_SURFACE).length === 6 &&
+      Array.isArray(reg.POWERFUL_COMMANDS) && reg.POWERFUL_COMMANDS.length === 7 &&
+      reg.ADAPTERS && Object.keys(reg.ADAPTERS).length === 9 &&
+      Array.isArray(reg.REUSE_CATEGORIES) && reg.REUSE_CATEGORIES.length === 15 &&
+      Array.isArray(reg.REUSE_CHECKLIST) && reg.REUSE_CHECKLIST.length === 6;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const movedOut = !/const CAPABILITY_SURFACE = \{/.test(harnessSrc) && !/const ADAPTERS = \{/.test(harnessSrc) && /require\('\.\.\/lib\/catalogs'\)/.test(harnessSrc);
+    // 소비 명령 회귀: capabilities + reuse-check (카탈로그 require 후 동작)
+    const cap = cp.spawnSync(process.execPath, [CLI, 'capabilities', '--json'], { cwd: tmp, encoding: 'utf8', timeout: 20000 });
+    const reuse = cp.spawnSync(process.execPath, [CLI, 'reuse-check', 'JWT 인증', '--json'], { cwd: tmp, encoding: 'utf8', timeout: 20000 });
+    const cmdsOk = cap.status === 0 && reuse.status === 0 && /auth/.test(reuse.stdout);
+    ok = dataOk && movedOut && cmdsOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.295) lib/catalogs 모듈 분리: 단일출처 + 인라인 제거 + capabilities/reuse-check 동작 (UR-0025)' : '✗ catalogs 모듈 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

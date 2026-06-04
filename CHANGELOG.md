@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.295 — 2026-06-04 — UR-0025 (4단계): 잔여 정적 카탈로그 → lib/catalogs.js — 데이터 추출 단계 완료 ✅
+
+**🧩 모놀리스 분리 4단계 — 잔여 정적 데이터 카탈로그 5종을 비파괴 분리. 이로써 leerness 의 모든 정적 데이터 카탈로그가 lib/ 모듈로 외부화됨(데이터 추출 단계 완료).**
+
+### 배경
+GPT-5.5 + Codex 공통 지적(단일 대형 `bin/harness.js`)을 점진 분리 중. 1단계(pure-utils 14함수)·2단계(agent-registry)·3단계(role-catalog)에 이어 4단계로 capability/adapter/reuse 정적 카탈로그를 분리.
+
+### 구현 (UR-0025 4단계)
+1. **`lib/catalogs.js` 신설** — 5개 순수 데이터 카탈로그 이동(53줄):
+   - `CAPABILITY_SURFACE`(6영역 위험/optOut 공개) + `POWERFUL_COMMANDS`(주의 명령 7종)
+   - `ADAPTERS`(도구별 어댑터 9종 — claude/cursor/codex/goose/opencode 등)
+   - `REUSE_CATEGORIES`(OSS 빌드 vs 재사용 게이트 15종) + `REUSE_CHECKLIST`(적합성 6항목)
+2. **비파괴 require-based 분리** — `capabilitiesCmd`/`adapterCmd`/`_reuseDetect`/`reuseCheckCmd` 소비처는 동일 바인딩. 런타임 변형 0(모두 읽기 전용 검증). 상단 단일 require + 원위치 마커 주석.
+3. **harness.js 21607→21560줄**. **lib 4모듈 체제 완성**: pure-utils(163)+agent-registry(147)+role-catalog(103)+catalogs(60) = 473줄 외부화.
+4. selftest 42→43 (5 카탈로그 동일참조 단일출처 + 인라인 제거 검증) · e2e 239→240 (모듈 standalone + `capabilities`/`reuse-check` 동작 회귀).
+
+### 검증
+- **selftest 43/43 PASS** · **E2E 240/240 PASS** (회귀 0).
+- 기존 selftest(CAPABILITY_SURFACE 6영역 + _reuseDetect 카테고리 + ADAPTERS .mcp.json)가 추출 정합성 즉시 검증.
+- `capabilities --json` / `reuse-check "JWT 인증" --json` 정상 동작(모듈 분리 후 회귀 없음).
+- **UR-0025 정적 데이터 카탈로그 추출 단계 완료** — 이후는 기능(command handler) 모듈화 검토 영역(별도 신중 진행).
+
 ## 1.9.294 — 2026-06-04 — UR-0025 (3단계): 역할/모델 카탈로그 → lib/role-catalog.js 모듈 분리
 
 **🧩 모놀리스 분리 3단계 — 역할/모델 레지스트리(4개 카탈로그)를 비파괴 데이터 모듈로 분리. 1.9.274(pure-utils)/1.9.291(agent-registry) 패턴 계승.**

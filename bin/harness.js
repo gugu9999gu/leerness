@@ -9,8 +9,10 @@ const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
+// 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.294';
+const VERSION = '1.9.295';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3001,6 +3003,7 @@ function _selfTestCases() {
     { name: 'get_project_context: MCP 시맨틱 verb 등록 + CLI context 디스패치 (UR-0031 1.9.292)', run: () => { const src = read(__filename); const mcpDef = /name: 'leerness_get_project_context'/.test(src); const mcpCase = /case 'leerness_get_project_context':[\s\S]*?cliArgs = \['context'/.test(src); const cliDisp = /if \(cmd === 'context'\)\s+return contextCmd/.test(src); return typeof contextCmd === 'function' && mcpDef && mcpCase && cliDisp && _mcpToolCount() >= 80; } },
     { name: '_canonicalProgressHeader + idempotency auto-fix (근본 복제버그 fix 1.9.293)', run: () => { const h = _canonicalProgressHeader(); const headerOk = /leernessRole: progress-tracker/.test(h) && /\| ID \| Status \| Request \|/.test(h) && /\|---\|/.test(h); const src = read(__filename); const fnOk = typeof _autoFixIdempotency === 'function'; const noWholeTextFallback = /if \(idx < 0\) return _canonicalProgressHeader\(\);/.test(src); const driftWired = /_autoFixIdempotency\(root\)/.test(src) && /idempotency 중복/.test(src); return headerOk && fnOk && noWholeTextFallback && driftWired; } },
     { name: 'lib/role-catalog: ROLE/PROVIDER/ALIASES/PROMPTS 모듈 단일출처 분리 (UR-0025 1.9.294)', run: () => { const m = require('../lib/role-catalog'); return m.ROLE_CATALOG === ROLE_CATALOG && m._PROVIDER_MODEL_CATALOG === _PROVIDER_MODEL_CATALOG && m._ROLE_ALIASES === _ROLE_ALIASES && m._AGENT_ROLE_PROMPTS === _AGENT_ROLE_PROMPTS && Object.keys(m.ROLE_CATALOG).length === 7 && Object.keys(m._PROVIDER_MODEL_CATALOG).length === 10 && !/const ROLE_CATALOG = \{/.test(read(__filename)); } },
+    { name: 'lib/catalogs: CAPABILITY/ADAPTERS/REUSE 모듈 단일출처 분리 (UR-0025 1.9.295)', run: () => { const m = require('../lib/catalogs'); return m.CAPABILITY_SURFACE === CAPABILITY_SURFACE && m.ADAPTERS === ADAPTERS && m.REUSE_CATEGORIES === REUSE_CATEGORIES && m.REUSE_CHECKLIST === REUSE_CHECKLIST && m.POWERFUL_COMMANDS === POWERFUL_COMMANDS && Object.keys(m.CAPABILITY_SURFACE).length === 6 && !/const CAPABILITY_SURFACE = \{/.test(read(__filename)); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -17981,23 +17984,7 @@ function rolesCmd(root, sub, ...args) {
 // ===== 1.9.272: Capability / Security Surface 공개 (GPT-5.5 외부 리뷰 반영) =====
 //   leerness 는 권한이 큰 CLI 하네스(child_process/git/외부 CLI/automation 브리지/hook 설치)이므로,
 //   무엇을 할 수 있고 어떻게 끄는지를 명시적으로 공개해 신뢰도를 높인다. SECURITY.md 와 동일 출처.
-const CAPABILITY_SURFACE = {
-  filesystem:        { risk: 'low',    desc: '.harness/ 메타파일 생성·갱신, 변경 전 .harness/archive/ 자동 백업. 소스코드는 직접 수정 안 함.', optOut: '핵심 동작 (백업으로 보호)' },
-  network:           { risk: 'low',    desc: 'npm 최신 버전 비교(update --check)만. 그 외 외부 URL 자동 fetch 안 함.', optOut: 'LEERNESS_OFFLINE=1' },
-  childProcess:      { risk: 'medium', desc: 'git(명시 명령 시 status/commit/push), npm test(verify-code), 외부 CLI --version 감지. 셸 spawn.', optOut: 'verify 계열 한정 · 외부 CLI 는 opt-in' },
-  externalAgents:    { risk: 'medium', desc: 'agents dispatch/multi — 외부 AI CLI(claude/codex/agy/grok/copilot) 호출. 기본은 명령 텍스트만 생성, multi --execute 시 실제 spawn.', optOut: 'LEERNESS_ENABLE_* 미설정 시 비활성 (기본 off)' },
-  automationBridges: { risk: 'high',   desc: 'web(playwright)/pc(robotjs)/lsp(typescript) 브리지 — opt-in 의존성. pc 는 마우스/키보드 제어(full 권한).', optOut: '의존성 미설치 시 비활성 (기본 off, 명시 설치 필요)' },
-  claudeHook:        { risk: 'low',    desc: 'init 시 .claude/settings.local.json 에 SessionStart hook(update --check) 설치.', optOut: 'leerness init . --no-auto-update' }
-};
-const POWERFUL_COMMANDS = [
-  { cmd: 'init',                   note: '.harness/ 50+ 파일 + .claude hook 생성 (변경 전 백업)' },
-  { cmd: 'update --yes',           note: '자동 마이그레이션 — 메타파일 갱신' },
-  { cmd: 'agents multi --execute', note: '외부 AI CLI 실제 spawn (병렬 실행)' },
-  { cmd: 'release publish / sync-main', note: 'git push + npm publish + GitHub release' },
-  { cmd: 'pc <click|type|...>',    note: '마우스/키보드 제어 (robotjs, full 권한)' },
-  { cmd: 'web <...>',              note: '헤드리스 브라우저 자동화 (playwright)' },
-  { cmd: 'setup-agents',           note: '외부 CLI 활성화 + 자동 설치 시도' }
-];
+// CAPABILITY_SURFACE / POWERFUL_COMMANDS → lib/catalogs.js (1.9.295 UR-0025 4단계)
 function capabilitiesCmd(root, opts = {}) {
   if (opts.json) {
     log(JSON.stringify({ version: VERSION, surface: CAPABILITY_SURFACE, powerfulCommands: POWERFUL_COMMANDS,
@@ -18284,17 +18271,7 @@ function stateCmd(root, sub, ...args) {
 //   목적: 도구별로 "필요한 지침/연결 파일만" 선택 생성 (전체 init 대신). --minimal + adapter 조합으로 침투성↓·범용성↑.
 //   MCP 지원 도구는 .mcp.json (leerness mcp serve 등록) 도 생성 → UR-0031 상태 verb 를 즉시 호출 가능.
 //   파일 템플릿은 coreFiles() 재사용(단일 출처). 비파괴(writeIfSafe + mergeManaged).
-const ADAPTERS = {
-  claude:   { label: 'Anthropic Claude Code', keys: ['CLAUDE.md', '.claude/commands/handoff.md', '.claude/commands/session-close.md', '.claude/commands/audit.md', '.claude/commands/lazy-detect.md', '.claude/commands/update.md', '.claude/skills/leerness.md'], mcp: true },
-  cursor:   { label: 'Cursor', keys: ['.cursor/rules/leerness.mdc'], mcp: true },
-  copilot:  { label: 'GitHub Copilot', keys: ['.github/copilot-instructions.md'], mcp: false },
-  codex:    { label: 'OpenAI Codex CLI', keys: ['AGENTS.md'], mcp: true },
-  goose:    { label: 'Goose (Block)', keys: ['AGENTS.md'], mcp: true },
-  gemini:   { label: 'Gemini CLI / Antigravity', keys: ['AGENTS.md'], mcp: false },
-  opencode: { label: 'opencode', keys: ['AGENTS.md'], mcp: true },
-  aider:    { label: 'Aider', keys: ['AGENTS.md'], mcp: false },
-  qwen:     { label: 'Qwen Code', keys: ['AGENTS.md'], mcp: false }
-};
+// ADAPTERS → lib/catalogs.js (1.9.295 UR-0025 4단계)
 // _mcpJsonContent → lib/pure-utils.js 로 이동 (1.9.283 UR-0025 2단계)
 // .mcp.json 병합 — 기존 mcpServers 보존하고 leerness 항목만 추가/갱신.
 function _mergeMcpJson(root) {
@@ -18354,35 +18331,12 @@ function adapterCmd(root, tool, opts = {}) {
 //   기능 계획 시 "이미 검증된 OSS 가 있는데 새로 만드는가?" 를 묻는 오프라인 구조적 게이트.
 //   네트워크 크롤러가 아님(offline-first 유지) — 호스트 AI(메인)가 실제 OSS 탐색을 하되, 이 게이트가
 //   카테고리 후보 + 적합성 체크리스트를 제공해 "재사용 검토 생략"을 방지. 기존 `reuse`(내부 자원)와 구분.
-const REUSE_CATEGORIES = [
-  { key: 'auth', kw: ['auth', 'login', 'oauth', 'jwt', 'session', '인증', '로그인', '토큰'], candidates: 'auth.js(NextAuth), lucia, passport, jose(JWT)' },
-  { key: 'http', kw: ['http client', 'fetch', 'api client', 'request', 'rest client', 'axios'], candidates: 'axios, ky, got, undici(내장 fetch)' },
-  { key: 'date', kw: ['date', 'time', 'datetime', 'timezone', '날짜', '시간', '달력'], candidates: 'date-fns, dayjs, luxon, Temporal(표준)' },
-  { key: 'validation', kw: ['validation', 'schema', 'validate', 'parse input', '검증', '유효성', '스키마'], candidates: 'zod, valibot, yup, joi' },
-  { key: 'state', kw: ['state management', 'store', 'global state', '상태 관리', '스토어'], candidates: 'zustand, redux-toolkit, jotai, nanostores' },
-  { key: 'ui', kw: ['ui component', 'design system', 'button', 'modal', 'component library', '컴포넌트', '디자인 시스템'], candidates: 'shadcn/ui, radix, MUI, Ark UI' },
-  { key: 'markdown', kw: ['markdown', 'md parser', 'mdx', '마크다운'], candidates: 'marked, markdown-it, remark/unified' },
-  { key: 'cli', kw: ['cli', 'command line', 'argv', 'arg parser', '명령행', '인자 파싱'], candidates: 'commander, yargs, clipanion, citty' },
-  { key: 'db', kw: ['orm', 'database', 'sql', 'query builder', 'migration', 'db', '데이터베이스', '쿼리'], candidates: 'prisma, drizzle, kysely' },
-  { key: 'test', kw: ['test', 'unit test', 'e2e', 'mock', '테스트', '목'], candidates: 'vitest, jest, playwright, node:test' },
-  { key: 'pdf', kw: ['pdf', 'generate pdf', 'pdf 생성'], candidates: 'pdf-lib, pdfkit, puppeteer(렌더)' },
-  { key: 'csv', kw: ['csv', 'excel', 'xlsx', 'spreadsheet', '스프레드시트'], candidates: 'papaparse, csv-parse, exceljs' },
-  { key: 'queue', kw: ['queue', 'job', 'worker', 'cron', 'scheduler', '큐', '작업 스케줄'], candidates: 'bullmq, p-queue, node-cron, croner' },
-  { key: 'i18n', kw: ['i18n', 'translation', 'localization', '국제화', '다국어'], candidates: 'i18next, lingui, format.js' },
-  { key: 'logging', kw: ['log', 'logger', 'logging', '로깅'], candidates: 'pino, winston, consola' }
-];
+// REUSE_CATEGORIES → lib/catalogs.js (1.9.295 UR-0025 4단계)
 function _reuseDetect(feature) {
   const t = String(feature || '').toLowerCase();
   return REUSE_CATEGORIES.filter(c => c.kw.some(k => t.includes(k)));
 }
-const REUSE_CHECKLIST = [
-  '라이선스: 프로젝트와 호환되는가 (MIT/Apache vs GPL 등)',
-  '유지보수: 최근 커밋/릴리스가 활발한가, 이슈 응답이 있는가',
-  '보안: 알려진 취약점이 없는가 (npm audit / advisory)',
-  '적합성: 요구사항의 80%+ 를 충족하는가 (과한 의존성/기능 과잉 아닌가)',
-  '통합 비용: 학습+통합 비용 < 직접 구현 비용인가',
-  '제어: 핵심 로직이면 외부 의존 리스크를 감수할 가치가 있는가'
-];
+// REUSE_CHECKLIST → lib/catalogs.js (1.9.295 UR-0025 4단계)
 function reuseCheckCmd(root, feature, opts = {}) {
   const json = has('--json');
   feature = String(feature || '').trim();
