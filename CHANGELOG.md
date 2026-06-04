@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.297 — 2026-06-04 — UR-0025 (5단계): MCP 도구 정의 → lib/mcp-tools.js 단일출처 (Codex #5 영구 해소)
+
+**🧩 모놀리스 분리 5단계 — 첫 "기능 영역" 분리. MCP 도구 정의 81종을 단일출처 모듈로 분리하며 `_mcpToolCount` 의 `__filename` regex self-count(Codex #5 취약성)를 영구 해소.**
+
+### 배경
+사용자 지정 라운드 B(기능 모듈화). 정적 데이터 카탈로그(1~4단계) 이후 첫 기능 영역 분리. MCP 도구 정의 배열(`const TOOLS`)은 순수 데이터지만 `tools/list` 응답과 `_mcpToolCount()` 가 **서로 다른 출처**(배열 vs `__filename` regex)를 써서 Codex #5(도구수 불일치)의 근본 취약성이 잠재.
+
+### 구현 (UR-0025 5단계)
+1. **`lib/mcp-tools.js` 신설** — MCP 도구 정의 81종(`{name, description, inputSchema}`)을 단일출처 배열로 분리. `tools/list` 응답이 이 배열을 직접 사용.
+2. **`_mcpToolCount()` 단일출처화** — `read(__filename).match(/.../g)` regex → `require('../lib/mcp-tools').length`. 도구 정의가 소스에 인라인으로 있어야만 동작하던 취약성 제거 → **tools/list 와 카운트가 동일 배열에서 파생(영구 일치 보장)**.
+3. **파생 카운터/검증 전환** — pulse `data.mcpTools`(소스 regex → `_mcpToolCount()`), selftest get_project_context/about 케이스(소스 regex → 모듈 `.some(t => t.name===...)`).
+4. **harness.js 21629→21543줄**. lib 5모듈 체제: pure-utils(163)+agent-registry(147)+role-catalog(103)+catalogs(60)+mcp-tools(89) = 562줄 외부화.
+5. selftest 44→45 · e2e 241→242.
+
+### 검증
+- **selftest 45/45 PASS** · **E2E 242/242 PASS** (회귀 0).
+- B(1.9.297): `tools/list(라이브) == 모듈 length == _mcpToolCount()` 3중 일치 실측 → Codex #5 영구 해소 확인.
+- B(1.9.288) 도구수 정합 테스트 통과(이제 배지·live·카운트가 모두 동일 모듈 파생).
+- `leerness about` / `get_project_context` 등 MCP verb 정상 동작(81 도구 노출 회귀 0).
+
 ## 1.9.296 — 2026-06-04 — UR-0030: 정체성 = AI 에이전트 운영 레이어 (leerness about verb)
 
 **🧭 GPT-5.5 범용 하네스 전략의 정체성 정립 — leerness 는 "실행기"가 아니라 어떤 AI 코딩 에이전트 위에도 얹는 "운영 레이어"임을 조회 가능·테스트 가능한 형태로 명문화.**

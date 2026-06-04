@@ -3249,5 +3249,25 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.297 회귀 (UR-0025 5단계): lib/mcp-tools.js 단일출처 — tools/list == 모듈 == _mcpToolCount (Codex #5 영구해소)
+total++;
+{
+  let ok = false;
+  try {
+    const T = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools.js'));
+    const dataOk = Array.isArray(T) && T.length >= 81 && T.every(t => t.name && t.description && t.inputSchema) && T[0].name === 'leerness_handoff';
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const movedOut = !/const TOOLS = \[/.test(harnessSrc) && /require\('\.\.\/lib\/mcp-tools'\)/.test(harnessSrc);
+    // tools/list(라이브 MCP) == 모듈 length (단일출처 일치)
+    const ml = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: tmp, encoding: 'utf8', timeout: 15000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n' });
+    const live = JSON.parse(ml.stdout.split('\n').filter(Boolean)[0]).result.tools.length;
+    const h = require(path.resolve(__dirname, '..', 'bin', 'harness.js'));
+    const singleSource = live === T.length && h._mcpToolCount() === T.length;
+    ok = dataOk && movedOut && singleSource;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.297) lib/mcp-tools 단일출처: tools/list == 모듈 == _mcpToolCount (Codex #5 영구해소, UR-0025)' : '✗ mcp-tools 모듈 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
