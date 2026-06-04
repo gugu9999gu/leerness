@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.316 — 2026-06-04 — 🐛 drift 'session close 누락' 영구 오발화 버그 (자가 발견)
+
+**🔧 session close 직후에도 drift 가 `session close 누락`(13일)을 보고하던 버그 수정 — 4라운드 연속 관찰된 leerness 자체 정확성 결함.**
+
+### 근본 원인 (자가 발견)
+- drift 의 `session close 누락` 신호는 `session-handoff.md` 의 `Last generated:` 타임스탬프로 나이를 계산.
+- `sessionClose` 가 파일 재작성 시 프론트매터 보존 로직 `cur.indexOf('\n---\n', 4)` 가 **본문의 `---`(수평선/구분자)** 를 프론트매터 종료로 오인 → **구 블록 전체(구 `Last generated`)를 보존**하고 그 뒤에 새 블록을 append.
+- 결과: `session-handoff.md` 에 `Last generated:` 가 **2개 누적**(구 + 신). drift 의 `.match()` 는 **첫(=구) 매치**를 읽어 → 매 session close 후에도 13일 stale → 영구 오발화.
+
+### 구현 (2중 수정)
+1. **근본 (write)**: 프론트매터는 파일이 **`^---` 로 시작할 때만** 추출 — 본문 `---` 오인 차단. 프론트매터 없으면 깨끗이 덮어써 단일 블록 유지(기존 손상 파일도 다음 close 에 self-heal).
+2. **방어 (read)**: drift 가 `matchAll` 로 **최신(마지막) `Last generated`** 사용 — 혹시 모를 중복에도 freshest 반영.
+3. selftest 63→64 · e2e 260→261.
+
+### 검증
+- **selftest 64/64 PASS** · **E2E 261/261 PASS** (회귀 0).
+- 실측: 손상 파일(구 timestamp + 본문 `---`) → session close → `Last generated` **1개**(신선), drift `session close 누락` **age 0.00d 클리어** · 프론트매터 파일 3회 연속 close → 누적 0(프론트매터 보존).
+
 ## 1.9.315 — 2026-06-04 — UR-0054(부분): doc/surface 정합 + doctor 명령 (설치리뷰)
 
 **📋 stale 현재상태 표시 수정 + `leerness doctor` 설치 진단 명령 추가 (Codex#2·Sonnet#2·Opus#2 공통 지적).**

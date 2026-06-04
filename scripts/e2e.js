@@ -3728,5 +3728,29 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.316 회귀 (drift 마커 버그): session-handoff 'Last generated' 중복 누적 방지 + drift 'session close 누락' 클리어
+//   근본: sessionClose 프론트매터 추출이 본문 '---' 를 오인 → 구 블록 보존 → 첫(구) Last generated 를 drift 가 읽어 영구 오발화
+total++;
+{
+  let ok = false;
+  try {
+    const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-driftmark-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', dd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const shp = path.join(dd, '.harness', 'session-handoff.md');
+    // 손상 시뮬: 구 timestamp + 본문 '---' (프론트매터 없는 파일)
+    fs.writeFileSync(shp, '# Session Handoff\n\nLast generated: 2026-01-01T00:00:00.000Z\n\n## Completed\n- old\n\n---\n## x\n');
+    cp.spawnSync(process.execPath, [CLI, 'session', 'close', dd], { encoding: 'utf8', timeout: 30000 });
+    const after = fs.readFileSync(shp, 'utf8');
+    const genCount = (after.match(/Last generated:/g) || []).length;   // 단일화
+    const noOld = !after.includes('2026-01-01');                       // 구 timestamp 제거
+    const dr = cp.spawnSync(process.execPath, [CLI, 'drift', 'check', dd, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let driftOk = false; try { const j = JSON.parse(dr.stdout); const sig = (j.signals || []).find(x => x.label && x.label.includes('session close')); driftOk = sig && sig.ageDays <= sig.threshold; } catch {}
+    ok = genCount === 1 && noOld && driftOk;
+    fs.rmSync(dd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.316) drift 마커: session-handoff Last generated 단일화 + session close 누락 신호 클리어' : '✗ drift 마커 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

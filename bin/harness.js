@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.315';
+const VERSION = '1.9.316';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3114,6 +3114,7 @@ function _selfTestCases() {
     { name: 'MCP notification 준수: id없는 요청 무응답 가드 + ping {} (UR-0049 설치리뷰 1.9.313)', run: () => { const src = read(__filename); const guard = src.includes("const isNotification = !('id' in req)") && src.includes("req.method.startsWith('notifications/')") && src.includes('if (isNotification) return;'); const ping = src.includes("req.method === 'ping'") && /ping[\s\S]{0,140}result: \{\} \}/.test(src); return guard && ping; } },
     { name: 'PowerShell 감지: pwsh7(channel/Documents\\PowerShell/install) + ps5.1 영구경로 과경고 안함 (UR-0052 설치리뷰 1.9.314)', run: () => { const f = _detectPwshFromEnv; const pwsh7a = f({ POWERSHELL_DISTRIBUTION_CHANNEL: 'MSI:Windows 10' }).version === '7'; const pwsh7b = f({ PSModulePath: 'C:\\Users\\me\\Documents\\PowerShell\\Modules' }).version === '7'; const pwsh7c = f({ PSModulePath: 'C:\\Program Files\\PowerShell\\7\\Modules' }).version === '7'; const noFalsePs5 = f({ PSModulePath: 'C:\\Users\\me\\Documents\\WindowsPowerShell\\Modules' }).isPowerShell === false; const cmdSys = f({ PSModulePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules' }).isPowerShell === false; const empty = f({}).isPowerShell === false; const src = read(__filename); const wired = src.includes('const fromEnv = _detectPwshFromEnv()') && src.includes('const pwshEnv = _detectPwshFromEnv()'); return pwsh7a && pwsh7b && pwsh7c && noFalsePs5 && cmdSys && empty && wired; } },
     { name: 'doc/surface 정합: doctor 명령 + stale MCP 카운트 동적화(commands/banner) (UR-0054 설치리뷰 1.9.315)', run: () => { const src = read(__filename); const doctorOk = typeof doctorCmd === 'function' && /cmd === 'doctor'/.test(src) && /# leerness doctor/.test(src); const dynCount = /MCP 도구: \$\{_mcpToolCount\(\)\}/.test(src) && /외부 AI 통합 \(MCP \$\{_mcpToolCount\(\)\} 도구\)/.test(src); return doctorOk && dynCount; } },
+    { name: 'drift 마커 버그: session-handoff 프론트매터는 ^--- 일 때만 + drift 최신 Last generated (1.9.316)', run: () => { const src = read(__filename); const writeFix = src.includes('if (/^---\\r?\\n/.test(cur))') && src.includes('writeUtf8(handoffPath(root), frontmatter + block)'); const readFix = src.includes('matchAll(/Last generated') && src.includes('allGen[allGen.length - 1]'); return writeFix && readFix; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -12246,9 +12247,15 @@ function sessionClose(root, opts = {}) {
     ``
   ].join('\n');
   const cur = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
-  const fmEnd = cur.indexOf('\n---\n', 4);
-  const frontmatter = fmEnd > 0 ? cur.slice(0, fmEnd + 5) + MARK + '\n' : '';
-  writeUtf8(handoffPath(root), (frontmatter || '') + block);
+  // 1.9.316 (drift 마커 버그): 프론트매터는 파일이 '---' 로 시작할 때만 추출.
+  //   이전: 본문의 '---'(수평선/구분자)을 프론트매터 종료로 오인 → 구 블록(구 'Last generated')을 보존 →
+  //   session-handoff.md 에 'Last generated' 중복 누적 → drift 가 첫(=구) 매치를 읽어 'session close 누락' 영구 오발화.
+  let frontmatter = '';
+  if (/^---\r?\n/.test(cur)) {
+    const fmEnd = cur.indexOf('\n---\n', 4);
+    if (fmEnd > 0) frontmatter = cur.slice(0, fmEnd + 5) + MARK + '\n';
+  }
+  writeUtf8(handoffPath(root), frontmatter + block);
 
   if (exists(currentStatePath(root))) {
     let cs = read(currentStatePath(root));
@@ -15588,7 +15595,9 @@ function driftCheckCmd(root, opts = {}) {
   const shPath = handoffPath(root);
   if (exists(shPath)) {
     const txt = read(shPath);
-    const m = txt.match(/Last generated:\s*([\d\-T:.Z]+)/);
+    // 1.9.316 (drift 마커 버그): 최신(마지막) 'Last generated' 사용 — 구 블록 중복 시 첫(구) 매치를 읽던 오발화 방어.
+    const allGen = [...txt.matchAll(/Last generated:\s*([\d\-T:.Z]+)/g)];
+    const m = allGen.length ? allGen[allGen.length - 1] : null;
     let ageDays;
     if (m) {
       ageDays = (now - new Date(m[1]).getTime()) / 86400000;
