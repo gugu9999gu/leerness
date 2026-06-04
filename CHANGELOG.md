@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.315 — 2026-06-04 — UR-0054(부분): doc/surface 정합 + doctor 명령 (설치리뷰)
+
+**📋 stale 현재상태 표시 수정 + `leerness doctor` 설치 진단 명령 추가 (Codex#2·Sonnet#2·Opus#2 공통 지적).**
+
+### 배경 (설치리뷰)
+"문서/표면 drift — init 'MCP 46'(실제83), .harness/.leerness 혼재, --help 중복, --compact 미압축, doctor no-op, init후 gate 실패". 6개 항목 중 **검증 후** 실제/현행 상태:
+- ✅ **stale MCP 카운트**: `commands` 요약(하드코딩 65) + `_banner`(하드코딩 46) — 실제 83. 현재상태 주장이 stale.
+- ✅ **doctor 부재**: `leerness doctor` 명령 없음(unknown command).
+- ⏸ `--help 중복`/`--compact`: 현재 재현 안 됨(중복 0, --compact 200→185줄 압축 동작) — 이미 정상.
+- ⏸ `init후 gate 실패`/`.harness·.leerness 혼재`: 의미적 결정/구조 변경 필요 → 후속(별도 라운드).
+
+### 구현 (UR-0054 부분)
+1. **stale MCP 카운트 → 동적 `_mcpToolCount()`**: `commands` 요약 + `_banner` 외부 AI 섹션. (역사적 changelog/What's-new 박스의 숫자는 그 시점 기록이라 보존.)
+2. **`leerness doctor` 신규** — 설치/환경 1콜 진단: version·node·경로·MCP 수·**selftest 코어 무결성(N/N)**·셸/PowerShell. `--json` + 실패 시 exit 1(CI 친화). health(프로젝트)와 구분되는 "도구 자체" 진단.
+3. selftest 62→63 · e2e 259→260.
+
+### 검증
+- **selftest 63/63 PASS** · **E2E 260/260 PASS** (회귀 0).
+- 실측: `commands`/`_banner` → "MCP 83" · `doctor` → `version 1.9.315 · MCP 83 · selftest 63/63 · 셸` exit 0 · `doctor --json` 구조화 출력 · `about`/`pulse` mcpTools 이미 동적(확인).
+
 ## 1.9.314 — 2026-06-04 — UR-0052: PowerShell 감지 정확화 (설치리뷰)
 
 **🪟 shell-guard 가 PowerShell 7(pwsh)을 cmd/ps5.1 로 오판해 `&&` 에 잘못된 ps5-chain 경고를 내던 결함 수정 (Opus#2 지적, Windows/한국어 타깃 핵심).**

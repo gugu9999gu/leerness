@@ -3711,5 +3711,22 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.315 회귀 (UR-0054 설치리뷰): doc/surface 정합 — doctor 진단 명령 + stale MCP 카운트 동적화(commands/banner)
+total++;
+{
+  let ok = false;
+  try {
+    const r = cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { encoding: 'utf8', timeout: 30000 });
+    let j = null; try { j = JSON.parse(r.stdout); } catch {}
+    const doctorOk = j && j.version && typeof j.mcpTools === 'number' && j.mcpTools >= 80 && j.selftest && j.selftest.total > 0 && j.healthy === true && r.status === 0;
+    // commands 요약 + banner 가 실제 MCP 수 노출 (하드코딩 65/46 아님)
+    const rc = cp.spawnSync(process.execPath, [CLI, 'commands'], { encoding: 'utf8', timeout: 15000 });
+    const dynOk = j && new RegExp('MCP 도구: ' + j.mcpTools).test(rc.stdout || '') && !/MCP 도구: 65\b/.test(rc.stdout || '');
+    ok = doctorOk && dynOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.315) doc/surface: doctor 진단(selftest+버전+셸) + commands MCP 카운트 동적 (UR-0054)' : '✗ doc/surface 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

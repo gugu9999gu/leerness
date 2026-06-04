@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.314';
+const VERSION = '1.9.315';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3113,6 +3113,7 @@ function _selfTestCases() {
     { name: 'secret 스캐너 현대 키: OpenAI proj/svcacct·Anthropic api03(_)·GitHub 변종·Stripe·npm 검출 + 오탐 가드 (UR-0050 설치리뷰 1.9.312)', run: () => { const hit = (s) => SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const named = (s, nm) => SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s) && p.name === nm; }); const A = 'A'.repeat(40); const projKey = 'sk-' + 'proj-' + A + '_' + A; const svcKey = 'sk-' + 'svcacct-' + A; const antKey = 'sk-' + 'ant-api03-' + A + '_' + A; const ghoKey = 'gho_' + 'a1B2'.repeat(9); const stripeKey = 'sk_' + 'live_' + A; const npmKey = 'npm_' + 'a1B2'.repeat(9); const asiaKey = 'ASIA' + 'ABCD1234EFGH5678'; const legacy = 'sk-' + A; const hits = hit(projKey) && hit(svcKey) && hit(antKey) && hit(ghoKey) && hit(stripeKey) && hit(npmKey) && hit(asiaKey) && hit(legacy); const names = named(projKey, 'OpenAI project/service key') && named(antKey, 'Anthropic API key') && named(stripeKey, 'Stripe secret key') && named(npmKey, 'npm token'); const clean = !hit('const userName = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return hits && names && clean; } },
     { name: 'MCP notification 준수: id없는 요청 무응답 가드 + ping {} (UR-0049 설치리뷰 1.9.313)', run: () => { const src = read(__filename); const guard = src.includes("const isNotification = !('id' in req)") && src.includes("req.method.startsWith('notifications/')") && src.includes('if (isNotification) return;'); const ping = src.includes("req.method === 'ping'") && /ping[\s\S]{0,140}result: \{\} \}/.test(src); return guard && ping; } },
     { name: 'PowerShell 감지: pwsh7(channel/Documents\\PowerShell/install) + ps5.1 영구경로 과경고 안함 (UR-0052 설치리뷰 1.9.314)', run: () => { const f = _detectPwshFromEnv; const pwsh7a = f({ POWERSHELL_DISTRIBUTION_CHANNEL: 'MSI:Windows 10' }).version === '7'; const pwsh7b = f({ PSModulePath: 'C:\\Users\\me\\Documents\\PowerShell\\Modules' }).version === '7'; const pwsh7c = f({ PSModulePath: 'C:\\Program Files\\PowerShell\\7\\Modules' }).version === '7'; const noFalsePs5 = f({ PSModulePath: 'C:\\Users\\me\\Documents\\WindowsPowerShell\\Modules' }).isPowerShell === false; const cmdSys = f({ PSModulePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules' }).isPowerShell === false; const empty = f({}).isPowerShell === false; const src = read(__filename); const wired = src.includes('const fromEnv = _detectPwshFromEnv()') && src.includes('const pwshEnv = _detectPwshFromEnv()'); return pwsh7a && pwsh7b && pwsh7c && noFalsePs5 && cmdSys && empty && wired; } },
+    { name: 'doc/surface 정합: doctor 명령 + stale MCP 카운트 동적화(commands/banner) (UR-0054 설치리뷰 1.9.315)', run: () => { const src = read(__filename); const doctorOk = typeof doctorCmd === 'function' && /cmd === 'doctor'/.test(src) && /# leerness doctor/.test(src); const dynCount = /MCP 도구: \$\{_mcpToolCount\(\)\}/.test(src) && /외부 AI 통합 \(MCP \$\{_mcpToolCount\(\)\} 도구\)/.test(src); return doctorOk && dynCount; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3791,7 +3792,7 @@ function commandsCmd(root) {
     log('');
   }
   log(dm(`  → 총 ${Object.values(cats).reduce((s, a) => s + a.length, 0)} 명령 (9 카테고리)`));
-  log(dm(`  → MCP 도구: 65 (외부 AI 노출)`));
+  log(dm(`  → MCP 도구: ${_mcpToolCount()} (외부 AI 노출)`));  // 1.9.315 (UR-0054): 하드코딩 65 → 동적
   log(dm(`  → 빠른 시작: leerness pulse | handoff | health`));
 }
 
@@ -11285,7 +11286,7 @@ function _banner(opts = {}) {
     cmd('leerness env sync .',               '.env ↔ .env.example 동기화');
     cmd('leerness health . --json',          '종합 헬스 (drift+보안+skill+feature)');
 
-    section('🤖 외부 AI 통합 (MCP 46 도구)');
+    section(`🤖 외부 AI 통합 (MCP ${_mcpToolCount()} 도구)`);  // 1.9.315 (UR-0054): 하드코딩 46 → 동적
     cmd('npx leerness mcp serve',                 'stdio JSON-RPC server');
     cmd('leerness memory status . --json',        '5 surface + featureGraph 한 호출');
     cmd('leerness memory archive list --query "kw"', 'DELETE 5종 archive 검색');
@@ -21386,6 +21387,46 @@ function reviewRequestCmd(root, request) {
 
 // 1.9.164: leerness which — 진단 도구 (구버전 충돌 / npx 캐시 / PATH 충돌 해결)
 //   사용자가 "최신 버전 작동 안 함" 의심 시: 실제 실행 중인 leerness 의 경로 / 버전 / npm 캐시 / PATH 후보 표시.
+// 1.9.315 (UR-0054, 설치리뷰): leerness doctor — 설치/환경 1콜 진단 (selftest 코어 무결성 + 버전/경로 + 셸/PowerShell).
+//   배경: 리뷰에서 doctor 명령 부재 지적("doctor no-op"). health(프로젝트 상태)와 달리 doctor 는 "도구 자체"의 정상성 진단.
+function doctorCmd(opts = {}) {
+  const json = opts.json || has('--json');
+  // 1) 코어 무결성: selftest 케이스 인라인 실행
+  let pass = 0; const failNames = [];
+  try {
+    for (const c of _selfTestCases()) {
+      let okc = false;
+      try { okc = !!c.run(); } catch { okc = false; }
+      if (okc) pass++; else failNames.push(c.name);
+    }
+  } catch {}
+  const total = pass + failNames.length;
+  // 2) 셸/PowerShell 컨텍스트 (UR-0052)
+  let shell = null, psVersion = null;
+  try { const ctx = _detectShellCtx(); shell = ctx.shell; psVersion = ctx.psVersion; } catch {}
+  const mcpCount = (() => { try { return _mcpToolCount(); } catch { return null; } })();
+  const report = {
+    version: VERSION, node: process.version, platform: process.platform + '/' + process.arch,
+    runningFrom: __filename, mcpTools: mcpCount,
+    selftest: { pass, total, ok: failNames.length === 0, failed: failNames },
+    shell, psVersion, healthy: failNames.length === 0
+  };
+  if (json) { process.stdout.write(JSON.stringify(report, null, 2) + '\n'); if (!report.healthy) process.exitCode = 1; return report; }
+  const isTty = process.stdout && process.stdout.isTTY;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s, rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s, cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s, dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  log(cy(`# leerness doctor — 설치/환경 진단`));
+  log('');
+  log(`  ${gr('✓')} version ${VERSION} · node ${process.version} · ${process.platform}/${process.arch}`);
+  log(`  ${gr('✓')} 설치 경로: ${dm(__filename)}`);
+  log(`  ${gr('✓')} MCP 도구: ${mcpCount}`);
+  log(`  ${report.selftest.ok ? gr('✓') : rd('✗')} selftest: ${pass}/${total} ${report.selftest.ok ? '통과' : '실패'}`);
+  if (!report.selftest.ok) report.selftest.failed.slice(0, 5).forEach(n => log(rd(`     ✗ ${n}`)));
+  log(`  ${gr('✓')} 셸: ${shell || 'unknown'}${psVersion && shell === 'powershell' ? ` (PowerShell ${psVersion})` : ''}`);
+  log('');
+  log(report.healthy ? gr('  ✓ leerness 설치 정상') : rd('  ✗ 문제 감지 — 재설치: npm i -g leerness@latest · 진단: leerness which'));
+  if (!report.healthy) process.exitCode = 1;
+  return report;
+}
 function whichCmd() {
   const out = {
     version: VERSION,
@@ -21559,6 +21600,8 @@ async function main() {
   if (cmd === 'provider') return providerCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.164: leerness which — 진단 도구 (구버전 충돌 / npx 캐시 / PATH 후보)
   if (cmd === 'which') return whichCmd();
+  // 1.9.315 (UR-0054): leerness doctor — 설치/환경 1콜 진단 (selftest + 버전/경로 + 셸)
+  if (cmd === 'doctor') return doctorCmd({ json: has('--json') });
   // 1.9.165: leerness web — playwright bridge (opt-in 의존성)
   if (cmd === 'web') return webCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.166: leerness pc — robotjs/nut-tree bridge (opt-in 의존성)
