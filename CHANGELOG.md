@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.321 — 2026-06-05 — UR-0053(2단계): decision/lesson 빈 필드 오파싱 수정
+
+**🔧 빈 필드(Alternatives 등)가 다음 줄(Impact)을 캡처하던 `Alternatives→Impact 오파싱` 버그 수정 (UR-0053 의 두 번째 구체 결함).**
+
+### 배경 (UR-0053)
+`decision add --reason r --impact x` (alternatives 비움) 후 `decision list --json` → `alternatives: "- Impact: x"` (다음 줄을 캡처). 원인 — 필드 파서 `block.match(/- Alternatives:\s*(.+)/)` 의 **`\s*` 가 개행을 포함**(`\s`) → 빈 필드일 때 개행을 건너뛰고 `(.+)` 가 다음 줄(`- Impact: …`)을 잡음.
+
+### 구현 (UR-0053 2단계)
+1. **필드 파서 `\s*` → `[ \t]*` (같은 줄 공백만)**: 빈 필드는 같은 줄에 내용이 없으면 매치 안 함 → 다음 줄 누출 차단. 적용 9곳: decision(Decision/Reason/Alternatives/Impact) + lesson(Lesson/Tag) 파서 전반.
+2. **락 테스트 안정화(테스트 품질)**: B(1.9.303) 동시 task add 락 테스트 폴 타임아웃 25s→60s — 전체 e2e CPU 포화 시 6 병렬 spawn 지연 간헐 플래키 방지(격리 실측 0.4s, 락 로직 불변).
+3. selftest 68→69 · e2e 265→266.
+
+### 검증
+- **selftest 69/69 PASS** · **E2E 266/266 PASS** (회귀 0).
+- 실측: 빈 alternatives → `alternatives` 가 `- Impact:…` 안 잡음(이전 누출) · 모든 필드 채움 → 정확 분리 · 락 테스트 6/6 안정.
+
 ## 1.9.320 — 2026-06-04 — UR-0053(1단계): decisions/lessons count drift 버그 수정
 
 **🔢 MD 파싱이 코드펜스 템플릿 예시까지 세어 `decisions=2 실제1` 로 오집계하던 count drift 버그 수정 (UR-0053 의 구체적 결함).**

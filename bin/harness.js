@@ -15,7 +15,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.320';
+const VERSION = '1.9.321';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3120,6 +3120,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: HTML 파싱 유틸 3종 모듈 분리 + 동작 + 인라인 제거 (UR-0025 1.9.318)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._htmlToText === 'function' && typeof m._extractTitle === 'function' && typeof m._extractLinks === 'function'; const work = m._htmlToText('<p>Hello <b>World</b></p>') === 'Hello World' && m._extractTitle('<html><title>My &amp; Page</title></html>') === 'My & Page' && m._extractLinks('<a href="/a">A</a><a href="https://other.com/b">B</a>', 'https://x.com/').length === 1; const moved = m._htmlToText === _htmlToText && !/^function _htmlToText\(html\) \{/m.test(read(__filename)); return fnOk && work && moved; } },
     { name: 'MCP ToolRegistry 일치성: 모든 도구 def 가 dispatch case 보유 + 고아 case 0 + requiredTier 완비 (UR-0044 1.9.319)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const missing = tools.filter(t => !src.includes("case '" + t.name + "':")); const cases = [...src.matchAll(/case '(leerness_[a-z_]+)':/g)].map(m => m[1]); const defNames = new Set(tools.map(t => t.name)); const orphans = [...new Set(cases)].filter(c => !defNames.has(c)); const tierOk = tools.every(t => typeof t.requiredTier === 'string' && PERMISSION_TIERS.includes(t.requiredTier)); return tools.length >= 83 && missing.length === 0 && orphans.length === 0 && tierOk; } },
     { name: 'count drift 수정: _countDatedBlocks 코드펜스(템플릿) 제외 + 카운트 사이트 단일화 (UR-0053 1.9.320)', run: () => { const f = _countDatedBlocks; const withTpl = '# D\n\n```md\n### 2026-01-01 — Decision 제목\n- Decision:\n```\n\n### 2026-06-04 — 실제\n- Decision: 실제\n'; const c1 = f(withTpl) === 1; const c0 = f('```md\n### 2026-01-01 — x\n```\n') === 0; const c2 = f('### 2026-01-01 — A\n### 2026-02-02 — B\n') === 2; const src = read(__filename); const wired = src.includes('_countDatedBlocks(read(decisionsPath(root)))') && src.includes('_countDatedBlocks(read(lessonsPath(root)))') && src.includes('_countDatedBlocks(dtext)') && !src.includes('read(decisionsPath(root)).' + 'match(/^### '); return typeof f === 'function' && c1 && c0 && c2 && wired; } },
+    { name: 'decision/lesson 필드 파싱: 빈 필드가 다음 줄로 안 샘 ([ \\t]* 사용) (UR-0053 1.9.321)', run: () => { const block = '### 2026-06-05 — X\n- Decision: X\n- Reason: r\n- Alternatives: \n- Impact: 보안\n'; const alt = block.match(/- Alternatives:[ \t]*(.+)/); const imp = block.match(/- Impact:[ \t]*(.+)/); const altNoBleed = !alt || !/Impact/.test(alt[1]); const impOk = !!imp && imp[1].trim() === '보안'; const src = read(__filename); const fixedOk = src.includes('- Alternatives:[ \\t]*(.+)') && src.includes('- Lesson:[ \\t]*(.+)') && src.includes('- Impact:[ \\t]*(.+)'); return altNoBleed && impOk && fixedOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6673,8 +6674,8 @@ function lessonListCmd(root, opts = {}) {
   for (const block of text.split(/\n(?=### )/)) {
     if (!block.startsWith('### ')) continue;
     const dateMatch = block.match(/^### (\d{4}-\d{2}-\d{2}[^\n]*)/);
-    const lessonMatch = block.match(/- Lesson:\s*(.+)/);
-    const tagMatch = block.match(/- Tag:\s*(.+)/);
+    const lessonMatch = block.match(/- Lesson:[ \t]*(.+)/);
+    const tagMatch = block.match(/- Tag:[ \t]*(.+)/);
     if (!lessonMatch) continue;
     const lesson = {
       date: dateMatch ? dateMatch[1].trim() : null,
@@ -6720,7 +6721,7 @@ function lessonDropCmd(root, target) {
     if (!b.startsWith('### ')) { kept.push(b); continue; }
     // date 매칭 (정확) 또는 text substring (lesson content)
     const dateMatch = b.match(/^### (\d{4}-\d{2}-\d{2})/);
-    const lessonMatch = b.match(/- Lesson:\s*(.+)/);
+    const lessonMatch = b.match(/- Lesson:[ \t]*(.+)/);
     const isDateTarget = dateMatch && dateMatch[1] === target;
     const isTextTarget = lessonMatch && lessonMatch[1].includes(target);
     if (isDateTarget || isTextTarget) {
@@ -6785,10 +6786,10 @@ function decisionListCmd(root, opts = {}) {
     const dateTitleMatch = titleLine.match(/^(\d{4}-\d{2}-\d{2})\s*—\s*(.+)$/);
     const date = dateTitleMatch ? dateTitleMatch[1] : null;
     const title = dateTitleMatch ? dateTitleMatch[2].trim() : titleLine;
-    const decisionMatch = block.match(/- Decision:\s*(.+)/);
-    const reasonMatch = block.match(/- Reason:\s*(.+)/);
-    const alternativesMatch = block.match(/- Alternatives:\s*(.+)/);
-    const impactMatch = block.match(/- Impact:\s*(.+)/);
+    const decisionMatch = block.match(/- Decision:[ \t]*(.+)/);
+    const reasonMatch = block.match(/- Reason:[ \t]*(.+)/);
+    const alternativesMatch = block.match(/- Alternatives:[ \t]*(.+)/);
+    const impactMatch = block.match(/- Impact:[ \t]*(.+)/);
     const entry = {
       date,
       title,
@@ -13237,7 +13238,7 @@ function _brainstormFor(root, topic) {
     const lessonsText = read(lp_brainstorm);
     for (const block of lessonsText.split(/\n(?=### )/)) {
       if (!block.startsWith('### ')) continue;
-      const lessonMatch = block.match(/- Lesson:\s*(.+)/);
+      const lessonMatch = block.match(/- Lesson:[ \t]*(.+)/);
       if (lessonMatch && matches(block)) {
         const idx = lessonsText.indexOf(block);
         const lineNo = idx >= 0 ? lessonsText.slice(0, idx).split('\n').length : 0;
@@ -13533,7 +13534,7 @@ function brainstormCmd(root, topic) {
     const lessonsText = read(lp_b2);
     for (const block of lessonsText.split(/\n(?=### )/)) {
       if (!block.startsWith('### ')) continue;
-      const lessonMatch = block.match(/- Lesson:\s*(.+)/);
+      const lessonMatch = block.match(/- Lesson:[ \t]*(.+)/);
       if (lessonMatch && matches(block)) {
         const idx = lessonsText.indexOf(block);
         const lineNo = idx >= 0 ? lessonsText.slice(0, idx).split('\n').length : 0;
@@ -15958,7 +15959,7 @@ function _loadLessonsIndex(root) {
     const txt = read(lp);
     for (const block of txt.split(/\n(?=### )/)) {
       if (!block.startsWith('### ')) continue;
-      const lessonMatch = block.match(/- Lesson:\s*(.+)/);
+      const lessonMatch = block.match(/- Lesson:[ \t]*(.+)/);
       if (lessonMatch) lessonsExplicit.push({ title: lessonMatch[1].trim(), block });
     }
   }

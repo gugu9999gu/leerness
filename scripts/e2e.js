@@ -3416,7 +3416,8 @@ total++;
     const ptPath = path.join(lDir, '.harness', 'progress-tracker.md');
     // 자식들이 OS 프로세스로 독립 진행 → 부모는 파일을 sync 폴링(원자쓰기라 부분읽기 없음)
     const start = Date.now(); let found = 0;
-    while (Date.now() - start < 25000) {
+    // 1.9.321: 폴 타임아웃 25s→60s — 전체 e2e CPU 포화 시 6 병렬 spawn 지연으로 인한 간헐 플래키 방지(격리 실측 0.4s, 대폭 여유)
+    while (Date.now() - start < 60000) {
       try { const pt = fs.readFileSync(ptPath, 'utf8'); found = Array.from({ length: N }, (_, i) => i).filter(i => pt.includes('LOCKTEST-' + i)).length; if (found === N) break; } catch {}
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
     }
@@ -3831,6 +3832,25 @@ total++;
     fs.rmSync(cd, { recursive: true, force: true });
   } catch {}
   console.log(ok ? '✓ B(1.9.320) count drift 수정: decisions/lessons 코드펜스 템플릿 제외 (실제 카운트) (UR-0053)' : '✗ count drift 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.321 회귀 (UR-0053): decision 빈 필드(alternatives)가 [ \t]* 파싱으로 다음 줄(impact)을 캡처하지 않음
+total++;
+{
+  let ok = false;
+  try {
+    const fd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-field-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', fd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', '캐시 도입', '--path', fd, '--reason', '성능', '--impact', '응답50ms'], { encoding: 'utf8', timeout: 20000 });  // alternatives 비움
+    const r = cp.spawnSync(process.execPath, [CLI, 'decision', 'list', '--path', fd, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let alt = 'X', imp = null; try { const parsed = JSON.parse(r.stdout); const arr = parsed.decisions || parsed; const d = arr[0]; alt = d.alternatives; imp = d.impact; } catch {}
+    const noBleed = !alt || !String(alt).includes('Impact');   // 빈 alternatives 가 '- Impact:...' 캡처 안 함
+    const impOk = imp === '응답50ms';                          // impact 는 정확
+    ok = noBleed && impOk;
+    fs.rmSync(fd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.321) decision 필드 파싱: 빈 alternatives 가 impact 로 안 샘 (UR-0053)' : '✗ decision 필드 파싱 실패');
   if (!ok) failed++;
 }
 
