@@ -654,7 +654,7 @@ total++;
   fs.appendFileSync(path.join(tmpS, '.harness/progress-tracker.md'),
     '| T-0050 | done | DB 마이그레이션 | 사용자 데이터 DB에 저장, 1000건 insert 성공 | (완료) | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0050', '--path', tmpS, '--strict-claims'], { encoding: 'utf8', timeout: 10000 });
-  const ok = r.status !== 0 && /낙관적 표시 \(--strict-claims\): ⚠ FAIL/.test(r.stdout) && /DB 호출/.test(r.stdout);
+  const ok = r.status !== 0 && /낙관적 표시.*\(--strict-claims\): ⚠ FAIL/.test(r.stdout) && /DB 호출/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.26) verify-claim --strict-claims: DB 거짓 evidence 통합 감지' : '✗ --strict-claims 실패');
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
@@ -3451,6 +3451,29 @@ total++;
     ok = dataOk && movedOut && cmdOk;
   } catch {}
   console.log(ok ? '✓ B(1.9.304) lib/analyzers 모듈 분리: 단일출처 + 인라인 제거 + shell-guard 동작 (UR-0025)' : '✗ analyzers 모듈 분리 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.305 회귀 (사용자 명시): honesty-check — AI 인식론적 정직성 3차원 + exit code + MCP 노출
+total++;
+{
+  let ok = false;
+  try {
+    // 양호(근거 있음) → exit 0 + ✓
+    const good = cp.spawnSync(process.execPath, [CLI, 'honesty-check', '--text', 'src/api.js 수정, 12/12 통과 (Exit: 0)'], { cwd: tmp, encoding: 'utf8', timeout: 15000 });
+    const goodOk = good.status === 0 && /정직성 신호 양호/.test(good.stdout || '');
+    // 근거 없는 단정 → exit 1 + pretend-knowledge
+    const bad1 = cp.spawnSync(process.execPath, [CLI, 'honesty-check', '--text', '이 기능은 항상 정상 동작합니다', '--json'], { cwd: tmp, encoding: 'utf8', timeout: 15000 });
+    const b1 = JSON.parse(bad1.stdout); const bad1Ok = bad1.status === 1 && b1.findings.some(f => f.dim === 'pretend-knowledge');
+    // 미검증 섣부른 판단 → premature-judgment
+    const bad2 = cp.spawnSync(process.execPath, [CLI, 'honesty-check', '--text', '아마 될 것 같습니다. 구현 완료했습니다', '--json'], { cwd: tmp, encoding: 'utf8', timeout: 15000 });
+    const bad2Ok = JSON.parse(bad2.stdout).findings.some(f => f.dim === 'premature-judgment');
+    // MCP tools/list 에 노출
+    const ml = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: tmp, encoding: 'utf8', timeout: 15000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n' });
+    const mcpOk = JSON.parse(ml.stdout.split('\n').filter(Boolean)[0]).result.tools.some(t => t.name === 'leerness_honesty_check');
+    ok = goodOk && bad1Ok && bad2Ok && mcpOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.305) honesty-check: 3차원 탐지 + exit code + MCP 노출 (모르는걸 아는척/미검증판단/정보미수집)' : '✗ honesty-check 실패');
   if (!ok) failed++;
 }
 

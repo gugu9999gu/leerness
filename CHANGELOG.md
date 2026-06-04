@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.305 — 2026-06-04 — honesty-check: AI 인식론적 정직성 점검 (사용자 명시)
+
+**🧠 사용자 요청 — AI 가 (1) 모르는 걸 아는 척, (2) 정보를 안 모으고, (3) 검증 없이 섣부르게 판단하는지를 점검하는 인식론적 정직성 가드 신설.**
+
+### 배경 (사용자 명시)
+"AI 가 모르는 정보를 아는 척하지 않는지 / 모르는 정보를 알기 위해 정확한 정보를 수집하는지 / 수집 후 검증 없이 섣부른 판단을 하지 않는지" 점검 요청. 기존 leerness 는 부분 커버만: `optimism-check`(행동 주장 vs 코드 흔적, 11종), `api-skill`(외부 문서 수집, opt-in), `verify-claim`(검증). **3차원을 통합 점검하는 정직성 가드는 없었음.**
+
+### 구현
+1. **`_epistemicHonestyCheck(text)`** (lib/analyzers.js, 순수) — 3차원 휴리스틱:
+   - **pretend-knowledge**(high) — 단정 표현(반드시/항상/100%/always…)인데 근거·출처(파일/문서/테스트/로그) 없음
+   - **premature-judgment**(high) — 추정 표현(아마/추정/probably/should…) + 완료·성공 결론인데 검증 근거 없음
+   - **no-info-gathering**(med) — 외부 API/버전/스펙 언급인데 수집 흔적(공식문서/api-skill/조회) 없음 (파일경로 `api.js` 오탐 제외)
+2. **`leerness honesty-check <T-ID> | --text "<주장>"`** — 양호 시 exit 0, high 발견 시 exit 1(에이전트 self-gate). `--json`.
+3. **MCP `leerness_honesty_check` (82번째 도구, read-only)** — 에이전트가 단언 전 자기 주장 self-check.
+4. **`verify-claim --strict-claims` 통합** — high-severity 정직성 발견도 strict 실패에 반영(낙관 + 정직성 통합 게이트).
+5. selftest 52→53 · e2e 249→250.
+
+### 검증
+- **selftest 53/53 PASS** · **E2E 250/250 PASS** (회귀 0).
+- 실측: "이 기능은 항상 동작"→pretend-knowledge(exit1), "아마 될 것 같다. 완료"→premature-judgment, "이 API rate limit 초당 5회"→no-info-gathering, "src/api.js 수정 12/12 통과(Exit:0)"→양호(exit0). 오탐 0(6/6 케이스).
+- 휴리스틱 advisory — 근거(파일·문서·테스트·로그)나 수집 흔적(공식문서·api-skill·조회) 명시 시 해소.
+
 ## 1.9.304 — 2026-06-04 — UR-0025 (6단계): 순수 분석/검증 함수 → lib/analyzers.js 모듈 분리
 
 **🧩 모놀리스 분리 계속 — 순수 분석/검증 함수 4종을 비파괴 분리. lib 6모듈 체제(630줄 외부화).**

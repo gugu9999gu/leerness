@@ -10,11 +10,11 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
-const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit } = require('../lib/analyzers');
+const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.304';
+const VERSION = '1.9.305';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3071,6 +3071,7 @@ function _selfTestCases() {
     { name: 'verify-claim git diff 시맨틱 교차검증: _gitChangedFiles/_claimFileInGit + strict FAIL 통합 (UR-0042 외부리뷰 1.9.302)', run: () => { const fnOk = typeof _gitChangedFiles === 'function' && typeof _claimFileInGit === 'function'; const matchOk = _claimFileInGit('src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('./src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('other.js', new Set(['src/api.js'])) === false && _claimFileInGit('x', null) === null; const src = read(__filename); const wired = /git diff 교차검증/.test(src) && /\|\| !gitClaimOk/.test(src) && /_gitChangedFiles\(root\)/.test(src); return fnOk && matchOk && wired; } },
     { name: '_withLock/_updateRun: lost-update 락(O_EXCL+재진입) + 적용 (UR-0043 외부리뷰 1.9.303)', run: () => { const src = read(__filename); const fnOk = typeof _withLock === 'function' && typeof _sleepSyncMs === 'function' && typeof _updateRun === 'function'; const reentrant = /if \(_heldLocks\.has\(lockPath\)\) return fn\(\)/.test(src); const excl = /fs\.openSync\(lockPath, 'wx'\)/.test(src); const applied = /const id = _withLock\(progressPath\(root\)/.test(src) && /_updateRun\(root, curId/.test(src); return fnOk && reentrant && excl && applied; } },
     { name: 'lib/analyzers: 분석/검증 함수 4종 모듈 단일출처 분리 (UR-0025 1.9.304)', run: () => { const m = require('../lib/analyzers'); return m._evidenceQuality === _evidenceQuality && m._shellGuardAnalyze === _shellGuardAnalyze && m._parseEvidenceStats === _parseEvidenceStats && m._claimFileInGit === _claimFileInGit && !/function _evidenceQuality\(evidence\) \{/.test(read(__filename)) && !/function _shellGuardAnalyze\(cmd, ctx\) \{/.test(read(__filename)); } },
+    { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -9605,10 +9606,13 @@ function verifyClaimCmd(root, taskId) {
   // 1.9.26: --strict-claims — 낙관적 표시 자동 감지 (evidence vs 코드 호출 흔적)
   let optimismSuspects = [];
   let strictOk = true;
+  let honestyFindings = [];
   if (has('--strict-claims')) {
     const codeText = _scanCodeForPatterns(root);
     optimismSuspects = _detectOptimism(evidence, codeText);
-    strictOk = optimismSuspects.length === 0;
+    // 1.9.305 (사용자 명시): 인식론적 정직성 high 발견(근거없는 단정/미검증 판단)도 strict 실패에 반영.
+    honestyFindings = _epistemicHonestyCheck(evidence).findings.filter(f => f.severity === 'high');
+    strictOk = optimismSuspects.length === 0 && honestyFindings.length === 0;
   }
 
   log('');
@@ -9622,10 +9626,11 @@ function verifyClaimCmd(root, taskId) {
     if (declaredPass) log(`  - 주장과 실행 결과 일치: ${declaredPassMatchesActual ? '✓ pass' : '⚠ 다름'}`);
   }
   if (has('--strict-claims')) {
-    if (strictOk) log(`  - 낙관적 표시 (--strict-claims): ✓ pass (의심 없음)`);
+    if (strictOk) log(`  - 낙관적 표시 + 정직성 (--strict-claims): ✓ pass (의심 없음)`);
     else {
-      log(`  - 낙관적 표시 (--strict-claims): ⚠ FAIL (${optimismSuspects.length}건 의심)`);
+      log(`  - 낙관적 표시 + 정직성 (--strict-claims): ⚠ FAIL (낙관 ${optimismSuspects.length} · 정직성 ${honestyFindings.length})`);
       for (const s of optimismSuspects) log(`    · [${s.kind}] ${s.label}: evidence에 주장 있는데 코드에 호출 흔적 없음`);
+      for (const f of honestyFindings) log(`    · [정직성:${f.dim}] ${f.label}: ${f.detail}`);
     }
   }
   // 1.9.302 (UR-0042): git diff 시맨틱 교차검증 — 주장한 파일이 실제 git 변경(working tree+직전커밋)에 있는가.
@@ -10250,6 +10255,33 @@ function _computeConfidence(evidence, codeText) {
   return Math.round(confidence * 100) / 100;
 }
 
+// 1.9.305 (사용자 명시): AI 인식론적 정직성 점검 — 모르는 걸 아는 척 / 정보 미수집 / 미검증 섣부른 판단.
+//   leerness honesty-check <T-ID>  또는  --text "<주장>". 휴리스틱 advisory, high-severity 시 exit 1(에이전트 self-gate).
+function honestyCheckCmd(root, arg1) {
+  root = absRoot(root || process.cwd());
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s, gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s, rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s, dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const textArg = arg('--text', null);
+  let subject = '', sourceLabel = '';
+  if (textArg) { subject = String(textArg); sourceLabel = '--text'; }
+  else if (arg1 && !arg1.startsWith('-')) {
+    const row = readProgressRows(root).find(r => r.id === arg1);
+    if (!row) { fail(`progress-tracker.md에 ${arg1} 없음.`); process.exitCode = 1; return; }
+    subject = row.evidence || ''; sourceLabel = `${arg1} evidence`;
+  } else { fail('사용법: leerness honesty-check <T-ID>  또는  leerness honesty-check --text "<주장>"'); process.exitCode = 1; return; }
+  const r = _epistemicHonestyCheck(subject);
+  const high = r.findings.filter(f => f.severity === 'high').length;
+  if (has('--json')) { log(JSON.stringify({ source: sourceLabel, ...r, highCount: high }, null, 2)); if (high > 0) process.exitCode = 1; return; }
+  log(cy(`# leerness honesty-check (1.9.305) — AI 인식론적 정직성 점검`));
+  log(dm(`  대상: ${sourceLabel} · "${subject.slice(0, 80)}${subject.length > 80 ? '…' : ''}"`));
+  log('');
+  if (r.ok) { log(gr('  ✓ 정직성 신호 양호 — 근거 없는 단정 / 미검증 섣부른 판단 / 외부정보 미수집 흔적 없음')); return; }
+  log(rd(`  ⚠ ${r.findings.length}건 발견:`));
+  for (const f of r.findings) { log(`  ${f.severity === 'high' ? '🔴' : '🟡'} [${f.dim}] ${f.label}`); log(dm(`     ${f.detail}`)); }
+  log('');
+  log(dm('  ℹ 휴리스틱 advisory — 근거(파일·문서·테스트·로그) 또는 수집 흔적(공식문서·api-skill·조회) 명시 시 해소.'));
+  if (high > 0) process.exitCode = 1;
+}
 function optimismCheckCmd(root, taskId) {
   root = absRoot(root || process.cwd());
   if (!taskId) return fail('optimism-check <T-ID> 필요. 예: leerness optimism-check T-0001');
@@ -16889,6 +16921,9 @@ function mcpServeCmd(root) {
           case 'leerness_about':
             cliArgs = ['about', '--json'];
             break;
+          case 'leerness_honesty_check':
+            cliArgs = ['honesty-check', ...(args.text ? ['--text', String(args.text)] : [String(args.taskId || '')]), '--path', targetPath, '--json'];
+            break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -21279,6 +21314,7 @@ async function main() {
   if (cmd === 'deps')         return depsImpactCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'register-pending') return registerPendingCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')));
   if (cmd === 'optimism-check') return optimismCheckCmd(arg('--path', process.cwd()), args[1]);
+  if (cmd === 'honesty-check') return honestyCheckCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'persona') return personaCmd(arg('--path', process.cwd()), args[1], args[2]);
   if (cmd === 'review') return reviewCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'agents') return agentsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
