@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.313 — 2026-06-04 — UR-0049: MCP notification 프로토콜 준수 (설치리뷰 3중수렴 high)
+
+**🔌 MCP 서버가 JSON-RPC notification(`notifications/*`)에 에러 응답을 보내 프로토콜을 위반하던 결함 수정 — 엄격한 MCP 클라이언트의 핸드셰이크 중단 위험.**
+
+### 배경 (설치리뷰)
+실측: `notifications/initialized`(MCP 핸드셰이크 표준, id 없음) 전송 시 서버가 `{"jsonrpc":"2.0","error":{"code":-32601,"message":"Unknown method: notifications/initialized"}}` 응답.
+- JSON-RPC 2.0 spec: **"The Server MUST NOT reply to a Notification"** (id 없는 요청). 응답 자체가 위반.
+- 응답에 `id` 필드도 없어(undefined) 이중 위반 — 엄격한 클라이언트는 프로토콜 오류로 로깅/연결 중단 가능.
+- 표준 `ping` 메서드도 `-32601` 오류 반환(빈 결과 `{}` 기대).
+
+### 구현 (UR-0049)
+1. **notification 가드**: `handleRequest` 진입부에서 `id` 없는 요청 또는 `notifications/*` 메서드 → **무응답**(spec 준수). `notifications/initialized`·`notifications/cancelled`·`notifications/progress` 등 조용히 수용.
+2. **`ping` 표준 응답**: 빈 결과 `{}` 반환 (연결 확인).
+3. 미지 메서드(id 있음)는 여전히 `-32601` 반환 — 정상 동작 보존.
+4. selftest 60→61 · e2e 257→258.
+
+### 검증
+- **selftest 61/61 PASS** · **E2E 258/258 PASS** (회귀 0).
+- 실측: `notifications/initialized`·`notifications/cancelled` → 무응답 · `ping`(id 2) → `{"result":{}}` · `initialize`/`tools/list` 정상 · `bogus/method`(id 有) → `-32601`(보존) · 핸드셰이크 시퀀스에서 응답 수 = id 보유 요청 수.
+
 ## 1.9.312 — 2026-06-04 — UR-0050: secret 스캐너 현대 키 패턴 (설치리뷰 3중수렴 high)
 
 **🔒 `scan secrets` 가 modern OpenAI/Anthropic 키를 놓치던 보안 결함 수정 — 노출돼도 탐지 안 되던 위험.**

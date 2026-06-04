@@ -3669,5 +3669,30 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.313 회귀 (UR-0049 설치리뷰): MCP notification 준수 — id 없는 요청 무응답 + ping {} + notifications/* 가드
+total++;
+{
+  let ok = false;
+  try {
+    const input = [
+      '{"jsonrpc":"2.0","id":1,"method":"initialize"}',
+      '{"jsonrpc":"2.0","method":"notifications/initialized"}',              // id 없음 → 무응답
+      '{"jsonrpc":"2.0","id":2,"method":"ping"}',                           // → {} 결과
+      '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}', // id 없음 → 무응답
+      '{"jsonrpc":"2.0","id":3,"method":"tools/list"}',
+    ].join('\n') + '\n';
+    const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 15000, input });
+    const lines = (r.stdout || '').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const ids = lines.map(l => l.id);
+    const exactly3 = lines.length === 3 && ids.includes(1) && ids.includes(2) && ids.includes(3);  // notification 2건 무응답
+    const noNotifResponse = !lines.some(l => l.error && /Unknown method: notifications/.test((l.error && l.error.message) || ''));
+    const pingOk = lines.some(l => l.id === 2 && l.result && Object.keys(l.result).length === 0);
+    const toolsOk = lines.some(l => l.id === 3 && l.result && Array.isArray(l.result.tools));
+    ok = exactly3 && noNotifResponse && pingOk && toolsOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.313) MCP notification 준수: id없는 요청 무응답(2건) + ping {} + tools/list (UR-0049)' : '✗ MCP notification 준수 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
