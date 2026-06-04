@@ -12,7 +12,7 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.300';
+const VERSION = '1.9.301';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3036,6 +3036,7 @@ function _selfTestCases() {
     { name: 'writeUtf8: 원자적 쓰기(temp→rename) 손상방지 (UR-0038 외부리뷰 3중수렴 1.9.298)', run: () => { const src = read(__filename); return /function writeUtf8\(p, s\)/.test(src) && /fs\.writeFileSync\(tmp,/.test(src) && /fs\.renameSync\(tmp, p\)/.test(src) && /\.tmp-\$\{process\.pid\}/.test(src) && /fs\.unlinkSync\(tmp\)/.test(src); } },
     { name: '_scrubTestEnv: npm test 시크릿 차단(_scrubEnv는 release 토큰 유지) (UR-0039 외부리뷰 1.9.299)', run: () => { const o = { N: process.env.NPM_TOKEN, L: process.env.LEERNESS_NPM_TOKEN }; process.env.NPM_TOKEN = 'sec1'; process.env.LEERNESS_NPM_TOKEN = 'sec2'; const base = _scrubEnv(); const test = _scrubTestEnv(); const r = base.NPM_TOKEN === 'sec1' && base.LEERNESS_NPM_TOKEN === 'sec2' && !test.NPM_TOKEN && !test.LEERNESS_NPM_TOKEN && !!test.PATH; if (o.N === undefined) delete process.env.NPM_TOKEN; else process.env.NPM_TOKEN = o.N; if (o.L === undefined) delete process.env.LEERNESS_NPM_TOKEN; else process.env.LEERNESS_NPM_TOKEN = o.L; return r; } },
     { name: 'shell 주입 표면 제거: fetchNpmLatest execFile+pkg검증 + runCommandSafe argList 인용 (UR-0040 외부리뷰 1.9.300)', run: () => { const src = read(__filename); const npmFix = /cp\.execFile\('npm', \['view', pkg, 'version'\]/.test(src) && !/cp\.exec\(.npm view \$\{pkg\}/.test(src) && /패키지명 charset/.test(src); const argFix = /argList\.map\(_shellQuoteArg\)\.join/.test(src); return npmFix && argFix && typeof _shellQuoteArg === 'function'; } },
+    { name: 'MCP requiredTier 메타데이터 + 정책 minTier 게이트 (UR-0041 외부리뷰 1.9.301)', run: () => { const T = require('../lib/mcp-tools'); const allValid = T.length >= 81 && T.every(t => PERMISSION_TIERS.includes(t.requiredTier)); const get = n => (T.find(t => t.name === n) || {}).requiredTier; const classOk = get('leerness_state_record') === 'safe-write' && get('leerness_provider_add') === 'safe-write' && get('leerness_web') === 'network' && get('leerness_handoff') === 'read-only' && get('leerness_audit') === 'read-only'; const src = read(__filename); const gateOk = /_tierRank\(minTier\) > _tierRank\(required\)/.test(src) && /_policyEnforce\(targetPath, cliArgs\.join\(' '\), _toolDef/.test(src); return allValid && classOk && gateOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -16850,7 +16851,9 @@ function mcpServeCmd(root) {
         //   이전: _policyEnforce 는 agents multi --execute 한 곳뿐 → MCP state_start 등이 정책 우회하고 .leerness 기록.
         //   cliArgs(실제 실행 명령) 로 required tier 판정 → enforce ON 이고 초과 시 JSON-RPC error 반환(실행 안 함).
         try {
-          const pol = _policyEnforce(targetPath, cliArgs.join(' '));
+          // 1.9.301 (UR-0041): 도구 선언 requiredTier(메타데이터) + cliArgs regex 중 더 엄격한 tier 로 판정 (under-classify 갭 차단).
+          const _toolDef = TOOLS.find(t => t.name === name);
+          const pol = _policyEnforce(targetPath, cliArgs.join(' '), _toolDef && _toolDef.requiredTier);
           if (!pol.allowed) {
             return send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `정책 차단(policy): ${pol.reason}` }], isError: true } });
           }
@@ -17995,10 +17998,13 @@ function _loadPolicy(root) {
 function _savePolicy(root, p) { const d = _leernessStateDir(root); mkdirp(d); writeUtf8(_policyFile(root), JSON.stringify({ schemaVersion: 1, allowedTier: p.allowedTier, enforce: !!p.enforce, updatedAt: new Date().toISOString() }, null, 2) + '\n'); }
 // 위험 진입점이 호출 — enforce ON 이고 요구등급 > 허용등급이면 {allowed:false}. 기본 OFF → 항상 allowed:true(+advisory).
 // env LEERNESS_ENFORCE_POLICY=1 로 강제 ON 가능.
-function _policyEnforce(root, cmd) {
+function _policyEnforce(root, cmd, minTier) {
   const p = _loadPolicy(root);
   const enforce = p.enforce || process.env.LEERNESS_ENFORCE_POLICY === '1';
-  const required = _requiredTier(cmd);
+  let required = _requiredTier(cmd);
+  // 1.9.301 (UR-0041, 외부리뷰): 도구 선언 tier(minTier, lib/mcp-tools.js requiredTier)와 regex tier 중 더 엄격한 쪽 채택.
+  //   regex 가 신규/특이 명령을 under-classify 하는 갭을 메타데이터로 차단. 게이트를 절대 낮추지 않음(regex over-classify 유지).
+  if (minTier && _tierRank(minTier) > _tierRank(required)) required = minTier;
   const allowed = _policyAllows(p.allowedTier, required);
   if (enforce && !allowed) return { allowed: false, required, allowedTier: p.allowedTier, reason: `정책 차단: '${cmd}' 는 '${required}' 등급 필요 (허용 '${p.allowedTier}'). 해제: leerness policy set ${required} 또는 LEERNESS_ENFORCE_POLICY 해제` };
   return { allowed: true, required, allowedTier: p.allowedTier, advisory: !allowed };

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.301 — 2026-06-04 — UR-0041 (1단계): MCP 도구 requiredTier 메타데이터 + 정책 메타데이터 게이트 (R2)
+
+**🛡 외부 AI 리뷰 3종이 공통 지적한 "정책이 regex라 취약 + 도구 정의/dispatch/tier 3중 분산"의 핵심부 해소 — 81개 MCP 도구에 `requiredTier` 메타데이터를 부여하고, 정책 게이트가 regex와 메타데이터 중 더 엄격한 tier로 판정.**
+
+### 배경 (Opus S-5 / Codex / Sonnet)
+MCP 정책 게이트(1.9.288)가 `_requiredTier(cliArgs.join(' '))` **regex 매칭**으로 권한 등급 판정 → 신규/특이 명령을 **under-classify**(예: `provider add`/`feature add`/`requests auto-complete`/`release cleanup`/`memory restore` 등은 regex 패턴에 없어 read-only 로 오판 → read-only enforce 우회). 또한 도구 정의(mcp-tools.js)·dispatch(switch)·tier(regex)가 3곳 분산.
+
+### 구현 (UR-0041 1단계 — tier 메타데이터)
+1. **`lib/mcp-tools.js` 81개 도구에 `requiredTier` 부여** — dispatch 서브커맨드 정밀 분류(read-only 55 / safe-write 23 / network 1[web] / shell-write 1[pc] / git-write 1[release_cleanup]). 동적-sub/특수 도구는 정확 지정.
+2. **`_policyEnforce(root, cmd, minTier)` 확장** — 도구 선언 tier(메타데이터)와 regex tier 중 **더 엄격한 쪽** 채택(`_tierRank` 비교). 게이트를 절대 낮추지 않음 → under-classify 갭만 차단, regex over-classify 유지(보안 단방향).
+3. **MCP 게이트가 `TOOLS.find(name).requiredTier` 전달** — provider_add 등 regex 미탐 write 도구가 read-only enforce 에서 정상 차단.
+4. selftest 48→49 · e2e 245→246.
+
+### 검증
+- **selftest 49/49 PASS** · **E2E 246/246 PASS** (회귀 0).
+- 실측: read-only enforce 에서 `leerness_provider_add`(regex=read-only, 메타=safe-write) **차단**(이전엔 우회됐던 갭) · `leerness_handoff`(read-only) **허용**(read 도구 정상).
+
+### 남은 부분 (UR-0041 후속)
+- dispatch handler 통합(`{name,schema,requiredTier,handler}` 완전 단일출처) — 81 case switch 의 arg 매핑을 데이터화하는 대형 리팩토링(별도 신중 라운드).
+
 ## 1.9.300 — 2026-06-04 — UR-0040: 셸 주입 표면 제거 (외부 AI 리뷰 #3) — R1 보안 경화 완료 🔒
 
 **🔒 외부 AI 리뷰가 지적한 마지막 R1 보안 항목 — 셸 주입 표면 2곳 제거. 이로써 R1(보안/안정성 코어 경화: UR-0038 원자쓰기 + UR-0039 시크릿차단 + UR-0040 셸주입) 완료.**

@@ -3344,5 +3344,35 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.301 회귀 (UR-0041 외부리뷰): MCP 정책 게이트가 도구 requiredTier 메타데이터로 under-classify 갭 차단
+total++;
+{
+  let ok = false;
+  try {
+    const pDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tier-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', pDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'policy', 'set', 'read-only', '--enforce', '--path', pDir], { encoding: 'utf8', timeout: 15000 });
+    const callMcp = (name, args) => {
+      const req = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n';
+      const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 15000, input: req });
+      for (const l of (r.stdout || '').trim().split('\n')) { try { const j = JSON.parse(l); if (j.result) return j.result; } catch {} }
+      return null;
+    };
+    // provider_add: regex 는 read-only(아래 정책 통과 가능) 인데 메타데이터 safe-write → read-only enforce 에서 차단되어야
+    const pa = callMcp('leerness_provider_add', { path: pDir, id: 'x', cmd: 'y' });
+    const blocked = pa && pa.isError === true && /정책 차단/.test(pa.content[0].text);
+    // handoff: read-only → 허용
+    const hd = callMcp('leerness_handoff', { path: pDir });
+    const allowed = hd && hd.isError !== true;
+    // 모든 도구 유효 tier
+    const T = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools.js'));
+    const tierOk = T.every(t => typeof t.requiredTier === 'string' && t.requiredTier.length > 0);
+    ok = blocked && allowed && tierOk;
+    fs.rmSync(pDir, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.301) MCP 정책 메타데이터 게이트: under-classify 차단(provider_add) + read 허용(handoff) (UR-0041)' : '✗ MCP 정책 메타데이터 게이트 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
