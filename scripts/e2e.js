@@ -3297,5 +3297,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.299 회귀 (UR-0039 외부리뷰): npm test 시크릿 차단 — 토큰이 보이면 exit 1 인 test 스크립트가 verify-code 에서 통과해야(스크럽됨)
+total++;
+{
+  let ok = false;
+  try {
+    const secDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sec-'));
+    // test: NPM_TOKEN/LEERNESS_NPM_TOKEN 가 보이면 exit 1(스크럽 실패), 안 보이면 exit 0
+    fs.writeFileSync(path.join(secDir, 'package.json'), JSON.stringify({
+      name: 'sec', version: '0.0.1',
+      scripts: { test: 'node -e "process.exit(process.env.NPM_TOKEN||process.env.LEERNESS_NPM_TOKEN?1:0)"' }
+    }) + '\n', 'utf8');
+    // 시크릿을 env 에 심고 verify-code 실행 → 스크럽되면 스크립트가 토큰을 못 봐 exit 0(test passed)
+    const r = cp.spawnSync(process.execPath, [CLI, 'verify-code', secDir], {
+      cwd: secDir, encoding: 'utf8', timeout: 60000,
+      env: { ...process.env, NPM_TOKEN: 'leaktok', LEERNESS_NPM_TOKEN: 'leaklz' }
+    });
+    const out = (r.stdout || '') + (r.stderr || '');
+    // 대조군: 같은 스크립트를 스크럽 없이 직접 실행하면 exit 1 (토큰 노출 확인 — 테스트 자체 유효성)
+    const ctrl = cp.spawnSync('npm test', [], { cwd: secDir, shell: true, encoding: 'utf8', timeout: 30000, env: { ...process.env, NPM_TOKEN: 'leaktok' } });
+    ok = /✓ test passed/.test(out) && !/✗ test/.test(out) && ctrl.status === 1;
+    fs.rmSync(secDir, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.299) npm test 시크릿 차단: verify-code 가 NPM_TOKEN/LEERNESS_NPM_TOKEN 스크럽 (UR-0039 외부리뷰)' : '✗ npm test 시크릿 차단 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

