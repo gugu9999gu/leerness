@@ -3402,5 +3402,35 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.303 회귀 (UR-0043 외부리뷰): 동시 task add lost-update 락 — 6개 병렬 추가 시 모두 보존 + ID 충돌 0
+total++;
+{
+  let ok = false;
+  try {
+    const lDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lock-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', lDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const N = 6;
+    const procs = [];
+    for (let i = 0; i < N; i++) procs.push(cp.spawn(process.execPath, [CLI, 'task', 'add', 'LOCKTEST-' + i, '--path', lDir], { stdio: 'ignore' }));
+    const ptPath = path.join(lDir, '.harness', 'progress-tracker.md');
+    // 자식들이 OS 프로세스로 독립 진행 → 부모는 파일을 sync 폴링(원자쓰기라 부분읽기 없음)
+    const start = Date.now(); let found = 0;
+    while (Date.now() - start < 25000) {
+      try { const pt = fs.readFileSync(ptPath, 'utf8'); found = Array.from({ length: N }, (_, i) => i).filter(i => pt.includes('LOCKTEST-' + i)).length; if (found === N) break; } catch {}
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+    }
+    try { procs.forEach(p => { try { p.kill(); } catch {} }); } catch {}
+    const pt = fs.readFileSync(ptPath, 'utf8');
+    const allFound = Array.from({ length: N }, (_, i) => i).every(i => pt.includes('LOCKTEST-' + i));
+    const ids = (pt.match(/^\| (T-\d{4}) \|/gm) || []).map(s => s.match(/T-\d{4}/)[0]);
+    const noDupId = ids.length === new Set(ids).size;  // ID 충돌 0
+    const oneSep = pt.split('\n').filter(l => /^\|---\|/.test(l)).length === 1;
+    ok = allFound && noDupId && oneSep;
+    fs.rmSync(lDir, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.303) 동시 task add lost-update 락: 6 병렬 모두 보존 + ID 충돌 0 (UR-0043)' : '✗ lost-update 락 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

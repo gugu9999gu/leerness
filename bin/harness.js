@@ -12,7 +12,7 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.302';
+const VERSION = '1.9.303';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -189,6 +189,35 @@ function writeUtf8(p, s) {
   }
 }
 function append(p, s) { mkdirp(path.dirname(p)); fs.appendFileSync(p, s, 'utf8'); }
+// 1.9.303 (UR-0043, 외부리뷰): 동기 sleep (Atomics.wait, 실패 시 busy-wait 폴백).
+function _sleepSyncMs(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(1, ms | 0)); }
+  catch { const end = Date.now() + ms; while (Date.now() < end) {} }
+}
+// 1.9.303 (UR-0043, 외부리뷰 Codex/Opus): read-modify-write lost-update 방지 advisory 락.
+//   O_EXCL(wx) 원자적 생성으로 상호배제. 다른 프로세스가 보유 중이면 짧게 대기 후 재시도.
+//   stale(보유 프로세스 crash) 은 staleMs 초과 시 탈취. 타임아웃(maxWaitMs) 시 락 없이 진행(원자쓰기로 손상은 이미 방지, lost-update 만 rare 노출).
+const _heldLocks = new Set();  // 프로세스 내 재진입 추적 (중첩 _withLock 데드락 방지)
+function _withLock(targetPath, fn, opts = {}) {
+  const lockPath = targetPath + '.lock';
+  if (_heldLocks.has(lockPath)) return fn();  // 이미 이 프로세스가 보유 → 재진입(중첩 호출 안전)
+  const maxWaitMs = opts.maxWaitMs || 5000;
+  const staleMs = opts.staleMs || 30000;
+  try { mkdirp(path.dirname(lockPath)); } catch {}
+  const start = Date.now();
+  let held = false;
+  while (Date.now() - start <= maxWaitMs) {
+    try { const fd = fs.openSync(lockPath, 'wx'); fs.closeSync(fd); held = true; break; }  // 원자적 배타 생성
+    catch (e) {
+      if (e.code !== 'EEXIST') break;  // 예기치 못한 오류 → 락 없이 진행
+      try { const st = fs.statSync(lockPath); if (Date.now() - st.mtimeMs > staleMs) { fs.unlinkSync(lockPath); continue; } } catch {}
+      _sleepSyncMs(15 + Math.floor((Date.now() - start) / 50));  // 점증 backoff
+    }
+  }
+  if (held) _heldLocks.add(lockPath);
+  try { return fn(); }
+  finally { if (held) { _heldLocks.delete(lockPath); try { fs.unlinkSync(lockPath); } catch {} } }
+}
 function rel(root, p) { return path.relative(root, p).replace(/\\/g, '/') || '.'; }
 function today() { return new Date().toISOString().slice(0, 10); }
 function now() { return new Date().toISOString(); }
@@ -3038,6 +3067,7 @@ function _selfTestCases() {
     { name: 'shell 주입 표면 제거: fetchNpmLatest execFile+pkg검증 + runCommandSafe argList 인용 (UR-0040 외부리뷰 1.9.300)', run: () => { const src = read(__filename); const npmFix = /cp\.execFile\('npm', \['view', pkg, 'version'\]/.test(src) && !/cp\.exec\(.npm view \$\{pkg\}/.test(src) && /패키지명 charset/.test(src); const argFix = /argList\.map\(_shellQuoteArg\)\.join/.test(src); return npmFix && argFix && typeof _shellQuoteArg === 'function'; } },
     { name: 'MCP requiredTier 메타데이터 + 정책 minTier 게이트 (UR-0041 외부리뷰 1.9.301)', run: () => { const T = require('../lib/mcp-tools'); const allValid = T.length >= 81 && T.every(t => PERMISSION_TIERS.includes(t.requiredTier)); const get = n => (T.find(t => t.name === n) || {}).requiredTier; const classOk = get('leerness_state_record') === 'safe-write' && get('leerness_provider_add') === 'safe-write' && get('leerness_web') === 'network' && get('leerness_handoff') === 'read-only' && get('leerness_audit') === 'read-only'; const src = read(__filename); const gateOk = /_tierRank\(minTier\) > _tierRank\(required\)/.test(src) && /_policyEnforce\(targetPath, cliArgs\.join\(' '\), _toolDef/.test(src); return allValid && classOk && gateOk; } },
     { name: 'verify-claim git diff 시맨틱 교차검증: _gitChangedFiles/_claimFileInGit + strict FAIL 통합 (UR-0042 외부리뷰 1.9.302)', run: () => { const fnOk = typeof _gitChangedFiles === 'function' && typeof _claimFileInGit === 'function'; const matchOk = _claimFileInGit('src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('./src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('other.js', new Set(['src/api.js'])) === false && _claimFileInGit('x', null) === null; const src = read(__filename); const wired = /git diff 교차검증/.test(src) && /\|\| !gitClaimOk/.test(src) && /_gitChangedFiles\(root\)/.test(src); return fnOk && matchOk && wired; } },
+    { name: '_withLock/_updateRun: lost-update 락(O_EXCL+재진입) + 적용 (UR-0043 외부리뷰 1.9.303)', run: () => { const src = read(__filename); const fnOk = typeof _withLock === 'function' && typeof _sleepSyncMs === 'function' && typeof _updateRun === 'function'; const reentrant = /if \(_heldLocks\.has\(lockPath\)\) return fn\(\)/.test(src); const excl = /fs\.openSync\(lockPath, 'wx'\)/.test(src); const applied = /const id = _withLock\(progressPath\(root\)/.test(src) && /_updateRun\(root, curId/.test(src); return fnOk && reentrant && excl && applied; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6110,12 +6140,15 @@ function writeProgressRows(root, header, rows) {
   writeUtf8(progressPath(root), composed);
 }
 function upsertProgress(root, row) {
-  const header = progressHeader(root);
-  const rows = readProgressRows(root);
-  const i = rows.findIndex(r => r.id === row.id);
-  if (i >= 0) rows[i] = { ...rows[i], ...row, updated: today() };
-  else rows.push({ ...row, updated: today() });
-  writeProgressRows(root, header, rows);
+  // 1.9.303 (UR-0043): read-modify-write 전체를 락으로 직렬화 — 동시 task 쓰기 lost-update 방지.
+  return _withLock(progressPath(root), () => {
+    const header = progressHeader(root);
+    const rows = readProgressRows(root);
+    const i = rows.findIndex(r => r.id === row.id);
+    if (i >= 0) rows[i] = { ...rows[i], ...row, updated: today() };
+    else rows.push({ ...row, updated: today() });
+    writeProgressRows(root, header, rows);
+  });
 }
 
 function planShow(root) { const p = planPath(root); log(exists(p) ? read(p) : 'plan.md not found'); }
@@ -6176,11 +6209,15 @@ function planListCmd(root, opts = {}) {
 }
 
 function planAdd(root, text) {
-  const id = nextId(root, 'M');
-  const status = arg('--status','planned'), progress = arg('--progress','0');
-  append(planPath(root), `\n### ${id}. ${text}\nStatus: ${status}\nProgress: ${progress}%\n\nTasks:\n- [ ] ${text}\n`);
-  const tid = nextId(root, 'T');
-  upsertProgress(root, { id: tid, status, request: text, evidence: `plan:${id}`, nextAction: arg('--next', '다음 액션 작성') });
+  const status = arg('--status','planned'), progress = arg('--progress','0'), nextAction = arg('--next', '다음 액션 작성');
+  // 1.9.303 (UR-0043): M-id append + T-id upsert 를 하나의 락으로 — 동시 plan add ID 충돌 방지.
+  const { id, tid } = _withLock(progressPath(root), () => {
+    const id = nextId(root, 'M');
+    append(planPath(root), `\n### ${id}. ${text}\nStatus: ${status}\nProgress: ${progress}%\n\nTasks:\n- [ ] ${text}\n`);
+    const tid = nextId(root, 'T');
+    upsertProgress(root, { id: tid, status, request: text, evidence: `plan:${id}`, nextAction });
+    return { id, tid };
+  });
   ok(`plan added: ${id} → progress: ${tid}`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -6302,8 +6339,12 @@ function taskAdd(root, text) {
       }
     } catch {}
   }
-  const id = nextId(root, 'T');
-  upsertProgress(root, { id, status: arg('--status','requested'), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next','다음 액션 작성') });
+  // 1.9.303 (UR-0043): ID 할당 + write 를 하나의 락으로 — 동시 task add 의 ID 충돌(lost-update) 방지.
+  const id = _withLock(progressPath(root), () => {
+    const newId = nextId(root, 'T');
+    upsertProgress(root, { id: newId, status: arg('--status','requested'), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next','다음 액션 작성') });
+    return newId;
+  });
   ok(`task added: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
   // 1.9.177: task add 자동 review-request trigger (사용자 명시 1.9.176 자동화).
@@ -18117,6 +18158,16 @@ function _saveLeernessState(root, state) {
 function _runFile(root, id) { return path.join(_leernessStateDir(root), 'runs', `${id}.json`); }
 function _loadRun(root, id) { const f = _runFile(root, id); if (!exists(f)) return null; try { return JSON.parse(read(f)); } catch { return null; } }
 function _saveRun(root, rec) { const f = _runFile(root, rec.run_id); mkdirp(path.dirname(f)); writeUtf8(f, JSON.stringify(rec, null, 2) + '\n'); }
+// 1.9.303 (UR-0043): run 레코드 read-modify-write 를 락으로 직렬화 — 동시 state record/verify/handoff lost-update 방지.
+function _updateRun(root, id, mutator) {
+  return _withLock(_runFile(root, id), () => {
+    const rec = _loadRun(root, id);
+    if (!rec) return null;
+    mutator(rec);
+    _saveRun(root, rec);
+    return rec;
+  });
+}
 function _splitList(v) { return String(v || '').split(',').map(s => s.trim()).filter(Boolean); }
 
 // leerness state <show|start|record|verify|handoff>
@@ -18274,36 +18325,40 @@ function stateCmd(root, sub, ...args) {
   }
 
   if (sub === 'record') {
-    const rec = _loadRun(root, curId); if (!rec) return fail(`run 없음: ${curId}`);
-    for (const [flag, key] of [['--files-read', 'files_read'], ['--files-changed', 'files_changed'], ['--commands', 'commands_run'], ['--tests', 'tests_run'], ['--errors', 'errors'], ['--decision', 'decisions']]) {
-      const v = arg(flag, null); if (v) rec[key] = Array.from(new Set([...(rec[key] || []), ..._splitList(v)]));
-    }
-    _saveRun(root, rec);
+    const rec = _updateRun(root, curId, (rec) => {  // 1.9.303 (UR-0043): 락 직렬화 RMW
+      for (const [flag, key] of [['--files-read', 'files_read'], ['--files-changed', 'files_changed'], ['--commands', 'commands_run'], ['--tests', 'tests_run'], ['--errors', 'errors'], ['--decision', 'decisions']]) {
+        const v = arg(flag, null); if (v) rec[key] = Array.from(new Set([...(rec[key] || []), ..._splitList(v)]));
+      }
+    });
+    if (!rec) return fail(`run 없음: ${curId}`);
     if (json) { log(JSON.stringify({ recorded: curId, run: rec }, null, 2)); return; }
     ok(`기록: ${curId} (files_changed ${rec.files_changed.length} · commands ${rec.commands_run.length} · tests ${rec.tests_run.length} · decisions ${rec.decisions.length})`);
     return;
   }
 
   if (sub === 'verify') {
-    const rec = _loadRun(root, curId); if (!rec) return fail(`run 없음: ${curId}`);
     const result = (arg('--result', '') || (args.find(a => a && !a.startsWith('-')) || '')).toLowerCase();
     if (result !== 'pass' && result !== 'fail') return fail('--result pass|fail 필요');
-    rec.verification_result = result;
-    rec.status = result === 'pass' ? 'verified' : 'in-progress';
-    const note = arg('--note', null); if (note) rec.decisions = [...(rec.decisions || []), `verify(${result}): ${note}`];
-    _saveRun(root, rec);
+    const note = arg('--note', null);
+    const rec = _updateRun(root, curId, (rec) => {  // 1.9.303 (UR-0043): 락 직렬화 RMW
+      rec.verification_result = result;
+      rec.status = result === 'pass' ? 'verified' : 'in-progress';
+      if (note) rec.decisions = [...(rec.decisions || []), `verify(${result}): ${note}`];
+    });
+    if (!rec) return fail(`run 없음: ${curId}`);
     if (json) { log(JSON.stringify({ verified: curId, result, run: rec }, null, 2)); return; }
     (result === 'pass' ? ok : warn)(`검증 결과: ${curId} → ${result}`);
     return;
   }
 
   if (sub === 'handoff') {
-    const rec = _loadRun(root, curId); if (!rec) return fail(`run 없음: ${curId}`);
     const summary = (args.find(a => a && !a.startsWith('-')) || arg('--summary', '')).trim();
-    rec.handoff_summary = summary || rec.handoff_summary || '(요약 없음)';
-    rec.ended_at = new Date().toISOString();
-    rec.status = 'handed-off';
-    _saveRun(root, rec);
+    const rec = _updateRun(root, curId, (rec) => {  // 1.9.303 (UR-0043): 락 직렬화 RMW
+      rec.handoff_summary = summary || rec.handoff_summary || '(요약 없음)';
+      rec.ended_at = new Date().toISOString();
+      rec.status = 'handed-off';
+    });
+    if (!rec) return fail(`run 없음: ${curId}`);
     // 다음 에이전트가 읽을 latest handoff (json + md)
     const hdir = path.join(_leernessStateDir(root), 'handoff'); mkdirp(hdir);
     writeUtf8(path.join(hdir, 'latest.json'), JSON.stringify(rec, null, 2) + '\n');

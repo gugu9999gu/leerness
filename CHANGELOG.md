@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.303 — 2026-06-04 — UR-0043: 상태 파일 lost-update 락 (외부 AI 리뷰 — 멀티에이전트 안전 완성)
+
+**🔐 원자적 쓰기(UR-0038)가 막지 못한 동시 read-modify-write lost-update를 advisory 락으로 차단. Codex/Opus가 지적한 "상태 쓰기에 락 0건" 해소 — 멀티에이전트 동시 쓰기 안전성 완성.**
+
+### 배경 (Codex / Opus A-3)
+원자적 쓰기는 부분쓰기 손상은 막으나, 두 에이전트가 동시에 `task add`(또는 `state record`)를 호출하면: A 읽기 → B 읽기 → A 쓰기 → B 쓰기(A 변경 누락) = **lost-update**. 특히 `nextId`(다음 ID 계산)가 쓰기와 분리돼 **동일 ID 충돌**(둘 다 같은 T-XXXX → 덮어쓰기)까지 발생. grep 결과 `flock`/`O_EXCL` 0건(Opus).
+
+### 구현 (UR-0043)
+1. **`_withLock(targetPath, fn)`** — `O_EXCL`(wx) 원자적 lock 파일로 상호배제. 점증 backoff 재시도, stale(crash) 30s 초과 시 탈취, 타임아웃 5s 시 락 없이 진행(원자쓰기로 손상은 이미 방지). **프로세스 내 재진입**(`_heldLocks`)으로 중첩 호출 데드락 방지.
+2. **`_updateRun(root, id, mutator)`** — run 레코드 RMW를 락으로 캡슐화.
+3. **적용** — `upsertProgress`(task/plan write), `taskAdd`/`planAdd`(nextId+upsert를 **하나의 락**으로 → ID 충돌 차단), `state record/verify/handoff`(_updateRun). `_sleepSyncMs`(Atomics.wait) 헬퍼.
+4. selftest 50→51 · e2e 247→248.
+
+### 검증
+- **selftest 51/51 PASS** · **E2E 248/248 PASS** (회귀 0).
+- **실측: 6개 `task add` 병렬 실행 → 6개 모두 보존 + ID 충돌 0 + 구분자 1줄**. (락 전: 3/6 보존, ID 충돌 발생 — 동일 ID 덮어쓰기 확인 후 수정.)
+
+### 🎉 외부 AI 리뷰 신뢰성/보안 핵심 권고 완수
+- UR-0038 원자쓰기 · UR-0039 시크릿차단 · UR-0040 셸주입 · UR-0041 정책 메타데이터 · UR-0042 verify 시맨틱 · **UR-0043 lost-update 락** — 세 모델(Codex/Sonnet/Opus) 공통 high + 전략 항목 전부 코드화. 남은 UR-0044(handler 통합)는 low.
+
 ## 1.9.302 — 2026-06-04 — UR-0042: verify-claim git diff 시맨틱 교차검증 (외부 AI 리뷰 R3, Opus G-1)
 
 **🔍 Opus가 "가장 전략적 약점"으로 꼽은 거짓완료 검증의 실질화 — "파일 존재 + N passed" 문자열매칭에 git diff 교차검증 추가: 주장한 파일이 실제로 변경됐는가를 git working tree + 직전 커밋으로 대조.**
