@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.296 — 2026-06-04 — UR-0030: 정체성 = AI 에이전트 운영 레이어 (leerness about verb)
+
+**🧭 GPT-5.5 범용 하네스 전략의 정체성 정립 — leerness 는 "실행기"가 아니라 어떤 AI 코딩 에이전트 위에도 얹는 "운영 레이어"임을 조회 가능·테스트 가능한 형태로 명문화.**
+
+### 배경
+GPT-5.5 범용 하네스 리뷰: leerness 의 정체성을 "AI 에이전트 운영 레이어(Memory+Policy+Handoff+Verification+Audit 공통 계층)"로 포지셔닝 권고(UR-0030). 하위 구현(MCP-first/state schema/adapters/tiers)은 이미 완료됐으나, **정체성 자체가 코드/문서에서 명시적으로 조회 가능하지 않았음**.
+
+### 구현 (UR-0030)
+1. **`leerness about [--json]` (alias `identity`) CLI 신설** — 정체성을 구조화 노출: identity("AI 에이전트 운영 레이어") / isNot(실행기 아님) / 5계층(기억·정책·인수인계·검증·감사) / complements(AGENTS.md 보완) / entryPoints / surface(동적: MCP 도구수·어댑터·provider·런타임의존성 0).
+2. **MCP `leerness_about` (81번째 도구)** — read-only. 어떤 에이전트든 "이 도구가 무엇이고 무엇을 보완하는가"를 1콜로 파악.
+3. **`_leernessIdentity()` 단일 출처** — about CLI / MCP / README 정체성 섹션이 공유(동적 표면 데이터는 ADAPTERS/_mcpToolCount/EXTERNAL_AGENTS 에서 합성).
+4. **README 정체성 섹션** — managedReadmeBlock 에 "정체성 — AI 에이전트 운영 레이어" 섹션 추가(5계층 + AGENTS.md 보완 관계 명시). readme sync 로 자동 propagate.
+5. selftest 43→44 · e2e 240→241. MCP 배지 80→81 자동 동기화.
+
+### 검증
+- **selftest 44/44 PASS** · **E2E 241/241 PASS** (회귀 0).
+- 실측: `about --json` → identity/5계층/surface(MCP 81·어댑터 9·provider 10·deps 0). MCP tools/list 81개에 `leerness_about` 노출. README 정체성 섹션 생성.
+- B(1.9.288) 도구수 정합 가드가 배지 stale(80 vs 81) 즉시 검출 → sync 정합(Codex #5 가드 정상).
+
 ## 1.9.295 — 2026-06-04 — UR-0025 (4단계): 잔여 정적 카탈로그 → lib/catalogs.js — 데이터 추출 단계 완료 ✅
 
 **🧩 모놀리스 분리 4단계 — 잔여 정적 데이터 카탈로그 5종을 비파괴 분리. 이로써 leerness 의 모든 정적 데이터 카탈로그가 lib/ 모듈로 외부화됨(데이터 추출 단계 완료).**

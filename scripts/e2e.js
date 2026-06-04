@@ -3225,5 +3225,29 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.296 회귀 (UR-0030): leerness about — 정체성(AI 운영 레이어) verb + MCP + README 섹션
+total++;
+{
+  let ok = false;
+  try {
+    const r = cp.spawnSync(process.execPath, [CLI, 'about', '--json'], { cwd: tmp, encoding: 'utf8', timeout: 20000 });
+    const j = JSON.parse(r.stdout);
+    const structOk = r.status === 0 && /운영 레이어/.test(j.identity) && Array.isArray(j.layers) && j.layers.length === 5 &&
+      j.layers.every(l => l.key && l.ko && l.desc) && j.complements && j.surface && typeof j.surface.mcpTools === 'number' &&
+      j.surface.runtimeDeps === 0 && /AGENTS\.md/.test(j.complements);
+    // MCP tools/list 에 leerness_about 노출 (81 도구)
+    const ml = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: tmp, encoding: 'utf8', timeout: 15000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n' });
+    const names = JSON.parse(ml.stdout.split('\n').filter(Boolean)[0]).result.tools.map(t => t.name);
+    const mcpOk = names.includes('leerness_about') && names.length >= 81;
+    // README 정체성 섹션: readme sync 후 tmp/README.md 에 섹션 생성 확인
+    cp.spawnSync(process.execPath, [CLI, 'readme', 'sync', tmp], { cwd: tmp, encoding: 'utf8', timeout: 20000 });
+    const rd = fs.existsSync(path.join(tmp, 'README.md')) ? fs.readFileSync(path.join(tmp, 'README.md'), 'utf8') : '';
+    const readmeOk = /정체성 — AI 에이전트 운영 레이어/.test(rd);
+    ok = structOk && mcpOk && readmeOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.296) leerness about: 정체성 verb + MCP leerness_about(81) + README 섹션 (UR-0030)' : '✗ about 정체성 verb 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

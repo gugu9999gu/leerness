@@ -12,7 +12,7 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.295';
+const VERSION = '1.9.296';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -287,6 +287,18 @@ function managedReadmeBlock(project) {
     '## Leerness Project Harness',
     '',
     `이 프로젝트는 Leerness v${VERSION} 하네스를 사용합니다. AI 에이전트는 작업 전 \`leerness handoff\`로 컨텍스트를 적재하고, 작업 후 \`leerness check\`/\`leerness audit\`/\`leerness session close\`를 수행해야 합니다.`,
+    '',
+    '### 정체성 — AI 에이전트 운영 레이어 (UR-0030)',
+    '',
+    'Leerness 는 **실행기/코딩 에이전트가 아니라**, 어떤 AI 코딩 에이전트(Claude Code · Codex · Cursor · Goose 등) 위에도 얹는 **범용 운영 레이어**입니다. 5개 공통 계층을 제공합니다:',
+    '',
+    '- **기억(Memory)** — 프로젝트 상태/결정/진행을 `.leerness/` 에 영속화',
+    '- **정책(Policy)** — 8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트',
+    '- **인수인계(Handoff)** — 에이전트 간 컨텍스트 표준 전달 + `get_project_context` 1콜 온보딩',
+    '- **검증(Verification)** — 근거 기반 완료 검증으로 허위 완료 차단',
+    '- **감사(Audit)** — drift/idempotency/secret/encoding 자동 감사 + self-heal',
+    '',
+    'AGENTS.md(정적 지침)을 **대체하지 않고 보완**합니다 — 정적 규칙은 AGENTS.md, 동적 상태·검증·인수인계는 leerness. 정체성 조회: `leerness about` (MCP `leerness_about`).',
     '',
     '### Core Commands',
     '',
@@ -3004,6 +3016,7 @@ function _selfTestCases() {
     { name: '_canonicalProgressHeader + idempotency auto-fix (근본 복제버그 fix 1.9.293)', run: () => { const h = _canonicalProgressHeader(); const headerOk = /leernessRole: progress-tracker/.test(h) && /\| ID \| Status \| Request \|/.test(h) && /\|---\|/.test(h); const src = read(__filename); const fnOk = typeof _autoFixIdempotency === 'function'; const noWholeTextFallback = /if \(idx < 0\) return _canonicalProgressHeader\(\);/.test(src); const driftWired = /_autoFixIdempotency\(root\)/.test(src) && /idempotency 중복/.test(src); return headerOk && fnOk && noWholeTextFallback && driftWired; } },
     { name: 'lib/role-catalog: ROLE/PROVIDER/ALIASES/PROMPTS 모듈 단일출처 분리 (UR-0025 1.9.294)', run: () => { const m = require('../lib/role-catalog'); return m.ROLE_CATALOG === ROLE_CATALOG && m._PROVIDER_MODEL_CATALOG === _PROVIDER_MODEL_CATALOG && m._ROLE_ALIASES === _ROLE_ALIASES && m._AGENT_ROLE_PROMPTS === _AGENT_ROLE_PROMPTS && Object.keys(m.ROLE_CATALOG).length === 7 && Object.keys(m._PROVIDER_MODEL_CATALOG).length === 10 && !/const ROLE_CATALOG = \{/.test(read(__filename)); } },
     { name: 'lib/catalogs: CAPABILITY/ADAPTERS/REUSE 모듈 단일출처 분리 (UR-0025 1.9.295)', run: () => { const m = require('../lib/catalogs'); return m.CAPABILITY_SURFACE === CAPABILITY_SURFACE && m.ADAPTERS === ADAPTERS && m.REUSE_CATEGORIES === REUSE_CATEGORIES && m.REUSE_CHECKLIST === REUSE_CHECKLIST && m.POWERFUL_COMMANDS === POWERFUL_COMMANDS && Object.keys(m.CAPABILITY_SURFACE).length === 6 && !/const CAPABILITY_SURFACE = \{/.test(read(__filename)); } },
+    { name: 'about: 정체성 verb(AI 운영 레이어) + MCP leerness_about 등록 (UR-0030 1.9.296)', run: () => { const id = _leernessIdentity(); const src = read(__filename); return typeof aboutCmd === 'function' && /운영 레이어/.test(id.identity) && id.layers.length === 5 && id.surface.mcpTools >= 81 && /name: 'leerness_about'/.test(src) && /case 'leerness_about':/.test(src) && /cmd === 'about' \|\| cmd === 'identity'/.test(src); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -16634,7 +16647,8 @@ function mcpServeCmd(root) {
     { name: 'leerness_state_record', description: '1.9.279 (UR-0031) — record_file_change / record_decision. 진행 중 run 에 변경 파일/명령/테스트/결정을 누적. 인자: { path?, filesChanged? (콤마), filesRead?, commands?, tests?, errors?, decision? }. 응답: { recorded, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, filesChanged: { type: 'string' }, filesRead: { type: 'string' }, commands: { type: 'string' }, tests: { type: 'string' }, errors: { type: 'string' }, decision: { type: 'string' } } } },
     { name: 'leerness_state_verify', description: '1.9.279 (UR-0031) — request_verification / verify_done. 현재 run 의 검증 결과 기록. 인자: { path?, result (required: "pass"|"fail"), note? }. 응답: { verified, result, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, result: { type: 'string', enum: ['pass', 'fail'] }, note: { type: 'string' } }, required: ['result'] } },
     { name: 'leerness_state_handoff', description: '1.9.279 (UR-0031) — create_handoff / make_handoff. 현재 run 을 마감하고 다음 에이전트용 .leerness/handoff/latest.{md,json} 작성 (Claude→Goose→Codex 인수인계 표준). 인자: { path?, summary (required) }. 응답: { handoff, run }.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, summary: { type: 'string' } }, required: ['summary'] } },
-    { name: 'leerness_get_project_context', description: '1.9.292 (UR-0031) — get_project_context. 외부 에이전트가 작업 시작 전 단 1콜로 "지금 무엇을 알아야 하는가"를 파악하는 집약 컨텍스트. 여러 소스(현재 작업/미답 사용자 요청/최근 결정/활성 룰/next-actions/memory surface/프로젝트 의도)를 한 번에 구조화 회수. read-only. 인자: { path? }. 응답: { version, project, currentTask, openRequests, recentDecisions, activeRules, nextActions, memory }.', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }
+    { name: 'leerness_get_project_context', description: '1.9.292 (UR-0031) — get_project_context. 외부 에이전트가 작업 시작 전 단 1콜로 "지금 무엇을 알아야 하는가"를 파악하는 집약 컨텍스트. 여러 소스(현재 작업/미답 사용자 요청/최근 결정/활성 룰/next-actions/memory surface/프로젝트 의도)를 한 번에 구조화 회수. read-only. 인자: { path? }. 응답: { version, project, currentTask, openRequests, recentDecisions, activeRules, nextActions, memory }.', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    { name: 'leerness_about', description: '1.9.296 (UR-0030) — leerness 정체성/포지셔닝 회수. leerness 가 무엇인가: "AI 에이전트 운영 레이어"(실행기 아님) — 기억·정책·인수인계·검증·감사 5계층. read-only. 어떤 에이전트든 "이 도구가 무엇이고 무엇을 보완하는가"를 1콜로 파악. 응답: { identity, isNot, tagline, layers[], complements, entryPoints, surface }.', inputSchema: { type: 'object', properties: {} } }
   ];
 
   function send(obj) {
@@ -16886,6 +16900,9 @@ function mcpServeCmd(root) {
             break;
           case 'leerness_get_project_context':
             cliArgs = ['context', '--path', targetPath, '--json'];
+            break;
+          case 'leerness_about':
+            cliArgs = ['about', '--json'];
             break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
@@ -18104,6 +18121,56 @@ function _splitList(v) { return String(v || '').split(',').map(s => s.trim()).fi
 // 1.9.292 (UR-0031): get_project_context — 외부 에이전트 온보딩용 단일 집약 컨텍스트.
 //   1콜로 현재 작업/미답 요청/최근 결정/활성 룰/next-actions/memory/프로젝트 의도를 구조화 회수.
 //   MCP leerness_get_project_context 가 이 명령(--json)을 호출. handoff(인간용 장문)와 달리 기계 친화 lean payload.
+// 1.9.296 (UR-0030, GPT-5.5 범용 하네스 전략): leerness 정체성 = 'AI 에이전트 운영 레이어'.
+//   실행기가 아니라 기억·정책·인수인계·검증·감사의 공통 계층. 어떤 AI 코딩 에이전트 위에도 얹힌다.
+//   _leernessIdentity() 단일 출처 — about 명령 / MCP leerness_about / README 정체성 섹션이 공유.
+function _leernessIdentity() {
+  let adapterIds = [];
+  try { adapterIds = Object.keys(ADAPTERS); } catch {}
+  let providerCount = 0;
+  try { providerCount = EXTERNAL_AGENTS.length; } catch {}
+  return {
+    name: 'leerness',
+    version: VERSION,
+    identity: 'AI 에이전트 운영 레이어 (AI agent operating layer)',
+    isNot: '실행기/코딩 에이전트가 아님 — 어떤 에이전트 위에도 얹는 공통 운영 계층',
+    tagline: '어떤 AI 코딩 에이전트에도 적용되는 범용 운영 레이어 — 기억·정책·인수인계·검증·감사',
+    layers: [
+      { key: 'memory', ko: '기억', desc: '프로젝트 상태/결정/진행을 .leerness/ 에 영속화 (state start|record|verify|handoff)' },
+      { key: 'policy', ko: '정책', desc: '8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트' },
+      { key: 'handoff', ko: '인수인계', desc: '에이전트 간 컨텍스트 표준 전달 (Claude→Codex→Goose), get_project_context 1콜 온보딩' },
+      { key: 'verification', ko: '검증', desc: '근거 기반 완료 검증 (verify-claim --require-evidence) — 허위 완료 차단' },
+      { key: 'audit', ko: '감사', desc: 'drift/idempotency/secret/encoding 자동 감사 + self-heal (--auto-fix)' }
+    ],
+    complements: 'AGENTS.md(정적 지침)을 대체하지 않고 보완 — 정적 규칙/명령/금지는 AGENTS.md, 동적 상태·기억·검증·인수인계는 leerness',
+    entryPoints: { context: 'leerness context  (MCP get_project_context)', mcp: 'leerness mcp serve', adapter: 'leerness adapter <tool>' },
+    surface: { mcpTools: _mcpToolCount(), adapters: adapterIds, providers: providerCount, runtimeDeps: 0, offlineFirst: true }
+  };
+}
+function aboutCmd(opts = {}) {
+  const id = _leernessIdentity();
+  if (opts.json || has('--json')) { process.stdout.write(JSON.stringify(id, null, 2) + '\n'); return id; }
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  log(cy(`# ${id.name} v${id.version} — ${id.identity}`));
+  log('');
+  log(`  ${id.tagline}`);
+  log(dm(`  ✗ ${id.isNot}`));
+  log('');
+  log(gr('## 5 운영 계층 (Memory · Policy · Handoff · Verification · Audit)'));
+  id.layers.forEach(l => log(`  • ${l.ko} (${l.key}) — ${l.desc}`));
+  log('');
+  log(gr('## 보완 관계'));
+  log(`  ${id.complements}`);
+  log('');
+  log(gr('## 진입점'));
+  Object.values(id.entryPoints).forEach(e => log(dm(`  • ${e}`)));
+  log('');
+  log(`표면: MCP ${id.surface.mcpTools} 도구 · 어댑터 ${id.surface.adapters.length} · provider ${id.surface.providers} · 런타임 의존성 ${id.surface.runtimeDeps} · offline-first ${id.surface.offlineFirst ? '✓' : '✗'}`);
+  return id;
+}
 function contextCmd(root, opts = {}) {
   root = absRoot(root);
   const rows = readProgressRows(root);
@@ -21350,6 +21417,7 @@ async function main() {
   // 1.9.278 (UR-0032): leerness state <show|start|record|verify|handoff> — .leerness/ 구조화 상태 substrate
   if (cmd === 'state')                              return stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   if (cmd === 'context')                            return contextCmd(arg('--path', process.cwd()), { json: has('--json') });
+  if (cmd === 'about' || cmd === 'identity')        return aboutCmd({ json: has('--json') });
   // 1.9.281 (UR-0034): leerness policy <show|set|check> — 권한 등급 (opt-in enforced)
   if (cmd === 'policy')                             return policyCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.285 (UR-0023): leerness reuse-check "<기능>" — 외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인)
