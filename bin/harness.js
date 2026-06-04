@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.313';
+const VERSION = '1.9.314';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2604,6 +2604,22 @@ function _computeRecentChanges(root, limit = 5) {
 //   사용자 보고: Windows + 한국어 PowerShell 에서 .ps1 UTF-8 (no BOM) 파일이 CP949 로 잘못 인식되어 파싱 오류
 //   해결: leerness 가 환경 정보 + 셸 스크립트 인코딩을 사전 감지 → handoff body 경고
 //   주의: 기존 _detectEnvironment (1.9.145) 와 명명 충돌 → _collectRuntimeEnv 로 분리
+// 1.9.314 (UR-0052, 설치리뷰 3중수렴): Windows PowerShell 실제 실행 셸/버전 감지 — env 마커 우선(순수 함수).
+//   배경: 이전엔 powershell.exe(=5.1)만 probe + ComSpec(항상 cmd.exe) 의존 → pwsh7 을 ps5/cmd 로 오판 → && 에 ps5-chain 오탐.
+//   신뢰 마커: POWERSHELL_DISTRIBUTION_CHANNEL(pwsh 런타임 전용, cmd/ps5 미상속) · PSModulePath 의 사용자 모듈 경로
+//   (Documents\PowerShell=pwsh7 / Documents\WindowsPowerShell=ps5.1). 시스템 경로는 cmd 도 가져 비신뢰 → 사용자 경로만 판별.
+function _detectPwshFromEnv(e) {
+  e = e || process.env;
+  const channel = e.POWERSHELL_DISTRIBUTION_CHANNEL || '';
+  const pmp = e.PSModulePath || '';
+  // pwsh 6/7 (Core) 신뢰 마커: POWERSHELL_DISTRIBUTION_CHANNEL(pwsh 런타임 전용, cmd/ps5 미상속) · pwsh 전용 경로(\PowerShell\7|6\, Documents\PowerShell\).
+  //   pwsh 오검출은 안전 — pwsh 는 &&/|| 지원 → ps5-chain 오탐을 만들지 않음.
+  //   ⚠ ps5.1 은 신뢰 가능한 런타임 마커가 없음(Documents\WindowsPowerShell 은 영구 user env → bash/cmd 도 상속) → 자동 판별하지 않음(과경고 방지).
+  if (channel || /[\\/]PowerShell[\\/][67][\\/]/i.test(pmp) || /Documents[\\/]+PowerShell[\\/]/i.test(pmp)) {
+    return { isPowerShell: true, version: '7', edition: 'Core' };
+  }
+  return { isPowerShell: false, version: null, edition: null };
+}
 function _collectRuntimeEnv() {
   const env = {
     os: { platform: os.platform(), release: os.release(), arch: os.arch() },
@@ -2628,7 +2644,8 @@ function _collectRuntimeEnv() {
       isTTY: !!(process.stdout && process.stdout.isTTY),
       term: process.env.TERM || null,
       shell: process.env.SHELL || process.env.ComSpec || null,
-      powershell: null
+      powershell: null,
+      psEdition: null
     },
     tools: { git: null, npm: null, python: null, python3: null }
   };
@@ -2661,11 +2678,21 @@ function _collectRuntimeEnv() {
       }
     }
   } catch {}
-  // PowerShell 감지
+  // PowerShell 감지 (1.9.314 UR-0052, 설치리뷰): 실제 부모 셸 env 마커 우선 — 이전엔 powershell.exe(=5.1)만 probe 해 pwsh7 을 '5' 로 오판.
   try {
     if (env.os.platform === 'win32') {
-      const r = cp.spawnSync('powershell', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8', timeout: 5000 });
-      if (r.status === 0) env.terminal.powershell = (r.stdout || '').trim().split('\n')[0];
+      const fromEnv = _detectPwshFromEnv();
+      if (fromEnv.version) {
+        env.terminal.powershell = fromEnv.version;
+        env.terminal.psEdition = fromEnv.edition;
+      } else {
+        // env 마커 불충분 → 보수적으로 Windows PowerShell(5.1) probe (미확정 시 && 경고 유지가 안전)
+        const r = cp.spawnSync('powershell', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8', timeout: 5000 });
+        if (r.status === 0 && (r.stdout || '').trim()) {
+          env.terminal.powershell = (r.stdout || '').trim().split(/\r?\n/)[0].trim();
+          env.terminal.psEdition = parseInt(env.terminal.powershell, 10) >= 6 ? 'Core' : 'Desktop';
+        }
+      }
     }
   } catch {}
   // 도구 버전 감지
@@ -3085,6 +3112,7 @@ function _selfTestCases() {
     { name: 'init 가드: 미초기화 write 차단 + 다중마커 판별 + --force 우회 (UR-0047 설치리뷰 1.9.311)', run: () => { const src = read(__filename); const fnOk = typeof _isInitialized === 'function' && typeof _requireInit === 'function'; const liveOk = _isInitialized('.') === true; const emptyOk = _isInitialized(path.join(os.tmpdir(), '__leerness_noinit_marker__')) === false; const wired = ["task add", "task update", "plan add", "decision add", "rule add", "lesson save", "brief set"].every(l => src.includes(`_requireInit(root, '${l}')`)) && !src.includes("_requireInit(root, 'state " + "start')"); const force = /if \(_isInitialized\(root\) \|\| has\('--force'\)\) return true/.test(src); return fnOk && liveOk && emptyOk && wired && force; } },
     { name: 'secret 스캐너 현대 키: OpenAI proj/svcacct·Anthropic api03(_)·GitHub 변종·Stripe·npm 검출 + 오탐 가드 (UR-0050 설치리뷰 1.9.312)', run: () => { const hit = (s) => SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const named = (s, nm) => SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s) && p.name === nm; }); const A = 'A'.repeat(40); const projKey = 'sk-' + 'proj-' + A + '_' + A; const svcKey = 'sk-' + 'svcacct-' + A; const antKey = 'sk-' + 'ant-api03-' + A + '_' + A; const ghoKey = 'gho_' + 'a1B2'.repeat(9); const stripeKey = 'sk_' + 'live_' + A; const npmKey = 'npm_' + 'a1B2'.repeat(9); const asiaKey = 'ASIA' + 'ABCD1234EFGH5678'; const legacy = 'sk-' + A; const hits = hit(projKey) && hit(svcKey) && hit(antKey) && hit(ghoKey) && hit(stripeKey) && hit(npmKey) && hit(asiaKey) && hit(legacy); const names = named(projKey, 'OpenAI project/service key') && named(antKey, 'Anthropic API key') && named(stripeKey, 'Stripe secret key') && named(npmKey, 'npm token'); const clean = !hit('const userName = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return hits && names && clean; } },
     { name: 'MCP notification 준수: id없는 요청 무응답 가드 + ping {} (UR-0049 설치리뷰 1.9.313)', run: () => { const src = read(__filename); const guard = src.includes("const isNotification = !('id' in req)") && src.includes("req.method.startsWith('notifications/')") && src.includes('if (isNotification) return;'); const ping = src.includes("req.method === 'ping'") && /ping[\s\S]{0,140}result: \{\} \}/.test(src); return guard && ping; } },
+    { name: 'PowerShell 감지: pwsh7(channel/Documents\\PowerShell/install) + ps5.1 영구경로 과경고 안함 (UR-0052 설치리뷰 1.9.314)', run: () => { const f = _detectPwshFromEnv; const pwsh7a = f({ POWERSHELL_DISTRIBUTION_CHANNEL: 'MSI:Windows 10' }).version === '7'; const pwsh7b = f({ PSModulePath: 'C:\\Users\\me\\Documents\\PowerShell\\Modules' }).version === '7'; const pwsh7c = f({ PSModulePath: 'C:\\Program Files\\PowerShell\\7\\Modules' }).version === '7'; const noFalsePs5 = f({ PSModulePath: 'C:\\Users\\me\\Documents\\WindowsPowerShell\\Modules' }).isPowerShell === false; const cmdSys = f({ PSModulePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules' }).isPowerShell === false; const empty = f({}).isPowerShell === false; const src = read(__filename); const wired = src.includes('const fromEnv = _detectPwshFromEnv()') && src.includes('const pwshEnv = _detectPwshFromEnv()'); return pwsh7a && pwsh7b && pwsh7c && noFalsePs5 && cmdSys && empty && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3146,13 +3174,17 @@ function _detectShellCtx() {
   let env; try { env = _collectRuntimeEnv(); } catch { env = null; }
   let shell = 'unknown';
   const sh = (env && env.terminal && env.terminal.shell) || process.env.SHELL || process.env.ComSpec || '';
-  if (/powershell|pwsh/i.test(sh)) shell = 'powershell';
-  else if (/cmd\.exe/i.test(sh)) shell = 'cmd';
+  // 1.9.314 (UR-0052, 설치리뷰): PowerShell env 마커 우선 — Windows ComSpec 은 항상 cmd.exe 라 pwsh/ps5 를 cmd 로 오판하던 문제 수정.
+  //   psVersion 은 _collectRuntimeEnv(win32 probe) → env 마커 순 폴백 (cross-platform pwsh 도 정확).
+  const pwshEnv = _detectPwshFromEnv();
+  const psVersion = (env && env.terminal && env.terminal.powershell) || pwshEnv.version || null;
+  if (/powershell|pwsh/i.test(sh) || pwshEnv.isPowerShell) shell = 'powershell';
   else if (/bash/i.test(sh)) shell = 'bash';
   else if (/\bsh\b|zsh/i.test(sh)) shell = 'sh';
-  else if (process.platform === 'win32') shell = (env && env.terminal && env.terminal.powershell) ? 'powershell' : 'cmd';
-  const psVersion = env && env.terminal && env.terminal.powershell ? env.terminal.powershell : null;
-  return { shell, psVersion, raw: sh };
+  else if (/cmd\.exe/i.test(sh)) shell = 'cmd';
+  else if (process.platform === 'win32') shell = 'cmd';
+  else shell = 'sh';
+  return { shell, psVersion, raw: sh, psEdition: (env && env.terminal && env.terminal.psEdition) || pwshEnv.edition || null };
 }
 // 환경 버전 변동 감지 (environment.json 스냅샷 vs 현재 — 사용자 명시: 과거↔현재 버전 업데이트)
 function _shellEnvDrift(root) {

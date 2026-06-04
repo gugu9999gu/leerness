@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.314 — 2026-06-04 — UR-0052: PowerShell 감지 정확화 (설치리뷰)
+
+**🪟 shell-guard 가 PowerShell 7(pwsh)을 cmd/ps5.1 로 오판해 `&&` 에 잘못된 ps5-chain 경고를 내던 결함 수정 (Opus#2 지적, Windows/한국어 타깃 핵심).**
+
+### 배경 (설치리뷰)
+- `_collectRuntimeEnv` 가 항상 `powershell.exe`(=Windows PowerShell 5.1)만 probe → pwsh7 환경도 버전 `5` 로 오판.
+- `_detectShellCtx` 가 Windows `ComSpec`(항상 cmd.exe)에 의존 → pwsh7/ps5.1 도 `cmd` 로 오판.
+- 결과: pwsh7(=`&&`/`||` 지원)에서 `a && b` 에 **거짓 ps5-chain 에러**(exit 1) 발생 가능.
+
+### 구현 (UR-0052)
+1. **`_detectPwshFromEnv(e)` 순수 헬퍼** — pwsh 6/7 신뢰 마커로 판별: `POWERSHELL_DISTRIBUTION_CHANNEL`(pwsh 런타임 전용, cmd/ps5 미상속) · pwsh 전용 경로(`\PowerShell\7\`, `Documents\PowerShell\`). pwsh 오검출은 안전(pwsh 는 `&&` 지원 → ps5-chain 무발생).
+2. **ps5.1 자동 판별 안 함** — `Documents\WindowsPowerShell` 은 영구 user env(bash/cmd 도 상속)라 신뢰 불가 → **과경고 방지**. ps5-chain 규칙은 ctx 가 명시적 powershell+v5 일 때만(직접 호출/probe) 발화.
+3. `_collectRuntimeEnv`/`_detectShellCtx` 둘 다 헬퍼 사용 + cross-platform psVersion 폴백 + `psEdition` 필드 추가.
+4. selftest 61→62 · e2e 258→259.
+
+### 검증
+- **selftest 62/62 PASS** · **E2E 259/259 PASS** (회귀 0).
+- 실측: pwsh7(channel) → `shell=powershell, psVersion=7, ps5-chain 없음` · 영구 ps5.1경로+bash → `shell=bash, ps5-chain 없음`(과경고 0) · 직접 `{powershell, v5}` → ps5-chain 발화(규칙 보존).
+- 회귀 수정: B(1.9.304) 가 OLD 오판(shell=cmd)에 의존하던 `shell-guard "a && b"` exit 0 가정 → 정확 감지 후에도 통과(이 환경은 bash).
+
 ## 1.9.313 — 2026-06-04 — UR-0049: MCP notification 프로토콜 준수 (설치리뷰 3중수렴 high)
 
 **🔌 MCP 서버가 JSON-RPC notification(`notifications/*`)에 에러 응답을 보내 프로토콜을 위반하던 결함 수정 — 엄격한 MCP 클라이언트의 핸드셰이크 중단 위험.**

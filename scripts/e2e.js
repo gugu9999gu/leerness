@@ -3694,5 +3694,22 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.314 회귀 (UR-0049→UR-0052 설치리뷰): PowerShell 감지 — pwsh7(channel) ps5-chain 오탐 제거 + ps5.1 정상 발화
+//   env 마커로 셸/버전 판별(cross-platform) — POWERSHELL_DISTRIBUTION_CHANNEL=pwsh7, Documents\WindowsPowerShell=ps5.1
+total++;
+{
+  let ok = false;
+  try {
+    const sg = (extra) => { const r = cp.spawnSync(process.execPath, [CLI, 'shell-guard', 'a && b', '--json'], { encoding: 'utf8', timeout: 15000, env: { ...process.env, ...extra } }); try { return JSON.parse(r.stdout); } catch { return null; } };
+    const j7 = sg({ POWERSHELL_DISTRIBUTION_CHANNEL: 'MSI:Windows 10 Pro', PSModulePath: '', SHELL: '' });
+    const jb = sg({ POWERSHELL_DISTRIBUTION_CHANNEL: '', PSModulePath: 'C:\\Users\\u\\Documents\\WindowsPowerShell\\Modules', SHELL: '/usr/bin/bash' });
+    const pwsh7Ok = j7 && String(j7.psVersion) === '7' && j7.shell === 'powershell' && !(j7.issues || []).some(i => i.rule === 'ps5-chain');  // pwsh7(channel) → ps5-chain 오탐 없음
+    const noFalsePs5 = jb && jb.shell !== 'powershell' && !(jb.issues || []).some(i => i.rule === 'ps5-chain');  // 영구 ps5.1 PSModulePath + bash → ps5 오판/과경고 없음
+    ok = pwsh7Ok && noFalsePs5;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.314) PowerShell 감지: pwsh7(channel) ps5-chain 오탐 제거 + 영구 ps5.1경로 과경고 없음 (UR-0052)' : '✗ PowerShell 감지 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
