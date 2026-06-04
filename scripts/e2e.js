@@ -3432,5 +3432,27 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.304 회귀 (UR-0025): lib/analyzers.js 모듈 분리 — 단일출처 + 부작용 0 + 소비 명령 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const a = require(path.resolve(__dirname, '..', 'lib', 'analyzers.js'));
+    const dataOk = typeof a._evidenceQuality === 'function' && typeof a._parseEvidenceStats === 'function' &&
+      typeof a._shellGuardAnalyze === 'function' && typeof a._claimFileInGit === 'function' &&
+      a._evidenceQuality('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true &&
+      a._shellGuardAnalyze('a && b', { shell: 'powershell', psVersion: '5' }).issues.some(i => i.rule === 'ps5-chain') &&
+      a._claimFileInGit('src/api.js', new Set(['src/api.js'])) === true;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const movedOut = !/function _evidenceQuality\(evidence\) \{/.test(harnessSrc) && !/function _shellGuardAnalyze\(cmd, ctx\) \{/.test(harnessSrc) && /require\('\.\.\/lib\/analyzers'\)/.test(harnessSrc);
+    // 소비 명령 회귀: shell-guard (_shellGuardAnalyze 사용)
+    const sg = cp.spawnSync(process.execPath, [CLI, 'shell-guard', 'a && b', '--json'], { cwd: tmp, encoding: 'utf8', timeout: 20000 });
+    const cmdOk = sg.status === 0 && /"shell"/.test(sg.stdout || '');
+    ok = dataOk && movedOut && cmdOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.304) lib/analyzers 모듈 분리: 단일출처 + 인라인 제거 + shell-guard 동작 (UR-0025)' : '✗ analyzers 모듈 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

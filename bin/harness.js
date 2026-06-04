@@ -9,10 +9,12 @@ const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
+// 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
+const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.303';
+const VERSION = '1.9.304';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3068,6 +3070,7 @@ function _selfTestCases() {
     { name: 'MCP requiredTier 메타데이터 + 정책 minTier 게이트 (UR-0041 외부리뷰 1.9.301)', run: () => { const T = require('../lib/mcp-tools'); const allValid = T.length >= 81 && T.every(t => PERMISSION_TIERS.includes(t.requiredTier)); const get = n => (T.find(t => t.name === n) || {}).requiredTier; const classOk = get('leerness_state_record') === 'safe-write' && get('leerness_provider_add') === 'safe-write' && get('leerness_web') === 'network' && get('leerness_handoff') === 'read-only' && get('leerness_audit') === 'read-only'; const src = read(__filename); const gateOk = /_tierRank\(minTier\) > _tierRank\(required\)/.test(src) && /_policyEnforce\(targetPath, cliArgs\.join\(' '\), _toolDef/.test(src); return allValid && classOk && gateOk; } },
     { name: 'verify-claim git diff 시맨틱 교차검증: _gitChangedFiles/_claimFileInGit + strict FAIL 통합 (UR-0042 외부리뷰 1.9.302)', run: () => { const fnOk = typeof _gitChangedFiles === 'function' && typeof _claimFileInGit === 'function'; const matchOk = _claimFileInGit('src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('./src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('other.js', new Set(['src/api.js'])) === false && _claimFileInGit('x', null) === null; const src = read(__filename); const wired = /git diff 교차검증/.test(src) && /\|\| !gitClaimOk/.test(src) && /_gitChangedFiles\(root\)/.test(src); return fnOk && matchOk && wired; } },
     { name: '_withLock/_updateRun: lost-update 락(O_EXCL+재진입) + 적용 (UR-0043 외부리뷰 1.9.303)', run: () => { const src = read(__filename); const fnOk = typeof _withLock === 'function' && typeof _sleepSyncMs === 'function' && typeof _updateRun === 'function'; const reentrant = /if \(_heldLocks\.has\(lockPath\)\) return fn\(\)/.test(src); const excl = /fs\.openSync\(lockPath, 'wx'\)/.test(src); const applied = /const id = _withLock\(progressPath\(root\)/.test(src) && /_updateRun\(root, curId/.test(src); return fnOk && reentrant && excl && applied; } },
+    { name: 'lib/analyzers: 분석/검증 함수 4종 모듈 단일출처 분리 (UR-0025 1.9.304)', run: () => { const m = require('../lib/analyzers'); return m._evidenceQuality === _evidenceQuality && m._shellGuardAnalyze === _shellGuardAnalyze && m._parseEvidenceStats === _parseEvidenceStats && m._claimFileInGit === _claimFileInGit && !/function _evidenceQuality\(evidence\) \{/.test(read(__filename)) && !/function _shellGuardAnalyze\(cmd, ctx\) \{/.test(read(__filename)); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3111,38 +3114,7 @@ function selfTestCmd(opts = {}) {
 //   leerness 는 셸을 직접 가로챌 수 없으므로(0-dep Node CLI) → 실행 전 정적 분석 + 실패 기록/회수로 대응.
 //   ctx: { shell: 'powershell'|'cmd'|'bash'|'sh', psVersion: '5'|'7'|null }
 //   반환: { shell, psVersion, issues: [{ rule, severity, detail, suggestion }] } — 순수 함수 (단위 테스트 가능)
-function _shellGuardAnalyze(cmd, ctx) {
-  const c = String(cmd || '');
-  const shell = (ctx && ctx.shell) || 'unknown';
-  const psVer = ctx && ctx.psVersion != null ? parseInt(ctx.psVersion, 10) : null;
-  const issues = [];
-  const isWinPowerShell = shell === 'powershell' && psVer != null && psVer < 6;  // 5.1 = Windows PowerShell
-  // 규칙 1: PowerShell 5.1 에서 && / || 체이닝 미지원 (pwsh 7+ 부터 지원)
-  if (isWinPowerShell && /\s&&\s|\s\|\|\s/.test(c)) {
-    issues.push({ rule: 'ps5-chain', severity: 'error', detail: 'Windows PowerShell 5.1 은 && / || 연산자를 지원하지 않습니다 (PowerShell 7+ 부터 지원).', suggestion: 'A; if ($?) { B }  (조건부) 또는 A; B  (무조건) 로 분리. 또는 pwsh 7 설치.' });
-  }
-  // 규칙 2: PowerShell 에서 2>/dev/null → 2>$null
-  if (shell === 'powershell' && /2>\s*\/dev\/null/.test(c)) {
-    issues.push({ rule: 'ps-devnull', severity: 'error', detail: 'PowerShell 은 /dev/null 경로가 없습니다.', suggestion: '2>$null 사용 (PowerShell 리다이렉트).' });
-  }
-  // 규칙 3: PowerShell 에서 inline env (VAR=val cmd) 미지원
-  if (shell === 'powershell' && /^[A-Z_][A-Z0-9_]*=[^\s]+\s+\S/.test(c.trim())) {
-    issues.push({ rule: 'ps-inline-env', severity: 'error', detail: 'PowerShell 은 VAR=val cmd 형식의 inline 환경변수를 지원하지 않습니다.', suggestion: "$env:VAR='val'; cmd  로 분리." });
-  }
-  // 규칙 4: PowerShell 에서 Unix 전용 명령 (rm -rf / ls -la 등) — 별칭은 되나 플래그 오류 가능
-  if (shell === 'powershell' && /\brm\s+-rf\b/.test(c)) {
-    issues.push({ rule: 'ps-rm-rf', severity: 'warn', detail: 'PowerShell 에서 rm -rf 는 -rf 플래그 파싱 오류 가능 (rm 은 Remove-Item 별칭).', suggestion: 'Remove-Item -Recurse -Force <path> 사용.' });
-  }
-  // 규칙 5: CMD 에서 ; 는 명령 구분자가 아님 (한 줄로 실행됨)
-  if (shell === 'cmd' && /;/.test(c) && !/&&|\|\|/.test(c)) {
-    issues.push({ rule: 'cmd-semicolon', severity: 'warn', detail: 'CMD 는 ; 를 명령 구분자로 처리하지 않습니다 (인자로 전달됨).', suggestion: 'A && B  (조건부) 또는 A & B  (무조건) 사용.' });
-  }
-  // 규칙 6: PowerShell 에서 && 가 있으나 버전 미상 — 정보성
-  if (shell === 'powershell' && psVer == null && /\s&&\s/.test(c)) {
-    issues.push({ rule: 'ps-version-unknown', severity: 'info', detail: 'PowerShell 버전 미상 — 5.1 이면 && 미지원, 7+ 이면 지원.', suggestion: '$PSVersionTable.PSVersion 확인. 안전하게 A; if ($?) { B } 권장.' });
-  }
-  return { shell, psVersion: psVer, issues };
-}
+// _shellGuardAnalyze → lib/analyzers.js (1.9.304 UR-0025)
 function _shellFailuresPath(root) { return path.join(absRoot(root), '.harness', 'shell-failures.json'); }
 function _loadShellFailures(root) {
   try { const f = _shellFailuresPath(root); if (!exists(f)) return { failures: [] }; const j = JSON.parse(read(f)); return j && Array.isArray(j.failures) ? j : { failures: [] }; } catch { return { failures: [] }; }
@@ -9435,17 +9407,7 @@ function reuseMapCmd(root) {
 // "src/foo.js + 5개 테스트 (54/54 통과)" 같은 주장을 파싱해 실제 파일/카운트 확인
 // 1.9.287 (Codex 리뷰 수렴): evidence 완전성 평가 — "테스트 통과만으로 done" 차단.
 //   done 주장은 (a) 수정 파일 경로 (b) 테스트명/개수 가 evidence 에 있어야 신뢰 가능. 순수 함수(selftest).
-function _evidenceQuality(evidence) {
-  const e = String(evidence || '');
-  const hasFile = /(?:[A-Za-z][\w-]*[\/\\])?[A-Za-z][\w./\\-]*\.(?:js|ts|tsx|jsx|mjs|cjs|py|go|rs|rb|kt|cs|gd|java|php|swift|c|cpp|h|html|css|scss|vue|svelte|json|yaml|yml|toml|md|sql|sh)\b/i.test(e);
-  const hasTest = /(\d+)\s*(?:\/\s*\d+\s*)?(?:통과|passed|passing|개\s*테스트)|\btests?\b\s*[:=]?\s*\d|Tests?:\s*\d|\b\d+\s*tests?\b/i.test(e);
-  const hasLog = /Exit\s*[:=]|exit\s*code|Command\s*[:=]|npm\s+(?:test|run)|pytest|cargo\s+test|go\s+test/i.test(e);
-  const missing = [];
-  if (!hasFile) missing.push('수정 파일 경로');
-  if (!hasTest) missing.push('테스트명/개수');
-  if (!hasLog) missing.push('실행 로그(Command/Exit)');
-  return { hasFile, hasTest, hasLog, ok: hasFile && hasTest, missing };
-}
+// _evidenceQuality → lib/analyzers.js (1.9.304 UR-0025)
 // 1.9.302 (UR-0042, 외부리뷰 Opus G-1): git 변경 파일 집합 — verify-claim 시맨틱 교차검증용.
 //   working tree(staged/unstaged/untracked) + 직전 커밋(HEAD~1..HEAD) 변경을 합쳐, "주장한 파일이 실제로 변경됐는가" 판정.
 //   git repo 아니거나 git 미설치면 null(검증 불가 → 페널티 X). 경로는 root-relative forward-slash.
@@ -9467,12 +9429,7 @@ function _gitChangedFiles(root) {
   } catch { return null; }
 }
 // 주장 파일이 git 변경 집합에 있는지(상대경로 prefix 차이 허용).
-function _claimFileInGit(claimed, gitSet) {
-  if (!gitSet) return null;
-  const c = String(claimed).replace(/\\/g, '/').replace(/^\.\//, '');
-  for (const g of gitSet) { if (g === c || g.endsWith('/' + c) || c.endsWith('/' + g)) return true; }
-  return false;
-}
+// _claimFileInGit → lib/analyzers.js (1.9.304 UR-0025)
 function verifyClaimCmd(root, taskId) {
   root = absRoot(root);
   if (!taskId) return fail('verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008');
@@ -18497,19 +18454,7 @@ function reuseCheckCmd(root, feature, opts = {}) {
 //   "설치한 스킬이 코딩 성능/정확도에 긍정 영향?" — 무거운 벤치 harness 가 아니라, 기존 데이터
 //   (skill 사용 빈도 + review-evidence 검증 통과율)를 상관(인과 아님)으로 advisory 제시. offline.
 // review-evidence.md 파싱 (순수) — 검증 항목 수 + pass/fail 추정 (Exit 0 / 'PASS' vs 'fail'/Exit !=0).
-function _parseEvidenceStats(text) {
-  const t = String(text || '');
-  const blocks = t.split(/\n(?=## )/).filter(b => /Command:|Exit:|verify|test/i.test(b));
-  let pass = 0, fail = 0;
-  for (const b of blocks) {
-    const exitM = b.match(/Exit:\s*(-?\d+)/i);
-    if (exitM) { (parseInt(exitM[1], 10) === 0 ? pass++ : fail++); continue; }
-    if (/\bPASS\b|통과|성공|✓/i.test(b)) pass++;
-    else if (/\bFAIL\b|실패|오류|error|✗/i.test(b)) fail++;
-  }
-  const entries = blocks.length;
-  return { entries, pass, fail, rate: (pass + fail) ? Math.round(pass / (pass + fail) * 100) : null };
-}
+// _parseEvidenceStats → lib/analyzers.js (1.9.304 UR-0025)
 function skillImpactCmd(root) {
   root = absRoot(root || process.cwd());
   const json = has('--json');

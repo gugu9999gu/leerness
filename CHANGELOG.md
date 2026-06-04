@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.304 — 2026-06-04 — UR-0025 (6단계): 순수 분석/검증 함수 → lib/analyzers.js 모듈 분리
+
+**🧩 모놀리스 분리 계속 — 순수 분석/검증 함수 4종을 비파괴 분리. lib 6모듈 체제(630줄 외부화).**
+
+### 배경
+외부 리뷰 핵심(UR-0038~0043) 완료 후, 두 리뷰 공통 지적인 단일 대형 파일을 계속 점진 분리. 데이터 카탈로그(1~5단계) 다음으로 **순수 함수**(부작용 0, 입력→출력) 클러스터를 분리.
+
+### 구현 (UR-0025 6단계)
+1. **`lib/analyzers.js` 신설** — 순수 분석/검증 함수 4종(62줄):
+   - `_evidenceQuality`(evidence 완전성: 파일/테스트/로그 근거)
+   - `_parseEvidenceStats`(review-evidence pass/fail 집계)
+   - `_shellGuardAnalyze`(셸 호환성 6규칙 정적 분석)
+   - `_claimFileInGit`(verify-claim git 교차검증 매칭)
+2. **비파괴 require-based 분리** — verify-claim/shell-guard/review-evidence 소비처는 동일 바인딩. 모두 순수(내부 의존 0) 검증.
+3. **harness.js 21686→21630줄**. lib 6모듈: pure-utils+agent-registry+role-catalog+catalogs+mcp-tools+analyzers = 630줄 외부화.
+4. selftest 51→52 (4함수 동일참조 단일출처 + 인라인 제거) · e2e 248→249 (모듈 standalone + shell-guard 동작 회귀).
+
+### 검증
+- **selftest 52/52 PASS** · **E2E 249/249 PASS** (회귀 0).
+- 기존 selftest(_evidenceQuality/_parseEvidenceStats/_shellGuardAnalyze ×2/_claimFileInGit)가 추출 정합성 즉시 검증.
+- `shell-guard "a && b" --json` 정상 동작(모듈 분리 후 회귀 없음).
+
 ## 1.9.303 — 2026-06-04 — UR-0043: 상태 파일 lost-update 락 (외부 AI 리뷰 — 멀티에이전트 안전 완성)
 
 **🔐 원자적 쓰기(UR-0038)가 막지 못한 동시 read-modify-write lost-update를 advisory 락으로 차단. Codex/Opus가 지적한 "상태 쓰기에 락 0건" 해소 — 멀티에이전트 동시 쓰기 안전성 완성.**
