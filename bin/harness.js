@@ -12,7 +12,7 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.301';
+const VERSION = '1.9.302';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3037,6 +3037,7 @@ function _selfTestCases() {
     { name: '_scrubTestEnv: npm test 시크릿 차단(_scrubEnv는 release 토큰 유지) (UR-0039 외부리뷰 1.9.299)', run: () => { const o = { N: process.env.NPM_TOKEN, L: process.env.LEERNESS_NPM_TOKEN }; process.env.NPM_TOKEN = 'sec1'; process.env.LEERNESS_NPM_TOKEN = 'sec2'; const base = _scrubEnv(); const test = _scrubTestEnv(); const r = base.NPM_TOKEN === 'sec1' && base.LEERNESS_NPM_TOKEN === 'sec2' && !test.NPM_TOKEN && !test.LEERNESS_NPM_TOKEN && !!test.PATH; if (o.N === undefined) delete process.env.NPM_TOKEN; else process.env.NPM_TOKEN = o.N; if (o.L === undefined) delete process.env.LEERNESS_NPM_TOKEN; else process.env.LEERNESS_NPM_TOKEN = o.L; return r; } },
     { name: 'shell 주입 표면 제거: fetchNpmLatest execFile+pkg검증 + runCommandSafe argList 인용 (UR-0040 외부리뷰 1.9.300)', run: () => { const src = read(__filename); const npmFix = /cp\.execFile\('npm', \['view', pkg, 'version'\]/.test(src) && !/cp\.exec\(.npm view \$\{pkg\}/.test(src) && /패키지명 charset/.test(src); const argFix = /argList\.map\(_shellQuoteArg\)\.join/.test(src); return npmFix && argFix && typeof _shellQuoteArg === 'function'; } },
     { name: 'MCP requiredTier 메타데이터 + 정책 minTier 게이트 (UR-0041 외부리뷰 1.9.301)', run: () => { const T = require('../lib/mcp-tools'); const allValid = T.length >= 81 && T.every(t => PERMISSION_TIERS.includes(t.requiredTier)); const get = n => (T.find(t => t.name === n) || {}).requiredTier; const classOk = get('leerness_state_record') === 'safe-write' && get('leerness_provider_add') === 'safe-write' && get('leerness_web') === 'network' && get('leerness_handoff') === 'read-only' && get('leerness_audit') === 'read-only'; const src = read(__filename); const gateOk = /_tierRank\(minTier\) > _tierRank\(required\)/.test(src) && /_policyEnforce\(targetPath, cliArgs\.join\(' '\), _toolDef/.test(src); return allValid && classOk && gateOk; } },
+    { name: 'verify-claim git diff 시맨틱 교차검증: _gitChangedFiles/_claimFileInGit + strict FAIL 통합 (UR-0042 외부리뷰 1.9.302)', run: () => { const fnOk = typeof _gitChangedFiles === 'function' && typeof _claimFileInGit === 'function'; const matchOk = _claimFileInGit('src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('./src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('other.js', new Set(['src/api.js'])) === false && _claimFileInGit('x', null) === null; const src = read(__filename); const wired = /git diff 교차검증/.test(src) && /\|\| !gitClaimOk/.test(src) && /_gitChangedFiles\(root\)/.test(src); return fnOk && matchOk && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -9404,6 +9405,33 @@ function _evidenceQuality(evidence) {
   if (!hasLog) missing.push('실행 로그(Command/Exit)');
   return { hasFile, hasTest, hasLog, ok: hasFile && hasTest, missing };
 }
+// 1.9.302 (UR-0042, 외부리뷰 Opus G-1): git 변경 파일 집합 — verify-claim 시맨틱 교차검증용.
+//   working tree(staged/unstaged/untracked) + 직전 커밋(HEAD~1..HEAD) 변경을 합쳐, "주장한 파일이 실제로 변경됐는가" 판정.
+//   git repo 아니거나 git 미설치면 null(검증 불가 → 페널티 X). 경로는 root-relative forward-slash.
+function _gitChangedFiles(root) {
+  try {
+    const st = cp.spawnSync('git', ['-C', root, 'status', '--porcelain', '--untracked-files=all'], { encoding: 'utf8', timeout: 10000 });
+    if (st.status !== 0) return null;  // git repo 아님 / git 없음
+    const out = new Set();
+    for (let line of (st.stdout || '').split('\n')) {
+      if (line.length < 4) continue;
+      let p = line.slice(3).trim();           // 'XY ' 상태 프리픽스 제거
+      if (p.includes(' -> ')) p = p.split(' -> ').pop();  // rename
+      p = p.replace(/^"|"$/g, '');            // quoted path
+      if (p) out.add(p.replace(/\\/g, '/'));
+    }
+    const df = cp.spawnSync('git', ['-C', root, 'diff', '--name-only', 'HEAD~1', 'HEAD'], { encoding: 'utf8', timeout: 10000 });
+    if (df.status === 0) for (let line of (df.stdout || '').split('\n')) { line = line.trim(); if (line) out.add(line.replace(/\\/g, '/')); }
+    return out;
+  } catch { return null; }
+}
+// 주장 파일이 git 변경 집합에 있는지(상대경로 prefix 차이 허용).
+function _claimFileInGit(claimed, gitSet) {
+  if (!gitSet) return null;
+  const c = String(claimed).replace(/\\/g, '/').replace(/^\.\//, '');
+  for (const g of gitSet) { if (g === c || g.endsWith('/' + c) || c.endsWith('/' + g)) return true; }
+  return false;
+}
 function verifyClaimCmd(root, taskId) {
   root = absRoot(root);
   if (!taskId) return fail('verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008');
@@ -9450,6 +9478,12 @@ function verifyClaimCmd(root, taskId) {
 
   // 실제 파일 존재 검사
   const fileChecks = files.map(f => ({ file: f, exists: exists(path.join(root, f)) }));
+  // 1.9.302 (UR-0042, 외부리뷰 Opus G-1): git diff 시맨틱 교차검증 — 주장한 파일이 실제로 변경됐는가.
+  //   "파일 존재"만으로는 "테스트만 통과하면 done" 허위완료를 못 막음(Opus). git working tree+직전커밋 변경과 대조.
+  const gitChanged = _gitChangedFiles(root);  // Set | null(git repo 아님 → 검증 불가)
+  const gitApplicable = !!gitChanged && gitChanged.size > 0 && files.length > 0;
+  const claimedInGit = gitApplicable ? files.filter(f => _claimFileInGit(f, gitChanged)) : [];
+  const claimedNotInGit = gitApplicable ? files.filter(f => !_claimFileInGit(f, gitChanged)) : [];
   // 테스트 카운트: tests/test.js의 check( 또는 it( 또는 test( 개수
   let actualTestCount = null;
   const candidateTestFiles = ['tests/test.js', 'test/test.js', 'tests/index.js'];
@@ -9596,6 +9630,19 @@ function verifyClaimCmd(root, taskId) {
       for (const s of optimismSuspects) log(`    · [${s.kind}] ${s.label}: evidence에 주장 있는데 코드에 호출 흔적 없음`);
     }
   }
+  // 1.9.302 (UR-0042): git diff 시맨틱 교차검증 — 주장한 파일이 실제 git 변경(working tree+직전커밋)에 있는가.
+  //   advisory 기본 표시. --strict-claims 시 강한 불일치(변경 있는데 주장 파일이 하나도 git 변경에 없음)는 FAIL 기여.
+  let gitClaimOk = true;
+  if (gitChanged === null) {
+    log(`  - git diff 교차검증: ⊘ skip (git repo 아님 — 검증 불가)`);
+  } else if (!gitApplicable) {
+    log(`  - git diff 교차검증: ⊘ skip (working tree 변경 0 또는 주장 파일 0 — 이미 커밋됐거나 해당 없음)`);
+  } else {
+    const strongMismatch = claimedInGit.length === 0;  // 변경 있는데 주장 파일이 git 변경에 전무
+    log(`  - git diff 교차검증: ${strongMismatch ? '⚠ 불일치' : '✓'} 주장 ${files.length}개 중 실제 변경 ${claimedInGit.length}개${claimedNotInGit.length ? ` · git 변경에 없음: ${claimedNotInGit.slice(0, 5).join(', ')}` : ''}`);
+    if (strongMismatch) log(`    · 주장한 파일이 working tree/직전커밋 변경에 전무 — 변경이 더 오래전 커밋이거나, 실제로 변경 안 됐을 수 있음(허위완료 의심)`);
+    if (has('--strict-claims') && strongMismatch) gitClaimOk = false;  // strict 시 강한 불일치는 FAIL
+  }
   // 1.9.287 (Codex 리뷰 수렴): --require-evidence — done 주장의 evidence 완전성(파일+테스트) 강제.
   //   "테스트 통과만으로 done" 차단 — Codex 가 발견한 허위 완료 통과 갭 보강.
   const reqEvidence = has('--require-evidence');
@@ -9607,7 +9654,7 @@ function verifyClaimCmd(root, taskId) {
     log(`  - evidence 완전성 (--require-evidence): ${evidenceQualityOk ? '✓ pass (파일+테스트 근거 있음)' : `✗ FAIL (누락: ${evq.missing.join(', ')})`}`);
     if (!evidenceQualityOk) log(`    · done 주장은 수정 파일 경로 + 테스트명/개수 가 evidence 에 있어야 함 (테스트 통과만으로는 불충분)`);
   }
-  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (has('--strict-claims') && !strictOk) || !evidenceQualityOk;
+  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (has('--strict-claims') && !strictOk) || !evidenceQualityOk || !gitClaimOk;
   // 1.9.287: 정직한 한계 고지 — 테스트 통과 ≠ 의미적 구현 정확성
   if (has('--strict-claims') || reqEvidence) {
     log('');

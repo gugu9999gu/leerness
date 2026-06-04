@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.302 — 2026-06-04 — UR-0042: verify-claim git diff 시맨틱 교차검증 (외부 AI 리뷰 R3, Opus G-1)
+
+**🔍 Opus가 "가장 전략적 약점"으로 꼽은 거짓완료 검증의 실질화 — "파일 존재 + N passed" 문자열매칭에 git diff 교차검증 추가: 주장한 파일이 실제로 변경됐는가를 git working tree + 직전 커밋으로 대조.**
+
+### 배경 (Opus G-1)
+verify-claim 의 차별점은 "거짓 완료 차단"인데, 기존 메커니즘은 evidence 텍스트에서 파일경로 추출 → `fs.existsSync` (존재만 확인) + "N passed" 정규식 파싱뿐. **변경 내용이 실제로 일어났는지는 검증 안 함** → "테스트 통과 = 구현 완료" 오인 가능. Opus: "파일이 존재하는가 + 테스트가 통과한다고 적혀있는가만 검증."
+
+### 구현 (UR-0042)
+1. **`_gitChangedFiles(root)`** — git working tree(staged/unstaged/untracked, `status --porcelain`) + 직전 커밋(`diff HEAD~1 HEAD`) 변경 파일 집합. git repo 아니면 null(검증 불가 → 페널티 없음).
+2. **`_claimFileInGit(claimed, gitSet)`** — 주장 파일이 git 변경에 있는지(상대경로 prefix 차이 허용).
+3. **verify-claim 종합에 git 교차검증** — 주장 N개 중 실제 변경 X개 표시. advisory 기본. `--strict-claims` 시 **강한 불일치**(working tree 변경 있는데 주장 파일이 git 변경에 전무)는 `overallFail` 기여(exit 1).
+4. 정직한 한계 고지 유지(시맨틱 정확성까지는 보장 X, 단 "주장↔실제 변경" 링크는 검증). selftest 49→50 · e2e 246→247.
+
+### 검증
+- **selftest 50/50 PASS** · **E2E 247/247 PASS** (회귀 0).
+- 실측(실 git repo): src/api.js 수정 후 "src/api.js 수정" 주장 → git 교차검증 **✓** · 미변경 old.js 주장 + `--strict-claims` → **⚠ 불일치 + exit 1**. git repo 아니면 skip(페널티 없음).
+- false-positive 완화: working tree 변경 0(이미 커밋/미변경) 시 skip, 직전 커밋도 변경 집합에 포함.
+
 ## 1.9.301 — 2026-06-04 — UR-0041 (1단계): MCP 도구 requiredTier 메타데이터 + 정책 메타데이터 게이트 (R2)
 
 **🛡 외부 AI 리뷰 3종이 공통 지적한 "정책이 regex라 취약 + 도구 정의/dispatch/tier 3중 분산"의 핵심부 해소 — 81개 MCP 도구에 `requiredTier` 메타데이터를 부여하고, 정책 게이트가 regex와 메타데이터 중 더 엄격한 tier로 판정.**

@@ -3374,5 +3374,33 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.302 회귀 (UR-0042 외부리뷰): verify-claim git diff 시맨틱 교차검증 (변경 파일 주장 ✓ / 미변경 주장 ⚠ + strict FAIL)
+total++;
+{
+  let ok = false;
+  try {
+    const vDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc-'));
+    const git = (...a) => cp.spawnSync('git', ['-C', vDir, ...a], { encoding: 'utf8', timeout: 15000 });
+    const gi = git('init');
+    if (gi.status !== 0) throw new Error('git 없음');  // git 미설치 환경 → skip(아래 catch 로 ok=false 방지 위해 통과 처리)
+    git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
+    cp.spawnSync(process.execPath, [CLI, 'init', vDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    fs.mkdirSync(path.join(vDir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(vDir, 'src', 'api.js'), 'v1'); fs.writeFileSync(path.join(vDir, 'old.js'), 'old');
+    git('add', '-A'); git('commit', '-m', 'init');
+    fs.writeFileSync(path.join(vDir, 'src', 'api.js'), 'v2 changed');  // working tree 변경
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', '작업1', '--path', vDir, '--status', 'done', '--evidence', 'src/api.js 수정'], { encoding: 'utf8', timeout: 15000 });
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', '작업2', '--path', vDir, '--status', 'done', '--evidence', 'old.js 수정'], { encoding: 'utf8', timeout: 15000 });
+    const r1 = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--path', vDir], { encoding: 'utf8', timeout: 20000 });
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0003', '--path', vDir, '--strict-claims'], { encoding: 'utf8', timeout: 20000 });
+    const changedClaimOk = /git diff 교차검증: ✓/.test(r1.stdout || '');   // 변경 파일 주장 → 매칭
+    const mismatchDetected = /git diff 교차검증: ⚠ 불일치/.test(r2.stdout || '') && r2.status === 1;  // 미변경 주장 + strict → FAIL
+    ok = changedClaimOk && mismatchDetected;
+    fs.rmSync(vDir, { recursive: true, force: true });
+  } catch (e) { if (/git 없음/.test(e.message)) { ok = true; console.log('  (git 미설치 — git 교차검증 e2e skip)'); } }
+  console.log(ok ? '✓ B(1.9.302) verify-claim git diff 교차검증: 변경파일 주장 ✓ / 미변경 주장 ⚠ strict FAIL (UR-0042)' : '✗ verify-claim git 교차검증 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
