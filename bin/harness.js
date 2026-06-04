@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.311';
+const VERSION = '1.9.312';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3083,6 +3083,7 @@ function _selfTestCases() {
     { name: 'verify-claim: done 주장 evidence 기본강제 + --lenient + MCP/json 도달 (UR-0048 설치리뷰 critical 1.9.309)', run: () => { const src = read(__filename); const def = /const mustHaveEvidence = !has\('--lenient'\) && \(isDoneClaim \|\| has\('--require-evidence'\)\)/.test(src); const threshold = /has\('--require-evidence'\) \? evq\.ok : \(evq\.hasFile \|\| evq\.hasTest \|\| evq\.hasLog\)/.test(src); const jsonWired = /evidenceComplete:/.test(src) && /!evidenceQualityOk\) return process\.exit\(1\)/.test(src); const mcpLenient = !!require('../lib/mcp-tools').find(t => t.name === 'leerness_verify_claim').inputSchema.properties.lenient; return def && threshold && jsonWired && mcpLenient; } },
     { name: '입력 스키마 검증: task status/rule trigger 무효값 거부 + every-round 보존 (UR-0046 설치리뷰 1.9.310)', run: () => { const src = read(__filename); const sets = TASK_STATUSES.has('done') && TASK_STATUSES.has('in-progress') && !TASK_STATUSES.has('nonsense') && RULE_TRIGGERS.has('every-round') && RULE_TRIGGERS.has('every-update') && !RULE_TRIGGERS.has('not-a-trigger'); const helper = typeof _validateChoice === 'function' && _validateChoice('done', TASK_STATUSES, 'x') === true; const wired = /_validateChoice\(arg\('--status', null\), TASK_STATUSES/.test(src) && /_validateChoice\(trigger, RULE_TRIGGERS/.test(src); return sets && helper && wired; } },
     { name: 'init 가드: 미초기화 write 차단 + 다중마커 판별 + --force 우회 (UR-0047 설치리뷰 1.9.311)', run: () => { const src = read(__filename); const fnOk = typeof _isInitialized === 'function' && typeof _requireInit === 'function'; const liveOk = _isInitialized('.') === true; const emptyOk = _isInitialized(path.join(os.tmpdir(), '__leerness_noinit_marker__')) === false; const wired = ["task add", "task update", "plan add", "decision add", "rule add", "lesson save", "brief set"].every(l => src.includes(`_requireInit(root, '${l}')`)) && !src.includes("_requireInit(root, 'state " + "start')"); const force = /if \(_isInitialized\(root\) \|\| has\('--force'\)\) return true/.test(src); return fnOk && liveOk && emptyOk && wired && force; } },
+    { name: 'secret 스캐너 현대 키: OpenAI proj/svcacct·Anthropic api03(_)·GitHub 변종·Stripe·npm 검출 + 오탐 가드 (UR-0050 설치리뷰 1.9.312)', run: () => { const hit = (s) => SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const named = (s, nm) => SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s) && p.name === nm; }); const A = 'A'.repeat(40); const projKey = 'sk-' + 'proj-' + A + '_' + A; const svcKey = 'sk-' + 'svcacct-' + A; const antKey = 'sk-' + 'ant-api03-' + A + '_' + A; const ghoKey = 'gho_' + 'a1B2'.repeat(9); const stripeKey = 'sk_' + 'live_' + A; const npmKey = 'npm_' + 'a1B2'.repeat(9); const asiaKey = 'ASIA' + 'ABCD1234EFGH5678'; const legacy = 'sk-' + A; const hits = hit(projKey) && hit(svcKey) && hit(antKey) && hit(ghoKey) && hit(stripeKey) && hit(npmKey) && hit(asiaKey) && hit(legacy); const names = named(projKey, 'OpenAI project/service key') && named(antKey, 'Anthropic API key') && named(stripeKey, 'Stripe secret key') && named(npmKey, 'npm token'); const clean = !hit('const userName = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return hits && names && clean; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -7338,13 +7339,21 @@ function audit(root, opts = {}) {
   if (failures) process.exitCode = 1;
 }
 
+// 1.9.312 (UR-0050, 설치리뷰 3중수렴): secret 스캐너 현대 키 패턴 보강.
+//   배경: 기존 OpenAI 패턴 `sk-[A-Za-z0-9]{32,}` 은 하이픈에서 끊겨 sk-proj-/sk-svcacct- (modern 프로젝트/서비스 키)를 놓침.
+//         Anthropic 패턴은 `_` 미포함 + 후행 \b 로 실제 sk-ant-api03- 키(언더스코어 사용)를 놓침.
+//   보강: OpenAI modern(proj/svcacct/admin) · GitHub 변종(gho_/ghu_/ghs_/ghr_) · Stripe · npm · Google OAuth · AWS 임시(ASIA).
 const SECRET_PATTERNS = [
-  { name: 'AWS Access Key', re: /\bAKIA[0-9A-Z]{16}\b/g },
-  { name: 'GitHub PAT', re: /\bghp_[A-Za-z0-9]{36}\b/g },
+  { name: 'AWS Access Key', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },                       // ASIA=임시 자격증명 추가
+  { name: 'GitHub token', re: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/g },                        // ghp_/gho_/ghu_/ghs_/ghr_ 통합
   { name: 'GitHub fine-grained PAT', re: /\bgithub_pat_[A-Za-z0-9_]{40,}\b/g },
-  { name: 'OpenAI API key', re: /\bsk-[A-Za-z0-9]{32,}\b/g },
-  { name: 'Anthropic API key', re: /\bsk-ant-[A-Za-z0-9-]{20,}\b/g },
+  { name: 'OpenAI project/service key', re: /\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}/g }, // modern (하이픈/언더스코어 포함)
+  { name: 'OpenAI API key', re: /\bsk-[A-Za-z0-9]{32,}\b/g },                             // legacy
+  { name: 'Anthropic API key', re: /\bsk-ant-[A-Za-z0-9_-]{20,}/g },                      // _ 포함 + 후행 \b 제거 (실제 키 호환)
+  { name: 'Stripe secret key', re: /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,}\b/g },
+  { name: 'npm token', re: /\bnpm_[A-Za-z0-9]{36}\b/g },
   { name: 'Google API key', re: /\bAIza[0-9A-Za-z_\-]{35}\b/g },
+  { name: 'Google OAuth token', re: /\bya29\.[A-Za-z0-9_-]{20,}/g },
   { name: 'Slack token', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g },
   { name: 'Generic private key', re: /-----BEGIN (?:RSA |OPENSSH |EC |DSA |PGP )?PRIVATE KEY-----/g },
   { name: 'Hardcoded password assignment', re: /\b(?:password|passwd|pwd|secret|api_key|apikey)\s*[:=]\s*["'][^"'\s]{6,}["']/gi },

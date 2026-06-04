@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.312 — 2026-06-04 — UR-0050: secret 스캐너 현대 키 패턴 (설치리뷰 3중수렴 high)
+
+**🔒 `scan secrets` 가 modern OpenAI/Anthropic 키를 놓치던 보안 결함 수정 — 노출돼도 탐지 안 되던 위험.**
+
+### 배경 (설치리뷰)
+실측: 가짜 키 7종 스캔 시 **legacy `sk-...` 1건만 검출**, 나머지 전부 통과 —
+- `sk-proj-...`/`sk-svcacct-...` (modern OpenAI 프로젝트/서비스 키): 기존 패턴 `sk-[A-Za-z0-9]{32,}` 이 **하이픈에서 끊겨** 미검출.
+- `sk-ant-api03-..._...` (실제 Anthropic 키): 기존 `sk-ant-[A-Za-z0-9-]{20,}\b` 가 **언더스코어 미포함 + 후행 `\b`** 로 실제 키(언더스코어 사용)를 미검출.
+- `gho_`/`ghu_`/`ghs_`/`ghr_` (GitHub PAT 외 변종), Stripe, npm, Google OAuth, AWS 임시(ASIA): 패턴 부재.
+
+### 구현 (UR-0050)
+`SECRET_PATTERNS` 9종 → 13종 확장:
+1. **OpenAI modern** `sk-(proj|svcacct|admin)-[A-Za-z0-9_-]{20,}` (신규) + legacy 유지.
+2. **Anthropic** 패턴 `_` 포함 + 후행 `\b` 제거 — 실제 `sk-ant-api03-` 키 호환.
+3. **GitHub** `gh[pousr]_` 통합 (ghp_/gho_/ghu_/ghs_/ghr_).
+4. **신규**: Stripe(`sk_|rk_(live|test)_`), npm(`npm_`), Google OAuth(`ya29.`), AWS 임시(`ASIA`).
+5. selftest 59→60 · e2e 256→257.
+
+### 검증
+- **selftest 60/60 PASS** · **E2E 257/257 PASS** (회귀 0).
+- 실측: 7종 키 모두 검출 + exit 1 · clean dir → exit 0(오탐 0) · **repo 자체 `scan secrets .` clean**(self-flag 없음).
+- false-positive 가드: `userName`/URL 등 평범한 문자열 미검출.
+
 ## 1.9.311 — 2026-06-04 — UR-0047: init 가드 (설치리뷰 3중수렴 high)
 
 **🛡 미초기화 디렉토리에서 write 명령이 부분 `.harness`(progress-tracker·cache·runs)만 생성해 "반쪽 설치" 상태를 만들던 결함 수정.**

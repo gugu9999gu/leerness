@@ -3639,5 +3639,35 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.312 회귀 (UR-0050 설치리뷰): secret 스캐너 현대 키 — sk-proj-/sk-ant-api03-(_)/gho_/Stripe/npm 검출 + exit 1
+//   주의: e2e.js 는 scan 대상이라 키는 문자열 연결로 구성(리터럴 금지 — 자기 repo scan 오탐 방지)
+total++;
+{
+  let ok = false;
+  try {
+    const sd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-secmod-'));
+    const A = 'A'.repeat(40);
+    const lines = [
+      'const a = "' + 'sk-' + 'proj-' + A + '_' + A + '";',          // modern OpenAI project (기존 패턴 놓침)
+      'const b = "' + 'sk-' + 'ant-api03-' + A + '_' + A + '";',     // Anthropic api03 (언더스코어 — 기존 놓침)
+      'const c = "' + 'gho_' + 'a1B2'.repeat(9) + '";',              // GitHub OAuth token (ghp_ 외 변종)
+      'const d = "' + 'sk_' + 'live_' + A + '";',                    // Stripe
+      'const e = "' + 'npm_' + 'a1B2'.repeat(9) + '";',             // npm token
+    ];
+    fs.writeFileSync(path.join(sd, 'cfg.js'), lines.join('\n') + '\n');
+    const r = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', sd], { encoding: 'utf8', timeout: 20000 });
+    const out = r.stdout || '';
+    ok = r.status === 1
+      && /OpenAI project\/service key/.test(out)
+      && /Anthropic API key/.test(out)
+      && /GitHub token/.test(out)
+      && /Stripe secret key/.test(out)
+      && /npm token/.test(out);
+    fs.rmSync(sd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.312) secret 스캐너 현대 키: sk-proj/sk-ant-api03(_)/gho_/Stripe/npm 검출 + exit 1 (UR-0050)' : '✗ secret 현대 키 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
