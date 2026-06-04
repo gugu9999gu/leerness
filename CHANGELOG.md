@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.309 — 2026-06-04 — UR-0048: verify-claim 거짓완료 차단 기본화 (설치리뷰 Opus critical)
+
+**🔴 제품 핵심 가치(거짓완료 차단)가 기본값·MCP 에서 무력하던 자기모순 수정 — 증거 0 인 done 주장이 기본 통과하고 MCP 로는 강한 게이트에 도달조차 못 하던 critical 결함 해소.**
+
+### 배경 (clean-install 리뷰 Opus G-1, 직접 재확인)
+`verify-claim` 의 1번 셀링포인트인데, 증거 0 done 이 **기본 exit 0**(`fileChecks.every([])` 공허참 + `--require-evidence` 가 기본 OFF). MCP `leerness_verify_claim` 은 `requireEvidence` 미노출 → 외부 에이전트가 강한 게이트 **호출 불가**. `lazy detect` 는 잡는데 verify-claim 은 통과시키는 자기모순.
+
+### 구현 (UR-0048)
+1. **done/완료 주장 evidence 기본 강제** — `mustHaveEvidence = !--lenient && (done주장 || --require-evidence)`. 증거(파일·테스트·로그) 한 줄도 없는 done 은 기본 **FAIL(exit 1)**. CLI/json/MCP **세 경로 모두** 적용(이전엔 pretty 만, 그것도 플래그 시에만).
+2. **비례적 임계** — 기본은 "근거 일부(파일·테스트·로그 중 하나)"만 요구(Opus 의 증거0 케이스만 차단, 과탐 방지). `--require-evidence`(명시)는 엄격(파일+테스트, 1.9.287). `--lenient` opt-out.
+3. **MCP `leerness_verify_claim`** — done 기본 강제로 강한 게이트가 자동 도달 + `lenient` 인자 노출. json `verdict.evidenceComplete` + `evidence{required,...}` 추가.
+4. selftest 56→57 · e2e 253→254 (FILE_RE 추출 테스트 2건은 `--lenient` 로 게이트와 분리).
+
+### 검증
+- **selftest 57/57 PASS** · **E2E 254/254 PASS** (회귀 0).
+- 실측: 증거0 done → **exit 1**(CLI) + **isError**(MCP) · `--lenient` → exit 0 · 증거+파일존재 done → exit 0(회귀 0) · 비-done(requested) → 강제 안 함.
+- 행동 변경 안전 처리: 비례 임계로 과탐 방지 + `--lenient` opt-out + 기존 파일추출 테스트 2건 분리.
+
 ## 1.9.308 — 2026-06-04 — UR-0055 (2단계 완료): 개발 방향 이력 + context/MCP 청사진 통합
 
 **📘 프로젝트 청사진 기능 완성 — 개발 방향 변경/확대 이력 누적 + 에이전트가 청사진을 1콜로 회수(context/MCP). 사용자 요청 "개발 방향이 변경/확대될 때 업데이트" 완전 충족.**

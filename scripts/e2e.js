@@ -559,7 +559,7 @@ total++;
   fs.writeFileSync(path.join(tmpG, 'scripts/network.gd'), 'extends Node\n');
   fs.appendFileSync(path.join(tmpG, '.harness/progress-tracker.md'),
     '| T-0020 | done | Godot 클라 | project.godot + scenes/main.tscn + scripts/network.gd | next | 2026-05-14 |\n');
-  const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0020', '--path', tmpG], { encoding: 'utf8', timeout: 15000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0020', '--path', tmpG, '--lenient'], { encoding: 'utf8', timeout: 15000 });  // FILE_RE 추출 테스트 — evidence 게이트와 분리(1.9.309)
   const ok = r.status === 0
     && /✓ project\.godot/.test(r.stdout)
     && /✓ scenes\/main\.tscn/.test(r.stdout)
@@ -579,7 +579,7 @@ total++;
   fs.writeFileSync(path.join(tmpC, 'Cargo.lock'), '# lock\n');
   fs.appendFileSync(path.join(tmpC, '.harness/progress-tracker.md'),
     '| T-0030 | done | 설정 | export_presets.cfg + config.ini + Cargo.lock | next | 2026-05-14 |\n');
-  const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0030', '--path', tmpC], { encoding: 'utf8', timeout: 15000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0030', '--path', tmpC, '--lenient'], { encoding: 'utf8', timeout: 15000 });  // FILE_RE 추출 테스트 — evidence 게이트와 분리(1.9.309)
   const ok = r.status === 0
     && /✓ export_presets\.cfg/.test(r.stdout)
     && /✓ config\.ini/.test(r.stdout)
@@ -3559,6 +3559,32 @@ total++;
     fs.rmSync(b2, { recursive: true, force: true });
   } catch {}
   console.log(ok ? '✓ B(1.9.308) brief 2단계: update --direction 이력누적 + context 통합 + MCP leerness_brief (UR-0055)' : '✗ brief 2단계 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.309 회귀 (UR-0048 설치리뷰 critical): verify-claim done 주장 evidence 기본강제 + --lenient + MCP 도달
+total++;
+{
+  let ok = false;
+  try {
+    const vc = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc48-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', vc, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    fs.mkdirSync(path.join(vc, 'src'), { recursive: true }); fs.writeFileSync(path.join(vc, 'src', 'api.js'), 'module.exports={};');
+    const ex = (...a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: vc, encoding: 'utf8', timeout: 20000 });
+    ex('task', 'add', '증거없는완료', '--path', vc, '--status', 'done');               // T-0002: 증거 0
+    ex('task', 'add', '증거있는완료', '--path', vc, '--status', 'done', '--evidence', 'src/api.js 수정, 8 tests 통과 (Exit: 0)');  // T-0003
+    ex('task', 'add', '진행중', '--path', vc);                                          // T-0004: requested
+    const noEv = ex('verify-claim', 'T-0002', '--path', vc).status === 1;              // 기본 거짓완료 차단
+    const lenient = ex('verify-claim', 'T-0002', '--path', vc, '--lenient').status === 0;  // opt-out
+    const withEv = ex('verify-claim', 'T-0003', '--path', vc).status === 0;            // 증거+파일 → 통과
+    const notDone = ex('verify-claim', 'T-0004', '--path', vc).status === 0;           // 비-done 강제 안함
+    // MCP 도 기본 강제 (증거0 done → isError)
+    const ml = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: vc, encoding: 'utf8', timeout: 15000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_verify_claim', arguments: { taskId: 'T-0002', path: vc } } }) + '\n' });
+    let mcpBlocks = false; try { mcpBlocks = JSON.parse(ml.stdout.split('\n').filter(Boolean)[0]).result.isError === true; } catch {}
+    ok = noEv && lenient && withEv && notDone && mcpBlocks;
+    fs.rmSync(vc, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.309) verify-claim 거짓완료 차단: 증거0 done 기본 FAIL + --lenient + 증거통과 + MCP 차단 (UR-0048)' : '✗ verify-claim 기본강제 실패');
   if (!ok) failed++;
 }
 

@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.308';
+const VERSION = '1.9.309';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3080,6 +3080,7 @@ function _selfTestCases() {
     { name: 'exit code 일관성: fail()→exitCode 1 + unknown 명령 안내 (UR-0045 설치리뷰 1.9.306)', run: () => { const src = read(__filename); return /function fail\(s\) \{ log\('✗ ' \+ s\); process\.exitCode = 1; \}/.test(src) && /알 수 없는 명령: \$\{cmd\}/.test(src) && /if \(cmd === 'help' \|\| cmd === 'commands'/.test(src); } },
     { name: 'brief: 프로젝트 청사진 set/show/export + README 개요 섹션 (UR-0055 사용자명시 1.9.307)', run: () => { const src = read(__filename); const fnOk = typeof briefCmd === 'function' && typeof _loadBrief === 'function' && typeof _briefBlueprint === 'function' && _BRIEF_FIELDS.length === 10; const b = { project: 'X', intro: 'i', purpose: 'p', problem: '', features: ['f1', 'f2'], stack: ['s'], architecture: '', users: [], success: [], nonGoals: [], currentState: '' }; const bp = _briefBlueprint('.', b); const bpOk = /Blueprint/.test(bp) && /소개 \(Intro\)/.test(bp) && /f1/.test(bp) && /신규 프로젝트 시작 가이드/.test(bp); const rb = _briefReadmeBlock(b); const rbOk = rb.includes(BRIEF_START) && rb.includes(BRIEF_END) && /프로젝트 개요/.test(rb) && /\*\*목적\*\*/.test(rb); return fnOk && bpOk && rbOk && /if \(cmd === 'brief'\)/.test(src); } },
     { name: 'brief 2단계: update --direction 이력 + MCP leerness_brief + context 통합 (UR-0055 1.9.308)', run: () => { const src = read(__filename); const b = { project: 'X', intro: '', purpose: '', problem: '', features: [], stack: [], architecture: '', users: [], success: [], nonGoals: [], currentState: '', directionHistory: ['2026-06-04: 확대'] }; const bpOk = /개발 방향 이력/.test(_briefBlueprint('.', b)) && /최근 개발 방향 변경/.test(_briefReadmeBlock(b)); const histWired = /sub === 'update'/.test(src) && /brief\.directionHistory \|\| \[\]\), `\$\{today\(\)\}/.test(src); const mcpOk = require('../lib/mcp-tools').some(t => t.name === 'leerness_brief'); const ctxOk = /brief: \{ intro:/.test(src); return bpOk && histWired && mcpOk && ctxOk; } },
+    { name: 'verify-claim: done 주장 evidence 기본강제 + --lenient + MCP/json 도달 (UR-0048 설치리뷰 critical 1.9.309)', run: () => { const src = read(__filename); const def = /const mustHaveEvidence = !has\('--lenient'\) && \(isDoneClaim \|\| has\('--require-evidence'\)\)/.test(src); const threshold = /has\('--require-evidence'\) \? evq\.ok : \(evq\.hasFile \|\| evq\.hasTest \|\| evq\.hasLog\)/.test(src); const jsonWired = /evidenceComplete:/.test(src) && /!evidenceQualityOk\) return process\.exit\(1\)/.test(src); const mcpLenient = !!require('../lib/mcp-tools').find(t => t.name === 'leerness_verify_claim').inputSchema.properties.lenient; return def && threshold && jsonWired && mcpLenient; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -9549,6 +9550,18 @@ function verifyClaimCmd(root, taskId) {
     }
   }
 
+  // 1.9.309 (UR-0048, 설치리뷰 Opus critical): done 주장은 evidence(파일+테스트) 기본 강제 — 거짓완료 차단을 기본값·MCP·json 모두에서 작동.
+  //   이전: --require-evidence 플래그 시에만 검사 → 증거0 done 이 기본 통과(fileChecks.every([])=공허참)했고 MCP 는 도달 불가했음.
+  //   이제 done/완료 주장은 기본 강제. opt-out: --lenient. 비-done 주장은 영향 없음.
+  const isDoneClaim = /done|완료|completed/i.test(row.status || '');
+  const evq = _evidenceQuality(evidence);
+  const mustHaveEvidence = !has('--lenient') && (isDoneClaim || has('--require-evidence'));
+  // 1.9.309: 기본 임계는 비례적 — 근거 일부(파일·테스트·로그 중 하나)만 있으면 통과(Opus 의 "증거 0" 만 차단).
+  //   --require-evidence(명시) 는 엄격(파일+테스트 모두, 1.9.287). 과탐 방지.
+  const evidenceQualityOk = !mustHaveEvidence || (has('--require-evidence') ? evq.ok : (evq.hasFile || evq.hasTest || evq.hasLog));
+  //   공허참("증거 0 done") 은 evidenceQualityOk 가 차단하므로 filesAllExist 는 표준 의미 유지(주장 파일들이 실제 존재하는가).
+  const filesAllExist = fileChecks.every(c => c.exists);
+
   if (has('--json')) {
     const out = {
       project: path.basename(root),
@@ -9556,9 +9569,11 @@ function verifyClaimCmd(root, taskId) {
       declared: { files: files.length, pass: declaredPass, testCount: declaredTestCount },
       actual: { fileChecks, testCount: actualTestCount },
       verdict: {
-        filesAllExist: fileChecks.every(c => c.exists),
-        testCountMatch: declaredTestCount == null || actualTestCount == null || actualTestCount >= declaredTestCount
-      }
+        filesAllExist,
+        testCountMatch: declaredTestCount == null || actualTestCount == null || actualTestCount >= declaredTestCount,
+        evidenceComplete: !mustHaveEvidence ? null : evq.ok
+      },
+      evidence: { required: mustHaveEvidence, ...evq }
     };
     if (runResult) {
       out.run = runResult;
@@ -9570,7 +9585,7 @@ function verifyClaimCmd(root, taskId) {
     }
     log(JSON.stringify(out, null, 2));
     if (runResult && !runResult.skipped && !runResult.allPassed) return process.exit(1);
-    if (!out.verdict.filesAllExist || !out.verdict.testCountMatch) return process.exit(1);
+    if (!filesAllExist || !out.verdict.testCountMatch || !evidenceQualityOk) return process.exit(1);
     return;
   }
 
@@ -9624,7 +9639,7 @@ function verifyClaimCmd(root, taskId) {
   }
 
   log('');
-  const allFilesOk = fileChecks.every(c => c.exists);
+  const allFilesOk = filesAllExist;
   const testOk = declaredTestCount == null || actualTestCount == null || actualTestCount >= declaredTestCount;
   log(`## 종합`);
   log(`  - 파일 모두 존재: ${allFilesOk ? '✓ pass' : '✗ FAIL (일부 누락)'}`);
@@ -9654,20 +9669,14 @@ function verifyClaimCmd(root, taskId) {
     if (strongMismatch) log(`    · 주장한 파일이 working tree/직전커밋 변경에 전무 — 변경이 더 오래전 커밋이거나, 실제로 변경 안 됐을 수 있음(허위완료 의심)`);
     if (has('--strict-claims') && strongMismatch) gitClaimOk = false;  // strict 시 강한 불일치는 FAIL
   }
-  // 1.9.287 (Codex 리뷰 수렴): --require-evidence — done 주장의 evidence 완전성(파일+테스트) 강제.
-  //   "테스트 통과만으로 done" 차단 — Codex 가 발견한 허위 완료 통과 갭 보강.
-  const reqEvidence = has('--require-evidence');
-  const isDoneClaim = /done|완료/i.test(row.status || '');
-  let evidenceQualityOk = true;
-  if (reqEvidence) {
-    const evq = _evidenceQuality(evidence);
-    evidenceQualityOk = !isDoneClaim || evq.ok;
-    log(`  - evidence 완전성 (--require-evidence): ${evidenceQualityOk ? '✓ pass (파일+테스트 근거 있음)' : `✗ FAIL (누락: ${evq.missing.join(', ')})`}`);
-    if (!evidenceQualityOk) log(`    · done 주장은 수정 파일 경로 + 테스트명/개수 가 evidence 에 있어야 함 (테스트 통과만으로는 불충분)`);
+  // 1.9.309 (UR-0048): done 주장 evidence 완전성 — 기본 강제(상단 pre-compute). --lenient 로 opt-out.
+  if (mustHaveEvidence) {
+    log(`  - evidence 완전성 (done 기본 강제): ${evidenceQualityOk ? '✓ pass (파일+테스트 근거 있음)' : `✗ FAIL (누락: ${evq.missing.join(', ')})`}`);
+    if (!evidenceQualityOk) log(`    · done 주장은 수정 파일 경로 + 테스트명/개수 가 evidence 에 있어야 함 (테스트 통과만으로는 불충분). 완화: --lenient`);
   }
   const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (has('--strict-claims') && !strictOk) || !evidenceQualityOk || !gitClaimOk;
   // 1.9.287: 정직한 한계 고지 — 테스트 통과 ≠ 의미적 구현 정확성
-  if (has('--strict-claims') || reqEvidence) {
+  if (has('--strict-claims') || mustHaveEvidence) {
     log('');
     log(`  ℹ 한계: 테스트 통과는 "의미적 구현 정확성"을 보장하지 않음 — evidence 가 해당 주장(수정 파일/테스트)을 직접 링크해야 신뢰도↑.`);
   }
@@ -16708,7 +16717,7 @@ function mcpServeCmd(root) {
           case 'leerness_handoff':         cliArgs = ['handoff', targetPath, '--compact', '--no-drift-check']; break;
           case 'leerness_drift_check':     cliArgs = ['drift', 'check', targetPath, '--json']; break;
           case 'leerness_audit':           cliArgs = ['audit', targetPath, '--json', ...(args.fix ? ['--fix'] : []), ...(args.strict ? ['--strict'] : [])]; break;
-          case 'leerness_verify_claim':    cliArgs = ['verify-claim', args.taskId, '--path', targetPath, ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : [])]; break;
+          case 'leerness_verify_claim':    cliArgs = ['verify-claim', args.taskId, '--path', targetPath, ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : [])]; break;
           case 'leerness_contract_verify': cliArgs = ['contract', 'verify', args.spec, args.impl]; break;
           case 'leerness_agents_list':     cliArgs = ['agents', 'list', '--json']; break;
           case 'leerness_reuse_map':       cliArgs = ['reuse-map', targetPath, ...(args.allApps ? ['--all-apps'] : []), ...(args.strictElements ? ['--strict-elements'] : []), '--json']; break;
