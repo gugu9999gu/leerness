@@ -3181,5 +3181,26 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.294 회귀 (UR-0025 3단계): lib/role-catalog.js 모듈 분리 — 단일출처 + 부작용 0
+total++;
+{
+  let ok = false;
+  try {
+    const reg = require(path.resolve(__dirname, '..', 'lib', 'role-catalog.js'));
+    const dataOk = reg.ROLE_CATALOG && Object.keys(reg.ROLE_CATALOG).length === 7 &&
+      reg._PROVIDER_MODEL_CATALOG && Object.keys(reg._PROVIDER_MODEL_CATALOG).length === 10 &&
+      reg._ROLE_ALIASES && Object.keys(reg._ROLE_ALIASES).length >= 14 &&
+      reg._AGENT_ROLE_PROMPTS && reg._AGENT_ROLE_PROMPTS.actor;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const movedOut = !/const ROLE_CATALOG = \{/.test(harnessSrc) && /require\('\.\.\/lib\/role-catalog'\)/.test(harnessSrc);
+    // roles 명령이 여전히 동작 (모듈 require 후) — 회귀 방지
+    const rr = cp.spawnSync(process.execPath, [CLI, 'roles', 'list', '--path', tmp, '--json'], { cwd: tmp, encoding: 'utf8', timeout: 20000 });
+    const rolesOk = rr.status === 0;
+    ok = dataOk && movedOut && rolesOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.294) lib/role-catalog 모듈 분리: 단일출처 + 인라인 제거 + roles 동작 (UR-0025)' : '✗ role-catalog 모듈 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

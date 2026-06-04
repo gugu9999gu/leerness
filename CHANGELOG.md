@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.294 — 2026-06-04 — UR-0025 (3단계): 역할/모델 카탈로그 → lib/role-catalog.js 모듈 분리
+
+**🧩 모놀리스 분리 3단계 — 역할/모델 레지스트리(4개 카탈로그)를 비파괴 데이터 모듈로 분리. 1.9.274(pure-utils)/1.9.291(agent-registry) 패턴 계승.**
+
+### 배경
+GPT-5.5 + Codex 두 리뷰 공통 지적인 단일 대형 `bin/harness.js`(#1 유지보수 이슈)를 점진 분리 중. 1단계(pure-utils 14함수)·2단계(agent-registry)에 이어 3단계로 역할/모델 데이터 카탈로그를 분리.
+
+### 구현 (UR-0025 3단계)
+1. **`lib/role-catalog.js` 신설** — 4개 순수 데이터 카탈로그 이동(96줄):
+   - `_PROVIDER_MODEL_CATALOG`(provider×모델 10종, REPL Tab cycle)
+   - `_AGENT_ROLE_PROMPTS`(planner/reviewer/actor 역할 프롬프트)
+   - `ROLE_CATALOG`(7종 역할: commander/reviewer/coder/architect/designer/debugger/dispatcher)
+   - `_ROLE_ALIASES`(한국어 별칭 21종)
+2. **비파괴 require-based 분리** — `_normalizeRole`/`_pickModel`/REPL 소비처는 동일 바인딩 사용. 런타임 변형 0(모두 읽기 전용 검증).
+3. **harness.js 21700→21606줄** (94줄 감소). 누적: pure-utils(163)+agent-registry(147)+role-catalog(103) 3 모듈.
+4. selftest 41→42 (4개 카탈로그 동일참조 단일출처 + 인라인 제거 검증) · e2e 238→239 (모듈 standalone + harness 인라인 제거 + `roles list` 동작 회귀).
+
+### 검증
+- **selftest 42/42 PASS** · **E2E 239/239 PASS** (회귀 0).
+- 기존 selftest(ROLE_CATALOG 7종 + _normalizeRole 한국어별칭 + _pickModel top/code/fast)가 추출 정합성 즉시 검증.
+- `roles list --json` 정상 동작 확인(모듈 분리 후 회귀 없음).
+
 ## 1.9.293 — 2026-06-04 — idempotency auto-fix + progress-tracker 복제 버그 근본 수정 🐛
 
 **🔁 idempotency 위반(task/요청 중복)을 자동 회복하는 `--auto-fix` 신설 + 중복이 매 세션 누적되던 근본 버그(헤더 유실 시 전체 복제) 수정. 라이브 프로젝트 progress-tracker.md 69행→6행 복구.**
