@@ -3411,7 +3411,8 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', lDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
     const N = 6;
     const procs = [];
-    for (let i = 0; i < N; i++) procs.push(cp.spawn(process.execPath, [CLI, 'task', 'add', 'LOCKTEST-' + i, '--path', lDir], { stdio: 'ignore' }));
+    // 1.9.318: --no-review 로 review-request 내부 spawn(~550ms×N) 제외 — 락(동시성) 자체만 격리 검증 (전체 e2e 부하 시 타임아웃 플래키 방지)
+    for (let i = 0; i < N; i++) procs.push(cp.spawn(process.execPath, [CLI, 'task', 'add', 'LOCKTEST-' + i, '--path', lDir, '--no-review'], { stdio: 'ignore' }));
     const ptPath = path.join(lDir, '.harness', 'progress-tracker.md');
     // 자식들이 OS 프로세스로 독립 진행 → 부모는 파일을 sync 폴링(원자쓰기라 부분읽기 없음)
     const start = Date.now(); let found = 0;
@@ -3775,6 +3776,26 @@ total++;
     fs.rmSync(td, { recursive: true, force: true });
   } catch {}
   console.log(ok ? '✓ B(1.9.317) 텔레메트리 분리: task add review-request 오염 없음 + LEERNESS_INTERNAL 미집계 (UR-0051)' : '✗ 텔레메트리 분리 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.318 회귀 (UR-0025 모듈화): HTML 파싱 유틸 3종 lib/pure-utils 분리 + harness 인라인 제거 + 동작 보존 + 소비명령 로드
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const fnOk = typeof m._htmlToText === 'function' && typeof m._extractTitle === 'function' && typeof m._extractLinks === 'function';
+    const work = m._htmlToText('<p>a <b>b</b></p>') === 'a b'
+      && m._extractTitle('<title>T &amp; U</title>') === 'T & U'
+      && m._extractLinks('<a href="/x">x</a><a href="https://o.com/y">y</a>', 'https://h.com/').length === 1;  // same-domain only
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const movedOut = !/function _htmlToText\(html\) \{/.test(harnessSrc) && /_htmlToText, _extractTitle, _extractLinks \} = require\('\.\.\/lib\/pure-utils'\)/.test(harnessSrc);
+    const r = cp.spawnSync(process.execPath, [CLI, 'api-skill'], { encoding: 'utf8', timeout: 15000 });  // 소비 명령 로드
+    const cmdOk = /api-skill/.test(r.stdout || '');
+    ok = fnOk && work && movedOut && cmdOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.318) lib/pure-utils HTML 유틸 분리: 모듈 단일출처 + 인라인 제거 + api-skill 로드 (UR-0025)' : '✗ HTML 유틸 분리 실패');
   if (!ok) failed++;
 }
 

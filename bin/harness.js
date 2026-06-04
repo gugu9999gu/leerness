@@ -8,13 +8,14 @@ const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
-  PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord } = require('../lib/pure-utils');
+  PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
+  _htmlToText, _extractTitle, _extractLinks } = require('../lib/pure-utils');  // 1.9.318 (UR-0025): 순수 HTML 파싱 유틸 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.317';
+const VERSION = '1.9.318';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3116,6 +3117,7 @@ function _selfTestCases() {
     { name: 'doc/surface 정합: doctor 명령 + stale MCP 카운트 동적화(commands/banner) (UR-0054 설치리뷰 1.9.315)', run: () => { const src = read(__filename); const doctorOk = typeof doctorCmd === 'function' && /cmd === 'doctor'/.test(src) && /# leerness doctor/.test(src); const dynCount = /MCP 도구: \$\{_mcpToolCount\(\)\}/.test(src) && /외부 AI 통합 \(MCP \$\{_mcpToolCount\(\)\} 도구\)/.test(src); return doctorOk && dynCount; } },
     { name: 'drift 마커 버그: session-handoff 프론트매터는 ^--- 일 때만 + drift 최신 Last generated (1.9.316)', run: () => { const src = read(__filename); const writeFix = src.includes('if (/^---\\r?\\n/.test(cur))') && src.includes('writeUtf8(handoffPath(root), frontmatter + block)'); const readFix = src.includes('matchAll(/Last generated') && src.includes('allGen[allGen.length - 1]'); return writeFix && readFix; } },
     { name: '텔레메트리 분리: 내부 auto-call(LEERNESS_INTERNAL) usage 집계 제외 + 주요 spawn 마킹 (UR-0051 설치리뷰 1.9.317)', run: () => { const src = read(__filename); const guard = src.includes("process.env.LEERNESS_INTERNAL !== '1'"); const marked = (src.match(/LEERNESS_INTERNAL: '1'/g) || []).length >= 10; const reviewMarked = /'review-request'[\s\S]{0,200}LEERNESS_INTERNAL: '1'/.test(src); return guard && marked && reviewMarked; } },
+    { name: 'lib/pure-utils: HTML 파싱 유틸 3종 모듈 분리 + 동작 + 인라인 제거 (UR-0025 1.9.318)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._htmlToText === 'function' && typeof m._extractTitle === 'function' && typeof m._extractLinks === 'function'; const work = m._htmlToText('<p>Hello <b>World</b></p>') === 'Hello World' && m._extractTitle('<html><title>My &amp; Page</title></html>') === 'My & Page' && m._extractLinks('<a href="/a">A</a><a href="https://other.com/b">B</a>', 'https://x.com/').length === 1; const moved = m._htmlToText === _htmlToText && !/^function _htmlToText\(html\) \{/m.test(read(__filename)); return fnOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3325,45 +3327,7 @@ function _fetchUrl(url, opts = {}) {
     go(url, 0);
   });
 }
-function _htmlToText(html) {
-  if (!html) return '';
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/?(p|div|li|h[1-6]|tr|td|pre)[^>]*>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
-    .replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*\n+/g, '\n\n').trim();
-}
-function _extractTitle(html) {
-  const m = (html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (!m) return '';
-  return _htmlToText(m[1]).slice(0, 200);
-}
-function _extractLinks(html, baseUrl, maxLinks) {
-  if (!html) return [];
-  const base = new URL(baseUrl);
-  const found = new Map();
-  const re = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    let href = m[1];
-    if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) continue;
-    let abs;
-    try { abs = new URL(href, baseUrl).toString(); } catch { continue; }
-    const u = new URL(abs);
-    if (u.hostname !== base.hostname) continue; // same-domain only
-    if (abs === baseUrl) continue;
-    if (found.has(abs)) continue;
-    const text = _htmlToText(m[2]).slice(0, 120);
-    found.set(abs, { url: abs, text });
-    if (found.size >= (maxLinks || 10)) break;
-  }
-  return Array.from(found.values());
-}
+// 1.9.318 (UR-0025): _htmlToText / _extractTitle / _extractLinks → lib/pure-utils.js 로 이동 (순수 함수, require 로 사용).
 async function _collectAPIDoc(url, opts = {}) {
   const direction = opts.direction || '';
   const noCrawl = opts.noCrawl;

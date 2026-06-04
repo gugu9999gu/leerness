@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.318 — 2026-06-04 — UR-0025: HTML 파싱 유틸 모듈 분리 + 락 테스트 격리
+
+**🧩 점진적 비파괴 모듈화(UR-0025) 한 단계 + pre-wake-audit critical 조사 결과 정리.**
+
+### pre-wake-audit critical 조사 (요청)
+매 라운드 관찰된 `pre-wake-audit critical 1` 을 조사 → **버그 아님**. `missing-user-requests` 가 미답 백로그 **3건**(UR-0025 모듈화 / UR-0044 ToolRegistry / UR-0053 JSON store)을 **정확히 보고**하는 정상 동작 (drift 마커와 달리 오발화 아님). 클리어하려면 백로그를 진행해야 함 → 가장 안전·확립된 UR-0025 를 진행.
+
+### 구현 (UR-0025)
+1. **순수 HTML 파싱 유틸 3종 → `lib/pure-utils.js` 분리**: `_htmlToText` / `_extractTitle` / `_extractLinks` (api-skill 문서 수집용, fs/네트워크 의존 0, URL·regex 만). harness.js 인라인 정의 제거 → require 로 동일 사용.
+2. **락 테스트 격리(테스트 품질)**: B(1.9.303) 동시 task add 락 테스트가 전체 e2e 부하 + review-request 내부 spawn(~550ms×6) 오버헤드로 **타임아웃 플래키** → `--no-review` 로 동시성만 격리(락 로직은 격리 실행 0.4s/6 보존 검증). 제품 락 로직 변경 없음.
+3. selftest 65→66 · e2e 262→263.
+
+### 검증
+- **selftest 66/66 PASS** · **E2E 263/263 PASS** (회귀 0).
+- 실측: 모듈 `_htmlToText('<p>Hello <b>World</b></p>')` → `Hello World` · `_extractTitle`(엔티티 디코드) · `_extractLinks`(same-domain only) · harness 인라인 제거 확인 · api-skill 명령 정상 로드.
+
 ## 1.9.317 — 2026-06-04 — UR-0051: 텔레메트리 분리 (설치리뷰)
 
 **📊 내부 auto-call 이 usage 통계를 오염시켜 거짓 skill 추천을 유발하던 결함 수정.**
