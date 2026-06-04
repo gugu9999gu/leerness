@@ -12,7 +12,7 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.299';
+const VERSION = '1.9.300';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3035,6 +3035,7 @@ function _selfTestCases() {
     { name: 'lib/mcp-tools: MCP 도구 정의 모듈 단일출처 (_mcpToolCount=모듈 length, Codex #5 영구해소) (UR-0025 1.9.297)', run: () => { const T = require('../lib/mcp-tools'); return Array.isArray(T) && T.length >= 81 && T.every(t => t.name && t.description && t.inputSchema) && T[0].name === 'leerness_handoff' && _mcpToolCount() === T.length && !/const TOOLS = \[/.test(read(__filename)); } },
     { name: 'writeUtf8: 원자적 쓰기(temp→rename) 손상방지 (UR-0038 외부리뷰 3중수렴 1.9.298)', run: () => { const src = read(__filename); return /function writeUtf8\(p, s\)/.test(src) && /fs\.writeFileSync\(tmp,/.test(src) && /fs\.renameSync\(tmp, p\)/.test(src) && /\.tmp-\$\{process\.pid\}/.test(src) && /fs\.unlinkSync\(tmp\)/.test(src); } },
     { name: '_scrubTestEnv: npm test 시크릿 차단(_scrubEnv는 release 토큰 유지) (UR-0039 외부리뷰 1.9.299)', run: () => { const o = { N: process.env.NPM_TOKEN, L: process.env.LEERNESS_NPM_TOKEN }; process.env.NPM_TOKEN = 'sec1'; process.env.LEERNESS_NPM_TOKEN = 'sec2'; const base = _scrubEnv(); const test = _scrubTestEnv(); const r = base.NPM_TOKEN === 'sec1' && base.LEERNESS_NPM_TOKEN === 'sec2' && !test.NPM_TOKEN && !test.LEERNESS_NPM_TOKEN && !!test.PATH; if (o.N === undefined) delete process.env.NPM_TOKEN; else process.env.NPM_TOKEN = o.N; if (o.L === undefined) delete process.env.LEERNESS_NPM_TOKEN; else process.env.LEERNESS_NPM_TOKEN = o.L; return r; } },
+    { name: 'shell 주입 표면 제거: fetchNpmLatest execFile+pkg검증 + runCommandSafe argList 인용 (UR-0040 외부리뷰 1.9.300)', run: () => { const src = read(__filename); const npmFix = /cp\.execFile\('npm', \['view', pkg, 'version'\]/.test(src) && !/cp\.exec\(.npm view \$\{pkg\}/.test(src) && /패키지명 charset/.test(src); const argFix = /argList\.map\(_shellQuoteArg\)\.join/.test(src); return npmFix && argFix && typeof _shellQuoteArg === 'function'; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -15287,7 +15288,10 @@ function cacheFresh(c, hours) { return c && c.at && (Date.now() - c.at < hours *
 function fetchNpmLatest(pkg) {
   return new Promise(resolve => {
     if (process.env.LEERNESS_OFFLINE === '1' || process.env.LEERNESS_PLUS_OFFLINE === '1') return resolve(null);
-    cp.exec(`npm view ${pkg} version`, { timeout: 12000 }, (err, stdout) => {
+    // 1.9.300 (UR-0040, 외부리뷰 Sonnet): cp.exec 템플릿리터럴 → execFile(args 배열) + pkg charset 검증 = 셸 주입 이중 차단.
+    //   이전: `npm view ${pkg} version` 가 셸 문자열이라 pkg 에 메타문자(; && $() 공백)면 주입 가능.
+    if (!/^@?[a-z0-9][a-z0-9._/-]*$/i.test(String(pkg || ''))) return resolve(null);  // 패키지명 charset (메타문자 0)
+    cp.execFile('npm', ['view', pkg, 'version'], { timeout: 12000, shell: process.platform === 'win32' }, (err, stdout) => {
       if (err) return resolve(null);
       const v = String(stdout || '').trim();
       resolve(/^\d+\.\d+\.\d+/.test(v) ? v : null);
@@ -17722,8 +17726,9 @@ function runCommandSafe(cmd, args, opts) {
   let r;
   try {
     if (useShell) {
-      // shell:true 모드 — 인자가 cmd 안에 포함된 단일 문자열인 경우 처리
-      r = cp.spawnSync(cmdStr + (argList.length ? ' ' + argList.join(' ') : ''), [], spawnOpts);
+      // shell:true 모드 — cmd 는 셸 명령 문자열(의도적 raw), argList 는 개별 인자라 _shellQuoteArg 로 인용(셸 주입 차단).
+      // 1.9.300 (UR-0040, 외부리뷰 Codex): 이전 argList.join(' ') 는 인자의 메타문자(;&|$())를 셸이 해석 → 인용 추가.
+      r = cp.spawnSync(cmdStr + (argList.length ? ' ' + argList.map(_shellQuoteArg).join(' ') : ''), [], spawnOpts);
     } else {
       // 단일 명령어로 들어온 경우 자동 분리
       let bin = cmdStr, finalArgs = argList;

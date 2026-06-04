@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.300 — 2026-06-04 — UR-0040: 셸 주입 표면 제거 (외부 AI 리뷰 #3) — R1 보안 경화 완료 🔒
+
+**🔒 외부 AI 리뷰가 지적한 마지막 R1 보안 항목 — 셸 주입 표면 2곳 제거. 이로써 R1(보안/안정성 코어 경화: UR-0038 원자쓰기 + UR-0039 시크릿차단 + UR-0040 셸주입) 완료.**
+
+### 배경 (Sonnet [high] + Codex [high])
+1. `fetchNpmLatest()`(15290)가 `` cp.exec(`npm view ${pkg} version`) `` 템플릿 리터럴 — `pkg` 에 셸 메타문자(`;`/`&&`/`$()`/공백)가 있으면 주입. 호출처는 `'leerness'` 하드코딩이나 함수 시그니처는 임의 문자열 허용.
+2. `runCommandSafe()` allowShell 모드(17726)가 `cmdStr + ' ' + argList.join(' ')` — argList 인자를 인용 없이 셸 문자열로 합침 → 인자의 메타문자가 셸에 해석.
+
+### 구현 (UR-0040)
+1. **`fetchNpmLatest` execFile + pkg 검증** — `cp.exec` 템플릿 → `cp.execFile('npm', ['view', pkg, 'version'])`(args 배열, POSIX shell 없음). 추가로 pkg charset 검증(`/^@?[a-z0-9][a-z0-9._/-]*$/i`)으로 메타문자 이중 차단. Windows `.cmd` 호환 위해 win32 만 shell:true(단 pkg 검증됨).
+2. **`runCommandSafe` argList 인용** — `argList.map(_shellQuoteArg).join(' ')`. cmd 는 의도적 raw 셸 문자열, 추가 argList 인자만 인용(1.9.289 `_shellQuoteArg` 재사용).
+3. selftest 47→48 (소스 패턴 검증) · e2e 244→245 (소스 + `update --check` 오프라인 무crash 회귀).
+
+### 검증
+- **selftest 48/48 PASS** · **E2E 245/245 PASS** (회귀 0).
+- 실측: pkg 검증 regex — `leerness`/`@scope/p` 통과, `leerness; rm -rf /`·`$(whoami)` 거부. `update --check` 가 execFile 경로로 latest 정상 조회(회귀 0).
+
+### 🎉 R1 보안/안정성 코어 경화 완료 (외부 AI 리뷰 3중수렴 high 3종)
+- **UR-0038**(1.9.298) 원자적 쓰기 — 부분쓰기 손상 차단
+- **UR-0039**(1.9.299) npm test 시크릿 차단 — process.env 노출 차단
+- **UR-0040**(1.9.300) 셸 주입 표면 제거 — 템플릿 리터럴/argList 인용
+- 다음(R2): UR-0041 실행가능 ToolRegistry(구조 개선).
+
 ## 1.9.299 — 2026-06-04 — UR-0039: npm test 시크릿 노출 차단 (외부 AI 리뷰 #2, Opus S-1)
 
 **🔒 신뢰 못 할 워크스페이스의 `npm test` 가 호스트 `process.env`(시크릿 전체)를 상속받던 실질 취약점 차단. Opus 4.8 리뷰가 코드 라인 근거로 지적한 high 보안 이슈.**

@@ -3323,5 +3323,26 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.300 회귀 (UR-0040 외부리뷰): 셸 주입 표면 제거 — fetchNpmLatest execFile + argList 인용 + update --check 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    // (1) 소스: cp.exec 템플릿 제거 + execFile args 배열 + argList 인용
+    const srcOk = /cp\.execFile\('npm', \['view', pkg, 'version'\]/.test(harnessSrc) &&
+      !/cp\.exec\(.npm view \$\{pkg\}/.test(harnessSrc) &&
+      /argList\.map\(_shellQuoteArg\)\.join/.test(harnessSrc);
+    // (2) 기능 회귀: update --check 가 오프라인(네트워크 무)에서도 crash 없이 종료
+    const uDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-upd-'));
+    const r = cp.spawnSync(process.execPath, [CLI, 'update', uDir, '--check'], { encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_OFFLINE: '1' } });
+    const funcOk = r.status === 0 && /Current:/.test(r.stdout || '');
+    ok = srcOk && funcOk;
+    fs.rmSync(uDir, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.300) 셸 주입 표면 제거: fetchNpmLatest execFile + argList 인용 + update --check 회귀 (UR-0040 외부리뷰)' : '✗ 셸 주입 표면 제거 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
