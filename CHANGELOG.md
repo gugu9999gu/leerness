@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.323 — 2026-06-05 — UR-0054 ⑥: fresh-init gate 통과 (lazy detect 부재신호 비차단)
+
+**🚀 `leerness init` 직후 `leerness gate` 가 빈 트래커/미생성 handoff 때문에 즉시 실패하던 UX 결함 수정.**
+
+### 배경 (UR-0054 ⑥)
+fresh init 후 `gate`(verify+audit+scan+encoding+lazy) 중 **lazy detect 만 exit 1** — `handoff_never_generated`/`handoff_empty`/`no_test_run` 같은 "아직 작업 안 함" 신호를 lazy work 위반처럼 차단. 갓 init 한 프로젝트가 즉시 gate 실패 → 나쁜 첫인상.
+
+### 구현 (UR-0054 ⑥)
+1. **작업 흔적 기반 차단 판정**: `done/completed/verified` row 가 하나도 없으면(fresh/무작업) "부재" 신호(`progress_empty`/`handoff_never_generated`/`handoff_empty`/`no_test_run`)는 **어드바이저리(비차단)**. `blockingIssues = issues − advisory(무작업 시)`.
+2. **active 프로젝트 보호 유지**: done-claim 이 있으면 모든 신호가 차단(기존 동작). 특히 `evidence_missing`(증거 없는 done)은 항상 차단.
+3. JSON 에 `blockingIssues` 필드 추가, `healthy`/exit 는 blocking 기준.
+4. selftest 70→71 · e2e 267→268.
+
+### 검증
+- **selftest 71/71 PASS** · **E2E 268/268 PASS** (회귀 0).
+- 실측: fresh init → `lazy detect` exit **0**(issues=3 advisory, blocking=0, healthy=true) · 거짓완료(done+증거0) 추가 → exit **1**(blocking=3, evidence_missing 차단 유지).
+
 ## 1.9.322 — 2026-06-05 — UR-0044(완료): MCP handler 통합 (_mcpToCliArgs 추출)
 
 **🧩 mcpServeCmd 의 인라인 83-case switch(name→cliArgs)를 단일 함수 `_mcpToCliArgs` 로 통합 — ToolRegistry handler 통합 완료.**

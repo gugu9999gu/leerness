@@ -3876,5 +3876,23 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.323 회귀 (UR-0054 ⑥): fresh init → gate(lazy detect) 통과(부재신호 비차단) + active 거짓완료는 차단 유지
+total++;
+{
+  let ok = false;
+  try {
+    const fg = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-freshgate-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', fg, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const freshExit = cp.spawnSync(process.execPath, [CLI, 'lazy', 'detect', fg], { encoding: 'utf8', timeout: 20000 }).status;  // fresh → 통과(0)
+    // 거짓완료(done + 증거0) 추가 → 다시 lazy detect → 차단(1)
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', '거짓완료', '--status', 'done', '--evidence', '', '--path', fg, '--no-review', '--force'], { encoding: 'utf8', timeout: 20000 });
+    const activeExit = cp.spawnSync(process.execPath, [CLI, 'lazy', 'detect', fg], { encoding: 'utf8', timeout: 20000 }).status;  // 거짓완료 → 차단(1)
+    ok = freshExit === 0 && activeExit === 1;
+    fs.rmSync(fg, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.323) fresh-init gate: lazy detect 부재신호 비차단(통과) + 거짓완료 차단 유지 (UR-0054 ⑥)' : '✗ fresh-init gate 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

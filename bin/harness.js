@@ -15,7 +15,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.322';
+const VERSION = '1.9.323';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3122,6 +3122,7 @@ function _selfTestCases() {
     { name: 'count drift 수정: _countDatedBlocks 코드펜스(템플릿) 제외 + 카운트 사이트 단일화 (UR-0053 1.9.320)', run: () => { const f = _countDatedBlocks; const withTpl = '# D\n\n```md\n### 2026-01-01 — Decision 제목\n- Decision:\n```\n\n### 2026-06-04 — 실제\n- Decision: 실제\n'; const c1 = f(withTpl) === 1; const c0 = f('```md\n### 2026-01-01 — x\n```\n') === 0; const c2 = f('### 2026-01-01 — A\n### 2026-02-02 — B\n') === 2; const src = read(__filename); const wired = src.includes('_countDatedBlocks(read(decisionsPath(root)))') && src.includes('_countDatedBlocks(read(lessonsPath(root)))') && src.includes('_countDatedBlocks(dtext)') && !src.includes('read(decisionsPath(root)).' + 'match(/^### '); return typeof f === 'function' && c1 && c0 && c2 && wired; } },
     { name: 'decision/lesson 필드 파싱: 빈 필드가 다음 줄로 안 샘 ([ \\t]* 사용) (UR-0053 1.9.321)', run: () => { const block = '### 2026-06-05 — X\n- Decision: X\n- Reason: r\n- Alternatives: \n- Impact: 보안\n'; const alt = block.match(/- Alternatives:[ \t]*(.+)/); const imp = block.match(/- Impact:[ \t]*(.+)/); const altNoBleed = !alt || !/Impact/.test(alt[1]); const impOk = !!imp && imp[1].trim() === '보안'; const src = read(__filename); const fixedOk = src.includes('- Alternatives:[ \\t]*(.+)') && src.includes('- Lesson:[ \\t]*(.+)') && src.includes('- Impact:[ \\t]*(.+)'); return altNoBleed && impOk && fixedOk; } },
     { name: 'MCP handler 통합: _mcpToCliArgs 단일 함수 + mcpServeCmd 호출 + 인라인 switch 단일화 (UR-0044 1.9.322)', run: () => { const src = read(__filename); const fnDef = /function _mcpToCliArgs\(name, args, targetPath\) \{/.test(src); const called = src.includes('cliArgs = _mcpToCliArgs(name, args, targetPath)'); const switchCount = (src.match(/switch \(name\) \{/g) || []).length; const nullPath = src.includes('if (cliArgs === null) return send('); return fnDef && called && switchCount === 1 && nullPath; } },
+    { name: 'fresh-init gate 통과: lazy detect 부재신호(handoff/test/progress) done-work 없으면 비차단 (UR-0054 ⑥ 1.9.323)', run: () => { const src = read(__filename); const doneWork = src.includes("const _hasDoneWork = rows.some(r => /^(done|completed|verified)$/i.test(r.status))"); const advisory = src.includes('_ADVISORY_KINDS') && src.includes("'handoff_never_generated'") && src.includes("'no_test_run'"); const blocking = src.includes('const blockingIssues = Math.max(0, issues - advisoryCount)') && src.includes('if (blockingIssues > 0) process.exitCode = 1'); return doneWork && advisory && blocking; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -7547,23 +7548,31 @@ function lazyDetect(root, opts = {}) {
     issues++; _warn(`blocker without nextAction: ${b.id}`,
       { kind: 'blocker_no_next_action', severity: 'warn', taskId: b.id });
   }
+  // 1.9.323 (UR-0054 ⑥, 설치리뷰): fresh/무작업 프로젝트 gate 통과 — 작업 흔적(done/completed/verified) 없으면
+  //   "부재" 신호(progress empty / handoff 미생성·빈 / 테스트 미실행)는 비차단(어드바이저리). active 프로젝트는 기존대로 차단.
+  //   배경: leerness init 직후 leerness gate 가 빈 트래커·미생성 handoff 때문에 즉시 실패하던 UX 결함.
+  const _hasDoneWork = rows.some(r => /^(done|completed|verified)$/i.test(r.status));
+  const _ADVISORY_KINDS = new Set(['progress_empty', 'handoff_never_generated', 'handoff_empty', 'no_test_run']);
+  const advisoryCount = _hasDoneWork ? 0 : findings.filter(f => _ADVISORY_KINDS.has(f.kind)).length;
+  const blockingIssues = Math.max(0, issues - advisoryCount);
   // 1.9.101: JSON 모드 → 구조화 출력만 (process.exitCode는 일관 유지)
   if (jsonMode) {
     const payload = {
       version: VERSION,
       root,
       issues,
-      healthy: issues === 0,
+      blockingIssues,
+      healthy: blockingIssues === 0,
       todoCount,
       newTodoCount: newTodos.length,
       findings,
     };
     process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
-    if (issues > 0) process.exitCode = 1;
+    if (blockingIssues > 0) process.exitCode = 1;
     return;
   }
-  if (issues === 0) ok('lazy detect passed (no obvious lazy work signals)');
-  else { fail(`lazy detect found ${issues} issues`); process.exitCode = 1; }
+  if (blockingIssues === 0) ok(advisoryCount > 0 ? `lazy detect passed (${advisoryCount} advisory, 0 blocking — 작업 흔적 없는 fresh 프로젝트)` : 'lazy detect passed (no obvious lazy work signals)');
+  else { fail(`lazy detect found ${blockingIssues} blocking issues`); process.exitCode = 1; }
 }
 
 function preCheck(root) {
