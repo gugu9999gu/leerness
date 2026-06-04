@@ -3752,5 +3752,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.317 회귀 (UR-0051 설치리뷰): 텔레메트리 분리 — 내부 auto-call(LEERNESS_INTERNAL)이 usage 집계 오염 안 함
+total++;
+{
+  let ok = false;
+  try {
+    const td = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-telem-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', td, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const usagePath = path.join(td, '.harness', 'cache', 'usage-stats.json');
+    const cmds = () => { try { return JSON.parse(fs.readFileSync(usagePath, 'utf8')).commands || {}; } catch { return {}; } };
+    // task add → 내부 review-request auto-call 이 usage 오염 안 함 (task 만 집계, review-request 없음)
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', '텔레메트리 테스트', '--path', td], { encoding: 'utf8', timeout: 20000 });
+    const afterTask = cmds();
+    const noPollution = afterTask.task >= 1 && !afterTask['review-request'];
+    // LEERNESS_INTERNAL=1 호출은 미집계 (일반 호출은 집계)
+    cp.spawnSync(process.execPath, [CLI, 'drift', 'check', '--path', td], { encoding: 'utf8', timeout: 20000 });
+    const d1 = cmds().drift || 0;
+    cp.spawnSync(process.execPath, [CLI, 'drift', 'check', '--path', td], { encoding: 'utf8', timeout: 20000, env: { ...process.env, LEERNESS_INTERNAL: '1' } });
+    const d2 = cmds().drift || 0;
+    const internalSkip = d1 >= 1 && d2 === d1;   // 일반=증가, INTERNAL=증가없음
+    ok = noPollution && internalSkip;
+    fs.rmSync(td, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.317) 텔레메트리 분리: task add review-request 오염 없음 + LEERNESS_INTERNAL 미집계 (UR-0051)' : '✗ 텔레메트리 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.317 — 2026-06-04 — UR-0051: 텔레메트리 분리 (설치리뷰)
+
+**📊 내부 auto-call 이 usage 통계를 오염시켜 거짓 skill 추천을 유발하던 결함 수정.**
+
+### 배경 (설치리뷰)
+"텔레메트리 오염 — 내부 auto-call 이 사용자명령 집계 → 거짓 skill 추천 + task add ~550ms". leerness 가 자기 자신을 spawn 하는 내부 auto-call(`task add` → `review-request`, MCP `callLeerness`, session close/handoff/drift 자동 보조 호출 등 ~20곳)이 dispatch 의 usage 카운터에 **사용자 명령처럼 집계** → `skill suggest`(명령 빈도 기반)가 거짓 후보 추천.
+
+### 구현 (UR-0051)
+1. **`LEERNESS_INTERNAL=1` 마커**: 모든 내부 self-spawn(`cp.spawnSync(process.execPath, [__filename, …])`)의 env 에 마킹 (~20곳). 공통 env 프래그먼트 일괄 적용 + env 없던 3곳(task add/session close 자동) 보강.
+2. **usage 집계 가드**: dispatch 의 `_bumpUsage` 호출 조건에 `process.env.LEERNESS_INTERNAL !== '1'` 추가 — 내부 호출은 집계 제외.
+3. selftest 64→65 · e2e 261→262.
+
+### 검증
+- **selftest 65/65 PASS** · **E2E 262/262 PASS** (회귀 0 — ~20곳 마킹에도 모든 auto-call 정상).
+- 실측: `task add` 1회 → usage `{task:1}` (이전엔 `review-request` 도 집계) · 일반 drift 1→2 집계, **`LEERNESS_INTERNAL=1` drift → 미집계(2 유지)**.
+- 범위: usage(skill 추천) 오염 제거. task add 지연(~550ms, review-request spawn 자체)은 별도 — 후속 캐싱/비동기화 검토 여지.
+
 ## 1.9.316 — 2026-06-04 — 🐛 drift 'session close 누락' 영구 오발화 버그 (자가 발견)
 
 **🔧 session close 직후에도 drift 가 `session close 누락`(13일)을 보고하던 버그 수정 — 4라운드 연속 관찰된 leerness 자체 정확성 결함.**

@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.316';
+const VERSION = '1.9.317';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2517,7 +2517,7 @@ function agentModeCmd(root, sub) {
   const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   function spawnChild(args, opts) {
-    return cp.spawnSync(process.execPath, [__filename, ...args], Object.assign({ encoding: 'utf8', cwd: root, env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1' } }, opts || {}));
+    return cp.spawnSync(process.execPath, [__filename, ...args], Object.assign({ encoding: 'utf8', cwd: root, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1' } }, opts || {}));
   }
   if (!sub || sub === 'help') {
     log(cy(`# leerness agent-mode (1.9.239) — 자율 모드 전용 통합 명령`));
@@ -3115,6 +3115,7 @@ function _selfTestCases() {
     { name: 'PowerShell 감지: pwsh7(channel/Documents\\PowerShell/install) + ps5.1 영구경로 과경고 안함 (UR-0052 설치리뷰 1.9.314)', run: () => { const f = _detectPwshFromEnv; const pwsh7a = f({ POWERSHELL_DISTRIBUTION_CHANNEL: 'MSI:Windows 10' }).version === '7'; const pwsh7b = f({ PSModulePath: 'C:\\Users\\me\\Documents\\PowerShell\\Modules' }).version === '7'; const pwsh7c = f({ PSModulePath: 'C:\\Program Files\\PowerShell\\7\\Modules' }).version === '7'; const noFalsePs5 = f({ PSModulePath: 'C:\\Users\\me\\Documents\\WindowsPowerShell\\Modules' }).isPowerShell === false; const cmdSys = f({ PSModulePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules' }).isPowerShell === false; const empty = f({}).isPowerShell === false; const src = read(__filename); const wired = src.includes('const fromEnv = _detectPwshFromEnv()') && src.includes('const pwshEnv = _detectPwshFromEnv()'); return pwsh7a && pwsh7b && pwsh7c && noFalsePs5 && cmdSys && empty && wired; } },
     { name: 'doc/surface 정합: doctor 명령 + stale MCP 카운트 동적화(commands/banner) (UR-0054 설치리뷰 1.9.315)', run: () => { const src = read(__filename); const doctorOk = typeof doctorCmd === 'function' && /cmd === 'doctor'/.test(src) && /# leerness doctor/.test(src); const dynCount = /MCP 도구: \$\{_mcpToolCount\(\)\}/.test(src) && /외부 AI 통합 \(MCP \$\{_mcpToolCount\(\)\} 도구\)/.test(src); return doctorOk && dynCount; } },
     { name: 'drift 마커 버그: session-handoff 프론트매터는 ^--- 일 때만 + drift 최신 Last generated (1.9.316)', run: () => { const src = read(__filename); const writeFix = src.includes('if (/^---\\r?\\n/.test(cur))') && src.includes('writeUtf8(handoffPath(root), frontmatter + block)'); const readFix = src.includes('matchAll(/Last generated') && src.includes('allGen[allGen.length - 1]'); return writeFix && readFix; } },
+    { name: '텔레메트리 분리: 내부 auto-call(LEERNESS_INTERNAL) usage 집계 제외 + 주요 spawn 마킹 (UR-0051 설치리뷰 1.9.317)', run: () => { const src = read(__filename); const guard = src.includes("process.env.LEERNESS_INTERNAL !== '1'"); const marked = (src.match(/LEERNESS_INTERNAL: '1'/g) || []).length >= 10; const reviewMarked = /'review-request'[\s\S]{0,200}LEERNESS_INTERNAL: '1'/.test(src); return guard && marked && reviewMarked; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -5890,7 +5891,7 @@ async function nextActionCmd(root, sub, ...rest) {
       state.queue.splice(n, 1);
       _writeNextActionQueue(root, state.queue);
       // leerness task add 호출
-      const taskResult = cp.spawnSync(process.execPath, [__filename, 'task', 'add', taskTitle, '--path', root], { encoding: 'utf8', timeout: 8000 });
+      const taskResult = cp.spawnSync(process.execPath, [__filename, 'task', 'add', taskTitle, '--path', root], { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_INTERNAL: '1' } });
       if (taskResult.status === 0) {
         const m = (taskResult.stdout || '').match(/T-\d{4}/);
         log(`  ✓ task 추가: ${m ? m[0] : '?'} — "${taskTitle}"`);
@@ -6411,7 +6412,7 @@ function taskAdd(root, text) {
       const t0 = Date.now();
       const r = cp.spawnSync(process.execPath, [__filename, 'review-request', text, '--path', absRoot(root), '--json'], {
         encoding: 'utf8', timeout: 15000,
-        env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
+        env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
       });
       if (r.status === 0 && r.stdout) {
         const j = JSON.parse(r.stdout);
@@ -7918,7 +7919,7 @@ function handoff(root) {
       // 1) drift level (가벼운 check)
       try {
         const r = cp.spawnSync(process.execPath, [__filename, 'drift', 'check', root, '--json'],
-          { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
+          { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
         const j = JSON.parse(r.stdout.trim());
         if (j.level) parts.push(`drift ${j.level.replace(/^[^\w]+/, '')} (${j.score})`);
       } catch {}
@@ -8516,7 +8517,7 @@ function handoff(root) {
                 if (!has('--no-brainstorm-hits') && !has('--quiet') && process.env.LEERNESS_NO_BRAINSTORM_HITS !== '1') {
                   try {
                     const r = cp.spawnSync(process.execPath, [__filename, 'brainstorm', keyword, '--path', root, '--json'],
-                      { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
+                      { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
                     const bj = JSON.parse(r.stdout);
                     const hits = bj.hits || {};
                     const items = [];
@@ -9019,7 +9020,7 @@ function handoff(root) {
             if (process.env.LEERNESS_AUTO_SECURITY_FIX === '1') {
               try {
                 const r = cp.spawnSync(process.execPath, [__filename, 'audit', root, '--fix'],
-                  { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
+                  { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
                 if (r.status === 0) {
                   log(dim(`  ✓ 자동 회복 (LEERNESS_AUTO_SECURITY_FIX=1): audit --fix 완료`));
                 } else {
@@ -9264,7 +9265,7 @@ function handoffCmd(root) {
           if (has('--auto-recover') && sevStale) {
             log(dim(`     🔧 --auto-recover 활성 — session close 자동 실행 중...`));
             try {
-              const r = cp.spawnSync(process.execPath, [__filename, 'session', 'close', absR0], { encoding: 'utf8', timeout: 60000 });
+              const r = cp.spawnSync(process.execPath, [__filename, 'session', 'close', absR0], { encoding: 'utf8', timeout: 60000, env: { ...process.env, LEERNESS_INTERNAL: '1' } });
               if (r.status === 0) {
                 log(dim(`     ✓ session close 자동 완료 (다음 라운드부터 healthy)`));
                 const s2 = _readUsageStats(absR0);
@@ -12302,7 +12303,7 @@ function sessionClose(root, opts = {}) {
     // 1) skill suggest
     try {
       const r = cp.spawnSync(process.execPath, [__filename, 'skill', 'suggest', '--path', root, '--min', '3', '--json'],
-        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
       const j = JSON.parse(r.stdout);
       if (j.candidates && j.candidates.length) {
         log(dim('  📌 신규 skill 후보 (Hermes-style 자동 학습):'));
@@ -12313,7 +12314,7 @@ function sessionClose(root, opts = {}) {
     // 2) drift check
     try {
       const r = cp.spawnSync(process.execPath, [__filename, 'drift', 'check', root, '--json'],
-        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
       const j = JSON.parse(r.stdout.trim());
       if (j.level) {
         log(dim(`  🩺 drift 상태: ${j.level} ${j.score}/200`));
@@ -15740,7 +15741,7 @@ function driftCheckCmd(root, opts = {}) {
     log(`🔒 --auto-fix 활성 (1.9.82) — 보안 신호 회복: audit --fix 자동 실행 중...`);
     try {
       const r = cp.spawnSync(process.execPath, [__filename, 'audit', root, '--fix'],
-        { encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
+        { encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
       if (r.status === 0) {
         log(`✓ audit --fix 완료 — .gitignore + .env.example 동기화`);
         // 재검사 (보안 신호 회복 확인)
@@ -15853,7 +15854,7 @@ function driftCheckCmd(root, opts = {}) {
     log('');
     log(`🔧 --auto-fix 활성 — session close 자동 실행 중...`);
     try {
-      const r = cp.spawnSync(process.execPath, [__filename, 'session', 'close', root], { encoding: 'utf8', timeout: 60000 });
+      const r = cp.spawnSync(process.execPath, [__filename, 'session', 'close', root], { encoding: 'utf8', timeout: 60000, env: { ...process.env, LEERNESS_INTERNAL: '1' } });
       if (r.status === 0) {
         log(`✓ session close 자동 완료`);
         // autoResolved 카운트
@@ -16134,7 +16135,7 @@ function skillPublishCmd(root) {
   if (!has('--no-security-check') && !has('--force')) {
     try {
       const r = cp.spawnSync(process.execPath, [__filename, 'health', root, '--json'],
-        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
       const j = JSON.parse(r.stdout.trim());
       if (j.issues && j.issues.length > 0) {
         log(`🚨 보안 사전 점검 (1.9.98): ${j.issues.length}건 issue 발견`);
@@ -16217,11 +16218,11 @@ const BENCHMARK_SCENARIOS = {
     setup: (dir) => {
       // 빈 evidence로 done task 생성
       cp.spawnSync(process.execPath, [__filename, 'task', 'add', '거짓 완료된 작업', '--status', 'done', '--evidence', '', '--path', dir],
-        { encoding: 'utf8', timeout: 10000, env: { ...process.env, LEERNESS_NO_PROMPT: '1' } });
+        { encoding: 'utf8', timeout: 10000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1' } });
     },
     measure: (dir) => {
       const r = cp.spawnSync(process.execPath, [__filename, 'lazy', 'detect', dir],
-        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_DRIFT_CHECK: '1' } });
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
       const detected = /✗ |found.*issue|증거 없는|empty/.test(r.stdout);
       return { detected, exit: r.status, sample: r.stdout.slice(0, 200) };
     }
@@ -16236,7 +16237,7 @@ const BENCHMARK_SCENARIOS = {
     measure: (dir) => {
       const r = cp.spawnSync(process.execPath, [__filename, 'contract', 'verify',
         path.join(dir, 'mismatch-spec.md'), path.join(dir, 'mismatch-impl.js'), '--json'],
-        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_DRIFT_CHECK: '1' } });
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
       let j = null;
       try { j = JSON.parse(r.stdout); } catch {}
       const detected = j && j.missingFunctions && j.missingFunctions.includes('missingFn');
@@ -16256,7 +16257,7 @@ const BENCHMARK_SCENARIOS = {
     },
     measure: (dir) => {
       const r = cp.spawnSync(process.execPath, [__filename, 'drift', 'check', dir, '--json'],
-        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_DRIFT_CHECK: '0' } });
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
       let j = null;
       try { j = JSON.parse(r.stdout.trim()); } catch {}
       const detected = j && (j.level === '🔴 critical' || j.level === '🟠 attention');
@@ -16275,7 +16276,7 @@ const BENCHMARK_SCENARIOS = {
     measure: (dir) => {
       const r = cp.spawnSync(process.execPath, [__filename, 'skill', 'install',
         path.join(dir, 'bom-test.md'), '--path', dir],
-        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1' } });
+        { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1' } });
       const f = path.join(dir, '.harness', 'skills', 'bom-test', 'SKILL.md');
       return { detected: r.status === 0 && exists(f), sample: r.stdout.slice(0, 200) };
     }
@@ -16312,7 +16313,7 @@ async function _benchmarkMeasure(root, task) {
     const t1 = Date.now();
     cp.spawnSync(process.execPath, [__filename, 'audit', root, '--fix'], {
       encoding: 'utf8', timeout: 15000,
-      env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
+      env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
     });
     const verifyTime = Date.now() - t1;
     results.push({
@@ -16782,7 +16783,7 @@ function mcpServeCmd(root) {
     const r = cp.spawnSync(process.execPath, [__filename, ...cliArgs], {
       encoding: 'utf8',
       timeout: 60000,
-      env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_WORKFLOW_GUIDE: '1' }
+      env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_WORKFLOW_GUIDE: '1' }
     });
     return { ok: r.status === 0, exit: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
   }
@@ -18917,7 +18918,7 @@ async function _agentRepl(root, opts) {
   try {
     const hf = cp.spawnSync(process.execPath, [__filename, 'handoff', root, '--compact', '--no-drift-check', '--no-headline'], {
       encoding: 'utf8', timeout: 8000,
-      env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_LESSONS: '1' }
+      env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_LESSONS: '1' }
     });
     if (hf.status === 0 && hf.stdout) {
       const preview = hf.stdout.split('\n').slice(0, 4).map(l => l.replace(/^\s+/, '')).filter(Boolean).slice(0, 3).join(' · ');
@@ -19659,7 +19660,7 @@ async function agentCmd(root, taskArg) {
   log(`permission mode: ${perms.mode || 'basic'}`);
   // handoff 자동 회수 (compact 모드)
   try {
-    const hf = cp.spawnSync(process.execPath, [__filename, 'handoff', root, '--compact', '--no-drift-check'], { encoding: 'utf8', timeout: 10000, env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1' } });
+    const hf = cp.spawnSync(process.execPath, [__filename, 'handoff', root, '--compact', '--no-drift-check'], { encoding: 'utf8', timeout: 10000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1' } });
     if (hf.status === 0 && hf.stdout) {
       const preview = hf.stdout.split('\n').slice(0, 6).join('\n');
       log('\n[handoff context (preview)]\n' + preview);
@@ -19886,7 +19887,7 @@ async function incidentHandleCmd(root, id) {
     const keywords = String(err).toLowerCase().match(/[\w가-힣]{4,}/g) || [];
     if (keywords.length) {
       const r = cp.spawnSync(process.execPath, [__filename, 'lessons', '--path', root, '--query', keywords[0], '--limit', '3'],
-        { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_NO_PROMPT: '1' } });
+        { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1' } });
       if (r.status === 0 && /총 \d+건 발견/.test(r.stdout)) {
         const block = r.stdout.split('\n').slice(0, 12).join('\n');
         log(`\n📚 관련 lessons:\n${block}`);
@@ -20027,7 +20028,7 @@ function healthCmd(root) {
   // 1) drift level
   try {
     const r = cp.spawnSync(process.execPath, [__filename, 'drift', 'check', root, '--json'],
-      { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
+      { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '0' } });
     const j = JSON.parse(r.stdout.trim());
     out.checks.drift = { level: j.level, score: j.score, firedCount: (j.fired || []).length };
   } catch { out.checks.drift = { error: 'drift check 실패' }; }
@@ -21152,7 +21153,7 @@ function reviewRequestCmd(root, request) {
   try {
     const r = cp.spawnSync(process.execPath, [__filename, 'brainstorm', text, '--path', root, '--json'], {
       encoding: 'utf8', timeout: 12000,
-      env: { ...process.env, LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
+      env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' }
     });
     if (r.stdout) {
       const j = JSON.parse(r.stdout);
@@ -21540,7 +21541,8 @@ async function main() {
   }
   if (has('--help') || has('-h')) return help();
   // 1.9.38 (B): 사용 통계 카운터 — usage stats 명령 자체와 비차단 경로는 제외
-  if (cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== '--version' && cmd !== '--help') {
+  // 1.9.317 (UR-0051, 설치리뷰): 내부 auto-call(LEERNESS_INTERNAL=1) 은 usage 집계 제외 — 텔레메트리 오염(거짓 skill 추천) 방지.
+  if (process.env.LEERNESS_INTERNAL !== '1' && cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== '--version' && cmd !== '--help') {
     try {
       const root = absRoot(arg('--path', args[1] && !args[1].startsWith('-') ? args[1] : process.cwd()));
       if (exists(path.join(root, '.harness'))) _bumpUsage(root, cmd);
