@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.320 — 2026-06-04 — UR-0053(1단계): decisions/lessons count drift 버그 수정
+
+**🔢 MD 파싱이 코드펜스 템플릿 예시까지 세어 `decisions=2 실제1` 로 오집계하던 count drift 버그 수정 (UR-0053 의 구체적 결함).**
+
+### 배경 (UR-0053)
+UR-0053 전략(상태 canonical=JSON, MD=projection) 중 **구체적으로 재현된 버그**: `context.memory.decisions=2 실제1`. 원인 — decisions.md/lessons.md 의 **Template 예시가 코드펜스(```md … ```) 안에 `### YYYY-MM-DD — Decision 제목` 형태**로 들어있는데, 카운터 6곳이 raw regex `match(/^### \d{4}-\d{2}-\d{2}/gm)` 로 **펜스 안 템플릿까지 카운트**.
+
+### 구현 (UR-0053 1단계 — 비파괴 count 정합)
+1. **`_countDatedBlocks(text)` 단일 진실소스** — 코드펜스 제거 후 `### YYYY-MM-DD` 헤더만 카운트 (기존 `_extractDecisionBlocks` 의 펜스 제거 로직과 동일 원리).
+2. **6개 카운트 사이트 교체** (context / auto-resume / handoff·audit builder): decisions 2곳 + lessons 4곳 → `_countDatedBlocks` 사용. raw regex 카운트 0.
+3. selftest 67→68 · e2e 264→265.
+4. 전체 JSON-canonical 아키텍처(쓰기 경로 전환)는 별도 후속 — 본 단계는 **읽기 카운트 정합**(비파괴, behavior change 0).
+
+### 검증
+- **selftest 68/68 PASS** · **E2E 265/265 PASS** (회귀 0).
+- 실측: decision 1건 + lesson 1건 추가 → `context` `memory.decisions=1, lessons=1` (이전 decisions=2) · `_countDatedBlocks`: 펜스 템플릿 제외(1), 펜스만(0), 펜스 없는 2건(2).
+
 ## 1.9.319 — 2026-06-04 — UR-0044(가드): MCP ToolRegistry 일치성 회귀 가드
 
 **🛡 MCP 도구 def ↔ dispatch case 불일치(Unknown-tool 갭)를 영구 차단하는 회귀 가드 — UR-0044 의 실질 위험 해소.**

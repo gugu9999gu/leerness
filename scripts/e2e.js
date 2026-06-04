@@ -3816,5 +3816,23 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.320 회귀 (UR-0053): count drift — decisions/lessons 카운터가 코드펜스(```md 템플릿 예시) 제외 (decisions=2 실제1 버그)
+total++;
+{
+  let ok = false;
+  try {
+    const cd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-countdrift-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', cd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'JWT 채택', '--path', cd, '--reason', 'stateless', '--alternatives', 'session', '--impact', '보안'], { encoding: 'utf8', timeout: 20000 });
+    cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', '락은 reentrant', '--path', cd], { encoding: 'utf8', timeout: 20000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'context', '--path', cd, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let dec = null, les = null; try { const j = JSON.parse(r.stdout); dec = j.memory && j.memory.decisions; les = j.memory && j.memory.lessons; } catch {}
+    ok = dec === 1 && les === 1;  // 코드펜스 템플릿 제외 → 실제 1건씩 (이전: decisions=2)
+    fs.rmSync(cd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.320) count drift 수정: decisions/lessons 코드펜스 템플릿 제외 (실제 카운트) (UR-0053)' : '✗ count drift 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

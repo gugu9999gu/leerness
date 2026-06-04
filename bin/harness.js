@@ -15,7 +15,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.319';
+const VERSION = '1.9.320';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3119,6 +3119,7 @@ function _selfTestCases() {
     { name: '텔레메트리 분리: 내부 auto-call(LEERNESS_INTERNAL) usage 집계 제외 + 주요 spawn 마킹 (UR-0051 설치리뷰 1.9.317)', run: () => { const src = read(__filename); const guard = src.includes("process.env.LEERNESS_INTERNAL !== '1'"); const marked = (src.match(/LEERNESS_INTERNAL: '1'/g) || []).length >= 10; const reviewMarked = /'review-request'[\s\S]{0,200}LEERNESS_INTERNAL: '1'/.test(src); return guard && marked && reviewMarked; } },
     { name: 'lib/pure-utils: HTML 파싱 유틸 3종 모듈 분리 + 동작 + 인라인 제거 (UR-0025 1.9.318)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._htmlToText === 'function' && typeof m._extractTitle === 'function' && typeof m._extractLinks === 'function'; const work = m._htmlToText('<p>Hello <b>World</b></p>') === 'Hello World' && m._extractTitle('<html><title>My &amp; Page</title></html>') === 'My & Page' && m._extractLinks('<a href="/a">A</a><a href="https://other.com/b">B</a>', 'https://x.com/').length === 1; const moved = m._htmlToText === _htmlToText && !/^function _htmlToText\(html\) \{/m.test(read(__filename)); return fnOk && work && moved; } },
     { name: 'MCP ToolRegistry 일치성: 모든 도구 def 가 dispatch case 보유 + 고아 case 0 + requiredTier 완비 (UR-0044 1.9.319)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const missing = tools.filter(t => !src.includes("case '" + t.name + "':")); const cases = [...src.matchAll(/case '(leerness_[a-z_]+)':/g)].map(m => m[1]); const defNames = new Set(tools.map(t => t.name)); const orphans = [...new Set(cases)].filter(c => !defNames.has(c)); const tierOk = tools.every(t => typeof t.requiredTier === 'string' && PERMISSION_TIERS.includes(t.requiredTier)); return tools.length >= 83 && missing.length === 0 && orphans.length === 0 && tierOk; } },
+    { name: 'count drift 수정: _countDatedBlocks 코드펜스(템플릿) 제외 + 카운트 사이트 단일화 (UR-0053 1.9.320)', run: () => { const f = _countDatedBlocks; const withTpl = '# D\n\n```md\n### 2026-01-01 — Decision 제목\n- Decision:\n```\n\n### 2026-06-04 — 실제\n- Decision: 실제\n'; const c1 = f(withTpl) === 1; const c0 = f('```md\n### 2026-01-01 — x\n```\n') === 0; const c2 = f('### 2026-01-01 — A\n### 2026-02-02 — B\n') === 2; const src = read(__filename); const wired = src.includes('_countDatedBlocks(read(decisionsPath(root)))') && src.includes('_countDatedBlocks(read(lessonsPath(root)))') && src.includes('_countDatedBlocks(dtext)') && !src.includes('read(decisionsPath(root)).' + 'match(/^### '); return typeof f === 'function' && c1 && c0 && c2 && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -4654,9 +4655,9 @@ function _buildAutoResumePlan(root, opts) {
   // memory surface counts
   const memorySurface = {
     tasksInProgress: rows.filter(r => r.status === 'in-progress').length,
-    decisions: exists(decisionsPath(root)) ? (read(decisionsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0,
+    decisions: exists(decisionsPath(root)) ? _countDatedBlocks(read(decisionsPath(root))) : 0,
     rulesActive: readRules(root).filter(r => r.status === 'active').length,
-    lessons: exists(lessonsPath(root)) ? (read(lessonsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0
+    lessons: exists(lessonsPath(root)) ? _countDatedBlocks(read(lessonsPath(root))) : 0
   };
   return {
     nextRoundVersion: opts.nextRoundVersion || `next after ${currentVersion}`,
@@ -7937,11 +7938,11 @@ function handoff(root) {
       try {
         const rows = readProgressRows(root);
         const inProgressTasks = rows.filter(r => r.status === 'in-progress').length;
-        const decisions = exists(decisionsPath(root)) ? (read(decisionsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0;
+        const decisions = exists(decisionsPath(root)) ? _countDatedBlocks(read(decisionsPath(root))) : 0;
         const rulesActive = readRules(root).filter(r => r.status === 'active').length;
         const planText = exists(planPath(root)) ? read(planPath(root)) : '';
         const planMilestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
-        const lessons = exists(lessonsPath(root)) ? (read(lessonsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0;
+        const lessons = exists(lessonsPath(root)) ? _countDatedBlocks(read(lessonsPath(root))) : 0;
         parts.push(`🧠 mem T${inProgressTasks}/D${decisions}/R${rulesActive}/P${planMilestones}/L${lessons}`);
       } catch {}
       // 8) 1.9.152: 활성 외부 AI CLI 카운트 (1.9.151 복수 선택 결과 반영) — 메인 에이전트가 sub-agent 분배 가능성 즉시 인지
@@ -12817,6 +12818,12 @@ function readSessionCounter(root) {
 function writeSessionCounter(root, c) { writeUtf8(sessionCounterPath(root), JSON.stringify(c, null, 2) + '\n'); }
 
 // 1.9.14 A/D: 결정 블록 추출 — 코드 블록 안의 ### + Template 제외
+// 1.9.320 (UR-0053, 설치리뷰): 날짜 블록(### YYYY-MM-DD) 카운트 단일 진실소스 — 코드펜스(```md 템플릿 예시) 제거 후 카운트.
+//   배경: decisions/lessons 카운터 6곳이 raw regex 로 코드펜스 안 Template 예시까지 세어 count drift(decisions=2 실제1) 발생.
+function _countDatedBlocks(text) {
+  const cleaned = String(text || '').replace(/^```[^\n]*\n[\s\S]*?\n```\s*$/gm, '');  // 코드펜스(템플릿) 제거
+  return (cleaned.match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length;
+}
 function _extractDecisionBlocks(text) {
   // 줄 시작의 ```부터 줄 시작의 ```까지를 코드블록으로 인식 (인라인 백틱 무시)
   const cleaned = String(text || '').replace(/^```[^\n]*\n[\s\S]*?\n```\s*$/gm, '');
@@ -18442,7 +18449,7 @@ function contextCmd(root, opts = {}) {
   let decisionCount = 0;
   if (exists(decFile)) {
     const dtext = read(decFile);
-    decisionCount = (dtext.match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length;
+    decisionCount = _countDatedBlocks(dtext);
     const blocks = _extractDecisionBlocks(dtext);
     recentDecisions = blocks.slice(-3).reverse().map(block => {
       const tm = (block.match(/^### (.+)$/m) || [])[1] || '';
@@ -18456,7 +18463,7 @@ function contextCmd(root, opts = {}) {
     tasksInProgress: rows.filter(r => r.status === 'in-progress').length,
     decisions: decisionCount,
     rulesActive: activeRules.length,
-    lessons: exists(lessonsPath(root)) ? (read(lessonsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0
+    lessons: exists(lessonsPath(root)) ? _countDatedBlocks(read(lessonsPath(root))) : 0
   };
   // 프로젝트 청사진 (1.9.308 UR-0055 2단계): brief 에서 의도/개요/방향이력 회수 (단일 출처)
   const brief = _loadBrief(root);
