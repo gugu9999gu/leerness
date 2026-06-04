@@ -12,7 +12,7 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.297';
+const VERSION = '1.9.298';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -172,7 +172,22 @@ function read(p) {
 }
 function readBuf(p) { return fs.readFileSync(p); }
 function mkdirp(p) { fs.mkdirSync(p, { recursive: true }); }
-function writeUtf8(p, s) { mkdirp(path.dirname(p)); fs.writeFileSync(p, s, { encoding: 'utf8' }); }
+// 1.9.298 (UR-0038, 외부리뷰 3중수렴): 원자적 쓰기 — temp 파일에 기록 후 rename(원자 교체)으로 부분쓰기 손상 방지.
+//   crash/타임아웃 kill/동시쓰기 중에도 대상 파일에 깨진 부분파일이 남지 않음 ('메모리 항상 보존' 코드 보증).
+//   rename 은 동일 디렉토리(=동일 FS) 라 POSIX/NTFS 모두 원자적(Node renameSync = MOVEFILE_REPLACE_EXISTING).
+//   temp 이름은 확장자 끝이 아니라 .tmp-PID-SEQ 라 *.md glob 에 안 걸림. 실패 시 temp 정리.
+let _writeSeq = 0;
+function writeUtf8(p, s) {
+  mkdirp(path.dirname(p));
+  const tmp = `${p}.tmp-${process.pid}-${++_writeSeq}`;
+  try {
+    fs.writeFileSync(tmp, s, { encoding: 'utf8' });
+    fs.renameSync(tmp, p);
+  } catch (e) {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch {}
+    throw e;
+  }
+}
 function append(p, s) { mkdirp(path.dirname(p)); fs.appendFileSync(p, s, 'utf8'); }
 function rel(root, p) { return path.relative(root, p).replace(/\\/g, '/') || '.'; }
 function today() { return new Date().toISOString().slice(0, 10); }
@@ -3018,6 +3033,7 @@ function _selfTestCases() {
     { name: 'lib/catalogs: CAPABILITY/ADAPTERS/REUSE 모듈 단일출처 분리 (UR-0025 1.9.295)', run: () => { const m = require('../lib/catalogs'); return m.CAPABILITY_SURFACE === CAPABILITY_SURFACE && m.ADAPTERS === ADAPTERS && m.REUSE_CATEGORIES === REUSE_CATEGORIES && m.REUSE_CHECKLIST === REUSE_CHECKLIST && m.POWERFUL_COMMANDS === POWERFUL_COMMANDS && Object.keys(m.CAPABILITY_SURFACE).length === 6 && !/const CAPABILITY_SURFACE = \{/.test(read(__filename)); } },
     { name: 'about: 정체성 verb(AI 운영 레이어) + MCP leerness_about 등록 (UR-0030 1.9.296)', run: () => { const id = _leernessIdentity(); const src = read(__filename); return typeof aboutCmd === 'function' && /운영 레이어/.test(id.identity) && id.layers.length === 5 && id.surface.mcpTools >= 81 && require('../lib/mcp-tools').some(t => t.name === 'leerness_about') && /case 'leerness_about':/.test(src) && /cmd === 'about' \|\| cmd === 'identity'/.test(src); } },
     { name: 'lib/mcp-tools: MCP 도구 정의 모듈 단일출처 (_mcpToolCount=모듈 length, Codex #5 영구해소) (UR-0025 1.9.297)', run: () => { const T = require('../lib/mcp-tools'); return Array.isArray(T) && T.length >= 81 && T.every(t => t.name && t.description && t.inputSchema) && T[0].name === 'leerness_handoff' && _mcpToolCount() === T.length && !/const TOOLS = \[/.test(read(__filename)); } },
+    { name: 'writeUtf8: 원자적 쓰기(temp→rename) 손상방지 (UR-0038 외부리뷰 3중수렴 1.9.298)', run: () => { const src = read(__filename); return /function writeUtf8\(p, s\)/.test(src) && /fs\.writeFileSync\(tmp,/.test(src) && /fs\.renameSync\(tmp, p\)/.test(src) && /\.tmp-\$\{process\.pid\}/.test(src) && /fs\.unlinkSync\(tmp\)/.test(src); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }

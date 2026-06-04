@@ -3269,5 +3269,33 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.298 회귀 (UR-0038 외부리뷰): writeUtf8 원자적 쓰기 — 반복 쓰기 후 무손상 + temp 잔여 0
+total++;
+{
+  let ok = false;
+  try {
+    const aDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-atomic-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', aDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    // writeUtf8 경유 명령 반복 (progress-tracker/decisions 갱신)
+    for (let i = 0; i < 3; i++) {
+      cp.spawnSync(process.execPath, [CLI, 'task', 'add', `원자성 테스트 T-${i}`, '--path', aDir], { encoding: 'utf8', timeout: 15000 });
+      cp.spawnSync(process.execPath, [CLI, 'decision', 'add', `결정 ${i}`, '--reason', 'r', '--path', aDir], { encoding: 'utf8', timeout: 15000 });
+    }
+    const pt = fs.readFileSync(path.join(aDir, '.harness', 'progress-tracker.md'), 'utf8');
+    // (1) 3개 task 모두 기록 + 구분자 라인 1개(중복/손상 없음). 라인 기준 카운트(|---|---| 한 줄에 부분매치 다수 방지).
+    const sepLines = pt.split('\n').filter(l => /^\|---\|/.test(l)).length;
+    const tasksOk = /원자성 테스트 T-0/.test(pt) && /원자성 테스트 T-2/.test(pt) && sepLines === 1;
+    // (2) .harness 어디에도 .tmp- 잔여 파일 없음 (rename 완료)
+    const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+    const tmpLeftover = walk(path.join(aDir, '.harness')).filter(f => /\.tmp-\d+-\d+$/.test(f));
+    // (3) 소스에 renameSync 원자 패턴 존재
+    const srcOk = /fs\.renameSync\(tmp, p\)/.test(fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8'));
+    ok = tasksOk && tmpLeftover.length === 0 && srcOk;
+    fs.rmSync(aDir, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.298) writeUtf8 원자적 쓰기: 반복쓰기 무손상 + temp 잔여 0 (UR-0038 외부리뷰)' : '✗ writeUtf8 원자성 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

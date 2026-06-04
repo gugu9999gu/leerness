@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.298 — 2026-06-04 — UR-0038: writeUtf8 원자적 쓰기 (외부 AI 리뷰 3중수렴 #1)
+
+**🔒 외부 AI 리뷰 3종(Codex gpt-5.5 · Sonnet 4.8 · Opus 4.8)이 공통 high로 지적한 최우선 신뢰성 이슈 해소 — 모든 상태 파일 쓰기를 원자적(temp→rename)으로 전환해 부분쓰기 손상을 근본 차단. "메모리 항상 보존" 약속을 코드로 보증.**
+
+### 배경
+세 리뷰가 독립적으로 동일 지적: `writeUtf8()`(중앙 쓰기 헬퍼, 109곳 사용)가 `fs.writeFileSync` 직접 호출이라 crash/타임아웃 kill/동시쓰기 중 **부분 기록으로 상태 파일이 손상**될 수 있음. 실제로 1.9.293에서 progress-tracker.md 69줄 손상 전례. README/FAQ가 "사용자 메모리 항상 보존"을 핵심 약속으로 내세우나 코드 보증이 없었음.
+
+### 구현 (UR-0038 — 원자적 쓰기 부분)
+1. **`writeUtf8()` 원자화** — temp 파일(`<path>.tmp-<pid>-<seq>`)에 기록 후 `fs.renameSync(tmp, path)` 원자 교체. rename 은 동일 디렉토리(=동일 FS)라 POSIX/NTFS 모두 원자적(Node renameSync = MOVEFILE_REPLACE_EXISTING). 109개 모든 호출처(progress-tracker/decisions/rules/plan/session-handoff/.leerness 상태)가 자동 보호.
+2. **실패 안전** — 쓰기 실패 시 temp 정리(unlink) 후 throw. temp 이름이 확장자 끝이 아니라(`.tmp-PID-SEQ`) `*.md` glob 에 안 걸림(파서 오염 방지).
+3. selftest 45→46 (원자 패턴 소스 검증) · e2e 242→243 (반복쓰기 후 무손상 + 헤더 1개 + temp 잔여 0 실측).
+
+### 검증
+- **selftest 46/46 PASS** · **E2E 243/243 PASS** (회귀 0).
+- 실측: init + task add×3 + decision add×3 반복 후 progress-tracker 정확(중복/손상 0) · `.harness` 전체에 `.tmp-` 잔여 0 · 헤더 1줄 유지.
+
+### 남은 부분 (UR-0038 후속)
+- 동시 writer **lost-update**(read-modify-write 경합) 방지를 위한 상태 파일 락 — 별도 후속 라운드(원자 쓰기로 손상 클래스는 이미 제거됨, 락은 rare 한 동시쓰기 유실 대비).
+
 ## 1.9.297 — 2026-06-04 — UR-0025 (5단계): MCP 도구 정의 → lib/mcp-tools.js 단일출처 (Codex #5 영구 해소)
 
 **🧩 모놀리스 분리 5단계 — 첫 "기능 영역" 분리. MCP 도구 정의 81종을 단일출처 모듈로 분리하며 `_mcpToolCount` 의 `__filename` regex self-count(Codex #5 취약성)를 영구 해소.**
