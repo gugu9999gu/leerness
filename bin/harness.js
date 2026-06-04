@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.309';
+const VERSION = '1.9.310';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3081,6 +3081,7 @@ function _selfTestCases() {
     { name: 'brief: 프로젝트 청사진 set/show/export + README 개요 섹션 (UR-0055 사용자명시 1.9.307)', run: () => { const src = read(__filename); const fnOk = typeof briefCmd === 'function' && typeof _loadBrief === 'function' && typeof _briefBlueprint === 'function' && _BRIEF_FIELDS.length === 10; const b = { project: 'X', intro: 'i', purpose: 'p', problem: '', features: ['f1', 'f2'], stack: ['s'], architecture: '', users: [], success: [], nonGoals: [], currentState: '' }; const bp = _briefBlueprint('.', b); const bpOk = /Blueprint/.test(bp) && /소개 \(Intro\)/.test(bp) && /f1/.test(bp) && /신규 프로젝트 시작 가이드/.test(bp); const rb = _briefReadmeBlock(b); const rbOk = rb.includes(BRIEF_START) && rb.includes(BRIEF_END) && /프로젝트 개요/.test(rb) && /\*\*목적\*\*/.test(rb); return fnOk && bpOk && rbOk && /if \(cmd === 'brief'\)/.test(src); } },
     { name: 'brief 2단계: update --direction 이력 + MCP leerness_brief + context 통합 (UR-0055 1.9.308)', run: () => { const src = read(__filename); const b = { project: 'X', intro: '', purpose: '', problem: '', features: [], stack: [], architecture: '', users: [], success: [], nonGoals: [], currentState: '', directionHistory: ['2026-06-04: 확대'] }; const bpOk = /개발 방향 이력/.test(_briefBlueprint('.', b)) && /최근 개발 방향 변경/.test(_briefReadmeBlock(b)); const histWired = /sub === 'update'/.test(src) && /brief\.directionHistory \|\| \[\]\), `\$\{today\(\)\}/.test(src); const mcpOk = require('../lib/mcp-tools').some(t => t.name === 'leerness_brief'); const ctxOk = /brief: \{ intro:/.test(src); return bpOk && histWired && mcpOk && ctxOk; } },
     { name: 'verify-claim: done 주장 evidence 기본강제 + --lenient + MCP/json 도달 (UR-0048 설치리뷰 critical 1.9.309)', run: () => { const src = read(__filename); const def = /const mustHaveEvidence = !has\('--lenient'\) && \(isDoneClaim \|\| has\('--require-evidence'\)\)/.test(src); const threshold = /has\('--require-evidence'\) \? evq\.ok : \(evq\.hasFile \|\| evq\.hasTest \|\| evq\.hasLog\)/.test(src); const jsonWired = /evidenceComplete:/.test(src) && /!evidenceQualityOk\) return process\.exit\(1\)/.test(src); const mcpLenient = !!require('../lib/mcp-tools').find(t => t.name === 'leerness_verify_claim').inputSchema.properties.lenient; return def && threshold && jsonWired && mcpLenient; } },
+    { name: '입력 스키마 검증: task status/rule trigger 무효값 거부 + every-round 보존 (UR-0046 설치리뷰 1.9.310)', run: () => { const src = read(__filename); const sets = TASK_STATUSES.has('done') && TASK_STATUSES.has('in-progress') && !TASK_STATUSES.has('nonsense') && RULE_TRIGGERS.has('every-round') && RULE_TRIGGERS.has('every-update') && !RULE_TRIGGERS.has('not-a-trigger'); const helper = typeof _validateChoice === 'function' && _validateChoice('done', TASK_STATUSES, 'x') === true; const wired = /_validateChoice\(arg\('--status', null\), TASK_STATUSES/.test(src) && /_validateChoice\(trigger, RULE_TRIGGERS/.test(src); return sets && helper && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6191,6 +6192,7 @@ function planListCmd(root, opts = {}) {
 }
 
 function planAdd(root, text) {
+  if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'plan status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
   const status = arg('--status','planned'), progress = arg('--progress','0'), nextAction = arg('--next', '다음 액션 작성');
   // 1.9.303 (UR-0043): M-id append + T-id upsert 를 하나의 락으로 — 동시 plan add ID 충돌 방지.
   const { id, tid } = _withLock(progressPath(root), () => {
@@ -6296,7 +6298,18 @@ function taskList(root) {
   log('|---|---|---|---|---|---|');
   for (const r of filtered) log(`| ${r.id} | ${r.status} | ${r.request} | ${r.evidence} | ${r.nextAction} | ${r.updated} |`);
 }
+// 1.9.310 (UR-0046, 설치리뷰 3중수렴): CLI/MCP 입력 스키마 검증 — 무효 status/trigger 거부(--force 우회).
+//   이전: task --status nonsense / rule --trigger 오타가 그대로 등록돼 상태/정책 신뢰성 훼손.
+const TASK_STATUSES = new Set(['requested', 'planned', 'in-progress', 'waiting', 'on-hold', 'blocked', 'incomplete', 'done', 'dropped', 'completed', 'verified']);
+const RULE_TRIGGERS = new Set(['every-session', 'every-update', 'every-commit', 'every-round', 'session-start', 'session-close', 'pre-publish']);
+function _validateChoice(value, validSet, label) {
+  if (value == null || validSet.has(String(value)) || has('--force')) return true;
+  fail(`무효한 ${label}: "${value}" — 유효값: ${[...validSet].join(', ')} (커스텀 허용: --force)`);
+  return false;
+}
 function taskAdd(root, text) {
+  // 1.9.310 (UR-0046): --status 스키마 검증 (무효값 거부, --force 우회)
+  if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'task status')) { process.exitCode = 1; return; }
   // 1.9.212: 멱등성 — 같은 request 텍스트 + 활성 상태 (requested/in-progress) 이미 존재 시 skip (사용자 명시)
   // progress-tracker.md 포맷: | T-XXXX | status | request | evidence | nextAction | date |
   if (!has('--force') && text && text.trim()) {
@@ -6368,6 +6381,7 @@ function taskAdd(root, text) {
 }
 function taskUpdate(root, id) {
   if (!id) return fail('id required (e.g., task update T-0001 --status in-progress)');
+  if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'task status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
   const rows = readProgressRows(root);
   if (!rows.find(r => r.id === id)) { fail(`task ${id} not found in progress-tracker.md`); return; }
   const patch = { id };
@@ -13978,10 +13992,8 @@ function ruleAdd(root, description) {
   if (!description) return fail('rule description required (e.g., rule add "매 업데이트마다 버전 bump" --trigger every-update)');
   if (!exists(rulesPath(root))) writeRules(root, []);
   const trigger = arg('--trigger', 'every-session');
-  const validTriggers = new Set(['every-session','every-update','every-commit','session-start','session-close','pre-publish']);
-  if (!validTriggers.has(trigger)) {
-    warn(`unknown trigger "${trigger}" — 사용 가능: ${[...validTriggers].join(', ')}. 그대로 등록합니다.`);
-  }
+  // 1.9.310 (UR-0046): 무효 trigger 거부 (이전엔 warn 후 등록 → 오타 룰 등록됨). --force 우회.
+  if (!_validateChoice(trigger, RULE_TRIGGERS, 'rule trigger')) { process.exitCode = 1; return; }
   const rules = readRules(root);
   // 1.9.212: 멱등성 보장 — 같은 description + trigger + active 상태 이미 존재 시 skip (사용자 명시)
   if (!has('--force')) {

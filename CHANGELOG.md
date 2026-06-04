@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.310 — 2026-06-04 — UR-0046: CLI/MCP 입력 스키마 검증 (설치리뷰 3중수렴 high)
+
+**🛡 무효한 task status / rule trigger 가 그대로 등록돼 상태·정책 신뢰성을 훼손하던 결함 수정 — 세 모델(Codex#2·Sonnet#2) 공통 지적.**
+
+### 배경 (설치리뷰)
+실측: `task update --status nonsense` 가 그대로 적용(health 도 정상으로 보고), `rule add --trigger not-a-trigger` 가 경고만 하고 등록. "운영 레이어의 핵심인 상태/정책 신뢰성이 깨짐"(Codex). 게다가 기존 `validTriggers` 가 **every-round 누락**(R-0001 이 실제 사용 중) — warn-and-register 라 통과됐지만 불완전.
+
+### 구현 (UR-0046)
+1. **`TASK_STATUSES`(11종) / `RULE_TRIGGERS`(7종, every-round 포함) 모듈 상수 + `_validateChoice` 헬퍼** — 무효값은 `fail`(exit 1) + 유효값 안내, `--force` 우회.
+2. **task add/update + plan add: `--status` 검증** — 무효 status 거부(이전 무검증).
+3. **rule add: `--trigger` 검증** — warn-and-register → **거부**(exit 1). every-round 를 RULE_TRIGGERS 에 포함해 R-0001(every-round) 등록 보존.
+4. selftest 57→58 · e2e 254→255.
+
+### 검증
+- **selftest 58/58 PASS** · **E2E 255/255 PASS** (회귀 0).
+- 실측: `task --status nonsense` → exit 1 · `--status in-progress` → 0 · `--status weird --force` → 0(우회) · `rule --trigger 오타` → exit 1 · `--trigger every-round` → 0(**R-0001 보존**) · `--trigger every-update` → 0.
+- 범위: status/trigger enum 검증. decision/기타 스키마는 후속.
+
 ## 1.9.309 — 2026-06-04 — UR-0048: verify-claim 거짓완료 차단 기본화 (설치리뷰 Opus critical)
 
 **🔴 제품 핵심 가치(거짓완료 차단)가 기본값·MCP 에서 무력하던 자기모순 수정 — 증거 0 인 done 주장이 기본 통과하고 MCP 로는 강한 게이트에 도달조차 못 하던 critical 결함 해소.**

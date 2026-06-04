@@ -3588,5 +3588,26 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.310 회귀 (UR-0046 설치리뷰): 입력 스키마 검증 — 무효 status/trigger 거부, 유효/--force 통과, every-round 보존
+total++;
+{
+  let ok = false;
+  try {
+    const vd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-val-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', vd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const st = (...a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: vd, encoding: 'utf8', timeout: 20000 }).status;
+    const badStatus = st('task', 'add', 't', '--path', vd, '--status', 'nonsense') === 1;          // 무효 거부
+    const goodStatus = st('task', 'add', 't2', '--path', vd, '--status', 'in-progress') === 0;     // 유효 통과
+    const forceStatus = st('task', 'add', 't3', '--path', vd, '--status', 'weird', '--force') === 0; // --force 우회
+    const badTrigger = st('rule', 'add', 'r', '--path', vd, '--trigger', 'not-a-trigger') === 1;   // 무효 거부
+    const everyRound = st('rule', 'add', 'r2', '--path', vd, '--trigger', 'every-round') === 0;    // every-round 보존(R-0001)
+    const everyUpdate = st('rule', 'add', 'r3', '--path', vd, '--trigger', 'every-update') === 0;  // 유효 통과
+    ok = badStatus && goodStatus && forceStatus && badTrigger && everyRound && everyUpdate;
+    fs.rmSync(vd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.310) 입력 스키마 검증: 무효 status/trigger 거부 + 유효/--force/every-round 통과 (UR-0046)' : '✗ 입력 스키마 검증 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
