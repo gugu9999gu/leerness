@@ -3530,5 +3530,37 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.308 회귀 (UR-0055 2단계): brief update --direction 이력 + context 통합 + MCP leerness_brief
+total++;
+{
+  let ok = false;
+  try {
+    const b2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-brief2-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', b2, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const run = (...a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: b2, encoding: 'utf8', timeout: 20000 });
+    run('brief', 'set', '--path', b2, '--intro', '앱', '--features', 'CRUD');
+    run('brief', 'update', '--path', b2, '--direction', 'AI 자동분류 확대');
+    run('brief', 'update', '--path', b2, '--direction', '모바일 지원 추가');
+    const md = fs.readFileSync(path.join(b2, '.harness', 'project-brief.md'), 'utf8');
+    const histOk = /## Direction History/.test(md) && /AI 자동분류 확대/.test(md) && /모바일 지원 추가/.test(md);  // 이력 누적
+    const readme = fs.readFileSync(path.join(b2, 'README.md'), 'utf8');
+    const readmeOk = /최근 개발 방향 변경/.test(readme) && /모바일 지원 추가/.test(readme);
+    const exp = run('brief', 'export', '--path', b2);
+    const expOk = /개발 방향 이력/.test(exp.stdout) && /AI 자동분류 확대/.test(exp.stdout);
+    // context --path 가 brief 노출
+    const ctx = run('context', '--path', b2, '--json');
+    const cj = JSON.parse(ctx.stdout);
+    const ctxOk = cj.brief && cj.brief.intro === '앱' && cj.brief.features.includes('CRUD') && /모바일 지원/.test(cj.brief.latestDirection || '');
+    // MCP leerness_brief
+    const ml = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: b2, encoding: 'utf8', timeout: 15000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_brief', arguments: { path: b2 } } }) + '\n' });
+    let mcpOk = false;
+    try { const r = JSON.parse(ml.stdout.split('\n').filter(Boolean)[0]); const t = JSON.parse(r.result.content[0].text); mcpOk = t.directionHistory.length === 2 && t.features.includes('CRUD'); } catch {}
+    ok = histOk && readmeOk && expOk && ctxOk && mcpOk;
+    fs.rmSync(b2, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.308) brief 2단계: update --direction 이력누적 + context 통합 + MCP leerness_brief (UR-0055)' : '✗ brief 2단계 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

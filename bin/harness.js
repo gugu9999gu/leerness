@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.307';
+const VERSION = '1.9.308';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3079,6 +3079,7 @@ function _selfTestCases() {
     { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
     { name: 'exit code 일관성: fail()→exitCode 1 + unknown 명령 안내 (UR-0045 설치리뷰 1.9.306)', run: () => { const src = read(__filename); return /function fail\(s\) \{ log\('✗ ' \+ s\); process\.exitCode = 1; \}/.test(src) && /알 수 없는 명령: \$\{cmd\}/.test(src) && /if \(cmd === 'help' \|\| cmd === 'commands'/.test(src); } },
     { name: 'brief: 프로젝트 청사진 set/show/export + README 개요 섹션 (UR-0055 사용자명시 1.9.307)', run: () => { const src = read(__filename); const fnOk = typeof briefCmd === 'function' && typeof _loadBrief === 'function' && typeof _briefBlueprint === 'function' && _BRIEF_FIELDS.length === 10; const b = { project: 'X', intro: 'i', purpose: 'p', problem: '', features: ['f1', 'f2'], stack: ['s'], architecture: '', users: [], success: [], nonGoals: [], currentState: '' }; const bp = _briefBlueprint('.', b); const bpOk = /Blueprint/.test(bp) && /소개 \(Intro\)/.test(bp) && /f1/.test(bp) && /신규 프로젝트 시작 가이드/.test(bp); const rb = _briefReadmeBlock(b); const rbOk = rb.includes(BRIEF_START) && rb.includes(BRIEF_END) && /프로젝트 개요/.test(rb) && /\*\*목적\*\*/.test(rb); return fnOk && bpOk && rbOk && /if \(cmd === 'brief'\)/.test(src); } },
+    { name: 'brief 2단계: update --direction 이력 + MCP leerness_brief + context 통합 (UR-0055 1.9.308)', run: () => { const src = read(__filename); const b = { project: 'X', intro: '', purpose: '', problem: '', features: [], stack: [], architecture: '', users: [], success: [], nonGoals: [], currentState: '', directionHistory: ['2026-06-04: 확대'] }; const bpOk = /개발 방향 이력/.test(_briefBlueprint('.', b)) && /최근 개발 방향 변경/.test(_briefReadmeBlock(b)); const histWired = /sub === 'update'/.test(src) && /brief\.directionHistory \|\| \[\]\), `\$\{today\(\)\}/.test(src); const mcpOk = require('../lib/mcp-tools').some(t => t.name === 'leerness_brief'); const ctxOk = /brief: \{ intro:/.test(src); return bpOk && histWired && mcpOk && ctxOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -16931,6 +16932,9 @@ function mcpServeCmd(root) {
           case 'leerness_honesty_check':
             cliArgs = ['honesty-check', ...(args.text ? ['--text', String(args.text)] : [String(args.taskId || '')]), '--path', targetPath, '--json'];
             break;
+          case 'leerness_brief':
+            cliArgs = ['brief', args.export === true ? 'export' : 'show', '--path', targetPath, ...(args.export === true ? [] : ['--json'])];
+            break;
           default:
             return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         }
@@ -18240,7 +18244,7 @@ const _BRIEF_FIELDS = [
 ];
 function _briefPath(root) { return path.join(absRoot(root), '.harness', 'project-brief.md'); }
 function _loadBrief(root) {
-  const brief = { project: detectProjectName(absRoot(root)) };
+  const brief = { project: detectProjectName(absRoot(root)), directionHistory: [] };
   for (const f of _BRIEF_FIELDS) brief[f.key] = f.multi ? [] : '';
   const p = _briefPath(root);
   if (!exists(p)) return brief;
@@ -18249,6 +18253,7 @@ function _loadBrief(root) {
     if (!m) continue;
     const head = m[1].trim(), body = m[2].trim();
     if (head === 'Project') { brief.project = (body.replace(/^[-*]\s*/, '').split('\n')[0] || '').trim() || brief.project; continue; }
+    if (head === 'Direction History') { brief.directionHistory = body.split('\n').map(l => l.replace(/^[-*]\s*/, '').trim()).filter(l => l && l !== '-'); continue; }
     const f = _BRIEF_FIELDS.find(x => x.h === head);
     if (!f) continue;
     if (f.multi) brief[f.key] = body.split('\n').map(l => l.replace(/^[-*]\s*/, '').trim()).filter(l => l && l !== '-' && !/업데이트하세요/.test(l));
@@ -18264,6 +18269,8 @@ function _saveBrief(root, brief) {
     if (f.multi) body += (v && v.length ? v.map(x => `- ${x}`).join('\n') : '-') + '\n';
     else body += (v ? v : '- 이 항목을 실제 내용으로 업데이트하세요.') + '\n';
   }
+  // 1.9.308 (UR-0055 2단계): 개발 방향 변경/확대 이력 (append-only, 날짜별)
+  if (brief.directionHistory && brief.directionHistory.length) body += `\n## Direction History\n` + brief.directionHistory.map(x => `- ${x}`).join('\n') + '\n';
   writeUtf8(_briefPath(root), fm('project-brief', ['프로젝트 목적 확인', '신규 기능 판단', '계획 수립'], ['프로젝트 목적 변경', '사용자/범위 변경'], body));
 }
 function _briefFilled(brief) { return _BRIEF_FIELDS.filter(f => (f.multi ? (brief[f.key] && brief[f.key].length) : brief[f.key])).length; }
@@ -18274,6 +18281,7 @@ function _briefReadmeBlock(brief) {
   if (brief.problem) L.push(`**해결 문제**: ${brief.problem}`, '');
   if (brief.features && brief.features.length) { L.push('**핵심 기능**'); brief.features.forEach(x => L.push(`- ${x}`)); L.push(''); }
   if (brief.stack && brief.stack.length) L.push(`**기술 스택**: ${brief.stack.join(', ')}`, '');
+  if (brief.directionHistory && brief.directionHistory.length) { L.push('**최근 개발 방향 변경**'); brief.directionHistory.slice(-3).forEach(x => L.push(`- ${x}`)); L.push(''); }
   if (_briefFilled(brief) === 0) L.push('_아직 개요 미입력 — `leerness brief set --intro "..." --purpose "..."` 로 작성._', '');
   L.push('<sub>이 섹션은 `leerness brief` 로 관리됩니다. 전체 청사진(복사용): `leerness brief export`.</sub>', BRIEF_END);
   return L.join('\n');
@@ -18298,6 +18306,7 @@ function _briefBlueprint(root, brief) {
   sec('아키텍처 (Architecture)', brief.architecture); sec('사용자 (Users)', brief.users, true);
   sec('성공 기준 (Success Criteria)', brief.success, true); sec('비목표 (Non-Goals)', brief.nonGoals, true);
   sec('현재 상태 (Current State)', brief.currentState);
+  sec('개발 방향 이력 (Direction History)', brief.directionHistory, true);
   L.push('---', '## 신규 프로젝트 시작 가이드', '', '1. 위 소개·목적·기능·아키텍처·스택을 신규 레포의 계획으로 복사.', '2. `leerness init .` 후 이 파일을 `.harness/project-brief.md` 로 복사하거나 `leerness brief set` 으로 재입력.', '3. Features 를 `leerness plan add` / `leerness task add` 로 분해.', '');
   return L.join('\n');
 }
@@ -18334,7 +18343,18 @@ function briefCmd(root, sub) {
     log(bp);
     return;
   }
-  fail(`brief: 알 수 없는 sub: ${sub} (set | show | export)`);
+  if (sub === 'update') {
+    // 1.9.308 (UR-0055 2단계): 개발 방향 변경/확대 이력 추가 (날짜별 append).
+    const dir = arg('--direction', null);
+    if (dir == null) { fail('brief update --direction "<개발 방향 변경/확대 내용>" 필요'); return; }
+    const brief = _loadBrief(root);
+    brief.directionHistory = [...(brief.directionHistory || []), `${today()}: ${dir}`];
+    _saveBrief(root, brief);
+    _syncBriefReadme(root, brief);
+    ok(`방향 이력 추가 (총 ${brief.directionHistory.length}건) → project-brief.md Direction History`);
+    return;
+  }
+  fail(`brief: 알 수 없는 sub: ${sub} (set | show | export | update)`);
 }
 function contextCmd(root, opts = {}) {
   root = absRoot(root);
@@ -18364,17 +18384,14 @@ function contextCmd(root, opts = {}) {
     rulesActive: activeRules.length,
     lessons: exists(lessonsPath(root)) ? (read(lessonsPath(root)).match(/^### \d{4}-\d{2}-\d{2}/gm) || []).length : 0
   };
-  // 프로젝트 의도 (best-effort) — .harness/project-brief.md 의 ## Purpose 첫 줄
-  let intent = null;
-  const briefPath = path.join(root, '.harness', 'project-brief.md');
-  if (exists(briefPath)) {
-    const m = read(briefPath).match(/##\s*Purpose\s*\n+\s*[-*]?\s*([^\n#].*)/);
-    if (m && !/업데이트하세요/.test(m[1])) intent = m[1].trim().slice(0, 200);
-  }
+  // 프로젝트 청사진 (1.9.308 UR-0055 2단계): brief 에서 의도/개요/방향이력 회수 (단일 출처)
+  const brief = _loadBrief(root);
+  const intent = (brief.purpose || brief.intro || '').slice(0, 200) || null;
   const ctx = {
     schemaVersion: 1,
     version: VERSION,
-    project: { root, intent },
+    project: { root, name: brief.project, intent },
+    brief: { intro: brief.intro || null, purpose: brief.purpose || null, features: brief.features || [], stack: brief.stack || [], latestDirection: (brief.directionHistory || []).slice(-1)[0] || null, filled: _briefFilled(brief) },
     currentTask: active ? { id: active.id, request: (active.request || '').slice(0, 200), status: active.status, nextAction: (active.nextAction || '').slice(0, 160) || null } : null,
     openRequests: { count: openReqs.length, items: openReqs.slice(0, 5).map(r => ({ id: r.id, text: (r.text || '').slice(0, 120) })) },
     recentDecisions,
@@ -18389,6 +18406,7 @@ function contextCmd(root, opts = {}) {
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   log(cy(`# leerness context (1.9.292) — 에이전트 온보딩 컨텍스트 (v${VERSION})`));
   if (intent) log(`  🎯 의도: ${intent}`);
+  if (ctx.brief.intro || ctx.brief.features.length) log(dm(`  📘 청사진: ${ctx.brief.intro || ''}${ctx.brief.features.length ? ` · 기능 ${ctx.brief.features.length}` : ''}${ctx.brief.latestDirection ? ` · 최근방향 ${ctx.brief.latestDirection.slice(0, 50)}` : ''} (leerness brief show)`));
   log('');
   if (ctx.currentTask) {
     log(gr(`▶ 현재 작업: ${ctx.currentTask.id} — ${ctx.currentTask.request}`));

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.308 — 2026-06-04 — UR-0055 (2단계 완료): 개발 방향 이력 + context/MCP 청사진 통합
+
+**📘 프로젝트 청사진 기능 완성 — 개발 방향 변경/확대 이력 누적 + 에이전트가 청사진을 1콜로 회수(context/MCP). 사용자 요청 "개발 방향이 변경/확대될 때 업데이트" 완전 충족.**
+
+### 구현 (UR-0055 2단계)
+1. **`leerness brief update --direction "..."`** — 개발 방향 변경/확대를 날짜별 이력으로 누적(`## Direction History` append-only). README `**최근 개발 방향 변경**`(최근 3건) + blueprint export `개발 방향 이력` 섹션에 반영 → 프로젝트 진화 추적.
+2. **context 청사진 통합** — `contextCmd` 가 `_loadBrief` 단일출처로 intent + brief 요약(intro/features/최근방향) 노출. 에이전트가 작업 시작 시 프로젝트 정체성을 1콜로 파악.
+3. **MCP `leerness_brief` (83번째 도구, read-only)** — `{ path?, export? }` → 구조화 청사진(show) 또는 복사용 blueprint(export). 외부 에이전트가 "이 프로젝트가 무엇이고 어디로 가는가" 회수.
+4. selftest 55→56 · e2e 252→253.
+
+### 검증
+- **selftest 56/56 PASS** · **E2E 253/253 PASS** (회귀 0).
+- 실측: `brief update --direction` ×2 → Direction History 2건 누적 + README 최근방향 + export 이력 · `context --json` brief.latestDirection 노출 · MCP leerness_brief 가 directionHistory/features 반환.
+
+### 🎉 UR-0055 완료 (사용자 명시 — 프로젝트 청사진)
+- 1단계(1.9.307): brief set/show/export + README 개요 섹션
+- 2단계(1.9.308): update --direction 이력 + context/MCP 통합
+- 결과: 프로젝트 개요/소개/목적/기능을 README 에 유지·업데이트 + 복사하면 신규 프로젝트를 기초부터 재시작할 수 있는 blueprint.
+
 ## 1.9.307 — 2026-06-04 — UR-0055 (1단계): 프로젝트 청사진 brief (README 개요 + 복사용 blueprint)
 
 **📘 사용자 명시 — 프로젝트 개요/소개/목적/기능을 README 에 작성·유지하고, 그 내용만 복사하면 신규 프로젝트를 기초부터 재시작할 수 있는 자기완결 청사진(blueprint) 생성. 기존 `.harness/project-brief.md` 비파괴 확장.**
