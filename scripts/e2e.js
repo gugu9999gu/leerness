@@ -3799,5 +3799,22 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.319 회귀 (UR-0044): MCP ToolRegistry 일치성 — tools/list 수 = def 수 + 대표 도구 dispatch(Unknown tool 아님)
+total++;
+{
+  let ok = false;
+  try {
+    const toolsLen = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools.js')).length;
+    const rList = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 10000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n' });
+    let listOk = false; try { const t = JSON.parse(rList.stdout.split('\n').filter(Boolean)[0]).result.tools; listOk = t.length === toolsLen && toolsLen >= 83; } catch {}
+    // 대표 read-only 도구 dispatch → -32601(Unknown tool) 아니어야 (switch 매핑 존재 확인)
+    const callOne = (name) => { const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 15000, input: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: {} } }) + '\n' }); try { const j = JSON.parse(r.stdout.split('\n').filter(Boolean)[0]); return !(j.error && j.error.code === -32601); } catch { return false; } };
+    const dispatchOk = callOne('leerness_about') && callOne('leerness_commands') && callOne('leerness_pulse');
+    ok = listOk && dispatchOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.319) MCP ToolRegistry 일치성: tools/list=def 수 + 대표 도구 dispatch 정상 (UR-0044)' : '✗ ToolRegistry 일치성 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

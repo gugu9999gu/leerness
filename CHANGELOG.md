@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.319 — 2026-06-04 — UR-0044(가드): MCP ToolRegistry 일치성 회귀 가드
+
+**🛡 MCP 도구 def ↔ dispatch case 불일치(Unknown-tool 갭)를 영구 차단하는 회귀 가드 — UR-0044 의 실질 위험 해소.**
+
+### 배경 (UR-0044 재평가)
+UR-0044 원안은 "83-case switch 의 cliArgs 매핑을 도구 def 로 이전". 조사 결과:
+- 현재 일치성 **갭 0**(83 def 모두 case 보유, 고아 case 0) — 즉시 버그는 없음.
+- 진짜 위험은 **미래 드리프트**: mcp-tools.js 에 def 추가하고 switch case 누락 시 런타임에 조용히 `Unknown tool` 반환(테스트 부재).
+- 전면 이전(인라인 230줄, MCP critical 경로)은 low 우선순위 대비 이동 위험이 큼 → **위험을 먼저 가드**하고 이전은 후속(계획).
+
+### 구현 (UR-0044 가드)
+1. **selftest 일치성 가드**: 모든 도구 def 가 dispatch `case` 보유 + 고아 case 0 + 모든 def 의 `requiredTier` 가 유효 tier(8종). 미래 def/case 드리프트 즉시 검출.
+2. **e2e 런타임 스모크**: `tools/list` 수 = def 수(83) + 대표 도구(about/commands/pulse) dispatch 가 `-32601`(Unknown) 아님.
+3. selftest 66→67 · e2e 263→264.
+
+### 검증
+- **selftest 67/67 PASS** · **E2E 264/264 PASS** (회귀 0).
+- 실측: 83 def ↔ 83 case 1:1 일치, 고아 0, tier 완비 · tools/list=83 · about/commands/pulse dispatch 정상.
+- 범위: 일치성·tier 가드(위험 해소). 매핑의 tool-def 물리적 이전은 후속(가드가 안전망 제공).
+
 ## 1.9.318 — 2026-06-04 — UR-0025: HTML 파싱 유틸 모듈 분리 + 락 테스트 격리
 
 **🧩 점진적 비파괴 모듈화(UR-0025) 한 단계 + pre-wake-audit critical 조사 결과 정리.**
