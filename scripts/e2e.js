@@ -3609,5 +3609,35 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.311 회귀 (UR-0047 설치리뷰): init 가드 — 미초기화 디렉토리 write 차단, .harness 미생성, --force 우회, init 후 정상
+total++;
+{
+  let ok = false;
+  try {
+    // dir1: 미초기화 7개 write 차단(exit 1) + .harness 미생성 + --force 우회
+    const ig = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-initguard-'));
+    const st = (...a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', ig], { cwd: ig, encoding: 'utf8', timeout: 20000 }).status;
+    const blocked = st('task', 'add', 't') === 1
+      && st('task', 'update', 'T-0001', '--status', 'done') === 1
+      && st('rule', 'add', 'r', '--trigger', 'every-update') === 1
+      && st('decision', 'add', 'd') === 1
+      && st('plan', 'add', 'p') === 1
+      && st('lesson', 'save', 'l') === 1
+      && st('brief', 'set', '--intro', 'x') === 1;
+    const stateOk = st('state', 'start', 'g') === 0;              // state 는 .leerness substrate(standalone) → 가드 미적용(0)
+    const noHarness = !fs.existsSync(path.join(ig, '.harness'));   // .harness write 차단 시 부분 .harness 미생성
+    const forced = st('task', 'add', 'tf', '--force') === 0;       // --force 우회
+    fs.rmSync(ig, { recursive: true, force: true });
+    // dir2: init 후 정상 write
+    const ig2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-initguard2-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', ig2, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const afterInit = cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'ti', '--path', ig2], { cwd: ig2, encoding: 'utf8', timeout: 20000 }).status === 0;
+    fs.rmSync(ig2, { recursive: true, force: true });
+    ok = blocked && stateOk && noHarness && forced && afterInit;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.311) init 가드: 미초기화 .harness write 7종 차단 + state(.leerness) 예외 + --force 우회 + init 후 정상 (UR-0047)' : '✗ init 가드 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

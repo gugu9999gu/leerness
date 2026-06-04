@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.311 — 2026-06-04 — UR-0047: init 가드 (설치리뷰 3중수렴 high)
+
+**🛡 미초기화 디렉토리에서 write 명령이 부분 `.harness`(progress-tracker·cache·runs)만 생성해 "반쪽 설치" 상태를 만들던 결함 수정.**
+
+### 배경 (설치리뷰)
+실측: 깨끗한(미초기화) 폴더에서 `leerness task add` 가 곧바로 `.harness/{cache,progress-tracker.md,runs}` 를 생성 — `init` 없이 banner/handoff/doctor 가 혼란스러운 반쪽 상태로 동작. "write 진입점이 init 여부를 확인하지 않는다"(Codex#2·Sonnet#2·Opus#2 공통).
+
+### 구현 (UR-0047)
+1. **`_isInitialized(root)` — 워크스페이스-인식 판별**: 활성 워크스페이스(`.harness` 기본 / 마이그레이션 시 `.leerness`)의 강마커(`HARNESS_VERSION`/`guideline.md`) 또는 루트 `AGENTS.md` 중 하나라도 있으면 초기화로 간주(fail-open, 레거시·마이그레이션 호환).
+2. **`_requireInit(root, cmd)` 가드**를 `.harness` write 7종 진입점에 적용 — **task add / task update / plan add / decision add / rule add / lesson save / brief set**. 미초기화 시 `fail`(exit 1) + `leerness init .` 안내, **`--force` 우회**.
+3. **state(`.leerness` substrate)는 가드 제외** — start→record→verify→handoff 는 standalone 설계라 `.harness` init 과 무관(회귀 방지).
+4. selftest 58→59 · e2e 255→256.
+
+### 검증
+- **selftest 59/59 PASS** · **E2E 256/256 PASS** (회귀 0).
+- 실측: 미초기화 `task add` → exit 1 + `.harness` 미생성 · 7종 write 모두 차단 · `task add --force` → 0(우회) · init 후 7종 모두 → 0 · 레거시(HARNESS_VERSION 없이 AGENTS.md만) → 통과 · `state start`(미초기화) → 0(`.leerness` 만 생성).
+- 범위: `.harness` 메모리/계획 write 진입점. read/show/list·state·init·migrate 는 비대상.
+
 ## 1.9.310 — 2026-06-04 — UR-0046: CLI/MCP 입력 스키마 검증 (설치리뷰 3중수렴 high)
 
 **🛡 무효한 task status / rule trigger 가 그대로 등록돼 상태·정책 신뢰성을 훼손하던 결함 수정 — 세 모델(Codex#2·Sonnet#2) 공통 지적.**

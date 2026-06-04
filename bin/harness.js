@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.310';
+const VERSION = '1.9.311';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3082,6 +3082,7 @@ function _selfTestCases() {
     { name: 'brief 2단계: update --direction 이력 + MCP leerness_brief + context 통합 (UR-0055 1.9.308)', run: () => { const src = read(__filename); const b = { project: 'X', intro: '', purpose: '', problem: '', features: [], stack: [], architecture: '', users: [], success: [], nonGoals: [], currentState: '', directionHistory: ['2026-06-04: 확대'] }; const bpOk = /개발 방향 이력/.test(_briefBlueprint('.', b)) && /최근 개발 방향 변경/.test(_briefReadmeBlock(b)); const histWired = /sub === 'update'/.test(src) && /brief\.directionHistory \|\| \[\]\), `\$\{today\(\)\}/.test(src); const mcpOk = require('../lib/mcp-tools').some(t => t.name === 'leerness_brief'); const ctxOk = /brief: \{ intro:/.test(src); return bpOk && histWired && mcpOk && ctxOk; } },
     { name: 'verify-claim: done 주장 evidence 기본강제 + --lenient + MCP/json 도달 (UR-0048 설치리뷰 critical 1.9.309)', run: () => { const src = read(__filename); const def = /const mustHaveEvidence = !has\('--lenient'\) && \(isDoneClaim \|\| has\('--require-evidence'\)\)/.test(src); const threshold = /has\('--require-evidence'\) \? evq\.ok : \(evq\.hasFile \|\| evq\.hasTest \|\| evq\.hasLog\)/.test(src); const jsonWired = /evidenceComplete:/.test(src) && /!evidenceQualityOk\) return process\.exit\(1\)/.test(src); const mcpLenient = !!require('../lib/mcp-tools').find(t => t.name === 'leerness_verify_claim').inputSchema.properties.lenient; return def && threshold && jsonWired && mcpLenient; } },
     { name: '입력 스키마 검증: task status/rule trigger 무효값 거부 + every-round 보존 (UR-0046 설치리뷰 1.9.310)', run: () => { const src = read(__filename); const sets = TASK_STATUSES.has('done') && TASK_STATUSES.has('in-progress') && !TASK_STATUSES.has('nonsense') && RULE_TRIGGERS.has('every-round') && RULE_TRIGGERS.has('every-update') && !RULE_TRIGGERS.has('not-a-trigger'); const helper = typeof _validateChoice === 'function' && _validateChoice('done', TASK_STATUSES, 'x') === true; const wired = /_validateChoice\(arg\('--status', null\), TASK_STATUSES/.test(src) && /_validateChoice\(trigger, RULE_TRIGGERS/.test(src); return sets && helper && wired; } },
+    { name: 'init 가드: 미초기화 write 차단 + 다중마커 판별 + --force 우회 (UR-0047 설치리뷰 1.9.311)', run: () => { const src = read(__filename); const fnOk = typeof _isInitialized === 'function' && typeof _requireInit === 'function'; const liveOk = _isInitialized('.') === true; const emptyOk = _isInitialized(path.join(os.tmpdir(), '__leerness_noinit_marker__')) === false; const wired = ["task add", "task update", "plan add", "decision add", "rule add", "lesson save", "brief set"].every(l => src.includes(`_requireInit(root, '${l}')`)) && !src.includes("_requireInit(root, 'state " + "start')"); const force = /if \(_isInitialized\(root\) \|\| has\('--force'\)\) return true/.test(src); return fnOk && liveOk && emptyOk && wired && force; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6192,6 +6193,7 @@ function planListCmd(root, opts = {}) {
 }
 
 function planAdd(root, text) {
+  if (!_requireInit(root, 'plan add')) return;  // 1.9.311 (UR-0047): init 가드
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'plan status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
   const status = arg('--status','planned'), progress = arg('--progress','0'), nextAction = arg('--next', '다음 액션 작성');
   // 1.9.303 (UR-0043): M-id append + T-id upsert 를 하나의 락으로 — 동시 plan add ID 충돌 방지.
@@ -6307,7 +6309,27 @@ function _validateChoice(value, validSet, label) {
   fail(`무효한 ${label}: "${value}" — 유효값: ${[...validSet].join(', ')} (커스텀 허용: --force)`);
   return false;
 }
+// 1.9.311 (UR-0047, 설치리뷰 3중수렴): init 가드 — 미초기화 디렉토리에서 write 차단.
+//   이전: 미초기화 폴더에서 task/plan/decision/rule/lesson add·brief set·state start 가
+//   부분 .harness(progress-tracker/cache/runs)만 생성 → init 없는 반쪽 상태로 banner/handoff/doctor 혼란.
+//   판별: 워크스페이스 강마커(HARNESS_VERSION/guideline.md) 또는 AGENTS.md 중 하나라도 있으면 초기화로 간주(레거시/마이그레이션 호환, fail-open).
+//   주의: state(.leerness substrate)는 standalone 설계라 가드 대상 아님 — .harness write 진입점만 가드.
+function _isInitialized(root) {
+  root = absRoot(root);
+  const ws = _workspaceDirAbs(root);  // .harness(기본) 또는 마이그레이션된 .leerness
+  return exists(path.join(ws, 'HARNESS_VERSION'))
+      || exists(path.join(ws, 'guideline.md'))
+      || exists(path.join(root, 'AGENTS.md'));
+}
+function _requireInit(root, cmdLabel) {
+  if (_isInitialized(root) || has('--force')) return true;
+  fail(`미초기화 디렉토리 — '${cmdLabel || 'write'}' 전에 먼저 'leerness init .' 실행 (강제: --force).`);
+  log(`   워크스페이스 마커(HARNESS_VERSION/AGENTS.md) 없음 — write 가 반쪽 상태를 만들지 않도록 차단했습니다.`);
+  return false;
+}
 function taskAdd(root, text) {
+  // 1.9.311 (UR-0047): init 가드 — 미초기화 디렉토리 write 차단 (--force 우회)
+  if (!_requireInit(root, 'task add')) return;
   // 1.9.310 (UR-0046): --status 스키마 검증 (무효값 거부, --force 우회)
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'task status')) { process.exitCode = 1; return; }
   // 1.9.212: 멱등성 — 같은 request 텍스트 + 활성 상태 (requested/in-progress) 이미 존재 시 skip (사용자 명시)
@@ -6380,6 +6402,7 @@ function taskAdd(root, text) {
   }
 }
 function taskUpdate(root, id) {
+  if (!_requireInit(root, 'task update')) return;  // 1.9.311 (UR-0047): init 가드
   if (!id) return fail('id required (e.g., task update T-0001 --status in-progress)');
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'task status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
   const rows = readProgressRows(root);
@@ -6716,6 +6739,7 @@ function lessonDropCmd(root, target) {
 // 1.9.112: lesson save — .harness/lessons.md에 새 lesson 추가 (Memory Write Surface 5번째)
 function lessonSave(root, text) {
   root = absRoot(root);
+  if (!_requireInit(root, 'lesson save')) return;  // 1.9.311 (UR-0047): init 가드
   if (!text) return fail('lesson text required. 예: leerness lesson save "JWT는 refresh token도 짧게 (15분 권장)"');
   const lp = lessonsPath(root);
   const tag = arg('--tag', '');
@@ -6842,6 +6866,7 @@ function decisionDropCmd(root, target) {
 // 1.9.108: decision add — decisions.md에 새 설계 결정 추가 (외부 AI/MCP 통합 메모리 영구화)
 function decisionAdd(root, title) {
   root = absRoot(root);
+  if (!_requireInit(root, 'decision add')) return;  // 1.9.311 (UR-0047): init 가드
   if (!title) return fail('decision title required. 예: leerness decision add "PostgreSQL 채택" --reason "..." ');
   const dp = decisionsPath(root);
   const reason = arg('--reason', '');
@@ -13989,6 +14014,7 @@ function nextRuleId(root) {
 
 function ruleAdd(root, description) {
   root = absRoot(root);
+  if (!_requireInit(root, 'rule add')) return;  // 1.9.311 (UR-0047): init 가드
   if (!description) return fail('rule description required (e.g., rule add "매 업데이트마다 버전 bump" --trigger every-update)');
   if (!exists(rulesPath(root))) writeRules(root, []);
   const trigger = arg('--trigger', 'every-session');
@@ -18337,6 +18363,7 @@ function briefCmd(root, sub) {
   const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s, gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s, dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   sub = sub || 'show';
   if (sub === 'set') {
+    if (!_requireInit(root, 'brief set')) return;  // 1.9.311 (UR-0047): init 가드
     const brief = _loadBrief(root);
     let changed = 0;
     const proj = arg('--project', null); if (proj != null) { brief.project = proj; changed++; }
@@ -18449,6 +18476,7 @@ function stateCmd(root, sub, ...args) {
   sub = sub || 'show';
 
   if (sub === 'start') {
+    // 1.9.311 (UR-0047): state 는 .leerness substrate(standalone) — .harness init 가드 미적용 (회귀 방지)
     const goal = (args.find(a => a && !a.startsWith('-')) || arg('--goal', '')).trim();
     const state = _loadLeernessState(root);
     state.runCounter = (state.runCounter || 0) + 1;
