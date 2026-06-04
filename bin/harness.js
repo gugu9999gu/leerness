@@ -14,7 +14,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.306';
+const VERSION = '1.9.307';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -61,6 +61,9 @@ if (require.main === module) _cliBootstrap();
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
 const README_END = '<!-- leerness:project-readme:end -->';
+// 1.9.307 (UR-0055 사용자명시): 프로젝트 청사진(brief) — README 개요 섹션 마커.
+const BRIEF_START = '<!-- leerness:project-brief:start -->';
+const BRIEF_END = '<!-- leerness:project-brief:end -->';
 
 // 1.9.10: leerness-skillpack 동적 로드 (선택). 없으면 BUILTIN 사용.
 function _tryLoadSkillpack() {
@@ -3075,6 +3078,7 @@ function _selfTestCases() {
     { name: 'lib/analyzers: 분석/검증 함수 4종 모듈 단일출처 분리 (UR-0025 1.9.304)', run: () => { const m = require('../lib/analyzers'); return m._evidenceQuality === _evidenceQuality && m._shellGuardAnalyze === _shellGuardAnalyze && m._parseEvidenceStats === _parseEvidenceStats && m._claimFileInGit === _claimFileInGit && !/function _evidenceQuality\(evidence\) \{/.test(read(__filename)) && !/function _shellGuardAnalyze\(cmd, ctx\) \{/.test(read(__filename)); } },
     { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
     { name: 'exit code 일관성: fail()→exitCode 1 + unknown 명령 안내 (UR-0045 설치리뷰 1.9.306)', run: () => { const src = read(__filename); return /function fail\(s\) \{ log\('✗ ' \+ s\); process\.exitCode = 1; \}/.test(src) && /알 수 없는 명령: \$\{cmd\}/.test(src) && /if \(cmd === 'help' \|\| cmd === 'commands'/.test(src); } },
+    { name: 'brief: 프로젝트 청사진 set/show/export + README 개요 섹션 (UR-0055 사용자명시 1.9.307)', run: () => { const src = read(__filename); const fnOk = typeof briefCmd === 'function' && typeof _loadBrief === 'function' && typeof _briefBlueprint === 'function' && _BRIEF_FIELDS.length === 10; const b = { project: 'X', intro: 'i', purpose: 'p', problem: '', features: ['f1', 'f2'], stack: ['s'], architecture: '', users: [], success: [], nonGoals: [], currentState: '' }; const bp = _briefBlueprint('.', b); const bpOk = /Blueprint/.test(bp) && /소개 \(Intro\)/.test(bp) && /f1/.test(bp) && /신규 프로젝트 시작 가이드/.test(bp); const rb = _briefReadmeBlock(b); const rbOk = rb.includes(BRIEF_START) && rb.includes(BRIEF_END) && /프로젝트 개요/.test(rb) && /\*\*목적\*\*/.test(rb); return fnOk && bpOk && rbOk && /if \(cmd === 'brief'\)/.test(src); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -18219,6 +18223,119 @@ function aboutCmd(opts = {}) {
   log(`표면: MCP ${id.surface.mcpTools} 도구 · 어댑터 ${id.surface.adapters.length} · provider ${id.surface.providers} · 런타임 의존성 ${id.surface.runtimeDeps} · offline-first ${id.surface.offlineFirst ? '✓' : '✗'}`);
   return id;
 }
+// ===== 1.9.307 (UR-0055 사용자명시): 프로젝트 청사진(brief) =====
+//   프로젝트 개요/소개/목적/기능을 .harness/project-brief.md(정본)에 유지 + README 개요 섹션 동기화 + 복사용 blueprint export.
+//   "복사하면 신규 프로젝트를 기초부터 재시작할 수 있는" 자기완결 청사진. 기존 project-brief.md 확장(비파괴).
+const _BRIEF_FIELDS = [
+  { key: 'intro', h: 'Intro', label: '소개', flag: 'intro', multi: false },
+  { key: 'purpose', h: 'Purpose', label: '목적', flag: 'purpose', multi: false },
+  { key: 'problem', h: 'Problem', label: '해결 문제', flag: 'problem', multi: false },
+  { key: 'features', h: 'Features', label: '핵심 기능', flag: 'features', multi: true },
+  { key: 'stack', h: 'Tech Stack', label: '기술 스택', flag: 'stack', multi: true },
+  { key: 'architecture', h: 'Architecture', label: '아키텍처', flag: 'architecture', multi: false },
+  { key: 'users', h: 'Users', label: '사용자', flag: 'users', multi: true },
+  { key: 'success', h: 'Success Criteria', label: '성공 기준', flag: 'success', multi: true },
+  { key: 'nonGoals', h: 'Non-Goals', label: '비목표', flag: 'non-goals', multi: true },
+  { key: 'currentState', h: 'Current State', label: '현재 상태', flag: 'current-state', multi: false },
+];
+function _briefPath(root) { return path.join(absRoot(root), '.harness', 'project-brief.md'); }
+function _loadBrief(root) {
+  const brief = { project: detectProjectName(absRoot(root)) };
+  for (const f of _BRIEF_FIELDS) brief[f.key] = f.multi ? [] : '';
+  const p = _briefPath(root);
+  if (!exists(p)) return brief;
+  for (const b of read(p).split(/\n(?=## )/)) {
+    const m = b.match(/^## (.+?)\n([\s\S]*)$/);
+    if (!m) continue;
+    const head = m[1].trim(), body = m[2].trim();
+    if (head === 'Project') { brief.project = (body.replace(/^[-*]\s*/, '').split('\n')[0] || '').trim() || brief.project; continue; }
+    const f = _BRIEF_FIELDS.find(x => x.h === head);
+    if (!f) continue;
+    if (f.multi) brief[f.key] = body.split('\n').map(l => l.replace(/^[-*]\s*/, '').trim()).filter(l => l && l !== '-' && !/업데이트하세요/.test(l));
+    else { const v = body.replace(/^[-*]\s*/, '').trim(); brief[f.key] = /업데이트하세요/.test(v) ? '' : v; }
+  }
+  return brief;
+}
+function _saveBrief(root, brief) {
+  let body = `# Project Brief\n\n## Project\n${brief.project || detectProjectName(absRoot(root))}\n`;
+  for (const f of _BRIEF_FIELDS) {
+    const v = brief[f.key];
+    body += `\n## ${f.h}\n`;
+    if (f.multi) body += (v && v.length ? v.map(x => `- ${x}`).join('\n') : '-') + '\n';
+    else body += (v ? v : '- 이 항목을 실제 내용으로 업데이트하세요.') + '\n';
+  }
+  writeUtf8(_briefPath(root), fm('project-brief', ['프로젝트 목적 확인', '신규 기능 판단', '계획 수립'], ['프로젝트 목적 변경', '사용자/범위 변경'], body));
+}
+function _briefFilled(brief) { return _BRIEF_FIELDS.filter(f => (f.multi ? (brief[f.key] && brief[f.key].length) : brief[f.key])).length; }
+function _briefReadmeBlock(brief) {
+  const L = [BRIEF_START, '## 프로젝트 개요', ''];
+  if (brief.intro) L.push(brief.intro, '');
+  if (brief.purpose) L.push(`**목적**: ${brief.purpose}`, '');
+  if (brief.problem) L.push(`**해결 문제**: ${brief.problem}`, '');
+  if (brief.features && brief.features.length) { L.push('**핵심 기능**'); brief.features.forEach(x => L.push(`- ${x}`)); L.push(''); }
+  if (brief.stack && brief.stack.length) L.push(`**기술 스택**: ${brief.stack.join(', ')}`, '');
+  if (_briefFilled(brief) === 0) L.push('_아직 개요 미입력 — `leerness brief set --intro "..." --purpose "..."` 로 작성._', '');
+  L.push('<sub>이 섹션은 `leerness brief` 로 관리됩니다. 전체 청사진(복사용): `leerness brief export`.</sub>', BRIEF_END);
+  return L.join('\n');
+}
+function _syncBriefReadme(root, brief) {
+  const p = path.join(absRoot(root), 'README.md');
+  const existing = exists(p) ? read(p) : '';
+  const block = _briefReadmeBlock(brief);
+  const s = existing.indexOf(BRIEF_START), e = existing.indexOf(BRIEF_END);
+  let updated;
+  if (s >= 0 && e >= s) updated = existing.slice(0, s).trimEnd() + '\n\n' + block + '\n' + existing.slice(e + BRIEF_END.length).trimStart();
+  else if (existing.trim()) updated = existing.trimEnd() + '\n\n' + block + '\n';
+  else updated = `# ${brief.project}\n\n${block}\n`;
+  writeUtf8(p, updated);
+}
+function _briefBlueprint(root, brief) {
+  const L = [`# ${brief.project} — 프로젝트 청사진 (Blueprint)`,
+    `> 이 문서만으로 프로젝트를 기초부터 재구성할 수 있도록 작성. \`leerness brief export\` 생성 (leerness v${VERSION}).`, ''];
+  const sec = (h, v, multi) => { if (multi ? (v && v.length) : v) { L.push(`## ${h}`, multi ? v.map(x => `- ${x}`).join('\n') : v, ''); } };
+  sec('소개 (Intro)', brief.intro); sec('목적 (Purpose)', brief.purpose); sec('해결 문제 (Problem)', brief.problem);
+  sec('핵심 기능 (Features)', brief.features, true); sec('기술 스택 (Tech Stack)', brief.stack, true);
+  sec('아키텍처 (Architecture)', brief.architecture); sec('사용자 (Users)', brief.users, true);
+  sec('성공 기준 (Success Criteria)', brief.success, true); sec('비목표 (Non-Goals)', brief.nonGoals, true);
+  sec('현재 상태 (Current State)', brief.currentState);
+  L.push('---', '## 신규 프로젝트 시작 가이드', '', '1. 위 소개·목적·기능·아키텍처·스택을 신규 레포의 계획으로 복사.', '2. `leerness init .` 후 이 파일을 `.harness/project-brief.md` 로 복사하거나 `leerness brief set` 으로 재입력.', '3. Features 를 `leerness plan add` / `leerness task add` 로 분해.', '');
+  return L.join('\n');
+}
+function briefCmd(root, sub) {
+  root = absRoot(root || process.cwd());
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s, gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s, dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  sub = sub || 'show';
+  if (sub === 'set') {
+    const brief = _loadBrief(root);
+    let changed = 0;
+    const proj = arg('--project', null); if (proj != null) { brief.project = proj; changed++; }
+    for (const f of _BRIEF_FIELDS) { const v = arg('--' + f.flag, null); if (v != null) { brief[f.key] = f.multi ? _splitList(v) : v; changed++; } }
+    if (!changed) { fail('brief set: 최소 하나의 필드 필요 (--intro --purpose --problem --features --stack --architecture --users --success --non-goals --current-state --project)'); return; }
+    _saveBrief(root, brief);
+    _syncBriefReadme(root, brief);
+    ok(`brief 갱신 (${changed}개 필드) → .harness/project-brief.md + README 개요 섹션 동기화`);
+    return;
+  }
+  if (sub === 'show') {
+    const brief = _loadBrief(root);
+    if (has('--json')) { log(JSON.stringify(brief, null, 2)); return; }
+    log(cy(`# leerness brief — ${brief.project}`));
+    for (const f of _BRIEF_FIELDS) { const v = brief[f.key]; const filled = f.multi ? (v && v.length) : v; log(`  ${filled ? gr('✓') : dm('·')} ${f.label}: ${filled ? (f.multi ? v.join(', ') : v).slice(0, 90) : dm('(미입력)')}`); }
+    log('');
+    log(dm(`  채움 ${_briefFilled(brief)}/${_BRIEF_FIELDS.length} · 설정: leerness brief set --intro "..." · 복사용: leerness brief export`));
+    return;
+  }
+  if (sub === 'export') {
+    const brief = _loadBrief(root);
+    const bp = _briefBlueprint(root, brief);
+    const out = arg('--out', null);
+    if (out) { const op = path.isAbsolute(out) ? out : path.join(root, out); writeUtf8(op, bp); ok(`blueprint export → ${rel(root, op)} (${_briefFilled(brief)}/${_BRIEF_FIELDS.length} 필드)`); return; }
+    log(bp);
+    return;
+  }
+  fail(`brief: 알 수 없는 sub: ${sub} (set | show | export)`);
+}
 function contextCmd(root, opts = {}) {
   root = absRoot(root);
   const rows = readProgressRows(root);
@@ -21458,6 +21575,7 @@ async function main() {
   // 1.9.278 (UR-0032): leerness state <show|start|record|verify|handoff> — .leerness/ 구조화 상태 substrate
   if (cmd === 'state')                              return stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   if (cmd === 'context')                            return contextCmd(arg('--path', process.cwd()), { json: has('--json') });
+  if (cmd === 'brief')                              return briefCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'about' || cmd === 'identity')        return aboutCmd({ json: has('--json') });
   // 1.9.281 (UR-0034): leerness policy <show|set|check> — 권한 등급 (opt-in enforced)
   if (cmd === 'policy')                             return policyCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));

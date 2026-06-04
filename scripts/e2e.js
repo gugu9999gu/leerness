@@ -3501,5 +3501,34 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.307 회귀 (UR-0055 사용자명시): brief — 프로젝트 청사진 set/show/export + README 섹션 + 멱등 업데이트
+total++;
+{
+  let ok = false;
+  try {
+    const bDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-brief-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', bDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const run = (...a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: bDir, encoding: 'utf8', timeout: 20000 });
+    run('brief', 'set', '--path', bDir, '--intro', '할 일 관리 앱', '--purpose', '팀 생산성', '--features', '태스크CRUD, 알림');
+    const briefMd = fs.readFileSync(path.join(bDir, '.harness', 'project-brief.md'), 'utf8');
+    const readme = fs.readFileSync(path.join(bDir, 'README.md'), 'utf8');
+    const setOk = /## Intro\n할 일 관리 앱/.test(briefMd) && /태스크CRUD/.test(briefMd) && readme.includes('<!-- leerness:project-brief:start -->') && /## 프로젝트 개요/.test(readme) && /할 일 관리 앱/.test(readme);
+    // 멱등 업데이트: 방향 변경(--purpose 만 갱신) → intro/features 보존
+    run('brief', 'set', '--path', bDir, '--purpose', '엔터프라이즈 확대');
+    const md2 = fs.readFileSync(path.join(bDir, '.harness', 'project-brief.md'), 'utf8');
+    const updateOk = /엔터프라이즈 확대/.test(md2) && /할 일 관리 앱/.test(md2) && /태스크CRUD/.test(md2);
+    // README 섹션 중복 없음 (재sync)
+    const readme2 = fs.readFileSync(path.join(bDir, 'README.md'), 'utf8');
+    const noDup = (readme2.match(/<!-- leerness:project-brief:start -->/g) || []).length === 1;
+    // export: 복사용 blueprint
+    const exp = run('brief', 'export', '--path', bDir);
+    const exportOk = exp.status === 0 && /Blueprint/.test(exp.stdout) && /신규 프로젝트 시작 가이드/.test(exp.stdout) && /엔터프라이즈 확대/.test(exp.stdout);
+    ok = setOk && updateOk && noDup && exportOk;
+    fs.rmSync(bDir, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.307) brief: 청사진 set→README+brief 동기화 + 멱등 업데이트 + export blueprint (UR-0055)' : '✗ brief 청사진 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

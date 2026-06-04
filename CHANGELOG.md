@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.307 — 2026-06-04 — UR-0055 (1단계): 프로젝트 청사진 brief (README 개요 + 복사용 blueprint)
+
+**📘 사용자 명시 — 프로젝트 개요/소개/목적/기능을 README 에 작성·유지하고, 그 내용만 복사하면 신규 프로젝트를 기초부터 재시작할 수 있는 자기완결 청사진(blueprint) 생성. 기존 `.harness/project-brief.md` 비파괴 확장.**
+
+### 배경 (사용자 명시)
+"개발 중인 프로그램/프로젝트의 소개·목적·설명을 README 에 쓰고, 개발 방향 변경/확대 시 업데이트, 복사하면 신규 프로젝트 계획으로 쓸 수 있게(기초부터 재시작)". 기존 project-brief.md(Project/Purpose/Users/Success)는 빈약 → 10필드로 확장 + README 동기화 + export.
+
+### 구현 (UR-0055 1단계)
+1. **`.harness/project-brief.md` 10필드 확장** — intro/purpose/problem/features/stack/architecture/users/success/nonGoals/currentState (`## Section` 블록, 파서/직렬화, frontmatter 보존, 비파괴).
+2. **`leerness brief set --intro/--purpose/--features/--stack/...`** — 정본 갱신 + README `## 프로젝트 개요` 관리 섹션(`<!-- leerness:project-brief:start/end -->`) 자동 동기화. **멱등 업데이트**(주어진 필드만 갱신, 나머지 보존 → 개발 방향 변경/확대 반영).
+3. **`leerness brief show [--json]`** — 채움 현황(N/10) + 필드 표시.
+4. **`leerness brief export [--out plan.md]`** — 자기완결 blueprint(소개+목적+문제+기능+아키텍처+스택+성공기준+비목표+현재상태 + "신규 프로젝트 시작 가이드") → 복사하면 기초부터 재시작 가능.
+5. selftest 54→55 · e2e 251→252.
+
+### 검증
+- **selftest 55/55 PASS** · **E2E 252/252 PASS** (회귀 0).
+- 실측: `brief set` → project-brief.md(## Intro/Features) + README 개요 섹션 동기화 · 멱등 업데이트(--purpose 만 갱신 시 intro/features 보존) · README 섹션 중복 0(재sync) · `brief export` blueprint(방향 변경 반영 + 신규프로젝트 가이드).
+
+### 남은 부분 (UR-0055 2단계)
+- `brief update --direction "..."`(개발 방향 변경 이력 누적) + handoff/context 청사진 노출 확장 + MCP `leerness_brief` 도구.
+
 ## 1.9.306 — 2026-06-04 — UR-0045: exit code 일관성 (설치리뷰 3중수렴 high)
 
 **🚦 clean-install 리뷰에서 Codex·Sonnet·Opus 가 공통 high 로 지적한 "실패가 exit 0" 문제 수정 — CI·MCP·AI 에이전트가 실패를 성공으로 오판하던 근본 신뢰 결함. (직전 라운드의 인식론적 정직성과 직결: 에이전트가 거짓 성공을 믿지 않게.)**
