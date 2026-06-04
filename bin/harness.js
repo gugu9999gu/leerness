@@ -15,7 +15,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.321';
+const VERSION = '1.9.322';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3121,6 +3121,7 @@ function _selfTestCases() {
     { name: 'MCP ToolRegistry 일치성: 모든 도구 def 가 dispatch case 보유 + 고아 case 0 + requiredTier 완비 (UR-0044 1.9.319)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const missing = tools.filter(t => !src.includes("case '" + t.name + "':")); const cases = [...src.matchAll(/case '(leerness_[a-z_]+)':/g)].map(m => m[1]); const defNames = new Set(tools.map(t => t.name)); const orphans = [...new Set(cases)].filter(c => !defNames.has(c)); const tierOk = tools.every(t => typeof t.requiredTier === 'string' && PERMISSION_TIERS.includes(t.requiredTier)); return tools.length >= 83 && missing.length === 0 && orphans.length === 0 && tierOk; } },
     { name: 'count drift 수정: _countDatedBlocks 코드펜스(템플릿) 제외 + 카운트 사이트 단일화 (UR-0053 1.9.320)', run: () => { const f = _countDatedBlocks; const withTpl = '# D\n\n```md\n### 2026-01-01 — Decision 제목\n- Decision:\n```\n\n### 2026-06-04 — 실제\n- Decision: 실제\n'; const c1 = f(withTpl) === 1; const c0 = f('```md\n### 2026-01-01 — x\n```\n') === 0; const c2 = f('### 2026-01-01 — A\n### 2026-02-02 — B\n') === 2; const src = read(__filename); const wired = src.includes('_countDatedBlocks(read(decisionsPath(root)))') && src.includes('_countDatedBlocks(read(lessonsPath(root)))') && src.includes('_countDatedBlocks(dtext)') && !src.includes('read(decisionsPath(root)).' + 'match(/^### '); return typeof f === 'function' && c1 && c0 && c2 && wired; } },
     { name: 'decision/lesson 필드 파싱: 빈 필드가 다음 줄로 안 샘 ([ \\t]* 사용) (UR-0053 1.9.321)', run: () => { const block = '### 2026-06-05 — X\n- Decision: X\n- Reason: r\n- Alternatives: \n- Impact: 보안\n'; const alt = block.match(/- Alternatives:[ \t]*(.+)/); const imp = block.match(/- Impact:[ \t]*(.+)/); const altNoBleed = !alt || !/Impact/.test(alt[1]); const impOk = !!imp && imp[1].trim() === '보안'; const src = read(__filename); const fixedOk = src.includes('- Alternatives:[ \\t]*(.+)') && src.includes('- Lesson:[ \\t]*(.+)') && src.includes('- Impact:[ \\t]*(.+)'); return altNoBleed && impOk && fixedOk; } },
+    { name: 'MCP handler 통합: _mcpToCliArgs 단일 함수 + mcpServeCmd 호출 + 인라인 switch 단일화 (UR-0044 1.9.322)', run: () => { const src = read(__filename); const fnDef = /function _mcpToCliArgs\(name, args, targetPath\) \{/.test(src); const called = src.includes('cliArgs = _mcpToCliArgs(name, args, targetPath)'); const switchCount = (src.match(/switch \(name\) \{/g) || []).length; const nullPath = src.includes('if (cliArgs === null) return send('); return fnDef && called && switchCount === 1 && nullPath; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -16742,49 +16743,11 @@ function skillExportAllCmd(root) {
 }
 
 // 1.9.43: MCP server — stdio JSON-RPC로 leerness 도구 노출 (Claude Code/Hermes 등이 호출)
-// 프로토콜: MCP 표준 (JSON-RPC 2.0). 메서드: initialize, tools/list, tools/call
-function mcpServeCmd(root) {
-  root = absRoot(root || process.cwd());
-  // 노출할 leerness 도구 목록
-  // 1.9.297 (UR-0025 5단계): MCP 도구 정의를 lib/mcp-tools.js 단일출처로 분리 (Codex #5 regex self-count 영구 해소).
-  const TOOLS = require('../lib/mcp-tools');
 
-  function send(obj) {
-    process.stdout.write(JSON.stringify(obj) + '\n');
-  }
-  function callLeerness(cliArgs) {
-    const r = cp.spawnSync(process.execPath, [__filename, ...cliArgs], {
-      encoding: 'utf8',
-      timeout: 60000,
-      env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_WORKFLOW_GUIDE: '1' }
-    });
-    return { ok: r.status === 0, exit: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
-  }
-  function handleRequest(req) {
-    const id = req.id;
-    // 1.9.313 (UR-0049, 설치리뷰 3중수렴): JSON-RPC 2.0 / MCP notification 준수.
-    //   notification = id 없는 요청 (또는 notifications/* 메서드) → spec "MUST NOT reply" → 절대 응답 금지.
-    //   이전: notifications/initialized 에 -32601 + id 없는 응답 → 엄격한 MCP 클라이언트가 프로토콜 위반 로깅/중단.
-    const isNotification = !('id' in req) || (typeof req.method === 'string' && req.method.startsWith('notifications/'));
-    if (isNotification) return;  // initialized/cancelled/progress 등 조용히 수용 (무응답)
-    if (req.method === 'initialize') {
-      send({ jsonrpc: '2.0', id, result: {
-        protocolVersion: '2024-11-05',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'leerness', version: VERSION }
-      } });
-    } else if (req.method === 'ping') {
-      // 1.9.313 (UR-0049): MCP 표준 ping → 빈 결과 응답 (연결 확인 — 이전엔 -32601 오류)
-      send({ jsonrpc: '2.0', id, result: {} });
-    } else if (req.method === 'tools/list') {
-      send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
-    } else if (req.method === 'tools/call') {
-      const { name, arguments: args = {} } = req.params || {};
-      const targetPath = args.path || root;
-      // 1.9.70: MCP tools/call 자동 사용 통계 — 어떤 도구가 자주/드물게 호출되는지 가시화
-      try { _bumpMcpUsage(targetPath, name); } catch {}
-      let cliArgs;
-      try {
+// 1.9.322 (UR-0044, 설치리뷰): MCP tools/call name->cliArgs 매핑을 단일 함수로 통합 (이전: mcpServeCmd 인라인 83-case switch).
+//   일치성 가드(selftest: 모든 도구 def 가 case 보유) + e2e(대표 도구 dispatch) 가 안전망. 미지 도구는 null 반환.
+function _mcpToCliArgs(name, args, targetPath) {
+  let cliArgs;
         switch (name) {
           case 'leerness_handoff':         cliArgs = ['handoff', targetPath, '--compact', '--no-drift-check']; break;
           case 'leerness_drift_check':     cliArgs = ['drift', 'check', targetPath, '--json']; break;
@@ -17017,8 +16980,56 @@ function mcpServeCmd(root) {
             cliArgs = ['brief', args.export === true ? 'export' : 'show', '--path', targetPath, ...(args.export === true ? [] : ['--json'])];
             break;
           default:
-            return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
+            return null;
         }
+  return cliArgs;
+}
+
+// 프로토콜: MCP 표준 (JSON-RPC 2.0). 메서드: initialize, tools/list, tools/call
+function mcpServeCmd(root) {
+  root = absRoot(root || process.cwd());
+  // 노출할 leerness 도구 목록
+  // 1.9.297 (UR-0025 5단계): MCP 도구 정의를 lib/mcp-tools.js 단일출처로 분리 (Codex #5 regex self-count 영구 해소).
+  const TOOLS = require('../lib/mcp-tools');
+
+  function send(obj) {
+    process.stdout.write(JSON.stringify(obj) + '\n');
+  }
+  function callLeerness(cliArgs) {
+    const r = cp.spawnSync(process.execPath, [__filename, ...cliArgs], {
+      encoding: 'utf8',
+      timeout: 60000,
+      env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_WORKFLOW_GUIDE: '1' }
+    });
+    return { ok: r.status === 0, exit: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+  }
+  function handleRequest(req) {
+    const id = req.id;
+    // 1.9.313 (UR-0049, 설치리뷰 3중수렴): JSON-RPC 2.0 / MCP notification 준수.
+    //   notification = id 없는 요청 (또는 notifications/* 메서드) → spec "MUST NOT reply" → 절대 응답 금지.
+    //   이전: notifications/initialized 에 -32601 + id 없는 응답 → 엄격한 MCP 클라이언트가 프로토콜 위반 로깅/중단.
+    const isNotification = !('id' in req) || (typeof req.method === 'string' && req.method.startsWith('notifications/'));
+    if (isNotification) return;  // initialized/cancelled/progress 등 조용히 수용 (무응답)
+    if (req.method === 'initialize') {
+      send({ jsonrpc: '2.0', id, result: {
+        protocolVersion: '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'leerness', version: VERSION }
+      } });
+    } else if (req.method === 'ping') {
+      // 1.9.313 (UR-0049): MCP 표준 ping → 빈 결과 응답 (연결 확인 — 이전엔 -32601 오류)
+      send({ jsonrpc: '2.0', id, result: {} });
+    } else if (req.method === 'tools/list') {
+      send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
+    } else if (req.method === 'tools/call') {
+      const { name, arguments: args = {} } = req.params || {};
+      const targetPath = args.path || root;
+      // 1.9.70: MCP tools/call 자동 사용 통계 — 어떤 도구가 자주/드물게 호출되는지 가시화
+      try { _bumpMcpUsage(targetPath, name); } catch {}
+      let cliArgs;
+      try {
+        cliArgs = _mcpToCliArgs(name, args, targetPath);
+        if (cliArgs === null) return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
         // 1.9.288 (Codex gpt-5.5 리뷰 #1 수렴): MCP 도구도 policy enforce 적용 — read-only enforce 시 write 도구 차단.
         //   이전: _policyEnforce 는 agents multi --execute 한 곳뿐 → MCP state_start 등이 정책 우회하고 .leerness 기록.
         //   cliArgs(실제 실행 명령) 로 required tier 판정 → enforce ON 이고 초과 시 JSON-RPC error 반환(실행 안 함).

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.322 — 2026-06-05 — UR-0044(완료): MCP handler 통합 (_mcpToCliArgs 추출)
+
+**🧩 mcpServeCmd 의 인라인 83-case switch(name→cliArgs)를 단일 함수 `_mcpToCliArgs` 로 통합 — ToolRegistry handler 통합 완료.**
+
+### 배경 (UR-0044)
+mcpServeCmd 의 tools/call 핸들러에 **230줄 인라인 switch**(83 도구 name→cliArgs 매핑)가 있어 mcpServeCmd 가 비대하고 매핑이 dispatch 로직과 뒤섞임. 1.9.319 에서 일치성 가드(모든 def↔case)를 먼저 깔아 안전망 확보 → 본 라운드에서 물리 이전.
+
+### 구현 (UR-0044 완료)
+1. **`_mcpToCliArgs(name, args, targetPath)` 모듈레벨 함수 추출** — 83-case switch 를 그대로 이전(미지 도구는 `null` 반환). mcpServeCmd 는 `cliArgs = _mcpToCliArgs(...)` 호출 + `null` 시 `-32601` 응답.
+2. **마이그레이션 스크립트(`scripts/_migrate-mcp-tocli.js`)로 프로그램적 splice** — 수기 전사 위험 0, 실행 후 삭제.
+3. 안전망: 일치성 가드(selftest: 83 def↔case) + e2e(MCP 16+ 테스트 + 신규 B(1.9.322) 인자매핑/미지도구) 가 검증.
+4. selftest 69→70 · e2e 266→267.
+
+### 검증
+- **selftest 70/70 PASS** · **E2E 267/267 PASS** (회귀 0 — 전체 MCP 테스트 green).
+- 실측: about/state_start(멀티인자)/feature_add/task_add(status push) dispatch 정상 · 미지 도구 → `-32601 Unknown tool` · `switch (name)` 소스 1곳(_mcpToCliArgs)만.
+
 ## 1.9.321 — 2026-06-05 — UR-0053(2단계): decision/lesson 빈 필드 오파싱 수정
 
 **🔧 빈 필드(Alternatives 등)가 다음 줄(Impact)을 캡처하던 `Alternatives→Impact 오파싱` 버그 수정 (UR-0053 의 두 번째 구체 결함).**

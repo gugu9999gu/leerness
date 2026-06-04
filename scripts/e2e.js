@@ -3854,5 +3854,27 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.322 회귀 (UR-0044): _mcpToCliArgs 추출 후 인자 매핑(push) 보존 + 미지 도구 -32601
+total++;
+{
+  let ok = false;
+  try {
+    const md = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tocli-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', md, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const call = (req) => { const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 15000, input: JSON.stringify(req) + '\n' }); try { return JSON.parse(r.stdout.split('\n').filter(Boolean)[0]); } catch { return null; } };
+    // task_add with status arg (멀티 인자 push 경로) → task list 반영 확인
+    call({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_task_add', arguments: { path: md, text: 'TOCLI 테스트', status: 'in-progress' } } });
+    const listed = call({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'leerness_task_list', arguments: { path: md } } });
+    const t = (listed && listed.result && listed.result.content && listed.result.content[0].text) || '';
+    const argMapOk = /TOCLI 테스트/.test(t) && /in-progress/.test(t);
+    const unk = call({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'leerness_nope', arguments: {} } });
+    const unkOk = !!unk && !!unk.error && unk.error.code === -32601;
+    ok = argMapOk && unkOk;
+    fs.rmSync(md, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.322) _mcpToCliArgs 추출: 인자 매핑(task_add status) 보존 + 미지 도구 -32601 (UR-0044)' : '✗ _mcpToCliArgs 추출 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
