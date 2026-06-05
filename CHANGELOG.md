@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.361 — 2026-06-06 — 안정화② 외부리뷰 CV-1 --path 라우팅 통일 + CV-3 audit 가드 (UR-0076/0078)
+
+**🛠 외부 멀티모델 리뷰 안정화 시리즈 2탄 — 3개 모델 합의 #1 finding(--path 불일치) + audit 오판 수정.**
+
+### 배경
+- **CV-1 (P1, 3/3 모델 + 자체검증)**: 다수 명령이 positional / `--path=값` 을 무시하고 cwd 로 silent fallback. 특히 `session close --path X` 가 cwd 에 써서 **wrong-root 쓰기**(데이터 정합 위험).
+- **CV-3 (P1, 2/3 + 자체재현)**: `audit` 가 미초기화/존재하지 않는 경로를 `healthy:true` 로 오판(verify 는 올바르게 exit 1).
+
+### 구현
+1. **`arg()` `--path=값` 등호형 지원** (이전엔 `--path 값` 공백형만 — Opus 지적). 전 `arg('--path',...)` 명령에 일괄 적용.
+2. **공통 `_resolveRoot(positional)` 헬퍼**: `--path`(=값 포함) > 유효 positional > cwd. silent cwd fallback 방지.
+3. **적용**: `session close`(wrong-root 쓰기 해소)·`lazy detect`(--path 무시 해소)·`context`·`pulse`·`milestones`·`round-history`(positional 무시 해소). (`health`/`whats-new`/`drift`/`usage` 등 `args[N] || arg('--path',cwd)` 형은 이미 양쪽 처리 → arg() 보강만으로 등호형까지 정상.)
+4. **CV-3**: `audit` 시작부에 root/.harness/AGENTS.md 존재 가드 → 미초기화는 failure 승격(healthy=false, exit 1) — verify 와 일관.
+
+### 검증 (회귀 0)
+- **selftest 107→108 PASS** (CV-1 행위 검증: argv 주입으로 `arg('--path=값')` + `_resolveRoot` 우선순위 4종 단언). **E2E 305→307 PASS** (CV-1 행위: cwd=B 에서 `session close --path A` → A 의 handoff 재생성·`context --path=` 등호형 정타깃 / CV-3: 미초기화 audit healthy=false).
+- 실측: `context --path A`/`--path=A`/positional A 모두 A 읽음(cwd 아님). audit 미초기화 → healthy:false failures:1.
+
+### 잔여 (후속 라운드)
+나머지 `arg('--path',cwd)` 명령(verify-claim/deps/persona/review 등 — positional 이 path 아닌 인자)은 그대로 두되, --path 등호형은 이제 전체 동작. CV-4(멱등/retention)·CV-5(selftest 행위화 추가)·CV-6(스캐너 FP/FN)·CV-7(help registry) 후속.
+
 ## 1.9.360 — 2026-06-05 — 안정화① 외부리뷰 CV-2: fetchNpmLatest 신형 Node Windows EINVAL 회피 (UR-0077)
 
 **🛠 외부 멀티모델 리뷰(1.9.359) 안정화 시리즈 1탄.** `update --check` 가 신형 Node Windows 에서 `spawn EINVAL` 로 실패하던 회귀를 수정. (Codex+Sonnet 교차검증 + 자체 재현 Node v26.3.0)

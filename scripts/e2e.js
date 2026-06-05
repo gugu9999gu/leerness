@@ -4885,5 +4885,45 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.361 회귀 (외부리뷰 CV-1/UR-0076): --path 라우팅 통일 — session close --path 가 cwd 아닌 정타깃에 쓰기 + context --path= 등호형
+total++;
+{
+  let ok = false;
+  try {
+    const a = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rootA-'));
+    const b = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rootB-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', a, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', b, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // A 의 session-handoff 삭제 → cwd=B 에서 session close --path A → A 가 작동하면 A 에 재생성(아니면 cwd B 만 갱신)
+    const aHandoff = path.join(a, '.harness', 'session-handoff.md');
+    fs.rmSync(aHandoff, { force: true });
+    cp.spawnSync(process.execPath, [CLI, 'session', 'close', '--path', a], { cwd: b, encoding: 'utf8', timeout: 30000 });
+    const aRecreated = fs.existsSync(aHandoff);
+    // context --path= 등호형: cdir 에 고유 결정 추가 후 cwd=B 에서 --path=cdir 로 읽기
+    const cdir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-eq-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', cdir, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'EQFORM_DEC_991', '--path', cdir], { encoding: 'utf8', timeout: 20000 });
+    const eqOut = cp.spawnSync(process.execPath, [CLI, 'context', '--path=' + cdir, '--json'], { cwd: b, encoding: 'utf8', timeout: 20000 });
+    const eqOk = (eqOut.stdout || '').includes('EQFORM_DEC_991');
+    [a, b, cdir].forEach(d => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} });
+    ok = aRecreated && eqOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.361) CV-1: --path 라우팅 통일 (session close --path 정타깃 쓰기 / context --path= 등호형) (UR-0076)' : '✗ --path 라우팅 통일 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.361 회귀 (외부리뷰 CV-3/UR-0078): audit 가 미초기화/존재하지않는 경로를 healthy 로 오판 안 함 (verify 와 일관)
+total++;
+{
+  let ok = false;
+  try {
+    const r = cp.spawnSync(process.execPath, [CLI, 'audit', path.join(os.tmpdir(), 'leerness-no-such-' + total), '--json'], { encoding: 'utf8', timeout: 15000 });
+    const j = JSON.parse(r.stdout);
+    ok = j.healthy === false && j.failures >= 1;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.361) CV-3: audit 미초기화 경로 failure 승격 (healthy=false) (UR-0078)' : '✗ audit 미초기화 가드 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

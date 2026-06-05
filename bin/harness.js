@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.360';
+const VERSION = '1.9.361';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -232,8 +232,21 @@ function _getAutoLoopRule(root) {
     return readRules(root).find(r => r.status === 'active' && /every-round/i.test(r.trigger || '')) || null;
   } catch { return null; }
 }
-function arg(name, def = null) { const i = process.argv.indexOf(name); return i >= 0 ? (process.argv[i + 1] || true) : def; }
+function arg(name, def = null) {
+  const i = process.argv.indexOf(name);
+  if (i >= 0) return process.argv[i + 1] || true;
+  const eq = process.argv.find(a => a.startsWith(name + '='));  // --name=value 형태 (외부리뷰 CV-1/UR-0076)
+  return eq ? eq.slice(name.length + 1) : def;
+}
 function has(name) { return process.argv.includes(name); }
+// 공통 root 해석 (외부리뷰 CV-1/UR-0076): --path(=값 포함) 플래그 > 유효 positional > cwd.
+//   여러 dispatcher 가 positional 또는 --path 한쪽만 처리하던 불일치(특히 session close 의 wrong-root 쓰기) 해소.
+function _resolveRoot(positional) {
+  const p = arg('--path', null);
+  if (p && p !== true) return p;
+  if (positional && !String(positional).startsWith('-')) return positional;
+  return process.cwd();
+}
 function nonFlagArgs() {
   const out = [];
   const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version']);
@@ -3065,6 +3078,7 @@ function _selfTestCases() {
     { name: 'UR-0075 Phase D: migrate plan(임시폴더 설치 후 비교) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migratePlanCmd === 'function' && src.includes('migratePlanCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'plan'"); } },
     { name: 'UR-0074: install-safety(0 런타임 deps · 0 install-script) 사실 가드', run: () => { if (typeof installSafetyCmd !== 'function') return false; let pkg = {}; try { pkg = JSON.parse(read(path.join(__dirname, '..', 'package.json'))); } catch { return false; } const deps = Object.keys(pkg.dependencies || {}).length; const hooks = ['preinstall','install','postinstall'].filter(h => (pkg.scripts||{})[h]).length; return deps === 0 && hooks === 0; } },
     { name: 'CV-2/UR-0077: fetchNpmLatest 신형 Node win EINVAL 회피 (cmd.exe + try/catch + windowsHide)', run: () => { if (typeof fetchNpmLatest !== 'function') return false; const src = read(__filename); const i = src.indexOf('function fetchNpmLatest'); if (i < 0) return false; const body = src.slice(i, i + 1600); return body.includes('cmd.exe') && /try \{/.test(body) && body.includes('windowsHide'); } },
+    { name: 'CV-1/UR-0076: arg() --path=값 파싱 + _resolveRoot(--path>positional>cwd) 행위', run: () => { if (typeof _resolveRoot !== 'function') return false; const save = process.argv; try { process.argv = ['node', 'h', 'context', '--path=/tmp/eqform']; const eq = arg('--path', null) === '/tmp/eqform'; process.argv = ['node', 'h', 'context', 'X', '--path', '/tmp/flag']; const flagWins = _resolveRoot('X') === '/tmp/flag'; process.argv = ['node', 'h', 'context', '/tmp/pos']; const posWins = _resolveRoot('/tmp/pos') === '/tmp/pos'; process.argv = ['node', 'h', 'context']; const cwdFb = _resolveRoot(undefined) === process.cwd(); return eq && flagWins && posWins && cwdFb; } finally { process.argv = save; } } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6928,6 +6942,12 @@ function audit(root, opts = {}) {
   const _origWrite = process.stdout.write.bind(process.stdout);
   if (jsonMode) process.stdout.write = () => true;
   try {
+  // 외부리뷰 CV-3/UR-0078: 미초기화/존재하지 않는 경로를 healthy 로 오판하던 것 수정 — 필수 마커 부재 시 failure 승격(verify 와 일관).
+  if (!exists(root) || !exists(path.join(root, '.harness')) || !exists(path.join(root, 'AGENTS.md'))) {
+    failures++;
+    fail(`미초기화 또는 존재하지 않는 경로: ${root} (.harness/AGENTS.md 없음 — leerness init 필요)`);
+    _finding('not_initialized', 'fail', 'uninitialized or missing path (.harness or AGENTS.md absent)', { root });
+  }
   const designCands = ['designguide.md','design-guide.md','docs/designguide.md','docs/design-guide.md','.harness/designguide.md'];
   const dups = designCands.filter(f => exists(path.join(root,f)));
   if (dups.length) { warnings++; warn(`design guide duplicates outside canonical: ${dups.join(', ')} (run: leerness consistency merge-design-guide)`); _finding('design_dup', 'warn', 'design guide duplicates outside canonical', { duplicates: dups }); }
@@ -21186,7 +21206,7 @@ async function main() {
   if (cmd === 'check')     return preCheck(arg('--path', args[1] || process.cwd()));
   if (cmd === 'scan' && args[1] === 'secrets')   return scanSecrets(arg('--path', args[2] || process.cwd()));
   if (cmd === 'encoding' && args[1] === 'check') return encodingCheck(arg('--path', args[2] || process.cwd()));
-  if (cmd === 'lazy' && args[1] === 'detect')    return lazyDetect(args[2] || process.cwd(), { json: has('--json') });
+  if (cmd === 'lazy' && args[1] === 'detect')    return lazyDetect(_resolveRoot(args[2]), { json: has('--json') });
   if (cmd === 'memory' && args[1] === 'search')  return memorySearch(arg('--path', process.cwd()), args.slice(2).join(' '));
   if (cmd === 'handoff')      return handoffCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'reuse-map')    return reuseMapCmd(arg('--path', args[1] || process.cwd()));
@@ -21249,7 +21269,7 @@ async function main() {
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'reuse' && args[1] === 'autodetect') return reuseAutodetectCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'setup-agents' || cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(args[1] && args[1] !== 'agents' ? args[1] : (arg('--path', args[2] || process.cwd())));
-  if (cmd === 'session' && args[1] === 'close') return sessionClose(args[2] || process.cwd(), { json: has('--json') });
+  if (cmd === 'session' && args[1] === 'close') return sessionClose(_resolveRoot(args[2]), { json: has('--json') });
   // 1.9.151: viewwork 명령 제거 (사용자 명시 — leerness 와 무관). session close 의 viewworkEmit 콜도 함께 제거.
   if (cmd === 'route')     return route(args[1] || 'planning');
   if (cmd === 'self' && args[1] === 'check')   return await selfCheck(absRoot(arg('--path', args[2] || process.cwd())));
@@ -21301,11 +21321,11 @@ async function main() {
   // 1.9.220: leerness session-resume — 비정상 종료 감지 + 자율 재개 가이드 (사용자 명시)
   if (cmd === 'session-resume')                     return sessionResumeCmd(arg('--path', process.cwd()));
   // 1.9.226: leerness round-history — 자율 라운드 통계 + 다음 마일스톤
-  if (cmd === 'round-history')                      return roundHistoryCmd(arg('--path', process.cwd()));
+  if (cmd === 'round-history')                      return roundHistoryCmd(_resolveRoot(args[1]));
   // 1.9.229: leerness milestones — 도달 마일스톤 + 다음 ETA (1.9.226 확장)
-  if (cmd === 'milestones')                         return milestonesCmd(arg('--path', process.cwd()));
+  if (cmd === 'milestones')                         return milestonesCmd(_resolveRoot(args[1]));
   // 1.9.231: leerness pulse — 한 줄 종합 요약 (10 핵심 지표)
-  if (cmd === 'pulse')                              return pulseCmd(arg('--path', process.cwd()));
+  if (cmd === 'pulse')                              return pulseCmd(_resolveRoot(args[1]));
   // 1.9.233: leerness commands — 카테고리화된 전체 CLI 명령 목록
   if (cmd === 'commands')                           return commandsCmd(arg('--path', process.cwd()));
   // 1.9.239: leerness py-check — Python 파일 분석 (사용자 명시 UR-0013)
@@ -21338,7 +21358,7 @@ async function main() {
   if (cmd === 'capabilities' || cmd === 'security-surface') return capabilitiesCmd(arg('--path', process.cwd()), { json: has('--json') });
   // 1.9.278 (UR-0032): leerness state <show|start|record|verify|handoff> — .leerness/ 구조화 상태 substrate
   if (cmd === 'state')                              return stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
-  if (cmd === 'context')                            return contextCmd(arg('--path', process.cwd()), { json: has('--json') });
+  if (cmd === 'context')                            return contextCmd(_resolveRoot(args[1]), { json: has('--json') });
   if (cmd === 'brief')                              return briefCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'about' || cmd === 'identity')        return aboutCmd({ json: has('--json') });
   // 1.9.281 (UR-0034): leerness policy <show|set|check> — 권한 등급 (opt-in enforced)
