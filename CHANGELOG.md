@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.336 — 2026-06-05 — UR-0025(심층): anti-laziness 서브시스템 분리 (Codex 위임·검증)
+
+**🤖 anti-laziness(거짓완료 탐지) 서브시스템의 핵심(claim-vs-code 패턴 catalog + 순수 탐지/신뢰도 로직)을 Codex CLI(gpt-5.5)에 위임 분리하고 하네스가 독립 검증까지 완료.** (사용자 "일부 Codex 위임" 지시 — 1.9.334 위임·1.9.335 자체 구현에 이은 교대)
+
+### 배경 (위임 결정)
+constraints(1.9.333)·intent-도메인(1.9.334)·LSP(1.9.335)에 이은 동형 추출 4번째. 프로젝트 핵심인 anti-lazy-work 탐지 로직이라 신중을 기해 blast radius(harness 내 외부 호출 3곳, 교차 참조 0)를 사전 확정 후 정밀 명세로 Codex 에 위임. 위임 ≠ 무검증: 결과를 하네스가 독립 검증(범위·금지파일·구문·중복·호출처·동작·end-to-end) 후 릴리스.
+
+### 구현 (Codex 수행)
+1. **`OPTIMISM_PATTERNS`**(10종 외부작용 claim-vs-code 패턴: API/DB/Email/Webhook/Payment/FileIO/Queue/Cache/Notify/Storage) → `lib/catalogs.js`.
+2. **`_extractUrlClaims`/`_verifyUrlClaim`/`_detectOptimism(patterns, …)`/`_computeConfidence(patterns, …)`**(순수 탐지·신뢰도 로직, patterns 주입) → `lib/pure-utils.js`. harness 는 alias import(`_puDetectOptimism`/`_puComputeConfidence`) + 박막 wrapper(`_detectOptimism(evidence, codeText)` = `_puDetectOptimism(OPTIMISM_PATTERNS, …)`)로 호출처 3곳 시그니처 0변경. fs 의존 `_scanCodeForPatterns` 는 harness 유지.
+
+### 검증 (하네스 독립)
+- **변경 범위**: bin/harness.js + lib/catalogs.js + lib/pure-utils.js 만 (VERSION/e2e/README/CHANGELOG/package.json 미변경 — 명세 금지사항 준수).
+- **무결성**: node -c ×3 통과 · selftest 84/84 PASS · **E2E 281/281 PASS** (회귀 0).
+- **동작 실측**: catalog 10종 · `_detectOptimism`(API claim+코드無 → API/high + URL/medium) · `_computeConfidence` 0.25 · 무claim=1.0 · null guard([]/1.0) · `_extractUrlClaims`/`_verifyUrlClaim` 정상.
+- **end-to-end 동치**: `optimism-check T-9999`(harness wrapper 경로) → suspects [API,URL]·confidence 0.25 — 순수 함수 직접 호출과 완전 일치.
+
 ## 1.9.335 — 2026-06-05 — UR-0025(심층): LSP 서브시스템 핵심 분리
 
 **🧩 LSP 정규식 fallback 서브시스템의 핵심(언어별 심볼 패턴 catalog + 순수 언어감지 + 순수 심볼 매처)을 모듈로 분리 — 1.9.333~334 패턴 동일 적용.** (UR-0025 심층)

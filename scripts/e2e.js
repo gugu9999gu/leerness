@@ -4188,5 +4188,38 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.336 회귀 (UR-0025 심층, Codex 위임·검증): anti-laziness OPTIMISM_PATTERNS→lib/catalogs + optimism 순수로직→pure-utils + optimism-check 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const catOk = Array.isArray(c.OPTIMISM_PATTERNS) && c.OPTIMISM_PATTERNS.length === 10 && c.OPTIMISM_PATTERNS[0].kind === 'API';
+    const ev = 'API 호출 완료, POST /users 처리함';
+    const sus = m._detectOptimism(c.OPTIMISM_PATTERNS, ev, 'function x(){ return 1; }');
+    const conf = m._computeConfidence(c.OPTIMISM_PATTERNS, ev, 'function x(){ return 1; }');
+    const work = catOk && typeof m._detectOptimism === 'function' && sus.some(s => s.kind === 'API' && s.severity === 'high') && conf < 0.5
+      && m._computeConfidence(c.OPTIMISM_PATTERNS, '그냥 정리함', 'x') === 1 && m._detectOptimism(null, ev, 'x').length === 0
+      && m._extractUrlClaims('POST /a/b').length === 1 && m._verifyUrlClaim({ path: '/a/b' }, 'has /a/b') === true;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
+    const movedOut = !/const OPTIMISM_PATTERNS = \[/.test(harnessSrc) && !/function _extractUrlClaims\(/.test(harnessSrc)
+      && _catImp.includes('OPTIMISM_PATTERNS') && _puImp.includes('_puDetectOptimism') && _puImp.includes('_puComputeConfidence');
+    // 소비 명령 회귀: optimism-check (harness wrapper → _puDetectOptimism(OPTIMISM_PATTERNS, ...) 경로)
+    const od = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-opt-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', od, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    fs.appendFileSync(path.join(od, '.harness', 'progress-tracker.md'), '| T-9999 | done | API 통합 | API 호출 완료, POST /users 처리함 | M-1 | 2026-06-05 |\n');
+    const or = cp.spawnSync(process.execPath, [CLI, 'optimism-check', 'T-9999', '--path', od, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let cmdOk = false;
+    try { const j = JSON.parse(or.stdout); cmdOk = Array.isArray(j.suspects) && j.suspects.some(s => s.kind === 'API') && typeof j.confidence === 'number' && j.confidence < 0.5; } catch {}
+    ok = work && movedOut && cmdOk;
+    fs.rmSync(od, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.336) UR-0025 심층(Codex 위임·검증): OPTIMISM_PATTERNS/optimism 순수로직 분리 + optimism-check 회귀 (UR-0025)' : '✗ anti-laziness 서브시스템 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

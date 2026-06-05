@@ -17,13 +17,14 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _BRIEF_FIELDS, _briefFilled,
   BRIEF_START, BRIEF_END, _briefReadmeBlock, _briefBlueprint,
   _parseLessonEntries, _matchConstraints, _matchDomain,
-  _detectLspLang, _matchLspSymbols } = require('../lib/pure-utils');  // 1.9.318~335 (UR-0025): 순수 유틸 모듈 분리
+  _detectLspLang, _matchLspSymbols,
+  _detectOptimism: _puDetectOptimism, _computeConfidence: _puComputeConfidence } = require('../lib/pure-utils');  // 1.9.318~335 (UR-0025): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS } = require('../lib/catalogs');  // 1.9.335 (UR-0025): LSP 패턴 catalog 분리
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS } = require('../lib/catalogs');  // 1.9.335 (UR-0025): LSP 패턴 catalog 분리
 
-const VERSION = '1.9.335';
+const VERSION = '1.9.336';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3081,6 +3082,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심층: constraints catalog→lib/catalogs + _matchConstraints→pure-utils 분리 (1.9.333)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6 && !!c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe; const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제'); const work = r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0; const src = read(__filename); const moved = _DEFAULT_PLATFORM_CONSTRAINTS === c._DEFAULT_PLATFORM_CONSTRAINTS && _matchConstraints === m._matchConstraints && !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(src) && src.includes('_matchConstraints(_loadPlatformConstraints(root), text)'); return catOk && work && moved; } },
     { name: 'UR-0025 심층(Codex 위임·검증): intent domain catalog→lib/catalogs + _matchDomain→pure-utils 분리 (1.9.334)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_DOMAIN_CATALOG && Object.keys(c._DEFAULT_DOMAIN_CATALOG.domains).length === 5 && !!c._DEFAULT_DOMAIN_CATALOG.domains.game; const r = m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'unity 게임'); const work = r.domain === 'game' && Array.isArray(r.components) && m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'zzz없음').domain === null && m._matchDomain(null, 'x').domain === null; const src = read(__filename); const moved = _DEFAULT_DOMAIN_CATALOG === c._DEFAULT_DOMAIN_CATALOG && _matchDomain === m._matchDomain && !/const _DEFAULT_DOMAIN_CATALOG = \{/.test(src) && src.includes('_matchDomain(_loadDomainCatalog(root), text)'); return catOk && work && moved; } },
     { name: 'UR-0025 심층: LSP catalog→lib/catalogs(_LSP_LANG_PATTERNS) + _detectLspLang/_matchLspSymbols→pure-utils 분리 (1.9.335)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._LSP_LANG_PATTERNS && Object.keys(c._LSP_LANG_PATTERNS).length === 5 && Array.isArray(c._LSP_LANG_PATTERNS.javascript); const langOk = m._detectLspLang('a.py') === 'python' && m._detectLspLang('b.go') === 'go' && m._detectLspLang('c.md') === 'javascript'; const sy = m._matchLspSymbols(c._LSP_LANG_PATTERNS, 'function alpha(){}\nclass Beta{}', 'javascript'); const work = sy.length === 2 && sy[0].name === 'alpha' && sy[0].kind === 'function' && sy[1].kind === 'class' && m._matchLspSymbols(null, 'x', 'javascript').length === 0; const src = read(__filename); const moved = _LSP_LANG_PATTERNS === c._LSP_LANG_PATTERNS && _detectLspLang === m._detectLspLang && _matchLspSymbols === m._matchLspSymbols && !/const _LSP_LANG_PATTERNS = \{/.test(src) && !/function _detectLspLang\(/.test(src); return catOk && langOk && work && moved; } },
+    { name: 'UR-0025 심층(Codex 위임·검증): anti-laziness catalog→lib/catalogs(OPTIMISM_PATTERNS) + optimism 순수로직→pure-utils 분리 (1.9.336)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = Array.isArray(c.OPTIMISM_PATTERNS) && c.OPTIMISM_PATTERNS.length === 10 && c.OPTIMISM_PATTERNS[0].kind === 'API'; const ev = 'API 호출 완료, POST /users'; const sus = m._detectOptimism(c.OPTIMISM_PATTERNS, ev, 'function x(){}'); const conf = m._computeConfidence(c.OPTIMISM_PATTERNS, ev, 'function x(){}'); const work = sus.some(s => s.kind === 'API' && s.severity === 'high') && conf < 0.5 && m._computeConfidence(c.OPTIMISM_PATTERNS, '정리함', 'x') === 1 && m._detectOptimism(null, ev, 'x').length === 0 && m._extractUrlClaims('POST /a').length === 1 && m._verifyUrlClaim({ path: '/a' }, 'has /a') === true; const src = read(__filename); const moved = OPTIMISM_PATTERNS === c.OPTIMISM_PATTERNS && _puDetectOptimism === m._detectOptimism && !/const OPTIMISM_PATTERNS = \[/.test(src) && !/function _extractUrlClaims\(/.test(src); return catOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -9996,59 +9998,10 @@ function depsImpactCmd(root, targetCapability) {
 //   evidence에 "DB 저장" / "insert N건" / "DB에" → db.*/pg.*/mysql.*/mongoose.*/prisma.* 없으면 의심
 //   evidence에 "이메일 발송" / "메일 전송" → sendMail/nodemailer/smtp 없으면 의심
 // 1.9.27: 패턴 카탈로그 확장 (5 → 10) + URL/메서드 단위 매핑 추가
-const OPTIMISM_PATTERNS = [
-  { kind: 'API',     evidenceRe: /(API\s*호출|HTTP\s*\d{3}|POST\s*\/|GET\s*\/|PUT\s*\/|DELETE\s*\/|fetch|REST 응답|응답 확인|endpoint|엔드포인트)/i,
-    codeRe: /\b(fetch\s*\(|http\.request|https\.request|axios\.|got\.|undici|node-fetch)/i,
-    label: 'API/HTTP 호출' },
-  { kind: 'DB',      evidenceRe: /(DB에?\s*저장|insert\s+\d+|데이터베이스|SQL\s*(INSERT|UPDATE|DELETE)|migration|마이그레이션 적용)/i,
-    codeRe: /\b(db\.|pg\.|pool\.|mysql\.|mongoose\.|prisma\.|sequelize|knex|sqlite3|MongoClient|createConnection)/i,
-    label: 'DB 호출' },
-  { kind: 'Email',   evidenceRe: /(이메일[^.\n]{0,30}(발송|전송|보냈|보냄|완료)|메일[^.\n]{0,30}(발송|전송|보냈|보냄)|sendMail|smtp\s*(전송|발송))/i,
-    codeRe: /\b(sendMail|nodemailer|smtp|@sendgrid|mailgun|aws-sdk\/ses|resend\.)/i,
-    label: '이메일 전송' },
-  { kind: 'Webhook', evidenceRe: /(웹훅\s*(호출|전송|발송)|webhook\s+(sent|posted|triggered))/i,
-    codeRe: /\b(fetch\s*\(|http\.request|axios\.)/i,
-    label: '웹훅' },
-  { kind: 'Payment', evidenceRe: /(결제\s*(완료|성공|승인|취소)|payment\s+(processed|charged)|stripe 결제|toss\s*결제|카카오페이|네이버페이|kakaopay|nicepay|iamport 결제|페이팔|paypal)/i,
-    codeRe: /\b(stripe|toss|@stripe|tosspayments|iamport|kakao|nicepay|naverpay|paypal-rest-sdk|@paypal)/i,
-    label: '결제' },
-  // 1.9.27 신규 카테고리
-  { kind: 'FileIO',  evidenceRe: /(파일[^.\n]{0,20}(생성|저장|작성|기록)|\d+개[^.\n]{0,20}파일|디스크[^.\n]{0,20}저장|로그 파일 작성)/i,
-    codeRe: /\b(fs\.write|fs\.appendFile|writeFileSync|appendFileSync|fs\/promises|fs\.createWriteStream)/i,
-    label: '파일 I/O 쓰기' },
-  { kind: 'Queue',   evidenceRe: /(메시지\s*큐|발행\s*완료|publish\s*(완료|성공)|RabbitMQ|Kafka|SQS|Redis Pub|이벤트 발행)/i,
-    codeRe: /\b(amqp|kafkajs|rabbit|redis\.(publish|xadd)|@aws-sdk\/client-sqs|bull|bullmq)/i,
-    label: '메시지 큐 발행' },
-  { kind: 'Cache',   evidenceRe: /(Redis[^.\n]{0,20}(저장|set|get)|캐시[^.\n]{0,20}(저장|기록|적중)|memcache)/i,
-    codeRe: /\b(redis\.|ioredis|memcached|node-cache|@upstash\/redis|connect-redis)/i,
-    label: '캐시 저장' },
-  { kind: 'Notify',  evidenceRe: /(슬랙\s*(알림|발송|전송)|Slack\s+(notification|sent|posted)|Discord\s+(알림|발송|webhook)|푸시 알림 전송)/i,
-    codeRe: /\b(@slack\/web-api|slack-webhook|discord\.js|discord-webhook|@discordjs|firebase\/messaging|expo-notifications)/i,
-    label: '슬랙/Discord 알림' },
-  { kind: 'Storage', evidenceRe: /(S3\s*(업로드|저장)|GCS\s*업로드|Azure Blob|클라우드 스토리지 업로드|object storage 저장)/i,
-    codeRe: /\b(@aws-sdk\/client-s3|aws-sdk[^a-z]|@google-cloud\/storage|@azure\/storage-blob|aws-s3)/i,
-    label: '클라우드 스토리지' }
-];
+// OPTIMISM_PATTERNS moved to lib/catalogs.js (UR-0057).
 
 // 1.9.27: URL/메서드 단위 매핑 — evidence에서 "POST /users" 같은 구체 경로를 추출하고 코드에 같은 경로 존재 확인
-function _extractUrlClaims(evidence) {
-  const claims = [];
-  // "POST /users" / "GET /api/v1/items" 등
-  const re = /\b(GET|POST|PUT|DELETE|PATCH)\s+(\/[\w\-\/]*)/gi;
-  let m;
-  while ((m = re.exec(evidence)) !== null) {
-    claims.push({ method: m[1].toUpperCase(), path: m[2] });
-  }
-  return claims;
-}
-function _verifyUrlClaim(claim, codeText) {
-  // claim.path 가 코드에 등장해야 함 (fetch('https://.../users') 또는 라우트 정의 'POST /users')
-  if (!claim.path || claim.path.length < 2) return true;
-  // path를 그대로 검색 (URL 또는 라우트 정의)
-  const escaped = claim.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(escaped, 'i');
-  return re.test(codeText);
-}
+// _extractUrlClaims/_verifyUrlClaim moved to lib/pure-utils.js (UR-0057).
 
 function _scanCodeForPatterns(root) {
   // src/, bin/, lib/, scripts/ 의 .js/.ts/.gd/.py 파일 본문 통합
@@ -10072,46 +10025,13 @@ function _scanCodeForPatterns(root) {
 }
 
 function _detectOptimism(evidence, codeText) {
-  // 각 패턴 검사: evidence에 주장 있고 코드에 흔적 없으면 의심
-  const suspects = [];
-  for (const p of OPTIMISM_PATTERNS) {
-    if (p.evidenceRe.test(evidence) && !p.codeRe.test(codeText)) {
-      suspects.push({ kind: p.kind, label: p.label, severity: 'high' });
-    }
-  }
-  // 1.9.27: URL/메서드 단위 매핑 — API 패턴에선 통과해도 구체 경로가 코드에 없으면 추가 의심
-  const urlClaims = _extractUrlClaims(evidence);
-  for (const claim of urlClaims) {
-    if (!_verifyUrlClaim(claim, codeText)) {
-      suspects.push({
-        kind: 'URL',
-        label: `구체 경로 "${claim.method} ${claim.path}" 코드에 미발견`,
-        severity: 'medium',
-        claim
-      });
-    }
-  }
-  return suspects;
+  return _puDetectOptimism(OPTIMISM_PATTERNS, evidence, codeText);
 }
 
 // 1.9.27: 신뢰도 점수 (0=완전 의심, 1=신뢰)
 // 1.9.28: high suspect 단일 케이스 floor 0.15 — 단일 의심도 정량 차등 가능하게
 function _computeConfidence(evidence, codeText) {
-  const suspects = _detectOptimism(evidence, codeText);
-  const high = suspects.filter(s => s.severity === 'high').length;
-  const medium = suspects.filter(s => s.severity === 'medium').length;
-  // 가중치: high 1.0 / medium 0.5
-  const totalPenalty = high * 1.0 + medium * 0.5;
-  // 패턴 검사로 발견된 evidence 주장이 많을수록 신뢰도 산정 base 변경
-  const evidenceClaims = OPTIMISM_PATTERNS.filter(p => p.evidenceRe.test(evidence)).length + _extractUrlClaims(evidence).length;
-  if (evidenceClaims === 0) return 1.0; // 외부 작용 주장 자체가 없으면 신뢰 1.0
-  let confidence = Math.max(0, 1 - totalPenalty / evidenceClaims);
-  // 1.9.28: single high suspect에서 confidence 0.0이 일률적 → severity 기반 floor 적용
-  if (suspects.length > 0 && high > 0 && confidence < 0.15) {
-    // 의심 발견은 명확하지만 0보다는 명시적 신호로
-    confidence = 0.15;
-  }
-  return Math.round(confidence * 100) / 100;
+  return _puComputeConfidence(OPTIMISM_PATTERNS, evidence, codeText);
 }
 
 // 1.9.305 (사용자 명시): AI 인식론적 정직성 점검 — 모르는 걸 아는 척 / 정보 미수집 / 미검증 섣부른 판단.
