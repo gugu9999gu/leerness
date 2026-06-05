@@ -27,7 +27,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.352';
+const VERSION = '1.9.353';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -235,7 +235,7 @@ function arg(name, def = null) { const i = process.argv.indexOf(name); return i 
 function has(name) { return process.argv.includes(name); }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep']);
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version']);
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -1169,14 +1169,16 @@ async function install(root, opts = {}) {
     }
     // 1.9.251 (UR-0018 3단계): init 완료 시 터미널 인코딩 점검 안내 — 사용자 명시 ("leerness init 시 터미널 인코딩 점검 안내")
     //   Windows CP949 / POSIX non-UTF-8 환경에서 leerness 한국어 출력 깨짐을 설치 직후 사용자에게 즉시 고지.
+    // 1.9.353 (UR-0071 외부리뷰): non-TTY(파이프) 출력에 raw ANSI 누출 방지 — isTTY 일 때만 색상.
+    const _c = (n, s) => (process.stdout && process.stdout.isTTY) ? `\x1b[${n}m${s}\x1b[0m` : s;
     if (!opts.migration) {
       try {
         const enc = _terminalEncodingNotice();
         if (enc.lines.length > 0) {
           log('');
-          log(`\x1b[36m🌐 터미널 인코딩 점검 (1.9.251, UR-0018)\x1b[0m`);
+          log(_c(36, '🌐 터미널 인코딩 점검 (1.9.251, UR-0018)'));
           enc.lines.forEach(l => log(l));
-          if (!enc.ok) log(`\x1b[2m   상세: leerness env  ·  셸 스크립트 검사: leerness env encoding\x1b[0m`);
+          if (!enc.ok) log(_c(2, '   상세: leerness env  ·  셸 스크립트 검사: leerness env encoding'));
         }
       } catch {}
     }
@@ -1187,9 +1189,9 @@ async function install(root, opts = {}) {
         const diag = _pathDiagnose();
         if (!diag.resolvable && !diag.inPath && diag.globalBin) {
           log('');
-          log(`\x1b[33m🔗 leerness CLI PATH 미등록 (1.9.254, UR-0019)\x1b[0m`);
-          log(`\x1b[2m   npm global bin (${diag.globalBin}) 이 PATH 에 없어 'leerness' 명령이 안 먹힐 수 있음\x1b[0m`);
-          log(`\x1b[36m   → 자동 등록: leerness path-setup --apply\x1b[0m`);
+          log(_c(33, '🔗 leerness CLI PATH 미등록 (1.9.254, UR-0019)'));
+          log(_c(2, `   npm global bin (${diag.globalBin}) 이 PATH 에 없어 'leerness' 명령이 안 먹힐 수 있음`));
+          log(_c(36, '   → 자동 등록: leerness path-setup --apply'));
         }
       } catch {}
     }
@@ -3150,7 +3152,8 @@ function shellGuardCmd(root, cmd, opts = {}) {
   const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
   const rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
-  const ctx = _detectShellCtx();
+  // 1.9.353 (UR-0070 외부리뷰): --shell 로 대상 셸 명시 — 자동 감지(git-bash 경유 등)가 실제 실행 셸과 달라 PS5.1 && 가드가 무력화되는 것 방지
+  const ctx = opts.shell ? { shell: opts.shell, psVersion: opts.shell === 'powershell' ? (opts.psVersion || '5') : null } : _detectShellCtx();
   // record 모드: 실패한 명령 기록
   if (opts.record) {
     if (!cmd) { fail('shell-guard --record 에는 --cmd "<명령>" 필요'); return; }
@@ -7139,7 +7142,7 @@ function encodingCheck(root) {
     if (buf.length === 0) continue;
     if (buf.length > 5 * 1024 * 1024) continue;
     const fileRel = rel(root, file);
-    if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) { warnings++; findings.push({ file: fileRel, issue: 'UTF-8 BOM' }); }
+    if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) { if (ext !== '.ps1' && ext !== '.bat') { warnings++; findings.push({ file: fileRel, issue: 'UTF-8 BOM' }); } }  // 1.9.353 (UR-0067 외부리뷰): .ps1/.bat 는 PS5.1 호환 위해 BOM 의도적일 수 있어 예외 (env encoding 정책과 모순 해소)
     else if ((buf[0] === 0xFF && buf[1] === 0xFE) || (buf[0] === 0xFE && buf[1] === 0xFF)) { warnings++; findings.push({ file: fileRel, issue: 'UTF-16 BOM' }); }
     let nul = false; for (let i = 0; i < Math.min(buf.length, 4096); i++) if (buf[i] === 0) { nul = true; break; }
     if (nul) { warnings++; findings.push({ file: fileRel, issue: 'NUL byte (binary in text path)' }); }
@@ -7147,13 +7150,13 @@ function encodingCheck(root) {
       const text = buf.toString('utf8').replace(/^﻿/, '');
       if (!/^@?chcp\s+65001/i.test(text.split(/\r?\n/, 1)[0] || '')) { warnings++; findings.push({ file: fileRel, issue: '.bat missing chcp 65001' }); }
     }
+    // 1.9.353 (UR-0067 외부리뷰): 가-힣 게이트 제거 — CP949/Latin-1 등 invalid UTF-8 은 한글 포함 여부와 무관하게 round-trip 불일치로 감지(이전: 한글 없으면 통과 = false negative). 유효 UTF-8 은 byte-exact round-trip 이라 오탐 없음.
     try {
       const text = buf.toString('utf8');
-      if (/[가-힣]/.test(text)) {
-        const reBuf = Buffer.from(text, 'utf8');
-        if (!reBuf.equals(buf) && !(buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF)) {
-          warnings++; findings.push({ file: fileRel, issue: 'Korean text but non-clean UTF-8 roundtrip' });
-        }
+      const reBuf = Buffer.from(text, 'utf8');
+      const hasBOM = buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF;
+      if (!reBuf.equals(buf) && !hasBOM) {
+        warnings++; findings.push({ file: fileRel, issue: 'invalid UTF-8 roundtrip (CP949/mojibake 의심)' });
       }
     } catch {}
   }
@@ -21158,7 +21161,7 @@ async function main() {
   if (cmd === 'shell-guard' || cmd === 'shellguard') {
     const cmdArg = arg('--cmd', args[1] && !args[1].startsWith('-') ? args[1] : '');
     const exitRaw = arg('--exit', null);
-    return shellGuardCmd(arg('--path', process.cwd()), cmdArg, { record: has('--record'), exit: exitRaw != null ? parseInt(exitRaw, 10) : null, json: has('--json') });
+    return shellGuardCmd(arg('--path', process.cwd()), cmdArg, { record: has('--record'), exit: exitRaw != null ? parseInt(exitRaw, 10) : null, json: has('--json'), shell: arg('--shell', null), psVersion: arg('--ps-version', null) });
   }
   // 1.9.265: leerness slash-commands [agent] — CLI 에이전트별 슬래시 명령어 레지스트리 (사용자 명시 UR-0021)
   if (cmd === 'slash-commands' || cmd === 'slash' || cmd === 'agent-slash') {

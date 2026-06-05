@@ -4693,5 +4693,35 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.353 회귀 (외부리뷰 P2): UR-0067 encoding(CP949 감지/.ps1 BOM 예외) + UR-0070 shell-guard --shell + UR-0071 init non-TTY ANSI
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-enc-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // UR-0067: CP949 bytes(한글 utf8 미매치) → invalid 감지 / .ps1 BOM → 예외
+    fs.writeFileSync(path.join(d, 'cp949.txt'), Buffer.from([0xC7, 0xD1, 0xB1, 0xDB]));
+    fs.writeFileSync(path.join(d, 'script.ps1'), Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from('Write-Host hi', 'utf8')]));
+    const er = cp.spawnSync(process.execPath, [CLI, 'encoding', 'check', d], { encoding: 'utf8', timeout: 20000 });
+    const eout = (er.stdout || '') + (er.stderr || '');
+    const encOk = /cp949\.txt/.test(eout) && /CP949|invalid UTF-8/.test(eout) && !/script\.ps1/.test(eout);
+    fs.rmSync(d, { recursive: true, force: true });
+    // UR-0070: shell-guard --shell powershell → ps5-chain 감지(자동감지로는 bash 라 놓쳤을 것)
+    const sr = cp.spawnSync(process.execPath, [CLI, 'shell-guard', 'a && b', '--shell', 'powershell', '--json'], { encoding: 'utf8', timeout: 20000 });
+    let shellOk = false;
+    try { const j = JSON.parse(sr.stdout); shellOk = j.shell === 'powershell' && (j.issues || []).some(i => i.rule === 'ps5-chain'); } catch {}
+    // UR-0071: init non-TTY 출력에 fixed raw ANSI 없음
+    const e2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ansi-'));
+    const ir = cp.spawnSync(process.execPath, [CLI, 'init', e2, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const iout = (ir.stdout || '') + (ir.stderr || '');
+    const ansiOk = !/\x1b\[36m🌐/.test(iout) && !/\x1b\[33m🔗/.test(iout);
+    fs.rmSync(e2, { recursive: true, force: true });
+    ok = encOk && shellOk && ansiOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.353) 외부리뷰 P2: encoding CP949/.ps1 BOM + shell-guard --shell + init non-TTY ANSI (UR-0067/0070/0071)' : '✗ P2 마무리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

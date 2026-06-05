@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.353 — 2026-06-05 — 외부리뷰 P2 마무리 3종 (UR-0067/0070/0071) · P2 전량 완료
+
+**🧩 외부 리뷰 남은 P2 3건 — 인코딩 정책/CP949 · shell-guard 셸 명시 · init non-TTY ANSI. 외부리뷰 P0/P1/P2 전량 해소.**
+
+### 구현
+1. **UR-0067 — 인코딩 정합** (Opus P2-1/Codex#4): (a) `encoding check` 의 UTF-8 BOM 경고를 `.ps1`/`.bat` 예외 — PS5.1 호환 위해 BOM 이 의도적일 수 있어 `env encoding`(BOM 권장)과의 모순 해소. (b) 한글(`[가-힣]`) 게이트 제거 → **CP949/Latin-1 등 invalid UTF-8 을 round-trip 불일치로 감지**(이전: 한글 없으면 통과 = false negative). 유효 UTF-8 은 byte-exact round-trip 이라 오탐 0.
+2. **UR-0070 — shell-guard 셸 명시** (Opus P2-4): `--shell powershell|cmd|bash` (+ `--ps-version`) 옵션 — 자동 감지(git-bash 경유 등)가 실제 실행 셸과 달라 PS5.1 `&&` 가드가 무력화되던 문제. AI 에이전트가 대상 셸 지정 가능.
+3. **UR-0071 — init non-TTY ANSI** (Sonnet F-05): init 완료 안내 5개 raw ANSI(`\x1b[36m/33m/2m`)에 isTTY 가드 — 파이프 출력에 raw escape 누출 방지.
+
+### 검증
+- **selftest 100/100 PASS** · **E2E 297→298 PASS** (회귀 0).
+- 실측: cp949.txt(한글 utf8 미매치) invalid 감지 + script.ps1 BOM 예외 · `shell-guard "a && b" --shell powershell` → ps5-chain 감지 · init 파이프 출력 raw ANSI 0.
+
 ## 1.9.352 — 2026-06-05 — 외부리뷰 P2 정리 3종 (UR-0066/0068/0069)
 
 **🧩 외부 리뷰 P2 3건 — shell:true 주입 가드 + milestone 파서 누출 + usage subcommand 미집계.** (selftest 100 달성)
