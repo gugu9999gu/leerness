@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.344 — 2026-06-05 — UR-0025(심층): SKILL_CATALOG_PRESETS 분리 + UR-0057 완료
+
+**🧩 skill discover GitHub preset catalog 를 모듈로 분리 — catalog 추출 vein 마무리(동형 추출 10번째). + UR-0057(anti-laziness 분리, 1.9.336 기구현) 백로그 위생 완료.** (UR-0025 심층)
+
+### 구현 (UR-0025 심층)
+1. **`SKILL_CATALOG_PRESETS`**(vercel/anthropic GitHub skill preset) → `lib/catalogs.js`. `skill discover --preset`/`--all-presets` 가 import. catalog 추출 vein 마무리(10번째).
+2. **UR-0057 완료**: "anti-laziness subsystem data and pure logic extraction" 은 1.9.336 에서 이미 구현(OPTIMISM_PATTERNS→catalogs 10종 + _detectOptimism/_computeConfidence/_extractUrlClaims/_verifyUrlClaim→pure-utils) — 재검증 후 완료 처리(백로그 위생).
+3. selftest 91→92 · e2e 288→289.
+
+### 검증
+- **selftest 92/92 PASS** · **E2E 289/289 PASS** (회귀 0).
+- 실측: preset 2종(vercel.owner=vercel-labs · anthropic.repo=skills) · `skill discover --preset nonexistent` 가 catalog 기반 사용가능 목록(vercel, anthropic) 노출 · UR-0057 구현 실재 재검증(catalogs 10 + pure-utils 4함수 + harness 정의 부재).
+
 ## 1.9.343 — 2026-06-05 — 🎉 R300 마일스톤 · UR-0025(심층): SECRET_PATTERNS 보안 응집 분리
 
 **🎉 R300 누적 라운드 달성 (baseline v1.9.6).** **🔒 시크릿 값 스캔 정규식(13종)을 lib/catalogs.js 로 분리 — 보안 패턴 응집(`_isSecretKey` 키이름 휴리스틱과 모듈 통합). 동형 추출 9번째.** (UR-0025 심층)

@@ -25,9 +25,9 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS } = require('../lib/catalogs');  // 1.9.343 (UR-0025): SECRET_PATTERNS 보안 응집 분리
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.343';
+const VERSION = '1.9.344';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1612,12 +1612,7 @@ function _parseSkillCatalog(body, sourceUrl) {
 // 1.9.182: 공식 조직 스킬 catalog presets — 사용자 명시 (vercel-labs, anthropics 같은 1st-party 자동 탐색).
 //   각 entry: GitHub repo의 skills/ 디렉토리에 SKILL.md 들이 있는 표준 구조.
 //   sync: leerness skill discover --preset <name>  ·  --all-presets  ·  --github <owner/repo>[#branch]
-const SKILL_CATALOG_PRESETS = {
-  'vercel':    { owner: 'vercel-labs', repo: 'agent-skills', branch: 'main', path: 'skills',
-                  homepage: 'https://github.com/vercel-labs/agent-skills' },
-  'anthropic': { owner: 'anthropics',  repo: 'skills',       branch: 'main', path: 'skills',
-                  homepage: 'https://github.com/anthropics/skills' }
-};
+// 1.9.344 (UR-0025 심층): SKILL_CATALOG_PRESETS 는 lib/catalogs.js 로 이전 (import).
 
 // 1.9.182: GitHub repo 의 skills/ 디렉토리 자동 탐색.
 //   GitHub Contents API (no auth 60req/hr, .env GITHUB_TOKEN 시 5000req/hr) 사용.
@@ -3057,6 +3052,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심층: BUILTIN_CATALOG→lib/catalogs + _withBuiltinSource→pure-utils 분리 (1.9.341)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.BUILTIN_CATALOG && Object.keys(c.BUILTIN_CATALOG).length === 9 && c.BUILTIN_CATALOG.office && c.BUILTIN_CATALOG.office.version === '1.0.0'; const out = m._withBuiltinSource(c.BUILTIN_CATALOG); const work = Object.keys(out).length === 9 && Object.values(out).every(v => v._source === 'builtin') && out.office.version === '1.0.0' && Array.isArray(out.office.capabilities) && Object.keys(m._withBuiltinSource(null)).length === 0; const src = read(__filename); const moved = BUILTIN_CATALOG === c.BUILTIN_CATALOG && _withBuiltinSource === m._withBuiltinSource && !/const BUILTIN_CATALOG = \{/.test(src); return catOk && work && moved; } },
     { name: 'UR-0025 심층: ROADMAP_STATUS_LABEL/COLOR→lib/catalogs 분리 (1.9.342)', run: () => { const c = require('../lib/catalogs'); const lblOk = c.ROADMAP_STATUS_LABEL && Object.keys(c.ROADMAP_STATUS_LABEL).length === 11 && c.ROADMAP_STATUS_LABEL.done === '완료' && c.ROADMAP_STATUS_LABEL.blocked === '오류'; const colOk = c.ROADMAP_STATUS_COLOR && Object.keys(c.ROADMAP_STATUS_COLOR).length === 11 && c.ROADMAP_STATUS_COLOR.done === '#16a34a' && c.ROADMAP_STATUS_COLOR.skill === '#8b5cf6'; const src = read(__filename); const moved = ROADMAP_STATUS_LABEL === c.ROADMAP_STATUS_LABEL && ROADMAP_STATUS_COLOR === c.ROADMAP_STATUS_COLOR && !/const ROADMAP_STATUS_LABEL = \{/.test(src); return lblOk && colOk && moved; } },
     { name: 'UR-0025 심층: SECRET_PATTERNS→lib/catalogs 보안 응집 분리 (1.9.343)', run: () => { const c = require('../lib/catalogs'); const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 13 && c.SECRET_PATTERNS.every(p => p.name && p.re instanceof RegExp); const A = 'A'.repeat(40); const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";'); const moved = SECRET_PATTERNS === c.SECRET_PATTERNS; return catOk && det && moved; } },
+    { name: 'UR-0025 심층: SKILL_CATALOG_PRESETS→lib/catalogs 분리 (1.9.344)', run: () => { const c = require('../lib/catalogs'); const catOk = c.SKILL_CATALOG_PRESETS && Object.keys(c.SKILL_CATALOG_PRESETS).length === 2 && c.SKILL_CATALOG_PRESETS.vercel && c.SKILL_CATALOG_PRESETS.vercel.owner === 'vercel-labs' && c.SKILL_CATALOG_PRESETS.anthropic && c.SKILL_CATALOG_PRESETS.anthropic.repo === 'skills'; const moved = SKILL_CATALOG_PRESETS === c.SKILL_CATALOG_PRESETS; return catOk && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }

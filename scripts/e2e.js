@@ -4461,5 +4461,30 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.344 회귀 (UR-0025 심층): SKILL_CATALOG_PRESETS→lib/catalogs + skill discover preset 인식 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const catOk = c.SKILL_CATALOG_PRESETS && Object.keys(c.SKILL_CATALOG_PRESETS).length === 2
+      && c.SKILL_CATALOG_PRESETS.vercel && c.SKILL_CATALOG_PRESETS.vercel.owner === 'vercel-labs'
+      && c.SKILL_CATALOG_PRESETS.anthropic && c.SKILL_CATALOG_PRESETS.anthropic.repo === 'skills';
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
+    const movedOut = !/const SKILL_CATALOG_PRESETS = \{/.test(harnessSrc) && _catImp.includes('SKILL_CATALOG_PRESETS');
+    // 소비 회귀: skill discover 가 preset 목록을 catalog 에서 노출 (네트워크 없이 unknown preset → 사용가능 목록)
+    const sd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pre-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', sd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const dr = cp.spawnSync(process.execPath, [CLI, 'skill', 'discover', '--preset', 'nonexistent', '--path', sd], { encoding: 'utf8', timeout: 20000 });
+    const out = (dr.stdout || '') + (dr.stderr || '');
+    const cmdOk = /vercel/.test(out) && /anthropic/.test(out);
+    ok = catOk && movedOut && cmdOk;
+    fs.rmSync(sd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.344) UR-0025 심층: SKILL_CATALOG_PRESETS 분리 + skill discover preset 회귀 (UR-0025)' : '✗ SKILL_CATALOG_PRESETS 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
