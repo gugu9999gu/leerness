@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.339 — 2026-06-05 — UR-0053: decisions canonical = JSON, MD = projection (아키텍처)
+
+**🏛 상태 저장 단일 진실소스 — decisions 를 canonical JSON 으로 전환, decisions.md 는 projection(렌더 뷰). count drift 근본 해소.** (UR-0053 full, "UR-0053+UR-0025 둘 다 진행" 중 Round B)
+
+### 배경
+설치리뷰 med 전략(Codex#6·Opus·Sonnet): MD 파싱이 count drift(`context.memory.decisions=2 실제1`)·field 오파싱(Alternatives→Impact). 1.9.320 부분수정(template 제외)에 이은 **full**: JSON 을 canonical 로, MD 를 projection 으로 분리해 audit/health/context/MCP 가 단일 진실소스를 보게. (사용자 범위 선택: "decisions만 canonical JSON, 비파괴")
+
+### 구현 (UR-0053 — 비파괴 아키텍처)
+1. **canonical write path**: `decision add`/`drop` → `decisions.json`(canonical) + `decisions.md`(projection) 동시 기록. `_saveDecisions(root, arr)`.
+2. **순수 파서/렌더** (lib/pure-utils): `_parseDecisionBlock`(블록→객체, 빈 값 null 정규화), `_decisionsFromMd`(MD→객체배열, template 제외), `_renderDecisionsMd`(객체배열→MD projection, template preamble 보존) — render↔parse round-trip 멱등.
+3. **canonical 로더** `_loadDecisions(root)`: decisions.json 우선 → 없으면 decisions.md 파싱(읽기 무부작용). 손상 JSON 시 MD fallback.
+4. **단일 진실소스 라우팅**: context/health/handoff/pulse/memory-status/session-close/round-history 의 decision count·list·recent 를 모두 `_loadDecisions` 로 전환. MCP `decision_list` 포함.
+5. **비파괴/백필**: 기존 MD-only 프로젝트 → 첫 write 시 MD→JSON 백필(데이터 무손실). 읽기 명령은 부작용 0. retro 집계·fuzzy restore·today-heuristic 은 faithful projection MD 를 계속 읽어 일관.
+
+### 검증
+- **selftest 87/87 PASS** · **E2E 284/284 PASS** (회귀 0).
+- 실측: add→decisions.json(canonical, alt=Mongo·빈값 null)+decisions.md(projection, template 보존) · list/context.memory.decisions=2 일치 · drop→1건+archive 보존 · **백필**: MD-only→list 2건(template 제외)·읽기 무부작용·첫 add 시 기존2+신규1=3 보존 · render↔parse round-trip 멱등.
+
 ## 1.9.338 — 2026-06-05 — UR-0025(심층): i18n STRINGS 서브시스템 분리
 
 **🧩 i18n 문자열 서브시스템의 핵심(ko/en catalog + 순수 조회)을 모듈로 분리 — 동형 추출 6번째.** (UR-0025 심층, "UR-0053+UR-0025 둘 다 진행" 중 Round A)

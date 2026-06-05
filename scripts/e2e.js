@@ -4276,5 +4276,52 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.339 회귀 (UR-0053): decisions canonical = JSON, MD = projection. add→json+md / context count 단일소스 / drop+archive / MD-only 백필
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    // 순수 round-trip + field 정규화
+    const md = '# Decisions\n\n### 2026-06-05 — A\n- Decision: a\n- Reason: r\n- Alternatives: alt\n- Impact: imp\n\n### 2026-06-04 — B\n- Decision: b\n- Alternatives:\n';
+    const objs = m._decisionsFromMd(md);
+    const pureOk = objs.length === 2 && objs[0].alternatives === 'alt' && objs[1].alternatives === null
+      && JSON.stringify(m._decisionsFromMd(m._renderDecisionsMd(objs))) === JSON.stringify(objs);
+    // end-to-end: add → decisions.json(canonical) + decisions.md(projection)
+    const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dec-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', dd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'PG 채택', '--reason', '관계형', '--alternatives', 'Mongo', '--path', dd], { encoding: 'utf8', timeout: 20000 });
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'Redis', '--reason', '속도', '--path', dd], { encoding: 'utf8', timeout: 20000 });
+    const jsonExists = fs.existsSync(path.join(dd, '.harness', 'decisions.json'));
+    const canon = jsonExists ? JSON.parse(fs.readFileSync(path.join(dd, '.harness', 'decisions.json'), 'utf8')) : [];
+    const mdProj = fs.existsSync(path.join(dd, '.harness', 'decisions.md')) ? fs.readFileSync(path.join(dd, '.harness', 'decisions.md'), 'utf8') : '';
+    const writeOk = jsonExists && canon.length === 2 && canon[0].alternatives === 'Mongo' && canon[1].alternatives === null
+      && mdProj.includes('PG 채택') && mdProj.includes('Redis');
+    // list + context count = canonical 단일소스
+    let listOk = false, ctxOk = false;
+    const lr = cp.spawnSync(process.execPath, [CLI, 'decision', 'list', '--path', dd, '--json'], { encoding: 'utf8', timeout: 20000 });
+    try { const j = JSON.parse(lr.stdout); listOk = j.total === 2; } catch {}
+    const cr = cp.spawnSync(process.execPath, [CLI, 'context', '--path', dd, '--json'], { encoding: 'utf8', timeout: 20000 });
+    try { const j = JSON.parse(cr.stdout); ctxOk = j.memory && j.memory.decisions === 2; } catch {}
+    // drop + archive
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'drop', 'PG', '--path', dd], { encoding: 'utf8', timeout: 20000 });
+    const afterDrop = JSON.parse(fs.readFileSync(path.join(dd, '.harness', 'decisions.json'), 'utf8'));
+    const dropOk = afterDrop.length === 1 && afterDrop[0].title === 'Redis' && fs.existsSync(path.join(dd, '.harness', 'decisions.archive.md'));
+    fs.rmSync(dd, { recursive: true, force: true });
+    // 백필: MD-only(JSON 없음) → list 가 MD 파싱(template 제외), 읽기 무부작용
+    const bd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bf-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', bd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    fs.rmSync(path.join(bd, '.harness', 'decisions.json'), { force: true });
+    fs.writeFileSync(path.join(bd, '.harness', 'decisions.md'), '# Decisions\n\n## Template\n\n' + '```md\n### YYYY-MM-DD — 제목\n- Decision:\n```\n\n### 2026-06-01 — 기존A\n- Decision: A\n\n### 2026-06-02 — 기존B\n- Decision: B\n', 'utf8');
+    const br = cp.spawnSync(process.execPath, [CLI, 'decision', 'list', '--path', bd, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let backfillOk = false;
+    try { const j = JSON.parse(br.stdout); backfillOk = j.total === 2 && !fs.existsSync(path.join(bd, '.harness', 'decisions.json')); } catch {}
+    fs.rmSync(bd, { recursive: true, force: true });
+    ok = pureOk && writeOk && listOk && ctxOk && dropOk && backfillOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.339) UR-0053: decisions canonical JSON + MD projection + 백필 + context 단일소스 (UR-0053)' : '✗ decisions canonical JSON 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
