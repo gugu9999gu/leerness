@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.343 — 2026-06-05 — 🎉 R300 마일스톤 · UR-0025(심층): SECRET_PATTERNS 보안 응집 분리
+
+**🎉 R300 누적 라운드 달성 (baseline v1.9.6).** **🔒 시크릿 값 스캔 정규식(13종)을 lib/catalogs.js 로 분리 — 보안 패턴 응집(`_isSecretKey` 키이름 휴리스틱과 모듈 통합). 동형 추출 9번째.** (UR-0025 심층)
+
+### 구현 (UR-0025 심층 — 보안 catalog)
+1. **`SECRET_PATTERNS`**(13종 값 탐지 정규식: AWS AKIA/ASIA · GitHub token/PAT · OpenAI proj/svcacct·legacy · Anthropic api03 · Stripe · npm · Google API/OAuth · Slack · private key · 하드코딩 비밀번호) → `lib/catalogs.js`. `scan secrets` 가 import. **스캔 로직은 harness 무수정**(보안 위험 최소화 — catalog-only 이동).
+2. 블록 지역 `SECRET_PATTERNS = ['.env',...]`(gitignore 파일명 배열, 4곳)은 동명이지만 별개 — **무손상 보존**(모듈 레벨 const 만 이동).
+3. selftest 90→91 · e2e 287→288.
+
+### 검증 (보안 핵심 — 철저)
+- **selftest 91/91 PASS** · **E2E 288/288 PASS** (회귀 0).
+- 실측: catalog 13종(모두 {name, RegExp}) · `scan secrets` 가짜 AWS AKIA + Anthropic api03 키 **탐지** · clean 파일(john_doe_2024 / example.com URL) **오탐 0**(exit 0) · 지역 .env shadow 4곳 보존.
+
+### 🏛 R300 누적 현황
+- catalogs.js **14개 catalog** 분리(capability/powerful/adapters/reuse/constraints/domain/LSP/optimism/persona/STRINGS/builtin-skill/roadmap-label/roadmap-color/secret).
+- pure-utils **~46개 순수 함수**. decisions·lessons **canonical JSON 단일 진실소스**. selftest 91 + e2e 288 무결성 게이트. MCP 도구·9 카테고리 CLI.
+
 ## 1.9.342 — 2026-06-05 — UR-0025(심층): roadmap status 맵 분리
 
 **🧩 roadmap.html 상태 라벨/색상 맵(각 11키)을 모듈로 분리 — 동형 추출 8번째.** (UR-0025 심층)

@@ -4426,5 +4426,40 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.343 회귀 (UR-0025 심층, R300 마일스톤): SECRET_PATTERNS→lib/catalogs 보안 응집 + scan secrets 탐지/오탐 가드 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const A = 'A'.repeat(40);
+    const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); });
+    const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 13
+      && hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
+    // 모듈 레벨 정의 제거(블록 지역 .env 배열은 보존) + import
+    const movedOut = !/const SECRET_PATTERNS = \[\r?\n\s*\{ name:/.test(harnessSrc) && _catImp.includes('SECRET_PATTERNS')
+      && /const SECRET_PATTERNS = \['\.env'/.test(harnessSrc);  // 지역 .env shadow 보존 확인
+    // 소비 회귀: scan secrets 가 가짜 AWS/Anthropic 키 탐지 + clean 0
+    const sd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sec-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', sd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(sd, 'leak.js'), 'const k1 = "AKIAABCD1234EFGH5678";\nconst k2 = "sk-ant-api03-' + A + '_' + A + '";\n', 'utf8');
+    const lr = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', sd], { encoding: 'utf8', timeout: 20000 });
+    const leakOut = (lr.stdout || '') + (lr.stderr || '');
+    const detectOk = /AWS Access Key/.test(leakOut) && /Anthropic API key/.test(leakOut);
+    fs.rmSync(sd, { recursive: true, force: true });
+    const cd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-secc-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', cd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(cd, 'clean.js'), 'const userName = "john_doe_2024";\nconst url = "https://example.com/x";\n', 'utf8');
+    const cr = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', cd], { encoding: 'utf8', timeout: 20000 });
+    const cleanOk = cr.status === 0 && !/AWS Access Key|Anthropic API key/.test((cr.stdout || '') + (cr.stderr || ''));
+    fs.rmSync(cd, { recursive: true, force: true });
+    ok = catOk && movedOut && detectOk && cleanOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.343) UR-0025 심층(R300): SECRET_PATTERNS 보안 응집 분리 + scan secrets 탐지/오탐 가드 (UR-0025)' : '✗ SECRET_PATTERNS 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
