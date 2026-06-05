@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.337 — 2026-06-05 — UR-0025(심층): review persona 서브시스템 분리
+
+**🧩 코드리뷰 persona 서브시스템의 핵심(5종 페르소나 catalog + 순수 요약 변환)을 모듈로 분리 — 동형 추출 5번째.** (UR-0025 심층)
+
+### 배경
+constraints(1.9.333)·intent-도메인(1.9.334)·LSP(1.9.335)·anti-laziness(1.9.336)에 이은 동형 추출 5번째. 직전 Codex 위임에 이어 이번은 직접 구현(사용자 "일부" 위임 지시 — 1.9.334/336 위임·1.9.335/337 자체의 교대). template literal(백틱) 본문이 긴 catalog 라 전사 오류 회피용 일회용 마이그레이션 스크립트로 결정적 이동 후 삭제.
+
+### 구현 (UR-0025 심층)
+1. **`BUILT_IN_PERSONAS`**(5종 리뷰 페르소나 catalog: security/performance/ux/testing/docs, 각 id/name/description/body) → `lib/catalogs.js`.
+2. **`_personaSummaries(catalog)`**(순수: catalog → `[{id,name,description}]` 요약, body 제거) → `lib/pure-utils.js`. `persona list --json` 의 인라인 map 을 헬퍼 호출로 교체. `_resolvePersona`(fs fallback 포함)는 harness 유지하며 import 된 catalog 사용.
+3. selftest 84→85 · e2e 281→282.
+
+### 검증
+- **selftest 85/85 PASS** · **E2E 282/282 PASS** (회귀 0).
+- 실측: catalog 5종(security.body 문자열) · `_personaSummaries` 5요약(body 제거)·null guard([]) · `persona list --json` builtin 5 · `review <file> --persona security`(harness `_resolvePersona`→imported catalog) "보안 엔지니어" body 정상 출력.
+
 ## 1.9.336 — 2026-06-05 — UR-0025(심층): anti-laziness 서브시스템 분리 (Codex 위임·검증)
 
 **🤖 anti-laziness(거짓완료 탐지) 서브시스템의 핵심(claim-vs-code 패턴 catalog + 순수 탐지/신뢰도 로직)을 Codex CLI(gpt-5.5)에 위임 분리하고 하네스가 독립 검증까지 완료.** (사용자 "일부 Codex 위임" 지시 — 1.9.334 위임·1.9.335 자체 구현에 이은 교대)

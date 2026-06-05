@@ -18,13 +18,14 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   BRIEF_START, BRIEF_END, _briefReadmeBlock, _briefBlueprint,
   _parseLessonEntries, _matchConstraints, _matchDomain,
   _detectLspLang, _matchLspSymbols,
-  _detectOptimism: _puDetectOptimism, _computeConfidence: _puComputeConfidence } = require('../lib/pure-utils');  // 1.9.318~335 (UR-0025): 순수 유틸 모듈 분리
+  _detectOptimism: _puDetectOptimism, _computeConfidence: _puComputeConfidence,
+  _personaSummaries } = require('../lib/pure-utils');  // 1.9.318~337 (UR-0025): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS } = require('../lib/catalogs');  // 1.9.335 (UR-0025): LSP 패턴 catalog 분리
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS } = require('../lib/catalogs');  // 1.9.337 (UR-0025): persona catalog 분리
 
-const VERSION = '1.9.336';
+const VERSION = '1.9.337';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3083,6 +3084,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심층(Codex 위임·검증): intent domain catalog→lib/catalogs + _matchDomain→pure-utils 분리 (1.9.334)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_DOMAIN_CATALOG && Object.keys(c._DEFAULT_DOMAIN_CATALOG.domains).length === 5 && !!c._DEFAULT_DOMAIN_CATALOG.domains.game; const r = m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'unity 게임'); const work = r.domain === 'game' && Array.isArray(r.components) && m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'zzz없음').domain === null && m._matchDomain(null, 'x').domain === null; const src = read(__filename); const moved = _DEFAULT_DOMAIN_CATALOG === c._DEFAULT_DOMAIN_CATALOG && _matchDomain === m._matchDomain && !/const _DEFAULT_DOMAIN_CATALOG = \{/.test(src) && src.includes('_matchDomain(_loadDomainCatalog(root), text)'); return catOk && work && moved; } },
     { name: 'UR-0025 심층: LSP catalog→lib/catalogs(_LSP_LANG_PATTERNS) + _detectLspLang/_matchLspSymbols→pure-utils 분리 (1.9.335)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._LSP_LANG_PATTERNS && Object.keys(c._LSP_LANG_PATTERNS).length === 5 && Array.isArray(c._LSP_LANG_PATTERNS.javascript); const langOk = m._detectLspLang('a.py') === 'python' && m._detectLspLang('b.go') === 'go' && m._detectLspLang('c.md') === 'javascript'; const sy = m._matchLspSymbols(c._LSP_LANG_PATTERNS, 'function alpha(){}\nclass Beta{}', 'javascript'); const work = sy.length === 2 && sy[0].name === 'alpha' && sy[0].kind === 'function' && sy[1].kind === 'class' && m._matchLspSymbols(null, 'x', 'javascript').length === 0; const src = read(__filename); const moved = _LSP_LANG_PATTERNS === c._LSP_LANG_PATTERNS && _detectLspLang === m._detectLspLang && _matchLspSymbols === m._matchLspSymbols && !/const _LSP_LANG_PATTERNS = \{/.test(src) && !/function _detectLspLang\(/.test(src); return catOk && langOk && work && moved; } },
     { name: 'UR-0025 심층(Codex 위임·검증): anti-laziness catalog→lib/catalogs(OPTIMISM_PATTERNS) + optimism 순수로직→pure-utils 분리 (1.9.336)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = Array.isArray(c.OPTIMISM_PATTERNS) && c.OPTIMISM_PATTERNS.length === 10 && c.OPTIMISM_PATTERNS[0].kind === 'API'; const ev = 'API 호출 완료, POST /users'; const sus = m._detectOptimism(c.OPTIMISM_PATTERNS, ev, 'function x(){}'); const conf = m._computeConfidence(c.OPTIMISM_PATTERNS, ev, 'function x(){}'); const work = sus.some(s => s.kind === 'API' && s.severity === 'high') && conf < 0.5 && m._computeConfidence(c.OPTIMISM_PATTERNS, '정리함', 'x') === 1 && m._detectOptimism(null, ev, 'x').length === 0 && m._extractUrlClaims('POST /a').length === 1 && m._verifyUrlClaim({ path: '/a' }, 'has /a') === true; const src = read(__filename); const moved = OPTIMISM_PATTERNS === c.OPTIMISM_PATTERNS && _puDetectOptimism === m._detectOptimism && !/const OPTIMISM_PATTERNS = \[/.test(src) && !/function _extractUrlClaims\(/.test(src); return catOk && work && moved; } },
+    { name: 'UR-0025 심층: persona catalog→lib/catalogs(BUILT_IN_PERSONAS) + _personaSummaries→pure-utils 분리 (1.9.337)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.BUILT_IN_PERSONAS && Object.keys(c.BUILT_IN_PERSONAS).length === 5 && c.BUILT_IN_PERSONAS.security && typeof c.BUILT_IN_PERSONAS.security.body === 'string'; const sm = m._personaSummaries(c.BUILT_IN_PERSONAS); const work = Array.isArray(sm) && sm.length === 5 && sm[0].id === 'security' && sm[0].body === undefined && typeof sm[0].name === 'string' && m._personaSummaries(null).length === 0; const src = read(__filename); const moved = BUILT_IN_PERSONAS === c.BUILT_IN_PERSONAS && _personaSummaries === m._personaSummaries && !/const BUILT_IN_PERSONAS = \{/.test(src); return catOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -10108,53 +10110,7 @@ function optimismCheckCmd(root, taskId) {
 
 // 1.9.29: 페르소나 시스템 + review 명령
 // 페르소나 부여 sub-agent가 도메인 깊이 3-4배 (1.9.28 라운드 실측). 자동 프롬프트 생성.
-const BUILT_IN_PERSONAS = {
-  security: {
-    id: 'security',
-    name: '보안 엔지니어 (10년차)',
-    description: 'OWASP Top 10, CWE, RFC, 한국 개인정보보호법/게임산업법 정통',
-    body: `너는 **10년 경력의 시니어 보안 엔지니어**다. OWASP Top 10 2021, CWE, RFC 7235/6454, CORS 보안, secret 관리에 정통하며, 한국 금융사·카카오·네이버 등 대형 IT 기업의 보안 감사 경험이 있다. 코드를 볼 때 **위협 모델링**과 **공격 표면(attack surface)** 을 자동으로 시각화한다.
-
-검토 영역: 입력 검증 / 인증·인가 / CORS / 시크릿/로그 노출 / DoS / 데이터 노출 / 의존성 attack surface / 한국 시장 특화 (개인정보보호법, 결제 정보)
-보고에 포함: 위협 모델 / CWE ID 매핑 / 실 공격 시나리오 1건 (HTTP 페이로드) / P0/P1/P2 우선순위 / OWASP Top 10 2021 매핑`
-  },
-  performance: {
-    id: 'performance',
-    name: '성능 최적화 전문가 (V8 내부)',
-    description: 'V8 엔진 (Ignition/TurboFan, hidden class), Node.js 이벤트 루프, libuv 정통',
-    body: `너는 **V8 엔진 내부 (Ignition, TurboFan, hidden class)와 Node.js 이벤트 루프, libuv에 정통한 성능 최적화 전문가**다. Linux perf, node --prof, clinic.js, autocannon, FlameGraph 활용 경험이 풍부하다. 메모리 압박(GC pressure), CPU bound vs I/O bound 구분, hot path 식별이 직관이다.
-
-검토 영역: Hot path 식별 / hidden class 안정성 / 메모리 할당 패턴 / 정규식 컴파일 / JSON.parse/stringify 비용 / 이벤트 루프 블로킹 / 라우트 매칭 복잡도
-보고에 포함: 성능 프로필 요약 (RPS/latency 추정) / Hot path Top 5 / 비효율 표 (영향 high/med/low) / 벤치 시나리오 (autocannon 명령) / 권장 우선순위 (당장/부하증가/마이크로)`
-  },
-  ux: {
-    id: 'ux',
-    name: '한국어 UX 라이터 + DX 컨설턴트',
-    description: '카카오/네이버/토스/라인 마이크로카피, API 디자인 (Stripe/GitHub/Google) 정통',
-    body: `너는 **한국 사용자 대상 게임/SaaS 제품의 UX 라이터 + DX(Developer Experience) 컨설턴트**다. 카카오, 네이버, 토스, 라인의 한국어 마이크로카피 가이드라인을 숙지하고 있으며, 클라이언트 개발자의 API 통합 경험을 잘 안다. 에러 메시지, HTTP status, 응답 본문 일관성이 직관이다.
-
-검토 영역: 한국어 에러 메시지 톤 / HTTP status 적절성 (400/404/422/409) / 응답 본문 일관성 / 한국어/영문 혼재 / 누락 정보 (rate limit, request id, version) / 클라이언트 SDK 친화성
-보고에 포함: UX/DX 점수 (1-10) / 발견 이슈 표 / Before/After 메시지 5건 / SDK 친화성 점수 (1-5) / 권장 로드맵 (이번 PR / 1주 / 분기)`
-  },
-  testing: {
-    id: 'testing',
-    name: '테스트 엔지니어 (TDD + property-based)',
-    description: 'TDD, property-based testing (fast-check), AAA 패턴, fuzz, mutation testing 정통',
-    body: `너는 **TDD와 property-based testing (fast-check) 에 정통한 테스트 엔지니어**다. AAA 패턴, given/when/then, fuzz testing, mutation testing, contract testing 경험이 있다. 테스트 커버리지보다 **테스트 품질**과 **회귀 방어** 가치를 더 중시한다.
-
-검토 영역: 테스트 누락 분기 / edge case / mocking 과다 / AAA 패턴 위반 / async 테스트 결함 (race) / property 후보 / 회귀 가능성
-보고에 포함: 누락 테스트 목록 + 우선순위 / fast-check property 후보 3건 / 기존 테스트 약점 / 권장 회귀 시나리오`
-  },
-  docs: {
-    id: 'docs',
-    name: '기술 문서 작성자 (한국어)',
-    description: 'README, API 문서, 사용 가이드 작성. Stripe Docs / Google Cloud / 카카오 dev 가이드 정통',
-    body: `너는 **한국어 기술 문서 작성에 정통한 테크니컬 라이터**다. Stripe Docs, Google Cloud, AWS, 카카오 개발자 가이드 톤을 잘 안다. README 첫 60초 경험, 점진적 공개 (progressive disclosure), 코드 예시의 즉시 실행 가능성을 중시한다.
-
-검토 영역: 60초 시작 가능성 / 예시 코드 정확성 / 누락된 사전 요구사항 / 한국어 자연스러움 / 시각적 균형 (이모지/표/코드블록) / 한국어/영문 혼재 / 다음 단계 명시
-보고에 포함: 사용자 페르소나별 평가 (입문자/실무자/전문가) / 60초 안 첫 결과 가능 여부 / 누락 정보 / 권장 개선 표`
-  }
-};
+// 1.9.337 (UR-0025 심층): BUILT_IN_PERSONAS (5 리뷰 페르소나 catalog) 는 lib/catalogs.js 로 이전 (import).
 
 function _resolvePersona(root, id) {
   // 1) 내장
@@ -11718,7 +11674,7 @@ function personaCmd(root, sub, idOrName, ...rest) {
     const custom = exists(customDir) ? fs.readdirSync(customDir).filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, '')) : [];
     if (has('--json')) {
       log(JSON.stringify({
-        builtin: Object.values(BUILT_IN_PERSONAS).map(p => ({ id: p.id, name: p.name, description: p.description })),
+        builtin: _personaSummaries(BUILT_IN_PERSONAS),
         custom
       }, null, 2));
       return;

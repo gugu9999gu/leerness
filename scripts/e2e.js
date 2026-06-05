@@ -4221,5 +4221,35 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.337 회귀 (UR-0025 심층): persona BUILT_IN_PERSONAS→lib/catalogs + _personaSummaries→pure-utils + persona list/review 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const catOk = c.BUILT_IN_PERSONAS && Object.keys(c.BUILT_IN_PERSONAS).length === 5 && c.BUILT_IN_PERSONAS.security && typeof c.BUILT_IN_PERSONAS.security.body === 'string';
+    const sm = m._personaSummaries(c.BUILT_IN_PERSONAS);
+    const work = catOk && typeof m._personaSummaries === 'function' && Array.isArray(sm) && sm.length === 5 && sm[0].id === 'security' && sm[0].body === undefined && m._personaSummaries(null).length === 0;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
+    const movedOut = !/const BUILT_IN_PERSONAS = \{/.test(harnessSrc) && _catImp.includes('BUILT_IN_PERSONAS') && _puImp.includes('_personaSummaries');
+    // 소비 명령 회귀: persona list --json (_personaSummaries) + review --persona (_resolvePersona → imported catalog)
+    const pd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-per-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', pd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const lr = cp.spawnSync(process.execPath, [CLI, 'persona', 'list', '--path', pd, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let listOk = false;
+    try { const j = JSON.parse(lr.stdout); listOk = Array.isArray(j.builtin) && j.builtin.length === 5 && j.builtin.some(p => p.id === 'security') && j.builtin[0].body === undefined; } catch {}
+    fs.writeFileSync(path.join(pd, 't.js'), 'function q(){ return 1; }\n', 'utf8');
+    const rr = cp.spawnSync(process.execPath, [CLI, 'review', path.join(pd, 't.js'), '--persona', 'security', '--path', pd], { encoding: 'utf8', timeout: 20000 });
+    const reviewOk = /보안 엔지니어/.test(rr.stdout || '');
+    ok = work && movedOut && listOk && reviewOk;
+    fs.rmSync(pd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.337) UR-0025 심층: persona BUILT_IN_PERSONAS/_personaSummaries 분리 + persona list/review 회귀 (UR-0025)' : '✗ persona 서브시스템 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
