@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.334 — 2026-06-05 — UR-0025(심층): intent-도메인 서브시스템 분리 (Codex 위임·검증)
+
+**🤖 남은 백로그 일부를 Codex CLI(gpt-5.5)에 위임하고 독립 검증까지 완료 — intent-도메인 서브시스템의 핵심(데이터 catalog + 순수 매처)을 1.9.333 constraints 패턴 그대로 모듈로 분리.** (사용자 지시: "남은 백로그 일부는 codex cli를 호출해서 업무 할당하고 검증까지 진행")
+
+### 배경 (위임 결정)
+직전 1.9.333 에서 확립한 "서브시스템 핵심(데이터·순수 로직) 추출" 패턴이 안정적으로 반복 가능 → 동형(同型) 작업인 intent-도메인 추출을 Codex CLI 에 위임. 위임 ≠ 무검증: 작업 명세를 backtick-free 파일로 작성 → `codex exec` 호출 → 결과를 하네스가 **독립 검증**(범위·금지파일·구문·selftest·동작·중복) 후 릴리스 확정.
+
+### 구현 (Codex 수행)
+1. **`_DEFAULT_DOMAIN_CATALOG`**(5도메인 catalog) → `lib/catalogs.js`(export 추가).
+2. **`_matchDomain(catalog, text)`**(순수 매처: text 소문자에 alias substring 포함되는 첫 도메인 → `{domain, alias, components}`, 없으면 `{domain:null}`) → `lib/pure-utils.js`. `_detectDomain(text, root)` = `_matchDomain(_loadDomainCatalog(root), text)`.
+
+### 검증 (하네스 독립)
+- **변경 범위 확인**: `bin/harness.js` + `lib/catalogs.js` + `lib/pure-utils.js` 만 변경 (VERSION/e2e/README/CHANGELOG/package.json 미변경 — 명세 금지사항 준수).
+- **무결성**: `node -c` 통과 · selftest 82/82 PASS · **E2E 279/279 PASS** (회귀 0).
+- **동작 실측**: `_matchDomain` game/web/null/no-match 정상 · intent expand("domain: game") 회귀 정상 · catalog 중복 없음 · exports 정상.
+- **테스트 견고화**: import 멤버십 체크(B 1.9.333/1.9.334)를 rigid 정규식 → importBlock 추출 패턴으로 통일 (이후 import 추가에 비의존).
+
 ## 1.9.333 — 2026-06-05 — UR-0025(심층): constraints 서브시스템 핵심 분리
 
 **🧩 constraints 서브시스템의 핵심(데이터 catalog + 순수 매처)을 모듈로 분리 — command 서브시스템 추출의 안전한 첫 단계.** (사용자 선택: UR-0025 심층)

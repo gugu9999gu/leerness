@@ -4118,8 +4118,10 @@ total++;
     const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제');
     const work = catOk && r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0;
     const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    // 1.9.334: catalogs import 블록 추출 후 이름 포함 확인(순서/추가 비의존 — 이후 import 추가 허용)
+    const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];
     const movedOut = !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(harnessSrc) && harnessSrc.includes('_matchConstraints(_loadPlatformConstraints(root), text)')
-      && /_DEFAULT_PLATFORM_CONSTRAINTS \} = require\('\.\.\/lib\/catalogs'\)/.test(harnessSrc);
+      && _catImp.includes('_DEFAULT_PLATFORM_CONSTRAINTS');
     // 소비 명령 회귀: constraints check (review-request 도 _checkRequestConstraints 사용)
     const cd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-con-'));
     cp.spawnSync(process.execPath, [CLI, 'init', cd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
@@ -4129,6 +4131,32 @@ total++;
     fs.rmSync(cd, { recursive: true, force: true });
   } catch {}
   console.log(ok ? '✓ B(1.9.333) UR-0025 심층: constraints catalog/_matchConstraints 분리 + constraints check 회귀 (UR-0025)' : '✗ constraints 서브시스템 분리 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.334 회귀 (UR-0025 심층, Codex 위임·검증): intent domain catalog→lib/catalogs + _matchDomain→pure-utils + intent expand 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const catOk = c._DEFAULT_DOMAIN_CATALOG && Object.keys(c._DEFAULT_DOMAIN_CATALOG.domains).length === 5;
+    const r = m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'unity 게임');
+    const work = catOk && typeof m._matchDomain === 'function' && r.domain === 'game' && Array.isArray(r.components) && m._matchDomain(null, 'x').domain === null;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
+    const movedOut = !/const _DEFAULT_DOMAIN_CATALOG = \{/.test(harnessSrc) && harnessSrc.includes('_matchDomain(_loadDomainCatalog(root), text)')
+      && _catImp.includes('_DEFAULT_DOMAIN_CATALOG');
+    // 소비 명령 회귀: intent expand 도메인 감지(_detectDomain → _matchDomain)
+    const id = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dom-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', id, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const ir = cp.spawnSync(process.execPath, [CLI, 'intent', 'expand', 'unity 게임 맵', '--path', id], { encoding: 'utf8', timeout: 20000 });
+    const cmdOk = /game/.test(ir.stdout || '');
+    ok = work && movedOut && cmdOk;
+    fs.rmSync(id, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.334) UR-0025 심층(Codex 위임·검증): domain catalog/_matchDomain 분리 + intent expand 회귀 (UR-0025)' : '✗ domain 서브시스템 분리 실패');
   if (!ok) failed++;
 }
 

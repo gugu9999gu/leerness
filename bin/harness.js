@@ -16,13 +16,13 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _roadmapMapStatus, _roadmapParseMilestones, _roadmapParseTokens,
   _BRIEF_FIELDS, _briefFilled,
   BRIEF_START, BRIEF_END, _briefReadmeBlock, _briefBlueprint,
-  _parseLessonEntries, _matchConstraints } = require('../lib/pure-utils');  // 1.9.318~333 (UR-0025): 순수 유틸 모듈 분리
+  _parseLessonEntries, _matchConstraints, _matchDomain } = require('../lib/pure-utils');  // 1.9.318~333 (UR-0025): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS } = require('../lib/catalogs');  // 1.9.333 (UR-0025): constraints catalog 분리
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG } = require('../lib/catalogs');  // 1.9.333 (UR-0025): constraints catalog 분리
 
-const VERSION = '1.9.333';
+const VERSION = '1.9.334';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3078,6 +3078,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: brief 빌더 분리(_briefReadmeBlock/_briefBlueprint + BRIEF 마커, VERSION 주입) (UR-0025 1.9.331)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._briefReadmeBlock === 'function' && typeof m._briefBlueprint === 'function' && m.BRIEF_START.includes('project-brief:start'); const b = { project: 'X', intro: 'i', features: ['f1'] }; const rb = m._briefReadmeBlock(b); const bp = m._briefBlueprint(b, '9.9.9'); const work = rb.includes(m.BRIEF_START) && rb.includes(m.BRIEF_END) && /f1/.test(rb) && /Blueprint/.test(bp) && /leerness v9\.9\.9/.test(bp); const src = read(__filename); const moved = m._briefBlueprint === _briefBlueprint && m.BRIEF_START === BRIEF_START && !/^function _briefReadmeBlock\(/m.test(src) && !/^function _briefBlueprint\(/m.test(src) && !/^const BRIEF_START =/m.test(src); return fnOk && work && moved; } },
     { name: 'lib/pure-utils: lessons.md 파서 분리(_parseLessonEntries) + 인라인 제거 (UR-0025 1.9.332)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseLessonEntries('### 2026-06-05\n- Lesson: A\n- Tag: t\n\n### 2026-06-04\n- Lesson: B'); const work = r.length === 2 && r[0].text === 'A' && r[0].tag === 't' && r[1].tag === null && r[0].date === '2026-06-05'; const src = read(__filename); const moved = m._parseLessonEntries === _parseLessonEntries && !/^function _parseLessonEntries\(/m.test(src) && src.includes('for (const lesson of _parseLessonEntries(text))'); return work && moved; } },
     { name: 'UR-0025 심층: constraints catalog→lib/catalogs + _matchConstraints→pure-utils 분리 (1.9.333)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6 && !!c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe; const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제'); const work = r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0; const src = read(__filename); const moved = _DEFAULT_PLATFORM_CONSTRAINTS === c._DEFAULT_PLATFORM_CONSTRAINTS && _matchConstraints === m._matchConstraints && !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(src) && src.includes('_matchConstraints(_loadPlatformConstraints(root), text)'); return catOk && work && moved; } },
+    { name: 'UR-0025 심층(Codex 위임·검증): intent domain catalog→lib/catalogs + _matchDomain→pure-utils 분리 (1.9.334)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_DOMAIN_CATALOG && Object.keys(c._DEFAULT_DOMAIN_CATALOG.domains).length === 5 && !!c._DEFAULT_DOMAIN_CATALOG.domains.game; const r = m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'unity 게임'); const work = r.domain === 'game' && Array.isArray(r.components) && m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'zzz없음').domain === null && m._matchDomain(null, 'x').domain === null; const src = read(__filename); const moved = _DEFAULT_DOMAIN_CATALOG === c._DEFAULT_DOMAIN_CATALOG && _matchDomain === m._matchDomain && !/const _DEFAULT_DOMAIN_CATALOG = \{/.test(src) && src.includes('_matchDomain(_loadDomainCatalog(root), text)'); return catOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -4339,73 +4340,7 @@ function _buildWorkspaceReferenceGuide(root, dirName) {
 //   3원칙: (1) Always-Off Opt-In, (2) Dry-run 기본 (실행 X), (3) 명시 vs 추론 분리 라벨링
 //   .harness/domain-catalog.json 사용자 편집 가능 + default catalog 5종 (game/web/api/cli/data)
 function _domainCatalogPath(root) { return path.join(root, '.harness', 'domain-catalog.json'); }
-const _DEFAULT_DOMAIN_CATALOG = {
-  version: '1.9.213',
-  domains: {
-    game: {
-      aliases: ['게임', 'game', 'unity', 'unreal', 'godot', 'phaser', 'gamedev'],
-      components: [
-        { key: 'map', desc: '맵/타일 시스템 + 영역/스폰' },
-        { key: 'character', desc: '캐릭터/스프라이트 + 애니메이션 상태머신' },
-        { key: 'gameLoop', desc: '게임 루프 (tick/render/update)' },
-        { key: 'collision', desc: '충돌 감지 (AABB/SAT/grid)' },
-        { key: 'camera', desc: '카메라 follow + 영역 제한' },
-        { key: 'hud', desc: 'HUD/UI (HP/score/inventory)' },
-        { key: 'audio', desc: '사운드 매니저 (BGM/SFX)' },
-        { key: 'save', desc: '저장/로드 (slot 시스템)' },
-        { key: 'menu', desc: '메뉴 (메인/일시정지/설정)' },
-        { key: 'input', desc: '입력 핸들러 (키보드/패드/터치)' }
-      ]
-    },
-    web: {
-      aliases: ['웹', 'web', 'website', 'webapp', 'nextjs', 'react', 'vue', 'svelte', 'frontend'],
-      components: [
-        { key: 'routing', desc: '라우팅 (path/dynamic/nested)' },
-        { key: 'state', desc: '상태 관리 (context/redux/zustand)' },
-        { key: 'auth', desc: '인증 (OAuth/JWT/session)' },
-        { key: 'api', desc: 'API 클라이언트 (fetch/axios/tanstack-query)' },
-        { key: 'db', desc: 'DB 연동 (ORM/migration/seed)' },
-        { key: 'ui', desc: 'UI 컴포넌트 라이브러리' },
-        { key: 'test', desc: '테스트 (unit/e2e/visual)' },
-        { key: 'deploy', desc: '배포 (Vercel/Netlify/Cloudflare)' }
-      ]
-    },
-    api: {
-      aliases: ['api', 'rest', 'graphql', 'endpoint', 'backend', 'server'],
-      components: [
-        { key: 'endpoint', desc: '엔드포인트 라우팅 + HTTP method' },
-        { key: 'auth', desc: '인증/인가 (API key/OAuth/JWT)' },
-        { key: 'rate-limit', desc: 'rate limit (RPS/RPM/token bucket)' },
-        { key: 'validation', desc: '입력 검증 (zod/joi/yup)' },
-        { key: 'error', desc: '에러 핸들링 + 응답 형식' },
-        { key: 'logging', desc: '로깅 + 모니터링 (structured logs)' },
-        { key: 'docs', desc: 'API 문서 (OpenAPI/Swagger)' }
-      ]
-    },
-    cli: {
-      aliases: ['cli', 'command-line', 'tool', 'utility', 'shell'],
-      components: [
-        { key: 'argParser', desc: '인자 파싱 (yargs/commander/clipanion)' },
-        { key: 'help', desc: 'help / man / examples 텍스트' },
-        { key: 'config', desc: '설정 파일 + env 변수' },
-        { key: 'output', desc: '출력 (TTY 색상/JSON/quiet)' },
-        { key: 'error', desc: '에러 처리 + exit code 규약' },
-        { key: 'completion', desc: 'shell completion (bash/zsh/fish)' }
-      ]
-    },
-    data: {
-      aliases: ['data', 'pipeline', 'etl', 'analytics', 'ingest'],
-      components: [
-        { key: 'ingest', desc: '데이터 수집 (file/API/stream)' },
-        { key: 'transform', desc: '변환 (cleaning/normalization/joining)' },
-        { key: 'storage', desc: '저장소 (parquet/db/blob)' },
-        { key: 'query', desc: '쿼리/분석 (SQL/aggregations)' },
-        { key: 'validation', desc: '데이터 검증 (schema/contracts)' },
-        { key: 'lineage', desc: '데이터 lineage 추적' }
-      ]
-    }
-  }
-};
+// 1.9.333 패턴 적용: _DEFAULT_DOMAIN_CATALOG → lib/catalogs.js 로 이동 (순수 데이터, require 사용).
 function _loadDomainCatalog(root) {
   try {
     const fp = _domainCatalogPath(root);
@@ -4428,17 +4363,7 @@ function _writeDomainCatalog(root, catalog) {
 }
 // 1.9.325 (UR-0025): _classifyIntent → lib/pure-utils.js 로 이동 (순수 intent 분류, require 사용).
 function _detectDomain(text, root) {
-  if (!text) return { domain: null, alias: null };
-  const lower = text.toLowerCase();
-  const catalog = _loadDomainCatalog(root);
-  for (const [domain, info] of Object.entries(catalog.domains)) {
-    for (const a of info.aliases || []) {
-      if (lower.includes(a.toLowerCase())) {
-        return { domain, alias: a, components: info.components };
-      }
-    }
-  }
-  return { domain: null, alias: null };
+  return _matchDomain(_loadDomainCatalog(root), text);
 }
 function _inferScopeExpansion(text, root) {
   const classify = _classifyIntent(text);
