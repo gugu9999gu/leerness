@@ -4723,5 +4723,33 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.354 회귀 (외부리뷰 P3 UR-0072): compareVer pre-release + _classifyCJK + scan secrets 파일경로 + requests drop ✓
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const pureOk = m.compareVer('1.9.0-beta', '1.9.0') === -1 && m.compareVer('1.9.0', '1.9.0-beta') === 1 && m.compareVer('1.9.6', '1.9.5') === 1
+      && (() => { const jp = Buffer.from([0xE3, 0x81, 0x82, 0xE6, 0x97, 0xA5]); const r = m._classifyCJK(jp, jp.length); return r.japanese > r.chinese; })();
+    // scan secrets <file> (이전 ENOTDIR) + basename 표시
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-p3-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d, 'leak.js'), 'const k = "glpat-' + 'x'.repeat(20) + '";\n');
+    const fr = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', path.join(d, 'leak.js')], { encoding: 'utf8', timeout: 20000 });
+    const fout = (fr.stdout || '') + (fr.stderr || '');
+    const fileScanOk = /GitLab PAT/.test(fout) && /leak\.js/.test(fout) && !/ENOTDIR/.test(fout);
+    // requests drop 성공 아이콘 ✓ (실패 ✗ 아님)
+    cp.spawnSync(process.execPath, [CLI, 'requests', 'add', 'P3 drop test', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const lj = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'requests', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 20000 }).stdout);
+    const newId = (lj.requests || []).filter(r => r.status === 'open').pop();
+    let dropOk = false;
+    if (newId) { const dr = cp.spawnSync(process.execPath, [CLI, 'requests', 'drop', newId.id, '--path', d], { encoding: 'utf8', timeout: 20000 }); const dout = (dr.stdout || '') + (dr.stderr || ''); dropOk = /✓ dropped/.test(dout) && !/✗ dropped/.test(dout); }
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = pureOk && fileScanOk && dropOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.354) 외부리뷰 P3: compareVer/_classifyCJK + scan secrets 파일 + requests drop ✓ (UR-0072)' : '✗ P3 클러스터 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

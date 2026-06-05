@@ -27,7 +27,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.353';
+const VERSION = '1.9.354';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3057,6 +3057,7 @@ function _selfTestCases() {
     { name: 'UR-0060(외부리뷰 P1): SECRET_PATTERNS 19종 — GitLab/JWT/DB-URI/SendGrid/AWS-secret/Bearer 보강 + 오탐 가드', run: () => { const c = require('../lib/catalogs'); const hit = s => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('glpat-' + 'x'.repeat(20)) && hit('eyJ' + 'x'.repeat(15) + '.eyJ' + 'y'.repeat(15) + '.' + 'z'.repeat(15)) && hit('postgres://u:p@host:5432/db') && hit('SG.' + 'x'.repeat(22) + '.' + 'y'.repeat(43)) && hit('aws_secret_access_key = "' + 'x'.repeat(40) + '"') && hit('Bearer ' + 'x'.repeat(25)); const clean = !hit('const u = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return c.SECRET_PATTERNS.length === 19 && det && clean; } },
     { name: 'UR-0068(외부리뷰 P2): _roadmapParseMilestones 블록 경계 — 다음 milestone status 누출 차단', run: () => { const m = require('../lib/pure-utils'); const r = m._roadmapParseMilestones('### M-0001. A\n\n### M-0002. B\nStatus: done\nProgress: 80%\n'); return r.length === 2 && r[0].status === 'planned' && r[0].progress === 0 && r[1].status === 'done' && r[1].progress === 80; } },
     { name: 'UR-0066(외부리뷰 P2): shell:true 주입 가드 — agents bench task _shellQuoteArg + fetchNpmLatest npm.cmd', run: () => { const m = require('../lib/pure-utils'); const src = read(__filename); const benchQuoted = src.includes('const qTask = ' + '_shellQuoteArg(task)'); const npmCmd = /'win32' \? 'npm\.cmd' : 'npm'/.test(src); const q = m._shellQuoteArg('a & b'); const safe = (process.platform === 'win32' ? q === '"a & b"' : q === "'a & b'"); return benchQuoted && npmCmd && safe; } },
+    { name: 'UR-0072(외부리뷰 P3): compareVer pre-release + _classifyCJK 한자 kana 귀속', run: () => { const m = require('../lib/pure-utils'); const verOk = m.compareVer('1.9.0-beta', '1.9.0') === -1 && m.compareVer('1.9.0', '1.9.0-beta') === 1 && m.compareVer('1.9.5', '1.9.5') === 0 && m.compareVer('1.9.6', '1.9.5') === 1; const jp = Buffer.from([0xE3, 0x81, 0x82, 0xE6, 0x97, 0xA5, 0xE6, 0x9C, 0xAC]); const cn = Buffer.from([0xE4, 0xB8, 0xAD, 0xE5, 0x9B, 0xBD]); const rj = m._classifyCJK(jp, jp.length); const rc = m._classifyCJK(cn, cn.length); const cjkOk = rj.japanese > rj.chinese && rc.chinese > 0 && rc.japanese === 0; return verOk && cjkOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -4602,7 +4603,7 @@ function requestsCmd(root, sub, ...rest) {
     const updated = _updateUserRequest(root, id, { status: 'dropped' });
     if (!updated) { console.error(`request not found: ${id}`); process.exit(1); }
     if (has('--json')) { log(JSON.stringify(updated, null, 2)); return; }
-    log(yel(`✗ dropped ${updated.id}`));
+    log(yel(`✓ dropped ${updated.id}`));  // 1.9.354 (UR-0072 외부리뷰): 성공 동작에 실패 아이콘(✗) 대신 ✓
     return;
   }
 
@@ -7103,13 +7104,16 @@ function* walk(root, base = root, depth = 0, extras = null) {
 function scanSecrets(root) {
   root = absRoot(root);
   const findings = [];
-  for (const file of walk(root)) {
+  // 1.9.354 (UR-0072 외부리뷰): root 가 파일이면 그 파일만 스캔 (이전: walk 의 readdirSync → ENOTDIR). 디렉토리면 기존 walk.
+  let _iter;
+  try { _iter = fs.statSync(root).isFile() ? [root] : walk(root); } catch { _iter = walk(root); }
+  for (const file of _iter) {
     const ext = path.extname(file).toLowerCase();
     if (!SCAN_TEXT_EXT.has(ext)) continue;
     let text;
     try { text = read(file); } catch { continue; }
     if (text.length > 1024 * 1024) continue;
-    const fileRel = rel(root, file);
+    const fileRel = (file === root) ? path.basename(file) : rel(root, file);  // 1.9.354 (UR-0072): 단일 파일 스캔 시 basename 표시('.' 방지)
     // 1.9.350 (UR-0060 외부리뷰): leerness 자기 harness.js(regex 소스) + 생성 secret-policy 템플릿만 제외 — 정확 경로(사용자 파일명 substring false-negative 제거)
     if (path.resolve(file) === path.resolve(__filename) || /(^|[\\/])\.(?:harness|leerness)[\\/]secret-policy\.md$/.test(fileRel)) continue;
     for (const { name, re } of SECRET_PATTERNS) {

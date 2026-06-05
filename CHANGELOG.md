@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.354 — 2026-06-05 — 외부리뷰 P3 클러스터 (UR-0072) · 외부리뷰 백로그 소진
+
+**🧩 외부 리뷰 P3 핵심 4종 — compareVer pre-release · _classifyCJK 일본어 오판 · scan secrets 파일경로 · requests drop 아이콘.**
+
+### 구현
+1. **compareVer pre-release** (Opus P3-4): `1.9.0-beta` < `1.9.0` semver 규칙 적용(이전: `-beta` 무시 → 동일 취급). beta/next 채널 stale-check 정확도.
+2. **_classifyCJK 일본어 오판** (Opus P3-2): CJK 통합 한자(한·중·일 공유)를 무조건 중국어로 세던 것 → **kana 존재 시 일본어 귀속** 휴리스틱. advisory 인코딩 라벨 정확도.
+3. **scan secrets 파일경로** (Codex#10): `scan secrets <file>` 가 `ENOTDIR` 로 실패하던 것 → 파일이면 그 파일만 스캔(basename 표시), 디렉토리면 walk.
+4. **requests drop 아이콘** (Codex#8): 성공 동작에 실패 아이콘 `✗` → `✓`.
+
+### 검증
+- **selftest 101/101 PASS** · **E2E 298→299 PASS** (회귀 0).
+- 실측: compareVer beta<release · _classifyCJK 일본어(kana+한자)→japanese·중국어(한자만)→chinese · `scan secrets leak.js` GitLab PAT 감지(ENOTDIR 없음, leak.js 표시) · `requests drop` → ✓.
+
+### 비고 (P3 잔여 — cosmetic, UR-0072 후속)
+intent/constraints/requests `.` arg "Unknown subcommand"(핸들러별 default 검증 필요) · skill install <catalog-id>(id 해석 설계) · pulse 라벨 분모 표기 — 소형 UX 폴리시, 별도 처리.
+
 ## 1.9.353 — 2026-06-05 — 외부리뷰 P2 마무리 3종 (UR-0067/0070/0071) · P2 전량 완료
 
 **🧩 외부 리뷰 남은 P2 3건 — 인코딩 정책/CP949 · shell-guard 셸 명시 · init non-TTY ANSI. 외부리뷰 P0/P1/P2 전량 해소.**
