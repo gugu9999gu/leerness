@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.349 — 2026-06-05 — 외부리뷰 UR-0063: selftest/doctor 위치독립화 (trust-killer)
+
+**🔴 신규 사용자 첫인상 신뢰 직결 버그 수정 — `selftest`/`doctor` 가 비초기화 디렉토리에서 거짓 "설치 손상 → 재설치" 오보고하던 문제 해소.** (Opus 4.8 P1-1 + 웹 GPT-5.5 "가장 치명적" + 하네스 재현 = **3모델 교차검증**)
+
+### 배경
+`init 가드` selftest 케이스(UR-0047 1.9.311)가 `_isInitialized('.')===true` 를 검사 → cwd 가 init 프로젝트가 아니면 거짓 실패. `selftest`/`doctor`/`npm run test:fast`/smoke 가 신규 사용자의 임의 디렉토리에서 "1/N 실패 — 설치 손상 의심 / 재설치" 출력 → 첫 진단이 정상 설치를 broken 으로 오인. GPT-5.5 신뢰도 4/10·프로덕션 3/10 의 핵심 원인. **자가진단은 cwd 상태에 의존하면 안 됨.**
+
+### 구현
+1. selftest 케이스의 cwd 의존 `liveOk = _isInitialized('.')` → **위치독립 임시 fixture**: `os.tmpdir()` 에 AGENTS.md 마커 생성 후 `_isInitialized(fixture)===true` 검증 + 정리(finally). 비초기화 탐지(`emptyOk`)는 유지.
+2. doctor 는 selftest 를 인라인 실행 → 동일 수정으로 함께 해소.
+
+### 검증
+- **비초기화 dir selftest 96/96 통과**(이전 1/96 실패) · **doctor "✓ 설치 정상"**(이전 "✗ 문제 감지 — 재설치") · init dir 회귀 96/96 OK.
+- selftest 96/96 · **E2E 293→294 PASS**(비초기화 cwd selftest/doctor 회귀 가드 추가, 회귀 0).
+
 ## 1.9.348 — 2026-06-05 — 외부리뷰 UR-0059(P0): --path 라우팅 일관화
 
 **🔴 외부 멀티모델 리뷰 P0 수정 — `--path` 플래그가 ~22개 positional-dispatch 명령에서 무시되고 CWD 로 fallback 되던 버그 해소.** (Sonnet 4.8 F-01 발견, 하네스 재현 검증)

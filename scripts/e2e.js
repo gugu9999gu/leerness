@@ -4594,5 +4594,24 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.349 회귀 (외부리뷰 UR-0063, GPT5.5+Opus 교차검증): selftest/doctor 위치독립 — 비초기화 dir 에서도 통과(거짓 "설치 손상" 없음)
+total++;
+{
+  let ok = false;
+  try {
+    const ni = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noinit-'));  // .harness 없는 비초기화 dir
+    const sr = cp.spawnSync(process.execPath, [CLI, 'selftest'], { cwd: ni, encoding: 'utf8', timeout: 30000 });
+    const sout = (sr.stdout || '') + (sr.stderr || '');
+    const selftestOk = sr.status === 0 && /전체 \d+건 통과/.test(sout) && !/설치 손상/.test(sout);
+    const dr = cp.spawnSync(process.execPath, [CLI, 'doctor'], { cwd: ni, encoding: 'utf8', timeout: 30000 });
+    const dout = (dr.stdout || '') + (dr.stderr || '');
+    const doctorOk = !/문제 감지|설치 손상|재설치/.test(dout) && /설치 정상|통과/.test(dout);
+    ok = selftestOk && doctorOk;
+    fs.rmSync(ni, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.349) 외부리뷰 UR-0063: selftest/doctor 위치독립 — 비초기화 dir 통과 (UR-0063)' : '✗ selftest 위치독립 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
