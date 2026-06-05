@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.341 — 2026-06-05 — UR-0025(심층): BUILTIN_CATALOG 서브시스템 분리
+
+**🧩 내장 스킬 catalog(9종) + 순수 _source 변환을 모듈로 분리 — 동형 추출 7번째.** (UR-0025 심층)
+
+### 배경 (방향 판단)
+"rules canonical 로 트리오 완성"을 검토했으나, rules 는 이미 **구조화된 MD 테이블**(`| R-XXXX | trigger | rule | added | status | lastVerified |`)로 `readRules`/`writeRules` round-trip 이 깔끔 → decisions/lessons 의 free-form 블록 drift 부류가 아니고, 6개 변이 명령 + 매세션 자동검증에 쓰이는 행동 핵심이라 변환 위험 대비 가치 낮음 → **보류**(결정매트릭스: 안정성·기존 패턴 우선). 대신 검증된 저위험 catalog 추출 계속.
+
+### 구현 (UR-0025 심층)
+1. **`BUILTIN_CATALOG`**(9 내장 스킬: office/commerce-api/crawling/firebase/ads-analytics/appstore-review/ai-verified-skill-publisher/feature-implementation/project-roadmap-generator) → `lib/catalogs.js`.
+2. **`_withBuiltinSource(catalog)`**(순수: catalog → `_source:'builtin'` 부여 맵) → `lib/pure-utils.js`. `_loadSkillCatalog` 의 builtin fallback = `_withBuiltinSource(BUILTIN_CATALOG)` 박막. import 가 로드타임 `_loadSkillCatalog()` 호출보다 앞서므로 순서 안전. 긴 단일라인 블록은 일회용 마이그레이션 스크립트로 결정적 이동 후 삭제.
+3. selftest 88→89 · e2e 285→286.
+
+### 검증
+- **selftest 89/89 PASS** · **E2E 286/286 PASS** (회귀 0).
+- 실측: catalog 9종(office.version 보존) · `_withBuiltinSource` 9 entries 전부 _source=builtin·capabilities 보존·null guard({}) · `skill list` 명령 builtin catalog 정상 노출(office/firebase/...).
+
 ## 1.9.340 — 2026-06-05 — UR-0058: lessons canonical = JSON, MD = projection (Codex 위임·검증)
 
 **🤖 UR-0053 decisions canonical 패턴을 lessons 로 확장 — Codex CLI(gpt-5.5) 위임 후 하네스 독립 검증. 상태 저장 단일 진실소스 일반화.** (직전 1.9.339 decisions 의 정밀 미러)

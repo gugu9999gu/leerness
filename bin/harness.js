@@ -20,13 +20,14 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _detectLspLang, _matchLspSymbols,
   _detectOptimism: _puDetectOptimism, _computeConfidence: _puComputeConfidence,
   _personaSummaries, _translate,
-  _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd } = require('../lib/pure-utils');  // 1.9.318~339 (UR-0025/0053): 순수 유틸 모듈 분리
+  _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd,
+  _withBuiltinSource } = require('../lib/pure-utils');  // 1.9.318~341 (UR-0025/0053): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS } = require('../lib/catalogs');  // 1.9.338 (UR-0025): i18n STRINGS catalog 분리
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG } = require('../lib/catalogs');  // 1.9.341 (UR-0025): BUILTIN_CATALOG 분리
 
-const VERSION = '1.9.340';
+const VERSION = '1.9.341';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -123,23 +124,10 @@ function _loadSkillCatalog() {
     return out;
   }
   SKILLPACK_SOURCE = 'builtin';
-  const out = {};
-  for (const [k, v] of Object.entries(BUILTIN_CATALOG)) out[k] = { ...v, _source: 'builtin' };
-  return out;
+  return _withBuiltinSource(BUILTIN_CATALOG);  // 1.9.341 (UR-0025): 순수 _withBuiltinSource (lib/pure-utils)
 }
 
-const BUILTIN_CATALOG = {
-  'office':                       { displayNameKo: '마이크로소프트 오피스 자동화 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['Word/Excel/PowerPoint 문서 자동화', '템플릿 기반 문서 생성', '표/차트/요약 문서화', '민감정보 제외 규칙 적용'] },
-  'commerce-api':                 { displayNameKo: '커머스 API 연동 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['쿠팡·롯데온·스마트스토어 API 연동 설계', '주문/상품/매출 동기화', '환경변수 기반 인증 분리', '레이트리밋/재시도/오류 처리'] },
-  'crawling':                     { displayNameKo: '크롤링·브라우저 자동화 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['Playwright 기반 자동화', '다운로드/로그인 세션 처리', '스크린샷 기반 실패 진단', '약관/권한/차단 위험 점검'] },
-  'firebase':                     { displayNameKo: 'Firebase·Cloud Functions 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['Firebase Functions 배포 구조', '환경변수/시크릿 분리', '권한/IAM 점검', '로컬 에뮬레이터 검증'] },
-  'ads-analytics':                { displayNameKo: '광고·GA4 분석 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['GA4 이벤트/전환 점검', '광고 데이터 수집 구조화', '소스/매체 분석', '리포트 자동화'] },
-  'appstore-review':              { displayNameKo: '앱스토어 심사 대응 스킬 라이브러리', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['심사 문구 분석', '개인정보 라벨 점검', '리젝 대응 초안', '웹뷰/앱 데이터 수집 구분'] },
-  'ai-verified-skill-publisher':  { displayNameKo: 'AI 검증 스킬 업로드·라이브러리화 스킬', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['검증된 스킬 정규화', '민감정보 스캔', 'AI 검증 메타데이터 작성', 'npm/git 업로드 dry-run 및 실행 게이트'] },
-  'feature-implementation':       { displayNameKo: '기능 구현 표준 스킬', version: '1.0.0', lastUpdated: '2026-05-08', verification: 'passed', capabilities: ['feature-contracts 작성', '재사용 우선 검사', '테스트 증거 수집', '핸드오프 트리거'] },
-  // 1.9.11: 기본 내장 — 로드맵 자동 생성 스킬
-  'project-roadmap-generator':    { displayNameKo: '프로젝트 로드맵 자동 생성 스킬', version: '0.2.0', lastUpdated: '2026-05-12', verification: 'passed', capabilities: ['leerness .harness/* 통합 파싱 (plan/progress/skills/rules/decisions/handoff/current-state)', '좌→우 수평 트리 + 상하 중앙정렬 SVG', '7개 상태 색상 (완료/진행/보류/검토/예정/미완료/오류)', 'design-system + CSS variables 자동 주입', '화이트보드 panning/zoom + 더블클릭 reset', '단일 HTML 출력 (외부 의존성 0)'] }
-};
+// 1.9.341 (UR-0025 심층): BUILTIN_CATALOG (9 내장 스킬 catalog) 는 lib/catalogs.js 로 이전 (import).
 
 // 1.9.10: skillCatalog는 skillpack 우선, fallback builtin. _loadSkillCatalog 호출은 BUILTIN_CATALOG 정의 후.
 const skillCatalog = _loadSkillCatalog();
@@ -3066,6 +3054,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심층: i18n STRINGS catalog→lib/catalogs + _translate→pure-utils 분리 (1.9.338)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.STRINGS && typeof c.STRINGS['common.ready'] === 'object' && c.STRINGS['common.ready'].en === 'Ready'; const work = m._translate(c.STRINGS, 'common.ready', 'en') === 'Ready' && m._translate(c.STRINGS, 'common.ready', 'ko') === '준비 완료' && m._translate(c.STRINGS, 'no.such.key', 'en') === 'no.such.key' && m._translate(null, 'x', 'ko') === 'x' && m._translate({ k: { ko: '케이' } }, 'k', 'en') === '케이'; const src = read(__filename); const moved = STRINGS === c.STRINGS && _translate === m._translate && !/const STRINGS = \{/.test(src); return catOk && work && moved; } },
     { name: 'UR-0053: decisions canonical JSON 레이어(_loadDecisions/_saveDecisions/decisionsJsonPath) + pure 파서/렌더 round-trip (1.9.339)', run: () => { const m = require('../lib/pure-utils'); const md = '# Decisions\n\n### 2026-06-05 — A\n- Decision: a\n- Reason: r\n- Alternatives: alt\n- Impact: imp\n\n### 2026-06-04 — B\n- Decision: b\n- Alternatives:\n'; const objs = m._decisionsFromMd(md); const parseOk = objs.length === 2 && objs[0].alternatives === 'alt' && objs[0].impact === 'imp' && objs[1].alternatives === null && objs[1].title === 'B'; const rt = m._decisionsFromMd(m._renderDecisionsMd(objs)); const rtOk = JSON.stringify(rt) === JSON.stringify(objs); const tplOk = m._decisionsFromMd(m._renderDecisionsMd([])).length === 0; const layerOk = typeof _loadDecisions === 'function' && typeof _saveDecisions === 'function' && typeof decisionsJsonPath === 'function' && _decisionsFromMd === m._decisionsFromMd; return parseOk && rtOk && tplOk && layerOk; } },
     { name: 'UR-0058: lessons canonical JSON 레이어(_loadLessons/_saveLessons/lessonsJsonPath) + pure 파서/렌더 round-trip', run: () => { const m = require('../lib/pure-utils'); const objs = [{ date: '2026-06-05', text: 'A', tag: 't' }, { date: '2026-06-04', text: 'B', tag: null }]; const rt = m._parseLessonEntries(m._renderLessonsMd(objs)); const rtOk = JSON.stringify(rt) === JSON.stringify(objs); const tplOk = m._parseLessonEntries(m._renderLessonsMd([])).length === 0; const layerOk = typeof _loadLessons === 'function' && typeof _saveLessons === 'function' && typeof lessonsJsonPath === 'function' && _renderLessonsMd === m._renderLessonsMd; return rtOk && tplOk && layerOk; } },
+    { name: 'UR-0025 심층: BUILTIN_CATALOG→lib/catalogs + _withBuiltinSource→pure-utils 분리 (1.9.341)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.BUILTIN_CATALOG && Object.keys(c.BUILTIN_CATALOG).length === 9 && c.BUILTIN_CATALOG.office && c.BUILTIN_CATALOG.office.version === '1.0.0'; const out = m._withBuiltinSource(c.BUILTIN_CATALOG); const work = Object.keys(out).length === 9 && Object.values(out).every(v => v._source === 'builtin') && out.office.version === '1.0.0' && Array.isArray(out.office.capabilities) && Object.keys(m._withBuiltinSource(null)).length === 0; const src = read(__filename); const moved = BUILTIN_CATALOG === c.BUILTIN_CATALOG && _withBuiltinSource === m._withBuiltinSource && !/const BUILTIN_CATALOG = \{/.test(src); return catOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }

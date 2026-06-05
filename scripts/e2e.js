@@ -4369,5 +4369,35 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.341 회귀 (UR-0025 심층): BUILTIN_CATALOG→lib/catalogs + _withBuiltinSource→pure-utils + skill list 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const catOk = c.BUILTIN_CATALOG && Object.keys(c.BUILTIN_CATALOG).length === 9 && c.BUILTIN_CATALOG.office && c.BUILTIN_CATALOG.office.version === '1.0.0';
+    const out = m._withBuiltinSource(c.BUILTIN_CATALOG);
+    const work = catOk && typeof m._withBuiltinSource === 'function' && Object.keys(out).length === 9
+      && Object.values(out).every(v => v._source === 'builtin') && Array.isArray(out.office.capabilities)
+      && Object.keys(m._withBuiltinSource(null)).length === 0;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
+    const movedOut = !/const BUILTIN_CATALOG = \{/.test(harnessSrc) && _catImp.includes('BUILTIN_CATALOG') && _puImp.includes('_withBuiltinSource')
+      && harnessSrc.includes('_withBuiltinSource(BUILTIN_CATALOG)');
+    // 소비 명령 회귀: skill list (builtin catalog 노출)
+    const sd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-skl-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', sd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const sr = cp.spawnSync(process.execPath, [CLI, 'skill', 'list', '--path', sd], { encoding: 'utf8', timeout: 20000 });
+    const listOut = (sr.stdout || '') + (sr.stderr || '');
+    const cmdOk = /office|firebase|feature-implementation|roadmap/i.test(listOut);
+    ok = work && movedOut && cmdOk;
+    fs.rmSync(sd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.341) UR-0025 심층: BUILTIN_CATALOG/_withBuiltinSource 분리 + skill list 회귀 (UR-0025)' : '✗ BUILTIN_CATALOG 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
