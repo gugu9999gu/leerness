@@ -4541,5 +4541,32 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.347 회귀 (UR-0025 심층): _parseSkillMd(SKILL.md frontmatter, BOM-aware)→pure-utils + skill install(BOM) 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const r = m._parseSkillMd('---\nname: s1\ndescription: "d1"\n---\nbody');
+    const pureOk = typeof m._parseSkillMd === 'function' && r.meta.name === 's1' && r.meta.description === 'd1' && r.body === 'body'
+      && m._parseSkillMd('﻿---\nname: b\n---\nx').meta.name === 'b'
+      && Object.keys(m._parseSkillMd('plain').meta).length === 0 && m._parseSkillMd(null).body === '';
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
+    const movedOut = !/function _parseSkillMd\(/.test(harnessSrc) && _puImp.includes('_parseSkillMd');
+    // 소비 회귀: skill install 이 BOM 포함 SKILL.md 를 정상 설치 (frontmatter name 파싱)
+    const sd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-smd-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', sd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const smdPath = path.join(sd, 's.md');
+    fs.writeFileSync(smdPath, Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from('---\nname: e2e-skill\ndescription: BOM 처리\n---\n# Body', 'utf8')]));
+    cp.spawnSync(process.execPath, [CLI, 'skill', 'install', smdPath, '--path', sd], { encoding: 'utf8', timeout: 20000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1' } });
+    const installOk = fs.existsSync(path.join(sd, '.harness', 'skills', 'e2e-skill', 'SKILL.md'));
+    ok = pureOk && movedOut && installOk;
+    fs.rmSync(sd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.347) UR-0025 심층: _parseSkillMd 분리 + skill install(BOM) 회귀 (UR-0025)' : '✗ _parseSkillMd 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

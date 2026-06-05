@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.347 — 2026-06-05 — UR-0025(심층): _parseSkillMd 순수 파서 분리
+
+**🧩 SKILL.md frontmatter 파서(`_parseSkillMd`, BOM-aware)를 lib/pure-utils.js 로 분리 — 순수함수 추출 3번째. 스킬 설치/임포트의 사용자 입력 파싱(Windows Notepad BOM 호환).** (UR-0025 심층)
+
+### 구현 (UR-0025 심층 — 순수함수)
+1. **`_parseSkillMd(text)`**(SKILL.md → `{meta, body}`, frontmatter `---...---` 파싱 + BOM strip + 따옴표 제거, 모듈 의존 0) → `lib/pure-utils.js`. harness 2개 사용처(skill discover/install)는 import 바인딩 사용.
+2. selftest 94→95 · e2e 291→292.
+
+### 검증
+- **selftest 95/95 PASS** · **E2E 292/292 PASS** (회귀 0).
+- 실측: frontmatter name/description(따옴표 제거) · body 분리 · **BOM-aware**(선행 U+FEFF strip) · no-frontmatter→`{meta:{}, body:원문}` · null-safe · **skill install end-to-end**: BOM 포함 SKILL.md → `e2e-skill/SKILL.md` 정상 설치.
+
 ## 1.9.346 — 2026-06-05 — UR-0025(심층): _roadmapTokenStyles 순수함수 분리
 
 **🧩 roadmap.html `:root` CSS 변수 빌더(`_roadmapTokenStyles`)를 lib/pure-utils.js 로 분리 — 순수함수 추출 2번째. + null-safe 가드 보강.** (UR-0025 심층)

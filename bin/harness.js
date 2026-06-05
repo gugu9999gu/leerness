@@ -21,13 +21,13 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _detectOptimism: _puDetectOptimism, _computeConfidence: _puComputeConfidence,
   _personaSummaries, _translate,
   _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd,
-  _withBuiltinSource, _esc, _roadmapTokenStyles } = require('../lib/pure-utils');  // 1.9.318~346 (UR-0025/0053): 순수 유틸 모듈 분리
+  _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd } = require('../lib/pure-utils');  // 1.9.318~347 (UR-0025/0053): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.346';
+const VERSION = '1.9.347';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1468,17 +1468,7 @@ function skillConsolidate(root) {
 
 // SKILL.md frontmatter 파싱 (---name: ... description: ... --- 본문)
 // 1.9.44 BUG-fix: UTF-8 BOM (﻿) 제거 후 파싱 (stress-v2 G2에서 발견)
-function _parseSkillMd(text) {
-  const cleaned = String(text || '').replace(/^﻿/, '');
-  const m = cleaned.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
-  if (!m) return { meta: {}, body: cleaned };
-  const meta = {};
-  for (const line of m[1].split('\n')) {
-    const km = line.match(/^([a-zA-Z_-]+):\s*(.+)$/);
-    if (km) meta[km[1].trim()] = km[2].trim().replace(/^["']|["']$/g, '');
-  }
-  return { meta, body: m[2] };
-}
+// 1.9.347 (UR-0025 심층): _parseSkillMd 는 lib/pure-utils.js 로 이전 (SKILL.md frontmatter 파서, import).
 
 // HTTPS fetch — Node 18+ globalThis.fetch 사용. 미지원 시 https module.
 async function _httpFetch(urlStr, opts = {}) {
@@ -3055,6 +3045,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심층: SKILL_CATALOG_PRESETS→lib/catalogs 분리 (1.9.344)', run: () => { const c = require('../lib/catalogs'); const catOk = c.SKILL_CATALOG_PRESETS && Object.keys(c.SKILL_CATALOG_PRESETS).length === 2 && c.SKILL_CATALOG_PRESETS.vercel && c.SKILL_CATALOG_PRESETS.vercel.owner === 'vercel-labs' && c.SKILL_CATALOG_PRESETS.anthropic && c.SKILL_CATALOG_PRESETS.anthropic.repo === 'skills'; const moved = SKILL_CATALOG_PRESETS === c.SKILL_CATALOG_PRESETS; return catOk && moved; } },
     { name: 'UR-0025 심층: _esc(HTML escape)→pure-utils 분리 + XSS 가드 (1.9.345)', run: () => { const m = require('../lib/pure-utils'); const work = m._esc('&<>"\'') === '&amp;&lt;&gt;&quot;&#39;' && m._esc('<script>x</script>') === '&lt;script&gt;x&lt;/script&gt;' && m._esc(null) === '' && m._esc(undefined) === '' && m._esc(42) === '42'; const moved = _esc === m._esc; return work && moved; } },
     { name: 'UR-0025 심층: _roadmapTokenStyles→pure-utils 분리 (1.9.346)', run: () => { const m = require('../lib/pure-utils'); const out = m._roadmapTokenStyles({ 'color.primary': '#2563eb' }, { 'color-surface': '#fff', 'custom': '#abc' }); const work = out.startsWith(':root {') && out.includes('--lr-primary: #2563eb') && out.includes('--lr-surface: #fff') && out.includes('--lr-custom: #abc') && out.includes('--lr-card-bg') && m._roadmapTokenStyles(null, null).startsWith(':root {'); const moved = _roadmapTokenStyles === m._roadmapTokenStyles; return work && moved; } },
+    { name: 'UR-0025 심층: _parseSkillMd(SKILL.md frontmatter, BOM-aware)→pure-utils 분리 (1.9.347)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseSkillMd('---\nname: s1\ndescription: "d1"\n---\nbody'); const work = r.meta.name === 's1' && r.meta.description === 'd1' && r.body === 'body' && m._parseSkillMd('﻿---\nname: b\n---\nx').meta.name === 'b' && Object.keys(m._parseSkillMd('plain text').meta).length === 0 && m._parseSkillMd('plain text').body === 'plain text' && m._parseSkillMd(null).body === ''; const moved = _parseSkillMd === m._parseSkillMd; return work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
