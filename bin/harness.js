@@ -27,7 +27,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.349';
+const VERSION = '1.9.350';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1530,8 +1530,12 @@ async function skillInstallCmd(root, source) {
   const description = parsed.meta.description || '';
   if (!name) { fail('SKILL.md frontmatter에 `name` 필수'); return process.exit(1); }
   // .harness/skills/<id>/SKILL.md 저장
-  const skillId = String(name).toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
-  const dir = path.join(root, '.harness', 'skills', skillId);
+  // 1.9.350 (UR-0062 외부리뷰): skill id 정규화 — 선행/후행 ./- 제거 + .. 거부 + jail (path traversal 차단)
+  const skillId = String(name).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[.\-]+|[.\-]+$/g, '');
+  if (!skillId || skillId.includes('..')) { fail(`유효하지 않은 skill id (path traversal 차단): ${name}`); return process.exit(1); }
+  const _skillsRoot = path.join(root, '.harness', 'skills');
+  const dir = path.join(_skillsRoot, skillId);
+  if (!path.resolve(dir).startsWith(path.resolve(_skillsRoot) + path.sep)) { fail(`skill id jail 위반: ${name}`); return process.exit(1); }
   mkdirp(dir);
   writeUtf8(path.join(dir, 'SKILL.md'), body);
   // skill.json도 함께 (자체 catalog 호환)
@@ -3041,12 +3045,14 @@ function _selfTestCases() {
     { name: 'UR-0058: lessons canonical JSON 레이어(_loadLessons/_saveLessons/lessonsJsonPath) + pure 파서/렌더 round-trip', run: () => { const m = require('../lib/pure-utils'); const objs = [{ date: '2026-06-05', text: 'A', tag: 't' }, { date: '2026-06-04', text: 'B', tag: null }]; const rt = m._parseLessonEntries(m._renderLessonsMd(objs)); const rtOk = JSON.stringify(rt) === JSON.stringify(objs); const tplOk = m._parseLessonEntries(m._renderLessonsMd([])).length === 0; const layerOk = typeof _loadLessons === 'function' && typeof _saveLessons === 'function' && typeof lessonsJsonPath === 'function' && _renderLessonsMd === m._renderLessonsMd; return rtOk && tplOk && layerOk; } },
     { name: 'UR-0025 심층: BUILTIN_CATALOG→lib/catalogs + _withBuiltinSource→pure-utils 분리 (1.9.341)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.BUILTIN_CATALOG && Object.keys(c.BUILTIN_CATALOG).length === 9 && c.BUILTIN_CATALOG.office && c.BUILTIN_CATALOG.office.version === '1.0.0'; const out = m._withBuiltinSource(c.BUILTIN_CATALOG); const work = Object.keys(out).length === 9 && Object.values(out).every(v => v._source === 'builtin') && out.office.version === '1.0.0' && Array.isArray(out.office.capabilities) && Object.keys(m._withBuiltinSource(null)).length === 0; const src = read(__filename); const moved = BUILTIN_CATALOG === c.BUILTIN_CATALOG && _withBuiltinSource === m._withBuiltinSource && !/const BUILTIN_CATALOG = \{/.test(src); return catOk && work && moved; } },
     { name: 'UR-0025 심층: ROADMAP_STATUS_LABEL/COLOR→lib/catalogs 분리 (1.9.342)', run: () => { const c = require('../lib/catalogs'); const lblOk = c.ROADMAP_STATUS_LABEL && Object.keys(c.ROADMAP_STATUS_LABEL).length === 11 && c.ROADMAP_STATUS_LABEL.done === '완료' && c.ROADMAP_STATUS_LABEL.blocked === '오류'; const colOk = c.ROADMAP_STATUS_COLOR && Object.keys(c.ROADMAP_STATUS_COLOR).length === 11 && c.ROADMAP_STATUS_COLOR.done === '#16a34a' && c.ROADMAP_STATUS_COLOR.skill === '#8b5cf6'; const src = read(__filename); const moved = ROADMAP_STATUS_LABEL === c.ROADMAP_STATUS_LABEL && ROADMAP_STATUS_COLOR === c.ROADMAP_STATUS_COLOR && !/const ROADMAP_STATUS_LABEL = \{/.test(src); return lblOk && colOk && moved; } },
-    { name: 'UR-0025 심층: SECRET_PATTERNS→lib/catalogs 보안 응집 분리 (1.9.343)', run: () => { const c = require('../lib/catalogs'); const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 13 && c.SECRET_PATTERNS.every(p => p.name && p.re instanceof RegExp); const A = 'A'.repeat(40); const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";'); const moved = SECRET_PATTERNS === c.SECRET_PATTERNS; return catOk && det && moved; } },
+    { name: 'UR-0025 심층: SECRET_PATTERNS→lib/catalogs 보안 응집 분리 (1.9.343)', run: () => { const c = require('../lib/catalogs'); const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 19 && c.SECRET_PATTERNS.every(p => p.name && p.re instanceof RegExp); const A = 'A'.repeat(40); const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";'); const moved = SECRET_PATTERNS === c.SECRET_PATTERNS; return catOk && det && moved; } },
     { name: 'UR-0025 심층: SKILL_CATALOG_PRESETS→lib/catalogs 분리 (1.9.344)', run: () => { const c = require('../lib/catalogs'); const catOk = c.SKILL_CATALOG_PRESETS && Object.keys(c.SKILL_CATALOG_PRESETS).length === 2 && c.SKILL_CATALOG_PRESETS.vercel && c.SKILL_CATALOG_PRESETS.vercel.owner === 'vercel-labs' && c.SKILL_CATALOG_PRESETS.anthropic && c.SKILL_CATALOG_PRESETS.anthropic.repo === 'skills'; const moved = SKILL_CATALOG_PRESETS === c.SKILL_CATALOG_PRESETS; return catOk && moved; } },
     { name: 'UR-0025 심층: _esc(HTML escape)→pure-utils 분리 + XSS 가드 (1.9.345)', run: () => { const m = require('../lib/pure-utils'); const work = m._esc('&<>"\'') === '&amp;&lt;&gt;&quot;&#39;' && m._esc('<script>x</script>') === '&lt;script&gt;x&lt;/script&gt;' && m._esc(null) === '' && m._esc(undefined) === '' && m._esc(42) === '42'; const moved = _esc === m._esc; return work && moved; } },
     { name: 'UR-0025 심층: _roadmapTokenStyles→pure-utils 분리 (1.9.346)', run: () => { const m = require('../lib/pure-utils'); const out = m._roadmapTokenStyles({ 'color.primary': '#2563eb' }, { 'color-surface': '#fff', 'custom': '#abc' }); const work = out.startsWith(':root {') && out.includes('--lr-primary: #2563eb') && out.includes('--lr-surface: #fff') && out.includes('--lr-custom: #abc') && out.includes('--lr-card-bg') && m._roadmapTokenStyles(null, null).startsWith(':root {'); const moved = _roadmapTokenStyles === m._roadmapTokenStyles; return work && moved; } },
     { name: 'UR-0025 심층: _parseSkillMd(SKILL.md frontmatter, BOM-aware)→pure-utils 분리 (1.9.347)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseSkillMd('---\nname: s1\ndescription: "d1"\n---\nbody'); const work = r.meta.name === 's1' && r.meta.description === 'd1' && r.body === 'body' && m._parseSkillMd('﻿---\nname: b\n---\nx').meta.name === 'b' && Object.keys(m._parseSkillMd('plain text').meta).length === 0 && m._parseSkillMd('plain text').body === 'plain text' && m._parseSkillMd(null).body === ''; const moved = _parseSkillMd === m._parseSkillMd; return work && moved; } },
     { name: 'UR-0059(외부리뷰 P0): --path 라우팅 일관화 — bare args[N]||cwd 제거 + arg(--path) wrap', run: () => { const src = read(__filename); const bare1 = '(args[1] ' + '|| process.cwd())'; const bare2 = '(args[2] ' + '|| process.cwd())'; const noBare = !src.includes(bare1) && !src.includes(bare2); const wrapped = src.includes('arg(' + "'--path', args[1] || process.cwd())") && src.includes('arg(' + "'--path', args[2] || process.cwd())"); const argDefault = arg('--definitely-not-real-xyz', 'SENT') === 'SENT'; return noBare && wrapped && argDefault; } },
+    { name: 'UR-0061(외부리뷰 P1): roadmap CSS 값 살균 — :root/</style> breakout 차단', run: () => { const m = require('../lib/pure-utils'); const css = m._roadmapTokenStyles({ 'color.primary': 'red;}' + '</style><script>alert(1)</script>' }, {}); const blocked = !css.includes('<') && !css.includes('>'); const primaryLine = (css.split('\n').find(l => l.includes('--lr-primary')) || ''); const noBreakout = !primaryLine.replace(/;$/, '').includes('}'); const preserved = m._roadmapTokenStyles({ 'color.primary': '#2563eb' }, {}).includes('--lr-primary: #2563eb'); return blocked && noBreakout && preserved; } },
+    { name: 'UR-0060(외부리뷰 P1): SECRET_PATTERNS 19종 — GitLab/JWT/DB-URI/SendGrid/AWS-secret/Bearer 보강 + 오탐 가드', run: () => { const c = require('../lib/catalogs'); const hit = s => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('glpat-' + 'x'.repeat(20)) && hit('eyJ' + 'x'.repeat(15) + '.eyJ' + 'y'.repeat(15) + '.' + 'z'.repeat(15)) && hit('postgres://u:p@host:5432/db') && hit('SG.' + 'x'.repeat(22) + '.' + 'y'.repeat(43)) && hit('aws_secret_access_key = "' + 'x'.repeat(40) + '"') && hit('Bearer ' + 'x'.repeat(25)); const clean = !hit('const u = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return c.SECRET_PATTERNS.length === 19 && det && clean; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -7099,11 +7105,12 @@ function scanSecrets(root) {
     try { text = read(file); } catch { continue; }
     if (text.length > 1024 * 1024) continue;
     const fileRel = rel(root, file);
+    // 1.9.350 (UR-0060 외부리뷰): leerness 자기 harness.js(regex 소스) + 생성 secret-policy 템플릿만 제외 — 정확 경로(사용자 파일명 substring false-negative 제거)
+    if (path.resolve(file) === path.resolve(__filename) || /(^|[\\/])\.(?:harness|leerness)[\\/]secret-policy\.md$/.test(fileRel)) continue;
     for (const { name, re } of SECRET_PATTERNS) {
       re.lastIndex = 0;
       let m;
       while ((m = re.exec(text))) {
-        if (fileRel.includes('harness.js') || fileRel.includes('secret-policy.md')) break;
         const line = text.slice(0, m.index).split('\n').length;
         findings.push({ file: fileRel, line, name, snippet: m[0].slice(0, 32) });
         break;

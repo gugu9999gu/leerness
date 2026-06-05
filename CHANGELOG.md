@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.350 — 2026-06-05 — 외부리뷰 P1 보안 하드닝 3종 (UR-0060/0061/0062)
+
+**🔒 외부 멀티모델 리뷰 P1 보안 3건 일괄 수정 — 자율 팀(UR-0073) 전 보안 기반 다지기.**
+
+### 구현
+1. **UR-0062 — skill install path traversal 차단** (Codex#2): `SKILL.md name: ..` 가 `.harness/skills/<id>` 밖에 쓰이던 문제. id 정규화에 선행/후행 `./-` 제거 + `..` 거부 + jail(`dir.startsWith(skillsRoot+sep)`).
+2. **UR-0061 — roadmap CSS 인젝션 차단** (Codex#3+Opus P3-1, 2모델): design token 값이 `_roadmapTokenStyles` 의 `:root{}` 에 raw 보간 → `}`/`</style>` breakout. CSS 값 whitelist 살균(`[^#a-zA-Z0-9(),.%\s_-]` 제거)으로 규칙/태그 탈출 차단, 색상/길이 보존.
+3. **UR-0060 — 시크릿 스캐너 보강** (3모델): (a) 파일명 substring(`harness.js`/`secret-policy.md`) skip → **정확 경로** self-exclusion(`path.resolve(file)===__filename` + 생성 secret-policy 템플릿만) — 사용자 파일명 false-negative 제거. (b) SECRET_PATTERNS 13→**19**: GitLab PAT / JWT / DB-URI(임베디드 비밀번호) / SendGrid / AWS Secret Access Key(context) / Bearker 토큰 보강.
+
+### 검증
+- **selftest 98/98 PASS** · **E2E 295/295 PASS** (회귀 0).
+- 실측: skill `name: ..` → "path traversal 차단"(`.harness/SKILL.md` 미생성) · 사용자 `harness.js` 의 GitLab PAT **이제 탐지**(false-neg 해소) · CSS `red;}</style><script>` → `<`/`>`/`}` 제거(breakout 차단)·`#2563eb` 보존 · 신규 6패턴 탐지 + clean(john_doe/example.com URL) 오탐 0.
+
 ## 1.9.349 — 2026-06-05 — 외부리뷰 UR-0063: selftest/doctor 위치독립화 (trust-killer)
 
 **🔴 신규 사용자 첫인상 신뢰 직결 버그 수정 — `selftest`/`doctor` 가 비초기화 디렉토리에서 거짓 "설치 손상 → 재설치" 오보고하던 문제 해소.** (Opus 4.8 P1-1 + 웹 GPT-5.5 "가장 치명적" + 하네스 재현 = **3모델 교차검증**)

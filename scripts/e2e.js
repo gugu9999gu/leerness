@@ -4434,7 +4434,7 @@ total++;
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
     const A = 'A'.repeat(40);
     const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); });
-    const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 13
+    const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 19
       && hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";');
     const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
@@ -4610,6 +4610,36 @@ total++;
     fs.rmSync(ni, { recursive: true, force: true });
   } catch {}
   console.log(ok ? '✓ B(1.9.349) 외부리뷰 UR-0063: selftest/doctor 위치독립 — 비초기화 dir 통과 (UR-0063)' : '✗ selftest 위치독립 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.350 회귀 (외부리뷰 P1 보안 하드닝): UR-0061 CSS breakout 차단 + UR-0062 skill traversal 차단 + UR-0060 scan false-neg/패턴 보강
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    // UR-0061: roadmap CSS 값 살균 (순수)
+    const css = m._roadmapTokenStyles({ 'color.primary': 'red;}' + '</style><script>x</script>' }, {});
+    const cssOk = !css.includes('<') && !css.includes('>') && css.includes('--lr-primary:');
+    // UR-0062: skill install name:.. traversal 차단 (end-to-end)
+    const sd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-trav-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', sd, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const skf = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-skf-'));
+    fs.writeFileSync(path.join(skf, 'SKILL.md'), '---\nname: ..\ndescription: t\n---\n# b');
+    const ir = cp.spawnSync(process.execPath, [CLI, 'skill', 'install', skf, '--path', sd], { encoding: 'utf8', timeout: 20000 });
+    const travBlocked = /traversal|유효하지 않은 skill id|jail/.test((ir.stdout || '') + (ir.stderr || '')) && !fs.existsSync(path.join(sd, '.harness', 'SKILL.md'));
+    fs.rmSync(skf, { recursive: true, force: true });
+    // UR-0060: 사용자 harness.js 파일도 스캔(false-neg 제거) + 신규 GitLab 패턴 탐지
+    const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-scan-'));
+    fs.writeFileSync(path.join(ud, 'harness.js'), 'const k = "glpat-' + 'x'.repeat(20) + '";\n');
+    const scr = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', ud], { encoding: 'utf8', timeout: 20000 });
+    const scanOk = /GitLab PAT/.test((scr.stdout || '') + (scr.stderr || ''));
+    fs.rmSync(ud, { recursive: true, force: true });
+    fs.rmSync(sd, { recursive: true, force: true });
+    ok = cssOk && travBlocked && scanOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.350) 외부리뷰 P1보안: CSS breakout/skill traversal 차단 + secret scan false-neg/패턴 보강 (UR-0060/0061/0062)' : '✗ P1 보안 하드닝 실패');
   if (!ok) failed++;
 }
 
