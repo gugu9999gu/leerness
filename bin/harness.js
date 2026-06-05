@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.363';
+const VERSION = '1.9.364';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3097,6 +3097,7 @@ function _selfTestCases() {
     { name: 'CV-1/UR-0076: arg() --path=값 파싱 + _resolveRoot(--path>positional>cwd) 행위', run: () => { if (typeof _resolveRoot !== 'function') return false; const save = process.argv; try { process.argv = ['node', 'h', 'context', '--path=/tmp/eqform']; const eq = arg('--path', null) === '/tmp/eqform'; process.argv = ['node', 'h', 'context', 'X', '--path', '/tmp/flag']; const flagWins = _resolveRoot('X') === '/tmp/flag'; process.argv = ['node', 'h', 'context', '/tmp/pos']; const posWins = _resolveRoot('/tmp/pos') === '/tmp/pos'; process.argv = ['node', 'h', 'context']; const cwdFb = _resolveRoot(undefined) === process.cwd(); return eq && flagWins && posWins && cwdFb; } finally { process.argv = save; } } },
     { name: 'CV-4/UR-0079: _pruneArchives archive retention (최신 keep 유지, 오래된 prune) 행위', run: () => { if (typeof _pruneArchives !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_prune_')); try { const adir = path.join(tmp, '.harness', 'archive'); fs.mkdirSync(adir, { recursive: true }); for (let i = 0; i < 5; i++) fs.mkdirSync(path.join(adir, 'leerness-1.9.' + i + '-stamp')); const pruned = _pruneArchives(tmp, 2); const left = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length; return pruned === 3 && left === 2; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'CV-7/UR-0082: commands 카탈로그 + help 에 누락 명령군 등재 (표면 drift 가드)', run: () => { const src = read(__filename); const ci = src.indexOf('function commandsCmd'); const hi = src.indexOf('function help('); if (ci < 0 || hi < 0) return false; const cbody = src.slice(ci, ci + 8000); const hbody = src.slice(hi, hi + 7000); const must = ['install-safety', 'feature add', 'creds list', 'incident list', 'webhook serve', 'deploy auto', 'runs list', 'permissions list', 'whats-new', 'migrate audit']; return must.every(c => cbody.includes(c)) && hbody.includes('install-safety') && hbody.includes('feature add'); } },
+    { name: 'UR-0083(4th외부평가 9.3): auto-update hook 비침투 (update --quiet 모드 + hook --check --quiet + 업그레이드)', run: () => { const src = read(__filename); const quietMode = /const quiet = !!opts\.quiet \|\| has\('--quiet'\)/.test(src); const hookQuiet = src.includes("command: 'leerness update --check --quiet'"); const upgrade = /includes\('leerness update --check'\) && !h\.command\.includes\('--quiet'\)/.test(src); return quietMode && hookQuiet && upgrade; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -15209,26 +15210,29 @@ function fetchNpmLatest(pkg) {
 
 async function updateCmd(root, opts = {}) {
   root = absRoot(root);
+  // 1.9.364 (4번째 외부평가 9.3 + Codex CV-2 후속): --quiet — SessionStart hook 비침투화.
+  //   up-to-date 시 무음, 업데이트 가능 시에만 1줄 통지 (매 세션 노이즈 제거). hook 명령이 이 모드를 사용.
+  const quiet = !!opts.quiet || has('--quiet');
   const verF = path.join(root, '.harness/HARNESS_VERSION');
   const cur = exists(verF) ? parseHarnessVersion(read(verF)) : { plus: null, base: null, raw: '(not installed)' };
-  log(`# leerness update`);
-  log(`Current: ${cur.raw}`);
+  if (!quiet) log(`# leerness update`);
+  if (!quiet) log(`Current: ${cur.raw}`);
   const fromTar = arg('--from', null);
   const cacheHours = opts.checkOnly ? 24 : 0;
   let nextLeerness = VERSION;
-  if (fromTar) log(`Local tarball mode: ${fromTar}`);
+  if (fromTar) { if (!quiet) log(`Local tarball mode: ${fromTar}`); }
   else {
     const cached = readUpdateCache(root);
     if (cacheFresh(cached, cacheHours)) {
       nextLeerness = cached.nextLeerness || VERSION;
-      log(`(cached ${Math.round((Date.now() - cached.at) / 60000)}m ago)`);
-      log(`npm leerness latest: ${cached.nextLeerness || '(unavailable)'}`);
+      if (!quiet) log(`(cached ${Math.round((Date.now() - cached.at) / 60000)}m ago)`);
+      if (!quiet) log(`npm leerness latest: ${cached.nextLeerness || '(unavailable)'}`);
     } else {
-      log('Checking npm registry…');
+      if (!quiet) log('Checking npm registry…');
       const latest = await fetchNpmLatest('leerness');
       nextLeerness = latest || VERSION;
       writeUpdateCache(root, { nextLeerness: latest, runningCli: VERSION });
-      log(`npm leerness latest: ${latest || '(unavailable, using running CLI ' + VERSION + ')'}`);
+      if (!quiet) log(`npm leerness latest: ${latest || '(unavailable, using running CLI ' + VERSION + ')'}`);
     }
   }
   // What is "current"? canonical=base; legacy plus also rolls into leerness 1.9.0+
@@ -15242,6 +15246,7 @@ async function updateCmd(root, opts = {}) {
     if (compareVer(nextLeerness, '1.9.0') >= 0) { needsMigrate = true; reason = 'consolidate legacy plus@ marker into canonical'; }
   }
   if (opts.checkOnly) {
+    if (quiet) { if (needsMigrate) log(`↑ leerness 업데이트 가능: ${reason} — leerness update --yes`); return; }  // up-to-date 시 무음
     if (needsMigrate) log(`\n→ migration available: ${reason}`);
     else log('\n→ up to date');
     return;
@@ -15282,22 +15287,26 @@ function autoUpdateInstall(root) {
   if (exists(settingsFile)) { try { settings = JSON.parse(read(settingsFile)); } catch {} }
   settings.hooks = settings.hooks || {};
   // 1.9.1 P1: legacy 'leerness-plus update' hook 자동 제거 (이전 fork 시절 잔재).
-  let removedLegacy = 0;
+  let removedLegacy = 0, upgradedQuiet = 0;
   settings.hooks.SessionStart = (settings.hooks.SessionStart || []).filter(h => {
     if (h && h.command && /\bleerness-plus update\b/.test(h.command)) { removedLegacy++; return false; }
+    // 1.9.364 (4번째 외부평가 9.3): 비-quiet 'leerness update --check' 를 quiet 버전으로 업그레이드 (기존 설치 매세션 노이즈 제거)
+    if (h && h.command && h.command.includes('leerness update --check') && !h.command.includes('--quiet')) { upgradedQuiet++; return false; }
     return true;
   });
   if (!settings.hooks.SessionStart.some(h => h.command && h.command.includes('leerness update'))) {
-    settings.hooks.SessionStart.push({ matcher: '*', command: 'leerness update --check' });
+    settings.hooks.SessionStart.push({ matcher: '*', command: 'leerness update --check --quiet' });
   }
   writeUtf8(settingsFile, JSON.stringify(settings, null, 2) + '\n');
   writeUtf8(path.join(root, '.claude/commands/update.md'),
     `# /update\n\nleerness 자동 업데이트 (감지 → 마이그레이션 → 검증).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\n체크만:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`);
   ok('auto-update SessionStart hook installed (.claude/settings.local.json)');
   if (removedLegacy) ok(`legacy hook 제거: ${removedLegacy}건 (leerness-plus → leerness 통합)`);
+  if (upgradedQuiet) ok(`hook 업그레이드: ${upgradedQuiet}건 → --quiet (up-to-date 시 무음, 1.9.364)`);
   ok('/update slash command added');
   // 1.9.272 (GPT-5.5 외부 리뷰 반영): hook 설치 투명성 — 무엇을/왜/어떻게 끄는지 명시.
-  log(`  ⓘ 이 hook 은 Claude Code 세션 시작 시 \`leerness update --check\` 를 1회 실행합니다 (네트워크: npm 최신 버전 비교, 자동 설치는 안 함).`);
+  // 1.9.364 (4번째 외부평가 9.3): 비침투 — 세션 시작 시 --quiet 로 up-to-date 면 아무 출력 없음, 업데이트 가능 시에만 1줄.
+  log(`  ⓘ 이 hook 은 Claude Code 세션 시작 시 \`leerness update --check --quiet\` 를 1회 실행합니다 (최신이면 무음, 업데이트 가능 시에만 1줄 통지 · 자동 설치는 안 함).`);
   log(`  ⓘ 제거: ${rel(root, settingsFile)} 의 hooks.SessionStart 항목 삭제  ·  설치 시 끄기: leerness init . --no-auto-update`);
 }
 

@@ -4957,5 +4957,25 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.364 회귀 (4번째 외부평가 9.3/UR-0083): auto-update hook 비침투 — update --check --quiet 가 up-to-date 시 무음 + hook 명령이 --quiet 사용
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-quiet-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // up-to-date(방금 init한 현재 버전) → --check --quiet 는 무음
+    const r = cp.spawnSync(process.execPath, [CLI, 'update', d, '--check', '--quiet'], { encoding: 'utf8', timeout: 30000 });
+    const silent = (r.stdout || '').trim() === '' && r.status === 0;
+    // 설치된 SessionStart hook 명령이 --quiet 사용
+    const settings = JSON.parse(fs.readFileSync(path.join(d, '.claude', 'settings.local.json'), 'utf8'));
+    const hookQuiet = (settings.hooks.SessionStart || []).some(h => h.command && h.command.includes('update --check --quiet'));
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = silent && hookQuiet;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.364) 4th외부평가: auto-update hook 비침투 (update --check --quiet 무음 + hook --quiet) (UR-0083)' : '✗ auto-update 비침투 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

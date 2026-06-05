@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.364 — 2026-06-06 — 4번째 외부평가 반영: auto-update hook 비침투화 (UR-0083)
+
+**🛠 4번째 외부평가(web, 1.9.361 대상) 9.3 반영 — SessionStart 자동업데이트 hook 매세션 노이즈 제거.**
+
+### 배경
+4번째 외부평가가 "Claude 세션 시작마다 `leerness update --check` 가 실행돼 부담"을 지적(9.3). Codex CV-2 후속 권고(hook 비침투화)와 일치. `--no-auto-update`(opt-out)는 이미 존재하나, 기본 ON 상태의 hook 이 매 세션 출력하는 점이 문제.
+
+### 구현
+1. **`update --check --quiet` 모드**(신규): up-to-date 시 **완전 무음**, 업데이트 가능 시에만 1줄 통지. 헤더/네트워크 로그 전부 억제.
+2. **SessionStart hook 명령 → `leerness update --check --quiet`**: 새 설치는 quiet hook. 
+3. **기존 비-quiet hook 자동 업그레이드**: autoUpdateInstall 재실행(migrate 포함) 시 기존 `leerness update --check`(비-quiet)를 quiet 버전으로 교체 → 기존 사용자도 노이즈 제거.
+4. **opt-out 가시화**: hook 설치 안내에 "최신이면 무음" 명시 + `--no-auto-update` 끄기 안내 유지.
+
+### 검증 (회귀 0)
+- **selftest 110→111 PASS** (quiet 모드 + hook --quiet + 업그레이드 로직 가드). **E2E 309→310 PASS** (행위: up-to-date `update --check --quiet` 무음 + hook 명령 --quiet 확인).
+- 실측: up-to-date 프로젝트 `update --check --quiet` → 출력 0 chars. 기존 비-quiet hook → 재설치 시 `--quiet` 로 업그레이드.
+
 ## 1.9.363 — 2026-06-06 — 안정화④ 외부리뷰 CV-7: commands/help 표면 drift 해소 (UR-0082)
 
 **🛠 외부 멀티모델 리뷰 안정화 시리즈 4탄 — `--help`/`commands` 에서 누락됐던 명령군 전수 등재.**
