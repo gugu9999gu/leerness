@@ -3904,8 +3904,10 @@ total++;
     const work = m._countDatedBlocks('```md\n### 2026-01-01 — T\n```\n### 2026-06-05 — R\n') === 1
       && m._extractDecisionBlocks('### 2026-06-05 — A\n- Decision: x\n').length === 1;
     const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    // 1.9.325: import 순서 비의존 — pure-utils 구조분해 블록을 추출해 이름 포함 확인(이후 import 추가 허용)
+    const _puImport = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     const movedOut = !/function _countDatedBlocks\(/.test(harnessSrc) && !/function _compareSemver\(/.test(harnessSrc)
-      && /_countDatedBlocks, _extractDecisionBlocks \} = require\('\.\.\/lib\/pure-utils'\)/.test(harnessSrc);
+      && _puImport.includes('_countDatedBlocks') && _puImport.includes('_extractDecisionBlocks');
     // 소비 명령 회귀: context 의 decisions count (_countDatedBlocks 사용)
     const cd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-memparse-'));
     cp.spawnSync(process.execPath, [CLI, 'init', cd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
@@ -3916,6 +3918,32 @@ total++;
     fs.rmSync(cd, { recursive: true, force: true });
   } catch {}
   console.log(ok ? '✓ B(1.9.324) lib/pure-utils 메모리 파서 분리: 모듈 단일출처 + 인라인/중복 제거 + context count (UR-0025)' : '✗ 메모리 파서 분리 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.325 회귀 (UR-0025 모듈화): _classifyIntent lib/pure-utils 분리 + harness 인라인 제거 + 소비명령(intent classify)
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const fnOk = typeof m._classifyIntent === 'function';
+    const work = m._classifyIntent('정확히 그것만').intent === 'precise'
+      && m._classifyIntent('전체 다양한 기능').intent === 'broad'
+      && m._classifyIntent('로그인 구현').intent === 'default';
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    // import 순서 비의존: pure-utils 구조분해 블록 추출 후 이름 포함 확인
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
+    const movedOut = !/function _classifyIntent\(/.test(harnessSrc) && _puImp.includes('_classifyIntent');
+    // 소비 명령 회귀: intent classify
+    const id = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-intent-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', id, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'intent', 'classify', '정확히 그것만 해줘', '--path', id], { encoding: 'utf8', timeout: 20000 });
+    const cmdOk = /precise/.test(r.stdout || '');
+    ok = fnOk && work && movedOut && cmdOk;
+    fs.rmSync(id, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.325) lib/pure-utils _classifyIntent 분리: 모듈 단일출처 + 인라인 제거 + intent classify (UR-0025)' : '✗ _classifyIntent 분리 실패');
   if (!ok) failed++;
 }
 

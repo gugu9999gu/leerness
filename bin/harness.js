@@ -10,13 +10,13 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
   _htmlToText, _extractTitle, _extractLinks,
-  _countDatedBlocks, _extractDecisionBlocks } = require('../lib/pure-utils');  // 1.9.318/324 (UR-0025): 순수 HTML/메모리 파서 분리
+  _countDatedBlocks, _extractDecisionBlocks, _classifyIntent } = require('../lib/pure-utils');  // 1.9.318/324/325 (UR-0025): 순수 HTML/메모리/intent 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.324';
+const VERSION = '1.9.325';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3117,6 +3117,7 @@ function _selfTestCases() {
     { name: 'MCP handler 통합: _mcpToCliArgs 단일 함수 + mcpServeCmd 호출 + 인라인 switch 단일화 (UR-0044 1.9.322)', run: () => { const src = read(__filename); const fnDef = /function _mcpToCliArgs\(name, args, targetPath\) \{/.test(src); const called = src.includes('cliArgs = _mcpToCliArgs(name, args, targetPath)'); const switchCount = (src.match(/switch \(name\) \{/g) || []).length; const nullPath = src.includes('if (cliArgs === null) return send('); return fnDef && called && switchCount === 1 && nullPath; } },
     { name: 'fresh-init gate 통과: lazy detect 부재신호(handoff/test/progress) done-work 없으면 비차단 (UR-0054 ⑥ 1.9.323)', run: () => { const src = read(__filename); const doneWork = src.includes("const _hasDoneWork = rows.some(r => /^(done|completed|verified)$/i.test(r.status))"); const advisory = src.includes('_ADVISORY_KINDS') && src.includes("'handoff_never_generated'") && src.includes("'no_test_run'"); const blocking = src.includes('const blockingIssues = Math.max(0, issues - advisoryCount)') && src.includes('if (blockingIssues > 0) process.exitCode = 1'); return doneWork && advisory && blocking; } },
     { name: 'lib/pure-utils: 메모리 MD 파서 분리(_countDatedBlocks/_extractDecisionBlocks) + _compareSemver 중복제거 (UR-0025 1.9.324)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._countDatedBlocks === 'function' && typeof m._extractDecisionBlocks === 'function'; const work = m._countDatedBlocks('```md\n### 2026-01-01 — T\n```\n### 2026-06-05 — R\n') === 1 && m._extractDecisionBlocks('### 2026-06-05 — A\n- Decision: x\n').length === 1; const src = read(__filename); const moved = m._countDatedBlocks === _countDatedBlocks && m._extractDecisionBlocks === _extractDecisionBlocks && !/^function _countDatedBlocks\(/m.test(src) && !/^function _compareSemver\(/m.test(src); return fnOk && work && moved; } },
+    { name: 'lib/pure-utils: _classifyIntent 분리 (precise/broad/default 분류) + 인라인 제거 (UR-0025 1.9.325)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._classifyIntent === 'function'; const work = m._classifyIntent('정확히 그것만').intent === 'precise' && m._classifyIntent('전체 다양한 기능').intent === 'broad' && m._classifyIntent('로그인 구현').intent === 'default'; const moved = m._classifyIntent === _classifyIntent && !/^function _classifyIntent\(/m.test(read(__filename)); return fnOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -4535,29 +4536,7 @@ function _writeDomainCatalog(root, catalog) {
     return true;
   } catch { return false; }
 }
-// intent 분류: precise / broad / default
-function _classifyIntent(text) {
-  if (!text || typeof text !== 'string') return { intent: 'default', signals: [] };
-  const signals = [];
-  // precise 신호: "정확히 / 그것만 / 그대로 / only / just / 만"
-  const preciseKws = ['정확히', '그것만', '그대로', 'only', 'just only', '말한대로', '말한 그대로'];
-  for (const kw of preciseKws) {
-    if (text.toLowerCase().includes(kw.toLowerCase())) signals.push({ kind: 'precise', match: kw });
-  }
-  // broad 신호: "기본 / 포괄적 / 등등 / 다양한 / 전체 / 기본적인 / etc / overall"
-  const broadKws = ['기본', '포괄적', '등등', '다양한', '전체', '기본적인', 'etc', 'overall', '필요한', '관련', 'comprehensive', 'including'];
-  for (const kw of broadKws) {
-    if (text.toLowerCase().includes(kw.toLowerCase())) signals.push({ kind: 'broad', match: kw });
-  }
-  // 결정
-  const preciseCount = signals.filter(s => s.kind === 'precise').length;
-  const broadCount = signals.filter(s => s.kind === 'broad').length;
-  let intent;
-  if (preciseCount > broadCount && preciseCount >= 1) intent = 'precise';
-  else if (broadCount >= 1) intent = 'broad';
-  else intent = 'default';
-  return { intent, signals, preciseCount, broadCount };
-}
+// 1.9.325 (UR-0025): _classifyIntent → lib/pure-utils.js 로 이동 (순수 intent 분류, require 사용).
 function _detectDomain(text, root) {
   if (!text) return { domain: null, alias: null };
   const lower = text.toLowerCase();

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.325 — 2026-06-05 — UR-0025(증분): _classifyIntent 분리 + 모듈화 테스트 견고화
+
+**🧩 순수 intent 분류 함수를 lib/pure-utils 로 이전 + 모듈화 회귀 테스트를 import 순서 비의존으로 견고화.**
+
+### 구현 (UR-0025)
+1. **`_classifyIntent` → `lib/pure-utils.js` 분리**: 사용자 텍스트의 precise/broad 신호로 의도(precise/broad/default) 추정 — fs/상태 의존 0. harness 인라인 제거 → require.
+2. **모듈화 테스트 견고화**: B(1.9.324) 가 require 라인의 마지막 import 이름에 정규식 고정(`_extractDecisionBlocks } = require`)이라 새 import 추가 시 깨지던 문제 → **pure-utils 구조분해 블록을 추출해 이름 포함만 확인**(import 순서·추가 비의존). B(1.9.325) 도 동일 패턴 적용.
+3. selftest 72→73 · e2e 269→270.
+
+### 검증
+- **selftest 73/73 PASS** · **E2E 270/270 PASS** (회귀 0).
+- 실측: `_classifyIntent('정확히 그것만')`→precise · `'전체 다양한 기능'`→broad · `'로그인 구현'`→default · `intent classify` 명령 정상 · harness 인라인 제거 확인.
+- ⚠️ 첫 e2e 269/270(B(1.9.324) 정규식이 import 추가에 취약) → 견고화 후 270/270. (전 라운드 B(1.9.318) 과 동일 패턴 — 이번엔 미래 안전 패턴으로 통일.)
+
 ## 1.9.324 — 2026-06-05 — UR-0025(증분): 메모리 MD 파서 분리 + _compareSemver 중복 제거
 
 **🧩 점진적 비파괴 모듈화 — 순수 메모리 파서 2종을 lib/pure-utils 로 이전 + 중복 버전비교 함수 통합.**
