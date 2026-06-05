@@ -4925,5 +4925,22 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.362 회귀 (외부리뷰 CV-4/UR-0079): archive retention — init/migrate 반복해도 --keep 상한 유지 (무한 누적 차단)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-arch-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko', '--keep', '2'], { encoding: 'utf8', timeout: 30000 });
+    for (let i = 0; i < 3; i++) cp.spawnSync(process.execPath, [CLI, 'migrate', d, '--keep', '2'], { encoding: 'utf8', timeout: 30000 });
+    const adir = path.join(d, '.harness', 'archive');
+    const cnt = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = cnt === 2;  // init + migrate x3 = 4 스냅샷 → --keep 2 로 prune → 2
+  } catch {}
+  console.log(ok ? '✓ B(1.9.362) CV-4: archive retention (--keep 상한, 무한 누적 차단) (UR-0079)' : '✗ archive retention 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

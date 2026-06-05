@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.362 — 2026-06-06 — 안정화③ 외부리뷰 CV-4: archive retention (무한 누적 차단, UR-0079)
+
+**🛠 외부 멀티모델 리뷰 안정화 시리즈 3탄 — init/migrate 재실행 시 archive 무한 누적 차단.**
+
+### 배경 — 외부 리뷰 CV-4 (Opus P1 / Sonnet P3)
+init/migrate 가 변경 유무와 무관하게 매 실행마다 전체 archive 스냅샷을 생성하나 retention 이 없어 무한 누적(Opus: 5회 재실행 → `.harness` 1.7M 중 1.5M 이 중복 archive). createBackup(709)이 prune 없이 copy 만.
+
+### 구현
+1. **`_pruneArchives(root, keep)`**(신규): `.harness/archive/leerness-*` 디렉토리를 **mtime 기준** 정렬해 최신 `keep` 개만 유지, 오래된 스냅샷 prune. (이름의 버전 문자열은 zero-pad 안 돼 사전순 부정확 → mtime 사용.)
+2. **createBackup 통합**: 새 스냅샷 기록 후 `_pruneArchives(root, keep)` 호출. `keep` = `--keep N`(기본 10). init/migrate/update 전부 자동 bounded.
+
+### 검증 (회귀 0)
+- **selftest 108→109 PASS** (행위: 임시 archive 5개 생성 → `_pruneArchives(root,2)` → pruned 3 / 남은 2 단언). **E2E 307→308 PASS** (행위: `init --keep 2` + `migrate --keep 2` x3 = 4 스냅샷 → archive 2개 상한).
+- 실측: `--keep 2` 로 init+migrate x3 후 archive 정확히 2개.
+
 ## 1.9.361 — 2026-06-06 — 안정화② 외부리뷰 CV-1 --path 라우팅 통일 + CV-3 audit 가드 (UR-0076/0078)
 
 **🛠 외부 멀티모델 리뷰 안정화 시리즈 2탄 — 3개 모델 합의 #1 finding(--path 불일치) + audit 오판 수정.**

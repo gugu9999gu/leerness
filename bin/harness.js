@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.361';
+const VERSION = '1.9.362';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -706,6 +706,19 @@ function migrationCandidates(root, files) {
   return all.filter(f => exists(path.join(root, f)));
 }
 
+// 외부리뷰 CV-4/UR-0079: archive 무한 누적 방지 — 최신 keep 개만 유지, 오래된 스냅샷 prune (mtime 기준).
+//   init/migrate 재실행마다 전체 archive copy 가 쌓이던 것(Opus: 5회→1.5M 중복) 을 bounded 로.
+function _pruneArchives(root, keep = 10) {
+  const adir = path.join(root, '.harness', 'archive');
+  let names;
+  try { names = fs.readdirSync(adir, { withFileTypes: true }).filter(e => e.isDirectory() && /^leerness-/.test(e.name)).map(e => e.name); } catch { return 0; }
+  if (names.length <= keep) return 0;
+  const withTime = names.map(name => { let t = 0; try { t = fs.statSync(path.join(adir, name)).mtimeMs; } catch {} return { name, t }; });
+  withTime.sort((a, b) => b.t - a.t);  // 최신 우선 (이름의 버전 문자열은 zero-pad 안 돼 사전순 부정확 → mtime 사용)
+  let pruned = 0;
+  for (const e of withTime.slice(keep)) { try { fs.rmSync(path.join(adir, e.name), { recursive: true, force: true }); pruned++; } catch {} }
+  return pruned;
+}
 function createBackup(root, reason, files, dry = false) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const ar = path.join(root, '.harness/archive', `leerness-${VERSION}-${stamp}`);
@@ -719,7 +732,10 @@ function createBackup(root, reason, files, dry = false) {
     policy: 'backup-before-write; preserve-by-default; merge-managed-files; merge-env-and-gitignore',
     candidates
   }, null, 2) + '\n');
-  return { archiveDir: ar, candidates };
+  // CV-4/UR-0079: 새 스냅샷 기록 후 retention 적용 (기본 10, --keep N 조정) — 무한 누적 차단.
+  const keep = Math.max(1, parseInt(arg('--keep', '10'), 10) || 10);
+  const pruned = _pruneArchives(root, keep);
+  return { archiveDir: ar, candidates, pruned };
 }
 
 // 1.9.1 P2: 데이터/인덱스 파일은 preserved 블록 없이 overwrite (누적 방지).
@@ -3079,6 +3095,7 @@ function _selfTestCases() {
     { name: 'UR-0074: install-safety(0 런타임 deps · 0 install-script) 사실 가드', run: () => { if (typeof installSafetyCmd !== 'function') return false; let pkg = {}; try { pkg = JSON.parse(read(path.join(__dirname, '..', 'package.json'))); } catch { return false; } const deps = Object.keys(pkg.dependencies || {}).length; const hooks = ['preinstall','install','postinstall'].filter(h => (pkg.scripts||{})[h]).length; return deps === 0 && hooks === 0; } },
     { name: 'CV-2/UR-0077: fetchNpmLatest 신형 Node win EINVAL 회피 (cmd.exe + try/catch + windowsHide)', run: () => { if (typeof fetchNpmLatest !== 'function') return false; const src = read(__filename); const i = src.indexOf('function fetchNpmLatest'); if (i < 0) return false; const body = src.slice(i, i + 1600); return body.includes('cmd.exe') && /try \{/.test(body) && body.includes('windowsHide'); } },
     { name: 'CV-1/UR-0076: arg() --path=값 파싱 + _resolveRoot(--path>positional>cwd) 행위', run: () => { if (typeof _resolveRoot !== 'function') return false; const save = process.argv; try { process.argv = ['node', 'h', 'context', '--path=/tmp/eqform']; const eq = arg('--path', null) === '/tmp/eqform'; process.argv = ['node', 'h', 'context', 'X', '--path', '/tmp/flag']; const flagWins = _resolveRoot('X') === '/tmp/flag'; process.argv = ['node', 'h', 'context', '/tmp/pos']; const posWins = _resolveRoot('/tmp/pos') === '/tmp/pos'; process.argv = ['node', 'h', 'context']; const cwdFb = _resolveRoot(undefined) === process.cwd(); return eq && flagWins && posWins && cwdFb; } finally { process.argv = save; } } },
+    { name: 'CV-4/UR-0079: _pruneArchives archive retention (최신 keep 유지, 오래된 prune) 행위', run: () => { if (typeof _pruneArchives !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_prune_')); try { const adir = path.join(tmp, '.harness', 'archive'); fs.mkdirSync(adir, { recursive: true }); for (let i = 0; i < 5; i++) fs.mkdirSync(path.join(adir, 'leerness-1.9.' + i + '-stamp')); const pruned = _pruneArchives(tmp, 2); const left = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length; return pruned === 3 && left === 2; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
