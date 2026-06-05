@@ -3971,5 +3971,25 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.327 회귀 (UR-0025 모듈화): TZ/날짜 포맷 2종 lib/pure-utils 분리 + harness 인라인 제거
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const fnOk = typeof m._getLocalTz === 'function' && typeof m._formatLocal === 'function';
+    const work = m._formatLocal('2026-06-05T01:13:00.000Z', { tz: 'Asia/Seoul' }) === '2026-06-05 10:13 KST'  // UTC→KST +9h
+      && m._formatLocal('2026-06-05T01:13:00.000Z', { tz: 'Asia/Seoul', dateOnly: true }) === '2026-06-05'
+      && m._formatLocal('') === '?' && typeof m._getLocalTz() === 'string';
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
+    const movedOut = !/function _formatLocal\(/.test(harnessSrc) && !/function _getLocalTz\(/.test(harnessSrc)
+      && _puImp.includes('_getLocalTz') && _puImp.includes('_formatLocal');
+    ok = fnOk && work && movedOut;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.327) lib/pure-utils TZ/날짜 포맷 분리: 모듈 단일출처 + 인라인 제거 (UR-0025)' : '✗ TZ/날짜 포맷 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

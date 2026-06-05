@@ -11,13 +11,14 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
   _htmlToText, _extractTitle, _extractLinks,
   _countDatedBlocks, _extractDecisionBlocks, _classifyIntent,
-  _sanitizeFences, _shellQuoteArg, _detectPwshFromEnv } = require('../lib/pure-utils');  // 1.9.318~326 (UR-0025): 순수 HTML/메모리/intent/문자열·셸·env 분리
+  _sanitizeFences, _shellQuoteArg, _detectPwshFromEnv,
+  _getLocalTz, _formatLocal } = require('../lib/pure-utils');  // 1.9.318~327 (UR-0025): 순수 HTML/메모리/intent/문자열·셸·env/날짜 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.326';
+const VERSION = '1.9.327';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -222,40 +223,7 @@ function _withLock(targetPath, fn, opts = {}) {
 function rel(root, p) { return path.relative(root, p).replace(/\\/g, '/') || '.'; }
 function today() { return new Date().toISOString().slice(0, 10); }
 function now() { return new Date().toISOString(); }
-// 1.9.204: timezone 보강 (사용자 명시)
-//   ISO UTC timestamp 저장은 유지 (이식성/일관성) → display 시 사용자 local time 변환
-//   환경변수: LEERNESS_TZ (default = 시스템 timezone, fallback: 'Asia/Seoul')
-function _getLocalTz() {
-  if (process.env.LEERNESS_TZ) return process.env.LEERNESS_TZ;
-  try {
-    const sys = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (sys && sys !== 'UTC') return sys;
-  } catch {}
-  return 'Asia/Seoul';
-}
-// ISO timestamp → local time 표시 (예: "2026-05-22 10:13 KST")
-function _formatLocal(iso, opts) {
-  if (!iso) return '?';
-  opts = opts || {};
-  const tz = opts.tz || _getLocalTz();
-  try {
-    const d = typeof iso === 'string' ? new Date(iso) : iso;
-    if (isNaN(d.getTime())) return String(iso);
-    const fmt = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-      hour12: false
-    });
-    const parts = fmt.formatToParts(d);
-    const get = (t) => (parts.find(p => p.type === t) || {}).value || '';
-    const date = `${get('year')}-${get('month')}-${get('day')}`;
-    const time = `${get('hour')}:${get('minute')}`;
-    // tz 약어 (KST/JST/UTC 등) — 간단 추출
-    const tzShort = tz === 'Asia/Seoul' ? 'KST' : tz === 'Asia/Tokyo' ? 'JST' : tz === 'UTC' ? 'UTC' : tz.split('/').pop().slice(0, 3);
-    return opts.dateOnly ? date : `${date} ${time} ${tzShort}`;
-  } catch { return String(iso); }
-}
+// 1.9.327 (UR-0025): _getLocalTz / _formatLocal → lib/pure-utils.js 로 이동 (순수 TZ/날짜 포맷, require 사용).
 // 자동 모드 활성 여부 (R-XXXX every-round 룰 존재 시 true)
 function _isAutoLoopActive(root) {
   try {
@@ -3100,6 +3068,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: 메모리 MD 파서 분리(_countDatedBlocks/_extractDecisionBlocks) + _compareSemver 중복제거 (UR-0025 1.9.324)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._countDatedBlocks === 'function' && typeof m._extractDecisionBlocks === 'function'; const work = m._countDatedBlocks('```md\n### 2026-01-01 — T\n```\n### 2026-06-05 — R\n') === 1 && m._extractDecisionBlocks('### 2026-06-05 — A\n- Decision: x\n').length === 1; const src = read(__filename); const moved = m._countDatedBlocks === _countDatedBlocks && m._extractDecisionBlocks === _extractDecisionBlocks && !/^function _countDatedBlocks\(/m.test(src) && !/^function _compareSemver\(/m.test(src); return fnOk && work && moved; } },
     { name: 'lib/pure-utils: _classifyIntent 분리 (precise/broad/default 분류) + 인라인 제거 (UR-0025 1.9.325)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._classifyIntent === 'function'; const work = m._classifyIntent('정확히 그것만').intent === 'precise' && m._classifyIntent('전체 다양한 기능').intent === 'broad' && m._classifyIntent('로그인 구현').intent === 'default'; const moved = m._classifyIntent === _classifyIntent && !/^function _classifyIntent\(/m.test(read(__filename)); return fnOk && work && moved; } },
     { name: 'lib/pure-utils: 문자열/셸/env 유틸 분리(_sanitizeFences/_shellQuoteArg/_detectPwshFromEnv) (UR-0025 1.9.326)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._sanitizeFences === 'function' && typeof m._shellQuoteArg === 'function' && typeof m._detectPwshFromEnv === 'function'; const work = m._sanitizeFences('a```b') === "a'''b" && m._detectPwshFromEnv({ POWERSHELL_DISTRIBUTION_CHANNEL: 'X' }).version === '7' && /^['"]/.test(m._shellQuoteArg('a b')); const src = read(__filename); const moved = m._sanitizeFences === _sanitizeFences && !/^function _sanitizeFences\(/m.test(src) && !/^function _shellQuoteArg\(/m.test(src) && !/^function _detectPwshFromEnv\(/m.test(src); return fnOk && work && moved; } },
+    { name: 'lib/pure-utils: TZ/날짜 포맷 분리(_getLocalTz/_formatLocal) + 인라인 제거 (UR-0025 1.9.327)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._getLocalTz === 'function' && typeof m._formatLocal === 'function'; const work = m._formatLocal('2026-06-05T01:13:00.000Z', { tz: 'Asia/Seoul' }) === '2026-06-05 10:13 KST' && m._formatLocal('2026-06-05T01:13:00.000Z', { tz: 'Asia/Seoul', dateOnly: true }) === '2026-06-05' && m._formatLocal('') === '?'; const src = read(__filename); const moved = m._formatLocal === _formatLocal && !/^function _formatLocal\(/m.test(src) && !/^function _getLocalTz\(/m.test(src); return fnOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }

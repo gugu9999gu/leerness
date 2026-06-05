@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.327 — 2026-06-05 — UR-0025(증분): TZ/날짜 포맷 유틸 분리
+
+**🧩 순수 TZ/날짜 포맷 함수(`_getLocalTz`/`_formatLocal`)를 lib/pure-utils 로 이전.** (UR-0025 micro-증분 계속)
+
+### 구현 (UR-0025)
+1. **`_getLocalTz`**(env LEERNESS_TZ / 시스템 tz / Asia/Seoul fallback) + **`_formatLocal`**(ISO UTC → local 표시, 예 "2026-06-05 10:13 KST") → `lib/pure-utils.js`. harness 인라인 제거 → require.
+2. selftest 74→75 · e2e 271→272.
+
+### 검증
+- **selftest 75/75 PASS** · **E2E 272/272 PASS** (회귀 0, import-블록 견고 패턴).
+- 실측: `_formatLocal('…01:13Z', {tz:'Asia/Seoul'})`→`2026-06-05 10:13 KST`(UTC+9) · dateOnly→`2026-06-05` · 빈값→`?`.
+
 ## 1.9.326 — 2026-06-05 — UR-0025(증분): 순수 문자열/셸/env 유틸 3종 분리
 
 **🧩 순수 유틸 3종(`_sanitizeFences`/`_shellQuoteArg`/`_detectPwshFromEnv`)을 lib/pure-utils 로 이전.** (사용자 선택: UR-0025 micro-증분 계속)
