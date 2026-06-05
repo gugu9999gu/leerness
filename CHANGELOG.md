@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.351 — 2026-06-05 — 외부리뷰 UR-0064/0065: 제목 오염 차단 + 문서 정합
+
+**🧩 외부 리뷰 남은 P1 2건 — decision/lesson 제목 오염 차단 + 문서 정합(AGENTS.md/--help). 외부리뷰 P0/P1 전량 해소.**
+
+### 구현
+1. **UR-0064 — 제목/텍스트 오염 차단** (Sonnet F-02): `decision add "T" --reason "R" /path` 처럼 `--flag value` 가 nonFlagArgs 로 제거된 뒤 남는 **경로형 positional** 이 title/text 에 흡수되던 문제. titleParts/textParts 루프가 절대/상대 경로 패턴(`C:\`, `/`, `./`, `../`)에서 break.
+2. **UR-0065 — 문서 정합** (Sonnet F-04 + Codex#7):
+   - **AGENTS.md** `.leerness/` 모호성 해소 — 동적 상태(결정/교훈/계획/진행/인수인계)는 **기본 워크스페이스 `.harness/`** 에 기록됨을 명시. `leerness state` JSON substrate(`.leerness/`)는 별개(선택)임을 구분.
+   - **--help** 누락 명령 보강: context/health/doctor/pulse/milestones/round-history/decision/lesson/intent/constraints/requests/skill install/discover.
+
+### 검증
+- **selftest 98/98 PASS** · **E2E 295→296 PASS** (회귀 0).
+- 실측: `decision add "PG 채택" --reason "관계형" /abs/leak` → title="PG 채택"(경로 미흡수) · lesson save 동일 · 생성 AGENTS.md ".harness 메인 + state substrate 별개" 명시 · `--help` 가 이전 누락 10+ 명령 노출.
+
 ## 1.9.350 — 2026-06-05 — 외부리뷰 P1 보안 하드닝 3종 (UR-0060/0061/0062)
 
 **🔒 외부 멀티모델 리뷰 P1 보안 3건 일괄 수정 — 자율 팀(UR-0073) 전 보안 기반 다지기.**

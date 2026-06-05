@@ -4643,5 +4643,30 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.351 회귀 (외부리뷰 UR-0064/0065): decision/lesson 제목 오염 차단 + 문서 정합(AGENTS.md .harness / --help 누락 명령)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-doc-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // UR-0064: decision add 제목에 경로형 positional 미흡수
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'PG 채택', '--reason', '관계형', '/abs/leak/path', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const dj = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'decisions.json'), 'utf8'));
+    const titleOk = dj.length === 1 && dj[0].title === 'PG 채택' && !dj[0].title.includes('/abs/leak');
+    // UR-0065 AGENTS.md: .harness 메인 워크스페이스 명시 + state substrate 별개
+    const agents = fs.readFileSync(path.join(d, 'AGENTS.md'), 'utf8');
+    const agentsOk = agents.includes('기본 워크스페이스 `.harness/`') && agents.includes('메인 워크스페이스(.harness)와 별개');
+    fs.rmSync(d, { recursive: true, force: true });
+    // UR-0065 --help: 이전 누락 명령 노출
+    const hr = cp.spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8', timeout: 20000 });
+    const hout = (hr.stdout || '') + (hr.stderr || '');
+    const helpOk = ['leerness context', 'leerness health', 'leerness intent', 'leerness constraints', 'leerness requests', 'leerness skill install'].every(c => hout.includes(c));
+    ok = titleOk && agentsOk && helpOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.351) 외부리뷰 UR-0064/0065: 제목 오염 차단 + AGENTS.md/--help 정합 (UR-0064/0065)' : '✗ UR-0064/0065 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
