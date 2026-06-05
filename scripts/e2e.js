@@ -3947,5 +3947,29 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.326 회귀 (UR-0025 모듈화): 순수 문자열/셸/env 유틸 3종 lib/pure-utils 분리 + harness 인라인 제거
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const fnOk = typeof m._sanitizeFences === 'function' && typeof m._shellQuoteArg === 'function' && typeof m._detectPwshFromEnv === 'function';
+    const work = m._sanitizeFences('a```b') === "a'''b"
+      && m._detectPwshFromEnv({ POWERSHELL_DISTRIBUTION_CHANNEL: 'X' }).version === '7'
+      && m._detectPwshFromEnv({}).isPowerShell === false
+      && /^['"]/.test(m._shellQuoteArg('a b'));
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
+    const movedOut = !/function _sanitizeFences\(/.test(harnessSrc) && !/function _shellQuoteArg\(/.test(harnessSrc) && !/function _detectPwshFromEnv\(/.test(harnessSrc)
+      && _puImp.includes('_sanitizeFences') && _puImp.includes('_shellQuoteArg') && _puImp.includes('_detectPwshFromEnv');
+    // 소비 명령 회귀: shell-guard (_detectPwshFromEnv 사용) + session close (_sanitizeFences 사용)
+    const sg = cp.spawnSync(process.execPath, [CLI, 'shell-guard', 'echo hi', '--json'], { encoding: 'utf8', timeout: 15000 });
+    const cmdOk = sg.status === 0 && /"shell"/.test(sg.stdout || '');
+    ok = fnOk && work && movedOut && cmdOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.326) lib/pure-utils 문자열/셸/env 유틸 분리: 모듈 단일출처 + 인라인 제거 + shell-guard (UR-0025)' : '✗ 문자열/셸/env 유틸 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.326 — 2026-06-05 — UR-0025(증분): 순수 문자열/셸/env 유틸 3종 분리
+
+**🧩 순수 유틸 3종(`_sanitizeFences`/`_shellQuoteArg`/`_detectPwshFromEnv`)을 lib/pure-utils 로 이전.** (사용자 선택: UR-0025 micro-증분 계속)
+
+### 구현 (UR-0025)
+1. **`_sanitizeFences`**(코드펜스 ``` → ''' 중립화) + **`_shellQuoteArg`**(shell:true spawn 인자 안전 인용, POSIX/Windows) + **`_detectPwshFromEnv`**(pwsh 6/7 신뢰 마커 감지) → `lib/pure-utils.js`. harness 인라인 제거 → require.
+2. 기존 selftest(B 1.9.300 _shellQuoteArg, B 1.9.314 _detectPwshFromEnv)는 import 경유로 통과 — 동작 동일.
+3. selftest 73→74 · e2e 270→271.
+
+### 검증
+- **selftest 74/74 PASS** · **E2E 271/271 PASS** (회귀 0 — 이번엔 import-블록 추출 견고 패턴으로 브리틀 회귀 없음).
+- 실측: `_sanitizeFences('a```b')`→`a'''b` · `_detectPwshFromEnv({channel})`→v7 · `_shellQuoteArg` 인용 · shell-guard/session close 소비 명령 정상.
+
 ## 1.9.325 — 2026-06-05 — UR-0025(증분): _classifyIntent 분리 + 모듈화 테스트 견고화
 
 **🧩 순수 intent 분류 함수를 lib/pure-utils 로 이전 + 모듈화 회귀 테스트를 import 순서 비의존으로 견고화.**

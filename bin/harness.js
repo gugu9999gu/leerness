@@ -10,13 +10,14 @@ const readline = require('readline');
 const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
   _htmlToText, _extractTitle, _extractLinks,
-  _countDatedBlocks, _extractDecisionBlocks, _classifyIntent } = require('../lib/pure-utils');  // 1.9.318/324/325 (UR-0025): 순수 HTML/메모리/intent 분리
+  _countDatedBlocks, _extractDecisionBlocks, _classifyIntent,
+  _sanitizeFences, _shellQuoteArg, _detectPwshFromEnv } = require('../lib/pure-utils');  // 1.9.318~326 (UR-0025): 순수 HTML/메모리/intent/문자열·셸·env 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.325';
+const VERSION = '1.9.326';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -157,16 +158,7 @@ function warn(s) { log('⚠ ' + s); }
 // 1.9.306 (UR-0045, 설치리뷰 3중수렴): fail() 은 오류 신호 → exit code 1 설정 (CI/MCP/에이전트가 실패를 성공으로 오판 방지).
 //   비치명 경고는 warn() 사용. process.exit 즉시종료가 아니라 exitCode 설정(후속 출력/정리 보존, main 종료 wrapper 가 강제).
 function fail(s) { log('✗ ' + s); process.exitCode = 1; }
-// 1.9.287 (Codex 리뷰 수렴): 임베딩 텍스트의 코드펜스(```)를 중립화해 외부 마크다운(session-handoff)이 깨지지 않게.
-//   ``` → ''' (펜스가 아닌 표시), 인라인 백틱은 보존. 순수 함수.
-function _sanitizeFences(s) { return String(s || '').replace(/```+/g, "'''"); }
-// 1.9.289 (Codex gpt-5.5 리뷰 #3 수렴): shell:true spawn 의 인자를 셸-안전하게 인용 — 프롬프트 셸 주입/분리 방지.
-//   POSIX(sh): single-quote (bulletproof). Windows(cmd.exe): double-quote + inner " 이스케이프 (공백/&|<>() 안전).
-function _shellQuoteArg(s) {
-  s = String(s == null ? '' : s);
-  if (process.platform === 'win32') return '"' + s.replace(/"/g, '""') + '"';
-  return "'" + s.replace(/'/g, "'\\''") + "'";
-}
+// 1.9.326 (UR-0025): _sanitizeFences / _shellQuoteArg → lib/pure-utils.js 로 이동 (순수 문자열/셸 유틸, require 사용).
 // 1.9.297 (UR-0025 5단계): MCP 도구 수 = lib/mcp-tools.js 모듈 length (진짜 단일 출처).
 //   이전(1.9.288): __filename regex self-count — 도구 정의가 소스에 있어야만 동작(취약, Codex #5). 이제 tools/list 와 동일 배열을 직접 카운트.
 function _mcpToolCount() {
@@ -2602,18 +2594,7 @@ function _computeRecentChanges(root, limit = 5) {
 //   배경: 이전엔 powershell.exe(=5.1)만 probe + ComSpec(항상 cmd.exe) 의존 → pwsh7 을 ps5/cmd 로 오판 → && 에 ps5-chain 오탐.
 //   신뢰 마커: POWERSHELL_DISTRIBUTION_CHANNEL(pwsh 런타임 전용, cmd/ps5 미상속) · PSModulePath 의 사용자 모듈 경로
 //   (Documents\PowerShell=pwsh7 / Documents\WindowsPowerShell=ps5.1). 시스템 경로는 cmd 도 가져 비신뢰 → 사용자 경로만 판별.
-function _detectPwshFromEnv(e) {
-  e = e || process.env;
-  const channel = e.POWERSHELL_DISTRIBUTION_CHANNEL || '';
-  const pmp = e.PSModulePath || '';
-  // pwsh 6/7 (Core) 신뢰 마커: POWERSHELL_DISTRIBUTION_CHANNEL(pwsh 런타임 전용, cmd/ps5 미상속) · pwsh 전용 경로(\PowerShell\7|6\, Documents\PowerShell\).
-  //   pwsh 오검출은 안전 — pwsh 는 &&/|| 지원 → ps5-chain 오탐을 만들지 않음.
-  //   ⚠ ps5.1 은 신뢰 가능한 런타임 마커가 없음(Documents\WindowsPowerShell 은 영구 user env → bash/cmd 도 상속) → 자동 판별하지 않음(과경고 방지).
-  if (channel || /[\\/]PowerShell[\\/][67][\\/]/i.test(pmp) || /Documents[\\/]+PowerShell[\\/]/i.test(pmp)) {
-    return { isPowerShell: true, version: '7', edition: 'Core' };
-  }
-  return { isPowerShell: false, version: null, edition: null };
-}
+// 1.9.326 (UR-0025): _detectPwshFromEnv → lib/pure-utils.js 로 이동 (순수 PowerShell env 감지, require 사용).
 function _collectRuntimeEnv() {
   const env = {
     os: { platform: os.platform(), release: os.release(), arch: os.arch() },
@@ -3118,6 +3099,7 @@ function _selfTestCases() {
     { name: 'fresh-init gate 통과: lazy detect 부재신호(handoff/test/progress) done-work 없으면 비차단 (UR-0054 ⑥ 1.9.323)', run: () => { const src = read(__filename); const doneWork = src.includes("const _hasDoneWork = rows.some(r => /^(done|completed|verified)$/i.test(r.status))"); const advisory = src.includes('_ADVISORY_KINDS') && src.includes("'handoff_never_generated'") && src.includes("'no_test_run'"); const blocking = src.includes('const blockingIssues = Math.max(0, issues - advisoryCount)') && src.includes('if (blockingIssues > 0) process.exitCode = 1'); return doneWork && advisory && blocking; } },
     { name: 'lib/pure-utils: 메모리 MD 파서 분리(_countDatedBlocks/_extractDecisionBlocks) + _compareSemver 중복제거 (UR-0025 1.9.324)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._countDatedBlocks === 'function' && typeof m._extractDecisionBlocks === 'function'; const work = m._countDatedBlocks('```md\n### 2026-01-01 — T\n```\n### 2026-06-05 — R\n') === 1 && m._extractDecisionBlocks('### 2026-06-05 — A\n- Decision: x\n').length === 1; const src = read(__filename); const moved = m._countDatedBlocks === _countDatedBlocks && m._extractDecisionBlocks === _extractDecisionBlocks && !/^function _countDatedBlocks\(/m.test(src) && !/^function _compareSemver\(/m.test(src); return fnOk && work && moved; } },
     { name: 'lib/pure-utils: _classifyIntent 분리 (precise/broad/default 분류) + 인라인 제거 (UR-0025 1.9.325)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._classifyIntent === 'function'; const work = m._classifyIntent('정확히 그것만').intent === 'precise' && m._classifyIntent('전체 다양한 기능').intent === 'broad' && m._classifyIntent('로그인 구현').intent === 'default'; const moved = m._classifyIntent === _classifyIntent && !/^function _classifyIntent\(/m.test(read(__filename)); return fnOk && work && moved; } },
+    { name: 'lib/pure-utils: 문자열/셸/env 유틸 분리(_sanitizeFences/_shellQuoteArg/_detectPwshFromEnv) (UR-0025 1.9.326)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._sanitizeFences === 'function' && typeof m._shellQuoteArg === 'function' && typeof m._detectPwshFromEnv === 'function'; const work = m._sanitizeFences('a```b') === "a'''b" && m._detectPwshFromEnv({ POWERSHELL_DISTRIBUTION_CHANNEL: 'X' }).version === '7' && /^['"]/.test(m._shellQuoteArg('a b')); const src = read(__filename); const moved = m._sanitizeFences === _sanitizeFences && !/^function _sanitizeFences\(/m.test(src) && !/^function _shellQuoteArg\(/m.test(src) && !/^function _detectPwshFromEnv\(/m.test(src); return fnOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
