@@ -12,13 +12,14 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _htmlToText, _extractTitle, _extractLinks,
   _countDatedBlocks, _extractDecisionBlocks, _classifyIntent,
   _sanitizeFences, _shellQuoteArg, _detectPwshFromEnv,
-  _getLocalTz, _formatLocal, _truncate, _splitList } = require('../lib/pure-utils');  // 1.9.318~328 (UR-0025): 순수 HTML/메모리/intent/문자열·셸·env/날짜 분리
+  _getLocalTz, _formatLocal, _truncate, _splitList,
+  _roadmapMapStatus, _roadmapParseMilestones, _roadmapParseTokens } = require('../lib/pure-utils');  // 1.9.318~329 (UR-0025): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.328';
+const VERSION = '1.9.329';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3070,6 +3071,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: 문자열/셸/env 유틸 분리(_sanitizeFences/_shellQuoteArg/_detectPwshFromEnv) (UR-0025 1.9.326)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._sanitizeFences === 'function' && typeof m._shellQuoteArg === 'function' && typeof m._detectPwshFromEnv === 'function'; const work = m._sanitizeFences('a```b') === "a'''b" && m._detectPwshFromEnv({ POWERSHELL_DISTRIBUTION_CHANNEL: 'X' }).version === '7' && /^['"]/.test(m._shellQuoteArg('a b')); const src = read(__filename); const moved = m._sanitizeFences === _sanitizeFences && !/^function _sanitizeFences\(/m.test(src) && !/^function _shellQuoteArg\(/m.test(src) && !/^function _detectPwshFromEnv\(/m.test(src); return fnOk && work && moved; } },
     { name: 'lib/pure-utils: TZ/날짜 포맷 분리(_getLocalTz/_formatLocal) + 인라인 제거 (UR-0025 1.9.327)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._getLocalTz === 'function' && typeof m._formatLocal === 'function'; const work = m._formatLocal('2026-06-05T01:13:00.000Z', { tz: 'Asia/Seoul' }) === '2026-06-05 10:13 KST' && m._formatLocal('2026-06-05T01:13:00.000Z', { tz: 'Asia/Seoul', dateOnly: true }) === '2026-06-05' && m._formatLocal('') === '?'; const src = read(__filename); const moved = m._formatLocal === _formatLocal && !/^function _formatLocal\(/m.test(src) && !/^function _getLocalTz\(/m.test(src); return fnOk && work && moved; } },
     { name: 'lib/pure-utils: 문자열 유틸 분리(_truncate/_splitList) + 인라인 제거 (UR-0025 1.9.328)', run: () => { const m = require('../lib/pure-utils'); const work = m._truncate('hello world', 8) === 'hello w…' && m._truncate('hi', 8) === 'hi' && JSON.stringify(m._splitList('a, b ,c,')) === '["a","b","c"]'; const src = read(__filename); const moved = m._truncate === _truncate && m._splitList === _splitList && !/^function _truncate\(/m.test(src) && !/^function _splitList\(/m.test(src); return work && moved; } },
+    { name: 'lib/pure-utils: roadmap MD 파서 분리(_roadmapMapStatus/Milestones/Tokens) + 인라인 제거 (UR-0025 1.9.329)', run: () => { const m = require('../lib/pure-utils'); const work = m._roadmapMapStatus('REQUESTED') === 'planned' && m._roadmapMapStatus('done') === 'done' && m._roadmapParseMilestones('### M-0001. 로그인\nStatus: in-progress\nProgress: 40%')[0].progress === 40 && m._roadmapParseTokens('| color | #fff |').color === '#fff'; const src = read(__filename); const moved = m._roadmapMapStatus === _roadmapMapStatus && !/^function _roadmapMapStatus\(/m.test(src) && !/^function _roadmapParseMilestones\(/m.test(src) && !/^function _roadmapParseTokens\(/m.test(src); return work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -13558,36 +13560,7 @@ const ROADMAP_NODE_W = 220, ROADMAP_NODE_H = 72, ROADMAP_COL_GAP = 70, ROADMAP_R
 function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 // 1.9.328 (UR-0025): _truncate → lib/pure-utils.js 로 이동 (순수 문자열 절단, require 사용).
 
-function _roadmapMapStatus(s) {
-  s = String(s || '').toLowerCase();
-  if (s === 'done' || s === 'in-progress' || s === 'on-hold' || s === 'waiting' || s === 'incomplete' || s === 'blocked' || s === 'dropped') return s;
-  if (s === 'planned' || s === 'requested') return 'planned';
-  return 'planned';
-}
-
-function _roadmapParseMilestones(text) {
-  const out = [];
-  for (const m of String(text || '').matchAll(/^### (M-\d{4})\.\s*(.+?)$/gm)) {
-    const after = text.slice(m.index);
-    const sm = after.match(/^Status:\s*(\S+)/m);
-    const pm = after.match(/^Progress:\s*(\d+)%/m);
-    out.push({ id: m[1], title: m[2].trim(), status: sm ? sm[1] : 'planned', progress: pm ? parseInt(pm[1], 10) : 0 });
-  }
-  return out;
-}
-
-function _roadmapParseTokens(text) {
-  const tokens = {};
-  for (const line of String(text || '').split('\n')) {
-    const m = line.match(/^\|\s*([\w.\-]+)\s*\|\s*([^|]+?)\s*\|/);
-    if (!m) continue;
-    const key = m[1].trim(), val = m[2].trim();
-    if (!key || !val || key === 'Token' || /^-+$/.test(key) || val === 'Value' || /\(실제 값으로 업데이트\)/.test(val)) continue;
-    if (val.length > 80) continue;
-    tokens[key] = val;
-  }
-  return tokens;
-}
+// 1.9.329 (UR-0025): _roadmapMapStatus / _roadmapParseMilestones / _roadmapParseTokens → lib/pure-utils.js 로 이동 (순수 roadmap MD 파서, require 사용).
 
 function _roadmapParseCssVars(root) {
   const out = {};

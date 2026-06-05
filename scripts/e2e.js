@@ -4010,5 +4010,25 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.329 회귀 (UR-0025 모듈화): roadmap MD 파서 3종 lib/pure-utils 분리 + harness 인라인 제거
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const work = typeof m._roadmapMapStatus === 'function' && typeof m._roadmapParseMilestones === 'function' && typeof m._roadmapParseTokens === 'function'
+      && m._roadmapMapStatus('REQUESTED') === 'planned' && m._roadmapMapStatus('done') === 'done'
+      && m._roadmapParseMilestones('### M-0001. 로그인\nStatus: in-progress\nProgress: 40%')[0].progress === 40
+      && m._roadmapParseTokens('| color | #fff |').color === '#fff';
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
+    const movedOut = !/function _roadmapMapStatus\(/.test(harnessSrc) && !/function _roadmapParseMilestones\(/.test(harnessSrc) && !/function _roadmapParseTokens\(/.test(harnessSrc)
+      && _puImp.includes('_roadmapMapStatus') && _puImp.includes('_roadmapParseMilestones') && _puImp.includes('_roadmapParseTokens');
+    ok = work && movedOut;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.329) lib/pure-utils roadmap MD 파서 분리: 모듈 단일출처 + 인라인 제거 (UR-0025)' : '✗ roadmap 파서 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

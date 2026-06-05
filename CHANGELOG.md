@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.329 — 2026-06-05 — UR-0025(증분): roadmap MD 파서 3종 분리
+
+**🧩 순수 roadmap MD 파서 3종을 lib/pure-utils 로 이전.** (UR-0025 micro-증분 계속)
+
+### 구현 (UR-0025)
+1. **`_roadmapMapStatus`**(상태 정규화) + **`_roadmapParseMilestones`**(### M-XXXX 마일스톤 추출) + **`_roadmapParseTokens`**(MD 테이블 토큰 추출) → `lib/pure-utils.js`. (`_roadmapParseCssVars` 는 fs 의존이라 harness 유지.) harness 인라인 제거 → require.
+2. selftest 76→77 · e2e 273→274.
+
+### 검증
+- **selftest 77/77 PASS** · **E2E 274/274 PASS** (회귀 0).
+- 실측: `_roadmapMapStatus('REQUESTED')`→`planned`/`('done')`→`done` · 마일스톤 progress 40 파싱 · 토큰 `color`→`#fff`.
+
 ## 1.9.328 — 2026-06-05 — UR-0025(증분): 문자열 유틸(_truncate/_splitList) 분리
 
 **🧩 순수 문자열 유틸 2종을 lib/pure-utils 로 이전.** (UR-0025 micro-증분 계속)
