@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.331 — 2026-06-05 — UR-0025(서브시스템): brief 빌더 분리 (VERSION 주입)
+
+**🧩 project-brief 텍스트 빌더(`_briefReadmeBlock`/`_briefBlueprint`) + 마커(BRIEF_START/END)를 lib/pure-utils 로 이전 — brief 순수 레이어 완성.** (사용자 선택: UR-0025 서브시스템 추출)
+
+### 구현 (UR-0025)
+1. **`_briefReadmeBlock`**(README 개요 블록) + **`_briefBlueprint`**(복사용 청사진) + **`BRIEF_START`/`BRIEF_END`** 마커 → `lib/pure-utils.js`. 이제 brief 순수 레이어(config·채움·빌더·마커) 전부 pure-utils 단일 소스.
+2. **VERSION 결합 해소**: `_briefBlueprint(root, brief)` → **`_briefBlueprint(brief, version)`** (VERSION 을 인자 주입 — pure 유지). harness 호출부 + selftest 2건 시그니처 갱신.
+3. **multi-touch 안전 처리**: BRIEF_START/END 는 `_syncBriefReadme`(fs, harness 유지)도 사용 → import back. 호출처/선택검사 모두 갱신, e2e 견고 패턴(import-블록)으로 회귀 차단.
+4. selftest 78→79 · e2e 275→276.
+
+### 검증
+- **selftest 79/79 PASS** · **E2E 276/276 PASS** (회귀 0 — brief 4종 307·308·330·331 green).
+- 실측: `_briefBlueprint(b, '9.9.9')`→"leerness v9.9.9"(주입) · brief export blueprint · README project-brief 마커 sync 정상.
+
 ## 1.9.330 — 2026-06-05 — UR-0025(증분): project-brief config 분리
 
 **🧩 project-brief 필드 config(`_BRIEF_FIELDS`) + 채움 카운트(`_briefFilled`)를 lib/pure-utils 로 이전.** (UR-0025 micro-증분 계속)

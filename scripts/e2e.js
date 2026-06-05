@@ -4055,5 +4055,33 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.331 회귀 (UR-0025 서브시스템): brief 빌더(_briefReadmeBlock/_briefBlueprint)+마커 lib/pure-utils 분리 + brief export/sync 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const b = { project: 'X', intro: 'i', features: ['f1'] };
+    const work = typeof m._briefReadmeBlock === 'function' && typeof m._briefBlueprint === 'function'
+      && m._briefReadmeBlock(b).includes(m.BRIEF_START) && /f1/.test(m._briefReadmeBlock(b))
+      && /Blueprint/.test(m._briefBlueprint(b, '9.9.9')) && /leerness v9\.9\.9/.test(m._briefBlueprint(b, '9.9.9'));  // VERSION 주입
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
+    const movedOut = !/function _briefReadmeBlock\(/.test(harnessSrc) && !/function _briefBlueprint\(/.test(harnessSrc) && !/^const BRIEF_START =/m.test(harnessSrc)
+      && _puImp.includes('_briefReadmeBlock') && _puImp.includes('_briefBlueprint') && _puImp.includes('BRIEF_START');
+    // 소비 명령 회귀: brief set → export(blueprint) + README sync(markers)
+    const bd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-briefsub-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', bd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'brief', 'set', '--intro', 'X', '--features', 'a,b', '--path', bd], { encoding: 'utf8', timeout: 20000 });
+    const ex = cp.spawnSync(process.execPath, [CLI, 'brief', 'export', '--path', bd], { encoding: 'utf8', timeout: 20000 });
+    const readmeOk = /project-brief:start/.test(fs.readFileSync(path.join(bd, 'README.md'), 'utf8'));
+    const cmdOk = /Blueprint/.test(ex.stdout || '') && readmeOk;
+    ok = work && movedOut && cmdOk;
+    fs.rmSync(bd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.331) lib/pure-utils brief 빌더 분리: 모듈 단일출처 + 인라인 제거 + brief export/README sync (UR-0025)' : '✗ brief 빌더 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
