@@ -16,13 +16,14 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _roadmapMapStatus, _roadmapParseMilestones, _roadmapParseTokens,
   _BRIEF_FIELDS, _briefFilled,
   BRIEF_START, BRIEF_END, _briefReadmeBlock, _briefBlueprint,
-  _parseLessonEntries, _matchConstraints, _matchDomain } = require('../lib/pure-utils');  // 1.9.318~333 (UR-0025): 순수 유틸 모듈 분리
+  _parseLessonEntries, _matchConstraints, _matchDomain,
+  _detectLspLang, _matchLspSymbols } = require('../lib/pure-utils');  // 1.9.318~335 (UR-0025): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG } = require('../lib/catalogs');  // 1.9.333 (UR-0025): constraints catalog 분리
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS } = require('../lib/catalogs');  // 1.9.335 (UR-0025): LSP 패턴 catalog 분리
 
-const VERSION = '1.9.334';
+const VERSION = '1.9.335';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3079,6 +3080,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: lessons.md 파서 분리(_parseLessonEntries) + 인라인 제거 (UR-0025 1.9.332)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseLessonEntries('### 2026-06-05\n- Lesson: A\n- Tag: t\n\n### 2026-06-04\n- Lesson: B'); const work = r.length === 2 && r[0].text === 'A' && r[0].tag === 't' && r[1].tag === null && r[0].date === '2026-06-05'; const src = read(__filename); const moved = m._parseLessonEntries === _parseLessonEntries && !/^function _parseLessonEntries\(/m.test(src) && src.includes('for (const lesson of _parseLessonEntries(text))'); return work && moved; } },
     { name: 'UR-0025 심층: constraints catalog→lib/catalogs + _matchConstraints→pure-utils 분리 (1.9.333)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6 && !!c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe; const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제'); const work = r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0; const src = read(__filename); const moved = _DEFAULT_PLATFORM_CONSTRAINTS === c._DEFAULT_PLATFORM_CONSTRAINTS && _matchConstraints === m._matchConstraints && !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(src) && src.includes('_matchConstraints(_loadPlatformConstraints(root), text)'); return catOk && work && moved; } },
     { name: 'UR-0025 심층(Codex 위임·검증): intent domain catalog→lib/catalogs + _matchDomain→pure-utils 분리 (1.9.334)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_DOMAIN_CATALOG && Object.keys(c._DEFAULT_DOMAIN_CATALOG.domains).length === 5 && !!c._DEFAULT_DOMAIN_CATALOG.domains.game; const r = m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'unity 게임'); const work = r.domain === 'game' && Array.isArray(r.components) && m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'zzz없음').domain === null && m._matchDomain(null, 'x').domain === null; const src = read(__filename); const moved = _DEFAULT_DOMAIN_CATALOG === c._DEFAULT_DOMAIN_CATALOG && _matchDomain === m._matchDomain && !/const _DEFAULT_DOMAIN_CATALOG = \{/.test(src) && src.includes('_matchDomain(_loadDomainCatalog(root), text)'); return catOk && work && moved; } },
+    { name: 'UR-0025 심층: LSP catalog→lib/catalogs(_LSP_LANG_PATTERNS) + _detectLspLang/_matchLspSymbols→pure-utils 분리 (1.9.335)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._LSP_LANG_PATTERNS && Object.keys(c._LSP_LANG_PATTERNS).length === 5 && Array.isArray(c._LSP_LANG_PATTERNS.javascript); const langOk = m._detectLspLang('a.py') === 'python' && m._detectLspLang('b.go') === 'go' && m._detectLspLang('c.md') === 'javascript'; const sy = m._matchLspSymbols(c._LSP_LANG_PATTERNS, 'function alpha(){}\nclass Beta{}', 'javascript'); const work = sy.length === 2 && sy[0].name === 'alpha' && sy[0].kind === 'function' && sy[1].kind === 'class' && m._matchLspSymbols(null, 'x', 'javascript').length === 0; const src = read(__filename); const moved = _LSP_LANG_PATTERNS === c._LSP_LANG_PATTERNS && _detectLspLang === m._detectLspLang && _matchLspSymbols === m._matchLspSymbols && !/const _LSP_LANG_PATTERNS = \{/.test(src) && !/function _detectLspLang\(/.test(src); return catOk && langOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -20604,70 +20606,13 @@ function _tryLoadLSP() {
 
 // 1.9.173: 다국어 확장 — Python/Go/Rust/Java 패턴 추가 (regex fallback)
 //   파일 확장자 기반 자동 라우팅. TypeScript Compiler API 미설치 시에도 5개 언어 지원.
-const _LSP_LANG_PATTERNS = {
-  javascript: [
-    { re: /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/, kind: 'function' },
-    { re: /^\s*(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/, kind: 'class' },
-    { re: /^\s*(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)/, kind: 'interface' },
-    { re: /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function|\()/, kind: 'function' },
-    { re: /^\s*(?:export\s+)?type\s+([A-Za-z_$][\w$]*)\s*=/, kind: 'type' },
-    { re: /^\s*(?:export\s+)?enum\s+([A-Za-z_$][\w$]*)/, kind: 'enum' }
-  ],
-  python: [
-    { re: /^\s*async\s+def\s+([A-Za-z_][\w]*)\s*\(/, kind: 'function' },
-    { re: /^\s*def\s+([A-Za-z_][\w]*)\s*\(/, kind: 'function' },
-    { re: /^\s*class\s+([A-Za-z_][\w]*)\s*[(:]/, kind: 'class' }
-  ],
-  go: [
-    { re: /^\s*func\s+(?:\([^)]*\)\s+)?([A-Za-z_][\w]*)\s*\(/, kind: 'function' },
-    { re: /^\s*type\s+([A-Za-z_][\w]*)\s+struct\b/, kind: 'struct' },
-    { re: /^\s*type\s+([A-Za-z_][\w]*)\s+interface\b/, kind: 'interface' },
-    { re: /^\s*type\s+([A-Za-z_][\w]*)\s+[A-Za-z]/, kind: 'type' }
-  ],
-  rust: [
-    { re: /^\s*(?:pub(?:\([^)]+\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][\w]*)/, kind: 'function' },
-    { re: /^\s*(?:pub(?:\([^)]+\))?\s+)?struct\s+([A-Za-z_][\w]*)/, kind: 'struct' },
-    { re: /^\s*(?:pub(?:\([^)]+\))?\s+)?enum\s+([A-Za-z_][\w]*)/, kind: 'enum' },
-    { re: /^\s*(?:pub(?:\([^)]+\))?\s+)?trait\s+([A-Za-z_][\w]*)/, kind: 'trait' },
-    { re: /^\s*impl\s+(?:[^{]+\s+for\s+)?([A-Za-z_][\w]*)/, kind: 'impl' },
-    { re: /^\s*(?:pub(?:\([^)]+\))?\s+)?type\s+([A-Za-z_][\w]*)\s*=/, kind: 'type' }
-  ],
-  java: [
-    { re: /^\s*(?:public|private|protected)?\s*(?:final\s+)?(?:abstract\s+)?class\s+([A-Za-z_][\w]*)/, kind: 'class' },
-    { re: /^\s*(?:public|private|protected)?\s*(?:abstract\s+)?interface\s+([A-Za-z_][\w]*)/, kind: 'interface' },
-    { re: /^\s*(?:public|private|protected)?\s*(?:static\s+)?(?:final\s+)?enum\s+([A-Za-z_][\w]*)/, kind: 'enum' },
-    // method: visibility + return type + name(  (heuristic — 첫 번째 ( 매칭, 키워드 필터)
-    { re: /^\s*(?:public|private|protected)\s+(?:static\s+)?(?:final\s+)?(?:[A-Za-z_<>,\s\[\]]+\s+)?([A-Za-z_][\w]*)\s*\(/, kind: 'method' }
-  ]
-};
+// 1.9.335 (UR-0025 심층): _LSP_LANG_PATTERNS (6언어 심볼 패턴 catalog) 는 lib/catalogs.js 로 이전 (import).
+// 1.9.335 (UR-0025 심층): _detectLspLang 는 lib/pure-utils.js 로 이전 (순수 언어감지).
 
-function _detectLspLang(file) {
-  const ext = (file.match(/\.[a-zA-Z0-9]+$/) || [''])[0].toLowerCase();
-  if (/^\.(py|pyw|pyi)$/.test(ext)) return 'python';
-  if (ext === '.go') return 'go';
-  if (ext === '.rs') return 'rust';
-  if (/^\.(java|kt|scala)$/.test(ext)) return 'java';
-  if (/^\.(ts|tsx|js|jsx|mjs|cjs)$/.test(ext)) return 'javascript';
-  return 'javascript';  // default — 기본 JS 패턴 (.txt/.md 등 미지원 확장자)
-}
-
-// 정규식 fallback — 5개 언어 (JS/TS/Python/Go/Rust/Java) symbol 추출 (LSP 없이도 동작)
-// 1.9.173: lang 인자 추가 — 미지정 시 javascript 패턴 (1.9.167 호환).
+// 정규식 fallback — 6개 언어 (JS/TS/Python/Go/Rust/Java) symbol 추출 (LSP 없이도 동작)
+// 1.9.335 (UR-0025 심층): 순수 매처 _matchLspSymbols(catalog, content, lang) 로 분리 — 여기는 catalog 주입 박막.
 function _lspRegexSymbols(content, lang) {
-  const symbols = [];
-  const lines = content.split(/\r?\n/);
-  const patterns = _LSP_LANG_PATTERNS[lang || 'javascript'] || _LSP_LANG_PATTERNS.javascript;
-  lines.forEach((line, idx) => {
-    for (const p of patterns) {
-      const m = line.match(p.re);
-      // 키워드 false-positive 제거 (예: java method 정규식이 `if(`, `for(` 등에 매치되는 경우)
-      if (m && !/^(if|for|while|switch|catch|return|throw|new)$/.test(m[1])) {
-        symbols.push({ name: m[1], kind: p.kind, line: idx + 1 });
-        break;
-      }
-    }
-  });
-  return symbols;
+  return _matchLspSymbols(_LSP_LANG_PATTERNS, content, lang);
 }
 
 // TypeScript Compiler API 기반 symbol 추출 (정확)

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.335 — 2026-06-05 — UR-0025(심층): LSP 서브시스템 핵심 분리
+
+**🧩 LSP 정규식 fallback 서브시스템의 핵심(언어별 심볼 패턴 catalog + 순수 언어감지 + 순수 심볼 매처)을 모듈로 분리 — 1.9.333~334 패턴 동일 적용.** (UR-0025 심층)
+
+### 배경
+constraints(1.9.333)·intent-도메인(1.9.334)에 이어 동형(同型) 추출의 세 번째 적용. 검증된 "데이터 catalog → lib/catalogs.js, 순수 매처(catalog 주입) → lib/pure-utils.js, harness 는 박막 wrapper" 패턴을 그대로 반복(결정매트릭스: 기존 패턴 유지·안정성 우선). 직전 라운드 Codex 위임에 이어 이번은 직접 구현(사용자 "일부" 위임 지시 — 적합한 독립 청크 시 재위임).
+
+### 구현 (UR-0025 심층)
+1. **`_LSP_LANG_PATTERNS`**(6언어 JS/TS·Python·Go·Rust·Java 심볼 패턴 catalog) → `lib/catalogs.js`.
+2. **`_detectLspLang(file)`**(순수: 파일 확장자 → 언어) → `lib/pure-utils.js`.
+3. **`_matchLspSymbols(catalog, content, lang)`**(순수 매처: catalog 주입, 라인별 정규식 매칭 + 키워드 false-positive 필터) → `lib/pure-utils.js`. harness `_lspRegexSymbols(content, lang)` = `_matchLspSymbols(_LSP_LANG_PATTERNS, content, lang)` 박막.
+4. selftest 82→83 · e2e 279→280.
+
+### 검증
+- **selftest 83/83 PASS** · **E2E 280/280 PASS** (회귀 0).
+- 실측: catalog 5언어 키 · `_detectLspLang` .py→python/.go→go/.rs→rust/.ts·.md→javascript · `_matchLspSymbols` JS(alpha/fn,Beta/class)·PY(foo/fn,Bar/class)·null guard=[] · `lsp symbols` 명령 end-to-end(helloWorld/MyClass, lang 감지) 정상.
+
 ## 1.9.334 — 2026-06-05 — UR-0025(심층): intent-도메인 서브시스템 분리 (Codex 위임·검증)
 
 **🤖 남은 백로그 일부를 Codex CLI(gpt-5.5)에 위임하고 독립 검증까지 완료 — intent-도메인 서브시스템의 핵심(데이터 catalog + 순수 매처)을 1.9.333 constraints 패턴 그대로 모듈로 분리.** (사용자 지시: "남은 백로그 일부는 codex cli를 호출해서 업무 할당하고 검증까지 진행")

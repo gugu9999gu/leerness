@@ -4160,5 +4160,33 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.335 회귀 (UR-0025 심층): LSP catalog→lib/catalogs + _detectLspLang/_matchLspSymbols→pure-utils + lsp symbols 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const catOk = c._LSP_LANG_PATTERNS && Object.keys(c._LSP_LANG_PATTERNS).length === 5 && Array.isArray(c._LSP_LANG_PATTERNS.python);
+    const langOk = m._detectLspLang('x.py') === 'python' && m._detectLspLang('y.rs') === 'rust' && m._detectLspLang('z.txt') === 'javascript';
+    const sy = m._matchLspSymbols(c._LSP_LANG_PATTERNS, 'def foo():\n    pass\nclass Bar:\n    pass', 'python');
+    const work = catOk && langOk && typeof m._matchLspSymbols === 'function' && sy.length === 2 && sy[0].name === 'foo' && sy[0].kind === 'function' && sy[1].name === 'Bar' && m._matchLspSymbols(null, 'x', 'javascript').length === 0;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
+    const movedOut = !/const _LSP_LANG_PATTERNS = \{/.test(harnessSrc) && !/function _detectLspLang\(/.test(harnessSrc)
+      && _catImp.includes('_LSP_LANG_PATTERNS') && _puImp.includes('_matchLspSymbols') && _puImp.includes('_detectLspLang');
+    // 소비 명령 회귀: lsp symbols (정규식 fallback, _detectLspLang + _matchLspSymbols 경로)
+    const lf = path.join(os.tmpdir(), 'leerness-lsp-' + total + '.js');
+    fs.writeFileSync(lf, 'function helloWorld(){}\nclass MyClass{}\n', 'utf8');
+    const lr = cp.spawnSync(process.execPath, [CLI, 'lsp', 'symbols', lf], { encoding: 'utf8', timeout: 20000 });
+    const cmdOk = /helloWorld/.test(lr.stdout || '') && /MyClass/.test(lr.stdout || '') && /javascript/.test(lr.stdout || '');
+    ok = work && movedOut && cmdOk;
+    fs.rmSync(lf, { force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.335) UR-0025 심층: LSP catalog/_detectLspLang/_matchLspSymbols 분리 + lsp symbols 회귀 (UR-0025)' : '✗ LSP 서브시스템 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
