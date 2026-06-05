@@ -3991,5 +3991,24 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.328 회귀 (UR-0025 모듈화): 순수 문자열 유틸 2종(_truncate/_splitList) lib/pure-utils 분리 + harness 인라인 제거
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const work = typeof m._truncate === 'function' && typeof m._splitList === 'function'
+      && m._truncate('hello world', 8) === 'hello w…' && m._truncate('hi', 8) === 'hi'
+      && JSON.stringify(m._splitList('a, b ,c,')) === '["a","b","c"]';
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
+    const movedOut = !/function _truncate\(/.test(harnessSrc) && !/function _splitList\(/.test(harnessSrc)
+      && _puImp.includes('_truncate') && _puImp.includes('_splitList');
+    ok = work && movedOut;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.328) lib/pure-utils 문자열 유틸 분리: 모듈 단일출처 + 인라인 제거 (UR-0025)' : '✗ 문자열 유틸 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

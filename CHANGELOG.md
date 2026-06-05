@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.328 — 2026-06-05 — UR-0025(증분): 문자열 유틸(_truncate/_splitList) 분리
+
+**🧩 순수 문자열 유틸 2종을 lib/pure-utils 로 이전.** (UR-0025 micro-증분 계속)
+
+### 구현 (UR-0025)
+1. **`_truncate`**(말줄임표 절단) + **`_splitList`**(콤마 리스트 분할, trim+filter) → `lib/pure-utils.js`. harness 인라인 제거 → require.
+2. selftest 75→76 · e2e 272→273.
+
+### 검증
+- **selftest 76/76 PASS** · **E2E 273/273 PASS** (회귀 0).
+- 실측: `_truncate('hello world',8)`→`hello w…`·`_truncate('hi',8)`→`hi` · `_splitList('a, b ,c,')`→`["a","b","c"]`.
+
 ## 1.9.327 — 2026-06-05 — UR-0025(증분): TZ/날짜 포맷 유틸 분리
 
 **🧩 순수 TZ/날짜 포맷 함수(`_getLocalTz`/`_formatLocal`)를 lib/pure-utils 로 이전.** (UR-0025 micro-증분 계속)
