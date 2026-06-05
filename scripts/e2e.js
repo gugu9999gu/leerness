@@ -3329,8 +3329,8 @@ total++;
   let ok = false;
   try {
     const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
-    // (1) 소스: cp.exec 템플릿 제거 + execFile args 배열 + argList 인용
-    const srcOk = /cp\.execFile\([^,]*'npm[^']*', \['view', pkg, 'version'\]/.test(harnessSrc) &&  // 1.9.352(UR-0066): npm.cmd(win) 형태 허용
+    // (1) 소스: cp.exec 템플릿 제거 + execFile args 배열(view pkg version) + argList 인용
+    const srcOk = /'view', pkg, 'version'/.test(harnessSrc) &&  // 1.9.360(CV-2/UR-0077): cmd.exe /d /s /c npm view (args 배열) 형태
       !/cp\.exec\(.npm view \$\{pkg\}/.test(harnessSrc) &&
       /argList\.map\(_shellQuoteArg\)\.join/.test(harnessSrc);
     // (2) 기능 회귀: update --check 가 오프라인(네트워크 무)에서도 crash 없이 종료
@@ -4865,6 +4865,23 @@ total++;
     ok = j.runtimeDeps === 0 && j.hasInstallScripts === false && Array.isArray(j.safeInstall) && j.safeInstall.length >= 3;
   } catch {}
   console.log(ok ? '✓ B(1.9.359) UR-0074: install-safety (0 런타임 deps / 0 install-script / safe-install) (UR-0074)' : '✗ install-safety 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.360 회귀 (외부리뷰 CV-2/UR-0077): update --check 가 신형 Node Windows 에서 spawn EINVAL 없이 동작 (cmd.exe 경유)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-einval-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'update', d, '--check'], { encoding: 'utf8', timeout: 30000 });
+    const out = (r.stdout || '') + (r.stderr || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    // 핵심 회귀 가드: EINVAL 미발생 + exit 0 (네트워크 유무와 무관 — 오프라인이어도 EINVAL 은 안 나야 함)
+    ok = !out.includes('EINVAL') && r.status === 0;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.360) CV-2: update --check 신형 Node Windows EINVAL 회피 (cmd.exe 경유) (UR-0077)' : '✗ update --check EINVAL 회귀');
   if (!ok) failed++;
 }
 

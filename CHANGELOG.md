@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.360 — 2026-06-05 — 안정화① 외부리뷰 CV-2: fetchNpmLatest 신형 Node Windows EINVAL 회피 (UR-0077)
+
+**🛠 외부 멀티모델 리뷰(1.9.359) 안정화 시리즈 1탄.** `update --check` 가 신형 Node Windows 에서 `spawn EINVAL` 로 실패하던 회귀를 수정. (Codex+Sonnet 교차검증 + 자체 재현 Node v26.3.0)
+
+### 배경 — 외부 리뷰 CV-2 (P1, 2/3 모델 + 자체 재현)
+Node 18.20.2+/20.12.2+/21.7.3+/22+/26 은 `shell:true` 없이 `.cmd` 파일을 spawn 하면 `EINVAL` 을 던진다(CVE-2024-27980 수정 부작용). UR-0066(1.9.352)이 셸 주입 표면 제거를 위해 `npm.cmd` 를 직접 `execFile` 하도록 바꾼 것이 이 환경에서 회귀를 유발 → `update --check` 무력화. 게다가 init 이 SessionStart hook 으로 `update --check` 를 기본 설치하므로 **매 세션 `✗ spawn EINVAL`** 가 출력됐다. 자체 재현: Node v26.3.0 에서 `update --check` → `✗ spawn EINVAL`.
+
+### 구현
+1. **`fetchNpmLatest` win 경로 교체**: `npm.cmd` 직접 execFile → **`cmd.exe /d /s /c npm view <pkg> version`**. cmd.exe 는 `.exe` 라 EINVAL 없음, `shell:true` 미사용이라 DEP0190(deprecation) 도 회피. pkg 는 charset 검증(메타문자 0)이라 cmd 주입 불가.
+2. **동기 throw 흡수**: execFile 동기 EINVAL throw 를 `try/catch` 로 `resolve(null)` (이전엔 Promise reject 누수).
+
+### 검증 (회귀 0)
+- **selftest 106→107 PASS** (UR-0040/UR-0066 케이스를 cmd.exe args 형태로 갱신 + CV-2 EINVAL 회피 가드 추가). **E2E 304→305 PASS** (행위 가드: `update --check` 가 EINVAL 없이 exit 0).
+- 실측: 수정 후 `update --check` → `npm leerness latest: 1.9.360 → up to date` (EINVAL 소멸).
+
 ## 1.9.359 — 2026-06-05 — UR-0074: install-safety — 설치 안전 프로필 투명 공개 (공급망 신뢰)
 
 **🧩 `leerness install-safety` — 0 런타임 의존성 · 0 install-time 스크립트라는 핵심 안전 속성을 사실 그대로 보고 + 안전 설치 워크플로 안내. 외부리뷰 "설치/릴리스 신뢰성" 우려 선제 대응.** (UR-0074, 안정화 배포 직전)
