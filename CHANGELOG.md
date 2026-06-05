@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.359 — 2026-06-05 — UR-0074: install-safety — 설치 안전 프로필 투명 공개 (공급망 신뢰)
+
+**🧩 `leerness install-safety` — 0 런타임 의존성 · 0 install-time 스크립트라는 핵심 안전 속성을 사실 그대로 보고 + 안전 설치 워크플로 안내. 외부리뷰 "설치/릴리스 신뢰성" 우려 선제 대응.** (UR-0074, 안정화 배포 직전)
+
+### 배경
+GPT-5.5 웹 리뷰(UR-0074)가 "릴리스 케이던스 과다 + 설치 안전성"을 지적하며 `npm_config_ignore_scripts=true` + branch+diff 워크플로를 권고했다. leerness 는 이미 **런타임 의존성 0 · install-time 스크립트 0**(공급망 노출 0)이므로, 이 사실을 투명하게 공개하는 것이 신뢰의 핵심이다. 곧 이어질 안정화 배포의 신뢰 근거이기도 하다.
+
+### 구현
+1. **`installSafetyCmd(opts)`**(신규) + **`leerness install-safety [--json]`**: 패키지 `package.json` 을 읽어 `runtimeDeps`(0) · `installScripts`(preinstall/install/postinstall 0) · `node` engines · offline-first 여부 + 안전 설치 4단계(branch → ignore-scripts `migrate plan`(읽기전용 비교) → `update --yes` → `git diff`) 보고.
+2. **회귀 가드 겸용**: selftest + e2e 가 `runtimeDeps===0 && hasInstallScripts===false` 를 단언 — 누군가 런타임 deps/install hook 를 추가하면 테스트가 실패시켜 **의식적 결정을 강제**(공급망 안전 회귀 방지).
+
+### 검증
+- **selftest 105→106 PASS** · **E2E 303→304 PASS** (회귀 0).
+- 실측: `--json` → `runtimeDeps:0, hasInstallScripts:false, node:">=18", safeInstall:4단계`. human 출력 정상.
+
 ## 1.9.358 — 2026-06-05 — UR-0075 Phase D: migrate plan — 임시폴더 설치 후 비교 마이그레이션 플랜 (umbrella 완결)
 
 **🧩 `leerness migrate plan` — 임시폴더에 현재 버전을 설치한 뒤 프로젝트의 .harness 코어 파일과 비교해 정확한 마이그레이션 플랜을 산출. 읽기 전용. UR-0075 마이그레이션 umbrella 완결.** (UR-0075 Phase D)

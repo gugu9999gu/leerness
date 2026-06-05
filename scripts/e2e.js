@@ -4855,5 +4855,18 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.359 회귀 (UR-0074): install-safety — 0 런타임 deps / 0 install-script / safe-install 워크플로 (공급망 신뢰 가드)
+total++;
+{
+  let ok = false;
+  try {
+    const r = cp.spawnSync(process.execPath, [CLI, 'install-safety', '--json'], { encoding: 'utf8', timeout: 15000 });
+    const j = JSON.parse(r.stdout);
+    ok = j.runtimeDeps === 0 && j.hasInstallScripts === false && Array.isArray(j.safeInstall) && j.safeInstall.length >= 3;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.359) UR-0074: install-safety (0 런타임 deps / 0 install-script / safe-install) (UR-0074)' : '✗ install-safety 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

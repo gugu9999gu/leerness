@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.358';
+const VERSION = '1.9.359';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3063,6 +3063,7 @@ function _selfTestCases() {
     { name: 'UR-0075 Phase B: migrate audit(dry-run 스키마 drift) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migrateAuditCmd === 'function' && src.includes('migrateAuditCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'audit'"); } },
     { name: 'UR-0075 Phase C: migrate apply(canonical 백필 비파괴 적용) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migrateApplyCmd === 'function' && src.includes('migrateApplyCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'apply'"); } },
     { name: 'UR-0075 Phase D: migrate plan(임시폴더 설치 후 비교) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migratePlanCmd === 'function' && src.includes('migratePlanCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'plan'"); } },
+    { name: 'UR-0074: install-safety(0 런타임 deps · 0 install-script) 사실 가드', run: () => { if (typeof installSafetyCmd !== 'function') return false; let pkg = {}; try { pkg = JSON.parse(read(path.join(__dirname, '..', 'package.json'))); } catch { return false; } const deps = Object.keys(pkg.dependencies || {}).length; const hooks = ['preinstall','install','postinstall'].filter(h => (pkg.scripts||{})[h]).length; return deps === 0 && hooks === 0; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6867,6 +6868,41 @@ function migratePlanCmd(root, opts = {}) {
     if (plan.missingFiles.length > 20) log(`        … 외 ${plan.missingFiles.length - 20}건`);
   }
   log(`\n  전체 적용: leerness update --yes --path ${root}  ·  canonical만: leerness migrate apply --path ${root} --yes`);
+}
+// UR-0074 (1.9.359): install-safety — 패키지 설치 안전 프로필 투명 공개 (외부리뷰 설치 신뢰성 우려 대응).
+// leerness 의 핵심 안전 속성(0 런타임 의존성 · 0 install-time 스크립트)을 사실 그대로 보고 + 안전 설치 워크플로 안내.
+// 회귀 가드 역할도 겸함: 누군가 런타임 deps/install hook 를 추가하면 selftest/e2e 가 실패시켜 의식적 결정을 강제.
+function installSafetyCmd(opts = {}) {
+  const pkgPath = path.join(__dirname, '..', 'package.json');
+  let pkg = {};
+  try { pkg = JSON.parse(read(pkgPath)); } catch {}
+  const deps = Object.keys(pkg.dependencies || {});
+  const scripts = pkg.scripts || {};
+  const installHooks = ['preinstall', 'install', 'postinstall'].filter(h => scripts[h]);
+  const profile = {
+    version: VERSION,
+    runtimeDeps: deps.length,
+    runtimeDepList: deps,
+    installScripts: installHooks,
+    hasInstallScripts: installHooks.length > 0,
+    node: (pkg.engines && pkg.engines.node) || null,
+    offlineFirst: true,
+    safeInstall: [
+      'git checkout -b chore/leerness-update',
+      'npm_config_ignore_scripts=true npx leerness@latest migrate plan --path .   # 임시폴더 비교(읽기 전용)',
+      'npx leerness@latest update --yes --path .',
+      'git diff   # 변경 검토 후 커밋 또는 롤백',
+    ],
+  };
+  if (opts.json) { log(JSON.stringify(profile, null, 2)); return; }
+  log(`# leerness install-safety (1.9.359) — 설치 안전 프로필`);
+  log(`  버전: ${VERSION}  ·  Node: ${profile.node || '(미지정)'}`);
+  log(`  런타임 의존성: ${deps.length === 0 ? '0건 (외부 패키지 없음 — 공급망 노출 0)' : deps.length + '건 — ' + deps.join(', ')}`);
+  log(`  install-time 스크립트: ${installHooks.length === 0 ? '없음 (preinstall/install/postinstall 0 — 설치 시 임의코드 실행 없음)' : installHooks.join(', ')}`);
+  log(`  동작 방식: offline-first (설치 시 네트워크/빌드 불필요, 단일 bin + lib)`);
+  log(`\n  안전 설치 워크플로 (검토 후 적용):`);
+  profile.safeInstall.forEach((s, i) => log(`    ${i + 1}. ${s}`));
+  if (installHooks.length > 0) warn('install-time 스크립트 존재 — 위 ignore-scripts safe-install 권장');
 }
 function debug(root) {
   root = absRoot(root); let warnings = 0, failures = 0;
@@ -21130,6 +21166,7 @@ async function main() {
   if (cmd === 'migrate' && (args[1] === 'audit' || has('--audit'))) return migrateAuditCmd(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()), { json: has('--json') });  // 1.9.356 (UR-0075 Phase B): dry-run 스키마 drift 리포트
   if (cmd === 'migrate' && args[1] === 'apply') return migrateApplyCmd(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()), { json: has('--json'), yes: has('--yes') });  // 1.9.357 (UR-0075 Phase C): canonical 백필 비파괴 적용 (기본 dry-run)
   if (cmd === 'migrate' && args[1] === 'plan') return migratePlanCmd(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()), { json: has('--json') });  // 1.9.358 (UR-0075 Phase D): 임시폴더 설치 후 비교 마이그레이션 플랜 (읽기 전용)
+  if (cmd === 'install-safety') return installSafetyCmd({ json: has('--json') });  // 1.9.359 (UR-0074): 설치 안전 프로필 (0 deps / 0 install-script) + 안전 설치 워크플로
   if (cmd === 'migrate')   return await install(arg('--path', args[1] || process.cwd()), { force:has('--force'), dry:has('--dry-run'), migration:true });  // 1.9.355 (UR-0075): --path 지원
   if (cmd === 'update')    return await updateCmd(arg('--path', args[1] || process.cwd()), { checkOnly: has('--check'), yes: has('--yes'), force: has('--force') });  // 1.9.355 (UR-0075): --path 지원
   if (cmd === 'auto-update' && args[1] === 'install') return autoUpdateInstall(arg('--path', args[2] || process.cwd()));
