@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.362';
+const VERSION = '1.9.363';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3096,6 +3096,7 @@ function _selfTestCases() {
     { name: 'CV-2/UR-0077: fetchNpmLatest 신형 Node win EINVAL 회피 (cmd.exe + try/catch + windowsHide)', run: () => { if (typeof fetchNpmLatest !== 'function') return false; const src = read(__filename); const i = src.indexOf('function fetchNpmLatest'); if (i < 0) return false; const body = src.slice(i, i + 1600); return body.includes('cmd.exe') && /try \{/.test(body) && body.includes('windowsHide'); } },
     { name: 'CV-1/UR-0076: arg() --path=값 파싱 + _resolveRoot(--path>positional>cwd) 행위', run: () => { if (typeof _resolveRoot !== 'function') return false; const save = process.argv; try { process.argv = ['node', 'h', 'context', '--path=/tmp/eqform']; const eq = arg('--path', null) === '/tmp/eqform'; process.argv = ['node', 'h', 'context', 'X', '--path', '/tmp/flag']; const flagWins = _resolveRoot('X') === '/tmp/flag'; process.argv = ['node', 'h', 'context', '/tmp/pos']; const posWins = _resolveRoot('/tmp/pos') === '/tmp/pos'; process.argv = ['node', 'h', 'context']; const cwdFb = _resolveRoot(undefined) === process.cwd(); return eq && flagWins && posWins && cwdFb; } finally { process.argv = save; } } },
     { name: 'CV-4/UR-0079: _pruneArchives archive retention (최신 keep 유지, 오래된 prune) 행위', run: () => { if (typeof _pruneArchives !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_prune_')); try { const adir = path.join(tmp, '.harness', 'archive'); fs.mkdirSync(adir, { recursive: true }); for (let i = 0; i < 5; i++) fs.mkdirSync(path.join(adir, 'leerness-1.9.' + i + '-stamp')); const pruned = _pruneArchives(tmp, 2); const left = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length; return pruned === 3 && left === 2; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
+    { name: 'CV-7/UR-0082: commands 카탈로그 + help 에 누락 명령군 등재 (표면 drift 가드)', run: () => { const src = read(__filename); const ci = src.indexOf('function commandsCmd'); const hi = src.indexOf('function help('); if (ci < 0 || hi < 0) return false; const cbody = src.slice(ci, ci + 8000); const hbody = src.slice(hi, hi + 7000); const must = ['install-safety', 'feature add', 'creds list', 'incident list', 'webhook serve', 'deploy auto', 'runs list', 'permissions list', 'whats-new', 'migrate audit']; return must.every(c => cbody.includes(c)) && hbody.includes('install-safety') && hbody.includes('feature add'); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3713,7 +3714,26 @@ function commandsCmd(root) {
       { cmd: 'intent classify|expand|domains "<request>"', desc: '의도 파악 + scope (1.9.213)' },
       { cmd: 'constraints list|check|add', desc: '플랫폼/API 제약 (1.9.208)' },
       { cmd: 'provider list|add|remove|sync', desc: 'Provider Registry (1.9.157~160)' },
-      { cmd: 'commands [--json]', desc: '전체 명령 카테고리 목록 (1.9.233)' }
+      { cmd: 'commands [--json]', desc: '전체 명령 카테고리 목록 (1.9.233)' },
+      { cmd: 'migrate audit|apply|plan [path] [--json] [--yes]', desc: '크로스버전 마이그레이션 진단/적용/플랜 (UR-0075, 1.9.356~358)' },
+      { cmd: 'migrate --guide', desc: 'AI 에이전트용 크로스버전 마이그레이션 가이드 (1.9.355)' },
+      { cmd: 'doctor [--json]', desc: '설치/환경 진단 (1.9.315)' },
+      { cmd: 'selftest [--json]', desc: '코어 함수 무결성 자가 검증 (1.9.258)' },
+      { cmd: 'install-safety [--json]', desc: '설치 안전 프로필 — 0 deps/0 install-script (1.9.359)' },
+      { cmd: 'env check|sync|detect [path]', desc: '셸/인코딩 환경 진단 (1.9.241)' },
+      { cmd: 'shell-guard "<command>"', desc: '셸 호환성 정적 분석 (1.9.260)' },
+      { cmd: 'path-setup [--apply]', desc: 'CLI PATH 자동 등록 (1.9.254)' }
+    ],
+    ops: [
+      { cmd: 'feature add|link|impact|list|show', desc: '기능 그래프(feature-graph) 추적' },
+      { cmd: 'permissions list|set', desc: 'agent 권한 모드 (1.9.174)' },
+      { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (1.9.272)' },
+      { cmd: 'creds list|register|check|refresh', desc: '크리덴셜 메타 추적 (값 미저장)' },
+      { cmd: 'incident list|show|handle', desc: '인시던트 관리' },
+      { cmd: 'webhook serve', desc: '웹훅 수신 서버' },
+      { cmd: 'deploy auto', desc: '배포 자동화' },
+      { cmd: 'runs list|show', desc: '실행 이력' },
+      { cmd: 'whats-new [path]', desc: '최근 버전 변경 요약' }
     ]
   };
   if (has('--json')) {
@@ -3730,7 +3750,7 @@ function commandsCmd(root) {
     });
     log('');
   }
-  log(dm(`  → 총 ${Object.values(cats).reduce((s, a) => s + a.length, 0)} 명령 (9 카테고리)`));
+  log(dm(`  → 총 ${Object.values(cats).reduce((s, a) => s + a.length, 0)} 명령 (${Object.keys(cats).length} 카테고리)`));
   log(dm(`  → MCP 도구: ${_mcpToolCount()} (외부 AI 노출)`));  // 1.9.315 (UR-0054): 하드코딩 65 → 동적
   log(dm(`  → 빠른 시작: leerness pulse | handoff | health`));
 }
@@ -21149,7 +21169,7 @@ function help() {
   leerness skill install <SKILL.md|dir|url> · leerness skill discover --preset vercel|anthropic   # 스킬 설치/탐색
   leerness release bump [--patch|--minor|--major]  # package.json 자동 bump (1.9.8)
   leerness release note "<내용>"               # CHANGELOG.md 자동 추가 (1.9.8)
-  leerness release publish [--dry-run] [--pack] [--git-push] [--gh-release] [--gh-pages] [--gh-pages-src file] [--npm-publish] [--auto]  # 통합 배포 (1.9.8 + 1.9.10)\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n`);
+  leerness release publish [--dry-run] [--pack] [--git-push] [--gh-release] [--gh-pages] [--gh-pages-src file] [--npm-publish] [--auto]  # 통합 배포 (1.9.8 + 1.9.10)\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n  leerness migrate audit|apply|plan [path] [--json] [--yes]   # 크로스버전 마이그레이션 진단/적용(canonical 백필)/플랜(임시폴더 비교) (UR-0075, 1.9.356~358)\n  leerness migrate --guide                    # AI 에이전트용 크로스버전 마이그레이션 가이드 (1.9.355)\n  leerness install-safety [--json]            # 설치 안전 프로필 — 0 런타임 deps / 0 install-script (1.9.359)\n  leerness capabilities [--json]              # 권한·보안 표면 공개 (1.9.272)\n  leerness feature add|link|impact|list|show  # 기능 그래프(feature-graph) 추적\n  leerness permissions list|set               # agent 권한 모드 (1.9.174)\n  leerness creds list|register|check|refresh  # 크리덴셜 메타 추적 (값 미저장)\n  leerness incident list|show|handle · webhook serve · deploy auto · runs list|show   # 운영(ops)\n  leerness whats-new [path]                   # 최근 버전 변경 요약\n  leerness commands [--json]                  # 전체 명령 전수 목록 (누락 없이 이 명령으로 확인)\n`);
 }
 
 async function main() {

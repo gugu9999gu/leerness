@@ -4942,5 +4942,20 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.363 회귀 (외부리뷰 CV-7/UR-0082): commands 카탈로그가 누락 명령군(8그룹+install-safety+migrate sub) 전수 등재
+total++;
+{
+  let ok = false;
+  try {
+    const r = cp.spawnSync(process.execPath, [CLI, 'commands', '--json'], { encoding: 'utf8', timeout: 15000 });
+    const j = JSON.parse(r.stdout);
+    const flat = JSON.stringify(j.categories);
+    const must = ['install-safety', 'feature add', 'creds list', 'incident list', 'webhook serve', 'deploy auto', 'runs list', 'permissions list', 'whats-new', 'migrate audit'];
+    ok = must.every(c => flat.includes(c)) && j.totalCommands >= 70;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.363) CV-7: commands 카탈로그 누락 명령군 전수 등재 (8그룹+install-safety+migrate sub) (UR-0082)' : '✗ commands 카탈로그 drift');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

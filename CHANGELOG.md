@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.363 — 2026-06-06 — 안정화④ 외부리뷰 CV-7: commands/help 표면 drift 해소 (UR-0082)
+
+**🛠 외부 멀티모델 리뷰 안정화 시리즈 4탄 — `--help`/`commands` 에서 누락됐던 명령군 전수 등재.**
+
+### 배경 — 외부 리뷰 CV-7 (Codex+Opus)
+`install-safety`(1.9.359) + 8개 명령군(feature/creds/incident/webhook/deploy/runs/permissions/whats-new) + 이번 세션 신규 `migrate audit|apply|plan` 이 `--help`/`commands` 에 노출 안 됨(문서-동작 drift). phantom(문서O구현X) 명령은 0(양호).
+
+### 구현
+1. **`commands` 카탈로그 확장** (60→77 명령): `config` 에 migrate 서브커맨드+가이드, doctor/selftest/install-safety/env/shell-guard/path-setup 추가. 신규 **`ops` 카테고리**(feature/permissions/capabilities/creds/incident/webhook/deploy/runs/whats-new). 카테고리 9→10, 푸터 카테고리 수 동적화.
+2. **`help()` 보강**: 누락 명령군 블록 추가 + "`commands` 로 전수 확인" 안내.
+3. **표면 drift 가드**: selftest(commandsCmd+help 본문에 누락 명령군 존재 단언) + e2e(`commands --json` 전수 등재 + total>=70) — 재발 차단.
+
+### 검증 (회귀 0)
+- **selftest 109→110 PASS** · **E2E 308→309 PASS**.
+- 실측: `commands --json` total 77 / 10 카테고리 / 누락 명령 10종 전부 등재. `--help` 에도 반영.
+
 ## 1.9.362 — 2026-06-06 — 안정화③ 외부리뷰 CV-4: archive retention (무한 누적 차단, UR-0079)
 
 **🛠 외부 멀티모델 리뷰 안정화 시리즈 3탄 — init/migrate 재실행 시 archive 무한 누적 차단.**
