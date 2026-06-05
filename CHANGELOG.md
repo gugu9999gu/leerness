@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.332 — 2026-06-05 — UR-0025(증분): lessons.md 파서 분리
+
+**🧩 순수 lessons.md 파서(`_parseLessonEntries`)를 lib/pure-utils 로 이전 (인라인 파싱 → 재사용 가능 단일 출처).** (UR-0025 micro-증분 계속)
+
+### 구현 (UR-0025)
+1. **`_parseLessonEntries(text)`** — lessons.md 블록(### 날짜)→엔트리 `{date, text, tag}` 파싱 → `lib/pure-utils.js`. `lessonListCmd` 의 인라인 루프를 헬퍼 호출로 교체(필터는 명령에 유지). decision/roadmap 파서와 동일 패턴.
+2. selftest 79→80 · e2e 276→277.
+
+### 검증
+- **selftest 80/80 PASS** · **E2E 277/277 PASS** (회귀 0).
+- 실측: `_parseLessonEntries` 2엔트리(date/text/tag, 미존재 tag=null) · lesson save+list "total 1, tag lock" 정상.
+
+### 비고 (UR-0025)
+lib/pure-utils 누적 ~38종. 순수 함수/인라인 파서 추출은 사실상 한계 — 남은 harness.js 는 command/fs/state 결합이라 추가 분리는 dependency 주입을 동반(아키텍처). UR-0025 는 실질적으로 안전 추출 범위를 소진했으며, 다음 방향(서브시스템 심층 분리 / UR-0053 / UR-0054 ② / 일단락)은 사용자 결정을 권장.
+
 ## 1.9.331 — 2026-06-05 — UR-0025(서브시스템): brief 빌더 분리 (VERSION 주입)
 
 **🧩 project-brief 텍스트 빌더(`_briefReadmeBlock`/`_briefBlueprint`) + 마커(BRIEF_START/END)를 lib/pure-utils 로 이전 — brief 순수 레이어 완성.** (사용자 선택: UR-0025 서브시스템 추출)

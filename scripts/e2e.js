@@ -4083,5 +4083,29 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.332 회귀 (UR-0025 모듈화): lessons.md 파서(_parseLessonEntries) lib/pure-utils 분리 + lesson list 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const r = m._parseLessonEntries('### 2026-06-05\n- Lesson: A\n- Tag: t\n\n### 2026-06-04\n- Lesson: B');
+    const work = typeof m._parseLessonEntries === 'function' && r.length === 2 && r[0].text === 'A' && r[0].tag === 't' && r[1].tag === null;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
+    const movedOut = !/function _parseLessonEntries\(/.test(harnessSrc) && _puImp.includes('_parseLessonEntries');
+    // 소비 명령 회귀: lesson save + list --json
+    const ld = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lesson-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', ld, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', '락 reentrant', '--tag', 'lock', '--path', ld], { encoding: 'utf8', timeout: 20000 });
+    const lr = cp.spawnSync(process.execPath, [CLI, 'lesson', 'list', '--path', ld, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let cmdOk = false; try { const j = JSON.parse(lr.stdout); cmdOk = j.total === 1 && j.lessons[0].tag === 'lock'; } catch {}
+    ok = work && movedOut && cmdOk;
+    fs.rmSync(ld, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.332) lib/pure-utils lessons 파서 분리: 모듈 단일출처 + 인라인 제거 + lesson list (UR-0025)' : '✗ lessons 파서 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

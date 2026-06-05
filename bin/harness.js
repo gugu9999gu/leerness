@@ -15,13 +15,14 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _getLocalTz, _formatLocal, _truncate, _splitList,
   _roadmapMapStatus, _roadmapParseMilestones, _roadmapParseTokens,
   _BRIEF_FIELDS, _briefFilled,
-  BRIEF_START, BRIEF_END, _briefReadmeBlock, _briefBlueprint } = require('../lib/pure-utils');  // 1.9.318~331 (UR-0025): 순수 유틸 모듈 분리
+  BRIEF_START, BRIEF_END, _briefReadmeBlock, _briefBlueprint,
+  _parseLessonEntries } = require('../lib/pure-utils');  // 1.9.318~332 (UR-0025): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.331';
+const VERSION = '1.9.332';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3075,6 +3076,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: roadmap MD 파서 분리(_roadmapMapStatus/Milestones/Tokens) + 인라인 제거 (UR-0025 1.9.329)', run: () => { const m = require('../lib/pure-utils'); const work = m._roadmapMapStatus('REQUESTED') === 'planned' && m._roadmapMapStatus('done') === 'done' && m._roadmapParseMilestones('### M-0001. 로그인\nStatus: in-progress\nProgress: 40%')[0].progress === 40 && m._roadmapParseTokens('| color | #fff |').color === '#fff'; const src = read(__filename); const moved = m._roadmapMapStatus === _roadmapMapStatus && !/^function _roadmapMapStatus\(/m.test(src) && !/^function _roadmapParseMilestones\(/m.test(src) && !/^function _roadmapParseTokens\(/m.test(src); return work && moved; } },
     { name: 'lib/pure-utils: project-brief config 분리(_BRIEF_FIELDS/_briefFilled) + 인라인 제거 (UR-0025 1.9.330)', run: () => { const m = require('../lib/pure-utils'); const cfgOk = Array.isArray(m._BRIEF_FIELDS) && m._BRIEF_FIELDS.length === 10 && m._BRIEF_FIELDS[0].key === 'intro'; const work = m._briefFilled({ intro: 'x', features: ['a'] }) === 2 && m._briefFilled({}) === 0; const src = read(__filename); const moved = m._briefFilled === _briefFilled && m._BRIEF_FIELDS === _BRIEF_FIELDS && !/^const _BRIEF_FIELDS = \[/m.test(src) && !/^function _briefFilled\(/m.test(src); return cfgOk && work && moved; } },
     { name: 'lib/pure-utils: brief 빌더 분리(_briefReadmeBlock/_briefBlueprint + BRIEF 마커, VERSION 주입) (UR-0025 1.9.331)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._briefReadmeBlock === 'function' && typeof m._briefBlueprint === 'function' && m.BRIEF_START.includes('project-brief:start'); const b = { project: 'X', intro: 'i', features: ['f1'] }; const rb = m._briefReadmeBlock(b); const bp = m._briefBlueprint(b, '9.9.9'); const work = rb.includes(m.BRIEF_START) && rb.includes(m.BRIEF_END) && /f1/.test(rb) && /Blueprint/.test(bp) && /leerness v9\.9\.9/.test(bp); const src = read(__filename); const moved = m._briefBlueprint === _briefBlueprint && m.BRIEF_START === BRIEF_START && !/^function _briefReadmeBlock\(/m.test(src) && !/^function _briefBlueprint\(/m.test(src) && !/^const BRIEF_START =/m.test(src); return fnOk && work && moved; } },
+    { name: 'lib/pure-utils: lessons.md 파서 분리(_parseLessonEntries) + 인라인 제거 (UR-0025 1.9.332)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseLessonEntries('### 2026-06-05\n- Lesson: A\n- Tag: t\n\n### 2026-06-04\n- Lesson: B'); const work = r.length === 2 && r[0].text === 'A' && r[0].tag === 't' && r[1].tag === null && r[0].date === '2026-06-05'; const src = read(__filename); const moved = m._parseLessonEntries === _parseLessonEntries && !/^function _parseLessonEntries\(/m.test(src) && src.includes('for (const lesson of _parseLessonEntries(text))'); return work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6603,17 +6605,8 @@ function lessonListCmd(root, opts = {}) {
   }
   const text = read(lp);
   const lessons = [];
-  for (const block of text.split(/\n(?=### )/)) {
-    if (!block.startsWith('### ')) continue;
-    const dateMatch = block.match(/^### (\d{4}-\d{2}-\d{2}[^\n]*)/);
-    const lessonMatch = block.match(/- Lesson:[ \t]*(.+)/);
-    const tagMatch = block.match(/- Tag:[ \t]*(.+)/);
-    if (!lessonMatch) continue;
-    const lesson = {
-      date: dateMatch ? dateMatch[1].trim() : null,
-      text: lessonMatch[1].trim(),
-      tag: tagMatch ? tagMatch[1].trim() : null,
-    };
+  // 1.9.332 (UR-0025): 블록→엔트리 파싱은 순수 _parseLessonEntries (lib/pure-utils), 필터는 명령에 유지.
+  for (const lesson of _parseLessonEntries(text)) {
     if (tagFilter && lesson.tag !== tagFilter) continue;
     // 1.9.139: query 필터 — lesson text 또는 tag 매칭
     if (queryRe && !queryRe.test(lesson.text) && !queryRe.test(lesson.tag || '')) continue;
