@@ -21,13 +21,13 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _detectOptimism: _puDetectOptimism, _computeConfidence: _puComputeConfidence,
   _personaSummaries, _translate,
   _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd,
-  _withBuiltinSource } = require('../lib/pure-utils');  // 1.9.318~341 (UR-0025/0053): 순수 유틸 모듈 분리
+  _withBuiltinSource, _esc } = require('../lib/pure-utils');  // 1.9.318~345 (UR-0025/0053): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.344';
+const VERSION = '1.9.345';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3053,6 +3053,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심층: ROADMAP_STATUS_LABEL/COLOR→lib/catalogs 분리 (1.9.342)', run: () => { const c = require('../lib/catalogs'); const lblOk = c.ROADMAP_STATUS_LABEL && Object.keys(c.ROADMAP_STATUS_LABEL).length === 11 && c.ROADMAP_STATUS_LABEL.done === '완료' && c.ROADMAP_STATUS_LABEL.blocked === '오류'; const colOk = c.ROADMAP_STATUS_COLOR && Object.keys(c.ROADMAP_STATUS_COLOR).length === 11 && c.ROADMAP_STATUS_COLOR.done === '#16a34a' && c.ROADMAP_STATUS_COLOR.skill === '#8b5cf6'; const src = read(__filename); const moved = ROADMAP_STATUS_LABEL === c.ROADMAP_STATUS_LABEL && ROADMAP_STATUS_COLOR === c.ROADMAP_STATUS_COLOR && !/const ROADMAP_STATUS_LABEL = \{/.test(src); return lblOk && colOk && moved; } },
     { name: 'UR-0025 심층: SECRET_PATTERNS→lib/catalogs 보안 응집 분리 (1.9.343)', run: () => { const c = require('../lib/catalogs'); const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 13 && c.SECRET_PATTERNS.every(p => p.name && p.re instanceof RegExp); const A = 'A'.repeat(40); const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";'); const moved = SECRET_PATTERNS === c.SECRET_PATTERNS; return catOk && det && moved; } },
     { name: 'UR-0025 심층: SKILL_CATALOG_PRESETS→lib/catalogs 분리 (1.9.344)', run: () => { const c = require('../lib/catalogs'); const catOk = c.SKILL_CATALOG_PRESETS && Object.keys(c.SKILL_CATALOG_PRESETS).length === 2 && c.SKILL_CATALOG_PRESETS.vercel && c.SKILL_CATALOG_PRESETS.vercel.owner === 'vercel-labs' && c.SKILL_CATALOG_PRESETS.anthropic && c.SKILL_CATALOG_PRESETS.anthropic.repo === 'skills'; const moved = SKILL_CATALOG_PRESETS === c.SKILL_CATALOG_PRESETS; return catOk && moved; } },
+    { name: 'UR-0025 심층: _esc(HTML escape)→pure-utils 분리 + XSS 가드 (1.9.345)', run: () => { const m = require('../lib/pure-utils'); const work = m._esc('&<>"\'') === '&amp;&lt;&gt;&quot;&#39;' && m._esc('<script>x</script>') === '&lt;script&gt;x&lt;/script&gt;' && m._esc(null) === '' && m._esc(undefined) === '' && m._esc(42) === '42'; const moved = _esc === m._esc; return work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -13203,7 +13204,7 @@ function brainstormCmd(root, topic) {
 // 1.9.342 (UR-0025 심층): ROADMAP_STATUS_LABEL / ROADMAP_STATUS_COLOR 는 lib/catalogs.js 로 이전 (import).
 const ROADMAP_NODE_W = 220, ROADMAP_NODE_H = 72, ROADMAP_COL_GAP = 70, ROADMAP_ROW_GAP = 14;
 
-function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+// 1.9.345 (UR-0025 심층): _esc (HTML escape) 는 lib/pure-utils.js 로 이전 (import).
 // 1.9.328 (UR-0025): _truncate → lib/pure-utils.js 로 이동 (순수 문자열 절단, require 사용).
 
 // 1.9.329 (UR-0025): _roadmapMapStatus / _roadmapParseMilestones / _roadmapParseTokens → lib/pure-utils.js 로 이동 (순수 roadmap MD 파서, require 사용).

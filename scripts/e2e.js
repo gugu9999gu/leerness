@@ -4486,5 +4486,33 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.345 회귀 (UR-0025 심층): _esc(HTML escape)→pure-utils + roadmap.html XSS 이스케이프 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const pureOk = typeof m._esc === 'function'
+      && m._esc('&<>"\'') === '&amp;&lt;&gt;&quot;&#39;'
+      && m._esc('<script>x</script>') === '&lt;script&gt;x&lt;/script&gt;'
+      && m._esc(null) === '' && m._esc(undefined) === '' && m._esc(42) === '42';
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
+    const movedOut = !/function _esc\(/.test(harnessSrc) && _puImp.includes('_esc');
+    // 소비 회귀: roadmap.html 이 악성 task 제목을 이스케이프 (인젝션 방지)
+    const rd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-esc-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', rd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    fs.appendFileSync(path.join(rd, '.harness', 'progress-tracker.md'), '| T-7777 | done | <img src=x onerror=alert(1)> | src/x.js | M-1 | 2026-06-05 |\n');
+    cp.spawnSync(process.execPath, [CLI, 'roadmap', rd], { encoding: 'utf8', timeout: 20000 });
+    const rf = path.join(rd, 'roadmap.html');
+    const html = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8') : '';
+    const renderOk = html.length > 0 && !html.includes('<img src=x onerror') && html.includes('&lt;img');
+    ok = pureOk && movedOut && renderOk;
+    fs.rmSync(rd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.345) UR-0025 심층: _esc(HTML escape) 분리 + roadmap.html XSS 이스케이프 회귀 (UR-0025)' : '✗ _esc 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

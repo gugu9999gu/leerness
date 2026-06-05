@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.345 — 2026-06-05 — UR-0025(심층): _esc(HTML escape) 순수함수 분리
+
+**🔒 HTML escape 헬퍼(`_esc`)를 lib/pure-utils.js 로 분리 — roadmap.html 출력 인젝션 방지 보안 함수의 단위 테스트화. catalog vein 이후 순수함수 추출 전환 1번째.** (UR-0025 심층)
+
+### 배경
+정적 데이터 catalog 15종 분리 완료 → 모듈화의 나머지 절반(순수 함수 추출)으로 전환. `_esc` 는 roadmap.html 의 모든 사용자 입력(task 제목/ID/next-action 등 19개 사이트)을 이스케이프하는 **보안 관련** 순수 함수.
+
+### 구현 (UR-0025 심층 — 순수함수)
+1. **`_esc(s)`**(5문자 `& < > " '` → HTML 엔티티, null-safe) → `lib/pure-utils.js`. harness 19개 사용처는 import 된 바인딩 사용(호출 0변경).
+2. selftest 92→93 · e2e 289→290.
+
+### 검증
+- **selftest 93/93 PASS** · **E2E 290/290 PASS** (회귀 0).
+- 실측: 5문자 이스케이프 정확 · XSS 페이로드(`<script>`→`&lt;script&gt;`) · null/undefined→"" · 숫자/평문 보존 · **roadmap.html end-to-end**: 악성 task 제목(`<img src=x onerror=alert(1)>`) 이스케이프 확인(raw 미주입, `&lt;img` 형태).
+
 ## 1.9.344 — 2026-06-05 — UR-0025(심층): SKILL_CATALOG_PRESETS 분리 + UR-0057 완료
 
 **🧩 skill discover GitHub preset catalog 를 모듈로 분리 — catalog 추출 vein 마무리(동형 추출 10번째). + UR-0057(anti-laziness 분리, 1.9.336 기구현) 백로그 위생 완료.** (UR-0025 심층)
