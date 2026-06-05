@@ -4030,5 +4030,30 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.330 회귀 (UR-0025 모듈화): project-brief config(_BRIEF_FIELDS) + _briefFilled lib/pure-utils 분리 + brief 명령 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const cfgOk = Array.isArray(m._BRIEF_FIELDS) && m._BRIEF_FIELDS.length === 10 && m._BRIEF_FIELDS[0].key === 'intro';
+    const work = m._briefFilled({ intro: 'x', features: ['a'] }) === 2 && m._briefFilled({}) === 0;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
+    const movedOut = !/const _BRIEF_FIELDS = \[/.test(harnessSrc) && !/function _briefFilled\(/.test(harnessSrc)
+      && _puImp.includes('_BRIEF_FIELDS') && _puImp.includes('_briefFilled');
+    // 소비 명령 회귀: brief set + show (채움 N/10)
+    const bd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-brief-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', bd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'brief', 'set', '--intro', 'X', '--purpose', 'Y', '--path', bd], { encoding: 'utf8', timeout: 20000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'brief', 'show', '--path', bd], { encoding: 'utf8', timeout: 20000 });
+    const cmdOk = /2\/10/.test(r.stdout || '');
+    ok = cfgOk && work && movedOut && cmdOk;
+    fs.rmSync(bd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.330) lib/pure-utils brief config 분리: _BRIEF_FIELDS/_briefFilled 모듈 단일출처 + brief 명령 (UR-0025)' : '✗ brief config 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

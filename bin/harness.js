@@ -13,13 +13,14 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _countDatedBlocks, _extractDecisionBlocks, _classifyIntent,
   _sanitizeFences, _shellQuoteArg, _detectPwshFromEnv,
   _getLocalTz, _formatLocal, _truncate, _splitList,
-  _roadmapMapStatus, _roadmapParseMilestones, _roadmapParseTokens } = require('../lib/pure-utils');  // 1.9.318~329 (UR-0025): 순수 유틸 모듈 분리
+  _roadmapMapStatus, _roadmapParseMilestones, _roadmapParseTokens,
+  _BRIEF_FIELDS, _briefFilled } = require('../lib/pure-utils');  // 1.9.318~330 (UR-0025): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
 
-const VERSION = '1.9.329';
+const VERSION = '1.9.330';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3072,6 +3073,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: TZ/날짜 포맷 분리(_getLocalTz/_formatLocal) + 인라인 제거 (UR-0025 1.9.327)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._getLocalTz === 'function' && typeof m._formatLocal === 'function'; const work = m._formatLocal('2026-06-05T01:13:00.000Z', { tz: 'Asia/Seoul' }) === '2026-06-05 10:13 KST' && m._formatLocal('2026-06-05T01:13:00.000Z', { tz: 'Asia/Seoul', dateOnly: true }) === '2026-06-05' && m._formatLocal('') === '?'; const src = read(__filename); const moved = m._formatLocal === _formatLocal && !/^function _formatLocal\(/m.test(src) && !/^function _getLocalTz\(/m.test(src); return fnOk && work && moved; } },
     { name: 'lib/pure-utils: 문자열 유틸 분리(_truncate/_splitList) + 인라인 제거 (UR-0025 1.9.328)', run: () => { const m = require('../lib/pure-utils'); const work = m._truncate('hello world', 8) === 'hello w…' && m._truncate('hi', 8) === 'hi' && JSON.stringify(m._splitList('a, b ,c,')) === '["a","b","c"]'; const src = read(__filename); const moved = m._truncate === _truncate && m._splitList === _splitList && !/^function _truncate\(/m.test(src) && !/^function _splitList\(/m.test(src); return work && moved; } },
     { name: 'lib/pure-utils: roadmap MD 파서 분리(_roadmapMapStatus/Milestones/Tokens) + 인라인 제거 (UR-0025 1.9.329)', run: () => { const m = require('../lib/pure-utils'); const work = m._roadmapMapStatus('REQUESTED') === 'planned' && m._roadmapMapStatus('done') === 'done' && m._roadmapParseMilestones('### M-0001. 로그인\nStatus: in-progress\nProgress: 40%')[0].progress === 40 && m._roadmapParseTokens('| color | #fff |').color === '#fff'; const src = read(__filename); const moved = m._roadmapMapStatus === _roadmapMapStatus && !/^function _roadmapMapStatus\(/m.test(src) && !/^function _roadmapParseMilestones\(/m.test(src) && !/^function _roadmapParseTokens\(/m.test(src); return work && moved; } },
+    { name: 'lib/pure-utils: project-brief config 분리(_BRIEF_FIELDS/_briefFilled) + 인라인 제거 (UR-0025 1.9.330)', run: () => { const m = require('../lib/pure-utils'); const cfgOk = Array.isArray(m._BRIEF_FIELDS) && m._BRIEF_FIELDS.length === 10 && m._BRIEF_FIELDS[0].key === 'intro'; const work = m._briefFilled({ intro: 'x', features: ['a'] }) === 2 && m._briefFilled({}) === 0; const src = read(__filename); const moved = m._briefFilled === _briefFilled && m._BRIEF_FIELDS === _BRIEF_FIELDS && !/^const _BRIEF_FIELDS = \[/m.test(src) && !/^function _briefFilled\(/m.test(src); return cfgOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -18216,18 +18218,7 @@ function aboutCmd(opts = {}) {
 // ===== 1.9.307 (UR-0055 사용자명시): 프로젝트 청사진(brief) =====
 //   프로젝트 개요/소개/목적/기능을 .harness/project-brief.md(정본)에 유지 + README 개요 섹션 동기화 + 복사용 blueprint export.
 //   "복사하면 신규 프로젝트를 기초부터 재시작할 수 있는" 자기완결 청사진. 기존 project-brief.md 확장(비파괴).
-const _BRIEF_FIELDS = [
-  { key: 'intro', h: 'Intro', label: '소개', flag: 'intro', multi: false },
-  { key: 'purpose', h: 'Purpose', label: '목적', flag: 'purpose', multi: false },
-  { key: 'problem', h: 'Problem', label: '해결 문제', flag: 'problem', multi: false },
-  { key: 'features', h: 'Features', label: '핵심 기능', flag: 'features', multi: true },
-  { key: 'stack', h: 'Tech Stack', label: '기술 스택', flag: 'stack', multi: true },
-  { key: 'architecture', h: 'Architecture', label: '아키텍처', flag: 'architecture', multi: false },
-  { key: 'users', h: 'Users', label: '사용자', flag: 'users', multi: true },
-  { key: 'success', h: 'Success Criteria', label: '성공 기준', flag: 'success', multi: true },
-  { key: 'nonGoals', h: 'Non-Goals', label: '비목표', flag: 'non-goals', multi: true },
-  { key: 'currentState', h: 'Current State', label: '현재 상태', flag: 'current-state', multi: false },
-];
+// 1.9.330 (UR-0025): _BRIEF_FIELDS (10필드 config) → lib/pure-utils.js 로 이동 (순수 데이터, require 사용).
 function _briefPath(root) { return path.join(absRoot(root), '.harness', 'project-brief.md'); }
 function _loadBrief(root) {
   const brief = { project: detectProjectName(absRoot(root)), directionHistory: [] };
@@ -18259,7 +18250,7 @@ function _saveBrief(root, brief) {
   if (brief.directionHistory && brief.directionHistory.length) body += `\n## Direction History\n` + brief.directionHistory.map(x => `- ${x}`).join('\n') + '\n';
   writeUtf8(_briefPath(root), fm('project-brief', ['프로젝트 목적 확인', '신규 기능 판단', '계획 수립'], ['프로젝트 목적 변경', '사용자/범위 변경'], body));
 }
-function _briefFilled(brief) { return _BRIEF_FIELDS.filter(f => (f.multi ? (brief[f.key] && brief[f.key].length) : brief[f.key])).length; }
+// 1.9.330 (UR-0025): _briefFilled → lib/pure-utils.js 로 이동 (순수 derivation, require 사용).
 function _briefReadmeBlock(brief) {
   const L = [BRIEF_START, '## 프로젝트 개요', ''];
   if (brief.intro) L.push(brief.intro, '');

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.330 — 2026-06-05 — UR-0025(증분): project-brief config 분리
+
+**🧩 project-brief 필드 config(`_BRIEF_FIELDS`) + 채움 카운트(`_briefFilled`)를 lib/pure-utils 로 이전.** (UR-0025 micro-증분 계속)
+
+### 구현 (UR-0025)
+1. **`_BRIEF_FIELDS`**(10필드 순수 config) + **`_briefFilled`**(순수 채움 derivation) → `lib/pure-utils.js`. harness 인라인 제거 → require. (brief 텍스트 빌더 `_briefReadmeBlock`/`_briefBlueprint`는 BRIEF_START/VERSION 결합이라 harness 유지 — 후속.)
+2. selftest 77→78 · e2e 274→275.
+
+### 검증
+- **selftest 78/78 PASS** · **E2E 275/275 PASS** (회귀 0).
+- 실측: `_BRIEF_FIELDS.length`=10·`[0].key`=intro · `_briefFilled({intro,features})`=2 · brief set/show "채움 2/10" 정상.
+
+### 비고 (UR-0025 진행도)
+순수 함수 micro-추출이 실질 소진 단계 — lib/pure-utils 누적 32종. 남은 UR-0025 는 서브시스템 단위(brief 빌더/skill/wakeup 등, 상수·VERSION 결합 동반)라 multi-touch. 다음 방향은 사용자 확인 필요.
+
 ## 1.9.329 — 2026-06-05 — UR-0025(증분): roadmap MD 파서 3종 분리
 
 **🧩 순수 roadmap MD 파서 3종을 lib/pure-utils 로 이전.** (UR-0025 micro-증분 계속)
