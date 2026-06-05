@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.356 — 2026-06-05 — UR-0075 Phase B: migrate audit — 비파괴 스키마 drift 리포트
+
+**🧩 `leerness migrate audit` — 임시설치/변형 없이 프로젝트의 마이그레이션 필요 항목만 진단하는 비파괴 dry-run 리포트.** (UR-0075 Phase B — Phase A 가이드 다음 단계)
+
+### 배경
+Phase A 가이드는 AI 에이전트에게 "무엇을 해야 하는가"의 워크플로를 제공했으나, 실제 프로젝트가 **무엇이 어긋나 있는지**(버전 drift / canonical JSON 미생성 / 필수 파일 누락)는 사람이/AI가 수동 확인해야 했다. Phase B는 그 진단을 한 명령으로 자동화한다 — 임시설치·파일변형 없이(완전 비파괴) 읽기만으로.
+
+### 구현
+1. **`migrateAuditCmd(root, opts)`**(신규) + **`leerness migrate audit [--path <p>] [--json]`** — 3종 finding 감지:
+   - **version-drift**: `.harness/HARNESS_VERSION`(또는 추정) vs 도구 VERSION `compareVer` 비교 — 구버전 프로젝트 식별.
+   - **canonical-pending**: `decisions.md`/`lessons.md` 에 항목이 있으나 대응 `.json`(canonical) 부재 — UR-0053/0058 canonical 백필 대상.
+   - **missing-required**: `verify()` 필수 파일 매니페스트(9종) 대비 누락 파일.
+2. **완전 비파괴(dry-run)**: 읽기 전용 — `.json` 생성/파일 변형 없음. `--json` 은 `{projectVersion, toolVersion, willChange, findings:[{kind,detail,...}]}` 구조화 출력, 사람용은 항목별 권장 조치 안내.
+3. **clean 프로젝트**: `willChange:0` + "마이그레이션 필요 없음 — 최신 스키마 정합".
+
+### 검증
+- **selftest 102→103 PASS** · **E2E 300→301 PASS** (회귀 0).
+- 실측: clean init → `willChange:0`. 구버전(HARNESS_VERSION 1.9.6) + `decisions.md`(json 삭제) → `willChange:2` `version-drift,canonical-pending`. dry-run 후 `decisions.json` 미생성(비파괴 확인).
+
 ## 1.9.355 — 2026-06-05 — UR-0075 Phase A: 크로스버전 마이그레이션 가이드 + migrate/update --path
 
 **🧩 AI 에이전트용 크로스버전 마이그레이션 가이드(`migrate --guide`) + init/migrate/update `--path` 지원.** (UR-0075 Phase A — 비전 착수, 외부리뷰 버그 전량 해소 후)

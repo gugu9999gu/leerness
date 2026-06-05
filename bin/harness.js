@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.355';
+const VERSION = '1.9.356';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3060,6 +3060,7 @@ function _selfTestCases() {
     { name: 'UR-0066(외부리뷰 P2): shell:true 주입 가드 — agents bench task _shellQuoteArg + fetchNpmLatest npm.cmd', run: () => { const m = require('../lib/pure-utils'); const src = read(__filename); const benchQuoted = src.includes('const qTask = ' + '_shellQuoteArg(task)'); const npmCmd = /'win32' \? 'npm\.cmd' : 'npm'/.test(src); const q = m._shellQuoteArg('a & b'); const safe = (process.platform === 'win32' ? q === '"a & b"' : q === "'a & b'"); return benchQuoted && npmCmd && safe; } },
     { name: 'UR-0072(외부리뷰 P3): compareVer pre-release + _classifyCJK 한자 kana 귀속', run: () => { const m = require('../lib/pure-utils'); const verOk = m.compareVer('1.9.0-beta', '1.9.0') === -1 && m.compareVer('1.9.0', '1.9.0-beta') === 1 && m.compareVer('1.9.5', '1.9.5') === 0 && m.compareVer('1.9.6', '1.9.5') === 1; const jp = Buffer.from([0xE3, 0x81, 0x82, 0xE6, 0x97, 0xA5, 0xE6, 0x9C, 0xAC]); const cn = Buffer.from([0xE4, 0xB8, 0xAD, 0xE5, 0x9B, 0xBD]); const rj = m._classifyCJK(jp, jp.length); const rc = m._classifyCJK(cn, cn.length); const cjkOk = rj.japanese > rj.chinese && rc.chinese > 0 && rc.japanese === 0; return verOk && cjkOk; } },
     { name: 'UR-0075 Phase A: 마이그레이션 가이드(_migrationGuideText) + migrate --guide 와이어 + init/migrate/update --path', run: () => { const m = require('../lib/pure-utils'); const g = m._migrationGuideText('1.9.355'); const guideOk = typeof g === 'string' && g.includes('마이그레이션 가이드') && g.includes('update --check --path') && g.includes('selftest') && g.includes('canonical JSON') && g.includes('롤백') && g.includes('1.9.355'); const src = read(__filename); const wired = src.includes("has('--guide') || args[1] === " + "'guide'") && src.includes('install(arg(' + "'--path', args[1] || process.cwd())") && src.includes('updateCmd(arg(' + "'--path', args[1] || process.cwd())"); return guideOk && wired; } },
+    { name: 'UR-0075 Phase B: migrate audit(dry-run 스키마 drift) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migrateAuditCmd === 'function' && src.includes('migrateAuditCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'audit'"); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6759,6 +6760,29 @@ function verify(root) {
   if (!a.includes('protected-files.md')) { bad++; fail('AGENTS.md must reference protected-files.md'); }
   if (!a.includes('anti-lazy-work-policy.md')) { bad++; fail('AGENTS.md must reference anti-lazy-work-policy.md'); }
   if (bad) process.exitCode = 1; else ok('verify passed');
+}
+// 1.9.356 (UR-0075 Phase B): migrate audit — 비파괴 dry-run 스키마 drift 리포트(버전/ canonical JSON 백필/누락 파일). 실제 변경 X.
+function migrateAuditCmd(root, opts = {}) {
+  root = absRoot(root);
+  const findings = [];
+  const hvPath = path.join(root, '.harness', 'HARNESS_VERSION');
+  const projVer = exists(hvPath) ? read(hvPath).trim() : null;
+  if (!projVer) findings.push({ kind: 'no-version', detail: 'HARNESS_VERSION 없음 (미초기화 또는 아주 구버전)', action: `leerness migrate --path ${root}` });
+  else if (compareVer(projVer, VERSION) < 0) findings.push({ kind: 'version-drift', detail: `${projVer} → ${VERSION}`, action: `leerness update --yes --path ${root}` });
+  // canonical JSON 백필 필요 (구 MD-only → decisions.json/lessons.json)
+  if (exists(decisionsPath(root)) && !exists(decisionsJsonPath(root)) && _loadDecisions(root).length > 0) findings.push({ kind: 'canonical-pending', detail: 'decisions.md → decisions.json 백필 예정', action: 'decision add/drop 또는 migrate 시 자동' });
+  if (exists(lessonsPath(root)) && !exists(lessonsJsonPath(root)) && _loadLessons(root).length > 0) findings.push({ kind: 'canonical-pending', detail: 'lessons.md → lessons.json 백필 예정', action: 'lesson save/drop 또는 migrate 시 자동' });
+  // 누락 예상 파일 (현재 버전 required set 기준)
+  const required = ['.harness/plan.md', '.harness/progress-tracker.md', '.harness/guideline.md', '.harness/protected-files.md', '.harness/design-system.md', '.harness/anti-lazy-work-policy.md', '.harness/session-handoff.md', '.harness/current-state.md', 'AGENTS.md'];
+  for (const f of required) if (!exists(path.join(root, f))) findings.push({ kind: 'missing-file', detail: f, action: 'migrate 가 생성' });
+  if (opts.json) { log(JSON.stringify({ version: VERSION, root, projectVersion: projVer, willChange: findings.length, findings }, null, 2)); return; }
+  log(`# leerness migrate audit (1.9.356, UR-0075 dry-run) — 실제 변경 없음`);
+  log(`  대상: ${root}`);
+  log(`  프로젝트 버전: ${projVer || '(없음)'}  ·  도구 버전: ${VERSION}`);
+  if (!findings.length) { ok('마이그레이션 필요 없음 — 최신 스키마 정합'); return; }
+  log(`  예상 변경 ${findings.length}건:`);
+  for (const f of findings) log(`    • [${f.kind}] ${f.detail}${f.action ? `  → ${f.action}` : ''}`);
+  log(`\n  적용: leerness update --yes --path ${root}  ·  안전 가이드: leerness migrate --guide`);
 }
 function debug(root) {
   root = absRoot(root); let warnings = 0, failures = 0;
@@ -21019,6 +21043,7 @@ async function main() {
     return process.exit(1);
   }
   if (cmd === 'migrate' && (has('--guide') || args[1] === 'guide')) { log(_migrationGuideText(VERSION)); return; }  // 1.9.355 (UR-0075 Phase A): 크로스버전 마이그레이션 가이드
+  if (cmd === 'migrate' && (args[1] === 'audit' || has('--audit'))) return migrateAuditCmd(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()), { json: has('--json') });  // 1.9.356 (UR-0075 Phase B): dry-run 스키마 drift 리포트
   if (cmd === 'migrate')   return await install(arg('--path', args[1] || process.cwd()), { force:has('--force'), dry:has('--dry-run'), migration:true });  // 1.9.355 (UR-0075): --path 지원
   if (cmd === 'update')    return await updateCmd(arg('--path', args[1] || process.cwd()), { checkOnly: has('--check'), yes: has('--yes'), force: has('--force') });  // 1.9.355 (UR-0075): --path 지원
   if (cmd === 'auto-update' && args[1] === 'install') return autoUpdateInstall(arg('--path', args[2] || process.cwd()));

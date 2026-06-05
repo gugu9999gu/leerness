@@ -4777,5 +4777,32 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.356 회귀 (UR-0075 Phase B): migrate audit — clean=변경없음 · 구버전+canonical 누락=findings (비파괴 dry-run)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-aud-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // clean → willChange 0
+    const c1 = cp.spawnSync(process.execPath, [CLI, 'migrate', 'audit', '--path', d, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let cleanOk = false;
+    try { cleanOk = JSON.parse(c1.stdout).willChange === 0; } catch {}
+    // 구버전 + decisions.md(canonical 없음) → version-drift + canonical-pending
+    fs.writeFileSync(path.join(d, '.harness', 'HARNESS_VERSION'), '1.9.6\n');
+    fs.writeFileSync(path.join(d, '.harness', 'decisions.md'), '# Decisions\n\n### 2026-06-01 — A\n- Decision: x\n');
+    fs.rmSync(path.join(d, '.harness', 'decisions.json'), { force: true });
+    const c2 = cp.spawnSync(process.execPath, [CLI, 'migrate', 'audit', '--path', d, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let driftOk = false;
+    try { const j = JSON.parse(c2.stdout); const kinds = j.findings.map(f => f.kind); driftOk = j.projectVersion === '1.9.6' && j.willChange >= 2 && kinds.includes('version-drift') && kinds.includes('canonical-pending'); } catch {}
+    // dry-run: decisions.json 미생성(비파괴)
+    const nonDestructive = !fs.existsSync(path.join(d, '.harness', 'decisions.json'));
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = cleanOk && driftOk && nonDestructive;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.356) UR-0075 Phase B: migrate audit dry-run (clean/version-drift/canonical-pending, 비파괴) (UR-0075)' : '✗ migrate audit 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
