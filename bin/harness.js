@@ -16,13 +16,13 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _roadmapMapStatus, _roadmapParseMilestones, _roadmapParseTokens,
   _BRIEF_FIELDS, _briefFilled,
   BRIEF_START, BRIEF_END, _briefReadmeBlock, _briefBlueprint,
-  _parseLessonEntries } = require('../lib/pure-utils');  // 1.9.318~332 (UR-0025): 순수 유틸 모듈 분리
+  _parseLessonEntries, _matchConstraints } = require('../lib/pure-utils');  // 1.9.318~333 (UR-0025): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST } = require('../lib/catalogs');
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS } = require('../lib/catalogs');  // 1.9.333 (UR-0025): constraints catalog 분리
 
-const VERSION = '1.9.332';
+const VERSION = '1.9.333';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3077,6 +3077,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: project-brief config 분리(_BRIEF_FIELDS/_briefFilled) + 인라인 제거 (UR-0025 1.9.330)', run: () => { const m = require('../lib/pure-utils'); const cfgOk = Array.isArray(m._BRIEF_FIELDS) && m._BRIEF_FIELDS.length === 10 && m._BRIEF_FIELDS[0].key === 'intro'; const work = m._briefFilled({ intro: 'x', features: ['a'] }) === 2 && m._briefFilled({}) === 0; const src = read(__filename); const moved = m._briefFilled === _briefFilled && m._BRIEF_FIELDS === _BRIEF_FIELDS && !/^const _BRIEF_FIELDS = \[/m.test(src) && !/^function _briefFilled\(/m.test(src); return cfgOk && work && moved; } },
     { name: 'lib/pure-utils: brief 빌더 분리(_briefReadmeBlock/_briefBlueprint + BRIEF 마커, VERSION 주입) (UR-0025 1.9.331)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._briefReadmeBlock === 'function' && typeof m._briefBlueprint === 'function' && m.BRIEF_START.includes('project-brief:start'); const b = { project: 'X', intro: 'i', features: ['f1'] }; const rb = m._briefReadmeBlock(b); const bp = m._briefBlueprint(b, '9.9.9'); const work = rb.includes(m.BRIEF_START) && rb.includes(m.BRIEF_END) && /f1/.test(rb) && /Blueprint/.test(bp) && /leerness v9\.9\.9/.test(bp); const src = read(__filename); const moved = m._briefBlueprint === _briefBlueprint && m.BRIEF_START === BRIEF_START && !/^function _briefReadmeBlock\(/m.test(src) && !/^function _briefBlueprint\(/m.test(src) && !/^const BRIEF_START =/m.test(src); return fnOk && work && moved; } },
     { name: 'lib/pure-utils: lessons.md 파서 분리(_parseLessonEntries) + 인라인 제거 (UR-0025 1.9.332)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseLessonEntries('### 2026-06-05\n- Lesson: A\n- Tag: t\n\n### 2026-06-04\n- Lesson: B'); const work = r.length === 2 && r[0].text === 'A' && r[0].tag === 't' && r[1].tag === null && r[0].date === '2026-06-05'; const src = read(__filename); const moved = m._parseLessonEntries === _parseLessonEntries && !/^function _parseLessonEntries\(/m.test(src) && src.includes('for (const lesson of _parseLessonEntries(text))'); return work && moved; } },
+    { name: 'UR-0025 심층: constraints catalog→lib/catalogs + _matchConstraints→pure-utils 분리 (1.9.333)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6 && !!c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe; const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제'); const work = r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0; const src = read(__filename); const moved = _DEFAULT_PLATFORM_CONSTRAINTS === c._DEFAULT_PLATFORM_CONSTRAINTS && _matchConstraints === m._matchConstraints && !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(src) && src.includes('_matchConstraints(_loadPlatformConstraints(root), text)'); return catOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3754,63 +3755,7 @@ function roundHistoryCmd(root) {
 //   .harness/platform-constraints.json 에 플랫폼별 제약 catalog 저장 → 요청 텍스트 키워드 매칭 → 적용 가능한 제약 보고
 //   기본 catalog 6종: Stripe / OpenAI / Anthropic / GitHub / Discord / Twitter
 function _platformConstraintsPath(root) { return path.join(root, '.harness', 'platform-constraints.json'); }
-const _DEFAULT_PLATFORM_CONSTRAINTS = {
-  version: '1.9.208',
-  platforms: {
-    stripe: {
-      aliases: ['stripe', 'stripe api', 'payment', '결제'],
-      docs: 'https://stripe.com/docs/rate-limits',
-      constraints: [
-        { kind: 'rate-limit', detail: 'read: 100 req/s, write: 100 req/s (live mode), test mode: 25 req/s' },
-        { kind: 'idempotency', detail: 'Idempotency-Key 헤더 24h 유지 — 중복 결제 방지 필수' },
-        { kind: 'webhook', detail: 'webhook 서명 검증 필수 (Stripe-Signature header + endpoint secret)' }
-      ]
-    },
-    openai: {
-      aliases: ['openai', 'gpt', 'chatgpt', 'gpt-4', 'gpt-3'],
-      docs: 'https://platform.openai.com/docs/guides/rate-limits',
-      constraints: [
-        { kind: 'rate-limit', detail: 'tier-based: Free 3 RPM / Tier 1 500 RPM / Tier 5 10,000 RPM' },
-        { kind: 'token-limit', detail: 'TPM (tokens/min) 별도 — 큰 입력 시 RPM 도달 전 차단 가능' },
-        { kind: 'cost', detail: 'gpt-4: $30/$60 per 1M input/output tokens — 대량 호출 전 비용 추정 필수' }
-      ]
-    },
-    anthropic: {
-      aliases: ['anthropic', 'claude', 'claude api', 'sonnet', 'opus', 'haiku'],
-      docs: 'https://docs.anthropic.com/claude/reference/rate-limits',
-      constraints: [
-        { kind: 'rate-limit', detail: 'tier-based: Free 5 RPM / Tier 1 50 RPM / Tier 4 4,000 RPM' },
-        { kind: 'context-window', detail: 'claude-sonnet 200K context, claude-opus 200K, 1M tier 별도' },
-        { kind: 'cost', detail: 'sonnet: $3/$15 per 1M tokens (1M context tier 2x)' }
-      ]
-    },
-    github: {
-      aliases: ['github', 'github api', 'gh api', 'octokit'],
-      docs: 'https://docs.github.com/en/rest/rate-limit',
-      constraints: [
-        { kind: 'rate-limit', detail: 'authenticated: 5,000 req/hr, unauthenticated: 60 req/hr' },
-        { kind: 'rate-limit', detail: 'search API: 30 req/min (authenticated)' },
-        { kind: 'secondary', detail: 'secondary rate limit — concurrent + content creation 별도 가드' }
-      ]
-    },
-    discord: {
-      aliases: ['discord', 'discord api', 'discord bot'],
-      docs: 'https://discord.com/developers/docs/topics/rate-limits',
-      constraints: [
-        { kind: 'rate-limit', detail: 'global: 50 req/s, per-route 별도' },
-        { kind: 'invalid', detail: '10,000 invalid req/10min → 1h ban 위험' }
-      ]
-    },
-    twitter: {
-      aliases: ['twitter', 'twitter api', 'x api', 'x.com api'],
-      docs: 'https://developer.twitter.com/en/docs/twitter-api/rate-limits',
-      constraints: [
-        { kind: 'rate-limit', detail: 'tier-based: Free 1,500 posts/month, Basic 50,000 posts/month' },
-        { kind: 'auth', detail: 'OAuth 2.0 PKCE 필수 (user context), App-only는 별도 endpoint' }
-      ]
-    }
-  }
-};
+// 1.9.333 (UR-0025 심층): _DEFAULT_PLATFORM_CONSTRAINTS → lib/catalogs.js 로 이동 (순수 데이터, require 사용).
 function _loadPlatformConstraints(root) {
   try {
     const fp = _platformConstraintsPath(root);
@@ -3834,23 +3779,9 @@ function _writePlatformConstraints(root, catalog) {
   } catch { return false; }
 }
 // 사용자 요청 텍스트에서 플랫폼 alias 매칭 → 적용 제약 목록 반환
+// 1.9.333 (UR-0025 심층): 매칭 로직은 순수 _matchConstraints(catalog, text) (lib/pure-utils) — fs(load)는 여기서 주입.
 function _checkRequestConstraints(root, text) {
-  if (!text || typeof text !== 'string') return { matched: [], suggestions: [] };
-  const catalog = _loadPlatformConstraints(root);
-  const lower = text.toLowerCase();
-  const matched = [];
-  for (const [pid, plat] of Object.entries(catalog.platforms)) {
-    const aliases = plat.aliases || [];
-    const hit = aliases.find(a => lower.includes(a.toLowerCase()));
-    if (hit) matched.push({ platform: pid, matchedAlias: hit, docs: plat.docs, constraints: plat.constraints });
-  }
-  // suggestions — 보편 키워드 (api/rate/limit/integration) 시 catalog 검토 권장
-  const suggestions = [];
-  const generic = /\bapi\b|연동|integration|호출|rate|limit|quota|webhook/i.test(text);
-  if (generic && matched.length === 0) {
-    suggestions.push('일반적 API 연동 키워드 감지 — leerness constraints list 로 사전 등록된 플랫폼 catalog 확인 권장');
-  }
-  return { matched, suggestions, totalPlatforms: Object.keys(catalog.platforms).length };
+  return _matchConstraints(_loadPlatformConstraints(root), text);
 }
 
 // 1.9.209: pre-wake sub-agent audit (사용자 명시)

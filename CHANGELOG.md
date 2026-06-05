@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.333 — 2026-06-05 — UR-0025(심층): constraints 서브시스템 핵심 분리
+
+**🧩 constraints 서브시스템의 핵심(데이터 catalog + 순수 매처)을 모듈로 분리 — command 서브시스템 추출의 안전한 첫 단계.** (사용자 선택: UR-0025 심층)
+
+### 배경 (방향 결정)
+순수 함수 micro-추출 소진 → 사용자가 "command 서브시스템 심층 추출"을 선택. command 함수의 factory+deps 주입은 **새 패턴 도입**(결정매트릭스: 기존 패턴 유지·안정성 우선)이라 위험 → **phase 1은 서브시스템의 핵심(데이터·순수 로직)을 기존 모듈 패턴으로 추출**, fs/command 박막은 harness 유지.
+
+### 구현 (UR-0025 심층 phase 1)
+1. **`_DEFAULT_PLATFORM_CONSTRAINTS`**(6플랫폼 제약 catalog, ~57줄) → `lib/catalogs.js`(기존 정적 데이터 모듈).
+2. **`_matchConstraints(catalog, text)`**(순수 매칭: 플랫폼 alias 매칭 + 제안) → `lib/pure-utils.js`. `_checkRequestConstraints(root, text)` = `_matchConstraints(_loadPlatformConstraints(root), text)` (fs load 만 주입).
+3. selftest 80→81 · e2e 277→278.
+
+### 검증
+- **selftest 81/81 PASS** · **E2E 278/278 PASS** (회귀 0).
+- 실측: catalog 6플랫폼 · `_matchConstraints(cat, 'stripe 결제')`→matched stripe/total 6 · `(null,…)`→빈 결과 · constraints check + review-request(_checkRequestConstraints) 정상.
+- 비고: command 함수(constraintsCmd) 자체의 lib 이전은 factory 패턴 필요 → 별도 결정. 핵심 데이터·로직은 분리·테스트화 완료.
+
 ## 1.9.332 — 2026-06-05 — UR-0025(증분): lessons.md 파서 분리
 
 **🧩 순수 lessons.md 파서(`_parseLessonEntries`)를 lib/pure-utils 로 이전 (인라인 파싱 → 재사용 가능 단일 출처).** (UR-0025 micro-증분 계속)

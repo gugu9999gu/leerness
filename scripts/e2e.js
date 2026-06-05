@@ -4107,5 +4107,30 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.333 회귀 (UR-0025 심층): constraints 서브시스템 핵심 분리 — catalog→lib/catalogs + _matchConstraints→pure-utils + constraints 명령 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6;
+    const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제');
+    const work = catOk && r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0;
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const movedOut = !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(harnessSrc) && harnessSrc.includes('_matchConstraints(_loadPlatformConstraints(root), text)')
+      && /_DEFAULT_PLATFORM_CONSTRAINTS \} = require\('\.\.\/lib\/catalogs'\)/.test(harnessSrc);
+    // 소비 명령 회귀: constraints check (review-request 도 _checkRequestConstraints 사용)
+    const cd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-con-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', cd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const cr = cp.spawnSync(process.execPath, [CLI, 'constraints', 'check', 'stripe 결제 구현', '--path', cd], { encoding: 'utf8', timeout: 20000 });
+    const cmdOk = /stripe|플랫폼 매칭/.test(cr.stdout || '');
+    ok = work && movedOut && cmdOk;
+    fs.rmSync(cd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.333) UR-0025 심층: constraints catalog/_matchConstraints 분리 + constraints check 회귀 (UR-0025)' : '✗ constraints 서브시스템 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
