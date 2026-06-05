@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.357';
+const VERSION = '1.9.358';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3062,6 +3062,7 @@ function _selfTestCases() {
     { name: 'UR-0075 Phase A: 마이그레이션 가이드(_migrationGuideText) + migrate --guide 와이어 + init/migrate/update --path', run: () => { const m = require('../lib/pure-utils'); const g = m._migrationGuideText('1.9.355'); const guideOk = typeof g === 'string' && g.includes('마이그레이션 가이드') && g.includes('update --check --path') && g.includes('selftest') && g.includes('canonical JSON') && g.includes('롤백') && g.includes('1.9.355'); const src = read(__filename); const wired = src.includes("has('--guide') || args[1] === " + "'guide'") && src.includes('install(arg(' + "'--path', args[1] || process.cwd())") && src.includes('updateCmd(arg(' + "'--path', args[1] || process.cwd())"); return guideOk && wired; } },
     { name: 'UR-0075 Phase B: migrate audit(dry-run 스키마 drift) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migrateAuditCmd === 'function' && src.includes('migrateAuditCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'audit'"); } },
     { name: 'UR-0075 Phase C: migrate apply(canonical 백필 비파괴 적용) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migrateApplyCmd === 'function' && src.includes('migrateApplyCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'apply'"); } },
+    { name: 'UR-0075 Phase D: migrate plan(임시폴더 설치 후 비교) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migratePlanCmd === 'function' && src.includes('migratePlanCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'plan'"); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6821,6 +6822,51 @@ function migrateApplyCmd(root, opts = {}) {
     for (const s of skipped) log(`    • [${s.kind}] ${s.detail}  → ${s.reason}`);
   }
   if (!apply && applied.length) log(`\n  적용: leerness migrate apply --path ${root} --yes`);
+}
+// UR-0075 Phase D (1.9.358): migrate plan — 임시폴더에 현재 버전을 설치(서브프로세스 격리)한 뒤
+// 프로젝트의 .harness 코어 관리 파일과 비교해 정확한 마이그레이션 플랜을 산출. 읽기 전용(프로젝트 미변경).
+// 사용자 비전("임시 폴더에 leerness 설치 후 기존 프로젝트 내용을 정확히 마이그레이션")의 진단 단계.
+function migratePlanCmd(root, opts = {}) {
+  root = absRoot(root);
+  const plan = { version: VERSION, root, projectVersion: null, versionDrift: null, canonicalPending: [], missingFiles: [], tempInstallOk: false, willChange: 0 };
+  const hvPath = path.join(root, '.harness', 'HARNESS_VERSION');
+  plan.projectVersion = exists(hvPath) ? read(hvPath).trim() : null;
+  if (plan.projectVersion && compareVer(plan.projectVersion, VERSION) < 0) plan.versionDrift = `${plan.projectVersion} → ${VERSION}`;
+  if (exists(decisionsPath(root)) && !exists(decisionsJsonPath(root)) && _loadDecisions(root).length > 0) plan.canonicalPending.push('decisions.md → decisions.json');
+  if (exists(lessonsPath(root)) && !exists(lessonsJsonPath(root)) && _loadLessons(root).length > 0) plan.canonicalPending.push('lessons.md → lessons.json');
+  // 임시폴더에 현재 버전 init → 생성되는 .harness 코어 파일(depth-1) 비교 (서브프로세스 격리, stdout 미오염)
+  let tmp = null;
+  try {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-plan-'));
+    const langPath = path.join(root, '.harness', 'LANGUAGE');
+    const lang = exists(langPath) ? (read(langPath).trim() || 'ko') : 'ko';
+    const r = cp.spawnSync(process.execPath, [__filename, 'init', tmp, '--yes', '--language', lang, '--no-banner'], { encoding: 'utf8', timeout: 60000 });
+    plan.tempInstallOk = r.status === 0;
+    if (plan.tempInstallOk) {
+      const tmpHarness = path.join(tmp, '.harness');
+      let tmpFiles = [];
+      try { tmpFiles = fs.readdirSync(tmpHarness, { withFileTypes: true }).filter(e => e.isFile()).map(e => '.harness/' + e.name); } catch {}
+      for (const top of ['AGENTS.md', 'CLAUDE.md']) if (exists(path.join(tmp, top))) tmpFiles.push(top);
+      for (const f of tmpFiles) if (!exists(path.join(root, f))) plan.missingFiles.push(f);
+    }
+  } catch {}
+  finally { if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } }
+  plan.willChange = plan.missingFiles.length + plan.canonicalPending.length + (plan.versionDrift ? 1 : 0);
+  if (opts.json) { log(JSON.stringify(plan, null, 2)); return; }
+  log(`# leerness migrate plan (1.9.358, UR-0075 Phase D) — 임시폴더 설치 후 비교 · 읽기 전용(프로젝트 미변경)`);
+  log(`  대상: ${root}`);
+  log(`  프로젝트 버전: ${plan.projectVersion || '(없음)'}  ·  도구 버전: ${VERSION}`);
+  if (!plan.tempInstallOk) warn('임시폴더 설치 실패 — 파일 비교 생략 (버전/canonical 만 보고)');
+  if (!plan.willChange) { ok('마이그레이션 필요 없음 — 최신 스키마 정합'); return; }
+  log(`  예상 변경 ${plan.willChange}건:`);
+  if (plan.versionDrift) log(`    • [version-drift] ${plan.versionDrift}  → leerness update --yes --path ${root}`);
+  for (const c of plan.canonicalPending) log(`    • [canonical-pending] ${c}  → leerness migrate apply --path ${root} --yes`);
+  if (plan.missingFiles.length) {
+    log(`    • [missing-file] ${plan.missingFiles.length}건 (현재 버전이 생성하는 관리 파일 누락):`);
+    for (const f of plan.missingFiles.slice(0, 20)) log(`        - ${f}`);
+    if (plan.missingFiles.length > 20) log(`        … 외 ${plan.missingFiles.length - 20}건`);
+  }
+  log(`\n  전체 적용: leerness update --yes --path ${root}  ·  canonical만: leerness migrate apply --path ${root} --yes`);
 }
 function debug(root) {
   root = absRoot(root); let warnings = 0, failures = 0;
@@ -21083,6 +21129,7 @@ async function main() {
   if (cmd === 'migrate' && (has('--guide') || args[1] === 'guide')) { log(_migrationGuideText(VERSION)); return; }  // 1.9.355 (UR-0075 Phase A): 크로스버전 마이그레이션 가이드
   if (cmd === 'migrate' && (args[1] === 'audit' || has('--audit'))) return migrateAuditCmd(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()), { json: has('--json') });  // 1.9.356 (UR-0075 Phase B): dry-run 스키마 drift 리포트
   if (cmd === 'migrate' && args[1] === 'apply') return migrateApplyCmd(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()), { json: has('--json'), yes: has('--yes') });  // 1.9.357 (UR-0075 Phase C): canonical 백필 비파괴 적용 (기본 dry-run)
+  if (cmd === 'migrate' && args[1] === 'plan') return migratePlanCmd(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()), { json: has('--json') });  // 1.9.358 (UR-0075 Phase D): 임시폴더 설치 후 비교 마이그레이션 플랜 (읽기 전용)
   if (cmd === 'migrate')   return await install(arg('--path', args[1] || process.cwd()), { force:has('--force'), dry:has('--dry-run'), migration:true });  // 1.9.355 (UR-0075): --path 지원
   if (cmd === 'update')    return await updateCmd(arg('--path', args[1] || process.cwd()), { checkOnly: has('--check'), yes: has('--yes'), force: has('--force') });  // 1.9.355 (UR-0075): --path 지원
   if (cmd === 'auto-update' && args[1] === 'install') return autoUpdateInstall(arg('--path', args[2] || process.cwd()));

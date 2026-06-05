@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.358 — 2026-06-05 — UR-0075 Phase D: migrate plan — 임시폴더 설치 후 비교 마이그레이션 플랜 (umbrella 완결)
+
+**🧩 `leerness migrate plan` — 임시폴더에 현재 버전을 설치한 뒤 프로젝트의 .harness 코어 파일과 비교해 정확한 마이그레이션 플랜을 산출. 읽기 전용. UR-0075 마이그레이션 umbrella 완결.** (UR-0075 Phase D)
+
+### 배경
+사용자 비전: "임시 폴더에 leerness 설치 후 기존 프로젝트의 내용을 정확하게 마이그레이션." Phase A(가이드)·B(audit 진단)·C(apply 적용)에 이어, Phase D는 그 비전의 핵심인 **임시폴더 설치 기반 정밀 비교**를 구현한다. 임시폴더에 현재 버전을 실제로 설치(서브프로세스 격리)해 "최신 버전이 생성하는 관리 파일 집합"을 확보하고, 프로젝트의 현재 파일과 비교해 누락 파일을 정확히 식별한다.
+
+### 구현
+1. **`migratePlanCmd(root, opts)`**(신규) + **`leerness migrate plan [--path <p>] [--json]`**:
+   - **임시폴더 설치**: `mkdtempSync` → `cp.spawnSync(node, [harness, init, <tmp>, --yes, --language <projlang>, --no-banner])` (서브프로세스 격리 — stdout 미오염, 부작용 격리). e2e 검증 패턴 재사용.
+   - **비교**: 임시폴더 `.harness` 코어 파일(depth-1) + `AGENTS.md`/`CLAUDE.md` 중 프로젝트에 **없는** 파일 → `missing-file`.
+   - **통합**: `version-drift`(compareVer) + `canonical-pending`(decisions/lessons MD-without-JSON) 합산.
+2. **완전 읽기 전용**: 프로젝트 미변경 — 임시폴더만 사용 후 `rmSync` 자동 정리.
+3. `--json`: `{ projectVersion, versionDrift, canonicalPending[], missingFiles[], tempInstallOk, willChange }`. 각 finding 에 적용 명령 안내(`update --yes` / `migrate apply --yes`).
+
+### 검증
+- **selftest 104→105 PASS** · **E2E 302→303 PASS** (회귀 0).
+- 실측: clean → `willChange:0` `tempInstallOk:true`. 코어 파일(reuse-map.md) 삭제 → `missingFiles` 에 정확 감지 · `willChange:1`. 플랜 실행 후 프로젝트 미변경(읽기 전용 확인).
+
+### UR-0075 umbrella 완결
+Phase A(가이드) · B(audit 진단) · C(apply 적용) · **D(plan 임시폴더 비교)** 4단계 완료. 크로스버전 마이그레이션 워크플로: `migrate plan`(진단) → `migrate apply --yes`(canonical) / `update --yes`(버전) → `migrate audit`(재확인).
+
 ## 1.9.357 — 2026-06-05 — UR-0075 Phase C: migrate apply — canonical 백필 비파괴 적용
 
 **🧩 `leerness migrate apply` — `migrate audit` 가 찾은 '안전 항목'(canonical 백필)만 실제로 적용하는 실행 짝. 기본 dry-run, `--yes` 로 적용, 멱등.** (UR-0075 Phase C)

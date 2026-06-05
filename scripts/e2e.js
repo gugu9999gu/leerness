@@ -4830,5 +4830,30 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.358 회귀 (UR-0075 Phase D): migrate plan — 임시폴더 설치 후 비교 · clean=변경없음 · 코어파일 누락=missing 감지 · 읽기전용
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-plan-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // clean: willChange 0 + tempInstallOk
+    const c1 = cp.spawnSync(process.execPath, [CLI, 'migrate', 'plan', '--path', d, '--json'], { encoding: 'utf8', timeout: 90000 });
+    let cleanOk = false, tmpOk = false;
+    try { const j = JSON.parse(c1.stdout); cleanOk = j.willChange === 0 && j.missingFiles.length === 0; tmpOk = j.tempInstallOk === true; } catch {}
+    // 코어 관리 파일 삭제 → missing 감지
+    fs.rmSync(path.join(d, '.harness', 'reuse-map.md'), { force: true });
+    const c2 = cp.spawnSync(process.execPath, [CLI, 'migrate', 'plan', '--path', d, '--json'], { encoding: 'utf8', timeout: 90000 });
+    let missOk = false;
+    try { const j = JSON.parse(c2.stdout); missOk = j.missingFiles.includes('.harness/reuse-map.md') && j.willChange >= 1; } catch {}
+    // 읽기전용: 플랜은 프로젝트를 수정하지 않음 (reuse-map.md 재생성 안 됨)
+    const readOnly = !fs.existsSync(path.join(d, '.harness', 'reuse-map.md'));
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = cleanOk && tmpOk && missOk && readOnly;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.358) UR-0075 Phase D: migrate plan (임시폴더 설치 후 비교, clean/missing 감지, 읽기전용) (UR-0075)' : '✗ migrate plan 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
