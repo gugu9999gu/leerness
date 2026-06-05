@@ -4251,5 +4251,30 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.338 회귀 (UR-0025 심층): i18n STRINGS→lib/catalogs + _translate→pure-utils + _t 박막 (인터랙티브 전용 getter라 구조+순수동작 검증)
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const catOk = c.STRINGS && typeof c.STRINGS['common.ready'] === 'object' && c.STRINGS['common.ready'].en === 'Ready' && c.STRINGS['common.ready'].ko === '준비 완료';
+    const work = catOk && typeof m._translate === 'function'
+      && m._translate(c.STRINGS, 'common.ready', 'en') === 'Ready'
+      && m._translate(c.STRINGS, 'common.ready', 'ko') === '준비 완료'
+      && m._translate(c.STRINGS, 'no.such.key', 'en') === 'no.such.key'
+      && m._translate(null, 'x', 'ko') === 'x'
+      && m._translate({ k: { ko: '케이' } }, 'k', 'en') === '케이';
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
+    // _t 박막: 인라인 STRINGS 정의 제거 + import + _translate(STRINGS,..) 호출
+    const movedOut = !/const STRINGS = \{/.test(harnessSrc) && _catImp.includes('STRINGS') && _puImp.includes('_translate') && harnessSrc.includes('return _translate(STRINGS, key, lang)');
+    ok = work && movedOut;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.338) UR-0025 심층: i18n STRINGS/_translate 분리 + _t 박막 (UR-0025)' : '✗ i18n 서브시스템 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

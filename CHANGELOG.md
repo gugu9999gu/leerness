@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.338 — 2026-06-05 — UR-0025(심층): i18n STRINGS 서브시스템 분리
+
+**🧩 i18n 문자열 서브시스템의 핵심(ko/en catalog + 순수 조회)을 모듈로 분리 — 동형 추출 6번째.** (UR-0025 심층, "UR-0053+UR-0025 둘 다 진행" 중 Round A)
+
+### 배경
+constraints·intent-도메인·LSP·anti-laziness·persona에 이은 동형 추출 6번째. 사용자가 "UR-0053 + UR-0025 심층 둘 다 진행"을 지시 → 원자성·회귀격리를 위해 2 독립 라운드로 분리(Round A=UR-0025 i18n[decisions 무관, 저위험] → Round B=UR-0053 decisions canonical JSON). 17줄 catalog 라 전사 오류 회피용 일회용 마이그레이션 스크립트로 결정적 이동 후 삭제.
+
+### 구현 (UR-0025 심층)
+1. **`STRINGS`**(i18n ko/en catalog, 17키: install/repl/common) → `lib/catalogs.js`.
+2. **`_translate(strings, key, lang)`**(순수: catalog 주입, key→lang 값, fallback ko→key) → `lib/pure-utils.js`. harness `_t(key, lang)` = `_translate(STRINGS, key, lang)` 박막(호출처 0변경).
+3. selftest 85→86 · e2e 282→283.
+
+### 검증
+- **selftest 86/86 PASS** · **E2E 283/283 PASS** (회귀 0).
+- 실측: catalog 17키 · `_translate` ko/en/default·미존재키→키자체·null guard·en누락→ko fallback 정상. (`_t` 는 인터랙티브 install/REPL 전용 getter — 구조+순수동작 검증)
+
 ## 1.9.337 — 2026-06-05 — UR-0025(심층): review persona 서브시스템 분리
 
 **🧩 코드리뷰 persona 서브시스템의 핵심(5종 페르소나 catalog + 순수 요약 변환)을 모듈로 분리 — 동형 추출 5번째.** (UR-0025 심층)

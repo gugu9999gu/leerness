@@ -19,13 +19,13 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _parseLessonEntries, _matchConstraints, _matchDomain,
   _detectLspLang, _matchLspSymbols,
   _detectOptimism: _puDetectOptimism, _computeConfidence: _puComputeConfidence,
-  _personaSummaries } = require('../lib/pure-utils');  // 1.9.318~337 (UR-0025): 순수 유틸 모듈 분리
+  _personaSummaries, _translate } = require('../lib/pure-utils');  // 1.9.318~338 (UR-0025): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS } = require('../lib/catalogs');  // 1.9.337 (UR-0025): persona catalog 분리
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS } = require('../lib/catalogs');  // 1.9.338 (UR-0025): i18n STRINGS catalog 분리
 
-const VERSION = '1.9.337';
+const VERSION = '1.9.338';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1973,29 +1973,7 @@ async function skillAutoCacheCmd(root, sub) {
 //   사용자 명시: "설치 가이드에서 언어 선택에 따라 설치 가이드 및 REPL agent 모드 등 설정된 언어로 표시"
 //   설계: 핵심 string table (ko/en) + _t(key, lang) helper. 설치 시 선택 언어 → .harness/LANGUAGE 저장.
 //   lang 결정: explicit > .harness/LANGUAGE > LEERNESS_LANG env > 'ko' (default)
-const STRINGS = {
-  // 설치 가이드 prompt
-  'install.lang.title': { ko: '설치 언어를 선택하세요', en: 'Select install language' },
-  'install.lang.auto':  { ko: '자동 감지', en: 'Auto detect' },
-  'install.lang.auto.desc': { ko: '디렉토리/파일 + 시스템(OS) 언어 자동 판별 (한국어/영어)', en: 'Auto-detect from dir/files + system (OS) locale (KO/EN)' },
-  'install.lang.sysNotice': { ko: '시스템 언어 감지', en: 'System language detected' },
-  'install.lang.ko': { ko: '한국어', en: 'Korean' },
-  'install.lang.ko.desc': { ko: '모든 인스트럭션을 한국어로 생성', en: 'All instructions in Korean' },
-  'install.lang.en': { ko: 'English', en: 'English' },
-  'install.lang.en.desc': { ko: '모든 인스트럭션을 영어로 생성', en: 'All instructions in English' },
-  'install.agents.title': { ko: 'CLI 에이전트 활성화 (복수 선택, Space 토글) — sub-agent 위임용',
-                            en: 'Enable CLI agents (multi-select, Space toggle) — for sub-agent dispatch' },
-  'install.agents.none': { ko: '선택 안함 (나중에 setup-agents)', en: 'None (later setup-agents)' },
-  'install.complete': { ko: '✓ 설치 완료', en: '✓ Install complete' },
-  // REPL agent 모드
-  'repl.welcome.title': { ko: 'leerness REPL agent', en: 'leerness REPL agent' },
-  'repl.welcome.subtitle': { ko: 'Tab provider · Shift+Tab model · :help · /slash', en: 'Tab provider · Shift+Tab model · :help · /slash' },
-  'repl.welcome.start': { ko: '시작하려면 메시지를 입력하세요', en: 'Type a message to start' },
-  // 공통
-  'common.cancel': { ko: '취소됨', en: 'Cancelled' },
-  'common.confirm': { ko: '확인', en: 'Confirm' },
-  'common.ready': { ko: '준비 완료', en: 'Ready' }
-};
+// 1.9.338 (UR-0025 심층): STRINGS (i18n ko/en catalog) 는 lib/catalogs.js 로 이전 (import). _t 는 _translate(STRINGS,..) 박막.
 // 현재 사용 언어 결정 (env > config > 'ko')
 function _currentLang(root) {
   if (process.env.LEERNESS_LANG) return process.env.LEERNESS_LANG === 'en' ? 'en' : 'ko';
@@ -2011,10 +1989,9 @@ function _currentLang(root) {
   } catch {}
   return 'ko';  // default
 }
+// 1.9.338 (UR-0025 심층): 순수 _translate(STRINGS, key, lang) (lib/pure-utils) 박막 — STRINGS catalog 주입.
 function _t(key, lang) {
-  const entry = STRINGS[key];
-  if (!entry) return key;  // fallback: 키 자체 반환
-  return entry[lang || 'ko'] || entry.ko || key;
+  return _translate(STRINGS, key, lang);
 }
 
 // 1.9.206: UI/UX 개선 — typewriter / fade-in 효과 (opt-in via LEERNESS_TYPEWRITER=1)
@@ -3085,6 +3062,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심층: LSP catalog→lib/catalogs(_LSP_LANG_PATTERNS) + _detectLspLang/_matchLspSymbols→pure-utils 분리 (1.9.335)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._LSP_LANG_PATTERNS && Object.keys(c._LSP_LANG_PATTERNS).length === 5 && Array.isArray(c._LSP_LANG_PATTERNS.javascript); const langOk = m._detectLspLang('a.py') === 'python' && m._detectLspLang('b.go') === 'go' && m._detectLspLang('c.md') === 'javascript'; const sy = m._matchLspSymbols(c._LSP_LANG_PATTERNS, 'function alpha(){}\nclass Beta{}', 'javascript'); const work = sy.length === 2 && sy[0].name === 'alpha' && sy[0].kind === 'function' && sy[1].kind === 'class' && m._matchLspSymbols(null, 'x', 'javascript').length === 0; const src = read(__filename); const moved = _LSP_LANG_PATTERNS === c._LSP_LANG_PATTERNS && _detectLspLang === m._detectLspLang && _matchLspSymbols === m._matchLspSymbols && !/const _LSP_LANG_PATTERNS = \{/.test(src) && !/function _detectLspLang\(/.test(src); return catOk && langOk && work && moved; } },
     { name: 'UR-0025 심층(Codex 위임·검증): anti-laziness catalog→lib/catalogs(OPTIMISM_PATTERNS) + optimism 순수로직→pure-utils 분리 (1.9.336)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = Array.isArray(c.OPTIMISM_PATTERNS) && c.OPTIMISM_PATTERNS.length === 10 && c.OPTIMISM_PATTERNS[0].kind === 'API'; const ev = 'API 호출 완료, POST /users'; const sus = m._detectOptimism(c.OPTIMISM_PATTERNS, ev, 'function x(){}'); const conf = m._computeConfidence(c.OPTIMISM_PATTERNS, ev, 'function x(){}'); const work = sus.some(s => s.kind === 'API' && s.severity === 'high') && conf < 0.5 && m._computeConfidence(c.OPTIMISM_PATTERNS, '정리함', 'x') === 1 && m._detectOptimism(null, ev, 'x').length === 0 && m._extractUrlClaims('POST /a').length === 1 && m._verifyUrlClaim({ path: '/a' }, 'has /a') === true; const src = read(__filename); const moved = OPTIMISM_PATTERNS === c.OPTIMISM_PATTERNS && _puDetectOptimism === m._detectOptimism && !/const OPTIMISM_PATTERNS = \[/.test(src) && !/function _extractUrlClaims\(/.test(src); return catOk && work && moved; } },
     { name: 'UR-0025 심층: persona catalog→lib/catalogs(BUILT_IN_PERSONAS) + _personaSummaries→pure-utils 분리 (1.9.337)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.BUILT_IN_PERSONAS && Object.keys(c.BUILT_IN_PERSONAS).length === 5 && c.BUILT_IN_PERSONAS.security && typeof c.BUILT_IN_PERSONAS.security.body === 'string'; const sm = m._personaSummaries(c.BUILT_IN_PERSONAS); const work = Array.isArray(sm) && sm.length === 5 && sm[0].id === 'security' && sm[0].body === undefined && typeof sm[0].name === 'string' && m._personaSummaries(null).length === 0; const src = read(__filename); const moved = BUILT_IN_PERSONAS === c.BUILT_IN_PERSONAS && _personaSummaries === m._personaSummaries && !/const BUILT_IN_PERSONAS = \{/.test(src); return catOk && work && moved; } },
+    { name: 'UR-0025 심층: i18n STRINGS catalog→lib/catalogs + _translate→pure-utils 분리 (1.9.338)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.STRINGS && typeof c.STRINGS['common.ready'] === 'object' && c.STRINGS['common.ready'].en === 'Ready'; const work = m._translate(c.STRINGS, 'common.ready', 'en') === 'Ready' && m._translate(c.STRINGS, 'common.ready', 'ko') === '준비 완료' && m._translate(c.STRINGS, 'no.such.key', 'en') === 'no.such.key' && m._translate(null, 'x', 'ko') === 'x' && m._translate({ k: { ko: '케이' } }, 'k', 'en') === '케이'; const src = read(__filename); const moved = STRINGS === c.STRINGS && _translate === m._translate && !/const STRINGS = \{/.test(src); return catOk && work && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
