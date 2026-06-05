@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.346 — 2026-06-05 — UR-0025(심층): _roadmapTokenStyles 순수함수 분리
+
+**🧩 roadmap.html `:root` CSS 변수 빌더(`_roadmapTokenStyles`)를 lib/pure-utils.js 로 분리 — 순수함수 추출 2번째. + null-safe 가드 보강.** (UR-0025 심층)
+
+### 구현 (UR-0025 심층 — 순수함수)
+1. **`_roadmapTokenStyles(designTokens, cssVariables)`**(design token + CSS var → `:root { --lr-* }` CSS 문자열, 모듈 의존 0) → `lib/pure-utils.js`. `_roadmapLayout` 은 ROADMAP_NODE_* 상수를 `_roadmapHTML` 과 공유(entangled)라 harness 유지.
+2. 추출 시 **null-safe 가드 보강**(`designTokens||{}`, `cssVariables||{}`) — 기존 동작 동일, 견고성 향상.
+3. selftest 93→94 · e2e 290→291.
+
+### 검증
+- **selftest 94/94 PASS** · **E2E 291/291 PASS** (회귀 0).
+- 실측: `:root` prefix · token→`--lr-primary` · cssVar→`--lr-surface` · custom passthrough(`--lr-custom`) · 기본값(card-bg/edge/page-bg) · null-safe · **roadmap.html end-to-end** `:root`/`--lr-` CSS 주입 정상.
+
 ## 1.9.345 — 2026-06-05 — UR-0025(심층): _esc(HTML escape) 순수함수 분리
 
 **🔒 HTML escape 헬퍼(`_esc`)를 lib/pure-utils.js 로 분리 — roadmap.html 출력 인젝션 방지 보안 함수의 단위 테스트화. catalog vein 이후 순수함수 추출 전환 1번째.** (UR-0025 심층)

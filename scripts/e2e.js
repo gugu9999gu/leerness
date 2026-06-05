@@ -4514,5 +4514,32 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.346 회귀 (UR-0025 심층): _roadmapTokenStyles→pure-utils + roadmap.html CSS 변수 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const out = m._roadmapTokenStyles({ 'color.primary': '#2563eb' }, { 'color-surface': '#fff', 'custom': '#abc' });
+    const pureOk = typeof m._roadmapTokenStyles === 'function' && out.startsWith(':root {')
+      && out.includes('--lr-primary: #2563eb') && out.includes('--lr-surface: #fff') && out.includes('--lr-custom: #abc')
+      && out.includes('--lr-card-bg') && out.includes('--lr-page-bg') && m._roadmapTokenStyles(null, null).startsWith(':root {');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
+    const movedOut = !/function _roadmapTokenStyles\(/.test(harnessSrc) && _puImp.includes('_roadmapTokenStyles');
+    // 소비 회귀: roadmap.html 이 :root CSS 변수 주입
+    const rd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tok-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', rd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'roadmap', rd], { encoding: 'utf8', timeout: 20000 });
+    const rf = path.join(rd, 'roadmap.html');
+    const html = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8') : '';
+    const renderOk = html.includes(':root {') && html.includes('--lr-');
+    ok = pureOk && movedOut && renderOk;
+    fs.rmSync(rd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.346) UR-0025 심층: _roadmapTokenStyles 분리 + roadmap.html CSS 변수 회귀 (UR-0025)' : '✗ _roadmapTokenStyles 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
