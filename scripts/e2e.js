@@ -4568,5 +4568,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.348 회귀 (외부리뷰 UR-0059 P0): --path 라우팅 일관화 — positional-dispatch 가 --path 우선(→positional→cwd)
+total++;
+{
+  let ok = false;
+  try {
+    const A = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pa-'));
+    const Bd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pb-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', A, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', Bd, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.appendFileSync(path.join(A, '.harness', 'progress-tracker.md'), '| T-0001 | done | AONLYMARK | x | M-1 | 2026-06-05 |\n');
+    fs.appendFileSync(path.join(Bd, '.harness', 'progress-tracker.md'), '| T-0002 | done | BONLYMARK | x | M-1 | 2026-06-05 |\n');
+    const runIn = (cwd, a) => (cp.spawnSync(process.execPath, [CLI, ...a], { cwd, encoding: 'utf8', timeout: 20000 }).stdout || '');
+    const flagOut = runIn(A, ['handoff', '--path', Bd]);  // A(cwd)에서 --path B
+    const posOut = runIn(A, ['handoff', Bd]);             // positional B
+    const cwdOut = runIn(A, ['handoff']);                 // cwd A
+    const flagOk = /BONLYMARK/.test(flagOut) && !/AONLYMARK/.test(flagOut);  // --path 우선(버그였으면 AONLY)
+    const posOk = /BONLYMARK/.test(posOut);              // positional 회귀
+    const cwdOk = /AONLYMARK/.test(cwdOut);              // cwd fallback 회귀
+    ok = flagOk && posOk && cwdOk;
+    fs.rmSync(A, { recursive: true, force: true });
+    fs.rmSync(Bd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.348) 외부리뷰 UR-0059(P0): --path 라우팅 일관화 + positional/cwd 회귀 (UR-0059)' : '✗ --path 라우팅 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

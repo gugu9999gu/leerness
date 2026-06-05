@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.348 — 2026-06-05 — 외부리뷰 UR-0059(P0): --path 라우팅 일관화
+
+**🔴 외부 멀티모델 리뷰 P0 수정 — `--path` 플래그가 ~22개 positional-dispatch 명령에서 무시되고 CWD 로 fallback 되던 버그 해소.** (Sonnet 4.8 F-01 발견, 하네스 재현 검증)
+
+### 배경
+`nonFlagArgs()` 가 `--path <value>` 쌍을 제거 → `roadmapCmd(args[1] || process.cwd())` 류 22개 dispatch 가 `--path` 를 무시하고 CWD/positional 로 fallback. CWD 에 `.harness` 가 있으면 silent wrong-target(타 프로젝트 데이터 읽기/쓰기). 영속 팀(올바른 프로젝트 타깃팅, UR-0073)의 전제조건.
+
+### 구현
+1. 22개 dispatch 사이트 `(args[N] || process.cwd())` → `(arg('--path', args[N] || process.cwd()))` 일괄 — **--path 우선 → positional → cwd** 정합. (128개 `arg('--path')` 사이트와 일관화)
+2. 영향 명령: status/verify/debug/audit/check/handoff/reuse-map/gate/verify-code/retro/insights/roadmap/graph(args[1]) + auto-update install/scan secrets/encoding check/self check/readme sync/consistency/ui consistency/setup-agents(args[2]).
+3. selftest 95→96 · e2e 292→293.
+
+### 검증
+- **selftest 96/96 PASS** · **E2E 293/293 PASS** (회귀 0).
+- 재현 해소 실측: A(cwd)에서 `handoff --path B` → **B 데이터 사용**(이전: A) · positional `handoff B` → B(회귀 OK) · `handoff`(무인자) → A cwd(회귀 OK) · `scan secrets --path B`(args[2] 패턴) 정상.
+
 ## 1.9.347 — 2026-06-05 — UR-0025(심층): _parseSkillMd 순수 파서 분리
 
 **🧩 SKILL.md frontmatter 파서(`_parseSkillMd`, BOM-aware)를 lib/pure-utils.js 로 분리 — 순수함수 추출 3번째. 스킬 설치/임포트의 사용자 입력 파싱(Windows Notepad BOM 호환).** (UR-0025 심층)

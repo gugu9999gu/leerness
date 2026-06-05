@@ -27,7 +27,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.347';
+const VERSION = '1.9.348';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3046,6 +3046,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심층: _esc(HTML escape)→pure-utils 분리 + XSS 가드 (1.9.345)', run: () => { const m = require('../lib/pure-utils'); const work = m._esc('&<>"\'') === '&amp;&lt;&gt;&quot;&#39;' && m._esc('<script>x</script>') === '&lt;script&gt;x&lt;/script&gt;' && m._esc(null) === '' && m._esc(undefined) === '' && m._esc(42) === '42'; const moved = _esc === m._esc; return work && moved; } },
     { name: 'UR-0025 심층: _roadmapTokenStyles→pure-utils 분리 (1.9.346)', run: () => { const m = require('../lib/pure-utils'); const out = m._roadmapTokenStyles({ 'color.primary': '#2563eb' }, { 'color-surface': '#fff', 'custom': '#abc' }); const work = out.startsWith(':root {') && out.includes('--lr-primary: #2563eb') && out.includes('--lr-surface: #fff') && out.includes('--lr-custom: #abc') && out.includes('--lr-card-bg') && m._roadmapTokenStyles(null, null).startsWith(':root {'); const moved = _roadmapTokenStyles === m._roadmapTokenStyles; return work && moved; } },
     { name: 'UR-0025 심층: _parseSkillMd(SKILL.md frontmatter, BOM-aware)→pure-utils 분리 (1.9.347)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseSkillMd('---\nname: s1\ndescription: "d1"\n---\nbody'); const work = r.meta.name === 's1' && r.meta.description === 'd1' && r.body === 'body' && m._parseSkillMd('﻿---\nname: b\n---\nx').meta.name === 'b' && Object.keys(m._parseSkillMd('plain text').meta).length === 0 && m._parseSkillMd('plain text').body === 'plain text' && m._parseSkillMd(null).body === ''; const moved = _parseSkillMd === m._parseSkillMd; return work && moved; } },
+    { name: 'UR-0059(외부리뷰 P0): --path 라우팅 일관화 — bare args[N]||cwd 제거 + arg(--path) wrap', run: () => { const src = read(__filename); const bare1 = '(args[1] ' + '|| process.cwd())'; const bare2 = '(args[2] ' + '|| process.cwd())'; const noBare = !src.includes(bare1) && !src.includes(bare2); const wrapped = src.includes('arg(' + "'--path', args[1] || process.cwd())") && src.includes('arg(' + "'--path', args[2] || process.cwd())"); const argDefault = arg('--definitely-not-real-xyz', 'SENT') === 'SENT'; return noBare && wrapped && argDefault; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -20984,18 +20985,18 @@ async function main() {
   }
   if (cmd === 'migrate')   return await install(args[1] || process.cwd(), { force:has('--force'), dry:has('--dry-run'), migration:true });
   if (cmd === 'update')    return await updateCmd(args[1] || process.cwd(), { checkOnly: has('--check'), yes: has('--yes'), force: has('--force') });
-  if (cmd === 'auto-update' && args[1] === 'install') return autoUpdateInstall(args[2] || process.cwd());
-  if (cmd === 'status')    return status(args[1] || process.cwd());
-  if (cmd === 'verify')    return verify(args[1] || process.cwd());
-  if (cmd === 'debug')     return debug(args[1] || process.cwd());
-  if (cmd === 'audit')     return audit(args[1] || process.cwd());
-  if (cmd === 'check')     return preCheck(args[1] || process.cwd());
-  if (cmd === 'scan' && args[1] === 'secrets')   return scanSecrets(args[2] || process.cwd());
-  if (cmd === 'encoding' && args[1] === 'check') return encodingCheck(args[2] || process.cwd());
+  if (cmd === 'auto-update' && args[1] === 'install') return autoUpdateInstall(arg('--path', args[2] || process.cwd()));
+  if (cmd === 'status')    return status(arg('--path', args[1] || process.cwd()));
+  if (cmd === 'verify')    return verify(arg('--path', args[1] || process.cwd()));
+  if (cmd === 'debug')     return debug(arg('--path', args[1] || process.cwd()));
+  if (cmd === 'audit')     return audit(arg('--path', args[1] || process.cwd()));
+  if (cmd === 'check')     return preCheck(arg('--path', args[1] || process.cwd()));
+  if (cmd === 'scan' && args[1] === 'secrets')   return scanSecrets(arg('--path', args[2] || process.cwd()));
+  if (cmd === 'encoding' && args[1] === 'check') return encodingCheck(arg('--path', args[2] || process.cwd()));
   if (cmd === 'lazy' && args[1] === 'detect')    return lazyDetect(args[2] || process.cwd(), { json: has('--json') });
   if (cmd === 'memory' && args[1] === 'search')  return memorySearch(arg('--path', process.cwd()), args.slice(2).join(' '));
-  if (cmd === 'handoff')      return handoffCmd(args[1] || process.cwd());
-  if (cmd === 'reuse-map')    return reuseMapCmd(args[1] || process.cwd());
+  if (cmd === 'handoff')      return handoffCmd(arg('--path', args[1] || process.cwd()));
+  if (cmd === 'reuse-map')    return reuseMapCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'verify-claim') return verifyClaimCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'orchestrate')  return await orchestrateCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')));
   if (cmd === 'llm-bench' && args[1] === 'record') return llmBenchRecordCmd(arg('--path', process.cwd()));
@@ -21054,15 +21055,15 @@ async function main() {
   if (cmd === 'health') return healthCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'reuse' && args[1] === 'autodetect') return reuseAutodetectCmd(args[2] || arg('--path', process.cwd()));
-  if (cmd === 'setup-agents' || cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(args[1] && args[1] !== 'agents' ? args[1] : (args[2] || process.cwd()));
+  if (cmd === 'setup-agents' || cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(args[1] && args[1] !== 'agents' ? args[1] : (arg('--path', args[2] || process.cwd())));
   if (cmd === 'session' && args[1] === 'close') return sessionClose(args[2] || process.cwd(), { json: has('--json') });
   // 1.9.151: viewwork 명령 제거 (사용자 명시 — leerness 와 무관). session close 의 viewworkEmit 콜도 함께 제거.
   if (cmd === 'route')     return route(args[1] || 'planning');
-  if (cmd === 'self' && args[1] === 'check')   return await selfCheck(absRoot(args[2] || process.cwd()));
+  if (cmd === 'self' && args[1] === 'check')   return await selfCheck(absRoot(arg('--path', args[2] || process.cwd())));
   if (cmd === 'self' && args[1] === 'migrate') return log('Run: npx --yes leerness@latest migrate . --dry-run, then migrate without --dry-run after review.');
-  if (cmd === 'readme' && args[1] === 'sync')  return readmeCmd(args[2] || process.cwd());
-  if (cmd === 'consistency' && args[1] === 'check')              return consistencyCheck(args[2] || process.cwd());
-  if (cmd === 'consistency' && args[1] === 'merge-design-guide') return mergeDesign(args[2] || process.cwd());
+  if (cmd === 'readme' && args[1] === 'sync')  return readmeCmd(arg('--path', args[2] || process.cwd()));
+  if (cmd === 'consistency' && args[1] === 'check')              return consistencyCheck(arg('--path', args[2] || process.cwd()));
+  if (cmd === 'consistency' && args[1] === 'merge-design-guide') return mergeDesign(arg('--path', args[2] || process.cwd()));
   if (cmd === 'skill' && args[1] === 'list')        return skillList(args[2] || arg('--path', process.cwd()));
   if (cmd === 'skill' && args[1] === 'info')        return skillInfo(args[2], absRoot(arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'add')         return addSkill(absRoot(arg('--path', process.cwd())), args[2]);
@@ -21090,14 +21091,14 @@ async function main() {
   // 1.9.192: skill auto-cache — 공식 organization catalog 24h 캐시 관리 (C축 보강)
   if (cmd === 'skill' && args[1] === 'auto-cache')   return await skillAutoCacheCmd(absRoot(arg('--path', process.cwd())), args[2] || 'status');
   if (cmd === 'mcp' && args[1] === 'serve')         return mcpServeCmd(absRoot(arg('--path', process.cwd())));
-  if (cmd === 'gate')                               return gate(args[1] || process.cwd());
-  if (cmd === 'verify-code')                        return verifyCodeCmd(args[1] || process.cwd());
+  if (cmd === 'gate')                               return gate(arg('--path', args[1] || process.cwd()));
+  if (cmd === 'verify-code')                        return verifyCodeCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'lessons')                            return lessonsCmd(arg('--path', process.cwd()));
-  if (cmd === 'retro')                              return retroCmd(args[1] || process.cwd());
-  if (cmd === 'insights')                           return insightsCmd(args[1] || process.cwd());
+  if (cmd === 'retro')                              return retroCmd(arg('--path', args[1] || process.cwd()));
+  if (cmd === 'insights')                           return insightsCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'brainstorm')                         return brainstormCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'roadmap' && args[1] === 'auto')      return roadmapAutoCmd(arg('--path', process.cwd()), args[2]);
-  if (cmd === 'roadmap')                            return roadmapCmd(args[1] || process.cwd());
+  if (cmd === 'roadmap')                            return roadmapCmd(arg('--path', args[1] || process.cwd()));
   // 1.9.201: next-action queue CLI (E축 9.5→10)
   if (cmd === 'next-action')                        return nextActionCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.203: leerness resume — auto-resume-plan 읽고 다음 라운드 즉시 안내 (사용자 명시)
@@ -21199,8 +21200,8 @@ async function main() {
   if (cmd === 'impact')                             return impactCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'reuse' && args[1] === 'find')        return reuseFind(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'reuse' && args[1] === 'register')    return reuseRegister(arg('--path', process.cwd()), args[2]);
-  if (cmd === 'ui' && args[1] === 'consistency')    return uiConsistency(args[2] || process.cwd());
-  if (cmd === 'graph')                              return graphCmd(args[1] || process.cwd());
+  if (cmd === 'ui' && args[1] === 'consistency')    return uiConsistency(arg('--path', args[2] || process.cwd()));
+  if (cmd === 'graph')                              return graphCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'guide')                              return guideCmd(arg('--path', process.cwd()), args[1]);
   // legacy duplicate routing removed below (was: skill list/info/add)
   if (cmd === 'skill' && args[1] === 'info') return skillInfo(args[2]);
