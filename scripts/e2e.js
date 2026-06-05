@@ -4323,5 +4323,51 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.340 회귀 (UR-0058, Codex 위임·검증): lessons canonical = JSON, MD = projection. save→json+md / list+tag / drop+archive / MD-only 백필
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    // 순수 round-trip (tag null 포함)
+    const objs = [{ date: '2026-06-05', text: 'A', tag: 't' }, { date: '2026-06-04', text: 'B', tag: null }];
+    const pureOk = JSON.stringify(m._parseLessonEntries(m._renderLessonsMd(objs))) === JSON.stringify(objs)
+      && m._parseLessonEntries(m._renderLessonsMd([])).length === 0;
+    // end-to-end: save → lessons.json(canonical) + lessons.md(projection)
+    const ld = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-les-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', ld, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', 'JWT 짧게', '--tag', 'security', '--path', ld], { encoding: 'utf8', timeout: 20000 });
+    cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', '캐시 TTL', '--path', ld], { encoding: 'utf8', timeout: 20000 });
+    const jsonExists = fs.existsSync(path.join(ld, '.harness', 'lessons.json'));
+    const canon = jsonExists ? JSON.parse(fs.readFileSync(path.join(ld, '.harness', 'lessons.json'), 'utf8')) : [];
+    const mdProj = fs.existsSync(path.join(ld, '.harness', 'lessons.md')) ? fs.readFileSync(path.join(ld, '.harness', 'lessons.md'), 'utf8') : '';
+    const writeOk = jsonExists && canon.length === 2 && canon[0].tag === 'security' && canon[1].tag === null
+      && mdProj.includes('JWT 짧게') && mdProj.includes('캐시 TTL') && mdProj.includes('- Tag: security');
+    // list + tag filter
+    let listOk = false, tagOk = false;
+    const lr = cp.spawnSync(process.execPath, [CLI, 'lesson', 'list', '--path', ld, '--json'], { encoding: 'utf8', timeout: 20000 });
+    try { listOk = JSON.parse(lr.stdout).total === 2; } catch {}
+    const tr = cp.spawnSync(process.execPath, [CLI, 'lesson', 'list', '--tag', 'security', '--path', ld, '--json'], { encoding: 'utf8', timeout: 20000 });
+    try { tagOk = JSON.parse(tr.stdout).total === 1; } catch {}
+    // drop + archive
+    cp.spawnSync(process.execPath, [CLI, 'lesson', 'drop', 'JWT', '--path', ld], { encoding: 'utf8', timeout: 20000 });
+    const afterDrop = JSON.parse(fs.readFileSync(path.join(ld, '.harness', 'lessons.json'), 'utf8'));
+    const dropOk = afterDrop.length === 1 && afterDrop[0].text === '캐시 TTL' && fs.existsSync(path.join(ld, '.harness', 'lessons.archive.md'));
+    fs.rmSync(ld, { recursive: true, force: true });
+    // 백필: MD-only(JSON 없음) → list 가 MD 파싱, 읽기 무부작용
+    const bd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lbf-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', bd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    fs.rmSync(path.join(bd, '.harness', 'lessons.json'), { force: true });
+    fs.writeFileSync(path.join(bd, '.harness', 'lessons.md'), '# Lessons\n\n### 2026-06-01\n- Lesson: 기존1\n- Tag: t1\n\n### 2026-06-02\n- Lesson: 기존2\n', 'utf8');
+    const br = cp.spawnSync(process.execPath, [CLI, 'lesson', 'list', '--path', bd, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let backfillOk = false;
+    try { backfillOk = JSON.parse(br.stdout).total === 2 && !fs.existsSync(path.join(bd, '.harness', 'lessons.json')); } catch {}
+    fs.rmSync(bd, { recursive: true, force: true });
+    ok = pureOk && writeOk && listOk && tagOk && dropOk && backfillOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.340) UR-0058(Codex 위임·검증): lessons canonical JSON + MD projection + 백필 (UR-0058)' : '✗ lessons canonical JSON 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

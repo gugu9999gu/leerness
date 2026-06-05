@@ -20,13 +20,13 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _detectLspLang, _matchLspSymbols,
   _detectOptimism: _puDetectOptimism, _computeConfidence: _puComputeConfidence,
   _personaSummaries, _translate,
-  _decisionsFromMd, _renderDecisionsMd } = require('../lib/pure-utils');  // 1.9.318~339 (UR-0025/0053): 순수 유틸 모듈 분리
+  _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd } = require('../lib/pure-utils');  // 1.9.318~339 (UR-0025/0053): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS } = require('../lib/catalogs');  // 1.9.338 (UR-0025): i18n STRINGS catalog 분리
 
-const VERSION = '1.9.339';
+const VERSION = '1.9.340';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3045,7 +3045,7 @@ function _selfTestCases() {
     { name: '텔레메트리 분리: 내부 auto-call(LEERNESS_INTERNAL) usage 집계 제외 + 주요 spawn 마킹 (UR-0051 설치리뷰 1.9.317)', run: () => { const src = read(__filename); const guard = src.includes("process.env.LEERNESS_INTERNAL !== '1'"); const marked = (src.match(/LEERNESS_INTERNAL: '1'/g) || []).length >= 10; const reviewMarked = /'review-request'[\s\S]{0,200}LEERNESS_INTERNAL: '1'/.test(src); return guard && marked && reviewMarked; } },
     { name: 'lib/pure-utils: HTML 파싱 유틸 3종 모듈 분리 + 동작 + 인라인 제거 (UR-0025 1.9.318)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._htmlToText === 'function' && typeof m._extractTitle === 'function' && typeof m._extractLinks === 'function'; const work = m._htmlToText('<p>Hello <b>World</b></p>') === 'Hello World' && m._extractTitle('<html><title>My &amp; Page</title></html>') === 'My & Page' && m._extractLinks('<a href="/a">A</a><a href="https://other.com/b">B</a>', 'https://x.com/').length === 1; const moved = m._htmlToText === _htmlToText && !/^function _htmlToText\(html\) \{/m.test(read(__filename)); return fnOk && work && moved; } },
     { name: 'MCP ToolRegistry 일치성: 모든 도구 def 가 dispatch case 보유 + 고아 case 0 + requiredTier 완비 (UR-0044 1.9.319)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const missing = tools.filter(t => !src.includes("case '" + t.name + "':")); const cases = [...src.matchAll(/case '(leerness_[a-z_]+)':/g)].map(m => m[1]); const defNames = new Set(tools.map(t => t.name)); const orphans = [...new Set(cases)].filter(c => !defNames.has(c)); const tierOk = tools.every(t => typeof t.requiredTier === 'string' && PERMISSION_TIERS.includes(t.requiredTier)); return tools.length >= 83 && missing.length === 0 && orphans.length === 0 && tierOk; } },
-    { name: 'count drift 수정: _countDatedBlocks 코드펜스(템플릿) 제외 (UR-0053 1.9.320; decisions 는 1.9.339 canonical 로 이관)', run: () => { const f = _countDatedBlocks; const withTpl = '# D\n\n```md\n### 2026-01-01 — Decision 제목\n- Decision:\n```\n\n### 2026-06-04 — 실제\n- Decision: 실제\n'; const c1 = f(withTpl) === 1; const c0 = f('```md\n### 2026-01-01 — x\n```\n') === 0; const c2 = f('### 2026-01-01 — A\n### 2026-02-02 — B\n') === 2; const src = read(__filename); const lessonsWired = src.includes('_countDatedBlocks(read(lessonsPath(root)))'); return typeof f === 'function' && c1 && c0 && c2 && lessonsWired; } },
+    { name: 'count drift 수정: _countDatedBlocks 코드펜스(템플릿) 제외 (UR-0053 1.9.320; memory count canonical 전환 후 legacy parser 보존)', run: () => { const f = _countDatedBlocks; const withTpl = '# D\n\n```md\n### 2026-01-01 — Decision 제목\n- Decision:\n```\n\n### 2026-06-04 — 실제\n- Decision: 실제\n'; const c1 = f(withTpl) === 1; const c0 = f('```md\n### 2026-01-01 — x\n```\n') === 0; const c2 = f('### 2026-01-01 — A\n### 2026-02-02 — B\n') === 2; return typeof f === 'function' && c1 && c0 && c2; } },
     { name: 'decision/lesson 필드 파싱: 빈 필드가 다음 줄로 안 샘 ([ \\t]* 사용) (UR-0053 1.9.321)', run: () => { const block = '### 2026-06-05 — X\n- Decision: X\n- Reason: r\n- Alternatives: \n- Impact: 보안\n'; const alt = block.match(/- Alternatives:[ \t]*(.+)/); const imp = block.match(/- Impact:[ \t]*(.+)/); const altNoBleed = !alt || !/Impact/.test(alt[1]); const impOk = !!imp && imp[1].trim() === '보안'; const src = read(__filename); const fixedOk = src.includes('- Alternatives:[ \\t]*(.+)') && src.includes('- Lesson:[ \\t]*(.+)') && src.includes('- Impact:[ \\t]*(.+)'); return altNoBleed && impOk && fixedOk; } },
     { name: 'MCP handler 통합: _mcpToCliArgs 단일 함수 + mcpServeCmd 호출 + 인라인 switch 단일화 (UR-0044 1.9.322)', run: () => { const src = read(__filename); const fnDef = /function _mcpToCliArgs\(name, args, targetPath\) \{/.test(src); const called = src.includes('cliArgs = _mcpToCliArgs(name, args, targetPath)'); const switchCount = (src.match(/switch \(name\) \{/g) || []).length; const nullPath = src.includes('if (cliArgs === null) return send('); return fnDef && called && switchCount === 1 && nullPath; } },
     { name: 'fresh-init gate 통과: lazy detect 부재신호(handoff/test/progress) done-work 없으면 비차단 (UR-0054 ⑥ 1.9.323)', run: () => { const src = read(__filename); const doneWork = src.includes("const _hasDoneWork = rows.some(r => /^(done|completed|verified)$/i.test(r.status))"); const advisory = src.includes('_ADVISORY_KINDS') && src.includes("'handoff_never_generated'") && src.includes("'no_test_run'"); const blocking = src.includes('const blockingIssues = Math.max(0, issues - advisoryCount)') && src.includes('if (blockingIssues > 0) process.exitCode = 1'); return doneWork && advisory && blocking; } },
@@ -3057,7 +3057,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: roadmap MD 파서 분리(_roadmapMapStatus/Milestones/Tokens) + 인라인 제거 (UR-0025 1.9.329)', run: () => { const m = require('../lib/pure-utils'); const work = m._roadmapMapStatus('REQUESTED') === 'planned' && m._roadmapMapStatus('done') === 'done' && m._roadmapParseMilestones('### M-0001. 로그인\nStatus: in-progress\nProgress: 40%')[0].progress === 40 && m._roadmapParseTokens('| color | #fff |').color === '#fff'; const src = read(__filename); const moved = m._roadmapMapStatus === _roadmapMapStatus && !/^function _roadmapMapStatus\(/m.test(src) && !/^function _roadmapParseMilestones\(/m.test(src) && !/^function _roadmapParseTokens\(/m.test(src); return work && moved; } },
     { name: 'lib/pure-utils: project-brief config 분리(_BRIEF_FIELDS/_briefFilled) + 인라인 제거 (UR-0025 1.9.330)', run: () => { const m = require('../lib/pure-utils'); const cfgOk = Array.isArray(m._BRIEF_FIELDS) && m._BRIEF_FIELDS.length === 10 && m._BRIEF_FIELDS[0].key === 'intro'; const work = m._briefFilled({ intro: 'x', features: ['a'] }) === 2 && m._briefFilled({}) === 0; const src = read(__filename); const moved = m._briefFilled === _briefFilled && m._BRIEF_FIELDS === _BRIEF_FIELDS && !/^const _BRIEF_FIELDS = \[/m.test(src) && !/^function _briefFilled\(/m.test(src); return cfgOk && work && moved; } },
     { name: 'lib/pure-utils: brief 빌더 분리(_briefReadmeBlock/_briefBlueprint + BRIEF 마커, VERSION 주입) (UR-0025 1.9.331)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._briefReadmeBlock === 'function' && typeof m._briefBlueprint === 'function' && m.BRIEF_START.includes('project-brief:start'); const b = { project: 'X', intro: 'i', features: ['f1'] }; const rb = m._briefReadmeBlock(b); const bp = m._briefBlueprint(b, '9.9.9'); const work = rb.includes(m.BRIEF_START) && rb.includes(m.BRIEF_END) && /f1/.test(rb) && /Blueprint/.test(bp) && /leerness v9\.9\.9/.test(bp); const src = read(__filename); const moved = m._briefBlueprint === _briefBlueprint && m.BRIEF_START === BRIEF_START && !/^function _briefReadmeBlock\(/m.test(src) && !/^function _briefBlueprint\(/m.test(src) && !/^const BRIEF_START =/m.test(src); return fnOk && work && moved; } },
-    { name: 'lib/pure-utils: lessons.md 파서 분리(_parseLessonEntries) + 인라인 제거 (UR-0025 1.9.332)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseLessonEntries('### 2026-06-05\n- Lesson: A\n- Tag: t\n\n### 2026-06-04\n- Lesson: B'); const work = r.length === 2 && r[0].text === 'A' && r[0].tag === 't' && r[1].tag === null && r[0].date === '2026-06-05'; const src = read(__filename); const moved = m._parseLessonEntries === _parseLessonEntries && !/^function _parseLessonEntries\(/m.test(src) && src.includes('for (const lesson of _parseLessonEntries(text))'); return work && moved; } },
+    { name: 'lib/pure-utils: lessons.md 파서 분리(_parseLessonEntries) + 인라인 제거 (UR-0025 1.9.332)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseLessonEntries('### 2026-06-05\n- Lesson: A\n- Tag: t\n\n### 2026-06-04\n- Lesson: B'); const work = r.length === 2 && r[0].text === 'A' && r[0].tag === 't' && r[1].tag === null && r[0].date === '2026-06-05'; const src = read(__filename); const moved = m._parseLessonEntries === _parseLessonEntries && !/^function _parseLessonEntries\(/m.test(src) && src.includes('_parseLessonEntries(read(mp))'); return work && moved; } },
     { name: 'UR-0025 심층: constraints catalog→lib/catalogs + _matchConstraints→pure-utils 분리 (1.9.333)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6 && !!c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe; const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제'); const work = r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0; const src = read(__filename); const moved = _DEFAULT_PLATFORM_CONSTRAINTS === c._DEFAULT_PLATFORM_CONSTRAINTS && _matchConstraints === m._matchConstraints && !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(src) && src.includes('_matchConstraints(_loadPlatformConstraints(root), text)'); return catOk && work && moved; } },
     { name: 'UR-0025 심층(Codex 위임·검증): intent domain catalog→lib/catalogs + _matchDomain→pure-utils 분리 (1.9.334)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_DOMAIN_CATALOG && Object.keys(c._DEFAULT_DOMAIN_CATALOG.domains).length === 5 && !!c._DEFAULT_DOMAIN_CATALOG.domains.game; const r = m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'unity 게임'); const work = r.domain === 'game' && Array.isArray(r.components) && m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'zzz없음').domain === null && m._matchDomain(null, 'x').domain === null; const src = read(__filename); const moved = _DEFAULT_DOMAIN_CATALOG === c._DEFAULT_DOMAIN_CATALOG && _matchDomain === m._matchDomain && !/const _DEFAULT_DOMAIN_CATALOG = \{/.test(src) && src.includes('_matchDomain(_loadDomainCatalog(root), text)'); return catOk && work && moved; } },
     { name: 'UR-0025 심층: LSP catalog→lib/catalogs(_LSP_LANG_PATTERNS) + _detectLspLang/_matchLspSymbols→pure-utils 분리 (1.9.335)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._LSP_LANG_PATTERNS && Object.keys(c._LSP_LANG_PATTERNS).length === 5 && Array.isArray(c._LSP_LANG_PATTERNS.javascript); const langOk = m._detectLspLang('a.py') === 'python' && m._detectLspLang('b.go') === 'go' && m._detectLspLang('c.md') === 'javascript'; const sy = m._matchLspSymbols(c._LSP_LANG_PATTERNS, 'function alpha(){}\nclass Beta{}', 'javascript'); const work = sy.length === 2 && sy[0].name === 'alpha' && sy[0].kind === 'function' && sy[1].kind === 'class' && m._matchLspSymbols(null, 'x', 'javascript').length === 0; const src = read(__filename); const moved = _LSP_LANG_PATTERNS === c._LSP_LANG_PATTERNS && _detectLspLang === m._detectLspLang && _matchLspSymbols === m._matchLspSymbols && !/const _LSP_LANG_PATTERNS = \{/.test(src) && !/function _detectLspLang\(/.test(src); return catOk && langOk && work && moved; } },
@@ -3065,6 +3065,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심층: persona catalog→lib/catalogs(BUILT_IN_PERSONAS) + _personaSummaries→pure-utils 분리 (1.9.337)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.BUILT_IN_PERSONAS && Object.keys(c.BUILT_IN_PERSONAS).length === 5 && c.BUILT_IN_PERSONAS.security && typeof c.BUILT_IN_PERSONAS.security.body === 'string'; const sm = m._personaSummaries(c.BUILT_IN_PERSONAS); const work = Array.isArray(sm) && sm.length === 5 && sm[0].id === 'security' && sm[0].body === undefined && typeof sm[0].name === 'string' && m._personaSummaries(null).length === 0; const src = read(__filename); const moved = BUILT_IN_PERSONAS === c.BUILT_IN_PERSONAS && _personaSummaries === m._personaSummaries && !/const BUILT_IN_PERSONAS = \{/.test(src); return catOk && work && moved; } },
     { name: 'UR-0025 심층: i18n STRINGS catalog→lib/catalogs + _translate→pure-utils 분리 (1.9.338)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.STRINGS && typeof c.STRINGS['common.ready'] === 'object' && c.STRINGS['common.ready'].en === 'Ready'; const work = m._translate(c.STRINGS, 'common.ready', 'en') === 'Ready' && m._translate(c.STRINGS, 'common.ready', 'ko') === '준비 완료' && m._translate(c.STRINGS, 'no.such.key', 'en') === 'no.such.key' && m._translate(null, 'x', 'ko') === 'x' && m._translate({ k: { ko: '케이' } }, 'k', 'en') === '케이'; const src = read(__filename); const moved = STRINGS === c.STRINGS && _translate === m._translate && !/const STRINGS = \{/.test(src); return catOk && work && moved; } },
     { name: 'UR-0053: decisions canonical JSON 레이어(_loadDecisions/_saveDecisions/decisionsJsonPath) + pure 파서/렌더 round-trip (1.9.339)', run: () => { const m = require('../lib/pure-utils'); const md = '# Decisions\n\n### 2026-06-05 — A\n- Decision: a\n- Reason: r\n- Alternatives: alt\n- Impact: imp\n\n### 2026-06-04 — B\n- Decision: b\n- Alternatives:\n'; const objs = m._decisionsFromMd(md); const parseOk = objs.length === 2 && objs[0].alternatives === 'alt' && objs[0].impact === 'imp' && objs[1].alternatives === null && objs[1].title === 'B'; const rt = m._decisionsFromMd(m._renderDecisionsMd(objs)); const rtOk = JSON.stringify(rt) === JSON.stringify(objs); const tplOk = m._decisionsFromMd(m._renderDecisionsMd([])).length === 0; const layerOk = typeof _loadDecisions === 'function' && typeof _saveDecisions === 'function' && typeof decisionsJsonPath === 'function' && _decisionsFromMd === m._decisionsFromMd; return parseOk && rtOk && tplOk && layerOk; } },
+    { name: 'UR-0058: lessons canonical JSON 레이어(_loadLessons/_saveLessons/lessonsJsonPath) + pure 파서/렌더 round-trip', run: () => { const m = require('../lib/pure-utils'); const objs = [{ date: '2026-06-05', text: 'A', tag: 't' }, { date: '2026-06-04', text: 'B', tag: null }]; const rt = m._parseLessonEntries(m._renderLessonsMd(objs)); const rtOk = JSON.stringify(rt) === JSON.stringify(objs); const tplOk = m._parseLessonEntries(m._renderLessonsMd([])).length === 0; const layerOk = typeof _loadLessons === 'function' && typeof _saveLessons === 'function' && typeof lessonsJsonPath === 'function' && _renderLessonsMd === m._renderLessonsMd; return rtOk && tplOk && layerOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3549,8 +3550,7 @@ function pulseCmd(root) {
     const rulesActive = readRules(root).filter(r => r.status === 'active').length;
     const planText = exists(planPath(root)) ? read(planPath(root)) : '';
     const milestonesCnt = (planText.match(/^### M-\d{4}\./gm) || []).length;
-    const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
-    const lessonsCount = (lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+    const lessonsCount = _loadLessons(root).length;
     data.memorySurface = `T${tasksInProgress}/D${decisionCount}/R${rulesActive}/P${milestonesCnt}/L${lessonsCount}`;
   } catch {}
   // 마일스톤 + ETA
@@ -4429,7 +4429,7 @@ function _buildAutoResumePlan(root, opts) {
     tasksInProgress: rows.filter(r => r.status === 'in-progress').length,
     decisions: _loadDecisions(root).length,  // 1.9.339 (UR-0053): canonical 단일 진실소스
     rulesActive: readRules(root).filter(r => r.status === 'active').length,
-    lessons: exists(lessonsPath(root)) ? _countDatedBlocks(read(lessonsPath(root))) : 0
+    lessons: _loadLessons(root).length
   };
   return {
     nextRoundVersion: opts.nextRoundVersion || `next after ${currentVersion}`,
@@ -5877,6 +5877,21 @@ function _saveDecisions(root, decisions) {
 }
 // 1.9.112: 전용 lessons.md (Memory Write Surface 5번째)
 const lessonsPath = root => path.join(root, '.harness/lessons.md');
+const lessonsJsonPath = root => path.join(root, '.harness/lessons.json');
+function _loadLessons(root) {
+  const jp = lessonsJsonPath(root);
+  if (exists(jp)) {
+    try { const arr = JSON.parse(read(jp)); if (Array.isArray(arr)) return arr; } catch {}
+  }
+  const mp = lessonsPath(root);
+  return exists(mp) ? _parseLessonEntries(read(mp)) : [];
+}
+function _saveLessons(root, lessons) {
+  const arr = Array.isArray(lessons) ? lessons : [];
+  mkdirp(path.dirname(lessonsJsonPath(root)));
+  writeUtf8(lessonsJsonPath(root), JSON.stringify(arr, null, 2) + '\n');
+  writeUtf8(lessonsPath(root), _renderLessonsMd(arr));
+}
 
 function nextId(root, prefix) {
   const sources = [planPath(root), progressPath(root)].map(p => exists(p) ? read(p) : '').join('\n');
@@ -6240,10 +6255,10 @@ function memoryStatusCmd(root, opts = {}) {
   const milestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
   // plan milestones in-progress: progress-tracker에서 plan:M-XXXX evidence 있고 in-progress 인 row
   const planInProgress = rows.filter(r => /plan:M-/.test(r.evidence || '') && r.status === 'in-progress').length;
-  // Lessons (lessons.md)
-  const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
-  const lessonHeaders = lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || [];
-  const lessonsLatest = lessonHeaders.length ? (lm.split('\n').filter(l => /- Lesson:/.test(l)).pop() || '').replace(/^- Lesson:\s*/, '').slice(0, 100) : null;
+  // Lessons (UR-0058: canonical _loadLessons — JSON 단일 진실소스, MD projection fallback)
+  const _les = _loadLessons(root);
+  const lessonHeaders = _les.map(l => '### ' + l.date);
+  const lessonsLatest = _les.length ? (_les[_les.length - 1].text || '').slice(0, 100) : null;
   // 1.9.130: DELETE 5종 archive entry counts
   const archiveCounts = { decisions: 0, lessons: 0, plan: 0, total: 0 };
   try {
@@ -6444,20 +6459,19 @@ function lessonListCmd(root, opts = {}) {
   // 1.9.139: --query 필터 (lesson text case-insensitive 매칭)
   const queryFilter = arg('--query', null);
   const queryRe = queryFilter ? new RegExp(queryFilter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
-  const lp = lessonsPath(root);
-  if (!exists(lp)) {
+  const all = _loadLessons(root);
+  if (!all.length) {
     if (jsonMode) {
       const empty = { version: VERSION, root, total: 0, lessons: [], tag: tagFilter };
       if (queryFilter) empty.query = queryFilter;
       process.stdout.write(JSON.stringify(empty, null, 2) + '\n');
       return;
     }
-    return ok('lessons.md 없음 — leerness lesson save "<text>" 로 첫 lesson 영구화');
+    return ok('lessons 비어있음 — leerness lesson save "<text>" 로 첫 lesson 영구화');
   }
-  const text = read(lp);
   const lessons = [];
-  // 1.9.332 (UR-0025): 블록→엔트리 파싱은 순수 _parseLessonEntries (lib/pure-utils), 필터는 명령에 유지.
-  for (const lesson of _parseLessonEntries(text)) {
+  // UR-0058: lessons.json canonical 로드(JSON 우선, MD fallback). tag/query 필터는 명령에 유지.
+  for (const lesson of all) {
     if (tagFilter && lesson.tag !== tagFilter) continue;
     // 1.9.139: query 필터 — lesson text 또는 tag 매칭
     if (queryRe && !queryRe.test(lesson.text) && !queryRe.test(lesson.tag || '')) continue;
@@ -6487,32 +6501,24 @@ function lessonListCmd(root, opts = {}) {
 function lessonDropCmd(root, target) {
   root = absRoot(root);
   if (!target) return fail('lesson drop <date|text-substring> 필요. 예: leerness lesson drop "2026-05-20" 또는 leerness lesson drop "JWT"');
-  const lp = lessonsPath(root);
-  if (!exists(lp)) return fail('lessons.md 없음');
-  const text = read(lp);
-  const blocks = text.split(/\n(?=### )/);
-  let removed = 0;
   const kept = [];
-  for (const b of blocks) {
-    if (!b.startsWith('### ')) { kept.push(b); continue; }
-    // date 매칭 (정확) 또는 text substring (lesson content)
-    const dateMatch = b.match(/^### (\d{4}-\d{2}-\d{2})/);
-    const lessonMatch = b.match(/- Lesson:[ \t]*(.+)/);
-    const isDateTarget = dateMatch && dateMatch[1] === target;
-    const isTextTarget = lessonMatch && lessonMatch[1].includes(target);
-    if (isDateTarget || isTextTarget) {
-      removed++;
-      // archive 보존 — lessons.archive.md 에 추가
-      const archivePath = path.join(root, '.harness/lessons.archive.md');
-      const archiveHeader = exists(archivePath) ? '' : '# Lessons archive\n\n';
-      append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${target}")\n${b}\n`);
-      continue;
-    }
-    kept.push(b);
+  const removed = [];
+  const all = _loadLessons(root);
+  if (!all.length) return fail('lessons 없음');
+  for (const l of all) {
+    if (l.date === target || (l.text || '').includes(target)) removed.push(l);
+    else kept.push(l);
   }
-  if (removed === 0) return fail(`매칭 lesson 없음: "${target}"`);
-  writeUtf8(lp, kept.join('\n'));
-  ok(`lesson dropped: ${removed}건 (보존: .harness/lessons.archive.md)`);
+  if (!removed.length) return fail(`매칭 lesson 없음: "${target}"`);
+  // archive 보존 — lessons.archive.md 에 projection MD 블록 형태로 추가
+  const archivePath = path.join(root, '.harness/lessons.archive.md');
+  const archiveHeader = exists(archivePath) ? '' : '# Lessons archive\n\n';
+  const archiveBlocks = removed.map(l =>
+    `\n### ${l.date}\n- Lesson: ${l.text}\n${l.tag ? `- Tag: ${l.tag}\n` : ''}`
+  ).join('');
+  append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${target}")\n${archiveBlocks}\n`);
+  _saveLessons(root, kept);
+  ok(`lesson dropped: ${removed.length}건 (보존: .harness/lessons.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
 
@@ -6521,15 +6527,10 @@ function lessonSave(root, text) {
   root = absRoot(root);
   if (!_requireInit(root, 'lesson save')) return;  // 1.9.311 (UR-0047): init 가드
   if (!text) return fail('lesson text required. 예: leerness lesson save "JWT는 refresh token도 짧게 (15분 권장)"');
-  const lp = lessonsPath(root);
   const tag = arg('--tag', '');
-  const tagBlock = tag ? `- Tag: ${tag}\n` : '';
-  const block = `\n### ${today()}\n- Lesson: ${text}\n${tagBlock}`;
-  if (!exists(lp)) {
-    writeUtf8(lp, `# Lessons (1.9.112)\n\n과거 실수/통찰/패턴 영구 기록 — handoff 자동 회수와 통합.\n${block}`);
-  } else {
-    append(lp, block);
-  }
+  const all = _loadLessons(root);
+  all.push({ date: today(), text, tag: tag || null });
+  _saveLessons(root, all);
   ok(`lesson saved`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -7415,8 +7416,7 @@ function handoff(root) {
       const rulesActive = rules.filter(r => r.status === 'active').length;
       const planText = exists(planPath(root)) ? read(planPath(root)) : '';
       const milestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
-      const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
-      const lessonsCount = (lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+      const lessonsCount = _loadLessons(root).length;
       // 1.9.130: archive 카운트 통합
       const archiveCountsH = { decisions: 0, lessons: 0, plan: 0, total: 0 };
       try {
@@ -7686,7 +7686,7 @@ function handoff(root) {
         const rulesActive = readRules(root).filter(r => r.status === 'active').length;
         const planText = exists(planPath(root)) ? read(planPath(root)) : '';
         const planMilestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
-        const lessons = exists(lessonsPath(root)) ? _countDatedBlocks(read(lessonsPath(root))) : 0;
+        const lessons = _loadLessons(root).length;
         parts.push(`🧠 mem T${inProgressTasks}/D${decisions}/R${rulesActive}/P${planMilestones}/L${lessons}`);
       } catch {}
       // 8) 1.9.152: 활성 외부 AI CLI 카운트 (1.9.151 복수 선택 결과 반영) — 메인 에이전트가 sub-agent 분배 가능성 즉시 인지
@@ -12024,8 +12024,7 @@ function sessionClose(root, opts = {}) {
       const rulesActive0 = rules0.filter(r => r.status === 'active').length;
       const planText0 = exists(planPath(root)) ? read(planPath(root)) : '';
       const milestones0 = (planText0.match(/^### M-\d{4}\./gm) || []).length;
-      const lm0 = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
-      const lessonsCount0 = (lm0.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+      const lessonsCount0 = _loadLessons(root).length;
       // 1.9.130: archive 카운트 통합
       const archiveCountsS = { decisions: 0, lessons: 0, plan: 0, total: 0 };
       try {
@@ -12362,8 +12361,7 @@ function sessionClose(root, opts = {}) {
         const rActive = readRules(root).filter(r => r.status === 'active').length;
         const planText = exists(planPath(root)) ? read(planPath(root)) : '';
         const pCnt = (planText.match(/^### M-\d{4}\./gm) || []).length;
-        const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
-        const lCnt = (lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+        const lCnt = _loadLessons(root).length;
         const mem = `T${tIn}/D${dCnt}/R${rActive}/P${pCnt}/L${lCnt}`;
         let pulseLine = `📍 v${VERSION} · 🔄 R${rh.roundCount} · 🧠 ${mem}`;
         if (ms.next) {
@@ -18001,7 +17999,7 @@ function contextCmd(root, opts = {}) {
     tasksInProgress: rows.filter(r => r.status === 'in-progress').length,
     decisions: decisionCount,
     rulesActive: activeRules.length,
-    lessons: exists(lessonsPath(root)) ? _countDatedBlocks(read(lessonsPath(root))) : 0
+    lessons: _loadLessons(root).length
   };
   // 프로젝트 청사진 (1.9.308 UR-0055 2단계): brief 에서 의도/개요/방향이력 회수 (단일 출처)
   const brief = _loadBrief(root);
@@ -19606,8 +19604,7 @@ function healthCmd(root) {
     const rulesActive = rules.filter(r => r.status === 'active').length;
     const planText = exists(planPath(root)) ? read(planPath(root)) : '';
     const milestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
-    const lm = exists(lessonsPath(root)) ? read(lessonsPath(root)) : '';
-    const lessonsCount = (lm.match(/^### \d{4}-\d{2}-\d{2}[^\n]*/gm) || []).length;
+    const lessonsCount = _loadLessons(root).length;
     out.memorySurface = {
       tasks: { inProgress: tasksInProgress, total: rows.length, byStatus: tasksByStatus },
       decisions: { count: decisionsCount },

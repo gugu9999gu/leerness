@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.340 — 2026-06-05 — UR-0058: lessons canonical = JSON, MD = projection (Codex 위임·검증)
+
+**🤖 UR-0053 decisions canonical 패턴을 lessons 로 확장 — Codex CLI(gpt-5.5) 위임 후 하네스 독립 검증. 상태 저장 단일 진실소스 일반화.** (직전 1.9.339 decisions 의 정밀 미러)
+
+### 배경 (위임 결정)
+1.9.339 에서 decisions canonical(JSON 진실소스 + MD projection)을 확립 → lessons 도 동일 MD-parse drift 부류이고 `_parseLessonEntries`(순수, `{date,text,tag}`)가 이미 존재 → 동형 작업을 Codex 에 위임("일부 Codex" 로테이션). 위임 ≠ 무검증: 1.9.339 구현을 참조 명세로 작성 → `codex exec` → 하네스가 독립 검증(범위·구문·round-trip·백필·count 사이트·save/list/drop end-to-end).
+
+### 구현 (Codex 수행)
+1. **canonical write path**: `lesson save`/`drop` → `lessons.json`(canonical) + `lessons.md`(projection) 동시 기록 (`_saveLessons`).
+2. **순수 렌더** `_renderLessonsMd(lessons)` → `lib/pure-utils.js` (tag 없으면 Tag 줄 생략 → `_parseLessonEntries` 와 round-trip 멱등). 기존 `_parseLessonEntries` 가 canonical 파서.
+3. **canonical 로더** `_loadLessons(root)`: lessons.json 우선 → 없으면 `_parseLessonEntries(lessons.md)` (읽기 무부작용). 손상 JSON 시 MD fallback.
+4. **단일 진실소스 라우팅**: lesson save/list(+tag/query)/drop + pulse/memorySurface/memory-status(lessonHeaders/latest)/handoff count 를 `_loadLessons` 로 전환.
+5. **비파괴/백필**: 기존 MD-only → 첫 write 시 MD→JSON 백필(무손실). 읽기 무부작용. fuzzy restore/retro/today-heuristic 은 projection MD 유지(일관).
+
+### 검증 (하네스 독립)
+- **변경 범위**: bin/harness.js + lib/pure-utils.js 만 (VERSION/e2e/README/CHANGELOG/package/catalogs 미변경 — 명세 준수).
+- **무결성**: node -c ×2 · selftest 88/88 PASS (Codex 가 self-reference-safe 케이스 추가) · **E2E 285/285 PASS** (회귀 0).
+- **동작 실측**: save→lessons.json(tag=security·null)+lessons.md(projection, Tag 줄) · list 2·tag filter 1 · drop→1건+archive · memory-status L count=1 · **백필**: MD-only→list 2(읽기 무부작용)·첫 save 시 기존2+신규1=3 보존 · round-trip 멱등.
+
 ## 1.9.339 — 2026-06-05 — UR-0053: decisions canonical = JSON, MD = projection (아키텍처)
 
 **🏛 상태 저장 단일 진실소스 — decisions 를 canonical JSON 으로 전환, decisions.md 는 projection(렌더 뷰). count drift 근본 해소.** (UR-0053 full, "UR-0053+UR-0025 둘 다 진행" 중 Round B)
