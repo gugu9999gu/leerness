@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.355 — 2026-06-05 — UR-0075 Phase A: 크로스버전 마이그레이션 가이드 + migrate/update --path
+
+**🧩 AI 에이전트용 크로스버전 마이그레이션 가이드(`migrate --guide`) + init/migrate/update `--path` 지원.** (UR-0075 Phase A — 비전 착수, 외부리뷰 버그 전량 해소 후)
+
+### 배경
+외부리뷰 P0~P3 전량 해소로 안전 기반 마련 → 비전 착수. 마이그레이션은 leerness 핵심 가치("비파괴 마이그레이션"). 가이드가 `update --path`/`migrate --path` 를 권하므로 정확성 위해 --path 지원을 함께 보강(UR-0059 확장).
+
+### 구현
+1. **`_migrationGuideText(version)`**(순수) + **`leerness migrate --guide`/`migrate guide`** — AI 에이전트용 안전 워크플로: 안전 스냅샷(git) → `npx leerness@latest update --check --path <project>`(감지) → `--yes`(임시설치·.harness/archive 백업·신 스키마) → `git diff`/`selftest`/`check` 검증 → canonical JSON 백필 메모 → 롤백.
+2. **init/migrate/update `--path` 지원** (UR-0059 확장): `install(arg('--path', args[1] || cwd))` / `updateCmd(arg('--path', ...))` — 이전엔 `args[1] || cwd` 로 positional 전용·`--path` 무시. 이제 --path > positional > cwd. (가이드의 `update --path` 정확성)
+
+### 검증
+- **selftest 102/102 PASS** · **E2E 299→300 PASS** (회귀 0).
+- 실측: `migrate --guide` 가이드 출력(0.원칙~6.롤백) · `migrate guide` subcommand 동일 · `update --check --path B`(cwd A) → B 의 HARNESS_VERSION(1.9.6) 읽음(=--path 동작, 이전 cwd A).
+
 ## 1.9.354 — 2026-06-05 — 외부리뷰 P3 클러스터 (UR-0072) · 외부리뷰 백로그 소진
 
 **🧩 외부 리뷰 P3 핵심 4종 — compareVer pre-release · _classifyCJK 일본어 오판 · scan secrets 파일경로 · requests drop 아이콘.**

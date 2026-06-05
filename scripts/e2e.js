@@ -4751,5 +4751,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.355 회귀 (UR-0075 Phase A): migrate --guide 가이드 출력 + update/init/migrate --path 타깃(이전 positional 전용)
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    const g = m._migrationGuideText('9.9.9');
+    const pureOk = g.includes('마이그레이션 가이드') && g.includes('update --check --path') && g.includes('selftest') && g.includes('9.9.9');
+    const gr = cp.spawnSync(process.execPath, [CLI, 'migrate', '--guide'], { encoding: 'utf8', timeout: 20000 });
+    const guideOk = /마이그레이션 가이드/.test(gr.stdout || '') && /git/.test(gr.stdout || '');
+    // update --path: A(cwd) 에서 --path B 가 B 의 HARNESS_VERSION 을 읽음(=--path 동작, 이전엔 cwd A)
+    const A = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mga-'));
+    const Bd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mgb-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', A, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', Bd, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(Bd, '.harness', 'HARNESS_VERSION'), '1.9.6\n');
+    const ur = cp.spawnSync(process.execPath, [CLI, 'update', '--check', '--path', Bd], { cwd: A, encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_OFFLINE: '1' } });
+    const pathOk = /1\.9\.6/.test((ur.stdout || '') + (ur.stderr || ''));
+    fs.rmSync(A, { recursive: true, force: true });
+    fs.rmSync(Bd, { recursive: true, force: true });
+    ok = pureOk && guideOk && pathOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.355) UR-0075 Phase A: 마이그레이션 가이드 + update --path 타깃 (UR-0075)' : '✗ UR-0075 가이드 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -21,13 +21,14 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
   _detectOptimism: _puDetectOptimism, _computeConfidence: _puComputeConfidence,
   _personaSummaries, _translate,
   _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd,
-  _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd } = require('../lib/pure-utils');  // 1.9.318~347 (UR-0025/0053): 순수 유틸 모듈 분리
+  _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
+  _migrationGuideText } = require('../lib/pure-utils');  // 1.9.318~355 (UR-0025/0053/0075): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.354';
+const VERSION = '1.9.355';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3058,6 +3059,7 @@ function _selfTestCases() {
     { name: 'UR-0068(외부리뷰 P2): _roadmapParseMilestones 블록 경계 — 다음 milestone status 누출 차단', run: () => { const m = require('../lib/pure-utils'); const r = m._roadmapParseMilestones('### M-0001. A\n\n### M-0002. B\nStatus: done\nProgress: 80%\n'); return r.length === 2 && r[0].status === 'planned' && r[0].progress === 0 && r[1].status === 'done' && r[1].progress === 80; } },
     { name: 'UR-0066(외부리뷰 P2): shell:true 주입 가드 — agents bench task _shellQuoteArg + fetchNpmLatest npm.cmd', run: () => { const m = require('../lib/pure-utils'); const src = read(__filename); const benchQuoted = src.includes('const qTask = ' + '_shellQuoteArg(task)'); const npmCmd = /'win32' \? 'npm\.cmd' : 'npm'/.test(src); const q = m._shellQuoteArg('a & b'); const safe = (process.platform === 'win32' ? q === '"a & b"' : q === "'a & b'"); return benchQuoted && npmCmd && safe; } },
     { name: 'UR-0072(외부리뷰 P3): compareVer pre-release + _classifyCJK 한자 kana 귀속', run: () => { const m = require('../lib/pure-utils'); const verOk = m.compareVer('1.9.0-beta', '1.9.0') === -1 && m.compareVer('1.9.0', '1.9.0-beta') === 1 && m.compareVer('1.9.5', '1.9.5') === 0 && m.compareVer('1.9.6', '1.9.5') === 1; const jp = Buffer.from([0xE3, 0x81, 0x82, 0xE6, 0x97, 0xA5, 0xE6, 0x9C, 0xAC]); const cn = Buffer.from([0xE4, 0xB8, 0xAD, 0xE5, 0x9B, 0xBD]); const rj = m._classifyCJK(jp, jp.length); const rc = m._classifyCJK(cn, cn.length); const cjkOk = rj.japanese > rj.chinese && rc.chinese > 0 && rc.japanese === 0; return verOk && cjkOk; } },
+    { name: 'UR-0075 Phase A: 마이그레이션 가이드(_migrationGuideText) + migrate --guide 와이어 + init/migrate/update --path', run: () => { const m = require('../lib/pure-utils'); const g = m._migrationGuideText('1.9.355'); const guideOk = typeof g === 'string' && g.includes('마이그레이션 가이드') && g.includes('update --check --path') && g.includes('selftest') && g.includes('canonical JSON') && g.includes('롤백') && g.includes('1.9.355'); const src = read(__filename); const wired = src.includes("has('--guide') || args[1] === " + "'guide'") && src.includes('install(arg(' + "'--path', args[1] || process.cwd())") && src.includes('updateCmd(arg(' + "'--path', args[1] || process.cwd())"); return guideOk && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -20998,7 +21000,7 @@ async function main() {
     } catch {}
   }
   // 1.9.276 (GPT-5.5 2차 리뷰): init --dry-run(미리보기) / --minimal(핵심 파일만) / --no-env(.env 생략)
-  if (cmd === 'init')      return await install(args[1] || process.cwd(), { force:has('--force'), dry:has('--dry-run'), migration:false, minimal:has('--minimal'), noEnv:has('--no-env') });
+  if (cmd === 'init')      return await install(arg('--path', args[1] || process.cwd()), { force:has('--force'), dry:has('--dry-run'), migration:false, minimal:has('--minimal'), noEnv:has('--no-env') });  // 1.9.355 (UR-0075): --path 지원
   // 1.9.64: install <skill-id-or-url> 별칭 (= skill install). 자주 쓰는 명령 단축형.
   // 단, init이 leerness install . 같은 형태로도 동작하던 옛 호환은 유지 — args[1]이 디렉토리면 init으로 라우팅.
   if (cmd === 'install') {
@@ -21016,8 +21018,9 @@ async function main() {
     fail(`알 수 없는 install 대상: ${arg1}\n  SKILL.md 파일/URL/SKILL.md 포함 디렉토리 필요`);
     return process.exit(1);
   }
-  if (cmd === 'migrate')   return await install(args[1] || process.cwd(), { force:has('--force'), dry:has('--dry-run'), migration:true });
-  if (cmd === 'update')    return await updateCmd(args[1] || process.cwd(), { checkOnly: has('--check'), yes: has('--yes'), force: has('--force') });
+  if (cmd === 'migrate' && (has('--guide') || args[1] === 'guide')) { log(_migrationGuideText(VERSION)); return; }  // 1.9.355 (UR-0075 Phase A): 크로스버전 마이그레이션 가이드
+  if (cmd === 'migrate')   return await install(arg('--path', args[1] || process.cwd()), { force:has('--force'), dry:has('--dry-run'), migration:true });  // 1.9.355 (UR-0075): --path 지원
+  if (cmd === 'update')    return await updateCmd(arg('--path', args[1] || process.cwd()), { checkOnly: has('--check'), yes: has('--yes'), force: has('--force') });  // 1.9.355 (UR-0075): --path 지원
   if (cmd === 'auto-update' && args[1] === 'install') return autoUpdateInstall(arg('--path', args[2] || process.cwd()));
   if (cmd === 'status')    return status(arg('--path', args[1] || process.cwd()));
   if (cmd === 'verify')    return verify(arg('--path', args[1] || process.cwd()));
