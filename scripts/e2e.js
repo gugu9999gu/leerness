@@ -3330,7 +3330,7 @@ total++;
   try {
     const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
     // (1) 소스: cp.exec 템플릿 제거 + execFile args 배열 + argList 인용
-    const srcOk = /cp\.execFile\('npm', \['view', pkg, 'version'\]/.test(harnessSrc) &&
+    const srcOk = /cp\.execFile\([^,]*'npm[^']*', \['view', pkg, 'version'\]/.test(harnessSrc) &&  // 1.9.352(UR-0066): npm.cmd(win) 형태 허용
       !/cp\.exec\(.npm view \$\{pkg\}/.test(harnessSrc) &&
       /argList\.map\(_shellQuoteArg\)\.join/.test(harnessSrc);
     // (2) 기능 회귀: update --check 가 오프라인(네트워크 무)에서도 crash 없이 종료
@@ -4665,6 +4665,31 @@ total++;
     ok = titleOk && agentsOk && helpOk;
   } catch {}
   console.log(ok ? '✓ B(1.9.351) 외부리뷰 UR-0064/0065: 제목 오염 차단 + AGENTS.md/--help 정합 (UR-0064/0065)' : '✗ UR-0064/0065 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.352 회귀 (외부리뷰 P2): UR-0069 usage subcommand 집계 + UR-0068 milestone 파서 블록 경계
+total++;
+{
+  let ok = false;
+  try {
+    const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
+    // UR-0068: milestone 누출 차단 (pure)
+    const mil = m._roadmapParseMilestones('### M-0001. A\n\n### M-0002. B\nStatus: done\nProgress: 80%\n');
+    const milOk = mil.length === 2 && mil[0].status === 'planned' && mil[0].progress === 0 && mil[1].status === 'done';
+    // UR-0069: subcommand 명령(decision add/lesson save/scan secrets) usage 집계 (이전엔 args[1]=subcommand 를 path 로 오인 → 미집계)
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-usg-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'T1', '--reason', 'r'], { cwd: d, encoding: 'utf8', timeout: 20000 });
+    cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', 'L1'], { cwd: d, encoding: 'utf8', timeout: 20000 });
+    cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', '.'], { cwd: d, encoding: 'utf8', timeout: 20000 });
+    const ur = cp.spawnSync(process.execPath, [CLI, 'usage', 'stats', d, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let usageOk = false;
+    try { const j = JSON.parse(ur.stdout); const c = j.commands || {}; usageOk = (c.decision || 0) >= 1 && (c.lesson || 0) >= 1 && (c.scan || 0) >= 1; } catch {}
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = milOk && usageOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.352) 외부리뷰 P2: milestone 파서 블록경계 + usage subcommand 집계 (UR-0068/0069)' : '✗ P2 milestone/usage 실패');
   if (!ok) failed++;
 }
 

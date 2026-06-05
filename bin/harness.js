@@ -27,7 +27,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.351';
+const VERSION = '1.9.352';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3002,7 +3002,7 @@ function _selfTestCases() {
     { name: 'lib/mcp-tools: MCP 도구 정의 모듈 단일출처 (_mcpToolCount=모듈 length, Codex #5 영구해소) (UR-0025 1.9.297)', run: () => { const T = require('../lib/mcp-tools'); return Array.isArray(T) && T.length >= 81 && T.every(t => t.name && t.description && t.inputSchema) && T[0].name === 'leerness_handoff' && _mcpToolCount() === T.length && !/const TOOLS = \[/.test(read(__filename)); } },
     { name: 'writeUtf8: 원자적 쓰기(temp→rename) 손상방지 (UR-0038 외부리뷰 3중수렴 1.9.298)', run: () => { const src = read(__filename); return /function writeUtf8\(p, s\)/.test(src) && /fs\.writeFileSync\(tmp,/.test(src) && /fs\.renameSync\(tmp, p\)/.test(src) && /\.tmp-\$\{process\.pid\}/.test(src) && /fs\.unlinkSync\(tmp\)/.test(src); } },
     { name: '_scrubTestEnv: npm test 시크릿 차단(_scrubEnv는 release 토큰 유지) (UR-0039 외부리뷰 1.9.299)', run: () => { const o = { N: process.env.NPM_TOKEN, L: process.env.LEERNESS_NPM_TOKEN }; process.env.NPM_TOKEN = 'sec1'; process.env.LEERNESS_NPM_TOKEN = 'sec2'; const base = _scrubEnv(); const test = _scrubTestEnv(); const r = base.NPM_TOKEN === 'sec1' && base.LEERNESS_NPM_TOKEN === 'sec2' && !test.NPM_TOKEN && !test.LEERNESS_NPM_TOKEN && !!test.PATH; if (o.N === undefined) delete process.env.NPM_TOKEN; else process.env.NPM_TOKEN = o.N; if (o.L === undefined) delete process.env.LEERNESS_NPM_TOKEN; else process.env.LEERNESS_NPM_TOKEN = o.L; return r; } },
-    { name: 'shell 주입 표면 제거: fetchNpmLatest execFile+pkg검증 + runCommandSafe argList 인용 (UR-0040 외부리뷰 1.9.300)', run: () => { const src = read(__filename); const npmFix = /cp\.execFile\('npm', \['view', pkg, 'version'\]/.test(src) && !/cp\.exec\(.npm view \$\{pkg\}/.test(src) && /패키지명 charset/.test(src); const argFix = /argList\.map\(_shellQuoteArg\)\.join/.test(src); return npmFix && argFix && typeof _shellQuoteArg === 'function'; } },
+    { name: 'shell 주입 표면 제거: fetchNpmLatest execFile+pkg검증 + runCommandSafe argList 인용 (UR-0040 외부리뷰 1.9.300)', run: () => { const src = read(__filename); const npmFix = /cp\.execFile\([^,]*'npm[^']*', \['view', pkg, 'version'\]/.test(src) && !/cp\.exec\(.npm view \$\{pkg\}/.test(src) && /패키지명 charset/.test(src) && !/cp\.execFile\('npm', \[[^\]]*\], \{ timeout: 12000, shell:/.test(src); const argFix = /argList\.map\(_shellQuoteArg\)\.join/.test(src); return npmFix && argFix && typeof _shellQuoteArg === 'function'; } },
     { name: 'MCP requiredTier 메타데이터 + 정책 minTier 게이트 (UR-0041 외부리뷰 1.9.301)', run: () => { const T = require('../lib/mcp-tools'); const allValid = T.length >= 81 && T.every(t => PERMISSION_TIERS.includes(t.requiredTier)); const get = n => (T.find(t => t.name === n) || {}).requiredTier; const classOk = get('leerness_state_record') === 'safe-write' && get('leerness_provider_add') === 'safe-write' && get('leerness_web') === 'network' && get('leerness_handoff') === 'read-only' && get('leerness_audit') === 'read-only'; const src = read(__filename); const gateOk = /_tierRank\(minTier\) > _tierRank\(required\)/.test(src) && /_policyEnforce\(targetPath, cliArgs\.join\(' '\), _toolDef/.test(src); return allValid && classOk && gateOk; } },
     { name: 'verify-claim git diff 시맨틱 교차검증: _gitChangedFiles/_claimFileInGit + strict FAIL 통합 (UR-0042 외부리뷰 1.9.302)', run: () => { const fnOk = typeof _gitChangedFiles === 'function' && typeof _claimFileInGit === 'function'; const matchOk = _claimFileInGit('src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('./src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('other.js', new Set(['src/api.js'])) === false && _claimFileInGit('x', null) === null; const src = read(__filename); const wired = /git diff 교차검증/.test(src) && /\|\| !gitClaimOk/.test(src) && /_gitChangedFiles\(root\)/.test(src); return fnOk && matchOk && wired; } },
     { name: '_withLock/_updateRun: lost-update 락(O_EXCL+재진입) + 적용 (UR-0043 외부리뷰 1.9.303)', run: () => { const src = read(__filename); const fnOk = typeof _withLock === 'function' && typeof _sleepSyncMs === 'function' && typeof _updateRun === 'function'; const reentrant = /if \(_heldLocks\.has\(lockPath\)\) return fn\(\)/.test(src); const excl = /fs\.openSync\(lockPath, 'wx'\)/.test(src); const applied = /const id = _withLock\(progressPath\(root\)/.test(src) && /_updateRun\(root, curId/.test(src); return fnOk && reentrant && excl && applied; } },
@@ -3053,6 +3053,8 @@ function _selfTestCases() {
     { name: 'UR-0059(외부리뷰 P0): --path 라우팅 일관화 — bare args[N]||cwd 제거 + arg(--path) wrap', run: () => { const src = read(__filename); const bare1 = '(args[1] ' + '|| process.cwd())'; const bare2 = '(args[2] ' + '|| process.cwd())'; const noBare = !src.includes(bare1) && !src.includes(bare2); const wrapped = src.includes('arg(' + "'--path', args[1] || process.cwd())") && src.includes('arg(' + "'--path', args[2] || process.cwd())"); const argDefault = arg('--definitely-not-real-xyz', 'SENT') === 'SENT'; return noBare && wrapped && argDefault; } },
     { name: 'UR-0061(외부리뷰 P1): roadmap CSS 값 살균 — :root/</style> breakout 차단', run: () => { const m = require('../lib/pure-utils'); const css = m._roadmapTokenStyles({ 'color.primary': 'red;}' + '</style><script>alert(1)</script>' }, {}); const blocked = !css.includes('<') && !css.includes('>'); const primaryLine = (css.split('\n').find(l => l.includes('--lr-primary')) || ''); const noBreakout = !primaryLine.replace(/;$/, '').includes('}'); const preserved = m._roadmapTokenStyles({ 'color.primary': '#2563eb' }, {}).includes('--lr-primary: #2563eb'); return blocked && noBreakout && preserved; } },
     { name: 'UR-0060(외부리뷰 P1): SECRET_PATTERNS 19종 — GitLab/JWT/DB-URI/SendGrid/AWS-secret/Bearer 보강 + 오탐 가드', run: () => { const c = require('../lib/catalogs'); const hit = s => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('glpat-' + 'x'.repeat(20)) && hit('eyJ' + 'x'.repeat(15) + '.eyJ' + 'y'.repeat(15) + '.' + 'z'.repeat(15)) && hit('postgres://u:p@host:5432/db') && hit('SG.' + 'x'.repeat(22) + '.' + 'y'.repeat(43)) && hit('aws_secret_access_key = "' + 'x'.repeat(40) + '"') && hit('Bearer ' + 'x'.repeat(25)); const clean = !hit('const u = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return c.SECRET_PATTERNS.length === 19 && det && clean; } },
+    { name: 'UR-0068(외부리뷰 P2): _roadmapParseMilestones 블록 경계 — 다음 milestone status 누출 차단', run: () => { const m = require('../lib/pure-utils'); const r = m._roadmapParseMilestones('### M-0001. A\n\n### M-0002. B\nStatus: done\nProgress: 80%\n'); return r.length === 2 && r[0].status === 'planned' && r[0].progress === 0 && r[1].status === 'done' && r[1].progress === 80; } },
+    { name: 'UR-0066(외부리뷰 P2): shell:true 주입 가드 — agents bench task _shellQuoteArg + fetchNpmLatest npm.cmd', run: () => { const m = require('../lib/pure-utils'); const src = read(__filename); const benchQuoted = src.includes('const qTask = ' + '_shellQuoteArg(task)'); const npmCmd = /'win32' \? 'npm\.cmd' : 'npm'/.test(src); const q = m._shellQuoteArg('a & b'); const safe = (process.platform === 'win32' ? q === '"a & b"' : q === "'a & b'"); return benchQuoted && npmCmd && safe; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -11467,19 +11469,21 @@ function agentsCmd(root, sub, ...args) {
     const promises = ready.map(({ agent, status }) => new Promise((resolve) => {
       const t0 = Date.now();
       let cmd, cmdArgs;
+      // 1.9.352 (UR-0066 외부리뷰): shell:true 경로에 raw task 전달 시 셸 메타문자(& | $() 백틱) 주입 위험 → _shellQuoteArg 로 단일 토큰화 (안전 경로 _cliChat 와 일관)
+      const qTask = _shellQuoteArg(task);
       if (agent.id === 'claude') {
-        cmdArgs = writeMode ? ['--print', '--dangerously-skip-permissions', task] : ['--print', task];
+        cmdArgs = writeMode ? ['--print', '--dangerously-skip-permissions', qTask] : ['--print', qTask];
         cmd = 'claude';
       } else if (agent.id === 'codex') {
         cmdArgs = writeMode
-          ? ['exec', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', task]
-          : ['exec', '--skip-git-repo-check', task];
+          ? ['exec', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', qTask]
+          : ['exec', '--skip-git-repo-check', qTask];
         cmd = 'codex';
       } else if (agent.id === 'agy') {
-        cmdArgs = writeMode ? ['-p', task, '--yolo'] : ['-p', task];
+        cmdArgs = writeMode ? ['-p', qTask, '--yolo'] : ['-p', qTask];
         cmd = 'agy';
       } else if (agent.id === 'copilot') {
-        cmdArgs = ['copilot', 'suggest', task];
+        cmdArgs = ['copilot', 'suggest', qTask];
         cmd = 'gh';
       }
       const r = cp.spawn(cmd, cmdArgs, { shell: true });
@@ -14975,7 +14979,8 @@ function fetchNpmLatest(pkg) {
     // 1.9.300 (UR-0040, 외부리뷰 Sonnet): cp.exec 템플릿리터럴 → execFile(args 배열) + pkg charset 검증 = 셸 주입 이중 차단.
     //   이전: `npm view ${pkg} version` 가 셸 문자열이라 pkg 에 메타문자(; && $() 공백)면 주입 가능.
     if (!/^@?[a-z0-9][a-z0-9._/-]*$/i.test(String(pkg || ''))) return resolve(null);  // 패키지명 charset (메타문자 0)
-    cp.execFile('npm', ['view', pkg, 'version'], { timeout: 12000, shell: process.platform === 'win32' }, (err, stdout) => {
+    // 1.9.352 (UR-0066 외부리뷰): shell:true 대신 win 에서 npm.cmd 직접 호출 (shell 해석 표면 제거 — pkg 가 charset 검증돼 있어도 방어심층)
+    cp.execFile(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['view', pkg, 'version'], { timeout: 12000 }, (err, stdout) => {
       if (err) return resolve(null);
       const v = String(stdout || '').trim();
       resolve(/^\d+\.\d+\.\d+/.test(v) ? v : null);
@@ -20960,7 +20965,12 @@ async function main() {
   // 1.9.317 (UR-0051, 설치리뷰): 내부 auto-call(LEERNESS_INTERNAL=1) 은 usage 집계 제외 — 텔레메트리 오염(거짓 skill 추천) 방지.
   if (process.env.LEERNESS_INTERNAL !== '1' && cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== '--version' && cmd !== '--help') {
     try {
-      const root = absRoot(arg('--path', args[1] && !args[1].startsWith('-') ? args[1] : process.cwd()));
+      // 1.9.352 (UR-0069 외부리뷰): usage 루트 — --path 우선, 없으면 args[1] 이 .harness 보유 디렉토리일 때만 path(positional 보존), 아니면 cwd. (이전: args[1] 무조건 path 가정 → subcommand[decision add 등] root=cwd/add → .harness 못 찾아 미집계)
+      const _pathArg = arg('--path', null);
+      let root;
+      if (_pathArg) root = absRoot(_pathArg);
+      else if (args[1] && !args[1].startsWith('-') && exists(path.join(absRoot(args[1]), '.harness'))) root = absRoot(args[1]);
+      else root = absRoot(process.cwd());
       if (exists(path.join(root, '.harness'))) _bumpUsage(root, cmd);
     } catch {}
   }

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.352 — 2026-06-05 — 외부리뷰 P2 정리 3종 (UR-0066/0068/0069)
+
+**🧩 외부 리뷰 P2 3건 — shell:true 주입 가드 + milestone 파서 누출 + usage subcommand 미집계.** (selftest 100 달성)
+
+### 구현
+1. **UR-0066 — shell:true 주입 가드** (Opus P2-3/Sonnet F-12): `agents bench|multi --execute` 가 raw task 를 `shell:true` spawn 에 전달 → 셸 메타문자(`& | $()` 백틱) 주입 위험. task 를 `_shellQuoteArg`(크로스플랫폼)로 단일 토큰화(안전 경로 `_cliChat` 와 일관). `fetchNpmLatest` 의 `shell:true` → win `npm.cmd` 직접 호출로 셸 표면 제거.
+2. **UR-0068 — milestone 파서 누출** (Codex#5): `_roadmapParseMilestones` 가 `slice(m.index)` 로 다음 milestone 의 Status/Progress 를 이전에 적용하던 버그. **다음 milestone 직전까지 block 한정**.
+3. **UR-0069 — usage subcommand 미집계** (Codex#6): usage 루트가 `args[1]` 을 path 로 가정 → `decision add`/`scan secrets` 등 subcommand 명령에서 `root=cwd/add` 가 되어 .harness 못 찾아 미집계. 루트를 `arg('--path', cwd)` 로 수정(전 명령 집계).
+
+### 검증
+- **selftest 100/100 PASS** · **E2E 296→297 PASS** (회귀 0).
+- 실측: milestone M-0001 status=planned(누출 없음)/M-0002 done · `_shellQuoteArg('a & b')` 단일 토큰화 · decision/lesson/scan 각 usage 1 집계(이전 0) · 기존 UR-0040 fetchNpmLatest selftest 케이스 새 npm.cmd 형태로 갱신.
+
 ## 1.9.351 — 2026-06-05 — 외부리뷰 UR-0064/0065: 제목 오염 차단 + 문서 정합
 
 **🧩 외부 리뷰 남은 P1 2건 — decision/lesson 제목 오염 차단 + 문서 정합(AGENTS.md/--help). 외부리뷰 P0/P1 전량 해소.**
