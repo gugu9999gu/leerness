@@ -4399,5 +4399,32 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.342 회귀 (UR-0025 심층): ROADMAP_STATUS_LABEL/COLOR→lib/catalogs + roadmap.html 렌더 회귀
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
+    const mapsOk = c.ROADMAP_STATUS_LABEL && c.ROADMAP_STATUS_COLOR
+      && Object.keys(c.ROADMAP_STATUS_LABEL).length === 11 && Object.keys(c.ROADMAP_STATUS_COLOR).length === 11
+      && c.ROADMAP_STATUS_LABEL.done === '완료' && c.ROADMAP_STATUS_COLOR.done === '#16a34a' && c.ROADMAP_STATUS_COLOR.skill === '#8b5cf6';
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
+    const movedOut = !/const ROADMAP_STATUS_LABEL = \{/.test(harnessSrc) && !/const ROADMAP_STATUS_COLOR = \{/.test(harnessSrc)
+      && _catImp.includes('ROADMAP_STATUS_LABEL') && _catImp.includes('ROADMAP_STATUS_COLOR');
+    // 소비 회귀: roadmap.html 생성 시 색상/라벨 주입
+    const rd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', rd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'roadmap', rd], { encoding: 'utf8', timeout: 20000 });
+    const rf = path.join(rd, 'roadmap.html');
+    const html = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8') : '';
+    const renderOk = html.includes('#16a34a') && html.includes('#8b5cf6');
+    ok = mapsOk && movedOut && renderOk;
+    fs.rmSync(rd, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.342) UR-0025 심층: ROADMAP_STATUS 맵 분리 + roadmap.html 렌더 회귀 (UR-0025)' : '✗ ROADMAP_STATUS 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

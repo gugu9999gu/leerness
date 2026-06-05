@@ -25,9 +25,9 @@ const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel,
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG } = require('../lib/catalogs');  // 1.9.341 (UR-0025): BUILTIN_CATALOG 분리
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR } = require('../lib/catalogs');  // 1.9.342 (UR-0025): roadmap status 맵 분리
 
-const VERSION = '1.9.341';
+const VERSION = '1.9.342';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3055,6 +3055,7 @@ function _selfTestCases() {
     { name: 'UR-0053: decisions canonical JSON 레이어(_loadDecisions/_saveDecisions/decisionsJsonPath) + pure 파서/렌더 round-trip (1.9.339)', run: () => { const m = require('../lib/pure-utils'); const md = '# Decisions\n\n### 2026-06-05 — A\n- Decision: a\n- Reason: r\n- Alternatives: alt\n- Impact: imp\n\n### 2026-06-04 — B\n- Decision: b\n- Alternatives:\n'; const objs = m._decisionsFromMd(md); const parseOk = objs.length === 2 && objs[0].alternatives === 'alt' && objs[0].impact === 'imp' && objs[1].alternatives === null && objs[1].title === 'B'; const rt = m._decisionsFromMd(m._renderDecisionsMd(objs)); const rtOk = JSON.stringify(rt) === JSON.stringify(objs); const tplOk = m._decisionsFromMd(m._renderDecisionsMd([])).length === 0; const layerOk = typeof _loadDecisions === 'function' && typeof _saveDecisions === 'function' && typeof decisionsJsonPath === 'function' && _decisionsFromMd === m._decisionsFromMd; return parseOk && rtOk && tplOk && layerOk; } },
     { name: 'UR-0058: lessons canonical JSON 레이어(_loadLessons/_saveLessons/lessonsJsonPath) + pure 파서/렌더 round-trip', run: () => { const m = require('../lib/pure-utils'); const objs = [{ date: '2026-06-05', text: 'A', tag: 't' }, { date: '2026-06-04', text: 'B', tag: null }]; const rt = m._parseLessonEntries(m._renderLessonsMd(objs)); const rtOk = JSON.stringify(rt) === JSON.stringify(objs); const tplOk = m._parseLessonEntries(m._renderLessonsMd([])).length === 0; const layerOk = typeof _loadLessons === 'function' && typeof _saveLessons === 'function' && typeof lessonsJsonPath === 'function' && _renderLessonsMd === m._renderLessonsMd; return rtOk && tplOk && layerOk; } },
     { name: 'UR-0025 심층: BUILTIN_CATALOG→lib/catalogs + _withBuiltinSource→pure-utils 분리 (1.9.341)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.BUILTIN_CATALOG && Object.keys(c.BUILTIN_CATALOG).length === 9 && c.BUILTIN_CATALOG.office && c.BUILTIN_CATALOG.office.version === '1.0.0'; const out = m._withBuiltinSource(c.BUILTIN_CATALOG); const work = Object.keys(out).length === 9 && Object.values(out).every(v => v._source === 'builtin') && out.office.version === '1.0.0' && Array.isArray(out.office.capabilities) && Object.keys(m._withBuiltinSource(null)).length === 0; const src = read(__filename); const moved = BUILTIN_CATALOG === c.BUILTIN_CATALOG && _withBuiltinSource === m._withBuiltinSource && !/const BUILTIN_CATALOG = \{/.test(src); return catOk && work && moved; } },
+    { name: 'UR-0025 심층: ROADMAP_STATUS_LABEL/COLOR→lib/catalogs 분리 (1.9.342)', run: () => { const c = require('../lib/catalogs'); const lblOk = c.ROADMAP_STATUS_LABEL && Object.keys(c.ROADMAP_STATUS_LABEL).length === 11 && c.ROADMAP_STATUS_LABEL.done === '완료' && c.ROADMAP_STATUS_LABEL.blocked === '오류'; const colOk = c.ROADMAP_STATUS_COLOR && Object.keys(c.ROADMAP_STATUS_COLOR).length === 11 && c.ROADMAP_STATUS_COLOR.done === '#16a34a' && c.ROADMAP_STATUS_COLOR.skill === '#8b5cf6'; const src = read(__filename); const moved = ROADMAP_STATUS_LABEL === c.ROADMAP_STATUS_LABEL && ROADMAP_STATUS_COLOR === c.ROADMAP_STATUS_COLOR && !/const ROADMAP_STATUS_LABEL = \{/.test(src); return lblOk && colOk && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -13216,8 +13217,7 @@ function brainstormCmd(root, topic) {
 }
 
 // ===== 1.9.11: Roadmap (project-roadmap-generator 통합) =====
-const ROADMAP_STATUS_LABEL = { done: '완료', 'in-progress': '진행', 'on-hold': '보류', waiting: '검토', incomplete: '미완료', planned: '예정', blocked: '오류', dropped: '취소', skill: '스킬', rule: '룰', meta: '프로젝트' };
-const ROADMAP_STATUS_COLOR = { done: '#16a34a', 'in-progress': '#2563eb', 'on-hold': '#6b7280', waiting: '#eab308', incomplete: '#f97316', planned: '#94a3b8', blocked: '#dc2626', dropped: '#9ca3af', skill: '#8b5cf6', rule: '#06b6d4', meta: '#0f172a' };
+// 1.9.342 (UR-0025 심층): ROADMAP_STATUS_LABEL / ROADMAP_STATUS_COLOR 는 lib/catalogs.js 로 이전 (import).
 const ROADMAP_NODE_W = 220, ROADMAP_NODE_H = 72, ROADMAP_COL_GAP = 70, ROADMAP_ROW_GAP = 14;
 
 function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }

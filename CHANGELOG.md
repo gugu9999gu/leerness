@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.342 — 2026-06-05 — UR-0025(심층): roadmap status 맵 분리
+
+**🧩 roadmap.html 상태 라벨/색상 맵(각 11키)을 모듈로 분리 — 동형 추출 8번째.** (UR-0025 심층)
+
+### 구현 (UR-0025 심층)
+1. **`ROADMAP_STATUS_LABEL`**(status→ko 라벨, 11키) + **`ROADMAP_STATUS_COLOR`**(status→hex 색상, 11키) → `lib/catalogs.js`. roadmap.html 생성기가 import 해서 사용(렌더 로직은 harness 유지 — 인라인 fallback 다양해 박막 강제 안 함).
+2. selftest 89→90 · e2e 286→287.
+
+### 검증
+- **selftest 90/90 PASS** · **E2E 287/287 PASS** (회귀 0).
+- 실측: label/color 각 11키 보존(done=완료/#16a34a · blocked=오류/#dc2626 · skill=#8b5cf6) · `roadmap` 명령 roadmap.html 색상 주입(#16a34a/#8b5cf6) 정상.
+
 ## 1.9.341 — 2026-06-05 — UR-0025(심층): BUILTIN_CATALOG 서브시스템 분리
 
 **🧩 내장 스킬 catalog(9종) + 순수 _source 변환을 모듈로 분리 — 동형 추출 7번째.** (UR-0025 심층)
