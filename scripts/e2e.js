@@ -4804,5 +4804,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.357 회귀 (UR-0075 Phase C): migrate apply — dry-run 비파괴 · --yes canonical 백필 · 멱등
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-app-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d, '.harness', 'decisions.md'), '# Decisions\n\n### 2026-06-01 — A\n- Decision: x\n');
+    fs.rmSync(path.join(d, '.harness', 'decisions.json'), { force: true });
+    // dry-run: json 미생성(비파괴)
+    cp.spawnSync(process.execPath, [CLI, 'migrate', 'apply', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const dryNoWrite = !fs.existsSync(path.join(d, '.harness', 'decisions.json'));
+    // --yes: canonical json 생성
+    cp.spawnSync(process.execPath, [CLI, 'migrate', 'apply', '--path', d, '--yes'], { encoding: 'utf8', timeout: 20000 });
+    const appliedOk = fs.existsSync(path.join(d, '.harness', 'decisions.json'));
+    // 멱등: 재실행 시 applied 0
+    const c3 = cp.spawnSync(process.execPath, [CLI, 'migrate', 'apply', '--path', d, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let idem = false;
+    try { idem = JSON.parse(c3.stdout).applied.length === 0; } catch {}
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = dryNoWrite && appliedOk && idem;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.357) UR-0075 Phase C: migrate apply (dry-run 비파괴 / --yes canonical 백필 / 멱등) (UR-0075)' : '✗ migrate apply 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

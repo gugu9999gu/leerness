@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.357 — 2026-06-05 — UR-0075 Phase C: migrate apply — canonical 백필 비파괴 적용
+
+**🧩 `leerness migrate apply` — `migrate audit` 가 찾은 '안전 항목'(canonical 백필)만 실제로 적용하는 실행 짝. 기본 dry-run, `--yes` 로 적용, 멱등.** (UR-0075 Phase C)
+
+### 배경
+Phase B(`migrate audit`)는 무엇이 어긋났는지 **진단(읽기 전용)** 만 했다. Phase C는 그중 **안전하게 자동 적용 가능한 항목**(canonical-pending: MD-only → canonical JSON 백필)을 실제로 처리한다. version-drift(npm 재설치 필요)·missing-file(재초기화 필요)는 in-place 자동 처리가 안전하지 않으므로 apply 범위에서 제외하고 수동 안내만 한다.
+
+### 구현
+1. **`migrateApplyCmd(root, opts)`**(신규) + **`leerness migrate apply [--path <p>] [--json] [--yes]`**:
+   - **canonical-pending** → `_loadX(root)`(MD 백필) → `_saveX(root, arr)`(canonical JSON + MD 정규화). UR-0053/0058 라운드트립이라 **멱등**(재실행 시 변경 0).
+   - **version-drift / missing-file** → apply 범위 외 → "수동 필요"로 분류 + 조치 명령 안내(`update --yes` / `migrate`).
+2. **기본 dry-run(비파괴)** — `--yes` 없으면 변경 0, "적용 예정" 만 표시(전역 지침 "Dry-run 기본" 준수). `--yes` 시에만 실제 백필.
+3. `--json`: `{ dryRun, appliedCount, applied:[], skipped:[] }` 구조화 출력.
+
+### 검증
+- **selftest 103→104 PASS** · **E2E 301→302 PASS** (회귀 0).
+- 실측: dry-run → `decisions.json` 미생성(비파괴). `--yes` → 생성. 재실행 → `applied 0`(멱등). clean → "적용할 항목 없음".
+
 ## 1.9.356 — 2026-06-05 — UR-0075 Phase B: migrate audit — 비파괴 스키마 drift 리포트
 
 **🧩 `leerness migrate audit` — 임시설치/변형 없이 프로젝트의 마이그레이션 필요 항목만 진단하는 비파괴 dry-run 리포트.** (UR-0075 Phase B — Phase A 가이드 다음 단계)
