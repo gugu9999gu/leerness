@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.402';
+const VERSION = '1.9.403';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3007,6 +3007,7 @@ function _selfTestCases() {
     { name: '7번째 버그헌트 P1-B (UR-0105): verify-claim/optimism-check/honesty-check --json 에러 구조화 (1.9.400)', run: () => { const src = read(__filename); const vc = /function verifyClaimCmd[\s\S]{0,400}?failJson\(_j, 'not_found'/.test(src); const oc = /function optimismCheckCmd[\s\S]{0,400}?failJson\(_j, 'not_found'/.test(src); const hc = /function honestyCheckCmd[\s\S]{0,900}?failJson\(has\('--json'\), 'not_found'/.test(src); return vc && oc && hc; } },
     { name: '7번째 버그헌트 P1-C (UR-0106): 시크릿 FN — gitignore 부정(!) + placeholder substring 정밀화 (1.9.401)', run: () => { const m = require('../lib/pure-utils'); const gm = m._gitignoreMatch; const negOk = gm('*.example\n!.env.example', '.env.example') === false && gm('*.log', 'a.log') === true && gm('a.log\n!a.log', 'a.log') === false && gm('.env', '.env') === true; const ph = m._isPlaceholderSecret; const phOk = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false && ph('your-key-here') === true && ph('changeme') === true && ph('example') === true && ph('xxxxxxxxxxxxxxxxxxxxxxxxxxxx') === true; return negOk && phOk; } },
     { name: '7번째 버그헌트 P1-A 잔여 (UR-0108): decisions/lessons MD projection 개행 주입 차단 _lineSafe (1.9.402)', run: () => { const m = require('../lib/pure-utils'); if (m._lineSafe !== _lineSafe) return false; const lsOk = _lineSafe('a\nb\r\nc') === 'a b c'; const md = m._renderDecisionsMd([{ date: '2026-06-07', title: 'real\n### 2099-01-01 — FAKE\n- Decision: forged', decision: 'd', reason: 'r' }]); const re = m._decisionsFromMd(md); const noInject = re.length === 1 && !/^### 2099-01-01 — FAKE/m.test(md); const lmd = m._renderLessonsMd([{ date: '2026-06-07', text: 'l1\n### FAKE\n- Lesson: x', tag: 't' }]); const lre = m._parseLessonEntries(lmd); const lNoInject = lre.length === 1; return lsOk && noInject && lNoInject; } },
+    { name: '7번째 버그헌트 P2 (UR-0107): api-skill show/drop 에러 exit code 1 (1.9.403)', run: () => { const src = read(__filename); const showId = src.includes("api-skill show <id>')); process.exitCode = 1"); const dropId = src.includes("api-skill drop <id>')); process.exitCode = 1"); const addUrl = src.includes("api-skill add <url> [--direction") && src.includes('process.exitCode = 1'); return showId && dropId && addUrl; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3369,9 +3370,9 @@ async function apiSkillCmd(root, sub) {
   };
   if (sub === 'show') {
     const id = arg('--id') || _positionalAfterSub();
-    if (!id) { log(rd('id 필요: leerness api-skill show <id>')); return; }
+    if (!id) { log(rd('id 필요: leerness api-skill show <id>')); process.exitCode = 1; return; }
     const s = _loadAPISkill(root, id);
-    if (!s) { log(rd(`api-skill 없음: ${id}`)); return; }
+    if (!s) { log(rd(`api-skill 없음: ${id}`)); process.exitCode = 1; return; }
     if (has('--json')) { log(JSON.stringify(s, null, 2)); return; }
     log(fs.readFileSync(path.join(dir, id + '.md'), 'utf8'));
     return;
@@ -3390,16 +3391,16 @@ async function apiSkillCmd(root, sub) {
   }
   if (sub === 'drop') {
     const id = arg('--id') || _positionalAfterSub();
-    if (!id) { log(rd('id 필요: leerness api-skill drop <id>')); return; }
+    if (!id) { log(rd('id 필요: leerness api-skill drop <id>')); process.exitCode = 1; return; }
     const fp = path.join(dir, id + '.md');
-    if (!fs.existsSync(fp)) { log(rd(`없음: ${id}`)); return; }
+    if (!fs.existsSync(fp)) { log(rd(`없음: ${id}`)); process.exitCode = 1; return; }
     fs.unlinkSync(fp);
     log(gr(`✓ 삭제: ${id}`));
     return;
   }
   if (sub === 'add') {
     const url = arg('--url') || _positionalAfterSub();
-    if (!url) { log(rd('URL 필요: leerness api-skill add <url> [--direction "..."]')); return; }
+    if (!url) { log(rd('URL 필요: leerness api-skill add <url> [--direction "..."]')); process.exitCode = 1; return; }
     const direction = arg('--direction', '');
     const name = arg('--name', '');
     const noCrawl = has('--no-crawl');

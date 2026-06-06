@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.403 — 2026-06-07 — api-skill 에러 exit code 1 (7번째 버그헌트 P2, UR-0107)
+
+**🚦 api-skill show/drop 의 실패가 성공(exit 0)으로 보고되던 것 수정 — AI 에이전트의 exit-code 게이트 신뢰성.**
+
+### 배경 (7번째 버그헌트 P2 · 비판검토 후 선별)
+버그헌트가 여러 exit-code 비일관을 지적. 직접 재현 + **비판 판단**:
+- **수정(명확)**: api-skill show/drop 없는 ID + 인자 누락이 `✗ ...` 출력하면서 exit 0 → 실패를 성공으로 오판(데이터 op 에러). exit 1 로 수정.
+- **미수정(by-design 판단)**: roles/policy/state 의 unknown-subcommand 가 catalog(default list)를 보여주며 exit 0 → `cmd`(no sub)와 동일한 lenient-default 라 defensible. 과엄격 변경 위험으로 제외. web/pc check 의 "미설치" exit 0 도 opt-in 정보성이라 정당(미수정).
+
+### 구현
+- api-skill show(id 누락/not-found), drop(id 누락/not-found), add(url 누락) 에러에 `process.exitCode = 1` 추가. 정상 list/show 는 exit 0 보존.
+
+### 검증 (회귀 0)
+- **selftest 148→149 PASS** (api-skill show/drop/add 에러 exit-code 와이어).
+- **E2E 341→342 PASS** (show/drop NOPE + show id누락 → exit1, list → exit0).
+
 ## 1.9.402 — 2026-06-07 — decisions/lessons MD projection 개행 주입 차단 (7번째 버그헌트 P1-A 잔여, UR-0108)
 
 **🛡 데이터 무결성 완결 — decision/lesson 텍스트의 개행이 decisions.md/lessons.md projection 에 위조 블록을 주입하던 것 차단(테이블셀 injection 클러스터 마무리).**

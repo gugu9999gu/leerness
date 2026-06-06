@@ -5647,5 +5647,25 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.403 회귀 (7번째 버그헌트 P2, UR-0107): api-skill show/drop 의 missing-id/not-found 에러가 exit 1(성공 오판 방지)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-apiskillexit-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const ex = (args) => cp.spawnSync(process.execPath, [CLI, ...args, '--path', d], { encoding: 'utf8', timeout: 15000 }).status;
+    const showNf = ex(['api-skill', 'show', 'NOPE']) === 1;
+    const dropNf = ex(['api-skill', 'drop', 'NOPE']) === 1;
+    const showNoId = ex(['api-skill', 'show']) === 1;
+    // 정상 list 는 exit 0 보존
+    const listOk = ex(['api-skill', 'list']) === 0;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = showNf && dropNf && showNoId && listOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.403) 7th버그헌트 P2: api-skill show/drop 에러 exit1(성공오판 방지) + list 정상 (UR-0107)' : '✗ api-skill exit-code 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
