@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.374';
+const VERSION = '1.9.375';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -199,7 +199,7 @@ const _heldLocks = new Set();  // 프로세스 내 재진입 추적 (중첩 _wit
 function _withLock(targetPath, fn, opts = {}) {
   const lockPath = targetPath + '.lock';
   if (_heldLocks.has(lockPath)) return fn();  // 이미 이 프로세스가 보유 → 재진입(중첩 호출 안전)
-  const maxWaitMs = opts.maxWaitMs || 5000;
+  const maxWaitMs = opts.maxWaitMs || 10000;  // 1.9.375 (UR-0084): 5s→10s — 고부하 경합 시 fail-open(락 없이 진행) 전 인내 상향, lost-update 창 축소
   const staleMs = opts.staleMs || 30000;
   try { mkdirp(path.dirname(lockPath)); } catch {}
   const start = Date.now();
@@ -3011,6 +3011,7 @@ function _selfTestCases() {
     { name: 'UR-0073 Phase B: _composeTeamPlan dry-run 실행 계획 (멤버별 dispatch, 실행 없음) 행위 (1.9.372)', run: () => { const m = require('../lib/pure-utils'); if (typeof _composeTeamPlan !== 'function' || m._composeTeamPlan !== _composeTeamPlan) return false; const team = { id: 'rev', name: 'R', purpose: 'PR 리뷰', personas: ['security', 'perf'], members: ['claude', 'codex'], schedule: 'manual' }; const p1 = _composeTeamPlan(team, '점검'); const ok1 = p1.steps.length === 2 && p1.task === '점검' && p1.steps[0].member === 'claude' && p1.steps[0].suggestedCommand.includes('agents dispatch') && p1.steps[0].suggestedCommand.includes('--to claude') && p1.steps[0].dispatchPrompt.includes('security'); const p2 = _composeTeamPlan(team, null); const ok2 = p2.task === 'PR 리뷰'; const p3 = _composeTeamPlan({ id: 'e', personas: [], members: [] }, 'x'); const ok3 = p3.steps.length === 0 && p3.memberCount === 0; return ok1 && ok2 && ok3; } },
     { name: 'UR-0073 Phase C: _teamHandoffReminders 스케줄 알림 (비-manual·active 만, 실행 트리거 아님) 행위 (1.9.373)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamHandoffReminders !== 'function' || m._teamHandoffReminders !== _teamHandoffReminders) return false; const r = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'] }, { id: 'man', schedule: 'manual', status: 'active' }, { id: 'paused', schedule: 'daily', status: 'paused' }]); return r.length === 1 && r[0].includes('rev') && r[0].includes('every-session') && r[0].includes('team preview rev') && !r.join('|').includes('man') && !r.join('|').includes('paused'); } },
     { name: 'UR-0074: _cadenceAssessment 릴리스 빈도 평가 (임계값) 행위 (1.9.374)', run: () => { const m = require('../lib/pure-utils'); if (typeof _cadenceAssessment !== 'function' || m._cadenceAssessment !== _cadenceAssessment || typeof releaseCadenceCmd !== 'function') return false; return _cadenceAssessment(7, 1, 1).level === 'very-high' && _cadenceAssessment(3, 1, 1).level === 'high' && _cadenceAssessment(1, 1, 1).level === 'moderate' && _cadenceAssessment(0.2, 1, 1).level === 'healthy' && _cadenceAssessment(7, 1, 1).recommendation.length > 0; } },
+    { name: 'UR-0084: _withLock 획득/재진입/해제 + maxWaitMs 하드닝(10s) 행위 (1.9.375)', run: () => { if (typeof _withLock !== 'function') return false; const src = read(__filename); const hardened = /maxWaitMs = opts\.maxWaitMs \|\| 10000/.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lock_')); try { const target = path.join(tmp, 'f.md'); let reentrant = false; const lockSeen = _withLock(target, () => { const exists = fs.existsSync(target + '.lock'); reentrant = (_withLock(target, () => 42) === 42); return exists; }); const cleaned = !fs.existsSync(target + '.lock'); return hardened && lockSeen === true && reentrant === true && cleaned; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }

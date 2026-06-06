@@ -3413,8 +3413,8 @@ total++;
     const ptPath = path.join(lDir, '.harness', 'progress-tracker.md');
     // 자식들이 OS 프로세스로 독립 진행 → 부모는 파일을 sync 폴링(원자쓰기라 부분읽기 없음)
     const start = Date.now(); let found = 0;
-    // 1.9.321: 폴 타임아웃 25s→60s — 전체 e2e CPU 포화 시 6 병렬 spawn 지연으로 인한 간헐 플래키 방지(격리 실측 0.4s, 대폭 여유)
-    while (Date.now() - start < 60000) {
+    // 1.9.321/1.9.375 (UR-0084): 폴 타임아웃 60s→120s — 전체 e2e CPU 포화(561s 실측 시 1회 flake) 대비 헤드룸 2배(격리 실측 0.4s, 대폭 여유)
+    while (Date.now() - start < 120000) {
       try { const pt = fs.readFileSync(ptPath, 'utf8'); found = Array.from({ length: N }, (_, i) => i).filter(i => pt.includes('LOCKTEST-' + i)).length; if (found === N) break; } catch {}
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
     }

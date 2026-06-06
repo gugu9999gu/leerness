@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.375 — 2026-06-06 — UR-0084: 동시성 락 하드닝 (e2e flake 제거 + lost-update 창 축소)
+
+**🛠 고부하 시 간헐 flake 한 락 테스트 + `_withLock` fail-open 창 하드닝.**
+
+### 배경
+1.9.374 e2e(561s 고부하)에서 "lost-update 락" 테스트가 1회 flake(UR-0084). 근원: `_withLock` 이 `maxWaitMs`(5s) 초과 시 **락 없이 진행**(fail-open) → 극단 경합 시 lost-update 창. + e2e 폴 60s 가 CPU 포화 시 6 병렬 spawn 완료에 빠듯.
+
+### 구현
+1. **`_withLock` maxWaitMs 5s→10s**: fail-open(락 없이 쓰기) 전 인내 2배 — 고부하 경합에서 lost-update 창 축소(fail-open 정책은 유지, 무한 차단 방지).
+2. **e2e lost-update 폴 60s→120s**: CPU 포화 헤드룸 2배(격리 실측 0.4s 라 대폭 여유).
+3. **`_withLock` 행위 selftest 추가**: 실제 락 획득(lock 파일 존재)→재진입(중첩 호출 42)→해제(cleanup) + maxWaitMs 하드닝 확인.
+
+### 검증 (회귀 0)
+- **selftest 120→121 PASS** (신규: _withLock 실호출 행위). **E2E 320/320 PASS**(락 테스트 강건화).
+- 실측: _withLock 획득/재진입/해제 정상, 락 파일 정리.
+
 ## 1.9.374 — 2026-06-06 — UR-0074: release cadence 진단 (외부리뷰 케이던스 가시화)
 
 **🧩 외부 리뷰가 반복 지적한 "릴리스 케이던스 과다"를 측정·가시화 — `leerness release cadence`.**
