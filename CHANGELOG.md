@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.371 — 2026-06-06 — UR-0073 Phase A: 에이전트 팀 정의 레지스트리 (opt-in · 정의 전용)
+
+**🧩 페르소나 기반 에이전트 팀 비전 착수 — `leerness team` 정의 레지스트리.** (UR-0073 Phase A, 안정화 완료 후 opt-in 신규 비전)
+
+### 배경
+사용자 비전(UR-0073): 페르소나 기반 영속 에이전트 팀(리뷰/배포/블로그 팀)이 세션/주기적으로 자동 작업. 방향 설계대로 **코어 안정화 완료 후 opt-in 으로 착수**. Phase A 는 **정의 레지스트리(persistence layer)** 만 — 자동 실행은 향후 단계로 게이트.
+
+### 구현
+1. **`leerness team list|add|show|remove <id>`** + 옵션(`--name --purpose --personas a,b --members claude,codex --schedule manual|every-session|daily|weekly`).
+2. **canonical JSON 패턴**: `teams.json`(주) + `teams.md`(projection, `_renderTeamsMd` 순수 렌더러 → pure-utils). `_loadTeams`/`_saveTeams` I/O.
+3. **안전**: 정의 전용 — **자동 실행 없음**(메타데이터만). id 정규화(영숫자/._-, traversal sanitize). dedup. schedule 화이트리스트.
+4. **표면 정합(CV-7 규율)**: commands ops 카테고리 + help 등재.
+
+### 검증 (회귀 0)
+- **selftest 116→117 PASS** (행위: `_renderTeamsMd` 출력 + `_saveTeams`/`_loadTeams` round-trip + JSON/MD 생성).
+- **E2E 316→317 PASS** (행위: team add→list(--json count/personas/schedule)→canonical JSON+MD 생성→remove→count 0).
+- 실측: add/list/show/remove + teams.json/teams.md 생성 + id sanitize.
+
+### UR-0073 다단계 — Phase A(정의 레지스트리) 완료, 실행/스케줄/배포 단계는 향후 opt-in (open 유지).
+
 ## 1.9.370 — 2026-06-06 — UR-0025 모듈화: archive/skill-catalog 순수 파서 분리
 
 **🧩 순수 파서 2종을 lib/pure-utils 로 분리 — 인라인 ~65줄 제거.**

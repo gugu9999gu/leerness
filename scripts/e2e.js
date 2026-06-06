@@ -5086,5 +5086,29 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.371 회귀 (UR-0073 Phase A): team 정의 레지스트리 — add/list/remove + canonical JSON/MD (opt-in · 정의 전용)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-team-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'rev', '--name', 'Review', '--personas', 'security,perf', '--members', 'claude,codex', '--schedule', 'every-session', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const lj = cp.spawnSync(process.execPath, [CLI, 'team', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let addOk = false;
+    try { const j = JSON.parse(lj.stdout); addOk = j.count === 1 && j.teams[0].id === 'rev' && j.teams[0].personas.length === 2 && j.teams[0].schedule === 'every-session'; } catch {}
+    const jsonExists = fs.existsSync(path.join(d, '.harness', 'teams.json'));
+    const mdExists = fs.existsSync(path.join(d, '.harness', 'teams.md'));
+    cp.spawnSync(process.execPath, [CLI, 'team', 'remove', 'rev', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const lj2 = cp.spawnSync(process.execPath, [CLI, 'team', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let removeOk = false;
+    try { removeOk = JSON.parse(lj2.stdout).count === 0; } catch {}
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = addOk && jsonExists && mdExists && removeOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.371) UR-0073 Phase A: team 정의 레지스트리 (add/list/remove + canonical JSON/MD, opt-in 정의전용)' : '✗ team 레지스트리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
