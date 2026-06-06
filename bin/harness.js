@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
-const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
+const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, _parseSkillsValue, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
   _htmlToText, _extractTitle, _extractLinks,
   _countDatedBlocks, _extractDecisionBlocks, _classifyIntent,
@@ -26,9 +26,9 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368 (UR-0025): SKILL_CATALOG_PRESETS + MERGE_OVERWRITE_FILES 분리
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.368';
+const VERSION = '1.9.369';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -438,19 +438,7 @@ function skillLock(skills) {
   return JSON.stringify(data, null, 2) + '\n';
 }
 
-// 1.9.276 (GPT-5.5 2차 리뷰): init --minimal 시 제외하는 키 — 에디터 통합/가이드/템플릿/스킬/특화 체크리스트 등
-//   "코어 워크플로(handoff/verify/audit/session close)"가 요구하지 않는 파일만 제외 (verify 필수 파일은 유지).
-const MINIMAL_SKIP_KEYS = new Set([
-  '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md',
-  '.harness/project-brief.md', '.harness/task-type-map.md', '.harness/architecture.md', '.harness/context-map.md',
-  '.harness/guardrails.md', '.harness/feature-contracts.md', '.harness/feature-graph.md',
-  '.harness/testing-strategy.md', '.harness/review-checklist.md', '.harness/release-checklist.md',
-  '.harness/session-close-policy.md', '.harness/language-policy.md', '.harness/test-evidence-policy.md',
-  '.harness/AX_PLAN_GUIDE.md', '.harness/AX_MIGRATION_GUIDE.md', '.harness/AX_NEW_PROJECT_GUIDE.md', '.harness/AX_SKILL_LIBRARY_GUIDE.md',
-  '.harness/skill-index.md',
-  '.harness/templates/end-of-session-report.md', '.harness/templates/decision.md', '.harness/templates/task-row.md',
-  '.claude/skills/leerness.md'
-]);
+// 1.9.276/1.9.369 (UR-0025): MINIMAL_SKIP_KEYS → lib/catalogs (init --minimal 제외 키).
 function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
   const project = detectProjectName(root);
   const skillRows = Object.entries(skillCatalog).map(([k, v]) => `| ${k} | ${v.displayNameKo} | ${v.capabilities.join(', ')} | ${v.lastUpdated} | ${v.verification} |`).join('\n');
@@ -852,13 +840,8 @@ function syncReadme(root) {
   ok('README.md Leerness section synced');
 }
 
-function parseSkillsValue(v) {
-  if (!v || v === true) return [];
-  if (v === 'all') return Object.keys(skillCatalog);
-  // 1.9.11: recommended에 project-roadmap-generator 자동 포함
-  if (v === 'recommended') return ['office','commerce-api','ai-verified-skill-publisher','feature-implementation','project-roadmap-generator'];
-  return String(v).split(',').map(s => s.trim()).filter(Boolean).filter(s => skillCatalog[s]);
-}
+// 1.9.369 (UR-0025): 순수 코어 _parseSkillsValue (lib/pure-utils) + skillCatalog 주입 래퍼.
+function parseSkillsValue(v) { return _parseSkillsValue(v, skillCatalog); }
 
 async function resolveInstallOptions(root, opts = {}) {
   const explicitLang = arg('--language', null);
@@ -3069,6 +3052,7 @@ function _selfTestCases() {
     { name: 'CV-6/UR-0081: 시크릿 스캐너 FP/FN — _isPlaceholderSecret + _looksSecretLike 행위', run: () => { if (typeof _isPlaceholderSecret !== 'function' || typeof _looksSecretLike !== 'function') return false; const fp = _isPlaceholderSecret('change-me') && _isPlaceholderSecret('your-api-key-here') && _isPlaceholderSecret('<token>') && _isPlaceholderSecret('') && !_isPlaceholderSecret('hunter2realpass'); const fn = _looksSecretLike('secret123') && _looksSecretLike('a'.repeat(24)) && !_looksSecretLike('processEnv') && !_looksSecretLike('reqBodyPassword'); return fp && fn; } },
     { name: 'UR-0025: _mergeLines/_mergeEnvLines 순수 코어 모듈 분리 + 행위 (1.9.367)', run: () => { if (typeof _mergeLines !== 'function' || typeof _mergeEnvLines !== 'function') return false; const m = require('../lib/pure-utils'); const moved = m._mergeLines === _mergeLines && m._mergeEnvLines === _mergeEnvLines; const ml = _mergeLines('a\n', ['a', 'b']) === 'a\nb\n'; const meKeep = _mergeEnvLines('FOO=keep\n', ['FOO=new']) === 'FOO=keep\n'; const meAdd = _mergeEnvLines('FOO=keep\n', ['BAR=add']).includes('BAR=add'); return moved && ml && meKeep && meAdd; } },
     { name: 'UR-0025: _mergeReadmeSection/_managedMerge + MERGE_OVERWRITE_FILES 모듈 분리 + 행위 (1.9.368)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _mergeReadmeSection !== 'function' || typeof _managedMerge !== 'function') return false; const moved = m._mergeReadmeSection === _mergeReadmeSection && m._managedMerge === _managedMerge && MERGE_OVERWRITE_FILES === c.MERGE_OVERWRITE_FILES; const rd = _mergeReadmeSection('', 'BLOCK', '<s>', '<e>') === '# Project\n\nBLOCK'; const mm = _managedMerge('a.md', 'NEW', 'OLD', '.h', new Set()).includes('migration-preserved'); const ow = _managedMerge('.harness/manifest.json', 'NEW', 'OLD', '.h', c.MERGE_OVERWRITE_FILES) === 'NEW'; const same = _managedMerge('a.md', 'X', 'X', '.h', new Set()) === 'X'; return moved && rd && mm && ow && same; } },
+    { name: 'UR-0025: _parseSkillsValue(catalog 주입) + MINIMAL_SKIP_KEYS 모듈 분리 + 행위 (1.9.369)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _parseSkillsValue !== 'function') return false; const moved = m._parseSkillsValue === _parseSkillsValue && MINIMAL_SKIP_KEYS === c.MINIMAL_SKIP_KEYS; const cat = { office: {}, foo: {} }; const empty = _parseSkillsValue('', cat).length === 0; const all = _parseSkillsValue('all', cat).length === 2; const rec = _parseSkillsValue('recommended', cat).includes('office'); const csv = JSON.stringify(_parseSkillsValue('office,bar', cat)) === JSON.stringify(['office']); return moved && empty && all && rec && csv && MINIMAL_SKIP_KEYS.has('.claude/skills/leerness.md'); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }

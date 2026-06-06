@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.369 — 2026-06-06 — UR-0025 모듈화: _parseSkillsValue + MINIMAL_SKIP_KEYS 분리
+
+**🧩 install 설정 로직/데이터 모듈화 — --skills 파서 순수화(catalog 주입) + --minimal 제외목록 catalogs 응집.**
+
+### 구현
+1. **`_parseSkillsValue(v, catalog)`**(pure-utils): `--skills` 값 파싱(all/recommended/csv) + catalog 필터. skillCatalog 를 인자 주입해 harness 모듈 상태와 비결합. harness `parseSkillsValue(v)` = 얇은 래퍼.
+2. **`MINIMAL_SKIP_KEYS`**(catalogs): `init --minimal` 제외 키목록(에디터통합/가이드/템플릿 등 비핵심). harness import.
+
+### 검증 (회귀 0)
+- **selftest 114→115 PASS** (행위: `_parseSkillsValue('all',cat)`/`'recommended'`/`'office,bar'`→catalog 필터 + 모듈 reference equality + `MINIMAL_SKIP_KEYS` 보유).
+- **E2E 314→315 PASS** (행위: `init --minimal` → architecture.md 제외 + plan.md 유지 · `init --skills recommended` → office 스킬 설치).
+- 실측: 위 시나리오 확인.
+
 ## 1.9.368 — 2026-06-06 — UR-0025 모듈화: README/managed 머지 + MERGE_OVERWRITE_FILES 분리
 
 **🧩 마이그레이션 머지 안전 핵심을 모듈화 — README/관리파일 머지 순수 코어 → pure-utils, overwrite 파일목록 → catalogs.**

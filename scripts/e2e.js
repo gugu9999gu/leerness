@@ -5053,5 +5053,25 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.369 회귀 (UR-0025): MINIMAL_SKIP_KEYS/_parseSkillsValue 분리 — init --minimal 비핵심 스킵+코어 유지, --skills recommended 설치
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-min-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko', '--minimal'], { encoding: 'utf8', timeout: 30000 });
+    const skipAbsent = !fs.existsSync(path.join(d, '.harness', 'architecture.md'));  // MINIMAL_SKIP_KEYS
+    const corePresent = fs.existsSync(path.join(d, '.harness', 'plan.md'));  // core 유지
+    fs.rmSync(d, { recursive: true, force: true });
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rec-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d2, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    const recInstalled = fs.existsSync(path.join(d2, '.harness', 'skills', 'office'));  // recommended → office 포함
+    fs.rmSync(d2, { recursive: true, force: true });
+    ok = skipAbsent && corePresent && recInstalled;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.369) UR-0025: MINIMAL_SKIP_KEYS/_parseSkillsValue 분리 (--minimal 스킵+코어유지, --skills recommended)' : '✗ minimal/skills 분리 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
