@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.384 — 2026-06-06 — 5번째 외부평가: status/verify --json 구조화 출력 일관성 (UR-0085)
+
+**🔌 `status --json` / `verify --json` 이 사람용 텍스트 → 구조화 JSON — AI 에이전트 자동화용 출력 일관성 확보.**
+
+### 배경 (5번째 외부평가, GPT-5.5 web, 1.9.382 · "참고하되 맹신 X")
+외부 평가가 #1 AI-에이전트 리스크로 지목: audit/health/task list 는 `--json` 시 JSON 인데 `status --json` 은 "Leerness: 1.9.x / Files: 56/56", `verify --json` 은 "✓ verify passed" 처럼 **사람용 텍스트**를 그대로 냄. 자체 재현으로 확인 후 수정.
+
+### 구현
+1. **status --json**: `{ version, language, minimal, total, present, missing[], healthy }` 구조화 출력(없으면 기존 사람용 유지).
+2. **verify --json**: 실패를 `failures[]` 로 먼저 수집 → `{ ok, failures[], healthy }` 출력. **exit code 1 보존**(JSON·사람용 양쪽 모두 실패 시 exit 1).
+3. 사람용 출력/동작 무변경(--json 없을 때 기존 `✗ ...` 메시지 + exit code 그대로).
+
+### 검증 (회귀 0)
+- **selftest 129→130 PASS** (status --json behavioral 파싱(total/present/healthy/missing) + verify --json 와이어 확인).
+- **E2E 328→329 PASS** (status --json 구조 + verify --json pass(exit0)/fail(exit1) + 사람용 verify fail(exit1, JSON 아님) 보존).
+- 실측: pass `{ok:true,failures:0}` exit0 / AGENTS.md 삭제 `{ok:false,failures:3}` exit1 / 사람용 `✗ ...` exit1.
+
+### 5번째 외부평가 후속 (UR-0086 contract spec markdown-bullet 파서, UR-0087 secret .env.bad 정책)은 검증 후 별도 라운드.
+
 ## 1.9.383 — 2026-06-06 — UR-0025 큰 핸들러 모듈화 토대②: lib/io.js fs 프리미티브 분리
 
 **🧩 lib/io.js 에 파일 I/O 프리미티브 추가 — 핸들러를 별도 lib 모듈로 분리할 토대 완비(io 14종).**

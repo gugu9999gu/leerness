@@ -5340,5 +5340,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.384 회귀 (5번째 외부평가/UR-0085): status/verify --json 구조화 출력 일관성 — pass JSON + fail JSON(exit1) + 사람용 exit1 유지
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-svjson-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const sr = cp.spawnSync(process.execPath, [CLI, 'status', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    const sj = JSON.parse(sr.stdout);
+    const statusOk = typeof sj.total === 'number' && sj.present === sj.total && sj.healthy === true && Array.isArray(sj.missing) && sj.missing.length === 0;
+    const vr = cp.spawnSync(process.execPath, [CLI, 'verify', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    const vj = JSON.parse(vr.stdout);
+    const verifyPassOk = vj.ok === true && Array.isArray(vj.failures) && vj.failures.length === 0 && vr.status === 0;
+    fs.rmSync(path.join(d, 'AGENTS.md'), { force: true });
+    const vr2 = cp.spawnSync(process.execPath, [CLI, 'verify', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    const vj2 = JSON.parse(vr2.stdout);
+    const verifyFailOk = vj2.ok === false && vj2.failures.length >= 1 && vr2.status === 1;  // --json 실패도 exit1
+    const vr3 = cp.spawnSync(process.execPath, [CLI, 'verify', d], { encoding: 'utf8', timeout: 15000 });  // 사람용 분기 보존
+    const humanFailOk = vr3.status === 1 && /✗/.test((vr3.stdout || '') + (vr3.stderr || '')) && !/^\s*\{/.test(vr3.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = statusOk && verifyPassOk && verifyFailOk && humanFailOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.384) 5th외부평가: status/verify --json 구조화 일관성 (pass/fail JSON+exit1, 사람용 보존, UR-0085)' : '✗ status/verify --json 일관성 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

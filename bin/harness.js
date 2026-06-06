@@ -29,7 +29,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.383';
+const VERSION = '1.9.384';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2986,6 +2986,7 @@ function _selfTestCases() {
     { name: 'UR-0025: KEYWORD_STOPWORDS 단일출처 — handoff/lessons 키워드 stopwords 2중 중복 제거 (1.9.381)', run: () => { const c = require('../lib/catalogs'); if (KEYWORD_STOPWORDS !== c.KEYWORD_STOPWORDS) return false; const setOk = c.KEYWORD_STOPWORDS instanceof Set && c.KEYWORD_STOPWORDS.has('작업') && c.KEYWORD_STOPWORDS.has('task') && !c.KEYWORD_STOPWORDS.has('고유단어') && c.KEYWORD_STOPWORDS.size >= 25; const usesConst = (read(__filename).match(/const stopwords = KEYWORD_STOPWORDS;/g) || []).length >= 2 && !/const stopwords = new Set\(\[/.test(read(__filename)); return setOk && usesConst; } },
     { name: 'UR-0025 큰핸들러토대: lib/io.js 프리미티브(log/ok/warn/fail/today/now) 모듈 분리 + 동작 (1.9.382)', run: () => { const io = require('../lib/io'); const exportsOk = ['log', 'ok', 'warn', 'fail', 'today', 'now'].every(k => typeof io[k] === 'function') && io.log === log && io.fail === fail && io.now === now; const todayOk = /^\d{4}-\d{2}-\d{2}$/.test(io.today()) && /^\d{4}-\d{2}-\d{2}T/.test(io.now()); const src = read(__filename); const moved = src.includes("require('../lib/io')") && !/^function fail\(s\) \{ log/m.test(src) && !/^function now\(\) \{ return new Date/m.test(src); let exitOk = false; const saved = process.exitCode; const _w = process.stdout.write; try { process.stdout.write = () => true; process.exitCode = 0; io.fail('probe'); exitOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } return exportsOk && todayOk && moved && exitOk; } },
     { name: 'UR-0025 큰핸들러토대: lib/io.js fs 프리미티브(read/writeUtf8/exists/mkdirp/append/rel/absRoot) 분리 + round-trip (1.9.383)', run: () => { const io = require('../lib/io'); const exp = ['absRoot', 'exists', 'read', 'readBuf', 'mkdirp', 'writeUtf8', 'append', 'rel'].every(k => typeof io[k] === 'function') && io.read === read && io.writeUtf8 === writeUtf8 && io.exists === exists; const src = read(__filename); const moved = !/^function writeUtf8\(p, s\) \{/m.test(src) && !/^function read\(p\) \{/m.test(src) && !/^function exists\(p\) \{/m.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_io_')); let rt = false; try { const f = path.join(tmp, 'a', 'b.txt'); io.writeUtf8(f, '한글RT'); rt = io.exists(f) && io.read(f) === '한글RT' && io.rel(tmp, f) === 'a/b.txt'; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return exp && moved && rt; } },
+    { name: '5th외부평가/UR-0085: status --json 구조화 출력 + verify --json 와이어 (1.9.384)', run: () => { if (typeof status !== 'function' || typeof verify !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sj_')); const save = process.argv; const _w = process.stdout.write; let so = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'status', tmp, '--json']; process.stdout.write = s => { so += s; return true; }; status(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let sj; try { sj = JSON.parse(so); } catch {} const statusOk = !!sj && typeof sj.total === 'number' && typeof sj.present === 'number' && 'healthy' in sj && Array.isArray(sj.missing); const src = read(__filename); const verifyWired = /function verify\(root\) \{[\s\S]*?has\('--json'\)[\s\S]*?JSON\.stringify\(\{ ok:/.test(src); return statusOk && verifyWired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6745,6 +6746,8 @@ function status(root) {
   try { const mf = path.join(root, '.harness/manifest.json'); if (exists(mf)) isMinimal = !!JSON.parse(read(mf)).minimal; } catch {}
   const files = Object.keys(coreFiles(root, lang, [], { minimal: isMinimal }));
   const missing = files.filter(f => !exists(path.join(root,f)));
+  // 1.9.384 (5번째 외부평가/UR-0085): --json 일관성 — AI 에이전트용 구조화 출력.
+  if (has('--json')) { log(JSON.stringify({ version: ver, language: lang, minimal: isMinimal, total: files.length, present: files.length - missing.length, missing, healthy: missing.length === 0 }, null, 2)); return; }
   log(`Leerness: ${ver}${isMinimal ? ' (minimal)' : ''}`);
   log(`Files: ${files.length - missing.length}/${files.length}`);
   if (missing.length) missing.forEach(x => warn('missing: ' + x));
@@ -6752,15 +6755,17 @@ function status(root) {
 }
 function verify(root) {
   root = absRoot(root);
-  let bad = 0;
+  // 1.9.384 (5번째 외부평가/UR-0085): 실패를 먼저 수집 → --json 구조화 출력 + 사람용 분기 (exit code 일관 유지).
+  const failures = [];
   const required = REQUIRED_WORKSPACE_FILES;  // 1.9.380 (UR-0025): lib/catalogs 단일출처
-  for (const f of required) { if (!exists(path.join(root,f))) { bad++; fail(`missing: ${f}`); } }
+  for (const f of required) { if (!exists(path.join(root,f))) failures.push(`missing: ${f}`); }
   const g = exists(path.join(root,'.harness/guideline.md')) ? read(path.join(root,'.harness/guideline.md')) : '';
-  if (!g.includes('plan.md') || !g.includes('progress-tracker.md')) { bad++; fail('guideline.md must reference plan.md and progress-tracker.md'); }
+  if (!g.includes('plan.md') || !g.includes('progress-tracker.md')) failures.push('guideline.md must reference plan.md and progress-tracker.md');
   const a = exists(path.join(root,'AGENTS.md')) ? read(path.join(root,'AGENTS.md')) : '';
-  if (!a.includes('protected-files.md')) { bad++; fail('AGENTS.md must reference protected-files.md'); }
-  if (!a.includes('anti-lazy-work-policy.md')) { bad++; fail('AGENTS.md must reference anti-lazy-work-policy.md'); }
-  if (bad) process.exitCode = 1; else ok('verify passed');
+  if (!a.includes('protected-files.md')) failures.push('AGENTS.md must reference protected-files.md');
+  if (!a.includes('anti-lazy-work-policy.md')) failures.push('AGENTS.md must reference anti-lazy-work-policy.md');
+  if (has('--json')) { log(JSON.stringify({ ok: failures.length === 0, failures, healthy: failures.length === 0 }, null, 2)); if (failures.length) process.exitCode = 1; return; }
+  if (failures.length) { failures.forEach(f => fail(f)); process.exitCode = 1; } else ok('verify passed');
 }
 // 1.9.356 (UR-0075 Phase B): migrate audit — 비파괴 dry-run 스키마 drift 리포트(버전/ canonical JSON 백필/누락 파일). 실제 변경 X.
 function migrateAuditCmd(root, opts = {}) {
