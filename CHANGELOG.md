@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.391 — 2026-06-06 — UR-0025 큰 핸들러 모듈화 3번째: feature → lib/feature.js (DI)
+
+**🧩 세 번째 핸들러 모듈 — feature add/link/impact/list/show 를 lib/feature.js 로 분리. 1.9.390 순수 코어 토대 위에 완성.**
+
+### 배경 (UR-0025, 사용자 승인 모듈화)
+migrate(1.9.388)/team(1.9.389) 에 이어 세 번째. 1.9.390 에서 feature-graph 순수 코어를 pure-utils 로 뺀 덕에 이제 핸들러를 깨끗이 분리 가능.
+
+### 구현
+1. **lib/feature.js 신규**: 5 핸들러(add/link/impact/list/show) 이전.
+   - 직접 require: `./io`(absRoot/log/ok/warn/fail) · `./pure-utils`(_nextFeatureId/_featureImpactBfs).
+   - **DI 주입**: _ensureFeatureGraph · _readFeatureGraph · _writeFeatureGraph(feature-graph I/O 헬퍼) · arg · has.
+2. **_featureImpactBfs → pure-utils**: 영향 BFS(affects/co-changes transitive + depends-on 역방향)는 순수 + handoff(8613)/audit(19302)도 공유 → pure-utils 로 이동, harness+lib 양쪽 import.
+3. **I/O 헬퍼는 harness 유지**: _readFeatureGraph(7+곳 공유) 등은 그대로, deps 로 주입.
+4. **harness thin wrapper**: _featureDeps() 구성 후 5 wrapper 위임. dispatch·MCP·동작·출력 무변경.
+
+### 검증 (회귀 0)
+- **selftest 136→137 PASS** (lib/feature 5 exports + _featureImpactBfs reference-equality + BFS 동작 + 위임 와이어 + lib 본문 이동 교차참조 + behavioral list --json).
+- **E2E 332 유지 PASS** (feature add/link/impact/list/show + 공유 _featureImpactBfs(handoff/audit) 회귀). 락 flake 시 재실행.
+- 실측: add(depends-on)·link(affects)·impact(transitive)·list·show(--json)·에러(BADID exit1)·handoff(공유 BFS) 보존.
+
 ## 1.9.390 — 2026-06-06 — UR-0025 모듈화: feature-graph 순수 코어 → pure-utils (feature 핸들러 분리 토대)
 
 **🧩 feature-graph 의 순수 로직(템플릿/파서/ID/블록 렌더)을 lib/pure-utils.js 로 분리 — 가장 많이 공유되는 서브시스템의 핵심을 단일출처·테스트 가능화.**

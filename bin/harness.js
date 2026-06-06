@@ -24,13 +24,13 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd,
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
-  _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock } = require('../lib/pure-utils');  // 1.9.318~390 (UR-0025/0053/0075/0086/0087): 순수 유틸 모듈 분리
+  _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs } = require('../lib/pure-utils');  // 1.9.318~391 (UR-0025/0053/0075/0086/0087): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.390';
+const VERSION = '1.9.391';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2994,6 +2994,7 @@ function _selfTestCases() {
     { name: 'UR-0025 큰핸들러 모듈화: migrate audit/apply/plan → lib/migrate.js + DI 위임 + 동작 (1.9.388)', run: () => { const m = require('../lib/migrate'); const expOk = typeof m.migrateAuditCmd === 'function' && typeof m.migrateApplyCmd === 'function' && typeof m.migratePlanCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/migrate')") && src.includes('_migrate.migrateAuditCmd(root, opts, _migrateDeps())') && src.includes('_migrate.migratePlanCmd(root, opts, _migrateDeps())'); const movedToLib = read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).includes('leerness-plan-'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_mig_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'HARNESS_VERSION'), VERSION); process.argv = ['node', 'h', 'migrate', 'audit', tmp, '--json']; process.stdout.write = s => { out += s; return true; }; migrateAuditCmd(tmp, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && typeof j.willChange === 'number' && Array.isArray(j.findings); } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: 'UR-0025 큰핸들러 모듈화: teamCmd → lib/team.js + DI 위임 + 동작 (1.9.389)', run: () => { const m = require('../lib/team'); const expOk = typeof m.teamCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/team')") && src.includes('_team.teamCmd(root, sub, id, opts,'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const movedToLib = teamSrc.includes("require('./pure-utils')") && teamSrc.includes('_teamDeployGate') && teamSrc.includes('알 수 없는 team 하위명령'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tm_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'team', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; teamCmd(tmp, 'list', undefined, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && j.count === 0 && Array.isArray(j.teams); } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: 'UR-0025: feature-graph 순수 코어(_featureGraphTemplate/_parseFeatureGraph/_nextFeatureId/_featureBlock) → pure-utils + round-trip (1.9.390)', run: () => { const m = require('../lib/pure-utils'); const refOk = m._parseFeatureGraph === _parseFeatureGraph && m._featureGraphTemplate === _featureGraphTemplate && m._nextFeatureId === _nextFeatureId && m._featureBlock === _featureBlock; const tmpl = m._featureGraphTemplate(); const tmplOk = tmpl.includes('Feature Graph') && tmpl.includes('## Nodes'); const nodes = m._parseFeatureGraph('## F-0001 Auth\n- depends-on: F-0002\n- affects: F-0003\n- files: a.js\n'); const parseOk = nodes.length === 1 && nodes[0].id === 'F-0001' && nodes[0].title === 'Auth' && nodes[0].dependsOn[0] === 'F-0002' && nodes[0].affects[0] === 'F-0003' && nodes[0].files[0] === 'a.js'; const idOk = m._nextFeatureId(nodes) === 'F-0002'; const rt = m._parseFeatureGraph(m._featureBlock(nodes[0])); const rtOk = rt.length === 1 && rt[0].id === 'F-0001' && rt[0].dependsOn[0] === 'F-0002'; const src = read(__filename); const moved = src.includes("require('../lib/pure-utils')") && !/^function _parseFeatureGraph\(text\) \{/m.test(src) && !/^function _featureBlock\(node\) \{/m.test(src); return refOk && tmplOk && parseOk && idOk && rtOk && moved; } },
+    { name: 'UR-0025 큰핸들러 모듈화: feature add/link/impact/list/show → lib/feature.js + DI + _featureImpactBfs pure 공유 (1.9.391)', run: () => { const m = require('../lib/feature'); const p = require('../lib/pure-utils'); const expOk = ['featureAddCmd', 'featureLinkCmd', 'featureImpactCmd', 'featureListCmd', 'featureShowCmd'].every(k => typeof m[k] === 'function'); const bfsRefOk = p._featureImpactBfs === _featureImpactBfs; const nodes = [{ id: 'F-0001', title: 'A', affects: ['F-0002'], dependsOn: [], coChangesWith: [] }, { id: 'F-0002', title: 'B', affects: [], dependsOn: [], coChangesWith: [] }]; const r = p._featureImpactBfs(nodes, 'F-0001'); const bfsWork = r.length === 1 && r[0].id === 'F-0002' && r[0].via === 'affects'; const src = read(__filename); const delegated = src.includes("require('../lib/feature')") && src.includes('_feature.featureImpactCmd(root, fromId, _featureDeps())'); const featSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'feature.js')); const movedToLib = featSrc.includes("require('./pure-utils')") && featSrc.includes('feature added:'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ft_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'feature', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; featureListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.total === 0 && Array.isArray(j.features); } catch {} return expOk && bfsRefOk && bfsWork && delegated && movedToLib && behavOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -14524,134 +14525,15 @@ function _writeFeatureGraph(root, nodes) {
   const body = nodes.map(_featureBlock).join('');
   writeUtf8(p, header + body);
 }
-function featureAddCmd(root, title) {
-  root = absRoot(root);
-  if (!title) return fail('feature add: title 필요 — leerness feature add "<title>"');
-  _ensureFeatureGraph(root);
-  const { nodes } = _readFeatureGraph(root);
-  if (nodes.some(n => n.title.toLowerCase() === title.toLowerCase())) {
-    return warn(`이미 존재: "${title}"`);
-  }
-  const id = _nextFeatureId(nodes);
-  const node = {
-    id, title,
-    dependsOn: [], affects: [], coChangesWith: [],
-    files: [], input: '', output: '', errorModes: [], tests: [], notes: ''
-  };
-  // 옵션 인자 — 한 번에 의존/영향 등록 가능
-  const depends = arg('--depends-on', '');
-  const affects = arg('--affects', '');
-  const coChanges = arg('--co-changes-with', '');
-  const files = arg('--files', '');
-  if (depends) node.dependsOn = depends.split(/[,\s]+/).filter(Boolean);
-  if (affects) node.affects = affects.split(/[,\s]+/).filter(Boolean);
-  if (coChanges) node.coChangesWith = coChanges.split(/[,\s]+/).filter(Boolean);
-  if (files) node.files = files.split(/[,\s]+/).filter(Boolean);
-  nodes.push(node);
-  _writeFeatureGraph(root, nodes);
-  ok(`feature added: ${id} · ${title}`);
-}
-function featureLinkCmd(root, fromId) {
-  root = absRoot(root);
-  if (!fromId || !/^F-\d{4}$/.test(fromId)) return fail('feature link: 첫 인자는 F-XXXX 형식 ID');
-  const { nodes } = _readFeatureGraph(root);
-  const node = nodes.find(n => n.id === fromId);
-  if (!node) return fail(`feature ${fromId} 없음 — feature add 먼저`);
-  const dep = arg('--depends-on', '');
-  const aff = arg('--affects', '');
-  const co = arg('--co-changes-with', '');
-  let changes = 0;
-  if (dep) { const ids = dep.split(/[,\s]+/).filter(Boolean); for (const id of ids) if (!node.dependsOn.includes(id)) { node.dependsOn.push(id); changes++; } }
-  if (aff) { const ids = aff.split(/[,\s]+/).filter(Boolean); for (const id of ids) if (!node.affects.includes(id)) { node.affects.push(id); changes++; } }
-  if (co)  { const ids =  co.split(/[,\s]+/).filter(Boolean); for (const id of ids) if (!node.coChangesWith.includes(id)) { node.coChangesWith.push(id); changes++; } }
-  if (!changes) return warn('변경 없음 — --depends-on / --affects / --co-changes-with 중 하나 이상 지정');
-  _writeFeatureGraph(root, nodes);
-  ok(`feature ${fromId} 링크 ${changes}건 추가`);
-}
-function _featureImpactBfs(nodes, startId) {
-  // affects + co-changes-with 양방향 transitive closure
-  const byId = new Map(nodes.map(n => [n.id, n]));
-  const visited = new Set();
-  const queue = [{ id: startId, depth: 0, via: 'self' }];
-  const result = [];
-  while (queue.length) {
-    const cur = queue.shift();
-    if (visited.has(cur.id)) continue;
-    visited.add(cur.id);
-    const node = byId.get(cur.id);
-    if (!node) continue;
-    if (cur.depth > 0) result.push({ id: cur.id, title: node.title, depth: cur.depth, via: cur.via, files: node.files, errorModes: node.errorModes });
-    for (const next of node.affects || []) queue.push({ id: next, depth: cur.depth + 1, via: 'affects' });
-    for (const next of node.coChangesWith || []) queue.push({ id: next, depth: cur.depth + 1, via: 'co-changes-with' });
-  }
-  // 역방향: 이 feature에 depends-on 하는 노드도 영향받음
-  for (const n of nodes) {
-    if (visited.has(n.id)) continue;
-    if ((n.dependsOn || []).includes(startId)) {
-      result.push({ id: n.id, title: n.title, depth: 1, via: 'depends-on(reverse)', files: n.files, errorModes: n.errorModes });
-      visited.add(n.id);
-    }
-  }
-  return result;
-}
-function featureImpactCmd(root, fromId) {
-  root = absRoot(root);
-  if (!fromId || !/^F-\d{4}$/.test(fromId)) return fail('feature impact: F-XXXX ID 필요');
-  const { nodes } = _readFeatureGraph(root);
-  const node = nodes.find(n => n.id === fromId);
-  if (!node) return fail(`feature ${fromId} 없음`);
-  const impacted = _featureImpactBfs(nodes, fromId);
-  if (has('--json')) {
-    log(JSON.stringify({ feature: { id: node.id, title: node.title }, total: impacted.length, impacted }, null, 2));
-    return;
-  }
-  log(`# Feature Impact: ${node.id} · ${node.title}`);
-  if (!impacted.length) { ok('영향받는 다른 feature 없음 (또는 link 미설정)'); return; }
-  log(`\n총 ${impacted.length} feature에 영향:\n`);
-  for (const it of impacted) {
-    log(`  ${it.id} · ${it.title}  [depth=${it.depth}, via=${it.via}]`);
-    if (it.files && it.files.length) log(`    files: ${it.files.join(', ')}`);
-    if (it.errorModes && it.errorModes.length) log(`    error-modes: ${it.errorModes.join(', ')}`);
-  }
-  log(`\n💡 코드 변경 전 위 ${impacted.length}개 feature의 테스트/계약 확인 권장`);
-}
-function featureListCmd(root) {
-  root = absRoot(root);
-  const { nodes } = _readFeatureGraph(root);
-  if (has('--json')) {
-    log(JSON.stringify({ total: nodes.length, features: nodes }, null, 2));
-    return;
-  }
-  log(`# Features (${nodes.length}개)`);
-  if (!nodes.length) {
-    log('  (없음) — leerness feature add "<title>"');
-    return;
-  }
-  for (const n of nodes) {
-    log(`  ${n.id} · ${n.title}`);
-    if (n.dependsOn.length) log(`    ↓ depends-on: ${n.dependsOn.join(', ')}`);
-    if (n.affects.length) log(`    → affects: ${n.affects.join(', ')}`);
-    if (n.coChangesWith.length) log(`    ↔ co-changes-with: ${n.coChangesWith.join(', ')}`);
-  }
-}
-function featureShowCmd(root, fromId) {
-  root = absRoot(root);
-  if (!fromId || !/^F-\d{4}$/.test(fromId)) return fail('feature show: F-XXXX ID 필요');
-  const { nodes } = _readFeatureGraph(root);
-  const node = nodes.find(n => n.id === fromId);
-  if (!node) return fail(`feature ${fromId} 없음`);
-  if (has('--json')) { log(JSON.stringify(node, null, 2)); return; }
-  log(`# ${node.id} · ${node.title}`);
-  log(`  depends-on:      ${node.dependsOn.join(', ') || '(없음)'}`);
-  log(`  affects:         ${node.affects.join(', ') || '(없음)'}`);
-  log(`  co-changes-with: ${node.coChangesWith.join(', ') || '(없음)'}`);
-  log(`  files:           ${node.files.join(', ') || '(없음)'}`);
-  log(`  input:           ${node.input || '(없음)'}`);
-  log(`  output:          ${node.output || '(없음)'}`);
-  log(`  error-modes:     ${node.errorModes.join(', ') || '(없음)'}`);
-  log(`  tests:           ${node.tests.join(', ') || '(없음)'}`);
-  log(`  notes:           ${node.notes || '(없음)'}`);
-}
+// 1.9.391 (UR-0025 큰 핸들러 모듈화 3번째): feature add/link/impact/list/show 핸들러를 lib/feature.js 로 분리.
+//   _featureImpactBfs 는 pure-utils 로 이동(handoff/audit 공유). feature-graph I/O 헬퍼(_readFeatureGraph 등)는 공유라 harness 유지+주입.
+const _feature = require('../lib/feature');
+function _featureDeps() { return { _ensureFeatureGraph, _readFeatureGraph, _writeFeatureGraph, arg, has }; }
+function featureAddCmd(root, title) { return _feature.featureAddCmd(root, title, _featureDeps()); }
+function featureLinkCmd(root, fromId) { return _feature.featureLinkCmd(root, fromId, _featureDeps()); }
+function featureImpactCmd(root, fromId) { return _feature.featureImpactCmd(root, fromId, _featureDeps()); }
+function featureListCmd(root) { return _feature.featureListCmd(root, _featureDeps()); }
+function featureShowCmd(root, fromId) { return _feature.featureShowCmd(root, fromId, _featureDeps()); }
 
 // ===== 1.9.3: Causal / reuse / consistency =====
 const CODE_EXT = new Set(['.js','.ts','.jsx','.tsx','.mjs','.cjs','.css','.scss','.sass','.less','.html','.htm','.vue','.svelte','.md','.json','.py','.rb','.go','.rs','.java','.kt','.swift','.cs','.php']);
