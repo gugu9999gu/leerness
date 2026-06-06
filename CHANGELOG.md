@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.382 — 2026-06-06 — UR-0025 큰 핸들러 모듈화 토대: lib/io.js 출력·시간 프리미티브 분리
+
+**🧩 (사용자 명시 허용) 큰 핸들러 분리의 선결 토대 — 공유 출력/시간 프리미티브 모듈 신설.**
+
+### 배경
+큰 핸들러를 별도 lib 모듈로 분리하려면, harness 인라인이던 `log/ok/warn/fail`(출력) + `today/now`(시간) 프리미티브를 **공유 모듈**로 빼야 함(다른 모듈이 import 가능해야 함). 이 토대 없이는 핸들러 추출 시 매번 deps 주입 필요. 첫 단계로 자기완결적 프리미티브 6종을 `lib/io.js` 로 분리.
+
+### 구현
+1. **`lib/io.js`**(신설): `log/ok/warn/fail/today/now` 단일출처. fail 은 stdout + `process.exitCode=1`(UR-0045 정책 유지).
+2. harness 인라인 정의 제거 → `const { log, ok, warn, fail, today, now } = require('../lib/io')`. **호출부 무변경**(이름 동일, ~1000+ 호출 그대로).
+
+### 검증 (회귀 0)
+- **selftest 127→128 PASS** (io exports 6종 함수 + reference equality + today/now 포맷 + fail→exitCode 1 행위 + 인라인 정의 제거 확인).
+- **E2E 326→327 PASS** (io exports + init `ok()` 출력 유지 + verify 누락 `fail()`→exit 1 유지 — consumer 동작 보존).
+- 실측: init ✓ 6줄, verify 누락 exit 1, handoff(now/today) exit 0.
+
+### 향후: lib/io.js 에 fs 프리미티브(read/write/exists 등) 추가 → 핸들러를 lib 모듈로 점진 분리 가능.
+
 ## 1.9.381 — 2026-06-06 — UR-0025: KEYWORD_STOPWORDS 단일출처 (키워드 stopwords 2중 중복 제거)
 
 **🧩 handoff 자동회수 / lessons 키워드추출이 각자 보유하던 동일 stopwords Set 을 catalogs 단일출처로 DRY.**

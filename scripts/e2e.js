@@ -5296,5 +5296,25 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.382 회귀 (UR-0025 큰핸들러토대): lib/io.js 프리미티브 분리 — exports + 동작 + init(ok)/verify(fail→exit1) consumer 유지
+total++;
+{
+  let ok = false;
+  try {
+    const io = require(path.resolve(__dirname, '..', 'lib', 'io'));
+    const expOk = ['log', 'ok', 'warn', 'fail', 'today', 'now'].every(k => typeof io[k] === 'function') && /^\d{4}-\d{2}-\d{2}$/.test(io.today());
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-io-'));
+    const ir = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const initOk = ir.status === 0 && /✓/.test(ir.stdout || '');  // ok() 출력 유지
+    fs.rmSync(path.join(d, 'AGENTS.md'), { force: true });
+    const vr = cp.spawnSync(process.execPath, [CLI, 'verify', d], { encoding: 'utf8', timeout: 15000 });
+    const failOk = vr.status === 1 && /✗/.test((vr.stdout || '') + (vr.stderr || ''));  // fail()→exit1 유지
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = expOk && initOk && failOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.382) UR-0025 큰핸들러토대: lib/io.js 프리미티브 분리 (exports + init ok/verify fail→exit1 유지)' : '✗ lib/io 프리미티브 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
