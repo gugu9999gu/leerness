@@ -5767,5 +5767,28 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.408 회귀 (8번째 버그헌트, UR-0112): CRLF/CR SKILL.md frontmatter 파싱 — Windows/Notepad 줄바꿈으로 meta 소실되던 skill install 복구
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-crlfskill-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const skillDir = path.join(d, 'crlfSkillSrc');
+    fs.mkdirSync(skillDir, { recursive: true });
+    // CRLF 줄바꿈 SKILL.md (Windows/Notepad)
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\r\nname: crlf-skill\r\ndescription: a windows skill\r\n---\r\nbody content\r\n');
+    const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'install', skillDir, '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const installOk = r.status === 0 && !/name.{0,4}필수/.test((r.stdout || '') + (r.stderr || ''));
+    // 설치 확인
+    const ls = cp.spawnSync(process.execPath, [CLI, 'skill', 'list', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const found = /crlf-skill/.test(ls.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = installOk && found;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.408) 8th버그헌트: CRLF SKILL.md frontmatter 파싱 복구(Windows skill install) (UR-0112)' : '✗ CRLF SKILL.md 파싱 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

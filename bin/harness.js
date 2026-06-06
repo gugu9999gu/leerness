@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.407';
+const VERSION = '1.9.408';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3012,6 +3012,7 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 회귀수정 (UR-0109): 긴 서술형 placeholder FP 차단(마커 우선) + 실키 FN 유지 (1.9.405)', run: () => { const m = require('../lib/pure-utils'); const ph = m._isPlaceholderSecret; const fpFixed = ph('your-super-secret-api-key-example-value') === true && ph('this-is-just-an-example-placeholder-value') === true && ph('example-api-key-do-not-use-1234567890') === true; const fnKept = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false; const realKept = ph('a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6') === false; const shortPh = ph('your-api-key-here') === true && ph('changeme') === true; return fpFixed && fnKept && realKept && shortPh; } },
     { name: '8번째 버그헌트 (UR-0110): rule/decision/lesson add 동시쓰기 _withLock 직렬화 (UR-0043 갭 메움) (1.9.406)', run: () => { const src = read(__filename); const L = '_withLock('; const ruleLock = src.includes(L + 'rulesPath' + '(root), () =>'); const decLock = src.includes(L + 'decisionsJsonPath' + '(root), () =>'); const lesLock = src.includes(L + 'lessonsJsonPath' + '(root), () =>'); return ruleLock && decLock && lesLock; } },
     { name: '8번째 버그헌트 (UR-0111): MCP feature_link safe-write tier(권한경계) + _parseLimit NaN/음수 가드 (1.9.407)', run: () => { const m = require('../lib/pure-utils'); const pl = m._parseLimit('abc', 10) === 10 && m._parseLimit('-5', 10) === 10 && m._parseLimit('0', 10) === 10 && m._parseLimit('3', 10) === 3 && m._parseLimit('7.9', 10) === 7; const tools = require('../lib/mcp-tools'); const arr = Array.isArray(tools) ? tools : (tools.MCP_TOOLS || []); const fl = arr.find(x => x.name === 'leerness_feature_link'); const tierOk = !!fl && fl.requiredTier === 'safe-write'; return pl && tierOk; } },
+    { name: '8번째 버그헌트 (UR-0112): _parseSkillMd CRLF/CR 줄바꿈 정규화 (Windows SKILL.md meta 소실 차단) (1.9.408)', run: () => { const m = require('../lib/pure-utils'); const lf = m._parseSkillMd('---\nname: s\ndescription: d\n---\nbody'); const crlf = m._parseSkillMd('---\r\nname: s\r\ndescription: d\r\n---\r\nbody'); const cr = m._parseSkillMd('---\rname: s\rdescription: d\r---\rbody'); const bom = m._parseSkillMd('﻿---\r\nname: s\r\n---\r\nbody'); return lf.meta.name === 's' && crlf.meta.name === 's' && crlf.meta.description === 'd' && cr.meta.name === 's' && bom.meta.name === 's'; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }

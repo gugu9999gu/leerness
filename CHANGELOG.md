@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.408 — 2026-06-07 — CRLF/CR SKILL.md frontmatter 파싱 복구 (8번째 버그헌트, UR-0112)
+
+**🪟 Windows 호환 — CRLF/CR 줄바꿈의 SKILL.md frontmatter 가 통째로 소실돼 `skill install` 이 "name 필수" 로 실패하던 것 수정.**
+
+### 배경 (2차 버그헌트 encoding 차원 · Windows 직격)
+`_parseSkillMd` 의 frontmatter 값 정규식 `(.+)$` 의 `.` 은 CR(`\r`)을 매칭하지 못함 → `name: x\r` 라인이 통째로 매칭 실패 → CRLF SKILL.md(Windows/Notepad 기본)의 meta 가 `{}` 로 소실 → `skill install` 이 frontmatter 의 name 을 못 찾아 "name 필수" 로 실패. 직접 재현: LF 는 정상, CRLF 는 meta={}.
+
+### 구현
+- `_parseSkillMd` 상단에서 BOM strip 후 `replace(/\r\n?/g, '\n')` 로 CRLF/CR → LF 정규화. 모든 줄바꿈 스타일(LF/CRLF/CR/BOM+CRLF) 동일 파싱.
+
+### 검증 (회귀 0)
+- **selftest 153→154 PASS** (LF/CRLF/CR/BOM+CRLF 4종 meta 파싱).
+- **E2E 346→347 PASS** (CRLF SKILL.md `skill install` exit0 + skill list 에 등록 확인).
+
 ## 1.9.407 — 2026-06-07 — MCP feature_link 권한경계 + NaN --limit 가드 (8번째 버그헌트, UR-0111)
 
 **🛡 MCP 권한경계 — read-only로 잘못 선언된 그래프-변경 도구 수정 + NaN --limit 가 결과를 조용히 숨기던 것 차단.**
