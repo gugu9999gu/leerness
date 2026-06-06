@@ -5537,5 +5537,26 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.398 회귀 (6번째 외부평가/codex P1-C, UR-0099): --json 에러 경로가 구조화 JSON(텍스트 아님) + 사람용 보존
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-jsonerr-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const cv = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', '--json'], { encoding: 'utf8', timeout: 10000 });
+    const cj = JSON.parse(cv.stdout); const cvOk = cj.ok === false && cj.code === 'missing_args' && cv.status === 1;
+    const fsr = cp.spawnSync(process.execPath, [CLI, 'feature', 'show', 'F-9999', '--path', d, '--json'], { encoding: 'utf8', timeout: 10000 });
+    const fj = JSON.parse(fsr.stdout); const fsOk = fj.ok === false && fj.code === 'not_found' && fsr.status === 1;
+    // 사람용 보존: --json 없이 텍스트(JSON 아님) + exit1
+    const fh = cp.spawnSync(process.execPath, [CLI, 'feature', 'show', 'F-9999', '--path', d], { encoding: 'utf8', timeout: 10000 });
+    const humanOk = fh.status === 1 && /✗/.test(fh.stdout || '') && !/^\s*\{/.test(fh.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = cvOk && fsOk && humanOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.398) 6th외부평가 codex P1-C: --json 에러 경로 구조화(contract verify/feature show) + 사람용 보존 (UR-0099)' : '✗ --json 에러 경로 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

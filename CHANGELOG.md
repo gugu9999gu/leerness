@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.398 — 2026-06-07 — --json 에러 경로 구조화 (6번째 외부평가 P1-C, UR-0099)
+
+**🔌 `--json` 모드에서 에러도 구조화 JSON(`{ok:false,error,code}`) — AI 에이전트가 에러 경로에서 JSON.parse 실패하지 않도록.**
+
+### 배경 (6번째 외부평가 codex P1-C · UR-0085/0088 의 에러판)
+codex: `contract verify --json`(인자 누락) / `feature show F-9999 --json`(없는 ID) 등이 에러 시 사람용 텍스트(`✗ ...`)를 출력 → 자동화가 JSON.parse 크래시. UR-0085/0088 이 성공/빈 경로를 구조화했으나 **에러 경로**가 남아 있었음.
+
+### 구현
+- `failJson(jsonMode, code, msg)` 헬퍼 신규(lib/io.js): jsonMode 면 `{ok:false,error,code}` + exit1, 아니면 사람용 `fail()`. 양쪽 exit 1.
+- 적용: `contract verify`(missing_args/spec_not_found/impl_not_found), `feature show`/`feature impact`(bad_id/not_found). 사람용 출력 무변경.
+
+### 검증 (회귀 0)
+- **selftest 143→144 PASS** (failJson reference-equality + json/human 분기 + exit1 + 와이어).
+- **E2E 336→337 PASS** (contract verify --json → code:missing_args / feature show --json → code:not_found, 둘 다 exit1 + 사람용 텍스트 보존).
+
 ## 1.9.397 — 2026-06-06 — install-safety 레시피 셸-무관화 (6번째 외부평가 P1-A, UR-0098)
 
 **🪟 install-safety 안전설치 레시피를 셸-무관으로 — Windows PowerShell(주환경)에서 깨지던 POSIX env-prefix 제거.**

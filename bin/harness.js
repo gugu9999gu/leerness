@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
-const { log, ok, warn, fail, today, now, absRoot, exists, read, readBuf, mkdirp, writeUtf8, append, rel } = require('../lib/io');  // 1.9.382/383 (UR-0025): 출력/시간/파일 프리미티브 공유 모듈
+const { log, ok, warn, fail, failJson, today, now, absRoot, exists, read, readBuf, mkdirp, writeUtf8, append, rel } = require('../lib/io');  // 1.9.382/383 (UR-0025): 출력/시간/파일 프리미티브 공유 모듈
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.397';
+const VERSION = '1.9.398';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3002,6 +3002,7 @@ function _selfTestCases() {
     { name: '회귀가드: decisions/lessons canonical round-trip 엣지문자(pipe/dash/colon) 무손상 + idempotent (1.9.395)', run: () => { const m = require('../lib/pure-utils'); const d = [{ date: '2026-06-06', title: 'A | pipe', decision: 'use X | Y', reason: 'r—dash', alternatives: 'alt: colon', impact: 'i' }]; const dback = m._decisionsFromMd(m._renderDecisionsMd(d)); const dOk = dback.length === 1 && dback[0].title === 'A | pipe' && dback[0].decision === 'use X | Y' && dback[0].reason === 'r—dash'; const dIdem = JSON.stringify(dback) === JSON.stringify(m._decisionsFromMd(m._renderDecisionsMd(dback))); const l = [{ date: '2026-06-06', text: 'lesson | with — chars: ok', tag: 't' }]; const lback = m._parseLessonEntries(m._renderLessonsMd(l)); const lOk = lback.length === 1 && lback[0].text === 'lesson | with — chars: ok'; const lIdem = JSON.stringify(lback) === JSON.stringify(m._parseLessonEntries(m._renderLessonsMd(lback))); return dOk && dIdem && lOk && lIdem; } },
     { name: '6번째 외부평가/codex P1-B: task drop 존재확인 가드 — 없는 ID 가짜 row 방지 (1.9.396)', run: () => { const src = read(__filename); const i = src.indexOf('function taskDrop(root, id)'); if (i < 0) return false; const body = src.slice(i, i + 700); return body.includes('not found in progress-tracker.md') && body.includes('rows.find(r => r.id === id)') && body.includes('_requireInit'); } },
     { name: '6번째 외부평가/codex P1-A (UR-0098): install-safety 레시피 셸-무관 + hardeningNote (1.9.397)', run: () => { if (typeof installSafetyCmd !== 'function') return false; const save = process.argv; const _w = process.stdout.write; let out = ''; try { process.argv = ['node', 'h', 'install-safety', '--json']; process.stdout.write = s => { out += s; return true; }; installSafetyCmd({ json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; } let j; try { j = JSON.parse(out); } catch {} const noPosixPrefix = !!j && Array.isArray(j.safeInstall) && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim())); const crossShell = !!j && j.safeInstall.filter(x => String(x).includes('npx --yes')).length >= 2; const noteOk = !!j && typeof j.hardeningNote === 'string' && j.hardeningNote.includes('PowerShell'); return noPosixPrefix && crossShell && noteOk; } },
+    { name: '6번째 외부평가/codex P1-C (UR-0099): --json 에러 경로 구조화 failJson + 와이어 (1.9.398)', run: () => { const io = require('../lib/io'); if (io.failJson !== failJson) return false; const _w = process.stdout.write; const saved = process.exitCode; let jOut = '', hOut = ''; let jExit = 0; try { process.stdout.write = s => { jOut += s; return true; }; process.exitCode = 0; failJson(true, 'tc', 'm'); jExit = process.exitCode; process.stdout.write = s => { hOut += s; return true; }; process.exitCode = 0; failJson(false, 'c', 'humanmsg'); } catch {} finally { process.stdout.write = _w; process.exitCode = saved; } let pj; try { pj = JSON.parse(jOut); } catch {} const jsonOk = !!pj && pj.ok === false && pj.code === 'tc' && pj.error === 'm' && jExit === 1; const humanOk = hOut.includes('✗') && hOut.includes('humanmsg') && !hOut.includes('{'); const src = read(__filename); const wired = src.includes("failJson(_j, 'missing_args'") && src.includes("failJson(_j, 'spec_not_found'"); return jsonOk && humanOk && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -19693,12 +19694,14 @@ function taskSyncCmd(root) {
 // 사양 문서(spec.md)에 명시된 함수 이름이 실제 module.exports에 모두 있는지 검사.
 // 사용 예: leerness contract verify TICK_SPEC.md src/format.js
 function contractVerifyCmd(specPath, implPath) {
-  if (!specPath || !implPath) { fail('사용법: leerness contract verify <spec.md> <impl.js>'); return process.exit(1); }
+  // 1.9.398 (6번째 외부평가/codex P1-C, UR-0099): --json 모드 에러는 구조화 출력(텍스트 대신) — AI 에이전트 JSON.parse 보호.
+  const _j = has('--json');
+  if (!specPath || !implPath) { failJson(_j, 'missing_args', '사용법: leerness contract verify <spec.md> <impl.js>'); return process.exit(process.exitCode || 1); }
   const spec = absRoot('.') + path.sep; // dummy to avoid abs
   const specFile = path.resolve(specPath);
   const implFile = path.resolve(implPath);
-  if (!exists(specFile)) { fail(`spec 파일 없음: ${specFile}`); return process.exit(1); }
-  if (!exists(implFile)) { fail(`impl 파일 없음: ${implFile}`); return process.exit(1); }
+  if (!exists(specFile)) { failJson(_j, 'spec_not_found', `spec 파일 없음: ${specFile}`); return process.exit(process.exitCode || 1); }
+  if (!exists(implFile)) { failJson(_j, 'impl_not_found', `impl 파일 없음: ${implFile}`); return process.exit(process.exitCode || 1); }
   const specText = read(specFile);
   // 1.9.385 (UR-0086, 5th외부평가): spec 함수/필드 추출을 순수 파서 _parseContractSpec 로 위임.
   //   declared(강선언): function 시그니처 + markdown bullet "- name(args)" — 누락검사 대상.
