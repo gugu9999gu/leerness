@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.395 — 2026-06-06 — 행위검증 회귀가드: audit FP/FN + canonical 파이프 round-trip (UR-0096)
+
+**🛡 광범위 행위검증으로 실 버그 탐색 — 신규 버그 0(성숙·견고 확인) + 가드 없던 2영역에 net-new 회귀 가드 추가.**
+
+### 배경 (whats-new 버그 발견의 후속 — 행위검증 확대)
+1.9.393 의 whats-new 버그가 행위검증의 실익을 보여줘, audit/version/canonical 핵심 로직을 구성된 시나리오로 광범위 검증:
+- audit README배지 mismatch / current-state stale (FP/FN) · compareVer(multi-digit 6종) · parseHarnessVersion(계약) · decisions/lessons round-trip(파이프/em-dash/콜론) — **모두 정상, 신규 버그 0**.
+
+### 구현 (정직: no-op/가짜수정 안 만듦 — 미가드 영역 보강만)
+- **e2e B(1.9.395)**: audit `readme_version_mismatch`(불일치 감지 + 일치 시 FP 0) + `current_state_stale`(2020 감지 + 오늘 FP 0) — 종전 전용 e2e 가드 부재였던 검증.
+- **selftest**: decisions/lessons canonical round-trip 엣지문자(파이프 `|`=테이블 구분자/em-dash/콜론) 무손상 + idempotent — 데이터 손상 회귀 가드.
+
+### 검증 (회귀 0)
+- **selftest 140→141 PASS** · **E2E 333→334 PASS**.
+- compareVer 17곳 기존 가드 + 신규 2가드 = audit/canonical 커버리지 보강.
+
 ## 1.9.394 — 2026-06-06 — UR-0025: whatsNewCmd → lib/diagnostics.js (whats-new 완결) + 파서 형제버그 감사
 
 **🧩 whats-new 핸들러를 lib/diagnostics.js 로 분리 — whats-new 서브시스템 완전 모듈화. + /m `$` 절단 버그 클래스 전수 감사(클린).**

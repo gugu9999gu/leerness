@@ -5468,5 +5468,35 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.395 회귀가드 (행위검증): audit README 배지 mismatch + current-state stale 의 FP/FN — 종전 전용 e2e 가드 부재
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auditchk-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const kinds = (root) => { const r = cp.spawnSync(process.execPath, [CLI, 'audit', root, '--json', '--no-npm-audit'], { encoding: 'utf8', timeout: 20000 }); try { return (JSON.parse(r.stdout).findings || []).map(f => f.kind); } catch { return null; } };
+    const readme = path.join(d, 'README.md'), pkg = path.join(d, 'package.json'), csp = path.join(d, '.harness', 'current-state.md');
+    // ① README 배지(1.0.0) ≠ package.json(2.0.0) → readme_version_mismatch
+    fs.writeFileSync(readme, '# T\n![v](https://img.shields.io/badge/version-1.0.0-green)\n');
+    fs.writeFileSync(pkg, '{"name":"t","version":"2.0.0"}\n');
+    const mismatchOk = (kinds(d) || []).includes('readme_version_mismatch');
+    // ② 배지 일치(2.0.0) → mismatch 없어야 (FP 0)
+    fs.writeFileSync(readme, '# T\n![v](https://img.shields.io/badge/version-2.0.0-green)\n');
+    const matchOk = !(kinds(d) || ['x']).includes('readme_version_mismatch');
+    // ③ current-state 오래됨(2020) → current_state_stale
+    fs.writeFileSync(csp, '# CS\nUpdated: 2020-01-01\n');
+    const staleOk = (kinds(d) || []).includes('current_state_stale');
+    // ④ current-state 오늘 → stale 없어야 (FP 0)
+    const today = new Date().toISOString().slice(0, 10);
+    fs.writeFileSync(csp, '# CS\nUpdated: ' + today + '\n');
+    const freshOk = !(kinds(d) || ['x']).includes('current_state_stale');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = mismatchOk && matchOk && staleOk && freshOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.395) 회귀가드: audit README배지 mismatch + current-state stale FP/FN (행위검증)' : '✗ audit 체크 FP/FN 가드 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
