@@ -5602,5 +5602,28 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.401 회귀 (7번째 버그헌트 P1-C, UR-0106): 시크릿 FN — gitignore 부정(!) 처리 + placeholder substring 정밀화
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-secfn-'));
+    // ① *.example 무시 + !.env.example 해제 → .env.example(커밋대상) 시크릿 탐지
+    fs.writeFileSync(path.join(d, '.gitignore'), '*.example\n!.env.example\n');
+    fs.writeFileSync(path.join(d, '.env.example'), 'OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl012mno345pqr678stuvwx\n');
+    const r1 = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d], { encoding: 'utf8', timeout: 20000 });
+    const negOk = r1.status === 1 && /\.env\.example/.test(r1.stdout || '');
+    // ② placeholder 정밀: 'EXAMPLE' 포함 실키(sk-proj-) 는 억제 안 됨 → 커밋 파일에서 탐지
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'src', 'c.txt'), 'api_key=sk-proj-EXAMPLEab12cd34ef56gh78ij90klmn99\n');
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', path.join(d, 'src', 'c.txt')], { encoding: 'utf8', timeout: 15000 });
+    const phOk = r2.status === 1;  // 실키(EXAMPLE 포함) placeholder 억제 안 됨
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = negOk && phOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.401) 7th버그헌트 P1-C: 시크릿 FN(gitignore !부정 + placeholder substring 정밀화) (UR-0106)' : '✗ 시크릿 FN 수정 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

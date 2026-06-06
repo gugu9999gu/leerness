@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.401 — 2026-06-07 — 시크릿 스캐너 FN 2종: gitignore 부정(!) + placeholder substring 정밀화 (7번째 버그헌트 P1-C, UR-0106)
+
+**🔐 보안 — 커밋되는 파일의 실제 시크릿을 놓치던 false-negative 2종 수정.**
+
+### 배경 (7번째 버그헌트 P1-C · 직접 재현 검증)
+1. **gitignore 부정(!) 미처리**: `*.example` + `!.env.example` 일 때 git 은 `.env.example` 을 커밋(! 해제)하지만, leerness 는 `!` 라인을 무시해 `.env.example` 을 "gitignored(안전)"로 오분류 → 그 안의 실제 시크릿을 비실패(info)로 강등 = FN.
+2. **placeholder substring 오억제**: `_isPlaceholderSecret` 가 `value.includes('example')` 등 부분문자열로 판정 → `sk-EXAMPLEab12...`, `sk-proj-realKEYexample99..` 같은 **실제 키**가 'example' 포함만으로 placeholder 로 억제 = FN.
+
+### 구현
+- **`_gitignoreMatch`**: 부정(`!`) 패턴 + last-match-wins(git 실제 동작) 구현. `!` 매칭은 un-ignore. → `!.env.example` 커밋대상 정확 판정.
+- **`_isPlaceholderSecret`**: 실키 가드 추가 — 알려진 키 prefix(sk-/AKIA/ghp_/xox../AIza/glpat-/-----begin) 또는 고엔트로피(영숫자 24+ & 고유문자 12+)면 substring placeholder 신호 무시. 반복문자/짧은 placeholder 는 그대로 억제.
+
+### 검증 (회귀 0)
+- **selftest 146→147 PASS** (gitignore 부정/last-match + placeholder 7케이스 실키↔placeholder 구분).
+- **E2E 339→340 PASS** (!.env.example 시크릿 탐지 exit1 + 'EXAMPLE' 포함 실키 비억제 탐지).
+- 실측: git check-ignore 교차확인 + 기존 동작(.env 강등) 보존.
+
+### #25(per-pattern break 다중시크릿 under-count, P2)는 후속.
+
 ## 1.9.400 — 2026-06-07 🎉 — anti-laziness 명령 --json 에러 구조화 (7번째 버그헌트 P1-B, UR-0105)
 
 **🔌 verify-claim / optimism-check / honesty-check 의 `--json` 에러도 구조화 JSON — AI 에이전트 self-gate 검증 명령의 자동화 신뢰성.**
