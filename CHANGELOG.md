@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.393 — 2026-06-06 — whats-new 파서 BUG-fix + _parseChangelogBetween → pure-utils (UR-0025/UR-0094)
+
+**🐞 `whats-new` 가 현재 CHANGELOG 형식(`## X — DATE — title`)에서 0건 반환하던 버그 수정 + 파서를 lib/pure-utils.js 로 추출.**
+
+### 배경 (UR-0025 모듈화 중 실사용 버그 발견)
+whats-new 의 순수 파서 `_parseChangelogBetween` 를 pure-utils 로 추출하려다 자체 검증에서 **실사용 버그 2건** 발견(추출은 byte-identical 이라 회귀 아님 — 기존부터 깨져 있었음):
+1. **헤더 미파싱**: 헤더 꼬리 정규식 `\s*\n` 이 `## X — DATE — title` 의 ` — title` 를 소비 못 해 현재 CHANGELOG 형식에서 **0개 섹션** 반환(`whats-new --from 1.9.388` → 0 versions).
+2. **body 첫줄 절단**: body 캡처 `([\s\S]*?)(?=^##…|$)` 의 `$` 가 `/m` 모드에서 **줄 끝**과 매칭 → body 가 첫 줄로 잘림(①이 헤더를 막아 가려져 있던 잠재 버그).
+
+### 구현
+- `_parseChangelogBetween` 를 `_parseFeatureGraph` 식 **위치 기반 분할**로 재작성: 헤더 정규식으로 위치 수집 → 다음 헤더(또는 끝)까지 body 전체 slice. `## X` / `## X — DATE` / `## X — DATE — title` 모두 매칭, 다중줄 body 보존.
+- pure-utils 로 추출(738 update 경로 + whats-new 공유) + harness 인라인 제거 + import.
+
+### 검증 (회귀 0)
+- **selftest 138→139 PASS** (reference-equality + `## X — DATE — title` 파싱 + 명령/플래그/파일 추출 + 제목없음 헤더 + 인라인 제거).
+- **E2E 332→333 PASS** (실제 CHANGELOG whats-new `--from 1.9.388` ≥1 versions + 제목있음/없음 헤더 + 다중줄 body).
+- 실측: whats-new --from 1.9.388 = **0 → 4 versions**(1.9.389~392), body 17줄 전체 캡처.
+
 ## 1.9.392 — 2026-06-06 — UR-0025 큰 핸들러 모듈화 4번째: doctor/which → lib/diagnostics.js (DI)
 
 **🧩 네 번째 핸들러 모듈 — 진단 명령(doctor/which)을 lib/diagnostics.js 로 분리.**

@@ -5448,5 +5448,25 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.393 회귀 (UR-0025 + whats-new BUG-fix): _parseChangelogBetween 가 "## X — DATE — title" 헤더를 파싱 (종전 0건 반환 버그)
+total++;
+{
+  let ok = false;
+  try {
+    const pkgRoot = path.resolve(__dirname, '..');
+    const r = cp.spawnSync(process.execPath, [CLI, 'whats-new', pkgRoot, '--from', '1.9.388', '--json'], { encoding: 'utf8', timeout: 15000 });
+    const j = JSON.parse(r.stdout);
+    // 실제 CHANGELOG(## X — DATE — title 형식)에서 1.9.388 초과 버전이 1건 이상 파싱돼야 함
+    const versOk = Array.isArray(j.versions) && j.versions.length >= 1 && j.versions.every(v => /^\d+\.\d+\.\d+$/.test(v.version));
+    // 순수 함수 직접: 제목 있는 헤더 + 제목 없는 헤더 모두 매칭
+    const pu = require(path.resolve(pkgRoot, 'lib', 'pure-utils'));
+    const titled = pu._parseChangelogBetween('## 1.9.20 — 2026-01-01 — T\n- a\n## 1.9.19 — 2026-01-01 — U\n- b\n', '1.9.19', '1.9.20').length === 1;
+    const titleless = pu._parseChangelogBetween('## 1.9.20\n- a\n## 1.9.19\n- b\n', '1.9.19', '1.9.20').length === 1;
+    ok = versOk && titled && titleless;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.393) whats-new BUG-fix: "## X — DATE — title" 헤더 파싱 (_parseChangelogBetween pure 추출, UR-0025)' : '✗ whats-new 헤더 파싱 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
