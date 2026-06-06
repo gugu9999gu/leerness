@@ -5232,5 +5232,25 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.379 회귀 (UR-0025 심화): pulse 렌더 코어(_memorySurface/_renderPulseLine) 분리 — 빌더 동작 + pulse CLI 출력 유지
+total++;
+{
+  let ok = false;
+  try {
+    const pu = require(path.resolve(__dirname, '..', 'lib', 'pure-utils'));
+    const msOk = pu._memorySurface({ tasks: 1, decisions: 2, rules: 3, milestones: 4, lessons: 5 }) === 'T1/D2/R3/P4/L5';
+    const lnOk = pu._renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 9, memorySurface: 'T0/D0/R0/P0/L0', nextMilestone: 400, etaDays: 6 }).includes('🎯 R400 (6d)');
+    // pulse CLI 가 한 줄 출력 유지
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pulse-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'pulse', d], { encoding: 'utf8', timeout: 15000 });
+    const cliOk = /📍 v[\d.]+ · 🔄 R\d+ · 🔌 MCP \d+ · 🧠 T\d+\/D\d+\/R\d+\/P\d+\/L\d+/.test(r.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = msOk && lnOk && cliOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.379) UR-0025 심화: pulse 렌더 코어 분리 (_memorySurface/_renderPulseLine + CLI 출력 유지)' : '✗ pulse 렌더 코어 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

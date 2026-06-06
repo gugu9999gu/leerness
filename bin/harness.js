@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
-const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, _parseSkillsValue, _parseArchiveBlocks, _parseSkillCatalog, _renderTeamsMd, _composeTeamPlan, _teamHandoffReminders, _cadenceAssessment, _teamDeployGate, _renderWorkspaceReferenceGuide, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
+const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, _parseSkillsValue, _parseArchiveBlocks, _parseSkillCatalog, _renderTeamsMd, _composeTeamPlan, _teamHandoffReminders, _cadenceAssessment, _teamDeployGate, _renderWorkspaceReferenceGuide, _memorySurface, _renderPulseLine, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
   _htmlToText, _extractTitle, _extractLinks,
   _countDatedBlocks, _extractDecisionBlocks, _classifyIntent,
@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.378';
+const VERSION = '1.9.379';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3015,6 +3015,7 @@ function _selfTestCases() {
     { name: 'UR-0073 Phase D: _teamDeployGate 이중 게이트 (dry-run 기본/env 게이트/실행) 행위 (1.9.376)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamDeployGate !== 'function' || m._teamDeployGate !== _teamDeployGate) return false; const team = { id: 'd', deployCommand: 'echo hi' }; const noCmd = _teamDeployGate({ id: 'x' }, { yes: true, envOn: true }).mode === 'no-command'; const dry = _teamDeployGate(team, { yes: false, envOn: true }).mode === 'dry-run'; const gated = _teamDeployGate(team, { yes: true, envOn: false }).mode === 'gated'; const exec = _teamDeployGate(team, { yes: true, envOn: true }).mode === 'execute'; return noCmd && dry && gated && exec; } },
     { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + 빌더 동작 (1.9.377)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide('.leerness', '9.9.9', '2026-01-01T00:00:00.000Z'); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString())'); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && g.includes('마이그레이션 안내') && wrapperThin; } },
     { name: 'UR-0073: team MCP 도구 2종(read-only) 정의 + dispatch 와이어 (1.9.378)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const tl = tools.find(t => t.name === 'leerness_team_list'); const tp = tools.find(t => t.name === 'leerness_team_preview'); const defsOk = tl && tl.requiredTier === 'read-only' && tp && tp.requiredTier === 'read-only' && tp.inputSchema.required && tp.inputSchema.required.includes('id'); const wired = src.includes("case " + "'leerness_team_list':") && src.includes("case " + "'leerness_team_preview':") && /cliArgs = \['team', 'list'/.test(src) && /cliArgs = \['team', 'preview'/.test(src); return !!defsOk && wired; } },
+    { name: 'UR-0025 심화: pulse 렌더 코어 분리 — _memorySurface + _renderPulseLine 행위 (1.9.379)', run: () => { const m = require('../lib/pure-utils'); if (typeof _memorySurface !== 'function' || typeof _renderPulseLine !== 'function' || m._memorySurface !== _memorySurface || m._renderPulseLine !== _renderPulseLine) return false; const ms = _memorySurface({ tasks: 1, decisions: 2, rules: 3, milestones: 4, lessons: 5 }) === 'T1/D2/R3/P4/L5' && _memorySurface({}) === 'T0/D0/R0/P0/L0'; const base = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'T0/D1/R0/P2/L0' }); const ln = base.includes('v1.0.0') && base.includes('R7') && base.includes('MCP 85') && base.includes('T0/D1/R0/P2/L0') && !base.includes('🎯') && !base.includes('abnormal'); const full = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'x', nextMilestone: 400, etaDays: 6, abnormalShutdown: 'high' }); const ln2 = full.includes('🎯 R400 (6d)') && full.includes('abnormal:high'); const wired = read(__filename).includes('const line = _renderPulseLine(data)') && read(__filename).includes('data.memorySurface = _memorySurface('); return ms && ln && ln2 && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3501,7 +3502,7 @@ function pulseCmd(root) {
     const planText = exists(planPath(root)) ? read(planPath(root)) : '';
     const milestonesCnt = (planText.match(/^### M-\d{4}\./gm) || []).length;
     const lessonsCount = _loadLessons(root).length;
-    data.memorySurface = `T${tasksInProgress}/D${decisionCount}/R${rulesActive}/P${milestonesCnt}/L${lessonsCount}`;
+    data.memorySurface = _memorySurface({ tasks: tasksInProgress, decisions: decisionCount, rules: rulesActive, milestones: milestonesCnt, lessons: lessonsCount });
   } catch {}
   // 마일스톤 + ETA
   try {
@@ -3522,14 +3523,7 @@ function pulseCmd(root) {
   }
   if (has('--json')) { log(JSON.stringify(data, null, 2)); return; }
   // 한 줄 출력
-  let line = `📍 v${data.version} · 🔄 R${data.roundCount} · 🔌 MCP ${data.mcpTools} · 🧠 ${data.memorySurface}`;
-  if (data.nextMilestone) {
-    const eta = data.etaDays != null ? ` (${data.etaDays}d)` : '';
-    line += ` · 🎯 R${data.nextMilestone}${eta}`;
-  }
-  if (data.abnormalShutdown !== 'none') {
-    line += ` · 🔌 abnormal:${data.abnormalShutdown}`;
-  }
+  const line = _renderPulseLine(data);
   log(cy(`# leerness pulse (1.9.231/1.9.232) — 한 줄 종합 요약`));
   log('');
   log(`  ${line}`);

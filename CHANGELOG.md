@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.379 — 2026-06-06 — UR-0025 심화: pulse 핸들러 렌더 코어 분리 (수집→렌더 패턴 착수)
+
+**🧩 큰 핸들러 모듈화 착수 — display 핸들러의 "수집(I/O) → 렌더(순수)" 분리 패턴을 pulse 에 적용.**
+
+### 배경
+사용자 선택(큰 핸들러 모듈화/UR-0025 심화). 대형 I/O-결합 핸들러를 안전하게 분해하기 위해, **순수한 렌더/포맷 코어**를 lib/pure-utils 로 분리하고 핸들러는 gather(I/O)+순수 렌더 구조로 정리하는 패턴을 확립. 첫 대상: pulse(집계 display 핸들러).
+
+### 구현
+1. **`_memorySurface(counts)`**(pure-utils): T/D/R/P/L 카운트 → 문자열. pulse + memory-status 단일출처(중복 포맷 제거).
+2. **`_renderPulseLine(data)`**(pure-utils): gather 된 data → 한 줄 요약 문자열(마일스톤/비정상종료 조건부 포함).
+3. **pulseCmd**: 인라인 memory-surface 조합 + 한 줄 조합을 순수 코어 호출로 교체(gather 부분만 I/O 유지).
+
+### 검증 (회귀 0)
+- **selftest 124→125 PASS** (행위: `_memorySurface` 카운트→문자열, `_renderPulseLine` 기본/마일스톤/abnormal 분기 + pulse 와이어).
+- **E2E 323→324 PASS** (행위: 빌더 동작 + pulse CLI 한 줄 출력 정규식 유지).
+- 실측: pulse human/JSON 출력 동일.
+
 ## 1.9.378 — 2026-06-06 — UR-0073: 에이전트 팀 MCP 노출 (read-only list/preview)
 
 **🧩 신규 team 서브시스템을 MCP 로 외부 AI 에 노출 — 에이전트 팀 비전을 외부 에이전트가 직접 활용.**
