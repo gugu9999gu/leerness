@@ -5584,5 +5584,23 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.400 회귀 (7번째 버그헌트 P1-B, UR-0105): verify-claim/optimism-check/honesty-check --json 에러가 구조화 JSON + 사람용 보존
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-antilazyjson-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const jsonErr = (cmd) => { const r = cp.spawnSync(process.execPath, [CLI, cmd, 'T-9999', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 }); try { const j = JSON.parse(r.stdout); return j.ok === false && j.code === 'not_found' && r.status === 1; } catch { return false; } };
+    const allJson = jsonErr('verify-claim') && jsonErr('optimism-check') && jsonErr('honesty-check');
+    const hr = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-9999', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const humanOk = hr.status === 1 && /✗/.test(hr.stdout || '') && !/^\s*\{/.test(hr.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = allJson && humanOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.400) 7th버그헌트 P1-B: anti-laziness(verify-claim/optimism/honesty) --json 에러 구조화 + 사람용 보존 (UR-0105)' : '✗ anti-laziness --json 에러 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

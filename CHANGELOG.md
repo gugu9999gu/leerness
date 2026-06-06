@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.400 — 2026-06-07 🎉 — anti-laziness 명령 --json 에러 구조화 (7번째 버그헌트 P1-B, UR-0105)
+
+**🔌 verify-claim / optimism-check / honesty-check 의 `--json` 에러도 구조화 JSON — AI 에이전트 self-gate 검증 명령의 자동화 신뢰성.**
+
+### 배경 (7번째 버그헌트 P1-B · failJson 패턴 확대)
+버그헌트: 위 3개 anti-laziness 검증 명령(AI 에이전트가 자기 검증에 사용)이 없는 T-ID 에 `--json` 으로 호출 시 `✗ ... 없음` 텍스트를 stdout 에 출력 → JSON.parse 크래시. 1.9.398 의 failJson 헬퍼를 이들에 확대 적용.
+
+### 구현
+- verify-claim / optimism-check: missing_args / not_found 를 `failJson(_j, ...)` 로.
+- honesty-check: T-ID not_found 를 failJson 로.
+- 사람용 출력(--json 없을 때) 무변경.
+
+### 검증 (회귀 0)
+- **selftest 145→146 PASS** (3개 명령 failJson 와이어 소스 확인).
+- **E2E 338→339 PASS** (3개 --json 에러 → {ok:false,code:not_found} exit1 + 사람용 ✗ 텍스트 보존).
+
 ## 1.9.399 — 2026-06-07 — 테이블셀 injection 차단: task/rule 파이프·개행 (7번째 버그헌트 P1-A, UR-0104)
 
 **🛡 데이터 무결성 — task/rule 텍스트의 파이프(|)·개행(\\n)이 progress-tracker/rules.md 표를 손상·가짜행 주입·멱등성 무력화하던 것을 차단(셀 이스케이프).**

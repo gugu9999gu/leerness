@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.399';
+const VERSION = '1.9.400';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3004,6 +3004,7 @@ function _selfTestCases() {
     { name: '6번째 외부평가/codex P1-A (UR-0098): install-safety 레시피 셸-무관 + hardeningNote (1.9.397)', run: () => { if (typeof installSafetyCmd !== 'function') return false; const save = process.argv; const _w = process.stdout.write; let out = ''; try { process.argv = ['node', 'h', 'install-safety', '--json']; process.stdout.write = s => { out += s; return true; }; installSafetyCmd({ json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; } let j; try { j = JSON.parse(out); } catch {} const noPosixPrefix = !!j && Array.isArray(j.safeInstall) && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim())); const crossShell = !!j && j.safeInstall.filter(x => String(x).includes('npx --yes')).length >= 2; const noteOk = !!j && typeof j.hardeningNote === 'string' && j.hardeningNote.includes('PowerShell'); return noPosixPrefix && crossShell && noteOk; } },
     { name: '6번째 외부평가/codex P1-C (UR-0099): --json 에러 경로 구조화 failJson + 와이어 (1.9.398)', run: () => { const io = require('../lib/io'); if (io.failJson !== failJson) return false; const _w = process.stdout.write; const saved = process.exitCode; let jOut = '', hOut = ''; let jExit = 0; try { process.stdout.write = s => { jOut += s; return true; }; process.exitCode = 0; failJson(true, 'tc', 'm'); jExit = process.exitCode; process.stdout.write = s => { hOut += s; return true; }; process.exitCode = 0; failJson(false, 'c', 'humanmsg'); } catch {} finally { process.stdout.write = _w; process.exitCode = saved; } let pj; try { pj = JSON.parse(jOut); } catch {} const jsonOk = !!pj && pj.ok === false && pj.code === 'tc' && pj.error === 'm' && jExit === 1; const humanOk = hOut.includes('✗') && hOut.includes('humanmsg') && !hOut.includes('{'); const src = read(__filename); const wired = src.includes("failJson(_j, 'missing_args'") && src.includes("failJson(_j, 'spec_not_found'"); return jsonOk && humanOk && wired; } },
     { name: '7번째 버그헌트 P1-A (UR-0104): 테이블셀 안전화 _cellSafe/_cellUnescape (파이프/개행 injection 차단) (1.9.399)', run: () => { const m = require('../lib/pure-utils'); if (m._cellSafe !== _cellSafe || m._cellUnescape !== _cellUnescape) return false; const safe = _cellSafe('fix | bug\nrow2'); const noRaw = !/(?<!\\)\|/.test(safe) && !/[\r\n]/.test(safe); const pipeRt = _cellUnescape(_cellSafe('a | b | c')) === 'a | b | c'; const nlGone = _cellSafe('a\nb') === 'a b'; const src = read(__filename); const wired = src.includes('_cellSafe(r.request)') && src.includes('_cellSafe(r.rule)'); return noRaw && pipeRt && nlGone && wired; } },
+    { name: '7번째 버그헌트 P1-B (UR-0105): verify-claim/optimism-check/honesty-check --json 에러 구조화 (1.9.400)', run: () => { const src = read(__filename); const vc = /function verifyClaimCmd[\s\S]{0,400}?failJson\(_j, 'not_found'/.test(src); const oc = /function optimismCheckCmd[\s\S]{0,400}?failJson\(_j, 'not_found'/.test(src); const hc = /function honestyCheckCmd[\s\S]{0,900}?failJson\(has\('--json'\), 'not_found'/.test(src); return vc && oc && hc; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -9235,10 +9236,11 @@ function _gitChangedFiles(root) {
 // _claimFileInGit → lib/analyzers.js (1.9.304 UR-0025)
 function verifyClaimCmd(root, taskId) {
   root = absRoot(root);
-  if (!taskId) return fail('verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008');
+  const _j = has('--json');  // 1.9.400 (7번째 버그헌트 P1-B, UR-0105): --json 에러도 구조화
+  if (!taskId) return failJson(_j, 'missing_args', 'verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008');
   const rows = readProgressRows(root);
   const row = rows.find(r => r.id === taskId);
-  if (!row) return fail(`progress-tracker.md에 ${taskId} 없음.`);
+  if (!row) return failJson(_j, 'not_found', `progress-tracker.md에 ${taskId} 없음.`);
 
   const evidence = row.evidence || '';
   // 1.9.20: 파일 경로 추출 — 도메인 폴더 자동 인식 + 루트 메타파일
@@ -9994,7 +9996,7 @@ function honestyCheckCmd(root, arg1) {
   if (textArg) { subject = String(textArg); sourceLabel = '--text'; }
   else if (arg1 && !arg1.startsWith('-')) {
     const row = readProgressRows(root).find(r => r.id === arg1);
-    if (!row) { fail(`progress-tracker.md에 ${arg1} 없음.`); process.exitCode = 1; return; }
+    if (!row) { failJson(has('--json'), 'not_found', `progress-tracker.md에 ${arg1} 없음.`); return; }  // 1.9.400 (UR-0105): --json 에러 구조화
     subject = row.evidence || ''; sourceLabel = `${arg1} evidence`;
   } else { fail('사용법: leerness honesty-check <T-ID>  또는  leerness honesty-check --text "<주장>"'); process.exitCode = 1; return; }
   const r = _epistemicHonestyCheck(subject);
@@ -10012,10 +10014,11 @@ function honestyCheckCmd(root, arg1) {
 }
 function optimismCheckCmd(root, taskId) {
   root = absRoot(root || process.cwd());
-  if (!taskId) return fail('optimism-check <T-ID> 필요. 예: leerness optimism-check T-0001');
+  const _j = has('--json');  // 1.9.400 (7번째 버그헌트 P1-B, UR-0105): --json 에러도 구조화
+  if (!taskId) return failJson(_j, 'missing_args', 'optimism-check <T-ID> 필요. 예: leerness optimism-check T-0001');
   const rows = readProgressRows(root);
   const row = rows.find(r => r.id === taskId);
-  if (!row) return fail(`progress-tracker.md에 ${taskId} 없음.`);
+  if (!row) return failJson(_j, 'not_found', `progress-tracker.md에 ${taskId} 없음.`);
 
   const codeText = _scanCodeForPatterns(root);
   const suspects = _detectOptimism(row.evidence || '', codeText);
