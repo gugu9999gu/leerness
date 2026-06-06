@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.368 — 2026-06-06 — UR-0025 모듈화: README/managed 머지 + MERGE_OVERWRITE_FILES 분리
+
+**🧩 마이그레이션 머지 안전 핵심을 모듈화 — README/관리파일 머지 순수 코어 → pure-utils, overwrite 파일목록 → catalogs.**
+
+### 구현
+1. **`_mergeReadmeSection(existing, block, START, END)`**(pure-utils): README 관리섹션 마커 사이 교체/append. 마커는 인자 주입(harness 상수 비결합).
+2. **`_managedMerge(file, next, previous, archiveRel, overwriteSet)`**(pure-utils): 관리 파일 마이그레이션 머지 — 이전 내용을 `<!-- leerness:migration-preserved -->` 블록으로 보존(데이터/인덱스 파일은 overwrite). archiveRel(사전계산)+overwriteSet 주입 → path/process/상수 비결합(순수).
+3. **`MERGE_OVERWRITE_FILES`** → lib/catalogs (데이터 응집).
+4. **harness**: `mergeReadmeSection`/`managedMerge` 은 마커/archiveRel/set 만 주입하는 얇은 래퍼.
+
+### 검증 (회귀 0)
+- **selftest 113→114 PASS** (행위: `_mergeReadmeSection('','BLOCK',..)`==='# Project\n\nBLOCK' / `_managedMerge` preserved 블록 생성 / overwrite-set→NEW만 / 동일내용→NEW / 모듈 reference equality).
+- **E2E 313→314 PASS** (행위: init → AGENTS.md 사용자 편집 → migrate → migration-preserved 블록에 편집 보존).
+- 실측: AGENTS.md 편집 후 migrate → marker + preserved 블록 보존. init/migrate/check smoke 정상.
+
 ## 1.9.367 — 2026-06-06 — UR-0025 모듈화: env/line 머지 순수 코어 분리
 
 **🧩 안정화 마일스톤 이후 모듈화(UR-0025) 재개 — `.env`/라인 머지 순수 코어를 lib/pure-utils 로 분리, harness 는 얇은 I/O 래퍼.**

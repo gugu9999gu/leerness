@@ -5035,5 +5035,23 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.368 회귀 (UR-0025): _managedMerge 모듈 분리 — migrate 가 사용자 편집(AGENTS.md)을 migration-preserved 블록으로 보존
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mm-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const agents = path.join(d, 'AGENTS.md');
+    fs.writeFileSync(agents, fs.readFileSync(agents, 'utf8') + '\nCUSTOM_USER_EDIT_MARKER_42\n');
+    cp.spawnSync(process.execPath, [CLI, 'migrate', d], { encoding: 'utf8', timeout: 30000 });
+    const after = fs.readFileSync(agents, 'utf8');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = after.includes('CUSTOM_USER_EDIT_MARKER_42') && after.includes('migration-preserved');
+  } catch {}
+  console.log(ok ? '✓ B(1.9.368) UR-0025: _managedMerge 분리 — migrate 가 사용자 편집 preserved 블록 보존' : '✗ managedMerge 보존 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
