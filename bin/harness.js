@@ -23,13 +23,13 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _personaSummaries, _translate,
   _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd,
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
-  _migrationGuideText, _parseContractSpec } = require('../lib/pure-utils');  // 1.9.318~385 (UR-0025/0053/0075/0086): 순수 유틸 모듈 분리
+  _migrationGuideText, _parseContractSpec, _gitignoreMatch } = require('../lib/pure-utils');  // 1.9.318~386 (UR-0025/0053/0075/0086/0087): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.385';
+const VERSION = '1.9.386';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2988,6 +2988,7 @@ function _selfTestCases() {
     { name: 'UR-0025 큰핸들러토대: lib/io.js fs 프리미티브(read/writeUtf8/exists/mkdirp/append/rel/absRoot) 분리 + round-trip (1.9.383)', run: () => { const io = require('../lib/io'); const exp = ['absRoot', 'exists', 'read', 'readBuf', 'mkdirp', 'writeUtf8', 'append', 'rel'].every(k => typeof io[k] === 'function') && io.read === read && io.writeUtf8 === writeUtf8 && io.exists === exists; const src = read(__filename); const moved = !/^function writeUtf8\(p, s\) \{/m.test(src) && !/^function read\(p\) \{/m.test(src) && !/^function exists\(p\) \{/m.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_io_')); let rt = false; try { const f = path.join(tmp, 'a', 'b.txt'); io.writeUtf8(f, '한글RT'); rt = io.exists(f) && io.read(f) === '한글RT' && io.rel(tmp, f) === 'a/b.txt'; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return exp && moved && rt; } },
     { name: '5th외부평가/UR-0085: status --json 구조화 출력 + verify --json 와이어 (1.9.384)', run: () => { if (typeof status !== 'function' || typeof verify !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sj_')); const save = process.argv; const _w = process.stdout.write; let so = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'status', tmp, '--json']; process.stdout.write = s => { so += s; return true; }; status(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let sj; try { sj = JSON.parse(so); } catch {} const statusOk = !!sj && typeof sj.total === 'number' && typeof sj.present === 'number' && 'healthy' in sj && Array.isArray(sj.missing); const src = read(__filename); const verifyWired = /function verify\(root\) \{[\s\S]*?has\('--json'\)[\s\S]*?JSON\.stringify\(\{ ok:/.test(src); return statusOk && verifyWired; } },
     { name: '5th외부평가/UR-0086: _parseContractSpec markdown bullet 함수 감지 + 순수 추출 (1.9.385)', run: () => { const m = require('../lib/pure-utils'); if (m._parseContractSpec !== _parseContractSpec) return false; const p = _parseContractSpec('# Spec\n- add(a,b)\n* subtract(a,b)\n1. multiply(a,b)\nfunction legacy(x)\n`mentioned(`\ntick.amount\n'); const declOk = ['add', 'subtract', 'multiply', 'legacy'].every(n => p.declared.includes(n)) && p.declared.length === 4; const menOk = p.mentioned.includes('mentioned') && !p.declared.includes('mentioned'); const fieldOk = p.fields.includes('amount'); const fpOk = _parseContractSpec('- 합계 (a+b)\n- result (total)\n- foo: bar(x)\n**bold**').declared.length === 0; const src = read(__filename); const moved = src.includes('_parseContractSpec(specText)') && !/specText\.matchAll\(\/function/.test(src); return declOk && menOk && fieldOk && fpOk && moved; } },
+    { name: '5th외부평가/UR-0087: _gitignoreMatch git 일치(.env↛.env.bad) + env-family 스캔 (1.9.386)', run: () => { const m = require('../lib/pure-utils'); if (m._gitignoreMatch !== _gitignoreMatch) return false; const gm = _gitignoreMatch; const semOk = gm('.env', '.env') === true && gm('.env', '.env.bad') === false && gm('.env', '.env.local') === false && gm('.env.*', '.env.bad') === true && gm('.env*', '.env') === true && gm('*.pem', 'k.pem') === true && gm('src/', 'src/a.txt') === true; const src = read(__filename); const envFamilyScan = src.includes('const isEnvFamily =') && src.includes('!SCAN_TEXT_EXT.has(ext) && !isEnvFamily'); const delegated = src.includes('return _gitignoreMatch(gi, fileRel)'); return semOk && envFamilyScan && delegated; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -7257,23 +7258,13 @@ function* walk(root, base = root, depth = 0, extras = null) {
     else yield p;
   }
 }
-// 1.9.365 (외부리뷰 CV-6/UR-0081): 간이 .gitignore 매칭 — gitignored 파일(.env 계열)의 시크릿은 커밋 제외(설계상 안전) → 실패 대신 info.
-//   full gitignore semantics 아님 (정확매칭/.env-family/*.ext/dir/ 만). 미스 시 안전측(커밋됨으로 간주).
+// 1.9.365 (외부리뷰 CV-6/UR-0081): 간이 .gitignore 매칭 — gitignored 파일의 시크릿은 커밋 제외(설계상 안전) → 실패 대신 info.
+//   1.9.386 (UR-0087, 5번째 외부평가): 순수 _gitignoreMatch 로 위임 + bare '.env' → 모든 '.env.*' 과잉보호 제거.
+//   git 실제 동작 일치: '.env' 는 '.env' 만 보호, '.env.bad' 는 커밋 대상(실패). '.env.*'/'.env*' 명시 시에만 보호.
 function _isLikelyGitignored(root, fileRel) {
   let gi;
   try { gi = read(path.join(root, '.gitignore')); } catch { return false; }
-  const relPosix = String(fileRel).replace(/\\/g, '/');
-  const base = relPosix.split('/').pop();
-  for (let pat of gi.split(/\r?\n/)) {
-    pat = pat.trim();
-    if (!pat || pat.startsWith('#') || pat.startsWith('!')) continue;
-    const p = pat.replace(/^\/+|\/+$/g, '');
-    if (p === relPosix || p === base) return true;
-    if (pat === '.env' && /^\.env(\.|$)/.test(base)) return true;  // .env 관행상 .env.* 도 보호
-    if (p.startsWith('*.') && base.endsWith(p.slice(1))) return true;
-    if (pat.endsWith('/') && (relPosix === p || relPosix.startsWith(p + '/'))) return true;
-  }
-  return false;
+  return _gitignoreMatch(gi, fileRel);
 }
 function scanSecrets(root) {
   root = absRoot(root);
@@ -7283,7 +7274,10 @@ function scanSecrets(root) {
   try { _iter = fs.statSync(root).isFile() ? [root] : walk(root); } catch { _iter = walk(root); }
   for (const file of _iter) {
     const ext = path.extname(file).toLowerCase();
-    if (!SCAN_TEXT_EXT.has(ext)) continue;
+    // 1.9.386 (UR-0087, 5번째 외부평가): env-family(.env / .env.local / .env.bad / .env.production …)는
+    //   extname 이 .bad/.local/.production 라 SCAN_TEXT_EXT 에 없어 통째로 스킵되던 FN → basename 으로 강제 포함.
+    const isEnvFamily = /^\.env(\.|$)/.test(path.basename(file));
+    if (!SCAN_TEXT_EXT.has(ext) && !isEnvFamily) continue;
     let text;
     try { text = read(file); } catch { continue; }
     if (text.length > 1024 * 1024) continue;

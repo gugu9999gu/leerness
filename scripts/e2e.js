@@ -5395,5 +5395,36 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.386 회귀 (5번째 외부평가/UR-0087): secret scan env-family 포함 + gitignore git-일치 (.env↛.env.bad 미보호=커밋대상)
+total++;
+{
+  let ok = false;
+  try {
+    const key = 'OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl012mno345pqr678stuvwx\n';
+    // ① .env.bad(extname .bad, 종전 스킵) + gitignore=.env → 스캔됨 + 커밋대상 실패(exit1). git 실제 동작 일치(핵심 FN fix)
+    const d1 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-envbad-'));
+    fs.writeFileSync(path.join(d1, '.gitignore'), '.env\n');
+    fs.writeFileSync(path.join(d1, '.env.bad'), key);
+    const r1 = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d1], { encoding: 'utf8', timeout: 20000 });
+    const flaggedOk = r1.status === 1 && /\.env\.bad/.test(r1.stdout || '') && /OpenAI/.test(r1.stdout || '');
+    // ② .env + gitignore=.env → 강등 info(exit0). 기존 CV-6(1.9.365) 보존
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-envok-'));
+    fs.writeFileSync(path.join(d2, '.gitignore'), '.env\n');
+    fs.writeFileSync(path.join(d2, '.env'), 'TOKEN=npm_abcdefghijklmnopqrstuvwxyz0123456789\n');
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d2], { encoding: 'utf8', timeout: 20000 });
+    const downgradeOk = r2.status === 0 && /gitignored/.test(r2.stdout || '');
+    // ③ .env.bad + gitignore=.env.* → 명시 glob 보호 → 강등 info(exit0). 적정설정 프로젝트 FP 0
+    const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-envglob-'));
+    fs.writeFileSync(path.join(d3, '.gitignore'), '.env.*\n');
+    fs.writeFileSync(path.join(d3, '.env.bad'), key);
+    const r3 = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d3], { encoding: 'utf8', timeout: 20000 });
+    const globOk = r3.status === 0 && /gitignored/.test(r3.stdout || '');
+    [d1, d2, d3].forEach(d => fs.rmSync(d, { recursive: true, force: true }));
+    ok = flaggedOk && downgradeOk && globOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.386) 5th외부평가: secret scan env-family 포함 + gitignore git-일치(.env↛.env.bad 커밋대상) (UR-0087)' : '✗ secret scan env-family/gitignore 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

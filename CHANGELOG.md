@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.386 — 2026-06-06 — 5번째 외부평가: secret scan env-family 포함 + gitignore git-일치 (UR-0087)
+
+**🔐 `.env.bad` / `.env.local` / `.env.production` 등 env-variant 파일의 시크릿을 스캔 — 통째 스킵되던 보안 false-negative 해소 + gitignore 강등을 git 실제 동작에 맞춤.**
+
+### 배경 (5번째 외부평가, GPT-5.5 web · "참고하되 맹신 X")
+"secret scan 이 `.env.bad` 의 OpenAI-key-like 문자열을 놓쳤다." 자체 재현으로 **두 겹의 원인** 발견:
+1. **스캔 제외(주원인)**: `.env.bad` 의 extname 은 `.bad`(.env.local→`.local`, .env.production→`.production`) 라 `SCAN_TEXT_EXT` 에 없어 **파일 자체가 스킵**. bare `.env`(extname `''`)만 스캔되고 있었음.
+2. **과잉 강등**: 1.9.365(CV-6) 의 `.env` 관행 휴리스틱이 `.gitignore` 에 `.env` 만 있어도 모든 `.env.*` 를 보호(info 강등)로 처리 — 그러나 `git check-ignore .env.bad`(gitignore=`.env`) 는 **미무시(커밋 대상)**.
+
+### 구현
+1. **env-family 스캔 포함**: extname 대신 basename `/^\.env(\.|$)/` 매칭 → `.env` / `.env.local` / `.env.bad` / `.env.production` 모두 스캔.
+2. **`_gitignoreMatch` + `_globToRe` 순수 추출**(lib/pure-utils.js, UR-0025): 정확매칭 / glob(`*`→`[^/]*`) / dir(`/`) 지원. 1.9.365 과잉 휴리스틱 제거 → **git 실제 동작 일치**: bare `.env` 는 `.env` 만 보호, `.env.bad` 는 커밋 대상(실패). `.env.*` / `.env*` 명시 시에만 `.env.bad` 보호.
+
+### 검증 (회귀 0)
+- **selftest 131→132 PASS** (`_gitignoreMatch` 15종 매트릭스 핵심 `.env↛.env.bad`=false + env-family 스캔 와이어 + reference-equality).
+- **E2E 330→331 PASS** (① `.env.bad`+gitignore=`.env`→커밋대상 exit1 + ② `.env`→강등 exit0(CV-6 보존) + ③ `.env.bad`+gitignore=`.env.*`→glob 강등 exit0).
+- 실측 15/15 gitignore 매칭(git 일치) + `git check-ignore` 교차확인.
+
 ## 1.9.385 — 2026-06-06 — 5번째 외부평가: contract verify markdown bullet 함수 파서 (UR-0086)
 
 **📐 `contract verify` spec 파서가 markdown bullet `- name(args)` 함수 선언을 감지 — 실제 누락을 통과시키던 false-negative 해소.**
