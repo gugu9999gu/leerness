@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.412';
+const VERSION = '1.9.413';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3024,6 +3024,7 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0114): absRoot 비문자열(--path 값없음 boolean true) → cwd 폴백(raw TypeError 차단) (1.9.410)', run: () => { const io = require('../lib/io'); const cwd = process.cwd(); const tBool = io.absRoot(true) === cwd; const tEmpty = io.absRoot('') === cwd; const tUndef = io.absRoot(undefined) === cwd; const tSpace = io.absRoot('   ') === cwd; const tReal = io.absRoot(os.tmpdir()) === path.resolve(os.tmpdir()); return tBool && tEmpty && tUndef && tSpace && tReal; } },
     { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
     { name: '6번째 외부평가 Opus P1 (UR-0100): list-family(decision/feature/plan/runs/team list) positional path 지원 (조용한 cwd 오독 차단) (1.9.412)', run: () => { const src = read(__filename); const L = '_resolveRoot('; const decOk = src.includes("decisionListCmd(absRoot(" + L + "args[2]))"); const planOk = src.includes("planListCmd(absRoot(" + L + "args[2]))"); const featOk = src.includes("featureListCmd(absRoot(" + L + "args[2]))"); const runsOk = src.includes("runsListCmd(absRoot(" + L + "args[2]))"); const teamOk = src.includes(L + "args[1] === 'list' ? args[2] : null)"); return decOk && planOk && featOk && runsOk && teamOk; } },
+    { name: '6번째 외부평가 codex P2 (UR-0101): action 명령(task/decision/rule/lesson add) --json 구조화 출력 (1.9.413)', run: () => { const src = read(__filename); const taskJ = src.includes("log(JSON.stringify({ ok: true, id, status: arg('--status', 'requested'), request: text }))"); const decJ = src.includes("log(JSON.stringify({ ok: true, title }))"); const lesJ = src.includes("log(JSON.stringify({ ok: true, text, tag: tag || null }))"); const ruleJ = src.includes("skipped: !!result.skip"); return taskJ && decJ && lesJ && ruleJ; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6120,6 +6121,8 @@ function taskAdd(root, text) {
     upsertProgress(root, { id: newId, status: arg('--status','requested'), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next','다음 액션 작성') });
     return newId;
   });
+  // 1.9.413 (6th외부평가 codex P2, UR-0101): --json 시 구조화 출력(코어 데이터는 이미 영속). 사람용 ok + cosmetic roadmap/interactive review 는 스킵.
+  if (has('--json')) { log(JSON.stringify({ ok: true, id, status: arg('--status', 'requested'), request: text })); return; }
   ok(`task added: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
   // 1.9.177: task add 자동 review-request trigger (사용자 명시 1.9.176 자동화).
@@ -6471,6 +6474,8 @@ function lessonSave(root, text) {
     all.push({ date: today(), text, tag: tag || null });
     _saveLessons(root, all);
   });
+  // 1.9.413 (6th외부평가 codex P2, UR-0101): --json 구조화 출력(데이터 이미 영속).
+  if (has('--json')) { log(JSON.stringify({ ok: true, text, tag: tag || null })); return; }
   ok(`lesson saved`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -6563,6 +6568,8 @@ function decisionAdd(root, title) {
     });
     _saveDecisions(root, all);
   });
+  // 1.9.413 (6th외부평가 codex P2, UR-0101): --json 구조화 출력(데이터 이미 영속).
+  if (has('--json')) { log(JSON.stringify({ ok: true, title })); return; }
   ok(`decision added: ${title}`);
   // 1.9.43+ handoff lessons 회수 흐름과 자동 통합 (decisions.md fuzzy 매칭됨)
   _autoRoadmap(absRoot(root), 'data-change');
@@ -13652,6 +13659,8 @@ function ruleAdd(root, description) {
     writeRules(root, rules);
     return { skip: false, id };
   });
+  // 1.9.413 (6th외부평가 codex P2, UR-0101): --json 구조화 출력(skip/added 구분, 데이터 이미 영속).
+  if (has('--json')) { log(JSON.stringify({ ok: true, id: result.id, trigger, rule: description, skipped: !!result.skip })); return; }
   if (result.skip) { ok(`rule exists (skip): ${result.id} [${trigger}] ${description}  (--force 로 덮어쓰기)`); return; }
   ok(`rule added: ${result.id} [${trigger}] ${description}`);
   _autoRoadmap(root, 'data-change');

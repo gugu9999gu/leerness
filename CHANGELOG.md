@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.413 — 2026-06-07 — action 명령 --json 구조화 출력 (6번째 외부평가 codex P2, UR-0101)
+
+**🔌 자동화 일관성 완결 — task/decision/rule/lesson add 가 `--json` 을 무시하고 텍스트만 내던 것을 구조화 JSON 출력으로.**
+
+### 배경 (6번째 외부평가 codex P2 / 2차 버그헌트 #9)
+read 명령(list/show)은 --json JSON 을 내지만 action(쓰기) 명령은 --json 을 무시하고 `✓ task added: T-0002` 텍스트만 출력 → 외부 AI 가 결과를 구조화 파싱 못 함. 핵심 4개 memory-write action 에 --json 추가.
+
+### 구현
+- task add → `{ok,id,status,request}`, decision add → `{ok,title}`, rule add → `{ok,id,trigger,rule,skipped}`, lesson save → `{ok,text,tag}`.
+- 코어 데이터 영속 후 JSON 1줄 출력 + return(사람용 ok 및 cosmetic auto-roadmap/interactive review-trigger 스킵 → stdout 오염 없음). --json 미사용 시 기존 텍스트 동작 불변.
+
+### 검증 (회귀 0)
+- **selftest 158→159 PASS** (4개 action JSON 출력 와이어).
+- **E2E 351→352 PASS** (4개 --json → {ok:true} + 데이터 영속 + 사람용 텍스트 보존).
+
 ## 1.9.412 — 2026-06-07 — list-family positional path 지원 (6번째 외부평가 Opus P1, UR-0100)
 
 **🧭 일관성 footgun 수정 — decision/feature/plan/runs/team `list` 이 positional path 를 조용히 무시하고 cwd 를 읽던 것을 positional 지원으로.**

@@ -5873,5 +5873,30 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.413 회귀 (6th외부평가 codex P2, UR-0101): action 명령 --json 구조화 출력 + 데이터 영속 + 사람용 보존
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-actionjson-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const j = (args) => { const r = cp.spawnSync(process.execPath, [CLI, ...args, '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 }); try { const o = JSON.parse((r.stdout || '').trim().split('\n')[0]); return o.ok === true; } catch { return false; } };
+    const taskJ = j(['task', 'add', 'AJtask', '--no-review']);
+    const decJ = j(['decision', 'add', 'AJdec', '--reason', 'r']);
+    const ruleJ = j(['rule', 'add', 'AJrule', '--trigger', 'every-session']);
+    const lesJ = j(['lesson', 'save', 'AJlesson']);
+    // 데이터 영속
+    const tl = cp.spawnSync(process.execPath, [CLI, 'task', 'list', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const persisted = /AJtask/.test(tl.stdout || '');
+    // 사람용 보존(--json 없이 텍스트)
+    const human = cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'AJhuman', '--reason', 'r', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const humanOk = /✓/.test(human.stdout || '') && !/^\s*\{/.test(human.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = taskJ && decJ && ruleJ && lesJ && persisted && humanOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.413) 6th외부평가 codex P2: action(task/decision/rule/lesson add) --json 구조화 + 데이터 영속 + 사람용 보존 (UR-0101)' : '✗ action --json 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
