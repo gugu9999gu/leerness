@@ -5743,5 +5743,29 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.407 회귀 (8번째 버그헌트, UR-0111): MCP feature_link safe-write tier + NaN --limit 가 결과 은폐 안 함
+total++;
+{
+  let ok = false;
+  try {
+    // ① feature_link tier safe-write (권한경계)
+    const tools = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools'));
+    const arr = Array.isArray(tools) ? tools : (tools.MCP_TOOLS || []);
+    const fl = arr.find(x => x.name === 'leerness_feature_link');
+    const tierOk = !!fl && fl.requiredTier === 'safe-write';
+    // ② NaN --limit: lessons 쿼리 매칭 결과가 은폐되지 않음(기본값 폴백)
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-nanlimit-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', 'ZZUNIQUE alpha lesson', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', 'ZZUNIQUE beta lesson', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'lessons', 'ZZUNIQUE', '--path', d, '--limit', 'abc'], { encoding: 'utf8', timeout: 15000 });
+    const limitOk = r.status === 0 && /ZZUNIQUE/.test(r.stdout || '');  // NaN→기본값, 결과 은폐 안 됨
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = tierOk && limitOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.407) 8th버그헌트: MCP feature_link safe-write tier + NaN --limit 결과 은폐 차단 (UR-0111)' : '✗ feature_link tier/NaN limit 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

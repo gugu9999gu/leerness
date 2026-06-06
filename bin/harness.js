@@ -25,13 +25,13 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
-  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe } = require('../lib/pure-utils');  // 1.9.318~399 (UR-0025/0053/0075/0086/0087/0104): 순수 유틸 모듈 분리
+  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit } = require('../lib/pure-utils');  // 1.9.318~399 (UR-0025/0053/0075/0086/0087/0104): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.406';
+const VERSION = '1.9.407';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3011,6 +3011,7 @@ function _selfTestCases() {
     { name: '7번째 버그헌트 P2 (UR-0105 잔여): reuse autodetect / creds check --json 에러 구조화 (1.9.404)', run: () => { const src = read(__filename); const reuseOk = src.includes("failJson(has('--json'), 'no_scan_dir'"); const credsOk = src.includes("failJson(has('--json'), 'no_service'"); return reuseOk && credsOk; } },
     { name: '8번째 버그헌트 회귀수정 (UR-0109): 긴 서술형 placeholder FP 차단(마커 우선) + 실키 FN 유지 (1.9.405)', run: () => { const m = require('../lib/pure-utils'); const ph = m._isPlaceholderSecret; const fpFixed = ph('your-super-secret-api-key-example-value') === true && ph('this-is-just-an-example-placeholder-value') === true && ph('example-api-key-do-not-use-1234567890') === true; const fnKept = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false; const realKept = ph('a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6') === false; const shortPh = ph('your-api-key-here') === true && ph('changeme') === true; return fpFixed && fnKept && realKept && shortPh; } },
     { name: '8번째 버그헌트 (UR-0110): rule/decision/lesson add 동시쓰기 _withLock 직렬화 (UR-0043 갭 메움) (1.9.406)', run: () => { const src = read(__filename); const L = '_withLock('; const ruleLock = src.includes(L + 'rulesPath' + '(root), () =>'); const decLock = src.includes(L + 'decisionsJsonPath' + '(root), () =>'); const lesLock = src.includes(L + 'lessonsJsonPath' + '(root), () =>'); return ruleLock && decLock && lesLock; } },
+    { name: '8번째 버그헌트 (UR-0111): MCP feature_link safe-write tier(권한경계) + _parseLimit NaN/음수 가드 (1.9.407)', run: () => { const m = require('../lib/pure-utils'); const pl = m._parseLimit('abc', 10) === 10 && m._parseLimit('-5', 10) === 10 && m._parseLimit('0', 10) === 10 && m._parseLimit('3', 10) === 3 && m._parseLimit('7.9', 10) === 7; const tools = require('../lib/mcp-tools'); const arr = Array.isArray(tools) ? tools : (tools.MCP_TOOLS || []); const fl = arr.find(x => x.name === 'leerness_feature_link'); const tierOk = !!fl && fl.requiredTier === 'safe-write'; return pl && tierOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -7342,7 +7343,7 @@ function memorySearch(root, query) {
     const hits = lines.map((line, i) => ({ line, i })).filter(x => re.test(x.line));
     if (hits.length) {
       log(`\n# ${f}`);
-      for (const h of hits.slice(0, parseInt(arg('--limit','5'),10))) log(`  L${h.i+1}: ${h.line.trim()}`);
+      for (const h of hits.slice(0, _parseLimit(arg('--limit','5'),5))) log(`  L${h.i+1}: ${h.line.trim()}`);
       total += hits.length;
     }
   }
@@ -7364,7 +7365,7 @@ function memorySearch(root, query) {
           const hits = lines.map((line, i) => ({ line, i })).filter(x => re.test(x.line));
           if (hits.length) {
             log(`\n# ${rel(root, p)}`);
-            for (const h of hits.slice(0, parseInt(arg('--limit','5'),10))) log(`  L${h.i+1}: ${h.line.trim().slice(0, 160)}`);
+            for (const h of hits.slice(0, _parseLimit(arg('--limit','5'),5))) log(`  L${h.i+1}: ${h.line.trim().slice(0, 160)}`);
             total += hits.length;
           }
         }
@@ -14444,7 +14445,7 @@ function verifyCodeCmd(root) {
 function lessonsCmd(root) {
   root = absRoot(root);
   let query = arg('--query', null);
-  const limit = parseInt(arg('--limit', '10'), 10);
+  const limit = _parseLimit(arg('--limit', '10'), 10);  // 1.9.407 (UR-0111): NaN/음수 가드
   // 1.9.54: --auto 옵션 — 현재 진행 중인 task의 키워드 자동 추출 → query로 사용
   if (has('--auto') && !query) {
     const rows = readProgressRows(root);
@@ -14680,7 +14681,7 @@ function reuseFind(root, query) {
   log(`# reuse find: "${query}"`);
   if (!matches.length) return ok('기존 자원 없음 — 새로 만드는 것이 최선의 선택일 수 있음');
   log(`${matches.length}개 후보:`);
-  for (const m of matches.slice(0, parseInt(arg('--limit', '20'), 10))) log(`- ${m.source}:${m.line}  ${m.text}`);
+  for (const m of matches.slice(0, _parseLimit(arg('--limit', '20'), 20))) log(`- ${m.source}:${m.line}  ${m.text}`);
   log(`\n💡 새로 만들기 전에 위 자원을 재사용/확장 가능한지 확인하세요.`);
 }
 

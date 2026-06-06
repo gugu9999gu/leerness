@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.407 — 2026-06-07 — MCP feature_link 권한경계 + NaN --limit 가드 (8번째 버그헌트, UR-0111)
+
+**🛡 MCP 권한경계 — read-only로 잘못 선언된 그래프-변경 도구 수정 + NaN --limit 가 결과를 조용히 숨기던 것 차단.**
+
+### 배경 (2차 버그헌트 mcp-parity/arg-boundary)
+- **feature_link**: `requiredTier: 'read-only'` 인데 실제로는 feature 그래프에 엣지를 **추가(mutate)** → read-only tier로 제한된 에이전트가 예기치 않게 상태 변경 가능(권한경계 위반). 형제 `feature_add` 는 올바르게 `safe-write`. (감사: read-only 59종 중 mutation 키워드 7건 의심 → 비판검토로 feature_link 만 진짜, 나머지는 조회/등록된/DELETE archive 등 read 문맥 false-positive.)
+- **NaN --limit**: `--limit abc` → `parseInt('abc')=NaN` → `slice(0,NaN)=[]` → 모든 결과를 조용히 숨김(음수/0도 동일).
+
+### 구현
+- feature_link `requiredTier` → `safe-write` (feature_add 와 일관).
+- `_parseLimit(raw, def)` 순수 헬퍼(NaN/음수/0 → 기본값) → lessons/memory search/reuse find/lsp search 4개 호출부 적용.
+
+### 검증 (회귀 0)
+- **selftest 152→153 PASS** (_parseLimit 5케이스 + feature_link safe-write tier).
+- **E2E 345→346 PASS** (feature_link tier + lessons --limit abc 결과 은폐 안 됨).
+
 ## 1.9.406 — 2026-06-07 — rule/decision/lesson add 동시쓰기 lost-update 차단 (8번째 버그헌트, UR-0110)
 
 **🔒 멀티에이전트 데이터 무결성 — rule/decision/lesson add 의 read-modify-write 가 락 없이 실행돼 동시 쓰기 시 항목이 조용히 유실되던 것 차단(UR-0043 락 정책의 커버리지 갭 메움).**
