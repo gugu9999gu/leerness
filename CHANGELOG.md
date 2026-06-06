@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.410 — 2026-06-07 — 값 없는 --path raw TypeError 크래시 차단 (8번째 버그헌트, UR-0114)
+
+**🛡 견고성 — `--path`(값 없이) 같은 비-문자열 인자가 `path.resolve(true)` raw Node TypeError 로 크래시하던 것을 cwd 폴백으로 차단.**
+
+### 배경 (2차 버그헌트 arg-boundary)
+값 없는 `--path` 플래그는 `arg()` 가 boolean `true` 를 반환 → `absRoot(p) = path.resolve(p || cwd)` 에서 `true || cwd = true`(truthy) → `path.resolve(true)` → "The paths[0] argument must be of type string. Received type boolean (true)" raw 크래시. absRoot 를 쓰는 모든 명령(status/audit/handoff/…)에 영향.
+
+### 구현
+- `absRoot(p)`: `(typeof p === 'string' && p.trim()) ? p : process.cwd()` — 비-문자열/빈/공백 입력은 cwd 폴백(`--path=` 빈값 동작과 일관). 실제 문자열 경로는 그대로 보존.
+
+### 검증 (회귀 0)
+- **selftest 155→156 PASS** (true/''/undefined/공백 → cwd, 실경로 보존 5케이스).
+- **E2E 348→349 PASS** (`status --path` raw TypeError 누출 안 됨 + cwd 폴백 정상 실행).
+
 ## 1.9.409 — 2026-06-07 — encoding-check --apply 가 .sh/shebang 깨뜨리던 것 차단 (8번째 버그헌트, UR-0113)
 
 **🐚 인코딩 도구 자기모순 수정 — `env encoding-check --apply` 가 .sh(shebang) 파일에 BOM 을 추가해 스크립트 실행을 깨뜨리던 것 차단.**

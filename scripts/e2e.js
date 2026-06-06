@@ -5811,5 +5811,20 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.410 회귀 (8번째 버그헌트, UR-0114): 값 없는 --path (boolean true) 가 raw TypeError 크래시 안 함(cwd 폴백)
+total++;
+{
+  let ok = false;
+  try {
+    const r = cp.spawnSync(process.execPath, [CLI, 'status', '--path'], { encoding: 'utf8', timeout: 15000 });
+    const out = (r.stdout || '') + (r.stderr || '');
+    const noCrash = !/paths\[0\].*argument must be of type string|Received type boolean/.test(out);  // raw TypeError 누출 안 됨
+    const ran = /Leerness:/.test(out) || /Files:/.test(out);  // cwd 로 폴백해 정상 실행
+    ok = noCrash && ran;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.410) 8th버그헌트: 값없는 --path raw TypeError 차단(cwd 폴백) (UR-0114)' : '✗ --path 크래시 가드 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
