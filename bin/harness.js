@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.411';
+const VERSION = '1.9.412';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3023,6 +3023,7 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0113): env encoding-check --apply 가 .sh/shebang 에 BOM 미추가(shebang 보존) (1.9.409)', run: () => { const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_bom_')); try { const sh = path.join(tmp, 's.sh'); fs.writeFileSync(sh, '#!/bin/bash\n# 한글\necho hi\n'); const ps = path.join(tmp, 's.ps1'); fs.writeFileSync(ps, '# 한글\nWrite-Host hi\n'); const save = process.argv; let out = ''; const _w = process.stdout.write; try { process.argv = ['node', 'h', 'env', 'encoding-check', '--path', tmp, '--apply', '--json']; process.stdout.write = s => { out += s; return true; }; envCmd(tmp, 'encoding-check'); } catch {} finally { process.stdout.write = _w; process.argv = save; } const shBuf = fs.readFileSync(sh); const psBuf = fs.readFileSync(ps); const shNoBom = !(shBuf[0] === 0xEF && shBuf[1] === 0xBB && shBuf[2] === 0xBF) && shBuf[0] === 0x23 && shBuf[1] === 0x21; const psBom = psBuf[0] === 0xEF && psBuf[1] === 0xBB && psBuf[2] === 0xBF; return shNoBom && psBom; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: '8번째 버그헌트 (UR-0114): absRoot 비문자열(--path 값없음 boolean true) → cwd 폴백(raw TypeError 차단) (1.9.410)', run: () => { const io = require('../lib/io'); const cwd = process.cwd(); const tBool = io.absRoot(true) === cwd; const tEmpty = io.absRoot('') === cwd; const tUndef = io.absRoot(undefined) === cwd; const tSpace = io.absRoot('   ') === cwd; const tReal = io.absRoot(os.tmpdir()) === path.resolve(os.tmpdir()); return tBool && tEmpty && tUndef && tSpace && tReal; } },
     { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
+    { name: '6번째 외부평가 Opus P1 (UR-0100): list-family(decision/feature/plan/runs/team list) positional path 지원 (조용한 cwd 오독 차단) (1.9.412)', run: () => { const src = read(__filename); const L = '_resolveRoot('; const decOk = src.includes("decisionListCmd(absRoot(" + L + "args[2]))"); const planOk = src.includes("planListCmd(absRoot(" + L + "args[2]))"); const featOk = src.includes("featureListCmd(absRoot(" + L + "args[2]))"); const runsOk = src.includes("runsListCmd(absRoot(" + L + "args[2]))"); const teamOk = src.includes(L + "args[1] === 'list' ? args[2] : null)"); return decOk && planOk && featOk && runsOk && teamOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -20768,7 +20769,7 @@ async function main() {
   if (cmd === 'creds' && args[1] === 'refresh')   return credsRefreshTimestampCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'deploy' && args[1] === 'auto')     return deployAutoCmd(arg('--path', process.cwd()), args[2]);
   // 1.9.149: observability lite + runs list/show
-  if (cmd === 'runs' && args[1] === 'list')       return runsListCmd(arg('--path', process.cwd()));
+  if (cmd === 'runs' && args[1] === 'list')       return runsListCmd(absRoot(_resolveRoot(args[2])));  // 1.9.412 (UR-0100): positional path 지원
   if (cmd === 'runs' && args[1] === 'show')       return runsShowCmd(arg('--path', process.cwd()), args[2]);
   // 1.9.85: leerness health — 종합 헬스 체크
   if (cmd === 'health') return healthCmd(args[1] || arg('--path', process.cwd()));
@@ -20865,7 +20866,7 @@ async function main() {
   // 1.9.278 (UR-0032): leerness state <show|start|record|verify|handoff> — .leerness/ 구조화 상태 substrate
   if (cmd === 'state')                              return stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   if (cmd === 'context')                            return contextCmd(_resolveRoot(args[1]), { json: has('--json') });
-  if (cmd === 'team')                               return teamCmd(_resolveRoot(null), args[1], args[2], { json: has('--json') });  // 1.9.371 (UR-0073 Phase A): 에이전트 팀 정의 레지스트리 (opt-in, positional=sub/id, root=--path|cwd)
+  if (cmd === 'team')                               return teamCmd(_resolveRoot(args[1] === 'list' ? args[2] : null), args[1], args[2], { json: has('--json') });  // 1.9.371 (UR-0073 Phase A): 팀 레지스트리. 1.9.412 (UR-0100): team list 만 positional path 지원(preview/deploy 의 args[2]=id 와 분리)
   if (cmd === 'brief')                              return briefCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'about' || cmd === 'identity')        return aboutCmd({ json: has('--json') });
   // 1.9.281 (UR-0034): leerness policy <show|set|check> — 권한 등급 (opt-in enforced)
@@ -20916,7 +20917,7 @@ async function main() {
   if (cmd === 'feature' && args[1] === 'add')    return featureAddCmd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('--')).join(' '));
   if (cmd === 'feature' && args[1] === 'link')   return featureLinkCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'feature' && args[1] === 'impact') return featureImpactCmd(arg('--path', process.cwd()), args[2]);
-  if (cmd === 'feature' && args[1] === 'list')   return featureListCmd(arg('--path', process.cwd()));
+  if (cmd === 'feature' && args[1] === 'list')   return featureListCmd(absRoot(_resolveRoot(args[2])));  // 1.9.412 (UR-0100): positional path 지원(조용한 cwd 오독 방지)
   if (cmd === 'feature' && args[1] === 'show')   return featureShowCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'impact')                             return impactCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'reuse' && args[1] === 'find')        return reuseFind(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
@@ -20937,7 +20938,7 @@ async function main() {
     if (sub==='progress') return planProgress(root);
     if (sub==='sync')     return planSync(root);
     // 1.9.119: plan list — 모든 milestone JSON/verbose
-    if (sub==='list')     return planListCmd(root, { json: has('--json') });
+    if (sub==='list')     return planListCmd(absRoot(_resolveRoot(args[2])), { json: has('--json') });  // 1.9.412 (UR-0100): positional path 지원
   }
   if (cmd === 'task') {
     const root = absRoot(arg('--path', process.cwd())); const sub = args[1] || 'list';
@@ -21007,7 +21008,7 @@ async function main() {
       return decisionAdd(root, titleParts.join(' '));
     }
     if (sub === 'list') {
-      return decisionListCmd(root, { json: has('--json') });
+      return decisionListCmd(absRoot(_resolveRoot(args[2])), { json: has('--json') });  // 1.9.412 (UR-0100): positional path 지원(add 의 args[2]=title 와 분리)
     }
     // 1.9.125: decision drop <date|title>
     if (sub === 'drop') {

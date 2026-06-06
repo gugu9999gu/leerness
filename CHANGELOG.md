@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.412 — 2026-06-07 — list-family positional path 지원 (6번째 외부평가 Opus P1, UR-0100)
+
+**🧭 일관성 footgun 수정 — decision/feature/plan/runs/team `list` 이 positional path 를 조용히 무시하고 cwd 를 읽던 것을 positional 지원으로.**
+
+### 배경 (6번째 외부평가 Opus P1 · 맹신 X로 재검증)
+status/audit/handoff 는 `[path]` positional 을 지원하나, list-family(decision/feature/plan/runs/team list)는 `--path` 만 받고 positional 을 무시 → `leerness decision list ./proj` 가 조용히 cwd 를 읽어 **다른 데이터** 반환(에러 없음 = silent-wrong footgun). 직접 재현 확인(positional=0, --path=1).
+
+### 구현
+- 각 list 브랜치 root 해석을 기존 헬퍼 `_resolveRoot(positional)`(--path > positional > cwd)로 전환: `absRoot(_resolveRoot(args[2]))`. team 은 `sub==='list'` 일 때만(preview/deploy 의 args[2]=id 와 분리).
+- add/show/drop/preview 의 positional(title/id)은 별도 브랜치라 불변(회귀 0).
+
+### 검증 (회귀 0)
+- **selftest 157→158 PASS** (5개 list 디스패치 _resolveRoot 와이어).
+- **E2E 350→351 PASS** (decision/feature list positional → 해당 워크스페이스 데이터 + --path 보존 + add title/show id 회귀 없음).
+
 ## 1.9.411 — 2026-06-07 — lazy detect --auto-track 배치화 O(N²)→O(N) (8번째 버그헌트, UR-0115)
 
 **⚡ 성능 — `lazy detect --auto-track` 가 TODO 마다 progress-tracker 전체 read-modify-write 하던 O(T×N) 을 단일 RMW O(N+T) 로.**

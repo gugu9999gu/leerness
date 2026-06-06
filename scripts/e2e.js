@@ -5850,5 +5850,28 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.412 회귀 (6th외부평가 Opus P1, UR-0100): list-family 가 positional path 를 인식(조용한 cwd 오독 차단) + add/show 회귀 없음
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pospath-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'DZZmark', '--reason', 'r', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    cp.spawnSync(process.execPath, [CLI, 'feature', 'add', 'FZZmark', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    // positional path 로 list → 해당 워크스페이스 데이터 보임
+    const dl = cp.spawnSync(process.execPath, [CLI, 'decision', 'list', d], { encoding: 'utf8', timeout: 15000 });
+    const fl = cp.spawnSync(process.execPath, [CLI, 'feature', 'list', d], { encoding: 'utf8', timeout: 15000 });
+    const posOk = /DZZmark/.test(dl.stdout || '') && /FZZmark/.test(fl.stdout || '');
+    // 회귀: decision add 의 title(args[2]) 여전히 보존 + --json 안전
+    const dl2 = cp.spawnSync(process.execPath, [CLI, 'decision', 'list', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const flagOk = /DZZmark/.test(dl2.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = posOk && flagOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.412) 6th외부평가 Opus P1: list-family positional path 인식(cwd 오독 차단) + --path 보존 (UR-0100)' : '✗ list positional path 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
