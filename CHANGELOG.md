@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.404 — 2026-06-07 — reuse autodetect / creds check --json 에러 구조화 (7번째 버그헌트 P2, UR-0105 잔여)
+
+**🔌 reuse autodetect / creds check 의 빈·에러 --json 경로도 구조화 JSON — failJson 와이어 확대.**
+
+### 배경
+버그헌트가 여러 명령의 --json 에러 누출을 지적. UR-0099/0105 에서 핵심(contract/feature/anti-laziness)을 고쳤고, 이번에 reuse autodetect(스캔 디렉토리 없음)·creds check(등록 서비스 없음)를 추가.
+
+### 구현
+- reuse autodetect: `no_scan_dir`, creds check: `no_service` 를 `failJson(has('--json'), ...)` 로. 사람용 출력 보존.
+
+### 검증 (회귀 0)
+- **selftest 149→150 PASS** + **E2E 342→343 PASS** (reuse/creds --json → {ok:false,code} + 사람용 텍스트 보존).
+
 ## 1.9.403 — 2026-06-07 — api-skill 에러 exit code 1 (7번째 버그헌트 P2, UR-0107)
 
 **🚦 api-skill show/drop 의 실패가 성공(exit 0)으로 보고되던 것 수정 — AI 에이전트의 exit-code 게이트 신뢰성.**

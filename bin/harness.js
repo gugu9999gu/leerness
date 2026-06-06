@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.403';
+const VERSION = '1.9.404';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3008,6 +3008,7 @@ function _selfTestCases() {
     { name: '7번째 버그헌트 P1-C (UR-0106): 시크릿 FN — gitignore 부정(!) + placeholder substring 정밀화 (1.9.401)', run: () => { const m = require('../lib/pure-utils'); const gm = m._gitignoreMatch; const negOk = gm('*.example\n!.env.example', '.env.example') === false && gm('*.log', 'a.log') === true && gm('a.log\n!a.log', 'a.log') === false && gm('.env', '.env') === true; const ph = m._isPlaceholderSecret; const phOk = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false && ph('your-key-here') === true && ph('changeme') === true && ph('example') === true && ph('xxxxxxxxxxxxxxxxxxxxxxxxxxxx') === true; return negOk && phOk; } },
     { name: '7번째 버그헌트 P1-A 잔여 (UR-0108): decisions/lessons MD projection 개행 주입 차단 _lineSafe (1.9.402)', run: () => { const m = require('../lib/pure-utils'); if (m._lineSafe !== _lineSafe) return false; const lsOk = _lineSafe('a\nb\r\nc') === 'a b c'; const md = m._renderDecisionsMd([{ date: '2026-06-07', title: 'real\n### 2099-01-01 — FAKE\n- Decision: forged', decision: 'd', reason: 'r' }]); const re = m._decisionsFromMd(md); const noInject = re.length === 1 && !/^### 2099-01-01 — FAKE/m.test(md); const lmd = m._renderLessonsMd([{ date: '2026-06-07', text: 'l1\n### FAKE\n- Lesson: x', tag: 't' }]); const lre = m._parseLessonEntries(lmd); const lNoInject = lre.length === 1; return lsOk && noInject && lNoInject; } },
     { name: '7번째 버그헌트 P2 (UR-0107): api-skill show/drop 에러 exit code 1 (1.9.403)', run: () => { const src = read(__filename); const showId = src.includes("api-skill show <id>')); process.exitCode = 1"); const dropId = src.includes("api-skill drop <id>')); process.exitCode = 1"); const addUrl = src.includes("api-skill add <url> [--direction") && src.includes('process.exitCode = 1'); return showId && dropId && addUrl; } },
+    { name: '7번째 버그헌트 P2 (UR-0105 잔여): reuse autodetect / creds check --json 에러 구조화 (1.9.404)', run: () => { const src = read(__filename); const reuseOk = src.includes("failJson(has('--json'), 'no_scan_dir'"); const credsOk = src.includes("failJson(has('--json'), 'no_service'"); return reuseOk && credsOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -19020,7 +19021,7 @@ function credsCheckCmd(root, service) {
   const j = _readCredentials(root);
   const result = { service: service || null, services: {}, ok: true };
   const targets = service ? (j.services[service] ? { [service]: j.services[service] } : {}) : (j.services || {});
-  if (!Object.keys(targets).length) { fail(`등록된 서비스 없음${service ? ` (${service})` : ''}`); return; }
+  if (!Object.keys(targets).length) { failJson(has('--json'), 'no_service', `등록된 서비스 없음${service ? ` (${service})` : ''}`); return; }  // 1.9.404 (UR-0105 잔여): --json 에러 구조화
   for (const [name, meta] of Object.entries(targets)) {
     const missing = (meta.envVars || []).filter(v => !process.env[v]);
     const expired = meta.tokenLifetimeHours && meta.lastRefreshed
@@ -19785,7 +19786,7 @@ function reuseAutodetectCmd(root) {
   root = absRoot(root || process.cwd());
   // 1.9.36 BUG-fix: src/만이 아니라 bin/, lib/, app/도 스캔. require() 대신 정적 분석 (side-effect 차단).
   const candidateDirs = ['src', 'bin', 'lib', 'app'].filter(d => exists(path.join(root, d)));
-  if (!candidateDirs.length) { fail(`스캔할 디렉토리 없음 (src/, bin/, lib/, app/ 중 하나 필요): ${root}`); return process.exit(1); }
+  if (!candidateDirs.length) { failJson(has('--json'), 'no_scan_dir', `스캔할 디렉토리 없음 (src/, bin/, lib/, app/ 중 하나 필요): ${root}`); return process.exit(process.exitCode || 1); }  // 1.9.404 (UR-0105 잔여): --json 에러 구조화
   const found = [];
   for (const dir of candidateDirs) {
     const files = fs.readdirSync(path.join(root, dir)).filter(f => f.endsWith('.js'));

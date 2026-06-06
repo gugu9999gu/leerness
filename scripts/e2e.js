@@ -5667,5 +5667,28 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.404 회귀 (7번째 버그헌트 P2, UR-0105 잔여): reuse autodetect / creds check 의 --json 에러도 구조화 JSON
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-jsonleak2-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // reuse autodetect: 스캔 디렉토리 없음 → JSON 에러
+    const ra = cp.spawnSync(process.execPath, [CLI, 'reuse', 'autodetect', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let raJson = false; try { const j = JSON.parse(ra.stdout); raJson = j.ok === false && j.code === 'no_scan_dir'; } catch {}
+    // creds check: 등록 서비스 없음 → JSON 에러
+    const cc = cp.spawnSync(process.execPath, [CLI, 'creds', 'check', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let ccJson = false; try { const j = JSON.parse(cc.stdout); ccJson = j.ok === false && j.code === 'no_service'; } catch {}
+    // 사람용 보존 (creds check --json 없이 텍스트)
+    const ch = cp.spawnSync(process.execPath, [CLI, 'creds', 'check', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const humanOk = /✗/.test(ch.stdout || '') && !/^\s*\{/.test(ch.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = raJson && ccJson && humanOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.404) 7th버그헌트 P2: reuse autodetect/creds check --json 에러 구조화 + 사람용 보존 (UR-0105 잔여)' : '✗ reuse/creds --json 에러 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
