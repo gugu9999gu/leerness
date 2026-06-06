@@ -5133,5 +5133,26 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.373 회귀 (UR-0073 Phase C): handoff 가 비-manual 팀 스케줄 알림 노출(미리보기 안내) · manual 미표시 · opt-out
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tsch-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'rev', '--members', 'claude', '--schedule', 'every-session', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'man', '--members', 'claude', '--schedule', 'manual', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const h = cp.spawnSync(process.execPath, [CLI, 'handoff', d], { encoding: 'utf8', timeout: 30000 });
+    const out = h.stdout || '';
+    const shows = out.includes('에이전트 팀 스케줄') && out.includes('team preview rev') && !out.includes('🤝 man');
+    const ho = cp.spawnSync(process.execPath, [CLI, 'handoff', d], { encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_NO_TEAM_REMINDERS: '1' } });
+    const optOut = !(ho.stdout || '').includes('에이전트 팀 스케줄');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = shows && optOut;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.373) UR-0073 Phase C: handoff 팀 스케줄 알림 (비-manual 노출/manual 제외/opt-out)' : '✗ team 스케줄 알림 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

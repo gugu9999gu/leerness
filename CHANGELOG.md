@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.373 — 2026-06-06 — UR-0073 Phase C: handoff 팀 스케줄 알림 (opt-out · 실행 트리거 아님)
+
+**🧩 정의된 비-manual 팀을 세션 시작(handoff)에서 미리보기 안내 — 스케줄 인지.** (UR-0073 Phase C)
+
+### 구현
+1. **`_teamHandoffReminders(teams)`**(순수): `schedule !== 'manual'` 이고 `status==='active'` 인 팀만 → `🤝 <id> (<schedule>) · N명 — 미리보기: leerness team preview <id>` 라인.
+2. **handoff 통합**: 정의된 팀이 있으면 `## 🤝 에이전트 팀 스케줄` 섹션 노출. **opt-out**(`--no-team-reminders` / `LEERNESS_NO_TEAM_REMINDERS=1` / `--compact`/`--quiet`).
+3. **안전**: 알림은 **미리보기 안내만** — 실행/dispatch/배포 트리거 아님. manual·paused 팀 제외.
+
+### 검증 (회귀 0)
+- **selftest 118→119 PASS** (행위: every-session/active 만 알림, manual·paused 제외, `team preview` 링크 포함, 모듈 reference equality).
+- **E2E 318→319 PASS** (행위: handoff 가 every-session 팀 노출 + manual 제외 + `LEERNESS_NO_TEAM_REMINDERS=1` opt-out).
+- 실측: handoff 에 rev(every-session) 노출, man(manual) 미표시, opt-out 동작.
+
+### UR-0073 로드맵: A(정의)·B(preview)·**C(스케줄 알림)** 완료. D(배포 통합)는 향후 권한 게이트.
+
 ## 1.9.372 — 2026-06-06 — UR-0073 Phase B: team preview — dry-run 실행 계획 미리보기
 
 **🧩 정의된 팀의 작업을 실제 실행 없이 미리보기 — `leerness team preview`.** (UR-0073 Phase B, 안전 게이트: dry-run 전용)
