@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.405';
+const VERSION = '1.9.406';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3010,6 +3010,7 @@ function _selfTestCases() {
     { name: '7번째 버그헌트 P2 (UR-0107): api-skill show/drop 에러 exit code 1 (1.9.403)', run: () => { const src = read(__filename); const showId = src.includes("api-skill show <id>')); process.exitCode = 1"); const dropId = src.includes("api-skill drop <id>')); process.exitCode = 1"); const addUrl = src.includes("api-skill add <url> [--direction") && src.includes('process.exitCode = 1'); return showId && dropId && addUrl; } },
     { name: '7번째 버그헌트 P2 (UR-0105 잔여): reuse autodetect / creds check --json 에러 구조화 (1.9.404)', run: () => { const src = read(__filename); const reuseOk = src.includes("failJson(has('--json'), 'no_scan_dir'"); const credsOk = src.includes("failJson(has('--json'), 'no_service'"); return reuseOk && credsOk; } },
     { name: '8번째 버그헌트 회귀수정 (UR-0109): 긴 서술형 placeholder FP 차단(마커 우선) + 실키 FN 유지 (1.9.405)', run: () => { const m = require('../lib/pure-utils'); const ph = m._isPlaceholderSecret; const fpFixed = ph('your-super-secret-api-key-example-value') === true && ph('this-is-just-an-example-placeholder-value') === true && ph('example-api-key-do-not-use-1234567890') === true; const fnKept = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false; const realKept = ph('a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6') === false; const shortPh = ph('your-api-key-here') === true && ph('changeme') === true; return fpFixed && fnKept && realKept && shortPh; } },
+    { name: '8번째 버그헌트 (UR-0110): rule/decision/lesson add 동시쓰기 _withLock 직렬화 (UR-0043 갭 메움) (1.9.406)', run: () => { const src = read(__filename); const L = '_withLock('; const ruleLock = src.includes(L + 'rulesPath' + '(root), () =>'); const decLock = src.includes(L + 'decisionsJsonPath' + '(root), () =>'); const lesLock = src.includes(L + 'lessonsJsonPath' + '(root), () =>'); return ruleLock && decLock && lesLock; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6451,9 +6452,12 @@ function lessonSave(root, text) {
   if (!_requireInit(root, 'lesson save')) return;  // 1.9.311 (UR-0047): init 가드
   if (!text) return fail('lesson text required. 예: leerness lesson save "JWT는 refresh token도 짧게 (15분 권장)"');
   const tag = arg('--tag', '');
-  const all = _loadLessons(root);
-  all.push({ date: today(), text, tag: tag || null });
-  _saveLessons(root, all);
+  // 1.9.406 (8번째 버그헌트, UR-0110): RMW 락 직렬화 — 동시 lesson save lost-update 방지(UR-0043 패턴).
+  _withLock(lessonsJsonPath(root), () => {
+    const all = _loadLessons(root);
+    all.push({ date: today(), text, tag: tag || null });
+    _saveLessons(root, all);
+  });
   ok(`lesson saved`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -6534,15 +6538,18 @@ function decisionAdd(root, title) {
   const alternatives = arg('--alternatives', '');
   const impact = arg('--impact', '');
   // 1.9.339 (UR-0053): canonical JSON write path — 기존 항목(JSON 우선, 없으면 MD backfill) 로드 후 추가, JSON+MD projection 동시 저장.
-  const all = _loadDecisions(root);
-  all.push({
-    date: today(), title,
-    decision: title,
-    reason: reason || null,
-    alternatives: alternatives || null,
-    impact: impact || null
+  // 1.9.406 (8번째 버그헌트, UR-0110): RMW 락 직렬화 — 동시 decision add lost-update 방지(UR-0043 패턴).
+  _withLock(decisionsJsonPath(root), () => {
+    const all = _loadDecisions(root);
+    all.push({
+      date: today(), title,
+      decision: title,
+      reason: reason || null,
+      alternatives: alternatives || null,
+      impact: impact || null
+    });
+    _saveDecisions(root, all);
   });
-  _saveDecisions(root, all);
   ok(`decision added: ${title}`);
   // 1.9.43+ handoff lessons 회수 흐름과 자동 통합 (decisions.md fuzzy 매칭됨)
   _autoRoadmap(absRoot(root), 'data-change');
@@ -13608,19 +13615,21 @@ function ruleAdd(root, description) {
   const trigger = arg('--trigger', 'every-session');
   // 1.9.310 (UR-0046): 무효 trigger 거부 (이전엔 warn 후 등록 → 오타 룰 등록됨). --force 우회.
   if (!_validateChoice(trigger, RULE_TRIGGERS, 'rule trigger')) { process.exitCode = 1; return; }
-  const rules = readRules(root);
-  // 1.9.212: 멱등성 보장 — 같은 description + trigger + active 상태 이미 존재 시 skip (사용자 명시)
-  if (!has('--force')) {
-    const dup = rules.find(r => r.rule === description && r.trigger === trigger && r.status === 'active');
-    if (dup) {
-      ok(`rule exists (skip): ${dup.id} [${dup.trigger}] ${description}  (--force 로 덮어쓰기)`);
-      return;
+  // 1.9.406 (8번째 버그헌트, UR-0110): read-modify-write 전체를 락으로 직렬화 — 동시 rule add lost-update 방지(UR-0043 패턴, task add 와 동일).
+  const result = _withLock(rulesPath(root), () => {
+    const rules = readRules(root);
+    // 1.9.212: 멱등성 보장 — 같은 description + trigger + active 상태 이미 존재 시 skip (사용자 명시)
+    if (!has('--force')) {
+      const dup = rules.find(r => r.rule === description && r.trigger === trigger && r.status === 'active');
+      if (dup) return { skip: true, id: dup.id };
     }
-  }
-  const id = nextRuleId(root);
-  rules.push({ id, trigger, rule: description, added: today(), status: 'active', lastVerified: '-' });
-  writeRules(root, rules);
-  ok(`rule added: ${id} [${trigger}] ${description}`);
+    const id = nextRuleId(root);
+    rules.push({ id, trigger, rule: description, added: today(), status: 'active', lastVerified: '-' });
+    writeRules(root, rules);
+    return { skip: false, id };
+  });
+  if (result.skip) { ok(`rule exists (skip): ${result.id} [${trigger}] ${description}  (--force 로 덮어쓰기)`); return; }
+  ok(`rule added: ${result.id} [${trigger}] ${description}`);
   _autoRoadmap(root, 'data-change');
 }
 

@@ -5712,5 +5712,36 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.406 회귀 (8번째 버그헌트, UR-0110): rule/decision/lesson add 락 리팩터가 멱등성/정확성 보존 (skip 플래그 회귀가드)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lockrefactor-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const run = (args) => cp.spawnSync(process.execPath, [CLI, ...args, '--path', d], { encoding: 'utf8', timeout: 15000 });
+    // rule: 멱등성(dup skip) 보존
+    run(['rule', 'add', 'lock refactor rule', '--trigger', 'every-session']);
+    const dup = run(['rule', 'add', 'lock refactor rule', '--trigger', 'every-session']);  // 중복 → skip
+    run(['rule', 'add', 'lock refactor rule 2', '--trigger', 'every-session']);
+    const rl = JSON.parse(run(['rule', 'list', '--json']).stdout); const rs = rl.rules || rl;
+    const ruleOk = rs.length === 2 && /skip/.test(dup.stdout || '');
+    // decision: 2개 순차 → 2 보존
+    run(['decision', 'add', 'lock dec A', '--reason', 'r']);
+    run(['decision', 'add', 'lock dec B', '--reason', 'r']);
+    const decs = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'decisions.json'), 'utf8'));
+    const decOk = decs.length === 2;
+    // lesson: 2개 순차 → 2 보존
+    run(['lesson', 'save', 'lock lesson A']);
+    run(['lesson', 'save', 'lock lesson B']);
+    const les = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'lessons.json'), 'utf8'));
+    const lesOk = les.length === 2;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = ruleOk && decOk && lesOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.406) 8th버그헌트: rule/decision/lesson add 락 리팩터 멱등성·정확성 보존 (UR-0110)' : '✗ 락 리팩터 회귀가드 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

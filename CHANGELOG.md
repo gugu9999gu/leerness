@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.406 — 2026-06-07 — rule/decision/lesson add 동시쓰기 lost-update 차단 (8번째 버그헌트, UR-0110)
+
+**🔒 멀티에이전트 데이터 무결성 — rule/decision/lesson add 의 read-modify-write 가 락 없이 실행돼 동시 쓰기 시 항목이 조용히 유실되던 것 차단(UR-0043 락 정책의 커버리지 갭 메움).**
+
+### 배경 (2차 버그헌트 concurrency 차원)
+1.9.303(UR-0043)이 task/plan add 의 동시 lost-update 를 _withLock 으로 막았으나, rule add / decision add / lesson save 는 누락. 2차 버그헌트가 실측 재현: 14개 동시 rule add → 11~13개만 잔존(2~3개 영구 유실), 12 동시 decision add → 10개. atomic write 라 파일은 무손상이나 개수 무결성 깨짐(늦은 writer 가 이른 항목 덮어씀).
+
+### 구현
+- ruleAdd / decisionAdd / lessonSave 의 RMW 전체를 `_withLock(rulesPath/decisionsJsonPath/lessonsJsonPath, () => {...})` 로 직렬화(task add 와 동일 패턴). ruleAdd 는 멱등 skip 을 락 내 반환값으로 처리.
+
+### 검증 (회귀 0)
+- **selftest 151→152 PASS** (3함수 _withLock 와이어).
+- **E2E 344→345 PASS** (락 리팩터 멱등성/정확성 보존: dup skip + 순차 카운트).
+- 실측 동시성: 14 rule / 12 decision / 10 lesson 동시 add → 전부 무손실 + stale lock 없음.
+
 ## 1.9.405 — 2026-06-07 — 시크릿 placeholder FP 회귀수정 (8번째 버그헌트, UR-0109)
 
 **🔧 자기 회귀 수정 — 1.9.401 의 looksReal 가드가 긴 서술형 placeholder를 실키로 오탐(FP)하던 것 차단.**
