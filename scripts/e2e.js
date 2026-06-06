@@ -5154,5 +5154,21 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.374 회귀 (UR-0074): release cadence 진단 — --json level/recommendation/releasesPerDay 구조 (릴리스 빈도 가시화)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cad-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'release', 'cadence', d, '--json'], { encoding: 'utf8', timeout: 20000 });
+    const j = JSON.parse(r.stdout);
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = ['very-high', 'high', 'moderate', 'healthy'].includes(j.level) && typeof j.releasesPerDay === 'number' && typeof j.recommendation === 'string' && j.recommendation.length > 0;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.374) UR-0074: release cadence 진단 (--json level/recommendation/releasesPerDay)' : '✗ release cadence 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

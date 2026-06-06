@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.374 — 2026-06-06 — UR-0074: release cadence 진단 (외부리뷰 케이던스 가시화)
+
+**🧩 외부 리뷰가 반복 지적한 "릴리스 케이던스 과다"를 측정·가시화 — `leerness release cadence`.**
+
+### 배경
+3개 모델 + GPT-5.5 외부 리뷰 모두 300+ 버전의 높은 릴리스 빈도를 신뢰 저하 요인으로 지적(UR-0074). 케이던스를 **측정 가능하게** 만들어 자기 인지 + batched-minor 전환 근거를 제공.
+
+### 구현
+1. **`_cadenceAssessment(perDay, total, daysActive)`**(순수): releases/day → 수준(very-high ≥5 / high ≥2 / moderate ≥0.5 / healthy) + 권장(batched minor·stable 채널 등).
+2. **`leerness release cadence [path] [--json]`**: git tag(`_computeRoundHistory` 재사용)로 누적/활동일/빈도 산출 → 평가 출력. 읽기 전용.
+3. commands(release) + help 등재.
+
+### 검증 (회귀 0)
+- **selftest 119→120 PASS** (행위: 임계값 4구간 + 권장 비어있지 않음).
+- **E2E 319→320 PASS** (행위: `release cadence --json` level∈집합 + releasesPerDay number + recommendation string).
+- 실측: 본 저장소 330 릴리스 / 28일 = **11.79/day → very-high**(외부리뷰 우려를 그대로 정량 확인) → batched minor 권장.
+
 ## 1.9.373 — 2026-06-06 — UR-0073 Phase C: handoff 팀 스케줄 알림 (opt-out · 실행 트리거 아님)
 
 **🧩 정의된 비-manual 팀을 세션 시작(handoff)에서 미리보기 안내 — 스케줄 인지.** (UR-0073 Phase C)
