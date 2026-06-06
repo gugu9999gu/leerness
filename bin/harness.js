@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
-const { _isSecretKey, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
+const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
   _htmlToText, _extractTitle, _extractLinks,
   _countDatedBlocks, _extractDecisionBlocks, _classifyIntent,
@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344 (UR-0025): SKILL_CATALOG_PRESETS 분리
 
-const VERSION = '1.9.364';
+const VERSION = '1.9.365';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3077,14 +3077,14 @@ function _selfTestCases() {
     { name: 'UR-0058: lessons canonical JSON 레이어(_loadLessons/_saveLessons/lessonsJsonPath) + pure 파서/렌더 round-trip', run: () => { const m = require('../lib/pure-utils'); const objs = [{ date: '2026-06-05', text: 'A', tag: 't' }, { date: '2026-06-04', text: 'B', tag: null }]; const rt = m._parseLessonEntries(m._renderLessonsMd(objs)); const rtOk = JSON.stringify(rt) === JSON.stringify(objs); const tplOk = m._parseLessonEntries(m._renderLessonsMd([])).length === 0; const layerOk = typeof _loadLessons === 'function' && typeof _saveLessons === 'function' && typeof lessonsJsonPath === 'function' && _renderLessonsMd === m._renderLessonsMd; return rtOk && tplOk && layerOk; } },
     { name: 'UR-0025 심층: BUILTIN_CATALOG→lib/catalogs + _withBuiltinSource→pure-utils 분리 (1.9.341)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.BUILTIN_CATALOG && Object.keys(c.BUILTIN_CATALOG).length === 9 && c.BUILTIN_CATALOG.office && c.BUILTIN_CATALOG.office.version === '1.0.0'; const out = m._withBuiltinSource(c.BUILTIN_CATALOG); const work = Object.keys(out).length === 9 && Object.values(out).every(v => v._source === 'builtin') && out.office.version === '1.0.0' && Array.isArray(out.office.capabilities) && Object.keys(m._withBuiltinSource(null)).length === 0; const src = read(__filename); const moved = BUILTIN_CATALOG === c.BUILTIN_CATALOG && _withBuiltinSource === m._withBuiltinSource && !/const BUILTIN_CATALOG = \{/.test(src); return catOk && work && moved; } },
     { name: 'UR-0025 심층: ROADMAP_STATUS_LABEL/COLOR→lib/catalogs 분리 (1.9.342)', run: () => { const c = require('../lib/catalogs'); const lblOk = c.ROADMAP_STATUS_LABEL && Object.keys(c.ROADMAP_STATUS_LABEL).length === 11 && c.ROADMAP_STATUS_LABEL.done === '완료' && c.ROADMAP_STATUS_LABEL.blocked === '오류'; const colOk = c.ROADMAP_STATUS_COLOR && Object.keys(c.ROADMAP_STATUS_COLOR).length === 11 && c.ROADMAP_STATUS_COLOR.done === '#16a34a' && c.ROADMAP_STATUS_COLOR.skill === '#8b5cf6'; const src = read(__filename); const moved = ROADMAP_STATUS_LABEL === c.ROADMAP_STATUS_LABEL && ROADMAP_STATUS_COLOR === c.ROADMAP_STATUS_COLOR && !/const ROADMAP_STATUS_LABEL = \{/.test(src); return lblOk && colOk && moved; } },
-    { name: 'UR-0025 심층: SECRET_PATTERNS→lib/catalogs 보안 응집 분리 (1.9.343)', run: () => { const c = require('../lib/catalogs'); const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 19 && c.SECRET_PATTERNS.every(p => p.name && p.re instanceof RegExp); const A = 'A'.repeat(40); const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";'); const moved = SECRET_PATTERNS === c.SECRET_PATTERNS; return catOk && det && moved; } },
+    { name: 'UR-0025 심층: SECRET_PATTERNS→lib/catalogs 보안 응집 분리 (1.9.343)', run: () => { const c = require('../lib/catalogs'); const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 20 && c.SECRET_PATTERNS.every(p => p.name && p.re instanceof RegExp); const A = 'A'.repeat(40); const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";'); const moved = SECRET_PATTERNS === c.SECRET_PATTERNS; return catOk && det && moved; } },
     { name: 'UR-0025 심층: SKILL_CATALOG_PRESETS→lib/catalogs 분리 (1.9.344)', run: () => { const c = require('../lib/catalogs'); const catOk = c.SKILL_CATALOG_PRESETS && Object.keys(c.SKILL_CATALOG_PRESETS).length === 2 && c.SKILL_CATALOG_PRESETS.vercel && c.SKILL_CATALOG_PRESETS.vercel.owner === 'vercel-labs' && c.SKILL_CATALOG_PRESETS.anthropic && c.SKILL_CATALOG_PRESETS.anthropic.repo === 'skills'; const moved = SKILL_CATALOG_PRESETS === c.SKILL_CATALOG_PRESETS; return catOk && moved; } },
     { name: 'UR-0025 심층: _esc(HTML escape)→pure-utils 분리 + XSS 가드 (1.9.345)', run: () => { const m = require('../lib/pure-utils'); const work = m._esc('&<>"\'') === '&amp;&lt;&gt;&quot;&#39;' && m._esc('<script>x</script>') === '&lt;script&gt;x&lt;/script&gt;' && m._esc(null) === '' && m._esc(undefined) === '' && m._esc(42) === '42'; const moved = _esc === m._esc; return work && moved; } },
     { name: 'UR-0025 심층: _roadmapTokenStyles→pure-utils 분리 (1.9.346)', run: () => { const m = require('../lib/pure-utils'); const out = m._roadmapTokenStyles({ 'color.primary': '#2563eb' }, { 'color-surface': '#fff', 'custom': '#abc' }); const work = out.startsWith(':root {') && out.includes('--lr-primary: #2563eb') && out.includes('--lr-surface: #fff') && out.includes('--lr-custom: #abc') && out.includes('--lr-card-bg') && m._roadmapTokenStyles(null, null).startsWith(':root {'); const moved = _roadmapTokenStyles === m._roadmapTokenStyles; return work && moved; } },
     { name: 'UR-0025 심층: _parseSkillMd(SKILL.md frontmatter, BOM-aware)→pure-utils 분리 (1.9.347)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseSkillMd('---\nname: s1\ndescription: "d1"\n---\nbody'); const work = r.meta.name === 's1' && r.meta.description === 'd1' && r.body === 'body' && m._parseSkillMd('﻿---\nname: b\n---\nx').meta.name === 'b' && Object.keys(m._parseSkillMd('plain text').meta).length === 0 && m._parseSkillMd('plain text').body === 'plain text' && m._parseSkillMd(null).body === ''; const moved = _parseSkillMd === m._parseSkillMd; return work && moved; } },
     { name: 'UR-0059(외부리뷰 P0): --path 라우팅 일관화 — bare args[N]||cwd 제거 + arg(--path) wrap', run: () => { const src = read(__filename); const bare1 = '(args[1] ' + '|| process.cwd())'; const bare2 = '(args[2] ' + '|| process.cwd())'; const noBare = !src.includes(bare1) && !src.includes(bare2); const wrapped = src.includes('arg(' + "'--path', args[1] || process.cwd())") && src.includes('arg(' + "'--path', args[2] || process.cwd())"); const argDefault = arg('--definitely-not-real-xyz', 'SENT') === 'SENT'; return noBare && wrapped && argDefault; } },
     { name: 'UR-0061(외부리뷰 P1): roadmap CSS 값 살균 — :root/</style> breakout 차단', run: () => { const m = require('../lib/pure-utils'); const css = m._roadmapTokenStyles({ 'color.primary': 'red;}' + '</style><script>alert(1)</script>' }, {}); const blocked = !css.includes('<') && !css.includes('>'); const primaryLine = (css.split('\n').find(l => l.includes('--lr-primary')) || ''); const noBreakout = !primaryLine.replace(/;$/, '').includes('}'); const preserved = m._roadmapTokenStyles({ 'color.primary': '#2563eb' }, {}).includes('--lr-primary: #2563eb'); return blocked && noBreakout && preserved; } },
-    { name: 'UR-0060(외부리뷰 P1): SECRET_PATTERNS 19종 — GitLab/JWT/DB-URI/SendGrid/AWS-secret/Bearer 보강 + 오탐 가드', run: () => { const c = require('../lib/catalogs'); const hit = s => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('glpat-' + 'x'.repeat(20)) && hit('eyJ' + 'x'.repeat(15) + '.eyJ' + 'y'.repeat(15) + '.' + 'z'.repeat(15)) && hit('postgres://u:p@host:5432/db') && hit('SG.' + 'x'.repeat(22) + '.' + 'y'.repeat(43)) && hit('aws_secret_access_key = "' + 'x'.repeat(40) + '"') && hit('Bearer ' + 'x'.repeat(25)); const clean = !hit('const u = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return c.SECRET_PATTERNS.length === 19 && det && clean; } },
+    { name: 'UR-0060(외부리뷰 P1): SECRET_PATTERNS 20종 (unquoted 보강) — GitLab/JWT/DB-URI/SendGrid/AWS-secret/Bearer 보강 + 오탐 가드', run: () => { const c = require('../lib/catalogs'); const hit = s => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('glpat-' + 'x'.repeat(20)) && hit('eyJ' + 'x'.repeat(15) + '.eyJ' + 'y'.repeat(15) + '.' + 'z'.repeat(15)) && hit('postgres://u:p@host:5432/db') && hit('SG.' + 'x'.repeat(22) + '.' + 'y'.repeat(43)) && hit('aws_secret_access_key = "' + 'x'.repeat(40) + '"') && hit('Bearer ' + 'x'.repeat(25)); const clean = !hit('const u = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return c.SECRET_PATTERNS.length === 20 && det && clean; } },
     { name: 'UR-0068(외부리뷰 P2): _roadmapParseMilestones 블록 경계 — 다음 milestone status 누출 차단', run: () => { const m = require('../lib/pure-utils'); const r = m._roadmapParseMilestones('### M-0001. A\n\n### M-0002. B\nStatus: done\nProgress: 80%\n'); return r.length === 2 && r[0].status === 'planned' && r[0].progress === 0 && r[1].status === 'done' && r[1].progress === 80; } },
     { name: 'UR-0066(외부리뷰 P2): shell:true 주입 가드 — agents bench task _shellQuoteArg + fetchNpmLatest cmd.exe args', run: () => { const m = require('../lib/pure-utils'); const src = read(__filename); const benchQuoted = src.includes('const qTask = ' + '_shellQuoteArg(task)'); const npmSafe = /'\/d', '\/s', '\/c', 'npm', 'view'/.test(src); const q = m._shellQuoteArg('a & b'); const safe = (process.platform === 'win32' ? q === '"a & b"' : q === "'a & b'"); return benchQuoted && npmSafe && safe; } },
     { name: 'UR-0072(외부리뷰 P3): compareVer pre-release + _classifyCJK 한자 kana 귀속', run: () => { const m = require('../lib/pure-utils'); const verOk = m.compareVer('1.9.0-beta', '1.9.0') === -1 && m.compareVer('1.9.0', '1.9.0-beta') === 1 && m.compareVer('1.9.5', '1.9.5') === 0 && m.compareVer('1.9.6', '1.9.5') === 1; const jp = Buffer.from([0xE3, 0x81, 0x82, 0xE6, 0x97, 0xA5, 0xE6, 0x9C, 0xAC]); const cn = Buffer.from([0xE4, 0xB8, 0xAD, 0xE5, 0x9B, 0xBD]); const rj = m._classifyCJK(jp, jp.length); const rc = m._classifyCJK(cn, cn.length); const cjkOk = rj.japanese > rj.chinese && rc.chinese > 0 && rc.japanese === 0; return verOk && cjkOk; } },
@@ -3098,6 +3098,7 @@ function _selfTestCases() {
     { name: 'CV-4/UR-0079: _pruneArchives archive retention (최신 keep 유지, 오래된 prune) 행위', run: () => { if (typeof _pruneArchives !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_prune_')); try { const adir = path.join(tmp, '.harness', 'archive'); fs.mkdirSync(adir, { recursive: true }); for (let i = 0; i < 5; i++) fs.mkdirSync(path.join(adir, 'leerness-1.9.' + i + '-stamp')); const pruned = _pruneArchives(tmp, 2); const left = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length; return pruned === 3 && left === 2; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'CV-7/UR-0082: commands 카탈로그 + help 에 누락 명령군 등재 (표면 drift 가드)', run: () => { const src = read(__filename); const ci = src.indexOf('function commandsCmd'); const hi = src.indexOf('function help('); if (ci < 0 || hi < 0) return false; const cbody = src.slice(ci, ci + 8000); const hbody = src.slice(hi, hi + 7000); const must = ['install-safety', 'feature add', 'creds list', 'incident list', 'webhook serve', 'deploy auto', 'runs list', 'permissions list', 'whats-new', 'migrate audit']; return must.every(c => cbody.includes(c)) && hbody.includes('install-safety') && hbody.includes('feature add'); } },
     { name: 'UR-0083(4th외부평가 9.3): auto-update hook 비침투 (update --quiet 모드 + hook --check --quiet + 업그레이드)', run: () => { const src = read(__filename); const quietMode = /const quiet = !!opts\.quiet \|\| has\('--quiet'\)/.test(src); const hookQuiet = src.includes("command: 'leerness update --check --quiet'"); const upgrade = /includes\('leerness update --check'\) && !h\.command\.includes\('--quiet'\)/.test(src); return quietMode && hookQuiet && upgrade; } },
+    { name: 'CV-6/UR-0081: 시크릿 스캐너 FP/FN — _isPlaceholderSecret + _looksSecretLike 행위', run: () => { if (typeof _isPlaceholderSecret !== 'function' || typeof _looksSecretLike !== 'function') return false; const fp = _isPlaceholderSecret('change-me') && _isPlaceholderSecret('your-api-key-here') && _isPlaceholderSecret('<token>') && _isPlaceholderSecret('') && !_isPlaceholderSecret('hunter2realpass'); const fn = _looksSecretLike('secret123') && _looksSecretLike('a'.repeat(24)) && !_looksSecretLike('processEnv') && !_looksSecretLike('reqBodyPassword'); return fp && fn; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -7306,6 +7307,24 @@ function* walk(root, base = root, depth = 0, extras = null) {
     else yield p;
   }
 }
+// 1.9.365 (외부리뷰 CV-6/UR-0081): 간이 .gitignore 매칭 — gitignored 파일(.env 계열)의 시크릿은 커밋 제외(설계상 안전) → 실패 대신 info.
+//   full gitignore semantics 아님 (정확매칭/.env-family/*.ext/dir/ 만). 미스 시 안전측(커밋됨으로 간주).
+function _isLikelyGitignored(root, fileRel) {
+  let gi;
+  try { gi = read(path.join(root, '.gitignore')); } catch { return false; }
+  const relPosix = String(fileRel).replace(/\\/g, '/');
+  const base = relPosix.split('/').pop();
+  for (let pat of gi.split(/\r?\n/)) {
+    pat = pat.trim();
+    if (!pat || pat.startsWith('#') || pat.startsWith('!')) continue;
+    const p = pat.replace(/^\/+|\/+$/g, '');
+    if (p === relPosix || p === base) return true;
+    if (pat === '.env' && /^\.env(\.|$)/.test(base)) return true;  // .env 관행상 .env.* 도 보호
+    if (p.startsWith('*.') && base.endsWith(p.slice(1))) return true;
+    if (pat.endsWith('/') && (relPosix === p || relPosix.startsWith(p + '/'))) return true;
+  }
+  return false;
+}
 function scanSecrets(root) {
   root = absRoot(root);
   const findings = [];
@@ -7321,22 +7340,35 @@ function scanSecrets(root) {
     const fileRel = (file === root) ? path.basename(file) : rel(root, file);  // 1.9.354 (UR-0072): 단일 파일 스캔 시 basename 표시('.' 방지)
     // 1.9.350 (UR-0060 외부리뷰): leerness 자기 harness.js(regex 소스) + 생성 secret-policy 템플릿만 제외 — 정확 경로(사용자 파일명 substring false-negative 제거)
     if (path.resolve(file) === path.resolve(__filename) || /(^|[\\/])\.(?:harness|leerness)[\\/]secret-policy\.md$/.test(fileRel)) continue;
-    for (const { name, re } of SECRET_PATTERNS) {
+    const gitignored = _isLikelyGitignored(root, fileRel);  // 1.9.365 CV-6: gitignored 면 발견을 info 로 강등
+    for (const { name, re, valueGroup, requireSecretLike } of SECRET_PATTERNS) {
       re.lastIndex = 0;
       let m;
       while ((m = re.exec(text))) {
+        // 1.9.365 (CV-6/UR-0081): assignment 패턴 값이 placeholder/예시면 오탐 → 스킵(같은 패턴 계속 탐색).
+        if (valueGroup != null) {
+          const val = m[valueGroup];
+          if (_isPlaceholderSecret(val)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
+          if (requireSecretLike && !_looksSecretLike(val)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
+        }
         const line = text.slice(0, m.index).split('\n').length;
-        findings.push({ file: fileRel, line, name, snippet: m[0].slice(0, 32) });
+        findings.push({ file: fileRel, line, name, snippet: m[0].slice(0, 32), gitignored });
         break;
       }
     }
   }
-  if (findings.length) {
-    fail(`secret patterns found: ${findings.length}`);
-    findings.forEach(f => log(`  ${f.file}:${f.line}  ${f.name}  ${f.snippet}…`));
+  // 1.9.365 (CV-6/UR-0081): gitignored(.env 등 설계상 안전 보관) 발견은 info, 커밋되는 파일 발견만 실패.
+  const committed = findings.filter(f => !f.gitignored);
+  const ignored = findings.filter(f => f.gitignored);
+  if (committed.length) {
+    fail(`secret patterns found: ${committed.length}`);
+    committed.forEach(f => log(`  ${f.file}:${f.line}  ${f.name}  ${f.snippet}…`));
     process.exitCode = 1;
   } else {
-    ok('no obvious secret patterns');
+    ok('no obvious secret patterns (커밋 대상)');
+  }
+  if (ignored.length) {
+    log(`  ⓘ gitignored ${ignored.length}건 (커밋 제외 — 설계상 안전 보관, 비실패): ${[...new Set(ignored.map(f => f.file))].join(', ')}`);
   }
 }
 

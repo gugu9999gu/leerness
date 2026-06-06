@@ -4434,7 +4434,7 @@ total++;
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
     const A = 'A'.repeat(40);
     const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); });
-    const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 19
+    const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 20
       && hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";');
     const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
@@ -4974,6 +4974,33 @@ total++;
     ok = silent && hookQuiet;
   } catch {}
   console.log(ok ? '✓ B(1.9.364) 4th외부평가: auto-update hook 비침투 (update --check --quiet 무음 + hook --quiet) (UR-0083)' : '✗ auto-update 비침투 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.365 회귀 (외부리뷰 CV-6/UR-0081): 시크릿 스캐너 정밀도 — placeholder FP 무시 / unquoted FN 탐지 / gitignored 강등
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sec-'));
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    // ① placeholder 만 → 커밋 대상 finding 없음 (exit 0)
+    fs.writeFileSync(path.join(d, 'src', 'a.js'), 'const x = { secret: "change-me", apiKey: "your-key-here" };\n');
+    const r1 = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', path.join(d, 'src', 'a.js')], { encoding: 'utf8', timeout: 15000 });
+    const fpOk = r1.status === 0 && /no obvious/.test(r1.stdout || '');
+    // ② unquoted 실제 시크릿 → 탐지 (exit 1)
+    fs.writeFileSync(path.join(d, 'src', 'b.txt'), 'password=hunter2realsecret\n');
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', path.join(d, 'src', 'b.txt')], { encoding: 'utf8', timeout: 15000 });
+    const fnOk = r2.status === 1 && /unquoted/.test(r2.stdout || '');
+    // ③ gitignored(.env+src/) → 커밋 대상 0 → exit 0 + gitignored info
+    fs.writeFileSync(path.join(d, '.gitignore'), '.env\nsrc/\n');
+    fs.writeFileSync(path.join(d, '.env'), 'TOKEN=npm_abcdefghijklmnopqrstuvwxyz0123456789\n');
+    const r3 = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d], { encoding: 'utf8', timeout: 20000 });
+    const giOk = r3.status === 0 && /gitignored/.test(r3.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = fpOk && fnOk && giOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.365) CV-6: 시크릿 스캐너 FP(placeholder)/FN(unquoted)/gitignored 강등 (UR-0081)' : '✗ 시크릿 스캐너 정밀도 실패');
   if (!ok) failed++;
 }
 

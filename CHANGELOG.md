@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.365 — 2026-06-06 — 안정화⑤ 외부리뷰 CV-6: 시크릿 스캐너 FP/FN 정밀도 (UR-0081)
+
+**🛠 외부 멀티모델 리뷰 안정화 시리즈 5탄 — 시크릿 스캐너 오탐(placeholder/자기 .env) 억제 + 미탐(unquoted) 보강.**
+
+### 배경 — 외부 리뷰 CV-6 (Opus+Sonnet)
+- **FP**: `secret: "change-me"` 같은 placeholder 경보(Opus), 사용자가 토큰 채운 gitignored `.env` 경보(Sonnet, 설계 모순 — .env 는 gitignored 안전 보관소).
+- **FN**: 따옴표 없는 `KEY=secret123` 미탐(Opus, 패턴이 따옴표 강제).
+- provider 19종 정탐 6/6 양호(FP 없음).
+
+### 구현
+1. **placeholder FP 억제** — `_isPlaceholderSecret(value)`(pure): change-me/your-*/<...>/example/${...} 등 명백한 예시값은 시크릿 아님. assignment 패턴(valueGroup)의 **값에만** 적용(provider 형식 키엔 미적용 → FN 방지).
+2. **unquoted FN 보강** — 신규 패턴 `KEY=value`(따옴표 없음) + `_looksSecretLike`(숫자포함 8+/24+ 만 후보 → camelCase 코드 식별자 오탐 억제). charset 이 `.` 제외 → `process.env.X` 등 var-ref 자동 제외.
+3. **gitignored 강등** — `_isLikelyGitignored`(간이 .gitignore 매칭): gitignored 파일(.env 계열)의 발견은 **info 로 강등**(커밋 제외 = 설계상 안전), 커밋되는 파일 발견만 실패. `.env` 미-gitignore 시엔 정상 실패.
+4. SECRET_PATTERNS 19→20.
+
+### 검증 (회귀 0)
+- **selftest 111→112 PASS** (행위: `_isPlaceholderSecret`/`_looksSecretLike` 직접 호출 단언). **E2E 310→311 PASS** (행위: placeholder no-fail / unquoted 탐지 / gitignored info 강등 3시나리오).
+- 실측: `{secret:"change-me"}` no-fail · `password=hunter2realsecret` 탐지 · gitignored `.env`(토큰) exit 0 + info, 미-gitignore 시 fail.
+
 ## 1.9.364 — 2026-06-06 — 4번째 외부평가 반영: auto-update hook 비침투화 (UR-0083)
 
 **🛠 4번째 외부평가(web, 1.9.361 대상) 9.3 반영 — SessionStart 자동업데이트 hook 매세션 노이즈 제거.**
