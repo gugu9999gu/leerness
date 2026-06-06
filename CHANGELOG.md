@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.394 — 2026-06-06 — UR-0025: whatsNewCmd → lib/diagnostics.js (whats-new 완결) + 파서 형제버그 감사
+
+**🧩 whats-new 핸들러를 lib/diagnostics.js 로 분리 — whats-new 서브시스템 완전 모듈화. + /m `$` 절단 버그 클래스 전수 감사(클린).**
+
+### 배경
+1.9.393 에서 whats-new 파서(`_parseChangelogBetween`)를 pure-utils 로 빼고 버그 2건을 고쳤다. 후속으로 (1) **같은 부류의 형제 버그 감사** + (2) whatsNewCmd 핸들러 자체 분리로 서브시스템을 완결.
+
+### 구현
+1. **파서 형제버그 감사**: `|$)` lookahead + `/m` 조합으로 줄끝 절단되는 정규식을 전수 검색. 다른 5개(`Tasks:` 섹션 / `## Incomplete` / env-family / secret value / lang) 는 모두 `/m` 미사용이거나 `$`=문자열끝으로 **올바름** → 형제 버그 없음(no-op 릴리스 안 만듦).
+2. **whatsNewCmd → lib/diagnostics.js**: introspection 핸들러(~58줄) 이전. require: `./io`(absRoot/exists/read/log/fail) · `./pure-utils`(parseHarnessVersion/_parseChangelogBetween) · node path. DI: VERSION/arg/has. CHANGELOG 경로 fallback `lib/../CHANGELOG.md`(= pkg 루트, bin/ 과 동일).
+3. harness thin wrapper. dispatch·동작·출력·exit code 무변경.
+
+### 검증 (회귀 0)
+- **selftest 139→140 PASS** (lib/diagnostics whatsNewCmd export + 위임 와이어 + lib 본문 이동 + behavioral: tmp CHANGELOG `--from 1.9.49 --to 1.9.50 --json` → 1 version).
+- **E2E 333 유지 PASS** (whats-new B(1.9.393) + 회귀). 락 flake 시 재실행.
+- 실측: whats-new --from 1.9.388 --json(5 versions) · 사람용 · --from 누락 exit1 보존.
+
 ## 1.9.393 — 2026-06-06 — whats-new 파서 BUG-fix + _parseChangelogBetween → pure-utils (UR-0025/UR-0094)
 
 **🐞 `whats-new` 가 현재 CHANGELOG 형식(`## X — DATE — title`)에서 0건 반환하던 버그 수정 + 파서를 lib/pure-utils.js 로 추출.**

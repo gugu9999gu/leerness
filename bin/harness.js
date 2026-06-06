@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.393';
+const VERSION = '1.9.394';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2998,6 +2998,7 @@ function _selfTestCases() {
     { name: 'UR-0025 큰핸들러 모듈화: feature add/link/impact/list/show → lib/feature.js + DI + _featureImpactBfs pure 공유 (1.9.391)', run: () => { const m = require('../lib/feature'); const p = require('../lib/pure-utils'); const expOk = ['featureAddCmd', 'featureLinkCmd', 'featureImpactCmd', 'featureListCmd', 'featureShowCmd'].every(k => typeof m[k] === 'function'); const bfsRefOk = p._featureImpactBfs === _featureImpactBfs; const nodes = [{ id: 'F-0001', title: 'A', affects: ['F-0002'], dependsOn: [], coChangesWith: [] }, { id: 'F-0002', title: 'B', affects: [], dependsOn: [], coChangesWith: [] }]; const r = p._featureImpactBfs(nodes, 'F-0001'); const bfsWork = r.length === 1 && r[0].id === 'F-0002' && r[0].via === 'affects'; const src = read(__filename); const delegated = src.includes("require('../lib/feature')") && src.includes('_feature.featureImpactCmd(root, fromId, _featureDeps())'); const featSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'feature.js')); const movedToLib = featSrc.includes("require('./pure-utils')") && featSrc.includes('feature added:'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ft_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'feature', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; featureListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.total === 0 && Array.isArray(j.features); } catch {} return expOk && bfsRefOk && bfsWork && delegated && movedToLib && behavOk; } },
     { name: 'UR-0025 큰핸들러 모듈화: doctor/which → lib/diagnostics.js + DI 위임 + 동작 (1.9.392)', run: () => { const m = require('../lib/diagnostics'); const expOk = typeof m.doctorCmd === 'function' && typeof m.whichCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/diagnostics')") && src.includes('_diag.doctorCmd(opts,') && src.includes('_diag.whichCmd('); const diagSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js')); const movedToLib = diagSrc.includes('leerness doctor') && diagSrc.includes('_selfTestCases'); let behavOk = false; const _w = process.stdout.write; const savedExit = process.exitCode; try { process.stdout.write = () => true; const rep = m.doctorCmd({ json: true }, { VERSION, _selfTestCases: () => [], _detectShellCtx: () => ({ shell: 'test', psVersion: null }), _mcpToolCount: () => 7, has: () => true, harnessPath: 'h.js' }); behavOk = !!rep && rep.version === VERSION && rep.selftest.total === 0 && rep.healthy === true && rep.mcpTools === 7; } catch {} finally { process.stdout.write = _w; process.exitCode = savedExit; } return expOk && delegated && movedToLib && behavOk; } },
     { name: 'UR-0025/whats-new BUG-fix: _parseChangelogBetween pure 추출 + "## X — DATE — title" 헤더 파싱 (1.9.393)', run: () => { const m = require('../lib/pure-utils'); if (m._parseChangelogBetween !== _parseChangelogBetween) return false; const cl = '## 1.9.393 — 2026-06-06 — Title\n- `leerness foo`\n- `--flagx`\n- `.harness/x.md`\n\n## 1.9.392 — 2026-06-05 — Y\n- y\n\n## 1.9.391 — 2026-06-04 — Z\n- z\n'; const r = m._parseChangelogBetween(cl, '1.9.391', '1.9.393'); const rangeOk = r.length === 2 && r[0].version === '1.9.393' && r[1].version === '1.9.392'; const extractOk = r[0].newCommands.includes('foo') && r[0].newFlags.includes('--flagx') && r[0].newFiles.includes('.harness/x.md'); const titlelessOk = m._parseChangelogBetween('## 1.9.50\n- a\n## 1.9.49\n- b\n', '1.9.49', '1.9.50').length === 1; const src = read(__filename); const moved = src.includes("require('../lib/pure-utils')") && !/function _parseChangelogBetween\(changelogText/.test(src); return rangeOk && extractOk && titlelessOk && moved; } },
+    { name: 'UR-0025 whats-new 완결: whatsNewCmd → lib/diagnostics.js + DI 위임 + 동작 (1.9.394)', run: () => { const m = require('../lib/diagnostics'); const expOk = typeof m.whatsNewCmd === 'function'; const src = read(__filename); const delegated = src.includes('_diag.whatsNewCmd(root,'); const diagSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js')); const movedToLib = diagSrc.includes('leerness whats-new') && diagSrc.includes('_parseChangelogBetween'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wn_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, 'CHANGELOG.md'), '## 1.9.50 — 2026-06-06 — A\n- `leerness x`\n\n## 1.9.49 — 2026-06-05 — B\n- old\n'); process.argv = ['node', 'h', 'whats-new', tmp, '--from', '1.9.49', '--to', '1.9.50', '--json']; process.stdout.write = s => { out += s; return true; }; whatsNewCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.from === '1.9.49' && j.to === '1.9.50' && Array.isArray(j.versions) && j.versions.length === 1 && j.versions[0].version === '1.9.50'; } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -16416,64 +16417,8 @@ function mcpServeCmd(root) {
   process.on('SIGTERM', () => process.exit(0));
 }
 
-function whatsNewCmd(root) {
-  root = absRoot(root || process.cwd());
-  const fromV = arg('--from', null) || (function () {
-    const hv = path.join(root, '.harness', 'HARNESS_VERSION');
-    if (exists(hv)) { try { return parseHarnessVersion(read(hv)).base || parseHarnessVersion(read(hv)).plus; } catch { return null; } }
-    return null;
-  })();
-  const toV = arg('--to', null) || VERSION;
-  if (!fromV) {
-    fail('현재 버전을 파악할 수 없습니다. --from <version> 명시');
-    return process.exit(1);
-  }
-  // CHANGELOG.md — 우선 root, 없으면 leerness-pkg 자체
-  let changelogPath = path.join(root, 'CHANGELOG.md');
-  if (!exists(changelogPath)) changelogPath = path.join(__dirname, '..', 'CHANGELOG.md');
-  if (!exists(changelogPath)) {
-    fail('CHANGELOG.md 없음');
-    return process.exit(1);
-  }
-  const diff = _parseChangelogBetween(read(changelogPath), fromV, toV);
-  if (has('--json')) { log(JSON.stringify({ from: fromV, to: toV, versions: diff }, null, 2)); return; }
-  if (!diff.length) {
-    log(`# leerness whats-new (1.9.41)`);
-    log(`현재 ${fromV} ↔ 대상 ${toV}: 새 항목 없음 (또는 CHANGELOG에 기록 안 됨)`);
-    return;
-  }
-  log(`# leerness whats-new (1.9.41)`);
-  log(`현재 워크스페이스 버전: ${fromV} → 대상: ${toV}`);
-  log(`범위: ${diff.length}개 버전 (${diff[0].version} → ${diff[diff.length - 1].version})`);
-  log('');
-  // AI 가독 요약 — 각 버전당 한 줄 + 신규 명령/플래그/파일
-  log(`## 🆕 신규 명령·플래그·파일 (AI 에이전트는 다음 명령을 우선 시도)`);
-  const allCommands = new Set();
-  const allFlags = new Set();
-  const allFiles = new Set();
-  for (const v of diff) {
-    v.newCommands.forEach(c => allCommands.add(c));
-    v.newFlags.forEach(f => allFlags.add(f));
-    v.newFiles.forEach(f => allFiles.add(f));
-  }
-  if (allCommands.size) log(`  📌 신규 명령: ${[...allCommands].join(', ')}`);
-  if (allFlags.size)    log(`  🚩 신규 플래그: ${[...allFlags].join(', ')}`);
-  if (allFiles.size)    log(`  📄 신규 파일: ${[...allFiles].join(', ')}`);
-  log('');
-  log(`## 📜 버전별 헤드라인`);
-  for (const v of diff) {
-    // body 첫 줄(또는 strong header) 추출
-    const firstLine = (v.body.match(/^\*\*([^*]+)\*\*/) || [])[1]
-                   || (v.body.split('\n').find(l => l.trim() && !l.startsWith('##')) || '').trim().slice(0, 120);
-    log(`  • ${v.version}${v.date ? ` (${v.date})` : ''} — ${firstLine || '(no headline)'}`);
-  }
-  log('');
-  log(`## 💡 권장 행동`);
-  log(`  1. 위 신규 명령들을 시도해 보세요 (예: \`leerness <명령> --help\`)`);
-  log(`  2. 신규 파일들을 읽어 보세요 (예: \`cat .harness/session-workflow.md\`)`);
-  log(`  3. AGENTS.md/CLAUDE.md 재독 — migrate가 인스트럭션을 업데이트했을 수 있음`);
-  log(`  4. 상세: \`cat CHANGELOG.md\` 또는 \`leerness whats-new --json\``);
-}
+// 1.9.394 (UR-0025): whatsNewCmd 를 lib/diagnostics.js 로 분리 (whats-new 서브시스템 완결 — 파서는 1.9.393 에 pure-utils 로). deps 위임.
+function whatsNewCmd(root) { return _diag.whatsNewCmd(root, { VERSION, arg, has }); }
 
 // 1.9.71: .env / .env.example 자동 동기화 — 누락 키 감지 + (옵션) 자동 추가
 // 보안 정책: .env의 실제 값은 절대 옮기지 않음. .env.example엔 키만 (빈 값).
