@@ -23,13 +23,13 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _personaSummaries, _translate,
   _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd,
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
-  _migrationGuideText } = require('../lib/pure-utils');  // 1.9.318~355 (UR-0025/0053/0075): 순수 유틸 모듈 분리
+  _migrationGuideText, _parseContractSpec } = require('../lib/pure-utils');  // 1.9.318~385 (UR-0025/0053/0075/0086): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.384';
+const VERSION = '1.9.385';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2987,6 +2987,7 @@ function _selfTestCases() {
     { name: 'UR-0025 큰핸들러토대: lib/io.js 프리미티브(log/ok/warn/fail/today/now) 모듈 분리 + 동작 (1.9.382)', run: () => { const io = require('../lib/io'); const exportsOk = ['log', 'ok', 'warn', 'fail', 'today', 'now'].every(k => typeof io[k] === 'function') && io.log === log && io.fail === fail && io.now === now; const todayOk = /^\d{4}-\d{2}-\d{2}$/.test(io.today()) && /^\d{4}-\d{2}-\d{2}T/.test(io.now()); const src = read(__filename); const moved = src.includes("require('../lib/io')") && !/^function fail\(s\) \{ log/m.test(src) && !/^function now\(\) \{ return new Date/m.test(src); let exitOk = false; const saved = process.exitCode; const _w = process.stdout.write; try { process.stdout.write = () => true; process.exitCode = 0; io.fail('probe'); exitOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } return exportsOk && todayOk && moved && exitOk; } },
     { name: 'UR-0025 큰핸들러토대: lib/io.js fs 프리미티브(read/writeUtf8/exists/mkdirp/append/rel/absRoot) 분리 + round-trip (1.9.383)', run: () => { const io = require('../lib/io'); const exp = ['absRoot', 'exists', 'read', 'readBuf', 'mkdirp', 'writeUtf8', 'append', 'rel'].every(k => typeof io[k] === 'function') && io.read === read && io.writeUtf8 === writeUtf8 && io.exists === exists; const src = read(__filename); const moved = !/^function writeUtf8\(p, s\) \{/m.test(src) && !/^function read\(p\) \{/m.test(src) && !/^function exists\(p\) \{/m.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_io_')); let rt = false; try { const f = path.join(tmp, 'a', 'b.txt'); io.writeUtf8(f, '한글RT'); rt = io.exists(f) && io.read(f) === '한글RT' && io.rel(tmp, f) === 'a/b.txt'; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return exp && moved && rt; } },
     { name: '5th외부평가/UR-0085: status --json 구조화 출력 + verify --json 와이어 (1.9.384)', run: () => { if (typeof status !== 'function' || typeof verify !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sj_')); const save = process.argv; const _w = process.stdout.write; let so = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'status', tmp, '--json']; process.stdout.write = s => { so += s; return true; }; status(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let sj; try { sj = JSON.parse(so); } catch {} const statusOk = !!sj && typeof sj.total === 'number' && typeof sj.present === 'number' && 'healthy' in sj && Array.isArray(sj.missing); const src = read(__filename); const verifyWired = /function verify\(root\) \{[\s\S]*?has\('--json'\)[\s\S]*?JSON\.stringify\(\{ ok:/.test(src); return statusOk && verifyWired; } },
+    { name: '5th외부평가/UR-0086: _parseContractSpec markdown bullet 함수 감지 + 순수 추출 (1.9.385)', run: () => { const m = require('../lib/pure-utils'); if (m._parseContractSpec !== _parseContractSpec) return false; const p = _parseContractSpec('# Spec\n- add(a,b)\n* subtract(a,b)\n1. multiply(a,b)\nfunction legacy(x)\n`mentioned(`\ntick.amount\n'); const declOk = ['add', 'subtract', 'multiply', 'legacy'].every(n => p.declared.includes(n)) && p.declared.length === 4; const menOk = p.mentioned.includes('mentioned') && !p.declared.includes('mentioned'); const fieldOk = p.fields.includes('amount'); const fpOk = _parseContractSpec('- 합계 (a+b)\n- result (total)\n- foo: bar(x)\n**bold**').declared.length === 0; const src = read(__filename); const moved = src.includes('_parseContractSpec(specText)') && !/specText\.matchAll\(\/function/.test(src); return declOk && menOk && fieldOk && fpOk && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -20165,18 +20166,13 @@ function contractVerifyCmd(specPath, implPath) {
   if (!exists(specFile)) { fail(`spec 파일 없음: ${specFile}`); return process.exit(1); }
   if (!exists(implFile)) { fail(`impl 파일 없음: ${implFile}`); return process.exit(1); }
   const specText = read(specFile);
-  // spec에서 함수 이름 추출:
-  //   `function fooBar(...)` 형태 (markdown 코드블럭 내 JS)
-  //   또는 `**fooBar**` (한국어 문서에서 함수명 강조)
-  //   또는 `tick.amount` (필드명)
-  const fnSpec = new Set();
-  const fieldSpec = new Set();
-  // function 시그니처
-  for (const m of specText.matchAll(/function\s+([A-Za-z_$][\w$]*)\s*\(/g)) fnSpec.add(m[1]);
-  // backtick에 싸인 함수 호출 같은 형태: `xxx(`
-  for (const m of specText.matchAll(/`([A-Za-z_$][\w$]*)\s*\(/g)) fnSpec.add(m[1]);
-  // 필드: tick.<name>
-  for (const m of specText.matchAll(/tick\.([A-Za-z_$][\w$]*)/g)) fieldSpec.add(m[1]);
+  // 1.9.385 (UR-0086, 5th외부평가): spec 함수/필드 추출을 순수 파서 _parseContractSpec 로 위임.
+  //   declared(강선언): function 시그니처 + markdown bullet "- name(args)" — 누락검사 대상.
+  //   mentioned(약언급): backtick `name(` — 표시만(기존 관대성 유지, 산문 인라인 언급 오탐 방지).
+  const parsedSpec = _parseContractSpec(specText);
+  const declaredSpec = new Set(parsedSpec.declared);
+  const fnSpec = new Set([...parsedSpec.declared, ...parsedSpec.mentioned]);  // 표시용 전체
+  const fieldSpec = new Set(parsedSpec.fields);
   // 1.9.36 BUG-fix: require()는 side-effect 실행 위험 (CLI 스크립트는 require로 실행됨).
   // 대신 정적 소스 분석 — module.exports = { foo, bar } / exports.foo = ... / module.exports.foo = ... 패턴 grep.
   const implSrc = read(implFile);
@@ -20191,12 +20187,12 @@ function contractVerifyCmd(specPath, implPath) {
   // pattern 2: exports.foo = / module.exports.foo =
   for (const m of implSrc.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=/g)) implExports.add(m[1]);
   // pattern 3: function foo + module.exports에 포함되었는지는 위에서 처리됨
-  // 검사: spec에 명시된 함수 중 impl exports에 없는 것
+  // 검사: spec 강선언(function 시그니처 + markdown bullet) 함수 중 impl exports에 없는 것.
+  // 1.9.385 (UR-0086): 기존 `specText.includes('function '+fn)` 가드는 bullet/backtick 추출명을 무력화하던 잠재 FN.
+  //   → declaredSpec(강선언) 기준으로 교체: bullet 함수도 누락 감지, backtick 약언급은 관대(검사 제외) 유지.
   const missing = [];
-  for (const fn of fnSpec) {
-    if (implExports.has(fn)) continue;
-    // spec에 'function fnName('이 있지만 impl exports에 없으면 미구현
-    if (specText.includes(`function ${fn}`) && !implExports.has(fn)) missing.push(fn);
+  for (const fn of declaredSpec) {
+    if (!implExports.has(fn)) missing.push(fn);
   }
   const fieldMissing = [];
   for (const f of fieldSpec) {

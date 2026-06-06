@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.385 — 2026-06-06 — 5번째 외부평가: contract verify markdown bullet 함수 파서 (UR-0086)
+
+**📐 `contract verify` spec 파서가 markdown bullet `- name(args)` 함수 선언을 감지 — 실제 누락을 통과시키던 false-negative 해소.**
+
+### 배경 (5번째 외부평가, GPT-5.5 web · "참고하되 맹신 X")
+spec 파서가 `function name(...)` 와 backtick `` `name(` `` 만 추출하고 markdown bullet 목록(`- add(a,b)`)은 미감지. 자체 재현: bullet 3개 spec + impl 1개 export → `specFunctions: []`, `missingFunctions: []`, `ok: true`(실제론 2개 누락). **재현 후 수정**.
+
+### 구현
+1. **`_parseContractSpec(specText)` 순수 추출**(lib/pure-utils.js, UR-0025): `{ declared, mentioned, fields }`.
+   - **declared**(강선언, 누락검사 대상): `function name(` + markdown bullet `- name(args)` / `* ` / `1. `.
+   - **mentioned**(약언급, 표시만): backtick `` `name(` `` — 산문 인라인 언급 오탐 방지 위해 관대(기존 동작 유지).
+2. **bullet 패턴**: `^\s*(?:[-*+]|\d+\.)\s+name(` — name 직후 `(`(공백 불허) + ASCII 식별자만 → 산문 `- 합계 (a+b)` / `- foo: bar(x)` / `**bold**` 오탐 0.
+3. **missing-검출 잠재 FN 수정**: 기존 `specText.includes('function '+fn)` 가드가 bullet/backtick 추출명을 무력화 → `declaredSpec` 기준으로 교체(bullet 함수도 누락 감지, backtick 관대 유지).
+
+### 검증 (회귀 0)
+- **selftest 130→131 PASS** (bullet/asterisk/numbered 감지 + reference-equality + 산문 FP 0 + 인라인 제거 확인).
+- **E2E 329→330 PASS** (bullet spec 3함수 감지 + subtract/multiply 누락 + add 보존 + backtick 관대 + 산문 FP 0).
+- 실측 8/8 FP/감지 케이스 + 기존 B(1.9.35) `function bar`/`isCritical` 무회귀.
+
 ## 1.9.384 — 2026-06-06 — 5번째 외부평가: status/verify --json 구조화 출력 일관성 (UR-0085)
 
 **🔌 `status --json` / `verify --json` 이 사람용 텍스트 → 구조화 JSON — AI 에이전트 자동화용 출력 일관성 확보.**

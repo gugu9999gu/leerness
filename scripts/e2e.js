@@ -5366,5 +5366,34 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.385 회귀 (5번째 외부평가/UR-0086): contract verify spec 파서가 markdown bullet "- name(args)" 함수 선언 감지 + backtick 약언급 관대 유지
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-contract-bullet-'));
+    const spec = path.join(d, 'spec.md');
+    const impl = path.join(d, 'impl.js');
+    fs.writeFileSync(spec, '# Calc API\n\n함수 목록:\n- add(a, b): 합\n- subtract(a, b): 차\n- multiply(a, b): 곱\n', 'utf8');
+    fs.writeFileSync(impl, '"use strict";\nfunction add(a,b){return a+b}\nmodule.exports={add};\n', 'utf8');
+    const r = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', spec, impl, '--json'], { encoding: 'utf8', timeout: 10000 });
+    const j = JSON.parse(r.stdout);
+    const bulletOk = j.specFunctions.includes('add') && j.specFunctions.includes('subtract') && j.specFunctions.includes('multiply') &&
+      j.missingFunctions.includes('subtract') && j.missingFunctions.includes('multiply') && !j.missingFunctions.includes('add') && j.ok === false;
+    // backtick 약언급은 누락검사 제외(관대) + 산문 bullet FP 방지 회귀
+    const spec2 = path.join(d, 'spec2.md');
+    const impl2 = path.join(d, 'impl2.js');
+    fs.writeFileSync(spec2, '# S\n\n`onlyMentioned(` 는 인라인 언급\nfunction realFn(x) {}\n- 합계 (a + b) 계산\n', 'utf8');
+    fs.writeFileSync(impl2, '"use strict";\nfunction realFn(x){return x}\nmodule.exports={realFn};\n', 'utf8');
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', spec2, impl2, '--json'], { encoding: 'utf8', timeout: 10000 });
+    const j2 = JSON.parse(r2.stdout);
+    const lenientOk = !j2.missingFunctions.includes('onlyMentioned') && !j2.specFunctions.includes('합계') && j2.ok === true;  // mentioned 관대 + 산문 FP 0
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = bulletOk && lenientOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.385) 5th외부평가: contract verify markdown bullet 함수 감지 + backtick 관대 + 산문 FP 0 (UR-0086)' : '✗ contract bullet 파서 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
