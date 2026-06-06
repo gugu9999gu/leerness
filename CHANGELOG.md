@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.387 — 2026-06-06 — --json 일관성 연장: incident/runs list 빈 케이스 구조화 (UR-0088)
+
+**🔌 `incident list` / `runs list` 의 빈 상태도 `--json` 시 `{total:0,items:[]}` 출력 — AI 에이전트가 빈 프로젝트에서 사람용 텍스트를 파싱하다 실패하던 일관성 결함 해소.**
+
+### 배경 (5번째 외부평가 UR-0085 테마 자체 확장)
+status/verify --json(1.9.384) 수정 후, 나머지 읽기형 명령 12종의 --json 커버리지를 자체 점검. 10종은 정상이나 `incident list` / `runs list` 는 디렉토리 미존재(빈 프로젝트) 시 `--json` 검사 전에 사람용 텍스트(`(runs 없음 …)`)를 출력하고 조기 return → AI 에이전트가 JSON.parse 실패.
+
+### 구현
+- `runsListCmd` / `incidentListCmd` 의 빈 케이스 조기 return 을 `has('--json')` 인지하도록 수정 → 빈 케이스도 `{ total: 0, items: [] }`(데이터 케이스와 동일 스키마) 출력. `--json` 없으면 기존 사람용 텍스트 그대로.
+
+### 검증 (회귀 0)
+- **selftest 132→133 PASS** (incident/runs list 빈 케이스 behavioral --json 파싱 → total=0/items=[]).
+- **E2E 331→332 PASS** (fresh init 에서 incident/runs list --json → `{total:0,items:[]}` + 사람용 텍스트(JSON 아님) 보존).
+- 실측: 읽기형 12종 중 10종 기존 정상 + 2종 수정 = --json 일관성 완비.
+
 ## 1.9.386 — 2026-06-06 — 5번째 외부평가: secret scan env-family 포함 + gitignore git-일치 (UR-0087)
 
 **🔐 `.env.bad` / `.env.local` / `.env.production` 등 env-variant 파일의 시크릿을 스캔 — 통째 스킵되던 보안 false-negative 해소 + gitignore 강등을 git 실제 동작에 맞춤.**

@@ -5426,5 +5426,27 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.387 회귀 (5번째 외부평가 일관성/UR-0088): incident/runs list 빈 케이스도 --json 구조화 {total:0,items:[]} + 사람용 보존
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-listjson-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const ri = cp.spawnSync(process.execPath, [CLI, 'incident', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    const ij = JSON.parse(ri.stdout);
+    const rr = cp.spawnSync(process.execPath, [CLI, 'runs', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    const rj = JSON.parse(rr.stdout);
+    const jsonOk = ij.total === 0 && Array.isArray(ij.items) && ij.items.length === 0 && rj.total === 0 && Array.isArray(rj.items) && rj.items.length === 0;
+    // 사람용 보존(--json 없이 → 텍스트, JSON 아님)
+    const rih = cp.spawnSync(process.execPath, [CLI, 'incident', 'list', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const humanOk = /incidents 없음/.test(rih.stdout || '') && !/^\s*\{/.test(rih.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = jsonOk && humanOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.387) 5th외부평가 일관성: incident/runs list 빈 케이스 --json 구조화 + 사람용 보존 (UR-0088)' : '✗ list 빈 케이스 --json 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
