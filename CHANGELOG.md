@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.377 — 2026-06-06 — UR-0025 모듈화: workspace reference guide 빌더 분리
+
+**🧩 워크스페이스 레퍼런스 가이드 빌더(~57줄)를 lib/pure-utils 로 분리.**
+
+### 구현
+1. **`_renderWorkspaceReferenceGuide(dirName, version, generatedAt)`**(pure-utils): 디렉토리 구조/자주 묻는 위치/마이그레이션 안내 가이드 빌더. version·timestamp 주입(순수).
+2. **harness `_buildWorkspaceReferenceGuide(root, dirName)`**: 얇은 래퍼(`_renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString())`).
+3. 전사 위험 회피: node 스크립트로 결정적 교체 + 출력 동일성(핵심 마커) 검증.
+
+### 검증 (회귀 0)
+- **selftest 122→123 PASS** (행위: 빌더가 dirName/version 반영 + 핵심 섹션 포함 + 래퍼 얇음 + 모듈 reference equality).
+- **E2E 321→322 PASS** (행위: lib/pure-utils 직접 호출로 가이드 빌더 출력 검증).
+
 ## 1.9.376 — 2026-06-06 — UR-0073 Phase D: team deploy 2중 게이트 (에이전트 팀 umbrella 완결) 🎉
 
 **🧩 정의된 팀의 사용자 설정 배포 명령을 안전 게이트로 실행 — `leerness team deploy`. UR-0073 A~D 완결.**

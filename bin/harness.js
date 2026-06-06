@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
-const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, _parseSkillsValue, _parseArchiveBlocks, _parseSkillCatalog, _renderTeamsMd, _composeTeamPlan, _teamHandoffReminders, _cadenceAssessment, _teamDeployGate, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
+const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, _parseSkillsValue, _parseArchiveBlocks, _parseSkillCatalog, _renderTeamsMd, _composeTeamPlan, _teamHandoffReminders, _cadenceAssessment, _teamDeployGate, _renderWorkspaceReferenceGuide, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
   _htmlToText, _extractTitle, _extractLinks,
   _countDatedBlocks, _extractDecisionBlocks, _classifyIntent,
@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.376';
+const VERSION = '1.9.377';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3013,6 +3013,7 @@ function _selfTestCases() {
     { name: 'UR-0074: _cadenceAssessment 릴리스 빈도 평가 (임계값) 행위 (1.9.374)', run: () => { const m = require('../lib/pure-utils'); if (typeof _cadenceAssessment !== 'function' || m._cadenceAssessment !== _cadenceAssessment || typeof releaseCadenceCmd !== 'function') return false; return _cadenceAssessment(7, 1, 1).level === 'very-high' && _cadenceAssessment(3, 1, 1).level === 'high' && _cadenceAssessment(1, 1, 1).level === 'moderate' && _cadenceAssessment(0.2, 1, 1).level === 'healthy' && _cadenceAssessment(7, 1, 1).recommendation.length > 0; } },
     { name: 'UR-0084: _withLock 획득/재진입/해제 + maxWaitMs 하드닝(10s) 행위 (1.9.375)', run: () => { if (typeof _withLock !== 'function') return false; const src = read(__filename); const hardened = /maxWaitMs = opts\.maxWaitMs \|\| 10000/.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lock_')); try { const target = path.join(tmp, 'f.md'); let reentrant = false; const lockSeen = _withLock(target, () => { const exists = fs.existsSync(target + '.lock'); reentrant = (_withLock(target, () => 42) === 42); return exists; }); const cleaned = !fs.existsSync(target + '.lock'); return hardened && lockSeen === true && reentrant === true && cleaned; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'UR-0073 Phase D: _teamDeployGate 이중 게이트 (dry-run 기본/env 게이트/실행) 행위 (1.9.376)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamDeployGate !== 'function' || m._teamDeployGate !== _teamDeployGate) return false; const team = { id: 'd', deployCommand: 'echo hi' }; const noCmd = _teamDeployGate({ id: 'x' }, { yes: true, envOn: true }).mode === 'no-command'; const dry = _teamDeployGate(team, { yes: false, envOn: true }).mode === 'dry-run'; const gated = _teamDeployGate(team, { yes: true, envOn: false }).mode === 'gated'; const exec = _teamDeployGate(team, { yes: true, envOn: true }).mode === 'execute'; return noCmd && dry && gated && exec; } },
+    { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + 빌더 동작 (1.9.377)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide('.leerness', '9.9.9', '2026-01-01T00:00:00.000Z'); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString())'); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && g.includes('마이그레이션 안내') && wrapperThin; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -4235,66 +4236,9 @@ function _migrateWorkspaceDir(root, opts = {}) {
   return report;
 }
 // AI 참조 가이드 빌더 — 워크스페이스 디렉토리 구조 + 파일별 역할 매핑
+// 1.9.377 (UR-0025): 순수 코어 _renderWorkspaceReferenceGuide (lib/pure-utils) + 얇은 래퍼 (root 미사용, version/timestamp 주입).
 function _buildWorkspaceReferenceGuide(root, dirName) {
-  const lines = [];
-  lines.push(`# Leerness Workspace Reference Guide`);
-  lines.push('');
-  lines.push(`> AI 에이전트가 leerness 워크스페이스에서 어떤 파일을 어디서 찾는지 안내합니다 (1.9.211).`);
-  lines.push('');
-  lines.push(`Generated: ${new Date().toISOString()} by leerness ${VERSION}`);
-  lines.push(`Workspace dir: \`${dirName}/\``);
-  lines.push('');
-  lines.push(`## 📁 디렉토리 구조 (핵심)`);
-  lines.push('');
-  lines.push('```');
-  lines.push(`${dirName}/`);
-  lines.push(`├── plan.md                    ← 무엇을 할 것인가 (사용자 메모리)`);
-  lines.push(`├── progress-tracker.md        ← 무엇을 했는가 (증거 포함, 사용자 메모리)`);
-  lines.push(`├── decisions.md               ← 왜 그렇게 했는가 (사용자 메모리)`);
-  lines.push(`├── session-handoff.md         ← 다음 세션 인계 (사용자 메모리)`);
-  lines.push(`├── lessons.md                 ← 과거 교훈 (자동 fuzzy 회수)`);
-  lines.push(`├── rules.md                   ← 자연어 룰 (매 세션 자동 노출, R-XXXX)`);
-  lines.push(`├── task-log.md                ← in-progress / dropped task 이력`);
-  lines.push(`├── reuse-map.md               ← 워크스페이스 capability 매핑`);
-  lines.push(`├── skill-suggestions.md       ← skill rolling history`);
-  lines.push(`├── feature-graph.md           ← 기능 의존 그래프 (F-XXXX)`);
-  lines.push(`├── manifest.json              ← 워크스페이스 메타`);
-  lines.push(`├── leerness-config.json       ← 비시크릿 LEERNESS_* 설정 (1.9.187, AI 가시)`);
-  lines.push(`├── user-requests.json         ← 사용자 명시 요청 누적 (1.9.207)`);
-  lines.push(`├── active-wakeups.json        ← ScheduleWakeup 상태 (1.9.205)`);
-  lines.push(`├── pre-wake-report.json       ← sleep 전 sub-agent audit (1.9.209)`);
-  lines.push(`├── wakeup-history.json        ← adaptive wakeup 이력 (1.9.210)`);
-  lines.push(`├── platform-constraints.json  ← API 제약 catalog (1.9.208)`);
-  lines.push(`├── auto-resume-plan.json      ← 다음 라운드 plan (1.9.203)`);
-  lines.push(`├── next-action-queue.json     ← 다음 next-action 큐 (1.9.201)`);
-  lines.push(`├── last-handoff.json          ← 마지막 handoff timestamp`);
-  lines.push(`├── environment.json           ← 환경 변동 추적 (1.9.145)`);
-  lines.push(`├── skills/                    ← 설치된 skill 디렉토리`);
-  lines.push(`└── templates/                 ← 워크스페이스 템플릿`);
-  lines.push('```');
-  lines.push('');
-  lines.push(`## 🧭 자주 묻는 위치`);
-  lines.push('');
-  lines.push(`| 찾는 것 | 위치 |`);
-  lines.push(`|---|---|`);
-  lines.push(`| 현재 진행 중인 task | \`${dirName}/progress-tracker.md\` (status: in-progress) |`);
-  lines.push(`| 사용자가 명시한 영구 룰 | \`${dirName}/rules.md\` (active R-XXXX) |`);
-  lines.push(`| 직전 sleep 전 audit 결과 | \`${dirName}/pre-wake-report.json\` (1.9.209) |`);
-  lines.push(`| 미답 사용자 요청 | \`${dirName}/user-requests.json\` (status: open) |`);
-  lines.push(`| 다음 라운드 권장 단계 | \`${dirName}/auto-resume-plan.json\` (1.9.203) |`);
-  lines.push(`| API 제약 catalog | \`${dirName}/platform-constraints.json\` (1.9.208) |`);
-  lines.push(`| 자동 wakeup 권장 간격 | \`${dirName}/wakeup-history.json\` (1.9.210) |`);
-  lines.push('');
-  lines.push(`## 🔄 마이그레이션 안내`);
-  lines.push('');
-  lines.push(`이 워크스페이스는 \`.harness\` → \`.leerness\` 로 마이그레이션되었을 수 있습니다.`);
-  lines.push(`- \`.leerness/MIGRATED_FROM_HARNESS\` 존재 → 마이그레이션 완료, \`.leerness\` 우선 사용`);
-  lines.push(`- \`.harness/MIGRATED_TO_LEERNESS.md\` 존재 → \`.leerness/\` 로 가야 함`);
-  lines.push(`- 양쪽 모두 없음 → 기본 \`.harness\` 사용 중`);
-  lines.push('');
-  lines.push(`AI 에이전트는 \`leerness handoff .\` 결과를 신뢰하십시오 — 자동으로 올바른 디렉토리를 사용합니다.`);
-  lines.push('');
-  return lines.join('\n');
+  return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString());
 }
 
 // 1.9.213: intent inference + scope expansion 게이트 (사용자 명시)

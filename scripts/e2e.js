@@ -5195,5 +5195,19 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.377 회귀 (UR-0025): _renderWorkspaceReferenceGuide 모듈 분리 — 빌더가 dirName/version 반영 + 핵심 섹션 포함 (출력 동일성)
+total++;
+{
+  let ok = false;
+  try {
+    const pu = require(path.resolve(__dirname, '..', 'lib', 'pure-utils'));
+    const g = pu._renderWorkspaceReferenceGuide('.harness', '1.2.3', '2026-01-01T00:00:00.000Z');
+    ok = typeof g === 'string' && g.includes('.harness/progress-tracker.md') && g.includes('by leerness 1.2.3')
+      && g.includes('## 📁 디렉토리 구조 (핵심)') && g.includes('## 🧭 자주 묻는 위치') && g.includes('## 🔄 마이그레이션 안내') && g.includes('plan.md');
+  } catch {}
+  console.log(ok ? '✓ B(1.9.377) UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 (빌더 동작 + 핵심 섹션)' : '✗ workspace guide 빌더 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
