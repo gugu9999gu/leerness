@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.399 — 2026-06-07 — 테이블셀 injection 차단: task/rule 파이프·개행 (7번째 버그헌트 P1-A, UR-0104)
+
+**🛡 데이터 무결성 — task/rule 텍스트의 파이프(|)·개행(\\n)이 progress-tracker/rules.md 표를 손상·가짜행 주입·멱등성 무력화하던 것을 차단(셀 이스케이프).**
+
+### 배경 (7번째 — 내부 멀티에이전트 버그헌트, 외부리뷰 초월)
+38 에이전트 포괄 버그헌트(31후보→confirmed 30/refuted 1)가 외부 리뷰(codex/Opus)가 못 본 **테이블셀 injection 클래스**를 발견. 직접 재현 검증:
+- `task add 'fix login | bypass'` → progress-tracker 행 컬럼 시프트, update 시 영구 절단(JSON 백업 없음).
+- `task add '...\\n| T-9999 | done | ...'` → 가짜 done 행 주입 + 실제 task 무성 소실.
+- `rule add 'a | b'` → rules.md 컬럼 밀림 + dedup(1.9.212) 무력화로 중복 룰 무한 생성.
+
+### 구현
+- **`_cellSafe`/`_cellUnescape`** 순수 헬퍼(lib/pure-utils.js): 쓰기 시 개행→공백 + `|`→`\\|`, 읽기 시 비이스케이프 파이프(`/(?<!\\)\\|/`)에서만 분리 후 `\\|`→`|` 복원.
+- 적용: `writeProgressRows`/`readProgressRows`(task) + `writeRules`/`readRules`(rule). 사용자 텍스트의 파이프는 **보존**(복원), 개행은 공백화(행 주입 차단).
+
+### 검증 (회귀 0)
+- **selftest 144→145 PASS** (cellSafe/Unescape reference-equality + 파이프 round-trip + 개행 제거 + 와이어).
+- **E2E 337→338 PASS** (task 파이프 보존/개행 가짜행 차단 + rule 파이프 보존/멱등 회복/status 비오염).
+- 실측: `task add 'fix login | bypass'` 원본 보존, 개행 주입 T-9999 차단, rule 중복 add → skip(멱등).
+
+### 다음(같은 클러스터): decisions/lessons MD projection 셀 안전화(UR-0104 잔여, JSON canonical 은 이미 안전).
+
 ## 1.9.398 — 2026-06-07 — --json 에러 경로 구조화 (6번째 외부평가 P1-C, UR-0099)
 
 **🔌 `--json` 모드에서 에러도 구조화 JSON(`{ok:false,error,code}`) — AI 에이전트가 에러 경로에서 JSON.parse 실패하지 않도록.**

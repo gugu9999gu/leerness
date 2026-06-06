@@ -25,13 +25,13 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
-  _parseChangelogBetween } = require('../lib/pure-utils');  // 1.9.318~393 (UR-0025/0053/0075/0086/0087): 순수 유틸 모듈 분리
+  _parseChangelogBetween, _cellSafe, _cellUnescape } = require('../lib/pure-utils');  // 1.9.318~399 (UR-0025/0053/0075/0086/0087/0104): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.398';
+const VERSION = '1.9.399';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3003,6 +3003,7 @@ function _selfTestCases() {
     { name: '6번째 외부평가/codex P1-B: task drop 존재확인 가드 — 없는 ID 가짜 row 방지 (1.9.396)', run: () => { const src = read(__filename); const i = src.indexOf('function taskDrop(root, id)'); if (i < 0) return false; const body = src.slice(i, i + 700); return body.includes('not found in progress-tracker.md') && body.includes('rows.find(r => r.id === id)') && body.includes('_requireInit'); } },
     { name: '6번째 외부평가/codex P1-A (UR-0098): install-safety 레시피 셸-무관 + hardeningNote (1.9.397)', run: () => { if (typeof installSafetyCmd !== 'function') return false; const save = process.argv; const _w = process.stdout.write; let out = ''; try { process.argv = ['node', 'h', 'install-safety', '--json']; process.stdout.write = s => { out += s; return true; }; installSafetyCmd({ json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; } let j; try { j = JSON.parse(out); } catch {} const noPosixPrefix = !!j && Array.isArray(j.safeInstall) && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim())); const crossShell = !!j && j.safeInstall.filter(x => String(x).includes('npx --yes')).length >= 2; const noteOk = !!j && typeof j.hardeningNote === 'string' && j.hardeningNote.includes('PowerShell'); return noPosixPrefix && crossShell && noteOk; } },
     { name: '6번째 외부평가/codex P1-C (UR-0099): --json 에러 경로 구조화 failJson + 와이어 (1.9.398)', run: () => { const io = require('../lib/io'); if (io.failJson !== failJson) return false; const _w = process.stdout.write; const saved = process.exitCode; let jOut = '', hOut = ''; let jExit = 0; try { process.stdout.write = s => { jOut += s; return true; }; process.exitCode = 0; failJson(true, 'tc', 'm'); jExit = process.exitCode; process.stdout.write = s => { hOut += s; return true; }; process.exitCode = 0; failJson(false, 'c', 'humanmsg'); } catch {} finally { process.stdout.write = _w; process.exitCode = saved; } let pj; try { pj = JSON.parse(jOut); } catch {} const jsonOk = !!pj && pj.ok === false && pj.code === 'tc' && pj.error === 'm' && jExit === 1; const humanOk = hOut.includes('✗') && hOut.includes('humanmsg') && !hOut.includes('{'); const src = read(__filename); const wired = src.includes("failJson(_j, 'missing_args'") && src.includes("failJson(_j, 'spec_not_found'"); return jsonOk && humanOk && wired; } },
+    { name: '7번째 버그헌트 P1-A (UR-0104): 테이블셀 안전화 _cellSafe/_cellUnescape (파이프/개행 injection 차단) (1.9.399)', run: () => { const m = require('../lib/pure-utils'); if (m._cellSafe !== _cellSafe || m._cellUnescape !== _cellUnescape) return false; const safe = _cellSafe('fix | bug\nrow2'); const noRaw = !/(?<!\\)\|/.test(safe) && !/[\r\n]/.test(safe); const pipeRt = _cellUnescape(_cellSafe('a | b | c')) === 'a | b | c'; const nlGone = _cellSafe('a\nb') === 'a b'; const src = read(__filename); const wired = src.includes('_cellSafe(r.request)') && src.includes('_cellSafe(r.rule)'); return noRaw && pipeRt && nlGone && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -5832,7 +5833,8 @@ function readProgressRows(root) {
   const rows = [];
   for (const line of text.split('\n')) {
     if (!/^\| (?:T|M|D)-\d{4} \|/.test(line)) continue;
-    const cells = line.split('|').slice(1, -1).map(s => s.trim());
+    // 1.9.399 (7번째 버그헌트 P1-A, UR-0104): 비이스케이프 파이프에서만 분리 + 셀 복원 — 사용자 텍스트의 '|'(이스케이프됨)이 컬럼을 깨지 않음.
+    const cells = line.split(/(?<!\\)\|/).slice(1, -1).map(s => _cellUnescape(s).trim());
     if (cells.length < 6) continue;
     const [id, status, request, evidence, nextAction, updated] = cells;
     rows.push({ id, status, request, evidence, nextAction, updated });
@@ -5853,8 +5855,9 @@ function progressHeader(root) {
   return text.slice(0, text.indexOf('\n', idx)).trimEnd();
 }
 function writeProgressRows(root, header, rows) {
+  // 1.9.399 (7번째 버그헌트 P1-A, UR-0104): 셀 콘텐츠 안전화 — 개행→공백, '|'→'\|'. 사용자 텍스트의 파이프/개행이 표 행을 손상/주입 못 함.
   const composed = header + '\n' +
-    rows.map(r => `| ${r.id} | ${r.status} | ${r.request} | ${r.evidence} | ${r.nextAction} | ${r.updated} |`).join('\n') +
+    rows.map(r => `| ${_cellSafe(r.id)} | ${_cellSafe(r.status)} | ${_cellSafe(r.request)} | ${_cellSafe(r.evidence)} | ${_cellSafe(r.nextAction)} | ${_cellSafe(r.updated)} |`).join('\n') +
     (rows.length ? '\n' : '');
   writeUtf8(progressPath(root), composed);
 }
@@ -13565,7 +13568,8 @@ function readRules(root) {
   const rules = [];
   for (const line of read(f).split('\n')) {
     if (!/^\| R-\d{4} \|/.test(line)) continue;
-    const cells = line.split('|').slice(1, -1).map(s => s.trim());
+    // 1.9.399 (7번째 버그헌트 P1-A, UR-0104): 비이스케이프 파이프 분리 + 복원 — rule 텍스트의 '|'가 컬럼 밀림/멱등성 무력화를 못 일으킴.
+    const cells = line.split(/(?<!\\)\|/).slice(1, -1).map(s => _cellUnescape(s).trim());
     if (cells.length < 6) continue;
     rules.push({ id: cells[0], trigger: cells[1], rule: cells[2], added: cells[3], status: cells[4], lastVerified: cells[5] });
   }
@@ -13573,7 +13577,8 @@ function readRules(root) {
 }
 
 function writeRules(root, rules) {
-  const body = rules.map(r => `| ${r.id} | ${r.trigger} | ${r.rule} | ${r.added} | ${r.status} | ${r.lastVerified || '-'} |`).join('\n');
+  // 1.9.399 (7번째 버그헌트 P1-A, UR-0104): 셀 안전화 — rule 텍스트의 파이프/개행 차단(컬럼 밀림·중복 룰 무한생성 방지).
+  const body = rules.map(r => `| ${_cellSafe(r.id)} | ${_cellSafe(r.trigger)} | ${_cellSafe(r.rule)} | ${_cellSafe(r.added)} | ${_cellSafe(r.status)} | ${_cellSafe(r.lastVerified || '-')} |`).join('\n');
   writeUtf8(rulesPath(root), _rulesHeader() + '\n' + body + (body ? '\n' : ''));
 }
 

@@ -5558,5 +5558,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.399 회귀 (7번째 버그헌트 P1-A, UR-0104): 테이블셀 injection 차단 — task/rule 텍스트의 파이프(|) 보존 + 개행 가짜행 주입 차단 + rule 멱등성
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cellinj-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'fix login | bypass', '--path', d, '--no-review'], { encoding: 'utf8', timeout: 15000 });
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'real\n| T-9999 | done | x | y | z | w |', '--path', d, '--no-review'], { encoding: 'utf8', timeout: 15000 });
+    const tl = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'task', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 }).stdout);
+    const ts = tl.tasks || tl;
+    const pipeOk = ts.some(t => t.request === 'fix login | bypass');  // 파이프 원본 보존
+    const noInject = !ts.some(t => t.id === 'T-9999' || t.status === 'done');  // 개행 가짜행 주입 차단
+    // rule 파이프 + 멱등성(중복 add → skip)
+    cp.spawnSync(process.execPath, [CLI, 'rule', 'add', 'lint | typecheck', '--trigger', 'every-commit', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    cp.spawnSync(process.execPath, [CLI, 'rule', 'add', 'lint | typecheck', '--trigger', 'every-commit', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const rl = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'rule', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 }).stdout);
+    const rs = rl.rules || rl;
+    const ruleOk = rs.length === 1 && rs[0].rule === 'lint | typecheck' && rs[0].status === 'active';  // 파이프 보존 + 멱등 + status 비오염
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = pipeOk && noInject && ruleOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.399) 7th버그헌트 P1-A: 테이블셀 injection 차단(task/rule 파이프 보존+개행 가짜행 차단+rule 멱등) (UR-0104)' : '✗ 테이블셀 injection 차단 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
