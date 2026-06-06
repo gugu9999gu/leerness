@@ -26,9 +26,9 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.379';
+const VERSION = '1.9.380';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3016,6 +3016,7 @@ function _selfTestCases() {
     { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + 빌더 동작 (1.9.377)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide('.leerness', '9.9.9', '2026-01-01T00:00:00.000Z'); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString())'); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && g.includes('마이그레이션 안내') && wrapperThin; } },
     { name: 'UR-0073: team MCP 도구 2종(read-only) 정의 + dispatch 와이어 (1.9.378)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const tl = tools.find(t => t.name === 'leerness_team_list'); const tp = tools.find(t => t.name === 'leerness_team_preview'); const defsOk = tl && tl.requiredTier === 'read-only' && tp && tp.requiredTier === 'read-only' && tp.inputSchema.required && tp.inputSchema.required.includes('id'); const wired = src.includes("case " + "'leerness_team_list':") && src.includes("case " + "'leerness_team_preview':") && /cliArgs = \['team', 'list'/.test(src) && /cliArgs = \['team', 'preview'/.test(src); return !!defsOk && wired; } },
     { name: 'UR-0025 심화: pulse 렌더 코어 분리 — _memorySurface + _renderPulseLine 행위 (1.9.379)', run: () => { const m = require('../lib/pure-utils'); if (typeof _memorySurface !== 'function' || typeof _renderPulseLine !== 'function' || m._memorySurface !== _memorySurface || m._renderPulseLine !== _renderPulseLine) return false; const ms = _memorySurface({ tasks: 1, decisions: 2, rules: 3, milestones: 4, lessons: 5 }) === 'T1/D2/R3/P4/L5' && _memorySurface({}) === 'T0/D0/R0/P0/L0'; const base = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'T0/D1/R0/P2/L0' }); const ln = base.includes('v1.0.0') && base.includes('R7') && base.includes('MCP 85') && base.includes('T0/D1/R0/P2/L0') && !base.includes('🎯') && !base.includes('abnormal'); const full = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'x', nextMilestone: 400, etaDays: 6, abnormalShutdown: 'high' }); const ln2 = full.includes('🎯 R400 (6d)') && full.includes('abnormal:high'); const wired = read(__filename).includes('const line = _renderPulseLine(data)') && read(__filename).includes('data.memorySurface = _memorySurface('); return ms && ln && ln2 && wired; } },
+    { name: 'UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 — verify/migrate audit·apply 3중 중복 제거 (1.9.380)', run: () => { const c = require('../lib/catalogs'); if (REQUIRED_WORKSPACE_FILES !== c.REQUIRED_WORKSPACE_FILES) return false; const listOk = Array.isArray(c.REQUIRED_WORKSPACE_FILES) && c.REQUIRED_WORKSPACE_FILES.length === 9 && c.REQUIRED_WORKSPACE_FILES.includes('AGENTS.md') && c.REQUIRED_WORKSPACE_FILES.includes('.harness/plan.md'); const usesConst = (read(__filename).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 3; return listOk && usesConst; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6783,7 +6784,7 @@ function status(root) {
 function verify(root) {
   root = absRoot(root);
   let bad = 0;
-  const required = ['.harness/plan.md','.harness/progress-tracker.md','.harness/guideline.md','.harness/protected-files.md','.harness/design-system.md','.harness/anti-lazy-work-policy.md','.harness/session-handoff.md','.harness/current-state.md','AGENTS.md'];
+  const required = REQUIRED_WORKSPACE_FILES;  // 1.9.380 (UR-0025): lib/catalogs 단일출처
   for (const f of required) { if (!exists(path.join(root,f))) { bad++; fail(`missing: ${f}`); } }
   const g = exists(path.join(root,'.harness/guideline.md')) ? read(path.join(root,'.harness/guideline.md')) : '';
   if (!g.includes('plan.md') || !g.includes('progress-tracker.md')) { bad++; fail('guideline.md must reference plan.md and progress-tracker.md'); }
@@ -6804,7 +6805,7 @@ function migrateAuditCmd(root, opts = {}) {
   if (exists(decisionsPath(root)) && !exists(decisionsJsonPath(root)) && _loadDecisions(root).length > 0) findings.push({ kind: 'canonical-pending', detail: 'decisions.md → decisions.json 백필 예정', action: 'decision add/drop 또는 migrate 시 자동' });
   if (exists(lessonsPath(root)) && !exists(lessonsJsonPath(root)) && _loadLessons(root).length > 0) findings.push({ kind: 'canonical-pending', detail: 'lessons.md → lessons.json 백필 예정', action: 'lesson save/drop 또는 migrate 시 자동' });
   // 누락 예상 파일 (현재 버전 required set 기준)
-  const required = ['.harness/plan.md', '.harness/progress-tracker.md', '.harness/guideline.md', '.harness/protected-files.md', '.harness/design-system.md', '.harness/anti-lazy-work-policy.md', '.harness/session-handoff.md', '.harness/current-state.md', 'AGENTS.md'];
+  const required = REQUIRED_WORKSPACE_FILES;  // 1.9.380 (UR-0025): lib/catalogs 단일출처
   for (const f of required) if (!exists(path.join(root, f))) findings.push({ kind: 'missing-file', detail: f, action: 'migrate 가 생성' });
   if (opts.json) { log(JSON.stringify({ version: VERSION, root, projectVersion: projVer, willChange: findings.length, findings }, null, 2)); return; }
   log(`# leerness migrate audit (1.9.356, UR-0075 dry-run) — 실제 변경 없음`);
@@ -6836,7 +6837,7 @@ function migrateApplyCmd(root, opts = {}) {
   const projVer = exists(hvPath) ? read(hvPath).trim() : null;
   if (!projVer) skipped.push({ kind: 'no-version', detail: 'HARNESS_VERSION 없음', reason: `leerness migrate --path ${root}` });
   else if (compareVer(projVer, VERSION) < 0) skipped.push({ kind: 'version-drift', detail: `${projVer} → ${VERSION}`, reason: `leerness update --yes --path ${root}` });
-  const required = ['.harness/plan.md', '.harness/progress-tracker.md', '.harness/guideline.md', '.harness/protected-files.md', '.harness/design-system.md', '.harness/anti-lazy-work-policy.md', '.harness/session-handoff.md', '.harness/current-state.md', 'AGENTS.md'];
+  const required = REQUIRED_WORKSPACE_FILES;  // 1.9.380 (UR-0025): lib/catalogs 단일출처
   for (const f of required) if (!exists(path.join(root, f))) skipped.push({ kind: 'missing-file', detail: f, reason: 'leerness migrate / init' });
   if (opts.json) { log(JSON.stringify({ version: VERSION, root, dryRun: !apply, appliedCount: apply ? applied.length : 0, applied, skipped }, null, 2)); return; }
   log(`# leerness migrate apply (1.9.357, UR-0075 Phase C)${apply ? '' : ' — dry-run (변경 없음 · --yes 로 적용)'}`);

@@ -5252,5 +5252,26 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.380 회귀 (UR-0025): REQUIRED_WORKSPACE_FILES 단일출처 — verify 가 catalog 리스트로 init통과/누락실패
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs'));
+    const catOk = Array.isArray(c.REQUIRED_WORKSPACE_FILES) && c.REQUIRED_WORKSPACE_FILES.length === 9 && c.REQUIRED_WORKSPACE_FILES.includes('AGENTS.md');
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-req-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const r1 = cp.spawnSync(process.execPath, [CLI, 'verify', d], { encoding: 'utf8', timeout: 15000 });
+    const passOk = r1.status === 0;
+    fs.rmSync(path.join(d, 'AGENTS.md'), { force: true });
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'verify', d], { encoding: 'utf8', timeout: 15000 });
+    const failOk = r2.status === 1 && /missing: AGENTS\.md/.test((r2.stdout || '') + (r2.stderr || ''));
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = catOk && passOk && failOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.380) UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 (verify init통과/누락실패)' : '✗ required files 단일출처 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.380 — 2026-06-06 — UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 (필수목록 3중 중복 제거)
+
+**🧩 verify / migrate audit / migrate apply 가 각자 보유하던 동일 9-파일 필수목록을 catalogs 단일출처로 DRY.**
+
+### 배경
+필수 워크스페이스 파일 목록(9종)이 verify(6786)·migrateAuditCmd(6807)·migrateApplyCmd(6839) 에 **3중 복제**돼 있었음. 한 곳만 바뀌면 불일치 위험.
+
+### 구현
+1. **`REQUIRED_WORKSPACE_FILES`** → lib/catalogs.js (단일출처).
+2. harness 3개 인라인 배열 → `const required = REQUIRED_WORKSPACE_FILES;` 로 교체(node 스크립트 결정적 교체, 내용 동일 확인).
+3. 별도 4-파일 경량 체크(7511)는 다른 용도라 보존(중복 아님).
+
+### 검증 (회귀 0)
+- **selftest 125→126 PASS** (catalog 9파일 + reference equality + 3 사이트 const 사용).
+- **E2E 324→325 PASS** (verify: init 통과 / AGENTS.md 누락 시 exit 1 + missing 메시지).
+- 실측: verify init통과·누락실패, migrate audit missing-file 감지 정상.
+
 ## 1.9.379 — 2026-06-06 — UR-0025 심화: pulse 핸들러 렌더 코어 분리 (수집→렌더 패턴 착수)
 
 **🧩 큰 핸들러 모듈화 착수 — display 핸들러의 "수집(I/O) → 렌더(순수)" 분리 패턴을 pulse 에 적용.**
