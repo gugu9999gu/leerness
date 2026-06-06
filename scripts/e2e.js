@@ -5004,5 +5004,18 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.366 회귀 (외부리뷰 CV-5/UR-0080): selftest 무결성 — 설치 패키지 관점에서 --json 전부 통과 (행위 케이스 포함)
+total++;
+{
+  let ok = false;
+  try {
+    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { encoding: 'utf8', timeout: 30000 });
+    const j = JSON.parse(r.stdout);
+    ok = j.ok === true && j.pass === j.total && j.fail === 0 && j.total >= 112 && r.status === 0;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.366) CV-5: selftest 무결성 (--json pass===total, 행위 전환 writeUtf8/fail 포함) (UR-0080)' : '✗ selftest 무결성 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.9.366 — 2026-06-06 — 안정화⑥(완결) 외부리뷰 CV-5: selftest 행위화 + 외부리뷰 7 finding 전량 해소 🎉
+
+**🛠 외부 멀티모델 리뷰 안정화 시리즈 최종 6탄 — selftest 동어반복 source-grep 핵심 케이스를 행위 검증으로 전환. CV-1~7 + 4번째 외부평가 전량 해소로 안정화 마일스톤.**
+
+### 배경 — 외부 리뷰 CV-5 (3개 모델 합의)
+selftest ~13/106 케이스가 소스 문자열 grep(`src.includes`)이라 동작이 깨져도 통과(EINVAL 버그가 selftest 106/106 통과한 근본 원인). 권고: 구조 무결성(selftest) vs 행위(e2e) 분리 + 핵심 source-grep 을 행위 검증으로.
+
+### 구현
+1. **핵심 동어반복 케이스 행위 전환**:
+   - `writeUtf8`: 소스 grep → **실제 호출**(중첩 dir 에 한글 UTF-8 쓰기 → round-trip 내용 일치 + `.tmp-` 잔존 0 검증).
+   - `exit code(fail)`: 소스 grep → **실제 호출**(stdout 억제 + exitCode save/restore 로 `fail()` → `process.exitCode===1` 단언).
+2. **구조 vs 행위 분리 원칙 확립**: 구조 케이스(dispatch 와이어/등록 존재 — 빠른 sync)는 selftest 유지, 행위 케이스(로직 출력 정확성)는 함수 직접 호출. **안정화 시리즈(1.9.360~366) 신규 케이스는 전부 행위 기반**(argv 주입/prune/placeholder/secret-like/quiet 등).
+3. **selftest 무결성 e2e 가드**: 설치 패키지 관점 `selftest --json` 전부 통과(pass===total, fail===0) 단언.
+
+### 검증 (회귀 0)
+- **selftest 112/112 PASS**(2건 행위 전환, 카운트 유지). **E2E 311→312 PASS**(selftest --json 무결성 가드).
+
+### 🎉 외부 리뷰 안정화 마일스톤
+3개 모델 클린룸 리뷰(1.9.359) 교차검증 7 finding + 4번째 외부평가(web) 9.3 **전량 해소**:
+| finding | 버전 |
+|---|---|
+| CV-2 EINVAL | 1.9.360 |
+| CV-1 --path · CV-3 audit | 1.9.361 |
+| CV-4 archive retention | 1.9.362 |
+| CV-7 commands/help drift | 1.9.363 |
+| 4th평가 9.3 auto-update 비침투 | 1.9.364 |
+| CV-6 스캐너 FP/FN | 1.9.365 |
+| CV-5 selftest 행위화 | 1.9.366 |
+
+다음: 모듈화(UR-0025) → 에이전트 팀(UR-0073) → 릴리스 케이던스(UR-0074).
+
 ## 1.9.365 — 2026-06-06 — 안정화⑤ 외부리뷰 CV-6: 시크릿 스캐너 FP/FN 정밀도 (UR-0081)
 
 **🛠 외부 멀티모델 리뷰 안정화 시리즈 5탄 — 시크릿 스캐너 오탐(placeholder/자기 .env) 억제 + 미탐(unquoted) 보강.**
