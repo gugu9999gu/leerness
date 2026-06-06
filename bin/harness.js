@@ -30,7 +30,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.391';
+const VERSION = '1.9.392';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2995,6 +2995,7 @@ function _selfTestCases() {
     { name: 'UR-0025 큰핸들러 모듈화: teamCmd → lib/team.js + DI 위임 + 동작 (1.9.389)', run: () => { const m = require('../lib/team'); const expOk = typeof m.teamCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/team')") && src.includes('_team.teamCmd(root, sub, id, opts,'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const movedToLib = teamSrc.includes("require('./pure-utils')") && teamSrc.includes('_teamDeployGate') && teamSrc.includes('알 수 없는 team 하위명령'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tm_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'team', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; teamCmd(tmp, 'list', undefined, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && j.count === 0 && Array.isArray(j.teams); } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: 'UR-0025: feature-graph 순수 코어(_featureGraphTemplate/_parseFeatureGraph/_nextFeatureId/_featureBlock) → pure-utils + round-trip (1.9.390)', run: () => { const m = require('../lib/pure-utils'); const refOk = m._parseFeatureGraph === _parseFeatureGraph && m._featureGraphTemplate === _featureGraphTemplate && m._nextFeatureId === _nextFeatureId && m._featureBlock === _featureBlock; const tmpl = m._featureGraphTemplate(); const tmplOk = tmpl.includes('Feature Graph') && tmpl.includes('## Nodes'); const nodes = m._parseFeatureGraph('## F-0001 Auth\n- depends-on: F-0002\n- affects: F-0003\n- files: a.js\n'); const parseOk = nodes.length === 1 && nodes[0].id === 'F-0001' && nodes[0].title === 'Auth' && nodes[0].dependsOn[0] === 'F-0002' && nodes[0].affects[0] === 'F-0003' && nodes[0].files[0] === 'a.js'; const idOk = m._nextFeatureId(nodes) === 'F-0002'; const rt = m._parseFeatureGraph(m._featureBlock(nodes[0])); const rtOk = rt.length === 1 && rt[0].id === 'F-0001' && rt[0].dependsOn[0] === 'F-0002'; const src = read(__filename); const moved = src.includes("require('../lib/pure-utils')") && !/^function _parseFeatureGraph\(text\) \{/m.test(src) && !/^function _featureBlock\(node\) \{/m.test(src); return refOk && tmplOk && parseOk && idOk && rtOk && moved; } },
     { name: 'UR-0025 큰핸들러 모듈화: feature add/link/impact/list/show → lib/feature.js + DI + _featureImpactBfs pure 공유 (1.9.391)', run: () => { const m = require('../lib/feature'); const p = require('../lib/pure-utils'); const expOk = ['featureAddCmd', 'featureLinkCmd', 'featureImpactCmd', 'featureListCmd', 'featureShowCmd'].every(k => typeof m[k] === 'function'); const bfsRefOk = p._featureImpactBfs === _featureImpactBfs; const nodes = [{ id: 'F-0001', title: 'A', affects: ['F-0002'], dependsOn: [], coChangesWith: [] }, { id: 'F-0002', title: 'B', affects: [], dependsOn: [], coChangesWith: [] }]; const r = p._featureImpactBfs(nodes, 'F-0001'); const bfsWork = r.length === 1 && r[0].id === 'F-0002' && r[0].via === 'affects'; const src = read(__filename); const delegated = src.includes("require('../lib/feature')") && src.includes('_feature.featureImpactCmd(root, fromId, _featureDeps())'); const featSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'feature.js')); const movedToLib = featSrc.includes("require('./pure-utils')") && featSrc.includes('feature added:'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ft_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'feature', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; featureListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.total === 0 && Array.isArray(j.features); } catch {} return expOk && bfsRefOk && bfsWork && delegated && movedToLib && behavOk; } },
+    { name: 'UR-0025 큰핸들러 모듈화: doctor/which → lib/diagnostics.js + DI 위임 + 동작 (1.9.392)', run: () => { const m = require('../lib/diagnostics'); const expOk = typeof m.doctorCmd === 'function' && typeof m.whichCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/diagnostics')") && src.includes('_diag.doctorCmd(opts,') && src.includes('_diag.whichCmd('); const diagSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js')); const movedToLib = diagSrc.includes('leerness doctor') && diagSrc.includes('_selfTestCases'); let behavOk = false; const _w = process.stdout.write; const savedExit = process.exitCode; try { process.stdout.write = () => true; const rep = m.doctorCmd({ json: true }, { VERSION, _selfTestCases: () => [], _detectShellCtx: () => ({ shell: 'test', psVersion: null }), _mcpToolCount: () => 7, has: () => true, harnessPath: 'h.js' }); behavOk = !!rep && rep.version === VERSION && rep.selftest.total === 0 && rep.healthy === true && rep.mcpTools === 7; } catch {} finally { process.stdout.write = _w; process.exitCode = savedExit; } return expOk && delegated && movedToLib && behavOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -20640,121 +20641,11 @@ function reviewRequestCmd(root, request) {
 //   사용자가 "최신 버전 작동 안 함" 의심 시: 실제 실행 중인 leerness 의 경로 / 버전 / npm 캐시 / PATH 후보 표시.
 // 1.9.315 (UR-0054, 설치리뷰): leerness doctor — 설치/환경 1콜 진단 (selftest 코어 무결성 + 버전/경로 + 셸/PowerShell).
 //   배경: 리뷰에서 doctor 명령 부재 지적("doctor no-op"). health(프로젝트 상태)와 달리 doctor 는 "도구 자체"의 정상성 진단.
-function doctorCmd(opts = {}) {
-  const json = opts.json || has('--json');
-  // 1) 코어 무결성: selftest 케이스 인라인 실행
-  let pass = 0; const failNames = [];
-  try {
-    for (const c of _selfTestCases()) {
-      let okc = false;
-      try { okc = !!c.run(); } catch { okc = false; }
-      if (okc) pass++; else failNames.push(c.name);
-    }
-  } catch {}
-  const total = pass + failNames.length;
-  // 2) 셸/PowerShell 컨텍스트 (UR-0052)
-  let shell = null, psVersion = null;
-  try { const ctx = _detectShellCtx(); shell = ctx.shell; psVersion = ctx.psVersion; } catch {}
-  const mcpCount = (() => { try { return _mcpToolCount(); } catch { return null; } })();
-  const report = {
-    version: VERSION, node: process.version, platform: process.platform + '/' + process.arch,
-    runningFrom: __filename, mcpTools: mcpCount,
-    selftest: { pass, total, ok: failNames.length === 0, failed: failNames },
-    shell, psVersion, healthy: failNames.length === 0
-  };
-  if (json) { process.stdout.write(JSON.stringify(report, null, 2) + '\n'); if (!report.healthy) process.exitCode = 1; return report; }
-  const isTty = process.stdout && process.stdout.isTTY;
-  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s, rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s, cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s, dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
-  log(cy(`# leerness doctor — 설치/환경 진단`));
-  log('');
-  log(`  ${gr('✓')} version ${VERSION} · node ${process.version} · ${process.platform}/${process.arch}`);
-  log(`  ${gr('✓')} 설치 경로: ${dm(__filename)}`);
-  log(`  ${gr('✓')} MCP 도구: ${mcpCount}`);
-  log(`  ${report.selftest.ok ? gr('✓') : rd('✗')} selftest: ${pass}/${total} ${report.selftest.ok ? '통과' : '실패'}`);
-  if (!report.selftest.ok) report.selftest.failed.slice(0, 5).forEach(n => log(rd(`     ✗ ${n}`)));
-  log(`  ${gr('✓')} 셸: ${shell || 'unknown'}${psVersion && shell === 'powershell' ? ` (PowerShell ${psVersion})` : ''}`);
-  log('');
-  log(report.healthy ? gr('  ✓ leerness 설치 정상') : rd('  ✗ 문제 감지 — 재설치: npm i -g leerness@latest · 진단: leerness which'));
-  if (!report.healthy) process.exitCode = 1;
-  return report;
-}
-function whichCmd() {
-  const out = {
-    version: VERSION,
-    runningFrom: __filename,
-    nodeVersion: process.version,
-    platform: process.platform,
-    arch: process.arch,
-    npm: {},
-    pathCandidates: []
-  };
-  // npm root -g (글로벌 설치 경로)
-  try {
-    const r = cp.spawnSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 5000, shell: true });
-    if (r.status === 0) out.npm.globalRoot = (r.stdout || '').trim();
-  } catch {}
-  // npm cache (npx 캐시 경로)
-  try {
-    const r = cp.spawnSync('npm', ['config', 'get', 'cache'], { encoding: 'utf8', timeout: 5000, shell: true });
-    if (r.status === 0) out.npm.cacheDir = (r.stdout || '').trim();
-  } catch {}
-  // npm 글로벌 leerness 설치 정보
-  try {
-    const r = cp.spawnSync('npm', ['ls', '-g', 'leerness', '--depth=0', '--json'], { encoding: 'utf8', timeout: 8000, shell: true });
-    if (r.stdout) {
-      try {
-        const j = JSON.parse(r.stdout);
-        if (j.dependencies?.leerness) out.npm.globalInstalled = j.dependencies.leerness.version;
-      } catch {}
-    }
-  } catch {}
-  // PATH 후보 (Windows: where / Unix: which)
-  try {
-    const isWin = process.platform === 'win32';
-    const tool = isWin ? 'where' : 'which';
-    const r = cp.spawnSync(tool, ['-a', 'leerness'], { encoding: 'utf8', timeout: 5000, shell: true });
-    if (r.stdout) out.pathCandidates = (r.stdout || '').trim().split(/\r?\n/).filter(Boolean);
-  } catch {}
-  // 진단: 글로벌 설치된 leerness 와 현재 실행 버전이 다르면 경고
-  out.diagnostics = [];
-  if (out.npm.globalInstalled && out.npm.globalInstalled !== VERSION) {
-    out.diagnostics.push(`⚠ 글로벌 설치 ${out.npm.globalInstalled} ≠ 현재 실행 ${VERSION} — npx 캐시 또는 PATH 충돌 의심`);
-    out.diagnostics.push(`  → 강제 최신: npm i -g leerness@latest  /  또는 npx --yes leerness@latest <command>`);
-  }
-  if (out.pathCandidates.length > 1) {
-    out.diagnostics.push(`⚠ PATH 에 leerness 가 ${out.pathCandidates.length}개 — 우선순위 충돌 가능`);
-    out.diagnostics.push(`  → 명시적 경로 사용: ${out.runningFrom}`);
-  }
-  if (has('--json')) { log(JSON.stringify(out, null, 2)); return; }
-  log(`# leerness which (1.9.164)`);
-  log(`현재 실행: ${out.runningFrom}`);
-  log(`버전:      v${out.version}`);
-  log(`Node:      ${out.nodeVersion} (${out.platform}/${out.arch})`);
-  log('');
-  log(`## npm 환경`);
-  if (out.npm.globalRoot) log(`  npm root -g: ${out.npm.globalRoot}`);
-  if (out.npm.cacheDir)   log(`  npm cache:   ${out.npm.cacheDir}  (npx 옛 버전이 여기 캐싱 — 의심 시 \`npm cache clean --force\`)`);
-  if (out.npm.globalInstalled) log(`  글로벌 설치: leerness@${out.npm.globalInstalled}`);
-  else log(`  글로벌 설치: (없음 — npx 또는 로컬 경로만 사용 중)`);
-  if (out.pathCandidates.length) {
-    log('');
-    log(`## PATH 후보 (${out.pathCandidates.length}개)`);
-    for (const p of out.pathCandidates) log(`  - ${p}`);
-  }
-  if (out.diagnostics.length) {
-    log('');
-    log(`## ⚠ 진단`);
-    for (const d of out.diagnostics) log(`  ${d}`);
-  } else {
-    log('');
-    log(`✓ 충돌 없음 (현재 실행 버전 = 글로벌 설치 버전)`);
-  }
-  log('');
-  log(`💡 강제 최신 실행 방법:`);
-  log(`  1) npx --yes leerness@latest <command>        # npx 캐시 무시하고 최신 다운로드`);
-  log(`  2) npm i -g leerness@latest                    # 글로벌 설치 갱신`);
-  log(`  3) npm cache clean --force                     # npx 캐시 강제 비우기 (의심 시)`);
-}
+// 1.9.392 (UR-0025 큰 핸들러 모듈화 4번째): doctor/which 진단 핸들러를 lib/diagnostics.js 로 분리.
+//   harness 는 deps(VERSION · _selfTestCases · _detectShellCtx · _mcpToolCount · has · harnessPath)를 구성해 위임(thin wrapper). 호출부/동작 무변경.
+const _diag = require('../lib/diagnostics');
+function doctorCmd(opts = {}) { return _diag.doctorCmd(opts, { VERSION, _selfTestCases, _detectShellCtx, _mcpToolCount, has, harnessPath: __filename }); }
+function whichCmd() { return _diag.whichCmd({ VERSION, has, harnessPath: __filename }); }
 
 function help() {
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/agy/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy

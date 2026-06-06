@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.392 — 2026-06-06 — UR-0025 큰 핸들러 모듈화 4번째: doctor/which → lib/diagnostics.js (DI)
+
+**🧩 네 번째 핸들러 모듈 — 진단 명령(doctor/which)을 lib/diagnostics.js 로 분리.**
+
+### 구현
+1. **lib/diagnostics.js 신규**: doctorCmd + whichCmd 이전.
+   - 직접 require: `./io`(log) · node child_process.
+   - **DI 주입**: VERSION · _selfTestCases · _detectShellCtx · _mcpToolCount · has · harnessPath.
+   - `_selfTestCases` 의 각 case.run 클로저는 harness 모듈 스코프를 유지 → 함수 참조 주입만으로 정상 동작.
+2. **harness thin wrapper**: deps 구성 후 위임. dispatch·동작·출력·exit code 무변경.
+
+### 검증 (회귀 0)
+- **selftest 137→138 PASS** (lib/diagnostics 2 exports + 위임 와이어 + lib 본문 이동 교차참조 + behavioral: stub _selfTestCases(빈 배열)로 lib doctorCmd 호출 → 재귀 회피 + report.version/selftest/healthy/mcpTools 검증).
+- **E2E 332 유지 PASS** (doctor/which 회귀). 락 flake 시 재실행.
+- 실측: doctor(--json selftest 137/137 healthy + 사람용 + exit0) · which(--json runningFrom/diagnostics + 사람용) 보존.
+
 ## 1.9.391 — 2026-06-06 — UR-0025 큰 핸들러 모듈화 3번째: feature → lib/feature.js (DI)
 
 **🧩 세 번째 핸들러 모듈 — feature add/link/impact/list/show 를 lib/feature.js 로 분리. 1.9.390 순수 코어 토대 위에 완성.**
