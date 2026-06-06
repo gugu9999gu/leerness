@@ -5017,5 +5017,23 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.367 회귀 (UR-0025): _mergeEnvLines 모듈 분리 — migrate 가 사용자 .env 값을 key-aware 로 보존 (덮어쓰기 X)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-envm-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const envPath = path.join(d, '.env');
+    fs.writeFileSync(envPath, fs.readFileSync(envPath, 'utf8').replace('LEERNESS_NPM_TOKEN=', 'LEERNESS_NPM_TOKEN=user_kept_value_777'));
+    cp.spawnSync(process.execPath, [CLI, 'migrate', d], { encoding: 'utf8', timeout: 30000 });
+    const after = fs.readFileSync(envPath, 'utf8');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = after.includes('LEERNESS_NPM_TOKEN=user_kept_value_777');
+  } catch {}
+  console.log(ok ? '✓ B(1.9.367) UR-0025: _mergeEnvLines 분리 — migrate 가 사용자 .env 값 key-aware 보존' : '✗ env merge 보존 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.367 — 2026-06-06 — UR-0025 모듈화: env/line 머지 순수 코어 분리
+
+**🧩 안정화 마일스톤 이후 모듈화(UR-0025) 재개 — `.env`/라인 머지 순수 코어를 lib/pure-utils 로 분리, harness 는 얇은 I/O 래퍼.**
+
+### 배경
+외부 리뷰가 지목한 코드 품질(5.8) 개선 방향 = 21k줄 단일 harness.js 모듈화. 비파괴 추출 패턴(데이터→catalogs, 순수 로직→pure-utils, harness 얇은 래퍼) 지속.
+
+### 구현
+1. **`_mergeLines(currentText, lines)`**(pure-utils): 기존 텍스트에 없는 라인만 append (substring 중복 방지).
+2. **`_mergeEnvLines(currentText, lines)`**(pure-utils): `.env` key-aware 머지 — 기존 KEY 값 보존(덮어쓰기 X), 신규 KEY/주석만 append. 사용자가 편집한 토큰을 절대 덮어쓰지 않는 핵심 로직.
+3. **harness `mergeLinesFile`/`mergeEnvFile`**: 순수 코어 + `read`/`writeUtf8` 만 남긴 얇은 I/O 래퍼.
+
+### 검증 (회귀 0)
+- **selftest 112→113 PASS** (행위: `_mergeLines('a\n',['a','b'])==='a\nb\n'` / `_mergeEnvLines('FOO=keep\n',['FOO=new'])==='FOO=keep\n'`(보존) / 신규 KEY append + 모듈 reference equality).
+- **E2E 312→313 PASS** (행위: init → `.env` 토큰 편집 → migrate → 사용자 값 key-aware 보존).
+- 실측: init→토큰편집→migrate→`LEERNESS_NPM_TOKEN` 사용자 값 보존.
+
 ## 1.9.366 — 2026-06-06 — 안정화⑥(완결) 외부리뷰 CV-5: selftest 행위화 + 외부리뷰 7 finding 전량 해소 🎉
 
 **🛠 외부 멀티모델 리뷰 안정화 시리즈 최종 6탄 — selftest 동어반복 source-grep 핵심 케이스를 행위 검증으로 전환. CV-1~7 + 4번째 외부평가 전량 해소로 안정화 마일스톤.**
