@@ -29,7 +29,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.388';
+const VERSION = '1.9.389';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2991,6 +2991,7 @@ function _selfTestCases() {
     { name: '5th외부평가/UR-0087: _gitignoreMatch git 일치(.env↛.env.bad) + env-family 스캔 (1.9.386)', run: () => { const m = require('../lib/pure-utils'); if (m._gitignoreMatch !== _gitignoreMatch) return false; const gm = _gitignoreMatch; const semOk = gm('.env', '.env') === true && gm('.env', '.env.bad') === false && gm('.env', '.env.local') === false && gm('.env.*', '.env.bad') === true && gm('.env*', '.env') === true && gm('*.pem', 'k.pem') === true && gm('src/', 'src/a.txt') === true; const src = read(__filename); const envFamilyScan = src.includes('const isEnvFamily =') && src.includes('!SCAN_TEXT_EXT.has(ext) && !isEnvFamily'); const delegated = src.includes('return _gitignoreMatch(gi, fileRel)'); return semOk && envFamilyScan && delegated; } },
     { name: 'UR-0088 5th외부평가 일관성: incident/runs list 빈 케이스 --json 구조화 (1.9.387)', run: () => { if (typeof incidentListCmd !== 'function' || typeof runsListCmd !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lj_')); const save = process.argv; const _w = process.stdout.write; let io = '', ro = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'incident', 'list', '--json']; process.stdout.write = s => { io += s; return true; }; incidentListCmd(tmp); process.stdout.write = _w; process.argv = ['node', 'h', 'runs', 'list', '--json']; process.stdout.write = s => { ro += s; return true; }; runsListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let ij, rj; try { ij = JSON.parse(io); rj = JSON.parse(ro); } catch {} return !!ij && ij.total === 0 && Array.isArray(ij.items) && !!rj && rj.total === 0 && Array.isArray(rj.items); } },
     { name: 'UR-0025 큰핸들러 모듈화: migrate audit/apply/plan → lib/migrate.js + DI 위임 + 동작 (1.9.388)', run: () => { const m = require('../lib/migrate'); const expOk = typeof m.migrateAuditCmd === 'function' && typeof m.migrateApplyCmd === 'function' && typeof m.migratePlanCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/migrate')") && src.includes('_migrate.migrateAuditCmd(root, opts, _migrateDeps())') && src.includes('_migrate.migratePlanCmd(root, opts, _migrateDeps())'); const movedToLib = read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).includes('leerness-plan-'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_mig_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'HARNESS_VERSION'), VERSION); process.argv = ['node', 'h', 'migrate', 'audit', tmp, '--json']; process.stdout.write = s => { out += s; return true; }; migrateAuditCmd(tmp, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && typeof j.willChange === 'number' && Array.isArray(j.findings); } catch {} return expOk && delegated && movedToLib && behavOk; } },
+    { name: 'UR-0025 큰핸들러 모듈화: teamCmd → lib/team.js + DI 위임 + 동작 (1.9.389)', run: () => { const m = require('../lib/team'); const expOk = typeof m.teamCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/team')") && src.includes('_team.teamCmd(root, sub, id, opts,'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const movedToLib = teamSrc.includes("require('./pure-utils')") && teamSrc.includes('_teamDeployGate') && teamSrc.includes('알 수 없는 team 하위명령'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tm_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'team', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; teamCmd(tmp, 'list', undefined, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && j.count === 0 && Array.isArray(j.teams); } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -5785,114 +5786,10 @@ function _saveTeams(root, teams) {
   writeUtf8(teamsJsonPath(root), JSON.stringify(arr, null, 2) + '\n');
   writeUtf8(teamsPath(root), _renderTeamsMd(arr));
 }
-function teamCmd(root, sub, id, opts = {}) {
-  root = absRoot(root);
-  const json = opts.json || has('--json');
-  const teams = _loadTeams(root);
-  sub = sub || 'list';
-  if (sub === 'list') {
-    if (json) { log(JSON.stringify({ version: VERSION, root, count: teams.length, teams }, null, 2)); return; }
-    log(`# leerness team (1.9.371, UR-0073 Phase A) — 에이전트 팀 정의 (opt-in · 정의 전용)`);
-    if (!teams.length) { log('  (정의된 팀 없음) — leerness team add <id> --name "..." --purpose "..." --personas a,b --members claude,codex'); return; }
-    for (const t of teams) log(`  • ${t.id}${t.name ? ' — ' + t.name : ''}  [${t.status || 'active'}/${t.schedule || 'manual'}]  personas:${(t.personas || []).join('|') || '-'} members:${(t.members || []).join('|') || '-'}`);
-    log(`\n  ⓘ 정의 전용 — 자동 실행 없음. 실행(리뷰/배포/블로그)은 향후 opt-in 단계.`);
-    return;
-  }
-  if (sub === 'add') {
-    const teamId = String(id || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[.\-]+|[.\-]+$/g, '');
-    if (!teamId || teamId.includes('..')) { fail(`무효한 team id: "${id}" (영숫자/._- 만)`); return; }
-    if (teams.some(t => t.id === teamId)) { warn(`이미 존재: ${teamId} (제거 후 재정의: leerness team remove ${teamId})`); return; }
-    const splitCsv = v => (v && v !== true) ? String(v).split(',').map(s => s.trim()).filter(Boolean) : [];
-    const sched = arg('--schedule', 'manual');
-    const validSched = new Set(['manual', 'every-session', 'daily', 'weekly']);
-    const team = {
-      id: teamId,
-      name: arg('--name', '') === true ? '' : arg('--name', ''),
-      purpose: arg('--purpose', '') === true ? '' : arg('--purpose', ''),
-      personas: splitCsv(arg('--personas', null)),
-      members: splitCsv(arg('--members', null)),
-      schedule: validSched.has(sched) ? sched : 'manual',
-      deployCommand: arg('--deploy', '') === true ? '' : arg('--deploy', ''),  // 1.9.376 (Phase D): 사용자 설정 배포 명령 (실행은 게이트)
-      status: 'active',
-      createdAt: now()
-    };
-    teams.push(team);
-    _saveTeams(root, teams);
-    ok(`team 정의: ${teamId} (personas:${team.personas.length} members:${team.members.length} schedule:${team.schedule})`);
-    log(`  ⓘ 정의 전용 — 자동 실행 없음. 목록: leerness team list`);
-    return;
-  }
-  if (sub === 'show') {
-    const t = teams.find(x => x.id === id);
-    if (!t) { fail(`team 없음: ${id}`); return; }
-    if (json) { log(JSON.stringify(t, null, 2)); return; }
-    log(`# team ${t.id}`);
-    log(`  name: ${t.name || ''}`);
-    log(`  purpose: ${t.purpose || ''}`);
-    log(`  personas: ${(t.personas || []).join(', ') || '-'}`);
-    log(`  members: ${(t.members || []).join(', ') || '-'}`);
-    log(`  schedule: ${t.schedule || 'manual'}  ·  status: ${t.status || 'active'}`);
-    log(`  deploy: ${t.deployCommand || '-'}`);
-    return;
-  }
-  if (sub === 'remove') {
-    const before = teams.length;
-    const next = teams.filter(x => x.id !== id);
-    if (next.length === before) { warn(`team 없음: ${id}`); return; }
-    _saveTeams(root, next);
-    ok(`team 제거: ${id}`);
-    return;
-  }
-  // 1.9.372 (UR-0073 Phase B): team preview — dry-run 실행 계획 미리보기 (실제 dispatch/spawn/배포 없음).
-  if (sub === 'preview') {
-    const t = teams.find(x => x.id === id);
-    if (!t) { fail(`team 없음: ${id}`); return; }
-    const plan = _composeTeamPlan(t, arg('--task', null));
-    if (json) { log(JSON.stringify({ version: VERSION, dryRun: true, ...plan }, null, 2)); return; }
-    log(`# team preview ${t.id} (1.9.372, UR-0073 Phase B) — dry-run (실제 실행 없음)`);
-    log(`  task: ${plan.task}`);
-    log(`  schedule: ${plan.schedule}  ·  members: ${plan.memberCount}`);
-    if (!plan.steps.length) { warn('members 없음 — leerness team add <id> --members claude,codex 로 지정'); return; }
-    log(`  실행 계획 (미리보기 · 자동 실행 안 함):`);
-    for (const s of plan.steps) {
-      log(`    • ${s.member}${s.personas.length ? ' [' + s.personas.join(',') + ']' : ''}`);
-      log(`        ↳ ${s.suggestedCommand}`);
-    }
-    log(`\n  ⓘ dry-run — 실제 dispatch/배포 없음. 위 명령을 검토 후 직접 실행하거나, 향후 Phase C(스케줄)/D(배포)에서 게이트 적용.`);
-    return;
-  }
-  // 1.9.376 (UR-0073 Phase D): team deploy — 사용자 설정 deployCommand 실행. 안전: dry-run 기본 + --yes + LEERNESS_TEAM_DEPLOY=1 이중 게이트 + shell-guard.
-  if (sub === 'deploy') {
-    const t = teams.find(x => x.id === id);
-    if (!t) { fail(`team 없음: ${id}`); return; }
-    const gate = _teamDeployGate(t, { yes: has('--yes'), envOn: process.env.LEERNESS_TEAM_DEPLOY === '1' });
-    if (json) { log(JSON.stringify({ version: VERSION, teamId: t.id, ...gate }, null, 2)); if (gate.mode !== 'execute') return; }
-    if (gate.mode === 'no-command') { fail(`team '${t.id}' deployCommand 미설정 — leerness team add ${t.id} --deploy "<배포 명령>"`); return; }
-    if (gate.mode === 'dry-run') {
-      log(`# team deploy ${t.id} (1.9.376, UR-0073 Phase D) — dry-run (실행 없음)`);
-      log(`  배포 명령: ${gate.command}`);
-      log(`  ⓘ ${gate.message}`);
-      log(`  실행: LEERNESS_TEAM_DEPLOY=1 leerness team deploy ${t.id} --yes  (셸 호환성 점검 후 실행)`);
-      return;
-    }
-    if (gate.mode === 'gated') { fail(`${gate.message} — dry-run 으로 먼저 검토: leerness team deploy ${t.id}`); return; }
-    // execute: shell-guard 정적 점검(advisory) 후 spawn
-    try {
-      const ctx = _detectShellCtx();
-      const guard = _shellGuardAnalyze ? _shellGuardAnalyze(gate.command, ctx) : null;
-      if (guard && guard.findings && guard.findings.length) {
-        warn(`shell-guard 경고 ${guard.findings.length}건 (배포 명령): ${guard.findings.map(f => f.rule || f.kind || f).join(', ')}`);
-      }
-    } catch {}
-    log(`# team deploy ${t.id} — 실행 (LEERNESS_TEAM_DEPLOY=1 + --yes)`);
-    log(`  $ ${gate.command}`);
-    const r = cp.spawnSync(gate.command, { cwd: root, shell: true, stdio: 'inherit', timeout: 600000 });
-    if (r.status === 0) ok(`team deploy 완료: ${t.id} (exit 0)`);
-    else { fail(`team deploy 실패: ${t.id} (exit ${r.status})`); }
-    return;
-  }
-  fail(`알 수 없는 team 하위명령: ${sub} (list|add|show|remove|preview|deploy)`);
-}
+// 1.9.389 (UR-0025 큰 핸들러 모듈화 2번째): teamCmd 핸들러를 lib/team.js 로 분리.
+//   harness 는 deps(VERSION · 공유 저장 _loadTeams/_saveTeams · _detectShellCtx · argv 파서 arg/has)를 구성해 위임(thin wrapper). 호출부/동작 무변경.
+const _team = require('../lib/team');
+function teamCmd(root, sub, id, opts = {}) { return _team.teamCmd(root, sub, id, opts, { VERSION, _loadTeams, _saveTeams, _detectShellCtx, arg, has }); }
 
 // 1.9.112: 전용 lessons.md (Memory Write Surface 5번째)
 const lessonsPath = root => path.join(root, '.harness/lessons.md');

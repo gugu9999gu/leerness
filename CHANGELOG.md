@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.389 — 2026-06-06 — UR-0025 큰 핸들러 모듈화 2번째: teamCmd → lib/team.js (DI)
+
+**🧩 두 번째 핸들러 모듈 추출 — team 서브시스템(list/add/show/remove/preview/deploy)을 lib/team.js 로 분리. migrate(1.9.388)에서 확립한 DI 패턴 재사용.**
+
+### 배경 (UR-0025 큰 핸들러 모듈화, 사용자 승인)
+1.9.388 migrate 추출로 DI 패턴(io import + deps 주입)을 확립. 동일 패턴으로 두 번째 응집 핸들러 teamCmd(UR-0073, ~111줄, e2e 5건 보유)를 분리.
+
+### 구현
+1. **lib/team.js 신규**: teamCmd(6 서브명령) 이전.
+   - 직접 require: `./io`(absRoot/log/ok/warn/fail/now) · `./pure-utils`(_composeTeamPlan/_teamDeployGate) · `./analyzers`(_shellGuardAnalyze) · node child_process.
+   - **DI 주입**: VERSION · _loadTeams · _saveTeams · _detectShellCtx · arg · has(argv 파서).
+2. **_loadTeams/_saveTeams 는 harness 유지**: handoff team reminders(_teamHandoffReminders)도 쓰는 공유 함수 → harness 에 두고 주입만. (teamsJsonPath/teamsPath/_renderTeamsMd 도 harness 유지.)
+3. **harness thin wrapper**: deps 구성 후 위임. dispatch · 동작 · 출력 무변경.
+
+### 검증 (회귀 0)
+- **selftest 134→135 PASS** (lib/team export + 위임 와이어 + lib 본문 이동(pure-utils require/_teamDeployGate/하위명령) 교차참조 + behavioral list --json). 기존 1.9.371 케이스(_saveTeams/_loadTeams/_renderTeamsMd harness 유지)도 통과.
+- **E2E 332 유지 PASS** (team B(1.9.371/372/373/376/378) list/add/preview/deploy-gate/MCP 회귀가 CLI→wrapper→lib 경로 검증). 락 flake 시 재실행.
+- 실측: list/add/show/preview/deploy(dry-run·gated 이중게이트) + handoff team reminders(daily 팀 노출) 보존.
+
 ## 1.9.388 — 2026-06-06 — UR-0025 큰 핸들러 모듈화: migrate audit/apply/plan → lib/migrate.js (DI)
 
 **🧩 첫 실제 핸들러 모듈 추출 — migrate 서브시스템(audit/apply/plan)을 lib/migrate.js 로 분리(의존성 주입 ctx). lib/io.js 토대(1.9.382/383)의 첫 활용.**
