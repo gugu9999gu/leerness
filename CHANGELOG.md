@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.383 — 2026-06-06 — UR-0025 큰 핸들러 모듈화 토대②: lib/io.js fs 프리미티브 분리
+
+**🧩 lib/io.js 에 파일 I/O 프리미티브 추가 — 핸들러를 별도 lib 모듈로 분리할 토대 완비(io 14종).**
+
+### 구현
+1. **lib/io.js fs 프리미티브 추가**: `read`(BOM strip) / `readBuf` / `writeUtf8`(원자 temp→rename) / `exists` / `mkdirp` / `append` / `rel` / `absRoot`. io 모듈 14종(출력6+fs8) 완성.
+2. **harness 인라인 정의 제거** → import 확장. **호출부 무변경**(이름 동일, 수천 호출 그대로).
+3. e2e B(1.9.298) writeUtf8 원자성 소스체크 경로 `bin/harness.js` → `lib/io.js`(renameSync 이동 대응).
+
+### 검증 (회귀 0)
+- **selftest 128→129 PASS** (io fs exports 8종 + reference equality(read/writeUtf8/exists) + 인라인 제거 + writeUtf8→read round-trip + rel).
+- **E2E 327→328 PASS** (직접 round-trip + decision add(writeUtf8)→context(read) consumer 보존).
+- 실측: io 14종, init/decision→context round-trip, migrate plan(read 다수) 정상.
+
+### 큰 핸들러 모듈화 토대 완비 → 이제 핸들러(migrate/team/audit)를 lib 모듈로 ctx-경량 분리 가능(io import 만으로 출력/파일 프리미티브 확보).
+
 ## 1.9.382 — 2026-06-06 — UR-0025 큰 핸들러 모듈화 토대: lib/io.js 출력·시간 프리미티브 분리
 
 **🧩 (사용자 명시 허용) 큰 핸들러 분리의 선결 토대 — 공유 출력/시간 프리미티브 모듈 신설.**

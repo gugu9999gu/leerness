@@ -3286,7 +3286,7 @@ total++;
     const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
     const tmpLeftover = walk(path.join(aDir, '.harness')).filter(f => /\.tmp-\d+-\d+$/.test(f));
     // (3) 소스에 renameSync 원자 패턴 존재
-    const srcOk = /fs\.renameSync\(tmp, p\)/.test(fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8'));
+    const srcOk = /fs\.renameSync\(tmp, p\)/.test(fs.readFileSync(path.resolve(__dirname, '..', 'lib', 'io.js'), 'utf8'));  // 1.9.383: writeUtf8 → lib/io.js
     ok = tasksOk && tmpLeftover.length === 0 && srcOk;
     fs.rmSync(aDir, { recursive: true, force: true });
   } catch {}
@@ -5313,6 +5313,30 @@ total++;
     ok = expOk && initOk && failOk;
   } catch {}
   console.log(ok ? '✓ B(1.9.382) UR-0025 큰핸들러토대: lib/io.js 프리미티브 분리 (exports + init ok/verify fail→exit1 유지)' : '✗ lib/io 프리미티브 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.383 회귀 (UR-0025 큰핸들러토대): lib/io.js fs 프리미티브 분리 — round-trip + decision write→context read consumer 유지
+total++;
+{
+  let ok = false;
+  try {
+    const io = require(path.resolve(__dirname, '..', 'lib', 'io'));
+    const expOk = ['absRoot', 'exists', 'read', 'readBuf', 'mkdirp', 'writeUtf8', 'append', 'rel'].every(k => typeof io[k] === 'function');
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-iofs-'));
+    const f = path.join(t, 'sub', 'x.txt');
+    io.writeUtf8(f, '한글IO');
+    const rtOk = io.exists(f) && io.read(f) === '한글IO' && io.rel(t, f) === 'sub/x.txt';
+    fs.rmSync(t, { recursive: true, force: true });
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-iocons-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'IO_RT_881', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const ctx = cp.spawnSync(process.execPath, [CLI, 'context', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    const consumerOk = (ctx.stdout || '').includes('IO_RT_881');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = expOk && rtOk && consumerOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.383) UR-0025 큰핸들러토대: lib/io.js fs 프리미티브 분리 (round-trip + decision→context consumer)' : '✗ lib/io fs 프리미티브 실패');
   if (!ok) failed++;
 }
 
