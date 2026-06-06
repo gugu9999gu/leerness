@@ -1172,15 +1172,12 @@ total++;
 
 total++;
 {
-  // _parseSkillCatalog 4 형식 인식 — node -e로 동적 평가
-  const src = fs.readFileSync(CLI, 'utf8');
-  // 1.9.141 fix: Windows CRLF 대응 — \r?\n 으로 양쪽 line ending 모두 매칭
-  const m = src.match(/function _parseSkillCatalog\([\s\S]*?\r?\n\}\r?\n/);
-  if (!m) {
-    console.log('✗ _parseSkillCatalog 함수 위치 못 찾음');
+  // _parseSkillCatalog 4 형식 인식 — 1.9.370 (UR-0025): lib/pure-utils 직접 require (이전: harness 소스 regex+eval, 모듈 이동으로 전환)
+  const fn = require(path.resolve(__dirname, '..', 'lib', 'pure-utils'))._parseSkillCatalog;
+  if (typeof fn !== 'function') {
+    console.log('✗ _parseSkillCatalog 함수 위치 못 찾음 (lib/pure-utils)');
     failed++;
   } else {
-    const fn = eval('(' + m[0].replace('function _parseSkillCatalog', 'function') + ')');
     const jsonR = fn(JSON.stringify({ skills: [{ name: 'a', description: 'A' }] }), null);
     const rssR = fn('<rss><channel><item><title>X</title><link>http://x.com/s.md</link></item></channel></rss>', null);
     const mdR = fn('- [office](o.md) — Office\n- [crawling](c.md) — Web', null);
@@ -5070,6 +5067,22 @@ total++;
     ok = skipAbsent && corePresent && recInstalled;
   } catch {}
   console.log(ok ? '✓ B(1.9.369) UR-0025: MINIMAL_SKIP_KEYS/_parseSkillsValue 분리 (--minimal 스킵+코어유지, --skills recommended)' : '✗ minimal/skills 분리 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.370 회귀 (UR-0025): _parseArchiveBlocks/_parseSkillCatalog 순수 파서 모듈 분리 — lib/pure-utils 직접 호출 행위
+total++;
+{
+  let ok = false;
+  try {
+    const pu = require(path.resolve(__dirname, '..', 'lib', 'pure-utils'));
+    const ab = pu._parseArchiveBlocks('## 제거 2026-01-01 (target: "T-9")\n### 옛제목\n');
+    const md = pu._parseSkillCatalog('- [nm](https://x/SKILL.md) — d', '');
+    const js = pu._parseSkillCatalog('{"skills":[{"id":"a","url":"u"}]}', '');
+    ok = Array.isArray(ab) && ab.length === 1 && ab[0].target === 'T-9' && ab[0].originalHeader === '옛제목'
+      && md.length === 1 && md[0].format === 'markdown' && js.length === 1 && js[0].format === 'json';
+  } catch {}
+  console.log(ok ? '✓ B(1.9.370) UR-0025: _parseArchiveBlocks/_parseSkillCatalog 순수 파서 모듈 분리 (행위)' : '✗ 파서 모듈 분리 실패');
   if (!ok) failed++;
 }
 

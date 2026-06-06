@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
-const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, _parseSkillsValue, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
+const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, _parseSkillsValue, _parseArchiveBlocks, _parseSkillCatalog, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
   _htmlToText, _extractTitle, _extractLinks,
   _countDatedBlocks, _extractDecisionBlocks, _classifyIntent,
@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.369';
+const VERSION = '1.9.370';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1537,54 +1537,7 @@ async function skillInstallCmd(root, source) {
 
 // 1.9.52: 카탈로그 형식 자동 감지 + 파싱 (JSON, llms.txt, RSS, manifest.json, 일반 마크다운)
 // 표준화된 entry 형식: { name, url, description, format }
-function _parseSkillCatalog(body, sourceUrl) {
-  const entries = [];
-  const trimmed = body.trim();
-  // 1) JSON 카탈로그 — manifest.json 형식 (1.9.47에서 publish가 만드는 형식과 호환)
-  //    { "skills": [{ "id"/"name", "url"/"path", "description" }, ...] }
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try {
-      const j = JSON.parse(trimmed);
-      const arr = Array.isArray(j) ? j : (j.skills || j.entries || j.items || []);
-      for (const e of arr) {
-        if (!e || (!e.name && !e.id)) continue;
-        entries.push({
-          name: e.name || e.id,
-          url: e.url || e.path || (sourceUrl ? sourceUrl.replace(/[^/]+$/, '') + (e.id || e.name) + '/SKILL.md' : ''),
-          description: e.description || '',
-          format: 'json'
-        });
-      }
-      if (entries.length) return entries;
-    } catch {}
-  }
-  // 2) RSS/Atom — <item><title>X</title><link>...</link><description>...</description></item>
-  if (/<rss|<feed|<channel|<item>/i.test(body)) {
-    for (const m of body.matchAll(/<(?:item|entry)\b[\s\S]*?<\/(?:item|entry)>/gi)) {
-      const item = m[0];
-      const title = (item.match(/<title>([^<]+)<\/title>/i) || [])[1];
-      const link = (item.match(/<link[^>]*>([^<]+)<\/link>/i) || item.match(/<link\s+href="([^"]+)"/i) || [])[1];
-      const desc = (item.match(/<description>([^<]+)<\/description>/i) || item.match(/<summary>([^<]+)<\/summary>/i) || [])[1];
-      if (title) entries.push({ name: title.trim(), url: (link || '').trim(), description: (desc || '').trim(), format: 'rss' });
-    }
-    if (entries.length) return entries;
-  }
-  // 3) 마크다운 링크 with description — "- [name](url) — description"
-  for (const m of body.matchAll(/^\s*[-*]\s*\[([^\]]+)\]\(([^)]+)\)\s*[-—:]\s*(.+)$/gm)) {
-    entries.push({ name: m[1], url: m[2], description: m[3].trim(), format: 'markdown' });
-  }
-  if (entries.length) return entries;
-  // 4) 마크다운 링크 without description — "- [name](url)"
-  for (const m of body.matchAll(/^\s*[-*]\s*\[([^\]]+)\]\(([^)]+\.md)\)/gm)) {
-    entries.push({ name: m[1], url: m[2], description: '', format: 'markdown' });
-  }
-  if (entries.length) return entries;
-  // 5) llms.txt — 단순 URL 라인
-  for (const m of body.matchAll(/(https?:\/\/[^\s)]+SKILL\.md)/g)) {
-    entries.push({ name: m[1].split('/').slice(-2)[0], url: m[1], description: '', format: 'urls' });
-  }
-  return entries;
-}
+// 1.9.370 (UR-0025): _parseSkillCatalog → lib/pure-utils (순수 파서 — JSON/RSS/markdown/urls).
 
 // 1.9.182: 공식 조직 스킬 catalog presets — 사용자 명시 (vercel-labs, anthropics 같은 1st-party 자동 탐색).
 //   각 entry: GitHub repo의 skills/ 디렉토리에 SKILL.md 들이 있는 표준 구조.
@@ -3053,6 +3006,7 @@ function _selfTestCases() {
     { name: 'UR-0025: _mergeLines/_mergeEnvLines 순수 코어 모듈 분리 + 행위 (1.9.367)', run: () => { if (typeof _mergeLines !== 'function' || typeof _mergeEnvLines !== 'function') return false; const m = require('../lib/pure-utils'); const moved = m._mergeLines === _mergeLines && m._mergeEnvLines === _mergeEnvLines; const ml = _mergeLines('a\n', ['a', 'b']) === 'a\nb\n'; const meKeep = _mergeEnvLines('FOO=keep\n', ['FOO=new']) === 'FOO=keep\n'; const meAdd = _mergeEnvLines('FOO=keep\n', ['BAR=add']).includes('BAR=add'); return moved && ml && meKeep && meAdd; } },
     { name: 'UR-0025: _mergeReadmeSection/_managedMerge + MERGE_OVERWRITE_FILES 모듈 분리 + 행위 (1.9.368)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _mergeReadmeSection !== 'function' || typeof _managedMerge !== 'function') return false; const moved = m._mergeReadmeSection === _mergeReadmeSection && m._managedMerge === _managedMerge && MERGE_OVERWRITE_FILES === c.MERGE_OVERWRITE_FILES; const rd = _mergeReadmeSection('', 'BLOCK', '<s>', '<e>') === '# Project\n\nBLOCK'; const mm = _managedMerge('a.md', 'NEW', 'OLD', '.h', new Set()).includes('migration-preserved'); const ow = _managedMerge('.harness/manifest.json', 'NEW', 'OLD', '.h', c.MERGE_OVERWRITE_FILES) === 'NEW'; const same = _managedMerge('a.md', 'X', 'X', '.h', new Set()) === 'X'; return moved && rd && mm && ow && same; } },
     { name: 'UR-0025: _parseSkillsValue(catalog 주입) + MINIMAL_SKIP_KEYS 모듈 분리 + 행위 (1.9.369)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _parseSkillsValue !== 'function') return false; const moved = m._parseSkillsValue === _parseSkillsValue && MINIMAL_SKIP_KEYS === c.MINIMAL_SKIP_KEYS; const cat = { office: {}, foo: {} }; const empty = _parseSkillsValue('', cat).length === 0; const all = _parseSkillsValue('all', cat).length === 2; const rec = _parseSkillsValue('recommended', cat).includes('office'); const csv = JSON.stringify(_parseSkillsValue('office,bar', cat)) === JSON.stringify(['office']); return moved && empty && all && rec && csv && MINIMAL_SKIP_KEYS.has('.claude/skills/leerness.md'); } },
+    { name: 'UR-0025: _parseArchiveBlocks/_parseSkillCatalog 순수 파서 모듈 분리 + 행위 (1.9.370)', run: () => { const m = require('../lib/pure-utils'); if (typeof _parseArchiveBlocks !== 'function' || typeof _parseSkillCatalog !== 'function') return false; const moved = m._parseArchiveBlocks === _parseArchiveBlocks && m._parseSkillCatalog === _parseSkillCatalog; const ab = _parseArchiveBlocks('## 제거 2026-01-01 (target: ' + '"T-1")\n### 헤더\n'); const abOk = ab.length === 1 && ab[0].date === '2026-01-01' && ab[0].target === 'T-1' && ab[0].originalHeader === '헤더'; const md = _parseSkillCatalog('- [nm](https://x/SKILL.md) — d', ''); const mdOk = md.length === 1 && md[0].name === 'nm' && md[0].format === 'markdown'; const js = _parseSkillCatalog('{' + '"skills":[{"id":"a","url":"u"}]}', ''); const jsOk = js.length === 1 && js[0].name === 'a' && js[0].format === 'json'; return moved && abOk && mdOk && jsOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6312,24 +6266,7 @@ function memoryStatusCmd(root, opts = {}) {
 // 1.9.127: memory archive list — DELETE 5종 archive 파일 통합 조회
 //   .harness/decisions.archive.md / lessons.archive.md / plan.archive.md 의 "## 제거 YYYY-MM-DD" 블록 파싱
 //   --surface decisions|lessons|plan 필터, --json 옵션
-function _parseArchiveBlocks(text) {
-  // archive 형식: "## 제거 YYYY-MM-DD (target: \"...\")\n<원래 블록>"
-  // 첫 번째 "## 제거" 이전의 헤더(# Plan archive 등)는 skip
-  const entries = [];
-  if (!text) return entries;
-  const blocks = text.split(/\n(?=## 제거 )/);
-  for (const b of blocks) {
-    const m = b.match(/^## 제거 (\d{4}-\d{2}-\d{2})\s*\(target:\s*"([^"]*)"\)/);
-    if (!m) continue;
-    const date = m[1];
-    const target = m[2];
-    // 원래 헤더 추출 (### …)
-    const headerMatch = b.match(/^### (.+)$/m);
-    const originalHeader = headerMatch ? headerMatch[1].trim() : null;
-    entries.push({ date, target, originalHeader });
-  }
-  return entries;
-}
+// 1.9.370 (UR-0025): _parseArchiveBlocks → lib/pure-utils (순수 파서).
 function memoryArchiveListCmd(root, opts = {}) {
   root = absRoot(root);
   const jsonMode = !!opts.json || has('--json');

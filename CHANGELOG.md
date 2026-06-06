@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.370 — 2026-06-06 — UR-0025 모듈화: archive/skill-catalog 순수 파서 분리
+
+**🧩 순수 파서 2종을 lib/pure-utils 로 분리 — 인라인 ~65줄 제거.**
+
+### 구현
+1. **`_parseArchiveBlocks(text)`**(pure-utils): memory archive 블록 파서 — `## 제거 DATE (target: "...")` → `{date,target,originalHeader}[]`.
+2. **`_parseSkillCatalog(body, sourceUrl)`**(pure-utils): skill 카탈로그 파서 — JSON/RSS·Atom/markdown 링크/llms.txt 4형식 → `{name,url,description,format}[]`.
+3. harness 인라인 정의(~65줄) 제거 → import 대체. consumer(`memory archive list`/`skill discover`) 무변경.
+
+### 검증 (회귀 0)
+- **selftest 115→116 PASS** (행위: archive 블록 파싱 + markdown/json skill 파싱 + 모듈 reference equality).
+- **E2E 315→316 PASS** (행위: lib/pure-utils 직접 호출로 두 파서 출력 검증).
+- 실측: `memory archive list` consumer 무크래시.
+
 ## 1.9.369 — 2026-06-06 — UR-0025 모듈화: _parseSkillsValue + MINIMAL_SKIP_KEYS 분리
 
 **🧩 install 설정 로직/데이터 모듈화 — --skills 파서 순수화(catalog 주입) + --minimal 제외목록 catalogs 응집.**
