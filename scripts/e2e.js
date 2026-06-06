@@ -5790,5 +5790,26 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.409 회귀 (8번째 버그헌트, UR-0113): env encoding-check --apply 가 .sh/shebang 에 BOM 미추가(실행 깨짐 방지), .ps1 은 추가
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bomsh-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d, 'script.sh'), '#!/bin/bash\n# 한글 주석\necho hi\n');
+    fs.writeFileSync(path.join(d, 'script.ps1'), '# 한글 주석\nWrite-Host hi\n');
+    cp.spawnSync(process.execPath, [CLI, 'env', 'encoding-check', '--path', d, '--apply'], { encoding: 'utf8', timeout: 15000 });
+    const sh = fs.readFileSync(path.join(d, 'script.sh'));
+    const ps = fs.readFileSync(path.join(d, 'script.ps1'));
+    const shOk = sh[0] === 0x23 && sh[1] === 0x21 && !(sh[0] === 0xEF);  // '#!' 보존, BOM 없음
+    const psOk = ps[0] === 0xEF && ps[1] === 0xBB && ps[2] === 0xBF;     // .ps1 BOM 추가
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = shOk && psOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.409) 8th버그헌트: encoding-check --apply .sh shebang 보존(BOM 미추가) + .ps1 BOM (UR-0113)' : '✗ encoding-check BOM 스킵 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

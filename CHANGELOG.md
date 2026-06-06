@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.409 — 2026-06-07 — encoding-check --apply 가 .sh/shebang 깨뜨리던 것 차단 (8번째 버그헌트, UR-0113)
+
+**🐚 인코딩 도구 자기모순 수정 — `env encoding-check --apply` 가 .sh(shebang) 파일에 BOM 을 추가해 스크립트 실행을 깨뜨리던 것 차단.**
+
+### 배경 (2차 버그헌트 encoding 차원)
+`--apply` 는 비-ASCII + no-BOM "위험" 파일에 UTF-8 BOM 을 추가하는데, `.sh`(예: `#!/bin/bash`) 에 BOM(EF BB BF)이 shebang 앞에 붙으면 커널이 `#!` 를 인식 못 해 스크립트 실행 불가. leerness 자체 인코딩 도구가 .sh 를 깨뜨리는 모순.
+
+### 구현
+- `--apply` 루프: `.sh` 확장자 또는 첫 2바이트가 `#!`(shebang)인 파일은 BOM 추가 스킵(`action: skipped-shebang`). .ps1/.bat 등은 기존대로 BOM 추가.
+
+### 검증 (회귀 0)
+- **selftest 154→155 PASS** (.sh shebang 보존 + .ps1 BOM 추가 행위검증).
+- **E2E 347→348 PASS** (CLI --apply: .sh 첫바이트 `#!` 보존(BOM 없음) + .ps1 BOM 추가).
+
 ## 1.9.408 — 2026-06-07 — CRLF/CR SKILL.md frontmatter 파싱 복구 (8번째 버그헌트, UR-0112)
 
 **🪟 Windows 호환 — CRLF/CR 줄바꿈의 SKILL.md frontmatter 가 통째로 소실돼 `skill install` 이 "name 필수" 로 실패하던 것 수정.**

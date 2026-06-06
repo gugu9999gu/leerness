@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.408';
+const VERSION = '1.9.409';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2628,6 +2628,13 @@ function envCmd(root, sub) {
         try {
           const fullPath = path.join(root, r.file);
           const orig = fs.readFileSync(fullPath);
+          // 1.9.409 (8번째 버그헌트, UR-0113): .sh / shebang(#!) 파일은 BOM 추가 금지.
+          //   BOM(EF BB BF)이 shebang 앞에 붙으면 커널이 '#!' 를 인식 못 해 스크립트 실행 불가 → encoding check 가 자기 도구로 .sh 를 깨뜨리던 모순 차단.
+          const isShebang = orig.length >= 2 && orig[0] === 0x23 && orig[1] === 0x21;  // '#!'
+          if (/\.sh$/i.test(r.file) || isShebang) {
+            result.applied.push({ file: r.file, action: 'skipped-shebang (BOM은 shebang을 깨뜨림 — .sh는 no-BOM UTF-8 유지)' });
+            continue;
+          }
           const bom = Buffer.from([0xEF, 0xBB, 0xBF]);
           const fixed = Buffer.concat([bom, orig]);
           fs.writeFileSync(fullPath, fixed);
@@ -3013,6 +3020,7 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0110): rule/decision/lesson add 동시쓰기 _withLock 직렬화 (UR-0043 갭 메움) (1.9.406)', run: () => { const src = read(__filename); const L = '_withLock('; const ruleLock = src.includes(L + 'rulesPath' + '(root), () =>'); const decLock = src.includes(L + 'decisionsJsonPath' + '(root), () =>'); const lesLock = src.includes(L + 'lessonsJsonPath' + '(root), () =>'); return ruleLock && decLock && lesLock; } },
     { name: '8번째 버그헌트 (UR-0111): MCP feature_link safe-write tier(권한경계) + _parseLimit NaN/음수 가드 (1.9.407)', run: () => { const m = require('../lib/pure-utils'); const pl = m._parseLimit('abc', 10) === 10 && m._parseLimit('-5', 10) === 10 && m._parseLimit('0', 10) === 10 && m._parseLimit('3', 10) === 3 && m._parseLimit('7.9', 10) === 7; const tools = require('../lib/mcp-tools'); const arr = Array.isArray(tools) ? tools : (tools.MCP_TOOLS || []); const fl = arr.find(x => x.name === 'leerness_feature_link'); const tierOk = !!fl && fl.requiredTier === 'safe-write'; return pl && tierOk; } },
     { name: '8번째 버그헌트 (UR-0112): _parseSkillMd CRLF/CR 줄바꿈 정규화 (Windows SKILL.md meta 소실 차단) (1.9.408)', run: () => { const m = require('../lib/pure-utils'); const lf = m._parseSkillMd('---\nname: s\ndescription: d\n---\nbody'); const crlf = m._parseSkillMd('---\r\nname: s\r\ndescription: d\r\n---\r\nbody'); const cr = m._parseSkillMd('---\rname: s\rdescription: d\r---\rbody'); const bom = m._parseSkillMd('﻿---\r\nname: s\r\n---\r\nbody'); return lf.meta.name === 's' && crlf.meta.name === 's' && crlf.meta.description === 'd' && cr.meta.name === 's' && bom.meta.name === 's'; } },
+    { name: '8번째 버그헌트 (UR-0113): env encoding-check --apply 가 .sh/shebang 에 BOM 미추가(shebang 보존) (1.9.409)', run: () => { const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_bom_')); try { const sh = path.join(tmp, 's.sh'); fs.writeFileSync(sh, '#!/bin/bash\n# 한글\necho hi\n'); const ps = path.join(tmp, 's.ps1'); fs.writeFileSync(ps, '# 한글\nWrite-Host hi\n'); const save = process.argv; let out = ''; const _w = process.stdout.write; try { process.argv = ['node', 'h', 'env', 'encoding-check', '--path', tmp, '--apply', '--json']; process.stdout.write = s => { out += s; return true; }; envCmd(tmp, 'encoding-check'); } catch {} finally { process.stdout.write = _w; process.argv = save; } const shBuf = fs.readFileSync(sh); const psBuf = fs.readFileSync(ps); const shNoBom = !(shBuf[0] === 0xEF && shBuf[1] === 0xBB && shBuf[2] === 0xBF) && shBuf[0] === 0x23 && shBuf[1] === 0x21; const psBom = psBuf[0] === 0xEF && psBuf[1] === 0xBB && psBuf[2] === 0xBF; return shNoBom && psBom; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
