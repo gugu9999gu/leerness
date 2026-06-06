@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.410';
+const VERSION = '1.9.411';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3022,6 +3022,7 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0112): _parseSkillMd CRLF/CR 줄바꿈 정규화 (Windows SKILL.md meta 소실 차단) (1.9.408)', run: () => { const m = require('../lib/pure-utils'); const lf = m._parseSkillMd('---\nname: s\ndescription: d\n---\nbody'); const crlf = m._parseSkillMd('---\r\nname: s\r\ndescription: d\r\n---\r\nbody'); const cr = m._parseSkillMd('---\rname: s\rdescription: d\r---\rbody'); const bom = m._parseSkillMd('﻿---\r\nname: s\r\n---\r\nbody'); return lf.meta.name === 's' && crlf.meta.name === 's' && crlf.meta.description === 'd' && cr.meta.name === 's' && bom.meta.name === 's'; } },
     { name: '8번째 버그헌트 (UR-0113): env encoding-check --apply 가 .sh/shebang 에 BOM 미추가(shebang 보존) (1.9.409)', run: () => { const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_bom_')); try { const sh = path.join(tmp, 's.sh'); fs.writeFileSync(sh, '#!/bin/bash\n# 한글\necho hi\n'); const ps = path.join(tmp, 's.ps1'); fs.writeFileSync(ps, '# 한글\nWrite-Host hi\n'); const save = process.argv; let out = ''; const _w = process.stdout.write; try { process.argv = ['node', 'h', 'env', 'encoding-check', '--path', tmp, '--apply', '--json']; process.stdout.write = s => { out += s; return true; }; envCmd(tmp, 'encoding-check'); } catch {} finally { process.stdout.write = _w; process.argv = save; } const shBuf = fs.readFileSync(sh); const psBuf = fs.readFileSync(ps); const shNoBom = !(shBuf[0] === 0xEF && shBuf[1] === 0xBB && shBuf[2] === 0xBF) && shBuf[0] === 0x23 && shBuf[1] === 0x21; const psBom = psBuf[0] === 0xEF && psBuf[1] === 0xBB && psBuf[2] === 0xBF; return shNoBom && psBom; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: '8번째 버그헌트 (UR-0114): absRoot 비문자열(--path 값없음 boolean true) → cwd 폴백(raw TypeError 차단) (1.9.410)', run: () => { const io = require('../lib/io'); const cwd = process.cwd(); const tBool = io.absRoot(true) === cwd; const tEmpty = io.absRoot('') === cwd; const tUndef = io.absRoot(undefined) === cwd; const tSpace = io.absRoot('   ') === cwd; const tReal = io.absRoot(os.tmpdir()) === path.resolve(os.tmpdir()); return tBool && tEmpty && tUndef && tSpace && tReal; } },
+    { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -7282,10 +7283,21 @@ function lazyDetect(root, opts = {}) {
       // 새 TODO 처음 5개 표시 (verbose 모드만)
       if (!jsonMode) newTodos.slice(0, 5).forEach(t => log(`    ${t.file}:${t.line}  ${t.text}`));
       if (has('--auto-track') && newTodos.length) {
-        for (const t of newTodos) {
-          const id = nextId(root, 'T');
-          upsertProgress(root, { id, status: 'requested', request: `TODO ${t.file}:${t.line}`, evidence: 'auto-tracked', nextAction: t.text.slice(0, 80) });
-        }
+        // 1.9.411 (8번째 버그헌트, UR-0115): TODO 일괄 등록을 단일 read-modify-write 로 직렬화.
+        //   종전: TODO 마다 nextId(plan+progress 전체 스캔) + upsertProgress(전체 read+write) → O(T × tracker크기) (다수 TODO 자동등록 시 O(N²) 행걸림).
+        //   개선: 락 1회 안에서 rows 1회 읽고, 최대 T-id 1회 계산, 전부 push, 1회 write → O(N + T).
+        _withLock(progressPath(root), () => {
+          const header = progressHeader(root);
+          const rows2 = readProgressRows(root);
+          let maxT = 0; const idRe = /\bT-(\d{4})\b/g;
+          const scanSrc = (exists(planPath(root)) ? read(planPath(root)) : '') + '\n' + rows2.map(r => r.id).join('\n');
+          let mm; while ((mm = idRe.exec(scanSrc))) maxT = Math.max(maxT, Number(mm[1]));
+          for (const t of newTodos) {
+            maxT++;
+            rows2.push({ id: `T-${String(maxT).padStart(4, '0')}`, status: 'requested', request: `TODO ${t.file}:${t.line}`, evidence: 'auto-tracked', nextAction: t.text.slice(0, 80), updated: today() });
+          }
+          writeProgressRows(root, header, rows2);
+        });
         // known-todos에 추가 — 다음 detect에서 재카운트 안 하도록
         const merged = [...knownList, ...newTodos.map(t => ({ ...t, ackAt: now() }))];
         writeUtf8(knownPath, JSON.stringify(merged, null, 2) + '\n');

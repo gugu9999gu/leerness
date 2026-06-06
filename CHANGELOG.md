@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.411 — 2026-06-07 — lazy detect --auto-track 배치화 O(N²)→O(N) (8번째 버그헌트, UR-0115)
+
+**⚡ 성능 — `lazy detect --auto-track` 가 TODO 마다 progress-tracker 전체 read-modify-write 하던 O(T×N) 을 단일 RMW O(N+T) 로.**
+
+### 배경 (2차 버그헌트 ReDoS/perf 차원)
+`--auto-track` 은 새 TODO 마다 `nextId`(plan+progress 전체 스캔) + `upsertProgress`(락+전체 read+write)를 호출 → T개 TODO 시 O(T × tracker크기). AI 가 생성/대량 코드에 실행 시 다수 TODO 자동등록이 느려짐(병리적 입력에서 행걸림).
+
+### 구현
+- 락 1회 안에서 rows 1회 읽기 → 최대 T-id 1회 계산 → 전부 push → 1회 write. 순차 ID·필드·멱등 동작 보존(동시성 안전 _withLock 유지).
+
+### 검증 (회귀 0)
+- **selftest 156→157 PASS** (배치 구조 + per-TODO upsert 제거 확인).
+- **E2E 349→350 PASS** (6 TODO --auto-track 순차 ID 무중복 등록).
+- 실측: 8 TODO → T-0002~0009 순차, 단일 RMW.
+
 ## 1.9.410 — 2026-06-07 — 값 없는 --path raw TypeError 크래시 차단 (8번째 버그헌트, UR-0114)
 
 **🛡 견고성 — `--path`(값 없이) 같은 비-문자열 인자가 `path.resolve(true)` raw Node TypeError 로 크래시하던 것을 cwd 폴백으로 차단.**

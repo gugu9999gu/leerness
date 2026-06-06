@@ -5826,5 +5826,29 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.411 회귀 (8번째 버그헌트, UR-0115): lazy detect --auto-track 배치화가 다수 TODO 를 순차 ID 로 정확히 등록(동작 보존)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-autotrack-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    let body = '';
+    for (let i = 0; i < 6; i++) body += `function f${i}(){ // TODO fix ${i}\n  return ${i};\n}\n`;
+    fs.writeFileSync(path.join(d, 'src', 'a.js'), body);
+    cp.spawnSync(process.execPath, [CLI, 'lazy', 'detect', d, '--auto-track'], { encoding: 'utf8', timeout: 20000 });
+    const tl = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'task', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 }).stdout);
+    const ts = (tl.tasks || tl).filter(t => /^TODO /.test(t.request));
+    const ids = ts.map(t => t.id);
+    const uniq = new Set(ids).size === ids.length;  // 중복 ID 없음(배치 정확성)
+    const ok6 = ts.length === 6 && uniq;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = ok6;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.411) 8th버그헌트: lazy detect --auto-track 배치(6 TODO 순차ID 무중복 등록) (UR-0115)' : '✗ auto-track 배치 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
