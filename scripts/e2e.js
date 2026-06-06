@@ -5110,5 +5110,28 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.372 회귀 (UR-0073 Phase B): team preview — dry-run 실행 계획 미리보기 (멤버별 dispatch 명령, 실제 실행/파일변경 없음)
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tprev-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'rev', '--purpose', 'PR 리뷰', '--personas', 'security', '--members', 'claude,codex', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const pj = cp.spawnSync(process.execPath, [CLI, 'team', 'preview', 'rev', '--task', '점검', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let planOk = false;
+    try { const j = JSON.parse(pj.stdout); planOk = j.dryRun === true && j.task === '점검' && j.steps.length === 2 && j.steps[0].suggestedCommand.includes('agents dispatch') && j.steps[0].suggestedCommand.includes('--to claude') && j.steps[0].dispatchPrompt.includes('security'); } catch {}
+    // dry-run: preview 가 어떤 파일도 변경하지 않음 (teams.json mtime 불변)
+    const tj = path.join(d, '.harness', 'teams.json');
+    const before = fs.statSync(tj).mtimeMs;
+    cp.spawnSync(process.execPath, [CLI, 'team', 'preview', 'rev', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const after = fs.statSync(tj).mtimeMs;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = planOk && before === after;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.372) UR-0073 Phase B: team preview dry-run 실행계획 (멤버별 dispatch, 파일변경 0)' : '✗ team preview 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

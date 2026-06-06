@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.372 — 2026-06-06 — UR-0073 Phase B: team preview — dry-run 실행 계획 미리보기
+
+**🧩 정의된 팀의 작업을 실제 실행 없이 미리보기 — `leerness team preview`.** (UR-0073 Phase B, 안전 게이트: dry-run 전용)
+
+### 구현
+1. **`leerness team preview <id> [--task "..."]`** + `_composeTeamPlan(team, task)`(순수): 팀의 members × personas × task 로 **멤버별 dispatch 명령 문자열**을 생성. `--task` 미지정 시 팀 purpose 를 기본 작업으로.
+2. **dry-run 전용 안전**: 실제 spawn/dispatch/배포 **없음**, 파일 변경 0. 출력은 검토용 제안 명령(`leerness agents dispatch "..." --to <member>`)만. `--json` 은 `{ dryRun:true, task, steps:[{member,personas,dispatchPrompt,suggestedCommand}] }`.
+3. commands/help 에 preview 반영.
+
+### 검증 (회귀 0)
+- **selftest 117→118 PASS** (행위: `_composeTeamPlan` 멤버별 step/persona 주입/purpose 기본값/빈 members + 모듈 reference equality).
+- **E2E 317→318 PASS** (행위: team add→preview `--json`(dryRun true, steps 2, dispatch 명령) + preview 후 teams.json mtime 불변=파일변경 0).
+- 실측: preview 가 dispatch 계획만 출력, 실행/변경 없음.
+
+### UR-0073 로드맵: Phase A(정의) → **B(preview dry-run)** 완료. C(스케줄 트리거)/D(배포 통합)는 향후 opt-in 게이트.
+
 ## 1.9.371 — 2026-06-06 — UR-0073 Phase A: 에이전트 팀 정의 레지스트리 (opt-in · 정의 전용)
 
 **🧩 페르소나 기반 에이전트 팀 비전 착수 — `leerness team` 정의 레지스트리.** (UR-0073 Phase A, 안정화 완료 후 opt-in 신규 비전)
