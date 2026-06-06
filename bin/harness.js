@@ -29,7 +29,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.387';
+const VERSION = '1.9.388';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2982,7 +2982,7 @@ function _selfTestCases() {
     { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + 빌더 동작 (1.9.377)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide('.leerness', '9.9.9', '2026-01-01T00:00:00.000Z'); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString())'); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && g.includes('마이그레이션 안내') && wrapperThin; } },
     { name: 'UR-0073: team MCP 도구 2종(read-only) 정의 + dispatch 와이어 (1.9.378)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const tl = tools.find(t => t.name === 'leerness_team_list'); const tp = tools.find(t => t.name === 'leerness_team_preview'); const defsOk = tl && tl.requiredTier === 'read-only' && tp && tp.requiredTier === 'read-only' && tp.inputSchema.required && tp.inputSchema.required.includes('id'); const wired = src.includes("case " + "'leerness_team_list':") && src.includes("case " + "'leerness_team_preview':") && /cliArgs = \['team', 'list'/.test(src) && /cliArgs = \['team', 'preview'/.test(src); return !!defsOk && wired; } },
     { name: 'UR-0025 심화: pulse 렌더 코어 분리 — _memorySurface + _renderPulseLine 행위 (1.9.379)', run: () => { const m = require('../lib/pure-utils'); if (typeof _memorySurface !== 'function' || typeof _renderPulseLine !== 'function' || m._memorySurface !== _memorySurface || m._renderPulseLine !== _renderPulseLine) return false; const ms = _memorySurface({ tasks: 1, decisions: 2, rules: 3, milestones: 4, lessons: 5 }) === 'T1/D2/R3/P4/L5' && _memorySurface({}) === 'T0/D0/R0/P0/L0'; const base = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'T0/D1/R0/P2/L0' }); const ln = base.includes('v1.0.0') && base.includes('R7') && base.includes('MCP 85') && base.includes('T0/D1/R0/P2/L0') && !base.includes('🎯') && !base.includes('abnormal'); const full = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'x', nextMilestone: 400, etaDays: 6, abnormalShutdown: 'high' }); const ln2 = full.includes('🎯 R400 (6d)') && full.includes('abnormal:high'); const wired = read(__filename).includes('const line = _renderPulseLine(data)') && read(__filename).includes('data.memorySurface = _memorySurface('); return ms && ln && ln2 && wired; } },
-    { name: 'UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 — verify/migrate audit·apply 3중 중복 제거 (1.9.380)', run: () => { const c = require('../lib/catalogs'); if (REQUIRED_WORKSPACE_FILES !== c.REQUIRED_WORKSPACE_FILES) return false; const listOk = Array.isArray(c.REQUIRED_WORKSPACE_FILES) && c.REQUIRED_WORKSPACE_FILES.length === 9 && c.REQUIRED_WORKSPACE_FILES.includes('AGENTS.md') && c.REQUIRED_WORKSPACE_FILES.includes('.harness/plan.md'); const usesConst = (read(__filename).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 3; return listOk && usesConst; } },
+    { name: 'UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 — verify/migrate audit·apply 3중 중복 제거 (1.9.380)', run: () => { const c = require('../lib/catalogs'); if (REQUIRED_WORKSPACE_FILES !== c.REQUIRED_WORKSPACE_FILES) return false; const listOk = Array.isArray(c.REQUIRED_WORKSPACE_FILES) && c.REQUIRED_WORKSPACE_FILES.length === 9 && c.REQUIRED_WORKSPACE_FILES.includes('AGENTS.md') && c.REQUIRED_WORKSPACE_FILES.includes('.harness/plan.md'); const harnessUses = (read(__filename).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 1; const migUses = (read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 2; return listOk && harnessUses && migUses; } },
     { name: 'UR-0025: KEYWORD_STOPWORDS 단일출처 — handoff/lessons 키워드 stopwords 2중 중복 제거 (1.9.381)', run: () => { const c = require('../lib/catalogs'); if (KEYWORD_STOPWORDS !== c.KEYWORD_STOPWORDS) return false; const setOk = c.KEYWORD_STOPWORDS instanceof Set && c.KEYWORD_STOPWORDS.has('작업') && c.KEYWORD_STOPWORDS.has('task') && !c.KEYWORD_STOPWORDS.has('고유단어') && c.KEYWORD_STOPWORDS.size >= 25; const usesConst = (read(__filename).match(/const stopwords = KEYWORD_STOPWORDS;/g) || []).length >= 2 && !/const stopwords = new Set\(\[/.test(read(__filename)); return setOk && usesConst; } },
     { name: 'UR-0025 큰핸들러토대: lib/io.js 프리미티브(log/ok/warn/fail/today/now) 모듈 분리 + 동작 (1.9.382)', run: () => { const io = require('../lib/io'); const exportsOk = ['log', 'ok', 'warn', 'fail', 'today', 'now'].every(k => typeof io[k] === 'function') && io.log === log && io.fail === fail && io.now === now; const todayOk = /^\d{4}-\d{2}-\d{2}$/.test(io.today()) && /^\d{4}-\d{2}-\d{2}T/.test(io.now()); const src = read(__filename); const moved = src.includes("require('../lib/io')") && !/^function fail\(s\) \{ log/m.test(src) && !/^function now\(\) \{ return new Date/m.test(src); let exitOk = false; const saved = process.exitCode; const _w = process.stdout.write; try { process.stdout.write = () => true; process.exitCode = 0; io.fail('probe'); exitOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } return exportsOk && todayOk && moved && exitOk; } },
     { name: 'UR-0025 큰핸들러토대: lib/io.js fs 프리미티브(read/writeUtf8/exists/mkdirp/append/rel/absRoot) 분리 + round-trip (1.9.383)', run: () => { const io = require('../lib/io'); const exp = ['absRoot', 'exists', 'read', 'readBuf', 'mkdirp', 'writeUtf8', 'append', 'rel'].every(k => typeof io[k] === 'function') && io.read === read && io.writeUtf8 === writeUtf8 && io.exists === exists; const src = read(__filename); const moved = !/^function writeUtf8\(p, s\) \{/m.test(src) && !/^function read\(p\) \{/m.test(src) && !/^function exists\(p\) \{/m.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_io_')); let rt = false; try { const f = path.join(tmp, 'a', 'b.txt'); io.writeUtf8(f, '한글RT'); rt = io.exists(f) && io.read(f) === '한글RT' && io.rel(tmp, f) === 'a/b.txt'; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return exp && moved && rt; } },
@@ -2990,6 +2990,7 @@ function _selfTestCases() {
     { name: '5th외부평가/UR-0086: _parseContractSpec markdown bullet 함수 감지 + 순수 추출 (1.9.385)', run: () => { const m = require('../lib/pure-utils'); if (m._parseContractSpec !== _parseContractSpec) return false; const p = _parseContractSpec('# Spec\n- add(a,b)\n* subtract(a,b)\n1. multiply(a,b)\nfunction legacy(x)\n`mentioned(`\ntick.amount\n'); const declOk = ['add', 'subtract', 'multiply', 'legacy'].every(n => p.declared.includes(n)) && p.declared.length === 4; const menOk = p.mentioned.includes('mentioned') && !p.declared.includes('mentioned'); const fieldOk = p.fields.includes('amount'); const fpOk = _parseContractSpec('- 합계 (a+b)\n- result (total)\n- foo: bar(x)\n**bold**').declared.length === 0; const src = read(__filename); const moved = src.includes('_parseContractSpec(specText)') && !/specText\.matchAll\(\/function/.test(src); return declOk && menOk && fieldOk && fpOk && moved; } },
     { name: '5th외부평가/UR-0087: _gitignoreMatch git 일치(.env↛.env.bad) + env-family 스캔 (1.9.386)', run: () => { const m = require('../lib/pure-utils'); if (m._gitignoreMatch !== _gitignoreMatch) return false; const gm = _gitignoreMatch; const semOk = gm('.env', '.env') === true && gm('.env', '.env.bad') === false && gm('.env', '.env.local') === false && gm('.env.*', '.env.bad') === true && gm('.env*', '.env') === true && gm('*.pem', 'k.pem') === true && gm('src/', 'src/a.txt') === true; const src = read(__filename); const envFamilyScan = src.includes('const isEnvFamily =') && src.includes('!SCAN_TEXT_EXT.has(ext) && !isEnvFamily'); const delegated = src.includes('return _gitignoreMatch(gi, fileRel)'); return semOk && envFamilyScan && delegated; } },
     { name: 'UR-0088 5th외부평가 일관성: incident/runs list 빈 케이스 --json 구조화 (1.9.387)', run: () => { if (typeof incidentListCmd !== 'function' || typeof runsListCmd !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lj_')); const save = process.argv; const _w = process.stdout.write; let io = '', ro = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'incident', 'list', '--json']; process.stdout.write = s => { io += s; return true; }; incidentListCmd(tmp); process.stdout.write = _w; process.argv = ['node', 'h', 'runs', 'list', '--json']; process.stdout.write = s => { ro += s; return true; }; runsListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let ij, rj; try { ij = JSON.parse(io); rj = JSON.parse(ro); } catch {} return !!ij && ij.total === 0 && Array.isArray(ij.items) && !!rj && rj.total === 0 && Array.isArray(rj.items); } },
+    { name: 'UR-0025 큰핸들러 모듈화: migrate audit/apply/plan → lib/migrate.js + DI 위임 + 동작 (1.9.388)', run: () => { const m = require('../lib/migrate'); const expOk = typeof m.migrateAuditCmd === 'function' && typeof m.migrateApplyCmd === 'function' && typeof m.migratePlanCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/migrate')") && src.includes('_migrate.migrateAuditCmd(root, opts, _migrateDeps())') && src.includes('_migrate.migratePlanCmd(root, opts, _migrateDeps())'); const movedToLib = read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).includes('leerness-plan-'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_mig_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'HARNESS_VERSION'), VERSION); process.argv = ['node', 'h', 'migrate', 'audit', tmp, '--json']; process.stdout.write = s => { out += s; return true; }; migrateAuditCmd(tmp, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && typeof j.willChange === 'number' && Array.isArray(j.findings); } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6771,110 +6772,16 @@ function verify(root) {
   if (failures.length) { failures.forEach(f => fail(f)); process.exitCode = 1; } else ok('verify passed');
 }
 // 1.9.356 (UR-0075 Phase B): migrate audit — 비파괴 dry-run 스키마 drift 리포트(버전/ canonical JSON 백필/누락 파일). 실제 변경 X.
-function migrateAuditCmd(root, opts = {}) {
-  root = absRoot(root);
-  const findings = [];
-  const hvPath = path.join(root, '.harness', 'HARNESS_VERSION');
-  const projVer = exists(hvPath) ? read(hvPath).trim() : null;
-  if (!projVer) findings.push({ kind: 'no-version', detail: 'HARNESS_VERSION 없음 (미초기화 또는 아주 구버전)', action: `leerness migrate --path ${root}` });
-  else if (compareVer(projVer, VERSION) < 0) findings.push({ kind: 'version-drift', detail: `${projVer} → ${VERSION}`, action: `leerness update --yes --path ${root}` });
-  // canonical JSON 백필 필요 (구 MD-only → decisions.json/lessons.json)
-  if (exists(decisionsPath(root)) && !exists(decisionsJsonPath(root)) && _loadDecisions(root).length > 0) findings.push({ kind: 'canonical-pending', detail: 'decisions.md → decisions.json 백필 예정', action: 'decision add/drop 또는 migrate 시 자동' });
-  if (exists(lessonsPath(root)) && !exists(lessonsJsonPath(root)) && _loadLessons(root).length > 0) findings.push({ kind: 'canonical-pending', detail: 'lessons.md → lessons.json 백필 예정', action: 'lesson save/drop 또는 migrate 시 자동' });
-  // 누락 예상 파일 (현재 버전 required set 기준)
-  const required = REQUIRED_WORKSPACE_FILES;  // 1.9.380 (UR-0025): lib/catalogs 단일출처
-  for (const f of required) if (!exists(path.join(root, f))) findings.push({ kind: 'missing-file', detail: f, action: 'migrate 가 생성' });
-  if (opts.json) { log(JSON.stringify({ version: VERSION, root, projectVersion: projVer, willChange: findings.length, findings }, null, 2)); return; }
-  log(`# leerness migrate audit (1.9.356, UR-0075 dry-run) — 실제 변경 없음`);
-  log(`  대상: ${root}`);
-  log(`  프로젝트 버전: ${projVer || '(없음)'}  ·  도구 버전: ${VERSION}`);
-  if (!findings.length) { ok('마이그레이션 필요 없음 — 최신 스키마 정합'); return; }
-  log(`  예상 변경 ${findings.length}건:`);
-  for (const f of findings) log(`    • [${f.kind}] ${f.detail}${f.action ? `  → ${f.action}` : ''}`);
-  log(`\n  적용: leerness update --yes --path ${root}  ·  안전 가이드: leerness migrate --guide`);
+// 1.9.388 (UR-0025 큰 핸들러 모듈화): migrate audit/apply/plan 핸들러를 lib/migrate.js 로 분리.
+//   harness 는 deps(VERSION·canonical 메모리 함수·카탈로그·compareVer·harness 경로)를 1회 구성해 위임(thin wrapper). 호출부/동작 무변경.
+const _migrate = require('../lib/migrate');
+function _migrateDeps() {
+  return { VERSION, compareVer, REQUIRED_WORKSPACE_FILES, decisionsPath, decisionsJsonPath, lessonsPath, lessonsJsonPath, _loadDecisions, _saveDecisions, _loadLessons, _saveLessons, harnessPath: __filename };
 }
-// UR-0075 Phase C (1.9.357): migrate apply — audit가 찾은 '안전 항목'(canonical 백필)만 비파괴 적용.
-// 기본 dry-run(변경 없음) · --yes 로 실제 적용. version-drift/missing-file 은 apply 범위 외(수동 안내).
-function migrateApplyCmd(root, opts = {}) {
-  root = absRoot(root);
-  const apply = !!opts.yes;
-  const applied = [];   // 안전하게 적용 가능(또는 dry-run 예정): canonical 백필
-  const skipped = [];   // apply 범위 외: 수동 조치 필요
-  // canonical-pending: MD 항목 존재 + JSON 부재 → load(MD 백필)→save(canonical JSON + MD 정규화). idempotent(UR-0053).
-  if (exists(decisionsPath(root)) && !exists(decisionsJsonPath(root)) && _loadDecisions(root).length > 0) {
-    if (apply) _saveDecisions(root, _loadDecisions(root));
-    applied.push({ kind: 'canonical-backfill', detail: 'decisions.md → decisions.json' });
-  }
-  if (exists(lessonsPath(root)) && !exists(lessonsJsonPath(root)) && _loadLessons(root).length > 0) {
-    if (apply) _saveLessons(root, _loadLessons(root));
-    applied.push({ kind: 'canonical-backfill', detail: 'lessons.md → lessons.json' });
-  }
-  // version-drift / 누락 파일 — apply 가 안전하게 in-place 처리 불가(npm 재설치/재초기화 필요) → 수동 안내.
-  const hvPath = path.join(root, '.harness', 'HARNESS_VERSION');
-  const projVer = exists(hvPath) ? read(hvPath).trim() : null;
-  if (!projVer) skipped.push({ kind: 'no-version', detail: 'HARNESS_VERSION 없음', reason: `leerness migrate --path ${root}` });
-  else if (compareVer(projVer, VERSION) < 0) skipped.push({ kind: 'version-drift', detail: `${projVer} → ${VERSION}`, reason: `leerness update --yes --path ${root}` });
-  const required = REQUIRED_WORKSPACE_FILES;  // 1.9.380 (UR-0025): lib/catalogs 단일출처
-  for (const f of required) if (!exists(path.join(root, f))) skipped.push({ kind: 'missing-file', detail: f, reason: 'leerness migrate / init' });
-  if (opts.json) { log(JSON.stringify({ version: VERSION, root, dryRun: !apply, appliedCount: apply ? applied.length : 0, applied, skipped }, null, 2)); return; }
-  log(`# leerness migrate apply (1.9.357, UR-0075 Phase C)${apply ? '' : ' — dry-run (변경 없음 · --yes 로 적용)'}`);
-  log(`  대상: ${root}`);
-  if (!applied.length && !skipped.length) { ok('적용할 항목 없음 — 최신 스키마 정합'); return; }
-  if (applied.length) {
-    log(apply ? `  ✓ 적용 ${applied.length}건 (canonical 백필 · MD→JSON, MD 정규화):` : `  적용 예정 ${applied.length}건 (canonical 백필 · MD→JSON, MD 정규화):`);
-    for (const a of applied) log(`    • ${a.detail}`);
-  }
-  if (skipped.length) {
-    log(`  ⚠ 수동 필요 ${skipped.length}건 (apply 범위 외 — 안전상 자동 변경 안 함):`);
-    for (const s of skipped) log(`    • [${s.kind}] ${s.detail}  → ${s.reason}`);
-  }
-  if (!apply && applied.length) log(`\n  적용: leerness migrate apply --path ${root} --yes`);
-}
-// UR-0075 Phase D (1.9.358): migrate plan — 임시폴더에 현재 버전을 설치(서브프로세스 격리)한 뒤
-// 프로젝트의 .harness 코어 관리 파일과 비교해 정확한 마이그레이션 플랜을 산출. 읽기 전용(프로젝트 미변경).
-// 사용자 비전("임시 폴더에 leerness 설치 후 기존 프로젝트 내용을 정확히 마이그레이션")의 진단 단계.
-function migratePlanCmd(root, opts = {}) {
-  root = absRoot(root);
-  const plan = { version: VERSION, root, projectVersion: null, versionDrift: null, canonicalPending: [], missingFiles: [], tempInstallOk: false, willChange: 0 };
-  const hvPath = path.join(root, '.harness', 'HARNESS_VERSION');
-  plan.projectVersion = exists(hvPath) ? read(hvPath).trim() : null;
-  if (plan.projectVersion && compareVer(plan.projectVersion, VERSION) < 0) plan.versionDrift = `${plan.projectVersion} → ${VERSION}`;
-  if (exists(decisionsPath(root)) && !exists(decisionsJsonPath(root)) && _loadDecisions(root).length > 0) plan.canonicalPending.push('decisions.md → decisions.json');
-  if (exists(lessonsPath(root)) && !exists(lessonsJsonPath(root)) && _loadLessons(root).length > 0) plan.canonicalPending.push('lessons.md → lessons.json');
-  // 임시폴더에 현재 버전 init → 생성되는 .harness 코어 파일(depth-1) 비교 (서브프로세스 격리, stdout 미오염)
-  let tmp = null;
-  try {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-plan-'));
-    const langPath = path.join(root, '.harness', 'LANGUAGE');
-    const lang = exists(langPath) ? (read(langPath).trim() || 'ko') : 'ko';
-    const r = cp.spawnSync(process.execPath, [__filename, 'init', tmp, '--yes', '--language', lang, '--no-banner'], { encoding: 'utf8', timeout: 60000 });
-    plan.tempInstallOk = r.status === 0;
-    if (plan.tempInstallOk) {
-      const tmpHarness = path.join(tmp, '.harness');
-      let tmpFiles = [];
-      try { tmpFiles = fs.readdirSync(tmpHarness, { withFileTypes: true }).filter(e => e.isFile()).map(e => '.harness/' + e.name); } catch {}
-      for (const top of ['AGENTS.md', 'CLAUDE.md']) if (exists(path.join(tmp, top))) tmpFiles.push(top);
-      for (const f of tmpFiles) if (!exists(path.join(root, f))) plan.missingFiles.push(f);
-    }
-  } catch {}
-  finally { if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } }
-  plan.willChange = plan.missingFiles.length + plan.canonicalPending.length + (plan.versionDrift ? 1 : 0);
-  if (opts.json) { log(JSON.stringify(plan, null, 2)); return; }
-  log(`# leerness migrate plan (1.9.358, UR-0075 Phase D) — 임시폴더 설치 후 비교 · 읽기 전용(프로젝트 미변경)`);
-  log(`  대상: ${root}`);
-  log(`  프로젝트 버전: ${plan.projectVersion || '(없음)'}  ·  도구 버전: ${VERSION}`);
-  if (!plan.tempInstallOk) warn('임시폴더 설치 실패 — 파일 비교 생략 (버전/canonical 만 보고)');
-  if (!plan.willChange) { ok('마이그레이션 필요 없음 — 최신 스키마 정합'); return; }
-  log(`  예상 변경 ${plan.willChange}건:`);
-  if (plan.versionDrift) log(`    • [version-drift] ${plan.versionDrift}  → leerness update --yes --path ${root}`);
-  for (const c of plan.canonicalPending) log(`    • [canonical-pending] ${c}  → leerness migrate apply --path ${root} --yes`);
-  if (plan.missingFiles.length) {
-    log(`    • [missing-file] ${plan.missingFiles.length}건 (현재 버전이 생성하는 관리 파일 누락):`);
-    for (const f of plan.missingFiles.slice(0, 20)) log(`        - ${f}`);
-    if (plan.missingFiles.length > 20) log(`        … 외 ${plan.missingFiles.length - 20}건`);
-  }
-  log(`\n  전체 적용: leerness update --yes --path ${root}  ·  canonical만: leerness migrate apply --path ${root} --yes`);
-}
+function migrateAuditCmd(root, opts = {}) { return _migrate.migrateAuditCmd(root, opts, _migrateDeps()); }
+function migrateApplyCmd(root, opts = {}) { return _migrate.migrateApplyCmd(root, opts, _migrateDeps()); }
+function migratePlanCmd(root, opts = {}) { return _migrate.migratePlanCmd(root, opts, _migrateDeps()); }
+
 // UR-0074 (1.9.359): install-safety — 패키지 설치 안전 프로필 투명 공개 (외부리뷰 설치 신뢰성 우려 대응).
 // leerness 의 핵심 안전 속성(0 런타임 의존성 · 0 install-time 스크립트)을 사실 그대로 보고 + 안전 설치 워크플로 안내.
 // 회귀 가드 역할도 겸함: 누군가 런타임 deps/install hook 를 추가하면 selftest/e2e 가 실패시켜 의식적 결정을 강제.

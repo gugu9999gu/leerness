@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.388 — 2026-06-06 — UR-0025 큰 핸들러 모듈화: migrate audit/apply/plan → lib/migrate.js (DI)
+
+**🧩 첫 실제 핸들러 모듈 추출 — migrate 서브시스템(audit/apply/plan)을 lib/migrate.js 로 분리(의존성 주입 ctx). lib/io.js 토대(1.9.382/383)의 첫 활용.**
+
+### 배경 (UR-0025 큰 핸들러 모듈화, 사용자 승인)
+1.9.382/383 에서 lib/io.js(출력+fs 프리미티브 14종)를 만든 목적은 "핸들러를 별도 lib 모듈로 분리할 토대". 이번에 그 토대로 **첫 실제 핸들러**(migrate UR-0075, ~100줄, 응집적·e2e 3건 보유)를 추출.
+
+### 구현
+1. **lib/migrate.js 신규**: `migrateAuditCmd` / `migrateApplyCmd` / `migratePlanCmd` 이전.
+   - I/O 프리미티브: `require('./io')`(absRoot/exists/read/log/ok/warn).
+   - harness 고유 의존은 **deps 객체로 주입(DI)**: VERSION · compareVer · REQUIRED_WORKSPACE_FILES · canonical 메모리 함수 8종(decisionsPath/…/_save*) · harnessPath(plan 의 임시폴더 init spawn 용).
+2. **harness thin wrapper**: `_migrateDeps()` 가 deps 1회 구성 → 3개 wrapper 가 위임. **호출부(dispatch)·동작·출력 무변경**.
+3. 새 패턴 확립: 향후 다른 핸들러도 이 DI 방식으로 lib 모듈화 가능(io import + deps 주입).
+
+### 검증 (회귀 0)
+- **selftest 133→134 PASS** (lib/migrate 3 exports + harness 위임 와이어 + lib 본문 이동 확인 + behavioral audit JSON). 1.9.380 케이스는 REQUIRED_WORKSPACE_FILES 소비처가 harness+lib 로 분산됨에 맞춰 교차참조 카운트로 갱신.
+- **E2E 332 유지 PASS** (기존 migrate B(1.9.356/357/358) audit/apply/plan CLI 회귀가 CLI→wrapper→lib 경로를 그대로 검증 — 신규 케이스 불필요). 락 flake 시 재실행.
+- 실측: audit(정합 willChange:0 / canonical-pending 감지) · apply --yes(decisions.json 백필 복원) · plan(tempInstallOk:true) · 사람용 출력 보존.
+
 ## 1.9.387 — 2026-06-06 — --json 일관성 연장: incident/runs list 빈 케이스 구조화 (UR-0088)
 
 **🔌 `incident list` / `runs list` 의 빈 상태도 `--json` 시 `{total:0,items:[]}` 출력 — AI 에이전트가 빈 프로젝트에서 사람용 텍스트를 파싱하다 실패하던 일관성 결함 해소.**
