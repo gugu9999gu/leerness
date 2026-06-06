@@ -7,7 +7,7 @@ const cp = require('child_process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
-const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, _parseSkillsValue, _parseArchiveBlocks, _parseSkillCatalog, _renderTeamsMd, _composeTeamPlan, _teamHandoffReminders, _cadenceAssessment, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
+const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, _parseSkillsValue, _parseArchiveBlocks, _parseSkillCatalog, _renderTeamsMd, _composeTeamPlan, _teamHandoffReminders, _cadenceAssessment, _teamDeployGate, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
   _htmlToText, _extractTitle, _extractLinks,
   _countDatedBlocks, _extractDecisionBlocks, _classifyIntent,
@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.375';
+const VERSION = '1.9.376';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3012,6 +3012,7 @@ function _selfTestCases() {
     { name: 'UR-0073 Phase C: _teamHandoffReminders 스케줄 알림 (비-manual·active 만, 실행 트리거 아님) 행위 (1.9.373)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamHandoffReminders !== 'function' || m._teamHandoffReminders !== _teamHandoffReminders) return false; const r = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'] }, { id: 'man', schedule: 'manual', status: 'active' }, { id: 'paused', schedule: 'daily', status: 'paused' }]); return r.length === 1 && r[0].includes('rev') && r[0].includes('every-session') && r[0].includes('team preview rev') && !r.join('|').includes('man') && !r.join('|').includes('paused'); } },
     { name: 'UR-0074: _cadenceAssessment 릴리스 빈도 평가 (임계값) 행위 (1.9.374)', run: () => { const m = require('../lib/pure-utils'); if (typeof _cadenceAssessment !== 'function' || m._cadenceAssessment !== _cadenceAssessment || typeof releaseCadenceCmd !== 'function') return false; return _cadenceAssessment(7, 1, 1).level === 'very-high' && _cadenceAssessment(3, 1, 1).level === 'high' && _cadenceAssessment(1, 1, 1).level === 'moderate' && _cadenceAssessment(0.2, 1, 1).level === 'healthy' && _cadenceAssessment(7, 1, 1).recommendation.length > 0; } },
     { name: 'UR-0084: _withLock 획득/재진입/해제 + maxWaitMs 하드닝(10s) 행위 (1.9.375)', run: () => { if (typeof _withLock !== 'function') return false; const src = read(__filename); const hardened = /maxWaitMs = opts\.maxWaitMs \|\| 10000/.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lock_')); try { const target = path.join(tmp, 'f.md'); let reentrant = false; const lockSeen = _withLock(target, () => { const exists = fs.existsSync(target + '.lock'); reentrant = (_withLock(target, () => 42) === 42); return exists; }); const cleaned = !fs.existsSync(target + '.lock'); return hardened && lockSeen === true && reentrant === true && cleaned; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
+    { name: 'UR-0073 Phase D: _teamDeployGate 이중 게이트 (dry-run 기본/env 게이트/실행) 행위 (1.9.376)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamDeployGate !== 'function' || m._teamDeployGate !== _teamDeployGate) return false; const team = { id: 'd', deployCommand: 'echo hi' }; const noCmd = _teamDeployGate({ id: 'x' }, { yes: true, envOn: true }).mode === 'no-command'; const dry = _teamDeployGate(team, { yes: false, envOn: true }).mode === 'dry-run'; const gated = _teamDeployGate(team, { yes: true, envOn: false }).mode === 'gated'; const exec = _teamDeployGate(team, { yes: true, envOn: true }).mode === 'execute'; return noCmd && dry && gated && exec; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3651,7 +3652,7 @@ function commandsCmd(root) {
       { cmd: 'deploy auto', desc: '배포 자동화' },
       { cmd: 'runs list|show', desc: '실행 이력' },
       { cmd: 'whats-new [path]', desc: '최근 버전 변경 요약' },
-      { cmd: 'team list|add|show|remove|preview <id> [--name --purpose --personas --members --schedule --task]', desc: '에이전트 팀 정의 + preview(dry-run 실행계획) — UR-0073 Phase A/B, opt-in · 정의/미리보기 전용' }
+      { cmd: 'team list|add|show|remove|preview|deploy <id> [--name --purpose --personas --members --schedule --task --deploy --yes]', desc: '에이전트 팀 정의 + preview(dry-run) + deploy(2중 게이트) — UR-0073 A~D, opt-in · 배포는 --yes+LEERNESS_TEAM_DEPLOY=1' }
     ]
   };
   if (has('--json')) {
@@ -5897,6 +5898,7 @@ function teamCmd(root, sub, id, opts = {}) {
       personas: splitCsv(arg('--personas', null)),
       members: splitCsv(arg('--members', null)),
       schedule: validSched.has(sched) ? sched : 'manual',
+      deployCommand: arg('--deploy', '') === true ? '' : arg('--deploy', ''),  // 1.9.376 (Phase D): 사용자 설정 배포 명령 (실행은 게이트)
       status: 'active',
       createdAt: now()
     };
@@ -5916,6 +5918,7 @@ function teamCmd(root, sub, id, opts = {}) {
     log(`  personas: ${(t.personas || []).join(', ') || '-'}`);
     log(`  members: ${(t.members || []).join(', ') || '-'}`);
     log(`  schedule: ${t.schedule || 'manual'}  ·  status: ${t.status || 'active'}`);
+    log(`  deploy: ${t.deployCommand || '-'}`);
     return;
   }
   if (sub === 'remove') {
@@ -5944,7 +5947,37 @@ function teamCmd(root, sub, id, opts = {}) {
     log(`\n  ⓘ dry-run — 실제 dispatch/배포 없음. 위 명령을 검토 후 직접 실행하거나, 향후 Phase C(스케줄)/D(배포)에서 게이트 적용.`);
     return;
   }
-  fail(`알 수 없는 team 하위명령: ${sub} (list|add|show|remove|preview)`);
+  // 1.9.376 (UR-0073 Phase D): team deploy — 사용자 설정 deployCommand 실행. 안전: dry-run 기본 + --yes + LEERNESS_TEAM_DEPLOY=1 이중 게이트 + shell-guard.
+  if (sub === 'deploy') {
+    const t = teams.find(x => x.id === id);
+    if (!t) { fail(`team 없음: ${id}`); return; }
+    const gate = _teamDeployGate(t, { yes: has('--yes'), envOn: process.env.LEERNESS_TEAM_DEPLOY === '1' });
+    if (json) { log(JSON.stringify({ version: VERSION, teamId: t.id, ...gate }, null, 2)); if (gate.mode !== 'execute') return; }
+    if (gate.mode === 'no-command') { fail(`team '${t.id}' deployCommand 미설정 — leerness team add ${t.id} --deploy "<배포 명령>"`); return; }
+    if (gate.mode === 'dry-run') {
+      log(`# team deploy ${t.id} (1.9.376, UR-0073 Phase D) — dry-run (실행 없음)`);
+      log(`  배포 명령: ${gate.command}`);
+      log(`  ⓘ ${gate.message}`);
+      log(`  실행: LEERNESS_TEAM_DEPLOY=1 leerness team deploy ${t.id} --yes  (셸 호환성 점검 후 실행)`);
+      return;
+    }
+    if (gate.mode === 'gated') { fail(`${gate.message} — dry-run 으로 먼저 검토: leerness team deploy ${t.id}`); return; }
+    // execute: shell-guard 정적 점검(advisory) 후 spawn
+    try {
+      const ctx = _detectShellCtx();
+      const guard = _shellGuardAnalyze ? _shellGuardAnalyze(gate.command, ctx) : null;
+      if (guard && guard.findings && guard.findings.length) {
+        warn(`shell-guard 경고 ${guard.findings.length}건 (배포 명령): ${guard.findings.map(f => f.rule || f.kind || f).join(', ')}`);
+      }
+    } catch {}
+    log(`# team deploy ${t.id} — 실행 (LEERNESS_TEAM_DEPLOY=1 + --yes)`);
+    log(`  $ ${gate.command}`);
+    const r = cp.spawnSync(gate.command, { cwd: root, shell: true, stdio: 'inherit', timeout: 600000 });
+    if (r.status === 0) ok(`team deploy 완료: ${t.id} (exit 0)`);
+    else { fail(`team deploy 실패: ${t.id} (exit ${r.status})`); }
+    return;
+  }
+  fail(`알 수 없는 team 하위명령: ${sub} (list|add|show|remove|preview|deploy)`);
 }
 
 // 1.9.112: 전용 lessons.md (Memory Write Surface 5번째)
@@ -21224,7 +21257,7 @@ function help() {
   leerness skill install <SKILL.md|dir|url> · leerness skill discover --preset vercel|anthropic   # 스킬 설치/탐색
   leerness release bump [--patch|--minor|--major]  # package.json 자동 bump (1.9.8)
   leerness release note "<내용>"               # CHANGELOG.md 자동 추가 (1.9.8)
-  leerness release publish [--dry-run] [--pack] [--git-push] [--gh-release] [--gh-pages] [--gh-pages-src file] [--npm-publish] [--auto]  # 통합 배포 (1.9.8 + 1.9.10)\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n  leerness migrate audit|apply|plan [path] [--json] [--yes]   # 크로스버전 마이그레이션 진단/적용(canonical 백필)/플랜(임시폴더 비교) (UR-0075, 1.9.356~358)\n  leerness migrate --guide                    # AI 에이전트용 크로스버전 마이그레이션 가이드 (1.9.355)\n  leerness install-safety [--json]            # 설치 안전 프로필 — 0 런타임 deps / 0 install-script (1.9.359)\n  leerness capabilities [--json]              # 권한·보안 표면 공개 (1.9.272)\n  leerness feature add|link|impact|list|show  # 기능 그래프(feature-graph) 추적\n  leerness permissions list|set               # agent 권한 모드 (1.9.174)\n  leerness creds list|register|check|refresh  # 크리덴셜 메타 추적 (값 미저장)\n  leerness incident list|show|handle · webhook serve · deploy auto · runs list|show   # 운영(ops)\n  leerness whats-new [path]                   # 최근 버전 변경 요약\n  leerness team list|add|show|remove|preview <id> [--name --purpose --personas a,b --members claude,codex --schedule every-session --task "..."]   # 에이전트 팀 정의 + preview(dry-run 실행계획) — UR-0073 Phase A/B, opt-in · 정의/미리보기 전용(자동실행 X)\n  leerness release channel|cadence [path] [--json]   # 릴리스 채널 정책 + 빈도 진단 (UR-0074 케이던스 가시화, 1.9.275/374)\n  leerness commands [--json]                  # 전체 명령 전수 목록 (누락 없이 이 명령으로 확인)\n`);
+  leerness release publish [--dry-run] [--pack] [--git-push] [--gh-release] [--gh-pages] [--gh-pages-src file] [--npm-publish] [--auto]  # 통합 배포 (1.9.8 + 1.9.10)\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n  leerness migrate audit|apply|plan [path] [--json] [--yes]   # 크로스버전 마이그레이션 진단/적용(canonical 백필)/플랜(임시폴더 비교) (UR-0075, 1.9.356~358)\n  leerness migrate --guide                    # AI 에이전트용 크로스버전 마이그레이션 가이드 (1.9.355)\n  leerness install-safety [--json]            # 설치 안전 프로필 — 0 런타임 deps / 0 install-script (1.9.359)\n  leerness capabilities [--json]              # 권한·보안 표면 공개 (1.9.272)\n  leerness feature add|link|impact|list|show  # 기능 그래프(feature-graph) 추적\n  leerness permissions list|set               # agent 권한 모드 (1.9.174)\n  leerness creds list|register|check|refresh  # 크리덴셜 메타 추적 (값 미저장)\n  leerness incident list|show|handle · webhook serve · deploy auto · runs list|show   # 운영(ops)\n  leerness whats-new [path]                   # 최근 버전 변경 요약\n  leerness team list|add|show|remove|preview|deploy <id> [--personas a,b --members claude,codex --schedule every-session --task "..." --deploy "<배포명령>" --yes]   # 에이전트 팀 정의/미리보기/배포 — UR-0073 A~D, opt-in · 배포는 2중게이트(--yes + LEERNESS_TEAM_DEPLOY=1)\n  leerness release channel|cadence [path] [--json]   # 릴리스 채널 정책 + 빈도 진단 (UR-0074 케이던스 가시화, 1.9.275/374)\n  leerness commands [--json]                  # 전체 명령 전수 목록 (누락 없이 이 명령으로 확인)\n`);
 }
 
 async function main() {

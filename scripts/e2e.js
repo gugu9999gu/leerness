@@ -5170,5 +5170,30 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.376 회귀 (UR-0073 Phase D): team deploy 2중 게이트 — dry-run 실행안함 · --yes만이면 거부 · --yes+env 만 실행
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tdep-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const marker = path.join(d, 'DEPLOYED.txt');
+    cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'dep', '--members', 'claude', '--deploy', 'node -e "require(\'fs\').writeFileSync(\'DEPLOYED.txt\',\'ok\')"', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    // 1) dry-run (no --yes) → 실행 안 함
+    cp.spawnSync(process.execPath, [CLI, 'team', 'deploy', 'dep', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const dryNoExec = !fs.existsSync(marker);
+    // 2) --yes 인데 env 없음 → 거부 (실행 안 함)
+    cp.spawnSync(process.execPath, [CLI, 'team', 'deploy', 'dep', '--yes', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const gateRefuse = !fs.existsSync(marker);
+    // 3) --yes + LEERNESS_TEAM_DEPLOY=1 → 실행 (marker 생성)
+    cp.spawnSync(process.execPath, [CLI, 'team', 'deploy', 'dep', '--yes', '--path', d], { cwd: d, encoding: 'utf8', timeout: 20000, env: { ...process.env, LEERNESS_TEAM_DEPLOY: '1' } });
+    const executed = fs.existsSync(marker);
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = dryNoExec && gateRefuse && executed;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.376) UR-0073 Phase D: team deploy 2중 게이트 (dry-run 실행X / env거부 / --yes+env 실행)' : '✗ team deploy 게이트 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

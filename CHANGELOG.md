@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.376 — 2026-06-06 — UR-0073 Phase D: team deploy 2중 게이트 (에이전트 팀 umbrella 완결) 🎉
+
+**🧩 정의된 팀의 사용자 설정 배포 명령을 안전 게이트로 실행 — `leerness team deploy`. UR-0073 A~D 완결.**
+
+### 배경
+UR-0073 로드맵의 마지막·최고위험 단계(실제 외부 배포). 방향 설계 안전 원칙(opt-in/dry-run 기본/명시 승인) 엄격 적용. **Firebase/블로그를 하드코딩하지 않고**(offline-first/0-deps 유지) 사용자가 `deployCommand` 를 설정하면 leerness 가 게이트와 함께 오케스트레이션.
+
+### 구현
+1. **`team add --deploy "<명령>"`**: 팀에 사용자 설정 배포 명령(예: `firebase deploy --only hosting`, `npm run deploy`) 저장.
+2. **`team deploy <id> [--yes]`** + **`_teamDeployGate`**(순수, 4-mode): 
+   - **dry-run**(기본, --yes 없음): 명령 표시만, 실행 X.
+   - **gated**(--yes 만, env 없음): **거부** — `LEERNESS_TEAM_DEPLOY=1` 필요.
+   - **execute**(--yes + `LEERNESS_TEAM_DEPLOY=1`): shell-guard advisory 점검 후 팀 root 에서 spawn.
+   - no-command: deployCommand 미설정 안내.
+3. **2중 게이트 안전**: 실행은 명시 플래그(`--yes`) AND 명시 env opt-in(`LEERNESS_TEAM_DEPLOY=1`) 동시 충족 시에만. (전역 지침 "deploy 신중" 준수.)
+4. _renderTeamsMd/show + commands/help 에 deploy 반영.
+
+### 검증 (회귀 0)
+- **selftest 121→122 PASS** (행위: `_teamDeployGate` 4-mode no-command/dry-run/gated/execute).
+- **E2E 320→321 PASS** (행위: dry-run 실행 X marker 없음 · --yes만 거부 marker 없음 · --yes+env 실행 marker 생성).
+- 실측: 3개 게이트 경로 정확 + 배포 명령 spawn 검증.
+
+### 🎉 UR-0073 에이전트 팀 umbrella 완결
+A(정의 레지스트리)·B(preview dry-run)·C(스케줄 알림)·**D(배포 2중 게이트)** 전 단계 완료. 모두 opt-in/dry-run/게이트 안전 위에 구축.
+
 ## 1.9.375 — 2026-06-06 — UR-0084: 동시성 락 하드닝 (e2e flake 제거 + lost-update 창 축소)
 
 **🛠 고부하 시 간헐 flake 한 락 테스트 + `_withLock` fail-open 창 하드닝.**
