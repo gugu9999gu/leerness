@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.404';
+const VERSION = '1.9.405';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3009,6 +3009,7 @@ function _selfTestCases() {
     { name: '7번째 버그헌트 P1-A 잔여 (UR-0108): decisions/lessons MD projection 개행 주입 차단 _lineSafe (1.9.402)', run: () => { const m = require('../lib/pure-utils'); if (m._lineSafe !== _lineSafe) return false; const lsOk = _lineSafe('a\nb\r\nc') === 'a b c'; const md = m._renderDecisionsMd([{ date: '2026-06-07', title: 'real\n### 2099-01-01 — FAKE\n- Decision: forged', decision: 'd', reason: 'r' }]); const re = m._decisionsFromMd(md); const noInject = re.length === 1 && !/^### 2099-01-01 — FAKE/m.test(md); const lmd = m._renderLessonsMd([{ date: '2026-06-07', text: 'l1\n### FAKE\n- Lesson: x', tag: 't' }]); const lre = m._parseLessonEntries(lmd); const lNoInject = lre.length === 1; return lsOk && noInject && lNoInject; } },
     { name: '7번째 버그헌트 P2 (UR-0107): api-skill show/drop 에러 exit code 1 (1.9.403)', run: () => { const src = read(__filename); const showId = src.includes("api-skill show <id>')); process.exitCode = 1"); const dropId = src.includes("api-skill drop <id>')); process.exitCode = 1"); const addUrl = src.includes("api-skill add <url> [--direction") && src.includes('process.exitCode = 1'); return showId && dropId && addUrl; } },
     { name: '7번째 버그헌트 P2 (UR-0105 잔여): reuse autodetect / creds check --json 에러 구조화 (1.9.404)', run: () => { const src = read(__filename); const reuseOk = src.includes("failJson(has('--json'), 'no_scan_dir'"); const credsOk = src.includes("failJson(has('--json'), 'no_service'"); return reuseOk && credsOk; } },
+    { name: '8번째 버그헌트 회귀수정 (UR-0109): 긴 서술형 placeholder FP 차단(마커 우선) + 실키 FN 유지 (1.9.405)', run: () => { const m = require('../lib/pure-utils'); const ph = m._isPlaceholderSecret; const fpFixed = ph('your-super-secret-api-key-example-value') === true && ph('this-is-just-an-example-placeholder-value') === true && ph('example-api-key-do-not-use-1234567890') === true; const fnKept = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false; const realKept = ph('a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6') === false; const shortPh = ph('your-api-key-here') === true && ph('changeme') === true; return fpFixed && fnKept && realKept && shortPh; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }

@@ -5690,5 +5690,27 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.405 회귀수정 (8번째 버그헌트, UR-0109): 1.9.401 looksReal 가드 FP — 긴 서술형 placeholder 가 실키로 오탐되던 것 차단
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-phfp-'));
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    // 긴 서술형 placeholder → 시크릿 아님(FP 차단) → exit 0
+    fs.writeFileSync(path.join(d, 'src', 'cfg.txt'), 'API_KEY = "your-super-secret-api-key-example-value"\n');
+    const r1 = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', path.join(d, 'src', 'cfg.txt')], { encoding: 'utf8', timeout: 15000 });
+    const fpOk = r1.status === 0 && /no obvious/.test(r1.stdout || '');
+    // 실키(sk-proj-, example 포함) → 탐지 유지(FN 수정 보존) → exit 1
+    fs.writeFileSync(path.join(d, 'src', 'real.txt'), 'api_key=sk-proj-EXAMPLEab12cd34ef56gh78ij90klmn99\n');
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', path.join(d, 'src', 'real.txt')], { encoding: 'utf8', timeout: 15000 });
+    const fnOk = r2.status === 1;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = fpOk && fnOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.405) 8th버그헌트 회귀수정: 긴 서술형 placeholder FP 차단 + 실키 FN 유지 (UR-0109)' : '✗ placeholder FP 회귀수정 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

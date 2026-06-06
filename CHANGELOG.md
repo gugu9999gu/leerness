@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.405 — 2026-06-07 — 시크릿 placeholder FP 회귀수정 (8번째 버그헌트, UR-0109)
+
+**🔧 자기 회귀 수정 — 1.9.401 의 looksReal 가드가 긴 서술형 placeholder를 실키로 오탐(FP)하던 것 차단.**
+
+### 배경 (2차 버그헌트가 1.9.401 회귀 발견 — "맹신 X"가 자기 수정도 검증)
+1.9.401 이 'sk-EXAMPLE..' 같은 실키 FN 을 고치려 entropy 가드(영숫자24+ & 고유12+)를 추가했는데, `your-super-secret-api-key-example-value`(len 33, 고유 16) 같은 긴 서술형 placeholder 가 가드를 넘어 실키로 오탐(FP) → .env.example 의 명백한 placeholder 를 시크릿으로 잘못 보고. 2차 적대적 버그헌트가 직접 재현 검출.
+
+### 구현
+- `_isPlaceholderSecret` 순서 재정렬: ① 실키 prefix(sk-/AKIA/ghp_ 등) → 실키(마커 무시, FN 방지). ② placeholder 마커 단어(example/your-/changeme/<…) 있으면 → placeholder(고엔트로피여도, FP 방지). ③ prefix·마커 없는 고엔트로피 → 실키.
+
+### 검증 (회귀 0)
+- **selftest 150→151 PASS** (긴 서술형 placeholder 3종 FP 차단 + sk- 실키 2종 FN 유지 + 고엔트로피 실키 + 짧은 placeholder).
+- **E2E 343→344 PASS** (서술형 placeholder cfg.txt → exit0 미탐 / sk-proj-EXAMPLE 실키 → exit1 탐지).
+- 실측 9/9.
+
 ## 1.9.404 — 2026-06-07 — reuse autodetect / creds check --json 에러 구조화 (7번째 버그헌트 P2, UR-0105 잔여)
 
 **🔌 reuse autodetect / creds check 의 빈·에러 --json 경로도 구조화 JSON — failJson 와이어 확대.**
