@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.402 — 2026-06-07 — decisions/lessons MD projection 개행 주입 차단 (7번째 버그헌트 P1-A 잔여, UR-0108)
+
+**🛡 데이터 무결성 완결 — decision/lesson 텍스트의 개행이 decisions.md/lessons.md projection 에 위조 블록을 주입하던 것 차단(테이블셀 injection 클러스터 마무리).**
+
+### 배경
+1.9.399 가 progress-tracker/rules(파이프 테이블)를 보호. decisions/lessons 는 canonical JSON(raw 안전) + MD projection(`### date — title` / `- field:`) 인데, title/text 의 개행이 MD projection 에 가짜 `### ` 블록을 주입 → JSON 부재(MD-fallback) 시 위조 결정/레슨 증식. 직접 재현 확인(### 4개).
+
+### 구현
+- **`_lineSafe(s)`** 순수 헬퍼(개행→공백, 파이프는 보존 — 표 아님): `_renderDecisionsMd`/`_renderLessonsMd` 의 head + 각 필드에 적용. canonical JSON 은 raw 유지(다줄 보존), MD projection 만 단일라인화 → 위조 블록 주입 차단.
+
+### 검증 (회귀 0)
+- **selftest 147→148 PASS** (_lineSafe + 개행 title 렌더→reparse 1개 + 별도 ### 헤더 부재 + lessons 동일).
+- **E2E 340→341 PASS** (decision add 개행 → decisions.md 별도 ### 2099 헤더 없음 + MD-fallback context 결정 1개).
+- 실측: ### 4→2(위조 0), reparse 1개, title 'a\\nb'→'a b'.
+
+### 테이블셀 injection 클러스터(UR-0104/0108) 완결: task/rule(파이프+개행) + decisions/lessons(개행).
+
 ## 1.9.401 — 2026-06-07 — 시크릿 스캐너 FN 2종: gitignore 부정(!) + placeholder substring 정밀화 (7번째 버그헌트 P1-C, UR-0106)
 
 **🔐 보안 — 커밋되는 파일의 실제 시크릿을 놓치던 false-negative 2종 수정.**
