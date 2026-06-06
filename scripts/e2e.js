@@ -5273,5 +5273,28 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.381 회귀 (UR-0025): KEYWORD_STOPWORDS 단일출처 — catalog Set + 키워드 필터 동작 + handoff consumer 무크래시
+total++;
+{
+  let ok = false;
+  try {
+    const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs'));
+    const setOk = c.KEYWORD_STOPWORDS instanceof Set && c.KEYWORD_STOPWORDS.has('작업') && c.KEYWORD_STOPWORDS.has('task') && !c.KEYWORD_STOPWORDS.has('고유키워드') && c.KEYWORD_STOPWORDS.size >= 25;
+    // 필터 동작: stopwords 제거 후 고유 키워드만 남음
+    const tokens = ['작업', 'task', '고유키워드', 'work'];
+    const filtered = tokens.filter(t => !c.KEYWORD_STOPWORDS.has(t));
+    const filterOk = filtered.length === 1 && filtered[0] === '고유키워드';
+    // consumer 무크래시
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sw-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'handoff', d], { encoding: 'utf8', timeout: 30000 });
+    const handoffOk = r.status === 0;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = setOk && filterOk && handoffOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.381) UR-0025: KEYWORD_STOPWORDS 단일출처 (catalog Set + 필터 + handoff 무크래시)' : '✗ stopwords 단일출처 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

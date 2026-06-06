@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.381 — 2026-06-06 — UR-0025: KEYWORD_STOPWORDS 단일출처 (키워드 stopwords 2중 중복 제거)
+
+**🧩 handoff 자동회수 / lessons 키워드추출이 각자 보유하던 동일 stopwords Set 을 catalogs 단일출처로 DRY.**
+
+### 배경
+키워드 추출 stopwords(한국어 24 + 영어 5)가 harness.js 두 곳(handoff 자동회수 8332, lessons 키워드추출 14647)에 **2중 복제**. 한 곳만 바뀌면 두 키워드 추출 동작이 갈라짐.
+
+### 구현
+1. **`KEYWORD_STOPWORDS`** → lib/catalogs.js (Set, 29개 단일출처).
+2. harness 2개 인라인 `new Set([...])` → `const stopwords = KEYWORD_STOPWORDS;` (node 스크립트 정규식 결정적 교체, 내용 동일).
+
+### 검증 (회귀 0)
+- **selftest 126→127 PASS** (catalog Set 29개 + '작업'/'task' 포함 + reference equality + 2 사이트 const + 인라인 Set 0).
+- **E2E 325→326 PASS** (catalog Set + 키워드 필터 동작(stopwords 제거 후 고유 키워드만) + handoff consumer 무크래시).
+- 실측: KEYWORD_STOPWORDS 29개, 필터 정상, handoff exit 0.
+
 ## 1.9.380 — 2026-06-06 — UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 (필수목록 3중 중복 제거)
 
 **🧩 verify / migrate audit / migrate apply 가 각자 보유하던 동일 9-파일 필수목록을 catalogs 단일출처로 DRY.**

@@ -26,9 +26,9 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.380';
+const VERSION = '1.9.381';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3017,6 +3017,7 @@ function _selfTestCases() {
     { name: 'UR-0073: team MCP 도구 2종(read-only) 정의 + dispatch 와이어 (1.9.378)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const tl = tools.find(t => t.name === 'leerness_team_list'); const tp = tools.find(t => t.name === 'leerness_team_preview'); const defsOk = tl && tl.requiredTier === 'read-only' && tp && tp.requiredTier === 'read-only' && tp.inputSchema.required && tp.inputSchema.required.includes('id'); const wired = src.includes("case " + "'leerness_team_list':") && src.includes("case " + "'leerness_team_preview':") && /cliArgs = \['team', 'list'/.test(src) && /cliArgs = \['team', 'preview'/.test(src); return !!defsOk && wired; } },
     { name: 'UR-0025 심화: pulse 렌더 코어 분리 — _memorySurface + _renderPulseLine 행위 (1.9.379)', run: () => { const m = require('../lib/pure-utils'); if (typeof _memorySurface !== 'function' || typeof _renderPulseLine !== 'function' || m._memorySurface !== _memorySurface || m._renderPulseLine !== _renderPulseLine) return false; const ms = _memorySurface({ tasks: 1, decisions: 2, rules: 3, milestones: 4, lessons: 5 }) === 'T1/D2/R3/P4/L5' && _memorySurface({}) === 'T0/D0/R0/P0/L0'; const base = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'T0/D1/R0/P2/L0' }); const ln = base.includes('v1.0.0') && base.includes('R7') && base.includes('MCP 85') && base.includes('T0/D1/R0/P2/L0') && !base.includes('🎯') && !base.includes('abnormal'); const full = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'x', nextMilestone: 400, etaDays: 6, abnormalShutdown: 'high' }); const ln2 = full.includes('🎯 R400 (6d)') && full.includes('abnormal:high'); const wired = read(__filename).includes('const line = _renderPulseLine(data)') && read(__filename).includes('data.memorySurface = _memorySurface('); return ms && ln && ln2 && wired; } },
     { name: 'UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 — verify/migrate audit·apply 3중 중복 제거 (1.9.380)', run: () => { const c = require('../lib/catalogs'); if (REQUIRED_WORKSPACE_FILES !== c.REQUIRED_WORKSPACE_FILES) return false; const listOk = Array.isArray(c.REQUIRED_WORKSPACE_FILES) && c.REQUIRED_WORKSPACE_FILES.length === 9 && c.REQUIRED_WORKSPACE_FILES.includes('AGENTS.md') && c.REQUIRED_WORKSPACE_FILES.includes('.harness/plan.md'); const usesConst = (read(__filename).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 3; return listOk && usesConst; } },
+    { name: 'UR-0025: KEYWORD_STOPWORDS 단일출처 — handoff/lessons 키워드 stopwords 2중 중복 제거 (1.9.381)', run: () => { const c = require('../lib/catalogs'); if (KEYWORD_STOPWORDS !== c.KEYWORD_STOPWORDS) return false; const setOk = c.KEYWORD_STOPWORDS instanceof Set && c.KEYWORD_STOPWORDS.has('작업') && c.KEYWORD_STOPWORDS.has('task') && !c.KEYWORD_STOPWORDS.has('고유단어') && c.KEYWORD_STOPWORDS.size >= 25; const usesConst = (read(__filename).match(/const stopwords = KEYWORD_STOPWORDS;/g) || []).length >= 2 && !/const stopwords = new Set\(\[/.test(read(__filename)); return setOk && usesConst; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -8329,12 +8330,7 @@ function handoff(root) {
       const lrows = readProgressRows(root);
       const latestRow = lrows.filter(r => r.status === 'in-progress' || r.status === 'planned').pop() || lrows[lrows.length - 1];
       if (latestRow && latestRow.request) {
-        const stopwords = new Set([
-          '이런','저런','하다','하고','있는','하지','에서',
-          '작업','구현','추가','진행','수정','변경','검토','확인',
-          '프로젝트','관리','기능','시스템','코드','파일','버전','정리','계획',
-          'next','action','task','todo','work'
-        ]);
+        const stopwords = KEYWORD_STOPWORDS;  // 1.9.381 (UR-0025): lib/catalogs 단일출처
         const tokens = String(latestRow.request).toLowerCase().match(/[\w가-힣]{4,}/g) || [];
         const keyword = tokens.filter(t => !stopwords.has(t)).sort((a, b) => b.length - a.length)[0];
         if (keyword) {
@@ -14644,12 +14640,7 @@ function lessonsCmd(root) {
       // 4자+ 키워드 중 가장 긴 단어 1개 선택
       const tokens = String(latest.request).toLowerCase().match(/[\w가-힣]{4,}/g) || [];
       // 1.9.55: stopword 확장 — 너무 일반적인 단어 제외 (lessons 매칭에 도움 안 됨)
-      const stopwords = new Set([
-        '이런', '저런', '하다', '하고', '있는', '하지', '에서',
-        '작업', '구현', '추가', '진행', '수정', '변경', '검토', '확인',
-        '프로젝트', '관리', '기능', '시스템', '코드', '파일', '버전', '정리', '계획',
-        'next', 'action', 'task', 'todo', 'work'
-      ]);
+      const stopwords = KEYWORD_STOPWORDS;  // 1.9.381 (UR-0025): lib/catalogs 단일출처
       const candidate = tokens.filter(t => !stopwords.has(t)).sort((a, b) => b.length - a.length)[0];
       if (candidate) query = candidate;
     }
