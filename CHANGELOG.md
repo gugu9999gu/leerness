@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.397 — 2026-06-06 — install-safety 레시피 셸-무관화 (6번째 외부평가 P1-A, UR-0098)
+
+**🪟 install-safety 안전설치 레시피를 셸-무관으로 — Windows PowerShell(주환경)에서 깨지던 POSIX env-prefix 제거.**
+
+### 배경 (6번째 외부평가 codex P1-A · 비판검토 후 채택)
+codex 가 레시피의 `npm_config_ignore_scripts=true npx ...`(bash env-prefix)가 PowerShell 에서 실패한다고 지적. **직접 검토**: PowerShell 비호환은 실문제(Windows 주환경)이나 "update 단계 ignore-scripts 누락"은 저가치(leerness 는 0 deps/0 install-script 라 실행될 스크립트 없음). → **셸 호환만 핵심 수정**.
+
+### 구현
+- safeInstall 레시피: `npm_config_x=true npx ...`(POSIX) → `npx --yes leerness@latest ...`(셸 무관). PowerShell/cmd/bash 모두 동작.
+- `hardeningNote` 신규: leerness 자체 0-script 명시 + 일반 npx 하드닝(타 패키지 대비)을 셸별로 안내(bash/PowerShell/cmd). 사람용 출력에도 노출.
+
+### 검증 (회귀 0)
+- **selftest 142→143 PASS** (safeInstall 에 POSIX env-prefix 부재 + npx --yes 2건 + hardeningNote PowerShell 언급).
+- **E2E 335→336 PASS** (install-safety --json 셸-무관 + hardeningNote).
+
 ## 1.9.396 — 2026-06-06 — 6번째 외부 멀티모델 리뷰 + task drop 데이터 손상 수정 (UR-0097)
 
 **🔬 6번째 외부 클린룸 리뷰(codex GPT-5.5 + Opus) — findings 7건 등록 + 최우선 데이터 손상(task drop) 즉시 수정.**

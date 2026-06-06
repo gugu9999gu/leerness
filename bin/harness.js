@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.396';
+const VERSION = '1.9.397';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3001,6 +3001,7 @@ function _selfTestCases() {
     { name: 'UR-0025 whats-new 완결: whatsNewCmd → lib/diagnostics.js + DI 위임 + 동작 (1.9.394)', run: () => { const m = require('../lib/diagnostics'); const expOk = typeof m.whatsNewCmd === 'function'; const src = read(__filename); const delegated = src.includes('_diag.whatsNewCmd(root,'); const diagSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js')); const movedToLib = diagSrc.includes('leerness whats-new') && diagSrc.includes('_parseChangelogBetween'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wn_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, 'CHANGELOG.md'), '## 1.9.50 — 2026-06-06 — A\n- `leerness x`\n\n## 1.9.49 — 2026-06-05 — B\n- old\n'); process.argv = ['node', 'h', 'whats-new', tmp, '--from', '1.9.49', '--to', '1.9.50', '--json']; process.stdout.write = s => { out += s; return true; }; whatsNewCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.from === '1.9.49' && j.to === '1.9.50' && Array.isArray(j.versions) && j.versions.length === 1 && j.versions[0].version === '1.9.50'; } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: '회귀가드: decisions/lessons canonical round-trip 엣지문자(pipe/dash/colon) 무손상 + idempotent (1.9.395)', run: () => { const m = require('../lib/pure-utils'); const d = [{ date: '2026-06-06', title: 'A | pipe', decision: 'use X | Y', reason: 'r—dash', alternatives: 'alt: colon', impact: 'i' }]; const dback = m._decisionsFromMd(m._renderDecisionsMd(d)); const dOk = dback.length === 1 && dback[0].title === 'A | pipe' && dback[0].decision === 'use X | Y' && dback[0].reason === 'r—dash'; const dIdem = JSON.stringify(dback) === JSON.stringify(m._decisionsFromMd(m._renderDecisionsMd(dback))); const l = [{ date: '2026-06-06', text: 'lesson | with — chars: ok', tag: 't' }]; const lback = m._parseLessonEntries(m._renderLessonsMd(l)); const lOk = lback.length === 1 && lback[0].text === 'lesson | with — chars: ok'; const lIdem = JSON.stringify(lback) === JSON.stringify(m._parseLessonEntries(m._renderLessonsMd(lback))); return dOk && dIdem && lOk && lIdem; } },
     { name: '6번째 외부평가/codex P1-B: task drop 존재확인 가드 — 없는 ID 가짜 row 방지 (1.9.396)', run: () => { const src = read(__filename); const i = src.indexOf('function taskDrop(root, id)'); if (i < 0) return false; const body = src.slice(i, i + 700); return body.includes('not found in progress-tracker.md') && body.includes('rows.find(r => r.id === id)') && body.includes('_requireInit'); } },
+    { name: '6번째 외부평가/codex P1-A (UR-0098): install-safety 레시피 셸-무관 + hardeningNote (1.9.397)', run: () => { if (typeof installSafetyCmd !== 'function') return false; const save = process.argv; const _w = process.stdout.write; let out = ''; try { process.argv = ['node', 'h', 'install-safety', '--json']; process.stdout.write = s => { out += s; return true; }; installSafetyCmd({ json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; } let j; try { j = JSON.parse(out); } catch {} const noPosixPrefix = !!j && Array.isArray(j.safeInstall) && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim())); const crossShell = !!j && j.safeInstall.filter(x => String(x).includes('npx --yes')).length >= 2; const noteOk = !!j && typeof j.hardeningNote === 'string' && j.hardeningNote.includes('PowerShell'); return noPosixPrefix && crossShell && noteOk; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6710,12 +6711,16 @@ function installSafetyCmd(opts = {}) {
     hasInstallScripts: installHooks.length > 0,
     node: (pkg.engines && pkg.engines.node) || null,
     offlineFirst: true,
+    // 1.9.397 (6번째 외부평가/codex P1-A, UR-0098): 레시피를 셸-무관으로 — 종전 'npm_config_x=true npx'(POSIX env-prefix)는
+    //   PowerShell(Windows 주환경)에서 실패. leerness 는 0 deps/0 install-script 라 npx 시 실행될 스크립트 자체가 없어 prefix 불필요.
+    //   타 패키지 대비 일반 하드닝은 셸별로 hardeningNote 참조.
     safeInstall: [
       'git checkout -b chore/leerness-update',
-      'npm_config_ignore_scripts=true npx leerness@latest migrate plan --path .   # 임시폴더 비교(읽기 전용)',
-      'npx leerness@latest update --yes --path .',
+      'npx --yes leerness@latest migrate plan --path .   # 임시폴더 비교(읽기 전용, 셸 무관)',
+      'npx --yes leerness@latest update --yes --path .',
       'git diff   # 변경 검토 후 커밋 또는 롤백',
     ],
+    hardeningNote: 'leerness 자체는 0 deps / 0 install-script 라 설치/업데이트 시 임의코드 실행 없음. 일반 npx 하드닝(타 패키지 대비)은 셸별 — bash: npm_config_ignore_scripts=true npx ... · PowerShell: $env:npm_config_ignore_scripts=1; npx ... · cmd: set npm_config_ignore_scripts=1 && npx ...',
   };
   if (opts.json) { log(JSON.stringify(profile, null, 2)); return; }
   log(`# leerness install-safety (1.9.359) — 설치 안전 프로필`);
@@ -6725,6 +6730,7 @@ function installSafetyCmd(opts = {}) {
   log(`  동작 방식: offline-first (설치 시 네트워크/빌드 불필요, 단일 bin + lib)`);
   log(`\n  안전 설치 워크플로 (검토 후 적용):`);
   profile.safeInstall.forEach((s, i) => log(`    ${i + 1}. ${s}`));
+  log(`\n  ⓘ ${profile.hardeningNote}`);  // 1.9.397 (UR-0098): 셸별 하드닝 노트
   if (installHooks.length > 0) warn('install-time 스크립트 존재 — 위 ignore-scripts safe-install 권장');
 }
 function debug(root) {

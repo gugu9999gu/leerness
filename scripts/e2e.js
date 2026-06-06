@@ -5521,5 +5521,21 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.397 회귀 (6번째 외부평가/codex P1-A, UR-0098): install-safety 레시피 셸-무관(POSIX env-prefix 제거) + hardeningNote
+total++;
+{
+  let ok = false;
+  try {
+    const r = cp.spawnSync(process.execPath, [CLI, 'install-safety', '--json'], { encoding: 'utf8', timeout: 10000 });
+    const j = JSON.parse(r.stdout);
+    const noPosix = Array.isArray(j.safeInstall) && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim()));  // PowerShell 비호환 prefix 부재
+    const crossShell = j.safeInstall.filter(x => String(x).includes('npx --yes')).length >= 2;
+    const note = typeof j.hardeningNote === 'string' && j.hardeningNote.includes('PowerShell');
+    ok = noPosix && crossShell && note;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.397) 6th외부평가 codex P1-A: install-safety 레시피 셸-무관 + hardeningNote (UR-0098)' : '✗ install-safety 셸호환 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
