@@ -28,7 +28,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.377';
+const VERSION = '1.9.378';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3014,6 +3014,7 @@ function _selfTestCases() {
     { name: 'UR-0084: _withLock 획득/재진입/해제 + maxWaitMs 하드닝(10s) 행위 (1.9.375)', run: () => { if (typeof _withLock !== 'function') return false; const src = read(__filename); const hardened = /maxWaitMs = opts\.maxWaitMs \|\| 10000/.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lock_')); try { const target = path.join(tmp, 'f.md'); let reentrant = false; const lockSeen = _withLock(target, () => { const exists = fs.existsSync(target + '.lock'); reentrant = (_withLock(target, () => 42) === 42); return exists; }); const cleaned = !fs.existsSync(target + '.lock'); return hardened && lockSeen === true && reentrant === true && cleaned; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'UR-0073 Phase D: _teamDeployGate 이중 게이트 (dry-run 기본/env 게이트/실행) 행위 (1.9.376)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamDeployGate !== 'function' || m._teamDeployGate !== _teamDeployGate) return false; const team = { id: 'd', deployCommand: 'echo hi' }; const noCmd = _teamDeployGate({ id: 'x' }, { yes: true, envOn: true }).mode === 'no-command'; const dry = _teamDeployGate(team, { yes: false, envOn: true }).mode === 'dry-run'; const gated = _teamDeployGate(team, { yes: true, envOn: false }).mode === 'gated'; const exec = _teamDeployGate(team, { yes: true, envOn: true }).mode === 'execute'; return noCmd && dry && gated && exec; } },
     { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + 빌더 동작 (1.9.377)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide('.leerness', '9.9.9', '2026-01-01T00:00:00.000Z'); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString())'); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && g.includes('마이그레이션 안내') && wrapperThin; } },
+    { name: 'UR-0073: team MCP 도구 2종(read-only) 정의 + dispatch 와이어 (1.9.378)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const tl = tools.find(t => t.name === 'leerness_team_list'); const tp = tools.find(t => t.name === 'leerness_team_preview'); const defsOk = tl && tl.requiredTier === 'read-only' && tp && tp.requiredTier === 'read-only' && tp.inputSchema.required && tp.inputSchema.required.includes('id'); const wired = src.includes("case " + "'leerness_team_list':") && src.includes("case " + "'leerness_team_preview':") && /cliArgs = \['team', 'list'/.test(src) && /cliArgs = \['team', 'preview'/.test(src); return !!defsOk && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -16675,6 +16676,15 @@ function _mcpToCliArgs(name, args, targetPath) {
           case 'leerness_commands':
             // 1.9.233: 카테고리화된 전체 CLI 명령 목록
             cliArgs = ['commands', '--json'];
+            break;
+          case 'leerness_team_list':
+            // 1.9.378 (UR-0073): 정의된 에이전트 팀 목록 (read-only)
+            cliArgs = ['team', 'list', '--path', targetPath, '--json'];
+            break;
+          case 'leerness_team_preview':
+            // 1.9.378 (UR-0073 Phase B): 팀 실행 계획 dry-run 미리보기 (실행 없음)
+            cliArgs = ['team', 'preview', String(args.id || ''), '--path', targetPath, '--json'];
+            if (args.task) cliArgs.push('--task', String(args.task));
             break;
           case 'leerness_py_check':
             // 1.9.239 (UR-0013): Python 파일 분석

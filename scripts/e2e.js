@@ -5209,5 +5209,28 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.378 회귀 (UR-0073): team MCP 도구 2종(read-only) 정의 + 매핑 CLI(team list/preview) 동작
+total++;
+{
+  let ok = false;
+  try {
+    const tools = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools'));
+    const tl = tools.find(t => t.name === 'leerness_team_list');
+    const tp = tools.find(t => t.name === 'leerness_team_preview');
+    const defsOk = !!tl && tl.requiredTier === 'read-only' && !!tp && tp.requiredTier === 'read-only' && tp.inputSchema.required.includes('id') && tools.length >= 85;
+    // 매핑 대상 CLI 동작 (MCP dispatch 가 호출하는 것)
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tmcp-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'rev', '--members', 'claude', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const lj = cp.spawnSync(process.execPath, [CLI, 'team', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let cliOk = false;
+    try { cliOk = JSON.parse(lj.stdout).count === 1; } catch {}
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = defsOk && cliOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.378) UR-0073: team MCP 도구(read-only list/preview) 정의 + 매핑 CLI 동작' : '✗ team MCP 도구 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

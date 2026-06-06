@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.378 — 2026-06-06 — UR-0073: 에이전트 팀 MCP 노출 (read-only list/preview)
+
+**🧩 신규 team 서브시스템을 MCP 로 외부 AI 에 노출 — 에이전트 팀 비전을 외부 에이전트가 직접 활용.**
+
+### 배경
+leerness 는 MCP-first(80+ 도구)이나 신규 team 서브시스템(UR-0073)이 MCP 미노출이었음. 외부 AI 에이전트가 팀을 조회/미리보기할 수 있어야 비전("에이전트가 팀 관리/실행")이 완성. **읽기 전용만 노출**(deploy 는 CLI 게이트 유지 — MCP 로 배포 트리거 방지).
+
+### 구현
+1. **`leerness_team_list`**(read-only): 정의된 팀 목록 JSON.
+2. **`leerness_team_preview`**(read-only, `id` required, `task?`): 팀 실행 계획 dry-run 미리보기 JSON(실행 없음).
+3. harness MCP dispatch 2 case(`team list/preview --json` 매핑). MCP 도구 83→85(`_mcpToolCount` 자동 반영).
+
+### 검증 (회귀 0)
+- **selftest 123→124 PASS** (MCP 정의 read-only + required id + dispatch 와이어). **E2E 322→323 PASS** (정의 + 매핑 CLI 동작).
+- 실측: mcp-tools 85개, team_list/preview read-only, 매핑 CLI 정상.
+
 ## 1.9.377 — 2026-06-06 — UR-0025 모듈화: workspace reference guide 빌더 분리
 
 **🧩 워크스페이스 레퍼런스 가이드 빌더(~57줄)를 lib/pure-utils 로 분리.**
