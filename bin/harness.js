@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.395';
+const VERSION = '1.9.396';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3000,6 +3000,7 @@ function _selfTestCases() {
     { name: 'UR-0025/whats-new BUG-fix: _parseChangelogBetween pure 추출 + "## X — DATE — title" 헤더 파싱 (1.9.393)', run: () => { const m = require('../lib/pure-utils'); if (m._parseChangelogBetween !== _parseChangelogBetween) return false; const cl = '## 1.9.393 — 2026-06-06 — Title\n- `leerness foo`\n- `--flagx`\n- `.harness/x.md`\n\n## 1.9.392 — 2026-06-05 — Y\n- y\n\n## 1.9.391 — 2026-06-04 — Z\n- z\n'; const r = m._parseChangelogBetween(cl, '1.9.391', '1.9.393'); const rangeOk = r.length === 2 && r[0].version === '1.9.393' && r[1].version === '1.9.392'; const extractOk = r[0].newCommands.includes('foo') && r[0].newFlags.includes('--flagx') && r[0].newFiles.includes('.harness/x.md'); const titlelessOk = m._parseChangelogBetween('## 1.9.50\n- a\n## 1.9.49\n- b\n', '1.9.49', '1.9.50').length === 1; const src = read(__filename); const moved = src.includes("require('../lib/pure-utils')") && !/function _parseChangelogBetween\(changelogText/.test(src); return rangeOk && extractOk && titlelessOk && moved; } },
     { name: 'UR-0025 whats-new 완결: whatsNewCmd → lib/diagnostics.js + DI 위임 + 동작 (1.9.394)', run: () => { const m = require('../lib/diagnostics'); const expOk = typeof m.whatsNewCmd === 'function'; const src = read(__filename); const delegated = src.includes('_diag.whatsNewCmd(root,'); const diagSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js')); const movedToLib = diagSrc.includes('leerness whats-new') && diagSrc.includes('_parseChangelogBetween'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wn_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, 'CHANGELOG.md'), '## 1.9.50 — 2026-06-06 — A\n- `leerness x`\n\n## 1.9.49 — 2026-06-05 — B\n- old\n'); process.argv = ['node', 'h', 'whats-new', tmp, '--from', '1.9.49', '--to', '1.9.50', '--json']; process.stdout.write = s => { out += s; return true; }; whatsNewCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.from === '1.9.49' && j.to === '1.9.50' && Array.isArray(j.versions) && j.versions.length === 1 && j.versions[0].version === '1.9.50'; } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: '회귀가드: decisions/lessons canonical round-trip 엣지문자(pipe/dash/colon) 무손상 + idempotent (1.9.395)', run: () => { const m = require('../lib/pure-utils'); const d = [{ date: '2026-06-06', title: 'A | pipe', decision: 'use X | Y', reason: 'r—dash', alternatives: 'alt: colon', impact: 'i' }]; const dback = m._decisionsFromMd(m._renderDecisionsMd(d)); const dOk = dback.length === 1 && dback[0].title === 'A | pipe' && dback[0].decision === 'use X | Y' && dback[0].reason === 'r—dash'; const dIdem = JSON.stringify(dback) === JSON.stringify(m._decisionsFromMd(m._renderDecisionsMd(dback))); const l = [{ date: '2026-06-06', text: 'lesson | with — chars: ok', tag: 't' }]; const lback = m._parseLessonEntries(m._renderLessonsMd(l)); const lOk = lback.length === 1 && lback[0].text === 'lesson | with — chars: ok'; const lIdem = JSON.stringify(lback) === JSON.stringify(m._parseLessonEntries(m._renderLessonsMd(lback))); return dOk && dIdem && lOk && lIdem; } },
+    { name: '6번째 외부평가/codex P1-B: task drop 존재확인 가드 — 없는 ID 가짜 row 방지 (1.9.396)', run: () => { const src = read(__filename); const i = src.indexOf('function taskDrop(root, id)'); if (i < 0) return false; const body = src.slice(i, i + 700); return body.includes('not found in progress-tracker.md') && body.includes('rows.find(r => r.id === id)') && body.includes('_requireInit'); } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6149,7 +6150,11 @@ function taskUpdate(root, id) {
   _autoRoadmap(absRoot(root), 'data-change');
 }
 function taskDrop(root, id) {
+  if (!_requireInit(root, 'task drop')) return;  // 1.9.396 (6번째 외부평가/codex P1-B): init 가드
   if (!id) return fail('id required');
+  const rows = readProgressRows(root);
+  // 1.9.396 (6번째 외부평가/codex P1-B): 없는 task drop 시 가짜 row(request undefined) 생성 = 데이터 손상 → task update 와 동일하게 존재 확인 후 fail(no-op).
+  if (!rows.find(r => r.id === id)) { fail(`task ${id} not found in progress-tracker.md`); return; }
   upsertProgress(root, { id, status: 'dropped', evidence: arg('--reason','사용자 요청으로 제외'), nextAction: '없음' });
   ok(`task dropped: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');

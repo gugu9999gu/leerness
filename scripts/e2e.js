@@ -5498,5 +5498,28 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.396 회귀 (6번째 외부평가/codex P1-B): task drop 없는 ID → fail + 가짜 row 무생성(데이터 손상 차단). 실제 task drop 은 정상.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-taskdrop-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const ptPath = path.join(d, '.harness', 'progress-tracker.md');
+    const before = fs.readFileSync(ptPath, 'utf8');
+    const rNo = cp.spawnSync(process.execPath, [CLI, 'task', 'drop', 'T-9999', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const after = fs.readFileSync(ptPath, 'utf8');
+    const noBogus = rNo.status === 1 && !after.includes('T-9999') && after === before;  // fail + 무변경
+    // 실제 task 는 정상 drop
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'RealDropTask', '--path', d, '--no-review'], { encoding: 'utf8', timeout: 15000 });
+    const rReal = cp.spawnSync(process.execPath, [CLI, 'task', 'drop', 'T-0001', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const realOk = rReal.status === 0 && /dropped/.test(rReal.stdout || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = noBogus && realOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.396) 6th외부평가 codex P1-B: task drop 없는ID fail+무변경 / 실제 정상 (데이터 손상 차단)' : '✗ task drop 가드 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

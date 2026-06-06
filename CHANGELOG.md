@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.396 — 2026-06-06 — 6번째 외부 멀티모델 리뷰 + task drop 데이터 손상 수정 (UR-0097)
+
+**🔬 6번째 외부 클린룸 리뷰(codex GPT-5.5 + Opus) — findings 7건 등록 + 최우선 데이터 손상(task drop) 즉시 수정.**
+
+### 6번째 외부 멀티모델 클린룸 리뷰
+백로그가 상당히 소진되어, 깨끗한 경로에 leerness@1.9.395 를 설치하고 codex CLI(GPT-5.5) + Opus(현재 에이전트)로 객관 리뷰(Claude 헤드리스 401 로 sonnet 별도 세션은 불가, 2모델). "맹신 X" 로 각 발견을 직접 재현.
+- 발견 7건(P0 0 · P1 4 · P2 3) → UR-0097~0103 등록. 상세: `_reports/_extreview6-consolidated-1.9.395.md`.
+
+### 수정 (P1-B, UR-0097 — 데이터 손상, 최우선)
+- **task drop 없는 ID**: `task drop T-9999`(미존재) 가 `✓ task dropped` exit 0 + `| T-9999 | dropped | undefined |` 가짜 row 를 progress-tracker 에 기록 = **프로젝트 메모리 손상**.
+- task update 는 `_requireInit` + 존재확인(없으면 fail/no-op)인데 task drop 만 누락.
+- **수정**: task drop 에 동일 가드 추가 → 없는 ID = fail + exit 1 + **무변경**, 실제 task = 정상 drop.
+
+### 나머지 P1(후속 라운드): install-safety PowerShell 레시피(UR-0098) · --json 에러 경로(UR-0099) · list positional path(UR-0100).
+
+### 검증 (회귀 0)
+- **selftest 141→142 PASS** (task drop 존재확인 가드 + init 가드).
+- **E2E 334→335 PASS** (없는 ID drop fail+무변경 / 실제 drop 정상).
+
 ## 1.9.395 — 2026-06-06 — 행위검증 회귀가드: audit FP/FN + canonical 파이프 round-trip (UR-0096)
 
 **🛡 광범위 행위검증으로 실 버그 탐색 — 신규 버그 0(성숙·견고 확인) + 가드 없던 2영역에 net-new 회귀 가드 추가.**
