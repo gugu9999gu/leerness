@@ -23,13 +23,14 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _personaSummaries, _translate,
   _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd,
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
-  _migrationGuideText, _parseContractSpec, _gitignoreMatch } = require('../lib/pure-utils');  // 1.9.318~386 (UR-0025/0053/0075/0086/0087): 순수 유틸 모듈 분리
+  _migrationGuideText, _parseContractSpec, _gitignoreMatch,
+  _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock } = require('../lib/pure-utils');  // 1.9.318~390 (UR-0025/0053/0075/0086/0087): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.389';
+const VERSION = '1.9.390';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2992,6 +2993,7 @@ function _selfTestCases() {
     { name: 'UR-0088 5th외부평가 일관성: incident/runs list 빈 케이스 --json 구조화 (1.9.387)', run: () => { if (typeof incidentListCmd !== 'function' || typeof runsListCmd !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lj_')); const save = process.argv; const _w = process.stdout.write; let io = '', ro = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'incident', 'list', '--json']; process.stdout.write = s => { io += s; return true; }; incidentListCmd(tmp); process.stdout.write = _w; process.argv = ['node', 'h', 'runs', 'list', '--json']; process.stdout.write = s => { ro += s; return true; }; runsListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let ij, rj; try { ij = JSON.parse(io); rj = JSON.parse(ro); } catch {} return !!ij && ij.total === 0 && Array.isArray(ij.items) && !!rj && rj.total === 0 && Array.isArray(rj.items); } },
     { name: 'UR-0025 큰핸들러 모듈화: migrate audit/apply/plan → lib/migrate.js + DI 위임 + 동작 (1.9.388)', run: () => { const m = require('../lib/migrate'); const expOk = typeof m.migrateAuditCmd === 'function' && typeof m.migrateApplyCmd === 'function' && typeof m.migratePlanCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/migrate')") && src.includes('_migrate.migrateAuditCmd(root, opts, _migrateDeps())') && src.includes('_migrate.migratePlanCmd(root, opts, _migrateDeps())'); const movedToLib = read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).includes('leerness-plan-'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_mig_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'HARNESS_VERSION'), VERSION); process.argv = ['node', 'h', 'migrate', 'audit', tmp, '--json']; process.stdout.write = s => { out += s; return true; }; migrateAuditCmd(tmp, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && typeof j.willChange === 'number' && Array.isArray(j.findings); } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: 'UR-0025 큰핸들러 모듈화: teamCmd → lib/team.js + DI 위임 + 동작 (1.9.389)', run: () => { const m = require('../lib/team'); const expOk = typeof m.teamCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/team')") && src.includes('_team.teamCmd(root, sub, id, opts,'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const movedToLib = teamSrc.includes("require('./pure-utils')") && teamSrc.includes('_teamDeployGate') && teamSrc.includes('알 수 없는 team 하위명령'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tm_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'team', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; teamCmd(tmp, 'list', undefined, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && j.count === 0 && Array.isArray(j.teams); } catch {} return expOk && delegated && movedToLib && behavOk; } },
+    { name: 'UR-0025: feature-graph 순수 코어(_featureGraphTemplate/_parseFeatureGraph/_nextFeatureId/_featureBlock) → pure-utils + round-trip (1.9.390)', run: () => { const m = require('../lib/pure-utils'); const refOk = m._parseFeatureGraph === _parseFeatureGraph && m._featureGraphTemplate === _featureGraphTemplate && m._nextFeatureId === _nextFeatureId && m._featureBlock === _featureBlock; const tmpl = m._featureGraphTemplate(); const tmplOk = tmpl.includes('Feature Graph') && tmpl.includes('## Nodes'); const nodes = m._parseFeatureGraph('## F-0001 Auth\n- depends-on: F-0002\n- affects: F-0003\n- files: a.js\n'); const parseOk = nodes.length === 1 && nodes[0].id === 'F-0001' && nodes[0].title === 'Auth' && nodes[0].dependsOn[0] === 'F-0002' && nodes[0].affects[0] === 'F-0003' && nodes[0].files[0] === 'a.js'; const idOk = m._nextFeatureId(nodes) === 'F-0002'; const rt = m._parseFeatureGraph(m._featureBlock(nodes[0])); const rtOk = rt.length === 1 && rt[0].id === 'F-0001' && rt[0].dependsOn[0] === 'F-0002'; const src = read(__filename); const moved = src.includes("require('../lib/pure-utils')") && !/^function _parseFeatureGraph\(text\) \{/m.test(src) && !/^function _featureBlock\(node\) \{/m.test(src); return refOk && tmplOk && parseOk && idOk && rtOk && moved; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -14505,61 +14507,6 @@ function lessonsCmd(root) {
 //   - tests: tests/foo.test.ts
 //   - notes: 자유 메모
 function featureGraphPath(root) { return path.join(absRoot(root), '.harness', 'feature-graph.md'); }
-function _featureGraphTemplate() {
-  return `# Feature Graph (1.9.141)\n\n` +
-    `> **목적**: 각 기능의 인과관계를 정확히 정리해서 코드 작성 전 영향 범위를 자동 추적.\n` +
-    `> 신규 기능 추가, 데이터 형식 변경, 외부 API 매칭 작업 전 \`leerness feature impact <id>\`로 확인.\n` +
-    `> handoff가 현재 task 키워드로 자동 매칭해서 영향받는 feature 목록을 회수.\n\n` +
-    `## How to use\n\n` +
-    `\`\`\`bash\n` +
-    `leerness feature add "User Auth"                           # F-0001 자동 부여\n` +
-    `leerness feature link F-0002 --depends-on F-0001           # 의존 관계\n` +
-    `leerness feature link F-0001 --affects F-0002,F-0005        # 영향 관계 (다수)\n` +
-    `leerness feature link F-0001 --co-changes-with F-0011       # 함께 변해야 하는 기능\n` +
-    `leerness feature impact F-0001                              # 영향받는 전체 (transitive)\n` +
-    `leerness feature list --json                                # 그래프 JSON\n` +
-    `leerness feature show F-0001                                # 단일 상세\n` +
-    `\`\`\`\n\n` +
-    `## Nodes\n\n`;
-}
-function _parseFeatureGraph(text) {
-  if (!text) return [];
-  const nodes = [];
-  const re = /^## (F-\d{4})\s+(.+?)\s*$/gm;
-  const positions = [];
-  let m;
-  while ((m = re.exec(text)) !== null) positions.push({ id: m[1], title: m[2], start: m.index });
-  for (let i = 0; i < positions.length; i++) {
-    const start = positions[i].start;
-    const end = i + 1 < positions.length ? positions[i + 1].start : text.length;
-    const block = text.slice(start, end);
-    const parseField = (key) => {
-      // 1.9.141 fix: \s 은 \n 도 포함하므로 [ \t]* 로 newline 비포함 horizontal whitespace 만 매칭
-      const r = new RegExp(`^- ${key}:[ \\t]*(.*?)$`, 'mi');
-      const mm = block.match(r);
-      return mm ? mm[1].trim() : '';
-    };
-    const parseList = (key) => {
-      const v = parseField(key);
-      if (!v) return [];
-      return v.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
-    };
-    nodes.push({
-      id: positions[i].id,
-      title: positions[i].title,
-      dependsOn: parseList('depends-on'),
-      affects: parseList('affects'),
-      coChangesWith: parseList('co-changes-with'),
-      files: parseList('files'),
-      input: parseField('input'),
-      output: parseField('output'),
-      errorModes: parseList('error-modes'),
-      tests: parseList('tests'),
-      notes: parseField('notes')
-    });
-  }
-  return nodes;
-}
 function _readFeatureGraph(root) {
   const p = featureGraphPath(root);
   if (!exists(p)) return { nodes: [], text: '' };
@@ -14570,23 +14517,6 @@ function _ensureFeatureGraph(root) {
   const p = featureGraphPath(root);
   if (!exists(p)) writeUtf8(p, _featureGraphTemplate());
   return p;
-}
-function _nextFeatureId(nodes) {
-  const used = new Set(nodes.map(n => parseInt(n.id.slice(2), 10)));
-  let n = 1; while (used.has(n)) n++;
-  return 'F-' + String(n).padStart(4, '0');
-}
-function _featureBlock(node) {
-  return `## ${node.id} ${node.title}\n` +
-    `- depends-on: ${(node.dependsOn || []).join(', ')}\n` +
-    `- affects: ${(node.affects || []).join(', ')}\n` +
-    `- co-changes-with: ${(node.coChangesWith || []).join(', ')}\n` +
-    `- files: ${(node.files || []).join(', ')}\n` +
-    `- input: ${node.input || ''}\n` +
-    `- output: ${node.output || ''}\n` +
-    `- error-modes: ${(node.errorModes || []).join(', ')}\n` +
-    `- tests: ${(node.tests || []).join(', ')}\n` +
-    `- notes: ${node.notes || ''}\n\n`;
 }
 function _writeFeatureGraph(root, nodes) {
   const p = _ensureFeatureGraph(root);

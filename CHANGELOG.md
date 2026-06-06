@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.390 — 2026-06-06 — UR-0025 모듈화: feature-graph 순수 코어 → pure-utils (feature 핸들러 분리 토대)
+
+**🧩 feature-graph 의 순수 로직(템플릿/파서/ID/블록 렌더)을 lib/pure-utils.js 로 분리 — 가장 많이 공유되는 서브시스템의 핵심을 단일출처·테스트 가능화.**
+
+### 배경 (UR-0025, 사용자 승인 모듈화)
+migrate(1.9.388)/team(1.9.389) 핸들러를 lib 모듈로 뺐다. feature 서브시스템도 후보지만, `_readFeatureGraph` 가 audit/health/handoff 등 **7+곳에서 공유**돼 핸들러를 통째로 옮기기 전에 순수 코어부터 분리하는 게 안전(lib/io.js 토대를 먼저 만든 것과 동일 순서).
+
+### 구현
+1. **pure-utils 로 순수 4종 이전**: `_featureGraphTemplate`(템플릿) · `_parseFeatureGraph`(MD→nodes) · `_nextFeatureId`(다음 F-id) · `_featureBlock`(node→MD). 모두 I/O 없음.
+2. **I/O 헬퍼는 harness 유지**: `_readFeatureGraph`(7+곳 공유) · `_writeFeatureGraph` · `_ensureFeatureGraph` · `featureGraphPath` — 이제 pure-utils 의 순수 함수를 import 해 사용.
+3. harness 인라인 정의 제거 + import. 호출부·동작·출력 무변경.
+
+### 검증 (회귀 0)
+- **selftest 135→136 PASS** (reference-equality 4종 + 템플릿/파서/nextId 동작 + `_featureBlock`→`_parseFeatureGraph` round-trip + 인라인 제거 확인).
+- **E2E 332 유지 PASS** (feature add/link/impact/list/show + 공유 _readFeatureGraph(audit/health/handoff) 회귀). 락 flake 시 재실행.
+- 실측: add(F-0001/F-0002)·link(affects)·impact(transitive)·list(--json)·health(featureGraph) 보존.
+
 ## 1.9.389 — 2026-06-06 — UR-0025 큰 핸들러 모듈화 2번째: teamCmd → lib/team.js (DI)
 
 **🧩 두 번째 핸들러 모듈 추출 — team 서브시스템(list/add/show/remove/preview/deploy)을 lib/team.js 로 분리. migrate(1.9.388)에서 확립한 DI 패턴 재사용.**
