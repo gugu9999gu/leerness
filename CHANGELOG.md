@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.433 — 2026-06-08 — 11번째 외부평가: contract verify backtick-bullet 강선언 FN 수정 (UR-0136~0139)
+
+**🔍 11번째 외부 멀티모델 리뷰(Codex/Sonnet/Opus, README 미참조, 1.9.432). 5개 회귀항목 전부 정상 확인 + contract verify P1 신규 적발.**
+
+### 수정 (확정·맹신 X 직접 재현)
+- **[P1] contract verify backtick-bullet 강선언 우회(FN)** (Codex+Opus 교차확인): CLI 자체 관례인 `` - `name()` 필요 `` / `` - `field`: 설명 `` 표기가 **약언급(mentioned)으로 분류돼 누락검사 우회** → 구현에 없어도 ok:true/exit 0. `_parseContractSpec` 의 강선언 bullet regex(함수·필드)에 **bullet 시작 backtick 허용**. 인라인 산문 backtick 은 약언급 유지(관대성), 공백+괄호 산문(`- result (total)`) FP 가드 유지.
+
+### 검증 (회귀 0)
+- **selftest 177→178 PASS** (backtick 함수/필드 강선언 + 산문 약언급 + FP 가드). contract verify e2e: 누락 함수/필드 → ok:false/exit 1.
+- **E2E 무회귀**.
+
+### 5개 회귀항목 독립 검증 — 전부 정상
+health memorySurface(STATUSES) · check/plan show/review-request --json 순수성 · contract 멀티라인/ESM · health 보안 exit 1 · drift 재귀 종료성.
+
+### 맹신 X — 기각 2건 (직접 재현으로 반증)
+- Sonnet "동시 task add 데이터 유실(P1)" → node 정밀 재현 **3/3 무손실·dup 0**(bash `&` 아티팩트). e2e B(1.9.303) + CPU포화 5/5 와 일치.
+- Sonnet "GitHub 토큰(ghp_/github_pat_) 미탐지(P2)" → **정상 탐지·exit 1** 확인.
+
+### 후속 백로그 (UR-0136~0139)
+nonexistent path exit 통일 · agents dispatch flag bleed(_parseAddTitle) · --json 에러 전역화 · ESM re-export/encoding CRLF/AKIA placeholder.
+
 ## 1.9.432 — 2026-06-08 — drift --auto-fix 재귀 depth 가드 (10th 외부평가 Opus latent, UR-0131 잔여)
 
 **🛡️ drift --auto-fix 재귀의 잠재적 무한재귀 방어(방어적 — 현재 신호 타입에선 미발현 확인).**

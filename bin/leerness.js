@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.432';
+const VERSION = '1.9.433';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3249,6 +3249,16 @@ function _selfTestCases() {
       const guard = modSrc.includes("has('--auto-fix') && !opts._noAutoFix");
       const recurseGuarded = (modSrc.match(/driftCheckCmd\(root, \{ \.\.\.opts, _noAutoFix: true \}, deps\)/g) || []).length === 2;
       return guard && recurseGuarded;
+    } },
+    { name: '11th 외부평가 Codex/Opus P1: contract spec backtick-bullet 함수/필드 강선언 인식 (1.9.433)', run: () => {
+      const m = require('../lib/pure-utils');
+      const f = m._parseContractSpec('## Functions\n- `subtract(a,b)` 필요\n- createUser()\n## Fields\n- `version`: 모듈명\n- plainField\n');
+      const fn = [...f.declared].sort().join(',') === 'createUser,subtract';
+      const fld = [...f.fields].sort().join(',') === 'plainField,version';
+      // 인라인 산문 backtick 은 약언급 유지(declared 아님)
+      const prose = m._parseContractSpec('산문에서 `helperFn()` 언급.');
+      const proseOk = [...prose.declared].length === 0 && [...prose.mentioned].join(',') === 'helperFn';
+      return fn && fld && proseOk;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
