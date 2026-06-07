@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.432 — 2026-06-08 — drift --auto-fix 재귀 depth 가드 (10th 외부평가 Opus latent, UR-0131 잔여)
+
+**🛡️ drift --auto-fix 재귀의 잠재적 무한재귀 방어(방어적 — 현재 신호 타입에선 미발현 확인).**
+
+### 변경
+- **`lib/drift.js`**: `autoFix = has('--auto-fix') && !opts._noAutoFix`. 두 재귀점이 `{ ...opts, _noAutoFix: true }` 전달 → 재귀는 auto-fix 블록 재진입 금지(명시 1회 보장).
+- 기존엔 재귀가 `has('--auto-fix')`(전역 argv)를 재독해 auto-fix 분기에 재진입, 종료가 "audit --fix가 보안 신호를 항상 지운다"는 취약 불변식에 의존. 미래에 audit이 못 고치는 신호 타입이 추가되면 무한재귀 위험.
+
+### 검증 (맹신 X)
+- Opus의 "infinite recursion" 우려를 직접 재현 시도 → **현재 미발현**(보안 신호는 gitignore 기반이라 audit --fix가 항상 해소). 그러나 불변식 의존은 취약 → 방어적 가드는 정당.
+- **selftest 176→177 PASS**(depth 가드 소스 + 기존 1.9.422 재귀 케이스 갱신) · 발화 케이스 정상 종료(exit 0) 확인 · **E2E 무회귀**.
+
+### 분리 (UR-0135)
+drift --auto-fix --json 비순수(dirty WS 진행로그)는 재귀가 auto-fix 블록 내부라 stdout 캡처 재구조화 필요 → 신중한 별도 라운드로 분리.
+
 ## 1.9.431 — 2026-06-08 — health exit code 정책: 보안 CRITICAL CI 게이트 (10th 외부평가 UR-0130)
 
 > 1.9.430(npm 게시)에서 e2e 테스트 픽스처가 `sk_live_` 패턴(Stripe 실키 형태)이라 GitHub push-protection에 막혀 git 미반영. 픽스처를 코드베이스 관례인 `sk-test-`(GitHub-safe + leerness 탐지)로 교체하고 1.9.431로 정리(git=npm=tag 정합). 동작 동일.
