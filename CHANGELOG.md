@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.438 — 2026-06-08 — contract impl ESM re-export 인식 (11th 외부평가 Sonnet P3, UR-0139 완결)
+
+**🧩 `export { default as X } from './m'` 재export 의 별칭 X 를 named export 로 인식.**
+
+### 변경
+- **`_parseImplExports` ESM 목록 파서**: `default as X` 는 별칭 X 가 named export 이므로 `as` 별칭을 먼저 채택(이전엔 `default` 시작이라 통째로 스킵 → contract verify false negative). `export { foo, bar as baz } from './x'` 도 정상. 단독 `export default`/`type X` 는 제외 유지. `export * from`(이름 정적 불가)은 미지원(문서화).
+
+### 검증 (회귀 0)
+- `export { default as getUserById } from` → `[getUserById]`; `foo, bar as baz` → `[foo,baz]`; 단독 default → `[]`; 일반 ESM 무회귀.
+- **selftest 182→183 PASS** · **E2E 무회귀**. → UR-0139(AKIA placeholder + ESM re-export) 완결.
+
 ## 1.9.437 — 2026-06-08 — --json 에러 전역화: unknown command + 무효 choice (11th 외부평가 Codex P2/P3, UR-0138)
 
 **📐 자동화(CI/MCP)가 모든 에러 경로를 JSON.parse 할 수 있도록 중앙 에러 2종을 순수 JSON 화.**
