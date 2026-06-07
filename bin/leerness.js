@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.427';
+const VERSION = '1.9.428';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3209,6 +3209,29 @@ function _selfTestCases() {
       }
       return true;
     } },
+    { name: '10th 외부평가 UR-0128: check/plan show/review-request --json 순수성 (1.9.428)', run: () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_json_'));
+      let pass = false;
+      const _w = process.stdout.write; let out = '';
+      const _argv = process.argv.slice();  // 외부 호출(doctor --json/selftest --json)의 argv 격리·복원
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        const cap = fn => { out = ''; process.stdout.write = s => { out += s; return true; }; try { fn(); } finally { process.stdout.write = _w; } return out; };
+        process.argv = _argv.filter(a => a !== '--json');  // 텍스트 모드 강제(외부 --json 제거)
+        const a = cap(() => planShow(tmp));  // 텍스트 → JSON 아니어야
+        process.argv = _argv.filter(a => a !== '--json').concat('--json');  // JSON 모드 강제
+        const b = cap(() => planShow(tmp));  // --json → JSON
+        let bOk = false; try { const j = JSON.parse(b); bOk = typeof j.exists === 'boolean' && Array.isArray(j.milestones); } catch {}
+        const aNotJson = (() => { try { JSON.parse(a); return false; } catch { return true; } })();
+        pass = bOk && aNotJson;
+      } catch (e) { pass = false; } finally { process.argv = _argv; process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      // 소스 가드: 세 핸들러가 has('--json') 분기를 가짐
+      const src = read(__filename);
+      const guards = src.includes("if (json) { log(JSON.stringify({ root, healthy") && src.includes('plan show --json 구조화');
+      const rrSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'review-request.js'));
+      const rrGuard = rrSrc.includes("failJson(!!(has && has('--json')), 'review_request_empty'");
+      return pass && guards && rrGuard;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6079,7 +6102,7 @@ function upsertProgress(root, row) {
   });
 }
 
-function planShow(root) { const p = planPath(root); log(exists(p) ? read(p) : 'plan.md not found'); }
+function planShow(root) { const p = planPath(root); const has_ = exists(p); const content = has_ ? read(p) : ''; if (has('--json')) { const milestones = (content.match(/^### (M-\d{4})\b.*$/gm) || []).map(l => l.replace(/^###\s*/, '').trim()); log(JSON.stringify({ exists: has_, milestones, raw: content }, null, 2)); return; } log(has_ ? content : 'plan.md not found'); }  // 1.9.428 (UR-0128): plan show --json 구조화
 function planInit(root) { const goal = arg('--goal', ''); if (!exists(planPath(root))) return install(root); append(planPath(root), `\n## User Goal\n- ${goal || '사용자 목적을 작성하세요.'}\n`); ok('plan goal appended'); }
 // 1.9.119: plan list — plan.md 의 모든 milestone (M-XXXX) 조회 (CLI + --json + MCP)
 function planListCmd(root, opts = {}) {
@@ -7245,14 +7268,18 @@ function lazyDetect(root, opts = {}) {
 
 function preCheck(root) {
   root = absRoot(root);
+  const json = has('--json');  // 1.9.428 (10th 외부평가 UR-0128): check --json 순수 JSON
+  const checks = [];
   let issues = 0;
   const required = ['.harness/plan.md','.harness/progress-tracker.md','.harness/protected-files.md','AGENTS.md'];
-  for (const f of required) if (!exists(path.join(root,f))) { issues++; fail(`missing: ${f}`); }
-  if (exists(handoffPath(root))) ok('session-handoff present');
-  if (exists(currentStatePath(root))) ok('current-state present');
-  if (exists(planPath(root))) ok('plan present');
-  const pf = exists(path.join(root,'.harness/protected-files.md')) ? read(path.join(root,'.harness/protected-files.md')) : '';
-  if (!pf.includes('AGENTS.md')) { issues++; fail('protected-files.md missing AGENTS.md'); }
+  for (const f of required) { const present = exists(path.join(root,f)); checks.push({ name: f, kind: 'required', ok: present }); if (!present) { issues++; if (!json) fail(`missing: ${f}`); } }
+  for (const [name, p] of [['session-handoff', handoffPath(root)], ['current-state', currentStatePath(root)], ['plan', planPath(root)]]) { const present = exists(p); checks.push({ name, kind: 'state', ok: present }); if (present && !json) ok(`${name} present`); }
+  const pfPath = path.join(root,'.harness/protected-files.md');
+  const pf = exists(pfPath) ? read(pfPath) : '';
+  const pfOk = pf.includes('AGENTS.md');
+  checks.push({ name: 'protected-files.md AGENTS.md', kind: 'integrity', ok: pfOk });
+  if (!pfOk) { issues++; if (!json) fail('protected-files.md missing AGENTS.md'); }
+  if (json) { log(JSON.stringify({ root, healthy: issues === 0, issues, checks }, null, 2)); if (issues) process.exitCode = 1; return; }
   if (issues === 0) ok('pre-action check passed');
   else { process.exitCode = 1; }
 }

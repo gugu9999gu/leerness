@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.428 — 2026-06-07 — --json 순수성: check / plan show / review-request (10th 외부평가 UR-0128)
+
+**📐 자동화 소비자(CI/MCP)를 위한 --json 일관성 — 텍스트만 내던 3개 경로를 순수 JSON 화.**
+
+### 변경
+- **`check --json`**: 텍스트("✓ … present") → `{ root, healthy, issues, checks:[{name,kind,ok}] }`.
+- **`plan show --json`**: raw 마크다운(frontmatter 포함) → `{ exists, milestones:[…], raw }`.
+- **`review-request "" --json`**: 텍스트 usage 에러 → `failJson` 으로 `{ ok:false, error, code:"review_request_empty" }`.
+- 텍스트 모드는 출력 무변경(회귀 0).
+
+### 검증
+- **selftest 173→174 PASS** (planShow text=비JSON / --json=JSON 행위검증 + 3핸들러 소스 가드).
+- **E2E 무회귀**.
+
+### 잔여 (UR-0128 후속)
+drift --auto-fix --json 비순수(dirty WS, 한국어 로그 선행) + audit --fix --json stale findings 는 후속 라운드.
+
 ## 1.9.427 — 2026-06-07 — DI 완전성 메타체크: 모듈화 회귀 근본 차단 (UR-0131)
 
 **🛡️ 10번째 외부평가의 구조적 발견(selftest가 DI 누락 회귀를 못 잡음) 근본 해결.**
