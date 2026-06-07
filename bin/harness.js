@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.416';
+const VERSION = '1.9.417';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3025,6 +3025,18 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
     { name: '6번째 외부평가 Opus P1 (UR-0100): list-family(decision/feature/plan/runs/team list) positional path 지원 (조용한 cwd 오독 차단) (1.9.412)', run: () => { const src = read(__filename); const L = '_resolveRoot('; const decOk = src.includes("decisionListCmd(absRoot(" + L + "args[2]))"); const planOk = src.includes("planListCmd(absRoot(" + L + "args[2]))"); const featOk = src.includes("featureListCmd(absRoot(" + L + "args[2]))"); const runsOk = src.includes("runsListCmd(absRoot(" + L + "args[2]))"); const teamOk = src.includes(L + "args[1] === 'list' ? args[2] : null)"); return decOk && planOk && featOk && runsOk && teamOk; } },
     { name: '6번째 외부평가 codex P2 (UR-0101): action 명령(task/decision/rule/lesson add) --json 구조화 출력 (1.9.413)', run: () => { const src = read(__filename); const taskJ = src.includes("log(JSON.stringify({ ok: true, id, status: arg('--status', 'requested'), request: text }))"); const decJ = src.includes("log(JSON.stringify({ ok: true, title }))"); const lesJ = src.includes("log(JSON.stringify({ ok: true, text, tag: tag || null }))"); const ruleJ = src.includes("skipped: !!result.skip"); return taskJ && decJ && lesJ && ruleJ; } },
+    { name: '9th 외부평가 Opus (UR-0123): contract field 범용화 — ## Fields 섹션 불릿 인식(tick. 회귀 보존) (1.9.417)', run: () => {
+      const m = require('../lib/pure-utils');
+      const r1 = m._parseContractSpec('# S\n\n## Fields\n- userId\n- expiresAt: string\n');
+      const f1 = r1.fields.includes('userId') && r1.fields.includes('expiresAt');
+      const r2 = m._parseContractSpec('# S\n\n## Functions\n- loginUser(id)\n- notField\n');
+      const f2 = r2.fields.length === 0 && r2.declared.includes('loginUser');
+      const r3 = m._parseContractSpec('tick.legacy\n');
+      const f3 = r3.fields.includes('legacy');
+      const r4 = m._parseContractSpec('# S\n\n## 필드\n- 항목은영문만\n- userName\n');
+      const f4 = r4.fields.includes('userName');
+      return f1 && f2 && f3 && f4;
+    } },
     { name: '9th 외부평가 Sonnet/Codex (UR-0122): add류 _parseAddTitle(flag/경로 break) + 빈 입력 거부 와이어 (1.9.416)', run: () => {
       const m = require('../lib/pure-utils');
       if (typeof m._parseAddTitle !== 'function' || m._parseAddTitle !== _parseAddTitle) return false;

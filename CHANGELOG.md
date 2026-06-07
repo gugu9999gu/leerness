@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.417 — 2026-06-07 — contract verify field 검증 범용화: ## Fields 섹션 불릿 인식 (9번째 외부평가, UR-0123)
+
+**🔧 `contract verify` 의 필드 계약 검증이 `tick.` 프리픽스 전용으로 하드코딩돼 범용 spec 에서 무력화되던 것(Opus 발견) 보강.**
+
+### 배경
+Opus: `_parseContractSpec` 의 필드 추출이 `matchAll(/tick\.(name)/g)` 뿐(원래 TICK_SPEC 예제 잔재) → `## Fields` 아래 `- userId` 같은 일반 필드를 전혀 인식 못 해 "모든 필드 존재"로 항상 통과. 범용 명세↔구현 필드 검증이 사실상 불능.
+
+### 수정
+- `_parseContractSpec`: **`## Fields`(또는 `## 필드`) 섹션 한정**으로 불릿(`- name` / `* name: type` / `- name (설명)`)을 필드로 인식. 섹션 한정이라 산문 불릿 오탐 없음. 식별자 직후 `(` 면 함수로 보아 제외.
+- 기존 `tick.X` 인식 + 함수 불릿(declared) 동작은 그대로(회귀 0).
+
+### 검증 (회귀 0)
+- **selftest 162→163 PASS** (Fields 섹션 인식 + Functions 불릿 필드 오인 방지 + `## 필드` 한글 + tick. 회귀).
+- **E2E 416→417 PASS** (## Fields 누락 감지 exit 1 + 충족 시 통과).
+
+### 9번째 외부평가 진행
+UR-0121(handoff false-OK) ✅ · UR-0122(add류 일관성) ✅ · **UR-0123(contract field) ✅** · 잔여: team positional path / status 라벨 / init 프로파일·명령 계층화(UR-0124).
+
 ## 1.9.416 — 2026-06-07 — add류 CLI 인자 일관성: 경로 흡수 차단 + 빈 입력 거부 (9번째 외부평가, UR-0122)
 
 **🧩 9번째 외부평가의 최강 UX 발견(3모델 공통: CLI 인자 규칙 불일치) 보강 — `task add`/`requests add`/`decision add` 의 제목 파싱을 단일 출처로 통일.**

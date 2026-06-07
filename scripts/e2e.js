@@ -5986,5 +5986,27 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.417 회귀 (9th 외부평가 Opus, UR-0123): contract verify field 범용화 — ## Fields 섹션 불릿 누락 감지
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cfield-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d, 'f.md'), '# S\n\n## Fields\n- userId\n- expiresAt\n');
+    fs.writeFileSync(path.join(d, 'f.js'), 'const x={userId:1};\nmodule.exports={x};\n');
+    const cj = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'f.md'), path.join(d, 'f.js'), '--json'], { encoding: 'utf8', timeout: 15000 });
+    let detectOk = false; try { const j = JSON.parse(cj.stdout); detectOk = j.specFields.includes('userId') && j.specFields.includes('expiresAt') && j.missingFields.includes('expiresAt') && !j.missingFields.includes('userId') && j.ok === false && cj.status === 1; } catch {}
+    // 회귀: 모든 필드 충족 시 통과
+    fs.writeFileSync(path.join(d, 'g.js'), 'const x={userId:1,expiresAt:2};\nmodule.exports={x};\n');
+    const cg = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'f.md'), path.join(d, 'g.js'), '--json'], { encoding: 'utf8', timeout: 15000 });
+    let passOk = false; try { const j = JSON.parse(cg.stdout); passOk = j.missingFields.length === 0 && j.ok === true; } catch {}
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = detectOk && passOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.417) 9th외부평가: contract field 범용화(## Fields 불릿 누락 감지 + 충족 통과) (UR-0123)' : '✗ contract field 범용화 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
