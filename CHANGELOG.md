@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.424 — 2026-06-07 — 무거움 점진 해소 5: agentsCmd → lib/agents.js 모듈화 (UR-0025/UR-0125)
+
+**🪶 `bin/leerness.js` 무거움 점진 해소 5단계 — `agents` 오케스트레이션 핸들러(442줄)를 lib/ 로 DI 분리. bin이 2만 줄 아래로.**
+
+### 변경
+- `lib/agents.js` 신설(456줄): `agentsCmd(root, sub, args, deps)` — io는 `./io`, `EXTERNAL_AGENTS`는 `./agent-registry`, cp/path/fs 빌트인, harness 고유 의존 18종 DI 주입.
+- **시그니처 `(root, sub, ...args)` → `(root, sub, args[], deps)`**: rest 인자를 배열로 받아 내부 재귀(`agents list`/`multi`)에 deps 전달. wrapper가 rest를 배열로 모아 전달. 동작 무변경.
+- `bin/leerness.js`: 442줄 → **3줄 thin wrapper**. **20,008 → 19,588줄(−420)** — **2만 줄 아래 진입**.
+- 기존 selftest(UR-0066 shell 주입 가드)의 agents 본문 검사를 lib/agents.js 참조로 갱신.
+
+### 검증 (회귀 0)
+- **selftest 169→170 PASS** (모듈 + DI 위임 + rest→array 시그니처 + 재귀 deps + UR-0066 lib 참조).
+- **E2E 423→424 PASS** (agents list/check/quota/dispatch).
+
+### 누적 효과 (UR-0125) — 5회 추출
+bin **21,177 → 19,588줄(−1,589, 7.5%)**. lib/ 모듈 16개. 남은 최대: handoff(1434줄, 최고결합 — 별도 신중 작업) · sessionClose(599줄).
+
 ## 1.9.423 — 2026-06-07 — 무거움 점진 해소 4: healthCmd → lib/health.js 모듈화 (UR-0025/UR-0125)
 
 **🪶 `bin/leerness.js` 무거움 점진 해소 4단계 — `health` 종합 진단 핸들러(334줄, 의존 최다)를 lib/ 로 DI 분리.**
