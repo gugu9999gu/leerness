@@ -5898,5 +5898,29 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.414 회귀 (UR-0119/0120): team review(메인 검수) — preview 가 분배 후 메인 검수 단계 표시, --no-review 시 생략
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-teamreview-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'rt', '--members', 'claude,codex', '--schedule', 'every-session', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const pv = cp.spawnSync(process.execPath, [CLI, 'team', 'preview', 'rt', '--task', '점검', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const reviewShown = /메인 검수/.test(pv.stdout || '') && /verify-claim/.test(pv.stdout || '');
+    const dispatchShown = /agents dispatch/.test(pv.stdout || '');
+    cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'nr', '--members', 'claude', '--no-review', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const pv2 = cp.spawnSync(process.execPath, [CLI, 'team', 'preview', 'nr', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const noReviewOk = !/메인 검수/.test(pv2.stdout || '');
+    // --json 에 review/reviewStep 반영
+    const pj = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'team', 'preview', 'rt', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 }).stdout);
+    const jsonOk = pj.review === true && !!pj.reviewStep;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = reviewShown && dispatchShown && noReviewOk && jsonOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.414) 9라운드: team review(분배→메인 검수 단계 표시, --no-review 생략, --json reviewStep) (UR-0119/0120)' : '✗ team review 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

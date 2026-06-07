@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.414 — 2026-06-07 — 에이전트 팀에 "메인 검수" 단계 (서브에이전트 검수 통합, UR-0119/0120)
+
+**🤝 team 에 `--review`(메인 에이전트 검수 요구) 추가 — "분배(sub-agent) → 메인 검수" 흐름을 팀 정의에 일급으로 통합.**
+
+### 배경 (사용자 체크 요청 → 갭 보강)
+사용자 확인 요청: "서브에이전트 자동화 + 메인 에이전트 검수 과정이 구현돼 있는지". 조사 결과 분배(agents dispatch/team) + 검증(verify-claim/review) + session-workflow Step5(교차검증)는 있으나, **팀 정의에 "메인 검수 필수"가 일급으로 없었음**. team 에 review 필드를 추가해 통합.
+
+### 구현
+- `team add ... [--no-review]`: 팀에 `review` 필드(기본 on). `--no-review` 로 끔.
+- `_composeTeamPlan`: review 시 멤버별 dispatch 단계 뒤에 **메인 검수 단계(reviewStep)** 추가 — `verify-claim --strict-claims` / `review --persona` 안내.
+- `team preview`: 분배 계획 + "✔ 메인 검수 (필수)" 표시(+ --json reviewStep).
+- `_teamHandoffReminders`: 스케줄 팀에 "· 검수필요" 표시.
+- show/`_renderTeamsMd`: review 상태 표기.
+
+### 검증 (회귀 0)
+- **selftest 159→160 PASS** (_composeTeamPlan reviewStep on/off + handoff 검수필요 + team add 와이어).
+- **E2E 413→414 PASS** (preview 메인 검수 표시 + --no-review 생략 + --json reviewStep).
+
 ## 1.9.413 — 2026-06-07 — action 명령 --json 구조화 출력 (6번째 외부평가 codex P2, UR-0101)
 
 **🔌 자동화 일관성 완결 — task/decision/rule/lesson add 가 `--json` 을 무시하고 텍스트만 내던 것을 구조화 JSON 출력으로.**
