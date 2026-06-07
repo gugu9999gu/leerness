@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.425 — 2026-06-07 — 무거움 점진 해소 6: sessionClose → lib/session-close.js 모듈화 (UR-0025/UR-0125)
+
+**🪶 `bin/leerness.js` 무거움 점진 해소 6단계 — `session close` 핸들러(599줄, 9 카테고리 보고)를 lib/ 로 DI 분리.**
+
+### 변경
+- `lib/session-close.js` 신설(615줄): `sessionClose(root, opts, deps)` — io는 `./io`, `_sanitizeFences`/`_parseArchiveBlocks`는 `./pure-utils`, cp/os/path/fs 빌트인, harness 고유 의존 41종(STATUSES·MARK 포함) DI 주입, `__filename`→`harnessPath`.
+- `bin/leerness.js`: 599줄 → **3줄 thin wrapper**. **19,588 → 19,003줄(−585)**.
+- 동작/출력 무변경(9 카테고리 + 활성 룰 검증 + retro + pre-wake/idempotency audit + --json 동일).
+
+### 검증 (회귀 0)
+- **selftest 170→171 PASS** (모듈 + DI 위임 + STATUSES/MARK 주입 + 본문 이동(recommendedDirection)).
+- 기존 selftest 2건(UR-0066 agents·1.9.316 drift-marker)의 본문 소스 검사를 해당 lib 파일 참조로 갱신(모듈 이동 동반 패턴).
+- **E2E 424→425 PASS** (session close 다수 경로).
+
+### 누적 효과 (UR-0125) — 6회 추출
+bin **21,177 → 19,003줄(−2,174, 10.3%)**. lib/ 모듈 17개. 남은 최대: handoff(1434줄, 최고결합 — 별도 신중 다단계 작업 권장).
+
 ## 1.9.424 — 2026-06-07 — 무거움 점진 해소 5: agentsCmd → lib/agents.js 모듈화 (UR-0025/UR-0125)
 
 **🪶 `bin/leerness.js` 무거움 점진 해소 5단계 — `agents` 오케스트레이션 핸들러(442줄)를 lib/ 로 DI 분리. bin이 2만 줄 아래로.**
