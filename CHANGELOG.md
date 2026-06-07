@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.415 — 2026-06-07 — 정직성 수정: handoff 보안 헤드라인 false-OK + scan/encoding/contract --json (9번째 외부평가, UR-0121)
+
+**🚨 9번째 외부 멀티모델 리뷰(Codex GPT-5.5 + Claude Sonnet/Opus 4.8, README 미참조 클린룸)에서 발견한 "의미적 false-OK"를 수정 — leerness 정체성(정직/anti-laziness)과 정면 충돌하던 결함.**
+
+### 배경
+3개 모델이 깨끗한 경로에 leerness@latest 설치(README 제거) 후 직접 사용으로 객관 평가. 모든 발견을 직접 재현·검증(맹신 X)해 확정분만 수정.
+
+### 수정 (확정 발견)
+- **[Codex P1] handoff 보안 헤드라인 false-OK**: `handoff` 가 `.env` 가 `.gitignore` 에 있으면 무조건 "🔒 보안 OK" 출력 — **하드코딩된 시크릿이 있어도** 안전하다고 표시(scan secrets/gate 는 정확히 실패하는데 handoff 만 거짓 안심). 이제 실제 시크릿 스캔(`_collectSecretFindings`) 결과를 반영 → 커밋 대상 시크릿이 있으면 "🚨 시크릿 N건", 없을 때만 "🔒 보안 OK".
+- **[Opus/Codex P2] `scan secrets` / `encoding check` --json 무시**: 두 명령이 `--json` 을 무시하고 텍스트만 출력(MCP/CI 파싱 불가) → 구조화 JSON + exit code 일관화.
+- **[Opus P2] `contract verify --json` 불일치인데 exit 0**: `--json` 분기가 `process.exitCode=1` 보다 먼저 return → CI 가 계약 실패를 못 잡음. 불일치 시 exit 1.
+
+### 검증 (회귀 0)
+- **selftest 160→161 PASS** · **E2E 414→415 PASS**.
+
+### 직접 재현으로 기각한 발견 (맹신 X)
+- [Opus P1] contract verify 백틱 불릿 누락 → 이미 정상 작동(1.9.385 파서)으로 **기각**.
+- [Sonnet] npm 패키지가 .harness 동봉 → 미동봉으로 **기각**.
+- [Opus] route/gate/audit 동시성 손상 → Opus 자체 정정(파이프 아티팩트).
+
+### 후속 백로그 (UR-0122~0124)
+team add positional path 일관성 · status/health "healthy" 라벨 명확화 · contract field 범용화 · init 침습성/명령 계층화/handoff 속도/--compact 압축.
+
 ## 1.9.414 — 2026-06-07 — 에이전트 팀에 "메인 검수" 단계 (서브에이전트 검수 통합, UR-0119/0120)
 
 **🤝 team 에 `--review`(메인 에이전트 검수 요구) 추가 — "분배(sub-agent) → 메인 검수" 흐름을 팀 정의에 일급으로 통합.**

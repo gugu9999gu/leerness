@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.414';
+const VERSION = '1.9.415';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3025,6 +3025,22 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
     { name: '6번째 외부평가 Opus P1 (UR-0100): list-family(decision/feature/plan/runs/team list) positional path 지원 (조용한 cwd 오독 차단) (1.9.412)', run: () => { const src = read(__filename); const L = '_resolveRoot('; const decOk = src.includes("decisionListCmd(absRoot(" + L + "args[2]))"); const planOk = src.includes("planListCmd(absRoot(" + L + "args[2]))"); const featOk = src.includes("featureListCmd(absRoot(" + L + "args[2]))"); const runsOk = src.includes("runsListCmd(absRoot(" + L + "args[2]))"); const teamOk = src.includes(L + "args[1] === 'list' ? args[2] : null)"); return decOk && planOk && featOk && runsOk && teamOk; } },
     { name: '6번째 외부평가 codex P2 (UR-0101): action 명령(task/decision/rule/lesson add) --json 구조화 출력 (1.9.413)', run: () => { const src = read(__filename); const taskJ = src.includes("log(JSON.stringify({ ok: true, id, status: arg('--status', 'requested'), request: text }))"); const decJ = src.includes("log(JSON.stringify({ ok: true, title }))"); const lesJ = src.includes("log(JSON.stringify({ ok: true, text, tag: tag || null }))"); const ruleJ = src.includes("skipped: !!result.skip"); return taskJ && decJ && lesJ && ruleJ; } },
+    { name: '9th 외부평가 Codex P1 (UR-0121): handoff 보안 헤드라인 실제 스캔 기반 + scan/encoding --json + contract --json exit (1.9.415)', run: () => {
+      const src = read(__filename);
+      const handoffWired = src.includes('_collectSecretFindings(root)') && src.includes('🚨 ' + '시크릿 ');
+      const scanJson = src.includes('function scanSecrets(root, opts = {})') && src.includes("has('--json') || opts.json");
+      const encJson = src.includes('function encodingCheck(root, opts = {})');
+      const contractExit = src.includes('if (!okJson) process.exitCode = 1;');
+      let behav = false;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sec_'));
+      try {
+        fs.writeFileSync(path.join(tmp, 'c.js'), 'module.exports={apiKey:"sk-test-1234567890abcdefghijklmnopqrstuvwxyz"};');
+        const r = _collectSecretFindings(tmp);
+        const clean = _collectSecretFindings(fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_clean_')));
+        behav = r.committed.length >= 1 && clean.committed.length === 0;
+      } catch {} finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      return handoffWired && scanJson && encJson && contractExit && behav;
+    } },
     { name: '9라운드 (UR-0119/0120): team review(메인 검수) — _composeTeamPlan reviewStep + handoff 검수필요 + team add 와이어 (1.9.414)', run: () => { const m = require('../lib/pure-utils'); const on = m._composeTeamPlan({ id: 't', members: ['a', 'b'], personas: ['security'] }, '점검'); const off = m._composeTeamPlan({ id: 't', members: ['a'], review: false }, '점검'); const planOk = on.review === true && !!on.reviewStep && on.reviewStep.suggestedCommand.includes('verify-claim') && off.review === false && !off.reviewStep; const rem = m._teamHandoffReminders([{ id: 'r', schedule: 'every-session', status: 'active', members: ['a'], review: true }]); const remOk = rem.length === 1 && rem[0].includes('검수필요'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const wired = teamSrc.includes("review: !has('--no-review')") && teamSrc.includes('메인 검수 (필수)'); return planOk && remOk && wired; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -7128,30 +7144,31 @@ function _isLikelyGitignored(root, fileRel) {
   try { gi = read(path.join(root, '.gitignore')); } catch { return false; }
   return _gitignoreMatch(gi, fileRel);
 }
-function scanSecrets(root) {
+// 1.9.415 (9th 외부평가 Codex P1): 시크릿 findings 수집 순수부 — scanSecrets 출력/exit 와 handoff 보안 헤드라인이 공유(단일 출처).
+//   기존엔 handoff 가 '.env 가 .gitignore 에 있으면 보안 OK' 로만 판단(하드코딩 시크릿 무시 → false-OK). 이제 둘 다 실제 스캔 결과를 사용.
+function _collectSecretFindings(root) {
   root = absRoot(root);
   const findings = [];
-  // 1.9.354 (UR-0072 외부리뷰): root 가 파일이면 그 파일만 스캔 (이전: walk 의 readdirSync → ENOTDIR). 디렉토리면 기존 walk.
+  // 1.9.354 (UR-0072 외부리뷰): root 가 파일이면 그 파일만 스캔. 디렉토리면 walk.
   let _iter;
   try { _iter = fs.statSync(root).isFile() ? [root] : walk(root); } catch { _iter = walk(root); }
   for (const file of _iter) {
     const ext = path.extname(file).toLowerCase();
-    // 1.9.386 (UR-0087, 5번째 외부평가): env-family(.env / .env.local / .env.bad / .env.production …)는
-    //   extname 이 .bad/.local/.production 라 SCAN_TEXT_EXT 에 없어 통째로 스킵되던 FN → basename 으로 강제 포함.
+    // 1.9.386 (UR-0087): env-family(.env / .env.local / .env.production …) basename 강제 포함.
     const isEnvFamily = /^\.env(\.|$)/.test(path.basename(file));
     if (!SCAN_TEXT_EXT.has(ext) && !isEnvFamily) continue;
     let text;
     try { text = read(file); } catch { continue; }
     if (text.length > 1024 * 1024) continue;
-    const fileRel = (file === root) ? path.basename(file) : rel(root, file);  // 1.9.354 (UR-0072): 단일 파일 스캔 시 basename 표시('.' 방지)
-    // 1.9.350 (UR-0060 외부리뷰): leerness 자기 harness.js(regex 소스) + 생성 secret-policy 템플릿만 제외 — 정확 경로(사용자 파일명 substring false-negative 제거)
+    const fileRel = (file === root) ? path.basename(file) : rel(root, file);
+    // 1.9.350 (UR-0060): leerness 자기 harness.js + secret-policy 템플릿만 제외.
     if (path.resolve(file) === path.resolve(__filename) || /(^|[\\/])\.(?:harness|leerness)[\\/]secret-policy\.md$/.test(fileRel)) continue;
-    const gitignored = _isLikelyGitignored(root, fileRel);  // 1.9.365 CV-6: gitignored 면 발견을 info 로 강등
+    const gitignored = _isLikelyGitignored(root, fileRel);  // 1.9.365 CV-6: gitignored 면 info 강등
     for (const { name, re, valueGroup, requireSecretLike } of SECRET_PATTERNS) {
       re.lastIndex = 0;
       let m;
       while ((m = re.exec(text))) {
-        // 1.9.365 (CV-6/UR-0081): assignment 패턴 값이 placeholder/예시면 오탐 → 스킵(같은 패턴 계속 탐색).
+        // 1.9.365 (CV-6/UR-0081): placeholder/예시 값 스킵.
         if (valueGroup != null) {
           const val = m[valueGroup];
           if (_isPlaceholderSecret(val)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
@@ -7163,9 +7180,19 @@ function scanSecrets(root) {
       }
     }
   }
-  // 1.9.365 (CV-6/UR-0081): gitignored(.env 등 설계상 안전 보관) 발견은 info, 커밋되는 파일 발견만 실패.
-  const committed = findings.filter(f => !f.gitignored);
-  const ignored = findings.filter(f => f.gitignored);
+  // gitignored(.env 등 안전 보관)는 info, 커밋 대상 발견만 실패.
+  return { findings, committed: findings.filter(f => !f.gitignored), ignored: findings.filter(f => f.gitignored) };
+}
+
+function scanSecrets(root, opts = {}) {
+  root = absRoot(root);
+  const { committed, ignored } = _collectSecretFindings(root);
+  // 1.9.415 (9th 외부평가 Opus/Codex): --json 일관성 — 기존엔 --json 무시하고 사람용 텍스트만 출력하던 FN.
+  if (has('--json') || opts.json) {
+    log(JSON.stringify({ version: VERSION, root, ok: committed.length === 0, count: committed.length, committed, ignored }, null, 2));
+    if (committed.length) process.exitCode = 1;
+    return;
+  }
   if (committed.length) {
     fail(`secret patterns found: ${committed.length}`);
     committed.forEach(f => log(`  ${f.file}:${f.line}  ${f.name}  ${f.snippet}…`));
@@ -7178,7 +7205,7 @@ function scanSecrets(root) {
   }
 }
 
-function encodingCheck(root) {
+function encodingCheck(root, opts = {}) {
   root = absRoot(root);
   let warnings = 0; const findings = [];
   for (const file of walk(root)) {
@@ -7206,6 +7233,12 @@ function encodingCheck(root) {
         warnings++; findings.push({ file: fileRel, issue: 'invalid UTF-8 roundtrip (CP949/mojibake 의심)' });
       }
     } catch {}
+  }
+  // 1.9.415 (9th 외부평가 Opus/Codex): --json 일관성 — 기존엔 --json 무시하고 텍스트만 출력하던 FN.
+  if (has('--json') || opts.json) {
+    log(JSON.stringify({ version: VERSION, root, ok: findings.length === 0, count: findings.length, findings }, null, 2));
+    if (warnings > 0) process.exitCode = 1;
+    return;
   }
   if (findings.length) {
     warn(`encoding issues: ${findings.length}`);
@@ -7670,14 +7703,22 @@ function handoff(root) {
         const j = JSON.parse(r.stdout.trim());
         if (j.level) parts.push(`drift ${j.level.replace(/^[^\w]+/, '')} (${j.score})`);
       } catch {}
-      // 2) 보안 상태
+      // 2) 보안 상태 (1.9.415, 9th 외부평가 Codex P1): 실제 시크릿 스캔 기반.
+      //   기존엔 '.env 가 .gitignore 에 있으면 보안 OK' 로만 판단해 하드코딩 시크릿이 있어도 '🔒 보안 OK' 출력하던 false-OK.
+      //   이제 커밋 대상 시크릿이 있으면 '🚨 시크릿 N건', 없을 때만 '보안 OK'(.env 미무시는 별도 경고).
       try {
-        const envPath = path.join(root, '.env');
-        if (exists(envPath)) {
-          const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
-          const giLines = giText.split('\n').map(l => l.trim());
-          if (giLines.includes('.env') || giLines.includes('/.env')) parts.push('🔒 보안 OK');
-          else parts.push('🚨 보안 위험');
+        const sec = _collectSecretFindings(root);
+        if (sec.committed.length) {
+          parts.push(`🚨 시크릿 ${sec.committed.length}건`);
+        } else {
+          const envPath = path.join(root, '.env');
+          if (exists(envPath)) {
+            const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
+            const giLines = giText.split('\n').map(l => l.trim());
+            parts.push((giLines.includes('.env') || giLines.includes('/.env')) ? '🔒 보안 OK' : '🚨 .env 미무시');
+          } else {
+            parts.push('🔒 보안 OK');
+          }
         }
       } catch {}
       // 3) MCP 활동 누적
@@ -19793,13 +19834,15 @@ function contractVerifyCmd(specPath, implPath) {
   }
   // 출력
   if (has('--json')) {
+    const okJson = missing.length === 0 && fieldMissing.length === 0;
     log(JSON.stringify({
       spec: specFile, impl: implFile,
       specFunctions: [...fnSpec], specFields: [...fieldSpec],
       implExports: [...implExports],
       missingFunctions: missing, missingFields: fieldMissing,
-      ok: missing.length === 0 && fieldMissing.length === 0
+      ok: okJson
     }, null, 2));
+    if (!okJson) process.exitCode = 1;  // 1.9.415 (9th 외부평가 Opus P2): --json 불일치도 exit 1 (기존엔 exit 0 → CI 가 계약실패 못 잡음)
     return;
   }
   log(`# leerness contract verify (1.9.35)`);

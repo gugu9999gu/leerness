@@ -5922,5 +5922,40 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.415 회귀 (9th 외부평가 Codex P1/Opus P2, UR-0121): handoff 보안 헤드라인 정직화 + scan/encoding --json + contract --json exit
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-honesty-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d, 'config.js'), 'module.exports={apiKey:"sk-test-1234567890abcdefghijklmnopqrstuvwxyz",githubToken:"ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD"};');
+    fs.writeFileSync(path.join(d, 'bad.txt'), Buffer.from([0xff, 0xfe, 0x20, 0x80]));
+    // (1) handoff 가 시크릿을 헤드라인에 정직 반영(보안 OK 아님)
+    const ho = cp.spawnSync(process.execPath, [CLI, 'handoff', d], { encoding: 'utf8', timeout: 20000 }).stdout || '';
+    const honestSecret = /시크릿\s*\d+건/.test(ho) && !/보안 OK/.test(ho);
+    // (2) scan secrets --json 구조화 + exit 1
+    const sj = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let scanOk = false; try { const j = JSON.parse(sj.stdout); scanOk = j.ok === false && j.count >= 1 && sj.status === 1; } catch {}
+    // (3) encoding check --json 구조화
+    const ej = cp.spawnSync(process.execPath, [CLI, 'encoding', 'check', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let encOk = false; try { const j = JSON.parse(ej.stdout); encOk = j.ok === false && j.count >= 1; } catch {}
+    // (4) contract verify --json 불일치 exit 1
+    fs.writeFileSync(path.join(d, 's.md'), '# S\n- loginUser(id)\n- logoutUser(id)\n');
+    fs.writeFileSync(path.join(d, 'i.js'), 'function loginUser(i){return i}\nmodule.exports={loginUser};\n');
+    const cj = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 's.md'), path.join(d, 'i.js'), '--json'], { encoding: 'utf8', timeout: 15000 });
+    let contractOk = false; try { const j = JSON.parse(cj.stdout); contractOk = j.ok === false && cj.status === 1; } catch {}
+    // (5) 정직성 회귀: 클린 워크스페이스는 시크릿 경고 없음
+    const dc = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-clean-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', dc, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const hc = cp.spawnSync(process.execPath, [CLI, 'handoff', dc], { encoding: 'utf8', timeout: 20000 }).stdout || '';
+    const cleanOk = !/시크릿\s*\d+건/.test(hc);
+    fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(dc, { recursive: true, force: true });
+    ok = honestSecret && scanOk && encOk && contractOk && cleanOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.415) 9th외부평가: handoff 보안 헤드라인 정직화 + scan/encoding --json + contract --json exit (UR-0121)' : '✗ honesty/--json 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
