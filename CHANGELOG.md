@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.420 — 2026-06-07 — 무거움 점진 해소: reviewRequestCmd → lib/review-request.js 모듈화 (UR-0025/UR-0125)
+
+**🪶 `bin/leerness.js`(21k줄/1.3MB) 무거움 점진 해소 — `review-request` 핸들러(277줄)를 lib/ 로 DI 분리.**
+
+### 배경
+실현가능성 조사(3-에이전트)에서 무거움=MODERATE, 큰 핸들러 점진 추출 권장. 후보별 외부 의존 footprint 측정 결과 **reviewRequestCmd(285줄, 의존 최소)**가 최저 위험 → 첫 추출 대상으로 선정(안정성 우선).
+
+### 변경
+- `lib/review-request.js` 신설(288줄): `reviewRequestCmd(root, request, deps)` — io 프리미티브는 `./io`, `cp`/`path` 빌트인, harness 고유 의존(`has`·`harnessPath`·`_checkRequestConstraints`·`_recordRun`)은 **DI 주입**(기존 doctor/team/migrate/feature 패턴 동일).
+- `bin/leerness.js`: 277줄 함수 → **3줄 thin wrapper** 위임. **21,177 → 20,903줄(−274)**.
+- 동작/출력 **무변경**(텍스트·--json·빈입력 가드 동일).
+
+### 검증 (회귀 0)
+- **selftest 165→166 PASS** (모듈 존재 + DI 위임 + 인라인 제거 + estimatedType/recommendedSteps 동작).
+- **E2E 419→420 PASS**.
+
+### 무거움 진행 (UR-0125, 다음 라운드)
+다음 추출 후보(의존 footprint 순): audit(~9) → driftCheck(~13) → healthCmd(~24) → handoff(1434줄, 최대/최고결합). 라운드마다 1개씩 안전 추출.
+
 ## 1.9.419 — 2026-06-07 — 엔트리 파일명 변경: bin/harness.js → bin/leerness.js (네이밍 일관성, UR-0126)
 
 **📛 패키지 엔트리 파일명을 `bin/harness.js` → `bin/leerness.js` 로 변경 — 명령어(`leerness`)와 파일명 일치.**
