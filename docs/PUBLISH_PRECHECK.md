@@ -40,7 +40,7 @@ npm owner ls leerness
 ## 3. 로컬 검증
 
 ```bash
-node ./bin/harness.js --version    # → 1.9.0
+node ./bin/leerness.js --version    # → 1.9.0
 npm pack --dry-run                 # 패키지 내용 미리보기
 node ./scripts/e2e.js              # 30+개 시나리오 통과
 ```
@@ -65,7 +65,7 @@ npm publish leerness-1.9.0.tgz --dry-run
 확인:
 - `package.json#files`와 실제 tarball 내용 일치
 - 총 크기 (≈30~40 kB)
-- bin → harness.js 매핑
+- bin → leerness.js 매핑
 
 ## 6. 실 publish
 

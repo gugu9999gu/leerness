@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.418';
+const VERSION = '1.9.419';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3072,6 +3072,7 @@ function _selfTestCases() {
       return handoffWired && scanJson && encJson && contractExit && behav;
     } },
     { name: '9라운드 (UR-0119/0120): team review(메인 검수) — _composeTeamPlan reviewStep + handoff 검수필요 + team add 와이어 (1.9.414)', run: () => { const m = require('../lib/pure-utils'); const on = m._composeTeamPlan({ id: 't', members: ['a', 'b'], personas: ['security'] }, '점검'); const off = m._composeTeamPlan({ id: 't', members: ['a'], review: false }, '점검'); const planOk = on.review === true && !!on.reviewStep && on.reviewStep.suggestedCommand.includes('verify-claim') && off.review === false && !off.reviewStep; const rem = m._teamHandoffReminders([{ id: 'r', schedule: 'every-session', status: 'active', members: ['a'], review: true }]); const remOk = rem.length === 1 && rem[0].includes('검수필요'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const wired = teamSrc.includes("review: !has('--no-review')") && teamSrc.includes('메인 검수 (필수)'); return planOk && remOk && wired; } },
+    { name: '파일명 변경 (UR-0126): bin 파일=leerness.js + package.json bin/main 일치 (1.9.419)', run: () => { const okName = path.basename(__filename) === 'leerness.js'; let pkg; try { pkg = require('../package.json'); } catch { return false; } const okBin = pkg && pkg.bin && pkg.bin.leerness === 'bin/leerness.js' && pkg.main === 'bin/leerness.js'; return okName && okBin; } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -5709,7 +5710,7 @@ function _suggestNextActions(root, latestRow, keyword) {
   // 6) CHANGELOG / README 버전 일치 확인 (1.9.X bump 후 자주 누락되는 단계)
   try {
     if (/(\d\.\d\.\d+)/.test(taskText) || /(bump|version|release)/i.test(taskText)) {
-      actions.push({ icon: '📝', title: `버전 변동 task — CHANGELOG.md / README.md 갱신 확인`, command: `node ./bin/harness.js whats-new .` });
+      actions.push({ icon: '📝', title: `버전 변동 task — CHANGELOG.md / README.md 갱신 확인`, command: `leerness whats-new .` });
     }
   } catch {}
 

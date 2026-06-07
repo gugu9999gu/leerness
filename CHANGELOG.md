@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.419 — 2026-06-07 — 엔트리 파일명 변경: bin/harness.js → bin/leerness.js (네이밍 일관성, UR-0126)
+
+**📛 패키지 엔트리 파일명을 `bin/harness.js` → `bin/leerness.js` 로 변경 — 명령어(`leerness`)와 파일명 일치.**
+
+### 배경
+파일명 `harness.js` 는 초기 잔재로, 명령어/패키지명(`leerness`)과 불일치했습니다. 3-에이전트 실현가능성 조사 결과 **EASY/안전**(명령어는 이미 `leerness`, 내부 참조는 `__filename`/`path.resolve` 기반이라 자동 대응)으로 판정되어 실행.
+
+### 변경
+- `git mv bin/harness.js bin/leerness.js` (히스토리 보존).
+- `package.json`: `bin.leerness` / `main` / npm scripts(test/test:fast/prepack) → `bin/leerness.js`.
+- `scripts/e2e.js`(35건)·`scripts/smoke.js`·`.github/workflows/ci.yml`·`docs/PUBLISH_PRECHECK.md` 경로 참조 갱신.
+- 내부 self-invocation/진단(`harnessPath: __filename`)·selftest(`read(__filename)`)는 런타임 자동 — 무변경.
+- next-action 제안 문자열 1건 `node ./bin/harness.js whats-new` → `leerness whats-new`.
+
+### 사용자 영향
+**없음** — 설치/실행은 `leerness` 명령(불변). 파일을 직접 호출하지 않음. 기존 워크스페이스(.harness)·상태도 불변.
+
+### 검증 (회귀 0)
+- **selftest 164→165 PASS** (신규 구조 가드: bin 파일=leerness.js + package.json bin/main 일치).
+- **E2E 418→419 PASS** (CLI 경로 변경 후 전체 스모크).
+
+### 참고 (조사 결과 — 다음 라운드)
+- harness.js 무거움(21k줄) → UR-0125 점진 모듈화(handoff 등 DI 추출).
+- `.harness`→`.leerness` 폴더명 → UR-0127 **직접 변경 비권장**(기존 .leerness 상태 substrate 충돌) — 상태기판 격리(대안 A) 권장.
+
 ## 1.9.418 — 2026-06-07 — health 보안 정직화 + status "healthy" 의미 명시 (9번째 외부평가 Codex P2, UR-0121 잔여)
 
 **🩺 `health`/`status` 의 "healthy" 가 프로젝트 안전을 뜻하는 듯 오해되던 것(Codex P2) 보강 — 정직성 일관 적용.**

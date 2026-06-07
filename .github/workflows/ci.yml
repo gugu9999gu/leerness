@@ -40,9 +40,9 @@ jobs:
           node-version: ${{ matrix.node }}
       # No dependencies to install (zero runtime deps) — run the integrity gate directly.
       - name: version
-        run: node ./bin/harness.js --version
+        run: node ./bin/leerness.js --version
       - name: selftest
-        run: node ./bin/harness.js selftest
+        run: node ./bin/leerness.js selftest
       - name: e2e
         env:
           LEERNESS_OFFLINE: "1"

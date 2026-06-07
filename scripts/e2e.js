@@ -11,7 +11,7 @@ process.env.LEERNESS_OFFLINE = process.env.LEERNESS_OFFLINE || '1';
 // 1.9.284 (UR-0029): e2e 속도 — 기본 roadmap.html(70KB HTML) 자동 생성 OFF (roadmap 전용 테스트 블록만 일시 ON).
 //   대부분의 init/session 테스트는 roadmap 을 검증하지 않으므로 생성 비용 제거 → 5분 내 완료.
 process.env.LEERNESS_NO_AUTO_ROADMAP = '1';
-const CLI = path.resolve(__dirname, '..', 'bin', 'harness.js');
+const CLI = path.resolve(__dirname, '..', 'bin', 'leerness.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-e2e-'));
 let failed = 0; let total = 0;
 const _e2eStart = Date.now();  // 1.9.284 (UR-0029): 총 소요시간 투명성
@@ -3081,7 +3081,7 @@ total++;
 {
   let ok = false;
   try {
-    const h = require(path.resolve(__dirname, '..', 'bin', 'harness.js'));
+    const h = require(path.resolve(__dirname, '..', 'bin', 'leerness.js'));
     const q = h._shellQuoteArg('a; rm -rf / && echo $(whoami)');
     const win = process.platform === 'win32';
     // 따옴표로 감싸 메타문자가 단일 리터럴 인자가 됨 (POSIX 단일/Windows 이중)
@@ -3104,7 +3104,7 @@ total++;
       "const survived=process.listeners('warning').includes(L);" +
       "const polluted=(process.env.NODE_OPTIONS||'')!==o;" +
       "process.exit(survived&&!polluted?0:1);";
-    const harnessPath = path.resolve(__dirname, '..', 'bin', 'harness.js');
+    const harnessPath = path.resolve(__dirname, '..', 'bin', 'leerness.js');
     const r = cp.spawnSync(process.execPath, ['-e', probe, harnessPath], { encoding: 'utf8', timeout: 20000 });
     ok = r.status === 0;
   } catch {}
@@ -3118,14 +3118,14 @@ total++;
   let ok = false;
   try {
     const reg = require(path.resolve(__dirname, '..', 'lib', 'agent-registry.js'));
-    const h = require(path.resolve(__dirname, '..', 'bin', 'harness.js'));
+    const h = require(path.resolve(__dirname, '..', 'bin', 'leerness.js'));
     const dataOk = Array.isArray(reg.EXTERNAL_AGENTS) && reg.EXTERNAL_AGENTS.length === 10 &&
       reg.EXTERNAL_AGENTS.every(a => a.id && a.bin && a.envFlag) &&
       reg.AGENT_SLASH_COMMANDS && Object.keys(reg.AGENT_SLASH_COMMANDS).length === 9;
     // harness 가 모듈을 단일출처로 사용 (같은 객체 참조)
     const singleSource = h.AGENT_SLASH_COMMANDS === reg.AGENT_SLASH_COMMANDS;
     // harness.js 소스에 인라인 정의가 더 이상 없음 (모듈로 이동 완료)
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const movedOut = !/const EXTERNAL_AGENTS = \[/.test(harnessSrc) && /require\('\.\.\/lib\/agent-registry'\)/.test(harnessSrc);
     ok = dataOk && singleSource && movedOut;
   } catch {}
@@ -3143,7 +3143,7 @@ total++;
     const structOk = r.status === 0 && j.schemaVersion === 1 && !!j.version && !!j.project && ('currentTask' in j) &&
       j.openRequests && typeof j.openRequests.count === 'number' && Array.isArray(j.recentDecisions) &&
       Array.isArray(j.activeRules) && Array.isArray(j.nextActions) && j.memory && typeof j.memory.rulesActive === 'number';
-    const h = require(path.resolve(__dirname, '..', 'bin', 'harness.js'));
+    const h = require(path.resolve(__dirname, '..', 'bin', 'leerness.js'));
     const mcpOk = h._mcpToolCount && h._mcpToolCount() >= 80;
     ok = structOk && mcpOk;
   } catch {}
@@ -3188,7 +3188,7 @@ total++;
       reg._PROVIDER_MODEL_CATALOG && Object.keys(reg._PROVIDER_MODEL_CATALOG).length === 10 &&
       reg._ROLE_ALIASES && Object.keys(reg._ROLE_ALIASES).length >= 14 &&
       reg._AGENT_ROLE_PROMPTS && reg._AGENT_ROLE_PROMPTS.actor;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const movedOut = !/const ROLE_CATALOG = \{/.test(harnessSrc) && /require\('\.\.\/lib\/role-catalog'\)/.test(harnessSrc);
     // roles 명령이 여전히 동작 (모듈 require 후) — 회귀 방지
     const rr = cp.spawnSync(process.execPath, [CLI, 'roles', 'list', '--path', tmp, '--json'], { cwd: tmp, encoding: 'utf8', timeout: 20000 });
@@ -3210,7 +3210,7 @@ total++;
       reg.ADAPTERS && Object.keys(reg.ADAPTERS).length === 9 &&
       Array.isArray(reg.REUSE_CATEGORIES) && reg.REUSE_CATEGORIES.length === 15 &&
       Array.isArray(reg.REUSE_CHECKLIST) && reg.REUSE_CHECKLIST.length === 6;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const movedOut = !/const CAPABILITY_SURFACE = \{/.test(harnessSrc) && !/const ADAPTERS = \{/.test(harnessSrc) && /require\('\.\.\/lib\/catalogs'\)/.test(harnessSrc);
     // 소비 명령 회귀: capabilities + reuse-check (카탈로그 require 후 동작)
     const cap = cp.spawnSync(process.execPath, [CLI, 'capabilities', '--json'], { cwd: tmp, encoding: 'utf8', timeout: 20000 });
@@ -3253,12 +3253,12 @@ total++;
   try {
     const T = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools.js'));
     const dataOk = Array.isArray(T) && T.length >= 81 && T.every(t => t.name && t.description && t.inputSchema) && T[0].name === 'leerness_handoff';
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const movedOut = !/const TOOLS = \[/.test(harnessSrc) && /require\('\.\.\/lib\/mcp-tools'\)/.test(harnessSrc);
     // tools/list(라이브 MCP) == 모듈 length (단일출처 일치)
     const ml = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: tmp, encoding: 'utf8', timeout: 15000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n' });
     const live = JSON.parse(ml.stdout.split('\n').filter(Boolean)[0]).result.tools.length;
-    const h = require(path.resolve(__dirname, '..', 'bin', 'harness.js'));
+    const h = require(path.resolve(__dirname, '..', 'bin', 'leerness.js'));
     const singleSource = live === T.length && h._mcpToolCount() === T.length;
     ok = dataOk && movedOut && singleSource;
   } catch {}
@@ -3325,7 +3325,7 @@ total++;
 {
   let ok = false;
   try {
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     // (1) 소스: cp.exec 템플릿 제거 + execFile args 배열(view pkg version) + argList 인용
     const srcOk = /'view', pkg, 'version'/.test(harnessSrc) &&  // 1.9.360(CV-2/UR-0077): cmd.exe /d /s /c npm view (args 배열) 형태
       !/cp\.exec\(.npm view \$\{pkg\}/.test(harnessSrc) &&
@@ -3442,7 +3442,7 @@ total++;
       a._evidenceQuality('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true &&
       a._shellGuardAnalyze('a && b', { shell: 'powershell', psVersion: '5' }).issues.some(i => i.rule === 'ps5-chain') &&
       a._claimFileInGit('src/api.js', new Set(['src/api.js'])) === true;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const movedOut = !/function _evidenceQuality\(evidence\) \{/.test(harnessSrc) && !/function _shellGuardAnalyze\(cmd, ctx\) \{/.test(harnessSrc) && /require\('\.\.\/lib\/analyzers'\)/.test(harnessSrc);
     // 소비 명령 회귀: shell-guard (_shellGuardAnalyze 사용)
     const sg = cp.spawnSync(process.execPath, [CLI, 'shell-guard', 'a && b', '--json'], { cwd: tmp, encoding: 'utf8', timeout: 20000 });
@@ -3787,7 +3787,7 @@ total++;
     const work = m._htmlToText('<p>a <b>b</b></p>') === 'a b'
       && m._extractTitle('<title>T &amp; U</title>') === 'T & U'
       && m._extractLinks('<a href="/x">x</a><a href="https://o.com/y">y</a>', 'https://h.com/').length === 1;  // same-domain only
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const movedOut = !/function _htmlToText\(html\) \{/.test(harnessSrc) && harnessSrc.includes('_htmlToText, _extractTitle, _extractLinks') && /require\('\.\.\/lib\/pure-utils'\)/.test(harnessSrc);  // 1.9.324: import 순서 비의존(이후 import 추가 허용)
     const r = cp.spawnSync(process.execPath, [CLI, 'api-skill'], { encoding: 'utf8', timeout: 15000 });  // 소비 명령 로드
     const cmdOk = /api-skill/.test(r.stdout || '');
@@ -3900,7 +3900,7 @@ total++;
     const fnOk = typeof m._countDatedBlocks === 'function' && typeof m._extractDecisionBlocks === 'function';
     const work = m._countDatedBlocks('```md\n### 2026-01-01 — T\n```\n### 2026-06-05 — R\n') === 1
       && m._extractDecisionBlocks('### 2026-06-05 — A\n- Decision: x\n').length === 1;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     // 1.9.325: import 순서 비의존 — pure-utils 구조분해 블록을 추출해 이름 포함 확인(이후 import 추가 허용)
     const _puImport = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     const movedOut = !/function _countDatedBlocks\(/.test(harnessSrc) && !/function _compareSemver\(/.test(harnessSrc)
@@ -3928,7 +3928,7 @@ total++;
     const work = m._classifyIntent('정확히 그것만').intent === 'precise'
       && m._classifyIntent('전체 다양한 기능').intent === 'broad'
       && m._classifyIntent('로그인 구현').intent === 'default';
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     // import 순서 비의존: pure-utils 구조분해 블록 추출 후 이름 포함 확인
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     const movedOut = !/function _classifyIntent\(/.test(harnessSrc) && _puImp.includes('_classifyIntent');
@@ -3955,7 +3955,7 @@ total++;
       && m._detectPwshFromEnv({ POWERSHELL_DISTRIBUTION_CHANNEL: 'X' }).version === '7'
       && m._detectPwshFromEnv({}).isPowerShell === false
       && /^['"]/.test(m._shellQuoteArg('a b'));
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
     const movedOut = !/function _sanitizeFences\(/.test(harnessSrc) && !/function _shellQuoteArg\(/.test(harnessSrc) && !/function _detectPwshFromEnv\(/.test(harnessSrc)
       && _puImp.includes('_sanitizeFences') && _puImp.includes('_shellQuoteArg') && _puImp.includes('_detectPwshFromEnv');
@@ -3978,7 +3978,7 @@ total++;
     const work = m._formatLocal('2026-06-05T01:13:00.000Z', { tz: 'Asia/Seoul' }) === '2026-06-05 10:13 KST'  // UTC→KST +9h
       && m._formatLocal('2026-06-05T01:13:00.000Z', { tz: 'Asia/Seoul', dateOnly: true }) === '2026-06-05'
       && m._formatLocal('') === '?' && typeof m._getLocalTz() === 'string';
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
     const movedOut = !/function _formatLocal\(/.test(harnessSrc) && !/function _getLocalTz\(/.test(harnessSrc)
       && _puImp.includes('_getLocalTz') && _puImp.includes('_formatLocal');
@@ -3997,7 +3997,7 @@ total++;
     const work = typeof m._truncate === 'function' && typeof m._splitList === 'function'
       && m._truncate('hello world', 8) === 'hello w…' && m._truncate('hi', 8) === 'hi'
       && JSON.stringify(m._splitList('a, b ,c,')) === '["a","b","c"]';
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
     const movedOut = !/function _truncate\(/.test(harnessSrc) && !/function _splitList\(/.test(harnessSrc)
       && _puImp.includes('_truncate') && _puImp.includes('_splitList');
@@ -4017,7 +4017,7 @@ total++;
       && m._roadmapMapStatus('REQUESTED') === 'planned' && m._roadmapMapStatus('done') === 'done'
       && m._roadmapParseMilestones('### M-0001. 로그인\nStatus: in-progress\nProgress: 40%')[0].progress === 40
       && m._roadmapParseTokens('| color | #fff |').color === '#fff';
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
     const movedOut = !/function _roadmapMapStatus\(/.test(harnessSrc) && !/function _roadmapParseMilestones\(/.test(harnessSrc) && !/function _roadmapParseTokens\(/.test(harnessSrc)
       && _puImp.includes('_roadmapMapStatus') && _puImp.includes('_roadmapParseMilestones') && _puImp.includes('_roadmapParseTokens');
@@ -4035,7 +4035,7 @@ total++;
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
     const cfgOk = Array.isArray(m._BRIEF_FIELDS) && m._BRIEF_FIELDS.length === 10 && m._BRIEF_FIELDS[0].key === 'intro';
     const work = m._briefFilled({ intro: 'x', features: ['a'] }) === 2 && m._briefFilled({}) === 0;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
     const movedOut = !/const _BRIEF_FIELDS = \[/.test(harnessSrc) && !/function _briefFilled\(/.test(harnessSrc)
       && _puImp.includes('_BRIEF_FIELDS') && _puImp.includes('_briefFilled');
@@ -4062,7 +4062,7 @@ total++;
     const work = typeof m._briefReadmeBlock === 'function' && typeof m._briefBlueprint === 'function'
       && m._briefReadmeBlock(b).includes(m.BRIEF_START) && /f1/.test(m._briefReadmeBlock(b))
       && /Blueprint/.test(m._briefBlueprint(b, '9.9.9')) && /leerness v9\.9\.9/.test(m._briefBlueprint(b, '9.9.9'));  // VERSION 주입
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
     const movedOut = !/function _briefReadmeBlock\(/.test(harnessSrc) && !/function _briefBlueprint\(/.test(harnessSrc) && !/^const BRIEF_START =/m.test(harnessSrc)
       && _puImp.includes('_briefReadmeBlock') && _puImp.includes('_briefBlueprint') && _puImp.includes('BRIEF_START');
@@ -4088,7 +4088,7 @@ total++;
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
     const r = m._parseLessonEntries('### 2026-06-05\n- Lesson: A\n- Tag: t\n\n### 2026-06-04\n- Lesson: B');
     const work = typeof m._parseLessonEntries === 'function' && r.length === 2 && r[0].text === 'A' && r[0].tag === 't' && r[1].tag === null;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];  // import 순서 비의존
     const movedOut = !/function _parseLessonEntries\(/.test(harnessSrc) && _puImp.includes('_parseLessonEntries');
     // 소비 명령 회귀: lesson save + list --json
@@ -4114,7 +4114,7 @@ total++;
     const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6;
     const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제');
     const work = catOk && r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     // 1.9.334: catalogs import 블록 추출 후 이름 포함 확인(순서/추가 비의존 — 이후 import 추가 허용)
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];
     const movedOut = !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(harnessSrc) && harnessSrc.includes('_matchConstraints(_loadPlatformConstraints(root), text)')
@@ -4141,7 +4141,7 @@ total++;
     const catOk = c._DEFAULT_DOMAIN_CATALOG && Object.keys(c._DEFAULT_DOMAIN_CATALOG.domains).length === 5;
     const r = m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'unity 게임');
     const work = catOk && typeof m._matchDomain === 'function' && r.domain === 'game' && Array.isArray(r.components) && m._matchDomain(null, 'x').domain === null;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
     const movedOut = !/const _DEFAULT_DOMAIN_CATALOG = \{/.test(harnessSrc) && harnessSrc.includes('_matchDomain(_loadDomainCatalog(root), text)')
       && _catImp.includes('_DEFAULT_DOMAIN_CATALOG');
@@ -4168,7 +4168,7 @@ total++;
     const langOk = m._detectLspLang('x.py') === 'python' && m._detectLspLang('y.rs') === 'rust' && m._detectLspLang('z.txt') === 'javascript';
     const sy = m._matchLspSymbols(c._LSP_LANG_PATTERNS, 'def foo():\n    pass\nclass Bar:\n    pass', 'python');
     const work = catOk && langOk && typeof m._matchLspSymbols === 'function' && sy.length === 2 && sy[0].name === 'foo' && sy[0].kind === 'function' && sy[1].name === 'Bar' && m._matchLspSymbols(null, 'x', 'javascript').length === 0;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     const movedOut = !/const _LSP_LANG_PATTERNS = \{/.test(harnessSrc) && !/function _detectLspLang\(/.test(harnessSrc)
@@ -4199,7 +4199,7 @@ total++;
     const work = catOk && typeof m._detectOptimism === 'function' && sus.some(s => s.kind === 'API' && s.severity === 'high') && conf < 0.5
       && m._computeConfidence(c.OPTIMISM_PATTERNS, '그냥 정리함', 'x') === 1 && m._detectOptimism(null, ev, 'x').length === 0
       && m._extractUrlClaims('POST /a/b').length === 1 && m._verifyUrlClaim({ path: '/a/b' }, 'has /a/b') === true;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     const movedOut = !/const OPTIMISM_PATTERNS = \[/.test(harnessSrc) && !/function _extractUrlClaims\(/.test(harnessSrc)
@@ -4228,7 +4228,7 @@ total++;
     const catOk = c.BUILT_IN_PERSONAS && Object.keys(c.BUILT_IN_PERSONAS).length === 5 && c.BUILT_IN_PERSONAS.security && typeof c.BUILT_IN_PERSONAS.security.body === 'string';
     const sm = m._personaSummaries(c.BUILT_IN_PERSONAS);
     const work = catOk && typeof m._personaSummaries === 'function' && Array.isArray(sm) && sm.length === 5 && sm[0].id === 'security' && sm[0].body === undefined && m._personaSummaries(null).length === 0;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     const movedOut = !/const BUILT_IN_PERSONAS = \{/.test(harnessSrc) && _catImp.includes('BUILT_IN_PERSONAS') && _puImp.includes('_personaSummaries');
@@ -4262,7 +4262,7 @@ total++;
       && m._translate(c.STRINGS, 'no.such.key', 'en') === 'no.such.key'
       && m._translate(null, 'x', 'ko') === 'x'
       && m._translate({ k: { ko: '케이' } }, 'k', 'en') === '케이';
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     // _t 박막: 인라인 STRINGS 정의 제거 + import + _translate(STRINGS,..) 호출
@@ -4378,7 +4378,7 @@ total++;
     const work = catOk && typeof m._withBuiltinSource === 'function' && Object.keys(out).length === 9
       && Object.values(out).every(v => v._source === 'builtin') && Array.isArray(out.office.capabilities)
       && Object.keys(m._withBuiltinSource(null)).length === 0;
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     const movedOut = !/const BUILTIN_CATALOG = \{/.test(harnessSrc) && _catImp.includes('BUILTIN_CATALOG') && _puImp.includes('_withBuiltinSource')
@@ -4405,7 +4405,7 @@ total++;
     const mapsOk = c.ROADMAP_STATUS_LABEL && c.ROADMAP_STATUS_COLOR
       && Object.keys(c.ROADMAP_STATUS_LABEL).length === 11 && Object.keys(c.ROADMAP_STATUS_COLOR).length === 11
       && c.ROADMAP_STATUS_LABEL.done === '완료' && c.ROADMAP_STATUS_COLOR.done === '#16a34a' && c.ROADMAP_STATUS_COLOR.skill === '#8b5cf6';
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
     const movedOut = !/const ROADMAP_STATUS_LABEL = \{/.test(harnessSrc) && !/const ROADMAP_STATUS_COLOR = \{/.test(harnessSrc)
       && _catImp.includes('ROADMAP_STATUS_LABEL') && _catImp.includes('ROADMAP_STATUS_COLOR');
@@ -4433,7 +4433,7 @@ total++;
     const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); });
     const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 20
       && hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";');
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
     // 모듈 레벨 정의 제거(블록 지역 .env 배열은 보존) + import
     const movedOut = !/const SECRET_PATTERNS = \[\r?\n\s*\{ name:/.test(harnessSrc) && _catImp.includes('SECRET_PATTERNS')
@@ -4467,7 +4467,7 @@ total++;
     const catOk = c.SKILL_CATALOG_PRESETS && Object.keys(c.SKILL_CATALOG_PRESETS).length === 2
       && c.SKILL_CATALOG_PRESETS.vercel && c.SKILL_CATALOG_PRESETS.vercel.owner === 'vercel-labs'
       && c.SKILL_CATALOG_PRESETS.anthropic && c.SKILL_CATALOG_PRESETS.anthropic.repo === 'skills';
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
     const movedOut = !/const SKILL_CATALOG_PRESETS = \{/.test(harnessSrc) && _catImp.includes('SKILL_CATALOG_PRESETS');
     // 소비 회귀: skill discover 가 preset 목록을 catalog 에서 노출 (네트워크 없이 unknown preset → 사용가능 목록)
@@ -4493,7 +4493,7 @@ total++;
       && m._esc('&<>"\'') === '&amp;&lt;&gt;&quot;&#39;'
       && m._esc('<script>x</script>') === '&lt;script&gt;x&lt;/script&gt;'
       && m._esc(null) === '' && m._esc(undefined) === '' && m._esc(42) === '42';
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     const movedOut = !/function _esc\(/.test(harnessSrc) && _puImp.includes('_esc');
     // 소비 회귀: roadmap.html 이 악성 task 제목을 이스케이프 (인젝션 방지)
@@ -4521,7 +4521,7 @@ total++;
     const pureOk = typeof m._roadmapTokenStyles === 'function' && out.startsWith(':root {')
       && out.includes('--lr-primary: #2563eb') && out.includes('--lr-surface: #fff') && out.includes('--lr-custom: #abc')
       && out.includes('--lr-card-bg') && out.includes('--lr-page-bg') && m._roadmapTokenStyles(null, null).startsWith(':root {');
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     const movedOut = !/function _roadmapTokenStyles\(/.test(harnessSrc) && _puImp.includes('_roadmapTokenStyles');
     // 소비 회귀: roadmap.html 이 :root CSS 변수 주입
@@ -4548,7 +4548,7 @@ total++;
     const pureOk = typeof m._parseSkillMd === 'function' && r.meta.name === 's1' && r.meta.description === 'd1' && r.body === 'body'
       && m._parseSkillMd('﻿---\nname: b\n---\nx').meta.name === 'b'
       && Object.keys(m._parseSkillMd('plain').meta).length === 0 && m._parseSkillMd(null).body === '';
-    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'harness.js'), 'utf8');
+    const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _puImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/pure-utils'\)/) || [''])[0];
     const movedOut = !/function _parseSkillMd\(/.test(harnessSrc) && _puImp.includes('_parseSkillMd');
     // 소비 회귀: skill install 이 BOM 포함 SKILL.md 를 정상 설치 (frontmatter name 파싱)

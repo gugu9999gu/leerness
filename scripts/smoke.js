@@ -12,7 +12,7 @@ const path = require('path');
 const cp = require('child_process');
 
 process.env.LEERNESS_OFFLINE = process.env.LEERNESS_OFFLINE || '1';
-const CLI = path.resolve(__dirname, '..', 'bin', 'harness.js');
+const CLI = path.resolve(__dirname, '..', 'bin', 'leerness.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-smoke-'));
 let failed = 0, total = 0;
 const t0 = Date.now();
