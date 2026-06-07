@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.423 — 2026-06-07 — 무거움 점진 해소 4: healthCmd → lib/health.js 모듈화 (UR-0025/UR-0125)
+
+**🪶 `bin/leerness.js` 무거움 점진 해소 4단계 — `health` 종합 진단 핸들러(334줄, 의존 최다)를 lib/ 로 DI 분리.**
+
+### 배경
+네 번째 큰 핸들러 추출. healthCmd는 drift/security/skill/usage/tasks/memory/featureGraph/roundHistory/milestones/recentChanges/pyFiles/envInfo/apiSkills/capabilityMatrix를 집계하는 **최다 의존(26종)** 핸들러. **사전 종합 의존 스캔**(drift 라운드 교훈)으로 전체 DI 목록을 일괄 확보 → **추출 첫 시도에 누락 deps 0**.
+
+### 변경
+- `lib/health.js` 신설(348줄): `healthCmd(root, deps)` — io는 `./io`, `_parseArchiveBlocks`는 `./pure-utils`, cp/os/path/fs 빌트인, harness 고유 의존 **26종 DI 주입**, `__filename`→`harnessPath`(drift spawn) 변환.
+- `bin/leerness.js`: 334줄 → **3줄 thin wrapper**. **20,318 → 20,008줄(−310)**.
+- 동작/출력 무변경(health 14 통합 필드 + --json + --strict 동일).
+
+### 검증 (회귀 0)
+- **selftest 168→169 PASS** (모듈 + DI 위임 + 본문 이동(capabilityMatrix) + healthy/checks 동작 — 첫 시도 통과).
+- **E2E 422→423 PASS**.
+
+### 누적 효과 (UR-0125) — 4회 추출
+bin **21,177 → 20,008줄(−1,169, 5.5%)**. lib/ 모듈 15개. 남은 최대 후보: handoff(1434줄, 최고결합 — 별도 신중 작업).
+
 ## 1.9.422 — 2026-06-07 — 무거움 점진 해소 3: driftCheckCmd → lib/drift.js 모듈화 (UR-0025/UR-0125)
 
 **🪶 `bin/leerness.js` 무거움 점진 해소 3단계 — `drift check` 핸들러(322줄, 내부 재귀 포함)를 lib/ 로 DI 분리.**
