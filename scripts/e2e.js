@@ -6056,5 +6056,22 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.435 (11th 외부평가 Codex P2, UR-0137): agents dispatch task 에 flag 값(--to 의 codex) 흡수 금지.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-disp-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'REVIEWTASK', '--to', 'codex', '--path', d], { encoding: 'utf8', timeout: 20000, env: { ...process.env, LEERNESS_ENABLE_CODEX: '1' } });
+    const out = r.stdout || '';
+    // dispatch 명령에 task 가 정확히 "REVIEWTASK" 로만 인용되어야(코덱스/경로 흡수 없음)
+    ok = /"REVIEWTASK"/.test(out) && !/"REVIEWTASK codex"/.test(out) && !/REVIEWTASK.*tmp/.test(out);
+    fs.rmSync(d, { recursive: true, force: true });
+  } catch {}
+  console.log(ok ? '✓ B(1.9.435) UR-0137: agents dispatch task 에 --to/경로 값 흡수 없음' : '✗ agents dispatch flag bleed');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

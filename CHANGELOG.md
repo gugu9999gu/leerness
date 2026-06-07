@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.435 — 2026-06-08 — agents dispatch task flag-value 흡수 차단 (11th 외부평가 Codex P2, UR-0137)
+
+**🧹 `agents dispatch "<task>" --to codex` 의 생성 명령에 `codex`(또는 경로)가 task 본문으로 섞이던 문제.**
+
+### 변경
+- **`lib/agents.js` dispatch/multi `_taskArg`**: 상위(bin)에서 `--to` flag 는 제거되나 그 값(codex)은 positional 로 남아 기존 `filter(!startsWith('-'))` 가 task 에 흡수시켰음. → 첫 flag 에서 break + lib 가 소비하는 값-flag(`--to`/`--model`/`--role`/`--only`) 값을 task 에서 제외. 명시 task 는 `--task` 폴백.
+- 결과: `dispatch "REVIEWTASK" --to codex --path X` → 생성 명령 `codex exec … "REVIEWTASK"`(codex/경로 미흡수). 양쪽 인자 순서 안전.
+
+### 검증 (회귀 0)
+- **selftest 179→180** + **E2E 신규 B(1.9.435)**: dispatch task 에 `--to`/경로 값 흡수 없음.
+
 ## 1.9.434 — 2026-06-08 — health/drift/status 미존재 경로 exit 1 통일 (11th 외부평가 Opus P2, UR-0136)
 
 **🚧 존재하지 않는 경로를 "healthy"로 위조 보고하던 문제 — CI 게이트 안전성.**
