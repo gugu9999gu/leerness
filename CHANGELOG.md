@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.434 — 2026-06-08 — health/drift/status 미존재 경로 exit 1 통일 (11th 외부평가 Opus P2, UR-0136)
+
+**🚧 존재하지 않는 경로를 "healthy"로 위조 보고하던 문제 — CI 게이트 안전성.**
+
+### 변경
+- **`health` / `drift check` / `status`**: 진입부에서 `!exists(root)` 면 `failJson(has('--json'), 'path_not_found', …)` + **exit 1**(audit/verify 와 일치). 기존엔 phantom 경로를 exit 0 + healthy 로 보고 → 오타 경로/미초기화 디렉토리를 CI가 통과시킴.
+- 유효하지만 미초기화(.harness 없는 기존 디렉토리)는 종전대로 정상 보고(가드는 디렉토리 존재만 확인).
+
+### 검증 (회귀 0)
+- 미존재 경로: health/drift/status 전부 exit 1, `--json` 은 `{ok:false, code:"path_not_found"}` 순수 JSON. 클린/미초기화 WS: exit 0 유지.
+- **selftest 178→179 PASS** · **E2E 무회귀**.
+
 ## 1.9.433 — 2026-06-08 — 11번째 외부평가: contract verify backtick-bullet 강선언 FN 수정 (UR-0136~0139)
 
 **🔍 11번째 외부 멀티모델 리뷰(Codex/Sonnet/Opus, README 미참조, 1.9.432). 5개 회귀항목 전부 정상 확인 + contract verify P1 신규 적발.**
