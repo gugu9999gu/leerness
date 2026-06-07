@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.438';
+const VERSION = '1.9.439';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3290,6 +3290,13 @@ function _selfTestCases() {
       const named = JSON.stringify(m._parseImplExports("export { foo, bar as baz } from './x.js';").sort()) === JSON.stringify(['baz', 'foo']);
       const noDefault = JSON.stringify(m._parseImplExports('export default function x(){}')) === JSON.stringify([]);
       return reexp && named && noDefault;
+    } },
+    { name: '10th 외부평가 Codex P1 (UR-0135): drift --auto-fix --json 진행로그 억제(순수 JSON) (1.9.439)', run: () => {
+      const modSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'drift.js'));
+      const afLogDef = modSrc.includes("const afLog = has('--json') ? () => {} : log;");
+      const usesAfLog = (modSrc.match(/afLog\(/g) || []).length >= 10;  // auto-fix 진행로그 다수 afLog 화
+      const jsonStillLog = modSrc.includes('log(JSON.stringify({ root, score');  // 최종 JSON 출력은 log 유지
+      return afLogDef && usesAfLog && jsonStillLog;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];

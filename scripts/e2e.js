@@ -6073,5 +6073,23 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.439 (10th 외부평가 Codex P1, UR-0135): drift --auto-fix --json 은 dirty WS 에서도 stdout 순수 JSON.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-djson-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d, '.env'), 'API_KEY=sk-test-1234567890abcdefghijklmnopqrstuvwxyz\n');
+    fs.writeFileSync(path.join(d, '.gitignore'), 'node_modules/\n');  // .env 누락 → 보안 신호 발화 → auto-fix 진행로그
+    const r = cp.spawnSync(process.execPath, [CLI, 'drift', 'check', d, '--auto-fix', '--json'], { encoding: 'utf8', timeout: 30000 });
+    let pure = false; try { const j = JSON.parse(r.stdout); pure = typeof j.score === 'number'; } catch {}
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = pure;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.439) UR-0135: drift --auto-fix --json 순수 JSON(dirty WS 진행로그 억제)' : '✗ drift --auto-fix --json 비순수');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

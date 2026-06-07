@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.439 — 2026-06-08 — drift --auto-fix --json 순수성 (10th 외부평가 Codex P1, UR-0135 완결)
+
+**📐 `drift check --auto-fix --json` 이 dirty 워크스페이스에서 진행로그를 stdout 에 섞던 비-순수 JSON 해소.**
+
+### 변경
+- **`lib/drift.js`**: `--json` 시 auto-fix 진행로그(보안회복/인코딩/delivered/idempotency/release ~28건)를 `afLog`(no-op)로 무음화. depth 가드(1.9.432)로 재귀가 auto-fix 블록을 건너뛰고 최종 JSON 만 출력 → stdout 순수 JSON 보장. 텍스트 모드는 진행로그 그대로 유지(최종 JSON 출력 `log()` 는 불변).
+
+### 검증 (회귀 0)
+- dirty WS(보안 신호 발화) `drift --auto-fix --json` → 순수 JSON 파싱 성공. 텍스트 모드 진행로그 3건 유지.
+- **selftest 183→184** + **E2E 신규 B(1.9.439)**. → 10th 외부평가 Codex P1(--json 전 경로 순수성) 완결.
+
 ## 1.9.438 — 2026-06-08 — contract impl ESM re-export 인식 (11th 외부평가 Sonnet P3, UR-0139 완결)
 
 **🧩 `export { default as X } from './m'` 재export 의 별칭 X 를 named export 로 인식.**
