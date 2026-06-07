@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.422 — 2026-06-07 — 무거움 점진 해소 3: driftCheckCmd → lib/drift.js 모듈화 (UR-0025/UR-0125)
+
+**🪶 `bin/leerness.js` 무거움 점진 해소 3단계 — `drift check` 핸들러(322줄, 내부 재귀 포함)를 lib/ 로 DI 분리.**
+
+### 배경
+세 번째 큰 핸들러 추출. driftCheckCmd는 **내부 재귀**(auto-fix 후 재검사) + **self-spawn**(audit --fix/session close) + 의존 16종으로 가장 복잡 → **테스트주도 추출**로 누락 deps를 단계적 포착(harnessPath→fs→taskLogPath/envDiff).
+
+### 변경
+- `lib/drift.js` 신설(334줄): `driftCheckCmd(root, opts, deps)` — io는 `./io`, fs/cp/path 빌트인, harness 고유 의존 16종 DI 주입. **내부 재귀 호출에 deps 전달**(`driftCheckCmd(root, opts, deps)`), `__filename`→`harnessPath`(self-spawn) 변환.
+- `bin/leerness.js`: 322줄 → **3줄 thin wrapper**. **20,617 → 20,318줄(−299)**.
+- 동작/출력 무변경(drift 4신호/4레벨 + --auto-fix 재귀 + handoff/health spawn 경로 동일).
+
+### 검증 (회귀 0)
+- **selftest 167→168 PASS** (모듈 + DI 위임 + 재귀 deps 전달 + level/score/fired 동작).
+- **E2E 421→422 PASS** (drift check/--auto-fix + handoff·health의 drift spawn 경로).
+
+### 누적 효과 (UR-0125)
+3회 추출로 bin **21,177 → 20,318줄(−859, 4.1%)**. lib/ 모듈 14개. 다음 후보: healthCmd(~24) → handoff(1434).
+
 ## 1.9.421 — 2026-06-07 — 무거움 점진 해소 2: audit → lib/audit.js 모듈화 (UR-0025/UR-0125)
 
 **🪶 `bin/leerness.js` 무거움 점진 해소 2단계 — `audit` 핸들러(310줄)를 lib/ 로 DI 분리.**

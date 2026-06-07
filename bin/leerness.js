@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.421';
+const VERSION = '1.9.422';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3073,6 +3073,27 @@ function _selfTestCases() {
     } },
     { name: '9라운드 (UR-0119/0120): team review(메인 검수) — _composeTeamPlan reviewStep + handoff 검수필요 + team add 와이어 (1.9.414)', run: () => { const m = require('../lib/pure-utils'); const on = m._composeTeamPlan({ id: 't', members: ['a', 'b'], personas: ['security'] }, '점검'); const off = m._composeTeamPlan({ id: 't', members: ['a'], review: false }, '점검'); const planOk = on.review === true && !!on.reviewStep && on.reviewStep.suggestedCommand.includes('verify-claim') && off.review === false && !off.reviewStep; const rem = m._teamHandoffReminders([{ id: 'r', schedule: 'every-session', status: 'active', members: ['a'], review: true }]); const remOk = rem.length === 1 && rem[0].includes('검수필요'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const wired = teamSrc.includes("review: !has('--no-review')") && teamSrc.includes('메인 검수 (필수)'); return planOk && remOk && wired; } },
     { name: '파일명 변경 (UR-0126): bin 파일=leerness.js + package.json bin/main 일치 (1.9.419)', run: () => { const okName = path.basename(__filename) === 'leerness.js'; let pkg; try { pkg = require('../package.json'); } catch { return false; } const okBin = pkg && pkg.bin && pkg.bin.leerness === 'bin/leerness.js' && pkg.main === 'bin/leerness.js'; return okName && okBin; } },
+    { name: 'UR-0025 큰핸들러 모듈화 7번째: driftCheckCmd → lib/drift.js + DI 위임 + 재귀/동작 (1.9.422)', run: () => {
+      const m = require('../lib/drift');
+      const expOk = typeof m.driftCheckCmd === 'function';
+      const src = read(__filename);
+      const delegated = src.includes("require('../lib/drift')") && src.includes('_drift.driftCheckCmd(root, opts,');
+      const modSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'drift.js'));
+      const bodyMarker = 'auto-fix 활성 ' + '(1.9.82)';  // drift 본문 고유(split-literal 자기참조 회피)
+      const recursionWired = modSrc.includes('driftCheckCmd(root, opts, deps)');  // 재귀에 deps 전달
+      const movedToLib = modSrc.includes("require('./io')") && recursionWired && modSrc.includes(bodyMarker) && !src.includes(bodyMarker);
+      let behavOk = false;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_drift_'));
+      const _w = process.stdout.write; let out = '';
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        process.stdout.write = s => { out += s; return true; };
+        // has: --json 만 true(JSON 출력) → --auto-fix false 라 spawn 없음.
+        m.driftCheckCmd(tmp, { json: true }, { VERSION, has: f => f === '--json', arg: (k, d) => d, harnessPath: __filename, readProgressRows, planPath, handoffPath, currentStatePath, taskLogPath, envDiff, _usageStatsPath, _readUsageStats, _updateUserRequest, _scanShellScriptsEncoding, _readFeatureGraph, _detectDeliveredRequests, _autoFixIdempotency });
+      } catch (e) { out = 'ERR:' + e.message; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      try { const j = JSON.parse(out); behavOk = typeof j.score === 'number' && 'level' in j && Array.isArray(j.fired); } catch {}
+      return expOk && delegated && movedToLib && behavOk;
+    } },
     { name: 'UR-0025 큰핸들러 모듈화 6번째: audit → lib/audit.js + DI 위임 + 동작 (1.9.421)', run: () => {
       const m = require('../lib/audit');
       const expOk = typeof m.audit === 'function';
@@ -14792,328 +14813,9 @@ function autoUpdateInstall(root) {
 // 기존 프로젝트의 .viewwork/ 폴더는 그대로 유지 (leerness 가 삭제하지 않음 — 사용자 책임).
 
 // 1.9.37: drift detection — 메타파일 staleness 측정으로 "leerness 점점 안 쓰는" 현상 감지
-function driftCheckCmd(root, opts = {}) {
-  root = absRoot(root || process.cwd());
-  const now = Date.now();
-  const _ageDays = (p) => {
-    if (!exists(p)) return null;
-    return (now - fs.statSync(p).mtimeMs) / 86400000;
-  };
-  // 각 메타파일의 마지막 갱신
-  const signals = [];
-  // 1. session-handoff.md - "Last generated" 라인 우선, 없으면 mtime
-  const shPath = handoffPath(root);
-  if (exists(shPath)) {
-    const txt = read(shPath);
-    // 1.9.316 (drift 마커 버그): 최신(마지막) 'Last generated' 사용 — 구 블록 중복 시 첫(구) 매치를 읽던 오발화 방어.
-    const allGen = [...txt.matchAll(/Last generated:\s*([\d\-T:.Z]+)/g)];
-    const m = allGen.length ? allGen[allGen.length - 1] : null;
-    let ageDays;
-    if (m) {
-      ageDays = (now - new Date(m[1]).getTime()) / 86400000;
-    } else {
-      ageDays = _ageDays(shPath);
-    }
-    signals.push({ file: 'session-handoff.md', ageDays, threshold: 1, weight: 30, label: 'session close 누락' });
-  }
-  // 2. current-state.md - "Updated: YYYY-MM-DD" 라인
-  const csPath = currentStatePath(root);
-  if (exists(csPath)) {
-    const m = read(csPath).match(/Updated:\s*(\d{4}-\d{2}-\d{2})/);
-    const ageDays = m ? (now - new Date(m[1]).getTime()) / 86400000 : _ageDays(csPath);
-    signals.push({ file: 'current-state.md', ageDays, threshold: 2, weight: 20, label: 'current-state 갱신 없음' });
-  }
-  // 3. progress-tracker.md 마지막 row의 updated 컬럼
-  const rows = readProgressRows(root);
-  if (rows.length) {
-    const dates = rows.map(r => (r.updated || '').match(/\d{4}-\d{2}-\d{2}/)).filter(Boolean).map(m => m[0]);
-    if (dates.length) {
-      dates.sort();
-      const latest = dates[dates.length - 1];
-      const ageDays = (now - new Date(latest).getTime()) / 86400000;
-      signals.push({ file: 'progress-tracker.md', ageDays, threshold: 1, weight: 30, label: 'task update 없음' });
-    }
-  } else {
-    signals.push({ file: 'progress-tracker.md', ageDays: 999, threshold: 1, weight: 25, label: 'progress-tracker 비어있음' });
-  }
-  // 4. task-log.md 마지막 entry "## YYYY-MM-DD"
-  const tlPath = taskLogPath(root);
-  if (exists(tlPath)) {
-    const dates = Array.from(read(tlPath).matchAll(/^## (\d{4}-\d{2}-\d{2})/gm)).map(m => m[1]);
-    if (dates.length) {
-      dates.sort();
-      const latest = dates[dates.length - 1];
-      const ageDays = (now - new Date(latest).getTime()) / 86400000;
-      signals.push({ file: 'task-log.md', ageDays, threshold: 2, weight: 20, label: 'task-log 갱신 없음' });
-    }
-  }
-  // 점수 계산
-  let totalScore = 0;
-  const fired = [];
-  for (const s of signals) {
-    if (s.ageDays > s.threshold) {
-      totalScore += s.weight;
-      fired.push(s);
-    }
-  }
-  // 1.9.78: 보안 신호 (env / .gitignore 누락) — 5번째 신호
-  try {
-    const envPath = path.join(root, '.env');
-    if (exists(envPath)) {
-      let secScore = 0;
-      const secIssues = [];
-      // (a) .env vs .env.example 동기화
-      try {
-        const d = envDiff(root);
-        if (d.inEnvOnly.length) {
-          secIssues.push(`.env→.env.example 누락 ${d.inEnvOnly.length}건`);
-          secScore += 15;
-        }
-      } catch {}
-      // (b) .gitignore 시크릿 패턴
-      try {
-        const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
-        const giLines = giText.split('\n').map(l => l.trim());
-        const SECRET_PATTERNS = ['.env', '.env.local', '.env.production', '.env.*.local', '*.pem', 'credentials.json'];
-        const missing = SECRET_PATTERNS.filter(p => !giLines.some(l => l === p || l === '/' + p));
-        if (missing.length) {
-          secIssues.push(`.gitignore 시크릿 누락 ${missing.length}건`);
-          // 누락이 .env 자체면 최우선 위험 — 15점 가중
-          if (missing.includes('.env')) secScore += 30;
-          else secScore += Math.min(20, missing.length * 5);
-        }
-      } catch {}
-      if (secScore > 0) {
-        totalScore += secScore;
-        fired.push({ file: '.env / .gitignore', ageDays: null, threshold: 0, weight: secScore, label: `보안 위험 (1.9.78): ${secIssues.join(' · ')}` });
-      }
-    }
-  } catch {}
-  // 1.9.143: Feature Graph 미사용 신호 — 노드는 있는데 edges 비율 낮으면 인과관계 정리 미진
-  try {
-    const { nodes: fGraphNodes } = _readFeatureGraph(root);
-    if (fGraphNodes.length >= 3) {
-      const edgeCount = fGraphNodes.reduce((s, n) => s + (n.dependsOn?.length || 0) + (n.affects?.length || 0) + (n.coChangesWith?.length || 0), 0);
-      const linkedSet = new Set();
-      for (const n of fGraphNodes) {
-        for (const x of [...(n.dependsOn||[]), ...(n.affects||[]), ...(n.coChangesWith||[])]) { linkedSet.add(n.id); linkedSet.add(x); }
-      }
-      const isolatedCount = Math.max(0, fGraphNodes.length - linkedSet.size);
-      const isolatedRatio = isolatedCount / fGraphNodes.length;
-      if (edgeCount === 0 || isolatedRatio >= 0.5) {
-        const fgScore = edgeCount === 0 ? 25 : 15;
-        totalScore += fgScore;
-        fired.push({ file: '.harness/feature-graph.md', ageDays: null, threshold: 0, weight: fgScore, label: `Feature Graph 미정리 (1.9.143): ${fGraphNodes.length} 노드, edges=${edgeCount}, isolated=${isolatedCount}` });
-      }
-    }
-  } catch {}
-  // 신규 _apps/* 에서 task 0건도 신호로
-  const appsDir = path.join(root, '_apps');
-  let appsZeroTask = [];
-  if (exists(appsDir)) {
-    for (const d of fs.readdirSync(appsDir)) {
-      const sub = path.join(appsDir, d);
-      if (!exists(path.join(sub, '.harness'))) continue;
-      const subRows = readProgressRows(sub);
-      if (!subRows.length) appsZeroTask.push(d);
-    }
-    if (appsZeroTask.length) {
-      const w = Math.min(50, appsZeroTask.length * 10);
-      totalScore += w;
-      fired.push({ file: `_apps/* (${appsZeroTask.length}개)`, ageDays: null, threshold: 0, weight: w, label: `task 0건 sub-app: ${appsZeroTask.slice(0, 3).join(', ')}${appsZeroTask.length > 3 ? '...' : ''}` });
-    }
-  }
-  // 레벨 판정
-  let level = '🟢 healthy';
-  if (totalScore >= 100) level = '🔴 critical';
-  else if (totalScore >= 50) level = '🟡 warning';
-  else if (totalScore >= 20) level = '🟠 attention';
-
-  // 1.9.38 (D): drift critical 등급은 누적 카운트 (학습 신호)
-  try {
-    if (level === '🔴 critical') {
-      const stats = _readUsageStats(root);
-      stats.drift = stats.drift || {};
-      stats.drift.criticalSeen = (stats.drift.criticalSeen || 0) + 1;
-      const p = _usageStatsPath(root);
-      mkdirp(path.dirname(p));
-      writeUtf8(p, JSON.stringify(stats, null, 2) + '\n');
-    }
-  } catch {}
-  // 1.9.39: --auto-fix — critical 시 session close 자동 실행
-  // 1.9.82: --auto-fix가 보안 신호도 자동 회복 (audit --fix 호출)
-  const autoFix = has('--auto-fix');
-  // 1.9.82: 보안 신호가 fired에 있으면 우선 audit --fix 호출
-  const hasSecurityFired = fired.some(f => /보안 위험 \(1\.9\.78\)/.test(f.label));
-  if (autoFix && hasSecurityFired) {
-    log('');
-    log(`🔒 --auto-fix 활성 (1.9.82) — 보안 신호 회복: audit --fix 자동 실행 중...`);
-    try {
-      const r = cp.spawnSync(process.execPath, [__filename, 'audit', root, '--fix'],
-        { encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
-      if (r.status === 0) {
-        log(`✓ audit --fix 완료 — .gitignore + .env.example 동기화`);
-        // 재검사 (보안 신호 회복 확인)
-        log('');
-        log(`재검사 중...`);
-        return driftCheckCmd(root); // 재귀 1회 (auto-fix 없이)
-      } else {
-        log(`⚠ audit --fix 실패 (exit ${r.status}) — 수동 \`leerness audit --fix\` 권장`);
-      }
-    } catch (e) {
-      log(`⚠ auto-fix 보안 회복 오류: ${e.message}`);
-    }
-  }
-  // 1.9.242: drift check --auto-fix 에 env encoding BOM 자동 추가 통합 (사용자 명시 UR-0014 2단계)
-  //   1.9.82 패턴 확장 — drift 회복 시 셸 스크립트 인코딩 위험도 자동 해결
-  if (autoFix) {
-    try {
-      const encScan = _scanShellScriptsEncoding(root);
-      if (encScan.atRisk && encScan.atRisk.length > 0) {
-        log('');
-        log(`🌐 --auto-fix 활성 (1.9.242) — 셸 스크립트 인코딩 위험 ${encScan.atRisk.length}건 BOM 자동 추가 중...`);
-        let ok = 0;
-        for (const r of encScan.atRisk) {
-          try {
-            const fullPath = path.join(root, r.file);
-            const orig = fs.readFileSync(fullPath);
-            const bom = Buffer.from([0xEF, 0xBB, 0xBF]);
-            const fixed = Buffer.concat([bom, orig]);
-            fs.writeFileSync(fullPath, fixed);
-            ok++;
-          } catch {}
-        }
-        log(`✓ UTF-8 BOM 추가 ${ok}/${encScan.atRisk.length}건 (1.9.242 UR-0014)`);
-      }
-    } catch (e) {
-      log(`⚠ env encoding auto-fix 오류 (1.9.242): ${e.message}`);
-    }
-  }
-  // 1.9.225: drift check --auto-fix 에 delivered 패턴 자동 적용 통합 (1.9.223/224 시스템 회수)
-  //   사용자 요청에 "구현 완료" 패턴이 누적되면 가짜 미답 신호가 drift score 를 가중시킬 수 있음 → 자동 정리.
-  //   1.9.82 audit --fix 패턴과 동일: --auto-fix 시 즉시 적용, 적용 후 재검사.
-  if (autoFix) {
-    try {
-      const delivered = _detectDeliveredRequests(root);
-      if (delivered.candidates && delivered.candidates.length > 0) {
-        log('');
-        log(`📥 --auto-fix 활성 (1.9.225) — delivered 패턴 ${delivered.candidates.length}건 자동 완료 중...`);
-        let ok = 0;
-        for (const c of delivered.candidates) {
-          const u = _updateUserRequest(root, c.id, { status: 'completed', autoCompletedAt: new Date().toISOString(), autoCompleteReason: 'drift-auto-fix-1.9.225' });
-          if (u) ok++;
-        }
-        log(`✓ delivered 자동 완료 ${ok}/${delivered.candidates.length}건`);
-      }
-    } catch (e) {
-      log(`⚠ delivered auto-apply 오류 (1.9.225): ${e.message}`);
-    }
-  }
-  // 1.9.293: drift check --auto-fix 에 idempotency task/user-request 중복 자동 정리 통합
-  //   누적 중복 task/요청이 idempotency 위반(medium)을 가중 → drift/handoff 노이즈. 안전: 완전중복 행 제거 + 동일텍스트 dropped 보존(id 유지).
-  if (autoFix) {
-    try {
-      const idemFixes = _autoFixIdempotency(root);
-      const totalFixed = idemFixes.reduce((n, f) => n + (f.removedExact || 0) + (f.droppedSameText || 0) + (f.count || 0), 0);
-      if (totalFixed > 0) {
-        log('');
-        log(`🔁 --auto-fix 활성 (1.9.293) — idempotency 중복 ${totalFixed}건 자동 정리 (task/user-request dedup)`);
-      }
-    } catch (e) {
-      log(`⚠ idempotency auto-fix 오류 (1.9.293): ${e.message}`);
-    }
-  }
-  // 1.9.236: drift check --auto-fix 에 release cleanup 통합 (1.9.235 회수)
-  //   누적된 50개+ release/* branches → abnormal-shutdown release-branch-pending 신호 가중
-  //   안전: keep 10 (최근 10개 유지), merged 만 삭제 (1.9.235 안전 가드)
-  //   임계: 50개 초과 시만 자동 정리 (소량 누적은 정상 운영)
-  if (autoFix) {
-    try {
-      const branchR = cp.spawnSync('git', ['branch', '--merged', 'main', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
-      if (branchR.status === 0) {
-        const merged = (branchR.stdout || '').split('\n')
-          .map(l => l.replace(/^\*?\s+/, '').trim())
-          .filter(l => l && /^release\/\d+\.\d+\.\d+$/.test(l));
-        if (merged.length > 50) {
-          log('');
-          log(`🗑 --auto-fix 활성 (1.9.236) — release/* merged ${merged.length}개 (50+) 자동 정리 (keep 10)...`);
-          // 정렬 (semver desc)
-          merged.sort((a, b) => {
-            const va = a.replace('release/', '').split('.').map(n => parseInt(n, 10) || 0);
-            const vb = b.replace('release/', '').split('.').map(n => parseInt(n, 10) || 0);
-            for (let i = 0; i < 3; i++) if (va[i] !== vb[i]) return vb[i] - va[i];
-            return 0;
-          });
-          const currentBranchR = cp.spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf8' });
-          const currentBranch = (currentBranchR.stdout || '').trim();
-          const toDelete = merged.slice(10).filter(b => b !== currentBranch);
-          let ok = 0;
-          for (const b of toDelete) {
-            const r = cp.spawnSync('git', ['branch', '-d', b], { cwd: root, encoding: 'utf8' });
-            if (r.status === 0) ok++;
-          }
-          log(`✓ release cleanup 자동 완료 ${ok}/${toDelete.length}건 (keep 10)`);
-        }
-      }
-    } catch (e) {
-      log(`⚠ release cleanup auto-fix 오류 (1.9.236): ${e.message}`);
-    }
-  }
-  if (autoFix && level === '🔴 critical' && !hasSecurityFired) {
-    log('');
-    log(`🔧 --auto-fix 활성 — session close 자동 실행 중...`);
-    try {
-      const r = cp.spawnSync(process.execPath, [__filename, 'session', 'close', root], { encoding: 'utf8', timeout: 60000, env: { ...process.env, LEERNESS_INTERNAL: '1' } });
-      if (r.status === 0) {
-        log(`✓ session close 자동 완료`);
-        // autoResolved 카운트
-        const stats = _readUsageStats(root);
-        stats.drift = stats.drift || {};
-        stats.drift.autoResolved = (stats.drift.autoResolved || 0) + 1;
-        const p = _usageStatsPath(root);
-        mkdirp(path.dirname(p));
-        writeUtf8(p, JSON.stringify(stats, null, 2) + '\n');
-        // 재검사
-        log('');
-        log(`재검사 중...`);
-        return driftCheckCmd(root); // 재귀 1회 (auto-fix 없이)
-      } else {
-        log(`⚠ session close 실패 (exit ${r.status}) — 수동 실행 필요`);
-      }
-    } catch (e) {
-      log(`⚠ auto-fix 오류: ${e.message}`);
-    }
-  }
-  if (has('--json')) {
-    log(JSON.stringify({ root, score: totalScore, level, signals, fired, appsZeroTask }, null, 2));
-    return;
-  }
-  log(`# leerness drift check (1.9.37)`);
-  log(`경로: ${root}`);
-  log('');
-  log(`상태: ${level}  ·  점수 ${totalScore}/200`);
-  log('');
-  log(`| 신호 | age | 임계 | 가중치 | 발화 |`);
-  log(`|---|---:|---:|---:|---|`);
-  for (const s of signals) {
-    const fire = s.ageDays > s.threshold ? '🔥' : '✓';
-    const age = s.ageDays === null ? '-' : `${s.ageDays.toFixed(1)}d`;
-    log(`| ${s.label} | ${age} | ${s.threshold}d | ${s.weight} | ${fire} |`);
-  }
-  if (appsZeroTask.length) {
-    log('');
-    log(`task 0건 sub-app (${appsZeroTask.length}개): ${appsZeroTask.join(', ')}`);
-  }
-  if (totalScore >= 50) {
-    log('');
-    log(`💡 권장 조치:`);
-    log(`  - 즉시: leerness session close .                (handoff/current-state 갱신)`);
-    log(`  - 또는: leerness audit . --fix                  (자동 갱신 가능 항목 적용)`);
-    log(`  - sub-app에 task 등록: cd _apps/X && leerness task add "..."`);
-    log(`  - 이 검사 끄기: --no-drift-check 또는 LEERNESS_NO_DRIFT_CHECK=1`);
-  }
-  if (level === '🔴 critical') process.exitCode = 1;
-}
+const _drift = require('../lib/drift');
+// 1.9.422 (UR-0025/UR-0125 큰 핸들러 모듈화 7번째): driftCheckCmd → lib/drift.js (DI 위임, thin wrapper)
+function driftCheckCmd(root, opts = {}) { return _drift.driftCheckCmd(root, opts, { VERSION, has, arg, harnessPath: __filename, readProgressRows, planPath, handoffPath, currentStatePath, taskLogPath, envDiff, _usageStatsPath, _readUsageStats, _updateUserRequest, _scanShellScriptsEncoding, _readFeatureGraph, _detectDeliveredRequests, _autoFixIdempotency }); }
 
 // 1.9.69: skill-suggestions.md rolling history 인덱스 — mtime 기반 캐시
 // handoff에서 같은 키워드 과거 추천 결과를 즉시 노출 (재매칭 불필요)
