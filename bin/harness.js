@@ -25,13 +25,13 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
-  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit } = require('../lib/pure-utils');  // 1.9.318~399 (UR-0025/0053/0075/0086/0087/0104): 순수 유틸 모듈 분리
+  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle } = require('../lib/pure-utils');  // 1.9.318~416 (UR-0025/0053/0075/0086/0087/0104/0122): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.415';
+const VERSION = '1.9.416';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3025,6 +3025,18 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
     { name: '6번째 외부평가 Opus P1 (UR-0100): list-family(decision/feature/plan/runs/team list) positional path 지원 (조용한 cwd 오독 차단) (1.9.412)', run: () => { const src = read(__filename); const L = '_resolveRoot('; const decOk = src.includes("decisionListCmd(absRoot(" + L + "args[2]))"); const planOk = src.includes("planListCmd(absRoot(" + L + "args[2]))"); const featOk = src.includes("featureListCmd(absRoot(" + L + "args[2]))"); const runsOk = src.includes("runsListCmd(absRoot(" + L + "args[2]))"); const teamOk = src.includes(L + "args[1] === 'list' ? args[2] : null)"); return decOk && planOk && featOk && runsOk && teamOk; } },
     { name: '6번째 외부평가 codex P2 (UR-0101): action 명령(task/decision/rule/lesson add) --json 구조화 출력 (1.9.413)', run: () => { const src = read(__filename); const taskJ = src.includes("log(JSON.stringify({ ok: true, id, status: arg('--status', 'requested'), request: text }))"); const decJ = src.includes("log(JSON.stringify({ ok: true, title }))"); const lesJ = src.includes("log(JSON.stringify({ ok: true, text, tag: tag || null }))"); const ruleJ = src.includes("skipped: !!result.skip"); return taskJ && decJ && lesJ && ruleJ; } },
+    { name: '9th 외부평가 Sonnet/Codex (UR-0122): add류 _parseAddTitle(flag/경로 break) + 빈 입력 거부 와이어 (1.9.416)', run: () => {
+      const m = require('../lib/pure-utils');
+      if (typeof m._parseAddTitle !== 'function' || m._parseAddTitle !== _parseAddTitle) return false;
+      const u1 = m._parseAddTitle(['add', '제목', '/x/y'], 1) === '제목';
+      const u2 = m._parseAddTitle(['add', 'my', 'title', '--note', 'v'], 1) === 'my title';
+      const u3 = m._parseAddTitle(['add', '/only'], 1) === '';
+      const u4 = m._parseAddTitle(['add', './rel'], 1) === '';
+      const src = read(__filename);
+      const taskWired = src.includes('_parseAddTitle(args, 2)') && src.includes("'empty_title'");
+      const reqWired = src.includes('_parseAddTitle(rest, 0)');
+      return u1 && u2 && u3 && u4 && taskWired && reqWired;
+    } },
     { name: '9th 외부평가 Codex P1 (UR-0121): handoff 보안 헤드라인 실제 스캔 기반 + scan/encoding --json + contract --json exit (1.9.415)', run: () => {
       const src = read(__filename);
       const handoffWired = src.includes('_collectSecretFindings(root)') && src.includes('🚨 ' + '시크릿 ');
@@ -4513,8 +4525,9 @@ function requestsCmd(root, sub, ...rest) {
   }
 
   if (sub === 'add') {
-    const text = rest.filter(x => !x.startsWith('-')).join(' ');
-    if (!text) { console.error('Usage: leerness requests add "<request text>"'); process.exit(1); }
+    // 1.9.416 (UR-0122): flag/경로 break(기존 filter 는 경로형 positional 을 text 에 흡수) + 빈 입력 거부
+    const text = _parseAddTitle(rest, 0);
+    if (!text) { failJson(has('--json'), 'empty_request', 'leerness requests add "<요청>" 필요 (빈/경로-only 거부)'); return process.exit(process.exitCode || 1); }
     const entry = _recordUserRequest(root, text);
     if (!entry) { console.error('failed to record'); process.exit(1); }
     if (has('--json')) { log(JSON.stringify(entry, null, 2)); return; }
@@ -20996,7 +21009,12 @@ async function main() {
   if (cmd === 'task') {
     const root = absRoot(arg('--path', process.cwd())); const sub = args[1] || 'list';
     if (sub==='list')   return taskList(root);
-    if (sub==='add')    return taskAdd(root, args.slice(2).join(' ') || '새 작업');
+    if (sub==='add')    {
+      // 1.9.416 (UR-0122): flag/경로 break + 빈 입력 거부 (기존: args.slice(2).join(' ') 가 경로 흡수 + 빈 task 생성)
+      const title = _parseAddTitle(args, 2);
+      if (!title) { failJson(has('--json'), 'empty_title', 'task add "<제목>" 필요 (빈/경로-only 제목 거부)'); return process.exit(process.exitCode || 1); }
+      return taskAdd(root, title);
+    }
     if (sub==='update') return taskUpdate(root, args[2]);
     if (sub==='drop')   return taskDrop(root, args[2]);
     if (sub==='fix-evidence') return taskFixEvidence(root);
@@ -21052,13 +21070,10 @@ async function main() {
     const root = absRoot(arg('--path', process.cwd())); const sub = args[1] || '';
     if (sub === 'add') {
       // args[2..] 가 title (단, --flag 또는 경로형 positional 이 시작되기 전까지)
-      const titleParts = [];
-      for (let i = 2; i < args.length; i++) {
-        // 1.9.351 (UR-0064 외부리뷰): --flag value 제거 후 남는 경로형 positional 이 title 에 흡수되는 것 차단
-        if (args[i].startsWith('--') || /^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(args[i])) break;
-        titleParts.push(args[i]);
-      }
-      return decisionAdd(root, titleParts.join(' '));
+      // 1.9.351 (UR-0064) → 1.9.416 (UR-0122): 공유 헬퍼 _parseAddTitle 로 단일화(flag/경로 break) + 빈 입력 거부
+      const title = _parseAddTitle(args, 2);
+      if (!title) { failJson(has('--json'), 'empty_title', 'decision add "<제목>" 필요'); return process.exit(process.exitCode || 1); }
+      return decisionAdd(root, title);
     }
     if (sub === 'list') {
       return decisionListCmd(absRoot(_resolveRoot(args[2])), { json: has('--json') });  // 1.9.412 (UR-0100): positional path 지원(add 의 args[2]=title 와 분리)

@@ -5957,5 +5957,34 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.416 회귀 (9th 외부평가 Sonnet/Codex, UR-0122): add류 제목 경로흡수 차단 + 빈 입력 거부
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-addtitle-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // (1) task add "제목" <경로> → 경로가 title 에 흡수되지 않음
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', '인증 구현', d, '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const tl = cp.spawnSync(process.execPath, [CLI, 'task', 'list', d, '--path', d], { encoding: 'utf8', timeout: 15000 }).stdout || '';
+    const noPathPollution = /인증 구현/.test(tl) && !new RegExp(d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(tl.split('인증 구현')[1] || '');
+    // (2) task add 빈/경로-only 거부 exit 1
+    const empty = cp.spawnSync(process.execPath, [CLI, 'task', 'add', '', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const pathOnly = cp.spawnSync(process.execPath, [CLI, 'task', 'add', d, '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const rejectOk = empty.status === 1 && pathOnly.status === 1;
+    // (3) --json 빈 거부 구조화
+    const ej = cp.spawnSync(process.execPath, [CLI, 'task', 'add', '', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let jsonOk = false; try { const j = JSON.parse(ej.stdout); jsonOk = j.ok === false && j.code === 'empty_title'; } catch {}
+    // (4) requests add 경로 break
+    cp.spawnSync(process.execPath, [CLI, 'requests', 'add', '다크모드 지원', d, '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const rl = cp.spawnSync(process.execPath, [CLI, 'requests', 'list', '--path', d], { encoding: 'utf8', timeout: 15000 }).stdout || '';
+    const reqClean = /다크모드 지원/.test(rl) && !new RegExp(d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(rl.split('다크모드 지원')[1] || '');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = noPathPollution && rejectOk && jsonOk && reqClean;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.416) 9th외부평가: add류 제목 경로흡수 차단 + 빈 입력 거부 exit1 + --json (UR-0122)' : '✗ add류 제목 일관성 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

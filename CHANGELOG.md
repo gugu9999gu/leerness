@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.416 — 2026-06-07 — add류 CLI 인자 일관성: 경로 흡수 차단 + 빈 입력 거부 (9번째 외부평가, UR-0122)
+
+**🧩 9번째 외부평가의 최강 UX 발견(3모델 공통: CLI 인자 규칙 불일치) 보강 — `task add`/`requests add`/`decision add` 의 제목 파싱을 단일 출처로 통일.**
+
+### 배경
+Sonnet P1 + Codex: `task add "제목" /some/path` 가 경로를 제목에 흡수("제목 /some/path")하던 반면 `decision add` 는 1.9.351(UR-0064)에서 이미 경로형 positional 을 차단. 같은 add 패러다임에서 동작이 갈려 혼란.
+
+### 수정
+- **`_parseAddTitle(args, startIdx)` 순수 헬퍼**(pure-utils): positional 을 join 하되 첫 `--flag` 또는 경로형 토큰(`/x`, `C:\x`, `./x`, `../x`)에서 멈춤 — **단일 출처**.
+- `task add` / `requests add` / `decision add` 모두 이 헬퍼 사용 → 경로 흡수 일관 차단.
+- **빈/경로-only 제목 거부**: `task add ""`, `task add /path` 등 → `failJson`(--json 시 `{ok:false,code:"empty_title"}`) + **exit 1**(기존엔 빈 task 생성). decision/requests add 동일.
+
+### 검증 (회귀 0)
+- **selftest 161→162 PASS** (_parseAddTitle 4 단위 + task/requests 와이어).
+- **E2E 415→416 PASS** (경로 흡수 차단 + 빈/경로-only exit 1 + --json + requests 경로 break).
+
+### 후속 백로그 (다음 라운드)
+team add/show positional path 일관성(UR-0122 잔여) · status/health "healthy" 라벨(UR-0121 잔여) · contract field 범용화(UR-0123) · init 프로파일/명령 계층화(UR-0124).
+
 ## 1.9.415 — 2026-06-07 — 정직성 수정: handoff 보안 헤드라인 false-OK + scan/encoding/contract --json (9번째 외부평가, UR-0121)
 
 **🚨 9번째 외부 멀티모델 리뷰(Codex GPT-5.5 + Claude Sonnet/Opus 4.8, README 미참조 클린룸)에서 발견한 "의미적 false-OK"를 수정 — leerness 정체성(정직/anti-laziness)과 정면 충돌하던 결함.**
