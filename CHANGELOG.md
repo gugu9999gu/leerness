@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.427 — 2026-06-07 — DI 완전성 메타체크: 모듈화 회귀 근본 차단 (UR-0131)
+
+**🛡️ 10번째 외부평가의 구조적 발견(selftest가 DI 누락 회귀를 못 잡음) 근본 해결.**
+
+### 변경
+- **selftest 신규 케이스**: 6개 DI 모듈(review-request/audit/drift/health/agents/session-close) 각각의 `const {...} = deps` destructure 이름이 **bin wrapper 의 전달 deps 객체에 모두 포함**되는지 소스 분석으로 검증. 누락 시 selftest 실패 → 향후 모듈 추출에서 `STATUSES`류 dep 누락(1.9.423 회귀)을 **자동 적발**.
+- 자기참조 함정 회피: 케이스의 regex 리터럴이 자신을 매치하지 않도록 `return ` 프리픽스로 실제 wrapper 만 타깃.
+
+### 검증 (회귀 0)
+- **selftest 172→173 PASS**. 회귀 적발력 확인: health destructure 에서 STATUSES 임시 제거 시 메타체크가 정확히 실패, 복원 시 통과.
+- **E2E 무회귀**.
+
 ## 1.9.426 — 2026-06-07 — 10번째 외부평가: 모듈화 회귀(health) 수정 + contract/rule 일관성 (UR-0128~0131)
 
 **🔍 10번째 외부 멀티모델 리뷰(Codex GPT-5.5 + Claude Sonnet/Opus 4.8, README 미참조 클린룸, 1.9.425)로 6회 모듈화 직후 무결성 독립 검증 — 모듈화 회귀 1건 적발·수정.**
