@@ -25,13 +25,13 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
-  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle } = require('../lib/pure-utils');  // 1.9.318~416 (UR-0025/0053/0075/0086/0087/0104/0122): 순수 유틸 모듈 분리
+  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports } = require('../lib/pure-utils');  // 1.9.318~416 (UR-0025/0053/0075/0086/0087/0104/0122): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.428';
+const VERSION = '1.9.429';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3231,6 +3231,14 @@ function _selfTestCases() {
       const rrSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'review-request.js'));
       const rrGuard = rrSrc.includes("failJson(!!(has && has('--json')), 'review_request_empty'");
       return pass && guards && rrGuard;
+    } },
+    { name: '10th 외부평가 UR-0129: contract impl 파서 — 멀티라인 module.exports top-level 키 + ESM export (1.9.429)', run: () => {
+      const m = require('../lib/pure-utils');
+      if (typeof m._parseImplExports !== 'function') return false;
+      const multi = m._parseImplExports('module.exports = {\n  login: function(u,p){ return {t:1}; },\n  logout: function(t){ return true; }\n};').sort();
+      const esm = m._parseImplExports('export function add(){}\nexport const PI=3;\nfunction y(){}\nexport { y as z };').sort();
+      const moved = m._parseImplExports === _parseImplExports && read(__filename).includes('new Set(_parseImplExports(implSrc))');
+      return JSON.stringify(multi) === JSON.stringify(['login','logout']) && JSON.stringify(esm) === JSON.stringify(['PI','add','z']) && moved;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -18018,17 +18026,8 @@ function contractVerifyCmd(specPath, implPath) {
   // 1.9.36 BUG-fix: require()는 side-effect 실행 위험 (CLI 스크립트는 require로 실행됨).
   // 대신 정적 소스 분석 — module.exports = { foo, bar } / exports.foo = ... / module.exports.foo = ... 패턴 grep.
   const implSrc = read(implFile);
-  const implExports = new Set();
-  // pattern 1: module.exports = { foo, bar, baz }
-  for (const m of implSrc.matchAll(/module\.exports\s*=\s*\{([^}]+)\}/g)) {
-    for (const k of m[1].split(',')) {
-      const name = k.replace(/:.*/, '').trim();
-      if (/^[A-Za-z_$][\w$]*$/.test(name)) implExports.add(name);
-    }
-  }
-  // pattern 2: exports.foo = / module.exports.foo =
-  for (const m of implSrc.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=/g)) implExports.add(m[1]);
-  // pattern 3: function foo + module.exports에 포함되었는지는 위에서 처리됨
+  // 1.9.429 (UR-0129): 브레이스 균형 top-level 키(멀티라인 module.exports 안전) + ESM export 인식 — pure-utils 단일출처
+  const implExports = new Set(_parseImplExports(implSrc));
   // 검사: spec 강선언(function 시그니처 + markdown bullet) 함수 중 impl exports에 없는 것.
   // 1.9.385 (UR-0086): 기존 `specText.includes('function '+fn)` 가드는 bullet/backtick 추출명을 무력화하던 잠재 FN.
   //   → declaredSpec(강선언) 기준으로 교체: bullet 함수도 누락 감지, backtick 약언급은 관대(검사 제외) 유지.

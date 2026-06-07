@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.429 — 2026-06-07 — contract verify impl 파서 강화: 멀티라인 + ESM (10th 외부평가 UR-0129)
+
+**🧩 contract verify 의 export 인식 false-negative 2종 수정 — 현대 JS 프로젝트 대응.**
+
+### 변경
+- **`lib/pure-utils.js _parseImplExports(src)` 신설**(테스트 가능 순수 파서) + bin 단일출처화:
+  - **브레이스 균형 + top-level 키**: `module.exports = { login: function(){…}, logout: … }` 멀티라인/함수값에서 **첫 키만 인식되던 버그**(정규식 `[^}]+`가 함수 본문 `}`에서 중단) 수정 — 이제 전 키 인식.
+  - **ESM 인식 추가**: `export function/const/let/var/class foo`, `export { a, b as c }`(as 별칭 우선, default/type 제외).
+- 기존 `exports.foo` / `module.exports.foo` 유지.
+
+### 검증 (회귀 0)
+- **selftest 174→175 PASS** (멀티라인 3키 + ESM 양식 + 단일출처 가드).
+- 파서 5케이스 직접 검증 + contract verify e2e(멀티라인 `login/logout/verifyToken` 전부 + ESM) 확인.
+- **E2E 무회귀**.
+
 ## 1.9.428 — 2026-06-07 — --json 순수성: check / plan show / review-request (10th 외부평가 UR-0128)
 
 **📐 자동화 소비자(CI/MCP)를 위한 --json 일관성 — 텍스트만 내던 3개 경로를 순수 JSON 화.**
