@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.437 — 2026-06-08 — --json 에러 전역화: unknown command + 무효 choice (11th 외부평가 Codex P2/P3, UR-0138)
+
+**📐 자동화(CI/MCP)가 모든 에러 경로를 JSON.parse 할 수 있도록 중앙 에러 2종을 순수 JSON 화.**
+
+### 변경
+- **중앙 unknown command 폴백**: `알 수 없는 명령` → `--json` 시 `failJson(..., 'unknown_command', …)` (`{ok:false,error,code}`).
+- **`_validateChoice`**(task update/plan status 등 공용): 무효값 거부도 `--json` 시 `failJson(..., 'invalid_choice', …)`. 한 곳 수정으로 status/trigger 등 전 검증 경로 커버.
+- 텍스트 모드 출력 무변경.
+
+### 검증 (회귀 0)
+- `bogus-cmd --json` → `code:unknown_command`; `task update <id> --status nonsense --json` → `code:invalid_choice`. 텍스트 모드 동일.
+- **selftest 181→182 PASS** · **E2E 무회귀**.
+
+### UR-0138 잔여
+일부 명령별 ad-hoc 에러(plan add 등) + lazy/audit --fix --json stale 는 후속(중앙 핸들러화 점진).
+
 ## 1.9.436 — 2026-06-08 — 시크릿 스캐너 all-X/0 placeholder FP 차단 (11th 외부평가 Opus P3, UR-0139)
 
 **🔑 `AKIAXXXXXXXXXXXXXXXX`(전부 X 더미)를 실키로 오탐하던 FP — prefix 보다 우선하는 더미 가드.**

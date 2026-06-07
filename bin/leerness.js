@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.436';
+const VERSION = '1.9.437';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3278,6 +3278,12 @@ function _selfTestCases() {
         && m._isPlaceholderSecret('sk-test-1234567890abcdefghijklmnopqrstuvwxyz') === false  // 테스트 픽스처 탐지 유지
         && m._isPlaceholderSecret('ghp_abcdefghijklmnopqrstuvwxyz123456') === false;          // GitHub 토큰 탐지 유지
     } },
+    { name: '11th 외부평가 Codex P2 (UR-0138): unknown command + 무효 choice --json 순수 JSON (1.9.437)', run: () => {
+      const src = read(__filename);
+      const unknownJson = src.includes("failJson(has('--json'), 'unknown_command'");
+      const choiceJson = src.includes("failJson(has('--json'), 'invalid_choice'");
+      return unknownJson && choiceJson;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6319,7 +6325,8 @@ const TASK_STATUSES = new Set(['requested', 'planned', 'in-progress', 'waiting',
 const RULE_TRIGGERS = new Set(['every-session', 'every-update', 'every-commit', 'every-round', 'session-start', 'session-close', 'pre-publish']);
 function _validateChoice(value, validSet, label) {
   if (value == null || validSet.has(String(value)) || has('--force')) return true;
-  fail(`무효한 ${label}: "${value}" — 유효값: ${[...validSet].join(', ')} (커스텀 허용: --force)`);
+  // 1.9.437 (11th 외부평가 Codex P2/P3, UR-0138): --json 모드 무효값 에러도 순수 JSON(failJson).
+  failJson(has('--json'), 'invalid_choice', `무효한 ${label}: "${value}" — 유효값: ${[...validSet].join(', ')} (커스텀 허용: --force)`);
   return false;
 }
 // 1.9.311 (UR-0047, 설치리뷰 3중수렴): init 가드 — 미초기화 디렉토리에서 write 차단.
@@ -19051,7 +19058,8 @@ async function main() {
   }
   // 1.9.306 (UR-0045): 명시적 help 요청은 exit 0, 그 외 미인식 명령은 안내 + exit 1 (실패를 성공으로 오판 방지).
   if (cmd === 'help' || cmd === 'commands' || cmd === '--help' || cmd === '-h') { help(); return; }
-  fail(`알 수 없는 명령: ${cmd}  (leerness --help 로 전체 명령 확인)`);
+  // 1.9.437 (11th 외부평가 Codex P2, UR-0138): --json 모드 unknown command 도 순수 JSON.
+  failJson(has('--json'), 'unknown_command', `알 수 없는 명령: ${cmd}  (leerness --help 로 전체 명령 확인)`);
   return;
 }
 
