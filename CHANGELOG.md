@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.421 — 2026-06-07 — 무거움 점진 해소 2: audit → lib/audit.js 모듈화 (UR-0025/UR-0125)
+
+**🪶 `bin/leerness.js` 무거움 점진 해소 2단계 — `audit` 핸들러(310줄)를 lib/ 로 DI 분리.**
+
+### 배경
+1.9.420(review-request)에 이어 두 번째 큰 핸들러 추출. footprint 측정으로 audit(중심 명령이나 의존 추적 가능) 선정. **테스트주도 추출**: 추출 직후 audit text/--json 실행으로 누락 deps 즉시 검증(0건).
+
+### 변경
+- `lib/audit.js` 신설(322줄): `audit(root, opts, deps)` — io는 `./io`, SECRET_PATTERNS는 `./catalogs`, cp/path 빌트인, harness 고유 의존 11종(VERSION·arg·has·planPath·readProgressRows·currentStatePath·handoffPath·envDiff·_readFeatureGraph·_matchAPISkills·_listAPISkills) **DI 주입**.
+- `bin/leerness.js`: 310줄 → **3줄 thin wrapper**. **20,903 → 20,617줄(−286)**.
+- 동작/출력 무변경(meta/design/reuse/CVE/api-skill 감사 + --fix + --json 동일).
+
+### 검증 (회귀 0)
+- **selftest 166→167 PASS** (모듈 존재 + DI 위임 + 본문 이동(not_initialized finding kind) + healthy/findings 동작).
+- **E2E 420→421 PASS** (audit는 gate/session-close/audit 케이스에서 핵심 검증).
+
+### 누적 효과 (UR-0125)
+2회 추출로 bin **21,177 → 20,617줄(−560, 2.6%)**. 다음 후보: driftCheck(~13) → healthCmd(~24) → handoff(1434).
+
 ## 1.9.420 — 2026-06-07 — 무거움 점진 해소: reviewRequestCmd → lib/review-request.js 모듈화 (UR-0025/UR-0125)
 
 **🪶 `bin/leerness.js`(21k줄/1.3MB) 무거움 점진 해소 — `review-request` 핸들러(277줄)를 lib/ 로 DI 분리.**

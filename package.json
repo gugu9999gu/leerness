@@ -1,6 +1,6 @@
 {
   "name": "leerness",
-  "version": "1.9.420",
+  "version": "1.9.421",
   "description": "Leerness: 비파괴 마이그레이션, 자동 버전 감지·업데이트, 계획/진행/핸드오프 자동화, 게으름·시크릿·인코딩 자동 가드, Claude Code 슬래시 통합을 갖춘 한국어 우선 AI 개발 하네스.",
   "keywords": [
     "leerness",
