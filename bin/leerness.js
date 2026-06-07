@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.429';
+const VERSION = '1.9.431';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3239,6 +3239,10 @@ function _selfTestCases() {
       const esm = m._parseImplExports('export function add(){}\nexport const PI=3;\nfunction y(){}\nexport { y as z };').sort();
       const moved = m._parseImplExports === _parseImplExports && read(__filename).includes('new Set(_parseImplExports(implSrc))');
       return JSON.stringify(multi) === JSON.stringify(['login','logout']) && JSON.stringify(esm) === JSON.stringify(['PI','add','z']) && moved;
+    } },
+    { name: '10th 외부평가 UR-0130: health 보안 CRITICAL → --strict 없이도 exit 1 (CI 게이트, 1.9.430)', run: () => {
+      const modSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'health.js'));
+      return modSrc.includes('const criticalSecurity =') && modSrc.includes("has('--strict') && !out.healthy) || criticalSecurity") && modSrc.includes('out.criticalSecurity = criticalSecurity');
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];

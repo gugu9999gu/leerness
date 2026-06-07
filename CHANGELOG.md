@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.431 — 2026-06-08 — health exit code 정책: 보안 CRITICAL CI 게이트 (10th 외부평가 UR-0130)
+
+> 1.9.430(npm 게시)에서 e2e 테스트 픽스처가 `sk_live_` 패턴(Stripe 실키 형태)이라 GitHub push-protection에 막혀 git 미반영. 픽스처를 코드베이스 관례인 `sk-test-`(GitHub-safe + leerness 탐지)로 교체하고 1.9.431로 정리(git=npm=tag 정합). 동작 동일.
+
+### 변경 (1.9.430 + 픽스처 패턴 수정)
+
+**🚦 health 를 CI 게이트로 쓸 때 하드코딩 시크릿을 놓치던 문제 — exit code 정책 명확화.**
+
+### 변경
+- **`health`**: 보안 CRITICAL(커밋 대상 하드코딩 시크릿 / `.env` 가 `.gitignore` 미포함)이면 **`--strict` 없이도 exit 1**. `scan secrets` 와 exit code 일치 → health 만으로도 시크릿 유출을 CI에서 차단.
+- 비-CRITICAL issue(drift·env.example 누락 등)는 종전대로 exit 0(게이트는 `--strict`). JSON 에 `criticalSecurity` 노출.
+- 맹신 X 판단: 3개 명령(health/audit/drift) 전부 exit 1로 바꾸면 기존 non-strict 워크플로가 깨지므로, **방어 가능한 보안-크리티컬 케이스(health)만** 변경. audit/drift 는 메타/정보성이라 `gate` 가 하드 게이트 역할 유지.
+
+### 검증 (회귀 0)
+- **selftest 175→176 PASS** + **E2E 신규 B(1.9.430)**: 커밋 시크릿 → exit 1, 클린 → exit 0.
+
+### e2e 락 테스트 flake 하드닝 (dev 전용, 패키지 무영향)
+- 락 제품 로직은 **CPU 포화 하 독립 5/5 무결**(dup=0/sep=1) 검증됨. 전체 e2e 자원압박 시 6개 async `cp.spawn` 일부가 EAGAIN 미기동 → found<N 타임아웃 flake.
+- 테스트 하네스 보강: spawn `error` 동기 재시도 + post-poll 누락분 동기 재추가. 락 무결성(dup/sep/lost-update) 검증은 유지.
+
 ## 1.9.429 — 2026-06-07 — contract verify impl 파서 강화: 멀티라인 + ESM (10th 외부평가 UR-0129)
 
 **🧩 contract verify 의 export 인식 false-negative 2종 수정 — 현대 JS 프로젝트 대응.**

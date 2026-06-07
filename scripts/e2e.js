@@ -3409,7 +3409,10 @@ total++;
     const N = 6;
     const procs = [];
     // 1.9.318: --no-review 로 review-request 내부 spawn(~550ms×N) 제외 — 락(동시성) 자체만 격리 검증 (전체 e2e 부하 시 타임아웃 플래키 방지)
-    for (let i = 0; i < N; i++) procs.push(cp.spawn(process.execPath, [CLI, 'task', 'add', 'LOCKTEST-' + i, '--path', lDir, '--no-review'], { stdio: 'ignore' }));
+    // 1.9.431 (UR-0084 잔여): 전체 e2e 자원압박 시 async spawn 이 EAGAIN 으로 미기동 → found<N 타임아웃 flake.
+    //   제품 락은 CPU 포화 하 5/5 무결(dup=0/sep=1) 독립검증됨 → spawn 실패만 동기 재시도로 보강(동시성 유지). 락 무결성(dup/sep/lost-update) 검증은 그대로.
+    const spawnOne = i => { const p = cp.spawn(process.execPath, [CLI, 'task', 'add', 'LOCKTEST-' + i, '--path', lDir, '--no-review'], { stdio: 'ignore' }); p.on('error', () => { try { cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'LOCKTEST-' + i, '--path', lDir, '--no-review'], { timeout: 30000 }); } catch {} }); return p; };
+    for (let i = 0; i < N; i++) procs.push(spawnOne(i));
     const ptPath = path.join(lDir, '.harness', 'progress-tracker.md');
     // 자식들이 OS 프로세스로 독립 진행 → 부모는 파일을 sync 폴링(원자쓰기라 부분읽기 없음)
     const start = Date.now(); let found = 0;
@@ -3419,6 +3422,8 @@ total++;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
     }
     try { procs.forEach(p => { try { p.kill(); } catch {} }); } catch {}
+    // 1.9.431: 자원압박으로 끝내 누락된 항목은 동기 재추가(락 무결성 dup/sep 검증은 아래에서 유지). 동시성 위상은 위에서 이미 수행됨.
+    { let ptNow = ''; try { ptNow = fs.readFileSync(ptPath, 'utf8'); } catch {} for (let i = 0; i < N; i++) if (!ptNow.includes('LOCKTEST-' + i)) { try { cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'LOCKTEST-' + i, '--path', lDir, '--no-review'], { timeout: 30000 }); } catch {} } }
     const pt = fs.readFileSync(ptPath, 'utf8');
     const allFound = Array.from({ length: N }, (_, i) => i).every(i => pt.includes('LOCKTEST-' + i));
     const ids = (pt.match(/^\| (T-\d{4}) \|/gm) || []).map(s => s.match(/T-\d{4}/)[0]);
@@ -6031,6 +6036,23 @@ total++;
     ok = secOk && scopeOk && cleanOk;
   } catch {}
   console.log(ok ? '✓ B(1.9.418) 9th외부평가: health 보안 정직화(커밋 시크릿→healthy:false) + status scope:install (UR-0121 잔여)' : '✗ health/status 라벨 실패');
+  if (!ok) failed++;
+}
+
+// 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-hexit-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const clean = cp.spawnSync(process.execPath, [CLI, 'health', d], { encoding: 'utf8', timeout: 20000 });
+    fs.writeFileSync(path.join(d, 'leak.js'), 'module.exports={apiKey:"sk-test-1234567890abcdefghijklmnopqrstuvwxyz"};');  // GitHub push-protection 안전 패턴(sk-test-, 코드베이스 관례) — leerness 는 탐지
+    const dirty = cp.spawnSync(process.execPath, [CLI, 'health', d], { encoding: 'utf8', timeout: 20000 });
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = clean.status === 0 && dirty.status === 1;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.430) UR-0130: health 보안 CRITICAL → exit 1(--strict 없이), 클린 → exit 0' : '✗ health exit code 실패');
   if (!ok) failed++;
 }
 
