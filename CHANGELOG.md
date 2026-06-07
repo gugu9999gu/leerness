@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.418 — 2026-06-07 — health 보안 정직화 + status "healthy" 의미 명시 (9번째 외부평가 Codex P2, UR-0121 잔여)
+
+**🩺 `health`/`status` 의 "healthy" 가 프로젝트 안전을 뜻하는 듯 오해되던 것(Codex P2) 보강 — 정직성 일관 적용.**
+
+### 배경
+Codex: 같은 상태에서 `gate` 는 실패하는데 `health --json`/`status --json` 은 `healthy:true`. `health` 의 보안 점검은 `.env`/`.gitignore` 만 보고 하드코딩 시크릿을 무시(1.9.415 handoff 와 동일 근본원인), `status` 의 `healthy` 는 설치 파일 존재만 의미하나 라벨이 오해를 유발.
+
+### 수정
+- **health 보안 점검 정직화**: `_collectSecretFindings`(1.9.415 공유 헬퍼)로 **커밋 대상 하드코딩 시크릿**을 반영 → `checks.security.committedSecrets`/`critical` + `issues` + 최상위 `healthy` 에 전파. 시크릿이 있으면 `health` 가 `healthy:false`. `.env` 없어도 소스 스캔(기존엔 .env 없으면 보안 점검 스킵).
+- **status 의미 명시**: `--json` 에 `scope:"install"` + `healthyMeaning`("설치 파일 존재 여부 — 프로젝트 안전은 gate/scan secrets 사용") 추가. `healthy` 의미(설치 완료)는 보존(비파괴).
+
+### 검증 (회귀 0)
+- **selftest 163→164 PASS** (health `_collectSecretFindings` 와이어 + status scope/meaning).
+- **E2E 417→418 PASS** (시크릿 시 health healthy:false + committedSecrets + status scope:install + 클린 회귀).
+
+### 9번째 외부평가 — 확정 발견 전부 소진
+UR-0121(handoff/scan/encoding/contract + **health/status 라벨**) ✅ · UR-0122(add류) ✅ · UR-0123(contract field) ✅. 잔여는 전략 항목 UR-0124(init 프로파일/명령 계층화/handoff 속도/--compact) + team positional path(소소).
+
 ## 1.9.417 — 2026-06-07 — contract verify field 검증 범용화: ## Fields 섹션 불릿 인식 (9번째 외부평가, UR-0123)
 
 **🔧 `contract verify` 의 필드 계약 검증이 `tick.` 프리픽스 전용으로 하드코딩돼 범용 spec 에서 무력화되던 것(Opus 발견) 보강.**

@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.417';
+const VERSION = '1.9.418';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3025,6 +3025,12 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
     { name: '6번째 외부평가 Opus P1 (UR-0100): list-family(decision/feature/plan/runs/team list) positional path 지원 (조용한 cwd 오독 차단) (1.9.412)', run: () => { const src = read(__filename); const L = '_resolveRoot('; const decOk = src.includes("decisionListCmd(absRoot(" + L + "args[2]))"); const planOk = src.includes("planListCmd(absRoot(" + L + "args[2]))"); const featOk = src.includes("featureListCmd(absRoot(" + L + "args[2]))"); const runsOk = src.includes("runsListCmd(absRoot(" + L + "args[2]))"); const teamOk = src.includes(L + "args[1] === 'list' ? args[2] : null)"); return decOk && planOk && featOk && runsOk && teamOk; } },
     { name: '6번째 외부평가 codex P2 (UR-0101): action 명령(task/decision/rule/lesson add) --json 구조화 출력 (1.9.413)', run: () => { const src = read(__filename); const taskJ = src.includes("log(JSON.stringify({ ok: true, id, status: arg('--status', 'requested'), request: text }))"); const decJ = src.includes("log(JSON.stringify({ ok: true, title }))"); const lesJ = src.includes("log(JSON.stringify({ ok: true, text, tag: tag || null }))"); const ruleJ = src.includes("skipped: !!result.skip"); return taskJ && decJ && lesJ && ruleJ; } },
+    { name: '9th 외부평가 Codex P2 (UR-0121 잔여): health 보안 정직화(커밋 시크릿 반영) + status scope:install (1.9.418)', run: () => {
+      const src = read(__filename);
+      const healthWired = src.includes('_collectSecretFindings(root)') && src.includes('committedSecrets') && src.includes('커밋 대상 하드코딩 시크릿');
+      const statusScope = src.includes("scope: 'install'") && src.includes('healthyMeaning');
+      return healthWired && statusScope && typeof healthCmd === 'function' && typeof status === 'function';
+    } },
     { name: '9th 외부평가 Opus (UR-0123): contract field 범용화 — ## Fields 섹션 불릿 인식(tick. 회귀 보존) (1.9.417)', run: () => {
       const m = require('../lib/pure-utils');
       const r1 = m._parseContractSpec('# S\n\n## Fields\n- userId\n- expiresAt: string\n');
@@ -6741,7 +6747,8 @@ function status(root) {
   const files = Object.keys(coreFiles(root, lang, [], { minimal: isMinimal }));
   const missing = files.filter(f => !exists(path.join(root,f)));
   // 1.9.384 (5번째 외부평가/UR-0085): --json 일관성 — AI 에이전트용 구조화 출력.
-  if (has('--json')) { log(JSON.stringify({ version: ver, language: lang, minimal: isMinimal, total: files.length, present: files.length - missing.length, missing, healthy: missing.length === 0 }, null, 2)); return; }
+  // 1.9.418 (9th 외부평가 Codex P2): healthy 의 의미를 명시(설치 파일 존재 ≠ 프로젝트 안전). 프로젝트 안전은 gate/scan secrets 사용.
+  if (has('--json')) { log(JSON.stringify({ version: ver, language: lang, minimal: isMinimal, scope: 'install', total: files.length, present: files.length - missing.length, missing, healthy: missing.length === 0, healthyMeaning: '설치 파일 존재 여부(프로젝트 안전 아님 — 보안/품질은 leerness gate / scan secrets 사용)' }, null, 2)); return; }
   log(`Leerness: ${ver}${isMinimal ? ' (minimal)' : ''}`);
   log(`Files: ${files.length - missing.length}/${files.length}`);
   if (missing.length) missing.forEach(x => warn('missing: ' + x));
@@ -19381,26 +19388,29 @@ function healthCmd(root) {
     const j = JSON.parse(r.stdout.trim());
     out.checks.drift = { level: j.level, score: j.score, firedCount: (j.fired || []).length };
   } catch { out.checks.drift = { error: 'drift check 실패' }; }
-  // 2) 보안 상태 (env + .gitignore)
+  // 2) 보안 상태 (1.9.418, 9th 외부평가 Codex P2): .env/.gitignore + **실제 하드코딩 시크릿 스캔**.
+  //   기존엔 .env 가 .gitignore 에 있으면 critical:false 라 커밋된 하드코딩 시크릿이 있어도 health 가 healthy:true 였음(false-OK).
+  //   handoff/scan secrets 와 동일하게 _collectSecretFindings 로 커밋 대상 시크릿을 반영(정직성).
   try {
+    const sec = _collectSecretFindings(root);
+    const committedSecrets = sec.committed.length;
     const envPath = path.join(root, '.env');
-    if (exists(envPath)) {
+    const hasDotEnv = exists(envPath);
+    const s = { hasDotEnv, committedSecrets };
+    if (hasDotEnv) {
       const d = envDiff(root);
       const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
       const giLines = giText.split('\n').map(l => l.trim());
       const envInGi = giLines.includes('.env') || giLines.includes('/.env');
       const SECRET_PATTERNS = ['.env', '.env.local', '.env.production', '.env.*.local', '*.pem', 'credentials.json'];
-      const missingSecrets = SECRET_PATTERNS.filter(p => !giLines.some(l => l === p || l === '/' + p));
-      out.checks.security = {
-        hasDotEnv: true,
-        envInGitignore: envInGi,
-        envExampleMissing: d.inEnvOnly,
-        gitignoreMissingSecrets: missingSecrets,
-        critical: !envInGi
-      };
+      s.envInGitignore = envInGi;
+      s.envExampleMissing = d.inEnvOnly;
+      s.gitignoreMissingSecrets = SECRET_PATTERNS.filter(p => !giLines.some(l => l === p || l === '/' + p));
+      s.critical = !envInGi || committedSecrets > 0;
     } else {
-      out.checks.security = { hasDotEnv: false, ok: true };
+      s.critical = committedSecrets > 0;
     }
+    out.checks.security = s;
   } catch { out.checks.security = { error: '보안 점검 실패' }; }
   // 3) skill 수 + skill query 누적
   try {
@@ -19643,7 +19653,8 @@ function healthCmd(root) {
   // 6) issues 요약 (사용자 글로벌 룰 가시화)
   const issues = [];
   if (out.checks.drift?.level && !/healthy/.test(out.checks.drift.level)) issues.push(`drift ${out.checks.drift.level}`);
-  if (out.checks.security?.critical) issues.push('🚨 .env가 .gitignore에 누락 (보안 CRITICAL)');
+  if (out.checks.security?.committedSecrets > 0) issues.push(`🚨 커밋 대상 하드코딩 시크릿 ${out.checks.security.committedSecrets}건 (보안 CRITICAL)`);  // 1.9.418 (9th 외부평가 Codex P2)
+  if (out.checks.security?.hasDotEnv && out.checks.security?.envInGitignore === false) issues.push('🚨 .env가 .gitignore에 누락 (보안 CRITICAL)');
   if (out.checks.security?.envExampleMissing?.length) issues.push(`.env→.env.example 누락 ${out.checks.security.envExampleMissing.length}건`);
   if (out.checks.security?.gitignoreMissingSecrets?.length) issues.push(`.gitignore 시크릿 누락 ${out.checks.security.gitignoreMissingSecrets.length}건`);
   out.issues = issues;

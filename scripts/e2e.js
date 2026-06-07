@@ -6008,5 +6008,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.418 회귀 (9th 외부평가 Codex P2, UR-0121 잔여): health 보안 정직화 + status scope
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-hlabel-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d, 'leak.js'), 'module.exports={apiKey:"sk-test-1234567890abcdefghijklmnopqrstuvwxyz"};');
+    // (1) 시크릿 있으면 health healthy:false + committedSecrets>0
+    const hj = cp.spawnSync(process.execPath, [CLI, 'health', d, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let secOk = false; try { const j = JSON.parse(hj.stdout); secOk = j.healthy === false && j.checks.security.critical === true && j.checks.security.committedSecrets >= 1; } catch {}
+    // (2) status scope:install + healthyMeaning
+    const sj = cp.spawnSync(process.execPath, [CLI, 'status', d, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let scopeOk = false; try { const j = JSON.parse(sj.stdout); scopeOk = j.scope === 'install' && typeof j.healthyMeaning === 'string' && j.healthyMeaning.length > 0; } catch {}
+    // (3) 회귀: 클린 워크스페이스 health healthy:true
+    const dc = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-hclean-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', dc, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const hc = cp.spawnSync(process.execPath, [CLI, 'health', dc, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let cleanOk = false; try { const j = JSON.parse(hc.stdout); cleanOk = j.checks.security.committedSecrets === 0; } catch {}
+    fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(dc, { recursive: true, force: true });
+    ok = secOk && scopeOk && cleanOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.418) 9th외부평가: health 보안 정직화(커밋 시크릿→healthy:false) + status scope:install (UR-0121 잔여)' : '✗ health/status 라벨 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
