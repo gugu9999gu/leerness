@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.436 — 2026-06-08 — 시크릿 스캐너 all-X/0 placeholder FP 차단 (11th 외부평가 Opus P3, UR-0139)
+
+**🔑 `AKIAXXXXXXXXXXXXXXXX`(전부 X 더미)를 실키로 오탐하던 FP — prefix 보다 우선하는 더미 가드.**
+
+### 변경
+- **`_isPlaceholderSecret`**: 본문(alnum)에 **동일문자 8+연속**(`XXXXXXXX`/`00000000`/`aaaaaaaa`)이 있으면 실키 prefix(akia/sk- 등) 여부와 무관하게 placeholder 로 판정. 암호학적 실키는 고엔트로피라 8연속이 없어 무영향.
+- 기존 `hasRealPrefix → 실키` 규칙보다 앞에 배치(AKIA 등 prefix + 더미 본문 FP 해소).
+
+### 검증 (회귀 0)
+- AKIA all-X / sk-0000… → placeholder(미탐). 실키스러움/`sk-test-…`/`ghp_…` 토큰 → 탐지 유지.
+- **selftest 180→181 PASS** · **E2E 무회귀**.
+
+### UR-0139 잔여
+contract impl ESM re-export(`export {default as X} from`/`export *`) 인식 + encoding CRLF 미탐지는 후속.
+
 ## 1.9.435 — 2026-06-08 — agents dispatch task flag-value 흡수 차단 (11th 외부평가 Codex P2, UR-0137)
 
 **🧹 `agents dispatch "<task>" --to codex` 의 생성 명령에 `codex`(또는 경로)가 task 본문으로 섞이던 문제.**
