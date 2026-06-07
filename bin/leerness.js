@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.425';
+const VERSION = '1.9.426';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3094,6 +3094,13 @@ function _selfTestCases() {
       const movedToLib = modSrc.includes("require('./io')") && modSrc.includes("require('./agent-registry')") && sigTransform && modSrc.includes(bodyMarker) && !src.includes(bodyMarker);
       return expOk && delegated && movedToLib;
     } },
+    { name: '10th 외부평가 Sonnet P2: rule add flag/경로 break(_parseAddTitle) — trigger 값/경로 흡수 차단 (1.9.426)', run: () => {
+      const src = read(__filename);
+      const wired = src.includes("ruleAdd(arg('--path', process.cwd()), _parseAddTitle(args, 2))");
+      const m = require('../lib/pure-utils');
+      const u = m._parseAddTitle(['rule', 'add', '세션', '점검', '--trigger', 'every-session', '/p'], 2) === '세션 점검';
+      return wired && u;
+    } },
     { name: 'UR-0025 큰핸들러 모듈화 8번째: healthCmd → lib/health.js + DI 위임 + 동작 (1.9.423)', run: () => {
       const m = require('../lib/health');
       const expOk = typeof m.healthCmd === 'function';
@@ -3101,16 +3108,19 @@ function _selfTestCases() {
       const delegated = src.includes("require('../lib/health')") && src.includes('_health.healthCmd(root,');
       const modSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'health.js'));
       const bodyMarker = 'capability' + 'Matrix';  // health 본문 고유(split-literal 자기참조 회피)
-      const movedToLib = modSrc.includes("require('./io')") && modSrc.includes("require('./pure-utils')") && modSrc.includes(bodyMarker) && !src.includes(bodyMarker);
+      // 1.9.426 (10th 외부평가 회귀가드): wrapper 가 STATUSES 를 주입해야 memorySurface 가 동작(1.9.423 누락 회귀).
+      const statusesWired = modSrc.includes('STATUSES') && /_health\.healthCmd\(root, \{ VERSION, STATUSES,/.test(src);
+      const movedToLib = modSrc.includes("require('./io')") && modSrc.includes("require('./pure-utils')") && modSrc.includes(bodyMarker) && !src.includes(bodyMarker) && statusesWired;
       let behavOk = false;
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_health_'));
       const _w = process.stdout.write; let out = '';
       try {
         fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
         process.stdout.write = s => { out += s; return true; };
-        m.healthCmd(tmp, { VERSION, has: f => f === '--json', arg: (k, d) => d, harnessPath: path.join(tmp, '__nope.js'), listAllSkills, planPath, readProgressRows, readRules, envDiff, _collectSecretFindings, _readUsageStats, _loadDecisions, _loadLessons, _loadShellFailures, _readFeatureGraph, _scanShellScriptsEncoding, _shellEnvDrift, _computeMilestones, _computeRecentChanges, _computeRoundHistory, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _listAPISkills, _matchAPISkills, _mcpToolCount });
+        m.healthCmd(tmp, { VERSION, STATUSES, has: f => f === '--json', arg: (k, d) => d, harnessPath: path.join(tmp, '__nope.js'), listAllSkills, planPath, readProgressRows, readRules, envDiff, _collectSecretFindings, _readUsageStats, _loadDecisions, _loadLessons, _loadShellFailures, _readFeatureGraph, _scanShellScriptsEncoding, _shellEnvDrift, _computeMilestones, _computeRecentChanges, _computeRoundHistory, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _listAPISkills, _matchAPISkills, _mcpToolCount });
       } catch (e) { out = 'ERR:' + e.message; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
-      try { const j = JSON.parse(out); behavOk = typeof j.healthy === 'boolean' && !!j.checks; } catch {}
+      // memorySurface 가 error 가 아니어야 함(STATUSES 누락 회귀 감지).
+      try { const j = JSON.parse(out); behavOk = typeof j.healthy === 'boolean' && !!j.checks && !!j.memorySurface && !j.memorySurface.error && /^T\d/.test(j.memorySurface.summary || ''); } catch {}
       return expOk && delegated && movedToLib && behavOk;
     } },
     { name: 'UR-0025 큰핸들러 모듈화 7번째: driftCheckCmd → lib/drift.js + DI 위임 + 재귀/동작 (1.9.422)', run: () => {
@@ -17822,7 +17832,7 @@ async function deployAutoCmd(root, service) {
 // 1.9.85: leerness health — 종합 헬스 체크 (drift + 보안 + skill + MCP + 누적)
 const _health = require('../lib/health');
 // 1.9.423 (UR-0025/UR-0125 큰 핸들러 모듈화 8번째): healthCmd → lib/health.js (DI 위임, thin wrapper)
-function healthCmd(root) { return _health.healthCmd(root, { VERSION, has, arg, harnessPath: __filename, listAllSkills, planPath, readProgressRows, readRules, envDiff, _collectSecretFindings, _readUsageStats, _loadDecisions, _loadLessons, _loadShellFailures, _readFeatureGraph, _scanShellScriptsEncoding, _shellEnvDrift, _computeMilestones, _computeRecentChanges, _computeRoundHistory, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _listAPISkills, _matchAPISkills, _mcpToolCount }); }
+function healthCmd(root) { return _health.healthCmd(root, { VERSION, STATUSES, has, arg, harnessPath: __filename, listAllSkills, planPath, readProgressRows, readRules, envDiff, _collectSecretFindings, _readUsageStats, _loadDecisions, _loadLessons, _loadShellFailures, _readFeatureGraph, _scanShellScriptsEncoding, _shellEnvDrift, _computeMilestones, _computeRecentChanges, _computeRoundHistory, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _listAPISkills, _matchAPISkills, _mcpToolCount }); }
 
 function usageStatsCmd(root) {
   root = absRoot(root || process.cwd());
@@ -18006,7 +18016,7 @@ function contractVerifyCmd(specPath, implPath) {
   } else log(`✓ 모든 spec 함수가 impl에 존재`);
   if (fieldMissing.length) {
     log(`✗ 누락된 필드 (${fieldMissing.length}건):`);
-    for (const m of fieldMissing) log(`    - tick.${m}`);
+    for (const m of fieldMissing) log(`    - ${m}`);  // 1.9.426 (10th 외부평가 Opus P3): 레거시 'tick.' 프리픽스 제거 — ## Fields 범용화(1.9.417) 표시 잔재. JSON 은 이미 정상.
   } else log(`✓ 모든 spec 필드가 impl 소스에 존재`);
   const ok = missing.length === 0 && fieldMissing.length === 0;
   log('');
@@ -18821,7 +18831,7 @@ async function main() {
   if (cmd === 'idempotency')                        return idempotencyCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.213: leerness intent <classify|expand|domains> — intent inference + scope expansion (사용자 명시)
   if (cmd === 'intent')                             return intentCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
-  if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
+  if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), _parseAddTitle(args, 2));  // 1.9.426 (10th 외부평가 Sonnet P2): flag/경로 break — 기존 filter 는 경로 + --trigger 값까지 설명에 흡수
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);
   if (cmd === 'rule' && args[1] === 'pause')        return rulePause(arg('--path', process.cwd()), args[2]);

@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.9.426 — 2026-06-07 — 10번째 외부평가: 모듈화 회귀(health) 수정 + contract/rule 일관성 (UR-0128~0131)
+
+**🔍 10번째 외부 멀티모델 리뷰(Codex GPT-5.5 + Claude Sonnet/Opus 4.8, README 미참조 클린룸, 1.9.425)로 6회 모듈화 직후 무결성 독립 검증 — 모듈화 회귀 1건 적발·수정.**
+
+### 배경
+6회 큰 핸들러 추출 직후 코드-위험 0인 독립 리뷰로 회귀 여부 확인. 모든 발견 직접 재현·검증(맹신 X).
+
+### 수정 (확정·저위험)
+- **[P1 모듈화 회귀] health memorySurface 항상 실패**: 1.9.423 health 추출 시 종합 의존 스캔이 **대문자 상수 `STATUSES`를 제외**해 DI 누락 → `health --json` 의 `memorySurface` 가 항상 `{error}`. **Codex·Sonnet 독립 동시 적발**(Opus는 놓침). STATUSES 주입으로 수정. (session-close 1.9.425에서 STATUSES/MARK 교훈을 얻기 전 라운드라 누락됨.)
+- **[P3] contract verify 텍스트 `tick.` 유령 프리픽스**: `## Fields` 범용화(1.9.417) 후에도 누락 필드를 `- tick.createdAt` 로 표기(JSON 은 정상). 레거시 프리픽스 제거.
+- **[P2] rule add 경로/trigger 값 흡수**: `rule add "설명" --trigger X /path` 가 설명에 `X`·`/path` 를 흡수. `_parseAddTitle`(1.9.416) 적용으로 flag/경로 break.
+
+### 회귀가드 강화
+- health selftest 가 **STATUSES 주입 + memorySurface 비-error** 를 검증하도록 강화(리뷰 지적: 기존 selftest 가 이 회귀를 못 잡음).
+
+### 검증 (회귀 0)
+- **selftest 171→172 PASS** · **E2E 425→426 PASS**.
+
+### 3모델 긍정 평가
+데이터무결성·인코딩·시크릿·**동시성(8-way 무손실)**·**DI 모듈 경계**가 동급 대비 견고. P0/P1 데이터손상·크래시 없음. (Opus: "DI 구조 깨끗 + wrapper composition root 견고".)
+
+### 후속 백로그 (UR-0128~0131, 다음 라운드)
+--json 전 경로 순수성(drift --auto-fix/check/plan show/review-request/audit --fix) · contract impl 파서 강화(멀티라인/ESM) · health/audit/drift exit code 정책 · selftest DI 완전성 메타체크 + drift 재귀 depth 가드.
+
 ## 1.9.425 — 2026-06-07 — 무거움 점진 해소 6: sessionClose → lib/session-close.js 모듈화 (UR-0025/UR-0125)
 
 **🪶 `bin/leerness.js` 무거움 점진 해소 6단계 — `session close` 핸들러(599줄, 9 카테고리 보고)를 lib/ 로 DI 분리.**
