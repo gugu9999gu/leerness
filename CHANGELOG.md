@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.448 — 2026-06-08 — export/prompt = adapter 별칭 (GPT-5.5 전략리뷰 §6.6/7.3, UR-0154)
+
+**🔌 GPT-5.5 권고 표면명 정합: `leerness export/prompt --target <agent>`.**
+
+### 변경
+- 신규 `export --target <agent>` / `prompt --target <agent>` — 기존 `adapter <tool>` 의 별칭(도구별 지침/계약 파일 생성: claude/cursor/codex/copilot/goose). `--target` 플래그 또는 positional 모두 지원, 미지정 시 list.
+- `agents-md`/`agents`/`agent` → `codex`(AGENTS.md 생성) 별칭 매핑 — GPT-5.5 가 권고한 `export --target agents-md` 가 그대로 동작.
+- GPT-5.5 전략리뷰가 권고한 명령 표면명(`export`/`prompt --target`)을 기존 adapter 위에 제공 → 외부 사용자 발견성↑.
+
+### 검증 (회귀 0)
+- **selftest 192→193** (와이어), 행위 재현: `export --target claude`→CLAUDE.md, `export --target agents-md`→AGENTS.md.
+- patch(1.9.448, 같은 minor) — R-0011 정책상 npm 미배포, GitHub 만 갱신.
+
+### 보류 메모
+- UR-0146(init --json 순수화): init=install 큰 핸들러의 다중 log(~15) quiet-mode 게이팅 필요 — P3 대비 침투적이라 quiet-mode 리팩터 라운드로 보류. audit --fix --json 의 fixApplied(=fix모드)/fixed(=카운트)는 의미상 일관(by-design).
+
 ## 1.9.447 — 2026-06-08 — plan progress 읽기전용 요약 명확화 (12th 외부평가 Codex P3, UR-0145)
 
 **🐛 명령명-동작 불일치 해소: `plan progress` 가 인자를 silent ignore 하던 문제.**

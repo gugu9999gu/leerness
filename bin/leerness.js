@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.447';
+const VERSION = '1.9.448';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3390,6 +3390,14 @@ function _selfTestCases() {
       const intentWarn = src.includes('if (opts.updateIntent) warn(') && src.includes("updateIntent: args.slice(2).some(a => /^M-\\d/i.test(a)) || has('--status') || arg('--progress', null) != null");
       return richer && jsonOut && intentWarn;
     } },
+    { name: 'GPT-5.5 전략리뷰 §6.6 (UR-0154): export/prompt = adapter 별칭 (--target + agents-md→codex) (1.9.448)', run: () => {
+      const src = read(__filename);
+      const wired = src.includes("if (cmd === 'export' || cmd === 'prompt') {")
+        && src.includes("arg('--target', null)")
+        && src.includes("'agents-md': 'codex'")
+        && src.includes('return adapterCmd(arg(\'--path\', process.cwd()), _xTool);');
+      return wired;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3969,6 +3977,7 @@ function commandsCmd(root) {
       { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278' },
       { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280' },
       { cmd: 'ci init [path] [--force]', desc: 'PR 마다 leerness gate 실행하는 GitHub Actions 워크플로 생성 (.github/workflows/leerness-gate.yml) — 1.9.444' },
+      { cmd: 'export|prompt --target <agent>', desc: 'adapter 별칭 — 도구별 지침/계약 파일 생성 (claude/cursor/codex/agents-md/...) — 1.9.448' },
       { cmd: 'policy show|set|check', desc: '권한 등급 (read-only…publish) — opt-in enforced (위험 명령 차단) — 1.9.281' },
       { cmd: 'reuse-check "<기능>"', desc: '외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인 카테고리+체크리스트) — 1.9.285' },
       { cmd: 'skill impact', desc: '스킬 설치 영향 경량 상관추적 (사용 빈도 ↔ 검증 통과율, advisory) — 1.9.286' },
@@ -19088,6 +19097,13 @@ async function main() {
     const _aTool = args[1] && !args[1].startsWith('-') ? args[1] : 'list';
     const _aRoot = (args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd());
     return adapterCmd(_aRoot, _aTool);
+  }
+  // 1.9.448 (GPT-5.5 전략리뷰 §6.6/7.3, UR-0154): export/prompt = adapter 별칭 — GPT-5.5 권고 표면명 정합(도구별 지침/계약 파일 생성).
+  if (cmd === 'export' || cmd === 'prompt') {
+    const _ADAPTER_ALIAS = { 'agents-md': 'codex', 'agents': 'codex', 'agent': 'codex', 'agents.md': 'codex' };
+    let _xTool = arg('--target', null) || (args[1] && !args[1].startsWith('-') ? args[1] : 'list');
+    _xTool = _ADAPTER_ALIAS[String(_xTool).toLowerCase()] || _xTool;
+    return adapterCmd(arg('--path', process.cwd()), _xTool);
   }
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
