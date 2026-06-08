@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.10.1 — 2026-06-08 — 시크릿 스캐너 AWS …EXAMPLE 키 오탐 수정 (12th 외부평가 Opus P3, UR-0144)
+
+**🔒 AWS 공식 예제키(AKIA…EXAMPLE) 오탐 차단 — 실키 FN 정책은 보존.**
+
+### 변경
+- `_isPlaceholderSecret`: 값이 **'example' 로 끝나면(접미사)** placeholder 로 판정 — AWS 문서 표준 예제키 `AKIAIOSFODNN7EXAMPLE` 등 오탐(FP) 차단.
+- **중간에 'example' 이 있는 실키**(`sk-EXAMPLEab12…`, `sk-proj-realKEYexample…`)는 접미사가 아니라 미해당 → 실키-FN 정책(UR-0105) 보존. 실키가 'example' 로 끝날 확률 0.
+- 직전 시도(1.9.440)에서 'example' 통째 매칭이 FN 정책과 충돌해 보류했던 것을 접미사 한정으로 정밀 해결.
+
+### 함께 종결 (코드 변경 없음)
+- **UR-0142** intent classify 항상 default → **by-design**: intent classify 는 precise/broad scope 분류이며 default 는 scope 신호 없는 입력의 정상 중립 결과(맹신 X 직접 재현: "정확히"→precise, "전체 다양한"→broad). 리뷰의 task-type 기대는 오해.
+
+### 검증 (회귀 0)
+- **selftest 194→195** (AWS EXAMPLE placeholder + 중간 example 실키 real + 진짜키 탐지), 기존 FN 정책 셀프테스트(UR-0106/0109) 유지.
+- patch(1.10.1, 같은 minor) — R-0011 정책상 npm 미배포, GitHub 만 갱신.
+
 ## 1.10.0 — 2026-06-08 — 🛡️ [안정화/Stable] 1.10 안정 minor (배포 정책 첫 minor 릴리스)
 
 **🛡️ 안정화(Stable) minor — patch 누적(1.9.446~449)을 검증·통합해 npm 에 안정 버전으로 공개.** R-0011 배포 정책(patch 는 누적, minor 만 npm 공개)의 첫 minor 릴리스.
