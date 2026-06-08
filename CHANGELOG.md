@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.12.0 — 2026-06-08 — 🛡️ [안정화/Stable] 핵심가치(증거-우선 완료) 복원 + 용어집 안정 minor
+
+**🛡️ 안정화(Stable) minor. 헤드라인 = verify-claim 기본 모드가 허위완료를 차단하도록 복원(동작 변경).** 14번째 멀티에이전트 버그헌트 성과(1.11.1~1.11.4)를 검증·통합해 npm 공개. R-0011 정책의 3번째 minor.
+
+### ⚠️ 동작 변경 (중요)
+- **`verify-claim` 기본 모드가 done 주장의 evidence↔코드 일치(optimism)를 게이팅**합니다(이전엔 `--strict-claims` 옵트인). 거짓 코드+빈 테스트로 "완료" 선언 시 **exit 1**로 차단. 정상 코드는 통과(오탐 없음). 기존의 느슨한 동작이 필요하면 **`--lenient`**.
+
+### 이번 minor 통합 (1.11.1~1.11.4)
+- **🔴 verify-claim 허위완료 차단** (UR-0175): 기본 모드 fail-open 수정 — leerness 정체성("증거 없으면 완료 불가") 복원. optimism 전체 프로젝트 스캔 + `--json` claimsConsistent/gitCrossCheck 노출 + `--lenient` 탈출.
+- **📖 leerness glossary** (UR-0007): 의존성 용어집 — package.json/requirements 라이브러리를 비개발자용 한 줄 설명(한/영)으로. 큐레이션 카탈로그(~40) + node_modules fallback + AI 보완 프롬프트. 외부 3-에이전트 평가 설계.
+- **데이터 무결성** (UR-0176/0177): nextId 라인앵커(셀 토큰 오인 행손실 차단) + feature-graph 노드 위조 차단.
+- **일관성/무결성** (UR-0178/0179/0180): completed/verified→done 집계 정규화 + rule archive 셀 안전화 + rule ID 재사용 방지.
+
+### 검증 (회귀 0)
+- **selftest 206 PASS** · **E2E 365/365 PASS** · npm gate=minor_bump. 허위완료→exit 1, 정상완료→exit 0, glossary 5/5.
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag annotation (Stable) · GitHub release (Stable) · npm dist-tag `stable` 시도.
+
 ## 1.11.4 — 2026-06-08 — 📖 leerness glossary: 의존성 용어집 (UR-0007, 외부 3-에이전트 평가 설계)
 
 **🙂 바이브 코딩 지원 — 프로젝트가 쓰는 라이브러리를 비개발자도 알 수 있게 한 줄로.**
