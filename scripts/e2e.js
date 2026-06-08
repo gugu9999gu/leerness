@@ -37,7 +37,7 @@ run('scan secrets',        ['scan', 'secrets', tmp]);
 run('encoding check',      ['encoding', 'check', tmp]);
 
 const secretFile = path.join(tmp, 'fake-config.json');
-fs.writeFileSync(secretFile, JSON.stringify({ openai: 'sk-' + 'A'.repeat(48) }));
+fs.writeFileSync(secretFile, JSON.stringify({ openai: 'sk-' + 'a1B2'.repeat(12) }));
 run('scan secrets (detect)', ['scan', 'secrets', tmp], { expectFail: true });
 fs.unlinkSync(secretFile);
 
@@ -2695,7 +2695,7 @@ total++;
 total++;
 {
   fs.mkdirSync(path.join(tmp, '_devspace'), { recursive: true });
-  fs.writeFileSync(path.join(tmp, '_devspace/secret-config.js'), `const k = "ghp_${'a'.repeat(36)}";\n`);
+  fs.writeFileSync(path.join(tmp, '_devspace/secret-config.js'), `const k = "ghp_${'a1B2'.repeat(9)}";\n`);
   fs.writeFileSync(path.join(tmp, '.leerness-skip-dirs'), '_devspace/\n# 주석은 무시\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', tmp], { encoding: 'utf8' });
   const ok = r.status === 0 && /no obvious secret patterns/.test(r.stdout);
@@ -3650,7 +3650,7 @@ total++;
   let ok = false;
   try {
     const sd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-secmod-'));
-    const A = 'A'.repeat(40);
+    const A = 'a1B2'.repeat(10);
     const lines = [
       'const a = "' + 'sk-' + 'proj-' + A + '_' + A + '";',          // modern OpenAI project (기존 패턴 놓침)
       'const b = "' + 'sk-' + 'ant-api03-' + A + '_' + A + '";',     // Anthropic api03 (언더스코어 — 기존 놓침)
@@ -4434,7 +4434,7 @@ total++;
   let ok = false;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
-    const A = 'A'.repeat(40);
+    const A = 'a1B2'.repeat(10);
     const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); });
     const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 20
       && hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";');
@@ -4634,7 +4634,7 @@ total++;
     fs.rmSync(skf, { recursive: true, force: true });
     // UR-0060: 사용자 harness.js 파일도 스캔(false-neg 제거) + 신규 GitLab 패턴 탐지
     const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-scan-'));
-    fs.writeFileSync(path.join(ud, 'harness.js'), 'const k = "glpat-' + 'x'.repeat(20) + '";\n');
+    fs.writeFileSync(path.join(ud, 'harness.js'), 'const k = "glpat-' + 'a1B2'.repeat(5) + '";\n');
     const scr = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', ud], { encoding: 'utf8', timeout: 20000 });
     const scanOk = /GitLab PAT/.test((scr.stdout || '') + (scr.stderr || ''));
     fs.rmSync(ud, { recursive: true, force: true });
@@ -4736,7 +4736,7 @@ total++;
     // scan secrets <file> (이전 ENOTDIR) + basename 표시
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-p3-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    fs.writeFileSync(path.join(d, 'leak.js'), 'const k = "glpat-' + 'x'.repeat(20) + '";\n');
+    fs.writeFileSync(path.join(d, 'leak.js'), 'const k = "glpat-' + 'a1B2'.repeat(5) + '";\n');
     const fr = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', path.join(d, 'leak.js')], { encoding: 'utf8', timeout: 20000 });
     const fout = (fr.stdout || '') + (fr.stderr || '');
     const fileScanOk = /GitLab PAT/.test(fout) && /leak\.js/.test(fout) && !/ENOTDIR/.test(fout);
@@ -6088,6 +6088,26 @@ total++;
     ok = pure;
   } catch {}
   console.log(ok ? '✓ B(1.9.439) UR-0135: drift --auto-fix --json 순수 JSON(dirty WS 진행로그 억제)' : '✗ drift --auto-fix --json 비순수');
+  if (!ok) failed++;
+}
+
+// 1.9.440 (12th 외부평가 Opus P2): 시크릿 스캐너 prefix 패턴(AWS/GitHub)도 placeholder 가드 — .env.example 더미는 미탐, 진짜는 탐지.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-scanph-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // 더미 prefix 토큰(.env.example, gitignore 대상 아님) → 미탐(exit 0)
+    fs.writeFileSync(path.join(d, '.env.example'), 'AWS_KEY=AKIA' + 'X'.repeat(16) + '\nGH=ghp_' + 'X'.repeat(36) + '\n');
+    const dummy = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d], { encoding: 'utf8', timeout: 20000 });
+    // 진짜 AWS 키(AKIA+16 랜덤) → 탐지(exit 1)
+    fs.writeFileSync(path.join(d, 'real.js'), 'const k="AKIAJQXMP7RZ2KL9WXYZ";');
+    const real = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d], { encoding: 'utf8', timeout: 20000 });
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = dummy.status === 0 && real.status === 1;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.440) UR-0140: 시크릿 스캐너 prefix 더미 미탐 + 진짜 탐지(placeholder 가드 통합)' : '✗ 시크릿 스캐너 prefix 가드 실패');
   if (!ok) failed++;
 }
 

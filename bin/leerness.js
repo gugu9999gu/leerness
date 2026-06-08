@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.439';
+const VERSION = '1.9.440';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3297,6 +3297,15 @@ function _selfTestCases() {
       const usesAfLog = (modSrc.match(/afLog\(/g) || []).length >= 10;  // auto-fix 진행로그 다수 afLog 화
       const jsonStillLog = modSrc.includes('log(JSON.stringify({ root, score');  // 최종 JSON 출력은 log 유지
       return afLogDef && usesAfLog && jsonStillLog;
+    } },
+    { name: '12th 외부평가 Opus P2 (UR-0140 stab): 시크릿 스캐너 prefix 패턴도 placeholder 가드 적용 (1.9.440)', run: () => {
+      const src = read(__filename);
+      // 스캐너가 valueGroup 없을 때 m[0] 로 placeholder 판정(prefix 패턴 가드)
+      const wired = src.includes('const val = (valueGroup != null) ? m[valueGroup] : m[0];') && src.includes('if (_isPlaceholderSecret(val)) {');
+      // 행위: prefix 8연속 더미는 placeholder, 진짜(고엔트로피)는 real (FN 정책 유지 — 'example' 포함 실키는 real)
+      const m = require('../lib/pure-utils');
+      const behav = m._isPlaceholderSecret('AKIA' + 'X'.repeat(16)) === true && m._isPlaceholderSecret('AKIAJQXMP7RZ2KL9WXYZ') === false && m._isPlaceholderSecret('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false;
+      return wired && behav;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -7123,11 +7132,11 @@ function _collectSecretFindings(root) {
       let m;
       while ((m = re.exec(text))) {
         // 1.9.365 (CV-6/UR-0081): placeholder/예시 값 스킵.
-        if (valueGroup != null) {
-          const val = m[valueGroup];
-          if (_isPlaceholderSecret(val)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
-          if (requireSecretLike && !_looksSecretLike(val)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
-        }
+        // 1.9.440 (12th 외부평가 Opus P2): prefix 패턴(valueGroup 없음, AWS/GitHub 등 19종)도 placeholder 가드 적용 —
+        //   기존엔 valueGroup 있는 2패턴만 가드 → .env.example 의 더미 토큰(AKIAXXXX…/ghp_XXXX…)이 커밋 시크릿 오탐(CI 파손). 전체 매치(m[0])로 판정.
+        const val = (valueGroup != null) ? m[valueGroup] : m[0];
+        if (_isPlaceholderSecret(val)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
+        if (valueGroup != null && requireSecretLike && !_looksSecretLike(val)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
         const line = text.slice(0, m.index).split('\n').length;
         findings.push({ file: fileRel, line, name, snippet: m[0].slice(0, 32), gitignored });
         break;

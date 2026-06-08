@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.440 — 2026-06-08 — 🛡️ [안정화/Stable] 시크릿 스캐너 prefix 패턴 placeholder 가드 (12th 외부평가 Opus P2, UR-0140)
+
+**🛡️ 안정화 릴리스(Stable) — 보안 스캐너 False-Positive 가 CI 를 깨던 문제 수정.**
+
+### 변경 (12th 외부 멀티모델 리뷰 Opus P2)
+- **`scan secrets`/`gate`/`audit` 시크릿 스캐너**: placeholder 가드(`_isPlaceholderSecret`)가 `valueGroup` 있는 2개 패턴에만 적용돼, **AWS/GitHub 등 19개 prefix 패턴은 가드를 우회**(1.9.436 픽스가 그들에겐 dead code). → `.env.example`(placeholder 전용, gitignore 대상 아님)의 더미 토큰(`AKIAXXXX…`/`ghp_XXXX…`)이 커밋 시크릿으로 오탐 → `scan/gate/audit` 실패(exit 1) → CI 파손.
+- **수정**: `valueGroup` 없으면 전체 매치(`m[0]`)로 placeholder 판정 — 19 prefix 패턴도 8연속 더미/마커 가드 적용. `requireSecretLike` 는 valueGroup 한정 유지. **진짜 키(고엔트로피)는 그대로 탐지**(회귀 0), `sk-EXAMPLE…` 류 실키-FN 정책도 유지.
+- 통합 갭 방지: selftest 가 순수 함수만이 아닌 **스캐너 경로**도 검증(Opus 지적), E2E B(1.9.440) 추가(.env.example 더미 미탐 + 진짜 탐지).
+
+### 검증 (회귀 0)
+- **selftest 184→185** + **E2E 신규 B(1.9.440)**: 더미 prefix 토큰 미탐(exit 0) + 진짜 AWS 키 탐지(exit 1) + sk-EXAMPLE 실키 유지.
+- 맹신 X: 내 1.9.436 의 불완전성(prefix 패턴 미적용)을 12th 리뷰가 적발, 직접 재현·수정. P3(AWS …EXAMPLE 키 FP)는 기존 FN 정책 충돌로 UR-0144 분리.
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag/GitHub release (Stable) · npm dist-tag `stable`.
+
 ## 1.9.439 — 2026-06-08 — drift --auto-fix --json 순수성 (10th 외부평가 Codex P1, UR-0135 완결)
 
 **📐 `drift check --auto-fix --json` 이 dirty 워크스페이스에서 진행로그를 stdout 에 섞던 비-순수 JSON 해소.**
