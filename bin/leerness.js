@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.12.0';
+const VERSION = '1.12.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3362,9 +3362,10 @@ function _selfTestCases() {
     } },
     { name: 'UR-0151: decision/lesson/rule add positional path 지원(_taskPositionalPath 재사용, cwd 오염 차단) (1.9.445)', run: () => {
       const src = read(__filename);
+      // 1.12.1 (UR-0008): 멀티라인 exact-string includes 는 공백/줄바꿈/환경에 취약(클린룸 selftest false-alarm) → 공백 유연 정규식(\s+)으로 견고화.
       const rule = src.includes("ruleAdd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), _parseAddTitle(args, 2))");
-      const lesson = src.includes("if (cmd === 'lesson') {\n    const root = absRoot(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());");
-      const decision = src.includes("if (cmd === 'decision') {\n    const root = absRoot(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());");
+      const lesson = /if \(cmd === 'lesson'\) \{\s+const root = absRoot\(arg\('--path', null\) \|\| _taskPositionalPath\(args, 2\) \|\| process\.cwd\(\)\)/.test(src);
+      const decision = /if \(cmd === 'decision'\) \{\s+const root = absRoot\(arg\('--path', null\) \|\| _taskPositionalPath\(args, 2\) \|\| process\.cwd\(\)\)/.test(src);
       // rule add 의 --trigger 값은 경로 아님(path-like 아님) + 값-플래그 제외
       const m = require('../lib/pure-utils');
       const trig = m._taskPositionalPath(['rule', 'add', '룰', '--trigger', 'every-update', '/p'], 2) === '/p'
