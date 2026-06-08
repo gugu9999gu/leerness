@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.10.0 — 2026-06-08 — 🛡️ [안정화/Stable] 1.10 안정 minor (배포 정책 첫 minor 릴리스)
+
+**🛡️ 안정화(Stable) minor — patch 누적(1.9.446~449)을 검증·통합해 npm 에 안정 버전으로 공개.** R-0011 배포 정책(patch 는 누적, minor 만 npm 공개)의 첫 minor 릴리스.
+
+### 이번 minor 에 담긴 개선 (1.9.446~449, 그동안 GitHub 에만 누적)
+- **npm 배포 minor-gate** (UR-0160): patch 는 npm 미배포, minor/major 변동 시에만 안정 배포. `release sync-main . --publish-npm` 강제 옵션.
+- **plan progress 읽기전용 요약** (UR-0145): 완료율% + 상태별 + `--json` + 변경의도 인자 경고(silent ignore 제거).
+- **export/prompt = adapter 별칭** (UR-0154, GPT-5.5 §6.6): `export --target claude|cursor|codex|agents-md`.
+- **plan drop 역할 분리** (UR-0143): scope 드랍을 plan.md(Out of Scope)에만 기록, progress-tracker phantom task 제거.
+
+### 직전 안정(1.9.x)부터의 핵심 (참고)
+- evidence-first 완료 게이트 `completion_claim_allowed` (UR-0153, GPT-5.5 §6.3), CI/PR 턴키 `ci init` (UR-0152, §6.7), task/add-family positional path (UR-0141/0151), 시크릿 스캐너 prefix placeholder 가드(12th 리뷰 Opus P2), README ASCII 배너.
+
+### 검증 (회귀 0)
+- **selftest 194 PASS** · **E2E 365/365 PASS** · npm gate=minor_bump(배포) 확인.
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag annotation (Stable) · GitHub release (Stable) · npm dist-tag `stable` 시도.
+
 ## 1.9.449 — 2026-06-08 — plan drop: progress-tracker T- 행 미생성 (12th 외부평가 Sonnet P3, UR-0143)
 
 **🐛 plan↔progress 역할 분리: scope 드랍이 phantom task 를 만들던 문제.**

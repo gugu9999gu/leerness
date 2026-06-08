@@ -1457,7 +1457,7 @@ total++;
   const r = cp.spawnSync(process.execPath, [CLI, 'migrate', tmpC, '--yes', '--no-banner', '--no-stale-check'], { encoding: 'utf8', timeout: 60000 });
   const ok = r.status === 0
     && /AI must re-read/.test(r.stdout)
-    && /1\.9\.36 → 1\.9\.\d+/.test(r.stdout)
+    && /1\.9\.36 → \d+\.\d+\.\d+/.test(r.stdout)
     && /신규 명령/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.41) migrate stdout: AI must re-read 차분 자동 출력' : `✗ migrate 차분 출력 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(-800)); }
@@ -1902,7 +1902,7 @@ total++;
     && /███████╗/.test(r.stdout)
     && /verify · remember/.test(r.stdout)
     && /AI 에이전트 검수.기억.드리프트 방지 하네스/.test(r.stdout)
-    && /v1\.9\.\d+/.test(r.stdout);
+    && /v\d+\.\d+\.\d+/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.34) 배너 색상 + ASCII + 한국어' : `✗ 배너 색상 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
