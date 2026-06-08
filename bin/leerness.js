@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.448';
+const VERSION = '1.9.449';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3398,6 +3398,13 @@ function _selfTestCases() {
         && src.includes('return adapterCmd(arg(\'--path\', process.cwd()), _xTool);');
       return wired;
     } },
+    { name: '12th 외부평가 Sonnet P3 (UR-0143): plan drop 은 plan.md(D-)만 기록, progress-tracker T- 행 미생성 (1.9.449)', run: () => {
+      const src = read(__filename);
+      // planDrop 에서 upsertProgress(dropped task) 제거 + ok 메시지가 plan.md 가리킴
+      const noTaskRow = !/function planDrop[\s\S]*?upsertProgress\(root, \{ id: tid, status: 'dropped'/.test(src);
+      const dropsToPlan = src.includes("ok(`plan dropped: ${id} → .harness/plan.md (Out of Scope / Dropped)`);");
+      return noTaskRow && dropsToPlan;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6354,9 +6361,9 @@ function planDrop(root, text) {
   } else {
     append(planFile, `\n${droppedHeader}\n| ID | Item | Reason | Date |\n|---|---|---|---|\n| ${id} | ${text} | ${reason} | ${today()} |\n`);
   }
-  const tid = nextId(root, 'T');
-  upsertProgress(root, { id: tid, status: 'dropped', request: text, evidence: `drop:${reason}`, nextAction: '없음' });
-  ok(`plan dropped: ${id} → progress: ${tid}`);
+  // 1.9.449 (12th 외부평가 Sonnet P3, UR-0143): progress-tracker 에 dropped task(T-) 행 생성 제거 — plan drop 은 plan.md "Out of Scope / Dropped"(D-) 에만 기록.
+  //   기존엔 scope 드랍이 phantom T- task 로도 생겨 plan↔progress 역할 혼선 + task list 노이즈. 드랍 기록의 단일 출처 = plan.md.
+  ok(`plan dropped: ${id} → .harness/plan.md (Out of Scope / Dropped)`);
 }
 function planProgress(root, opts = {}) {
   // 1.9.447 (12th 외부평가 Codex P3, UR-0145): 읽기 전용 진행 요약 — 완료율%+상태별+마일스톤 수. --json 지원.

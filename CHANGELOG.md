@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.449 — 2026-06-08 — plan drop: progress-tracker T- 행 미생성 (12th 외부평가 Sonnet P3, UR-0143)
+
+**🐛 plan↔progress 역할 분리: scope 드랍이 phantom task 를 만들던 문제.**
+
+### 변경
+- `plan drop` 이 progress-tracker 에 `dropped` 상태의 `T-` task 행을 만들던 동작 제거 — 이제 plan.md `## Out of Scope / Dropped`(D-) 에만 기록. scope 드랍의 단일 출처 = plan.md.
+- 기존엔 scope 드랍 1건이 plan.md D- + progress-tracker T- 양쪽에 생겨 plan↔progress 역할 혼선 + `task list` 노이즈(실제 작업 아닌 phantom T-) 발생.
+
+### 검증 (회귀 0)
+- **selftest 193→194** (planDrop 에 dropped-task upsert 없음 + ok 메시지가 plan.md 가리킴), 행위 재현: plan drop → D-0001 기록 + progress T- 행 미증가.
+- patch(1.9.449, 같은 minor) — R-0011 정책상 npm 미배포, GitHub 만 갱신.
+
 ## 1.9.448 — 2026-06-08 — export/prompt = adapter 별칭 (GPT-5.5 전략리뷰 §6.6/7.3, UR-0154)
 
 **🔌 GPT-5.5 권고 표면명 정합: `leerness export/prompt --target <agent>`.**
