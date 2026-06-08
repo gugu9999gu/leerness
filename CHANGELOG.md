@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.11.0 — 2026-06-08 — 🛡️ [안정화/Stable] CLI 견고성 + --json 에이전트 계약 안정 minor
+
+**🛡️ 안정화(Stable) minor — 13번째 멀티에이전트 버그헌트로 발견·수정한 patch(1.10.1~1.10.5)를 검증·통합해 npm 에 안정 공개.** R-0011 배포 정책의 2번째 minor 릴리스.
+
+### 이번 minor 에 담긴 개선 (1.10.1~1.10.5, 그동안 GitHub 에만 누적)
+- **시크릿 스캐너 정밀화** (UR-0144): AWS 공식 예제키 `AKIA…EXAMPLE`(접미사) 오탐 차단, 중간 example 실키는 보존(FN 정책 유지).
+- **--json 에이전트 계약 하드닝** (UR-0146/0173/0174): `init --json` 순수 JSON(배너/진행바/대화 메뉴 억제, io quiet 모드) + `scan secrets`/`encoding check`/`lazy detect`/`deps` 잘못된 경로 구조화 에러(`failJson`, exit 1).
+- **정직성·견고성** (UR-0167): `session close <파일>` 가 실패를 성공(exit 0)으로 오판하던 문제 → 구조화 에러 + exit 1.
+- **CLI 인자 견고성** (UR-0169): `arg()` 가 값 없이 끝나면 `true` 누출 / 다음 `--flag` 흡수하던 문제 → def 반환(음수값 보존).
+- **표·출력 안전화** (UR-0170/0168/0171): plan drop 표셀 `_cellSafe`, handoff --json 배너 억제, env encoding-check positional 디렉토리 존중.
+
+### 검증 (회귀 0)
+- **selftest 201 PASS** · **E2E 365/365 PASS** · npm gate=minor_bump(배포) 확인. 13번째 버그헌트 8건 중 7건 수정 + 2건 by-design(UR-0142 intent classify, audit --fix).
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag annotation (Stable) · GitHub release (Stable) · npm dist-tag `stable` 시도.
+
 ## 1.10.5 — 2026-06-08 — arg() 플래그 흡수 방지 + handoff --json 배너 억제 (13th 버그헌트 잔여, UR-0168/0169)
 
 **🧰 CLI 인자 견고성 + --json 순수성 마무리.**
