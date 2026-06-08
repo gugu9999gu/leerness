@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.11.2';
+const VERSION = '1.11.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3497,6 +3497,14 @@ function _selfTestCases() {
       const gitAdvisory = src.includes("const gitClaimOk = !(has('--strict-claims') && gitStrongMismatch);");
       return defaultGate && jsonExposed && jsonGate && overall && wholeScan && gitAdvisory;
     } },
+    { name: '14th 버그헌트 P2 (UR-0178/0179/0180): completed→done 정규화 + rule archive _cellSafe + nextRuleId 아카이브 스캔 (1.11.3)', run: () => {
+      if (_normTaskStatus('completed') !== 'done' || _normTaskStatus('verified') !== 'done' || _normTaskStatus('in-progress') !== 'in-progress') return false;
+      const src = read(__filename);
+      const norm = src.includes("patch.status = _normTaskStatus(arg('--status'))") && src.includes("status: _normTaskStatus(arg('--status','requested'))");
+      const archEsc = src.includes('${_cellSafe(removed.rule)}') && src.includes('${_cellSafe(removed.trigger)}');
+      const ridArch = /function nextRuleId[\s\S]*?rulesArchivePath\(root\)[\s\S]*?R-\(\\d\+\)/.test(src);
+      return norm && archEsc && ridArch;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6552,6 +6560,8 @@ function taskList(root) {
 // 1.9.310 (UR-0046, 설치리뷰 3중수렴): CLI/MCP 입력 스키마 검증 — 무효 status/trigger 거부(--force 우회).
 //   이전: task --status nonsense / rule --trigger 오타가 그대로 등록돼 상태/정책 신뢰성 훼손.
 const TASK_STATUSES = new Set(['requested', 'planned', 'in-progress', 'waiting', 'on-hold', 'blocked', 'incomplete', 'done', 'dropped', 'completed', 'verified']);
+// 1.11.3 (14th 버그헌트 P2, UR-0178): TASK_STATUSES 는 completed/verified 를 입력으로 수락하지만 STATUSES(집계/버킷 단일출처)엔 없어 total 엔 있고 buckets/done% 엔 누락됐음(lazy-detect/idempotency 는 이미 done 취급 — 내부 불일치). 저장 시 canonical 'done' 으로 정규화 → 모든 집계 일관.
+function _normTaskStatus(s) { return (s === 'completed' || s === 'verified') ? 'done' : s; }
 const RULE_TRIGGERS = new Set(['every-session', 'every-update', 'every-commit', 'every-round', 'session-start', 'session-close', 'pre-publish']);
 function _validateChoice(value, validSet, label) {
   if (value == null || validSet.has(String(value)) || has('--force')) return true;
@@ -6609,11 +6619,11 @@ function taskAdd(root, text) {
   // 1.9.303 (UR-0043): ID 할당 + write 를 하나의 락으로 — 동시 task add 의 ID 충돌(lost-update) 방지.
   const id = _withLock(progressPath(root), () => {
     const newId = nextId(root, 'T');
-    upsertProgress(root, { id: newId, status: arg('--status','requested'), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next','다음 액션 작성') });
+    upsertProgress(root, { id: newId, status: _normTaskStatus(arg('--status','requested')), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next','다음 액션 작성') });
     return newId;
   });
   // 1.9.413 (6th외부평가 codex P2, UR-0101): --json 시 구조화 출력(코어 데이터는 이미 영속). 사람용 ok + cosmetic roadmap/interactive review 는 스킵.
-  if (has('--json')) { log(JSON.stringify({ ok: true, id, status: arg('--status', 'requested'), request: text })); return; }
+  if (has('--json')) { log(JSON.stringify({ ok: true, id, status: _normTaskStatus(arg('--status', 'requested')), request: text })); return; }
   ok(`task added: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
   // 1.9.177: task add 자동 review-request trigger (사용자 명시 1.9.176 자동화).
@@ -6660,7 +6670,7 @@ function taskUpdate(root, id) {
   const rows = readProgressRows(root);
   if (!rows.find(r => r.id === id)) { fail(`task ${id} not found in progress-tracker.md`); return; }
   const patch = { id };
-  if (arg('--status') !== null) patch.status = arg('--status');
+  if (arg('--status') !== null) patch.status = _normTaskStatus(arg('--status'));  // 1.11.3 (UR-0178): completed/verified → done 정규화
   if (arg('--evidence') !== null) patch.evidence = arg('--evidence');
   if (arg('--next') !== null) patch.nextAction = arg('--next');
   if (arg('--note')) patch.request = arg('--note');
@@ -12828,6 +12838,13 @@ function nextRuleId(root) {
     const m = r.id.match(/^R-(\d{4})$/);
     if (m) max = Math.max(max, Number(m[1]));
   }
+  // 1.11.3 (14th 버그헌트 P2, UR-0180): 아카이브의 R-id 도 카운트 — 기존엔 활성 rules 만 스캔해 rule remove 후 같은 R-id 가 다른 룰에 재사용됐음(아카이브 ID 충돌).
+  try {
+    if (exists(rulesArchivePath(root))) {
+      const re = /(?:^|\n)\|\s*R-(\d+)\s*\|/g; const arch = read(rulesArchivePath(root)); let m;
+      while ((m = re.exec(arch))) max = Math.max(max, Number(m[1]));
+    }
+  } catch {}
   return `R-${String(max + 1).padStart(4, '0')}`;
 }
 
@@ -12882,7 +12899,8 @@ function ruleRemove(root, id) {
   const removed = rules.splice(i, 1)[0];
   writeRules(root, rules);
   const archive = exists(rulesArchivePath(root)) ? read(rulesArchivePath(root)) : '# Rules archive\n\n| ID | Trigger | Rule | Added | Status | Removed |\n|---|---|---|---|---|---|\n';
-  writeUtf8(rulesArchivePath(root), archive + `| ${removed.id} | ${removed.trigger} | ${removed.rule} | ${removed.added} | removed | ${today()} |\n`);
+  // 1.11.3 (14th 버그헌트 P2, UR-0179): 아카이브 셀도 _cellSafe — 기존엔 removed.rule/trigger 를 raw 기록해 파이프(|) 포함 룰이 아카이브 표를 깨뜨렸음(rules.md 는 이미 _cellSafe 적용).
+  writeUtf8(rulesArchivePath(root), archive + `| ${_cellSafe(removed.id)} | ${_cellSafe(removed.trigger)} | ${_cellSafe(removed.rule)} | ${_cellSafe(removed.added)} | removed | ${today()} |\n`);
   ok(`rule removed: ${id} (보존: .harness/rules.archive.md)`);
 }
 

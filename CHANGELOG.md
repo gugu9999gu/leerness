@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.11.3 — 2026-06-08 — 14th 버그헌트 데이터 일관성 P2 클러스터 (UR-0178/0179/0180)
+
+**🐛 task 집계 일관성 + rule 아카이브 무결성 + ID 재사용 방지.**
+
+### 변경
+- **completed/verified 집계 정규화** (UR-0178): `task --status completed|verified` 가 TASK_STATUSES(입력 수락)엔 있으나 STATUSES(집계/버킷 단일출처)엔 없어 total 엔 잡히고 buckets/done% 엔 누락(lazy-detect/idempotency 는 이미 done 취급 — 내부 불일치)됐음 → 저장 시 canonical `done` 으로 정규화(`_normTaskStatus`). 모든 집계 일관.
+- **rule 아카이브 셀 안전화** (UR-0179): `rule remove` 가 `rules.archive.md` 에 trigger/rule 을 raw 기록 → 파이프(`|`) 포함 룰이 아카이브 표를 깨뜨렸음(rules.md 는 이미 `_cellSafe`) → 아카이브에도 `_cellSafe`.
+- **rule ID 재사용 방지** (UR-0180): `nextRuleId` 가 활성 rules 만 스캔 → `rule remove` 후 같은 R-id 가 다른 룰에 재발급(아카이브 ID 충돌)됐음 → 아카이브의 R-id 도 카운트.
+
+### 검증 (회귀 0)
+- **selftest 204→205**, 행위 재현: `--status completed`→저장 `done`+plan progress 집계 일치, rule remove 파이프→아카이브 `\|` escape, rule remove 후 재추가→R-0002(재사용 X).
+- patch(1.11.3, 같은 minor) — R-0011 정책상 npm 미배포.
+
+### 비고 (정직)
+- stray 테스트 커밋 복구(1.11.2) 과정의 `reset --hard` 가 repo 자체 `.harness/user-requests.json`(한 번도 커밋 안 된 누적 working state)을 비웠음. UR 정본은 CHANGELOG+git 커밋이라 비치명적. 14th 잔여(MCP path/lazy TODO/session close 정직성)는 백로그 유지.
+
 ## 1.11.2 — 2026-06-08 — 🔴 핵심가치: verify-claim 기본 모드 허위완료 차단 (14th 버그헌트 P1-CRITICAL, UR-0175)
 
 **🛡️ leerness 정체성 복원 — "증거 없으면 완료 불가"가 기본값에서 작동.** (동작 변경)
