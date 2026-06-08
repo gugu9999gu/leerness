@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.442 — 2026-06-08 — task 계열 positional path 지원 (12th 외부평가 Sonnet P1, UR-0141)
+
+**🐛 P1 데이터 오염 수정: `task add "제목" ./경로` / `task list /경로` 가 무시되고 cwd 에 저장되던 문제.**
+
+### 변경
+- `task list/add/update/drop/...` 가 positional path 를 인식 — `--path` > path-like positional > cwd 우선순위. 기존엔 `arg('--path', cwd)` 만 사용해 positional 경로를 무시 → 프로젝트 루트가 아닌 cwd 에서 실행 시 엉뚱한 곳에 메모리 생성(멀티프로젝트 오염).
+- 순수 `_taskPositionalPath(args, startIdx)` (pure-utils): `_parseAddTitle` 과 동일한 path-like 판정(선행 구분자 `/ ./ ../ C:\`)으로 **제목/ID/맨이름은 경로로 오인하지 않음**(`task add "fix src/auth bug"` 의 내부 슬래시 제목 보호). **값-취하는 플래그의 값**(`--evidence /abs/log`)도 경로 후보에서 제외.
+
+### 검증 (회귀 0)
+- **selftest 186→187** (순수 7케이스 + 와이어), **E2E 신규 B(1.9.442)**: 다른 cwd 에서 `task add "x" <ws>` → ws 에 저장 + cwd 오염 0.
+- 행위 재현으로 확인: positional 경로 저장 + cwd `.harness` 미생성. `--path` 최우선·내부슬래시 제목·Windows 경로(`C:\`,`C:/`)·boolean 플래그 뒤 경로 전부 정상.
+
 ## 1.9.441 — 2026-06-08 — README ASCII 배너 추가
 
 **🎨 README 최상단에 LEERNESS ASCII 아트 배너 추가(CLI `_banner` 와 동일 아트).**

@@ -6111,5 +6111,25 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.442 (12th 외부평가 Sonnet P1, UR-0141): task 계열 positional path — 다른 cwd 에서 실행해도 positional 경로에 저장(cwd 오염 차단).
+total++;
+{
+  let ok = false;
+  try {
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-taskpos-'));
+    const cwd2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cwd-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', ws, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', '포지셔널e2e', ws, '--no-review'], { encoding: 'utf8', timeout: 15000, cwd: cwd2 });
+    const tracker = path.join(ws, '.harness', 'progress-tracker.md');
+    const savedToWs = fs.existsSync(tracker) && fs.readFileSync(tracker, 'utf8').includes('포지셔널e2e');
+    const cwdClean = !fs.existsSync(path.join(cwd2, '.harness'));
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(cwd2, { recursive: true, force: true });
+    ok = savedToWs && cwdClean;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.442) UR-0141: task positional path 저장 + cwd 오염 차단' : '✗ task positional path 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
