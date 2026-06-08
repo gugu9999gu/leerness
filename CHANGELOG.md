@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.10.5 — 2026-06-08 — arg() 플래그 흡수 방지 + handoff --json 배너 억제 (13th 버그헌트 잔여, UR-0168/0169)
+
+**🧰 CLI 인자 견고성 + --json 순수성 마무리.**
+
+### 변경
+- **arg() 값 플래그 흡수 방지** (UR-0169, P3): `arg(name)` 가 값 없이 끝나면 boolean `true` 를 누출(`--reason` 가 plan.md 에 'true' 기록)하거나, 다음 토큰이 `--flag` 면 그것을 값으로 흡수(`--target --path` → target='--path')하던 문제 → 다음 토큰이 없거나 `--` 장식 플래그면 `def` 반환. **음수 값(`--x -5` 등 단일 `-`)은 보존**.
+- **handoff --json 미-init 배너 억제** (UR-0168, P2): `handoff --json` 이 미-init 디렉토리에서 사람용 "init 미실행" 경고를 JSON 앞에 출력(비-JSON)하던 문제 → `--json` 시 배너 억제(순수 JSON).
+
+### 검증 (회귀 0)
+- **selftest 199→201** (arg: 흡수방지+음수보존+정상값, handoff 배너 와이어), 행위 재현: `export --target --path` 미흡수, `--reason`(끝) true 누출 없음, `handoff --json` 미-init 순수 JSON.
+- arg() 는 코어 함수 → **E2E 365 전수**가 회귀 안전망. patch(1.10.5, 같은 minor) — R-0011 정책상 npm 미배포. (13th 잔여: UR-0172 시크릿 prefix FP — FN 회귀 위험으로 신중 검토 예정)
+
 ## 1.10.4 — 2026-06-08 — 13번째 버그헌트 후속 P2/P3 클러스터 (UR-0167/0170/0171)
 
 **🐛 정직성·견고성: 실패 오판 + 표 손상 + 무시되던 인자 수정.**
