@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.444 — 2026-06-08 — CI/PR 턴키: leerness ci init (GPT-5.5 전략리뷰 §6.7, UR-0152)
+
+**⚙️ leerness 를 팀/CI 품질 게이트로 확장 — PR 마다 `leerness gate` 를 실행하는 GitHub Actions 워크플로 1-커맨드 생성.**
+
+### 변경
+- 신규 `leerness ci init [path] [--force] [--json]`: `.github/workflows/leerness-gate.yml` 생성 — `on: pull_request` 에서 `npx -y leerness gate .` 실행. gate = verify + audit + scan secrets + encoding + lazy. **exit 1 시 PR 체크 실패** → 증거 없는 완료·커밋 시크릿·인코딩 깨짐·규칙 위반을 CI 에서 차단.
+- 워크플로 상단에 **exit-code 정책 주석** 명시(통과=0 / 실패=1). 멱등(이미 존재 시 경고, `--force` 로 덮어쓰기). `--json` 구조화 출력.
+
+### 검증 (회귀 0)
+- **selftest 188→189** (워크플로 콘텐츠 + 와이어), **E2E 신규 B(1.9.444)**: `ci init` → 파일 생성 + 핵심 라인(name/pull_request/gate) 포함 + 재실행 멱등.
+- 행위 재현: 임시 워크스페이스에 워크플로 생성·내용 검증·멱등 확인.
+
 ## 1.9.443 — 2026-06-08 — evidence-first 완료 게이트 completion_claim_allowed (GPT-5.5 전략리뷰 §6.3/6.4, UR-0153)
 
 **🔒 leerness 최대 차별점 강화: 증거로부터 "완료 주장 가능 여부"를 파생·노출.**

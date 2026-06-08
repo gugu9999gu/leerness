@@ -6153,5 +6153,26 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.444 (GPT-5.5 전략리뷰 §6.7, UR-0152): ci init — PR gate 워크플로 생성(멱등).
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ci-'));
+    const r1 = cp.spawnSync(process.execPath, [CLI, 'ci', 'init', d], { encoding: 'utf8', timeout: 15000 });
+    const wfPath = path.join(d, '.github', 'workflows', 'leerness-gate.yml');
+    const created = fs.existsSync(wfPath);
+    const content = created ? fs.readFileSync(wfPath, 'utf8') : '';
+    const contentOk = /name:\s*leerness-gate/.test(content) && /pull_request:/.test(content) && /leerness gate \./.test(content);
+    // 멱등: 재실행 시 경고(덮어쓰기 X, exit 0)
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'ci', 'init', d], { encoding: 'utf8', timeout: 15000 });
+    const idempotent = r2.status === 0 && /이미 존재|exists/.test((r2.stdout || '') + (r2.stderr || ''));
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = r1.status === 0 && created && contentOk && idempotent;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.444) UR-0152: ci init — PR gate 워크플로 생성 + 멱등' : '✗ ci init 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.443';
+const VERSION = '1.9.444';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3347,6 +3347,14 @@ function _selfTestCases() {
         && src.includes('completion_claim_allowed: _ccaH');  // handoff json + latest.json
       return pure && wired;
     } },
+    { name: 'GPT-5.5 전략리뷰 §6.7 (UR-0152): ci init — PR gate 워크플로 생성 + exit-code 정책 (1.9.444)', run: () => {
+      if (typeof ciInitCmd !== 'function') return false;
+      const wf = LEERNESS_GATE_WORKFLOW;
+      const contentOk = /name:\s*leerness-gate/.test(wf) && /on:\s*\n\s*pull_request:/.test(wf) && /leerness gate \./.test(wf) && /exit code 정책/.test(wf) && /actions\/checkout@v4/.test(wf);
+      const src = read(__filename);
+      const wired = src.includes("cmd === 'ci' && (args[1] === 'init'") && src.includes('ciInitCmd(absRoot(_resolveRoot(args[2]))');
+      return contentOk && wired;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3925,6 +3933,7 @@ function commandsCmd(root) {
       { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272' },
       { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278' },
       { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280' },
+      { cmd: 'ci init [path] [--force]', desc: 'PR 마다 leerness gate 실행하는 GitHub Actions 워크플로 생성 (.github/workflows/leerness-gate.yml) — 1.9.444' },
       { cmd: 'policy show|set|check', desc: '권한 등급 (read-only…publish) — opt-in enforced (위험 명령 차단) — 1.9.281' },
       { cmd: 'reuse-check "<기능>"', desc: '외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인 카테고리+체크리스트) — 1.9.285' },
       { cmd: 'skill impact', desc: '스킬 설치 영향 경량 상관추적 (사용 빈도 ↔ 검증 통과율, advisory) — 1.9.286' },
@@ -16004,6 +16013,44 @@ function runsShowCmd(root, id) {
   if (!exists(fp)) return fail(`run 없음: ${id}`);
   log(read(fp));
 }
+
+// 1.9.444 (GPT-5.5 전략리뷰 §6.7, UR-0152): CI/PR 턴키 — PR 마다 leerness gate 를 실행하는 GitHub Actions 워크플로 생성.
+//   gate = verify + audit + scan secrets + encoding + lazy. exit 1 시 PR 체크 실패 → 증거 없는 완료/시크릿/규칙 위반을 CI 에서 차단.
+const LEERNESS_GATE_WORKFLOW = [
+  '# leerness gate — AI 코딩 작업 증거/규칙/검증 게이트 (PR CI). leerness ci init 로 생성.',
+  '# exit code 정책: 통과=0, 실패(테스트 실패 / 커밋 시크릿 / 인코딩 깨짐 / 게으름·증거 누락 / 필수 규칙 파일 없음)=1 → PR 체크 실패.',
+  'name: leerness-gate',
+  'on:',
+  '  pull_request:',
+  '  workflow_dispatch:',
+  'jobs:',
+  '  gate:',
+  '    runs-on: ubuntu-latest',
+  '    steps:',
+  '      - uses: actions/checkout@v4',
+  '      - uses: actions/setup-node@v4',
+  '        with:',
+  "          node-version: '20'",
+  '      - name: leerness gate',
+  '        run: npx -y leerness gate .',
+  '',
+].join('\n');
+function ciInitCmd(root, opts = {}) {
+  root = absRoot(root || process.cwd());
+  const relPath = '.github/workflows/leerness-gate.yml';
+  const fp = path.join(root, '.github', 'workflows', 'leerness-gate.yml');
+  const json = !!opts.json;
+  if (exists(fp) && !opts.force) {
+    if (json) { log(JSON.stringify({ ok: true, created: false, path: relPath, reason: 'exists' })); return; }
+    warn(`이미 존재: ${relPath} (덮어쓰려면 --force)`);
+    return;
+  }
+  mkdirp(path.join(root, '.github', 'workflows'));
+  writeUtf8(fp, LEERNESS_GATE_WORKFLOW);
+  if (json) { log(JSON.stringify({ ok: true, created: true, path: relPath })); return; }
+  ok(`생성: ${relPath} — PR 마다 leerness gate 실행 (exit 1 시 PR 체크 실패)`);
+  log('  gate = verify + audit + scan secrets + encoding + lazy. 증거 없는 완료·시크릿·규칙 위반을 CI 에서 차단.');
+}
 // 1.9.294 (UR-0025 3단계): 역할/모델 카탈로그(_PROVIDER_MODEL_CATALOG + _AGENT_ROLE_PROMPTS + ROLE_CATALOG + _ROLE_ALIASES) 데이터 모듈 분리 (비파괴, require-based).
 const { _PROVIDER_MODEL_CATALOG, _AGENT_ROLE_PROMPTS, ROLE_CATALOG, _ROLE_ALIASES } = require('../lib/role-catalog');
 function _normalizeRole(name) {
@@ -18879,6 +18926,7 @@ async function main() {
   if (cmd === 'setup-agents' || cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(args[1] && args[1] !== 'agents' ? args[1] : (arg('--path', args[2] || process.cwd())));
   if (cmd === 'session' && args[1] === 'close') return sessionClose(_resolveRoot(args[2]), { json: has('--json') });
   // 1.9.151: viewwork 명령 제거 (사용자 명시 — leerness 와 무관). session close 의 viewworkEmit 콜도 함께 제거.
+  if (cmd === 'ci' && (args[1] === 'init' || args[1] == null)) return ciInitCmd(absRoot(_resolveRoot(args[2])), { force: has('--force'), json: has('--json') });  // 1.9.444 (UR-0152): CI gate 워크플로 생성
   if (cmd === 'route')     return route(args[1] || 'planning');
   if (cmd === 'self' && args[1] === 'check')   return await selfCheck(absRoot(arg('--path', args[2] || process.cwd())));
   if (cmd === 'self' && args[1] === 'migrate') return log('Run: npx --yes leerness@latest migrate . --dry-run, then migrate without --dry-run after review.');
