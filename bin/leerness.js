@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.440';
+const VERSION = '1.9.441';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3306,6 +3306,11 @@ function _selfTestCases() {
       const m = require('../lib/pure-utils');
       const behav = m._isPlaceholderSecret('AKIA' + 'X'.repeat(16)) === true && m._isPlaceholderSecret('AKIAJQXMP7RZ2KL9WXYZ') === false && m._isPlaceholderSecret('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false;
       return wired && behav;
+    } },
+    { name: 'README ASCII 배너 표시 + CLI _banner 와 동일 아트 (1.9.441)', run: () => {
+      const readme = read(path.join(path.dirname(__filename), '..', 'README.md'));
+      const bannerLine = '███████╗███████╗██╗  ██╗'.slice(0, 0) + '██║     █████╗  █████╗  ██████╔╝';  // LEERNESS 배너 고유 라인(자기참조 회피 split)
+      return readme.includes(bannerLine) && read(__filename).includes(bannerLine);  // README ↔ CLI _banner 동일 아트
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
