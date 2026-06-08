@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.441 — 2026-06-08 — README ASCII 배너 추가
+
+**🎨 README 최상단에 LEERNESS ASCII 아트 배너 추가(CLI `_banner` 와 동일 아트).**
+
+### 변경
+- `README.md` 상단에 LEERNESS 블록레터 ASCII 배너를 코드블록으로 표시 — CLI init 배너(`_banner`)와 동일한 아트로 브랜드 일관성.
+- selftest: README ↔ CLI `_banner` 동일 배너 라인 검증.
+
+### 검증 (회귀 0)
+- **selftest 185→186 PASS** · **E2E 무회귀**.
+
 ## 1.9.440 — 2026-06-08 — 🛡️ [안정화/Stable] 시크릿 스캐너 prefix 패턴 placeholder 가드 (12th 외부평가 Opus P2, UR-0140)
 
 **🛡️ 안정화 릴리스(Stable) — 보안 스캐너 False-Positive 가 CI 를 깨던 문제 수정.**
