@@ -6131,5 +6131,27 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.443 (GPT-5.5 전략리뷰 §6.3, UR-0153): evidence-first 완료 게이트 — state 워크플로에서 completion_claim_allowed 파생.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cca-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'state', 'start', '목표', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const before = cp.spawnSync(process.execPath, [CLI, 'state', 'show', '--json', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    cp.spawnSync(process.execPath, [CLI, 'state', 'record', '--files-changed', 'a.js', '--tests', 'npm test', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    cp.spawnSync(process.execPath, [CLI, 'state', 'verify', 'pass', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const after = cp.spawnSync(process.execPath, [CLI, 'state', 'show', '--json', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const bj = JSON.parse(before.stdout);
+    const aj = JSON.parse(after.stdout);
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = bj.completion_claim_allowed && bj.completion_claim_allowed.allowed === false
+      && aj.completion_claim_allowed && aj.completion_claim_allowed.allowed === true;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.443) UR-0153: evidence-first completion_claim_allowed (증거없음=no, 증거+pass=yes)' : '✗ completion_claim_allowed 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

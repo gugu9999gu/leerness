@@ -25,13 +25,13 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
-  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath } = require('../lib/pure-utils');  // 1.9.318~442 (UR-0025/0053/0075/0086/0087/0104/0122/0141): 순수 유틸 모듈 분리
+  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed } = require('../lib/pure-utils');  // 1.9.318~443 (UR-0025/0053/0075/0086/0087/0104/0122/0141/0153): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.442';
+const VERSION = '1.9.443';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3324,6 +3324,27 @@ function _selfTestCases() {
         && p(['task', 'update', 'T-0001', '--evidence', '/abs/log']) === null   // 값-플래그 값은 경로 아님
         && p(['task', 'list', '--json', '/abs']) === '/abs';                    // boolean 플래그 뒤 경로 OK
       const wired = read(__filename).includes("arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd()");
+      return pure && wired;
+    } },
+    { name: 'GPT-5.5 전략리뷰 §6.3 (UR-0153): evidence-first 완료 게이트 _completionClaimAllowed + state/handoff 노출 (1.9.443)', run: () => {
+      const m = require('../lib/pure-utils');
+      if (typeof m._completionClaimAllowed !== 'function' || m._completionClaimAllowed !== _completionClaimAllowed) return false;
+      const f = m._completionClaimAllowed;
+      const ok = f({ files_changed: ['a.js'], tests_run: ['npm test'], errors: [], verification_result: 'pass' });
+      const noFiles = f({ files_changed: [], tests_run: ['t'], verification_result: 'pass' });
+      const noVerifyRun = f({ files_changed: ['a'], tests_run: [], commands_run: [], verification_result: 'pass' });
+      const failed = f({ files_changed: ['a'], tests_run: ['t'], verification_result: 'fail' });
+      const notVerified = f({ files_changed: ['a'], commands_run: ['c'], verification_result: null });
+      const withErr = f({ files_changed: ['a'], tests_run: ['t'], errors: ['boom'], verification_result: 'pass' });
+      const pure = ok.allowed === true && ok.reasons.length === 0
+        && noFiles.allowed === false && noFiles.reasons.includes('no_files_changed')
+        && noVerifyRun.allowed === false && noVerifyRun.reasons.includes('no_verification_run')
+        && failed.allowed === false && failed.reasons.includes('verification_failed')
+        && notVerified.allowed === false && notVerified.reasons.includes('not_verified')
+        && withErr.allowed === false && withErr.reasons.includes('unresolved_errors');
+      const src = read(__filename);
+      const wired = src.includes('completion_claim_allowed: rec ? _completionClaimAllowed(rec) : null')  // state show json
+        && src.includes('completion_claim_allowed: _ccaH');  // handoff json + latest.json
       return pure && wired;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
@@ -16541,7 +16562,7 @@ function stateCmd(root, sub, ...args) {
       if (note) rec.decisions = [...(rec.decisions || []), `verify(${result}): ${note}`];
     });
     if (!rec) return fail(`run 없음: ${curId}`);
-    if (json) { log(JSON.stringify({ verified: curId, result, run: rec }, null, 2)); return; }
+    if (json) { log(JSON.stringify({ verified: curId, result, run: rec, completion_claim_allowed: _completionClaimAllowed(rec) }, null, 2)); return; }
     (result === 'pass' ? ok : warn)(`검증 결과: ${curId} → ${result}`);
     return;
   }
@@ -16556,19 +16577,22 @@ function stateCmd(root, sub, ...args) {
     if (!rec) return fail(`run 없음: ${curId}`);
     // 다음 에이전트가 읽을 latest handoff (json + md)
     const hdir = path.join(_leernessStateDir(root), 'handoff'); mkdirp(hdir);
-    writeUtf8(path.join(hdir, 'latest.json'), JSON.stringify(rec, null, 2) + '\n');
+    // 1.9.443 (UR-0153): handoff evidence 에 completion_claim_allowed 포함 — 다음 에이전트/PR 이 증거 게이트를 직접 읽음.
+    const _ccaH = _completionClaimAllowed(rec);
+    writeUtf8(path.join(hdir, 'latest.json'), JSON.stringify({ ...rec, completion_claim_allowed: _ccaH }, null, 2) + '\n');
     writeUtf8(path.join(hdir, 'latest.md'),
-      `# Handoff — ${rec.run_id}\n\n- task: ${rec.task_id || '-'}\n- agent: ${rec.agent_name || '-'} · model: ${rec.model_name || '-'}\n- goal: ${rec.goal || '-'}\n- files_changed: ${rec.files_changed.join(', ') || '-'}\n- tests_run: ${rec.tests_run.join(', ') || '-'}\n- verification: ${rec.verification_result || '-'}\n\n## Summary\n${rec.handoff_summary}\n`);
+      `# Handoff — ${rec.run_id}\n\n- task: ${rec.task_id || '-'}\n- agent: ${rec.agent_name || '-'} · model: ${rec.model_name || '-'}\n- goal: ${rec.goal || '-'}\n- files_changed: ${rec.files_changed.join(', ') || '-'}\n- tests_run: ${rec.tests_run.join(', ') || '-'}\n- verification: ${rec.verification_result || '-'}\n- completion_claim_allowed: ${_ccaH.allowed ? 'yes' : 'no (' + _ccaH.reasons.join(', ') + ')'}\n\n## Summary\n${rec.handoff_summary}\n`);
     state.currentRunId = null;  // 다음 에이전트가 새 run 시작
     _saveLeernessState(root, state);
-    if (json) { log(JSON.stringify({ handoff: rec.run_id, run: rec }, null, 2)); return; }
+    if (json) { log(JSON.stringify({ handoff: rec.run_id, run: rec, completion_claim_allowed: _ccaH }, null, 2)); return; }
     ok(`handoff 작성: ${rec.run_id} → .leerness/handoff/latest.{md,json}`);
     return;
   }
 
   // default: show
   const rec = curId ? _loadRun(root, curId) : null;
-  if (json) { log(JSON.stringify({ state, currentRun: rec }, null, 2)); return; }
+  // 1.9.443 (UR-0153): evidence-first 완료 게이트 파생 노출.
+  if (json) { log(JSON.stringify({ state, currentRun: rec, completion_claim_allowed: rec ? _completionClaimAllowed(rec) : null }, null, 2)); return; }
   log(`# leerness state (1.9.278, UR-0032) — .leerness/ 구조화 상태`);
   log(`project: ${state.project} · runs 누적: ${state.runCounter || 0} · 현재 run: ${curId || '(없음)'}`);
   if (rec) {
@@ -16580,6 +16604,8 @@ function stateCmd(root, sub, ...args) {
     log(`  commands_run: ${rec.commands_run.join(', ') || '-'}`);
     log(`  tests_run: ${rec.tests_run.join(', ') || '-'} · verification: ${rec.verification_result || '-'}`);
     if (rec.decisions.length) log(`  decisions: ${rec.decisions.length}`);
+    const _cca = _completionClaimAllowed(rec);  // 1.9.443 (UR-0153): 증거 기반 완료 주장 가능 여부
+    log(`  completion_claim_allowed: ${_cca.allowed ? 'yes ✓' : 'no ✗ (' + _cca.reasons.join(', ') + ')'}`);
   } else {
     log(`  → 시작: leerness state start "<goal>" [--agent claude --model claude-opus-4-7 --task T-0001]`);
   }

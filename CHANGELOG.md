@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.443 — 2026-06-08 — evidence-first 완료 게이트 completion_claim_allowed (GPT-5.5 전략리뷰 §6.3/6.4, UR-0153)
+
+**🔒 leerness 최대 차별점 강화: 증거로부터 "완료 주장 가능 여부"를 파생·노출.**
+
+### 변경
+- 순수 `_completionClaimAllowed(record)` (pure-utils): run-record 증거 기반 완료 게이트 — **변경 파일 존재 + 검증 실행(tests/commands) + 미해결 errors 0 + verification_result === 'pass'** 일 때만 `allowed:true`. 미검증/실패/증거부족은 사유(reasons)와 함께 불허.
+- `state show`(text + `--json`), `state verify --json`, `state handoff`(latest.json + .md + --json) 에 `completion_claim_allowed` 노출 → 다음 에이전트/PR 리뷰어가 증거 게이트를 직접 읽음.
+- GPT-5.5 전략리뷰가 evidence-first 를 핵심 차별점으로 명시 — run-record 14필드 스키마(기존)에 완료 가능성 판정을 더해 "완료 주장 ↔ 증거" 연결을 표면화.
+
+### 검증 (회귀 0)
+- **selftest 187→188** (순수 6케이스 + state/handoff 와이어), **E2E 신규 B(1.9.443)**: 증거 없음 → no(사유), 증거+verify pass → allowed.
+- 행위 재현: state start→show(no) → record+verify pass → show(--json allowed=true, reasons=[]).
+
 ## 1.9.442 — 2026-06-08 — task 계열 positional path 지원 (12th 외부평가 Sonnet P1, UR-0141)
 
 **🐛 P1 데이터 오염 수정: `task add "제목" ./경로` / `task list /경로` 가 무시되고 cwd 에 저장되던 문제.**
