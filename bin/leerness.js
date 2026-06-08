@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.10.3';
+const VERSION = '1.10.4';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3439,6 +3439,14 @@ function _selfTestCases() {
         && src.includes('process.stdout.isTTY && !opts.dry && !opts.json')
         && src.includes('{ ..._initOpts, json: true, nonInteractive: true }');
     } },
+    { name: '13th 버그헌트 P2/P3 (UR-0167/0170/0171): session close 디렉토리 가드 + plan drop _cellSafe + env encoding-check positional (1.10.4)', run: () => {
+      const scSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js'));
+      const sc = scSrc.includes("!fs.statSync(root).isDirectory()") && scSrc.includes("'path_not_found'");
+      const src = read(__filename);
+      const planSafe = src.includes('const safeText = _cellSafe(text); const safeReason = _cellSafe(reason);') && src.includes('| ${id} | ${safeText} | ${safeReason} |');
+      const envPos = src.includes("(args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()), args[1] === 'summary' ? null : 'encoding-check')");
+      return sc && planSafe && envPos;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6386,14 +6394,16 @@ function planAdd(root, text) {
 function planDrop(root, text) {
   const id = nextId(root, 'D');
   const reason = arg('--reason', '사용자 요청으로 제외');
+  // 1.10.4 (13th 버그헌트 P3, UR-0170): text/reason 의 파이프(|)·개행이 plan.md 마크다운 표 칼럼을 깨뜨림 → _cellSafe 셀 안전화(task/rule UR-0104 와 동일).
+  const safeText = _cellSafe(text); const safeReason = _cellSafe(reason);
   const planFile = planPath(root); let p = exists(planFile) ? read(planFile) : '';
   const droppedHeader = '## Out of Scope / Dropped';
   if (p.includes(droppedHeader)) {
     p = p.replace(droppedHeader + '\n| ID | Item | Reason | Date |\n|---|---|---|---|\n',
-      droppedHeader + '\n| ID | Item | Reason | Date |\n|---|---|---|---|\n' + `| ${id} | ${text} | ${reason} | ${today()} |\n`);
+      droppedHeader + '\n| ID | Item | Reason | Date |\n|---|---|---|---|\n' + `| ${id} | ${safeText} | ${safeReason} | ${today()} |\n`);
     writeUtf8(planFile, p);
   } else {
-    append(planFile, `\n${droppedHeader}\n| ID | Item | Reason | Date |\n|---|---|---|---|\n| ${id} | ${text} | ${reason} | ${today()} |\n`);
+    append(planFile, `\n${droppedHeader}\n| ID | Item | Reason | Date |\n|---|---|---|---|\n| ${id} | ${safeText} | ${safeReason} | ${today()} |\n`);
   }
   // 1.9.449 (12th 외부평가 Sonnet P3, UR-0143): progress-tracker 에 dropped task(T-) 행 생성 제거 — plan drop 은 plan.md "Out of Scope / Dropped"(D-) 에만 기록.
   //   기존엔 scope 드랍이 phantom T- task 로도 생겨 plan↔progress 역할 혼선 + task list 노이즈. 드랍 기록의 단일 출처 = plan.md.
@@ -19121,7 +19131,8 @@ async function main() {
   // 1.9.241: leerness env summary|encoding — 환경 종합 + 셸 스크립트 인코딩 위험 (사용자 명시 UR-0014)
   //   기존 env check/sync/detect (1.9.71) 와 충돌하지 않음 — summary/encoding 신규 서브
   if (cmd === 'env' && (args[1] === 'summary' || args[1] === 'encoding' || args[1] === 'encoding-check'))
-    return envCmd(arg('--path', process.cwd()), args[1] === 'summary' ? null : 'encoding-check');
+    // 1.10.4 (13th 버그헌트 P3, UR-0171): positional 디렉토리 인자 존중(형제 env check/sync/detect 와 통일) — 기존엔 무시하고 cwd 스캔 → 잘못된 디렉토리 false 'no risk'.
+    return envCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()), args[1] === 'summary' ? null : 'encoding-check');
   // 1.9.254: leerness path-setup [--apply] — CLI PATH 자동 등록 (사용자 명시 UR-0019)
   //   npm global bin 경로 감지 + leerness 가 PATH 에서 찾아지는지 확인 → 미등록 시 플랫폼별 등록
   if (cmd === 'path-setup' || cmd === 'path')        return pathSetupCmd(arg('--path', process.cwd()), { apply: has('--apply'), json: has('--json') });

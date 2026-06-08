@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.10.4 — 2026-06-08 — 13번째 버그헌트 후속 P2/P3 클러스터 (UR-0167/0170/0171)
+
+**🐛 정직성·견고성: 실패 오판 + 표 손상 + 무시되던 인자 수정.**
+
+### 변경
+- **session close 디렉토리 가드** (UR-0167, P2-정직성): `session close <파일경로>` 가 `mkdir <path>/.harness` 에서 ENOTDIR 크래시 + **exit 0(실패를 성공으로 오판)** 하던 문제 → 경로 없음/디렉토리 아님이면 `failJson(code:'path_not_found')` + exit 1.
+- **plan drop 표셀 안전화** (UR-0170, P3): `plan drop` 의 text/`--reason` 에 든 파이프(`|`)·개행이 plan.md 마크다운 표 칼럼을 깨뜨리던 문제 → `_cellSafe`(task/rule UR-0104 와 동일, round-trip 가능) 적용.
+- **env encoding-check positional 디렉토리** (UR-0171, P3): `env encoding-check <dir>` 가 positional 인자를 무시하고 cwd 를 스캔(→ 잘못된 디렉토리 false 'no risk') 하던 문제 → 형제 `env check/sync/detect` 와 동일하게 positional 존중.
+
+### 검증 (회귀 0)
+- **selftest 198→199**, 행위 재현: session close 파일경로 → exit 1 + JSON, plan drop 파이프 → `\|` escape(round-trip OK), env encoding-check `<dir>` → scanned 정상.
+- patch(1.10.4, 같은 minor) — R-0011 정책상 npm 미배포, GitHub 만 갱신. (13th 잔여: UR-0168 handoff 배너 · UR-0169 arg 값흡수 · UR-0172 시크릿 prefix FP)
+
 ## 1.10.3 — 2026-06-08 — --json 순수성 하드닝 (13번째 멀티에이전트 버그헌트, UR-0173/0174)
 
 **🤖 에이전트 계약 강화: `--json` 이 항상 기계 파싱 가능한 출력만 내도록.**
