@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.12.1';
+const VERSION = '1.12.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3521,6 +3521,11 @@ function _selfTestCases() {
       const md = m._renderGlossaryMd(g.entries, { gaps: g.gaps });
       return md.includes(m.GLOSSARY_START) && md.includes('react') && /미정의|unknownpkgxyz/.test(md)
         && read(__filename).includes("if (cmd === 'glossary')");
+    } },
+    { name: '14th 버그헌트 (UR-0181): MCP _bumpMcpUsage 를 unknown-tool 검증 후로 이동(unknown tool 임의경로 쓰기 차단) (1.12.2)', run: () => {
+      const src = read(__filename);
+      // _bumpMcpUsage 호출이 unknown-tool 가드(cliArgs === null return) "뒤"에 위치 — generic 서버 path-타게팅은 유지(취약점 아님), unknown tool 쓰기만 차단.
+      return /if \(cliArgs === null\) return send[\s\S]{0,400}?_bumpMcpUsage\(targetPath, name\)/.test(src);
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -15344,13 +15349,14 @@ function mcpServeCmd(root) {
       send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
     } else if (req.method === 'tools/call') {
       const { name, arguments: args = {} } = req.params || {};
+      // 1.12.2 (14th 버그헌트, UR-0181): MCP 서버는 generic 설계 — cwd 에서 실행 후 각 호출의 path 로 대상 프로젝트 지정(의도된 기능, e2e 가 검증). 즉 path-타게팅 자체는 취약점 아님(신뢰된 로컬 MCP). policy 도 대상-프로젝트별로 path 에서 로드(올바름).
+      //   진짜 버그는 unknown tool 도 _bumpMcpUsage 가 임의 경로에 무조건 쓰던 것 → 사용 통계를 unknown-tool 검증 "후"로 이동. (프로젝트-scoped 가둠은 opt-in 플래그로 별도 검토 — UR backlog)
       const targetPath = args.path || root;
-      // 1.9.70: MCP tools/call 자동 사용 통계 — 어떤 도구가 자주/드물게 호출되는지 가시화
-      try { _bumpMcpUsage(targetPath, name); } catch {}
       let cliArgs;
       try {
         cliArgs = _mcpToCliArgs(name, args, targetPath);
         if (cliArgs === null) return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
+        try { _bumpMcpUsage(targetPath, name); } catch {}  // 알려진 도구만 통계 기록(unknown tool 의 임의경로 쓰기 차단)
         // 1.9.288 (Codex gpt-5.5 리뷰 #1 수렴): MCP 도구도 policy enforce 적용 — read-only enforce 시 write 도구 차단.
         //   이전: _policyEnforce 는 agents multi --execute 한 곳뿐 → MCP state_start 등이 정책 우회하고 .leerness 기록.
         //   cliArgs(실제 실행 명령) 로 required tier 판정 → enforce ON 이고 초과 시 JSON-RPC error 반환(실행 안 함).

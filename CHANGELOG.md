@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.12.2 — 2026-06-09 — MCP unknown-tool 임의경로 쓰기 차단 (14th 버그헌트, UR-0181)
+
+**🧹 MCP 사용통계 기록을 도구 검증 후로 — unknown tool 의 임의 경로 쓰기 차단.**
+
+### 조사 정정 (맹신 X)
+외부 에이전트가 "MCP `path` 인자가 서버 루트를 탈출(traversal/정책 우회)"을 P2 보안으로 보고했으나, **직접 조사 + e2e 로 확인 결과 MCP 서버는 generic 설계**임: `mcp serve` 는 cwd 에서 실행되고 각 `tools/call` 의 `path` 로 대상 프로젝트를 지정(의도된 기능 — e2e 가 temp 경로 타게팅을 검증). policy 도 대상-프로젝트별로 path 에서 로드(올바름). 즉 **path-타게팅 자체는 취약점이 아니라 설계**(신뢰된 로컬 MCP 모델). 처음 적용한 "루트 가둠"은 이 설계를 깨 e2e 5건 실패 → **revert**.
+
+### 진짜 버그 수정
+- `_bumpMcpUsage`(사용 통계 쓰기)가 **unknown-tool 검증 전**에 실행돼, 미등록 도구 호출로도 임의 경로에 `.harness/cache` 가 생성됐음 → **검증 후(알려진 도구만)로 이동**.
+
+### 검증 (회귀 0)
+- **selftest 206→207** (bump 위치 와이어), e2e 365/365. 프로젝트-scoped 가둠은 opt-in 플래그로 별도 검토(backlog).
+- patch(1.12.2, 같은 minor) — R-0011 정책상 npm 미배포. 14th 잔여: UR-0182(lazy TODO)·UR-0183(session close 정직성).
+
 ## 1.12.1 — 2026-06-08 — 🩹 [Stable hotfix] 클린룸 selftest false-alarm 수정 (UR-0008)
 
 **1.12.0 직후 발견된 사용자-노출 결함 핫픽스 — npm 배포(예외).**
