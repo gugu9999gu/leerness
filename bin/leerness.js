@@ -25,13 +25,13 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
-  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed } = require('../lib/pure-utils');  // 1.9.318~443 (UR-0025/0053/0075/0086/0087/0104/0122/0141/0153): 순수 유틸 모듈 분리
+  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm } = require('../lib/pure-utils');  // 1.9.318~446 (UR-0025/.../0153/0160): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.445';
+const VERSION = '1.9.446';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3365,6 +3365,23 @@ function _selfTestCases() {
       const trig = m._taskPositionalPath(['rule', 'add', '룰', '--trigger', 'every-update', '/p'], 2) === '/p'
         && m._taskPositionalPath(['rule', 'add', '룰', '--trigger', 'every-update'], 2) === null;
       return rule && lesson && decision && trig;
+    } },
+    { name: 'R-0011/UR-0160: npm 배포 minor-gate _shouldPublishNpm + _publishToNpm 와이어 (1.9.446)', run: () => {
+      const m = require('../lib/pure-utils');
+      if (typeof m._shouldPublishNpm !== 'function' || m._shouldPublishNpm !== _shouldPublishNpm) return false;
+      const f = m._shouldPublishNpm;
+      const pure = f('1.9.446', '1.9.445', false).publish === false                 // 같은 minor patch → 미배포
+        && f('1.9.446', '1.9.445', false).reason === 'same_minor'
+        && f('1.10.0', '1.9.445', false).publish === true                            // minor ↑ → 배포
+        && f('1.10.0', '1.9.445', false).reason === 'minor_bump'
+        && f('2.0.0', '1.9.445', false).publish === true                             // major ↑ → 배포
+        && f('1.9.446', '1.9.445', true).publish === true                            // force → 배포
+        && f('1.9.0', null, false).publish === true                                  // 최초 → 배포
+        && m._minorKey('1.9.445') === '1.9' && m._minorKey('1.10.0') === '1.10';
+      const src = read(__filename);
+      const wired = src.includes('const gate = _shouldPublishNpm(pkgVersion, publishedLatest, false);')
+        && src.includes("forcePublish: has('--publish-npm')");
+      return pure && wired;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -13028,7 +13045,7 @@ function releaseSyncMainCmd(root) {
   //   opt-out: --no-npm 또는 LEERNESS_NO_NPM_PUBLISH=1
   //   토큰 미설정 시 친절한 안내 후 skip (실패 X).
   if (!has('--no-npm') && process.env.LEERNESS_NO_NPM_PUBLISH !== '1') {
-    try { _publishToNpm(root, { dryRun: has('--dry-run-npm') }); } catch (e) { warn('npm publish 시도 실패 (계속): ' + e.message); }
+    try { _publishToNpm(root, { dryRun: has('--dry-run-npm'), forcePublish: has('--publish-npm') }); } catch (e) { warn('npm publish 시도 실패 (계속): ' + e.message); }  // 1.9.446 (UR-0160): --publish-npm 으로 minor-gate 강제 우회
   }
 }
 
@@ -13196,6 +13213,21 @@ function _publishToNpm(root, opts = {}) {
       return;
     }
   } catch {}  // 네트워크 실패 시 그냥 publish 시도
+
+  // 1.5) R-0011/UR-0160: npm 배포는 minor(x.x) 변동 시에만 — 같은 minor 내 patch 는 스킵(GitHub/CHANGELOG 는 유지). --publish-npm 으로 강제.
+  if (!opts.forcePublish) {
+    let publishedLatest = null;
+    try {
+      const latestR = cp.spawnSync('npm', ['view', pkgName, 'version'], { cwd: root, encoding: 'utf8', shell: true, timeout: 15000 });
+      if (latestR.status === 0) publishedLatest = (latestR.stdout || '').trim();
+    } catch {}
+    const gate = _shouldPublishNpm(pkgVersion, publishedLatest, false);
+    if (!gate.publish) {
+      log(`   ⏸ npm 배포 스킵 (R-0011): patch(${pkgVersion}) 는 npm 미배포 — 직전 npm minor(${_minorKey(publishedLatest) || '?'}) 와 동일. minor 올릴 때만 안정 버전으로 배포. (강제: release sync-main . --publish-npm)`);
+      return;
+    }
+    if (gate.reason === 'minor_bump') log(`   ▶ minor 변동(${_minorKey(publishedLatest)} → ${_minorKey(pkgVersion)}) — npm 안정 배포 진행`);
+  }
 
   // 2) 임시 .npmrc 생성 (토큰 노출 방지)
   let tmpDir;

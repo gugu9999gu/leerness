@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.446 — 2026-06-08 — npm 배포 minor-gate (R-0011/UR-0160)
+
+**📦 배포 정책 도구화: npm 배포는 minor(x.x) 변동 시에만 — patch(x.x.x) 는 자동 스킵.**
+
+### 변경
+- 순수 `_shouldPublishNpm(current, published, force)` + `_minorKey` (pure-utils): npm latest 와 major.minor 비교 → minor/major ↑ 면 배포, 같은 minor 내 patch 면 스킵. 최초/force 는 배포.
+- `_publishToNpm` 에 minor-gate 추가(1.5단계): `npm view <pkg> version` 으로 latest 확인 후, 같은 minor patch 면 npm publish 스킵(GitHub 커밋·CHANGELOG 는 유지). `release sync-main . --publish-npm` 으로 강제 배포.
+- 사용자 정책(R-0011): 자잘한 patch 는 npm 미배포로 누적, 안정화되면 minor 올려 안정 버전만 npm 노출 → npm latest 안정성 향상.
+
+### 검증 (회귀 0)
+- **selftest 190→191** (순수 7케이스 + 와이어): 1.9.446 vs 1.9.445=스킵(same_minor), 1.10.0=배포(minor_bump), 2.0.0=배포, force/최초=배포.
+- 본 패치(1.9.446)부터 정책 적용 — npm 미배포(같은 minor), GitHub 만 갱신.
+
 ## 1.9.445 — 2026-06-08 — add-family positional path 일관화 (UR-0151, UR-0141 후속)
 
 **🐛 데이터 오염 일관화: `decision/lesson/rule add` 도 positional path 인식 (task 와 동일).**
