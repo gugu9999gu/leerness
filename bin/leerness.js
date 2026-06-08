@@ -25,13 +25,14 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
-  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm } = require('../lib/pure-utils');  // 1.9.318~446 (UR-0025/.../0153/0160): 순수 유틸 모듈 분리
+  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm,
+  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.11.3';
+const VERSION = '1.11.4';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3505,6 +3506,21 @@ function _selfTestCases() {
       const ridArch = /function nextRuleId[\s\S]*?rulesArchivePath\(root\)[\s\S]*?R-\(\\d\+\)/.test(src);
       return norm && archEsc && ridArch;
     } },
+    { name: 'UR-0007: glossary 순수코어 — _matchTool/_parsePackageJsonDeps/_buildGlossary/_renderGlossaryMd + _TOOL_CATALOG (1.11.4)', run: () => {
+      const m = require('../lib/pure-utils'); const cat = require('../lib/catalogs')._TOOL_CATALOG;
+      if (!cat || Object.keys(cat.tools || {}).length < 30) return false;             // 카탈로그 ~40개
+      if (!m._matchTool(cat, 'react') || m._matchTool(cat, 'react').category !== 'frontend') return false;
+      if (m._matchTool(cat, 'pg').id !== 'postgres') return false;                     // alias 매칭
+      if (m._matchTool(cat, '존재안함패키지') !== null) return false;
+      const deps = m._parsePackageJsonDeps('{"dependencies":{"react":"^18","zod":"^3"},"devDependencies":{"jest":"^29"}}');
+      if (!(deps.includes('react') && deps.includes('zod') && deps.includes('jest'))) return false;
+      if (!m._parseRequirementsTxt('flask==2.0  # web\nnumpy\n').includes('flask')) return false;
+      const g = m._buildGlossary({ deps: ['react', 'unknownpkgxyz'], catalog: cat, descFor: () => null });
+      if (!(g.entries.length === 1 && g.entries[0].term === 'react' && g.gaps.length === 1)) return false;
+      const md = m._renderGlossaryMd(g.entries, { gaps: g.gaps });
+      return md.includes(m.GLOSSARY_START) && md.includes('react') && /미정의|unknownpkgxyz/.test(md)
+        && read(__filename).includes("if (cmd === 'glossary')");
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -4085,6 +4101,7 @@ function commandsCmd(root) {
       { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280' },
       { cmd: 'ci init [path] [--force]', desc: 'PR 마다 leerness gate 실행하는 GitHub Actions 워크플로 생성 (.github/workflows/leerness-gate.yml) — 1.9.444' },
       { cmd: 'export|prompt --target <agent>', desc: 'adapter 별칭 — 도구별 지침/계약 파일 생성 (claude/cursor/codex/agents-md/...) — 1.9.448' },
+      { cmd: 'glossary [build|show] [--lang ko|en|both] [--json]', desc: '의존성 용어집 — package.json/requirements 라이브러리를 비개발자용 한 줄 설명으로 (.harness/glossary.md) — 1.11.4' },
       { cmd: 'policy show|set|check', desc: '권한 등급 (read-only…publish) — opt-in enforced (위험 명령 차단) — 1.9.281' },
       { cmd: 'reuse-check "<기능>"', desc: '외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인 카테고리+체크리스트) — 1.9.285' },
       { cmd: 'skill impact', desc: '스킬 설치 영향 경량 상관추적 (사용 빈도 ↔ 검증 통과율, advisory) — 1.9.286' },
@@ -16879,6 +16896,43 @@ function _mergeMcpJson(root) {
   writeUtf8(f, JSON.stringify(obj, null, 2) + '\n');
   return { file: '.mcp.json', action: already ? 'updated' : 'created' };
 }
+// 1.11.4 (UR-0007): 의존성 용어집 — package.json/requirements deps → 큐레이션 카탈로그 plain-ko/en. 미카탈로그는 node_modules 로컬 description fallback, 미정의는 AI 보완 프롬프트. 무LLM·0deps.
+function glossaryCmd(root, sub) {
+  root = absRoot(root || process.cwd());
+  const jsonMode = has('--json');
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const deps = [];
+  const pkgPath = path.join(root, 'package.json');
+  if (exists(pkgPath)) { try { deps.push(..._parsePackageJsonDeps(read(pkgPath))); } catch {} }
+  for (const rf of ['requirements.txt', 'requirements-dev.txt']) {
+    const rp = path.join(root, rf);
+    if (exists(rp)) { try { deps.push(..._parseRequirementsTxt(read(rp))); } catch {} }
+  }
+  // 미카탈로그 dep → 로컬 node_modules/<pkg>/package.json 의 description fallback (오프라인, 네트워크 X).
+  const descFor = (name) => {
+    try { const p = path.join(root, 'node_modules', name, 'package.json'); if (exists(p)) { const d = JSON.parse(read(p)).description; if (d && typeof d === 'string' && d.trim()) return d.trim().slice(0, 160); } } catch {}
+    return null;
+  };
+  const { entries, gaps, stats } = _buildGlossary({ deps, catalog: _TOOL_CATALOG, descFor });
+  if (sub === 'show') {
+    if (jsonMode) { log(JSON.stringify({ ok: true, ...stats, entries, gaps }, null, 2)); return; }
+    log(cy(`# 용어집 / Glossary  (${stats.defined}/${stats.total} 정의 · 미정의 ${stats.gaps})`));
+    if (!entries.length && !gaps.length) { log(dm('  (의존성 없음 — package.json/requirements.txt 미발견)')); return; }
+    for (const e of entries) log(`  ${gr('•')} ${e.term} — ${e.plainKo} ${dm('['+e.source+']')}`);
+    if (gaps.length) log(dm(`  미정의(AI 보완): ${gaps.map(g => g.term).join(', ')}`));
+    return;
+  }
+  // build (default)
+  const md = _renderGlossaryMd(entries, { lang: arg('--lang', 'both'), gaps });
+  const hd = path.join(root, '.harness'); mkdirp(hd);
+  writeUtf8(path.join(hd, 'glossary.md'), md);
+  writeUtf8(path.join(hd, 'glossary.json'), JSON.stringify({ generated: today(), ...stats, entries, gaps }, null, 2) + '\n');
+  if (jsonMode) { log(JSON.stringify({ ok: true, action: 'glossary build', ...stats, file: '.harness/glossary.md' }, null, 2)); return; }
+  ok(`glossary 생성: .harness/glossary.md (${stats.defined}/${stats.total} 정의${stats.gaps ? ` · ${stats.gaps} 미정의 → AI 보완 프롬프트 포함` : ''})`);
+}
 function adapterCmd(root, tool, opts = {}) {
   root = absRoot(root || process.cwd());
   const json = has('--json');
@@ -19244,6 +19298,12 @@ async function main() {
     const _aTool = args[1] && !args[1].startsWith('-') ? args[1] : 'list';
     const _aRoot = (args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd());
     return adapterCmd(_aRoot, _aTool);
+  }
+  // 1.11.4 (UR-0007): glossary — 의존성 용어집(비개발자용 한 줄 설명). 외부 3-에이전트 평가 종합 설계(큐레이션 카탈로그, 무LLM).
+  if (cmd === 'glossary') {
+    const _gSub = (args[1] && !args[1].startsWith('-')) ? args[1] : 'build';
+    const _gRoot = (args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd());
+    return glossaryCmd(_gRoot, _gSub);
   }
   // 1.9.448 (GPT-5.5 전략리뷰 §6.6/7.3, UR-0154): export/prompt = adapter 별칭 — GPT-5.5 권고 표면명 정합(도구별 지침/계약 파일 생성).
   if (cmd === 'export' || cmd === 'prompt') {

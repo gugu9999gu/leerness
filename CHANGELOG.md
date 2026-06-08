@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.11.4 — 2026-06-08 — 📖 leerness glossary: 의존성 용어집 (UR-0007, 외부 3-에이전트 평가 설계)
+
+**🙂 바이브 코딩 지원 — 프로젝트가 쓰는 라이브러리를 비개발자도 알 수 있게 한 줄로.**
+
+### 배경
+외부 AI 3-에이전트(제품/기술/회의) 평가 종합: 가이드·기능맵·프로젝트설명은 기존 brief/feature-graph/context-map 와 ~70-80% 중복 → 제외. **유일한 진짜 공백 = 의존성 용어집**(비개발자가 package.json 의 라이브러리를 이해하지 못함). 회의론자의 "무LLM 저품질" 우려는 코드-식별자 추출에만 해당 → **큐레이션 카탈로그**(손작성 고품질)로 해소.
+
+### 신규 `leerness glossary [build|show]`
+- `package.json`(deps/devDeps/peerDeps) + `requirements.txt` 의존성을 **큐레이션 도구 카탈로그(`_TOOL_CATALOG`, ~40개)**의 plain-ko/plain-en 한 줄 설명으로 매칭 → `.harness/glossary.md`(이중언어, marker-wrapped, drift-aware) + `glossary.json`.
+- 카탈로그 없는 의존성은 **`node_modules/<pkg>` 로컬 description fallback**(오프라인, 네트워크 X).
+- 미정의 의존성은 **AI 에이전트가 채울 보완 프롬프트** 생성(leerness 는 LLM 미호출 원칙).
+- `--lang ko|en|both`, `--json`. 0 deps, 무LLM, 오프라인.
+
+### 검증 (회귀 0)
+- **selftest 205→206** (순수코어 _matchTool/_parsePackageJsonDeps/_buildGlossary/_renderGlossaryMd + 카탈로그 ~40), 행위 재현: 실 deps 픽스처 → 5/5 정의(카탈로그 4 + description fallback 1), 이중언어 출력, --json.
+- patch(1.11.4, 같은 minor) — R-0011 정책상 npm 미배포. Phase 2(handoff/MCP/audit 연동, brief --plain)는 후속.
+
 ## 1.11.3 — 2026-06-08 — 14th 버그헌트 데이터 일관성 P2 클러스터 (UR-0178/0179/0180)
 
 **🐛 task 집계 일관성 + rule 아카이브 무결성 + ID 재사용 방지.**
