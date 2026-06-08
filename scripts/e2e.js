@@ -6174,5 +6174,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.9.445 (UR-0151): add-family(decision/lesson/rule) positional path — 다른 cwd 에서 실행해도 positional 경로에 저장(cwd 오염 차단).
+total++;
+{
+  let ok = false;
+  try {
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-addpos-'));
+    const cwd3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cwd3-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', ws, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'decision', 'add', '결정E2E', ws, '--reason', 'r'], { encoding: 'utf8', timeout: 15000, cwd: cwd3 });
+    cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', '교훈E2E', ws], { encoding: 'utf8', timeout: 15000, cwd: cwd3 });
+    cp.spawnSync(process.execPath, [CLI, 'rule', 'add', '룰E2E', '--trigger', 'every-update', ws], { encoding: 'utf8', timeout: 15000, cwd: cwd3 });
+    const hdir = path.join(ws, '.harness');
+    let savedAll = false;
+    try {
+      const blob = fs.readdirSync(hdir).map(f => { try { return fs.readFileSync(path.join(hdir, f), 'utf8'); } catch { return ''; } }).join('\n');
+      savedAll = blob.includes('결정E2E') && blob.includes('교훈E2E') && blob.includes('룰E2E');
+    } catch {}
+    const cwdClean = !fs.existsSync(path.join(cwd3, '.harness'));
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(cwd3, { recursive: true, force: true });
+    ok = savedAll && cwdClean;
+  } catch {}
+  console.log(ok ? '✓ B(1.9.445) UR-0151: decision/lesson/rule add positional path 저장 + cwd 오염 차단' : '✗ add-family positional path 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.445 — 2026-06-08 — add-family positional path 일관화 (UR-0151, UR-0141 후속)
+
+**🐛 데이터 오염 일관화: `decision/lesson/rule add` 도 positional path 인식 (task 와 동일).**
+
+### 변경
+- `decision add`, `lesson save`, `rule add` 가 positional path 를 인식 — `--path` > path-like positional > cwd. 1.9.442(task)에서 도입한 순수 `_taskPositionalPath` 재사용 → 제목/내용은 경로로 오인 안 함(선행 구분자 only), 값-플래그값(`--reason`/`--trigger`/`--tag` 등) 제외.
+- `_TASK_VALUE_FLAGS` 에 add-family 값-플래그(`--trigger`/`--tag`) 추가.
+- 기존엔 블록 root 가 `arg('--path', cwd)` 만 사용 → 비-루트 cwd 에서 add 시 cwd 오염(멀티프로젝트). 이제 task 와 일관.
+
+### 검증 (회귀 0)
+- **selftest 189→190** (와이어 3종 + --trigger 값 제외), **E2E 신규 B(1.9.445)**: 다른 cwd 에서 decision/lesson/rule add `<ws>` → ws 저장 + cwd 오염 0.
+
 ## 1.9.444 — 2026-06-08 — CI/PR 턴키: leerness ci init (GPT-5.5 전략리뷰 §6.7, UR-0152)
 
 **⚙️ leerness 를 팀/CI 품질 게이트로 확장 — PR 마다 `leerness gate` 를 실행하는 GitHub Actions 워크플로 1-커맨드 생성.**

@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.444';
+const VERSION = '1.9.445';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3096,7 +3096,7 @@ function _selfTestCases() {
     } },
     { name: '10th 외부평가 Sonnet P2: rule add flag/경로 break(_parseAddTitle) — trigger 값/경로 흡수 차단 (1.9.426)', run: () => {
       const src = read(__filename);
-      const wired = src.includes("ruleAdd(arg('--path', process.cwd()), _parseAddTitle(args, 2))");
+      const wired = src.includes("ruleAdd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), _parseAddTitle(args, 2))");
       const m = require('../lib/pure-utils');
       const u = m._parseAddTitle(['rule', 'add', '세션', '점검', '--trigger', 'every-session', '/p'], 2) === '세션 점검';
       return wired && u;
@@ -3354,6 +3354,17 @@ function _selfTestCases() {
       const src = read(__filename);
       const wired = src.includes("cmd === 'ci' && (args[1] === 'init'") && src.includes('ciInitCmd(absRoot(_resolveRoot(args[2]))');
       return contentOk && wired;
+    } },
+    { name: 'UR-0151: decision/lesson/rule add positional path 지원(_taskPositionalPath 재사용, cwd 오염 차단) (1.9.445)', run: () => {
+      const src = read(__filename);
+      const rule = src.includes("ruleAdd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), _parseAddTitle(args, 2))");
+      const lesson = src.includes("if (cmd === 'lesson') {\n    const root = absRoot(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());");
+      const decision = src.includes("if (cmd === 'decision') {\n    const root = absRoot(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());");
+      // rule add 의 --trigger 값은 경로 아님(path-like 아님) + 값-플래그 제외
+      const m = require('../lib/pure-utils');
+      const trig = m._taskPositionalPath(['rule', 'add', '룰', '--trigger', 'every-update', '/p'], 2) === '/p'
+        && m._taskPositionalPath(['rule', 'add', '룰', '--trigger', 'every-update'], 2) === null;
+      return rule && lesson && decision && trig;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -19044,7 +19055,7 @@ async function main() {
   if (cmd === 'idempotency')                        return idempotencyCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.213: leerness intent <classify|expand|domains> — intent inference + scope expansion (사용자 명시)
   if (cmd === 'intent')                             return intentCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
-  if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', process.cwd()), _parseAddTitle(args, 2));  // 1.9.426 (10th 외부평가 Sonnet P2): flag/경로 break — 기존 filter 는 경로 + --trigger 값까지 설명에 흡수
+  if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), _parseAddTitle(args, 2));  // 1.9.426: flag/경로 break(_parseAddTitle) · 1.9.445 (UR-0151): positional path 지원(제목과 분리)
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);
   if (cmd === 'rule' && args[1] === 'pause')        return rulePause(arg('--path', process.cwd()), args[2]);
@@ -19125,7 +19136,7 @@ async function main() {
   // 1.9.112: lesson save — lessons.md에 새 lesson 추가
   // 1.9.117: lesson list — lessons.md 조회 + --tag 필터 + --json
   if (cmd === 'lesson') {
-    const root = absRoot(arg('--path', process.cwd())); const sub = args[1] || '';
+    const root = absRoot(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd()); const sub = args[1] || '';  // 1.9.445 (UR-0151): positional path 지원
     if (sub === 'save') {
       const textParts = [];
       for (let i = 2; i < args.length; i++) {
@@ -19152,7 +19163,7 @@ async function main() {
   // 1.9.108: decision add — decisions.md에 새 설계 결정 추가
   // 1.9.118: decision list — decisions.md 전체 조회 + --json
   if (cmd === 'decision') {
-    const root = absRoot(arg('--path', process.cwd())); const sub = args[1] || '';
+    const root = absRoot(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd()); const sub = args[1] || '';  // 1.9.445 (UR-0151): positional path 지원
     if (sub === 'add') {
       // args[2..] 가 title (단, --flag 또는 경로형 positional 이 시작되기 전까지)
       // 1.9.351 (UR-0064) → 1.9.416 (UR-0122): 공유 헬퍼 _parseAddTitle 로 단일화(flag/경로 break) + 빈 입력 거부
