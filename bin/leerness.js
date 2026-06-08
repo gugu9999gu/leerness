@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.9.446';
+const VERSION = '1.9.447';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3383,6 +3383,13 @@ function _selfTestCases() {
         && src.includes("forcePublish: has('--publish-npm')");
       return pure && wired;
     } },
+    { name: '12th 외부평가 Codex P3 (UR-0145): plan progress 읽기전용 요약(완료율%/--json) + 변경의도 인자 경고 (1.9.447)', run: () => {
+      const src = read(__filename);
+      const richer = src.includes('const percent = total ? Math.round((done / total) * 100) : 0;') && src.includes("log(`# plan progress (읽기 전용 요약)`);");
+      const jsonOut = src.includes("log(JSON.stringify({ ok: true, total, done, percent, milestones, counts }, null, 2)); return;");
+      const intentWarn = src.includes('if (opts.updateIntent) warn(') && src.includes("updateIntent: args.slice(2).some(a => /^M-\\d/i.test(a)) || has('--status') || arg('--progress', null) != null");
+      return richer && jsonOut && intentWarn;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6342,11 +6349,22 @@ function planDrop(root, text) {
   upsertProgress(root, { id: tid, status: 'dropped', request: text, evidence: `drop:${reason}`, nextAction: '없음' });
   ok(`plan dropped: ${id} → progress: ${tid}`);
 }
-function planProgress(root) {
+function planProgress(root, opts = {}) {
+  // 1.9.447 (12th 외부평가 Codex P3, UR-0145): 읽기 전용 진행 요약 — 완료율%+상태별+마일스톤 수. --json 지원.
+  //   기존엔 task status 카운트만 출력하며 명령명이 milestone 변경처럼 오인됨 + M-id/--status/--progress 를 silent ignore → 변경의도 인자 시 경고.
   const rows = readProgressRows(root);
+  const tasks = rows.filter(r => /^T-/.test(r.id));
   const counts = {}; for (const s of STATUSES) counts[s] = 0;
-  for (const r of rows) if (counts[r.status] != null) counts[r.status]++;
-  log(JSON.stringify(counts, null, 2));
+  for (const r of tasks) if (counts[r.status] != null) counts[r.status]++;
+  const total = tasks.length;
+  const done = counts['done'] || 0;
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  const milestones = rows.filter(r => /^M-/.test(r.id)).length;
+  if (opts.json) { log(JSON.stringify({ ok: true, total, done, percent, milestones, counts }, null, 2)); return; }
+  log(`# plan progress (읽기 전용 요약)`);
+  log(`  완료율: ${done}/${total} (${percent}%)${milestones ? ` · 마일스톤 ${milestones}개` : ''}`);
+  for (const s of STATUSES) if (counts[s]) log(`  ${s}: ${counts[s]}`);
+  if (opts.updateIntent) warn('plan progress 는 읽기 전용 요약입니다 — 상태/진행 변경은 task update <T-ID> --status … 또는 plan add|drop 을 사용하세요.');
 }
 // 1.9.126: plan remove — milestone 블록을 plan.md에서 제거 + archive 보존
 //   Memory Surface DELETE 5종 완전 완성 (task drop / decision drop / lesson drop / rule remove / plan remove)
@@ -19127,7 +19145,7 @@ async function main() {
     if (sub==='add')      return planAdd(root, args.slice(2).join(' ') || '새 계획');
     if (sub==='drop')     return planDrop(root, args.slice(2).join(' ') || '드랍 항목');
     if (sub==='remove')   return planRemoveCmd(root, args[2]);
-    if (sub==='progress') return planProgress(root);
+    if (sub==='progress') return planProgress(root, { json: has('--json'), updateIntent: args.slice(2).some(a => /^M-\d/i.test(a)) || has('--status') || arg('--progress', null) != null });  // 1.9.447 (UR-0145): --json + 변경의도 인자 경고
     if (sub==='sync')     return planSync(root);
     // 1.9.119: plan list — 모든 milestone JSON/verbose
     if (sub==='list')     return planListCmd(absRoot(_resolveRoot(args[2])), { json: has('--json') });  // 1.9.412 (UR-0100): positional path 지원

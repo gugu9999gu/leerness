@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.447 — 2026-06-08 — plan progress 읽기전용 요약 명확화 (12th 외부평가 Codex P3, UR-0145)
+
+**🐛 명령명-동작 불일치 해소: `plan progress` 가 인자를 silent ignore 하던 문제.**
+
+### 변경
+- `plan progress` 를 읽기 전용 진행 요약으로 명확화 — **완료율%**(done/total) + 상태별 카운트 + 마일스톤 수 출력. `--json` 구조화 지원.
+- `plan progress M-0002 --status … --progress …` 처럼 변경 의도 인자가 오면 **읽기 전용임을 경고**(기존: silent ignore) — 상태/진행 변경은 `task update`/`plan add|drop` 안내.
+- 기존엔 task status 카운트만 출력하며 명령명이 milestone 변경처럼 오인됨.
+
+### 검증 (회귀 0)
+- **selftest 191→192** (richer 출력 + --json + 변경의도 경고 와이어), 행위 재현: 완료율 1/3(33%)·--json(total/done/percent)·M-id+--status 시 경고.
+- patch(1.9.447, 같은 minor) — R-0011 정책상 npm 미배포, GitHub 만 갱신.
+
 ## 1.9.446 — 2026-06-08 — npm 배포 minor-gate (R-0011/UR-0160)
 
 **📦 배포 정책 도구화: npm 배포는 minor(x.x) 변동 시에만 — patch(x.x.x) 는 자동 스킵.**
