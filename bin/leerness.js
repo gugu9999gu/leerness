@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.10.2';
+const VERSION = '1.10.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -930,7 +930,7 @@ async function install(root, opts = {}) {
     }
   } catch {}
   // 1.9.32: init 시 ASCII 배너 + 빠른 시작 가이드 (migrate는 quiet)
-  if (!opts.migration && !has('--no-banner')) _banner({ quickStart: !opts.dry });
+  if (!opts.migration && !has('--no-banner') && !opts.json) _banner({ quickStart: !opts.dry });  // 1.10.3 (UR-0173): --json 시 배너 억제(순수 JSON)
   // 1.9.33: npx 캐시로 옛 버전이 실행될 때 경고 (migrate/--no-stale-check 시 스킵)
   // 1.9.276: dry-run 시 스킵 — 캐시 파일(.harness/cache) 생성 방지 (dry = 부작용 0 보장)
   if (!opts.migration && !has('--no-stale-check') && !opts.nonInteractive && !opts.dry) {
@@ -973,7 +973,7 @@ async function install(root, opts = {}) {
   // 1.9.184 (사용자 명시): 파일 설치 — 생성 목록 나열 X, 로딩바 + 단일 완료 메시지.
   const actions = [];
   const totalFiles = Object.keys(files).length;
-  const isTty = process.stdout.isTTY && !opts.dry;
+  const isTty = process.stdout.isTTY && !opts.dry && !opts.json;  // 1.10.3 (UR-0173): --json 시 진행바/완료메시지 억제(순수 JSON)
   const drawProgress = (done, file) => {
     if (!isTty) return;
     const pct = Math.round(done * 100 / totalFiles);
@@ -3424,6 +3424,20 @@ function _selfTestCases() {
       const src = read(__filename);
       const wired = src.includes("setQuiet(true);") && src.includes("action: 'init', version: VERSION, path: _initRoot, harnessFiles");
       return quietLogSuppressed && failShown && wired;
+    } },
+    { name: '13th 버그헌트 P2 (UR-0174): scan secrets/encoding check/lazy detect/deps --json 잘못된경로 구조화 에러 (1.10.3)', run: () => {
+      const cp = require('child_process'); const osm = require('os');
+      const bad = path.join(osm.tmpdir(), '__leerness_nope_' + process.pid);
+      const isJson = (a) => { const r = cp.spawnSync(process.execPath, [__filename, ...a], { encoding: 'utf8' }); if (r.status !== 1) return false; try { const j = JSON.parse((r.stdout || '').trim()); return j.ok === false && !!j.code; } catch { return false; } };
+      return isJson(['scan', 'secrets', '--path', bad, '--json'])
+        && isJson(['lazy', 'detect', '--path', bad, '--json'])
+        && isJson(['encoding', 'check', '--path', __filename, '--json']);  // 파일 경로(디렉토리 아님)
+    } },
+    { name: '13th 버그헌트 P2 (UR-0173): init --json 배너/진행바/대화 억제 와이어 (1.10.3)', run: () => {
+      const src = read(__filename);
+      return src.includes("!has('--no-banner') && !opts.json")
+        && src.includes('process.stdout.isTTY && !opts.dry && !opts.json')
+        && src.includes('{ ..._initOpts, json: true, nonInteractive: true }');
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -7280,6 +7294,8 @@ function _collectSecretFindings(root) {
 
 function scanSecrets(root, opts = {}) {
   root = absRoot(root);
+  // 1.10.3 (13th 버그헌트 P2, UR-0174): 없는 경로에서 --json 비-JSON(ENOENT) 차단 → 구조화 에러. 단 파일 경로는 지원(UR-0072: _collectSecretFindings 가 파일 root 단일 스캔) → 존재성만 검사(디렉토리 강제 X).
+  if (!exists(root)) { failJson(has('--json') || opts.json, 'path_not_found', `경로 없음: ${root}`); return; }
   const { committed, ignored } = _collectSecretFindings(root);
   // 1.9.415 (9th 외부평가 Opus/Codex): --json 일관성 — 기존엔 --json 무시하고 사람용 텍스트만 출력하던 FN.
   if (has('--json') || opts.json) {
@@ -7301,6 +7317,8 @@ function scanSecrets(root, opts = {}) {
 
 function encodingCheck(root, opts = {}) {
   root = absRoot(root);
+  // 1.10.3 (13th 버그헌트 P2, UR-0174): 잘못된 경로(없음/파일)에서 walk() throw → --json 비-JSON 차단.
+  if (!exists(root) || !fs.statSync(root).isDirectory()) { failJson(has('--json') || opts.json, 'path_not_found', `경로 없음 또는 디렉토리 아님: ${root}`); return; }
   let warnings = 0; const findings = [];
   for (const file of walk(root)) {
     const ext = path.extname(file).toLowerCase();
@@ -7347,6 +7365,8 @@ function encodingCheck(root, opts = {}) {
 function lazyDetect(root, opts = {}) {
   root = absRoot(root);
   const jsonMode = !!opts.json || has('--json');
+  // 1.10.3 (13th 버그헌트 P2, UR-0174): 잘못된 경로(없음/파일)에서 walk() throw → --json 비-JSON 차단.
+  if (!exists(root) || !fs.statSync(root).isDirectory()) { failJson(jsonMode, 'path_not_found', `경로 없음 또는 디렉토리 아님: ${root}`); return; }
   let issues = 0;
   const findings = []; // 1.9.101: { kind, severity, message, ...details }
   const _warn = (msg, finding) => { if (finding) findings.push(finding); if (!jsonMode) warn(msg); };
@@ -10005,7 +10025,7 @@ async function orchestrateCmd(root, goalParts) {
 //   → 회귀 발생 시 어느 프로젝트인지 즉시 보고
 function depsImpactCmd(root, targetCapability) {
   root = absRoot(root || process.cwd());
-  if (!targetCapability) { fail('impact <capability> 필요. 예: leerness impact Character'); return process.exit(1); }
+  if (!targetCapability) { failJson(has('--json'), 'missing_arg', 'impact <capability> 필요. 예: leerness impact Character'); return; }  // 1.10.3 (UR-0174): --json 구조화 에러
   const paths = _collectWorkspacePaths(root);
   if (!paths.length) {
     // --all-apps 자동
@@ -18930,8 +18950,9 @@ async function main() {
     const _initOpts = { force:has('--force'), dry:has('--dry-run'), migration:false, minimal:has('--minimal'), noEnv:has('--no-env') };
     if (has('--json')) {
       // 1.10.2 (UR-0146): init --json — 사람용 출력 묵음(setQuiet) + 순수 JSON 요약 1개. 기존엔 --json 을 silent ignore(배너만 출력).
+      // 1.10.3 (UR-0173): json:true → 배너/진행바 억제(TTY 누출 차단), nonInteractive:true → 대화 메뉴 차단(머신 계약).
       setQuiet(true);
-      try { await install(_initRoot, _initOpts); } finally { setQuiet(false); }
+      try { await install(_initRoot, { ..._initOpts, json: true, nonInteractive: true }); } finally { setQuiet(false); }
       let harnessFiles = 0; try { harnessFiles = exists(path.join(_initRoot, '.harness')) ? fs.readdirSync(path.join(_initRoot, '.harness')).length : 0; } catch {}
       log(JSON.stringify({ ok: true, action: 'init', version: VERSION, path: _initRoot, harnessFiles, dryRun: !!_initOpts.dry, minimal: !!_initOpts.minimal }, null, 2));
       return;

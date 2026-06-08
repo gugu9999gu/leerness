@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.10.3 — 2026-06-08 — --json 순수성 하드닝 (13번째 멀티에이전트 버그헌트, UR-0173/0174)
+
+**🤖 에이전트 계약 강화: `--json` 이 항상 기계 파싱 가능한 출력만 내도록.**
+
+### 변경
+- **init --json TTY 누출 차단** (UR-0173, 1.10.2 회귀): 인터랙티브 터미널에서 `init --json` 이 배너/진행바/언어선택 메뉴를 JSON 앞에 출력하던 문제 → 배너·진행바(`isTty`)에 `!opts.json` 게이트 + `nonInteractive` 적용. 비-TTY(파이프/CI)는 기존에도 정상.
+- **walk 기반 스캐너 --json 경로 오류 구조화** (UR-0174): `scan secrets` / `encoding check` / `lazy detect` 가 없는/파일 경로에서 `walk()` throw → 사람용 `✗ ENOENT/ENOTDIR` 텍스트(비-JSON)를 뱉던 문제 → `status()` 패턴(path 가드 + `failJson(code:'path_not_found')`, exit 1) 통일.
+- **deps --json 인자누락 구조화** (UR-0174): `deps --json` 의 capability 누락이 사람용 텍스트 → `failJson(code:'missing_arg')`.
+
+### 13번째 버그헌트 — 후속 등록 (이번 미수정, 백로그)
+- UR-0167 session close --json 파일경로 exit 0 오판 · UR-0168 handoff --json 미-init 배너 누출 · UR-0169 arg() 값없는 플래그 흡수 · UR-0170 plan drop 파이프 표 깨짐 · UR-0171 env encoding-check positional 무시 · UR-0172 시크릿 prefix+단어 placeholder FP(검토).
+
+### 검증 (회귀 0)
+- **selftest 196→198** (4종 --json 구조화 에러 spawn 검증 + init 게이트 와이어), 행위 재현: 4종 모두 `{ok:false,code}` exit 1, init --json TTY 순수 JSON.
+- patch(1.10.3, 같은 minor) — R-0011 정책상 npm 미배포, GitHub 만 갱신.
+
 ## 1.10.2 — 2026-06-08 — init --json 순수 JSON 출력 (12th 외부평가 Codex P3, UR-0146)
 
 **🤖 `init --json` 이 사람용 출력 대신 순수 JSON 요약 1개 — AI 에이전트가 JSON.parse 가능.**
