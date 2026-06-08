@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
-const { log, ok, warn, fail, failJson, today, now, absRoot, exists, read, readBuf, mkdirp, writeUtf8, append, rel } = require('../lib/io');  // 1.9.382/383 (UR-0025): 출력/시간/파일 프리미티브 공유 모듈
+const { log, ok, warn, fail, failJson, setQuiet, today, now, absRoot, exists, read, readBuf, mkdirp, writeUtf8, append, rel } = require('../lib/io');  // 1.9.382/383 (UR-0025): 출력/시간/파일 프리미티브 공유 모듈 · 1.10.2 (UR-0146): setQuiet
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.10.1';
+const VERSION = '1.10.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3412,6 +3412,18 @@ function _selfTestCases() {
         && f('sk-proj-realKEYexample9988776655') === false
         && f('AKIAJQXMP7RZ2KL9WXYZ') === false
         && read(path.join(path.dirname(__filename), '..', 'lib', 'pure-utils.js')).includes('if (/example$/.test(v)) return true;');
+    } },
+    { name: '12th 외부평가 Codex P3 (UR-0146): init --json 순수 JSON(quiet 모드) + 오류는 quiet 무시 (1.10.2)', run: () => {
+      const io = require('../lib/io');
+      if (typeof io.setQuiet !== 'function') return false;
+      // quiet 면 log/ok/warn 묵음, fail/failJson 은 노출
+      let out = ''; const _w = process.stdout.write; process.stdout.write = s => { out += s; return true; };
+      let quietLogSuppressed, failShown;
+      try { io.setQuiet(true); io.log('HUMAN'); io.ok('OK'); quietLogSuppressed = !/HUMAN|OK/.test(out); out = ''; io.fail('ERR'); failShown = /ERR/.test(out); }
+      finally { io.setQuiet(false); process.stdout.write = _w; process.exitCode = 0; }
+      const src = read(__filename);
+      const wired = src.includes("setQuiet(true);") && src.includes("action: 'init', version: VERSION, path: _initRoot, harnessFiles");
+      return quietLogSuppressed && failShown && wired;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -18913,7 +18925,19 @@ async function main() {
     } catch {}
   }
   // 1.9.276 (GPT-5.5 2차 리뷰): init --dry-run(미리보기) / --minimal(핵심 파일만) / --no-env(.env 생략)
-  if (cmd === 'init')      return await install(arg('--path', args[1] || process.cwd()), { force:has('--force'), dry:has('--dry-run'), migration:false, minimal:has('--minimal'), noEnv:has('--no-env') });  // 1.9.355 (UR-0075): --path 지원
+  if (cmd === 'init') {
+    const _initRoot = absRoot(arg('--path', args[1] && !args[1].startsWith('-') ? args[1] : process.cwd()));
+    const _initOpts = { force:has('--force'), dry:has('--dry-run'), migration:false, minimal:has('--minimal'), noEnv:has('--no-env') };
+    if (has('--json')) {
+      // 1.10.2 (UR-0146): init --json — 사람용 출력 묵음(setQuiet) + 순수 JSON 요약 1개. 기존엔 --json 을 silent ignore(배너만 출력).
+      setQuiet(true);
+      try { await install(_initRoot, _initOpts); } finally { setQuiet(false); }
+      let harnessFiles = 0; try { harnessFiles = exists(path.join(_initRoot, '.harness')) ? fs.readdirSync(path.join(_initRoot, '.harness')).length : 0; } catch {}
+      log(JSON.stringify({ ok: true, action: 'init', version: VERSION, path: _initRoot, harnessFiles, dryRun: !!_initOpts.dry, minimal: !!_initOpts.minimal }, null, 2));
+      return;
+    }
+    return await install(_initRoot, _initOpts);  // 1.9.355 (UR-0075): --path 지원
+  }
   // 1.9.64: install <skill-id-or-url> 별칭 (= skill install). 자주 쓰는 명령 단축형.
   // 단, init이 leerness install . 같은 형태로도 동작하던 옛 호환은 유지 — args[1]이 디렉토리면 init으로 라우팅.
   if (cmd === 'install') {

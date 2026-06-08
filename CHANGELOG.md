@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.10.2 — 2026-06-08 — init --json 순수 JSON 출력 (12th 외부평가 Codex P3, UR-0146)
+
+**🤖 `init --json` 이 사람용 출력 대신 순수 JSON 요약 1개 — AI 에이전트가 JSON.parse 가능.**
+
+### 변경
+- `leerness init --json` 이 기존엔 `--json` 을 silent ignore 하고 배너+15줄 사람용 로그를 출력 → 이제 **순수 JSON 요약**: `{ ok, action:'init', version, path, harnessFiles, dryRun, minimal }`.
+- io 에 **quiet 모드(`setQuiet`)** 추가 — `log/ok/warn`(사람용)만 묵음, `fail/failJson`(오류)은 항상 노출. init(install) 큰 핸들러 내부 다중 log 게이팅(침투적) 없이 비침투적 묵음.
+- init 디스패치가 `--json` 시 `setQuiet(true)` → install → `finally setQuiet(false)` → JSON 1개 emit (배너/공지 누출 0).
+
+### 검증 (회귀 0)
+- **selftest 195→196** (setQuiet: log/ok 묵음 + fail 노출 + 와이어), 행위 재현: `init --json` → 파싱 가능 JSON, 배너 누출 없음.
+- patch(1.10.2, 같은 minor) — R-0011 정책상 npm 미배포, GitHub 만 갱신.
+
 ## 1.10.1 — 2026-06-08 — 시크릿 스캐너 AWS …EXAMPLE 키 오탐 수정 (12th 외부평가 Opus P3, UR-0144)
 
 **🔒 AWS 공식 예제키(AKIA…EXAMPLE) 오탐 차단 — 실키 FN 정책은 보존.**
