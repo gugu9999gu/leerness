@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.12.3 — 2026-06-09 — 정직성 마무리: lazy TODO 파일별 추적 + session close 완료 정직성 (14th 버그헌트, UR-0182/0183)
+
+**🔍 14번째 버그헌트 잔여 2건 — 정직성 탐지 정밀화.**
+
+### 변경
+- **lazy detect TODO 파일별 추적** (UR-0182): `todo_untracked` 가 아무 task 의 request/evidence 에 'TODO' 글자만 있어도 모든 코드 TODO 경보를 **전역 억제**(무관한 task 1개가 전부 묵음)하던 문제 → 해당 TODO 의 **파일을 참조하는 task 가 없는 것만** 미추적으로 경보. `--auto-track` 도 미추적 TODO 만 등록.
+- **session close 완료 정직성 advisory** (UR-0183): 마감 시 done 인데 evidence 가 비었거나 placeholder 인 task 를 노출(`completionHonesty` JSON 필드 + `⚠ 완료 정직성` 라인). 차단하지 않는 advisory(session close 의 advisory 철학) — verify-claim 권장 환기.
+
+### 검증 (회귀 0)
+- **selftest 206→208**, 행위 재현: 무관 task 의 'TODO' 글자에도 코드 TODO 경보 유지(untracked=1), session close `completionHonesty.doneWithoutEvidence` 노출.
+- patch(1.12.3, 같은 minor) — R-0011 정책상 npm 미배포. **14번째 버그헌트 백로그(UR-0175~0183) 전부 처리 완료.**
+
 ## 1.12.2 — 2026-06-09 — MCP unknown-tool 임의경로 쓰기 차단 (14th 버그헌트, UR-0181)
 
 **🧹 MCP 사용통계 기록을 도구 검증 후로 — unknown tool 의 임의 경로 쓰기 차단.**

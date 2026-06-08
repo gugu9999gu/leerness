@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.12.2';
+const VERSION = '1.12.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3526,6 +3526,13 @@ function _selfTestCases() {
       const src = read(__filename);
       // _bumpMcpUsage 호출이 unknown-tool 가드(cliArgs === null return) "뒤"에 위치 — generic 서버 path-타게팅은 유지(취약점 아님), unknown tool 쓰기만 차단.
       return /if \(cliArgs === null\) return send[\s\S]{0,400}?_bumpMcpUsage\(targetPath, name\)/.test(src);
+    } },
+    { name: '14th 버그헌트 P2/P3 (UR-0182/0183): lazy TODO 파일별 추적 + session close 완료 정직성 advisory (1.12.3)', run: () => {
+      const src = read(__filename);
+      const todoPerFile = src.includes('const untrackedTodos = newTodos.filter(t => !taskText.includes(t.file));') && src.includes("kind: 'todo_untracked'");
+      const scSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js'));
+      const honesty = scSrc.includes('jsonResult.completionHonesty =') && scSrc.includes("doneWithoutEvidence: _doneNoEvidence.length");
+      return todoPerFile && honesty;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -7526,14 +7533,16 @@ function lazyDetect(root, opts = {}) {
     }
   }
   if (todoCount > 0) {
-    const hasTodoTask = rows.some(r => /TODO|FIXME|XXX/.test(r.request) || /TODO|FIXME|XXX/i.test(r.evidence));
-    if (!hasTodoTask) {
+    // 1.12.3 (14th 버그헌트 P2, UR-0182): 파일별 추적 — 기존엔 아무 task 의 request/evidence 가 'TODO' 글자만 포함해도 모든 코드 TODO 경보를 전역 억제(무관한 task 1개가 전부 묵음)했음. 이제 해당 TODO 의 파일을 참조하는 task 가 없는 것만 미추적으로 경보.
+    const taskText = rows.map(r => `${r.request || ''} ${r.evidence || ''}`).join('\n');
+    const untrackedTodos = newTodos.filter(t => !taskText.includes(t.file));
+    if (untrackedTodos.length > 0) {
       issues++;
-      _warn(`code has ${todoCount} TODO/FIXME/XXX (new: ${newTodos.length}) but no progress-tracker entry tracks them`,
-        { kind: 'todo_untracked', severity: 'warn', todoCount, newCount: newTodos.length, newTodos: newTodos.slice(0, 5) });
-      // 새 TODO 처음 5개 표시 (verbose 모드만)
-      if (!jsonMode) newTodos.slice(0, 5).forEach(t => log(`    ${t.file}:${t.line}  ${t.text}`));
-      if (has('--auto-track') && newTodos.length) {
+      _warn(`code has ${todoCount} TODO/FIXME/XXX (untracked: ${untrackedTodos.length}) — no progress-tracker entry references their files`,
+        { kind: 'todo_untracked', severity: 'warn', todoCount, newCount: newTodos.length, untrackedCount: untrackedTodos.length, newTodos: untrackedTodos.slice(0, 5) });
+      // 미추적 TODO 처음 5개 표시 (verbose 모드만)
+      if (!jsonMode) untrackedTodos.slice(0, 5).forEach(t => log(`    ${t.file}:${t.line}  ${t.text}`));
+      if (has('--auto-track') && untrackedTodos.length) {
         // 1.9.411 (8번째 버그헌트, UR-0115): TODO 일괄 등록을 단일 read-modify-write 로 직렬화.
         //   종전: TODO 마다 nextId(plan+progress 전체 스캔) + upsertProgress(전체 read+write) → O(T × tracker크기) (다수 TODO 자동등록 시 O(N²) 행걸림).
         //   개선: 락 1회 안에서 rows 1회 읽고, 최대 T-id 1회 계산, 전부 push, 1회 write → O(N + T).
