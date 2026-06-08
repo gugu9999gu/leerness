@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.11.0';
+const VERSION = '1.11.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3469,6 +3469,23 @@ function _selfTestCases() {
       const src = read(__filename);
       return src.includes("!has('--no-init-check') && !has('--json')) {");
     } },
+    { name: '14th 버그헌트 P1 (UR-0176): nextId 가 셀 내부 토큰(T-9999) 무시, 라인앵커 한정 (1.11.1)', run: () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_nid_'));
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        // 실제 행 T-0002 + Request 셀 안 텍스트 T-9999
+        fs.writeFileSync(path.join(tmp, '.harness', 'progress-tracker.md'), '# Progress Tracker\n\n| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0002 | done | fix T-9999 bug | e | n | 2026-06-08 |\n');
+        fs.writeFileSync(path.join(tmp, '.harness', 'plan.md'), '# Plan\n');
+        return nextId(tmp, 'T') === 'T-0003';  // 셀 안 T-9999 무시 → T-0003 (기존 버그면 T-10000)
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: '14th 버그헌트 P1 (UR-0177): _featureBlock 가 개행+## 주입 차단 (_lineSafe) (1.11.1)', run: () => {
+      const m = require('../lib/pure-utils');
+      const md = m._featureBlock({ id: 'F-0001', title: 'X\n## F-9999 GHOST', notes: 'a\n## F-8888 X' });
+      const nodes = m._parseFeatureGraph(md);
+      // 주입 차단 시 노드 1개(F-0001)만, 가짜 F-9999/F-8888 없음
+      return nodes.length === 1 && nodes[0].id === 'F-0001' && !/\n## F-9999/.test(md) && !/\n## F-8888/.test(md);
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6291,7 +6308,9 @@ function _saveLessons(root, lessons) {
 
 function nextId(root, prefix) {
   const sources = [planPath(root), progressPath(root)].map(p => exists(p) ? read(p) : '').join('\n');
-  const re = new RegExp('\\b' + prefix + '-(\\d{4})\\b', 'g'); let max = 0, m;
+  // 1.11.1 (14th 버그헌트 P1, UR-0176): 실제 행/헤더의 ID만 카운트 — 라인 시작(표 파이프 `|`/헤더 `#`/리스트 마커 허용)에 한정.
+  //   기존 \b...\b 는 Request 셀 안의 'T-9999' 같은 텍스트 토큰까지 매칭 → 다음 ID 가 폭증(T-10000=5자리)하여 4자리 행 정규식에 안 잡혀 행 손실+중복 ID 유발. width-무관(\d+)로 5자리도 인식.
+  const re = new RegExp('(?:^|\\n)[\\s|#>*-]*' + prefix + '-(\\d+)\\b', 'g'); let max = 0, m;
   while ((m = re.exec(sources))) max = Math.max(max, Number(m[1]));
   return `${prefix}-${String(max + 1).padStart(4, '0')}`;
 }

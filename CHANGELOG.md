@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.11.1 — 2026-06-08 — 데이터 무결성 P1 (14번째 멀티에이전트 버그헌트, UR-0176/0177)
+
+**🐛 데이터 손실·메모리 위조 차단 — leerness 가 보존하는 기록의 무결성 강화.**
+
+### 변경
+- **ID 생성 충돌·행 손실 차단** (UR-0176, P1): `nextId` 가 Request 셀 안의 `T-9999` 같은 텍스트 토큰까지 ID 로 매칭 → 다음 ID 가 `T-10000`(5자리)이 되어 4자리 행 정규식에 안 잡혀 **행이 보이지 않게 사라지고 ID 가 중복**되던 문제. 이제 실제 행/헤더(라인 시작) ID 만 카운트 + width-무관 인식.
+- **feature 그래프 노드 위조 차단** (UR-0177, P1): `_featureBlock` 가 title/notes/input/output 을 raw 기록 → `title="X\n## F-9999 …"` 로 가짜 노드(헤더) 위조가 가능(메모리 기판 prompt-injection)했음. 모든 보간 값에 `_lineSafe`(개행→공백) — decisions/lessons(UR-0108)와 동일 정책.
+
+### 14번째 버그헌트 — 후속 등록 (이번 미수정, 백로그)
+- **UR-0175 (P1-CRITICAL 핵심가치)** verify-claim 기본 모드 fail-open(허위 완료 통과) → 다음 전용 라운드(동작변경·e2e 분석). · UR-0178 completed/verified 미집계 · UR-0179 rule archive 미escape · UR-0180 rule ID 재사용 · UR-0181 MCP path 탈출 · UR-0182 lazy TODO 억제 · UR-0183 session close 정직성 게이트 + feature lock/init-guard 잔여.
+
+### 검증 (회귀 0)
+- **selftest 201→203** (nextId 라인앵커 + _featureBlock 주입차단), 행위 재현: T-9999 텍스트 후 ID T-0003/0004(손실 0, list=disk), feature 주입 2노드(위조 차단).
+- patch(1.11.1, 같은 minor) — R-0011 정책상 npm 미배포, GitHub 만 갱신.
+
 ## 1.11.0 — 2026-06-08 — 🛡️ [안정화/Stable] CLI 견고성 + --json 에이전트 계약 안정 minor
 
 **🛡️ 안정화(Stable) minor — 13번째 멀티에이전트 버그헌트로 발견·수정한 patch(1.10.1~1.10.5)를 검증·통합해 npm 에 안정 공개.** R-0011 배포 정책의 2번째 minor 릴리스.
