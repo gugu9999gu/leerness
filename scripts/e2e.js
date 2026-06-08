@@ -654,7 +654,7 @@ total++;
   fs.appendFileSync(path.join(tmpS, '.harness/progress-tracker.md'),
     '| T-0050 | done | DB 마이그레이션 | 사용자 데이터 DB에 저장, 1000건 insert 성공 | (완료) | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0050', '--path', tmpS, '--strict-claims'], { encoding: 'utf8', timeout: 10000 });
-  const ok = r.status !== 0 && /낙관적 표시.*\(--strict-claims\): ⚠ FAIL/.test(r.stdout) && /DB 호출/.test(r.stdout);
+  const ok = r.status !== 0 && /낙관적 표시[^\n]*⚠ FAIL/.test(r.stdout) && /DB 호출/.test(r.stdout);  // 1.11.2 (UR-0175): 라벨-무관(done 기본/--strict-claims) — optimism FAIL 검증
   console.log(ok ? '✓ B(1.9.26) verify-claim --strict-claims: DB 거짓 evidence 통합 감지' : '✗ --strict-claims 실패');
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }

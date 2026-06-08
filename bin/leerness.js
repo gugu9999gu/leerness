@@ -31,7 +31,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 (MERGE_OVERWRITE_FILES/MINIMAL_SKIP_KEYS 포함)
 
-const VERSION = '1.11.1';
+const VERSION = '1.11.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2926,7 +2926,7 @@ function _selfTestCases() {
     { name: 'exit code 일관성: fail()→exitCode 1 행위 + unknown 명령 안내 (UR-0045 / CV-5 행위화 1.9.366)', run: () => { if (typeof fail !== 'function') return false; const saved = process.exitCode; const _w = process.stdout.write; let setOk = false; try { process.stdout.write = () => true; process.exitCode = 0; fail('selftest probe'); setOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } const src = read(__filename); const dispatchOk = /알 수 없는 명령: \$\{cmd\}/.test(src); return setOk && dispatchOk; } },
     { name: 'brief: 프로젝트 청사진 set/show/export + README 개요 섹션 (UR-0055 사용자명시 1.9.307)', run: () => { const src = read(__filename); const fnOk = typeof briefCmd === 'function' && typeof _loadBrief === 'function' && typeof _briefBlueprint === 'function' && _BRIEF_FIELDS.length === 10; const b = { project: 'X', intro: 'i', purpose: 'p', problem: '', features: ['f1', 'f2'], stack: ['s'], architecture: '', users: [], success: [], nonGoals: [], currentState: '' }; const bp = _briefBlueprint(b, VERSION); const bpOk = /Blueprint/.test(bp) && /소개 \(Intro\)/.test(bp) && /f1/.test(bp) && /신규 프로젝트 시작 가이드/.test(bp); const rb = _briefReadmeBlock(b); const rbOk = rb.includes(BRIEF_START) && rb.includes(BRIEF_END) && /프로젝트 개요/.test(rb) && /\*\*목적\*\*/.test(rb); return fnOk && bpOk && rbOk && /if \(cmd === 'brief'\)/.test(src); } },
     { name: 'brief 2단계: update --direction 이력 + MCP leerness_brief + context 통합 (UR-0055 1.9.308)', run: () => { const src = read(__filename); const b = { project: 'X', intro: '', purpose: '', problem: '', features: [], stack: [], architecture: '', users: [], success: [], nonGoals: [], currentState: '', directionHistory: ['2026-06-04: 확대'] }; const bpOk = /개발 방향 이력/.test(_briefBlueprint(b, VERSION)) && /최근 개발 방향 변경/.test(_briefReadmeBlock(b)); const histWired = /sub === 'update'/.test(src) && /brief\.directionHistory \|\| \[\]\), `\$\{today\(\)\}/.test(src); const mcpOk = require('../lib/mcp-tools').some(t => t.name === 'leerness_brief'); const ctxOk = /brief: \{ intro:/.test(src); return bpOk && histWired && mcpOk && ctxOk; } },
-    { name: 'verify-claim: done 주장 evidence 기본강제 + --lenient + MCP/json 도달 (UR-0048 설치리뷰 critical 1.9.309)', run: () => { const src = read(__filename); const def = /const mustHaveEvidence = !has\('--lenient'\) && \(isDoneClaim \|\| has\('--require-evidence'\)\)/.test(src); const threshold = /has\('--require-evidence'\) \? evq\.ok : \(evq\.hasFile \|\| evq\.hasTest \|\| evq\.hasLog\)/.test(src); const jsonWired = /evidenceComplete:/.test(src) && /!evidenceQualityOk\) return process\.exit\(1\)/.test(src); const mcpLenient = !!require('../lib/mcp-tools').find(t => t.name === 'leerness_verify_claim').inputSchema.properties.lenient; return def && threshold && jsonWired && mcpLenient; } },
+    { name: 'verify-claim: done 주장 evidence 기본강제 + --lenient + MCP/json 도달 (UR-0048 설치리뷰 critical 1.9.309)', run: () => { const src = read(__filename); const def = /const mustHaveEvidence = !has\('--lenient'\) && \(isDoneClaim \|\| has\('--require-evidence'\)\)/.test(src); const threshold = /has\('--require-evidence'\) \? evq\.ok : \(evq\.hasFile \|\| evq\.hasTest \|\| evq\.hasLog\)/.test(src); const jsonWired = /evidenceComplete:/.test(src) && /!evidenceQualityOk[^\n]*\) return process\.exit\(1\)/.test(src); const mcpLenient = !!require('../lib/mcp-tools').find(t => t.name === 'leerness_verify_claim').inputSchema.properties.lenient; return def && threshold && jsonWired && mcpLenient; } },
     { name: '입력 스키마 검증: task status/rule trigger 무효값 거부 + every-round 보존 (UR-0046 설치리뷰 1.9.310)', run: () => { const src = read(__filename); const sets = TASK_STATUSES.has('done') && TASK_STATUSES.has('in-progress') && !TASK_STATUSES.has('nonsense') && RULE_TRIGGERS.has('every-round') && RULE_TRIGGERS.has('every-update') && !RULE_TRIGGERS.has('not-a-trigger'); const helper = typeof _validateChoice === 'function' && _validateChoice('done', TASK_STATUSES, 'x') === true; const wired = /_validateChoice\(arg\('--status', null\), TASK_STATUSES/.test(src) && /_validateChoice\(trigger, RULE_TRIGGERS/.test(src); return sets && helper && wired; } },
     { name: 'init 가드: 미초기화 write 차단 + 다중마커 판별 + --force 우회 (UR-0047 설치리뷰 1.9.311)', run: () => { const src = read(__filename); const fnOk = typeof _isInitialized === 'function' && typeof _requireInit === 'function'; const _fix = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_initfix_')); let liveOk = false; try { fs.writeFileSync(path.join(_fix, 'AGENTS.md'), 'x'); liveOk = _isInitialized(_fix) === true; } finally { try { fs.rmSync(_fix, { recursive: true, force: true }); } catch {} } const emptyOk = _isInitialized(path.join(os.tmpdir(), '__leerness_noinit_marker__')) === false; const wired = ["task add", "task update", "plan add", "decision add", "rule add", "lesson save", "brief set"].every(l => src.includes(`_requireInit(root, '${l}')`)) && !src.includes("_requireInit(root, 'state " + "start')"); const force = /if \(_isInitialized\(root\) \|\| has\('--force'\)\) return true/.test(src); return fnOk && liveOk && emptyOk && wired && force; } },
     { name: 'secret 스캐너 현대 키: OpenAI proj/svcacct·Anthropic api03(_)·GitHub 변종·Stripe·npm 검출 + 오탐 가드 (UR-0050 설치리뷰 1.9.312)', run: () => { const hit = (s) => SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const named = (s, nm) => SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s) && p.name === nm; }); const A = 'A'.repeat(40); const projKey = 'sk-' + 'proj-' + A + '_' + A; const svcKey = 'sk-' + 'svcacct-' + A; const antKey = 'sk-' + 'ant-api03-' + A + '_' + A; const ghoKey = 'gho_' + 'a1B2'.repeat(9); const stripeKey = 'sk_' + 'live_' + A; const npmKey = 'npm_' + 'a1B2'.repeat(9); const asiaKey = 'ASIA' + 'ABCD1234EFGH5678'; const legacy = 'sk-' + A; const hits = hit(projKey) && hit(svcKey) && hit(antKey) && hit(ghoKey) && hit(stripeKey) && hit(npmKey) && hit(asiaKey) && hit(legacy); const names = named(projKey, 'OpenAI project/service key') && named(antKey, 'Anthropic API key') && named(stripeKey, 'Stripe secret key') && named(npmKey, 'npm token'); const clean = !hit('const userName = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return hits && names && clean; } },
@@ -3485,6 +3485,17 @@ function _selfTestCases() {
       const nodes = m._parseFeatureGraph(md);
       // 주입 차단 시 노드 1개(F-0001)만, 가짜 F-9999/F-8888 없음
       return nodes.length === 1 && nodes[0].id === 'F-0001' && !/\n## F-9999/.test(md) && !/\n## F-8888/.test(md);
+    } },
+    { name: '14th 버그헌트 P1-CRITICAL (UR-0175): verify-claim 기본 optimism 게이팅(done) + git --json 노출 + --lenient 탈출 (1.11.2)', run: () => {
+      const src = read(__filename);
+      // 1) done 기본 claimsChecked(--strict-claims 옵트인 아님) 2) --json 에 claimsConsistent+gitCrossCheck 3) --lenient 탈출 4) optimism 전체스캔(walk root) 5) git strongMismatch 는 advisory(기본 게이트 제외)
+      const defaultGate = src.includes("const claimsChecked = !lenient && (isDoneClaim || has('--require-evidence') || has('--strict-claims'));");
+      const jsonExposed = src.includes('claimsConsistent: !claimsChecked ? null : strictOk') && src.includes('gitCrossCheck: !gitApplicable ? null : !gitStrongMismatch');
+      const jsonGate = src.includes('(claimsChecked && !strictOk) || !gitClaimOk) return process.exit(1);');
+      const overall = src.includes('(claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk;');
+      const wholeScan = src.includes('function _scanCodeForPatterns(root)') && src.includes('walk(root, 0);');
+      const gitAdvisory = src.includes("const gitClaimOk = !(has('--strict-claims') && gitStrongMismatch);");
+      return defaultGate && jsonExposed && jsonGate && overall && wholeScan && gitAdvisory;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -9611,6 +9622,22 @@ function verifyClaimCmd(root, taskId) {
   //   공허참("증거 0 done") 은 evidenceQualityOk 가 차단하므로 filesAllExist 는 표준 의미 유지(주장 파일들이 실제 존재하는가).
   const filesAllExist = fileChecks.every(c => c.exists);
 
+  // 1.11.2 (14th 버그헌트 P1-CRITICAL, UR-0175): 허위완료 차단을 "기본값"에서 작동 — done 주장은 optimism(evidence 주장↔코드 호출 흔적) + git 교차검증을 기본 게이팅.
+  //   이전엔 --strict-claims 옵트인일 때만 잡아 기본 모드(verify-claim --run-tests)가 허위완료를 통과(exit 0)시켰고, --json 은 git 신호조차 누락(머신 경로가 더 위험)했음.
+  //   범위: done/완료 주장(또는 --require-evidence/--strict-claims). opt-out: --lenient. --json/human 양 경로가 동일 계산을 공유.
+  const lenient = has('--lenient');
+  const claimsChecked = !lenient && (isDoneClaim || has('--require-evidence') || has('--strict-claims'));
+  let optimismSuspects = [], honestyFindings = [], strictOk = true;
+  if (claimsChecked) {
+    const codeText = _scanCodeForPatterns(root);
+    optimismSuspects = _detectOptimism(evidence, codeText);
+    honestyFindings = _epistemicHonestyCheck(evidence).findings.filter(f => f.severity === 'high');
+    strictOk = optimismSuspects.length === 0 && honestyFindings.length === 0;
+  }
+  const gitStrongMismatch = gitApplicable && claimedInGit.length === 0;  // 변경 있는데 주장 파일이 git 변경에 전무
+  // 1.11.2 (UR-0175): git strongMismatch 는 기본 게이트에서 제외(advisory) — 커밋 후 검증(정상 흐름)에서 커밋된 파일이 working-tree 변경에 없어 false-fail 하므로. --strict-claims 시에만 FAIL 기여. 기본 게이트는 신뢰도 높은 optimism(claimsConsistent)이 담당.
+  const gitClaimOk = !(has('--strict-claims') && gitStrongMismatch);
+
   if (has('--json')) {
     const out = {
       project: path.basename(root),
@@ -9620,9 +9647,13 @@ function verifyClaimCmd(root, taskId) {
       verdict: {
         filesAllExist,
         testCountMatch: declaredTestCount == null || actualTestCount == null || actualTestCount >= declaredTestCount,
-        evidenceComplete: !mustHaveEvidence ? null : evq.ok
+        evidenceComplete: !mustHaveEvidence ? null : evq.ok,
+        claimsConsistent: !claimsChecked ? null : strictOk,            // 1.11.2 (UR-0175): optimism+정직성 (기본 게이팅)
+        gitCrossCheck: !gitApplicable ? null : !gitStrongMismatch      // 1.11.2 (UR-0175): git 교차검증 (머신 경로 노출)
       },
-      evidence: { required: mustHaveEvidence, ...evq }
+      evidence: { required: mustHaveEvidence, ...evq },
+      claims: !claimsChecked ? null : { ok: strictOk, optimism: optimismSuspects.map(s => ({ kind: s.kind, label: s.label })), honesty: honestyFindings.map(f => ({ dim: f.dim, label: f.label })) },
+      git: gitChanged === null ? { applicable: false, reason: 'not-a-git-repo' } : (!gitApplicable ? { applicable: false, reason: 'no-working-changes-or-no-claimed-files' } : { applicable: true, claimedInGit: claimedInGit.length, claimedNotInGit, strongMismatch: gitStrongMismatch })
     };
     if (runResult) {
       out.run = runResult;
@@ -9634,7 +9665,8 @@ function verifyClaimCmd(root, taskId) {
     }
     log(JSON.stringify(out, null, 2));
     if (runResult && !runResult.skipped && !runResult.allPassed) return process.exit(1);
-    if (!filesAllExist || !out.verdict.testCountMatch || !evidenceQualityOk) return process.exit(1);
+    // 1.11.2 (UR-0175): --json 도 optimism+git 게이팅 — 머신 경로가 허위완료를 통과시키지 않도록(human 경로와 동일).
+    if (!filesAllExist || !out.verdict.testCountMatch || !evidenceQualityOk || (claimsChecked && !strictOk) || !gitClaimOk) return process.exit(1);
     return;
   }
 
@@ -9675,17 +9707,7 @@ function verifyClaimCmd(root, taskId) {
     }
   }
 
-  // 1.9.26: --strict-claims — 낙관적 표시 자동 감지 (evidence vs 코드 호출 흔적)
-  let optimismSuspects = [];
-  let strictOk = true;
-  let honestyFindings = [];
-  if (has('--strict-claims')) {
-    const codeText = _scanCodeForPatterns(root);
-    optimismSuspects = _detectOptimism(evidence, codeText);
-    // 1.9.305 (사용자 명시): 인식론적 정직성 high 발견(근거없는 단정/미검증 판단)도 strict 실패에 반영.
-    honestyFindings = _epistemicHonestyCheck(evidence).findings.filter(f => f.severity === 'high');
-    strictOk = optimismSuspects.length === 0 && honestyFindings.length === 0;
-  }
+  // 1.11.2 (UR-0175): optimism/honesty/strictOk 는 상단(--json 위)에서 claimsChecked 기준으로 이미 계산됨 (양 경로 공유).
 
   log('');
   const allFilesOk = filesAllExist;
@@ -9697,35 +9719,32 @@ function verifyClaimCmd(root, taskId) {
     log(`  - npm test 실행: ${runTestsOk ? '✓ all passed' : '✗ FAIL'}`);
     if (declaredPass) log(`  - 주장과 실행 결과 일치: ${declaredPassMatchesActual ? '✓ pass' : '⚠ 다름'}`);
   }
-  if (has('--strict-claims')) {
-    if (strictOk) log(`  - 낙관적 표시 + 정직성 (--strict-claims): ✓ pass (의심 없음)`);
+  // 1.11.2 (UR-0175): optimism+정직성 — done 주장은 기본 게이팅(claimsChecked). 완화: --lenient.
+  if (claimsChecked) {
+    if (strictOk) log(`  - 낙관적 표시 + 정직성 (done 기본): ✓ pass (의심 없음)`);
     else {
-      log(`  - 낙관적 표시 + 정직성 (--strict-claims): ⚠ FAIL (낙관 ${optimismSuspects.length} · 정직성 ${honestyFindings.length})`);
+      log(`  - 낙관적 표시 + 정직성 (done 기본 — 완화: --lenient): ⚠ FAIL (낙관 ${optimismSuspects.length} · 정직성 ${honestyFindings.length})`);
       for (const s of optimismSuspects) log(`    · [${s.kind}] ${s.label}: evidence에 주장 있는데 코드에 호출 흔적 없음`);
       for (const f of honestyFindings) log(`    · [정직성:${f.dim}] ${f.label}: ${f.detail}`);
     }
   }
-  // 1.9.302 (UR-0042): git diff 시맨틱 교차검증 — 주장한 파일이 실제 git 변경(working tree+직전커밋)에 있는가.
-  //   advisory 기본 표시. --strict-claims 시 강한 불일치(변경 있는데 주장 파일이 하나도 git 변경에 없음)는 FAIL 기여.
-  let gitClaimOk = true;
+  // 1.9.302 (UR-0042) + 1.11.2 (UR-0175): git diff 시맨틱 교차검증 — 주장 파일이 실제 git 변경에 있는가. gitClaimOk/gitStrongMismatch 는 상단 공유(done 기본 게이팅, --lenient 완화).
   if (gitChanged === null) {
     log(`  - git diff 교차검증: ⊘ skip (git repo 아님 — 검증 불가)`);
   } else if (!gitApplicable) {
     log(`  - git diff 교차검증: ⊘ skip (working tree 변경 0 또는 주장 파일 0 — 이미 커밋됐거나 해당 없음)`);
   } else {
-    const strongMismatch = claimedInGit.length === 0;  // 변경 있는데 주장 파일이 git 변경에 전무
-    log(`  - git diff 교차검증: ${strongMismatch ? '⚠ 불일치' : '✓'} 주장 ${files.length}개 중 실제 변경 ${claimedInGit.length}개${claimedNotInGit.length ? ` · git 변경에 없음: ${claimedNotInGit.slice(0, 5).join(', ')}` : ''}`);
-    if (strongMismatch) log(`    · 주장한 파일이 working tree/직전커밋 변경에 전무 — 변경이 더 오래전 커밋이거나, 실제로 변경 안 됐을 수 있음(허위완료 의심)`);
-    if (has('--strict-claims') && strongMismatch) gitClaimOk = false;  // strict 시 강한 불일치는 FAIL
+    log(`  - git diff 교차검증: ${gitStrongMismatch ? '⚠ 불일치' : '✓'} 주장 ${files.length}개 중 실제 변경 ${claimedInGit.length}개${claimedNotInGit.length ? ` · git 변경에 없음: ${claimedNotInGit.slice(0, 5).join(', ')}` : ''}`);
+    if (gitStrongMismatch) log(`    · 주장한 파일이 working tree/직전커밋 변경에 전무 — 변경이 더 오래전 커밋이거나, 실제로 변경 안 됐을 수 있음(허위완료 의심)${has('--strict-claims') ? ' → FAIL' : ' (advisory — 커밋 후 검증 시 정상일 수 있음)'}`);
   }
   // 1.9.309 (UR-0048): done 주장 evidence 완전성 — 기본 강제(상단 pre-compute). --lenient 로 opt-out.
   if (mustHaveEvidence) {
     log(`  - evidence 완전성 (done 기본 강제): ${evidenceQualityOk ? '✓ pass (파일+테스트 근거 있음)' : `✗ FAIL (누락: ${evq.missing.join(', ')})`}`);
     if (!evidenceQualityOk) log(`    · done 주장은 수정 파일 경로 + 테스트명/개수 가 evidence 에 있어야 함 (테스트 통과만으로는 불충분). 완화: --lenient`);
   }
-  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (has('--strict-claims') && !strictOk) || !evidenceQualityOk || !gitClaimOk;
+  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk;
   // 1.9.287: 정직한 한계 고지 — 테스트 통과 ≠ 의미적 구현 정확성
-  if (has('--strict-claims') || mustHaveEvidence) {
+  if (claimsChecked || mustHaveEvidence) {
     log('');
     log(`  ℹ 한계: 테스트 통과는 "의미적 구현 정확성"을 보장하지 않음 — evidence 가 해당 주장(수정 파일/테스트)을 직접 링크해야 신뢰도↑.`);
   }
@@ -10209,23 +10228,21 @@ function depsImpactCmd(root, targetCapability) {
 // _extractUrlClaims/_verifyUrlClaim moved to lib/pure-utils.js (UR-0057).
 
 function _scanCodeForPatterns(root) {
-  // src/, bin/, lib/, scripts/ 의 .js/.ts/.gd/.py 파일 본문 통합
+  // 1.11.2 (14th 버그헌트 P2, UR-0175): 전체 프로젝트 스캔(무거운 디렉토리/도트 디렉토리 제외) — 기존 src/bin/lib/scripts 한정은 routes/app/pages/controllers 등 비표준 위치 코드를 못 찾아 optimism 오탐(legit 차단)+미탐(허위 통과)을 유발했음. 루트부터 walk, heavy 디렉토리·예산(4MB)·깊이(8) 상한.
   let combined = '';
-  const dirs = ['src', 'bin', 'lib', 'scripts'];
-  for (const d of dirs) {
-    const dp = path.join(root, d);
-    if (!exists(dp)) continue;
-    function walk(p) {
-      let entries; try { entries = fs.readdirSync(p, { withFileTypes: true }); } catch { return; }
-      for (const e of entries) {
-        const fp = path.join(p, e.name);
-        if (e.isDirectory()) { walk(fp); continue; }
-        if (!/\.(js|ts|jsx|tsx|gd|cs|py|rb|go|rs)$/i.test(e.name)) continue;
-        try { combined += read(fp) + '\n'; } catch {}
-      }
+  const SKIP = /^(node_modules|dist|build|coverage|vendor|venv|__pycache__|out|tmp|_apps|_reports)$/i;
+  let budget = 4_000_000;
+  function walk(p, depth) {
+    if (budget <= 0 || depth > 8) return;
+    let entries; try { entries = fs.readdirSync(p, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (budget <= 0) return;
+      if (e.isDirectory()) { if (!SKIP.test(e.name) && !e.name.startsWith('.')) walk(path.join(p, e.name), depth + 1); continue; }
+      if (!/\.(js|ts|jsx|tsx|gd|cs|py|rb|go|rs|java|php|kt|swift)$/i.test(e.name)) continue;
+      try { const t = read(path.join(p, e.name)); combined += t + '\n'; budget -= t.length; } catch {}
     }
-    walk(dp);
   }
+  walk(root, 0);
   return combined;
 }
 

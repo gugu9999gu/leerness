@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.11.2 — 2026-06-08 — 🔴 핵심가치: verify-claim 기본 모드 허위완료 차단 (14th 버그헌트 P1-CRITICAL, UR-0175)
+
+**🛡️ leerness 정체성 복원 — "증거 없으면 완료 불가"가 기본값에서 작동.** (동작 변경)
+
+### 문제 (직접 재현)
+`verify-claim --run-tests`(문서화된 기본 흐름)가 **허위 완료를 통과**시켰음(exit 0): stub 코드 + 아무것도 검증 안 하는 테스트 + 낙관적 evidence → 통과. 허위를 잡는 optimism/git 교차검증이 `--strict-claims` 옵트인일 때만 작동했고, `--json`(에이전트/MCP 경로)은 git 신호조차 누락해 머신 경로가 더 위험했음.
+
+### 변경
+- **done 주장 기본 게이팅**: optimism(evidence 주장↔코드 호출 흔적) + 정직성(근거없는 단정) 검사를 done 완료 주장에 **기본 적용**(이전 `--strict-claims` 옵트인 → 이제 done 기본). 완화: `--lenient`. `--json`/human 양 경로 동일 계산 공유.
+- **optimism 전체 프로젝트 스캔**: 기존 `src/bin/lib/scripts` 한정 → 루트부터 walk(무거운 디렉토리/예산 상한). routes/app/pages 등 비표준 위치 코드도 인식 → FP(legit 차단)·FN(허위 통과) 동시 해소.
+- **--json 신호 노출**: `verdict.claimsConsistent`(optimism+정직성) + `verdict.gitCrossCheck` + `claims`/`git` 상세 → 머신 경로도 human 과 동일하게 정직.
+- **git strongMismatch 는 advisory**(기본 게이트 제외, `--strict-claims` 시만 FAIL): 커밋 후 검증(정상 흐름)에서 커밋된 파일이 working-tree 변경에 없어 false-fail 하므로. 기본 게이트는 신뢰도 높은 optimism 이 담당.
+
+### 검증 (회귀 0)
+- **selftest 203→204**, 행위 재현: 허위완료(stub) 기본 **exit 1**(차단), 정상완료(실코드) 기본 **exit 0**(false-fail 없음), `--lenient` **exit 0**(탈출), `--json` claimsConsistent/gitCrossCheck 노출.
+- patch(1.11.2, 같은 minor) — R-0011 정책상 npm 미배포. **이 동작 변경은 1.12 안정 minor 의 핵심 헤드라인이 됨.**
+
+### 14th 잔여 백로그
+UR-0178 completed 집계 · 0179 rule archive escape · 0180 rule ID 재사용 · 0181 MCP path 탈출 · 0182 lazy TODO 억제 · 0183 session close 정직성 게이트.
+
 ## 1.11.1 — 2026-06-08 — 데이터 무결성 P1 (14번째 멀티에이전트 버그헌트, UR-0176/0177)
 
 **🐛 데이터 손실·메모리 위조 차단 — leerness 가 보존하는 기록의 무결성 강화.**
