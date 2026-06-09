@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.17.0';
+const VERSION = '1.17.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3557,6 +3557,15 @@ function _selfTestCases() {
       const src = read(__filename);
       return src.includes('const _GROUP_USAGE = {') && src.includes("if (_GROUP_USAGE[cmd] && !args[1])") && src.includes("'subcommand_required'");
     } },
+    { name: '17th 버그헌트 P2: plan add 공백제목 trim(기본값) + milestone 파서 개행 미흡수 (1.17.1)', run: () => {
+      const src = read(__filename);
+      const wired = src.includes("args.slice(2).join(' ').trim() || '새 계획'") && src.includes('(M-\\d{4})\\.[ \\t]*(.+?)$');
+      // 파서 동작: 공백제목 milestone 이 다음 줄 'Status:' 를 제목으로 먹지 않음
+      const block = '### M-0006.   \nStatus: planned\nProgress: 0%\n';
+      const m = block.match(/^### (M-\d{4})\.[ \t]*(.+?)$/m);
+      const safe = !m || (m[2] || '').indexOf('Status') === -1;
+      return wired && safe;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6445,7 +6454,7 @@ function planListCmd(root, opts = {}) {
   // ### M-XXXX. <title> 블록 추출
   const blocks = text.split(/\n(?=### M-\d{4}\.)/);
   for (const b of blocks) {
-    const headerMatch = b.match(/^### (M-\d{4})\.\s*(.+?)$/m);
+    const headerMatch = b.match(/^### (M-\d{4})\.[ \t]*(.+?)$/m);
     if (!headerMatch) continue;
     const id = headerMatch[1];
     const title = headerMatch[2].trim();
@@ -7147,7 +7156,7 @@ function _jaccard(a, b) {
 function taskRelink(root) {
   root = absRoot(root);
   const planText = exists(planPath(root)) ? read(planPath(root)) : '';
-  const milestones = [...planText.matchAll(/^### (M-\d{4})\.\s*(.+?)$/gm)]
+  const milestones = [...planText.matchAll(/^### (M-\d{4})\.[ \t]*(.+?)$/gm)]
     .map(m => ({ id: m[1], text: m[2].trim() }));
   const rows = readProgressRows(root);
   const linkedM = new Set(rows.map(r => (r.evidence.match(/M-\d{4}/) || [])[0]).filter(Boolean));
@@ -12180,7 +12189,7 @@ function _brainstormFor(root, topic) {
     const planText = read(planFile_brainstorm);
     const milestoneBlocks = planText.split(/\n(?=### M-\d{4}\.)/);
     for (const b of milestoneBlocks) {
-      const m = b.match(/^### (M-\d{4})\.\s*(.+?)$/m);
+      const m = b.match(/^### (M-\d{4})\.[ \t]*(.+?)$/m);
       if (m && matches(b)) {
         const idx = planText.indexOf(b);
         const lineNo = idx >= 0 ? planText.slice(0, idx).split('\n').length : 0;
@@ -12475,7 +12484,7 @@ function brainstormCmd(root, topic) {
     const planText = read(planFile_b2);
     const milestoneBlocks = planText.split(/\n(?=### M-\d{4}\.)/);
     for (const b of milestoneBlocks) {
-      const m = b.match(/^### (M-\d{4})\.\s*(.+?)$/m);
+      const m = b.match(/^### (M-\d{4})\.[ \t]*(.+?)$/m);
       if (m && matches(b)) {
         const idx = planText.indexOf(b);
         const lineNo = idx >= 0 ? planText.slice(0, idx).split('\n').length : 0;
@@ -19433,7 +19442,7 @@ async function main() {
     const root = absRoot(arg('--path', process.cwd())); const sub = args[1] || 'show';
     if (sub==='show')     return planShow(root);
     if (sub==='init')     return planInit(root);
-    if (sub==='add')      return planAdd(root, args.slice(2).join(' ') || '새 계획');
+    if (sub==='add')      return planAdd(root, args.slice(2).join(' ').trim() || '새 계획');  // 17th 버그헌트 P2: 공백-only 제목이 || 기본값을 우회(truthy)해 plan.md 손상(파서가 다음 줄 'Status:' 흡수) → trim 후 판정
     if (sub==='drop')     return planDrop(root, args.slice(2).join(' ') || '드랍 항목');
     if (sub==='remove')   return planRemoveCmd(root, args[2]);
     if (sub==='progress') return planProgress(root, { json: has('--json'), updateIntent: args.slice(2).some(a => /^M-\d/i.test(a)) || has('--status') || arg('--progress', null) != null });  // 1.9.447 (UR-0145): --json + 변경의도 인자 경고

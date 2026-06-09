@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.17.1 — 2026-06-09 — 17번째 버그헌트: plan add 공백제목 데이터 손상 차단
+
+**🔬 17번째 버그헌트(이번 세션 신규코드 회귀 + 광역 스윕).** 신규코드(gate --json stdout-swap·memory --json·_GROUP_USAGE·scan break·_cellSafe)는 **0 결함**(5000키 664ms 등 입증). plan add 입력검증 1건 발견·수정.
+
+### 수정 (재현 검증)
+- **🟠 plan add 공백 제목 → plan.md 손상 (P2)**: `plan add "   "`(공백만)이 `|| 기본값`을 우회(truthy)해 빈 제목으로 기록 → milestone 파서의 `\s*` 가 개행을 흡수해 **다음 줄 `Status: planned` 를 제목으로 오인**. 2중 수정: ① dispatch 에서 `.trim()` 후 판정(공백→기본값 '새 계획'), ② 파서 `\.\s*` → `\.[ \t]*`(개행 미흡수, 5곳 + pure-utils) — 손상 클래스 차단.
+
+### 검증 (회귀 0)
+- **selftest 216→217** · **E2E 365/365** · `plan add "   "` → '새 계획'(손상 없음)·정상 제목 보존 행위 재현.
+- patch(1.17.1) — npm 미배포(R-0011, GitHub). (P3 plan add 빈-인자 기본값은 의도된 동작 — trim 으로 안전화.)
+
 ## 1.17.0 — 2026-06-09 — 🛡️ [안정화/Stable] 외부 클린룸 일관성 안정 minor
 
 **🛡️ 안정화(Stable) minor.** 외부 클린룸 리뷰(게시본 무README 신규사용자 관점)에서 도출한 --json·CLI 일관성 개선(1.16.1~1.16.2)을 검증·통합해 npm 공개. R-0011 정책의 8번째 minor. 영상은 HyperFrames "문제→해소" 디자인.
