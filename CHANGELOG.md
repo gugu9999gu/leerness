@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.13.0 — 2026-06-09 — 🛡️ [안정화/Stable] verify-claim 다언어 + 정직성·자원·보안 안정화
+
+**🛡️ 안정화(Stable) minor. 헤드라인 = verify-claim 다언어 지원(비-JS 개발자 핵심 회귀 수정).** 15번째 멀티에이전트 버그헌트 성과(1.12.2~1.12.5)를 검증·통합해 npm 공개. R-0011 정책의 4번째 minor.
+
+### ⚠️ 동작 변경 (중요)
+- **verify-claim 기본 게이트가 Python·Ruby·Go·C#·Java·PHP·Rust 등 비-JS 구현을 인식**합니다(1.12.0 의 게이트는 JS 패턴만 알아 비-JS 정상 완료를 오차단했음). 정직하게 구현한 완료는 언어 무관 통과, 가짜 완료는 여전히 차단.
+
+### 이번 minor 통합 (1.12.2~1.12.5)
+- **🌐 verify-claim 다언어 지원** (UR-0014): `OPTIMISM_PATTERNS.codeRe` 에 교차언어 idiom 추가 — 비-JS 정상 done-claim 오차단(exit 1) 제거. 1.12.0 핵심가치의 비-JS 회귀 수정.
+- **🔒 MCP 정직성** (UR-0181): unknown tool 호출의 임의경로 쓰기 차단(사용통계 기록을 도구 검증 후로). path-타게팅은 generic 서버 설계로 확인(맹신 X — 과수정 회피).
+- **🔍 탐지 정직성** (UR-0182/0183): lazy detect TODO 파일별 추적(무관 task 의 'TODO' 글자 전역 억제 제거) + session close 완료 정직성 advisory(증거 없는 done 노출).
+- **🧹 견고성/자원/정확성** (UR-0015~0021): glossary 표 파이프 escape · MCP _chunkSize 클램프(무한루프 데이터손실) · api-skill CRLF/BOM · shell-guard 공백없는 `&&` · 대형파일 stat-before-read(메모리 2배 스파이크) · 중첩 skip-dir 시크릿 오탐 · requirements pip 디렉티브.
+
+### 검증 (회귀 0)
+- **selftest 210 PASS** · **E2E 365/365 PASS** · npm gate=minor_bump. Python API done-claim→exit 0, 중첩 node_modules 시크릿 제외, MCP unknown tool 쓰기 차단 등 행위 재현.
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag annotation (Stable) · GitHub release (Stable) · npm dist-tag `stable` 시도.
+
 ## 1.12.5 — 2026-06-09 — 15th 버그헌트 잔여 5종: CRLF·shell-guard·메모리·skip-dir·requirements
 
 **🧹 15번째 버그헌트 잔여 클러스터(UR-0017~0021) 일괄 처리 — 견고성/자원/정확성.**
