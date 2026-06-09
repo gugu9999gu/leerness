@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.12.3';
+const VERSION = '1.12.4';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3533,6 +3533,19 @@ function _selfTestCases() {
       const scSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js'));
       const honesty = scSrc.includes('jsonResult.completionHonesty =') && scSrc.includes("doneWithoutEvidence: _doneNoEvidence.length");
       return todoPerFile && honesty;
+    } },
+    { name: '15th 버그헌트 P1/P2 (UR-0014/0015/0016): optimism 다언어 codeRe + glossary _cellSafe + MCP _chunkSize 클램프 (1.12.4)', run: () => {
+      const cat = require('../lib/catalogs').OPTIMISM_PATTERNS;
+      const api = cat.find(p => p.kind === 'API');
+      // 다언어: Python requests / Ruby Net::HTTP / Go http.Get / C# HttpClient 매칭
+      const multiLang = api.codeRe.test('requests.get(url)') && api.codeRe.test('Net::HTTP.get') && api.codeRe.test('http.Get(url)') && api.codeRe.test('new HttpClient()') && api.codeRe.test('fetch(');
+      const m = require('../lib/pure-utils');
+      // glossary 표 셀 파이프 escape
+      const md = m._renderGlossaryMd([{ term: 'x', plainKo: 'a | b', plainEn: 'a | b', category: 'c', source: 'catalog' }], {});
+      const pipeEsc = md.includes('a \\| b') && !/\| a \| b \|/.test(md.replace(/\\\|/g, '§'));
+      const src = read(__filename);
+      const clamp = src.includes('const _cs = Math.floor(Number(args._chunkSize));') && src.includes('(Number.isFinite(_cs) && _cs > 0) ? _cs : 50000');
+      return multiLang && pipeEsc && clamp;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -15380,7 +15393,9 @@ function mcpServeCmd(root) {
         const r = callLeerness(cliArgs);
         // 1.9.61: cursor 기반 페이지네이션 — 긴 출력은 cursor offset로 다음 청크
         const fullText = r.stdout || r.stderr || '(no output)';
-        const CHUNK_SIZE = (args._chunkSize && Number.isFinite(args._chunkSize)) ? args._chunkSize : 50000;
+        // 1.12.4 (15th 버그헌트 P2, UR-0016): _chunkSize 를 양의 정수로 클램프 — 음수/소수면 slice 빈 출력 + nextCursor 음수 → 무한 빈-루프(데이터 손실)였음.
+        const _cs = Math.floor(Number(args._chunkSize));
+        const CHUNK_SIZE = (Number.isFinite(_cs) && _cs > 0) ? _cs : 50000;
         const cursor = (args._cursor && /^\d+$/.test(String(args._cursor))) ? parseInt(args._cursor, 10) : 0;
         const chunk = fullText.slice(cursor, cursor + CHUNK_SIZE);
         const nextCursor = (cursor + CHUNK_SIZE) < fullText.length ? String(cursor + CHUNK_SIZE) : null;

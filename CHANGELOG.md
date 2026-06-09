@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.12.4 — 2026-06-09 — 🌐 verify-claim 다언어 지원 + glossary 표/MCP 페이지네이션 (15th 버그헌트 P1/P2)
+
+**🔴 핵심 회귀 수정: verify-claim 기본 게이트가 非JS 정상 완료를 오차단하던 문제.** 15번째 멀티에이전트 버그헌트(크로스플랫폼·최신기능·성능 3관점) 결과 중 즉시-수정 가능한 고가치 3건.
+
+### 변경
+- **🔴 verify-claim 다언어 지원** (UR-0014, P1): 1.12.0 의 optimism 기본 게이트가 `OPTIMISM_PATTERNS.codeRe` 를 **JS 전용**으로 두고도 코드 스캐너는 13개 언어를 읽어, Python(`requests`)·Ruby(`Net::HTTP`)·Go(`http.Get`)·C#(`HttpClient`)·Java·PHP·Rust 로 정직하게 구현한 done-claim 을 "호출 흔적 없음"으로 **오차단(exit 1)** 했음. 각 codeRe 에 교차언어 idiom 추가 → 非JS 정상 완료 통과. (검출 관대화 = 정직한 작업 오차단 제거; 과탐보다 안전.)
+- **glossary.md 표 파이프 escape** (UR-0015, P2): 표 셀에 `_lineSafe`(개행만 제거) 대신 `_cellSafe`(파이프 escape) 적용 — 의존성 description 의 `|` 가 표 칼럼을 깨뜨리던 문제(node_modules description fallback 벡터).
+- **MCP 페이지네이션 _chunkSize 클램프** (UR-0016, P2): 음수/소수 `_chunkSize` → 빈 출력 무한 루프(데이터 손실)였음 → 양의 정수로 클램프.
+
+### 검증 (회귀 0)
+- **selftest 207→209**, 행위 재현: Python API done-claim 기본 verify-claim **exit 0**(false-fail 제거), glossary `|`→`\|`, _chunkSize 음수 클램프.
+- patch(1.12.4, 같은 minor) — R-0011 정책상 npm 미배포. 15th 잔여(UR-0017~0021): _loadAPISkill CRLF, shell-guard 공백없는 &&, 대형파일 stat-before-read, 중첩 skip-dir, requirements `-` — 후속.
+
 ## 1.12.3 — 2026-06-09 — 정직성 마무리: lazy TODO 파일별 추적 + session close 완료 정직성 (14th 버그헌트, UR-0182/0183)
 
 **🔍 14번째 버그헌트 잔여 2건 — 정직성 탐지 정밀화.**
