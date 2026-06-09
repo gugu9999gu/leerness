@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.13.1';
+const VERSION = '1.13.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3561,6 +3561,10 @@ function _selfTestCases() {
       const reqs = m._parseRequirementsTxt('-e git+https://x\n-r base.txt\n--hash=sha256:abc\nrequests==2.31\n');
       const reqDirectives = reqs.length === 1 && reqs[0] === 'requests';
       return apiCrlf && statBeforeRead && nestedSkip && shellNoSpace && reqDirectives;
+    } },
+    { name: 'Karpathy 가이드라인3 "외과적 변경" (UR-0030): verify-claim 역방향 git 교차검증 scope-creep 표면화 (1.13.2)', run: () => {
+      const src = read(__filename);
+      return src.includes('const changedNotClaimed = gitApplicable') && src.includes('files.some(f => _claimFileInGit(f, new Set([g])))') && src.includes('scopeCreep:') && src.includes('외과적 변경 점검');
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -9630,6 +9634,9 @@ function verifyClaimCmd(root, taskId) {
   const gitApplicable = !!gitChanged && gitChanged.size > 0 && files.length > 0;
   const claimedInGit = gitApplicable ? files.filter(f => _claimFileInGit(f, gitChanged)) : [];
   const claimedNotInGit = gitApplicable ? files.filter(f => !_claimFileInGit(f, gitChanged)) : [];
+  // 1.13.2 (Karpathy 가이드라인 3 "외과적 변경", UR-0030): 역방향 교차검증 — git 에 변경됐으나 evidence/주장에 없는 파일(scope-creep / 요청 범위 밖 변경 신호). 하네스 자체 기록(.harness 등)은 제외. advisory(오탐 방지 — 기본 FAIL 아님, 표면화만).
+  const _SCOPE_SKIP = /^(\.harness[\\/]|\.git[\\/]|node_modules[\\/]|\.claude[\\/]|dist[\\/]|build[\\/])/;
+  const changedNotClaimed = gitApplicable ? [...gitChanged].filter(g => !_SCOPE_SKIP.test(g) && !files.some(f => _claimFileInGit(f, new Set([g])))) : [];
   // 테스트 카운트: tests/test.js의 check( 또는 it( 또는 test( 개수
   let actualTestCount = null;
   const candidateTestFiles = ['tests/test.js', 'test/test.js', 'tests/index.js'];
@@ -9731,7 +9738,8 @@ function verifyClaimCmd(root, taskId) {
       },
       evidence: { required: mustHaveEvidence, ...evq },
       claims: !claimsChecked ? null : { ok: strictOk, optimism: optimismSuspects.map(s => ({ kind: s.kind, label: s.label })), honesty: honestyFindings.map(f => ({ dim: f.dim, label: f.label })) },
-      git: gitChanged === null ? { applicable: false, reason: 'not-a-git-repo' } : (!gitApplicable ? { applicable: false, reason: 'no-working-changes-or-no-claimed-files' } : { applicable: true, claimedInGit: claimedInGit.length, claimedNotInGit, strongMismatch: gitStrongMismatch })
+      git: gitChanged === null ? { applicable: false, reason: 'not-a-git-repo' } : (!gitApplicable ? { applicable: false, reason: 'no-working-changes-or-no-claimed-files' } : { applicable: true, claimedInGit: claimedInGit.length, claimedNotInGit, strongMismatch: gitStrongMismatch, changedNotClaimed }),
+      scopeCreep: !gitApplicable ? null : { count: changedNotClaimed.length, files: changedNotClaimed.slice(0, 10) }  // 1.13.2 (Karpathy 외과적 변경): 요청/주장 밖 변경 파일(advisory)
     };
     if (runResult) {
       out.run = runResult;
@@ -9814,6 +9822,8 @@ function verifyClaimCmd(root, taskId) {
   } else {
     log(`  - git diff 교차검증: ${gitStrongMismatch ? '⚠ 불일치' : '✓'} 주장 ${files.length}개 중 실제 변경 ${claimedInGit.length}개${claimedNotInGit.length ? ` · git 변경에 없음: ${claimedNotInGit.slice(0, 5).join(', ')}` : ''}`);
     if (gitStrongMismatch) log(`    · 주장한 파일이 working tree/직전커밋 변경에 전무 — 변경이 더 오래전 커밋이거나, 실제로 변경 안 됐을 수 있음(허위완료 의심)${has('--strict-claims') ? ' → FAIL' : ' (advisory — 커밋 후 검증 시 정상일 수 있음)'}`);
+    // 1.13.2 (Karpathy 가이드라인 3 "외과적 변경", UR-0030): scope-creep 표면화 — git 변경됐으나 evidence/주장에 없는 파일.
+    if (changedNotClaimed.length) log(`    · 🔬 외과적 변경 점검: git 에 변경됐으나 evidence/주장에 없는 파일 ${changedNotClaimed.length}건: ${changedNotClaimed.slice(0, 5).join(', ')}${changedNotClaimed.length > 5 ? ' …' : ''} — 요청 범위 밖 변경(scope creep)인지 확인 (advisory)`);
   }
   // 1.9.309 (UR-0048): done 주장 evidence 완전성 — 기본 강제(상단 pre-compute). --lenient 로 opt-out.
   if (mustHaveEvidence) {

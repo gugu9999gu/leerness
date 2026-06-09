@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.13.2 — 2026-06-09 — Karpathy 가이드라인 정렬: verify-claim scope-creep 표면화 (외과적 변경)
+
+**🔬 외부 에이전트(Sonnet/Opus) 가 leerness 를 Andrej Karpathy 4대 코딩 가이드라인 대비 검토.** 두 리뷰가 수렴: leerness 는 원칙4(목표주도/검증루프)는 최강이나, **원칙3(외과적 변경)이 최대 갭** — 변경 파일이 요청 범위 내인지 검사가 없었음. 최고가치·최저노력 항목을 즉시 구현(신규 명령 0 — leerness 자신의 원칙2 위반 악화 방지).
+
+### 변경 (UR-0030, Karpathy 원칙3)
+- **verify-claim 역방향 git 교차검증**: 기존엔 "주장한 파일이 git 변경에 있는가"(한 방향)만 봤음. 이제 **"git 에 변경됐으나 evidence/주장에 없는 파일"(scope-creep / 요청 범위 밖 변경 신호)** 도 표면화 — `--json scopeCreep` + 사람용 advisory(`🔬 외과적 변경 점검`). 하네스 자체 기록(.harness/.git/node_modules 등) 제외, 오탐 방지 위해 advisory(기본 FAIL 아님). 이미 계산하던 `gitChanged` Set 재사용 — 최소 변경.
+
+### 검증 (회귀 0)
+- **selftest 210→211**, 행위 재현: claim a.js + change a.js,b.js → `scopeCreep={count:1,files:["b.js"]}` (.harness 정확 제외).
+- 백로그(기존 명령 확장 권장): review-request scope/단순성 신호(원칙1+2, UR-0031) · plan `--done-when` 성공기준(원칙4, UR-0032) · leerness 자체 단순화 검토(원칙2, UR-0033).
+- patch(1.13.2) — R-0011 정책상 npm 미배포(GitHub).
+
 ## 1.13.1 — 2026-06-09 — 블라인드 3-모델 리뷰 수정 + README 재구성 (codex gpt-5.5 · Sonnet 4.8 · Opus 4.8)
 
 **🔍 블라인드 멀티모델 리뷰**: 3개 모델(codex gpt-5.5 외부 CLI + Claude Sonnet/Opus 4.8 서브에이전트)이 **leerness 소개 없이, README 를 물리적으로 제거(숨김)한 클린룸**에서 npm 최신본(1.13.0)을 코드·CLI·행위만으로 분석. 발견을 맹신 X로 직접 재현·검증해 수정하고, 그 리뷰 내용으로 README 를 재구성.
