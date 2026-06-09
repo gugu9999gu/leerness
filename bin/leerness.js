@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.13.0';
+const VERSION = '1.13.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3313,9 +3313,11 @@ function _selfTestCases() {
       return wired && behav;
     } },
     { name: 'README ASCII 배너 표시 + CLI _banner 와 동일 아트 (1.9.441)', run: () => {
-      const readme = read(path.join(path.dirname(__filename), '..', 'README.md'));
+      // 1.13.1 (15th 블라인드 리뷰 P3, Opus): README 부재 시 read() throw 로 selftest 가 깨끗한 실패 대신 예외 → exists 가드. README 는 코어 무결성 파일이 아니므로(문서 pruning 가능) 없으면 통과 처리, 있으면 CLI _banner 와 일치 검사.
+      const readmePath = path.join(path.dirname(__filename), '..', 'README.md');
       const bannerLine = '███████╗███████╗██╗  ██╗'.slice(0, 0) + '██║     █████╗  █████╗  ██████╔╝';  // LEERNESS 배너 고유 라인(자기참조 회피 split)
-      return readme.includes(bannerLine) && read(__filename).includes(bannerLine);  // README ↔ CLI _banner 동일 아트
+      if (!exists(readmePath)) return read(__filename).includes(bannerLine);  // 문서 없으면 CLI 측 아트만 확인
+      return read(readmePath).includes(bannerLine) && read(__filename).includes(bannerLine);  // README ↔ CLI _banner 동일 아트
     } },
     { name: '12th 외부평가 Sonnet P1 (UR-0141): task 계열 positional path 지원 (cwd 오염 차단) (1.9.442)', run: () => {
       const m = require('../lib/pure-utils');
@@ -7653,7 +7655,8 @@ function preCheck(root) {
 function memorySearch(root, query) {
   root = absRoot(root);
   if (!query) { fail('query required (e.g., memory search "키워드")'); return; }
-  const files = ['.harness/decisions.md','.harness/task-log.md','.harness/session-handoff.md','.harness/progress-tracker.md','.harness/plan.md','.harness/review-evidence.md','.harness/architecture.md'];
+  // 1.13.1 (15th 블라인드 리뷰 P1, Sonnet): lessons.md + rules.md 누락 수정 — memory search 가 5종 메모리 표면을 표방하나 lesson/rule 을 검색 못 해(lesson add/rule add 로 저장한 교훈·룰이 'no matches') 모순감지 핵심 용도가 훼손됐음.
+  const files = ['.harness/decisions.md','.harness/lessons.md','.harness/rules.md','.harness/task-log.md','.harness/session-handoff.md','.harness/progress-tracker.md','.harness/plan.md','.harness/review-evidence.md','.harness/architecture.md'];
   const re = new RegExp(query.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i');
   let total = 0;
   for (const f of files) {
@@ -19107,6 +19110,8 @@ async function main() {
     return log(VERSION);
   }
   if (has('--help') || has('-h')) return help();
+  // 1.13.1 (15th 블라인드 리뷰 P1, codex gpt-5.5): 무명령 + 옵션만(예: leerness --json) 은 묵시적 init 쓰기를 하지 않음 — cwd 에 .harness 가 의도치 않게 생성되던 부작용 차단. 명시 명령 없이 옵션만이면 help (bare leerness 온보딩 init 은 유지).
+  if (!args[0] && process.argv.slice(2).some(a => a.startsWith('-'))) { help(); return; }
   // 1.9.38 (B): 사용 통계 카운터 — usage stats 명령 자체와 비차단 경로는 제외
   // 1.9.317 (UR-0051, 설치리뷰): 내부 auto-call(LEERNESS_INTERNAL=1) 은 usage 집계 제외 — 텔레메트리 오염(거짓 skill 추천) 방지.
   if (process.env.LEERNESS_INTERNAL !== '1' && cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== '--version' && cmd !== '--help') {

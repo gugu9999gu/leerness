@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.13.1 — 2026-06-09 — 블라인드 3-모델 리뷰 수정 + README 재구성 (codex gpt-5.5 · Sonnet 4.8 · Opus 4.8)
+
+**🔍 블라인드 멀티모델 리뷰**: 3개 모델(codex gpt-5.5 외부 CLI + Claude Sonnet/Opus 4.8 서브에이전트)이 **leerness 소개 없이, README 를 물리적으로 제거(숨김)한 클린룸**에서 npm 최신본(1.13.0)을 코드·CLI·행위만으로 분석. 발견을 맹신 X로 직접 재현·검증해 수정하고, 그 리뷰 내용으로 README 를 재구성.
+
+### 버그 수정 (전부 재현 검증)
+- **🔴 memory search 가 lessons/rules 누락** (Sonnet P1): `memory search` 가 5종 메모리 표면을 표방하나 `lessons.md`/`rules.md` 를 검색 못 해(저장한 교훈·룰이 'no matches') 모순감지 핵심 용도가 훼손됐음 → 두 파일 추가. (검증: lesson/rule/decision 3종 모두 검색됨)
+- **🔴 옵션-only 무명령의 묵시적 init 쓰기** (codex P1): `leerness --json` 처럼 명령 없이 옵션만 주면 cwd 에 `.harness` 가 의도치 않게 생성되던 쓰기 부작용 → 무명령+옵션만은 help 로 처리(명시 `init` 만 쓰기). bare `leerness` 온보딩은 유지.
+- **doctor 문구 + selftest README 의존** (Sonnet/codex/Opus P3): doctor 가 pass 수에 '실패' 를 붙여 "209/210 실패"(=209건 실패로 오독)되던 것 → "통과 N/M (K건 실패)". selftest 의 README 배너 케이스에 `exists` 가드 추가 → 문서가 없는(pruned) 설치에서도 코어 무결성 진단 통과.
+
+### README 재구성 (블라인드 리뷰 기반)
+3모델이 코드/행위만으로 파악한 정체성("AI 코딩 에이전트 운영/신뢰성 하네스, 코드를 대신 쓰지 않음")을 반영 — **거짓 완료 차단(핵심 차별점) 섹션 신설**(verify-claim 다언어 인식 포함), selftest 카운트 정정(→210), 경로 규칙(메모리 명령은 `--path`/`./dir`)·한국어-우선 출력 명시.
+
+### 검증 / 잔여
+- **selftest 210 PASS** · E2E 365/365. 백로그: bare relative dir cwd-fallback(codex P2, README 경로규칙으로 문서화 + pure 함수 계약 변경은 후속).
+- patch(1.13.1, 같은 minor) — R-0011 정책상 npm 미배포(GitHub). Opus 가 "버그처럼 보였으나 자기 테스트 데이터 오류"로 정직하게 철회한 항목은 수정 안 함(과수정 회피).
+
 ## 1.13.0 — 2026-06-09 — 🛡️ [안정화/Stable] verify-claim 다언어 + 정직성·자원·보안 안정화
 
 **🛡️ 안정화(Stable) minor. 헤드라인 = verify-claim 다언어 지원(비-JS 개발자 핵심 회귀 수정).** 15번째 멀티에이전트 버그헌트 성과(1.12.2~1.12.5)를 검증·통합해 npm 공개. R-0011 정책의 4번째 minor.

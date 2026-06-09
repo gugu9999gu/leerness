@@ -67,6 +67,22 @@ CLAUDE.md / AGENTS.md 에 `세션 시작 시 leerness handoff .`, `종료 전 le
 
 ---
 
+## 거짓 완료 차단 — 핵심 차별점
+
+세 모델의 블라인드 리뷰가 공통으로 꼽은 leerness의 핵심 가치입니다. AI 에이전트가 가장 자주 하는 거짓말 "다 했어요"를, leerness는 **완료 주장을 실제 코드와 대조**해 검증합니다.
+
+```bash
+# 에이전트가 "결제 API 연동 완료"라고 주장하지만 코드엔 호출 흔적이 없으면:
+leerness verify-claim T-0001 --require-evidence
+#   ⚠ FAIL (낙관 1) · [Payment] 결제: evidence에 주장 있으나 코드에 호출 흔적 없음 → exit 1
+```
+
+- `optimism-check` · `verify-claim` — evidence의 도메인 주장(API·DB·결제·이메일·큐·캐시·알림·스토리지 등 10종)을 실제 소스 호출과 대조. **JavaScript뿐 아니라 Python·Ruby·Go·C#·Java·PHP·Rust 구현도 인식**합니다(1.13).
+- `lazy detect` — 증거 없는 done, 빈 handoff, 테스트 미실행, 미추적 TODO를 탐지.
+- 정직한 완료는 통과하고 가짜 완료만 exit 1로 차단 — `gate` 또는 CI에 그대로 연결됩니다.
+
+---
+
 ## 핵심 개념 — 5계층
 
 - **기억(Memory)** — `task`/`plan`/`decision`/`lesson`/`rule`/`feature`(그래프). canonical JSON 을 단일 진실소스로 저장하고 마크다운은 projection. archive/restore 지원.
@@ -89,6 +105,8 @@ CLAUDE.md / AGENTS.md 에 `세션 시작 시 leerness handoff .`, `종료 전 le
 - **MCP**: `mcp serve` — stdio JSON-RPC 서버로 85개 도구 노출
 
 전체 명령은 `leerness commands` 또는 `leerness --help` 로 확인하세요.
+
+> **경로 규칙** — 대부분 명령은 `[path]` 위치 인자를 받습니다. `task`/`decision`/`lesson` 등 메모리 명령에 다른 폴더를 지정할 땐 `--path <dir>` 또는 `./dir` 형태를 쓰세요(맨 폴더 이름만 주면 현재 폴더로 처리됩니다). 출력은 한국어가 기본이며 `--language en` 으로 영어를 늘릴 수 있습니다(일부 메시지는 한국어 유지).
 
 ---
 
@@ -130,7 +148,7 @@ leerness mcp serve                          # JSON-RPC over stdio, 85 도구
 - **원자적 UTF-8 쓰기** — temp + rename 으로 부분쓰기 손상 방지, BOM 자동 strip.
 - **shell 미경유 MCP** — `mcp serve` 의 도구 호출은 셸을 거치지 않고 인자를 직접 전달(명령 주입 차단).
 - **순수 `--json` / 일관 exit code** — 성공·실패·미존재 경로 모두 파싱 가능한 JSON(`{ok,error,code}`) + 실패 시 exit 1. 자동화·CI 친화.
-- **모듈 분리(DI)** + **내장 자가검증** — `lib/` 순수 유틸/IO/카탈로그 분리, `selftest` 180+ 케이스로 설치 무결성 검증.
+- **모듈 분리(DI)** + **내장 자가검증** — `lib/` 순수 유틸/IO/카탈로그 분리, `selftest` 210 케이스로 설치 무결성 검증(`doctor` 가 함께 실행). 문서(README) 부재에도 코어 무결성 진단은 통과.
 
 ---
 
@@ -168,7 +186,7 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.9.440 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.13.0 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
@@ -222,7 +240,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.9.440는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **85개 도구**를 노출:
+Leerness v1.13.0는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **85개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -243,7 +261,7 @@ Leerness v1.9.440는 stdio JSON-RPC MCP server를 내장합니다 — Claude Cod
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **70 라운드 (1.9.40 → 1.9.440)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
+현재 누적: **70 라운드 (1.9.40 → 1.13.0)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
 
 ### 성능 가이드 (1.9.140 측정)
 
@@ -281,5 +299,6 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.9.440: 2026-06-08
+Last synced by Leerness v1.13.0: 2026-06-09
 <!-- leerness:project-readme:end -->
+
