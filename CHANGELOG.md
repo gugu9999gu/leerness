@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.15.0 — 2026-06-09 — 🛡️ [안정화/Stable] Karpathy 가이드라인 정렬 3부작 안정 minor
+
+**🛡️ 안정화(Stable) minor.** Andrej Karpathy 코딩 가이드라인(생각하고 코딩 / 단순성 / 외과적 변경 / 목표 주도) 대비 외부 에이전트 검토에서 도출한 정렬 작업(1.14.1~1.14.3)을 검증·통합해 npm 공개. R-0011 정책의 6번째 minor. 영상은 HyperFrames 파이프라인 제작.
+
+### 이번 minor 통합 (1.14.1~1.14.3) — Karpathy 4원칙 정렬
+- **원칙1·2 (생각하고 코딩 / 단순성)**: `review-request` 가 요청의 **범위 과대 신호**(전체·모두·리팩토링·재구성·rewrite/refactor everything)와 **투기적 신호**(나중에·확장 가능·유연하게·범용화·추상화·future-proof)를 탐지해 "더 작게 쪼갤 수 있나? 요청 범위만" 환기(advisory). `--json simplicitySignals`.
+- **원칙4 (목표 주도 — 검증가능한 완료)**: `plan add --done-when "<조건>"` 로 milestone 에 성공 기준을 1급 필드(`Done-When`)로 저장 · `plan list` 표시 + `--json doneWhen` · 미정 시 환기. (부수: `--done-when` 값이 제목에 흡수되던 잠복 버그 수정.)
+- **원칙2 (자기적용)**: 정적 분석으로 호출 0·동적참조 0 인 **죽은 함수 5개 제거**(무행위변경). 함수 476→471.
+
+### 검증 (회귀 0)
+- **selftest 213 PASS** · **E2E 365/365 PASS** · npm gate=minor_bump. 각 기능 행위 재현(신호 탐지/오탐0, done-when 저장·표시, dead 제거 후 재스캔 0).
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag annotation (Stable) · GitHub release (Stable) · npm dist-tag `stable` 시도.
+
 ## 1.14.3 — 2026-06-09 — Karpathy 정렬④(완결): 자체 단순화 — 죽은 코드 제거 (원칙2)
 
 **🧹 leerness 가 자신의 원칙2(단순성)를 자신에게 적용.** 정적 분석으로 "정의됐으나 호출 0 + 동적(문자열) 참조 0" 인 함수만 골라 제거 — 무행위변경(검증가능) 단순화.
