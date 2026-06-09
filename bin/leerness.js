@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.14.2';
+const VERSION = '1.14.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -190,12 +190,6 @@ function _withLock(targetPath, fn, opts = {}) {
 }
 // 1.9.327 (UR-0025): _getLocalTz / _formatLocal → lib/pure-utils.js 로 이동 (순수 TZ/날짜 포맷, require 사용).
 // 자동 모드 활성 여부 (R-XXXX every-round 룰 존재 시 true)
-function _isAutoLoopActive(root) {
-  try {
-    const rules = readRules(root);
-    return rules.some(r => r.status === 'active' && /every-round|every-session/i.test(r.trigger || ''));
-  } catch { return false; }
-}
 function _getAutoLoopRule(root) {
   try {
     return readRules(root).find(r => r.status === 'active' && /every-round/i.test(r.trigger || '')) || null;
@@ -1257,10 +1251,6 @@ function _buildAllSkills(root) {
   return out;
 }
 // 1.9.66: skill 추가/제거 시 캐시 invalidate (외부 helper)
-function _invalidateSkillsCache(root) {
-  try { _SKILLS_LIST_CACHE.delete(absRoot(root)); } catch {}
-}
-
 function skillList(root) {
   const all = listAllSkills(root);
   // 1.9.84: --json 옵션 (MCP 통합용)
@@ -1862,42 +1852,11 @@ async function skillAutoCacheCmd(root, sub) {
 //   lang 결정: explicit > .harness/LANGUAGE > LEERNESS_LANG env > 'ko' (default)
 // 1.9.338 (UR-0025 심층): STRINGS (i18n ko/en catalog) 는 lib/catalogs.js 로 이전 (import). _t 는 _translate(STRINGS,..) 박막.
 // 현재 사용 언어 결정 (env > config > 'ko')
-function _currentLang(root) {
-  if (process.env.LEERNESS_LANG) return process.env.LEERNESS_LANG === 'en' ? 'en' : 'ko';
-  try {
-    if (root) {
-      const fp = path.join(root, '.harness', 'LANGUAGE');
-      if (exists(fp)) {
-        const v = read(fp).trim().toLowerCase();
-        if (v === 'en' || v === 'english') return 'en';
-        if (v === 'ko' || v === 'korean' || v === 'kr') return 'ko';
-      }
-    }
-  } catch {}
-  return 'ko';  // default
-}
 // 1.9.338 (UR-0025 심층): 순수 _translate(STRINGS, key, lang) (lib/pure-utils) 박막 — STRINGS catalog 주입.
 function _t(key, lang) {
   return _translate(STRINGS, key, lang);
 }
 
-// 1.9.206: UI/UX 개선 — typewriter / fade-in 효과 (opt-in via LEERNESS_TYPEWRITER=1)
-function _typewrite(text, delayMs) {
-  delayMs = delayMs || 15;
-  if (process.env.LEERNESS_TYPEWRITER !== '1' || !process.stdout.isTTY) {
-    process.stdout.write(text);
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    let i = 0;
-    const step = () => {
-      if (i >= text.length) return resolve();
-      process.stdout.write(text[i++]);
-      setTimeout(step, delayMs);
-    };
-    step();
-  });
-}
 // 색상 helper (TTY 시 ANSI, 비-TTY 시 plain)
 const _ui = {
   bold: s => process.stdout.isTTY ? `\x1b[1m${s}\x1b[0m` : s,
@@ -4823,13 +4782,6 @@ function _loadDomainCatalog(root) {
     }
     return merged;
   } catch { return _DEFAULT_DOMAIN_CATALOG; }
-}
-function _writeDomainCatalog(root, catalog) {
-  try {
-    mkdirp(path.join(root, '.harness'));
-    writeUtf8(_domainCatalogPath(root), JSON.stringify({ ...catalog, updatedAt: new Date().toISOString() }, null, 2));
-    return true;
-  } catch { return false; }
 }
 // 1.9.325 (UR-0025): _classifyIntent → lib/pure-utils.js 로 이동 (순수 intent 분류, require 사용).
 function _detectDomain(text, root) {
