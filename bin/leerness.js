@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.14.1';
+const VERSION = '1.14.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -222,7 +222,7 @@ function _resolveRoot(positional) {
 }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version']);
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when']);  // 1.14.2 (UR-0032): --done-when 값이 positional 로 누출돼 milestone 제목에 흡수되던 것 차단
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -3572,6 +3572,14 @@ function _selfTestCases() {
       const wired = rr.includes('const simplicitySignals = { broad: broadHits, speculative: specHits }') && rr.includes('범위 과대 신호') && rr.includes('투기적 신호') && rr.includes('simplicitySignals,');
       return typeof m.reviewRequestCmd === 'function' && wired;
     } },
+    { name: 'Karpathy 가이드라인4 (UR-0032): plan --done-when 검증가능 완료조건 저장/파싱/표시 (1.14.2)', run: () => {
+      const src = read(__filename);
+      const wired = src.includes("const doneWhen = _lineSafe(arg('--done-when', '') || '(미정)')") && src.includes('Done-When: ${doneWhen}') && src.includes("const doneWhenMatch = b.match(/^Done-When:") && src.includes('doneWhen: doneWhenMatch ? doneWhenMatch[1].trim() : null')
+        && src.includes("'--ps-version','--done-when'");  // 잠복버그 회귀가드: nonFlagArgs withValue 에 --done-when (제목 흡수 차단)
+      const b = '### M-0001. 로그인\nStatus: planned\nProgress: 0%\nDone-When: 로그인 e2e 테스트 통과\n\nTasks:\n- [ ] x\n';
+      const dw = (b.match(/^Done-When:\s*(.+)$/m) || [])[1];
+      return wired && dw === '로그인 e2e 테스트 통과';
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6473,6 +6481,7 @@ function planListCmd(root, opts = {}) {
     const title = headerMatch[2].trim();
     const statusMatch = b.match(/^Status:\s*(.+)$/m);
     const progressMatch = b.match(/^Progress:\s*(.+)$/m);
+    const doneWhenMatch = b.match(/^Done-When:\s*(.+)$/m);  // 1.14.2 (Karpathy 원칙4, UR-0032): 검증가능 완료조건
     // Tasks 블록 (- [ ] 또는 - [x])
     const tasks = [];
     const tasksSection = b.match(/Tasks:\s*\n([\s\S]+?)(?=\n###|\n## |$)/);
@@ -6487,6 +6496,7 @@ function planListCmd(root, opts = {}) {
       title,
       status: statusMatch ? statusMatch[1].trim() : null,
       progress: progressMatch ? progressMatch[1].trim() : null,
+      doneWhen: doneWhenMatch ? doneWhenMatch[1].trim() : null,
       tasks,
     });
   }
@@ -6501,6 +6511,7 @@ function planListCmd(root, opts = {}) {
     log(`\n[${m.id}] ${m.title}`);
     if (m.status) log(`  Status: ${m.status}`);
     if (m.progress) log(`  Progress: ${m.progress}`);
+    log(`  완료기준(Done-When): ${m.doneWhen || '⚠ 미정 — plan add ... --done-when "<검증가능 조건>" 권장 (Karpathy 원칙4)'}`);
     if (m.tasks.length) log(`  Tasks: ${m.tasks.length}개 (${m.tasks.filter(t => t.done).length} 완료)`);
   }
 }
@@ -6509,10 +6520,12 @@ function planAdd(root, text) {
   if (!_requireInit(root, 'plan add')) return;  // 1.9.311 (UR-0047): init 가드
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'plan status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
   const status = arg('--status','planned'), progress = arg('--progress','0'), nextAction = arg('--next', '다음 액션 작성');
+  // 1.14.2 (Karpathy 원칙4 "성공기준 정의", UR-0032): --done-when 으로 검증가능 완료조건을 milestone 에 기록. 미지정 시 (미정) — plan show/audit 가 환기.
+  const doneWhen = _lineSafe(arg('--done-when', '') || '(미정)');
   // 1.9.303 (UR-0043): M-id append + T-id upsert 를 하나의 락으로 — 동시 plan add ID 충돌 방지.
   const { id, tid } = _withLock(progressPath(root), () => {
     const id = nextId(root, 'M');
-    append(planPath(root), `\n### ${id}. ${text}\nStatus: ${status}\nProgress: ${progress}%\n\nTasks:\n- [ ] ${text}\n`);
+    append(planPath(root), `\n### ${id}. ${text}\nStatus: ${status}\nProgress: ${progress}%\nDone-When: ${doneWhen}\n\nTasks:\n- [ ] ${text}\n`);
     const tid = nextId(root, 'T');
     upsertProgress(root, { id: tid, status, request: text, evidence: `plan:${id}`, nextAction });
     return { id, tid };

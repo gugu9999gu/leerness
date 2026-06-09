@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.14.2 — 2026-06-09 — Karpathy 정렬③: plan --done-when 검증가능 완료조건 (원칙4)
+
+**🎯 milestone 에 "성공 기준"을 1급 필드로.** Karpathy 원칙4(목표 주도 실행 — 검증가능한 완료 정의)의 빠진 절반. plan 에 done-criteria 개념이 없어 "언제 끝인지" 가 모호했던 것을 보강.
+
+### 변경 (UR-0032)
+- **plan add `--done-when "<조건>"`**: milestone 에 `Done-When:` 라인으로 검증가능 완료조건 저장. 미지정 시 `(미정)`.
+- **plan list 표시 + `--json doneWhen`**: 각 milestone 의 완료기준 노출. 누락(legacy/미정) 시 `⚠ 미정 — --done-when 권장 (Karpathy 원칙4)` 환기.
+- **🐛 잠복 버그 수정(맹신 X)**: `nonFlagArgs()` 의 value-flag 집합(`withValue`)에 `--done-when` 이 없어, 값이 positional 로 누출돼 **milestone 제목에 흡수**(예: "결제 연동" → "결제 연동 Stripe e2e…")되던 것 차단. 행위 재현으로 발견·수정.
+
+### 검증 (회귀 0)
+- **selftest 212→213**, 행위: `plan add "결제 연동" --done-when "Stripe e2e 통과"` → 제목="결제 연동"(흡수 없음)·Done-When 분리 저장·plan list/json 노출; 미지정 → (미정)+환기.
+- patch(1.14.2) — npm 미배포(R-0011, GitHub). 잔여 Karpathy: UR-0033(자체 단순화).
+
 ## 1.14.1 — 2026-06-09 — Karpathy 정렬②: review-request 범위과대/투기적 신호 (원칙1+2)
 
 **🤔 사전 검토 게이트에 "생각하고 코딩" + "단순성 우선" 신호 추가.** Karpathy 리뷰가 가장 약한 원칙으로 꼽은 1(트레이드오프 표면화)·2(단순성)를, 가장 많이 쓰는 `review-request`(작업 전 자동 호출)에서 보강.
