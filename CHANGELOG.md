@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.17.0 — 2026-06-09 — 🛡️ [안정화/Stable] 외부 클린룸 일관성 안정 minor
+
+**🛡️ 안정화(Stable) minor.** 외부 클린룸 리뷰(게시본 무README 신규사용자 관점)에서 도출한 --json·CLI 일관성 개선(1.16.1~1.16.2)을 검증·통합해 npm 공개. R-0011 정책의 8번째 minor. 영상은 HyperFrames "문제→해소" 디자인.
+
+### 이번 minor 통합 (1.16.1~1.16.2)
+- **gate `--json` 단일 객체화**: 텍스트+단계JSON 혼재로 파싱 불가하던 것 → `{ok,total,failed,checks}` 단일 JSON(CI/에이전트 소비 가능).
+- **memory search `--json`**: 플래그 무시하던 것 → `{query,total,results}` 구조화.
+- **명령그룹 무인자 일관화**: `rule`/`skill`/`feature`/`memory` 를 하위명령 없이 부르면 "알 수 없는 명령" 대신 **사용법 힌트**(decision/lesson 과 일관, `--json` 구조화).
+- **문서 정합**: `about` 의 메모리 경로 `.leerness/` → `.harness/`(기본 워크스페이스) 정정.
+
+### 검증 (회귀 0)
+- **selftest 216 PASS** · **E2E 365/365 PASS** · npm gate=minor_bump. gate/memory --json valid JSON + bare-group 사용법 힌트 행위 재현. (맹신 X: scan --json exit·AKIA 는 비-버그로 판정해 제외.)
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag (Stable) · GitHub release (Stable) · npm dist-tag `stable` 시도.
+
 ## 1.16.2 — 2026-06-09 — CLI 일관성: 명령그룹 무인자 → 사용법 힌트 (외부클린룸 UR-0042)
 
 **🧭 명령그룹을 하위명령 없이 부르면 친절한 사용법 안내.** 외부 클린룸 리뷰가 지적: `rule`/`skill`/`feature`/`memory` 를 하위명령 없이 부르면 "알 수 없는 명령"(유효 그룹인데 혼란)이 떴음 — `decision`/`lesson` 처럼 사용법 힌트로 통일.
