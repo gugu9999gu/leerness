@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.16.0';
+const VERSION = '1.16.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -281,7 +281,7 @@ function managedReadmeBlock(project) {
     '',
     'Leerness 는 **실행기/코딩 에이전트가 아니라**, 어떤 AI 코딩 에이전트(Claude Code · Codex · Cursor · Goose 등) 위에도 얹는 **범용 운영 레이어**입니다. 5개 공통 계층을 제공합니다:',
     '',
-    '- **기억(Memory)** — 프로젝트 상태/결정/진행을 `.leerness/` 에 영속화',
+    '- **기억(Memory)** — 프로젝트 상태/결정/진행을 `.harness/` 에 영속화',
     '- **정책(Policy)** — 8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트',
     '- **인수인계(Handoff)** — 에이전트 간 컨텍스트 표준 전달 + `get_project_context` 1콜 온보딩',
     '- **검증(Verification)** — 근거 기반 완료 검증으로 허위 완료 차단',
@@ -3544,6 +3544,14 @@ function _selfTestCases() {
       const f1 = src.includes('같은 패턴이 한 파일에 여러 번') && src.includes('if (re.lastIndex === m.index) re.lastIndex++;');
       const f2 = src.includes('_cellSafe(r.request)') && src.includes('_cellSafe(r.rule)');
       return f1 && f2;
+    } },
+    { name: '외부클린룸 C2/C3/C4: gate --json 단일객체 + memory search --json + about .harness 정합 (1.16.1)', run: () => {
+      const src = read(__filename);
+      const c2 = src.includes("const jsonMode = has('--json');  // 외부리뷰 C2") && src.includes('ok: bad === 0, total: checks.length, failed: bad, checks');
+      const c3 = src.includes('// 외부리뷰 C3: --json 일관성') && src.includes('JSON.stringify({ version: VERSION, query, total, includeCode');
+      const _badDir = '.leern' + 'ess/ 에 영속화 (state start';  // 자기참조 회피: 분할 — about state 줄이 .leerness 로 남아있으면 감지
+      const c4 = src.includes('상태/결정/진행을 .harness/ 에 영속화 (task/decision') && !src.includes('상태/결정/진행을 ' + _badDir);
+      return c2 && c3 && c4;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -7636,7 +7644,8 @@ function preCheck(root) {
 
 function memorySearch(root, query) {
   root = absRoot(root);
-  if (!query) { fail('query required (e.g., memory search "키워드")'); return; }
+  const jsonMode = has('--json'); const results = [];  // 외부리뷰 C3: --json 일관성(이전엔 --json 무시하고 텍스트만)
+  if (!query) { failJson(jsonMode, 'query_required', 'query required (e.g., memory search "키워드")'); return; }
   // 1.13.1 (15th 블라인드 리뷰 P1, Sonnet): lessons.md + rules.md 누락 수정 — memory search 가 5종 메모리 표면을 표방하나 lesson/rule 을 검색 못 해(lesson add/rule add 로 저장한 교훈·룰이 'no matches') 모순감지 핵심 용도가 훼손됐음.
   const files = ['.harness/decisions.md','.harness/lessons.md','.harness/rules.md','.harness/task-log.md','.harness/session-handoff.md','.harness/progress-tracker.md','.harness/plan.md','.harness/review-evidence.md','.harness/architecture.md'];
   const re = new RegExp(query.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i');
@@ -7646,8 +7655,8 @@ function memorySearch(root, query) {
     const lines = read(p).split('\n');
     const hits = lines.map((line, i) => ({ line, i })).filter(x => re.test(x.line));
     if (hits.length) {
-      log(`\n# ${f}`);
-      for (const h of hits.slice(0, _parseLimit(arg('--limit','5'),5))) log(`  L${h.i+1}: ${h.line.trim()}`);
+      if (!jsonMode) log(`\n# ${f}`);
+      for (const h of hits.slice(0, _parseLimit(arg('--limit','5'),5))) { if (!jsonMode) log(`  L${h.i+1}: ${h.line.trim()}`); results.push({ file: f, line: h.i + 1, text: h.line.trim() }); }
       total += hits.length;
     }
   }
@@ -7668,8 +7677,8 @@ function memorySearch(root, query) {
           const lines = txt.split('\n');
           const hits = lines.map((line, i) => ({ line, i })).filter(x => re.test(x.line));
           if (hits.length) {
-            log(`\n# ${rel(root, p)}`);
-            for (const h of hits.slice(0, _parseLimit(arg('--limit','5'),5))) log(`  L${h.i+1}: ${h.line.trim().slice(0, 160)}`);
+            if (!jsonMode) log(`\n# ${rel(root, p)}`);
+            for (const h of hits.slice(0, _parseLimit(arg('--limit','5'),5))) { if (!jsonMode) log(`  L${h.i+1}: ${h.line.trim().slice(0, 160)}`); results.push({ file: rel(root, p), line: h.i + 1, text: h.line.trim().slice(0, 160) }); }
             total += hits.length;
           }
         }
@@ -7677,6 +7686,7 @@ function memorySearch(root, query) {
       walkCodeDir(dp);
     }
   }
+  if (jsonMode) { log(JSON.stringify({ version: VERSION, query, total, includeCode: has('--include-code'), results }, null, 2)); return; }
   if (total === 0) log('(no matches)');
   else log(`\n${total} matches${has('--include-code') ? ' (소스 코드 포함)' : ''}`);
 }
@@ -11709,13 +11719,21 @@ async function selfCheck(root) {
 // 1.9.2: 게이트 5종 한번에 실행 (verify + audit + scan secrets + encoding check + lazy detect).
 function gate(root) {
   root = absRoot(root);
-  log('# leerness gate (5 checks)');
+  const jsonMode = has('--json');  // 외부리뷰 C2: --json 일관성 — 이전엔 텍스트 헤더+단계별 JSON 혼재로 파싱 불가. 단일 객체로 집계.
+  const checks = [];
   let bad = 0;
+  if (!jsonMode) log('# leerness gate (5 checks)');
   function step(label, fn) {
-    log(`\n## ${label}`);
     const code0 = process.exitCode || 0;
-    try { fn(); } catch (e) { fail(`${label} threw: ${e.message}`); bad++; }
-    if (process.exitCode && process.exitCode !== code0) bad++;
+    if (!jsonMode) log(`\n## ${label}`);
+    const orig = process.stdout.write;
+    if (jsonMode) process.stdout.write = () => true;  // 단계 하위출력 억제(JSON 오염 방지) — fn 은 동기, finally 로 복원
+    let threw = null;
+    try { fn(); } catch (e) { threw = e; } finally { if (jsonMode) process.stdout.write = orig; }
+    const failed = threw != null || !!(process.exitCode && process.exitCode !== code0);
+    if (threw && !jsonMode) fail(`${label} threw: ${threw.message}`);
+    if (failed) bad++;
+    checks.push({ name: label, ok: !failed, ...(threw ? { error: threw.message } : {}) });
     process.exitCode = 0;
   }
   step('verify', () => verify(root));
@@ -11723,6 +11741,7 @@ function gate(root) {
   step('scan secrets', () => scanSecrets(root));
   step('encoding check', () => encodingCheck(root));
   step('lazy detect', () => lazyDetect(root));
+  if (jsonMode) { log(JSON.stringify({ version: VERSION, root, ok: bad === 0, total: checks.length, failed: bad, checks }, null, 2)); if (bad) process.exitCode = 1; return; }
   log(`\n# gate summary: ${bad} 단계 실패`);
   if (bad) process.exitCode = 1;
   else ok('all gates passed');
@@ -16630,7 +16649,7 @@ function _leernessIdentity() {
     isNot: '실행기/코딩 에이전트가 아님 — 어떤 에이전트 위에도 얹는 공통 운영 계층',
     tagline: '어떤 AI 코딩 에이전트에도 적용되는 범용 운영 레이어 — 기억·정책·인수인계·검증·감사',
     layers: [
-      { key: 'memory', ko: '기억', desc: '프로젝트 상태/결정/진행을 .leerness/ 에 영속화 (state start|record|verify|handoff)' },
+      { key: 'memory', ko: '기억', desc: '프로젝트 상태/결정/진행을 .harness/ 에 영속화 (task/decision/lesson/plan; 선택 state substrate 는 .leerness/)' },
       { key: 'policy', ko: '정책', desc: '8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트' },
       { key: 'handoff', ko: '인수인계', desc: '에이전트 간 컨텍스트 표준 전달 (Claude→Codex→Goose), get_project_context 1콜 온보딩' },
       { key: 'verification', ko: '검증', desc: '근거 기반 완료 검증 (verify-claim --require-evidence) — 허위 완료 차단' },

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.16.1 — 2026-06-09 — 외부 클린룸 리뷰: --json 일관성 + 문서 정합
+
+**🔬 외부 클린룸 리뷰(게시본 1.16.0 설치·README/소스 미참조·신규 사용자 관점, 2모델).** 발굴된 지적을 직접 재현해 진짜만 수정(맹신 X — 비-버그/의도된 동작은 제외).
+
+### 수정 (전부 재현 검증)
+- **gate `--json` 단일 객체화 (C2)**: 이전엔 텍스트 헤더 + 단계별 JSON 이 섞여 파싱 불가. 이제 `{ok, total, failed, checks:[{name,ok}]}` 단일 객체(하위 출력 억제). CI/에이전트 소비 가능.
+- **memory search `--json` (C3)**: `--json` 을 무시하고 텍스트만 내던 것 → `{query, total, results:[{file,line,text}]}` 구조화(전 명령 일관).
+- **about 문서 정합 (C4)**: `about` 의 메모리 설명이 `.leerness/` 라 했으나 기본 워크스페이스는 `.harness/` → 정정(선택 state substrate 만 .leerness/).
+
+### 비-버그 판정 (맹신 X — 재현했으나 수정 안 함)
+- **scan secrets `--json` exit 코드**: 리뷰는 exit 0 라 했으나 재현 결과 committed 발견 시 exit 1 정상(코드도 `if(committed.length) process.exitCode=1`). gitignored-only(안전) → exit 0 은 의도된 동작.
+- **AWS AKIA 미탐지**: `...EXAMPLE` 포함은 placeholder 가드로 스킵(의도) — 실 키(EXAMPLE 없음)는 정상 탐지.
+
+### 잔여(백로그): bare `leerness`(무인자) 자동 init·hook / `--language en` 런타임 미적용 / 서브명령그룹 무인자 동작 일관화.
+
+### 검증 (회귀 0)
+- **selftest 214→215** · **E2E 365/365** · gate/memory --json valid JSON + about .harness 행위 재현.
+- patch(1.16.1) — npm 미배포(R-0011, GitHub).
+
 ## 1.16.0 — 2026-06-09 — 🛡️ [안정화/Stable] 16번째 버그헌트 안정 minor
 
 **🛡️ 안정화(Stable) minor.** 16번째 멀티에이전트 버그헌트(8건 발굴·전부 직접 재현)의 코어 수정(1.15.1)을 검증·통합해 npm 공개. R-0011 정책의 7번째 minor. **이 릴리스 영상부터 개선된 "문제→해소" 디자인**(짧은 인트로 + 이전/이제 모션 + 의미 보존 하이라이트)으로 제작됩니다.
