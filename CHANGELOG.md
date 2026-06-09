@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.14.0 — 2026-06-09 — 🛡️ [안정화/Stable] 블라인드 리뷰 수정 + Karpathy 정렬 안정 minor
+
+**🛡️ 안정화(Stable) minor.** 블라인드 3-모델 리뷰(codex/Sonnet/Opus) 수정 + Karpathy 가이드라인 정렬(1.13.1~1.13.2)을 검증·통합해 npm 공개. R-0011 정책의 5번째 minor. (이 릴리스의 소개 영상부터 **HyperFrames 파이프라인**으로 자동 제작됩니다.)
+
+### 이번 minor 통합 (1.13.1~1.13.2)
+- **🔴 memory search 5종 표면 복구** (블라인드 Sonnet P1): `memory search` 가 lessons.md/rules.md 를 누락해 저장한 교훈·룰을 못 찾던 문제 → 추가.
+- **🔴 옵션-only 무명령의 묵시적 init 쓰기 차단** (블라인드 codex P1): `leerness --json` 처럼 명령 없이 옵션만 주면 cwd 에 `.harness` 가 생성되던 부작용 → help 처리(명시 init 만 쓰기).
+- **📖 README 블라인드 재구성**: 3모델이 코드/행위만으로 파악한 정체성 반영(거짓완료 차단 전면화·다언어·경로규칙·한국어 우선).
+- **🔬 verify-claim scope-creep 표면화** (Karpathy 원칙3 "외과적 변경"): git 에 변경됐으나 evidence/주장에 없는 파일(요청 범위 밖 변경)을 advisory 로 노출(`--json scopeCreep`).
+- doctor 문구 + selftest README exists 가드 (블라인드 P3).
+
+### 검증 (회귀 0)
+- **selftest 211 PASS** · **E2E 365/365 PASS** · npm gate=minor_bump. scope-creep 행위(claim A + change A,B→[B]), memory search 5종 검색, --json-무명령 비쓰기 재현.
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag annotation (Stable) · GitHub release (Stable) · npm dist-tag `stable` 시도.
+
 ## 1.13.2 — 2026-06-09 — Karpathy 가이드라인 정렬: verify-claim scope-creep 표면화 (외과적 변경)
 
 **🔬 외부 에이전트(Sonnet/Opus) 가 leerness 를 Andrej Karpathy 4대 코딩 가이드라인 대비 검토.** 두 리뷰가 수렴: leerness 는 원칙4(목표주도/검증루프)는 최강이나, **원칙3(외과적 변경)이 최대 갭** — 변경 파일이 요청 범위 내인지 검사가 없었음. 최고가치·최저노력 항목을 즉시 구현(신규 명령 0 — leerness 자신의 원칙2 위반 악화 방지).
