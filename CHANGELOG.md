@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.14.1 — 2026-06-09 — Karpathy 정렬②: review-request 범위과대/투기적 신호 (원칙1+2)
+
+**🤔 사전 검토 게이트에 "생각하고 코딩" + "단순성 우선" 신호 추가.** Karpathy 리뷰가 가장 약한 원칙으로 꼽은 1(트레이드오프 표면화)·2(단순성)를, 가장 많이 쓰는 `review-request`(작업 전 자동 호출)에서 보강.
+
+### 변경 (UR-0031)
+- **review-request 단순성/범위 신호**: 요청 텍스트에서 **범위 과대 동사**(전체·모두·리팩토링·재구성·rewrite/refactor everything 등)와 **투기적 신호**(나중에·확장 가능·유연하게·범용화·추상화·future-proof 등)를 탐지해 `efficiencyHints` + `--json simplicitySignals` 로 표면화. "더 작게 쪼갤 수 있나? 요청 범위만" 환기. advisory(차단 X — 표면화만, Karpathy 원칙1).
+- 신규 명령 0 — 기존 명령 확장(leerness 자신의 원칙2 준수).
+
+### 검증 (회귀 0)
+- **selftest 211→212**, 행위 재현: "전체 코드베이스 리팩토링 + 나중에 유연하게 확장 가능하게 추상화" → broad=[전체,리팩토링] spec=[나중에,유연하게,확장 가능,추상화]; 단순 요청 → 0(오탐 없음).
+- patch(1.14.1) — R-0011 정책상 npm 미배포(GitHub). 잔여 Karpathy 백로그: UR-0032(plan --done-when 성공기준), UR-0033(자체 단순화).
+
 ## 1.14.0 — 2026-06-09 — 🛡️ [안정화/Stable] 블라인드 리뷰 수정 + Karpathy 정렬 안정 minor
 
 **🛡️ 안정화(Stable) minor.** 블라인드 3-모델 리뷰(codex/Sonnet/Opus) 수정 + Karpathy 가이드라인 정렬(1.13.1~1.13.2)을 검증·통합해 npm 공개. R-0011 정책의 5번째 minor. (이 릴리스의 소개 영상부터 **HyperFrames 파이프라인**으로 자동 제작됩니다.)
