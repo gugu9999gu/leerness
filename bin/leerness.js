@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.12.4';
+const VERSION = '1.12.5';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3547,6 +3547,19 @@ function _selfTestCases() {
       const clamp = src.includes('const _cs = Math.floor(Number(args._chunkSize));') && src.includes('(Number.isFinite(_cs) && _cs > 0) ? _cs : 50000');
       return multiLang && pipeEsc && clamp;
     } },
+    { name: '15th 잔여 클러스터 (UR-0017~0021): api-skill CRLF + shell-guard 공백없는&& + stat-before-read + 중첩skip + requirements 디렉티브 (1.12.5)', run: () => {
+      const src = read(__filename);
+      const apiCrlf = src.includes("const content = read(fp).replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');") && src.includes('urls: [], name: id, body: content }');
+      const statBeforeRead = src.includes('if (fs.statSync(file).size > 1024 * 1024) continue;') && src.includes('if (fs.statSync(file).size > 5 * 1024 * 1024) continue;') && src.includes('if (fs.statSync(fp2).size > budget) continue;');
+      const nestedSkip = src.includes('segs.some(s => SCAN_SKIP_DIRS.has(s))');
+      const an = require('../lib/analyzers');
+      const sg = an._shellGuardAnalyze('npm run build&&npm test', { shell: 'powershell', psVersion: 5 });
+      const shellNoSpace = (sg.issues || []).some(i => i.rule === 'ps5-chain');
+      const m = require('../lib/pure-utils');
+      const reqs = m._parseRequirementsTxt('-e git+https://x\n-r base.txt\n--hash=sha256:abc\nrequests==2.31\n');
+      const reqDirectives = reqs.length === 1 && reqs[0] === 'requests';
+      return apiCrlf && statBeforeRead && nestedSkip && shellNoSpace && reqDirectives;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -3824,9 +3837,10 @@ function _serializeAPISkill(id, name, urls, direction, doc) {
 function _loadAPISkill(root, id) {
   const fp = path.join(_apiSkillsDir(root), id + '.md');
   if (!fs.existsSync(fp)) return null;
-  const content = fs.readFileSync(fp, 'utf8');
+  // 1.12.5 (15th 버그헌트 P2, UR-0017): read()(BOM strip) + CRLF/CR 정규화 — 이전 raw readFileSync 는 CRLF 파일에서 '^---\n' 불일치로 frontmatter 전부 유실(1.9.408 SKILL.md 수정 누락분). 또 fallback 에 body 추가 → _matchAPISkills 의 s.body.slice 크래시 방지.
+  const content = read(fp).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const fm = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!fm) return { id, content, urls: [], name: id };
+  if (!fm) return { id, content, urls: [], name: id, body: content };
   const meta = {};
   fm[1].split('\n').forEach(l => {
     const m = l.match(/^(\w+):\s*(.*)$/);
@@ -7344,8 +7358,10 @@ function getExtraSkipDirs(root) {
   return read(f).split('\n').map(s => s.trim().replace(/\/+$/, '')).filter(s => s && !s.startsWith('#'));
 }
 function isSkippedRel(rel, extras = []) {
-  const all = [...SCAN_SKIP_DIRS, ...extras];
-  return all.some(d => rel === d || rel.startsWith(d + '/'));
+  // 1.12.5 (15th 버그헌트 P3, UR-0020): 중첩 skip-dir 도 제외 — 이전엔 root-anchored prefix 만 매칭해 deep/node_modules, sub/.git, vendor/dist 가 스캔돼 오탐. SCAN_SKIP_DIRS 는 단일 dir 명이라 경로 세그먼트로 매칭(_scanShellScriptsEncoding 의 basename skip 과 일관).
+  const segs = rel.split('/');
+  if (segs.some(s => SCAN_SKIP_DIRS.has(s))) return true;  // SCAN_SKIP_DIRS 는 Set
+  return extras.some(d => rel === d || rel.startsWith(d + '/'));
 }
 const SCAN_TEXT_EXT = new Set(['.js','.ts','.jsx','.tsx','.mjs','.cjs','.json','.md','.txt','.env','.bash','.sh','.yml','.yaml','.toml','.ini','.cfg','.py','.rb','.go','.rs','.java','.kt','.swift','.cs','.php','.sql','.html','.css','.scss','.less','.xml','.bat','.ps1','']);
 function* walk(root, base = root, depth = 0, extras = null) {
@@ -7381,6 +7397,8 @@ function _collectSecretFindings(root) {
     const isEnvFamily = /^\.env(\.|$)/.test(path.basename(file));
     if (!SCAN_TEXT_EXT.has(ext) && !isEnvFamily) continue;
     let text;
+    // 1.12.5 (15th 버그헌트 P2, UR-0019): stat-before-read — 1MB 초과 파일은 읽지 않고 건너뜀(이전엔 read 후 검사라 대형 파일 통째 로드).
+    try { if (fs.statSync(file).size > 1024 * 1024) continue; } catch { continue; }
     try { text = read(file); } catch { continue; }
     if (text.length > 1024 * 1024) continue;
     const fileRel = (file === root) ? path.basename(file) : rel(root, file);
@@ -7439,6 +7457,8 @@ function encodingCheck(root, opts = {}) {
     const ext = path.extname(file).toLowerCase();
     if (!SCAN_TEXT_EXT.has(ext)) continue;
     let buf;
+    // 1.12.5 (15th 버그헌트 P2, UR-0019): stat-before-read — 5MB 초과 파일은 읽지 않고 건너뜀(이전엔 readBuf 후 검사라 대형 파일 통째 로드).
+    try { if (fs.statSync(file).size > 5 * 1024 * 1024) continue; } catch { continue; }
     try { buf = readBuf(file); } catch { continue; }
     if (buf.length === 0) continue;
     if (buf.length > 5 * 1024 * 1024) continue;
@@ -10294,7 +10314,8 @@ function _scanCodeForPatterns(root) {
       if (budget <= 0) return;
       if (e.isDirectory()) { if (!SKIP.test(e.name) && !e.name.startsWith('.')) walk(path.join(p, e.name), depth + 1); continue; }
       if (!/\.(js|ts|jsx|tsx|gd|cs|py|rb|go|rs|java|php|kt|swift)$/i.test(e.name)) continue;
-      try { const t = read(path.join(p, e.name)); combined += t + '\n'; budget -= t.length; } catch {}
+      // 1.12.5 (15th 버그헌트 P2, UR-0019): stat-before-read — 이전엔 read() 후 budget 검사라 대형 파일 1개가 통째 메모리에 로드(200MB→RSS 464MB). 남은 budget 초과 파일은 읽지 않고 건너뜀.
+      try { const fp2 = path.join(p, e.name); if (fs.statSync(fp2).size > budget) continue; const t = read(fp2); combined += t + '\n'; budget -= t.length; } catch {}
     }
   }
   walk(root, 0);

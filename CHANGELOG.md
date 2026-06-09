@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.12.5 — 2026-06-09 — 15th 버그헌트 잔여 5종: CRLF·shell-guard·메모리·skip-dir·requirements
+
+**🧹 15번째 버그헌트 잔여 클러스터(UR-0017~0021) 일괄 처리 — 견고성/자원/정확성.**
+
+### 변경
+- **api-skill CRLF/BOM 복구** (UR-0017, P2): `_loadAPISkill` 가 raw readFileSync 라 CRLF 파일에서 frontmatter 전부 유실 + `api-skill match` 크래시(body undefined). `read()`(BOM strip) + `\r\n`/`\r` 정규화 + fallback 에 `body` 추가(1.9.408 SKILL.md 수정 누락분).
+- **shell-guard 공백없는 `&&`/`||` 탐지** (UR-0018, P2): `/\s&&\s/` 가 양쪽 공백을 요구해 `npm run build&&npm test`(PS5.1 에서 실패하는 흔한 형태) 미탐 → 공백 무관 토큰 매칭.
+- **대형 파일 stat-before-read** (UR-0019, P2): `_scanCodeForPatterns`·`scan secrets`·`encoding check` 가 size-cap 을 read() **후** 검사해 대형 파일 1개가 메모리 2배 스파이크(200MB→RSS 464MB) → 읽기 **전** stat 으로 초과 파일 건너뜀. verify-claim/gate 메모리 안정화.
+- **중첩 skip-dir 제외** (UR-0020, P3): `isSkippedRel` 가 root-anchored 만 매칭해 중첩 `node_modules`/`.git`/`dist` 가 스캔돼 오탐 → 경로 세그먼트 매칭(SCAN_SKIP_DIRS Set).
+- **requirements.txt 디렉티브 skip** (UR-0021, P3): `-e`/`-r`/`--hash` pip 디렉티브를 패키지로 파싱하던 것 → `-` 라인 skip + 영숫자 시작 요구.
+
+### 검증 (회귀 0)
+- **selftest 209→210**, 행위 재현: api-skill CRLF→"Real Name"+match exit 0, scan secrets 중첩 node_modules/dist/.git 제외(root.js 만 탐지), requirements `["requests","flask"]`.
+- 개발 중 발견·수정: `SCAN_SKIP_DIRS` 는 Set(.has) — `.includes` 오용을 selftest 가 배포 전 차단(handoff 보안 스캔 회귀 포함).
+- patch(1.12.5, 같은 minor) — R-0011 정책상 npm 미배포. **15번째 버그헌트(UR-0014~0021) 전부 처리 완료.**
+
 ## 1.12.4 — 2026-06-09 — 🌐 verify-claim 다언어 지원 + glossary 표/MCP 페이지네이션 (15th 버그헌트 P1/P2)
 
 **🔴 핵심 회귀 수정: verify-claim 기본 게이트가 非JS 정상 완료를 오차단하던 문제.** 15번째 멀티에이전트 버그헌트(크로스플랫폼·최신기능·성능 3관점) 결과 중 즉시-수정 가능한 고가치 3건.
