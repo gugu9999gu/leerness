@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.16.2 — 2026-06-09 — CLI 일관성: 명령그룹 무인자 → 사용법 힌트 (외부클린룸 UR-0042)
+
+**🧭 명령그룹을 하위명령 없이 부르면 친절한 사용법 안내.** 외부 클린룸 리뷰가 지적: `rule`/`skill`/`feature`/`memory` 를 하위명령 없이 부르면 "알 수 없는 명령"(유효 그룹인데 혼란)이 떴음 — `decision`/`lesson` 처럼 사용법 힌트로 통일.
+
+### 변경 (UR-0042)
+- bare `rule`/`skill`/`feature`/`memory` → `subcommand_required` + 실제 하위명령 사용법 표시(예: `memory search "<키>" | memory status | …`). `--json` 도 구조화 출력.
+- 기존 동작 보존: 하위명령이 있는 호출(`memory search` 등)은 그대로.
+
+### 검증 (회귀 0)
+- **selftest 215→216** · **E2E 365/365** · 4개 그룹 bare 호출 → 사용법 힌트, `memory --json` → `{code:'subcommand_required'}` 행위 재현.
+- patch(1.16.2) — npm 미배포(R-0011, GitHub). 잔여: bare `leerness` 자동 init·hook(UR-0041, 설계 재검토), `--language en` 런타임(UR-0042 잔여).
+
 ## 1.16.1 — 2026-06-09 — 외부 클린룸 리뷰: --json 일관성 + 문서 정합
 
 **🔬 외부 클린룸 리뷰(게시본 1.16.0 설치·README/소스 미참조·신규 사용자 관점, 2모델).** 발굴된 지적을 직접 재현해 진짜만 수정(맹신 X — 비-버그/의도된 동작은 제외).
