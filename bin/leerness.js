@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.15.0';
+const VERSION = '1.15.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -297,7 +297,7 @@ function managedReadmeBlock(project) {
     'leerness verify .             # 필수 파일 검증',
     'leerness audit .              # 일관성·계획-진행 정렬 감사',
     'leerness scan secrets .       # 시크릿 패턴 스캔',
-    'leerness encoding check .     # UTF-8 / BOM / CRLF 검사',
+    'leerness encoding check .     # UTF-8 / BOM / NUL / .bat 인코딩 검사',
     'leerness lazy detect .        # 게으름 방지 자동 평가',
     'leerness memory search "키"   # 결정/이력 검색',
     'leerness session close .      # 세션 종료 + handoff 자동 작성',
@@ -624,7 +624,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
     '.claude/commands/audit.md': `# /audit\n\n계획-진행 정렬, 디자인/재사용 일관성, 시크릿/인코딩을 일괄 점검합니다.\n\n\`\`\`\n!leerness audit .\n!leerness scan secrets .\n!leerness encoding check .\n\`\`\`\n`,
     '.claude/commands/lazy-detect.md': `# /lazy-detect\n\n게으름 방지 자동 평가를 실행합니다.\n\n\`\`\`\n!leerness lazy detect .\n\`\`\`\n`,
     '.claude/commands/update.md': `# /update\n\nleerness 자동 업데이트를 실행합니다 (감지 → 마이그레이션 → 검증).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n`,
-    '.claude/skills/leerness.md': `---\nname: leerness\ndescription: Leerness harness commands - handoff, audit, scan secrets, encoding check, lazy detect, session close, update. Use when the user asks to load project context, verify work quality, scan secrets, check encoding, or end a session.\n---\n\n# leerness skill\n\n## When to use\n- 사용자가 프로젝트 컨텍스트를 로드해달라고 할 때\n- 완료 선언 전 자기 검증을 요청할 때\n- 세션을 종료하거나 인수인계를 요청할 때\n- 시크릿/한글 인코딩 점검을 요청할 때\n- 새 leerness 버전 적용을 요청할 때\n\n## Commands\n\n\`\`\`bash\nleerness handoff .             # 컨텍스트 로드\nleerness check .               # pre-action 체크\nleerness audit .               # 일관성/계획 정렬 감사\nleerness scan secrets .        # 시크릿 패턴 스캔\nleerness encoding check .      # UTF-8/BOM/CRLF\nleerness lazy detect .         # 게으름 평가\nleerness memory search "key"   # 결정/이력 검색\nleerness session close .       # 종료 보고 + handoff 자동 생성\nleerness update --yes          # 자동 업데이트\n\`\`\`\n`,
+    '.claude/skills/leerness.md': `---\nname: leerness\ndescription: Leerness harness commands - handoff, audit, scan secrets, encoding check, lazy detect, session close, update. Use when the user asks to load project context, verify work quality, scan secrets, check encoding, or end a session.\n---\n\n# leerness skill\n\n## When to use\n- 사용자가 프로젝트 컨텍스트를 로드해달라고 할 때\n- 완료 선언 전 자기 검증을 요청할 때\n- 세션을 종료하거나 인수인계를 요청할 때\n- 시크릿/한글 인코딩 점검을 요청할 때\n- 새 leerness 버전 적용을 요청할 때\n\n## Commands\n\n\`\`\`bash\nleerness handoff .             # 컨텍스트 로드\nleerness check .               # pre-action 체크\nleerness audit .               # 일관성/계획 정렬 감사\nleerness scan secrets .        # 시크릿 패턴 스캔\nleerness encoding check .      # UTF-8/BOM/NUL\nleerness lazy detect .         # 게으름 평가\nleerness memory search "key"   # 결정/이력 검색\nleerness session close .       # 종료 보고 + handoff 자동 생성\nleerness update --yes          # 자동 업데이트\n\`\`\`\n`,
   };
   // 1.9.276: minimal 모드 — 코어가 요구하지 않는 파일 제외 (verify 필수 파일은 유지).
   if (opts.minimal) { for (const k of MINIMAL_SKIP_KEYS) delete _files[k]; }
@@ -3538,6 +3538,12 @@ function _selfTestCases() {
       const b = '### M-0001. 로그인\nStatus: planned\nProgress: 0%\nDone-When: 로그인 e2e 테스트 통과\n\nTasks:\n- [ ] x\n';
       const dw = (b.match(/^Done-When:\s*(.+)$/m) || [])[1];
       return wired && dw === '로그인 e2e 테스트 통과';
+    } },
+    { name: '16th 버그헌트 F1/F2: scan secrets 패턴당 멀티매치(break 제거) + task/rule list 파이프 셀안전 (1.15.1)', run: () => {
+      const src = read(__filename);
+      const f1 = src.includes('같은 패턴이 한 파일에 여러 번') && src.includes('if (re.lastIndex === m.index) re.lastIndex++;');
+      const f2 = src.includes('_cellSafe(r.request)') && src.includes('_cellSafe(r.rule)');
+      return f1 && f2;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -6589,7 +6595,7 @@ function taskList(root) {
   if (!filtered.length) return log('(no tasks)');
   log('| ID | Status | Request | Evidence | Next Action | Updated |');
   log('|---|---|---|---|---|---|');
-  for (const r of filtered) log(`| ${r.id} | ${r.status} | ${r.request} | ${r.evidence} | ${r.nextAction} | ${r.updated} |`);
+  for (const r of filtered) log(`| ${r.id} | ${r.status} | ${_cellSafe(r.request)} | ${_cellSafe(r.evidence)} | ${_cellSafe(r.nextAction)} | ${r.updated} |`);  // 16th 버그헌트 F2: 표시도 _cellSafe — 파이프(|)가 칼럼 깨던 것 차단(저장은 안전했으나 list 표시가 raw)
 }
 // 1.9.310 (UR-0046, 설치리뷰 3중수렴): CLI/MCP 입력 스키마 검증 — 무효 status/trigger 거부(--force 우회).
 //   이전: task --status nonsense / rule --trigger 오타가 그대로 등록돼 상태/정책 신뢰성 훼손.
@@ -7394,7 +7400,8 @@ function _collectSecretFindings(root) {
         if (valueGroup != null && requireSecretLike && !_looksSecretLike(val)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
         const line = text.slice(0, m.index).split('\n').length;
         findings.push({ file: fileRel, line, name, snippet: m[0].slice(0, 32), gitignored });
-        break;
+        // 16th 버그헌트 F1: break 제거 — 같은 패턴이 한 파일에 여러 번(예: secret: + api_key: 둘 다 'Hardcoded password') 나오면 모두 보고(보안 FN 차단). zero-width 매치는 lastIndex 전진으로 무한루프 방지.
+        if (re.lastIndex === m.index) re.lastIndex++;
       }
     }
   }
@@ -12937,7 +12944,7 @@ function ruleList(root) {
   if (!rules.length) return ok('등록된 룰 없음');
   log('| ID | Trigger | Rule | Status | Last Verified |');
   log('|---|---|---|---|---|');
-  for (const r of rules) log(`| ${r.id} | ${r.trigger} | ${r.rule} | ${r.status} | ${r.lastVerified} |`);
+  for (const r of rules) log(`| ${r.id} | ${_cellSafe(r.trigger)} | ${_cellSafe(r.rule)} | ${r.status} | ${r.lastVerified} |`);  // 16th 버그헌트 F2: 파이프 칼럼 깨짐 차단(표시 _cellSafe)
 }
 
 function ruleRemove(root, id) {
