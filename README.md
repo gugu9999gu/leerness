@@ -186,13 +186,13 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.16.0 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.17.0 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
 Leerness 는 **실행기/코딩 에이전트가 아니라**, 어떤 AI 코딩 에이전트(Claude Code · Codex · Cursor · Goose 등) 위에도 얹는 **범용 운영 레이어**입니다. 5개 공통 계층을 제공합니다:
 
-- **기억(Memory)** — 프로젝트 상태/결정/진행을 `.leerness/` 에 영속화
+- **기억(Memory)** — 프로젝트 상태/결정/진행을 `.harness/` 에 영속화
 - **정책(Policy)** — 8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트
 - **인수인계(Handoff)** — 에이전트 간 컨텍스트 표준 전달 + `get_project_context` 1콜 온보딩
 - **검증(Verification)** — 근거 기반 완료 검증으로 허위 완료 차단
@@ -240,7 +240,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.16.0는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **85개 도구**를 노출:
+Leerness v1.17.0는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **85개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -261,7 +261,7 @@ Leerness v1.16.0는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **70 라운드 (1.9.40 → 1.16.0)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
+현재 누적: **70 라운드 (1.9.40 → 1.17.0)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
 
 ### 성능 가이드 (1.9.140 측정)
 
@@ -299,6 +299,6 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.16.0: 2026-06-09
+Last synced by Leerness v1.17.0: 2026-06-09
 <!-- leerness:project-readme:end -->
 
