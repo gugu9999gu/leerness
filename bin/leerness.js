@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.17.4';
+const VERSION = '1.17.5';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3593,6 +3593,13 @@ function _selfTestCases() {
       const py = ('def test_a():\n    pass\ndef test_b():\n    pass\n'.match(/^\s*def\s+test_/gm) || []).length === 2;
       return wired && glob && py;
     } },
+    { name: '범용성 P2 (UR-0048): task update unknown flag 거부 + did-you-mean(인수인계 유실 차단) (1.17.5)', run: () => {
+      const src = read(__filename);
+      const wired = src.includes('function _rejectUnknownFlags(allowed, usageHint)') && src.includes("'unknown_flag'") && src.includes("_rejectUnknownFlags(['--status', '--evidence', '--next', '--note']");
+      // did-you-mean prefix 로직: --next-action 은 --next 를 prefix 로 가짐
+      const dymOk = '--next-action'.startsWith('--next');
+      return wired && dymOk;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6751,8 +6758,22 @@ function taskAdd(root, text) {
     } catch {}  // review 실패는 task add 자체에 영향 X
   }
 }
+// 1.17.5 (UR-0048, 5축 실증 P2): 모르는 옵션 조용히 무시 차단 — `task update --next-action "x"` 처럼 오타/미존재 플래그가
+//   "✓ task updated" 와 함께 값을 버려, 쓴 에이전트는 기록됐다고 믿고 다음 에이전트는 placeholder 를 받는(인수인계 유실) 최악의 실패 양식.
+//   prefix 기반 did-you-mean(--next-action → --next) + exit 1. 전역 플래그(--path/--json/--force/--lenient)는 항상 허용.
+function _rejectUnknownFlags(allowed, usageHint) {
+  const all = new Set([...allowed, '--path', '--json', '--force', '--lenient']);
+  const seen = process.argv.slice(2).filter(a => a.startsWith('--')).map(a => a.split('=')[0]);
+  const unknown = [...new Set(seen.filter(f => !all.has(f)))];
+  if (!unknown.length) return true;
+  const dym = (u) => { const c = [...all].find(k => u.startsWith(k) || k.startsWith(u)); return c ? ` — 혹시 ${c}?` : ''; };
+  failJson(has('--json'), 'unknown_flag', `알 수 없는 옵션: ${unknown.map(u => u + dym(u)).join(', ')}  (지원: ${[...allowed].join(' ')}${usageHint ? ' · ' + usageHint : ''}) — 값이 조용히 버려지는 것을 방지하기 위해 거부`);
+  return false;
+}
+
 function taskUpdate(root, id) {
   if (!_requireInit(root, 'task update')) return;  // 1.9.311 (UR-0047): init 가드
+  if (!_rejectUnknownFlags(['--status', '--evidence', '--next', '--note'], 'task update T-0001 --status done --evidence "..." --next "..."')) { process.exitCode = 1; return; }  // 1.17.5 (UR-0048)
   if (!id) return fail('id required (e.g., task update T-0001 --status in-progress)');
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'task status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
   const rows = readProgressRows(root);
