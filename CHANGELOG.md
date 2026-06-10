@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.17.6 — 2026-06-10 — 범용성⑤(P2 완결): session close 마감 정합 (UR-0049)
+
+**🔚 마감이 "마지막 관문" 역할을 하도록.** 5축 실증에서 — verify-claim 이 거짓으로 판정했던 task 가 마감 보고서에 평범한 "done"으로, gate 가 시크릿으로 실패 중인데 "clean (sleep 안전)"으로 선언되던 정합 문제 해소. **이로써 5축 격차(P1 2건 + P2 3건) 전부 닫힘.**
+
+### 변경 (UR-0049)
+- **done 낙관 재확인**: 마감 시 done task 들의 evidence 를 코드 흔적과 재대조(`_detectOptimism`) — verify-claim 을 건너뛴 거짓 주장(예: "DB 저장 구현" 인데 코드에 DB 호출 없음)을 `⚠ 낙관 의심 미해소` 로 표면화. `--json completionHonesty.optimismUnresolved`.
+- **마감 보안 재확인**: 커밋 대상 시크릿이 살아있으면 `🚨 마감 보안: N건 미해소 — clean 아님` 표면화. `--json closeSecurity.committedSecrets`.
+- advisory(차단 X) — 마감 흐름은 유지하되 거짓/위험이 조용히 통과하지 않음.
+
+### 검증 (회귀 0)
+- **selftest 221→222** · **E2E 365/365** · 행위 3종: 거짓 DB 주장 done + 시크릿 → 두 경고 표면화 ✓ · --json 필드 ✓ · 진짜 구현+시크릿 제거 → 경고 0(과탐 0) ✓.
+- patch(1.17.6) — npm 미배포(R-0011, GitHub). **다음: 1.18.0 [Stable] "범용 검증 하네스" minor(1.17.1~1.17.6 묶음 공개).**
+
 ## 1.17.5 — 2026-06-10 — 범용성④: 모르는 옵션 조용히 무시 차단 (UR-0048)
 
 **🔗 인수인계 유실의 최악 양식 차단.** 5축 실증에서 — `task update --next-action "..."` 처럼 존재하지 않는 옵션을 줘도 "✓ task updated"만 출력하고 값을 버려, **쓴 에이전트는 기록됐다고 믿고 다음 에이전트는 placeholder 를 받던** P2 해소.
