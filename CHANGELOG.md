@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.18.0 — 2026-06-10 — 🛡️ [안정화/Stable] 범용 검증 하네스 안정 minor
+
+**🛡️ 안정화(Stable) minor — "범용 AI 코딩 하네스" 실증 격차 전부 해소.** 5개 독립 클린룸 실사용 평가(Python/Node/Rust 실개발·에이전트 교대·적대 공격)가 찾은 P1 2건 + P2 3건(1.17.2~1.17.6)을 검증·통합해 npm 공개. R-0011 정책의 9번째 minor. 새 포지셔닝: **"어떤 언어, 어떤 AI 에이전트로 작업하든 — 증거 없이는 끝났다고 말할 수 없게."**
+
+### 이번 minor 통합 (1.17.1~1.17.6)
+- **🌐 테스트 명령 해석 체인 (P1)**: `verify-claim --run-tests` 가 npm test 하드코딩 → `--test-cmd` > 설정 `testCommand` > 실제 npm test(placeholder 제외) > skip. 파이썬 프로젝트 오판 해소 + pytest 출력 파싱.
+- **🛡️ 빈껍데기·가짜 테스트 차단 (P1)**: 주석뿐 구현(비주석 코드 0줄) done 게이팅 FAIL + 테스트-구현 연결 검사(12개 언어, 파이썬 `#` 스텁 포함). `--json implementationSubstance/testImplLink`.
+- **🧪 테스트 카운트 정직화 (P2)**: pytest·루트 `*.test.*` 관례 인식 + 측정불가="검증 미수행"(통과 위장 금지) + 한국어 "테스트 N개" 주장 추출(부풀린 주장 차단).
+- **🔗 unknown flag 거부 (P2)**: `task update --next-action` 같은 미존재 옵션이 값을 조용히 버리던 것 → 거부 + did-you-mean(인수인계 유실 차단).
+- **🔚 마감 정합 (P2)**: session close 가 done 낙관 의심·살아있는 시크릿을 재확인해 표면화 — 마감이 마지막 관문 역할.
+- **plan add 공백제목 손상 수정** + milestone 파서 개행 미흡수(1.17.1).
+
+### 검증 (회귀 0)
+- **selftest 222 PASS** · **E2E 365/365 PASS** · npm gate=minor_bump. 각 격차 행위 재현(공격 차단 + 정직 작업 과탐 0) 완료.
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag (Stable) · GitHub release (Stable) · npm dist-tag `stable` 시도.
+
 ## 1.17.6 — 2026-06-10 — 범용성⑤(P2 완결): session close 마감 정합 (UR-0049)
 
 **🔚 마감이 "마지막 관문" 역할을 하도록.** 5축 실증에서 — verify-claim 이 거짓으로 판정했던 task 가 마감 보고서에 평범한 "done"으로, gate 가 시크릿으로 실패 중인데 "clean (sleep 안전)"으로 선언되던 정합 문제 해소. **이로써 5축 격차(P1 2건 + P2 3건) 전부 닫힘.**
