@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.17.2';
+const VERSION = '1.17.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3573,6 +3573,15 @@ function _selfTestCases() {
       // pytest 출력 파싱: "3 passed in 0.05s"
       const py = ('3 passed in 0.05s'.match(/(\d+)\s+passed\b/i) || [])[1] === '3';
       return chain && wired && py;
+    } },
+    { name: '범용성 P1② (UR-0046): verify-claim 스텁 구현 차단 + 테스트-구현 연결 검사 (1.17.3)', run: () => {
+      const src = read(__filename);
+      const wired = src.includes('const stubFiles = [];') && src.includes('implementationSubstance: stubFiles.length === 0') && src.includes('testImplLink: testLinkOk') && src.includes("(claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false)");
+      // 스텁 판정 로직 재현: 주석뿐 파일 → 코드줄 0
+      const stub = '// TODO: call stripe\n// TODO: verify signature\n\n';
+      const real = '// handler\nmodule.exports = function(){ return 1; };\n';
+      const count = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => l.trim()).filter(t => t && !t.startsWith('//') && !t.startsWith('#')).length;
+      return wired && count(stub) === 0 && count(real) > 0;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -9637,6 +9646,27 @@ function verifyClaimCmd(root, taskId) {
 
   // 실제 파일 존재 검사
   const fileChecks = files.map(f => ({ file: f, exists: exists(path.join(root, f)) }));
+
+  // 1.17.3 (UR-0046 범용성 P1②): 빈껍데기(스텁) 구현 + 테스트-구현 연결 검사 — "주석뿐 구현 + assert(true) 테스트"가 verify-claim 을 exit 0 으로 통과하던 공격(5축 실증 Attack C) 차단.
+  //   ① 스텁: 주장된 코드 파일(테스트 제외)의 비주석 코드줄이 0 이면 확정 스텁 — done 게이팅 FAIL(확실 신호만, 과탐 0).
+  //   ② 연결: 주장에 구현+테스트가 모두 있는데 어떤 테스트도 구현 파일명(basename)을 참조하지 않으면 — 기본 advisory ⚠, --strict-claims 시 FAIL.
+  const _VC_CODE_EXT = /\.(js|mjs|cjs|jsx|ts|tsx|py|rb|go|rs|java|cs|php)$/i;
+  const _VC_TEST_PAT = /(^|[\\/])(test_[^\\/]+\.[a-z]+|[^\\/]+[._-]test\.[a-z]+|[^\\/]+\.spec\.[a-z]+)$|(^|[\\/])tests?[\\/]/i;
+  const stubFiles = [];
+  for (const c of fileChecks) {
+    if (!c.exists || !_VC_CODE_EXT.test(c.file) || _VC_TEST_PAT.test(c.file)) continue;
+    let body = ''; try { body = read(path.join(root, c.file)); } catch { continue; }
+    if (!body || body.length > 512 * 1024) continue;
+    const codeLines = body.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => l.trim()).filter(t => t && !t.startsWith('//') && !t.startsWith('#'));
+    if (codeLines.length === 0) stubFiles.push(c.file);
+  }
+  const _vcImpl = fileChecks.filter(c => c.exists && _VC_CODE_EXT.test(c.file) && !_VC_TEST_PAT.test(c.file)).map(c => c.file);
+  const _vcTests = fileChecks.filter(c => c.exists && _VC_CODE_EXT.test(c.file) && _VC_TEST_PAT.test(c.file)).map(c => c.file);
+  let testLinkOk = null;  // null = 판단 불가(구현·테스트가 함께 주장되지 않음)
+  if (_vcImpl.length && _vcTests.length) {
+    const bases = _vcImpl.map(f => path.basename(f).replace(/\.[a-z]+$/i, ''));
+    testLinkOk = _vcTests.some(tf => { let t = ''; try { t = read(path.join(root, tf)); } catch { return false; } return bases.some(b => b && t.includes(b)); });
+  }
   // 1.9.302 (UR-0042, 외부리뷰 Opus G-1): git diff 시맨틱 교차검증 — 주장한 파일이 실제로 변경됐는가.
   //   "파일 존재"만으로는 "테스트만 통과하면 done" 허위완료를 못 막음(Opus). git working tree+직전커밋 변경과 대조.
   const gitChanged = _gitChangedFiles(root);  // Set | null(git repo 아님 → 검증 불가)
@@ -9759,8 +9789,11 @@ function verifyClaimCmd(root, taskId) {
         testCountMatch: declaredTestCount == null || actualTestCount == null || actualTestCount >= declaredTestCount,
         evidenceComplete: !mustHaveEvidence ? null : evq.ok,
         claimsConsistent: !claimsChecked ? null : strictOk,            // 1.11.2 (UR-0175): optimism+정직성 (기본 게이팅)
-        gitCrossCheck: !gitApplicable ? null : !gitStrongMismatch      // 1.11.2 (UR-0175): git 교차검증 (머신 경로 노출)
+        gitCrossCheck: !gitApplicable ? null : !gitStrongMismatch,     // 1.11.2 (UR-0175): git 교차검증 (머신 경로 노출)
+        implementationSubstance: stubFiles.length === 0,               // 1.17.3 (UR-0046): 주장된 구현이 주석/빈껍데기뿐이면 false
+        testImplLink: testLinkOk                                       // 1.17.3 (UR-0046): 테스트가 구현을 참조하는가 (null=판단불가)
       },
+      stubFiles: stubFiles.slice(0, 10),
       evidence: { required: mustHaveEvidence, ...evq },
       claims: !claimsChecked ? null : { ok: strictOk, optimism: optimismSuspects.map(s => ({ kind: s.kind, label: s.label })), honesty: honestyFindings.map(f => ({ dim: f.dim, label: f.label })) },
       git: gitChanged === null ? { applicable: false, reason: 'not-a-git-repo' } : (!gitApplicable ? { applicable: false, reason: 'no-working-changes-or-no-claimed-files' } : { applicable: true, claimedInGit: claimedInGit.length, claimedNotInGit, strongMismatch: gitStrongMismatch, changedNotClaimed }),
@@ -9777,7 +9810,7 @@ function verifyClaimCmd(root, taskId) {
     log(JSON.stringify(out, null, 2));
     if (runResult && !runResult.skipped && !runResult.allPassed) return process.exit(1);
     // 1.11.2 (UR-0175): --json 도 optimism+git 게이팅 — 머신 경로가 허위완료를 통과시키지 않도록(human 경로와 동일).
-    if (!filesAllExist || !out.verdict.testCountMatch || !evidenceQualityOk || (claimsChecked && !strictOk) || !gitClaimOk) return process.exit(1);
+    if (!filesAllExist || !out.verdict.testCountMatch || !evidenceQualityOk || (claimsChecked && !strictOk) || !gitClaimOk || (claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false)) return process.exit(1);  // 1.17.3 (UR-0046): 스텁(done 기본) + 테스트 미연결(strict)
     return;
   }
 
@@ -9855,7 +9888,18 @@ function verifyClaimCmd(root, taskId) {
     log(`  - evidence 완전성 (done 기본 강제): ${evidenceQualityOk ? '✓ pass (파일+테스트 근거 있음)' : `✗ FAIL (누락: ${evq.missing.join(', ')})`}`);
     if (!evidenceQualityOk) log(`    · done 주장은 수정 파일 경로 + 테스트명/개수 가 evidence 에 있어야 함 (테스트 통과만으로는 불충분). 완화: --lenient`);
   }
-  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk;
+  // 1.17.3 (UR-0046): 구현 실체(스텁) + 테스트-구현 연결 — Attack C(주석뿐 구현+assert(true)) 차단.
+  if (stubFiles.length) {
+    log(`  - 구현 실체 (done 기본): ✗ FAIL — 주장된 구현 파일이 주석/빈껍데기뿐: ${stubFiles.slice(0, 5).join(', ')} (비주석 코드 0줄)`);
+  } else if (claimsChecked && _vcImpl.length) {
+    log(`  - 구현 실체 (done 기본): ✓ pass (주장 구현 파일에 실코드 존재)`);
+  }
+  if (testLinkOk === false) {
+    log(`  - 테스트-구현 연결: ⚠ 주장된 테스트(${_vcTests.slice(0, 3).join(', ')})가 구현 파일을 참조하지 않음 — 빈 테스트(assert(true)) 의심${has('--strict-claims') ? ' → FAIL' : ' (advisory — --strict-claims 시 FAIL)'}`);
+  } else if (testLinkOk === true && claimsChecked) {
+    log(`  - 테스트-구현 연결: ✓ pass (테스트가 구현을 참조)`);
+  }
+  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk || (claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false);
   // 1.9.287: 정직한 한계 고지 — 테스트 통과 ≠ 의미적 구현 정확성
   if (claimsChecked || mustHaveEvidence) {
     log('');
