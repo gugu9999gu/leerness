@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.17.3';
+const VERSION = '1.17.4';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3582,6 +3582,16 @@ function _selfTestCases() {
       const real = '// handler\nmodule.exports = function(){ return 1; };\n';
       const count = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => l.trim()).filter(t => t && !t.startsWith('//') && !t.startsWith('#')).length;
       return wired && count(stub) === 0 && count(real) > 0;
+    } },
+    { name: '범용성 P2 (UR-0047): 테스트 카운트 관례 확대(pytest/루트 *.test.*) + 측정불가=검증미수행(역전 해소) (1.17.4)', run: () => {
+      const src = read(__filename);
+      const wired = src.includes('const _countTests = (fp)') && src.includes("def\\s+test_") && src.includes('측정 불가 — 주장') && src.includes('out.verdict.testCountMatch === false') && src.includes('const testMeasured = actualTestCount != null;');
+      // 관례 글롭: pytest/루트 test 파일명 매칭
+      const re = /^test_.+\.py$|_test\.py$|\.test\.[cm]?[jt]sx?$|\.spec\.[cm]?[jt]sx?$/i;
+      const glob = re.test('test_calc.py') && re.test('calc_test.py') && re.test('rateLimiter.test.js') && re.test('app.spec.ts') && !re.test('calc.py') && !re.test('index.js');
+      // 파이썬 카운트: def test_ 2개
+      const py = ('def test_a():\n    pass\ndef test_b():\n    pass\n'.match(/^\s*def\s+test_/gm) || []).length === 2;
+      return wired && glob && py;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -9638,6 +9648,11 @@ function verifyClaimCmd(root, taskId) {
   // 4) N개 테스트 (단순 카운트)
   const m4 = evidence.match(/(\d+)\s*개\s*테스트/);
   if (m4) declaredTestCount = parseInt(m4[1], 10);
+  // 4b) 테스트 N개 (1.17.4 UR-0047: 한국어 자연어순 '테스트 50개 통과' — 이전 미인식으로 부풀린 주장이 카운트 검증을 아예 안 탔음)
+  if (!declaredTestCount) {
+    const m4b = evidence.match(/테스트\s*(\d+)\s*개/);
+    if (m4b) declaredTestCount = parseInt(m4b[1], 10);
+  }
   // 5) N tests (영문 단순 카운트)
   if (!declaredTestCount) {
     const m5 = evidence.match(/(\d+)\s*tests?\b/i);
@@ -9676,17 +9691,29 @@ function verifyClaimCmd(root, taskId) {
   // 1.13.2 (Karpathy 가이드라인 3 "외과적 변경", UR-0030): 역방향 교차검증 — git 에 변경됐으나 evidence/주장에 없는 파일(scope-creep / 요청 범위 밖 변경 신호). 하네스 자체 기록(.harness 등)은 제외. advisory(오탐 방지 — 기본 FAIL 아님, 표면화만).
   const _SCOPE_SKIP = /^(\.harness[\\/]|\.git[\\/]|node_modules[\\/]|\.claude[\\/]|dist[\\/]|build[\\/])/;
   const changedNotClaimed = gitApplicable ? [...gitChanged].filter(g => !_SCOPE_SKIP.test(g) && !files.some(f => _claimFileInGit(f, new Set([g])))) : [];
-  // 테스트 카운트: tests/test.js의 check( 또는 it( 또는 test( 개수
+  // 테스트 카운트 (1.17.4, UR-0047): 주장된 테스트 파일 우선 + 관례 글롭(pytest test_*.py·*_test.py / 루트·tests/ 의 *.test.*·*.spec.*) 인식.
+  //   이전엔 tests/test.js 등 3개 하드코딩 — pytest/node:test 루트 관례가 안 보여 "파일 못 찾음"인데 ✓ pass 로 표기(측정실패=통과 역전, 5축 실증 P2 공통).
+  const _countTests = (fp) => {
+    let t = ''; try { t = read(fp); } catch { return 0; }
+    if (/\.py$/i.test(fp)) { const d = (t.match(/^\s*def\s+test_/gm) || []).length; return d || (t.match(/^\s*assert\b/gm) || []).length; }
+    return (t.match(/\bcheck\s*\(/g) || t.match(/\b(it|test)\s*\(/g) || []).length;
+  };
   let actualTestCount = null;
-  const candidateTestFiles = ['tests/test.js', 'test/test.js', 'tests/index.js'];
-  for (const tf of candidateTestFiles) {
-    const tp = path.join(root, tf);
-    if (exists(tp)) {
-      const t = read(tp);
-      actualTestCount = (t.match(/\bcheck\s*\(/g) || t.match(/\b(it|test)\s*\(/g) || []).length;
-      break;
+  if (_vcTests.length) {
+    actualTestCount = _vcTests.reduce((a, f) => a + _countTests(path.join(root, f)), 0);
+  } else {
+    const found = new Set();
+    for (const tf of ['tests/test.js', 'test/test.js', 'tests/index.js']) if (exists(path.join(root, tf))) found.add(tf);
+    if (!found.size) {
+      for (const dir of ['', 'tests', 'test']) {
+        let ents = []; try { ents = fs.readdirSync(path.join(root, dir)); } catch { continue; }
+        for (const e of ents) if (/^test_.+\.py$|_test\.py$|\.test\.[cm]?[jt]sx?$|\.spec\.[cm]?[jt]sx?$/i.test(e)) found.add(dir ? dir + '/' + e : e);
+        if (found.size) break;  // 루트 우선 (루트에 있으면 tests/ 중복 스캔 안 함)
+      }
     }
+    if (found.size) actualTestCount = [...found].reduce((a, f) => a + _countTests(path.join(root, f)), 0);
   }
+  const testMeasured = actualTestCount != null;
 
   // 1.9.19: --run-tests — 테스트 자동 실행 + pass/fail 파싱
   // 1.17.2 (UR-0045 범용성 P1): 테스트 명령 해석 체인 — --test-cmd > leerness-config.json testCommand > 실제 npm test 스크립트 > skip.
@@ -9786,7 +9813,7 @@ function verifyClaimCmd(root, taskId) {
       actual: { fileChecks, testCount: actualTestCount },
       verdict: {
         filesAllExist,
-        testCountMatch: declaredTestCount == null || actualTestCount == null || actualTestCount >= declaredTestCount,
+        testCountMatch: declaredTestCount == null ? null : (!testMeasured ? null : actualTestCount >= declaredTestCount),  // 1.17.4 (UR-0047): null=측정불가(검증 미수행 — pass 아님), false 만 게이팅
         evidenceComplete: !mustHaveEvidence ? null : evq.ok,
         claimsConsistent: !claimsChecked ? null : strictOk,            // 1.11.2 (UR-0175): optimism+정직성 (기본 게이팅)
         gitCrossCheck: !gitApplicable ? null : !gitStrongMismatch,     // 1.11.2 (UR-0175): git 교차검증 (머신 경로 노출)
@@ -9810,7 +9837,7 @@ function verifyClaimCmd(root, taskId) {
     log(JSON.stringify(out, null, 2));
     if (runResult && !runResult.skipped && !runResult.allPassed) return process.exit(1);
     // 1.11.2 (UR-0175): --json 도 optimism+git 게이팅 — 머신 경로가 허위완료를 통과시키지 않도록(human 경로와 동일).
-    if (!filesAllExist || !out.verdict.testCountMatch || !evidenceQualityOk || (claimsChecked && !strictOk) || !gitClaimOk || (claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false)) return process.exit(1);  // 1.17.3 (UR-0046): 스텁(done 기본) + 테스트 미연결(strict)
+    if (!filesAllExist || out.verdict.testCountMatch === false || !evidenceQualityOk || (claimsChecked && !strictOk) || !gitClaimOk || (claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false)) return process.exit(1);  // 1.17.3 (UR-0046): 스텁(done 기본) + 테스트 미연결(strict). 1.17.4 (UR-0047): testCountMatch null(측정불가)은 미기여
     return;
   }
 
@@ -9828,8 +9855,8 @@ function verifyClaimCmd(root, taskId) {
   log(`## 🧪 테스트 카운트`);
   if (declaredPass) log(`  주장 (pass): ${declaredPass.num}/${declaredPass.denom}`);
   if (declaredTestCount) log(`  주장 (개수): ${declaredTestCount}개`);
-  if (actualTestCount != null) log(`  실측: tests/test.js에 ${actualTestCount}개 check/test 호출`);
-  else log(`  실측: 테스트 파일 못 찾음 (tests/test.js 등)`);
+  if (actualTestCount != null) log(`  실측: ${actualTestCount}개 테스트 호출 (${_vcTests.length ? '주장된 테스트 파일' : '관례 탐색: 루트/tests·test_*.py·*.test.*'})`);
+  else log(`  실측: 테스트 파일 못 찾음 — 카운트 검증 미수행 (pass 아님)`);
 
   // 1.9.19: --run-tests 결과
   let runTestsOk = true;
@@ -9858,7 +9885,8 @@ function verifyClaimCmd(root, taskId) {
   const testOk = declaredTestCount == null || actualTestCount == null || actualTestCount >= declaredTestCount;
   log(`## 종합`);
   log(`  - 파일 모두 존재: ${allFilesOk ? '✓ pass' : '✗ FAIL (일부 누락)'}`);
-  log(`  - 테스트 카운트: ${testOk ? '✓ pass (실측 ≥ 주장)' : '⚠ 주장보다 적음'}`);
+  // 1.17.4 (UR-0047): 측정 불가는 '통과' 가 아니라 '검증 미수행' — 이전엔 실측 0 인데 ✓ pass(실측≥주장) 모순 표기.
+  log(`  - 테스트 카운트: ${declaredTestCount == null ? '⊘ (주장 없음)' : !testMeasured ? `⊘ 측정 불가 — 주장 ${declaredTestCount}개 검증 미수행 (pass 아님)` : testOk ? '✓ pass (실측 ≥ 주장)' : '⚠ 주장보다 적음'}`);
   if (runResult && !runResult.skipped) {
     log(`  - npm test 실행: ${runTestsOk ? '✓ all passed' : '✗ FAIL'}`);
     if (declaredPass) log(`  - 주장과 실행 결과 일치: ${declaredPassMatchesActual ? '✓ pass' : '⚠ 다름'}`);

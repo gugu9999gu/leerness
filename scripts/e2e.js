@@ -451,9 +451,11 @@ total++;
   fs.writeFileSync(path.join(tmpV, 'src/myMod.js'), 'module.exports = {};\n');
   fs.writeFileSync(path.join(tmpV, 'tests/test.js'), 'check(1); check(2); check(3); check(4); check(5);\n');
   // T-row를 evidence와 함께 추가
+  // 1.17.4 (UR-0047): evidence 에 명시적 개수 주장(테스트 5개) 포함 — 카운트 검증이 실제로 수행되는 경로를 테스트.
+  //   이전 evidence 는 "(5/5 통과)"(pass 비율)만 있어 개수 주장이 없었는데도 옛 코드가 "✓ pass (실측 ≥ 주장)" 으로 표기(측정실패=통과 모순의 일부) — 정직화로 "⊘ (주장 없음)" 이 되므로 의도(카운트 검증)에 맞게 주장을 명시.
   fs.appendFileSync(path.join(tmpV, '.harness/progress-tracker.md'),
-    '| T-0099 | done | 신모듈 | src/myMod.js + tests/test.js (5/5 통과) | next | 2026-05-14 |\n');
-  // 정상: 파일 존재 + 테스트 5개
+    '| T-0099 | done | 신모듈 | src/myMod.js + tests/test.js 테스트 5개 (5/5 통과) | next | 2026-05-14 |\n');
+  // 정상: 파일 존재 + 테스트 5개 (주장 5 = 실측 5)
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0099', '--path', tmpV], { encoding: 'utf8', timeout: 15000 });
   const okPass = r.status === 0 && /✓ src\/myMod\.js/.test(r.stdout) && /✓ tests\/test\.js/.test(r.stdout) && /pass \(실측 ≥ 주장\)/.test(r.stdout);
   // 파일 없는 케이스 → exit ≠ 0
