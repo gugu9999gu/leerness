@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.17.1';
+const VERSION = '1.17.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -216,7 +216,7 @@ function _resolveRoot(positional) {
 }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when']);  // 1.14.2 (UR-0032): --done-when 값이 positional 로 누출돼 milestone 제목에 흡수되던 것 차단
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when','--test-cmd']);  // 1.14.2 (UR-0032): --done-when 값이 positional 로 누출돼 milestone 제목에 흡수되던 것 차단. 1.17.2 (UR-0045): --test-cmd 동일 원칙(신규 value-flag 는 반드시 여기 등록)
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -3566,6 +3566,14 @@ function _selfTestCases() {
       const safe = !m || (m[2] || '').indexOf('Status') === -1;
       return wired && safe;
     } },
+    { name: '범용성 P1 (UR-0045): verify-claim --run-tests 테스트 명령 해석 체인(--test-cmd>config>실제 npm test>skip) + placeholder 미실행 (1.17.2)', run: () => {
+      const src = read(__filename);
+      const chain = src.includes("let testCmd = arg('--test-cmd', null)") && src.includes("typeof cfg.testCommand === 'string'") && src.includes("!/no test specified/i.test(ts)") && src.includes('테스트 명령 미지정');
+      const wired = src.includes("'--done-when','--test-cmd'") && src.includes('runCommandSafe(testCmd, []') && src.includes('cmd: testCmd');
+      // pytest 출력 파싱: "3 passed in 0.05s"
+      const py = ('3 passed in 0.05s'.match(/(\d+)\s+passed\b/i) || [])[1] === '3';
+      return chain && wired && py;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -4130,7 +4138,7 @@ function commandsCmd(root) {
       { cmd: 'scan secrets [path]', desc: '시크릿 탐지' },
       { cmd: 'encoding check [path]', desc: '인코딩 검증' },
       { cmd: 'lazy detect [path] [--json]', desc: '게으른 작업 감지 (1.9.101)' },
-      { cmd: 'verify-claim <T-ID> [--run-tests] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287)' },
+      { cmd: 'verify-claim <T-ID> [--run-tests] [--test-cmd "<명령>"] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287) · --test-cmd: 비-JS 테스트 명령 (1.17.2)' },
       { cmd: 'optimism-check <T-ID>', desc: '낙관적 API 감지 (1.9.26)' },
       { cmd: 'requests audit|list|complete|drop|auto-complete', desc: '사용자 요청 추적 (1.9.207/223)' },
       { cmd: 'pre-wake-audit [path] [--last]', desc: 'sleep 전 점검 (1.9.209)' },
@@ -9650,21 +9658,31 @@ function verifyClaimCmd(root, taskId) {
     }
   }
 
-  // 1.9.19: --run-tests — npm test 자동 실행 + pass/fail 파싱
+  // 1.9.19: --run-tests — 테스트 자동 실행 + pass/fail 파싱
+  // 1.17.2 (UR-0045 범용성 P1): 테스트 명령 해석 체인 — --test-cmd > leerness-config.json testCommand > 실제 npm test 스크립트 > skip.
+  //   이전엔 npm test 하드코딩 → 비-JS(파이썬 등) 프로젝트에서 npm init 잔재 placeholder("no test specified"&&exit 1)가 실행돼
+  //   테스트 전부 통과한 작업을 "주장 불일치 FAIL"로 오판(5축 클린룸 실증 P1). placeholder 는 테스트가 아니므로 skip 처리.
   let runResult = null;
   if (has('--run-tests')) {
-    const pkgPath = path.join(root, 'package.json');
-    if (!exists(pkgPath)) {
-      runResult = { skipped: true, reason: 'package.json 없음' };
+    let testCmd = arg('--test-cmd', null);
+    if (!testCmd) {
+      try { const cfg = JSON.parse(read(path.join(root, '.harness', 'leerness-config.json'))); if (cfg && typeof cfg.testCommand === 'string' && cfg.testCommand.trim()) testCmd = cfg.testCommand.trim(); } catch {}
+    }
+    if (!testCmd) {
+      const pkgPath = path.join(root, 'package.json');
+      if (exists(pkgPath)) {
+        let pkg = null;
+        try { pkg = JSON.parse(read(pkgPath)); } catch {}
+        const ts = pkg && pkg.scripts && pkg.scripts.test;
+        if (ts && !/no test specified/i.test(ts)) testCmd = 'npm test';
+      }
+    }
+    if (!testCmd) {
+      runResult = { skipped: true, reason: '테스트 명령 미지정 — 비-JS 프로젝트는 --test-cmd "<명령>" 또는 .harness/leerness-config.json 의 "testCommand" 로 지정 (불일치 판정 아님)' };
     } else {
-      let pkg = null;
-      try { pkg = JSON.parse(read(pkgPath)); } catch {}
-      const hasTestScript = pkg && pkg.scripts && pkg.scripts.test;
-      if (!hasTestScript) {
-        runResult = { skipped: true, reason: 'scripts.test 없음' };
-      } else {
-        // 1.9.299 (UR-0039): 신뢰 못 할 워크스페이스 npm test → runCommandSafe + scrubSecrets (시크릿 노출 차단 + cwd jail).
-        const r = runCommandSafe('npm test', [], { cwd: root, root, encoding: 'utf8', allowShell: true, scrubSecrets: true, timeout: 5 * 60 * 1000, kind: 'verify_claim_test' });
+      {
+        // 1.9.299 (UR-0039): 신뢰 못 할 워크스페이스 테스트 실행 → runCommandSafe + scrubSecrets (시크릿 노출 차단 + cwd jail).
+        const r = runCommandSafe(testCmd, [], { cwd: root, root, encoding: 'utf8', allowShell: true, scrubSecrets: true, timeout: 5 * 60 * 1000, kind: 'verify_claim_test' });
         const out = (r.stdout || '') + (r.stderr || '');
         // 1.9.20: 파싱 패턴 확장 — 한국어 + jest/mocha/tap/vitest
         let parsed = null;
@@ -9686,8 +9704,14 @@ function verifyClaimCmd(root, taskId) {
           const m4 = out.match(/#\s*pass\s+(\d+)/i);
           if (m4) parsed = { num: parseInt(m4[1], 10), denom: parseInt(m4[1], 10) };
         }
+        // 5) pytest: "N passed in 0.12s" (UR-0045 — 파이썬 러너 출력 인식)
+        if (!parsed) {
+          const m5 = out.match(/(\d+)\s+passed\b/i);
+          if (m5) parsed = { num: parseInt(m5[1], 10), denom: parseInt(m5[1], 10) };
+        }
         runResult = {
           skipped: false,
+          cmd: testCmd,
           exitCode: r.status,
           parsed,
           allPassed: r.status === 0 && (!parsed || (parsed && parsed.num === parsed.denom))
@@ -9779,7 +9803,7 @@ function verifyClaimCmd(root, taskId) {
   let declaredPassMatchesActual = true;
   if (runResult) {
     log('');
-    log(`## 🚦 npm test 실행 (--run-tests)`);
+    log(`## 🚦 ${runResult.cmd || '테스트'} 실행 (--run-tests)`);
     if (runResult.skipped) {
       log(`  ⚠ skipped: ${runResult.reason}`);
     } else {

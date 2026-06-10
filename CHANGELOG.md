@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.17.2 — 2026-06-10 — 범용성①: verify-claim 테스트 명령 해석 체인 (UR-0045)
+
+**🌐 "범용 AI 코딩 하네스" 5축 실증 분석의 P1 1호 해소.** `verify-claim --run-tests` 가 `npm test` 하드코딩이라 — 테스트가 전부 통과한 파이썬 프로젝트(npm init 잔재 placeholder 존재)를 "주장 불일치 FAIL"로 오판하던 범용성 정면 반례를 수정.
+
+### 변경 (UR-0045)
+- **테스트 명령 해석 체인**: `--test-cmd "<명령>"` > `.harness/leerness-config.json` 의 `"testCommand"` > package.json 의 **실제** test 스크립트(npm placeholder "no test specified" 는 테스트가 아니므로 제외) > **skip 표기**(불일치 판정 금지).
+- **pytest 출력 파싱**: "N passed in …s" 형식 인식(파이썬 러너 pass/fail 비율 표시).
+- 신규 value-flag `--test-cmd` 를 `nonFlagArgs` withValue 에 등록(1.14.2 교훈 적용 — 제목 흡수 차단).
+
+### 검증 (회귀 0)
+- **selftest 217→218** · **E2E 365/365** · 행위 재현: ① placeholder-only 파이썬 프로젝트 `--run-tests` → skip + exit 0(오판 해소, 이전 exit 1) ② `--test-cmd "node mytest.js"` → 실행+파싱(2/2 passed)+주장 대조 ✓ ③ config testCommand 경유 동작 ④ 실제 npm test 스크립트는 기존대로 ⑤ 실패 명령은 정직하게 exit 1.
+- patch(1.17.2) — npm 미배포(R-0011, GitHub). 다음: UR-0046(스텁/연결 검사 — 빈껍데기 구현 차단).
+
 ## 1.17.1 — 2026-06-09 — 17번째 버그헌트: plan add 공백제목 데이터 손상 차단
 
 **🔬 17번째 버그헌트(이번 세션 신규코드 회귀 + 광역 스윕).** 신규코드(gate --json stdout-swap·memory --json·_GROUP_USAGE·scan break·_cellSafe)는 **0 결함**(5000키 664ms 등 입증). plan add 입력검증 1건 발견·수정.
