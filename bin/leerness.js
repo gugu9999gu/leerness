@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.18.1';
+const VERSION = '1.18.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3625,6 +3625,36 @@ function _selfTestCases() {
     { name: '재실증 P2 (1.18.1): task update id 뒤 non-path positional(status) 거부 + path-like 허용 (소스 가드)', run: () => {
       const src = read(__filename);
       return src.includes("_pos.slice(3).find(t => t && !t.startsWith('-') && !_pathLike(t))") && src.includes("알 수 없는 인자 '${stray}'") && src.includes('상태는 ${hint} 로 지정');
+    } },
+    { name: '위장 스텁 차단 (1.18.2): 빈 export 껍데기=스텁(우회형 포함), 이름붙은/재노출/실코드=정상 (행위)', run: () => {
+      const E = _vcImplIsEmpty;
+      // 스텁(true): 코드 0줄 · 빈 객체/배열 · 빈 함수/화살표 · export default {} · Python pass
+      const base = E('// TODO\n') === true && E('// c\nmodule.exports = {};\n') === true && E('module.exports = {\n};\n') === true
+        && E('exports = {}') === true && E('export default {}') === true && E('module.exports = []') === true
+        && E('module.exports = () => {}') === true && E('module.exports = function(){}') === true && E('# todo\npass') === true;
+      // 적대 워크플로 우회형(true 여야 함): Object.freeze · new Object · async function · exports.default · =>({}) · class{} · 인라인주석 · TS 캐스트
+      const bypass = E('module.exports = Object.freeze({});\n') === true
+        && E('module.exports = new Object();\n') === true
+        && E('module.exports = async function(){};\n') === true
+        && E('exports.default = {};\n') === true
+        && E('module.exports = () => ({});\n') === true
+        && E('module.exports = class {};\n') === true
+        && E('module.exports = {}; // real code coming\n') === true
+        && E('module.exports = {} as any;\n') === true;
+      // 정상(false): 이름붙은 export · require 재노출 · export * · 실코드 · 멤버 객체 · 비어있지않은 freeze/class/arrow
+      const real = E('function pay(n){ return n*2; }\nmodule.exports = { pay };\n') === false
+        && E('module.exports = require("./pay");\n') === false && E('export * from "./x";\n') === false
+        && E('module.exports = { a: 1 };\n') === false && E('module.exports = () => { return doStuff(); }') === false
+        && E('export default { port: 3000 }') === false && E('class Foo {}\nmodule.exports = Foo;\n') === false
+        && E('module.exports = Object.freeze({ a: 1 });\n') === false
+        && E('module.exports = class { run(){ return 1; } };\n') === false
+        && E('module.exports = (a,b) => a+b;\n') === false;
+      return base && bypass && real;
+    } },
+    { name: '위장 스텁 차단 (1.18.2): stub 루프 _vcImplIsEmpty 사용 + 메시지 + FILE_EXTS java/php 정합 (소스 가드)', run: () => {
+      const src = read(__filename);
+      return src.includes('if (_vcImplIsEmpty(body)) stubFiles.push(c.file);') && src.includes('비주석 코드 0줄 또는 빈 export 껍데기')
+        && /const FILE_EXTS = '[^']*\bjava\b[^']*\bphp\b[^']*'/.test(src);
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -9669,6 +9699,46 @@ function _gitChangedFiles(root) {
 }
 // 주장 파일이 git 변경 집합에 있는지(상대경로 prefix 차이 허용).
 // _claimFileInGit → lib/analyzers.js (1.9.304 UR-0025)
+
+// 1.18.2 (재실증 후속, 위장 스텁 차단): 주장된 구현 파일이 "실체 없는 껍데기"인지 판정 (verify-claim 구현 실체 검사).
+//   ① 비주석 코드줄 0 (기존 1.17.3) — 주석/공백뿐.
+//   ② 빈 export 껍데기 — 비주석 코드가 빈 객체/배열/빈 함수 export(또는 Python pass)뿐: module.exports={} / export default {} / module.exports=()=>{} / pass.
+//   FP 가드(스텁 아님): 이름붙은 export(module.exports={ a, b }) · 재노출(module.exports=require('./x') / export * from) · 실제 선언/로직.
+//   1.18.1 재실증에서 `module.exports = {};` 한 줄짜리 위장 스텁이 "구현 실체 ✓"로 통과(+require 만 하는 가짜 테스트와 결합 시 --strict 도 exit 0)하던 우회 차단.
+// 빈 값(zero-logic) producer: 빈 객체/배열 · 빈 컨테이너 생성자/래퍼 · 빈 함수/화살표 · 빈 클래스.
+//   1.18.2 적대 워크플로(우회 헌터)가 찾은 P1 우회 전부 포함: Object.freeze({}) · new Object() · async function(){} · ()=>({}).
+//   FP 0(오탐 헌터 ~45 합법패턴 통과): 내부가 비어야만 매치 → Object.freeze({a:1}) · class{ m(){} } · (a,b)=>a+b 등은 불매치.
+const _VC_EMPTY_VAL = '(?:' + [
+  '\\{\\s*\\}',                                                            // {}
+  '\\[\\s*\\]',                                                            // []
+  'Object\\.freeze\\(\\s*(?:\\{\\s*\\}|\\[\\s*\\])\\s*\\)',                 // Object.freeze({}) / ([])
+  '(?:new\\s+)?(?:Object|Array)\\s*\\(\\s*\\)',                            // new Object() / Object() / new Array()
+  '(?:async\\s+)?function\\s*\\*?\\s*[A-Za-z0-9_$]*\\s*\\([^)]*\\)\\s*\\{\\s*\\}',  // (async) function name?(){}
+  '(?:async\\s+)?\\([^)]*\\)\\s*=>\\s*(?:\\{\\s*\\}|\\(\\s*\\{\\s*\\}\\s*\\))',     // (async)(...)=>{} | =>({})
+  'class\\s+[A-Za-z0-9_$]*\\s*\\{\\s*\\}',                                 // class Name? {} (직접 export 형)
+].join('|') + ')';
+const _VC_EMPTY_SHELL_RE = new RegExp(
+  '^(?:' + [
+    '(?:module\\.)?exports(?:\\.[A-Za-z0-9_$]+)?\\s*=\\s*' + _VC_EMPTY_VAL,  // module.exports[.x] = EMPTY (exports.default 포함)
+    'export\\s+default\\s*' + _VC_EMPTY_VAL,                                 // export default EMPTY
+    'export\\s*\\{\\s*\\}',                                                  // export {}
+    'pass',                                                                  // python pass
+  ].join('|') + ')(?:\\s+as\\s+[A-Za-z0-9_$.<>\\[\\] ]+?)?\\s*;?$'           // 선택적 TS 캐스트(as any) + ;
+);
+function _vcImplIsEmpty(body) {
+  if (typeof body !== 'string' || !body) return false;
+  // 블록주석 제거 → 줄별 trim/주석줄 제거 → 인라인 // 주석 제거(따옴표 없는 줄만, 문자열 보호) → join.
+  const codeLines = body.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => {
+    let t = l.trim();
+    if (!t || t.startsWith('//') || t.startsWith('#')) return '';
+    if (!/['"`]/.test(t)) t = t.replace(/\s*\/\/.*$/, '').trim();          // 1.18.2: 같은-줄 인라인 주석 우회(`{}; // ...`) 차단
+    return t;
+  }).filter(Boolean);
+  if (codeLines.length === 0) return true;                                  // ① 코드 0줄
+  const joined = codeLines.join(' ').replace(/\s+/g, ' ').trim();
+  return _VC_EMPTY_SHELL_RE.test(joined);                                   // ② 빈 export 껍데기뿐
+}
+
 function verifyClaimCmd(root, taskId) {
   root = absRoot(root);
   const _j = has('--json');  // 1.9.400 (7번째 버그헌트 P1-B, UR-0105): --json 에러도 구조화
@@ -9683,7 +9753,8 @@ function verifyClaimCmd(root, taskId) {
   // 변경: 확장자 화이트리스트 기반. 디렉토리는 선택적 (project.godot 같은 루트 파일도 잡음).
   // 확장자는 길이 내림차순(긴 것 먼저 매치) + \b 종결로 .ts vs .tscn 구분.
   // 1.9.21: 설정/메타 파일 확장자 추가 — Godot export_presets.cfg 등 false negative 보완
-  const FILE_EXTS = 'webmanifest|dockerfile|properties|tscn|tres|godot|json5|jsx|tsx|yaml|html|scss|sass|less|gltf|conf|json|toml|lock|mdx|xml|css|svg|yml|cfg|ini|env|md|js|ts|gd|cs|py|rb|go|rs|kt|sh|h';
+  // 1.18.2: java|php|mjs|cjs 추가 — _VC_CODE_EXT 와 정합(이전엔 .java/.php 임플 주장이 추출조차 안 돼 스텁/존재 검사를 무검사 통과).
+  const FILE_EXTS = 'webmanifest|dockerfile|properties|tscn|tres|godot|json5|java|jsx|tsx|yaml|html|scss|sass|less|gltf|conf|json|toml|lock|mdx|xml|css|svg|yml|cfg|ini|env|php|mjs|cjs|md|js|ts|gd|cs|py|rb|go|rs|kt|sh|h';
   const FILE_RE = new RegExp(`(?:[A-Za-z][A-Za-z0-9_-]*\\/)?[A-Za-z][\\w./-]*\\.(?:${FILE_EXTS})\\b`, 'g');
   const filePatterns = evidence.match(FILE_RE) || [];
   // 중복 제거 + "tests/test.js" 같은 결과를 유지 (이미 `..` 없으니 그대로)
@@ -9732,8 +9803,8 @@ function verifyClaimCmd(root, taskId) {
     if (!c.exists || !_VC_CODE_EXT.test(c.file) || _VC_TEST_PAT.test(c.file)) continue;
     let body = ''; try { body = read(path.join(root, c.file)); } catch { continue; }
     if (!body || body.length > 512 * 1024) continue;
-    const codeLines = body.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => l.trim()).filter(t => t && !t.startsWith('//') && !t.startsWith('#'));
-    if (codeLines.length === 0) stubFiles.push(c.file);
+    // 1.18.2: 코드 0줄(기존) + 빈 export 껍데기(위장 스텁) 통합 판정.
+    if (_vcImplIsEmpty(body)) stubFiles.push(c.file);
   }
   const _vcImpl = fileChecks.filter(c => c.exists && _VC_CODE_EXT.test(c.file) && !_VC_TEST_PAT.test(c.file)).map(c => c.file);
   const _vcTests = fileChecks.filter(c => c.exists && _VC_CODE_EXT.test(c.file) && _VC_TEST_PAT.test(c.file)).map(c => c.file);
@@ -9985,7 +10056,7 @@ function verifyClaimCmd(root, taskId) {
   }
   // 1.17.3 (UR-0046): 구현 실체(스텁) + 테스트-구현 연결 — Attack C(주석뿐 구현+assert(true)) 차단.
   if (stubFiles.length) {
-    log(`  - 구현 실체 (done 기본): ✗ FAIL — 주장된 구현 파일이 주석/빈껍데기뿐: ${stubFiles.slice(0, 5).join(', ')} (비주석 코드 0줄)`);
+    log(`  - 구현 실체 (done 기본): ✗ FAIL — 주장된 구현 파일이 주석/빈껍데기뿐: ${stubFiles.slice(0, 5).join(', ')} (비주석 코드 0줄 또는 빈 export 껍데기)`);
   } else if (claimsChecked && _vcImpl.length) {
     log(`  - 구현 실체 (done 기본): ✓ pass (주장 구현 파일에 실코드 존재)`);
   }
@@ -19780,5 +19851,7 @@ module.exports = {
   // 1.9.289: shell-safe 인용 (Codex #3) — 단위 테스트
   _shellQuoteArg,
   // 1.18.1: 명령 실행 권한 결정 (재실증 신규 P1: --test-cmd 비-JS 인터프리터 거짓차단) — 단위 테스트
-  _isCommandPermitted, RUN_CORE_ALLOW
+  _isCommandPermitted, RUN_CORE_ALLOW,
+  // 1.18.2: verify-claim 위장 스텁(빈 export 껍데기) 판정 — 단위 테스트
+  _vcImplIsEmpty, _VC_EMPTY_SHELL_RE
 };

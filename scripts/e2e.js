@@ -448,7 +448,7 @@ total++;
   // 실제 src 파일 + 테스트 파일 생성 (5개 check)
   fs.mkdirSync(path.join(tmpV, 'src'), { recursive: true });
   fs.mkdirSync(path.join(tmpV, 'tests'), { recursive: true });
-  fs.writeFileSync(path.join(tmpV, 'src/myMod.js'), 'module.exports = {};\n');
+  fs.writeFileSync(path.join(tmpV, 'src/myMod.js'), 'module.exports = { ok: true };\n');
   fs.writeFileSync(path.join(tmpV, 'tests/test.js'), 'check(1); check(2); check(3); check(4); check(5);\n');
   // T-row를 evidence와 함께 추가
   // 1.17.4 (UR-0047): evidence 에 명시적 개수 주장(테스트 5개) 포함 — 카운트 검증이 실제로 수행되는 경로를 테스트.
@@ -484,7 +484,7 @@ total++;
   }));
   fs.mkdirSync(path.join(tmpR, 'src'), { recursive: true });
   fs.mkdirSync(path.join(tmpR, 'tests'), { recursive: true });
-  fs.writeFileSync(path.join(tmpR, 'src/mod.js'), 'module.exports={};\n');
+  fs.writeFileSync(path.join(tmpR, 'src/mod.js'), 'module.exports = { ok: true };\n');
   // 5 check 호출 + "5/5 passed" 직접 출력 (간단한 fixture)
   fs.writeFileSync(path.join(tmpR, 'tests/test.js'),
     "let p=0;function check(c){if(c)p++;}check(1);check(1);check(1);check(1);check(1);console.log(p+'/5 passed');if(p!==5)process.exit(1);\n");
@@ -508,7 +508,7 @@ total++;
   fs.writeFileSync(path.join(tmpF, 'package.json'), JSON.stringify({ name: 'rtf', version: '0.0.1', scripts: { test: 'node tests/test.js' } }));
   fs.mkdirSync(path.join(tmpF, 'src'), { recursive: true });
   fs.mkdirSync(path.join(tmpF, 'tests'), { recursive: true });
-  fs.writeFileSync(path.join(tmpF, 'src/mod.js'), 'module.exports={};\n');
+  fs.writeFileSync(path.join(tmpF, 'src/mod.js'), 'module.exports = { ok: true };\n');
   fs.writeFileSync(path.join(tmpF, 'tests/test.js'),
     "console.log('3/5 passed'); process.exit(1);\n");
   fs.appendFileSync(path.join(tmpF, '.harness/progress-tracker.md'),
@@ -652,7 +652,7 @@ total++;
   const tmpS = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-stct-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpS, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpS, 'src'), { recursive: true });
-  fs.writeFileSync(path.join(tmpS, 'src/x.js'), 'module.exports={};\n');
+  fs.writeFileSync(path.join(tmpS, 'src/x.js'), 'module.exports = { ok: true };\n');
   fs.appendFileSync(path.join(tmpS, '.harness/progress-tracker.md'),
     '| T-0050 | done | DB 마이그레이션 | 사용자 데이터 DB에 저장, 1000건 insert 성공 | (완료) | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0050', '--path', tmpS, '--strict-claims'], { encoding: 'utf8', timeout: 10000 });
@@ -688,7 +688,7 @@ total++;
   const tmpN = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-notify-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpN, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpN, 'src'), { recursive: true });
-  fs.writeFileSync(path.join(tmpN, 'src/x.js'), 'module.exports={};\n');
+  fs.writeFileSync(path.join(tmpN, 'src/x.js'), 'module.exports = { ok: true };\n');
   fs.appendFileSync(path.join(tmpN, '.harness/progress-tracker.md'),
     '| T-9100 | done | Slack 알림 | 슬랙 알림 발송 완료, #general 채널에 통보 | next | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'optimism-check', 'T-9100', '--path', tmpN], { encoding: 'utf8', timeout: 10000 });
@@ -703,7 +703,7 @@ total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-conf-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpC, 'src'), { recursive: true });
-  fs.writeFileSync(path.join(tmpC, 'src/x.js'), 'module.exports={};\n');
+  fs.writeFileSync(path.join(tmpC, 'src/x.js'), 'module.exports = { ok: true };\n');
   fs.appendFileSync(path.join(tmpC, '.harness/progress-tracker.md'),
     '| T-9200 | done | pure compute | src/x.js 모듈 추가 | next | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'optimism-check', 'T-9200', '--path', tmpC, '--json'], { encoding: 'utf8', timeout: 10000 });
@@ -720,7 +720,7 @@ total++;
   const tmpK = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-kpay-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpK, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpK, 'src'), { recursive: true });
-  fs.writeFileSync(path.join(tmpK, 'src/x.js'), 'module.exports={};\n');
+  fs.writeFileSync(path.join(tmpK, 'src/x.js'), 'module.exports = { ok: true };\n');
   fs.appendFileSync(path.join(tmpK, '.harness/progress-tracker.md'),
     '| T-9100 | done | 결제 | 카카오페이 결제 승인 완료 | next | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'optimism-check', 'T-9100', '--path', tmpK, '--json'], { encoding: 'utf8', timeout: 10000 });
@@ -2007,7 +2007,7 @@ total++;
   fs.writeFileSync(path.join(tmpJ, 'package.json'), JSON.stringify({ name: 'tp', version: '0.0.1', scripts: { test: 'node tests/test.js' } }));
   fs.mkdirSync(path.join(tmpJ, 'src'), { recursive: true });
   fs.mkdirSync(path.join(tmpJ, 'tests'), { recursive: true });
-  fs.writeFileSync(path.join(tmpJ, 'src/foo.js'), 'module.exports={};\n');
+  fs.writeFileSync(path.join(tmpJ, 'src/foo.js'), 'module.exports = { ok: true };\n');
   fs.writeFileSync(path.join(tmpJ, 'tests/test.js'), "console.log('Tests:       12 passed, 12 total');\n");
   fs.appendFileSync(path.join(tmpJ, '.harness/progress-tracker.md'),
     '| T-0021 | done | jest 스타일 | src/foo.js + Tests: 12 passed, 12 total | next | 2026-05-14 |\n');
@@ -2027,7 +2027,7 @@ total++;
   fs.writeFileSync(path.join(tmpM, 'package.json'), JSON.stringify({ name: 'mc', version: '0.0.1', scripts: { test: 'node tests/test.js' } }));
   fs.mkdirSync(path.join(tmpM, 'src'), { recursive: true });
   fs.mkdirSync(path.join(tmpM, 'tests'), { recursive: true });
-  fs.writeFileSync(path.join(tmpM, 'src/x.js'), 'module.exports={};\n');
+  fs.writeFileSync(path.join(tmpM, 'src/x.js'), 'module.exports = { ok: true };\n');
   fs.writeFileSync(path.join(tmpM, 'tests/test.js'), "console.log('  7 passing (12ms)');\n");
   fs.appendFileSync(path.join(tmpM, '.harness/progress-tracker.md'),
     '| T-0022 | done | mocha | src/x.js + 7 passing | next | 2026-05-14 |\n');
@@ -3019,7 +3019,7 @@ total++;
   const fakeBlocked = rFake.status === 1 && /evidence 완전성.*FAIL/.test(rFake.stdout);
   // 완전한 evidence(파일+테스트) + 실제 파일 존재 → pass (exit 0)
   fs.mkdirSync(path.join(cDir, 'src'), { recursive: true });
-  fs.writeFileSync(path.join(cDir, 'src', 'api.js'), 'module.exports = {};\n');
+  fs.writeFileSync(path.join(cDir, 'src', 'api.js'), 'module.exports = { ok: true };\n');
   cp.spawnSync(process.execPath, [CLI, 'task', 'update', 'T-0002', '--evidence', 'src/api.js 구현, npm test 5/5 통과 (Exit: 0)', '--path', cDir], { encoding: 'utf8', timeout: 15000, env });
   const rGood = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--require-evidence', '--path', cDir], { encoding: 'utf8', timeout: 20000, env });
   const goodPass = rGood.status === 0 && /evidence 완전성.*pass/.test(rGood.stdout);
@@ -3575,7 +3575,7 @@ total++;
   try {
     const vc = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc48-'));
     cp.spawnSync(process.execPath, [CLI, 'init', vc, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    fs.mkdirSync(path.join(vc, 'src'), { recursive: true }); fs.writeFileSync(path.join(vc, 'src', 'api.js'), 'module.exports={};');
+    fs.mkdirSync(path.join(vc, 'src'), { recursive: true }); fs.writeFileSync(path.join(vc, 'src', 'api.js'), 'module.exports = { ok: true };');
     const ex = (...a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: vc, encoding: 'utf8', timeout: 20000 });
     ex('task', 'add', '증거없는완료', '--path', vc, '--status', 'done');               // T-0002: 증거 0
     ex('task', 'add', '증거있는완료', '--path', vc, '--status', 'done', '--evidence', 'src/api.js 수정, 8 tests 통과 (Exit: 0)');  // T-0003

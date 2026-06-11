@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.18.2 — 2026-06-11 — 위장 스텁(빈 export 껍데기) 차단 — 거짓완료 우회 폐쇄 + 적대 강화
+
+**🛡️ "거짓완료 차단"의 위장 스텁 우회 폐쇄 — 적대 워크플로로 강화.** 1.18.1 재실증에서 정직한 한계로 남겼던 위장 스텁을 닫고, 적대 헌터(우회·오탐 병렬)로 1차 수정의 우회를 재발견해 함께 폐쇄. `module.exports = {};` 한 줄 "빈 껍데기 구현"이 `verify-claim` "구현 실체 ✓"를 통과하고 `require` 만 하는 가짜 테스트와 결합하면 **`--strict-claims` 에서도 exit 0** 으로 통과하던 우회(맹신 X 클린룸 케이스 B).
+
+### 변경 (재실증 후속 + 적대 강화)
+- **빈 export 껍데기 = 스텁 판정**: 비주석 코드가 빈 값(zero-logic) producer 뿐이면 스텁 → done 주장 기본 게이팅 FAIL. 순수 함수 `_vcImplIsEmpty` 분리(단위 테스트). 적대 헌터가 찾은 우회형까지 포함: `{}`·`[]`·`Object.freeze({})`·`new Object()`·`(async) function(){}`·`(async)()=>{}`·`()=>({})`·`class {}`·`export default {}`·`export {}`·`exports.default = {}`·`pass`, TS 캐스트(`{} as any`) 허용.
+- **인라인 주석 우회 차단**: 같은 줄 트레일링 주석(`module.exports = {}; // ...`)이 앵커를 깨던 가장 사소한 누수 — 줄별 인라인 `//` 제거(따옴표 없는 줄 한정, 문자열 보호) 후 판정.
+- **확장자 정합(`FILE_EXTS`)**: `java`·`php`·`mjs`·`cjs` 추가 — 이전엔 `.java`/`.php` 임플 주장이 추출조차 안 돼 스텁/존재 검사를 무검사 통과하던 불일치 버그 해소.
+- **과탐 0(오탐 헌터 ~45 합법패턴 확인)**: 이름붙은 export(`{ a, b }`)·재노출(`require('./x')`/`export * from`)·멤버 객체(`{ port: 3000 }`)·`Object.freeze({a:1})`·메서드 있는 클래스·비어있지 않은 화살표(`(a,b)=>a+b`)·`class Foo {}` + 별도 export(스펙 FP-가드)는 전부 정상 통과.
+- 참고: 재실증이 의심했던 "테스트-구현 연결 OR 우회"는 **실재하지 않음**(내용 기반 검사가 미연결 테스트를 정확히 잡음 — 클린룸 케이스 A strict=exit 1).
+- 정직한 잔여(백로그): 호출식 다중 인자(`Object.assign({},{})`), Python def/class-wrapped `pass`·`...`·`raise NotImplementedError`, 다언어(Ruby/Go/Rust `todo!()`) 빈 본문 — 정규식 누적보다 경량 토큰/AST 기반 "빈 컨테이너" 재설계로 미룸.
+
+### 검증 (회귀 0)
+- **selftest 225→227** (빈 껍데기 기본+우회형 8종+정상 10종 행위 단위 + 소스/확장자 가드) · **E2E 365/365** · **적대 워크플로 2회**(우회 9건 isReal 재현 → 수정 → CLI 행위 14/14 재확인; 오탐 0).
+- **행위 재현(맹신 X)**: Object.freeze/new Object/async fn/exports.default/=>({})/class{}/인라인주석/리터럴 8종 → strict exit 1(이전 0); 진짜 구현·배럴·freeze({a:1})·메서드 클래스·설정 객체 6종 → exit 0(오탐 0).
+- patch(1.18.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.18.1 — 2026-06-11 — 재실증 후속: --test-cmd 비-JS 거짓차단 해소 (P1) + 정합 구멍 2건
 
 **🔁 1.18.0 을 게시본에서 다시 검증(맹신 X)했더니, "범용" 약속의 핵심인 비-JS 사용자에게 새 P1 이 보였다.** 독립 클린룸 3곳(파이썬 재개발·적대 재공격·Node 회귀)으로 1.18.0 의 5격차를 재실증한 결과 4건은 닫혔으나, `verify-claim --run-tests --test-cmd "python ..."` 이 권한 차단(126)으로 막혀 **초록 프로젝트에 거짓 "✗ 불일치 FAIL"**(exit 1)을 내던 것을 발견·수정.
