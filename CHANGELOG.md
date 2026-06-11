@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.18.1 — 2026-06-11 — 재실증 후속: --test-cmd 비-JS 거짓차단 해소 (P1) + 정합 구멍 2건
+
+**🔁 1.18.0 을 게시본에서 다시 검증(맹신 X)했더니, "범용" 약속의 핵심인 비-JS 사용자에게 새 P1 이 보였다.** 독립 클린룸 3곳(파이썬 재개발·적대 재공격·Node 회귀)으로 1.18.0 의 5격차를 재실증한 결과 4건은 닫혔으나, `verify-claim --run-tests --test-cmd "python ..."` 이 권한 차단(126)으로 막혀 **초록 프로젝트에 거짓 "✗ 불일치 FAIL"**(exit 1)을 내던 것을 발견·수정.
+
+### 변경 (재실증 발견)
+- **🌐 --test-cmd 비-JS 인터프리터 거짓차단 해소 (P1)**: `leerness init` 기본 권한(basic, `shell.exec=false`)의 allowList 가 JS 도구(git/npm/node…)만 허용해 `python/py/pytest/uv` 등이 status 126 으로 막히고, 그게 "테스트 실패→주장 불일치" 거짓 판정으로 둔갑했음. 이제 **사용자가 명시한 `--test-cmd`/설정 `testCommand` 는 명시 권한(userAuthorized)** 으로 인터프리터 실행 허용(cwd jail 은 유지). 추가 방어: 권한/jail 로 막힌 실행은 **"테스트 실패"가 아니라 "측정 불가(skip, 불일치 판정 아님)"** 로 처리 — 차단이 절대 거짓 FAIL 로 바뀌지 않음.
+- **🔚 task update 위치인자 status 무시 차단 (P2)**: `task update T-0003 done` 처럼 상태를 위치인자로 주면 조용히 무시되고 "✓ updated"가 출력돼 **done 이 안 되고 verify-claim/마감 정직성 검사가 통째로 건너뛰던** 데이터 정합 구멍 해소 — id 뒤 떠도는 positional 거부 + did-you-mean(`--status done`). 정상 `--status`/`--next` 는 과탐 0.
+- **🏷 종합 라벨 정직화 (P3)**: 커스텀 `--test-cmd` 인데도 종합 줄이 "npm test 실행"으로 하드코딩되던 것 → 실제 실행 명령 표기.
+
+### 검증 (회귀 0)
+- **selftest 222→225** (권한 결정 `_isCommandPermitted` 행위 단위 + 정합 가드) · **E2E 365/365** (대기 중 갱신).
+- **행위 재현(맹신 X)**: 초록 파이썬 프로젝트에서 `verify-claim --run-tests --test-cmd "python test_todo.py"` → exit 0 + "python test_todo.py 실행: ✓ all passed" + 일치 판정(이전: 126/거짓 FAIL/exit 1). `task update T-0001 done` → 명확 에러+exit 1, status 는 그대로(done 아님), `--status done`/`--next` 정상.
+- patch(1.18.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적). 다음 minor 때 묶음 공개.
+
 ## 1.18.0 — 2026-06-10 — 🛡️ [안정화/Stable] 범용 검증 하네스 안정 minor
 
 **🛡️ 안정화(Stable) minor — "범용 AI 코딩 하네스" 실증 격차 전부 해소.** 5개 독립 클린룸 실사용 평가(Python/Node/Rust 실개발·에이전트 교대·적대 공격)가 찾은 P1 2건 + P2 3건(1.17.2~1.17.6)을 검증·통합해 npm 공개. R-0011 정책의 9번째 minor. 새 포지셔닝: **"어떤 언어, 어떤 AI 에이전트로 작업하든 — 증거 없이는 끝났다고 말할 수 없게."**

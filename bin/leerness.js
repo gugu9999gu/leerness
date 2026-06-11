@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.18.0';
+const VERSION = '1.18.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3606,6 +3606,26 @@ function _selfTestCases() {
       const injected = read(__filename).includes('_updateUserRequest, _detectOptimism, _scanCodeForPatterns, _collectSecretFindings });');
       return wired && injected;
     } },
+    { name: '재실증 P1 (1.18.1): basic 모드에서 비-JS 인터프리터는 차단되지만 userAuthorized(--test-cmd) 는 허용 (행위)', run: () => {
+      const basic = { mode: 'basic', shell: { exec: false, allowList: [] } };
+      const blockedDefault = _isCommandPermitted(basic, 'python test_todo.py', {}) === false;       // 기본: 차단(원래 126 원인)
+      const blockedPy = _isCommandPermitted(basic, 'pytest -q', {}) === false;                      // pytest 도 차단
+      const allowedAuth = _isCommandPermitted(basic, 'python test_todo.py', { userAuthorized: true }) === true;  // 명시 권한 → 허용
+      const coreStillOk = _isCommandPermitted(basic, 'npm test', {}) === true;                      // JS 핵심도구는 그대로 허용(회귀 가드)
+      const extOk = _isCommandPermitted({ mode: 'extended', shell: { exec: true, allowList: [] } }, 'python x.py', {}) === true;  // exec:true → 허용
+      return blockedDefault && blockedPy && allowedAuth && coreStillOk && extOk;
+    } },
+    { name: '재실증 P1 (1.18.1): verify-claim 차단 실행은 skip(불일치 판정 아님) + 종합 라벨이 실제 cmd (소스 가드)', run: () => {
+      const src = read(__filename);
+      const authPass = src.includes('userAuthorized: true, timeout: 5 * 60 * 1000, kind: ' + "'verify_claim_test'");
+      const skipOnBlock = src.includes('if (r.blocked) {') && src.includes('테스트 명령 차단') && src.includes('불일치 판정 아님');
+      const label = src.includes('`  - ${runResult.cmd ' + "|| 'npm test'} 실행:");  // P3: 하드코딩된 npm test 라벨 제거
+      return authPass && skipOnBlock && label;
+    } },
+    { name: '재실증 P2 (1.18.1): task update id 뒤 non-path positional(status) 거부 + path-like 허용 (소스 가드)', run: () => {
+      const src = read(__filename);
+      return src.includes("_pos.slice(3).find(t => t && !t.startsWith('-') && !_pathLike(t))") && src.includes("알 수 없는 인자 '${stray}'") && src.includes('상태는 ${hint} 로 지정');
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -6781,6 +6801,19 @@ function taskUpdate(root, id) {
   if (!_requireInit(root, 'task update')) return;  // 1.9.311 (UR-0047): init 가드
   if (!_rejectUnknownFlags(['--status', '--evidence', '--next', '--note'], 'task update T-0001 --status done --evidence "..." --next "..."')) { process.exitCode = 1; return; }  // 1.17.5 (UR-0048)
   if (!id) return fail('id required (e.g., task update T-0001 --status in-progress)');
+  // 1.18.1 (재실증 신규 P2): id 뒤 떠도는 non-path positional 거부 — `task update T-0003 done` 처럼 상태를 위치인자로 주면
+  //   조용히 무시되고 "✓ updated" 가 출력돼 done 이 안 됨 → verify-claim/close 의 정직성 검사가 통째로 건너뛰던 데이터 정합 구멍.
+  //   단, path-like positional(/abs, ./rel, C:\ — UR-0141 task 계열 positional path)은 워크스페이스 경로이므로 허용.
+  {
+    const _pos = nonFlagArgs();  // ['task','update','<id>', ...rest]
+    const _pathLike = (t) => /^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(t);
+    const stray = _pos.slice(3).find(t => t && !t.startsWith('-') && !_pathLike(t));
+    if (stray) {
+      const known = TASK_STATUSES.has(stray);
+      const hint = known ? `--status ${stray}` : `--status <${[...TASK_STATUSES].join('|')}>`;
+      return fail(`알 수 없는 인자 '${stray}' — 상태는 ${hint} 로 지정하세요 (예: task update ${id} ${known ? '--status ' + stray : '--status done'} --evidence "...")`);
+    }
+  }
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'task status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
   const rows = readProgressRows(root);
   if (!rows.find(r => r.id === id)) { fail(`task ${id} not found in progress-tracker.md`); return; }
@@ -9766,7 +9799,13 @@ function verifyClaimCmd(root, taskId) {
     } else {
       {
         // 1.9.299 (UR-0039): 신뢰 못 할 워크스페이스 테스트 실행 → runCommandSafe + scrubSecrets (시크릿 노출 차단 + cwd jail).
-        const r = runCommandSafe(testCmd, [], { cwd: root, root, encoding: 'utf8', allowShell: true, scrubSecrets: true, timeout: 5 * 60 * 1000, kind: 'verify_claim_test' });
+        // 1.18.1 (재실증 P1): testCmd 는 사용자 명시(--test-cmd/config) → userAuthorized 로 basic 모드 allowList 우회(cwd jail 은 유지).
+        //   이전엔 python/pytest 등 비-JS 인터프리터가 권한 차단(126)돼 verify-claim 이 "주장 불일치" 거짓 FAIL 을 냈음.
+        const r = runCommandSafe(testCmd, [], { cwd: root, root, encoding: 'utf8', allowShell: true, scrubSecrets: true, userAuthorized: true, timeout: 5 * 60 * 1000, kind: 'verify_claim_test' });
+        // 1.18.1: 권한/jail 로 차단된 실행은 "테스트 실패" 가 아니라 "측정 불가" — 절대 불일치 판정으로 둔갑시키지 않음(skip).
+        if (r.blocked) {
+          runResult = { skipped: true, reason: `테스트 명령 차단(${r.error}) — '${testCmd}' 실행 불가 (불일치 판정 아님). leerness permissions set extended 또는 allowList 에 추가 권장` };
+        } else {
         const out = (r.stdout || '') + (r.stderr || '');
         // 1.9.20: 파싱 패턴 확장 — 한국어 + jest/mocha/tap/vitest
         let parsed = null;
@@ -9800,6 +9839,7 @@ function verifyClaimCmd(root, taskId) {
           parsed,
           allPassed: r.status === 0 && (!parsed || (parsed && parsed.num === parsed.denom))
         };
+        }
       }
     }
   }
@@ -9915,7 +9955,7 @@ function verifyClaimCmd(root, taskId) {
   // 1.17.4 (UR-0047): 측정 불가는 '통과' 가 아니라 '검증 미수행' — 이전엔 실측 0 인데 ✓ pass(실측≥주장) 모순 표기.
   log(`  - 테스트 카운트: ${declaredTestCount == null ? '⊘ (주장 없음)' : !testMeasured ? `⊘ 측정 불가 — 주장 ${declaredTestCount}개 검증 미수행 (pass 아님)` : testOk ? '✓ pass (실측 ≥ 주장)' : '⚠ 주장보다 적음'}`);
   if (runResult && !runResult.skipped) {
-    log(`  - npm test 실행: ${runTestsOk ? '✓ all passed' : '✗ FAIL'}`);
+    log(`  - ${runResult.cmd || 'npm test'} 실행: ${runTestsOk ? '✓ all passed' : '✗ FAIL'}`);
     if (declaredPass) log(`  - 주장과 실행 결과 일치: ${declaredPassMatchesActual ? '✓ pass' : '⚠ 다름'}`);
   }
   // 1.11.2 (UR-0175): optimism+정직성 — done 주장은 기본 게이팅(claimsChecked). 완화: --lenient.
@@ -16327,8 +16367,25 @@ function _isCwdSafe(root, cwd) {
     return !rel.startsWith('..') && !path.isAbsolute(rel);
   } catch { return false; }
 }
+// basic 모드에서도 항상 허용하는 핵심 도구 (release/install 흐름 유지)
+const RUN_CORE_ALLOW = ['git', 'npm', 'npx', 'node', 'pnpm', 'yarn'];
+// 1.18.1 (재실증 신규 P1): 명령 실행 권한 결정 — 순수 함수(테스트 가능). cwd jail 은 별도(여기서 판단 안 함).
+//   userAuthorized: 사용자가 명시적으로 입력한 명령(예: verify-claim --test-cmd "<명령>" 또는 config testCommand)
+//   → basic 모드 allowList 우회(명시 권한). 이전엔 coreAllow(JS 도구)만 허용해 --test-cmd "python ..." 가
+//   status 126 으로 차단되고, 그게 verify-claim 에서 "테스트 실패 → 주장 불일치" 거짓 FAIL 로 둔갑했음(초록 파이썬 프로젝트 오판).
+function _isCommandPermitted(perms, cmdStr, opts) {
+  opts = opts || {};
+  perms = perms || {};
+  if (opts.allowOutsideCwd || opts.userAuthorized) return true;
+  const exec = perms.shell && perms.shell.exec !== false;
+  if (exec) return true;  // extended/full 모드 (또는 exec:true)
+  const allow = (perms.shell && perms.shell.allowList) || [];
+  const first = String(cmdStr || '').trim().split(/\s+/)[0];
+  return RUN_CORE_ALLOW.includes(first) || allow.includes('*') || allow.includes(first);
+}
+
 function runCommandSafe(cmd, args, opts) {
-  // opts: { cwd, root, timeout, env, stdio, kind, label, allowShell, encoding, input, allowOutsideCwd }
+  // opts: { cwd, root, timeout, env, stdio, kind, label, allowShell, encoding, input, allowOutsideCwd, userAuthorized }
   opts = opts || {};
   const root = opts.root || opts.cwd || process.cwd();
   const cwd = opts.cwd || root;
@@ -16345,17 +16402,11 @@ function runCommandSafe(cmd, args, opts) {
   // 2) permissions allowList (1.9.146)
   try {
     const perms = _readPermissions(root);
-    const exec = perms.shell?.exec !== false;  // basic 에선 false
-    const allow = perms.shell?.allowList || [];
-    if (!exec && !opts.allowOutsideCwd) {
-      // basic 모드 — git/npm/node 같은 핵심 도구는 허용 (release/install 흐름 유지)
-      const coreAllow = ['git', 'npm', 'npx', 'node', 'pnpm', 'yarn'];
-      const first = cmdStr.split(/\s+/)[0];
-      if (!coreAllow.includes(first) && !allow.includes('*') && !allow.includes(first)) {
-        const r = { status: 126, stdout: '', stderr: `runCommandSafe: shell.exec=false (mode=${perms.mode}). allowList: ${allow.join(',') || '(없음)'} / core: ${coreAllow.join(',')}`, error: 'permissions', blocked: true };
-        try { _recordRun(root, { kind: label, cmd: cmdStr, args: argList, durationMs: Date.now() - t0, ok: false, blocked: 'permissions', mode: perms.mode }); } catch {}
-        return r;
-      }
+    if (!_isCommandPermitted(perms, cmdStr, opts)) {
+      const allow = perms.shell?.allowList || [];
+      const r = { status: 126, stdout: '', stderr: `runCommandSafe: shell.exec=false (mode=${perms.mode}). allowList: ${allow.join(',') || '(없음)'} / core: ${RUN_CORE_ALLOW.join(',')}`, error: 'permissions', blocked: true };
+      try { _recordRun(root, { kind: label, cmd: cmdStr, args: argList, durationMs: Date.now() - t0, ok: false, blocked: 'permissions', mode: perms.mode }); } catch {}
+      return r;
     }
   } catch {}
   // 3) spawn — shell:false 기본 (shell injection 차단). allowShell=true 시만 shell:true (deploy/build 호환)
@@ -19727,5 +19778,7 @@ module.exports = {
   // 1.9.288: MCP 도구 수 단일 출처 (Codex #5) — 단위 테스트
   _mcpToolCount,
   // 1.9.289: shell-safe 인용 (Codex #3) — 단위 테스트
-  _shellQuoteArg
+  _shellQuoteArg,
+  // 1.18.1: 명령 실행 권한 결정 (재실증 신규 P1: --test-cmd 비-JS 인터프리터 거짓차단) — 단위 테스트
+  _isCommandPermitted, RUN_CORE_ALLOW
 };
