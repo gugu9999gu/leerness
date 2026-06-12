@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.18.3 — 2026-06-12 — 품질 렌즈(분야별 자기질문) + README 영문 우선 + 설치 REPL 문항 제거 (사용자 명시 3종)
+
+**🧭 "AI가 스스로 질문하고 행동하도록".** 사용자 명시 지시 3종을 한 패치로: (1) 분야별 자기질문 품질 렌즈, (2) README 영어권 우선 재작성, (3) 설치 직후 REPL 진입 문항 제거.
+
+### 변경
+- **`leerness lens [code|design|docs|test|security]` 신설 (UR-0003)**: 완료 선언 전 AI가 스스로 답하는 분야별 질문 + **분야간 인과관계**(↔ affects). 사용자 원문 그대로 — 코드: *"선임 개발자가 이 코드를 보고 복잡하다고 느끼지 않을까?"* / 디자인: *"선임 디자이너와 일반 사용자가 봤을 때 이쁘고 편하고 직관적이며 헷갈리지 않는가?"* / 문서: *"30초 안에 뭘 해보면 되지?"*. "그렇다(통과)"라고 답할 수 없으면 완료가 아님. `--json` 지원. AGENTS.md 템플릿 Required behavior + anti-lazy-work-policy 규칙 7로 통합(새 init 워크스페이스부터 AI가 자동으로 읽음).
+- **README 영어권 우선 재작성 (UR-0004)**: 첫 화면 영문 — *Try it in 30 seconds*(즉시 해볼 명령) / *No terminal? Let your AI run it*(비개발자: AI에게 붙여넣는 한 문단 + MCP 85 도구) / *Why leerness?*(자체 하네스 대비 차별점 표 — "기억은 말한 것, leerness는 한 것을 검증"). 한국어 전문은 `README.ko.md` 분리. 관리 블록(project-readme) 보존.
+- **설치 직후 REPL agent 모드 진입 문항 제거 (사용자 명시)**: REPL은 완성도가 올라가면 구현 예정 — 설치 흐름에서 질문·자동 진입 삭제(수동 `leerness agent`는 유지). 설치 문항이 한 개 줄어 더 단순.
+- **운영**: leerness 영상(쇼츠) 생성 당분간 중지 — site release-pipeline의 렌더/검증/업로드 3단계에 `LEERNESS_VIDEO_ENABLED` 가드(레포 변수로 재개). 룰 R-0006(토큰 예산 고려)/R-0007(영상 중지) 등록.
+
+### 기록만 (토큰 예산 고려 — 다음 라운드 후보, UR-0003 완전판)
+- 렌즈 워크스페이스 커스텀(`.harness/quality-lenses.json` — 프로젝트별 질문 추가/수정), handoff 헤드라인에 in-progress task 키워드 → 관련 렌즈 자동 힌트, verify-claim/session close에 렌즈 자가답변 기록(advisory), MCP `leerness_lens` 노출, 인과관계 그래프 자동 추론(변경 파일 확장자 → 영향 분야 매핑).
+
+### 검증 (회귀 0)
+- **selftest 227→229** (카탈로그 무결성·사용자 원문·affects 상호참조 행위 + 표면 등재/REPL 제거 소스 가드 — 자기참조 함정 1건 즉시 수정) · **E2E 365/365** · lens 행위 확인(유효/무효 도메인 exit 0/1).
+- patch(1.18.3) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.18.2 — 2026-06-11 — 위장 스텁(빈 export 껍데기) 차단 — 거짓완료 우회 폐쇄 + 적대 강화
 
 **🛡️ "거짓완료 차단"의 위장 스텁 우회 폐쇄 — 적대 워크플로로 강화.** 1.18.1 재실증에서 정직한 한계로 남겼던 위장 스텁을 닫고, 적대 헌터(우회·오탐 병렬)로 1차 수정의 우회를 재발견해 함께 폐쇄. `module.exports = {};` 한 줄 "빈 껍데기 구현"이 `verify-claim` "구현 실체 ✓"를 통과하고 `require` 만 하는 가짜 테스트와 결합하면 **`--strict-claims` 에서도 exit 0** 으로 통과하던 우회(맹신 X 클린룸 케이스 B).
