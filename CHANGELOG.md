@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.19.0 — 2026-06-14 — 🛡️ [안정화/Stable] 검증 하네스 강화 + 정직한 프레이밍 안정 minor
+
+**🛡️ 안정화(Stable) minor — "거짓 완료를 못 하게" 만드는 검증 계층을 한층 더 단단하게.** 직전 minor(1.18.0) 이후 누적된 패치 4건(1.18.1~1.18.4)을 검증·통합해 npm 공개. R-0011 정책의 10번째 stable minor. 핵심 테마: **검증 계층 강화(비-JS 거짓FAIL 해소 + 위장 스텁 차단) + AI 자기질문 품질 렌즈 + 정직한 프레이밍(협조 vs 강제, 영문 우선)**.
+
+### 이번 minor 통합 (1.18.1~1.18.4)
+- **🌐 비-JS `--test-cmd` 거짓 FAIL 해소 (P1, 1.18.1)**: 기본 권한(basic)이 `python/pytest` 등 사용자 명시 테스트 명령을 막아(exit 126) 초록 프로젝트를 "주장 불일치 FAIL"로 오판하던 것 — 명시 `--test-cmd`/config `testCommand`는 명시 권한으로 실행 허용(cwd jail 유지), 차단 시엔 FAIL 아닌 skip. + task update 위치인자 status 무시 차단 + 종합 라벨 정직화.
+- **🛡️ 위장 스텁 차단 (P2, 1.18.2)**: `module.exports = {}` 같은 빈 export 껍데기가 "구현 실체 ✓"를 통과하던 우회 폐쇄. 적대 워크플로로 한-단어 우회 9종(Object.freeze/new Object/async fn/exports.default/인라인 주석/`()=>({})`/class{}) 재발견·차단. 과탐 0(이름붙은 export·재노출·실코드 통과). `.java/.php/.mjs/.cjs` 추출 정합.
+- **🧭 분야별 자기질문 품질 렌즈 (1.18.3)**: `leerness lens [code|design|docs|test|security]` — 완료 선언 전 AI가 스스로 답하는 질문(코드: "선임 개발자가 복잡하다 느끼지 않을까?" / 디자인: "선임 디자이너+일반 사용자가 이쁘고 직관적인가?") + 분야간 인과관계. AGENTS.md/anti-lazy 정책 통합. README 영문 우선 재작성(README.ko.md 분리) + 설치 직후 REPL 문항 제거.
+- **🔒 보안 제보 비공개화 + 자기정합 (1.18.4)**: SECURITY.md를 GitHub Private Vulnerability Reporting + 보안 이메일로(공개 이슈 안내 모순 해소). README 관리블록 버전 자기정합 + audit가 동적 배지 README의 관리블록 lag도 감지. README "Guidance vs enforcement"(협조형 기본, `ci init`+branch protection으로 강제) + `init --minimal` 노출.
+
+### 검증 (회귀 0)
+- **selftest 222→231** · **E2E 365/365** · 각 패치 행위 재현(공격 차단 + 정직 작업 과탐 0) + 위장 스텁 적대 워크플로 + 게시본 재실증(1.18.1 P1) 완료.
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag (Stable) · GitHub release (`--latest`) · npm dist-tag `stable` 시도.
+
 ## 1.18.4 — 2026-06-14 — GPT-5.5 외부평가 채택: 보안 제보 비공개화 + 자기정합 + 정직한 강제 프레이밍
 
 **🔎 외부평가(GPT-5.5)를 맹신 X로 검증해 진짜 결함만 채택.** 8개 한계 지적을 리포지토리에서 직접 확인 — #3(오케스트레이션 과대홍보)은 현 포지셔닝상 **기각**(이미 "operations/verification layer"), #6(채택 증거)은 범위 밖. 검증된 결함을 이번 패치에 반영.
