@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.19.1';
+const VERSION = '1.19.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3661,6 +3661,17 @@ function _selfTestCases() {
       const src = read(__filename);
       return src.includes("if (domain != null) domain = String(domain).trim().toLowerCase();");
     } },
+    { name: '렌즈 완전판 v2 (1.19.2, UR-0003): 파일 확장자 → 렌즈 도메인 매핑 (행위)', run: () => {
+      const F = _lensDomainsForFiles;
+      const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      return eq(F(['src/api.js']), ['code'])
+        && eq(F(['ui/Button.tsx', 'styles/app.css']), ['design'])           // UI/스타일 → design (코드 ext 아닌 tsx 는 design 우선)
+        && eq(F(['src/pay.js', 'src/Button.tsx']), ['code', 'design'])       // 혼합 → code 먼저, design (최대 2)
+        && eq(F(['README.md']), ['docs'])
+        && eq(F(['tests/foo.test.js']), ['code', 'test'])                    // 테스트파일(.js) → code+test (고정 순서: code 먼저)
+        && eq(F([]), [])
+        && eq(F(['a.css', 'b.md', 'c.js', 'd.test.js']).length, 2);          // 최대 2개 클러터 방지
+    } },
     { name: 'GPT-5.5 평가 #5 (1.19.1, UR-0009): 클린룸 평가 문서 공개 + 한계 명시 (행위)', run: () => {
       const dp = path.join(path.dirname(__filename), '..', 'docs', 'clean-room-evaluations.md');
       if (!exists(dp)) return true;  // 패키지에 없으면 스킵(설치본 안전)
@@ -4245,6 +4256,20 @@ const LENS_CATALOG = {
     affects: ['code', 'test'], affectsNote: '보안 가드를 넣었다면 우회/오탐 테스트가 따라와야 함'
   }
 };
+// 1.19.2 (UR-0003 렌즈 완전판 v2): 주장된 파일 확장자 → 관련 품질 렌즈 도메인 (결정적, 키워드 추론 아님).
+//   verify-claim 이 완료-검증 순간(사용자: "완료 선언 전 자기질문")에 해당 분야 질문을 advisory 로 노출하는 데 사용.
+function _lensDomainsForFiles(files) {
+  const out = [];
+  const arr = Array.isArray(files) ? files : [];
+  const has = (re) => arr.some(f => typeof f === 'string' && re.test(f));
+  if (has(/\.(css|scss|sass|less|styl|tsx|jsx|vue|svelte|html?|astro)$/i)) out.push('design');  // UI/스타일
+  if (has(/\.(md|mdx|rst|adoc|txt)$/i)) out.push('docs');                                       // 문서
+  if (has(/(^|[\\/])(test_[^\\/]+\.[a-z]+|[^\\/]+[._-]test\.[a-z]+|[^\\/]+\.spec\.[a-z]+)$|(^|[\\/])tests?[\\/]/i)) out.push('test');  // 테스트
+  if (has(/\.(js|mjs|cjs|ts|py|rb|go|rs|java|cs|php)$/i)) out.push('code');                      // 실코드
+  // 순서: code 먼저(가장 일반), 그다음 design/docs/test. 중복 제거 + 최대 2개(클러터 방지).
+  const ordered = ['code', 'design', 'docs', 'test'].filter(d => out.includes(d));
+  return ordered.slice(0, 2);
+}
 function lensCmd(domain, opts = {}) {
   const jsonMode = !!opts.json || has('--json');
   // 1.19.1 (19th 버그헌트): 도메인 인자 정규화 — `lens Code` / `lens  CODE ` 도 인식(대소문자·공백 무관).
@@ -10153,6 +10178,18 @@ function verifyClaimCmd(root, taskId) {
   if (claimsChecked || mustHaveEvidence) {
     log('');
     log(`  ℹ 한계: 테스트 통과는 "의미적 구현 정확성"을 보장하지 않음 — evidence 가 해당 주장(수정 파일/테스트)을 직접 링크해야 신뢰도↑.`);
+    // 1.19.2 (UR-0003 렌즈 완전판 v2): 완료-검증 순간에 분야별 자기질문 advisory — 주장 파일 확장자 기반(결정적).
+    //   기계검증(파일/테스트/스텁)을 통과해도 "사람이 보기에 좋은가"는 별개 → AI 가 스스로 답하도록 권장(advisory, 게이트 아님).
+    const _lensDoms = _lensDomainsForFiles(files);
+    if (_lensDoms.length) {
+      log('');
+      log(`  🧭 품질 렌즈 (완료 선언 전 자문 — advisory, 게이트 아님):`);
+      for (const d of _lensDoms) {
+        const l = LENS_CATALOG[d];
+        if (l) log(`     · ${d}(${l.title}): ${l.questions[0]}`);
+      }
+      log(`     → 전체 질문: leerness lens ${_lensDoms[0]}`);
+    }
   }
   if (overallFail) {
     log('');
@@ -19939,6 +19976,6 @@ module.exports = {
   _isCommandPermitted, RUN_CORE_ALLOW,
   // 1.18.2: verify-claim 위장 스텁(빈 export 껍데기) 판정 — 단위 테스트
   _vcImplIsEmpty, _VC_EMPTY_SHELL_RE,
-  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈 — 단위 테스트
-  LENS_CATALOG, lensCmd
+  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈 — 단위 테스트. 1.19.2: 파일→도메인 매핑(완료-검증 advisory)
+  LENS_CATALOG, lensCmd, _lensDomainsForFiles
 };
