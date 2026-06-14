@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.18.4 — 2026-06-14 — GPT-5.5 외부평가 채택: 보안 제보 비공개화 + 자기정합 + 정직한 강제 프레이밍
+
+**🔎 외부평가(GPT-5.5)를 맹신 X로 검증해 진짜 결함만 채택.** 8개 한계 지적을 리포지토리에서 직접 확인 — #3(오케스트레이션 과대홍보)은 현 포지셔닝상 **기각**(이미 "operations/verification layer"), #6(채택 증거)은 범위 밖. 검증된 결함을 이번 패치에 반영.
+
+### 변경 (채택)
+- **🔒 SECURITY.md 비공개 제보 채널 (#8, P1, UR-0005)**: "비공개로 알려주세요" 하면서 **공개** GitHub Issues+보안라벨로 안내하던 모순 해소(공개 이슈는 모두에게 노출). → **GitHub Private Vulnerability Reporting**(`/security/advisories/new`) + 보안 이메일(`[leerness security]`)로 교체, "공개 이슈 금지" 명시 + 책임 있는 공개 안내. 권한 큰 하네스의 기본 위생.
+- **🪞 README 자기정합 (#7, P2, UR-0006)**: 관리블록 버전이 package.json(1.18.x)과 어긋나던 것(v1.18.0 표기) 해소 — `readme sync` 로 1.18.4 재스탬프. 게다가 audit 이 **동적 npm 배지 README 에서 못 잡던 갭**을 닫음: 배지뿐 아니라 "Last synced by Leerness vX" 관리블록 버전도 package.json 과 대조(`readme_synced_version_stale`, `--fix` 자동). 정합성 관리 도구가 자기 정합부터.
+- **🛡️ 정직한 강제 프레이밍 (#2, P2, UR-0007)**: README 에 "Guidance vs enforcement" 섹션 — leerness 는 **기본 협조형**(에이전트가 자발 실행)이며, **강제**하려면 `leerness ci init`(PR 게이트 워크플로) + branch protection required check 로 검증 건너뛴 PR 머지 차단. 가이드라인과 가드레일의 차이를 솔직히 명시.
+- **🪶 가벼운 진입 (#4, P2, UR-0008)**: README 30초 퀵스타트에 `init --minimal`(핵심 메모리+검증 파일만) 노출 — 사용자 "가볍게" 철학과 정합. 핵심8 vs 플러그인 경계 분리는 백로그.
+- 백로그(UR-0009): 클린룸 평가 요약 공개 + 커버리지 측정.
+
+### 검증 (회귀 0)
+- **selftest 229→231** (SECURITY.md 비공개 채널 행위 + audit 관리블록 lag 소스 가드) · audit 행위 재현(인위적 stale → 감지+`--fix`) · **E2E 365/365**.
+- patch(1.18.4) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.18.3 — 2026-06-12 — 품질 렌즈(분야별 자기질문) + README 영문 우선 + 설치 REPL 문항 제거 (사용자 명시 3종)
 
 **🧭 "AI가 스스로 질문하고 행동하도록".** 사용자 명시 지시 3종을 한 패치로: (1) 분야별 자기질문 품질 렌즈, (2) README 영어권 우선 재작성, (3) 설치 직후 REPL 진입 문항 제거.

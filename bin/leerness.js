@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.18.3';
+const VERSION = '1.18.4';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3644,6 +3644,18 @@ function _selfTestCases() {
       const surface = src.includes("if (cmd === 'lens')") && src.includes("cmd: 'lens [code|design|docs|test|security]") && src.includes('leerness lens [code|design|docs|test|security]');
       const replGone = !src.includes('설치 완료 후 REPL agent ' + '모드를 즉시 시작할까요') && src.includes('REPL agent 모드 진입 ' + '문항 제거');
       return surface && replGone;
+    } },
+    { name: 'GPT-5.5 평가 #8 (1.18.4, UR-0005): SECURITY.md 비공개 제보 채널 — 공개 이슈 안내 제거 (행위)', run: () => {
+      const sp = path.join(path.dirname(__filename), '..', 'SECURITY.md');
+      if (!exists(sp)) return true;  // 패키지에 없으면 스킵(설치본 안전)
+      const s = read(sp);
+      const hasPrivate = /security\/advisories\/new/.test(s) && /Private Vulnerability Reporting/i.test(s) && /\[leerness security\]/.test(s);
+      const warnsPublic = /공개 이슈로 올리지 마세요|Do NOT open a public issue/i.test(s);
+      return hasPrivate && warnsPublic;
+    } },
+    { name: 'GPT-5.5 평가 #7 (1.18.4, UR-0006): audit 가 README 관리블록 synced 버전 lag 감지 (소스 가드)', run: () => {
+      const a = read(path.join(path.dirname(__filename), '..', 'lib', 'audit.js'));
+      return a.includes('Last synced by Leerness v') && a.includes('readme_synced_version_stale');
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];

@@ -52,5 +52,15 @@ leerness capabilities                             # 권한 표면 확인
 
 ## 취약점 보고 / Reporting
 
-보안 이슈는 공개 이슈 대신 비공개로 알려주세요 / Report security issues privately (not public issues):
-https://github.com/gugu9999gu/leerness/issues (보안 라벨 / security label)
+보안 취약점은 **공개 이슈로 올리지 마세요** — 공개 이슈는 내용이 모두에게 노출됩니다.
+**Do NOT open a public issue for security vulnerabilities** — public issues are visible to everyone.
+
+대신 아래 **비공개 채널** 중 하나로 알려주세요 / Use one of these **private** channels instead:
+
+1. **GitHub Private Vulnerability Reporting** (권장 / preferred):
+   https://github.com/gugu9999gu/leerness/security/advisories/new
+   — GitHub 의 비공개 보안 권고 폼. 저장소 Security 탭 → "Report a vulnerability".
+2. **보안 이메일 / Security email**: adstore3869@gmail.com (제목에 `[leerness security]` 표기 / prefix the subject with `[leerness security]`)
+
+48 시간 내 접수 확인을 목표로 합니다. 수정 전까지 세부 내용은 공개하지 말아 주세요 (책임 있는 공개).
+We aim to acknowledge within 48 hours. Please keep details private until a fix ships (responsible disclosure).
