@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.19.0';
+const VERSION = '1.19.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3657,6 +3657,16 @@ function _selfTestCases() {
       const a = read(path.join(path.dirname(__filename), '..', 'lib', 'audit.js'));
       return a.includes('Last synced by Leerness v') && a.includes('readme_synced_version_stale');
     } },
+    { name: '19th 헌트 (1.19.1): lens 도메인 대소문자/공백 정규화 (소스 가드)', run: () => {
+      const src = read(__filename);
+      return src.includes("if (domain != null) domain = String(domain).trim().toLowerCase();");
+    } },
+    { name: 'GPT-5.5 평가 #5 (1.19.1, UR-0009): 클린룸 평가 문서 공개 + 한계 명시 (행위)', run: () => {
+      const dp = path.join(path.dirname(__filename), '..', 'docs', 'clean-room-evaluations.md');
+      if (!exists(dp)) return true;  // 패키지에 없으면 스킵(설치본 안전)
+      const d = read(dp);
+      return /AI clean-room evaluations/i.test(d) && /heuristic, not semantic/i.test(d) && /npm i leerness@/.test(d);
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -4237,6 +4247,8 @@ const LENS_CATALOG = {
 };
 function lensCmd(domain, opts = {}) {
   const jsonMode = !!opts.json || has('--json');
+  // 1.19.1 (19th 버그헌트): 도메인 인자 정규화 — `lens Code` / `lens  CODE ` 도 인식(대소문자·공백 무관).
+  if (domain != null) domain = String(domain).trim().toLowerCase();
   if (domain && !LENS_CATALOG[domain]) {
     return fail(`알 수 없는 렌즈: ${domain} — 유효값: ${Object.keys(LENS_CATALOG).join(', ')}`);
   }

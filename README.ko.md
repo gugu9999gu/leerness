@@ -11,7 +11,7 @@
 ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝
 ```
 
-> **어떤 언어, 어떤 AI 에이전트로 작업하든 — "증거 없이는 끝났다고 말할 수 없게" 만드는 AI 코딩 운영 레이어.** 코드를 대신 쓰는 도구가 아니라, AI 에이전트의 **기억·인수인계·검증·감사·보안 가드**를 프로젝트에 영속화하는 CLI + MCP 서버입니다. (이 포지셔닝은 5개 독립 클린룸 실사용 평가 — Python/Node/Rust 실개발·에이전트 교대·적대 공격 — 로 검증됐습니다.)
+> **어떤 언어, 어떤 AI 에이전트로 작업하든 — "증거 없이는 끝났다고 말할 수 없게" 만드는 AI 코딩 운영 레이어.** 코드를 대신 쓰는 도구가 아니라, AI 에이전트의 **기억·인수인계·검증·감사·보안 가드**를 프로젝트에 영속화하는 CLI + MCP 서버입니다. (이 포지셔닝은 독립 클린룸 평가 — Python/Node/Rust 실개발·에이전트 교대·검증기 적대 공격 — 로 확인됐습니다. 방법론·결과·정직한 한계: [docs/clean-room-evaluations.md](./docs/clean-room-evaluations.md))
 
 [![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-85-blue) · **런타임 의존성 0** · **install-script 0** · offline-first · Node ≥ 18 · MIT
 

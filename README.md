@@ -63,7 +63,7 @@ Built-in harnesses remember what the AI **said**. leerness verifies what the AI 
 | Secrets · encoding · drift guards | none | `scan secrets` · `encoding check` · `drift check --auto-fix` — CI-ready |
 | Lock-in | one vendor | any agent, any language, 0 runtime dependencies |
 
-This positioning was verified by **5 independent clean-room evaluations** — real Python/Node/Rust development, agent swaps, and adversarial attacks against the verifier itself (fake tests, comment-only stubs, inflated test counts — all rejected).
+This positioning was verified by **independent clean-room evaluations** — fresh `npm install` into temp dirs, driven by behavior only, including adversarial attacks against the verifier itself (fake tests, comment-only stubs, inflated test counts — all rejected). Methodology, results, and honest limitations: **[docs/clean-room-evaluations.md](./docs/clean-room-evaluations.md)**.
 
 ---
 
@@ -102,7 +102,7 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.19.0 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.19.1 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
@@ -156,7 +156,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.19.0는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **85개 도구**를 노출:
+Leerness v1.19.1는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **85개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -177,7 +177,7 @@ Leerness v1.19.0는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **70 라운드 (1.9.40 → 1.19.0)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
+현재 누적: **70 라운드 (1.9.40 → 1.19.1)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
 
 ### 성능 가이드 (1.9.140 측정)
 
@@ -215,6 +215,6 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.19.0: 2026-06-14
+Last synced by Leerness v1.19.1: 2026-06-14
 <!-- leerness:project-readme:end -->
 
