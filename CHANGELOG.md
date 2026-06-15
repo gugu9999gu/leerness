@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.22.2 — 2026-06-15 — CLI 영어화 Phase 5: session close --suggest/진행요약/cleanup 영어화 (UR-0010)
+
+**🌐 마감 보고의 나머지 절반까지 영어로.** Phase 4 가 "항상 표시되는" 마감 라인을 영어화했다면, Phase 5 는 **다음 라운드 추천(`--suggest`)·진행 요약·운영 자동정리** 출력을 영어 opt-in 으로 — 마감 화면 전체가 언어 선택을 따른다.
+
+### 변경 (UR-0010 Phase 5)
+- **`--suggest` 다음 라운드 추천 영어화**: `다음 라운드 추천`→`Next-round suggestions`, 신규 skill 후보, `drift 상태`→`drift status`, `가장 많이 쓴 명령`→`Most-used commands`, MCP 호출/드문 호출, skill match query 누적 — 전부 `t(ko,en)` 분기.
+- **진행 요약 영어화**: `진행 요약`→`Progress summary`, archive 누적, N세션 마일스톤/자동 회고, 워크스페이스 안내, retro 요약 실패 메시지.
+- **운영 자동정리 영어화**: release/* 정리(`--auto-cleanup-branches`), 셸 스크립트 인코딩 위험 자동 BOM(`--auto-fix-encoding`) 안내.
+- **가벼움 정리**: MCP 통계 줄에서 `t` 헬퍼와 충돌하던 `.map(([t, n]) => …)` 지역 변수를 `tool` 로 rename — 셰도잉 제거(가독성).
+- **한국어 기본 유지**: 영어는 `--language en`/`LEERNESS_LANG=en`/en init 프로젝트에서만. 플래그 없으면 한국어(ko 원문은 `t()` ko 인자로 보존).
+
+### 잔여 (UR-0010 Phase 6+, 백로그)
+- session-handoff.md / current-state.md 본문(파일에 기록되는 한국어 메모리 아티팩트) + help + status + 그 외 명령 본문 — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 239→240** (Phase 5 영어/한국어 보존 + 셰도잉 제거 소스가드) · 행위(en: `Next-round suggestions / drift status / Most-used commands / Progress summary`, ko 기본: `다음 라운드 추천 / drift 상태 / 가장 많이 쓴 명령 / 진행 요약`) · **E2E 365/365**.
+- patch(1.22.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.22.1 — 2026-06-15 — CLI 영어화 Phase 4: session close 마감 보고 영어화 (UR-0010)
 
 **🌐 세션을 마칠 때 보는 마지막 출력을 영어로.** init 배너(P1)→handoff 헤드라인(P2)→verify-claim(P3)에 이어 **session close 의 항상-표시 마감 보고**를 영어 opt-in 으로 — 핵심 세션 라이프사이클(시작→작업→검증→마감)이 영어로 일관.

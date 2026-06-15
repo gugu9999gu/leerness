@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.22.1';
+const VERSION = '1.22.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3756,6 +3756,13 @@ function _selfTestCases() {
       const en = sc.includes('session close integrated report') && sc.includes('no active rules') && sc.includes('no user requests (UR backlog empty)');
       const koPreserved = sc.includes('자동 통합 보고') && sc.includes('활성 룰 없음');  // ko 원문 t() ko 인자로 보존(e2e ko 무회귀)
       return injected && en && koPreserved;
+    } },
+    { name: 'CLI 영어화 Phase 5 (1.22.2, UR-0010): session close --suggest/진행요약/cleanup 영어/한국어 보존 (소스 가드)', run: () => {
+      const sc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js'));
+      const en = sc.includes('Next-round suggestions') && sc.includes('Progress summary (session') && sc.includes('Most-used commands') && sc.includes('encoding risk(s) auto-fixed');
+      const koPreserved = sc.includes('다음 라운드 추천') && sc.includes('진행 요약 (session') && sc.includes('가장 많이 쓴 명령');  // ko 원문 t() ko 인자로 보존(e2e ko 무회귀)
+      const noShadow = !sc.includes('.map(([t, n]) =>');  // t 헬퍼 셰도잉 제거 확인
+      return en && koPreserved && noShadow;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
