@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.27.1 — 2026-06-15 — 13번째 외부리뷰 정직성 후속: audit 미초기화 모순출력 + verify-claim no-parse 표기
+
+**🔎 13번째 외부리뷰의 정직성 잔여 P2/P3 2건 수정(맹신 X 양방향 재현).** 둘 다 leerness 핵심 정체성(정직한 보고)을 직접 건드리는 출력 문제.
+
+### 변경
+- **audit 미초기화 경로 모순 출력 차단 (#2)**: `audit <미초기화경로>` 가 "미초기화" 를 선언한 직후 design/reuse 체크를 **없는 하네스에 대해** 보고하던 모순(예: "✓ no duplicate design guide candidates")을 차단 — 미초기화 감지 시 요약/JSON 으로 직행 후 종료. exit code(1)·`--json` 페이로드(not_initialized finding)는 종전과 동일, **정상 프로젝트 audit 은 무영향**(모든 체크 계속).
+- **verify-claim --run-tests no-parse 정직 표기 (#3)**: 비-테스트 `--test-cmd`(예: `echo hi`)가 exit 0 이면서 테스트 비율을 못 파싱한 경우 `✓ all passed` 로 거짓표기하던 것을 `✓ ran (exit 0) — test count unconfirmed`(실행됨, 테스트 수 미확인)로 정직 표기. **메시지만 변경, 판정/exit 불변** → 출력 포맷이 다른 정상 테스트러너의 통과 주장을 거부하지 않음(FP=0). 진짜 N/N 테스트는 계속 `✓ all passed`, 실패(exit≠0)는 계속 `✗ FAIL`.
+
+### 검증 (회귀 0)
+- **selftest 246→247** (소스가드; 기존 1.9.421 "audit body=lib" 가드와 자기참조 충돌을 코멘트 앵커로 회피 — [[lesson-selftest-self-reference-trap]] 적용) · 행위(맹신 X 양방향) · **E2E 367→368** (정직성 후속 회귀가드 1건).
+- patch(1.27.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적). 잔여(init en seed=대형 템플릿 i18n, Phase 10 진단 영어화)는 백로그.
+
 ## 1.27.0 — 2026-06-15 — 🛡️ [안정화/Stable] 보안 수정 안정 minor (개인키 스캔 FN + placeholder FP)
 
 **🛡️ 안정화(Stable) minor — 13번째 외부리뷰에서 확인된 보안 수정을 조기 npm 공개.** 직전 minor(1.26.0) 이후 1.26.1 패치 1건이지만, **보안 FN/FP(거짓 "보안 OK" + CI 파손)는 패치 누적을 기다리기보다 조기 공개가 합리적**이라 단독 minor 로 게시. R-0011 정책의 18번째 stable minor.

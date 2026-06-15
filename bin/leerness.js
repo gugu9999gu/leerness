@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.27.0';
+const VERSION = '1.27.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3819,6 +3819,14 @@ function _selfTestCases() {
       const phPlaceholder = pu.includes('root|admin|user|username|yourpassword');
       const retroGuard = bin.includes("failJson(has('--json'), 'invalid_arg'") && bin.includes('Math.min(days, 36500)');
       return keyFile && dbVg && phPlaceholder && retroGuard;
+    } },
+    { name: '13번째 외부리뷰 정직성 후속 (1.27.1): audit 미초기화 early-return + verify-claim no-parse 표기 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      const aud = read(path.join(path.dirname(__filename), '..', 'lib', 'audit.js'));
+      // 주의: bin 에 'not_'+'initialized' 리터럴을 두면 1.9.421('body 가 lib 로 이동') 가드가 깨짐 → 코멘트 텍스트로 앵커.
+      const auditReturn = aud.includes('// 1.27.1 (13번째 외부리뷰 #2)') && /외부리뷰 #2\)[\s\S]{0,1200}?process\.exitCode = 1;\s*\n\s*return;/.test(aud);
+      const vcMsg = bin.includes("test count unconfirmed") && bin.includes('runResult.parsed ? ');
+      return auditReturn && vcMsg;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -10383,7 +10391,8 @@ function verifyClaimCmd(root, taskId) {
   // 1.17.4 (UR-0047): 측정 불가는 '통과' 가 아니라 '검증 미수행' — 이전엔 실측 0 인데 ✓ pass(실측≥주장) 모순 표기.
   log(`  - ${t('테스트 카운트', 'test count')}: ${declaredTestCount == null ? t('⊘ (주장 없음)', '⊘ (none claimed)') : !testMeasured ? t(`⊘ 측정 불가 — 주장 ${declaredTestCount}개 검증 미수행 (pass 아님)`, `⊘ not measurable — claimed ${declaredTestCount} not verified (not a pass)`) : testOk ? t('✓ pass (실측 ≥ 주장)', '✓ pass (measured ≥ claimed)') : t('⚠ 주장보다 적음', '⚠ fewer than claimed')}`);
   if (runResult && !runResult.skipped) {
-    log(`  - ${runResult.cmd || 'npm test'} ${t('실행', 'run')}: ${runTestsOk ? '✓ all passed' : '✗ FAIL'}`);
+    // 1.27.1 (13번째 외부리뷰 #3): exit 0 인데 테스트 비율을 못 파싱한 경우(예: 비-테스트 --test-cmd)를 '✓ all passed' 로 거짓표기하지 않음 — '실행됨, 테스트 수 미확인' 으로 정직 표기(판정/exit 불변 → 이색 테스트러너 FP 없음).
+    log(`  - ${runResult.cmd || 'npm test'} ${t('실행', 'run')}: ${runTestsOk ? (runResult.parsed ? '✓ all passed' : t('✓ 실행됨 (exit 0) — 테스트 수 미확인', '✓ ran (exit 0) — test count unconfirmed')) : '✗ FAIL'}`);
     if (declaredPass) log(`  - ${t('주장과 실행 결과 일치', 'claimed matches run')}: ${declaredPassMatchesActual ? '✓ pass' : t('⚠ 다름', '⚠ differs')}`);
   }
   // 1.11.2 (UR-0175): optimism+정직성 — done 주장은 기본 게이팅(claimsChecked). 완화: --lenient.

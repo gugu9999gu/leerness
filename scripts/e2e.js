@@ -6270,5 +6270,40 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.27.1 (13번째 외부리뷰 정직성 후속 회귀가드): audit 미초기화 모순출력 차단 + verify-claim no-parse 정직표기 (양방향 무회귀).
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rev13b-'));
+    const out = (r) => (r.stdout || '') + (r.stderr || '');
+    // #2 audit 미초기화: design/reuse 모순 출력 없이 요약 직행 + exit 1 + --json not_initialized
+    fs.mkdirSync(path.join(d, 'uninit'));
+    const au = cp.spawnSync(process.execPath, [CLI, 'audit', path.join(d, 'uninit')], { encoding: 'utf8', timeout: 15000 });
+    const auClean = au.status === 1 && !/design guide|reuse-map/.test(out(au)) && /Audit summary/.test(out(au));
+    const auj = cp.spawnSync(process.execPath, [CLI, 'audit', path.join(d, 'uninit'), '--json'], { encoding: 'utf8', timeout: 15000 });
+    let aujOk = false; try { const j = JSON.parse(auj.stdout); aujOk = j.healthy === false && (j.findings || []).some(f => f.kind === ('not_' + 'initialized')); } catch {}
+    // #2 회귀: 정상 프로젝트 audit 는 체크 계속 수행
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    const auReal = out(cp.spawnSync(process.execPath, [CLI, 'audit', d], { encoding: 'utf8', timeout: 15000 }));
+    const auRealOk = /Audit summary/.test(auReal) && /gitignore|design|reuse/.test(auReal);
+    // #3 verify-claim 비-테스트 --test-cmd → 거짓 'all passed' 아님(정직 표기)
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'src', 'x.js'), 'module.exports={};\n');
+    fs.writeFileSync(path.join(d, 'x.test.js'), 'test();\n');
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'x', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    cp.spawnSync(process.execPath, [CLI, 'task', 'update', 'T-0002', '--status', 'done', '--evidence', 'src/x.js implemented, x.test.js added', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const vcNon = out(cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--run-tests', '--test-cmd', 'echo hi', '--path', d], { encoding: 'utf8', timeout: 20000 }));
+    const vcNonOk = /미확인|unconfirmed/.test(vcNon) && !/echo hi.*all passed/.test(vcNon);
+    // #3 회귀: 진짜 N/N 테스트 → all passed 유지
+    const vcReal = out(cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--run-tests', '--test-cmd', 'echo Tests: 2 passed, 2 total', '--path', d], { encoding: 'utf8', timeout: 20000 }));
+    const vcRealOk = /all passed/.test(vcReal);
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = auClean && aujOk && auRealOk && vcNonOk && vcRealOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.27.1) 13th 리뷰 정직성: audit 미초기화 모순출력 차단(+정상 무회귀) + verify-claim no-parse 정직표기(+진짜테스트 무회귀)' : '✗ 13th 리뷰 정직성 후속 회귀가드 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
