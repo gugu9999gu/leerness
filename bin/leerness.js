@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.19.2';
+const VERSION = '1.19.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3661,6 +3661,19 @@ function _selfTestCases() {
       const src = read(__filename);
       return src.includes("if (domain != null) domain = String(domain).trim().toLowerCase();");
     } },
+    { name: '렌즈 완전판 v3 (1.19.3, UR-0003): 프로젝트 커스텀 렌즈 병합 (행위)', run: () => {
+      const M = _mergeLensCatalog;
+      const a = M({ code: { title: '코드', persona: 'p', questions: ['Q1'], affects: [] } }, { code: { questions: ['Q1', 'Q2'] } });
+      const appendOk = a.code.questions.length === 2 && a.code.questions[1] === 'Q2' && a.code._customAdded === true;
+      const b = M({ code: { title: '코드', persona: 'p', questions: ['Q'], affects: [] } }, { a11y: { title: '접근성', persona: '스크린리더', questions: ['키보드로 가능?'] } });
+      const newOk = b.a11y && b.a11y.title === '접근성' && b.a11y._custom === true && b.code.questions.length === 1;
+      const c = M({ code: { questions: ['Q'], affects: [] } }, { bad: { title: 'x' }, nope: null });
+      const ignoreOk = !c.bad && !c.nope && c.code.questions.length === 1;
+      const before = LENS_CATALOG.code.questions.length;
+      M(LENS_CATALOG, { code: { questions: ['임시'] } });
+      const immutableOk = LENS_CATALOG.code.questions.length === before;
+      return appendOk && newOk && ignoreOk && immutableOk;
+    } },
     { name: '렌즈 완전판 v2 (1.19.2, UR-0003): 파일 확장자 → 렌즈 도메인 매핑 (행위)', run: () => {
       const F = _lensDomainsForFiles;
       const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -4256,6 +4269,36 @@ const LENS_CATALOG = {
     affects: ['code', 'test'], affectsNote: '보안 가드를 넣었다면 우회/오탐 테스트가 따라와야 함'
   }
 };
+// 1.19.3 (UR-0003 렌즈 완전판 v3): 프로젝트별 커스텀 렌즈 — .harness/quality-lenses.json 읽기-병합(쓰기 명령 없음, AI/사용자가 편집).
+//   포맷: { "domains": { "code": { "questions": ["추가 질문"] }, "a11y": { "title":"접근성", "persona":"스크린리더 사용자", "questions":[...], "affects":["design"] } } }
+function _loadProjectLenses(root) {
+  try {
+    const p = path.join(absRoot(root || process.cwd()), '.harness', 'quality-lenses.json');
+    if (!exists(p)) return {};
+    const j = JSON.parse(read(p));
+    return (j && typeof j === 'object' && j.domains && typeof j.domains === 'object') ? j.domains : {};
+  } catch { return {}; }
+}
+// 내장 + 프로젝트 커스텀 병합. 기존 도메인 → 질문 추가(dedup, 최대 8); 신규 도메인 → 기본값으로 추가. _custom 플래그로 표시.
+function _mergeLensCatalog(builtin, custom) {
+  const out = {};
+  for (const [k, v] of Object.entries(builtin || {})) out[k] = Object.assign({}, v, { questions: (v.questions || []).slice(), affects: (v.affects || []).slice() });
+  for (const [k, c] of Object.entries(custom || {})) {
+    if (!c || typeof c !== 'object') continue;
+    const cq = Array.isArray(c.questions) ? c.questions.filter(q => typeof q === 'string' && q.trim()) : [];
+    if (out[k]) {
+      const seen = new Set(out[k].questions);
+      for (const q of cq) if (!seen.has(q)) { out[k].questions.push(q); seen.add(q); }
+      out[k].questions = out[k].questions.slice(0, 8);
+      out[k]._customAdded = cq.length > 0;
+    } else if (cq.length) {
+      out[k] = { title: (c.title || k), persona: (c.persona || '검토자'), questions: cq.slice(0, 8), affects: Array.isArray(c.affects) ? c.affects : [], affectsNote: c.affectsNote || '(프로젝트 정의)', _custom: true };
+    }
+  }
+  return out;
+}
+function _effectiveLensCatalog(root) { return _mergeLensCatalog(LENS_CATALOG, _loadProjectLenses(root)); }
+
 // 1.19.2 (UR-0003 렌즈 완전판 v2): 주장된 파일 확장자 → 관련 품질 렌즈 도메인 (결정적, 키워드 추론 아님).
 //   verify-claim 이 완료-검증 순간(사용자: "완료 선언 전 자기질문")에 해당 분야 질문을 advisory 로 노출하는 데 사용.
 function _lensDomainsForFiles(files) {
@@ -4274,21 +4317,26 @@ function lensCmd(domain, opts = {}) {
   const jsonMode = !!opts.json || has('--json');
   // 1.19.1 (19th 버그헌트): 도메인 인자 정규화 — `lens Code` / `lens  CODE ` 도 인식(대소문자·공백 무관).
   if (domain != null) domain = String(domain).trim().toLowerCase();
-  if (domain && !LENS_CATALOG[domain]) {
-    return fail(`알 수 없는 렌즈: ${domain} — 유효값: ${Object.keys(LENS_CATALOG).join(', ')}`);
+  // 1.19.3: 내장 + 프로젝트 커스텀(.harness/quality-lenses.json) 병합 catalog.
+  const root = opts.root || arg('--path', process.cwd());
+  const catalog = _effectiveLensCatalog(root);
+  if (domain && !catalog[domain]) {
+    return fail(`알 수 없는 렌즈: ${domain} — 유효값: ${Object.keys(catalog).join(', ')}`);
   }
-  const picked = domain ? { [domain]: LENS_CATALOG[domain] } : LENS_CATALOG;
+  const picked = domain ? { [domain]: catalog[domain] } : catalog;
   if (jsonMode) { log(JSON.stringify({ ok: true, lenses: picked }, null, 2)); return; }
-  log(`# leerness lens — 분야별 자기질문 품질 렌즈 (1.18.3)`);
+  const hasCustom = Object.values(catalog).some(l => l && (l._custom || l._customAdded));
+  log(`# leerness lens — 분야별 자기질문 품질 렌즈 (1.18.3)${hasCustom ? ' + 프로젝트 커스텀(.harness/quality-lenses.json)' : ''}`);
   log(`완료 선언 전 해당 분야 질문에 스스로 답해보세요. "그렇다(통과)"라고 답할 수 없으면 아직 완료가 아닙니다.`);
   for (const [key, l] of Object.entries(picked)) {
     log('');
-    log(`## ${key} (${l.title}) — 페르소나: ${l.persona}`);
+    log(`## ${key} (${l.title}) — 페르소나: ${l.persona}${l._custom ? ' [프로젝트]' : (l._customAdded ? ' [+프로젝트 질문]' : '')}`);
     l.questions.forEach((q, i) => log(`  ${i + 1}. ${q}`));
-    log(`  ↔ 인과: ${key} 를 바꾸면 → ${l.affects.join(', ')} 질문도 다시 — ${l.affectsNote}`);
+    log(`  ↔ 인과: ${key} 를 바꾸면 → ${(l.affects || []).join(', ') || '(없음)'} 질문도 다시 — ${l.affectsNote}`);
   }
   log('');
-  log(`사용: leerness lens <${Object.keys(LENS_CATALOG).join('|')}> · 완료 검증과 함께: leerness verify-claim T-XXXX`);
+  log(`사용: leerness lens <${Object.keys(catalog).join('|')}> · 완료 검증과 함께: leerness verify-claim T-XXXX`);
+  if (!hasCustom) log(`프로젝트 커스텀 렌즈: .harness/quality-lenses.json 에 { "domains": { "code": { "questions": ["..."] } } } 추가`);
 }
 
 function commandsCmd(root) {
@@ -10182,10 +10230,11 @@ function verifyClaimCmd(root, taskId) {
     //   기계검증(파일/테스트/스텁)을 통과해도 "사람이 보기에 좋은가"는 별개 → AI 가 스스로 답하도록 권장(advisory, 게이트 아님).
     const _lensDoms = _lensDomainsForFiles(files);
     if (_lensDoms.length) {
+      const _lensCat = _effectiveLensCatalog(root);  // 1.19.3: 프로젝트 커스텀 질문도 포함
       log('');
       log(`  🧭 품질 렌즈 (완료 선언 전 자문 — advisory, 게이트 아님):`);
       for (const d of _lensDoms) {
-        const l = LENS_CATALOG[d];
+        const l = _lensCat[d];
         if (l) log(`     · ${d}(${l.title}): ${l.questions[0]}`);
       }
       log(`     → 전체 질문: leerness lens ${_lensDoms[0]}`);
@@ -19977,5 +20026,5 @@ module.exports = {
   // 1.18.2: verify-claim 위장 스텁(빈 export 껍데기) 판정 — 단위 테스트
   _vcImplIsEmpty, _VC_EMPTY_SHELL_RE,
   // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈 — 단위 테스트. 1.19.2: 파일→도메인 매핑(완료-검증 advisory)
-  LENS_CATALOG, lensCmd, _lensDomainsForFiles
+  LENS_CATALOG, lensCmd, _lensDomainsForFiles, _mergeLensCatalog, _loadProjectLenses, _effectiveLensCatalog
 };
