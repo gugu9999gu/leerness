@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.20.0';
+const VERSION = '1.20.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3624,7 +3624,18 @@ function _selfTestCases() {
         && E('module.exports = Object.freeze({ a: 1 });\n') === false
         && E('module.exports = class { run(){ return 1; } };\n') === false
         && E('module.exports = (a,b) => a+b;\n') === false;
-      return base && bypass && real;
+      // 1.20.1 (1.20.0 외부평가 재현): 장식된 no-op 우회(true 여야 함) — 디렉티브 프롤로그 + no-op 문
+      const noop = E('"use strict";\nmodule.exports = {};\n') === true
+        && E('{}; // c\n') === true
+        && E('module.exports = {};\nvoid 0;\n') === true
+        && E(';;;;\n') === true
+        && E('0;\n') === true
+        && E("'use strict';\nexports.default = {};\n") === true;
+      // 1.20.1 FP 가드(false 여야 함): 단일 의미 토큰만 있어도 통과
+      const noopFP = E('"use strict";\nfunction f(){ return 1; }\nmodule.exports = { f };\n') === false
+        && E('module.exports = 0;\n') === false                 // 0 을 export 하는 의도적 값 — 스텁 아님
+        && E('module.exports = require("./x"); void 0;\n') === false;
+      return base && bypass && real && noop && noopFP;
     } },
     { name: '위장 스텁 차단 (1.18.2): stub 루프 _vcImplIsEmpty 사용 + 메시지 + FILE_EXTS java/php 정합 (소스 가드)', run: () => {
       const src = read(__filename);
@@ -4326,7 +4337,7 @@ function lensCmd(domain, opts = {}) {
   const picked = domain ? { [domain]: catalog[domain] } : catalog;
   if (jsonMode) { log(JSON.stringify({ ok: true, lenses: picked }, null, 2)); return; }
   const hasCustom = Object.values(catalog).some(l => l && (l._custom || l._customAdded));
-  log(`# leerness lens — 분야별 자기질문 품질 렌즈 (1.18.3)${hasCustom ? ' + 프로젝트 커스텀(.harness/quality-lenses.json)' : ''}`);
+  log(`# leerness lens — 분야별 자기질문 품질 렌즈 (v${VERSION})${hasCustom ? ' + 프로젝트 커스텀(.harness/quality-lenses.json)' : ''}`);
   log(`완료 선언 전 해당 분야 질문에 스스로 답해보세요. "그렇다(통과)"라고 답할 수 없으면 아직 완료가 아닙니다.`);
   for (const [key, l] of Object.entries(picked)) {
     log('');
@@ -9892,7 +9903,19 @@ function _vcImplIsEmpty(body) {
   }).filter(Boolean);
   if (codeLines.length === 0) return true;                                  // ① 코드 0줄
   const joined = codeLines.join(' ').replace(/\s+/g, ' ').trim();
-  return _VC_EMPTY_SHELL_RE.test(joined);                                   // ② 빈 export 껍데기뿐
+  if (_VC_EMPTY_SHELL_RE.test(joined)) return true;                         // ② 빈 export 껍데기뿐
+  // ③ 1.20.1 (1.20.0 외부평가 재현): 장식된 no-op 우회 — 디렉티브 프롤로그 + 빈 export + no-op 문만 남으면 스텁.
+  //    "use strict"; module.exports={} · {};//c · module.exports={};void 0; · ;;;; · 0; (정적모드 우회) 폐쇄. FP 0: 실코드는 식별자/키워드가 남음.
+  //    (let x=1 같은 무의미 선언은 식별자가 남아 통과 — AST 토큰 카운트 필요, 백로그.)
+  const residue = joined
+    .replace(/^\s*(['"])use strict\1\s*;?/i, '')                             // 디렉티브 프롤로그
+    .replace(/(?:module\.)?exports(?:\.[A-Za-z0-9_$]+)?\s*=\s*(?:\{\s*\}|\[\s*\])\s*;?/g, '')  // 빈 export
+    .replace(/export\s+default\s*(?:\{\s*\}|\[\s*\])\s*;?/g, '')
+    .replace(/export\s*\{\s*\}\s*;?/g, '')
+    .replace(/\bvoid\s+0\b/g, '')                                            // void 0
+    .replace(/\b(?:null|undefined|false|true|0)\b/g, '')                     // 단독 no-op 리터럴
+    .replace(/[\s;{}()[\],.]/g, '');                                         // 공백/구두점
+  return residue === '';                                                     // 의미 토큰이 하나도 안 남으면 스텁
 }
 
 function verifyClaimCmd(root, taskId) {
