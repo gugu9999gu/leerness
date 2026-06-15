@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.21.1';
+const VERSION = '1.21.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3610,7 +3610,7 @@ function _selfTestCases() {
       const src = read(__filename);
       const authPass = src.includes('userAuthorized: true, timeout: 5 * 60 * 1000, kind: ' + "'verify_claim_test'");
       const skipOnBlock = src.includes('if (r.blocked) {') && src.includes('테스트 명령 차단') && src.includes('불일치 판정 아님');
-      const label = src.includes('`  - ${runResult.cmd ' + "|| 'npm test'} 실행:");  // P3: 하드코딩된 npm test 라벨 제거
+      const label = src.includes('`  - ${runResult.cmd ' + "|| 'npm test'} ${t('실행', 'run')}:");  // P3: 하드코딩 제거 + 1.21.2 영어화 t()
       return authPass && skipOnBlock && label;
     } },
     { name: '재실증 P2 (1.18.1): task update id 뒤 non-path positional(status) 거부 + path-like 허용 (소스 가드)', run: () => {
@@ -3741,6 +3741,13 @@ function _selfTestCases() {
       const src = read(__filename);
       return src.includes('const _L = _uiLang(root); const t = (ko, en) => (_L === ' + "'en' ? en : ko);")
         && src.includes("security OK") && src.includes("unanswered request(s)") && src.includes("abnormal-exit") && src.includes("platform constraint(s)");
+    } },
+    { name: 'CLI 영어화 Phase 3 (1.21.2, UR-0010): verify-claim 출력 t() 경유 + 한국어 기본 보존 (소스 가드)', run: () => {
+      const src = read(__filename);
+      const en = src.includes('## File check') && src.includes('## Test count') && src.includes('## Summary')
+        && src.includes('implementation substance (done default)') && src.includes('evidence claim matches actual files');
+      const koPreserved = src.includes('## 종합') && src.includes('구현 실체 (done 기본)');  // ko 원문이 t() ko 인자로 남아 e2e(ko) 무회귀
+      return en && koPreserved;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -10202,39 +10209,41 @@ function verifyClaimCmd(root, taskId) {
     return;
   }
 
+  // 1.21.2 (UR-0010 Phase 3): verify-claim 출력 UI 언어 적용 (영어 opt-in, 한국어 기본). human 렌더 한정(--json 은 위에서 return).
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
   log(`# verify-claim ${taskId} (${path.basename(root)})`);
   log(`Request: ${row.request}`);
   log(`Status: ${row.status}  ·  Updated: ${row.updated}`);
   log(`Evidence: ${evidence.slice(0, 200)}${evidence.length > 200 ? '…' : ''}`);
   log('');
-  log(`## 📂 파일 검증 (${files.length}건 주장)`);
-  if (!files.length) log('  (evidence에서 파일 경로를 추출하지 못함)');
+  log(t(`## 📂 파일 검증 (${files.length}건 주장)`, `## 📂 File check (${files.length} claimed)`));
+  if (!files.length) log(t('  (evidence에서 파일 경로를 추출하지 못함)', '  (no file paths extracted from evidence)'));
   else {
-    for (const c of fileChecks) log(`  ${c.exists ? '✓' : '✗'} ${c.file}${c.exists ? '' : '  ← 누락'}`);
+    for (const c of fileChecks) log(`  ${c.exists ? '✓' : '✗'} ${c.file}${c.exists ? '' : t('  ← 누락', '  ← missing')}`);
   }
   log('');
-  log(`## 🧪 테스트 카운트`);
-  if (declaredPass) log(`  주장 (pass): ${declaredPass.num}/${declaredPass.denom}`);
-  if (declaredTestCount) log(`  주장 (개수): ${declaredTestCount}개`);
-  if (actualTestCount != null) log(`  실측: ${actualTestCount}개 테스트 호출 (${_vcTests.length ? '주장된 테스트 파일' : '관례 탐색: 루트/tests·test_*.py·*.test.*'})`);
-  else log(`  실측: 테스트 파일 못 찾음 — 카운트 검증 미수행 (pass 아님)`);
+  log(t(`## 🧪 테스트 카운트`, `## 🧪 Test count`));
+  if (declaredPass) log(t(`  주장 (pass): ${declaredPass.num}/${declaredPass.denom}`, `  claimed (pass): ${declaredPass.num}/${declaredPass.denom}`));
+  if (declaredTestCount) log(t(`  주장 (개수): ${declaredTestCount}개`, `  claimed (count): ${declaredTestCount}`));
+  if (actualTestCount != null) log(t(`  실측: ${actualTestCount}개 테스트 호출 (${_vcTests.length ? '주장된 테스트 파일' : '관례 탐색: 루트/tests·test_*.py·*.test.*'})`, `  measured: ${actualTestCount} test call(s) (${_vcTests.length ? 'claimed test files' : 'convention scan: root/tests·test_*.py·*.test.*'})`));
+  else log(t(`  실측: 테스트 파일 못 찾음 — 카운트 검증 미수행 (pass 아님)`, `  measured: no test file found — count not verified (not a pass)`));
 
   // 1.9.19: --run-tests 결과
   let runTestsOk = true;
   let declaredPassMatchesActual = true;
   if (runResult) {
     log('');
-    log(`## 🚦 ${runResult.cmd || '테스트'} 실행 (--run-tests)`);
+    log(`## 🚦 ${runResult.cmd || t('테스트', 'test')} ${t('실행', 'run')} (--run-tests)`);
     if (runResult.skipped) {
       log(`  ⚠ skipped: ${runResult.reason}`);
     } else {
       log(`  exit: ${runResult.exitCode}`);
-      if (runResult.parsed) log(`  실행 결과: ${runResult.parsed.num}/${runResult.parsed.denom} ${runResult.parsed.num === runResult.parsed.denom ? 'passed' : 'partial'}`);
-      else log(`  (pass/fail 비율을 stdout에서 파싱 못함)`);
+      if (runResult.parsed) log(t(`  실행 결과: ${runResult.parsed.num}/${runResult.parsed.denom} ${runResult.parsed.num === runResult.parsed.denom ? 'passed' : 'partial'}`, `  result: ${runResult.parsed.num}/${runResult.parsed.denom} ${runResult.parsed.num === runResult.parsed.denom ? 'passed' : 'partial'}`));
+      else log(t(`  (pass/fail 비율을 stdout에서 파싱 못함)`, `  (could not parse pass/fail ratio from stdout)`));
       runTestsOk = runResult.allPassed;
       if (declaredPass && runResult.parsed) {
         declaredPassMatchesActual = (runResult.parsed.num === declaredPass.num && runResult.parsed.denom === declaredPass.denom);
-        log(`  주장 vs 실행: ${declaredPassMatchesActual ? '✓ 일치' : `⚠ 불일치 (주장 ${declaredPass.num}/${declaredPass.denom} ≠ 실행 ${runResult.parsed.num}/${runResult.parsed.denom})`}`);
+        log(t(`  주장 vs 실행: ${declaredPassMatchesActual ? '✓ 일치' : `⚠ 불일치 (주장 ${declaredPass.num}/${declaredPass.denom} ≠ 실행 ${runResult.parsed.num}/${runResult.parsed.denom})`}`, `  claimed vs run: ${declaredPassMatchesActual ? '✓ match' : `⚠ mismatch (claimed ${declaredPass.num}/${declaredPass.denom} ≠ run ${runResult.parsed.num}/${runResult.parsed.denom})`}`));
       }
     }
   }
@@ -10244,76 +10253,76 @@ function verifyClaimCmd(root, taskId) {
   log('');
   const allFilesOk = filesAllExist;
   const testOk = declaredTestCount == null || actualTestCount == null || actualTestCount >= declaredTestCount;
-  log(`## 종합`);
-  log(`  - 파일 모두 존재: ${allFilesOk ? '✓ pass' : '✗ FAIL (일부 누락)'}`);
+  log(t(`## 종합`, `## Summary`));
+  log(`  - ${t('파일 모두 존재', 'all files exist')}: ${allFilesOk ? '✓ pass' : t('✗ FAIL (일부 누락)', '✗ FAIL (some missing)')}`);
   // 1.17.4 (UR-0047): 측정 불가는 '통과' 가 아니라 '검증 미수행' — 이전엔 실측 0 인데 ✓ pass(실측≥주장) 모순 표기.
-  log(`  - 테스트 카운트: ${declaredTestCount == null ? '⊘ (주장 없음)' : !testMeasured ? `⊘ 측정 불가 — 주장 ${declaredTestCount}개 검증 미수행 (pass 아님)` : testOk ? '✓ pass (실측 ≥ 주장)' : '⚠ 주장보다 적음'}`);
+  log(`  - ${t('테스트 카운트', 'test count')}: ${declaredTestCount == null ? t('⊘ (주장 없음)', '⊘ (none claimed)') : !testMeasured ? t(`⊘ 측정 불가 — 주장 ${declaredTestCount}개 검증 미수행 (pass 아님)`, `⊘ not measurable — claimed ${declaredTestCount} not verified (not a pass)`) : testOk ? t('✓ pass (실측 ≥ 주장)', '✓ pass (measured ≥ claimed)') : t('⚠ 주장보다 적음', '⚠ fewer than claimed')}`);
   if (runResult && !runResult.skipped) {
-    log(`  - ${runResult.cmd || 'npm test'} 실행: ${runTestsOk ? '✓ all passed' : '✗ FAIL'}`);
-    if (declaredPass) log(`  - 주장과 실행 결과 일치: ${declaredPassMatchesActual ? '✓ pass' : '⚠ 다름'}`);
+    log(`  - ${runResult.cmd || 'npm test'} ${t('실행', 'run')}: ${runTestsOk ? '✓ all passed' : '✗ FAIL'}`);
+    if (declaredPass) log(`  - ${t('주장과 실행 결과 일치', 'claimed matches run')}: ${declaredPassMatchesActual ? '✓ pass' : t('⚠ 다름', '⚠ differs')}`);
   }
   // 1.11.2 (UR-0175): optimism+정직성 — done 주장은 기본 게이팅(claimsChecked). 완화: --lenient.
   if (claimsChecked) {
-    if (strictOk) log(`  - 낙관적 표시 + 정직성 (done 기본): ✓ pass (의심 없음)`);
+    if (strictOk) log(t(`  - 낙관적 표시 + 정직성 (done 기본): ✓ pass (의심 없음)`, `  - optimism + honesty (done default): ✓ pass (no suspicion)`));
     else {
-      log(`  - 낙관적 표시 + 정직성 (done 기본 — 완화: --lenient): ⚠ FAIL (낙관 ${optimismSuspects.length} · 정직성 ${honestyFindings.length})`);
-      for (const s of optimismSuspects) log(`    · [${s.kind}] ${s.label}: evidence에 주장 있는데 코드에 호출 흔적 없음`);
-      for (const f of honestyFindings) log(`    · [정직성:${f.dim}] ${f.label}: ${f.detail}`);
+      log(t(`  - 낙관적 표시 + 정직성 (done 기본 — 완화: --lenient): ⚠ FAIL (낙관 ${optimismSuspects.length} · 정직성 ${honestyFindings.length})`, `  - optimism + honesty (done default — relax: --lenient): ⚠ FAIL (optimism ${optimismSuspects.length} · honesty ${honestyFindings.length})`));
+      for (const s of optimismSuspects) log(t(`    · [${s.kind}] ${s.label}: evidence에 주장 있는데 코드에 호출 흔적 없음`, `    · [${s.kind}] ${s.label}: claimed in evidence but no call trace in code`));
+      for (const f of honestyFindings) log(`    · [${t('정직성', 'honesty')}:${f.dim}] ${f.label}: ${f.detail}`);
     }
   }
   // 1.9.302 (UR-0042) + 1.11.2 (UR-0175): git diff 시맨틱 교차검증 — 주장 파일이 실제 git 변경에 있는가. gitClaimOk/gitStrongMismatch 는 상단 공유(done 기본 게이팅, --lenient 완화).
   if (gitChanged === null) {
-    log(`  - git diff 교차검증: ⊘ skip (git repo 아님 — 검증 불가)`);
+    log(`  - ${t('git diff 교차검증', 'git diff cross-check')}: ${t('⊘ skip (git repo 아님 — 검증 불가)', '⊘ skip (not a git repo — cannot verify)')}`);
   } else if (!gitApplicable) {
-    log(`  - git diff 교차검증: ⊘ skip (working tree 변경 0 또는 주장 파일 0 — 이미 커밋됐거나 해당 없음)`);
+    log(`  - ${t('git diff 교차검증', 'git diff cross-check')}: ${t('⊘ skip (working tree 변경 0 또는 주장 파일 0 — 이미 커밋됐거나 해당 없음)', '⊘ skip (no working-tree changes or no claimed files — already committed or N/A)')}`);
   } else {
-    log(`  - git diff 교차검증: ${gitStrongMismatch ? '⚠ 불일치' : '✓'} 주장 ${files.length}개 중 실제 변경 ${claimedInGit.length}개${claimedNotInGit.length ? ` · git 변경에 없음: ${claimedNotInGit.slice(0, 5).join(', ')}` : ''}`);
-    if (gitStrongMismatch) log(`    · 주장한 파일이 working tree/직전커밋 변경에 전무 — 변경이 더 오래전 커밋이거나, 실제로 변경 안 됐을 수 있음(허위완료 의심)${has('--strict-claims') ? ' → FAIL' : ' (advisory — 커밋 후 검증 시 정상일 수 있음)'}`);
+    log(`  - ${t('git diff 교차검증', 'git diff cross-check')}: ${gitStrongMismatch ? t('⚠ 불일치', '⚠ mismatch') : '✓'} ${t(`주장 ${files.length}개 중 실제 변경 ${claimedInGit.length}개`, `${claimedInGit.length} of ${files.length} claimed actually changed`)}${claimedNotInGit.length ? t(` · git 변경에 없음: ${claimedNotInGit.slice(0, 5).join(', ')}`, ` · not in git changes: ${claimedNotInGit.slice(0, 5).join(', ')}`) : ''}`);
+    if (gitStrongMismatch) log(`    · ${t('주장한 파일이 working tree/직전커밋 변경에 전무 — 변경이 더 오래전 커밋이거나, 실제로 변경 안 됐을 수 있음(허위완료 의심)', 'claimed files are absent from working-tree/last-commit changes — changed in an older commit, or not actually changed (false-done suspected)')}${has('--strict-claims') ? ' → FAIL' : t(' (advisory — 커밋 후 검증 시 정상일 수 있음)', ' (advisory — may be normal when verifying after commit)')}`);
     // 1.13.2 (Karpathy 가이드라인 3 "외과적 변경", UR-0030): scope-creep 표면화 — git 변경됐으나 evidence/주장에 없는 파일.
-    if (changedNotClaimed.length) log(`    · 🔬 외과적 변경 점검: git 에 변경됐으나 evidence/주장에 없는 파일 ${changedNotClaimed.length}건: ${changedNotClaimed.slice(0, 5).join(', ')}${changedNotClaimed.length > 5 ? ' …' : ''} — 요청 범위 밖 변경(scope creep)인지 확인 (advisory)`);
+    if (changedNotClaimed.length) log(`    · ${t(`🔬 외과적 변경 점검: git 에 변경됐으나 evidence/주장에 없는 파일 ${changedNotClaimed.length}건: ${changedNotClaimed.slice(0, 5).join(', ')}${changedNotClaimed.length > 5 ? ' …' : ''} — 요청 범위 밖 변경(scope creep)인지 확인 (advisory)`, `🔬 surgical-change check: ${changedNotClaimed.length} file(s) changed in git but not in evidence/claim: ${changedNotClaimed.slice(0, 5).join(', ')}${changedNotClaimed.length > 5 ? ' …' : ''} — check for scope creep (advisory)`)}`);
   }
   // 1.9.309 (UR-0048): done 주장 evidence 완전성 — 기본 강제(상단 pre-compute). --lenient 로 opt-out.
   if (mustHaveEvidence) {
-    log(`  - evidence 완전성 (done 기본 강제): ${evidenceQualityOk ? '✓ pass (파일+테스트 근거 있음)' : `✗ FAIL (누락: ${evq.missing.join(', ')})`}`);
-    if (!evidenceQualityOk) log(`    · done 주장은 수정 파일 경로 + 테스트명/개수 가 evidence 에 있어야 함 (테스트 통과만으로는 불충분). 완화: --lenient`);
+    log(`  - ${t('evidence 완전성 (done 기본 강제)', 'evidence completeness (done default)')}: ${evidenceQualityOk ? t('✓ pass (파일+테스트 근거 있음)', '✓ pass (file + test evidence present)') : `✗ FAIL ${t(`(누락: ${evq.missing.join(', ')})`, `(missing: ${evq.missing.join(', ')})`)}`}`);
+    if (!evidenceQualityOk) log(`    · ${t('done 주장은 수정 파일 경로 + 테스트명/개수 가 evidence 에 있어야 함 (테스트 통과만으로는 불충분). 완화: --lenient', 'a done claim needs changed-file paths + test name/count in evidence (passing tests alone is insufficient). relax: --lenient')}`);
   }
   // 1.17.3 (UR-0046): 구현 실체(스텁) + 테스트-구현 연결 — Attack C(주석뿐 구현+assert(true)) 차단.
   if (stubFiles.length) {
-    log(`  - 구현 실체 (done 기본): ✗ FAIL — 주장된 구현 파일이 주석/빈껍데기뿐: ${stubFiles.slice(0, 5).join(', ')} (비주석 코드 0줄 또는 빈 export 껍데기)`);
+    log(`  - ${t('구현 실체 (done 기본)', 'implementation substance (done default)')}: ${t(`✗ FAIL — 주장된 구현 파일이 주석/빈껍데기뿐: ${stubFiles.slice(0, 5).join(', ')} (비주석 코드 0줄 또는 빈 export 껍데기)`, `✗ FAIL — claimed impl files are comments/empty shells only: ${stubFiles.slice(0, 5).join(', ')} (0 non-comment code lines or empty export shell)`)}`);
   } else if (claimsChecked && _vcImpl.length) {
-    log(`  - 구현 실체 (done 기본): ✓ pass (주장 구현 파일에 실코드 존재)`);
+    log(`  - ${t('구현 실체 (done 기본)', 'implementation substance (done default)')}: ${t('✓ pass (주장 구현 파일에 실코드 존재)', '✓ pass (real code present in claimed impl files)')}`);
   }
   if (testLinkOk === false) {
-    log(`  - 테스트-구현 연결: ⚠ 주장된 테스트(${_vcTests.slice(0, 3).join(', ')})가 구현 파일을 참조하지 않음 — 빈 테스트(assert(true)) 의심${has('--strict-claims') ? ' → FAIL' : ' (advisory — --strict-claims 시 FAIL)'}`);
+    log(`  - ${t('테스트-구현 연결', 'test-impl link')}: ${t(`⚠ 주장된 테스트(${_vcTests.slice(0, 3).join(', ')})가 구현 파일을 참조하지 않음 — 빈 테스트(assert(true)) 의심`, `⚠ claimed test(s) (${_vcTests.slice(0, 3).join(', ')}) do not reference the impl file — empty test (assert(true)) suspected`)}${has('--strict-claims') ? ' → FAIL' : t(' (advisory — --strict-claims 시 FAIL)', ' (advisory — FAIL under --strict-claims)')}`);
   } else if (testLinkOk === true && claimsChecked) {
-    log(`  - 테스트-구현 연결: ✓ pass (테스트가 구현을 참조)`);
+    log(`  - ${t('테스트-구현 연결', 'test-impl link')}: ${t('✓ pass (테스트가 구현을 참조)', '✓ pass (test references the impl)')}`);
   }
   const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk || (claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false);
   // 1.9.287: 정직한 한계 고지 — 테스트 통과 ≠ 의미적 구현 정확성
   if (claimsChecked || mustHaveEvidence) {
     log('');
-    log(`  ℹ 한계: 테스트 통과는 "의미적 구현 정확성"을 보장하지 않음 — evidence 가 해당 주장(수정 파일/테스트)을 직접 링크해야 신뢰도↑.`);
+    log(t(`  ℹ 한계: 테스트 통과는 "의미적 구현 정확성"을 보장하지 않음 — evidence 가 해당 주장(수정 파일/테스트)을 직접 링크해야 신뢰도↑.`, `  ℹ Limit: passing tests do not guarantee "semantic correctness" — evidence should directly link the claimed files/tests for higher confidence.`));
     // 1.19.2 (UR-0003 렌즈 완전판 v2): 완료-검증 순간에 분야별 자기질문 advisory — 주장 파일 확장자 기반(결정적).
     //   기계검증(파일/테스트/스텁)을 통과해도 "사람이 보기에 좋은가"는 별개 → AI 가 스스로 답하도록 권장(advisory, 게이트 아님).
     const _lensDoms = _lensDomainsForFiles(files);
     if (_lensDoms.length) {
       const _lensCat = _effectiveLensCatalog(root);  // 1.19.3: 프로젝트 커스텀 질문도 포함
       log('');
-      log(`  🧭 품질 렌즈 (완료 선언 전 자문 — advisory, 게이트 아님):`);
+      log(t(`  🧭 품질 렌즈 (완료 선언 전 자문 — advisory, 게이트 아님):`, `  🧭 Quality lens (self-ask before declaring done — advisory, not a gate):`));
       for (const d of _lensDoms) {
         const l = _lensCat[d];
         if (l) log(`     · ${d}(${l.title}): ${l.questions[0]}`);
       }
-      log(`     → 전체 질문: leerness lens ${_lensDoms[0]}`);
+      log(`     ${t('→ 전체 질문', '→ full questions')}: leerness lens ${_lensDoms[0]}`);
     }
   }
   if (overallFail) {
     log('');
-    log(`  ⚠ evidence 주장과 실제가 일치하지 않음 — task 상태 재검토 권장`);
+    log(t(`  ⚠ evidence 주장과 실제가 일치하지 않음 — task 상태 재검토 권장`, `  ⚠ evidence claim does not match reality — review the task status`));
     return process.exit(1);
   }
   log('');
-  log(`  ✓ evidence 주장이 실제 파일·테스트${runResult && !runResult.skipped ? '·실행 결과' : ''}와 일치`);
+  log(t(`  ✓ evidence 주장이 실제 파일·테스트${runResult && !runResult.skipped ? '·실행 결과' : ''}와 일치`, `  ✓ evidence claim matches actual files·tests${runResult && !runResult.skipped ? '·run results' : ''}`));
 }
 
 // 1.9.22: orchestrate — Ollama 로컬 LLM으로 best-of-N 멀티 에이전트 시뮬

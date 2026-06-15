@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.21.2 — 2026-06-15 — CLI 영어화 Phase 3: verify-claim(플래그십) 출력 영어화 (UR-0010)
+
+**🌐 플래그십 명령 출력을 영어로.** 사용자가 "완료됐나?"를 확인할 때 보는 `verify-claim` 의 human 출력 전체를 영어 opt-in 으로 — 온보딩 다음으로 영향 큰 표면. 한국어 기본 유지(영어 명시 opt-in).
+
+### 변경 (UR-0010 Phase 3)
+- **verify-claim 출력 영어화**: human 렌더(–json 제외) 시작에서 `_uiLang(root)` 1회 해석 후 전 출력을 `t(ko,en)` 분기 — `📂 파일 검증`→`File check`, `🧪 테스트 카운트`→`Test count`, `🚦 실행`→`run`, `종합`→`Summary`, `파일 모두 존재`→`all files exist`, `구현 실체`→`implementation substance`, `테스트-구현 연결`→`test-impl link`, `git diff 교차검증`→`git diff cross-check`, `낙관적 표시+정직성`→`optimism+honesty`, evidence 완전성/외과적 변경/한계/최종 판정까지 ~30 문자열. 품질 렌즈 advisory 헤더도 영어.
+- **한국어 기본 무회귀**: e2e 는 `--language` 없이 실행되며 init 이 이 환경에서 manifest.language=`ko` 로 저장(검증함) → verify-claim 기본 출력 한국어 유지. ko 원문은 `t()` 의 ko 인자로 소스에 보존.
+
+### 잔여 (UR-0010 Phase 4+, 백로그)
+- session close 마감 보고 + help + status + 그 외 명령 본문 영어화 — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 237→238** (verify-claim t() 경유 + 한국어 보존 소스가드) · 행위(en: `## Summary / all files exist / evidence claim matches`, ko 기본: `## 종합 / 파일 모두 존재`) · **E2E 365/365**.
+- patch(1.21.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.21.1 — 2026-06-15 — CLI 영어화 Phase 2: handoff 헤드라인 항목 라벨 영어화 (UR-0010)
 
 **🌐 매 세션 가장 많이 보는 출력(handoff 헤드라인)을 영어로 완성.** Phase 1(배너 + 헤드라인 프리픽스)에 이어, 헤드라인의 **항목 라벨 전체**를 영어 opt-in 으로. 비한국어 사용자가 세션마다 보던 한국어 토막들(보안 OK·미답 요청·비정상종료·플랫폼 제약 등)이 사라짐.
