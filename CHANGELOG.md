@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.23.0 — 2026-06-15 — 🛡️ [안정화/Stable] session close 영어 완전화 안정 minor
+
+**🛡️ 안정화(Stable) minor — 세션 마감 화면 전체를 영어로 공개.** 직전 minor(1.22.0) 이후 누적된 패치 2건(1.22.1 Phase 4 + 1.22.2 Phase 5)을 검증·통합해 npm 배포. R-0011 정책의 14번째 stable minor. 이로써 **핵심 세션 라이프사이클 — 설치(init) → 시작(handoff) → 검증(verify-claim) → 마감(session close) — 전체가 영어 opt-in 으로 일관**됩니다. 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.22.1~1.22.2)
+- **🌐 session close 마감 보고 영어화 (Phase 4)**: 항상-표시되는 마감 라인 — 완료 정직성/마감 보안 advisory, `활성 룰 없음`→`no active rules`, Required final response sections, `🔚 자동 통합 보고`→`integrated report`(사용자 요청·pre-wake·멱등성·셸 실패 포함). DI 로 `uiLang` 주입.
+- **🌐 session close --suggest/진행요약/cleanup 영어화 (Phase 5)**: 다음 라운드 추천(skill 후보·`drift 상태`→`drift status`·`가장 많이 쓴 명령`→`Most-used commands`·MCP/skill-query 통계), `진행 요약`→`Progress summary`(archive·마일스톤·회고·워크스페이스), 운영 자동정리(release cleanup·인코딩 BOM).
+- **가벼움 정리**: MCP 통계 줄의 `t` 헬퍼 셰도잉(`.map(([t,n])…)` → `[tool,n]`) 제거.
+- **한국어 우선 기본 보존**: 영어는 명시 opt-in(`--language en`/`LEERNESS_LANG=en`/en init 프로젝트). 플래그 없으면 한국어 — e2e 무회귀로 검증.
+
+### 잔여 (UR-0010 Phase 6+, 백로그)
+- session-handoff.md / current-state.md 본문(파일에 기록되는 한국어 메모리 아티팩트) + help + status + 그 외 명령 본문 — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 240/240** (Phase 4·5 영어/한국어 보존 소스가드 포함) · 행위(en: `integrated report / Next-round suggestions / Progress summary`, ko 기본: `자동 통합 보고 / 다음 라운드 추천 / 진행 요약`) · **E2E 365/365**.
+- minor(1.23.0) — npm 배포(R-0011 stable) + annotated tag(Stable) + GitHub release(latest) + 게시본 클린룸 재실증.
+
 ## 1.22.2 — 2026-06-15 — CLI 영어화 Phase 5: session close --suggest/진행요약/cleanup 영어화 (UR-0010)
 
 **🌐 마감 보고의 나머지 절반까지 영어로.** Phase 4 가 "항상 표시되는" 마감 라인을 영어화했다면, Phase 5 는 **다음 라운드 추천(`--suggest`)·진행 요약·운영 자동정리** 출력을 영어 opt-in 으로 — 마감 화면 전체가 언어 선택을 따른다.
