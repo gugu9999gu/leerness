@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.27.0 — 2026-06-15 — 🛡️ [안정화/Stable] 보안 수정 안정 minor (개인키 스캔 FN + placeholder FP)
+
+**🛡️ 안정화(Stable) minor — 13번째 외부리뷰에서 확인된 보안 수정을 조기 npm 공개.** 직전 minor(1.26.0) 이후 1.26.1 패치 1건이지만, **보안 FN/FP(거짓 "보안 OK" + CI 파손)는 패치 누적을 기다리기보다 조기 공개가 합리적**이라 단독 minor 로 게시. R-0011 정책의 18번째 stable minor.
+
+### 이번 minor 통합 (1.26.1)
+- **🔒 개인키 파일 스캔 FN 차단**: `scan secrets` 가 `.pem`/`.key`/`.crt`/`.p8`/`.pfx` 등을 확장자 allow-list 누락으로 건너뛰어 **커밋된 개인키 미탐 + handoff 가 "보안 OK" 거짓보증**하던 문제 수정(basename 오버라이드). gitignore 된 키는 종전대로 info.
+- **🔒 DB placeholder 오탐(FP) 차단**: `.env.example` 의 `user:password@`·`root:root` 등 교과서 placeholder 를 커밋 시크릿으로 오탐해 `gate`/CI 를 깨뜨리던 문제 수정(valueGroup + placeholder 마커). 진짜 고엔트로피 비밀번호는 계속 탐지(FN=0).
+- **🔧 retro --json NaN 계약**: 비숫자 `--days` 가 plain text 를 `--json` 소비자에게 흘리던 문제 → 숫자 가드 + 클램프(failJson 구조화).
+
+### 잔여 (외부리뷰 백로그)
+- init `--language en` seed 데이터 i18n(= 전체 `.harness/` 템플릿 i18n 필요, 대형) · verify-claim `--test-cmd` no-parse 하드닝(FP 회귀 위험으로 신중) · audit 미초기화 출력 정합(cosmetic) · 진단명령 영어화 Phase 10.
+
+### 검증 (회귀 0)
+- **selftest 246/246** · **E2E 367/367** (개인키 스캔 FN차단 + placeholder FP차단/FN유지 + retro --json 행위 회귀가드 포함) · 게시본 클린룸 재실증.
+- minor(1.27.0) — npm 배포(R-0011 stable) + annotated tag(Stable) + GitHub release(latest).
+
 ## 1.26.1 — 2026-06-15 — 13번째 외부리뷰 P2 수정: 개인키파일 스캔 FN + DB placeholder FP + retro --json NaN
 
 **🔎 13번째 외부 멀티모델 리뷰(1.26.0 게시본)에서 확인된 P2 3건 수정.** 3 에이전트 클린룸 리뷰 → 맹신 X 양방향 직접 재현으로 진짜만 채택 → 보안 2건 + --json 계약 1건 수정.
