@@ -6226,10 +6226,14 @@ total++;
     const stEn = out(cp.spawnSync(process.execPath, [CLI, 'status', path.join(d, 'nope'), '--language', 'en', '--json'], { encoding: 'utf8', timeout: 15000 }));
     const stKo = out(cp.spawnSync(process.execPath, [CLI, 'status', path.join(d, 'nope'), '--json'], { encoding: 'utf8', timeout: 15000 }));
     const stOk = /path not found/.test(stEn) && /경로 없음/.test(stKo);
+    // ⑤ (1.25.2 Phase 9) health: en 렌더 영어(한글 0) + ko 기본 한글 보존
+    const hEn = out(cp.spawnSync(process.execPath, [CLI, 'health', '--language', 'en', '--path', d], { encoding: 'utf8', timeout: 20000 }));
+    const hKo = out(cp.spawnSync(process.execPath, [CLI, 'health', '--path', d], { encoding: 'utf8', timeout: 20000 }));
+    const healthOk = /## Security/.test(hEn) && !H.test(hEn) && /## 보안/.test(hKo);
     fs.rmSync(d, { recursive: true, force: true });
-    ok = lensKoOk && lensEnOk && noLeak && stOk;
+    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk;
   } catch {}
-  console.log(ok ? '✓ B(1.25.1) i18n 행위: --language en 런타임 영어 + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
+  console.log(ok ? '✓ B(1.25.1/1.25.2) i18n 행위: --language en 런타임 영어(lens/health) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
   if (!ok) failed++;
 }
 

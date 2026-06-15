@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.25.2 — 2026-06-15 — CLI 영어화 Phase 9: health 진단 완전 영어화 (UR-0010)
+
+**🌐 health 진단을 통째로 영어로.** en-leak 스캔 우선순위에서 고빈도 진단인 `health` 를 — 렌더 라벨만이 아니라 **능력 매트릭스 evidence·issues·요약까지 완전히** — 영어화. 반쪽 번역(1.23.0 과장)의 재발을 피하려 한 모듈(lib/health.js)의 모든 한국어를 한 번에 처리.
+
+### 변경 (UR-0010 Phase 9)
+- **health 완전 영어화 (lib/health.js, DI uiLang 주입)**: 렌더 라벨(`## 보안`→`## Security`, skills/usage/tasks, `6능력 매트릭스`→`6-capability matrix`, `자동 회복`→`auto-recover`) + **능력 매트릭스 evidence 16종**(웹/PC/멀티/REPL/MCP/LSP 각 점수대) + summary + 보안 issues 4종 + path-not-found 에러. `t(ko,en)` 분기, ko 인자 verbatim.
+- **bin DI**: `healthCmd` 호출에 `uiLang: _uiLang(root)` 주입(session-close/health 동일 패턴).
+- **한국어 기본 유지**: 영어는 명시 opt-in. `health`/`health --json` 기본은 한국어 그대로(e2e 무회귀). `--json` 값도 언어 따름(en 시 영어 evidence).
+
+### 잔여 (UR-0010 Phase 10+, 백로그)
+- capabilities(24)/commands(90)/drift check/install-safety/constraints/doctor + 메모리 CRUD 빈상태 메시지 + handoff 본문 — en-leak 우선순위순.
+
+### 검증 (회귀 0)
+- **selftest 244→245** (health 영어/한국어 보존 + uiLang 주입 소스가드) · 행위(health `--language en` 한글 0 / ko 16줄 보존 / en --json 유효) · **E2E 366/366** (i18n 행위가드에 health en/ko 추가).
+- patch(1.25.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.25.1 — 2026-06-15 — 22번째 버그헌트(i18n 레이어 검증) + i18n 행위 e2e 회귀가드 (UR-0010)
 
 **🔬 8 phase 영어화 레이어를 통째로 적대 검증.** uiLang/`_tx`/`_t` 머신을 cross-cutting 레이어로 한 번에 점검 — **런타임 버그 0** (맹신 X 양방향 확인). 다만 그동안 i18n 은 *소스가드(문자열 존재)* 만 있고 *행위 e2e* 가 없었는데, 이 공백이 1.23.0 "완전 영어" 과장(런타임 누출)을 통과시킨 근본 원인이었음 → 행위 회귀가드로 보강.
