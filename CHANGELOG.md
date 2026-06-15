@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.25.0 — 2026-06-15 — 🛡️ [안정화/Stable] 마감 본문 정직성 + lens 플래그십 영어화 안정 minor
+
+**🛡️ 안정화(Stable) minor — 자가 검증으로 잡은 정직성 수정 + 품질 렌즈 영어화를 npm 공개.** 직전 minor(1.24.0) 이후 누적된 패치 2건(1.24.1 + 1.24.2)을 검증·통합해 배포. R-0011 정책의 16번째 stable minor. 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.24.1~1.24.2)
+- **🔎 session close 보고 본문 정직성 수정 (1.24.1)**: 게시된 모든 영어 표면을 `--language en` 으로 실행해 한글 누출을 자동 스캔(맹신 X — 내 'CLOSED' 주장 재실증)한 결과, 1.23.0 "session close 완전 영어" 가 과장임을 발견 → 보고 본문 잔여 영어화(`- 없음`→`- none`, `완료/결정 누적`→`done/decisions accumulated`, roadmap `자동 갱신`→`auto-updated`).
+- **🌐 lens 품질 렌즈 플래그십 영어화 (1.24.2)**: 분야별 자기질문 품질 렌즈 5 도메인(code/design/docs/test/security)에 영어 병렬 카탈로그 추가 + `--language en` 렌더. 영어권 사용자도 완료 선언 전 자가 점검 + 분야간 인과를 활용.
+- **한국어 우선 기본 보존**: 영어는 명시 opt-in. 한국어 원문/렌즈 질문은 한 글자도 안 바뀜(e2e 무회귀).
+
+### 잔여 (UR-0010 Phase 9+, 백로그)
+- 진단/정보 명령 본문(health/capabilities/commands/doctor/drift/install-safety/constraints) + 메모리 CRUD 빈상태 메시지 + handoff 본문 + init starter 데이터 — en-leak 스캔 우선순위순 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 244/244** (정직성 + lens 영어/한국어 보존 소스가드 포함) · 행위(en-leak 스캔: session close 본문·lens en 한글 0 / ko 보존) · **E2E 365/365**.
+- minor(1.25.0) — npm 배포(R-0011 stable) + annotated tag(Stable) + GitHub release(latest) + 게시본 클린룸 재실증.
+
 ## 1.24.2 — 2026-06-15 — CLI 영어화 Phase 8: lens(품질 렌즈 플래그십) 영어화 (UR-0010)
 
 **🌐 품질 렌즈를 영어로.** 남은 한국어 표면을 en-leak 스캔으로 매핑한 뒤, 가장 가치 높은 플래그십 — **분야별 자기질문 품질 렌즈(`leerness lens`)** — 를 영어화. 영어권 사용자도 "완료 선언 전 자가 점검" + 분야간 인과관계를 그대로 활용할 수 있습니다.
