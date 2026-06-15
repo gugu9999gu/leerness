@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.23.2 — 2026-06-15 — CLI 영어화 Phase 7: group help 5종 + _GROUP_USAGE 자리표시자 영어화 (UR-0010)
+
+**🌐 도움말 표면 패밀리 완성.** Phase 6(메인 `--help`)에 이어, 명령군을 하위명령 없이 부를 때 나오는 **그룹 도움말**과 **사용법 힌트의 자리표시자**까지 영어화 — 메인 help + group help + usage hint 가 모두 언어 선택을 따른다.
+
+### 변경 (UR-0010 Phase 7)
+- **group help 5종 영어화**: `requests` / `constraints` / `wakeup-interval` / `idempotency` / `intent` 를 하위명령 없이(또는 `help`) 부를 때의 도움말을 `_t(ko,en)` 분기.
+- **_GROUP_USAGE 자리표시자 영어화**: `<텍스트>`→`<text>`, `<트리거>`→`<trigger>`, `<키>`→`<key>`, `<이름>`→`<name>` — `_GROUP_USAGE_EN` 병렬맵으로(한국어 맵은 한 글자도 안 바꿔 e2e 안전), subcommand_required 에러가 언어별 정확한 사용법 표시.
+- **한국어 기본 유지**: 영어는 명시 opt-in. 플래그 없으면 기존 한국어 그대로(e2e 무회귀).
+
+### 잔여 (UR-0010 Phase 8+, 백로그)
+- 메모리 CRUD/진단 명령 본문 출력(task/decision/audit/gate/scan 등 사람용 메시지) + session-handoff.md 본문 — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 241→242** (group help 5종 영어+한국어 보존, _GROUP_USAGE_EN 존재 + ko 맵 불변 소스가드) · 행위(en: 5종 영어 헤더 + `<key>`/`<text>`, ko 기본: 5종 한국어 헤더 + `<키>`/`<텍스트>`) · **E2E 365/365**.
+- patch(1.23.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.23.1 — 2026-06-15 — CLI 영어화 Phase 6: help(영어 큐레이트판) + status/subcommand 에러 영어화 (UR-0010)
 
 **🌐 `leerness --help` 와 흔한 에러를 영어로.** 영어 사용자가 가장 먼저 보는 도움말을 — 레거시 버전태그를 줄별로 번역하는 대신 — **카테고리별로 정리한 별도 영어 도움말**로 제공. 한국어 도움말은 그대로 둬서 한국어 기본 경로는 한 글자도 안 바뀜.

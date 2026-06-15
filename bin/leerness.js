@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.23.1';
+const VERSION = '1.23.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3774,6 +3774,14 @@ function _selfTestCases() {
       const subEn = bin.includes('subcommand required — usage: leerness');
       return enHelp && enCovers && koPreserved && statusEn && subEn;
     } },
+    { name: 'CLI 영어화 Phase 7 (1.23.2, UR-0010): group help 5종 + _GROUP_USAGE_EN 영어/한국어 보존 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      const en = bin.includes('track missing user requests') && bin.includes('pre-check platform/API constraints') && bin.includes('adaptive wakeup interval') && bin.includes('detect idempotency violations') && bin.includes('infer user intent');
+      const koPreserved = bin.includes('사용자 요청 누락 확인 절차') && bin.includes('플랫폼/API 제약 사전 체크') && bin.includes('멱등성 위반 탐지');  // ko 원문 _t ko 인자로 보존(e2e ko 무회귀)
+      const groupUsageEn = bin.includes('const _GROUP_USAGE_EN = {') && bin.includes('rule add "<text>" --trigger <trigger>') && bin.includes('${_GROUP_USAGE_EN[cmd]}');
+      const koUsagePreserved = bin.includes('rule add "<텍스트>" --trigger <트리거>');  // ko 맵 불변
+      return en && koPreserved && groupUsageEn && koUsagePreserved;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -5308,14 +5316,15 @@ function requestsCmd(root, sub, ...rest) {
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
 
   if (!sub || sub === 'help' || sub === '--help') {
-    log(`# leerness requests (1.9.207) — 사용자 요청 누락 확인 절차`);
+    const _L = _uiLang(root); const _t = (ko, en) => _L === 'en' ? en : ko;  // 1.23.2 (UR-0010 Phase 7)
+    log(_t(`# leerness requests (1.9.207) — 사용자 요청 누락 확인 절차`, `# leerness requests — track missing user requests`));
     log('');
-    log(`  audit            → 누락 후보 + tracked + stale 보고 (--json 가능)`);
-    log(`  add "<text>"     → 사용자 요청 수동 기록`);
-    log(`  list             → 전체 요청 출력 (--json 가능, --status open|completed|dropped)`);
-    log(`  complete <id>    → 요청 완료 표시 (예: UR-0003)`);
-    log(`  drop <id>        → 요청 드롭 표시`);
-    log(`  auto-complete    → "Round X.Y.Z — 구현 완료" 패턴 자동 감지 (default: dry-run, --apply 시 적용) [1.9.223]`);
+    log(_t(`  audit            → 누락 후보 + tracked + stale 보고 (--json 가능)`, `  audit            → report missing candidates + tracked + stale (--json)`));
+    log(_t(`  add "<text>"     → 사용자 요청 수동 기록`, `  add "<text>"     → manually record a user request`));
+    log(_t(`  list             → 전체 요청 출력 (--json 가능, --status open|completed|dropped)`, `  list             → list all requests (--json, --status open|completed|dropped)`));
+    log(_t(`  complete <id>    → 요청 완료 표시 (예: UR-0003)`, `  complete <id>    → mark a request completed (e.g. UR-0003)`));
+    log(_t(`  drop <id>        → 요청 드롭 표시`, `  drop <id>        → mark a request dropped`));
+    log(_t(`  auto-complete    → "Round X.Y.Z — 구현 완료" 패턴 자동 감지 (default: dry-run, --apply 시 적용) [1.9.223]`, `  auto-complete    → auto-detect "Round X.Y.Z delivered" patterns (default: dry-run, --apply to apply)`));
     return;
   }
 
@@ -5561,13 +5570,14 @@ function constraintsCmd(root, sub, ...rest) {
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
 
   if (!sub || sub === 'help' || sub === '--help') {
-    log(`# leerness constraints (1.9.208) — 플랫폼/API 제약 사전 체크`);
+    const _L = _uiLang(root); const _t = (ko, en) => _L === 'en' ? en : ko;  // 1.23.2 (UR-0010 Phase 7)
+    log(_t(`# leerness constraints (1.9.208) — 플랫폼/API 제약 사전 체크`, `# leerness constraints — pre-check platform/API constraints`));
     log('');
-    log(`  list                  → 등록된 모든 플랫폼 catalog 출력 (--json 가능)`);
-    log(`  check "<request>"     → 사용자 요청에서 플랫폼 매칭 → 제약 보고 (--json 가능)`);
+    log(_t(`  list                  → 등록된 모든 플랫폼 catalog 출력 (--json 가능)`, `  list                  → list all registered platform catalogs (--json)`));
+    log(_t(`  check "<request>"     → 사용자 요청에서 플랫폼 매칭 → 제약 보고 (--json 가능)`, `  check "<request>"     → match platforms in a request → report constraints (--json)`));
     log(`  add <id> --constraint "kind:detail" --alias name`);
     log('');
-    log(dim(`  예: leerness constraints check "Stripe API 연동 결제 모듈"`));
+    log(dim(_t(`  예: leerness constraints check "Stripe API 연동 결제 모듈"`, `  e.g. leerness constraints check "Stripe API payment integration"`)));
     return;
   }
 
@@ -5747,15 +5757,16 @@ function wakeupIntervalCmd(root, sub, val) {
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
 
   if (!sub || sub === 'help' || sub === '--help') {
-    log(`# leerness wakeup-interval (1.9.210) — adaptive wakeup 간격`);
+    const _L = _uiLang(root); const _t = (ko, en) => _L === 'en' ? en : ko;  // 1.23.2 (UR-0010 Phase 7)
+    log(_t(`# leerness wakeup-interval (1.9.210) — adaptive wakeup 간격`, `# leerness wakeup-interval — adaptive wakeup interval`));
     log('');
-    log(`  get              → 현재 권장 interval + stats (--json 가능)`);
-    log(`  set <secs>       → override 설정 (예: leerness wakeup-interval set 900)`);
-    log(`  auto             → override 해제 + 자동 계산 모드`);
-    log(`  history          → 최근 fire 이력 출력`);
-    log(`  record <kind>    → fire 기록 (user-trigger / auto / wakeup-miss)`);
+    log(_t(`  get              → 현재 권장 interval + stats (--json 가능)`, `  get              → current recommended interval + stats (--json)`));
+    log(_t(`  set <secs>       → override 설정 (예: leerness wakeup-interval set 900)`, `  set <secs>       → set an override (e.g. leerness wakeup-interval set 900)`));
+    log(_t(`  auto             → override 해제 + 자동 계산 모드`, `  auto             → clear override + auto-compute mode`));
+    log(_t(`  history          → 최근 fire 이력 출력`, `  history          → recent fire history`));
+    log(_t(`  record <kind>    → fire 기록 (user-trigger / auto / wakeup-miss)`, `  record <kind>    → record a fire (user-trigger / auto / wakeup-miss)`));
     log('');
-    log(dim(`  opt-out: env LEERNESS_FIXED_INTERVAL=1500 (초) 또는 set <secs>`));
+    log(dim(_t(`  opt-out: env LEERNESS_FIXED_INTERVAL=1500 (초) 또는 set <secs>`, `  opt-out: env LEERNESS_FIXED_INTERVAL=1500 (seconds) or set <secs>`)));
     return;
   }
 
@@ -6123,15 +6134,16 @@ function idempotencyCmd(root, sub) {
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
 
   if (!sub || sub === 'help' || sub === '--help') {
-    log(`# leerness idempotency (1.9.212) — 멱등성 위반 탐지`);
+    const _L = _uiLang(root); const _t = (ko, en) => _L === 'en' ? en : ko;  // 1.23.2 (UR-0010 Phase 7)
+    log(_t(`# leerness idempotency (1.9.212) — 멱등성 위반 탐지`, `# leerness idempotency — detect idempotency violations`));
     log('');
-    log(`  audit               → 워크스페이스 멱등성 점검 (rules / tasks / user-requests / wakeups)  (--json 가능)`);
-    log(`  audit --auto-fix    → task 완전중복 행 제거 + active 동일텍스트 dropped 처리 + user-request open 중복 정리 (1.9.293)`);
+    log(_t(`  audit               → 워크스페이스 멱등성 점검 (rules / tasks / user-requests / wakeups)  (--json 가능)`, `  audit               → check workspace idempotency (rules / tasks / user-requests / wakeups)  (--json)`));
+    log(_t(`  audit --auto-fix    → task 완전중복 행 제거 + active 동일텍스트 dropped 처리 + user-request open 중복 정리 (1.9.293)`, `  audit --auto-fix    → remove exact-duplicate tasks + mark same-text active as dropped + dedup open user-requests`));
     log('');
-    log(dim(`  dedup 적용 영역: ruleAdd / taskAdd (1.9.212) + _recordUserRequest (1.9.207) + _recordWakeup (1.9.205)`));
-    log(dim(`  --auto-fix 안전: 완전 동일 행만 제거 / 동일텍스트는 status=dropped 로 보존(id 유지) / git 회복 가능 / 멱등`));
-    log(dim(`  자동화: drift check --auto-fix 가 idempotency 중복도 자동 정리 (1.9.293)`));
-    log(dim(`  opt-out: --force 플래그로 dedup 우회 가능`));
+    log(dim(_t(`  dedup 적용 영역: ruleAdd / taskAdd (1.9.212) + _recordUserRequest (1.9.207) + _recordWakeup (1.9.205)`, `  dedup applies to: ruleAdd / taskAdd + _recordUserRequest + _recordWakeup`)));
+    log(dim(_t(`  --auto-fix 안전: 완전 동일 행만 제거 / 동일텍스트는 status=dropped 로 보존(id 유지) / git 회복 가능 / 멱등`, `  --auto-fix safety: removes only exact dupes / same-text kept as status=dropped (id preserved) / git-recoverable / idempotent`)));
+    log(dim(_t(`  자동화: drift check --auto-fix 가 idempotency 중복도 자동 정리 (1.9.293)`, `  automation: drift check --auto-fix also dedups idempotency violations`)));
+    log(dim(_t(`  opt-out: --force 플래그로 dedup 우회 가능`, `  opt-out: pass --force to bypass dedup`)));
     return;
   }
 
@@ -6198,14 +6210,15 @@ function intentCmd(root, sub, ...rest) {
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
 
   if (!sub || sub === 'help' || sub === '--help') {
-    log(`# leerness intent (1.9.213) — 사용자 의도 파악 + scope expansion 게이트`);
+    const _L = _uiLang(root); const _t = (ko, en) => _L === 'en' ? en : ko;  // 1.23.2 (UR-0010 Phase 7)
+    log(_t(`# leerness intent (1.9.213) — 사용자 의도 파악 + scope expansion 게이트`, `# leerness intent — infer user intent + scope-expansion gate`));
     log('');
-    log(`  classify "<request>"      → intent 분류 (precise/broad/default) + 신호 (--json 가능)`);
-    log(`  expand "<request>"        → 도메인 탐지 + 확장 후보 dry-run (--json 가능)`);
-    log(`  domains                   → 등록된 도메인 catalog 출력 (game/web/api/cli/data)`);
+    log(_t(`  classify "<request>"      → intent 분류 (precise/broad/default) + 신호 (--json 가능)`, `  classify "<request>"      → classify intent (precise/broad/default) + signals (--json)`));
+    log(_t(`  expand "<request>"        → 도메인 탐지 + 확장 후보 dry-run (--json 가능)`, `  expand "<request>"        → detect domain + expansion candidates (dry-run, --json)`));
+    log(_t(`  domains                   → 등록된 도메인 catalog 출력 (game/web/api/cli/data)`, `  domains                   → list registered domain catalog (game/web/api/cli/data)`));
     log('');
-    log(dim(`  3원칙: (1) Always-Off Opt-In  (2) Dry-run 기본 (실행 X)  (3) 명시 vs 추론 분리 라벨링`));
-    log(dim(`  예: leerness intent expand "맵과 캐릭터 + 기본 게임 기능 만들어줘"`));
+    log(dim(_t(`  3원칙: (1) Always-Off Opt-In  (2) Dry-run 기본 (실행 X)  (3) 명시 vs 추론 분리 라벨링`, `  3 principles: (1) always-off opt-in  (2) dry-run by default (no execution)  (3) explicit vs inferred labeling`)));
+    log(dim(_t(`  예: leerness intent expand "맵과 캐릭터 + 기본 게임 기능 만들어줘"`, `  e.g. leerness intent expand "build a map + characters + basic game features"`)));
     return;
   }
 
@@ -20160,7 +20173,14 @@ async function main() {
     feature: 'feature add "<이름>" | feature list | feature show <ID> | feature link <A> <B> | feature impact <ID>',
     memory: 'memory search "<키>" [--json] | memory status | memory archive | memory restore',
   };
-  if (_GROUP_USAGE[cmd] && !args[1]) { const _gu = _uiLang(arg('--path', process.cwd())) === 'en' ? `${cmd} subcommand required — usage: leerness ${_GROUP_USAGE[cmd]}` : `${cmd} 하위명령 필요 — 사용법: leerness ${_GROUP_USAGE[cmd]}`; failJson(has('--json'), 'subcommand_required', _gu); return; }
+  // 1.23.2 (UR-0010 Phase 7): 영어 자리표시자 병렬맵 — ko 맵은 불변(e2e 안전), en 은 <text>/<trigger>/<key>/<name>.
+  const _GROUP_USAGE_EN = {
+    rule: 'rule add "<text>" --trigger <trigger> | rule list | rule pause/resume/remove <ID> | rule verify',
+    skill: 'skill list | skill add <id> | skill use <id> | skill search "<key>" | skill match "<text>"',
+    feature: 'feature add "<name>" | feature list | feature show <ID> | feature link <A> <B> | feature impact <ID>',
+    memory: 'memory search "<key>" [--json] | memory status | memory archive | memory restore',
+  };
+  if (_GROUP_USAGE[cmd] && !args[1]) { const _gu = _uiLang(arg('--path', process.cwd())) === 'en' ? `${cmd} subcommand required — usage: leerness ${_GROUP_USAGE_EN[cmd]}` : `${cmd} 하위명령 필요 — 사용법: leerness ${_GROUP_USAGE[cmd]}`; failJson(has('--json'), 'subcommand_required', _gu); return; }
   // 1.9.437 (11th 외부평가 Codex P2, UR-0138): --json 모드 unknown command 도 순수 JSON.
   failJson(has('--json'), 'unknown_command', `알 수 없는 명령: ${cmd}  (leerness --help 로 전체 명령 확인)`);
   return;
