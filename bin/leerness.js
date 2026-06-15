@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.26.0';
+const VERSION = '1.26.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3809,6 +3809,16 @@ function _selfTestCases() {
       const bin = read(__filename);
       const renderEn = bin.includes('quality self-question lenses (v${VERSION})') && bin.includes("t('페르소나', 'persona')");
       return enFields && koVerbatim && renderEn;
+    } },
+    { name: '13번째 외부리뷰 P2 수정 (1.26.1): 개인키파일 스캔 + DB placeholder valueGroup + retro NaN 가드 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      const cat = read(path.join(path.dirname(__filename), '..', 'lib', 'catalogs.js'));
+      const pu = read(path.join(path.dirname(__filename), '..', 'lib', 'pure-utils.js'));
+      const keyFile = bin.includes('const isKeyFile =') && bin.includes('!isKeyFile) continue;');
+      const dbVg = /DB connection string[^\n]*valueGroup: 1/.test(cat);
+      const phPlaceholder = pu.includes('root|admin|user|username|yourpassword');
+      const retroGuard = bin.includes("failJson(has('--json'), 'invalid_arg'") && bin.includes('Math.min(days, 36500)');
+      return keyFile && dbVg && phPlaceholder && retroGuard;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -7843,7 +7853,9 @@ function _collectSecretFindings(root) {
     const ext = path.extname(file).toLowerCase();
     // 1.9.386 (UR-0087): env-family(.env / .env.local / .env.production …) basename 강제 포함.
     const isEnvFamily = /^\.env(\.|$)/.test(path.basename(file));
-    if (!SCAN_TEXT_EXT.has(ext) && !isEnvFamily) continue;
+    // 1.26.1 (13번째 외부리뷰 P2): 개인키/인증서 파일(.pem/.key/.crt/.p8 …)은 확장자 allow-list 에 없어 스캔 누락 → 커밋된 개인키 미탐 + handoff 'OK' 거짓보증. basename 으로 강제 포함('Generic private key' 정규식이 실제로 돌도록).
+    const isKeyFile = /\.(?:pem|key|crt|cer|der|p8|p12|pfx|pkcs8|ppk|asc|gpg|keystore|jks)$/i.test(path.basename(file));
+    if (!SCAN_TEXT_EXT.has(ext) && !isEnvFamily && !isKeyFile) continue;
     let text;
     // 1.12.5 (15th 버그헌트 P2, UR-0019): stat-before-read — 1MB 초과 파일은 읽지 않고 건너뜀(이전엔 read 후 검사라 대형 파일 통째 로드).
     try { if (fs.statSync(file).size > 1024 * 1024) continue; } catch { continue; }
@@ -12509,7 +12521,10 @@ function retroCmd(root) {
   if (has('--all-apps') || arg('--include', null)) {
     return _retroWorkspace(root);
   }
-  const days = parseInt(arg('--days', '7'), 10);
+  // 1.26.1 (13번째 외부리뷰 P2): 비숫자 --days → NaN → new Date(Invalid) throw 로 --json 소비자에 plain text 누출. 숫자 가드 + 음수/오버플로 클램프(insights/round-history 와 일관).
+  let days = parseInt(arg('--days', '7'), 10);
+  if (!Number.isFinite(days)) { failJson(has('--json'), 'invalid_arg', _uiLang(root) === 'en' ? '--days must be a number' : '--days 는 숫자여야 합니다'); return; }
+  days = Math.max(0, Math.min(days, 36500));
   const cutoff = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
   const agg = _retroAggregate(root);
   // 1.9.16: --json

@@ -6237,5 +6237,38 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.26.1 (13번째 외부리뷰 P2 회귀가드): 개인키파일 스캔 FN + DB placeholder FP + retro --json NaN 행위 가드.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rev13-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    const out = (r) => (r.stdout || '') + (r.stderr || '');
+    // #4: 커밋된 개인키 파일(.key, gitignore 미포함)은 잡혀야 함(FN 차단)
+    fs.writeFileSync(path.join(d, 'server.key'), '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA1234567890abcdefghij\n-----END RSA PRIVATE KEY-----\n');
+    const keyScan = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d], { encoding: 'utf8', timeout: 15000 });
+    const keyCaught = keyScan.status === 1 && /Generic private key/.test(out(keyScan));
+    fs.unlinkSync(path.join(d, 'server.key'));
+    // #5: .env.example 의 placeholder DB URI 는 오탐 X (FP 차단) / 진짜 비번은 잡힘(FN 유지)
+    fs.writeFileSync(path.join(d, '.env.example'), 'A=postgres://user:password@h:5432/db\nB=mysql://root:root@h/db\n');
+    const phScan = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d], { encoding: 'utf8', timeout: 15000 });
+    const noFp = phScan.status === 0 && !/DB connection string/.test(out(phScan));
+    fs.unlinkSync(path.join(d, '.env.example'));
+    fs.writeFileSync(path.join(d, 'real.env'), 'D=postgres://admin:Xk9zQ2mP7rL4wT@prod.example.com:5432/main\n');
+    const realScan = cp.spawnSync(process.execPath, [CLI, 'scan', 'secrets', d], { encoding: 'utf8', timeout: 15000 });
+    const realCaught = realScan.status === 1 && /DB connection string/.test(out(realScan));
+    fs.unlinkSync(path.join(d, 'real.env'));
+    // #1: retro --days 비숫자 --json 은 구조화 JSON(plain text 누출 X)
+    const rj = cp.spawnSync(process.execPath, [CLI, 'retro', d, '--days', 'xyz', '--json'], { encoding: 'utf8', timeout: 15000 });
+    let retroJsonOk = false;
+    try { const j = JSON.parse(rj.stdout); retroJsonOk = j && (j.error || j.code) && rj.status === 1; } catch {}
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = keyCaught && noFp && realCaught && retroJsonOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.26.1) 13th 외부리뷰: 개인키파일 스캔(FN차단) + DB placeholder(FP차단/FN유지) + retro --json NaN 구조화' : '✗ 13th 외부리뷰 P2 회귀가드 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.26.1 — 2026-06-15 — 13번째 외부리뷰 P2 수정: 개인키파일 스캔 FN + DB placeholder FP + retro --json NaN
+
+**🔎 13번째 외부 멀티모델 리뷰(1.26.0 게시본)에서 확인된 P2 3건 수정.** 3 에이전트 클린룸 리뷰 → 맹신 X 양방향 직접 재현으로 진짜만 채택 → 보안 2건 + --json 계약 1건 수정.
+
+### 변경 (확인된 P2 3건)
+- **🔒 개인키 파일 스캔 FN 차단 (보안)**: `scan secrets` 가 `.pem`/`.key`/`.crt`/`.p8`/`.pfx` 등 개인키·인증서 확장자를 스캔 allow-list 누락으로 건너뛰어 **커밋된 개인키를 미탐 + handoff 가 "보안 OK" 거짓보증**하던 문제 → basename 오버라이드(env-family 패턴 미러)로 강제 스캔. (gitignore 된 키는 종전대로 info 강등.)
+- **🔒 DB placeholder 오탐(FP) 차단 (보안/CI)**: `.env.example` 의 `postgres://user:password@`·`root:root`·`yourpassword` 같은 교과서 placeholder 가 커밋 시크릿으로 오탐돼 `gate`/CI 를 깨뜨리던 문제 → DB URI 정규식에 비밀번호 capture group(`valueGroup`) 추가 + placeholder 마커(`root`/`admin`/`user`/`yourpassword` 등 전체-값 정확 일치)로 차단. **진짜 고엔트로피 비밀번호는 계속 탐지(FN=0)**.
+- **🔧 retro --json NaN 크래시 (계약)**: `retro --days <비숫자>` 가 `new Date(Invalid)` throw 로 `--json` 소비자에게 plain text(`✗ Invalid time value`)를 흘리던 문제 → 숫자 가드 + 음수/오버플로 클램프(`failJson` 구조화, insights/round-history 와 일관).
+
+### 검증 (회귀 0)
+- **selftest 245→246** (소스가드) · 행위(맹신 X 양방향: 개인키 .key 탐지 + .crt 무오탐, placeholder 스킵 + 실비번 탐지, retro --json 구조화 + 정상동작) · **E2E 367/367** (신규 행위 회귀가드 1건).
+- patch(1.26.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적). 잔여 리뷰 발견(audit 미초기화 출력 정합 P2, verify-claim --test-cmd no-parse 하드닝 P3, init en seed 데이터 i18n, 진단명령 영어화 Phase 10)은 백로그.
+
 ## 1.26.0 — 2026-06-15 — 🛡️ [안정화/Stable] i18n 행위가드 + health 진단 영어화 안정 minor
 
 **🛡️ 안정화(Stable) minor — i18n 레이어 견고성 검증·가드 + health 진단 영어화를 npm 공개.** 직전 minor(1.25.0) 이후 누적된 패치 2건(1.25.1 + 1.25.2)을 검증·통합해 배포. R-0011 정책의 17번째 stable minor. 한국어 우선 기본은 그대로.
