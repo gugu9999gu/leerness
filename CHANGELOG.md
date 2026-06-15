@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.23.1 — 2026-06-15 — CLI 영어화 Phase 6: help(영어 큐레이트판) + status/subcommand 에러 영어화 (UR-0010)
+
+**🌐 `leerness --help` 와 흔한 에러를 영어로.** 영어 사용자가 가장 먼저 보는 도움말을 — 레거시 버전태그를 줄별로 번역하는 대신 — **카테고리별로 정리한 별도 영어 도움말**로 제공. 한국어 도움말은 그대로 둬서 한국어 기본 경로는 한 글자도 안 바뀜.
+
+### 변경 (UR-0010 Phase 6)
+- **help 영어 큐레이트판 (`_helpEn`)**: `--language en`/`LEERNESS_LANG=en` 시 8개 카테고리(Setup·Diagnostics·Verification·Security·Handoff·Memory·Skills·Agents·Reuse·Release·More)로 정리된 영어 도움말. 전체 전수 목록은 `leerness commands` 안내(드리프트 방지).
+- **status 잔여 영어화**: 경로 없음 에러(`path not found`), `--json` 의 `healthyMeaning`(`install-file presence only …`).
+- **subcommand_required 에러 영어화**: 명령군(rule/skill/feature/memory)을 하위명령 없이 부를 때의 `subcommand required — usage: …`.
+- **한국어 기본 유지**: 영어는 명시 opt-in. 플래그 없으면 기존 한국어 도움말/에러 그대로(e2e 무회귀).
+
+### 잔여 (UR-0010 Phase 7+, 백로그)
+- `_GROUP_USAGE` 내부 자리표시자(`<텍스트>`/`<트리거>`) + 명령별 하위 help 블록(group help) + session-handoff.md 본문 — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 240→241** (help 영어판 존재+핵심 카테고리 포함, ko help 분기 보존, status/subcommand 영어/한국어 소스가드) · 행위(en: `SETUP & UPDATE / path not found / subcommand required`, ko 기본: `Usage: / 경로 없음 / 하위명령 필요`) · **E2E 365/365**.
+- patch(1.23.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.23.0 — 2026-06-15 — 🛡️ [안정화/Stable] session close 영어 완전화 안정 minor
 
 **🛡️ 안정화(Stable) minor — 세션 마감 화면 전체를 영어로 공개.** 직전 minor(1.22.0) 이후 누적된 패치 2건(1.22.1 Phase 4 + 1.22.2 Phase 5)을 검증·통합해 npm 배포. R-0011 정책의 14번째 stable minor. 이로써 **핵심 세션 라이프사이클 — 설치(init) → 시작(handoff) → 검증(verify-claim) → 마감(session close) — 전체가 영어 opt-in 으로 일관**됩니다. 한국어 우선 기본은 그대로.

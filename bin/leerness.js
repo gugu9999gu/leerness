@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.23.0';
+const VERSION = '1.23.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3763,6 +3763,16 @@ function _selfTestCases() {
       const koPreserved = sc.includes('다음 라운드 추천') && sc.includes('진행 요약 (session') && sc.includes('가장 많이 쓴 명령');  // ko 원문 t() ko 인자로 보존(e2e ko 무회귀)
       const noShadow = !sc.includes('.map(([t, n]) =>');  // t 헬퍼 셰도잉 제거 확인
       return en && koPreserved && noShadow;
+    } },
+    { name: 'CLI 영어화 Phase 6 (1.23.1, UR-0010): help 영어 큐레이트판 + status/subcommand 영어/한국어 보존 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      // en help 가 존재하고 핵심 명령군을 포함 + ko help 분기 보존
+      const enHelp = bin.includes('function _helpEn()') && bin.includes("if (_uiLang(arg('--path', process.cwd())) === 'en') { _helpEn(); return; }");
+      const enCovers = bin.includes('SETUP & UPDATE') && bin.includes('VERIFICATION (evidence-gated') && bin.includes('Full, exhaustive command list');
+      const koPreserved = bin.includes('Leerness v${VERSION}\\n\\nUsage:');  // 한국어 help 원문 유지
+      const statusEn = bin.includes('path not found: ${root}') && bin.includes('install-file presence only');
+      const subEn = bin.includes('subcommand required — usage: leerness');
+      return enHelp && enCovers && koPreserved && statusEn && subEn;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -7598,8 +7608,9 @@ function route(name) {
 
 function status(root) {
   root = absRoot(root);
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);  // 1.23.1 (UR-0010 Phase 6)
   // 1.9.434 (11th 외부평가 Opus P2, UR-0136): 미존재 경로는 healthy 위조 금지 — failJson + exit 1.
-  if (!exists(root)) { failJson(has('--json'), 'path_not_found', `경로 없음: ${root}`); return; }
+  if (!exists(root)) { failJson(has('--json'), 'path_not_found', t(`경로 없음: ${root}`, `path not found: ${root}`)); return; }
   const verF = path.join(root,'.harness/HARNESS_VERSION');
   const ver = exists(verF) ? read(verF).trim() : 'not installed';
   const lang = exists(path.join(root,'.harness/LANGUAGE')) ? read(path.join(root,'.harness/LANGUAGE')).trim() : 'ko';
@@ -7610,7 +7621,7 @@ function status(root) {
   const missing = files.filter(f => !exists(path.join(root,f)));
   // 1.9.384 (5번째 외부평가/UR-0085): --json 일관성 — AI 에이전트용 구조화 출력.
   // 1.9.418 (9th 외부평가 Codex P2): healthy 의 의미를 명시(설치 파일 존재 ≠ 프로젝트 안전). 프로젝트 안전은 gate/scan secrets 사용.
-  if (has('--json')) { log(JSON.stringify({ version: ver, language: lang, minimal: isMinimal, scope: 'install', total: files.length, present: files.length - missing.length, missing, healthy: missing.length === 0, healthyMeaning: '설치 파일 존재 여부(프로젝트 안전 아님 — 보안/품질은 leerness gate / scan secrets 사용)' }, null, 2)); return; }
+  if (has('--json')) { log(JSON.stringify({ version: ver, language: lang, minimal: isMinimal, scope: 'install', total: files.length, present: files.length - missing.length, missing, healthy: missing.length === 0, healthyMeaning: t('설치 파일 존재 여부(프로젝트 안전 아님 — 보안/품질은 leerness gate / scan secrets 사용)', 'install-file presence only (not project safety — use leerness gate / scan secrets for security/quality)') }, null, 2)); return; }
   log(`Leerness: ${ver}${isMinimal ? ' (minimal)' : ''}`);
   log(`Files: ${files.length - missing.length}/${files.length}`);
   if (missing.length) missing.forEach(x => warn('missing: ' + x));
@@ -19604,7 +19615,102 @@ const _diag = require('../lib/diagnostics');
 function doctorCmd(opts = {}) { return _diag.doctorCmd(opts, { VERSION, _selfTestCases, _detectShellCtx, _mcpToolCount, has, harnessPath: __filename }); }
 function whichCmd() { return _diag.whichCmd({ VERSION, has, harnessPath: __filename }); }
 
+// 1.23.1 (UR-0010 Phase 6): 영어 큐레이트 도움말 — 한국어 help 의 줄별 번역이 아니라, 카테고리별로 정리한 별도 영어판.
+//   레거시 버전태그(1.9.x) 군더더기를 빼고 영어 사용자가 읽기 쉽게. 전체 전수 목록은 `leerness commands`.
+//   한국어 help() 는 그대로 유지(기본 ko, e2e 무회귀). 영어는 --language en / LEERNESS_LANG=en opt-in.
+function _helpEn() {
+  log(`Leerness v${VERSION}
+
+The AI-coding operations layer that makes "done" require evidence.
+Korean-first by default; this English help shows with --language en or LEERNESS_LANG=en.
+
+Usage: leerness <command> [path] [options]
+
+SETUP & UPDATE
+  init [path] [--language auto|ko|en] [--skills recommended|all|a,b] [--minimal] [--yes]
+                                  Install the .harness/ workspace into your project
+  migrate [path] [--dry-run] [--force]            Non-destructive cross-version migration
+  migrate audit|apply|plan [path] [--json]        Diagnose / backfill / compare migration
+  update [path] [--check|--yes|--force]           Auto-detect version + migrate
+  auto-update install [path]                      Install the auto-update hook
+  path-setup [--apply]                            Register the leerness CLI on PATH
+
+STATUS & DIAGNOSTICS
+  status [path]                   Install status (files present)
+  health [path] | doctor [path]   Install/state diagnostics
+  verify [path]                   Required-file verification
+  which [--json]                  Resolve current binary/version (npm cache conflicts)
+  selftest [--json]               Core-function integrity self-check (CI-friendly)
+  pulse | milestones | round-history [path]       Combined progress metrics
+  whats-new [path]                Recent version changes
+
+VERIFICATION (evidence-gated "done")
+  verify-claim <T-ID> [--run-tests] [--test-cmd "..."] [--json]
+                                  Check evidence vs reality (stub / fake-test / inflated-count detection)
+  contract verify <spec.md> <impl.js> [--json]    Spec <-> implementation match
+  verify-code [path] [--build] [--bench]          Run tests/lint/typecheck, record evidence
+  gate [path]                     One-call CI gate: verify + audit + scan + encoding + lazy
+  lens [code|design|docs|test|security] [--json]  Quality self-question lenses
+
+SECURITY & HYGIENE
+  scan secrets [path]             Committed-secret detection
+  encoding check [path]           UTF-8 / BOM / CP949 / shell-script encoding
+  audit [path] [--fix]            Consistency + plan/progress alignment
+  lazy detect [path] [--auto-track]               Anti-laziness evaluation
+  shell-guard "<command>" [--json]                Shell-compatibility linter (PowerShell 5.1 etc.)
+
+HANDOFF & SESSION
+  handoff [path] [--compact] [--all-apps] [--json]  Session-start context in one call
+  session close [path]            Closing report + auto handoff
+  context [path] [--json]         Agent onboarding context
+  retro | insights [path] [--json]                Retrospective / cumulative stats
+
+MEMORY (canonical JSON + markdown projections)
+  task list|add|update|drop|fix-evidence|relink [args]
+  plan show|init|add|drop|progress|sync [args]
+  decision add "<title>" [--reason ...] | decision list|drop <id>
+  lesson save "<text>" [--tag t] | lesson list|drop <id>
+  rule add "<text>" --trigger every-session|every-commit|... | rule list|pause|resume|remove
+  requests audit|add|list|complete|drop           User-request tracking (UR-XXXX)
+  memory search "query" [--include-code] [--limit N]
+  memory archive list|restore [args]
+  lessons [--query <k>] | brainstorm "<topic>"
+
+SKILLS
+  skill list|info <name>|use <id>|remove <id>
+  skill learn <id> --doc <url> --command "..." --capability "..."
+  skill install <SKILL.md|dir|url> | skill discover --preset vercel|anthropic
+  skill consolidate [--threshold 0.3]
+
+AGENTS & PROVIDERS (opt-in)
+  agents list|check|quota | agents dispatch "<task>" --to <id> | agents multi "<task>"
+  provider list|add|remove [args]
+  setup-agents [path] [--yes]
+  team list|add|show|remove|preview|deploy <id> [...]   (deploy is double-gated)
+
+REUSE & IMPACT
+  reuse autodetect|find|register [args] | reuse-map [path] [--json]
+  impact <target> [--all] | deps <capability> [--run-tests]
+  feature add|link|impact|list|show | graph [path] | guide [target]
+
+RELEASE & OPS
+  release bump|note|publish|channel|cadence [args]
+  capabilities | install-safety [--json] | permissions list|set | creds list|register|check
+  incident list|show|handle | deploy auto | runs list|show | webhook serve
+  roadmap [path] [--out f.html] | roadmap auto on|off|status
+
+MORE
+  commands [--json]               Full, exhaustive command list
+  help | --help | -h              This help
+  --version | -v                  Version only
+
+Docs: https://www.npmjs.com/package/leerness  |  https://leerness.pages.dev
+`);
+}
+
 function help() {
+  // 1.23.1 (UR-0010 Phase 6): 영어 opt-in 시 큐레이트 영어판. 기본(ko) 은 아래 한국어 help 그대로.
+  if (_uiLang(arg('--path', process.cwd())) === 'en') { _helpEn(); return; }
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/agy/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합
   leerness lens [code|design|docs|test|security] [--json]   # 1.18.3 분야별 자기질문 품질 렌즈 + 분야간 인과관계 (완료 선언 전 자가 점검)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
@@ -20054,7 +20160,7 @@ async function main() {
     feature: 'feature add "<이름>" | feature list | feature show <ID> | feature link <A> <B> | feature impact <ID>',
     memory: 'memory search "<키>" [--json] | memory status | memory archive | memory restore',
   };
-  if (_GROUP_USAGE[cmd] && !args[1]) { failJson(has('--json'), 'subcommand_required', `${cmd} 하위명령 필요 — 사용법: leerness ${_GROUP_USAGE[cmd]}`); return; }
+  if (_GROUP_USAGE[cmd] && !args[1]) { const _gu = _uiLang(arg('--path', process.cwd())) === 'en' ? `${cmd} subcommand required — usage: leerness ${_GROUP_USAGE[cmd]}` : `${cmd} 하위명령 필요 — 사용법: leerness ${_GROUP_USAGE[cmd]}`; failJson(has('--json'), 'subcommand_required', _gu); return; }
   // 1.9.437 (11th 외부평가 Codex P2, UR-0138): --json 모드 unknown command 도 순수 JSON.
   failJson(has('--json'), 'unknown_command', `알 수 없는 명령: ${cmd}  (leerness --help 로 전체 명령 확인)`);
   return;
