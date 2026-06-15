@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.22.0';
+const VERSION = '1.22.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3748,6 +3748,14 @@ function _selfTestCases() {
         && src.includes('implementation substance (done default)') && src.includes('evidence claim matches actual files');
       const koPreserved = src.includes('## 종합') && src.includes('구현 실체 (done 기본)');  // ko 원문이 t() ko 인자로 남아 e2e(ko) 무회귀
       return en && koPreserved;
+    } },
+    { name: 'CLI 영어화 Phase 4 (1.22.1, UR-0010): session close uiLang 주입 + 마감보고 영어/한국어 보존 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      const sc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js'));
+      const injected = bin.includes('uiLang: _uiLang(root), harnessPath: __filename');
+      const en = sc.includes('session close integrated report') && sc.includes('no active rules') && sc.includes('no user requests (UR backlog empty)');
+      const koPreserved = sc.includes('자동 통합 보고') && sc.includes('활성 룰 없음');  // ko 원문 t() ko 인자로 보존(e2e ko 무회귀)
+      return injected && en && koPreserved;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -12185,7 +12193,7 @@ function llmBenchRecordCmd(root) {
 
 const _sessionClose = require('../lib/session-close');
 // 1.9.425 (UR-0025/UR-0125 큰 핸들러 모듈화 10번째): sessionClose → lib/session-close.js (DI 위임)
-function sessionClose(root, opts = {}) { return _sessionClose.sessionClose(root, opts, { VERSION, STATUSES, MARK, has, arg, harnessPath: __filename, readProgressRows, evidencePath, handoffPath, currentStatePath, taskLogPath, verifyRules, _autoRoadmap, _readUsageStats, readSessionCounter, writeSessionCounter, _retroAggregate, _retroOneLine, retroCmd, _loadDecisions, readRules, planPath, _loadLessons, _readFeatureGraph, _auditUserRequests, _detectDeliveredRequests, _computeRoundHistory, _computeMilestones, _computeRecentChanges, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _scanShellScriptsEncoding, _listAPISkills, _matchAPISkills, _loadShellFailures, _shellEnvDrift, _runPreWakeAudit, _saveAndAppendPreWakeReport, _runIdempotencyAudit, _detectAbnormalShutdown, _updateUserRequest, _detectOptimism, _scanCodeForPatterns, _collectSecretFindings }); }  // 1.17.6 (UR-0049): 마감 정합 — done 낙관 재확인 + 시크릿 재확인
+function sessionClose(root, opts = {}) { return _sessionClose.sessionClose(root, opts, { VERSION, STATUSES, MARK, has, arg, uiLang: _uiLang(root), harnessPath: __filename, readProgressRows, evidencePath, handoffPath, currentStatePath, taskLogPath, verifyRules, _autoRoadmap, _readUsageStats, readSessionCounter, writeSessionCounter, _retroAggregate, _retroOneLine, retroCmd, _loadDecisions, readRules, planPath, _loadLessons, _readFeatureGraph, _auditUserRequests, _detectDeliveredRequests, _computeRoundHistory, _computeMilestones, _computeRecentChanges, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _scanShellScriptsEncoding, _listAPISkills, _matchAPISkills, _loadShellFailures, _shellEnvDrift, _runPreWakeAudit, _saveAndAppendPreWakeReport, _runIdempotencyAudit, _detectAbnormalShutdown, _updateUserRequest, _detectOptimism, _scanCodeForPatterns, _collectSecretFindings }); }  // 1.17.6 (UR-0049): 마감 정합 — done 낙관 재확인 + 시크릿 재확인
 
 function readmeCmd(root) { syncReadme(absRoot(root)); }
 function consistencyCheck(root) {

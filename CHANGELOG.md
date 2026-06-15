@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.22.1 — 2026-06-15 — CLI 영어화 Phase 4: session close 마감 보고 영어화 (UR-0010)
+
+**🌐 세션을 마칠 때 보는 마지막 출력을 영어로.** init 배너(P1)→handoff 헤드라인(P2)→verify-claim(P3)에 이어 **session close 의 항상-표시 마감 보고**를 영어 opt-in 으로 — 핵심 세션 라이프사이클(시작→작업→검증→마감)이 영어로 일관.
+
+### 변경 (UR-0010 Phase 4)
+- **session close 마감 보고 영어화 (DI uiLang 주입)**: `_uiLang(root)` 를 session-close DI deps 로 주입 후 항상-표시 라인 `t(ko,en)` 분기 — 완료 정직성/마감 보안 advisory, `활성 룰 없음`→`no active rules`, Required final response sections 목록, `🔚 자동 통합 보고`→`integrated report`(사용자 요청/pre-wake/멱등성/셸 실패 결과 포함). 한국어 기본 유지(영어 명시 opt-in).
+- **한국어 무회귀**: e2e 는 `--language` 없이 ko 로 실행 → 마감 보고 한국어 유지(검증). ko 원문은 `t()` ko 인자로 보존.
+
+### 잔여 (UR-0010 Phase 5+, 백로그)
+- session close `--suggest` 상세(skill 후보·drift·MCP/skill-query 통계·진행 요약) + help + status + 그 외 명령 본문 — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 238→239** (session close uiLang 주입 + 영어/한국어 보존 소스가드) · 행위(en: `integrated report / no active rules / no user requests`, ko 기본: `자동 통합 보고 / 활성 룰 없음`) · **E2E 365/365**.
+- patch(1.22.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.22.0 — 2026-06-15 — 🛡️ [안정화/Stable] 확장된 영어 지원(헤드라인 + verify-claim) 안정 minor
 
 **🛡️ 안정화(Stable) minor — 영어 CLI 커버리지를 핵심 검증 흐름까지 확장해 npm 공개.** 직전 minor(1.21.0) 이후 누적된 패치 2건(1.21.1~1.21.2)을 검증·통합해 배포. R-0011 정책의 13번째 stable minor. 영어 opt-in 표면이 첫 화면(1.21.0)에서 **handoff 헤드라인 + verify-claim 플래그십**까지 확장 — 한국어 우선 기본은 그대로.
