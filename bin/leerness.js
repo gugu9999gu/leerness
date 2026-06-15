@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.21.0';
+const VERSION = '1.21.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3736,6 +3736,11 @@ function _selfTestCases() {
       // 첫화면(배너/헤드라인)이 언어 분기 사용
       const src = read(__filename);
       return src.includes("const L = _uiLang(arg('--path', process.cwd()));") && src.includes("_uiLang(root) === 'en' ? '📊 Headline'");
+    } },
+    { name: 'CLI 영어화 Phase 2 (1.21.1, UR-0010): handoff 헤드라인 항목 라벨 t() 경유 (소스 가드)', run: () => {
+      const src = read(__filename);
+      return src.includes('const _L = _uiLang(root); const t = (ko, en) => (_L === ' + "'en' ? en : ko);")
+        && src.includes("security OK") && src.includes("unanswered request(s)") && src.includes("abnormal-exit") && src.includes("platform constraint(s)");
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -8278,6 +8283,8 @@ function handoff(root) {
   if (!has('--no-headline') && !has('--compact') && !has('--quiet')) {
     try {
       const parts = [];
+      // 1.20.3 (UR-0010 Phase 2): 헤드라인 항목 라벨 UI 언어 적용 (영어 opt-in, 한국어 기본). 블록 1회 해석.
+      const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
       // 1) drift level (가벼운 check)
       try {
         const r = cp.spawnSync(process.execPath, [__filename, 'drift', 'check', root, '--json'],
@@ -8291,15 +8298,15 @@ function handoff(root) {
       try {
         const sec = _collectSecretFindings(root);
         if (sec.committed.length) {
-          parts.push(`🚨 시크릿 ${sec.committed.length}건`);
+          parts.push(t(`🚨 시크릿 ${sec.committed.length}건`, `🚨 ${sec.committed.length} secret(s)`));
         } else {
           const envPath = path.join(root, '.env');
           if (exists(envPath)) {
             const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
             const giLines = giText.split('\n').map(l => l.trim());
-            parts.push((giLines.includes('.env') || giLines.includes('/.env')) ? '🔒 보안 OK' : '🚨 .env 미무시');
+            parts.push((giLines.includes('.env') || giLines.includes('/.env')) ? t('🔒 보안 OK', '🔒 security OK') : t('🚨 .env 미무시', '🚨 .env not ignored'));
           } else {
-            parts.push('🔒 보안 OK');
+            parts.push(t('🔒 보안 OK', '🔒 security OK'));
           }
         }
       } catch {}
@@ -8307,7 +8314,7 @@ function handoff(root) {
       try {
         const stats = _readUsageStats(root);
         const mcpTotal = stats.mcp?.tools ? Object.values(stats.mcp.tools).reduce((s, n) => s + n, 0) : 0;
-        if (mcpTotal > 0) parts.push(`🔌 MCP ${mcpTotal}회`);
+        if (mcpTotal > 0) parts.push(`🔌 MCP ${mcpTotal}${t('회', 'x')}`);
       } catch {}
       // 4) skill match history 누적
       try {
@@ -8315,7 +8322,7 @@ function handoff(root) {
         if (exists(histPath)) {
           const txt = read(histPath);
           const cnt = (txt.match(/^## [\d-]+ [\d:]+ — query/gm) || []).length;
-          if (cnt > 0) parts.push(`📒 skill query ${cnt}회`);
+          if (cnt > 0) parts.push(`📒 skill query ${cnt}${t('회', 'x')}`);
         }
       } catch {}
       // 5) 설치된 skill 수
@@ -8376,7 +8383,7 @@ function handoff(root) {
               }
             } catch {}
           }
-          if (slashCount > 0) parts.push(`🪄 slash 24h ${slashCount}회`);
+          if (slashCount > 0) parts.push(`🪄 slash 24h ${slashCount}${t('회', 'x')}`);
         }
       } catch {}
       // 10) 1.9.192: 공식 organization skill catalog 캐시 매칭 (C축 보강 — 사용자 명시)
@@ -8404,7 +8411,7 @@ function handoff(root) {
         if (rh.roundCount >= 5) {
           let label = `🔄 R${rh.roundCount}`;
           if (rh.nextMilestone != null && rh.roundsToNextMilestone <= 20) {
-            label += ` → R${rh.nextMilestone} (${rh.roundsToNextMilestone}R 남음)`;
+            label += ` → R${rh.nextMilestone} (${rh.roundsToNextMilestone}R ${t('남음', 'left')})`;
           }
           parts.push(label);
           // 1.9.230: 임박 마일스톤 ETA 별도 노출 (다음 마일스톤이 매우 가까울 때만)
@@ -8449,11 +8456,11 @@ function handoff(root) {
         let detected = { candidates: [] };
         try { detected = _detectDeliveredRequests(root); } catch {}
         if (detected.candidates && detected.candidates.length > 0) {
-          parts.push(`📥 자동완료가능 ${detected.candidates.length}건 (1.9.223)`);
+          parts.push(t(`📥 자동완료가능 ${detected.candidates.length}건 (1.9.223)`, `📥 ${detected.candidates.length} auto-completable`));
         } else if (audit.missing && audit.missing.length > 0) {
-          parts.push(`📥 미답 요청 ${audit.missing.length}건`);
+          parts.push(t(`📥 미답 요청 ${audit.missing.length}건`, `📥 ${audit.missing.length} unanswered request(s)`));
         } else if (audit.open > 0) {
-          parts.push(`📥 요청 ${audit.open} (tracked)`);
+          parts.push(t(`📥 요청 ${audit.open} (tracked)`, `📥 ${audit.open} request(s) (tracked)`));
         }
       } catch {}
       // 14) 1.9.209: pre-wake-audit 최근 보고서 (사용자 명시) — 깨어남 직후 자동 노출
@@ -8472,7 +8479,7 @@ function handoff(root) {
       try {
         const ad = _detectAbnormalShutdown(root);
         if (ad.abnormalShutdown) {
-          parts.push(`🔌 비정상종료 ${ad.severity} (${ad.signals.length}신호)`);
+          parts.push(t(`🔌 비정상종료 ${ad.severity} (${ad.signals.length}신호)`, `🔌 abnormal-exit ${ad.severity} (${ad.signals.length} signals)`));
         }
       } catch {}
       // 15) 1.9.215: 현재 활성 task에서 constraints/intent 자동 분석 (1.9.208/213 통합)
@@ -8492,7 +8499,7 @@ function handoff(root) {
               try {
                 const cc = _checkRequestConstraints(root, req);
                 if (cc.matched && cc.matched.length > 0) {
-                  parts.push(`🚦 ${cc.matched.length} 플랫폼 제약`);
+                  parts.push(t(`🚦 ${cc.matched.length} 플랫폼 제약`, `🚦 ${cc.matched.length} platform constraint(s)`));
                 }
               } catch {}
               // 1.9.213 intent classify

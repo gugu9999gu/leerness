@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.21.1 — 2026-06-15 — CLI 영어화 Phase 2: handoff 헤드라인 항목 라벨 영어화 (UR-0010)
+
+**🌐 매 세션 가장 많이 보는 출력(handoff 헤드라인)을 영어로 완성.** Phase 1(배너 + 헤드라인 프리픽스)에 이어, 헤드라인의 **항목 라벨 전체**를 영어 opt-in 으로. 비한국어 사용자가 세션마다 보던 한국어 토막들(보안 OK·미답 요청·비정상종료·플랫폼 제약 등)이 사라짐.
+
+### 변경 (UR-0010 Phase 2)
+- **handoff 헤드라인 항목 라벨 영어화**: 블록 1회 `_uiLang(root)` 해석 후 각 항목을 `t(ko,en)` 분기 — `🔒 보안 OK`→`security OK`, `🚨 시크릿 N건`→`N secret(s)`, `🚨 .env 미무시`→`.env not ignored`, `🔌 MCP N회`→`MCP Nx`, `📒 skill query N회`, `🪄 slash 24h N회`, `📥 미답 요청 N건`→`N unanswered request(s)`, `📥 요청 N (tracked)`, `📥 자동완료가능 N건`→`N auto-completable`, `🔌 비정상종료`→`abnormal-exit`, `🚦 N 플랫폼 제약`→`N platform constraint(s)`, `R N남음`→`N left`. **한국어 기본 유지**(영어 opt-in).
+- 행위 확인: en → `📊 Headline: drift healthy · 🔒 security OK · 📚 N skills · ⚕ health: ✓ · 🧠 mem …` 완전 영어 / 플래그 없음 → `📊 헤드라인`(한국어).
+
+### 잔여 (UR-0010 Phase 3+, 백로그)
+- session close 마감 보고 + verify-claim 출력 + help + status 등 명령 본문 영어화 — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 236→237** (헤드라인 t() 경유 소스가드) · 행위(en 헤드라인 완전 영어 + ko 기본) · **E2E 365/365**.
+- patch(1.21.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.21.0 — 2026-06-15 — 🛡️ [안정화/Stable] 영어 온보딩 첫걸음 + 검증 강화 안정 minor
 
 **🛡️ 안정화(Stable) minor — 비한국어 사용자에게 영어 온보딩을 실제로 전달.** 직전 minor(1.20.0) 이후 누적된 패치 2건(1.20.1~1.20.2)을 검증·통합해 npm 공개. R-0011 정책의 12번째 stable minor. 핵심: **영어 첫 화면(opt-in)** 이 npm 사용자에게 닿고, 검증 플래그십의 정적 우회가 닫힘.
