@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.22.0 — 2026-06-15 — 🛡️ [안정화/Stable] 확장된 영어 지원(헤드라인 + verify-claim) 안정 minor
+
+**🛡️ 안정화(Stable) minor — 영어 CLI 커버리지를 핵심 검증 흐름까지 확장해 npm 공개.** 직전 minor(1.21.0) 이후 누적된 패치 2건(1.21.1~1.21.2)을 검증·통합해 배포. R-0011 정책의 13번째 stable minor. 영어 opt-in 표면이 첫 화면(1.21.0)에서 **handoff 헤드라인 + verify-claim 플래그십**까지 확장 — 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.21.1~1.21.2)
+- **🌐 handoff 헤드라인 항목 라벨 영어화 (Phase 2)**: 매 세션 가장 많이 보는 출력 — `--language en` 시 `📊 Headline: drift healthy · security OK · N skills · health · mem …` 완전 영어. 보안/시크릿/미답요청/비정상종료/플랫폼제약 등 전 항목.
+- **🌐 verify-claim 출력 영어화 (Phase 3, 플래그십)**: 완료 검증 시 보는 핵심 출력 ~30 문자열 영어화 — File check / Test count / Summary / implementation substance / test-impl link / git diff cross-check / optimism+honesty / final verdict.
+- **한국어 우선 기본 보존**: 영어는 명시 opt-in(`--language en`/`LEERNESS_LANG=en`/en init 프로젝트). 플래그 없으면 한국어 — e2e 무회귀로 검증.
+
+### 잔여 (UR-0010 Phase 4+, 백로그)
+- session close 마감 보고(~117 문자열) + help + status — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 236→238** · **E2E 365/365** · en/ko 헤드라인·verify-claim 행위 + 게시본 재실증.
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag (Stable) · GitHub release (`--latest`) · npm dist-tag `stable` 시도.
+
 ## 1.21.2 — 2026-06-15 — CLI 영어화 Phase 3: verify-claim(플래그십) 출력 영어화 (UR-0010)
 
 **🌐 플래그십 명령 출력을 영어로.** 사용자가 "완료됐나?"를 확인할 때 보는 `verify-claim` 의 human 출력 전체를 영어 opt-in 으로 — 온보딩 다음으로 영향 큰 표면. 한국어 기본 유지(영어 명시 opt-in).
