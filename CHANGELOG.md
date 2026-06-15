@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.20.2 — 2026-06-15 — CLI 영어화 Phase 1: 첫 화면(init 배너·handoff 헤드라인) 영어 opt-in (UR-0010)
+
+**🌐 "어떤 언어, 어떤 AI 에이전트로 작업하든"의 실질 첫걸음.** 외부평가가 꼽은 단일 최대 병목 — 영어 README 정문 ↔ 한국어 CLI 불일치 — 를 단계적으로 해소 시작. 한국어 우선 정체성은 기본값으로 유지하고, **영어는 명시 opt-in**.
+
+### 변경 (UR-0010 Phase 1)
+- **UI 언어 해석 `_uiLang(root)`**: 우선순위 `--language` 플래그 > `LEERNESS_LANG` env > `.harness/manifest.json` 의 language(init 선택) > **`ko`(기본)**. system locale 은 의도적으로 미사용(영어 OS 한국 사용자 놀람 방지) — 영어는 항상 명시 opt-in.
+- **init 시작하기 배너 영어화**: `--language en`(또는 LEERNESS_LANG=en, 또는 en 으로 init 된 프로젝트)에서 "Get started (3 steps)" + 메모리/인과/보안/MCP/release 섹션 전체 영어로. 비한국어 신규 유저의 첫 화면이 더 이상 한국어 벽이 아님.
+- **handoff 헤드라인 라벨 영어화**: `📊 헤드라인 (버전태그…)` → 영어 시 `📊 Headline`(버전태그 노이즈 제거).
+- 순수 함수 `_uiLang`/`_tx` 분리(단위 테스트). **한국어 기본 회귀 0**(플래그/env/manifest 없으면 그대로 한국어).
+
+### 잔여 (UR-0010 Phase 2+, 백로그)
+- handoff 헤드라인 **항목 라벨**(보안 OK·skills·health…) 영어화, 그 외 명령(session close·verify-claim 출력·help·status 등) 영어화 — 단계적 확대. Phase 1 은 첫인상 표면(배너+헤드라인 프리픽스)에 한정.
+
+### 검증 (회귀 0)
+- **selftest 235→236** (`_uiLang` 해석 4종 + `_tx` + 첫화면 분기 소스가드) · 행위: `--language en` → 영어 배너/헤드라인, 플래그 없음 → 한국어 유지 · **E2E 365/365**.
+- patch(1.20.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.20.1 — 2026-06-15 — 1.20.0 외부평가 채택: 장식 no-op 우회 차단 + README 데모 정합
 
 **🔎 게시본 1.20.0 신규 멀티모델 클린룸 평가(5축) 채택 — 맹신 X로 재현된 것만.** 검증(8)·정직성/보안(9)·품질렌즈(8)는 GPT-5.5 대비 뚜렷이 상승했고, 평가가 찾은 재현 가능한 P2 두 가지(검증 정적모드 우회 + README 데모 부정확)를 닫음.

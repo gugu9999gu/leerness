@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.20.1';
+const VERSION = '1.20.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -252,6 +252,22 @@ function detectLanguageValue(root, value = 'auto') {
   // ③ en 폴백
   return 'en';
 }
+// 1.20.2 (UR-0010 CLI 영어화 Phase 1): UI 출력 언어 해석 — 한국어 우선 기본, 영어 opt-in.
+//   우선순위: --language 플래그 > LEERNESS_LANG env > .harness/manifest.json 의 language(init 선택) > 'ko'.
+//   (system locale 은 의도적으로 미사용 — 영어 OS 한국 사용자 놀람 방지. 영어는 명시 opt-in.)
+function _uiLang(root) {
+  try {
+    const flag = String(arg('--language', '') || '').toLowerCase();
+    if (flag === 'en' || flag === 'ko') return flag;
+    const env = String(process.env.LEERNESS_LANG || '').toLowerCase();
+    if (env === 'en' || env === 'ko') return env;
+    const mf = path.join(absRoot(root || process.cwd()), '.harness', 'manifest.json');
+    if (exists(mf)) { const l = String((JSON.parse(read(mf)) || {}).language || '').toLowerCase(); if (l === 'en' || l === 'ko') return l; }
+  } catch {}
+  return 'ko';
+}
+// ko/en 쌍에서 해석된 UI 언어로 선택 (Phase 1: 첫 화면 한정 사용).
+function _tx(lang, ko, en) { return lang === 'en' ? en : ko; }
 function fm(role, readWhen, updateWhen, body) {
   return `---\nleernessRole: ${role}\nreadWhen:\n${readWhen.map(x => '  - ' + x).join('\n')}\nupdateWhen:\n${updateWhen.map(x => '  - ' + x).join('\n')}\ndoNotStore:\n  - 실제 토큰\n  - 비밀번호\n  - 운영 쿠키\n  - 민감한 개인정보 원문\n---\n${MARK}\n${body}`;
 }
@@ -3701,6 +3717,25 @@ function _selfTestCases() {
       if (!exists(dp)) return true;  // 패키지에 없으면 스킵(설치본 안전)
       const d = read(dp);
       return /AI clean-room evaluations/i.test(d) && /heuristic, not semantic/i.test(d) && /npm i leerness@/.test(d);
+    } },
+    { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
+      const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;
+      try {
+        // 기본 ko (한국어 우선 정체성 보존)
+        process.argv = ['node', 'h', 'handoff']; delete process.env.LEERNESS_LANG;
+        if (_uiLang('/no/such/dir') !== 'ko') return false;
+        // --language en 플래그 → en
+        process.argv = ['node', 'h', 'handoff', '--language', 'en'];
+        if (_uiLang('/no/such/dir') !== 'en') return false;
+        // LEERNESS_LANG env → en (플래그 없을 때)
+        process.argv = ['node', 'h', 'handoff']; process.env.LEERNESS_LANG = 'en';
+        if (_uiLang('/no/such/dir') !== 'en') return false;
+        // _tx 선택
+        if (_tx('en', '가', 'A') !== 'A' || _tx('ko', '가', 'A') !== '가') return false;
+      } finally { process.argv = save; if (saveEnv === undefined) delete process.env.LEERNESS_LANG; else process.env.LEERNESS_LANG = saveEnv; }
+      // 첫화면(배너/헤드라인)이 언어 분기 사용
+      const src = read(__filename);
+      return src.includes("const L = _uiLang(arg('--path', process.cwd()));") && src.includes("_uiLang(root) === 'en' ? '📊 Headline'");
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -8478,7 +8513,9 @@ function handoff(root) {
       if (parts.length) {
         const isTty = process.stdout && process.stdout.isTTY;
         const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
-        log(cy(`📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207/209/215/220/223/226): ${parts.join(' · ')}`));
+        // 1.20.2 (UR-0010 Phase 1): 헤드라인 라벨 UI 언어 적용 (영어 시 버전태그 노이즈 제거; 항목 라벨 영어화는 Phase 2).
+        const _hl = _uiLang(root) === 'en' ? '📊 Headline' : '📊 헤드라인 (1.9.81/93/113/152/162/192/197/204/207/209/215/220/223/226)';
+        log(cy(`${_hl}: ${parts.join(' · ')}`));
       }
     } catch {}
   }
@@ -11634,43 +11671,46 @@ function _banner(opts = {}) {
       cprint('    ' + C.green(padded) + C.dim('# ' + desc));
     };
 
+    // 1.20.2 (UR-0010 Phase 1): 첫 화면 배너 — UI 언어(한국어 우선, 영어 opt-in) 적용.
+    const L = _uiLang(arg('--path', process.cwd()));
+    const t = (ko, en) => (L === 'en' ? en : ko);
     cprint('');
-    cprint(C.bold(C.cyan('  ✨ 시작하기 (3단계면 끝)')));
-    cmd('npx leerness init .',         '1️⃣  하네스 설치 + AI 도구 자동 연결');
-    cmd('npx leerness handoff .',      '2️⃣  세션 시작 — 컨텍스트·기억·feature impact 자동 회수');
-    cmd('npx leerness session close .', '3️⃣  세션 종료 — 마감 통계 + 다음 라운드 추천');
+    cprint(C.bold(C.cyan(t('  ✨ 시작하기 (3단계면 끝)', '  ✨ Get started (3 steps)'))));
+    cmd('npx leerness init .',         t('1️⃣  하네스 설치 + AI 도구 자동 연결', '1️⃣  install the harness + auto-wire AI tools'));
+    cmd('npx leerness handoff .',      t('2️⃣  세션 시작 — 컨텍스트·기억·feature impact 자동 회수', '2️⃣  start a session — context, memory, feature impact in one call'));
+    cmd('npx leerness session close .', t('3️⃣  세션 종료 — 마감 통계 + 다음 라운드 추천', '3️⃣  end a session — closing stats + next-round suggestion'));
 
-    section('🧠 메모리 5종 CRUD (1.9.142 — cascade 방지)');
-    cmd('leerness task add "<제목>"',         'progress-tracker 등록');
-    cmd('leerness decision add "<제목>" --reason "..."', '되돌리기 어려운 결정 영구화');
-    cmd('leerness lesson save "<교훈>" --tag "..."',     '재발견 가능한 통찰 저장');
-    cmd('leerness plan add "<milestone>"',     '계획 단계 등록');
-    cmd('leerness rule add "<룰>" --trigger every-X',    '자연어 영구 룰');
-    cmd('leerness feature add "<기능>" --files "..."',   'Feature Graph 노드 (1.9.141)');
+    section(t('🧠 메모리 5종 CRUD (1.9.142 — cascade 방지)', '🧠 Memory (5 surfaces)'));
+    cmd('leerness task add "<title>"',         t('progress-tracker 등록', 'add a task to progress-tracker'));
+    cmd('leerness decision add "<title>" --reason "..."', t('되돌리기 어려운 결정 영구화', 'persist a hard-to-reverse decision'));
+    cmd('leerness lesson save "<lesson>" --tag "..."',     t('재발견 가능한 통찰 저장', 'save a rediscoverable insight'));
+    cmd('leerness plan add "<milestone>"',     t('계획 단계 등록', 'add a plan milestone'));
+    cmd('leerness rule add "<rule>" --trigger every-X',    t('자연어 영구 룰', 'natural-language standing rule'));
+    cmd('leerness feature add "<feature>" --files "..."',   t('Feature Graph 노드 (1.9.141)', 'Feature Graph node'));
 
-    section('🔗 인과관계 + 영향 추적 (1.9.141~143)');
-    cmd('leerness feature impact <F-XXXX>',  '코드 변경 전 영향받는 feature 자동 회수');
-    cmd('leerness feature list --json',      '전체 그래프 + 엣지');
-    cmd('leerness audit . --json',           'orphan/cycle 무결성 검증');
+    section(t('🔗 인과관계 + 영향 추적 (1.9.141~143)', '🔗 Causality + impact tracking'));
+    cmd('leerness feature impact <F-XXXX>',  t('코드 변경 전 영향받는 feature 자동 회수', 'which features a code change affects'));
+    cmd('leerness feature list --json',      t('전체 그래프 + 엣지', 'full graph + edges'));
+    cmd('leerness audit . --json',           t('orphan/cycle 무결성 검증', 'orphan/cycle integrity check'));
 
-    section('🛡 보안·드리프트·게으름 가드');
-    cmd('leerness drift check . --auto-fix', 'drift + 보안 자동 회복');
-    cmd('leerness lazy detect . --json',     '거짓 완료/no test run 감지');
-    cmd('leerness env sync .',               '.env ↔ .env.example 동기화');
-    cmd('leerness health . --json',          '종합 헬스 (drift+보안+skill+feature)');
+    section(t('🛡 보안·드리프트·게으름 가드', '🛡 Security · drift · laziness guards'));
+    cmd('leerness drift check . --auto-fix', t('drift + 보안 자동 회복', 'drift + security auto-heal'));
+    cmd('leerness lazy detect . --json',     t('거짓 완료/no test run 감지', 'detect false-done / no-test-run'));
+    cmd('leerness env sync .',               t('.env ↔ .env.example 동기화', 'sync .env <-> .env.example'));
+    cmd('leerness health . --json',          t('종합 헬스 (drift+보안+skill+feature)', 'overall health (drift+security+skill+feature)'));
 
-    section(`🤖 외부 AI 통합 (MCP ${_mcpToolCount()} 도구)`);  // 1.9.315 (UR-0054): 하드코딩 46 → 동적
+    section(t(`🤖 외부 AI 통합 (MCP ${_mcpToolCount()} 도구)`, `🤖 External AI integration (MCP, ${_mcpToolCount()} tools)`));  // 1.9.315 (UR-0054): 하드코딩 46 → 동적
     cmd('npx leerness mcp serve',                 'stdio JSON-RPC server');
-    cmd('leerness memory status . --json',        '5 surface + featureGraph 한 호출');
-    cmd('leerness memory archive list --query "kw"', 'DELETE 5종 archive 검색');
-    cmd('leerness memory restore <surface> <target>', 'archive → active 복원');
+    cmd('leerness memory status . --json',        t('5 surface + featureGraph 한 호출', '5 surfaces + featureGraph in one call'));
+    cmd('leerness memory archive list --query "kw"', t('DELETE 5종 archive 검색', 'search the archive of deleted items'));
+    cmd('leerness memory restore <surface> <target>', t('archive → active 복원', 'restore archive -> active'));
 
-    section('🚀 Release 자동화');
-    cmd('leerness release pack --close --auto-main-push', '한 줄 release (1.9.140 main push 통합)');
-    cmd('leerness release sync-main .',          'release branch → main 자동 fast-forward');
+    section(t('🚀 Release 자동화', '🚀 Release automation'));
+    cmd('leerness release pack --close --auto-main-push', t('한 줄 release (1.9.140 main push 통합)', 'one-line release (with main push)'));
+    cmd('leerness release sync-main .',          t('release branch → main 자동 fast-forward', 'release branch -> main fast-forward'));
 
     cprint('');
-    cprint(C.dim('  📚 자세히: `leerness --help` · 자율 모드: `<<autonomous-loop-dynamic>>` 신호로 진행'));
+    cprint(C.dim(t('  📚 자세히: `leerness --help` · 자율 모드: `<<autonomous-loop-dynamic>>` 신호로 진행', '  📚 More: `leerness --help`')));
     cprint('');
   }
 }
@@ -20045,7 +20085,7 @@ module.exports = {
   // 1.9.289: shell-safe 인용 (Codex #3) — 단위 테스트
   _shellQuoteArg,
   // 1.18.1: 명령 실행 권한 결정 (재실증 신규 P1: --test-cmd 비-JS 인터프리터 거짓차단) — 단위 테스트
-  _isCommandPermitted, RUN_CORE_ALLOW,
+  _isCommandPermitted, RUN_CORE_ALLOW, _uiLang, _tx,
   // 1.18.2: verify-claim 위장 스텁(빈 export 껍데기) 판정 — 단위 테스트
   _vcImplIsEmpty, _VC_EMPTY_SHELL_RE,
   // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈 — 단위 테스트. 1.19.2: 파일→도메인 매핑(완료-검증 advisory)
