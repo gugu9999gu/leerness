@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.24.0 — 2026-06-15 — 🛡️ [안정화/Stable] help 표면 전체 영어화 안정 minor
+
+**🛡️ 안정화(Stable) minor — `leerness --help` 와 모든 도움말 표면을 영어로 공개.** 직전 minor(1.23.0) 이후 누적된 패치 2건(1.23.1 Phase 6 + 1.23.2 Phase 7)을 검증·통합해 npm 배포. R-0011 정책의 15번째 stable minor. 이제 영어 사용자가 **메인 도움말 → 명령군 그룹 도움말 → 사용법 힌트**까지 막힘없이 읽을 수 있습니다. 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.23.1~1.23.2)
+- **🌐 메인 help 영어 큐레이트판 (Phase 6)**: `--language en` 시 8개 카테고리(Setup·Diagnostics·Verification·Security·Handoff·Memory·Skills·Agents·Reuse·Release·More)로 정리된 영어 도움말. 레거시 버전태그 군더더기를 빼 영어 사용자가 읽기 쉬움. status 잔여(경로 없음/healthyMeaning) + subcommand_required 에러도 영어화.
+- **🌐 그룹 help + 사용법 힌트 영어화 (Phase 7)**: requests/constraints/wakeup-interval/idempotency/intent 의 bare-command 도움말 + `_GROUP_USAGE` 자리표시자(`<text>`/`<trigger>`/`<key>`/`<name>`, 병렬 영어맵).
+- **한국어 우선 기본 보존**: 영어는 명시 opt-in(`--language en`/`LEERNESS_LANG=en`/en init 프로젝트). 플래그 없으면 한국어 — 한국어 help/맵은 한 글자도 안 바뀜(e2e 무회귀로 검증).
+
+### 잔여 (UR-0010 Phase 8+, 백로그)
+- 메모리 CRUD/진단 명령 본문 출력(task/decision/audit/gate/scan 등 사람용 메시지) + session-handoff.md 본문 — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 242/242** (Phase 6·7 영어/한국어 보존 소스가드 포함) · 행위(en: `SETUP & UPDATE / 5 group headers / <key>`, ko 기본: `Usage: / 한국어 그룹 헤더 / <키>`) · **E2E 365/365**.
+- minor(1.24.0) — npm 배포(R-0011 stable) + annotated tag(Stable) + GitHub release(latest) + 게시본 클린룸 재실증.
+
 ## 1.23.2 — 2026-06-15 — CLI 영어화 Phase 7: group help 5종 + _GROUP_USAGE 자리표시자 영어화 (UR-0010)
 
 **🌐 도움말 표면 패밀리 완성.** Phase 6(메인 `--help`)에 이어, 명령군을 하위명령 없이 부를 때 나오는 **그룹 도움말**과 **사용법 힌트의 자리표시자**까지 영어화 — 메인 help + group help + usage hint 가 모두 언어 선택을 따른다.
