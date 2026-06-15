@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.21.0 — 2026-06-15 — 🛡️ [안정화/Stable] 영어 온보딩 첫걸음 + 검증 강화 안정 minor
+
+**🛡️ 안정화(Stable) minor — 비한국어 사용자에게 영어 온보딩을 실제로 전달.** 직전 minor(1.20.0) 이후 누적된 패치 2건(1.20.1~1.20.2)을 검증·통합해 npm 공개. R-0011 정책의 12번째 stable minor. 핵심: **영어 첫 화면(opt-in)** 이 npm 사용자에게 닿고, 검증 플래그십의 정적 우회가 닫힘.
+
+### 이번 minor 통합 (1.20.1~1.20.2)
+- **🌐 CLI 영어화 Phase 1 (UR-0010, 사용자 지정 방향)**: 영어 README 정문 ↔ 한국어 CLI 불일치(외부평가 #1 병목) 해소 시작. `--language en` / `LEERNESS_LANG=en` / en 으로 init 된 프로젝트에서 **init 시작하기 배너 전체 + handoff 헤드라인 라벨**이 영어로. 한국어 우선 정체성은 **기본값 유지**(영어는 명시 opt-in, system locale 미사용). 순수 `_uiLang`/`_tx`.
+- **🛡️ 장식 no-op 정적 우회 차단 (검증)**: `"use strict"; module.exports={}` · `{}; //c` · `void 0;` · `;;;;` · `0;` 같은 "실로직 0" 파일이 정적 verify-claim 을 통과하던 우회를 차감식 residue 검사로 폐쇄(FP 0).
+- **📄 README 플래그십 데모 정합**: task-id(T-0002) + "실파일 쓰면 같은 명령 통과" 정정 — 신규 유저 복붙이 실제로 동작. lens 헤더 동적 버전.
+- **🔬 신뢰 투명성/렌즈 완전판** (1.19.x 누적 — 1.20.0 에 포함됨, 본 minor 는 1.20.x 패치 묶음).
+
+### 잔여 (UR-0010 Phase 2+, 백로그)
+- handoff 헤드라인 **항목 라벨**(drift·보안·skills·health·mem 등 ~20종) + session close·verify-claim·help·status 출력 영어화 — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 235→236** · **E2E 365/365** · 영어 배너/헤드라인 행위 + no-op 우회 차단 + 게시본 재실증.
+
+### 안정화 표시 (R-0006)
+CHANGELOG [안정화/Stable] · git tag (Stable) · GitHub release (`--latest`) · npm dist-tag `stable` 시도.
+
 ## 1.20.2 — 2026-06-15 — CLI 영어화 Phase 1: 첫 화면(init 배너·handoff 헤드라인) 영어 opt-in (UR-0010)
 
 **🌐 "어떤 언어, 어떤 AI 에이전트로 작업하든"의 실질 첫걸음.** 외부평가가 꼽은 단일 최대 병목 — 영어 README 정문 ↔ 한국어 CLI 불일치 — 를 단계적으로 해소 시작. 한국어 우선 정체성은 기본값으로 유지하고, **영어는 명시 opt-in**.
