@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.26.0 — 2026-06-15 — 🛡️ [안정화/Stable] i18n 행위가드 + health 진단 영어화 안정 minor
+
+**🛡️ 안정화(Stable) minor — i18n 레이어 견고성 검증·가드 + health 진단 영어화를 npm 공개.** 직전 minor(1.25.0) 이후 누적된 패치 2건(1.25.1 + 1.25.2)을 검증·통합해 배포. R-0011 정책의 17번째 stable minor. 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.25.1~1.25.2)
+- **🔬 22번째 버그헌트(i18n 레이어) + 행위 e2e 회귀가드 (1.25.1)**: 8 phase 영어화 레이어를 통째 적대 검증 → 런타임 버그 0(맹신 X 양방향). uiLang 크래시안전·`--language` positional 무누출·`--language=en` 문법·`--json` 유효·flag>manifest 우선순위 확인. 소스가드만 있던 공백(1.23.0 과장 통과 원인)을 **행위 e2e 가드**로 보강.
+- **🌐 health 진단 완전 영어화 (1.25.2)**: 고빈도 진단 `health` 를 렌더 라벨 + 능력 매트릭스 evidence(16종) + issues + summary 까지 완전 영어화(반쪽 번역 회피). `--language en` opt-in.
+- **한국어 우선 기본 보존**: 영어는 명시 opt-in. 한국어 출력/매트릭스는 한 글자도 안 바뀜(e2e 무회귀).
+
+### 잔여 (UR-0010 Phase 10+, 백로그)
+- capabilities/commands/drift check/install-safety/constraints/doctor + 메모리 CRUD 빈상태 + handoff 본문 — en-leak 우선순위순.
+
+### 검증 (회귀 0)
+- **selftest 245/245** · **E2E 366/366** (i18n 행위가드: lens/health en 한글 0 + ko 기본 보존 + positional 무누출 포함).
+- minor(1.26.0) — npm 배포(R-0011 stable) + annotated tag(Stable) + GitHub release(latest) + 게시본 클린룸 재실증.
+
 ## 1.25.2 — 2026-06-15 — CLI 영어화 Phase 9: health 진단 완전 영어화 (UR-0010)
 
 **🌐 health 진단을 통째로 영어로.** en-leak 스캔 우선순위에서 고빈도 진단인 `health` 를 — 렌더 라벨만이 아니라 **능력 매트릭스 evidence·issues·요약까지 완전히** — 영어화. 반쪽 번역(1.23.0 과장)의 재발을 피하려 한 모듈(lib/health.js)의 모든 한국어를 한 번에 처리.
