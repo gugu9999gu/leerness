@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.24.0';
+const VERSION = '1.24.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3781,6 +3781,15 @@ function _selfTestCases() {
       const groupUsageEn = bin.includes('const _GROUP_USAGE_EN = {') && bin.includes('rule add "<text>" --trigger <trigger>') && bin.includes('${_GROUP_USAGE_EN[cmd]}');
       const koUsagePreserved = bin.includes('rule add "<텍스트>" --trigger <트리거>');  // ko 맵 불변
       return en && koPreserved && groupUsageEn && koUsagePreserved;
+    } },
+    { name: '영어화 정직성 (1.24.1, UR-0010): session close 보고 본문(없음/retro/roadmap) 영어/한국어 보존 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      const sc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js'));
+      const rowsEn = sc.includes("t('- 없음', '- none')") && sc.includes('_retroOneLine(agg, uiLang)');
+      const retroEn = bin.includes('function _retroOneLine(agg, lang)') && bin.includes('`done ${done}/${total}') && bin.includes('decisions ${agg.decisionBlocks} accumulated');
+      const roadmapEn = bin.includes('roadmap.html auto-updated (${trigger})');
+      const koPreserved = bin.includes('완료 ${done}/${total}') && bin.includes('roadmap.html 자동 갱신 (${trigger})') && sc.includes("t('- 없음', '- none')");  // ko 인자 보존
+      return rowsEn && retroEn && roadmapEn && koPreserved;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -12371,13 +12380,15 @@ function _retroAggregate(root) {
   };
 }
 
-function _retroOneLine(agg) {
+function _retroOneLine(agg, lang) {
+  // 1.24.1 (UR-0010): 선택적 lang — en 시 한 줄 요약 영어. 미지정 시 ko(기존 호출부 무영향).
+  const t = (ko, en) => (lang === 'en' ? en : ko);
   const parts = [];
   const done = agg.statusCounts.done;
   const total = agg.totalTasks;
-  if (total) parts.push(`완료 ${done}/${total} (${Math.round(done / total * 100)}%)`);
-  if (agg.totalSkillUsage) parts.push(`스킬 ${agg.skillUsage.length}종 / 사용 ${agg.totalSkillUsage}회 / 최적화 ${agg.totalOptimizations}건`);
-  if (agg.activeRules) parts.push(`룰 ${agg.activeRules}건 활성 (${agg.verifiedRules} 검증됨)`);
+  if (total) parts.push(t(`완료 ${done}/${total} (${Math.round(done / total * 100)}%)`, `done ${done}/${total} (${Math.round(done / total * 100)}%)`));
+  if (agg.totalSkillUsage) parts.push(t(`스킬 ${agg.skillUsage.length}종 / 사용 ${agg.totalSkillUsage}회 / 최적화 ${agg.totalOptimizations}건`, `skills ${agg.skillUsage.length} / uses ${agg.totalSkillUsage} / optimizations ${agg.totalOptimizations}`));
+  if (agg.activeRules) parts.push(t(`룰 ${agg.activeRules}건 활성 (${agg.verifiedRules} 검증됨)`, `rules ${agg.activeRules} active (${agg.verifiedRules} verified)`));
   if (agg.durations.length >= 4) {
     const mid = Math.floor(agg.durations.length / 2);
     const a = agg.durations.slice(0, mid).reduce((x, y) => x + y, 0) / mid;
@@ -12385,10 +12396,10 @@ function _retroOneLine(agg) {
     if (a > 0) {
       const delta = ((b - a) / a) * 100;
       const sign = delta > 0 ? '+' : '';
-      parts.push(`검증 ${Math.round(a)}ms→${Math.round(b)}ms (${sign}${delta.toFixed(1)}%)`);
+      parts.push(t(`검증 ${Math.round(a)}ms→${Math.round(b)}ms (${sign}${delta.toFixed(1)}%)`, `verify ${Math.round(a)}ms→${Math.round(b)}ms (${sign}${delta.toFixed(1)}%)`));
     }
   }
-  parts.push(`결정 ${agg.decisionBlocks}건 누적`);
+  parts.push(t(`결정 ${agg.decisionBlocks}건 누적`, `decisions ${agg.decisionBlocks} accumulated`));
   return parts.join(' · ');
 }
 
@@ -13350,10 +13361,11 @@ function _autoRoadmap(root, trigger) {
     const outFile = path.resolve(cfg.outFile || path.join(root, 'roadmap.html'));
     const data = _roadmapData(root);
     writeUtf8(outFile, _roadmapHTML(data));
-    log(`✓ roadmap.html 자동 갱신 (${trigger}) — ${rel(root, outFile)}`);
+    const _en = _uiLang(root) === 'en';  // 1.24.1 (UR-0010): roadmap 로그 en
+    log(_en ? `✓ roadmap.html auto-updated (${trigger}) — ${rel(root, outFile)}` : `✓ roadmap.html 자동 갱신 (${trigger}) — ${rel(root, outFile)}`);
     return true;
   } catch (e) {
-    warn('roadmap 자동 갱신 실패: ' + (e && e.message ? e.message : e));
+    warn((_uiLang(root) === 'en' ? 'roadmap auto-update failed: ' : 'roadmap 자동 갱신 실패: ') + (e && e.message ? e.message : e));
     return false;
   }
 }

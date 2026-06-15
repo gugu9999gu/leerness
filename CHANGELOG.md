@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.24.1 — 2026-06-15 — 정직성 수정: session close 보고 본문 잔여 한국어 영어화 (UR-0010)
+
+**🔎 자가 검증으로 발견한 과장 주장 교정.** 게시된 모든 영어 표면을 `--language en` 으로 직접 실행해 한국어(가-힣) 누출을 스캔(맹신 X — 내 'CLOSED' 주장 재실증)한 결과: help/status/group help 는 깨끗했지만, **session close 보고 본문**은 1.23.0 에서 "완전 영어"로 배포했음에도 일부 한국어가 남아 있었습니다. 그 잔여를 영어화.
+
+### 변경 (UR-0010)
+- **session close 보고 본문 영어화**: 빈 섹션 표시 `- 없음`→`- none`(rowsToList, 헤더는 이미 영어라 정합↑), 진행 요약 한 줄 `완료 N/M · 결정 N건 누적`→`done N/M · decisions N accumulated`(`_retroOneLine` 에 선택적 lang), roadmap 자동 갱신 로그 `자동 갱신`→`auto-updated`(`_autoRoadmap`, `_uiLang(root)` 기반).
+- **한국어 기본 불변**: 모든 변경은 en 분기에만. ko 는 한 글자도 안 바뀜(e2e 무회귀). `_retroOneLine` 의 기존 호출부(retro 명령)는 lang 미전달 → ko 유지.
+- **검증 방법 공개**: en-leak 스캔(Node `[가-힣]` 탐지 — grep `\x{}` 빌드 한계 우회)으로 재실증. 남은 2줄은 seeded T-0001 + task-add 기본 next-action 값(데이터, Phase 8).
+
+### 잔여 (UR-0010 Phase 8+, 백로그)
+- handoff 본문 + 메모리 CRUD/진단 명령 본문(task/decision/audit/gate/scan 사람용 메시지) + init starter 콘텐츠/task-add 기본값 — 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 242→243** (보고 본문 영어/한국어 보존 소스가드) · 행위(en fresh: `- none / done 0/1 · decisions 0 accumulated / roadmap.html auto-updated`, ko fresh: `- 없음 / 완료 0/1 · 결정 0건 누적 / 자동 갱신`) · **E2E 365/365**.
+- patch(1.24.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.24.0 — 2026-06-15 — 🛡️ [안정화/Stable] help 표면 전체 영어화 안정 minor
 
 **🛡️ 안정화(Stable) minor — `leerness --help` 와 모든 도움말 표면을 영어로 공개.** 직전 minor(1.23.0) 이후 누적된 패치 2건(1.23.1 Phase 6 + 1.23.2 Phase 7)을 검증·통합해 npm 배포. R-0011 정책의 15번째 stable minor. 이제 영어 사용자가 **메인 도움말 → 명령군 그룹 도움말 → 사용법 힌트**까지 막힘없이 읽을 수 있습니다. 한국어 우선 기본은 그대로.
