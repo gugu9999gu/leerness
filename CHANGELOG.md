@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.25.1 — 2026-06-15 — 22번째 버그헌트(i18n 레이어 검증) + i18n 행위 e2e 회귀가드 (UR-0010)
+
+**🔬 8 phase 영어화 레이어를 통째로 적대 검증.** uiLang/`_tx`/`_t` 머신을 cross-cutting 레이어로 한 번에 점검 — **런타임 버그 0** (맹신 X 양방향 확인). 다만 그동안 i18n 은 *소스가드(문자열 존재)* 만 있고 *행위 e2e* 가 없었는데, 이 공백이 1.23.0 "완전 영어" 과장(런타임 누출)을 통과시킨 근본 원인이었음 → 행위 회귀가드로 보강.
+
+### 검증 결과 (런타임 버그 없음, 레이어 견고 확인)
+- `_uiLang` 크래시 안전(try/catch + String 가드, malformed manifest/빈 값 → ko 폴백).
+- arg 상호작용: `--language en` 값이 positional 로 누출 안 됨(앞/뒤 위치 모두), `task add "텍스트" --language en` 보존.
+- `--language=en` equals 문법 동작, `--json` 출력 en 에서도 유효 JSON, flag > env > manifest 우선순위(en 프로젝트에서 `--language ko` 가 ko 강제).
+
+### 변경 (defense-in-depth)
+- **i18n 행위 e2e 회귀가드 1건 추가** (e2e 365→366): ① ko 프로젝트 기본 lens 한글 보존 ② `--language en` 런타임 영어 렌더 + 한글 0 ③ `--language` positional 무누출 ④ status path-not-found 에러 en/ko 분기. 소스가드가 못 잡는 *런타임 누출* 을 행위로 차단.
+
+### 검증 (회귀 0)
+- **selftest 244/244** · **E2E 366/366** (신규 i18n 행위가드 포함, ko 기본 무회귀).
+- patch(1.25.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.25.0 — 2026-06-15 — 🛡️ [안정화/Stable] 마감 본문 정직성 + lens 플래그십 영어화 안정 minor
 
 **🛡️ 안정화(Stable) minor — 자가 검증으로 잡은 정직성 수정 + 품질 렌즈 영어화를 npm 공개.** 직전 minor(1.24.0) 이후 누적된 패치 2건(1.24.1 + 1.24.2)을 검증·통합해 배포. R-0011 정책의 16번째 stable minor. 한국어 우선 기본은 그대로.

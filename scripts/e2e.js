@@ -6202,5 +6202,36 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.25.1 (22nd 버그헌트 → i18n 행위 회귀 가드, UR-0010): --language en 런타임 렌더가 실제로 영어인지 + ko 기본 보존 + --language 값이 positional 로 누출 안 되는지 행위로 검증.
+//   소스가드(문자열 존재)만으로는 1.23.0 "session close 완전 영어" 과장(런타임 한글 누출)을 못 잡았던 공백을 e2e 로 보강(defense-in-depth).
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const H = /[가-힣]/;
+    const out = (r) => (r.stdout || '') + (r.stderr || '');
+    // ① 기본(ko 프로젝트, 플래그 없음): lens 한글 보존
+    const lensKo = out(cp.spawnSync(process.execPath, [CLI, 'lens', '--path', d], { encoding: 'utf8', timeout: 15000 }));
+    const lensKoOk = /분야별 자기질문 품질 렌즈/.test(lensKo);
+    // ② 영어 opt-in(ko 프로젝트라도 flag 가 manifest 를 이김): lens 영어 렌더 + 한글 0
+    const lensEn = out(cp.spawnSync(process.execPath, [CLI, 'lens', '--language', 'en', '--path', d], { encoding: 'utf8', timeout: 15000 }));
+    const lensEnOk = /quality self-question lenses/.test(lensEn) && !H.test(lensEn);
+    // ③ --language en 값이 positional 로 누출 안 됨: task add 텍스트 보존, request="en" 인 task 없음
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'I18N_TASK_E2E', '--language', 'en', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const tl = out(cp.spawnSync(process.execPath, [CLI, 'task', 'list', '--json', '--path', d], { encoding: 'utf8', timeout: 15000 }));
+    const noLeak = tl.includes('I18N_TASK_E2E') && !/"request"\s*:\s*"en"/.test(tl);
+    // ④ status path-not-found 에러: en 영어 / ko 한글 (failJson 분기)
+    const stEn = out(cp.spawnSync(process.execPath, [CLI, 'status', path.join(d, 'nope'), '--language', 'en', '--json'], { encoding: 'utf8', timeout: 15000 }));
+    const stKo = out(cp.spawnSync(process.execPath, [CLI, 'status', path.join(d, 'nope'), '--json'], { encoding: 'utf8', timeout: 15000 }));
+    const stOk = /path not found/.test(stEn) && /경로 없음/.test(stKo);
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = lensKoOk && lensEnOk && noLeak && stOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.25.1) i18n 행위: --language en 런타임 영어 + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
