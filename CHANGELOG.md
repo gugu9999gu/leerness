@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.24.2 — 2026-06-15 — CLI 영어화 Phase 8: lens(품질 렌즈 플래그십) 영어화 (UR-0010)
+
+**🌐 품질 렌즈를 영어로.** 남은 한국어 표면을 en-leak 스캔으로 매핑한 뒤, 가장 가치 높은 플래그십 — **분야별 자기질문 품질 렌즈(`leerness lens`)** — 를 영어화. 영어권 사용자도 "완료 선언 전 자가 점검" + 분야간 인과관계를 그대로 활용할 수 있습니다.
+
+### 변경 (UR-0010 Phase 8)
+- **lens 영어 병렬 카탈로그**: `LENS_CATALOG` 5 도메인(code/design/docs/test/security)에 `titleEn`/`personaEn`/`questionsEn`/`affectsNoteEn` 추가. 한국어 원문(`questions`/`persona` 등)은 **한 글자도 안 바꿈** — selftest `userVerbatim` 가드 + e2e(ko) 안전.
+- **lensCmd 영어 렌더**: `--language en` 시 헤더/부제/페르소나/질문/↔인과/푸터/unknown 에러 모두 영어. 프로젝트 커스텀 렌즈(.harness/quality-lenses.json)는 영어 필드가 없으면 작성된 텍스트로 graceful fallback, builtin 도메인에 추가한 커스텀 질문은 `questionsEn` 개수 기준으로 분리해 영어 렌더에 append.
+- **한국어 기본 유지**: 영어는 명시 opt-in. 플래그 없으면 한국어 그대로(e2e 무회귀).
+
+### 잔여 (UR-0010 Phase 9+, 백로그)
+- 진단/정보 명령 본문(health/capabilities/commands/doctor/drift check/install-safety/constraints) + 메모리 CRUD 빈상태 메시지 + handoff 본문 + init starter 데이터 — en-leak 스캔 우선순위순 단계적 확대.
+
+### 검증 (회귀 0)
+- **selftest 243→244** (lens 영어 병렬필드 + ko verbatim + 렌더 영어 분기 소스가드) · 행위(en-leak 재스캔: `lens --language en` 한글 0 / ko 29줄 보존 / unknown 에러 en·ko) · **E2E 365/365**.
+- patch(1.24.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.24.1 — 2026-06-15 — 정직성 수정: session close 보고 본문 잔여 한국어 영어화 (UR-0010)
 
 **🔎 자가 검증으로 발견한 과장 주장 교정.** 게시된 모든 영어 표면을 `--language en` 으로 직접 실행해 한국어(가-힣) 누출을 스캔(맹신 X — 내 'CLOSED' 주장 재실증)한 결과: help/status/group help 는 깨끗했지만, **session close 보고 본문**은 1.23.0 에서 "완전 영어"로 배포했음에도 일부 한국어가 남아 있었습니다. 그 잔여를 영어화.

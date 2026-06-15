@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.24.1';
+const VERSION = '1.24.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3791,6 +3791,17 @@ function _selfTestCases() {
       const koPreserved = bin.includes('완료 ${done}/${total}') && bin.includes('roadmap.html 자동 갱신 (${trigger})') && sc.includes("t('- 없음', '- none')");  // ko 인자 보존
       return rowsEn && retroEn && roadmapEn && koPreserved;
     } },
+    { name: 'CLI 영어화 Phase 8 (1.24.2, UR-0010): lens 영어 병렬필드 + 렌더 영어/한국어 보존 (소스 가드)', run: () => {
+      // 카탈로그 영어 병렬필드 + ko verbatim 동시 보존 + 렌더 영어 분기
+      const enFields = LENS_CATALOG.code.questionsEn && LENS_CATALOG.code.questionsEn.length === LENS_CATALOG.code.questions.length
+        && LENS_CATALOG.code.questionsEn.some(q => q.includes('senior engineer') && q.includes('complex'))
+        && LENS_CATALOG.design.personaEn.includes('senior designer') && LENS_CATALOG.docs.questionsEn.some(q => q.includes('30 seconds'));
+      const koVerbatim = LENS_CATALOG.code.questions.some(q => q.includes('선임 개발자') && q.includes('복잡'))
+        && LENS_CATALOG.docs.questions.some(q => q.includes('30초'));  // ko 원문 유지(e2e/userVerbatim)
+      const bin = read(__filename);
+      const renderEn = bin.includes('quality self-question lenses (v${VERSION})') && bin.includes("t('페르소나', 'persona')");
+      return enFields && koVerbatim && renderEn;
+    } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
 }
@@ -4322,51 +4333,89 @@ function pulseCmd(root) {
 // 1.18.3 (UR-0003 사용자 명시): 분야별 자기질문 품질 렌즈 — AI 가 완료 선언 전 스스로 답해보는 질문 + 분야간 인과관계.
 //   "선임 개발자가 내 코드를 보고 복잡하다고 느끼지 않을까?" / "선임 디자이너와 일반 사용자가 봤을 때 이쁘고 직관적인가?" (사용자 원문).
 //   질문에 "그렇다(통과)"라고 답할 수 없으면 아직 완료가 아님. affects = 이 분야를 바꿨을 때 다시 물어야 할 분야(인과관계).
+// 1.24.2 (UR-0010 Phase 8): 각 도메인에 영어 병렬 필드(titleEn/personaEn/questionsEn/affectsNoteEn) 추가.
+//   한국어(title/persona/questions/affectsNote)는 verbatim 유지 — selftest userVerbatim 가드 + e2e(ko) 무회귀.
+//   questionsEn 개수는 builtin questions 와 동일하게 유지(렌더가 커스텀 추가질문을 length 기준으로 분리·append).
 const LENS_CATALOG = {
   code: {
     title: '코드', persona: '선임 개발자',
+    titleEn: 'code quality', personaEn: 'senior engineer',
     questions: [
       '선임 개발자가 이 코드를 보고 "복잡하다"고 느끼지 않을까? — 가볍고 단순해야 함',
       '더 단순한 방법이 있는데 추상화/패턴/옵션을 추가하고 있지 않은가?',
       '처음 보는 사람이 5분 안에 이 변경을 이해할 수 있는가?'
     ],
-    affects: ['test', 'docs', 'design'], affectsNote: 'UI 를 만지는 코드 변경이면 design 질문 재확인 필수'
+    questionsEn: [
+      'Would a senior engineer call this code "complex"? — it should be light and simple',
+      'Are you adding abstraction/patterns/options when a simpler way exists?',
+      'Can a newcomer understand this change in 5 minutes?'
+    ],
+    affects: ['test', 'docs', 'design'], affectsNote: 'UI 를 만지는 코드 변경이면 design 질문 재확인 필수',
+    affectsNoteEn: 'if the change touches UI, re-check the design questions'
   },
   design: {
     title: '디자인/UX', persona: '선임 디자이너 + 일반 사용자',
+    titleEn: 'design / UX', personaEn: 'senior designer + everyday user',
     questions: [
       '선임 디자이너가 봤을 때 이쁘고 일관적인가?',
       '일반 사용자가 처음 봤을 때 편하고 직관적이며 헷갈리지 않는가?',
       '꾸미기 위해 복잡해지고 있지 않은가? — 단순함이 곧 직관'
     ],
-    affects: ['code', 'docs'], affectsNote: '디자인 단순화는 보통 코드도 단순하게 만든다 (역도 성립)'
+    questionsEn: [
+      'Would a senior designer find it pretty and consistent?',
+      'Is it comfortable, intuitive, and unconfusing for a first-time everyday user?',
+      'Are you adding complexity just to decorate? — simplicity is intuition'
+    ],
+    affects: ['code', 'docs'], affectsNote: '디자인 단순화는 보통 코드도 단순하게 만든다 (역도 성립)',
+    affectsNoteEn: 'simplifying design usually simplifies the code too (and vice versa)'
   },
   docs: {
     title: '문서/README', persona: '처음 온 사용자 (비개발자 포함)',
+    titleEn: 'docs / README', personaEn: 'first-time user (incl. non-developers)',
     questions: [
       '그래서 30초 안에 뭘 해보면 되지?',
       '비개발자가 터미널 명령 하나 없이 어떻게 사용하지?',
       '기존 도구가 이미 있는데 이걸 쓸 이유가 뭐지?'
     ],
-    affects: ['design'], affectsNote: '문서가 어렵다면 보통 제품 흐름(UX) 자체가 어렵다는 신호'
+    questionsEn: [
+      'So, what can I actually try in 30 seconds?',
+      'How does a non-developer use this without a single terminal command?',
+      'Tools already exist — why use this one?'
+    ],
+    affects: ['design'], affectsNote: '문서가 어렵다면 보통 제품 흐름(UX) 자체가 어렵다는 신호',
+    affectsNoteEn: 'hard docs usually signal the product flow (UX) itself is hard'
   },
   test: {
     title: '테스트', persona: '검증자',
+    titleEn: 'tests', personaEn: 'verifier',
     questions: [
       '이 테스트는 실패할 수 있는 테스트인가? (assert(true) 아님)',
       '주장한 테스트 개수/통과가 실측과 일치하는가?',
       '테스트가 구현을 실제로 import/호출하는가?'
     ],
-    affects: ['code'], affectsNote: '테스트하기 어렵다면 코드가 복잡하다는 신호 — code 질문으로 돌아갈 것'
+    questionsEn: [
+      'Can this test actually fail? (not assert(true))',
+      'Do the claimed test count/pass match the real measured numbers?',
+      'Does the test actually import/call the implementation?'
+    ],
+    affects: ['code'], affectsNote: '테스트하기 어렵다면 코드가 복잡하다는 신호 — code 질문으로 돌아갈 것',
+    affectsNoteEn: 'hard-to-test signals complex code — go back to the code questions'
   },
   security: {
     title: '보안', persona: '공격자',
+    titleEn: 'security', personaEn: 'attacker',
     questions: [
       '시크릿이 코드/커밋에 들어가지 않았는가?',
       '이 입력을 악의적으로 주면 어떻게 되는가?',
       '권한/경계를 한 단어 비틀기로 우회할 수 있는가?'
     ],
-    affects: ['code', 'test'], affectsNote: '보안 가드를 넣었다면 우회/오탐 테스트가 따라와야 함'
+    questionsEn: [
+      'Are there no secrets in the code/commits?',
+      'What happens if this input is given maliciously?',
+      'Can a one-word twist bypass a permission/boundary?'
+    ],
+    affects: ['code', 'test'], affectsNote: '보안 가드를 넣었다면 우회/오탐 테스트가 따라와야 함',
+    affectsNoteEn: 'if you added a security guard, bypass/false-positive tests should follow'
   }
 };
 // 1.19.3 (UR-0003 렌즈 완전판 v3): 프로젝트별 커스텀 렌즈 — .harness/quality-lenses.json 읽기-병합(쓰기 명령 없음, AI/사용자가 편집).
@@ -4419,24 +4468,32 @@ function lensCmd(domain, opts = {}) {
   if (domain != null) domain = String(domain).trim().toLowerCase();
   // 1.19.3: 내장 + 프로젝트 커스텀(.harness/quality-lenses.json) 병합 catalog.
   const root = opts.root || arg('--path', process.cwd());
+  const L = _uiLang(root); const t = (ko, en) => (L === 'en' ? en : ko);  // 1.24.2 (UR-0010 Phase 8): lens 영어 opt-in
   const catalog = _effectiveLensCatalog(root);
   if (domain && !catalog[domain]) {
-    return fail(`알 수 없는 렌즈: ${domain} — 유효값: ${Object.keys(catalog).join(', ')}`);
+    return fail(t(`알 수 없는 렌즈: ${domain} — 유효값: ${Object.keys(catalog).join(', ')}`, `unknown lens: ${domain} — valid: ${Object.keys(catalog).join(', ')}`));
   }
   const picked = domain ? { [domain]: catalog[domain] } : catalog;
   if (jsonMode) { log(JSON.stringify({ ok: true, lenses: picked }, null, 2)); return; }
   const hasCustom = Object.values(catalog).some(l => l && (l._custom || l._customAdded));
-  log(`# leerness lens — 분야별 자기질문 품질 렌즈 (v${VERSION})${hasCustom ? ' + 프로젝트 커스텀(.harness/quality-lenses.json)' : ''}`);
-  log(`완료 선언 전 해당 분야 질문에 스스로 답해보세요. "그렇다(통과)"라고 답할 수 없으면 아직 완료가 아닙니다.`);
+  log(t(`# leerness lens — 분야별 자기질문 품질 렌즈 (v${VERSION})${hasCustom ? ' + 프로젝트 커스텀(.harness/quality-lenses.json)' : ''}`, `# leerness lens — quality self-question lenses (v${VERSION})${hasCustom ? ' + project custom (.harness/quality-lenses.json)' : ''}`));
+  log(t(`완료 선언 전 해당 분야 질문에 스스로 답해보세요. "그렇다(통과)"라고 답할 수 없으면 아직 완료가 아닙니다.`, `Before declaring done, answer each domain's questions yourself. If you can't answer "yes (pass)", it's not done yet.`));
   for (const [key, l] of Object.entries(picked)) {
     log('');
-    log(`## ${key} (${l.title}) — 페르소나: ${l.persona}${l._custom ? ' [프로젝트]' : (l._customAdded ? ' [+프로젝트 질문]' : '')}`);
-    l.questions.forEach((q, i) => log(`  ${i + 1}. ${q}`));
-    log(`  ↔ 인과: ${key} 를 바꾸면 → ${(l.affects || []).join(', ') || '(없음)'} 질문도 다시 — ${l.affectsNote}`);
+    const title = (L === 'en' && l.titleEn) ? l.titleEn : l.title;
+    const persona = (L === 'en' && l.personaEn) ? l.personaEn : l.persona;
+    const note = (L === 'en' && l.affectsNoteEn) ? l.affectsNoteEn : l.affectsNote;
+    const cflag = l._custom ? t(' [프로젝트]', ' [project]') : (l._customAdded ? t(' [+프로젝트 질문]', ' [+project questions]') : '');
+    // en: builtin 영어 질문 + (커스텀 추가질문은 questions 의 builtin 개수 이후 — questionsEn 과 동일 개수 기준으로 분리)
+    let qs = l.questions;
+    if (L === 'en' && l.questionsEn) qs = l.questions.length > l.questionsEn.length ? [...l.questionsEn, ...l.questions.slice(l.questionsEn.length)] : l.questionsEn;
+    log(`## ${key} (${title}) — ${t('페르소나', 'persona')}: ${persona}${cflag}`);
+    qs.forEach((q, i) => log(`  ${i + 1}. ${q}`));
+    log(t(`  ↔ 인과: ${key} 를 바꾸면 → ${(l.affects || []).join(', ') || '(없음)'} 질문도 다시 — ${note}`, `  ↔ causality: change ${key} → re-check ${(l.affects || []).join(', ') || '(none)'} too — ${note}`));
   }
   log('');
-  log(`사용: leerness lens <${Object.keys(catalog).join('|')}> · 완료 검증과 함께: leerness verify-claim T-XXXX`);
-  if (!hasCustom) log(`프로젝트 커스텀 렌즈: .harness/quality-lenses.json 에 { "domains": { "code": { "questions": ["..."] } } } 추가`);
+  log(t(`사용: leerness lens <${Object.keys(catalog).join('|')}> · 완료 검증과 함께: leerness verify-claim T-XXXX`, `Usage: leerness lens <${Object.keys(catalog).join('|')}> · with completion check: leerness verify-claim T-XXXX`));
+  if (!hasCustom) log(t(`프로젝트 커스텀 렌즈: .harness/quality-lenses.json 에 { "domains": { "code": { "questions": ["..."] } } } 추가`, `Project custom lenses: add { "domains": { "code": { "questions": ["..."] } } } to .harness/quality-lenses.json`));
 }
 
 function commandsCmd(root) {
