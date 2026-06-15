@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.27.1';
+const VERSION = '1.27.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3827,6 +3827,14 @@ function _selfTestCases() {
       const auditReturn = aud.includes('// 1.27.1 (13번째 외부리뷰 #2)') && /외부리뷰 #2\)[\s\S]{0,1200}?process\.exitCode = 1;\s*\n\s*return;/.test(aud);
       const vcMsg = bin.includes("test count unconfirmed") && bin.includes('runResult.parsed ? ');
       return auditReturn && vcMsg;
+    } },
+    { name: 'CLI 영어화 Phase 10 (1.27.2, UR-0010): drift check 출력 영어/한국어 보존 + uiLang 주입 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      const dr = read(path.join(path.dirname(__filename), '..', 'lib', 'drift.js'));
+      const injected = bin.includes('uiLang: _uiLang(root), harnessPath: __filename, readProgressRows, planPath, handoffPath, currentStatePath, taskLogPath');
+      const en = dr.includes('| signal | age | threshold | weight | fired |') && dr.includes('session close missing') && dr.includes('recommended actions') && dr.includes('security risk:');
+      const koPreserved = dr.includes('| 신호 | age | 임계 | 가중치 | 발화 |') && dr.includes('session close 누락') && dr.includes('권장 조치');  // ko 인자 보존(e2e ko/내부호출)
+      return injected && en && koPreserved;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -14922,7 +14930,7 @@ function autoUpdateInstall(root) {
 // 1.9.37: drift detection — 메타파일 staleness 측정으로 "leerness 점점 안 쓰는" 현상 감지
 const _drift = require('../lib/drift');
 // 1.9.422 (UR-0025/UR-0125 큰 핸들러 모듈화 7번째): driftCheckCmd → lib/drift.js (DI 위임, thin wrapper)
-function driftCheckCmd(root, opts = {}) { return _drift.driftCheckCmd(root, opts, { VERSION, has, arg, harnessPath: __filename, readProgressRows, planPath, handoffPath, currentStatePath, taskLogPath, envDiff, _usageStatsPath, _readUsageStats, _updateUserRequest, _scanShellScriptsEncoding, _readFeatureGraph, _detectDeliveredRequests, _autoFixIdempotency }); }
+function driftCheckCmd(root, opts = {}) { return _drift.driftCheckCmd(root, opts, { VERSION, has, arg, uiLang: _uiLang(root), harnessPath: __filename, readProgressRows, planPath, handoffPath, currentStatePath, taskLogPath, envDiff, _usageStatsPath, _readUsageStats, _updateUserRequest, _scanShellScriptsEncoding, _readFeatureGraph, _detectDeliveredRequests, _autoFixIdempotency }); }
 
 // 1.9.69: skill-suggestions.md rolling history 인덱스 — mtime 기반 캐시
 // handoff에서 같은 키워드 과거 추천 결과를 즉시 노출 (재매칭 불필요)

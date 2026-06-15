@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.27.2 — 2026-06-15 — CLI 영어화 Phase 10: drift check 출력 영어화 (UR-0010)
+
+**🌐 drift 진단 출력을 영어로.** 고빈도 진단 `drift check` 의 **기본 출력**(경로/상태/신호 표/보안 신호/권장 조치)을 영어 opt-in 으로. `--auto-fix` 진행 로그(~25줄)는 정직하게 Phase 10b 로 분리(반쪽 주장 회피).
+
+### 변경 (UR-0010 Phase 10)
+- **drift check 출력 영어화 (lib/drift.js, DI uiLang)**: 경로 없음 에러, 표 헤더(`신호/임계/가중치/발화`→`signal/threshold/weight/fired`), 신호 라벨 8종(`session close 누락`→`session close missing`, `current-state 갱신 없음`, `task update 없음`, `progress-tracker 비어있음`, `task-log 갱신 없음`, `보안 위험`→`security risk`, `Feature Graph 미정리`→`unlinked`, `task 0건 sub-app`), 보안 issue 2종, `권장 조치` 블록. `t(ko,en)`, ko 인자 verbatim.
+- **내부 호출 무영향**: handoff/health 가 drift 를 내부 spawn(LEERNESS_INTERNAL, `--language` 없음)할 땐 ko 기본 라벨 — 한국어 출력/JSON 파싱 그대로(무회귀). 라벨은 `--json` 값도 언어 따름(en 시 영어).
+
+### 잔여 (UR-0010 Phase 10b+, 백로그)
+- drift `--auto-fix` 진행 로그(~25줄) + capabilities/commands/doctor/install-safety/constraints + init en seed 템플릿 i18n.
+
+### 검증 (회귀 0)
+- **selftest 247→248** (drift 영어/한국어 보존 + uiLang 주입 소스가드) · 행위(drift `--language en` 한글 0 / ko 보존 / 내부호출 ko 유지) · **E2E 368/368** (i18n 행위가드에 drift en/ko 추가).
+- patch(1.27.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.27.1 — 2026-06-15 — 13번째 외부리뷰 정직성 후속: audit 미초기화 모순출력 + verify-claim no-parse 표기
 
 **🔎 13번째 외부리뷰의 정직성 잔여 P2/P3 2건 수정(맹신 X 양방향 재현).** 둘 다 leerness 핵심 정체성(정직한 보고)을 직접 건드리는 출력 문제.

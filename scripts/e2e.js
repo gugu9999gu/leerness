@@ -6230,10 +6230,14 @@ total++;
     const hEn = out(cp.spawnSync(process.execPath, [CLI, 'health', '--language', 'en', '--path', d], { encoding: 'utf8', timeout: 20000 }));
     const hKo = out(cp.spawnSync(process.execPath, [CLI, 'health', '--path', d], { encoding: 'utf8', timeout: 20000 }));
     const healthOk = /## Security/.test(hEn) && !H.test(hEn) && /## 보안/.test(hKo);
+    // ⑥ (1.27.2 Phase 10) drift check 출력: en 영어(한글 0, --auto-fix 제외) + ko 기본 한글 보존
+    const drEn = out(cp.spawnSync(process.execPath, [CLI, 'drift', 'check', d, '--language', 'en'], { encoding: 'utf8', timeout: 20000 }));
+    const drKo = out(cp.spawnSync(process.execPath, [CLI, 'drift', 'check', d], { encoding: 'utf8', timeout: 20000 }));
+    const driftOk = /signal \| age \| threshold/.test(drEn) && !H.test(drEn) && /신호 \| age \| 임계/.test(drKo);
     fs.rmSync(d, { recursive: true, force: true });
-    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk;
+    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk;
   } catch {}
-  console.log(ok ? '✓ B(1.25.1/1.25.2) i18n 행위: --language en 런타임 영어(lens/health) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
+  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2) i18n 행위: --language en 런타임 영어(lens/health/drift) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
   if (!ok) failed++;
 }
 
