@@ -6268,9 +6268,28 @@ total++;
     const edEnOk = /Runtime environment/.test(edEn) && edEnLines.length >= 1 && !edEnLines.some(l => H.test(l));
     const edKoOk = /실행 환경/.test(edKo);
     fs.rmSync(de, { recursive: true, force: true });
-    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk && edEnOk && edKoOk;
+    // ⑩ (1.29.3) handoff shell-guard 블록: 셸 실패 기록 + 환경 스냅샷 변동 → en 영어(블록 라인 한글 0) + ko 기본 한글.
+    //   블록은 hasFailures(.harness/shell-failures.json) 또는 hasDrift(스냅샷 변동) 시 발동. 둘 다 인위 구성.
+    const ds = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-sh-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', ds, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const ssnap = path.join(ds, '.harness', 'environment.json');
+    const sfail = path.join(ds, '.harness', 'shell-failures.json');
+    const seedSh = () => {
+      try { const s = JSON.parse(fs.readFileSync(ssnap, 'utf8')); if (s.node) s.node.version = 'v0.0.0-test'; fs.writeFileSync(ssnap, JSON.stringify(s, null, 2) + '\n'); } catch {}
+      fs.writeFileSync(sfail, JSON.stringify({ failures: [{ cmd: 'ls && pwd', exitCode: 1, shell: 'powershell-5.1', issues: ['ps5-chain'] }] }, null, 2) + '\n');
+    };
+    cp.spawnSync(process.execPath, [CLI, 'handoff', ds], { encoding: 'utf8', timeout: 25000 }); // 첫 캡처(silent)
+    seedSh();
+    const shEn = out(cp.spawnSync(process.execPath, [CLI, 'handoff', ds, '--language', 'en'], { encoding: 'utf8', timeout: 25000 }));
+    seedSh(); // en 실행이 스냅샷 갱신 → ko 위해 재구성
+    const shKo = out(cp.spawnSync(process.execPath, [CLI, 'handoff', ds], { encoding: 'utf8', timeout: 25000 }));
+    const shEnLines = shEn.split('\n').filter(l => /shell guard|shell failure|review past shell|shell-guard|check before running/i.test(l));
+    const shEnOk = /Terminal shell guard/.test(shEn) && shEnLines.length >= 2 && !shEnLines.some(l => H.test(l));
+    const shKoOk = /셸 가드/.test(shKo);
+    fs.rmSync(ds, { recursive: true, force: true });
+    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk && edEnOk && edKoOk && shEnOk && shKoOk;
   } catch {}
-  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1/1.29.2) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약/env-detect) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
+  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1/1.29.2/1.29.3) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약/env-detect/shell-guard) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
   if (!ok) failed++;
 }
 

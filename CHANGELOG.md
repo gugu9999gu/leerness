@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.29.3 — 2026-06-16 — handoff shell-guard 블록 영어화 (UR-0010)
+
+**🌐 handoff 터미널 셸 가드 블록을 영어화.** 1.29.2 probe 에서 관측한 인접 en-leak. 과거 셸 실패(예: PowerShell 5.1 `&&` 미지원) + 환경 버전 변동 알림을 `--language en` 에서 영어로. 한국어 기본 보존.
+
+### 변경 (UR-0010)
+- **🌐 shell-guard 블록 4줄 영어화**: `## 🐚 Terminal shell guard (UR-0020)` 헤더 + `⚠ Environment version changed — review past shell failures:` + `N recent shell failure(s) (showing up to 3):` + `→ check before running a command: leerness shell-guard "<command>"`. data 라인(`what: from → to`, `cmd (exit=…, shell)`)은 이미 영어라 무변경. ko verbatim 보존.
+- **블록-스코프 t 함정 회피(1.29.1 교훈)**: 이 블록도 headline `t()` 스코프 밖 → 블록 로컬 `t()`/`_uiLang(root)` 정의하고 영어화(회귀 사전 차단).
+
+### 검증 (회귀 0)
+- **selftest 252→253** (shell-guard 영어/한국어 보존 소스가드, split-literal).
+- **행위 검증(1.29.1 교훈)**: `.harness/shell-failures.json` 시드 + 스냅샷 변동으로 hasFailures/hasDrift 양쪽 발동 → `handoff --language en` 4줄 영어 렌더(블록 라인 한글 0, Node 탐지) / `handoff` ko 보존.
+- **E2E i18n 행위가드 ⑩ 추가**: shell-guard en/ko 를 셸실패+스냅샷변동 시나리오로 e2e 에 못박음.
+- patch(1.29.3) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
+### 잔여 (UR-0010 백로그)
+- handoff CLI 에이전트 슬래시 명령 블록(`## 🤖 CLI 에이전트 슬래시 명령`/`활성 에이전트 N개`) en-leak(외부 에이전트 활성 시 노출, 다음 라운드) · capabilities/commands/constraints/install-safety 영어화 · init en seed 템플릿 i18n.
+
 ## 1.29.2 — 2026-06-16 — handoff env-detect 블록 영어화 (UR-0010)
 
 **🌐 handoff 실행 환경 변동/PATH 누락 알림을 영어화.** 1.29.1 감사 중 발견한 인접 en-leak. `🖥 실행 환경` 헤더 2종(PATH 누락 / 변동 감지) + `→ 상세` 안내를 `--language en` 에서 영어로. 변동 설명(`os.platform`/`node`/`tool added` 등)은 이미 영어라 source 무변경. 한국어 기본 보존.

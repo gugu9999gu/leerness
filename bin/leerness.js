@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.29.2';
+const VERSION = '1.29.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3869,6 +3869,16 @@ function _selfTestCases() {
         && bin.includes('→ detail' + 's: leerness env detect');
       const koPreserved = bin.includes('실행 환경 (1.9.145): ⚠ PATH 누' + '락')
         && bin.includes('→ 상' + '세: leerness env detect');
+      return en && koPreserved;
+    } },
+    { name: 'Phase 10f (1.29.3): handoff shell-guard 블록 영어/한국어 보존 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      // split-literals (self-reference trap 회피)
+      const en = bin.includes('Terminal shell gua' + 'rd (UR-0020)')
+        && bin.includes('review past shell fail' + 'ures')
+        && bin.includes('check before running a comm' + 'and: leerness shell-guard');
+      const koPreserved = bin.includes('터미널 셸 가' + '드 (1.9.263, UR-0020)')
+        && bin.includes('과거 셸 실패 기록 재검' + '토 권장');
       return en && koPreserved;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
@@ -8826,23 +8836,26 @@ function handoff(root) {
     const hasFailures = sf.failures && sf.failures.length > 0;
     const hasDrift = drift && drift.changes && drift.changes.length > 0;
     if (hasFailures || hasDrift) {
+      // 1.29.3: headline t() 스코프 밖 — 로컬 t() (1.29.1 교훈: 없으면 ReferenceError 가 try 에 삼켜져 블록 증발)
+      const _Lsh = _uiLang(root);
+      const t = (ko, en) => (_Lsh === 'en' ? en : ko);
       const isTty8 = process.stdout && process.stdout.isTTY;
       const yl8 = s => isTty8 ? `\x1b[33m${s}\x1b[0m` : s;
       const dm8 = s => isTty8 ? `\x1b[2m${s}\x1b[0m` : s;
       const cy8 = s => isTty8 ? `\x1b[36m${s}\x1b[0m` : s;
       log('');
-      log(cy8(`## 🐚 터미널 셸 가드 (1.9.263, UR-0020)`));
+      log(cy8(t(`## 🐚 터미널 셸 가드 (1.9.263, UR-0020)`, `## 🐚 Terminal shell guard (UR-0020)`)));
       if (hasDrift) {
-        log(yl8(`  ⚠ 환경 버전 변동 — 과거 셸 실패 기록 재검토 권장:`));
+        log(yl8(t(`  ⚠ 환경 버전 변동 — 과거 셸 실패 기록 재검토 권장:`, `  ⚠ Environment version changed — review past shell failures:`)));
         drift.changes.forEach(ch => log(dm8(`     ${ch.what}: ${ch.from} → ${ch.to}`)));
       }
       if (hasFailures) {
-        log(dm8(`  최근 셸 실패 ${sf.failures.length}건 (최대 3 표시):`));
+        log(dm8(t(`  최근 셸 실패 ${sf.failures.length}건 (최대 3 표시):`, `  ${sf.failures.length} recent shell failure(s) (showing up to 3):`)));
         sf.failures.slice(-3).reverse().forEach(f => {
           const rules = (f.issues && f.issues.length) ? ` [${f.issues.join(',')}]` : '';
           log(dm8(`     • ${(f.cmd || '').slice(0, 50)} (exit=${f.exitCode}, ${f.shell})${rules}`));
         });
-        log(dm8(`  → 명령 실행 전 점검: leerness shell-guard "<command>"`));
+        log(dm8(t(`  → 명령 실행 전 점검: leerness shell-guard "<command>"`, `  → check before running a command: leerness shell-guard "<command>"`)));
       }
     }
   } catch {}
