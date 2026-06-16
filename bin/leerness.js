@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.29.3';
+const VERSION = '1.29.4';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3879,6 +3879,16 @@ function _selfTestCases() {
         && bin.includes('check before running a comm' + 'and: leerness shell-guard');
       const koPreserved = bin.includes('터미널 셸 가' + '드 (1.9.263, UR-0020)')
         && bin.includes('과거 셸 실패 기록 재검' + '토 권장');
+      return en && koPreserved;
+    } },
+    { name: 'Phase 10g (1.29.4): handoff CLI 에이전트 슬래시 블록 영어/한국어 보존 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      // split-literals (self-reference trap 회피)
+      const en = bin.includes('CLI agent slash comma' + 'nds (UR-0021)')
+        && bin.includes("active agent(s) — use each one'" + 's slash commands')
+        && bin.includes('full list / record / refr' + 'esh: leerness slash-commands');
+      const koPreserved = bin.includes('CLI 에이전트 슬래시 명' + '령 (1.9.265~266, UR-0021)')
+        && bin.includes('전체/기록/최신' + '화: leerness slash-commands');
       return en && koPreserved;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
@@ -8868,20 +8878,23 @@ function handoff(root) {
       return v && v !== '0' && String(v).toLowerCase() !== 'false';
     });
     if (enabledAgents.length > 0) {
+      // 1.29.4: headline t() 스코프 밖 — 로컬 t() (1.29.1 교훈)
+      const _Lag = _uiLang(root);
+      const t = (ko, en) => (_Lag === 'en' ? en : ko);
       const isTtyS = process.stdout && process.stdout.isTTY;
       const cyS = s => isTtyS ? `\x1b[36m${s}\x1b[0m` : s;
       const dmS = s => isTtyS ? `\x1b[2m${s}\x1b[0m` : s;
       log('');
-      log(cyS(`## 🤖 CLI 에이전트 슬래시 명령 (1.9.265~266, UR-0021)`));
-      log(dmS(`  활성 에이전트 ${enabledAgents.length}개 — sub-agent 호출 시 각자 슬래시 명령 사용:`));
+      log(cyS(t(`## 🤖 CLI 에이전트 슬래시 명령 (1.9.265~266, UR-0021)`, `## 🤖 CLI agent slash commands (UR-0021)`)));
+      log(dmS(t(`  활성 에이전트 ${enabledAgents.length}개 — sub-agent 호출 시 각자 슬래시 명령 사용:`, `  ${enabledAgents.length} active agent(s) — use each one's slash commands when invoking a sub-agent:`)));
       for (const a of enabledAgents) {
         const hint = _agentSlashHint(root, a.id);
         if (hint && hint.commands.length) {
           const top = hint.commands.slice(0, 8).map(c => c.cmd).join(' ');
-          log(dmS(`     ${a.id.padEnd(8)} ${top}${hint.invoke === 'subcommand' ? ' (하위명령)' : ''}`));
+          log(dmS(`     ${a.id.padEnd(8)} ${top}${hint.invoke === 'subcommand' ? t(' (하위명령)', ' (subcommand)') : ''}`));
         }
       }
-      log(dmS(`  → 전체/기록/최신화: leerness slash-commands [agent] [--record]`));
+      log(dmS(t(`  → 전체/기록/최신화: leerness slash-commands [agent] [--record]`, `  → full list / record / refresh: leerness slash-commands [agent] [--record]`)));
     }
   } catch {}
 

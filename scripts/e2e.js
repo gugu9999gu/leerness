@@ -6287,9 +6287,19 @@ total++;
     const shEnOk = /Terminal shell guard/.test(shEn) && shEnLines.length >= 2 && !shEnLines.some(l => H.test(l));
     const shKoOk = /셸 가드/.test(shKo);
     fs.rmSync(ds, { recursive: true, force: true });
-    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk && edEnOk && edKoOk && shEnOk && shKoOk;
+    // ⑪ (1.29.4) handoff CLI 에이전트 슬래시 블록: 외부 에이전트 env flag 활성 시 → en 영어(블록 라인 한글 0) + ko 기본 한글.
+    const da = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-ag-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', da, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const agEnv = { ...process.env, LEERNESS_ENABLE_CODEX: '1', LEERNESS_ENABLE_CLAUDE: '1' };
+    const agEn = out(cp.spawnSync(process.execPath, [CLI, 'handoff', da, '--language', 'en'], { encoding: 'utf8', timeout: 25000, env: agEnv }));
+    const agKo = out(cp.spawnSync(process.execPath, [CLI, 'handoff', da], { encoding: 'utf8', timeout: 25000, env: agEnv }));
+    const agEnLines = agEn.split('\n').filter(l => /agent slash|active agent|slash-commands|full list/i.test(l));
+    const agEnOk = /CLI agent slash commands/.test(agEn) && agEnLines.length >= 2 && !agEnLines.some(l => H.test(l));
+    const agKoOk = /에이전트 슬래시/.test(agKo);
+    fs.rmSync(da, { recursive: true, force: true });
+    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk && edEnOk && edKoOk && shEnOk && shKoOk && agEnOk && agKoOk;
   } catch {}
-  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1/1.29.2/1.29.3) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약/env-detect/shell-guard) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
+  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1/1.29.2/1.29.3/1.29.4) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약/env-detect/shell-guard/agent-slash) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
   if (!ok) failed++;
 }
 

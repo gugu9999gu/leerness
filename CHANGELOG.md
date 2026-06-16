@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.29.4 — 2026-06-16 — handoff CLI 에이전트 슬래시 명령 블록 영어화 (UR-0010)
+
+**🌐 handoff CLI 에이전트 슬래시 명령 블록을 영어화.** 1.29.3 잔여 백로그. 외부 CLI 에이전트(codex/claude/agy/copilot/ollama)가 env flag 로 활성일 때 노출되는 sub-agent 슬래시 명령 요약을 `--language en` 에서 영어로. 한국어 기본 보존.
+
+### 변경 (UR-0010)
+- **🌐 agent-slash 블록 4줄 영어화**: `## 🤖 CLI agent slash commands (UR-0021)` 헤더 + `N active agent(s) — use each one's slash commands when invoking a sub-agent:` + ` (subcommand)` 접미사 + `→ full list / record / refresh: leerness slash-commands [agent] [--record]`. 에이전트별 명령 라인(`id cmd…`)은 데이터라 무변경. ko verbatim 보존.
+- **블록-스코프 t 함정 회피(1.29.1 교훈)**: 이 블록도 headline `t()` 스코프 밖 → 블록 로컬 `t()`/`_uiLang(root)` 정의.
+
+### 검증 (회귀 0)
+- **selftest 253→254** (agent-slash 영어/한국어 보존 소스가드, split-literal).
+- **행위 검증(1.29.1 교훈)**: `LEERNESS_ENABLE_CODEX=1`+`LEERNESS_ENABLE_CLAUDE=1` 로 블록 발동 → `handoff --language en` 영어 렌더(블록 라인 한글 0, Node 탐지) / `handoff` ko 보존.
+- **E2E i18n 행위가드 ⑪ 추가**: agent-slash en/ko 를 env flag 활성 시나리오로 e2e 에 못박음.
+- patch(1.29.4) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
+### 잔여 (UR-0010 백로그)
+- capabilities/commands/constraints/install-safety 영어화 · init en seed 템플릿 i18n · handoff 본문 잔여 표면(팀 스케줄/요청 자동완료/비정상종료 등) 점진 영어화.
+
 ## 1.29.3 — 2026-06-16 — handoff shell-guard 블록 영어화 (UR-0010)
 
 **🌐 handoff 터미널 셸 가드 블록을 영어화.** 1.29.2 probe 에서 관측한 인접 en-leak. 과거 셸 실패(예: PowerShell 5.1 `&&` 미지원) + 환경 버전 변동 알림을 `--language en` 에서 영어로. 한국어 기본 보존.
