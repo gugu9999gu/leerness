@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.29.2 — 2026-06-16 — handoff env-detect 블록 영어화 (UR-0010)
+
+**🌐 handoff 실행 환경 변동/PATH 누락 알림을 영어화.** 1.29.1 감사 중 발견한 인접 en-leak. `🖥 실행 환경` 헤더 2종(PATH 누락 / 변동 감지) + `→ 상세` 안내를 `--language en` 에서 영어로. 변동 설명(`os.platform`/`node`/`tool added` 등)은 이미 영어라 source 무변경. 한국어 기본 보존.
+
+### 변경 (UR-0010)
+- **🌐 env-detect 블록 3줄 영어화**: `🖥 Runtime environment: ⚠ N PATH tool(s) missing — npm run may fail` / `🖥 Runtime environment: N change(s) detected` / `→ details: leerness env detect . --json`. ko verbatim 보존.
+- **블록-스코프 t 함정 회피(1.29.1 교훈 적용)**: env-detect 블록도 headline 의 `t()` 스코프 밖이라, 처음부터 블록 로컬 `t()`/`_uiLang(root)` 를 정의하고 영어화 — `ReferenceError → try 삼킴 → 블록 증발` 회귀를 사전 차단.
+
+### 검증 (회귀 0)
+- **selftest 251→252** (env-detect 영어/한국어 보존 소스가드, split-literal).
+- **행위 검증(1.29.1 교훈)**: 스냅샷 `node.version` 인위 변경으로 블록 강제 발동 → `handoff --language en` 이 영어 렌더(블록 라인 한글 0, Node 탐지) / `handoff` ko 보존 확인.
+- **E2E i18n 행위가드 ⑨ 추가**: env-detect en/ko 를 스냅샷 변동 시나리오로 e2e 에 못박음.
+- patch(1.29.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
+### 잔여 (UR-0010 백로그)
+- handoff shell-failures 재검토 알림(`⚠ 환경 버전 변동 — 과거 셸 실패 기록 재검토 권장`) en-leak(env 변동 시 동반 노출, 다음 라운드) · capabilities/commands/constraints/install-safety 영어화 · init en seed 템플릿 i18n.
+
 ## 1.29.1 — 2026-06-16 — i18n-coupling 감사(clean) + handoff 보안 요약 섹션 영어화 (UR-0010)
 
 **🔒🌐 영어 사용자가 커밋된 시크릿을 가질 때 정확히 노출되는 handoff 보안 요약 섹션을 영어화.** 1.28.1 의 `hasSecurityFired` 라벨-결합 버그 클래스를 lib/ 전수 감사(추가 결합 버그 0)한 뒤, 감사 중 발견한 마지막 en-leak(보안 요약 본문)을 영어화. 한국어 우선 기본 보존.

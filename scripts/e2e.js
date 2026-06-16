@@ -6252,9 +6252,25 @@ total++;
     const hoEnOk = /Security summary/.test(hoEn) && enSecLines.length >= 2 && !enSecLines.some(l => H.test(l));
     const hoKoOk = /보안 요약/.test(hoKo);
     fs.rmSync(dh, { recursive: true, force: true });
-    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk;
+    // ⑨ (1.29.2) handoff env-detect 블록: 환경 스냅샷 변동 시 → en 영어(블록 라인 한글 0) + ko 기본 한글.
+    //   블록은 첫 핸드오프 후 .harness/environment.json 변동이 있어야 발동 → 스냅샷의 node.version 을 인위 변경해 강제.
+    //   (1.29.1 과 같은 블록-스코프 t 함정 가드 — env-detect 도 headline t() 스코프 밖이라 로컬 t() 필요.)
+    const de = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-env-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', de, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const snap = path.join(de, '.harness', 'environment.json');
+    const forceEnvChange = () => { try { const s = JSON.parse(fs.readFileSync(snap, 'utf8')); if (s.node) s.node.version = 'v0.0.0-test'; fs.writeFileSync(snap, JSON.stringify(s, null, 2) + '\n'); } catch {} };
+    cp.spawnSync(process.execPath, [CLI, 'handoff', de], { encoding: 'utf8', timeout: 25000 }); // 첫 캡처(silent)
+    forceEnvChange();
+    const edEn = out(cp.spawnSync(process.execPath, [CLI, 'handoff', de, '--language', 'en'], { encoding: 'utf8', timeout: 25000 }));
+    forceEnvChange(); // en 실행이 스냅샷 갱신 → ko 위해 재변경
+    const edKo = out(cp.spawnSync(process.execPath, [CLI, 'handoff', de], { encoding: 'utf8', timeout: 25000 }));
+    const edEnLines = edEn.split('\n').filter(l => /Runtime environment|env detect|change\(s\) detected/i.test(l));
+    const edEnOk = /Runtime environment/.test(edEn) && edEnLines.length >= 1 && !edEnLines.some(l => H.test(l));
+    const edKoOk = /실행 환경/.test(edKo);
+    fs.rmSync(de, { recursive: true, force: true });
+    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk && edEnOk && edKoOk;
   } catch {}
-  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
+  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1/1.29.2) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약/env-detect) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
   if (!ok) failed++;
 }
 

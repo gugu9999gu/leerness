@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.29.1';
+const VERSION = '1.29.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3859,6 +3859,16 @@ function _selfTestCases() {
         && bin.includes('auto-fix optio' + 'n: LEERNESS_AUTO_SECURITY_FIX');
       const koPreserved = bin.includes('보안 ' + '요약 (1.9.76)')
         && bin.includes('자동 실행 ' + '옵션: LEERNESS_AUTO_SECURITY_FIX');
+      return en && koPreserved;
+    } },
+    { name: 'Phase 10e (1.29.2): handoff env-detect 블록 영어/한국어 보존 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      // split-literals (self-reference trap 회피)
+      const en = bin.includes('Runtime environ' + 'ment: ⚠')
+        && bin.includes('change(s) detec' + 'ted')
+        && bin.includes('→ detail' + 's: leerness env detect');
+      const koPreserved = bin.includes('실행 환경 (1.9.145): ⚠ PATH 누' + '락')
+        && bin.includes('→ 상' + '세: leerness env detect');
       return en && koPreserved;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
@@ -9499,6 +9509,9 @@ function handoff(root) {
   //   첫 실행에선 자동 캡처 (silent), 이후엔 변동/누락 시에만 노출.
   if (!has('--no-env-detect') && !has('--compact') && !has('--quiet') && process.env.LEERNESS_NO_ENV_DETECT !== '1') {
     try {
+      // 1.29.2: headline t() 스코프 밖 — 로컬 t() (없으면 ReferenceError 가 try 에 삼켜져 env-detect 블록이 사라짐, 1.29.1 교훈)
+      const _Lenv = _uiLang(root);
+      const t = (ko, en) => (_Lenv === 'en' ? en : ko);
       const isTtyEd = process.stdout && process.stdout.isTTY;
       const edCy = s => isTtyEd ? `\x1b[35m${s}\x1b[0m` : s; // magenta
       const edDim = s => isTtyEd ? `\x1b[2m${s}\x1b[0m` : s;
@@ -9512,14 +9525,14 @@ function handoff(root) {
       } else if (diff.changes.length || (diff.missing && diff.missing.length)) {
         // 변동/누락 알림
         if (diff.missing && diff.missing.length) {
-          log(edCy(`🖥  실행 환경 (1.9.145): ⚠ PATH 누락 ${diff.missing.length}건 — npm run 시 실패 가능`));
+          log(edCy(t(`🖥  실행 환경 (1.9.145): ⚠ PATH 누락 ${diff.missing.length}건 — npm run 시 실패 가능`, `🖥  Runtime environment: ⚠ ${diff.missing.length} PATH tool(s) missing — npm run may fail`)));
           for (const m of diff.missing.slice(0, 3)) log(edDim(`  • ${m.command} (used by: npm run ${m.usedBy})`));
         }
         if (diff.changes.length) {
-          log(edCy(`🖥  실행 환경 (1.9.145): 변동 ${diff.changes.length}건 감지`));
+          log(edCy(t(`🖥  실행 환경 (1.9.145): 변동 ${diff.changes.length}건 감지`, `🖥  Runtime environment: ${diff.changes.length} change(s) detected`)));
           for (const c of diff.changes.slice(0, 3)) log(edDim(`  • ${c}`));
         }
-        log(edDim(`  → 상세: leerness env detect . --json`));
+        log(edDim(t(`  → 상세: leerness env detect . --json`, `  → details: leerness env detect . --json`)));
         log('');
         // 갱신 (다음 비교 baseline)
         try { writeUtf8(snapPath, JSON.stringify(curr, null, 2) + '\n'); } catch {}
