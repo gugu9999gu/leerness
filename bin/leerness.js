@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.31.2';
+const VERSION = '1.31.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2863,7 +2863,7 @@ function _selfTestCases() {
     { name: 'get_project_context: MCP 시맨틱 verb 등록 + CLI context 디스패치 (UR-0031 1.9.292)', run: () => { const src = read(__filename); const mcpDef = require('../lib/mcp-tools').some(t => t.name === 'leerness_get_project_context'); const mcpCase = /case 'leerness_get_project_context':[\s\S]*?cliArgs = \['context'/.test(src); const cliDisp = /if \(cmd === 'context'\)\s+return contextCmd/.test(src); return typeof contextCmd === 'function' && mcpDef && mcpCase && cliDisp && _mcpToolCount() >= 80; } },
     { name: '_canonicalProgressHeader + idempotency auto-fix (근본 복제버그 fix 1.9.293)', run: () => { const h = _canonicalProgressHeader(); const headerOk = /leernessRole: progress-tracker/.test(h) && /\| ID \| Status \| Request \|/.test(h) && /\|---\|/.test(h); const src = read(__filename); const fnOk = typeof _autoFixIdempotency === 'function'; const noWholeTextFallback = /if \(idx < 0\) return _canonicalProgressHeader\(\);/.test(src); const driftWired = /_autoFixIdempotency\(root\)/.test(src) && /idempotency 중복/.test(src); return headerOk && fnOk && noWholeTextFallback && driftWired; } },
     { name: 'lib/role-catalog: ROLE/PROVIDER/ALIASES/PROMPTS 모듈 단일출처 분리 (UR-0025 1.9.294)', run: () => { const m = require('../lib/role-catalog'); return m.ROLE_CATALOG === ROLE_CATALOG && m._PROVIDER_MODEL_CATALOG === _PROVIDER_MODEL_CATALOG && m._ROLE_ALIASES === _ROLE_ALIASES && m._AGENT_ROLE_PROMPTS === _AGENT_ROLE_PROMPTS && Object.keys(m.ROLE_CATALOG).length === 7 && Object.keys(m._PROVIDER_MODEL_CATALOG).length === 10 && !/const ROLE_CATALOG = \{/.test(read(__filename)); } },
-    { name: 'lib/catalogs: CAPABILITY/ADAPTERS/REUSE 모듈 단일출처 분리 (UR-0025 1.9.295)', run: () => { const m = require('../lib/catalogs'); return m.CAPABILITY_SURFACE === CAPABILITY_SURFACE && m.ADAPTERS === ADAPTERS && m.REUSE_CATEGORIES === REUSE_CATEGORIES && m.REUSE_CHECKLIST === REUSE_CHECKLIST && m.POWERFUL_COMMANDS === POWERFUL_COMMANDS && Object.keys(m.CAPABILITY_SURFACE).length === 6 && !/const CAPABILITY_SURFACE = \{/.test(read(__filename)); } },
+    { name: 'lib/catalogs: CAPABILITY/ADAPTERS/REUSE 모듈 단일출처 분리 (UR-0025 1.9.295) + i18n en(1.31.3)', run: () => { const m = require('../lib/catalogs'); const _H = /[가-힣]/; const cs = Object.values(m.CAPABILITY_SURFACE); const i18nOk = cs.length === 6 && cs.every(v => typeof v.descEn === 'string' && v.descEn.length > 0 && !_H.test(v.descEn) && typeof v.optOutEn === 'string' && !_H.test(v.optOutEn)) && m.POWERFUL_COMMANDS.every(c => typeof c.noteEn === 'string' && c.noteEn.length > 0 && !_H.test(c.noteEn)); return m.CAPABILITY_SURFACE === CAPABILITY_SURFACE && m.ADAPTERS === ADAPTERS && m.REUSE_CATEGORIES === REUSE_CATEGORIES && m.REUSE_CHECKLIST === REUSE_CHECKLIST && m.POWERFUL_COMMANDS === POWERFUL_COMMANDS && Object.keys(m.CAPABILITY_SURFACE).length === 6 && i18nOk && !/const CAPABILITY_SURFACE = \{/.test(read(__filename)); } },
     { name: 'about: 정체성 verb(AI 운영 레이어) + MCP leerness_about 등록 (UR-0030 1.9.296)', run: () => { const id = _leernessIdentity(); const src = read(__filename); return typeof aboutCmd === 'function' && /운영 레이어/.test(id.identity) && id.layers.length === 5 && id.surface.mcpTools >= 81 && require('../lib/mcp-tools').some(t => t.name === 'leerness_about') && /case 'leerness_about':/.test(src) && /cmd === 'about' \|\| cmd === 'identity'/.test(src); } },
     { name: 'lib/mcp-tools: MCP 도구 정의 모듈 단일출처 (_mcpToolCount=모듈 length, Codex #5 영구해소) (UR-0025 1.9.297)', run: () => { const T = require('../lib/mcp-tools'); return Array.isArray(T) && T.length >= 81 && T.every(t => t.name && t.description && t.inputSchema) && T[0].name === 'leerness_handoff' && _mcpToolCount() === T.length && !/const TOOLS = \[/.test(read(__filename)); } },
     { name: 'writeUtf8: 원자적 쓰기(temp→rename) 손상방지 행위 (UR-0038 외부리뷰 / CV-5 행위화 1.9.366)', run: () => { if (typeof writeUtf8 !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wu_')); try { const f = path.join(tmp, 'sub', 'a.txt'); writeUtf8(f, '한글 UTF-8 내용'); const okContent = read(f) === '한글 UTF-8 내용'; const noTmpLeft = fs.readdirSync(path.dirname(f)).every(n => !n.includes('.tmp-')); return okContent && noTmpLeft; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
@@ -2939,7 +2939,7 @@ function _selfTestCases() {
     { name: 'UR-0025: _parseArchiveBlocks/_parseSkillCatalog 순수 파서 모듈 분리 + 행위 (1.9.370)', run: () => { const m = require('../lib/pure-utils'); if (typeof _parseArchiveBlocks !== 'function' || typeof _parseSkillCatalog !== 'function') return false; const moved = m._parseArchiveBlocks === _parseArchiveBlocks && m._parseSkillCatalog === _parseSkillCatalog; const ab = _parseArchiveBlocks('## 제거 2026-01-01 (target: ' + '"T-1")\n### 헤더\n'); const abOk = ab.length === 1 && ab[0].date === '2026-01-01' && ab[0].target === 'T-1' && ab[0].originalHeader === '헤더'; const md = _parseSkillCatalog('- [nm](https://x/SKILL.md) — d', ''); const mdOk = md.length === 1 && md[0].name === 'nm' && md[0].format === 'markdown'; const js = _parseSkillCatalog('{' + '"skills":[{"id":"a","url":"u"}]}', ''); const jsOk = js.length === 1 && js[0].name === 'a' && js[0].format === 'json'; return moved && abOk && mdOk && jsOk; } },
     { name: 'UR-0073 Phase A: team 정의 레지스트리 (_renderTeamsMd + canonical load/save) 행위 (1.9.371)', run: () => { const m = require('../lib/pure-utils'); if (typeof teamCmd !== 'function' || typeof _renderTeamsMd !== 'function' || m._renderTeamsMd !== _renderTeamsMd) return false; const md = _renderTeamsMd([{ id: 't1', name: 'N', personas: ['security'], members: ['claude'], schedule: 'daily', status: 'active' }]); const mdOk = md.includes('## t1') && md.includes('security') && md.includes('daily') && md.includes('정의 전용'); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_team_')); let rtOk = false; try { _saveTeams(tmp, [{ id: 'x', name: 'X', personas: [], members: [], schedule: 'manual', status: 'active' }]); const loaded = _loadTeams(tmp); rtOk = loaded.length === 1 && loaded[0].id === 'x' && fs.existsSync(path.join(tmp, '.harness', 'teams.json')) && fs.existsSync(path.join(tmp, '.harness', 'teams.md')); } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return mdOk && rtOk; } },
     { name: 'UR-0073 Phase B: _composeTeamPlan dry-run 실행 계획 (멤버별 dispatch, 실행 없음) 행위 (1.9.372)', run: () => { const m = require('../lib/pure-utils'); if (typeof _composeTeamPlan !== 'function' || m._composeTeamPlan !== _composeTeamPlan) return false; const team = { id: 'rev', name: 'R', purpose: 'PR 리뷰', personas: ['security', 'perf'], members: ['claude', 'codex'], schedule: 'manual' }; const p1 = _composeTeamPlan(team, '점검'); const ok1 = p1.steps.length === 2 && p1.task === '점검' && p1.steps[0].member === 'claude' && p1.steps[0].suggestedCommand.includes('agents dispatch') && p1.steps[0].suggestedCommand.includes('--to claude') && p1.steps[0].dispatchPrompt.includes('security'); const p2 = _composeTeamPlan(team, null); const ok2 = p2.task === 'PR 리뷰'; const p3 = _composeTeamPlan({ id: 'e', personas: [], members: [] }, 'x'); const ok3 = p3.steps.length === 0 && p3.memberCount === 0; return ok1 && ok2 && ok3; } },
-    { name: 'UR-0073 Phase C: _teamHandoffReminders 스케줄 알림 (비-manual·active 만, 실행 트리거 아님) 행위 (1.9.373)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamHandoffReminders !== 'function' || m._teamHandoffReminders !== _teamHandoffReminders) return false; const r = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'] }, { id: 'man', schedule: 'manual', status: 'active' }, { id: 'paused', schedule: 'daily', status: 'paused' }]); return r.length === 1 && r[0].includes('rev') && r[0].includes('every-session') && r[0].includes('team preview rev') && !r.join('|').includes('man') && !r.join('|').includes('paused'); } },
+    { name: 'UR-0073 Phase C: _teamHandoffReminders 스케줄 알림 (비-manual·active 만, 실행 트리거 아님) 행위 (1.9.373) + i18n en(1.31.3)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamHandoffReminders !== 'function' || m._teamHandoffReminders !== _teamHandoffReminders) return false; const r = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'] }, { id: 'man', schedule: 'manual', status: 'active' }, { id: 'paused', schedule: 'daily', status: 'paused' }]); const behaviorOk = r.length === 1 && r[0].includes('rev') && r[0].includes('every-session') && r[0].includes('team preview rev') && !r.join('|').includes('man') && !r.join('|').includes('paused'); const _H = /[가-힣]/; const en = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'], review: true }], 'en')[0] || ''; const ko = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'], review: true }])[0] || ''; const i18nOk = !_H.test(en) && /2 members/.test(en) && /review needed/.test(en) && /preview:/.test(en) && _H.test(ko) && /2명/.test(ko) && /검수필요/.test(ko); return behaviorOk && i18nOk; } },
     { name: 'UR-0074: _cadenceAssessment 릴리스 빈도 평가 (임계값) 행위 (1.9.374)', run: () => { const m = require('../lib/pure-utils'); if (typeof _cadenceAssessment !== 'function' || m._cadenceAssessment !== _cadenceAssessment || typeof releaseCadenceCmd !== 'function') return false; return _cadenceAssessment(7, 1, 1).level === 'very-high' && _cadenceAssessment(3, 1, 1).level === 'high' && _cadenceAssessment(1, 1, 1).level === 'moderate' && _cadenceAssessment(0.2, 1, 1).level === 'healthy' && _cadenceAssessment(7, 1, 1).recommendation.length > 0; } },
     { name: 'UR-0084: _withLock 획득/재진입/해제 + maxWaitMs 하드닝(10s) 행위 (1.9.375)', run: () => { if (typeof _withLock !== 'function') return false; const src = read(__filename); const hardened = /maxWaitMs = opts\.maxWaitMs \|\| 10000/.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lock_')); try { const target = path.join(tmp, 'f.md'); let reentrant = false; const lockSeen = _withLock(target, () => { const exists = fs.existsSync(target + '.lock'); reentrant = (_withLock(target, () => 42) === 42); return exists; }); const cleaned = !fs.existsSync(target + '.lock'); return hardened && lockSeen === true && reentrant === true && cleaned; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'UR-0073 Phase D: _teamDeployGate 이중 게이트 (dry-run 기본/env 게이트/실행) 행위 (1.9.376)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamDeployGate !== 'function' || m._teamDeployGate !== _teamDeployGate) return false; const team = { id: 'd', deployCommand: 'echo hi' }; const noCmd = _teamDeployGate({ id: 'x' }, { yes: true, envOn: true }).mode === 'no-command'; const dry = _teamDeployGate(team, { yes: false, envOn: true }).mode === 'dry-run'; const gated = _teamDeployGate(team, { yes: true, envOn: false }).mode === 'gated'; const exec = _teamDeployGate(team, { yes: true, envOn: true }).mode === 'execute'; return noCmd && dry && gated && exec; } },
@@ -9865,7 +9865,7 @@ function handoff(root) {
   // 1.9.373 (UR-0073 Phase C): 에이전트 팀 스케줄 알림 — 비-manual 팀이 정의돼 있으면 미리보기(dry-run) 안내. 실행 없음. opt-out.
   if (!has('--no-team-reminders') && !has('--compact') && !has('--quiet') && process.env.LEERNESS_NO_TEAM_REMINDERS !== '1') {
     try {
-      const _teamRem = _teamHandoffReminders(_loadTeams(root));
+      const _teamRem = _teamHandoffReminders(_loadTeams(root), _uiLang(root));
       if (_teamRem.length) {
         const t = (ko, en) => (_uiLang(root) === 'en' ? en : ko); // 1.30.5 (#156 F3): 로컬 t()
         log('');
@@ -17419,33 +17419,36 @@ function rolesCmd(root, sub, ...args) {
 //   무엇을 할 수 있고 어떻게 끄는지를 명시적으로 공개해 신뢰도를 높인다. SECURITY.md 와 동일 출처.
 // CAPABILITY_SURFACE / POWERFUL_COMMANDS → lib/catalogs.js (1.9.295 UR-0025 4단계)
 function capabilitiesCmd(root, opts = {}) {
+  const _L = _uiLang(root); const _t = (ko, en) => _L === 'en' ? en : ko; // 1.31.3 (UR-0010)
   if (opts.json) {
     log(JSON.stringify({ version: VERSION, surface: CAPABILITY_SURFACE, powerfulCommands: POWERFUL_COMMANDS,
-      principles: ['0 런타임 의존성', 'postinstall 없음', '사용자 동의 없이 외부 LLM/API/CLI 자동 호출 안 함', '변경 전 자동 백업'] }, null, 2));
+      principles: _L === 'en'
+        ? ['0 runtime dependencies', 'no postinstall', 'no external LLM/API/CLI auto-call without user consent', 'auto-backup before changes']
+        : ['0 런타임 의존성', 'postinstall 없음', '사용자 동의 없이 외부 LLM/API/CLI 자동 호출 안 함', '변경 전 자동 백업'] }, null, 2));
     return;
   }
   const isTty = process.stdout && process.stdout.isTTY;
   const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   const riskMark = r => r === 'high' ? '🔴 high' : r === 'medium' ? '🟡 medium' : '🟢 low';
-  log(cy(`# leerness capabilities (1.9.272) — 권한·보안 표면 공개`));
-  log(dm(`  leerness 는 권한이 큰 CLI 하네스입니다. 아래가 할 수 있는 전부이며, 각 항목의 opt-out 을 함께 표기합니다.`));
+  log(cy(_t(`# leerness capabilities (1.9.272) — 권한·보안 표면 공개`, `# leerness capabilities — permission/security surface disclosure`)));
+  log(dm(_t(`  leerness 는 권한이 큰 CLI 하네스입니다. 아래가 할 수 있는 전부이며, 각 항목의 opt-out 을 함께 표기합니다.`, `  leerness is a high-privilege CLI harness. Below is everything it can do, with the opt-out for each item.`)));
   log('');
-  log(`## 원칙`);
-  log(`  ✓ 런타임 의존성 0 · postinstall 없음 · 변경 전 자동 백업`);
-  log(`  ✓ 사용자 동의 없이 외부 LLM/API/CLI 를 자동 호출하지 않음`);
+  log(_t(`## 원칙`, `## Principles`));
+  log(_t(`  ✓ 런타임 의존성 0 · postinstall 없음 · 변경 전 자동 백업`, `  ✓ 0 runtime dependencies · no postinstall · auto-backup before changes`));
+  log(_t(`  ✓ 사용자 동의 없이 외부 LLM/API/CLI 를 자동 호출하지 않음`, `  ✓ never auto-calls an external LLM/API/CLI without user consent`));
   log('');
-  log(`## 권한 표면`);
+  log(_t(`## 권한 표면`, `## Permission surface`));
   for (const [k, v] of Object.entries(CAPABILITY_SURFACE)) {
     log(`  ${riskMark(v.risk)}  ${cy(k)}`);
-    log(`     ${v.desc}`);
-    log(dm(`     opt-out: ${v.optOut}`));
+    log(`     ${_L === 'en' && v.descEn ? v.descEn : v.desc}`);
+    log(dm(`     opt-out: ${_L === 'en' && v.optOutEn ? v.optOutEn : v.optOut}`));
   }
   log('');
-  log(`## ⚠ 주의해서 쓸 명령 (회사/운영 코드)`);
-  for (const c of POWERFUL_COMMANDS) log(`  • ${c.cmd.padEnd(22)} ${dm(c.note)}`);
+  log(_t(`## ⚠ 주의해서 쓸 명령 (회사/운영 코드)`, `## ⚠ Commands to use with care (company/production code)`));
+  for (const c of POWERFUL_COMMANDS) log(`  • ${c.cmd.padEnd(22)} ${dm(_L === 'en' && c.noteEn ? c.noteEn : c.note)}`);
   log('');
-  log(dm(`  전체 정책: SECURITY.md  ·  기계 판독: leerness capabilities --json  ·  권한 등급: leerness policy`));
+  log(dm(_t(`  전체 정책: SECURITY.md  ·  기계 판독: leerness capabilities --json  ·  권한 등급: leerness policy`, `  full policy: SECURITY.md  ·  machine-readable: leerness capabilities --json  ·  permission tiers: leerness policy`)));
 }
 
 // ===== 1.9.281 (UR-0034, GPT-5.5 범용 하네스): 권한 등급(permission tiers) =====

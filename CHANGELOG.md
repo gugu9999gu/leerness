@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.31.3 — 2026-06-16 — 🌐 capabilities(권한·보안 표면) + team reminder 영어화 (UR-0010)
+
+**🌐 `leerness capabilities`(권한·보안 표면 공개, 보안 투명성 플래그십) + handoff 팀 스케줄 reminder 본문 영어 opt-in.** UR-0010 잔여 표면 2종. 라벨뿐 아니라 카탈로그 데이터(표면 desc/opt-out, powerful 명령 note)까지 영어화. 한국어 기본 보존.
+
+### 변경 (UR-0010)
+- **capabilities 완전 영어화**: `capabilitiesCmd` 에 `_uiLang`/`_t` 도입 — 헤더·원칙·섹션 라벨(권한 표면/주의 명령) + `--json` principles 영어화. `lib/catalogs.js` `CAPABILITY_SURFACE` 6표면에 `descEn`/`optOutEn`, `POWERFUL_COMMANDS` 7건에 `noteEn` 추가(보안 disclosure 정확 번역). en 렌더는 `descEn||desc` 폴백, catalog 구조·소비처 무변경.
+- **team reminder 본문 영어화**: `_teamHandoffReminders(teams, lang)` 에 optional `lang` 추가 — `N명`→`N member(s)`(단복수) · `검수필요`→`review needed` · `미리보기`→`preview`. 기본 ko(1-arg 호출 무회귀). handoff 호출부가 `_uiLang(root)` 전달 → 헤더(1.30.5 기영어화)+본문 라인 전체 배선 완성.
+
+### 검증 (회귀 0)
+- **selftest 257**: 기존 catalog 단일출처/`_teamHandoffReminders` 행위 가드에 i18n 추가(6표면 descEn/optOutEn·7 noteEn 영어+무한글 · team en 단복수/검수/preview + ko 보존).
+- **행위**: `capabilities --language en` 한글 0 + 영어 표면 desc/note/principles · ko 보존 · `--json --language en` principles 영어 · `handoff --language en` 팀 라인 영어(2 members/review needed/preview) · ko 라인 보존(2명/검수필요/미리보기) — handoff 전체 배선 실증.
+- **E2E 374→375**: 새 가드 B(1.31.3).
+- patch(1.31.3) — npm 미배포(R-0011). bin+package.json 동시 bump + 일치 가드 통과.
+
+### 잔여 (UR-0010 백로그)
+- `commands` 카탈로그(~85 desc, 큰 표면·다회차) · init en seed 템플릿(큰 표면).
+
 ## 1.31.2 — 2026-06-16 — 🌐 constraints 출력 영어화 (UR-0010)
 
 **🌐 `leerness constraints`(플랫폼/API 제약 사전 체크) 출력을 영어 opt-in 완전화.** UR-0010 CLI 영어화 잔여 표면. 라벨뿐 아니라 카탈로그 데이터(제약 detail)까지 영어화해 반쪽 영어(완전성 과장)를 회피. 한국어 기본 보존.

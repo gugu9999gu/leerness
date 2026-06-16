@@ -6232,6 +6232,39 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.31.3 회귀 (UR-0010): capabilities(권한·보안 표면) 영어화(라벨+카탈로그 descEn/optOutEn/noteEn+principles) + team reminder 본문 영어화 / ko 보존.
+total++;
+{
+  let ok = false;
+  try {
+    const H = /[가-힣]/;
+    const cap = (args) => (cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 15000 }).stdout) || '';
+    const capEn = cap(['capabilities', '--language', 'en']);
+    const capKo = cap(['capabilities']);
+    const capJsonEn = cap(['capabilities', '--json', '--language', 'en']);
+    // EN: zero Hangul + English catalog desc/note + English labels; KO: preserved; JSON: English principles
+    const capOk = !H.test(capEn) && /metadata files|external AI CLIs|mouse\/keyboard/.test(capEn)
+      && /Permission surface/.test(capEn) && /Principles/.test(capEn)
+      && H.test(capKo) && /권한 표면|백업/.test(capKo)
+      && /0 runtime dependencies/.test(capJsonEn);
+    // team reminder body en/ko via handoff (full wiring: pure lang + caller _uiLang)
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-team-i18n-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'nightly', '--members', 'a,b', '--schedule', 'every-session', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const hoEn = (cp.spawnSync(process.execPath, [CLI, 'handoff', d, '--language', 'en'], { encoding: 'utf8', timeout: 30000 }).stdout) || '';
+    const hoKo = (cp.spawnSync(process.execPath, [CLI, 'handoff', d], { encoding: 'utf8', timeout: 30000 }).stdout) || '';
+    const teamEn = hoEn.split('\n').filter(l => /🤝|team preview nightly/.test(l));
+    const teamKo = hoKo.split('\n').filter(l => /🤝|team preview nightly/.test(l));
+    const teamOk = teamEn.length >= 2 && !teamEn.some(l => H.test(l))
+      && teamEn.some(l => /2 members/.test(l)) && teamEn.some(l => /review needed/.test(l)) && teamEn.some(l => /preview:/.test(l))
+      && teamKo.some(l => /2명/.test(l)) && teamKo.some(l => /검수필요/.test(l)) && teamKo.some(l => /미리보기/.test(l));
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+    ok = capOk && teamOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.31.3) UR-0010: capabilities en 영어(표면 desc/optOut/note/principles, 한글 0) + ko 보존 + team reminder 본문 en/ko(handoff 전체배선)' : '✗ capabilities/team reminder 영어화 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {
