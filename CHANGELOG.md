@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.31.0 — 2026-06-16 — 🛡️ [안정화/Stable] 14th리뷰 7/7 + 하위 프로젝트(detect/adopt) 안정 minor
+
+**🛡️ 안정화(Stable) minor — 14번째 외부 리뷰 7건 전부 수정 + 사용자 명시 하위 프로젝트 기능을 npm 공개.** 직전 minor(1.30.0) 이후 누적된 패치 5건(1.30.1~1.30.5)을 검증·통합해 배포. R-0011 정책의 22번째 stable minor. 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.30.1~1.30.5)
+- **🔒 보안 정직성 (1.30.1, 14th리뷰 F1+F2)**: `audit`/`check` 가 소스에 커밋된 시크릿을 `_collectSecretFindings` 콘텐츠 스캔으로 **failure 승격**(scan secrets 와 일관, gitignored 는 FP 0). handoff `🔒 보안 요약` 섹션이 `.env` 없어도 **커밋 시크릿 노출**(파일 위치만, 값 미출력).
+- **🔗 하위 프로젝트 부모 자산: 탐지 (1.30.2, 사용자 명시 #157)**: `leerness parent detect [--json]` — 상위 leerness 부모 탐지(read-only). handoff 헤드라인 `🔗 부모 프로젝트 (N 자산·미적용)`. 외부AI(codex)+Claude(Plan) 교차검토로 **방향 C "탐지+게이트"** 결정(부모 자산 재활용은 사용자 결정 게이트).
+- **🔗 하위 프로젝트 부모 자산: 적용 (1.30.3, #158)**: `leerness parent adopt [--select] [--apply]` — dry-run 기본, `--apply`(사용자 명시) 시에만 자식-로컬 `inherited-from-parent.md`+`PARENT_LINK.json` 기록. **자식 design-system.md 무변경**(비파괴). handoff 헤드라인 adopt 상태 반영.
+- **🧹 cli-ux 일관성 (1.30.4, 14th리뷰 F5+F6+F7)**: decision/lesson **dedup**(task/rule 일관) · rule/lesson 빈입력 **--json 구조화**(exit1) · bogus subcommand **잘못된 토큰 명시**.
+- **🌐 i18n (1.30.5, 14th리뷰 F3+F4)**: `--language en` handoff 본문 4블록(워크플로 가이드/메모리 변동/ScheduleWakeup/팀 스케줄) + verify-claim/optimism-check 에러 영어화.
+- **🐛 인프라**: `VERSION === package.json` selftest 가드(한쪽만 bump 실수 2초 차단) · e2e flake 하드닝(dispatch/banner timeout 10s→30s) · 윈도형 소스가드 확대.
+
+### 검증 (회귀 0)
+- **selftest 254→257** (parent detect/adopt + 버전정합 + 보안/cli-ux/i18n 가드).
+- **E2E 368→372** — 신규 행위가드: B(1.30.1) 보안정직성 · B(1.30.2) parent detect · B(1.30.3) parent adopt 비파괴 · B(1.30.4) cli-ux · i18n ⑫(handoff 본문/verify-claim).
+- minor(1.31.0) — npm 배포(R-0011 stable) + annotated tag(Stable) + GitHub release(latest) + 게시본 클린룸 재실증.
+
+### 🎉 14번째 외부 멀티모델 리뷰 7/7 완료
+bounded 3-에이전트 리뷰 → 맹신 X 7/7 재현검증 → F1~F7 전부 수정·배포. 리뷰→검증→백로그→수정의 전체 사이클 완주.
+
+### 잔여 (UR-0010 백로그)
+- 팀 reminder 본문 · capabilities/commands/constraints/install-safety · init en seed 템플릿.
+
 ## 1.30.5 — 2026-06-16 — 🌐 handoff 본문 i18n + verify-claim 에러 영어화 (14th 외부리뷰 F3+F4) — 14th 리뷰 7/7 완료
 
 **🌐 14번째 외부 리뷰 마지막 2건(F3 P2 + F4 P3) 수정 → 14th 리뷰 7건 전부 소진.** `--language en` 에서 handoff 본문이 한국어 라벨을 누출하던 것 + verify-claim 미입력 에러 한국어를 영어화.
