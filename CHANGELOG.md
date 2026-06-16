@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.28.1 — 2026-06-16 — Phase 10b: drift --auto-fix 로그 영어화 + 보안신호 판정 버그 수정 (UR-0010)
+
+**🐛+🌐 drift 를 완전 영어로 + 직전 라운드가 심은 버그 수정.** `drift check --auto-fix` 진행 로그를 영어화하면서, 1.27.2 가 보안 신호 라벨을 언어화하며 함께 심은 **내부 판정 버그**를 발견·수정.
+
+### 변경
+- **🐛 hasSecurityFired 언어-결합 버그 수정**: 1.27.2 에서 보안 신호 `label` 을 `t(ko,en)` 로 언어화했는데, 내부 `hasSecurityFired` 가 한국어 라벨 정규식(`/보안 위험 \(1\.9\.78\)/`)으로 매칭하고 있어 **`drift check --auto-fix --language en` 에서 보안 auto-fix 가 발동하지 않던** 잠복 버그. 언어-안정 필드(`f.file === '.env / .gitignore'`)로 매칭 변경 → en/ko 모두 정상 발동. (번역된 라벨에 내부 로직이 결합되면 안 된다는 교훈 — [[lesson-adversarial-harden-heuristic]] 의 'valueGroup' 류와 동일.)
+- **🌐 drift --auto-fix 로그 영어화 (~21줄)**: 보안/인코딩/delivered/idempotency/release-cleanup/session-close 자동회복 진행 로그를 `t(ko,en)`. 이로써 `drift check` 가 **완전히** 영어 지원(출력 + auto-fix).
+- **한국어 기본 유지**: 영어는 명시 opt-in. ko 로그/내부 호출 무영향.
+
+### 검증 (회귀 0)
+- **selftest 248→249** (afLog 영어/한국어 + 버그수정 소스가드) · 행위(보안 auto-fix en/ko 모두 발동 + en 로그 한글 0 [Node 탐지] + ko 보존) · **E2E 368/368**.
+- patch(1.28.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.28.0 — 2026-06-15 — 🛡️ [안정화/Stable] 정직성 후속 + drift 영어화 안정 minor
 
 **🛡️ 안정화(Stable) minor — 13번째 외부리뷰 정직성 수정 + drift 진단 영어화를 npm 공개.** 직전 minor(1.27.0) 이후 누적된 패치 2건(1.27.1 + 1.27.2)을 검증·통합해 배포. R-0011 정책의 19번째 stable minor. 한국어 우선 기본은 그대로.

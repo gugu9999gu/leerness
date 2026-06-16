@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.28.0';
+const VERSION = '1.28.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3835,6 +3835,13 @@ function _selfTestCases() {
       const en = dr.includes('| signal | age | threshold | weight | fired |') && dr.includes('session close missing') && dr.includes('recommended actions') && dr.includes('security risk:');
       const koPreserved = dr.includes('| 신호 | age | 임계 | 가중치 | 발화 |') && dr.includes('session close 누락') && dr.includes('권장 조치');  // ko 인자 보존(e2e ko/내부호출)
       return injected && en && koPreserved;
+    } },
+    { name: 'Phase 10b (1.28.1): drift --auto-fix 로그 영어화 + hasSecurityFired 언어안정 매칭 (소스 가드)', run: () => {
+      const dr = read(path.join(path.dirname(__filename), '..', 'lib', 'drift.js'));
+      const bugFix = dr.includes("f.file === '.env / .gitignore'");  // 보안 신호 판정을 언어-안정 file 필드로(라벨 regex 결합 제거)
+      const afLogEn = dr.includes('recovering security signal: running audit --fix') && dr.includes('re-checking...') && dr.includes('auto-fix error:');
+      const afLogKo = dr.includes('보안 신호 회복: audit --fix 자동 실행 중') && dr.includes('재검사 중...');  // ko 인자 보존
+      return bugFix && afLogEn && afLogKo;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
