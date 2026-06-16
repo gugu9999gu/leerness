@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.32.0 — 2026-06-16 — 🛡️ [안정화/Stable] UR-0010 영어화 3종(install-safety+constraints+capabilities/team) 안정 minor
+
+**🛡️ 안정화(Stable) minor — 직전 minor(1.31.0) 이후 누적된 UR-0010 CLI 영어화 패치 3건(1.31.1~1.31.3)을 검증·통합해 npm 공개.** R-0011 정책의 23번째 stable minor. 잔여 영어화 표면 4종(install-safety / constraints / capabilities / team reminder)을 라벨+카탈로그 데이터까지 완전 영어화. 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.31.1~1.31.3)
+- **🌐 install-safety 영어화 (1.31.1)**: `install-safety`(설치 안전 프로필) 출력 영어 opt-in — 프로필/의존성/install-script/offline/safeInstall/hardeningNote. 셸-무관 가드(`npx --yes`/PowerShell/no `npm_config_` prefix) 양 언어 보존.
+- **🌐 constraints 영어화 (1.31.2)**: `constraints list/check/add` 라벨 + `lib/catalogs.js` `_DEFAULT_PLATFORM_CONSTRAINTS` 6 플랫폼 한국어 detail 9종 `detailEn` + `_matchConstraints(…, lang)` suggestion 영어. en `list` 에서 한글-only alias(`결제`)는 표시 숨김(매처는 유지 → 매칭 무회귀).
+- **🌐 capabilities + team reminder 영어화 (1.31.3)**: `capabilities`(권한·보안 표면 공개) 라벨/원칙/principles + `CAPABILITY_SURFACE` 6표면 `descEn`/`optOutEn` + `POWERFUL_COMMANDS` 7 `noteEn`(보안 disclosure 정확 번역). `_teamHandoffReminders(…, lang)` 본문(`N member(s)`/`review needed`/`preview`) + handoff `_uiLang` 전달로 전체 배선 완성.
+- **공통 패턴**: 카탈로그 데이터(detailEn/descEn/noteEn)까지 영어화해 "반쪽 영어(완전성 과장)" 회피 · 순수 함수 optional `lang` 인자(기본 ko, 기존 호출 무회귀) · ko 기본 verbatim 보존.
+
+### 검증 (회귀 0)
+- **selftest 257** (constraints/capability catalog 단일출처 + `_matchConstraints`/`_teamHandoffReminders` 행위 가드에 i18n 추가 — `*En` 존재·무한글 + ko 보존).
+- **E2E 375** (B(1.31.1) install-safety en · B(1.31.2) constraints en · B(1.31.3) capabilities+team handoff 전체배선 — 한글 0 + ko 보존 행위 가드).
+- **stable minor** — npm 공개 + annotated tag(Stable) + GitHub release `--latest` + npm dist-tag `stable`. 게시본 클린룸 재실증(install-safety/constraints/capabilities/team en 4표면).
+- bin+package.json 동시 bump + 일치 가드 통과.
+
+### 잔여 (UR-0010 백로그)
+- `commands` 카탈로그(~85 desc, 큰 표면·다회차) · init en seed 템플릿(큰 표면).
+
 ## 1.31.3 — 2026-06-16 — 🌐 capabilities(권한·보안 표면) + team reminder 영어화 (UR-0010)
 
 **🌐 `leerness capabilities`(권한·보안 표면 공개, 보안 투명성 플래그십) + handoff 팀 스케줄 reminder 본문 영어 opt-in.** UR-0010 잔여 표면 2종. 라벨뿐 아니라 카탈로그 데이터(표면 desc/opt-out, powerful 명령 note)까지 영어화. 한국어 기본 보존.
