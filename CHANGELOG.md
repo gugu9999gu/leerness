@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.30.4 — 2026-06-16 — cli-ux 일관성: add류 dedup + 빈입력 --json + bogus subcommand (14th 외부리뷰 F5+F6+F7)
+
+**🧹 14번째 외부 리뷰가 재현·확인한 cli-ux 일관성 3종(P2/P2/P3) 수정.** add 계열 명령들이 서로 다르게 동작하던 비일관성을 정리.
+
+### 변경 (14th 외부리뷰 F5+F6+F7)
+- **F5 (P2) decision/lesson dedup**: `decision add` / `lesson save` 가 동일 입력을 무조건 append 해 중복 누적되던 것을 `task add`/`rule add` 와 일관되게 **dedup**(동일 title/text 존재 시 `exists (skip)`, `--force` 우회). `--json` 시 `{ok:true,skipped:true}`.
+- **F6 (P2) rule/lesson 빈입력 --json 구조화**: `rule add "" --json` / `lesson save "" --json` 가 평문 `✗` 를 출력하던 것을 `decision/task add` 와 일관되게 **구조화 JSON**(`{ok:false,code:empty_title|empty_text}` + exit 1). dispatch 레이어에 failJson 가드 추가. 성공 경로 JSON 무회귀.
+- **F7 (P3) bogus subcommand 토큰 명시**: `task frobnicate` / `rule frobnicate` 가 top-level `unknown_command: task/rule`(유효 부모명 오인) 를 출력하던 것을, **잘못된 토큰을 명시 + usage**(`알 수 없는 task 하위명령: frobnicate — leerness task list|add|...`) + exit 1 로 수정. decision 의 usage 출력과 일관.
+
+### 검증 (회귀 0)
+- **selftest 257** (변동 없음 — 행위 변경이라 e2e 로 검증).
+- **행위(맹신 X)**: F5 decision/lesson 1 copy + --force→2 · F6 rule/lesson 빈입력 구조화 JSON+exit1 & 성공경로 JSON 유지 · F7 task/rule 잘못된 토큰 명시+exit1 & 유효 하위명령 무회귀. 3/3 PASS.
+- **E2E 371→372**: 새 가드 B(1.30.4).
+- patch(1.30.4) — npm 미배포(R-0011). bin+package.json 동시 bump(1.30.2 교훈) + 일치 가드 통과.
+
+### 14th 외부리뷰 잔여
+- **#156** F3+F4 i18n(handoff 본문 en 누출 + verify-claim 에러) — 다음 라운드. → 14th 리뷰 7건 중 F1/F2(1.30.1)+F5/F6/F7(1.30.4) 완료, F3/F4 남음.
+
 ## 1.30.3 — 2026-06-16 — 🔗 parent adopt: 부모 자산 게이트형 적용 (dry-run 기본·비파괴) (#158 사용자명시)
 
 **🔗 1.30.2(탐지)의 후속 — 부모 자산을 자식 프로젝트에 '적용'하는 단계.** 사용자 결정 게이트: dry-run 기본, `--apply`(사용자 명시 결정) 시에만 기록하며, **자식 원본 design-system.md 를 변형하지 않고 별도 참조 파일에만 기록(비파괴)**.

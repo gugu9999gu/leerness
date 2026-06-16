@@ -6153,6 +6153,41 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.30.4 회귀 (#155 / 14th리뷰 F5+F6+F7): add류 cli-ux 일관성 — decision/lesson dedup + rule/lesson 빈입력 --json 구조화 + task/rule bogus subcommand 토큰 명시.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f567-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const run = (args) => cp.spawnSync(process.execPath, [CLI, ...args, '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const isJson = (s) => { try { JSON.parse((s||'').trim()); return true; } catch { return false; } };
+    // F5 dedup: decision/lesson 동일 입력 2회 → 1 copy, --force → 2
+    run(['decision', 'add', 'dupdec']); run(['decision', 'add', 'dupdec']);
+    const decCount = ((run(['decision', 'list']).stdout || '').match(/dupdec/g) || []).length;
+    run(['lesson', 'save', 'duples']); run(['lesson', 'save', 'duples']);
+    const lesCount = ((run(['lesson', 'list']).stdout || '').match(/duples/g) || []).length;
+    run(['decision', 'add', 'dupdec', '--force']);
+    const decForce = ((run(['decision', 'list']).stdout || '').match(/dupdec/g) || []).length;
+    const f5 = decCount === 1 && lesCount === 1 && decForce === 2;
+    // F6 빈입력 --json 구조화 + exit1 (성공경로도 JSON 유지)
+    const ra = run(['rule', 'add', '', '--json']); const ls = run(['lesson', 'save', '', '--json']);
+    const raOk = run(['rule', 'add', '룰F6', '--json']); const lsOk = run(['lesson', 'save', '레슨F6', '--json']);
+    const f6 = isJson(ra.stdout) && /empty_title/.test(ra.stdout) && ra.status === 1
+            && isJson(ls.stdout) && /empty_text/.test(ls.stdout) && ls.status === 1
+            && isJson(raOk.stdout) && isJson(lsOk.stdout);
+    // F7 bogus subcommand → 잘못된 토큰 명시 + exit1 (유효 하위명령 무회귀)
+    const tf = run(['task', 'frobnicate']); const rf = run(['rule', 'frobnicate']);
+    const f7 = /task 하위명령: frobnicate/.test(tf.stdout + tf.stderr) && tf.status === 1
+            && /rule 하위명령: frobnicate/.test(rf.stdout + rf.stderr) && rf.status === 1
+            && run(['task', 'list']).status === 0 && run(['rule', 'list']).status === 0;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = f5 && f6 && f7;
+  } catch {}
+  console.log(ok ? '✓ B(1.30.4) #155 cli-ux 일관성: decision/lesson dedup(--force 우회) + rule/lesson 빈입력 --json 구조화(exit1) + task/rule bogus subcommand 토큰 명시' : '✗ cli-ux 일관성 F5+F6+F7 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {

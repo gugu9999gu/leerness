@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.30.3';
+const VERSION = '1.30.4';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7709,12 +7709,19 @@ function lessonSave(root, text) {
   if (!text) return fail('lesson text required. 예: leerness lesson save "JWT는 refresh token도 짧게 (15분 권장)"');
   const tag = arg('--tag', '');
   // 1.9.406 (8번째 버그헌트, UR-0110): RMW 락 직렬화 — 동시 lesson save lost-update 방지(UR-0043 패턴).
+  // 1.30.4 (14th리뷰 F5): task/rule add 와 일관된 dedup — 동일 text 존재 시 skip(--force 우회). 종전엔 무조건 append(중복 누적).
+  let _skipped = false;
   _withLock(lessonsJsonPath(root), () => {
     const all = _loadLessons(root);
+    if (!has('--force') && all.some(l => l && l.text === text)) { _skipped = true; return; }
     all.push({ date: today(), text, tag: tag || null });
     _saveLessons(root, all);
   });
   // 1.9.413 (6th외부평가 codex P2, UR-0101): --json 구조화 출력(데이터 이미 영속).
+  if (_skipped) {
+    if (has('--json')) { log(JSON.stringify({ ok: true, skipped: true, text, tag: tag || null })); return; }
+    ok(`lesson exists (skip): ${text.slice(0, 40)}  (--force 로 추가)`); return;
+  }
   if (has('--json')) { log(JSON.stringify({ ok: true, text, tag: tag || null })); return; }
   ok(`lesson saved`);
   _autoRoadmap(absRoot(root), 'data-change');
@@ -7797,8 +7804,11 @@ function decisionAdd(root, title) {
   const impact = arg('--impact', '');
   // 1.9.339 (UR-0053): canonical JSON write path — 기존 항목(JSON 우선, 없으면 MD backfill) 로드 후 추가, JSON+MD projection 동시 저장.
   // 1.9.406 (8번째 버그헌트, UR-0110): RMW 락 직렬화 — 동시 decision add lost-update 방지(UR-0043 패턴).
+  // 1.30.4 (14th리뷰 F5): task/rule add 와 일관된 dedup — 동일 title 존재 시 skip(--force 우회). 종전엔 무조건 append(중복 누적).
+  let _skipped = false;
   _withLock(decisionsJsonPath(root), () => {
     const all = _loadDecisions(root);
+    if (!has('--force') && all.some(d => d && (d.title === title || d.decision === title))) { _skipped = true; return; }
     all.push({
       date: today(), title,
       decision: title,
@@ -7809,6 +7819,10 @@ function decisionAdd(root, title) {
     _saveDecisions(root, all);
   });
   // 1.9.413 (6th외부평가 codex P2, UR-0101): --json 구조화 출력(데이터 이미 영속).
+  if (_skipped) {
+    if (has('--json')) { log(JSON.stringify({ ok: true, skipped: true, title })); return; }
+    ok(`decision exists (skip): ${title}  (--force 로 추가)`); return;
+  }
   if (has('--json')) { log(JSON.stringify({ ok: true, title })); return; }
   ok(`decision added: ${title}`);
   // 1.9.43+ handoff lessons 회수 흐름과 자동 통합 (decisions.md fuzzy 매칭됨)
@@ -20382,7 +20396,12 @@ async function main() {
   if (cmd === 'idempotency')                        return idempotencyCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.213: leerness intent <classify|expand|domains> — intent inference + scope expansion (사용자 명시)
   if (cmd === 'intent')                             return intentCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
-  if (cmd === 'rule' && args[1] === 'add')          return ruleAdd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), _parseAddTitle(args, 2));  // 1.9.426: flag/경로 break(_parseAddTitle) · 1.9.445 (UR-0151): positional path 지원(제목과 분리)
+  if (cmd === 'rule' && args[1] === 'add') {  // 1.9.426: flag/경로 break(_parseAddTitle) · 1.9.445 (UR-0151): positional path 지원(제목과 분리)
+    const _desc = _parseAddTitle(args, 2);
+    // 1.30.4 (14th리뷰 F6): 빈 입력 시 --json 에서도 구조화 JSON(task/decision add 와 일관). 종전엔 ruleAdd 내부 fail() 가 평문 출력.
+    if (!_desc) { failJson(has('--json'), 'empty_title', 'rule add "<설명>" 필요 (빈/경로-only 거부)'); return process.exit(process.exitCode || 1); }
+    return ruleAdd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), _desc);
+  }
   if (cmd === 'rule' && args[1] === 'list')         return ruleList(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'remove')       return ruleRemove(arg('--path', process.cwd()), args[2]);
   if (cmd === 'rule' && args[1] === 'pause')        return rulePause(arg('--path', process.cwd()), args[2]);
@@ -20390,6 +20409,8 @@ async function main() {
   if (cmd === 'rule' && args[1] === 'stop')         return ruleStop(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'resume-all')   return ruleResumeAll(arg('--path', process.cwd()));
   if (cmd === 'rule' && args[1] === 'verify')       return ruleVerifyCmd(arg('--path', process.cwd()));
+  // 1.30.4 (14th리뷰 F7): rule 하위명령 미매칭 시 잘못된 토큰 명시 + usage(종전엔 top-level 'unknown_command: rule' 로 유효 부모명을 오인 표기).
+  if (cmd === 'rule')                               { failJson(has('--json'), 'unknown_subcommand', `알 수 없는 rule 하위명령: ${args[1] || '(없음)'} — leerness rule add|list|remove|pause|resume|stop|resume-all|verify`); return process.exit(process.exitCode || 1); }
   if (cmd === 'release' && args[1] === 'bump')      return releaseBump(args[2] || arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'note')      return releaseNote(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'release' && args[1] === 'publish')   return releasePublish(args[2] || arg('--path', process.cwd()));
@@ -20444,6 +20465,8 @@ async function main() {
     if (sub==='relink')       return taskRelink(root);
     if (sub==='sync')         return taskSyncCmd(root);
     if (sub==='export')       return taskExportCmd(root);
+    // 1.30.4 (14th리뷰 F7): 미매칭 하위명령 시 잘못된 토큰을 명시 + usage(종전엔 top-level 'unknown_command: task' 로 유효 부모명을 오인 표기).
+    failJson(has('--json'), 'unknown_subcommand', `알 수 없는 task 하위명령: ${sub} — leerness task list|add|update|drop|fix-evidence|relink|sync|export`); return process.exit(process.exitCode || 1);
   }
   // 1.9.114: memory status — Memory Write Surface 5종 통합 상태
   if (cmd === 'memory' && args[1] === 'status') {
@@ -20471,7 +20494,10 @@ async function main() {
         if (args[i].startsWith('--') || /^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(args[i])) break;
         textParts.push(args[i]);
       }
-      return lessonSave(root, textParts.join(' '));
+      const _text = textParts.join(' ');
+      // 1.30.4 (14th리뷰 F6): 빈 입력 시 --json 에서도 구조화 JSON(task/decision add 와 일관). 종전엔 lessonSave 내부 fail() 가 평문 출력.
+      if (!_text) { failJson(has('--json'), 'empty_text', 'lesson save "<text>" 필요 (빈/경로-only 거부)'); return process.exit(process.exitCode || 1); }
+      return lessonSave(root, _text);
     }
     if (sub === 'list') {
       return lessonListCmd(root, { json: has('--json') });
