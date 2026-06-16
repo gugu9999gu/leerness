@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.30.0 — 2026-06-16 — 🛡️ [안정화/Stable] handoff 본문 i18n 4종 안정 minor
+
+**🛡️ 안정화(Stable) minor — handoff 본문 4블록 영어화 + i18n-coupling 감사 + 블록-스코프 t 회귀수정을 npm 공개.** 직전 minor(1.29.0) 이후 누적된 패치 4건(1.29.1~1.29.4)을 검증·통합해 배포. R-0011 정책의 21번째 stable minor. 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.29.1~1.29.4)
+- **🔒🌐 보안 요약 섹션 영어화 + i18n-coupling 감사 (1.29.1)**: 영어 사용자가 커밋된 시크릿을 가질 때 정확히 노출되는 handoff 보안 요약 섹션(`## 🔒 보안 요약` / issues / `🚨 CRITICAL` / 자동회복 / `💡 자동 실행 옵션`)을 영어화. lib/ 전수로 1.28.1 `hasSecurityFired` 류 라벨-결합 버그 추가 탐색 → 0건. **블록-스코프 t 회귀 자체수정**: headline `t()` 스코프 밖이라 `ReferenceError → try 삼킴 → 섹션 증발` 회귀를 심었다가 **행위 검증**으로 적발(소스가드는 통과)·수정.
+- **🌐 env-detect 블록 영어화 (1.29.2)**: `🖥 실행 환경` PATH 누락/변동 감지 + `→ 상세` 안내 영어화.
+- **🌐 shell-guard 블록 영어화 (1.29.3)**: `🐚 터미널 셸 가드` 헤더 + 환경 버전 변동 재검토 + 최근 셸 실패 + 명령 실행 전 점검 영어화.
+- **🌐 CLI 에이전트 슬래시 블록 영어화 (1.29.4)**: `🤖 CLI 에이전트 슬래시 명령` 헤더 + 활성 에이전트 + (하위명령) + 전체/기록/최신화 영어화.
+- **공통**: 4블록 모두 headline `t()` 스코프 밖 → 블록 로컬 `t()`/`_uiLang(root)` 정의(1.29.1 교훈 적용). 한국어 verbatim 보존.
+
+### 핵심 교훈 (defense-in-depth)
+- **소스가드(문자열 존재) ≠ 동작**: 번역 헬퍼를 다른 섹션의 블록 스코프에 두면 `ReferenceError` 가 `try/catch` 에 삼켜져 표면 전체가 (양 언어 모두) 사라진다. selftest 소스가드는 통과하지만 런타임 출력이 0. **행위 검증 + e2e 가드**로만 잡힌다.
+
+### 검증 (회귀 0)
+- **selftest 250→254** (4블록 영어/한국어 보존 소스가드, split-literal 로 self-reference 회피).
+- **E2E 368/368** — i18n 행위가드 **⑧~⑪ 신규**: 보안요약(.env+미흡 gitignore) / env-detect(스냅샷 변동) / shell-guard(셸실패+스냅샷변동) / agent-slash(env flag 활성) 4 시나리오를 실제 발동시켜 en 영어(블록 한글 0, Node 탐지) + ko 보존 검증.
+- minor(1.30.0) — npm 배포(R-0011 stable) + annotated tag(Stable) + GitHub release(latest) + 게시본 클린룸 재실증.
+
+### 잔여 (UR-0010 백로그)
+- capabilities/commands/constraints/install-safety 영어화 · init en seed 템플릿 i18n · handoff 본문 잔여 표면(팀 스케줄/요청 자동완료/비정상종료) 점진 영어화.
+
 ## 1.29.4 — 2026-06-16 — handoff CLI 에이전트 슬래시 명령 블록 영어화 (UR-0010)
 
 **🌐 handoff CLI 에이전트 슬래시 명령 블록을 영어화.** 1.29.3 잔여 백로그. 외부 CLI 에이전트(codex/claude/agy/copilot/ollama)가 env flag 로 활성일 때 노출되는 sub-agent 슬래시 명령 요약을 `--language en` 에서 영어로. 한국어 기본 보존.
