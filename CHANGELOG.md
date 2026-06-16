@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.28.0 — 2026-06-15 — 🛡️ [안정화/Stable] 정직성 후속 + drift 영어화 안정 minor
+
+**🛡️ 안정화(Stable) minor — 13번째 외부리뷰 정직성 수정 + drift 진단 영어화를 npm 공개.** 직전 minor(1.27.0) 이후 누적된 패치 2건(1.27.1 + 1.27.2)을 검증·통합해 배포. R-0011 정책의 19번째 stable minor. 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.27.1~1.27.2)
+- **🔎 정직성 후속 수정 (1.27.1)**: `audit <미초기화경로>` 가 "미초기화" 선언 후 없는 하네스에 design/reuse 체크를 보고하던 모순 출력 차단(요약/JSON 직행). `verify-claim --run-tests` 가 비-테스트 `--test-cmd`(exit 0, 미파싱)를 `✓ all passed` 로 거짓표기하던 것을 `✓ ran (exit 0) — test count unconfirmed` 로 정직 표기(판정/exit 불변 → FP=0).
+- **🌐 drift check 출력 영어화 (1.27.2)**: `drift check` 기본 출력(경로/상태/신호 표/보안 신호/권장 조치)을 영어 opt-in. `--auto-fix` 진행 로그는 Phase 10b 백로그. 내부 호출(handoff/health)은 ko 기본이라 무영향.
+- **한국어 우선 기본 보존**: 영어는 명시 opt-in. 한국어 출력/내부 JSON 은 그대로(e2e 무회귀).
+
+### 잔여 (백로그)
+- drift `--auto-fix` 로그(Phase 10b) · capabilities/commands/doctor/install-safety/constraints 영어화 · init en seed 템플릿 i18n.
+
+### 검증 (회귀 0)
+- **selftest 248/248** · **E2E 368/368** (정직성 후속 가드 + i18n 행위가드 lens/health/drift en/ko) · 게시본 클린룸 재실증.
+- minor(1.28.0) — npm 배포(R-0011 stable) + annotated tag(Stable) + GitHub release(latest).
+
 ## 1.27.2 — 2026-06-15 — CLI 영어화 Phase 10: drift check 출력 영어화 (UR-0010)
 
 **🌐 drift 진단 출력을 영어로.** 고빈도 진단 `drift check` 의 **기본 출력**(경로/상태/신호 표/보안 신호/권장 조치)을 영어 opt-in 으로. `--auto-fix` 진행 로그(~25줄)는 정직하게 Phase 10b 로 분리(반쪽 주장 회피).
