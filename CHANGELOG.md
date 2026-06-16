@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.30.1 — 2026-06-16 — 🔒 보안 정직성: audit/handoff 보안요약이 커밋된 시크릿 노출 (14th 외부리뷰 F1+F2)
+
+**🔒 도구가 보안 상태를 정직하게 보고하도록 수정.** 14번째 외부 리뷰가 재현·확인한 정직성 갭 2건(P2): `audit`/handoff 보안요약이 소스에 커밋된 실 시크릿을 노출하지 못해, `scan secrets`(exit 1)와 모순되게 healthy 를 반환하던 문제. 정직성 테마(1.9.415/1.9.418/1.27.1 계열) 연장.
+
+### 변경 (14th 외부리뷰 F1+F2)
+- **🔒 F1 — audit 커밋 시크릿 failure 승격**: `audit`/`check` 가 `_collectSecretFindings` 콘텐츠 스캔을 돌려 **committed 시크릿을 failure 로 승격**(healthy:false / exit 1) — `scan secrets` 와 일관. 기존엔 `.gitignore` 패턴/`.env` 동기화만 검사해, un-gitignored `.env` + 실 AWS/GitHub 키에 healthy:true/exit 0 을 반환(audit 기반 CI 게이트가 노출 시크릿을 통과)하던 갭. **gitignored 보관 시크릿은 committed 에서 제외 → FP 0**. 끄기: `--no-secret-scan`. (lib/audit.js, DI `_collectSecretFindings` 주입.)
+- **🔒 F2 — handoff 보안요약이 committed 시크릿 노출**: `## 🔒 보안 요약` 섹션이 headline 의 `🚨 시크릿 N건` 과 일관되게 **커밋된 시크릿을 노출**. 기존엔 `.env`/`.gitignore` 만 검사 + `envExists` 단독 게이팅이라 `.env` 없으면 섹션 통째 생략(헤드라인은 시크릿 N건인데 상세 섹션 부재). 이제 committed 시크릿이 있으면 `.env` 없어도 섹션 표시 + 파일 위치(`file:line`) 노출(값 snippet 은 미출력 — handoff 로그로의 시크릿 유출 방지). ko/en 양쪽.
+
+### 검증 (회귀 0)
+- **selftest 254/254** (audit 위임/FP-FN 가드 유지).
+- **행위 검증**: F1 un-gitignored .env+실키 → audit exit 1/healthy:false(=scan 일관) · **FP 0**(gitignored .env+키 → healthy:true · 클린 → healthy:true) · F2 committed 시크릿(.env 없음) → 보안요약 섹션 노출(ko) + en 영어(섹션 한글 0, Node 탐지).
+- **E2E i18n+보안가드 신규 B(1.30.1)**: F1 승격/FP0 + F2 ko/en 노출을 e2e 에 못박음. **368→369**.
+- patch(1.30.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
+### 14th 외부리뷰 잔여 백로그 (다음 라운드)
+- F5+F6+F7 cli-ux 일관성(decision/lesson dedup · rule/lesson 빈입력 --json 구조화 · bogus subcommand 토큰) · F3+F4 UR-0010 잔여 i18n(handoff 본문 en 누출 · verify-claim 에러).
+
 ## 1.30.0 — 2026-06-16 — 🛡️ [안정화/Stable] handoff 본문 i18n 4종 안정 minor
 
 **🛡️ 안정화(Stable) minor — handoff 본문 4블록 영어화 + i18n-coupling 감사 + 블록-스코프 t 회귀수정을 npm 공개.** 직전 minor(1.29.0) 이후 누적된 패치 4건(1.29.1~1.29.4)을 검증·통합해 배포. R-0011 정책의 21번째 stable minor. 한국어 우선 기본은 그대로.

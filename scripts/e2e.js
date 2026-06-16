@@ -6041,6 +6041,49 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.30.1 회귀 (14th 외부리뷰 F1+F2): audit/handoff 보안요약이 커밋된 시크릿을 정직하게 노출.
+//   F1: audit 가 _collectSecretFindings 콘텐츠 스캔을 돌려 committed 시크릿을 failure 로 승격(scan secrets 와 일관) — gitignored 는 무영향(FP 0).
+//   F2: handoff 🔒 보안요약 섹션이 .env 없어도 committed 시크릿을 노출(envExists 단독 게이팅 제거).
+total++;
+{
+  let ok = false;
+  try {
+    const H = /[가-힣]/;
+    // (F1) un-gitignored .env + 실 시크릿 → audit healthy:false exit1
+    const d1 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f1bad-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d1, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d1, '.gitignore'), 'node_modules/\n');
+    fs.writeFileSync(path.join(d1, '.env'), 'AWS=AKIAJQXMP7RZ2KL9WXYZ\nGH=ghp_aZ9bY8cX7dW6eV5fU4gT3hS2iR1jQ0kP9oN8\n');
+    const a1 = cp.spawnSync(process.execPath, [CLI, 'audit', d1, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let f1bad = false; try { const j = JSON.parse(a1.stdout); f1bad = j.healthy === false && a1.status === 1 && j.findings.some(x => x.kind === 'committed_secret'); } catch {}
+    // (F1-noFP) gitignored .env + 시크릿 → audit healthy:true (no false-positive)
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f1ok-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d2, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d2, '.gitignore'), '.env\n.env.local\n.env.production\n.env.*.local\n*.pem\ncredentials.json\nnode_modules/\n');
+    fs.writeFileSync(path.join(d2, '.env'), 'AWS=AKIAJQXMP7RZ2KL9WXYZ\n');
+    const a2 = cp.spawnSync(process.execPath, [CLI, 'audit', d2, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let f1ok = false; try { const j = JSON.parse(a2.stdout); f1ok = j.healthy === true && a2.status === 0; } catch {}
+    // (F2) committed secret in config.js, NO .env → handoff 보안요약 섹션이 노출(ko) + en 영어(섹션 한글 0)
+    const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f2-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d3, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d3, '.gitignore'), 'node_modules/\n');
+    fs.writeFileSync(path.join(d3, 'config.js'), 'const k="AKIAJQXMP7RZ2KL9WXYZ";\nconst g="ghp_aZ9bY8cX7dW6eV5fU4gT3hS2iR1jQ0kP9oN8";\n');
+    const hoKo = (cp.spawnSync(process.execPath, [CLI, 'handoff', d3], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
+    const f2ko = /🔒\s*보안 요약/.test(hoKo) && /커밋된 시크릿/.test(hoKo) && /config\.js/.test(hoKo);
+    const d4 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f2en-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d4, '--yes', '--language', 'en'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d4, '.gitignore'), 'node_modules/\n');
+    fs.writeFileSync(path.join(d4, 'config.js'), 'const k="AKIAJQXMP7RZ2KL9WXYZ";\n');
+    const hoEn = (cp.spawnSync(process.execPath, [CLI, 'handoff', d4], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
+    const enSecLines = hoEn.split('\n').filter(l => /Security summary|committed secret/i.test(l));
+    const f2en = /Security summary/.test(hoEn) && /committed secret/i.test(hoEn) && enSecLines.length >= 1 && !enSecLines.some(l => H.test(l));
+    [d1, d2, d3, d4].forEach(d => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} });
+    ok = f1bad && f1ok && f2ko && f2en;
+  } catch {}
+  console.log(ok ? '✓ B(1.30.1) 14th외부리뷰 F1+F2: audit committed-secret→failure(scan 일관, gitignored FP0) + handoff 보안요약이 committed 시크릿 노출(ko/en)' : '✗ 보안 정직성 F1+F2 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {

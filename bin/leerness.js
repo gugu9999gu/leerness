@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.30.0';
+const VERSION = '1.30.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3114,7 +3114,7 @@ function _selfTestCases() {
         fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
         fs.writeFileSync(path.join(tmp, 'AGENTS.md'), '# x');
         process.stdout.write = s => { out += s; return true; };
-        m.audit(tmp, { json: true }, { VERSION, arg: (k, d) => d, has: f => f === '--json', planPath, readProgressRows, currentStatePath, handoffPath, envDiff, _readFeatureGraph, _matchAPISkills, _listAPISkills });
+        m.audit(tmp, { json: true }, { VERSION, arg: (k, d) => d, has: f => f === '--json', planPath, readProgressRows, currentStatePath, handoffPath, envDiff, _readFeatureGraph, _matchAPISkills, _listAPISkills, _collectSecretFindings });
       } catch (e) { out = 'ERR:' + e.message; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
       try { const j = JSON.parse(out); behavOk = typeof j.healthy === 'boolean' && Array.isArray(j.findings); } catch {}
       return expOk && delegated && movedToLib && behavOk;
@@ -7872,7 +7872,7 @@ function debug(root) {
 
 const _audit = require('../lib/audit');
 // 1.9.421 (UR-0025/UR-0125 큰 핸들러 모듈화 6번째): audit → lib/audit.js (DI 위임, thin wrapper)
-function audit(root, opts = {}) { return _audit.audit(root, opts, { VERSION, arg, has, planPath, readProgressRows, currentStatePath, handoffPath, envDiff, _readFeatureGraph, _matchAPISkills, _listAPISkills }); }
+function audit(root, opts = {}) { return _audit.audit(root, opts, { VERSION, arg, has, planPath, readProgressRows, currentStatePath, handoffPath, envDiff, _readFeatureGraph, _matchAPISkills, _listAPISkills, _collectSecretFindings }); }
 
 // 1.9.312 (UR-0050, 설치리뷰 3중수렴): secret 스캐너 현대 키 패턴 보강.
 //   배경: 기존 OpenAI 패턴 `sk-[A-Za-z0-9]{32,}` 은 하이픈에서 끊겨 sk-proj-/sk-svcacct- (modern 프로젝트/서비스 키)를 놓침.
@@ -9573,8 +9573,13 @@ function handoff(root) {
       const _Lsec = _uiLang(root);
       const t = (ko, en) => (_Lsec === 'en' ? en : ko);
       const envExists = exists(path.join(root, '.env'));
+      const issues = [];
+      // 0) 1.30.1 (14th 외부리뷰 F2): 커밋된 plaintext 시크릿을 보안 요약에 노출 — headline '🚨 시크릿 N건' 과 일관.
+      //    envExists 무관(소스에 커밋된 시크릿은 .env 없어도 위험). gitignored 는 _collectSecretFindings 가 committed 에서 제외.
+      let committedSecrets = [];
+      try { committedSecrets = _collectSecretFindings(root).committed || []; } catch {}
+      if (committedSecrets.length) issues.push(t(`커밋된 시크릿 ${committedSecrets.length}건 (소스 노출)`, `${committedSecrets.length} committed secret(s) (exposed in source)`));
       if (envExists) {
-        const issues = [];
         // 1) env diff
         try {
           const d = envDiff(root);
@@ -9589,41 +9594,43 @@ function handoff(root) {
           const missing = SECRET_PATTERNS.filter(p => !giLines.some(l => l === p || l === '/' + p));
           if (missing.length) issues.push(t(`.gitignore 시크릿 누락 ${missing.length}건`, `.gitignore missing secret patterns ${missing.length}`));
         } catch {}
-        if (issues.length) {
-          const isTty = process.stdout && process.stdout.isTTY;
-          const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
-          const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
-          const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
-          log('');
-          log(red(t(`## 🔒 보안 요약 (1.9.76) — ${issues.length}건 주의`, `## 🔒 Security summary — ${issues.length} to review`)));
-          for (const i of issues) log(dim(`  ⚠ ${i}`));
-          log(dim(t(`  → 자동 수정: leerness audit --fix · 상세: leerness env check / leerness audit`, `  → auto-fix: leerness audit --fix · details: leerness env check / leerness audit`)));
-          // 1.9.80: critical 수준 (.gitignore에 .env 자체 누락) 시 자동 회복 옵션
-          const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
-          const giLines = giText.split('\n').map(l => l.trim());
-          const envInGitignore = giLines.includes('.env') || giLines.includes('/.env');
-          if (!envInGitignore) {
-            // .env 자체 누락 → 최우선 위험
-            log(yel(t(`  🚨 CRITICAL (1.9.80): .env가 .gitignore에 없습니다! 시크릿 노출 위험 — 즉시 \`leerness audit --fix\` 권장.`, `  🚨 CRITICAL: .env is not in .gitignore! secret-exposure risk — run \`leerness audit --fix\` now.`)));
-            // LEERNESS_AUTO_SECURITY_FIX=1 자동 실행 옵션
-            if (process.env.LEERNESS_AUTO_SECURITY_FIX === '1') {
-              try {
-                const r = cp.spawnSync(process.execPath, [__filename, 'audit', root, '--fix'],
-                  { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
-                if (r.status === 0) {
-                  log(dim(t(`  ✓ 자동 회복 (LEERNESS_AUTO_SECURITY_FIX=1): audit --fix 완료`, `  ✓ auto-recovered (LEERNESS_AUTO_SECURITY_FIX=1): audit --fix done`)));
-                } else {
-                  log(dim(t(`  ⚠ 자동 회복 실패 (exit ${r.status}) — 수동 \`leerness audit --fix\` 권장`, `  ⚠ auto-recovery failed (exit ${r.status}) — run \`leerness audit --fix\` manually`)));
-                }
-              } catch (e) {
-                log(dim(t(`  ⚠ 자동 회복 예외: ${e.message}`, `  ⚠ auto-recovery error: ${e.message}`)));
+      }
+      if (issues.length) {
+        const isTty = process.stdout && process.stdout.isTTY;
+        const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
+        const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+        const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+        log('');
+        log(red(t(`## 🔒 보안 요약 (1.9.76) — ${issues.length}건 주의`, `## 🔒 Security summary — ${issues.length} to review`)));
+        for (const i of issues) log(dim(`  ⚠ ${i}`));
+        // 1.30.1 (F2): 커밋된 시크릿 파일 위치 노출 (값 snippet 은 미출력 — handoff 로그로의 시크릿 유출 방지)
+        for (const f of committedSecrets.slice(0, 4)) log(dim(`    • ${f.file}:${f.line} (${f.name})`));
+        log(dim(t(`  → 자동 수정: leerness audit --fix · 상세: leerness scan secrets / leerness env check`, `  → auto-fix: leerness audit --fix · details: leerness scan secrets / leerness env check`)));
+        // 1.9.80: critical 수준 (.gitignore에 .env 자체 누락) 시 자동 회복 옵션
+        const giText2 = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
+        const giLines2 = giText2.split('\n').map(l => l.trim());
+        const envInGitignore = giLines2.includes('.env') || giLines2.includes('/.env');
+        if (envExists && !envInGitignore) {
+          // .env 자체 누락 → 최우선 위험
+          log(yel(t(`  🚨 CRITICAL (1.9.80): .env가 .gitignore에 없습니다! 시크릿 노출 위험 — 즉시 \`leerness audit --fix\` 권장.`, `  🚨 CRITICAL: .env is not in .gitignore! secret-exposure risk — run \`leerness audit --fix\` now.`)));
+          // LEERNESS_AUTO_SECURITY_FIX=1 자동 실행 옵션
+          if (process.env.LEERNESS_AUTO_SECURITY_FIX === '1') {
+            try {
+              const r = cp.spawnSync(process.execPath, [__filename, 'audit', root, '--fix'],
+                { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_DRIFT_CHECK: '1' } });
+              if (r.status === 0) {
+                log(dim(t(`  ✓ 자동 회복 (LEERNESS_AUTO_SECURITY_FIX=1): audit --fix 완료`, `  ✓ auto-recovered (LEERNESS_AUTO_SECURITY_FIX=1): audit --fix done`)));
+              } else {
+                log(dim(t(`  ⚠ 자동 회복 실패 (exit ${r.status}) — 수동 \`leerness audit --fix\` 권장`, `  ⚠ auto-recovery failed (exit ${r.status}) — run \`leerness audit --fix\` manually`)));
               }
-            } else {
-              log(dim(t(`  💡 자동 실행 옵션: LEERNESS_AUTO_SECURITY_FIX=1 leerness handoff .`, `  💡 auto-fix option: LEERNESS_AUTO_SECURITY_FIX=1 leerness handoff .`)));
+            } catch (e) {
+              log(dim(t(`  ⚠ 자동 회복 예외: ${e.message}`, `  ⚠ auto-recovery error: ${e.message}`)));
             }
+          } else {
+            log(dim(t(`  💡 자동 실행 옵션: LEERNESS_AUTO_SECURITY_FIX=1 leerness handoff .`, `  💡 auto-fix option: LEERNESS_AUTO_SECURITY_FIX=1 leerness handoff .`)));
           }
-          log('');
         }
+        log('');
       }
     } catch {}
   }
