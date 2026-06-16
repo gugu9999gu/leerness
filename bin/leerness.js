@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.30.4';
+const VERSION = '1.30.5';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2966,7 +2966,7 @@ function _selfTestCases() {
     { name: '6번째 외부평가/codex P1-A (UR-0098): install-safety 레시피 셸-무관 + hardeningNote (1.9.397)', run: () => { if (typeof installSafetyCmd !== 'function') return false; const save = process.argv; const _w = process.stdout.write; let out = ''; try { process.argv = ['node', 'h', 'install-safety', '--json']; process.stdout.write = s => { out += s; return true; }; installSafetyCmd({ json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; } let j; try { j = JSON.parse(out); } catch {} const noPosixPrefix = !!j && Array.isArray(j.safeInstall) && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim())); const crossShell = !!j && j.safeInstall.filter(x => String(x).includes('npx --yes')).length >= 2; const noteOk = !!j && typeof j.hardeningNote === 'string' && j.hardeningNote.includes('PowerShell'); return noPosixPrefix && crossShell && noteOk; } },
     { name: '6번째 외부평가/codex P1-C (UR-0099): --json 에러 경로 구조화 failJson + 와이어 (1.9.398)', run: () => { const io = require('../lib/io'); if (io.failJson !== failJson) return false; const _w = process.stdout.write; const saved = process.exitCode; let jOut = '', hOut = ''; let jExit = 0; try { process.stdout.write = s => { jOut += s; return true; }; process.exitCode = 0; failJson(true, 'tc', 'm'); jExit = process.exitCode; process.stdout.write = s => { hOut += s; return true; }; process.exitCode = 0; failJson(false, 'c', 'humanmsg'); } catch {} finally { process.stdout.write = _w; process.exitCode = saved; } let pj; try { pj = JSON.parse(jOut); } catch {} const jsonOk = !!pj && pj.ok === false && pj.code === 'tc' && pj.error === 'm' && jExit === 1; const humanOk = hOut.includes('✗') && hOut.includes('humanmsg') && !hOut.includes('{'); const src = read(__filename); const wired = src.includes("failJson(_j, 'missing_args'") && src.includes("failJson(_j, 'spec_not_found'"); return jsonOk && humanOk && wired; } },
     { name: '7번째 버그헌트 P1-A (UR-0104): 테이블셀 안전화 _cellSafe/_cellUnescape (파이프/개행 injection 차단) (1.9.399)', run: () => { const m = require('../lib/pure-utils'); if (m._cellSafe !== _cellSafe || m._cellUnescape !== _cellUnescape) return false; const safe = _cellSafe('fix | bug\nrow2'); const noRaw = !/(?<!\\)\|/.test(safe) && !/[\r\n]/.test(safe); const pipeRt = _cellUnescape(_cellSafe('a | b | c')) === 'a | b | c'; const nlGone = _cellSafe('a\nb') === 'a b'; const src = read(__filename); const wired = src.includes('_cellSafe(r.request)') && src.includes('_cellSafe(r.rule)'); return noRaw && pipeRt && nlGone && wired; } },
-    { name: '7번째 버그헌트 P1-B (UR-0105): verify-claim/optimism-check/honesty-check --json 에러 구조화 (1.9.400)', run: () => { const src = read(__filename); const vc = /function verifyClaimCmd[\s\S]{0,400}?failJson\(_j, 'not_found'/.test(src); const oc = /function optimismCheckCmd[\s\S]{0,400}?failJson\(_j, 'not_found'/.test(src); const hc = /function honestyCheckCmd[\s\S]{0,900}?failJson\(has\('--json'\), 'not_found'/.test(src); return vc && oc && hc; } },
+    { name: '7번째 버그헌트 P1-B (UR-0105): verify-claim/optimism-check/honesty-check --json 에러 구조화 (1.9.400)', run: () => { const src = read(__filename); const vc = /function verifyClaimCmd[\s\S]{0,700}?failJson\(_j, 'not_found'/.test(src); const oc = /function optimismCheckCmd[\s\S]{0,700}?failJson\(_j, 'not_found'/.test(src); const hc = /function honestyCheckCmd[\s\S]{0,900}?failJson\(has\('--json'\), 'not_found'/.test(src); return vc && oc && hc; } },  // 1.30.5: {0,400}→{0,700} (F4 가 missing_args 라인을 en/ko 로 늘려 not_found 가 창 밖)
     { name: '7번째 버그헌트 P1-C (UR-0106): 시크릿 FN — gitignore 부정(!) + placeholder substring 정밀화 (1.9.401)', run: () => { const m = require('../lib/pure-utils'); const gm = m._gitignoreMatch; const negOk = gm('*.example\n!.env.example', '.env.example') === false && gm('*.log', 'a.log') === true && gm('a.log\n!a.log', 'a.log') === false && gm('.env', '.env') === true; const ph = m._isPlaceholderSecret; const phOk = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false && ph('your-key-here') === true && ph('changeme') === true && ph('example') === true && ph('xxxxxxxxxxxxxxxxxxxxxxxxxxxx') === true; return negOk && phOk; } },
     { name: '7번째 버그헌트 P1-A 잔여 (UR-0108): decisions/lessons MD projection 개행 주입 차단 _lineSafe (1.9.402)', run: () => { const m = require('../lib/pure-utils'); if (m._lineSafe !== _lineSafe) return false; const lsOk = _lineSafe('a\nb\r\nc') === 'a b c'; const md = m._renderDecisionsMd([{ date: '2026-06-07', title: 'real\n### 2099-01-01 — FAKE\n- Decision: forged', decision: 'd', reason: 'r' }]); const re = m._decisionsFromMd(md); const noInject = re.length === 1 && !/^### 2099-01-01 — FAKE/m.test(md); const lmd = m._renderLessonsMd([{ date: '2026-06-07', text: 'l1\n### FAKE\n- Lesson: x', tag: 't' }]); const lre = m._parseLessonEntries(lmd); const lNoInject = lre.length === 1; return lsOk && noInject && lNoInject; } },
     { name: '7번째 버그헌트 P2 (UR-0107): api-skill show/drop 에러 exit code 1 (1.9.403)', run: () => { const src = read(__filename); const showId = src.includes("api-skill show <id>')); process.exitCode = 1"); const dropId = src.includes("api-skill drop <id>')); process.exitCode = 1"); const addUrl = src.includes("api-skill add <url> [--direction") && src.includes('process.exitCode = 1'); return showId && dropId && addUrl; } },
@@ -9526,24 +9526,25 @@ function handoff(root) {
       const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
       const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
       const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+      const _t = (ko, en) => (_uiLang(root) === 'en' ? en : ko); // 1.30.5 (#156 F3): 로컬 i18n (이 블록 9536 에 t 화살표 파라미터가 있어 _t 로 명명)
       if (gapInfo.hasLast) {
         // 마지막 handoff 시점 알고 있음 — 정확한 측정 (1.9.199)
         if (gapInfo.isLong) {
           // 60분+ → 강한 알림
-          log(red(`## ⏰ ScheduleWakeup miss 강한 의심 (1.9.199) — 이전 handoff ${gapInfo.gapMin}분 전`));
-          log(dim(`  R-0001 영구 룰 (25분) 대비 ${Math.floor(gapInfo.gapMin/25)}× 초과 — 시스템 sleep / wakeup 누락 확실`));
-          log(dim(`  → 회복: 사용자가 "다음 라운드" 입력 또는 leerness rule list 로 룰 확인`));
-          log(dim(`  → handoff 이력: ${(gapInfo.history || []).slice(-3).map(t => t.slice(11, 19)).join(' → ')}`));
+          log(red(_t(`## ⏰ ScheduleWakeup miss 강한 의심 (1.9.199) — 이전 handoff ${gapInfo.gapMin}분 전`, `## ⏰ ScheduleWakeup miss strongly suspected — last handoff ${gapInfo.gapMin} min ago`)));
+          log(dim(_t(`  R-0001 영구 룰 (25분) 대비 ${Math.floor(gapInfo.gapMin/25)}× 초과 — 시스템 sleep / wakeup 누락 확실`, `  ${Math.floor(gapInfo.gapMin/25)}× over the R-0001 rule (25 min) — system sleep / missed wakeup`)));
+          log(dim(_t(`  → 회복: 사용자가 "다음 라운드" 입력 또는 leerness rule list 로 룰 확인`, `  → recover: user types "next round" or check rules via leerness rule list`)));
+          log(dim(_t(`  → handoff 이력: ${(gapInfo.history || []).slice(-3).map(t => t.slice(11, 19)).join(' → ')}`, `  → handoff history: ${(gapInfo.history || []).slice(-3).map(t => t.slice(11, 19)).join(' → ')}`)));
           log('');
         } else if (gapInfo.isMiss) {
           // 35~60분 → 의심
-          log(yel(`## ⏰ ScheduleWakeup 지연 (1.9.199) — 이전 handoff ${gapInfo.gapMin}분 전 (룰: 25분)`));
-          log(dim(`  ±10분 buffer 초과 — wakeup 한 cycle 누락 가능성`));
+          log(yel(_t(`## ⏰ ScheduleWakeup 지연 (1.9.199) — 이전 handoff ${gapInfo.gapMin}분 전 (룰: 25분)`, `## ⏰ ScheduleWakeup delayed — last handoff ${gapInfo.gapMin} min ago (rule: 25 min)`)));
+          log(dim(_t(`  ±10분 buffer 초과 — wakeup 한 cycle 누락 가능성`, `  beyond the ±10 min buffer — a wakeup cycle may have been missed`)));
           log('');
         } else if (gapInfo.gapMin >= 0 && gapInfo.gapMin <= 30) {
           // 정상 범위 (handoff_history.length >= 2 일 때만 의미 있음 — 첫 진입 제외)
           if ((gapInfo.history || []).length >= 2) {
-            log(dim(`  ✓ ScheduleWakeup cycle 정상 (gap ${gapInfo.gapMin}분, 룰 25분 — 1.9.199)`));
+            log(dim(_t(`  ✓ ScheduleWakeup cycle 정상 (gap ${gapInfo.gapMin}분, 룰 25분 — 1.9.199)`, `  ✓ ScheduleWakeup cycle healthy (gap ${gapInfo.gapMin} min, rule 25 min)`)));
           }
         }
       } else {
@@ -9553,9 +9554,9 @@ function handoff(root) {
           const ageMs = Date.now() - fs.statSync(tlp).mtimeMs;
           const ageMin = Math.floor(ageMs / 60000);
           if (ageMin >= 60) {
-            const label = ageMin < 120 ? `${ageMin}분` : (ageMin < 1440 ? `${Math.floor(ageMin/60)}시간` : `${Math.floor(ageMin/1440)}일`);
-            log(yel(`## ⏰ ScheduleWakeup miss 의심 (1.9.196 fallback) — task-log 마지막 ${label} 전`));
-            log(dim(`  1.9.199 last-handoff.json 첫 기록 — 다음 handoff 부터 정확 측정`));
+            const label = ageMin < 120 ? _t(`${ageMin}분`, `${ageMin}min`) : (ageMin < 1440 ? _t(`${Math.floor(ageMin/60)}시간`, `${Math.floor(ageMin/60)}h`) : _t(`${Math.floor(ageMin/1440)}일`, `${Math.floor(ageMin/1440)}d`));
+            log(yel(_t(`## ⏰ ScheduleWakeup miss 의심 (1.9.196 fallback) — task-log 마지막 ${label} 전`, `## ⏰ ScheduleWakeup miss suspected (fallback) — task-log last modified ${label} ago`)));
+            log(dim(_t(`  1.9.199 last-handoff.json 첫 기록 — 다음 handoff 부터 정확 측정`, `  first last-handoff.json record — precise measurement from the next handoff`)));
             log('');
           }
         }
@@ -9570,6 +9571,7 @@ function handoff(root) {
       const isTtyMd = process.stdout && process.stdout.isTTY;
       const mdCy = s => isTtyMd ? `\x1b[36m${s}\x1b[0m` : s;
       const mdDim = s => isTtyMd ? `\x1b[2m${s}\x1b[0m` : s;
+      const t = (ko, en) => (_uiLang(root) === 'en' ? en : ko); // 1.30.5 (#156 F3): 로컬 t()
       const cutoff = Date.now() - 24 * 60 * 60 * 1000;
       const deltas = [];
       // tasks: progress-tracker.md row Updated 컬럼 기반 (간단 휴리스틱 — mtime이 24h내면 표시)
@@ -9610,7 +9612,7 @@ function handoff(root) {
         const pp = planPath(root);
         if (exists(pp) && fs.statSync(pp).mtimeMs > cutoff) {
           // M-XXXX 중 line이 24h내 추가됐는지 정확히는 어려움 — mtime 24h내면 "plan: 변경됨"으로 표시
-          deltas.push('plan: 변경됨');
+          deltas.push(t('plan: 변경됨', 'plan: changed'));
         }
       } catch {}
       // rules: rule add 후 mtime 24h내
@@ -9622,8 +9624,8 @@ function handoff(root) {
         }
       } catch {}
       if (deltas.length) {
-        log(mdCy(`🆕 최근 24h 메모리 변동 (1.9.121): ${deltas.join(' · ')}`));
-        log(mdDim(`  → 상세: leerness memory status --json`));
+        log(mdCy(t(`🆕 최근 24h 메모리 변동 (1.9.121): ${deltas.join(' · ')}`, `🆕 memory changes in last 24h: ${deltas.join(' · ')}`)));
+        log(mdDim(t(`  → 상세: leerness memory status --json`, `  → details: leerness memory status --json`)));
         log('');
       }
     } catch {}
@@ -9841,16 +9843,17 @@ function handoff(root) {
     const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
     const b = s => isTty ? `\x1b[1m${s}\x1b[0m` : s;
     const d = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+    const t = (ko, en) => (_uiLang(root) === 'en' ? en : ko); // 1.30.5 (#156 F3): headline t() 스코프 밖 — 로컬 t() (1.29.1 교훈)
     log('');
-    log(cy('## 🛠 세션 워크플로 6단계 (1.9.39+, AI 하네스 엔지니어링)'));
-    log(d('  상세: ') + cy('.harness/session-workflow.md'));
-    log(`  1. ${b('요청 분석')}     handoff(이미 완료) · drift check · 모호하면 명확화`);
-    log(`  2. ${b('계획 수립')}     plan add / TodoWrite · reuse-map으로 기존 자원 우선`);
-    log(`  3. ${b('업무 분배')}     agents list/recommend · 작업유형별 sub-agent 매핑`);
-    log(`  4. ${b('sub-agent 작업')} 파일 경로 격리 · mtime 검증 의무 · 자체 테스트`);
-    log(`  5. ${b('종합 검증')}     contract verify · verify-claim --run-tests · review --persona`);
-    log(`  6. ${b('세션 마감')}     session close · audit --fix · usage stats`);
-    log(d('  끄려면: --no-workflow-guide 또는 LEERNESS_NO_WORKFLOW_GUIDE=1'));
+    log(cy(t('## 🛠 세션 워크플로 6단계 (1.9.39+, AI 하네스 엔지니어링)', '## 🛠 Session workflow — 6 steps (AI harness engineering)')));
+    log(d(t('  상세: ', '  details: ')) + cy('.harness/session-workflow.md'));
+    log(`  1. ${b(t('요청 분석', 'Analyze request'))}     ${t('handoff(이미 완료) · drift check · 모호하면 명확화', 'handoff (done) · drift check · clarify if ambiguous')}`);
+    log(`  2. ${b(t('계획 수립', 'Plan'))}     ${t('plan add / TodoWrite · reuse-map으로 기존 자원 우선', 'plan add / TodoWrite · prefer existing via reuse-map')}`);
+    log(`  3. ${b(t('업무 분배', 'Distribute'))}     ${t('agents list/recommend · 작업유형별 sub-agent 매핑', 'agents list/recommend · map sub-agents by task type')}`);
+    log(`  4. ${b(t('sub-agent 작업', 'sub-agent work'))} ${t('파일 경로 격리 · mtime 검증 의무 · 자체 테스트', 'isolate file paths · verify mtime · self-test')}`);
+    log(`  5. ${b(t('종합 검증', 'Verify'))}     ${t('contract verify · verify-claim --run-tests · review --persona', 'contract verify · verify-claim --run-tests · review --persona')}`);
+    log(`  6. ${b(t('세션 마감', 'Close'))}     ${t('session close · audit --fix · usage stats', 'session close · audit --fix · usage stats')}`);
+    log(d(t('  끄려면: --no-workflow-guide 또는 LEERNESS_NO_WORKFLOW_GUIDE=1', '  to disable: --no-workflow-guide or LEERNESS_NO_WORKFLOW_GUIDE=1')));
     log('');
   }
   // 1.9.373 (UR-0073 Phase C): 에이전트 팀 스케줄 알림 — 비-manual 팀이 정의돼 있으면 미리보기(dry-run) 안내. 실행 없음. opt-out.
@@ -9858,10 +9861,11 @@ function handoff(root) {
     try {
       const _teamRem = _teamHandoffReminders(_loadTeams(root));
       if (_teamRem.length) {
+        const t = (ko, en) => (_uiLang(root) === 'en' ? en : ko); // 1.30.5 (#156 F3): 로컬 t()
         log('');
-        log('## 🤝 에이전트 팀 스케줄 (UR-0073 Phase C) — 정의 전용 · 자동 실행 X');
+        log(t('## 🤝 에이전트 팀 스케줄 (UR-0073 Phase C) — 정의 전용 · 자동 실행 X', '## 🤝 Agent team schedule (UR-0073) — definitions only · no auto-run'));
         _teamRem.forEach(r => log('  ' + r));
-        log('  ⓘ 미리보기는 dry-run. 실행은 제안 명령 검토 후 직접 · 끄려면 --no-team-reminders 또는 LEERNESS_NO_TEAM_REMINDERS=1');
+        log(t('  ⓘ 미리보기는 dry-run. 실행은 제안 명령 검토 후 직접 · 끄려면 --no-team-reminders 또는 LEERNESS_NO_TEAM_REMINDERS=1', '  ⓘ preview is dry-run. run it yourself after reviewing the suggested command · disable: --no-team-reminders or LEERNESS_NO_TEAM_REMINDERS=1'));
       }
     } catch {}
   }
@@ -10365,7 +10369,7 @@ function _vcImplIsEmpty(body) {
 function verifyClaimCmd(root, taskId) {
   root = absRoot(root);
   const _j = has('--json');  // 1.9.400 (7번째 버그헌트 P1-B, UR-0105): --json 에러도 구조화
-  if (!taskId) return failJson(_j, 'missing_args', 'verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008');
+  if (!taskId) return failJson(_j, 'missing_args', _uiLang(root) === 'en' ? 'verify-claim <T-ID> required. ex: leerness verify-claim T-0008' : 'verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008');  // 1.30.5 (#156 F4)
   const rows = readProgressRows(root);
   const row = rows.find(r => r.id === taskId);
   if (!row) return failJson(_j, 'not_found', `progress-tracker.md에 ${taskId} 없음.`);
@@ -11249,7 +11253,7 @@ function honestyCheckCmd(root, arg1) {
 function optimismCheckCmd(root, taskId) {
   root = absRoot(root || process.cwd());
   const _j = has('--json');  // 1.9.400 (7번째 버그헌트 P1-B, UR-0105): --json 에러도 구조화
-  if (!taskId) return failJson(_j, 'missing_args', 'optimism-check <T-ID> 필요. 예: leerness optimism-check T-0001');
+  if (!taskId) return failJson(_j, 'missing_args', _uiLang(root) === 'en' ? 'optimism-check <T-ID> required. ex: leerness optimism-check T-0001' : 'optimism-check <T-ID> 필요. 예: leerness optimism-check T-0001');  // 1.30.5 (#156 F4 twin)
   const rows = readProgressRows(root);
   const row = rows.find(r => r.id === taskId);
   if (!row) return failJson(_j, 'not_found', `progress-tracker.md에 ${taskId} 없음.`);

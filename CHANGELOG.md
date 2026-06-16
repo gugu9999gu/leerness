@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.30.5 — 2026-06-16 — 🌐 handoff 본문 i18n + verify-claim 에러 영어화 (14th 외부리뷰 F3+F4) — 14th 리뷰 7/7 완료
+
+**🌐 14번째 외부 리뷰 마지막 2건(F3 P2 + F4 P3) 수정 → 14th 리뷰 7건 전부 소진.** `--language en` 에서 handoff 본문이 한국어 라벨을 누출하던 것 + verify-claim 미입력 에러 한국어를 영어화.
+
+### 변경 (14th 외부리뷰 F3+F4)
+- **🌐 F3 (P2) handoff 본문 en 누출 영어화**: 매 핸드오프에 붙던 한국어 런타임 블록 4종을 영어 opt-in. (1) **세션 워크플로 6단계** 가이드(헤더+6단계+끄기 안내), (2) **🆕 최근 24h 메모리 변동**(라벨+`plan: 변경됨`+상세), (3) **⏰ ScheduleWakeup** 감지(miss 강한의심/지연/cycle 정상/fallback 4 분기 + 단위 분·시간·일), (4) **🤝 에이전트 팀 스케줄** 헤더+안내. 각 블록은 headline `t()` 스코프 밖이라 블록 로컬 `t()`/`_t()` 정의(1.29.1 교훈). 한국어 verbatim 보존.
+- **🌐 F4 (P3) verify-claim/optimism-check 미입력 에러 영어화**: `verify-claim <T-ID> 필요. 예: …`(+쌍둥이 `optimism-check`) 를 `_uiLang(root)` 분기로 영어(`<T-ID> required. ex: …`). plain + `--json` 모두.
+
+### 검증 (회귀 0)
+- **selftest 257** — 단, F4 가 `missing_args` 라인을 en/ko 로 늘려 1.9.400 소스가드의 `{0,400}` 윈도가 `not_found` 에 못 미쳐 1건 실패 → **윈도 `{0,700}` 확대로 복구**(라인 길이 늘 때 윈도형 소스가드가 깨지는 패턴, 즉시 적발·수정).
+- **행위(맹신 X)**: `handoff --language en` 워크플로 가이드(4줄 영어, 한글 0) + 메모리 변동 영어 · `handoff` ko 보존 · verify-claim/optimism-check en 영어(`required. ex:`) + ko 보존(`필요. 예:`). OVERALL PASS.
+- **E2E 372/372**: 기존 i18n 행위 케이스에 가드 ⑫ 확장(워크플로 가이드 + verify-claim en/ko) — 케이스 추가가 아닌 어서션 확장이라 총수 유지.
+- patch(1.30.5) — npm 미배포(R-0011). bin+package.json 동시 bump + 일치 가드 통과.
+
+### 잔여 (UR-0010 백로그)
+- 팀 스케줄 reminder 본문(pure-utils `_teamHandoffReminders`, 팀 정의 시만 노출) · capabilities/commands/constraints/install-safety · init en seed 템플릿.
+
+### 🎉 14th 외부리뷰 7/7 완료
+F1/F2 보안정직성(1.30.1) · F3/F4 i18n(1.30.5) · F5/F6/F7 cli-ux(1.30.4) — 14번째 외부 멀티모델 리뷰의 재현·확인된 7 발견 전부 수정 완료.
+
 ## 1.30.4 — 2026-06-16 — cli-ux 일관성: add류 dedup + 빈입력 --json + bogus subcommand (14th 외부리뷰 F5+F6+F7)
 
 **🧹 14번째 외부 리뷰가 재현·확인한 cli-ux 일관성 3종(P2/P2/P3) 수정.** add 계열 명령들이 서로 다르게 동작하던 비일관성을 정리.

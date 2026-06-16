@@ -6444,9 +6444,22 @@ total++;
     const agEnOk = /CLI agent slash commands/.test(agEn) && agEnLines.length >= 2 && !agEnLines.some(l => H.test(l));
     const agKoOk = /에이전트 슬래시/.test(agKo);
     fs.rmSync(da, { recursive: true, force: true });
-    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk && edEnOk && edKoOk && shEnOk && shKoOk && agEnOk && agKoOk;
+    // ⑫ (1.30.5 #156 F3+F4) handoff 본문 워크플로 가이드 + 메모리 변동 en 영어(섹션 한글 0) + ko 보존 · verify-claim/optimism-check 미입력 에러 en/ko.
+    const df3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-f3-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', df3, '--yes', '--language', 'en'], { encoding: 'utf8', timeout: 30000 });
+    const hf3En = out(cp.spawnSync(process.execPath, [CLI, 'handoff', df3], { encoding: 'utf8', timeout: 25000 }));
+    const wfLines = hf3En.split('\n').filter(l => /Session workflow|Analyze request|sub-agent work|to disable:/.test(l));
+    const f3En = /Session workflow/.test(hf3En) && wfLines.length >= 3 && !wfLines.some(l => H.test(l));
+    const df3ko = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-f3k-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', df3ko, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const f3Ko = /세션 워크플로 6단계/.test(out(cp.spawnSync(process.execPath, [CLI, 'handoff', df3ko], { encoding: 'utf8', timeout: 25000 })));
+    const vcEn = out(cp.spawnSync(process.execPath, [CLI, 'verify-claim', '--path', df3, '--language', 'en'], { encoding: 'utf8', timeout: 15000 }));
+    const vcKo = out(cp.spawnSync(process.execPath, [CLI, 'verify-claim', '--path', df3ko], { encoding: 'utf8', timeout: 15000 }));
+    const f4 = /required\. ex:/.test(vcEn) && !H.test(vcEn) && /필요\. 예:/.test(vcKo);
+    [df3, df3ko].forEach(d => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} });
+    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk && edEnOk && edKoOk && shEnOk && shKoOk && agEnOk && agKoOk && f3En && f3Ko && f4;
   } catch {}
-  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1/1.29.2/1.29.3/1.29.4) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약/env-detect/shell-guard/agent-slash) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
+  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1/1.29.2/1.29.3/1.29.4/1.30.5) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약/env-detect/shell-guard/agent-slash/워크플로가이드/verify-claim) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
   if (!ok) failed++;
 }
 
