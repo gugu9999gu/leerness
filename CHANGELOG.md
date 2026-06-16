@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.29.0 — 2026-06-16 — 🛡️ [안정화/Stable] drift auto-fix·진단 명령 영어화 안정 minor
+
+**🛡️ 안정화(Stable) minor — drift 완전 영어화(버그수정 포함) + 진단 3종 영어화를 npm 공개.** 직전 minor(1.28.0) 이후 누적된 패치 2건(1.28.1 + 1.28.2)을 검증·통합해 배포. R-0011 정책의 20번째 stable minor. 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.28.1~1.28.2)
+- **🐛+🌐 drift --auto-fix 영어화 + 보안신호 판정 버그수정 (1.28.1)**: 1.27.2 가 보안 신호 라벨을 언어화하며 내부 `hasSecurityFired` 가 한국어 라벨 정규식에 결합돼 `--language en` 에서 보안 auto-fix 가 미발동하던 잠복 버그를 언어-안정 필드(`f.file`)로 수정. drift `--auto-fix` 진행 로그 ~21줄 영어화 → `drift check` 완전 영어(출력 + auto-fix).
+- **🌐 진단 모듈 영어화 (1.28.2)**: `doctor`(설치/환경)·`which`(버전 충돌·npx 캐시)·`whats-new`(CHANGELOG 차분) 3종을 영어 opt-in. 기존 위임 가드 보존.
+- **한국어 우선 기본 보존**: 영어는 명시 opt-in. 한국어 출력/내부 호출 무영향(e2e 무회귀).
+
+### 잔여 (UR-0010 백로그)
+- capabilities/commands/constraints/install-safety 영어화 · init en seed 템플릿 i18n.
+
+### 검증 (회귀 0)
+- **selftest 250/250** · **E2E 368/368** (i18n 행위가드 lens/health/drift/doctor en/ko) · 게시본 클린룸 재실증.
+- minor(1.29.0) — npm 배포(R-0011 stable) + annotated tag(Stable) + GitHub release(latest).
+
 ## 1.28.2 — 2026-06-16 — CLI 영어화 Phase 10c: 진단 모듈(doctor/which/whats-new) 완전 영어화 (UR-0010)
 
 **🌐 설치/버전 진단 3종을 영어로.** 문제 해결 시 자주 쓰는 진단 명령 `doctor`(설치/환경)·`which`(버전 충돌·npx 캐시)·`whats-new`(버전 변경 요약)를 한 모듈(lib/diagnostics.js)에서 완전 영어화.
