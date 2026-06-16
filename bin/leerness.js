@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.28.1';
+const VERSION = '1.28.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3842,6 +3842,14 @@ function _selfTestCases() {
       const afLogEn = dr.includes('recovering security signal: running audit --fix') && dr.includes('re-checking...') && dr.includes('auto-fix error:');
       const afLogKo = dr.includes('보안 신호 회복: audit --fix 자동 실행 중') && dr.includes('재검사 중...');  // ko 인자 보존
       return bugFix && afLogEn && afLogKo;
+    } },
+    { name: 'Phase 10c (1.28.2): 진단 모듈(doctor/which/whats-new) 영어/한국어 보존 + uiLang 주입 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      const dg = read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js'));
+      const injected = bin.includes("uiLang: _uiLang(arg('--path', process.cwd())), _selfTestCases") && bin.includes('_diag.whatsNewCmd(root, { VERSION, uiLang: _uiLang(root)');
+      const en = dg.includes('install/environment diagnosis') && dg.includes('## npm environment') && dg.includes('per-version headlines') && dg.includes('how to force the latest');
+      const koPreserved = dg.includes('설치/환경 진단') && dg.includes('## npm 환경') && dg.includes('버전별 헤드라인');  // ko 인자 보존(내부호출/e2e)
+      return injected && en && koPreserved;
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
   ];
@@ -16122,7 +16130,7 @@ function mcpServeCmd(root) {
 }
 
 // 1.9.394 (UR-0025): whatsNewCmd 를 lib/diagnostics.js 로 분리 (whats-new 서브시스템 완결 — 파서는 1.9.393 에 pure-utils 로). deps 위임.
-function whatsNewCmd(root) { return _diag.whatsNewCmd(root, { VERSION, arg, has }); }
+function whatsNewCmd(root) { return _diag.whatsNewCmd(root, { VERSION, uiLang: _uiLang(root), arg, has }); }
 
 // 1.9.71: .env / .env.example 자동 동기화 — 누락 키 감지 + (옵션) 자동 추가
 // 보안 정책: .env의 실제 값은 절대 옮기지 않음. .env.example엔 키만 (빈 값).
@@ -19741,8 +19749,8 @@ function reviewRequestCmd(root, request) { return _reviewRequest.reviewRequestCm
 // 1.9.392 (UR-0025 큰 핸들러 모듈화 4번째): doctor/which 진단 핸들러를 lib/diagnostics.js 로 분리.
 //   harness 는 deps(VERSION · _selfTestCases · _detectShellCtx · _mcpToolCount · has · harnessPath)를 구성해 위임(thin wrapper). 호출부/동작 무변경.
 const _diag = require('../lib/diagnostics');
-function doctorCmd(opts = {}) { return _diag.doctorCmd(opts, { VERSION, _selfTestCases, _detectShellCtx, _mcpToolCount, has, harnessPath: __filename }); }
-function whichCmd() { return _diag.whichCmd({ VERSION, has, harnessPath: __filename }); }
+function doctorCmd(opts = {}) { return _diag.doctorCmd(opts, { VERSION, uiLang: _uiLang(arg('--path', process.cwd())), _selfTestCases, _detectShellCtx, _mcpToolCount, has, harnessPath: __filename }); }
+function whichCmd() { return _diag.whichCmd({ VERSION, uiLang: _uiLang(arg('--path', process.cwd())), has, harnessPath: __filename }); }
 
 // 1.23.1 (UR-0010 Phase 6): 영어 큐레이트 도움말 — 한국어 help 의 줄별 번역이 아니라, 카테고리별로 정리한 별도 영어판.
 //   레거시 버전태그(1.9.x) 군더더기를 빼고 영어 사용자가 읽기 쉽게. 전체 전수 목록은 `leerness commands`.

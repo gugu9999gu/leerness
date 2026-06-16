@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.28.2 — 2026-06-16 — CLI 영어화 Phase 10c: 진단 모듈(doctor/which/whats-new) 완전 영어화 (UR-0010)
+
+**🌐 설치/버전 진단 3종을 영어로.** 문제 해결 시 자주 쓰는 진단 명령 `doctor`(설치/환경)·`which`(버전 충돌·npx 캐시)·`whats-new`(버전 변경 요약)를 한 모듈(lib/diagnostics.js)에서 완전 영어화.
+
+### 변경 (UR-0010 Phase 10c)
+- **lib/diagnostics.js 3 명령 영어화 (DI uiLang)**: doctor(설치/환경 진단·설치 경로·MCP 도구·selftest 통과/실패·셸·정상/문제), which(현재 실행·버전·npm 환경·글로벌 설치·PATH 후보·진단·강제 최신 방법), whats-new(버전 파악 실패/CHANGELOG 없음 에러·신규 명령·플래그·파일·버전별 헤드라인·권장 행동). `t(ko,en)`, ko 인자 verbatim.
+- **3 DI 호출에 uiLang 주입**: doctorCmd/whichCmd(`_uiLang(arg('--path', cwd))`) + whatsNewCmd(`_uiLang(root)`). 기존 1.9.392/1.9.394 위임 가드 문자열 보존(selftest 무회귀).
+- **한국어 기본 유지**: 영어는 명시 opt-in. ko/내부 호출 무영향.
+
+### 잔여 (UR-0010 백로그)
+- capabilities/commands/constraints/install-safety 영어화 · init en seed 템플릿 i18n.
+
+### 검증 (회귀 0)
+- **selftest 249→250** (진단 영어/한국어 보존 + uiLang 주입 소스가드) · 행위(doctor/which/whats-new `--language en` 한글 0 [Node 탐지] / ko 보존) · **E2E 368/368** (i18n 행위가드에 doctor en/ko 추가).
+- patch(1.28.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
 ## 1.28.1 — 2026-06-16 — Phase 10b: drift --auto-fix 로그 영어화 + 보안신호 판정 버그 수정 (UR-0010)
 
 **🐛+🌐 drift 를 완전 영어로 + 직전 라운드가 심은 버그 수정.** `drift check --auto-fix` 진행 로그를 영어화하면서, 1.27.2 가 보안 신호 라벨을 언어화하며 함께 심은 **내부 판정 버그**를 발견·수정.
