@@ -6188,6 +6188,24 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.31.1 회귀 (UR-0010): install-safety 출력 영어 opt-in — en 한글 0 + ko 보존 + 셸-무관 가드(npx --yes/PowerShell/no npm_config prefix) 양 언어 보존.
+total++;
+{
+  let ok = false;
+  try {
+    const H = /[가-힣]/;
+    const en = (cp.spawnSync(process.execPath, [CLI, 'install-safety', '--language', 'en'], { encoding: 'utf8', timeout: 15000 }).stdout) || '';
+    const ko = (cp.spawnSync(process.execPath, [CLI, 'install-safety'], { encoding: 'utf8', timeout: 15000 }).stdout) || '';
+    const enOk = /install safety profile/.test(en) && !H.test(en);
+    const koOk = /설치 안전 프로필/.test(ko);
+    let guardOk = false;
+    try { const j = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'install-safety', '--json', '--language', 'en'], { encoding: 'utf8', timeout: 15000 }).stdout); guardOk = j.safeInstall.filter(x => x.includes('npx --yes')).length >= 2 && j.hardeningNote.includes('PowerShell') && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim())); } catch {}
+    ok = enOk && koOk && guardOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.31.1) UR-0010: install-safety en 영어(한글 0) + ko 보존 + 셸-무관 가드(npx --yes/PowerShell/no npm_config prefix) 양 언어 보존' : '✗ install-safety 영어화 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {

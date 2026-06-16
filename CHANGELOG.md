@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.31.1 — 2026-06-16 — 🌐 install-safety 출력 영어화 (UR-0010)
+
+**🌐 `leerness install-safety`(설치 안전 프로필) 출력을 영어 opt-in.** UR-0010 CLI 영어화 잔여 표면. 한국어 기본 보존.
+
+### 변경 (UR-0010)
+- **install-safety 출력 영어화**: 프로필 헤더 · 버전/Node · 런타임 의존성(0 공급망 노출) · install-time 스크립트 · offline-first 동작 · 안전 설치 워크플로 + safeInstall 주석 + hardeningNote(셸별 가드)를 `t(ko,en)` 으로. 블록 로컬 `t()`/`_uiLang(arg('--path'))`. ko verbatim 보존.
+- **셸-무관 가드 양 언어 보존(1.9.397/UR-0098)**: en 출력에서도 `safeInstall` 의 `npx --yes`(≥2) + `hardeningNote` 의 `PowerShell` 분기 + `npm_config_` POSIX prefix 부재 유지(셸-무관 레시피 회귀 0).
+
+### 검증 (회귀 0)
+- **selftest 257** (기존 install-safety 0-deps/0-script 사실 가드 + 셸-무관 레시피 가드 무회귀 — 기본 ko 유지).
+- **행위**: `install-safety --language en` 영어(한글 0, Node 탐지) · `install-safety` ko 보존 · `--json --language en` 에서 npx --yes ×2 + PowerShell + no npm_config prefix.
+- **E2E 372→373**: 새 가드 B(1.31.1).
+- patch(1.31.1) — npm 미배포(R-0011). bin+package.json 동시 bump + 일치 가드 통과.
+
+### 잔여 (UR-0010 백로그)
+- `commands` 카탈로그(~85 desc, 큰 표면) · `constraints` · 팀 reminder 본문 · init en seed 템플릿.
+
 ## 1.31.0 — 2026-06-16 — 🛡️ [안정화/Stable] 14th리뷰 7/7 + 하위 프로젝트(detect/adopt) 안정 minor
 
 **🛡️ 안정화(Stable) minor — 14번째 외부 리뷰 7건 전부 수정 + 사용자 명시 하위 프로젝트 기능을 npm 공개.** 직전 minor(1.30.0) 이후 누적된 패치 5건(1.30.1~1.30.5)을 검증·통합해 배포. R-0011 정책의 22번째 stable minor. 한국어 우선 기본은 그대로.

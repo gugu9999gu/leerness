@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.31.0';
+const VERSION = '1.31.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7998,6 +7998,9 @@ function installSafetyCmd(opts = {}) {
   const deps = Object.keys(pkg.dependencies || {});
   const scripts = pkg.scripts || {};
   const installHooks = ['preinstall', 'install', 'postinstall'].filter(h => scripts[h]);
+  // 1.31.1 (UR-0010): install-safety 출력 영어 opt-in (한국어 기본). safeInstall 의 npx --yes 토큰 + hardeningNote 의 PowerShell 토큰은 양 언어 공통(셸-무관 가드 보존).
+  const uiLang = _uiLang(arg('--path', process.cwd()));
+  const t = (ko, en) => (uiLang === 'en' ? en : ko);
   const profile = {
     version: VERSION,
     runtimeDeps: deps.length,
@@ -8011,22 +8014,23 @@ function installSafetyCmd(opts = {}) {
     //   타 패키지 대비 일반 하드닝은 셸별로 hardeningNote 참조.
     safeInstall: [
       'git checkout -b chore/leerness-update',
-      'npx --yes leerness@latest migrate plan --path .   # 임시폴더 비교(읽기 전용, 셸 무관)',
+      t('npx --yes leerness@latest migrate plan --path .   # 임시폴더 비교(읽기 전용, 셸 무관)', 'npx --yes leerness@latest migrate plan --path .   # read-only temp-folder compare (shell-agnostic)'),
       'npx --yes leerness@latest update --yes --path .',
-      'git diff   # 변경 검토 후 커밋 또는 롤백',
+      t('git diff   # 변경 검토 후 커밋 또는 롤백', 'git diff   # review the diff, then commit or roll back'),
     ],
-    hardeningNote: 'leerness 자체는 0 deps / 0 install-script 라 설치/업데이트 시 임의코드 실행 없음. 일반 npx 하드닝(타 패키지 대비)은 셸별 — bash: npm_config_ignore_scripts=true npx ... · PowerShell: $env:npm_config_ignore_scripts=1; npx ... · cmd: set npm_config_ignore_scripts=1 && npx ...',
+    hardeningNote: t('leerness 자체는 0 deps / 0 install-script 라 설치/업데이트 시 임의코드 실행 없음. 일반 npx 하드닝(타 패키지 대비)은 셸별 — bash: npm_config_ignore_scripts=true npx ... · PowerShell: $env:npm_config_ignore_scripts=1; npx ... · cmd: set npm_config_ignore_scripts=1 && npx ...',
+      'leerness itself has 0 deps / 0 install-script, so no arbitrary code runs on install/update. General npx hardening (for other packages) is shell-specific — bash: npm_config_ignore_scripts=true npx ... · PowerShell: $env:npm_config_ignore_scripts=1; npx ... · cmd: set npm_config_ignore_scripts=1 && npx ...'),
   };
   if (opts.json) { log(JSON.stringify(profile, null, 2)); return; }
-  log(`# leerness install-safety (1.9.359) — 설치 안전 프로필`);
-  log(`  버전: ${VERSION}  ·  Node: ${profile.node || '(미지정)'}`);
-  log(`  런타임 의존성: ${deps.length === 0 ? '0건 (외부 패키지 없음 — 공급망 노출 0)' : deps.length + '건 — ' + deps.join(', ')}`);
-  log(`  install-time 스크립트: ${installHooks.length === 0 ? '없음 (preinstall/install/postinstall 0 — 설치 시 임의코드 실행 없음)' : installHooks.join(', ')}`);
-  log(`  동작 방식: offline-first (설치 시 네트워크/빌드 불필요, 단일 bin + lib)`);
-  log(`\n  안전 설치 워크플로 (검토 후 적용):`);
+  log(t(`# leerness install-safety (1.9.359) — 설치 안전 프로필`, `# leerness install-safety — install safety profile`));
+  log(t(`  버전: ${VERSION}  ·  Node: ${profile.node || '(미지정)'}`, `  version: ${VERSION}  ·  Node: ${profile.node || '(unspecified)'}`));
+  log(t(`  런타임 의존성: ${deps.length === 0 ? '0건 (외부 패키지 없음 — 공급망 노출 0)' : deps.length + '건 — ' + deps.join(', ')}`, `  runtime deps: ${deps.length === 0 ? '0 (no external packages — zero supply-chain exposure)' : deps.length + ' — ' + deps.join(', ')}`));
+  log(t(`  install-time 스크립트: ${installHooks.length === 0 ? '없음 (preinstall/install/postinstall 0 — 설치 시 임의코드 실행 없음)' : installHooks.join(', ')}`, `  install-time scripts: ${installHooks.length === 0 ? 'none (0 preinstall/install/postinstall — no arbitrary code on install)' : installHooks.join(', ')}`));
+  log(t(`  동작 방식: offline-first (설치 시 네트워크/빌드 불필요, 단일 bin + lib)`, `  how it works: offline-first (no network/build on install, single bin + lib)`));
+  log(t(`\n  안전 설치 워크플로 (검토 후 적용):`, `\n  Safe install workflow (review then apply):`));
   profile.safeInstall.forEach((s, i) => log(`    ${i + 1}. ${s}`));
   log(`\n  ⓘ ${profile.hardeningNote}`);  // 1.9.397 (UR-0098): 셸별 하드닝 노트
-  if (installHooks.length > 0) warn('install-time 스크립트 존재 — 위 ignore-scripts safe-install 권장');
+  if (installHooks.length > 0) warn(t('install-time 스크립트 존재 — 위 ignore-scripts safe-install 권장', 'install-time scripts present — use the ignore-scripts safe-install above'));
 }
 function debug(root) {
   root = absRoot(root); let warnings = 0, failures = 0;
