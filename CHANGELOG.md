@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.30.2 — 2026-06-16 — 🔗 하위 프로젝트: 상위 leerness 부모 탐지(read-only) — 자산 재사용은 사용자 결정 게이트 (#157 사용자명시)
+
+**🔗 leerness 프로젝트 하위에 신규 하위프로젝트로 이어 개발할 때, 부모의 자산(design-system/reuse-map/컨벤션)을 어떻게 다룰지** 에 대한 사용자 명시 요청(#157). **외부AI(codex)+Claude(Plan) 교차검토**로 방향을 정하고 첫 슬라이스 구현.
+
+### 방향 결정 (교차검토 + 사용자 제약)
+- 사용자 하드 제약: **부모 자산 재활용은 자동이 아니라 사용자 결정 게이트**(묻거나 지시에 따라 톤/스타일 적용).
+- 검토 결과 → **방향 C "탐지 + 게이트"**: (A 자동상속)은 사용자 제약·leerness intent-expand 안전모델 위배, (B 독립 nested)는 재사용 목표 폐기. **C = 부모를 탐지해 AI 에게 '재사용 후보'로 노출만 하고, 실제 적용은 사용자 결정 게이트**(intent expand 1.9.213 / migrate-workspace-dir 1.9.211 과 동일 철학: 탐지·노출 ≠ 적용).
+
+### 변경 (첫 슬라이스 — read-only 탐지)
+- **`_findParentWorkspace(root)` 순수 헬퍼**: root 상위로 올라가며 가장 가까운 leerness 부모(`.harness`/`.leerness`)를 탐지. FP/안전 가드: root 자신 제외 + 깊이 상한(8) + 실제 워크스페이스 디렉토리만. 부모 자산(design-system/reuse-map/AGENTS/skills) 존재 여부 + assetCount 반환.
+- **`leerness parent detect [--json]`** (신규, read-only): 부모 경로 + 재사용 가능 자산 + **"⚠ 자동 적용 안 함 — 사용자 결정 게이트"** 경고 + 부모 design-system/reuse-find 포인터. 아무 파일도 쓰지 않음(`applied:false`). ko/en.
+- **handoff 헤드라인 토큰 `🔗 부모 프로젝트 (N 자산·미적용)`** (en: `🔗 parent project (N assets, not applied)`): AI 가 세션 시작 즉시 부모 컨텍스트를 인지(재발명 방지)하되 '미적용' 표기로 게이트 명확. read-only.
+- commands 카탈로그 등재(표면 일관성).
+
+### 후속 (다음 슬라이스, 별도 라운드)
+- **`leerness parent adopt --select tone|tokens|conventions --apply`** (dry-run 기본, 사용자 명시 confirm 시에만 적용): 부모 톤/스타일을 자식-로컬 `inherited-from-parent.md` + `PARENT_LINK` 마커로 기록(자식 design-system.md 직접 변형 X). intent expand 게이트 패턴 재사용.
+
+### 검증 (회귀 0)
+- **selftest 254→256** (① parent detect 행위: 부모 탐지·assetCount·독립 null·read-only 소스마커 ② **VERSION ↔ package.json 일치 가드**).
+- **행위**: subproject→부모탐지(4자산)·standalone→독립·`--json applied:false`·handoff 헤드라인 🔗(ko/en 미적용)·read-only(파일쓰기 0) 확인.
+- **E2E 369→370**: 새 가드 B(1.30.2) — parent detect/--json/standalone-null/handoff-headline/read-only.
+- **🐛 버전 불일치 자체수정 + 영구가드**: 이 라운드에서 `bin VERSION` 만 1.30.2 로 bump 하고 `package.json` 을 1.30.1 로 둔 실수 → 배너가 v1.30.2 인데 package.json 1.30.1 라 banner e2e 가 결정적 실패. 처음엔 flake 로 오인했으나 **격리 5회 재현(맹신 X)** 으로 결정적 실 버그임을 확인·수정. 재발 방지로 `VERSION === package.json.version` selftest 가드 추가(11분 e2e 대신 2초 차단).
+- **e2e flake 하드닝(1.9.375 계열)**: agents dispatch(3 spawn)·--version --banner subprocess timeout 10s→30s — 전체 e2e 부하 하 간헐 빈-stdout 오판 방지(동작 무변경). dispatch 는 실제 flake, banner 는 위장한 실버그였음(위 항목).
+- patch(1.30.2) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
+> 교차검토 메모: Claude Plan 에이전트는 방향 C + 첫 슬라이스(탐지+헤드라인)를 권고. 외부 codex 에이전트 리뷰는 비동기 진행(완료 시 후속 adopt 슬라이스에 반영). 방향 C 는 사용자 제약·Plan·leerness 기존 안전모델이 모두 가리켜 overdetermined.
+
 ## 1.30.1 — 2026-06-16 — 🔒 보안 정직성: audit/handoff 보안요약이 커밋된 시크릿 노출 (14th 외부리뷰 F1+F2)
 
 **🔒 도구가 보안 상태를 정직하게 보고하도록 수정.** 14번째 외부 리뷰가 재현·확인한 정직성 갭 2건(P2): `audit`/handoff 보안요약이 소스에 커밋된 실 시크릿을 노출하지 못해, `scan secrets`(exit 1)와 모순되게 healthy 를 반환하던 문제. 정직성 테마(1.9.415/1.9.418/1.27.1 계열) 연장.

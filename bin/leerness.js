@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.30.1';
+const VERSION = '1.30.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3891,7 +3891,26 @@ function _selfTestCases() {
         && bin.includes('전체/기록/최신' + '화: leerness slash-commands');
       return en && koPreserved;
     } },
-    { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) }
+    { name: 'parent detect (1.30.2 #157): 상위 leerness 부모 탐지(행위) + 독립 null + assetCount', run: () => {
+      const osx = require('os'); const fsx = require('fs');
+      const base = fsx.mkdtempSync(path.join(osx.tmpdir(), 'leer-parent-st-'));
+      const alone = fsx.mkdtempSync(path.join(osx.tmpdir(), 'leer-alone-st-'));
+      try {
+        fsx.mkdirSync(path.join(base, '.harness'), { recursive: true });
+        fsx.writeFileSync(path.join(base, '.harness', 'design-system.md'), '# ds');
+        const sub = path.join(base, 'sub'); fsx.mkdirSync(sub, { recursive: true });
+        const found = _findParentWorkspace(sub);
+        const standalone = _findParentWorkspace(alone);
+        // 부모 탐지: 워크스페이스 .harness + assetCount≥1(design-system) · 독립: null · read-only(소스에 파일쓰기 없음 — adopt 미구현)
+        const readOnly = /이 명령은 아무 파일도 쓰지 않는다/.test(read(__filename));
+        return !!found && found.workspaceDir === '.harness' && found.assetCount >= 1 && standalone === null && readOnly;
+      } finally { try { fsx.rmSync(base, { recursive: true, force: true }); } catch {}; try { fsx.rmSync(alone, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) },
+    { name: 'VERSION ↔ package.json 일치 (1.30.2: 한쪽만 bump 하던 실수 2초 내 차단)', run: () => {
+      // bin VERSION 과 package.json.version 이 어긋나면 배너/배포가 거짓 버전을 표기 → 즉시 fail.
+      try { return require('../package.json').version === VERSION; } catch { return false; }
+    } }
   ];
 }
 function selfTestCmd(opts = {}) {
@@ -4671,6 +4690,7 @@ function commandsCmd(root) {
       { cmd: 'update [--check|--yes|--force]', desc: '자가 업데이트' },
       { cmd: 'wakeup-interval get|set|auto|history|record', desc: 'adaptive wakeup (1.9.210)' },
       { cmd: 'workspace-dir get|guide', desc: '워크스페이스 디렉토리 (1.9.211)' },
+      { cmd: 'parent detect [--json]', desc: '상위 leerness 부모 탐지·자산 재사용 후보 (read-only, 1.30.2)' },
       { cmd: 'intent classify|expand|domains "<request>"', desc: '의도 파악 + scope (1.9.213)' },
       { cmd: 'constraints list|check|add', desc: '플랫폼/API 제약 (1.9.208)' },
       { cmd: 'provider list|add|remove|sync', desc: 'Provider Registry (1.9.157~160)' },
@@ -5201,6 +5221,36 @@ function _workspaceDirName(root) {
 }
 function _workspaceDirAbs(root) {
   return path.join(root, _workspaceDirName(root));
+}
+// 1.30.2 (#157 사용자명시, 하위 프로젝트 방향 — 외부AI+Claude 교차검토 → 방향 C "탐지+게이트"):
+//   현재 root 의 '상위' 디렉토리 중 가장 가까운 leerness 부모(.harness/ 또는 .leerness/ 보유)를 탐지(read-only).
+//   부모 자산(design-system/reuse-map/tone) 적용은 자동이 아니라 사용자 결정 게이트 — 이 함수는 '탐지만' 한다(적용 X).
+//   FP/안전: root 자신 제외(dirname 부터 시작) + 깊이 상한(monorepo/깊은 트리에서 무한 상승 방지) + 실제 워크스페이스 디렉토리만 매칭.
+function _findParentWorkspace(root, opts = {}) {
+  try {
+    root = absRoot(root);
+    const maxDepth = opts.maxDepth || 8;
+    let cur = path.dirname(root);
+    let prev = null, depth = 0;
+    while (cur && cur !== prev && depth < maxDepth) {
+      const hasHarness = exists(path.join(cur, '.harness'));
+      const hasLeerness = exists(path.join(cur, '.leerness'));
+      if (hasHarness || hasLeerness) {
+        const wd = (hasLeerness && exists(path.join(cur, '.leerness', 'MIGRATED_FROM_HARNESS'))) ? '.leerness' : (hasHarness ? '.harness' : '.leerness');
+        const wsAbs = path.join(cur, wd);
+        const assets = {
+          designSystem: exists(path.join(wsAbs, 'design-system.md')),
+          reuseMap: exists(path.join(wsAbs, 'reuse-map.md')),
+          agents: exists(path.join(cur, 'AGENTS.md')),
+          skills: exists(path.join(wsAbs, 'skills')),
+        };
+        const assetCount = Object.values(assets).filter(Boolean).length;
+        return { parentRoot: cur, workspaceDir: wd, workspaceAbs: wsAbs, assets, assetCount, depth: depth + 1 };
+      }
+      prev = cur; cur = path.dirname(cur); depth++;
+    }
+  } catch {}
+  return null;
 }
 // .harness → .leerness 마이그레이션 (copy + reference guide 생성)
 function _migrateWorkspaceDir(root, opts = {}) {
@@ -6038,6 +6088,40 @@ function workspaceDirCmd(root, sub) {
   }
 
   console.error(`Usage: leerness workspace-dir [get|guide]`);
+  process.exit(1);
+}
+
+// 1.30.2 (#157 사용자명시): leerness parent — 상위 leerness 부모 프로젝트 탐지(read-only).
+//   방향 C(교차검토): 부모 자산을 '재사용 후보'로 AI 에게 노출만 하고, 톤/스타일 등 실제 적용은 사용자 결정 게이트(후속 adopt 명령).
+//   intent expand(1.9.213) 안전 모델과 동일 철학 — 탐지/노출 ≠ 적용. 이 명령은 아무 파일도 쓰지 않는다.
+function parentCmd(root, sub) {
+  root = absRoot(root);
+  const uiLang = _uiLang(root);
+  const t = (ko, en) => (uiLang === 'en' ? en : ko);
+  const isTty = process.stdout && process.stdout.isTTY;
+  const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
+  const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  if (!sub || sub === 'detect') {
+    const p = _findParentWorkspace(root);
+    if (has('--json')) { log(JSON.stringify({ version: VERSION, root, parent: p, applied: false }, null, 2)); return; }
+    log(cyan(`# leerness parent detect (1.30.2)`));
+    if (!p) {
+      log(dim(t(`  상위 leerness 부모 프로젝트 없음 — 독립 프로젝트입니다.`, `  no parent leerness project found — this is a standalone project.`)));
+      return;
+    }
+    const mark = b => b ? '✓' : '✗';
+    log(t(`  부모 프로젝트: ${grn(p.parentRoot)}  (${p.workspaceDir}/, depth ${p.depth})`, `  parent project: ${grn(p.parentRoot)}  (${p.workspaceDir}/, depth ${p.depth})`));
+    log(t(`  재사용 가능 자산 ${p.assetCount}건: design-system=${mark(p.assets.designSystem)} reuse-map=${mark(p.assets.reuseMap)} AGENTS=${mark(p.assets.agents)} skills=${mark(p.assets.skills)}`,
+          `  reusable assets ${p.assetCount}: design-system=${mark(p.assets.designSystem)} reuse-map=${mark(p.assets.reuseMap)} AGENTS=${mark(p.assets.agents)} skills=${mark(p.assets.skills)}`));
+    log('');
+    log(yel(t(`  ⚠ 자동 적용하지 않음 — 부모 자산(톤/스타일/디자인) 재사용은 사용자 결정 게이트입니다.`, `  ⚠ not auto-applied — reusing parent assets (tone/style/design) is a user decision.`)));
+    log(dim(t(`    참고: leerness reuse find "<capability>" --path ${p.parentRoot} · 부모 design-system: ${path.join(p.workspaceAbs, 'design-system.md')}`,
+              `    ref: leerness reuse find "<capability>" --path ${p.parentRoot} · parent design-system: ${path.join(p.workspaceAbs, 'design-system.md')}`)));
+    return;
+  }
+  console.error(t(`Usage: leerness parent [detect] [--json]`, `Usage: leerness parent [detect] [--json]`));
   process.exit(1);
 }
 
@@ -8488,6 +8572,11 @@ function handoff(root) {
       const parts = [];
       // 1.20.3 (UR-0010 Phase 2): 헤드라인 항목 라벨 UI 언어 적용 (영어 opt-in, 한국어 기본). 블록 1회 해석.
       const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
+      // 1.30.2 (#157): 상위 leerness 부모 프로젝트 탐지 → AI 가 세션 시작 즉시 인지(재사용 후보). read-only — 자동 적용 X(사용자 결정 게이트). 상세: leerness parent detect
+      try {
+        const _pw = _findParentWorkspace(root);
+        if (_pw && _pw.assetCount > 0) parts.push(t(`🔗 부모 프로젝트 (${_pw.assetCount} 자산·미적용)`, `🔗 parent project (${_pw.assetCount} assets, not applied)`));
+      } catch {}
       // 1) drift level (가벼운 check)
       try {
         const r = cp.spawnSync(process.execPath, [__filename, 'drift', 'check', root, '--json'],
@@ -20211,6 +20300,7 @@ async function main() {
   if (cmd === 'wakeup-interval')                    return wakeupIntervalCmd(arg('--path', process.cwd()), args[1], args[2]);
   // 1.9.211: leerness workspace-dir <get|guide> — 현재 워크스페이스 디렉토리 / AI 참조 가이드 (사용자 명시)
   if (cmd === 'workspace-dir')                      return workspaceDirCmd(arg('--path', process.cwd()), args[1]);
+  if (cmd === 'parent')                             return parentCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.211: leerness migrate-workspace-dir — .harness → .leerness 마이그레이션 (사용자 명시)
   if (cmd === 'migrate-workspace-dir')              return migrateWorkspaceDirCmd(arg('--path', process.cwd()));
   // 1.9.212: leerness idempotency audit — 멱등성 위반 탐지 (사용자 명시)

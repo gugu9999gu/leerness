@@ -830,13 +830,14 @@ total++;
 {
   // agents dispatch — 활성 미충족 시 거부
   const env = { ...process.env, LEERNESS_ENABLE_CODEX: '0' };
-  const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'test task', '--to', 'codex'], { encoding: 'utf8', timeout: 10000, env });
+  // 1.30.2: timeout 10s→30s flake 하드닝(1.9.375 계열) — 전체 e2e 부하(수백 spawn) 하에서 짧은 타임아웃이 간헐 빈-stdout→오판.
+  const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'test task', '--to', 'codex'], { encoding: 'utf8', timeout: 30000, env });
   const okBlocked = r.status !== 0 && /비활성|disabled|not-installed/i.test(r.stdout);
   // --to 누락 거부
-  const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'test'], { encoding: 'utf8', timeout: 10000 });
+  const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'test'], { encoding: 'utf8', timeout: 30000 });
   const okNoTarget = r2.status !== 0 && /--to.*필요/.test(r2.stdout + r2.stderr);
   // 알 수 없는 agent 거부
-  const r3 = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'test', '--to', 'jedi'], { encoding: 'utf8', timeout: 10000 });
+  const r3 = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'test', '--to', 'jedi'], { encoding: 'utf8', timeout: 30000 });
   const okBadAgent = r3.status !== 0 && /알 수 없는 agent/.test(r3.stdout + r3.stderr);
   const ok = okBlocked && okNoTarget && okBadAgent;
   console.log(ok ? '✓ B(1.9.30) agents dispatch: env=0/--to 누락/잘못된 agent 모두 거부' : `✗ dispatch 실패 (block=${okBlocked} noT=${okNoTarget} bad=${okBadAgent})`);
@@ -882,7 +883,7 @@ total++;
 total++;
 {
   // --version --banner: LEERNESS ASCII + 신규 슬로건 (1.9.144+ "AI 에이전트 검수·기억·드리프트 방지 하네스")
-  const r = cp.spawnSync(process.execPath, [CLI, '--version', '--banner'], { encoding: 'utf8', timeout: 10000, env: { ...process.env, TERM: 'dumb' } });
+  const r = cp.spawnSync(process.execPath, [CLI, '--version', '--banner'], { encoding: 'utf8', timeout: 30000, env: { ...process.env, TERM: 'dumb' } });
   const ok = r.status === 0
     && /╔═+╗/.test(r.stdout)
     && /███████╗/.test(r.stdout)
@@ -6081,6 +6082,39 @@ total++;
     ok = f1bad && f1ok && f2ko && f2en;
   } catch {}
   console.log(ok ? '✓ B(1.30.1) 14th외부리뷰 F1+F2: audit committed-secret→failure(scan 일관, gitignored FP0) + handoff 보안요약이 committed 시크릿 노출(ko/en)' : '✗ 보안 정직성 F1+F2 가드 실패');
+  if (!ok) failed++;
+}
+
+// 1.30.2 회귀 (#157 사용자명시, 하위 프로젝트 방향 — 외부AI+Claude 교차검토 → 방향 C): parent detect 가 상위 leerness 부모를 탐지(read-only) + handoff 헤드라인 노출 + 자동 적용 안 함.
+total++;
+{
+  let ok = false;
+  try {
+    const par = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-par-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', par, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const sub = path.join(par, 'sub');
+    cp.spawnSync(process.execPath, [CLI, 'init', sub, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // (1) parent detect --json from sub → parent detected, applied:false, assetCount≥1
+    const pj = cp.spawnSync(process.execPath, [CLI, 'parent', 'detect', '--path', sub, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let detectOk = false; try { const j = JSON.parse(pj.stdout); detectOk = j.applied === false && j.parent && j.parent.workspaceDir === '.harness' && j.parent.assetCount >= 1; } catch {}
+    // (2) parent detect from standalone → null
+    const alone = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-alone-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', alone, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const aj = cp.spawnSync(process.execPath, [CLI, 'parent', 'detect', '--path', alone, '--json'], { encoding: 'utf8', timeout: 15000 });
+    let aloneOk = false; try { const j = JSON.parse(aj.stdout); aloneOk = j.parent === null; } catch {}
+    // (3) handoff headline from sub shows 🔗 부모 프로젝트 (미적용); en shows "not applied"
+    const hoKo = (cp.spawnSync(process.execPath, [CLI, 'handoff', '--path', sub], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
+    const hoEn = (cp.spawnSync(process.execPath, [CLI, 'handoff', '--path', sub, '--language', 'en'], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
+    const headlineOk = /🔗 부모 프로젝트.*미적용/.test(hoKo) && /🔗 parent project.*not applied/.test(hoEn);
+    // (4) read-only: parent detect 가 sub 에 아무 파일도 쓰지 않음(adopt 미구현)
+    const before = fs.readdirSync(sub).sort().join(',');
+    cp.spawnSync(process.execPath, [CLI, 'parent', 'detect', '--path', sub], { encoding: 'utf8', timeout: 15000 });
+    const after = fs.readdirSync(sub).sort().join(',');
+    const readOnlyOk = before === after;
+    [par, alone].forEach(d => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} });
+    ok = detectOk && aloneOk && headlineOk && readOnlyOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.30.2) #157 하위프로젝트: parent detect(상위 leerness 탐지·--json applied:false) + 독립 null + handoff 헤드라인 🔗(ko/en, 미적용) + read-only' : '✗ parent detect 가드 실패');
   if (!ok) failed++;
 }
 
