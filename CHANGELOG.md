@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.29.1 — 2026-06-16 — i18n-coupling 감사(clean) + handoff 보안 요약 섹션 영어화 (UR-0010)
+
+**🔒🌐 영어 사용자가 커밋된 시크릿을 가질 때 정확히 노출되는 handoff 보안 요약 섹션을 영어화.** 1.28.1 의 `hasSecurityFired` 라벨-결합 버그 클래스를 lib/ 전수 감사(추가 결합 버그 0)한 뒤, 감사 중 발견한 마지막 en-leak(보안 요약 본문)을 영어화. 한국어 우선 기본 보존.
+
+### 감사 (i18n-coupling, clean)
+- **lib/ 전수**: 번역된 라벨에 내부 로직이 string-match 로 결합된 곳(1.28.1 류) 추가 탐색 → **0 건**. drift `level === '🔴 critical'` 은 언어-안정(미번역), analyzer 조건은 bilingual-by-design, audit/pure-utils 한국어 조건은 미번역 템플릿 매칭, agents 조건은 안정 status 필드. 교차명령(handoff en headline 이 내부 ko-spawn `--json` 을 안정 필드로 파싱)도 견고.
+
+### 변경 (UR-0010)
+- **🌐 handoff 보안 요약 섹션 영어화**: `## 🔒 보안 요약` 헤더 + 2 issue(`.env→.env.example` / `.gitignore` 시크릿 누락) + `자동 수정` 안내 + `🚨 CRITICAL` + 자동 회복 3줄 + `💡 자동 실행 옵션` 을 `t(ko,en)` 으로 영어 opt-in. 한국어 verbatim 보존.
+- **🐛 회귀 자체수정(같은 라운드)**: 영어화 첫 시도에서 이 블록이 headline 의 `t()` 스코프 밖이라 `t` 가 미정의 → `ReferenceError` 가 블록의 `try`/`catch` 에 **삼켜져 보안 요약 섹션 전체가 (양 언어 모두) 사라지는** 회귀를 심었다. 소스가드(문자열 존재)는 통과했지만 **행위 검증**에서 적발(맹신 X) → 블록 로컬 `t()` 정의로 수정. 같은 함정의 [[lesson-selftest-self-reference-trap]] / [[lesson-reverify-published-artifact]] 계열.
+
+### 검증 (회귀 0)
+- **selftest 250→251** (보안 요약 영어/한국어 보존 소스가드, split-literal 로 self-reference 회피) · **행위**: `.env`+미흡 `.gitignore` 시나리오에서 `handoff --language en` 보안 요약 영어 렌더(섹션 라인 한글 0, Node 탐지) / `handoff` ko 보존.
+- **E2E i18n 행위가드 ⑧ 추가**: handoff 보안 요약 en/ko 를 e2e 로 못박음 — 소스가드가 못 잡는 "블록-스코프 t 누락 → 섹션 증발" 회귀를 행위로 차단(defense-in-depth).
+- patch(1.29.1) — npm 미배포(R-0011, GitHub/CHANGELOG 누적).
+
+### 잔여 (UR-0010 백로그)
+- handoff env-detect 블록(`🖥 실행 환경`/`→ 상세: leerness env detect`) en-leak(다음 라운드) · capabilities/commands/constraints/install-safety 영어화 · init en seed 템플릿 i18n.
+
 ## 1.29.0 — 2026-06-16 — 🛡️ [안정화/Stable] drift auto-fix·진단 명령 영어화 안정 minor
 
 **🛡️ 안정화(Stable) minor — drift 완전 영어화(버그수정 포함) + 진단 3종 영어화를 npm 공개.** 직전 minor(1.28.0) 이후 누적된 패치 2건(1.28.1 + 1.28.2)을 검증·통합해 배포. R-0011 정책의 20번째 stable minor. 한국어 우선 기본은 그대로.

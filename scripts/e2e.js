@@ -6239,9 +6239,22 @@ total++;
     const docKo = out(cp.spawnSync(process.execPath, [CLI, 'doctor'], { encoding: 'utf8', timeout: 20000, cwd: d }));
     const doctorOk = /install\/environment diagnosis/.test(docEn) && !H.test(docEn) && /설치\/환경 진단/.test(docKo);
     fs.rmSync(d, { recursive: true, force: true });
-    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk;
+    // ⑧ (1.29.1) handoff 보안 요약 섹션: .env + 미흡한 .gitignore → en 영어(섹션 라인 한글 0) + ko 기본 한글.
+    //   소스가드만으로는 못 잡는 회귀를 e2e 로 보강: 보안 요약 블록은 headline 의 t() 스코프 밖이라,
+    //   로컬 t() 누락 시 ReferenceError 가 try 에 삼켜져 섹션 전체가 (양 언어 모두) 사라진다. 이 가드가 그걸 잡는다.
+    const dh = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-ho-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', dh, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(dh, '.env'), 'API_KEY=sk-test-abc123def456ghi789jkl012mno345\n');
+    fs.writeFileSync(path.join(dh, '.gitignore'), 'node_modules/\n');
+    const hoEn = out(cp.spawnSync(process.execPath, [CLI, 'handoff', dh, '--language', 'en'], { encoding: 'utf8', timeout: 25000 }));
+    const hoKo = out(cp.spawnSync(process.execPath, [CLI, 'handoff', dh], { encoding: 'utf8', timeout: 25000 }));
+    const enSecLines = hoEn.split('\n').filter(l => /Security summary|auto-fix:|CRITICAL|auto-fix option|recover|missing secret/i.test(l));
+    const hoEnOk = /Security summary/.test(hoEn) && enSecLines.length >= 2 && !enSecLines.some(l => H.test(l));
+    const hoKoOk = /보안 요약/.test(hoKo);
+    fs.rmSync(dh, { recursive: true, force: true });
+    ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk;
   } catch {}
-  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
+  console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
   if (!ok) failed++;
 }
 
