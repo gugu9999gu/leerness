@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.31.2 — 2026-06-16 — 🌐 constraints 출력 영어화 (UR-0010)
+
+**🌐 `leerness constraints`(플랫폼/API 제약 사전 체크) 출력을 영어 opt-in 완전화.** UR-0010 CLI 영어화 잔여 표면. 라벨뿐 아니라 카탈로그 데이터(제약 detail)까지 영어화해 반쪽 영어(완전성 과장)를 회피. 한국어 기본 보존.
+
+### 변경 (UR-0010)
+- **constraints list/check/add 라벨 영어화**: "매칭된 플랫폼 없음" · "제안" · "N개 플랫폼 매칭 — 제약 사전 확인 필요" · "구현 전 위 제약 반영 설계 권장" · "platform 갱신" 을 `_t(ko,en)` 으로. `constraintsCmd` 에 함수레벨 `_L`/`_t` 도입(list/check/add 공유, 기존 help 블록 중복 제거).
+- **카탈로그 detail 영어화(데이터)**: `lib/catalogs.js` `_DEFAULT_PLATFORM_CONSTRAINTS` 6 플랫폼의 한국어 제약 detail 9종에 `detailEn` 추가(stripe/openai/anthropic/github/discord/twitter). en 출력 시 `detailEn`, 없으면 `detail`(영어 원문) 사용. catalog 매칭 로직·구조 무변경(추가 필드).
+- **suggestion 영어화**: `lib/pure-utils.js` `_matchConstraints(catalog, text, lang)` 에 optional `lang`('en') 추가 — generic API 키워드 no-match 제안을 영어로. 기본 ko(2-arg 호출 무회귀). `_checkRequestConstraints(root, text, lang)` 가 `_L` 전달.
+- **alias 표시 정합**: en `list` 에서 한글-only alias(예: stripe 의 `결제`)는 표시에서 숨김(매처로는 catalog 에 유지 → 한국어 입력 매칭 무회귀).
+
+### 검증 (회귀 0)
+- **selftest 257**: 기존 constraints catalog/`_matchConstraints` 분리 가드에 i18n 행위 추가(stripe `detailEn` 존재+무한글 · en suggestion 무한글+비공백 · ko suggestion 한글 유지).
+- **행위**: `constraints list/check --language en` 한글 0 + 영어 detail/라벨/suggestion · ko 기본 보존(필수/별도 detail) · 한국어 alias(`결제`) 매칭 무회귀(--json matched stripe).
+- **E2E 373→374**: 새 가드 B(1.31.2).
+- patch(1.31.2) — npm 미배포(R-0011). bin+package.json 동시 bump + 일치 가드 통과.
+
+### 잔여 (UR-0010 백로그)
+- `commands` 카탈로그(~85 desc, 큰 표면) · 팀 reminder 본문 · init en seed 템플릿.
+
 ## 1.31.1 — 2026-06-16 — 🌐 install-safety 출력 영어화 (UR-0010)
 
 **🌐 `leerness install-safety`(설치 안전 프로필) 출력을 영어 opt-in.** UR-0010 CLI 영어화 잔여 표면. 한국어 기본 보존.

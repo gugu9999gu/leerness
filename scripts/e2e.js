@@ -6206,6 +6206,32 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.31.2 회귀 (UR-0010): constraints 영어화 — list/check 라벨 + 카탈로그 detailEn + suggestion 영어 / ko 보존 / 매칭(한국어 alias) 무회귀.
+total++;
+{
+  let ok = false;
+  try {
+    const H = /[가-힣]/;
+    const cap = (args) => (cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 15000 }).stdout) || '';
+    const listEn = cap(['constraints', 'list', '--language', 'en']);
+    const listKo = cap(['constraints', 'list']);
+    const chkEn = cap(['constraints', 'check', 'stripe payment api integration', '--language', 'en']);
+    const noMatchEn = cap(['constraints', 'check', 'build a generic api integration widget xyz', '--language', 'en']);
+    // EN: zero Hangul + English catalog detail + English suggestion/labels surfaced
+    const enOk = !H.test(listEn) && /duplicate charges/.test(listEn) && /no platform matched/.test(noMatchEn)
+      && /review constraints before building/.test(chkEn) && !H.test(chkEn) && !H.test(noMatchEn)
+      && /review the pre-registered platform catalog/.test(noMatchEn);
+    // KO preserved: Korean catalog detail still present in default output
+    const koOk = H.test(listKo) && /필수|별도/.test(listKo) && /매칭된 플랫폼 없음|플랫폼 매칭/.test(cap(['constraints', 'check', '일반 api 연동 위젯 xyz']));
+    // matching unaffected: Korean alias still matches stripe (--json)
+    let matchOk = false;
+    try { const j = JSON.parse(cap(['constraints', 'check', 'stripe 결제 api 연동', '--json'])); matchOk = (j.matched || []).some(m => m.platform === 'stripe'); } catch {}
+    ok = enOk && koOk && matchOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.31.2) UR-0010: constraints en 영어(list/check 라벨+카탈로그 detailEn+suggestion, 한글 0) + ko 보존 + 한국어 alias 매칭 무회귀' : '✗ constraints 영어화 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {

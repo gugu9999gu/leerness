@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.31.1';
+const VERSION = '1.31.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2901,7 +2901,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: project-brief config 분리(_BRIEF_FIELDS/_briefFilled) + 인라인 제거 (UR-0025 1.9.330)', run: () => { const m = require('../lib/pure-utils'); const cfgOk = Array.isArray(m._BRIEF_FIELDS) && m._BRIEF_FIELDS.length === 10 && m._BRIEF_FIELDS[0].key === 'intro'; const work = m._briefFilled({ intro: 'x', features: ['a'] }) === 2 && m._briefFilled({}) === 0; const src = read(__filename); const moved = m._briefFilled === _briefFilled && m._BRIEF_FIELDS === _BRIEF_FIELDS && !/^const _BRIEF_FIELDS = \[/m.test(src) && !/^function _briefFilled\(/m.test(src); return cfgOk && work && moved; } },
     { name: 'lib/pure-utils: brief 빌더 분리(_briefReadmeBlock/_briefBlueprint + BRIEF 마커, VERSION 주입) (UR-0025 1.9.331)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._briefReadmeBlock === 'function' && typeof m._briefBlueprint === 'function' && m.BRIEF_START.includes('project-brief:start'); const b = { project: 'X', intro: 'i', features: ['f1'] }; const rb = m._briefReadmeBlock(b); const bp = m._briefBlueprint(b, '9.9.9'); const work = rb.includes(m.BRIEF_START) && rb.includes(m.BRIEF_END) && /f1/.test(rb) && /Blueprint/.test(bp) && /leerness v9\.9\.9/.test(bp); const src = read(__filename); const moved = m._briefBlueprint === _briefBlueprint && m.BRIEF_START === BRIEF_START && !/^function _briefReadmeBlock\(/m.test(src) && !/^function _briefBlueprint\(/m.test(src) && !/^const BRIEF_START =/m.test(src); return fnOk && work && moved; } },
     { name: 'lib/pure-utils: lessons.md 파서 분리(_parseLessonEntries) + 인라인 제거 (UR-0025 1.9.332)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseLessonEntries('### 2026-06-05\n- Lesson: A\n- Tag: t\n\n### 2026-06-04\n- Lesson: B'); const work = r.length === 2 && r[0].text === 'A' && r[0].tag === 't' && r[1].tag === null && r[0].date === '2026-06-05'; const src = read(__filename); const moved = m._parseLessonEntries === _parseLessonEntries && !/^function _parseLessonEntries\(/m.test(src) && src.includes('_parseLessonEntries(read(mp))'); return work && moved; } },
-    { name: 'UR-0025 심층: constraints catalog→lib/catalogs + _matchConstraints→pure-utils 분리 (1.9.333)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6 && !!c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe; const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제'); const work = r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0; const src = read(__filename); const moved = _DEFAULT_PLATFORM_CONSTRAINTS === c._DEFAULT_PLATFORM_CONSTRAINTS && _matchConstraints === m._matchConstraints && !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(src) && src.includes('_matchConstraints(_loadPlatformConstraints(root), text)'); return catOk && work && moved; } },
+    { name: 'UR-0025 심층: constraints catalog→lib/catalogs + _matchConstraints→pure-utils 분리 (1.9.333) + i18n en(1.31.2)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6 && !!c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe; const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제'); const work = r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0; const _H = /[가-힣]/; const enSug = (m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'generic api integration widget', 'en').suggestions || [])[0] || ''; const koSug = (m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'generic api integration widget', 'ko').suggestions || [])[0] || ''; const i18nOk = c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe.constraints.some(x => x.detailEn && !_H.test(x.detailEn)) && enSug.length > 0 && !_H.test(enSug) && _H.test(koSug); const src = read(__filename); const moved = _DEFAULT_PLATFORM_CONSTRAINTS === c._DEFAULT_PLATFORM_CONSTRAINTS && _matchConstraints === m._matchConstraints && !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(src) && src.includes('_matchConstraints(_loadPlatformConstraints(root), text)'); return catOk && work && i18nOk && moved; } },
     { name: 'UR-0025 심층(Codex 위임·검증): intent domain catalog→lib/catalogs + _matchDomain→pure-utils 분리 (1.9.334)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_DOMAIN_CATALOG && Object.keys(c._DEFAULT_DOMAIN_CATALOG.domains).length === 5 && !!c._DEFAULT_DOMAIN_CATALOG.domains.game; const r = m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'unity 게임'); const work = r.domain === 'game' && Array.isArray(r.components) && m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'zzz없음').domain === null && m._matchDomain(null, 'x').domain === null; const src = read(__filename); const moved = _DEFAULT_DOMAIN_CATALOG === c._DEFAULT_DOMAIN_CATALOG && _matchDomain === m._matchDomain && !/const _DEFAULT_DOMAIN_CATALOG = \{/.test(src) && src.includes('_matchDomain(_loadDomainCatalog(root), text)'); return catOk && work && moved; } },
     { name: 'UR-0025 심층: LSP catalog→lib/catalogs(_LSP_LANG_PATTERNS) + _detectLspLang/_matchLspSymbols→pure-utils 분리 (1.9.335)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._LSP_LANG_PATTERNS && Object.keys(c._LSP_LANG_PATTERNS).length === 5 && Array.isArray(c._LSP_LANG_PATTERNS.javascript); const langOk = m._detectLspLang('a.py') === 'python' && m._detectLspLang('b.go') === 'go' && m._detectLspLang('c.md') === 'javascript'; const sy = m._matchLspSymbols(c._LSP_LANG_PATTERNS, 'function alpha(){}\nclass Beta{}', 'javascript'); const work = sy.length === 2 && sy[0].name === 'alpha' && sy[0].kind === 'function' && sy[1].kind === 'class' && m._matchLspSymbols(null, 'x', 'javascript').length === 0; const src = read(__filename); const moved = _LSP_LANG_PATTERNS === c._LSP_LANG_PATTERNS && _detectLspLang === m._detectLspLang && _matchLspSymbols === m._matchLspSymbols && !/const _LSP_LANG_PATTERNS = \{/.test(src) && !/function _detectLspLang\(/.test(src); return catOk && langOk && work && moved; } },
     { name: 'UR-0025 심층(Codex 위임·검증): anti-laziness catalog→lib/catalogs(OPTIMISM_PATTERNS) + optimism 순수로직→pure-utils 분리 (1.9.336)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = Array.isArray(c.OPTIMISM_PATTERNS) && c.OPTIMISM_PATTERNS.length === 10 && c.OPTIMISM_PATTERNS[0].kind === 'API'; const ev = 'API 호출 완료, POST /users'; const sus = m._detectOptimism(c.OPTIMISM_PATTERNS, ev, 'function x(){}'); const conf = m._computeConfidence(c.OPTIMISM_PATTERNS, ev, 'function x(){}'); const work = sus.some(s => s.kind === 'API' && s.severity === 'high') && conf < 0.5 && m._computeConfidence(c.OPTIMISM_PATTERNS, '정리함', 'x') === 1 && m._detectOptimism(null, ev, 'x').length === 0 && m._extractUrlClaims('POST /a').length === 1 && m._verifyUrlClaim({ path: '/a' }, 'has /a') === true; const src = read(__filename); const moved = OPTIMISM_PATTERNS === c.OPTIMISM_PATTERNS && _puDetectOptimism === m._detectOptimism && !/const OPTIMISM_PATTERNS = \[/.test(src) && !/function _extractUrlClaims\(/.test(src); return catOk && work && moved; } },
@@ -4813,8 +4813,8 @@ function _writePlatformConstraints(root, catalog) {
 }
 // 사용자 요청 텍스트에서 플랫폼 alias 매칭 → 적용 제약 목록 반환
 // 1.9.333 (UR-0025 심층): 매칭 로직은 순수 _matchConstraints(catalog, text) (lib/pure-utils) — fs(load)는 여기서 주입.
-function _checkRequestConstraints(root, text) {
-  return _matchConstraints(_loadPlatformConstraints(root), text);
+function _checkRequestConstraints(root, text, lang) {
+  return _matchConstraints(_loadPlatformConstraints(root), text, lang);
 }
 
 // 1.9.209: pre-wake sub-agent audit (사용자 명시)
@@ -5780,9 +5780,9 @@ function constraintsCmd(root, sub, ...rest) {
   const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
   const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
+  const _L = _uiLang(root); const _t = (ko, en) => _L === 'en' ? en : ko;  // 1.31.2 (UR-0010): function-level so list/check/add share it
 
   if (!sub || sub === 'help' || sub === '--help') {
-    const _L = _uiLang(root); const _t = (ko, en) => _L === 'en' ? en : ko;  // 1.23.2 (UR-0010 Phase 7)
     log(_t(`# leerness constraints (1.9.208) — 플랫폼/API 제약 사전 체크`, `# leerness constraints — pre-check platform/API constraints`));
     log('');
     log(_t(`  list                  → 등록된 모든 플랫폼 catalog 출력 (--json 가능)`, `  list                  → list all registered platform catalogs (--json)`));
@@ -5800,11 +5800,13 @@ function constraintsCmd(root, sub, ...rest) {
     log(`  total platforms: ${Object.keys(catalog.platforms).length}`);
     log('');
     for (const [pid, plat] of Object.entries(catalog.platforms)) {
-      log(grn(`  📦 ${pid}`) + dim(`  aliases: ${(plat.aliases || []).join(', ')}`));
+      // 1.31.2: aliases are matchers (kept for matching); hide Hangul-only aliases from EN display
+      const aliasList = _L === 'en' ? (plat.aliases || []).filter(a => !/[가-힣]/.test(a)) : (plat.aliases || []);
+      log(grn(`  📦 ${pid}`) + dim(`  aliases: ${aliasList.join(', ')}`));
       log(dim(`     docs: ${plat.docs || '-'}`));
       for (const c of plat.constraints || []) {
         const icon = c.kind === 'rate-limit' ? '🚦' : (c.kind === 'cost' ? '💰' : (c.kind === 'auth' ? '🔐' : '📋'));
-        log(`     ${icon} [${c.kind}] ${c.detail}`);
+        log(`     ${icon} [${c.kind}] ${_L === 'en' && c.detailEn ? c.detailEn : c.detail}`);
       }
       log('');
     }
@@ -5814,32 +5816,32 @@ function constraintsCmd(root, sub, ...rest) {
   if (sub === 'check') {
     const text = rest.filter(x => !x.startsWith('-')).join(' ');
     if (!text) { console.error('Usage: leerness constraints check "<request text>"'); process.exit(1); }
-    const result = _checkRequestConstraints(root, text);
+    const result = _checkRequestConstraints(root, text, _L);
     if (has('--json')) { log(JSON.stringify({ query: text, ...result }, null, 2)); return; }
     log(cyan(`# leerness constraints check (1.9.208)`));
     log(`  query: ${text.slice(0, 80)}${text.length > 80 ? '…' : ''}`);
     log('');
     if (result.matched.length === 0) {
-      log(grn(`  ✓ 매칭된 플랫폼 없음 (catalog ${result.totalPlatforms}종 검토 완료)`));
+      log(grn(_t(`  ✓ 매칭된 플랫폼 없음 (catalog ${result.totalPlatforms}종 검토 완료)`, `  ✓ no platform matched (reviewed ${result.totalPlatforms} catalog entries)`)));
       if (result.suggestions.length) {
         log('');
-        log(yel(`  💡 제안:`));
+        log(yel(_t(`  💡 제안:`, `  💡 suggestions:`)));
         result.suggestions.forEach(s => log(`     • ${s}`));
       }
       return;
     }
-    log(red(`  ⚠ ${result.matched.length}개 플랫폼 매칭 — 제약 사전 확인 필요:`));
+    log(red(_t(`  ⚠ ${result.matched.length}개 플랫폼 매칭 — 제약 사전 확인 필요:`, `  ⚠ ${result.matched.length} platform(s) matched — review constraints before building:`)));
     log('');
     for (const m of result.matched) {
       log(grn(`  📦 ${m.platform}`) + dim(` (matched: "${m.matchedAlias}")`));
       log(dim(`     docs: ${m.docs || '-'}`));
       for (const c of m.constraints || []) {
         const icon = c.kind === 'rate-limit' ? '🚦' : (c.kind === 'cost' ? '💰' : (c.kind === 'auth' ? '🔐' : '📋'));
-        log(`     ${icon} [${c.kind}] ${c.detail}`);
+        log(`     ${icon} [${c.kind}] ${_L === 'en' && c.detailEn ? c.detailEn : c.detail}`);
       }
       log('');
     }
-    log(dim(`  → 구현 전 위 제약을 반영한 설계 권장 (rate limiter / idempotency key / 비용 추정)`));
+    log(dim(_t(`  → 구현 전 위 제약을 반영한 설계 권장 (rate limiter / idempotency key / 비용 추정)`, `  → recommend designing with the above constraints before building (rate limiter / idempotency key / cost estimate)`)));
     return;
   }
 
@@ -5857,7 +5859,7 @@ function constraintsCmd(root, sub, ...rest) {
     if (kind && detail) catalog.platforms[id].constraints.push({ kind: kind.trim(), detail });
     _writePlatformConstraints(root, catalog);
     if (has('--json')) { log(JSON.stringify(catalog.platforms[id], null, 2)); return; }
-    log(grn(`✓ platform "${id}" 갱신 — constraints: ${catalog.platforms[id].constraints.length}`));
+    log(grn(_t(`✓ platform "${id}" 갱신 — constraints: ${catalog.platforms[id].constraints.length}`, `✓ platform "${id}" updated — constraints: ${catalog.platforms[id].constraints.length}`)));
     return;
   }
 
