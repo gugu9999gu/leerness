@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.30.3 — 2026-06-16 — 🔗 parent adopt: 부모 자산 게이트형 적용 (dry-run 기본·비파괴) (#158 사용자명시)
+
+**🔗 1.30.2(탐지)의 후속 — 부모 자산을 자식 프로젝트에 '적용'하는 단계.** 사용자 결정 게이트: dry-run 기본, `--apply`(사용자 명시 결정) 시에만 기록하며, **자식 원본 design-system.md 를 변형하지 않고 별도 참조 파일에만 기록(비파괴)**.
+
+### 변경 (#158)
+- **`leerness parent adopt [--select <kinds>] [--apply] [--json]`** (신규):
+  - **dry-run 기본**(--apply 없음): 적용 후보(design-system/reuse-map/conventions)를 보여주고 **아무 파일도 쓰지 않음**. "실제 적용하려면 --apply" 안내.
+  - **`--apply`(사용자 명시 결정)**: 부모 자산을 자식-로컬 `.harness/inherited-from-parent.md`(참조) + `.harness/PARENT_LINK.json`(마커)로 기록. **자식 design-system.md/reuse-map.md 직접 변형 안 함**(additive·비파괴·되돌리기 쉬움).
+  - `--select design-system,reuse-map,conventions`(기본 all) — 적용 자산 선택.
+  - intent expand(1.9.213) 안전 모델 동일: Always-Off Opt-In + Dry-run 기본 + 명시 결정.
+- **handoff 헤드라인 adopt 상태 반영**: 자식에 `PARENT_LINK.json` 있으면 `🔗 부모 프로젝트 (N 자산·adopted)`, 없으면 `·미적용`(en: adopted / not applied). 게이트 상태 가시화.
+- commands 카탈로그 `parent detect|adopt` 갱신.
+
+### 검증 (회귀 0)
+- **selftest 256→257** (adopt 게이트/비파괴 소스가드).
+- **행위(맹신 X)**: dry-run→쓰기 0 · `--apply`→inherited+marker 기록 · **자식 design-system.md 무변경 확인** · linkOk · handoff 헤드라인 adopted(ko/en) · `--json applied:true`. OVERALL PASS.
+- **E2E 370→371**: 새 가드 B(1.30.3) — dry-run 쓰기0 + --apply 비파괴 + handoff adopted + --json.
+- patch(1.30.3) — npm 미배포(R-0011). VERSION bump bin+package.json 동시(1.30.2 교훈) + 일치 가드 통과.
+
+### #157~158 정리
+- 하위 프로젝트 부모 자산: **탐지(1.30.2, read-only) → adopt(1.30.3, 게이트형 비파괴)** 2 슬라이스 완료. 외부 codex 리뷰는 비동기(미반영) — 도착 시 후속 보강.
+
 ## 1.30.2 — 2026-06-16 — 🔗 하위 프로젝트: 상위 leerness 부모 탐지(read-only) — 자산 재사용은 사용자 결정 게이트 (#157 사용자명시)
 
 **🔗 leerness 프로젝트 하위에 신규 하위프로젝트로 이어 개발할 때, 부모의 자산(design-system/reuse-map/컨벤션)을 어떻게 다룰지** 에 대한 사용자 명시 요청(#157). **외부AI(codex)+Claude(Plan) 교차검토**로 방향을 정하고 첫 슬라이스 구현.

@@ -6118,6 +6118,41 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.30.3 회귀 (#158 사용자명시): parent adopt 게이트형 적용 — dry-run 기본(쓰기 0) + --apply(사용자 명시) 시에만 자식-로컬 참조 기록 + 자식 design-system.md 무변경(비파괴) + handoff 헤드라인 adopted 반영.
+total++;
+{
+  let ok = false;
+  try {
+    const par = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-adopt-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', par, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const sub = path.join(par, 'sub');
+    cp.spawnSync(process.execPath, [CLI, 'init', sub, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const childDs = path.join(sub, '.harness', 'design-system.md');
+    const childDsBefore = fs.readFileSync(childDs, 'utf8');
+    const inherited = path.join(sub, '.harness', 'inherited-from-parent.md');
+    const link = path.join(sub, '.harness', 'PARENT_LINK.json');
+    // (1) DRY-RUN: 쓰기 0
+    cp.spawnSync(process.execPath, [CLI, 'parent', 'adopt', '--path', sub], { encoding: 'utf8', timeout: 15000 });
+    const dryNoWrite = !fs.existsSync(inherited) && !fs.existsSync(link);
+    // (2) --apply: 참조파일+마커 기록, 자식 design-system.md 무변경
+    cp.spawnSync(process.execPath, [CLI, 'parent', 'adopt', '--apply', '--path', sub], { encoding: 'utf8', timeout: 15000 });
+    const wrote = fs.existsSync(inherited) && fs.existsSync(link);
+    const childUnchanged = fs.readFileSync(childDs, 'utf8') === childDsBefore;
+    let linkOk = false; try { const j = JSON.parse(fs.readFileSync(link, 'utf8')); linkOk = !!j.parentRoot && Array.isArray(j.adoptedKinds) && j.adoptedKinds.length >= 1; } catch {}
+    // (3) handoff 헤드라인 adopted 반영(ko/en)
+    const hoKo = (cp.spawnSync(process.execPath, [CLI, 'handoff', '--path', sub], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
+    const hoEn = (cp.spawnSync(process.execPath, [CLI, 'handoff', '--path', sub, '--language', 'en'], { encoding: 'utf8', timeout: 25000 }).stdout) || '';
+    const headlineOk = /🔗 부모 프로젝트.*adopted/.test(hoKo) && /🔗 parent project.*adopted/.test(hoEn);
+    // (4) --json applied:true on apply
+    const aj = cp.spawnSync(process.execPath, [CLI, 'parent', 'adopt', '--apply', '--json', '--path', sub], { encoding: 'utf8', timeout: 15000 });
+    let jsonOk = false; try { const j = JSON.parse(aj.stdout); jsonOk = j.applied === true && typeof j.inheritedPath === 'string'; } catch {}
+    fs.rmSync(par, { recursive: true, force: true });
+    ok = dryNoWrite && wrote && childUnchanged && linkOk && headlineOk && jsonOk;
+  } catch {}
+  console.log(ok ? '✓ B(1.30.3) #158 parent adopt: dry-run 쓰기0 + --apply 참조파일/마커 + 자식 design-system 무변경(비파괴) + handoff adopted(ko/en) + --json applied:true' : '✗ parent adopt 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {

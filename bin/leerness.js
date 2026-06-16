@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.30.2';
+const VERSION = '1.30.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3910,6 +3910,13 @@ function _selfTestCases() {
     { name: 'VERSION ↔ package.json 일치 (1.30.2: 한쪽만 bump 하던 실수 2초 내 차단)', run: () => {
       // bin VERSION 과 package.json.version 이 어긋나면 배너/배포가 거짓 버전을 표기 → 즉시 fail.
       try { return require('../package.json').version === VERSION; } catch { return false; }
+    } },
+    { name: 'parent adopt (1.30.3 #158): 게이트형 adopt(dry-run 기본/--apply) + 비파괴 참조파일 (소스 가드)', run: () => {
+      const bin = read(__filename);
+      // split-literals (self-reference trap 회피)
+      const hasAdopt = bin.includes("'ado" + "pt'") && bin.includes('parent ado' + 'pt --apply');
+      const nonDestructive = bin.includes('inherited-from-pa' + 'rent.md') && bin.includes('PARENT_LI' + 'NK.json');
+      return hasAdopt && nonDestructive;
     } }
   ];
 }
@@ -4690,7 +4697,7 @@ function commandsCmd(root) {
       { cmd: 'update [--check|--yes|--force]', desc: '자가 업데이트' },
       { cmd: 'wakeup-interval get|set|auto|history|record', desc: 'adaptive wakeup (1.9.210)' },
       { cmd: 'workspace-dir get|guide', desc: '워크스페이스 디렉토리 (1.9.211)' },
-      { cmd: 'parent detect [--json]', desc: '상위 leerness 부모 탐지·자산 재사용 후보 (read-only, 1.30.2)' },
+      { cmd: 'parent detect|adopt [--select <kinds>] [--apply]', desc: '상위 leerness 부모 탐지 + 자산 게이트형 adopt (1.30.2~3)' },
       { cmd: 'intent classify|expand|domains "<request>"', desc: '의도 파악 + scope (1.9.213)' },
       { cmd: 'constraints list|check|add', desc: '플랫폼/API 제약 (1.9.208)' },
       { cmd: 'provider list|add|remove|sync', desc: 'Provider Registry (1.9.157~160)' },
@@ -6103,6 +6110,7 @@ function parentCmd(root, sub) {
   const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
+  const red = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
   if (!sub || sub === 'detect') {
     const p = _findParentWorkspace(root);
     if (has('--json')) { log(JSON.stringify({ version: VERSION, root, parent: p, applied: false }, null, 2)); return; }
@@ -6119,9 +6127,71 @@ function parentCmd(root, sub) {
     log(yel(t(`  ⚠ 자동 적용하지 않음 — 부모 자산(톤/스타일/디자인) 재사용은 사용자 결정 게이트입니다.`, `  ⚠ not auto-applied — reusing parent assets (tone/style/design) is a user decision.`)));
     log(dim(t(`    참고: leerness reuse find "<capability>" --path ${p.parentRoot} · 부모 design-system: ${path.join(p.workspaceAbs, 'design-system.md')}`,
               `    ref: leerness reuse find "<capability>" --path ${p.parentRoot} · parent design-system: ${path.join(p.workspaceAbs, 'design-system.md')}`)));
+    log(dim(t(`    재사용 적용(사용자 결정): leerness parent adopt --select design-system,reuse-map,conventions --apply`,
+              `    adopt (your decision): leerness parent adopt --select design-system,reuse-map,conventions --apply`)));
     return;
   }
-  console.error(t(`Usage: leerness parent [detect] [--json]`, `Usage: leerness parent [detect] [--json]`));
+  // 1.30.3 (#158): leerness parent adopt — 부모 자산을 자식-로컬 참조로 기록(게이트형 적용).
+  //   사용자 결정 게이트: dry-run 기본, --apply(사용자 명시) 시에만 기록. 자식 design-system.md 무변경(비파괴, additive).
+  if (sub === 'adopt') {
+    const p = _findParentWorkspace(root);
+    const apply = has('--apply');
+    const selRaw = arg('--select', 'all');
+    const allKinds = ['design-system', 'reuse-map', 'conventions'];
+    const kinds = (selRaw === 'all') ? allKinds : String(selRaw).split(',').map(s => s.trim()).filter(Boolean);
+    const wsAbs = _workspaceDirAbs(root);
+    const inheritedPath = path.join(wsAbs, 'inherited-from-parent.md');
+    const linkPath = path.join(wsAbs, 'PARENT_LINK.json');
+    const cand = [];
+    if (p) {
+      if (kinds.includes('design-system') && p.assets.designSystem) cand.push({ kind: 'design-system', src: path.join(p.workspaceAbs, 'design-system.md') });
+      if (kinds.includes('reuse-map') && p.assets.reuseMap) cand.push({ kind: 'reuse-map', src: path.join(p.workspaceAbs, 'reuse-map.md') });
+      if (kinds.includes('conventions') && p.assets.agents) cand.push({ kind: 'conventions', src: path.join(p.parentRoot, 'AGENTS.md') });
+    }
+    // 1.30.3: --json 은 단일 객체만 출력 — apply(부모 존재) 경로는 자체 JSON(applied:true)을 내므로 여기선 제외(이중 JSON 방지).
+    if (has('--json') && (!p || !apply)) {
+      log(JSON.stringify({ version: VERSION, root, parent: p ? p.parentRoot : null, selected: kinds, candidates: cand.map(c => c.kind), apply, applied: false, inheritedPath: null }, null, 2));
+    }
+    if (!p) {
+      if (!has('--json')) { log(cyan(`# leerness parent adopt (1.30.3)`)); log(dim(t(`  상위 leerness 부모 프로젝트 없음 — adopt 대상 없음.`, `  no parent leerness project — nothing to adopt.`))); }
+      return;
+    }
+    if (!apply) {
+      if (!has('--json')) {
+        log(cyan(`# leerness parent adopt (1.30.3) [DRY-RUN]`));
+        log(t(`  부모: ${grn(p.parentRoot)} · 선택: ${kinds.join(', ')}`, `  parent: ${grn(p.parentRoot)} · select: ${kinds.join(', ')}`));
+        if (!cand.length) log(dim(t(`  적용 후보 없음 (부모에 선택 자산 없음).`, `  no candidates (parent lacks the selected assets).`)));
+        else cand.forEach(c => log(t(`  • ${c.kind} ← ${c.src}`, `  • ${c.kind} ← ${c.src}`)));
+        log('');
+        log(yel(t(`  ⚠ DRY-RUN — 실제 적용하려면 \`leerness parent adopt --apply\` (사용자 명시 결정).`, `  ⚠ DRY-RUN — to apply, run \`leerness parent adopt --apply\` (explicit user decision).`)));
+        log(dim(t(`    적용해도 자식 design-system.md 는 변경하지 않고, .harness/inherited-from-parent.md 에 '참조'로만 기록(비파괴).`,
+                  `    even on apply, your design-system.md is NOT modified — parent assets are recorded as reference in .harness/inherited-from-parent.md.`)));
+      }
+      return;
+    }
+    // APPLY (사용자 명시): 자식-로컬 참조 파일 + 마커 기록 (비파괴 additive — 자식 원본 design-system.md/reuse-map.md 직접 변형 안 함)
+    try {
+      mkdirp(wsAbs);
+      let body = `<!-- leerness:inherited-from-parent (1.30.3) — 사용자 명시 \`parent adopt --apply\`. 부모 자산을 '참조'로만 기록(자식 원본 무변경). -->\n`;
+      body += `# ${t('부모 프로젝트 자산 (참조용)', 'Parent project assets (reference)')}\n\n`;
+      body += `- ${t('부모', 'parent')}: ${p.parentRoot}\n- adopt: ${today()}\n- ${t('선택', 'select')}: ${kinds.join(', ')}\n\n`;
+      for (const c of cand) { const content = exists(c.src) ? read(c.src) : ''; body += `## ${c.kind} (from ${c.src})\n\n${String(content).trim()}\n\n`; }
+      writeUtf8(inheritedPath, body);
+      writeUtf8(linkPath, JSON.stringify({ parentRoot: p.parentRoot, workspaceDir: p.workspaceDir, adoptedKinds: kinds, adoptedAt: today(), version: VERSION }, null, 2) + '\n');
+      if (has('--json')) { log(JSON.stringify({ version: VERSION, root, parent: p.parentRoot, selected: kinds, candidates: cand.map(c => c.kind), apply: true, applied: true, inheritedPath }, null, 2)); }
+      else {
+        log(cyan(`# leerness parent adopt (1.30.3)`));
+        log(grn(t(`  ✓ adopt 완료 (${cand.length} 자산) — 자식 design-system.md 무변경(참조로만 기록).`, `  ✓ adopted (${cand.length} assets) — your design-system.md unchanged (recorded as reference only).`)));
+        log(dim(`    ${t('참조', 'reference')}: ${inheritedPath}`));
+        log(dim(`    ${t('마커', 'marker')}: ${linkPath}`));
+      }
+    } catch (e) {
+      if (!has('--json')) log(red(t(`  ✗ adopt 실패: ${e.message}`, `  ✗ adopt failed: ${e.message}`)));
+      process.exitCode = 1;
+    }
+    return;
+  }
+  console.error(t(`Usage: leerness parent [detect|adopt] [--select <kinds>] [--apply] [--json]`, `Usage: leerness parent [detect|adopt] [--select <kinds>] [--apply] [--json]`));
   process.exit(1);
 }
 
@@ -8575,7 +8645,12 @@ function handoff(root) {
       // 1.30.2 (#157): 상위 leerness 부모 프로젝트 탐지 → AI 가 세션 시작 즉시 인지(재사용 후보). read-only — 자동 적용 X(사용자 결정 게이트). 상세: leerness parent detect
       try {
         const _pw = _findParentWorkspace(root);
-        if (_pw && _pw.assetCount > 0) parts.push(t(`🔗 부모 프로젝트 (${_pw.assetCount} 자산·미적용)`, `🔗 parent project (${_pw.assetCount} assets, not applied)`));
+        if (_pw && _pw.assetCount > 0) {
+          const _adopted = exists(path.join(_workspaceDirAbs(root), 'PARENT_LINK.json')); // 1.30.3: adopt 여부 반영
+          parts.push(_adopted
+            ? t(`🔗 부모 프로젝트 (${_pw.assetCount} 자산·adopted)`, `🔗 parent project (${_pw.assetCount} assets, adopted)`)
+            : t(`🔗 부모 프로젝트 (${_pw.assetCount} 자산·미적용)`, `🔗 parent project (${_pw.assetCount} assets, not applied)`));
+        }
       } catch {}
       // 1) drift level (가벼운 check)
       try {
