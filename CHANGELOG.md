@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.32.1 — 2026-06-16 — 🔍 15번째 외부/멀티에이전트 리뷰 후속: parent/constraints --json 에러 구조화 + --select 정합
+
+**🔍 15번째 외부/멀티에이전트 리뷰(게시본 1.32.0 신규 표면 3차원) — 발견 전건 맹신X 양방향 재현검증 후 확정분만 수정.** i18n 차원은 clean(영어화 견고 재확인). parent/constraints/사이트 verify-deploy 에서 확정 발견 수정. 보안/비파괴 핵심 보장은 모두 hold.
+
+### 변경 (15th리뷰 확정 발견)
+- **C2 (P2) `--json` 에러 경로 구조화**: `constraints check/add` + `constraints`/`parent` unknown-subcommand 가 `--json` 에서도 plain text 를 출력하던 것을 `failJson(has('--json'), code, msg)` 로 통일(1.9.398 convention 과 일관). JSON 소비자가 stdout 파싱 가능. human 경로(`✗`+exit1) 보존.
+- **A1 (P2) parent adopt `--json` 에러 비공백**: `adopt --apply --json` 이 쓰기 오류 시 **빈 stdout+exit1**(JSON 소비자 크래시)을 내던 catch 를 구조화 1객체 `{applied:false, error}` 로 교정.
+- **A2 (P3) `--select` 정합**: 알 수 없는 `--select` kind(예: `garbage`)를 무시(필터)하고, **적용 후보 0건이면 기록하지 않음 + applied:false**(빈/거짓 `PARENT_LINK.json` 지속 차단, dry-run 과 일관). `adoptedKinds` 는 요청 kinds 가 아닌 **실제 채택분(cand)**만 기록.
+- **사이트 verify-deploy.cjs (별도 레포 커밋)**: C1(P1) 버전 정규식 좌측 경계 누락 → stale 사이트 false-pass(green-but-stale) 위험 교정(`(?<![\w.])`..`(?![\w.])` 양쪽 앵커) · C3 `--expect v1.31.2` v 이중요구 false-fail(선행 v strip) · C4 손상 releases.json uncaught SyntaxError → clean exit 2 · C5 비숫자 `--retries`/`--delay` NaN(0회 fetch) → 기본값 클램프.
+
+### 검증 (회귀 0, 맹신X 양방향)
+- 모든 발견을 메인이 직접 재현(진짜버그 확정 + 비버그 기각). i18n 차원 clean·비파괴(child design-system 무변경)·단일 JSON(success)·idempotency 등은 hold 확인.
+- **selftest 257** 무회귀. **E2E 375→376**: 새 가드 B(1.32.1) — C2(4경로 구조화) + A1(에러경로 비공백) + A2(무효 select→applied:false·실제 adoptedKinds) 행위.
+- verify-deploy 정규식 9케이스(asset-hash/left-digit/1.31.20 무매칭 + v-prefix/실제 homepage 매칭) + C4/C5 행위 직접 검증.
+- patch(1.32.1) — npm 미배포(R-0011). bin+package.json 동시 bump + 일치 가드 통과.
+
+### 백로그 (A3, P3 방어심화)
+- parent 자산 content 가 `inherited-from-parent.md` 에 verbatim 임베드(부모=신뢰 ancestor 라 P3) — marker/header spoofing 방어 위해 fencing 검토(UR 백로그). PARENT_LINK.json 은 JSON.stringify 라 안전.
+
 ## 1.32.0 — 2026-06-16 — 🛡️ [안정화/Stable] UR-0010 영어화 3종(install-safety+constraints+capabilities/team) 안정 minor
 
 **🛡️ 안정화(Stable) minor — 직전 minor(1.31.0) 이후 누적된 UR-0010 CLI 영어화 패치 3건(1.31.1~1.31.3)을 검증·통합해 npm 공개.** R-0011 정책의 23번째 stable minor. 잔여 영어화 표면 4종(install-safety / constraints / capabilities / team reminder)을 라벨+카탈로그 데이터까지 완전 영어화. 한국어 우선 기본은 그대로.

@@ -6265,6 +6265,41 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.32.1 회귀 (15th 외부리뷰 맹신X): constraints/parent --json 에러 구조화(C2) + parent adopt --json 에러경로 비공백(A1) + --select 무효 kind applied:false(A2).
+total++;
+{
+  let ok = false;
+  try {
+    const isJson = s => { try { JSON.parse(String(s).trim()); return true; } catch { return false; } };
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rev15-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    const child = path.join(d, 'child'); fs.mkdirSync(child);
+    cp.spawnSync(process.execPath, [CLI, 'init', child, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    const run = (args) => cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 20000 });
+    // C2: constraints check/add/zzz + parent zzz --json → structured {ok:false, code}
+    const c2 = [['constraints', 'check', '--json', '--path', child], ['constraints', 'add', '--json', '--path', child], ['constraints', 'zzz', '--json', '--path', child], ['parent', 'zzz', '--json', '--path', child]]
+      .every(a => { const r = run(a); let code = null; try { code = JSON.parse(r.stdout).code; } catch {} return isJson(r.stdout) && r.status === 1 && !!code; });
+    // C2 human path preserved: non-json check → exit1 (no JSON)
+    const human = run(['constraints', 'check', '--path', child]); const humanOk = human.status === 1 && !isJson(human.stdout);
+    // A1: parent adopt --apply --json on write error → non-empty structured JSON {applied:false, error}
+    const inh = path.join(child, '.harness', 'inherited-from-parent.md');
+    try { fs.mkdirSync(inh); } catch {}
+    const a1r = run(['parent', 'adopt', '--path', child, '--apply', '--json']); let a1j = null; try { a1j = JSON.parse(a1r.stdout); } catch {}
+    const a1ok = !!a1j && a1j.applied === false && !!a1j.error && a1r.status === 1;
+    try { fs.rmdirSync(inh); } catch {}
+    // A2: --select garbage --apply → applied:false + no PARENT_LINK written; valid select still works with actual adoptedKinds
+    const a2g = run(['parent', 'adopt', '--path', child, '--select', 'garbage,foo', '--apply', '--json']); let a2gj = null; try { a2gj = JSON.parse(a2g.stdout); } catch {}
+    const noLink = !fs.existsSync(path.join(child, '.harness', 'PARENT_LINK.json'));
+    const a2v = run(['parent', 'adopt', '--path', child, '--select', 'design-system', '--apply', '--json']); let a2vj = null; try { a2vj = JSON.parse(a2v.stdout); } catch {}
+    let link = null; try { link = JSON.parse(fs.readFileSync(path.join(child, '.harness', 'PARENT_LINK.json'), 'utf8')); } catch {}
+    const a2ok = !!a2gj && a2gj.applied === false && noLink && !!a2vj && a2vj.applied === true && link && JSON.stringify(link.adoptedKinds) === JSON.stringify(['design-system']);
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+    ok = c2 && humanOk && a1ok && a2ok;
+  } catch {}
+  console.log(ok ? '✓ B(1.32.1) 15th리뷰: constraints/parent --json 에러 구조화(C2) + parent adopt --json 에러경로 비공백(A1) + --select 무효→applied:false·실제 adoptedKinds(A2)' : '✗ 15th리뷰 후속(C2/A1/A2) 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {

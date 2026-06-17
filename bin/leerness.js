@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.32.0';
+const VERSION = '1.32.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5815,7 +5815,7 @@ function constraintsCmd(root, sub, ...rest) {
 
   if (sub === 'check') {
     const text = rest.filter(x => !x.startsWith('-')).join(' ');
-    if (!text) { console.error('Usage: leerness constraints check "<request text>"'); process.exit(1); }
+    if (!text) return failJson(has('--json'), 'missing_query', 'Usage: leerness constraints check "<request text>"');  // 1.32.1 (15th리뷰 C2): --json 구조화
     const result = _checkRequestConstraints(root, text, _L);
     if (has('--json')) { log(JSON.stringify({ query: text, ...result }, null, 2)); return; }
     log(cyan(`# leerness constraints check (1.9.208)`));
@@ -5847,11 +5847,11 @@ function constraintsCmd(root, sub, ...rest) {
 
   if (sub === 'add') {
     const id = rest[0];
-    if (!id) { console.error('Usage: leerness constraints add <platform-id> --constraint "kind:detail"'); process.exit(1); }
+    if (!id) return failJson(has('--json'), 'missing_platform_id', 'Usage: leerness constraints add <platform-id> --constraint "kind:detail"');  // 1.32.1 (15th리뷰 C2)
     const catalog = _loadPlatformConstraints(root);
     const aliases = (arg('--alias', '') || '').split(',').map(s => s.trim()).filter(Boolean);
     const detailRaw = arg('--constraint', '');
-    if (!detailRaw) { console.error('--constraint "kind:detail" required'); process.exit(1); }
+    if (!detailRaw) return failJson(has('--json'), 'missing_constraint', '--constraint "kind:detail" required');  // 1.32.1 (15th리뷰 C2)
     const [kind, ...rest2] = detailRaw.split(':');
     const detail = rest2.join(':').trim();
     if (!catalog.platforms[id]) catalog.platforms[id] = { aliases: [], constraints: [] };
@@ -5863,9 +5863,7 @@ function constraintsCmd(root, sub, ...rest) {
     return;
   }
 
-  console.error(`Unknown subcommand: ${sub}`);
-  console.error(`Run: leerness constraints help`);
-  process.exit(1);
+  return failJson(has('--json'), 'unknown_subcommand', `알 수 없는 constraints 하위명령: ${sub} — leerness constraints help`);  // 1.32.1 (15th리뷰 C2)
 }
 
 // 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit CLI (사용자 명시)
@@ -6140,7 +6138,7 @@ function parentCmd(root, sub) {
     const apply = has('--apply');
     const selRaw = arg('--select', 'all');
     const allKinds = ['design-system', 'reuse-map', 'conventions'];
-    const kinds = (selRaw === 'all') ? allKinds : String(selRaw).split(',').map(s => s.trim()).filter(Boolean);
+    const kinds = (selRaw === 'all') ? allKinds.slice() : String(selRaw).split(',').map(s => s.trim()).filter(k => allKinds.includes(k));  // 1.32.1 (15th리뷰 A2): 알 수 없는 --select kind 무시(bogus adoptedKinds 지속 차단)
     const wsAbs = _workspaceDirAbs(root);
     const inheritedPath = path.join(wsAbs, 'inherited-from-parent.md');
     const linkPath = path.join(wsAbs, 'PARENT_LINK.json');
@@ -6171,6 +6169,12 @@ function parentCmd(root, sub) {
       }
       return;
     }
+    // 1.32.1 (15th리뷰 A2): 적용 후보 0건이면 기록하지 않음 + applied:false (dry-run 과 일관 · 빈/거짓 PARENT_LINK 지속 방지)
+    if (!cand.length) {
+      if (has('--json')) { log(JSON.stringify({ version: VERSION, root, parent: p.parentRoot, selected: kinds, candidates: [], apply: true, applied: false, inheritedPath: null }, null, 2)); }
+      else { log(cyan(`# leerness parent adopt (1.30.3)`)); log(dim(t(`  적용 후보 없음 — 기록하지 않음 (부모에 선택 자산 없거나 --select 무효).`, `  no candidates — nothing recorded (parent lacks the selected assets, or --select invalid).`))); }
+      return;
+    }
     // APPLY (사용자 명시): 자식-로컬 참조 파일 + 마커 기록 (비파괴 additive — 자식 원본 design-system.md/reuse-map.md 직접 변형 안 함)
     try {
       mkdirp(wsAbs);
@@ -6179,7 +6183,7 @@ function parentCmd(root, sub) {
       body += `- ${t('부모', 'parent')}: ${p.parentRoot}\n- adopt: ${today()}\n- ${t('선택', 'select')}: ${kinds.join(', ')}\n\n`;
       for (const c of cand) { const content = exists(c.src) ? read(c.src) : ''; body += `## ${c.kind} (from ${c.src})\n\n${String(content).trim()}\n\n`; }
       writeUtf8(inheritedPath, body);
-      writeUtf8(linkPath, JSON.stringify({ parentRoot: p.parentRoot, workspaceDir: p.workspaceDir, adoptedKinds: kinds, adoptedAt: today(), version: VERSION }, null, 2) + '\n');
+      writeUtf8(linkPath, JSON.stringify({ parentRoot: p.parentRoot, workspaceDir: p.workspaceDir, adoptedKinds: cand.map(c => c.kind), adoptedAt: today(), version: VERSION }, null, 2) + '\n');  // 1.32.1: 실제 채택분(cand)만 기록
       if (has('--json')) { log(JSON.stringify({ version: VERSION, root, parent: p.parentRoot, selected: kinds, candidates: cand.map(c => c.kind), apply: true, applied: true, inheritedPath }, null, 2)); }
       else {
         log(cyan(`# leerness parent adopt (1.30.3)`));
@@ -6188,13 +6192,14 @@ function parentCmd(root, sub) {
         log(dim(`    ${t('마커', 'marker')}: ${linkPath}`));
       }
     } catch (e) {
-      if (!has('--json')) log(red(t(`  ✗ adopt 실패: ${e.message}`, `  ✗ adopt failed: ${e.message}`)));
+      // 1.32.1 (15th리뷰 A1): --json 에러 경로도 구조화 1객체 (빈 stdout+exit1 → JSON 소비자 깨짐 차단)
+      if (has('--json')) log(JSON.stringify({ version: VERSION, root, parent: p.parentRoot, selected: kinds, candidates: cand.map(c => c.kind), apply: true, applied: false, inheritedPath: null, error: e.message }, null, 2));
+      else log(red(t(`  ✗ adopt 실패: ${e.message}`, `  ✗ adopt failed: ${e.message}`)));
       process.exitCode = 1;
     }
     return;
   }
-  console.error(t(`Usage: leerness parent [detect|adopt] [--select <kinds>] [--apply] [--json]`, `Usage: leerness parent [detect|adopt] [--select <kinds>] [--apply] [--json]`));
-  process.exit(1);
+  return failJson(has('--json'), 'unknown_subcommand', `알 수 없는 parent 하위명령: ${sub} — leerness parent [detect|adopt] [--select <kinds>] [--apply] [--json]`);  // 1.32.1 (15th리뷰 C2)
 }
 
 // 1.9.211: leerness migrate-workspace-dir — .harness → .leerness 마이그레이션 (사용자 명시)
