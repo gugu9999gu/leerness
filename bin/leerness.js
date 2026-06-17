@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.32.2';
+const VERSION = '1.32.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -6181,7 +6181,15 @@ function parentCmd(root, sub) {
       let body = `<!-- leerness:inherited-from-parent (1.30.3) — 사용자 명시 \`parent adopt --apply\`. 부모 자산을 '참조'로만 기록(자식 원본 무변경). -->\n`;
       body += `# ${t('부모 프로젝트 자산 (참조용)', 'Parent project assets (reference)')}\n\n`;
       body += `- ${t('부모', 'parent')}: ${p.parentRoot}\n- adopt: ${today()}\n- ${t('선택', 'select')}: ${kinds.join(', ')}\n\n`;
-      for (const c of cand) { const content = exists(c.src) ? read(c.src) : ''; body += `## ${c.kind} (from ${c.src})\n\n${String(content).trim()}\n\n`; }
+      for (const c of cand) {
+        // 1.32.3 (15th리뷰 A3 방어심화): 부모 content 를 동적길이 코드펜스로 감싸 marker/## 헤더 spoofing 차단.
+        //   부모 design-system 이 신뢰경계 밖일 수 있어 — verbatim 임베드가 leerness 마커/섹션 헤더를 위조하지 못하게.
+        //   inherited-from-parent.md 는 leerness 가 구조 파싱하지 않음(AI 참조 전용)이라 fencing 안전. content 내 최장 백틱런+1 길이로 break-out 차단.
+        const content = String(exists(c.src) ? read(c.src) : '').trim();
+        const fence = '`'.repeat(Math.max(3, ...(content.match(/`+/g) || []).map(s => s.length + 1)));
+        const srcSafe = String(c.src).replace(/[\r\n]+/g, ' ');
+        body += `## ${c.kind} (from ${srcSafe})\n\n${fence}\n${content}\n${fence}\n\n`;
+      }
       writeUtf8(inheritedPath, body);
       writeUtf8(linkPath, JSON.stringify({ parentRoot: p.parentRoot, workspaceDir: p.workspaceDir, adoptedKinds: cand.map(c => c.kind), adoptedAt: today(), version: VERSION }, null, 2) + '\n');  // 1.32.1: 실제 채택분(cand)만 기록
       if (has('--json')) { log(JSON.stringify({ version: VERSION, root, parent: p.parentRoot, selected: kinds, candidates: cand.map(c => c.kind), apply: true, applied: true, inheritedPath }, null, 2)); }

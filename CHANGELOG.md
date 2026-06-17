@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.32.3 — 2026-06-17 — 🛡️ parent adopt 임베드 fencing (15th리뷰 A3, 방어심화 P3)
+
+**🛡️ `leerness parent adopt --apply` 가 부모 자산을 자식 `inherited-from-parent.md` 에 verbatim 임베드하던 것을 동적 코드펜스로 격리** — 신뢰경계 밖일 수 있는 부모 design-system 이 leerness 마커/`##` 섹션 헤더를 위조(spoofing)하지 못하게. 15th 리뷰 A3(재현됨) 마무리.
+
+### 변경 (15th리뷰 A3)
+- **부모 content 코드펜스 격리**: `parentCmd` adopt 가 부모 design-system/reuse-map/AGENTS content 를 `## ${kind} (from ...)` 아래 **동적 길이 백틱 펜스**(content 내 최장 백틱런+1)로 감싸 임베드. → 부모 content 내 `## 가짜헤더`·`<!-- leerness:inherited-from-parent -->` 가짜 마커·` ``` ` break-out 이 모두 펜스 안 리터럴로 무력화(구조 위조 차단). content 자체는 보존(참조용).
+- **src 경로 개행 strip**: `(from ${src})` 의 경로에서 CR/LF 제거(병리적 디렉토리명 주입 방어).
+- **맹신X 확인**: `inherited-from-parent.md` 는 leerness 런타임이 구조 파싱하지 않음(AI 참조 전용, 소비자는 adopt writer + e2e 존재확인뿐) → fencing 이 어떤 파서도 깨지 않음.
+
+### 검증 (회귀 0)
+- **행위(적대적 부모)**: 부모 design-system 에 가짜 `## INJECTEDHEADER` + 가짜 마커 + ` ``` ` 주입 → adopt --apply → 자식 doc 에서 적대 콘텐츠가 fence 안 격리(injIdx/spoofIdx > fenceOpen) · 동적펜스 ≥4(백틱런 차단) · 실제 top 마커 1개 보존 · content('normal design tokens') 보존.
+- **selftest 257** (VERSION↔package.json 가드가 한쪽-bump 실수 즉시 포착 — 1.30.2 교훈 작동) · **E2E 376→377**: 새 가드 B(1.32.3).
+- 비파괴(자식 design-system.md 무변경)·PARENT_LINK.json(JSON.stringify) 무영향 hold.
+- patch(1.32.3) — npm 미배포(R-0011). bin+package.json 동시 bump + 일치 가드 통과.
+
 ## 1.32.2 — 2026-06-17 — 🪞 정직성 calibration (웹 Opus 4.8 외부리뷰 후속, 맹신X)
 
 **🪞 외부 리뷰(웹 Opus 4.8, README-skim 기준)가 지적한 과장을 직접 검증해 진짜 갭만 calibrate.** *false-"done"을 막는 도구가 자기 자신에 대해 과장하면 모순* — 도구 thesis 와의 일관성을 위한 정직성 라운드. 맹신X 양방향: 리뷰가 과장이라 본 항목 다수가 README/docs 에 이미 정직했음을 확인(미수정), 진짜 잔여 갭만 수정.
