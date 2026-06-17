@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.33.0 — 2026-06-17 — 🛡️ [안정화/Stable] 15th리뷰 수정 + 정직성 calibration + A3 fencing 안정 minor
+
+**🛡️ 안정화(Stable) minor — 직전 minor(1.32.0) 이후 누적된 패치 3건(1.32.1~1.32.3)을 검증·통합해 npm 공개.** R-0011 정책의 24번째 stable minor. **이번 minor 의 핵심은 정직성 — 1.32.2 에서 calibrate 한 정직한 README/docs(self-administered 클린룸·성숙도 라벨)가 그동안 GitHub 에만 있었고 npm 에는 1.32.0 의 과장본이 남아 있었음. 1.33.0 이 정직한 게시본을 npm 에 올린다** (false-"done" 을 막는 도구가 자기 자신에 대해서도 과장하지 않도록). 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.32.1~1.32.3)
+- **🔍 15th 외부/멀티에이전트 리뷰 수정 (1.32.1)**: parent/constraints `--json` 에러 경로 구조화(C2, failJson 일관) · parent adopt `--json` 에러경로 비공백(A1) · `--select` 무효 kind → applied:false + 실제 adoptedKinds 만 기록(A2). 사이트 verify-deploy.cjs C1(P1 정규식 좌측경계→stale false-pass)/C3/C4/C5 (별도 레포).
+- **🪞 정직성 calibration (1.32.2, 웹 Opus 4.8 외부리뷰 후속·맹신X)**: clean-room "independent" → **"self-administered (AI agents·behavior-only — not third-party human audits or peer review)"** 인라인 명시(en/ko) · ko "객관 리뷰" 과장 교정 · **성숙도 정직 라벨 신규**(early·largely solo-maintained·자율 self-dev·외부채택 미미 + 낮은 exit-cost 비대칭). 맹신X: 강제력(이미 "be honest about this" 섹션)·clean-room 자기보고(이미 docs 명시)는 미수정(리뷰 과장 기각).
+- **🛡️ parent adopt 임베드 fencing (1.32.3, 15th리뷰 A3)**: 부모 자산 verbatim 임베드를 동적 코드펜스(content 최장 백틱런+1)로 격리 — 부모 design-system 이 leerness 마커/`##` 헤더를 위조하지 못하게. src 경로 CR/LF strip.
+
+### 검증 (회귀 0)
+- **selftest 257** · **E2E 377** (B(1.32.1) C2/A1/A2 · B(1.32.3) A3 적대적 부모 fencing 신규 가드 포함).
+- **stable minor** — npm 공개 + annotated tag(Stable) + GitHub release `--latest` + npm dist-tag `stable`. **게시본 클린룸 재실증**: parent/constraints --json 구조화 · A3 fencing · **게시된 README 가 정직(self-administered·성숙도 라벨) 확인**.
+- bin+package.json 동시 bump + 일치 가드 통과.
+
+### 잔여 (전략 — 사용자 결정)
+- 웹 리뷰의 핵심 지적: 검증할 product code 0줄 — leerness self-dev 지속 vs 실제 제품 Gate 0 빌드 전환.
+
 ## 1.32.3 — 2026-06-17 — 🛡️ parent adopt 임베드 fencing (15th리뷰 A3, 방어심화 P3)
 
 **🛡️ `leerness parent adopt --apply` 가 부모 자산을 자식 `inherited-from-parent.md` 에 verbatim 임베드하던 것을 동적 코드펜스로 격리** — 신뢰경계 밖일 수 있는 부모 design-system 이 leerness 마커/`##` 섹션 헤더를 위조(spoofing)하지 못하게. 15th 리뷰 A3(재현됨) 마무리.
