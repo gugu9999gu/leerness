@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.32.2 — 2026-06-17 — 🪞 정직성 calibration (웹 Opus 4.8 외부리뷰 후속, 맹신X)
+
+**🪞 외부 리뷰(웹 Opus 4.8, README-skim 기준)가 지적한 과장을 직접 검증해 진짜 갭만 calibrate.** *false-"done"을 막는 도구가 자기 자신에 대해 과장하면 모순* — 도구 thesis 와의 일관성을 위한 정직성 라운드. 맹신X 양방향: 리뷰가 과장이라 본 항목 다수가 README/docs 에 이미 정직했음을 확인(미수정), 진짜 잔여 갭만 수정.
+
+### 맹신X 검증 결과 (리뷰 주장 vs 실제)
+- **이미 정직(미수정)**: ① 강제력 — README "Guidance vs enforcement (be honest about this)" 섹션이 *cooperative / 작정한 에이전트는 skip 가능 / 진짜 강제는 CI gate + 필수 branch protection (guideline vs guardrail)* 를 이미 명시. ② clean-room 자기보고 — `docs/clean-room-evaluations.md` 가 *"NOT third-party human audits or peer review · AI clean-room · checkable rather than marketing line"* + "한계(정직)" 섹션을 이미 명시. → 리뷰가 README-skim 으로 과장 평가한 부분(맹신X 기각).
+- **진짜 갭(수정)**: clean-room "independent" 표현이 본문 인라인에서 제3자처럼 읽힐 여지 + 성숙도 upfront 라벨 부재.
+
+### 변경 (정직성)
+- **clean-room "self-administered" 인라인 명시**: README.md "independent clean-room evaluations" → "self-administered clean-room evaluations (AI agents, fresh install, behavior-only — **not third-party human audits or peer review**)". README.ko.md 동일("독립" → "자체 수행 AI 클린룸 평가, 제3자 감사 아님").
+- **ko "객관 리뷰" 과장 교정**: README.ko.md 의 "외부 다중 모델…**객관 리뷰**" → "AI 다중 모델…클린룸 리뷰(행위 기반 — 제3자 인간 객관 감사 아님)".
+- **성숙도 정직 라벨 신규** (en+ko): *early·largely solo-maintained·대부분 자율 AI 라운드 self-dev·외부채택 미미* 를 upfront 공개 + 낮은 exit-cost 비대칭(MIT·0 deps·평문파일·lock-in 거의 0)으로 *차별화 슬라이스(verify-claim + CI gate)만 의존* 권고. 시크릿 스캔은 gitleaks/trufflehog 등 전용도구 권장(편의 가드지 대체재 아님) 명시.
+
+### 검증
+- 헤로(README 관리블록 밖) 편집만 — selftest README 가드(ASCII 배너 일치)·clean-room doc 가드 무영향(미접촉). **selftest 257** + README 데모 명령(task/verify-claim) 스모크 무회귀.
+- **doc-only**(CLI 행위 무변경) — 전체 e2e 무영향이라 생략(정직 표기). patch(1.32.2) — npm 미배포(R-0011), GitHub README(리뷰 1차 표면)는 push 즉시 반영.
+
 ## 1.32.1 — 2026-06-16 — 🔍 15번째 외부/멀티에이전트 리뷰 후속: parent/constraints --json 에러 구조화 + --select 정합
 
 **🔍 15번째 외부/멀티에이전트 리뷰(게시본 1.32.0 신규 표면 3차원) — 발견 전건 맹신X 양방향 재현검증 후 확정분만 수정.** i18n 차원은 clean(영어화 견고 재확인). parent/constraints/사이트 verify-deploy 에서 확정 발견 수정. 보안/비파괴 핵심 보장은 모두 hold.

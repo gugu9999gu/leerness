@@ -11,11 +11,11 @@
 ╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝
 ```
 
-> **어떤 언어, 어떤 AI 에이전트로 작업하든 — "증거 없이는 끝났다고 말할 수 없게" 만드는 AI 코딩 운영 레이어.** 코드를 대신 쓰는 도구가 아니라, AI 에이전트의 **기억·인수인계·검증·감사·보안 가드**를 프로젝트에 영속화하는 CLI + MCP 서버입니다. (이 포지셔닝은 독립 클린룸 평가 — Python/Node/Rust 실개발·에이전트 교대·검증기 적대 공격 — 로 확인됐습니다. 방법론·결과·정직한 한계: [docs/clean-room-evaluations.md](./docs/clean-room-evaluations.md))
+> **어떤 언어, 어떤 AI 에이전트로 작업하든 — "증거 없이는 끝났다고 말할 수 없게" 만드는 AI 코딩 운영 레이어.** 코드를 대신 쓰는 도구가 아니라, AI 에이전트의 **기억·인수인계·검증·감사·보안 가드**를 프로젝트에 영속화하는 CLI + MCP 서버입니다. (이 포지셔닝은 **자체 수행 AI 클린룸 평가** — AI 에이전트가 빈 임시폴더에 fresh 설치 후 행위만으로 검증, 검증기 적대공격 포함 — 로 점검했습니다. *제3자 인간 감사·동료심사가 아닙니다.* 방법론·결과·정직한 한계: [docs/clean-room-evaluations.md](./docs/clean-room-evaluations.md))
 
 [![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-85-blue) · **런타임 의존성 0** · **install-script 0** · offline-first · Node ≥ 18 · MIT
 
-> 이 문서는 **외부 다중 모델(Codex / Claude Sonnet / Claude Opus)이 README 를 보지 않고 leerness 를 직접 설치·실행·소스 분석한 객관 리뷰**를 바탕으로 재구성되었습니다. 매 릴리스마다 자동 갱신됩니다.
+> 이 문서는 **AI 다중 모델(Codex / Claude Sonnet / Claude Opus)이 README 없이 leerness 를 직접 설치·실행·분석한 클린룸 리뷰**(행위 기반 — 제3자 인간 객관 감사는 아님)를 바탕으로 재구성됐습니다. 매 릴리스마다 자동 갱신됩니다.
 
 ---
 
@@ -42,6 +42,14 @@ leerness는 이 문제들을 해결하는 **외부 운영 substrate**입니다. 
 | 워크스페이스 노화(drift)를 에이전트가 모름 | `drift check [--auto-fix]` 점수화 + 자동 회복 |
 | 명세 ↔ 구현 불일치 | `contract verify spec.md impl.js` 함수/필드 일치 검사 |
 | 여러 AI CLI의 역할/분배 표준 부재 | `agents`/`roles`/`team` 오케스트레이션(기본 opt-in, dispatch는 실행이 아닌 명령 생성) |
+
+---
+
+## 성숙도 — 그래도 시도 비용은 싸다 (정직)
+
+의존하기 전에 솔직히: leerness 는 **초기 단계이고 사실상 단독 유지보수**이며, 대부분 **자율 AI 라운드**로 개발됐습니다 — 따라서 자체 `selftest` + e2e 스위트가 1차 품질 신호이고, 외부 채택은 아직 미미합니다. 신뢰만으로 load-bearing 으로 만들지 마세요: **버전을 핀**하고, 차별화된 슬라이스 — `verify-claim` + CI `gate`(필수 체크) — 만 의존할 부분으로 삼으세요.
+
+그럼에도 시도가 합리적인 이유는 비대칭입니다: MIT, **런타임 의존성 0**, offline-first, 모든 상태가 *당신의* 저장소 안 평문 파일입니다. lock-in 이 거의 없어 — 값을 못 하면 도구만 빼도 `task`/`decision`/`lesson` 파일은 그대로 남습니다. (시크릿 스캔이 꼭 필요하면 gitleaks/trufflehog 같은 검증된 전용 도구를 쓰세요 — leerness `scan secrets` 는 편의 가드지 대체재가 아닙니다.)
 
 ---
 
