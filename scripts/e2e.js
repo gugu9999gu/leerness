@@ -6355,6 +6355,46 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.33.2 회귀 (verify-claim+gate 슬라이스 강화): verify-claim --all — 모든 done 주장 일괄 검증. 거짓완료=exit 1(files-missing), 진실완료/빈프로젝트=exit 0, per-task 경로와 verdict 일치(맹신 X).
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vca-'));
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    // 빈(완료 0) → ok true exit 0
+    const empty = R(['verify-claim', '--all', '--json']);
+    const ej = JSON.parse(empty.stdout);
+    const emptyOk = empty.status === 0 && ej.ok === true && ej.total === 0;
+    // 진실 완료(실제 파일 + 테스트)
+    fs.writeFileSync(path.join(d, 'calc.js'), 'function add(a,b){ return a+b; }\nmodule.exports={add};\n');
+    fs.mkdirSync(path.join(d, 'tests'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'tests', 'calc.test.js'), 'const {add}=require("../calc.js");\ntest("add",()=>{ if(add(1,2)!==3) throw new Error("x"); });\n');
+    const aT = R(['task', 'add', 'Implement calc.js add()']);
+    const idT = (aT.stdout.match(/T-\d{4,}/) || [])[0];
+    R(['task', 'update', idT, '--status', 'done', '--evidence', 'calc.js + tests/calc.test.js — 1 test passing']);
+    // 거짓 완료(존재하지 않는 파일 주장)
+    const aF = R(['task', 'add', 'Implement payment API']);
+    const idF = (aF.stdout.match(/T-\d{4,}/) || [])[0];
+    R(['task', 'update', idF, '--status', 'done', '--evidence', 'payment.js implemented and tested']);
+    const mixed = R(['verify-claim', '--all', '--json']);
+    const mj = JSON.parse(mixed.stdout);
+    const fr = mj.results.find((x) => x.id === idF);
+    const tr = mj.results.find((x) => x.id === idT);
+    const mixedOk = mixed.status === 1 && mj.ok === false && mj.total === 2 && mj.failed === 1 && fr && fr.ok === false && fr.reasons.includes('files-missing') && tr && tr.ok === true;
+    // per-task 경로와 일치(맹신 X): 거짓 개별 exit 1, 진실 개별 exit 0 — 일괄 verdict 가 정밀 검사를 그대로 재사용
+    const consistent = R(['verify-claim', idF]).status === 1 && R(['verify-claim', idT]).status === 0;
+    // human 출력도 exit 1 + 불일치 표기
+    const human = R(['verify-claim', '--all']);
+    const humanOk = human.status === 1 && /불일치|mismatch/.test(human.stdout);
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = emptyOk && mixedOk && consistent && humanOk;
+  } catch (e) {}
+  console.log(ok ? '✓ B(1.33.2) verify-claim --all: 거짓완료 일괄 차단(exit 1, files-missing) + 진실완료/빈프로젝트 통과 + per-task verdict 일치' : '✗ verify-claim --all 일괄 검증 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {

@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.33.1';
+const VERSION = '1.33.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2966,7 +2966,7 @@ function _selfTestCases() {
     { name: '6번째 외부평가/codex P1-A (UR-0098): install-safety 레시피 셸-무관 + hardeningNote (1.9.397)', run: () => { if (typeof installSafetyCmd !== 'function') return false; const save = process.argv; const _w = process.stdout.write; let out = ''; try { process.argv = ['node', 'h', 'install-safety', '--json']; process.stdout.write = s => { out += s; return true; }; installSafetyCmd({ json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; } let j; try { j = JSON.parse(out); } catch {} const noPosixPrefix = !!j && Array.isArray(j.safeInstall) && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim())); const crossShell = !!j && j.safeInstall.filter(x => String(x).includes('npx --yes')).length >= 2; const noteOk = !!j && typeof j.hardeningNote === 'string' && j.hardeningNote.includes('PowerShell'); return noPosixPrefix && crossShell && noteOk; } },
     { name: '6번째 외부평가/codex P1-C (UR-0099): --json 에러 경로 구조화 failJson + 와이어 (1.9.398)', run: () => { const io = require('../lib/io'); if (io.failJson !== failJson) return false; const _w = process.stdout.write; const saved = process.exitCode; let jOut = '', hOut = ''; let jExit = 0; try { process.stdout.write = s => { jOut += s; return true; }; process.exitCode = 0; failJson(true, 'tc', 'm'); jExit = process.exitCode; process.stdout.write = s => { hOut += s; return true; }; process.exitCode = 0; failJson(false, 'c', 'humanmsg'); } catch {} finally { process.stdout.write = _w; process.exitCode = saved; } let pj; try { pj = JSON.parse(jOut); } catch {} const jsonOk = !!pj && pj.ok === false && pj.code === 'tc' && pj.error === 'm' && jExit === 1; const humanOk = hOut.includes('✗') && hOut.includes('humanmsg') && !hOut.includes('{'); const src = read(__filename); const wired = src.includes("failJson(_j, 'missing_args'") && src.includes("failJson(_j, 'spec_not_found'"); return jsonOk && humanOk && wired; } },
     { name: '7번째 버그헌트 P1-A (UR-0104): 테이블셀 안전화 _cellSafe/_cellUnescape (파이프/개행 injection 차단) (1.9.399)', run: () => { const m = require('../lib/pure-utils'); if (m._cellSafe !== _cellSafe || m._cellUnescape !== _cellUnescape) return false; const safe = _cellSafe('fix | bug\nrow2'); const noRaw = !/(?<!\\)\|/.test(safe) && !/[\r\n]/.test(safe); const pipeRt = _cellUnescape(_cellSafe('a | b | c')) === 'a | b | c'; const nlGone = _cellSafe('a\nb') === 'a b'; const src = read(__filename); const wired = src.includes('_cellSafe(r.request)') && src.includes('_cellSafe(r.rule)'); return noRaw && pipeRt && nlGone && wired; } },
-    { name: '7번째 버그헌트 P1-B (UR-0105): verify-claim/optimism-check/honesty-check --json 에러 구조화 (1.9.400)', run: () => { const src = read(__filename); const vc = /function verifyClaimCmd[\s\S]{0,700}?failJson\(_j, 'not_found'/.test(src); const oc = /function optimismCheckCmd[\s\S]{0,700}?failJson\(_j, 'not_found'/.test(src); const hc = /function honestyCheckCmd[\s\S]{0,900}?failJson\(has\('--json'\), 'not_found'/.test(src); return vc && oc && hc; } },  // 1.30.5: {0,400}→{0,700} (F4 가 missing_args 라인을 en/ko 로 늘려 not_found 가 창 밖)
+    { name: '7번째 버그헌트 P1-B (UR-0105): verify-claim/optimism-check/honesty-check --json 에러 구조화 (1.9.400)', run: () => { const src = read(__filename); const vc = /function verifyClaimCmd[\s\S]{0,1200}?failJson\(_j, 'not_found'/.test(src); const oc = /function optimismCheckCmd[\s\S]{0,700}?failJson\(_j, 'not_found'/.test(src); const hc = /function honestyCheckCmd[\s\S]{0,900}?failJson\(has\('--json'\), 'not_found'/.test(src); return vc && oc && hc; } },  // 1.30.5: {0,400}→{0,700} (F4 가 missing_args 라인을 en/ko 로 늘려 not_found 가 창 밖) · 1.33.2: vc {0,700}→{0,1200} (opts.collect 가드 라인이 not_found 를 더 밀어냄)
     { name: '7번째 버그헌트 P1-C (UR-0106): 시크릿 FN — gitignore 부정(!) + placeholder substring 정밀화 (1.9.401)', run: () => { const m = require('../lib/pure-utils'); const gm = m._gitignoreMatch; const negOk = gm('*.example\n!.env.example', '.env.example') === false && gm('*.log', 'a.log') === true && gm('a.log\n!a.log', 'a.log') === false && gm('.env', '.env') === true; const ph = m._isPlaceholderSecret; const phOk = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false && ph('your-key-here') === true && ph('changeme') === true && ph('example') === true && ph('xxxxxxxxxxxxxxxxxxxxxxxxxxxx') === true; return negOk && phOk; } },
     { name: '7번째 버그헌트 P1-A 잔여 (UR-0108): decisions/lessons MD projection 개행 주입 차단 _lineSafe (1.9.402)', run: () => { const m = require('../lib/pure-utils'); if (m._lineSafe !== _lineSafe) return false; const lsOk = _lineSafe('a\nb\r\nc') === 'a b c'; const md = m._renderDecisionsMd([{ date: '2026-06-07', title: 'real\n### 2099-01-01 — FAKE\n- Decision: forged', decision: 'd', reason: 'r' }]); const re = m._decisionsFromMd(md); const noInject = re.length === 1 && !/^### 2099-01-01 — FAKE/m.test(md); const lmd = m._renderLessonsMd([{ date: '2026-06-07', text: 'l1\n### FAKE\n- Lesson: x', tag: 't' }]); const lre = m._parseLessonEntries(lmd); const lNoInject = lre.length === 1; return lsOk && noInject && lNoInject; } },
     { name: '7번째 버그헌트 P2 (UR-0107): api-skill show/drop 에러 exit code 1 (1.9.403)', run: () => { const src = read(__filename); const showId = src.includes("api-skill show <id>')); process.exitCode = 1"); const dropId = src.includes("api-skill drop <id>')); process.exitCode = 1"); const addUrl = src.includes("api-skill add <url> [--direction") && src.includes('process.exitCode = 1'); return showId && dropId && addUrl; } },
@@ -3454,6 +3454,17 @@ function _selfTestCases() {
       const wholeScan = src.includes('function _scanCodeForPatterns(root)') && src.includes('walk(root, 0);');
       const gitAdvisory = src.includes("const gitClaimOk = !(has('--strict-claims') && gitStrongMismatch);");
       return defaultGate && jsonExposed && jsonGate && overall && wholeScan && gitAdvisory;
+    } },
+    { name: '1.33.2 (verify-claim --all): 집계 모드 — collect early-return(per-task verdict 재사용) + done 필터 + 라우팅 + 게이팅 부울 공유', run: () => {
+      const src = read(__filename);
+      const sigOpts = /function verifyClaimCmd\(root, taskId, opts = \{\}\)/.test(src);
+      const fn = /function verifyClaimAllCmd\(root\)/.test(src);
+      const doneFilter = src.includes("rows.filter(r => /done|완료|completed/i.test(String(r.status || '')))");
+      const reuse = src.includes("doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true }))");
+      // collect 게이팅 부울이 --json/human 경로와 동일 출처(분기 없음) — 정밀 검사를 일괄 모드에서도 그대로 재사용
+      const collectGate = src.includes('if (opts.collect) {') && src.includes("if (!filesAllExist) reasons.push('files-missing')") && src.includes("if (claimsChecked && !strictOk) reasons.push('optimism/honesty')") && src.includes("if (!gitClaimOk) reasons.push('git-mismatch')") && src.includes("if (claimsChecked && stubFiles.length > 0) reasons.push('stub-impl')");
+      const routed = src.includes("if (args[1] === '--all' || has('--all')) return verifyClaimAllCmd(_p)");
+      return sigOpts && fn && doneFilter && reuse && collectGate && routed;
     } },
     { name: '14th 버그헌트 P2 (UR-0178/0179/0180): completed→done 정규화 + rule archive _cellSafe + nextRuleId 아카이브 스캔 (1.11.3)', run: () => {
       if (_normTaskStatus('completed') !== 'done' || _normTaskStatus('verified') !== 'done' || _normTaskStatus('in-progress') !== 'in-progress') return false;
@@ -4651,7 +4662,7 @@ function commandsCmd(root) {
       { cmd: 'scan secrets [path]', desc: '시크릿 탐지' },
       { cmd: 'encoding check [path]', desc: '인코딩 검증' },
       { cmd: 'lazy detect [path] [--json]', desc: '게으른 작업 감지 (1.9.101)' },
-      { cmd: 'verify-claim <T-ID> [--run-tests] [--test-cmd "<명령>"] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287) · --test-cmd: 비-JS 테스트 명령 (1.17.2)' },
+      { cmd: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<명령>"] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --all: 모든 done 주장 일괄 검증(CI·스케일, 1.33.2) · --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287) · --test-cmd: 비-JS 테스트 명령 (1.17.2)' },
       { cmd: 'lens [code|design|docs|test|security] [--json]', desc: '분야별 자기질문 품질 렌즈 + 분야간 인과관계 (1.18.3)' },
       { cmd: 'optimism-check <T-ID>', desc: '낙관적 API 감지 (1.9.26)' },
       { cmd: 'requests audit|list|complete|drop|auto-complete', desc: '사용자 요청 추적 (1.9.207/223)' },
@@ -10389,13 +10400,14 @@ function _vcImplIsEmpty(body) {
   return residue === '';                                                     // 의미 토큰이 하나도 안 남으면 스텁
 }
 
-function verifyClaimCmd(root, taskId) {
+function verifyClaimCmd(root, taskId, opts = {}) {
   root = absRoot(root);
   const _j = has('--json');  // 1.9.400 (7번째 버그헌트 P1-B, UR-0105): --json 에러도 구조화
-  if (!taskId) return failJson(_j, 'missing_args', _uiLang(root) === 'en' ? 'verify-claim <T-ID> required. ex: leerness verify-claim T-0008' : 'verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008');  // 1.30.5 (#156 F4)
+  // 1.33.2: opts.collect — verify-claim --all 집계 모드. 렌더/exit 없이 verdict 객체만 반환 (per-task 경로 무변경, collect 일 때만 분기).
+  if (!taskId) { if (opts.collect) return { id: taskId, ok: false, reasons: ['no-id'] }; return failJson(_j, 'missing_args', _uiLang(root) === 'en' ? 'verify-claim <T-ID> required. ex: leerness verify-claim T-0008' : 'verify-claim <T-ID> 필요. 예: leerness verify-claim T-0008'); }  // 1.30.5 (#156 F4)
   const rows = readProgressRows(root);
   const row = rows.find(r => r.id === taskId);
-  if (!row) return failJson(_j, 'not_found', `progress-tracker.md에 ${taskId} 없음.`);
+  if (!row) { if (opts.collect) return { id: taskId, ok: false, reasons: ['not-found'] }; return failJson(_j, 'not_found', `progress-tracker.md에 ${taskId} 없음.`); }
 
   const evidence = row.evidence || '';
   // 1.9.20: 파일 경로 추출 — 도메인 폴더 자동 인식 + 루트 메타파일
@@ -10593,6 +10605,22 @@ function verifyClaimCmd(root, taskId) {
   // 1.11.2 (UR-0175): git strongMismatch 는 기본 게이트에서 제외(advisory) — 커밋 후 검증(정상 흐름)에서 커밋된 파일이 working-tree 변경에 없어 false-fail 하므로. --strict-claims 시에만 FAIL 기여. 기본 게이트는 신뢰도 높은 optimism(claimsConsistent)이 담당.
   const gitClaimOk = !(has('--strict-claims') && gitStrongMismatch);
 
+  // 1.33.2 (verify-claim --all): 집계 모드는 렌더/exit 없이 verdict 만 반환. 게이팅 부울은 아래 --json/human 경로와 동일 계산을 공유(분기 없음).
+  if (opts.collect) {
+    const _tcMatch = declaredTestCount == null ? null : (!testMeasured ? null : actualTestCount >= declaredTestCount);
+    const _runFail = !!(runResult && !runResult.skipped && !runResult.allPassed);
+    const reasons = [];
+    if (!filesAllExist) reasons.push('files-missing');
+    if (_tcMatch === false) reasons.push('test-count-short');
+    if (!evidenceQualityOk) reasons.push('evidence-incomplete');
+    if (claimsChecked && !strictOk) reasons.push('optimism/honesty');
+    if (!gitClaimOk) reasons.push('git-mismatch');
+    if (claimsChecked && stubFiles.length > 0) reasons.push('stub-impl');
+    if (has('--strict-claims') && testLinkOk === false) reasons.push('test-impl-unlinked');
+    if (_runFail) reasons.push('tests-failed');
+    return { id: taskId, request: row.request, status: row.status, ok: reasons.length === 0, reasons };
+  }
+
   if (has('--json')) {
     const out = {
       project: path.basename(root),
@@ -10744,6 +10772,35 @@ function verifyClaimCmd(root, taskId) {
   }
   log('');
   log(t(`  ✓ evidence 주장이 실제 파일·테스트${runResult && !runResult.skipped ? '·실행 결과' : ''}와 일치`, `  ✓ evidence claim matches actual files·tests${runResult && !runResult.skipped ? '·run results' : ''}`));
+}
+
+// 1.33.2 (verify-claim+CI gate 슬라이스 강화): verify-claim --all — 모든 done/완료 주장을 한 번에 검증(CI·스케일용).
+//   per-task 경로(verifyClaimCmd)를 opts.collect 로 재사용 → verdict 만 집계(렌더/exit 분기는 collect 가 흡수). 통과 플래그(--run-tests/--strict-claims/--lenient 등)는 전역이라 각 task 에 그대로 적용됨.
+//   동기: 플래그십(verify-claim)이 종전 per-task 전용이라, "내 완료 주장 전부 증거와 맞는가?"를 한 명령으로 못 했음. 게이트는 lazy/audit 휴리스틱으로 거짓완료를 잡지만, 부풀린 카운트·스텁은 verify-claim 의 정밀 검사가 더 잘 잡음.
+function verifyClaimAllCmd(root) {
+  root = absRoot(root);
+  const _j = has('--json');
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
+  const rows = readProgressRows(root);
+  const doneRows = rows.filter(r => /done|완료|completed/i.test(String(r.status || '')));
+  const results = doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true }));
+  const failed = results.filter(x => x && !x.ok);
+  if (_j) {
+    log(JSON.stringify({ ok: failed.length === 0, root: path.basename(root), total: doneRows.length, failed: failed.length, results }, null, 2));
+    if (failed.length) process.exitCode = 1;
+    return;
+  }
+  log(`# verify-claim --all (${path.basename(root)})`);
+  if (!doneRows.length) { log(t('  완료(done) 주장이 없어 검증할 항목이 없습니다.', '  No completed (done) claims to verify.')); return; }
+  log(t(`  완료 주장 ${doneRows.length}건 검증 — 통과 ${doneRows.length - failed.length} · 실패 ${failed.length}`, `  Verified ${doneRows.length} completed claim(s) — pass ${doneRows.length - failed.length} · fail ${failed.length}`));
+  log('');
+  for (const r of results) {
+    if (r.ok) log(`  ✓ ${r.id}  ${String(r.request || '').slice(0, 60)}`);
+    else log(`  ✗ ${r.id}  ${String(r.request || '').slice(0, 50)}  ${t('← 불일치', '← mismatch')}: ${r.reasons.join(', ')}`);
+  }
+  log('');
+  if (failed.length) { log(t(`  ⚠ ${failed.length}건의 완료 주장이 증거와 불일치 — 재검토 권장 (개별 상세: leerness verify-claim <T-ID>)`, `  ⚠ ${failed.length} completed claim(s) do not match evidence — review (per-task detail: leerness verify-claim <T-ID>)`)); return process.exit(1); }
+  log(t(`  ✓ 모든 완료 주장이 증거와 일치`, `  ✓ all completed claims match evidence`));
 }
 
 // 1.9.22: orchestrate — Ollama 로컬 LLM으로 best-of-N 멀티 에이전트 시뮬
@@ -20242,7 +20299,7 @@ async function main() {
   if (cmd === 'memory' && args[1] === 'search')  return memorySearch(arg('--path', process.cwd()), args.slice(2).join(' '));
   if (cmd === 'handoff')      return handoffCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'reuse-map')    return reuseMapCmd(arg('--path', args[1] || process.cwd()));
-  if (cmd === 'verify-claim') return verifyClaimCmd(arg('--path', process.cwd()), args[1]);
+  if (cmd === 'verify-claim') { const _p = arg('--path', process.cwd()); if (args[1] === '--all' || has('--all')) return verifyClaimAllCmd(_p); return verifyClaimCmd(_p, args[1]); }  // 1.33.2: --all → 모든 done 주장 일괄 검증
   if (cmd === 'orchestrate')  return await orchestrateCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')));
   if (cmd === 'llm-bench' && args[1] === 'record') return llmBenchRecordCmd(arg('--path', process.cwd()));
   if (cmd === 'deps')         return depsImpactCmd(arg('--path', process.cwd()), args[1]);

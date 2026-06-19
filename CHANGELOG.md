@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.33.2 — 2026-06-19 — 🔎 verify-claim --all (모든 done 주장 일괄 검증 — CI·스케일)
+
+**🔎 차별화 슬라이스(verify-claim) 견고화 — 플래그십을 스케일로.** 직전 라운드(1.33.1)에 이어 verify-claim/gate 슬라이스를 강화. 종전 verify-claim 은 **per-task 전용**(`verify-claim <T-ID>`)이라 "내 완료 주장 전부가 증거와 맞는가?"를 한 명령으로 확인할 수 없었음. `--all` 추가로 모든 done/완료 주장을 일괄 검증 → CI·대규모 트래커에서 바로 사용. (사용자 방향 선택: verify-claim + CI gate 강화.)
+
+### 맹신X (양방향 재현 — 헛수정 회피)
+- 직접 재현: 거짓완료(존재하지 않는 파일 주장 done) 프로젝트에서 `gate` 는 **이미** exit 1 로 차단(lazy/audit 휴리스틱) — 값 제안이 공허하지 않음을 확인 → "gate 가 주장을 안 본다"는 가설 **기각**. 단, `verify-claim --all`/no-id 는 둘 다 "T-ID 필요" 에러 → **일괄 검증 부재**가 진짜 갭.
+- 일괄 verdict ↔ per-task 일치 검증: 거짓 task 는 `--all` 에서 ok:false(`files-missing`) + 개별 `verify-claim` 도 exit 1, 진실 task 는 양쪽 다 통과. 정밀 검사(스텁·부풀린 카운트·optimism)를 그대로 재사용(분기 없음).
+
+### 변경
+- **`leerness verify-claim --all [--json]`** 신규 — progress-tracker 의 done/완료 주장을 전부 검증, 하나라도 불일치면 exit 1(CI 게이트). `--json`: `{ ok, total, failed, results:[{id,ok,reasons}] }`. 완료 주장 0건이면 통과(exit 0).
+- 통과 플래그(`--run-tests`/`--strict-claims`/`--require-evidence`/`--lenient`/`--test-cmd`)는 전역이라 각 task 에 그대로 적용 — 기본은 정적 검사(빠름), `--run-tests` 시 각 task 테스트 실행.
+- 구현: per-task 경로(`verifyClaimCmd`)에 `opts.collect` 비침투 추가 — 렌더/exit 없이 verdict 만 반환(기존 `--json`/human 게이팅 부울을 **동일 출처**로 공유). 일괄 모드는 thin orchestrator. **per-task 동작 무변경**(opts 없을 때 종전과 100% 동일).
+
+### 검증 (회귀 0)
+- **selftest 258**(신규 1.33.2 가드: collect early-return·done 필터·라우팅·게이팅 부울 공유 + 7th헌트 not_found 윈도 {0,700}→{0,1200} 정합).
+- **E2E 378→379**: 새 가드 B(1.33.2) — 거짓완료 일괄 차단(exit 1, `files-missing`)·진실완료/빈프로젝트 통과·per-task verdict 일치·human exit 1.
+- patch(1.33.2) — npm 미배포(R-0011, 다음 minor 에 게시). bin+package.json 동시 bump + 일치 가드 통과.
+
 ## 1.33.1 — 2026-06-17 — 🔒 verify-claim + CI gate 슬라이스 강화 (생성 워크플로 production-grade)
 
 **🔒 차별화 슬라이스(verify-claim + CI gate) 견고화.** 웹 Opus 4.8 외부리뷰가 "가치의 대부분 + 버전을 핀하라"고 짚은 부분을 채택 — `leerness ci init` 이 생성하는 PR 게이트 워크플로를 production-grade 로. (사용자 방향 선택: self-dev 중 고가치 항목.)
