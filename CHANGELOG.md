@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.34.0 — 2026-06-19 — 🛡️ [안정화/Stable] verify-claim + CI gate 슬라이스 강화 (CLI→CI→MCP 완결) 안정 minor
+
+**🛡️ 안정화(Stable) minor — 직전 minor(1.33.0) 이후 누적된 패치 3건(1.33.1~1.33.3)을 검증·통합해 npm 공개.** R-0011 정책의 25번째 stable minor. **이번 minor 의 핵심은 차별화 슬라이스(verify-claim + CI gate)를 한 테마로 완결한 것** — 웹 Opus 4.8 외부리뷰가 "leerness 의 진짜 가치 = verify-claim + CI gate"라 짚었고, 사용자가 그 방향을 선택해 3라운드에 걸쳐 플래그십을 CLI → CI 게이트 → MCP 까지 연결했습니다. 한국어 우선 기본은 그대로.
+
+### 이번 minor 통합 (1.33.1~1.33.3)
+- **🔒 CI 게이트 워크플로 production-grade (1.33.1)**: `leerness ci init` 생성 PR 게이트가 **leerness 버전 핀**(재현성·공급망 안전 — 새 릴리스가 게이트 판정을 조용히 못 바꿈) + **최소권한**(`permissions: contents: read`) + **중복 취소**(`concurrency` + `cancel-in-progress`). 맹신X: gate 본체는 이미 실제 시크릿을 차단(미수정, 헛수정 회피).
+- **🔎 verify-claim --all (1.33.2)**: 플래그십을 per-task 전용 → **일괄**(`leerness verify-claim --all`)로. 모든 done/완료 주장을 한 명령으로 검증, 하나라도 불일치면 exit 1(CI·스케일). per-task 경로에 비침투 `opts.collect` 추가로 정밀 검사(스텁·부풀린 카운트·optimism) 그대로 재사용. 맹신X: 일괄 verdict ↔ per-task 일치 재현.
+- **🔗 gate --claims + MCP (1.33.3)**: 일괄 검증을 강제·에이전트 표면에 연결 — `leerness gate --claims` opt-in 6번째 체크(기본 5체크 무변경, 회귀 0) + MCP `leerness_verify_claim_all`(86 도구). 비-exit 코어 `_verifyClaimsAll` 를 CLI·게이트가 공유. 맹신X: 게이트 5체크가 done 주장에 verify-claim 을 안 돌렸음을 소스 확인 → `--claims` 로 정밀화.
+
+### 안정화 표시 (R-0006)
+- annotated tag `v1.34.0` (Stable) · GitHub release `--latest` · npm dist-tag `stable` 시도.
+- **게시본 클린룸 재실증**: npm 공개본을 빈 임시폴더에 fresh 설치 → 버전 + 플래그십(verify-claim 거짓완료 차단 + gate --claims) 행위 재확인.
+
+### 검증 (회귀 0)
+- selftest **259** · E2E **380** (양 minor 누적 가드 포함). bin+package.json 동시 bump 일치.
+- **npm 공개**(minor — R-0011): 1.33.0 → 1.34.0. 누적 패치는 GitHub/CHANGELOG 에만 있던 것을 안정 버전으로 묶어 게시.
+
 ## 1.33.3 — 2026-06-19 — 🔗 verify-claim --all → CI gate(opt-in) + MCP (양 표면 도달)
 
 **🔗 차별화 슬라이스(verify-claim + CI gate) 견고화 3번째 — 1.33.2 의 일괄 검증을 실제 강제·에이전트 표면에 연결.** 1.33.2 가 CLI 에 `verify-claim --all` 을 추가했지만, ① CI **게이트**는 여전히 done 주장에 정밀 per-claim 검사를 안 돌렸고(거짓완료를 lazy/audit 휴리스틱으로만 차단), ② **MCP**(leerness 의 *주요* 에이전트 인터페이스)에는 일괄 검증 도구가 없었음(에이전트가 "내 완료 주장 전부 맞나?"를 한 번에 못 물음). 이 두 갭을 닫음.
