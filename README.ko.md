@@ -13,7 +13,7 @@
 
 > **어떤 언어, 어떤 AI 에이전트로 작업하든 — "증거 없이는 끝났다고 말할 수 없게" 만드는 AI 코딩 운영 레이어.** 코드를 대신 쓰는 도구가 아니라, AI 에이전트의 **기억·인수인계·검증·감사·보안 가드**를 프로젝트에 영속화하는 CLI + MCP 서버입니다. (이 포지셔닝은 **자체 수행 AI 클린룸 평가** — AI 에이전트가 빈 임시폴더에 fresh 설치 후 행위만으로 검증, 검증기 적대공격 포함 — 로 점검했습니다. *제3자 인간 감사·동료심사가 아닙니다.* 방법론·결과·정직한 한계: [docs/clean-room-evaluations.md](./docs/clean-room-evaluations.md))
 
-[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-85-blue) · **런타임 의존성 0** · **install-script 0** · offline-first · Node ≥ 18 · MIT
+[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-86-blue) · **런타임 의존성 0** · **install-script 0** · offline-first · Node ≥ 18 · MIT
 
 > 이 문서는 **AI 다중 모델(Codex / Claude Sonnet / Claude Opus)이 README 없이 leerness 를 직접 설치·실행·분석한 클린룸 리뷰**(행위 기반 — 제3자 인간 객관 감사는 아님)를 바탕으로 재구성됐습니다. 매 릴리스마다 자동 갱신됩니다.
 
@@ -112,7 +112,7 @@ leerness verify-claim T-0001 --require-evidence
 - **외부 에이전트**: `agents list/check/dispatch` · `provider` · `roles` · `adapter`
 - **운영/확장**: `release` · `migrate` · `team` · `install-safety` · `route` · `review`(페르소나)
 - **브리지(opt-in)**: `web`(playwright) · `pc`(robotjs) · `lsp`
-- **MCP**: `mcp serve` — stdio JSON-RPC 서버로 85개 도구 노출
+- **MCP**: `mcp serve` — stdio JSON-RPC 서버로 86개 도구 노출 (verify-claim --all 일괄 검증 포함, 1.33.3)
 
 전체 명령은 `leerness commands` 또는 `leerness --help` 로 확인하세요.
 

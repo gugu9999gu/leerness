@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.33.3 — 2026-06-19 — 🔗 verify-claim --all → CI gate(opt-in) + MCP (양 표면 도달)
+
+**🔗 차별화 슬라이스(verify-claim + CI gate) 견고화 3번째 — 1.33.2 의 일괄 검증을 실제 강제·에이전트 표면에 연결.** 1.33.2 가 CLI 에 `verify-claim --all` 을 추가했지만, ① CI **게이트**는 여전히 done 주장에 정밀 per-claim 검사를 안 돌렸고(거짓완료를 lazy/audit 휴리스틱으로만 차단), ② **MCP**(leerness 의 *주요* 에이전트 인터페이스)에는 일괄 검증 도구가 없었음(에이전트가 "내 완료 주장 전부 맞나?"를 한 번에 못 물음). 이 두 갭을 닫음.
+
+### 맹신X (양방향 재현)
+- 게이트 5체크(verify/audit/scan/encoding/lazy) 중 **어느 것도 done 주장에 verify-claim 을 실행 안 함**을 소스로 확인 — README 의 "claims fail → cannot merge" 가 휴리스틱에 의존. `gate --claims` 로 정밀화.
+- 회귀 0 재현: 클린 프로젝트는 기본 5체크/`--claims` 6체크 둘 다 통과 · 거짓완료는 기본 게이트 exit 1(기존 동작 유지) + `--claims` 의 6번째 `verify-claims` 체크가 명시적으로 ok:false. **human `--claims` 가 gate summary 까지 도달**(코어가 process.exit 안 해 step 집계 보호됨)을 검증.
+
+### 변경 (둘 다 additive·zero-regression)
+- **`leerness gate --claims`** opt-in — 6번째 체크 `verify-claims`(= verify-claim --all 정밀 검사) 추가. **기본 게이트는 5체크 무변경**(기존 CI 어댑터 회귀 0). CI 가 README 약속을 문자 그대로 강제하려면 `--claims`.
+- **MCP `leerness_verify_claim_all`** (85→86) — read-only. 응답 `{ ok, total, failed, results:[{id,ok,reasons}] }`. 에이전트가 세션 마감 전 모든 done 주장을 한 호출로 자가 점검.
+- 구현: 비-exit 코어 `_verifyClaimsAll(root)` 추출(렌더/exit 없이 결과만) → CLI(`verify-claim --all`)·게이트(`--claims`)가 **동일 코어 공유**. 코어는 절대 `process.exit(` 안 함(게이트 프로세스 조기종료 방지 — selftest 가드).
+- README: enforcement 섹션을 `gate --claims` 로 정밀화 + MCP 도구 수 86 갱신(en/ko).
+
+### 검증 (회귀 0)
+- **selftest 259**(신규 1.33.3: 코어 exit 부재 + gate --claims 6번째 + MCP def↔case) · **E2E 380**(B(1.33.3): 클린 5/6 + 거짓완료 `--claims` 차단 + human summary 도달 + MCP `verify_claim_all` 라운드트립).
+- patch(1.33.3) — npm 미배포(R-0011). bin+package.json 동시 bump 일치.
+
 ## 1.33.2 — 2026-06-19 — 🔎 verify-claim --all (모든 done 주장 일괄 검증 — CI·스케일)
 
 **🔎 차별화 슬라이스(verify-claim) 견고화 — 플래그십을 스케일로.** 직전 라운드(1.33.1)에 이어 verify-claim/gate 슬라이스를 강화. 종전 verify-claim 은 **per-task 전용**(`verify-claim <T-ID>`)이라 "내 완료 주장 전부가 증거와 맞는가?"를 한 명령으로 확인할 수 없었음. `--all` 추가로 모든 done/완료 주장을 일괄 검증 → CI·대규모 트래커에서 바로 사용. (사용자 방향 선택: verify-claim + CI gate 강화.)

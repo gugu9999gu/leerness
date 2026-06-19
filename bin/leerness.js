@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.33.2';
+const VERSION = '1.33.3';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3465,6 +3465,17 @@ function _selfTestCases() {
       const collectGate = src.includes('if (opts.collect) {') && src.includes("if (!filesAllExist) reasons.push('files-missing')") && src.includes("if (claimsChecked && !strictOk) reasons.push('optimism/honesty')") && src.includes("if (!gitClaimOk) reasons.push('git-mismatch')") && src.includes("if (claimsChecked && stubFiles.length > 0) reasons.push('stub-impl')");
       const routed = src.includes("if (args[1] === '--all' || has('--all')) return verifyClaimAllCmd(_p)");
       return sigOpts && fn && doneFilter && reuse && collectGate && routed;
+    } },
+    { name: '1.33.3 (verify-claim --all → gate+MCP): _verifyClaimsAll 코어(exit 없음) + gate --claims opt-in 6번째(기본 5 유지) + MCP leerness_verify_claim_all def↔case', run: () => {
+      const src = read(__filename);
+      const coreDef = src.match(/function _verifyClaimsAll\(root\) \{[\s\S]*?\n\}/);  // 함수 본문만 캡처(첫 줄머리 } 까지)
+      const core = !!coreDef && coreDef[0].includes('return { ok: failed.length === 0, total: doneRows.length, failed: failed.length, results };') && !/process\.exit\(/.test(coreDef[0]);  // 코어는 절대 process.exit( 안 함(게이트 step 집계 보호)
+      const gateOptIn = src.includes("const withClaims = has('--claims');") && src.includes('# leerness gate (${withClaims ? 6 : 5} checks)') && src.includes("if (withClaims) step('verify-claims', () => { const r = _verifyClaimsAll(root);");
+      const reuse = src.includes('const res = _verifyClaimsAll(root);');  // CLI 도 코어 공유(분기 없음)
+      const tools = require('../lib/mcp-tools');
+      const def = tools.find(t => t.name === 'leerness_verify_claim_all');
+      const mcpOk = !!def && def.requiredTier === 'read-only' && src.includes("case 'leerness_verify_claim_all':") && /case 'leerness_verify_claim_all':[\s\S]{0,160}'verify-claim', '--all'[\s\S]{0,80}'--json'/.test(src);
+      return core && gateOptIn && reuse && mcpOk && tools.length >= 84;
     } },
     { name: '14th 버그헌트 P2 (UR-0178/0179/0180): completed→done 정규화 + rule archive _cellSafe + nextRuleId 아카이브 스캔 (1.11.3)', run: () => {
       if (_normTaskStatus('completed') !== 'done' || _normTaskStatus('verified') !== 'done' || _normTaskStatus('in-progress') !== 'in-progress') return false;
@@ -10777,29 +10788,37 @@ function verifyClaimCmd(root, taskId, opts = {}) {
 // 1.33.2 (verify-claim+CI gate 슬라이스 강화): verify-claim --all — 모든 done/완료 주장을 한 번에 검증(CI·스케일용).
 //   per-task 경로(verifyClaimCmd)를 opts.collect 로 재사용 → verdict 만 집계(렌더/exit 분기는 collect 가 흡수). 통과 플래그(--run-tests/--strict-claims/--lenient 등)는 전역이라 각 task 에 그대로 적용됨.
 //   동기: 플래그십(verify-claim)이 종전 per-task 전용이라, "내 완료 주장 전부 증거와 맞는가?"를 한 명령으로 못 했음. 게이트는 lazy/audit 휴리스틱으로 거짓완료를 잡지만, 부풀린 카운트·스텁은 verify-claim 의 정밀 검사가 더 잘 잡음.
-function verifyClaimAllCmd(root) {
+// 1.33.3: 일괄 검증 코어 — 렌더/exit 없이 결과만 반환. verifyClaimAllCmd(CLI 렌더+exit) 와 gate --claims(opt-in 체크) 가 공유.
+//   gate 의 step() 은 process.exit 가 아니라 process.exitCode 로 실패를 감지하므로, 코어는 절대 process.exit 하지 않음(게이트 프로세스 조기종료 방지).
+function _verifyClaimsAll(root) {
   root = absRoot(root);
-  const _j = has('--json');
-  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
   const rows = readProgressRows(root);
   const doneRows = rows.filter(r => /done|완료|completed/i.test(String(r.status || '')));
   const results = doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true }));
   const failed = results.filter(x => x && !x.ok);
+  return { ok: failed.length === 0, total: doneRows.length, failed: failed.length, results };
+}
+function verifyClaimAllCmd(root) {
+  root = absRoot(root);
+  const _j = has('--json');
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
+  const res = _verifyClaimsAll(root);
+  const { results, total } = res;
   if (_j) {
-    log(JSON.stringify({ ok: failed.length === 0, root: path.basename(root), total: doneRows.length, failed: failed.length, results }, null, 2));
-    if (failed.length) process.exitCode = 1;
+    log(JSON.stringify({ ok: res.ok, root: path.basename(root), total, failed: res.failed, results }, null, 2));
+    if (res.failed) process.exitCode = 1;
     return;
   }
   log(`# verify-claim --all (${path.basename(root)})`);
-  if (!doneRows.length) { log(t('  완료(done) 주장이 없어 검증할 항목이 없습니다.', '  No completed (done) claims to verify.')); return; }
-  log(t(`  완료 주장 ${doneRows.length}건 검증 — 통과 ${doneRows.length - failed.length} · 실패 ${failed.length}`, `  Verified ${doneRows.length} completed claim(s) — pass ${doneRows.length - failed.length} · fail ${failed.length}`));
+  if (!total) { log(t('  완료(done) 주장이 없어 검증할 항목이 없습니다.', '  No completed (done) claims to verify.')); return; }
+  log(t(`  완료 주장 ${total}건 검증 — 통과 ${total - res.failed} · 실패 ${res.failed}`, `  Verified ${total} completed claim(s) — pass ${total - res.failed} · fail ${res.failed}`));
   log('');
   for (const r of results) {
     if (r.ok) log(`  ✓ ${r.id}  ${String(r.request || '').slice(0, 60)}`);
     else log(`  ✗ ${r.id}  ${String(r.request || '').slice(0, 50)}  ${t('← 불일치', '← mismatch')}: ${r.reasons.join(', ')}`);
   }
   log('');
-  if (failed.length) { log(t(`  ⚠ ${failed.length}건의 완료 주장이 증거와 불일치 — 재검토 권장 (개별 상세: leerness verify-claim <T-ID>)`, `  ⚠ ${failed.length} completed claim(s) do not match evidence — review (per-task detail: leerness verify-claim <T-ID>)`)); return process.exit(1); }
+  if (res.failed) { log(t(`  ⚠ ${res.failed}건의 완료 주장이 증거와 불일치 — 재검토 권장 (개별 상세: leerness verify-claim <T-ID>)`, `  ⚠ ${res.failed} completed claim(s) do not match evidence — review (per-task detail: leerness verify-claim <T-ID>)`)); return process.exit(1); }
   log(t(`  ✓ 모든 완료 주장이 증거와 일치`, `  ✓ all completed claims match evidence`));
 }
 
@@ -12695,7 +12714,10 @@ function gate(root) {
   const jsonMode = has('--json');  // 외부리뷰 C2: --json 일관성 — 이전엔 텍스트 헤더+단계별 JSON 혼재로 파싱 불가. 단일 객체로 집계.
   const checks = [];
   let bad = 0;
-  if (!jsonMode) log('# leerness gate (5 checks)');
+  // 1.33.3 (verify-claim+CI gate 슬라이스 강화): --claims opt-in — 모든 done 주장을 정밀 per-claim 검증(verify-claim --all)으로 추가(6번째). 기본 5체크는 무변경(기존 어댑터 회귀 0).
+  //   기본 게이트는 lazy/audit 휴리스틱으로 거짓완료를 잡지만, 부풀린 카운트·스텁은 verify-claim 의 정밀 검사가 더 잘 잡음 → CI 가 README 약속("claims fail → cannot merge")을 문자 그대로 강제하려면 --claims.
+  const withClaims = has('--claims');
+  if (!jsonMode) log(`# leerness gate (${withClaims ? 6 : 5} checks)`);
   function step(label, fn) {
     const code0 = process.exitCode || 0;
     if (!jsonMode) log(`\n## ${label}`);
@@ -12714,6 +12736,8 @@ function gate(root) {
   step('scan secrets', () => scanSecrets(root));
   step('encoding check', () => encodingCheck(root));
   step('lazy detect', () => lazyDetect(root));
+  // 1.33.3: opt-in 정밀 per-claim 검증. 코어(_verifyClaimsAll)는 exit 안 하고 결과만 반환 → step 의 exitCode 감지로 실패 집계. 비-json 모드는 불일치 task 를 fail() 로 표면화.
+  if (withClaims) step('verify-claims', () => { const r = _verifyClaimsAll(root); if (!r.ok) { process.exitCode = 1; if (!jsonMode) r.results.filter(x => x && !x.ok).forEach(x => fail(`${x.id} 불일치: ${x.reasons.join(', ')}`)); } });
   if (jsonMode) { log(JSON.stringify({ version: VERSION, root, ok: bad === 0, total: checks.length, failed: bad, checks }, null, 2)); if (bad) process.exitCode = 1; return; }
   log(`\n# gate summary: ${bad} 단계 실패`);
   if (bad) process.exitCode = 1;
@@ -16102,6 +16126,7 @@ function _mcpToCliArgs(name, args, targetPath) {
           case 'leerness_drift_check':     cliArgs = ['drift', 'check', targetPath, '--json']; break;
           case 'leerness_audit':           cliArgs = ['audit', targetPath, '--json', ...(args.fix ? ['--fix'] : []), ...(args.strict ? ['--strict'] : [])]; break;
           case 'leerness_verify_claim':    cliArgs = ['verify-claim', args.taskId, '--path', targetPath, ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : [])]; break;
+          case 'leerness_verify_claim_all': cliArgs = ['verify-claim', '--all', '--path', targetPath, '--json', ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : [])]; break;  // 1.33.3: 모든 done 주장 일괄 검증(--json 강제 → process.exitCode 만, 하드 exit 없음)
           case 'leerness_contract_verify': cliArgs = ['contract', 'verify', args.spec, args.impl]; break;
           case 'leerness_agents_list':     cliArgs = ['agents', 'list', '--json']; break;
           case 'leerness_reuse_map':       cliArgs = ['reuse-map', targetPath, ...(args.allApps ? ['--all-apps'] : []), ...(args.strictElements ? ['--strict-elements'] : []), '--json']; break;

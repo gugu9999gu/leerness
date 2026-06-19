@@ -12,7 +12,7 @@
 > **The AI-coding operations layer that makes "done" require evidence — for any language, any AI agent.**
 > leerness does not write code. It gives your AI agent persistent memory, verified completion, and clean handoffs — stored inside your repo as plain files, exposed via CLI + MCP.
 
-[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-85-blue) · **0 runtime deps** · **0 install scripts** · offline-first · Node ≥ 18 · MIT
+[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-86-blue) · **0 runtime deps** · **0 install scripts** · offline-first · Node ≥ 18 · MIT
 
 **🇰🇷 한국어 전문: [README.ko.md](./README.ko.md)**
 
@@ -49,7 +49,7 @@ You never have to type a command yourself. Paste this into Claude Code, Cursor, 
 
 The agent installs and operates it for you — `leerness init` also writes the instructions into CLAUDE.md / AGENTS.md so future sessions pick them up automatically.
 
-Prefer pure natural language? leerness ships an **MCP server with 85 tools** (`leerness mcp serve`). Connect it once to Claude Desktop / Claude Code and just ask: *"what was I working on?"*, *"did the AI actually finish T-0001?"*
+Prefer pure natural language? leerness ships an **MCP server with 86 tools** (`leerness mcp serve`). Connect it once to Claude Desktop / Claude Code and just ask: *"what was I working on?"*, *"did the AI actually finish T-0001?"*
 
 ---
 
@@ -79,7 +79,7 @@ leerness ci init          # writes .github/workflows/leerness-gate.yml — runs 
 
 The generated workflow is production-grade: it **pins the leerness version** (reproducible — the gate's verdict can't change from a silent upgrade), runs with **least-privilege permissions** (`contents: read`), and cancels superseded runs.
 
-Then make that check **required** in GitHub branch protection. Now a PR that skips verification (or whose claims fail) **cannot merge** — the gate runs independently of the agent, returns a non-zero exit code, and blocks. That is the difference between a guideline and a guardrail. For a precise per-claim sweep across every completed task, add `leerness verify-claim --all` as an extra gate step — it exits non-zero if any "done" task's evidence doesn't match reality.
+Then make that check **required** in GitHub branch protection. Now a PR that skips verification (or whose claims fail) **cannot merge** — the gate runs independently of the agent, returns a non-zero exit code, and blocks. That is the difference between a guideline and a guardrail. For exact per-claim enforcement, run `leerness gate --claims` — it adds a 6th check that runs `verify-claim` on **every** completed task and fails the gate if any "done" task's evidence doesn't match reality (the default 5-check gate already blocks false-done via heuristics; `--claims` makes it precise).
 
 ---
 
@@ -114,7 +114,7 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.33.2 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.33.3 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
@@ -168,7 +168,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.33.2는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **85개 도구**를 노출:
+Leerness v1.33.3는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **86개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -181,7 +181,7 @@ Leerness v1.33.2는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code
 // • Workflow: session_close / agents_list / task_export / env_check / usage_stats / reuse_map / whats_new
 
 // MCP server 실행: leerness mcp serve
-// tools/list 응답: 85 도구
+// tools/list 응답: 86 도구
 ```
 
 ### Autonomous mode (자율 모드)
@@ -189,7 +189,7 @@ Leerness v1.33.2는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **70 라운드 (1.9.40 → 1.33.2)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
+현재 누적: **70 라운드 (1.9.40 → 1.33.3)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
 
 ### 성능 가이드 (1.9.140 측정)
 
@@ -227,6 +227,6 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.33.2: 2026-06-19
+Last synced by Leerness v1.33.3: 2026-06-19
 <!-- leerness:project-readme:end -->
 

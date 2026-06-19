@@ -6395,6 +6395,46 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.33.3 회귀 (verify-claim+CI gate 슬라이스 강화): gate --claims opt-in 6번째 체크(기본 5 무변경) + MCP leerness_verify_claim_all 라운드트립.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-g3-'));
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    // 클린: 기본 gate 5체크, --claims 6체크(verify-claims 추가) 둘 다 통과
+    const cleanDefault = JSON.parse(R(['gate', '.', '--json']).stdout);
+    const cleanClaims = JSON.parse(R(['gate', '.', '--claims', '--json']).stdout);
+    const cleanOk = cleanDefault.total === 5 && cleanDefault.ok === true && cleanClaims.total === 6 && cleanClaims.ok === true && cleanClaims.checks.some((c) => c.name === 'verify-claims');
+    // 거짓 완료 추가
+    const aF = R(['task', 'add', 'Implement payment API']);
+    const idF = (aF.stdout.match(/T-\d{4,}/) || [])[0];
+    R(['task', 'update', idF, '--status', 'done', '--evidence', 'payment.js implemented and tested']);
+    // 기본 gate(5): 기존 동작 유지(lazy/audit 가 거짓완료 차단 → exit 1)
+    const falseDefault = R(['gate', '.', '--json']);
+    const fd = JSON.parse(falseDefault.stdout);
+    const defaultStill = falseDefault.status === 1 && fd.total === 5;
+    // --claims gate(6): verify-claims 체크가 명시적으로 false + exit 1 + human 모드 summary 도달(하드 exit 없음)
+    const falseClaims = R(['gate', '.', '--claims', '--json']);
+    const fc = JSON.parse(falseClaims.stdout);
+    const vcCheck = fc.checks.find((c) => c.name === 'verify-claims');
+    const claimsBlocks = falseClaims.status === 1 && vcCheck && vcCheck.ok === false && fc.total === 6;
+    const humanClaims = R(['gate', '.', '--claims']);
+    const humanOk = humanClaims.status === 1 && /verify-claims/.test(humanClaims.stdout) && /gate summary/.test(humanClaims.stdout);
+    // MCP leerness_verify_claim_all 라운드트립
+    const mcpCall = (req) => { const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 12000, input: JSON.stringify(req) + '\n' }); try { const line = r.stdout.split('\n').filter(Boolean)[0]; const j = JSON.parse(line); return JSON.parse(j.result.content[0].text); } catch { return null; } };
+    const listed = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 12000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n' });
+    let toolListed = false; try { toolListed = JSON.parse(listed.stdout.split('\n').filter(Boolean)[0]).result.tools.some((t) => t.name === 'leerness_verify_claim_all'); } catch {}
+    const mcpRes = mcpCall({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'leerness_verify_claim_all', arguments: { path: d } } });
+    const mcpOk = toolListed && mcpRes && mcpRes.ok === false && mcpRes.total === 1 && mcpRes.failed === 1 && Array.isArray(mcpRes.results) && mcpRes.results[0].reasons.includes('files-missing');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = cleanOk && defaultStill && claimsBlocks && humanOk && mcpOk;
+  } catch (e) {}
+  console.log(ok ? '✓ B(1.33.3) gate --claims opt-in(기본 5 무변경 + 6번째 verify-claims 거짓완료 차단) + MCP verify_claim_all 라운드트립' : '✗ gate --claims + MCP verify_claim_all 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {
