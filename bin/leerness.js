@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.33.0';
+const VERSION = '1.33.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3304,13 +3304,17 @@ function _selfTestCases() {
         && src.includes('completion_claim_allowed: _ccaH');  // handoff json + latest.json
       return pure && wired;
     } },
-    { name: 'GPT-5.5 전략리뷰 §6.7 (UR-0152): ci init — PR gate 워크플로 생성 + exit-code 정책 (1.9.444)', run: () => {
+    { name: 'GPT-5.5 전략리뷰 §6.7 (UR-0152): ci init — PR gate 워크플로 생성 + exit-code 정책 (1.9.444) + 강화(1.33.1 버전핀/권한/concurrency)', run: () => {
       if (typeof ciInitCmd !== 'function') return false;
       const wf = LEERNESS_GATE_WORKFLOW;
-      const contentOk = /name:\s*leerness-gate/.test(wf) && /on:\s*\n\s*pull_request:/.test(wf) && /leerness gate \./.test(wf) && /exit code 정책/.test(wf) && /actions\/checkout@v4/.test(wf);
+      const contentOk = /name:\s*leerness-gate/.test(wf) && /on:\s*\n\s*pull_request:/.test(wf) && /exit code 정책/.test(wf) && /actions\/checkout@v4/.test(wf);
+      // 1.33.1 강화: 버전 핀(leerness@x.y.z gate, latest 와 동일) + 최소권한 permissions + concurrency cancel
+      const hardened = new RegExp('leerness@' + VERSION.replace(/\./g, '\\.') + ' gate \\.').test(wf)
+        && /permissions:\s*\n\s*contents: read/.test(wf)
+        && /concurrency:\s*\n\s*group: leerness-gate/.test(wf) && /cancel-in-progress: true/.test(wf);
       const src = read(__filename);
       const wired = src.includes("cmd === 'ci' && (args[1] === 'init'") && src.includes('ciInitCmd(absRoot(_resolveRoot(args[2]))');
-      return contentOk && wired;
+      return contentOk && hardened && wired;
     } },
     { name: 'UR-0151: decision/lesson/rule add positional path 지원(_taskPositionalPath 재사용, cwd 오염 차단) (1.9.445)', run: () => {
       const src = read(__filename);
@@ -17227,13 +17231,22 @@ function runsShowCmd(root, id) {
 
 // 1.9.444 (GPT-5.5 전략리뷰 §6.7, UR-0152): CI/PR 턴키 — PR 마다 leerness gate 를 실행하는 GitHub Actions 워크플로 생성.
 //   gate = verify + audit + scan secrets + encoding + lazy. exit 1 시 PR 체크 실패 → 증거 없는 완료/시크릿/규칙 위반을 CI 에서 차단.
+// 1.33.1 (verify-claim+gate 슬라이스 강화, 웹 Opus 4.8 리뷰 "pin a version"): 생성 워크플로를 production-grade 로 —
+//   (1) leerness 버전 핀(재현성·공급망: ci init 가 설치 버전 주입) (2) permissions 최소권한 (3) concurrency 중복 취소.
 const LEERNESS_GATE_WORKFLOW = [
   '# leerness gate — AI 코딩 작업 증거/규칙/검증 게이트 (PR CI). leerness ci init 로 생성.',
   '# exit code 정책: 통과=0, 실패(테스트 실패 / 커밋 시크릿 / 인코딩 깨짐 / 게으름·증거 누락 / 필수 규칙 파일 없음)=1 → PR 체크 실패.',
+  '# 버전 핀(재현성·공급망 안전): 아래 leerness@' + VERSION + ' 을 의도적으로만 갱신하세요 (leerness ci init --force 재생성).',
+  '#   unpinned latest 는 새 릴리스가 나오면 게이트 판정이 조용히 바뀔 수 있어 지양 — CI 게이트는 재현 가능해야 합니다.',
   'name: leerness-gate',
   'on:',
   '  pull_request:',
   '  workflow_dispatch:',
+  'permissions:',
+  '  contents: read   # 최소 권한 — gate 는 읽기·검증만 (least-privilege)',
+  'concurrency:',
+  '  group: leerness-gate-${{ github.ref }}',
+  '  cancel-in-progress: true',
   'jobs:',
   '  gate:',
   '    runs-on: ubuntu-latest',
@@ -17243,7 +17256,7 @@ const LEERNESS_GATE_WORKFLOW = [
   '        with:',
   "          node-version: '20'",
   '      - name: leerness gate',
-  '        run: npx -y leerness gate .',
+  '        run: npx -y leerness@' + VERSION + ' gate .',
   '',
 ].join('\n');
 function ciInitCmd(root, opts = {}) {
@@ -17261,6 +17274,8 @@ function ciInitCmd(root, opts = {}) {
   if (json) { log(JSON.stringify({ ok: true, created: true, path: relPath })); return; }
   ok(`생성: ${relPath} — PR 마다 leerness gate 실행 (exit 1 시 PR 체크 실패)`);
   log('  gate = verify + audit + scan secrets + encoding + lazy. 증거 없는 완료·시크릿·규칙 위반을 CI 에서 차단.');
+  log(`  버전 핀 leerness@${VERSION}(재현성·공급망) · permissions 최소권한(contents: read) · 중복 실행 자동 취소.`);
+  log('  ⮕ 다음 단계(가드레일 완성): GitHub branch protection 에서 leerness-gate 를 "required" 체크로 지정 — 그래야 우회 불가.');
 }
 // 1.9.294 (UR-0025 3단계): 역할/모델 카탈로그(_PROVIDER_MODEL_CATALOG + _AGENT_ROLE_PROMPTS + ROLE_CATALOG + _ROLE_ALIASES) 데이터 모듈 분리 (비파괴, require-based).
 const { _PROVIDER_MODEL_CATALOG, _AGENT_ROLE_PROMPTS, ROLE_CATALOG, _ROLE_ALIASES } = require('../lib/role-catalog');

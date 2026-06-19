@@ -6332,6 +6332,29 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.33.1 회귀 (verify-claim+gate 슬라이스 강화): ci init 생성 워크플로가 production-grade — leerness 버전 핀(재현성) + 최소권한 permissions + concurrency 취소.
+total++;
+{
+  let ok = false;
+  try {
+    const ver = require(path.resolve(__dirname, '..', 'package.json')).version;
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ci-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    const ci = cp.spawnSync(process.execPath, [CLI, 'ci', 'init', d], { encoding: 'utf8', timeout: 15000 });
+    const wf = fs.readFileSync(path.join(d, '.github', 'workflows', 'leerness-gate.yml'), 'utf8');
+    // 버전 핀(설치 버전 == package.json) · 미핀 latest 부재 · 최소권한 · concurrency 취소 · gate 호출
+    const pinned = new RegExp('run: npx -y leerness@' + ver.replace(/\./g, '\\.') + ' gate \\.').test(wf);
+    const noUnpinned = !/npx -y leerness gate \./.test(wf);
+    const perms = /permissions:\n\s*contents: read/.test(wf);
+    const conc = /concurrency:\n\s*group: leerness-gate-\$\{\{ github\.ref \}\}\n\s*cancel-in-progress: true/.test(wf);
+    const stillGate = /leerness-gate/.test(wf) && /pull_request:/.test(wf) && /actions\/checkout@v4/.test(wf);
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = ci.status === 0 && pinned && noUnpinned && perms && conc && stillGate;
+  } catch {}
+  console.log(ok ? '✓ B(1.33.1) gate 슬라이스 강화: ci init 워크플로 버전핀(leerness@설치버전) + 최소권한 permissions(contents:read) + concurrency cancel + 미핀 latest 부재' : '✗ ci init 워크플로 강화 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {
@@ -6456,7 +6479,7 @@ total++;
     const wfPath = path.join(d, '.github', 'workflows', 'leerness-gate.yml');
     const created = fs.existsSync(wfPath);
     const content = created ? fs.readFileSync(wfPath, 'utf8') : '';
-    const contentOk = /name:\s*leerness-gate/.test(content) && /pull_request:/.test(content) && /leerness gate \./.test(content);
+    const contentOk = /name:\s*leerness-gate/.test(content) && /pull_request:/.test(content) && /leerness@[\d.]+ gate \./.test(content);  // 1.33.1: 버전 핀(leerness@x.y.z gate)
     // 멱등: 재실행 시 경고(덮어쓰기 X, exit 0)
     const r2 = cp.spawnSync(process.execPath, [CLI, 'ci', 'init', d], { encoding: 'utf8', timeout: 15000 });
     const idempotent = r2.status === 0 && /이미 존재|exists/.test((r2.stdout || '') + (r2.stderr || ''));

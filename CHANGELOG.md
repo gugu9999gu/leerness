@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.33.1 — 2026-06-17 — 🔒 verify-claim + CI gate 슬라이스 강화 (생성 워크플로 production-grade)
+
+**🔒 차별화 슬라이스(verify-claim + CI gate) 견고화.** 웹 Opus 4.8 외부리뷰가 "가치의 대부분 + 버전을 핀하라"고 짚은 부분을 채택 — `leerness ci init` 이 생성하는 PR 게이트 워크플로를 production-grade 로. (사용자 방향 선택: self-dev 중 고가치 항목.)
+
+### 맹신X (gate 동작은 견고 — 헛수정 회피)
+- 직접 재현: `gate` 는 5체크(verify/audit/scan-secrets/encoding/lazy) · `--json` 단일객체 집계(version/root/ok/total/failed/checks) · **실제 커밋 시크릿 차단**(exit 1, scan-secrets ok:false). AWS 문서 placeholder(`...EXAMPLE`)를 무시하는 건 정상(FP 회피)임을 확인 → gate 본체는 미수정.
+
+### 변경 (생성 워크플로 강화)
+- **leerness 버전 핀**: `npx -y leerness gate .`(unpinned latest) → `npx -y leerness@<설치버전> gate .`. `ci init` 가 설치 버전을 주입 → **재현성·공급망 안전**(새 릴리스가 게이트 판정을 조용히 바꾸지 못함). 업데이트 안내 주석 + `ci init --force` 재생성.
+- **최소 권한**: `permissions: contents: read` (least-privilege — gate 는 읽기·검증만).
+- **중복 취소**: `concurrency` + `cancel-in-progress: true` (superseded PR run 자동 취소).
+- **crisp CI 스토리**: `ci init` 성공 메시지에 핀/권한 + "branch protection 에서 required 지정 → guardrail 완성" 다음단계 명시. README ci 섹션도 1줄 보강.
+
+### 검증 (회귀 0)
+- **selftest 257** (ci init 가드(3307)를 핀/permissions/concurrency 검사로 강화 + VERSION↔package.json 일치).
+- **E2E 377→378**: 새 가드 B(1.33.1) — 버전핀(설치버전 일치)·미핀 latest 부재·`contents: read`·concurrency cancel.
+- 생성 워크플로 **YAML 파싱 검증**(name/permissions/concurrency/run 구조 유효).
+- patch(1.33.1) — npm 미배포(R-0011, 다음 minor 에 게시). bin+package.json 동시 bump + 일치 가드 통과.
+
 ## 1.33.0 — 2026-06-17 — 🛡️ [안정화/Stable] 15th리뷰 수정 + 정직성 calibration + A3 fencing 안정 minor
 
 **🛡️ 안정화(Stable) minor — 직전 minor(1.32.0) 이후 누적된 패치 3건(1.32.1~1.32.3)을 검증·통합해 npm 공개.** R-0011 정책의 24번째 stable minor. **이번 minor 의 핵심은 정직성 — 1.32.2 에서 calibrate 한 정직한 README/docs(self-administered 클린룸·성숙도 라벨)가 그동안 GitHub 에만 있었고 npm 에는 1.32.0 의 과장본이 남아 있었음. 1.33.0 이 정직한 게시본을 npm 에 올린다** (false-"done" 을 막는 도구가 자기 자신에 대해서도 과장하지 않도록). 한국어 우선 기본은 그대로.
