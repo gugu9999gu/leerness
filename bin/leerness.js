@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.34.0';
+const VERSION = '1.34.1';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -10787,7 +10787,8 @@ function verifyClaimCmd(root, taskId, opts = {}) {
 
 // 1.33.2 (verify-claim+CI gate 슬라이스 강화): verify-claim --all — 모든 done/완료 주장을 한 번에 검증(CI·스케일용).
 //   per-task 경로(verifyClaimCmd)를 opts.collect 로 재사용 → verdict 만 집계(렌더/exit 분기는 collect 가 흡수). 통과 플래그(--run-tests/--strict-claims/--lenient 등)는 전역이라 각 task 에 그대로 적용됨.
-//   동기: 플래그십(verify-claim)이 종전 per-task 전용이라, "내 완료 주장 전부 증거와 맞는가?"를 한 명령으로 못 했음. 게이트는 lazy/audit 휴리스틱으로 거짓완료를 잡지만, 부풀린 카운트·스텁은 verify-claim 의 정밀 검사가 더 잘 잡음.
+//   동기: 플래그십(verify-claim)이 종전 per-task 전용이라, "내 완료 주장 전부 증거와 맞는가?"를 한 명령으로 못 했음.
+//   1.34.1 (16th리뷰 정직화): 기본 게이트 5체크는 워크스페이스-상태 휴리스틱(handoff/test-run/evidence 부재 등)으로 거짓완료를 잡고, 콘텐츠-레벨 주장(파일 존재·테스트 카운트·스텁·optimism)은 검사하지 않음. verify-claim --all 은 그 콘텐츠 차원을 추가 — lazy detect 가 깨끗한(handoff·테스트기록 완비) 성숙 프로젝트에선 5체크가 통과해도 이 검사만 콘텐츠 거짓을 잡음(실증: gate 기본 exit 0 vs --claims exit 1).
 // 1.33.3: 일괄 검증 코어 — 렌더/exit 없이 결과만 반환. verifyClaimAllCmd(CLI 렌더+exit) 와 gate --claims(opt-in 체크) 가 공유.
 //   gate 의 step() 은 process.exit 가 아니라 process.exitCode 로 실패를 감지하므로, 코어는 절대 process.exit 하지 않음(게이트 프로세스 조기종료 방지).
 function _verifyClaimsAll(root) {
@@ -12715,7 +12716,8 @@ function gate(root) {
   const checks = [];
   let bad = 0;
   // 1.33.3 (verify-claim+CI gate 슬라이스 강화): --claims opt-in — 모든 done 주장을 정밀 per-claim 검증(verify-claim --all)으로 추가(6번째). 기본 5체크는 무변경(기존 어댑터 회귀 0).
-  //   기본 게이트는 lazy/audit 휴리스틱으로 거짓완료를 잡지만, 부풀린 카운트·스텁은 verify-claim 의 정밀 검사가 더 잘 잡음 → CI 가 README 약속("claims fail → cannot merge")을 문자 그대로 강제하려면 --claims.
+  //   1.34.1 (16th리뷰 정직화): 기본 5체크(특히 lazy detect)는 워크스페이스-상태(handoff/test-run/evidence 부재) 신호로 거짓완료를 잡지, 콘텐츠(파일/카운트/스텁)는 검사하지 않음.
+  //   --claims 는 콘텐츠-레벨 검증을 추가 — 워크스페이스가 깨끗한 성숙 프로젝트에선 기본 5체크가 통과(exit 0)해도 --claims 만 콘텐츠 거짓을 잡아(exit 1) README 약속("claims fail → cannot merge")을 문자 그대로 강제. (실증 가드: e2e B(1.34.1))
   const withClaims = has('--claims');
   if (!jsonMode) log(`# leerness gate (${withClaims ? 6 : 5} checks)`);
   function step(label, fn) {

@@ -6435,6 +6435,40 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.34.1 회귀 (16th리뷰 정직화 실증): gate --claims 정밀성 가치 — 워크스페이스가 깨끗(lazy detect 0 finding)한데 콘텐츠-레벨 거짓(부풀린 테스트 카운트)인 경우, 기본 5체크는 통과(exit 0)하고 --claims 만 차단(exit 1). 이 판별 케이스가 깨지면(기본도 잡거나 --claims가 못 잡으면) --claims 의 차별 가치가 사라진 것이므로 가드.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-disc-'));
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d, 'calc.js'), 'function add(a,b){return a+b}\nmodule.exports={add}\n');
+    fs.mkdirSync(path.join(d, 'tests'));
+    fs.writeFileSync(path.join(d, 'tests', 'calc.test.js'), 'const {add}=require("../calc.js");\ntest("a",()=>{if(add(1,2)!==3)throw 0});\n');
+    // lazy detect 완전 무력화: 유효 handoff(Last generated + 비어있지 않은 섹션) + test-run 기록
+    fs.writeFileSync(path.join(d, '.harness', 'session-handoff.md'), '# Handoff\nLast generated: 2026-06-19T00:00:00Z\n\n## Completed\n- calc.js add() 구현 + 테스트\n\n## Next Exact Step\n- 배포\n');
+    fs.writeFileSync(path.join(d, '.harness', 'review-evidence.md'), '# Evidence\n## Test run\n- npm test: 1/1 passing\n');
+    // 콘텐츠-레벨 거짓: 실파일/실테스트 존재하나 evidence 가 테스트 50개 통과(실제 1개) 부풀림
+    const id = (R(['task', 'add', 'calc 구현']).stdout.match(/T-\d{4,}/) || [])[0];
+    R(['task', 'update', id, '--status', 'done', '--evidence', 'calc.js + tests/calc.test.js 테스트 50개 통과']);
+    // lazy detect 깨끗(blocking 0) 확인
+    const lz = JSON.parse(R(['lazy', 'detect', '.', '--json']).stdout);
+    const lazyClean = R(['lazy', 'detect', '.']).status === 0 && (lz.findings || []).length === 0;
+    // 핵심 판별: 기본 게이트는 통과(exit 0), --claims 만 차단(exit 1)
+    const gDef = R(['gate', '.']);
+    const gClaims = R(['gate', '.', '--claims', '--json']);
+    const gcj = JSON.parse(gClaims.stdout);
+    const vcCheck = gcj.checks.find((c) => c.name === 'verify-claims');
+    const lazyCheck = gcj.checks.find((c) => c.name === 'lazy detect');
+    const discriminates = gDef.status === 0 && gClaims.status === 1 && vcCheck && vcCheck.ok === false && lazyCheck && lazyCheck.ok === true;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = lazyClean && discriminates;
+  } catch (e) {}
+  console.log(ok ? '✓ B(1.34.1) gate --claims 정밀성 REAL: 워크스페이스 깨끗(lazy 0) + 콘텐츠거짓(부풀린카운트) → 기본 5체크 통과(exit 0), --claims 만 차단(exit 1)' : '✗ gate --claims 정밀성 판별 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {

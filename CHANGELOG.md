@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.34.1 — 2026-06-19 — 🔬 16th 리뷰(게시본 1.34.0 신규 표면) — gate --claims 정밀성 정직화 + 판별 가드
+
+**🔬 게시본 1.34.0 신규 표면(gate --claims · verify-claim --all · MCP)을 적대적 리뷰 + 맹신X 양방향 재현.** R-0006(멀티에이전트 보수)에 따라 무거운 fan-out 대신 단일 컨텍스트 적대 버그헌트로 수행. 신규 표면은 행위상 견고했으나(스텁/부풀린카운트 차단·json 무오염·MCP 라운드트립 정상), **`gate --claims` 의 가치 설명 문구가 부정확**함을 발견.
+
+### 맹신X (양방향 재현 — 정밀성 가치는 REAL, 문구만 과장)
+- **재현으로 기각한 과장**: 종전 코드주석이 "기본 게이트는 lazy/audit 으로 거짓완료를 잡지만 부풀린카운트·스텁은 verify-claim 이 더 잘 잡음"이라 표현 → lazy/audit 이 **콘텐츠를 검사하는 듯 오해**를 줌. 실제 재현: 기본 게이트가 거짓완료를 잡은 건 `lazy detect` 의 **워크스페이스-상태 신호**(handoff 미생성·test-run 미기록 — done-work 있으면 blocking)였지, 부풀린카운트/스텁 **콘텐츠 탐지가 아니었음**.
+- **재현으로 확인한 진짜 가치(REAL)**: `lazy detect` 를 완전히 깨끗하게(유효 handoff + test-run 기록) 만든 성숙 프로젝트 + 콘텐츠-레벨 거짓(테스트 50개 주장, 실제 1개) → **기본 게이트 5체크 전부 통과(exit 0)**, **`--claims` 만 차단(exit 1, verify-claims FAIL)**. 즉 `--claims` 는 5체크가 안 보는 **콘텐츠-레벨 차원**(파일/카운트/스텁/optimism)을 추가하는 게 맞음.
+
+### 변경 (정직화 + 가드)
+- **문구 정직화**: `verifyClaimAllCmd`/`gate --claims` 코드주석을 "워크스페이스-상태 휴리스틱(5체크) vs 콘텐츠-레벨 검증(--claims)" 으로 교정 — lazy/audit 이 콘텐츠를 본다는 오해 제거. README enforcement 문구("via heuristics … --claims makes it precise")는 이미 정확해 유지.
+- **결정적 판별 e2e 가드 B(1.34.1)**: lazy detect 0 finding + 부풀린카운트 → 기본 게이트 exit 0, `--claims` exit 1(verify-claims FAIL · lazy detect ok). 미래에 `--claims` 가 조용히 무가치(기본도 잡거나 --claims 가 못 잡음)해지면 즉시 실패하게 고정.
+
+### 검증 (회귀 0)
+- selftest 259 · E2E 381(B(1.34.1) 추가). 신규 표면 적대 프로브(스텁·부풀린카운트·json오염·MCP) 모두 정상.
+- patch(1.34.1) — npm 미배포(R-0011, 다음 minor 에 게시). bin+package.json 동시 bump 일치.
+
 ## 1.34.0 — 2026-06-19 — 🛡️ [안정화/Stable] verify-claim + CI gate 슬라이스 강화 (CLI→CI→MCP 완결) 안정 minor
 
 **🛡️ 안정화(Stable) minor — 직전 minor(1.33.0) 이후 누적된 패치 3건(1.33.1~1.33.3)을 검증·통합해 npm 공개.** R-0011 정책의 25번째 stable minor. **이번 minor 의 핵심은 차별화 슬라이스(verify-claim + CI gate)를 한 테마로 완결한 것** — 웹 Opus 4.8 외부리뷰가 "leerness 의 진짜 가치 = verify-claim + CI gate"라 짚었고, 사용자가 그 방향을 선택해 3라운드에 걸쳐 플래그십을 CLI → CI 게이트 → MCP 까지 연결했습니다. 한국어 우선 기본은 그대로.
