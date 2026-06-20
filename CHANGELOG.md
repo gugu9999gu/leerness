@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.34.2 — 2026-06-20 — 🐶 dogfood 발견: scan secrets 테스트-픽스처 FP 억제 ('test' 토큰)
+
+**🐶 product(leerness Gate, GitHub App)를 leerness 하니스로 dogfooding 하다 발견한 leerness 개선.** 실제 product 코드를 leerness 로 빌드·검증하니 `scan secrets` 가 테스트 픽스처(`const SECRET = 'test-webhook-secret-123'`)를 "Hardcoded password assignment" FP 로 플래그함. (웹 Opus 4.8 리뷰의 "self-dev 밖 실제 product 에서 검증" 가치가 첫 leerness 개선으로 결실.)
+
+### 맹신X (양방향 재현 — FP 억제 + 실키 FN-guard 0)
+- 재현: `_isPlaceholderSecret('test-webhook-secret-123')` → false(플래그). 전체-값 placeholder 토큰도, marker 단어도 아니고(markers 에 bare 'test'/'secret' 없음), 저엔트로피(alnum 20 < 24)라 실키 가드도 미적용 → 최종 `return false`(플래그)에 도달.
+- **FN-guard 재현**: 실키(`AKIAJQXMP7RZ2KL9WXYZ` · `ghp_…` · 고엔트로피 랜덤 · `prod-database-secret-…` · `latestKEY…`)는 전부 FLAGGED 유지 확인. 수정 규칙은 함수 끝(실키 prefix·고엔트로피가 이미 return 한 뒤)에만 위치해 실키엔 **도달 불가** → 보안 회귀 0.
+
+### 변경 (FN-safe, 최소)
+- `_isPlaceholderSecret`: 'test' 구분자 토큰(`test-…`/`…-test`/`…-tests`/`TEST_…`)을 가진 **저엔트로피 비-실키** 값을 placeholder 로 판정 — 함수 끝(고엔트로피·실키 prefix 분기 뒤)에 추가해 실키 무영향. `test-webhook-secret-123`/`webhook-secret-for-tests` 류 FP 억제.
+- **whack-a-mole 회피(lesson)**: placeholder 휴리스틱 무한 확장은 FN 위험만 키움 — leerness 는 가장 명확한 'test' 픽스처 클래스만 잡고, 그 외(PEM 델리미터-in-코드·일반 fixture 값)는 product-side 에서 정직하게 해결(게이밍 X). 완전 해소는 allowlist 기제(향후)로.
+
+### 검증 (회귀 0)
+- selftest **260** (신규: _isPlaceholderSecret FP 억제 5종 + 실키 FN-guard 5종 + 소스 가드 '규칙이 고엔트로피 분기 뒤').
+- dogfood 검증: leerness-gate `scan secrets` → ✓ clean(FP 0), product 37 tests 유지.
+- patch(1.34.2) — npm 미배포(R-0011). bin+package.json 동시 bump 일치.
+
 ## 1.34.1 — 2026-06-19 — 🔬 16th 리뷰(게시본 1.34.0 신규 표면) — gate --claims 정밀성 정직화 + 판별 가드
 
 **🔬 게시본 1.34.0 신규 표면(gate --claims · verify-claim --all · MCP)을 적대적 리뷰 + 맹신X 양방향 재현.** R-0006(멀티에이전트 보수)에 따라 무거운 fan-out 대신 단일 컨텍스트 적대 버그헌트로 수행. 신규 표면은 행위상 견고했으나(스텁/부풀린카운트 차단·json 무오염·MCP 라운드트립 정상), **`gate --claims` 의 가치 설명 문구가 부정확**함을 발견.
