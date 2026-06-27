@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.35.0 — 2026-06-27 — 🕸️ [안정화/Stable] 온톨로지 그래프(graph --html + 자동생성) 안정 minor
+
+**신규 기능 minor**: leerness 적용 프로젝트의 하네스(5 메모리 표면 + skills + feature-graph)를 인터랙티브 온톨로지 그래프 HTML(`leerness.html`)로 표면화하는 기능을 도입하고, 누적 수정(1.34.1~1.34.4)을 묶어 안정화. 0 런타임 의존 자기완결 vanilla JS — 노드 클릭으로 하네스 내용을 손쉽게 조회.
+
+### 이번 minor 통합 (1.34.1~1.34.4)
+- **🕸️ leerness graph --html (1.34.3)**: 프로젝트 루트에 `leerness.html`(Obsidian graph-view 스타일 force-directed 캔버스) 생성. 노드=task(status색)/plan/decision/lesson/rule/skill/feature, 엣지=`M-####`·`[TURDL]-####`·`[[wikilink]]`·feature-graph. 기존 `graph`(mermaid 코드그래프)는 비파괴 유지(`--html` 분기). 새 모듈 `lib/graph.js`(DI). 맹신X: 엣지 이중계수 dedup + (자가발견)U+2028-in-regex SyntaxError 회귀를 중첩 spawn 재현으로 반증·revert.
+- **📊 graph 자동생성 (1.34.4)**: `LEERNESS_AUTO_GRAPH=1`(기본 OFF, Always-Off Opt-In) 시 `handoff` 마다 `leerness.html` 자동 갱신. dispatch 래퍼 격리 + `quiet` 모드. 맹신X: `handoff --json` notice 오염 차단(`!has('--json')`).
+- **🔬 gate --claims 정직화 (1.34.1)**: gate 정밀성 문구 정직화 + 판별 케이스 e2e 가드.
+- **🐶 scan secrets FP 억제 (1.34.2)**: dogfood(leerness Gate) 발견 — 'test' 픽스처 토큰 FP 억제(FN-safe, 실키 회귀 0).
+
+### 안정화 표시 (R-0006)
+- annotated tag `v1.35.0` (Stable) · GitHub release · npm dist-tag `stable` — 게시 단계에서 수행.
+- **배포 대기**: `npm publish` 는 2FA OTP 필요 → 사용자 게시 후 게시본 클린룸 재실증(graph --html 행위 포함, re-verify-published-artifact 교훈).
+
+### 검증 (회귀 0)
+- selftest **262** · full **e2e 381/381**. `files:["lib"]` → 신규 `lib/graph.js` 게시 포함 확인. bin+package.json 동시 bump 일치.
+
+## 1.34.4 — 2026-06-27 — 📊 graph 자동생성(opt-in): handoff 시 leerness.html 자동 갱신
+
+**T-0077 후속(사용자 비전 "자동으로 작성되게" 충족)**: `leerness graph --html`(1.34.3)은 수동이었음. 이제 `leerness handoff` 시 leerness.html 을 자동 재생성하는 opt-in 훅 추가 — 매 세션 시작마다 온톨로지 그래프가 최신 상태로 유지.
+
+### 기능 (Always-Off Opt-In)
+- 환경변수 `LEERNESS_AUTO_GRAPH=1` 일 때만 동작(기본 OFF — 1.9.213 "Always-Off Opt-In" 원칙). handoff 출력 끝에 `_maybeAutoGraph(root)` 가 leerness.html 을 조용히(quiet) 재생성하고 한 줄 알림.
+- 비치명: dispatch 래퍼에서 `handoffCmd()` 반환 후 호출 → `.harness` 미존재/오류 시 try/catch 로 handoff 본문 무영향. `--quiet`/`--compact` 시 알림 생략.
+- `lib/graph.js`: `graphHtmlCmd` 에 `quiet` 옵션 추가(자동생성 시 사람용 3줄 로그 억제). 거대 handoff 본문 미수정(격리).
+
+### 검증 (회귀 0)
+- selftest **262** (신규: handoff opt-in 배선 grep[split-literal 자기참조 회피] + quiet 모드 무로그 행위).
+- **end-to-end**: init 한 임시 하네스에서 `handoff` — env 미설정 → leerness.html 미생성(기본 off 증명), `LEERNESS_AUTO_GRAPH=1` → 생성 + 알림 라인 확인.
+- full **e2e 381/381**(711s, 기본 off → 기본경로 무영향) · bin+package.json 동시 bump. patch(1.34.4) — npm 미배포(R-0011).
+
+## 1.34.3 — 2026-06-26 — 🕸️ leerness graph --html: 하네스 온톨로지 그래프(leerness.html) 자동 생성
+
+**사용자 요청 신규 기능(T-0077)**: leerness 적용 프로젝트 루트에 인터랙티브 온톨로지 그래프 HTML(`leerness.html`)을 생성. Obsidian graph-view 스타일 force-directed 캔버스로 5 메모리 표면(task/plan/decision/lesson/rule) + skills + feature-graph 를 노드/엣지로 시각화하고, 노드 클릭 → 내용 패널로 하네스를 손쉽게 조회. **0 런타임 의존 자기완결 vanilla JS**(차트 라이브러리 X). codex 와 설계 협업(통합 지점·데이터 재사용·DI 배치), 검수는 메인.
+
+### 기능
+- `leerness graph [path] --html [--out <file>] [--json]` — 기존 `graph`(mermaid 코드 의존성 그래프)는 기본 동작 유지, `--html` 분기로 온톨로지 HTML 생성(비파괴).
+- 데이터: in-process 로더 주입(`_roadmapData`·`_loadDecisions`·`_loadLessons`) — 자식 프로세스 셸링 0. 노드: task(status별 색상)/plan/decision/lesson/rule/skill/feature. 엣지: `M-####`·`[TURDL]-####` 참조 · `[[wikilink]]` · `feature-graph.md`.
+- 새 모듈 `lib/graph.js`(DI 패턴 — lib/diagnostics 류와 일관). bin/leerness.js 는 thin wrapper + dispatch 분기 + help 만.
+- 임베드 안전: 모든 `<` → `<` 치환으로 `</script>`·`<!--` 차단(JSON 문자열 내부라 런타임 복원), function 치환기로 `$`-특수문자 회피.
+
+### 맹신X (자기검수에서 실버그 2건 발견·해결)
+- **P2 엣지 이중계수**: task→milestone 가 `_roadmapData` 추출(`_ms`) + blob `M-####` 정규식 양쪽에서 추가 → 엣지수/degree 부풀림. `(source,target)` dedup 으로 정확화(루트 하네스 20→10 정확).
+- **자가발견 회귀 + 반증**: U+2028/U+2029 escape 를 정규식 리터럴 안에 raw 로 넣어 `SyntaxError`(정규식은 줄종결자 불가) → bin 이 require 하는 공유 모듈이라 e2e 자식 전부 크래시(균일 75 실패). "다수 균일 실패=환경" 유혹을 **중첩 spawn 으로 `--version` 재현**해 반증(내 신택스 에러) → 이익 미미한 escape 는 단순 검증형으로 revert.
+
+### 검증 (회귀 0)
+- selftest **261** (신규: `graph --html` 행위 — 임시 하네스 seed → `leerness.html` 생성 + 노드/엣지 존재 + XSS 무결성(`</script>` 정확히 1개); 자기참조 트랩 회피 split-literal).
+- full **e2e 381/381**(750s) · 라이브: 루트 119 nodes/10 edges, `DATA` JSON.parse OK.
+- patch(1.34.3) — npm 미배포(R-0011). bin+package.json 동시 bump 일치.
+
 ## 1.34.2 — 2026-06-20 — 🐶 dogfood 발견: scan secrets 테스트-픽스처 FP 억제 ('test' 토큰)
 
 **🐶 product(leerness Gate, GitHub App)를 leerness 하니스로 dogfooding 하다 발견한 leerness 개선.** 실제 product 코드를 leerness 로 빌드·검증하니 `scan secrets` 가 테스트 픽스처(`const SECRET = 'test-webhook-secret-123'`)를 "Hardcoded password assignment" FP 로 플래그함. (웹 Opus 4.8 리뷰의 "self-dev 밖 실제 product 에서 검증" 가치가 첫 leerness 개선으로 결실.)
