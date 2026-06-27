@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.35.4 — 2026-06-27 — graph 폴리시: 엣지 종류별 색상 + PNG 내보내기
+
+**graph 시각/공유(1.35.3 게시 후 누적, R-0011)**.
+
+### 변경 (lib/graph.js 템플릿)
+- **엣지 종류별 색상**: milestone(amber)/ref(blue)/link(green)/feature(gray) 엣지를 색으로 구분 — 관계 종류를 한눈에. 선택 노드 연결 엣지는 기존 하이라이트 유지.
+- **PNG 내보내기**: `p` 키 → 현재 그래프를 `leerness-graph.png`로 저장(배경색 합성 후 canvas toDataURL). 문서/PR 공유용. hint 바 안내 추가.
+
+### 검증
+- selftest **264** (임베드-script JS 신택스 가드가 EKIND/exportPng/keydown 추가분 컴파일 유효성 자동 검증) · lib/graph.js 템플릿만 변경(데이터/엣지 로직 무변경). patch — npm 미배포(R-0011).
+
 ## 1.35.3 — 2026-06-27 — graph 네비게이션: 검색 Enter 점프 + f/dblclick fit + Esc
 
 **graph "손쉽게 조회" 강화(1.35.0 게시 후 누적, R-0011)**: 온톨로지 그래프에서 노드를 빠르게 찾아 조회하는 키보드/마우스 네비게이션.
