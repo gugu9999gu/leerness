@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.35.1 — 2026-06-27 — graph 후속(1.35.0 게시 후): README Visualize 문서 + 빈-하네스 방어가드
+
+**1.35.0 게시본 클린룸 재실증 후 정합 패치(정직성)**: 게시본 1.35.0(selftest 262)에서 `graph --html`(7노드 생성) + `LEERNESS_AUTO_GRAPH=1` 자동생성이 정상 동작 확인됨. 게시 시점 직후 추가된 변경 2건(README 문서 · 방어가드)이 git 상 1.35.0과 버전이 겹쳐, **1.35.1로 정합 분리**(같은 버전에 두 내용 공존 방지). 런타임 동작 무변경.
+
+### 변경 (문서 + 테스트만 — 런타임 무변경)
+- **README "Visualize" 항목**: `graph --html`(자기완결 온톨로지 그래프, 노드 클릭 조회) + 자동갱신(`LEERNESS_AUTO_GRAPH=1`)을 60초 투어에 문서화(관리영역 밖 손편집 → readme sync 무영향).
+- **방어가드 selftest +1**: `graph --html` 빈/미초기화 하네스 무크래시 + 유효 빈 HTML(0노드·단일 script 닫힘) 회귀가드 — 신규 프로젝트 init 직후 시나리오, deps 미주입 worst-case 포함.
+
+### 검증
+- selftest **263** · 동작 무변경(문서/테스트 only)이라 e2e 무영향(381 유지). patch — npm 미배포(R-0011, 다음 묶음 게시).
+
 ## 1.35.0 — 2026-06-27 — 🕸️ [안정화/Stable] 온톨로지 그래프(graph --html + 자동생성) 안정 minor
 
 **신규 기능 minor**: leerness 적용 프로젝트의 하네스(5 메모리 표면 + skills + feature-graph)를 인터랙티브 온톨로지 그래프 HTML(`leerness.html`)로 표면화하는 기능을 도입하고, 누적 수정(1.34.1~1.34.4)을 묶어 안정화. 0 런타임 의존 자기완결 vanilla JS — 노드 클릭으로 하네스 내용을 손쉽게 조회.
@@ -15,7 +26,7 @@
 - **배포 대기**: `npm publish` 는 2FA OTP 필요 → 사용자 게시 후 게시본 클린룸 재실증(graph --html 행위 포함, re-verify-published-artifact 교훈).
 
 ### 검증 (회귀 0)
-- selftest **263**(graph 빈/미초기화 하네스 무크래시 방어가드 추가 — 신규 프로젝트 init 직후 시나리오) · full **e2e 381/381**. `files:["lib"]` → 신규 `lib/graph.js` 게시 포함 확인. bin+package.json 동시 bump 일치.
+- selftest **262** · full **e2e 381/381**. **게시본 클린룸 재실증(1.35.0)**: 버전 1.35.0 · lib/graph.js 게시 포함 · selftest 262 · `graph --html` 7노드 생성 + `LEERNESS_AUTO_GRAPH=1` auto-gen 동작 OK. bin+package.json 동시 bump 일치.
 
 ## 1.34.4 — 2026-06-27 — 📊 graph 자동생성(opt-in): handoff 시 leerness.html 자동 갱신
 
