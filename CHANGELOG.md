@@ -15,7 +15,7 @@
 - **배포 대기**: `npm publish` 는 2FA OTP 필요 → 사용자 게시 후 게시본 클린룸 재실증(graph --html 행위 포함, re-verify-published-artifact 교훈).
 
 ### 검증 (회귀 0)
-- selftest **262** · full **e2e 381/381**. `files:["lib"]` → 신규 `lib/graph.js` 게시 포함 확인. bin+package.json 동시 bump 일치.
+- selftest **263**(graph 빈/미초기화 하네스 무크래시 방어가드 추가 — 신규 프로젝트 init 직후 시나리오) · full **e2e 381/381**. `files:["lib"]` → 신규 `lib/graph.js` 게시 포함 확인. bin+package.json 동시 bump 일치.
 
 ## 1.34.4 — 2026-06-27 — 📊 graph 자동생성(opt-in): handoff 시 leerness.html 자동 갱신
 
