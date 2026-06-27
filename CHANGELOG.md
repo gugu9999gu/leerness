@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.35.5 — 2026-06-27 — 17th 버그헌트: scan .json5/.jsonc FN + verify-claim git 매칭 정밀도
+
+**비-graph 버그헌트(게시본 1.35.4 후, R-0011)**. Explore 에이전트가 낸 6개 후보를 **맹신 X 재현으로 검증** → 강한 후보 다수가 거짓 판명(멀티라인 시크릿·`test_`고엔트로피 FN은 실제 재현에서 이미 flagged; agent의 `api_secret`↔`secret` 매칭 가정도 word-boundary로 오류), **확정 2건만** 수정.
+
+### 수정 (재현 확인)
+- **scan secrets — .json5/.jsonc 미스캔 FN (확인)**: `SCAN_TEXT_EXT` 가 `.json` 만 포함하고 `.json5`/`.jsonc` 를 제외 → 해당 설정 파일의 시크릿이 스캔에서 누락. 두 확장자 추가. 재현: JSON5 의 `api_key: "sk-…"` 시크릿이 이제 flagged. (참고: 따옴표 JSON 키 `"api_key":` 미매칭은 `.json` 포함 **기존 패턴 한계** — 본 변경 무관, 별도 영역.)
+- **verify-claim — git 교차검사 basename 충돌 (정밀도)**: `_claimFileInGit` 의 역방향 매칭 `c.endsWith('/'+g)` 가 bare basename 도 매칭 → claimed `src/test.js` 가 무관한 git 변경 `test.js` 와 오매칭(외과적-변경 신호 약화). git 경로가 다중세그먼트일 때만 역매칭하도록 한정. forward/exact 정상. (정직: 완전한 false-pass 시나리오는 미재현 — 정밀도 개선으로 분류.)
+
+### 검증
+- selftest **265** (신규: `_claimFileInGit` 단위 — 충돌 차단 + forward/exact/nested-reverse 보존, .json5/.jsonc 멤버십). full e2e (verify-claim git 로직 무회귀). patch — npm 미배포(R-0011).
+
 ## 1.35.4 — 2026-06-27 — graph 폴리시: 엣지 종류별 색상 + PNG 내보내기
 
 **graph 시각/공유(1.35.3 게시 후 누적, R-0011)**.
