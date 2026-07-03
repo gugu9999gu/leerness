@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.35.8 — 2026-07-03 — GPT5.5평가 잔여 제안 채택: 문서 drift 가드 + 전용 스캐너 병행 레시피 + 테스트 티어 안내 (UR-0017)
+
+**GPT 5.5 Pro 평가 후속 라운드** — 1.35.7 에서 확정버그 3건을 수정했고, 이번엔 잔여 개선제안 중 저위험·고정직성 항목을 채택. 나머지(e2e 3-tier 분리 / minimal lazy-create / AST 검증기)는 UR-0014~0016 으로 백로그 등록.
+
+### 채택 (제안⑤⑥ + ③문서파트)
+- **문서 숫자 drift 자동가드 (제안⑤)**: selftest 가 README managed 섹션의 MCP 도구 수(`**N개 도구**`)를 `lib/mcp-tools` 실제 정의 수와 대조 — 사이트가 85↔86 으로 drift 했던 계열의 재발을 릴리스 게이트에서 차단.
+- **전용 스캐너 병행 레시피 (제안⑥)**: README "Guidance vs enforcement" 에 gitleaks-action + leerness scan secrets 병행 워크플로 스니펫 추가. `scan secrets` human 출력에도 포지셔닝 정직 고지 1줄(편의 가드 — CI급 보장은 전용 스캐너 병행, ko/en) — README 만으론 CLI 사용자에게 닿지 않던 갭.
+- **테스트 티어 안내 (제안③ 문서파트)**: README Maturity 에 npm test = 풀 릴리스 게이트(10분+, 의도된 설계) vs test:fast = 개발 루프(1분 미만) 명시. 스크립트 분리 자체는 UR-0014 별도 라운드.
+
+### 검증
+- selftest **268** (신규: README 도구 수 정합 + 레시피/고지/티어 문서 존재). full e2e (scan secrets 출력 1줄 추가 — 기존 단언과 충돌 없음 확인).
+
 ## 1.35.7 — 2026-07-03 — 19th GPT5.5pro 평가: verify-claim declared-pass 부풀림 게이팅 + spec 리포터 파싱 + json ok/reasons (UR-0013)
 
 **웹 GPT 5.5 Pro 확장의 독립 평가보고서(1.35.6 게시본 대상) 검토 라운드**. 맹신 X 재현 결과 보고서의 헤드라인 버그가 **3경로 전부 실재** — 원인 분석의 소스 위치까지 정확했음. 검토 중 추가 발견 2건(자기모순 출력 + Node v26 파서 FN)도 함께 수정.

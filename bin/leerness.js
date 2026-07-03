@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.35.7';
+const VERSION = '1.35.8';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2904,6 +2904,17 @@ function _selfTestCases() {
       // (3) 단건 --json top-level ok/reasons — exit 는 reasons 기반 단일 판정.
       const jsonOk = src.includes('out.ok = out.reasons.length === 0') && src.includes('if (!out.ok) return process.exit(1)');
       return parseOk && gateWired && jsonOk;
+    } },
+    { name: '19th GPT5.5평가 제안⑤⑥ (UR-0017): README MCP 도구 수 ↔ lib/mcp-tools 정합(문서 drift 가드) + 전용 스캐너 병행 레시피/포지셔닝/테스트 티어 문서화 (1.35.8)', run: () => {
+      // (⑤) 문서 숫자 drift: README managed 섹션의 "**N개 도구**" 가 실제 MCP 도구 정의 수와 일치해야 함 (사이트 85↔86 drift 재발 방지 계열).
+      const readme = read(path.join(__dirname, '..', 'README.md'));
+      const m = readme.match(/\*\*(\d+)개 도구\*\*/);
+      const tools = require('../lib/mcp-tools').length;
+      const managedOk = !!m && parseInt(m[1], 10) === tools;
+      // (⑥) 전용 스캐너 병행 레시피(README) + scan secrets 출력 포지셔닝 고지 + 테스트 티어 안내.
+      const recipeOk = /gitleaks\/gitleaks-action/.test(readme) && /test:fast/.test(readme);
+      const advisoryOk = /pair with a dedicated scanner \(gitleaks\/trufflehog\)/.test(read(__filename));
+      return managedOk && recipeOk && advisoryOk;
     } },
     { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
     { name: 'exit code 일관성: fail()→exitCode 1 행위 + unknown 명령 안내 (UR-0045 / CV-5 행위화 1.9.366)', run: () => { if (typeof fail !== 'function') return false; const saved = process.exitCode; const _w = process.stdout.write; let setOk = false; try { process.stdout.write = () => true; process.exitCode = 0; fail('selftest probe'); setOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } const src = read(__filename); const dispatchOk = /알 수 없는 명령: \$\{cmd\}/.test(src); return setOk && dispatchOk; } },
@@ -8238,6 +8249,10 @@ function scanSecrets(root, opts = {}) {
   if (ignored.length) {
     log(`  ⓘ gitignored ${ignored.length}건 (커밋 제외 — 설계상 안전 보관, 비실패): ${[...new Set(ignored.map(f => f.file))].join(', ')}`);
   }
+  // 1.35.8 (UR-0017, GPT5.5평가 제안⑥): 포지셔닝 정직 고지 — 편의 가드임을 출력에서도 명시(README 만으론 CLI 사용자에게 안 닿음).
+  log(_uiLang(root) === 'en'
+    ? `  ⓘ positioning: convenience guard for agent workflows — for CI-grade guarantees pair with a dedicated scanner (gitleaks/trufflehog). Recipe: README "Guidance vs enforcement".`
+    : `  ⓘ 포지셔닝: 에이전트 워크플로용 편의 가드 — CI급 보장이 필요하면 전용 스캐너(gitleaks/trufflehog)와 병행하세요. 레시피: README "Guidance vs enforcement".`);
 }
 
 function encodingCheck(root, opts = {}) {
