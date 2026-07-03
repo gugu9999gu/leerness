@@ -6493,13 +6493,19 @@ total++;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-disp-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'REVIEWTASK', '--to', 'codex', '--path', d], { encoding: 'utf8', timeout: 20000, env: { ...process.env, LEERNESS_ENABLE_CODEX: '1' } });
+    const env = { ...process.env, LEERNESS_ENABLE_CODEX: '1' };
+    const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'REVIEWTASK', '--to', 'codex', '--path', d], { encoding: 'utf8', timeout: 20000, env });
     const out = r.stdout || '';
-    // dispatch 명령에 task 가 정확히 "REVIEWTASK" 로만 인용되어야(코덱스/경로 흡수 없음)
-    ok = /"REVIEWTASK"/.test(out) && !/"REVIEWTASK codex"/.test(out) && !/REVIEWTASK.*tmp/.test(out);
+    // 1.35.6: 기본은 harness 브리프가 접두되므로 task 는 "... 작업: REVIEWTASK" 끝에 그대로(코덱스/경로 흡수 없음).
+    const briefOk = /작업: REVIEWTASK"/.test(out) && !/REVIEWTASK codex"/.test(out) && !/REVIEWTASK.*tmp/.test(out);
+    // --raw 는 1.9.435 원형 보존 — task 가 정확히 "REVIEWTASK" 로만 인용.
+    const rRaw = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'REVIEWTASK', '--to', 'codex', '--raw', '--path', d], { encoding: 'utf8', timeout: 20000, env });
+    const outRaw = rRaw.stdout || '';
+    const rawOk = /"REVIEWTASK"/.test(outRaw) && !/"REVIEWTASK codex"/.test(outRaw) && !/REVIEWTASK.*tmp/.test(outRaw) && !/위임 프로토콜/.test(outRaw);
+    ok = briefOk && rawOk;
     fs.rmSync(d, { recursive: true, force: true });
   } catch {}
-  console.log(ok ? '✓ B(1.9.435) UR-0137: agents dispatch task 에 --to/경로 값 흡수 없음' : '✗ agents dispatch flag bleed');
+  console.log(ok ? '✓ B(1.9.435/1.35.6) UR-0137: agents dispatch task 에 --to/경로 값 흡수 없음 (브리프 접두 + --raw 원형)' : '✗ agents dispatch flag bleed');
   if (!ok) failed++;
 }
 

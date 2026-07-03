@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.35.6 — 2026-07-02 — 18th 위임실증: codex-leerness 준수 라이브 검증 + dispatch harness 브리프 + bench stdin hang 수정
+
+**위임 실증 라운드 (사용자 명시: "codex가 leerness를 참조하고 작업을 진행하는지 확인 후 고도화")**. 라이브 재현: leerness init 된 임시 프로젝트에 위임 룰(codex 구현/Claude 검수) 등록 → **leerness 를 전혀 언급하지 않은** 순수 코딩 태스크를 dispatch 레시피 그대로 codex(0.141)에 위임.
+
+### 실증 결과 (79 exec 명령 전수 분석)
+- **codex 는 AGENTS.md 경유로 leerness 를 자발 준수함 (강한 준수 확인)**: session-workflow/필수 읽기 순서 11개 파일 → handoff → drift check → scan secrets → route → task add → reuse find/impact → 구현 → node --test 실측 → task update(--evidence) → **verify-claim --run-tests 자기검증(테스트 명령 미지정 경고를 보고 --test-cmd 붙여 재검증까지)** → lens code/test → lazy detect → session close. progress-tracker 에 T-0002 done + 실측 증거 기록 확인.
+
+### 수정 (실증에서 발견)
+- **dispatch harness 위임 브리프 자동 접두 (`_harnessBrief`, 안전망)**: codex 준수는 (a) cwd=프로젝트 루트, (b) AGENTS.md 지원 CLI, (c) 자발 준수 3조건 의존 → dispatch 태스크 앞에 4단계 계약(handoff 적재 → task add → evidence 기록+verify-claim → session close)을 자동 접두. 셸 임베드 안전(backtick/달러/쌍따옴표-free). `--raw` 로 원문 위임.
+- **agents bench codex stdin hang (확인, 실버그)**: `codex exec` 는 stdin 이 열린 파이프면 `Reading additional input from stdin...` 에서 EOF 를 무한 대기(라이브 재현 — 40바이트 출력으로 8분+ hang). bench 의 `cp.spawn(..., { shell: true })` 는 기본 stdio pipe 로 stdin 을 닫지 않아 codex 가 항상 타임아웃으로 왜곡됨 → `stdio: ['ignore','pipe','pipe']`. dispatch 안내에도 비대화형 spawn 시 stdin 닫기 경고 추가.
+
+### 검증
+- selftest **266** (신규: `_harnessBrief` 내용/셸-안전 + dispatch 접두 와이어 + bench stdio 가드). full e2e **381/381** (flag-bleed 테스트는 의도 보존형으로 갱신 — 기본: 브리프 뒤 태스크 비오염, --raw: 1.9.435 원형). **npm 배포됨** (사용자 지시, automation token) — 게시본 재실증: selftest 266 + dispatch 브리프/--raw 행위 확인.
+
 ## 1.35.5 — 2026-06-27 — 17th 버그헌트: scan .json5/.jsonc FN + verify-claim git 매칭 정밀도
 
 **비-graph 버그헌트(게시본 1.35.4 후, R-0011)**. Explore 에이전트가 낸 6개 후보를 **맹신 X 재현으로 검증** → 강한 후보 다수가 거짓 판명(멀티라인 시크릿·`test_`고엔트로피 FN은 실제 재현에서 이미 flagged; agent의 `api_secret`↔`secret` 매칭 가정도 word-boundary로 오류), **확정 2건만** 수정.

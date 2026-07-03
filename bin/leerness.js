@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.35.5';
+const VERSION = '1.35.6';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2874,6 +2874,17 @@ function _selfTestCases() {
     { name: '_withLock/_updateRun: lost-update 락(O_EXCL+재진입) + 적용 (UR-0043 외부리뷰 1.9.303)', run: () => { const src = read(__filename); const fnOk = typeof _withLock === 'function' && typeof _sleepSyncMs === 'function' && typeof _updateRun === 'function'; const reentrant = /if \(_heldLocks\.has\(lockPath\)\) return fn\(\)/.test(src); const excl = /fs\.openSync\(lockPath, 'wx'\)/.test(src); const applied = /const id = _withLock\(progressPath\(root\)/.test(src) && /_updateRun\(root, curId/.test(src); return fnOk && reentrant && excl && applied; } },
     { name: 'lib/analyzers: 분석/검증 함수 4종 모듈 단일출처 분리 (UR-0025 1.9.304)', run: () => { const m = require('../lib/analyzers'); return m._evidenceQuality === _evidenceQuality && m._shellGuardAnalyze === _shellGuardAnalyze && m._parseEvidenceStats === _parseEvidenceStats && m._claimFileInGit === _claimFileInGit && !/function _evidenceQuality\(evidence\) \{/.test(read(__filename)) && !/function _shellGuardAnalyze\(cmd, ctx\) \{/.test(read(__filename)); } },
     { name: '17th헌트: _claimFileInGit bare-basename 충돌 차단 + scan .json5/.jsonc 포함 (1.35.5)', run: () => { const a = require('../lib/analyzers'); const collisionFixed = a._claimFileInGit('src/test.js', new Set(['test.js'])) !== true; const forwardOk = a._claimFileInGit('test.js', new Set(['src/test.js'])) === true; const exactOk = a._claimFileInGit('src/a.js', new Set(['src/a.js'])) === true; const nestedReverseOk = a._claimFileInGit('x/src/a.js', new Set(['src/a.js'])) === true; const src = read(__filename); const json5Ext = src.includes("'.js" + "on5'") && src.includes("'.js" + "onc'"); return collisionFixed && forwardOk && exactOk && nestedReverseOk && json5Ext; } },
+    { name: '18th 위임실증: _harnessBrief 계약 브리프(handoff/task/verify-claim/session close, backtick·달러-free) + dispatch 접두 와이어 + bench stdin ignore (1.35.6)', run: () => {
+      // (1) 브리프 내용: 위임 계약 4단계 포함 + 셸 임베드 안전(backtick/달러 금지 — command substitution 차단).
+      const b = _harnessBrief();
+      const briefOk = typeof b === 'string' && b.includes('leerness handoff .') && b.includes('task add') && b.includes('verify-claim') && b.includes('session close') && b.includes('--evidence') && !b.includes('`') && !b.includes('$') && !b.includes('"');
+      // (2) dispatch 와이어: lib/agents.js 가 --raw 옵트아웃으로 브리프를 접두하고, DI 로 _harnessBrief 를 받음.
+      const agentsSrc = read(path.join(__dirname, '..', 'lib', 'agents.js'));
+      const wired = /has\('--raw'\)[\s\S]{0,120}_harnessBrief\(\) \+ task/.test(agentsSrc) && /_harnessBrief,/.test(read(__filename));
+      // (3) bench stdin hang 수정: codex exec 가 열린 stdin 파이프에서 EOF 대기(실측) → spawn stdio ignore.
+      const stdinFixed = agentsSrc.includes("{ shell: true, stdio: ['ignore', 'pipe', 'pipe'] }");
+      return briefOk && wired && stdinFixed;
+    } },
     { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
     { name: 'exit code 일관성: fail()→exitCode 1 행위 + unknown 명령 안내 (UR-0045 / CV-5 행위화 1.9.366)', run: () => { if (typeof fail !== 'function') return false; const saved = process.exitCode; const _w = process.stdout.write; let setOk = false; try { process.stdout.write = () => true; process.exitCode = 0; fail('selftest probe'); setOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } const src = read(__filename); const dispatchOk = /알 수 없는 명령: \$\{cmd\}/.test(src); return setOk && dispatchOk; } },
     { name: 'brief: 프로젝트 청사진 set/show/export + README 개요 섹션 (UR-0055 사용자명시 1.9.307)', run: () => { const src = read(__filename); const fnOk = typeof briefCmd === 'function' && typeof _loadBrief === 'function' && typeof _briefBlueprint === 'function' && _BRIEF_FIELDS.length === 10; const b = { project: 'X', intro: 'i', purpose: 'p', problem: '', features: ['f1', 'f2'], stack: ['s'], architecture: '', users: [], success: [], nonGoals: [], currentState: '' }; const bp = _briefBlueprint(b, VERSION); const bpOk = /Blueprint/.test(bp) && /소개 \(Intro\)/.test(bp) && /f1/.test(bp) && /신규 프로젝트 시작 가이드/.test(bp); const rb = _briefReadmeBlock(b); const rbOk = rb.includes(BRIEF_START) && rb.includes(BRIEF_END) && /프로젝트 개요/.test(rb) && /\*\*목적\*\*/.test(rb); return fnOk && bpOk && rbOk && /if \(cmd === 'brief'\)/.test(src); } },
@@ -12516,6 +12527,14 @@ async function setupAgentsCmd(root, opts = {}) {
 
 // 1.9.152: 단일 agent dispatch 명령 빌더 — agents dispatch (단일) + agents multi (복수) 가 공유
 // 1.9.270: model 인자 추가 — 역할(roles) 기반 dispatch 시 provider 별 모델 플래그 주입 (없으면 기존 동작 그대로).
+// 1.35.6 (18th 위임실증): 위임 프롬프트 harness 계약 브리프 — dispatch 태스크 앞에 접두.
+//   실증(2026-07-02, codex 0.141): AGENTS.md 로드 시 codex 는 handoff→task add→verify-claim→session close 를 자발 준수(79 exec 재현).
+//   단 cwd 가 프로젝트 루트가 아니거나 AGENTS.md 미지원 CLI 면 계약 미전달 → 프롬프트 접두가 안전망.
+//   셸 명령 문자열에 임베드되므로 backtick/달러 금지 (command substitution/변수 확장 방지) — 인용은 작은따옴표만.
+function _harnessBrief() {
+  return "[leerness 위임 프로토콜] 시작: 'leerness handoff .' 로 컨텍스트/active rules 적재 후 'leerness task add' 로 이 작업 등록. 완료 전: evidence(수정 파일 경로 + 실제 테스트 결과)를 'leerness task update <T-ID> --status done --evidence ...' 로 기록하고 'leerness verify-claim <T-ID> --run-tests' 로 자기검증. 종료: 'leerness session close .' 실행. --- 작업: ";
+}
+
 function _dispatchCommand(agentId, task, writeMode, model) {
   const q = String(task || '').replace(/"/g, '\\"');
   const m = model ? String(model).replace(/"/g, '') : '';
@@ -12535,7 +12554,7 @@ function _dispatchCommand(agentId, task, writeMode, model) {
 
 const _agents = require('../lib/agents');
 // 1.9.424 (UR-0025/UR-0125 큰 핸들러 모듈화 9번째): agentsCmd → lib/agents.js (DI 위임, rest→array)
-function agentsCmd(root, sub, ...args) { return _agents.agentsCmd(root, sub, args, { VERSION, has, arg, _agentSlashHint, _allProviders, _checkAgent, _cliChat, _dispatchCommand, _loadEnvFile, _normalizeRole, _policyEnforce, _readUserProviders, _recommendAgent, _recordRun, _resolveRole, _shellQuoteArg, lessonsPath, taskLogPath }); }
+function agentsCmd(root, sub, ...args) { return _agents.agentsCmd(root, sub, args, { VERSION, has, arg, _agentSlashHint, _allProviders, _checkAgent, _cliChat, _dispatchCommand, _harnessBrief, _loadEnvFile, _normalizeRole, _policyEnforce, _readUserProviders, _recommendAgent, _recordRun, _resolveRole, _shellQuoteArg, lessonsPath, taskLogPath }); }
 
 function personaCmd(root, sub, idOrName, ...rest) {
   root = absRoot(root || process.cwd());
