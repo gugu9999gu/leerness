@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.35.7 — 2026-07-03 — 19th GPT5.5pro 평가: verify-claim declared-pass 부풀림 게이팅 + spec 리포터 파싱 + json ok/reasons (UR-0013)
+
+**웹 GPT 5.5 Pro 확장의 독립 평가보고서(1.35.6 게시본 대상) 검토 라운드**. 맹신 X 재현 결과 보고서의 헤드라인 버그가 **3경로 전부 실재** — 원인 분석의 소스 위치까지 정확했음. 검토 중 추가 발견 2건(자기모순 출력 + Node v26 파서 FN)도 함께 수정.
+
+### 확정 버그 (게시본 1.35.6 재현)
+- **declared-pass mismatch 미게이팅 (P1)**: evidence 주장 "3/3 passed" vs 실행 "2/2" 를 감지·표시("⚠ 불일치")하고도 human/`--json`/`--all` 3경로 모두 **exit 0** — 부풀린 완료 주장이 플래그십을 통과. 게다가 human 최종요약은 불일치 출력 직후 "✓ evidence 주장이 실제 파일·테스트·실행 결과와 일치" **자기모순 표기**.
+- **Node v26 파서 FN (추가발견)**: 신형 Node 는 비-TTY 도 spec 리포터가 기본(`ℹ pass 2`) → 기존 5패턴 전부 미매치 → `parsed=null` 로 mismatch 검사 자체가 조용히 스킵.
+
+### 수정
+- **부풀림 게이팅 (`_declaredPassMismatch`)**: 실행 pass < 주장 pass 면 human `overallFail` + `--json` exit + collect(`--all`/`gate --claims`) `declared-pass-mismatch` reason 3경로 FAIL. **방향성 게이트** — 실행 ≥ 주장(테스트가 늘어난 정상 흐름)은 무벌점(testCountMatch 의 "실측≥주장" 규칙과 동일 철학, 1.18.1식 거짓차단 FP 회피). 완화: `--lenient`. 요약 라벨도 "✗ FAIL (주장이 실행 결과보다 부풀려짐)" 로 자기모순 제거.
+- **`_parseTestStdout` 순수 추출 + spec 리포터 패턴 6**: 기존 5패턴(비율/jest/mocha/tap/pytest) 원형 유지 + node:test spec 리포터(`pass N`/`fail N` 라인-전체 앵커, denom = pass+fail) 신규 — 선두 비단어문자만 허용해 타 러너 프로즈 오탐 차단(테스트명 "pass 2 (1 ms)" 미매치 확인).
+- **단건 `--json` top-level `ok`/`reasons` (평가 개선제안 ②)**: CI 가 verdict 필드를 재조합할 필요 없이 collect 경로와 동일 어휘. exit 는 reasons 기반 단일 판정으로 통합 — ok↔exit 불일치 원천 차단(기존 게이트 동일).
+
+### 검증
+- selftest **267** (신규: 파서 5+스펙 행위 + 게이팅 3경로 와이어 + json ok/reasons). full e2e **382** (신규: 부풀림 exit 1 human/json/--all + spec 파싱 + 정직주장/실행≥주장 무벌점 FP 가드).
+
 ## 1.35.6 — 2026-07-02 — 18th 위임실증: codex-leerness 준수 라이브 검증 + dispatch harness 브리프 + bench stdin hang 수정
 
 **위임 실증 라운드 (사용자 명시: "codex가 leerness를 참조하고 작업을 진행하는지 확인 후 고도화")**. 라이브 재현: leerness init 된 임시 프로젝트에 위임 룰(codex 구현/Claude 검수) 등록 → **leerness 를 전혀 언급하지 않은** 순수 코딩 태스크를 dispatch 레시피 그대로 codex(0.141)에 위임.

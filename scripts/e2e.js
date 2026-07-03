@@ -6818,5 +6818,43 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.35.7 (UR-0013, GPT5.5pro 평가): declared-pass 부풀림 게이팅 — 주장(3/3) vs 실행(2/2) → exit 1 (human/--json/--all 3경로) + spec 리포터 파싱(패턴 6) + 실행≥주장 무벌점.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dpm-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'src', 'x.js'), 'module.exports = { f: () => 1 };\n');
+    fs.writeFileSync(path.join(d, 'x.test.js'), 'test();\ntest();\n');
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'dpm', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    cp.spawnSync(process.execPath, [CLI, 'task', 'update', 'T-0002', '--status', 'done', '--evidence', 'src/x.js implemented, x.test.js added; 3/3 passed', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    // (1) 부풀림(주장 3/3, 실행 2/2 — jest 형식 echo): human exit 1 + FAIL 라벨
+    const r1 = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--run-tests', '--test-cmd', 'echo Tests: 2 passed, 2 total', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const inflatedFails = r1.status === 1 && /부풀려짐|inflated/.test(r1.stdout);
+    // (2) --json: top-level ok=false + reasons 에 declared-pass-mismatch + verdict 필드 유지
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--run-tests', '--test-cmd', 'echo Tests: 2 passed, 2 total', '--json', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    let jsonOk = false; try { const j = JSON.parse(r2.stdout); jsonOk = r2.status === 1 && j.ok === false && j.reasons.includes('declared-pass-mismatch') && j.verdict.declaredPassMatches === false; } catch {}
+    // (3) --all collect: 동일 reason 으로 집계 실패
+    const r3 = cp.spawnSync(process.execPath, [CLI, 'verify-claim', '--all', '--run-tests', '--test-cmd', 'echo Tests: 2 passed, 2 total', '--json', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    let allOk = false; try { const j3 = JSON.parse(r3.stdout); const e3 = (j3.results || []).find(x => x.id === 'T-0002'); allOk = r3.status === 1 && e3 && e3.ok === false && e3.reasons.includes('declared-pass-mismatch'); } catch {}
+    // (4) spec 리포터 파싱(신규 패턴 6): 라인-전체 "pass 2" → parsed 2/2 → 부풀림 감지 exit 1
+    const r4 = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--run-tests', '--test-cmd', 'echo pass 2', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const specParsed = r4.status === 1 && /2\/2/.test(r4.stdout);
+    // (5) 정직 주장(2/2 = 실행) → exit 0 (FP 없음) / (6) 실행이 주장보다 많음(주장 2/2, 실행 3/3) → 무벌점 exit 0
+    cp.spawnSync(process.execPath, [CLI, 'task', 'update', 'T-0002', '--status', 'done', '--evidence', 'src/x.js implemented, x.test.js added; 2/2 passed', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const r5 = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--run-tests', '--test-cmd', 'echo Tests: 2 passed, 2 total', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const r6 = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--run-tests', '--test-cmd', 'echo Tests: 3 passed, 3 total', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const truthfulOk = r5.status === 0;
+    const growthOk = r6.status === 0;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = inflatedFails && jsonOk && allOk && specParsed && truthfulOk && growthOk;
+    if (!ok) console.log(`   [dpm 디버그] inflated=${inflatedFails} json=${jsonOk} all=${allOk} spec=${specParsed} truthful=${truthfulOk} growth=${growthOk}`);
+  } catch {}
+  console.log(ok ? '✓ B(1.35.7) UR-0013: declared-pass 부풀림 게이팅(human/json/--all) + spec 리포터 파싱 + 실행≥주장 무벌점' : '✗ declared-pass mismatch 게이팅 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

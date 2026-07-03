@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.35.6';
+const VERSION = '1.35.7';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2885,11 +2885,31 @@ function _selfTestCases() {
       const stdinFixed = agentsSrc.includes("{ shell: true, stdio: ['ignore', 'pipe', 'pipe'] }");
       return briefOk && wired && stdinFixed;
     } },
+    { name: '19th GPT5.5평가 (UR-0013): _parseTestStdout 러너 인식(jest/tap/spec/비율) + declared-pass 부풀림 3경로 게이팅 + json ok/reasons (1.35.7)', run: () => {
+      // (1) 파서 행위: 기존 4형식 보존 + spec 리포터(패턴 6) 신규 — denom = pass + fail.
+      const p = _parseTestStdout;
+      const tap = p('# tests 2\n# pass 2\n# fail 0');
+      const spec = p('ℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\n');
+      const specFail = p('ℹ pass 3\nℹ fail 1\n');
+      const jest = p('Tests: 5 passed, 6 total');
+      const ratio = p('12/12 passed');
+      const parseOk = tap && tap.num === 2 && tap.denom === 2 && spec && spec.num === 2 && spec.denom === 2
+        && specFail && specFail.num === 3 && specFail.denom === 4 && jest && jest.num === 5 && jest.denom === 6
+        && ratio && ratio.num === 12 && p('no test output here') === null && p('  ✓ pass 2 (1 ms) extra') === null;
+      // (2) 게이팅 와이어: 3경로(human overallFail / json reasons / collect reasons) + 방향성(실행 pass < 주장 pass 만 FAIL).
+      const src = read(__filename);
+      const gateWired = /overallFail = [^\n]*_declaredPassMismatch/.test(src)
+        && (src.match(/reasons\.push\('declared-pass-mismatch'\)/g) || []).length === 2
+        && src.includes('runResult.parsed.num < declaredPass.num');
+      // (3) 단건 --json top-level ok/reasons — exit 는 reasons 기반 단일 판정.
+      const jsonOk = src.includes('out.ok = out.reasons.length === 0') && src.includes('if (!out.ok) return process.exit(1)');
+      return parseOk && gateWired && jsonOk;
+    } },
     { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
     { name: 'exit code 일관성: fail()→exitCode 1 행위 + unknown 명령 안내 (UR-0045 / CV-5 행위화 1.9.366)', run: () => { if (typeof fail !== 'function') return false; const saved = process.exitCode; const _w = process.stdout.write; let setOk = false; try { process.stdout.write = () => true; process.exitCode = 0; fail('selftest probe'); setOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } const src = read(__filename); const dispatchOk = /알 수 없는 명령: \$\{cmd\}/.test(src); return setOk && dispatchOk; } },
     { name: 'brief: 프로젝트 청사진 set/show/export + README 개요 섹션 (UR-0055 사용자명시 1.9.307)', run: () => { const src = read(__filename); const fnOk = typeof briefCmd === 'function' && typeof _loadBrief === 'function' && typeof _briefBlueprint === 'function' && _BRIEF_FIELDS.length === 10; const b = { project: 'X', intro: 'i', purpose: 'p', problem: '', features: ['f1', 'f2'], stack: ['s'], architecture: '', users: [], success: [], nonGoals: [], currentState: '' }; const bp = _briefBlueprint(b, VERSION); const bpOk = /Blueprint/.test(bp) && /소개 \(Intro\)/.test(bp) && /f1/.test(bp) && /신규 프로젝트 시작 가이드/.test(bp); const rb = _briefReadmeBlock(b); const rbOk = rb.includes(BRIEF_START) && rb.includes(BRIEF_END) && /프로젝트 개요/.test(rb) && /\*\*목적\*\*/.test(rb); return fnOk && bpOk && rbOk && /if \(cmd === 'brief'\)/.test(src); } },
     { name: 'brief 2단계: update --direction 이력 + MCP leerness_brief + context 통합 (UR-0055 1.9.308)', run: () => { const src = read(__filename); const b = { project: 'X', intro: '', purpose: '', problem: '', features: [], stack: [], architecture: '', users: [], success: [], nonGoals: [], currentState: '', directionHistory: ['2026-06-04: 확대'] }; const bpOk = /개발 방향 이력/.test(_briefBlueprint(b, VERSION)) && /최근 개발 방향 변경/.test(_briefReadmeBlock(b)); const histWired = /sub === 'update'/.test(src) && /brief\.directionHistory \|\| \[\]\), `\$\{today\(\)\}/.test(src); const mcpOk = require('../lib/mcp-tools').some(t => t.name === 'leerness_brief'); const ctxOk = /brief: \{ intro:/.test(src); return bpOk && histWired && mcpOk && ctxOk; } },
-    { name: 'verify-claim: done 주장 evidence 기본강제 + --lenient + MCP/json 도달 (UR-0048 설치리뷰 critical 1.9.309)', run: () => { const src = read(__filename); const def = /const mustHaveEvidence = !has\('--lenient'\) && \(isDoneClaim \|\| has\('--require-evidence'\)\)/.test(src); const threshold = /has\('--require-evidence'\) \? evq\.ok : \(evq\.hasFile \|\| evq\.hasTest \|\| evq\.hasLog\)/.test(src); const jsonWired = /evidenceComplete:/.test(src) && /!evidenceQualityOk[^\n]*\) return process\.exit\(1\)/.test(src); const mcpLenient = !!require('../lib/mcp-tools').find(t => t.name === 'leerness_verify_claim').inputSchema.properties.lenient; return def && threshold && jsonWired && mcpLenient; } },
+    { name: 'verify-claim: done 주장 evidence 기본강제 + --lenient + MCP/json 도달 (UR-0048 설치리뷰 critical 1.9.309)', run: () => { const src = read(__filename); const def = /const mustHaveEvidence = !has\('--lenient'\) && \(isDoneClaim \|\| has\('--require-evidence'\)\)/.test(src); const threshold = /has\('--require-evidence'\) \? evq\.ok : \(evq\.hasFile \|\| evq\.hasTest \|\| evq\.hasLog\)/.test(src); const jsonWired = /evidenceComplete:/.test(src) && /if \(!evidenceQualityOk\) out\.reasons\.push\('evidence-incomplete'\)/.test(src) && /if \(!out\.ok\) return process\.exit\(1\)/.test(src); /* 1.35.7: reasons 기반 단일 exit 재배선(의도 동일 — evidence 게이트가 json exit 도달) */ const mcpLenient = !!require('../lib/mcp-tools').find(t => t.name === 'leerness_verify_claim').inputSchema.properties.lenient; return def && threshold && jsonWired && mcpLenient; } },
     { name: '입력 스키마 검증: task status/rule trigger 무효값 거부 + every-round 보존 (UR-0046 설치리뷰 1.9.310)', run: () => { const src = read(__filename); const sets = TASK_STATUSES.has('done') && TASK_STATUSES.has('in-progress') && !TASK_STATUSES.has('nonsense') && RULE_TRIGGERS.has('every-round') && RULE_TRIGGERS.has('every-update') && !RULE_TRIGGERS.has('not-a-trigger'); const helper = typeof _validateChoice === 'function' && _validateChoice('done', TASK_STATUSES, 'x') === true; const wired = /_validateChoice\(arg\('--status', null\), TASK_STATUSES/.test(src) && /_validateChoice\(trigger, RULE_TRIGGERS/.test(src); return sets && helper && wired; } },
     { name: 'init 가드: 미초기화 write 차단 + 다중마커 판별 + --force 우회 (UR-0047 설치리뷰 1.9.311)', run: () => { const src = read(__filename); const fnOk = typeof _isInitialized === 'function' && typeof _requireInit === 'function'; const _fix = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_initfix_')); let liveOk = false; try { fs.writeFileSync(path.join(_fix, 'AGENTS.md'), 'x'); liveOk = _isInitialized(_fix) === true; } finally { try { fs.rmSync(_fix, { recursive: true, force: true }); } catch {} } const emptyOk = _isInitialized(path.join(os.tmpdir(), '__leerness_noinit_marker__')) === false; const wired = ["task add", "task update", "plan add", "decision add", "rule add", "lesson save", "brief set"].every(l => src.includes(`_requireInit(root, '${l}')`)) && !src.includes("_requireInit(root, 'state " + "start')"); const force = /if \(_isInitialized\(root\) \|\| has\('--force'\)\) return true/.test(src); return fnOk && liveOk && emptyOk && wired && force; } },
     { name: 'secret 스캐너 현대 키: OpenAI proj/svcacct·Anthropic api03(_)·GitHub 변종·Stripe·npm 검출 + 오탐 가드 (UR-0050 설치리뷰 1.9.312)', run: () => { const hit = (s) => SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const named = (s, nm) => SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s) && p.name === nm; }); const A = 'A'.repeat(40); const projKey = 'sk-' + 'proj-' + A + '_' + A; const svcKey = 'sk-' + 'svcacct-' + A; const antKey = 'sk-' + 'ant-api03-' + A + '_' + A; const ghoKey = 'gho_' + 'a1B2'.repeat(9); const stripeKey = 'sk_' + 'live_' + A; const npmKey = 'npm_' + 'a1B2'.repeat(9); const asiaKey = 'ASIA' + 'ABCD1234EFGH5678'; const legacy = 'sk-' + A; const hits = hit(projKey) && hit(svcKey) && hit(antKey) && hit(ghoKey) && hit(stripeKey) && hit(npmKey) && hit(asiaKey) && hit(legacy); const names = named(projKey, 'OpenAI project/service key') && named(antKey, 'Anthropic API key') && named(stripeKey, 'Stripe secret key') && named(npmKey, 'npm token'); const clean = !hit('const userName = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return hits && names && clean; } },
@@ -10438,6 +10458,37 @@ function _vcImplIsEmpty(body) {
   return residue === '';                                                     // 의미 토큰이 하나도 안 남으면 스텁
 }
 
+// 1.35.7 (UR-0013, GPT5.5pro 평가): --run-tests stdout 파서 순수 추출 — selftest 단위검증 가능 + spec 리포터 인식.
+//   패턴 1~5는 1.9.20/UR-0045 원형 그대로, 6(node:test spec 리포터 "pass N"/"fail N" 라인)만 신규.
+//   추가발견 배경: Node v26 은 비-TTY 에서도 spec 리포터가 기본 → TAP "# pass N" 이 없어 parsed=null,
+//   declared-pass 불일치 검사가 조용히 스킵됐음. 라인-전체 앵커(선두 비단어문자만 허용)로 타 러너 프로즈 오탐 차단.
+function _parseTestStdout(out) {
+  out = String(out || '');
+  // 1) X/Y passing|passed|pass|통과
+  const m = out.match(/(\d+)\s*\/\s*(\d+)\s*(?:passed|통과|pass|passing)/i);
+  if (m) return { num: parseInt(m[1], 10), denom: parseInt(m[2], 10) };
+  // 2) jest: "Tests: N passed, M total" — 통과 + 총
+  const m2 = out.match(/Tests?:\s*(?:\d+\s*failed,\s*)?(\d+)\s*passed(?:,\s*(\d+)\s*total)?/i);
+  if (m2) return { num: parseInt(m2[1], 10), denom: parseInt(m2[2] || m2[1], 10) };
+  // 3) mocha: "N passing" — 단독 패턴이면 total = passing
+  const m3 = out.match(/^\s*(\d+)\s+passing\b/im);
+  if (m3) return { num: parseInt(m3[1], 10), denom: parseInt(m3[1], 10) };
+  // 4) tap: "# pass N"
+  const m4 = out.match(/#\s*pass\s+(\d+)/i);
+  if (m4) return { num: parseInt(m4[1], 10), denom: parseInt(m4[1], 10) };
+  // 5) pytest: "N passed in 0.12s" (UR-0045 — 파이썬 러너 출력 인식)
+  const m5 = out.match(/(\d+)\s+passed\b/i);
+  if (m5) return { num: parseInt(m5[1], 10), denom: parseInt(m5[1], 10) };
+  // 6) node:test spec 리포터: "ℹ pass 2" / "ℹ fail 0" — denom = pass + fail (fail 라인 없으면 0)
+  const mp6 = out.match(/^[^\w\r\n]*pass\s+(\d+)\s*$/im);
+  if (mp6) {
+    const mf6 = out.match(/^[^\w\r\n]*fail\s+(\d+)\s*$/im);
+    const p6 = parseInt(mp6[1], 10);
+    return { num: p6, denom: p6 + (mf6 ? parseInt(mf6[1], 10) : 0) };
+  }
+  return null;
+}
+
 function verifyClaimCmd(root, taskId, opts = {}) {
   root = absRoot(root);
   const _j = has('--json');  // 1.9.400 (7번째 버그헌트 P1-B, UR-0105): --json 에러도 구조화
@@ -10578,31 +10629,8 @@ function verifyClaimCmd(root, taskId, opts = {}) {
           runResult = { skipped: true, reason: `테스트 명령 차단(${r.error}) — '${testCmd}' 실행 불가 (불일치 판정 아님). leerness permissions set extended 또는 allowList 에 추가 권장` };
         } else {
         const out = (r.stdout || '') + (r.stderr || '');
-        // 1.9.20: 파싱 패턴 확장 — 한국어 + jest/mocha/tap/vitest
-        let parsed = null;
-        // 1) X/Y passing|passed|pass|통과
-        let m = out.match(/(\d+)\s*\/\s*(\d+)\s*(?:passed|통과|pass|passing)/i);
-        if (m) parsed = { num: parseInt(m[1], 10), denom: parseInt(m[2], 10) };
-        // 2) jest: "Tests: N passed, M total" — 통과 + 총
-        if (!parsed) {
-          const m2 = out.match(/Tests?:\s*(?:\d+\s*failed,\s*)?(\d+)\s*passed(?:,\s*(\d+)\s*total)?/i);
-          if (m2) parsed = { num: parseInt(m2[1], 10), denom: parseInt(m2[2] || m2[1], 10) };
-        }
-        // 3) mocha: "N passing" — 단독 패턴이면 total = passing
-        if (!parsed) {
-          const m3 = out.match(/^\s*(\d+)\s+passing\b/im);
-          if (m3) parsed = { num: parseInt(m3[1], 10), denom: parseInt(m3[1], 10) };
-        }
-        // 4) tap: "# pass N" 또는 "ok N"
-        if (!parsed) {
-          const m4 = out.match(/#\s*pass\s+(\d+)/i);
-          if (m4) parsed = { num: parseInt(m4[1], 10), denom: parseInt(m4[1], 10) };
-        }
-        // 5) pytest: "N passed in 0.12s" (UR-0045 — 파이썬 러너 출력 인식)
-        if (!parsed) {
-          const m5 = out.match(/(\d+)\s+passed\b/i);
-          if (m5) parsed = { num: parseInt(m5[1], 10), denom: parseInt(m5[1], 10) };
-        }
+        // 1.9.20 패턴 1~5 + 1.35.7 spec 리포터(패턴 6) — _parseTestStdout 순수 함수로 추출 (UR-0013, selftest 단위검증)
+        const parsed = _parseTestStdout(out);
         runResult = {
           skipped: false,
           cmd: testCmd,
@@ -10642,6 +10670,11 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   const gitStrongMismatch = gitApplicable && claimedInGit.length === 0;  // 변경 있는데 주장 파일이 git 변경에 전무
   // 1.11.2 (UR-0175): git strongMismatch 는 기본 게이트에서 제외(advisory) — 커밋 후 검증(정상 흐름)에서 커밋된 파일이 working-tree 변경에 없어 false-fail 하므로. --strict-claims 시에만 FAIL 기여. 기본 게이트는 신뢰도 높은 optimism(claimsConsistent)이 담당.
   const gitClaimOk = !(has('--strict-claims') && gitStrongMismatch);
+  // 1.35.7 (UR-0013, GPT5.5pro 평가 확정버그): declared-pass 부풀림 게이팅 — 주장 비율(예: 3/3)의 pass 가 실행 pass(예: 2)보다 크면 FAIL.
+  //   이전: 3경로(human overallFail / --json exit / collect reasons) 모두 불일치를 감지·표시만 하고 exit 0 — 부풀린 주장이 플래그십을 통과 + 최종요약은 "일치 ✓" 자기모순.
+  //   주장 개수("N개")는 이미 게이팅(testCountMatch)되는데 비율 주장("N/M")만 안 되던 내부 비일관성 해소.
+  //   방향성 게이트(실행 pass ≥ 주장 pass 면 통과) — 테스트가 늘어난 정상 흐름을 벌하지 않음(testCountMatch 의 실측≥주장 규칙과 동일 철학). 완화: --lenient.
+  const _declaredPassMismatch = !lenient && !!(runResult && !runResult.skipped && runResult.parsed && declaredPass && runResult.parsed.num < declaredPass.num);
 
   // 1.33.2 (verify-claim --all): 집계 모드는 렌더/exit 없이 verdict 만 반환. 게이팅 부울은 아래 --json/human 경로와 동일 계산을 공유(분기 없음).
   if (opts.collect) {
@@ -10656,6 +10689,7 @@ function verifyClaimCmd(root, taskId, opts = {}) {
     if (claimsChecked && stubFiles.length > 0) reasons.push('stub-impl');
     if (has('--strict-claims') && testLinkOk === false) reasons.push('test-impl-unlinked');
     if (_runFail) reasons.push('tests-failed');
+    if (_declaredPassMismatch) reasons.push('declared-pass-mismatch');  // 1.35.7 (UR-0013): --all/gate --claims 도 부풀림 게이팅
     return { id: taskId, request: row.request, status: row.status, ok: reasons.length === 0, reasons };
   }
 
@@ -10688,10 +10722,21 @@ function verifyClaimCmd(root, taskId, opts = {}) {
         out.verdict.declaredPassMatches = (runResult.parsed.num === declaredPass.num && runResult.parsed.denom === declaredPass.denom);
       }
     }
+    // 1.35.7 (UR-0013 GPT5.5평가 개선②): top-level ok/reasons — CI 가 verdict 필드를 재조합하지 않아도 되도록 collect 경로와 동일 어휘.
+    //   exit 는 reasons 기반 단일 판정(ok↔exit 불일치 원천 차단) — 기존 게이트(1.11.2/1.17.3/1.17.4) 동일 + declared-pass-mismatch 추가.
+    out.reasons = [];
+    if (!filesAllExist) out.reasons.push('files-missing');
+    if (out.verdict.testCountMatch === false) out.reasons.push('test-count-short');
+    if (!evidenceQualityOk) out.reasons.push('evidence-incomplete');
+    if (claimsChecked && !strictOk) out.reasons.push('optimism/honesty');
+    if (!gitClaimOk) out.reasons.push('git-mismatch');
+    if (claimsChecked && stubFiles.length > 0) out.reasons.push('stub-impl');
+    if (has('--strict-claims') && testLinkOk === false) out.reasons.push('test-impl-unlinked');
+    if (runResult && !runResult.skipped && !runResult.allPassed) out.reasons.push('tests-failed');
+    if (_declaredPassMismatch) out.reasons.push('declared-pass-mismatch');
+    out.ok = out.reasons.length === 0;
     log(JSON.stringify(out, null, 2));
-    if (runResult && !runResult.skipped && !runResult.allPassed) return process.exit(1);
-    // 1.11.2 (UR-0175): --json 도 optimism+git 게이팅 — 머신 경로가 허위완료를 통과시키지 않도록(human 경로와 동일).
-    if (!filesAllExist || out.verdict.testCountMatch === false || !evidenceQualityOk || (claimsChecked && !strictOk) || !gitClaimOk || (claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false)) return process.exit(1);  // 1.17.3 (UR-0046): 스텁(done 기본) + 테스트 미연결(strict). 1.17.4 (UR-0047): testCountMatch null(측정불가)은 미기여
+    if (!out.ok) return process.exit(1);
     return;
   }
 
@@ -10746,7 +10791,7 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   if (runResult && !runResult.skipped) {
     // 1.27.1 (13번째 외부리뷰 #3): exit 0 인데 테스트 비율을 못 파싱한 경우(예: 비-테스트 --test-cmd)를 '✓ all passed' 로 거짓표기하지 않음 — '실행됨, 테스트 수 미확인' 으로 정직 표기(판정/exit 불변 → 이색 테스트러너 FP 없음).
     log(`  - ${runResult.cmd || 'npm test'} ${t('실행', 'run')}: ${runTestsOk ? (runResult.parsed ? '✓ all passed' : t('✓ 실행됨 (exit 0) — 테스트 수 미확인', '✓ ran (exit 0) — test count unconfirmed')) : '✗ FAIL'}`);
-    if (declaredPass) log(`  - ${t('주장과 실행 결과 일치', 'claimed matches run')}: ${declaredPassMatchesActual ? '✓ pass' : t('⚠ 다름', '⚠ differs')}`);
+    if (declaredPass) log(`  - ${t('주장과 실행 결과 일치', 'claimed matches run')}: ${declaredPassMatchesActual ? '✓ pass' : (_declaredPassMismatch ? t('✗ FAIL (주장이 실행 결과보다 부풀려짐)', '✗ FAIL (claim inflated vs run)') : t('⚠ 다름 (실행 ≥ 주장 — pass)', '⚠ differs (run ≥ claimed — pass)'))}`);  // 1.35.7 (UR-0013): 자기모순 표기 제거 — 부풀림은 FAIL 라벨
   }
   // 1.11.2 (UR-0175): optimism+정직성 — done 주장은 기본 게이팅(claimsChecked). 완화: --lenient.
   if (claimsChecked) {
@@ -10784,7 +10829,7 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   } else if (testLinkOk === true && claimsChecked) {
     log(`  - ${t('테스트-구현 연결', 'test-impl link')}: ${t('✓ pass (테스트가 구현을 참조)', '✓ pass (test references the impl)')}`);
   }
-  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk || (claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false);
+  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk || (claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false) || _declaredPassMismatch;  // 1.35.7 (UR-0013): declared-pass 부풀림 게이팅
   // 1.9.287: 정직한 한계 고지 — 테스트 통과 ≠ 의미적 구현 정확성
   if (claimsChecked || mustHaveEvidence) {
     log('');
