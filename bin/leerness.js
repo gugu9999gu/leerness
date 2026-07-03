@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.35.8';
+const VERSION = '1.35.9';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2915,6 +2915,15 @@ function _selfTestCases() {
       const recipeOk = /gitleaks\/gitleaks-action/.test(readme) && /test:fast/.test(readme);
       const advisoryOk = /pair with a dedicated scanner \(gitleaks\/trufflehog\)/.test(read(__filename));
       return managedOk && recipeOk && advisoryOk;
+    } },
+    { name: '자체 적대적 FP 헌트 (1.35.9): declared-pass 게이트는 완전-통과(N/N) 주장만 — 부분 비율(비-테스트) 오탐 차단 + 완전-통과 부풀림 무회귀', run: () => {
+      const src = read(__filename);
+      // 게이트가 _declaredFullPass(num===denom) 조건에 종속 — 부분 비율(N<M)은 게이팅 제외.
+      const fullPassGuard = src.includes('const _declaredFullPass = !!(declaredPass && declaredPass.num === declaredPass.denom);')
+        && /_declaredPassMismatch = !lenient && _declaredFullPass &&/.test(src);
+      // 표시 라벨은 부분 비율을 advisory(게이트 제외)로 정직 표기 — 실행<주장인데 "실행 ≥ 주장" 오표기 안 함.
+      const honestLabel = src.includes('부분 비율 — advisory, 게이트 제외') && src.includes('partial ratio — advisory, not gated');
+      return fullPassGuard && honestLabel;
     } },
     { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
     { name: 'exit code 일관성: fail()→exitCode 1 행위 + unknown 명령 안내 (UR-0045 / CV-5 행위화 1.9.366)', run: () => { if (typeof fail !== 'function') return false; const saved = process.exitCode; const _w = process.stdout.write; let setOk = false; try { process.stdout.write = () => true; process.exitCode = 0; fail('selftest probe'); setOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } const src = read(__filename); const dispatchOk = /알 수 없는 명령: \$\{cmd\}/.test(src); return setOk && dispatchOk; } },
@@ -10689,7 +10698,13 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   //   이전: 3경로(human overallFail / --json exit / collect reasons) 모두 불일치를 감지·표시만 하고 exit 0 — 부풀린 주장이 플래그십을 통과 + 최종요약은 "일치 ✓" 자기모순.
   //   주장 개수("N개")는 이미 게이팅(testCountMatch)되는데 비율 주장("N/M")만 안 되던 내부 비일관성 해소.
   //   방향성 게이트(실행 pass ≥ 주장 pass 면 통과) — 테스트가 늘어난 정상 흐름을 벌하지 않음(testCountMatch 의 실측≥주장 규칙과 동일 철학). 완화: --lenient.
-  const _declaredPassMismatch = !lenient && !!(runResult && !runResult.skipped && runResult.parsed && declaredPass && runResult.parsed.num < declaredPass.num);
+  // 1.35.9 (자체 적대적 FP 헌트): declared-pass 게이트는 "전부 통과(N/N)" 완료-주장에만 적용.
+  //   FP 재현: evidence "closed 2/5 passing PRs"(비-테스트 부분 비율) + 실행 1/1 → 게이트가 truthful 완료를 거짓 거부(exit 1).
+  //   원인: declaredPass 파서는 evidence 어디든 "N/M passing" 을 테스트 주장으로 추출 → 1.35.7 이 이 표시상 모호함을 게이팅으로 승격.
+  //   수정: 위협모델은 거짓 "all green"(N/N) 이므로 완전-통과 주장만 게이팅. 부분 비율(N<M)은 완료-주장이 아니거나 비-테스트 → 제외(표시는 advisory 유지).
+  //   FN 무회귀: 정직한 "8/12 passed" done 의 실제 부분-실행은 allPassed(tests-failed)가 별도로 잡음(이 게이트 불필요).
+  const _declaredFullPass = !!(declaredPass && declaredPass.num === declaredPass.denom);
+  const _declaredPassMismatch = !lenient && _declaredFullPass && !!(runResult && !runResult.skipped && runResult.parsed && runResult.parsed.num < declaredPass.num);
 
   // 1.33.2 (verify-claim --all): 집계 모드는 렌더/exit 없이 verdict 만 반환. 게이팅 부울은 아래 --json/human 경로와 동일 계산을 공유(분기 없음).
   if (opts.collect) {
@@ -10806,7 +10821,14 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   if (runResult && !runResult.skipped) {
     // 1.27.1 (13번째 외부리뷰 #3): exit 0 인데 테스트 비율을 못 파싱한 경우(예: 비-테스트 --test-cmd)를 '✓ all passed' 로 거짓표기하지 않음 — '실행됨, 테스트 수 미확인' 으로 정직 표기(판정/exit 불변 → 이색 테스트러너 FP 없음).
     log(`  - ${runResult.cmd || 'npm test'} ${t('실행', 'run')}: ${runTestsOk ? (runResult.parsed ? '✓ all passed' : t('✓ 실행됨 (exit 0) — 테스트 수 미확인', '✓ ran (exit 0) — test count unconfirmed')) : '✗ FAIL'}`);
-    if (declaredPass) log(`  - ${t('주장과 실행 결과 일치', 'claimed matches run')}: ${declaredPassMatchesActual ? '✓ pass' : (_declaredPassMismatch ? t('✗ FAIL (주장이 실행 결과보다 부풀려짐)', '✗ FAIL (claim inflated vs run)') : t('⚠ 다름 (실행 ≥ 주장 — pass)', '⚠ differs (run ≥ claimed — pass)'))}`);  // 1.35.7 (UR-0013): 자기모순 표기 제거 — 부풀림은 FAIL 라벨
+    if (declaredPass) {  // 1.35.7 (UR-0013): 자기모순 표기 제거 — 부풀림은 FAIL 라벨. 1.35.9: 부분 비율은 advisory(게이트 제외) 정직 표기.
+      let _vsLabel;
+      if (declaredPassMatchesActual) _vsLabel = '✓ pass';
+      else if (_declaredPassMismatch) _vsLabel = t('✗ FAIL (주장이 실행 결과보다 부풀려짐)', '✗ FAIL (claim inflated vs run)');
+      else if (_declaredFullPass) _vsLabel = t('⚠ 다름 (실행 ≥ 주장 — pass)', '⚠ differs (run ≥ claimed — pass)');
+      else _vsLabel = t('⚠ 다름 (부분 비율 — advisory, 게이트 제외)', '⚠ differs (partial ratio — advisory, not gated)');
+      log(`  - ${t('주장과 실행 결과 일치', 'claimed matches run')}: ${_vsLabel}`);
+    }
   }
   // 1.11.2 (UR-0175): optimism+정직성 — done 주장은 기본 게이팅(claimsChecked). 완화: --lenient.
   if (claimsChecked) {

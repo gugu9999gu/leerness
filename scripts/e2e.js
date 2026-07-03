@@ -6848,9 +6848,13 @@ total++;
     const r6 = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--run-tests', '--test-cmd', 'echo Tests: 3 passed, 3 total', '--path', d], { encoding: 'utf8', timeout: 20000 });
     const truthfulOk = r5.status === 0;
     const growthOk = r6.status === 0;
+    // (7) 1.35.9 FP 가드: 비-테스트 부분 비율("2/5 passing PRs") + 실행 1/1 → 게이트 제외(exit 0). 완전-통과 부풀림만 게이팅.
+    cp.spawnSync(process.execPath, [CLI, 'task', 'update', 'T-0002', '--status', 'done', '--evidence', 'src/x.js implemented, x.test.js added; closed 2/5 passing PRs', '--path', d], { encoding: 'utf8', timeout: 15000 });
+    const r7 = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--run-tests', '--test-cmd', 'echo 1 passing', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const partialRatioFpOk = r7.status === 0;  // 부분 비율은 게이팅 안 함(오탐 차단)
     fs.rmSync(d, { recursive: true, force: true });
-    ok = inflatedFails && jsonOk && allOk && specParsed && truthfulOk && growthOk;
-    if (!ok) console.log(`   [dpm 디버그] inflated=${inflatedFails} json=${jsonOk} all=${allOk} spec=${specParsed} truthful=${truthfulOk} growth=${growthOk}`);
+    ok = inflatedFails && jsonOk && allOk && specParsed && truthfulOk && growthOk && partialRatioFpOk;
+    if (!ok) console.log(`   [dpm 디버그] inflated=${inflatedFails} json=${jsonOk} all=${allOk} spec=${specParsed} truthful=${truthfulOk} growth=${growthOk} partialFP=${partialRatioFpOk}`);
   } catch {}
   console.log(ok ? '✓ B(1.35.7) UR-0013: declared-pass 부풀림 게이팅(human/json/--all) + spec 리포터 파싱 + 실행≥주장 무벌점' : '✗ declared-pass mismatch 게이팅 실패');
   if (!ok) failed++;
