@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.35.14 — 2026-07-06 — codex 협업 라운드 ④: scan secrets 적대적 헌트 — 하드코딩 자격증명 FN 2종 수정
+
+**사용자 지시 "codex와 협업" 라운드 ④ — 보안-임계 `scan secrets` 적대적 FP/FN 헌트.** gate 에 임베드된 보안 가드라 FN=시크릿 유출, FP=정직 빌드 파손. codex(gpt-5.5 xhigh)를 독립 헌터로 백그라운드 실행하고, Claude 자체 프로브 매트릭스(24 픽스처)를 로컬 스캐너에 병렬로 돌려 교차. **하드코딩 자격증명 패턴의 고빈도 FN·FP 5종 확정·수정.**
+
+### 확정 수정 (자체 프로브 — FN 2종 + 결합 FP)
+- **FN #1 — 복합 env 키 미탐.** `Hardcoded credential (unquoted)` / `password assignment` 정규식의 선두 `\b` 가 `_` 앞(word-word 경계)에서 안 걸려 **`DB_PASSWORD=` / `REDIS_PASSWORD=` / `JWT_SECRET=` / `MY_API_KEY=` 같은 복합키(.env 관례)를 전부 미탐**. `\b` → `(?<![A-Za-z0-9])` 로 교체 — `_` 만 추가 허용하므로 기존 매칭 완전 보존 + 신규 FP 0.
+- **FN #2 — JSON 따옴표-키 미탐.** quoted 패턴 `keyword\s*[:=]` 이 `"password": "x"` 처럼 **키워드와 `:` 사이의 닫는 따옴표 때문에 JSON 스타일 키를 전부 미탐**(config.json 극히 흔함). 키워드 뒤 `["']?` 추가로 흡수. 이로써 이제 매칭되는 사전 단어 값(`"secret": "required"` / `"password": "hashed"`)이 새 FP 로 노출 → **unquoted 와 동일한 `requireSecretLike` 엔트로피 게이트를 quoted 에도 적용**해 억제(literal 워드리스트 아님 — 일관·비취약. [[lesson-widening-recall-resurfaces-masked-fp]]).
+- **보강 — Slack app-level 토큰.** `xox[baprs]-` 만으론 Socket Mode 의 `xapp-` 토큰 미탐 → `xapp` prefix 추가(Slack 전용이라 FP 0).
+
+### 확정 수정 (codex 독립 헌터 교차 — 재현 후 채택, A/B/C)
+- **A — Django `SECRET_KEY = "…"` 등 미탐 (codex FN#3).** quoted 키워드 목록에 `secret_key`/`access_key`/`access_token`/`auth_token` 이 없어(unquoted 목록엔 있었음) `SECRET_KEY`/`ACCESS_TOKEN` 따옴표 대입을 미탐. quoted 목록을 unquoted 와 일관되게 확장(`secret_key` 를 `secret` 앞 longer-first). requireSecretLike + placeholder 가드 유지라 FP-safe.
+- **B — 개인키 변종 미탐 (codex FN#6).** `-----BEGIN (?:RSA|OPENSSH|EC|DSA|PGP )?PRIVATE KEY-----` 이 `ENCRYPTED PRIVATE KEY` / `PGP PRIVATE KEY BLOCK` 을 미탐 → `(?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?` 로 일반화. `PUBLIC KEY`/`CERTIFICATE` 는 'PRIVATE KEY' 없어 미매치(FP 0).
+- **C — 로컬-개발 DB 기본자격 FP (codex FP#1).** `postgres://postgres:postgres@localhost` / `amqp://guest:guest@`(docker-compose 극히 흔함)의 기본 비번을 실키로 오탐(빌드 파손) → placeholder 정확-일치 목록에 `postgres/postgresql/guest/mysql/mongodb/mongo/redis` 추가(`root/admin` 과 동일 성격, 정확-일치만이라 실 비번엔 FN 0).
+
+### 맹신 X 교차검증 / 의도적 미수정 (보안-우선 · 별도 헌트)
+- 재현으로 by-design 확정(미수정): 저엔트로피 all-lowercase 무-digit 값(unquoted 정책상 스킵) · JWT/Bearer 문서 샘플 토큰 · 코드 var-ref(digit 접미) — **커밋된 샘플 토큰 플래그가 보안-우선 관점에서 정당**, 억제 시 실키 FN 위험 → conservative 유지([[lesson-adversarial-harden-heuristic]]).
+- 백로그(별도 헌트 필요, FP 위험): unquoted 값의 특수문자(`DB_PASSWORD=Tr0ub4dor&3`, charset) · YAML `password: val`(`:` 무따옴표) · 추가 프로바이더 패턴(Stripe `whsec_`/Google refresh) · Firebase 공개 API 키(정책의존).
+
+### 검증
+- selftest **273** (신규 행위검사: 복합/JSON키·Slack xapp·사전단어 FP 억제 + A/B/C — 복합키·Django·개인키변종 탐지 AND DB기본자격·PUBLIC KEY clean 을 한 케이스에 고정). e2e-core **16** (신규 CLI 픽스처 6: 복합키/JSON키/사전단어 + Django/ENCRYPTED-PK/DB기본자격). full e2e **384**. 게시본 1.35.14 재실증.
+
 ## 1.35.13 — 2026-07-06 — 테스트 3-tier: test:core 중간 티어(플래그십 행위 스위트) 신설 (UR-0014)
 
 **사용자 지시 "codex와 협업" 라운드 ③ — e2e 3-tier 분리.** GPT5.5 평가가 "npm test 가 300초 내 미완료"라 지적한 후속. 전체 e2e.js(384 케이스, ~12분)를 리스크 있게 쪼개는 대신, **누락된 중간 티어를 별도 파일로 신설**(릴리스 게이트 무손상).

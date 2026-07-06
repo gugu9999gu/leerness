@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.35.13';
+const VERSION = '1.35.14';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2950,6 +2950,39 @@ function _selfTestCases() {
       const fenceExcluded = !p._parseContractSpec('# S\n```js\nfunction helper(){}\n```\n').declared.includes('helper');  // #9: 펜스 예제 제외
       const realDecl = p._parseContractSpec('function realFn(){}\n').declared.includes('realFn');        // 회귀: 펜스 밖 선언 유지
       return bracket && dotStill && fenceExcluded && realDecl;
+    } },
+    { name: '시크릿 스캐너 FN 헌트 (1.35.14): 하드코딩 자격증명 복합/JSON키 탐지 + Slack xapp + 사전단어 FP 억제 — 행위검사', run: () => {
+      const pats = require('../lib/catalogs').SECRET_PATTERNS;
+      const pu = require('../lib/pure-utils');
+      // collector 와 동일한 per-pattern 판정(placeholder + requireSecretLike)을 재현.
+      const hit = (text) => {
+        const names = new Set();
+        for (const { name, re, valueGroup, requireSecretLike } of pats) {
+          re.lastIndex = 0; let m;
+          while ((m = re.exec(text))) {
+            const val = (valueGroup != null) ? m[valueGroup] : m[0];
+            if (re.lastIndex === m.index) re.lastIndex++;
+            if (pu._isPlaceholderSecret(val)) continue;
+            if (valueGroup != null && requireSecretLike && !pu._looksSecretLike(val)) continue;
+            names.add(name);
+          }
+        }
+        return names;
+      };
+      const compoundEnv = hit('DB_PASSWORD=Sup3rSecretValue99').has('Hardcoded credential (unquoted)');            // FN #1: 복합 env 키 (선두 \b→lookbehind)
+      const jsonKey = hit('{ "db_password": "Xk9mP2qL7vR4nT8wZ0" }').has('Hardcoded password assignment');         // FN #2: JSON 따옴표-키 (["']? 흡수)
+      const camelKey = hit('apiKey: "s3cretApiValue99"').has('Hardcoded password assignment');                     // camelCase ci 키워드
+      const slackApp = hit('SLACK=xapp-1-A04ABCDEFGH-1234567890123-abcdef0123').has('Slack token');               // FN: Slack app-level(xapp-)
+      const dictFP = !hit('{ "secret": "required", "password": "hashed" }').has('Hardcoded password assignment');  // 사전단어 FP 억제(requireSecretLike)
+      const plainStart = hit('password=plainStart1234').has('Hardcoded credential (unquoted)');                    // 회귀: 단순 키 유지
+      // 1.35.14 codex 헌트 A/B/C
+      const djangoKey = hit('SECRET_KEY = "n7zU4lYq8mP2rC5tV0bX9aQ1"').has('Hardcoded password assignment');      // A: Django SECRET_KEY quoted
+      const pkVariants = hit('-----BEGIN ENCRYPTED PRIVATE KEY-----').has('Generic private key')                   // B: ENCRYPTED/PGP BLOCK 변종
+        && hit('-----BEGIN PGP PRIVATE KEY BLOCK-----').has('Generic private key')
+        && !hit('-----BEGIN PUBLIC KEY-----').has('Generic private key');                                          //    안전: PUBLIC KEY 미탐
+      const dbDefaultFP = !hit('postgres://postgres:postgres@localhost/app').has('DB connection string (embedded password)')  // C: 로컬 기본자격 억제
+        && hit('postgres://app:Xk9mP2qL7vR4nT8wZ0@db/app').has('DB connection string (embedded password)');       //    실 비번은 탐지
+      return compoundEnv && jsonKey && camelKey && slackApp && dictFP && plainStart && djangoKey && pkVariants && dbDefaultFP;
     } },
     { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
     { name: 'exit code 일관성: fail()→exitCode 1 행위 + unknown 명령 안내 (UR-0045 / CV-5 행위화 1.9.366)', run: () => { if (typeof fail !== 'function') return false; const saved = process.exitCode; const _w = process.stdout.write; let setOk = false; try { process.stdout.write = () => true; process.exitCode = 0; fail('selftest probe'); setOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } const src = read(__filename); const dispatchOk = /알 수 없는 명령: \$\{cmd\}/.test(src); return setOk && dispatchOk; } },

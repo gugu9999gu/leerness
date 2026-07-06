@@ -68,12 +68,36 @@ console.log('# leerness core (test:core) — flagship behavioral guarantees');
   fs.rmSync(d, { recursive: true, force: true });
 }
 
-// (5) scan secrets: 커밋 시크릿 차단 / 클린 통과
+// (5) scan secrets: 커밋 시크릿 차단 / 클린 통과 + 하드코딩 자격증명 복합/JSON키 FN (1.35.14)
 {
   const d = fresh();
   assert('scan secrets clean → exit 0', run(d, ['scan', 'secrets', '.']).status === 0);
   fs.writeFileSync(path.join(d, 'k.js'), 'const k = "AKIAJQXMP7RZ2KL9WXYZ";\n');
   assert('scan secrets committed key → exit 1', run(d, ['scan', 'secrets', '.']).status === 1);
+  fs.rmSync(path.join(d, 'k.js'), { force: true });
+  // 1.35.14 FN #1: 복합 env 키(DB_PASSWORD=)를 탐지해야 함 (기존 선두 \b 는 '_' 앞에서 미탐)
+  fs.writeFileSync(path.join(d, 'app.env'), 'DB_PASSWORD=Sup3rSecretValue99\n');
+  assert('scan secrets catches compound env key (DB_PASSWORD=) → exit 1', run(d, ['scan', 'secrets', '.']).status === 1);
+  fs.rmSync(path.join(d, 'app.env'), { force: true });
+  // 1.35.14 FN #2: JSON 따옴표-키("db_password": "…")를 탐지해야 함
+  fs.writeFileSync(path.join(d, 'cfg.json'), '{ "db_password": "Xk9mP2qL7vR4nT8wZ0" }\n');
+  assert('scan secrets catches JSON quoted key → exit 1', run(d, ['scan', 'secrets', '.']).status === 1);
+  fs.rmSync(path.join(d, 'cfg.json'), { force: true });
+  // 1.35.14 FP 안전: 사전 단어 값("secret":"required")은 requireSecretLike 로 억제 → clean
+  fs.writeFileSync(path.join(d, 'schema.json'), '{ "secret": "required", "password": "hashed" }\n');
+  assert('scan secrets keeps dictionary-word schema clean → exit 0', run(d, ['scan', 'secrets', '.']).status === 0);
+  fs.rmSync(path.join(d, 'schema.json'), { force: true });
+  // 1.35.14 A: Django SECRET_KEY = "…" 탐지 (quoted 키워드 확장)
+  fs.writeFileSync(path.join(d, 'settings.py'), 'SECRET_KEY = "n7zU4lYq8mP2rC5tV0bX9aQ1"\n');
+  assert('scan secrets catches Django SECRET_KEY → exit 1', run(d, ['scan', 'secrets', '.']).status === 1);
+  fs.rmSync(path.join(d, 'settings.py'), { force: true });
+  // 1.35.14 B: ENCRYPTED PRIVATE KEY 변종 탐지
+  fs.writeFileSync(path.join(d, 'id.key'), '-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIF\n-----END ENCRYPTED PRIVATE KEY-----\n');
+  assert('scan secrets catches ENCRYPTED PRIVATE KEY → exit 1', run(d, ['scan', 'secrets', '.']).status === 1);
+  fs.rmSync(path.join(d, 'id.key'), { force: true });
+  // 1.35.14 C: 로컬-개발 DB 기본자격(postgres:postgres) 은 clean (docker-compose FP 차단)
+  fs.writeFileSync(path.join(d, 'compose.yml'), 'DATABASE_URL: postgres://postgres:postgres@localhost/app\n');
+  assert('scan secrets keeps local DB defaults clean → exit 0', run(d, ['scan', 'secrets', '.']).status === 0);
   fs.rmSync(d, { recursive: true, force: true });
 }
 
