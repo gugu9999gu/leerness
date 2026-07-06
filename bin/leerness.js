@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.35.11';
+const VERSION = '1.35.12';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3823,11 +3823,12 @@ function _selfTestCases() {
         && eq(F([]), [])
         && eq(F(['a.css', 'b.md', 'c.js', 'd.test.js']).length, 2);          // 최대 2개 클러터 방지
     } },
-    { name: 'GPT-5.5 평가 #5 (1.19.1, UR-0009): 클린룸 평가 문서 공개 + 한계 명시 (행위)', run: () => {
+    { name: 'GPT-5.5 평가 #5 (1.19.1, UR-0009) + 정직성 calibration (1.35.12): 클린룸 문서 공개 + 한계 명시 + self-administered 라벨 (행위)', run: () => {
       const dp = path.join(path.dirname(__filename), '..', 'docs', 'clean-room-evaluations.md');
       if (!exists(dp)) return true;  // 패키지에 없으면 스킵(설치본 안전)
       const d = read(dp);
-      return /AI clean-room evaluations/i.test(d) && /heuristic, not semantic/i.test(d) && /npm i leerness@/.test(d);
+      // 1.35.12: 정직성 마커 강화 — clean-room 프레이밍 + heuristic 한계 + self-administered(독립 아님) + 재현 레시피.
+      return /clean-room/i.test(d) && /heuristic, not semantic/i.test(d) && /self-administered/i.test(d) && /npm i leerness@/.test(d);
     } },
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
       const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;

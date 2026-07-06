@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.35.12 — 2026-07-06 — codex 협업 라운드 ②: clean-room 평가 문서 갱신 + codex 정직성 리뷰 8건 반영 (UR-0011)
+
+**사용자 지시 "codex와 협업" 라운드 ② — clean-room 평가 문서 갱신.** `docs/clean-room-evaluations.md` 가 1.19.0(selftest 231)에서 멈춰 stale → 이번 세션 자체 적대적 헌트(verify-claim FP/gate/contract)를 추가하고, codex(gpt-5.5 xhigh)를 **정직성 감사관**으로 병렬 실행해 과장 표현을 교정.
+
+### 갱신
+- 평가를 **"에이전트 클린룸 평가"(behavior-only)** 와 **"메인테이너 자체 적대적 헌트"(self-administered, 가장 덜 독립적)** 로 명확히 구분 — 1.35.9/10/11 헌트를 정직 outcome(FP 1건 발견·수정 / 0 product bug / codex 9건 중 3확정·1환각기각)으로 표에 추가. 한계 섹션에 contract heuristic 한계(UR-0018) + scan secrets 포지셔닝 추가.
+- **codex 정직성 리뷰 8건 전부 반영**(협업 검수 결과): "every evaluation"→"most", "real development"→"development exercises", "Independently"→"Separately", "External reviews"→"maintainer-run(external models≠외부 인간)", "Codex independent review"→"separate Codex review", "converged on 0 bugs"→"0 bugs found in these probes", 그리고 핵심 — "reliably catches ... without false-failing"의 **자기모순 교정**(문서 자신이 1.35.9에서 FP를 찾았으므로 "no false failures"는 보장이 아니라 검사 중인 속성이라 명시).
+
+### 검증
+- selftest **271** (기존 clean-room 문서 가드를 정직성 마커 강화: clean-room + heuristic + **self-administered** + 재현 레시피). full e2e (문서-only 변경, 무영향). 문서 변경이라 런타임 동작 불변.
+
 ## 1.35.11 — 2026-07-06 — codex 협업 contract verify 적대적 헌트: FP 3종 수정 ($ 필드 정규식 + bracket export + 코드펜스 예제)
 
 **사용자 지시 "codex와 협업" 라운드 ① — contract verify 적대적 헌트.** codex(gpt-5.5 xhigh 독립 분석)와 Claude(프로브+맹신X 검수) 병렬로 FN/FP/crash 사냥. codex 9건 제기 → 재현으로 검증: 3건 확정 수정, 3건 by-design/heuristic 한계(백로그), 3건은 이미 수정한 `$` 정규식 계열, 1건은 codex 환각(재현 기각).
