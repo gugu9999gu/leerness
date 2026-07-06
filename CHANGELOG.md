@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.35.13 — 2026-07-06 — 테스트 3-tier: test:core 중간 티어(플래그십 행위 스위트) 신설 (UR-0014)
+
+**사용자 지시 "codex와 협업" 라운드 ③ — e2e 3-tier 분리.** GPT5.5 평가가 "npm test 가 300초 내 미완료"라 지적한 후속. 전체 e2e.js(384 케이스, ~12분)를 리스크 있게 쪼개는 대신, **누락된 중간 티어를 별도 파일로 신설**(릴리스 게이트 무손상).
+
+### 3-tier 확립
+- **`test:fast`** = selftest + `smoke.js` — 명령이 크래시 없이 도는가(clean 프로젝트), <1분. 개발 루프. (기존)
+- **`test:core`** (신규) = selftest + `scripts/e2e-core.js` — 플래그십(verify-claim/gate/contract/scan)이 *적대적* 입력을 실제로 거부하고 정직 입력을 통과시키는가, **10 케이스 ~16초**. pre-commit / 빠른 CI. smoke("명령이 도는가")보다 깊고 full("전부")보다 20배 빠른 "가치제안 작동 확인" 티어.
+- **`test`** = selftest + `e2e.js`(384) — 전체, ~12분. 릴리스 게이트. (기존)
+- 부수: `test:smoke` 가 잘못 `e2e.js`(full)를 가리키던 네이밍 버그 → `smoke.js` 로 정정.
+
+### 검증
+- selftest **272** (신규: 3티어 스크립트 정합 + e2e-core.js 존재 가드). `test:core` 10/10 (~16초). full e2e **384** (무영향 — e2e-core 는 별도 파일). README 기여자 노트를 3티어로 갱신.
+
 ## 1.35.12 — 2026-07-06 — codex 협업 라운드 ②: clean-room 평가 문서 갱신 + codex 정직성 리뷰 8건 반영 (UR-0011)
 
 **사용자 지시 "codex와 협업" 라운드 ② — clean-room 평가 문서 갱신.** `docs/clean-room-evaluations.md` 가 1.19.0(selftest 231)에서 멈춰 stale → 이번 세션 자체 적대적 헌트(verify-claim FP/gate/contract)를 추가하고, codex(gpt-5.5 xhigh)를 **정직성 감사관**으로 병렬 실행해 과장 표현을 교정.

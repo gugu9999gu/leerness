@@ -95,7 +95,7 @@ For secrets, pair the gate with a **dedicated scanner** in the same workflow —
 
 Be honest with yourself before you depend on this: leerness is **early and largely solo-maintained**, developed mostly through autonomous AI rounds — so its own `selftest` + e2e suites are the primary quality signal, and external adoption is still small. Don't make it load-bearing on faith: **pin a version**, and treat the differentiated slice — `verify-claim` + the CI `gate` as a required check — as the part worth relying on.
 
-(Contributor note: `npm test` is the full release gate — selftest + the entire e2e suite, **10+ minutes by design**. For a quick dev loop use `npm run test:fast` — selftest + smoke, under a minute.)
+(Contributor note — three test tiers, fastest to slowest: `npm run test:fast` = selftest + smoke (commands run without crashing, <1 min, dev loop); `npm run test:core` = selftest + a flagship behavioral suite (verify-claim / gate / contract / scan actually reject bad input and pass honest input, ~20 s, pre-commit / quick CI); `npm test` = selftest + the entire e2e suite (**10+ minutes by design**, the release gate).)
 
 The asymmetry is what makes a trial reasonable anyway: MIT, **0 runtime dependencies**, offline-first, and all state is plain files in *your* repo. Lock-in is near zero — if it doesn't earn its place, remove the tool and your `task`/`decision`/`lesson` files stay. (For secret scanning specifically, mature dedicated tools like gitleaks/trufflehog exist — use those if you need a hard guarantee; leerness's `scan secrets` is a convenience guard, not a replacement.)
 
@@ -125,7 +125,7 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.35.12 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.35.13 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
@@ -179,7 +179,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.35.12는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **86개 도구**를 노출:
+Leerness v1.35.13는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **86개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -200,7 +200,7 @@ Leerness v1.35.12는 stdio JSON-RPC MCP server를 내장합니다 — Claude Cod
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **70 라운드 (1.9.40 → 1.35.12)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
+현재 누적: **70 라운드 (1.9.40 → 1.35.13)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
 
 ### 성능 가이드 (1.9.140 측정)
 
@@ -238,6 +238,6 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.35.12: 2026-07-06
+Last synced by Leerness v1.35.13: 2026-07-06
 <!-- leerness:project-readme:end -->
 
