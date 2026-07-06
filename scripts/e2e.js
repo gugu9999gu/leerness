@@ -6469,6 +6469,31 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.35.10 (자체 gate 적대적 헌트): gate 를 "보안 가드레일"로 검증 — 8-프로브 헌트(FP 4 + FN 3 + by-design 1) 결과 제품 결함 0 확인 후, 유일 커버리지 갭(gate 레벨 보안 동작)을 회귀 가드로 고정. 커밋된 실키 → 차단(exit 1, scan secrets step), 정상 .env.example placeholder → 오탐 없이 통과(exit 0). scan-step 리팩터가 가드레일 보안을 조용히 무너뜨리는 회귀 차단.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-gatesec-'));
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'handoff', '', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    // (a) 정상 placeholder(.env.example 교과서) → gate 오탐 없이 통과(exit 0)
+    fs.writeFileSync(path.join(d, '.env.example'), 'DATABASE_URL=postgres://user:password@localhost:5432/db\nAPI_KEY=your-api-key-here\n');
+    const gClean = R(['gate', '.', '--json']);
+    let cleanOk = false; try { const j = JSON.parse(gClean.stdout); cleanOk = gClean.status === 0 && j.ok === true; } catch {}
+    // (b) 커밋된 실 AWS 키(.js) → gate 차단(exit 1) + scan secrets check 실패
+    fs.writeFileSync(path.join(d, 'leak.js'), 'const k = "AKIAJQXMP7RZ2KL9WXYZ";\nmodule.exports = k;\n');
+    const gSecret = R(['gate', '.', '--json']);
+    let secretBlocked = false; try { const j = JSON.parse(gSecret.stdout); const sc = (j.checks || []).find(c => c.name === 'scan secrets'); secretBlocked = gSecret.status === 1 && j.ok === false && sc && sc.ok === false; } catch {}
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = cleanOk && secretBlocked;
+    if (!ok) console.log(`   [gatesec 디버그] cleanExit0=${cleanOk} secretBlocked=${secretBlocked}`);
+  } catch (e) {}
+  console.log(ok ? '✓ B(1.35.10) gate 보안 가드레일: 정상 placeholder 오탐 없이 통과(exit 0) + 커밋된 실키 차단(exit 1, scan secrets step)' : '✗ gate 보안 가드레일 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.430 (10th 외부평가 UR-0130): health 보안 CRITICAL(커밋 시크릿)은 --strict 없이도 exit 1(CI 게이트). 클린은 exit 0.
 total++;
 {

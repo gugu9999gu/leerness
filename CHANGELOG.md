@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.35.10 — 2026-07-06 — 자체 gate 적대적 헌트: 가드레일 검증(제품 결함 0) + 보안 동작 회귀 가드
+
+**verify-claim(1.35.9)에 이어 인접 가드레일 `gate` 를 적대적으로 검증** — README 가 "required CI check 로 만들라"고 권하는 표면이라 FN(거짓완료 PR 통과)/FP(정직한 PR 차단)가 최악. 게시본 1.35.9 에 8-프로브 매트릭스(FP 4: 클린 프로젝트·bare init·placeholder·done+evidence / FN 3: 커밋 시크릿·거짓완료 --claims·필수파일 삭제 / by-design 1) 실행.
+
+### 검증 결과 — **제품 결함 0**
+- FP 4/4 OK(클린 프로젝트/placeholder 모두 통과, 오탐 없음), FN 3/3 OK(시크릿·거짓완료·구조결함 차단). 프로브가 낸 "🚨 FN" 2건은 모두 **프로브 아티팩트**(1건은 문서상 by-design 기본 5체크, 1건은 내 프로브의 `--path` 누락으로 done task 미생성) — 맹신 X 로 3-경로 재현해 제품 정상(gate --claims 는 올바른 셋업에서 거짓완료 차단 확인) 판명. 지난 라운드에 이어 실패 신호를 제품 회귀로 오인하지 않음.
+
+### 회귀 가드 (유일 커버리지 갭)
+- 기존 e2e(B(1.33.3)/B(1.34.1))는 `--claims` 콘텐츠 차원 중심 → gate 를 **보안 가드레일**로 보는 관점(커밋된 실키 차단 / placeholder 오탐 없음)이 gate 레벨 전용 가드가 없었음. e2e B(1.35.10) 추가: 정상 `.env.example` placeholder → 오탐 없이 통과(exit 0), 커밋된 실 AWS 키 → 차단(exit 1, scan secrets step 실패). selftest 에 gate 5체크 조합 고정(verify/audit/scan secrets/encoding/lazy detect + --claims 6번째) — scan-step 리팩터가 가드레일 보안을 조용히 무너뜨리는 회귀 차단.
+
+### 검증
+- selftest **270** (신규: gate 조합 고정). full e2e **383** (신규: gate 보안 가드레일 행위). 8-프로브 매트릭스 게시본 재실증(FP 0/FN 0).
+
 ## 1.35.9 — 2026-07-03 — 자체 적대적 FP 헌트: declared-pass 게이트를 완전-통과(N/N) 주장으로 한정 (1.35.7 후속 하드닝)
 
 **1.35.7 에서 declared-pass 부풀림 게이팅을 넣은 뒤, 그 신규 게이트에 전용 FP/FN 헌트를 직접 돌림**(메모리 교훈: 「휴리스틱 적대적 하드닝 — 배포 전 bypass+FP 헌터」·「게시본 재실증」). 12-프로브 매트릭스(단일/`--json`/`--all`/`gate --claims` × 비율/카운트/spec·tap·jest 리포터/growth/lenient)를 게시본 1.35.8 에 실행 → **bypass(FN) 0, 정상 FP 0**, 단 1건의 진짜 false-positive 발견.
