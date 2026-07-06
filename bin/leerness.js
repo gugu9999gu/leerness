@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.35.10';
+const VERSION = '1.35.11';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2934,6 +2934,14 @@ function _selfTestCases() {
       const has5 = ["step('verify'", "step('audit'", "step('scan secrets'", "step('encoding check'", "step('lazy detect'"].every(s => body.includes(s));
       const claims6 = body.includes("step('verify-claims'") && body.includes("has('--claims')");
       return has5 && claims6;
+    } },
+    { name: '자체 contract 적대적 헌트 + codex 교차 (1.35.11): _parseImplExports bracket(#8) + _parseContractSpec 코드펜스 예제 제외(#9) — FP 2종 행위검사($ 필드 FP는 e2e cvdollar 담당)', run: () => {
+      const p = require('../lib/pure-utils');
+      const bracket = p._parseImplExports('exports["foo"] = function(){};\n').includes('foo');          // #8: bracket export 인식
+      const dotStill = p._parseImplExports('exports.bar = 1;\n').includes('bar');                        // 회귀: dot 유지
+      const fenceExcluded = !p._parseContractSpec('# S\n```js\nfunction helper(){}\n```\n').declared.includes('helper');  // #9: 펜스 예제 제외
+      const realDecl = p._parseContractSpec('function realFn(){}\n').declared.includes('realFn');        // 회귀: 펜스 밖 선언 유지
+      return bracket && dotStill && fenceExcluded && realDecl;
     } },
     { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
     { name: 'exit code 일관성: fail()→exitCode 1 행위 + unknown 명령 안내 (UR-0045 / CV-5 행위화 1.9.366)', run: () => { if (typeof fail !== 'function') return false; const saved = process.exitCode; const _w = process.stdout.write; let setOk = false; try { process.stdout.write = () => true; process.exitCode = 0; fail('selftest probe'); setOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } const src = read(__filename); const dispatchOk = /알 수 없는 명령: \$\{cmd\}/.test(src); return setOk && dispatchOk; } },
@@ -19676,7 +19684,11 @@ function contractVerifyCmd(specPath, implPath) {
   }
   const fieldMissing = [];
   for (const f of fieldSpec) {
-    if (!new RegExp(`\\b${f}\\b`).test(implSrc)) fieldMissing.push(f);
+    // 1.35.11 (자체 contract 적대적 헌트 + codex 교차): 필드명을 raw 로 RegExp 에 넣던 FP 수정.
+    //   식별자에 유효한 `$` 가 정규식에서 앵커로 해석돼 `$scope`/`foo$bar` 같은 실존 필드를 항상 missing 오탐(exit 1) → CI 계약이 compliant impl 을 거짓 차단.
+    //   또 \b 는 비단어문자(`$`)-접두 식별자 앞에서 경계를 못 잡음. → 메타문자 이스케이프 + 식별자-경계 룩어라운드로 교체(Node≥18 lookbehind). 함수 검사는 Set 멤버십이라 무관.
+    const _fe = f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!new RegExp(`(?<![\\w$])${_fe}(?![\\w$])`).test(implSrc)) fieldMissing.push(f);
   }
   // 출력
   if (has('--json')) {

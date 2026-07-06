@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.35.11 — 2026-07-06 — codex 협업 contract verify 적대적 헌트: FP 3종 수정 ($ 필드 정규식 + bracket export + 코드펜스 예제)
+
+**사용자 지시 "codex와 협업" 라운드 ① — contract verify 적대적 헌트.** codex(gpt-5.5 xhigh 독립 분석)와 Claude(프로브+맹신X 검수) 병렬로 FN/FP/crash 사냥. codex 9건 제기 → 재현으로 검증: 3건 확정 수정, 3건 by-design/heuristic 한계(백로그), 3건은 이미 수정한 `$` 정규식 계열, 1건은 codex 환각(재현 기각).
+
+### 확정 FP (재현 확인 → 수정)
+- **① 필드명 `$` 정규식-앵커 오탐 (Claude 발견)**: `## Fields` 필드가 `new RegExp(\`\\b${f}\\b\`)` 로 impl 소스에 grep 되는데 JS 식별자에 유효한 `$` 가 **정규식 앵커로 해석**돼 `$scope`/`foo$bar` 실존 필드를 **항상 missing 오탐(exit 1)** → CI 계약이 compliant impl 거짓 차단. `\b` 도 `$`-접두 식별자 앞에서 경계 못 잡음. → 메타문자 이스케이프 + **식별자-경계 룩어라운드**(`(?<![\w$])x(?![\w$])`, Node≥18)로 교체. (함수 검사는 Set 멤버십이라 무관 — `$init` 정상.)
+- **② bracket export 미인식 (codex #8)**: `exports["foo"] = function(){}` 를 `_parseImplExports` 가 dot 표기만 인식해 미노출 → 실존 함수를 누락 오판. bracket 패턴 추가.
+- **③ 코드펜스 예제를 계약으로 오인 (codex #9)**: spec 의 ```` ```js function helper(){} ``` ```` 예제가 `_parseContractSpec` 에서 declared 로 잡혀 impl 에 helper 강제 → 예제 있는 정상 spec 거짓 차단. triple-backtick 블록 제거 후 선언/필드 추출.
+
+### 백로그 (heuristic 한계/by-design — 수정 안 함, UR-0016 AST)
+- 필드/함수가 주석·문자열에만 존재 → grep 통과(FN, codex #1): grep-presence 검사의 문서화된 한계. 함수를 stub/비함수값으로 export → 통과(codex #6): contract 는 presence, verify-claim 이 substance(설계상 분리). backtick 약언급 미게이팅(codex #5): 산문 FP 회피 위한 의도적 관대. codex #7(ESM export-list)는 **재현서 이미 인식됨을 확인 → 환각 기각**. 세 수정 모두 위 한계를 악화시키지 않음.
+
+### 검증
+- selftest **271** (신규: `_parseImplExports` bracket + `_parseContractSpec` 펜스제외 순수함수 행위검사; 자기참조 트랩 회피 위해 소스-grep→행위검사 전환). full e2e **384** (신규: $필드 실존→통과/진짜누락→감지 + bracket #8 + 펜스 #9 FP 3종). codex 독립 헌트 교차확인(맹신 X: 9건 중 3 확정·1 환각기각·나머지 한계).
+
 ## 1.35.10 — 2026-07-06 — 자체 gate 적대적 헌트: 가드레일 검증(제품 결함 0) + 보안 동작 회귀 가드
 
 **verify-claim(1.35.9)에 이어 인접 가드레일 `gate` 를 적대적으로 검증** — README 가 "required CI check 로 만들라"고 권하는 표면이라 FN(거짓완료 PR 통과)/FP(정직한 PR 차단)가 최악. 게시본 1.35.9 에 8-프로브 매트릭스(FP 4: 클린 프로젝트·bare init·placeholder·done+evidence / FN 3: 커밋 시크릿·거짓완료 --claims·필수파일 삭제 / by-design 1) 실행.

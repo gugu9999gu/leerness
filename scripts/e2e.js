@@ -6016,6 +6016,40 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.35.11 (자체 contract 적대적 헌트 + codex 교차): 필드명 $ 정규식-앵커 FP — $scope/foo$bar 실존 필드를 항상 missing 오탐하던 버그. 이스케이프+식별자 룩어라운드로 수정. 정규식 안전 + no-FN 회귀 가드.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cvdollar-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    fs.writeFileSync(path.join(d, 's.md'), '# S\n\n## Fields\n- $scope\n- foo$bar\n- userId\n');
+    // (1) FP 수정: $scope/foo$bar/userId 모두 impl 에 실존 → 통과(exit 0, missingFields 0)
+    fs.writeFileSync(path.join(d, 'ok.js'), 'const $scope=1; const foo$bar=2; const userId=3;\nmodule.exports={$scope,foo$bar,userId};\n');
+    const cok = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 's.md'), path.join(d, 'ok.js'), '--json'], { encoding: 'utf8', timeout: 15000 });
+    let fpFixed = false; try { const j = JSON.parse(cok.stdout); fpFixed = cok.status === 0 && j.ok === true && (j.missingFields || []).length === 0; } catch {}
+    // (2) no-FN 회귀: $scope 진짜 누락 → 여전히 감지(exit 1, missingFields 에 $scope)
+    fs.writeFileSync(path.join(d, 'miss.js'), 'const foo$bar=2; const userId=3;\nmodule.exports={foo$bar,userId};\n');
+    const cmiss = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 's.md'), path.join(d, 'miss.js'), '--json'], { encoding: 'utf8', timeout: 15000 });
+    let fnGuard = false; try { const j = JSON.parse(cmiss.stdout); fnGuard = cmiss.status === 1 && j.ok === false && (j.missingFields || []).includes('$scope') && !(j.missingFields || []).includes('foo$bar'); } catch {}
+    // (3) codex #8: bracket export(exports["foo"]) 실존 → 통과(exit 0)
+    fs.writeFileSync(path.join(d, 'b.md'), '- foo()\n');
+    fs.writeFileSync(path.join(d, 'b.js'), 'exports["foo"] = function(){};\n');
+    const cbrk = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'b.md'), path.join(d, 'b.js'), '--json'], { encoding: 'utf8', timeout: 15000 });
+    let bracketOk = false; try { const j = JSON.parse(cbrk.stdout); bracketOk = cbrk.status === 0 && j.ok === true; } catch {}
+    // (4) codex #9: 코드펜스 예제 함수는 계약 아님 → 통과(exit 0) + specFunctions 에 helper 없음
+    fs.writeFileSync(path.join(d, 'fen.md'), '# S\n```js\nfunction helper(){}\n```\n');
+    fs.writeFileSync(path.join(d, 'fen.js'), 'module.exports={};\n');
+    const cfen = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'fen.md'), path.join(d, 'fen.js'), '--json'], { encoding: 'utf8', timeout: 15000 });
+    let fenceOk = false; try { const j = JSON.parse(cfen.stdout); fenceOk = cfen.status === 0 && j.ok === true && !(j.specFunctions || []).includes('helper'); } catch {}
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = fpFixed && fnGuard && bracketOk && fenceOk;
+    if (!ok) console.log(`   [cvdollar 디버그] fpFixed=${fpFixed} fnGuard=${fnGuard} bracket=${bracketOk} fence=${fenceOk}`);
+  } catch {}
+  console.log(ok ? '✓ B(1.35.11) 자체 contract 헌트 + codex 교차: $필드 정규식 안전화 + bracket export(#8) + 코드펜스 예제 제외(#9) FP 3종 + no-FN' : '✗ contract 헌트 FP 3종 수정 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.418 회귀 (9th 외부평가 Codex P2, UR-0121 잔여): health 보안 정직화 + status scope
 total++;
 {
