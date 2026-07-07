@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.35.17 — 2026-07-07 — codex 협업 라운드 ⑦: audit 적대적 헌트 — 유저-프로젝트 FP 4종 (gate 표면 sweep 완결)
+
+**사용자 지시 "codex와 협업" 라운드 ⑦ — gate 임베드 마지막 미헌트 표면 `audit`.** audit 은 유저의 실제 프로젝트를 점검하므로 FP 가 `--strict` gate 를 거짓 실패시킴. 자체 프로브 + codex(gpt-5.5 xhigh) 교차. 재현으로 확정한 유저-프로젝트 FP 4종 수정. **이로써 gate 5체크(verify/audit/scan secrets/encoding/lazy detect) + gate 구성 + contract 전 표면 적대적 헌트 완주.**
+
+### 확정 수정 (전부 유저-프로젝트 FP)
+- **`readme_synced_version_stale` 카테고리 오류.** README 관리블록의 "Last synced by Leerness vX" 는 readme sync 가 **leerness 도구 버전**(`v${VERSION}`)으로 쓰는데, audit 은 이를 **프로젝트의 package.json 버전**과 비교 → 도구≠프로젝트 버전인 **모든 유저 프로젝트에서 항상 오탐** + `--fix` 가 pkg.version 을 써 다음 readme sync(VERSION 기록)와 영구 충돌. → **현재 실행 중 leerness VERSION 과 비교**(= "오래된 leerness 로 sync 됨 → 재sync" 정확 감지, leerness 자기 repo 는 VERSION==pkg 라 무변화). 재현 확정.
+- **`gitignore_missing_secrets` glob 무지 (codex #11).** 필수 시크릿 패턴(`.env`/`.env.local`/…)을 **정확-일치**로만 검사 → 흔한 `.env*`/`.env.*` 광역 패턴(git 이 실제로 .env 패밀리 전체 ignore)을 쓰면 "누락" 오탐(`--strict` 시 failure). trailing-star prefix 커버리지 인식 추가(git 동작 일치, 신규 FN 0). 재현 확정.
+- **`api_skill_missing` 이 영어 단어 "rest" 오인 (codex #15).** 키워드 정규식이 `/…|REST|…/i` 라 대소문자 무관 → **"clean up the rest of the module"** 같은 평범한 task 를 REST API 로 오판. API/REST 약어를 대소문자-민감으로 분리(서술형 endpoint/graphql/oauth/webhook/url 은 무관 유지). 재현 확정.
+- **`strict_promoted` threshold 0 footgun (codex #12).** `--strict --threshold 0`(또는 음수)이면 `warnings>=0` 이 항상 참 → **경고 0인 clean 프로젝트도 실패**. `warnings>0 &&` 가드 추가.
+
+### 맹신 X / 미채택
+- codex "malformed package.json crash" → **반증**: 해당 블록이 `try{…JSON.parse…}catch{}` 로 감싸져 크래시 아님(조용히 skip). badge 다중매칭(#6)/design-system 템플릿 포맷(#5)/npm_cve --strict 노이즈(#4)/env local-only(#11)/milestone future(#10)/current-state 타임존(#7)은 저빈도·by-design·--fix 상호작용 복잡으로 미채택(문서화).
+
+### 검증
+- selftest 273. e2e-core **27**(신규 audit 픽스처 3: readme_synced/gitignore-glob/rest-word). full e2e **384**. 게시본 1.35.17 재실증.
+
 ## 1.35.16 — 2026-07-07 — codex 협업 라운드 ⑥: lazy detect(안티-치트) 적대적 헌트 — 우회/FP/FN 5종 수정
 
 **사용자 지시 "codex와 협업" 라운드 ⑥ — gate 임베드 `lazy detect`(안티-게으름/안티-치트) 적대적 헌트.** 이 체크의 주 사용자는 AI 에이전트 자신이라 **우회 인센티브가 직접적**. 자체 프로브 + codex(gpt-5.5 xhigh) 독립 헌터로 바이패스(FN)+FP 양방향 사냥. 재현으로 확정한 것만 수정.

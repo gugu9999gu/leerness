@@ -165,6 +165,37 @@ console.log('# leerness core (test:core) — flagship behavioral guarantees');
   }
 }
 
+// (9) audit: 유저-프로젝트 FP 가드 (1.35.17)
+{
+  const VER = (cp.spawnSync(process.execPath, [CLI, '--version'], { encoding: 'utf8' }).stdout || '').trim();
+  const auditJson = (d) => { const r = cp.spawnSync(process.execPath, [CLI, 'audit', d, '--json'], { encoding: 'utf8', timeout: 40000, env: { ...process.env, LEERNESS_OFFLINE: '1' } }); try { return JSON.parse(r.stdout); } catch { return null; } };
+  const hasK = (j, k) => !!(j && j.findings.some(f => f.kind === k));
+  // A: 관리블록이 현재 도구버전으로 sync 됨(유저 pkg 버전 다름) → readme_synced FP 없음
+  {
+    const d = fresh();
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'user-app', version: '2.3.0' }));
+    fs.writeFileSync(path.join(d, 'README.md'), '# A\n<!-- leerness:project-readme:start -->\nLast synced by Leerness v' + VER + ': x\n<!-- leerness:project-readme:end -->\n');
+    assert('audit: managed-block synced by CURRENT leerness → no readme_synced FP (user pkg 2.3.0)', !hasK(auditJson(d), 'readme_synced_version_stale'));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+  // B: .gitignore .env* 광역 패턴이 .env 패밀리 커버 → 오탐 없음
+  {
+    const d = fresh();
+    fs.writeFileSync(path.join(d, '.env'), 'K=xxxxxxxx\n');
+    fs.writeFileSync(path.join(d, '.gitignore'), '.env*\n*.pem\ncredentials.json\n');
+    assert('audit: .gitignore .env* glob covers .env family → no gitignore_missing_secrets FP', !hasK(auditJson(d), 'gitignore_missing_secrets'));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+  // C: 영어 단어 "rest" 는 REST API 로 오인 안 함
+  {
+    const d = fresh();
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'clean up the rest of the module', '--path', d], { encoding: 'utf8' });
+    cp.spawnSync(process.execPath, [CLI, 'task', 'update', 'T-0002', '--status', 'in-progress', '--path', d], { encoding: 'utf8' });
+    assert('audit: task word "rest" → no api_skill_missing FP (REST acronym case-sensitive)', !hasK(auditJson(d), 'api_skill_missing'));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+}
+
 const dur = ((Date.now() - t0) / 1000).toFixed(1);
 console.log(`\nCore result: ${total - failed}/${total} passed · ${dur}s`);
 if (failed > 0) process.exit(1);
