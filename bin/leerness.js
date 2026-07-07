@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.35.15';
+const VERSION = '1.35.16';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -8401,9 +8401,15 @@ function lazyDetect(root, opts = {}) {
   const rows = readProgressRows(root);
   // 1.9.1 P6: evidence가 단독 plan:M-XXXX 한 줄일 때만 검증 부족 처리.
   // "tests:32/32 (plan:M-0002)" 같이 검증 키워드를 같이 적은 경우는 통과.
-  for (const r of rows) if (r.status === 'done' && (!r.evidence || /^(\s*|user-request|-)$/.test(r.evidence) || /^plan:M-\d{4}\s*$/.test(r.evidence))) {
-    issues++; _warn(`done row without verifiable evidence: ${r.id} (${r.request})`,
-      { kind: 'evidence_missing', severity: 'warn', taskId: r.id, request: r.request });
+  // 1.35.16 (lazy 헌트 우회 #3+#4): (1) evidence 검사를 _hasDoneWork 와 동일한 done-집합(done|completed|verified, 대소문자무관)으로 정합 — 기존 `=== 'done'` 은 status=completed/verified/Done 을 놓쳐, done-work 로는 세면서 evidence 는 안 보던 우회. (2) trivial evidence 토큰(n/a, tbd, todo, wip, none, x, 점만/물음표만) 추가 — 비-empty 쓰레기 문자열로 통과하던 구멍 축소.
+  for (const r of rows) {
+    if (!/^(done|completed|verified)$/i.test(r.status || '')) continue;
+    const _ev = (r.evidence || '').trim();
+    const _trivial = !_ev || /^(user-request|n\/?a|tbd|todo|wip|none|nil|x|-+|\.+|\?+)$/i.test(_ev) || /^plan:M-\d{4}$/i.test(_ev);
+    if (_trivial) {
+      issues++; _warn(`done row without verifiable evidence: ${r.id} (${r.request})`,
+        { kind: 'evidence_missing', severity: 'warn', taskId: r.id, request: r.request });
+    }
   }
   if (rows.length === 0) { issues++; _warn('progress-tracker is empty (no tasks tracked)',
     { kind: 'progress_empty', severity: 'warn' }); }
@@ -8417,17 +8423,10 @@ function lazyDetect(root, opts = {}) {
       { kind: 'handoff_empty', severity: 'warn' });
   }
   const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
-  const hasTestRun = /\b(npm test|pnpm test|yarn test|pytest|jest|vitest|tsc|eslint|playwright|cypress)\b/i.test(ev);
+  // 1.35.16 (lazy 헌트 FP): JS+pytest 중심 목록에 비-JS 러너 추가 — Go/Rust/Ruby/PHP/.NET/Java/Elixir/Swift/Dart/C 등이 실제 테스트를 돌려도 no_test_run 오탐(active 프로젝트에선 blocking → gate 거짓 실패)하던 것 차단. (negative finding 억제라 추가는 FP-safe.)
+  const hasTestRun = /\b(npm test|pnpm test|yarn test|pytest|jest|vitest|tsc|eslint|playwright|cypress|go test|cargo test|cargo nextest|rspec|rake test|rake spec|phpunit|dotnet test|mvn test|mvn verify|gradle test|gradlew test|bun test|deno test|mocha|ctest|make test|make check|mix test|swift test|flutter test|dart test|tox|unittest|nose2)\b/i.test(ev);
   if (!hasTestRun) { issues++; _warn('review-evidence.md has no recorded test/typecheck/lint run',
     { kind: 'no_test_run', severity: 'warn' }); }
-  // 1.9.4 C: TODO/FIXME가 string literal 안에 있으면 제외 (정규식 패턴 자체 등 false positive).
-  function isInsideQuote(line, idx) {
-    const pre = line.slice(0, idx);
-    const sq = (pre.match(/(?<!\\)'/g) || []).length;
-    const dq = (pre.match(/(?<!\\)"/g) || []).length;
-    const bq = (pre.match(/(?<!\\)`/g) || []).length;
-    return (sq % 2 === 1) || (dq % 2 === 1) || (bq % 2 === 1);
-  }
   // 1.9.7 C: TODO 자동 추적 강화 — 위치+텍스트 캡처, known-todos 비교, --auto-track 등록
   const knownPath = path.join(root, '.harness/known-todos.json');
   let knownList = [];
@@ -8444,18 +8443,33 @@ function lazyDetect(root, opts = {}) {
     if (/[\\/]bin[\\/]harness\.js$/.test(file)) continue;
     let text; try { text = read(file); } catch { continue; }
     const lines = text.split('\n');
-    const tre = /\bTODO\b|\bFIXME\b|\bXXX\b/g;
+    const fileRel = rel(root, file);
+    // 1.35.16 (lazy 헌트 FN #6 + FP #10): 구 isInsideQuote(per-line 따옴표 패리티)는 (a) 큰따옴표 안의 아포스트로피("don't")를 여는-따옴표로 오인해 뒤의 진짜 TODO 를 스킵(FN·고의 우회 벡터), (b) 여러 줄 템플릿 리터럴 안의 TODO 를 문자열 밖으로 오판(FP·blocking). 파일 전체를 문자 단위로 걸으며 실제 문자열 상태를 추적(백틱 문자열은 줄 넘김, '/"는 개행에서 종료)해 '문자열 밖' TODO/FIXME/XXX 만 카운트.
+    let open = null;  // 현재 열린 문자열 종류 (null | ' | " | `)
     for (let i = 0; i < lines.length; i++) {
-      tre.lastIndex = 0;
-      let m;
-      while ((m = tre.exec(lines[i]))) {
-        if (isInsideQuote(lines[i], m.index)) continue;
-        todoCount++;
-        const txt = lines[i].trim().slice(0, 120);
-        const fileRel = rel(root, file);
-        const key = `${fileRel}:${i + 1}:${txt}`;
-        if (!knownSet.has(key)) newTodos.push({ file: fileRel, line: i + 1, text: txt });
+      const line = lines[i];
+      for (let k = 0; k < line.length; k++) {
+        const c = line[k];
+        if (open) {
+          if (c === '\\') { k++; continue; }        // 문자열 내부 이스케이프
+          if (c === open) open = null;
+          continue;
+        }
+        if (c === '\\') { k++; continue; }
+        if (c === '"' || c === "'" || c === '`') { open = c; continue; }
+        // 문자열 밖: 이 위치에서 TODO/FIXME/XXX 시작 + 앞쪽 word-boundary
+        if ((c === 'T' || c === 'F' || c === 'X') && (k === 0 || !/\w/.test(line[k - 1]))) {
+          const mm = /^(TODO|FIXME|XXX)\b/.exec(line.slice(k));
+          if (mm) {
+            todoCount++;
+            const txt = line.trim().slice(0, 120);
+            const key = `${fileRel}:${i + 1}:${txt}`;
+            if (!knownSet.has(key)) newTodos.push({ file: fileRel, line: i + 1, text: txt });
+            k += mm[1].length - 1;
+          }
+        }
       }
+      if (open === '"' || open === "'") open = null;  // 비-템플릿 문자열은 개행에서 종료(JS 문법상 개행 불가)
     }
   }
   if (todoCount > 0) {
@@ -8493,11 +8507,12 @@ function lazyDetect(root, opts = {}) {
       }
     }
   }
-  const blockers = rows.filter(r => r.status === 'blocked');
-  for (const b of blockers) if (b.nextAction === '없음' || /다음 액션 작성/.test(b.nextAction)) {
+  // 1.35.16 (lazy 헌트 우회 #9): status 대소문자무관(Blocked) + nextAction trivial 토큰(빈값/-/n/a/none/tbd/점만) 도 blocker_no_next_action 으로 감지(기존 '없음'/'다음 액션 작성' 만).
+  const blockers = rows.filter(r => /^blocked$/i.test(r.status || ''));
+  for (const b of blockers) { const _na = (b.nextAction || '').trim(); if (!_na || _na === '없음' || /다음 액션 작성/.test(b.nextAction) || /^(-+|n\/?a|none|nil|tbd|todo|wip|x|\.+|\?+)$/i.test(_na)) {
     issues++; _warn(`blocker without nextAction: ${b.id}`,
       { kind: 'blocker_no_next_action', severity: 'warn', taskId: b.id });
-  }
+  } }
   // 1.9.323 (UR-0054 ⑥, 설치리뷰): fresh/무작업 프로젝트 gate 통과 — 작업 흔적(done/completed/verified) 없으면
   //   "부재" 신호(progress empty / handoff 미생성·빈 / 테스트 미실행)는 비차단(어드바이저리). active 프로젝트는 기존대로 차단.
   //   배경: leerness init 직후 leerness gate 가 빈 트래커·미생성 handoff 때문에 즉시 실패하던 UX 결함.

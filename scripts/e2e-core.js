@@ -131,6 +131,40 @@ console.log('# leerness core (test:core) — flagship behavioral guarantees');
   fs.rmSync(d, { recursive: true, force: true });
 }
 
+// (8) lazy detect: 안티-치트 우회/FP 가드 (1.35.16)
+{
+  const BT = String.fromCharCode(96);
+  const jget = (d) => { const r = run(d, ['lazy', 'detect', '--json']); try { return JSON.parse(r.stdout); } catch { return null; } };
+  const hasK = (j, k) => !!(j && j.findings.some(f => f.kind === k));
+  // FP: cargo test 기록 → no_test_run 오탐 아님 (비-JS 러너 인식)
+  {
+    const d = fresh();
+    run(d, ['task', 'add', 'rust']); run(d, ['task', 'update', 'T-0002', '--status', 'done', '--evidence', 'src/lib.rs done']);
+    fs.appendFileSync(path.join(d, '.harness/review-evidence.md'), '\n```\ncargo test --all\n42 passed; 0 failed\n```\n');
+    assert('lazy: cargo test recognized (no false no_test_run)', !hasK(jget(d), 'no_test_run'));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+  // 우회 #3/#4: status=completed + trivial evidence → evidence_missing 발화
+  {
+    const d = fresh();
+    run(d, ['task', 'add', 'y']); run(d, ['task', 'update', 'T-0002', '--status', 'completed', '--evidence', 'n/a']);
+    assert('lazy: completed + n/a evidence → evidence_missing (status-consistency + trivial)', hasK(jget(d), 'evidence_missing'));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+  // FN #6: 아포스트로피 문자열 뒤 TODO 카운트 + FP #10: 멀티라인 템플릿 내 TODO 미카운트
+  {
+    const d = fresh();
+    fs.writeFileSync(path.join(d, 'a.js'), 'const m = "don' + String.fromCharCode(39) + 't"; // TODO: real\n');
+    const j1 = jget(d);
+    assert('lazy: TODO after apostrophe-string counted (FN fix)', j1 && j1.todoCount === 1);
+    fs.rmSync(path.join(d, 'a.js'), { force: true });
+    fs.writeFileSync(path.join(d, 'b.js'), 'const s = ' + BT + '\n  TODO: inside template\n' + BT + ';\n');
+    const j2 = jget(d);
+    assert('lazy: TODO inside multi-line template NOT counted (FP fix)', j2 && j2.todoCount === 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+}
+
 const dur = ((Date.now() - t0) / 1000).toFixed(1);
 console.log(`\nCore result: ${total - failed}/${total} passed · ${dur}s`);
 if (failed > 0) process.exit(1);

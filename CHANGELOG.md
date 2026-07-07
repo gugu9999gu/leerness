@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.35.16 — 2026-07-07 — codex 협업 라운드 ⑥: lazy detect(안티-치트) 적대적 헌트 — 우회/FP/FN 5종 수정
+
+**사용자 지시 "codex와 협업" 라운드 ⑥ — gate 임베드 `lazy detect`(안티-게으름/안티-치트) 적대적 헌트.** 이 체크의 주 사용자는 AI 에이전트 자신이라 **우회 인센티브가 직접적**. 자체 프로브 + codex(gpt-5.5 xhigh) 독립 헌터로 바이패스(FN)+FP 양방향 사냥. 재현으로 확정한 것만 수정.
+
+### 확정 수정
+- **FP — `no_test_run` 이 비-JS 프로젝트를 오탐.** `hasTestRun` 정규식이 JS+pytest 중심 → **Go/Rust/Ruby/PHP/.NET/Java/Elixir/Swift/Dart/C 프로젝트가 `cargo test`/`go test`/`rspec`/`phpunit`/`dotnet test`/`mvn`/`gradle` 등으로 실제 테스트를 돌려도** no_test_run 발화. done 작업이 있는 active 프로젝트에선 **blocking → gate 거짓 실패**. 러너 목록 확장(negative finding 억제라 FP-safe). 재현 확정.
+- **FN #6 + FP #10 — TODO 스캐너 따옴표 상태 오판.** 구 `isInsideQuote`(per-line 따옴표 패리티)가 (a) 큰따옴표 안의 아포스트로피(`"don't"`)를 여는-따옴표로 세어 **뒤의 진짜 TODO 를 스킵(FN·고의 우회 벡터)**, (b) **여러 줄 템플릿 리터럴 안의 TODO 를 문자열 밖으로 오판(FP·blocking)**. 파일 전체를 문자 단위로 걸으며 실제 문자열 경계를 추적(백틱은 줄 넘김, `'`/`"`는 개행 종료)하는 상태머신으로 교체 — 문자열 밖 TODO 만 카운트. 둘 다 재현 확정.
+- **우회 #3 — `evidence_missing` 이 status 를 `=== 'done'` 로만 검사.** `_hasDoneWork` 는 `/^(done|completed|verified)$/i` 인데 evidence 검사는 정확-`'done'` 만 → **`status=completed`(유효한 CLI 값)로 두면 done-work 로는 세면서 evidence 는 검사 안 하던 우회**. 동일 done-집합(대소문자무관)으로 정합. 재현 확정.
+- **우회 #4 — 쓰레기 evidence 통과.** trivial evidence 토큰(`n/a`/`tbd`/`todo`/`wip`/`none`/`x`/점·물음표만) 추가 — 비-empty 껍데기 문자열로 통과하던 구멍 축소(lazy 는 lenient, verify-claim 이 strict 담당이므로 최소한만).
+- **우회 #9 — blocked 행 좁은 검사.** status 대소문자무관(`Blocked`) + nextAction trivial 토큰(빈값/`-`/`n/a`/`none`/`tbd`)도 `blocker_no_next_action` 으로 감지.
+
+### 미채택 (by-design / 저빈도)
+- 대소문자 TODO(`todo`/`@todo`)는 `const todo` 등 FP 위험으로 대소문자-민감 유지(codex #7 동의). 무-done 회피(#5)는 fresh-프로젝트 leniency(1.9.323)의 의도된 트레이드오프. TODO 파일경로 substring 억제(#8)는 coarse-but-intended.
+
+### 검증
+- selftest 273. e2e-core **24**(신규 lazy 픽스처 4). full e2e **384**. 게시본 1.35.16 재실증.
+
 ## 1.35.15 — 2026-07-07 — codex 협업 라운드 ⑤: encoding check 적대적 헌트 — 파괴적 --apply + FP/FN 5종 수정
 
 **사용자 지시 "codex와 협업" 라운드 ⑤ — gate 임베드 `encoding check` + 변형 `env encoding-check --apply` 적대적 헌트.** 한국어-우선 사용자에게 CP949 오손은 실사용 영향이 큼. 자체 프로브 + 실제 cmd.exe 런타임 실측 + codex(gpt-5.5 xhigh, 웹검색 포함) 독립 헌터 교차.
