@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.35.15 — 2026-07-07 — codex 협업 라운드 ⑤: encoding check 적대적 헌트 — 파괴적 --apply + FP/FN 5종 수정
+
+**사용자 지시 "codex와 협업" 라운드 ⑤ — gate 임베드 `encoding check` + 변형 `env encoding-check --apply` 적대적 헌트.** 한국어-우선 사용자에게 CP949 오손은 실사용 영향이 큼. 자체 프로브 + 실제 cmd.exe 런타임 실측 + codex(gpt-5.5 xhigh, 웹검색 포함) 독립 헌터 교차.
+
+### 확정 수정 (자체 프로브 — 읽기전용 gate 체크)
+- **FP — 순수-ASCII `.bat` 이 gate 를 거짓 실패.** `.bat missing chcp 65001` 이 내용과 무관하게 모든 `.bat` 에 발화 → `@echo off` 만 있는 ASCII 배치도 exit 1. 비-ASCII 바이트가 있을 때만 경고하도록 게이팅(CP949 오손 위험이 실제로 있을 때만).
+- **FN — `.cmd` 가 gate 에서 미스캔.** `.cmd` 가 `SCAN_TEXT_EXT` 에 없어 encodingCheck/scanSecrets 가 `.cmd` 를 전혀 안 봄(반면 `env encoding-check` 는 `.cmd` 스캔 → 불일치). `.cmd` 추가 + `.bat` 와 동일 규칙(chcp 검사 · BOM 예외) 적용.
+
+### 확정 수정 (codex 독립 헌터 교차 — 재현 후 채택)
+- **codex #4 DESTRUCTIVE — `--apply` 가 CP949 파일을 손상.** `env encoding-check --apply` 가 비-ASCII+no-BOM 파일에 transcode 없이 UTF-8 BOM 만 붙임 → CP949 본문에 BOM 을 붙이면 'UTF-8 이라 주장하는 CP949' 손상본(mojibake 악화). **재현 확정**(CP949 `.ps1` → BOM+CP949). 수정: **유효 UTF-8 본문일 때만 BOM 추가**, 비-UTF-8 은 skip(수동 transcode 안내). 추가로 `.bat/.cmd` 는 BOM 이 cmd.exe 코드페이지를 안 바꾸므로 skip(첫 줄 `chcp 65001` 안내) — 이제 `--apply` 는 유효-UTF-8 `.ps1`(PS5.1 이 BOM 으로 UTF-8 인식) 에만 작용. `.sh`/shebang 가드(1.9.409)와 동류.
+- **codex #7 FN — BOM 이 roundtrip 경고를 억제.** 읽기전용 체크의 `&& !hasBOM` 가 BOM+깨진본문(예: 위 --apply 가 만든 손상본)을 통째 통과시킴. 제거 → BOM 있어도 본문이 invalid UTF-8 이면 탐지(유효 UTF-8+BOM 은 byte-exact roundtrip 이라 오탐 0, 실증).
+- **codex #6 FN — NUL 을 첫 4096B 만 검사.** 전체 버퍼(≤5MB, 이미 로드됨) 스캔으로 확대 — 긴 ASCII 헤더 뒤 NUL 미탐 차단.
+
+### 맹신 X 반증 / 미채택
+- codex #2 "BOM 이 cmd.exe 첫 명령을 깨뜨림"(구형 Windows SuperUser 인용) → **실제 Win11 cmd.exe 실측 결과 BOM 있는 .bat 정상 실행**(refuted, 플랫폼 의존). 파괴적 아님 → --apply 의 .bat/.cmd 는 BOM 미추가로 정리(무익하고 구형에선 위험할 수 있어서, 파괴 근거로는 미채택). #8(C2A1 우연 유효-UTF-8)은 CP949 디코더 없이 불가(0-deps) → by-design.
+
+### 검증
+- selftest 273. e2e-core **20**(신규 CLI 픽스처 4: 순수-ASCII .bat clean · mojibake .cmd 탐지 · --apply CP949 무손상 · --apply 유효 .ps1 BOM). full e2e **384**. 게시본 1.35.15 재실증.
+
 ## 1.35.14 — 2026-07-06 — codex 협업 라운드 ④: scan secrets 적대적 헌트 — 하드코딩 자격증명 FN 2종 수정
 
 **사용자 지시 "codex와 협업" 라운드 ④ — 보안-임계 `scan secrets` 적대적 FP/FN 헌트.** gate 에 임베드된 보안 가드라 FN=시크릿 유출, FP=정직 빌드 파손. codex(gpt-5.5 xhigh)를 독립 헌터로 백그라운드 실행하고, Claude 자체 프로브 매트릭스(24 픽스처)를 로컬 스캐너에 병렬로 돌려 교차. **하드코딩 자격증명 패턴의 고빈도 FN·FP 5종 확정·수정.**

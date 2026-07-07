@@ -32,7 +32,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 
-const VERSION = '1.35.14';
+const VERSION = '1.35.15';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2588,6 +2588,17 @@ function envCmd(root, sub) {
           const isShebang = orig.length >= 2 && orig[0] === 0x23 && orig[1] === 0x21;  // '#!'
           if (/\.sh$/i.test(r.file) || isShebang) {
             result.applied.push({ file: r.file, action: 'skipped-shebang (BOM은 shebang을 깨뜨림 — .sh는 no-BOM UTF-8 유지)' });
+            continue;
+          }
+          // 1.35.15 (encoding 헌트, codex #2): .bat/.cmd 는 BOM 추가 금지 — cmd.exe 는 BOM 으로 코드페이지를 바꾸지 않음(첫 줄 'chcp 65001' 이 올바른 해법). BOM 은 무익하고 일부 Windows 에선 첫 명령을 깨뜨림 → 거짓 수정 대신 chcp 안내.
+          if (/\.(bat|cmd)$/i.test(r.file)) {
+            result.applied.push({ file: r.file, action: 'skipped-batch (cmd.exe: 첫 줄에 chcp 65001 추가가 정답 — BOM은 코드페이지를 안 바꿈)' });
+            continue;
+          }
+          // 1.35.15 (encoding 헌트, codex #4 DESTRUCTIVE): 본문이 유효 UTF-8 일 때만 BOM 추가. CP949/Latin-1 등 비-UTF-8 본문에 BOM 만 붙이면 'UTF-8 이라 주장하는 CP949' 손상본이 됨(transcode 없이 파괴적) → skip + 수동 transcode 안내. (mojibake 를 더 악화시키던 자기-파괴 차단, .sh 가드와 동류.)
+          const isValidUtf8 = Buffer.from(orig.toString('utf8'), 'utf8').equals(orig);
+          if (!isValidUtf8) {
+            result.applied.push({ file: r.file, action: 'skipped-nonutf8 (본문이 비-UTF-8(CP949 등) — BOM 추가는 손상. UTF-8 로 먼저 transcode 필요)' });
             continue;
           }
           const bom = Buffer.from([0xEF, 0xBB, 0xBF]);
@@ -8232,7 +8243,8 @@ function isSkippedRel(rel, extras = []) {
   if (segs.some(s => SCAN_SKIP_DIRS.has(s))) return true;  // SCAN_SKIP_DIRS 는 Set
   return extras.some(d => rel === d || rel.startsWith(d + '/'));
 }
-const SCAN_TEXT_EXT = new Set(['.js','.ts','.jsx','.tsx','.mjs','.cjs','.json','.json5','.jsonc','.md','.txt','.env','.bash','.sh','.yml','.yaml','.toml','.ini','.cfg','.py','.rb','.go','.rs','.java','.kt','.swift','.cs','.php','.sql','.html','.css','.scss','.less','.xml','.bat','.ps1','']);
+// 1.35.15 (encoding 헌트 FN): '.cmd' 추가 — .bat 와 기능 동일한 Windows 배치인데 누락되어 encodingCheck/scanSecrets 가 .cmd 를 전혀 스캔 안 하던 미탐(env encoding-check 는 .cmd 를 스캔했어 불일치).
+const SCAN_TEXT_EXT = new Set(['.js','.ts','.jsx','.tsx','.mjs','.cjs','.json','.json5','.jsonc','.md','.txt','.env','.bash','.sh','.yml','.yaml','.toml','.ini','.cfg','.py','.rb','.go','.rs','.java','.kt','.swift','.cs','.php','.sql','.html','.css','.scss','.less','.xml','.bat','.cmd','.ps1','']);
 function* walk(root, base = root, depth = 0, extras = null) {
   if (depth > 12) return;
   if (extras === null) extras = getExtraSkipDirs(root);
@@ -8339,20 +8351,25 @@ function encodingCheck(root, opts = {}) {
     if (buf.length === 0) continue;
     if (buf.length > 5 * 1024 * 1024) continue;
     const fileRel = rel(root, file);
-    if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) { if (ext !== '.ps1' && ext !== '.bat') { warnings++; findings.push({ file: fileRel, issue: 'UTF-8 BOM' }); } }  // 1.9.353 (UR-0067 외부리뷰): .ps1/.bat 는 PS5.1 호환 위해 BOM 의도적일 수 있어 예외 (env encoding 정책과 모순 해소)
+    if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) { if (ext !== '.ps1' && ext !== '.bat' && ext !== '.cmd') { warnings++; findings.push({ file: fileRel, issue: 'UTF-8 BOM' }); } }  // 1.9.353 (UR-0067 외부리뷰): .ps1/.bat/.cmd 는 PS5.1 호환/배치 BOM 이 의도적일 수 있어 예외 (1.35.15: .cmd 추가 — .bat 와 동일 취급, env encoding 정책과 정합)
     else if ((buf[0] === 0xFF && buf[1] === 0xFE) || (buf[0] === 0xFE && buf[1] === 0xFF)) { warnings++; findings.push({ file: fileRel, issue: 'UTF-16 BOM' }); }
-    let nul = false; for (let i = 0; i < Math.min(buf.length, 4096); i++) if (buf[i] === 0) { nul = true; break; }
-    if (nul) { warnings++; findings.push({ file: fileRel, issue: 'NUL byte (binary in text path)' }); }
-    if (ext === '.bat') {
-      const text = buf.toString('utf8').replace(/^﻿/, '');
-      if (!/^@?chcp\s+65001/i.test(text.split(/\r?\n/, 1)[0] || '')) { warnings++; findings.push({ file: fileRel, issue: '.bat missing chcp 65001' }); }
+    // 1.35.15 (encoding 헌트 FN #6): NUL 을 첫 4096B 만 보던 것을 전체 버퍼(≤5MB, 이미 메모리 로드됨)로 확대 — 긴 ASCII 헤더 뒤 NUL 이 숨은 이진 파일 미탐 차단.
+    if (buf.includes(0)) { warnings++; findings.push({ file: fileRel, issue: 'NUL byte (binary in text path)' }); }
+    if (ext === '.bat' || ext === '.cmd') {
+      // 1.35.15 (encoding 헌트 FP): 순수-ASCII 배치는 CP949 오손 위험이 없어 chcp 불필요 → 비-ASCII 바이트가 있을 때만 경고(이전엔 @echo off 만 있는 ASCII .bat 도 무조건 발화해 gate 를 거짓 실패시킴). + .cmd 도 .bat 와 동일 검사.
+      let hasNonAscii = false;
+      for (let i = 0; i < Math.min(buf.length, 4096); i++) if (buf[i] >= 0x80) { hasNonAscii = true; break; }
+      if (hasNonAscii) {
+        const text = buf.toString('utf8').replace(/^﻿/, '');
+        if (!/^@?chcp\s+65001/i.test(text.split(/\r?\n/, 1)[0] || '')) { warnings++; findings.push({ file: fileRel, issue: `${ext} missing chcp 65001` }); }
+      }
     }
     // 1.9.353 (UR-0067 외부리뷰): 가-힣 게이트 제거 — CP949/Latin-1 등 invalid UTF-8 은 한글 포함 여부와 무관하게 round-trip 불일치로 감지(이전: 한글 없으면 통과 = false negative). 유효 UTF-8 은 byte-exact round-trip 이라 오탐 없음.
+    // 1.35.15 (encoding 헌트 FN #7): '&& !hasBOM' 제거 — BOM 이 있어도 본문이 깨진(CP949) 파일은 round-trip 불일치라 탐지해야 함. 기존 가드는 BOM+CP949 본문(예: --apply 가 CP949 파일에 BOM 만 붙여 만든 손상본)을 통째 통과시켰음. 유효 UTF-8(+BOM 포함)은 byte-exact round-trip 이라 오탐 0(실증).
     try {
       const text = buf.toString('utf8');
       const reBuf = Buffer.from(text, 'utf8');
-      const hasBOM = buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF;
-      if (!reBuf.equals(buf) && !hasBOM) {
+      if (!reBuf.equals(buf)) {
         warnings++; findings.push({ file: fileRel, issue: 'invalid UTF-8 roundtrip (CP949/mojibake 의심)' });
       }
     } catch {}

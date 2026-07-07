@@ -101,6 +101,36 @@ console.log('# leerness core (test:core) — flagship behavioral guarantees');
   fs.rmSync(d, { recursive: true, force: true });
 }
 
+// (6) encoding check: 순수-ASCII .bat clean(FP 차단) / Korean mojibake .cmd 탐지(FN, .cmd 스캔) (1.35.15)
+{
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-enc-'));
+  // 순수-ASCII .bat(@echo off, chcp 없음)은 CP949 오손 위험이 없어 clean 이어야 함(이전엔 무조건 실패시키던 FP)
+  fs.writeFileSync(path.join(d, 'ascii.bat'), '@echo off\r\necho hello world\r\n', 'latin1');
+  assert('encoding: pure-ASCII .bat clean (no false chcp warning) → exit 0', cp.spawnSync(process.execPath, [CLI, 'encoding', 'check', d], { encoding: 'utf8', timeout: 40000 }).status === 0);
+  // Korean mojibake(CP949 0xC7 0xD1) .cmd 는 이제 스캔되어 탐지되어야 함(이전엔 .cmd 미스캔 FN)
+  fs.writeFileSync(path.join(d, 'korean.cmd'), Buffer.from([0x40, 0x65, 0x63, 0x68, 0x6f, 0x20, 0xC7, 0xD1, 0x0d, 0x0a]));
+  assert('encoding: Korean mojibake .cmd flagged (.cmd now scanned) → exit 1', cp.spawnSync(process.execPath, [CLI, 'encoding', 'check', d], { encoding: 'utf8', timeout: 40000 }).status === 1);
+  fs.rmSync(d, { recursive: true, force: true });
+}
+
+// (7) env encoding-check --apply: CP949 .ps1 을 손상시키지 않고(BOM만 붙이는 파괴 차단) 유효 UTF-8 .ps1 만 BOM 추가 (1.35.15 codex #4 DESTRUCTIVE)
+{
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-apply-'));
+  // CP949 본문(Write-Host "안녕", 안=BE C8 녕=B3 E7) — --apply 가 BOM 만 붙이면 손상되므로 skip 되어 파일이 그대로여야 함
+  const cp949 = Buffer.concat([Buffer.from('Write-Host "', 'latin1'), Buffer.from([0xBE, 0xC8, 0xB3, 0xE7]), Buffer.from('"\r\n', 'latin1')]);
+  fs.writeFileSync(path.join(d, 'cp949.ps1'), cp949);
+  cp.spawnSync(process.execPath, [CLI, 'env', 'encoding-check', '--apply', '--path', d], { encoding: 'utf8', timeout: 40000 });
+  const after = fs.readFileSync(path.join(d, 'cp949.ps1'));
+  assert('encoding --apply: CP949 .ps1 NOT mutated (no destructive BOM-on-CP949)', after.equals(cp949) && !(after[0] === 0xEF && after[1] === 0xBB && after[2] === 0xBF));
+  // 유효 UTF-8 .ps1(한글, no BOM)은 정당하게 BOM 추가되어야 함
+  fs.writeFileSync(path.join(d, 'utf8.ps1'), Buffer.from('Write-Host "안녕"\r\n', 'utf8'));
+  cp.spawnSync(process.execPath, [CLI, 'env', 'encoding-check', '--apply', '--path', d], { encoding: 'utf8', timeout: 40000 });
+  const u = fs.readFileSync(path.join(d, 'utf8.ps1'));
+  const uValid = Buffer.from(u.toString('utf8'), 'utf8').equals(u);
+  assert('encoding --apply: valid-UTF-8 .ps1 gets BOM (still valid)', u[0] === 0xEF && u[1] === 0xBB && u[2] === 0xBF && uValid);
+  fs.rmSync(d, { recursive: true, force: true });
+}
+
 const dur = ((Date.now() - t0) / 1000).toFixed(1);
 console.log(`\nCore result: ${total - failed}/${total} passed · ${dur}s`);
 if (failed > 0) process.exit(1);
