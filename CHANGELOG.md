@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.36.3 — 2026-07-08 — DB 안전성 렌즈 코어 승격 (race condition + ACID) — 사용자 명시 + codex 검수 채택
+
+- 신규 내장 품질 렌즈 도메인 `database` (8 자기질문: lost update / check-then-act TOCTOU / atomicity / DB 제약 / isolation+retry / durability / distribution). `leerness lens database` 로 호출, verify-claim 이 DB 파일 변경 시 인라인 노출.
+- `_lensDomainsForFiles`: DB 파일(`.sql`/`.prisma`/migrations/schema/models/repositories/dao/db·database 디렉토리/data-source·drizzle.config 등) → `database` 도메인 우선 매핑. 테스트 파일은 test 렌즈 유지(제외).
+- `FILE_EXTS += sql|prisma` (verify-claim 파일 추출) + `_evidenceQuality += prisma` (파일 근거 인식) — `.sql`/`.prisma` 변경도 정상 검증.
+- 저작: 6차원 워크플로 → 적대적 비평 → codex 독립 검수(SHIP-WITH-FIXES 8채택/1반박) → 게시본 재실증 → node:sqlite 데모 자가검증. selftest 276 + e2e-core 42 통과.
+
 ## 1.36.2 — 2026-07-07 — 클린룸 후속: `feature add|show|link|impact` trailing positional path 존중 (조용한 cwd 오독 + stray `.harness` scaffold 차단)
 
 **독립 클린룸 리뷰(1.35.17 게시본)가 재현한 P2 결함 소진.** 비-프로젝트 디렉토리에서 `leerness feature add "이름" <프로젝트경로>` 를 실행하면 성공 메시지는 프로젝트 경로를 되울리지만(→ 처리된 척), 실제 feature 는 **CWD** 에 떨어지고 그 자리에 **stray `.harness` 가 조용히 scaffold** 됐다. 즉 지정한 프로젝트가 아니라 아무 폴더나 오염시켰다. `--path <project>` 는 정상 동작했다.
