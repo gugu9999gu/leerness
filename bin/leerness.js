@@ -31,8 +31,9 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
+const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.35.17';
+const VERSION = '1.36.2';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3193,6 +3194,24 @@ function _selfTestCases() {
       const u = m._parseAddTitle(['rule', 'add', '세션', '점검', '--trigger', 'every-session', '/p'], 2) === '세션 점검';
       return wired && u;
     } },
+    { name: '클린룸 (UR-0184): feature add/show/link/impact positional-path 와이어 + 미초기화 게이트 + _taskPositionalPath 값-플래그 skip (1.36.2)', run: () => {
+      const src = read(__filename);
+      // split-literal 앵커 — selftest 자기참조 false-pass 회피(자기참조 트랩); 실제 디스패치/주입에만 매칭
+      const featRootDef = 'const _feat' + 'Root = () => absRoot(';
+      const addWire = 'featureAddCmd(_feat' + 'Root(), _parseAddTitle(args, 2))';
+      const showWire = 'featureShowCmd(_feat' + 'Root(), args[2])';
+      const depInject = 'arg, has, _require' + 'Init }';                    // _featureDeps 에 _requireInit 주입
+      const wired = src.includes(featRootDef) && src.includes(addWire) && src.includes(showWire) && src.includes(depInject);
+      // lib/feature.js: featureAddCmd 가 미초기화 dir scaffold 대신 _requireInit 게이트
+      const featSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'feature.js'));
+      const gateWired = featSrc.includes('_require' + "Init(root, 'feature add')");
+      // 순수 동작: _taskPositionalPath 가 feature 값-플래그(--files 등)의 path-like 값을 root 로 오인 안 함 + 실제 경로/드라이브만 추출(id 는 제외)
+      const m = require('../lib/pure-utils');
+      const p1 = m._taskPositionalPath(['feature', 'add', 'Name', '--files', './src/x.js'], 2) === null;
+      const p2 = m._taskPositionalPath(['feature', 'add', 'Name', '/proj'], 2) === '/proj';
+      const p3 = m._taskPositionalPath(['feature', 'show', 'F-0001', 'C:\\proj'], 2) === 'C:\\proj';
+      return wired && gateWired && p1 && p2 && p3;
+    } },
     { name: 'UR-0025 큰핸들러 모듈화 8번째: healthCmd → lib/health.js + DI 위임 + 동작 (1.9.423)', run: () => {
       const m = require('../lib/health');
       const expOk = typeof m.healthCmd === 'function';
@@ -4081,6 +4100,26 @@ function _selfTestCases() {
       const hasAdopt = bin.includes("'ado" + "pt'") && bin.includes('parent ado' + 'pt --apply');
       const nonDestructive = bin.includes('inherited-from-pa' + 'rent.md') && bin.includes('PARENT_LI' + 'NK.json');
       return hasAdopt && nonDestructive;
+    } },
+    { name: 'lib/state-integrity: findCorruptedStateJson 손상 JSON 탐지 + 유효/빈파일 무오탐 + audit/health 공유 (클린룸 리뷰 FN 1.36.1)', run: () => {
+      const m = require('../lib/state-integrity');
+      if (typeof m.findCorruptedStateJson !== 'function') return false;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_si_'));
+      try {
+        const hd = path.join(tmp, '.harness'); fs.mkdirSync(hd, { recursive: true });
+        fs.writeFileSync(path.join(hd, 'valid.json'), '{"a":1}');
+        fs.writeFileSync(path.join(hd, 'empty.json'), '');                 // 빈 파일 = 그레이스풀 빈 상태(무오탐)
+        fs.writeFileSync(path.join(hd, 'manifest.json'), '{ bad : json ]]]');
+        const r = m.findCorruptedStateJson(tmp);
+        const onlyBad = r.length === 1 && r[0].file === '.harness/manifest.json' && !!r[0].error;
+        // .harness 부재 → 빈 배열(비-크래시)
+        const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_si2_'));
+        const noHarness = m.findCorruptedStateJson(emptyDir).length === 0;
+        try { fs.rmSync(emptyDir, { recursive: true, force: true }); } catch {}
+        // audit/health 가 헬퍼를 require 로 공유(DI 아님 — 래퍼 시그니처 무변경)
+        const wired = read(path.join(__dirname, '..', 'lib', 'audit.js')).includes("require('./state-integrity')") && read(path.join(__dirname, '..', 'lib', 'health.js')).includes("require('./state-integrity')");
+        return onlyBad && noHarness && wired;
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     } }
   ];
 }
@@ -7339,6 +7378,8 @@ function planAdd(root, text) {
     upsertProgress(root, { id: tid, status, request: text, evidence: `plan:${id}`, nextAction });
     return { id, tid };
   });
+  // 1.36.0 (클린룸 리뷰 B, --json 무결성): plan add 성공 경로 --json 보강(에러 경로는 이미 구조화).
+  if (has('--json')) { log(JSON.stringify({ ok: true, milestone: id, task: tid, text })); return; }
   ok(`plan added: ${id} → progress: ${tid}`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -7593,6 +7634,8 @@ function taskUpdate(root, id) {
   if (arg('--next') !== null) patch.nextAction = arg('--next');
   if (arg('--note')) patch.request = arg('--note');
   upsertProgress(root, patch);
+  // 1.36.0 (클린룸 리뷰 B, --json 무결성): task add(1.9.413) 는 --json 성공 출력이 있으나 task update 는 누락 — 성공 시 평문만 내보내 JSON 소비 스크립트가 성공 경로에서만 크래시(에러 경로는 이미 구조화). 동일 패턴으로 보강.
+  if (has('--json')) { log(JSON.stringify({ ok: true, ...patch })); return; }
   ok(`task updated: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -8553,6 +8596,17 @@ function preCheck(root) {
   const pfOk = pf.includes('AGENTS.md');
   checks.push({ name: 'protected-files.md AGENTS.md', kind: 'integrity', ok: pfOk });
   if (!pfOk) { issues++; if (!json) fail('protected-files.md missing AGENTS.md'); }
+  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태파일 JSON 무결성 — 손상 시 하드 실패(exit 1). check 는 pre-action 게이트이므로 손상 상태를 통과시키지 않는다.
+  //   (audit=warning / health=degraded 와 달리 check 는 차단 신호. 비-크래시: 헬퍼가 파서 예외를 흡수.)
+  try {
+    const corrupted = _findCorruptedStateJson(root);
+    if (corrupted.length) {
+      for (const c of corrupted) { checks.push({ name: c.file, kind: 'json-integrity', ok: false, error: c.error }); issues++; if (!json) fail(`corrupted JSON: ${c.file} (${c.error})`); }
+    } else {
+      checks.push({ name: 'state JSON integrity', kind: 'json-integrity', ok: true });
+      if (!json) ok('state JSON integrity OK (.harness/*.json)');
+    }
+  } catch {}
   if (json) { log(JSON.stringify({ root, healthy: issues === 0, issues, checks }, null, 2)); if (issues) process.exitCode = 1; return; }
   if (issues === 0) ok('pre-action check passed');
   else { process.exitCode = 1; }
@@ -14302,6 +14356,8 @@ function verifyRules(root) {
 function ruleVerifyCmd(root) {
   root = absRoot(root);
   const results = verifyRules(root);
+  // 1.36.0 (클린룸 리뷰 B, --json 무결성): rule verify 성공 경로 --json 보강 — 기존엔 --json 이어도 평문 표/텍스트만 출력.
+  if (has('--json')) { log(JSON.stringify({ ok: true, count: results.length, results })); return; }
   if (!results.length) return ok('활성 룰 없음');
   log('# Rules verification');
   log('| ID | Trigger | Rule | Verified | Note |');
@@ -15116,7 +15172,7 @@ function _writeFeatureGraph(root, nodes) {
 // 1.9.391 (UR-0025 큰 핸들러 모듈화 3번째): feature add/link/impact/list/show 핸들러를 lib/feature.js 로 분리.
 //   _featureImpactBfs 는 pure-utils 로 이동(handoff/audit 공유). feature-graph I/O 헬퍼(_readFeatureGraph 등)는 공유라 harness 유지+주입.
 const _feature = require('../lib/feature');
-function _featureDeps() { return { _ensureFeatureGraph, _readFeatureGraph, _writeFeatureGraph, arg, has }; }
+function _featureDeps() { return { _ensureFeatureGraph, _readFeatureGraph, _writeFeatureGraph, arg, has, _requireInit }; }  // 1.36.2: _requireInit 주입 — feature add 미초기화 dir scaffold 게이트
 function featureAddCmd(root, title) { return _feature.featureAddCmd(root, title, _featureDeps()); }
 function featureLinkCmd(root, fromId) { return _feature.featureLinkCmd(root, fromId, _featureDeps()); }
 function featureImpactCmd(root, fromId) { return _feature.featureImpactCmd(root, fromId, _featureDeps()); }
@@ -15226,6 +15282,8 @@ function reuseFind(root, query) {
       if (exportRe.test(lines[i])) matches.push({ source: rel(root, f), line: i + 1, text: lines[i].trim().slice(0, 120) });
     }
   }
+  // 1.36.0 (클린룸 리뷰 B, --json 무결성): reuse find 성공 경로 --json 보강 — 기존엔 --json 이어도 사람용 텍스트만.
+  if (has('--json')) { log(JSON.stringify({ ok: true, query, count: matches.length, matches: matches.slice(0, _parseLimit(arg('--limit', '20'), 20)) })); return; }
   log(`# reuse find: "${query}"`);
   if (!matches.length) return ok('기존 자원 없음 — 새로 만드는 것이 최선의 선택일 수 있음');
   log(`${matches.length}개 후보:`);
@@ -20773,11 +20831,16 @@ async function main() {
   if (cmd === 'release' && args[1] === 'channel')   return releaseChannelCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'cadence')   return releaseCadenceCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()));  // 1.9.374 (UR-0074): 릴리스 빈도 진단
   // 1.9.141: feature causality graph
-  if (cmd === 'feature' && args[1] === 'add')    return featureAddCmd(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('--')).join(' '));
-  if (cmd === 'feature' && args[1] === 'link')   return featureLinkCmd(arg('--path', process.cwd()), args[2]);
-  if (cmd === 'feature' && args[1] === 'impact') return featureImpactCmd(arg('--path', process.cwd()), args[2]);
+  // 1.36.2 (clean-room, UR-0184): add/show/link/impact 도 trailing positional path 인식 — list(1.9.412)만 지원하던 것을 일관 확대.
+  //   기존엔 add 가 모든 non-flag positional 을 NAME 으로 join → 경로가 이름에 흡수 + cwd 에 stray .harness scaffold(조용한 오독).
+  //   해석: --path > path-like positional(_taskPositionalPath) > cwd. add 의 NAME 은 _parseAddTitle 로 첫 경로/플래그에서 절단(경로 흡수 차단).
+  //   add 는 featureAddCmd 내부 _requireInit 게이트로 미초기화 dir scaffold 대신 에러(--force 우회). show/link/impact 는 read-only(scaffold 안 함).
+  const _featRoot = () => absRoot(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());
+  if (cmd === 'feature' && args[1] === 'add')    return featureAddCmd(_featRoot(), _parseAddTitle(args, 2));
+  if (cmd === 'feature' && args[1] === 'link')   return featureLinkCmd(_featRoot(), args[2]);
+  if (cmd === 'feature' && args[1] === 'impact') return featureImpactCmd(_featRoot(), args[2]);
   if (cmd === 'feature' && args[1] === 'list')   return featureListCmd(absRoot(_resolveRoot(args[2])));  // 1.9.412 (UR-0100): positional path 지원(조용한 cwd 오독 방지)
-  if (cmd === 'feature' && args[1] === 'show')   return featureShowCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'feature' && args[1] === 'show')   return featureShowCmd(_featRoot(), args[2]);
   if (cmd === 'impact')                             return impactCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'reuse' && args[1] === 'find')        return reuseFind(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
   if (cmd === 'reuse' && args[1] === 'register')    return reuseRegister(arg('--path', process.cwd()), args[2]);

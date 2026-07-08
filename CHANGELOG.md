@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.36.2 — 2026-07-07 — 클린룸 후속: `feature add|show|link|impact` trailing positional path 존중 (조용한 cwd 오독 + stray `.harness` scaffold 차단)
+
+**독립 클린룸 리뷰(1.35.17 게시본)가 재현한 P2 결함 소진.** 비-프로젝트 디렉토리에서 `leerness feature add "이름" <프로젝트경로>` 를 실행하면 성공 메시지는 프로젝트 경로를 되울리지만(→ 처리된 척), 실제 feature 는 **CWD** 에 떨어지고 그 자리에 **stray `.harness` 가 조용히 scaffold** 됐다. 즉 지정한 프로젝트가 아니라 아무 폴더나 오염시켰다. `--path <project>` 는 정상 동작했다.
+
+### 원인
+- 디스패치(`bin/leerness.js`)가 `feature add` 를 `featureAddCmd(arg('--path', cwd), args.slice(2).filter(비-flag).join(' '))` 로 라우팅 — **모든 비-flag positional 이 NAME 으로 join** 되어 경로가 이름에 흡수되고 root 는 언제나 CWD. `feature list` 는 1.9.412(UR-0100)에서 `_resolveRoot(args[2])` 로 positional-path 를 이미 지원했지만 `add/show/link/impact` 는 갱신되지 않았다.
+- `featureAddCmd` 의 `_ensureFeatureGraph(root)` 가 **무조건** `.harness/feature-graph.md` 를 생성 → 미초기화 폴더도 조용히 반쪽 상태로 오염.
+
+### 수정 — 두 겹 방어 (a) positional path 인식 (b) 미초기화 게이트
+- **(a) trailing positional path 존중** — `add/show/link/impact` 모두 `--path > path-like positional(_taskPositionalPath) > cwd` 로 root 해석(기존 `task`/`rule add`/`feature list` 와 동일 규약). `add` 의 NAME 은 `_parseAddTitle(args, 2)` 로 첫 경로/플래그에서 절단해 경로 흡수를 차단(내부 슬래시 제목 `auth/login` 등은 선행 구분자만 경로로 보므로 보호).
+- **(b) 미초기화 scaffold 게이트** — `featureAddCmd` 가 `_ensureFeatureGraph` 전에 `_requireInit(root, 'feature add')` 통과를 요구(=`task add` 와 동일). 워크스페이스 마커(HARNESS_VERSION/guideline.md/AGENTS.md) 없는 디렉토리는 **scaffold 대신 exit 1 + 안내**, `--force` 우회. `show/link/impact` 는 read-only(그래프 없으면 not-found/빈결과 — scaffold 안 함).
+- **`_taskPositionalPath` 값-플래그 확장** — feature 값-플래그(`--files`/`--depends-on`/`--affects`/`--co-changes-with`)의 값이 path-like(`./src/x.js`)여도 root 로 오인하지 않도록 `_TASK_VALUE_FLAGS` 에 포함(예: `feature add "이름" --files ./src/a.js` 에서 `./src/a.js` 는 files 값이지 경로 아님).
+
+### 검증
+- selftest **275**(+1: `_featRoot`/`_parseAddTitle` 디스패치 배선 + `_requireInit` 게이트 + `_taskPositionalPath` 값-플래그 skip; split-literal 앵커로 자기참조 false-pass 회피). e2e-core **+5**(positional 등록·이름 clean / stray scaffold 없음 / 미초기화 게이트 / show positional / `--path` 우선). full e2e **+1 회귀 블록**(add/show/link/impact positional + 미초기화 게이트 + `--files` path-like 값 오인 없음). 클린룸 재현(비-프로젝트 cwd)으로 fix 전/후 대조 확정 → 게시본 재실증.
+
+## 1.36.1 — 2026-07-07 — 클린룸 후속: 상태파일 JSON 무결성 체크 (health/check/audit false-negative 차단)
+
+**1.36.0 클린룸 리뷰가 남긴 후속 백로그 소진** — 독립 리뷰어 A(P2, fails-safe)가 재현한 false-negative: `.harness/manifest.json` 을 깨진 JSON(`{ this is : not valid json ]]]`)으로 덮어써도 `health`/`doctor`/`check`/`audit` 가 전부 **"healthy" / exit 0** 을 반환. 원인은 모든 상태파일 로더가 `try{JSON.parse}catch{빈 상태}` 로 그레이스풀 폴백해(=크래시 없음, 좋은 성질) **손상을 조용히 빈 상태로 대체**하는데, 어떤 진단 명령도 상태 JSON 무결성을 별도로 검증하지 않던 갭.
+
+### 수정 — `.harness/*.json` JSON 무결성 검증 (신규 공유 헬퍼 `lib/state-integrity.js`)
+- **단일출처 `findCorruptedStateJson(root)`** — `.harness` 바로 아래 `*.json`(manifest/decisions/lessons/skills-lock/active-wakeups/user-requests/…)을 열거해 `JSON.parse` 시도, 실패 파일 목록 반환. 비-재귀(archive/api-skills/cache 제외)·존재 파일만·빈/공백 파일 무오탐·BOM strip·**비-크래시**(파서 예외 흡수).
+- **3 진단 표면에 배선** (심각도는 표면 성격에 맞춤):
+  - **`audit`** — `corrupted_state_json` finding(**warning**, `--strict` 시 failure 승격).
+  - **`health`** — `checks.stateIntegrity` + `issues` → `healthy:false`(**degraded 신호**, `--strict` 시 exit 1).
+  - **`check`** — pre-action 게이트이므로 **하드 실패(exit 1)**. 손상 상태를 통과시키지 않음.
+- **`doctor` 는 무변경** — root 를 받지 않는 설치/환경 진단(selftest)이라 워크스페이스 상태 검증 범위 밖(설계상 분리).
+
+### 검증
+- selftest **274**(+1: `findCorruptedStateJson` 탐지/무오탐/공유 배선 직접 검증). e2e-core **37**(+6: 클린 무오탐 + 손상 manifest → audit/health/check 3표면 표면화). full e2e **385**(+1 회귀 블록: 클린 무오탐 + 손상 표면화 + `audit --strict` 승격). 재현 확정 → 게시본 재실증.
+
+## 1.36.0 — 2026-07-07 — 🏁 안정 minor: gate 표면 전체 적대적 헌트 완주 (1.35.14~1.35.17 통합) + 독립 클린룸 검증
+
+**codex 협업 7라운드로 gate 임베드 플래그십의 모든 체크 표면을 적대적 헌트 완주한 안정 릴리스**, 마지막으로 내 프레이밍 없는 **독립 블라인드 리뷰어 2명**으로 게시본(1.35.17)을 교차검증. 각 헌트 라운드 = 자체 프로브 + codex(gpt-5.5 xhigh) 독립 헌터 → 맹신 X 재현으로 확정만 수정 → FP-safe → 양-레벨 회귀가드(selftest+e2e-core) → 게시본 재실증.
+
+### 이 minor 에 묶인 gate 표면 sweep (전부 이미 patch 배포됨 — 안정 marker + 통합)
+- **scan secrets (1.35.14):** 복합키(`DB_PASSWORD=`)/JSON 따옴표키(`"password":"x"`)/Django `SECRET_KEY`/개인키 변종 미탐 + 로컬 DB 기본자격·사전-단어 FP 억제.
+- **encoding check (1.35.15):** 🔴 파괴적 `--apply` 가 CP949 파일에 BOM 만 붙여 손상시키던 것 차단(유효-UTF-8 만 BOM) + 순수-ASCII `.bat` FP + `.cmd` 미스캔 FN + BOM+깨진본문 은폐 FN.
+- **lazy detect (1.35.16):** 안티-치트 우회 3종(status=completed evidence 회피, 아포스트로피/멀티라인 TODO 오판, 쓰레기 evidence) + 비-JS 테스트러너 FP.
+- **audit (1.35.17):** 유저-프로젝트 FP 4종(`readme_synced` category error, `.env*` glob 무지, "rest" 오인, threshold-0 footgun).
+
+### 독립 클린룸 리뷰 반영 (블라인드 리뷰어 2명, 게시본 1.35.17 → 맹신 X 재현)
+- **`--json` 성공 경로 무결성 (리뷰어 B, P2).** `task update`/`plan add`/`rule verify`/`reuse find` 가 `--json` 이어도 **성공 시 평문** 출력(에러 경로는 이미 구조화) → JSON 소비 스크립트가 성공 경로에서만 크래시. `task add`(1.9.413) 와 동일 emitter 로 4곳 보강. 재현 확정.
+- **`migrate --force` 문구 정직화 (리뷰어 A, P2).** `--guide` 가 `--force` 를 "비파괴, 기존 내용 보존"이라 표기했으나 실제로는 관리 `.md` 를 템플릿으로 **교체**(기존 내용은 `.harness/archive` 백업, in-place 보존 아님) → 문구를 정직하게 수정(커스텀 보존은 `--force` 없이 migrate/`update --yes` 안내). 재현 확정.
+
+### 클린룸 발견 — 1.36.1 후속 백로그 (재현 확정했으나 behavior 변경이라 안정 릴리스에 미포함)
+- **`feature add|show|link|impact` 가 positional `[path]` 무시 + CWD 에 stray `.harness` 스캐폴딩 (리뷰어 A, P2).** name 이 positional 이라 경로가 name 으로 흡수됨(`feature list` 는 1.9.412 로 이미 positional path 지원). arg-parsing 변경이라 focused 후속에서 처리.
+- **`health`/`doctor`/`check` 가 손상된 `.harness/*.json` 에도 healthy 보고 (리뷰어 A, P2, fails-safe).** 상태파일 JSON 무결성 미검증(크래시는 없음 — graceful) → 진단 명령에 무결성 체크 추가는 신규 기능이라 후속.
+
+### 검증
+- selftest 273. e2e-core **31**(플래그십 행위 + 클린룸 회귀). full e2e 384. 독립 리뷰어 2명이 확증: 에러경로 --json 무결성·exit code·injection·비파괴 마이그레이션(--force 제외)·team deploy 이중게이트 모두 **PASS**. 게시본 1.36.0 재실증. **R-0006 안정 marker.**
+
 ## 1.35.17 — 2026-07-07 — codex 협업 라운드 ⑦: audit 적대적 헌트 — 유저-프로젝트 FP 4종 (gate 표면 sweep 완결)
 
 **사용자 지시 "codex와 협업" 라운드 ⑦ — gate 임베드 마지막 미헌트 표면 `audit`.** audit 은 유저의 실제 프로젝트를 점검하므로 FP 가 `--strict` gate 를 거짓 실패시킴. 자체 프로브 + codex(gpt-5.5 xhigh) 교차. 재현으로 확정한 유저-프로젝트 FP 4종 수정. **이로써 gate 5체크(verify/audit/scan secrets/encoding/lazy detect) + gate 구성 + contract 전 표면 적대적 헌트 완주.**

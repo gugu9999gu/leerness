@@ -5881,6 +5881,45 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.2 회귀 (클린룸 리뷰, UR-0184): feature add/show/link/impact 도 trailing positional path 인식 —
+//   기존엔 add 가 모든 non-flag positional 을 NAME 으로 join → 경로가 이름에 흡수 + 비-프로젝트 cwd 에 stray .harness scaffold(조용한 오독).
+//   fix: --path > path-like positional > cwd; add 의 NAME 은 _parseAddTitle 로 절단; 미초기화 dir 은 _requireInit 게이트(scaffold 대신 에러).
+total++;
+{
+  let ok = false;
+  try {
+    const target = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-featpos-t-'));
+    const outsider = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-featpos-x-'));  // 비-프로젝트 cwd
+    cp.spawnSync(process.execPath, [CLI, 'init', target, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const at = (dir, a) => cp.spawnSync(process.execPath, [CLI, ...a], { encoding: 'utf8', timeout: 20000, cwd: dir });
+    const graphOf = (dir) => { try { return fs.readFileSync(path.join(dir, '.harness', 'feature-graph.md'), 'utf8'); } catch { return ''; } };
+    // (a) 비-프로젝트 cwd 에서 positional path → 타깃 등록 + 이름 clean(경로 흡수 없음)
+    at(outsider, ['feature', 'add', 'PosFeat', target]);
+    const addedClean = /^## F-\d{4} PosFeat\s*$/m.test(graphOf(target));
+    // (b) 비-프로젝트 cwd 에 stray .harness scaffold 안 함
+    const noStray = !fs.existsSync(path.join(outsider, '.harness'));
+    // (c) 경로 미지정 + 미초기화 dir → init 게이트 exit 1 + scaffold 없음
+    const orphan = at(outsider, ['feature', 'add', 'Orphan']);
+    const gated = orphan.status === 1 && !fs.existsSync(path.join(outsider, '.harness'));
+    // (d) show/link/impact 도 positional path 존중 (cwd 아님)
+    at(outsider, ['feature', 'add', 'PosFeat2', target]);
+    const showP = at(outsider, ['feature', 'show', 'F-0001', target]);
+    const showOk = showP.status === 0 && /PosFeat/.test(showP.stdout || '');
+    at(outsider, ['feature', 'link', 'F-0001', '--affects', 'F-0002', target]);
+    const impactP = at(outsider, ['feature', 'impact', 'F-0001', target]);
+    const impactOk = impactP.status === 0 && /F-0002/.test(impactP.stdout || '');
+    // (e) --path 우선 보존(회귀 없음) + --files 의 path-like 값이 root 로 오인 안 됨
+    at(outsider, ['feature', 'add', 'ViaFlag', '--files', './src/x.js', '--path', target]);
+    const flagOk = /^## F-\d{4} ViaFlag\s*$/m.test(graphOf(target)) && !fs.existsSync(path.join(outsider, '.harness'));
+    fs.rmSync(target, { recursive: true, force: true });
+    fs.rmSync(outsider, { recursive: true, force: true });
+    ok = addedClean && noStray && gated && showOk && impactOk && flagOk;
+    if (!ok) console.log(`   [featpos 디버그] clean=${addedClean} noStray=${noStray} gated=${gated} show=${showOk} impact=${impactOk} flag=${flagOk}`);
+  } catch {}
+  console.log(ok ? '✓ B(1.36.2) 클린룸: feature add/show/link/impact positional path 인식 + 미초기화 scaffold 게이트 (UR-0184)' : '✗ feature positional path 실패');
+  if (!ok) failed++;
+}
+
 // 1.9.413 회귀 (6th외부평가 codex P2, UR-0101): action 명령 --json 구조화 출력 + 데이터 영속 + 사람용 보존
 total++;
 {
@@ -6916,6 +6955,40 @@ total++;
     if (!ok) console.log(`   [dpm 디버그] inflated=${inflatedFails} json=${jsonOk} all=${allOk} spec=${specParsed} truthful=${truthfulOk} growth=${growthOk} partialFP=${partialRatioFpOk}`);
   } catch {}
   console.log(ok ? '✓ B(1.35.7) UR-0013: declared-pass 부풀림 게이팅(human/json/--all) + spec 리포터 파싱 + 실행≥주장 무벌점' : '✗ declared-pass mismatch 게이팅 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.1 회귀 (클린룸 리뷰 FN): 상태파일 JSON 무결성 — 손상 .harness/*.json 을 audit(warning)/health(degraded)/check(exit 1) 가 표면화.
+//   배경: 그레이스풀 폴백이 깨진 상태 JSON 을 "healthy"/exit 0 으로 감추던 false-negative(health/doctor/check 전부). 클린(유효 JSON)엔 무오탐.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-si-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const auditJson = () => { const r = cp.spawnSync(process.execPath, [CLI, 'audit', d, '--json'], { encoding: 'utf8', timeout: 40000, env: { ...process.env, LEERNESS_OFFLINE: '1' } }); try { return JSON.parse(r.stdout); } catch { return null; } };
+    const healthJson = () => { const r = cp.spawnSync(process.execPath, [CLI, 'health', d, '--json'], { encoding: 'utf8', timeout: 40000 }); try { return JSON.parse(r.stdout); } catch { return null; } };
+    const checkExit = () => cp.spawnSync(process.execPath, [CLI, 'check', d], { encoding: 'utf8', timeout: 40000 }).status;
+    const hasK = (j, k) => !!(j && (j.findings || []).some(f => f.kind === k));
+    // 클린: 무오탐 + check exit 0 + health.stateIntegrity.ok
+    const cleanAudit = !hasK(auditJson(), 'corrupted_state_json');
+    const cleanCheck = checkExit() === 0;
+    const hc0 = healthJson();
+    const cleanHealth = !!(hc0 && hc0.checks && hc0.checks.stateIntegrity && hc0.checks.stateIntegrity.ok === true);
+    // 손상 주입(리뷰 재현): manifest.json → 깨진 JSON
+    fs.writeFileSync(path.join(d, '.harness', 'manifest.json'), '{ this is : not valid json ]]]');
+    const badAudit = hasK(auditJson(), 'corrupted_state_json');
+    const badCheck = checkExit() === 1;
+    const hc1 = healthJson();
+    const badHealth = !!(hc1 && hc1.healthy === false && hc1.checks.stateIntegrity && hc1.checks.stateIntegrity.corruptedCount === 1 && (hc1.checks.stateIntegrity.corrupted || []).some(c => c.file === '.harness/manifest.json'));
+    // audit --strict: warning 승격 → exit 1 (게이트 친화)
+    const strictExit = cp.spawnSync(process.execPath, [CLI, 'audit', d, '--strict', '--no-npm-audit'], { encoding: 'utf8', timeout: 40000, env: { ...process.env, LEERNESS_OFFLINE: '1' } }).status;
+    const strictBlocks = strictExit === 1;
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = cleanAudit && cleanCheck && cleanHealth && badAudit && badCheck && badHealth && strictBlocks;
+    if (!ok) console.log(`   [si 디버그] cleanA=${cleanAudit} cleanC=${cleanCheck} cleanH=${cleanHealth} badA=${badAudit} badC=${badCheck} badH=${badHealth} strict=${strictBlocks}`);
+  } catch (e) {}
+  console.log(ok ? '✓ B(1.36.1) 클린룸 FN: 상태 JSON 손상 표면화(audit finding/health degraded/check exit 1 + --strict 승격) + 클린 무오탐' : '✗ 상태 JSON 무결성 회귀가드 실패');
   if (!ok) failed++;
 }
 

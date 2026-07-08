@@ -196,6 +196,70 @@ console.log('# leerness core (test:core) — flagship behavioral guarantees');
   }
 }
 
+// (10) --json 무결성: 변형/조회 명령이 성공 경로에서도 유효 JSON (1.36.0, 클린룸 리뷰 B)
+{
+  const d = fresh();
+  const okJson = (r) => { try { JSON.parse((r.stdout || '').trim()); return true; } catch { return false; } };
+  run(d, ['task', 'add', 'sample']);
+  assert('json: task update --status done --json → valid JSON (was plain text)', okJson(run(d, ['task', 'update', 'T-0002', '--status', 'done', '--json'])));
+  assert('json: plan add --json → valid JSON', okJson(run(d, ['plan', 'add', 'a milestone', '--json'])));
+  assert('json: rule verify --json → valid JSON', okJson(run(d, ['rule', 'verify', '--json'])));
+  assert('json: reuse find --json → valid JSON', okJson(run(d, ['reuse', 'find', 'button', '--json'])));
+  fs.rmSync(d, { recursive: true, force: true });
+}
+
+// (11) 상태파일 JSON 무결성: 손상 .harness/*.json 을 audit/health/check 가 표면화 (클린룸 리뷰 FN, 1.36.1)
+//   회귀 배경: 그레이스풀 폴백(try{JSON.parse}catch{빈상태})이 깨진 상태 JSON 을 "healthy"/exit 0 으로 감추던 false-negative.
+{
+  const d = fresh();
+  const auditJson = (dir) => { const r = cp.spawnSync(process.execPath, [CLI, 'audit', dir, '--json'], { encoding: 'utf8', timeout: 40000, env: { ...process.env, LEERNESS_OFFLINE: '1' } }); try { return JSON.parse(r.stdout); } catch { return null; } };
+  const healthJson = (dir) => { const r = cp.spawnSync(process.execPath, [CLI, 'health', dir, '--json'], { encoding: 'utf8', timeout: 40000 }); try { return JSON.parse(r.stdout); } catch { return null; } };
+  const hasK = (j, k) => !!(j && (j.findings || []).some(f => f.kind === k));
+  // FP 가드: 클린(유효 JSON) 프로젝트 → 손상 finding 없음 + check exit 0 + health.stateIntegrity.ok
+  assert('state-integrity: clean project → no corrupted_state_json (FP guard)', !hasK(auditJson(d), 'corrupted_state_json'));
+  assert('state-integrity: clean project → check exit 0', run(d, ['check']).status === 0);
+  {
+    const hc = healthJson(d);
+    assert('state-integrity: clean project → health.stateIntegrity.ok', !!(hc && hc.checks && hc.checks.stateIntegrity && hc.checks.stateIntegrity.ok === true));
+  }
+  // 손상 주입: manifest.json 을 깨진 JSON 으로 덮어씀 (리뷰 재현과 동일)
+  fs.writeFileSync(path.join(d, '.harness', 'manifest.json'), '{ this is : not valid json ]]]');
+  assert('state-integrity: corrupted manifest.json → audit corrupted_state_json finding', hasK(auditJson(d), 'corrupted_state_json'));
+  assert('state-integrity: corrupted manifest.json → check exit 1 (hard gate)', run(d, ['check']).status === 1);
+  {
+    const hc = healthJson(d);
+    const flagged = !!(hc && hc.healthy === false && hc.checks && hc.checks.stateIntegrity && hc.checks.stateIntegrity.corruptedCount === 1 && (hc.checks.stateIntegrity.corrupted || []).some(c => c.file === '.harness/manifest.json'));
+    assert('state-integrity: corrupted manifest.json → health degraded (healthy=false + stateIntegrity)', flagged);
+  }
+  // 비-크래시 확인: 손상 상태에서도 audit/health/check 는 예외 없이 종료(위 spawn 이 이미 parse 됨 → 크래시 아님)
+  fs.rmSync(d, { recursive: true, force: true });
+}
+
+// (12) feature add/show 가 trailing positional path 를 존중 — cwd 조용한 오독 + stray .harness scaffold 차단 (클린룸 리뷰 UR-0184, 1.36.2)
+//   회귀 배경: add 가 모든 non-flag positional 을 NAME 으로 join → 경로가 이름에 흡수 + 비-프로젝트 cwd 에 stray .harness scaffold(조용한 오염).
+{
+  const target = fresh();                                                          // 초기화된 타깃 프로젝트
+  const outsider = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-nonproj-'));     // 비-프로젝트 cwd (init 안 함)
+  const at = (dir, args) => cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 40000, cwd: dir });
+  const graphOf = (dir) => { try { return fs.readFileSync(path.join(dir, '.harness', 'feature-graph.md'), 'utf8'); } catch { return ''; } };
+  // (a) 비-프로젝트 cwd 에서 `feature add "이름" <타깃경로>` → 타깃에 등록 + 이름에 경로 흡수 없음(node heading title clean)
+  at(outsider, ['feature', 'add', 'PosPathFeat', target]);
+  assert('feature add: positional path → 타깃 등록 + 이름 clean(경로 흡수 없음)', /^## F-\d{4} PosPathFeat\s*$/m.test(graphOf(target)));
+  // (b) 비-프로젝트 cwd 에 stray .harness scaffold 안 함 (조용한 오염 차단)
+  assert('feature add: positional path → 비-프로젝트 cwd 에 .harness scaffold 안 함', !fs.existsSync(path.join(outsider, '.harness')));
+  // (c) 경로 미지정 + 비-프로젝트 dir → init 게이트로 exit 1 + scaffold 없음 (option b)
+  const orphan = at(outsider, ['feature', 'add', 'OrphanFeat']);
+  assert('feature add: 미초기화 dir(경로 미지정) → init 게이트 exit 1 + scaffold 없음', orphan.status === 1 && !fs.existsSync(path.join(outsider, '.harness')));
+  // (d) show 도 positional path 존중 — 타깃 노드 조회(cwd 아님)
+  const showP = at(outsider, ['feature', 'show', 'F-0001', target]);
+  assert('feature show: positional path → 타깃 노드 조회(cwd 아님)', showP.status === 0 && /PosPathFeat/.test(showP.stdout || ''));
+  // (e) --path 는 여전히 우선(회귀 없음)
+  at(outsider, ['feature', 'add', 'ViaFlag', '--path', target]);
+  assert('feature add: --path 우선 보존(회귀 없음)', /^## F-\d{4} ViaFlag\s*$/m.test(graphOf(target)) && !fs.existsSync(path.join(outsider, '.harness')));
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.rmSync(outsider, { recursive: true, force: true });
+}
+
 const dur = ((Date.now() - t0) / 1000).toFixed(1);
 console.log(`\nCore result: ${total - failed}/${total} passed · ${dur}s`);
 if (failed > 0) process.exit(1);
