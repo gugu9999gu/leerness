@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.36.7 — 2026-07-09 — handoff 넛지: 세션-시작 리추얼 사각지대 메꿈 (메타-테스트 도그푸드)
+
+**자기 행동 실측(세션 트랜스크립트 파싱)에서 드러난 사각지대를 leerness 기능으로 메꿈.** "세션이 길수록 leerness를 덜 참조하는가?" 가설을 트랜스크립트로 측정 → **반박**(workspace 사용은 세션 길이가 아니라 작업 종류에 종속). 단 실재 gap 1건: **compaction/resume 직후 세션-시작 `leerness handoff`를 건너뜀**(요약이 "resume mid-task"를 지시). 그 신호는 handoff 출력에만 떴는데 정작 handoff 를 안 돌리는 게 문제.
+
+- 신규: `_handoffNudgeState`/`_emitHandoffNudge` — `task add`/`decision add`(에이전트가 작업 중 실제로 실행하는 명령) 시, 마지막 handoff 가 오래됨(gap > 120분)이면 **한 줄 넛지**: `⚠ 마지막 handoff N시간 전 — 'leerness handoff .' 권장`.
+- FP 가드: **기록 있음 + gap > 임계**일 때만(신규 프로젝트=last-handoff.json 부재 → 넛지 안 함). `--json`/`--quiet` 오염 없음. opt-out `LEERNESS_NO_HANDOFF_NUDGE=1`.
+- 정본 `_getLastHandoffGap` 재사용(스키마 일관). selftest 281(행위: 오래됨→넛지·최근/부재→없음·opt-out) + e2e 통과.
+
 ## 1.36.6 — 2026-07-09 — 정직성 백로그 소진: 강제력/종합-health 문구 정직화 (심층 감사 P2/P3 후속)
 
 **1.36.5 심층 정직성 감사가 확인했으나 미수정으로 남긴 P2/P3 강제력·과장 문구를 정직화.**

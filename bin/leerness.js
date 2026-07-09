@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.6';
+const VERSION = '1.36.7';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3973,6 +3973,26 @@ function _selfTestCases() {
       const policyHonest = self.includes('실제 셸 실행을 가로채진 않음'); // policy enforce: 차단 판정이 실행 가로채기 아님을 명시
       return tokenHonest && idHonest && policyHonest;
     } },
+    { name: 'handoff 넛지 (1.36.7, 메타-테스트 도그푸드): 오래된 handoff→넛지 · 최근/부재→없음 · opt-out 존중 (행위)', run: () => {
+      const os = require('os');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lz-hn-'));
+      const hd = path.join(dir, '.harness'); fs.mkdirSync(hd);
+      const lhf = path.join(hd, 'last-handoff.json');
+      const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
+      try {
+        const noneOk = _handoffNudgeState(dir) === null;                                 // 부재 → 넛지 없음(신규 프로젝트 FP 방지)
+        fs.writeFileSync(lhf, JSON.stringify({ last: iso(3 * 3600 * 1000), history: [iso(3 * 3600 * 1000)] }));
+        const st = _handoffNudgeState(dir);
+        const staleOk = !!st && st.gapMin >= 120;                                        // 3h 오래됨 → 넛지
+        fs.writeFileSync(lhf, JSON.stringify({ last: iso(5 * 60 * 1000), history: [iso(5 * 60 * 1000)] }));
+        const freshOk = _handoffNudgeState(dir) === null;                                // 5min 최근 → 없음
+        process.env.LEERNESS_NO_HANDOFF_NUDGE = '1';
+        fs.writeFileSync(lhf, JSON.stringify({ last: iso(3 * 3600 * 1000), history: [] }));
+        const optOutOk = _handoffNudgeState(dir) === null;                               // opt-out 존중
+        delete process.env.LEERNESS_NO_HANDOFF_NUDGE;
+        return noneOk && staleOk && freshOk && optOutOk;
+      } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } }
+    } },
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
       const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;
       try {
@@ -7000,6 +7020,29 @@ function _getLastHandoffGap(root) {
     return { hasLast: true, lastAt: j.last, gapMin, expected, isMiss, isLong, history: j.history || [] };
   } catch { return { hasLast: false }; }
 }
+// 1.36.7 (메타-테스트 도그푸드): 세션에서 작업 중(task/decision add)인데 handoff 가 오래됨/미실행이면 넛지.
+//   실측(트랜스크립트)에서 확인된 사각지대: compaction/resume 후 세션-시작 handoff 리추얼을 건너뜀 → 컨텍스트 미적재.
+//   그 신호는 handoff 출력에만 떴는데 정작 handoff 를 안 돌리는 게 문제라, 에이전트가 실제로 실행하는 명령에 넛지를 노출.
+//   FP 가드: 기록 있음 + gap > 임계(기본 120분)일 때만(신규 프로젝트=기록 없음 → 넛지 안 함). opt-out: LEERNESS_NO_HANDOFF_NUDGE=1.
+const HANDOFF_NUDGE_MIN = 120;
+function _handoffNudgeState(root, thresholdMin = HANDOFF_NUDGE_MIN) {
+  if (process.env.LEERNESS_NO_HANDOFF_NUDGE === '1') return null;
+  try {
+    const g = _getLastHandoffGap(root);
+    if (g && g.hasLast && g.gapMin > thresholdMin) return { gapMin: g.gapMin };
+  } catch {}
+  return null;
+}
+function _emitHandoffNudge(root) {
+  if (has('--json') || has('--quiet')) return;   // 구조화/조용 모드 오염 방지
+  const s = _handoffNudgeState(root);
+  if (!s) return;
+  const L = _uiLang(root); const tt = (ko, en) => (L === 'en' ? en : ko);
+  const koAge = s.gapMin < 120 ? `${s.gapMin}분` : `${Math.floor(s.gapMin / 60)}시간`;
+  const enAge = s.gapMin < 120 ? `${s.gapMin}min` : `${Math.floor(s.gapMin / 60)}h`;
+  log(tt(`  ⚠ 마지막 handoff ${koAge} 전 — 이 세션 컨텍스트 최신화를 위해 'leerness handoff .' 권장 (끄기: LEERNESS_NO_HANDOFF_NUDGE=1)`,
+    `  ⚠ last handoff ${enAge} ago — run 'leerness handoff .' to refresh this session's context (off: LEERNESS_NO_HANDOFF_NUDGE=1)`));
+}
 
 // 1.9.198: B축 (멀티 Sub-Agent 오케스트라) 보강 — handoff 에서 task keyword 매칭 best agent 추천
 //   1.9.193 에서 agents multi --execute 결과를 lessons.md 에 기록 → 이를 keyword 매칭하여 추출
@@ -7701,6 +7744,7 @@ function taskAdd(root, text) {
   if (has('--json')) { log(JSON.stringify({ ok: true, id, status: _normTaskStatus(arg('--status', 'requested')), request: text })); return; }
   ok(`task added: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
+  _emitHandoffNudge(root);   // 1.36.7: 세션 handoff 미실행/오래됨 넛지 (compaction/resume 사각지대)
   // 1.9.177: task add 자동 review-request trigger (사용자 명시 1.9.176 자동화).
   //   사용자가 task 추가 시 자동으로 사전 검토 — 충돌/재사용/효율/권장 단계 결과를 등록 직후 표시.
   //   opt-out: --no-review 또는 env LEERNESS_NO_AUTO_REVIEW=1, 또는 status=in-progress/done 같은 운영 메타.
@@ -8192,6 +8236,7 @@ function decisionAdd(root, title) {
   ok(`decision added: ${title}`);
   // 1.9.43+ handoff lessons 회수 흐름과 자동 통합 (decisions.md fuzzy 매칭됨)
   _autoRoadmap(absRoot(root), 'data-change');
+  _emitHandoffNudge(root);   // 1.36.7: 세션 handoff 미실행/오래됨 넛지 (compaction/resume 사각지대)
 }
 
 // 1.9.6: 옛 link 손실 row를 plan.md milestone과 자동 매칭 제안/복구.
@@ -21178,5 +21223,6 @@ module.exports = {
   _vcImplIsEmpty, _VC_EMPTY_SHELL_RE,
   // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈 — 단위 테스트. 1.19.2: 파일→도메인 매핑(완료-검증 advisory)
   LENS_CATALOG, lensCmd, _lensDomainsForFiles, _mergeLensCatalog, _loadProjectLenses, _effectiveLensCatalog,
-  _isDbContentText, _anyDbContentInFiles, _withDbDomain
+  _isDbContentText, _anyDbContentInFiles, _withDbDomain,
+  _handoffNudgeState, _getLastHandoffGap, _recordLastHandoff
 };
