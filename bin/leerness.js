@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.8';
+const VERSION = '1.36.9';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -4001,6 +4001,21 @@ function _selfTestCases() {
       const noBareOk = !self.includes(bareSelfHeal);
       const nudgeInUpdate = /task updated: \$\{id\}`\);[\s\S]{0,200}_emitHandoffNudge\(root\)/.test(self);  // update 경로 넛지 와이어
       return encScopeOk && selfHealOk && noBareOk && nudgeInUpdate;
+    } },
+    { name: 'optimism [DB] FP 수정 (1.36.9, dogfood 백로그): SQL-migration만 있는 정직한 주장 무오탐 + 허위 주장 검출 유지 (행위)', run: () => {
+      const os = require('os');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lz-odb-'));
+      try {
+        fs.mkdirSync(path.join(dir, 'db'), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'db', '001_create.sql'), 'CREATE TABLE product (id INTEGER PRIMARY KEY, stock INTEGER NOT NULL);\n');
+        const ct = _scanCodeForPatterns(dir);
+        const scannedOk = ct.includes('CREATE TABLE');                                            // .sql 이 스캔됨
+        const honest = _detectOptimism('db/001_create.sql 마이그레이션 적용 완료', ct);
+        const noFp = !honest.some(s => s.kind === 'DB');                                          // 정직한 SQL 주장 무오탐
+        const fake = _detectOptimism('사용자 데이터를 DB에 저장 완료, INSERT 500건', 'const x = 1;');
+        const stillDetects = fake.some(s => s.kind === 'DB');                                     // 허위 주장 검출 유지(FN 없음)
+        return scannedOk && noFp && stillDetects;
+      } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } }
     } },
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
       const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;
@@ -11758,7 +11773,7 @@ function _scanCodeForPatterns(root) {
     for (const e of entries) {
       if (budget <= 0) return;
       if (e.isDirectory()) { if (!SKIP.test(e.name) && !e.name.startsWith('.')) walk(path.join(p, e.name), depth + 1); continue; }
-      if (!/\.(js|ts|jsx|tsx|gd|cs|py|rb|go|rs|java|php|kt|swift)$/i.test(e.name)) continue;
+      if (!/\.(js|mjs|cjs|ts|jsx|tsx|gd|cs|py|rb|go|rs|java|php|kt|swift|sql|prisma)$/i.test(e.name)) continue;   // 1.36.9: sql/prisma(+mjs/cjs) — SQL-migration만 있는 정직한 done 주장이 [DB] optimism 오탐되던 FP 수정
       // 1.12.5 (15th 버그헌트 P2, UR-0019): stat-before-read — 이전엔 read() 후 budget 검사라 대형 파일 1개가 통째 메모리에 로드(200MB→RSS 464MB). 남은 budget 초과 파일은 읽지 않고 건너뜀.
       try { const fp2 = path.join(p, e.name); if (fs.statSync(fp2).size > budget) continue; const t = read(fp2); combined += t + '\n'; budget -= t.length; } catch {}
     }
@@ -21235,5 +21250,6 @@ module.exports = {
   // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈 — 단위 테스트. 1.19.2: 파일→도메인 매핑(완료-검증 advisory)
   LENS_CATALOG, lensCmd, _lensDomainsForFiles, _mergeLensCatalog, _loadProjectLenses, _effectiveLensCatalog,
   _isDbContentText, _anyDbContentInFiles, _withDbDomain,
-  _handoffNudgeState, _getLastHandoffGap, _recordLastHandoff
+  _handoffNudgeState, _getLastHandoffGap, _recordLastHandoff,
+  _detectOptimism, _scanCodeForPatterns
 };

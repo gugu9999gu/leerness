@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.9 — 2026-07-09 — optimism [DB] FP 수정: SQL-migration 프로젝트의 정직한 done 주장 무오탐 (dogfood 백로그)
+
+**stock-service 도그푸드에서 두 번 마주친 선재 FP 소진(깨끗한 1.36.2에서도 동일 재현 확인 — 이번 세션 회귀 아님).**
+
+- 증상: `.sql` 마이그레이션만으로 구성된 정직한 done 주장(evidence 에 `migration` 언급)이 verify-claim/lazy-detect 의 optimism 검사에서 `[DB] 주장 있는데 코드 호출 흔적 없음` 으로 오탐 → 기본 게이트 false-fail.
+- 원인(재현으로 확정): `_scanCodeForPatterns` 확장자 필터에 `.sql`/`.prisma` 부재(스캔 결과 0바이트) **그리고** DB codeRe 가 JS/ORM 관용구만 인식(raw SQL 미인식) — 둘 다 충족돼야 오탐이 사라짐.
+- 수정: 스캐너 확장자 `+= sql|prisma|mjs|cjs` · DB codeRe `+= CREATE TABLE|ALTER TABLE|INSERT INTO|node:sqlite|DatabaseSync|better-sqlite3` (검출 관대화 — 1.12.4 다언어 확장과 같은 안전 방향).
+- 정밀도 검증: 허위 DB 주장(코드에 DB 흔적 없음)은 여전히 `[DB]` 검출(FN 미발생, 행위 확인). selftest 283 (신규 행위 케이스: SQL 스캔 + 정직 무오탐 + 허위 검출 유지) + e2e 통과.
+- 부수: `_detectOptimism`/`_scanCodeForPatterns` export(테스트 가능성, require.main 가드 패턴).
+
 ## 1.36.8 — 2026-07-09 — 정직성 marginal 소진 + 넛지 확장 (심층 감사 P3 완결)
 
 **심층 정직성 감사(1.36.5)의 마지막 marginal P3 2건 소진 + handoff 넛지를 실사용 최다 명령으로 확장.**
