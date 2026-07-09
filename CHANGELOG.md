@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.5 — 2026-07-09 — 정직성 감사: 성숙도 판정 과장 보정 (심층 멀티에이전트 정직성 감사 채택)
+
+**게시본 1.36.4에 9개 사용자대면 표면 정직성 감사(멀티에이전트 35 + 적대적 반증) → 가장 강하게 수렴한 P1(성숙도 판정 과장) 보정.**
+
+- `leerness health` 6능력 매트릭스: `overall N% (production-ready)` 는 **소스 문자열 존재 + 의존성 설치 여부 휴리스틱**의 평균일 뿐(미설치 의존성도 부분점수). "측정된/독립 성숙도 판정"으로 오독되지 않도록 **인라인 캐비엇** 추가.
+- mcpTools 근거의 `CRUD 완성/CRUD complete` 제거 — 도구 수(≥50)는 기능적 CRUD 완결성을 증명하지 않음.
+- REPL 환영창의 **하드코딩된 "72% production-ready · MCP 54 도구"** 고정/구식 수치 제거 → `leerness health` 참조로 대체.
+- selftest 279 (신규 정직성 소스가드) + e2e 통과. self-ref 트랩 회피(split-literal).
+- 정직 고지: 감사가 확인한 나머지 P2/P3 문구(policy "차단" enforce-ON 협조성, KO identity "허위완료 차단" vs EN, README "measures the real count" 방향성, "독립 검수"↔cross-model, encoding "passed" 스코프)는 정직성 백로그로 추적 — 이번 릴리스는 최고 수렴 P1에 집중.
+
 ## 1.36.4 — 2026-07-09 — database 렌즈 recall: 내용 기반 DB 감지 (dogfood FN) — 평범한 이름의 DB 모듈도 렌즈 노출
 
 **도그푸드에서 발견한 recall gap(FN) 소진.** 실사용(재고 서비스) 도중, `_lensDomainsForFiles` 가 **경로 휴리스틱**만 써서 `models/`·`.repository.`·`.sql` 등 관습적 이름의 파일만 `database` 도메인에 매핑함을 경험적으로 확인했다 — `inventory.safe.mjs`·`orders.occ.mjs` 처럼 실제로 SQLite 를 다루지만 이름에 단서가 없는 모듈은 `database` 렌즈가 **전혀 노출되지 않았다**(`["code"]` 로만 분류).

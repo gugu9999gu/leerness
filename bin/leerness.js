@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.4';
+const VERSION = '1.36.5';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3954,6 +3954,16 @@ function _selfTestCases() {
       const d = read(dp);
       // 1.35.12: 정직성 마커 강화 — clean-room 프레이밍 + heuristic 한계 + self-administered(독립 아님) + 재현 레시피.
       return /clean-room/i.test(d) && /heuristic, not semantic/i.test(d) && /self-administered/i.test(d) && /npm i leerness@/.test(d);
+    } },
+    { name: '정직성 감사 (1.36.5, 심층감사 채택): capability matrix 성숙도 판정 휴리스틱 캐비엇 + 하드코딩%/완결성 과장 제거 (소스 가드)', run: () => {
+      const hp = path.join(path.dirname(__filename), '..', 'lib', 'health.js');
+      const h = exists(hp) ? read(hp) : '';
+      if (!h) return true;  // 설치본에 lib 없으면 스킵(안전)
+      const caveatOk = /휴리스틱 자가평가/.test(h) && /heuristic self-assessment/i.test(h);   // production-ready 판정 정직화
+      const noCrudComplete = !/CRUD complete/i.test(h);                                        // 도구수→기능완결성 과장 제거
+      const fabricated = '72% ' + 'production-ready';                                          // split-literal: self-ref 트랩 회피
+      const noHardcodedMaturity = !read(__filename).includes(fabricated);                      // REPL 하드코딩 성숙도% 제거
+      return caveatOk && noCrudComplete && noHardcodedMaturity;
     } },
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
       const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;
@@ -18656,7 +18666,7 @@ async function _agentRepl(root, opts) {
   log(C.green('  │  ') + C.dim('• Bridge slash :web/:pc/:lsp REPL 즉시 호출 + LSP 다국어 5종') + C.green('        │'));
   log(C.green('  │  ') + C.dim('• review-request 사전 검토 + task add 자동 trigger') + C.green('                  │'));
   log(C.green('  │  ') + C.dim('• release sync-main 자동 npm publish (.env NPM_TOKEN)') + C.green('               │'));
-  log(C.green('  │  ') + C.dim('• 6 능력 매트릭스 72% production-ready · MCP 54 도구') + C.green('               │'));
+  log(C.green('  │  ') + C.dim('• 6 능력 매트릭스 자가평가 (leerness health 로 상세)') + C.green('            │'));
   log(C.bold(C.green('  └─────────────────────────────────────────────────────────────────────┘')));
   log('');
   log(C.bold('  Available Slash (5 그룹)'));
