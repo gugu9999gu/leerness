@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.36.4 — 2026-07-09 — database 렌즈 recall: 내용 기반 DB 감지 (dogfood FN) — 평범한 이름의 DB 모듈도 렌즈 노출
+
+**도그푸드에서 발견한 recall gap(FN) 소진.** 실사용(재고 서비스) 도중, `_lensDomainsForFiles` 가 **경로 휴리스틱**만 써서 `models/`·`.repository.`·`.sql` 등 관습적 이름의 파일만 `database` 도메인에 매핑함을 경험적으로 확인했다 — `inventory.safe.mjs`·`orders.occ.mjs` 처럼 실제로 SQLite 를 다루지만 이름에 단서가 없는 모듈은 `database` 렌즈가 **전혀 노출되지 않았다**(`["code"]` 로만 분류).
+
+- 신규: `_isDbContentText` / `_anyDbContentInFiles` / `_withDbDomain` — verify-claim 이 주장 파일의 **내용**에 실제 DB 드라이버 import(`node:sqlite`/`pg`/`mysql2`/`better-sqlite3`/`typeorm`/`prisma` 등) 또는 산문엔 거의 없는 완결형 SQL 문장(`SELECT…FROM…WHERE`/`UPDATE…SET…WHERE`/`CREATE TABLE`/`INSERT INTO`/`ON CONFLICT`/`BEGIN IMMEDIATE`)이 있으면 `database` 렌즈를 보강 노출.
+- FP 가드: 단일 키워드(`database`/`select`/`from`/`where` = 영어 단어)만으로는 안 켬 — 드라이버 import 또는 근접 다중 SQL 키워드 조합만. 산문/비-DB 코드 회귀 0(selftest 행위 검증).
+- 안전: 코드 파일(.js/.mjs/.ts/.py 등)만, 512KB 이하만 읽음. path-기반 매핑은 그대로 두고 **추가 보강**만(비파괴). advisory 렌즈라 게이트 아님.
+- codex FN검수 채택: **root 제한**(evidence 경로의 `../`·절대경로로 워크스페이스 밖 파일 읽기 차단, 심볼릭 링크 스킵 — P2) + **테스트 파일 제외**(SQL 담은 test 파일이 `test` 렌즈를 축출하지 않도록 — P3).
+- 알려진 한계(정직 고지): 드라이버 import 가 타 파일에 있는 ORM 메서드체인 파일은 단일파일 내용분석으론 여전히 미탐(P3); `SELECT…FROM…WHERE` 형태의 드문 산문은 advisory FP 가능(저해, 게이트 아님).
+- 검증: 실제 dogfood 4개 DB 모듈 전부 감지(전 false→true), 산문/README FP 0, ReDoS SAFE(<25ms @320KB), root 트래버설·테스트 제외 행위 검증. selftest 278 + full e2e 통과.
+
 ## 1.36.3 — 2026-07-08 — DB 안전성 렌즈 코어 승격 (race condition + ACID) — 사용자 명시 + codex 검수 채택
 
 - 신규 내장 품질 렌즈 도메인 `database` (8 자기질문: lost update / check-then-act TOCTOU / atomicity / DB 제약 / isolation+retry / durability / distribution). `leerness lens database` 로 호출, verify-claim 이 DB 파일 변경 시 인라인 노출.

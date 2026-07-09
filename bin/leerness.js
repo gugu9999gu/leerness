@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.3';
+const VERSION = '1.36.4';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3914,6 +3914,40 @@ function _selfTestCases() {
         && eq(F(['README.md']), ['docs']);
       return catOk && mapOk;
     } },
+    { name: 'DB 렌즈 recall (dogfood FN, 1.36.4): 내용기반 감지 — 평범한 이름의 DB 모듈 잡고 산문 FP 0 (행위)', run: () => {
+      const T = _isDbContentText, W = _withDbDomain;
+      const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      // 잡아야: 드라이버 import + 완결형 SQL 문장(SELECT…FROM…WHERE / UPDATE…SET…WHERE) + DDL/트랜잭션 토큰
+      const hit = T("import { DatabaseSync } from 'node:sqlite'")
+        && T("const pg = require('pg')")
+        && T("db.prepare('SELECT * FROM product WHERE id = ?')")
+        && T("db.prepare('UPDATE product SET stock = stock - 1 WHERE id = ?')")
+        && T("db.exec('BEGIN IMMEDIATE')") && T("INSERT INTO orders(x) VALUES(?)") && T("ON CONFLICT(idem_key) DO NOTHING");
+      // FP 0: database/select/from/where 가 산문에 흩어져 있어도 단일 키워드·부분조합은 안 켠다
+      const noFp = !T('// connect to the database and select from the menu')
+        && !T('const total = items.reduce((a,b)=>a+b,0)')
+        && !T('return items.filter(x => x.from && x.where)')
+        && !T('updateProfile(user) // app update, no SQL');
+      // 병합: database 우선 노출 + 최대 2 캡
+      const mergeOk = eq(W(['code']), ['database', 'code']) && eq(W(['code', 'design']), ['database', 'code']) && eq(W([]), ['database']);
+      return hit && noFp && mergeOk;
+    } },
+    { name: 'DB 렌즈 recall 보안·특례 (codex FN검수 P2/P3, 1.36.4): _anyDbContentInFiles root 제한 + 테스트파일 제외 (행위)', run: () => {
+      const os = require('os');
+      const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'lz-dbc-'));
+      const dir = path.join(parent, 'proj'); fs.mkdirSync(dir);
+      try {
+        const sql = "import { DatabaseSync } from 'node:sqlite'\ndb.prepare('SELECT * FROM t WHERE id=?')\n";
+        fs.writeFileSync(path.join(dir, 'svc.mjs'), sql);
+        fs.writeFileSync(path.join(dir, 'svc.test.mjs'), sql);          // 테스트 파일(동일 DB 내용)
+        fs.writeFileSync(path.join(parent, 'outside.mjs'), sql);        // root 밖(존재+DB내용)
+        const plain = _anyDbContentInFiles(['svc.mjs'], dir) === true;
+        const testExcluded = _anyDbContentInFiles(['svc.test.mjs'], dir) === false;   // codex P3: 테스트 제외
+        const traversalBlocked = _anyDbContentInFiles(['../outside.mjs'], dir) === false   // codex P2: ../ 거부
+          && _anyDbContentInFiles([path.join(parent, 'outside.mjs')], dir) === false;      // 절대경로 거부
+        return plain && testExcluded && traversalBlocked;
+      } finally { try { fs.rmSync(parent, { recursive: true, force: true }); } catch { /* ignore */ } }
+    } },
     { name: 'GPT-5.5 평가 #5 (1.19.1, UR-0009) + 정직성 calibration (1.35.12): 클린룸 문서 공개 + 한계 명시 + self-administered 라벨 (행위)', run: () => {
       const dp = path.join(path.dirname(__filename), '..', 'docs', 'clean-room-evaluations.md');
       if (!exists(dp)) return true;  // 패키지에 없으면 스킵(설치본 안전)
@@ -4832,6 +4866,44 @@ function _lensDomainsForFiles(files) {
   // 순서: database 먼저(DB 파일이면 동시성/트랜잭션 질문을 인라인 노출), 그다음 code/design/docs/test. 중복 제거 + 최대 2개(클러터 방지).
   const ordered = ['database', 'code', 'design', 'docs', 'test'].filter(d => out.includes(d));
   return ordered.slice(0, 2);
+}
+// 1.36.x (dogfood FN): path 휴리스틱은 관습적 이름(models/·.repository.·.sql 등)만 잡아, 평범한 이름의 DB 모듈
+//   (inventory.safe.mjs · orders.occ.mjs 처럼 DB 를 다루지만 이름에 단서 없음)을 놓친다. 내용 기반으로 보강한다:
+//   claimed 파일이 실제 DB 드라이버를 import 하거나 산문엔 안 나오는 명백한 SQL DDL/트랜잭션 토큰을 담으면 database 렌즈를 켠다.
+//   FP 가드: "database" 라는 단어만으로는 안 켠다 — 드라이버 import 또는 CREATE TABLE/INSERT INTO/ON CONFLICT/BEGIN IMMEDIATE/FOR UPDATE 급 토큰이 있어야 함.
+const _DB_IMPORT_RE = /(?:require\s*\(|\bfrom|\bimport)\s*['"](?:node:sqlite|better-sqlite3|sqlite3|pg|postgres|mysql2?|knex|typeorm|sequelize|drizzle-orm|@prisma\/client|mongodb|mongoose|ioredis|redis|oracledb|tedious|@libsql\/client)['"]/i;
+//   단일 SQL 키워드는 산문 FP 위험(select/update/from/where 는 영어 단어) → 산문에 거의 없는 조합만: DDL/트랜잭션 토큰 또는
+//   완결형 문장 패턴(SELECT…FROM…WHERE / UPDATE…SET…WHERE / DELETE FROM…WHERE). 근접 조합이라 산문 FP 가 급감한다.
+const _DB_SQL_RE = /\b(?:CREATE\s+TABLE|INSERT\s+INTO|ON\s+CONFLICT|BEGIN\s+(?:IMMEDIATE|TRANSACTION|DEFERRED|EXCLUSIVE)|FOR\s+UPDATE)\b|\bSELECT\b[\s\S]{0,120}?\bFROM\b[\s\S]{0,120}?\bWHERE\b|\bUPDATE\b[\s\S]{0,80}?\bSET\b[\s\S]{0,200}?\bWHERE\b|\bDELETE\s+FROM\b[\s\S]{0,120}?\bWHERE\b/i;
+function _isDbContentText(txt) {
+  return typeof txt === 'string' && (_DB_IMPORT_RE.test(txt) || _DB_SQL_RE.test(txt));
+}
+// claimed 파일 중 코드 파일을 읽어 DB 내용 신호가 있으면 true. 미존재/큰 파일(>512KB)은 건너뜀(안전·비용).
+//   보안(codex P2): 경로는 root 안으로 제한 — 절대경로/../ 트래버설로 워크스페이스 밖 파일을 읽지 않는다. 심볼릭 링크는 스킵.
+//   codex P3: 테스트 파일은 DB 증강에서 제외 — test 렌즈를 축출하지 않도록(_lensDomainsForFiles 의 test 특례와 일관).
+function _anyDbContentInFiles(files, root) {
+  const arr = Array.isArray(files) ? files : [];
+  const base = path.resolve(root || process.cwd());
+  const _testRe = /(^|[\\/])(test_[^\\/]+\.[a-z]+|[^\\/]+[._-]test\.[a-z]+|[^\\/]+\.spec\.[a-z]+)$|(^|[\\/])tests?[\\/]/i;
+  for (const f of arr) {
+    if (typeof f !== 'string') continue;
+    if (!/\.(js|mjs|cjs|ts|tsx|py|rb|go|rs|java|cs|php)$/i.test(f)) continue;
+    if (_testRe.test(f)) continue;                                  // 테스트 파일 → test 렌즈 유지(DB 증강 제외)
+    try {
+      const p = path.resolve(base, f);
+      if (p !== base && !p.startsWith(base + path.sep)) continue;   // root 밖(../·절대경로) 거부
+      const st = fs.lstatSync(p);                                    // 심볼릭 링크는 따라가지 않음(isFile()=false → 스킵)
+      if (!st.isFile() || st.size > 512 * 1024) continue;
+      if (_isDbContentText(fs.readFileSync(p, 'utf8'))) return true;
+    } catch { /* 미존재/권한 → 무시 */ }
+  }
+  return false;
+}
+// database 를 도메인 목록에 병합(우선 노출 + 최대 2 캡). database 가 code/design 등보다 앞선다.
+function _withDbDomain(domains) {
+  const merged = Array.isArray(domains) ? domains.slice() : [];
+  if (!merged.includes('database')) merged.unshift('database');
+  return ['database', 'code', 'design', 'docs', 'test'].filter(d => merged.includes(d)).slice(0, 2);
 }
 function lensCmd(domain, opts = {}) {
   const jsonMode = !!opts.json || has('--json');
@@ -11072,7 +11144,9 @@ function verifyClaimCmd(root, taskId, opts = {}) {
     log(t(`  ℹ 한계: 테스트 통과는 "의미적 구현 정확성"을 보장하지 않음 — evidence 가 해당 주장(수정 파일/테스트)을 직접 링크해야 신뢰도↑.`, `  ℹ Limit: passing tests do not guarantee "semantic correctness" — evidence should directly link the claimed files/tests for higher confidence.`));
     // 1.19.2 (UR-0003 렌즈 완전판 v2): 완료-검증 순간에 분야별 자기질문 advisory — 주장 파일 확장자 기반(결정적).
     //   기계검증(파일/테스트/스텁)을 통과해도 "사람이 보기에 좋은가"는 별개 → AI 가 스스로 답하도록 권장(advisory, 게이트 아님).
-    const _lensDoms = _lensDomainsForFiles(files);
+    let _lensDoms = _lensDomainsForFiles(files);
+    // 1.36.x (dogfood FN): path 가 놓친 평범한 이름의 DB 모듈 — claimed 파일 내용에 DB 신호가 있으면 database 렌즈 보강.
+    if (!_lensDoms.includes('database') && _anyDbContentInFiles(files, root)) _lensDoms = _withDbDomain(_lensDoms);
     if (_lensDoms.length) {
       const _lensCat = _effectiveLensCatalog(root);  // 1.19.3: 프로젝트 커스텀 질문도 포함
       log('');
@@ -21087,5 +21161,6 @@ module.exports = {
   // 1.18.2: verify-claim 위장 스텁(빈 export 껍데기) 판정 — 단위 테스트
   _vcImplIsEmpty, _VC_EMPTY_SHELL_RE,
   // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈 — 단위 테스트. 1.19.2: 파일→도메인 매핑(완료-검증 advisory)
-  LENS_CATALOG, lensCmd, _lensDomainsForFiles, _mergeLensCatalog, _loadProjectLenses, _effectiveLensCatalog
+  LENS_CATALOG, lensCmd, _lensDomainsForFiles, _mergeLensCatalog, _loadProjectLenses, _effectiveLensCatalog,
+  _isDbContentText, _anyDbContentInFiles, _withDbDomain
 };
