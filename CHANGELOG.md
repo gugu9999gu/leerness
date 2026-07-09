@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.8 — 2026-07-09 — 정직성 marginal 소진 + 넛지 확장 (심층 감사 P3 완결)
+
+**심층 정직성 감사(1.36.5)의 마지막 marginal P3 2건 소진 + handoff 넛지를 실사용 최다 명령으로 확장.**
+
+- **encoding "passed" 스코프 명시** — `passed` 는 전체 트리가 아니라 allowlist 텍스트 확장자(≤5MB)만 검사한 결과 → `encoding check passed (scope: allowlisted text extensions, files ≤5MB)`.
+- **"self-heal" 범위 정직화** — identity/about/README 의 `자동 감사 + self-heal` 이 secret 자동치유를 암시 → 실제 범위 명시: `self-heal: drift·idempotency --auto-fix, encoding --apply; secret 은 감지 전용`.
+- **넛지 확장** — `task update`(작업 중 최다 실행 명령)에도 handoff 넛지 노출(1.36.7 add 계열과 동일 가드/opt-out).
+- selftest 282 (신규 소스가드, split-literal self-ref 회피) + e2e 통과. 이로써 1.36.5 심층 감사가 확정한 20건 중 수정 대상 전부 소진(잔여는 과거 CHANGELOG/주석의 역사 기록 — 소급 수정 안 함).
+
 ## 1.36.7 — 2026-07-09 — handoff 넛지: 세션-시작 리추얼 사각지대 메꿈 (메타-테스트 도그푸드)
 
 **자기 행동 실측(세션 트랜스크립트 파싱)에서 드러난 사각지대를 leerness 기능으로 메꿈.** "세션이 길수록 leerness를 덜 참조하는가?" 가설을 트랜스크립트로 측정 → **반박**(workspace 사용은 세션 길이가 아니라 작업 종류에 종속). 단 실재 gap 1건: **compaction/resume 직후 세션-시작 `leerness handoff`를 건너뜀**(요약이 "resume mid-task"를 지시). 그 신호는 handoff 출력에만 떴는데 정작 handoff 를 안 돌리는 게 문제.

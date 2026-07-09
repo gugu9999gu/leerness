@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.7';
+const VERSION = '1.36.8';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -302,7 +302,7 @@ function managedReadmeBlock(project) {
     '- **정책(Policy)** — 8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트',
     '- **인수인계(Handoff)** — 에이전트 간 컨텍스트 표준 전달 + `get_project_context` 1콜 온보딩',
     '- **검증(Verification)** — 근거 기반 완료 검증으로 허위 완료 감지 (권고; CI 게이트 필수화 시 차단)',
-    '- **감사(Audit)** — drift/idempotency/secret/encoding 자동 감사 + self-heal',
+    '- **감사(Audit)** — drift/idempotency/secret/encoding 자동 감사 (self-heal: drift·idempotency --auto-fix, encoding --apply; secret 은 감지 전용)',
     '',
     'AGENTS.md(정적 지침)을 **대체하지 않고 보완**합니다 — 정적 규칙은 AGENTS.md, 동적 상태·검증·인수인계는 leerness. 정체성 조회: `leerness about` (MCP `leerness_about`).',
     '',
@@ -3992,6 +3992,15 @@ function _selfTestCases() {
         delete process.env.LEERNESS_NO_HANDOFF_NUDGE;
         return noneOk && staleOk && freshOk && optOutOk;
       } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } }
+    } },
+    { name: '정직성 marginal 소진 (1.36.8): encoding passed 스코프 명시 + self-heal 범위 정직화 + 넛지 task update 확장 (소스 가드)', run: () => {
+      const self = read(__filename);
+      const encScopeOk = self.includes('encoding check passed (scope: allowlisted text extensions');   // passed 가 전체 트리 아님을 명시
+      const selfHealOk = self.includes('secret 은 감지 전용') && self.includes('secret 감지 전용');       // identity(305) + capabilities(catalog) 양쪽
+      const bareSelfHeal = '자동 감사 + ' + 'self-heal';                                                 // split-literal: 옛 무제한 self-heal 문구 부재
+      const noBareOk = !self.includes(bareSelfHeal);
+      const nudgeInUpdate = /task updated: \$\{id\}`\);[\s\S]{0,200}_emitHandoffNudge\(root\)/.test(self);  // update 경로 넛지 와이어
+      return encScopeOk && selfHealOk && noBareOk && nudgeInUpdate;
     } },
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
       const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;
@@ -7825,6 +7834,7 @@ function taskUpdate(root, id) {
   if (has('--json')) { log(JSON.stringify({ ok: true, ...patch })); return; }
   ok(`task updated: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
+  _emitHandoffNudge(root);   // 1.36.8: 넛지 확장 — 작업 중 가장 자주 실행하는 명령(update)에도 노출
 }
 function taskDrop(root, id) {
   if (!_requireInit(root, 'task drop')) return;  // 1.9.396 (6번째 외부평가/codex P1-B): init 가드
@@ -8616,7 +8626,8 @@ function encodingCheck(root, opts = {}) {
     findings.forEach(f => log(`  ${f.file}  ${f.issue}`));
     process.exitCode = warnings > 0 ? 1 : 0;
   } else {
-    ok('encoding check passed');
+    // 1.36.8 (정직성 marginal): 'passed' 는 전체 트리가 아니라 allowlist 텍스트 확장자(≤5MB)만 검사한 결과임을 명시.
+    ok('encoding check passed (scope: allowlisted text extensions, files ≤5MB)');
   }
 }
 
@@ -18139,7 +18150,7 @@ function _leernessIdentity() {
       { key: 'policy', ko: '정책', desc: '8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트' },
       { key: 'handoff', ko: '인수인계', desc: '에이전트 간 컨텍스트 표준 전달 (Claude→Codex→Goose), get_project_context 1콜 온보딩' },
       { key: 'verification', ko: '검증', desc: '근거 기반 완료 검증 (verify-claim --require-evidence) — 허위 완료 감지 (권고; CI 게이트 시 차단)' },
-      { key: 'audit', ko: '감사', desc: 'drift/idempotency/secret/encoding 자동 감사 + self-heal (--auto-fix)' }
+      { key: 'audit', ko: '감사', desc: 'drift/idempotency/secret/encoding 자동 감사 (self-heal: drift·idempotency --auto-fix, encoding --apply; secret 감지 전용)' }
     ],
     complements: 'AGENTS.md(정적 지침)을 대체하지 않고 보완 — 정적 규칙/명령/금지는 AGENTS.md, 동적 상태·기억·검증·인수인계는 leerness',
     entryPoints: { context: 'leerness context  (MCP get_project_context)', mcp: 'leerness mcp serve', adapter: 'leerness adapter <tool>' },
