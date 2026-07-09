@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.5';
+const VERSION = '1.36.6';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -301,7 +301,7 @@ function managedReadmeBlock(project) {
     '- **기억(Memory)** — 프로젝트 상태/결정/진행을 `.harness/` 에 영속화',
     '- **정책(Policy)** — 8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트',
     '- **인수인계(Handoff)** — 에이전트 간 컨텍스트 표준 전달 + `get_project_context` 1콜 온보딩',
-    '- **검증(Verification)** — 근거 기반 완료 검증으로 허위 완료 차단',
+    '- **검증(Verification)** — 근거 기반 완료 검증으로 허위 완료 감지 (권고; CI 게이트 필수화 시 차단)',
     '- **감사(Audit)** — drift/idempotency/secret/encoding 자동 감사 + self-heal',
     '',
     'AGENTS.md(정적 지침)을 **대체하지 않고 보완**합니다 — 정적 규칙은 AGENTS.md, 동적 상태·검증·인수인계는 leerness. 정체성 조회: `leerness about` (MCP `leerness_about`).',
@@ -3964,6 +3964,14 @@ function _selfTestCases() {
       const fabricated = '72% ' + 'production-ready';                                          // split-literal: self-ref 트랩 회피
       const noHardcodedMaturity = !read(__filename).includes(fabricated);                      // REPL 하드코딩 성숙도% 제거
       return caveatOk && noCrudComplete && noHardcodedMaturity;
+    } },
+    { name: '정직성 감사 후속 (1.36.6, 백로그 소진): handoff .env 토큰 + KO identity/policy 강제력 문구 정직화 (소스 가드)', run: () => {
+      const self = read(__filename);
+      const oldHealthTok = '⚕ ' + 'health:';                   // split-literal(escape+concat): 옛 종합-health 토큰 라벨 self-ref 회피
+      const tokenHonest = self.includes('🔐 .env:') && !self.includes(oldHealthTok);   // handoff 토큰: 종합 health 오칭 → .env 보호로 정직화
+      const idHonest = self.includes('허위 완료 감지 (권고');           // KO identity/about: 차단(하드) → 감지(권고; CI 시 차단)
+      const policyHonest = self.includes('실제 셸 실행을 가로채진 않음'); // policy enforce: 차단 판정이 실행 가로채기 아님을 명시
+      return tokenHonest && idHonest && policyHonest;
     } },
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
       const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;
@@ -9109,19 +9117,17 @@ function handoff(root) {
         const skillCnt = Object.keys(all).length;
         if (skillCnt > 0) parts.push(`📚 ${skillCnt} skills`);
       } catch {}
-      // 6) 1.9.93: health 종합 (보안 + drift 결합 1 토큰)
-      // 헤드라인의 다른 신호는 이미 계산됨 → inline 추론 (자식 spawn 없음)
+      // 6) 1.9.93 → 1.36.6 정직화: 이 토큰은 .env 의 gitignore 보호 여부만 본다 — 종합 health 가 아니다
+      //   (커밋된 시크릿/drift/상태무결성은 `leerness health`/`scan secrets`/`drift check` 로 확인). 라벨을 '🔐 .env' 로 정직화.
       try {
-        // 보안 위험 ↔ healthy 판정 (간단)
         const envPath = path.join(root, '.env');
-        let healthIssue = false;
+        let envUnprotected = false;
         if (exists(envPath)) {
           const giText = exists(path.join(root, '.gitignore')) ? read(path.join(root, '.gitignore')) : '';
           const giLines = giText.split('\n').map(l => l.trim());
-          if (!(giLines.includes('.env') || giLines.includes('/.env'))) healthIssue = true;
+          if (!(giLines.includes('.env') || giLines.includes('/.env'))) envUnprotected = true;
         }
-        // 헤드라인 끝에 health 토큰
-        parts.push(healthIssue ? '⚕ health: ⚠' : '⚕ health: ✓');
+        parts.push(envUnprotected ? '🔐 .env: ⚠' : '🔐 .env: ✓');   // .env 보호만 — 종합 health 아님
       } catch {}
       // 7) 1.9.113: Memory Write Surface 5종 카운트 (T=tasks in-progress / D=decisions / R=rules active / P=plan milestones / L=lessons)
       try {
@@ -18024,7 +18030,7 @@ function policyCmd(root, sub, ...args) {
   if (json) { log(JSON.stringify({ tiers: PERMISSION_TIERS, allowedTier: p.allowedTier, enforce: p.enforce, powerfulCommands: POWERFUL_COMMANDS.map(c => ({ cmd: c.cmd, requiredTier: _requiredTier(c.cmd) })) }, null, 2)); return; }
   log(`# leerness policy (1.9.281, UR-0034) — 권한 등급`);
   log(`등급(위험 오름차순): ${PERMISSION_TIERS.join(' < ')}`);
-  log(`허용 등급: ${p.allowedTier} · enforce: ${p.enforce ? '🔴 ON (초과 명령 차단)' : '🟢 OFF (advisory only, 기본)'}`);
+  log(`허용 등급: ${p.allowedTier} · enforce: ${p.enforce ? '🔴 ON (초과 명령 = 차단 판정 + exit 1 신호 · 실제 셸 실행을 가로채진 않음)' : '🟢 OFF (advisory only, 기본)'}`);
   log('');
   log(`## 주의 명령 요구 등급`);
   for (const c of POWERFUL_COMMANDS) { const rt = _requiredTier(c.cmd); const al = _policyAllows(p.allowedTier, rt); log(`  ${al ? '🟢' : (p.enforce ? '🔴' : '🟡')} ${c.cmd.padEnd(22)} → ${rt}`); }
@@ -18087,7 +18093,7 @@ function _leernessIdentity() {
       { key: 'memory', ko: '기억', desc: '프로젝트 상태/결정/진행을 .harness/ 에 영속화 (task/decision/lesson/plan; 선택 state substrate 는 .leerness/)' },
       { key: 'policy', ko: '정책', desc: '8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트' },
       { key: 'handoff', ko: '인수인계', desc: '에이전트 간 컨텍스트 표준 전달 (Claude→Codex→Goose), get_project_context 1콜 온보딩' },
-      { key: 'verification', ko: '검증', desc: '근거 기반 완료 검증 (verify-claim --require-evidence) — 허위 완료 차단' },
+      { key: 'verification', ko: '검증', desc: '근거 기반 완료 검증 (verify-claim --require-evidence) — 허위 완료 감지 (권고; CI 게이트 시 차단)' },
       { key: 'audit', ko: '감사', desc: 'drift/idempotency/secret/encoding 자동 감사 + self-heal (--auto-fix)' }
     ],
     complements: 'AGENTS.md(정적 지침)을 대체하지 않고 보완 — 정적 규칙/명령/금지는 AGENTS.md, 동적 상태·기억·검증·인수인계는 leerness',
