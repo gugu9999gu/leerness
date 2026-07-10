@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.9';
+const VERSION = '1.36.10';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -4015,6 +4015,21 @@ function _selfTestCases() {
         const fake = _detectOptimism('사용자 데이터를 DB에 저장 완료, INSERT 500건', 'const x = 1;');
         const stillDetects = fake.some(s => s.kind === 'DB');                                     // 허위 주장 검출 유지(FN 없음)
         return scannedOk && noFp && stillDetects;
+      } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } }
+    } },
+    { name: 'FILE_RE 백슬래시 경로 (1.36.10, 선재 백로그): Windows 경로 추출+정규화 · forward 회귀 0 · FP 0 (행위)', run: () => {
+      const os = require('os');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lz-bs-'));
+      const hd = path.join(dir, '.harness'); fs.mkdirSync(hd);
+      fs.mkdirSync(path.join(dir, 'src'));
+      fs.writeFileSync(path.join(dir, 'src', 'thing.mjs'), 'export const x = 1;\n// real impl with enough content to not be a stub\nexport function go(){ return x + 1; }\n');
+      try {
+        // 백슬래시 evidence 의 done 주장 → 파일 존재 검사가 통과해야 함(이전엔 디렉터리 소실로 false-fail)
+        fs.writeFileSync(path.join(hd, 'progress-tracker.md'),
+          '| ID | Status | Request | Evidence | Next Action | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | 작업 | src\\thing.mjs 수정 완료 | - | 2026-07-09 |\n');
+        const r = verifyClaimCmd(dir, 'T-0001', { collect: true });
+        const extractedOk = r && Array.isArray(r.reasons) && !r.reasons.includes('files-missing');
+        return extractedOk;
       } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } }
     } },
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
@@ -10888,8 +10903,11 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   // 1.9.21: 설정/메타 파일 확장자 추가 — Godot export_presets.cfg 등 false negative 보완
   // 1.18.2: java|php|mjs|cjs 추가 — _VC_CODE_EXT 와 정합(이전엔 .java/.php 임플 주장이 추출조차 안 돼 스텁/존재 검사를 무검사 통과).
   const FILE_EXTS = 'webmanifest|dockerfile|properties|tscn|tres|godot|json5|prisma|java|jsx|tsx|yaml|html|scss|sass|less|gltf|conf|json|toml|lock|mdx|xml|css|svg|yml|cfg|ini|env|php|sql|mjs|cjs|md|js|ts|gd|cs|py|rb|go|rs|kt|sh|h';
-  const FILE_RE = new RegExp(`(?:[A-Za-z][A-Za-z0-9_-]*\\/)?[A-Za-z][\\w./-]*\\.(?:${FILE_EXTS})\\b`, 'g');
-  const filePatterns = evidence.match(FILE_RE) || [];
+  // 1.36.10 (선재 백로그): Windows 백슬래시 경로 지원 — 'src\\inventory.mjs' 가 'inventory.mjs' 로,
+  //   'db\\migrations\\001_create.sql' 이 'create.sql' 로 잘려 추출돼 존재 검사가 false-fail 하던 결함.
+  //   구분자에 \\ 허용 + 추출 후 / 로 정규화(하류의 git diff 비교·렌즈 매핑은 / 기준).
+  const FILE_RE = new RegExp(`(?:[A-Za-z][A-Za-z0-9_-]*[\\/\\\\])?[A-Za-z][\\w./\\\\-]*\\.(?:${FILE_EXTS})\\b`, 'g');
+  const filePatterns = (evidence.match(FILE_RE) || []).map(f => f.replace(/\\/g, '/'));
   // 중복 제거 + "tests/test.js" 같은 결과를 유지 (이미 `..` 없으니 그대로)
   const files = Array.from(new Set(filePatterns));
   // 1.9.20: 테스트 수 파싱 확장 — 한국어 + jest/mocha/tap/vitest

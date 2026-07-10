@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.36.10 — 2026-07-09 — FILE_RE Windows 백슬래시 경로 지원 (마지막 선재 백로그 소진)
+
+**verify-claim 의 주장-파일 추출이 Windows 백슬래시 경로를 잘라먹던 선재 결함(전 확장자 공통, codex 6차 core-diff 리뷰에서 지적 후 backlog).**
+
+- 증상(충실 재현): evidence `src\thing.mjs` → `thing.mjs` 로(디렉터리 소실 → 존재 검사 false-fail), `db\migrations\001_create.sql` → `create.sql` 로(숫자 시작 세그먼트까지 소실) 추출.
+- 수정: `FILE_RE` 구분자에 `\\` 허용 + 추출 직후 `/` 정규화(하류의 git diff 비교·렌즈 도메인 매핑은 `/` 기준이라 일관).
+- 검증: 백슬래시/다단/혼합 6케이스 전부 정확 추출·정규화, forward-슬래시 회귀 0, 버전 문자열(`1.36.9`)·확장자 없는 경로(`C:\Users\…`) FP 0. selftest 284 (신규 행위 케이스: 백슬래시 evidence done 주장이 files-missing 없이 통과) + e2e 통과.
+
 ## 1.36.9 — 2026-07-09 — optimism [DB] FP 수정: SQL-migration 프로젝트의 정직한 done 주장 무오탐 (dogfood 백로그)
 
 **stock-service 도그푸드에서 두 번 마주친 선재 FP 소진(깨끗한 1.36.2에서도 동일 재현 확인 — 이번 세션 회귀 아님).**
