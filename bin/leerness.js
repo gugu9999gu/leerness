@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.10';
+const VERSION = '1.36.11';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -4032,6 +4032,26 @@ function _selfTestCases() {
         return extractedOk;
       } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } }
     } },
+    { name: '17th 클린룸 리뷰 (1.36.11): deps --json failJson + UNC 꼬리매치 스킵 + DB렌즈 prose FP 제거 + en 렌즈 i18n (행위+소스)', run: () => {
+      const self = read(__filename);
+      // P1-A: deps 워크스페이스-없음 경로 failJson 배선 (소스 가드)
+      const depsJsonOk = self.includes("failJson(has('--json'), 'no_workspace_projects'");
+      // P1-B: UNC/꼬리 매치 스킵 — \\src\thing.mjs 는 추출 안 됨(무관 로컬 경로 검증 차단), 정상 백슬래시는 유지 (행위)
+      const ev = String.fromCharCode(92) + String.fromCharCode(92) + 'src' + String.fromCharCode(92) + 'thing.mjs 그리고 src' + String.fromCharCode(92) + 'other.mjs 수정';
+      const FE = 'mjs|js';
+      const FR = new RegExp(`(?:[A-Za-z][A-Za-z0-9_-]*[\\/\\\\])?[A-Za-z][\\w./\\\\-]*\\.(?:${FE})\\b`, 'g');
+      const got = [];
+      for (const m of ev.matchAll(FR)) { const p = m.index > 0 ? ev[m.index - 1] : ''; if (p === '\\' || p === '/') continue; got.push(m[0].replace(/\\/g, '/')); }
+      const uncOk = JSON.stringify(got) === JSON.stringify(['src/other.mjs']);
+      // P2-A: prose FP 제거 + recall 유지 (행위)
+      const proseOk = !_isDbContentText('// select from the menu where appropriate')
+        && !_isDbContentText('<div>Select from the menu where needed</div>')
+        && _isDbContentText("db.prepare('select * from t where id = ?')")            // 인용 소문자 SQL recall 유지
+        && _isDbContentText('SELECT id FROM users WHERE active = 1');                 // 대문자 SQL recall 유지
+      // P2-B: en 렌즈 i18n (소스 가드)
+      const enLensOk = self.includes('(_en && l.questionsEn && l.questionsEn[0]) || l.questions[0]');
+      return depsJsonOk && uncOk && proseOk && enLensOk;
+    } },
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
       const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;
       try {
@@ -4951,9 +4971,14 @@ function _lensDomainsForFiles(files) {
 const _DB_IMPORT_RE = /(?:require\s*\(|\bfrom|\bimport)\s*['"](?:node:sqlite|better-sqlite3|sqlite3|pg|postgres|mysql2?|knex|typeorm|sequelize|drizzle-orm|@prisma\/client|mongodb|mongoose|ioredis|redis|oracledb|tedious|@libsql\/client)['"]/i;
 //   단일 SQL 키워드는 산문 FP 위험(select/update/from/where 는 영어 단어) → 산문에 거의 없는 조합만: DDL/트랜잭션 토큰 또는
 //   완결형 문장 패턴(SELECT…FROM…WHERE / UPDATE…SET…WHERE / DELETE FROM…WHERE). 근접 조합이라 산문 FP 가 급감한다.
-const _DB_SQL_RE = /\b(?:CREATE\s+TABLE|INSERT\s+INTO|ON\s+CONFLICT|BEGIN\s+(?:IMMEDIATE|TRANSACTION|DEFERRED|EXCLUSIVE)|FOR\s+UPDATE)\b|\bSELECT\b[\s\S]{0,120}?\bFROM\b[\s\S]{0,120}?\bWHERE\b|\bUPDATE\b[\s\S]{0,80}?\bSET\b[\s\S]{0,200}?\bWHERE\b|\bDELETE\s+FROM\b[\s\S]{0,120}?\bWHERE\b/i;
+//   1.36.11 (클린룸 P2-A): 완결형 문장은 산문("// select from the menu where …", JSX 텍스트)에도 나올 수 있어
+//   **대문자 키워드(case-sensitive)** 또는 **따옴표/백틱 문맥(인용 시작 40자 내)** 일 때만 인정 — 실제 코드의 SQL 은
+//   거의 항상 둘 중 하나(관례적 대문자 또는 문자열 리터럴)라 recall 손실 없이 prose FP 를 제거.
+const _DB_SQL_RE = /\b(?:CREATE\s+TABLE|INSERT\s+INTO|ON\s+CONFLICT|BEGIN\s+(?:IMMEDIATE|TRANSACTION|DEFERRED|EXCLUSIVE)|FOR\s+UPDATE)\b/i;
+const _DB_STMT_UPPER_RE = /\bSELECT\b[\s\S]{0,120}?\bFROM\b[\s\S]{0,120}?\bWHERE\b|\bUPDATE\b[\s\S]{0,80}?\bSET\b[\s\S]{0,200}?\bWHERE\b|\bDELETE\s+FROM\b[\s\S]{0,120}?\bWHERE\b/;   // case-sensitive
+const _DB_STMT_QUOTED_RE = /['"`][^'"`\n]{0,40}?\bselect\b[\s\S]{0,120}?\bfrom\b[\s\S]{0,120}?\bwhere\b|['"`][^'"`\n]{0,40}?\bupdate\b[\s\S]{0,80}?\bset\b[\s\S]{0,200}?\bwhere\b|['"`][^'"`\n]{0,40}?\bdelete\s+from\b[\s\S]{0,120}?\bwhere\b/i;
 function _isDbContentText(txt) {
-  return typeof txt === 'string' && (_DB_IMPORT_RE.test(txt) || _DB_SQL_RE.test(txt));
+  return typeof txt === 'string' && (_DB_IMPORT_RE.test(txt) || _DB_SQL_RE.test(txt) || _DB_STMT_UPPER_RE.test(txt) || _DB_STMT_QUOTED_RE.test(txt));
 }
 // claimed 파일 중 코드 파일을 읽어 DB 내용 신호가 있으면 true. 미존재/큰 파일(>512KB)은 건너뜀(안전·비용).
 //   보안(codex P2): 경로는 root 안으로 제한 — 절대경로/../ 트래버설로 워크스페이스 밖 파일을 읽지 않는다. 심볼릭 링크는 스킵.
@@ -10907,7 +10932,14 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   //   'db\\migrations\\001_create.sql' 이 'create.sql' 로 잘려 추출돼 존재 검사가 false-fail 하던 결함.
   //   구분자에 \\ 허용 + 추출 후 / 로 정규화(하류의 git diff 비교·렌즈 매핑은 / 기준).
   const FILE_RE = new RegExp(`(?:[A-Za-z][A-Za-z0-9_-]*[\\/\\\\])?[A-Za-z][\\w./\\\\-]*\\.(?:${FILE_EXTS})\\b`, 'g');
-  const filePatterns = (evidence.match(FILE_RE) || []).map(f => f.replace(/\\/g, '/'));
+  // 1.36.11 (클린룸 P1-B): 매치 직전 문자가 경로 구분자면 더 긴 경로의 "꼬리"만 잡은 것(UNC \\\\server\\..., 드라이브 X:\\...,
+  //   숫자 시작 선두 세그먼트 등) — 잘린 꼬리를 루트-상대 경로로 검증하면 무관한 로컬 파일이 통과(우회성). 그런 매치는 버린다.
+  const filePatterns = [];
+  for (const m of evidence.matchAll(FILE_RE)) {
+    const prev = m.index > 0 ? evidence[m.index - 1] : '';
+    if (prev === '\\' || prev === '/') continue;   // suffix-of-longer-path(UNC \\srv\..., C:\..., URL) → skip. ':' 는 "파일:src/x.js" 정상 케이스라 스킵 안 함
+    filePatterns.push(m[0].replace(/\\/g, '/'));
+  }
   // 중복 제거 + "tests/test.js" 같은 결과를 유지 (이미 `..` 없으니 그대로)
   const files = Array.from(new Set(filePatterns));
   // 1.9.20: 테스트 수 파싱 확장 — 한국어 + jest/mocha/tap/vitest
@@ -11258,7 +11290,9 @@ function verifyClaimCmd(root, taskId, opts = {}) {
       log(t(`  🧭 품질 렌즈 (완료 선언 전 자문 — advisory, 게이트 아님):`, `  🧭 Quality lens (self-ask before declaring done — advisory, not a gate):`));
       for (const d of _lensDoms) {
         const l = _lensCat[d];
-        if (l) log(`     · ${d}(${l.title}): ${l.questions[0]}`);
+        // 1.36.11 (클린룸 P2-B): en 로케일에서 렌즈 제목/질문이 한국어로 새던 것 — titleEn/questionsEn 사용(lensCmd 와 동일 규칙).
+        const _en = _uiLang(root) === 'en';
+        if (l) log(`     · ${d}(${(_en && l.titleEn) || l.title}): ${(_en && l.questionsEn && l.questionsEn[0]) || l.questions[0]}`);
       }
       log(`     ${t('→ 전체 질문', '→ full questions')}: leerness lens ${_lensDoms[0]}`);
     }
@@ -11655,7 +11689,9 @@ function depsImpactCmd(root, targetCapability) {
     process.argv.push('--all-apps');
   }
   const allPaths = _collectWorkspacePaths(root);
-  if (!allPaths.length) return fail('워크스페이스 프로젝트 없음. _apps/* 또는 --include 사용.');
+  // 1.36.11 (클린룸 P1-A): --json 인데 plain-text 로 새던 에러 경로 — failJson 배선 (설치본 selftest 283/284 의 원인:
+  //   dev 트리는 _apps 가 있어 이 분기를 안 타 게이트가 못 잡았음; 클린룸(워크스페이스 없음)에서만 노출되는 환경 의존 경로).
+  if (!allPaths.length) return failJson(has('--json'), 'no_workspace_projects', '워크스페이스 프로젝트 없음. _apps/* 또는 --include 사용.');
 
   // 1) 모든 reuse-map에서 entries + depends-on 엣지 수집
   const allEntries = []; // { project, entry }

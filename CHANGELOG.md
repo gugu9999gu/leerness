@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.36.11 — 2026-07-09 — 17th 클린룸 리뷰 4/4 채택: deps --json 누수 + UNC 우회 + DB렌즈 prose FP + en 렌즈 i18n
+
+**게시본 1.36.10 을 codex 가 클린룸(fresh npm install)에서 행위로만 적대 검증(이 세션 7개 신규 표면) — P1×2, P2×2 전부 명령+출력 증거로 확정, 4/4 수정.**
+
+- **P1-A `deps --json` plain-text 누수** — 워크스페이스-없음 에러 경로가 failJson 미배선 → **설치본 selftest 283/284 실패**의 원인. dev 트리는 `_apps` 가 있어 이 분기를 안 타 게이트가 못 잡는 **환경 의존 경로**였음(클린룸 리뷰의 존재 이유를 재확인). → `no_workspace_projects` 구조화.
+- **P1-B UNC 접두 조용한 변환** — evidence `\\src\thing.mjs` 의 UNC 접두를 벗겨 무관한 로컬 `src/thing.mjs` 를 검증(존재검사 우회성). → 매치 직전이 경로 구분자면 "더 긴 경로의 꼬리"로 보고 추출 제외(드라이브 `C:\...`·URL 꼬리도 함께 차단). `파일:src/x.js` 정상 케이스는 유지.
+- **P2-A DB 렌즈 prose FP** — `// select from the menu where …`(주석)·JSX 텍스트가 렌즈를 발화. → 완결형 SQL 문장은 **대문자 키워드(case-sensitive) 또는 따옴표/백틱 문맥**일 때만 인정 — 실제 코드 SQL 은 거의 항상 둘 중 하나라 recall 손실 없음(인용 소문자·대문자 SQL recall 행위 검증).
+- **P2-B en 로케일 렌즈 한국어 누출** — verify-claim 렌즈 블록이 titleEn/questionsEn 미사용. → lensCmd 와 동일 규칙 적용.
+- codex 검증 통과 표면(수정 불요): handoff 넛지(부패 JSON·미래 타임스탬프·10만 history·--json 무오염·opt-out 전부 견딤), optimism [DB] 수정(빈 .sql 경계 포함), 정직화 문구 4종 잔존 과장 없음.
+- selftest 285 (신규: 4수정 행위+소스 가드) + e2e 통과.
+
 ## 1.36.10 — 2026-07-09 — FILE_RE Windows 백슬래시 경로 지원 (마지막 선재 백로그 소진)
 
 **verify-claim 의 주장-파일 추출이 Windows 백슬래시 경로를 잘라먹던 선재 결함(전 확장자 공통, codex 6차 core-diff 리뷰에서 지적 후 backlog).**
