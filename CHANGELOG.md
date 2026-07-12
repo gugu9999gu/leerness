@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.12 — 2026-07-12 — UR-0009 완결: selftest 견고화 불변식 메타가드 + .gitattributes LF 강제 커밋
+
+**저순위 백로그 UR-0009 (1.12.0 클린룸 exact-match 실패 후속) 3파트 완결.**
+
+- **(1) 멀티라인 needle 전수 점검: CLEAN** — 실제 개행을 포함한 백틱 needle `.includes(` 0건(라인 히트 3건은 needle 텍스트에 이스케이프 `\n` 문자가 든 단일라인 — EOL 무관 견고). 1.12.1 정규식화 이후 재발 없음을 확인하고, **불변식을 메타가드 selftest 로 상시 강제**(실개행 needle 이 다시 생기면 selftest 실패; 스캔 정규식은 charCode 조립으로 self-ref 안전).
+- **(2) .gitattributes LF 강제 커밋** — 파일은 working tree 에 존재했으나 **미추적**이라 다른 클론엔 무효였음(git 은 untracked .gitattributes 도 읽으므로 로컬은 이미 유효 — 과거 커밋의 "CRLF will be replaced by LF" 경고가 증거). 커밋으로 모든 체크아웃에서 bin/lib LF 일관성 보장.
+- **(3) 1.12.0 실패 메커니즘** — 정확한 역사적 재현은 불가(당시 환경 소멸)를 정직 인정. 가설(체크아웃별 EOL/포맷 분산)은 (1) 불변식 강제 + (2) LF 정규화 커밋으로 **원인-계열 자체를 구조적으로 차단** — 증상(1.12.1)과 원인계열(1.36.12) 모두 닫힘.
+- selftest 286 + e2e 통과.
+
 ## 1.36.11 — 2026-07-09 — 17th 클린룸 리뷰 4/4 채택: deps --json 누수 + UNC 우회 + DB렌즈 prose FP + en 렌즈 i18n
 
 **게시본 1.36.10 을 codex 가 클린룸(fresh npm install)에서 행위로만 적대 검증(이 세션 7개 신규 표면) — P1×2, P2×2 전부 명령+출력 증거로 확정, 4/4 수정.**

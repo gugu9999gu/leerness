@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.11';
+const VERSION = '1.36.12';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -4051,6 +4051,17 @@ function _selfTestCases() {
       // P2-B: en 렌즈 i18n (소스 가드)
       const enLensOk = self.includes('(_en && l.questionsEn && l.questionsEn[0]) || l.questions[0]');
       return depsJsonOk && uncOk && proseOk && enLensOk;
+    } },
+    { name: 'selftest 견고화 불변식 (UR-0009, 1.36.12): 실개행 멀티라인 needle includes 금지(전수 0) — 1.12.0 클린룸 exact-match 실패 재발 차단 (메타가드)', run: () => {
+      // 1.12.0 사고: 멀티라인 exact-string includes 가드가 환경별 EOL/포맷 차이로 클린룸에서만 실패(1.12.1 정규식화로 해소).
+      // 이 메타가드는 그 불변식을 상시 강제: 백틱 needle 안에 실제 개행이 든 .includes( 가 다시 생기면 selftest 가 실패한다.
+      // self-ref 안전: 스캔 정규식은 backtick 을 charCode 로 조립 — 이 가드 자신은 실개행 needle 을 포함하지 않는다.
+      const self = read(__filename);
+      const BT = String.fromCharCode(96), NL = String.fromCharCode(10);
+      const re = new RegExp('\\.includes\\(' + BT + '([^' + BT + ']*)' + BT + '\\)', 'g');
+      let m, offenders = 0;
+      while ((m = re.exec(self)) !== null) { if (m[1].includes(NL)) offenders++; }
+      return offenders === 0;
     } },
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
       const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;
