@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.13 — 2026-07-13 — database 렌즈 8→10문항: 9라운드 dogfood playbook 역이식
+
+- **왜**: stock-service 에서 코퍼스 9개 동시성 개념을 실구현-리뷰-재현 루프로 dogfood 한 결과(회고: db-safety-lens/review-playbook.md), 기존 8문항이 다루지 않는 결함 패밀리가 반복 확인됨 — 전부 "그린 테스트는 통과했는데 리뷰가 잡은" 실사건 기반.
+- **추가 9번(KO+EN)**: 감싼 사용자 콜백의 async 이탈(await 강제/thenable 거부 — 아웃박스 sent=1 유실·펜스 밖 늦은 쓰기), 추적 구조의 등록-후-실행(동기 throw 가 반초기화 상태를 보면 원본 에러 삼킴·키 영구 오염), abort 의 완전 장벽(대기열 엔트리·표식·세대 카운터까지; 세대 재검사 없는 중단 획득은 abort 뒤에도 진행), 정리의 identity 가드.
+- **추가 10번(KO+EN)**: 버전/토큰 불변식의 전-라이터 참여(INSERT OR REPLACE 버전 초기화 ABA), 토큰/키 식별자(무표식 LSN 교차-스토어 노출·객체 키 identity), 수량 경계 검증(음수 qty 의 가드 방향 역전), 테스트 정직성(자기보고 라벨 대신 분기 데이터 판별·no-op 변이 실행·활성성 timeout).
+- **병합 cap 8→12**: 내장이 10문항이 되면서 기존 커스텀-병합 cap(8)이 내장 질문을 자르는 잠복 회귀를 함께 제거 (slice 2곳).
+- **selftest**: database 렌즈 케이스를 10문항(KO=EN) + 신규 앵커(thenable/ABA, EN 동형) + "병합이 내장 10을 자르지 않음" 회귀 가드로 갱신.
+- **검증**: selftest 286/286, `lens database` 실렌더 10문항 확인. 정직 한계: 신규 2문항은 단일 코드베이스 field log 에서 온 휴리스틱 질문이지 정적 감지가 아니다(렌즈 전체가 advisory).
+
 ## 1.36.12 — 2026-07-12 — UR-0009 완결: selftest 견고화 불변식 메타가드 + .gitattributes LF 강제 커밋
 
 **저순위 백로그 UR-0009 (1.12.0 클린룸 exact-match 실패 후속) 3파트 완결.**
