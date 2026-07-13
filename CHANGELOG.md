@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.36.16 — 2026-07-13 — 게시본 1.36.15 클린룸 codex 9건 채택: database 렌즈 정직/정밀 + selftest·병합 하드닝
+
+게시본 1.36.13~1.36.15 누적 신규 표면(문항 8→12, cap 16)을 codex 로 적대 리뷰 → 9건(P2/P3) 전부 재현/채택. clean 3축(i18n 패리티·앵커 유일성·크래시 없음).
+
+- **문항 정직화 5건(KO=EN)**: (Q6) MVCC "reads don't block writes"를 non-locking 한정으로·스냅샷 스코프는 격리수준 의존·lost update 는 PG READ COMMITTED 노출이고 PG REPEATABLE READ는 조용한 유실 아닌 직렬화 abort로 정정; SQLITE_BUSY_SNAPSHOT은 busy_timeout 이 아니라 롤백+재시작. (Q9) **자기모순 수정** — abort 장벽이 "세대 카운터를 걷어낸다"고 썼으나, 카운터는 오히려 유지·단조증가해야 stale continuation 을 거부(제거하면 ABA 재유입 — deadlock 라운드 shipped 수정과 정합). (Q11) 단일 락만으론 데드락 사이클 불가(다른 락과 얽힐 때)·파티션 co-location≠순서(in-flight 1+순서보존 프로듀서+sink 시퀀스 필요). (Q12) 상태-조건 UPDATE 만으로 비순환 전이 직렬화; 버전 조건은 상태만으로 stale 구분 불가할 때만.
+- **구조 4건**: (F6) 커스텀 병합 초과분 조용한 절단 → `_droppedCustom` 플래그 + lens 렌더 ⚠ 경고(내장 12는 앞이라 보존, 커스텀만 잘림). (F7) "병합이 12 안 자름" selftest 가 빈 custom 이라 slice 미실행(공허) → 넘치는 custom 주입해 내장12 보존+초과6 절단을 실제 검증. (F8) 단어 하나 앵커가 실질 문항 삭제를 못 잡음 → 문항별 다중절(clause) 판별로 강화(재현: 신 가드는 변이 포착, 구 가드는 놓침). (F9) selftest 이름 "11문항"→"12문항".
+- **검증**: selftest 286/286, F3/F6/F8 프로브 재현확정, 게이트 e2e 386/386, 게시본 클린룸 재실증.
+
 ## 1.36.15 — 2026-07-13 — database 렌즈 11→12문항 + Q6 확장: 매트릭스 partial 6요소 승격
 
 - **왜(37-코퍼스 매트릭스 후속)**: v2 매트릭스가 partial(문항이 인접 개념만 언급)로 정직 기록한 16요소 중 실무 빈도 최상위 두 클러스터를 문항으로 승격.
