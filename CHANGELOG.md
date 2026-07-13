@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.36.14 — 2026-07-13 — database 렌즈 10→11문항: 37-코퍼스 검증 매트릭스가 측정한 커버리지 갭(hot row/부하 계열) 보강
+
+- **왜(사용자 지시)**: leerness 설치 프로젝트(lens-validation, 신규)에서 로컬 SQLite 로 37개 코퍼스 요소를 14개 실행형 픽스처로 재현하고, 요소별 렌즈 작동을 행위 테스트(설치된 CLI 로 task→done→verify-claim 트리거 + lens 실렌더 문항 근거)로 측정 — 트리거 14/14 ✓·음성 대조(비-DB 파일) 무발화 ✓·redis-only 캐시 파일 트리거 ✓(_DB_IMPORT_RE 의 redis/ioredis). 유일한 측정 갭: **hot row·sharded counter·큐 직렬화·backpressure·bulkhead 5개 요소를 다루는 문항이 0개**.
+- **추가 11번(KO+EN)**: hot row 락 경합의 전파(대기→타임아웃→데드락→풀 고갈), 비정확 카운터의 샤딩(+재고/잔액엔 샤딩 금지 주의), 같은 키 경합의 큐 직렬화·예약 패턴(expires_at 회수), 유입>처리량 시 backpressure(큐 상한·rate limit·워커/풀 상한·bulkhead).
+- **selftest**: database 렌즈 케이스 11문항(KO=EN) + hot row/backpressure/bulkhead 앵커(EN 동형) + 병합 cap(12) 무절단 가드 갱신.
+- **검증**: selftest 286/286 + 매트릭스 재실행으로 f13 클러스터 '작동' 전환 확인(게시 후 lens-validation 에서 재실증). 정직 한계: 렌즈는 advisory 자기질문이며, 문항 존재 = 자동 감지가 아니다.
+
 ## 1.36.13 — 2026-07-13 — database 렌즈 8→10문항: 9라운드 dogfood playbook 역이식
 
 - **왜**: stock-service 에서 코퍼스 9개 동시성 개념을 실구현-리뷰-재현 루프로 dogfood 한 결과(회고: db-safety-lens/review-playbook.md), 기존 8문항이 다루지 않는 결함 패밀리가 반복 확인됨 — 전부 "그린 테스트는 통과했는데 리뷰가 잡은" 실사건 기반.
