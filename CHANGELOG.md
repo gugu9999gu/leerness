@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.15 — 2026-07-13 — database 렌즈 11→12문항 + Q6 확장: 매트릭스 partial 6요소 승격
+
+- **왜(37-코퍼스 매트릭스 후속)**: v2 매트릭스가 partial(문항이 인접 개념만 언급)로 정직 기록한 16요소 중 실무 빈도 최상위 두 클러스터를 문항으로 승격.
+- **Q6 확장(KO+EN)**: dirty read(READ UNCOMMITTED 급) 명시 + MVCC/스냅샷 가시성("자기 시점 스냅샷, 읽기가 쓰기를 안 막음 — 그러나 스냅샷 격리 ≠ 직렬화, lost update 잔존") → 2-1 MVCC·2-2 Snapshot Isolation·격리 이상 열거 승격.
+- **추가 12번(KO+EN)**: 상태 전이 허용 목록(현재-상태+버전 조건 UPDATE, 0행=불법 전이), aggregate 별 시퀀스 순서(created_at 불신, 역전 이벤트), inbox 소비 멱등(중복=정상, exactly-once 는 좁은 조건), 멱등키 본문 불일치 거부 → 2-10 State Machine·2-16 Exactly/At-least-once·2-17 Ordering·2-21 Inbox 승격.
+- **병합 cap 12→16**: 내장 12문항 절단 방지 (slice 2곳).
+- **selftest**: 12문항(KO=EN) + 신규 앵커(허용 목록+inbox / allow-list+inbox / dirty read) + 병합 무절단 가드 12.
+- **잔여 partial(정직)**: 전파(2-11)·락 입도(2-3)·데드락 감지 내부(2-5)·2PC(2-20)·서킷브레이커(2-34)·bulkhead 풀 격리(2-35)·선형화(2-29)·최종적 정합성 수렴(2-15)·구분 개념(2-36) 등은 advisory 렌즈 범위 밖으로 유지 — kit 체크리스트가 담당.
+
 ## 1.36.14 — 2026-07-13 — database 렌즈 10→11문항: 37-코퍼스 검증 매트릭스가 측정한 커버리지 갭(hot row/부하 계열) 보강
 
 - **왜(사용자 지시)**: leerness 설치 프로젝트(lens-validation, 신규)에서 로컬 SQLite 로 37개 코퍼스 요소를 14개 실행형 픽스처로 재현하고, 요소별 렌즈 작동을 행위 테스트(설치된 CLI 로 task→done→verify-claim 트리거 + lens 실렌더 문항 근거)로 측정 — 트리거 14/14 ✓·음성 대조(비-DB 파일) 무발화 ✓·redis-only 캐시 파일 트리거 ✓(_DB_IMPORT_RE 의 redis/ioredis). 유일한 측정 갭: **hot row·sharded counter·큐 직렬화·backpressure·bulkhead 5개 요소를 다루는 문항이 0개**.
