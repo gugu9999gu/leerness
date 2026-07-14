@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.20 — 2026-07-14 — `--apply --json`이 실제로 적용하도록 수정 — mutation-before-output (codex fresh-QA #7, 3커맨드 재현확정)
+
+codex fresh-surface QA(1.36.19 이연분)에서 확정한 **silent no-op** 버그 수정: `--json` 분기가 mutation "전"에 return 해, `--apply --json`이 적용을 보고하고도 실제로는 아무 변경도 안 하던 3개 커맨드.
+
+- **`reuse autodetect --apply --json`** — 후보만 보고하고 reuse-map.md를 안 씀(bin:20307의 --json return이 20319의 --apply 앞). → apply를 출력 전에 수행하고 JSON에 `applied`/`added` 반영. 실측: `--apply --json` → `applied:true, added:2` + reuse-map 실제 기록(0→1건), `--apply`(no-json) 무회귀.
+- **`release cleanup --apply --json`** — `apply:true, deleteCount:N`을 보고하고도 브랜치를 안 지움(15018의 --json return이 15051의 삭제 앞). → 삭제를 출력 전에 수행하고 JSON에 `deleted`/`deleteFailed` 반영 + 삭제 실패 시 `exitCode=1`. 실측: `--apply --keep 1 --json` → `deleted:3` + 브랜치 실제 삭제(4→1).
+- **`env encoding --apply --json`** — read-only 파일 apply 실패를 `action:'failed'`로 기록만 하고 exit 0. → 실패 시 `process.exitCode=1`. 실측: read-only→exit 1, writable→exit 0.
+- **검증**: selftest 290/290(신규 소스가드 — 3커맨드의 apply-before-output 구조 + 실패 exit 반영), 각 커맨드 재현확정(임시 프로젝트/git-repo/read-only 파일), 게이트 e2e, 게시본 클린룸.
+- **이연(다음 라운드)**: codex #8(CRLF `plan.md` 태스크 파서 tasks:[] + 잘못된 JSON 스키마가 `--json` 경로 crash — 파서 서브시스템 별도 조사) + #6(`copyRec` lstatSync 심링크).
+
 ## 1.36.19 — 2026-07-14 — 전략 앵커(project-brief/plan Goal) 미작성 감지 — 인계 AI가 프로젝트 맥락을 못 받던 근본원인 표면화 (실사용 7 프로젝트 dogfood)
 
 **현장 관찰**: leerness를 오래 적용한 실프로젝트에서, 인계받은 AI(codex 등)가 "leerness를 참조하나 프로젝트 맥락을 이해 못 하고" 작업하는 현상이 보고됨. 7개 실사용 프로젝트를 dogfood 조사한 결과 근본원인이 드러남 — **동적 상태(current-state 7/7, decisions)는 잘 유지되나, 정체성 앵커인 `project-brief.md` Purpose(5/7 미작성)와 `plan.md` Goal/Scope(7/7 미작성)이 템플릿 placeholder 그대로 방치됨**. 27개 결정을 쌓은 프로젝트조차 brief는 빈칸. 그 결과 인계 AI는 "최근 무슨 작업을 했는지"(동적)는 받지만 "이 프로젝트가 무엇이고 범위가 어디까지인지"(정체성)를 못 받아, 최근 스레드만 이어가며 전체 프레임을 놓침. 게다가 leerness 스스로 이 갭을 전혀 경고하지 않았음(감지 부재).

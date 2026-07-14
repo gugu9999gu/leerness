@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.19';
+const VERSION = '1.36.20';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2611,6 +2611,8 @@ function envCmd(root, sub) {
         }
       }
     }
+    // 1.36.20 (codex fresh-QA #7): apply 실패(read-only EPERM 등)를 exit code 에 반영 — 종전엔 action:'failed' 를 기록만 하고 exit 0.
+    if (apply && (result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1;
     if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
     log(cy(`# leerness env encoding-check (1.9.241/242, UR-0014) — 셸 스크립트 인코딩 위험 감지`));
     log('');
@@ -2962,6 +2964,13 @@ function _selfTestCases() {
       const fenceExcluded = !p._parseContractSpec('# S\n```js\nfunction helper(){}\n```\n').declared.includes('helper');  // #9: 펜스 예제 제외
       const realDecl = p._parseContractSpec('function realFn(){}\n').declared.includes('realFn');        // 회귀: 펜스 밖 선언 유지
       return bracket && dotStill && fenceExcluded && realDecl;
+    } },
+    { name: 'apply-before-output mutation 순서 (1.36.20, codex fresh-QA #7): reuse/release --apply 가 --json return 전 수행 + 실패 exit code — 소스가드', run: () => {
+      const s = read(__filename);
+      const reuseOk = s.includes('project: path.basename(root), found, applied, added') && s.includes("failJson(has('--json'), 'no_reuse_map'");   // reuse: apply 먼저 → json 에 applied/added
+      const releaseOk = s.includes('deleteCount: toDelete.length, deleted, deleteFailed') && s.includes('if (deleteFailed > 0) process.exitCode = 1');  // release: 삭제 먼저 → json 에 deleted
+      const encOk = s.includes("(result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1");   // encoding: 실패 exit1
+      return reuseOk && releaseOk && encOk;
     } },
     { name: 'ID 리더 5자리+ 대응 (1.36.18, UR-0052 P1-2): \\d{4}→\\d{4,} — 10k+ ID(T-10000) truncation 방지, 날짜 연도는 exactly-4 보존 — 행위검사', run: () => {
       // 행위: 5자리 ID 전체 캡처(구 \d{4}는 앞 4자리만 → truncation/충돌), 4자리 ID 무회귀, 날짜 연도 exactly-4 유지.
@@ -15014,11 +15023,21 @@ function releaseCleanupCmd(root) {
   });
   const recent = mergedBranches.slice(0, keep);
   const toDelete = mergedBranches.slice(keep).filter(b => b !== currentBranch);
+  // 1.36.20 (codex fresh-QA #7): 삭제(mutation)를 출력(json/human) "전"에 수행. 종전엔 --json 분기가 삭제 전 return 해
+  //   `release cleanup --apply --json` 이 apply:true·deleteCount N 을 보고하고도 실제로 아무것도 안 지우던 silent no-op.
+  let deleted = 0, deleteFailed = 0;
+  if (apply) {
+    for (const b of toDelete) {
+      const r = cp.spawnSync('git', ['branch', '-d', b], { cwd: root, encoding: 'utf8' });
+      if (r.status === 0) deleted++; else deleteFailed++;
+    }
+    if (deleteFailed > 0) process.exitCode = 1;   // 실패 시 nonzero exit
+  }
   // 5) JSON
   if (has('--json')) {
     log(JSON.stringify({
       apply, keep, total: allBranches.length, merged: mergedBranches.length,
-      unmerged: unmergedBranches.length, deleteCount: toDelete.length,
+      unmerged: unmergedBranches.length, deleteCount: toDelete.length, deleted, deleteFailed,
       toDelete, recent: recent.slice(0, keep), unmergedSample: unmergedBranches.slice(0, 5)
     }, null, 2));
     return;
@@ -15049,13 +15068,7 @@ function releaseCleanupCmd(root) {
   if (recent.length > 5) log(dm(`    ... +${recent.length - 5}개`));
   log('');
   if (apply) {
-    let ok = 0, fail = 0;
-    for (const b of toDelete) {
-      const r = cp.spawnSync('git', ['branch', '-d', b], { cwd: root, encoding: 'utf8' });
-      if (r.status === 0) ok++;
-      else fail++;
-    }
-    log(gr(`  ✓ 삭제 완료: ${ok}/${toDelete.length}건`) + (fail > 0 ? rd(` · 실패 ${fail}`) : ''));
+    log(gr(`  ✓ 삭제 완료: ${deleted}/${toDelete.length}건`) + (deleteFailed > 0 ? rd(` · 실패 ${deleteFailed}`) : ''));   // 1.36.20: 삭제는 출력 전 수행됨(#7)
   } else {
     log(dm(`  → 적용: leerness release cleanup --apply (안전: merged만 삭제, 현재 branch 보호)`));
     log(dm(`  → --keep N: 최근 N개 유지 (default 5)`));
@@ -20304,8 +20317,27 @@ function reuseAutodetectCmd(root) {
       }
     }
   }
+  // 1.36.20 (codex fresh-QA #7): --apply mutation 을 출력(human/json) "전"에 수행. 종전엔 --json 분기가 --apply 앞에서
+  //   return 해 `reuse autodetect --apply --json` 이 후보만 보고하고 실제 reuse-map 을 안 쓰던 silent no-op. 이제 먼저 mutate →
+  //   applied/added 를 human/json 양쪽에 반영. 에러도 --json 시 구조화(failJson).
+  let applied = false, added = 0;
+  if (has('--apply')) {
+    const reusePath = path.join(root, '.harness', 'reuse-map.md');
+    if (!exists(reusePath)) {
+      failJson(has('--json'), 'no_reuse_map', `.harness/reuse-map.md 없음 — leerness init 먼저 실행`);
+      return process.exit(process.exitCode || 1);
+    }
+    let body = read(reusePath);
+    for (const c of found) {
+      if (body.includes(`| ${c.name} |`)) continue; // 이미 있음
+      body += `| ${c.name} | ${c.file} | util | autodetect 1.9.35 |\n`;
+      added++;
+    }
+    writeUtf8(reusePath, body);
+    applied = true;
+  }
   if (has('--json')) {
-    log(JSON.stringify({ project: path.basename(root), found }, null, 2));
+    log(JSON.stringify({ project: path.basename(root), found, applied, added }, null, 2));
     return;
   }
   log(`# leerness reuse autodetect (1.9.35)`);
@@ -20316,25 +20348,8 @@ function reuseAutodetectCmd(root) {
   log('|---|---|---|---|');
   for (const c of found) log(`| ${c.name} | ${c.file} | util | (autodetect from module.exports) |`);
   log('');
-  if (has('--apply')) {
-    // reuse-map.md에 추가 (헤더 보존 + 후보 라인 append)
-    const reusePath = path.join(root, '.harness', 'reuse-map.md');
-    if (!exists(reusePath)) {
-      fail(`.harness/reuse-map.md 없음 — leerness init 먼저 실행`);
-      return process.exit(1);
-    }
-    let body = read(reusePath);
-    let added = 0;
-    for (const c of found) {
-      if (body.includes(`| ${c.name} |`)) continue; // 이미 있음
-      body += `| ${c.name} | ${c.file} | util | autodetect 1.9.35 |\n`;
-      added++;
-    }
-    writeUtf8(reusePath, body);
-    log(`✓ ${added}건 reuse-map.md에 추가됨`);
-  } else {
-    log(`(--apply 로 reuse-map.md에 자동 추가)`);
-  }
+  if (applied) log(`✓ ${added}건 reuse-map.md에 추가됨`);
+  else log(`(--apply 로 reuse-map.md에 자동 추가)`);
 }
 
 // 1.9.165: leerness web — playwright bridge MVP (opt-in 의존성, 5능력 #1 보강)
