@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.17';
+const VERSION = '1.36.18';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2963,6 +2963,27 @@ function _selfTestCases() {
       const realDecl = p._parseContractSpec('function realFn(){}\n').declared.includes('realFn');        // 회귀: 펜스 밖 선언 유지
       return bracket && dotStill && fenceExcluded && realDecl;
     } },
+    { name: 'ID 리더 5자리+ 대응 (1.36.18, UR-0052 P1-2): \\d{4}→\\d{4,} — 10k+ ID(T-10000) truncation 방지, 날짜 연도는 exactly-4 보존 — 행위검사', run: () => {
+      // 행위: 5자리 ID 전체 캡처(구 \d{4}는 앞 4자리만 → truncation/충돌), 4자리 ID 무회귀, 날짜 연도 exactly-4 유지.
+      const taskRe = /\bT-(\d{4,})\b/;
+      const idFive = (taskRe.exec('T-12345') || [])[1] === '12345';    // 5자리 전체
+      const idFour = (taskRe.exec('T-0001') || [])[1] === '0001';       // 회귀: 4자리 유지
+      const ruleFive = /^R-(\d{4,})$/.test('R-99999') && /^R-(\d{4,})$/.test('R-0001');
+      const mileFive = /^### M-\d{4,}\./m.test('### M-10000. big') && /^### M-\d{4,}\./m.test('### M-0004. small');
+      const dateExact4 = /^\d{4}-\d{2}-\d{2}$/.test('2026-07-14') && !/^\d{4}-\d{2}-\d{2}$/.test('20260-7-14');  // 연도는 정확히 4자리
+      // 소스가드: 핵심 리더가 실제로 \d{4,} 로 넓혀졌고, 날짜 패턴은 \d{4}- 로 보존.
+      const s = read(__filename);
+      const readersWidened = s.includes('/\\bT-(\\d{4,})\\b/g') && s.includes('/^R-(\\d{4,})$/') && s.includes('### M-\\d{4,}\\.');
+      const dateKept = s.includes('\\d{4}-\\d{2}-\\d{2}');   // 날짜 연도 미확장 확인
+      // codex F2/F5 회귀가드: lib 리더도 함께 넓혀졌는지(feature/audit/health/session-close 누락 방지) — 없으면 5자리 ID 가 이 표면에서만 truncation.
+      const dir = require('path').dirname(__dirname) + '/lib';
+      const libWidened = read(dir + '/feature.js').includes('F-\\d{4,}$')
+        && read(dir + '/audit.js').includes('M-\\d{4,}')
+        && read(dir + '/health.js').includes('M-\\d{4,}')
+        && read(dir + '/session-close.js').includes('M-\\d{4,}');
+      const libNoStale = !read(dir + '/feature.js').includes('F-\\d{4}$') && !read(dir + '/audit.js').includes('(M-\\d{4})');
+      return idFive && idFour && ruleFive && mileFive && dateExact4 && readersWidened && dateKept && libWidened && libNoStale;
+    } },
     { name: '시크릿 스캐너 FN 헌트 (1.35.14): 하드코딩 자격증명 복합/JSON키 탐지 + Slack xapp + 사전단어 FP 억제 — 행위검사', run: () => {
       const pats = require('../lib/catalogs').SECRET_PATTERNS;
       const pu = require('../lib/pure-utils');
@@ -3732,10 +3753,10 @@ function _selfTestCases() {
     } },
     { name: '17th 버그헌트 P2: plan add 공백제목 trim(기본값) + milestone 파서 개행 미흡수 (1.17.1)', run: () => {
       const src = read(__filename);
-      const wired = src.includes("args.slice(2).join(' ').trim() || '새 계획'") && src.includes('(M-\\d{4})\\.[ \\t]*(.+?)$');
+      const wired = src.includes("args.slice(2).join(' ').trim() || '새 계획'") && src.includes('(M-\\d{4,})\\.[ \\t]*(.+?)$');
       // 파서 동작: 공백제목 milestone 이 다음 줄 'Status:' 를 제목으로 먹지 않음
       const block = '### M-0006.   \nStatus: planned\nProgress: 0%\n';
-      const m = block.match(/^### (M-\d{4})\.[ \t]*(.+?)$/m);
+      const m = block.match(/^### (M-\d{4,})\.[ \t]*(.+?)$/m);
       const safe = !m || (m[2] || '').indexOf('Status') === -1;
       return wired && safe;
     } },
@@ -4801,7 +4822,7 @@ function pulseCmd(root) {
     const decisionCount = _loadDecisions(root).length;  // 1.9.339 (UR-0053): canonical 단일 진실소스
     const rulesActive = readRules(root).filter(r => r.status === 'active').length;
     const planText = exists(planPath(root)) ? read(planPath(root)) : '';
-    const milestonesCnt = (planText.match(/^### M-\d{4}\./gm) || []).length;
+    const milestonesCnt = (planText.match(/^### M-\d{4,}\./gm) || []).length;
     const lessonsCount = _loadLessons(root).length;
     data.memorySurface = _memorySurface({ tasks: tasksInProgress, decisions: decisionCount, rules: rulesActive, milestones: milestonesCnt, lessons: lessonsCount });
   } catch {}
@@ -7279,7 +7300,7 @@ async function nextActionCmd(root, sub, ...rest) {
       // leerness task add 호출
       const taskResult = cp.spawnSync(process.execPath, [__filename, 'task', 'add', taskTitle, '--path', root], { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_INTERNAL: '1' } });
       if (taskResult.status === 0) {
-        const m = (taskResult.stdout || '').match(/T-\d{4}/);
+        const m = (taskResult.stdout || '').match(/T-\d{4,}/);
         log(`  ✓ task 추가: ${m ? m[0] : '?'} — "${taskTitle}"`);
         if (action.command) log(`  💡 실행 명령: ${action.command}`);
       } else {
@@ -7338,9 +7359,9 @@ function _suggestNextActions(root, latestRow, keyword) {
   try {
     if (fuzzyRe && exists(planPath(root))) {
       const pt = read(planPath(root));
-      const milestones = (pt.match(/^### (M-\d{4})\..*$/gm) || []).filter(l => fuzzyRe.test(l));
+      const milestones = (pt.match(/^### (M-\d{4,})\..*$/gm) || []).filter(l => fuzzyRe.test(l));
       if (milestones.length > 0) {
-        const m = milestones[0].match(/M-\d{4}/);
+        const m = milestones[0].match(/M-\d{4,}/);
         if (m) actions.push({ icon: '🎯', title: `plan.md milestone ${m[0]} 검증 — "${keyword}" 관련`, command: `leerness plan list --filter "${keyword}"` });
       }
     }
@@ -7573,7 +7594,7 @@ function readProgressRows(root) {
   const text = exists(progressPath(root)) ? read(progressPath(root)) : '';
   const rows = [];
   for (const line of text.split('\n')) {
-    if (!/^\| (?:T|M|D)-\d{4} \|/.test(line)) continue;
+    if (!/^\| (?:T|M|D)-\d{4,} \|/.test(line)) continue;
     // 1.9.399 (7번째 버그헌트 P1-A, UR-0104): 비이스케이프 파이프에서만 분리 + 셀 복원 — 사용자 텍스트의 '|'(이스케이프됨)이 컬럼을 깨지 않음.
     const cells = line.split(/(?<!\\)\|/).slice(1, -1).map(s => _cellUnescape(s).trim());
     if (cells.length < 6) continue;
@@ -7614,7 +7635,7 @@ function upsertProgress(root, row) {
   });
 }
 
-function planShow(root) { const p = planPath(root); const has_ = exists(p); const content = has_ ? read(p) : ''; if (has('--json')) { const milestones = (content.match(/^### (M-\d{4})\b.*$/gm) || []).map(l => l.replace(/^###\s*/, '').trim()); log(JSON.stringify({ exists: has_, milestones, raw: content }, null, 2)); return; } log(has_ ? content : 'plan.md not found'); }  // 1.9.428 (UR-0128): plan show --json 구조화
+function planShow(root) { const p = planPath(root); const has_ = exists(p); const content = has_ ? read(p) : ''; if (has('--json')) { const milestones = (content.match(/^### (M-\d{4,})\b.*$/gm) || []).map(l => l.replace(/^###\s*/, '').trim()); log(JSON.stringify({ exists: has_, milestones, raw: content }, null, 2)); return; } log(has_ ? content : 'plan.md not found'); }  // 1.9.428 (UR-0128): plan show --json 구조화
 function planInit(root) { const goal = arg('--goal', ''); if (!exists(planPath(root))) return install(root); append(planPath(root), `\n## User Goal\n- ${goal || '사용자 목적을 작성하세요.'}\n`); ok('plan goal appended'); }
 // 1.9.119: plan list — plan.md 의 모든 milestone (M-XXXX) 조회 (CLI + --json + MCP)
 function planListCmd(root, opts = {}) {
@@ -7631,9 +7652,9 @@ function planListCmd(root, opts = {}) {
   const text = read(pp);
   const milestones = [];
   // ### M-XXXX. <title> 블록 추출
-  const blocks = text.split(/\n(?=### M-\d{4}\.)/);
+  const blocks = text.split(/\n(?=### M-\d{4,}\.)/);
   for (const b of blocks) {
-    const headerMatch = b.match(/^### (M-\d{4})\.[ \t]*(.+?)$/m);
+    const headerMatch = b.match(/^### (M-\d{4,})\.[ \t]*(.+?)$/m);
     if (!headerMatch) continue;
     const id = headerMatch[1];
     const title = headerMatch[2].trim();
@@ -7985,7 +8006,7 @@ function memoryStatusCmd(root, opts = {}) {
   const rulesPaused = rules.filter(r => r.status === 'paused').length;
   // Plan
   const planText = exists(planPath(root)) ? read(planPath(root)) : '';
-  const milestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
+  const milestones = (planText.match(/^### M-\d{4,}\./gm) || []).length;
   // plan milestones in-progress: progress-tracker에서 plan:M-XXXX evidence 있고 in-progress 인 row
   const planInProgress = rows.filter(r => /plan:M-/.test(r.evidence || '') && r.status === 'in-progress').length;
   // Lessons (UR-0058: canonical _loadLessons — JSON 단일 진실소스, MD projection fallback)
@@ -8394,10 +8415,10 @@ function _jaccard(a, b) {
 function taskRelink(root) {
   root = absRoot(root);
   const planText = exists(planPath(root)) ? read(planPath(root)) : '';
-  const milestones = [...planText.matchAll(/^### (M-\d{4})\.[ \t]*(.+?)$/gm)]
+  const milestones = [...planText.matchAll(/^### (M-\d{4,})\.[ \t]*(.+?)$/gm)]
     .map(m => ({ id: m[1], text: m[2].trim() }));
   const rows = readProgressRows(root);
-  const linkedM = new Set(rows.map(r => (r.evidence.match(/M-\d{4}/) || [])[0]).filter(Boolean));
+  const linkedM = new Set(rows.map(r => (r.evidence.match(/M-\d{4,}/) || [])[0]).filter(Boolean));
   const orphanM = milestones.filter(m => !linkedM.has(m.id));
   if (!orphanM.length) return ok('미연결 milestone 없음');
 
@@ -8445,7 +8466,7 @@ function taskFixEvidence(root) {
       !r.evidence ||
       /^\s*$/.test(r.evidence) ||
       /^(user-request|-)$/.test(r.evidence) ||
-      /^plan:M-\d{4}\s*$/.test(r.evidence)
+      /^plan:M-\d{4,}\s*$/.test(r.evidence)
     )
   );
   if (!candidates.length) return ok('갱신 후보 없음 (모든 done row가 검증 키워드 보유)');
@@ -8457,7 +8478,7 @@ function taskFixEvidence(root) {
     for (const r of candidates) {
       let newEv = setAll;
       if (preserveLink) {
-        const m = (r.evidence || '').match(/plan:M-\d{4}/);
+        const m = (r.evidence || '').match(/plan:M-\d{4,}/);
         if (m && !newEv.includes(m[0])) {
           newEv = `${setAll} (${m[0]})`;
           preserved++;
@@ -8773,7 +8794,7 @@ function lazyDetect(root, opts = {}) {
   for (const r of rows) {
     if (!/^(done|completed|verified)$/i.test(r.status || '')) continue;
     const _ev = (r.evidence || '').trim();
-    const _trivial = !_ev || /^(user-request|n\/?a|tbd|todo|wip|none|nil|x|-+|\.+|\?+)$/i.test(_ev) || /^plan:M-\d{4}$/i.test(_ev);
+    const _trivial = !_ev || /^(user-request|n\/?a|tbd|todo|wip|none|nil|x|-+|\.+|\?+)$/i.test(_ev) || /^plan:M-\d{4,}$/i.test(_ev);
     if (_trivial) {
       issues++; _warn(`done row without verifiable evidence: ${r.id} (${r.request})`,
         { kind: 'evidence_missing', severity: 'warn', taskId: r.id, request: r.request });
@@ -8857,7 +8878,7 @@ function lazyDetect(root, opts = {}) {
         _withLock(progressPath(root), () => {
           const header = progressHeader(root);
           const rows2 = readProgressRows(root);
-          let maxT = 0; const idRe = /\bT-(\d{4})\b/g;
+          let maxT = 0; const idRe = /\bT-(\d{4,})\b/g;
           const scanSrc = (exists(planPath(root)) ? read(planPath(root)) : '') + '\n' + rows2.map(r => r.id).join('\n');
           let mm; while ((mm = idRe.exec(scanSrc))) maxT = Math.max(maxT, Number(mm[1]));
           for (const t of newTodos) {
@@ -9030,7 +9051,7 @@ function handoff(root) {
       const rules = readRules(root);
       const rulesActive = rules.filter(r => r.status === 'active').length;
       const planText = exists(planPath(root)) ? read(planPath(root)) : '';
-      const milestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
+      const milestones = (planText.match(/^### M-\d{4,}\./gm) || []).length;
       const lessonsCount = _loadLessons(root).length;
       // 1.9.130: archive 카운트 통합
       const archiveCountsH = { decisions: 0, lessons: 0, plan: 0, total: 0 };
@@ -9221,6 +9242,32 @@ function handoff(root) {
     log(JSON.stringify(result, null, 2));
     return;
   }
+  // 1.36.18 (UR-0052 P3-8): 단일 워크스페이스 --compact 단축. 종전엔 --compact 가 섹션 몇 개만 억제하고
+  //   본문(session-handoff/progress/decisions…) 186줄을 전량 출력 → 문서상 "~500자 1줄 요약"인 --compact 가
+  //   단일 경로에서 사실상 무효(멀티 워크스페이스 _handoffWorkspace 에만 compact 존재). MCP handoff·REPL preview·
+  //   agent-mode 등 내부 호출자 3곳이 단일 경로에 --compact 를 쓰며 186줄을 받아 preview 첫 3줄이 무의미(헤더/날짜/이름)했음.
+  //   subprocess 없이(REPL 8s timeout·MCP 친화) 파일 로더만으로 핵심 신호 압축 후 return — _handoffWorkspace compact 형식과 정합.
+  if (has('--compact')) {
+    const rows = readProgressRows(root);
+    const byStatus = {};
+    for (const r of rows) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+    const done = byStatus['done'] || 0, wip = byStatus['in-progress'] || 0, blocked = byStatus['blocked'] || 0;
+    const pct = rows.length ? Math.round(done / rows.length * 100) : 0;
+    const decN = _loadDecisions(root).length;
+    const rulesActive = readRules(root).filter(r => r.status === 'active').length;
+    const lessN = _loadLessons(root).length;
+    const planText = exists(planPath(root)) ? read(planPath(root)) : '';
+    const mileN = (planText.match(/^### M-\d{4,}\./gm) || []).length;
+    const openReq = (_loadUserRequests(root).requests || []).filter(r => r.status === 'open' || r.status === 'in-progress').length;
+    const nx = rows.find(r => r.status === 'in-progress') || rows.find(r => r.status === 'planned') || null;
+    const flags = [];
+    if (openReq) flags.push(`📥 미답 ${openReq}`);
+    if (blocked) flags.push(`🚫 blocked ${blocked}`);
+    log(_lineSafe(`leerness compact: ${detectProjectName(root)} · ${done}/${rows.length}(${pct}%) done · WIP ${wip} · T${wip}/D${decN}/R${rulesActive}/P${mileN}/L${lessN}${flags.length ? ' · ' + flags.join(' · ') : ''}`));   // 1.36.18 (codex F4): projectName 개행 주입 차단
+    if (nx) log(_lineSafe(`다음: ${nx.id} [${nx.status}] ${nx.nextAction || nx.request || ''}`).slice(0, 200));
+    log('핵심 규칙: 의존성0 · 한국어주석 · UTF-8noBOM · reuse-map등록 · anti-lazy-work · verify-claim자동검수');
+    return;
+  }
   const sections = [];
   function block(label, p) {
     if (!exists(p)) return;
@@ -9318,7 +9365,7 @@ function handoff(root) {
         const decisions = _loadDecisions(root).length;  // 1.9.339 (UR-0053): canonical 단일 진실소스
         const rulesActive = readRules(root).filter(r => r.status === 'active').length;
         const planText = exists(planPath(root)) ? read(planPath(root)) : '';
-        const planMilestones = (planText.match(/^### M-\d{4}\./gm) || []).length;
+        const planMilestones = (planText.match(/^### M-\d{4,}\./gm) || []).length;
         const lessons = _loadLessons(root).length;
         parts.push(`🧠 mem T${inProgressTasks}/D${decisions}/R${rulesActive}/P${planMilestones}/L${lessons}`);
       } catch {}
@@ -13783,9 +13830,9 @@ function _brainstormFor(root, topic) {
   const planFile_brainstorm = planPath(root);
   if (exists(planFile_brainstorm)) {
     const planText = read(planFile_brainstorm);
-    const milestoneBlocks = planText.split(/\n(?=### M-\d{4}\.)/);
+    const milestoneBlocks = planText.split(/\n(?=### M-\d{4,}\.)/);
     for (const b of milestoneBlocks) {
-      const m = b.match(/^### (M-\d{4})\.[ \t]*(.+?)$/m);
+      const m = b.match(/^### (M-\d{4,})\.[ \t]*(.+?)$/m);
       if (m && matches(b)) {
         const idx = planText.indexOf(b);
         const lineNo = idx >= 0 ? planText.slice(0, idx).split('\n').length : 0;
@@ -14078,9 +14125,9 @@ function brainstormCmd(root, topic) {
   const planFile_b2 = planPath(root);
   if (exists(planFile_b2)) {
     const planText = read(planFile_b2);
-    const milestoneBlocks = planText.split(/\n(?=### M-\d{4}\.)/);
+    const milestoneBlocks = planText.split(/\n(?=### M-\d{4,}\.)/);
     for (const b of milestoneBlocks) {
-      const m = b.match(/^### (M-\d{4})\.[ \t]*(.+?)$/m);
+      const m = b.match(/^### (M-\d{4,})\.[ \t]*(.+?)$/m);
       if (m && matches(b)) {
         const idx = planText.indexOf(b);
         const lineNo = idx >= 0 ? planText.slice(0, idx).split('\n').length : 0;
@@ -14192,7 +14239,7 @@ function _roadmapData(root) {
   const milestones = _roadmapParseMilestones(exists(planPath(root)) ? read(planPath(root)) : '');
   const tasks = readProgressRows(root).map(t => ({
     ...t,
-    milestones: Array.from(String(t.evidence || '').matchAll(/M-\d{4}/g)).map(m => m[0])
+    milestones: Array.from(String(t.evidence || '').matchAll(/M-\d{4,}/g)).map(m => m[0])
   }));
   // skills
   const skills = [];
@@ -14208,7 +14255,7 @@ function _roadmapData(root) {
   const rulesT = exists(rulesPath(root)) ? read(rulesPath(root)) : '';
   const rules = [];
   for (const line of rulesT.split('\n')) {
-    if (!/^\| R-\d{4} \|/.test(line)) continue;
+    if (!/^\| R-\d{4,} \|/.test(line)) continue;
     const cells = line.split('|').slice(1, -1).map(s => s.trim());
     if (cells.length < 6) continue;
     rules.push({ id: cells[0], trigger: cells[1], rule: cells[2], status: cells[4], lastVerified: cells[5] });
@@ -14502,7 +14549,7 @@ function readRules(root) {
   if (!exists(f)) return [];
   const rules = [];
   for (const line of read(f).split('\n')) {
-    if (!/^\| R-\d{4} \|/.test(line)) continue;
+    if (!/^\| R-\d{4,} \|/.test(line)) continue;
     // 1.9.399 (7번째 버그헌트 P1-A, UR-0104): 비이스케이프 파이프 분리 + 복원 — rule 텍스트의 '|'가 컬럼 밀림/멱등성 무력화를 못 일으킴.
     const cells = line.split(/(?<!\\)\|/).slice(1, -1).map(s => _cellUnescape(s).trim());
     if (cells.length < 6) continue;
@@ -14521,7 +14568,7 @@ function nextRuleId(root) {
   const rules = readRules(root);
   let max = 0;
   for (const r of rules) {
-    const m = r.id.match(/^R-(\d{4})$/);
+    const m = r.id.match(/^R-(\d{4,})$/);
     if (m) max = Math.max(max, Number(m[1]));
   }
   // 1.11.3 (14th 버그헌트 P2, UR-0180): 아카이브의 R-id 도 카운트 — 기존엔 활성 rules 만 스캔해 rule remove 후 같은 R-id 가 다른 룰에 재사용됐음(아카이브 ID 충돌).
@@ -20148,6 +20195,7 @@ function contractVerifyCmd(specPath, implPath) {
   // 대신 정적 소스 분석 — module.exports = { foo, bar } / exports.foo = ... / module.exports.foo = ... 패턴 grep.
   const implSrc = read(implFile);
   // 1.9.429 (UR-0129): 브레이스 균형 top-level 키(멀티라인 module.exports 안전) + ESM export 인식 — pure-utils 단일출처
+  // 1.36.18 (UR-0052 P2-6 이연): 주석 마스킹은 7라운드 codex 재검 결과 파서 없이 안전 구현 불가로 판단해 미적용(하단 참조).
   const implExports = new Set(_parseImplExports(implSrc));
   // 검사: spec 강선언(function 시그니처 + markdown bullet) 함수 중 impl exports에 없는 것.
   // 1.9.385 (UR-0086): 기존 `specText.includes('function '+fn)` 가드는 bullet/backtick 추출명을 무력화하던 잠재 FN.
