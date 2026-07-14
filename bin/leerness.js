@@ -26,14 +26,14 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
   _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm,
-  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리
+  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd, _briefUnfilled, _planGoalUnfilled } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.18';
+const VERSION = '1.36.19';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2983,6 +2983,22 @@ function _selfTestCases() {
         && read(dir + '/session-close.js').includes('M-\\d{4,}');
       const libNoStale = !read(dir + '/feature.js').includes('F-\\d{4}$') && !read(dir + '/audit.js').includes('(M-\\d{4})');
       return idFive && idFour && ruleFive && mileFive && dateExact4 && readersWidened && dateKept && libWidened && libNoStale;
+    } },
+    { name: '전략 앵커 미작성 감지 (1.36.19, 실사용 7 프로젝트 dogfood): project-brief Purpose / plan Goal placeholder·빈칸 감지 + 실작성(bullet/문단) 무오탐 — 행위검사', run: () => {
+      const p = require('../lib/pure-utils');
+      if (typeof p._briefUnfilled !== 'function' || typeof p._planGoalUnfilled !== 'function') return false;
+      const phBrief = p._briefUnfilled('# Project Brief\n## Purpose\n- 이 프로젝트의 목적을 실제 내용으로 업데이트하세요.\n## Users\n-\n');  // 템플릿 placeholder
+      const emptyBrief = p._briefUnfilled('## Purpose\n- \n## Users\n-\n');                                                          // 빈 bullet
+      const filledBullet = !p._briefUnfilled('## Purpose\n- 소셜 발행 자동화 MCP 서버\n');                                            // 실작성(bullet) 무오탐
+      const filledPara = !p._briefUnfilled('## Purpose\n코드베이스 변화를 실시간 가시화한다\n');                                       // 실작성(문단) 무오탐
+      const noSection = !p._briefUnfilled('# Project Brief\n## Project\nfoo\n');                                                       // Purpose 섹션 없음 → 미플래그(FP 회피)
+      const phPlan = p._planGoalUnfilled('# Plan\n## Goal\n- 사용자 목적을 기준으로 전체 계획을 유지합니다.\n## Scope\n-\n');           // plan 템플릿
+      const filledPlan = !p._planGoalUnfilled('## Goal\n- 카드뉴스 발행 자동화 완성\n');                                              // 실작성 plan 무오탐
+      // audit + handoff 배선 가드
+      const s = read(__filename); const au = require('fs').readFileSync(require('path').join(require('path').dirname(__dirname), 'lib', 'audit.js'), 'utf8');
+      const wired = au.includes("_finding('project_brief_unfilled'") && au.includes("_finding('plan_goal_unfilled'")
+        && s.includes('📋 project-brief 미작성');
+      return phBrief && emptyBrief && filledBullet && filledPara && noSection && phPlan && filledPlan && wired;
     } },
     { name: '시크릿 스캐너 FN 헌트 (1.35.14): 하드코딩 자격증명 복합/JSON키 탐지 + Slack xapp + 사전단어 FP 억제 — 행위검사', run: () => {
       const pats = require('../lib/catalogs').SECRET_PATTERNS;
@@ -9324,6 +9340,19 @@ function handoff(root) {
             parts.push(t('🔒 보안 OK', '🔒 security OK'));
           }
         }
+      } catch {}
+      // 2b) 전략 앵커 미작성 (1.36.19, 실사용 7 프로젝트 dogfood): project-brief Purpose(5/7)·plan Goal(7/7)이 템플릿 그대로
+      //   방치돼 인계받는 AI 가 "프로젝트가 무엇인지/범위"를 못 받던 근본원인 → 세션시작 헤드라인에 표면화(파묻힌 init task 대신 가시화).
+      try {
+        const _naM = '<!-- leerness:na';
+        const _bf = path.join(root, '.harness/project-brief.md');
+        const _briefTxt = exists(_bf) ? read(_bf) : '';
+        const _planTxt = exists(planPath(root)) ? read(planPath(root)) : '';
+        const briefGap = !_briefTxt.includes(_naM) && _briefUnfilled(_briefTxt);
+        const planGap = !!_planTxt && !_planTxt.includes(_naM) && _planGoalUnfilled(_planTxt);
+        if (briefGap && planGap) parts.push(t('📋 정체성앵커 미작성 (brief+plan)', '📋 identity anchors unfilled (brief+plan)'));
+        else if (briefGap) parts.push(t('📋 project-brief 미작성', '📋 project-brief unfilled'));
+        else if (planGap) parts.push(t('📋 plan Goal 미작성', '📋 plan Goal unfilled'));
       } catch {}
       // 3) MCP 활동 누적
       try {

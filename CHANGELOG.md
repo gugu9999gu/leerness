@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.19 — 2026-07-14 — 전략 앵커(project-brief/plan Goal) 미작성 감지 — 인계 AI가 프로젝트 맥락을 못 받던 근본원인 표면화 (실사용 7 프로젝트 dogfood)
+
+**현장 관찰**: leerness를 오래 적용한 실프로젝트에서, 인계받은 AI(codex 등)가 "leerness를 참조하나 프로젝트 맥락을 이해 못 하고" 작업하는 현상이 보고됨. 7개 실사용 프로젝트를 dogfood 조사한 결과 근본원인이 드러남 — **동적 상태(current-state 7/7, decisions)는 잘 유지되나, 정체성 앵커인 `project-brief.md` Purpose(5/7 미작성)와 `plan.md` Goal/Scope(7/7 미작성)이 템플릿 placeholder 그대로 방치됨**. 27개 결정을 쌓은 프로젝트조차 brief는 빈칸. 그 결과 인계 AI는 "최근 무슨 작업을 했는지"(동적)는 받지만 "이 프로젝트가 무엇이고 범위가 어디까지인지"(정체성)를 못 받아, 최근 스레드만 이어가며 전체 프레임을 놓침. 게다가 leerness 스스로 이 갭을 전혀 경고하지 않았음(감지 부재).
+
+- **전략 앵커 미작성 감지 (신규)**: pure-utils에 `_briefUnfilled`/`_planGoalUnfilled` 순수 detector 추가 — `## Purpose`/`## Goal` 섹션이 템플릿 placeholder 문구이거나 실내용 0(빈 bullet)이면 미작성으로 판정. bullet/문단 무관(문단형 실작성도 정상 인식), 섹션 자체가 없으면 미플래그(FP 회피). 7 프로젝트 ground-truth + 컨트롤(placeholder/빈칸/bullet작성/문단작성/섹션없음)로 판별 정밀 검증.
+- **`audit` finding 2종**: project-brief Purpose 미작성 → `project_brief_unfilled` 경고("인계받는 AI가 프로젝트 목적/맥락을 못 받습니다"), plan Goal 미작성 → `plan_goal_unfilled` 경고. `<!-- leerness:na -->` 마커로 의도적 스킵 가능(기존 design-system/reuse-map 관례와 동일).
+- **handoff 헤드라인 표면화**: 세션 시작 헤드라인에 `📋 project-brief 미작성` / `📋 plan Goal 미작성` / `📋 정체성앵커 미작성 (brief+plan)` 노출 — 파묻힌 init task(T-0001) 대신 매 세션 가시화. 채워진 프로젝트엔 무신호(무노이즈).
+- **검증**: selftest 289/289(신규 앵커 감지 행위검사 — placeholder/빈칸/bullet/문단/섹션없음 5판별 + audit/handoff 배선 가드), 실프로젝트 실증(Adzento=brief+plan 경고, cafe-macro/view-work=brief populated·plan만), 게이트 e2e, 게시본 클린룸.
+- **이연(다음 라운드, codex fresh-surface QA)**: #7 `--json`이 mutation 전 early-return(`reuse autodetect`/`release cleanup`/`env encoding` `--apply --json`이 apply를 보고하나 실제 미적용) + 실패 시 exit 0, #8 CRLF `plan.md` tasks:[] & 잘못된 JSON 스키마가 `--json` 경로에서 crash(구조화 에러 아님), #6 `copyRec` lstatSync 심링크 미처리. 재현→수정 예정.
+
 ## 1.36.18 — 2026-07-14 — UR-0052: handoff --compact 단일경로 + ID 5자리+ 대응 (P2-6 주석 마스킹은 조사 후 이연)
 
 1.36.17에서 백로그로 이연했던 UR-0052 3건 중 2건(P3-8·P1-2)을 재현·수정. P2-6(주석 마스킹)은 codex 7라운드 적대 재검 끝에 **파서 없이 안전 구현 불가**로 판단해 이연(하단 상세). 각 수정은 파일 스크립트 프로브 + selftest 케이스로 실증(맹신 X).
