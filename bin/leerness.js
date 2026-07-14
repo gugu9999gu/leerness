@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.16';
+const VERSION = '1.36.17';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3928,6 +3928,26 @@ function _selfTestCases() {
         && eq(F(['README.md']), ['docs']);
       return catOk && mapOk;
     } },
+    { name: '비-렌즈 버그헌트 수정 회귀 (게시본 1.36.16 codex): restore canonical 재빌드 + plan 헤딩경계 + FILE_RE 숫자시작 + archive/json 구조화 (소스가드)', run: () => {
+      const src = read(__filename);
+      // P1-1: memory restore 가 decisions/lessons canonical JSON 을 재빌드(MD-only append 아님)
+      const restoreOk = src.includes("if (surface === 'decisions') _saveDecisions(root, _decisionsFromMd(read(activePath)))")
+        && src.includes("else if (surface === 'lessons') _saveLessons(root, _parseLessonEntries(read(activePath)))");
+      // P2-4: plan remove 가 모든 헤딩(#{1,3} )을 경계로 split (사용자 h2 섹션 흡수 방지)
+      const planOk = src.includes('const blocks = text.split(/\\n(?=#{1,3} )/);');
+      // P2-5: FILE_RE + _evidenceQuality basename 첫 글자에 숫자 허용 (저-백슬래시 판별 조각)
+      const fileReOk = src.includes(')?[A-Za-z0-9][');
+      const analyzersOk = read(path.join(__dirname, '..', 'lib', 'analyzers.js')).includes('[A-Za-z0-9][\\w./');
+      // P2-3: archive 쓰기에 _lineSafe (개행 델리미터 위조 차단)
+      const archiveOk = src.includes('`\\n## 제거 ${today()} (target: "${_lineSafe(target)}")\\n${archiveBlocks}\\n`');
+      // P2-7: drop/remove not-found 가 failJson (--json 에러 구조화)
+      const jsonOk = src.includes("failJson(has('--json'), 'lesson_not_found'")
+        && src.includes("failJson(has('--json'), 'decision_not_found'")
+        && src.includes("failJson(has('--json'), 'milestone_not_found'")
+        && src.includes("failJson(has('--json'), 'task_not_found'")
+        && src.includes("failJson(has('--json'), 'rule_not_found'");
+      return restoreOk && planOk && fileReOk && analyzersOk && archiveOk && jsonOk;
+    } },
     { name: 'DB 렌즈 recall (dogfood FN, 1.36.4): 내용기반 감지 — 평범한 이름의 DB 모듈 잡고 산문 FP 0 (행위)', run: () => {
       const T = _isDbContentText, W = _withDbDomain;
       const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -7717,11 +7737,13 @@ function planRemoveCmd(root, target) {
   if (!exists(pp)) return fail('plan.md 없음');
   const text = read(pp);
   // milestone 블록은 "### M-XXXX. 제목" 으로 시작; "## " (Out of Scope 등) 헤더 또는 EOF 이전까지
-  const blocks = text.split(/\n(?=### )/);
+  // codex 버그헌트 P2: `### ` 만 경계로 쓰면 마지막 마일스톤 뒤의 사용자 h1/h2 섹션(예: `## Risks`)이
+  // 그 마일스톤 블록에 흡수돼 함께 삭제된다. 모든 헤딩(#{1,3} )을 경계로 잘라 각 섹션을 독립 블록화.
+  const blocks = text.split(/\n(?=#{1,3} )/);
   let removed = 0;
   const kept = [];
   for (const b of blocks) {
-    if (!b.startsWith('### ')) { kept.push(b); continue; }
+    if (!b.startsWith('### ')) { kept.push(b); continue; }   // 마일스톤(### M-) 블록만 삭제 후보
     const headerMatch = b.match(/^### (.+)$/m);
     if (!headerMatch) { kept.push(b); continue; }
     const titleLine = headerMatch[1].trim();
@@ -7744,7 +7766,7 @@ function planRemoveCmd(root, target) {
     }
     kept.push(b);
   }
-  if (removed === 0) return fail(`매칭 milestone 없음: "${target}"`);
+  if (removed === 0) return failJson(has('--json'), 'milestone_not_found', `매칭 milestone 없음: "${target}"`);   // codex P2: --json 에러 구조화
   writeUtf8(pp, kept.join('\n'));
   ok(`milestone removed: ${removed}건 (보존: .harness/plan.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
@@ -7918,7 +7940,7 @@ function taskUpdate(root, id) {
   }
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'task status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
   const rows = readProgressRows(root);
-  if (!rows.find(r => r.id === id)) { fail(`task ${id} not found in progress-tracker.md`); return; }
+  if (!rows.find(r => r.id === id)) { failJson(has('--json'), 'task_not_found', `task ${id} not found in progress-tracker.md`); return; }  // codex P2: --json 에러 구조화
   const patch = { id };
   if (arg('--status') !== null) patch.status = _normTaskStatus(arg('--status'));  // 1.11.3 (UR-0178): completed/verified → done 정규화
   if (arg('--evidence') !== null) patch.evidence = arg('--evidence');
@@ -7936,7 +7958,7 @@ function taskDrop(root, id) {
   if (!id) return fail('id required');
   const rows = readProgressRows(root);
   // 1.9.396 (6번째 외부평가/codex P1-B): 없는 task drop 시 가짜 row(request undefined) 생성 = 데이터 손상 → task update 와 동일하게 존재 확인 후 fail(no-op).
-  if (!rows.find(r => r.id === id)) { fail(`task ${id} not found in progress-tracker.md`); return; }
+  if (!rows.find(r => r.id === id)) { failJson(has('--json'), 'task_not_found', `task ${id} not found in progress-tracker.md`); return; }  // codex P2: --json 에러 구조화
   upsertProgress(root, { id, status: 'dropped', evidence: arg('--reason','사용자 요청으로 제외'), nextAction: '없음' });
   ok(`task dropped: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
@@ -8134,6 +8156,12 @@ function memoryRestoreCmd(root, surface, target) {
   for (const blk of restoredBlocks) {
     append(activePath, '\n' + blk + '\n');
   }
+  // codex 버그헌트 P1: decisions/lessons 는 canonical JSON 이 진실소스라(list/save 가 JSON 기준),
+  // MD 프로젝션에만 append 하면 복원분이 list 에 안 보이고 다음 add/save 가 JSON→MD 재생성으로 영구 삭제.
+  // 방금 복원된 MD 를 canonical 파서로 재파싱해 JSON 을 재빌드 → 복원분이 후속 write 에도 생존.
+  if (surface === 'decisions') _saveDecisions(root, _decisionsFromMd(read(activePath)));
+  else if (surface === 'lessons') _saveLessons(root, _parseLessonEntries(read(activePath)));
+  // (plan 은 plan.md 가 진실소스라 append 로 충분)
   // archive 재작성 — 모두 제거되면 파일 비움 (헤더만 남김 또는 삭제)
   if (kept.length === 0) {
     // archive 헤더만 남겨도 의미 있음 — 향후 다시 사용 가능
@@ -8198,19 +8226,21 @@ function lessonDropCmd(root, target) {
   const kept = [];
   const removed = [];
   const all = _loadLessons(root);
-  if (!all.length) return fail('lessons 없음');
+  if (!all.length) return failJson(has('--json'), 'no_lessons', 'lessons 없음');   // codex P2: --json 에러 구조화
   for (const l of all) {
     if (l.date === target || (l.text || '').includes(target)) removed.push(l);
     else kept.push(l);
   }
-  if (!removed.length) return fail(`매칭 lesson 없음: "${target}"`);
+  if (!removed.length) return failJson(has('--json'), 'lesson_not_found', `매칭 lesson 없음: "${target}"`);
   // archive 보존 — lessons.archive.md 에 projection MD 블록 형태로 추가
   const archivePath = path.join(root, '.harness/lessons.archive.md');
   const archiveHeader = exists(archivePath) ? '' : '# Lessons archive\n\n';
+  // codex 버그헌트 P2: 사용자 텍스트(l.text/l.tag/target)를 archive MD 에 raw 삽입하면 개행으로
+  //   `## 제거 …` 델리미터를 위조해 가짜 archive 엔트리를 만들 수 있다(archive list/restore 오염). _lineSafe 로 개행 무력화.
   const archiveBlocks = removed.map(l =>
-    `\n### ${l.date}\n- Lesson: ${l.text}\n${l.tag ? `- Tag: ${l.tag}\n` : ''}`
+    `\n### ${_lineSafe(l.date)}\n- Lesson: ${_lineSafe(l.text)}\n${l.tag ? `- Tag: ${_lineSafe(l.tag)}\n` : ''}`
   ).join('');
-  append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${target}")\n${archiveBlocks}\n`);
+  append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`);
   _saveLessons(root, kept);
   ok(`lesson dropped: ${removed.length}건 (보존: .harness/lessons.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
@@ -8287,22 +8317,23 @@ function decisionDropCmd(root, target) {
   if (!target) return fail('decision drop <date|title-substring> 필요. 예: leerness decision drop "2026-05-20" 또는 leerness decision drop "PostgreSQL"');
   // 1.9.339 (UR-0053): canonical JSON 기준 drop (date 또는 title substring 매칭) — JSON+MD projection 동시 갱신.
   const all = _loadDecisions(root);
-  if (!all.length) return fail('decisions 없음');
+  if (!all.length) return failJson(has('--json'), 'no_decisions', 'decisions 없음');   // codex P2: --json 에러 구조화
   const kept = [];
   const removed = [];
   for (const d of all) {
     if (d.date === target || (d.title || '').includes(target)) removed.push(d);
     else kept.push(d);
   }
-  if (!removed.length) return fail(`매칭 decision 없음: "${target}"`);
+  if (!removed.length) return failJson(has('--json'), 'decision_not_found', `매칭 decision 없음: "${target}"`);
   // archive 보존 (projection MD 블록 형태)
   const archivePath = path.join(root, '.harness/decisions.archive.md');
   const archiveHeader = exists(archivePath) ? '' : '# Decisions archive\n\n';
+  // codex 버그헌트 P2: 사용자 필드 raw 삽입 → 개행으로 `## 제거` 델리미터 위조 가능. _lineSafe 로 무력화.
   const archiveBlocks = removed.map(d => {
-    const head = d.date ? `${d.date} — ${d.title}` : d.title;
-    return `\n### ${head}\n- Decision: ${d.decision || ''}\n- Reason: ${d.reason || ''}\n- Alternatives: ${d.alternatives || ''}\n- Impact: ${d.impact || ''}\n`;
+    const head = d.date ? `${_lineSafe(d.date)} — ${_lineSafe(d.title)}` : _lineSafe(d.title);
+    return `\n### ${head}\n- Decision: ${_lineSafe(d.decision || '')}\n- Reason: ${_lineSafe(d.reason || '')}\n- Alternatives: ${_lineSafe(d.alternatives || '')}\n- Impact: ${_lineSafe(d.impact || '')}\n`;
   }).join('');
-  append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${target}")\n${archiveBlocks}\n`);
+  append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`);
   _saveDecisions(root, kept);
   ok(`decision dropped: ${removed.length}건 (보존: .harness/decisions.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
@@ -10971,7 +11002,10 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   // 1.36.10 (선재 백로그): Windows 백슬래시 경로 지원 — 'src\\inventory.mjs' 가 'inventory.mjs' 로,
   //   'db\\migrations\\001_create.sql' 이 'create.sql' 로 잘려 추출돼 존재 검사가 false-fail 하던 결함.
   //   구분자에 \\ 허용 + 추출 후 / 로 정규화(하류의 git diff 비교·렌즈 매핑은 / 기준).
-  const FILE_RE = new RegExp(`(?:[A-Za-z][A-Za-z0-9_-]*[\\/\\\\])?[A-Za-z][\\w./\\\\-]*\\.(?:${FILE_EXTS})\\b`, 'g');
+  // codex 버그헌트 P2: basename 첫 글자를 [A-Za-z] 로만 잡아 '123.js'·'2fa.ts' 같은 숫자시작 실파일이
+  //   추출 안 돼 존재검사가 vacuous-pass → 없는 파일 인용한 done 주장이 통과(gate FN). 첫 글자에 숫자 허용.
+  //   (prev-separator 가드가 UNC/드라이브/URL 꼬리 오탐은 계속 차단하므로 FP 억제 유지)
+  const FILE_RE = new RegExp(`(?:[A-Za-z][A-Za-z0-9_-]*[\\/\\\\])?[A-Za-z0-9][\\w./\\\\-]*\\.(?:${FILE_EXTS})\\b`, 'g');
   // 1.36.11 (클린룸 P1-B): 매치 직전 문자가 경로 구분자면 더 긴 경로의 "꼬리"만 잡은 것(UNC \\\\server\\..., 드라이브 X:\\...,
   //   숫자 시작 선두 세그먼트 등) — 잘린 꼬리를 루트-상대 경로로 검증하면 무관한 로컬 파일이 통과(우회성). 그런 매치는 버린다.
   const filePatterns = [];
@@ -14547,7 +14581,7 @@ function ruleRemove(root, id) {
   if (!id) return fail('id required');
   const rules = readRules(root);
   const i = rules.findIndex(r => r.id === id);
-  if (i < 0) return fail(`rule not found: ${id}`);
+  if (i < 0) return failJson(has('--json'), 'rule_not_found', `rule not found: ${id}`);   // codex P2: --json 에러 구조화
   const removed = rules.splice(i, 1)[0];
   writeRules(root, rules);
   const archive = exists(rulesArchivePath(root)) ? read(rulesArchivePath(root)) : '# Rules archive\n\n| ID | Trigger | Rule | Added | Status | Removed |\n|---|---|---|---|---|---|\n';

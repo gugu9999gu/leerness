@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.36.17 — 2026-07-14 — 렌즈-외 표면 버그헌트: 데이터손실 2 + gate FN + 아카이브 주입 + --json 에러경로 (codex, 재현확정)
+
+게시본 1.36.16 대상, database 렌즈를 제외한 CLI 표면을 codex로 광범위 적대 헌트 → 8건 중 6건 수정(고영향 재현확정), 2건 백로그(UR-0052).
+
+- **P1 데이터손실 — `memory restore` (decisions/lessons)**: 복원이 MD 프로젝션에만 append 하고 canonical JSON을 안 고쳐, `list`엔 안 보이고 다음 add/save가 JSON→MD 재생성으로 복원분을 영구 삭제(재현확정). → 복원 후 MD를 canonical 파서로 재파싱해 `_saveDecisions`/`_saveLessons`로 JSON 재빌드.
+- **P2 데이터손실 — `plan remove`**: `### ` 만 블록 경계로 써서 마지막 마일스톤 뒤 사용자 h1/h2 섹션(`## Risks` 등)이 함께 삭제(재현확정). → 모든 헤딩(`#{1,3} `)을 경계로 분할, `### M-` 블록만 삭제.
+- **P2 gate FN — `verify-claim`**: FILE_RE/`_evidenceQuality`가 basename 첫 글자를 `[A-Za-z]`로만 잡아 `123.js` 같은 숫자시작 실파일 미추출 → 없는 파일 인용한 done 주장이 vacuous-pass(재현확정, 정상 done FP 회귀 없음 확인). → 첫 글자에 숫자 허용(prev-separator 가드 유지).
+- **P2 아카이브 주입**: lesson/decision drop이 사용자 텍스트를 archive MD에 raw 삽입 → 개행으로 `## 제거` 델리미터 위조(가짜 archive 엔트리)(재현확정). → 아카이브 필드에 `_lineSafe`.
+- **P2 --json 에러경로**: task update/drop·lesson/decision/plan/rule not-found 6경로가 `--json`에도 평문 출력 → JSON 소비자 파싱 실패. → `failJson(has('--json'), code, msg)`.
+- **백로그(UR-0052)**: P1-2(10k+ ID 고정폭 `\d{4}` 리더 ~20곳, 날짜 혼동 위험으로 신중한 일괄 필요), P2-6(contract verify 주석 마스킹), P3-8(handoff `--compact` 단일 워크스페이스 분기).
+- **검증**: selftest 287/287(신규 6수정 소스가드), 데이터손실 3건 재현→수정 후 재검, 게이트 e2e 386/386.
+
 ## 1.36.16 — 2026-07-13 — 게시본 1.36.15 클린룸 codex 9건 채택: database 렌즈 정직/정밀 + selftest·병합 하드닝
 
 게시본 1.36.13~1.36.15 누적 신규 표면(문항 8→12, cap 16)을 codex 로 적대 리뷰 → 9건(P2/P3) 전부 재현/채택. clean 3축(i18n 패리티·앵커 유일성·크래시 없음).
