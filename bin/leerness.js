@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.27';
+const VERSION = '1.36.28';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3027,6 +3027,47 @@ function _selfTestCases() {
       const encOk = s.includes("(result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1");   // encoding: 실패 exit1
       return reuseOk && releaseOk && encOk;
     } },
+    { name: '미검토표면 헌트 (1.36.28, codex): #8 impact 역의존 전이 + #10 alias 단어경계 + #3 손상스토어 클로버 차단 + #4 URL 해시 — 순수/소스 행위검사', run: () => {
+      const p = require('../lib/pure-utils');
+      // #8: A←B←C 전이 (F-0003 이 depth 2 로 잡혀야)
+      const nodes = [{ id: 'F1', title: 'A', dependsOn: [] }, { id: 'F2', title: 'B', dependsOn: ['F1'] }, { id: 'F3', title: 'C', dependsOn: ['F2'] }];
+      const imp = p._featureImpactBfs(nodes, 'F1').map(x => x.id);
+      const transitiveOk = imp.includes('F2') && imp.includes('F3');
+      // 사이클 안전: F1↔F2 순환이어도 무한루프/중복 없이 종료
+      const cyc = p._featureImpactBfs([{ id: 'F1', dependsOn: ['F2'] }, { id: 'F2', dependsOn: ['F1'] }], 'F1');
+      const cycleSafe = Array.isArray(cyc) && cyc.length <= 2;
+      // #10: 부분문자열 오탐 차단 + 실매칭 유지
+      const aliasOk = typeof p._aliasHit === 'function'
+        && !p._aliasHit('restore deleted files', 'rest') && !p._aliasHit('the client cache', 'cli')
+        && p._aliasHit('call the rest endpoint', 'rest') && p._aliasHit('run cli now', 'cli')
+        && p._aliasHit('노드제이에스 node.js 설정', 'node.js');   // 구두점 alias 는 substring 유지
+      // #3/#4: 소스 배선 확인 (행위는 e2e/실측, 여기선 가드 존재)
+      const s = read(__filename);
+      const guardOk = s.includes('function _assertStoreParsable') && s.includes("code: 'E_STORE_CORRUPT'")
+        && s.includes('_guardStore(has(') && s.includes("_assertStoreParsable(teamsJsonPath")
+        && s.includes("_assertStoreParsable(_platformConstraintsPath");
+      const hashOk = s.includes('function _shortHash') && s.includes("id = id + '-' + _shortHash(url)") && s.includes('urls:\\s*\\r?\\n');
+      return transitiveOk && cycleSafe && aliasOk && guardOk && hashOk;
+    } },
+    { name: '반복 마이그레이션 커스텀 보존 (1.36.28, 사용자 보고): _managedMerge 라인-diff 이월 — 2번째부터 유실되던 CLAUDE/AGENTS 커스텀 지시 (행위검사)', run: () => {
+      const p = require('../lib/pure-utils');
+      const next = '# T\nline A\nline B\n';
+      const prev = '# T\nline A\nline B\nMY CUSTOM 1\n';
+      const m1 = p._managedMerge('CLAUDE.md', next, prev, '.harness/archive', null);
+      const m2 = p._managedMerge('CLAUDE.md', next, m1, '.harness/archive', null);
+      const m3 = p._managedMerge('CLAUDE.md', next, m2, '.harness/archive', null);
+      // 핵심 판별: 종전 구현은 m2 에서 MY CUSTOM 1 이 사라졌다 (previous 에 preserved 태그 있으면 next 만 반환)
+      const survived = m1.includes('MY CUSTOM 1') && m2.includes('MY CUSTOM 1') && m3.includes('MY CUSTOM 1');
+      const idem = m2 === m3;
+      // 레거시 <details> 형식에서 커스텀 회수 + 래퍼 미이월
+      const F = String.fromCharCode(96, 96, 96);
+      const legacy = next + '\n---\n<!-- leerness:migration-preserved -->\n## Preserved previous content\n\n<details>\n<summary>Previous CLAUDE.md</summary>\n\n' + F + 'md\n# T\nOLD CUSTOM X\n' + F + '\n\n</details>\n';
+      const lm = p._managedMerge('CLAUDE.md', next, legacy, '.harness/archive', null);
+      const legacyOk = lm.includes('OLD CUSTOM X') && !lm.includes('<details>');
+      const cleanOk = p._managedMerge('CLAUDE.md', next, next, '.harness/archive', null) === next;
+      const owOk = p._managedMerge('x.md', next, prev, '.', new Set(['x.md'])) === next;
+      return survived && idem && legacyOk && cleanOk && owOk;
+    } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
       if (!d) return false;
@@ -4702,6 +4743,28 @@ function shellGuardCmd(root, cmd, opts = {}) {
   if (analysis.issues.some(i => i.severity === 'error')) process.exitCode = 1;
 }
 
+// 1.36.28 (codex 미검토표면 헌트 #3 — 데이터 유실 클래스): 손상된 JSON 스토어를 "빈 값"으로 오인해 덮어쓰는 fail-open 방지.
+//   파일이 "없음"과 "있으나 손상"을 구분 — 후자는 파싱 실패를 던져 변경(저장)을 거부하고 원본을 보존한다.
+//   설계: LOAD 가 아니라 SAVE/변경 진입점에서만 던진다(handoff 등 비변경 읽기 경로는 resilient 유지). state 는
+//   카운터 리셋이 run 파일 클로버를 유발하므로 예외적으로 load 에서 던지고 stateCmd 를 _guardStore 로 감싼다.
+function _assertStoreParsable(file, label) {
+  if (exists(file)) {
+    try { JSON.parse(read(file)); }
+    catch { throw Object.assign(new Error(`${label} 저장 파일이 손상돼(JSON 파싱 실패) 덮어쓰기를 거부합니다: ${file} — 파일을 복구하거나 삭제 후 재시도하세요`), { code: 'E_STORE_CORRUPT', file }); }
+  }
+}
+function _guardStore(jsonMode, fn) {
+  try { return fn(); }
+  catch (e) { if (e && e.code === 'E_STORE_CORRUPT') { failJson(jsonMode, 'store_corrupt', e.message); return undefined; } throw e; }
+}
+// 1.36.28 (#4): 0-deps 짧은 결정적 해시 (URL 충돌 구분용, 보안 아님).
+function _shortHash(s) {
+  let h = 5381;
+  const str = String(s || '');
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
+  return h.toString(36).slice(0, 6);
+}
+
 // 1.9.245: API skill cache — 공식 문서 + 관련 링크 자동 정리 (사용자 명시 UR-0015)
 //   .harness/api-skills/<id>.md 에 frontmatter + 본문 저장. handoff 자동 매칭.
 //   Node built-in https (의존성 0), depth=1 same-domain crawl, max 10 links.
@@ -4950,7 +5013,16 @@ async function apiSkillCmd(root, sub) {
     try {
       const doc = await _collectAPIDoc(url, { direction, noCrawl });
       const skillName = name || doc.title || new URL(url).hostname;
-      const id = _apiSkillId(url, name);
+      let id = _apiSkillId(url, name);
+      // 1.36.28 (#4): 쿼리/경로가 달라 URL 은 다른데 slug 가 같으면(예: example.com/?doc=alpha vs ?doc=beta) 기존 파일을
+      //   덮어써 이전 URL·방향이 유실됐다. 같은 id 파일이 이미 있고 저장된 URL 이 다르면 정규화 URL 해시를 붙여 분리한다.
+      const _idFile = (i) => path.join(dir, i + '.md');
+      if (fs.existsSync(_idFile(id))) {
+        const existing = fs.readFileSync(_idFile(id), 'utf8');
+        const um = existing.match(/^urls:\s*\r?\n\s*-\s*(\S.*)$/m);   // 'urls:' 블록의 첫 항목만 (--- 구분선 오매치 방지)
+        const storedUrl = um ? um[1].trim() : '';
+        if (storedUrl && storedUrl !== url) id = id + '-' + _shortHash(url);
+      }
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const md = _serializeAPISkill(id, skillName, [url], direction, doc);
       fs.writeFileSync(path.join(dir, id + '.md'), md, 'utf8');
@@ -5551,6 +5623,7 @@ function _loadPlatformConstraints(root) {
   } catch { return _DEFAULT_PLATFORM_CONSTRAINTS; }
 }
 function _writePlatformConstraints(root, catalog) {
+  _assertStoreParsable(_platformConstraintsPath(root), 'platform-constraints');   // 1.36.28 (#3): 손상 파일 덮어써 커스텀 제약 유실 방지 (try 밖 — 삼켜지지 않게)
   try {
     mkdirp(path.join(root, '.harness'));
     writeUtf8(_platformConstraintsPath(root), JSON.stringify({ ...catalog, updatedAt: new Date().toISOString() }, null, 2));
@@ -7790,6 +7863,7 @@ function _loadTeams(root) {
 }
 function _saveTeams(root, teams) {
   const arr = Array.isArray(teams) ? teams : [];
+  _assertStoreParsable(teamsJsonPath(root), 'team');   // 1.36.28 (#3): 손상 teams.json 을 덮어써 기존 팀 유실 방지
   mkdirp(path.dirname(teamsJsonPath(root)));
   writeUtf8(teamsJsonPath(root), JSON.stringify(arr, null, 2) + '\n');
   writeUtf8(teamsPath(root), _renderTeamsMd(arr));
@@ -18632,7 +18706,8 @@ function _leernessStateDir(root) { return path.join(absRoot(root), '.leerness');
 function _loadLeernessState(root) {
   const f = path.join(_leernessStateDir(root), 'state.json');
   if (!exists(f)) return { schemaVersion: 1, project: detectProjectName(root), currentRunId: null, runCounter: 0, updatedAt: null };
-  try { return JSON.parse(read(f)); } catch { return { schemaVersion: 1, project: detectProjectName(root), currentRunId: null, runCounter: 0, updatedAt: null }; }
+  // 1.36.28 (#3): 손상 파일을 빈 상태로 오인하면 카운터가 0으로 리셋돼 run-0001 을 덮어쓴다(데이터 유실). 파싱 실패는 던진다.
+  try { return JSON.parse(read(f)); } catch { throw Object.assign(new Error(`.leerness/state.json 손상 — 덮어쓰기 거부: ${f} (복구/삭제 후 재시도)`), { code: 'E_STORE_CORRUPT', file: f }); }
 }
 function _saveLeernessState(root, state) {
   const dir = _leernessStateDir(root); mkdirp(dir);
@@ -21504,9 +21579,9 @@ async function main() {
   // 1.9.272: leerness capabilities — 권한/보안 표면 공개 (GPT-5.5 외부 리뷰 반영)
   if (cmd === 'capabilities' || cmd === 'security-surface') return capabilitiesCmd(arg('--path', process.cwd()), { json: has('--json') });
   // 1.9.278 (UR-0032): leerness state <show|start|record|verify|handoff> — .leerness/ 구조화 상태 substrate
-  if (cmd === 'state')                              return stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  if (cmd === 'state')                              return _guardStore(has('--json'), () => stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2)));   // 1.36.28 (#3): 손상 스토어 클로버 차단
   if (cmd === 'context')                            return contextCmd(_resolveRoot(args[1]), { json: has('--json') });
-  if (cmd === 'team')                               return teamCmd(_resolveRoot(args[1] === 'list' ? args[2] : null), args[1], args[2], { json: has('--json') });  // 1.9.371 (UR-0073 Phase A): 팀 레지스트리. 1.9.412 (UR-0100): team list 만 positional path 지원(preview/deploy 의 args[2]=id 와 분리)
+  if (cmd === 'team')                               return _guardStore(has('--json'), () => teamCmd(_resolveRoot(args[1] === 'list' ? args[2] : null), args[1], args[2], { json: has('--json') }));  // 1.9.371 (UR-0073 Phase A): 팀 레지스트리. 1.9.412 (UR-0100): team list 만 positional path 지원. 1.36.28 (#3): 손상 스토어 클로버 차단
   if (cmd === 'brief')                              return briefCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'about' || cmd === 'identity')        return aboutCmd({ json: has('--json') });
   // 1.9.281 (UR-0034): leerness policy <show|set|check> — 권한 등급 (opt-in enforced)
@@ -21535,7 +21610,7 @@ async function main() {
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');
   // 1.9.208: leerness constraints <list|check|add> — 플랫폼/API 제약 사전 체크 (사용자 명시)
-  if (cmd === 'constraints')                        return constraintsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  if (cmd === 'constraints')                        return _guardStore(has('--json'), () => constraintsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2)));   // 1.36.28 (#3): 손상 스토어 클로버 차단
   // 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit (사용자 명시)
   if (cmd === 'pre-wake-audit')                     return preWakeAuditCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.210: leerness wakeup-interval <get|set|auto|history|record> — adaptive interval (사용자 명시)

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.36.28 — 2026-07-15 — 미검토 표면 헌트: 데이터 유실 클래스(손상 스토어 클로버 · URL 덮어쓰기) + 정확성(impact 전이 · alias 경계)
+
+rotate-review-targets 교훈 적용 — 최근 잘 검토된 표면(lens/memory/plan/requests/skill)을 **제외**하고 미검토 표면(state/team/api-skill/wakeup/intent/feature)을 codex 로 QA 헌트. 10 findings 중 결정적 5건을 맹신 X(전부 재현) 후, 데이터 유실 클래스 + 저위험 순수 교정 4건을 수정. 동시성 3건(크로스프로세스 락)은 0-deps rabbit-hole 위험이라 정직하게 이연.
+
+- **#3 P1 (데이터 유실 클래스) — 손상 JSON 스토어를 빈 값으로 오인해 덮어쓰기**: state.json/`teams.json`/`platform-constraints.json` 이 손상되면 fail-open 으로 빈 기본값이 되어 기존 데이터(진행 중 run·팀·커스텀 제약)를 소실시켰다. `_assertStoreParsable`(파일 "없음"과 "있으나 손상" 구분) + `_guardStore` 로 **변경(저장)을 거부하고 원본 보존** + `store_corrupt` 구조화 에러. 설계: SAVE 진입점에서만 던짐(handoff 등 비변경 읽기는 resilient 유지) — 단 state 는 카운터 리셋이 run 파일 클로버를 유발해 load 에서 던지고 stateCmd 를 감쌈.
+- **#4 P2 (데이터 유실) — api-skill 이 쿼리 다른 URL 을 같은 id 로 덮어씀**: `?doc=alpha` 와 `?doc=beta` 가 둘 다 `example.md` 로 슬러그돼 앞 URL·방향이 소실. 같은 id 파일의 저장 URL 이 다르면 정규화 URL 해시(`_shortHash`)를 붙여 분리, 같은 URL 재등록은 멱등 갱신 유지.
+- **#8 P2 (정확성) — feature impact 역의존 전이 누락**: `A←B←C` 에서 `impact A` 가 B 만 반환(C 누락). 역방향 depends-on 을 BFS 종료 후 1-홉이 아니라 BFS **안**에서 확장(visited 로 사이클 안전) → C 가 depth 2 로 포착.
+- **#10 P2 (정확성) — intent alias 부분문자열 오탐**: `restore`→'rest'(API), `client`→'cli'(CLI) 오분류. ASCII 단어 alias 는 단어경계를 요구(`_aliasHit`), 구두점/CJK alias 는 substring 유지.
+- **검증**: selftest 298/298(전이+사이클안전+alias 경계+가드 배선+해시), 4건 전부 원 재현본으로 before/after + 정상 무회귀 실측, 게이트 e2e, 게시본 클린룸.
+- 이연: #7(pre-wake-audit 테이블형 in-progress 미인식 — session-resume 매처 재사용), 동시성 #1/#2/#5(state/team 병렬 lost-update — 크로스프로세스 락 필요).
+
+**반복 마이그레이션 커스텀 유실 (사용자 보고, P1, 동일 릴리스 합류)**: "AI 에게 매번 최신 마이그레이션을 시키는" 표준 흐름에서 **2번째 마이그레이션부터 CLAUDE.md/AGENTS.md 의 사용자 커스텀 지시가 조용히 사라졌다** — `_managedMerge` 가 preserved 태그를 보면 병합 없이 새 템플릿만 반환했기 때문(구 `<details>` 중첩-방지 설계의 부작용). **실증**: 1.26.0/1.9.206 실제 구버전으로 워크스페이스 구축(23종 마커) → migrate: 1차는 유실 0 이지만, 커스텀 추가 후 2차에서 신·구 커스텀 모두 유실(archive 백업에만 잔존).
+- **재설계**: 라인-집합 diff — "새 템플릿에 없는 라인"만 Preserved 섹션에 평문 이월. 멱등(연속 5회 마이그레이션에서 커스텀 3종 전부 보존, 크기 고정), 중첩 없음, 레거시 `<details>` 형식에서도 커스텀 회수(래퍼 미이월), overwriteSet(통째 교체 파일) 존중. 편향은 명시적으로 false-PRESERVE(과보존 무해) — false-DROP(유실)이 버그.
+- 마이그레이션 유실 전수 검증 결과(이번 실측): `.harness/` 데이터 파일(task/lesson/decision/rule/request/plan/feature/team/skill + 수기 편집 project-brief/current-state/handoff/guideline/design-system)은 **1.26.0→최신, 1.9.206→최신, 반복 실행 모두 유실 0** — 유일한 유실 경로가 위 managed-merge 였고 이번에 봉합.
+
 ## 1.36.27 — 2026-07-15 — debug 렌즈 — "근본원인 조사 없이 수정 금지"를 자기질문으로 (obra/superpowers systematic-debugging)
 
 superpowers 검토 아크 마지막 채택분. 원문(systematic-debugging SKILL)의 규율을 **lens 카테고리 정합대로 자기질문 6문항으로 재작성** — 대문자 명령형/강제 게이트는 이식하지 않음(lens 는 advisory 표면, 강제로 포장하면 과장).
