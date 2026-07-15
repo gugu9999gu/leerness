@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.26';
+const VERSION = '1.36.27';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3027,6 +3027,23 @@ function _selfTestCases() {
       const encOk = s.includes("(result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1");   // encoding: 실패 exit1
       return reuseOk && releaseOk && encOk;
     } },
+    { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
+      const d = LENS_CATALOG.debug;
+      if (!d) return false;
+      const parity = Array.isArray(d.questions) && Array.isArray(d.questionsEn) && d.questions.length === d.questionsEn.length && d.questions.length >= 5;
+      // 다중절 앵커(단어 하나 앵커는 실질 삭제를 못 잡음 — 1.36.16 F8 교훈)
+      const anyKo = (...ws) => d.questions.some(q => ws.every(w => q.includes(w)));
+      const anyEn = (...ws) => d.questionsEn.some(q => ws.every(w => q.toLowerCase().includes(w.toLowerCase())));
+      const koOk = anyKo('근본원인', '한 문장') && anyKo('가설', '변수 하나') && anyKo('실패', '테스트') && anyKo('3번째', '자기보고');
+      const enOk = anyEn('root cause', 'one sentence') && anyEn('one variable') && anyEn('failing test');
+      const affectsOk = Array.isArray(d.affects) && d.affects.length && d.affects.every(a => !!LENS_CATALOG[a]);
+      const s = read(__filename);
+      const routeHint = s.includes("if (name === 'bugfix') log(") && s.includes('leerness lens debug');
+      const surface = s.includes('lens [code|design|docs|test|security|database|debug]');
+      // 파일 확장자 매핑 미확장(오탐 방지): _lensDomainsForFiles 가 debug 를 반환하지 않는다
+      const noFileMap = !JSON.stringify(_lensDomainsForFiles(['a.sql', 'b.js', 'c.md'])).includes('debug');
+      return parity && koOk && enOk && affectsOk && routeHint && surface && noFileMap;
+    } },
     { name: 'skill lint (1.36.26, obra/superpowers P1/P2): 2티어 severity(ERROR 만 exit1) + 한국어 트리거절 + CJK 본문예산 분기 — 순수 행위검사', run: () => {
       const p = require('../lib/pure-utils');
       if (typeof p._lintSkillMeta !== 'function') return false;
@@ -4063,7 +4080,7 @@ function _selfTestCases() {
     } },
     { name: '품질 렌즈 (1.18.3): lens 명령 표면 등재 + REPL 설치문항 제거 (소스 가드)', run: () => {
       const src = read(__filename);
-      const surface = src.includes("if (cmd === 'lens')") && src.includes("cmd: 'lens [code|design|docs|test|security|database]") && src.includes('leerness lens [code|design|docs|test|security|database]');
+      const surface = src.includes("if (cmd === 'lens')") && src.includes("cmd: 'lens [code|design|docs|test|security|database|debug]") && src.includes('leerness lens [code|design|docs|test|security|database|debug]');
       const replGone = !src.includes('설치 완료 후 REPL agent ' + '모드를 즉시 시작할까요') && src.includes('REPL agent 모드 진입 ' + '문항 제거');
       return surface && replGone;
     } },
@@ -5182,6 +5199,32 @@ const LENS_CATALOG = {
     ],
     affects: ['code', 'test'], affectsNote: '동시성 방어엔 인터리빙/부하/재시도/멀티인스턴스 실패를 재현하는 테스트가 따라와야 함(단일 인스턴스 초록불은 증거가 아님)',
     affectsNoteEn: 'a concurrency defense needs an interleaving/load/retry/multi-instance reproduction test'
+  },
+  // 1.36.27 (obra/superpowers systematic-debugging → 자기질문化): "근본원인 조사 없이 수정 금지" 계열.
+  //   원문의 대문자 명령형/강제 게이트는 이식하지 않음 — lens 는 advisory 자기질문 표면(과장 금지).
+  //   6번(3번째 시도)은 자기보고 질문 — 도구가 실패 횟수를 카운트하지 않는다(구현했다고 쓰지 말 것).
+  //   파일 확장자 매핑(_lensDomainsForFiles)에는 넣지 않음 — debug 는 파일 표면이 없어 오탐만 생김. 트리거는 route bugfix 힌트.
+  debug: {
+    title: '디버깅', persona: '재현 못 한 버그는 고친 적 없다고 믿는 조사관',
+    titleEn: 'debugging', personaEn: 'an investigator who believes an unreproduced bug was never fixed',
+    questions: [
+      "이 버그를 직접 재현했는가? 에러 전문과 스택을 끝까지 읽었는가 — 첫 줄만 보고 고치고 있지 않은가?",
+      "근본원인을 한 문장으로 글로 쓸 수 있는가? 못 쓰면 아직 조사 단계다 — 조사 전에 해법부터 제시하고 있지 않은가?",
+      "동작하는 유사 코드와의 차이를 전수 나열했는가? 최근 변경(diff) 중 이 경계를 건드린 것은 무엇인가?",
+      "가설을 하나만 세우고 변수 하나만 바꿔 검증했는가 — 여러 곳을 동시에 고쳐서 무엇이 통했는지 모르게 되고 있지 않은가?",
+      "그 버그를 재현하는 실패 테스트를 먼저 썼고, 수정 전엔 실제로 실패함을 확인했는가? — 수정 후 초록불만으론 그 테스트가 버그를 잡는지 알 수 없다.",
+      "같은 버그에 3번째 수정 시도인가? 그렇다면 증상이 아니라 설계를 의심할 때다 — `leerness decision add`/`lesson save` 로 승격해 기록하라. (자기보고 — 도구가 시도 횟수를 세지 않는다)",
+    ],
+    questionsEn: [
+      "Did you reproduce the bug yourself, and read the full error and stack to the end — or are you fixing off the first line?",
+      "Can you write the root cause in one sentence? If not, you are still investigating — are you proposing fixes before the investigation?",
+      "Did you enumerate every difference from similar working code? Which recent change (diff) touched this boundary?",
+      "One hypothesis, one variable changed per experiment — or are you changing several things at once so you can't tell what worked?",
+      "Did you write a failing test that reproduces the bug first, and confirm it actually fails before the fix? A green light after the fix alone proves nothing.",
+      "Is this your third attempt at the same bug? Then suspect the design, not the symptom — promote it via decision add / lesson save. (self-reported — the tool does not count attempts)",
+    ],
+    affects: ['test', 'code'], affectsNote: '근본원인을 한 문장으로 못 쓰겠으면 코드가 복잡하다는 신호 — code 질문으로. 수정엔 그 버그를 재현하는 회귀 테스트가 따라와야 함(수정 후 초록불은 증거가 아님)',
+    affectsNoteEn: 'if you cannot state the root cause in one sentence, the code is too complex — revisit the code lens; every fix needs a regression test that reproduces the bug'
   }
 };
 // 1.19.3 (UR-0003 렌즈 완전판 v3): 프로젝트별 커스텀 렌즈 — .harness/quality-lenses.json 읽기-병합(쓰기 명령 없음, AI/사용자가 편집).
@@ -5351,7 +5394,7 @@ function commandsCmd(root) {
       { cmd: 'encoding check [path]', desc: '인코딩 검증' },
       { cmd: 'lazy detect [path] [--json]', desc: '게으른 작업 감지 (1.9.101)' },
       { cmd: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<명령>"] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --all: 모든 done 주장 일괄 검증(CI·스케일, 1.33.2) · --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287) · --test-cmd: 비-JS 테스트 명령 (1.17.2)' },
-      { cmd: 'lens [code|design|docs|test|security|database] [--json]', desc: '분야별 자기질문 품질 렌즈 + 분야간 인과관계 (1.18.3, database: 동시성/트랜잭션)' },
+      { cmd: 'lens [code|design|docs|test|security|database|debug] [--json]', desc: '분야별 자기질문 품질 렌즈 + 분야간 인과관계 (1.18.3, database: 동시성/트랜잭션)' },
       { cmd: 'optimism-check <T-ID>', desc: '낙관적 API 감지 (1.9.26)' },
       { cmd: 'requests audit|list|complete|drop|auto-complete', desc: '사용자 요청 추적 (1.9.207/223)' },
       { cmd: 'pre-wake-audit [path] [--last]', desc: 'sleep 전 점검 (1.9.209)' },
@@ -8705,6 +8748,8 @@ function route(name) {
   log(`# Route: ${name}\n`);
   log('Read before work:'); r.read.forEach(x => log('- ' + x));
   log('\nUpdate after work:'); r.update.forEach(x => log('- ' + x));
+  // 1.36.27: bugfix 진입 시 debug 렌즈 힌트 — 결정적 트리거(사용자가 task type 명시)라 키워드 추론 아님. advisory 한 줄.
+  if (name === 'bugfix') log('\n💡 수정 전 자기질문: leerness lens debug  # 근본원인 조사 없이 수정 금지 (재현→원인 한 문장→가설 하나→실패 테스트 먼저)');
 }
 
 function status(root) {
@@ -21117,7 +21162,7 @@ VERIFICATION (evidence-gated "done")
   contract verify <spec.md> <impl.js> [--json]    Spec <-> implementation match
   verify-code [path] [--build] [--bench]          Run tests/lint/typecheck, record evidence
   gate [path]                     One-call CI gate: verify + audit + scan + encoding + lazy
-  lens [code|design|docs|test|security|database] [--json]  Quality self-question lenses
+  lens [code|design|docs|test|security|database|debug] [--json]  Quality self-question lenses
 
 SECURITY & HYGIENE
   scan secrets [path]             Committed-secret detection
@@ -21179,7 +21224,7 @@ function help() {
   // 1.23.1 (UR-0010 Phase 6): 영어 opt-in 시 큐레이트 영어판. 기본(ko) 은 아래 한국어 help 그대로.
   if (_uiLang(arg('--path', process.cwd())) === 'en') { _helpEn(); return; }
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/agy/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합
-  leerness lens [code|design|docs|test|security|database] [--json]   # 1.18.3 분야별 자기질문 품질 렌즈 (database: 동시성/트랜잭션 — 완료 선언 전 자가 점검)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  leerness lens [code|design|docs|test|security|database|debug] [--json]   # 1.18.3 분야별 자기질문 품질 렌즈 (database: 동시성/트랜잭션 — 완료 선언 전 자가 점검)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)

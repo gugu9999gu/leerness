@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.27 — 2026-07-15 — debug 렌즈 — "근본원인 조사 없이 수정 금지"를 자기질문으로 (obra/superpowers systematic-debugging)
+
+superpowers 검토 아크 마지막 채택분. 원문(systematic-debugging SKILL)의 규율을 **lens 카테고리 정합대로 자기질문 6문항으로 재작성** — 대문자 명령형/강제 게이트는 이식하지 않음(lens 는 advisory 표면, 강제로 포장하면 과장).
+
+- **`LENS_CATALOG.debug`** — persona "재현 못 한 버그는 고친 적 없다고 믿는 조사관". 6문항: 재현+스택 전문 / 근본원인 한 문장 / 유사 코드와 차이 전수 / 가설 하나·변수 하나 / **실패 테스트 먼저**(수정 후 초록불은 증거 아님) / 3번째 시도면 설계 의심 → decision·lesson 승격. ko/en 락스텝(병합 규칙상 개수 일치 필수). `affects: [test, code]`.
+  - 정직성: 6번(3번째 시도)은 **자기보고 질문** — 도구가 시도 횟수를 세지 않는다. 파일 확장자 매핑(`_lensDomainsForFiles`)에는 넣지 않음 — debug 는 파일 표면이 없어 오탐만 생김.
+- **`route bugfix` 힌트** — 결정적 트리거(사용자가 task type 명시): `💡 수정 전 자기질문: leerness lens debug`. 표면 문자열 5곳 `|debug` 동시 갱신(selftest 가드 리터럴 포함 — 미갱신 시 게이트가 깨지는 구조를 판정단이 사전 지적).
+- **검증**: selftest 297/297(ko/en 패리티 + 다중절 앵커 4쌍(1.36.16 F8 교훈 — 단어 하나 앵커 금지) + affects 유효 + route 힌트 + **파일매핑 미확장 확인**), lens/route/en 실측, 게이트 e2e, 게시본 클린룸.
+
 ## 1.36.26 — 2026-07-15 — `leerness skill lint` — SKILL 메타 품질 lint (2티어 severity · 한국어 트리거절 · CJK 본문예산) (obra/superpowers P1/P2)
 
 1.36.25(P0 — description 데이터)로 선행조건이 충족된 후속. 판별 증거: **P0 없이 lint 를 먼저 붙였으면 내장 9/9 가 실패**했을 것 — 지금은 내장 9종이 lint clean(순서가 맞았다는 실증, selftest 로 고정).
