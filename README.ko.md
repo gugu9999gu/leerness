@@ -164,7 +164,7 @@ leerness mcp serve                          # JSON-RPC over stdio, 85 도구
 - **에이전트 중립** — Claude / Codex / Cursor / Aider / Goose 등 어디에나 적용.
 - **거짓 완료 방지** — 완료 주장에 evidence 를 요구하는 anti-lazy 흐름.
 - **통합 게이트** — 보안·인코딩·드리프트·검증을 `gate` 하나로.
-- **한국어 우선 + Windows/인코딩 1급 시민** — CP949/BOM 가드, 한국어 출력 기본(`--language en` 지원).
+- **Windows/인코딩 1급 시민** — CP949/BOM 가드, 터미널 인코딩 자동 회복. 출력 언어는 기본 ko · `--language en` 으로 영어.
 - **자기기술(self-describing)** — `about`/`commands`/`capabilities`/`doctor` 로 도구가 스스로 설명.
 
 ---

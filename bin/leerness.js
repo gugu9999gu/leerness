@@ -30,10 +30,11 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
-const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
+const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, MEMORY_SYNONYMS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
+const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.22';
+const VERSION = '1.36.23';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -253,7 +254,7 @@ function detectLanguageValue(root, value = 'auto') {
   // ③ en 폴백
   return 'en';
 }
-// 1.20.2 (UR-0010 CLI 영어화 Phase 1): UI 출력 언어 해석 — 한국어 우선 기본, 영어 opt-in.
+// 1.20.2 (UR-0010 CLI 영어화 Phase 1): UI 출력 언어 해석 — 기본 ko(기존 사용자 기본값), 영어는 --language en / LEERNESS_LANG=en.
 //   우선순위: --language 플래그 > LEERNESS_LANG env > .harness/manifest.json 의 language(init 선택) > 'ko'.
 //   (system locale 은 의도적으로 미사용 — 영어 OS 한국 사용자 놀람 방지. 영어는 명시 opt-in.)
 function _uiLang(root) {
@@ -2982,6 +2983,37 @@ function _selfTestCases() {
       const encOk = s.includes("(result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1");   // encoding: 실패 exit1
       return reuseOk && releaseOk && encOk;
     } },
+    { name: 'memory search 랭킹/동의어 (1.36.23): 한국어 조사 회귀 0 + 동의어 리콜 순증 + BM25 단조성 — 순수 행위검사', run: () => {
+      const sc = require('../lib/search-core');
+      const { MEMORY_SYNONYMS } = require('../lib/catalogs');
+      if (typeof sc.scoreHits !== 'function' || typeof sc.expandQuery !== 'function') return false;
+      // (a) ★ 한국어 조사 회귀 금지 — 이 라운드의 최대 리스크. 토큰화 리콜로 바꿨다면 여기서 죽는다.
+      //     '핸드오프' 쿼리가 '핸드오프를…' 문서에 반드시 스코어를 준다(랭킹 토크나이저의 prefix 변형).
+      const ko = sc.scoreHits('핸드오프', [{ text: '핸드오프를 자동화하기로 결정했다' }]);
+      const koOk = ko.length === 1 && ko[0].score > 0;
+      //     리콜 자체는 caller 의 substring 이 담당 — 안전판 확인(토크나이저가 조사를 못 떼도 substring 은 찾는다)
+      const substringStillFinds = new RegExp('핸드오프', 'i').test('핸드오프를 자동화하기로 결정했다');
+      // (b) 동의어 확장은 "순증"만 — 원본이 항상 포함되고(리콜 감소 0), 양방향
+      const ex1 = sc.expandQuery('핸드오프', MEMORY_SYNONYMS);
+      const ex2 = sc.expandQuery('handoff', MEMORY_SYNONYMS);
+      const superset = ex1[0] === '핸드오프' && ex1.includes('handoff') && ex2[0] === 'handoff' && ex2.includes('핸드오프');
+      const unknownKeeps = JSON.stringify(sc.expandQuery('zzz없는말', MEMORY_SYNONYMS)) === JSON.stringify(['zzz없는말']);  // 모르는 말은 원본 그대로
+      // (c) BM25 단조성: tf↑ → score↑ / 희귀어(idf↑)가 흔한 어휘보다 높은 점수
+      const tfLow = sc.scoreHits('alpha', [{ text: 'alpha beta gamma delta' }])[0].score;
+      const tfHigh = sc.scoreHits('alpha', [{ text: 'alpha alpha alpha beta gamma delta' }])[0].score;
+      const monotonic = tfHigh > tfLow;
+      const corpus = [{ text: 'rare unique term' }, { text: 'common word here' }, { text: 'common word there' }, { text: 'common word everywhere' }];
+      const rareScore = sc.scoreHits('rare', corpus)[0].score;
+      const commonScore = sc.scoreHits('common', corpus)[1].score;
+      const idfOk = rareScore > commonScore;
+      // (d) 0건 제안은 실제 어휘에서만(지어내지 않음)
+      const sug = sc.suggestTerms('핸드', new Set(['핸드오프', '무관어']), { limit: 3 });
+      const sugOk = sug.includes('핸드오프') && !sug.includes('무관어');
+      // 배선 가드: 리콜은 substring(OR), 랭킹은 BM25, limit 은 정렬 "후"
+      const s = read(__filename);
+      const wired = s.includes('const _isHit = line => res.some(r => r.test(line));') && s.includes('_scoreHits(query, raw.map') && s.includes('.slice(0, _limit)');
+      return koOk && substringStillFinds && superset && unknownKeeps && monotonic && idfOk && sugOk && wired;
+    } },
     { name: 'SessionStart 컨텍스트 주입 (1.36.22, obra/superpowers 구조 검토): hook 전용 표면 + 쓰기0 가드 + matcher 에 compact 포함 + opt-out — 소스가드', run: () => {
       const s = read(__filename);
       const surface = typeof hookSessionStartCmd === 'function' && s.includes("cmd === 'hook' && args[1] === 'session-start'");
@@ -4192,7 +4224,7 @@ function _selfTestCases() {
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
       const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;
       try {
-        // 기본 ko (한국어 우선 정체성 보존)
+        // 기본 ko (기존 사용자 기본값 보존 — 영어는 --language en / LEERNESS_LANG=en)
         process.argv = ['node', 'h', 'handoff']; delete process.env.LEERNESS_LANG;
         if (_uiLang('/no/such/dir') !== 'ko') return false;
         // --language en 플래그 → en
@@ -9041,17 +9073,32 @@ function memorySearch(root, query) {
   if (!query) { failJson(jsonMode, 'query_required', 'query required (e.g., memory search "키워드")'); return; }
   // 1.13.1 (15th 블라인드 리뷰 P1, Sonnet): lessons.md + rules.md 누락 수정 — memory search 가 5종 메모리 표면을 표방하나 lesson/rule 을 검색 못 해(lesson add/rule add 로 저장한 교훈·룰이 'no matches') 모순감지 핵심 용도가 훼손됐음.
   const files = ['.harness/decisions.md','.harness/lessons.md','.harness/rules.md','.harness/task-log.md','.harness/session-handoff.md','.harness/progress-tracker.md','.harness/plan.md','.harness/review-evidence.md','.harness/architecture.md'];
-  const re = new RegExp(query.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i');
+  // 1.36.23: (1) 동의어 확장으로 리콜 "순증" — 실측 `핸드오프` 0 hits / `handoff` 37 hits 비대칭 해소. 기존 regex 에 OR 로 더하므로
+  //   현 동작의 상위집합(히트 감소 0). --no-synonyms 로 종전 동작. (2) 히트를 BM25 로 정렬한 뒤 --limit 적용 — 종전엔 파일당
+  //   "앞 N건" 임의 절단이었다(최고 N건이 아니라). ★ 리콜은 substring 유지: 한국어 조사 때문에 토큰화 리콜은 지금 찾히는 문서를
+  //   0건으로 만든다(lib/search-core.js 주석 참조) — BM25 는 정렬 전용이라 토크나이저가 틀려도 히트가 사라지지 않는다.
+  const useSyn = !has('--no-synonyms');
+  const terms = useSyn ? _expandQuery(query, MEMORY_SYNONYMS) : [query];
+  const res = terms.map(t => new RegExp(String(t).replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i'));
+  const _isHit = line => res.some(r => r.test(line));   // 리콜 = substring OR(원본 + 동의어) — 한국어 조사 안전판
+  const _limit = _parseLimit(arg('--limit','5'),5);
   let total = 0;
+  const _blocks = [];                                  // 파일별 결과 — best score 순으로 출력(관련 높은 파일 먼저)
   for (const f of files) {
     const p = path.join(root, f); if (!exists(p)) continue;
     const lines = read(p).split('\n');
-    const hits = lines.map((line, i) => ({ line, i })).filter(x => re.test(x.line));
-    if (hits.length) {
-      if (!jsonMode) log(`\n# ${f}`);
-      for (const h of hits.slice(0, _parseLimit(arg('--limit','5'),5))) { if (!jsonMode) log(`  L${h.i+1}: ${h.line.trim()}`); results.push({ file: f, line: h.i + 1, text: h.line.trim() }); }
-      total += hits.length;
-    }
+    const raw = lines.map((line, i) => ({ line, i })).filter(x => _isHit(x.line));
+    if (!raw.length) continue;
+    const scored = _scoreHits(query, raw.map(x => ({ line: x.i + 1, text: x.line.trim() })))
+      .sort((a, b) => (b.score - a.score) || (a.line - b.line));   // 동점이면 원래 순서(결정적)
+    const top = scored.slice(0, _limit);
+    _blocks.push({ file: f, top, best: top.length ? top[0].score : 0 });
+    total += raw.length;
+  }
+  _blocks.sort((a, b) => (b.best - a.best) || a.file.localeCompare(b.file));
+  for (const blk of _blocks) {
+    if (!jsonMode) log(`\n# ${blk.file}`);
+    for (const h of blk.top) { if (!jsonMode) log(`  L${h.line}: ${h.text}`); results.push({ file: blk.file, line: h.line, text: h.text, score: h.score }); }
   }
   // 1.9.25: --include-code 옵션 — 실제 소스 코드 본문도 검색 (src/tests/bin)
   // 이전 모순 감지 0/5 → 5/5의 핵심 보완
@@ -9068,10 +9115,13 @@ function memorySearch(root, query) {
           if (!/\.(js|ts|jsx|tsx|gd|cs|py|rb|go|rs|md|html|css|json)$/i.test(e.name)) continue;
           let txt; try { txt = read(p); } catch { continue; }
           const lines = txt.split('\n');
-          const hits = lines.map((line, i) => ({ line, i })).filter(x => re.test(x.line));
+          // 1.36.23: 메모리 파일 경로와 동일 처리로 통일 — 동의어 리콜 + BM25 정렬 후 limit(종전엔 단일 regex + 앞 N건 절단이라
+          //   JSON results 배열에 score 있는 항목/없는 항목이 섞였다). 21k줄 소스에서 "앞 5건"은 특히 자의적이었음.
+          const hits = _scoreHits(query, lines.map((line, i) => ({ line: i + 1, text: line.trim().slice(0, 160), _raw: line }))
+            .filter(x => _isHit(x._raw))).sort((a, b) => (b.score - a.score) || (a.line - b.line));
           if (hits.length) {
             if (!jsonMode) log(`\n# ${rel(root, p)}`);
-            for (const h of hits.slice(0, _parseLimit(arg('--limit','5'),5))) { if (!jsonMode) log(`  L${h.i+1}: ${h.line.trim().slice(0, 160)}`); results.push({ file: rel(root, p), line: h.i + 1, text: h.line.trim().slice(0, 160) }); }
+            for (const h of hits.slice(0, _limit)) { if (!jsonMode) log(`  L${h.line}: ${h.text}`); results.push({ file: rel(root, p), line: h.line, text: h.text, score: h.score }); }
             total += hits.length;
           }
         }
@@ -9079,9 +9129,22 @@ function memorySearch(root, query) {
       walkCodeDir(dp);
     }
   }
-  if (jsonMode) { log(JSON.stringify({ version: VERSION, query, total, includeCode: has('--include-code'), results }, null, 2)); return; }
-  if (total === 0) log('(no matches)');
-  else log(`\n${total} matches${has('--include-code') ? ' (소스 코드 포함)' : ''}`);
+  // 1.36.23: 0건이면 실제 색인 어휘로 근접어 제안(지어내지 않음 — vocab 은 방금 읽은 메모리 파일에서 추출).
+  let _suggest = [];
+  if (total === 0) {
+    try {
+      const vocab = new Set();
+      for (const f of files) {
+        const p = path.join(root, f); if (!exists(p)) continue;
+        for (const t of _tokenizeForRank(read(p))) if (t.length >= 2) vocab.add(t);
+      }
+      _suggest = _suggestTerms(query, vocab, { limit: 5 });
+    } catch {}
+  }
+  // 1.36.23: total(전체 히트) 과 results.length(표시분) 불일치를 자기정합화 — 종전엔 total 16 / results 15 처럼 어긋났다.
+  if (jsonMode) { log(JSON.stringify({ version: VERSION, query, terms: useSyn && terms.length > 1 ? terms : undefined, total, shown: results.length, truncated: total > results.length, suggestions: _suggest.length ? _suggest : undefined, includeCode: has('--include-code'), results }, null, 2)); return; }
+  if (total === 0) { log('(no matches)'); if (_suggest.length) log(`  혹시 이건가요: ${_suggest.join(', ')}`); }
+  else log(`\n${total} matches${total > results.length ? ` (상위 ${results.length}건 표시 — --limit 로 조절)` : ''}${has('--include-code') ? ' · 소스 코드 포함' : ''}${useSyn && terms.length > 1 ? ` · 동의어: ${terms.slice(1).join('/')}` : ''}`);
 }
 
 function handoff(root) {
@@ -12956,7 +13019,7 @@ function _banner(opts = {}) {
       cprint('    ' + C.green(padded) + C.dim('# ' + desc));
     };
 
-    // 1.20.2 (UR-0010 Phase 1): 첫 화면 배너 — UI 언어(한국어 우선, 영어 opt-in) 적용.
+    // 1.20.2 (UR-0010 Phase 1): 첫 화면 배너 — UI 언어(기본 ko, 영어 opt-in) 적용.
     const L = _uiLang(arg('--path', process.cwd()));
     const t = (ko, en) => (L === 'en' ? en : ko);
     cprint('');
