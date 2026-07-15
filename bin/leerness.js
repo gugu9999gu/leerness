@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.23';
+const VERSION = '1.36.24';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2982,6 +2982,16 @@ function _selfTestCases() {
       const releaseOk = s.includes('deleteCount: toDelete.length, deleted, deleteFailed') && s.includes('if (deleteFailed > 0) process.exitCode = 1');  // release: 삭제 먼저 → json 에 deleted
       const encOk = s.includes("(result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1");   // encoding: 실패 exit1
       return reuseOk && releaseOk && encOk;
+    } },
+    { name: 'requests positional 경로 (1.36.24, UR-0027 확장): requests 계열도 task/rule 과 동일하게 positional 경로 인식 — 다른 프로젝트 cwd 오기록 차단 — 소스가드+행위', run: () => {
+      const s = read(__filename);
+      const wired = s.includes("requestsCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd()");
+      // 행위(순수): path-like 만 경로 인정 — ID/텍스트/내부슬래시 무오인, 값-플래그 값 제외 (기존 계약 그대로)
+      const p = require('../lib/pure-utils');
+      const abs = p._taskPositionalPath(['requests', 'add', 'do the thing', 'C:\\other\\proj']) === 'C:\\other\\proj';
+      const idNotPath = p._taskPositionalPath(['requests', 'drop', 'UR-0001']) === null;
+      const innerSlashNotPath = p._taskPositionalPath(['requests', 'add', 'src/auth 모듈 정리']) === null;
+      return wired && abs && idNotPath && innerSlashNotPath;
     } },
     { name: 'memory search 랭킹/동의어 (1.36.23): 한국어 조사 회귀 0 + 동의어 리콜 순증 + BM25 단조성 — 순수 행위검사', run: () => {
       const sc = require('../lib/search-core');
@@ -21324,7 +21334,10 @@ async function main() {
   // 1.9.203: leerness resume — auto-resume-plan 읽고 다음 라운드 즉시 안내 (사용자 명시)
   if (cmd === 'resume')                             return resumeCmd(arg('--path', process.cwd()));
   // 1.9.207: leerness requests <audit|add|list|complete|drop> — 사용자 요청 누락 확인 절차 (사용자 명시)
-  if (cmd === 'requests')                           return requestsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  // 1.36.24 (UR-0027 확장, 실피해 재현): requests 계열만 positional 경로 미지원이라 `requests add "text" C:/other/proj` 가
+  //   조용히 cwd 프로젝트에 기록하고 성공 보고했다(task/rule 은 _taskPositionalPath 지원 → 불일치가 실수를 유도, 본인 피해 확인).
+  //   rule 선례와 동일 배선 — path-like(선행 구분자) 만 인정하는 기존 계약이라 텍스트/ID 오인 FP 없음(_parseAddTitle 이 add 텍스트를 path-like 에서 끊는 것도 기존과 동일).
+  if (cmd === 'requests')                           return requestsCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1], ...args.slice(2));
   // 1.9.220: leerness session-resume — 비정상 종료 감지 + 자율 재개 가이드 (사용자 명시)
   if (cmd === 'session-resume')                     return sessionResumeCmd(arg('--path', process.cwd()));
   // 1.9.226: leerness round-history — 자율 라운드 통계 + 다음 마일스톤
