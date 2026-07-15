@@ -26,7 +26,7 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
   _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm,
-  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd, _briefUnfilled, _planGoalUnfilled } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리
+  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd, _briefUnfilled, _planGoalUnfilled, _draftAnchors, _replaceMdSection } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리 · 1.36.36 anchors
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.35';
+const VERSION = '1.36.36';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3178,6 +3178,24 @@ function _selfTestCases() {
       const oldGone = !s.includes('const projPath = allPaths.find(' + 'p => path.basename(p) === projName);');
       return sweepShared && absKey && jsonExit && humanShared && oldGone;
     } },
+    { name: 'anchors draft (1.36.36, 도그푸딩 후속): 실신호 초안 합성 + 미작성만 교체 + 불클로버 — 순수 행위검사', run: () => {
+      const p = require('../lib/pure-utils');
+      if (typeof p._draftAnchors !== 'function' || typeof p._replaceMdSection !== 'function') return false;
+      const d = p._draftAnchors({ pkgDescription: '결제 정산 서비스', readmeText: '# T\n\n웹훅 백엔드.\n', milestones: [{ id: 'M-0001', title: '베타', status: 'planned' }], tasks: [] });
+      const draftOk = d.hasSignal && d.purpose.some(l => l.includes('결제 정산 서비스')) && d.goal.some(l => l.includes('M-0001')) && d.purpose[0].includes('draft:');
+      // 무신호 시 발명 금지
+      const empty = p._draftAnchors({});
+      const noInvent = !empty.hasSignal && empty.purpose.length === 0 && empty.goal.length === 0;
+      // 섹션 교체는 대상 섹션만, 나머지 불변 + 섹션 없으면 원문 그대로
+      const md = '# B\n\n## Purpose\n- placeholder\n\n## Users\n- real users\n';
+      const rep = p._replaceMdSection(md, 'Purpose', ['- new']);
+      const secOk = rep.includes('- new') && !rep.includes('- placeholder') && rep.includes('- real users');
+      const noSec = p._replaceMdSection(md, 'Nope', ['- x']) === md;
+      // CLI 배선 + handoff 힌트
+      const s = read(__filename);
+      const wired = typeof anchorsCmd === 'function' && s.includes("cmd === 'anchors'") && s.includes('→ leerness anchors draft');
+      return draftOk && noInvent && secOk && noSec && wired;
+    } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
       if (!d) return false;
@@ -4851,6 +4869,58 @@ function shellGuardCmd(root, cmd, opts = {}) {
   if (pastSame > 0) log(yl(`  ⚠ 이 명령은 과거 ${pastSame}회 실패 기록 있음`));
   else if (pastSimilar > 0) log(dm(`  ℹ "${firstTok}" 시작 명령 과거 ${pastSimilar}회 실패 기록`));
   if (analysis.issues.some(i => i.severity === 'error')) process.exitCode = 1;
+}
+
+// 1.36.36 (도그푸딩 실측 후속): `leerness anchors [status|draft [--apply]]` — 정체성앵커(brief Purpose / plan Goal) 미작성 전환 지원.
+//   실측: 1.36.19 감지 출하 후에도 실프로젝트 brief 4/7 · Goal 6/7 미작성 — 노출만으론 전환 안 됨. 초안 합성으로 마찰 제거.
+//   안전: --apply 는 해당 섹션이 "미작성일 때만" 교체(작성된 내용 절대 불클로버), 초안 표식 주석 명시.
+function anchorsCmd(root, sub) {
+  root = absRoot(root);
+  const json = has('--json');
+  if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root}`); return; }   // 코드명 주의: audit 고유 finding kind(초기화 미완 마커)는 selftest 가드가 bin 부재를 단언하므로 여기서 사용 금지
+  const bf = path.join(root, '.harness', 'project-brief.md');
+  const pf = planPath(root);
+  const briefTxt = exists(bf) ? read(bf) : '';
+  const planTxt = exists(pf) ? read(pf) : '';
+  const naM = '<!-- leerness:na';
+  const briefGap = !!briefTxt && !briefTxt.includes(naM) && _briefUnfilled(briefTxt);
+  const planGap = !!planTxt && !planTxt.includes(naM) && _planGoalUnfilled(planTxt);
+  if (!sub || sub === 'status') {
+    if (json) { log(JSON.stringify({ briefUnfilled: briefGap, planGoalUnfilled: planGap }, null, 2)); return; }
+    log(`# leerness anchors — 정체성앵커 상태`);
+    log(`  project-brief Purpose: ${briefGap ? '📋 미작성' : '✓ 작성됨'}`);
+    log(`  plan Goal:             ${planGap ? '📋 미작성' : '✓ 작성됨'}`);
+    if (briefGap || planGap) log(`\n  💡 초안 생성: leerness anchors draft   ·   적용: leerness anchors draft --apply (미작성 섹션만 채움)`);
+    return;
+  }
+  if (sub === 'draft') {
+    // 실신호 수집 (전부 read-only)
+    let pkgDescription = '';
+    try { const pj = JSON.parse(read(path.join(root, 'package.json'))); pkgDescription = pj.description || ''; } catch {}
+    let readmeText = '';
+    try { if (exists(path.join(root, 'README.md'))) readmeText = read(path.join(root, 'README.md')).slice(0, 4000); } catch {}
+    let milestones = [], tasks = [];
+    try { const rd = _roadmapData(root); milestones = rd.milestones || []; tasks = rd.tasks || []; } catch {}
+    const draft = _draftAnchors({ pkgDescription, readmeText, milestones, tasks });
+    if (!draft.hasSignal) { failJson(json, 'no_signal', '초안을 만들 실신호가 없음 (package.json description / README 산문 / milestone / 활성 task 모두 부재) — 직접 작성 필요'); return; }
+    const apply = has('--apply');
+    const applied = [];
+    if (briefGap && draft.purpose.length) {
+      if (apply) { writeUtf8(bf, _replaceMdSection(briefTxt, 'Purpose', draft.purpose)); applied.push('project-brief.md#Purpose'); }
+    }
+    if (planGap && draft.goal.length) {
+      if (apply) { writeUtf8(pf, _replaceMdSection(planTxt, 'Goal', draft.goal)); applied.push('plan.md#Goal'); }
+    }
+    if (json) { log(JSON.stringify({ briefUnfilled: briefGap, planGoalUnfilled: planGap, draft: { purpose: draft.purpose, goal: draft.goal }, applied, dryRun: !apply }, null, 2)); return; }
+    log(`# leerness anchors draft ${apply ? '(적용)' : '(dry-run — 적용: --apply)'}`);
+    if (briefGap) { log(`\n## project-brief Purpose ${apply ? '← 적용됨' : '초안'}`); draft.purpose.forEach(l => log('  ' + l)); }
+    else log(`\n  ✓ project-brief Purpose 는 이미 작성됨 — 건드리지 않음`);
+    if (planGap) { log(`\n## plan Goal ${apply ? '← 적용됨' : '초안'}`); draft.goal.forEach(l => log('  ' + l)); }
+    else log(`  ✓ plan Goal 은 이미 작성됨 — 건드리지 않음`);
+    if (apply && applied.length) log(`\n✓ 적용: ${applied.join(', ')} (초안 표식 주석 포함 — 검토 후 주석 제거로 확정)`);
+    return;
+  }
+  fail(`알 수 없는 하위명령: ${sub} (가능: status, draft [--apply])`);
 }
 
 // 1.36.28 (codex 미검토표면 헌트 #3 — 데이터 유실 클래스): 손상된 JSON 스토어를 "빈 값"으로 오인해 덮어쓰는 fail-open 방지.
@@ -9806,7 +9876,7 @@ function handoff(root) {
         const _planTxt = exists(planPath(root)) ? read(planPath(root)) : '';
         const briefGap = !_briefTxt.includes(_naM) && _briefUnfilled(_briefTxt);
         const planGap = !!_planTxt && !_planTxt.includes(_naM) && _planGoalUnfilled(_planTxt);
-        if (briefGap && planGap) parts.push(t('📋 정체성앵커 미작성 (brief+plan)', '📋 identity anchors unfilled (brief+plan)'));
+        if (briefGap && planGap) parts.push(t('📋 정체성앵커 미작성 (brief+plan) → leerness anchors draft', '📋 identity anchors unfilled (brief+plan) → leerness anchors draft'));
         else if (briefGap) parts.push(t('📋 project-brief 미작성', '📋 project-brief unfilled'));
         else if (planGap) parts.push(t('📋 plan Goal 미작성', '📋 plan Goal unfilled'));
       } catch {}
@@ -21718,6 +21788,7 @@ async function main() {
   if (cmd === 'milestones')                         return milestonesCmd(_resolveRoot(args[1]));
   // 1.9.231: leerness pulse — 한 줄 종합 요약 (10 핵심 지표)
   if (cmd === 'pulse')                              return pulseCmd(_resolveRoot(args[1]));
+  if (cmd === 'anchors')                           return anchorsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), args[1] && !args[1].startsWith('-') ? args[1] : null);   // 1.36.36: 정체성앵커 초안
   if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
   if (cmd === 'lens')                               return lensCmd(args[1]);  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈
   // 1.9.233: leerness commands — 카테고리화된 전체 CLI 명령 목록

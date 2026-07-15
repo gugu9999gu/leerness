@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.36 — 2026-07-15 — `leerness anchors` — 정체성앵커 초안 합성 (도그푸딩 재실측 후속)
+
+**배경(실측)**: 1.36.19 에서 앵커 미작성 감지를 출하했지만, 실프로젝트 7곳 재순회 결과 **brief 미작성 4/7 · plan Goal 미작성 6/7** — 감지·노출만으론 전환이 안 된다(반례: AEGIRINE 0/0 은 전환 가능함의 증거). 마찰 지점은 "빈 문서를 처음부터 써야 함" — 실신호 초안으로 제거.
+
+- **`leerness anchors [status|draft [--apply]] [path]`**: package.json description · README 첫 산문 · milestones · 활성 task 만으로 Purpose/Goal 초안 합성(순수 `_draftAnchors`). **발명 금지** — 신호가 없으면 `no_signal` 로 거부(빈 프로젝트에 그럴듯한 거짓 목적을 써주지 않음).
+- **안전**: `--apply` 는 해당 섹션이 **미작성일 때만** 교체(`_replaceMdSection` — 그 섹션만, 나머지 불변). 작성된 앵커는 절대 불클로버(재실행 실측). 초안 표식 주석 명시 — AI/사용자 검토 후 주석 제거로 확정.
+- **handoff 힌트 배선**: 앵커 미작성 헤드라인에 `→ leerness anchors draft` 액션 부착 — 다음 세션 AI 가 한 명령으로 전환.
+- **검증**: selftest 306/306(합성/무신호 거부/섹션 교체/배선), E2E 사슬 실측(status→draft→apply→감지 해소→불클로버), exit 전파형 게이트, 클린룸. (부수: audit 마커와의 finding-code 충돌을 selftest 가 잡아 코드명 분리 — 자기참조 트랩 주석 변형 포함 5번째.)
+
 ## 1.36.35 — 2026-07-15 — deps --run-tests 정직화 + #7 의도적 DEFER (codex 3차 잔여 소진)
 
 - **#6 `deps <cap> --run-tests`**: (a) `--json` 이 테스트 스윕 **전에** return → 스윕이 무언 무시되고 exit 0(false-green) — json/human 이 같은 `_runImpactSweep` 를 쓰도록 공용화, json 은 `tests[]` 필드 + 실패 시 exit 1. (b) 프로젝트를 basename 으로 역추적해 **동명 프로젝트(a/service, b/service) 중 하나만 테스트**되고 실패쪽이 조용히 생략 — 절대경로 키로 교정. 실측: 동명 2 프로젝트 모두 실행(PASS/FAIL 각각), json/human 동등, 실패 exit 1.
