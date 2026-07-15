@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.28';
+const VERSION = '1.36.29';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2952,7 +2952,11 @@ function _selfTestCases() {
       const wired = /has\('--raw'\)[\s\S]{0,120}_harnessBrief\(\) \+ task/.test(agentsSrc) && /_harnessBrief,/.test(read(__filename));
       // (3) bench stdin hang 수정: codex exec 가 열린 stdin 파이프에서 EOF 대기(실측) → spawn stdio ignore.
       const stdinFixed = agentsSrc.includes("{ shell: true, stdio: ['ignore', 'pipe', 'pipe'] }");
-      return briefOk && wired && stdinFixed;
+      // (4) 1.36.29 (사용자 보고): multi 도 브리프 접두 — --execute 실 spawn(_cliChat) + 명령 목록/JSON 3지점 전부 briefTask.
+      const multiWired = agentsSrc.includes('_cliChat(root, def.id, briefTask,')
+        && agentsSrc.includes('_dispatchCommand(x.def.id, briefTask, writeMode)')
+        && agentsSrc.includes('_dispatchCommand(def.id, briefTask, writeMode)');
+      return briefOk && wired && stdinFixed && multiWired;
     } },
     { name: '19th GPT5.5평가 (UR-0013): _parseTestStdout 러너 인식(jest/tap/spec/비율) + declared-pass 부풀림 3경로 게이팅 + json ok/reasons (1.35.7)', run: () => {
       // (1) 파서 행위: 기존 4형식 보존 + spec 리포터(패턴 6) 신규 — denom = pass + fail.

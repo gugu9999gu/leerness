@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.36.29 — 2026-07-15 — `agents multi` 위임 브리프 접두 — 백그라운드 AI 도 leerness 프로토콜을 받도록 (사용자 보고)
+
+사용자 질문("백그라운드에서 호출된 AI 가 leerness 를 참조하는가?")에 대한 조사 결과: `agents dispatch` 는 1.35.6 부터 "[leerness 위임 프로토콜]" 브리프(handoff 적재→task 등록→evidence→verify-claim→session close)를 자동 접두하지만, **`agents multi`(--execute 실 spawn 포함)는 원문 그대로 위임** — 병렬 백그라운드 AI 들이 프로토콜을 받지 못하는 실제 갭이었다.
+
+- **multi 3지점 브리프 접두**: `--execute` 실 spawn(`_cliChat`) + 명령 목록 출력 + `--json` commands. dispatch 와 동일 규칙(`--raw` 로 원문 위임). 로그/`_recordRun` 의 task 표시는 원문 유지(기록 정직성).
+- 참조 경로 정리(조사 확정): ① dispatch/multi 프롬프트 접두(이번에 완성) ② AGENTS.md 자동 로드(codex 실측 준수 — cwd 가 루트가 아니거나 미지원 CLI 면 무력해서 접두가 안전망) ③ orchestrate 는 자체 JSON 계약 컨텍스트 포함.
+- **검증**: selftest 299/299(브리프 4단계 + dispatch 와이어 + **multi 3지점 와이어**), 실측(multi 출력에 프로토콜 1회 포함 · `--raw` 0회), 게이트 e2e, 게시본 클린룸.
+
 ## 1.36.28 — 2026-07-15 — 미검토 표면 헌트: 데이터 유실 클래스(손상 스토어 클로버 · URL 덮어쓰기) + 정확성(impact 전이 · alias 경계)
 
 rotate-review-targets 교훈 적용 — 최근 잘 검토된 표면(lens/memory/plan/requests/skill)을 **제외**하고 미검토 표면(state/team/api-skill/wakeup/intent/feature)을 codex 로 QA 헌트. 10 findings 중 결정적 5건을 맹신 X(전부 재현) 후, 데이터 유실 클래스 + 저위험 순수 교정 4건을 수정. 동시성 3건(크로스프로세스 락)은 0-deps rabbit-hole 위험이라 정직하게 이연.
