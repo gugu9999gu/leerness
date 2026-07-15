@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.36';
+const VERSION = '1.36.37';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -719,12 +719,15 @@ function managedMerge(file, next, previous, archiveDir) {
 function writeIfSafe(root, file, content, opts = {}) {
   const p = path.join(root, file);
   const already = exists(p);
-  if (already && !opts.force && !opts.mergeManaged) return { action: 'preserved', file };
-  if (already && opts.mergeManaged && !opts.force) {
+  // 1.36.37 (1.9.441 드리프트 경로 실측): managed 파일(CLAUDE/AGENTS 등)은 --force 여도 항상 라인-diff 병합 —
+  //   병합이 곧 "템플릿 최신화 + 사용자 커스텀 보존"이라 raw 덮어쓰기가 필요한 경우가 없고, 종전엔 force 가
+  //   병합을 우회해 CLAUDE.md 커스텀 지시가 archive 에만 남았다(1.36.28 보존 재설계의 force 구멍).
+  if (already && opts.mergeManaged) {
     const prev = read(p);
     writeUtf8(p, managedMerge(file, content, prev, opts.archiveDir));
     return { action: 'merged', file };
   }
+  if (already && !opts.force) return { action: 'preserved', file };
   writeUtf8(p, content);
   return { action: already ? 'updated' : 'created', file };
 }
@@ -3195,6 +3198,42 @@ function _selfTestCases() {
       const s = read(__filename);
       const wired = typeof anchorsCmd === 'function' && s.includes("cmd === 'anchors'") && s.includes('→ leerness anchors draft');
       return draftOk && noInvent && secOk && noSec && wired;
+    } },
+    { name: 'managed 파일 force 병합 (1.36.37, 1.9.441 드리프트 실측): writeIfSafe 가 --force 여도 managed 는 라인-diff 병합 — CLAUDE 커스텀 보존 (행위검사)', run: () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wif_'));
+      let ok1 = false, ok2 = false, ok3 = false;
+      try {
+        const f = 'CLAUDE.md';
+        fs.writeFileSync(path.join(tmp, f), '# T\nline A\nMY CUSTOM X\n');
+        // force + mergeManaged → 병합 (커스텀 보존)
+        const r1 = writeIfSafe(tmp, f, '# T\nline A\nline B\n', { force: true, mergeManaged: true });
+        const t1 = fs.readFileSync(path.join(tmp, f), 'utf8');
+        ok1 = r1.action === 'merged' && t1.includes('MY CUSTOM X') && t1.includes('line B');
+        // 비-managed + force → 통째 교체(기존 동작 유지)
+        fs.writeFileSync(path.join(tmp, 'g.md'), 'OLD');
+        const r2 = writeIfSafe(tmp, 'g.md', 'NEW', { force: true });
+        ok2 = r2.action === 'updated' && fs.readFileSync(path.join(tmp, 'g.md'), 'utf8') === 'NEW';
+        // 비-managed + no-force → 보존
+        const r3 = writeIfSafe(tmp, 'g.md', 'NEWER', {});
+        ok3 = r3.action === 'preserved' && fs.readFileSync(path.join(tmp, 'g.md'), 'utf8') === 'NEW';
+      } catch {} finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      return ok1 && ok2 && ok3;
+    } },
+    { name: 'rules 손상 행 무언삭제 방지 (1.36.37, codex 4차 #1 High): 3~5셀 복구 + 3셀 미만 원문 보존 (행위검사)', run: () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rl_'));
+      let salvage = false, preserve = false;
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        const f = path.join(tmp, '.harness', 'rules.md');
+        // 4셀 행(status/lastVerified 누락) + 2셀 행(파싱 불가)
+        fs.writeFileSync(f, _rulesHeader() + '\n| R-0001 | every-session | 정상 룰 | 2026-07-16 | active | - |\n| R-0002 | every-commit | 절단 룰 | 2026-07-16 |\n| R-0003 | broken |\n');
+        const rules = readRules(tmp);
+        salvage = rules.length === 2 && rules.some(r => r.id === 'R-0002' && r.status === 'active');
+        writeRules(tmp, rules);
+        const t = fs.readFileSync(f, 'utf8');
+        preserve = t.includes('R-0002') && t.includes('R-0003') && t.includes('파싱 불가');
+      } catch {} finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      return salvage && preserve;
     } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
@@ -15164,16 +15203,34 @@ function readRules(root) {
     if (!/^\| R-\d{4,} \|/.test(line)) continue;
     // 1.9.399 (7번째 버그헌트 P1-A, UR-0104): 비이스케이프 파이프 분리 + 복원 — rule 텍스트의 '|'가 컬럼 밀림/멱등성 무력화를 못 일으킴.
     const cells = line.split(/(?<!\\)\|/).slice(1, -1).map(s => _cellUnescape(s).trim());
-    if (cells.length < 6) continue;
-    rules.push({ id: cells[0], trigger: cells[1], rule: cells[2], added: cells[3], status: cells[4], lastVerified: cells[5] });
+    // 1.36.38 (codex 4차 #1, High): 셀 부족 행을 버리면 다음 writeRules 가 그 룰을 무언 삭제했다(수동 편집/중단된 쓰기에서 발생).
+    //   3~5셀은 복구(누락 셀 기본값 — 룰 기능 유지), 3셀 미만만 파싱 불가로 남긴다(writeRules 가 원문 보존).
+    if (cells.length < 3) continue;
+    rules.push({ id: cells[0], trigger: cells[1], rule: cells[2], added: cells[3] || '-', status: cells[4] || 'active', lastVerified: cells[5] || '-' });
   }
   return rules;
+}
+
+// 1.36.38 (#1): 파싱 불가(3셀 미만) 룰-형태 행 수집 — writeRules 가 삭제하지 않고 원문 보존하기 위함.
+function _unparsableRuleLines(root) {
+  const f = rulesPath(root);
+  if (!exists(f)) return [];
+  const out = [];
+  for (const line of read(f).split('\n')) {
+    if (!/^\| R-\d{4,} \|/.test(line)) continue;
+    const cells = line.split(/(?<!\\)\|/).slice(1, -1);
+    if (cells.length < 3) out.push(line);
+  }
+  return out;
 }
 
 function writeRules(root, rules) {
   // 1.9.399 (7번째 버그헌트 P1-A, UR-0104): 셀 안전화 — rule 텍스트의 파이프/개행 차단(컬럼 밀림·중복 룰 무한생성 방지).
   const body = rules.map(r => `| ${_cellSafe(r.id)} | ${_cellSafe(r.trigger)} | ${_cellSafe(r.rule)} | ${_cellSafe(r.added)} | ${_cellSafe(r.status)} | ${_cellSafe(r.lastVerified || '-')} |`).join('\n');
-  writeUtf8(rulesPath(root), _rulesHeader() + '\n' + body + (body ? '\n' : ''));
+  // 1.36.38 (#1): 파싱 불가 행은 무언 삭제 대신 원문 보존 + 경고 표식 (수동 복구 대상)
+  const damaged = _unparsableRuleLines(root).filter(l => !rules.some(r => l.startsWith(`| ${r.id} `)));
+  const tail = damaged.length ? '\n<!-- ⚠ 아래 행은 손상돼 파싱 불가 — 삭제하지 않고 보존함. 수동 복구 후 위 표로 병합하세요 -->\n' + damaged.join('\n') + '\n' : '';
+  writeUtf8(rulesPath(root), _rulesHeader() + '\n' + body + (body ? '\n' : '') + tail);
 }
 
 function nextRuleId(root) {
