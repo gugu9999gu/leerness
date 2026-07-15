@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.32';
+const VERSION = '1.36.33';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -652,7 +652,8 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 function copyRecursiveSafe(src, dst) {
   if (!exists(src)) return;
   if (src.includes(path.sep + '.harness' + path.sep + 'archive')) return;
-  const st = fs.statSync(src);
+  const st = fs.lstatSync(src);   // 1.36.33 (#6): symlink 미추종 — 자기참조 링크 시 MAX_PATH 까지 복제 폭주 방지
+  if (st.isSymbolicLink()) return;
   if (st.isDirectory()) {
     mkdirp(dst);
     for (const e of fs.readdirSync(src)) {
@@ -986,16 +987,20 @@ async function install(root, opts = {}) {
   };
   drawProgress(0, '');
   let _done = 0;
+  // 1.36.33 (codex 3차 #1, P1 데이터 유실): --force 가 사용자 상태 파일(진행 task/plan/결정/로그/인계 등)까지 새 템플릿으로
+  //   덮어써 활성 기록이 archive 에만 남았다. force 는 가이드/템플릿 문서에만 적용 — 상태 파일은 force 여도 보존.
+  const _USER_STATE = new Set(['.harness/progress-tracker.md', '.harness/plan.md', '.harness/task-log.md', '.harness/decisions.md', '.harness/current-state.md', '.harness/session-handoff.md', '.harness/rules.md', '.harness/feature-graph.md', '.harness/reuse-map.md', '.harness/feature-contracts.md', '.harness/project-brief.md', '.harness/architecture.md', '.harness/context-map.md', '.harness/design-system.md']);
   for (const [f, c] of Object.entries(files)) {
     const existsNow = exists(path.join(root, f));
     const mergeManaged = managedOverwrite.has(f);
+    const effForce = opts.force && !_USER_STATE.has(f);
     if (opts.dry) {
-      const action = existsNow ? (mergeManaged || opts.force ? 'merge/update' : 'preserve') : 'create';
+      const action = existsNow ? (mergeManaged || effForce ? 'merge/update' : 'preserve') : 'create';
       log(`[dry-run] ${action}: ${f}`);
       actions.push({ file:f, action });
       continue;
     }
-    const r = writeIfSafe(root, f, c, { force: opts.force, mergeManaged, archiveDir: backup.archiveDir });
+    const r = writeIfSafe(root, f, c, { force: effForce, mergeManaged, archiveDir: backup.archiveDir });
     actions.push(r);
     _done++;
     drawProgress(_done, f);
@@ -1514,11 +1519,19 @@ async function skillInstallCmd(root, source) {
   if (!name) { fail('SKILL.md frontmatter에 `name` 필수'); return process.exit(1); }
   // .harness/skills/<id>/SKILL.md 저장
   // 1.9.350 (UR-0062 외부리뷰): skill id 정규화 — 선행/후행 ./- 제거 + .. 거부 + jail (path traversal 차단)
+  // 1.36.33 (codex 3차 #2): 원문(raw) name 부터 검증 — 정규화가 '../x' 의 ../ 를 벗겨 'x' 로 만들어 traversal 흔적을 지웠다.
+  if (/(^|[\\/])\.\.([\\/]|$)|[\\/]/.test(String(name))) { fail(`유효하지 않은 skill name (path traversal/경로 문자 차단): ${name}`); return process.exit(1); }
   const skillId = String(name).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[.\-]+|[.\-]+$/g, '');
   if (!skillId || skillId.includes('..')) { fail(`유효하지 않은 skill id (path traversal 차단): ${name}`); return process.exit(1); }
   const _skillsRoot = path.join(root, '.harness', 'skills');
   const dir = path.join(_skillsRoot, skillId);
   if (!path.resolve(dir).startsWith(path.resolve(_skillsRoot) + path.sep)) { fail(`skill id jail 위반: ${name}`); return process.exit(1); }
+  // 1.36.33 (codex 3차 #2): 같은 id 가 이미 설치돼 있고 내용이 다르면 무경고 덮어쓰기 금지 — --force 로만 교체(교체 전 .bak 백업).
+  const _prevMd = path.join(dir, 'SKILL.md');
+  if (exists(_prevMd) && read(_prevMd) !== body) {
+    if (!has('--force')) { fail(`이미 설치된 skill: ${skillId} — 내용이 다릅니다. 교체하려면 --force (기존본은 SKILL.md.bak 백업)`); return process.exit(1); }
+    try { fs.copyFileSync(_prevMd, _prevMd + '.bak'); } catch {}
+  }
   mkdirp(dir);
   writeUtf8(path.join(dir, 'SKILL.md'), body);
   // skill.json도 함께 (자체 catalog 호환)
@@ -3117,6 +3130,25 @@ function _selfTestCases() {
       const both = ('| T-0001 | in-progress | x |\nstatus: in-progress\n'.match(/^\|\s*T-\d{4,}\s*\|\s*in-progress\s*\|/gm) || []).length === 1;
       const pwWired = /_runPreWakeAudit[\s\S]{0,2200}\^\\\|\\s\*T-\\d\{4,\}\\s\*\\\|\\s\*in-progress/.test(s);
       return stateLock && teamLock && teamWired && both && pwWired;
+    } },
+    { name: 'positional path 잔존 클래스 소진 (1.36.33): migrate-workspace-dir 외 8종 — cwd 오염 차단 (소스가드, 실제 자기 저장소 오염 사고로 발견)', run: () => {
+      const s = read(__filename);
+      const P = "arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd()";
+      const cmds = ["'migrate-workspace-dir'", "'lessons'", "'resume'", "'session-resume'", "'commands'", "'py-check'", "'path-setup' || cmd === 'path'", "'capabilities' || cmd === 'security-surface'"];
+      return cmds.every(c => {
+        const i = s.indexOf('if (cmd === ' + c + ')');
+        if (i < 0) return false;
+        return s.slice(i, s.indexOf('\n', i)).includes(P);
+      });
+    } },
+    { name: '데이터 보존 3종 (1.36.33, codex 3차 #1/#2/#3): migrate --force 상태파일 보존 + skill 충돌/raw-name 가드 + settings 손상 중단 + symlink 미추종 (소스가드)', run: () => {
+      const s = read(__filename);
+      const forceGuard = s.includes("const effForce = opts.force && !_USER_STATE.has(f);") && s.includes("'.harness/progress-tracker.md', '.harness/plan.md', '.harness/task-log.md'");
+      const skillGuard = s.includes('유효하지 않은 skill name (path traversal/경로 문자 차단)') && s.includes('이미 설치된 skill: ${skillId} — 내용이 다릅니다');
+      const settingsGuard = s.includes('settings.local.json 이 손상돼(JSON 파싱 실패) hook 설치를 중단');
+      const symlinkGuard = s.includes("if (stat.isSymbolicLink()) { report.skippedFiles.push(rel + ' (symlink — 따라가지 않음')") || s.includes('symlink — 따라가지 않음');
+      const copySafe = /function copyRecursiveSafe[\s\S]{0,400}lstatSync/.test(s);
+      return forceGuard && skillGuard && settingsGuard && symlinkGuard && copySafe;
     } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
@@ -6165,7 +6197,10 @@ function _migrateWorkspaceDir(root, opts = {}) {
     const srcAbs = path.join(srcDir, rel);
     const dstAbs = path.join(dstDir, rel);
     let stat;
-    try { stat = fs.statSync(srcAbs); } catch (e) { report.errors.push(`stat ${rel}: ${e.message}`); return; }
+    // 1.36.33 (#6): lstat 로 symlink/junction 을 따라가지 않음 — 자기참조 링크(.harness 안 →.harness)가 있으면
+    //   종전엔 MAX_PATH 에러로 자기종결할 때까지 수십 단계를 실제 복사(63중첩 실측)했다. 링크는 skip 기록.
+    try { stat = fs.lstatSync(srcAbs); } catch (e) { report.errors.push(`stat ${rel}: ${e.message}`); return; }
+    if (stat.isSymbolicLink()) { report.skippedFiles.push(rel + ' (symlink — 따라가지 않음)'); return; }
     if (stat.isDirectory()) {
       if (!dryRun) mkdirp(dstAbs);
       let entries;
@@ -16389,7 +16424,12 @@ function autoUpdateInstall(root) {
   mkdirp(settingsDir);
   const settingsFile = path.join(settingsDir, 'settings.local.json');
   let settings = {};
-  if (exists(settingsFile)) { try { settings = JSON.parse(read(settingsFile)); } catch {} }
+  // 1.36.33 (codex 3차 #3, 1.36.28 손상-스토어 클래스): 손상 settings 를 빈 객체로 오인해 hooks-only 로 덮어쓰면
+  //   사용자의 permissions 등 무관 설정이 유실된다. 파싱 실패 시 원본 보존 + 중단.
+  if (exists(settingsFile)) {
+    try { settings = JSON.parse(read(settingsFile)); }
+    catch { fail(`.claude/settings.local.json 이 손상돼(JSON 파싱 실패) hook 설치를 중단합니다 — 파일을 복구한 뒤 재시도: ${settingsFile}`); process.exitCode = 1; return; }
+  }
   settings.hooks = settings.hooks || {};
   // 1.9.1 P1: legacy 'leerness-plus update' hook 자동 제거 (이전 fork 시절 잔재).
   let removedLegacy = 0, upgradedQuiet = 0;
@@ -21603,7 +21643,7 @@ async function main() {
   if (cmd === 'mcp' && args[1] === 'serve')         return mcpServeCmd(absRoot(arg('--path', process.cwd())));
   if (cmd === 'gate')                               return gate(arg('--path', args[1] || process.cwd()));
   if (cmd === 'verify-code')                        return verifyCodeCmd(arg('--path', args[1] || process.cwd()));
-  if (cmd === 'lessons')                            return lessonsCmd(arg('--path', process.cwd()));
+  if (cmd === 'lessons')                            return lessonsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
   if (cmd === 'retro')                              return retroCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'insights')                           return insightsCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'brainstorm')                         return brainstormCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')).join(' '));
@@ -21612,14 +21652,14 @@ async function main() {
   // 1.9.201: next-action queue CLI (E축 9.5→10)
   if (cmd === 'next-action')                        return nextActionCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.203: leerness resume — auto-resume-plan 읽고 다음 라운드 즉시 안내 (사용자 명시)
-  if (cmd === 'resume')                             return resumeCmd(arg('--path', process.cwd()));
+  if (cmd === 'resume')                             return resumeCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
   // 1.9.207: leerness requests <audit|add|list|complete|drop> — 사용자 요청 누락 확인 절차 (사용자 명시)
   // 1.36.24 (UR-0027 확장, 실피해 재현): requests 계열만 positional 경로 미지원이라 `requests add "text" C:/other/proj` 가
   //   조용히 cwd 프로젝트에 기록하고 성공 보고했다(task/rule 은 _taskPositionalPath 지원 → 불일치가 실수를 유도, 본인 피해 확인).
   //   rule 선례와 동일 배선 — path-like(선행 구분자) 만 인정하는 기존 계약이라 텍스트/ID 오인 FP 없음(_parseAddTitle 이 add 텍스트를 path-like 에서 끊는 것도 기존과 동일).
   if (cmd === 'requests')                           return requestsCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1], ...args.slice(2));
   // 1.9.220: leerness session-resume — 비정상 종료 감지 + 자율 재개 가이드 (사용자 명시)
-  if (cmd === 'session-resume')                     return sessionResumeCmd(arg('--path', process.cwd()));
+  if (cmd === 'session-resume')                     return sessionResumeCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
   // 1.9.226: leerness round-history — 자율 라운드 통계 + 다음 마일스톤
   if (cmd === 'round-history')                      return roundHistoryCmd(_resolveRoot(args[1]));
   // 1.9.229: leerness milestones — 도달 마일스톤 + 다음 ETA (1.9.226 확장)
@@ -21629,9 +21669,9 @@ async function main() {
   if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
   if (cmd === 'lens')                               return lensCmd(args[1]);  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈
   // 1.9.233: leerness commands — 카테고리화된 전체 CLI 명령 목록
-  if (cmd === 'commands')                           return commandsCmd(arg('--path', process.cwd()));
+  if (cmd === 'commands')                           return commandsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
   // 1.9.239: leerness py-check — Python 파일 분석 (사용자 명시 UR-0013)
-  if (cmd === 'py-check')                           return pyCheckCmd(arg('--path', process.cwd()));
+  if (cmd === 'py-check')                           return pyCheckCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
   // 1.9.239: leerness agent-mode <start|tick|stop> — 자율 모드 전용 통합 명령 (사용자 명시 UR-0013)
   if (cmd === 'agent-mode')                         return agentModeCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.241: leerness env summary|encoding — 환경 종합 + 셸 스크립트 인코딩 위험 (사용자 명시 UR-0014)
@@ -21641,7 +21681,7 @@ async function main() {
     return envCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()), args[1] === 'summary' ? null : 'encoding-check');
   // 1.9.254: leerness path-setup [--apply] — CLI PATH 자동 등록 (사용자 명시 UR-0019)
   //   npm global bin 경로 감지 + leerness 가 PATH 에서 찾아지는지 확인 → 미등록 시 플랫폼별 등록
-  if (cmd === 'path-setup' || cmd === 'path')        return pathSetupCmd(arg('--path', process.cwd()), { apply: has('--apply'), json: has('--json') });
+  if (cmd === 'path-setup' || cmd === 'path')        return pathSetupCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), { apply: has('--apply'), json: has('--json') });
   // 1.9.258: leerness selftest — 설치된 바이너리 코어 함수 무결성 자가 검증 (CI/사용자 진단)
   if (cmd === 'selftest' || cmd === 'self-test')     return selfTestCmd({ json: has('--json') });
   // 1.9.260: leerness shell-guard "<cmd>" — 터미널 명령 셸 호환성 린터 + 실패 메모리 (사용자 명시 UR-0020)
@@ -21658,7 +21698,7 @@ async function main() {
   // 1.9.270: leerness roles <list|set|unset|catalog|suggest|verify> — 모델별 역할 부여 (사용자 명시)
   if (cmd === 'roles' || cmd === 'role')             return rolesCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.272: leerness capabilities — 권한/보안 표면 공개 (GPT-5.5 외부 리뷰 반영)
-  if (cmd === 'capabilities' || cmd === 'security-surface') return capabilitiesCmd(arg('--path', process.cwd()), { json: has('--json') });
+  if (cmd === 'capabilities' || cmd === 'security-surface') return capabilitiesCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), { json: has('--json') });
   // 1.9.278 (UR-0032): leerness state <show|start|record|verify|handoff> — .leerness/ 구조화 상태 substrate
   if (cmd === 'state')                              return _guardStore(has('--json'), () => stateCmd(arg('--path', process.cwd()), args[1], ...args.slice(2)));   // 1.36.28 (#3): 손상 스토어 클로버 차단
   if (cmd === 'context')                            return contextCmd(_resolveRoot(args[1]), { json: has('--json') });
@@ -21700,7 +21740,7 @@ async function main() {
   if (cmd === 'workspace-dir')                      return workspaceDirCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'parent')                             return parentCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.211: leerness migrate-workspace-dir — .harness → .leerness 마이그레이션 (사용자 명시)
-  if (cmd === 'migrate-workspace-dir')              return migrateWorkspaceDirCmd(arg('--path', process.cwd()));
+  if (cmd === 'migrate-workspace-dir')              return migrateWorkspaceDirCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());   // 1.36.33: positional path 무시 → cwd 오염 (1.36.21/24 계열 잔존 — 실제로 이 버그로 소스 저장소가 오염될 뻔)
   // 1.9.212: leerness idempotency audit — 멱등성 위반 탐지 (사용자 명시)
   if (cmd === 'idempotency')                        return idempotencyCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.213: leerness intent <classify|expand|domains> — intent inference + scope expansion (사용자 명시)

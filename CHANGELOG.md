@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.33 — 2026-07-15 — 데이터 보존 5종 — migrate --force 상태 보존 · positional path 클래스 소진 · symlink 미추종 · skill 충돌 가드 · settings 손상 중단 (codex 3차 헌트 + 자체 발견)
+
+- **P1 — `migrate --force` 가 사용자 상태를 삭제** (codex 3차 #1): --force 가 progress-tracker/plan/task-log/decisions 등 상태 파일까지 새 템플릿으로 덮어써 활성 task 가 archive 에만 남았다(마커 실측 소실). → force 는 가이드/템플릿 문서에만 적용, 상태 파일 14종은 force 여도 보존(`_USER_STATE`). 실측: --force 후 task 잔존 1 · guideline 은 갱신. **1.36.28 의 마이그레이션 유실 전수 검증을 --force 경로까지 확장 완결.**
+- **P2 — positional path 무시 클래스 8종 소진** (자체 발견 — `migrate-workspace-dir <path>` 가 positional 을 무시하고 cwd 를 마이그레이션해 **검증 중 소스 저장소가 실제로 오염**된 사고로 표면화): migrate-workspace-dir/lessons/resume/session-resume/commands/py-check/path-setup/capabilities 에 1.36.21/24 와 동일한 `_taskPositionalPath` 배선. 오염은 사본 제거로 정리(원본 .harness 불변).
+- **P2 — 재귀 복사 symlink 폭주** (1.36.21 이연 #6): 자기참조 junction 이 있으면 copyRec 이 MAX_PATH 에러로 자기종결할 때까지 실복사(63중첩 실측). → `copyRec`/`copyRecursiveSafe` lstat 미추종(+skip 기록). 실측: 중첩 0 · 일반 파일 정상 복사.
+- **P1 — skill install 무경고 덮어쓰기 + raw-name 우회** (codex 3차 #2): 정규화가 `../x` 의 ../ 를 벗겨 traversal 흔적을 지우고 기존 스킬을 조용히 교체. → raw name 의 경로 문자 선검증 + 내용 다른 충돌은 `--force` 요구(교체 전 .bak 백업, 동일 내용 재설치는 멱등).
+- **P2 — auto-update install 이 손상 settings 를 hooks-only 로 교체** (codex 3차 #3, 1.36.28 손상-스토어 클래스): permissions 등 무관 설정 유실. → 파싱 실패 시 원본 보존 + 중단(exit 1). 정상 파일은 종전대로 병합.
+- **검증**: selftest 303/303, 5건 전부 원 재현 before/after + 무회귀(--force 멱등/정상 병합/skill 멱등), exit 전파형 게이트 e2e, 게시본 클린룸.
+- 이연(codex 3차 잔여): #4 tarball 공백경로 · #5 update 캐시 false-fresh + prerelease 비교 · #6 deps --run-tests false-green · #7 주석 트레이스 오인 · #8 policy exit · #9 creds null 스키마 · #10 session close 상태 별칭 — 다음 라운드.
+
 ## 1.36.32 — 2026-07-15 — e2e 그린 복원 + 게이트 절차 정직 교정 (자기 감사)
 
 **정정(정직 기록)**: 1.36.30/1.36.31 의 CHANGELOG 는 "게이트 e2e" 통과를 주장했지만 **사실이 아니었다** — 1.36.30 의 자동생성 전환(roadmap.html→leerness.html)으로 e2e 의 구식 단언 4건이 실패·크래시했는데, 게이트 러너 래퍼(`npm test > log; echo $?`)의 echo 가 exit code 를 0 으로 가려 두 릴리스가 e2e 실패 상태로 게시됐다(28/29 는 진짜 386/386). selftest 와 라이브 클린룸 실증은 두 릴리스 모두 실제로 통과했으므로 게시된 기능 자체는 검증돼 있었으나, e2e 전체 그린 주장은 과잉이었다.
