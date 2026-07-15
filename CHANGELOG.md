@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.31 — 2026-07-15 — 동시성 직렬화 — 병렬 에이전트의 lost update 차단 (codex 미검토표면 헌트 이연분 #1/#2/#5/#7)
+
+1.36.28 헌트에서 이연했던 동시성 P1 계열. 기존 `_withLock`(원자 배타 생성 + stale 회수 + 재진입 안전)을 재사용 — 새 락 발명 아님.
+
+- **#1 P1 — 병렬 `state start` run 유실/충돌**: 두 병렬 start 가 같은 run-0001 을 배정해 한쪽 goal 이 덮이거나 EPERM 크래시(codex 12-trial 실측 6~9/12 발화). → stateCmd 변경 sub(start/record/verify/handoff) 전체를 state.json 락으로 직렬화(load→카운터→run 저장→state 저장이 한 임계구역). 실측: 병렬 8 start → run 파일 8/8·고유 goal 8/8·EPERM 0.
+- **#2 P1 — 병렬 `team add` 무성 유실**: 20 병렬 add 전부 exit 0 인데 16 팀만 잔존(4건 무성 소실). → 락 안 재로드→중복검사→추가→저장 + Windows 일시 EPERM(락 밖 병렬 읽기가 파일을 잠깐 여는 사이 원자 rename 실패) 소규모 재시도. 실측: **20/20 잔존 ×2회**.
+- **#5 P2 — record↔handoff 경합 stale handoff**: 같은 state.json 락으로 함께 직렬화. 실측 6-trial 에러 0.
+- **#7 P2 — pre-wake-audit 테이블형 in-progress 미인식**: `status: in-progress`(YAML형)만 매치해 CLI 가 생성하는 canonical 테이블(`| T-XXXX | in-progress |`)을 못 봄 — session-resume 과 동일 정규식 추가(YAML형 호환 유지). 실측: 3일 stale 테이블 픽스처에서 `stale-in-progress` 감지.
+- **검증**: selftest 301/301, codex 원 재현 스크립트 재실행(4건 전부 ✓, #2 는 2회 반복), 게이트 e2e, 게시본 클린룸. 이로써 1.36.28 헌트 10건 중 **9건 처리**(잔여: state 손상 시 quarantine 심화 — 저가치).
+
 ## 1.36.30 — 2026-07-15 — 온톨로지 그래프 기본 활성 + roadmap 통합 + 기능 토글 (사용자 요청)
 
 `leerness.html`(온톨로지 그래프)가 **컨트롤 타워**가 된다: install/session-close 자동생성 대상이 roadmap.html → leerness.html 로 전환(기본 활성), roadmap 기능은 그래프 파일의 탭으로 통합, 그래프 뷰에서 leerness 기능(gate 등)을 토글.

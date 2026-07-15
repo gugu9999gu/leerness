@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.30';
+const VERSION = '1.36.31';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3103,6 +3103,21 @@ function _selfTestCases() {
         && s.includes("cmd === 'toggle'") && s.includes("_tgl.toggleOn(root, 'delegation-brief')");
       return regOk && behavOk && htmlOk && wired;
     } },
+    { name: '동시성 직렬화 (1.36.31, codex #1/#2/#5/#7): state 변경 락 + team add 락내 재로드 + EPERM 재시도 + pre-wake 테이블 매처 — 소스가드+행위', run: () => {
+      const s = read(__filename);
+      // #1/#5: stateCmd 변경 sub 가 state.json 락으로 재귀 직렬화 (재진입 가드 포함 — 무한재귀 방지 형태)
+      const stateLock = s.includes("const _mut = ['start', 'record', 'verify', 'handoff'].includes(sub || '')")
+        && s.includes("_withLock(path.join(_leernessStateDir(root), 'state.json'), () => stateCmd(root, sub, ...args))")
+        && s.includes("!_heldLocks.has(path.join(_leernessStateDir(root), 'state.json') + '.lock')");
+      // #2: team add 가 락 안 재로드→중복검사→저장 + EPERM 재시도
+      const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js'));
+      const teamLock = teamSrc.includes('const cur = _loadTeams(root);') && teamSrc.includes("deps._withLock(require('path').join(root, '.harness', 'teams.json'), _doAdd)") && teamSrc.includes("e.code === 'EPERM'");
+      const teamWired = s.includes('_detectShellCtx, arg, has, _withLock }');
+      // #7: pre-wake 매처가 테이블형+YAML형 모두 (행위)
+      const both = ('| T-0001 | in-progress | x |\nstatus: in-progress\n'.match(/^\|\s*T-\d{4,}\s*\|\s*in-progress\s*\|/gm) || []).length === 1;
+      const pwWired = /_runPreWakeAudit[\s\S]{0,2200}\^\\\|\\s\*T-\\d\{4,\}\\s\*\\\|\\s\*in-progress/.test(s);
+      return stateLock && teamLock && teamWired && both && pwWired;
+    } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
       if (!d) return false;
@@ -5734,7 +5749,10 @@ function _runPreWakeAudit(root) {
       const stat = fs.statSync(ptPath);
       const ageMin = Math.floor((Date.now() - stat.mtimeMs) / 60000);
       // in-progress 태그가 있는데 24h+ 갱신 없음
-      const inProgressCount = (content.match(/status:\s*in-progress/gi) || []).length;
+      // 1.36.31 (codex 미검토표면 #7): CLI 가 생성하는 canonical 테이블형(| T-XXXX | in-progress |)을 못 보던 매처 —
+      //   session-resume 의 테이블 정규식과 동일하게 인식(구 YAML 형도 호환 유지).
+      const inProgressCount = (content.match(/^\|\s*T-\d{4,}\s*\|\s*in-progress\s*\|/gm) || []).length
+        + (content.match(/status:\s*in-progress/gi) || []).length;
       if (inProgressCount > 0 && ageMin > 24 * 60) {
         audit.findings.warning.push({
           kind: 'stale-in-progress',
@@ -7912,7 +7930,7 @@ function _saveTeams(root, teams) {
 //   harness 는 deps(VERSION · 공유 저장 _loadTeams/_saveTeams · _detectShellCtx · argv 파서 arg/has)를 구성해 위임(thin wrapper). 호출부/동작 무변경.
 const _team = require('../lib/team');
 const _tgl = require('../lib/toggles');   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동 — gate/lens/auto-graph/delegation-brief)
-function teamCmd(root, sub, id, opts = {}) { return _team.teamCmd(root, sub, id, opts, { VERSION, _loadTeams, _saveTeams, _detectShellCtx, arg, has }); }
+function teamCmd(root, sub, id, opts = {}) { return _team.teamCmd(root, sub, id, opts, { VERSION, _loadTeams, _saveTeams, _detectShellCtx, arg, has, _withLock }); }   // 1.36.31: add 경합 락
 
 // 1.9.112: 전용 lessons.md (Memory Write Surface 5번째)
 const lessonsPath = root => path.join(root, '.harness/lessons.md');
@@ -18992,6 +19010,13 @@ function contextCmd(root, opts = {}) {
 }
 function stateCmd(root, sub, ...args) {
   root = absRoot(root || process.cwd());
+  // 1.36.31 (codex 미검토표면 #1/#5): 변경 sub 는 state.json 락으로 전체 직렬화 — 병렬 start 가 같은 run-0001 을
+  //   배정/덮어쓰거나(카운터 lost update), record↔handoff 경합으로 stale handoff 가 나오던 것을 차단.
+  //   load→카운터→run 저장→state 저장이 한 임계구역. _withLock 은 재진입 안전 + stale 락 자동 회수.
+  const _mut = ['start', 'record', 'verify', 'handoff'].includes(sub || '');
+  if (_mut && !_heldLocks.has(path.join(_leernessStateDir(root), 'state.json') + '.lock')) {
+    return _withLock(path.join(_leernessStateDir(root), 'state.json'), () => stateCmd(root, sub, ...args));
+  }
   const json = has('--json');
   sub = sub || 'show';
 
