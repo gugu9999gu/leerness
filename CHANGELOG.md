@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.36.35 — 2026-07-15 — deps --run-tests 정직화 + #7 의도적 DEFER (codex 3차 잔여 소진)
+
+- **#6 `deps <cap> --run-tests`**: (a) `--json` 이 테스트 스윕 **전에** return → 스윕이 무언 무시되고 exit 0(false-green) — json/human 이 같은 `_runImpactSweep` 를 쓰도록 공용화, json 은 `tests[]` 필드 + 실패 시 exit 1. (b) 프로젝트를 basename 으로 역추적해 **동명 프로젝트(a/service, b/service) 중 하나만 테스트**되고 실패쪽이 조용히 생략 — 절대경로 키로 교정. 실측: 동명 2 프로젝트 모두 실행(PASS/FAIL 각각), json/human 동등, 실패 exit 1.
+- **#7 (주석 트레이스 오인) 의도적 DEFER — 정직 기록**: 주석 속 `fetch('/users')` 가 낙관검사 트레이스로 인정되는 건 사실이나, 교정에는 JS 주석 마스킹이 필요하다. 이 마스커 계열은 1.36.18 에서 7회 반증 끝에 리버트한 전력이 있고(0-deps 제약 하에 파서 없이 안전 불가), 잘못 벗기면 verify-claim `--strict-claims` 가 **false-BLOCK**(허위 실패로 머지 차단) 하는 방향이라 게이트 편향 원칙(false-PASS 편향)에 반한다. 현 한계는 문서화된 known-limitation 으로 유지: 낙관검사는 "주장 vs 텍스트 흔적" 수준의 advisory 신호다.
+- **검증**: selftest 305/305(스윕 공용+절대경로+exit 배선; 자기참조 트랩 4번째 재발 → split-literal), 동명 충돌 원 재현 before/after, exit 전파형 게이트 e2e, 클린룸. **codex 3차 헌트 10건 전건 처분 완료(수정 9 + 정직 DEFER 1).**
+
 ## 1.36.34 — 2026-07-15 — 판정 정직화 5종 — 도구가 내리는 판정(허용/만료/최신/집계)이 거짓말하지 않도록 (codex 3차 #4/#5/#8/#9/#10)
 
 - **#8 policy check**: 차단 판정인데 exit 0 → **exit 1**(CI/스크립트가 판정 신뢰 가능). 손상 policy.json 을 기본값 폴백으로 오답하던 것 → `policy_corrupt` 구조화 에러.

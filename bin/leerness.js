@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.34';
+const VERSION = '1.36.35';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3167,6 +3167,16 @@ function _selfTestCases() {
       // #4: tarball 공백 경로 quoting + 설치 버전 재판독
       const tarOk = s.includes('const _qw = a =>') && s.includes("read(path.join(root, '.harness', 'HARNESS_VERSION')).trim(); if (_hv) nextLeerness = _hv;");
       return semverOk && cacheOk && policyOk && credsOk && closeOk && tarOk;
+    } },
+    { name: 'deps --run-tests 정직화 (1.36.35, codex 3차 #6): json/human 스윕 공용 + 절대경로 키(동명 프로젝트 오식별 방지) + 실패 시 exit1 (소스가드)', run: () => {
+      const s = read(__filename);
+      const sweepShared = s.includes('function _runImpactSweep(quietLog)') && s.includes("const tests = has('--run-tests') ? _runImpactSweep(true) : undefined;");
+      const absKey = s.includes('fromProjectPath: p,') && s.includes('const impactedPaths = new Set(directImpact.map(e => e.fromProjectPath)');
+      const jsonExit = s.includes('if (tests && tests.some(t => t.passed === false)) process.exitCode = 1;');
+      const humanShared = s.includes('const results = _runImpactSweep(false);');
+      // 구식 basename 역추적이 사라졌는지 (오식별 코드 부재) — split-literal: 이 줄 자신 매치 방지 (자기참조 트랩 4번째)
+      const oldGone = !s.includes('const projPath = allPaths.find(' + 'p => path.basename(p) === projName);');
+      return sweepShared && absKey && jsonExit && humanShared && oldGone;
     } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
@@ -12338,7 +12348,7 @@ function depsImpactCmd(root, targetCapability) {
     for (const e of entries) {
       allEntries.push({ project: path.basename(p), projectPath: p, entry: e });
       for (const dep of e.dependsOn) {
-        allEdges.push({ fromProject: path.basename(p), fromCap: e.capability, toCap: dep });
+        allEdges.push({ fromProject: path.basename(p), fromProjectPath: p, fromCap: e.capability, toCap: dep });   // 1.36.35 (#6): 절대경로 동반 — basename 충돌 시 프로젝트 오식별 방지
       }
     }
   }
@@ -12348,6 +12358,7 @@ function depsImpactCmd(root, targetCapability) {
   const targetLower = target.toLowerCase();
   const directImpact = allEdges.filter(e => e.toCap.toLowerCase() === targetLower);
   const impactedProjects = new Set(directImpact.map(e => e.fromProject));
+  const impactedPaths = new Set(directImpact.map(e => e.fromProjectPath).filter(Boolean));   // 1.36.35 (#6): 절대경로 기준 집합
 
   // 2단계 전이: 영향받은 capability를 또 의존하는 것들 (2-hop)
   const transitiveImpact = [];
@@ -12356,6 +12367,7 @@ function depsImpactCmd(root, targetCapability) {
       if (e2.toCap.toLowerCase() === e1.fromCap.toLowerCase()) {
         transitiveImpact.push({ via: e1.fromCap, ...e2 });
         impactedProjects.add(e2.fromProject);
+        if (e2.fromProjectPath) impactedPaths.add(e2.fromProjectPath);
       }
     }
   }
@@ -12363,13 +12375,39 @@ function depsImpactCmd(root, targetCapability) {
   // target capability 자체가 어디 등록됐는지
   const definedAt = allEntries.filter(e => e.entry.capability.toLowerCase() === targetLower);
 
+  // 1.36.35 (#6): 테스트 스윕 — json/human 공용 (종전엔 json 이 스윕 전에 return 해 --run-tests 가 무언 무시됐고,
+  //   basename 으로 경로를 역추적해 동명 프로젝트 중 하나만 테스트됐다). 절대경로 순회로 둘 다 교정.
+  function _runImpactSweep(quietLog) {
+    const results = [];
+    for (const projPath of impactedPaths) {
+      const projName = path.basename(projPath);
+      const pkgPath = path.join(projPath, 'package.json');
+      if (!exists(pkgPath)) { if (!quietLog) log(`  ⚠ ${projName}: package.json 없음 — skip`); results.push({ project: projName, projectPath: projPath, skipped: 'no_package_json' }); continue; }
+      let pkg = null;
+      try { pkg = JSON.parse(read(pkgPath)); } catch {}
+      if (!pkg?.scripts?.test) { if (!quietLog) log(`  ⚠ ${projName}: scripts.test 없음 — skip`); results.push({ project: projName, projectPath: projPath, skipped: 'no_test_script' }); continue; }
+      const t0 = Date.now();
+      const r = runCommandSafe('npm test', [], { cwd: projPath, root: projPath, encoding: 'utf8', allowShell: true, scrubSecrets: true, timeout: 5 * 60 * 1000, kind: 'reuse_impact_test' });
+      const elapsed = Date.now() - t0;
+      const out = (r.stdout || '') + (r.stderr || '');
+      const passed = r.status === 0;
+      results.push({ project: projName, projectPath: projPath, passed, status: r.status, elapsedMs: elapsed });
+      if (!quietLog) log(`  ${passed ? '✓' : '✗'} ${projName}: ${passed ? 'PASS' : `FAIL (exit ${r.status})`} · ${Math.round(elapsed / 1000)}s`);
+    }
+    return results;
+  }
+
   if (has('--json')) {
+    const tests = has('--run-tests') ? _runImpactSweep(true) : undefined;
+    if (tests && tests.some(t => t.passed === false)) process.exitCode = 1;
     log(JSON.stringify({
       target,
       definedAt: definedAt.map(d => ({ project: d.project, element: d.entry.element })),
       directImpact,
       transitiveImpact,
-      impactedProjects: Array.from(impactedProjects)
+      impactedProjects: Array.from(impactedProjects),
+      impactedProjectPaths: Array.from(impactedPaths),
+      ...(tests ? { tests } : {})
     }, null, 2));
     return;
   }
@@ -12402,32 +12440,12 @@ function depsImpactCmd(root, targetCapability) {
   if (has('--run-tests')) {
     log('');
     log(`## 🚦 자동 회귀 sweep (--run-tests)`);
-    const results = [];
-    for (const projName of impactedProjects) {
-      const projPath = allPaths.find(p => path.basename(p) === projName);
-      if (!projPath) continue;
-      const pkgPath = path.join(projPath, 'package.json');
-      if (!exists(pkgPath)) { log(`  ⚠ ${projName}: package.json 없음 — skip`); continue; }
-      let pkg = null;
-      try { pkg = JSON.parse(read(pkgPath)); } catch {}
-      if (!pkg?.scripts?.test) { log(`  ⚠ ${projName}: scripts.test 없음 — skip`); continue; }
-      const t0 = Date.now();
-      // 1.9.299 (UR-0039): 영향 프로젝트 npm test → runCommandSafe + scrubSecrets (시크릿 노출 차단). root=projPath 라 cwd jail 통과.
-      const r = runCommandSafe('npm test', [], { cwd: projPath, root: projPath, encoding: 'utf8', allowShell: true, scrubSecrets: true, timeout: 5 * 60 * 1000, kind: 'reuse_impact_test' });
-      const elapsed = Date.now() - t0;
-      const out = (r.stdout || '') + (r.stderr || '');
-      const m = out.match(/(\d+)\s*\/\s*(\d+)\s*(?:passed|통과|pass|passing)/i);
-      const passed = r.status === 0;
-      results.push({ project: projName, passed, exit: r.status, elapsed, parsed: m ? { num: parseInt(m[1], 10), denom: parseInt(m[2], 10) } : null });
-      const tag = passed ? '✓' : '✗';
-      const ratio = m ? ` (${m[1]}/${m[2]})` : '';
-      log(`  ${tag} ${projName}: exit=${r.status}${ratio}  ${elapsed}ms`);
-    }
+    const results = _runImpactSweep(false);   // 1.36.35 (#6): json 과 동일한 절대경로 스윕 공용
     log('');
     const pass = results.filter(r => r.passed).length;
-    const fail = results.length - pass;
+    const fail = results.filter(r => r.passed === false).length;
     log(`## 종합`);
-    log(`  - 영향받는 프로젝트 ${impactedProjects.size}개 중 ${pass}개 통과, ${fail}개 실패`);
+    log(`  - 영향받는 프로젝트 ${impactedPaths.size}개 중 ${pass}개 통과, ${fail}개 실패`);
     if (fail > 0) {
       log(`  ⚠ ${target} 변경이 ${fail}개 프로젝트에 회귀 발생 가능 — 해당 프로젝트 testing 우선`);
       return process.exit(1);
