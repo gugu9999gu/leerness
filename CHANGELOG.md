@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.36.21 — 2026-07-14 — 경로/EOL/형태 견고성 4종 — 없는 경로에 트리 생성·CRLF plan tasks 증발·오타 하위명령 전체설치·user-requests 원본 덮어쓰기 (22 에이전트 전수 sweep, 전부 재현확정)
+
+codex 이연분(#8/#6) 재현에 그치지 않고 **동일 버그 클래스를 전수 조사**(CRLF 파서 / `--json` 실패경로 / 로더 스키마 / mutation-order 잔여) — 22 에이전트가 실행 기반으로 확정하고 후보마다 독립 재검증. 확정 P2 중 **현실성 있는 4건**만 채택(P3/contrived 는 기각·이연).
+
+- **handoff / env detect 가 없는 경로에 디렉토리 트리 + `.harness` 를 생성 (P2, 현실성 high)**: 오타 경로로 `handoff` 하면 쓰레기 트리가 생기고, `--json` 은 `ok`/`error` 없는 **정상 "빈 프로젝트" JSON + exit 0** 이라 기계 소비자가 오타를 감지 못 했음. status/health/drift/lazy detect/scan secrets/session close 는 이미 `path_not_found` + exit 1(UR-0136)인데 **이 둘만 관례 갭**. → 두 진입점에 존재 가드(`--pulse`/`--all-apps` 분기보다 앞). 실측: 없는 경로 → exit 1 + `path_not_found` + **디렉토리 생성 0**, 기존 경로 무회귀.
+- **CRLF `plan.md` 에서 모든 마일스톤 tasks 가 조용히 증발 (P2, codex #8a — 3 에이전트 독립 수렴)**: 체크박스 정규식이 `/m` 없이 후행 `\r` 앞에서 `$` 를 못 잡아 실패. id/title/status/progress 는 `/m` 이라 정상 파싱돼 **부분·무증상 실패**(`plan list` 의 Tasks 줄 소실, MCP `leerness_plan_list` 가 tasks 0건 보고 → 계약 위반). leerness 엔 체크박스를 켜는 명령이 없어 tasks 사용엔 외부 편집이 필수인데 Windows 관용 편집(PowerShell `Set-Content` 등)이 기본 CRLF → 현실 경로. → 코드베이스 기존 관례대로 **읽는 즉시 정규화**(혼합 EOL 도 복구). 실측 LF/CRLF 모두 tasks 2건.
+- **`migrate` 오타/추측 하위명령이 전체 설치를 수행 (P2)**: `migrate aduit` / `migrate check` 가 그 토큰을 **경로로 삼아** 오타명 디렉토리를 만들고 77개 파일을 설치 + `--json` 무시 + exit 0. → **존재 기반 가드**(migrate 의 전제는 기존 프로젝트, 새 트리 생성은 `init` 의 일) + `unknown_subcommand` 구조화 에러. 정당 흐름(`migrate .` / `migrate /existing` / `migrate --path X` / `migrate audit|apply|plan`)은 전부 보존. 실측: 오타 → exit 1 + **디렉토리 생성 0**.
+- **`user-requests.json` 미인식 형태 → 원본 통째 덮어쓰기 (P2, 데이터손실)**: wrapper 가 아닌 유효 JSON 을 조용히 `{requests:[]}` 로 강제한 뒤, mutation 이 **읽지 못한 원본을 새 배열로 대체**(read-modify-write 파괴). → bare array 는 관대 수용해 자기치유(decisions/lessons 관례), 그 외 미인식/파싱실패는 `unrecognized` 로 표시해 **3개 파괴적 쓰기 경로가 모두 bail**. 실측: 미인식 형태에서 `requests add` → 기록 건너뜀 + **파일 INTACT**, bare array → 보존+append, canonical 무회귀. 부수 수정: id 를 `length+1` 로 만들어 200개 truncate 후 충돌하던 것 → **최대 UR 번호+1** 파생.
+- **검증**: selftest 291/291(신규 4수정 소스가드 + CRLF 판별 순수행위), 4건 전부 임시 워크스페이스에서 재현→수정 후 재검(17 체크 중 14→17 통과, 나머지 3은 테스트 스크립트 결함으로 판명 후 정정), 게이트 e2e, 게시본 클린룸.
+- **기각/이연**: `[null]`·필드누락 JSON crash(P3, low — leerness 자체 파서는 null 을 만들지 않아 수동 손상 필요) · `copyRec` 심링크(P2, low — .harness 에 심링크를 둘 이유 없음, Windows 권한상 재현 불가) · `--json` 진행로그 오염 12건 중 P3 다수 · **UR-0027 확장 증거**(`requests` 계열은 positional 경로 미지원 → `requests add "text" /other/project` 가 조용히 cwd 에 기록. `task` 는 지원해 불일치가 실수를 유도 — 실제 피해 재현. 계약 변경 리스크로 별도 라운드).
+
 ## 1.36.20 — 2026-07-14 — `--apply --json`이 실제로 적용하도록 수정 — mutation-before-output (codex fresh-QA #7, 3커맨드 재현확정)
 
 codex fresh-surface QA(1.36.19 이연분)에서 확정한 **silent no-op** 버그 수정: `--json` 분기가 mutation "전"에 return 해, `--apply --json`이 적용을 보고하고도 실제로는 아무 변경도 안 하던 3개 커맨드.

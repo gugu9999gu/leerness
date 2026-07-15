@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.20';
+const VERSION = '1.36.21';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1923,13 +1923,19 @@ function _analyzeWakeupStatus(root) {
 //   레코드 구조: { id, text, recordedAt, status: 'open'|'in-progress'|'completed'|'dropped',
 //                  linkedTaskIds?, linkedPlanIds?, linkedDecisionIds?, notes?, completedAt?, droppedAt? }
 function _userRequestsPath(root) { return path.join(root, '.harness', 'user-requests.json'); }
+// 1.36.21 (전수 sweep P2, 데이터손실): 종전엔 wrapper 가 아닌 "유효 JSON" 을 조용히 {requests:[]} 로 강제하고, 이후 mutation 이
+//   파일 전체를 새 배열로 덮어써 원본을 파괴했다(읽지 못한 데이터를 지우는 read-modify-write). 이제 (1) bare array 는 관대 수용해
+//   다음 쓰기에 자기치유(decisions/lessons 관례와 동일), (2) 그 외 미인식 형태/파싱 실패는 unrecognized 로 표시해 쓰기 경로가 bail.
+//   읽기 전용 소비자들은 .requests 만 구조분해하므로 하위호환.
 function _loadUserRequests(root) {
   try {
     const fp = _userRequestsPath(root);
-    if (!exists(fp)) return { requests: [] };
+    if (!exists(fp)) return { requests: [] };                       // 미존재 = 신규 시작(쓰기 허용)
     const j = JSON.parse(read(fp));
-    return { requests: Array.isArray(j.requests) ? j.requests : [] };
-  } catch { return { requests: [] }; }
+    if (j && Array.isArray(j.requests)) return { requests: j.requests };   // canonical wrapper
+    if (Array.isArray(j)) return { requests: j };                          // bare array → 관대 수용(다음 쓰기에 wrapper 로 치유)
+    return { requests: [], unrecognized: true };                           // 미인식 형태 → 파괴적 쓰기 차단
+  } catch { return { requests: [], unrecognized: true }; }                 // 파싱 실패 → 차단(덮어쓰기 방지)
 }
 function _writeUserRequests(root, requests) {
   try {
@@ -1941,11 +1947,14 @@ function _writeUserRequests(root, requests) {
 function _recordUserRequest(root, text, opts = {}) {
   if (!text || typeof text !== 'string') return null;
   const state = _loadUserRequests(root);
+  if (state.unrecognized) { warn(`user-requests.json 형태 인식 불가 — 기록 건너뜀(원본 덮어쓰기 방지). 파일 확인: ${_userRequestsPath(root)}`); return null; }  // 1.36.21: 읽지 못한 데이터 파괴 차단
   // 중복 방지: 동일 텍스트 + open 상태 이미 존재 시 skip
   const norm = text.trim().slice(0, 500);
-  const dup = state.requests.find(r => r.text === norm && (r.status === 'open' || r.status === 'in-progress'));
+  const dup = state.requests.find(r => r && r.text === norm && (r.status === 'open' || r.status === 'in-progress'));
   if (dup) return dup;
-  const id = 'UR-' + String(state.requests.length + 1).padStart(4, '0');
+  // 1.36.21 (전수 sweep 부수발견): id 를 length+1 로 만들면 200개 초과 truncate(slice(-200)) 후 기존 id 와 충돌 → 최대 UR 번호 +1 로 파생.
+  const _maxUr = state.requests.reduce((mx, r) => { const m = /^UR-(\d{4,})$/.exec(String((r && r.id) || '')); return m ? Math.max(mx, parseInt(m[1], 10)) : mx; }, 0);
+  const id = 'UR-' + String(_maxUr + 1).padStart(4, '0');
   const entry = {
     id, text: norm, recordedAt: new Date().toISOString(),
     status: opts.status || 'open',
@@ -1962,7 +1971,8 @@ function _recordUserRequest(root, text, opts = {}) {
 }
 function _updateUserRequest(root, id, patch) {
   const state = _loadUserRequests(root);
-  const idx = state.requests.findIndex(r => r.id === id);
+  if (state.unrecognized) { warn(`user-requests.json 형태 인식 불가 — 업데이트 건너뜀(원본 덮어쓰기 방지). 파일 확인: ${_userRequestsPath(root)}`); return null; }  // 1.36.21
+  const idx = state.requests.findIndex(r => r && r.id === id);
   if (idx < 0) return null;
   state.requests[idx] = { ...state.requests[idx], ...patch, updatedAt: new Date().toISOString() };
   if (patch.status === 'completed' && !state.requests[idx].completedAt) state.requests[idx].completedAt = new Date().toISOString();
@@ -2972,6 +2982,27 @@ function _selfTestCases() {
       const encOk = s.includes("(result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1");   // encoding: 실패 exit1
       return reuseOk && releaseOk && encOk;
     } },
+    { name: '경로/EOL/형태 견고성 4종 (1.36.21, 전수 sweep P2): handoff·env detect 없는경로 가드 + CRLF plan tasks + migrate 오타설치 차단 + user-requests 미인식 쓰기차단 — 소스가드 + 순수 행위', run: () => {
+      const s = read(__filename);
+      // B: 없는 경로에 트리/.harness 를 만들고 빈 프로젝트로 보고하던 것 차단 (UR-0136 관례 정렬)
+      const handoffGuard = s.includes("if (!exists(_hr) || !fs.statSync(_hr).isDirectory()) { failJson(has('--json'), 'path_not_found'");
+      const envGuard = s.includes("if (!exists(root) || !fs.statSync(root).isDirectory()) { failJson(has('--json') || opts.json, 'path_not_found'");
+      // A: CRLF plan → tasks 증발 (읽는 즉시 정규화)
+      const planNorm = s.includes("const text = read(pp).replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');");
+      // C: migrate 오타/추측 하위명령이 그 토큰을 경로로 삼아 전체 설치하던 것 차단
+      const migrateGuard = s.includes("failJson(has('--json'), 'unknown_subcommand'") && s.includes('_msub');
+      // D: user-requests 미인식 형태를 조용히 비우고 덮어쓰던 데이터손실 차단 + id 충돌
+      const urTolerant = s.includes('if (Array.isArray(j)) return { requests: j };') && s.includes('return { requests: [], unrecognized: true };');
+      const urWriteGuard = (s.match(/state\.unrecognized/g) || []).length >= 2 && s.includes('ur.unrecognized');
+      const urMaxId = s.includes("/^UR-(\\d{4,})$/.exec");
+      // 순수 행위(실 흐름 복제: 정규화 → split('\n') → 줄별 매치). \r 가 남으면 앵커 $ 가 실패해 태스크 0건, 정규화하면 2건.
+      const crlfBlock = '- [ ] one\r\n- [x] two\r\n';
+      const hit = ls => ls.filter(l => /^-\s*\[([\sx])\]\s*(.+)$/.test(l)).length;
+      const rawHit = hit(crlfBlock.split('\n'));                                                   // 종전 동작: 0 (후행 \r)
+      const normHit = hit(crlfBlock.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n'));       // 수정 후: 2
+      const crlfBehavior = rawHit === 0 && normHit === 2;
+      return handoffGuard && envGuard && planNorm && migrateGuard && urTolerant && urWriteGuard && urMaxId && crlfBehavior;
+    } },
     { name: 'ID 리더 5자리+ 대응 (1.36.18, UR-0052 P1-2): \\d{4}→\\d{4,} — 10k+ ID(T-10000) truncation 방지, 날짜 연도는 exactly-4 보존 — 행위검사', run: () => {
       // 행위: 5자리 ID 전체 캡처(구 \d{4}는 앞 4자리만 → truncation/충돌), 4자리 ID 무회귀, 날짜 연도 exactly-4 유지.
       const taskRe = /\bT-(\d{4,})\b/;
@@ -3102,7 +3133,7 @@ function _selfTestCases() {
     { name: 'UR-0068(외부리뷰 P2): _roadmapParseMilestones 블록 경계 — 다음 milestone status 누출 차단', run: () => { const m = require('../lib/pure-utils'); const r = m._roadmapParseMilestones('### M-0001. A\n\n### M-0002. B\nStatus: done\nProgress: 80%\n'); return r.length === 2 && r[0].status === 'planned' && r[0].progress === 0 && r[1].status === 'done' && r[1].progress === 80; } },
     { name: 'UR-0066(외부리뷰 P2): shell:true 주입 가드 — agents bench task _shellQuoteArg + fetchNpmLatest cmd.exe args', run: () => { const m = require('../lib/pure-utils'); const src = read(__filename); const agentsSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'agents.js')); const benchQuoted = agentsSrc.includes('const qTask = ' + '_shellQuoteArg(task)'); const npmSafe = /'\/d', '\/s', '\/c', 'npm', 'view'/.test(src); const q = m._shellQuoteArg('a & b'); const safe = (process.platform === 'win32' ? q === '"a & b"' : q === "'a & b'"); return benchQuoted && npmSafe && safe; } },
     { name: 'UR-0072(외부리뷰 P3): compareVer pre-release + _classifyCJK 한자 kana 귀속', run: () => { const m = require('../lib/pure-utils'); const verOk = m.compareVer('1.9.0-beta', '1.9.0') === -1 && m.compareVer('1.9.0', '1.9.0-beta') === 1 && m.compareVer('1.9.5', '1.9.5') === 0 && m.compareVer('1.9.6', '1.9.5') === 1; const jp = Buffer.from([0xE3, 0x81, 0x82, 0xE6, 0x97, 0xA5, 0xE6, 0x9C, 0xAC]); const cn = Buffer.from([0xE4, 0xB8, 0xAD, 0xE5, 0x9B, 0xBD]); const rj = m._classifyCJK(jp, jp.length); const rc = m._classifyCJK(cn, cn.length); const cjkOk = rj.japanese > rj.chinese && rc.chinese > 0 && rc.japanese === 0; return verOk && cjkOk; } },
-    { name: 'UR-0075 Phase A: 마이그레이션 가이드(_migrationGuideText) + migrate --guide 와이어 + init/migrate/update --path', run: () => { const m = require('../lib/pure-utils'); const g = m._migrationGuideText('1.9.355'); const guideOk = typeof g === 'string' && g.includes('마이그레이션 가이드') && g.includes('update --check --path') && g.includes('selftest') && g.includes('canonical JSON') && g.includes('롤백') && g.includes('1.9.355'); const src = read(__filename); const wired = src.includes("has('--guide') || args[1] === " + "'guide'") && src.includes('install(arg(' + "'--path', args[1] || process.cwd())") && src.includes('updateCmd(arg(' + "'--path', args[1] || process.cwd())"); return guideOk && wired; } },
+    { name: 'UR-0075 Phase A: 마이그레이션 가이드(_migrationGuideText) + migrate --guide 와이어 + init/migrate/update --path', run: () => { const m = require('../lib/pure-utils'); const g = m._migrationGuideText('1.9.355'); const guideOk = typeof g === 'string' && g.includes('마이그레이션 가이드') && g.includes('update --check --path') && g.includes('selftest') && g.includes('canonical JSON') && g.includes('롤백') && g.includes('1.9.355'); const src = read(__filename); const wired = src.includes("has('--guide') || args[1] === " + "'guide'") && src.includes('install(arg(' + "'--path', _msub || process.cwd())") && src.includes('updateCmd(arg(' + "'--path', args[1] || process.cwd())"); return guideOk && wired; } },   // 1.36.21: migrate 는 존재가드 도입으로 args[1]→_msub (--path 와이어는 동일)
     { name: 'UR-0075 Phase B: migrate audit(dry-run 스키마 drift) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migrateAuditCmd === 'function' && src.includes('migrateAuditCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'audit'"); } },
     { name: 'UR-0075 Phase C: migrate apply(canonical 백필 비파괴 적용) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migrateApplyCmd === 'function' && src.includes('migrateApplyCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'apply'"); } },
     { name: 'UR-0075 Phase D: migrate plan(임시폴더 설치 후 비교) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migratePlanCmd === 'function' && src.includes('migratePlanCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'plan'"); } },
@@ -6969,10 +7000,11 @@ function _autoFixIdempotency(root) {
   // 2) user-requests.json open 중복 — 동일 텍스트 중 최초만 open 유지, 나머지 dropped(보존)
   try {
     const ur = _loadUserRequests(root);
+    if (ur.unrecognized) throw new Error('user-requests.json 형태 인식 불가 — dedup 건너뜀(원본 덮어쓰기 방지)');  // 1.36.21: 3번째 파괴적 caller 도 차단
     const seen = new Map();
     let droppedReq = 0;
     for (const r of ur.requests) {
-      if (r.status !== 'open' && r.status !== 'in-progress') continue;
+      if (!r || (r.status !== 'open' && r.status !== 'in-progress')) continue;
       const k = (r.text || '').trim();
       if (seen.has(k)) { r.status = 'dropped'; r.droppedReason = `auto-dedup-1.9.293 (== ${seen.get(k)})`; droppedReq++; }
       else seen.set(k, r.id);
@@ -7674,7 +7706,12 @@ function planListCmd(root, opts = {}) {
     }
     return ok('plan.md 없음 — leerness plan add "<text>" 로 첫 milestone 등록');
   }
-  const text = read(pp);
+  // 1.36.21 (codex #8a, 전수 sweep 3 에이전트 수렴): CRLF plan.md 에서 모든 마일스톤의 tasks 가 조용히 [] 로 증발하던 것 수정.
+  //   체크박스 정규식(/^-\s*\[([\sx])\]\s*(.+)$/)이 /m 없이 후행 \r 앞에서 $ 를 못 잡아 실패 — id/title/status/progress 는 /m 이라 정상 파싱되어
+  //   부분·무증상 실패였음(plan list 의 Tasks 줄 소실, MCP leerness_plan_list 가 tasks 0건 보고 → 계약 위반). leerness 는 체크박스를 켜는 명령이
+  //   없어 tasks 사용엔 외부 편집이 필수인데, Windows 관용 편집(PowerShell Set-Content 등)이 기본 CRLF 라 현실 경로. 코드베이스 기존 관례(:4643)대로
+  //   읽는 즉시 정규화 — 혼합 EOL(기존 CRLF + plan add 의 LF append)도 함께 복구되고 이 함수의 향후 정규식 재발도 차단.
+  const text = read(pp).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const milestones = [];
   // ### M-XXXX. <title> 블록 추출
   const blocks = text.split(/\n(?=### M-\d{4,}\.)/);
@@ -10665,6 +10702,12 @@ function _handoffWorkspace(rootBase) {
 }
 
 function handoffCmd(root) {
+  // 1.36.21 (전수 sweep P2/high): 존재하지 않는 경로에 디렉토리 트리 + .harness 를 "생성"하고 깨끗한 빈 프로젝트로 보고하던 것 차단.
+  //   오타 경로에 handoff 하면 쓰레기 트리가 생기고, --json 은 ok/error 없는 정상 JSON + exit 0 이라 기계 소비자가 오타를 감지 못 했음.
+  //   status/health/drift/lazy detect/scan secrets/session close 는 이미 path_not_found + exit 1(UR-0136) — handoff/env detect 만 누락된 관례 갭.
+  //   --pulse/--all-apps 분기보다 "앞"에 둬야 전 모드가 커버됨.
+  const _hr = absRoot(root);
+  if (!exists(_hr) || !fs.statSync(_hr).isDirectory()) { failJson(has('--json'), 'path_not_found', `경로 없음 또는 디렉토리 아님: ${_hr}`); return; }
   // 1.9.232: --pulse 옵션 — pulse 1 line 형식으로 출력 (handoff 전체 대신)
   if (has('--pulse')) {
     return pulseCmd(absRoot(root));
@@ -17393,6 +17436,8 @@ function _diffEnvSnapshots(prev, curr) {
 }
 function envDetectCmd(root, opts = {}) {
   root = absRoot(root || process.cwd());
+  // 1.36.21 (전수 sweep P2/high): handoff 와 동일 갭 — 없는 경로에 .harness/environment.json 을 만들며 exit 0. UR-0136 관례로 정렬.
+  if (!exists(root) || !fs.statSync(root).isDirectory()) { failJson(has('--json') || opts.json, 'path_not_found', `경로 없음 또는 디렉토리 아님: ${root}`); return; }
   const jsonMode = has('--json') || opts.json;
   const writeMode = !has('--no-write');  // default: 캡처 후 .harness/environment.json 에 저장
   const snap = _detectEnvironment(root);
@@ -21030,7 +21075,17 @@ async function main() {
   if (cmd === 'migrate' && args[1] === 'apply') return migrateApplyCmd(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()), { json: has('--json'), yes: has('--yes') });  // 1.9.357 (UR-0075 Phase C): canonical 백필 비파괴 적용 (기본 dry-run)
   if (cmd === 'migrate' && args[1] === 'plan') return migratePlanCmd(arg('--path', args[2] && !args[2].startsWith('-') ? args[2] : process.cwd()), { json: has('--json') });  // 1.9.358 (UR-0075 Phase D): 임시폴더 설치 후 비교 마이그레이션 플랜 (읽기 전용)
   if (cmd === 'install-safety') return installSafetyCmd({ json: has('--json') });  // 1.9.359 (UR-0074): 설치 안전 프로필 (0 deps / 0 install-script) + 안전 설치 워크플로
-  if (cmd === 'migrate')   return await install(arg('--path', args[1] || process.cwd()), { force:has('--force'), dry:has('--dry-run'), migration:true });  // 1.9.355 (UR-0075): --path 지원
+  // 1.36.21 (전수 sweep P2): 오타/추측 하위명령(`migrate aduit`, `migrate check`)이 그 토큰을 "경로"로 삼아 새 디렉토리를 만들고
+  //   전체 설치를 수행하던 것 차단(--json 무시 + exit 0 이라 조용했음). migrate 의 전제는 "기존 프로젝트" — 새 트리 생성은 init 의 일.
+  //   존재 기반 가드라 정당 흐름(migrate . / migrate /existing / migrate --path X / migrate)은 전부 보존.
+  if (cmd === 'migrate') {
+    const _msub = args[1];
+    if (_msub && !_msub.startsWith('-') && !has('--path') && !(exists(_msub) && fs.statSync(_msub).isDirectory())) {
+      failJson(has('--json'), 'unknown_subcommand', `알 수 없는 migrate 하위명령/경로: ${_msub} — 사용법: leerness migrate [기존경로] | migrate audit|apply|plan [경로] | migrate --guide (새 프로젝트는 leerness init)`);
+      return;
+    }
+    return await install(arg('--path', _msub || process.cwd()), { force:has('--force'), dry:has('--dry-run'), migration:true });  // 1.9.355 (UR-0075): --path 지원
+  }
   if (cmd === 'update')    return await updateCmd(arg('--path', args[1] || process.cwd()), { checkOnly: has('--check'), yes: has('--yes'), force: has('--force') });  // 1.9.355 (UR-0075): --path 지원
   if (cmd === 'auto-update' && args[1] === 'install') return autoUpdateInstall(arg('--path', args[2] || process.cwd()));
   if (cmd === 'status')    return status(arg('--path', args[1] || process.cwd()));
