@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.34 — 2026-07-15 — 판정 정직화 5종 — 도구가 내리는 판정(허용/만료/최신/집계)이 거짓말하지 않도록 (codex 3차 #4/#5/#8/#9/#10)
+
+- **#8 policy check**: 차단 판정인데 exit 0 → **exit 1**(CI/스크립트가 판정 신뢰 가능). 손상 policy.json 을 기본값 폴백으로 오답하던 것 → `policy_corrupt` 구조화 에러.
+- **#9 creds check**: null/비객체 레코드 → raw TypeError 크래시, 판독불가 날짜(NaN) → false-ready. → `invalid_credentials_schema` 구조화 판정 exit 1, 판독불가 날짜는 유효로 치지 않음(`unparsable_lastRefreshed`).
+- **#10 session close**: `completed`/`cancelled` 등 별칭·미지 상태가 어느 카테고리에도 안 담겨 마감 보고에서 조용히 소실(3건 중 1건 집계 실측; codex 실측 실프로젝트 13건 누락). → 별칭 정규화(completed/verified→done, cancelled→dropped 등) + 미지 상태 `other` 버킷(집계·handoff 모두 소실 0).
+- **#5 update --check**: 조회 실패(null)를 24h 캐시로 굳혀 다음 실행이 "up to date" 오답 → null 미캐시(다음 실행 재조회, "판정 보류" 명시). `compareVer` prerelease 세그먼트 비교 구현(semver §11 — 종전 beta.10==beta.2) — 숫자/문자/길이 규칙 7케이스 실증, 일반 비교 무회귀.
+- **#4 update --from <tarball>**: Windows shell 이 공백 경로를 재분할해 실패 → 인자 quoting. 이력이 실행 CLI 버전을 기록하던 것 → 설치된 HARNESS_VERSION 재판독.
+- **검증**: selftest 304/304(semver 5케이스 행위 + 배선 5종), 5건 원 재현 before/after, exit 전파형 게이트 e2e, 게시본 클린룸. 이연: #6 deps --run-tests false-green · #7 주석 트레이스 오인(휴리스틱 계열 — 별도 라운드에서 신중 처리).
+
 ## 1.36.33 — 2026-07-15 — 데이터 보존 5종 — migrate --force 상태 보존 · positional path 클래스 소진 · symlink 미추종 · skill 충돌 가드 · settings 손상 중단 (codex 3차 헌트 + 자체 발견)
 
 - **P1 — `migrate --force` 가 사용자 상태를 삭제** (codex 3차 #1): --force 가 progress-tracker/plan/task-log/decisions 등 상태 파일까지 새 템플릿으로 덮어써 활성 task 가 archive 에만 남았다(마커 실측 소실). → force 는 가이드/템플릿 문서에만 적용, 상태 파일 14종은 force 여도 보존(`_USER_STATE`). 실측: --force 후 task 잔존 1 · guideline 은 갱신. **1.36.28 의 마이그레이션 유실 전수 검증을 --force 경로까지 확장 완결.**

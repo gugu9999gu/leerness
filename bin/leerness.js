@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.33';
+const VERSION = '1.36.34';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3149,6 +3149,24 @@ function _selfTestCases() {
       const symlinkGuard = s.includes("if (stat.isSymbolicLink()) { report.skippedFiles.push(rel + ' (symlink — 따라가지 않음')") || s.includes('symlink — 따라가지 않음');
       const copySafe = /function copyRecursiveSafe[\s\S]{0,400}lstatSync/.test(s);
       return forceGuard && skillGuard && settingsGuard && symlinkGuard && copySafe;
+    } },
+    { name: '판정 정직화 5종 (1.36.34, codex 3차 #4/#5/#8/#9/#10): prerelease semver + 캐시 null 미고착 + policy exit/손상 + creds 스키마 + close 상태 별칭 — 행위검사', run: () => {
+      const p = require('../lib/pure-utils');
+      // #5: prerelease 세그먼트 비교 (종전 0 반환)
+      const semverOk = p.compareVer('1.0.0-beta.10', '1.0.0-beta.2') === 1 && p.compareVer('1.0.0-alpha', '1.0.0-beta') === -1
+        && p.compareVer('1.0.0-beta', '1.0.0-beta.1') === -1 && p.compareVer('1.0.0', '1.0.0-beta') === 1 && p.compareVer('1.2.3', '1.2.3') === 0;
+      const s = read(__filename);
+      const cacheOk = s.includes('if (latest) writeUpdateCache(root,') && s.includes("cacheFresh(cached, cacheHours) && cached.nextLeerness");
+      // #8: 차단 exit 1 + 손상 policy 구조화 에러
+      const policyOk = s.includes('if (!res.allowed) process.exitCode = 1;') && s.includes("'policy_corrupt'");
+      // #9: creds 스키마 검증 + 판독불가 날짜
+      const credsOk = s.includes("invalid: 'invalid_credentials_schema'") && s.includes('unparsable_lastRefreshed');
+      // #10: session close 별칭 정규화 + other 버킷 (행위)
+      const sc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js'));
+      const closeOk = sc.includes('_STATUS_ALIAS') && sc.includes("completed: 'done'") && sc.includes("cancelled: 'dropped'") && sc.includes('buckets.other.length');
+      // #4: tarball 공백 경로 quoting + 설치 버전 재판독
+      const tarOk = s.includes('const _qw = a =>') && s.includes("read(path.join(root, '.harness', 'HARNESS_VERSION')).trim(); if (_hv) nextLeerness = _hv;");
+      return semverOk && cacheOk && policyOk && credsOk && closeOk && tarOk;
     } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
@@ -16363,16 +16381,17 @@ async function updateCmd(root, opts = {}) {
   if (fromTar) { if (!quiet) log(`Local tarball mode: ${fromTar}`); }
   else {
     const cached = readUpdateCache(root);
-    if (cacheFresh(cached, cacheHours)) {
-      nextLeerness = cached.nextLeerness || VERSION;
+    // 1.36.34 (codex 3차 #5): 조회 실패(null)를 24h 캐시로 굳히면 다음 실행이 "up to date" 로 오답 — null 은 캐시하지 않고 재시도.
+    if (cacheFresh(cached, cacheHours) && cached.nextLeerness) {
+      nextLeerness = cached.nextLeerness;
       if (!quiet) log(`(cached ${Math.round((Date.now() - cached.at) / 60000)}m ago)`);
-      if (!quiet) log(`npm leerness latest: ${cached.nextLeerness || '(unavailable)'}`);
+      if (!quiet) log(`npm leerness latest: ${cached.nextLeerness}`);
     } else {
       if (!quiet) log('Checking npm registry…');
       const latest = await fetchNpmLatest('leerness');
       nextLeerness = latest || VERSION;
-      writeUpdateCache(root, { nextLeerness: latest, runningCli: VERSION });
-      if (!quiet) log(`npm leerness latest: ${latest || '(unavailable, using running CLI ' + VERSION + ')'}`);
+      if (latest) writeUpdateCache(root, { nextLeerness: latest, runningCli: VERSION });
+      if (!quiet) log(`npm leerness latest: ${latest || '(unavailable — 판정 보류, 다음 실행에서 재조회)'}`);
     }
   }
   // What is "current"? canonical=base; legacy plus also rolls into leerness 1.9.0+
@@ -16403,8 +16422,12 @@ async function updateCmd(root, opts = {}) {
     if (r.status !== 0) { fail(`delegated migrate exited ${r.status}`); process.exitCode = 1; return; }
   } else if (fromTar) {
     log(`\nDelegating to npx -p ${fromTar} leerness migrate (local tarball)…`);
-    const r = cp.spawnSync('npx', ['-y', '-p', fromTar, 'leerness', 'migrate', root, '--yes'], { stdio: 'inherit', shell: process.platform === 'win32' });
+    // 1.36.34 (codex 3차 #4): Windows shell:true 는 인자를 공백에서 재분할 — 공백 포함 경로를 따옴표로 보호.
+    const _qw = a => (process.platform === 'win32' && /\s/.test(String(a))) ? `"${a}"` : a;
+    const r = cp.spawnSync('npx', ['-y', '-p', _qw(fromTar), 'leerness', 'migrate', _qw(root), '--yes'], { stdio: 'inherit', shell: process.platform === 'win32' });
     if (r.status !== 0) { fail(`delegated migrate exited ${r.status}`); process.exitCode = 1; return; }
+    // 1.36.34 (#4b): 이력에 실행 CLI 버전이 아니라 실제 설치된 버전 기록 — 마이그레이션 후 HARNESS_VERSION 재판독.
+    try { const _hv = read(path.join(root, '.harness', 'HARNESS_VERSION')).trim(); if (_hv) nextLeerness = _hv; } catch {}
   } else {
     log(`\nRunning in-process migrate (already on latest ${VERSION})…`);
     await install(root, { force: false, dry: false, migration: true, nonInteractive: true });
@@ -18788,7 +18811,11 @@ function policyCmd(root, sub, ...args) {
   if (sub === 'check') {
     const cmd = (args.find(a => a && !a.startsWith('-')) || arg('--cmd', '')).trim();
     if (!cmd) return fail('policy check "<command>" 필요');
+    // 1.36.34 (codex 3차 #8): 손상 policy.json 을 기본값으로 조용히 폴백하면 잘못된 허용 판정 — 손상은 구조화 에러 + exit 1.
+    const _pf = _policyFile(root);
+    if (exists(_pf)) { try { JSON.parse(read(_pf)); } catch { failJson(json, 'policy_corrupt', `policy 파일 손상(JSON 파싱 실패): ${_pf} — 복구/삭제 후 재시도`); return; } }
     const res = _policyEnforce(root, cmd);
+    if (!res.allowed) process.exitCode = 1;   // 1.36.34 (#8): 차단 판정은 exit 1 (CI/스크립트가 판정을 신뢰할 수 있게)
     if (json) { log(JSON.stringify({ cmd, ...res }, null, 2)); return; }
     log(`# policy check: ${cmd}`);
     log(`  요구 등급: ${res.required} · 허용 등급: ${res.allowedTier} · ${res.allowed ? '🟢 허용' : '🔴 차단'}${res.advisory ? ' (advisory — enforce OFF)' : ''}`);
@@ -20351,11 +20378,18 @@ function credsCheckCmd(root, service) {
   const targets = service ? (j.services[service] ? { [service]: j.services[service] } : {}) : (j.services || {});
   if (!Object.keys(targets).length) { failJson(has('--json'), 'no_service', `등록된 서비스 없음${service ? ` (${service})` : ''}`); return; }  // 1.9.404 (UR-0105 잔여): --json 에러 구조화
   for (const [name, meta] of Object.entries(targets)) {
-    const missing = (meta.envVars || []).filter(v => !process.env[v]);
-    const expired = meta.tokenLifetimeHours && meta.lastRefreshed
-      ? (Date.now() - new Date(meta.lastRefreshed).getTime()) > meta.tokenLifetimeHours * 3600 * 1000
-      : false;
-    result.services[name] = { envSet: !missing.length, missing, expired };
+    // 1.36.34 (codex 3차 #9): 손상 레코드(null/비객체) → raw TypeError 크래시, 파싱 불가 날짜(NaN) → false-ready. 구조화 판정.
+    if (!meta || typeof meta !== 'object' || !Array.isArray(meta.envVars)) {
+      result.services[name] = { envSet: false, missing: [], expired: false, invalid: 'invalid_credentials_schema' };
+      result.ok = false;
+      continue;
+    }
+    const missing = meta.envVars.filter(v => !process.env[v]);
+    const _ts = meta.lastRefreshed ? Date.parse(meta.lastRefreshed) : null;
+    const _badDate = meta.lastRefreshed != null && Number.isNaN(_ts);
+    const expired = _badDate ? true   // 판독 불가 날짜는 '유효' 로 치지 않음 (false-ready 방지)
+      : (meta.tokenLifetimeHours && _ts != null ? (Date.now() - _ts) > meta.tokenLifetimeHours * 3600 * 1000 : false);
+    result.services[name] = { envSet: !missing.length, missing, expired, ...(_badDate ? { invalid: 'unparsable_lastRefreshed' } : {}) };
     if (missing.length || expired) result.ok = false;
   }
   if (has('--json')) { log(JSON.stringify(result, null, 2)); if (!result.ok) process.exitCode = 1; return; }
@@ -20363,7 +20397,7 @@ function credsCheckCmd(root, service) {
   for (const [name, r] of Object.entries(result.services)) {
     if (r.envSet && !r.expired) log(`  ✓ ${name}: 사용 준비됨`);
     else {
-      log(`  ⚠ ${name}: ${r.missing.length ? `누락 ${r.missing.join(',')}` : ''}${r.expired ? ' · 토큰 만료 (재로그인 필요)' : ''}`);
+      log(`  ⚠ ${name}: ${r.missing.length ? `누락 ${r.missing.join(',')}` : ''}${r.expired ? ' · 토큰 만료 (재로그인 필요)' : ''}${r.invalid ? ` · 레코드 손상(${r.invalid}) — creds register 로 재등록` : ''}`);
     }
   }
   if (!result.ok) process.exitCode = 1;
