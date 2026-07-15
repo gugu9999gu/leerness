@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.36.22 — 2026-07-14 — SessionStart 컨텍스트 주입(compaction 후 컨텍스트 유실 차단) + README 를 소개·사용법·효과로 재구성
+
+**① SessionStart 컨텍스트 주입** (obra/superpowers 구조 검토 → 배선). 실측 결함: compaction/resume 후 에이전트가 "세션 시작 handoff" 의례를 건너뛰어 컨텍스트를 잃는다. superpowers 는 hook matcher 를 `startup|clear|compact` 로 걸어 하네스가 컨텍스트를 강제 적재한다(에이전트 자발성에 안 기댐) — leerness 는 hook 플럼빙과 compact 신호를 **이미 둘 다 갖고 있었고 배선만 없었다**.
+
+- **`leerness hook session-start [path]` 신설** — hook 전용 표면. Claude Code 규약(`{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"…"}}`)으로 진행상황 2~3줄 주입.
+  - ★ **handoff 를 호출하지 않는다**: handoff 는 `last-handoff` stamp 를 찍어 detector 3종(핸드오프 넛지·abnormal shutdown·R-0001 interval)을 오염시킨다. 동일 파일 로더만 재사용 — **subprocess 0 · 쓰기 0 · last-handoff.json 미접촉**(실측 불변 확인).
+  - **어떤 예외에서도 stdout 무출력 + exit 0** — 세션 시작을 절대 깨지 않는다. 미초기화/없는 경로도 무음.
+  - **자기 라벨링**(1.9.272 투명성): "위는 요약 — 전체 컨텍스트는 `leerness handoff .` 실행" + 끄는 법 동봉.
+  - opt-out: `--no-context-inject` / `LEERNESS_NO_CONTEXT_INJECT=1`.
+- **`handoff --no-record` / `LEERNESS_HOOK=1` 가드 신설** — 읽기전용/hook 호출이 stamp 를 찍어 detector 를 오염시키던 경로 차단(기본 동작 불변, 실측 무회귀).
+- **hook 설치 배선** — `auto-update install` 이 2번째 SessionStart hook(`matcher: 'startup|clear|compact'`)을 멱등 push. 기존 설치도 자동 취득. 투명성 문구로 무엇을/언제/왜/끄는법 명시.
+- 채택하지 않음: superpowers 의 SKILL.md 전문 주입(leerness 의 값어치는 정적 문서가 아니라 동적 상태) · bash 래퍼 hook(leerness 는 이미 PATH 실행파일).
+
+**② README 재구성** — 소개 / 사용법 / 사용효과만 담도록 정리. 자기평가·성숙도 서술은 README 의 일이 아니다.
+- 제거: "자체 수행 클린룸 평가로 검증됨" **주장과 그 한정어를 함께**(주장이 없으면 한정어도 불필요 — 방법론·결과·한계는 원래부터 `docs/clean-room-evaluations.md` 가 보유, Links 에서 링크) · "성숙도" 섹션(초기 단계/단독 유지보수/자율 AI 개발/외부 채택) · ko 의 문서 출처 메타 노트.
+- 이전(삭제 아님): 기여자 테스트 티어(`test:fast`/`test:core`/`npm test`) → **신규 `CONTRIBUTING.md`**(불변식·판별케이스·릴리스 절차 포함).
+- 재구성: "Guidance vs enforcement (be honest about this)" → **"Make it enforced, not optional"**(ci init + branch protection 사용법). gitleaks 병행은 사과가 아니라 사용 권장으로.
+- 정직성 회귀 가드로 전수 재검 → ko 에 남아있던 **"지속적 외부 검증 — 다중 모델 클린룸 리뷰"** 적발·제거(한정어를 뺀 자리에 제3자 검증 함의가 남아있었음). 최종 확인: 감사/인증/보장 함의 문구 0.
+- **검증**: selftest 292/292(신규 hook 소스가드 — 쓰기0 불변식·JSON 규약·matcher compact·opt-out·자기라벨링), hook 실측 5종(JSON 규약 / last-handoff 불변 / 미초기화 무음 exit0 / opt-out 2종 / `--no-record` + 기본 stamp 무회귀), 게이트 e2e, 게시본 클린룸.
+
 ## 1.36.21 — 2026-07-14 — 경로/EOL/형태 견고성 4종 — 없는 경로에 트리 생성·CRLF plan tasks 증발·오타 하위명령 전체설치·user-requests 원본 덮어쓰기 (22 에이전트 전수 sweep, 전부 재현확정)
 
 codex 이연분(#8/#6) 재현에 그치지 않고 **동일 버그 클래스를 전수 조사**(CRLF 파서 / `--json` 실패경로 / 로더 스키마 / mutation-order 잔여) — 22 에이전트가 실행 기반으로 확정하고 후보마다 독립 재검증. 확정 P2 중 **현실성 있는 4건**만 채택(P3/contrived 는 기각·이연).

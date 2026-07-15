@@ -33,7 +33,7 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.21';
+const VERSION = '1.36.22';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2981,6 +2981,21 @@ function _selfTestCases() {
       const releaseOk = s.includes('deleteCount: toDelete.length, deleted, deleteFailed') && s.includes('if (deleteFailed > 0) process.exitCode = 1');  // release: 삭제 먼저 → json 에 deleted
       const encOk = s.includes("(result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1");   // encoding: 실패 exit1
       return reuseOk && releaseOk && encOk;
+    } },
+    { name: 'SessionStart 컨텍스트 주입 (1.36.22, obra/superpowers 구조 검토): hook 전용 표면 + 쓰기0 가드 + matcher 에 compact 포함 + opt-out — 소스가드', run: () => {
+      const s = read(__filename);
+      const surface = typeof hookSessionStartCmd === 'function' && s.includes("cmd === 'hook' && args[1] === 'session-start'");
+      // ★ 핵심 불변식: hook 은 handoff 를 부르지 않는다(부르면 last-handoff stamp 로 detector 3종 오염) + record 는 가드 뒤에만
+      const zeroWrite = s.includes("if (!has('--no-record') && process.env.LEERNESS_HOOK !== '1') { try { _recordLastHandoff(root); } catch {} }");
+      // split-literal: 앵커를 통짜 문자열로 두면 이 selftest 줄 자신이 먼저 매칭돼 43자짜리 자기 슬라이스를 잡는다(자기참조 트랩, UR-0009 계열).
+      const hookBody = s.slice(s.indexOf('function ' + 'hookSessionStartCmd'), s.indexOf('function ' + 'handoffCmd'));
+      const noHandoffCall = hookBody.length > 100 && !/handoffCmd\(|_recordLastHandoff\(|writeUtf8\(|mkdirp\(/.test(hookBody);   // 쓰기/handoff 호출 0
+      const jsonContract = hookBody.includes("hookEventName: 'SessionStart'") && hookBody.includes('additionalContext');
+      const optOut = hookBody.includes("has('--no-context-inject')") && hookBody.includes("LEERNESS_NO_CONTEXT_INJECT");
+      const selfLabel = hookBody.includes('위는 요약');                                          // 1.9.272 투명성: 요약임을 자기 라벨링
+      const matcherCompact = s.includes("{ matcher: 'startup|clear|compact', command: 'leerness hook session-start' }");   // 실측 결함(compaction) 커버
+      const idempotent = s.includes("some(h => h.command && h.command.includes('leerness hook session-start'))");
+      return surface && zeroWrite && noHandoffCall && jsonContract && optOut && selfLabel && matcherCompact && idempotent;
     } },
     { name: '경로/EOL/형태 견고성 4종 (1.36.21, 전수 sweep P2): handoff·env detect 없는경로 가드 + CRLF plan tasks + migrate 오타설치 차단 + user-requests 미인식 쓰기차단 — 소스가드 + 순수 행위', run: () => {
       const s = read(__filename);
@@ -9075,7 +9090,9 @@ function handoff(root) {
   //   detector 가 prior gap 을 정확히 측정 (overwrite 전 값 필요). 함수 최상단에 선언.
   let _priorHandoffGap = { hasLast: false };
   try { _priorHandoffGap = _getLastHandoffGap(root); } catch {}
-  try { _recordLastHandoff(root); } catch {}
+  // 1.36.22: 읽기전용/hook 호출이 last-handoff stamp 를 찍으면 detector 3종(핸드오프 넛지·abnormal shutdown·R-0001 interval)이
+  //   "방금 handoff 했다"고 오판해 오염된다. --no-record / LEERNESS_HOOK=1 로 stamp 생략(기본 동작 불변).
+  if (!has('--no-record') && process.env.LEERNESS_HOOK !== '1') { try { _recordLastHandoff(root); } catch {} }
   // 1.9.203: auto-resume-plan 자동 로드 (사용자 명시 — 자동 모드 알람 트리거)
   let _autoResumePlan = null;
   try { _autoResumePlan = _loadAutoResumePlan(root); } catch {}
@@ -10701,6 +10718,35 @@ function _handoffWorkspace(rootBase) {
   log(`  - 새 패턴 추가 시 \`leerness reuse-map --all-apps\`로 중복 감지${sinceCutoff ? '' : ' / `--since 24h`로 최근 변경 추적'}`);
 }
 
+// 1.36.22 (obra/superpowers 구조 검토 → 배선): SessionStart 컨텍스트 주입 전용 표면.
+//   문제(실측): compaction/resume 후 에이전트가 "세션 시작 handoff" 의례를 건너뛰어 컨텍스트를 잃는다.
+//   superpowers 는 hook matcher 를 startup|clear|compact 로 걸어 하네스가 컨텍스트를 강제 적재한다(에이전트 자발성에 안 기댐).
+//   leerness 는 hook 플럼빙(autoUpdateInstall)과 compact 신호(handoff --compact)를 이미 둘 다 갖고 있었고 배선만 없었음 → 그 배선.
+//   ★ 여기서 handoff 를 호출하지 않는다: handoff 는 last-handoff stamp 를 찍어 detector 3종을 오염시킴. 동일 파일 로더만 재사용
+//     (subprocess 0 · 쓰기 0 · last-handoff.json 미접촉). 어떤 예외에서도 stdout 무출력 + exit 0 — 세션 시작을 절대 깨지 않는다.
+function hookSessionStartCmd(root) {
+  if (has('--no-context-inject') || process.env.LEERNESS_NO_CONTEXT_INJECT === '1') return;   // opt-out → 무출력 exit 0
+  try {
+    root = absRoot(root || process.cwd());
+    if (!exists(root) || !exists(path.join(root, '.harness'))) return;   // 미초기화/없는 경로 → 조용히 무출력(hook 은 어디서나 실행됨)
+    const rows = readProgressRows(root);
+    const byStatus = {};
+    for (const r of rows) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+    const done = byStatus['done'] || 0, wip = byStatus['in-progress'] || 0, blocked = byStatus['blocked'] || 0;
+    const pct = rows.length ? Math.round(done / rows.length * 100) : 0;
+    const openReq = (_loadUserRequests(root).requests || []).filter(r => r && (r.status === 'open' || r.status === 'in-progress')).length;
+    const nx = rows.find(r => r.status === 'in-progress') || rows.find(r => r.status === 'planned') || null;
+    const flags = [];
+    if (openReq) flags.push(`📥 미답 요청 ${openReq}`);
+    if (blocked) flags.push(`🚫 blocked ${blocked}`);
+    const lines = [_lineSafe(`[leerness] ${detectProjectName(root)} · ${done}/${rows.length}(${pct}%) done · WIP ${wip}${flags.length ? ' · ' + flags.join(' · ') : ''}`)];
+    if (nx) lines.push(_lineSafe(`다음: ${nx.id} [${nx.status}] ${nx.nextAction || nx.request || ''}`).slice(0, 200));
+    // 자기 라벨링(1.9.272 투명성 불변식): 요약임을 밝히고 전체 컨텍스트 경로와 끄는 법을 함께 준다.
+    lines.push('⚠ 위는 요약 — 전체 컨텍스트는 `leerness handoff .` 실행. (이 주입 끄기: LEERNESS_NO_CONTEXT_INJECT=1)');
+    // Claude Code SessionStart hook 규약. JSON.stringify 가 이스케이프 담당(수동 백슬래시/따옴표 처리 불필요).
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: lines.join('\n') } }) + '\n');
+  } catch { /* 세션 시작을 절대 깨지 않는다 — 무출력 exit 0 */ }
+}
 function handoffCmd(root) {
   // 1.36.21 (전수 sweep P2/high): 존재하지 않는 경로에 디렉토리 트리 + .harness 를 "생성"하고 깨끗한 빈 프로젝트로 보고하던 것 차단.
   //   오타 경로에 handoff 하면 쓰레기 트리가 생기고, --json 은 ok/error 없는 정상 JSON + exit 0 이라 기계 소비자가 오타를 감지 못 했음.
@@ -16012,6 +16058,11 @@ function autoUpdateInstall(root) {
   if (!settings.hooks.SessionStart.some(h => h.command && h.command.includes('leerness update'))) {
     settings.hooks.SessionStart.push({ matcher: '*', command: 'leerness update --check --quiet' });
   }
+  // 1.36.22: 2번째 SessionStart hook — 컨텍스트 주입. matcher 에 compact 를 포함하는 게 핵심(실측 결함: compaction/resume 후
+  //   에이전트가 세션시작 handoff 의례를 건너뜀). 기존 설치는 이 멱등 push 로 자동 취득(1.9.364 업그레이드 패턴 재사용).
+  if (!settings.hooks.SessionStart.some(h => h.command && h.command.includes('leerness hook session-start'))) {
+    settings.hooks.SessionStart.push({ matcher: 'startup|clear|compact', command: 'leerness hook session-start' });
+  }
   writeUtf8(settingsFile, JSON.stringify(settings, null, 2) + '\n');
   writeUtf8(path.join(root, '.claude/commands/update.md'),
     `# /update\n\nleerness 자동 업데이트 (감지 → 마이그레이션 → 검증).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\n체크만:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`);
@@ -16022,6 +16073,8 @@ function autoUpdateInstall(root) {
   // 1.9.272 (GPT-5.5 외부 리뷰 반영): hook 설치 투명성 — 무엇을/왜/어떻게 끄는지 명시.
   // 1.9.364 (4번째 외부평가 9.3): 비침투 — 세션 시작 시 --quiet 로 up-to-date 면 아무 출력 없음, 업데이트 가능 시에만 1줄.
   log(`  ⓘ 이 hook 은 Claude Code 세션 시작 시 \`leerness update --check --quiet\` 를 1회 실행합니다 (최신이면 무음, 업데이트 가능 시에만 1줄 통지 · 자동 설치는 안 함).`);
+  // 1.36.22: 2번째 hook 투명성 — 무엇을(요약 주입)/언제(startup·clear·compact)/왜(compaction 후 컨텍스트 유실)/어떻게 끄는지.
+  log(`  ⓘ 2번째 hook \`leerness hook session-start\` 는 세션 시작·clear·compaction 시 진행상황 요약 2~3줄을 컨텍스트에 주입합니다 (쓰기 0 · 미초기화 프로젝트면 무음 · 끄기: LEERNESS_NO_CONTEXT_INJECT=1).`);
   log(`  ⓘ 제거: ${rel(root, settingsFile)} 의 hooks.SessionStart 항목 삭제  ·  설치 시 끄기: leerness init . --no-auto-update`);
 }
 
@@ -21097,6 +21150,7 @@ async function main() {
   if (cmd === 'encoding' && args[1] === 'check') return encodingCheck(arg('--path', args[2] || process.cwd()));
   if (cmd === 'lazy' && args[1] === 'detect')    return lazyDetect(_resolveRoot(args[2]), { json: has('--json') });
   if (cmd === 'memory' && args[1] === 'search')  return memorySearch(arg('--path', process.cwd()), args.slice(2).join(' '));
+  if (cmd === 'hook' && args[1] === 'session-start') return hookSessionStartCmd(arg('--path', args[2] || process.cwd()));  // 1.36.22: SessionStart 컨텍스트 주입(쓰기 0)
   if (cmd === 'handoff')      { const _hp = arg('--path', args[1] || process.cwd()); const _hr = handoffCmd(_hp); _maybeAutoGraph(_hp); return _hr; }
   if (cmd === 'reuse-map')    return reuseMapCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'verify-claim') { const _p = arg('--path', process.cwd()); if (args[1] === '--all' || has('--all')) return verifyClaimAllCmd(_p); return verifyClaimCmd(_p, args[1]); }  // 1.33.2: --all → 모든 done 주장 일괄 검증

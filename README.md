@@ -65,13 +65,11 @@ Built-in harnesses remember what the AI **said**. leerness verifies what the AI 
 | Secrets · encoding · drift guards | none | `scan secrets` · `encoding check` · `drift check --auto-fix` — CI-ready |
 | Lock-in | one vendor | any agent, any language, 0 runtime dependencies |
 
-This positioning is checked by **self-administered clean-room evaluations** — AI agents do a fresh `npm install` into temp dirs and drive it by behavior only, including adversarial attacks against the verifier itself (fake tests, comment-only stubs, inflated test counts — all rejected). To be clear: these are *AI* clean-room runs, **not third-party human audits or peer review** — they make the claim *checkable* rather than a marketing line. Methodology, results, and honest limitations: **[docs/clean-room-evaluations.md](./docs/clean-room-evaluations.md)**.
-
 ---
 
-## Guidance vs enforcement (be honest about this)
+## Make it enforced, not optional
 
-By default leerness is **cooperative**: your AI agent runs the commands because CLAUDE.md / AGENTS.md tell it to. A determined agent could skip them. To make verification **enforced**, not optional:
+By default leerness is **cooperative**: your AI agent runs the commands because CLAUDE.md / AGENTS.md tell it to. A determined agent could skip them. To turn the guideline into a guardrail:
 
 ```bash
 leerness ci init          # writes .github/workflows/leerness-gate.yml — runs `leerness gate` on every PR
@@ -81,23 +79,19 @@ The generated workflow is production-grade: it **pins the leerness version** (re
 
 Then make that check **required** in GitHub branch protection. Now a PR that skips verification (or whose claims fail) **cannot merge** — the gate runs independently of the agent, returns a non-zero exit code, and blocks. That is the difference between a guideline and a guardrail. For exact per-claim enforcement, run `leerness gate --claims` — it adds a 6th check that runs `verify-claim` on **every** completed task and fails the gate if any "done" task's evidence doesn't match reality (the default 5-check gate already blocks false-done via heuristics; `--claims` makes it precise).
 
-For secrets, pair the gate with a **dedicated scanner** in the same workflow — leerness's `scan secrets` is a convenience guard (the same signal your agent sees locally), not a hard guarantee:
+For secrets, pair the gate with a **dedicated scanner** in the same workflow. `scan secrets` gives your agent the same signal locally; a dedicated scanner is the hard-guarantee layer:
 
 ```yaml
 # add to .github/workflows/leerness-gate.yml (or a separate job)
 - uses: gitleaks/gitleaks-action@v2                 # dedicated scanner — the hard-guarantee layer
-- run: npx leerness@<pinned-version> scan secrets . --json   # convenience layer — same check your agent runs locally
+- run: npx leerness@<pinned-version> scan secrets . --json   # same check your agent runs locally
 ```
 
 ---
 
-## Maturity — and why trying it is still cheap
+## Low-risk by design
 
-Be honest with yourself before you depend on this: leerness is **early and largely solo-maintained**, developed mostly through autonomous AI rounds — so its own `selftest` + e2e suites are the primary quality signal, and external adoption is still small. Don't make it load-bearing on faith: **pin a version**, and treat the differentiated slice — `verify-claim` + the CI `gate` as a required check — as the part worth relying on.
-
-(Contributor note — three test tiers, fastest to slowest: `npm run test:fast` = selftest + smoke (commands run without crashing, <1 min, dev loop); `npm run test:core` = selftest + a flagship behavioral suite (verify-claim / gate / contract / scan actually reject bad input and pass honest input, ~20 s, pre-commit / quick CI); `npm test` = selftest + the entire e2e suite (**10+ minutes by design**, the release gate).)
-
-The asymmetry is what makes a trial reasonable anyway: MIT, **0 runtime dependencies**, offline-first, and all state is plain files in *your* repo. Lock-in is near zero — if it doesn't earn its place, remove the tool and your `task`/`decision`/`lesson` files stay. (For secret scanning specifically, mature dedicated tools like gitleaks/trufflehog exist — use those if you need a hard guarantee; leerness's `scan secrets` is a convenience guard, not a replacement.)
+**MIT · 0 runtime dependencies · offline-first**, and all state is plain files in *your* repo. Lock-in is near zero — if it doesn't earn its place, remove the tool and your `task` / `decision` / `lesson` files stay exactly where they are. **Pin a version** in CI so the gate's verdict can't change from a silent upgrade.
 
 ---
 
@@ -117,6 +111,8 @@ Full command reference, workflows, and architecture: **[README.ko.md](./README.k
 - npm: https://www.npmjs.com/package/leerness
 - Site & release videos: https://leerness.pages.dev
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
+- How this gets tested — methodology, results, and limitations: [docs/clean-room-evaluations.md](./docs/clean-room-evaluations.md)
+- Contributing & test tiers (`test:fast` / `test:core` / `npm test`): [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## License
 
@@ -125,7 +121,7 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.36.12 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.36.22 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
@@ -179,7 +175,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.36.12는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **86개 도구**를 노출:
+Leerness v1.36.22는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **86개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -200,7 +196,7 @@ Leerness v1.36.12는 stdio JSON-RPC MCP server를 내장합니다 — Claude Cod
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **70 라운드 (1.9.40 → 1.36.12)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
+현재 누적: **70 라운드 (1.9.40 → 1.36.22)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
 
 ### 성능 가이드 (1.9.140 측정)
 
@@ -238,6 +234,6 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.36.12: 2026-07-12
+Last synced by Leerness v1.36.22: 2026-07-15
 <!-- leerness:project-readme:end -->
 
