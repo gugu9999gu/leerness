@@ -22,7 +22,7 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _detectOptimism: _puDetectOptimism, _computeConfidence: _puComputeConfidence,
   _personaSummaries, _translate,
   _decisionsFromMd, _renderDecisionsMd, _renderLessonsMd,
-  _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd,
+  _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd, _lintSkillMeta,
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
   _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm,
@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.25';
+const VERSION = '1.36.26';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1188,6 +1188,50 @@ function addSkill(root, name, silent = false) {
 
 // ===== Skill registry (catalog + user-defined merged) =====
 function userSkillsDir(root) { return path.join(absRoot(root), '.harness/skills'); }
+
+// 1.36.26 (obra/superpowers P2): skill 메타 품질 lint — `leerness skill lint [id] [--all] [--json] [--strict]`.
+//   대상: 설치 스킬(.harness/skills/<id>/SKILL.md 우선, 없으면 skill.json) + 내장 카탈로그 9종(skill.json 형태로 lint).
+//   기본 exit 0, ERROR 있을 때만 exit 1. --strict 는 WARNING 도 승격. INFO 는 절대 실패 아님(false-BLOCK 방지 설계).
+function skillLintCmd(root, id) {
+  root = absRoot(root);
+  const jsonMode = has('--json');
+  const strict = has('--strict');
+  const targets = [];   // { id, source, meta, body }
+  const seen = new Set();
+  const dir = userSkillsDir(root);
+  const wantAll = !id || has('--all');
+  const pushInstalled = (sid) => {
+    const md = path.join(dir, sid, 'SKILL.md');
+    const sj = path.join(dir, sid, 'skill.json');
+    if (exists(md)) { const p = _parseSkillMd(read(md)); targets.push({ id: sid, source: 'SKILL.md', meta: p.meta, body: p.body }); seen.add(sid); return true; }
+    if (exists(sj)) { try { const j = JSON.parse(read(sj)); targets.push({ id: sid, source: 'skill.json', meta: { name: j.name || sid, description: j.description || '' }, body: '' }); seen.add(sid); return true; } catch {} }
+    return false;
+  };
+  if (wantAll) {
+    if (exists(dir)) for (const e of fs.readdirSync(dir, { withFileTypes: true })) if (e.isDirectory()) pushInstalled(e.name);
+    for (const bid of Object.keys(BUILTIN_CATALOG)) if (!seen.has(bid)) { const d = BUILTIN_CATALOG[bid]; targets.push({ id: bid, source: 'builtin', meta: { name: bid, description: d.description || '' }, body: '' }); }
+  } else {
+    if (!pushInstalled(id)) {
+      if (BUILTIN_CATALOG[id]) { const d = BUILTIN_CATALOG[id]; targets.push({ id, source: 'builtin', meta: { name: id, description: d.description || '' }, body: '' }); }
+      else { failJson(jsonMode, 'skill_not_found', `스킬 없음: ${id} (설치 스킬 또는 내장 카탈로그에 없음)`); return; }
+    }
+  }
+  const results = targets.map(t => ({ id: t.id, source: t.source, ...(_lintSkillMeta(t.meta, t.body)) }));
+  const errN = results.reduce((s, r) => s + r.errors.length, 0);
+  const warnN = results.reduce((s, r) => s + r.warnings.length, 0);
+  const failed = errN > 0 || (strict && warnN > 0);
+  if (failed) process.exitCode = 1;
+  if (jsonMode) { log(JSON.stringify({ version: VERSION, total: results.length, errors: errN, warnings: warnN, strict, ok: !failed, results }, null, 2)); return; }
+  log(`# leerness skill lint — ${results.length}개 (ERROR ${errN} · WARNING ${warnN}${strict ? ' · --strict' : ''})`);
+  for (const r of results) {
+    const flat = [...r.errors.map(x => ['E', x]), ...r.warnings.map(x => ['W', x]), ...r.infos.map(x => ['i', x])];
+    if (!flat.length) { ok(`${r.id} (${r.source}) — clean`); continue; }
+    log(`\n## ${r.id} (${r.source})`);
+    for (const [lv, x] of flat) log(`  ${lv === 'E' ? '✗' : lv === 'W' ? '⚠' : 'ⓘ'} [${x.code}] ${x.msg}`);
+  }
+  log('');
+  log(failed ? `✗ lint 실패 (ERROR ${errN}${strict ? ` + strict WARNING ${warnN}` : ''})` : `✓ lint 통과 (ERROR 0${warnN ? ` · WARNING ${warnN}건은 exit 에 미반영 — --strict 로 승격` : ''})`);
+}
 function userSkillFile(root, id) { return path.join(userSkillsDir(root), id, 'skill.json'); }
 
 function loadUserSkill(root, id) {
@@ -2982,6 +3026,27 @@ function _selfTestCases() {
       const releaseOk = s.includes('deleteCount: toDelete.length, deleted, deleteFailed') && s.includes('if (deleteFailed > 0) process.exitCode = 1');  // release: 삭제 먼저 → json 에 deleted
       const encOk = s.includes("(result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1");   // encoding: 실패 exit1
       return reuseOk && releaseOk && encOk;
+    } },
+    { name: 'skill lint (1.36.26, obra/superpowers P1/P2): 2티어 severity(ERROR 만 exit1) + 한국어 트리거절 + CJK 본문예산 분기 — 순수 행위검사', run: () => {
+      const p = require('../lib/pure-utils');
+      if (typeof p._lintSkillMeta !== 'function') return false;
+      // ERROR: name/description 기계 판정
+      const e1 = p._lintSkillMeta({ name: 'bad-one' }, 'b');
+      const errMissing = e1.errors.some(x => x.code === 'description_missing');
+      const errCharset = p._lintSkillMeta({ name: 'Bad_Name!', description: 'x'.repeat(50) }, 'b').errors.some(x => x.code === 'name_charset');
+      // clean 케이스: 트리거 서술(ko) → ERROR/WARNING/no_trigger 전부 0 (false-BLOCK 방지 핵심)
+      const clean = p._lintSkillMeta({ name: 'ok-skill', description: '문서 산출물이 필요할 때 사용 — Word 파일을 만들거나 편집할 때 로드하는 스킬. Use when producing documents.' }, '본문');
+      const cleanOk = clean.errors.length === 0 && clean.warnings.length === 0 && !clean.infos.some(i => i.code === 'no_trigger_clause');
+      // WARNING 은 exit 판정과 분리(짧은 설명) + CJK lang 분기
+      const w1 = p._lintSkillMeta({ name: 'w', description: '짧은 설명' }, 'b');
+      const warnShort = w1.errors.length === 0 && w1.warnings.some(x => x.code === 'description_too_short');
+      const cjkLang = p._lintSkillMeta({ name: 'a', description: 'x'.repeat(50) }, '한글본문 '.repeat(50)).lang === 'cjk';
+      // 내장 카탈로그 9종이 lint clean(1.36.25 데이터 선행 조건 검증 — P0 없이 lint 먼저면 9/9 실패였음)
+      const c = require('../lib/catalogs');
+      const builtinClean = Object.keys(c.BUILTIN_CATALOG).every(k => p._lintSkillMeta({ name: k, description: c.BUILTIN_CATALOG[k].description || '' }, '').errors.length === 0);
+      // CLI 배선
+      const wired = typeof skillLintCmd === 'function' && read(__filename).includes("args[1] === 'lint'");
+      return errMissing && errCharset && cleanOk && warnShort && cjkLang && builtinClean && wired;
     } },
     { name: 'skill 트리거 description (1.36.25, obra/superpowers P0): BUILTIN_CATALOG 9/9 description(트리거 서술) + export/publish 합성 우선순위 description 우선 — 행위검사', run: () => {
       const c = require('../lib/catalogs');
@@ -21308,6 +21373,7 @@ async function main() {
   if (cmd === 'readme' && args[1] === 'sync')  return readmeCmd(arg('--path', args[2] || process.cwd()));
   if (cmd === 'consistency' && args[1] === 'check')              return consistencyCheck(arg('--path', args[2] || process.cwd()));
   if (cmd === 'consistency' && args[1] === 'merge-design-guide') return mergeDesign(arg('--path', args[2] || process.cwd()));
+  if (cmd === 'skill' && args[1] === 'lint')        return skillLintCmd(arg('--path', args[2] && !args[2].startsWith('-') && /^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(args[2]) ? args[2] : process.cwd()), args[2] && !args[2].startsWith('-') && !/^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(args[2]) ? args[2] : null);  // 1.36.26: 메타 품질 lint
   if (cmd === 'skill' && args[1] === 'list')        return skillList(args[2] || arg('--path', process.cwd()));
   if (cmd === 'skill' && args[1] === 'info')        return skillInfo(args[2], absRoot(arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'add')         return addSkill(absRoot(arg('--path', process.cwd())), args[2]);

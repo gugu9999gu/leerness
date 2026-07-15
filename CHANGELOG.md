@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.36.26 — 2026-07-15 — `leerness skill lint` — SKILL 메타 품질 lint (2티어 severity · 한국어 트리거절 · CJK 본문예산) (obra/superpowers P1/P2)
+
+1.36.25(P0 — description 데이터)로 선행조건이 충족된 후속. 판별 증거: **P0 없이 lint 를 먼저 붙였으면 내장 9/9 가 실패**했을 것 — 지금은 내장 9종이 lint clean(순서가 맞았다는 실증, selftest 로 고정).
+
+- **`_lintSkillMeta(meta, body)` 순수함수** (pure-utils, 의존 0) — 2티어 severity 설계(메모리 교훈: 게이트 휴리스틱은 false-PASS 편향, false-BLOCK 금지):
+  - **ERROR**(기계적, FP 0 — 이것만 exit 1): name 부재/문자셋 위반(`^[a-z0-9][a-z0-9-]*$`), description 부재/1024자 초과.
+  - **WARNING**(저FP 형태): name 반복 / 40자 미만(표시명 합성 흔적) / capabilities 나열 형태. 기본 exit 0, `--strict` 시 승격.
+  - **INFO**(주관적, 절대 실패 아님): 트리거절 부재, 본문 예산 초과.
+  - **한국어 적응**: 트리거절 ko(`~할 때 사용`)·en(`Use when`) 모두 인정, 3인칭 검사는 한국어(인칭 무표지)에 부적용이라 제외, **본문 예산 CJK 분기**(비CJK=단어수/CJK=char — 공백분리 단어수를 한국어에 쓰면 어절 카운트라 전면 오발).
+- **`leerness skill lint [id] [--all] [--json] [--strict]`** — 설치 스킬(SKILL.md 우선, skill.json 폴백) + 내장 카탈로그 9종 대상. `--json` 구조화(ok/errors/warnings/results).
+- **검증**: selftest 296/296(ERROR 기계판정 2종 + clean 무오발 + WARNING 분리 + CJK lang + **내장 9종 clean 고정** + CLI 배선), 실측 5종(내장 --all exit 0 / description 없음 ERROR exit 1 / WARNING 기본 0·strict 1 / ko 트리거 무 INFO / --json), 게이트 e2e, 게시본 클린룸.
+
 ## 1.36.25 — 2026-07-15 — 내장 스킬 9종 트리거 description + export/publish 합성 우선순위 — "언제 로드할지"를 알 수 있게 (obra/superpowers P0)
 
 superpowers 검토(1.36.22)에서 이연한 P0. **결함(도그푸딩 실측)**: BUILTIN_CATALOG 9개 스킬 전부 `description` 0/9 → (1) 설치 스킬 리더가 capabilities 나열로 폴백("feature-contracts 작성, 재사용 우선 검사…" = 에이전트가 "지금 로드할까"를 판단할 수 없는 워크플로 요약), (2) `skill export`/`skill publish` 가 description 을 displayNameKo("기능 구현 표준 스킬")로 합성 — **좋은 description 이 있어도 우선순위가 displayNameKo 1순위라 무시**되는 구조였다.
