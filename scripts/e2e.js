@@ -2228,8 +2228,8 @@ total++;
 {
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto1-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
-  const ok = fs.existsSync(path.join(tmpA, 'roadmap.html'));
-  console.log(ok ? '✓ B(1.9.12) install 직후 roadmap.html 자동 생성' : '✗ install 후 roadmap 없음');
+  const ok = fs.existsSync(path.join(tmpA, 'leerness.html'));
+  console.log(ok ? '✓ B(1.9.12) install 직후 leerness.html(온톨로지) 자동 생성 (1.36.30 전환)' : '✗ install 후 leerness.html 없음');
   if (!ok) failed++;
 }
 
@@ -2239,7 +2239,7 @@ total++;
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   // 첫 mtime 캡처
-  const f = path.join(tmpA, 'roadmap.html');
+  const f = path.join(tmpA, 'leerness.html');
   const mt1 = fs.statSync(f).mtimeMs;
   // 시간 차이 보장
   const wait = Date.now() + 50; while (Date.now() < wait) {}
@@ -2248,7 +2248,7 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpA], { stdio: 'ignore' });
   const mt2 = fs.statSync(f).mtimeMs;
   const ok = mt2 > mt1;
-  console.log(ok ? '✓ B(1.9.12) session close 후 roadmap.html 자동 갱신 (mtime 증가)' : `✗ session close 후 갱신 안 됨 mt1=${mt1} mt2=${mt2}`);
+  console.log(ok ? '✓ B(1.9.12) session close 후 leerness.html 자동 갱신 (mtime 증가)' : `✗ session close 후 갱신 안 됨 mt1=${mt1} mt2=${mt2}`);
   if (!ok) failed++;
 }
 
@@ -2258,14 +2258,14 @@ total++;
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto3-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   cp.spawnSync(process.execPath, [CLI, 'roadmap', 'auto', 'off', '--path', tmpA], { stdio: 'ignore' });
-  const f = path.join(tmpA, 'roadmap.html');
+  const f = path.join(tmpA, 'leerness.html');
   const mt1 = fs.statSync(f).mtimeMs;
   const wait = Date.now() + 80; while (Date.now() < wait) {}
   cp.spawnSync(process.execPath, [CLI, 'task', 'add', '비활성 후 추가', '--path', tmpA], { stdio: 'ignore' });
   cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpA], { stdio: 'ignore' });
   const mt2 = fs.statSync(f).mtimeMs;
   const ok = mt2 === mt1;
-  console.log(ok ? '✓ B(1.9.12) auto off: roadmap.html 갱신 안 됨' : `✗ auto off 후에도 갱신됨`);
+  console.log(ok ? '✓ B(1.9.12) auto off: leerness.html 갱신 안 됨' : `✗ auto off 후에도 갱신됨`);
   if (!ok) failed++;
 }
 
@@ -2275,7 +2275,7 @@ total++;
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auto4-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   cp.spawnSync(process.execPath, [CLI, 'roadmap', 'auto', 'on', '--on-every-change', '--path', tmpA], { stdio: 'ignore' });
-  const f = path.join(tmpA, 'roadmap.html');
+  const f = path.join(tmpA, 'leerness.html');
   const mt1 = fs.statSync(f).mtimeMs;
   const wait = Date.now() + 80; while (Date.now() < wait) {}
   cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'on-every-change 테스트', '--path', tmpA], { stdio: 'ignore' });
