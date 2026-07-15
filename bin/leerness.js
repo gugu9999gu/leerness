@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.24';
+const VERSION = '1.36.25';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -366,18 +366,18 @@ function managedReadmeBlock(project) {
     '### Autonomous mode (자율 모드)',
     '',
     '`<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:',
-    '1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.',
+    '1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push → 7) session close → 8) 다음 라운드 예약.',
     '',
     `현재 누적: **70 라운드 (1.9.40 → ${VERSION})** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.`,
     '',
-    '### 성능 가이드 (1.9.140 측정)',
+    '### 성능 가이드',
     '',
     '- `leerness handoff .` — 평균 ~1.5s (캐시 워밍업 후 ~0.6s)',
     '- `leerness memory status --json` — 평균 ~250ms',
     '- `leerness task list --json` — 평균 ~200ms',
     '- `leerness drift check --json` — 평균 ~400ms',
     '- MCP `tools/list` 응답 — 평균 ~150ms',
-    '- usage-stats / lessons / listAllSkills 모두 메모리 캐싱 (1.9.65/66)',
+    '- usage-stats / lessons / listAllSkills 모두 메모리 캐싱',
     '',
     '### 빠른 시작',
     '',
@@ -394,7 +394,7 @@ function managedReadmeBlock(project) {
     '# 4. 세션 종료 시',
     'leerness session close .      # 9 카테고리 + 룰 검증 + 다음 라운드 추천',
     '',
-    '# 5. release 자동화 (1.9.140 main 자동 push 포함)',
+    '# 5. release 자동화 (main 자동 push 포함)',
     'leerness release pack --close --auto-main-push',
     '```',
     '',
@@ -428,8 +428,8 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
   const project = detectProjectName(root);
   const skillRows = Object.entries(skillCatalog).map(([k, v]) => `| ${k} | ${v.displayNameKo} | ${v.capabilities.join(', ')} | ${v.lastUpdated} | ${v.verification} |`).join('\n');
   const _files = {
-    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ 매 세션 첫 행동 (1.9.39+)\n**반드시 \`.harness/session-workflow.md\`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.\n\n## 정적 vs 동적 — leerness 역할 경계 (1.9.282, UR-0035)\n**AGENTS.md = 정적 프로젝트 지침** (코딩 규칙·테스트 명령·금지 사항·배포 절차 — 자주 안 변함).\n**leerness = 동적 작업 상태·기억·검증·인수인계** (현재 목표·수정 파일·실패 시도·검증 결과·다음 에이전트 인계 — 매 작업 변함).\n- 규칙/명령/금지는 여기 AGENTS.md 에 적는다.\n- 동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 \`.harness/\`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). \`leerness handoff\` · \`decision add\` · \`lesson save\` 등이 여기에 쓴다.\n- (선택) \`leerness state show|start|record|verify|handoff\` (또는 MCP \`leerness_state_*\`) 의 JSON 상태 substrate 는 \`.leerness/\` (에이전트 간 인수인계 표준, 1.9.278 — state 명령 사용 시 생성). 메인 워크스페이스(.harness)와 별개.\n- leerness 는 AGENTS.md 를 **대체하지 않고 보완**한다. 정적 지침은 여기, 동적 상태는 leerness.\n\n## Mandatory read order (session start)\n1. **.harness/session-workflow.md** (1.9.39+ 6단계 워크플로 — 최우선)\n2. .harness/context-routing.md\n3. .harness/session-handoff.md\n4. .harness/current-state.md\n5. .harness/plan.md\n6. .harness/progress-tracker.md\n7. .harness/guideline.md\n8. .harness/protected-files.md\n9. .harness/writeback-policy.md\n10. .harness/anti-lazy-work-policy.md\n11. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증하고, \`leerness lens\`의 분야별 자기질문에 답합니다 (코드: "선임 개발자가 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 이쁘고 직관적이라 느낄까?" — 1.18.3).\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍 (1.9.13)\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리 (1.9.8)\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용 (1.9.8)\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
-    'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ 매 세션 첫 행동 (1.9.39+)**: \`.harness/session-workflow.md\`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 \`leerness drift check --auto-fix\`로 자동 회복.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰 (1.9.8)\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
+    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ 매 세션 첫 행동\n**반드시 \`.harness/session-workflow.md\`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.\n\n## 정적 vs 동적 — leerness 역할 경계\n**AGENTS.md = 정적 프로젝트 지침** (코딩 규칙·테스트 명령·금지 사항·배포 절차 — 자주 안 변함).\n**leerness = 동적 작업 상태·기억·검증·인수인계** (현재 목표·수정 파일·실패 시도·검증 결과·다음 에이전트 인계 — 매 작업 변함).\n- 규칙/명령/금지는 여기 AGENTS.md 에 적는다.\n- 동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 \`.harness/\`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). \`leerness handoff\` · \`decision add\` · \`lesson save\` 등이 여기에 쓴다.\n- (선택) \`leerness state show|start|record|verify|handoff\` (또는 MCP \`leerness_state_*\`) 의 JSON 상태 substrate 는 \`.leerness/\` (에이전트 간 인수인계 표준 — state 명령 사용 시 생성). 메인 워크스페이스(.harness)와 별개.\n- leerness 는 AGENTS.md 를 **대체하지 않고 보완**한다. 정적 지침은 여기, 동적 상태는 leerness.\n\n## Mandatory read order (session start)\n1. **.harness/session-workflow.md** (6단계 워크플로 — 최우선)\n2. .harness/context-routing.md\n3. .harness/session-handoff.md\n4. .harness/current-state.md\n5. .harness/plan.md\n6. .harness/progress-tracker.md\n7. .harness/guideline.md\n8. .harness/protected-files.md\n9. .harness/writeback-policy.md\n10. .harness/anti-lazy-work-policy.md\n11. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증하고, \`leerness lens\`의 분야별 자기질문에 답합니다 (코드: "선임 개발자가 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 이쁘고 직관적이라 느낄까?").\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
+    'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ 매 세션 첫 행동**: \`.harness/session-workflow.md\`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 \`leerness drift check --auto-fix\`로 자동 회복.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
     '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .harness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`,
     '.github/copilot-instructions.md': `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`,
     '.harness/HARNESS_VERSION': VERSION + '\n',
@@ -456,7 +456,7 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
     '.harness/reuse-map.md': fm('reuse-map', ['새 컴포넌트/API/helper 생성 전','중복 기능 감지'], ['재사용 가능한 요소 추가'], `# Reuse Map\n\n| Capability | Existing Element | Reuse Method | Notes |\n|---|---|---|---|\n`),
     '.harness/feature-contracts.md': fm('feature-contracts', ['기능 구현/수정 전'], ['기능 입출력/상태/오류 변경'], `# Feature Contracts\n\n## Template\n- Feature:\n- Input:\n- Output:\n- States:\n- Errors:\n- Related files:\n- Test evidence ID:\n`),
     // 1.9.141: Feature Causality Graph — 신규 기능/형식 변경 시 영향 범위 자동 추적 (사용자 요청)
-    '.harness/feature-graph.md': fm('feature-graph', ['신규 기능 추가 전','데이터 형식 변경 전','외부 API 매칭 작업 전'], ['feature 등록 / 링크 / impact 회수'], `# Feature Graph (1.9.141)\n\n> **목적**: 각 기능의 인과관계를 정확히 정리해서 코드 작성 전 영향 범위를 자동 추적.\n> 신규 기능 추가, 데이터 형식 변경, 외부 API 매칭 작업 전 \`leerness feature impact <id>\`로 확인.\n> handoff가 현재 task 키워드로 자동 매칭해서 영향받는 feature 목록을 회수.\n\n## How to use\n\n\`\`\`bash\nleerness feature add "User Auth"                           # F-0001 자동 부여\nleerness feature link F-0002 --depends-on F-0001           # 의존 관계\nleerness feature link F-0001 --affects F-0002,F-0005        # 영향 관계 (다수)\nleerness feature link F-0001 --co-changes-with F-0011       # 함께 변해야 하는 기능\nleerness feature impact F-0001                              # 영향받는 전체 (transitive)\nleerness feature list --json                                # 그래프 JSON\nleerness feature show F-0001                                # 단일 상세\n\`\`\`\n\n## Nodes\n\n`),
+    '.harness/feature-graph.md': fm('feature-graph', ['신규 기능 추가 전','데이터 형식 변경 전','외부 API 매칭 작업 전'], ['feature 등록 / 링크 / impact 회수'], `# Feature Graph\n\n> **목적**: 각 기능의 인과관계를 정확히 정리해서 코드 작성 전 영향 범위를 자동 추적.\n> 신규 기능 추가, 데이터 형식 변경, 외부 API 매칭 작업 전 \`leerness feature impact <id>\`로 확인.\n> handoff가 현재 task 키워드로 자동 매칭해서 영향받는 feature 목록을 회수.\n\n## How to use\n\n\`\`\`bash\nleerness feature add "User Auth"                           # F-0001 자동 부여\nleerness feature link F-0002 --depends-on F-0001           # 의존 관계\nleerness feature link F-0001 --affects F-0002,F-0005        # 영향 관계 (다수)\nleerness feature link F-0001 --co-changes-with F-0011       # 함께 변해야 하는 기능\nleerness feature impact F-0001                              # 영향받는 전체 (transitive)\nleerness feature list --json                                # 그래프 JSON\nleerness feature show F-0001                                # 단일 상세\n\`\`\`\n\n## Nodes\n\n`),
     '.harness/testing-strategy.md': fm('testing-strategy', ['검증 전','릴리즈 전'], ['테스트 전략 변경'], `# Testing Strategy\n\n- Typecheck (\`tsc --noEmit\` 또는 동등)\n- Lint (\`npm run lint\` 등)\n- Unit/Integration/E2E\n- Manual smoke test\n- Browser/UI smoke (frontend 변경 시)\n\n## Evidence Format\nEach completed task must reference an evidence ID stored in .harness/review-evidence.md.\n`),
     '.harness/review-checklist.md': fm('review-checklist', ['PR/리뷰 전'], ['리뷰 기준 변경'], `# Review Checklist\n\n- [ ] 계획과 정렬되어 있는가\n- [ ] progress-tracker가 갱신되었는가\n- [ ] 보호 파일을 삭제하지 않았는가\n- [ ] 디자인/기능 재사용을 확인했는가\n- [ ] 시크릿이 코드에 들어가지 않았는가 (\`leerness scan secrets\`)\n- [ ] 한글 인코딩 OK (\`leerness encoding check\`)\n- [ ] 게으름 평가 통과 (\`leerness lazy detect\`)\n`),
     '.harness/release-checklist.md': fm('release-checklist', ['배포 전'], ['배포 조건/환경변수/롤백 변경'], `# Release Checklist\n\n- [ ] \`leerness verify .\`\n- [ ] \`leerness audit .\`\n- [ ] \`leerness scan secrets .\`\n- [ ] \`leerness encoding check .\`\n- [ ] 프로젝트 typecheck/lint/test\n- [ ] 환경변수 (.env.example) 동기화\n- [ ] 롤백 방법 확인\n- [ ] CHANGELOG 갱신\n`),
@@ -488,7 +488,7 @@ leerness agents dispatch "<task>" --to <id>   # 작업 유형 추천 자동
 - 작업 유형별 최적 sub-agent:
   - 텍스트/번역/분석 → claude (1.7× 빠름)
   - 깊은 코드 추론 → codex (가장 상세)
-  - 파일 직접 수정 → agy --yolo (정확, Antigravity CLI 1.9.248)
+  - 파일 직접 수정 → agy --yolo (정확, Antigravity CLI)
   - 보안 리뷰 → \`leerness review --persona security\`
 - **충돌 방지 규칙 (필수)**:
   - 각 sub-agent에 *자신만 수정할 파일 경로* 명시
@@ -510,22 +510,22 @@ leerness review <file> --persona security,performance,ux
 
 ## Step 6. 세션 마감 + 인계 + 다음 라운드 추천
 \`\`\`bash
-leerness session close .             # 1.9.59+ — --suggest default 활성 (마감 + 다음 라운드 자동)
+leerness session close .             # --suggest default 활성 (마감 + 다음 라운드 자동)
 leerness session close . --no-suggest  # suggest 비활성 (이전 동작)
 
 # 분리 호출도 가능:
-leerness skill suggest .             # 1.9.53 — 반복 패턴 → 새 skill 후보
+leerness skill suggest .             # 반복 패턴 → 새 skill 후보
 leerness drift check .               # 4 신호 + 4 레벨 점검
 leerness audit . --fix               # 누락 메타 자동 보강
 \`\`\`
 
-## 🧠 Memory CRUD Quick Reference (1.9.107~135)
+## 🧠 Memory CRUD Quick Reference
 
 5 Memory Surface 모두 CRUD CLI + MCP 노출 완성:
 
 | Surface | CREATE | READ | DELETE | RESTORE |
 |---|---|---|---|---|
-| **tasks** | task add | task list --json (1.9.134) | task drop | task update |
+| **tasks** | task add | task list --json | task drop | task update |
 | **decisions** | decision add | decision list --json | decision drop | memory restore decisions |
 | **lessons** | lesson save | lesson list [--tag] | lesson drop | memory restore lessons |
 | **plan** | plan add | plan list --json | plan remove | memory restore plan |
@@ -534,69 +534,69 @@ leerness audit . --fix               # 누락 메타 자동 보강
 \`\`\`bash
 leerness memory status [--json]              # 5종 상태 통합 조회 (T/D/R/P/L 카운트)
 leerness memory archive list [--surface s]   # DELETE archive 통합 조회 (복원 후보)
-leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE→RESTORE cycle, 1.9.128)
+leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE→RESTORE cycle)
 \`\`\`
 
 **잘못 저장한 항목 복구**:
 1. \`memory archive list\` — 복원 후보 확인
 2. \`memory restore decisions "PostgreSQL"\` — archive → active
-3. handoff 가 매 세션 자동으로 24h 내 archive 활동 알림 (1.9.129)
+3. handoff 가 매 세션 자동으로 24h 내 archive 활동 알림
 
 
 - session close가 누락되면 다음 세션 시작 시 drift critical 발생.
 - 자동 회복 옵션: \`drift check --auto-fix\` (critical 시 session close 자동 실행).
-- 1.9.56+ handoff가 매 세션 시작 시 **과거 lessons 자동 재상기** (현재 task 키워드 기준).
-- 1.9.67+ handoff가 현재 task와 매칭되는 **설치된 skill을 자동 추천** (jaccard 기반, default ON, \`--no-skill-suggest\`로 끄기).
-- 1.9.67+ lessons 인덱스에 \`task-log.md\` 실패 라인까지 포함 → 회수 범위 확장.
-- 1.9.69+ handoff가 \`skill-suggestions.md\` rolling history (과거 같은 키워드 매칭 결과)도 자동 노출.
-- 1.9.76+ handoff에 보안 요약 1~2 line 자동 (\`.env\` ↔ \`.env.example\` 동기화 + \`.gitignore\` 시크릿 누락).
-- 1.9.80+ \`.env\` 가 \`.gitignore\` 에 누락 시 🚨 CRITICAL + \`LEERNESS_AUTO_SECURITY_FIX=1\` 환경변수 시 \`audit --fix\` 자동 실행.
-- 1.9.81+ handoff Date/Project 직후 통합 헤드라인 한 줄 (drift / 보안 / MCP / skill query / 설치 skill 수).
-- 1.9.85+ \`leerness health\` 한 줄로 종합 점검 (drift + 보안 + skills + usage + tasks).
-- 1.9.78/82+ \`leerness drift check --auto-fix\` 가 보안 신호 발견 시 \`audit --fix\` 자동 실행 → 재검사.
-- 1.9.86+ MCP server **18 도구** (handoff/drift/audit/verify_claim/contract/agents/reuse/whats_new/usage_stats/session_close/skill_suggest/lessons/task_export/env_check/brainstorm/skill_match/skill_list/health).
-- 1.9.94+ MCP server **21 도구** (skill_search/skill_info/benchmark 추가).
-- 1.9.96+ \`leerness handoff --json\` (외부 AI/MCP 통합용 구조화 출력).
-- 1.9.98+ \`leerness skill publish\` 보안 사전 점검 통합 (health 통과 후 publish).
-- 1.9.99+ \`leerness handoff --quiet\` (자동화/CI 모드 — 자동 회수 라인 비활성).
-- 1.9.100 🏆 마일스톤 — 30 라운드 자율 누적, stress-v45 30/30 PASS, e2e 219/219 PASS.
-- 1.9.101+ \`leerness lazy detect --json\` + MCP **22 도구** (\`leerness_lazy_detect\` 추가 — 거짓 완료/empty handoff/no test run/TODO 미추적 신호 JSON).
-- 1.9.102+ \`leerness audit --json\` 구조화 출력 (findings 11종 kind: design_dup/design_system_default/reuse_map_empty/milestone_unlinked/handoff_not_generated/current_state_stale/readme_version_mismatch/npm_cve/gitignore_missing_secrets/env_keys_missing/strict_promoted). MCP \`leerness_audit\`도 JSON 자동.
-- 1.9.103+ \`leerness session close --json\` 마감 통계 JSON (taskCounts/rules/skillCandidates/drift/topCommands/mcpStats/workspacePeers). MCP \`leerness_session_close\`도 JSON 자동.
-- 1.9.104+ MCP **23 도구** (\`leerness_retro\` 추가 — 4세션 누적 회고 JSON 외부 AI 노출).
-- 1.9.105+ MCP **24 도구** (\`leerness_task_add\` 추가 — 외부 AI 가 task 즉시 등록, 양방향 제어 완성).
-- 1.9.106+ MCP **25 도구** (\`leerness_task_update\` 추가 — task 상태/evidence/nextAction 갱신, read+add+update 3종 surface 완성).
-- 1.9.107+ MCP **26 도구** (\`leerness_task_drop\` 추가 — task 폐기, **task CRUD 완성**: read/add/update/drop).
-- 1.9.108+ \`leerness decision add\` CLI + MCP **27 도구** (\`leerness_decision_add\` — decisions.md 영구화 + handoff lessons 회수와 통합).
-- 1.9.109+ \`leerness rule list --json\` + MCP **29 도구** (\`leerness_rule_add\` + \`leerness_rule_list\` — 자연어 영구 룰 R/W).
-- 1.9.110+ MCP **30 도구 🎉 30 도구 마일스톤** (\`leerness_plan_add\` — plan.md milestone + progress-tracker 자동 동기화).
-- 1.9.112+ MCP **31 도구** (\`leerness_lesson_save\` — lessons.md 직접 write, **Memory Write Surface 5종 완성**: tasks/decisions/rules/plan/lessons).
-- 1.9.113+ handoff 통합 헤드라인에 **🧠 mem T/D/R/P/L 카운트** 추가 — 5종 메모리 영구화 상태 한눈에 확인.
-- 1.9.114+ \`leerness memory status [--json]\` + MCP **32 도구** (\`leerness_memory_status\`) — 상세 상태 + 최근 항목 조회.
-- 1.9.115+ \`leerness handoff --json\` 응답에 **\`memorySurface\` 필드 통합** — 단일 호출로 컨텍스트 + 5종 메모리 상태 동시 회수.
-- 1.9.116+ \`leerness brainstorm\` 회수 범위에 **lessons.md + plan.md** milestone 추가 — Memory Surface 5종 완전 통합.
-- 1.9.117+ \`leerness lesson list [--tag] [--json]\` + MCP **33 도구** (\`leerness_lesson_list\`) — lessons.md 전용 조회 + tag 필터.
-- 1.9.118+ \`leerness decision list [--json]\` + MCP **34 도구** (\`leerness_decision_list\`) — decisions.md 전체 조회 (Decision/Reason/Alternatives/Impact 메타).
-- 1.9.119+ \`leerness plan list [--json]\` + MCP **35 도구** (\`leerness_plan_list\`) — plan.md milestone 전체 (Status/Progress/Tasks). **Memory Surface READ 5종 완전 완성**.
-- 1.9.121+ handoff 6번째 자동 회수 \`🆕 최근 24h 메모리 변동\` — 5종 surface 의 24h 내 추가 항목 자동 노출.
-- 1.9.122+ \`session close --json\` 응답에도 \`memorySurface\` 필드 통합 — 마감 시 5종 메모리 상태 동시 회수.
-- 1.9.123+ \`health --json\` 응답에도 \`memorySurface\` 필드 통합 — handoff/session close/memory status 모든 JSON 명령 일관성.
-- 1.9.124+ \`leerness lesson drop <target>\` + MCP **36 도구** (\`leerness_lesson_drop\`) — 잘못 저장한 lesson 제거 (archive 자동 보존).
-- 1.9.125+ \`leerness decision drop <target>\` + MCP **37 도구** (\`leerness_decision_drop\`) — 잘못 저장한 결정 제거 (archive 보존).
-- 1.9.126+ \`leerness plan remove <M-XXXX|title>\` + MCP **38 도구** (\`leerness_plan_remove\`) — milestone 영구 제거 (archive 보존). **Memory Surface DELETE 5종 완전 완성** 🎉.
-- 1.9.127+ \`leerness memory archive list [--surface decisions|lessons|plan] [--json]\` + MCP **39 도구** (\`leerness_memory_archive_list\`) — DELETE 5종 archive 통합 조회 (복원 후보 회수).
-- 1.9.128+ \`leerness memory restore <surface> <target>\` + MCP **40 도구 🎉** (\`leerness_memory_restore\`) — archive → active 복귀 (DELETE→RESTORE cycle 완성). **MCP 40 도구 마일스톤**.
-- 1.9.129+ handoff **7번째 자동 회수** — \`🗑 최근 24h archive\` (D/L/P 카운트 + 복원 후보 안내). DELETE 활동 자동 인지.
-- 1.9.130+ 🎉 **60 라운드 자율 모드 마일스톤** — JSON 4종 (handoff/memory status/session close/health) \`memorySurface.archive\` 필드 통합. MCP 40 / handoff auto-recovery 7 / DELETE-RESTORE cycle 완성.
-- 1.9.131+ \`brainstorm\` 회수 범위에 3 archive 파일 (decisions/lessons/plan archive) 통합 — 과거 제거된 ideas 가 새 brainstorm 시 다시 후보로 노출. \`hits.archive\` 필드 + 복원 안내 라인.
-- 1.9.132+ \`session close\` 텍스트 모드에 archive 누적 라인 추가 — 마감 시점 DELETE 활동 가시화 (handoff 7번째 회수와 symmetric). archive 가시성 6 surface 완성.
-- 1.9.133+ \`brainstorm\` 텍스트 모드 lessonsExplicit / planMilestones display 추가 — 1.9.116에서 데이터 수집은 했지만 display 누락된 pre-existing gap fix.
-- 1.9.134+ \`leerness task list --json\` + MCP **41 도구** (\`leerness_task_list\`) — progress-tracker.md task 전체 JSON 조회 + \`--status\` 필터. Task surface CRUD MCP 완전 완성 (add/list/update/drop).
-- 1.9.135+ MCP **42 도구** (\`leerness_rule_remove\`) — rules.md 에서 특정 rule 제거 + archive 보존. **5 surface CRUD MCP 완전 완성** (task/decision/lesson/plan/rule 모두 add/list/delete MCP 노출).
-- 1.9.136+ MCP \`leerness_drift_check\` JSON 응답 fix — \`--json\` 플래그 자동 추가하여 외부 AI가 구조화된 drift 신호 회수 (score, level, signals[], healthy).
-- 1.9.137+ \`.harness/session-workflow.md\` 템플릿에 **🧠 Memory CRUD Quick Reference** 섹션 추가 — 5 surface × CRUD 매트릭스 + archive cycle 워크플로 가이드. 신규 \`init\` 워크스페이스 즉시 적용.
-- 1.9.138+ \`leerness memory archive list --query <keyword>\` + MCP \`leerness_memory_archive_list\` query 인자 — archive 항목 키워드 case-insensitive 검색 (target/originalHeader 매칭).
-- 1.9.139+ \`leerness lesson list --query\` + \`leerness decision list --query\` + MCP 동일 인자 — active Memory 항목 키워드 검색 (lesson: text/tag, decision: title/decision/reason/alternatives/impact).
+- handoff가 매 세션 시작 시 **과거 lessons 자동 재상기** (현재 task 키워드 기준).
+- handoff가 현재 task와 매칭되는 **설치된 skill을 자동 추천** (jaccard 기반, default ON, \`--no-skill-suggest\`로 끄기).
+- lessons 인덱스에 \`task-log.md\` 실패 라인까지 포함 → 회수 범위 확장.
+- handoff가 \`skill-suggestions.md\` rolling history (과거 같은 키워드 매칭 결과)도 자동 노출.
+- handoff에 보안 요약 1~2 line 자동 (\`.env\` ↔ \`.env.example\` 동기화 + \`.gitignore\` 시크릿 누락).
+- \`.env\` 가 \`.gitignore\` 에 누락 시 🚨 CRITICAL + \`LEERNESS_AUTO_SECURITY_FIX=1\` 환경변수 시 \`audit --fix\` 자동 실행.
+- handoff Date/Project 직후 통합 헤드라인 한 줄 (drift / 보안 / MCP / skill query / 설치 skill 수).
+- \`leerness health\` 한 줄로 종합 점검 (drift + 보안 + skills + usage + tasks).
+- \`leerness drift check --auto-fix\` 가 보안 신호 발견 시 \`audit --fix\` 자동 실행 → 재검사.
+- MCP server **18 도구** (handoff/drift/audit/verify_claim/contract/agents/reuse/whats_new/usage_stats/session_close/skill_suggest/lessons/task_export/env_check/brainstorm/skill_match/skill_list/health).
+- MCP server **21 도구** (skill_search/skill_info/benchmark 추가).
+- \`leerness handoff --json\` (외부 AI/MCP 통합용 구조화 출력).
+- \`leerness skill publish\` 보안 사전 점검 통합 (health 통과 후 publish).
+- \`leerness handoff --quiet\` (자동화/CI 모드 — 자동 회수 라인 비활성).
+- 🏆 마일스톤 — 30 라운드 자율 누적, stress-v45 30/30 PASS, e2e 219/219 PASS.
+- \`leerness lazy detect --json\` + MCP **22 도구** (\`leerness_lazy_detect\` 추가 — 거짓 완료/empty handoff/no test run/TODO 미추적 신호 JSON).
+- \`leerness audit --json\` 구조화 출력 (findings 11종 kind: design_dup/design_system_default/reuse_map_empty/milestone_unlinked/handoff_not_generated/current_state_stale/readme_version_mismatch/npm_cve/gitignore_missing_secrets/env_keys_missing/strict_promoted). MCP \`leerness_audit\`도 JSON 자동.
+- \`leerness session close --json\` 마감 통계 JSON (taskCounts/rules/skillCandidates/drift/topCommands/mcpStats/workspacePeers). MCP \`leerness_session_close\`도 JSON 자동.
+- MCP **23 도구** (\`leerness_retro\` 추가 — 4세션 누적 회고 JSON 외부 AI 노출).
+- MCP **24 도구** (\`leerness_task_add\` 추가 — 외부 AI 가 task 즉시 등록, 양방향 제어 완성).
+- MCP **25 도구** (\`leerness_task_update\` 추가 — task 상태/evidence/nextAction 갱신, read+add+update 3종 surface 완성).
+- MCP **26 도구** (\`leerness_task_drop\` 추가 — task 폐기, **task CRUD 완성**: read/add/update/drop).
+- \`leerness decision add\` CLI + MCP **27 도구** (\`leerness_decision_add\` — decisions.md 영구화 + handoff lessons 회수와 통합).
+- \`leerness rule list --json\` + MCP **29 도구** (\`leerness_rule_add\` + \`leerness_rule_list\` — 자연어 영구 룰 R/W).
+- MCP **30 도구 🎉 30 도구 마일스톤** (\`leerness_plan_add\` — plan.md milestone + progress-tracker 자동 동기화).
+- MCP **31 도구** (\`leerness_lesson_save\` — lessons.md 직접 write, **Memory Write Surface 5종 완성**: tasks/decisions/rules/plan/lessons).
+- handoff 통합 헤드라인에 **🧠 mem T/D/R/P/L 카운트** 추가 — 5종 메모리 영구화 상태 한눈에 확인.
+- \`leerness memory status [--json]\` + MCP **32 도구** (\`leerness_memory_status\`) — 상세 상태 + 최근 항목 조회.
+- \`leerness handoff --json\` 응답에 **\`memorySurface\` 필드 통합** — 단일 호출로 컨텍스트 + 5종 메모리 상태 동시 회수.
+- \`leerness brainstorm\` 회수 범위에 **lessons.md + plan.md** milestone 추가 — Memory Surface 5종 완전 통합.
+- \`leerness lesson list [--tag] [--json]\` + MCP **33 도구** (\`leerness_lesson_list\`) — lessons.md 전용 조회 + tag 필터.
+- \`leerness decision list [--json]\` + MCP **34 도구** (\`leerness_decision_list\`) — decisions.md 전체 조회 (Decision/Reason/Alternatives/Impact 메타).
+- \`leerness plan list [--json]\` + MCP **35 도구** (\`leerness_plan_list\`) — plan.md milestone 전체 (Status/Progress/Tasks). **Memory Surface READ 5종 완전 완성**.
+- handoff 6번째 자동 회수 \`🆕 최근 24h 메모리 변동\` — 5종 surface 의 24h 내 추가 항목 자동 노출.
+- \`session close --json\` 응답에도 \`memorySurface\` 필드 통합 — 마감 시 5종 메모리 상태 동시 회수.
+- \`health --json\` 응답에도 \`memorySurface\` 필드 통합 — handoff/session close/memory status 모든 JSON 명령 일관성.
+- \`leerness lesson drop <target>\` + MCP **36 도구** (\`leerness_lesson_drop\`) — 잘못 저장한 lesson 제거 (archive 자동 보존).
+- \`leerness decision drop <target>\` + MCP **37 도구** (\`leerness_decision_drop\`) — 잘못 저장한 결정 제거 (archive 보존).
+- \`leerness plan remove <M-XXXX|title>\` + MCP **38 도구** (\`leerness_plan_remove\`) — milestone 영구 제거 (archive 보존). **Memory Surface DELETE 5종 완전 완성** 🎉.
+- \`leerness memory archive list [--surface decisions|lessons|plan] [--json]\` + MCP **39 도구** (\`leerness_memory_archive_list\`) — DELETE 5종 archive 통합 조회 (복원 후보 회수).
+- \`leerness memory restore <surface> <target>\` + MCP **40 도구 🎉** (\`leerness_memory_restore\`) — archive → active 복귀 (DELETE→RESTORE cycle 완성). **MCP 40 도구 마일스톤**.
+- handoff **7번째 자동 회수** — \`🗑 최근 24h archive\` (D/L/P 카운트 + 복원 후보 안내). DELETE 활동 자동 인지.
+- 🎉 **60 라운드 자율 모드 마일스톤** — JSON 4종 (handoff/memory status/session close/health) \`memorySurface.archive\` 필드 통합. MCP 40 / handoff auto-recovery 7 / DELETE-RESTORE cycle 완성.
+- \`brainstorm\` 회수 범위에 3 archive 파일 (decisions/lessons/plan archive) 통합 — 과거 제거된 ideas 가 새 brainstorm 시 다시 후보로 노출. \`hits.archive\` 필드 + 복원 안내 라인.
+- \`session close\` 텍스트 모드에 archive 누적 라인 추가 — 마감 시점 DELETE 활동 가시화 (handoff 7번째 회수와 symmetric). archive 가시성 6 surface 완성.
+- \`brainstorm\` 텍스트 모드 lessonsExplicit / planMilestones display 추가 — 데이터 수집은 됐지만 display 가 누락돼 있던 gap 보완 fix.
+- \`leerness task list --json\` + MCP **41 도구** (\`leerness_task_list\`) — progress-tracker.md task 전체 JSON 조회 + \`--status\` 필터. Task surface CRUD MCP 완전 완성 (add/list/update/drop).
+- MCP **42 도구** (\`leerness_rule_remove\`) — rules.md 에서 특정 rule 제거 + archive 보존. **5 surface CRUD MCP 완전 완성** (task/decision/lesson/plan/rule 모두 add/list/delete MCP 노출).
+- MCP \`leerness_drift_check\` JSON 응답 fix — \`--json\` 플래그 자동 추가하여 외부 AI가 구조화된 drift 신호 회수 (score, level, signals[], healthy).
+- \`.harness/session-workflow.md\` 템플릿에 **🧠 Memory CRUD Quick Reference** 섹션 추가 — 5 surface × CRUD 매트릭스 + archive cycle 워크플로 가이드. 신규 \`init\` 워크스페이스 즉시 적용.
+- \`leerness memory archive list --query <keyword>\` + MCP \`leerness_memory_archive_list\` query 인자 — archive 항목 키워드 case-insensitive 검색 (target/originalHeader 매칭).
+- \`leerness lesson list --query\` + \`leerness decision list --query\` + MCP 동일 인자 — active Memory 항목 키워드 검색 (lesson: text/tag, decision: title/decision/reason/alternatives/impact).
 
 ---
 
@@ -606,11 +606,11 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 - [ ] plan/progress-tracker에 이번 라운드 task 등록됨 (또는 task sync)
 - [ ] 모든 done 항목에 evidence 첨부됨 (verify-claim PASS)
 - [ ] sub-agent 사용 시 contract verify PASS
-- [ ] drift 점수 ≤ 30 (attention 이하) — \`leerness drift check\` (1.9.78: 5신호 + 보안)
+- [ ] drift 점수 ≤ 30 (attention 이하) — \`leerness drift check\` (5신호 + 보안)
 - [ ] session close 호출됨
-- [ ] (1.9.85+) \`leerness health\`로 종합 점검 — drift + 보안 + skill + MCP + tasks
-- [ ] (1.9.75/76+) \`.env\` 사용 중이면 \`.gitignore\` 시크릿 패턴 OK + \`.env.example\` 동기화
-- [ ] (1.9.80+) 보안 critical 시 \`LEERNESS_AUTO_SECURITY_FIX=1\` 또는 \`audit --fix\`로 자동 회복
+- [ ] \`leerness health\`로 종합 점검 — drift + 보안 + skill + MCP + tasks
+- [ ] \`.env\` 사용 중이면 \`.gitignore\` 시크릿 패턴 OK + \`.env.example\` 동기화
+- [ ] 보안 critical 시 \`LEERNESS_AUTO_SECURITY_FIX=1\` 또는 \`audit --fix\`로 자동 회복
 
 ## Anti-pattern (drift 신호)
 
@@ -620,7 +620,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 - ⚠ "테스트 돌렸으니 PASS" 자기 보고만 → verify-claim --run-tests 미실행
 - ⚠ contract verify 생략 → 사양 불일치 BUG가 사용자에게 노출
 `),
-    '.harness/anti-lazy-work-policy.md': fm('anti-lazy-work-policy', ['완료 선언 전'], ['게으른 작업 방지 기준 변경'], `# Anti Lazy Work Policy\n\n## Rules\n1. **증거 없는 완료 금지**: \"완료\"를 선언하려면 progress-tracker의 evidence 컬럼에 명령 출력/테스트 결과/스크린샷 경로 등이 있어야 합니다.\n2. **빈 핸드오프 금지**: 세션 종료 시 session-handoff.md의 Completed/In Progress/Next Exact Step이 모두 비어 있으면 close가 \"insufficient\" 상태로 표시됩니다.\n3. **부분 구현 자기보고**: 완전 구현이 아니면 status를 \`incomplete\`로, Next Exact Step에 \"무엇을 추가해야 끝나는지\" 한 줄을 적습니다.\n4. **검증 기록**: typecheck/lint/test 결과를 review-evidence.md에 누적 기록합니다.\n5. **TODO 표지**: 코드에 \`TODO\`/\`FIXME\`/\`XXX\`를 새로 도입하면 progress-tracker에 동일 ID로 추적합니다.\n6. **거짓 완료 자동 감지**: \`leerness lazy detect\`는 다음을 자동 점검합니다.\n   - progress-tracker에 done인데 evidence가 비어있는 row\n   - session-handoff의 Completed가 비어있고 Next Exact Step도 비어있음\n   - 코드에 새 TODO/FIXME 추가 + progress-tracker에 추적 항목 없음\n   - test 명령 실행 흔적 없음 (review-evidence.md 또는 task-log.md에 명령 기록)\n7. **품질 렌즈 자가질문 (1.18.3)**: 완료 선언 전 \`leerness lens\`의 분야별 질문에 스스로 답합니다 — 코드: "선임 개발자가 이 코드를 보고 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 봤을 때 이쁘고 편하고 직관적인가?". "그렇다(통과)"라고 답할 수 없으면 완료가 아닙니다. 분야를 바꾸면 인과관계로 연결된 분야(\`lens\` 출력의 ↔ 인과)의 질문도 다시 확인합니다.\n`),
+    '.harness/anti-lazy-work-policy.md': fm('anti-lazy-work-policy', ['완료 선언 전'], ['게으른 작업 방지 기준 변경'], `# Anti Lazy Work Policy\n\n## Rules\n1. **증거 없는 완료 금지**: \"완료\"를 선언하려면 progress-tracker의 evidence 컬럼에 명령 출력/테스트 결과/스크린샷 경로 등이 있어야 합니다.\n2. **빈 핸드오프 금지**: 세션 종료 시 session-handoff.md의 Completed/In Progress/Next Exact Step이 모두 비어 있으면 close가 \"insufficient\" 상태로 표시됩니다.\n3. **부분 구현 자기보고**: 완전 구현이 아니면 status를 \`incomplete\`로, Next Exact Step에 \"무엇을 추가해야 끝나는지\" 한 줄을 적습니다.\n4. **검증 기록**: typecheck/lint/test 결과를 review-evidence.md에 누적 기록합니다.\n5. **TODO 표지**: 코드에 \`TODO\`/\`FIXME\`/\`XXX\`를 새로 도입하면 progress-tracker에 동일 ID로 추적합니다.\n6. **거짓 완료 자동 감지**: \`leerness lazy detect\`는 다음을 자동 점검합니다.\n   - progress-tracker에 done인데 evidence가 비어있는 row\n   - session-handoff의 Completed가 비어있고 Next Exact Step도 비어있음\n   - 코드에 새 TODO/FIXME 추가 + progress-tracker에 추적 항목 없음\n   - test 명령 실행 흔적 없음 (review-evidence.md 또는 task-log.md에 명령 기록)\n7. **품질 렌즈 자가질문**: 완료 선언 전 \`leerness lens\`의 분야별 질문에 스스로 답합니다 — 코드: "선임 개발자가 이 코드를 보고 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 봤을 때 이쁘고 편하고 직관적인가?". "그렇다(통과)"라고 답할 수 없으면 완료가 아닙니다. 분야를 바꾸면 인과관계로 연결된 분야(\`lens\` 출력의 ↔ 인과)의 질문도 다시 확인합니다.\n`),
     '.harness/rules.md': _rulesHeader() + '\n',
     '.harness/session-handoff.md': fm('session-handoff', ['세션 시작','다음 작업 이어받기'], ['세션 종료'], `# Session Handoff\n\nLast generated: (자동)\n\n## Completed\n-\n\n## In Progress\n-\n\n## Incomplete / Waiting / On Hold / Blocked\n-\n\n## Dropped\n-\n\n## Verification\n-\n\n## Recommended Direction\n-\n\n## Next Exact Step\n-\n`),
     '.harness/leerness-maintenance.md': fm('leerness-maintenance', ['작업 시작','마이그레이션/릴리즈 전'], ['버전 정책 변경'], `# Leerness Maintenance\n\nAI agents should check:\n\n\`\`\`bash\nleerness --version\nleerness self check .\nleerness update --check       # 24h 캐시 자동 감지\nleerness update --yes         # 새 버전 발견 시 자동 마이그레이션\ncat .harness/HARNESS_VERSION\nnpm view leerness version\n\`\`\`\n`),
@@ -2982,6 +2982,20 @@ function _selfTestCases() {
       const releaseOk = s.includes('deleteCount: toDelete.length, deleted, deleteFailed') && s.includes('if (deleteFailed > 0) process.exitCode = 1');  // release: 삭제 먼저 → json 에 deleted
       const encOk = s.includes("(result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1");   // encoding: 실패 exit1
       return reuseOk && releaseOk && encOk;
+    } },
+    { name: 'skill 트리거 description (1.36.25, obra/superpowers P0): BUILTIN_CATALOG 9/9 description(트리거 서술) + export/publish 합성 우선순위 description 우선 — 행위검사', run: () => {
+      const c = require('../lib/catalogs');
+      const ids = Object.keys(c.BUILTIN_CATALOG);
+      // 9/9 description 존재 + 트리거 형태(ko "사용" + en "Use when") + 200자 슬라이스 생존 + displayNameKo 반복 아님
+      const allDesc = ids.every(k => {
+        const e = c.BUILTIN_CATALOG[k]; const d = e.description || '';
+        return d.length >= 40 && d.length <= 200 && /사용/.test(d) && /Use when/i.test(d) && d !== e.displayNameKo;
+      });
+      // 합성 우선순위: description 이 displayNameKo 보다 먼저 (export 1 + publish 계열 2 = 총 3사이트)
+      const s = read(__filename);
+      const flipped = (s.match(/data\.description \|\| data\.displayNameKo/g) || []).length >= 3
+        && !s.includes('data.displayNameKo || ' + 'data.description');   // split-literal: 이 줄 자신이 매치되는 자기참조 트랩 회피
+      return allDesc && flipped;
     } },
     { name: 'requests positional 경로 (1.36.24, UR-0027 확장): requests 계열도 task/rule 과 동일하게 positional 경로 인식 — 다른 프로젝트 cwd 오기록 차단 — 소스가드+행위', run: () => {
       const s = read(__filename);
@@ -7622,7 +7636,7 @@ function skillExportCmd(root, id) {
   if (!id) { fail('사용법: leerness skill export <id>'); return process.exit(1); }
   const data = loadUserSkill(root, id) || (skillCatalog[id] ? { ...skillCatalog[id], name: id } : null);
   if (!data) { fail(`skill 없음: ${id}`); return process.exit(1); }
-  const description = data.displayNameKo || data.description || (data.capabilities && data.capabilities[0]) || id;
+  const description = data.description || data.displayNameKo || (data.capabilities && data.capabilities[0]) || id;   // 1.36.25 (P0): 트리거 서술 description 이 있으면 displayNameKo("~스킬")보다 우선 — 종전 순서는 좋은 description 을 무시했다
   const body = `---\nname: ${id}\ndescription: ${description.slice(0, 200)}\n---\n\n# ${data.displayNameKo || id}\n\n## Capabilities\n${(data.capabilities || []).map(c => '- ' + c).join('\n') || '-'}\n\n## Sources\n${(data.sources || []).map(s => '- ' + (s.url || s)).join('\n') || '-'}\n\n## Patterns\n${(data.patterns || []).map(p => `- \`${p.command}\` — ${p.note || ''}`).join('\n') || '-'}\n`;
   const outDir = arg('--out', path.join(root, '.harness', 'skills-export', id));
   mkdirp(outDir);
@@ -16377,7 +16391,7 @@ function skillPublishCmd(root) {
   // 각 skill을 SKILL.md로 export
   for (const id of ids) {
     const data = all[id];
-    const description = (data.displayNameKo || data.description || (data.capabilities && data.capabilities[0]) || id).slice(0, 200);
+    const description = (data.description || data.displayNameKo || (data.capabilities && data.capabilities[0]) || id).slice(0, 200);   // 1.36.25 (P0): description(트리거 서술) 우선 — 종전 displayNameKo 1순위는 좋은 description 을 무시
     const body = `---\nname: ${id}\ndescription: ${description}\nlicense: MIT\npublisher: leerness\nversion: ${VERSION}\n---\n\n# ${data.displayNameKo || id}\n\n## Capabilities\n${(data.capabilities || []).map(c => '- ' + c).join('\n') || '-'}\n\n## Sources\n${(data.sources || []).map(s => '- ' + (s.url || s)).join('\n') || '-'}\n\n## Usage\n\n\`\`\`bash\nleerness skill install <이 SKILL.md path or URL>\n\`\`\`\n`;
     const skillDir = path.join(exportDir, id);
     mkdirp(skillDir);
@@ -16971,7 +16985,7 @@ function skillExportAllCmd(root) {
   log('');
   for (const id of ids) {
     const data = all[id];
-    const description = (data.displayNameKo || data.description || (data.capabilities && data.capabilities[0]) || id).slice(0, 200);
+    const description = (data.description || data.displayNameKo || (data.capabilities && data.capabilities[0]) || id).slice(0, 200);   // 1.36.25 (P0): description(트리거 서술) 우선 — 종전 displayNameKo 1순위는 좋은 description 을 무시
     const body = `---\nname: ${id}\ndescription: ${description}\n---\n\n# ${data.displayNameKo || id}\n\n## Capabilities\n${(data.capabilities || []).map(c => '- ' + c).join('\n') || '-'}\n\n## Sources\n${(data.sources || []).map(s => '- ' + (s.url || s)).join('\n') || '-'}\n`;
     const skillDir = path.join(outDir, id);
     mkdirp(skillDir);

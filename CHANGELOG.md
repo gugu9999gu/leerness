@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.36.25 — 2026-07-15 — 내장 스킬 9종 트리거 description + export/publish 합성 우선순위 — "언제 로드할지"를 알 수 있게 (obra/superpowers P0)
+
+superpowers 검토(1.36.22)에서 이연한 P0. **결함(도그푸딩 실측)**: BUILTIN_CATALOG 9개 스킬 전부 `description` 0/9 → (1) 설치 스킬 리더가 capabilities 나열로 폴백("feature-contracts 작성, 재사용 우선 검사…" = 에이전트가 "지금 로드할까"를 판단할 수 없는 워크플로 요약), (2) `skill export`/`skill publish` 가 description 을 displayNameKo("기능 구현 표준 스킬")로 합성 — **좋은 description 이 있어도 우선순위가 displayNameKo 1순위라 무시**되는 구조였다.
+
+- **BUILTIN_CATALOG 9/9 에 트리거 서술 description 신설** — superpowers 규율("description 은 트리거 조건 전용 — 워크플로 요약 금지") 적용: ko 트리거("~할 때 사용") + en 트리거절("Use when …"), 전부 40~200자(합성 시 `.slice(0,200)` 생존).
+- **합성 우선순위 역전 3사이트** — `data.displayNameKo || data.description` → `data.description || data.displayNameKo` (export 1 + publish 계열 2). 실측: `skill export feature-implementation` 산출 SKILL.md frontmatter 가 "기능 구현 표준 스킬"(구) → "새 기능 구현을 시작할 때 사용 — … Use when starting to implement a new feature."(신). `skill list` 표시(displayNameKo)는 무변경.
+- **검증**: selftest 295/295(9/9 존재 + 트리거 형태 + 슬라이스 생존 + displayNameKo 반복 아님 + 우선순위 역전 3사이트 — 자기참조 트랩은 split-literal 로 회피, 3번째 재발), export 실측, 게이트 e2e, 게시본 클린룸.
+- 이연: `_lintSkillMeta` 순수 lint + `skill lint` CLI(P1/P2) — description 데이터가 먼저 채워져야 lint 가 의미 있음(이번에 충족). CJK 분기 본문 예산 포함해 다음 라운드 후보.
+
+**하네스 문서 버전표기 제거 (사용자 지시, 동일 릴리스 합류)**: 설치되는 하네스 문서 템플릿(AGENTS/CLAUDE/session-workflow 등)의 지시문마다 붙어 있던 내부 버전표기(`(1.9.39+)`, `(1.9.8)`, `- 1.9.56+ …` 불릿 접두, `# 1.9.59+ —` 명령주석 등 **79건**)를 제거 — 사용자에게 무의미한 내부 이력 노이즈. 정보가 있는 괄호는 내용만 보존(`(1.9.78: 5신호+보안)`→`(5신호+보안)`), 사실 기록(migration-report `Version:`, task-log "vX initialized", 라운드 범위 데이터)은 유지. 저장소 자체 CLAUDE.md/AGENTS.md 지시 라인도 동일 정리(이력 섹션 `### 1.9.207 —` 은 역사 기록이라 불변). **실증**: fresh `init` 산출물 전수 스캔 — 지시문 버전표기 잔존 0(사실 기록 3건만).
+
 ## 1.36.24 — 2026-07-14 — requests 계열 positional 경로 인식 — 다른 프로젝트에 조용히 오기록되던 갭 (UR-0027 확장, 실피해 재현)
 
 - **결함(실피해 재현)**: `requests` 계열만 positional 경로를 지원하지 않아 `requests add "text" C:/other/proj` 가 **경로 인자를 조용히 무시하고 cwd 프로젝트에 기록** 후 성공을 보고했다. `task`/`rule` 은 `_taskPositionalPath` 로 지원 → 표면 간 불일치가 실수를 유도(1.36.21 라운드에서 본인이 직접 당해 leerness-pkg 에 UR-0060 오기록·정리한 건).
