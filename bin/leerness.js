@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.29';
+const VERSION = '1.36.30';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2949,7 +2949,7 @@ function _selfTestCases() {
       const briefOk = typeof b === 'string' && b.includes('leerness handoff .') && b.includes('task add') && b.includes('verify-claim') && b.includes('session close') && b.includes('--evidence') && !b.includes('`') && !b.includes('$') && !b.includes('"');
       // (2) dispatch 와이어: lib/agents.js 가 --raw 옵트아웃으로 브리프를 접두하고, DI 로 _harnessBrief 를 받음.
       const agentsSrc = read(path.join(__dirname, '..', 'lib', 'agents.js'));
-      const wired = /has\('--raw'\)[\s\S]{0,120}_harnessBrief\(\) \+ task/.test(agentsSrc) && /_harnessBrief,/.test(read(__filename));
+      const wired = /has\('--raw'\)[\s\S]{0,120}_harnessBrief\(\) \+ task/.test(agentsSrc) && read(__filename).includes("_harnessBrief: _tgl.toggleOn(root, 'delegation-brief')");   // 1.36.30: delegation-brief 토글 연동 형태 (리터럴 매치)
       // (3) bench stdin hang 수정: codex exec 가 열린 stdin 파이프에서 EOF 대기(실측) → spawn stdio ignore.
       const stdinFixed = agentsSrc.includes("{ shell: true, stdio: ['ignore', 'pipe', 'pipe'] }");
       // (4) 1.36.29 (사용자 보고): multi 도 브리프 접두 — --execute 실 spawn(_cliChat) + 명령 목록/JSON 3지점 전부 briefTask.
@@ -3071,6 +3071,37 @@ function _selfTestCases() {
       const cleanOk = p._managedMerge('CLAUDE.md', next, next, '.harness/archive', null) === next;
       const owOk = p._managedMerge('x.md', next, prev, '.', new Set(['x.md'])) === next;
       return survived && idem && legacyOk && cleanOk && owOk;
+    } },
+    { name: '온톨로지 그래프 통합+토글 (1.36.30, 사용자 요청): 탭 3종(그래프/로드맵/⚙)+기본 자동생성 전환+toggle CLI+gate/lens/brief 준수 — 행위검사', run: () => {
+      const tg = require('../lib/toggles');
+      if (typeof tg.toggleCmd !== 'function' || typeof tg.loadToggles !== 'function') return false;
+      const regOk = ['gate', 'lens', 'auto-graph', 'delegation-brief'].every(k => !!tg.TOGGLE_REGISTRY[k]);
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tgl_'));
+      let behavOk = false, htmlOk = false;
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        // 토글 저장/로드 행위 + 기본 ON
+        const d0 = tg.loadToggles(tmp);
+        const defOn = Object.values(d0).every(v => v === true);
+        tg.saveToggles(tmp, Object.assign({}, d0, { gate: false }));
+        const offOk = tg.loadToggles(tmp).gate === false && tg.toggleOn(tmp, 'lens') === true;
+        behavOk = defOn && offOk;
+        // 그래프 HTML: 탭 3종 + roadmap/toggles 데이터 + 임베드 JS 문법
+        const m = require('../lib/graph');
+        const out = path.join(tmp, 'leerness.html');
+        m.graphHtmlCmd(tmp, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: tg.loadToggles, _toggleRegistry: tg.TOGGLE_REGISTRY, quiet: true }, out);
+        const html = fs.readFileSync(out, 'utf8');
+        const o = '<scr' + 'ipt>', c = '</scr' + 'ipt>';
+        const js = html.slice(html.indexOf(o) + o.length, html.lastIndexOf(c));
+        let synOk = false; try { new Function(js); synOk = true; } catch {}
+        htmlOk = html.includes('data-v="roadmap"') && html.includes('data-v="toggles"') && html.includes('toggleRegistry') && synOk;
+      } catch { behavOk = false; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      // 배선 소스가드: 자동생성이 leerness.html(온톨로지)로 전환 + gate/lens 토글 준수 + toggle dispatch
+      const s = read(__filename);
+      const wired = s.includes('온톨로지 그래프 자동 갱신 (' + '${trigger})')
+        && s.includes("_tgl.toggleOn(root, 'gate')") && s.includes("_tgl.toggleOn(root, 'lens')")
+        && s.includes("cmd === 'toggle'") && s.includes("_tgl.toggleOn(root, 'delegation-brief')");
+      return regOk && behavOk && htmlOk && wired;
     } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
@@ -4442,7 +4473,7 @@ function _selfTestCases() {
       const rowsEn = sc.includes("t('- 없음', '- none')") && sc.includes('_retroOneLine(agg, uiLang)');
       const retroEn = bin.includes('function _retroOneLine(agg, lang)') && bin.includes('`done ${done}/${total}') && bin.includes('decisions ${agg.decisionBlocks} accumulated');
       const roadmapEn = bin.includes('roadmap.html auto-updated (${trigger})');
-      const koPreserved = bin.includes('완료 ${done}/${total}') && bin.includes('roadmap.html 자동 갱신 (${trigger})') && sc.includes("t('- 없음', '- none')");  // ko 인자 보존
+      const koPreserved = bin.includes('완료 ${done}/${total}') && bin.includes('온톨로지 그래프 자동 갱신 (${trigger})') && sc.includes("t('- 없음', '- none')");  // ko 인자 보존
       return rowsEn && retroEn && roadmapEn && koPreserved;
     } },
     { name: 'CLI 영어화 Phase 9 (1.25.2, UR-0010): health 진단 영어/한국어 보존 + uiLang 주입 (소스 가드)', run: () => {
@@ -5404,6 +5435,11 @@ function lensCmd(domain, opts = {}) {
   if (domain != null) domain = String(domain).trim().toLowerCase();
   // 1.19.3: 내장 + 프로젝트 커스텀(.harness/quality-lenses.json) 병합 catalog.
   const root = opts.root || arg('--path', process.cwd());
+  // 1.36.30: 토글 준수 (⚙ 탭 / leerness toggle set lens off)
+  if (!_tgl.toggleOn(root, 'lens')) {
+    if (jsonMode) { log(JSON.stringify({ ok: true, skipped: true, reason: 'toggle_off', hint: 'leerness toggle set lens on' })); return; }
+    log('🎛 lens 토글 OFF — 건너뜀 (재활성: leerness toggle set lens on)'); return;
+  }
   const L = _uiLang(root); const t = (ko, en) => (L === 'en' ? en : ko);  // 1.24.2 (UR-0010 Phase 8): lens 영어 opt-in
   const catalog = _effectiveLensCatalog(root);
   if (domain && !catalog[domain]) {
@@ -7875,6 +7911,7 @@ function _saveTeams(root, teams) {
 // 1.9.389 (UR-0025 큰 핸들러 모듈화 2번째): teamCmd 핸들러를 lib/team.js 로 분리.
 //   harness 는 deps(VERSION · 공유 저장 _loadTeams/_saveTeams · _detectShellCtx · argv 파서 arg/has)를 구성해 위임(thin wrapper). 호출부/동작 무변경.
 const _team = require('../lib/team');
+const _tgl = require('../lib/toggles');   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동 — gate/lens/auto-graph/delegation-brief)
 function teamCmd(root, sub, id, opts = {}) { return _team.teamCmd(root, sub, id, opts, { VERSION, _loadTeams, _saveTeams, _detectShellCtx, arg, has }); }
 
 // 1.9.112: 전용 lessons.md (Memory Write Surface 5번째)
@@ -9691,6 +9728,12 @@ function handoff(root) {
         if (briefGap && planGap) parts.push(t('📋 정체성앵커 미작성 (brief+plan)', '📋 identity anchors unfilled (brief+plan)'));
         else if (briefGap) parts.push(t('📋 project-brief 미작성', '📋 project-brief unfilled'));
         else if (planGap) parts.push(t('📋 plan Goal 미작성', '📋 plan Goal unfilled'));
+      } catch {}
+      // 1.36.30: 기능 토글 OFF 헤드라인 — AI 가 이 상태를 보고 해당 기능을 스킵 준수 (그래프 ⚙ 탭과 동일 상태)
+      try {
+        const _tgs = _tgl.loadToggles(root);
+        const _offs = Object.keys(_tgs).filter(k => _tgs[k] === false);
+        if (_offs.length) parts.push(t(`🎛 토글 OFF: ${_offs.join(',')}`, `🎛 toggles OFF: ${_offs.join(',')}`));
       } catch {}
       // 3) MCP 활동 누적
       try {
@@ -13573,7 +13616,7 @@ function _dispatchCommand(agentId, task, writeMode, model) {
 
 const _agents = require('../lib/agents');
 // 1.9.424 (UR-0025/UR-0125 큰 핸들러 모듈화 9번째): agentsCmd → lib/agents.js (DI 위임, rest→array)
-function agentsCmd(root, sub, ...args) { return _agents.agentsCmd(root, sub, args, { VERSION, has, arg, _agentSlashHint, _allProviders, _checkAgent, _cliChat, _dispatchCommand, _harnessBrief, _loadEnvFile, _normalizeRole, _policyEnforce, _readUserProviders, _recommendAgent, _recordRun, _resolveRole, _shellQuoteArg, lessonsPath, taskLogPath }); }
+function agentsCmd(root, sub, ...args) { return _agents.agentsCmd(root, sub, args, { VERSION, has, arg, _agentSlashHint, _allProviders, _checkAgent, _cliChat, _dispatchCommand, _harnessBrief: _tgl.toggleOn(root, 'delegation-brief') ? _harnessBrief : undefined, _loadEnvFile, _normalizeRole, _policyEnforce, _readUserProviders, _recommendAgent, _recordRun, _resolveRole, _shellQuoteArg, lessonsPath, taskLogPath }); }   // 1.36.30: delegation-brief 토글 OFF 면 브리프 미접두(=--raw 경로)
 
 function personaCmd(root, sub, idOrName, ...rest) {
   root = absRoot(root || process.cwd());
@@ -13766,7 +13809,12 @@ async function selfCheck(root) {
 // 1.9.2: 게이트 5종 한번에 실행 (verify + audit + scan secrets + encoding check + lazy detect).
 function gate(root) {
   root = absRoot(root);
-  const jsonMode = has('--json');  // 외부리뷰 C2: --json 일관성 — 이전엔 텍스트 헤더+단계별 JSON 혼재로 파싱 불가. 단일 객체로 집계.
+  const jsonMode = has('--json');
+  // 1.36.30: 토글 준수 — 그래프 ⚙ 탭/`leerness toggle set gate off` 시 스킵을 명시하고 exit 0 (조용한 무시 아님).
+  if (!_tgl.toggleOn(root, 'gate')) {
+    if (jsonMode) { log(JSON.stringify({ ok: true, skipped: true, reason: 'toggle_off', hint: 'leerness toggle set gate on' })); return; }
+    log('🎛 gate 토글 OFF — 건너뜀 (재활성: leerness toggle set gate on)'); return;
+  }  // 외부리뷰 C2: --json 일관성 — 이전엔 텍스트 헤더+단계별 JSON 혼재로 파싱 불가. 단일 객체로 집계.
   const checks = [];
   let bad = 0;
   // 1.33.3 (verify-claim+CI gate 슬라이스 강화): --claims opt-in — 모든 done 주장을 정밀 per-claim 검증(verify-claim --all)으로 추가(6번째). 기본 5체크는 무변경(기존 어댑터 회귀 0).
@@ -14871,11 +14919,14 @@ function _autoRoadmap(root, trigger) {
     const cfg = _autoRoadmapConfig(root);
     if (!cfg.enabled) return false;
     if (trigger === 'data-change' && !cfg.onEveryChange) return false;
-    const outFile = path.resolve(cfg.outFile || path.join(root, 'roadmap.html'));
-    const data = _roadmapData(root);
-    writeUtf8(outFile, _roadmapHTML(data));
-    const _en = _uiLang(root) === 'en';  // 1.24.1 (UR-0010): roadmap 로그 en
-    log(_en ? `✓ roadmap.html auto-updated (${trigger}) — ${rel(root, outFile)}` : `✓ roadmap.html 자동 갱신 (${trigger}) — ${rel(root, outFile)}`);
+    // 1.36.30 (사용자 요청): 자동 생성 대상을 roadmap.html → leerness.html(온톨로지 그래프 + 로드맵 탭 통합)로 전환.
+    //   roadmap.html 기능은 그래프 파일의 "로드맵" 탭에 통합됨. 수동 `leerness roadmap` 은 호환 유지.
+    //   토글 auto-graph OFF 시 생성 안 함(⚙ 탭/`leerness toggle`).
+    if (!_tgl.toggleOn(root, 'auto-graph')) return false;
+    const outFile = path.resolve(cfg.outFile || path.join(root, 'leerness.html'));
+    const s = _graph.graphHtmlCmd(root, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, quiet: true }, outFile);
+    const _en = _uiLang(root) === 'en';
+    log(_en ? `✓ ontology graph auto-updated (${trigger}) — ${rel(root, outFile)} (graph+roadmap+toggles)` : `✓ 온톨로지 그래프 자동 갱신 (${trigger}) — ${rel(root, outFile)} (그래프+로드맵+토글 탭)`);
     return true;
   } catch (e) {
     warn((_uiLang(root) === 'en' ? 'roadmap auto-update failed: ' : 'roadmap 자동 갱신 실패: ') + (e && e.message ? e.message : e));
@@ -21194,14 +21245,14 @@ function doctorCmd(opts = {}) { return _diag.doctorCmd(opts, { VERSION, uiLang: 
 function whichCmd() { return _diag.whichCmd({ VERSION, uiLang: _uiLang(arg('--path', process.cwd())), has, harnessPath: __filename }); }
 // 1.34.3 (T-0077): `graph --html` → lib/graph.js 온톨로지 HTML(leerness.html) 생성기 위임. 데이터는 in-process 로더 주입(자식 프로세스 셸링 X).
 const _graph = require('../lib/graph');
-function graphHtmlCmd(root) { return _graph.graphHtmlCmd(root, { _roadmapData, _loadDecisions, _loadLessons, has, arg }); }
+function graphHtmlCmd(root) { return _graph.graphHtmlCmd(root, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, has, arg }); }   // 1.36.30: 로드맵 탭 + ⚙ 토글 탭 + canonical feature
 // 1.34.4 (T-0077 후속): handoff 시 leerness.html 자동 재생성 — opt-in(LEERNESS_AUTO_GRAPH=1, 기본 OFF / "Always-Off Opt-In"). 사용자 비전 "자동으로 작성되게" 충족. 비치명(try/catch) · 기본경로 무영향.
 function _maybeAutoGraph(root) {
   if (process.env.LEERNESS_AUTO_GRAPH !== '1') return;
   try {
     const r0 = absRoot(root || process.cwd());
     if (!exists(path.join(r0, '.harness'))) return;
-    const s = _graph.graphHtmlCmd(r0, { _roadmapData, _loadDecisions, _loadLessons, quiet: true });
+    const s = _graph.graphHtmlCmd(r0, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, quiet: true });
     if (!has('--json') && !has('--quiet') && !has('--compact')) log(`📊 ontology graph auto-regenerated: leerness.html (${s.nodes} nodes · ${s.edges} links) — LEERNESS_AUTO_GRAPH=1`);  // --json 출력 오염 방지
   } catch {}
 }
@@ -21550,6 +21601,7 @@ async function main() {
   if (cmd === 'milestones')                         return milestonesCmd(_resolveRoot(args[1]));
   // 1.9.231: leerness pulse — 한 줄 종합 요약 (10 핵심 지표)
   if (cmd === 'pulse')                              return pulseCmd(_resolveRoot(args[1]));
+  if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
   if (cmd === 'lens')                               return lensCmd(args[1]);  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈
   // 1.9.233: leerness commands — 카테고리화된 전체 CLI 명령 목록
   if (cmd === 'commands')                           return commandsCmd(arg('--path', process.cwd()));

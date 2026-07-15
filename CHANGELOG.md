@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.36.30 — 2026-07-15 — 온톨로지 그래프 기본 활성 + roadmap 통합 + 기능 토글 (사용자 요청)
+
+`leerness.html`(온톨로지 그래프)가 **컨트롤 타워**가 된다: install/session-close 자동생성 대상이 roadmap.html → leerness.html 로 전환(기본 활성), roadmap 기능은 그래프 파일의 탭으로 통합, 그래프 뷰에서 leerness 기능(gate 등)을 토글.
+
+- **탭 3종**: 그래프(기존 force-directed) | **로드맵**(milestone 진행률바 + 상태별 task + skills/rules — roadmap.html 기능 흡수, 수동 `leerness roadmap` 은 호환 유지) | **⚙ 토글**(스위치 UI).
+- **`leerness toggle list|set <id> on|off`** + `.harness/toggles.json` — 레지스트리: `gate` / `lens` / `auto-graph` / `delegation-brief`. 기본 전부 ON.
+- **AI 준수 배선**: gate·lens 는 토글 OFF 시 "🎛 토글 OFF — 건너뜀" 명시 후 exit 0(조용한 무시 아님, --json 은 `skipped:true`) · `delegation-brief` OFF 면 dispatch/multi 가 브리프 미접두 · **handoff 헤드라인에 `🎛 토글 OFF: …` 노출** — AI 가 세션 시작 시 상태를 보고 준수.
+- **⚙ 탭 정직성**: 정적 HTML 은 파일 쓰기가 불가 — 스위치 클릭 시 적용 명령(`leerness toggle set …`)을 표시+복사 버튼으로 제공하고 UI 에 명시.
+- **canonical feature 그래프 인식** (codex 미검토표면 #9 편입): `leerness feature add/link` 가 만드는 `## F-XXXX` 블록을 그래프 노드/엣지로 렌더 — 종전엔 ad-hoc "A -> B" 라인만 파싱해 CLI 생성 그래프가 HTML 에 0 노드였다.
+- **검증**: selftest 300/300(토글 저장/로드+기본 ON+레지스트리 4종+HTML 탭·데이터·임베드 JS 문법+배선 5종), 실측 6종(init 자동생성 전환 / 탭 임베드 / toggle CLI / gate·lens 스킵 / handoff 🎛 / brief 토글 0↔1 / canonical feature 노드), 게이트 e2e, 게시본 클린룸.
+
 ## 1.36.29 — 2026-07-15 — `agents multi` 위임 브리프 접두 — 백그라운드 AI 도 leerness 프로토콜을 받도록 (사용자 보고)
 
 사용자 질문("백그라운드에서 호출된 AI 가 leerness 를 참조하는가?")에 대한 조사 결과: `agents dispatch` 는 1.35.6 부터 "[leerness 위임 프로토콜]" 브리프(handoff 적재→task 등록→evidence→verify-claim→session close)를 자동 접두하지만, **`agents multi`(--execute 실 spawn 포함)는 원문 그대로 위임** — 병렬 백그라운드 AI 들이 프로토콜을 받지 못하는 실제 갭이었다.
