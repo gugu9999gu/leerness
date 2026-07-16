@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.45 — 2026-07-16 — `adapter codex --global` — goal 모드까지 닿는 조건부 전역 지침 (사용자 버그 후속 2층)
+
+1.36.43 enforce(커밋 관문)에 이은 **지침층 보완**: codex 는 프로젝트 AGENTS.md 를 안 읽는 모드(goal 모드 — 사용자 실측)에서도 **전역 `~/.codex/AGENTS.md` 는 읽는다**. 여기에 조건부 블록을 설치해 커버.
+
+- **`leerness adapter codex --global [--remove]`**: 마커 블록(`leerness:codex-global`)을 전역 AGENTS.md 에 병합 — 핵심은 **조건부**("현재 프로젝트 루트에 `.harness/` 있을 때만 발동, 없으면 무시") 라 비-leerness 프로젝트 무영향. handoff→verify-claim→session close 3계약 안내.
+- 사용자 전역 내용 보존(마커 병합) · 멱등(재실행 중복 0) · `--remove` 로 흔적 없이 해제 — 전부 실측.
+- **goal 모드 대응 스택 완성**: ① 프로젝트 AGENTS.md(읽는 모드) → ② 전역 조건부 지침(안 읽는 모드, 본 릴리스) → ③ pre-commit 강제(1.36.43 — 지침 자체를 무시해도 커밋 차단) → ④ enforce audit + CI gate(우회 감지·하드 차단).
+- **검증**: selftest 315/315, 설치/보존/멱등/제거 사슬 실측, exit 전파형 게이트 e2e, 클린룸.
+
 ## 1.36.44 — 2026-07-16 — enforce 적대적 하드닝 — FP/우회 자체 헌트 (anti-cheat 출하 후속 규율)
 
 1.36.43 enforce 는 anti-cheat 다 — 출하 규율(bypass+FP 헌터)에 따라 자체 적대 헌트를 돌린 결과 3건:

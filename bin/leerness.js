@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.44';
+const VERSION = '1.36.45';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3352,6 +3352,14 @@ function _selfTestCases() {
       const auditOk = s.includes("sub === 'audit'") && s.includes('우회 의심') && s.includes("'git_log_failed'");
       const honestOk = s.includes('git commit --no-verify 는 git 설계상 훅을 스킵');
       return fpFix && wtOk && auditOk && honestOk;
+    } },
+    { name: 'codex 전역 조건부 지침 (1.36.45, goal 모드 커버): adapter codex --global — 마커 병합/보존/멱등/remove (소스가드)', run: () => {
+      const s = read(__filename);
+      const wired = s.includes("tool === 'codex' && has('--global')") && s.includes('leerness:codex-global:start');
+      const conditional = s.includes('`.harness/` 디렉토리가 있을 때만');
+      const mergeOk = s.includes('_mergeReadmeSection(existing, block, START, END)');
+      const removeOk = /has\('--remove'\)[\s\S]{0,400}codex 전역 leerness 블록 제거/.test(s);
+      return wired && conditional && mergeOk && removeOk;
     } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
@@ -19780,6 +19788,39 @@ function adapterCmd(root, tool, opts = {}) {
       log(`     ${a.keys.join(', ')}`);
     }
     log(`\n  사용: leerness adapter <tool> [--dry-run]`);
+    return;
+  }
+  // 1.36.45 (사용자 버그 후속 — codex goal 모드가 프로젝트 문서를 안 읽음): codex 는 전역 ~/.codex/AGENTS.md 를
+  //   모든 모드에서 읽는다 — 조건부("`.harness/` 있는 프로젝트에서만") 전역 지침을 설치해 goal 모드까지 커버.
+  //   비-leerness 프로젝트 무영향(조건부) + 마커 블록 병합(사용자 전역 내용 보존) + --remove 로 깨끗이 해제.
+  if (tool === 'codex' && has('--global')) {
+    const gf = path.join(os.homedir(), '.codex', 'AGENTS.md');
+    const START = '<!-- leerness:codex-global:start -->';
+    const END = '<!-- leerness:codex-global:end -->';
+    const existing = exists(gf) ? read(gf) : '';
+    if (has('--remove')) {
+      const s = existing.indexOf(START), e = existing.indexOf(END);
+      if (s >= 0 && e >= s) { writeUtf8(gf, (existing.slice(0, s) + existing.slice(e + END.length)).replace(/\n{3,}/g, '\n\n').trim() + '\n'); ok('codex 전역 leerness 블록 제거'); }
+      else log('전역 블록 없음 — 변경 없음');
+      return;
+    }
+    const block = [
+      START,
+      '# leerness — 조건부 지침 (이 블록은 `leerness adapter codex --global` 이 관리)',
+      '',
+      '**현재 작업 중인 프로젝트 루트에 `.harness/` 디렉토리가 있을 때만** 아래를 따른다 (없으면 이 블록 전체 무시):',
+      '1. 작업 시작: `leerness handoff .` — 프로젝트 컨텍스트/활성 룰 적재',
+      '2. 완료 주장 전: `leerness verify-claim <T-ID>` — 증거 검증 (거짓 완료 차단)',
+      '3. 세션 종료: `leerness session close .` — 마감 보고 + 인수인계',
+      '',
+      '이 지침은 모든 Codex 모드(goal 모드 포함)에 적용된다 — 프로젝트 AGENTS.md 를 읽지 않는 모드를 위한 전역 안전망.',
+      END,
+    ].join('\n');
+    mkdirp(path.dirname(gf));
+    writeUtf8(gf, _mergeReadmeSection(existing, block, START, END));
+    ok(`codex 전역 지침 설치 — ${gf}`);
+    log('  조건부: .harness/ 있는 프로젝트에서만 발동 (goal 모드 포함 전 모드 커버)');
+    log('  해제: leerness adapter codex --global --remove');
     return;
   }
   const a = ADAPTERS[tool];
