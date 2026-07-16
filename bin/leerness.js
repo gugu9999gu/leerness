@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.40';
+const VERSION = '1.36.41';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3272,6 +3272,24 @@ function _selfTestCases() {
       // #8: pulse notComputed
       const pulseOk = s.includes("notComputed: ['security', 'health', 'driftScore']");
       return mcpOk && declOk && benchRecOk && benchOk && pulseOk;
+    } },
+    { name: '데이터 보존 3종-2차 (1.36.41, codex 5차 #1/#2/#3 High): .mcp.json 손상 중단 + register-pending 락 + glossary 마커 splice — 행위검사', run: () => {
+      const s = read(__filename);
+      // #1: 손상 .mcp.json throw + adapter 선검증 + dispatch 가드
+      const mcpGuard = s.includes('.mcp.json 이 손상돼(JSON 파싱 실패) 병합을 중단') && s.includes("if (a.mcp) _assertStoreParsable(path.join(root, '.mcp.json')") && s.includes('_guardStore(has(\'--json\'), () => adapterCmd(');
+      // #2: register-pending ID 산출~저장 임계구역
+      const rpLock = /registerPendingCmd[\s\S]{0,900}_withLock\(progressPath\(root\), \(\) => \{/.test(s);
+      // #3: glossary 마커 splice (행위)
+      let gOk = false;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_gl_'));
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        const p = require('../lib/pure-utils');
+        fs.writeFileSync(path.join(tmp, '.harness', 'glossary.md'), 'PREFACE\n' + p.GLOSSARY_START + '\nold\n' + p.GLOSSARY_END + '\nAPPENDIX\n');
+        // splice 로직은 glossaryCmd 내부 — 소스가드 + 위 실측(E2E 사슬)으로 검증. 여기선 마커 상수 존재만 재확인.
+        gOk = s.includes('_prev.slice(0, _si) + _gen + _prev.slice(_ei + GLOSSARY_END.length)');
+      } catch {} finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      return mcpGuard && rpLock && gOk;
     } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
@@ -13974,24 +13992,28 @@ function registerPendingCmd(root, requestParts) {
   const agent = arg('--agent', 'unknown');
   const note = arg('--note', '');
 
-  // 다음 T-ID 산출
-  const rows = readProgressRows(root);
-  let maxN = 0;
-  for (const r of rows) {
-    const m = r.id && r.id.match(/^T-(\d+)$/);
-    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
-  }
-  const id = `T-${String(maxN + 1).padStart(4, '0')}`;
-  const evidence = `(pending) by ${agent}${note ? ' — ' + note : ''}`;
-  const row = {
-    id,
-    status: 'in-progress',
-    request: request.slice(0, 200),
-    evidence,
-    nextAction: '작업 진행 중',
-    updated: today()
-  };
-  upsertProgress(root, row);
+  // 1.36.41 (codex 5차 #2, 1.36.31 락 클래스): ID 산출이 락 밖이라 병렬 등록 시 같은 T-ID 배정 → upsert 가
+  //   서로를 덮어써 무성 유실(30중 25 잔존 실측; 다중 세션 등록이 이 명령의 명시 용도). ID 산출→행 작성→저장을 한 임계구역으로.
+  const row = _withLock(progressPath(root), () => {
+    const rows = readProgressRows(root);
+    let maxN = 0;
+    for (const r of rows) {
+      const m = r.id && r.id.match(/^T-(\d+)$/);
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    }
+    const id = `T-${String(maxN + 1).padStart(4, '0')}`;
+    const rec = {
+      id,
+      status: 'in-progress',
+      request: request.slice(0, 200),
+      evidence: `(pending) by ${agent}${note ? ' — ' + note : ''}`,
+      nextAction: '작업 진행 중',
+      updated: today()
+    };
+    upsertProgress(root, rec);
+    return rec;
+  });
+  const id = row.id;
   log(`✓ ${id} 등록됨 (in-progress) by ${agent}`);
   log(`  request: ${row.request}`);
   log(`  💡 작업 완료 후: leerness task update ${id} --status done --evidence "..."`);
@@ -19446,7 +19468,12 @@ function stateCmd(root, sub, ...args) {
 function _mergeMcpJson(root) {
   const f = path.join(absRoot(root), '.mcp.json');
   let obj = {};
-  if (exists(f)) { try { obj = JSON.parse(read(f)); } catch { obj = {}; } }
+  // 1.36.41 (codex 5차 #1, 1.36.28 손상-스토어 클래스): 손상 .mcp.json 을 {} 로 오인해 사용자의 다른 MCP 서버
+  //   등록을 통째로 날렸다 — 파싱 실패/비객체 루트는 원본 보존 + 중단.
+  if (exists(f)) {
+    try { obj = JSON.parse(read(f)); } catch { throw Object.assign(new Error(`.mcp.json 이 손상돼(JSON 파싱 실패) 병합을 중단합니다 — 복구 후 재시도: ${f}`), { code: 'E_STORE_CORRUPT', file: f }); }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw Object.assign(new Error(`.mcp.json 루트가 객체가 아님 — 병합 중단: ${f}`), { code: 'E_STORE_CORRUPT', file: f });
+  }
   obj.mcpServers = obj.mcpServers || {};
   const already = !!obj.mcpServers.leerness;
   obj.mcpServers.leerness = { command: 'npx', args: ['leerness', 'mcp', 'serve'] };
@@ -19485,7 +19512,20 @@ function glossaryCmd(root, sub) {
   // build (default)
   const md = _renderGlossaryMd(entries, { lang: arg('--lang', 'both'), gaps });
   const hd = path.join(root, '.harness'); mkdirp(hd);
-  writeUtf8(path.join(hd, 'glossary.md'), md);
+  // 1.36.41 (codex 5차 #3): 통파일 덮어쓰기가 마커 밖 수동 서문/부록을 삭제 — 기존 파일에 마커가 있으면
+  //   생성 블록만 splice(마커가 존재하는 이유 그대로), 밖 내용은 보존.
+  const _gf = path.join(hd, 'glossary.md');
+  let _gOut = md;
+  if (exists(_gf)) {
+    const _prev = read(_gf);
+    const _si = _prev.indexOf(GLOSSARY_START), _ei = _prev.indexOf(GLOSSARY_END);
+    if (_si >= 0 && _ei > _si) {
+      const _gsi = md.indexOf(GLOSSARY_START), _gei = md.indexOf(GLOSSARY_END);
+      const _gen = (_gsi >= 0 && _gei > _gsi) ? md.slice(_gsi, _gei + GLOSSARY_END.length) : md;
+      _gOut = _prev.slice(0, _si) + _gen + _prev.slice(_ei + GLOSSARY_END.length);
+    }
+  }
+  writeUtf8(_gf, _gOut);
   writeUtf8(path.join(hd, 'glossary.json'), JSON.stringify({ generated: today(), ...stats, entries, gaps }, null, 2) + '\n');
   if (jsonMode) { log(JSON.stringify({ ok: true, action: 'glossary build', ...stats, file: '.harness/glossary.md' }, null, 2)); return; }
   ok(`glossary 생성: .harness/glossary.md (${stats.defined}/${stats.total} 정의${stats.gaps ? ` · ${stats.gaps} 미정의 → AI 보완 프롬프트 포함` : ''})`);
@@ -19520,6 +19560,8 @@ function adapterCmd(root, tool, opts = {}) {
     log(`  → 실제 적용: leerness adapter ${tool}`);
     return;
   }
+  // 1.36.41 (codex 5차 #1b): mcp 병합이 실패할 파일이면 지침 파일도 쓰기 전에 중단 — 부분 적용 방지(선검증).
+  if (a.mcp) _assertStoreParsable(path.join(root, '.mcp.json'), '.mcp.json');
   const results = [];
   for (const k of a.keys) {
     if (files[k] == null) continue;
@@ -21999,7 +22041,7 @@ async function main() {
   if (cmd === 'adapter') {
     const _aTool = args[1] && !args[1].startsWith('-') ? args[1] : 'list';
     const _aRoot = (args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd());
-    return adapterCmd(_aRoot, _aTool);
+    return _guardStore(has('--json'), () => adapterCmd(_aRoot, _aTool));   // 1.36.41 (#1): 손상 .mcp.json 은 구조화 에러 + exit 1
   }
   // 1.11.4 (UR-0007): glossary — 의존성 용어집(비개발자용 한 줄 설명). 외부 3-에이전트 평가 종합 설계(큐레이션 카탈로그, 무LLM).
   if (cmd === 'glossary') {

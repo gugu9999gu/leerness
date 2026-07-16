@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.41 — 2026-07-16 — 데이터 보존 3종 2차 — .mcp.json 손상 중단 · register-pending 락 · glossary 마커 보존 (codex 5차 헌트 #1/#2/#3 High)
+
+5차 헌트(adapter/ci/orchestrate/guide/doctor/glossary/consistency/release/lens 표면)의 High 3건 — 전부 기존 결함 클래스의 새 발화점:
+
+- **#1 adapter 가 손상 `.mcp.json` 파괴** (1.36.28 손상-스토어 클래스): 파싱 실패를 `{}` 로 오인해 사용자의 다른 MCP 서버 등록을 통째 교체 + 지침 파일은 검증 전에 써서 부분 적용. → 파싱 실패/비객체 루트는 **선검증 후 아무것도 쓰지 않고 중단**(`store_corrupt` exit 1). 실측: keep 서버 보존·지침 미생성·정상 병합 무회귀.
+- **#2 병렬 `register-pending` 무성 유실** (1.36.31 락 클래스): ID 산출이 락 밖이라 같은 T-ID 배정→상호 덮어쓰기(30중 25 잔존 실측 — 다중 세션 등록이 이 명령의 명시 용도). → ID 산출→행 작성→저장 한 임계구역. 실측: **24병렬 24/24 잔존**.
+- **#3 glossary 재생성이 수동 내용 삭제**: 마커(GLOSSARY_START/END)가 있는데 통파일 덮어쓰기 → 마커 밖 서문/부록 소실. → 생성 블록만 splice. 실측: 서문+부록+생성블록 공존.
+- **검증**: selftest 311/311, 3건 원 재현 before/after + 무회귀, exit 전파형 게이트 e2e, 클린룸. 이연(5차 잔여): #4 agent-mode 허위 준비완료 · #5 orchestrate 검증 · #6 release bump semver · #7 consistency dry-run · #8 whats-new --to · #9 lens 커스텀 · #10 JSON 계약 4종.
+
 ## 1.36.40 — 2026-07-16 — 사용자-대면 주장 사실성 감사 — 드리프트 수치 소거 (정기 정직성 점검)
 
 22 릴리스 동안 README/docs 의 정량 주장이 코드와 어긋났는지 전수 대조(주기 점검 — 과거 1.36.5 감사의 후속).
