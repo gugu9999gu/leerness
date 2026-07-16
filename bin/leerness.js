@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.38';
+const VERSION = '1.36.39';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3257,6 +3257,21 @@ function _selfTestCases() {
       const cutoffWired = s.includes('_retroAggregate(root, cutoff)');
       return filterOk && sigOk && tagOk && celebOk && usageOk && cutoffWired;
     } },
+    { name: '판정 정직화 배치B (1.36.39, codex 4차 #3/#5/#6/#7/#8): MCP -32602 검증 + retro canonical decisions + llm-bench 검증 + benchmark 정직 라벨 + pulse notComputed', run: () => {
+      const s = read(__filename);
+      // #3: arguments 비객체 -32602 + 스키마 타입 검증 + 파싱/핸들링 분리
+      const mcpOk = s.includes("code: -32602, message: 'Invalid params: arguments must be an object'")
+        && s.includes("must be a string") && s.includes("catch (e) { send({ jsonrpc: '2.0', id: (req && req.id != null) ? req.id : null");
+      // #5: retro 가 canonical _loadDecisions 사용 (행위: json 에 2건 → retro 도 2)
+      const declOk = s.includes('const _decsCanon = (() => { try { return _loadDecisions(root) || []; }');
+      // #6: llm-bench 점수 검증 + 셀 이스케이프
+      const benchRecOk = s.includes("'invalid_score'") && s.includes('const _bcell = v =>');
+      // #7: 미초기화 측정 거부 + 점수 근거 라벨
+      const benchOk = s.includes("failJson(has('--json'), 'harness_missing', `측정 불가") && s.includes("constantDims: ['autoVerify', 'workspace', 'contextKeep']");
+      // #8: pulse notComputed
+      const pulseOk = s.includes("notComputed: ['security', 'health', 'driftScore']");
+      return mcpOk && declOk && benchRecOk && benchOk && pulseOk;
+    } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
       if (!d) return false;
@@ -5326,9 +5341,12 @@ function pulseCmd(root) {
     roundCount: 0,
     mcpTools: 0,
     memorySurface: 'T0/D0/R0/P0/L0',
-    security: 'unknown',
-    health: 'unknown',
+    // 1.36.39 (codex 4차 #8): pulse 는 이 3종을 계산하지 않는다 — 상태값처럼 보이던 'unknown' placeholder 가
+    //   health --json(healthy:true)과 모순돼 보였음. null + notComputed 로 명시(계산은 leerness health).
+    security: null,
+    health: null,
     driftScore: null,
+    notComputed: ['security', 'health', 'driftScore'],
     nextMilestone: null,
     etaDays: null,
     abnormalShutdown: 'none'
@@ -13987,9 +14005,13 @@ function llmBenchRecordCmd(root) {
   const tokens = arg('--tokens', null);
   const model = arg('--model', 'unknown');
   if (!score) { fail('--score 필요'); return process.exit(1); }
+  // 1.36.39 (codex 4차 #6): 무의미 데이터 무검증 저장 — 유한/비음수 점수 + 필드 길이 상한 + 셀 파이프 이스케이프.
+  const scoreN = Number(score);
+  if (!Number.isFinite(scoreN) || scoreN < 0) { failJson(has('--json'), 'invalid_score', `--score 는 0 이상의 유한 숫자여야 합니다 (받음: ${score})`); return; }
+  const _bcell = v => String(v == null ? '' : v).slice(0, 200).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
   const histFile = path.join(root, '.harness', 'llm-bench-history.md');
   if (!exists(path.dirname(histFile))) fs.mkdirSync(path.dirname(histFile), { recursive: true });
-  const row = `| ${today()} | ${model} | ${label} | ${score} | ${tokens || '?'} |\n`;
+  const row = `| ${today()} | ${_bcell(model)} | ${_bcell(label)} | ${scoreN} | ${_bcell(tokens) || '?'} |\n`;
   if (!exists(histFile)) {
     writeUtf8(histFile, `# LLM Bench History\n\n| Date | Model | Label | Score | Tokens |\n|---|---|---|---:|---:|\n${row}`);
   } else {
@@ -14097,7 +14119,12 @@ function _retroAggregate(root, cutoff) {
   //   decisions 블록 수는 "누적" 라벨 그대로 누적 유지, 신호 카운트용 텍스트만 기간 필터.
   const tlog = _filterDatedSections(exists(taskLogPath(root)) ? read(taskLogPath(root)) : '', cutoff);
   const evidence = _filterDatedSections(exists(evidencePath(root)) ? read(evidencePath(root)) : '', cutoff);
-  const _decisionsSig = _filterDatedSections(decisions, cutoff);
+  // 1.36.39 (codex 4차 #5): decisions 는 canonical decisions.json 단일 소스 — md 직접 읽기는 decision list/memory status 와
+  //   불일치를 만들었다(md 수동 편집/프로젝션 중단 시). 신호 텍스트도 canonical 객체에서 합성 + cutoff 는 date 필드로.
+  const _decsCanon = (() => { try { return _loadDecisions(root) || []; } catch { return []; } })();
+  const _decisionsSig = _decsCanon
+    .filter(d => !cutoff || !d.date || String(d.date).slice(0, 10) >= cutoff)
+    .map(d => [d.decision, d.title, d.reason, d.impact].filter(Boolean).join(' ')).join('\n');
   const handoff = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
 
   // 1) 작업 상태 분포
@@ -14105,13 +14132,12 @@ function _retroAggregate(root, cutoff) {
   for (const s of STATUSES) statusCounts[s] = 0;
   for (const r of rows) if (statusCounts[r.status] != null) statusCounts[r.status]++;
 
-  // 2) 결정 블록 수 (1.9.14: 코드블록/Template 제외)
-  const decisionBlocks = _extractDecisionBlocks(decisions);
-  // recent decisions (날짜로 정렬 시 가장 최근)
-  const recentDecisions = decisionBlocks.slice(-5).map(b => {
-    const t = (b.match(/^### (.+)$/m) || [, ''])[1];
-    return { title: t.trim(), block: b.slice(0, 200) };
-  }).reverse();
+  // 2) 결정 수 — 1.36.39 (#5): canonical decisions.json 기준 (decision list/memory status 와 항상 일치)
+  const decisionBlocks = _decsCanon;
+  const recentDecisions = _decsCanon.slice(-5).map(d => ({
+    title: String(d.title || d.decision || '').trim(),
+    block: [d.decision, d.reason].filter(Boolean).join(' — ').slice(0, 200)
+  })).reverse();
 
   // 3) 스킬 활용
   const skillsDir = path.join(root, '.harness/skills');
@@ -17111,6 +17137,8 @@ function benchmarkCmd(root) {
       log(`💡 verify-claim/audit 오버헤드는 일반적으로 검수 1회당 200~500ms (실 CLI 호출 대비 1-10%)`);
     });
   }
+  // 1.36.39 (codex 4차 #7): 미초기화 디렉토리(증거 0)에 497/600 을 주던 것 — 측정 대상이 아니므로 거부.
+  if (!exists(path.join(root, '.harness'))) { failJson(has('--json'), 'harness_missing', `측정 불가: ${root} 에 .harness 없음 — leerness init 후 사용`); return; }
   const rows = readProgressRows(root);
   const done = rows.filter(r => r.status === 'done').length;
   const totalTasks = rows.length;
@@ -17146,6 +17174,12 @@ function benchmarkCmd(root) {
       project: detectProjectName(root),
       measured: { totalTasks, done, reuseLines, usage: usage.commands, driftLevel: usage.drift },
       leernessScore: score, total,
+      // 1.36.39 (#7 정직화): 어떤 차원이 측정 기반이고 어떤 게 설계 상수/정성 추정인지 명시 — 점수를 실측으로 오독 방지.
+      scoreBasis: {
+        measuredDims: ['multiAgent', 'reuse', 'bugDetect'],
+        constantDims: ['autoVerify', 'workspace', 'contextKeep'],
+        note: 'constantDims 는 도구 능력 설계치(이 워크스페이스의 측정값 아님) · compareSimulated 는 정성 추정'
+      },
       compareSimulated: vsTools
     }, null, 2));
     return;
@@ -17798,7 +17832,31 @@ function mcpServeCmd(root) {
     } else if (req.method === 'tools/list') {
       send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
     } else if (req.method === 'tools/call') {
-      const { name, arguments: args = {} } = req.params || {};
+      const name = (req.params || {}).name;
+      // 1.36.39 (codex 4차 #3): arguments 가 null/비객체면 기본 {} 디폴트가 안 먹어 args.path 접근이 throw →
+      //   stdin 캐치가 -32700 "Parse error"(id null)로 오보했다. 유효 JSON 의 잘못된 파라미터는 -32602 + 원 id.
+      const _rawArgs = (req.params || {}).arguments;
+      if (_rawArgs != null && (typeof _rawArgs !== 'object' || Array.isArray(_rawArgs))) {
+        return send({ jsonrpc: '2.0', id, error: { code: -32602, message: 'Invalid params: arguments must be an object' } });
+      }
+      const args = _rawArgs || {};
+      // 1.36.39 (#3): 도구 inputSchema 기반 타입 검증 — {"title":{...}} 같은 비문자열이 "[object Object]" 로 영속되던 것 차단.
+      {
+        const _td = TOOLS.find(t => t.name === name);
+        const _props = _td && _td.inputSchema && _td.inputSchema.properties || null;
+        if (_props) {
+          for (const [k, spec] of Object.entries(_props)) {
+            const v = args[k];
+            if (v === undefined || v === null) continue;
+            if (spec.type === 'string' && typeof v !== 'string') return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: '${k}' must be a string` } });
+            if (spec.type === 'number' && typeof v !== 'number') return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: '${k}' must be a number` } });
+            if (spec.type === 'boolean' && typeof v !== 'boolean') return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: '${k}' must be a boolean` } });
+          }
+          for (const rk of (_td.inputSchema.required || [])) {
+            if (args[rk] === undefined || args[rk] === null) return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: missing required '${rk}'` } });
+          }
+        }
+      }
       // 1.12.2 (14th 버그헌트, UR-0181): MCP 서버는 generic 설계 — cwd 에서 실행 후 각 호출의 path 로 대상 프로젝트 지정(의도된 기능, e2e 가 검증). 즉 path-타게팅 자체는 취약점 아님(신뢰된 로컬 MCP). policy 도 대상-프로젝트별로 path 에서 로드(올바름).
       //   진짜 버그는 unknown tool 도 _bumpMcpUsage 가 임의 경로에 무조건 쓰던 것 → 사용 통계를 unknown-tool 검증 "후"로 이동. (프로젝트-scoped 가둠은 opt-in 플래그로 별도 검토 — UR backlog)
       const targetPath = args.path || root;
@@ -17854,12 +17912,12 @@ function mcpServeCmd(root) {
       const line = buf.slice(0, nl).trim();
       buf = buf.slice(nl + 1);
       if (!line) continue;
-      try {
-        const req = JSON.parse(line);
-        handleRequest(req);
-      } catch (e) {
-        send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error: ' + e.message } });
-      }
+      // 1.36.39 (#3): 파싱과 핸들링 분리 — 핸들러 내부 예외가 -32700 "Parse error"(id null)로 오보되지 않게.
+      let req = null;
+      try { req = JSON.parse(line); }
+      catch (e) { send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error: ' + e.message } }); continue; }
+      try { handleRequest(req); }
+      catch (e) { send({ jsonrpc: '2.0', id: (req && req.id != null) ? req.id : null, error: { code: -32603, message: 'Internal error: ' + e.message } }); }
     }
   });
   process.stdin.on('end', () => process.exit(0));

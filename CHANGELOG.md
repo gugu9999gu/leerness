@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.39 — 2026-07-16 — 판정 정직화 배치 B — codex 4차 헌트 10건 전건 처분 완결 (#3/#5/#6/#7/#8)
+
+- **#3 MCP 파라미터 검증**: `arguments: null`/비객체가 args 접근 throw → stdin 캐치가 -32700 "Parse error"(id null)로 오보 + `{"title":{...}}` 같은 비문자열이 `[object Object]` 로 영속. → 비객체 arguments/스키마 타입 위반/필수 누락은 **-32602 + 원 id**, 파싱과 핸들링 캐치 분리(-32603 은 원 id 유지). 원 재현 2종 실측 + 정상 호출 무회귀.
+- **#5 decisions 이중 소스**: retro/insights 가 md 를 직접 읽어 `decision list`/`memory status`(canonical json)와 불일치 → canonical `_loadDecisions` 단일 소스(신호 텍스트·recent 목록·카운트 전부, cutoff 는 date 필드). 실측: md 수동 훼손 후에도 list=retro=2 일치.
+- **#6 llm-bench record**: -1/NaN 점수·무제한 필드 무검증 저장 → 유한·비음수 점수 필수(`invalid_score`), 필드 200자 상한 + 파이프/개행 셀 이스케이프.
+- **#7 benchmark**: 미초기화 빈 디렉토리에 **497/600** — 4개 차원이 상수·2개는 높은 바닥값 → .harness 없으면 측정 거부(`harness_missing`), 점수 응답에 `scoreBasis`(measuredDims/constantDims/시뮬 명시) 라벨 — 설계치를 실측으로 오독 방지([[lesson-tool-overstates-own-maturity]] 계열).
+- **#8 pulse↔health 모순**: pulse 가 계산하지 않는 security/health/driftScore 를 'unknown' 상태값처럼 노출 → null + `notComputed` 명시(계산은 `leerness health`).
+- **검증**: selftest 310/310, 5건 원 재현 before/after + 무회귀, exit 전파형 게이트 e2e, 클린룸. **codex 4차 10건 전건 처분(수정 10 · DEFER 0).**
+
 ## 1.36.38 — 2026-07-16 — 분석 정직화 — retro 기간필터·신호 정규식·태그 계보·usage 귀속 (codex 4차 #2/#4/#9/#10)
 
 - **#2 `retro --days`**: cutoff 를 계산만 하고 미적용 — 주간 회고가 전기간 집계였다. → 날짜 헤딩 섹션 필터(`_filterDatedSections`)를 task-log/evidence/decisions-신호에 적용(결정 블록 수는 "누적" 라벨대로 누적 유지). 실측: days=1 에서 2020 데이터 제외.
