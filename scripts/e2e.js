@@ -3386,7 +3386,7 @@ total++;
     const gi = git('init');
     if (gi.status !== 0) throw new Error('git 없음');  // git 미설치 환경 → skip(아래 catch 로 ok=false 방지 위해 통과 처리)
     git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
-    cp.spawnSync(process.execPath, [CLI, 'init', vDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', vDir, '--yes', '--language', 'ko', '--skills', 'recommended', '--no-enforce'], { encoding: 'utf8', timeout: 30000 });  // 1.36.43: 이 케이스 주제는 verify-claim — enforce 훅(handoff 없인 커밋 차단)은 옵트아웃
     fs.mkdirSync(path.join(vDir, 'src'), { recursive: true });
     fs.writeFileSync(path.join(vDir, 'src', 'api.js'), 'v1'); fs.writeFileSync(path.join(vDir, 'old.js'), 'old');
     git('add', '-A'); git('commit', '-m', 'init');

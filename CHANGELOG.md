@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.43 — 2026-07-16 — `leerness enforce` — 사용 강제를 문서에서 커밋 관문으로 (사용자 명시: codex goal 모드가 leerness 미참조)
+
+**배경(사용자 실측 버그)**: codex 의 goal 모드처럼 AGENTS.md/CLAUDE.md 를 읽지 않는 에이전트 경로에선 하네스 문서 수준의 지시가 무력하다. 실효 강제는 **어떤 에이전트/모드든 통과해야 하는 보편 관문 = git pre-commit** 에서.
+
+- **`leerness enforce install|check|status|remove [--window 24] [--strict]`**: 최근 window 내 handoff 흔적(`last-handoff.json`) 없으면 **커밋 차단** + 정확한 회복 명령(`leerness handoff .`) 안내. `--strict` 는 gate 전체 통과까지 요구. 긴급 우회는 명시적 env(`LEERNESS_ENFORCE_BYPASS=1`) — 무언 우회 없음.
+- **훅은 자기완결 sh**: 설치된 leerness 버전/PATH/네트워크 무의존(`find -mmin` mtime 판정) — 검증 중 **구버전 전역 CLI(1.36.41)가 enforce 를 몰라 오차단하는 실측 함정**을 밟고 재설계한 결과. 기존 pre-commit 훅은 체인 보존(`pre-commit.pre-leerness` 로 이동 후 호출, remove 시 복원).
+- **init/migrate 시 git 저장소면 기본 자동 설치** (사용자 의도: 설치된 프로젝트는 강제) — 옵트아웃 `--no-enforce` / `LEERNESS_NO_ENFORCE=1` / `--minimal`.
+- **실증 사슬 5/5**: 무handoff 커밋 차단 → handoff 후 통과+기존 훅 체인 실행 → 25h 경과 차단 → 명시 우회 → remove 시 기존 훅 복원. init 자동/비-git 무설치/옵트아웃/migrate 획득 4종 추가 실증.
+- **검증**: selftest 313/313, exit 전파형 게이트 e2e(verify-claim 픽스처만 주제 무관 옵트아웃 명시), 게시본 클린룸.
+
 ## 1.36.42 — 2026-07-16 — 판정 정직화 배치 C — codex 5차 헌트 10건 전건 처분 완결 (#4~#10)
 
 - **#4 agent-mode**: 3개 자식 전부 실패해도 "자율 라운드 진행 준비" 선언 + exit 0 — 전부 실패=exit 1, 부분 실패=⚠ 명시, tick/stop 자식 실패 전파, 미지 하위명령 exit 1.

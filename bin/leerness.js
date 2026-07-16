@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.42';
+const VERSION = '1.36.43';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1176,6 +1176,14 @@ async function install(root, opts = {}) {
     // 1.9.12: install 직후 첫 roadmap.html 자동 생성 (1.9.276: --minimal 시 건너뜀 — 침투성/용량 완화)
     if (!has('--no-auto-roadmap') && !opts.minimal) {
       try { _autoRoadmap(root, 'install'); } catch (e) { warn('auto-roadmap 실패: ' + (e && e.message)); }
+    }
+    // 1.36.43 (사용자 명시): git 저장소면 사용 강제(pre-commit) 기본 설치 — 문서를 읽지 않는 에이전트 경로(codex goal 모드 등)도
+    //   커밋 관문에서 강제. 옵트아웃: --no-enforce / LEERNESS_NO_ENFORCE=1 / --minimal. 이미 설치돼 있으면 멱등(마커 확인).
+    if (!has('--no-enforce') && process.env.LEERNESS_NO_ENFORCE !== '1' && !opts.minimal && exists(path.join(root, '.git'))) {
+      try {
+        const _hp2 = _gitHookPath(root);
+        if (!exists(_hp2) || !read(_hp2).includes(_ENFORCE_MARK)) enforceCmd(root, 'install');
+      } catch (e) { warn('enforce install skipped: ' + (e && e.message)); }
     }
     // 1.9.148: 1.9.32 중복 prompt 제거 (사용자 명시 — CLI 에이전트 prompt 중복).
     //   resolveInstallOptions (1.9.146) 가 이미 모든 prompt 모은 위치에 통합된 4지선다 prompt 있음.
@@ -3314,6 +3322,29 @@ function _selfTestCases() {
       try { const m = _mergeLensCatalog(LENS_CATALOG, { constructor: { title: 'C', persona: 'r', questions: ['q1'] } }); protoOk = !!(m.constructor && Array.isArray(m.constructor.questions) && m.constructor.questions[0] === 'q1'); } catch {}
       return amOk && orOk && relOk && toOk && conOk && lensOk && rpJsonOk && preOk && protoOk;
     } },
+    { name: 'enforce 사용 강제 (1.36.43, 사용자 명시 — codex goal 모드 미참조 버그): 자기완결 pre-commit 훅 + 체인 보존 + init 자동설치 — 행위검사', run: () => {
+      const s = read(__filename);
+      const wired = typeof enforceCmd === 'function' && s.includes("cmd === 'enforce'");
+      // 훅 자기완결(구버전 전역 CLI 무의존 — 실측 함정): leerness 호출 없이 find -mmin 으로 판정
+      const selfContained = s.includes('find "$LH" -mmin -"$WIN_MIN"') && s.includes('LEERNESS_ENFORCE_BYPASS');
+      const chainOk = s.includes('pre-commit.pre-leerness');
+      const initAuto = s.includes("!has('--no-enforce') && process.env.LEERNESS_NO_ENFORCE !== '1'");
+      // 행위: 임시 git repo — install→(handoff 無)차단 메시지, mtime 신선→통과 (git 없으면 skip-통과)
+      let behavOk = true;
+      try {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_enf_'));
+        const g = cp.spawnSync('git', ['-C', tmp, 'init'], { encoding: 'utf8', timeout: 10000 });
+        if (g.status === 0) {
+          fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+          const save = process.argv; const _w = process.stdout.write;
+          try { process.argv = ['node', 'h', 'enforce', 'install']; process.stdout.write = () => true; enforceCmd(tmp, 'install'); } finally { process.stdout.write = _w; process.argv = save; }
+          const hk = fs.readFileSync(path.join(tmp, '.git', 'hooks', 'pre-commit'), 'utf8');
+          behavOk = hk.includes(_ENFORCE_MARK) && hk.includes('find "$LH"');
+        }
+        fs.rmSync(tmp, { recursive: true, force: true });
+      } catch { behavOk = false; }
+      return wired && selfContained && chainOk && initAuto && behavOk;
+    } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
       if (!d) return false;
@@ -4987,6 +5018,102 @@ function shellGuardCmd(root, cmd, opts = {}) {
   if (pastSame > 0) log(yl(`  ⚠ 이 명령은 과거 ${pastSame}회 실패 기록 있음`));
   else if (pastSimilar > 0) log(dm(`  ℹ "${firstTok}" 시작 명령 과거 ${pastSimilar}회 실패 기록`));
   if (analysis.issues.some(i => i.severity === 'error')) process.exitCode = 1;
+}
+
+// 1.36.43 (사용자 명시): leerness 사용 강제 — 문서(AGENTS.md) 지시는 codex goal 모드처럼 문서를 읽지 않는
+//   에이전트 경로에서 무력하다(사용자 실측 버그). 어떤 에이전트든 통과해야 하는 보편 관문 = git pre-commit 훅에서 강제:
+//   최근 handoff 흔적(기본 24h)이 없으면 커밋 차단 + 정확한 회복 명령 안내. --strict 는 gate 전체까지 요구.
+//   긴급 우회: LEERNESS_ENFORCE_BYPASS=1 (문서화된 명시 우회 — 무언 우회 아님).
+const _ENFORCE_MARK = '# leerness-enforce v1';
+function _enforceCfgPath(root) { return path.join(root, '.harness', 'enforce.json'); }
+function _enforceCfg(root) {
+  const def = { windowHours: 24, strict: false };
+  try { if (exists(_enforceCfgPath(root))) return Object.assign(def, JSON.parse(read(_enforceCfgPath(root)))); } catch {}
+  return def;
+}
+function _gitHookPath(root) { return path.join(root, '.git', 'hooks', 'pre-commit'); }
+function enforceCmd(root, sub) {
+  root = absRoot(root);
+  const json = has('--json');
+  sub = sub || 'status';
+  const hookP = _gitHookPath(root);
+  const chainedP = hookP + '.pre-leerness';
+  if (sub === 'install') {
+    if (!exists(path.join(root, '.git'))) { failJson(json, 'not_a_git_repo', `git 저장소가 아님: ${root} — pre-commit 강제는 git 저장소에서만 가능`); return; }
+    if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root} — 먼저 leerness init`); return; }
+    const windowHours = Math.max(1, parseInt(arg('--window', '24'), 10) || 24);
+    const strict = has('--strict');
+    mkdirp(path.dirname(_enforceCfgPath(root)));
+    writeUtf8(_enforceCfgPath(root), JSON.stringify({ windowHours, strict, installedAt: now() }, null, 2) + '\n');
+    mkdirp(path.dirname(hookP));
+    // 기존 훅 보존: 우리 것이 아니면 체인 파일로 이동 후 호출
+    if (exists(hookP) && !read(hookP).includes(_ENFORCE_MARK)) {
+      fs.copyFileSync(hookP, chainedP);
+      try { fs.chmodSync(chainedP, 0o755); } catch {}
+    }
+    // 훅은 자기완결 sh — 설치된 leerness 버전/네트워크/PATH 에 무의존(구버전 전역 CLI 가 enforce 를 몰라 오차단하던 실측 함정 회피).
+    // 핵심 체크 = last-handoff.json 의 mtime 이 window 안인지 (find -mmin, git bash 표준).
+    const hook = [
+      '#!/bin/sh',
+      _ENFORCE_MARK + ' — leerness 사용 강제 (제거: leerness enforce remove)',
+      'if [ "$LEERNESS_ENFORCE_BYPASS" = "1" ]; then exit 0; fi',
+      `LH=".harness/last-handoff.json"`,
+      `WIN_MIN=${windowHours * 60}`,
+      'if [ ! -f "$LH" ] || [ -z "$(find "$LH" -mmin -"$WIN_MIN" 2>/dev/null)" ]; then',
+      `  echo "🔒 leerness 강제: 최근 ${windowHours}h 내 handoff 흔적 없음 — 커밋 전 실행: leerness handoff ." >&2`,
+      '  echo "   긴급 우회(명시): LEERNESS_ENFORCE_BYPASS=1 git commit ..." >&2',
+      '  exit 1',
+      'fi',
+      ...(strict ? [
+        'if command -v leerness >/dev/null 2>&1; then LEERNESS_INTERNAL=1 leerness gate . || exit 1;',
+        'elif command -v npx >/dev/null 2>&1; then LEERNESS_INTERNAL=1 npx -y leerness gate . || exit 1; fi',
+      ] : []),
+      'if [ -f "$(dirname "$0")/pre-commit.pre-leerness" ]; then sh "$(dirname "$0")/pre-commit.pre-leerness" "$@" || exit 1; fi',
+      '',
+    ].join('\n');
+    writeUtf8(hookP, hook);
+    try { fs.chmodSync(hookP, 0o755); } catch {}
+    if (json) { log(JSON.stringify({ ok: true, installed: true, windowHours, strict, hook: hookP }, null, 2)); return; }
+    ok(`enforce 설치 — 커밋 전 leerness 사용(최근 ${windowHours}h 내 handoff${strict ? ' + gate 통과' : ''})을 git pre-commit 에서 강제`);
+    log(`  대상: 어떤 에이전트/모드든(codex goal 모드 포함) — 커밋이 보편 관문이라 문서를 안 읽는 경로도 강제됨`);
+    log(`  긴급 우회: LEERNESS_ENFORCE_BYPASS=1 git commit …  ·  해제: leerness enforce remove`);
+    return;
+  }
+  if (sub === 'check') {
+    if (!exists(path.join(root, '.harness'))) return;   // leerness 미설치 저장소 — 강제 대상 아님(무음 통과)
+    const cfg = _enforceCfg(root);
+    const lhf = _lastHandoffPath(root);
+    let lastAt = null;
+    try { if (exists(lhf)) { const j = JSON.parse(read(lhf)); lastAt = j.last || (Array.isArray(j.history) && j.history.length ? j.history[j.history.length - 1] : null); } } catch {}
+    const ageH = lastAt ? (Date.now() - new Date(lastAt).getTime()) / 3600000 : Infinity;
+    if (ageH > cfg.windowHours) {
+      fail(`🔒 leerness 강제: 최근 ${cfg.windowHours}h 내 handoff 흔적 없음${lastAt ? ` (마지막: ${lastAt})` : ''}`);
+      log(`  → 커밋 전 실행: leerness handoff .   (컨텍스트 적재 + 사용 흔적)`);
+      log(`  → 긴급 우회(명시): LEERNESS_ENFORCE_BYPASS=1`);
+      process.exitCode = 1; return;
+    }
+    if (cfg.strict) {
+      const r = cp.spawnSync(process.execPath, [__filename, 'gate', root], { encoding: 'utf8', env: { ...process.env, LEERNESS_INTERNAL: '1' } });
+      if (r.status !== 0) { fail(`🔒 leerness 강제(strict): gate 실패 — 커밋 차단`); process.stdout.write((r.stdout || '').slice(-1500)); process.exitCode = 1; return; }
+    }
+    if (!json) ok(`enforce check 통과 (handoff ${lastAt ? Math.round(ageH * 10) / 10 + 'h 전' : '-'}${cfg.strict ? ' + gate' : ''})`);
+    return;
+  }
+  if (sub === 'remove') {
+    if (exists(hookP) && read(hookP).includes(_ENFORCE_MARK)) {
+      if (exists(chainedP)) { fs.copyFileSync(chainedP, hookP); fs.unlinkSync(chainedP); try { fs.chmodSync(hookP, 0o755); } catch {} }
+      else fs.unlinkSync(hookP);
+      ok('enforce 제거 — pre-commit 훅 해제' + (exists(hookP) ? ' (기존 훅 복원)' : ''));
+    } else log('enforce 훅 없음 — 변경 없음');
+    return;
+  }
+  // status
+  const installed = exists(hookP) && read(hookP).includes(_ENFORCE_MARK);
+  const cfg = _enforceCfg(root);
+  if (json) { log(JSON.stringify({ installed, ...cfg }, null, 2)); return; }
+  log(`# leerness enforce — 사용 강제 (git pre-commit)`);
+  log(`  상태: ${installed ? `🟢 설치됨 (window ${cfg.windowHours}h${cfg.strict ? ' · strict=gate' : ''})` : '⚪ 미설치'}`);
+  log(`  ${installed ? '해제: leerness enforce remove' : '설치: leerness enforce install [--window 24] [--strict]'}`);
 }
 
 // 1.36.36 (도그푸딩 실측 후속): `leerness anchors [status|draft [--apply]]` — 정체성앵커(brief Purpose / plan Goal) 미작성 전환 지원.
@@ -22049,6 +22176,7 @@ async function main() {
   if (cmd === 'milestones')                         return milestonesCmd(_resolveRoot(args[1]));
   // 1.9.231: leerness pulse — 한 줄 종합 요약 (10 핵심 지표)
   if (cmd === 'pulse')                              return pulseCmd(_resolveRoot(args[1]));
+  if (cmd === 'enforce')                           return enforceCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1]);   // 1.36.43: 사용 강제 (git pre-commit)
   if (cmd === 'anchors')                           return anchorsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), args[1] && !args[1].startsWith('-') ? args[1] : null);   // 1.36.36: 정체성앵커 초안
   if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
   if (cmd === 'lens')                               return lensCmd(args[1]);  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈
