@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.39';
+const VERSION = '1.36.40';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -365,10 +365,11 @@ function managedReadmeBlock(project) {
     '',
     '### Autonomous mode (자율 모드)',
     '',
+    // 1.36.40 (주장 사실성 감사): 고정 수치(e2e 219/219, 70 라운드)는 릴리스마다 드리프트해 거짓이 됨 — 비드리프트 서술로.
     '`<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:',
-    '1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push → 7) session close → 8) 다음 라운드 예약.',
+    '1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) 회귀 테스트 갱신 → 4) 전체 e2e 스위트 통과 → 5) npm publish + git tag → 6) main push → 7) session close → 8) 다음 라운드 예약.',
     '',
-    `현재 누적: **70 라운드 (1.9.40 → ${VERSION})** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.`,
+    `현재 누적: **v1.9.x → ${VERSION} 릴리스 태그 이력** (수백 라운드) · _reports/는 비공개 보존.`,
     '',
     '### 성능 가이드',
     '',

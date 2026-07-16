@@ -49,7 +49,7 @@ You never have to type a command yourself. Paste this into Claude Code, Cursor, 
 
 The agent installs and operates it for you — `leerness init` also writes the instructions into CLAUDE.md / AGENTS.md so future sessions pick them up automatically.
 
-Prefer pure natural language? leerness ships an **MCP server with 86 tools** (`leerness mcp serve`). Connect it once to Claude Desktop / Claude Code and just ask: *"what was I working on?"*, *"did the AI actually finish T-0001?"*
+Prefer pure natural language? leerness ships an **MCP server with 80+ tools** (`leerness mcp serve`). Connect it once to Claude Desktop / Claude Code and just ask: *"what was I working on?"*, *"did the AI actually finish T-0001?"*
 
 ---
 
@@ -121,7 +121,7 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.36.22 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.36.40 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
@@ -175,7 +175,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.36.22는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **86개 도구**를 노출:
+Leerness v1.36.40는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **86개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -194,18 +194,18 @@ Leerness v1.36.22는 stdio JSON-RPC MCP server를 내장합니다 — Claude Cod
 ### Autonomous mode (자율 모드)
 
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
-1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) stress-v* 신규 작성 + 누적 회귀 → 4) e2e 219/219 → 5) npm pack + git tag + GitHub release → 6) main 자동 push (1.9.140+) → 7) session close → 8) 다음 라운드 예약.
+1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) 회귀 테스트 갱신 → 4) 전체 e2e 스위트 통과 → 5) npm publish + git tag → 6) main push → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **70 라운드 (1.9.40 → 1.36.22)** · 매 라운드 GitHub release/태그 생성 · _reports/는 비공개 보존.
+현재 누적: **v1.9.x → 1.36.40 릴리스 태그 이력** (수백 라운드) · _reports/는 비공개 보존.
 
-### 성능 가이드 (1.9.140 측정)
+### 성능 가이드
 
 - `leerness handoff .` — 평균 ~1.5s (캐시 워밍업 후 ~0.6s)
 - `leerness memory status --json` — 평균 ~250ms
 - `leerness task list --json` — 평균 ~200ms
 - `leerness drift check --json` — 평균 ~400ms
 - MCP `tools/list` 응답 — 평균 ~150ms
-- usage-stats / lessons / listAllSkills 모두 메모리 캐싱 (1.9.65/66)
+- usage-stats / lessons / listAllSkills 모두 메모리 캐싱
 
 ### 빠른 시작
 
@@ -222,7 +222,7 @@ leerness handoff .            # 컨텍스트 자동 로드
 # 4. 세션 종료 시
 leerness session close .      # 9 카테고리 + 룰 검증 + 다음 라운드 추천
 
-# 5. release 자동화 (1.9.140 main 자동 push 포함)
+# 5. release 자동화 (main 자동 push 포함)
 leerness release pack --close --auto-main-push
 ```
 
@@ -234,6 +234,6 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.36.22: 2026-07-15
+Last synced by Leerness v1.36.40: 2026-07-16
 <!-- leerness:project-readme:end -->
 

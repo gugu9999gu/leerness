@@ -108,7 +108,7 @@ leerness verify-claim T-0001 --require-evidence
 - **외부 에이전트**: `agents list/check/dispatch` · `provider` · `roles` · `adapter`
 - **운영/확장**: `release` · `migrate` · `team` · `install-safety` · `route` · `review`(페르소나)
 - **브리지(opt-in)**: `web`(playwright) · `pc`(robotjs) · `lsp`
-- **MCP**: `mcp serve` — stdio JSON-RPC 서버로 86개 도구 노출 (verify-claim --all 일괄 검증 포함, 1.33.3)
+- **MCP**: `mcp serve` — stdio JSON-RPC 서버로 80+ 도구 노출 (verify-claim --all 일괄 검증 포함, 1.33.3)
 
 전체 명령은 `leerness commands` 또는 `leerness --help` 로 확인하세요.
 
@@ -142,7 +142,7 @@ leerness agents dispatch "코드 리뷰" --to codex   # 실행 명령 생성(직
 
 **MCP (외부 AI 에이전트에 도구로 노출)**
 ```bash
-leerness mcp serve                          # JSON-RPC over stdio, 85 도구
+leerness mcp serve                          # JSON-RPC over stdio, 80+ 도구
 ```
 
 ---
