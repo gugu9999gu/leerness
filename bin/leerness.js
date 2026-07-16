@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.43';
+const VERSION = '1.36.44';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3345,6 +3345,14 @@ function _selfTestCases() {
       } catch { behavOk = false; }
       return wired && selfContained && chainOk && initAuto && behavOk;
     } },
+    { name: 'enforce 하드닝 (1.36.44, 적대적 자체헌트): .harness 無 체크아웃 FP 방지 + worktree 훅경로 + --no-verify 사후감지 audit + 한계 정직 (소스가드)', run: () => {
+      const s = read(__filename);
+      const fpFix = s.includes("if [ ! -d \".harness\" ]; then") && s.includes('오차단(FP) 방지');
+      const wtOk = s.includes("'rev-parse', '--git-common-dir'");
+      const auditOk = s.includes("sub === 'audit'") && s.includes('우회 의심') && s.includes("'git_log_failed'");
+      const honestOk = s.includes('git commit --no-verify 는 git 설계상 훅을 스킵');
+      return fpFix && wtOk && auditOk && honestOk;
+    } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
       if (!d) return false;
@@ -5031,7 +5039,17 @@ function _enforceCfg(root) {
   try { if (exists(_enforceCfgPath(root))) return Object.assign(def, JSON.parse(read(_enforceCfgPath(root)))); } catch {}
   return def;
 }
-function _gitHookPath(root) { return path.join(root, '.git', 'hooks', 'pre-commit'); }
+function _gitHookPath(root) {
+  // 1.36.44 (하드닝): worktree 에선 .git 이 파일 — 훅은 공용 디렉토리에 산다. git 에게 물어 해석(양쪽 다 정답).
+  try {
+    const r = cp.spawnSync('git', ['-C', root, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', timeout: 5000 });
+    if (r.status === 0 && r.stdout.trim()) {
+      const gd = r.stdout.trim();
+      return path.join(path.isAbsolute(gd) ? gd : path.join(root, gd), 'hooks', 'pre-commit');
+    }
+  } catch {}
+  return path.join(root, '.git', 'hooks', 'pre-commit');
+}
 function enforceCmd(root, sub) {
   root = absRoot(root);
   const json = has('--json');
@@ -5057,6 +5075,11 @@ function enforceCmd(root, sub) {
       '#!/bin/sh',
       _ENFORCE_MARK + ' — leerness 사용 강제 (제거: leerness enforce remove)',
       'if [ "$LEERNESS_ENFORCE_BYPASS" = "1" ]; then exit 0; fi',
+      '# 1.36.44: .harness 없는 체크아웃(워크트리/구브랜치)은 강제 대상 아님 — 오차단(FP) 방지',
+      'if [ ! -d ".harness" ]; then',
+      '  if [ -f "$(dirname "$0")/pre-commit.pre-leerness" ]; then exec sh "$(dirname "$0")/pre-commit.pre-leerness" "$@"; fi',
+      '  exit 0',
+      'fi',
       `LH=".harness/last-handoff.json"`,
       `WIN_MIN=${windowHours * 60}`,
       'if [ ! -f "$LH" ] || [ -z "$(find "$LH" -mmin -"$WIN_MIN" 2>/dev/null)" ]; then',
@@ -5099,6 +5122,34 @@ function enforceCmd(root, sub) {
     if (!json) ok(`enforce check 통과 (handoff ${lastAt ? Math.round(ageH * 10) / 10 + 'h 전' : '-'}${cfg.strict ? ' + gate' : ''})`);
     return;
   }
+  if (sub === 'audit') {
+    // 1.36.44 (하드닝): `git commit --no-verify` 는 git 설계상 훅을 스킵한다(클라이언트 차단 불가) — 사후 감지로 보완.
+    //   최근 커밋 시각이 어떤 handoff 창(커밋 전 windowHours 내 handoff)에도 안 들면 우회 의심으로 표기 (advisory).
+    if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root}`); return; }
+    const cfg2 = _enforceCfg(root);
+    let handoffs = [];
+    try { const j = JSON.parse(read(_lastHandoffPath(root))); handoffs = (j.history || []).map(t => new Date(t).getTime()).filter(n => !Number.isNaN(n)); } catch {}
+    const gl = cp.spawnSync('git', ['-C', root, 'log', '-n', '30', '--pretty=format:%H|%ct|%s'], { encoding: 'utf8', timeout: 10000 });
+    if (gl.status !== 0) { failJson(json, 'git_log_failed', 'git log 실패 — git 저장소인지 확인'); return; }
+    const winMs = cfg2.windowHours * 3600000;
+    const suspects = [];
+    for (const line of (gl.stdout || '').split('\n').filter(Boolean)) {
+      const [h, ct, ...s2] = line.split('|');
+      const t = parseInt(ct, 10) * 1000;
+      const covered = handoffs.some(hh => hh <= t && (t - hh) <= winMs);
+      if (!covered) suspects.push({ commit: h.slice(0, 8), at: new Date(t).toISOString(), subject: s2.join('|').slice(0, 80) });
+    }
+    if (json) { log(JSON.stringify({ checked: (gl.stdout || '').split('\n').filter(Boolean).length, windowHours: cfg2.windowHours, suspects }, null, 2)); if (suspects.length) process.exitCode = 1; return; }
+    log(`# leerness enforce audit — --no-verify 우회 사후 감지 (advisory)`);
+    log(`  검사: 최근 ${(gl.stdout || '').split('\n').filter(Boolean).length}개 커밋 vs handoff 창(${cfg2.windowHours}h)`);
+    if (!suspects.length) ok('  우회 의심 커밋 없음 — 전부 handoff 창 안');
+    else {
+      warn(`  우회 의심 ${suspects.length}건 (handoff 창 밖 커밋 — --no-verify 또는 enforce 설치 전 커밋일 수 있음):`);
+      for (const s2 of suspects.slice(0, 8)) log(`    · ${s2.commit} ${s2.at.slice(0, 16)} ${s2.subject}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   if (sub === 'remove') {
     if (exists(hookP) && read(hookP).includes(_ENFORCE_MARK)) {
       if (exists(chainedP)) { fs.copyFileSync(chainedP, hookP); fs.unlinkSync(chainedP); try { fs.chmodSync(hookP, 0o755); } catch {} }
@@ -5114,6 +5165,8 @@ function enforceCmd(root, sub) {
   log(`# leerness enforce — 사용 강제 (git pre-commit)`);
   log(`  상태: ${installed ? `🟢 설치됨 (window ${cfg.windowHours}h${cfg.strict ? ' · strict=gate' : ''})` : '⚪ 미설치'}`);
   log(`  ${installed ? '해제: leerness enforce remove' : '설치: leerness enforce install [--window 24] [--strict]'}`);
+  // 1.36.44 (정직성): 한계 명시 — 과장 금지
+  log(dm(`  ⓘ 한계: git commit --no-verify 는 git 설계상 훅을 스킵 — 사후 감지는 leerness enforce audit, 우회 불가 하드 레이어는 CI(leerness ci init + branch protection)`));
 }
 
 // 1.36.36 (도그푸딩 실측 후속): `leerness anchors [status|draft [--apply]]` — 정체성앵커(brief Purpose / plan Goal) 미작성 전환 지원.

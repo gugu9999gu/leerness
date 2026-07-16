@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.44 — 2026-07-16 — enforce 적대적 하드닝 — FP/우회 자체 헌트 (anti-cheat 출하 후속 규율)
+
+1.36.43 enforce 는 anti-cheat 다 — 출하 규율(bypass+FP 헌터)에 따라 자체 적대 헌트를 돌린 결과 3건:
+
+- **FP(실차단 버그) — `.harness` 없는 체크아웃 오차단**: 워크트리/`.harness` 없는 브랜치에서 커밋이 차단됐다(강제 대상이 아닌 상태). → 훅이 `.harness` 부재 시 체인만 실행하고 통과. 실측: `.harness` 없는 워크트리 커밋 0.
+- **worktree 훅 경로**: `.git` 이 파일인 워크트리에서 `install` 이 경로를 오해석할 수 있던 것 → `git rev-parse --git-common-dir` 로 해석(본체/워크트리 모두 정답). 실측: 워크트리에서 install → 공용 훅에 기록.
+- **`--no-verify` 우회 — 정직 처분**: git 설계상 클라이언트 차단 불가. → (a) **`leerness enforce audit`**: 최근 30 커밋 시각 vs handoff 창 대조로 우회 의심 사후 감지(advisory, 의심 시 exit 1). 실측: `--no-verify` 커밋만 정확히 표기, 창 안 커밋 무의심. (b) status 에 한계 명시 — 우회 불가 하드 레이어는 CI(`ci init` + branch protection)임을 정직하게 안내.
+- **검증**: selftest 314/314, 하드닝 3건 원 재현 before/after + 본체 강제 무회귀, exit 전파형 게이트 e2e, 클린룸.
+
 ## 1.36.43 — 2026-07-16 — `leerness enforce` — 사용 강제를 문서에서 커밋 관문으로 (사용자 명시: codex goal 모드가 leerness 미참조)
 
 **배경(사용자 실측 버그)**: codex 의 goal 모드처럼 AGENTS.md/CLAUDE.md 를 읽지 않는 에이전트 경로에선 하네스 문서 수준의 지시가 무력하다. 실효 강제는 **어떤 에이전트/모드든 통과해야 하는 보편 관문 = git pre-commit** 에서.
