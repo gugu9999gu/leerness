@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.45';
+const VERSION = '1.36.46';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3360,6 +3360,13 @@ function _selfTestCases() {
       const mergeOk = s.includes('_mergeReadmeSection(existing, block, START, END)');
       const removeOk = /has\('--remove'\)[\s\S]{0,400}codex 전역 leerness 블록 제거/.test(s);
       return wired && conditional && mergeOk && removeOk;
+    } },
+    { name: 'JSON 계약 완결 (1.36.46, codex 5차 #10 잔여): persona show/review/guide --json 단일 JSON 문서 (소스가드)', run: () => {
+      const s = read(__filename);
+      const personaOk = s.includes("log(JSON.stringify({ id: p.id, name: p.name, description: p.description, body: p.body }, null, 2)); return;");
+      const reviewOk = s.includes("has('--json') ? 'json' : arg('--emit', 'prompt')") && s.includes('prompts: personas.map(p => ({ personaId: p.id, prompt: _mkPrompt(p) }))');
+      const guideOk = /guideCmd[\s\S]{0,600}if \(has\('--json'\)\) \{[\s\S]{0,900}sections/.test(s) && s.includes('uiConsistency: _cap(() => uiConsistency(root))');
+      return personaOk && reviewOk && guideOk;
     } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
@@ -14124,9 +14131,11 @@ function personaCmd(root, sub, idOrName, ...rest) {
     return;
   }
   if (sub === 'show') {
-    if (!idOrName) { fail('persona show <id> 필요'); return process.exit(1); }
+    if (!idOrName) { failJson(has('--json'), 'missing_arg', 'persona show <id> 필요'); return process.exit(1); }
     const p = _resolvePersona(root, idOrName);
-    if (!p) { fail(`페르소나 없음: ${idOrName}`); return process.exit(1); }
+    if (!p) { failJson(has('--json'), 'not_found', `페르소나 없음: ${idOrName}`); return process.exit(1); }
+    // 1.36.46 (codex 5차 #10 잔여): --json 은 단일 JSON 문서 (종전 마크다운 방출)
+    if (has('--json')) { log(JSON.stringify({ id: p.id, name: p.name, description: p.description, body: p.body }, null, 2)); return; }
     log(`# ${p.name} (${p.id})`);
     log(`\n${p.description}\n`);
     log(`---\n${p.body}`);
@@ -14170,13 +14179,16 @@ function reviewCmd(root, target) {
   }
 
   // 출력 형식: emit
-  const emit = arg('--emit', 'prompt'); // prompt | md | json
+  const emit = has('--json') ? 'json' : arg('--emit', 'prompt'); // prompt | md | json  (1.36.46: --json ≡ --emit json)
 
   if (emit === 'json') {
+    // 1.36.46 (codex 5차 #10 잔여): JSON 에 실제 산출물(프롬프트)까지 — 메타만 주던 종전은 소비자가 재조립해야 했다.
+    const _mkPrompt = (p) => [`# Review Prompt — ${p.name} (${p.id})`, `## 대상: ${target} (${fileSize} bytes)`, `## 페르소나 활성화`, p.body, ``, `## 작업`, `아래 코드를 위 페르소나 관점에서 정밀 리뷰하라. 한국어 보고 ~600단어.`, ``, `## 코드`, '```javascript', fileContent, '```'].join('\n');
     log(JSON.stringify({
       file: target,
       filePath, fileSize,
-      personas: personas.map(p => ({ id: p.id, name: p.name }))
+      personas: personas.map(p => ({ id: p.id, name: p.name })),
+      prompts: personas.map(p => ({ personaId: p.id, prompt: _mkPrompt(p) }))
     }, null, 2));
     return;
   }
@@ -16796,6 +16808,23 @@ function graphCmd(root) {
 
 function guideCmd(root, target) {
   root = absRoot(root);
+  // 1.36.46 (codex 5차 #10 잔여): --json 은 하위 4섹션 출력을 캡처해 단일 JSON 으로 집계 (종전: 사람용 헤딩+JSON 파편 혼합).
+  if (has('--json')) {
+    const q0 = target ? path.basename(target, path.extname(target)) : arg('--query', '');
+    const _cap = (fn) => {
+      const _w = process.stdout.write; let out = '';
+      try { process.stdout.write = s => { out += s; return true; }; fn(); } catch (e) { out += `\n(error: ${e.message})`; } finally { process.stdout.write = _w; }
+      return out.trim();
+    };
+    const sections = {
+      impact: target ? _cap(() => impactCmd(root, target)) : null,
+      reuse: q0 ? _cap(() => reuseFind(root, q0)) : null,
+      uiConsistency: _cap(() => uiConsistency(root)),
+      lessons: q0 ? _cap(() => { if (!process.argv.includes('--query')) process.argv.push('--query', q0); lessonsCmd(root); }) : null,
+    };
+    log(JSON.stringify({ target: target || null, query: q0 || null, date: today(), sections }, null, 2));
+    return;
+  }
   log(`# 변경 전 가이드 ${target ? `(target: ${target})` : ''}`);
   log(`Date: ${today()}\n`);
   if (target) {

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.46 — 2026-07-16 — JSON 계약 완결 — persona/review/guide (codex 5차 #10 잔여 소진)
+
+`--json` 을 광고하면서 마크다운/혼합 출력을 내던 마지막 3종 — MCP·자동화 소비자가 파싱 가능한 **단일 JSON 문서**로:
+
+- **`persona show <id> --json`**: `{id, name, description, body}` (종전: 마크다운 방출) + 에러 경로 failJson 구조화.
+- **`review <file> --persona … --json`**: `--emit json` 과 동치화 + **`prompts[]`(실제 리뷰 프롬프트 전문) 포함** — 종전 JSON 은 메타만 있어 소비자가 프롬프트를 재조립해야 했다.
+- **`guide <target> --json`**: 하위 4섹션(impact/reuse/uiConsistency/lessons) 출력을 캡처해 `{target, query, date, sections}` 단일 객체로 집계 (종전: 사람용 헤딩+JSON 파편 혼합).
+- 사람용 출력 3종 모두 무회귀. **이로써 codex 5차 헌트 10건 완전 소진(부분 이연 0).**
+- **검증**: selftest 316/316, 3종 JSON.parse 실측 + 프롬프트 포함 확인, exit 전파형 게이트 e2e, 클린룸.
+
 ## 1.36.45 — 2026-07-16 — `adapter codex --global` — goal 모드까지 닿는 조건부 전역 지침 (사용자 버그 후속 2층)
 
 1.36.43 enforce(커밋 관문)에 이은 **지침층 보완**: codex 는 프로젝트 AGENTS.md 를 안 읽는 모드(goal 모드 — 사용자 실측)에서도 **전역 `~/.codex/AGENTS.md` 는 읽는다**. 여기에 조건부 블록을 설치해 커버.
