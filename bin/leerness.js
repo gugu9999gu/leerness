@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.37';
+const VERSION = '1.36.38';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2134,7 +2134,7 @@ function _computeRoundHistory(root) {
   };
   try {
     // git tag --list 'v1.9.*' --sort=creatordate (시간순)
-    const r = cp.spawnSync('git', ['tag', '--list', 'v1.9.*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
+    const r = cp.spawnSync('git', ['tag', '--list', 'v*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
       cwd: root, encoding: 'utf8', timeout: 5000
     });
     if (r.status !== 0 || !r.stdout) return result;
@@ -2179,7 +2179,7 @@ function _computeMilestones(root) {
     baselineAt: null
   };
   try {
-    const r = cp.spawnSync('git', ['tag', '--list', 'v1.9.*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
+    const r = cp.spawnSync('git', ['tag', '--list', 'v*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
       cwd: root, encoding: 'utf8', timeout: 5000
     });
     if (r.status !== 0 || !r.stdout) return result;
@@ -2254,7 +2254,7 @@ function milestonesCmd(root) {
       log(`    • ETA: ${data.next.etaDate} (~${data.next.etaDays}일 후, 현재 속도 기준)`);
     }
   } else {
-    log(gr(`  🎉 모든 마일스톤 달성 (500+)`));
+    log(data && (data.roundCount || data.totalRounds) ? gr(`  🎉 모든 마일스톤 달성 (500+)`) : dm(`  (이 저장소 계보의 릴리스 태그 이력 없음)`));   // 1.36.38 (#4): 이력 0 인데 달성 축하 금지
   }
 }
 
@@ -3234,6 +3234,28 @@ function _selfTestCases() {
         preserve = t.includes('R-0002') && t.includes('R-0003') && t.includes('파싱 불가');
       } catch {} finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
       return salvage && preserve;
+    } },
+    { name: '분석 정직화 3종 (1.36.38, codex 4차 #2/#4/#9/#10): retro 기간필터+신호 정규식 / 태그 계보 v* / usage 귀속 — 행위검사', run: () => {
+      // #2: _filterDatedSections — cutoff 이후만
+      const t = '# L\n\n## 2020-01-01\n- ancient fix\n\n## 2099-01-01\n- future 수정\n';
+      const f1 = _filterDatedSections(t, '2026-01-01');
+      const filterOk = !f1.includes('ancient') && f1.includes('future') && _filterDatedSections(t, null) === t;
+      // #10: 한글 리터럴 + ASCII 토큰 경계 (password/bypass/undone FP 차단)
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rt_'));
+      let sigOk = false;
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.harness', 'task-log.md'), '# T\n\n## 2026-07-16\n- 수정 롤백 재발 password bypass undone\n');
+        const agg = _retroAggregate(tmp);
+        sigOk = agg.fixSignals === 3 && agg.passSignals === 0;
+      } catch {} finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      // #4/#9 배선 소스가드
+      const s = read(__filename);
+      const tagOk = s.includes("'--list', 'v*'") && !s.includes("'--list', 'v1.9" + ".*'");
+      const celebOk = (s.match(/이 저장소 계보의 릴리스 태그 이력 없음/g) || []).length >= 2;
+      const usageOk = s.includes("else if (args[2] && !args[2].startsWith('-') && exists(path.join(absRoot(args[2]), '.harness')))");
+      const cutoffWired = s.includes('_retroAggregate(root, cutoff)');
+      return filterOk && sigOk && tagOk && celebOk && usageOk && cutoffWired;
     } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
@@ -5817,7 +5839,7 @@ function roundHistoryCmd(root) {
   if (data.nextMilestone != null) {
     log(yl(`  🎯 다음 마일스톤: R${data.nextMilestone} (${data.roundsToNextMilestone} 라운드 남음)`));
   } else {
-    log(gr(`  🎉 모든 마일스톤 달성 (500+)`));
+    log(data && (data.roundCount || data.totalRounds) ? gr(`  🎉 모든 마일스톤 달성 (500+)`) : dm(`  (이 저장소 계보의 릴리스 태그 이력 없음)`));   // 1.36.38 (#4): 이력 0 인데 달성 축하 금지
   }
   log('');
   log(`  최근 10 tags:`);
@@ -14056,12 +14078,26 @@ function writeSessionCounter(root, c) { writeUtf8(sessionCounterPath(root), JSON
 
 // 1.9.324 (UR-0025): _countDatedBlocks / _extractDecisionBlocks → lib/pure-utils.js 로 이동 (순수 메모리 MD 파서, require 사용).
 
-function _retroAggregate(root) {
+// 1.36.38 (codex 4차 #2): 날짜 헤딩(## YYYY-MM-DD / ### YYYY-MM-DD …) 섹션 문서를 cutoff 이후만 남김.
+//   날짜 없는 프리앰블은 유지(헤더/템플릿 — 신호 카운트에 거의 무기여). cutoff 없으면 원문 그대로(무회귀).
+function _filterDatedSections(text, cutoff) {
+  if (!cutoff || !text) return text || '';
+  const parts = String(text).split(/(?=^#{2,3} \d{4}-\d{2}-\d{2})/m);
+  return parts.filter(p => {
+    const m = p.match(/^#{2,3} (\d{4}-\d{2}-\d{2})/);
+    return !m || m[1] >= cutoff;
+  }).join('');
+}
+
+function _retroAggregate(root, cutoff) {
   root = absRoot(root);
   const rows = readProgressRows(root);
   const decisions = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
-  const tlog = exists(taskLogPath(root)) ? read(taskLogPath(root)) : '';
-  const evidence = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
+  // 1.36.38 (#2): --days 의 cutoff 가 계산만 되고 미적용 → 주간 회고가 전기간 집계였다. 기간 신호(tlog/evidence)에 적용.
+  //   decisions 블록 수는 "누적" 라벨 그대로 누적 유지, 신호 카운트용 텍스트만 기간 필터.
+  const tlog = _filterDatedSections(exists(taskLogPath(root)) ? read(taskLogPath(root)) : '', cutoff);
+  const evidence = _filterDatedSections(exists(evidencePath(root)) ? read(evidencePath(root)) : '', cutoff);
+  const _decisionsSig = _filterDatedSections(decisions, cutoff);
   const handoff = exists(handoffPath(root)) ? read(handoffPath(root)) : '';
 
   // 1) 작업 상태 분포
@@ -14103,9 +14139,18 @@ function _retroAggregate(root) {
   const durations = [];
   for (const m of evidence.matchAll(/exit=\d+\s*\((\d+)ms\)/g)) durations.push(parseInt(m[1], 10));
 
-  // 5) 실패→성공 시그널 — task-log/evidence/decisions에서 "롤백" / "fail" / "재발" / "fix" / "수정" 등의 동시 등장 카운트
-  const fixSignals = (tlog + evidence + decisions).match(/\b(fix|fixed|수정|롤백|재발|incomplete|bug)\b/gi) || [];
-  const passSignals = (tlog + evidence + decisions).match(/(?:✓|pass(?:ed)?|통과|completed|done)/gi) || [];
+  // 5) 실패→성공 시그널 — task-log/evidence/decisions(기간 필터본)에서 카운트.
+  // 1.36.38 (codex 4차 #10): JS \b 는 한글 경계를 못 만들어 한글 신호가 전멸(FN)했고, 'pass' 가 password/bypass 안에서,
+  //   'done' 이 undone 안에서 매치(FP)했다. → 한글은 리터럴 카운트, ASCII 는 lookaround 토큰 경계.
+  const _sigText = tlog + evidence + _decisionsSig;
+  const fixSignals = [
+    ...(_sigText.match(/(?<![a-z])(fix(?:ed)?|bug|incomplete)(?![a-z])/gi) || []),
+    ...(_sigText.match(/수정|롤백|재발/g) || []),
+  ];
+  const passSignals = [
+    ...(_sigText.match(/✓|통과/g) || []),
+    ...(_sigText.match(/(?<![a-z])(pass(?:ed)?|completed|done)(?![a-z])/gi) || []),
+  ];
 
   // 6) 룰 활용
   const rules = exists(rulesPath(root)) ? readRules(root) : [];
@@ -14205,7 +14250,7 @@ function retroCmd(root) {
   if (!Number.isFinite(days)) { failJson(has('--json'), 'invalid_arg', _uiLang(root) === 'en' ? '--days must be a number' : '--days 는 숫자여야 합니다'); return; }
   days = Math.max(0, Math.min(days, 36500));
   const cutoff = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
-  const agg = _retroAggregate(root);
+  const agg = _retroAggregate(root, cutoff);   // 1.36.38 (#2): 기간 필터 적용
   // 1.9.16: --json
   if (has('--json')) {
     log(JSON.stringify({ project: path.basename(root), days, cutoff, summary: _retroOneLine(agg), data: agg }, null, 2));
@@ -14309,7 +14354,7 @@ function insightsCmd(root) {
   if (has('--all-apps') || arg('--include', null)) {
     return _insightsWorkspace(root);
   }
-  const agg = _retroAggregate(root);
+  const agg = _retroAggregate(root);   // insights 는 누적 지표 명령 — 기간 필터 없음(retro 만 --days). 1.36.38 광역치환 오적용 교정.
   // 1.9.16: --json
   if (has('--json')) {
     const sc = readSessionCounter(root);
@@ -21642,6 +21687,8 @@ async function main() {
       let root;
       if (_pathArg) root = absRoot(_pathArg);
       else if (args[1] && !args[1].startsWith('-') && exists(path.join(absRoot(args[1]), '.harness'))) root = absRoot(args[1]);
+      // 1.36.38 (codex 4차 #9): subcommand 형(예: memory status <B>)은 대상 경로가 args[2] — 종전엔 cwd(A)에 오귀속됐다.
+      else if (args[2] && !args[2].startsWith('-') && exists(path.join(absRoot(args[2]), '.harness'))) root = absRoot(args[2]);
       else root = absRoot(process.cwd());
       if (exists(path.join(root, '.harness'))) _bumpUsage(root, cmd);
     } catch {}

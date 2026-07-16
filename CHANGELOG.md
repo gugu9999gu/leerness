@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.36.38 — 2026-07-16 — 분석 정직화 — retro 기간필터·신호 정규식·태그 계보·usage 귀속 (codex 4차 #2/#4/#9/#10)
+
+- **#2 `retro --days`**: cutoff 를 계산만 하고 미적용 — 주간 회고가 전기간 집계였다. → 날짜 헤딩 섹션 필터(`_filterDatedSections`)를 task-log/evidence/decisions-신호에 적용(결정 블록 수는 "누적" 라벨대로 누적 유지). 실측: days=1 에서 2020 데이터 제외.
+- **#10 신호 정규식**: JS `\b` 가 한글 경계를 못 만들어 한글 fix 신호 전멸(FN) + `pass`가 password/bypass 안에서, `done` 이 undone 안에서 매치(FP). → 한글 리터럴 카운트 + ASCII lookaround 토큰 경계. 실측: "수정 롤백 재발 password bypass undone" → fix 3 · pass 0.
+- **#4 태그 계보**: round-history/milestones 가 `v1.9.*` 하드코드 — 현 계보(v1.36.x) 이력 0 으로 집계하면서 **"모든 마일스톤 달성 (500+)" 허위 축하**까지 출력. → `v*` 전체 semver 수집 + 이력 0 이면 "태그 이력 없음" 정직 표기. 실측: v1.36.36/37 태그 → roundCount 2.
+- **#9 usage 귀속**: `memory status <B>` 처럼 subcommand 대상이 args[2] 인 명령의 사용량이 cwd(A)에 오귀속. → args[2] 대상 해석 추가. 실측: A 0 · B 귀속.
+- **검증**: selftest 309/309(필터/신호/태그/귀속/배선 행위검사), 4건 원 재현 before/after, exit 전파형 게이트 e2e, 클린룸. 이연(codex 4차 잔여): #3 MCP 파라미터 검증 · #5 decisions 이중 소스 · #6 llm-bench 검증 · #7 benchmark 빈 디렉토리 점수 · #8 pulse/health 불일치.
+
 ## 1.36.37 — 2026-07-16 — managed 파일 --force 병합 — 마이그레이션 보존의 마지막 구멍 (1.9.441 드리프트 경로 실측)
 
 도그푸딩에서 발견된 실제 드리프트 세대(1.9.441 — auto-macro 가 쓰는 버전)로 마이그레이션 경로를 전수 재검(11종 마커, 기본→반복→--force): 기본/반복은 유실 0 이었으나 **--force 반복에서 CLAUDE.md 사용자 커스텀 1종 유실** — `writeIfSafe` 에서 force 가 managed 병합(1.36.28 라인-diff 재설계)을 우회해 raw 덮어쓰기했기 때문(1.36.33 `_USER_STATE` 는 .harness 상태 파일만 커버).

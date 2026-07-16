@@ -2166,8 +2166,10 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   cp.spawnSync(process.execPath, [CLI, 'plan', 'add', '캐시 helper', '--status', 'done', '--path', tmpR], { stdio: 'ignore', timeout: 10000 });
   cp.spawnSync(process.execPath, [CLI, 'plan', 'add', '인증 helper', '--status', 'in-progress', '--path', tmpR], { stdio: 'ignore', timeout: 10000 });
-  fs.appendFileSync(path.join(tmpR, '.harness/decisions.md'), `\n### 2026-05-13 — 캐시 차등 TTL 결정\n- Reason: ...\n`);
-  fs.appendFileSync(path.join(tmpR, '.harness/review-evidence.md'), `\n## 2026-05-13 verify-code\nexit=0 (250ms)\nexit=0 (180ms)\nexit=0 (120ms)\nexit=0 (90ms)\n`);
+  // 1.36.38: retro 가 --days 기간필터를 실제 적용하므로 픽스처 날짜는 오늘(창 안) — 고정 과거 날짜는 필터에 걸러지는 게 의도된 동작.
+  const _todayR = new Date().toISOString().slice(0, 10);
+  fs.appendFileSync(path.join(tmpR, '.harness/decisions.md'), `\n### ${_todayR} — 캐시 차등 TTL 결정\n- Reason: ...\n`);
+  fs.appendFileSync(path.join(tmpR, '.harness/review-evidence.md'), `\n## ${_todayR} verify-code\nexit=0 (250ms)\nexit=0 (180ms)\nexit=0 (120ms)\nexit=0 (90ms)\n`);
   const r = cp.spawnSync(process.execPath, [CLI, 'retro', tmpR], { encoding: 'utf8', timeout: 15000 });
   const ok = r.status === 0 && /한 줄 요약/.test(r.stdout) && /작업 상태 분포/.test(r.stdout) && /다음 우선 작업/.test(r.stdout) && /검증 시간 추세/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.13) retro: 한 줄 요약 + 다음 우선 작업 + 검증 시간 추세' : '✗ retro 실패');
