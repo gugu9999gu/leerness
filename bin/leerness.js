@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.41';
+const VERSION = '1.36.42';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -218,7 +218,7 @@ function _resolveRoot(positional) {
 }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when','--test-cmd']);  // 1.14.2 (UR-0032): --done-when 값이 positional 로 누출돼 milestone 제목에 흡수되던 것 차단. 1.17.2 (UR-0045): --test-cmd 동일 원칙(신규 value-flag 는 반드시 여기 등록)
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--to','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when','--test-cmd']);  // 1.14.2 (UR-0032): --done-when 값이 positional 로 누출돼 milestone 제목에 흡수되던 것 차단. 1.17.2 (UR-0045): --test-cmd 동일 원칙(신규 value-flag 는 반드시 여기 등록)
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -2396,7 +2396,11 @@ function agentModeCmd(root, sub) {
     const r3 = spawnChild(['handoff', root]);
     if (r3.status === 0) log(gr(`  ✓ handoff 출력 완료 (위 참조)`)); else log(yl(`  ⚠ handoff 종료 ${r3.status}`));
     log('');
-    log(gr(`✓ agent-mode start 완료 — 자율 라운드 진행 준비`));
+    // 1.36.42 (codex 5차 #4): 세 자식 전부 실패(status null 포함)여도 "준비" 를 선언하던 허위 성공 — 실패 수 기준 정직 판정.
+    const _fails = [r1, r2, r3].filter(r => r.status !== 0).length;
+    if (_fails === 3) { fail(`agent-mode start 실패 — 3개 단계 전부 실패 (경로/설치 확인: ${root})`); process.exitCode = 1; return; }
+    if (_fails > 0) { log(yl(`⚠ agent-mode start 부분 완료 — ${_fails}개 단계 실패 (위 ⚠ 참조)`)); }
+    else log(gr(`✓ agent-mode start 완료 — 자율 라운드 진행 준비`));
     return;
   }
   if (sub === 'tick') {
@@ -2404,6 +2408,7 @@ function agentModeCmd(root, sub) {
     log(cy(`# leerness agent-mode tick (1.9.239) — 가벼운 상태 확인`));
     const r = spawnChild(['pulse', '--path', root]);
     process.stdout.write(r.stdout || '');
+    if (r.status !== 0) process.exitCode = 1;   // 1.36.42 (#4): 자식 실패 전파
     return;
   }
   if (sub === 'stop') {
@@ -2411,10 +2416,12 @@ function agentModeCmd(root, sub) {
     log(dm(`  → session close --auto-apply-delivered --auto-cleanup-branches --auto-fix-encoding`));
     const r = spawnChild(['session', 'close', root, '--auto-apply-delivered', '--auto-cleanup-branches', '--auto-fix-encoding']);
     process.stdout.write(r.stdout || '');
+    if (r.status !== 0) process.exitCode = 1;   // 1.36.42 (#4): 자식 실패 전파
     return;
   }
-  log(yl(`unknown subcommand: ${sub}`));
+  fail(`unknown subcommand: ${sub}`);   // 1.36.42 (#4): 미지 하위명령 exit 1 (종전 exit 0)
   log(dm(`  → leerness agent-mode help`));
+  process.exitCode = 1;
 }
 
 // 1.9.234: recentChanges — 최근 N 라운드의 핵심 변경 요약 (git tag commit subject)
@@ -3290,6 +3297,22 @@ function _selfTestCases() {
         gOk = s.includes('_prev.slice(0, _si) + _gen + _prev.slice(_ei + GLOSSARY_END.length)');
       } catch {} finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
       return mcpGuard && rpLock && gOk;
+    } },
+    { name: '판정 정직화 배치C (1.36.42, codex 5차 #4~#10): agent-mode/orchestrate exit + release semver/note + consistency dry-run·멱등 + whats-new --to + lens 커스텀 + JSON 순수 (소스가드+행위)', run: () => {
+      const s = read(__filename);
+      const amOk = s.includes('if (_fails === 3) { fail(`agent-mode start 실패') && s.includes('미지 하위명령 exit 1');
+      const orOk = s.includes("'invalid_agents'") && s.includes('if (!ok.length) process.exitCode = 1;');
+      const relOk = s.includes("'invalid_version'") && s.includes('멀티라인은 한 리스트 항목의 연속 들여쓰기로 정규화');
+      const toOk = s.includes("'--from','--to','--repo'");
+      const conOk = s.includes('이미 병합됨(skip)') && /mergeDesign[\s\S]{0,600}has\('--dry-run'\)/.test(s);
+      const lensOk = s.includes('function _loadProjectLensesEx') && s.includes('Object.prototype.hasOwnProperty.call(out, k)');
+      const rpJsonOk = /registerPendingCmd[\s\S]{0,1600}if \(has\('--json'\)\) \{ log\(JSON\.stringify\(\{ ok: true, id, \.\.\.row \}, null, 2\)\); return; \}/.test(s);
+      // 행위: prerelease 안정화 + 프로토타입 키 무크래시
+      const p = require('../lib/pure-utils');
+      const preOk = p.compareVer('1.2.3', '1.2.3-beta.2') === 1;   // bump 결과가 상위인지 간접 확인
+      let protoOk = false;
+      try { const m = _mergeLensCatalog(LENS_CATALOG, { constructor: { title: 'C', persona: 'r', questions: ['q1'] } }); protoOk = !!(m.constructor && Array.isArray(m.constructor.questions) && m.constructor.questions[0] === 'q1'); } catch {}
+      return amOk && orOk && relOk && toOk && conOk && lensOk && rpJsonOk && preOk && protoOk;
     } },
     { name: 'debug 렌즈 (1.36.27, obra/superpowers systematic-debugging): 자기질문 6문항 ko/en 락스텝 + affects 유효 + route bugfix 힌트 + 파일매핑 미확장 — 행위검사', run: () => {
       const d = LENS_CATALOG.debug;
@@ -5579,12 +5602,18 @@ const LENS_CATALOG = {
 };
 // 1.19.3 (UR-0003 렌즈 완전판 v3): 프로젝트별 커스텀 렌즈 — .harness/quality-lenses.json 읽기-병합(쓰기 명령 없음, AI/사용자가 편집).
 //   포맷: { "domains": { "code": { "questions": ["추가 질문"] }, "a11y": { "title":"접근성", "persona":"스크린리더 사용자", "questions":[...], "affects":["design"] } } }
+// 1.36.42 (codex 5차 #9): 손상 파일을 무언 무시하면 사용자는 커스텀 렌즈가 적용된 줄 안다 — 에러를 함께 반환(Ex), 기존 시그니처는 래퍼.
+function _loadProjectLensesEx(root) {
+  const p = path.join(absRoot(root || process.cwd()), '.harness', 'quality-lenses.json');
+  if (!exists(p)) return { domains: {}, error: null };
+  try {
+    const j = JSON.parse(read(p));
+    return { domains: (j && typeof j === 'object' && j.domains && typeof j.domains === 'object') ? j.domains : {}, error: null };
+  } catch (e) { return { domains: {}, error: `quality-lenses.json 파싱 실패(커스텀 렌즈 미적용): ${e.message}` }; }
+}
 function _loadProjectLenses(root) {
   try {
-    const p = path.join(absRoot(root || process.cwd()), '.harness', 'quality-lenses.json');
-    if (!exists(p)) return {};
-    const j = JSON.parse(read(p));
-    return (j && typeof j === 'object' && j.domains && typeof j.domains === 'object') ? j.domains : {};
+    return _loadProjectLensesEx(root).domains;
   } catch { return {}; }
 }
 // 내장 + 프로젝트 커스텀 병합. 기존 도메인 → 질문 추가(dedup, 최대 16 — 내장 최대치(database 12) + 커스텀 여유; 낮으면 내장이 잘림); 신규 도메인 → 기본값으로 추가. _custom 플래그로 표시.
@@ -5594,7 +5623,9 @@ function _mergeLensCatalog(builtin, custom) {
   for (const [k, c] of Object.entries(custom || {})) {
     if (!c || typeof c !== 'object') continue;
     const cq = Array.isArray(c.questions) ? c.questions.filter(q => typeof q === 'string' && q.trim()) : [];
-    if (out[k]) {
+    // 1.36.42 (codex 5차 #9b): truthy 검사는 'constructor' 같은 프로토타입 키에서 상속 함수를 기존 도메인으로
+    //   오인해 .questions.push 크래시 — 자기 소유 키만 병합 대상으로.
+    if (Object.prototype.hasOwnProperty.call(out, k)) {
       const seen = new Set(out[k].questions);
       for (const q of cq) if (!seen.has(q)) { out[k].questions.push(q); seen.add(q); }
       const before = out[k].questions.length;
@@ -5678,6 +5709,8 @@ function lensCmd(domain, opts = {}) {
   if (domain != null) domain = String(domain).trim().toLowerCase();
   // 1.19.3: 내장 + 프로젝트 커스텀(.harness/quality-lenses.json) 병합 catalog.
   const root = opts.root || arg('--path', process.cwd());
+  // 1.36.42 (#9): 손상 커스텀 렌즈 파일은 무언 무시 대신 경고 (advisory — lens 자체는 계속 동작)
+  try { const _lx = _loadProjectLensesEx(root); if (_lx.error && !jsonMode) warn(_lx.error); } catch {}
   // 1.36.30: 토글 준수 (⚙ 탭 / leerness toggle set lens off)
   if (!_tgl.toggleOn(root, 'lens')) {
     if (jsonMode) { log(JSON.stringify({ ok: true, skipped: true, reason: 'toggle_off', hint: 'leerness toggle set lens on' })); return; }
@@ -12393,7 +12426,11 @@ async function orchestrateCmd(root, goalParts) {
     return process.exit(1);
   }
 
-  const agentCount = Math.max(1, Math.min(256, parseInt(arg('--agents', '4'), 10)));
+  // 1.36.42 (codex 5차 #5): NaN/0/-1 이 조용히 1(또는 NaN 루프)로 화하던 것 — 정수 1..256 검증.
+  const _agRaw = arg('--agents', '4');
+  const _agN = Number(_agRaw);
+  if (!Number.isInteger(_agN) || _agN < 1 || _agN > 256) { failJson(has('--json'), 'invalid_agents', `--agents 는 1~256 정수여야 합니다 (받음: ${_agRaw})`); return; }
+  const agentCount = _agN;
   const model = arg('--model', process.env.LEERNESS_OLLAMA_MODEL || 'qwen2.5:7b-instruct');
   const timeoutMs = parseInt(arg('--timeout', '300000'), 10);
   const retryOnFail = parseInt(arg('--retry-on-fail', '0'), 10); // 1.9.22 후보 2 통합
@@ -12428,6 +12465,7 @@ async function orchestrateCmd(root, goalParts) {
   if (failures.length) {
     for (const f of failures.slice(0, 3)) log(`    · agent ${f.agent}: ${f.error}`);
   }
+  if (!ok.length) process.exitCode = 1;   // 1.36.42 (#5): 전원 실패인데 exit 0 이던 허위 성공 — 성공 0 = exit 1
 
   if (ok.length) {
     const totalPromptTokens = ok.reduce((a, b) => a + b.promptTokens, 0);
@@ -14014,10 +14052,11 @@ function registerPendingCmd(root, requestParts) {
     return rec;
   });
   const id = row.id;
+  // 1.36.42 (codex 5차 #10): --json 인데 사람용 3줄이 앞에 섞여 파서가 깨짐 — JSON 모드는 단일 JSON 문서만.
+  if (has('--json')) { log(JSON.stringify({ ok: true, id, ...row }, null, 2)); return; }
   log(`✓ ${id} 등록됨 (in-progress) by ${agent}`);
   log(`  request: ${row.request}`);
   log(`  💡 작업 완료 후: leerness task update ${id} --status done --evidence "..."`);
-  if (has('--json')) log(JSON.stringify({ ok: true, id, ...row }, null, 2));
 }
 
 // 1.9.22 후보 4: llm-bench record + retro 통합
@@ -14060,10 +14099,20 @@ function mergeDesign(root) {
   root = absRoot(root);
   const canonical = path.join(root,'.harness/design-system.md');
   const cands = ['designguide.md','design-guide.md','.harness/designguide.md','docs/designguide.md','docs/design-guide.md'];
+  // 1.36.42 (codex 5차 #7): (a) --dry-run 인데 실기록, (b) 재실행마다 같은 내용 중복 append(비멱등) — 둘 다 교정.
+  const dry = has('--dry-run');
+  const already = exists(canonical) ? read(canonical) : '';
   let merged = '';
-  for (const f of cands) { const p = path.join(root,f); if (exists(p)) merged += `\n\n## Merged from ${f}\n\n` + read(p); }
+  const skipped = [];
+  for (const f of cands) {
+    const p = path.join(root,f);
+    if (!exists(p)) continue;
+    if (already.includes(`## Merged from ${f}`)) { skipped.push(f); continue; }   // 멱등: 같은 소스 재병합 방지
+    merged += `\n\n## Merged from ${f}\n\n` + read(p);
+  }
+  if (dry) { ok(`[dry-run] ${merged ? '병합 예정' : '병합 대상 없음'}${skipped.length ? ` · 이미 병합됨(skip): ${skipped.join(', ')}` : ''} — 실제 변경 0`); return; }
   if (merged) append(canonical, merged);
-  ok(merged ? 'design guides merged into .harness/design-system.md' : 'nothing to merge');
+  ok(merged ? `design guides merged into .harness/design-system.md${skipped.length ? ` (이미 병합 skip: ${skipped.join(', ')})` : ''}` : (skipped.length ? `nothing to merge (이미 전부 병합됨: ${skipped.join(', ')})` : 'nothing to merge'));
 }
 
 // 1.9.2: self check를 update --check의 thin wrapper로 통합 (단일 출처).
@@ -15526,12 +15575,16 @@ function releaseBump(root) {
   if (!exists(pkgFile)) return fail('package.json 없음');
   let pkg; try { pkg = JSON.parse(read(pkgFile)); } catch (e) { return fail('package.json 파싱 실패: ' + e.message); }
   const cur = String(pkg.version || '0.0.0');
-  const parts = cur.split('.').map(n => parseInt(n, 10) || 0);
-  const [maj, min, pat] = [parts[0]||0, parts[1]||0, parts[2]||0];
+  // 1.36.42 (codex 5차 #6): (a) 비 semver("banana")를 0.0.0 으로 오인해 0.0.1 로 덮어쓰던 것 → 거부.
+  //   (b) prerelease patch bump 는 npm 의미론(1.2.3-beta.2 → 1.2.3: pre 태그 제거=안정화)을 따름.
+  const _vm = cur.match(/^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?$/);
+  if (!_vm) { failJson(has('--json'), 'invalid_version', `package.json version 이 semver 가 아님: "${cur}" — bump 거부(수동 교정 필요)`); return; }
+  const [maj, min, pat] = [parseInt(_vm[1], 10), parseInt(_vm[2], 10), parseInt(_vm[3], 10)];
+  const isPre = !!_vm[4];
   let next;
-  if (kind === 'major') next = `${maj + 1}.0.0`;
-  else if (kind === 'minor') next = `${maj}.${min + 1}.0`;
-  else next = `${maj}.${min}.${pat + 1}`;
+  if (kind === 'major') next = isPre && min === 0 && pat === 0 ? `${maj}.0.0` : `${maj + 1}.0.0`;
+  else if (kind === 'minor') next = isPre && pat === 0 ? `${maj}.${min}.0` : `${maj}.${min + 1}.0`;
+  else next = isPre ? `${maj}.${min}.${pat}` : `${maj}.${min}.${pat + 1}`;
   pkg.version = next;
   writeUtf8(pkgFile, JSON.stringify(pkg, null, 2) + '\n');
   const hv = path.join(root, '.harness/HARNESS_VERSION');
@@ -15542,6 +15595,9 @@ function releaseBump(root) {
 function releaseNote(root, text) {
   root = absRoot(root);
   if (!text) return fail('note text required (e.g., release note "내용")');
+  // 1.36.42 (codex 5차 #6b): 개행 포함 노트가 CHANGELOG 에 가짜 버전 헤더("## 9.9.9 …")를 만들 수 있었음 —
+  //   멀티라인은 한 리스트 항목의 연속 들여쓰기로 정규화(헤더 문자로 시작하는 줄도 텍스트로 유지).
+  text = String(text).replace(/\r\n?/g, '\n').split('\n').map((l, i) => i === 0 ? l : '  ' + l.replace(/^#+\s*/, '')).join('\n');
   const pkgFile = path.join(root, 'package.json');
   let version = 'unknown';
   if (exists(pkgFile)) { try { version = JSON.parse(read(pkgFile)).version || 'unknown'; } catch {} }

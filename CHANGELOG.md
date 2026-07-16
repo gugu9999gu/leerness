@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.36.42 — 2026-07-16 — 판정 정직화 배치 C — codex 5차 헌트 10건 전건 처분 완결 (#4~#10)
+
+- **#4 agent-mode**: 3개 자식 전부 실패해도 "자율 라운드 진행 준비" 선언 + exit 0 — 전부 실패=exit 1, 부분 실패=⚠ 명시, tick/stop 자식 실패 전파, 미지 하위명령 exit 1.
+- **#5 orchestrate**: `--agents NaN/0/-1` 이 조용히 1로 화하고 전원 실패에도 exit 0 → 정수 1~256 검증(`invalid_agents`) + 성공 0=exit 1.
+- **#6 release bump/note**: "banana" 를 0.0.1 로 덮어쓰기 → semver 검증 후 거부(`invalid_version`, 원본 보존) · prerelease 는 npm 의미론(1.2.3-beta.2→1.2.3 안정화) · 멀티라인 노트가 CHANGELOG 에 가짜 버전 헤더를 만들던 것 → 한 리스트 항목으로 정규화.
+- **#7 consistency merge-design-guide**: `--dry-run` 실기록 + 재실행마다 중복 append → dry-run 무기록 + 소스별 멱등(이미 병합 skip 표시).
+- **#8 whats-new `--to`**: value-flag 미등록으로 값이 positional 경로로 흡수돼 **엉뚱한(패키지 내장) CHANGELOG 를 읽던 것** → 등록. 실측: --to 지정 시에도 로컬 CHANGELOG.
+- **#9 lens 커스텀**: 손상 quality-lenses.json 무언 무시 → 경고 노출(advisory 유지) · `constructor` 도메인명이 프로토타입 상속 키로 오인돼 크래시 → 자기 소유 키 검사.
+- **#10 register-pending `--json`**: 사람용 3줄이 JSON 앞에 섞여 파서 실패 → 단일 JSON 문서. (review/persona/guide 의 JSON 계약은 별도 라운드 — 출력 구조 재설계 필요라 이연 명기.)
+- **검증**: selftest 312/312, 13케이스 일괄 실증 스크립트 전부 ✓, exit 전파형 게이트 e2e, 클린룸. **codex 5차 10건 전건 처분(수정 10, guide-json 만 부분 이연).**
+
 ## 1.36.41 — 2026-07-16 — 데이터 보존 3종 2차 — .mcp.json 손상 중단 · register-pending 락 · glossary 마커 보존 (codex 5차 헌트 #1/#2/#3 High)
 
 5차 헌트(adapter/ci/orchestrate/guide/doctor/glossary/consistency/release/lens 표면)의 High 3건 — 전부 기존 결함 클래스의 새 발화점:
