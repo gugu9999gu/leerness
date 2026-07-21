@@ -1,0 +1,17 @@
+{
+  "name": "feature-implementation",
+  "displayNameKo": "기능 구현 표준 스킬",
+  "version": "1.0.0",
+  "lastUpdated": "2026-05-08",
+  "verification": {
+    "status": "passed",
+    "method": "leerness-curated"
+  },
+  "capabilities": [
+    "feature-contracts 작성",
+    "재사용 우선 검사",
+    "테스트 증거 수집",
+    "핸드오프 트리거"
+  ],
+  "_source": "builtin"
+}

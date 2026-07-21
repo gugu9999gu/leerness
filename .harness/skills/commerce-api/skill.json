@@ -1,0 +1,17 @@
+{
+  "name": "commerce-api",
+  "displayNameKo": "커머스 API 연동 스킬 라이브러리",
+  "version": "1.0.0",
+  "lastUpdated": "2026-05-08",
+  "verification": {
+    "status": "passed",
+    "method": "leerness-curated"
+  },
+  "capabilities": [
+    "쿠팡·롯데온·스마트스토어 API 연동 설계",
+    "주문/상품/매출 동기화",
+    "환경변수 기반 인증 분리",
+    "레이트리밋/재시도/오류 처리"
+  ],
+  "_source": "builtin"
+}

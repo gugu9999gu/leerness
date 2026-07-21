@@ -1,0 +1,32 @@
+{
+  "mode": "basic",
+  "filesystem": {
+    "read": true,
+    "write": true,
+    "restrictTo": [
+      ".harness/",
+      "progress-tracker.md",
+      "session-handoff.md"
+    ],
+    "delete": false
+  },
+  "shell": {
+    "exec": false,
+    "allowList": []
+  },
+  "network": {
+    "fetch": false,
+    "outboundAllowList": []
+  },
+  "mouse": false,
+  "keyboard": false,
+  "browser": false,
+  "admin": false,
+  "requireConfirmation": [
+    "shell.exec",
+    "filesystem.delete",
+    "network.fetch"
+  ],
+  "generatedAt": "2026-06-17T00:27:09.153Z",
+  "leernessVersion": "1.32.0"
+}

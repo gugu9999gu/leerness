@@ -1,0 +1,21 @@
+{
+  "savedAt": "2026-06-19T12:22:41.010Z",
+  "nextRoundVersion": "next after 1.34.0",
+  "expectedFireAt": "2026-06-19T12:47:41.009Z",
+  "intervalMin": 25,
+  "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
+  "contextSnapshot": {
+    "currentVersion": "1.34.0",
+    "activeTaskId": null,
+    "activeTaskRequest": null,
+    "memorySurface": {
+      "tasksInProgress": 0,
+      "decisions": 4,
+      "rulesActive": 0,
+      "lessons": 14
+    },
+    "r0001Rule": "25분 간격 (사용자 명시, R-0001)"
+  },
+  "nextActions": [],
+  "note": "다음 wakeup 시: 1) leerness resume . 으로 plan 확인  2) leerness handoff . 실행  3) leerness next-action take 로 즉시 task 진입"
+}

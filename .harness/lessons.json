@@ -1,0 +1,72 @@
+[
+  {
+    "date": "2026-06-08",
+    "text": "치명적 교훈: 테스트 셸 스크립트에서 cd temp 후 rm -rf 하면 다음 명령 cwd 가 repo 로 리셋됨 → 그 시점의 git add -A/git commit/leerness init/writeFileSync('package.json') 이 repo 를 오염시킴(stray 'init' 커밋 d7e26b8: package.json 0.0.1 오염+.harness/roadmap.html/routes/tests 유입). 회복: 내 bin 백업→reset --hard <good>→bin 복원. 예방: 검증 스크립트는 (a) 서브셸 ( cd $W && ... ) 로 격리, (b) git 명령에 -C $W 또는 절대경로, (c) repo 에서 leerness init/git commit 절대 금지, (d) 매 라운드 git status 로 repo 오염 확인.",
+    "tag": null
+  },
+  {
+    "date": "2026-06-08",
+    "text": "교훈2: leerness-pkg 자체 .harness/user-requests.json 은 매 라운드 specific-file git add(bin/package/CHANGELOG)만 해서 한 번도 커밋 안 됨 → 누적 working state. stray 커밋 복구(reset --hard)가 이를 ebfde2b(빈 상태)로 되돌려 UR-0001~0183 tracker 유실. 영향: 비치명적(UR 정본은 CHANGELOG+git 커밋메시지). 교훈: UR tracker 는 보조기록일 뿐, 정본은 CHANGELOG. 향후 repo dogfood .harness 를 보존하려면 별도 커밋 정책 필요(현 미적용).",
+    "tag": null
+  },
+  {
+    "date": "2026-06-09",
+    "text": "JS .map(fn) 은 콜백에 (요소, index, 배열) 3개를 전달 — 기본 인자(예: max=40)가 있는 함수를 .map(fn) 으로 바로 넘기면 index 가 그 인자로 들어가 버그. 반드시 .map(x => fn(x)) 로 래핑. (영상 파이프라인 cleanVideoHighlight 가 index 로 잘려 쓰레기 출력한 사례)",
+    "tag": "video"
+  },
+  {
+    "date": "2026-06-09",
+    "text": "Windows 에서 cp.spawnSync 로 .cmd(예: npx) 실행 시 shell:false 면 ENOENT/무출력 실패. shell:true + 경로 JSON.stringify 인용으로 해결(공백 안전, 리눅스도 호환). verify-video 의 remotion ffprobe 폴백 사례.",
+    "tag": "video"
+  },
+  {
+    "date": "2026-06-09",
+    "text": "hyperframes: <audio> 는 id 필수(없으면 렌더 무음). gsap.from(opacity:0) 는 CSS opacity:0 와 중복 금지(0→0 안보임 — inline opacity 제거). BGM/SFX 는 다른 track-index. npm run check 의 validate/inspect 는 Chrome 필요(로컬엔 lint 만). lint 가 이 3실수를 배포 전 전부 잡음.",
+    "tag": "video"
+  },
+  {
+    "date": "2026-06-09",
+    "text": "gh 다계정 환경: 활성 계정이 collaborator(읽기전용)로 drift 하면 git push 가 403 'Permission denied to <user>'. gh auth status 로 활성 계정 확인 → gh auth switch --user <owner> 로 전환해 복구. 토큰 만료/rate 로 오인 말 것 — 권한(repos/.permissions.push) 직접 확인.",
+    "tag": "git"
+  },
+  {
+    "date": "2026-06-09",
+    "text": "HTML 컴포지션 한글: 인라인 style='font-family:mono'(유효하지 않은 family명)는 [style*=mono] CSS보다 우선순위 높아 fallback 무시 → 한글 글리프 없는 폰트로 빠져 공백. class 로 폰트 지정해야 .mono 규칙(JetBrains Mono, Noto Sans KR, monospace)의 한글 fallback 동작.",
+    "tag": "video"
+  },
+  {
+    "date": "2026-06-09",
+    "text": "CLI value-flag 추가 시 반드시 nonFlagArgs()의 withValue Set에도 등록. 누락하면 플래그 값이 positional로 남아 add류 제목/인자에 흡수됨(예: --done-when 값이 milestone 제목에 붙음). 신규 value-flag 추가 = withValue 등록 + 행위검증(제목 흡수 0) 한 쌍.",
+    "tag": "cli"
+  },
+  {
+    "date": "2026-06-09",
+    "text": "HyperFrames/CI Chrome 렌더: 유니코드 기호(✕✓↓ 등)는 로드 폰트(Noto Sans KR/JetBrains Mono)에 글리프 없으면 빈칸으로 렌더돼 안 보임. 인접 텍스트는 정상. 화살표/체크 등은 CSS도형(border삼각형)+텍스트 라벨로 대체할 것. 추출 프레임으로 직접 확인 필수.",
+    "tag": "video"
+  },
+  {
+    "date": "2026-06-09",
+    "text": "git push 후 반드시 origin/main==HEAD 정합 확인. CI가 published/rendered.json을 [skip ci]로 main에 커밋해 origin이 앞서면 push가 조용히 fast-forward 거부될 수 있고, 로컬 생성파일(data/*.json) 미스테이징이 rebase를 막음. 증상: '변경했는데 결과가 옛날'. 해결: 생성파일 checkout 폐기 → pull --rebase → push → 정합검증.",
+    "tag": "git"
+  },
+  {
+    "date": "2026-06-09",
+    "text": "버그헌트 에이전트 findings는 맹신 X — 각 건을 temp에서 직접 재현하고, '재현되지만 의도된 설계'(예: status --json healthy:false+exit0은 정보성 명령으로 healthyMeaning 명시됨)는 수정 제외. 재현=버그확정 아님, 설계의도 대조 필수.",
+    "tag": "process"
+  },
+  {
+    "date": "2026-06-09",
+    "text": "selftest 케이스에서 '부재(absent)'를 단언할 때 그 문자열 리터럴을 케이스 소스에 그대로 쓰면 src.includes가 자기 자신을 잡아 항상 실패(자기참조 trap). 분할 연결('.leern'+'ess..')로 회피. 반복 재발 — absent-단언은 항상 분할.",
+    "tag": "selftest"
+  },
+  {
+    "date": "2026-06-09",
+    "text": "default 적용을 'value || default' 로 할 때 공백-only 입력은 truthy라 default를 우회함 → 반드시 .trim() 후 판정. 또 줄단위 헤더 파서의 \\s* 는 개행까지 흡수해 빈 필드가 다음 줄을 먹으므로 [ \\t]* 로 한정.",
+    "tag": "parsing"
+  },
+  {
+    "date": "2026-06-10",
+    "text": "영상 변주 시스템: 무작위 금지 — 버전 해시 시드로 결정적 변주(같은 버전=같은 영상, 멱등). 단일 비트시프트 %2 는 버전 문자열 형식에서 심한 편향(left 33:3) → xor 믹싱 필수. 길이가 변하는 구성 도입 시 다운스트림 게이트(verify-video 15~21s 하드코딩)와 오디오 트랙 겹침(lint error) 사전 점검.",
+    "tag": "video"
+  }
+]

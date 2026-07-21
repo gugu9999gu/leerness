@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>leerness-pkg — leerness 로드맵</title>
+<style>
+  :root {
+    --lr-card-bg: #ffffff;
+    --lr-edge: #cbd5e1;
+    --lr-page-bg: #f8fafc;
+  }
+  body { font-family: var(--lr-font-body, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif); margin: 0; padding: 20px; background: var(--lr-page-bg); color: var(--lr-text); }
+  h1 { margin: 0 0 4px; font-size: 22px; color: var(--lr-primary, var(--lr-text, #0f172a)); }
+  h2 { margin: 24px 0 8px; font-size: 16px; color: var(--lr-muted, #334155); }
+  .meta { font-size: 11px; color: var(--lr-muted, #64748b); margin-left: 4px; }
+  .summary { display: flex; gap: 16px; flex-wrap: wrap; background: var(--lr-card-bg); padding: 12px 16px; border-radius: var(--lr-radius, 8px); border: 1px solid var(--lr-muted, #e2e8f0); font-size: 13px; }
+  .legend { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+  .badge, .chip { display: inline-block; padding: 2px 10px; border: 1.5px solid var(--lr-muted, #94a3b8); border-radius: 999px; font-size: 11px; font-weight: 500; background: var(--lr-card-bg); }
+  .chip { padding: 3px 10px; }
+  .block { background: var(--lr-card-bg); padding: 12px 16px; border-radius: var(--lr-radius, 8px); border: 1px solid var(--lr-muted, #e2e8f0); margin: 8px 0; }
+  .row { font-size: 13px; padding: 4px 0; border-bottom: 1px dashed var(--lr-muted, #f1f5f9); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .row:last-child { border-bottom: none; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .empty { font-size: 12px; color: var(--lr-muted, #94a3b8); font-style: italic; padding: 4px 0; }
+  .roadmap-wrap { position: relative; background: var(--lr-card-bg); border-radius: var(--lr-radius, 8px); border: 1px solid var(--lr-muted, #e2e8f0); height: 640px; overflow: hidden; cursor: grab; }
+  .roadmap-wrap.grabbing { cursor: grabbing; }
+  .roadmap-wrap svg { display: block; width: 100%; height: 100%; }
+  .node:hover rect:first-of-type { fill: var(--lr-page-bg, #f1f5f9); cursor: pointer; }
+  .node text { user-select: none; pointer-events: none; }
+  .controls { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; background: var(--lr-card-bg); padding: 6px; border-radius: 8px; border: 1px solid var(--lr-muted, #e2e8f0); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .controls button { width: 32px; height: 32px; border: 1px solid var(--lr-muted, #cbd5e1); background: var(--lr-card-bg); color: var(--lr-text); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px; }
+  .controls button:hover { background: var(--lr-page-bg); }
+  .footer { color: var(--lr-muted, #94a3b8); font-size: 11px; text-align: right; margin-top: 16px; }
+  .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .columns { grid-template-columns: 1fr; } }
+</style></head>
+<body>
+  <h1>leerness-pkg — leerness 로드맵</h1>
+  <div class="meta">자동 생성 · 2026-07-14 08:33 · leerness v1.32.0</div>
+  <div class="summary">
+    <div><strong>milestones:</strong> 6</div>
+    <div><strong>tasks:</strong> 21</div>
+    <div><strong>skills:</strong> 5</div>
+    <div><strong>active rules:</strong> 0</div>
+    <div><strong>decisions:</strong> 10</div>
+    <div><strong>design tokens:</strong> 1</div>
+  </div>
+  <div class="legend"><span class="badge" style="border-color:#16a34a;color:#16a34a">완료</span> <span class="badge" style="border-color:#2563eb;color:#2563eb">진행</span> <span class="badge" style="border-color:#6b7280;color:#6b7280">보류</span> <span class="badge" style="border-color:#eab308;color:#eab308">검토</span> <span class="badge" style="border-color:#f97316;color:#f97316">미완료</span> <span class="badge" style="border-color:#94a3b8;color:#94a3b8">예정</span> <span class="badge" style="border-color:#dc2626;color:#dc2626">오류</span> <span class="badge" style="border-color:#8b5cf6;color:#8b5cf6">스킬</span> <span class="badge" style="border-color:#06b6d4;color:#06b6d4">룰</span></div>
+  <div class="legend"><span class="chip" style="border-color:#16a34a;color:#16a34a">완료 15</span> <span class="chip" style="border-color:#2563eb;color:#2563eb">진행 0</span> <span class="chip" style="border-color:#6b7280;color:#6b7280">보류 0</span> <span class="chip" style="border-color:#eab308;color:#eab308">검토 0</span> <span class="chip" style="border-color:#f97316;color:#f97316">미완료 0</span> <span class="chip" style="border-color:#94a3b8;color:#94a3b8">예정 2</span> <span class="chip" style="border-color:#dc2626;color:#dc2626">오류 0</span></div>
+  <h2>📍 Current State</h2>
+  <div class="block">
+    <div class="row"><strong>Now:</strong> - 대기 중</div>
+    <div class="row"><strong>Next:</strong> - 프로젝트 계획 정리</div>
+    <div class="row"><strong>Blockers:</strong> -</div>
+  </div>
+  <h2>🗺️ Roadmap — 화이트보드 (드래그 panning · 휠 zoom · 더블클릭 reset)</h2>
+  <div class="roadmap-wrap" id="roadmap-board">
+    <svg id="roadmap-svg" viewBox="0 0 1240 1872" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+      <g class="viewport">
+        <g class="edges"><path d="M 260,936 C 295,936 295,721 330,721" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 295,936 295,807 330,807" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 295,936 295,893 330,893" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 295,936 295,979 330,979" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 295,936 295,1065 330,1065" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 295,936 295,1151 330,1151" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 550,721 C 585,721 585,76 620,76" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,162 620,162" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,248 620,248" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,334 620,334" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,420 620,420" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,506 620,506" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,592 620,592" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+
+<path d="M 260,936 C 440,936 440,764 620,764" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 550,807 C 585,807 585,850 620,850" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,936 620,936" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,1022 620,1022" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,1108 620,1108" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,1194 620,1194" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,1280 620,1280" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 550,1065 C 585,1065 585,1366 620,1366" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,1452 620,1452" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,1538 620,1538" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,1624 620,1624" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,1710 620,1710" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 440,936 440,1796 620,1796" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 585,936 585,764 910,764" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 585,936 585,850 910,850" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 585,936 585,936 910,936" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 585,936 585,1022 910,1022" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/>
+<path d="M 260,936 C 585,936 585,1108 910,1108" stroke="var(--lr-edge, #cbd5e1)" stroke-width="1.5" fill="none"/></g>
+        <g class="nodes"><g class="node node-project status-meta" data-id="project" transform="translate(40,900)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#0f172a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#0f172a"/>
+      <text x="14" y="22" font-size="12" fill="#0f172a" font-weight="600">leerness-pkg · 프로젝트</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">leerness 1.32.0</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">M 6 · T 21 · S 5</text>
+      <title>project — leerness 1.32.0
+M 6 · T 21 · S 5</title>
+    </g>
+<g class="node node-milestone status-planned" data-id="M-0001" transform="translate(330,685)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">M-0001 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">프로젝트 계획 정리</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">0% · planned</text>
+      <title>M-0001 — 프로젝트 계획 정리
+0% · planned</title>
+    </g>
+<g class="node node-milestone status-planned" data-id="M-0002" transform="translate(330,771)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">M-0002 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">Adversarial review of v1.36.1…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">0% · planned</text>
+      <title>M-0002 — Adversarial review of v1.36.18 P2-6 masking, P3-8 compact handoff, P1-2 10k ID parsing: source audit plus scratch reproduction
+0% · planned</title>
+    </g>
+<g class="node node-milestone status-planned" data-id="M-0003" transform="translate(330,857)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">M-0003 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">Focused _maskCommentsStrings …</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">0% · planned</text>
+      <title>M-0003 — Focused _maskCommentsStrings adversarial re-review: nested templates, regex ambiguity, and contract false-fail reproduction
+0% · planned</title>
+    </g>
+<g class="node node-milestone status-planned" data-id="M-0004" transform="translate(330,943)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">M-0004 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">T-0013: Probe _maskCommentsSt…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">0% · planned</text>
+      <title>M-0004 — T-0013: Probe _maskCommentsStrings/_REGEX_KW only for concrete false-missing regressions
+0% · planned</title>
+    </g>
+<g class="node node-milestone status-planned" data-id="M-0005" transform="translate(330,1029)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">M-0005 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">FINAL convergence check: real…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">0% · planned</text>
+      <title>M-0005 — FINAL convergence check: realistic contract-verify false-fails in _maskCommentsStrings only
+0% · planned</title>
+    </g>
+<g class="node node-milestone status-planned" data-id="M-0007" transform="translate(330,1115)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">M-0007 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">Final line-leading-only _mask…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">100% · completed</text>
+      <title>M-0007 — Final line-leading-only _maskComments adversarial review
+100% · completed</title>
+    </g>
+<g class="node node-task status-planned" data-id="T-0001" transform="translate(620,40)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">T-0001 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">프로젝트 계획 정리</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: init default plan:M-0001</text>
+      <title>T-0001 — 프로젝트 계획 정리
+evidence: init default plan:M-0001</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0002" transform="translate(620,126)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0002 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">1.36.4~1.36.11 릴리스 아크: DB렌즈 r…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: npm 8연속 배포 1.36.4-1.36.11…</text>
+      <title>T-0002 — 1.36.4~1.36.11 릴리스 아크: DB렌즈 recall + 정직성 감사 3연 + handoff 넛지 + optimism/백슬래시 FP + 17th 클린룸 4/4
+evidence: npm 8연속 배포 1.36.4-1.36.11 (커밋 c3eed30..4</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0003" transform="translate(620,212)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0003 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">playbook 역이식 — 9라운드 현장 검증에서 나…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: bin/leerness.js database …</text>
+      <title>T-0003 — playbook 역이식 — 9라운드 현장 검증에서 나온 헌트 질문을 코어 database 렌즈에 추가 (KO+EN, selftest 가드 갱신, 게이트+배포)
+evidence: bin/leerness.js database 렌즈 8→10문항(KO=EN</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0004" transform="translate(620,298)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0004 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">partial 16건 디버그: Q6 확장(dirty …</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: bin/leerness.js Q6 확장(dir…</text>
+      <title>T-0004 — partial 16건 디버그: Q6 확장(dirty read+MVCC 가시성) + Q12 신설(상태 전이-이벤트 순서-inbox 멱등) — 매트릭스 부분판정 6요소 full 승격 (1.36.15)
+evidence: bin/leerness.js Q6 확장(dirty read+MVCC/스냅</title>
+    </g>
+<g class="node node-task status-planned" data-id="T-0005" transform="translate(620,384)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">T-0005 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">게시본 1.36.13~1.36.15 누적 신규 표면 …</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: user-request</text>
+      <title>T-0005 — 게시본 1.36.13~1.36.15 누적 신규 표면 클린룸 리뷰 (database 렌즈 8→12문항, cap 16, selftest 앵커) — codex 적대 검증 + 맹신 X
+evidence: user-request</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0006" transform="translate(620,470)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0006 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">게시본 1.36.15 클린룸 codex 9건 채택: …</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: bin/leerness.js Q6/Q9/Q11…</text>
+      <title>T-0006 — 게시본 1.36.15 클린룸 codex 9건 채택: Q6 MVCC/BUSY_SNAPSHOT 정직화, Q9 세대카운터 모순수정(제거X→유지), Q11 파티션≠순서/단일락≠데드락, Q12 버전조건 조건부화, selftest 앵커+병합가드 강화, 라벨 11→12 (1.36.16)
+evidence: bin/leerness.js Q6/Q9/Q11/Q12 정직화(KO=EN)</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0007" transform="translate(620,556)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0007 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">렌즈-외 표면 버그헌트 (게시본 1.36.16) — …</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: bin/leerness.js + lib/ana…</text>
+      <title>T-0007 — 렌즈-외 표면 버그헌트 (게시본 1.36.16) — database 렌즈 아닌 CLI 표면(task/rule/decision/lesson 파이프라인, --json 에러경로, migrate, contract, handoff 넛지, shell-guard)의 correctness 결함 codex 적대 헌트 + 맹신 X
+evidence: bin/leerness.js + lib/analyzers.js 6수정: </title>
+    </g>
+<g class="node node-task status-done" data-id="T-0008" transform="translate(620,642)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0008 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">UR-0052 이연 3건 처리: P2-6 contra…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: UR-0052 이연 3건 처리: P3-8 ha…</text>
+      <title>T-0008 — UR-0052 이연 3건 처리: P2-6 contract verify 주석/문자열 마스킹, P3-8 handoff --compact 단일 워크스페이스 분기, P1-2 10k+ ID 리더 \d{4,} 일괄(날짜 무영향)
+evidence: UR-0052 이연 3건 처리: P3-8 handoff --compact</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0009" transform="translate(620,728)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0009 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">Adversarially review P2-6 mas…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: Adversarial working-tree …</text>
+      <title>T-0009 — Adversarially review P2-6 masking, P3-8 compact handoff, and P1-2 ID widening in working tree; reproduce concrete bugs or refute.
+evidence: Adversarial working-tree review: reprodu</title>
+    </g>
+<g class="node node-task status-planned" data-id="T-0010" transform="translate(620,814)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#94a3b8" stroke-width="2"/>
+      <rect width="5" height="72" fill="#94a3b8"/>
+      <text x="14" y="22" font-size="12" fill="#94a3b8" font-weight="600">T-0010 · 예정</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">Adversarial review of v1.36.1…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: plan:M-0002</text>
+      <title>T-0010 — Adversarial review of v1.36.18 P2-6 masking, P3-8 compact handoff, P1-2 10k ID parsing: source audit plus scratch reproduction
+evidence: plan:M-0002</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0011" transform="translate(620,900)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0011 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">Focused adversarial re-review…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: P1 reproduced: contract v…</text>
+      <title>T-0011 — Focused adversarial re-review of _maskCommentsStrings rewrite: reproduce or refute concrete false-fails only
+evidence: P1 reproduced: contract verify JSON fals</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0012" transform="translate(620,986)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0012 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">Focused _maskCommentsStrings …</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: Focused re-review complet…</text>
+      <title>T-0012 — Focused _maskCommentsStrings adversarial re-review: nested templates, regex ambiguity, and contract false-fail reproduction
+evidence: Focused re-review complete: 3 independen</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0013" transform="translate(620,1072)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0013 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">Final convergence check on _m…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: Node direct helper reprod…</text>
+      <title>T-0013 — Final convergence check on _maskCommentsStrings and _REGEX_KW: reproduce or refute concrete false-fails only; do not audit repo.
+evidence: Node direct helper reproduction: valid t</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0014" transform="translate(620,1158)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0014 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">T-0013: Probe _maskCommentsSt…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: Focused single-function c…</text>
+      <title>T-0014 — T-0013: Probe _maskCommentsStrings/_REGEX_KW only for concrete false-missing regressions
+evidence: Focused single-function convergence revi</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0015" transform="translate(620,1244)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0015 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">FINAL convergence check on _m…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: Read-only CLI reproductio…</text>
+      <title>T-0015 — FINAL convergence check on _maskCommentsStrings(src) in lib/pure-utils.js: report only realistic false-fails in contract verify.
+evidence: Read-only CLI reproductions: bracket Com</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0016" transform="translate(620,1330)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0016 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">FINAL convergence check: real…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: M-0005 review plan execut…</text>
+      <title>T-0016 — FINAL convergence check: realistic contract-verify false-fails in _maskCommentsStrings only
+evidence: M-0005 review plan executed; independent</title>
+    </g>
+<g class="node node-task status-dropped" data-id="T-0017" transform="translate(620,1416)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#9ca3af" stroke-width="2"/>
+      <rect width="5" height="72" fill="#9ca3af"/>
+      <text x="14" y="22" font-size="12" fill="#9ca3af" font-weight="600">T-0017 · 취소</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">FINAL review of redesigned _m…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: 사용자 요청으로 제외</text>
+      <title>T-0017 — FINAL review of redesigned _maskComments: realistic false-blank, missed-comment, caller-integration, and crash/hang defects only
+evidence: 사용자 요청으로 제외</title>
+    </g>
+<g class="node node-task status-dropped" data-id="T-0018" transform="translate(620,1502)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#9ca3af" stroke-width="2"/>
+      <rect width="5" height="72" fill="#9ca3af"/>
+      <text x="14" y="22" font-size="12" fill="#9ca3af" font-weight="600">T-0018 · 취소</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">T-0017 _maskComments final ad…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: 사용자 요청으로 제외</text>
+      <title>T-0018 — T-0017 _maskComments final adversarial review: realistic false-blank, missed-comment, caller-integration, and hang checks
+evidence: 사용자 요청으로 제외</title>
+    </g>
+<g class="node node-task status-dropped" data-id="T-0019" transform="translate(620,1588)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#9ca3af" stroke-width="2"/>
+      <rect width="5" height="72" fill="#9ca3af"/>
+      <text x="14" y="22" font-size="12" fill="#9ca3af" font-weight="600">T-0019 · 취소</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">FINAL adversarial review of r…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: 사용자 요청으로 제외</text>
+      <title>T-0019 — FINAL adversarial review of redesigned line-leading-only _maskComments: realistic false-BLANK, missed full-line comments, caller integration, and crash/hang
+evidence: 사용자 요청으로 제외</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0020" transform="translate(620,1674)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0020 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">Final line-leading-only _mask…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: Read-only audit reproduce…</text>
+      <title>T-0020 — Final line-leading-only _maskComments adversarial review
+evidence: Read-only audit reproduced 5 valid-JS de</title>
+    </g>
+<g class="node node-task status-done" data-id="T-0021" transform="translate(620,1760)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#16a34a" stroke-width="2"/>
+      <rect width="5" height="72" fill="#16a34a"/>
+      <text x="14" y="22" font-size="12" fill="#16a34a" font-weight="600">T-0021 · 완료</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">Review _maskComments for fals…</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">evidence: Read-only audit reproduce…</text>
+      <title>T-0021 — Review _maskComments for false blanking, missed full-line comments, caller integration, crashes, and hangs
+evidence: Read-only audit reproduced 5 valid-JS de</title>
+    </g>
+<g class="node node-skill status-skill" data-id="skill:ai-verified-skill-publisher" transform="translate(910,728)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#8b5cf6" stroke-width="2"/>
+      <rect width="5" height="72" fill="#8b5cf6"/>
+      <text x="14" y="22" font-size="12" fill="#8b5cf6" font-weight="600">ai-verified-skill-publisher · 스킬</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">AI 검증 스킬 업로드·라이브러리화 스킬</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">사용 0회 · cap 4</text>
+      <title>skill:ai-verified-skill-publisher — AI 검증 스킬 업로드·라이브러리화 스킬
+사용 0회 · cap 4</title>
+    </g>
+<g class="node node-skill status-skill" data-id="skill:commerce-api" transform="translate(910,814)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#8b5cf6" stroke-width="2"/>
+      <rect width="5" height="72" fill="#8b5cf6"/>
+      <text x="14" y="22" font-size="12" fill="#8b5cf6" font-weight="600">commerce-api · 스킬</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">커머스 API 연동 스킬 라이브러리</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">사용 0회 · cap 4</text>
+      <title>skill:commerce-api — 커머스 API 연동 스킬 라이브러리
+사용 0회 · cap 4</title>
+    </g>
+<g class="node node-skill status-skill" data-id="skill:feature-implementation" transform="translate(910,900)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#8b5cf6" stroke-width="2"/>
+      <rect width="5" height="72" fill="#8b5cf6"/>
+      <text x="14" y="22" font-size="12" fill="#8b5cf6" font-weight="600">feature-implementation · 스킬</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">기능 구현 표준 스킬</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">사용 0회 · cap 4</text>
+      <title>skill:feature-implementation — 기능 구현 표준 스킬
+사용 0회 · cap 4</title>
+    </g>
+<g class="node node-skill status-skill" data-id="skill:office" transform="translate(910,986)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#8b5cf6" stroke-width="2"/>
+      <rect width="5" height="72" fill="#8b5cf6"/>
+      <text x="14" y="22" font-size="12" fill="#8b5cf6" font-weight="600">office · 스킬</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">마이크로소프트 오피스 자동화 스킬 라이브러리</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">사용 0회 · cap 4</text>
+      <title>skill:office — 마이크로소프트 오피스 자동화 스킬 라이브러리
+사용 0회 · cap 4</title>
+    </g>
+<g class="node node-skill status-skill" data-id="skill:project-roadmap-generator" transform="translate(910,1072)">
+      <rect width="220" height="72" rx="8" ry="8" fill="var(--lr-card-bg, #ffffff)" stroke="#8b5cf6" stroke-width="2"/>
+      <rect width="5" height="72" fill="#8b5cf6"/>
+      <text x="14" y="22" font-size="12" fill="#8b5cf6" font-weight="600">project-roadmap-generator · 스킬</text>
+      <text x="14" y="42" font-size="11" fill="var(--lr-text, #1f2937)" font-weight="500">프로젝트 로드맵 자동 생성 스킬</text>
+      <text x="14" y="60" font-size="10" fill="var(--lr-muted, #64748b)">사용 0회 · cap 6</text>
+      <title>skill:project-roadmap-generator — 프로젝트 로드맵 자동 생성 스킬
+사용 0회 · cap 6</title>
+    </g></g>
+      </g>
+    </svg>
+    <div class="controls"><button onclick="lrZoom(0.9)">−</button><button onclick="lrZoom(1.1)">＋</button><button onclick="lrReset()">⟳</button></div>
+  </div>
+  <div class="columns">
+    <div>
+      <h2>🎯 Milestones (6)</h2><div class="block"><div class="row"><span class="dot" style="background:#94a3b8"></span><strong>M-0001</strong> <span class="meta">[planned · 0%]</span> 프로젝트 계획 정리</div><div class="row"><span class="dot" style="background:#94a3b8"></span><strong>M-0002</strong> <span class="meta">[planned · 0%]</span> Adversarial review of v1.36.18 P2-6 masking, P3-8 compact handoff, P1-2 10k ID parsing: source audit plus scratch reproduction</div><div class="row"><span class="dot" style="background:#94a3b8"></span><strong>M-0003</strong> <span class="meta">[planned · 0%]</span> Focused _maskCommentsStrings adversarial re-review: nested templates, regex ambiguity, and contract false-fail reproduction</div><div class="row"><span class="dot" style="background:#94a3b8"></span><strong>M-0004</strong> <span class="meta">[planned · 0%]</span> T-0013: Probe _maskCommentsStrings/_REGEX_KW only for concrete false-missing regressions</div><div class="row"><span class="dot" style="background:#94a3b8"></span><strong>M-0005</strong> <span class="meta">[planned · 0%]</span> FINAL convergence check: realistic contract-verify false-fails in _maskCommentsStrings only</div><div class="row"><span class="dot" style="background:#94a3b8"></span><strong>M-0007</strong> <span class="meta">[completed · 100%]</span> Final line-leading-only _maskComments adversarial review</div></div>
+      <h2>📌 다음 예정 작업</h2><div class="block"><div class="row"><span class="dot" style="background:#94a3b8"></span><strong>T-0001</strong> <span class="meta">[예정]</span> 프로젝트 계획 정리 <span class="meta">→ project-brief.md를 실제 목적으로 업데이트</span></div><div class="row"><span class="dot" style="background:#000"></span><strong>T-0005</strong> <span class="meta">[requested]</span> 게시본 1.36.13~1.36.15 누적 신규 표면 클린룸 리뷰 (database 렌즈 8→12문항, cap 16, selftest 앵커) — codex 적대 검증 + 맹신 X <span class="meta">→ 다음 액션 작성</span></div><div class="row"><span class="dot" style="background:#94a3b8"></span><strong>T-0010</strong> <span class="meta">[예정]</span> Adversarial review of v1.36.18 P2-6 masking, P3-8 compact handoff, P1-2 10k ID parsing: source audit plus scratch reproduction <span class="meta">→ 다음 액션 작성</span></div></div>
+      <h2>📚 보유 스킬 (5)</h2><div class="block"><div class="row"><span class="dot" style="background:#8b5cf6"></span><strong>ai-verified-skill-publisher</strong> · AI 검증 스킬 업로드·라이브러리화 스킬 <span class="meta">사용 0회 · cap 4</span></div><div class="row"><span class="dot" style="background:#8b5cf6"></span><strong>commerce-api</strong> · 커머스 API 연동 스킬 라이브러리 <span class="meta">사용 0회 · cap 4</span></div><div class="row"><span class="dot" style="background:#8b5cf6"></span><strong>feature-implementation</strong> · 기능 구현 표준 스킬 <span class="meta">사용 0회 · cap 4</span></div><div class="row"><span class="dot" style="background:#8b5cf6"></span><strong>office</strong> · 마이크로소프트 오피스 자동화 스킬 라이브러리 <span class="meta">사용 0회 · cap 4</span></div><div class="row"><span class="dot" style="background:#8b5cf6"></span><strong>project-roadmap-generator</strong> · 프로젝트 로드맵 자동 생성 스킬 <span class="meta">사용 0회 · cap 6</span></div></div>
+    </div>
+    <div>
+      <h2>⚡ Active Rules (0)</h2><div class="block"><div class="empty">활성 룰 없음</div></div>
+      <h2>🧠 최근 결정</h2><div class="block"><div class="row"><span class="dot" style="background:var(--lr-text, #0f172a)"></span>YYYY-MM-DD — Decision 제목</div><div class="row"><span class="dot" style="background:var(--lr-text, #0f172a)"></span>2026-06-08 — 용어집/가이드 기능 설계 결론(외부 AI 3-에이전트 평가 종합): 광범위 버전(가이드+기능맵+프로젝트설명)은 brief/feature-graph/context-map/guide/api-skill 와 ~70-80% 중복이라 제외. 유일한 진짜 공백 = &#39;의존성 용어집&#39;(package.json/requirements deps→비개발자용 한줄설명). 회의론자의 &#39;저품질&#39; 우려는 코드-식별자 정적추출(S2)엔 타당하나, 큐레이션 카탈로그(_TOOL_CATALOG, 기존 constraints 카탈로그처럼 ~30-50개 손작성)엔 미해당 — 고품질+무LLM+비중복. 사용자가 비개발자 명시 → 대상 검증됨.</div><div class="row"><span class="dot" style="background:var(--lr-text, #0f172a)"></span>2026-06-09 — 외부 리뷰는 &#39;블라인드&#39;로: README 를 물리적으로 숨기고(mv) leerness 소개 없이 코드/행위만 분석시켜 외부 분석가 관점 확보 → 그 결과로 README 재구성. 모델 지시 의존 대신 파일 제거로 강제(맹신 X).</div><div class="row"><span class="dot" style="background:var(--lr-text, #0f172a)"></span>2026-06-10 — 범용 AI 코딩 하네스 포지셔닝: 5축 클린룸 실증 결과 &#39;조건부 가능&#39; — 관리층(장부·인수인계·증거요구)은 즉시 범용, 검증층(테스트 실행·카운트)은 JS 전용이라 P1 2건 해소 후 &#39;범용 검증&#39; 표방. 당분간 포지셔닝 문구는 &#39;증거 없이는 끝났다고 말할 수 없게 만드는 작업 장부 하네스&#39;</div><div class="row"><span class="dot" style="background:var(--lr-text, #0f172a)"></span>2026-06-10 — 영상 변주 시스템 설계: Date.now/random 금지(멱등) — 버전 문자열 해시를 시드로 씬 구성(4종 스토리 구조)·카피 풀·스타일(배경/타이포/모션)·씬 길이를 결정적으로 변주. published.json 이력으로 직전 영상과 같은 변주면 시프트. verify-video 게이트 + 프리뷰 2버전 프레임 비교로 &#39;실제로 다름&#39; 검증</div><div class="row"><span class="dot" style="background:var(--lr-text, #0f172a)"></span>2026-07-09 — 정직성 감사→소진: 1.36.4 recall FN, 1.36.5 성숙도 판정 과장, 1.36.6 강제력/종합-health 문구 정직화</div></div>
+      <h2>🎨 디자인 토큰</h2><div class="block"><div class="row"><span class="dot" style="background:var(--lr-muted, #94a3b8)"></span><strong>Pattern</strong> <span class="meta">Where</span></div></div>
+    </div>
+  </div>
+  <div class="footer">leerness roadmap · v1.32.0 · 화이트보드 + 토큰 주입 + 상하 중앙정렬</div>
+  <script>
+  (function(){var svg=document.getElementById('roadmap-svg');var board=document.getElementById('roadmap-board');var vp=svg.querySelector('.viewport');var tx=0,ty=0,scale=1;var dragging=false,sx=0,sy=0;function apply(){vp.setAttribute('transform','translate('+tx+','+ty+') scale('+scale+')');}board.addEventListener('mousedown',function(e){if(e.target.closest&&(e.target.closest('.node')||e.target.closest('.controls')))return;dragging=true;sx=e.clientX-tx;sy=e.clientY-ty;board.classList.add('grabbing');e.preventDefault();});window.addEventListener('mousemove',function(e){if(!dragging)return;tx=e.clientX-sx;ty=e.clientY-sy;apply();});window.addEventListener('mouseup',function(){dragging=false;board.classList.remove('grabbing');});board.addEventListener('wheel',function(e){e.preventDefault();var d=e.deltaY>0?0.9:1.1;var rect=board.getBoundingClientRect();var cx=e.clientX-rect.left;var cy=e.clientY-rect.top;var ns=Math.max(0.3,Math.min(3.0,scale*d));var r=ns/scale;tx=cx-(cx-tx)*r;ty=cy-(cy-ty)*r;scale=ns;apply();},{passive:false});board.addEventListener('dblclick',function(){tx=0;ty=0;scale=1;apply();});window.lrZoom=function(d){scale=Math.max(0.3,Math.min(3.0,scale*d));apply();};window.lrReset=function(){tx=0;ty=0;scale=1;apply();};})();
+  </script>
+</body></html>

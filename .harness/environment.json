@@ -1,0 +1,88 @@
+{
+  "capturedAt": "2026-07-21T03:30:42.055Z",
+  "leernessVersion": "1.36.49",
+  "os": {
+    "platform": "win32",
+    "type": "Windows_NT",
+    "release": "10.0.26200",
+    "arch": "x64",
+    "version": "Windows 11 Pro"
+  },
+  "hardware": {
+    "cpuCount": 20,
+    "cpuModel": "Intel(R) Core(TM) Ultra 7 265K",
+    "totalMemoryGB": 127.4,
+    "freeMemoryGB": 87
+  },
+  "locale": {
+    "lang": null,
+    "encoding": "cp949(default)"
+  },
+  "shell": {
+    "name": "cmd.exe"
+  },
+  "node": {
+    "version": "v26.3.0",
+    "path": "C:\\Program Files\\nodejs\\node.exe"
+  },
+  "tools": {
+    "git": {
+      "version": "git version 2.54.0.windows.1",
+      "path": "C:\\Program Files\\Git\\cmd\\git.exe"
+    },
+    "python": {
+      "version": "Python 3.11.9",
+      "path": "C:\\Users\\<user>\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"
+    },
+    "python3": {
+      "version": "Python 3.11.9",
+      "path": "C:\\Users\\<user>\\AppData\\Local\\Microsoft\\WindowsApps\\python3.exe"
+    },
+    "pip": {
+      "version": "pip 26.1.2 from C:\\Users\\leehy\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\site-",
+      "path": "C:\\Users\\<user>\\AppData\\Local\\Programs\\Python\\Python311\\Scripts\\pip.exe"
+    },
+    "docker": {
+      "version": "Docker version 29.4.3, build 055a478",
+      "path": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker"
+    },
+    "gh": {
+      "version": "gh version 2.93.0 (2026-05-27)",
+      "path": "C:\\Program Files\\GitHub CLI\\gh.exe"
+    },
+    "java": {
+      "version": "openjdk version \"25.0.3\" 2026-04-21 LTS",
+      "path": "C:\\Program Files\\Eclipse Adoptium\\jdk-25.0.3.9-hotspot\\bin\\java.exe"
+    },
+    "rustc": {
+      "version": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+      "path": "C:\\Users\\<user>\\.cargo\\bin\\rustc.exe"
+    },
+    "cargo": {
+      "version": "cargo 1.96.0 (30a34c682 2026-05-25)",
+      "path": "C:\\Users\\<user>\\.cargo\\bin\\cargo.exe"
+    }
+  },
+  "scriptDependencies": [
+    {
+      "command": "node",
+      "foundInPath": true,
+      "usedBy": "test"
+    },
+    {
+      "command": "selftest",
+      "foundInPath": false,
+      "usedBy": "test:fast"
+    },
+    {
+      "command": "readme",
+      "foundInPath": false,
+      "usedBy": "prepack"
+    },
+    {
+      "command": "sync",
+      "foundInPath": false,
+      "usedBy": "prepack"
+    }
+  ]
+}

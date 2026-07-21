@@ -1,0 +1,440 @@
+{
+  "reports": [
+    {
+      "auditedAt": "2026-07-14T04:49:15.805Z",
+      "auditVersion": "1.36.16",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          },
+          {
+            "kind": "wakeup-missed",
+            "deltaMin": 41245,
+            "detail": "wakeup 41245분 지남 — 다음 라운드 진입 늦음"
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 14,
+            "detail": "14건 사용자 요청이 7일+ open 상태"
+          },
+          {
+            "kind": "auto-resume-plan-stale",
+            "detail": "plan 35546분 전 작성 — outdated 가능"
+          }
+        ],
+        "info": []
+      },
+      "summary": {
+        "criticalCount": 2,
+        "warningCount": 2,
+        "infoCount": 0,
+        "needsAttention": true
+      }
+    },
+    {
+      "auditedAt": "2026-07-14T05:33:21.401Z",
+      "auditVersion": "1.36.18",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          },
+          {
+            "kind": "wakeup-missed",
+            "deltaMin": 41681,
+            "detail": "wakeup 41681분 지남 — 다음 라운드 진입 늦음"
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 14,
+            "detail": "14건 사용자 요청이 7일+ open 상태"
+          },
+          {
+            "kind": "auto-resume-plan-stale",
+            "detail": "plan 35590분 전 작성 — outdated 가능"
+          }
+        ],
+        "info": []
+      },
+      "summary": {
+        "criticalCount": 2,
+        "warningCount": 2,
+        "infoCount": 0,
+        "needsAttention": true
+      }
+    },
+    {
+      "auditedAt": "2026-07-14T05:57:01.988Z",
+      "auditVersion": "1.36.16",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          },
+          {
+            "kind": "wakeup-missed",
+            "deltaMin": 42030,
+            "detail": "wakeup 42030분 지남 — 다음 라운드 진입 늦음"
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 14,
+            "detail": "14건 사용자 요청이 7일+ open 상태"
+          },
+          {
+            "kind": "auto-resume-plan-stale",
+            "detail": "plan 35614분 전 작성 — outdated 가능"
+          }
+        ],
+        "info": []
+      },
+      "summary": {
+        "criticalCount": 2,
+        "warningCount": 2,
+        "infoCount": 0,
+        "needsAttention": true
+      }
+    },
+    {
+      "auditedAt": "2026-07-14T06:15:32.794Z",
+      "auditVersion": "1.36.16",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          },
+          {
+            "kind": "wakeup-missed",
+            "deltaMin": 48873,
+            "detail": "wakeup 48873분 지남 — 다음 라운드 진입 늦음"
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 14,
+            "detail": "14건 사용자 요청이 7일+ open 상태"
+          },
+          {
+            "kind": "auto-resume-plan-stale",
+            "detail": "plan 35632분 전 작성 — outdated 가능"
+          }
+        ],
+        "info": []
+      },
+      "summary": {
+        "criticalCount": 2,
+        "warningCount": 2,
+        "infoCount": 0,
+        "needsAttention": true
+      }
+    },
+    {
+      "auditedAt": "2026-07-14T06:30:21.548Z",
+      "auditVersion": "1.36.16",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          },
+          {
+            "kind": "wakeup-missed",
+            "deltaMin": 50239,
+            "detail": "wakeup 50239분 지남 — 다음 라운드 진입 늦음"
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 14,
+            "detail": "14건 사용자 요청이 7일+ open 상태"
+          },
+          {
+            "kind": "auto-resume-plan-stale",
+            "detail": "plan 35647분 전 작성 — outdated 가능"
+          }
+        ],
+        "info": []
+      },
+      "summary": {
+        "criticalCount": 2,
+        "warningCount": 2,
+        "infoCount": 0,
+        "needsAttention": true
+      }
+    },
+    {
+      "auditedAt": "2026-07-14T06:50:59.645Z",
+      "auditVersion": "1.36.16",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 14,
+            "detail": "14건 사용자 요청이 7일+ open 상태"
+          },
+          {
+            "kind": "auto-resume-plan-stale",
+            "detail": "plan 35668분 전 작성 — outdated 가능"
+          }
+        ],
+        "info": []
+      },
+      "summary": {
+        "criticalCount": 1,
+        "warningCount": 2,
+        "infoCount": 0,
+        "needsAttention": true
+      }
+    },
+    {
+      "auditedAt": "2026-07-14T06:51:18.287Z",
+      "auditVersion": "1.36.16",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 14,
+            "detail": "14건 사용자 요청이 7일+ open 상태"
+          },
+          {
+            "kind": "auto-resume-plan-stale",
+            "detail": "plan 35668분 전 작성 — outdated 가능"
+          }
+        ],
+        "info": []
+      },
+      "summary": {
+        "criticalCount": 1,
+        "warningCount": 2,
+        "infoCount": 0,
+        "needsAttention": true
+      }
+    },
+    {
+      "auditedAt": "2026-07-14T07:20:03.841Z",
+      "auditVersion": "1.36.17",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 14,
+            "detail": "14건 사용자 요청이 7일+ open 상태"
+          },
+          {
+            "kind": "auto-resume-plan-stale",
+            "detail": "plan 35697분 전 작성 — outdated 가능"
+          }
+        ],
+        "info": []
+      },
+      "summary": {
+        "criticalCount": 1,
+        "warningCount": 2,
+        "infoCount": 0,
+        "needsAttention": true
+      }
+    },
+    {
+      "auditedAt": "2026-07-14T08:33:03.294Z",
+      "auditVersion": "1.36.18",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 14,
+            "detail": "14건 사용자 요청이 7일+ open 상태"
+          },
+          {
+            "kind": "auto-resume-plan-stale",
+            "detail": "plan 35770분 전 작성 — outdated 가능"
+          }
+        ],
+        "info": []
+      },
+      "summary": {
+        "criticalCount": 1,
+        "warningCount": 2,
+        "infoCount": 0,
+        "needsAttention": true
+      }
+    },
+    {
+      "auditedAt": "2026-07-17T00:40:24.093Z",
+      "auditVersion": "1.36.46",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 14,
+            "detail": "14건 사용자 요청이 7일+ open 상태"
+          },
+          {
+            "kind": "auto-resume-plan-stale",
+            "detail": "plan 39617분 전 작성 — outdated 가능"
+          }
+        ],
+        "info": []
+      },
+      "summary": {
+        "criticalCount": 1,
+        "warningCount": 2,
+        "infoCount": 0,
+        "needsAttention": true
+      }
+    }
+  ],
+  "updatedAt": "2026-07-17T00:40:24.097Z"
+}

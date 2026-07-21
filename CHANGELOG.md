@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.36.49 — 2026-07-21 — codex 6차 헌트: 신작 표면(1.36.28~48) 10건 전수 수정 (High 3 · Medium 5 · Low 2)
+
+이번 창에서 신설된 기능들(enforce/toggles/anchors/release note/JSON 계약)을 외부 적대 검증(codex, 30만 토큰) — 10건 발견, 10건 전수 재현 확정 후 전부 수정 (반박 0, DEFER 0).
+
+- **#1 High — rules 손상행 무언 삭제 재발 경로**: `nextRuleId` 가 파싱된 룰만 스캔해 손상행(셀 부족)의 R-id 가 새 룰에 재발급 → writeRules 보존 필터가 손상행을 기존 룰로 오인해 삭제(1.36.37 보존 로직이 지키려던 바로 그 행). 원시 파일의 모든 `| R-XXXX |` 를 카운트.
+- **#2 High — enforce check 손상 타임스탬프 통과**: `new Date('not-a-date')` → NaN → `NaN > window` 가 false 라 손상 last-handoff.json 이 강제를 통과("handoff NaNh 전"). fail-closed(Infinity 취급) + `--json` 성공 시 구조화 출력(종전 빈 stdout).
+- **#3 High — anchors 위험신호로 --apply 마다 파일 증식**: 개행/`##` 포함 package description 이 섹션 본문에 구조 마크다운으로 박혀 재적용 시 섹션 경계가 밀려 중복 증식. 신호 한 줄 정규화(`_oneLine`) + `_replaceMdSection` 본문 개행 평탄화 방어층.
+- **#4 — `## Goal` 헤딩 부재를 "작성됨"으로 오보**: 섹션 자체가 없으면 gap 미탐지 + --apply 무동작. 부재=gap + `appendIfMissing` 으로 헤딩 신설.
+- **#5 — toggle set 이 손상 toggles.json 을 기본값으로 리셋**: lens 하나 바꾸면 gate:false 가 무언 ON 복원. 변경 진입점 fail-closed(1.36.28 스토어 손상 클래스), 원본 보존.
+- **#6 — release note 정상 입력 2종 실패**: 대시 시작 노트("- first")가 nonFlagArgs 전역 필터에 걸려 입력 불가(원시 argv 복원으로 수정) + SemVer 빌드메타(`1.2.3+build.1`)의 `+` 미이스케이프로 같은 버전 헤딩 중복 생성(전체 regex 이스케이프).
+- **#7 — review --json 오류경로가 사람용 텍스트**: target/persona/파일 검증 실패 시 failJson 단일 JSON 계약 (target_required/persona_required/file_not_found/file_too_large/persona_not_found).
+- **#8 — 무효 --window 무언 보정 설치**: 0/NaN→24 무언 보정, 400자리 정수→`WIN_MIN=Infinity` 훅(상시 차단). 1~8760 정수 외 invalid_window 거부.
+- **#9 Low — 커밋 0개 저장소를 enforce audit 이 실패 처리**: unborn HEAD 를 git_log_failed 로 오분류 → `checked:0` 성공(no_commits).
+- **#10 Low — whats-new 역순 범위 빈 성공**: from > to 를 invalid_range 명시 오류로.
+- 검증: 재현→수정→재검 전 케이스 실측, selftest 316→320(행위 2 + 소스가드 2, 자기참조 트랩 회피형 앵커), e2e.
+
 ## 1.36.48 — 2026-07-16 — ACP 입장 명문화 (docs/interoperability.md, 사용자 질의)
 
 사용자 질의("ACP 가 고려돼 있는가?")에 대한 검토 결과 언급 0 — "미고려" 를 "고려 후 결정" 으로 전환. **Agent Client Protocol**(Zed 계열): 에디터↔에이전트 토폴로지라 운영 레이어인 leerness 에 직접 구현 자리 없음 — ACP 에이전트는 MCP(.mcp.json) 경유로 이미 간접 호환, enforce 는 프로토콜 무관 커버. **Agent Communication Protocol**(BeeAI, REST): 오프라인-퍼스트/0-deps 원칙 충돌 — 동일 문제는 .leerness/ substrate 가 해결. 상호운용성 문서 신설(지원 표면 표 + 신규 프로토콜 평가 기준 3항 + 재검토 트리거), README Links 연결, decision 기록.

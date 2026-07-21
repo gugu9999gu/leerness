@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.48';
+const VERSION = '1.36.49';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -4894,6 +4894,45 @@ function _selfTestCases() {
         const wired = read(path.join(__dirname, '..', 'lib', 'audit.js')).includes("require('./state-integrity')") && read(path.join(__dirname, '..', 'lib', 'health.js')).includes("require('./state-integrity')");
         return onlyBad && noHarness && wired;
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: 'rules 손상행 ID 충돌 방지 (1.36.49, codex 6차 #1 High): nextRuleId 가 파싱불가 행의 R-id 도 카운트 — 행위검사', run: () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rid_'));
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.harness', 'rules.md'), '| R-0007 | every-session |\n');
+        return nextRuleId(tmp) === 'R-0008';   // 종전: 손상행 무시 → R-0001 재발급 → writeRules 가 손상행을 무언 삭제
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: 'anchors 위험신호 정규화 + 헤딩 신설 (1.36.49, codex 6차 #3 High/#4): 개행·헤딩 포함 description 평탄화 + appendIfMissing — 순수 행위검사', run: () => {
+      const p = require('../lib/pure-utils');
+      const d = p._draftAnchors({ pkgDescription: 'Alpha | Beta\n## Injected Heading\nmore' });
+      const flat = [...d.purpose, ...d.goal].every(l => !l.includes('\n') && !/^#/.test(l));
+      // 섹션 부재 + appendIfMissing → 헤딩 신설; 미지정이면 원문 불변(기존 계약 유지)
+      const base = '# T\n\n## Other\nx';
+      const appended = p._replaceMdSection(base, 'Goal', ['- g'], { appendIfMissing: true });
+      const addOk = appended.includes('## Goal') && appended.includes('- g') && p._replaceMdSection(base, 'Goal', ['- g']) === base;
+      // 본문 줄 내 개행은 평탄화(구조 오염 방어층) + 같은 입력 재적용 멱등
+      const rep1 = p._replaceMdSection('## Goal\nold\n## Next\ny', 'Goal', ['a\nb']);
+      const idem = rep1.split('\n').includes('a') && rep1.split('\n').includes('b') && p._replaceMdSection(rep1, 'Goal', ['a\nb']) === rep1;
+      return flat && addOk && idem;
+    } },
+    { name: 'enforce fail-closed 3종 (1.36.49, codex 6차 #2 High/#8/#9): 손상 타임스탬프·무효 window·unborn HEAD — 소스가드', run: () => {
+      const s = read(__filename);
+      const nanClosed = /const ageH = Number\.isFinite\(lastMs\)/.test(s) && /new Date\(lastAt\)\.getTime\(\) : NaN/.test(s);
+      const winValid = /failJson\(json, 'invalid_window'/.test(s) && /Number\.isInteger\(windowHours\) \|\| windowHours < 1/.test(s);
+      const unborn = /does not have any commits\|unknown revision/.test(s) && /note: 'no_commits'/.test(s);
+      const jsonOk = /ok: true, lastHandoff: lastAt/.test(s);   // --json 성공도 구조화 출력
+      return nanClosed && winValid && unborn && jsonOk;
+    } },
+    { name: '스토어/계약 4종 (1.36.49, codex 6차 #5/#6/#7/#10): toggle set fail-closed·release note 대시/regex·review failJson·whats-new 역순 — 소스가드', run: () => {
+      const tg = read(path.join(__dirname, '..', 'lib', 'toggles.js'));
+      const tOk = /JSON\.parse\(read\(f\)\)/.test(tg) && tg.includes('덮어쓰기 거부');
+      const s = read(__filename);
+      const noteOk = /raw\.indexOf\('note'\)/.test(s) && /version\.replace\(\/\[\.\*\+\?\^/.test(s);
+      const revOk = /failJson\(_rj, 'file_not_found'/.test(s) && /failJson\(_rj, 'persona_not_found'/.test(s);
+      const dg = read(path.join(__dirname, '..', 'lib', 'diagnostics.js'));
+      const wnOk = /compareVer\(fromV, toV\) > 0/.test(dg) && dg.includes("code: 'invalid_range'");
+      return tOk && noteOk && revOk && wnOk;
     } }
   ];
 }
@@ -5081,7 +5120,11 @@ function enforceCmd(root, sub) {
   if (sub === 'install') {
     if (!exists(path.join(root, '.git'))) { failJson(json, 'not_a_git_repo', `git 저장소가 아님: ${root} — pre-commit 강제는 git 저장소에서만 가능`); return; }
     if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root} — 먼저 leerness init`); return; }
-    const windowHours = Math.max(1, parseInt(arg('--window', '24'), 10) || 24);
+    // 1.36.49 (codex 6차 #8): 명시된 무효 window 는 24로 무언 보정하지 않고 거부 — 종전엔 0/NaN→24,
+    //   400자리 정수→Infinity 가 그대로 설치돼 훅에 WIN_MIN=Infinity(find -mmin 상시 실패=상시 차단)가 박혔다.
+    const winRaw = arg('--window', '24');
+    const windowHours = Number(winRaw);
+    if (!Number.isInteger(windowHours) || windowHours < 1 || windowHours > 8760) { failJson(json, 'invalid_window', `--window 는 1~8760 정수(시간)만: 받음 "${winRaw}"`); return; }
     const strict = has('--strict');
     mkdirp(path.dirname(_enforceCfgPath(root)));
     writeUtf8(_enforceCfgPath(root), JSON.stringify({ windowHours, strict, installedAt: now() }, null, 2) + '\n');
@@ -5130,7 +5173,11 @@ function enforceCmd(root, sub) {
     const lhf = _lastHandoffPath(root);
     let lastAt = null;
     try { if (exists(lhf)) { const j = JSON.parse(read(lhf)); lastAt = j.last || (Array.isArray(j.history) && j.history.length ? j.history[j.history.length - 1] : null); } } catch {}
-    const ageH = lastAt ? (Date.now() - new Date(lastAt).getTime()) / 3600000 : Infinity;
+    // 1.36.49 (codex 6차 #2 High): 손상 타임스탬프 fail-closed — 종전엔 new Date('not-a-date') → NaN,
+    //   NaN > windowHours 가 false 라서 손상 파일이 강제를 통과("handoff NaNh 전")했다.
+    const lastMs = lastAt ? new Date(lastAt).getTime() : NaN;
+    const ageH = Number.isFinite(lastMs) ? (Date.now() - lastMs) / 3600000 : Infinity;
+    if (!Number.isFinite(lastMs)) lastAt = null;
     if (ageH > cfg.windowHours) {
       fail(`🔒 leerness 강제: 최근 ${cfg.windowHours}h 내 handoff 흔적 없음${lastAt ? ` (마지막: ${lastAt})` : ''}`);
       log(`  → 커밋 전 실행: leerness handoff .   (컨텍스트 적재 + 사용 흔적)`);
@@ -5141,7 +5188,9 @@ function enforceCmd(root, sub) {
       const r = cp.spawnSync(process.execPath, [__filename, 'gate', root], { encoding: 'utf8', env: { ...process.env, LEERNESS_INTERNAL: '1' } });
       if (r.status !== 0) { fail(`🔒 leerness 강제(strict): gate 실패 — 커밋 차단`); process.stdout.write((r.stdout || '').slice(-1500)); process.exitCode = 1; return; }
     }
-    if (!json) ok(`enforce check 통과 (handoff ${lastAt ? Math.round(ageH * 10) / 10 + 'h 전' : '-'}${cfg.strict ? ' + gate' : ''})`);
+    // 1.36.49 (codex 6차 #2 부속): --json 성공 시 빈 stdout 이 아니라 구조화 객체를 내보낸다.
+    if (json) { log(JSON.stringify({ ok: true, lastHandoff: lastAt, ageHours: Number.isFinite(ageH) ? Math.round(ageH * 10) / 10 : null, windowHours: cfg.windowHours, strict: !!cfg.strict }, null, 2)); return; }
+    ok(`enforce check 통과 (handoff ${lastAt ? Math.round(ageH * 10) / 10 + 'h 전' : '-'}${cfg.strict ? ' + gate' : ''})`);
     return;
   }
   if (sub === 'audit') {
@@ -5152,6 +5201,11 @@ function enforceCmd(root, sub) {
     let handoffs = [];
     try { const j = JSON.parse(read(_lastHandoffPath(root))); handoffs = (j.history || []).map(t => new Date(t).getTime()).filter(n => !Number.isNaN(n)); } catch {}
     const gl = cp.spawnSync('git', ['-C', root, 'log', '-n', '30', '--pretty=format:%H|%ct|%s'], { encoding: 'utf8', timeout: 10000 });
+    // 1.36.49 (codex 6차 #9): 커밋 0개(unborn HEAD)는 정상 저장소 — 실패가 아니라 "검사 대상 없음" 성공.
+    if (gl.status !== 0 && /does not have any commits|unknown revision|bad default revision|ambiguous argument/i.test(gl.stderr || '')) {
+      if (json) { log(JSON.stringify({ checked: 0, windowHours: cfg2.windowHours, suspects: [], note: 'no_commits' }, null, 2)); return; }
+      ok('  커밋 0개 — 검사 대상 없음'); return;
+    }
     if (gl.status !== 0) { failJson(json, 'git_log_failed', 'git log 실패 — git 저장소인지 확인'); return; }
     const winMs = cfg2.windowHours * 3600000;
     const suspects = [];
@@ -5205,8 +5259,10 @@ function anchorsCmd(root, sub) {
   const naM = '<!-- leerness:na';
   // 1.36.47: draft 마커가 남아있는 섹션(미확정 초안)은 재초안 대상 — 초안 품질 개선을 기존 적용본에도 전파 가능.
   const _draftM = '<!-- draft: leerness anchors';
-  const briefGap = !!briefTxt && !briefTxt.includes(naM) && (_briefUnfilled(briefTxt) || (_mdSectionBody(briefTxt, 'Purpose') || '').includes(_draftM));
-  const planGap = !!planTxt && !planTxt.includes(naM) && (_planGoalUnfilled(planTxt) || (_mdSectionBody(planTxt, 'Goal') || '').includes(_draftM));
+  // 1.36.49 (codex 6차 #4): 헤딩 자체가 없는 파일도 gap — 종전 _sectionUnfilled 는 "섹션 없음→미플래그"(감지용 보수 기본)라
+  //   ## Goal 이 아예 없는 plan.md 가 "작성됨"으로 보고되고 draft --apply 도 무동작이었다. apply 시 헤딩을 신설한다.
+  const briefGap = !!briefTxt && !briefTxt.includes(naM) && (_briefUnfilled(briefTxt) || _mdSectionBody(briefTxt, 'Purpose') == null || (_mdSectionBody(briefTxt, 'Purpose') || '').includes(_draftM));
+  const planGap = !!planTxt && !planTxt.includes(naM) && (_planGoalUnfilled(planTxt) || _mdSectionBody(planTxt, 'Goal') == null || (_mdSectionBody(planTxt, 'Goal') || '').includes(_draftM));
   if (!sub || sub === 'status') {
     if (json) { log(JSON.stringify({ briefUnfilled: briefGap, planGoalUnfilled: planGap }, null, 2)); return; }
     log(`# leerness anchors — 정체성앵커 상태`);
@@ -5228,10 +5284,10 @@ function anchorsCmd(root, sub) {
     const apply = has('--apply');
     const applied = [];
     if (briefGap && draft.purpose.length) {
-      if (apply) { writeUtf8(bf, _replaceMdSection(briefTxt, 'Purpose', draft.purpose)); applied.push('project-brief.md#Purpose'); }
+      if (apply) { writeUtf8(bf, _replaceMdSection(briefTxt, 'Purpose', draft.purpose, { appendIfMissing: true })); applied.push('project-brief.md#Purpose'); }
     }
     if (planGap && draft.goal.length) {
-      if (apply) { writeUtf8(pf, _replaceMdSection(planTxt, 'Goal', draft.goal)); applied.push('plan.md#Goal'); }
+      if (apply) { writeUtf8(pf, _replaceMdSection(planTxt, 'Goal', draft.goal, { appendIfMissing: true })); applied.push('plan.md#Goal'); }
     }
     if (json) { log(JSON.stringify({ briefUnfilled: briefGap, planGoalUnfilled: planGap, draft: { purpose: draft.purpose, goal: draft.goal }, applied, dryRun: !apply }, null, 2)); return; }
     log(`# leerness anchors draft ${apply ? '(적용)' : '(dry-run — 적용: --apply)'}`);
@@ -14168,22 +14224,24 @@ function personaCmd(root, sub, idOrName, ...rest) {
 
 function reviewCmd(root, target) {
   root = absRoot(root || process.cwd());
-  if (!target) { fail('review <file> 필요. 예: leerness review src/api.js --persona security'); return process.exit(1); }
+  // 1.36.49 (codex 6차 #7): --json 요청 시 오류 경로도 단일 JSON 계약(failJson) — 종전 fail() 은 사람용 텍스트를 냈다.
+  const _rj = has('--json');
+  if (!target) { failJson(_rj, 'target_required', 'review <file> 필요. 예: leerness review src/api.js --persona security'); return process.exit(1); }
   const personaIds = (arg('--persona', null) || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (!personaIds.length) { fail('--persona <id> 필요. \`leerness persona list\`로 확인'); return process.exit(1); }
+  if (!personaIds.length) { failJson(_rj, 'persona_required', '--persona <id> 필요. `leerness persona list`로 확인'); return process.exit(1); }
 
   // 파일 확인
   const filePath = path.isAbsolute(target) ? target : path.join(root, target);
-  if (!exists(filePath)) { fail(`파일 없음: ${filePath}`); return process.exit(1); }
+  if (!exists(filePath)) { failJson(_rj, 'file_not_found', `파일 없음: ${filePath}`); return process.exit(1); }
   const fileContent = read(filePath);
   const fileSize = Buffer.byteLength(fileContent, 'utf8');
-  if (fileSize > 100 * 1024) { fail(`파일 너무 큼: ${fileSize} bytes. 100KB 미만 권장.`); return process.exit(1); }
+  if (fileSize > 100 * 1024) { failJson(_rj, 'file_too_large', `파일 너무 큼: ${fileSize} bytes. 100KB 미만 권장.`); return process.exit(1); }
 
   // 페르소나 해석
   const personas = [];
   for (const id of personaIds) {
     const p = _resolvePersona(root, id);
-    if (!p) { fail(`페르소나 없음: ${id}. \`leerness persona list\` 확인`); return process.exit(1); }
+    if (!p) { failJson(_rj, 'persona_not_found', `페르소나 없음: ${id}. \`leerness persona list\` 확인`); return process.exit(1); }
     personas.push(p);
   }
 
@@ -15592,6 +15650,15 @@ function nextRuleId(root) {
     const m = r.id.match(/^R-(\d{4,})$/);
     if (m) max = Math.max(max, Number(m[1]));
   }
+  // 1.36.49 (codex 6차 #1 High): 파싱 불가(손상) 행의 R-id 도 카운트 — 종전엔 파싱된 룰만 스캔해
+  //   손상 행과 같은 ID 가 새 룰에 재발급되고, writeRules 의 보존 필터(l.startsWith('| '+id))가
+  //   그 손상 행을 "이미 표에 있는 룰"로 오인해 무언 삭제했다(보존 로직이 지키려던 바로 그 행).
+  try {
+    if (exists(rulesPath(root))) {
+      const re = /(?:^|\n)\|\s*R-(\d+)\s*\|/g; const raw = read(rulesPath(root)); let m2;
+      while ((m2 = re.exec(raw))) max = Math.max(max, Number(m2[1]));
+    }
+  } catch {}
   // 1.11.3 (14th 버그헌트 P2, UR-0180): 아카이브의 R-id 도 카운트 — 기존엔 활성 rules 만 스캔해 rule remove 후 같은 R-id 가 다른 룰에 재사용됐음(아카이브 ID 충돌).
   try {
     if (exists(rulesArchivePath(root))) {
@@ -15812,7 +15879,9 @@ function releaseNote(root, text) {
   if (exists(pkgFile)) { try { version = JSON.parse(read(pkgFile)).version || 'unknown'; } catch {} }
   const clFile = path.join(root, 'CHANGELOG.md');
   const date = today();
-  const headerRe = new RegExp(`^## ${version.replace(/\./g, '\\.')} — `, 'm');
+  // 1.36.49 (codex 6차 #6b): 점만 이스케이프하던 종전 regex 는 SemVer 빌드메타(1.2.3+build.1)의 `+` 를 수량자로
+  //   해석해 기존 헤딩을 못 찾고 같은 버전 헤딩을 중복 생성했다 — 전체 regex 특수문자 이스케이프.
+  const headerRe = new RegExp('^## ' + version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' — ', 'm');
   if (exists(clFile)) {
     const cur = read(clFile);
     if (headerRe.test(cur)) {
@@ -22405,7 +22474,16 @@ async function main() {
   // 1.30.4 (14th리뷰 F7): rule 하위명령 미매칭 시 잘못된 토큰 명시 + usage(종전엔 top-level 'unknown_command: rule' 로 유효 부모명을 오인 표기).
   if (cmd === 'rule')                               { failJson(has('--json'), 'unknown_subcommand', `알 수 없는 rule 하위명령: ${args[1] || '(없음)'} — leerness rule add|list|remove|pause|resume|stop|resume-all|verify`); return process.exit(process.exitCode || 1); }
   if (cmd === 'release' && args[1] === 'bump')      return releaseBump(args[2] || arg('--path', process.cwd()));
-  if (cmd === 'release' && args[1] === 'note')      return releaseNote(arg('--path', process.cwd()), args.slice(2).filter(x => !x.startsWith('-')).join(' '));
+  // 1.36.49 (codex 6차 #6a): nonFlagArgs 가 대시 시작 토큰을 전역에서 걷어내 "- first" 같은 정상 노트가 입력 불가였다.
+  //   원시 argv 에서 note 이후를 복원 — `--` 플래그(+값)만 스킵하고 단일 대시 텍스트("- …")는 노트로 보존.
+  if (cmd === 'release' && args[1] === 'note') {
+    const raw = process.argv.slice(2); const ni = raw.indexOf('note'); const toks = [];
+    for (let i = ni + 1; i < raw.length && ni >= 0; i++) {
+      if (raw[i].startsWith('--')) { if (raw[i] === '--path' && raw[i + 1]) i++; continue; }
+      toks.push(raw[i]);
+    }
+    return releaseNote(arg('--path', process.cwd()), toks.join(' '));
+  }
   if (cmd === 'release' && args[1] === 'publish')   return releasePublish(args[2] || arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'pack')      return await releasePackCmd(args[2] || arg('--path', process.cwd()));
   if (cmd === 'release' && args[1] === 'sync-main') return releaseSyncMainCmd(args[2] || arg('--path', process.cwd()));
