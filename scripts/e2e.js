@@ -6994,5 +6994,39 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.51 (사용자 요청 UR-0061): clarify 모호성 질문 + preview 승인 워크플로 — CLI 라운드트립
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-clarify-'));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 15000 });
+    // clarify: 모호 요청 → ambiguous + 질문 / 구체 요청 → 무신호
+    const c1 = JSON.parse(R(['clarify', '메인 화면 적당히 이쁘게 바꿔줘, 그거도 같이', '--json']).stdout);
+    const c2 = JSON.parse(R(['clarify', 'src/a.js 의 sum 함수 오버플로 버그 수정', '--json']).stdout);
+    const clarifyOk = c1.ambiguous === true && c1.questions.length >= 2 && c2.ambiguous === false;
+    // preview: add(플래그 값 제목 미흡수) → pending 헤드라인 → approve → pending 해소
+    const pAdd = JSON.parse(R(['preview', 'add', '주문 목록 화면', '--design', '카드형 그리드', '--features', '검색,정렬', '--json']).stdout);
+    const addOk = pAdd.id === 'P-0001' && pAdd.title === '주문 목록 화면' && pAdd.design === '카드형 그리드' && pAdd.features.length === 2 && pAdd.status === 'proposed';
+    const ho1 = cp.spawnSync(process.execPath, [CLI, 'handoff', d], { encoding: 'utf8', timeout: 25000 });
+    const headlineOk = /미승인 미리보기 1건|1 preview\(s\) awaiting/.test((ho1.stdout || '') + (ho1.stderr || ''));
+    const ap = JSON.parse(R(['preview', 'approve', 'P-0001', '--json']).stdout);
+    const lst = JSON.parse(R(['preview', 'list', '--json']).stdout);
+    const approveOk = ap.status === 'approved' && lst.pending === 0 && lst.total === 1;
+    // 오류경로 JSON 계약: 미존재 id
+    const nf = R(['preview', 'show', 'P-9999', '--json']);
+    let nfOk = false; try { const j = JSON.parse(nf.stdout); nfOk = j.ok === false && j.code === 'not_found' && nf.status === 1; } catch {}
+    // 신규 init 산출물에 의무 절차 지시 존재
+    const agents = fs.readFileSync(path.join(d, 'AGENTS.md'), 'utf8');
+    const docOk = agents.includes('모호성 질문 의무') && agents.includes('미리보기 승인 의무') && agents.includes('approve 전에는 해당 기능의 코드를 작성하지 않습니다');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = clarifyOk && addOk && headlineOk && approveOk && nfOk && docOk;
+    if (!ok) console.log(`   [clarify 디버그] c=${clarifyOk} a=${addOk} h=${headlineOk} ap=${approveOk} nf=${nfOk} doc=${docOk}`);
+  } catch (e) {}
+  console.log(ok ? '✓ B(1.36.51) UR-0061: clarify 모호성 질문 생성(+구체요청 무신호) + preview add/approve 워크플로(제목 미흡수·헤드라인·not_found JSON) + AGENTS 의무 절차 주입' : '✗ clarify/preview 워크플로 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

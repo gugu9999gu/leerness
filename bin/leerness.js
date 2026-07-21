@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.50';
+const VERSION = '1.36.51';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -429,7 +429,7 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
   const project = detectProjectName(root);
   const skillRows = Object.entries(skillCatalog).map(([k, v]) => `| ${k} | ${v.displayNameKo} | ${v.capabilities.join(', ')} | ${v.lastUpdated} | ${v.verification} |`).join('\n');
   const _files = {
-    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ 매 세션 첫 행동\n**반드시 \`.harness/session-workflow.md\`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.\n\n## 정적 vs 동적 — leerness 역할 경계\n**AGENTS.md = 정적 프로젝트 지침** (코딩 규칙·테스트 명령·금지 사항·배포 절차 — 자주 안 변함).\n**leerness = 동적 작업 상태·기억·검증·인수인계** (현재 목표·수정 파일·실패 시도·검증 결과·다음 에이전트 인계 — 매 작업 변함).\n- 규칙/명령/금지는 여기 AGENTS.md 에 적는다.\n- 동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 \`.harness/\`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). \`leerness handoff\` · \`decision add\` · \`lesson save\` 등이 여기에 쓴다.\n- (선택) \`leerness state show|start|record|verify|handoff\` (또는 MCP \`leerness_state_*\`) 의 JSON 상태 substrate 는 \`.leerness/\` (에이전트 간 인수인계 표준 — state 명령 사용 시 생성). 메인 워크스페이스(.harness)와 별개.\n- leerness 는 AGENTS.md 를 **대체하지 않고 보완**한다. 정적 지침은 여기, 동적 상태는 leerness.\n\n## Mandatory read order (session start)\n1. **.harness/session-workflow.md** (6단계 워크플로 — 최우선)\n2. .harness/context-routing.md\n3. .harness/session-handoff.md\n4. .harness/current-state.md\n5. .harness/plan.md\n6. .harness/progress-tracker.md\n7. .harness/guideline.md\n8. .harness/protected-files.md\n9. .harness/writeback-policy.md\n10. .harness/anti-lazy-work-policy.md\n11. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증하고, \`leerness lens\`의 분야별 자기질문에 답합니다 (코드: "선임 개발자가 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 이쁘고 직관적이라 느낄까?").\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
+    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ 매 세션 첫 행동\n**반드시 \`.harness/session-workflow.md\`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.\n\n## 정적 vs 동적 — leerness 역할 경계\n**AGENTS.md = 정적 프로젝트 지침** (코딩 규칙·테스트 명령·금지 사항·배포 절차 — 자주 안 변함).\n**leerness = 동적 작업 상태·기억·검증·인수인계** (현재 목표·수정 파일·실패 시도·검증 결과·다음 에이전트 인계 — 매 작업 변함).\n- 규칙/명령/금지는 여기 AGENTS.md 에 적는다.\n- 동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 \`.harness/\`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). \`leerness handoff\` · \`decision add\` · \`lesson save\` 등이 여기에 쓴다.\n- (선택) \`leerness state show|start|record|verify|handoff\` (또는 MCP \`leerness_state_*\`) 의 JSON 상태 substrate 는 \`.leerness/\` (에이전트 간 인수인계 표준 — state 명령 사용 시 생성). 메인 워크스페이스(.harness)와 별개.\n- leerness 는 AGENTS.md 를 **대체하지 않고 보완**한다. 정적 지침은 여기, 동적 상태는 leerness.\n\n## Mandatory read order (session start)\n1. **.harness/session-workflow.md** (6단계 워크플로 — 최우선)\n2. .harness/context-routing.md\n3. .harness/session-handoff.md\n4. .harness/current-state.md\n5. .harness/plan.md\n6. .harness/progress-tracker.md\n7. .harness/guideline.md\n8. .harness/protected-files.md\n9. .harness/writeback-policy.md\n10. .harness/anti-lazy-work-policy.md\n11. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- **모호성 질문 의무**: 사용자 요청에 판단이 갈리는 부분(모호한 수식어/지시대명사/복수 선택지/불명확한 범위)이 있으면 **추측으로 구현하지 말고 먼저 사용자에게 질문**합니다. \`leerness clarify "<요청>"\` 이 감지한 질문 목록을 그대로 사용자에게 물어보세요. 신호가 없어도 스스로 판단이 갈리면 질문이 우선입니다.\n- **미리보기 승인 의무 (신규 기능)**: 사용자가 신규 기능 추가/구현을 요청하면 **코드를 먼저 작성하지 않습니다**. ① \`leerness preview add "<기능>" --design "<디자인/UX 설명>" --features "<기능 목록>"\` 으로 미리보기를 등록하고 ② 그 내용을 사용자에게 제시해 승인 또는 수정사항을 질문으로 받습니다. ③ 사용자가 승인하면 \`leerness preview approve <P-ID>\`, 수정 요구면 \`leerness preview revise <P-ID> --note "..."\` 후 미리보기를 고쳐 다시 제시합니다. **approve 전에는 해당 기능의 코드를 작성하지 않습니다.**\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증하고, \`leerness lens\`의 분야별 자기질문에 답합니다 (코드: "선임 개발자가 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 이쁘고 직관적이라 느낄까?").\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
     'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ 매 세션 첫 행동**: \`.harness/session-workflow.md\`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 \`leerness drift check --auto-fix\`로 자동 회복.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
     '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .harness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`,
     '.github/copilot-instructions.md': `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`,
@@ -4984,6 +4984,41 @@ function _selfTestCases() {
         const human = outs.length === 1 && outs[0] === '✗ 사람용';
         return passThru && demoted && humanExplicit && human;
       } finally { console.log = _log; console.error = _err; process.argv = saveArgv; io.setQuiet(false); process.exitCode = saveExit; }
+    } },
+    { name: 'clarify 모호성 감지 (1.36.51, UR-0061): 신호어→질문 생성 + 무신호 false-PASS 편향 — 순수 행위검사', run: () => {
+      const c = require('../lib/clarify');
+      const r1 = c._clarifySignals('로그인 화면 적당히 이쁘게 만들어줘, 그리고 그거도 고쳐줘');
+      const hit = r1.ambiguous && r1.signals.some(s => s.kind === 'vague-quality') && r1.signals.some(s => s.kind === 'pronoun') && r1.questions.length >= 2 && r1.questions.every(q => q.includes('?') || q.includes('요'));
+      const r2 = c._clarifySignals('src/login.js 의 validateEmail 함수가 빈 문자열에서 true 를 반환하는 버그를 수정');
+      const clean = !r2.ambiguous && r2.questions.length === 0;   // 구체 요청은 무질문 (false-BLOCK 방지)
+      const wired = read(__filename).includes("cmd === 'clarify'") && read(__filename).includes('모호성 질문 의무');
+      return hit && clean && wired;
+    } },
+    { name: 'preview 승인 워크플로 (1.36.51, UR-0061): add→proposed→pending 노출→approve/revise 이력 + 손상 스토어 거부 — 행위검사', run: () => {
+      const c = require('../lib/clarify');
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_pv_'));
+      const _w = process.stdout.write; const _ce = console.error;
+      try {
+        process.stdout.write = () => true; console.error = () => {};
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        const deps = { has: () => false, arg: (k, d) => (k === '--design' ? '카드형 목록 UI' : k === '--features' ? '검색,정렬' : d) };
+        c.previewCmd(tmp, 'add', ['주문', '목록'], deps);
+        let list = c._loadPreviews(tmp);
+        const added = list.length === 1 && list[0].id === 'P-0001' && list[0].status === 'proposed' && list[0].design === '카드형 목록 UI' && list[0].features.length === 2;
+        const pending1 = c.pendingPreviews(tmp).length === 1;
+        c.previewCmd(tmp, 'revise', ['P-0001'], { has: () => false, arg: (k, d) => (k === '--note' ? '색상 변경 요청' : d) });
+        list = c._loadPreviews(tmp);
+        const revised = list[0].status === 'revision-requested' && list[0].history.some(h => h.note === '색상 변경 요청') && c.pendingPreviews(tmp).length === 1;
+        c.previewCmd(tmp, 'approve', ['P-0001'], deps);
+        const approved = c._loadPreviews(tmp)[0].status === 'approved' && c.pendingPreviews(tmp).length === 0;
+        // 손상 스토어 위 변경 거부 (fail-closed) — 원본 보존
+        fs.writeFileSync(c._previewsPath(tmp), '[{"id":"P-0001",');
+        const saveExit = process.exitCode;
+        c.previewCmd(tmp, 'add', ['새기능'], deps);
+        process.exitCode = saveExit;
+        const preserved = fs.readFileSync(c._previewsPath(tmp), 'utf8') === '[{"id":"P-0001",';
+        return added && pending1 && revised && approved && preserved;
+      } finally { process.stdout.write = _w; console.error = _ce; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     } }
   ];
 }
@@ -6122,6 +6157,8 @@ function commandsCmd(root) {
       { cmd: 'release channel [--json]', desc: '릴리스 채널 정책 (latest 안정 / next 실험 / 버전 고정) — 1.9.275' },
       { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
+      { cmd: 'clarify "<사용자 요청>" [--json]', desc: '요청 모호성 신호 감지 → 사용자에게 물을 질문 생성 (추측 구현 방지) — 1.36.51 UR-0061' },
+      { cmd: 'preview add|list|show|approve|revise', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약 — 1.36.51 UR-0061' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
       { cmd: 'brainstorm "<topic>" [--include-code]', desc: '워크스페이스 회수 + 코드 grep' }
     ],
@@ -8511,6 +8548,7 @@ function _saveTeams(root, teams) {
 //   harness 는 deps(VERSION · 공유 저장 _loadTeams/_saveTeams · _detectShellCtx · argv 파서 arg/has)를 구성해 위임(thin wrapper). 호출부/동작 무변경.
 const _team = require('../lib/team');
 const _tgl = require('../lib/toggles');   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동 — gate/lens/auto-graph/delegation-brief)
+const _clar = require('../lib/clarify');  // 1.36.51 (UR-0061): 모호성 질문 + 미리보기 승인 워크플로
 function teamCmd(root, sub, id, opts = {}) { return _team.teamCmd(root, sub, id, opts, { VERSION, _loadTeams, _saveTeams, _detectShellCtx, arg, has, _withLock }); }   // 1.36.31: add 경합 락
 
 // 1.9.112: 전용 lessons.md (Memory Write Surface 5번째)
@@ -10484,6 +10522,11 @@ function handoff(root) {
         } else if (audit.open > 0) {
           parts.push(t(`📥 요청 ${audit.open} (tracked)`, `📥 ${audit.open} request(s) (tracked)`));
         }
+      } catch {}
+      // 1.36.51 (UR-0061): 미승인 미리보기 — 사용자 답을 기다리는 기능이 있으면 헤드라인 노출 (코드 작성 보류 계약)
+      try {
+        const _pp = _clar.pendingPreviews(root);
+        if (_pp.length) parts.push(t(`🎨 미승인 미리보기 ${_pp.length}건 (approve 전 코드 금지)`, `🎨 ${_pp.length} preview(s) awaiting approval (no code before approve)`));
       } catch {}
       // 14) 1.9.209: pre-wake-audit 최근 보고서 (사용자 명시) — 깨어남 직후 자동 노출
       try {
@@ -22437,6 +22480,17 @@ async function main() {
   if (cmd === 'enforce')                           return enforceCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1]);   // 1.36.43: 사용 강제 (git pre-commit)
   if (cmd === 'anchors')                           return anchorsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), args[1] && !args[1].startsWith('-') ? args[1] : null);   // 1.36.36: 정체성앵커 초안
   if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
+  // 1.36.51 (사용자 요청 UR-0061): 모호성 질문 + 미리보기 승인 워크플로
+  if (cmd === 'clarify')                           return _clar.clarifyCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')).join(' '), { has });
+  if (cmd === 'preview') {
+    // 미지 플래그(--design/--features/--note)의 값이 positional 로 새는 것 차단 — 원시 argv 에서 플래그+값 스킵 (1.36.49 release note 패턴)
+    const _pvRaw = process.argv.slice(2); const _pvI = _pvRaw.indexOf('preview'); const _pvToks = [];
+    for (let i = _pvI + 1; i < _pvRaw.length && _pvI >= 0; i++) {
+      if (_pvRaw[i].startsWith('--')) { if (['--design', '--features', '--note', '--path'].includes(_pvRaw[i]) && _pvRaw[i + 1]) i++; continue; }
+      _pvToks.push(_pvRaw[i]);
+    }
+    return _clar.previewCmd(arg('--path', process.cwd()), _pvToks[0], _pvToks.slice(1), { has, arg });
+  }
   if (cmd === 'lens')                               return lensCmd(args[1]);  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈
   // 1.9.233: leerness commands — 카테고리화된 전체 CLI 명령 목록
   if (cmd === 'commands')                           return commandsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());

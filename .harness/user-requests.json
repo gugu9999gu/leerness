@@ -713,7 +713,17 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": ""
+    },
+    {
+      "id": "UR-0063",
+      "text": "외부 GPT 감사(1.36.47, 10건) P0 채택: F-01 재init 언어보존(패치검증됨)·F-07 restore 별칭·F-08 .env 0600·F-02 ratio 증거 정규화+evidenceLevel",
+      "recordedAt": "2026-07-21T06:19:11.244Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-07-21T04:53:03.474Z"
+  "updatedAt": "2026-07-21T06:19:11.245Z"
 }

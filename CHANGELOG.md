@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.51 — 2026-07-21 — 모호성 질문 + 미리보기 승인 워크플로 (사용자 요청 UR-0061)
+
+사용자 요청: "자연어에 판단 모호한 부분이 있으면 사용자에게 질문하고, 신규 기능은 코드 작성 전 디자인/기능 미리보기를 제시해 승인/수정을 받도록".
+
+- **`leerness clarify "<요청>"`** (lib/clarify.js 신설): 모호성 신호 6종(모호 수식어/지시대명사/복수 선택지/불명 범위/불명 수량/불명 시점) 감지 → **AI 가 사용자에게 그대로 물을 질문 목록** 생성. 신호 없으면 무질문(false-PASS 편향 — "잘"은 요청동사 동반 시만, 과질문으로 흐름 차단 금지). --json 지원.
+- **`leerness preview add|list|show|approve|revise`**: 신규 기능 미리보기 스토어(.harness/previews.json, P-XXXX). add(--design/--features) → proposed → 사용자 제시 → approve(구현 허가) / revise --note(수정요구, 이력 누적). **approve 전 코드 작성 금지가 계약**. 손상 스토어 위 변경 fail-closed. 플래그 값의 제목 흡수 차단(원시 argv 파싱).
+- **지시 레이어 강제**: 신규 init 의 AGENTS.md Required behavior 에 "모호성 질문 의무"+"미리보기 승인 의무(①등록 ②제시·질문 ③approve 후 구현)" 주입 — 자연어만 쓰는 에이전트도 절차를 따르게 됨.
+- **handoff 헤드라인**: 미승인 미리보기 N건 노출("approve 전 코드 금지") — 세션이 바뀌어도 대기 상태가 이월.
+- 검증: selftest 325(+2 행위: 신호→질문/무신호, add→revise→approve 이력+손상거부), e2e +1 라운드트립(제목 미흡수·헤드라인·not_found JSON·AGENTS 주입).
+
 ## 1.36.50 — 2026-07-21 — 결함 클래스 3종 전수 스윕: 발견이 아니라 클래스를 고친다 (시스템적 진입점 3곳)
 
 6차 헌트의 개별 결함 3건을 클래스로 확장해 코드베이스 전수 스윕(교훈: fix-class call-site sweep). 개별 지점 수선 대신 시스템적 진입점 수정으로 현재+미래 지점까지 커버.
