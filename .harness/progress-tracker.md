@@ -74,3 +74,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0051 | done | codex 6차 헌트 — 신작 표면(1.36.28~48) 10건 전수 수정 (1.36.49) | 10/10 재현확정·반박0, selftest 320, e2e 386/386, 커밋 ed9c55d, npm 1.36.49 클린룸 검증 | 다음 액션 작성 | 2026-07-21 |
 | T-0052 | done | 결함 클래스 3종 전수 스윕 (1.36.50) | NaN날짜 7개소·스토어클로버 21종 writeUtf8 대피·--json 계약 fail v2, selftest 323, e2e 386/386, 커밋 881277f, npm 클린룸 | 다음 액션 작성 | 2026-07-21 |
 | T-0053 | done | 외부 GPT 감사 P0 채택 (1.36.52) | F-01/F-07 재현확정 수정 + F-02 정규화(실행우선 보정) + F-08 0600, selftest 326, e2e 387/387 | 다음 액션 작성 | 2026-07-21 |
+| T-0054 | done | UR-0061 clarify/preview (1.36.51) + UR-0062 tech 프로필/그래프 탭 (1.36.53) | selftest 327, e2e 388/388, 커밋 90e1441/eca2245/이번, npm 게시 | 다음 액션 작성 | 2026-07-21 |

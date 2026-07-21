@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.53';
+const VERSION = '1.36.54';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5083,6 +5083,49 @@ function _selfTestCases() {
         const tabOk = html.includes('data-v="tech"') && !html.includes('tgFlip') && html.includes('leerness toggle set') && html.includes('firebase');
         return det && saved && migr && tabOk;
       } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: 'codex 7차 헌트 12종 (1.36.54): preview 형상검증/락·clarify 억제/보강·tech DATABASE_URL 제외/모노레포/스키마검증/점-접두·io 이중JSON/폴백exit/백업충돌·count 실행우선 — 행위+소스가드', run: () => {
+      const c = require('../lib/clarify');
+      // #3 행위: 모두-표지 억제 + 비교급 모호 감지
+      const r1 = c._clarifySignals('A 또는 B 케이스 모두 테스트해줘');
+      const r2 = c._clarifySignals('좀 더 좋게 해줘');
+      const clar = r1.ambiguous === false && r2.ambiguous === true;
+      // #1 행위: 형상-무효 로더 판정
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_pv54_'));
+      let shape = false;
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.writeFileSync(c._previewsPath(tmp), '{"legacy":{"id":"P-0042"}}');
+        const chk1 = c._loadPreviewsChecked(tmp);
+        fs.writeFileSync(c._previewsPath(tmp), '[{"id":"P-0001","title":"ok"},null]');
+        const chk2 = c._loadPreviewsChecked(tmp);
+        fs.writeFileSync(c._previewsPath(tmp), '[{"id":"P-0001","title":"ok"}]');
+        const chk3 = c._loadPreviewsChecked(tmp);
+        shape = chk1.invalid && chk2.invalid && !chk3.invalid && chk3.list.length === 1;
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      // #4/#12 행위: DATABASE_URL 제외 + 점-접두 오탐 차단
+      const tp = require('../lib/tech-profile');
+      const pgSig = tp.SERVICE_SIGNALS.find(s => s.id === 'postgres');
+      const noDbUrl = !pgSig.env.includes('DATABASE_URL');
+      const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tp54_'));
+      let reqOk = false;
+      try {
+        fs.mkdirSync(path.join(tmp2, '.harness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp2, 'requirements.txt'), 'openai.fake==1.0\ndiscord.js==2.0\n');
+        const det = tp.detectTechProfile(tmp2);
+        const ids = det.services.map(s => s.id);
+        reqOk = !ids.includes('openai') && ids.includes('discord');
+      } finally { try { fs.rmSync(tmp2, { recursive: true, force: true }); } catch {} }
+      // 소스가드: 락 직렬화(#2)·스키마검증(#6)·이중JSON 차단(#7a)·폴백 exit 게이트(#7b)·백업 접미(#8)·count 실행우선(#9)·note_required(#10)
+      const s = read(__filename);
+      const cl = read(path.join(__dirname, '..', 'lib', 'clarify.js'));
+      const io2 = read(path.join(__dirname, '..', 'lib', 'io.js'));
+      const tps = read(path.join(__dirname, '..', 'lib', 'tech-profile.js'));
+      const guards = cl.includes('_withLock(_previewsPath(root)') && cl.includes("failJson(json, 'note_required'")
+        && tps.includes('prev = null') && tps.includes('_mergeManifests(root, 2)')
+        && io2.includes('!_jsonErrEmitted && t && (t[0]') && /process\.on\('exit', \(code\) => \{ if \(code !== 0/.test(io2) && io2.includes('.corrupt-${Date.now()}-${process.pid}-')
+        && s.includes('declaredTestCount != null && runResult && !runResult.skipped && runResult.allPassed');
+      return clar && shape && noDbUrl && reqOk && guards;
     } }
   ];
 }
@@ -12359,10 +12402,12 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   // 1.9.309 (UR-0048, 설치리뷰 Opus critical): done 주장은 evidence(파일+테스트) 기본 강제 — 거짓완료 차단을 기본값·MCP·json 모두에서 작동.
   //   이전: --require-evidence 플래그 시에만 검사 → 증거0 done 이 기본 통과(fileChecks.every([])=공허참)했고 MCP 는 도달 불가했음.
   //   이제 done/완료 주장은 기본 강제. opt-out: --lenient. 비-done 주장은 영향 없음.
-  // 1.36.52 (F-02 보정, 게이트 실측): 비율형 승격은 "정적 검증 전용" — --run-tests 가 주장 수 이상 전부-통과를
-  //   실제 실행으로 확증하면 정적 선언-수 대조를 재적용하지 않는다(실행 증거 > 정적 휴리스틱; jest/mocha 러너는
-  //   선언을 소스-grep 으로 셀 수 없는 형식이 많아 실행 확증 케이스를 정적 게이트가 거짓 차단했다).
-  if (_ratioPromoted && runResult && !runResult.skipped && runResult.allPassed && runResult.parsed && runResult.parsed.num >= declaredTestCount) declaredTestCount = null;
+  // 1.36.52 (F-02 보정, 게이트 실측): 정적 선언-수 대조는 실행 확증이 없을 때의 휴리스틱 — --run-tests 가 주장 수
+  //   이상 전부-통과를 실제 실행으로 확증하면 재적용하지 않는다(실행 증거 > 정적 휴리스틱).
+  // 1.36.54 (codex 7차 #9): 비율형(_ratioPromoted)만이 아니라 카운트형("N tests passed")도 동일 우선순위 —
+  //   같은 주장을 표현만 바꿨을 때 판정이 갈리던 비일관성 해소. void _ratioPromoted (표시용으로만 유지).
+  void _ratioPromoted;
+  if (declaredTestCount != null && runResult && !runResult.skipped && runResult.allPassed && runResult.parsed && runResult.parsed.num >= declaredTestCount) declaredTestCount = null;
   const isDoneClaim = /done|완료|completed/i.test(row.status || '');
   const evq = _evidenceQuality(evidence);
   const mustHaveEvidence = !has('--lenient') && (isDoneClaim || has('--require-evidence'));
@@ -22571,7 +22616,7 @@ async function main() {
       if (_pvRaw[i].startsWith('--')) { if (['--design', '--features', '--note', '--path'].includes(_pvRaw[i]) && _pvRaw[i + 1]) i++; continue; }
       _pvToks.push(_pvRaw[i]);
     }
-    return _clar.previewCmd(arg('--path', process.cwd()), _pvToks[0], _pvToks.slice(1), { has, arg });
+    return _clar.previewCmd(arg('--path', process.cwd()), _pvToks[0], _pvToks.slice(1), { has, arg, _withLock });   // 1.36.54 (#2): 변경은 락 직렬화
   }
   if (cmd === 'lens')                               return lensCmd(args[1]);  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈
   // 1.9.233: leerness commands — 카테고리화된 전체 CLI 명령 목록
