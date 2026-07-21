@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.51';
+const VERSION = '1.36.52';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -240,6 +240,21 @@ function detectProjectName(root) { try { const pkg = JSON.parse(read(path.join(r
 function detectLanguageValue(root, value = 'auto') {
   const v = String(value || 'auto').toLowerCase();
   if (v === 'ko' || v === 'en') return v;
+  // 1.36.52 (외부 GPT 감사 F-01, 재현확정): 이미 초기화된 프로젝트는 저장된 명시 언어를 최우선 —
+  //   1회차 init 이 생성한 한국어 관리 블록을 2회차 콘텐츠 감지가 오인해 en→ko 로 뒤집던 멱등성 버그.
+  //   콘텐츠 자동 감지는 신규 프로젝트에만. (감사 첨부 패치 검증 후 채택)
+  try {
+    const mf = path.join(root, '.harness', 'manifest.json');
+    if (exists(mf)) {
+      const saved = String((JSON.parse(read(mf)) || {}).language || '').toLowerCase();
+      if (saved === 'ko' || saved === 'en') return saved;
+    }
+    const lf = path.join(root, '.harness', 'LANGUAGE');
+    if (exists(lf)) {
+      const saved = String(read(lf) || '').trim().toLowerCase();
+      if (saved === 'ko' || saved === 'en') return saved;
+    }
+  } catch {}
   // ① 프로젝트 콘텐츠 한글 우선 — 콘텐츠가 있으면 그 의도를 존중 (기존 동작 보존).
   const candidates = ['README.md', 'docs/guideline.md', '.harness/project-brief.md', '.harness/plan.md'];
   let text = '';
@@ -744,6 +759,8 @@ function mergeLinesFile(p, lines) {
 function mergeEnvFile(p, lines) {
   const current = exists(p) ? read(p) : '';
   writeUtf8(p, _mergeEnvLines(current, lines));
+  // 1.36.52 (외부 GPT 감사 F-08): Unix 에서 .env 는 소유자 전용(0600) — gitignore 는 커밋만 막지 로컬 노출은 못 막는다.
+  if (process.platform !== 'win32') { try { fs.chmodSync(p, 0o600); } catch {} }
 }
 
 function writeMigrationReport(root, backup, actions, opts = {}) {
@@ -5019,6 +5036,26 @@ function _selfTestCases() {
         const preserved = fs.readFileSync(c._previewsPath(tmp), 'utf8') === '[{"id":"P-0001",';
         return added && pending1 && revised && approved && preserved;
       } finally { process.stdout.write = _w; console.error = _ce; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: '외부 GPT 감사 P0 (1.36.52, UR-0063): 재init 언어보존(F-01) + restore 별칭(F-07) + ratio 증거 정규화/evidenceLevel(F-02) + .env 0600(F-08) — 행위+소스가드', run: () => {
+      // F-01: manifest 언어가 콘텐츠 감지보다 우선 (행위)
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lang_'));
+      let langOk = false;
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.harness', 'manifest.json'), '{"language":"en"}');
+        fs.writeFileSync(path.join(tmp, 'README.md'), '# 한국어 콘텐츠 가득한 리드미');   // 종전엔 이것이 ko 로 뒤집었다
+        langOk = detectLanguageValue(tmp, 'auto') === 'en' && detectLanguageValue(tmp, 'ko') === 'ko';
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      const s = read(__filename);
+      // F-07: 단수형 별칭 매핑 존재
+      const aliasOk = s.includes("({ decision: 'decisions', lesson: 'lessons', plans: 'plan' })[surface]");
+      // F-02: 비율형 완전-통과 → declaredTestCount 승격 + 신뢰 경계 필드
+      const ratioOk = s.includes('declaredPass.num === declaredPass.denom) declaredTestCount = declaredPass.denom')
+        && s.includes('semanticVerified: false') && s.includes("? 'executed' : 'static'");
+      // F-08: Unix .env 0600
+      const envOk = /mergeEnvFile[\s\S]{0,600}chmodSync\(p, 0o600\)/.test(s);
+      return langOk && aliasOk && ratioOk && envOk;
     } }
   ];
 }
@@ -9129,6 +9166,8 @@ function memoryArchiveListCmd(root, opts = {}) {
 //   매칭 archive 블록을 active 파일 끝에 추가 + archive 에서 제거
 function memoryRestoreCmd(root, surface, target) {
   root = absRoot(root);
+  // 1.36.52 (외부 GPT 감사 F-07): 단수형 별칭 수용 — 생성 문서 예시(decision)와 CLI(decisions) 불일치로 실패하던 것.
+  surface = ({ decision: 'decisions', lesson: 'lessons', plans: 'plan' })[surface] || surface;
   if (!surface || !['decisions', 'lessons', 'plan'].includes(surface)) {
     return fail('memory restore <decisions|lessons|plan> <target> 필요 (target: date YYYY-MM-DD 또는 substring)');
   }
@@ -12180,6 +12219,11 @@ function verifyClaimCmd(root, taskId, opts = {}) {
     const m5 = evidence.match(/(\d+)\s*tests?\b/i);
     if (m5) declaredTestCount = parseInt(m5[1], 10);
   }
+  // 1.36.52 (외부 GPT 감사 F-02, 재현확정): 비율형 완전-통과("5/5 passed")를 명시 카운트와 동일 정규화 —
+  //   종전엔 declaredTestCount 로만 정적 선언-수 대조를 해서 비율형 주장이 그 게이트를 우회했다.
+  //   1.35.9 원칙 유지: 전부-통과(N/N) 주장만 승격(부분 비율은 비-테스트 서술일 수 있어 미승격).
+  let _ratioPromoted = false;
+  if (declaredTestCount == null && declaredPass && declaredPass.num === declaredPass.denom) { declaredTestCount = declaredPass.denom; _ratioPromoted = true; }
 
   // 실제 파일 존재 검사
   const fileChecks = files.map(f => ({ file: f, exists: exists(path.join(root, f)) }));
@@ -12286,6 +12330,10 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   // 1.9.309 (UR-0048, 설치리뷰 Opus critical): done 주장은 evidence(파일+테스트) 기본 강제 — 거짓완료 차단을 기본값·MCP·json 모두에서 작동.
   //   이전: --require-evidence 플래그 시에만 검사 → 증거0 done 이 기본 통과(fileChecks.every([])=공허참)했고 MCP 는 도달 불가했음.
   //   이제 done/완료 주장은 기본 강제. opt-out: --lenient. 비-done 주장은 영향 없음.
+  // 1.36.52 (F-02 보정, 게이트 실측): 비율형 승격은 "정적 검증 전용" — --run-tests 가 주장 수 이상 전부-통과를
+  //   실제 실행으로 확증하면 정적 선언-수 대조를 재적용하지 않는다(실행 증거 > 정적 휴리스틱; jest/mocha 러너는
+  //   선언을 소스-grep 으로 셀 수 없는 형식이 많아 실행 확증 케이스를 정적 게이트가 거짓 차단했다).
+  if (_ratioPromoted && runResult && !runResult.skipped && runResult.allPassed && runResult.parsed && runResult.parsed.num >= declaredTestCount) declaredTestCount = null;
   const isDoneClaim = /done|완료|completed/i.test(row.status || '');
   const evq = _evidenceQuality(evidence);
   const mustHaveEvidence = !has('--lenient') && (isDoneClaim || has('--require-evidence'));
@@ -12343,6 +12391,10 @@ function verifyClaimCmd(root, taskId, opts = {}) {
     const out = {
       project: path.basename(root),
       taskId, row,
+      // 1.36.52 (외부 GPT 감사 F-02): 신뢰 경계 명시 — 이 검증은 정적/실행 흔적 대조이지 의미론 보증이 아니다.
+      //   evidenceLevel: static(파일·문자열 대조만) | executed(--run-tests 실제 실행 포함). 소비자가 경계를 오인하지 않도록 스키마에 고정.
+      semanticVerified: false,
+      evidenceLevel: (runResult && !runResult.skipped) ? 'executed' : 'static',
       declared: { files: files.length, pass: declaredPass, testCount: declaredTestCount },
       actual: { fileChecks, testCount: actualTestCount },
       verdict: {
