@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.50 — 2026-07-21 — 결함 클래스 3종 전수 스윕: 발견이 아니라 클래스를 고친다 (시스템적 진입점 3곳)
+
+6차 헌트의 개별 결함 3건을 클래스로 확장해 코드베이스 전수 스윕(교훈: fix-class call-site sweep). 개별 지점 수선 대신 시스템적 진입점 수정으로 현재+미래 지점까지 커버.
+
+- **클래스 1 — NaN 날짜 비교 fail-open** (enforce #2 의 클래스): `new Date(손상).getTime()` → NaN 비교가 조용히 통과하던 7개소. drift 4곳(무효 날짜 → mtime 폴백/제외 — advisory 는 false-BLOCK 회피 원칙), audit 1곳(무효 `Updated:` → stale 취급, --fix 가 유효 날짜로 자가 복구), handoff-gap(정보 부재 취급), session-resume(신호 산출 불가 스킵). 실측: `Updated: 2026-99-99` 종전 무언 통과 → 경고+자가복구.
+- **클래스 A — 손상 JSON 스토어 클로버** (toggle #5 의 클래스, codex 실측 21개 스토어): 개별 가드 대신 단일 진입점 `writeUtf8` 에서 "손상 JSON 위에 유효 JSON 저장"(클로버 시그니처) 감지 시 원본을 `<file>.corrupt-<ts>` 로 대피 후 저장 — 바이트 유실 0 · 수동 흐름(handoff 등) 비차단 · 미래 스토어 자동 커버. 알림은 stderr(stdout JSON 계약 불오염). 명시 fail-closed 스토어(state/teams/toggles)는 상류 거부 유지.
+- **클래스 B — --json 오류 계약** (review #7 의 클래스, codex 전수 매트릭스 40+ 실측): `fail()` 진입점 자체가 --json 시 첫 오류를 단일 `{ok:false,error,code:'error'}` 로 방출하고 이후 사람용 출력을 묵음(래치는 argv 정체성 스코프 — REPL/인프로세스에서 자동 해제). failJson 구체 code 경로는 그대로 우선. stderr-only 빈 stdout 6개소(requests complete/drop·wakeup-interval set/record·intent classify/expand)는 fail() 로 전환. enforce remove --json 성공 JSON 화.
+- 이연(정직): --json 성공경로 사람용 텍스트 6개소(resume·pre-wake-audit --last·release cleanup·lessons --auto·bare-help 4종·legacy migrate preview)는 명령별 데이터 형상이 필요해 다음 라운드 — 오류경로와 달리 exit 0 이라 소비자 오판 위험이 낮다.
+- 검증: 클로버 대피/fail 래치/NaN 3종 행위검사 포함 selftest 323(+3), 대표 오류경로 8종 + 기존 PASS 회귀 실측, e2e.
+
 ## 1.36.49 — 2026-07-21 — codex 6차 헌트: 신작 표면(1.36.28~48) 10건 전수 수정 (High 3 · Medium 5 · Low 2)
 
 이번 창에서 신설된 기능들(enforce/toggles/anchors/release note/JSON 계약)을 외부 적대 검증(codex, 30만 토큰) — 10건 발견, 10건 전수 재현 확정 후 전부 수정 (반박 0, DEFER 0).

@@ -1,7 +1,7 @@
 <!-- leerness:managed:auto -->
 # 🔔 메인 에이전트용 자동 reminder
 
-_생성: 2026-07-21T03:30:39.433Z_
+_생성: 2026-07-21T06:07:12.192Z_
 
 ## drift critical 감지
 현재 워크스페이스의 메타파일이 매우 stale합니다. 이번 라운드 작업 끝에 반드시 다음 명령을 호출하세요:
@@ -16,8 +16,8 @@ leerness drift check .
 ```
 
 stale 신호:
-- session-handoff.md: 4.1일 stale
-- progress-tracker: 0.1일 stale
+- session-handoff.md: 4.2일 stale
+- progress-tracker: 0.3일 stale
 
 
 _이 파일은 leerness 1.9.38+가 자동 갱신합니다. session close 후 자동 삭제.

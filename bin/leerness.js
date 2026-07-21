@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.49';
+const VERSION = '1.36.50';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -4113,10 +4113,12 @@ function _selfTestCases() {
       const io = require('../lib/io');
       if (typeof io.setQuiet !== 'function') return false;
       // quiet 면 log/ok/warn 묵음, fail/failJson 은 노출
-      let out = ''; const _w = process.stdout.write; process.stdout.write = s => { out += s; return true; };
+      // 1.36.50: fail 은 json-argv 모드에서 stderr 강등(계약 v2) — "오류는 항상 노출" 의도는 양 스트림으로 검증
+      let out = ''; const _w = process.stdout.write, _e = process.stderr.write;
+      process.stdout.write = s => { out += s; return true; }; process.stderr.write = s => { out += s; return true; };
       let quietLogSuppressed, failShown;
       try { io.setQuiet(true); io.log('HUMAN'); io.ok('OK'); quietLogSuppressed = !/HUMAN|OK/.test(out); out = ''; io.fail('ERR'); failShown = /ERR/.test(out); }
-      finally { io.setQuiet(false); process.stdout.write = _w; process.exitCode = 0; }
+      finally { io.setQuiet(false); process.stdout.write = _w; process.stderr.write = _e; process.exitCode = 0; }
       const src = read(__filename);
       const wired = src.includes("setQuiet(true);") && src.includes("action: 'init', version: VERSION, path: _initRoot, harnessFiles");
       return quietLogSuppressed && failShown && wired;
@@ -4933,6 +4935,55 @@ function _selfTestCases() {
       const dg = read(path.join(__dirname, '..', 'lib', 'diagnostics.js'));
       const wnOk = /compareVer\(fromV, toV\) > 0/.test(dg) && dg.includes("code: 'invalid_range'");
       return tOk && noteOk && revOk && wnOk;
+    } },
+    { name: '스토어 클로버 대피 (1.36.50, 클래스 스윕 A): 손상 JSON 위 유효 JSON 저장 시 원본 .corrupt-* 대피 — 행위검사', run: () => {
+      const io = require('../lib/io');
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_cw_'));
+      const _ce = console.error; console.error = () => {};          // 대피 알림이 doctor(en) 등 상위 출력에 새지 않게 격리
+      try {
+        const f = path.join(tmp, 's.json');
+        fs.writeFileSync(f, '{"keep":[1,');                         // 손상
+        io.writeUtf8(f, '{"fresh":true}');
+        const baks = fs.readdirSync(tmp).filter(n => n.startsWith('s.json.corrupt-'));
+        const rescued = baks.length === 1 && fs.readFileSync(path.join(tmp, baks[0]), 'utf8') === '{"keep":[1,' && read(f) === '{"fresh":true}';
+        // 정상 파일 덮어쓰기·비-JSON 새 내용은 대피 없음(백업 증식 방지)
+        io.writeUtf8(f, '{"fresh":2}');
+        const f2 = path.join(tmp, 'n.json'); fs.writeFileSync(f2, 'not json'); io.writeUtf8(f2, 'still not json');
+        const noExtra = fs.readdirSync(tmp).filter(n => n.includes('.corrupt-')).length === 1;
+        return rescued && noExtra;
+      } finally { console.error = _ce; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: 'NaN 날짜 fail-open 클래스 스윕 (1.36.50): drift mtime 폴백·무효날짜 제외 + audit stale 취급 + handoff-gap 정보부재 — 소스가드', run: () => {
+      const dr = read(path.join(__dirname, '..', 'lib', 'drift.js'));
+      const drOk = (dr.match(/Number\.isFinite/g) || []).length >= 4;
+      const au = read(path.join(__dirname, '..', 'lib', 'audit.js'));
+      const auOk = /if \(!Number\.isFinite\(dDays\)\) dDays = Infinity/.test(au);
+      const s = read(__filename);
+      const gapOk = /if \(!Number\.isFinite\(lastMs\)\) return \{ hasLast: false \}/.test(s);
+      return drOk && auOk && gapOk;
+    } },
+    { name: '--json 오류 계약 진입점 v2 (1.36.50, 클래스 스윕 B): fail 래치 — 사람용 stderr 강등 + JSON 페이로드 통과 + 명시 failJson(false) human 보장 — 행위검사', run: () => {
+      const io = require('../lib/io');
+      const saveArgv = process.argv, saveExit = process.exitCode; const outs = [], errs = [];
+      const _log = console.log, _err = console.error;
+      try {
+        process.argv = ['node', 'x', 'cmd', '--json'];
+        console.log = (s) => outs.push(String(s)); console.error = (s) => errs.push(String(s));
+        io.setQuiet(false);                     // 래치 초기화
+        io.fail('첫 오류'); io.fail('둘째'); io.log('사람용 잔여줄'); io.log('{"agg":true}');
+        // stdout: 집계 JSON 만 통과 · ✗/잔여줄은 stderr
+        const passThru = outs.length === 1 && outs[0] === '{"agg":true}';
+        const demoted = errs.some(e => e.includes('첫 오류')) && errs.some(e => e === '사람용 잔여줄');
+        // 명시 failJson(false) → argv 에 --json 있어도 human ✗ (호출자 결정 우선, UR-0099 계약)
+        io.setQuiet(false); outs.length = 0;
+        io.failJson(false, 'c', '사람지정');
+        const humanExplicit = outs.length === 1 && outs[0] === '✗ 사람지정';
+        // 비-json argv 사람용 ✗ 유지
+        io.setQuiet(false); process.argv = ['node', 'x', 'cmd']; outs.length = 0;
+        io.fail('사람용');
+        const human = outs.length === 1 && outs[0] === '✗ 사람용';
+        return passThru && demoted && humanExplicit && human;
+      } finally { console.log = _log; console.error = _err; process.argv = saveArgv; io.setQuiet(false); process.exitCode = saveExit; }
     } }
   ];
 }
@@ -5227,11 +5278,16 @@ function enforceCmd(root, sub) {
     return;
   }
   if (sub === 'remove') {
+    let removed = false, restored = false;
     if (exists(hookP) && read(hookP).includes(_ENFORCE_MARK)) {
-      if (exists(chainedP)) { fs.copyFileSync(chainedP, hookP); fs.unlinkSync(chainedP); try { fs.chmodSync(hookP, 0o755); } catch {} }
+      if (exists(chainedP)) { fs.copyFileSync(chainedP, hookP); fs.unlinkSync(chainedP); try { fs.chmodSync(hookP, 0o755); } catch {} restored = true; }
       else fs.unlinkSync(hookP);
-      ok('enforce 제거 — pre-commit 훅 해제' + (exists(hookP) ? ' (기존 훅 복원)' : ''));
-    } else log('enforce 훅 없음 — 변경 없음');
+      removed = true;
+    }
+    // 1.36.50 (스윕 B): --json 성공도 단일 JSON — 종전엔 사람용 텍스트/무출력이었다
+    if (json) { log(JSON.stringify({ ok: true, removed, restoredChain: restored }, null, 2)); return; }
+    if (removed) ok('enforce 제거 — pre-commit 훅 해제' + (restored ? ' (기존 훅 복원)' : ''));
+    else log('enforce 훅 없음 — 변경 없음');
     return;
   }
   // status
@@ -6380,7 +6436,7 @@ function _detectAbnormalShutdown(root) {
     if (exists(lhFp)) {
       const j = JSON.parse(read(lhFp));
       const last = j.lastAt || (j.history && j.history.length > 0 ? j.history[j.history.length - 1] : null);
-      if (last) {
+      if (last && Number.isFinite(new Date(last).getTime())) {   // 1.36.50 (NaN 날짜 클래스): 손상 타임스탬프는 신호 산출 불가 — 스킵
         const lastMs = new Date(last).getTime();
         const gapMin = Math.floor((now - lastMs) / 60000);
         if (gapMin > 60) {
@@ -7016,9 +7072,9 @@ function requestsCmd(root, sub, ...rest) {
 
   if (sub === 'complete') {
     const id = rest[0];
-    if (!id) { console.error('Usage: leerness requests complete <id>'); process.exit(1); }
+    if (!id) { fail('Usage: leerness requests complete <id>'); process.exit(1); }   // 1.36.50 (스윕 B): stderr-only → stdout 계약(fail 이 --json 인지)
     const updated = _updateUserRequest(root, id, { status: 'completed' });
-    if (!updated) { console.error(`request not found: ${id}`); process.exit(1); }
+    if (!updated) { fail(`request not found: ${id}`); process.exit(1); }
     if (has('--json')) { log(JSON.stringify(updated, null, 2)); return; }
     log(grn(`✓ completed ${updated.id}`));
     return;
@@ -7026,9 +7082,9 @@ function requestsCmd(root, sub, ...rest) {
 
   if (sub === 'drop') {
     const id = rest[0];
-    if (!id) { console.error('Usage: leerness requests drop <id>'); process.exit(1); }
+    if (!id) { fail('Usage: leerness requests drop <id>'); process.exit(1); }   // 1.36.50 (스윕 B)
     const updated = _updateUserRequest(root, id, { status: 'dropped' });
-    if (!updated) { console.error(`request not found: ${id}`); process.exit(1); }
+    if (!updated) { fail(`request not found: ${id}`); process.exit(1); }
     if (has('--json')) { log(JSON.stringify(updated, null, 2)); return; }
     log(yel(`✓ dropped ${updated.id}`));  // 1.9.354 (UR-0072 외부리뷰): 성공 동작에 실패 아이콘(✗) 대신 ✓
     return;
@@ -7405,7 +7461,7 @@ function wakeupIntervalCmd(root, sub, val) {
 
   if (sub === 'set') {
     const n = Number(val);
-    if (!val || isNaN(n) || n < 60) { console.error('Usage: leerness wakeup-interval set <secs ≥ 60>'); process.exit(1); }
+    if (!val || isNaN(n) || n < 60) { fail('Usage: leerness wakeup-interval set <secs ≥ 60>'); process.exit(1); }   // 1.36.50 (스윕 B)
     const state = _loadWakeupHistory(root);
     state.override = n;
     _writeWakeupHistory(root, state);
@@ -7444,7 +7500,7 @@ function wakeupIntervalCmd(root, sub, val) {
   if (sub === 'record') {
     const kind = val || 'auto';
     const validKinds = ['auto', 'user-trigger', 'wakeup-miss'];
-    if (!validKinds.includes(kind)) { console.error(`kind must be: ${validKinds.join('/')}`); process.exit(1); }
+    if (!validKinds.includes(kind)) { fail(`kind must be: ${validKinds.join('/')}`); process.exit(1); }   // 1.36.50 (스윕 B)
     _recordWakeupFire(root, kind);
     if (has('--json')) { log(JSON.stringify({ recorded: kind, at: new Date().toISOString() }, null, 2)); return; }
     log(grn(`✓ wakeup fire 기록: ${kind}`));
@@ -7950,7 +8006,7 @@ function intentCmd(root, sub, ...rest) {
 
   if (sub === 'classify') {
     const text = rest.filter(x => !x.startsWith('-')).join(' ');
-    if (!text) { console.error('Usage: leerness intent classify "<request text>"'); process.exit(1); }
+    if (!text) { fail('Usage: leerness intent classify "<request text>"'); process.exit(1); }   // 1.36.50 (스윕 B)
     const result = _classifyIntent(text);
     if (has('--json')) { log(JSON.stringify({ text, ...result }, null, 2)); return; }
     log(cyan(`# leerness intent classify (1.9.213)`));
@@ -7968,7 +8024,7 @@ function intentCmd(root, sub, ...rest) {
 
   if (sub === 'expand') {
     const text = rest.filter(x => !x.startsWith('-')).join(' ');
-    if (!text) { console.error('Usage: leerness intent expand "<request text>"'); process.exit(1); }
+    if (!text) { fail('Usage: leerness intent expand "<request text>"'); process.exit(1); }   // 1.36.50 (스윕 B)
     const result = _inferScopeExpansion(text, root);
     if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
     log(cyan(`# leerness intent expand (1.9.213) [DRY-RUN]`));
@@ -8047,6 +8103,7 @@ function _getLastHandoffGap(root) {
     const j = JSON.parse(read(fp));
     if (!j.last) return { hasLast: false };
     const lastMs = new Date(j.last).getTime();
+    if (!Number.isFinite(lastMs)) return { hasLast: false };   // 1.36.50 (NaN 날짜 클래스): 손상 타임스탬프 = 정보 부재로 취급
     const gapMs = Date.now() - lastMs;
     const gapMin = Math.floor(gapMs / 60000);
     // R-0001 영구 룰: 25분 (1500s). gap > 35분 (140% buffer) → wakeup miss 의심

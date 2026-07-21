@@ -693,7 +693,27 @@
       "notes": "",
       "updatedAt": "2026-07-15T01:16:11.252Z",
       "droppedAt": "2026-07-15T01:16:11.252Z"
+    },
+    {
+      "id": "UR-0061",
+      "text": "자연어 모호성 감지 시 사용자 질문 + 신규기능은 코드 전 미리보기(디자인/기능) 제시→승인/수정 워크플로 강제",
+      "recordedAt": "2026-07-21T04:53:03.081Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
+    },
+    {
+      "id": "UR-0062",
+      "text": "프로젝트 개발 언어·연결 서비스 자동 감지(마이그레이션/언어 변경 이력 반영) + 온톨로지 그래프 표시, 그래프 토글스위치 제거→CLI 명령/사용가이드로 대체",
+      "recordedAt": "2026-07-21T04:53:03.473Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-07-15T01:16:11.253Z"
+  "updatedAt": "2026-07-21T04:53:03.474Z"
 }
