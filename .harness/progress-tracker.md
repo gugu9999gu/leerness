@@ -77,3 +77,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0054 | done | UR-0061 clarify/preview (1.36.51) + UR-0062 tech 프로필/그래프 탭 (1.36.53) | selftest 327, e2e 388/388, 커밋 90e1441/eca2245/이번, npm 게시 | 다음 액션 작성 | 2026-07-21 |
 | T-0055 | done | codex 7차 헌트 12건 전수 수정 (1.36.54) | 12/12 재현·수정·재검, selftest 328, e2e 388/388, npm 게시 | 다음 액션 작성 | 2026-07-21 |
 | T-0056 | done | E2E 아티팩트 이식성 6건 자기완결화 (1.36.55) | 아티팩트 e2e 386/386 + 저장소 388/388 양쪽 그린, 감사 P0-2 종결 | 다음 액션 작성 | 2026-07-21 |
+| T-0057 | done | F-06 스캐너 개선 + R-0001 codex 검수 사이클 1회전 (1.36.56) | 검수 4건 반영, selftest 329, e2e 388/388, npm 게시 | 다음 액션 작성 | 2026-07-21 |

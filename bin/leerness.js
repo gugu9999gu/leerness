@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.56';
+const VERSION = '1.36.57';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5153,6 +5153,34 @@ function _selfTestCases() {
         const srcOk = read(__filename).includes('_seenAt.has(_valKey)') && read(__filename).includes('_giMatch(fileRel)');
         return unknownOk && sameTokenOnce && distinctKept && extlessGuard && srcOk;
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: 'integrity check/repair (1.36.57, 외부감사 F-04): 절단/부재 감지 → archive 대피 후 템플릿 재생성 · 사용자 추가편집 무탐 — 행위검사', run: () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_int_'));
+      const _w = process.stdout.write; const saveArgv = process.argv; const saveExit = process.exitCode;
+      try {
+        process.stdout.write = () => true;
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        const tf = coreFiles(tmp, 'ko', [], {});
+        for (const k of _INTEGRITY_DOCS) fs.mkdirSync(path.dirname(path.join(tmp, k)), { recursive: true }), fs.writeFileSync(path.join(tmp, k), tf[k]);
+        fs.writeFileSync(path.join(tmp, '.harness', 'manifest.json'), '{"language":"ko"}');
+        // 손상 주입: 절단 + 삭제 / 사용자 추가 편집(무탐 대상)
+        fs.writeFileSync(path.join(tmp, '.harness', 'context-routing.md'), 'x');
+        fs.rmSync(path.join(tmp, '.harness', 'guardrails.md'));
+        fs.appendFileSync(path.join(tmp, '.harness', 'testing-strategy.md'), '\n## 커스텀 절차\n- 내 규칙\n');
+        process.argv = ['node', 'x', 'integrity', 'check'];
+        process.exitCode = 0; integrityCmd(tmp);
+        const detected = process.exitCode === 1;
+        process.argv = ['node', 'x', 'integrity', 'check', '--repair'];
+        process.exitCode = 0; integrityCmd(tmp);
+        const routing = fs.readFileSync(path.join(tmp, '.harness', 'context-routing.md'), 'utf8');
+        const repaired = routing.includes('# Context Routing') && fs.existsSync(path.join(tmp, '.harness', 'guardrails.md'));
+        const backed = fs.readdirSync(path.join(tmp, '.harness', 'archive')).some(n => n.startsWith('integrity-context-routing'));
+        const customKept = fs.readFileSync(path.join(tmp, '.harness', 'testing-strategy.md'), 'utf8').includes('커스텀 절차');
+        process.argv = ['node', 'x', 'integrity', 'check'];
+        process.exitCode = 0; integrityCmd(tmp);
+        const cleanAfter = process.exitCode !== 1;
+        return detected && repaired && backed && customKept && cleanAfter;
+      } finally { process.stdout.write = _w; process.argv = saveArgv; process.exitCode = saveExit; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     } }
   ];
 }
@@ -5525,6 +5553,79 @@ function anchorsCmd(root, sub) {
   }
   fail(`알 수 없는 하위명령: ${sub} (가능: status, draft [--apply])`);
 }
+
+// 1.36.57 (외부 GPT 감사 F-04): managed 정책-문서 무결성 점검/복구 — drift(신선도)와 별개로 "파일 자체가
+//   잘리거나 사라진" 손상을 감지한다. 대상은 사용자가 편집하지 않는 순수 템플릿 문서군만(사용자 데이터 표면 제외 —
+//   plan/progress/brief/decisions 등은 절대 건드리지 않음). 판정은 보수적: 부재 / H1 상실 / 템플릿 대비 40% 미만 크기.
+//   --repair 는 손상 원본을 .harness/archive/ 로 대피 후 현재 버전 템플릿으로 재생성.
+const _INTEGRITY_DOCS = [
+  '.harness/session-workflow.md', '.harness/context-routing.md', '.harness/writeback-policy.md',
+  '.harness/task-type-map.md', '.harness/protected-files.md', '.harness/guardrails.md',
+  '.harness/consistency-policy.md', '.harness/testing-strategy.md', '.harness/review-checklist.md',
+  '.harness/release-checklist.md', '.harness/session-close-policy.md', '.harness/plan-progress-boundary.md',
+];
+function integrityCmd(root) {
+  root = absRoot(root);
+  const json = has('--json');
+  const repair = has('--repair');
+  if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root} — 먼저 leerness init`); return; }
+  let lang = 'ko', minimal = false;
+  try { const mf = JSON.parse(read(path.join(root, '.harness', 'manifest.json'))); lang = mf.language || 'ko'; minimal = !!mf.minimal; } catch {}
+  // (검수 #1) minimal 설치 존중 — minimal 이 의도적으로 뺀 문서를 '부재 손상'으로 오판/재생성하지 않는다
+  const templates = coreFiles(root, lang, [], { minimal });
+  const docs = _INTEGRITY_DOCS.filter(k => typeof templates[k] === 'string');
+  const findings = []; const repaired = []; let repairFailed = false;
+  const force = has('--force');
+  for (const key of docs) {
+    const tmpl = templates[key];
+    const fp = path.join(root, key);
+    let kind = null;
+    if (!exists(fp)) kind = 'missing';
+    else {
+      let cur = ''; try { cur = read(fp); } catch { kind = 'unreadable'; }
+      if (!kind) {
+        // (검수 #3) H1 상실 = "H1 이 하나도 없음"(정확 일치 아님 — 사용자가 제목을 번역/개명해도 무탐)
+        if (!cur.split('\n').some(l => /^# \S/.test(l.trim()))) kind = 'h1_lost';
+        else if (cur.length < tmpl.length * 0.4) kind = 'truncated';
+      }
+    }
+    if (!kind) continue;
+    // (검수 #3) 길이-단독 신호(truncated)는 advisory — --force 없인 복구도 exit 1 도 아님 (합리적 축약 오판 방지)
+    const advisory = kind === 'truncated' && !force;
+    const f = { file: key, kind, advisory, templateBytes: Buffer.byteLength(tmpl, 'utf8') };
+    if (repair && !advisory) {
+      try {
+        if (exists(fp)) {
+          const bakDir = path.join(root, '.harness', 'archive');
+          mkdirp(bakDir);
+          // (검수 #4) 같은 ms 백업 충돌 방지 — pid+시퀀스 접미
+          fs.copyFileSync(fp, path.join(bakDir, `integrity-${path.basename(key)}-${Date.now()}-${process.pid}-${++_integSeq}.bak`));
+          f.backedUp = true;
+        }
+        writeUtf8(fp, tmpl);
+        f.repaired = true; repaired.push(key);
+      } catch (e) { f.repaired = false; f.error = String(e.message || e).slice(0, 120); repairFailed = true; }
+    }
+    findings.push(f);
+  }
+  // (검수 #2) 실패한 repair 는 성공이 아니다 — hard 손상 잔존 또는 복구 실패 시 exit 1 (advisory 는 exit 무영향)
+  const hardLeft = findings.filter(f => !f.advisory && !f.repaired);
+  if (json) {
+    log(JSON.stringify({ ok: !repairFailed && hardLeft.length === 0, checked: docs.length, minimal, findings, repaired }, null, 2));
+    if (repairFailed || hardLeft.length) process.exitCode = 1;
+    return;
+  }
+  log(`# leerness integrity — managed 정책-문서 무결성 (${docs.length}종 검사${minimal ? ' · minimal' : ''})`);
+  if (!findings.length) { ok('  손상 없음 — 전 문서 구조 정상'); return; }
+  for (const f of findings) {
+    const icon = f.repaired ? '🔧 복구' : (f.advisory ? '⚠ 의심' : '✗ 손상');
+    log(`  ${icon} ${f.file} (${f.kind})${f.repaired && f.backedUp ? ' — 원본은 .harness/archive/ 대피' : ''}${f.advisory ? ' — 길이-단독 신호(advisory): 복구하려면 --repair --force' : ''}${f.error ? ` — 복구 실패: ${f.error}` : ''}`);
+  }
+  if (hardLeft.length && !repair) warn(`  복구: leerness integrity check --repair (손상 원본은 archive 로 대피 후 템플릿 재생성)`);
+  if (repairFailed || hardLeft.length) process.exitCode = 1;
+  return;
+}
+let _integSeq = 0;
 
 // 1.36.28 (codex 미검토표면 헌트 #3 — 데이터 유실 클래스): 손상된 JSON 스토어를 "빈 값"으로 오인해 덮어쓰는 fail-open 방지.
 //   파일이 "없음"과 "있으나 손상"을 구분 — 후자는 파싱 실패를 던져 변경(저장)을 거부하고 원본을 보존한다.
@@ -6293,6 +6394,7 @@ function commandsCmd(root) {
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
       { cmd: 'clarify "<사용자 요청>" [--json]', desc: '요청 모호성 신호 감지 → 사용자에게 물을 질문 생성 (추측 구현 방지) — 1.36.51 UR-0061' },
       { cmd: 'tech [--json]', desc: '기술 프로필 — 개발 언어·연결 서비스 자동 감지 + 마이그레이션/언어전환 이력, 그래프 🛠 탭 표시 — 1.36.53 UR-0062' },
+      { cmd: 'integrity check [--repair] [--json]', desc: 'managed 정책-문서 12종 무결성(부재/H1 상실/절단) 점검 — --repair: archive 대피 후 템플릿 재생성 — 1.36.57 감사 F-04' },
       { cmd: 'preview add|list|show|approve|revise', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약 — 1.36.51 UR-0061' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
       { cmd: 'brainstorm "<topic>" [--include-code]', desc: '워크스페이스 회수 + 코드 grep' }
@@ -22658,6 +22760,10 @@ async function main() {
   if (cmd === 'anchors')                           return anchorsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), args[1] && !args[1].startsWith('-') ? args[1] : null);   // 1.36.36: 정체성앵커 초안
   if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
   if (cmd === 'tech')                              return _tech.techCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1], { has });   // 1.36.53 (UR-0062): 기술 프로필
+  if (cmd === 'integrity') {                       // 1.36.57 (감사 F-04): managed 문서 무결성 점검/복구
+    if (args[1] && args[1] !== 'check') { failJson(has('--json'), 'unknown_subcommand', `알 수 없는 integrity 하위명령: ${args[1]} (가능: check [--repair] [--force])`); return process.exit(process.exitCode || 1); }
+    return integrityCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());
+  }
   // 1.36.51 (사용자 요청 UR-0061): 모호성 질문 + 미리보기 승인 워크플로
   if (cmd === 'clarify')                           return _clar.clarifyCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')).join(' '), { has });
   if (cmd === 'preview') {

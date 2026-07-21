@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.36.57 — 2026-07-21 — integrity check --repair: managed 문서 무결성 복구 (외부감사 F-04) — R-0001 검수 2회전
+
+drift(신선도)와 별개로 "파일 자체가 잘리거나 사라진" 손상을 감지/복구. R-0001 codex 검수가 High 2 포함 5건을 지적 — 전건 재현·보정 후 재검(minimal 오판·repair 실패 exit 0 는 검수 없이는 출하됐을 결함).
+
+- **`leerness integrity check [--repair] [--force] [--json]`**: 정책-문서 12종(사용자 데이터 표면 제외) — 부재/H1 전무/템플릿 40% 미만 절단 감지. --repair 는 원본 archive 대피(pid+seq 접미, 검수 #4) 후 현재 버전 템플릿 재생성.
+- (검수 #1 High) **minimal 설치 존중**: manifest.minimal 반영 — minimal 이 뺀 6종을 '부재 손상' 오판/재생성하지 않음(6종만 검사).
+- (검수 #2 High) **repair 실패 = exit 1**: 종전엔 복구 실패(EEXIST 등)에도 exit 0.
+- (검수 #3) **오탐 완화**: H1 판정을 "H1 전무"로(제목 번역/개명 무탐), 길이-단독 신호(truncated)는 advisory — --force 없인 복구/exit 비관여(합리적 축약 보호).
+- (검수 #5) unknown 하위명령 JSON 오류 + templateBytes 실제 바이트.
+- 실측: 감사 시나리오(context-routing 절단) 감지→복구, 사용자 추가 편집 무탐, en/ko 라운드트립 클린. selftest 330(+1).
+
 ## 1.36.56 — 2026-07-21 — 시크릿 스캐너 F-06 (외부감사 P1) + 매 라운드 codex 검수 룰 (R-0001, 사용자 지시)
 
 사용자 지시로 영구 룰 R-0001(every-round: 출하 전 codex 교차 검수) 등록 — 이 릴리스가 첫 적용: 1차 구현 → codex 검수가 4건 지적 → 전건 재현 확인 후 보정 → 재검.

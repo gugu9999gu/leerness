@@ -89,7 +89,13 @@
       "title": "stress-v211 마지막 갱신 1201h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js",
       "addedAt": "2026-07-21T11:20:35.461Z"
+    },
+    {
+      "icon": "🧬",
+      "title": "stress-v211 마지막 갱신 1204h 전 — 새 stress test 작성 권장",
+      "command": "node _apps/leerness-stress/bin/stress-v212.js",
+      "addedAt": "2026-07-21T13:49:31.543Z"
     }
   ],
-  "at": "2026-07-21T11:20:35.462Z"
+  "at": "2026-07-21T13:49:31.543Z"
 }
