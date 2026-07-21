@@ -7028,5 +7028,33 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.53 (사용자 요청 UR-0062): tech 프로필 — 언어·서비스 감지/이력 + 그래프 🛠 탭(스위치 제거·가이드) CLI 라운드트립
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tech-'));
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'demo', dependencies: { stripe: '^1' } }));
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const t1 = JSON.parse(R(['tech', '--json']).stdout);
+    const detOk = t1.current.languages.some(l => l.id === 'javascript') && t1.current.services.some(s => s.id === 'stripe');
+    // 마이그레이션: stripe → supabase
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'demo', dependencies: { '@supabase/supabase-js': '^2' } }));
+    const t2 = JSON.parse(R(['tech', '--json']).stdout);
+    const migOk = t2.changedNow === true && t2.diffNow.addedServices.includes('supabase') && t2.diffNow.removedServices.includes('stripe') && t2.history.length === 1;
+    // handoff 자동 갱신(프로필) 후 그래프 재생성 → 🛠 탭 (스위치 UI 제거 + CLI 가이드 + tech 데이터)
+    cp.spawnSync(process.execPath, [CLI, 'handoff', d], { encoding: 'utf8', timeout: 25000 });
+    cp.spawnSync(process.execPath, [CLI, 'graph', d, '--html'], { encoding: 'utf8', timeout: 25000 });
+    const html = fs.readFileSync(path.join(d, 'leerness.html'), 'utf8');
+    const tabOk = html.includes('data-v="tech"') && !html.includes('data-v="toggles"') && !html.includes('tgFlip') && html.includes('leerness toggle set') && html.includes('supabase');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = detOk && migOk && tabOk;
+    if (!ok) console.log(`   [tech 디버그] det=${detOk} mig=${migOk} tab=${tabOk}`);
+  } catch (e) {}
+  console.log(ok ? '✓ B(1.36.53) UR-0062: tech 언어·서비스 감지 + 마이그레이션 이력 diff + handoff 자동갱신 + 그래프 🛠 탭(스위치 제거·CLI 가이드)' : '✗ tech 프로필 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

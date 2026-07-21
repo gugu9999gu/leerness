@@ -73,3 +73,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0050 | done | ACP 입장 명문화 (1.36.48) — docs/interoperability.md + decision, 사용자 질의 대응 | selftest 316, e2e 386/386(904s), 커밋 af4c74d, npm 1.36.48, 클린룸(패키지에 docs 포함 확인). Zed계 ACP=MCP 경유 간접호환+재검토 트리거, BeeAI ACP=원칙충돌 비채택 | 다음 액션 작성 | 2026-07-21 |
 | T-0051 | done | codex 6차 헌트 — 신작 표면(1.36.28~48) 10건 전수 수정 (1.36.49) | 10/10 재현확정·반박0, selftest 320, e2e 386/386, 커밋 ed9c55d, npm 1.36.49 클린룸 검증 | 다음 액션 작성 | 2026-07-21 |
 | T-0052 | done | 결함 클래스 3종 전수 스윕 (1.36.50) | NaN날짜 7개소·스토어클로버 21종 writeUtf8 대피·--json 계약 fail v2, selftest 323, e2e 386/386, 커밋 881277f, npm 클린룸 | 다음 액션 작성 | 2026-07-21 |
+| T-0053 | done | 외부 GPT 감사 P0 채택 (1.36.52) | F-01/F-07 재현확정 수정 + F-02 정규화(실행우선 보정) + F-08 0600, selftest 326, e2e 387/387 | 다음 액션 작성 | 2026-07-21 |

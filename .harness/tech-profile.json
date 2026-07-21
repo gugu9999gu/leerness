@@ -1,0 +1,13 @@
+{
+  "current": {
+    "languages": [
+      {
+        "id": "javascript",
+        "evidence": "package.json"
+      }
+    ],
+    "services": []
+  },
+  "updatedAt": "2026-07-21T08:01:36.071Z",
+  "history": []
+}

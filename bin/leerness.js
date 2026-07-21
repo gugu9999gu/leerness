@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.52';
+const VERSION = '1.36.53';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3143,7 +3143,7 @@ function _selfTestCases() {
         const o = '<scr' + 'ipt>', c = '</scr' + 'ipt>';
         const js = html.slice(html.indexOf(o) + o.length, html.lastIndexOf(c));
         let synOk = false; try { new Function(js); synOk = true; } catch {}
-        htmlOk = html.includes('data-v="roadmap"') && html.includes('data-v="toggles"') && html.includes('toggleRegistry') && synOk;
+        htmlOk = html.includes('data-v="roadmap"') && html.includes('data-v="tech"') && html.includes('toggleRegistry') && synOk;   // 1.36.53: ⚙토글 탭 → 🛠기술 탭(토글 상태표+CLI 가이드 포함)
       } catch { behavOk = false; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
       // 배선 소스가드: 자동생성이 leerness.html(온톨로지)로 전환 + gate/lens 토글 준수 + toggle dispatch
       const s = read(__filename);
@@ -5056,6 +5056,33 @@ function _selfTestCases() {
       // F-08: Unix .env 0600
       const envOk = /mergeEnvFile[\s\S]{0,600}chmodSync\(p, 0o600\)/.test(s);
       return langOk && aliasOk && ratioOk && envOk;
+    } },
+    { name: '기술 프로필 (1.36.53, UR-0062): 언어·서비스 감지 + 마이그레이션 이력 diff + 그래프 🛠 탭 임베드 — 행위검사', run: () => {
+      const tp = require('../lib/tech-profile');
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tech_'));
+      const _w = process.stdout.write;
+      try {
+        process.stdout.write = () => true;
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'x', dependencies: { stripe: '^1', '@supabase/supabase-js': '^2' } }));
+        fs.writeFileSync(path.join(tmp, '.env'), 'OPENAI_API_KEY=placeholder\n');
+        const d1 = tp.detectTechProfile(tmp);
+        const ids = a => a.map(x => x.id);
+        const det = ids(d1.languages).includes('javascript') && ['stripe', 'supabase', 'openai'].every(s2 => ids(d1.services).includes(s2));
+        const r1 = tp.refreshTechProfile(tmp);
+        const saved = fs.existsSync(tp._techPath(tmp)) && r1.profile.history.length === 0;
+        // 마이그레이션: stripe 제거 + firebase 추가 → 이력 diff 기록
+        fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'x', dependencies: { firebase: '^10', '@supabase/supabase-js': '^2' } }));
+        const r2 = tp.refreshTechProfile(tmp);
+        const migr = r2.changed && r2.diff.addedServices.includes('firebase') && r2.diff.removedServices.includes('stripe') && tp.loadTechProfile(tmp).history.length === 1;
+        // 그래프 🛠 탭: tech 데이터 임베드 + 스위치 UI 제거 + CLI 가이드
+        const g = require('../lib/graph');
+        const out = path.join(tmp, 'leerness.html');
+        g.graphHtmlCmd(tmp, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadTechProfile: tp.loadTechProfile, quiet: true }, out);
+        const html = fs.readFileSync(out, 'utf8');
+        const tabOk = html.includes('data-v="tech"') && !html.includes('tgFlip') && html.includes('leerness toggle set') && html.includes('firebase');
+        return det && saved && migr && tabOk;
+      } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     } }
   ];
 }
@@ -6195,6 +6222,7 @@ function commandsCmd(root) {
       { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
       { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
       { cmd: 'clarify "<사용자 요청>" [--json]', desc: '요청 모호성 신호 감지 → 사용자에게 물을 질문 생성 (추측 구현 방지) — 1.36.51 UR-0061' },
+      { cmd: 'tech [--json]', desc: '기술 프로필 — 개발 언어·연결 서비스 자동 감지 + 마이그레이션/언어전환 이력, 그래프 🛠 탭 표시 — 1.36.53 UR-0062' },
       { cmd: 'preview add|list|show|approve|revise', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약 — 1.36.51 UR-0061' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
       { cmd: 'brainstorm "<topic>" [--include-code]', desc: '워크스페이스 회수 + 코드 grep' }
@@ -8586,6 +8614,7 @@ function _saveTeams(root, teams) {
 const _team = require('../lib/team');
 const _tgl = require('../lib/toggles');   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동 — gate/lens/auto-graph/delegation-brief)
 const _clar = require('../lib/clarify');  // 1.36.51 (UR-0061): 모호성 질문 + 미리보기 승인 워크플로
+const _tech = require('../lib/tech-profile');  // 1.36.53 (UR-0062): 기술 프로필 (언어·서비스 감지 + 변경 이력)
 function teamCmd(root, sub, id, opts = {}) { return _team.teamCmd(root, sub, id, opts, { VERSION, _loadTeams, _saveTeams, _detectShellCtx, arg, has, _withLock }); }   // 1.36.31: add 경합 락
 
 // 1.9.112: 전용 lessons.md (Memory Write Surface 5번째)
@@ -15684,7 +15713,7 @@ function _autoRoadmap(root, trigger) {
     //   토글 auto-graph OFF 시 생성 안 함(⚙ 탭/`leerness toggle`).
     if (!_tgl.toggleOn(root, 'auto-graph')) return false;
     const outFile = path.resolve(cfg.outFile || path.join(root, 'leerness.html'));
-    const s = _graph.graphHtmlCmd(root, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, quiet: true }, outFile);
+    const s = _graph.graphHtmlCmd(root, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, quiet: true }, outFile);
     const _en = _uiLang(root) === 'en';
     log(_en ? `✓ ontology graph auto-updated (${trigger}) — ${rel(root, outFile)} (graph+roadmap+toggles)` : `✓ 온톨로지 그래프 자동 갱신 (${trigger}) — ${rel(root, outFile)} (그래프+로드맵+토글 탭)`);
     return true;
@@ -22171,14 +22200,14 @@ function doctorCmd(opts = {}) { return _diag.doctorCmd(opts, { VERSION, uiLang: 
 function whichCmd() { return _diag.whichCmd({ VERSION, uiLang: _uiLang(arg('--path', process.cwd())), has, harnessPath: __filename }); }
 // 1.34.3 (T-0077): `graph --html` → lib/graph.js 온톨로지 HTML(leerness.html) 생성기 위임. 데이터는 in-process 로더 주입(자식 프로세스 셸링 X).
 const _graph = require('../lib/graph');
-function graphHtmlCmd(root) { return _graph.graphHtmlCmd(root, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, has, arg }); }   // 1.36.30: 로드맵 탭 + ⚙ 토글 탭 + canonical feature
+function graphHtmlCmd(root) { return _graph.graphHtmlCmd(root, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, has, arg }); }   // 1.36.30: 로드맵 탭 + ⚙ 토글 탭 + canonical feature
 // 1.34.4 (T-0077 후속): handoff 시 leerness.html 자동 재생성 — opt-in(LEERNESS_AUTO_GRAPH=1, 기본 OFF / "Always-Off Opt-In"). 사용자 비전 "자동으로 작성되게" 충족. 비치명(try/catch) · 기본경로 무영향.
 function _maybeAutoGraph(root) {
   if (process.env.LEERNESS_AUTO_GRAPH !== '1') return;
   try {
     const r0 = absRoot(root || process.cwd());
     if (!exists(path.join(r0, '.harness'))) return;
-    const s = _graph.graphHtmlCmd(r0, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, quiet: true });
+    const s = _graph.graphHtmlCmd(r0, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, quiet: true });
     if (!has('--json') && !has('--quiet') && !has('--compact')) log(`📊 ontology graph auto-regenerated: leerness.html (${s.nodes} nodes · ${s.edges} links) — LEERNESS_AUTO_GRAPH=1`);  // --json 출력 오염 방지
   } catch {}
 }
@@ -22406,7 +22435,7 @@ async function main() {
   if (cmd === 'lazy' && args[1] === 'detect')    return lazyDetect(_resolveRoot(args[2]), { json: has('--json') });
   if (cmd === 'memory' && args[1] === 'search')  return memorySearch(arg('--path', process.cwd()), args.slice(2).join(' '));
   if (cmd === 'hook' && args[1] === 'session-start') return hookSessionStartCmd(arg('--path', args[2] || process.cwd()));  // 1.36.22: SessionStart 컨텍스트 주입(쓰기 0)
-  if (cmd === 'handoff')      { const _hp = arg('--path', args[1] || process.cwd()); const _hr = handoffCmd(_hp); _maybeAutoGraph(_hp); return _hr; }
+  if (cmd === 'handoff')      { const _hp = arg('--path', args[1] || process.cwd()); const _hr = handoffCmd(_hp); try { _tech.refreshTechProfile(_hp); } catch {} _maybeAutoGraph(_hp); return _hr; }   // 1.36.53: 기술 프로필 자동 갱신(마이그레이션 이력) — 그래프 생성 전에
   if (cmd === 'reuse-map')    return reuseMapCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'verify-claim') { const _p = arg('--path', process.cwd()); if (args[1] === '--all' || has('--all')) return verifyClaimAllCmd(_p); return verifyClaimCmd(_p, args[1]); }  // 1.33.2: --all → 모든 done 주장 일괄 검증
   if (cmd === 'orchestrate')  return await orchestrateCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')));
@@ -22532,6 +22561,7 @@ async function main() {
   if (cmd === 'enforce')                           return enforceCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1]);   // 1.36.43: 사용 강제 (git pre-commit)
   if (cmd === 'anchors')                           return anchorsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), args[1] && !args[1].startsWith('-') ? args[1] : null);   // 1.36.36: 정체성앵커 초안
   if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
+  if (cmd === 'tech')                              return _tech.techCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1], { has });   // 1.36.53 (UR-0062): 기술 프로필
   // 1.36.51 (사용자 요청 UR-0061): 모호성 질문 + 미리보기 승인 워크플로
   if (cmd === 'clarify')                           return _clar.clarifyCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')).join(' '), { has });
   if (cmd === 'preview') {
