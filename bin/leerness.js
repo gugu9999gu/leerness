@@ -26,7 +26,7 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
   _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm,
-  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd, _briefUnfilled, _planGoalUnfilled, _draftAnchors, _replaceMdSection } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리 · 1.36.36 anchors
+  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd, _briefUnfilled, _planGoalUnfilled, _draftAnchors, _replaceMdSection, _mdSectionBody } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리 · 1.36.36 anchors
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.46';
+const VERSION = '1.36.47';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3202,6 +3202,13 @@ function _selfTestCases() {
       if (typeof p._draftAnchors !== 'function' || typeof p._replaceMdSection !== 'function') return false;
       const d = p._draftAnchors({ pkgDescription: '결제 정산 서비스', readmeText: '# T\n\n웹훅 백엔드.\n', milestones: [{ id: 'M-0001', title: '베타', status: 'planned' }], tasks: [] });
       const draftOk = d.hasSignal && d.purpose.some(l => l.includes('결제 정산 서비스')) && d.goal.some(l => l.includes('M-0001')) && d.purpose[0].includes('draft:');
+      // 1.36.47: 어색 조사 병기 소거 + 장문은 단어 경계 절단(…) — 실적용에서 발견된 품질 결함 회귀 방지
+      const dLong = p._draftAnchors({ pkgDescription: '가나다 라마바사 아자차카 타파하 '.repeat(20) });
+      const phraseOk = !dLong.goal.join('').includes('를(을)') && dLong.goal.some(l => l.includes('…')) && !/[가-힣]{2}…[가-힣]/.test(dLong.goal.join(''));
+      // 재초안: draft 마커 잔존 섹션은 gap 취급 (배선 소스가드)
+      const s47 = read(__filename);
+      const redraftOk = s47.includes("_mdSectionBody(briefTxt, 'Purpose') || '').includes(_draftM)");
+      if (!(phraseOk && redraftOk)) return false;
       // 무신호 시 발명 금지
       const empty = p._draftAnchors({});
       const noInvent = !empty.hasSignal && empty.purpose.length === 0 && empty.goal.length === 0;
@@ -5196,8 +5203,10 @@ function anchorsCmd(root, sub) {
   const briefTxt = exists(bf) ? read(bf) : '';
   const planTxt = exists(pf) ? read(pf) : '';
   const naM = '<!-- leerness:na';
-  const briefGap = !!briefTxt && !briefTxt.includes(naM) && _briefUnfilled(briefTxt);
-  const planGap = !!planTxt && !planTxt.includes(naM) && _planGoalUnfilled(planTxt);
+  // 1.36.47: draft 마커가 남아있는 섹션(미확정 초안)은 재초안 대상 — 초안 품질 개선을 기존 적용본에도 전파 가능.
+  const _draftM = '<!-- draft: leerness anchors';
+  const briefGap = !!briefTxt && !briefTxt.includes(naM) && (_briefUnfilled(briefTxt) || (_mdSectionBody(briefTxt, 'Purpose') || '').includes(_draftM));
+  const planGap = !!planTxt && !planTxt.includes(naM) && (_planGoalUnfilled(planTxt) || (_mdSectionBody(planTxt, 'Goal') || '').includes(_draftM));
   if (!sub || sub === 'status') {
     if (json) { log(JSON.stringify({ briefUnfilled: briefGap, planGoalUnfilled: planGap }, null, 2)); return; }
     log(`# leerness anchors — 정체성앵커 상태`);
