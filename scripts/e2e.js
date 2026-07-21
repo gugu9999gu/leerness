@@ -1350,24 +1350,30 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-total++;
+// 1.36.55 (외부감사 이식성): .gitignore/.npmignore 는 npm files 화이트리스트에서 의도적으로 제외되는 저장소-전용 파일 —
+//   게시 아티팩트에서는 검사 자체가 성립 안 하므로 명시 SKIP (조용한 누락이 아니라 사유 로그).
 {
-  // .gitignore에 _reports/ 포함 — leerness-pkg
   const giPath = path.join(__dirname, '..', '.gitignore');
-  const body = fs.existsSync(giPath) ? fs.readFileSync(giPath, 'utf8') : '';
-  const ok = /_reports\//.test(body) && /\*\.private\.md/.test(body);
-  console.log(ok ? '✓ B(1.9.43) leerness-pkg/.gitignore: _reports/ + *.private.md 차단' : `✗ .gitignore 실패`);
-  if (!ok) { failed++; console.log(body.slice(0, 300)); }
+  if (!fs.existsSync(giPath)) console.log('⊘ SKIP(아티팩트 프로필): leerness-pkg/.gitignore 검사 — 저장소 체크아웃 전용');
+  else {
+    total++;
+    const body = fs.readFileSync(giPath, 'utf8');
+    const ok = /_reports\//.test(body) && /\*\.private\.md/.test(body);
+    console.log(ok ? '✓ B(1.9.43) leerness-pkg/.gitignore: _reports/ + *.private.md 차단' : `✗ .gitignore 실패`);
+    if (!ok) { failed++; console.log(body.slice(0, 300)); }
+  }
 }
 
-total++;
 {
-  // .npmignore에 _reports/ + 보고서 차단 명시
   const niPath = path.join(__dirname, '..', '.npmignore');
-  const body = fs.existsSync(niPath) ? fs.readFileSync(niPath, 'utf8') : '';
-  const ok = /_reports\//.test(body) && /\*\.private/.test(body);
-  console.log(ok ? '✓ B(1.9.43) leerness-pkg/.npmignore: _reports/ 차단' : `✗ .npmignore 실패`);
-  if (!ok) { failed++; console.log(body.slice(0, 300)); }
+  if (!fs.existsSync(niPath)) console.log('⊘ SKIP(아티팩트 프로필): leerness-pkg/.npmignore 검사 — 저장소 체크아웃 전용');
+  else {
+    total++;
+    const body = fs.readFileSync(niPath, 'utf8');
+    const ok = /_reports\//.test(body) && /\*\.private/.test(body);
+    console.log(ok ? '✓ B(1.9.43) leerness-pkg/.npmignore: _reports/ 차단' : `✗ .npmignore 실패`);
+    if (!ok) { failed++; console.log(body.slice(0, 300)); }
+  }
 }
 
 // 1.9.42 회귀: agentskills.io 표준 호환 (skill install/discover/export + .env opt-in)
@@ -2347,9 +2353,17 @@ total++;
 }
 
 // 1.9.10 A: skillpack 동적 로드 (LEERNESS_SKILLPACK_PATH로 시뮬)
+// 1.36.55 (외부감사 이식성): 형제 디렉토리 가정 제거 — 없으면 최소 catalog.json 픽스처를 테스트가 직접 생성 (자기완결)
 total++;
 {
-  const skillpackDir = path.resolve(__dirname, '..', '..', 'leerness-skillpack');
+  let skillpackDir = path.resolve(__dirname, '..', '..', 'leerness-skillpack');
+  if (!fs.existsSync(path.join(skillpackDir, 'catalog.json'))) {
+    skillpackDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-spfix-'));
+    fs.writeFileSync(path.join(skillpackDir, 'catalog.json'), JSON.stringify({
+      name: 'leerness-skillpack', version: '1.0.0', leernessCompat: '>=1.9.10', updatedAt: '2026-01-01',
+      skills: [{ id: 'fixture-skill', displayNameKo: '픽스처 스킬', version: '1.0.0', lastUpdated: '2026-01-01', verification: 'passed', capabilities: ['e2e portable fixture'] }]
+    }, null, 2));
+  }
   const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'list', '--path', tmp], {
     encoding: 'utf8',
     env: Object.assign({}, process.env, { LEERNESS_SKILLPACK_PATH: skillpackDir })
@@ -3014,7 +3028,7 @@ total++;
 {
   const cDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-codex-'));
   const env = { ...process.env, LEERNESS_OFFLINE: '1' };
-  cp.spawnSync(process.execPath, [CLI, 'init', cDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000, env });
+  cp.spawnSync(process.execPath, [CLI, 'init', cDir, '--minimal', '--no-env', '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000, env });   // 1.36.55: 로케일 고정 — auto(en 환경)에서 ko 정규식 단언이 깨지던 이식성 결함
   // A) 허위 완료(테스트 통과만) → --require-evidence FAIL (exit 1)
   cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'fake done', '--path', cDir], { encoding: 'utf8', timeout: 15000, env });
   cp.spawnSync(process.execPath, [CLI, 'task', 'update', 'T-0002', '--status', 'done', '--evidence', '테스트 통과함', '--path', cDir], { encoding: 'utf8', timeout: 15000, env });
@@ -6315,7 +6329,7 @@ total++;
     const H = /[가-힣]/;
     const cap = (args) => (cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 15000 }).stdout) || '';
     const capEn = cap(['capabilities', '--language', 'en']);
-    const capKo = cap(['capabilities']);
+    const capKo = cap(['capabilities', '--language', 'ko']);   // 1.36.55: ko 도 명시 — auto 로케일 환경 비결정성 제거
     const capJsonEn = cap(['capabilities', '--json', '--language', 'en']);
     // EN: zero Hangul + English catalog desc/note + English labels; KO: preserved; JSON: English principles
     const capOk = !H.test(capEn) && /metadata files|external AI CLIs|mouse\/keyboard/.test(capEn)
@@ -6324,7 +6338,7 @@ total++;
       && /0 runtime dependencies/.test(capJsonEn);
     // team reminder body en/ko via handoff (full wiring: pure lang + caller _uiLang)
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-team-i18n-'));
-    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });   // 1.36.55: 로케일 고정
     cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'nightly', '--members', 'a,b', '--schedule', 'every-session', '--path', d], { encoding: 'utf8', timeout: 15000 });
     const hoEn = (cp.spawnSync(process.execPath, [CLI, 'handoff', d, '--language', 'en'], { encoding: 'utf8', timeout: 30000 }).stdout) || '';
     const hoKo = (cp.spawnSync(process.execPath, [CLI, 'handoff', d], { encoding: 'utf8', timeout: 30000 }).stdout) || '';
@@ -6593,7 +6607,11 @@ total++;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-disp-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    const env = { ...process.env, LEERNESS_ENABLE_CODEX: '1' };
+    // 1.36.55 (외부감사 이식성): 실제 codex 미설치 환경 자기완결 — 즉시 종료하는 fake codex 실행파일을 PATH 앞에 주입
+    const fbin = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fakecodex-'));
+    if (process.platform === 'win32') fs.writeFileSync(path.join(fbin, 'codex.cmd'), '@echo fake-codex\r\n');
+    else { fs.writeFileSync(path.join(fbin, 'codex'), '#!/bin/sh\necho fake-codex\n'); fs.chmodSync(path.join(fbin, 'codex'), 0o755); }
+    const env = { ...process.env, LEERNESS_ENABLE_CODEX: '1', PATH: fbin + path.delimiter + process.env.PATH };
     const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'REVIEWTASK', '--to', 'codex', '--path', d], { encoding: 'utf8', timeout: 20000, env });
     const out = r.stdout || '';
     // 1.35.6: 기본은 harness 브리프가 접두되므로 task 는 "... 작업: REVIEWTASK" 끝에 그대로(코덱스/경로 흡수 없음).

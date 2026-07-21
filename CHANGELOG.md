@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.55 — 2026-07-21 — E2E 아티팩트 이식성: 게시본에서 release gate 재현 (외부 GPT 감사 P0-2)
+
+감사 지적: 게시 npm 아티팩트에서 e2e 6건이 저장소-전용 픽스처로 실패 — "release gate 가 아티팩트에서 재현 안 되는 것은 릴리스 엔지니어링 결함". 6건 전부 자기완결화.
+
+- **.gitignore/.npmignore 검사**: npm files 화이트리스트가 의도적으로 제외하는 저장소-전용 파일 — 부재 시 명시 `⊘ SKIP(아티팩트 프로필)` (조용한 누락 아님, total 미포함).
+- **skillpack 동적 로드**: 형제 디렉토리(../leerness-skillpack) 가정 제거 — 없으면 최소 catalog.json 픽스처를 테스트가 직접 생성.
+- **Codex 수렴(require-evidence) · capabilities/team 영어화**: auto 로케일(en 환경)에서 ko 정규식 단언이 깨지던 비결정성 — 모든 i18n 케이스에 `--language ko|en` 명시 고정.
+- **agents dispatch flag bleed**: 실제 codex CLI 설치 가정 제거 — 즉시 종료하는 fake codex 실행파일(sh/cmd)을 temp PATH 앞에 주입.
+- 검증: `npm pack` 아티팩트를 풀어 그 안에서 e2e 전체 실행(감사와 동일 방식) — 저장소 실행과 양쪽 그린.
+
 ## 1.36.54 — 2026-07-21 — codex 7차 헌트: 신작 표면(1.36.49~53) 12건 전수 수정 (High 2 · Med 7 · Low 3)
 
 직전 3개 릴리스에서 신설한 기능(clarify/preview/tech/그래프 탭/io v2)을 외부 적대 검증 — 12건 발견, 전수 독립 재현 후 전부 수정 (반박 0).
