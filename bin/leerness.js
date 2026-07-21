@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.55';
+const VERSION = '1.36.56';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5126,6 +5126,33 @@ function _selfTestCases() {
         && io2.includes('!_jsonErrEmitted && t && (t[0]') && /process\.on\('exit', \(code\) => \{ if \(code !== 0/.test(io2) && io2.includes('.corrupt-${Date.now()}-${process.pid}-')
         && s.includes('declaredTestCount != null && runResult && !runResult.skipped && runResult.allPassed');
       return clar && shape && noDbUrl && reqOk && guards;
+    } },
+    { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
+      try {
+        fs.writeFileSync(path.join(tmp, 'config.custom'), 'SERVICE_TOKEN = "npm_abcdefghijklmnopqrstuvwxyz0123456789"\n');
+        fs.writeFileSync(path.join(tmp, 'CREDENTIALS'), 'password=hunter2realsecret\n');
+        fs.writeFileSync(path.join(tmp, 'blob.custom'), Buffer.from([0, 1, 2, 3, 0, 5]));      // 이진 → 제외
+        fs.writeFileSync(path.join(tmp, 'sample.custom'), 'API_KEY=your-key-here\n');           // placeholder → 제외
+        const r = _collectSecretFindings(tmp);
+        const files = r.committed.map(f => f.file);
+        const unknownOk = files.includes('config.custom') && files.includes('CREDENTIALS') && !files.includes('blob.custom') && !files.includes('sample.custom');
+        // dedupe: 같은 토큰이 직접 패턴(npm 접두)과 컨텍스트 패턴(할당) 둘 다에 걸려도 1건 (검수 #1 실측 케이스)
+        fs.writeFileSync(path.join(tmp, 'same.js'), 'api_key = "npm_a1B2a1B2a1B2a1B2a1B2a1B2a1B2a1B2a1B2"\n');
+        const rSame = _collectSecretFindings(path.join(tmp, 'same.js'));
+        const sameTokenOnce = rSame.committed.length === 1;
+        // 서로 다른 토큰 2개는 유지 (통제군)
+        fs.writeFileSync(path.join(tmp, 'dup.js'), 'const s = { password: "realpw123456", api_key: "realkey7890123" };\n');
+        const r2 = _collectSecretFindings(path.join(tmp, 'dup.js'));
+        const distinctKept = r2.committed.length === 2 && new Set(r2.committed.map(f => f.snippet)).size === 2;
+        // 검수 #2: 확장자 없는 파일도 64KB/NUL 가드 적용 (대형/이진 무명 파일 제외)
+        fs.writeFileSync(path.join(tmp, 'BIGNOEXT'), 'x'.repeat(64 * 1024 + 1) + ' password=hunterreal99\n');
+        fs.writeFileSync(path.join(tmp, 'NULNOEXT'), Buffer.concat([Buffer.from([65, 66, 0, 67]), Buffer.from('password=hunterreal99\n')]));
+        const r3 = _collectSecretFindings(tmp);
+        const extlessGuard = !r3.committed.some(f => f.file === 'BIGNOEXT' || f.file === 'NULNOEXT');
+        const srcOk = read(__filename).includes('_seenAt.has(_valKey)') && read(__filename).includes('_giMatch(fileRel)');
+        return unknownOk && sameTokenOnce && distinctKept && extlessGuard && srcOk;
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     } }
   ];
 }
@@ -9763,6 +9790,9 @@ function _isLikelyGitignored(root, fileRel) {
 function _collectSecretFindings(root) {
   root = absRoot(root);
   const findings = [];
+  // 1.36.56 (검수 #3): .gitignore 는 수집당 1회만 로드 — 종전엔 적격 파일마다 재읽기(5천 파일 실측 5천회)
+  let _giText = null; try { _giText = read(path.join(root, '.gitignore')); } catch {}
+  const _giMatch = (fileRel) => _giText != null && _gitignoreMatch(_giText, fileRel);
   // 1.9.354 (UR-0072 외부리뷰): root 가 파일이면 그 파일만 스캔. 디렉토리면 walk.
   let _iter;
   try { _iter = fs.statSync(root).isFile() ? [root] : walk(root); } catch { _iter = walk(root); }
@@ -9772,16 +9802,32 @@ function _collectSecretFindings(root) {
     const isEnvFamily = /^\.env(\.|$)/.test(path.basename(file));
     // 1.26.1 (13번째 외부리뷰 P2): 개인키/인증서 파일(.pem/.key/.crt/.p8 …)은 확장자 allow-list 에 없어 스캔 누락 → 커밋된 개인키 미탐 + handoff 'OK' 거짓보증. basename 으로 강제 포함('Generic private key' 정규식이 실제로 돌도록).
     const isKeyFile = /\.(?:pem|key|crt|cer|der|p8|p12|pfx|pkcs8|ppk|asc|gpg|keystore|jks)$/i.test(path.basename(file));
-    if (!SCAN_TEXT_EXT.has(ext) && !isEnvFamily && !isKeyFile) continue;
+    // 1.36.56 (외부 GPT 감사 F-06): 알 수 없는 확장자도 "작고(≤64KB) 텍스트인" 파일은 스캔 —
+    //   config.custom / 확장자 없는 credential 파일 미탐을 막는다. 이진 파일은 확장자 deny + NUL 스니핑으로 제외.
+    //   (검수 #2) 확장자 없는 파일('')은 SCAN_TEXT_EXT 의 '' 무제한 경로가 아니라 이 가드 경로로 — 64KB/NUL 안전장치가 실제 적용되게.
+    //   (검수 #3) 확장자 deny 를 stat 보다 먼저, stat 은 1회만.
+    const _binExt = /\.(?:png|jpe?g|gif|webp|ico|bmp|pdf|zip|gz|tgz|7z|rar|exe|dll|so|dylib|woff2?|ttf|eot|otf|mp[34]|wav|mov|avi|wasm|jar|class|pyc|db|sqlite3?|bin|dat|pak|iso|img)$/i.test(ext);
+    const _known = (ext !== '' && SCAN_TEXT_EXT.has(ext)) || isEnvFamily || isKeyFile;
+    if (!_known && _binExt) continue;
+    let st; try { st = fs.statSync(file); } catch { continue; }                        // 1.12.5: stat-before-read (1회)
+    if (st.size > 1024 * 1024) continue;
     let text;
-    // 1.12.5 (15th 버그헌트 P2, UR-0019): stat-before-read — 1MB 초과 파일은 읽지 않고 건너뜀(이전엔 read 후 검사라 대형 파일 통째 로드).
-    try { if (fs.statSync(file).size > 1024 * 1024) continue; } catch { continue; }
-    try { text = read(file); } catch { continue; }
+    if (!_known) {
+      if (st.size === 0 || st.size > 64 * 1024) continue;                              // 소형 파일만 (감사 권고)
+      let buf; try { buf = fs.readFileSync(file); } catch { continue; }
+      if (buf.subarray(0, 512).includes(0)) continue;                                  // NUL = 이진
+      text = buf.toString('utf8'); if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    } else {
+      try { text = read(file); } catch { continue; }
+    }
     if (text.length > 1024 * 1024) continue;
     const fileRel = (file === root) ? path.basename(file) : rel(root, file);
     // 1.9.350 (UR-0060): leerness 자기 harness.js + secret-policy 템플릿만 제외.
     if (path.resolve(file) === path.resolve(__filename) || /(^|[\\/])\.(?:harness|leerness)[\\/]secret-policy\.md$/.test(fileRel)) continue;
-    const gitignored = _isLikelyGitignored(root, fileRel);  // 1.9.365 CV-6: gitignored 면 info 강등
+    const gitignored = _giMatch(fileRel);  // 1.9.365 CV-6: gitignored 면 info 강등 (1.36.56 검수 #3: 캐시 사용)
+    // 1.36.56 (F-06, 검수 #1 보정): 같은 "값 스팬"이 복수 패턴에 걸리면 1건만 — 컨텍스트 패턴(키에서 시작)과
+    //   직접 패턴(값에서 시작)이 같은 토큰을 이중 보고하던 실측 케이스를 값 위치 기준으로 접는다. 서로 다른 토큰은 유지.
+    const _seenAt = new Set();
     for (const { name, re, valueGroup, requireSecretLike } of SECRET_PATTERNS) {
       re.lastIndex = 0;
       let m;
@@ -9793,6 +9839,11 @@ function _collectSecretFindings(root) {
         if (_isPlaceholderSecret(val)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
         if (valueGroup != null && requireSecretLike && !_looksSecretLike(val)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
         const line = text.slice(0, m.index).split('\n').length;
+        // 1.36.56 (F-06, 검수 #1): dedupe 키 = 값 스팬(시작+길이) — valueGroup 없으면 전체 매치 스팬
+        const _valOff = (valueGroup != null && m[valueGroup]) ? m.index + m[0].indexOf(m[valueGroup]) : m.index;
+        const _valKey = `${_valOff}:${String(val || '').length}`;
+        if (_seenAt.has(_valKey)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
+        _seenAt.add(_valKey);
         findings.push({ file: fileRel, line, name, snippet: m[0].slice(0, 32), gitignored });
         // 16th 버그헌트 F1: break 제거 — 같은 패턴이 한 파일에 여러 번(예: secret: + api_key: 둘 다 'Hardcoded password') 나오면 모두 보고(보안 FN 차단). zero-width 매치는 lastIndex 전진으로 무한루프 방지.
         if (re.lastIndex === m.index) re.lastIndex++;

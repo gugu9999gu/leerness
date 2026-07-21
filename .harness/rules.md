@@ -24,3 +24,4 @@ doNotStore:
 
 | ID | Trigger | Rule | Added | Status | Last Verified |
 |---|---|---|---|---|---|
+| R-0001 | every-round | 매 작업(라운드)마다 출하 전 codex 를 호출해 변경분 검수(교차 리뷰)를 수행하고 발견을 재현/반박 후 반영 | 2026-07-21 | active | - |
