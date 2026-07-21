@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.48 — 2026-07-16 — ACP 입장 명문화 (docs/interoperability.md, 사용자 질의)
+
+사용자 질의("ACP 가 고려돼 있는가?")에 대한 검토 결과 언급 0 — "미고려" 를 "고려 후 결정" 으로 전환. **Agent Client Protocol**(Zed 계열): 에디터↔에이전트 토폴로지라 운영 레이어인 leerness 에 직접 구현 자리 없음 — ACP 에이전트는 MCP(.mcp.json) 경유로 이미 간접 호환, enforce 는 프로토콜 무관 커버. **Agent Communication Protocol**(BeeAI, REST): 오프라인-퍼스트/0-deps 원칙 충돌 — 동일 문제는 .leerness/ substrate 가 해결. 상호운용성 문서 신설(지원 표면 표 + 신규 프로토콜 평가 기준 3항 + 재검토 트리거), README Links 연결, decision 기록.
+
 ## 1.36.47 — 2026-07-16 — anchors 초안 품질 + 재초안 — 실프로젝트 6곳 실적용에서 발견·즉시 교정
 
 사용자 승인 하에 실프로젝트 6곳(hive-analytics/auto-macro/cafe-macro/blog-macro/view-work/AEGIRINE)을 1.36.46 으로 **무유실 마이그레이션**(5표면 카운트 전량 보존, auto-macro 는 1.9.441→46 32버전 점프에 CLAUDE 커스텀 포함 무손실 — 보존 3부작의 실전 입증)하고 anchors 초안을 일괄 적용한 결과, 실데이터에서 초안 품질 결함 2종 발견:
