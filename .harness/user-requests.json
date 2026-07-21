@@ -9,8 +9,8 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": "",
-      "updatedAt": "2026-06-08T13:38:37.880Z",
-      "completedAt": "2026-06-08T13:38:37.880Z"
+      "updatedAt": "2026-06-08T13:38:37.88Z",
+      "completedAt": "2026-06-08T13:38:37.88Z"
     },
     {
       "id": "UR-0002",
@@ -113,8 +113,8 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": "",
-      "updatedAt": "2026-07-11T11:12:12.060Z",
-      "completedAt": "2026-07-11T11:12:12.060Z"
+      "updatedAt": "2026-07-11T11:12:12.06Z",
+      "completedAt": "2026-07-11T11:12:12.06Z"
     },
     {
       "id": "UR-0011",
@@ -169,8 +169,8 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": "",
-      "updatedAt": "2026-06-09T00:26:49.850Z",
-      "completedAt": "2026-06-09T00:26:49.850Z"
+      "updatedAt": "2026-06-09T00:26:49.85Z",
+      "completedAt": "2026-06-09T00:26:49.85Z"
     },
     {
       "id": "UR-0016",
@@ -247,7 +247,7 @@
     {
       "id": "UR-0022",
       "text": "[다음라운드 PART A] 블라인드 멀티모델 리뷰(codex gpt5.5 + claude sonnet4.8 + opus4.8 별도 세션) — 클린룸 npm 설치 + README 물리적 숨김(mv README.md.hidden, 강제) + leerness 소개X로 면밀 분석/테스트/디버깅 → 그 리뷰로만 README.md 재구성. 상세=NEXT-ROUND-PLAN.md PART A.",
-      "recordedAt": "2026-06-09T01:21:26.740Z",
+      "recordedAt": "2026-06-09T01:21:26.74Z",
       "status": "open",
       "linkedTaskIds": [],
       "linkedPlanIds": [],
@@ -293,7 +293,7 @@
     {
       "id": "UR-0026",
       "text": "[15th 블라인드 Sonnet/codex P3 완료1.13.1] doctor 'N/M 실패'(pass수에 실패 오독) → '통과 N/M (K건 실패)' + selftest README exists 가드(doc-pruned false-alarm)",
-      "recordedAt": "2026-06-09T02:03:28.470Z",
+      "recordedAt": "2026-06-09T02:03:28.47Z",
       "status": "completed",
       "linkedTaskIds": [],
       "linkedPlanIds": [],
@@ -357,7 +357,7 @@
     {
       "id": "UR-0032",
       "text": "[Karpathy 리뷰 P3] plan/task 성공기준(--done-when) 필드 — 검증가능 완료조건(원칙4 '성공기준 정의' 코드 0건). audit/verify-claim 이 기준 노출.",
-      "recordedAt": "2026-06-09T03:18:33.870Z",
+      "recordedAt": "2026-06-09T03:18:33.87Z",
       "status": "completed",
       "linkedTaskIds": [],
       "linkedPlanIds": [],
@@ -375,8 +375,8 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": "",
-      "updatedAt": "2026-06-09T05:57:58.360Z",
-      "completedAt": "2026-06-09T05:57:58.360Z"
+      "updatedAt": "2026-06-09T05:57:58.36Z",
+      "completedAt": "2026-06-09T05:57:58.36Z"
     },
     {
       "id": "UR-0034",
@@ -467,13 +467,13 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": "",
-      "updatedAt": "2026-07-11T11:12:48.160Z",
-      "completedAt": "2026-07-11T11:12:48.160Z"
+      "updatedAt": "2026-07-11T11:12:48.16Z",
+      "completedAt": "2026-07-11T11:12:48.16Z"
     },
     {
       "id": "UR-0042",
       "text": "외부클린룸 잔여: --language en이 런타임 출력엔 미적용(코스메틱) + 서브명령그룹(plan/task/decision/skill) 무인자 동작 4종 불일치 정규화",
-      "recordedAt": "2026-06-09T09:30:10.980Z",
+      "recordedAt": "2026-06-09T09:30:10.98Z",
       "status": "completed",
       "linkedTaskIds": [],
       "linkedPlanIds": [],
@@ -511,8 +511,8 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": "",
-      "updatedAt": "2026-06-10T02:31:26.880Z",
-      "completedAt": "2026-06-10T02:31:26.880Z"
+      "updatedAt": "2026-06-10T02:31:26.88Z",
+      "completedAt": "2026-06-10T02:31:26.88Z"
     },
     {
       "id": "UR-0046",
@@ -553,7 +553,7 @@
     {
       "id": "UR-0049",
       "text": "[P2 마감 정합] session close가 미해소 verify-claim 실패·gate 실패를 done/clean으로 표기 — 마감시 done task의 낙관FAIL 재확인 + gate 상태 반영. 부수: Rust target/ 인코딩 오탐 제외",
-      "recordedAt": "2026-06-10T02:08:23.840Z",
+      "recordedAt": "2026-06-10T02:08:23.84Z",
       "status": "completed",
       "linkedTaskIds": [],
       "linkedPlanIds": [],
@@ -571,8 +571,8 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": "",
-      "updatedAt": "2026-06-10T09:38:20.220Z",
-      "completedAt": "2026-06-10T09:38:20.220Z"
+      "updatedAt": "2026-06-10T09:38:20.22Z",
+      "completedAt": "2026-06-10T09:38:20.22Z"
     },
     {
       "id": "UR-0051",
@@ -582,18 +582,19 @@
       "linkedTaskIds": [],
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
-      "notes": ""
+      "notes": "",
+      "updatedAt": "2026-07-21T13:49:44.87Z"
     },
     {
       "id": "UR-0052",
       "text": "codex 비-렌즈 헌트 이연 3건: P1-2(10k+ ID 고정폭 \\d{4} 리더 ~20곳 → \\d{4,} 일괄, 날짜 혼동 주의), P2-6(contract verify 주석/문자열 마스킹 후 export/field 스캔), P3-8(handoff <path> --compact 단일 워크스페이스 compact 분기)",
-      "recordedAt": "2026-07-14T04:34:29.890Z",
+      "recordedAt": "2026-07-14T04:34:29.89Z",
       "status": "completed",
       "linkedTaskIds": [],
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": "",
-      "updatedAt": "2026-07-14T08:33:39.010Z",
+      "updatedAt": "2026-07-14T08:33:39.01Z",
       "completedAt": "2026-07-14T08:33:39.011Z"
     },
     {
@@ -653,8 +654,8 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": "",
-      "updatedAt": "2026-07-14T08:33:40.290Z",
-      "droppedAt": "2026-07-14T08:33:40.290Z"
+      "updatedAt": "2026-07-14T08:33:40.29Z",
+      "droppedAt": "2026-07-14T08:33:40.29Z"
     },
     {
       "id": "UR-0058",
@@ -731,5 +732,5 @@
       "completedAt": "2026-07-21T07:14:58.984Z"
     }
   ],
-  "updatedAt": "2026-07-21T08:01:45.357Z"
+  "updatedAt": "2026-07-21T13:49:44.87Z"
 }
