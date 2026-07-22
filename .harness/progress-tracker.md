@@ -80,3 +80,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0057 | done | F-06 스캐너 개선 + R-0001 codex 검수 사이클 1회전 (1.36.56) | 검수 4건 반영, selftest 329, e2e 388/388, npm 게시 | 다음 액션 작성 | 2026-07-21 |
 | T-0058 | done | integrity check --repair (1.36.57, 감사 F-04 종결) | R-0001 검수 2회전 High2+3 반영, selftest 330, e2e 388/388, npm 게시 | 다음 액션 작성 | 2026-07-21 |
 | T-0059 | done | MCP core 프로필 (1.36.58, 감사 F-09 종결) | R-0001 검수 3회전 반영, selftest 331, e2e 388/388, npm 게시 | 다음 액션 작성 | 2026-07-22 |
+| T-0060 | done | F-05 1회차 en 지시레이어 완역 (1.36.59) | 검수 4회전 반영, selftest 331, e2e 389/389, npm 게시 | 다음 액션 작성 | 2026-07-22 |

@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.59';
+const VERSION = '1.36.60';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -738,9 +738,9 @@ function createBackup(root, reason, files, dry = false) {
 }
 
 // 1.9.1 P2 / 1.9.368 (UR-0025): MERGE_OVERWRITE_FILES → lib/catalogs, managedMerge 순수 코어 → lib/pure-utils. 얇은 래퍼.
-function managedMerge(file, next, previous, archiveDir) {
+function managedMerge(file, next, previous, archiveDir, mergeOpts = {}) {
   const archiveRel = archiveDir ? path.relative(process.cwd(), archiveDir).replace(/\\/g, '/') : '.harness/archive';
-  return _managedMerge(file, next, previous, archiveRel, MERGE_OVERWRITE_FILES);
+  return _managedMerge(file, next, previous, archiveRel, MERGE_OVERWRITE_FILES, mergeOpts);   // 1.36.60: altTemplate/lang 전달
 }
 
 function writeIfSafe(root, file, content, opts = {}) {
@@ -751,7 +751,7 @@ function writeIfSafe(root, file, content, opts = {}) {
   //   병합을 우회해 CLAUDE.md 커스텀 지시가 archive 에만 남았다(1.36.28 보존 재설계의 force 구멍).
   if (already && opts.mergeManaged) {
     const prev = read(p);
-    writeUtf8(p, managedMerge(file, content, prev, opts.archiveDir));
+    writeUtf8(p, managedMerge(file, content, prev, opts.archiveDir, { altTemplate: opts.altTemplate, lang: opts.lang }));
     return { action: 'merged', file };
   }
   if (already && !opts.force) return { action: 'preserved', file };
@@ -988,6 +988,17 @@ async function install(root, opts = {}) {
   // 1.9.10: 스킬 카탈로그 출처 안내
   // 1.9.184 (사용자 명시): leerness-skillpack 미사용 정책 — 안내 메시지 제거. builtin catalog 만 사용.
   const files = coreFiles(root, lang, skills, { minimal: !!opts.minimal });
+  // 1.36.60 (F-05 2회차, 검수 #1 High): 반대-언어 canonical 템플릿 — 언어 전환 재init/마이그레이션 시
+  //   구 언어 템플릿 라인을 "사용자 커스텀"으로 오인해 통째로 Preserved 에 이월하던 것을 차감 병합으로 해소.
+  //   (검수 2차 High): 차감은 "실제 언어 전환일 때만" — 동일-언어 재init 에 무조건 적용하면 반대-언어 템플릿과
+  //   우연히 일치하는 정당한 커스텀이 유실된다. 이전 저장 언어를 쓰기 전에 포착해 전환 여부로 게이트.
+  let _prevLang = null;
+  try { _prevLang = read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() || null; } catch {}
+  if (!_prevLang) { try { _prevLang = String(JSON.parse(read(path.join(root, '.harness', 'manifest.json'))).language || '').toLowerCase() || null; } catch {} }
+  const _langSwitched = !!(_prevLang && (_prevLang === 'ko' || _prevLang === 'en') && _prevLang !== lang);
+  const _altLang = lang === 'en' ? 'ko' : 'en';
+  let _altFiles = {};
+  if (_langSwitched) { try { _altFiles = coreFiles(root, _altLang, skills, { minimal: !!opts.minimal }); } catch {} }
   const backup = createBackup(root, opts.force ? 'force' : (opts.migration ? 'migration' : 'init'), files, opts.dry);
   if (opts.dry) {
     log(`Backup target: ${backup.archiveDir}`);
@@ -998,6 +1009,7 @@ async function install(root, opts = {}) {
   }
   const managedOverwrite = new Set([
     'AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md',
+    '.harness/session-workflow.md',   // 1.36.60 (검수 #1): managed 편입 — 종전엔 재init 시 구 언어/구 버전 그대로 방치
     '.harness/HARNESS_VERSION','.harness/manifest.json','.harness/LANGUAGE','.harness/skills-lock.json',
     '.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md',
     '.harness/leerness-maintenance.md','.harness/protected-files.md','.harness/AX_MIGRATION_GUIDE.md',
@@ -1032,7 +1044,7 @@ async function install(root, opts = {}) {
       actions.push({ file:f, action });
       continue;
     }
-    const r = writeIfSafe(root, f, c, { force: effForce, mergeManaged, archiveDir: backup.archiveDir });
+    const r = writeIfSafe(root, f, c, { force: effForce, mergeManaged, archiveDir: backup.archiveDir, altTemplate: _altFiles[f], lang });
     actions.push(r);
     _done++;
     drawProgress(_done, f);
@@ -5203,6 +5215,25 @@ function _selfTestCases() {
       const s = read(__filename);
       const wired = s.includes("_profile === 'core' ? _ALL_TOOLS.filter") && s.includes("Unknown tool: ${name} (core profile");
       return allExist && loop && cleanSer && wired;
+    } },
+    { name: '언어 전환 병합 (1.36.60, F-05 2회차 검수 High): altTemplate 차감 — 구 언어 템플릿을 커스텀 오인 이월 차단 + 커스텀 보존 + en 래퍼 — 순수 행위검사', run: () => {
+      const p = require('../lib/pure-utils');
+      const koT = '# 지시\n한국어 규칙 1\n한국어 규칙 2\n';
+      const enT = '# Instructions\nEnglish rule 1\nEnglish rule 2\n';
+      const prev = koT + 'MY CUSTOM LINE\n';
+      // 전환: KO(prev) → EN(next), altTemplate=koT — 한국어 템플릿 라인은 이월 안 되고 커스텀만
+      const m = p._managedMerge('AGENTS.md', enT, prev, '.harness/archive', null, { altTemplate: koT, lang: 'en' });
+      const noKoTemplate = !m.includes('한국어 규칙 1') && !m.includes('한국어 규칙 2');
+      const customKept = (m.match(/MY CUSTOM LINE/g) || []).length === 1;
+      const enWrapper = m.includes('carried over from the previous version') && !/[가-힣]/.test(m.replace('MY CUSTOM LINE', ''));
+      // altTemplate 없이(구 동작): 커스텀 오인 이월 — 회귀 방지용 대조군 (구 언어 라인이 이월됨을 확인)
+      const m2 = p._managedMerge('AGENTS.md', enT, prev, '.harness/archive', null, {});
+      const control = m2.includes('한국어 규칙 1');
+      // 멱등: 전환 결과에 같은 병합 재적용 시 커스텀 중복 없음
+      const m3 = p._managedMerge('AGENTS.md', enT, m, '.harness/archive', null, { altTemplate: koT, lang: 'en' });
+      const idem = (m3.match(/MY CUSTOM LINE/g) || []).length === 1;
+      const wired = read(__filename).includes('altTemplate: _altFiles[f]') && read(__filename).includes("'.harness/session-workflow.md',   // 1.36.60");
+      return noKoTemplate && customKept && enWrapper && control && idem && wired;
     } }
   ];
 }
@@ -20367,7 +20398,7 @@ function adapterCmd(root, tool, opts = {}) {
   const results = [];
   for (const k of a.keys) {
     if (files[k] == null) continue;
-    results.push(writeIfSafe(root, k, files[k], { mergeManaged: managedOverwrite.has(k) }));
+    results.push(writeIfSafe(root, k, files[k], { mergeManaged: managedOverwrite.has(k), lang: lang === 'en' ? 'en' : 'ko' }));   // 1.36.60 (검수 2차 #2): 래퍼 언어 전달 (altTemplate 은 전환-감지 없는 이 경로에선 미적용 — High 회귀 방지)
   }
   if (a.mcp) results.push(_mergeMcpJson(root));
   if (json) { log(JSON.stringify({ adapter: tool, files: results }, null, 2)); return; }
