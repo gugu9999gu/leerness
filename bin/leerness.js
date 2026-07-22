@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.65';
+const VERSION = '1.36.66';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -243,12 +243,16 @@ function detectLanguageValue(root, value = 'auto') {
   // 1.36.52 (외부 GPT 감사 F-01, 재현확정): 이미 초기화된 프로젝트는 저장된 명시 언어를 최우선 —
   //   1회차 init 이 생성한 한국어 관리 블록을 2회차 콘텐츠 감지가 오인해 en→ko 로 뒤집던 멱등성 버그.
   //   콘텐츠 자동 감지는 신규 프로젝트에만. (감사 첨부 패치 검증 후 채택)
+  // 1.36.66 (8차 헌트 F7): 소스별 개별 try — 손상 manifest 의 parse throw 가 유효한 LANGUAGE 폴백까지 건너뛰게 하던
+  //   것 차단(en 프로젝트가 manifest 손상 시 콘텐츠 휴리스틱으로 ko 회귀). manifest → LANGUAGE → 콘텐츠 순.
   try {
     const mf = path.join(root, '.harness', 'manifest.json');
     if (exists(mf)) {
       const saved = String((JSON.parse(read(mf)) || {}).language || '').toLowerCase();
       if (saved === 'ko' || saved === 'en') return saved;
     }
+  } catch {}
+  try {
     const lf = path.join(root, '.harness', 'LANGUAGE');
     if (exists(lf)) {
       const saved = String(read(lf) || '').trim().toLowerCase();
@@ -5434,6 +5438,35 @@ function _selfTestCases() {
         const wired = pkg.scripts.lint === 'node ./scripts/lint.js' && ['test', 'test:fast', 'test:core'].every(k => pkg.scripts[k].startsWith('node ./scripts/lint.js &&'));   // (검수 #1) test:core 포함
         return cleanOk && caught && synCaught && bomCaught && jsonCaught && wired;
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: 'codex 8차 홀리스틱 헌트 (1.36.66): writeUtf8 바이트비교(F13)·detectLang 소스별 try(F7)·en anchors(F11)·drift --json exit(F4)·integrity managed복구(F10) — 행위+소스가드', run: () => {
+      const io = require('../lib/io'); const pu = require('../lib/pure-utils');
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_h66_'));
+      try {
+        // F13: 손상 바이트(FF) 파일에 유효 UTF-8 쓰면 바이트 다르므로 정화 write 수행
+        const f13 = path.join(tmp, 'c.txt');
+        fs.writeFileSync(f13, Buffer.from([0x7b, 0xff, 0x7d]));
+        io.writeUtf8(f13, '{"ok":true}');
+        const f13ok = fs.readFileSync(f13, 'utf8') === '{"ok":true}' && !fs.readFileSync(f13).includes(0xff);
+        // 동일 바이트는 스킵(멱등) — mtime 안정
+        const before = fs.statSync(f13).mtimeMs; io.writeUtf8(f13, '{"ok":true}'); const skipOk = fs.statSync(f13).mtimeMs === before;
+        // F7: 손상 manifest + 유효 LANGUAGE → en 유지 (detectLanguageValue)
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.harness', 'manifest.json'), '{broken');
+        fs.writeFileSync(path.join(tmp, '.harness', 'LANGUAGE'), 'en\n');
+        const f7ok = detectLanguageValue(tmp, 'auto') === 'en';
+        // F11: en anchors 초안 영어
+        const d = pu._draftAnchors({ pkgDescription: 'payment service', lang: 'en' });
+        const f11ok = !/[가-힣]/.test([...d.purpose, ...d.goal].join('\n')) && d.goal.some(l => l.includes('Keep the product'));
+        // 소스가드: F4/F5/F6/F8/F10
+        const dr = read(path.join(__dirname, '..', 'lib', 'drift.js'));
+        const s = read(__filename);
+        const guards = /if \(level === '🔴 critical'\) process\.exitCode = 1;\s*\n\s*log\(JSON\.stringify/.test(dr)
+          && s.includes("writeIfSafe(root, '.claude/commands/update.md', _updContent")
+          && s.includes('force: !!opts.force, dry: false, migration: true')
+          && s.includes('const lang = detectLanguageValue(root, ') && s.includes("managedMerge(key, tmpl, cur, null, { lang })");
+        return f13ok && skipOk && f7ok && f11ok && guards;
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     } }
   ];
 }
@@ -5785,7 +5818,7 @@ function anchorsCmd(root, sub) {
     try { if (exists(path.join(root, 'README.md'))) readmeText = read(path.join(root, 'README.md')).slice(0, 4000); } catch {}
     let milestones = [], tasks = [];
     try { const rd = _roadmapData(root); milestones = rd.milestones || []; tasks = rd.tasks || []; } catch {}
-    const draft = _draftAnchors({ pkgDescription, readmeText, milestones, tasks });
+    const draft = _draftAnchors({ pkgDescription, readmeText, milestones, tasks, lang: _uiLang(root) });   // 1.36.66 (F11): 초안 언어
     if (!draft.hasSignal) { failJson(json, 'no_signal', '초안을 만들 실신호가 없음 (package.json description / README 산문 / milestone / 활성 task 모두 부재) — 직접 작성 필요'); return; }
     const apply = has('--apply');
     const applied = [];
@@ -5822,8 +5855,11 @@ function integrityCmd(root) {
   const json = has('--json');
   const repair = has('--repair');
   if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root} — 먼저 leerness init`); return; }
-  let lang = 'ko', minimal = false;
-  try { const mf = JSON.parse(read(path.join(root, '.harness', 'manifest.json'))); lang = mf.language || 'ko'; minimal = !!mf.minimal; } catch {}
+  let minimal = false;
+  try { minimal = !!JSON.parse(read(path.join(root, '.harness', 'manifest.json'))).minimal; } catch {}
+  // 1.36.66 (8차 헌트 F8): 언어는 init/migrate 와 동일 해석기 사용 — 손상 manifest 여도 LANGUAGE 폴백으로 en 유지
+  //   (종전엔 manifest 만 봐서 손상 시 ko 로 복구 → en 프로젝트에 한국어 템플릿 재생성).
+  const lang = detectLanguageValue(root, 'auto');
   // (검수 #1) minimal 설치 존중 — minimal 이 의도적으로 뺀 문서를 '부재 손상'으로 오판/재생성하지 않는다
   const templates = coreFiles(root, lang, [], { minimal });
   const docs = _INTEGRITY_DOCS.filter(k => typeof templates[k] === 'string');
@@ -5855,6 +5891,7 @@ function integrityCmd(root) {
     const f = { file: key, kind, advisory, templateBytes: Buffer.byteLength(tmpl, 'utf8') };
     if (repair && !advisory) {
       try {
+        const _readable = kind === 'h1_lost' || kind === 'truncated';
         if (exists(fp)) {
           const bakDir = path.join(root, '.harness', 'archive');
           mkdirp(bakDir);
@@ -5862,7 +5899,14 @@ function integrityCmd(root) {
           fs.copyFileSync(fp, path.join(bakDir, `integrity-${path.basename(key)}-${Date.now()}-${process.pid}-${++_integSeq}.bak`));
           f.backedUp = true;
         }
-        writeUtf8(fp, tmpl);
+        // 1.36.66 (8차 헌트 F10): 읽을 수 있는 손상(h1_lost/truncated)은 managed 병합으로 복구 —
+        //   raw 교체는 사용자가 추가한 커스텀 안전 규칙까지 지웠다. 부재/판독불가만 raw 재생성.
+        if (_readable && exists(fp)) {
+          let cur = ''; try { cur = read(fp); } catch {}
+          writeUtf8(fp, managedMerge(key, tmpl, cur, null, { lang }));
+        } else {
+          writeUtf8(fp, tmpl);
+        }
         f.repaired = true; repaired.push(key);
       } catch (e) { f.repaired = false; f.error = String(e.message || e).slice(0, 120); repairFailed = true; }
     }
@@ -16453,36 +16497,51 @@ function verifyRules(root) {
   const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
   const todayStr = today();
   const results = [];
+  // 1.36.66 (8차 헌트 F2/F3): 절별 독립 평가 후 AND 집계 — 종전 if/else-if 는 "version and changelog" 규칙에서
+  //   version 절만 보고 pass 했고(F2), "tests must pass" 는 실패한 테스트 증거(exit≠0)도 흔적만 있으면 pass 했다(F3).
+  const _todayEvidenceExit0 = () => {
+    // 오늘자 최신 verify-code/test 증거 블록에서 실패 신호(exit=null/nonzero, FAIL)가 없는지
+    const blocks = ev.split(/\n(?=## \d{4}-\d{2}-\d{2})/).filter(b => new RegExp(`^## ${todayStr}`).test(b.trim()) && /verify-code|test/i.test(b));
+    if (!blocks.length) return null;   // 흔적 없음
+    const last = blocks[blocks.length - 1];
+    if (/exit\s*=\s*(?!0\b)(\d+|null)/i.test(last) || /\bFAIL\b/.test(last)) return false;
+    return true;
+  };
   for (const r of active) {
-    let verified = 'manual';
-    let note = '';
     const rl = r.rule.toLowerCase();
+    const clauses = [];   // { kind, verified }
     if (/version|버전|bump|상승/i.test(rl)) {
-      if (prev.packageVersion && cur.packageVersion && prev.packageVersion !== cur.packageVersion) {
-        verified = 'pass'; note = `${prev.packageVersion} → ${cur.packageVersion}`;
-      } else if (!prev.packageVersion) {
-        verified = 'baseline'; note = `초기 ${cur.packageVersion || '미확인'}`;
-      } else {
-        verified = 'pending'; note = '버전 변경 없음';
-      }
-    } else if (/changelog|패치노트|patch.*note|note.*추가|note.*add/i.test(rl)) {
-      if (prev.changelogMtime && cur.changelogMtime && cur.changelogMtime > prev.changelogMtime) {
-        verified = 'pass'; note = 'CHANGELOG.md 갱신 감지';
-      } else if (!prev.changelogMtime) {
-        verified = 'baseline'; note = '초기 측정';
-      } else {
-        verified = 'pending'; note = 'CHANGELOG.md 변경 없음';
-      }
-    } else if (/test|테스트|verify/i.test(rl)) {
-      const hasTest = new RegExp(`## ${todayStr}.*verify-code|## ${todayStr}.*test`, 'i').test(ev);
-      verified = hasTest ? 'pass' : 'pending';
-      note = hasTest ? '오늘 verify-code 흔적' : '오늘 verify-code 호출 없음';
-    } else if (/deploy|배포|publish|push|release/i.test(rl)) {
-      verified = 'manual'; note = '배포는 사용자 명시 호출 (leerness release publish)';
-    } else {
-      verified = 'manual'; note = '자동 검증 패턴 없음 — 수동 확인';
+      if (prev.packageVersion && cur.packageVersion && prev.packageVersion !== cur.packageVersion) clauses.push({ kind: 'version', verified: 'pass', note: `${prev.packageVersion} → ${cur.packageVersion}` });
+      else if (!prev.packageVersion) clauses.push({ kind: 'version', verified: 'baseline', note: `초기 ${cur.packageVersion || '미확인'}` });
+      else clauses.push({ kind: 'version', verified: 'pending', note: '버전 변경 없음' });
     }
-    results.push({ ...r, verified, note });
+    if (/changelog|패치노트|patch.*note|note.*추가|note.*add/i.test(rl)) {
+      if (prev.changelogMtime && cur.changelogMtime && cur.changelogMtime > prev.changelogMtime) clauses.push({ kind: 'changelog', verified: 'pass', note: 'CHANGELOG.md 갱신 감지' });
+      else if (!prev.changelogMtime) clauses.push({ kind: 'changelog', verified: 'baseline', note: '초기 측정' });
+      else clauses.push({ kind: 'changelog', verified: 'pending', note: 'CHANGELOG.md 변경 없음' });
+    }
+    if (/test|테스트|verify/i.test(rl)) {
+      // "must pass" 의미면 exit0 확인, 아니면 "흔적 존재"(must run)
+      const mustPass = /pass|통과|성공|green/i.test(rl);
+      if (mustPass) {
+        const ok0 = _todayEvidenceExit0();
+        clauses.push({ kind: 'test', verified: ok0 === true ? 'pass' : 'pending', note: ok0 === true ? '오늘 테스트 통과(exit0)' : ok0 === false ? '오늘 테스트 실패(exit≠0)' : '오늘 테스트 흔적 없음' });
+      } else {
+        const hasTest = new RegExp(`## ${todayStr}.*verify-code|## ${todayStr}.*test`, 'i').test(ev);
+        clauses.push({ kind: 'test', verified: hasTest ? 'pass' : 'pending', note: hasTest ? '오늘 verify-code 흔적' : '오늘 verify-code 호출 없음' });
+      }
+    }
+    if (/deploy|배포|publish|push|release/i.test(rl) && !clauses.length) clauses.push({ kind: 'deploy', verified: 'manual', note: '배포는 사용자 명시 호출 (leerness release publish)' });
+    let verified, note;
+    if (!clauses.length) { verified = 'manual'; note = '자동 검증 패턴 없음 — 수동 확인'; }
+    else {
+      // AND 집계: 하나라도 pending 이면 pending, 모두 pass/baseline 이면 (pass 있으면 pass, 아니면 baseline)
+      if (clauses.some(c => c.verified === 'pending')) verified = 'pending';
+      else if (clauses.some(c => c.verified === 'pass')) verified = 'pass';
+      else verified = clauses.some(c => c.verified === 'manual') ? 'manual' : 'baseline';
+      note = clauses.map(c => `${c.kind}:${c.note}`).join(' · ');
+    }
+    results.push({ ...r, verified, note, clauses: clauses.length > 1 ? clauses.map(c => ({ kind: c.kind, verified: c.verified })) : undefined });
   }
   // lastVerified 갱신 (pass인 경우만)
   for (const r of rules) {
@@ -17691,7 +17750,7 @@ async function updateCmd(root, opts = {}) {
     try { const _hv = read(path.join(root, '.harness', 'HARNESS_VERSION')).trim(); if (_hv) nextLeerness = _hv; } catch {}
   } else {
     log(`\nRunning in-process migrate (already on latest ${VERSION})…`);
-    await install(root, { force: false, dry: false, migration: true, nonInteractive: true });
+    await install(root, { force: !!opts.force, dry: false, migration: true, nonInteractive: true });   // 1.36.66 (8차 헌트 F6): --force 전달 — no-op 우회해 손상 템플릿 재작성
   }
   log('\n# Post-migration checks');
   status(root);
@@ -17733,10 +17792,12 @@ function autoUpdateInstall(root) {
   }
   writeUtf8(settingsFile, JSON.stringify(settings, null, 2) + '\n');
   // 1.36.62 (검수 #1): en 프로젝트의 /update 를 한국어로 되덮던 것 — 언어 인지 렌더
-  const _updLang = (() => { try { return read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase(); } catch { return 'ko'; } })();
-  writeUtf8(path.join(root, '.claude/commands/update.md'), _updLang === 'en'
+  // 1.36.66 (8차 헌트 F5): raw writeUtf8 은 managed 파일 커스텀을 파괴했다 — coreFiles 와 동일 병합 경로(writeIfSafe mergeManaged)로.
+  const _updLang = (() => { try { return read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch { return 'ko'; } })();
+  const _updContent = _updLang === 'en'
     ? `# /update\n\nRun the leerness auto-update (detect → migrate → verify).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\nCheck only:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`
-    : `# /update\n\nleerness 자동 업데이트 (감지 → 마이그레이션 → 검증).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\n체크만:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`);
+    : `# /update\n\nleerness 자동 업데이트 (감지 → 마이그레이션 → 검증).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\n체크만:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`;
+  writeIfSafe(root, '.claude/commands/update.md', _updContent, { mergeManaged: true, lang: _updLang });
   ok('auto-update SessionStart hook installed (.claude/settings.local.json)');
   if (removedLegacy) ok(`legacy hook 제거: ${removedLegacy}건 (leerness-plus → leerness 통합)`);
   if (upgradedQuiet) ok(`hook 업그레이드: ${upgradedQuiet}건 → --quiet (up-to-date 시 무음, 1.9.364)`);

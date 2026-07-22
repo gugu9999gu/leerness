@@ -87,3 +87,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0064 | done | F-05 4회차 commands/AX en 완역 (1.36.62) | 23/61→9/61, 검수 7회전 4건 반영, selftest 332, e2e 389/389, npm 게시 | 다음 액션 작성 | 2026-07-22 |
 | T-0065 | done | F-05 시리즈 완결 (1.36.63) | en 53/61→6/61(잔여=스킬 데이터), 검수 8회전 4건 반영, selftest 332, e2e 389/389, npm 게시 | 다음 액션 작성 | 2026-07-22 |
 | T-0066 | done | lint 게이트 (1.36.64, 감사 F-10) | 검수 9회전 3건 반영, selftest 333, e2e 389/389, npm 게시 | 다음 액션 작성 | 2026-07-22 |
+| T-0067 | done | no-op 재설치 (1.36.65, 감사 F-08) | 검수 10회전 HIGH 반영+선재버그 수정, selftest 333, e2e 390/390, npm 게시 | 다음 액션 작성 | 2026-07-22 |

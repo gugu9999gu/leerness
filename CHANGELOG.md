@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.36.66 — 2026-07-22 — codex 8차 홀리스틱 헌트: 기능 간 상호작용 11건 수정 (High 1·Med 8·Low 2)
+
+라운드별 diff 검수가 못 본 "기능 조합" 결함을 교차 헌트(16 발견) — High/데이터손실/거짓판정 우선 11건 수정, 정보노출성 2건(F14/F15) 정직 이연.
+
+- **F13 (write-skip × 손상바이트)**: writeUtf8 동일-내용 비교를 디코딩 텍스트→**바이트 동일**로 — 손상 바이트(FF)/BOM 파일에 유효 UTF-8 정화 write 가 억제되던 것.
+- **F5 High (auto-update install × managed)**: /update.md 를 raw writeUtf8 로 덮어써 커스텀 파괴 → writeIfSafe mergeManaged 경로로.
+- **F6 (update --force 미전달)** → install 에 force 전달. **F4 (drift --json critical exit 0)** → exit 1 동치.
+- **F2/F3 거짓판정 룰**: "version and changelog" 복합 룰이 version 절만 보고 pass(F2), "tests must **pass**" 가 실패 증거도 흔적만 있으면 pass(F3) → 절별 독립 평가 후 AND 집계 + 오늘자 증거 exit0 파싱.
+- **F7/F8 (손상 manifest × 언어)**: manifest parse throw 가 유효 LANGUAGE 폴백까지 건너뛰어 en→ko 회귀 → 소스별 개별 try. integrity 도 detectLanguageValue 공용.
+- **F10 (integrity repair × 커스텀)**: h1_lost/truncated 는 managed 병합 복구(커스텀 안전규칙 보존), 부재/판독불가만 raw. **F11**: en 프로젝트 anchors 초안 영어.
+- 이연(정직): F14(session close 에 pending preview 노출)·F15(tech --json 후 graph 재생성) — 정보 노출성, 데이터 보존됨. F9(초고령 KO 템플릿 provenance)·F12(skills-lock 명명)은 설계 판단 필요.
+- 검증: F13/F7/F11 행위 + F4/F5/F6/F8/F10 소스가드 selftest 334, 개별 실측(F2 version-only→pending 등), e2e.
+
 ## 1.36.65 — 2026-07-22 — no-op 재설치 + 동일-내용 쓰기 스킵 (외부감사 F-08) — R-0001 검수 10회전
 
 무변경 재init 의 백업/아카이브/타임스탬프 증식(감사 지적) 해소 — 거짓 no-op 은 검수가 차단.

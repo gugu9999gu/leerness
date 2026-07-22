@@ -1,6 +1,6 @@
 {
   "name": "leerness",
-  "version": "1.36.65",
+  "version": "1.36.66",
   "description": "The AI-coding operations layer that makes \"done\" require evidence — persistent memory, evidence-gated completion checks, and clean handoffs for any AI agent (Claude Code, Codex, Cursor). State lives as plain files in your repo. CLI + MCP, 0 runtime dependencies.",
   "keywords": [
     "leerness",
