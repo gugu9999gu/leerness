@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.66';
+const VERSION = '1.36.67';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -23125,7 +23125,8 @@ async function main() {
   if (cmd === 'enforce')                           return enforceCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1]);   // 1.36.43: 사용 강제 (git pre-commit)
   if (cmd === 'anchors')                           return anchorsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), args[1] && !args[1].startsWith('-') ? args[1] : null);   // 1.36.36: 정체성앵커 초안
   if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
-  if (cmd === 'tech')                              return _tech.techCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1], { has });   // 1.36.53 (UR-0062): 기술 프로필
+  // 1.36.53 (UR-0062): 기술 프로필 · 1.36.67 (F15): 변경 시 기존 leerness.html 동반 갱신(있을 때만)
+  if (cmd === 'tech')                              return _tech.techCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1], { has, regenGraph: (r) => { if (exists(path.join(r, 'leerness.html'))) _graph.graphHtmlCmd(r, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, quiet: true }); } });
   if (cmd === 'integrity') {                       // 1.36.57 (감사 F-04): managed 문서 무결성 점검/복구
     if (args[1] && args[1] !== 'check') { failJson(has('--json'), 'unknown_subcommand', `알 수 없는 integrity 하위명령: ${args[1]} (가능: check [--repair] [--force])`); return process.exit(process.exitCode || 1); }
     return integrityCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());
