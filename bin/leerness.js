@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.62';
+const VERSION = '1.36.63';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -305,7 +305,93 @@ function ask(question) {
 }
 
 // 1.9.140: managedReadmeBlock 자동 풍부화 — 매 release pack 마다 명령/MCP/성능/가이드 갱신
-function managedReadmeBlock(project) {
+function managedReadmeBlock(project, lang = 'ko') {
+  // 1.36.63 (F-05 5회차): en 프로젝트 README 관리 섹션 완전 영어 — 계약 동등(정체성/5계층/명령/CRUD/MCP/빠른시작/planning files)
+  if (lang === 'en') {
+    return [
+      README_START,
+      '## Leerness Project Harness',
+      '',
+      `This project uses the Leerness v${VERSION} harness. AI agents must load context with \`leerness handoff\` before working, and run \`leerness check\` / \`leerness audit\` / \`leerness session close\` afterwards.`,
+      '',
+      '### Identity — an operating layer for AI agents',
+      '',
+      'Leerness is **not an executor or coding agent** — it is a **universal operating layer** that sits on top of any AI coding agent (Claude Code · Codex · Cursor · Goose, …). It provides five shared layers:',
+      '',
+      '- **Memory** — persists project state/decisions/progress into `.harness/`',
+      '- **Policy** — 8-tier permission levels + enforce (read-only→publish), MCP call gate',
+      '- **Handoff** — standard context transfer between agents + one-call onboarding via `get_project_context`',
+      '- **Verification** — evidence-based completion checks that catch false "done" claims (advisory; blocking when required via the CI gate)',
+      '- **Audit** — automatic drift/idempotency/secret/encoding audits (self-heal: drift·idempotency --auto-fix, encoding --apply; secrets are detection-only)',
+      '',
+      'It **complements AGENTS.md** (static instructions), never replaces it — static rules live in AGENTS.md; dynamic state, verification, and handoff live in leerness. Identity lookup: `leerness about` (MCP `leerness_about`).',
+      '',
+      '### Core Commands',
+      '',
+      '```bash',
+      'leerness handoff .            # auto-load session context',
+      'leerness status .             # install status',
+      'leerness verify .             # required-file verification',
+      'leerness audit .              # consistency / plan-progress audit',
+      'leerness scan secrets .       # secret pattern scan',
+      'leerness encoding check .     # UTF-8 / BOM / NUL / .bat encoding',
+      'leerness lazy detect .        # lazy-work (false-done) evaluation',
+      'leerness memory search "key"  # search decisions/history',
+      'leerness session close .      # close session + auto handoff',
+      'leerness update .             # auto version detect + migrate',
+      '```',
+      '',
+      '### Memory Surface CRUD (5 surfaces × add/list/drop)',
+      '',
+      '```bash',
+      'leerness task add "task title"',
+      'leerness task list --json',
+      'leerness decision add "decision title" --reason "why"',
+      'leerness decision list --query "keyword"',
+      'leerness rule add "update the changelog every commit" --trigger every-commit',
+      'leerness rule list',
+      'leerness plan add "M-XXXX plan" --next "next step"',
+      'leerness plan list',
+      'leerness lesson save "lesson body" --tag perf',
+      'leerness lesson list --query "keyword"',
+      'leerness memory archive list . --query "keyword"',
+      'leerness memory restore decisions <date|title>',
+      '```',
+      '',
+      '### Release automation & autonomous mode',
+      '',
+      '```bash',
+      'leerness release pack --close --auto-main-push   # one-shot release automation (incl. main push)',
+      '```',
+      '',
+      'Send the `<<autonomous-loop-dynamic>>` signal and the AI will: pick the next round → change code → update regression tests → pass the full e2e suite → npm publish + git tag → main push → session close → schedule the next round.',
+      '',
+      '### MCP server (external AI integration)',
+      '',
+      `Leerness v${VERSION} ships a stdio JSON-RPC MCP server — exposing **${_mcpToolCount()} tools** to Claude Code · Cursor · Codex CLI and others (\`leerness mcp serve\`; \`--profile core\` = 20 essentials).`,
+      '',
+      '### Quick start',
+      '',
+      '```bash',
+      'npm install -g leerness',
+      'cd my-project && leerness init . --yes --skills recommended',
+      'leerness handoff .            # at every session start',
+      'leerness session close .      # at every session end',
+      '```',
+      '',
+      '### Planning Files',
+      '',
+      '- `.harness/plan.md`: overall goal, milestones, dropped scope',
+      '- `.harness/progress-tracker.md`: per-request status and evidence',
+      '- `.harness/current-state.md`: what to continue right now',
+      '- `.harness/session-handoff.md`: next-session handoff (auto-written)',
+      '- `.harness/lessons.md` / `decisions.md` / `rules.md`: permanent memory (5 surfaces)',
+      '',
+      `Last synced by Leerness v${VERSION}: ${today()}`,
+      README_END,
+      ''
+    ].join('\n');
+  }
   return [
     README_START,
     '## Leerness Project Harness',
@@ -352,7 +438,7 @@ function managedReadmeBlock(project) {
     'leerness rule add "매 commit마다 changelog 갱신" --trigger every-commit',
     'leerness rule list',
     '# Plan (milestones)',
-    'leerness plan add "M-XXXX 계획" --next-action "다음 단계"',
+    'leerness plan add "M-XXXX 계획" --next "다음 단계"',
     'leerness plan list',
     '# Lessons (영구 교훈)',
     'leerness lesson save "교훈 본문" --tag perf',
@@ -456,7 +542,7 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
     '.harness/skills-lock.json': skillLock(selectedSkills),
     '.harness/project-brief.md': fm('project-brief', ['프로젝트 목적 확인','신규 기능 판단','계획 수립'], ['프로젝트 목적 변경','사용자/범위 변경'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- 이 프로젝트의 목적을 실제 내용으로 업데이트하세요.\n\n## Users\n-\n\n## Success Criteria\n-\n`),
     '.harness/plan.md': fm('plan', ['작업 시작 전','새 요청 접수','범위 변경','신규 프로젝트 감지'], ['계획 추가/수정/드랍','milestone 변경','목표 변경'], `# Plan\n\n## Goal\n- 사용자 목적을 기준으로 전체 계획을 유지합니다.\n\n## Scope\n- 포함 범위를 기록합니다.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. 프로젝트 계획 정리\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] project-brief.md를 실제 프로젝트 목적에 맞게 작성\n- [ ] context-map.md를 실제 파일 구조에 맞게 작성\n`),
-    '.harness/progress-tracker.md': _canonicalProgressHeader() + '\n',  // 1.9.293: _canonicalProgressHeader 단일 출처 (progressHeader 폴백과 동일)
+    '.harness/progress-tracker.md': _canonicalProgressHeader(lang) + '\n',  // 1.9.293: _canonicalProgressHeader 단일 출처 · 1.36.63: lang 전달
     '.harness/guideline.md': fm('guideline', ['구현 전 품질 기준 확인','계획 이행 기준 확인'], ['개발 기준 변경','검증 루틴 변경'], `# Guideline\n\n## Operating Principle\n- plan.md의 목표와 범위를 기준으로 작업합니다.\n- progress-tracker.md의 요청 상태를 기준으로 완료/미완료를 판단합니다.\n- guideline.md에는 진행률 수치를 직접 기록하지 않습니다. 진행률은 plan.md/progress-tracker.md가 단일 출처입니다.\n\n## Quality Gate\n- 변경 전 관련 route를 확인합니다 (\`leerness route <task-type>\`).\n- 변경 후 \`leerness verify\`, \`leerness audit\`, \`leerness check\`을 실행합니다.\n- 완료 선언 전 \`leerness lazy detect\`을 실행합니다.\n- 세션 종료 시 \`leerness session close\`를 실행합니다.\n`),
     '.harness/plan-progress-boundary.md': fm('plan-progress-boundary', ['계획과 진행률이 중복될 때','작업 추적 구조 변경'], ['역할 분리 기준 변경'], `# Plan / Progress Boundary\n\n## plan.md\n- 전체 목표, milestone, 포함/제외 범위, 계획 변경 이력.\n\n## progress-tracker.md\n- 사용자 요청 단위의 상태, 증거, 다음 액션.\n- ID 규칙: T-0001부터 단조 증가. plan add 시 부여되는 ID는 plan/progress 양쪽에서 고유합니다.\n\n## guideline.md\n- plan/progress를 수행할 때 지켜야 할 실행 기준.\n`),
     '.harness/current-state.md': fm('current-state', ['세션 시작','작업 이어받기'], ['현재 상태 변경','다음 작업 변경'], `# Current State\n\nUpdated: ${today()}\n\n## Now\n-\n\n## Next\n-\n\n## Blockers\n-\n`),
@@ -639,7 +725,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 - ⚠ contract verify 생략 → 사양 불일치 BUG가 사용자에게 노출
 `),
     '.harness/anti-lazy-work-policy.md': fm('anti-lazy-work-policy', ['완료 선언 전'], ['게으른 작업 방지 기준 변경'], `# Anti Lazy Work Policy\n\n## Rules\n1. **증거 없는 완료 금지**: \"완료\"를 선언하려면 progress-tracker의 evidence 컬럼에 명령 출력/테스트 결과/스크린샷 경로 등이 있어야 합니다.\n2. **빈 핸드오프 금지**: 세션 종료 시 session-handoff.md의 Completed/In Progress/Next Exact Step이 모두 비어 있으면 close가 \"insufficient\" 상태로 표시됩니다.\n3. **부분 구현 자기보고**: 완전 구현이 아니면 status를 \`incomplete\`로, Next Exact Step에 \"무엇을 추가해야 끝나는지\" 한 줄을 적습니다.\n4. **검증 기록**: typecheck/lint/test 결과를 review-evidence.md에 누적 기록합니다.\n5. **TODO 표지**: 코드에 \`TODO\`/\`FIXME\`/\`XXX\`를 새로 도입하면 progress-tracker에 동일 ID로 추적합니다.\n6. **거짓 완료 자동 감지**: \`leerness lazy detect\`는 다음을 자동 점검합니다.\n   - progress-tracker에 done인데 evidence가 비어있는 row\n   - session-handoff의 Completed가 비어있고 Next Exact Step도 비어있음\n   - 코드에 새 TODO/FIXME 추가 + progress-tracker에 추적 항목 없음\n   - test 명령 실행 흔적 없음 (review-evidence.md 또는 task-log.md에 명령 기록)\n7. **품질 렌즈 자가질문**: 완료 선언 전 \`leerness lens\`의 분야별 질문에 스스로 답합니다 — 코드: "선임 개발자가 이 코드를 보고 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 봤을 때 이쁘고 편하고 직관적인가?". "그렇다(통과)"라고 답할 수 없으면 완료가 아닙니다. 분야를 바꾸면 인과관계로 연결된 분야(\`lens\` 출력의 ↔ 인과)의 질문도 다시 확인합니다.\n`),
-    '.harness/rules.md': _rulesHeader() + '\n',
+    '.harness/rules.md': _rulesHeader(lang) + '\n',   // 1.36.63: lang 전달
     '.harness/session-handoff.md': fm('session-handoff', ['세션 시작','다음 작업 이어받기'], ['세션 종료'], `# Session Handoff\n\nLast generated: (자동)\n\n## Completed\n-\n\n## In Progress\n-\n\n## Incomplete / Waiting / On Hold / Blocked\n-\n\n## Dropped\n-\n\n## Verification\n-\n\n## Recommended Direction\n-\n\n## Next Exact Step\n-\n`),
     '.harness/leerness-maintenance.md': fm('leerness-maintenance', ['작업 시작','마이그레이션/릴리즈 전'], ['버전 정책 변경'], `# Leerness Maintenance\n\nAI agents should check:\n\n\`\`\`bash\nleerness --version\nleerness self check .\nleerness update --check       # 24h 캐시 자동 감지\nleerness update --yes         # 새 버전 발견 시 자동 마이그레이션\ncat .harness/HARNESS_VERSION\nnpm view leerness version\n\`\`\`\n`),
     '.harness/language-policy.md': fm('language-policy', ['문서 작성 전'], ['언어 변경'], `# Language Policy\n\nSelected language: ${lang}\n\n모든 Leerness 노트, 스킬 노트, 세션 보고, 작업 목록은 위 언어를 기본으로 사용합니다 (사용자가 다른 언어를 명시 요청 시 예외).\n`),
@@ -861,7 +947,8 @@ function syncReadme(root) {
   const p = path.join(root, 'README.md');
   const existing = exists(p) ? read(p) : '';
   // 1.9.40: 자체 README도 동기화 — version 배지, e2e 카운트, package.json#version 일관성
-  let updated = mergeReadmeSection(existing, managedReadmeBlock(detectProjectName(root)));
+  const _rmLang = (() => { try { return read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch { return 'ko'; } })();   // 1.36.63 (F-05 5회차)
+  let updated = mergeReadmeSection(existing, managedReadmeBlock(detectProjectName(root), _rmLang));
   try {
     // package.json#version 또는 .harness/HARNESS_VERSION을 참조하여 README 배지 자동 갱신
     const pkgPath = path.join(root, 'package.json');
@@ -1254,7 +1341,8 @@ async function install(root, opts = {}) {
         const linked = rows.some(r => /M-0001/.test(r.evidence));
         if (!linked) {
           const tid = nextId(root, 'T');
-          upsertProgress(root, { id: tid, status: 'planned', request: '프로젝트 계획 정리', evidence: 'init default plan:M-0001', nextAction: 'project-brief.md를 실제 목적으로 업데이트' });
+          const _en0 = _uiLang(root) === 'en';   // 1.36.63: 시드 task 도 프로젝트 언어
+          upsertProgress(root, { id: tid, status: 'planned', request: _en0 ? 'Organize the project plan' : '프로젝트 계획 정리', evidence: 'init default plan:M-0001', nextAction: _en0 ? 'Fill project-brief.md with the real purpose' : 'project-brief.md를 실제 목적으로 업데이트' });
         }
       }
     } catch {}
@@ -3053,7 +3141,7 @@ function _selfTestCases() {
     { name: '_cliBootstrap: CLI 부작용 require.main 가드 격리 (Codex #4 UR-0037 1.9.290)', run: () => { if (typeof _cliBootstrap !== 'function' || typeof _ensureStdoutEncoding !== 'function') return false; const src = read(__filename); const guarded = /if \(require\.main === module\) _cliBootstrap\(\);/.test(src); const inFn = /function _cliBootstrap\(\)\s*\{[\s\S]*?removeAllListeners\('warning'\)[\s\S]*?NODE_OPTIONS[\s\S]*?_ensureStdoutEncoding\(\);[\s\S]*?\n\}/.test(src); const noTopIife = !/\}\)\(\);\s*\n\n\/\/ 1\.9\.184/.test(src); return guarded && inFn && noTopIife; } },
     { name: 'lib/agent-registry: EXTERNAL_AGENTS/AGENT_SLASH_COMMANDS 모듈 단일출처 분리 (UR-0025 1.9.291)', run: () => { const m = require('../lib/agent-registry'); return m.EXTERNAL_AGENTS === EXTERNAL_AGENTS && m.AGENT_SLASH_COMMANDS === AGENT_SLASH_COMMANDS && m.EXTERNAL_AGENTS.length === 10 && Object.keys(m.AGENT_SLASH_COMMANDS).length === 9 && !/const EXTERNAL_AGENTS = \[/.test(read(__filename)); } },
     { name: 'get_project_context: MCP 시맨틱 verb 등록 + CLI context 디스패치 (UR-0031 1.9.292)', run: () => { const src = read(__filename); const mcpDef = require('../lib/mcp-tools').some(t => t.name === 'leerness_get_project_context'); const mcpCase = /case 'leerness_get_project_context':[\s\S]*?cliArgs = \['context'/.test(src); const cliDisp = /if \(cmd === 'context'\)\s+return contextCmd/.test(src); return typeof contextCmd === 'function' && mcpDef && mcpCase && cliDisp && _mcpToolCount() >= 80; } },
-    { name: '_canonicalProgressHeader + idempotency auto-fix (근본 복제버그 fix 1.9.293)', run: () => { const h = _canonicalProgressHeader(); const headerOk = /leernessRole: progress-tracker/.test(h) && /\| ID \| Status \| Request \|/.test(h) && /\|---\|/.test(h); const src = read(__filename); const fnOk = typeof _autoFixIdempotency === 'function'; const noWholeTextFallback = /if \(idx < 0\) return _canonicalProgressHeader\(\);/.test(src); const driftWired = /_autoFixIdempotency\(root\)/.test(src) && /idempotency 중복/.test(src); return headerOk && fnOk && noWholeTextFallback && driftWired; } },
+    { name: '_canonicalProgressHeader + idempotency auto-fix (근본 복제버그 fix 1.9.293)', run: () => { const h = _canonicalProgressHeader(); const headerOk = /leernessRole: progress-tracker/.test(h) && /\| ID \| Status \| Request \|/.test(h) && /\|---\|/.test(h); const src = read(__filename); const fnOk = typeof _autoFixIdempotency === 'function'; const noWholeTextFallback = src.includes('return _canonicalProgressHeader(_phLang);') && !/if \(idx < 0\) return text;/.test(src); const driftWired = /_autoFixIdempotency\(root\)/.test(src) && /idempotency 중복/.test(src); return headerOk && fnOk && noWholeTextFallback && driftWired; } },
     { name: 'lib/role-catalog: ROLE/PROVIDER/ALIASES/PROMPTS 모듈 단일출처 분리 (UR-0025 1.9.294)', run: () => { const m = require('../lib/role-catalog'); return m.ROLE_CATALOG === ROLE_CATALOG && m._PROVIDER_MODEL_CATALOG === _PROVIDER_MODEL_CATALOG && m._ROLE_ALIASES === _ROLE_ALIASES && m._AGENT_ROLE_PROMPTS === _AGENT_ROLE_PROMPTS && Object.keys(m.ROLE_CATALOG).length === 7 && Object.keys(m._PROVIDER_MODEL_CATALOG).length === 10 && !/const ROLE_CATALOG = \{/.test(read(__filename)); } },
     { name: 'lib/catalogs: CAPABILITY/ADAPTERS/REUSE 모듈 단일출처 분리 (UR-0025 1.9.295) + i18n en(1.31.3)', run: () => { const m = require('../lib/catalogs'); const _H = /[가-힣]/; const cs = Object.values(m.CAPABILITY_SURFACE); const i18nOk = cs.length === 6 && cs.every(v => typeof v.descEn === 'string' && v.descEn.length > 0 && !_H.test(v.descEn) && typeof v.optOutEn === 'string' && !_H.test(v.optOutEn)) && m.POWERFUL_COMMANDS.every(c => typeof c.noteEn === 'string' && c.noteEn.length > 0 && !_H.test(c.noteEn)); return m.CAPABILITY_SURFACE === CAPABILITY_SURFACE && m.ADAPTERS === ADAPTERS && m.REUSE_CATEGORIES === REUSE_CATEGORIES && m.REUSE_CHECKLIST === REUSE_CHECKLIST && m.POWERFUL_COMMANDS === POWERFUL_COMMANDS && Object.keys(m.CAPABILITY_SURFACE).length === 6 && i18nOk && !/const CAPABILITY_SURFACE = \{/.test(read(__filename)); } },
     { name: 'about: 정체성 verb(AI 운영 레이어) + MCP leerness_about 등록 (UR-0030 1.9.296)', run: () => { const id = _leernessIdentity(); const src = read(__filename); return typeof aboutCmd === 'function' && /운영 레이어/.test(id.identity) && id.layers.length === 5 && id.surface.mcpTools >= 81 && require('../lib/mcp-tools').some(t => t.name === 'leerness_about') && /case 'leerness_about':/.test(src) && /cmd === 'about' \|\| cmd === 'identity'/.test(src); } },
@@ -3737,7 +3825,7 @@ function _selfTestCases() {
     { name: 'UR-0083(4th외부평가 9.3): auto-update hook 비침투 (update --quiet 모드 + hook --check --quiet + 업그레이드)', run: () => { const src = read(__filename); const quietMode = /const quiet = !!opts\.quiet \|\| has\('--quiet'\)/.test(src); const hookQuiet = src.includes("command: 'leerness update --check --quiet'"); const upgrade = /includes\('leerness update --check'\) && !h\.command\.includes\('--quiet'\)/.test(src); return quietMode && hookQuiet && upgrade; } },
     { name: 'CV-6/UR-0081: 시크릿 스캐너 FP/FN — _isPlaceholderSecret + _looksSecretLike 행위', run: () => { if (typeof _isPlaceholderSecret !== 'function' || typeof _looksSecretLike !== 'function') return false; const fp = _isPlaceholderSecret('change-me') && _isPlaceholderSecret('your-api-key-here') && _isPlaceholderSecret('<token>') && _isPlaceholderSecret('') && !_isPlaceholderSecret('hunter2realpass'); const fn = _looksSecretLike('secret123') && _looksSecretLike('a'.repeat(24)) && !_looksSecretLike('processEnv') && !_looksSecretLike('reqBodyPassword'); return fp && fn; } },
     { name: 'UR-0025: _mergeLines/_mergeEnvLines 순수 코어 모듈 분리 + 행위 (1.9.367)', run: () => { if (typeof _mergeLines !== 'function' || typeof _mergeEnvLines !== 'function') return false; const m = require('../lib/pure-utils'); const moved = m._mergeLines === _mergeLines && m._mergeEnvLines === _mergeEnvLines; const ml = _mergeLines('a\n', ['a', 'b']) === 'a\nb\n'; const meKeep = _mergeEnvLines('FOO=keep\n', ['FOO=new']) === 'FOO=keep\n'; const meAdd = _mergeEnvLines('FOO=keep\n', ['BAR=add']).includes('BAR=add'); return moved && ml && meKeep && meAdd; } },
-    { name: 'UR-0025: _mergeReadmeSection/_managedMerge + MERGE_OVERWRITE_FILES 모듈 분리 + 행위 (1.9.368)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _mergeReadmeSection !== 'function' || typeof _managedMerge !== 'function') return false; const moved = m._mergeReadmeSection === _mergeReadmeSection && m._managedMerge === _managedMerge && MERGE_OVERWRITE_FILES === c.MERGE_OVERWRITE_FILES; const rd = _mergeReadmeSection('', 'BLOCK', '<s>', '<e>') === '# Project\n\nBLOCK'; const mm = _managedMerge('a.md', 'NEW', 'OLD', '.h', new Set()).includes('migration-preserved'); const ow = _managedMerge('.harness/manifest.json', 'NEW', 'OLD', '.h', c.MERGE_OVERWRITE_FILES) === 'NEW'; const same = _managedMerge('a.md', 'X', 'X', '.h', new Set()) === 'X'; return moved && rd && mm && ow && same; } },
+    { name: 'UR-0025: _mergeReadmeSection/_managedMerge + MERGE_OVERWRITE_FILES 모듈 분리 + 행위 (1.9.368)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _mergeReadmeSection !== 'function' || typeof _managedMerge !== 'function') return false; const moved = m._mergeReadmeSection === _mergeReadmeSection && m._managedMerge === _managedMerge && MERGE_OVERWRITE_FILES === c.MERGE_OVERWRITE_FILES; const rd = _mergeReadmeSection('', 'BLOCK', '<s>', '<e>') === '# Project\n\nBLOCK\n'; const mm = _managedMerge('a.md', 'NEW', 'OLD', '.h', new Set()).includes('migration-preserved'); const ow = _managedMerge('.harness/manifest.json', 'NEW', 'OLD', '.h', c.MERGE_OVERWRITE_FILES) === 'NEW'; const same = _managedMerge('a.md', 'X', 'X', '.h', new Set()) === 'X'; return moved && rd && mm && ow && same; } },
     { name: 'UR-0025: _parseSkillsValue(catalog 주입) + MINIMAL_SKIP_KEYS 모듈 분리 + 행위 (1.9.369)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _parseSkillsValue !== 'function') return false; const moved = m._parseSkillsValue === _parseSkillsValue && MINIMAL_SKIP_KEYS === c.MINIMAL_SKIP_KEYS; const cat = { office: {}, foo: {} }; const empty = _parseSkillsValue('', cat).length === 0; const all = _parseSkillsValue('all', cat).length === 2; const rec = _parseSkillsValue('recommended', cat).includes('office'); const csv = JSON.stringify(_parseSkillsValue('office,bar', cat)) === JSON.stringify(['office']); return moved && empty && all && rec && csv && MINIMAL_SKIP_KEYS.has('.claude/skills/leerness.md'); } },
     { name: 'UR-0025: _parseArchiveBlocks/_parseSkillCatalog 순수 파서 모듈 분리 + 행위 (1.9.370)', run: () => { const m = require('../lib/pure-utils'); if (typeof _parseArchiveBlocks !== 'function' || typeof _parseSkillCatalog !== 'function') return false; const moved = m._parseArchiveBlocks === _parseArchiveBlocks && m._parseSkillCatalog === _parseSkillCatalog; const ab = _parseArchiveBlocks('## 제거 2026-01-01 (target: ' + '"T-1")\n### 헤더\n'); const abOk = ab.length === 1 && ab[0].date === '2026-01-01' && ab[0].target === 'T-1' && ab[0].originalHeader === '헤더'; const md = _parseSkillCatalog('- [nm](https://x/SKILL.md) — d', ''); const mdOk = md.length === 1 && md[0].name === 'nm' && md[0].format === 'markdown'; const js = _parseSkillCatalog('{' + '"skills":[{"id":"a","url":"u"}]}', ''); const jsOk = js.length === 1 && js[0].name === 'a' && js[0].format === 'json'; return moved && abOk && mdOk && jsOk; } },
     { name: 'UR-0073 Phase A: team 정의 레지스트리 (_renderTeamsMd + canonical load/save) 행위 (1.9.371)', run: () => { const m = require('../lib/pure-utils'); if (typeof teamCmd !== 'function' || typeof _renderTeamsMd !== 'function' || m._renderTeamsMd !== _renderTeamsMd) return false; const md = _renderTeamsMd([{ id: 't1', name: 'N', personas: ['security'], members: ['claude'], schedule: 'daily', status: 'active' }]); const mdOk = md.includes('## t1') && md.includes('security') && md.includes('daily') && md.includes('정의 전용'); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_team_')); let rtOk = false; try { _saveTeams(tmp, [{ id: 'x', name: 'X', personas: [], members: [], schedule: 'manual', status: 'active' }]); const loaded = _loadTeams(tmp); rtOk = loaded.length === 1 && loaded[0].id === 'x' && fs.existsSync(path.join(tmp, '.harness', 'teams.json')) && fs.existsSync(path.join(tmp, '.harness', 'teams.md')); } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return mdOk && rtOk; } },
@@ -8941,7 +9029,12 @@ function readProgressRows(root) {
   return rows;
 }
 // 1.9.293: progress-tracker 정식 헤더 (frontmatter + 표 헤더 + 분리자). coreFiles 와 단일 출처.
-function _canonicalProgressHeader() {
+function _canonicalProgressHeader(lang = 'ko') {
+  // 1.36.63 (F-05 5회차): en frontmatter — 표 헤더/파서는 원래 영어·위치 기반이라 동작 무변
+  if (lang === 'en') {
+    return fm('progress-tracker', ['session start', 'session close', 'checking request status'], ['task status changes', 'verification results added', 'user request dropped'],
+      `# Progress Tracker\n\nStatus values: requested, planned, in-progress, waiting, on-hold, blocked, incomplete, done, dropped\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n|---|---|---|---|---|---|\n`, 'en').trimEnd();
+  }
   return fm('progress-tracker', ['세션 시작', '세션 종료', '사용자 요청 상태 확인'], ['작업 상태 변경', '검증 결과 추가', '사용자 요청 드랍'],
     `# Progress Tracker\n\nStatus values: requested, planned, in-progress, waiting, on-hold, blocked, incomplete, done, dropped\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n|---|---|---|---|---|---|\n`).trimEnd();
 }
@@ -8950,7 +9043,11 @@ function progressHeader(root) {
   const idx = text.indexOf('|---|');
   // 1.9.293 (근본 버그 fix): 분리자 없음(손상/헤더유실) 시 전체 텍스트 반환은 writeProgressRows 가 행을 복제 →
   //   세션마다 중복 누적의 원인이었음. 정식 헤더를 재구성해 반환 → 다음 write 시 자동 복구.
-  if (idx < 0) return _canonicalProgressHeader();
+  if (idx < 0) {
+    // 1.36.63 (검수 #1): 손상 헤더 복구도 프로젝트 언어로 — en 프로젝트가 ko frontmatter 로 회귀하지 않게
+    let _phLang = 'ko'; try { _phLang = read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch {}
+    return _canonicalProgressHeader(_phLang);
+  }
   return text.slice(0, text.indexOf('\n', idx)).trimEnd();
 }
 function writeProgressRows(root, header, rows) {
@@ -9040,9 +9137,9 @@ function planListCmd(root, opts = {}) {
 function planAdd(root, text) {
   if (!_requireInit(root, 'plan add')) return;  // 1.9.311 (UR-0047): init 가드
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'plan status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
-  const status = arg('--status','planned'), progress = arg('--progress','0'), nextAction = arg('--next', '다음 액션 작성');
+  const status = arg('--status','planned'), progress = arg('--progress','0'), nextAction = arg('--next', _uiLang(root) === 'en' ? 'write the next action' : '다음 액션 작성');   // 1.36.63
   // 1.14.2 (Karpathy 원칙4 "성공기준 정의", UR-0032): --done-when 으로 검증가능 완료조건을 milestone 에 기록. 미지정 시 (미정) — plan show/audit 가 환기.
-  const doneWhen = _lineSafe(arg('--done-when', '') || '(미정)');
+  const doneWhen = _lineSafe(arg('--done-when', '') || (_uiLang(root) === 'en' ? '(unset)' : '(미정)'));   // 1.36.63 (검수 #2)
   // 1.9.303 (UR-0043): M-id append + T-id upsert 를 하나의 락으로 — 동시 plan add ID 충돌 방지.
   const { id, tid } = _withLock(progressPath(root), () => {
     const id = nextId(root, 'M');
@@ -9058,7 +9155,7 @@ function planAdd(root, text) {
 }
 function planDrop(root, text) {
   const id = nextId(root, 'D');
-  const reason = arg('--reason', '사용자 요청으로 제외');
+  const reason = arg('--reason', _uiLang(root) === 'en' ? 'dropped by user request' : '사용자 요청으로 제외');   // 1.36.63 (검수 #2)
   // 1.10.4 (13th 버그헌트 P3, UR-0170): text/reason 의 파이프(|)·개행이 plan.md 마크다운 표 칼럼을 깨뜨림 → _cellSafe 셀 안전화(task/rule UR-0104 와 동일).
   const safeText = _cellSafe(text); const safeReason = _cellSafe(reason);
   const planFile = planPath(root); let p = exists(planFile) ? read(planFile) : '';
@@ -9226,7 +9323,7 @@ function taskAdd(root, text) {
   // 1.9.303 (UR-0043): ID 할당 + write 를 하나의 락으로 — 동시 task add 의 ID 충돌(lost-update) 방지.
   const id = _withLock(progressPath(root), () => {
     const newId = nextId(root, 'T');
-    upsertProgress(root, { id: newId, status: _normTaskStatus(arg('--status','requested')), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next','다음 액션 작성') });
+    upsertProgress(root, { id: newId, status: _normTaskStatus(arg('--status','requested')), request: text, evidence: arg('--evidence','user-request'), nextAction: arg('--next', _uiLang(root) === 'en' ? 'write the next action' : '다음 액션 작성') });   // 1.36.63: 기본값 언어 인지
     return newId;
   });
   // 1.9.413 (6th외부평가 codex P2, UR-0101): --json 시 구조화 출력(코어 데이터는 이미 영속). 사람용 ok + cosmetic roadmap/interactive review 는 스킵.
@@ -9322,7 +9419,8 @@ function taskDrop(root, id) {
   const rows = readProgressRows(root);
   // 1.9.396 (6번째 외부평가/codex P1-B): 없는 task drop 시 가짜 row(request undefined) 생성 = 데이터 손상 → task update 와 동일하게 존재 확인 후 fail(no-op).
   if (!rows.find(r => r.id === id)) { failJson(has('--json'), 'task_not_found', `task ${id} not found in progress-tracker.md`); return; }  // codex P2: --json 에러 구조화
-  upsertProgress(root, { id, status: 'dropped', evidence: arg('--reason','사용자 요청으로 제외'), nextAction: '없음' });
+  const _tdEn = _uiLang(root) === 'en';   // 1.36.63 (검수 #2)
+  upsertProgress(root, { id, status: 'dropped', evidence: arg('--reason', _tdEn ? 'dropped by user request' : '사용자 요청으로 제외'), nextAction: _tdEn ? 'none' : '없음' });
   ok(`task dropped: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -10268,7 +10366,7 @@ function lazyDetect(root, opts = {}) {
   }
   // 1.35.16 (lazy 헌트 우회 #9): status 대소문자무관(Blocked) + nextAction trivial 토큰(빈값/-/n/a/none/tbd/점만) 도 blocker_no_next_action 으로 감지(기존 '없음'/'다음 액션 작성' 만).
   const blockers = rows.filter(r => /^blocked$/i.test(r.status || ''));
-  for (const b of blockers) { const _na = (b.nextAction || '').trim(); if (!_na || _na === '없음' || /다음 액션 작성/.test(b.nextAction) || /^(-+|n\/?a|none|nil|tbd|todo|wip|x|\.+|\?+)$/i.test(_na)) {
+  for (const b of blockers) { const _na = (b.nextAction || '').trim(); if (!_na || _na === '없음' || /다음 액션 작성|write the next action/i.test(b.nextAction) || /^(-+|n\/?a|none|nil|tbd|todo|wip|x|\.+|\?+)$/i.test(_na)) {   // 1.36.63: en 기본값도 trivial 인식
     issues++; _warn(`blocker without nextAction: ${b.id}`,
       { kind: 'blocker_no_next_action', severity: 'warn', taskId: b.id });
   } }
@@ -16064,7 +16162,20 @@ function rulesPath(root) { return path.join(root, '.harness/rules.md'); }
 function rulesArchivePath(root) { return path.join(root, '.harness/rules.archive.md'); }
 function rulesCachePath(root) { return path.join(root, '.harness/cache/rule-state.json'); }
 
-function _rulesHeader() {
+function _rulesHeader(lang = 'ko') {
+  // 1.36.63 (F-05 5회차): en 프로젝트 rules 헤더 영어 — 파서(readRules)는 '| R-' 라인앵커+위치 기반이라 라벨 무관
+  if (lang === 'en') {
+    return [
+      '---', 'leernessRole: rules', 'readWhen:', '  - session start (handoff)', '  - before every task', '  - before completing every task', '  - session close',
+      'updateWhen:', '  - user states a new natural-language rule', '  - user asks to pause/remove a rule',
+      'doNotStore:', '  - real tokens', '  - passwords', '  - production cookies', '  - raw sensitive personal data', '---',
+      '<!-- leerness:managed -->', '# User Rules', '',
+      'Standing user-defined rules the AI agent must follow every session and every task.',
+      'All active rules are auto-surfaced and verified each session until the user explicitly says stop/remove.',
+      '', '## Active Rules', '',
+      '| ID | Trigger | Rule | Added | Status | Last Verified |', '|---|---|---|---|---|---|'
+    ].join('\n');
+  }
   return [
     '---',
     'leernessRole: rules',
@@ -16130,7 +16241,9 @@ function writeRules(root, rules) {
   // 1.36.38 (#1): 파싱 불가 행은 무언 삭제 대신 원문 보존 + 경고 표식 (수동 복구 대상)
   const damaged = _unparsableRuleLines(root).filter(l => !rules.some(r => l.startsWith(`| ${r.id} `)));
   const tail = damaged.length ? '\n<!-- ⚠ 아래 행은 손상돼 파싱 불가 — 삭제하지 않고 보존함. 수동 복구 후 위 표로 병합하세요 -->\n' + damaged.join('\n') + '\n' : '';
-  writeUtf8(rulesPath(root), _rulesHeader() + '\n' + body + (body ? '\n' : '') + tail);
+  // 1.36.63: 저장 시 헤더 언어 = 프로젝트 언어 (en rules.md 가 rule add 로 ko 회귀하지 않게)
+  let _rlLang = 'ko'; try { _rlLang = read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch {}
+  writeUtf8(rulesPath(root), _rulesHeader(_rlLang) + '\n' + body + (body ? '\n' : '') + tail);
 }
 
 function nextRuleId(root) {

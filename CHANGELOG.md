@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.63 — 2026-07-22 — F-05 시리즈 완결: README 섹션·헤더·런타임 기본값 en (5회차) — R-0001 검수 8회전
+
+**en init 한글 잔존 53/61 → 6/61** — 잔여 6개 전부 스킬팩 한국어 콘텐츠(데이터, 의도적 제외). 감사 F-05 종결.
+
+- **README 관리 섹션 en**(정체성/5계층/명령/CRUD/MCP/빠른시작/planning + 검수 #3 보강: list 예시·release/autonomous 절 + `--next-action`→`--next` 오기 정정 — KO 블록도 동일 오기였음). syncReadme 가 프로젝트 언어 감지.
+- **rules/progress 헤더 en**: 파서(readRules/readProgressRows)가 라인앵커+위치 기반임을 확인 후 frontmatter/라벨만 en. rule add 시 en 헤더 유지(writeRules 언어 해석), (검수 #1) 손상 헤더 복구도 프로젝트 언어로.
+- **런타임 기본값 언어 인지**: 시드 task·task/plan add 기본 nextAction(`write the next action`)·(검수 #2) plan Done-When `(unset)`·task/plan drop 사유 — lazy detect 가 en 기본값도 trivial 로 인식(감지 동수 유지).
+- (검수 #4) _mergeReadmeSection 말단 개행 정규화 — 재init 바이트 멱등.
+- 검증: en 파서 전 명령 무회귀(검수: lazy/drift/audit KO=EN 동수), ko 무회귀, selftest 332, 게이트.
+
 ## 1.36.62 — 2026-07-21 — commands/AX/잔여 참조층 en 완역 (F-05 4회차) — R-0001 검수 7회전
 
 en init 한글 잔존 23/61 → **9/61**. 잔여 9개는 성격이 다른 대상(스킬 카탈로그 한국어 데이터 5·파서-결합 헤더 2·README 관리 섹션·skill-index 데이터 컬럼) — 별도 판단 대상으로 명시.

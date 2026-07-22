@@ -84,3 +84,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0061 | done | 언어 전환 현지화 병합 (1.36.60, F-05 2회차) | 검수 5회전 High 반영, selftest 332, e2e 389/389, npm 게시 | 다음 액션 작성 | 2026-07-22 |
 | T-0062 | done | F-05 3회차 정책문서 en 완역 (1.36.61) | 53/61→23/61, 검수 6회전 High+Med 반영, selftest 332, e2e 389/389, npm 게시 | 다음 액션 작성 | 2026-07-22 |
 | T-0063 | done | leerness.com GEO/AEO/SEO (UR-0064) | canonical/OG/JSON-LD(SW+WebSite+FAQPage)/robots(AI 11종)/llms.txt/sitemap 633URL/naver 태그, codex 검수 4건 반영, 라이브 도메인 실측 그린, 커밋 03bb993 | 다음 액션 작성 | 2026-07-22 |
+| T-0064 | done | F-05 4회차 commands/AX en 완역 (1.36.62) | 23/61→9/61, 검수 7회전 4건 반영, selftest 332, e2e 389/389, npm 게시 | 다음 액션 작성 | 2026-07-22 |

@@ -2,12 +2,6 @@
   "queue": [
     {
       "icon": "🎯",
-      "title": "plan.md milestone M-0002 검증 — \"reproduction\" 관련",
-      "command": "leerness plan list --filter \"reproduction\"",
-      "addedAt": "2026-07-14T05:25:32.604Z"
-    },
-    {
-      "icon": "🎯",
       "title": "plan.md milestone M-0003 검증 — \"_maskcommentsstrings\" 관련",
       "command": "leerness plan list --filter \"_maskcommentsstrings\"",
       "addedAt": "2026-07-14T05:48:46.032Z"
@@ -119,7 +113,13 @@
       "title": "stress-v211 마지막 갱신 1222h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js",
       "addedAt": "2026-07-22T07:54:38.027Z"
+    },
+    {
+      "icon": "🧬",
+      "title": "stress-v211 마지막 갱신 1223h 전 — 새 stress test 작성 권장",
+      "command": "node _apps/leerness-stress/bin/stress-v212.js",
+      "addedAt": "2026-07-22T08:57:09.146Z"
     }
   ],
-  "at": "2026-07-22T07:54:38.028Z"
+  "at": "2026-07-22T08:57:09.147Z"
 }
