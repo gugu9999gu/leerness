@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.57';
+const VERSION = '1.36.58';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5181,6 +5181,17 @@ function _selfTestCases() {
         const cleanAfter = process.exitCode !== 1;
         return detected && repaired && backed && customKept && cleanAfter;
       } finally { process.stdout.write = _w; process.argv = saveArgv; process.exitCode = saveExit; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: 'MCP core 프로필 (1.36.58, 외부감사 F-09): CORE 20종 전원 실존 + 필수 루프 포함 + 기본 full 무변경 — 행위검사', run: () => {
+      const m = require('../lib/mcp-tools');
+      const names = new Set(m.map(t => t.name));
+      const allExist = Array.isArray(m.CORE) && m.CORE.length >= 15 && m.CORE.length < m.length && m.CORE.every(n => names.has(n));
+      const loop = ['leerness_handoff', 'leerness_session_close', 'leerness_verify_claim', 'leerness_state_handoff', 'leerness_get_project_context'].every(n => m.CORE.includes(n));
+      // CORE 프로퍼티가 배열 직렬화를 오염하지 않음 (tools/list JSON 에 CORE 미포함)
+      const cleanSer = !JSON.stringify(m).includes('"CORE"');
+      const s = read(__filename);
+      const wired = s.includes("_profile === 'core' ? _ALL_TOOLS.filter") && s.includes("Unknown tool: ${name} (core profile");
+      return allExist && loop && cleanSer && wired;
     } }
   ];
 }
@@ -18553,7 +18564,13 @@ function mcpServeCmd(root) {
   root = absRoot(root || process.cwd());
   // 노출할 leerness 도구 목록
   // 1.9.297 (UR-0025 5단계): MCP 도구 정의를 lib/mcp-tools.js 단일출처로 분리 (Codex #5 regex self-count 영구 해소).
-  const TOOLS = require('../lib/mcp-tools');
+  const _ALL_TOOLS = require('../lib/mcp-tools');
+  // 1.36.58 (외부 GPT 감사 F-09): core 프로필 — 86종 전체(약 45KB tools/list)가 세션 시작 토큰/도구 선택 혼선을
+  //   키우는 클라이언트를 위해 핵심 20종만 노출. opt-in(--profile core / LEERNESS_MCP_PROFILE=core), 기본 full 무변경.
+  const _profile = String(arg('--profile', null) || process.env.LEERNESS_MCP_PROFILE || 'full').trim().toLowerCase();
+  // (검수) 오타 프로필이 무언 full 로 새지 않게 — 제한 요청이 조용히 무력화되는 fail-open 차단
+  if (_profile !== 'core' && _profile !== 'full') { fail(`알 수 없는 MCP 프로필: ${_profile} (가능: core, full)`); return process.exit(1); }
+  const TOOLS = _profile === 'core' ? _ALL_TOOLS.filter(t => _ALL_TOOLS.CORE.includes(t.name)) : _ALL_TOOLS;
 
   function send(obj) {
     process.stdout.write(JSON.stringify(obj) + '\n');
@@ -18593,6 +18610,10 @@ function mcpServeCmd(root) {
         return send({ jsonrpc: '2.0', id, error: { code: -32602, message: 'Invalid params: arguments must be an object' } });
       }
       const args = _rawArgs || {};
+      // 1.36.58 (F-09): core 프로필에서는 노출 집합 = 호출 가능 집합 (광고 안 한 도구 호출은 unknown 과 동일 처리)
+      if (_profile === 'core' && !TOOLS.some(t => t.name === name)) {
+        return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name} (core profile — full: leerness mcp serve --profile full)` } });
+      }
       // 1.36.39 (#3): 도구 inputSchema 기반 타입 검증 — {"title":{...}} 같은 비문자열이 "[object Object]" 로 영속되던 것 차단.
       {
         const _td = TOOLS.find(t => t.name === name);

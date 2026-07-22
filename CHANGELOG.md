@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.58 — 2026-07-21 — MCP core 프로필 (외부감사 F-09 종결) — R-0001 검수 3회전
+
+86종 전체 tools/list(약 45KB)가 세션 시작 토큰/도구 선택 혼선을 키우는 클라이언트용 경량 프로필.
+
+- **`leerness mcp serve --profile core`** (또는 `LEERNESS_MCP_PROFILE=core`): 핵심 20종만 노출 — 에이전트 1세션 필수 루프(handoff→기억 CRUD→verify→인수인계) + 상태 substrate + get_project_context/about/brief. 비노출 도구 호출은 -32601 일관 거부(노출=호출가능). **기본 full 무변경**(검수 실측: tools/list 바이트 동일).
+- (검수 Medium) 오타 프로필 fail-open 차단 — core/full 외에는 exit 1 거부(제한 요청의 무언 무력화 방지). (검수 Low) CORE 를 비열거+freeze — for..in/Object.keys 소비자 오인 차단.
+- 검증: 검수 통과 프로브(20종 전원 _mcpToCliArgs 해석·policy 동일 적용·initialize/ping 불변·README 배지 86 유지·CORE 무누출), selftest 331(+1), 게이트.
+- 외부 GPT 감사 백로그 정리: P0 5건 + P1 중 F-04/F-06/F-09 종결 — 잔여 F-05(en 완전 번역)는 규모상 별도 시리즈.
+
 ## 1.36.57 — 2026-07-21 — integrity check --repair: managed 문서 무결성 복구 (외부감사 F-04) — R-0001 검수 2회전
 
 drift(신선도)와 별개로 "파일 자체가 잘리거나 사라진" 손상을 감지/복구. R-0001 codex 검수가 High 2 포함 5건을 지적 — 전건 재현·보정 후 재검(minimal 오판·repair 실패 exit 0 는 검수 없이는 출하됐을 결함).
