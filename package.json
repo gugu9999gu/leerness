@@ -1,6 +1,6 @@
 {
   "name": "leerness",
-  "version": "1.36.63",
+  "version": "1.36.64",
   "description": "The AI-coding operations layer that makes \"done\" require evidence — persistent memory, evidence-gated completion checks, and clean handoffs for any AI agent (Claude Code, Codex, Cursor). State lives as plain files in your repo. CLI + MCP, 0 runtime dependencies.",
   "keywords": [
     "leerness",
@@ -48,10 +48,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e.js",
-    "test:core": "node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e-core.js",
-    "test:fast": "node ./bin/leerness.js selftest && node ./scripts/smoke.js",
+    "test": "node ./scripts/lint.js && node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e.js",
+    "test:core": "node ./scripts/lint.js && node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e-core.js",
+    "test:fast": "node ./scripts/lint.js && node ./bin/leerness.js selftest && node ./scripts/smoke.js",
     "test:smoke": "node ./scripts/smoke.js",
+    "lint": "node ./scripts/lint.js",
     "prepack": "node ./bin/leerness.js readme sync . && node ./bin/leerness.js --version"
   },
   "publishConfig": {

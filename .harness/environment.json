@@ -1,6 +1,6 @@
 {
-  "capturedAt": "2026-07-22T08:57:09.157Z",
-  "leernessVersion": "1.36.63",
+  "capturedAt": "2026-07-22T09:35:24.827Z",
+  "leernessVersion": "1.36.64",
   "os": {
     "platform": "win32",
     "type": "Windows_NT",
@@ -12,7 +12,7 @@
     "cpuCount": 20,
     "cpuModel": "Intel(R) Core(TM) Ultra 7 265K",
     "totalMemoryGB": 127.4,
-    "freeMemoryGB": 84.3
+    "freeMemoryGB": 83.9
   },
   "locale": {
     "lang": null,
@@ -68,11 +68,6 @@
       "command": "node",
       "foundInPath": true,
       "usedBy": "test"
-    },
-    {
-      "command": "selftest",
-      "foundInPath": false,
-      "usedBy": "test:fast"
     },
     {
       "command": "readme",

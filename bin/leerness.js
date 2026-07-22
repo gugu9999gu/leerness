@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.63';
+const VERSION = '1.36.64';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5373,6 +5373,34 @@ function _selfTestCases() {
       const idem = (m3.match(/MY CUSTOM LINE/g) || []).length === 1;
       const wired = read(__filename).includes('altTemplate: _altFiles[f]') && read(__filename).includes("'.harness/session-workflow.md',   // 1.36.60");
       return noKoTemplate && customKept && enWrapper && control && idem && wired;
+    } },
+    { name: 'lint 게이트 (1.36.64, 외부감사 F-10): 구문/U+2028(실사고 재발 차단)/BOM/JSON — 클린 통과 + 위험문자 검출 행위검사 + npm test 배선', run: () => {
+      const lintP = path.join(__dirname, '..', 'scripts', 'lint.js');
+      if (!exists(lintP)) return false;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lint_'));
+      try {
+        fs.mkdirSync(path.join(tmp, 'lib'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, 'lib', 'ok.js'), 'module.exports = 1;\n');
+        const r1 = cp.spawnSync(process.execPath, [lintP, tmp], { encoding: 'utf8', timeout: 60000 });
+        const cleanOk = r1.status === 0;
+        fs.writeFileSync(path.join(tmp, 'lib', 'bad.js'), 'const s = "a' + String.fromCharCode(0x2028) + 'b";\n');
+        const r2 = cp.spawnSync(process.execPath, [lintP, tmp], { encoding: 'utf8', timeout: 60000 });
+        const caught = r2.status === 1 && /U\+2028/.test(r2.stdout);
+        // (검수 #2) 4개 축 전부 행위 검증 — 구문/BOM/JSON 도 각각 검출
+        fs.writeFileSync(path.join(tmp, 'lib', 'bad.js'), 'const = ;\n');
+        const rSyn = cp.spawnSync(process.execPath, [lintP, tmp], { encoding: 'utf8', timeout: 60000 });
+        const synCaught = rSyn.status === 1 && /syntax:/.test(rSyn.stdout);
+        fs.writeFileSync(path.join(tmp, 'lib', 'bad.js'), Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from('module.exports=1;\n')]));
+        const rBom = cp.spawnSync(process.execPath, [lintP, tmp], { encoding: 'utf8', timeout: 60000 });
+        const bomCaught = rBom.status === 1 && /bom:/.test(rBom.stdout);
+        fs.writeFileSync(path.join(tmp, 'lib', 'bad.js'), 'module.exports=1;\n');
+        fs.writeFileSync(path.join(tmp, 'lib', 'x.json'), '{broken');
+        const rJson = cp.spawnSync(process.execPath, [lintP, tmp], { encoding: 'utf8', timeout: 60000 });
+        const jsonCaught = rJson.status === 1 && /json:/.test(rJson.stdout);
+        const pkg = JSON.parse(read(path.join(__dirname, '..', 'package.json')));
+        const wired = pkg.scripts.lint === 'node ./scripts/lint.js' && ['test', 'test:fast', 'test:core'].every(k => pkg.scripts[k].startsWith('node ./scripts/lint.js &&'));   // (검수 #1) test:core 포함
+        return cleanOk && caught && synCaught && bomCaught && jsonCaught && wired;
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     } }
   ];
 }
