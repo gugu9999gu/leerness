@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.36.59 — 2026-07-21 — en 지시-레이어 완전 번역 (외부감사 F-05 시리즈 1회차) — R-0001 검수 4회전
+
+실측 베이스라인: en init 산출물 61개 중 한글 잔존 53개. 1회차 = en 에이전트가 "지시"로 읽는 최고 영향 5종.
+
+- **en 완역 5종**: AGENTS.md · CLAUDE.md · session-workflow.md · .cursor/leerness.mdc · copilot-instructions.md — 한글 0 실측. frontmatter(doNotStore)까지 영어(fm lang 인자). ko 무회귀.
+- (검수 #2) **계약 동등성 보강**: 검수가 KO 대비 누락 6종 적발 — lens 자기질문 원문/brainstorm 트리거/5세션 회고/rule list 안내/push 클래스/release bump·note·publish 자동화 지시 전부 EN 반영 + workflow 에 복구 절차·자동회복/보안·빠른 체크리스트·안티패턴 섹션 추가 (이력성 도구-카운트 로그는 드리프트 소음이라 의도적 비이식).
+- (검수 #3) **integrity 펜스-H1 오인 수정**: 코드펜스 안 `# 주석`을 H1 로 인정해 H1 상실을 놓치던 것 — 펜스 밖 라인만 검사.
+- (검수 #4) e2e 강화: spawn status 단언 + en 재init 커스텀 1회 생존 + 계약 존재 검사 확대 + finally 정리.
+- **이연(정직, 시리즈 2회차)**: (검수 #1 High) KO→EN 전환/마이그레이션 시 지시 레이어 현지화(구 템플릿 차감 병합 + session-workflow managed 편입 + 보존 래퍼 문구 현지화) — 기존 동작 대비 비회귀(HEAD 동일)이므로 신규 en init 한정으로 이번 출하. 잔여 한글 표면 ~50개(정책문서/AX 가이드/commands)도 후속.
+- 검증: en 5종 한글 0 + ko 보존 + 커스텀 보존 실측, selftest 331, e2e +1 강화판.
+
 ## 1.36.58 — 2026-07-21 — MCP core 프로필 (외부감사 F-09 종결) — R-0001 검수 3회전
 
 86종 전체 tools/list(약 45KB)가 세션 시작 토큰/도구 선택 혼선을 키우는 클라이언트용 경량 프로필.

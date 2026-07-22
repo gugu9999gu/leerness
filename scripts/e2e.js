@@ -7074,5 +7074,36 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.59 (외부감사 F-05 1회차): en init 의 지시-레이어 5종은 한글 0 + ko 완전 보존
+total++;
+{
+  let ok = false;
+  const _dirs = [];
+  try {
+    const H = /[가-힣]/;
+    const de = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-en5-')); _dirs.push(de);
+    const r1 = cp.spawnSync(process.execPath, [CLI, 'init', de, '--yes', '--language', 'en', '--no-env'], { encoding: 'utf8', timeout: 30000 });
+    const five = ['AGENTS.md', 'CLAUDE.md', '.harness/session-workflow.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md'];
+    const enOk = r1.status === 0 && five.every(p => { const t = fs.readFileSync(path.join(de, p), 'utf8'); return t.length > 100 && !H.test(t); });
+    // en 지시 본문의 핵심 계약 존재(번역이 빈 껍데기가 아님) — 검수 #2 반영: lens 질문/체크리스트/안티패턴/자동화 지시까지
+    const ag = fs.readFileSync(path.join(de, 'AGENTS.md'), 'utf8');
+    const wf = fs.readFileSync(path.join(de, '.harness/session-workflow.md'), 'utf8');
+    const substOk = ag.includes('Ask-on-ambiguity duty') && ag.includes('Preview-approval duty') && ag.includes('senior developer') && ag.includes('leerness release bump')
+      && wf.includes('## Step 6') && wf.includes('Quick checklist') && wf.includes('Anti-patterns') && wf.includes('LEERNESS_AUTO_SECURITY_FIX');
+    // (검수 #4) en 재init: 커스텀 라인 정확히 1회 생존 + exit 0
+    fs.appendFileSync(path.join(de, 'AGENTS.md'), '\nMY EN CUSTOM LINE\n');
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'init', de, '--yes', '--language', 'en', '--no-env'], { encoding: 'utf8', timeout: 30000 });
+    const ag2 = fs.readFileSync(path.join(de, 'AGENTS.md'), 'utf8');
+    const custOk = r2.status === 0 && (ag2.match(/MY EN CUSTOM LINE/g) || []).length === 1 && ag2.includes('Ask-on-ambiguity duty');
+    const dk = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ko5-')); _dirs.push(dk);
+    const r3 = cp.spawnSync(process.execPath, [CLI, 'init', dk, '--yes', '--language', 'ko', '--no-env'], { encoding: 'utf8', timeout: 30000 });
+    const koOk = r3.status === 0 && H.test(fs.readFileSync(path.join(dk, 'AGENTS.md'), 'utf8')) && fs.readFileSync(path.join(dk, '.harness/session-workflow.md'), 'utf8').includes('6단계');
+    ok = enOk && substOk && custOk && koOk;
+    if (!ok) console.log(`   [en5 디버그] en=${enOk} subst=${substOk} cust=${custOk} ko=${koOk}`);
+  } catch (e) {} finally { _dirs.forEach(d => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.59) F-05 1회차: en init 지시 5종(AGENTS/CLAUDE/workflow/cursor/copilot) 한글 0 + 핵심 계약 보존 + ko 무회귀' : '✗ en 지시 5종 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
