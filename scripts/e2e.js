@@ -1444,7 +1444,8 @@ total++;
 total++;
 {
   // whats-new --from 큰 점프 → 신규 명령 추출
-  const r = cp.spawnSync(process.execPath, [CLI, 'whats-new', '--from', '1.9.33', '--json'], { encoding: 'utf8', timeout: 15000 });
+  // 1.36.68: CHANGELOG 성장으로 응답이 기본 stdout 버퍼(1MB 근처)를 넘어 절단되던 것 — 상한 명시(제품 무변경)
+  const r = cp.spawnSync(process.execPath, [CLI, 'whats-new', '--from', '1.9.33', '--json'], { encoding: 'utf8', timeout: 20000, maxBuffer: 32 * 1024 * 1024 });
   let parsed = null;
   try { parsed = JSON.parse(r.stdout); } catch {}
   const ok = parsed
@@ -7140,6 +7141,36 @@ total++;
     if (!ok) console.log(`   [noop 디버그] noop=${noopOk} chg=${changedOk} stable=${stableOk} ver=${verOk}`);
   } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? '✓ B(1.36.65) F-08 no-op 재설치: 무변경=백업/타임스탬프 생략 · 변경/구버전=정상 설치 · 커스텀 1회 유지' : '✗ no-op 재설치 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.68 (8차 헌트 F14 재구현): 마감 보고/JSON 에 미승인 미리보기 노출 — 텍스트·JSON 양 모드 + 승인 후 소거
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f14-')); _d.push(d);
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env'], { encoding: 'utf8', timeout: 40000 });
+    cp.spawnSync(process.execPath, [CLI, 'preview', 'add', '결제 화면', '--design', '모달', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const txt = cp.spawnSync(process.execPath, [CLI, 'session', 'close', d], { encoding: 'utf8', timeout: 40000 });
+    const textOk = txt.status === 0 && /미승인 미리보기 1건|1 preview\(s\) awaiting/.test(txt.stdout) && /P-0001/.test(txt.stdout);
+    const js = cp.spawnSync(process.execPath, [CLI, 'session', 'close', d, '--json'], { encoding: 'utf8', timeout: 40000 });
+    let jsonOk = false;
+    try { const j = JSON.parse(js.stdout); jsonOk = j.pendingPreviews && j.pendingPreviews.count === 1 && j.pendingPreviews.items[0].id === 'P-0001'; } catch {}
+    // (검수) --no-suggest 에서도 승인 대기 상태는 노출돼야 — suggest 게이트 밖 배치 회귀 가드
+    const ns = cp.spawnSync(process.execPath, [CLI, 'session', 'close', d, '--no-suggest'], { encoding: 'utf8', timeout: 40000 });
+    const nsJs = cp.spawnSync(process.execPath, [CLI, 'session', 'close', d, '--json', '--no-suggest'], { encoding: 'utf8', timeout: 40000 });
+    let noSuggestOk = /미승인 미리보기|awaiting approval/.test(ns.stdout);
+    try { noSuggestOk = noSuggestOk && JSON.parse(nsJs.stdout).pendingPreviews.count === 1; } catch { noSuggestOk = false; }
+    cp.spawnSync(process.execPath, [CLI, 'preview', 'approve', 'P-0001', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const after = cp.spawnSync(process.execPath, [CLI, 'session', 'close', d, '--json'], { encoding: 'utf8', timeout: 40000 });
+    let clearedOk = false;
+    try { clearedOk = JSON.parse(after.stdout).pendingPreviews.count === 0; } catch {}
+    ok = textOk && jsonOk && noSuggestOk && clearedOk;
+    if (!ok) console.log(`   [f14 디버그] text=${textOk} json=${jsonOk} noSuggest=${noSuggestOk} cleared=${clearedOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.68) F14: session close 미승인 미리보기 노출 (텍스트+JSON 일치 · --no-suggest 무영향 · 승인 시 소거)' : '✗ F14 미승인 미리보기 노출 실패');
   if (!ok) failed++;
 }
 

@@ -89,3 +89,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0066 | done | lint 게이트 (1.36.64, 감사 F-10) | 검수 9회전 3건 반영, selftest 333, e2e 389/389, npm 게시 | 다음 액션 작성 | 2026-07-22 |
 | T-0067 | done | no-op 재설치 (1.36.65, 감사 F-08) | 검수 10회전 HIGH 반영+선재버그 수정, selftest 333, e2e 390/390, npm 게시 | 다음 액션 작성 | 2026-07-22 |
 | T-0068 | done | codex 8차 홀리스틱 헌트 11건 수정 (1.36.66) | 16 발견 중 11 수정+2 이연, selftest 334, e2e 390/390, npm 게시 | 다음 액션 작성 | 2026-07-22 |
+| T-0069 | done | F15 tech-graph 정합 (1.36.67), F14 이연 | selftest 334, e2e 390/390, npm 게시, F14 롤백 사유 CHANGELOG 명시 | 다음 액션 작성 | 2026-07-22 |
