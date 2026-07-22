@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.64';
+const VERSION = '1.36.65';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -745,7 +745,8 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
     '.claude/commands/session-close.md': `# /session-close\n\n세션 종료 보고를 자동 생성하고 session-handoff.md를 갱신합니다.\n\n\`\`\`\n!leerness session close .\n\`\`\`\n`,
     '.claude/commands/audit.md': `# /audit\n\n계획-진행 정렬, 디자인/재사용 일관성, 시크릿/인코딩을 일괄 점검합니다.\n\n\`\`\`\n!leerness audit .\n!leerness scan secrets .\n!leerness encoding check .\n\`\`\`\n`,
     '.claude/commands/lazy-detect.md': `# /lazy-detect\n\n게으름 방지 자동 평가를 실행합니다.\n\n\`\`\`\n!leerness lazy detect .\n\`\`\`\n`,
-    '.claude/commands/update.md': `# /update\n\nleerness 자동 업데이트를 실행합니다 (감지 → 마이그레이션 → 검증).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n`,
+    // 1.36.65: auto-update 훅 설치기와 동일 내용(단일화) — 재init no-op 판정이 어긋나지 않게
+    '.claude/commands/update.md': `# /update\n\nleerness 자동 업데이트 (감지 → 마이그레이션 → 검증).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\n체크만:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`,
     '.claude/skills/leerness.md': `---\nname: leerness\ndescription: Leerness harness commands - handoff, audit, scan secrets, encoding check, lazy detect, session close, update. Use when the user asks to load project context, verify work quality, scan secrets, check encoding, or end a session.\n---\n\n# leerness skill\n\n## When to use\n- 사용자가 프로젝트 컨텍스트를 로드해달라고 할 때\n- 완료 선언 전 자기 검증을 요청할 때\n- 세션을 종료하거나 인수인계를 요청할 때\n- 시크릿/한글 인코딩 점검을 요청할 때\n- 새 leerness 버전 적용을 요청할 때\n\n## Commands\n\n\`\`\`bash\nleerness handoff .             # 컨텍스트 로드\nleerness check .               # pre-action 체크\nleerness audit .               # 일관성/계획 정렬 감사\nleerness scan secrets .        # 시크릿 패턴 스캔\nleerness encoding check .      # UTF-8/BOM/NUL\nleerness lazy detect .         # 게으름 평가\nleerness memory search "key"   # 결정/이력 검색\nleerness session close .       # 종료 보고 + handoff 자동 생성\nleerness update --yes          # 자동 업데이트\n\`\`\`\n`,
   };
   // 1.36.59 (외부감사 F-05 시리즈 1회차): en 프로젝트에서 에이전트가 "지시"로 읽는 최상위 5종은 완전 영어 —
@@ -767,7 +768,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
     _files['.claude/commands/session-close.md'] = `# /session-close\n\nGenerate the end-of-session report and update session-handoff.md.\n\n\`\`\`\n!leerness session close .\n\`\`\`\n`;
     _files['.claude/commands/audit.md'] = `# /audit\n\nCheck plan-progress alignment, design/reuse consistency, secrets, and encoding in one pass.\n\n\`\`\`\n!leerness audit .\n!leerness scan secrets .\n!leerness encoding check .\n\`\`\`\n`;
     _files['.claude/commands/lazy-detect.md'] = `# /lazy-detect\n\nRun the lazy-work (false-done) automatic evaluation.\n\n\`\`\`\n!leerness lazy detect .\n\`\`\`\n`;
-    _files['.claude/commands/update.md'] = `# /update\n\nRun the leerness auto-update (detect → migrate → verify).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n`;
+    _files['.claude/commands/update.md'] = `# /update\n\nRun the leerness auto-update (detect → migrate → verify).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\nCheck only:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`;
     _files['.claude/skills/leerness.md'] = `---\nname: leerness\ndescription: Leerness harness commands - handoff, audit, scan secrets, encoding check, lazy detect, session close, update. Use when the user asks to load project context, verify work quality, scan secrets, check encoding, or end a session.\n---\n\n# leerness skill\n\n## When to use\n- When the user asks to load project context\n- When self-verification is requested before claiming completion\n- When ending a session or asked for a handoff\n- When secret/encoding checks are requested\n- When applying a new leerness version\n\n## Commands\n\n\`\`\`bash\nleerness handoff .             # load context\nleerness check .               # pre-action check\nleerness audit .               # consistency/plan-alignment audit\nleerness scan secrets .        # secret pattern scan\nleerness encoding check .      # UTF-8/BOM/NUL\nleerness lazy detect .         # lazy-work evaluation\nleerness memory search "key"   # search decisions/history\nleerness session close .       # close report + auto handoff\nleerness update --yes          # auto-update\n\`\`\`\n`;
     // 1.36.61 (F-05 3회차): .harness 정책·시드 문서군 en 완역 — 지시 5종(1.36.59)에 이어 read-order 가 가리키는 참조층.
     _files['.harness/project-brief.md'] = fm('project-brief', ['confirming project purpose', 'judging new features', 'planning'], ['project purpose changes', 'users/scope change'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- Update this with the real purpose of the project.\n\n## Users\n-\n\n## Success Criteria\n-\n`, 'en');
@@ -1130,14 +1131,6 @@ async function install(root, opts = {}) {
   const _altLang = lang === 'en' ? 'ko' : 'en';
   let _altFiles = {};
   if (_langSwitched) { try { _altFiles = coreFiles(root, _altLang, skills, { minimal: !!opts.minimal }); } catch {} }
-  const backup = createBackup(root, opts.force ? 'force' : (opts.migration ? 'migration' : 'init'), files, opts.dry);
-  if (opts.dry) {
-    log(`Backup target: ${backup.archiveDir}`);
-    log('Files that would be backed up:');
-    backup.candidates.forEach(f => log('- ' + f));
-  } else {
-    ok(`backup created: ${rel(root, backup.archiveDir)}`);
-  }
   const managedOverwrite = new Set([
     'AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md',
     '.harness/session-workflow.md',   // 1.36.60 (검수 #1): managed 편입 — 종전엔 재init 시 구 언어/구 버전 그대로 방치
@@ -1155,6 +1148,45 @@ async function install(root, opts = {}) {
     '.claude/commands/handoff.md','.claude/commands/session-close.md','.claude/commands/audit.md','.claude/commands/lazy-detect.md','.claude/commands/update.md',
     '.claude/skills/leerness.md'
   ]);
+  // 1.36.65 (외부감사 F-08): no-op 재설치 감지 — 계산 결과가 현재와 전부 동일하면 백업/쓰기/타임스탬프를 만들지 않는다.
+  //   비교는 휘발 필드 정규화 후: manifest/lock 의 시각류 키, preserved 래퍼의 아카이브 경로 라인.
+  //   force/dry/마이그레이션(버전 변화)·언어 전환은 no-op 판정 대상 아님.
+  const _normVolatile = (f, s) => {
+    let t = String(s);
+    if (/\.json$/i.test(f)) t = t.replace(/"(installedAt|generatedAt|updatedAt|at)"\s*:\s*"[^"]*"/g, '"$1":"~"');
+    t = t.replace(/(backup|백업): ?`[^`]*`/gi, '$1: `~`');   // (검수 2차 Low) 경로만 정규화 — 래퍼 문구 변경은 실변경으로 감지
+    return t.replace(/\r\n/g, '\n').trim();
+  };
+  let _noop = !opts.force && !opts.dry && !_langSwitched && exists(path.join(root, '.harness'));
+  if (_noop) {
+    for (const [f, c] of Object.entries(files)) {
+      const p = path.join(root, f);
+      if (!exists(p)) { _noop = false; if (process.env.LEERNESS_DEBUG_NOOP) log(`[noop-debug] missing: ${f}`); break; }
+      if (managedOverwrite.has(f)) {
+        let cur = ''; try { cur = read(p); } catch { _noop = false; break; }
+        const wouldBe = managedMerge(f, c, cur, null, { altTemplate: _altFiles[f], lang });
+        if (_normVolatile(f, wouldBe) !== _normVolatile(f, cur)) { _noop = false; if (process.env.LEERNESS_DEBUG_NOOP) log(`[noop-debug] differs: ${f}`); break; }
+      }
+      // 비-managed 는 preserve(불변) 경로 — 존재하면 변경 없음
+    }
+  }
+  // (검수 2차 HIGH): no-op 이어도 하위 조정기(.env/.gitignore/훅/스킬 payload/roadmap)는 계속 실행 —
+  //   조기 return 은 "요청된 드리프트 복구"까지 건너뛰었다(--no-env→기본 재init 시 .env 미생성 등 6케이스 실측).
+  //   생략 대상은 백업 생성 + coreFiles 쓰기 루프 + 마이그레이션 리포트뿐. 조정기의 무변경 churn 은
+  //   writeUtf8 동일-내용 스킵(1.36.65)이 전역 해소.
+  let backup = { archiveDir: path.join(root, '.harness', 'archive'), candidates: [], skipped: true };
+  if (_noop) {
+    ok(`no-op: coreFiles 이미 v${VERSION} 최신 — 백업/파일쓰기 생략, 부속 구성(.env/훅/스킬)은 정합 확인 계속 (강제: --force)`);
+  } else {
+    backup = createBackup(root, opts.force ? 'force' : (opts.migration ? 'migration' : 'init'), files, opts.dry);
+    if (opts.dry) {
+      log(`Backup target: ${backup.archiveDir}`);
+      log('Files that would be backed up:');
+      backup.candidates.forEach(f => log('- ' + f));
+    } else {
+      ok(`backup created: ${rel(root, backup.archiveDir)}`);
+    }
+  }
   // 1.9.184 (사용자 명시): 파일 설치 — 생성 목록 나열 X, 로딩바 + 단일 완료 메시지.
   const actions = [];
   const totalFiles = Object.keys(files).length;
@@ -1173,6 +1205,7 @@ async function install(root, opts = {}) {
   //   덮어써 활성 기록이 archive 에만 남았다. force 는 가이드/템플릿 문서에만 적용 — 상태 파일은 force 여도 보존.
   const _USER_STATE = new Set(['.harness/progress-tracker.md', '.harness/plan.md', '.harness/task-log.md', '.harness/decisions.md', '.harness/current-state.md', '.harness/session-handoff.md', '.harness/rules.md', '.harness/feature-graph.md', '.harness/reuse-map.md', '.harness/feature-contracts.md', '.harness/project-brief.md', '.harness/architecture.md', '.harness/context-map.md', '.harness/design-system.md', '.harness/review-evidence.md']);   // 1.36.62 (검수 #3): 검증 이력도 사용자 데이터
   for (const [f, c] of Object.entries(files)) {
+    if (_noop) break;   // 1.36.65: coreFiles 무변경 — 쓰기 루프 생략 (하위 조정기는 아래에서 계속)
     const existsNow = exists(path.join(root, f));
     const mergeManaged = managedOverwrite.has(f);
     const effForce = opts.force && !_USER_STATE.has(f);
@@ -1289,7 +1322,7 @@ async function install(root, opts = {}) {
     syncReadme(root);
     installSkills(root, skills);
     // 1.9.41: migrate 시 이전 버전을 미리 캡처해 차분 안내에 사용
-    writeMigrationReport(root, backup, actions, { fromV: opts._previousVersion || null });
+    if (!_noop) writeMigrationReport(root, backup, actions, { fromV: opts._previousVersion || null });   // 1.36.65: no-op 시 리포트 무증식
     // 1.9.41: migrate 후 (= 점프인 경우) 차분 안내를 stdout에 즉시 출력 — AI 컨텍스트에 새 도구 주입
     if (opts.migration && opts._previousVersion && opts._previousVersion !== VERSION) {
       try {

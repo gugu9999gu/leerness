@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.65 — 2026-07-22 — no-op 재설치 + 동일-내용 쓰기 스킵 (외부감사 F-08) — R-0001 검수 10회전
+
+무변경 재init 의 백업/아카이브/타임스탬프 증식(감사 지적) 해소 — 거짓 no-op 은 검수가 차단.
+
+- **no-op 재설치**: coreFiles 계산 결과가 현재와 전부 동일하면(휘발 시각키·아카이브 경로 정규화 비교) 백업 생성·파일쓰기·마이그레이션 리포트 생략. force/dry/언어 전환/버전 차이/커스텀 변경은 정상 설치. `LEERNESS_DEBUG_NOOP=1` 진단.
+- **(검수 HIGH) no-op ≠ 조기 종료**: 하위 조정기(.env/.gitignore/훅/스킬 payload/roadmap)는 항상 계속 — 조기 return 은 `--no-env→기본 재init` 등 6케이스에서 요청된 복구를 건너뛰었다(검수 실측). 무변경 churn 은 **writeUtf8 동일-내용 스킵**이 전역 해소.
+- **(파생 선재버그) _mergeLines substring 흡수**: '.env' 가 '.env.local' 에 포함돼 gitignore 복구가 영영 안 되던 것 — 라인 단위 정확 매칭으로 수정.
+- (검수 Low) 래퍼 정규화는 백틱 경로만(문구 변경은 실변경 감지). update.md 이중 출처 단일화(coreFiles↔훅 설치기).
+- 실측: 기본/minimal/en/skills 재init no-op·archive/manifest 불변·.env/gitignore 복구 계속·커스텀 1회 유지·구버전/전환 정상 설치. e2e +1, selftest 333.
+
 ## 1.36.64 — 2026-07-22 — lint 게이트 (외부감사 F-10) — R-0001 검수 9회전
 
 과거 실사고(raw U+2028 정규식 리터럴 → 전 명령 SyntaxError 출하) 재발을 구조적으로 차단하는 0-deps lint.

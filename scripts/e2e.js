@@ -4953,7 +4953,11 @@ total++;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-arch-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko', '--keep', '2'], { encoding: 'utf8', timeout: 30000 });
-    for (let i = 0; i < 3; i++) cp.spawnSync(process.execPath, [CLI, 'migrate', d, '--keep', '2'], { encoding: 'utf8', timeout: 30000 });
+    // 1.36.65: 무변경 migrate 는 no-op(백업 미생성) — 리텐션 검증 의도 유지를 위해 매회 변경 주입으로 스냅샷 강제
+    for (let i = 0; i < 3; i++) {
+      fs.appendFileSync(path.join(d, 'AGENTS.md'), `\nRETENTION PROBE ${i}\n`);
+      cp.spawnSync(process.execPath, [CLI, 'migrate', d, '--keep', '2'], { encoding: 'utf8', timeout: 30000 });
+    }
     const adir = path.join(d, '.harness', 'archive');
     const cnt = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length;
     fs.rmSync(d, { recursive: true, force: true });
@@ -7104,6 +7108,38 @@ total++;
     if (!ok) console.log(`   [en5 디버그] en=${enOk} subst=${substOk} cust=${custOk} ko=${koOk}`);
   } catch (e) {} finally { _dirs.forEach(d => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? '✓ B(1.36.59) F-05 1회차: en init 지시 5종(AGENTS/CLAUDE/workflow/cursor/copilot) 한글 0 + 핵심 계약 보존 + ko 무회귀' : '✗ en 지시 5종 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.65 (외부감사 F-08): no-op 재설치 — 변경 없으면 백업/아카이브/타임스탬프 무증식, 변경·구버전·force 는 정상 설치
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noop-')); _d.push(d);
+    const R = () => cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env'], { encoding: 'utf8', timeout: 40000 });
+    R();
+    const arch1 = fs.readdirSync(path.join(d, '.harness', 'archive')).length;
+    const mf1 = fs.readFileSync(path.join(d, '.harness', 'manifest.json'), 'utf8');
+    const r2 = R();
+    const noopOk = r2.status === 0 && /no-op/.test(r2.stdout)
+      && fs.readdirSync(path.join(d, '.harness', 'archive')).length === arch1
+      && fs.readFileSync(path.join(d, '.harness', 'manifest.json'), 'utf8') === mf1;
+    // 커스텀 추가 → 설치 수행(백업 생성) → 이후 다시 no-op + 커스텀 1회 유지
+    fs.appendFileSync(path.join(d, 'AGENTS.md'), '\nNOOP CUSTOM LINE\n');
+    const r3 = R();
+    const changedOk = /backup created/.test(r3.stdout) && !/no-op/.test(r3.stdout);
+    const r4 = R();
+    const stableOk = /no-op/.test(r4.stdout) && (fs.readFileSync(path.join(d, 'AGENTS.md'), 'utf8').match(/NOOP CUSTOM LINE/g) || []).length === 1;
+    // 구버전 마커 → 정상 설치
+    fs.writeFileSync(path.join(d, '.harness', 'HARNESS_VERSION'), '1.36.60\n');
+    const r5 = R();
+    const verOk = /backup created/.test(r5.stdout);
+    ok = noopOk && changedOk && stableOk && verOk;
+    if (!ok) console.log(`   [noop 디버그] noop=${noopOk} chg=${changedOk} stable=${stableOk} ver=${verOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.65) F-08 no-op 재설치: 무변경=백업/타임스탬프 생략 · 변경/구버전=정상 설치 · 커스텀 1회 유지' : '✗ no-op 재설치 실패');
   if (!ok) failed++;
 }
 
