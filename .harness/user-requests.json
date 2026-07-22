@@ -730,7 +730,19 @@
       "notes": "",
       "updatedAt": "2026-07-21T07:14:58.984Z",
       "completedAt": "2026-07-21T07:14:58.984Z"
+    },
+    {
+      "id": "UR-0064",
+      "text": "leerness.com 웹사이트 GEO/AEO/SEO 최적화 (검색엔진+AI 답변엔진 노출)",
+      "recordedAt": "2026-07-22T07:34:57.823Z",
+      "status": "completed",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": "",
+      "updatedAt": "2026-07-22T07:51:26.127Z",
+      "completedAt": "2026-07-22T07:51:26.127Z"
     }
   ],
-  "updatedAt": "2026-07-21T13:49:44.87Z"
+  "updatedAt": "2026-07-22T07:51:26.127Z"
 }

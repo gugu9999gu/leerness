@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.36.62 — 2026-07-21 — commands/AX/잔여 참조층 en 완역 (F-05 4회차) — R-0001 검수 7회전
+
+en init 한글 잔존 23/61 → **9/61**. 잔여 9개는 성격이 다른 대상(스킬 카탈로그 한국어 데이터 5·파서-결합 헤더 2·README 관리 섹션·skill-index 데이터 컬럼) — 별도 판단 대상으로 명시.
+
+- **en 오버라이드 14종**: .claude/commands 5·skills/leerness.md·AX 가이드 4·test-evidence/review-evidence·skill-index·context-routing·feature-graph.
+- (검수 #1) **/update 한국어 되덮기**: auto-update 훅 설치기가 en 템플릿을 한국어로 재작성 — 언어 인지 렌더. (검수 #2) **feature add 가 en 그래프를 한국어로 회귀+frontmatter 소실**: _writeFeatureGraph 가 매 저장마다 ko 템플릿 전체 재생성 — 기존 서두를 '## Nodes' 까지 보존. (검수 #3) 전환 누락 4종: AX_PLAN/test-evidence 는 managed 편입, review-evidence 는 _USER_STATE 편입(검증 이력=사용자 데이터), feature-graph 는 #2 경로가 커버. (검수 #4) verify-code 증거 마커 en 프로젝트에서 `(auto)`.
+- 검증: en /update·feature add 후 그래프 무한글+frontmatter 보존+파싱 실측, ko 15종 바이트 무회귀(검수), selftest 332.
+
 ## 1.36.61 — 2026-07-21 — .harness 정책·시드 문서군 en 완역 (F-05 3회차) — R-0001 검수 6회전
 
 en init 한글 잔존 53/61 → **23/61** (1·3회차 누적). 검수 계약 대조: 6개 대표 문서 규칙 전량 보존 확인.
