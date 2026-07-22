@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.36.61 — 2026-07-21 — .harness 정책·시드 문서군 en 완역 (F-05 3회차) — R-0001 검수 6회전
+
+en init 한글 잔존 53/61 → **23/61** (1·3회차 누적). 검수 계약 대조: 6개 대표 문서 규칙 전량 보존 확인.
+
+- **en 오버라이드 27종**: guideline/guardrails/anti-lazy/writeback/session-close/secret/encoding/consistency/testing/checklists/plan·brief·current-state·decisions·task-log·handoff 시드 등 — read-order 참조층 전체.
+- **자가 선검**: en brief placeholder 문구가 감지 regex 와 미스매치(작성됨 오판) → 문구 정합 (anchors status true/true 실측).
+- (검수 High) **정책문서 12종 managed 편입** — 언어 전환 시 구 언어로 방치되던 것 (사용자 상태 문서는 의도 제외). 실측: en→ko 전환 시 guardrails 한국어 재생성 + 커스텀 1회 + 영어 잔재 0.
+- (검수 Medium) **en 센티널 인식**: audit/lazy detect 의 `(자동)`, design-token `(실제 값으로 업데이트)` 만 알던 감시자들에 `(auto)`/`(update with real value)` 병기 — KO/EN audit 발견 동수(5=5) 회복, --fix 양 언어.
+- 검증: e2e en 케이스 10종 무한글로 확대, selftest 332, 검수 통과 프로브(파서 소비자 전수·integrity en 12종·전환 왕복).
+
 ## 1.36.60 — 2026-07-21 — 언어 전환 현지화 병합 (F-05 2회차, 전 검수 High 해소) — R-0001 검수 5회전
 
 KO→EN(역방향 포함) 전환 시 지시 레이어가 새 언어로 재생성되고 사용자 커스텀만 정확히 1회 이월된다.

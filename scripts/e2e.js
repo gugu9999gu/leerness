@@ -7083,7 +7083,9 @@ total++;
     const H = /[가-힣]/;
     const de = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-en5-')); _dirs.push(de);
     const r1 = cp.spawnSync(process.execPath, [CLI, 'init', de, '--yes', '--language', 'en', '--no-env'], { encoding: 'utf8', timeout: 30000 });
-    const five = ['AGENTS.md', 'CLAUDE.md', '.harness/session-workflow.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md'];
+    // 1.36.61 (3회차): 정책·시드 문서군까지 확대 — 대표 10종 무한글
+    const five = ['AGENTS.md', 'CLAUDE.md', '.harness/session-workflow.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md',
+      '.harness/guideline.md', '.harness/guardrails.md', '.harness/anti-lazy-work-policy.md', '.harness/plan.md', '.harness/secret-policy.md'];
     const enOk = r1.status === 0 && five.every(p => { const t = fs.readFileSync(path.join(de, p), 'utf8'); return t.length > 100 && !H.test(t); });
     // en 지시 본문의 핵심 계약 존재(번역이 빈 껍데기가 아님) — 검수 #2 반영: lens 질문/체크리스트/안티패턴/자동화 지시까지
     const ag = fs.readFileSync(path.join(de, 'AGENTS.md'), 'utf8');
