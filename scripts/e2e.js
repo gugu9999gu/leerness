@@ -1444,8 +1444,8 @@ total++;
 total++;
 {
   // whats-new --from 큰 점프 → 신규 명령 추출
-  // 1.36.68: CHANGELOG 성장으로 응답이 기본 stdout 버퍼(1MB 근처)를 넘어 절단되던 것 — 상한 명시(제품 무변경)
-  const r = cp.spawnSync(process.execPath, [CLI, 'whats-new', '--from', '1.9.33', '--json'], { encoding: 'utf8', timeout: 20000, maxBuffer: 32 * 1024 * 1024 });
+  // 1.36.69: 기본 응답은 최신 30개로 제한됨 — 전체 차분 검증은 --all (대용량이라 maxBuffer 명시)
+  const r = cp.spawnSync(process.execPath, [CLI, 'whats-new', '--from', '1.9.33', '--json', '--all'], { encoding: 'utf8', timeout: 20000, maxBuffer: 32 * 1024 * 1024 });
   let parsed = null;
   try { parsed = JSON.parse(r.stdout); } catch {}
   const ok = parsed
@@ -7171,6 +7171,39 @@ total++;
     if (!ok) console.log(`   [f14 디버그] text=${textOk} json=${jsonOk} noSuggest=${noSuggestOk} cleared=${clearedOk}`);
   } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? '✓ B(1.36.68) F14: session close 미승인 미리보기 노출 (텍스트+JSON 일치 · --no-suggest 무영향 · 승인 시 소거)' : '✗ F14 미승인 미리보기 노출 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.69 (성장 한계 클래스): whats-new --json 기본 상한 — AI 컨텍스트 보호 + 정직한 절단 표기 + --all/--limit 옵트인
+total++;
+{
+  let ok = false;
+  try {
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, 'whats-new', ...a], { encoding: 'utf8', timeout: 25000, maxBuffer: 32 * 1024 * 1024 });
+    const def = JSON.parse(R(['--from', '1.9.33', '--json']).stdout);
+    // (검수 #4) 정확 일치로 — shown<=30 은 기본값이 1로 퇴화해도 통과하던 느슨한 단언
+    const defOk = def.shown === 30 && def.versions.length === def.shown && def.totalVersions > def.shown && def.truncated === true && typeof def.hint === 'string';
+    // 무효 limit 은 기본값 폴백 (0/-5/abc)
+    const badLim = ['0', '-5', 'abc'].every(v => { try { return JSON.parse(R(['--from', '1.9.33', '--json', '--limit', v]).stdout).shown === 30; } catch { return false; } });
+    // 절단 없을 때 hint 부재
+    const small = JSON.parse(R(['--from', '1.36.60', '--json']).stdout);
+    const smallOk = small.truncated === false && small.hint === undefined && small.shown === small.totalVersions;
+    // MCP 인자 전달 (limit)
+    const mcpReq = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_whats_new', arguments: { from: '1.9.33', limit: 2 } } });
+    const mcpR = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: mcpReq + '\n', maxBuffer: 32 * 1024 * 1024 });
+    let mcpOk = false;
+    try { const txt = JSON.parse(mcpR.stdout.split('\n').filter(Boolean)[0]).result.content[0].text; mcpOk = JSON.parse(txt).shown === 2; } catch {}
+    const all = JSON.parse(R(['--from', '1.9.33', '--json', '--all']).stdout);
+    const allOk = all.shown === all.totalVersions && all.truncated === false && all.versions.length === def.totalVersions;
+    const lim = JSON.parse(R(['--from', '1.9.33', '--json', '--limit', '3']).stdout);
+    const limOk = lim.shown === 3 && lim.versions.length === 3;
+    // 크기 회귀 가드: 기본 응답이 200KB 를 넘지 않아야(에이전트 컨텍스트 보호)
+    const defRaw = R(['--from', '1.9.33', '--json']).stdout;
+    const sizeOk = defRaw.length < 200 * 1024;
+    ok = defOk && allOk && limOk && sizeOk && badLim && smallOk && mcpOk;
+    if (!ok) console.log(`   [wn 디버그] def=${defOk} all=${allOk} lim=${limOk} size=${sizeOk}(${Math.round(defRaw.length / 1024)}KB) bad=${badLim} small=${smallOk} mcp=${mcpOk}`);
+  } catch (e) {}
+  console.log(ok ? '✓ B(1.36.69) whats-new --json 상한 30(정확) + truncated/hint + --all/--limit + 무효limit 폴백 + MCP 전달 + 200KB 미만' : '✗ whats-new 상한 실패');
   if (!ok) failed++;
 }
 
