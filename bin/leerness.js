@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.69';
+const VERSION = '1.36.70';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -929,17 +929,22 @@ function writeMigrationReport(root, backup, actions, opts = {}) {
           v.newFiles.forEach(f => allFiles.add(f));
         }
         if (diff.length) {
+          // 1.36.70 (성장 한계 클래스, whats-new 1.36.69 와 동일 규율): 큰 버전 점프(601+ 릴리스)에서
+          //   보고서가 ~88KB 로 폭주해 AI 컨텍스트를 태우던 것 — 목록별 상한 + 정직한 "외 N개" 표기.
+          const _capList = (set, cap, fmt) => { const a = [...set]; return a.slice(0, cap).map(fmt).join('\n') + (a.length > cap ? `\n- … 외 ${a.length - cap}개 (전체: \`leerness whats-new --from ${fromV} --all\`)` : ''); };
           aiReadBlock = `\n## 🤖 AI must re-read (1.9.41 차분 안내)\n\n`;
-          aiReadBlock += `이 migrate는 ${fromV} → ${VERSION} 점프입니다. 메인 AI 에이전트는 다음을 인지하고 우선 활용:\n\n`;
-          if (allCommands.size) aiReadBlock += `**📌 신규 명령** (이전엔 없던 것):\n${[...allCommands].map(c => `- \`leerness ${c}\``).join('\n')}\n\n`;
-          if (allFlags.size)    aiReadBlock += `**🚩 신규 플래그**:\n${[...allFlags].map(f => `- \`${f}\``).join('\n')}\n\n`;
-          if (allFiles.size)    aiReadBlock += `**📄 신규/변경 파일** (반드시 재독):\n${[...allFiles].map(f => `- \`${f}\``).join('\n')}\n\n`;
-          aiReadBlock += `**버전별 헤드라인**:\n`;
-          for (const v of diff) {
+          aiReadBlock += `이 migrate는 ${fromV} → ${VERSION} 점프입니다 (${diff.length}개 릴리스). 메인 AI 에이전트는 다음을 인지하고 우선 활용:\n\n`;
+          if (allCommands.size) aiReadBlock += `**📌 신규 명령** (이전엔 없던 것, ${allCommands.size}개):\n${_capList(allCommands, 40, c => `- \`leerness ${c}\``)}\n\n`;
+          if (allFlags.size)    aiReadBlock += `**🚩 신규 플래그** (${allFlags.size}개):\n${_capList(allFlags, 40, f => `- \`${f}\``)}\n\n`;
+          if (allFiles.size)    aiReadBlock += `**📄 신규/변경 파일** (반드시 재독, ${allFiles.size}개):\n${_capList(allFiles, 40, f => `- \`${f}\``)}\n\n`;
+          const _hlCap = 30;
+          aiReadBlock += `**버전별 헤드라인** (최신 ${Math.min(_hlCap, diff.length)}/${diff.length}):\n`;
+          for (const v of diff.slice(0, _hlCap)) {
             const firstLine = (v.body.match(/^\*\*([^*]+)\*\*/) || [])[1]
                            || (v.body.split('\n').find(l => l.trim() && !l.startsWith('##')) || '').trim().slice(0, 120);
             aiReadBlock += `- ${v.version} — ${firstLine || '(no headline)'}\n`;
           }
+          if (diff.length > _hlCap) aiReadBlock += `- … 외 ${diff.length - _hlCap}개 버전 — \`leerness whats-new --from ${fromV} --limit N\` 으로 조회\n`;
           aiReadBlock += `\n**권장 행동**:\n1. 위 신규 명령을 \`--help\`로 확인\n2. \`AGENTS.md\` / \`CLAUDE.md\` / \`.harness/session-workflow.md\` 재독 (다음 \`leerness handoff\` 호출 시 자동 안내)\n3. 이전 청크의 기억 무효 — 새 도구 우선 시도\n4. 상세: \`leerness whats-new --from ${fromV}\`\n`;
         }
       }

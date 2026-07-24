@@ -7207,5 +7207,36 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.70 (성장 한계 클래스): migrate 보고서 상한 — 큰 버전 점프에서 ~88KB 폭주하던 AI must re-read 를 목록별 캡 + "외 N개" 정직 표기
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-migcap-')); _d.push(d);
+    // (검수 #2) --no-stale-check: 빈 캐시에서 npm 조회로 최대 8초 지연되던 것 차단
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    fs.writeFileSync(path.join(d, '.harness', 'HARNESS_VERSION'), '1.9.33');
+    cp.spawnSync(process.execPath, [CLI, 'migrate', d], { encoding: 'utf8', timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
+    const rep = fs.readFileSync(path.join(d, '.harness', 'migration-report.md'), 'utf8');
+    const sizeOk = rep.length < 30 * 1024;
+    // (검수 #3) 헤딩을 파싱해 shown/total 정합 + 헤드라인 행수 + 오버플로 수치 정확 일치로 단언 강화
+    const hm = rep.match(/최신 (\d+)\/(\d+)/);
+    const shown = hm ? parseInt(hm[1], 10) : 0, totalV = hm ? parseInt(hm[2], 10) : 0;
+    const hlRows = (rep.match(/^- 1\.\d+\.\d+ — /gm) || []).length;
+    const om = rep.match(/외 (\d+)개 버전/);
+    const capOk = shown === 30 && totalV > 30 && hlRows === 30 && !!om && parseInt(om[1], 10) === totalV - 30;
+    const escapeOk = rep.includes('whats-new --from 1.9.33');   // 전체가 필요한 소비자를 위한 탈출구
+    // (검수 #1) 광고된 --limit 이 텍스트 모드에서도 실제 동작
+    const limTxt = cp.spawnSync(process.execPath, [CLI, 'whats-new', '--from', '1.9.33', '--limit', '5'], { encoding: 'utf8', timeout: 20000, maxBuffer: 32 * 1024 * 1024 });
+    const limRows = (limTxt.stdout.match(/^ {2}• 1\.\d+\.\d+/gm) || []).length;
+    const limOk = limRows === 5 && /외 \d+개 버전|more version/.test(limTxt.stdout);
+    ok = sizeOk && capOk && escapeOk && limOk;
+    if (!ok) console.log(`   [migcap 디버그] size=${sizeOk}(${Math.round(rep.length / 1024)}KB) cap=${capOk}(${shown}/${totalV},rows=${hlRows}) escape=${escapeOk} lim=${limOk}(${limRows})`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.70) migrate 보고 상한: 88KB→<30KB + 외N개 정직 표기 + whats-new 탈출구' : '✗ migrate 보고 상한 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
