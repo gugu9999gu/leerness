@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.70';
+const VERSION = '1.36.71';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -15302,21 +15302,31 @@ function _collectWorkspacePaths(rootBase) {
   return Array.from(set);
 }
 
+// 1.36.71 (성장 한계 클래스 3, whats-new 1.36.69 규율): retro/insights --json 이 data.rows 에 전체 task row 를
+//   임베드해 프로젝트와 함께 무한 성장(72 task 에 이미 22KB — AI 소비자 컨텍스트 낭비). 기본 최신 30행 +
+//   rowsTotal/rowsShown/rowsTruncated 정직 표기, 전체는 --all, 개수는 --limit N. 집계 수치는 전량 기준 그대로.
+function _retroJsonData(agg) {
+  const rawLim = parseInt(arg('--limit', '30'), 10);
+  const lim = has('--all') ? agg.rows.length : (Number.isFinite(rawLim) && rawLim > 0 ? rawLim : 30);
+  const rows = agg.rows.slice(-lim);   // progress rows 는 오래된 것부터 — 최신 lim 개
+  return Object.assign({}, agg, { rows, rowsTotal: agg.rows.length, rowsShown: rows.length, rowsTruncated: rows.length < agg.rows.length });
+}
+
 function retroCmd(root) {
   root = absRoot(root);
-  // 1.9.15: --all-apps / --include 통합 모드
-  if (has('--all-apps') || arg('--include', null)) {
-    return _retroWorkspace(root);
-  }
   // 1.26.1 (13번째 외부리뷰 P2): 비숫자 --days → NaN → new Date(Invalid) throw 로 --json 소비자에 plain text 누출. 숫자 가드 + 음수/오버플로 클램프(insights/round-history 와 일관).
   let days = parseInt(arg('--days', '7'), 10);
   if (!Number.isFinite(days)) { failJson(has('--json'), 'invalid_arg', _uiLang(root) === 'en' ? '--days must be a number' : '--days 는 숫자여야 합니다'); return; }
   days = Math.max(0, Math.min(days, 36500));
   const cutoff = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
+  // 1.9.15: --all-apps / --include 통합 모드 — 1.36.71 (검수, 기존 버그): 워크스페이스 모드가 --days 를 조용히 무시하던 것, cutoff 전달
+  if (has('--all-apps') || arg('--include', null)) {
+    return _retroWorkspace(root, cutoff);
+  }
   const agg = _retroAggregate(root, cutoff);   // 1.36.38 (#2): 기간 필터 적용
   // 1.9.16: --json
   if (has('--json')) {
-    log(JSON.stringify({ project: path.basename(root), days, cutoff, summary: _retroOneLine(agg), data: agg }, null, 2));
+    log(JSON.stringify({ project: path.basename(root), days, cutoff, summary: _retroOneLine(agg), data: _retroJsonData(agg) }, null, 2));
     return;
   }
   log(`# 회고 (retro) — 최근 ${days}일 (since ${cutoff})`);
@@ -15365,14 +15375,14 @@ function retroCmd(root) {
 }
 
 // 1.9.15: 워크스페이스 통합 retro (다수 프로젝트 묶음 회고)
-function _retroWorkspace(rootBase) {
+function _retroWorkspace(rootBase, cutoff) {
   const paths = _collectWorkspacePaths(rootBase);
   if (!paths.length) return fail('대상 프로젝트 없음. --include <path1,path2> 또는 --all-apps 사용 필요.');
   // 1.9.16: --json
   if (has('--json')) {
     const projects = paths.map(p => {
-      const a = _retroAggregate(p);
-      return { project: path.basename(p), path: p, summary: _retroOneLine(a), data: a };
+      const a = _retroAggregate(p, cutoff);
+      return { project: path.basename(p), path: p, summary: _retroOneLine(a), data: _retroJsonData(a) };
     });
     const totals = projects.reduce((t, p) => ({
       tasks: t.tasks + p.data.totalTasks, done: t.done + p.data.doneCount,
@@ -15386,7 +15396,7 @@ function _retroWorkspace(rootBase) {
   log(`# Cross-project retro — ${paths.length}개 프로젝트`);
   const totals = { tasks: 0, done: 0, decisions: 0, skills: 0, totalSkillUsage: 0, totalOpts: 0, activeRules: 0, fixSig: 0, passSig: 0 };
   for (const p of paths) {
-    const agg = _retroAggregate(p);
+    const agg = _retroAggregate(p, cutoff);
     const name = path.basename(p);
     log(`\n## ${name}`);
     log(`  📈 ${_retroOneLine(agg)}`);
@@ -15421,7 +15431,7 @@ function insightsCmd(root) {
   // 1.9.16: --json
   if (has('--json')) {
     const sc = readSessionCounter(root);
-    log(JSON.stringify({ project: path.basename(root), sessionCount: sc.count, lastCloseAt: sc.lastCloseAt, data: agg }, null, 2));
+    log(JSON.stringify({ project: path.basename(root), sessionCount: sc.count, lastCloseAt: sc.lastCloseAt, data: _retroJsonData(agg) }, null, 2));
     return;
   }
   const sc = readSessionCounter(root);
@@ -15463,7 +15473,7 @@ function _insightsWorkspace(rootBase) {
   if (!paths.length) return fail('대상 프로젝트 없음. --include 또는 --all-apps 사용.');
   // 1.9.16: --json
   if (has('--json')) {
-    const projects = paths.map(p => ({ project: path.basename(p), path: p, data: _retroAggregate(p) }));
+    const projects = paths.map(p => ({ project: path.basename(p), path: p, data: _retroJsonData(_retroAggregate(p)) }));
     log(JSON.stringify({ projects, projectCount: paths.length }, null, 2));
     return;
   }
@@ -18686,7 +18696,7 @@ function _mcpToCliArgs(name, args, targetPath) {
           case 'leerness_skill_info':      cliArgs = ['skill', 'info', args.id || '', '--path', targetPath, '--json']; break;
           case 'leerness_benchmark':       cliArgs = ['benchmark', targetPath, '--json', ...(args.scenario ? ['--scenario', args.scenario] : [])]; break;
           case 'leerness_lazy_detect':     cliArgs = ['lazy', 'detect', targetPath, '--json']; break;
-          case 'leerness_retro':           cliArgs = ['retro', targetPath, '--json', ...(args.days ? ['--days', String(args.days)] : []), ...(args.allApps ? ['--all-apps'] : [])]; break;
+          case 'leerness_retro':           cliArgs = ['retro', targetPath, '--json', ...(args.days ? ['--days', String(args.days)] : []), ...(args.allApps ? ['--all-apps'] : []), ...(args.all ? ['--all'] : []), ...(args.limit ? ['--limit', String(args.limit)] : [])]; break;   // 1.36.71 (검수): rows 상한 조절 인자 전달
           case 'leerness_task_add':        cliArgs = ['task', 'add', String(args.text || ''), '--path', targetPath, ...(args.status ? ['--status', args.status] : []), ...(args.evidence ? ['--evidence', args.evidence] : []), ...(args.nextAction ? ['--next', args.nextAction] : [])]; break;
           case 'leerness_task_update':     cliArgs = ['task', 'update', String(args.id || ''), '--path', targetPath, ...(args.status ? ['--status', args.status] : []), ...(args.evidence ? ['--evidence', args.evidence] : []), ...(args.nextAction ? ['--next', args.nextAction] : []), ...(args.note ? ['--note', args.note] : [])]; break;
           case 'leerness_task_drop':       cliArgs = ['task', 'drop', String(args.id || ''), '--path', targetPath, ...(args.reason ? ['--reason', args.reason] : [])]; break;
@@ -22829,7 +22839,7 @@ HANDOFF & SESSION
   handoff [path] [--compact] [--all-apps] [--json]  Session-start context in one call
   session close [path]            Closing report + auto handoff
   context [path] [--json]         Agent onboarding context
-  retro | insights [path] [--json]                Retrospective / cumulative stats
+  retro | insights [path] [--json] [--limit N|--all]   Retrospective / cumulative stats (JSON rows: newest 30 by default; rowsTotal = lifetime count, not the --days window)
 
 MEMORY (canonical JSON + markdown projections)
   task list|add|update|drop|fix-evidence|relink [args]

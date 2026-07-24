@@ -92,3 +92,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0069 | done | F15 tech-graph 정합 (1.36.67), F14 이연 | selftest 334, e2e 390/390, npm 게시, F14 롤백 사유 CHANGELOG 명시 | 다음 액션 작성 | 2026-07-22 |
 | T-0070 | done | F14 재구현 완결 (1.36.68) | 원인규명(jsonMode 전용 구간)→텍스트 구간 이동, 검수 --no-suggest 반영, selftest 334, e2e 391/391, npm 게시 | 다음 액션 작성 | 2026-07-22 |
 | T-0071 | done | whats-new 응답 상한 (1.36.69) | 804KB→30KB, MCP 계약 갱신, 검수 4건 반영, selftest 334, e2e 392/392, npm 게시 | 다음 액션 작성 | 2026-07-23 |
+| T-0072 | done | migrate 보고 상한 (1.36.70) | 88KB→13.5KB, --limit 텍스트 존중, 검수 3건 반영, selftest 334, e2e 393/393, npm 게시 | 다음 액션 작성 | 2026-07-24 |

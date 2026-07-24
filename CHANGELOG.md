@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.71 — 2026-07-24 — 성장 한계 클래스 3: retro/insights --json rows 상한 + 워크스페이스 --days 기존 버그 — R-0001 검수 14회전
+
+- **retro/insights --json 의 data.rows 전량 임베드**(무한 성장, 72 task 에 22KB)를 기본 최신 30행으로 상한 — `rowsTotal/rowsShown/rowsTruncated` 정직 표기, `--all/--limit N` 옵트인, **집계 수치(totalTasks 등)는 전량 기준 그대로**(수치 왜곡 없음). 4개 JSON 배출 지점(단일/워크스페이스 × retro/insights) 일괄. 실측 33KB → 14KB.
+- (검수 High) e2e 가 init 기본 T-0001 을 몰라 하드코딩 35 로 확정 실패할 케이스 — 기준선 유도 방식 + init/add exit 단언으로 교정(--force 가 init 실패를 가리던 문제도 제거).
+- (검수 Medium) MCP `leerness_retro` 에 `limit`/`all` 노출+전달 (whats-new 1.36.69 와 동일 계약 규율). insights 는 MCP 도구 자체가 없음(현행 유지).
+- (검수 Medium, **기존 버그**) 워크스페이스 retro(`--include/--all-apps`)가 `--days` 를 조용히 무시 — cutoff 를 `_retroWorkspace` 로 전달해 단일 모드와 일관(실측: days 0→fix 0 / 36500→fix 3 분리 확인).
+- (검수 Low) help 에 `[--limit N|--all]` + rowsTotal 의미(수명 전체, --days 창 아님) 명시.
+- 검증: selftest 334, e2e +1. codex 확인: 텍스트 모드 바이트 동일, data.rows 하위 소비자 없음, focusNext/집계 무변형.
+
 ## 1.36.70 — 2026-07-24 — 성장 한계 클래스 2: migrate 보고 상한 (88KB → 13.5KB) — R-0001 검수 13회전
 
 1.36.69 whats-new 상한과 동일 규율을 migrate 보고서의 "AI must re-read" 섹션에 적용. 큰 버전 점프(602 릴리스)에서 보고서가 ~88KB 로 폭주해 AI 컨텍스트를 태우던 것.

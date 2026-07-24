@@ -7238,5 +7238,37 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.71 (성장 한계 클래스 3): retro/insights --json data.rows 상한 — 전 task row 임베드로 무한 성장하던 것 (집계는 전량 기준 유지)
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-retrocap-')); _d.push(d);
+    const initR = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const R = (extra) => JSON.parse(cp.spawnSync(process.execPath, [CLI, ...extra, '--path', d, '--json'], { encoding: 'utf8', timeout: 20000, maxBuffer: 32 * 1024 * 1024 }).stdout);
+    // (검수 High) init 이 기본 T-0001 을 만들 수 있음 — 하드코딩 35 대신 기준선에서 유도 + exit 단언
+    const baseline = R(['retro', '--all']).data.rowsTotal;
+    let addFails = 0;
+    for (let i = 1; i <= 35; i++) { const a = cp.spawnSync(process.execPath, [CLI, 'task', 'add', `t${i}`, '--path', d], { encoding: 'utf8', timeout: 15000 }); if (a.status !== 0) addFails++; }
+    const expTotal = baseline + 35;
+    const r = R(['retro']);
+    const retroOk = initR.status === 0 && addFails === 0
+      && r.data.rowsShown === 30 && r.data.rowsTotal === expTotal && r.data.rowsTruncated === true
+      && r.data.rows.length === 30 && r.data.rows[29].request === 't35'   // 최신 유지 (오래된 것부터 잘림)
+      && r.data.totalTasks === expTotal;                                  // 집계는 전량 기준
+    const rAll = R(['retro', '--all']);
+    const allOk = rAll.data.rowsShown === expTotal && rAll.data.rowsTruncated === false;
+    const rLim = R(['retro', '--limit', '5']);
+    const limOk = rLim.data.rowsShown === 5 && rLim.data.rows[4].request === 't35';
+    const ins = R(['insights']);
+    const insOk = ins.data.rowsShown === 30 && ins.data.rowsTotal === expTotal;
+    ok = retroOk && allOk && limOk && insOk;
+    if (!ok) console.log(`   [retrocap 디버그] retro=${retroOk}(exp=${expTotal},got=${r.data.rowsTotal},addFail=${addFails}) all=${allOk} lim=${limOk} ins=${insOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.71) retro/insights --json rows 상한 30 + 최신 유지 + 집계 전량 기준 + --all/--limit' : '✗ retro/insights rows 상한 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
