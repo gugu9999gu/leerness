@@ -7298,5 +7298,44 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.73 (8차 헌트 F12/F9 종결): skills-lock = 디스크 실재 + KO-잔존 이월 안내
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f12-')); _d.push(d);
+    // (검수 #3) exit 단언 + 정렬 집합 정확 비교 — 카운트만 비교하면 2차 init 실패를 1차 결과가 가렸다
+    const i1 = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'en', '--skills', 'all', '--no-stale-check', '--no-env'], { encoding: 'utf8', timeout: 40000 });
+    const i2 = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'en', '--skills', 'recommended', '--no-stale-check', '--no-env'], { encoding: 'utf8', timeout: 40000 });
+    const dirSet = fs.readdirSync(path.join(d, '.harness', 'skills'), { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name).sort();
+    const lockSet = Object.keys(JSON.parse(fs.readFileSync(path.join(d, '.harness', 'skills-lock.json'), 'utf8')).installedSkills).sort();
+    const f12Ok = i1.status === 0 && i2.status === 0 && dirSet.length > 5 && JSON.stringify(dirSet) === JSON.stringify(lockSet);
+    // F9: 실 CLI migrate 경유 — 구판 KO canonical 을 en 프로젝트 CLAUDE.md 에 심고 migrate
+    const d9 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f9-')); _d.push(d9);
+    const i3 = cp.spawnSync(process.execPath, [CLI, 'init', d9, '--yes', '--language', 'en', '--no-stale-check', '--no-env'], { encoding: 'utf8', timeout: 40000 });
+    const cl = path.join(d9, 'CLAUDE.md');
+    const ko = Array.from({ length: 15 }, (_, i) => '한국어 구판 템플릿 라인 ' + i).join('\n');
+    fs.appendFileSync(cl, '\n' + ko + '\nMY_CUSTOM_KEEP_42\n');
+    fs.writeFileSync(path.join(d9, '.harness', 'HARNESS_VERSION'), '1.36.0');
+    const mg = cp.spawnSync(process.execPath, [CLI, 'migrate', d9], { encoding: 'utf8', timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
+    const after = fs.readFileSync(cl, 'utf8');
+    const mg2 = cp.spawnSync(process.execPath, [CLI, 'migrate', d9], { encoding: 'utf8', timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
+    const after2 = fs.readFileSync(cl, 'utf8');
+    const f9Ok = i3.status === 0 && mg.status === 0 && mg2.status === 0
+      && after.includes('Korean lines were preserved')                    // 실 파일에 안내
+      && after.includes('MY_CUSTOM_KEEP_42')                              // 커스텀 무손실
+      && (after2.match(/Korean lines were preserved/g) || []).length === 1;   // 재migrate 멱등
+    // (검수 #2 회귀) 같은 접두의 사용자 커스텀 라인은 생존해야
+    const m = require(path.join(path.dirname(CLI), '..', 'lib', 'pure-utils.js'));
+    const userLine = '> ⚠ 10 Korean lines were preserved for localization QA.';
+    const surv = m._managedMerge('CLAUDE.md', '# N\n', '# O\n' + userLine, 'a', null, { lang: 'en' }).includes(userLine);
+    ok = f12Ok && f9Ok && surv;
+    if (!ok) console.log(`   [f12/f9 디버그] f12=${f12Ok}(${dirSet.length}/${lockSet.length}) f9=${f9Ok}(mg=${mg.status}) surv=${surv}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.73) F12 skills-lock=디스크 실재 + F9 KO-잔존 이월 안내(멱등·무손실·소수 무경고)' : '✗ F12/F9 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

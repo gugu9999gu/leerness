@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.72';
+const VERSION = '1.36.73';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -525,9 +525,21 @@ function mergeReadmeSection(existing, block) {
   return _mergeReadmeSection(existing, block, README_START, README_END);
 }
 
-function skillLock(skills) {
+function skillLock(skills, root) {
+  // 1.36.73 (8차 헌트 F12): 락은 "요청 집합"이 아니라 디스크 실재를 기록 — `--skills all` 후 `recommended` 재init 시
+  //   9개 디렉토리가 남는데 락은 5개만 주장하던 불일치. 기존 설치 디렉토리(카탈로그 내장분)와 합집합.
+  //   스킬 제거는 하지 않음(비파괴 원칙 — 사용자가 쓰고 있을 수 있다).
+  const set = new Set(skills);
+  try {
+    if (root) {
+      const dir = path.join(root, '.harness', 'skills');
+      if (exists(dir)) for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory() && skillCatalog[e.name]) set.add(e.name);
+      }
+    }
+  } catch {}
   const data = { leernessVersion: VERSION, updatedAt: now(), installedSkills: {} };
-  for (const s of skills) data.installedSkills[s] = skillCatalog[s] || { version: 'unknown' };
+  for (const s of [...set].sort()) data.installedSkills[s] = skillCatalog[s] || { version: 'unknown' };   // (검수 #4) 정렬 직렬화 — 동일 멤버십이면 바이트 동일(no-op 보존)
   return JSON.stringify(data, null, 2) + '\n';
 }
 
@@ -543,7 +555,7 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
     '.harness/HARNESS_VERSION': VERSION + '\n',
     '.harness/LANGUAGE': lang + '\n',
     '.harness/manifest.json': JSON.stringify({ project, leernessVersion: VERSION, language: lang, installedAt: now(), minimal: !!opts.minimal }, null, 2) + '\n',
-    '.harness/skills-lock.json': skillLock(selectedSkills),
+    '.harness/skills-lock.json': skillLock(selectedSkills, root),
     '.harness/project-brief.md': fm('project-brief', ['프로젝트 목적 확인','신규 기능 판단','계획 수립'], ['프로젝트 목적 변경','사용자/범위 변경'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- 이 프로젝트의 목적을 실제 내용으로 업데이트하세요.\n\n## Users\n-\n\n## Success Criteria\n-\n`),
     '.harness/plan.md': fm('plan', ['작업 시작 전','새 요청 접수','범위 변경','신규 프로젝트 감지'], ['계획 추가/수정/드랍','milestone 변경','목표 변경'], `# Plan\n\n## Goal\n- 사용자 목적을 기준으로 전체 계획을 유지합니다.\n\n## Scope\n- 포함 범위를 기록합니다.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. 프로젝트 계획 정리\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] project-brief.md를 실제 프로젝트 목적에 맞게 작성\n- [ ] context-map.md를 실제 파일 구조에 맞게 작성\n`),
     '.harness/progress-tracker.md': _canonicalProgressHeader(lang) + '\n',  // 1.9.293: _canonicalProgressHeader 단일 출처 · 1.36.63: lang 전달
