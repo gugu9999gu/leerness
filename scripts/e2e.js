@@ -7412,5 +7412,62 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.75 (UR-0066): 디자인 시안 워크플로 — preview mockup 스캐폴드 + 덮어쓰기 보호 + XSS 이스케이프 + 디자인 감지 + --mockup 첨부
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ur66-')); _d.push(d);
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const P = (a) => cp.spawnSync(process.execPath, [CLI, 'preview', ...a, '--path', d], { encoding: 'utf8', timeout: 20000 });
+    // 디자인 작업 감지 힌트
+    const add = P(['add', '신규 랜딩 페이지 제작', '--design', '히어로+3단', '--features', '히어로,FAQ']);
+    const detectOk = add.status === 0 && /preview mockup P-0001/.test(add.stdout);
+    // 스캐폴드 생성 + 스토어 기록
+    const mk = P(['mockup', 'P-0001']);
+    const mkFile = path.join(d, '.harness', 'previews', 'P-0001-mockup.html');
+    const html = fs.readFileSync(mkFile, 'utf8');
+    const mkOk = mk.status === 0 && html.includes('신규 랜딩 페이지 제작') && html.includes('leerness:mockup P-0001');
+    let showOk = false;
+    try { showOk = JSON.parse(P(['show', 'P-0001', '--json']).stdout).mockupPath === '.harness/previews/P-0001-mockup.html'; } catch {}
+    // 재실행은 AI 가 채운 시안을 보호 (--force 로만 재생성)
+    fs.appendFileSync(mkFile, '<!-- AI-FILLED -->');
+    const protectOk = P(['mockup', 'P-0001']).status === 0 && fs.readFileSync(mkFile, 'utf8').includes('AI-FILLED')
+      && !(P(['mockup', 'P-0001', '--force']).status !== 0) && !fs.readFileSync(mkFile, 'utf8').includes('AI-FILLED');
+    // XSS: 제목의 스크립트가 시안에 이스케이프
+    P(['add', '<script>alert(1)</script> 페이지', '--design', 'x']);
+    P(['mockup', 'P-0002']);
+    const xssOk = !fs.readFileSync(path.join(d, '.harness', 'previews', 'P-0002-mockup.html'), 'utf8').includes('<script>alert');
+    // --mockup 첨부 (존재 검증 포함)
+    fs.writeFileSync(path.join(d, 'my-mockup.html'), '<h1>시안</h1>');
+    let attachOk = false;
+    // (검수 #2) --mockup 값이 제목에 흡수되지 않아야
+    try { const j = JSON.parse(P(['add', '첨부형 페이지', '--mockup', 'my-mockup.html', '--json']).stdout); attachOk = j.mockupPath === 'my-mockup.html' && j.title === '첨부형 페이지'; } catch {}
+    const missOk = P(['add', '없는 첨부', '--mockup', 'no-such.html']).status === 1;
+    // (검수 #3) 디렉토리·루트 밖 첨부 거부
+    fs.mkdirSync(path.join(d, 'adir'), { recursive: true });
+    const dirOk = P(['add', 'd-dir', '--mockup', 'adir']).status === 1;
+    const outFile = path.join(path.dirname(d), `ur66-out-${path.basename(d)}.html`);
+    fs.writeFileSync(outFile, '<h1>o</h1>'); _d.push(outFile.replace(/\.html$/, '')); // rm 은 파일에도 동작(force)
+    const outOk = P(['add', 'd-out', '--mockup', outFile]).status === 1;
+    try { fs.rmSync(outFile, { force: true }); } catch {}
+    // (검수 High) 조작된 id 는 previews 디렉토리 밖 쓰기 불가
+    const evil = path.join(d, '.harness', 'previews.json');
+    const saved = fs.readFileSync(evil, 'utf8');
+    fs.writeFileSync(evil, JSON.stringify([{ id: '..\\..\\owned', title: 'x', status: 'proposed' }]));
+    const evilOk = cp.spawnSync(process.execPath, [CLI, 'preview', 'mockup', '..\\..\\owned', '--path', d], { encoding: 'utf8', timeout: 20000 }).status === 1
+      && !fs.existsSync(path.join(d, '..', 'owned-mockup.html'));
+    fs.writeFileSync(evil, saved);
+    // (검수 #5) 승인 후 mockup 거부
+    P(['approve', 'P-0001']);
+    const apprOk = P(['mockup', 'P-0001', '--force']).status === 1;
+    ok = detectOk && mkOk && showOk && protectOk && xssOk && attachOk && missOk && dirOk && outOk && evilOk && apprOk;
+    if (!ok) console.log(`   [ur66 디버그] detect=${detectOk} mk=${mkOk} show=${showOk} protect=${protectOk} xss=${xssOk} attach=${attachOk} miss=${missOk} dir=${dirOk} out=${outOk} evil=${evilOk} appr=${apprOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.75) UR-0066: preview mockup 시안(스캐폴드·보호·XSS·감지힌트·--mockup 첨부)' : '✗ UR-0066 시안 워크플로 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
