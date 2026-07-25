@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.76 — 2026-07-25 — 9차 헌트 이월 3건 종결 (P1 1·P2 2) — 헌트 8/8 전건 처리
+
+- **P1 (#3) 손상 아카이브 복원 거부**: 잘린 UTF-8 아카이브가 U+FFFD 를 품은 채 "정상 복원"돼 손상 데이터가 active 로 유입되고 아카이브 원본이 소비되던 것(codex 정확 재현으로 확정 — 지난 라운드 제 절단 변형은 미재현이라 이월했었다). 치환문자 감지 시 복원 중단·아카이브 무변경.
+- **P2 (#2) MCP read-only 가 대상을 변형**: ① 텔레메트리가 존재하지 않는 대상까지 디렉토리·usage-stats 를 생성 → 초기화된 하네스에만 기록. ② read-only 선언 `leerness_env_detect` 가 environment.json 을 기록 → MCP 경로는 `--no-write`(CLI 직접 호출은 종전대로 persist).
+- **P2 (#8) 긴/이상 URL 파생 id**: 300자 호스트·IPv6 가 raw ENOENT 로 터지던 것 — 호스트 슬러그화 + 길이 상한 80(초과 시 절단+짧은 해시). 정상 id 는 종전과 동일(문서화 예시 무변).
+- **(R-0001 검수 19회전, read-only 도구 59종 전수 스윕)**: (P1) **read-only 로 오선언된 쓰기 도구 9종** — handoff(last-handoff/tech-profile)·session_close(6파일)·skill_match·lsp·review_request·pre_wake_audit·audit(fix)·slash_commands 를 `safe-write` 로, task_export(--to 임의 경로)는 `project-write` 로 재선언 — enforce 정책이 이제 실제로 막는다. (#2) U+FFFD 판정을 **원시 바이트 fatal decode** 로 교체 — 사용자가 정당하게 붙여넣은 유효 U+FFFD 문자는 복원 가능(오탐 제거), malformed 바이트만 거부. (#3) 절단 해시 시드에 name 포함 — 같은 긴 URL·다른 name 이 같은 id 로 붕괴해 덮어쓰던 것. (#4) 충돌 접미사 후에도 상한 80 유지(단일 캡 함수). (Low) Windows 예약 이름(con 등) 회피.
+- 무회귀 실측: 정상 아카이브 복원·유효 U+FFFD 복원·초기화된 하네스 텔레메트리·CLI env persist·기존 id 형식.
+- 검증: selftest 334(티어 단언 신분류로 갱신), e2e +1(7 단언). 9차 헌트 8건 전건 처리 완료.
+
 ## 1.36.75 — 2026-07-25 — UR-0066: 디자인 시안 우선 워크플로 (preview mockup) — R-0001 검수 18회전
 
 사용자 요청: 웹페이지/디자인 작업은 코드 구현 전에 디자인 시안을 먼저 제시하고 수정/승인을 질문으로 받도록.

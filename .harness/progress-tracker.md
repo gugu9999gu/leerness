@@ -97,3 +97,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0074 | done | task list 상한 + lint F16 (1.36.72) | 상한 100+MCP 계약, lint 거짓 PASS 차단, 검수 15회전, selftest 334, e2e 395/395, npm 게시 | 다음 액션 작성 | 2026-07-25 |
 | T-0075 | done | 8차 헌트 종결 F12+F9 (1.36.73) | 16/16 전건, 검수 16회전 4건 반영, selftest 334, e2e 396/396, npm 게시 | 다음 액션 작성 | 2026-07-25 |
 | T-0076 | done | 9차 헌트 6건+검수 2건 (1.36.74) | state fail-closed, restore 정체성 판정, skeleton 충돌, MCP EOF, selftest 334, e2e 397/397, npm 게시 | 다음 액션 작성 | 2026-07-25 |
+| T-0077 | done | UR-0066 디자인 시안 워크플로 (1.36.75) | preview mockup+--mockup+AGENTS 계약, 검수 7건, selftest 334, e2e 398/398, npm 게시 | 다음 액션 작성 | 2026-07-25 |

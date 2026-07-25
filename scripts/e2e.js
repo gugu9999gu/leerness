@@ -3378,9 +3378,12 @@ total++;
     // provider_add: regex 는 read-only(아래 정책 통과 가능) 인데 메타데이터 safe-write → read-only enforce 에서 차단되어야
     const pa = callMcp('leerness_provider_add', { path: pDir, id: 'x', cmd: 'y' });
     const blocked = pa && pa.isError === true && /정책 차단/.test(pa.content[0].text);
-    // handoff: read-only → 허용
+    // 1.36.76 (검수 P1): handoff 는 last-handoff/tech-profile 을 쓰므로 safe-write 로 재분류 — read-only enforce 에서 차단되어야
     const hd = callMcp('leerness_handoff', { path: pDir });
-    const allowed = hd && hd.isError !== true;
+    const handoffBlocked = hd && hd.isError === true && /정책 차단/.test(hd.content[0].text);
+    // 진짜 read-only 도구(drift_check)는 허용
+    const dc = callMcp('leerness_drift_check', { path: pDir });
+    const allowed = handoffBlocked && dc && dc.isError !== true;
     // 모든 도구 유효 tier
     const T = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools.js'));
     const tierOk = T.every(t => typeof t.requiredTier === 'string' && t.requiredTier.length > 0);
@@ -7466,6 +7469,45 @@ total++;
     if (!ok) console.log(`   [ur66 디버그] detect=${detectOk} mk=${mkOk} show=${showOk} protect=${protectOk} xss=${xssOk} attach=${attachOk} miss=${missOk} dir=${dirOk} out=${outOk} evil=${evilOk} appr=${apprOk}`);
   } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? '✓ B(1.36.75) UR-0066: preview mockup 시안(스캐폴드·보호·XSS·감지힌트·--mockup 첨부)' : '✗ UR-0066 시안 워크플로 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.76 (9차 헌트 이월 3건 종결): 손상 아카이브 복원 거부 · MCP read-only 무변형 · 긴 파생 id 안전화
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    // #3 U+FFFD 아카이브 → 복원 거부 + 아카이브 무변경
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9x3-')); _d.push(d);
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const ap = path.join(d, '.harness', 'decisions.archive.md');
+    const bytes = Buffer.from('# Decisions archive\n\n## 제거 2026-07-25 (target: "Trunc")\n\n### 2026-07-25 — Trunc\n- Decision: 데이터', 'utf8');
+    fs.writeFileSync(ap, bytes.slice(0, bytes.length - 1));
+    const before = fs.readFileSync(ap);
+    const rr = cp.spawnSync(process.execPath, [CLI, 'memory', 'restore', 'decisions', 'Trunc', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const truncOk = rr.status === 1 && before.equals(fs.readFileSync(ap));
+    // #2a 없는 대상에 read-only MCP 호출 → 디렉토리·텔레메트리 미생성 / 초기화된 하네스엔 기록 유지
+    const ghost = path.join(d, 'no-such-target');
+    cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_state_show', arguments: { path: ghost } } }) + '\n' });
+    const ghostOk = !fs.existsSync(ghost);
+    cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'leerness_pulse', arguments: { path: d } } }) + '\n' });
+    const statsOk = fs.existsSync(path.join(d, '.harness', 'cache', 'usage-stats.json'));
+    // #2b MCP env_detect 는 environment.json 을 쓰지 않음 / CLI 직접 호출은 persist
+    fs.rmSync(path.join(d, '.harness', 'environment.json'), { force: true });
+    const envResp = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'leerness_env_detect', arguments: { path: d } } }) + '\n' });
+    const noWriteOk = /snapshot/.test(envResp.stdout) && !fs.existsSync(path.join(d, '.harness', 'environment.json'));
+    cp.spawnSync(process.execPath, [CLI, 'env', 'detect', d, '--json'], { encoding: 'utf8', timeout: 20000 });
+    const cliPersistOk = fs.existsSync(path.join(d, '.harness', 'environment.json'));
+    // #8 긴/이상 URL 파생 id — raw ENOENT 없이 저장, 정상 id 는 종전과 동일
+    const A = (u) => cp.spawnSync(process.execPath, [CLI, 'api-skill', 'add', u, '--skeleton', '--no-crawl', '--path', d, '--json'], { encoding: 'utf8', timeout: 25000 });
+    let longOk = false, normOk = false;
+    try { const j = JSON.parse(A('ftp://' + 'a'.repeat(300) + '.test/docs').stdout); longOk = j.ok === true && j.id.length <= 80; } catch {}
+    try { normOk = JSON.parse(A('https://developers.coupangcorp.com/articles/360033877853').stdout).id === 'developers-coupangcorp-articles-360033877853'; } catch {}
+    ok = truncOk && ghostOk && statsOk && noWriteOk && cliPersistOk && longOk && normOk;
+    if (!ok) console.log(`   [h9x 디버그] trunc=${truncOk} ghost=${ghostOk} stats=${statsOk} noWrite=${noWriteOk} cli=${cliPersistOk} long=${longOk} norm=${normOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.76) 9차 이월 종결: U+FFFD 아카이브 복원거부 · MCP read-only 무변형(대상/텔레메트리/env) · 긴 id 안전화' : '✗ 9차 이월 수정 실패');
   if (!ok) failed++;
 }
 

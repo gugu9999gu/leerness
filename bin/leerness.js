@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.75';
+const VERSION = '1.36.76';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3204,7 +3204,7 @@ function _selfTestCases() {
     { name: 'writeUtf8: 원자적 쓰기(temp→rename) 손상방지 행위 (UR-0038 외부리뷰 / CV-5 행위화 1.9.366)', run: () => { if (typeof writeUtf8 !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wu_')); try { const f = path.join(tmp, 'sub', 'a.txt'); writeUtf8(f, '한글 UTF-8 내용'); const okContent = read(f) === '한글 UTF-8 내용'; const noTmpLeft = fs.readdirSync(path.dirname(f)).every(n => !n.includes('.tmp-')); return okContent && noTmpLeft; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: '_scrubTestEnv: npm test 시크릿 차단(_scrubEnv는 release 토큰 유지) (UR-0039 외부리뷰 1.9.299)', run: () => { const o = { N: process.env.NPM_TOKEN, L: process.env.LEERNESS_NPM_TOKEN }; process.env.NPM_TOKEN = 'sec1'; process.env.LEERNESS_NPM_TOKEN = 'sec2'; const base = _scrubEnv(); const test = _scrubTestEnv(); const r = base.NPM_TOKEN === 'sec1' && base.LEERNESS_NPM_TOKEN === 'sec2' && !test.NPM_TOKEN && !test.LEERNESS_NPM_TOKEN && !!test.PATH; if (o.N === undefined) delete process.env.NPM_TOKEN; else process.env.NPM_TOKEN = o.N; if (o.L === undefined) delete process.env.LEERNESS_NPM_TOKEN; else process.env.LEERNESS_NPM_TOKEN = o.L; return r; } },
     { name: 'shell 주입 표면 제거: fetchNpmLatest execFile+pkg검증 + runCommandSafe argList 인용 (UR-0040 외부리뷰 1.9.300)', run: () => { const src = read(__filename); const npmFix = /'view', pkg, 'version'/.test(src) && !/cp\.exec\(.npm view \$\{pkg\}/.test(src) && /패키지명 charset/.test(src) && !/cp\.execFile\('npm', \[[^\]]*\], \{ timeout: 12000, shell:/.test(src); const argFix = /argList\.map\(_shellQuoteArg\)\.join/.test(src); return npmFix && argFix && typeof _shellQuoteArg === 'function'; } },
-    { name: 'MCP requiredTier 메타데이터 + 정책 minTier 게이트 (UR-0041 외부리뷰 1.9.301)', run: () => { const T = require('../lib/mcp-tools'); const allValid = T.length >= 81 && T.every(t => PERMISSION_TIERS.includes(t.requiredTier)); const get = n => (T.find(t => t.name === n) || {}).requiredTier; const classOk = get('leerness_state_record') === 'safe-write' && get('leerness_provider_add') === 'safe-write' && get('leerness_web') === 'network' && get('leerness_handoff') === 'read-only' && get('leerness_audit') === 'read-only'; const src = read(__filename); const gateOk = /_tierRank\(minTier\) > _tierRank\(required\)/.test(src) && /_policyEnforce\(targetPath, cliArgs\.join\(' '\), _toolDef/.test(src); return allValid && classOk && gateOk; } },
+    { name: 'MCP requiredTier 메타데이터 + 정책 minTier 게이트 (UR-0041 외부리뷰 1.9.301)', run: () => { const T = require('../lib/mcp-tools'); const allValid = T.length >= 81 && T.every(t => PERMISSION_TIERS.includes(t.requiredTier)); const get = n => (T.find(t => t.name === n) || {}).requiredTier; const classOk = get('leerness_state_record') === 'safe-write' && get('leerness_provider_add') === 'safe-write' && get('leerness_web') === 'network' && get('leerness_handoff') === 'safe-write' && get('leerness_audit') === 'safe-write' && get('leerness_task_export') === 'project-write'; const src = read(__filename); const gateOk = /_tierRank\(minTier\) > _tierRank\(required\)/.test(src) && /_policyEnforce\(targetPath, cliArgs\.join\(' '\), _toolDef/.test(src); return allValid && classOk && gateOk; } },
     { name: 'verify-claim git diff 시맨틱 교차검증: _gitChangedFiles/_claimFileInGit + strict FAIL 통합 (UR-0042 외부리뷰 1.9.302)', run: () => { const fnOk = typeof _gitChangedFiles === 'function' && typeof _claimFileInGit === 'function'; const matchOk = _claimFileInGit('src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('./src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('other.js', new Set(['src/api.js'])) === false && _claimFileInGit('x', null) === null; const src = read(__filename); const wired = /git diff 교차검증/.test(src) && /\|\| !gitClaimOk/.test(src) && /_gitChangedFiles\(root\)/.test(src); return fnOk && matchOk && wired; } },
     { name: '_withLock/_updateRun: lost-update 락(O_EXCL+재진입) + 적용 (UR-0043 외부리뷰 1.9.303)', run: () => { const src = read(__filename); const fnOk = typeof _withLock === 'function' && typeof _sleepSyncMs === 'function' && typeof _updateRun === 'function'; const reentrant = /if \(_heldLocks\.has\(lockPath\)\) return fn\(\)/.test(src); const excl = /fs\.openSync\(lockPath, 'wx'\)/.test(src); const applied = /const id = _withLock\(progressPath\(root\)/.test(src) && /_updateRun\(root, curId/.test(src); return fnOk && reentrant && excl && applied; } },
     { name: 'lib/analyzers: 분석/검증 함수 4종 모듈 단일출처 분리 (UR-0025 1.9.304)', run: () => { const m = require('../lib/analyzers'); return m._evidenceQuality === _evidenceQuality && m._shellGuardAnalyze === _shellGuardAnalyze && m._parseEvidenceStats === _parseEvidenceStats && m._claimFileInGit === _claimFileInGit && !/function _evidenceQuality\(evidence\) \{/.test(read(__filename)) && !/function _shellGuardAnalyze\(cmd, ctx\) \{/.test(read(__filename)); } },
@@ -3316,7 +3316,7 @@ function _selfTestCases() {
       const guardOk = s.includes('function _assertStoreParsable') && s.includes("code: 'E_STORE_CORRUPT'")
         && s.includes('_guardStore(has(') && s.includes("_assertStoreParsable(teamsJsonPath")
         && s.includes("_assertStoreParsable(_platformConstraintsPath");
-      const hashOk = s.includes('function _shortHash') && s.includes("id = id + '-' + _shortHash(url)") && s.includes('urls:\\s*\\r?\\n');
+      const hashOk = s.includes('function _shortHash') && s.includes("id = _apiSkillIdCap(id + '-' + _shortHash(url), url, name)") && s.includes('urls:\\s*\\r?\\n');
       return transitiveOk && cycleSafe && aliasOk && guardOk && hashOk;
     } },
     { name: '반복 마이그레이션 커스텀 보존 (1.36.28, 사용자 보고): _managedMerge 라인-diff 이월 — 2번째부터 유실되던 CLAUDE/AGENTS 커스텀 지시 (행위검사)', run: () => {
@@ -5977,14 +5977,26 @@ function _shortHash(s) {
 function _apiSkillsDir(root) {
   return path.join(absRoot(root), '.harness', 'api-skills');
 }
+// 1.36.76 (검수 #3/#4/Low): id 최종 안전화 단일 지점 — 상한 80(초과 시 절단+해시), 해시 시드는 url+name 전체
+//   정체성(같은 URL·다른 name 이 같은 id 로 붕괴하던 것), Windows 예약 이름(con/prn/aux/nul/com1..9/lpt1..9) 회피.
+//   충돌 접미사(-hash) 추가 후에도 이 함수를 다시 거쳐 상한이 유지된다.
+function _apiSkillIdCap(id, url, name) {
+  const seed = String(url || '') + ' ' + String(name || '');
+  if (!id || id.length > 80) id = (id || 'api').slice(0, 72).replace(/-+$/, '') + '-' + _shortHash(seed);
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(id)) id = id + '-' + _shortHash(seed);
+  return id;
+}
 function _apiSkillId(url, name) {
   // 도메인 + path slug 로 id 생성. 예: developers.coupangcorp.com/articles/360033877853 → coupang-articles-360033877853
   try {
     const u = new URL(url);
-    const host = u.hostname.replace(/^www\./, '').split('.').slice(0, -1).join('-') || u.hostname;
+    // 1.36.76 (9차 헌트 #8): 파생 id 를 항상 안전한 파일명으로 — 긴 호스트(300자)·IPv6([::1])가
+    //   raw ENOENT 를 뱉던 것. 호스트도 슬러그화 + 전체 길이 상한(80) 초과 시 절단+짧은 해시로 유일성 유지.
+    const host = (u.hostname.replace(/^www\./, '').split('.').slice(0, -1).join('-') || u.hostname).replace(/[^a-z0-9가-힣\-_]+/gi, '-');
     const pathSlug = u.pathname.replace(/^\/+|\/+$/g, '').replace(/[^a-z0-9가-힣\-_]+/gi, '-').slice(-50);
     const base = `${host}-${pathSlug}`.replace(/-+/g, '-').replace(/^-|-$/g, '');
-    return (name ? base + '-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30) : base).replace(/-+/g, '-');
+    let id = (name ? base + '-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30) : base).replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return _apiSkillIdCap(id, url, name);
   } catch { return 'api-' + Date.now(); }
 }
 function _fetchUrl(url, opts = {}) {
@@ -6239,7 +6251,7 @@ async function apiSkillCmd(root, sub) {
         const existing = fs.readFileSync(_idFile(id), 'utf8');
         const um = existing.match(/^urls:\s*\r?\n\s*-\s*(\S.*)$/m);   // 'urls:' 블록의 첫 항목만 (--- 구분선 오매치 방지)
         const storedUrl = um ? um[1].trim() : '';
-        if (storedUrl && storedUrl !== url) id = id + '-' + _shortHash(url);
+        if (storedUrl && storedUrl !== url) id = _apiSkillIdCap(id + '-' + _shortHash(url), url, name);   // 1.36.76 (검수 #4): 접미 후에도 상한 80 유지
       }
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const md = _serializeAPISkill(id, skillName, [url], direction, doc);
@@ -6263,7 +6275,7 @@ async function apiSkillCmd(root, sub) {
           const existing = fs.readFileSync(_idFileS(id), 'utf8');
           const um = existing.match(/^urls:\s*\r?\n\s*-\s*(\S.*)$/m);
           const storedUrl = um ? um[1].trim() : '';
-          if (storedUrl && storedUrl !== url) id = id + '-' + _shortHash(url);
+          if (storedUrl && storedUrl !== url) id = _apiSkillIdCap(id + '-' + _shortHash(url), url, name);   // 1.36.76 (검수 #4): 접미 후에도 상한 80 유지
         }
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         const stub = {
@@ -9738,6 +9750,11 @@ function memoryRestoreCmd(root, surface, target) {
   const hd = path.join(root, '.harness');
   const archivePath = path.join(hd, `${surface}.archive.md`);
   if (!exists(archivePath)) return fail(`${surface}.archive.md 없음 — 복원할 항목 없음`);
+  // 1.36.76 (9차 헌트 #3 P1) → (검수 #2): 잘린/깨진 UTF-8 아카이브가 손상 데이터를 active 로 유입시키던 것.
+  //   판정은 "디코딩 결과에 U+FFFD 포함"이 아니라 **원시 바이트의 UTF-8 유효성**(fatal decode) — 사용자가 정당하게
+  //   붙여넣은 실제 U+FFFD 문자(유효 EF BF BD)는 통과하고, 진짜 malformed 바이트만 거부한다.
+  try { new TextDecoder('utf-8', { fatal: true }).decode(readBuf(archivePath)); }
+  catch { failJson(has('--json'), 'archive_corrupt', `${surface}.archive.md 의 UTF-8 바이트 손상 — 파일이 잘렸거나 인코딩 깨짐. 복원 중단(아카이브 무변경) — 원본 복구 후 재시도`); return; }
   const text = read(archivePath);
   // archive 헤더 (# X archive) 와 본문 분리
   const headerMatch = text.match(/^(# [^\n]*\n+)([\s\S]*)$/);
@@ -18037,6 +18054,9 @@ function _bumpUsage(root, cmdName) {
 // 1.9.70: MCP tools/call 자동 사용 통계 — 도구별 호출 카운트
 function _bumpMcpUsage(root, toolName) {
   try {
+    // 1.36.76 (9차 헌트 #2a): read-only 호출조차 텔레메트리가 대상 프로젝트에 디렉토리·파일을 만들었다
+    //   (존재하지 않는 대상까지 통째로 생성). 통계는 이미 초기화된 하네스에만 기록 — 읽기가 대상을 변형하지 않는다.
+    if (!exists(path.join(absRoot(root), '.harness'))) return;
     const stats = _readUsageStats(root);
     if (!stats.mcp) stats.mcp = { tools: {} };
     if (!stats.mcp.tools) stats.mcp.tools = {};
@@ -18810,7 +18830,7 @@ function _mcpToCliArgs(name, args, targetPath) {
             if (args.coChangesWith) cliArgs.push('--co-changes-with', String(args.coChangesWith));
             break;
           // 1.9.145: 실행 환경 자동 감지
-          case 'leerness_env_detect': cliArgs = ['env', 'detect', targetPath, '--json']; break;
+          case 'leerness_env_detect': cliArgs = ['env', 'detect', targetPath, '--json', '--no-write']; break;   // 1.36.76 (#2b): read-only 선언 도구는 environment.json 을 쓰지 않는다 (persist 는 CLI 직접 호출로)
           // 1.9.158: Provider Registry — 외부 AI 가 등록된 provider 회수
           case 'leerness_provider_list': cliArgs = ['provider', 'list', '--path', targetPath, '--json']; break;
           // 1.9.159: Provider Registry CRUD — 외부 AI 가 자가 확장
