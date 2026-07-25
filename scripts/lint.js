@@ -8,6 +8,11 @@ const path = require('path');
 const cp = require('child_process');
 
 const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));   // 테스트용 루트 오버라이드 허용
+// 1.36.72 (8차 헌트 F16): 존재하지 않는/빈 루트가 "0 js clean" 거짓 PASS 로 통과하던 것 — 명시 오류
+if (!fs.existsSync(ROOT) || !fs.statSync(ROOT).isDirectory()) {
+  console.log(`✗ lint: root not found — ${ROOT}`);
+  process.exit(1);
+}
 const TARGET_DIRS = ['bin', 'lib', 'scripts'];
 const failures = [];
 
@@ -26,6 +31,11 @@ function listFiles(dir, ext) {
 }
 
 const jsFiles = TARGET_DIRS.flatMap(d => listFiles(path.join(ROOT, d), '.js'));
+// 1.36.72 (F16): 대상 0건도 거짓 PASS — lint 가 아무것도 검사하지 않았다는 뜻이므로 실패
+if (!jsFiles.length) {
+  console.log(`✗ lint: no js files found under ${TARGET_DIRS.join('/')} in ${ROOT} — nothing was checked`);
+  process.exit(1);
+}
 
 // ① 구문 (node --check)
 for (const f of jsFiles) {

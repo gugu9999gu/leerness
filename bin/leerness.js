@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.71';
+const VERSION = '1.36.72';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -699,7 +699,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 - \`brainstorm\` 회수 범위에 3 archive 파일 (decisions/lessons/plan archive) 통합 — 과거 제거된 ideas 가 새 brainstorm 시 다시 후보로 노출. \`hits.archive\` 필드 + 복원 안내 라인.
 - \`session close\` 텍스트 모드에 archive 누적 라인 추가 — 마감 시점 DELETE 활동 가시화 (handoff 7번째 회수와 symmetric). archive 가시성 6 surface 완성.
 - \`brainstorm\` 텍스트 모드 lessonsExplicit / planMilestones display 추가 — 데이터 수집은 됐지만 display 가 누락돼 있던 gap 보완 fix.
-- \`leerness task list --json\` + MCP **41 도구** (\`leerness_task_list\`) — progress-tracker.md task 전체 JSON 조회 + \`--status\` 필터. Task surface CRUD MCP 완전 완성 (add/list/update/drop).
+- \`leerness task list --json\` + MCP **41 도구** (\`leerness_task_list\`) — progress-tracker.md task JSON 조회 + \`--status\` 필터 (1.36.72 부터 기본 최신 100행, 전체는 \`--all\`). Task surface CRUD MCP 완전 완성 (add/list/update/drop).
 - MCP **42 도구** (\`leerness_rule_remove\`) — rules.md 에서 특정 rule 제거 + archive 보존. **5 surface CRUD MCP 완전 완성** (task/decision/lesson/plan/rule 모두 add/list/delete MCP 노출).
 - MCP \`leerness_drift_check\` JSON 응답 fix — \`--json\` 플래그 자동 추가하여 외부 AI가 구조화된 drift 신호 회수 (score, level, signals[], healthy).
 - \`.harness/session-workflow.md\` 템플릿에 **🧠 Memory CRUD Quick Reference** 섹션 추가 — 5 surface × CRUD 매트릭스 + archive cycle 워크플로 가이드. 신규 \`init\` 워크스페이스 즉시 적용.
@@ -9349,11 +9349,18 @@ function taskList(root) {
   const statusFilter = arg('--status', '');
   const filtered = statusFilter ? rows.filter(r => r.status === statusFilter) : rows;
   if (has('--json')) {
+    // 1.36.72 (성장 한계 클래스 4, 1.36.69~71 규율): tasks 전량 임베드는 무제한 성장 — 기본 최신 100행 +
+    //   shown/truncated 정직 표기, --all/--limit 옵트인. total 은 필터 후 전량 그대로(수치 무왜곡).
+    const _rawLim = parseInt(arg('--limit', '100'), 10);
+    const _lim = has('--all') ? filtered.length : (Number.isFinite(_rawLim) && _rawLim > 0 ? _rawLim : 100);
+    const _shownRows = filtered.slice(-_lim);   // rows 는 오래된 것부터 — 최신 유지
     const payload = {
       version: VERSION,
       root: absRoot(root),
       total: filtered.length,
-      tasks: filtered.map(r => ({
+      shown: _shownRows.length,
+      truncated: _shownRows.length < filtered.length,
+      tasks: _shownRows.map(r => ({
         id: r.id,
         status: r.status,
         request: r.request,
@@ -18714,7 +18721,7 @@ function _mcpToCliArgs(name, args, targetPath) {
           case 'leerness_plan_remove':     cliArgs = ['plan', 'remove', String(args.target || ''), '--path', targetPath]; break;
           case 'leerness_memory_archive_list': cliArgs = ['memory', 'archive', 'list', '--path', targetPath, '--json', ...(args.surface ? ['--surface', args.surface] : []), ...(args.query ? ['--query', args.query] : [])]; break;
           case 'leerness_memory_restore':  cliArgs = ['memory', 'restore', String(args.surface || ''), String(args.target || ''), '--path', targetPath]; break;
-          case 'leerness_task_list':       cliArgs = ['task', 'list', '--path', targetPath, '--json', ...(args.status ? ['--status', args.status] : [])]; break;
+          case 'leerness_task_list':       cliArgs = ['task', 'list', '--path', targetPath, '--json', ...(args.status ? ['--status', args.status] : []), ...(args.all ? ['--all'] : []), ...(args.limit ? ['--limit', String(args.limit)] : [])]; break;   // 1.36.72: 상한 조절 인자 전달
           case 'leerness_rule_remove':     cliArgs = ['rule', 'remove', String(args.id || ''), '--path', targetPath]; break;
           // 1.9.141: Feature Causality Graph
           case 'leerness_feature_impact':  cliArgs = ['feature', 'impact', String(args.id || ''), '--path', targetPath, '--json']; break;

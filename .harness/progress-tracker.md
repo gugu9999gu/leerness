@@ -93,3 +93,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0070 | done | F14 재구현 완결 (1.36.68) | 원인규명(jsonMode 전용 구간)→텍스트 구간 이동, 검수 --no-suggest 반영, selftest 334, e2e 391/391, npm 게시 | 다음 액션 작성 | 2026-07-22 |
 | T-0071 | done | whats-new 응답 상한 (1.36.69) | 804KB→30KB, MCP 계약 갱신, 검수 4건 반영, selftest 334, e2e 392/392, npm 게시 | 다음 액션 작성 | 2026-07-23 |
 | T-0072 | done | migrate 보고 상한 (1.36.70) | 88KB→13.5KB, --limit 텍스트 존중, 검수 3건 반영, selftest 334, e2e 393/393, npm 게시 | 다음 액션 작성 | 2026-07-24 |
+| T-0073 | done | retro/insights rows 상한 + 워크스페이스 --days 버그 (1.36.71) | 33KB→14KB, MCP 계약, days cutoff 전달, 검수 4건, selftest 334, e2e 394/394, npm 게시 | 다음 액션 작성 | 2026-07-24 |

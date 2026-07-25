@@ -7270,5 +7270,33 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.72 (성장 한계 클래스 4): task list --json 상한 100 + lint 거짓 PASS(F16) 차단
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tlcap-')); _d.push(d);
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const R = (extra) => JSON.parse(cp.spawnSync(process.execPath, [CLI, 'task', 'list', '--path', d, '--json', ...extra], { encoding: 'utf8', timeout: 20000, maxBuffer: 32 * 1024 * 1024 }).stdout);
+    const baseline = R(['--all']).total;
+    for (let i = 1; i <= 105; i++) { const a = cp.spawnSync(process.execPath, [CLI, 'task', 'add', `x${i}`, '--path', d], { encoding: 'utf8', timeout: 15000 }); if (a.status !== 0) throw new Error('add fail'); }
+    const expTotal = baseline + 105;
+    const j = R([]);
+    const capOk = j.shown === 100 && j.total === expTotal && j.truncated === true && j.tasks.length === 100 && j.tasks[99].request === 'x105';
+    const allOk = R(['--all']).shown === expTotal;
+    const limOk = R(['--limit', '7']).tasks.length === 7;
+    // F16: lint 가 없는 루트/빈 루트에서 실패해야 함 (거짓 PASS 차단)
+    const LINT = path.join(path.dirname(CLI), '..', 'scripts', 'lint.js');
+    const missOk = cp.spawnSync(process.execPath, [LINT, path.join(d, 'no-such-dir')], { encoding: 'utf8', timeout: 20000 }).status === 1;
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lintempty-')); _d.push(emptyDir);
+    const emptyOk = cp.spawnSync(process.execPath, [LINT, emptyDir], { encoding: 'utf8', timeout: 20000 }).status === 1;
+    ok = capOk && allOk && limOk && missOk && emptyOk;
+    if (!ok) console.log(`   [tlcap 디버그] cap=${capOk}(${j.shown}/${j.total}) all=${allOk} lim=${limOk} lintMiss=${missOk} lintEmpty=${emptyOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.72) task list --json 상한 100 + --all/--limit + lint 거짓 PASS 차단(F16)' : '✗ task list 상한/lint F16 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

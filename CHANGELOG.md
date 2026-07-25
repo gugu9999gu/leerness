@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.36.72 — 2026-07-24 — 성장 한계 클래스 4(task list) + F16 lint 거짓 PASS 차단 — R-0001 검수 15회전
+
+- **task list --json 상한**: 기본 최신 100행 + `shown/truncated` 정직 표기(`total` 은 필터 후 전량), `--all/--limit N` 옵트인. MCP `leerness_task_list` 계약 동반 갱신(limit/all 노출+전달). 텍스트 모드 무변경(codex: HEAD 와 바이트 동일 확인).
+- **F16 (8차 헌트 이연분)**: lint 가 존재하지 않는 루트/빈 루트에서 `✓ 0 js clean` **거짓 PASS** — "아무것도 검사하지 않았다"는 명시 실패(exit 1)로 전환. 검증 도구가 무검사 통과 도장을 찍는 것은 핵심 철학 위반.
+- (검수 Low) README/내장 문서의 "전체 JSON 조회" 낡은 계약 서술 정합.
+- codex 실측: status 필터×캡 상호작용, 무효 limit 폴백, --all 우선, 최신 유지, 소비자 부재(tasks.length===total 가정 없음), lint 4개 부정 경로(missing/non-dir/empty/src-only) 전부 exit 1.
+- 검증: selftest 334, e2e +1. 8차 헌트 잔여는 이제 설계 판단 2건(F9/F12)만.
+
 ## 1.36.71 — 2026-07-24 — 성장 한계 클래스 3: retro/insights --json rows 상한 + 워크스페이스 --days 기존 버그 — R-0001 검수 14회전
 
 - **retro/insights --json 의 data.rows 전량 임베드**(무한 성장, 72 task 에 22KB)를 기본 최신 30행으로 상한 — `rowsTotal/rowsShown/rowsTruncated` 정직 표기, `--all/--limit N` 옵트인, **집계 수치(totalTasks 등)는 전량 기준 그대로**(수치 왜곡 없음). 4개 JSON 배출 지점(단일/워크스페이스 × retro/insights) 일괄. 실측 33KB → 14KB.
