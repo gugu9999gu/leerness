@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.73';
+const VERSION = '1.36.74';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -6094,7 +6094,9 @@ function _loadAPISkill(root, id) {
   // 1.12.5 (15th 버그헌트 P2, UR-0017): read()(BOM strip) + CRLF/CR 정규화 — 이전 raw readFileSync 는 CRLF 파일에서 '^---\n' 불일치로 frontmatter 전부 유실(1.9.408 SKILL.md 수정 누락분). 또 fallback 에 body 추가 → _matchAPISkills 의 s.body.slice 크래시 방지.
   const content = read(fp).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const fm = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!fm) return { id, content, urls: [], name: id, body: content };
+  // 1.36.74 (9차 헌트 #6 P2): frontmatter 가 깨진 파일(닫는 --- 누락 등)이 "URL 0개짜리 정상 스킬"로 조용히 강등돼
+  //   목록에 섞였다 — 손상 사실을 표시해 사용자가 고칠 수 있게(로드 자체는 유지, 비파괴).
+  if (!fm) return { id, content, urls: [], name: id, body: content, corrupt: true, corruptReason: 'frontmatter_unparsable' };
   const meta = {};
   fm[1].split('\n').forEach(l => {
     const m = l.match(/^(\w+):\s*(.*)$/);
@@ -6140,23 +6142,28 @@ async function apiSkillCmd(root, sub) {
   const dir = _apiSkillsDir(root);
   if (sub === 'list') {
     if (!fs.existsSync(dir)) {
-      if (has('--json')) { log(JSON.stringify({ skills: [] })); return; }
+      if (has('--json')) { log(JSON.stringify({ skills: [], corruptCount: 0 })); return; }   // (검수 Low) 빈 저장소도 동일 필드 형태
       log(dm(`(아직 API skill 없음 — leerness api-skill add <url> 으로 생성)`));
       return;
     }
     const skills = _listAPISkills(root);
+    const _corrupt = skills.filter(s => s.corrupt);   // 1.36.74 (#6): 손상 레코드를 정상처럼 보이게 두지 않는다
     if (has('--json')) {
-      log(JSON.stringify({ skills: skills.map(s => ({ id: s.id, name: s.name, urls: s.urls, captured_at: s.captured_at })) }, null, 2));
+      log(JSON.stringify({
+        skills: skills.map(s => ({ id: s.id, name: s.name, urls: s.urls, captured_at: s.captured_at, ...(s.corrupt ? { corrupt: true, corruptReason: s.corruptReason } : {}) })),
+        corruptCount: _corrupt.length
+      }, null, 2));
       return;
     }
     log(cy(`# leerness api-skill list (1.9.245, UR-0015)`));
     log('');
     if (skills.length === 0) { log(dm(`(없음)`)); return; }
     skills.forEach(s => {
-      log(`  • ${gr(s.id)} — ${s.name}`);
+      log(`  • ${gr(s.id)} — ${s.name}${s.corrupt ? yl('  ⚠ 손상(frontmatter 파싱 불가)') : ''}`);
       if (s.urls && s.urls.length) log(dm(`       ${s.urls[0]}${s.urls.length > 1 ? ` (+${s.urls.length - 1})` : ''}`));
       if (s.direction) log(dm(`       방향: ${s.direction.slice(0, 80)}`));
     });
+    if (_corrupt.length) log(yl(`  ⚠ 손상 ${_corrupt.length}건 — 해당 .md 의 frontmatter(--- 구분선)를 확인하세요`));
     return;
   }
   // 1.9.245: 위치 인자 robust 추출 — argv 에서 cmd/sub 뒤 첫 non-flag (flag value 도 skip)
@@ -6177,9 +6184,9 @@ async function apiSkillCmd(root, sub) {
   };
   if (sub === 'show') {
     const id = arg('--id') || _positionalAfterSub();
-    if (!id) { log(rd('id 필요: leerness api-skill show <id>')); process.exitCode = 1; return; }
+    if (!id) { failJson(has('--json'), 'missing_args', 'id 필요: leerness api-skill show <id>'); return; }   // 1.36.74: --json 에러 구조화
     const s = _loadAPISkill(root, id);
-    if (!s) { log(rd(`api-skill 없음: ${id}`)); process.exitCode = 1; return; }
+    if (!s) { failJson(has('--json'), 'not_found', `api-skill 없음: ${id}`); return; }
     if (has('--json')) { log(JSON.stringify(s, null, 2)); return; }
     log(fs.readFileSync(path.join(dir, id + '.md'), 'utf8'));
     return;
@@ -6198,23 +6205,28 @@ async function apiSkillCmd(root, sub) {
   }
   if (sub === 'drop') {
     const id = arg('--id') || _positionalAfterSub();
-    if (!id) { log(rd('id 필요: leerness api-skill drop <id>')); process.exitCode = 1; return; }
+    if (!id) { failJson(has('--json'), 'missing_args', 'id 필요: leerness api-skill drop <id>'); return; }
     const fp = path.join(dir, id + '.md');
-    if (!fs.existsSync(fp)) { log(rd(`없음: ${id}`)); process.exitCode = 1; return; }
+    if (!fs.existsSync(fp)) { failJson(has('--json'), 'not_found', `없음: ${id}`); return; }   // 1.36.74: --json 에러 구조화
     fs.unlinkSync(fp);
+    if (has('--json')) { log(JSON.stringify({ ok: true, dropped: id }, null, 2)); return; }
     log(gr(`✓ 삭제: ${id}`));
     return;
   }
   if (sub === 'add') {
+    // 1.36.74 (9차 헌트 자체관측): --json 인데 사람용 진행 로그/실패 메시지가 stdout 을 오염시켜 JSON 소비자(MCP/CI)가
+    //   파싱 불가 — 다른 표면에서 이미 고친 --json 계약 위반의 잔존 지점. 진행 로그 억제 + 실패도 구조화.
+    const _j = has('--json');
+    const _hlog = (s) => { if (!_j) log(s); };
     const url = arg('--url') || _positionalAfterSub();
-    if (!url) { log(rd('URL 필요: leerness api-skill add <url> [--direction "..."]')); process.exitCode = 1; return; }
+    if (!url) { failJson(_j, 'missing_args', 'URL 필요: leerness api-skill add <url> [--direction "..."]'); return; }
     const direction = arg('--direction', '');
     const name = arg('--name', '');
     const noCrawl = has('--no-crawl');
-    log(cy(`# leerness api-skill add (1.9.245, UR-0015)`));
-    log(`  URL: ${url}`);
-    if (direction) log(`  방향: ${direction}`);
-    log(dm(`  Fetch + crawl (depth=1, same-domain, max 10)...`));
+    _hlog(cy(`# leerness api-skill add (1.9.245, UR-0015)`));
+    _hlog(`  URL: ${url}`);
+    if (direction) _hlog(`  방향: ${direction}`);
+    _hlog(dm(`  Fetch + crawl (depth=1, same-domain, max 10)...`));
     try {
       const doc = await _collectAPIDoc(url, { direction, noCrawl });
       const skillName = name || doc.title || new URL(url).hostname;
@@ -6231,17 +6243,27 @@ async function apiSkillCmd(root, sub) {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const md = _serializeAPISkill(id, skillName, [url], direction, doc);
       fs.writeFileSync(path.join(dir, id + '.md'), md, 'utf8');
-      log(gr(`✓ 저장: .harness/api-skills/${id}.md`));
-      log(dm(`  title: ${doc.title || '(none)'}`));
-      log(dm(`  related links: ${(doc.related_links || []).length}`));
-      log(dm(`  text size: ${doc.text.length} chars`));
-      if (has('--json')) log(JSON.stringify({ id, name: skillName, url, related_count: (doc.related_links || []).length }, null, 2));
+      _hlog(gr(`✓ 저장: .harness/api-skills/${id}.md`));
+      _hlog(dm(`  title: ${doc.title || '(none)'}`));
+      _hlog(dm(`  related links: ${(doc.related_links || []).length}`));
+      _hlog(dm(`  text size: ${doc.text.length} chars`));
+      if (_j) log(JSON.stringify({ ok: true, id, name: skillName, url, related_count: (doc.related_links || []).length }, null, 2));
     } catch (e) {
-      log(rd(`✗ Fetch 실패: ${e.message}`));
+      _hlog(rd(`✗ Fetch 실패: ${e.message}`));
       // 1.9.245: --skeleton fallback — Cloudflare/WAF 차단된 URL 도 빈 .md 골격 생성 → 사용자가 수동 채움
       if (has('--skeleton') || /403|401|429/.test(e.message)) {
-        const skillName = name || new URL(url).hostname;
-        const id = _apiSkillId(url, name);
+        // 1.36.74 (9차 헌트 #5 P1): skeleton 폴백에 충돌 해소기가 없어 URL 이 다른데 slug 가 같으면 앞 항목을
+        //   통째로 덮어썼다(실측: alpha URL·direction 소실). fetch 경로(1.36.28 #4)와 동일 규칙 공유.
+        let skillName, id;
+        try { skillName = name || new URL(url).hostname; } catch { skillName = name || String(url).slice(0, 60); }
+        id = _apiSkillId(url, name);
+        const _idFileS = (i) => path.join(dir, i + '.md');
+        if (fs.existsSync(_idFileS(id))) {
+          const existing = fs.readFileSync(_idFileS(id), 'utf8');
+          const um = existing.match(/^urls:\s*\r?\n\s*-\s*(\S.*)$/m);
+          const storedUrl = um ? um[1].trim() : '';
+          if (storedUrl && storedUrl !== url) id = id + '-' + _shortHash(url);
+        }
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         const stub = {
           url, title: skillName, text: `(fetch 실패 — 사용자가 직접 ${url} 에서 내용을 복사해 채워주세요)`,
@@ -6249,11 +6271,12 @@ async function apiSkillCmd(root, sub) {
         };
         const md = _serializeAPISkill(id, skillName, [url], direction, stub);
         fs.writeFileSync(path.join(dir, id + '.md'), md, 'utf8');
-        log(yl(`⚠ 빈 골격 생성 (--skeleton fallback): .harness/api-skills/${id}.md`));
-        log(dm(`  → 직접 ${url} 내용을 복사해서 .md 파일에 채워넣어주세요`));
-        log(dm(`  → 이후 leerness handoff 가 매칭 시 참조됩니다`));
-        if (has('--json')) log(JSON.stringify({ id, skeleton: true, url, name: skillName }, null, 2));
+        _hlog(yl(`⚠ 빈 골격 생성 (--skeleton fallback): .harness/api-skills/${id}.md`));
+        _hlog(dm(`  → 직접 ${url} 내용을 복사해서 .md 파일에 채워넣어주세요`));
+        _hlog(dm(`  → 이후 leerness handoff 가 매칭 시 참조됩니다`));
+        if (_j) log(JSON.stringify({ ok: true, id, skeleton: true, url, name: skillName, fetchError: e.message }, null, 2));
       } else {
+        if (_j) log(JSON.stringify({ ok: false, code: 'fetch_failed', error: e.message, url }, null, 2));   // 실패도 구조화(종전: --json 에 사람용 텍스트만)
         process.exitCode = 1;
       }
     }
@@ -9744,6 +9767,39 @@ function memoryRestoreCmd(root, surface, target) {
   const activePath = surface === 'decisions' ? decisionsPath(root)
                     : surface === 'lessons'   ? lessonsPath(root)
                     : planPath(root);
+  // 1.36.74 (9차 헌트 #4 P1): 같은 항목이 이미 active 에 있으면 복원이 조용히 중복 레코드를 만들었다
+  //   (drop → 같은 제목 재생성 → restore = 동일 제목 2건, 어느 쪽이 진짜인지 불명). 충돌은 기본 거부하고
+  //   --force 로만 진행 — 복원은 "되살리기"지 "복제"가 아니다. archive 는 손대지 않으므로 재시도 가능.
+  if (!has('--force')) {
+    // 1.36.74 (검수 High-2 + Medium): 첫 줄 substring 비교는 (a) 날짜만 다른 논리적 중복을 놓치고
+    //   (b) 같은 날 저장된 무관한 lesson·'Deploy' vs 'Deploy v2' 를 오탐 차단했다(양쪽 실측).
+    //   표면별 "정체성"(decision=title, lesson=text, plan=제목)을 파싱해 정확 일치로만 판정.
+    const _activeNow = exists(activePath) ? read(activePath) : '';
+    const _identities = (mdText) => {
+      try {
+        if (surface === 'decisions') return new Set((_decisionsFromMd(mdText) || []).map(d => String(d.title || '').trim()).filter(Boolean));
+        if (surface === 'lessons') return new Set((_parseLessonEntries(mdText) || []).map(l => String(l.text || '').trim()).filter(Boolean));
+      } catch {}
+      // plan: '## M-XXXX 제목' 헤딩의 제목부 (M-ID 는 재발급될 수 있어 제목으로 판정)
+      const out = new Set();
+      for (const l of String(mdText).split('\n')) {
+        const m = l.match(/^##+\s*(?:M-\d+\s*)?(.+?)\s*$/);
+        if (m && m[1] && !/^제거 /.test(m[1])) out.add(m[1].trim());
+      }
+      return out;
+    };
+    const _activeIds = _identities(_activeNow);
+    const _dupes = [];
+    for (const blk of restoredBlocks) {
+      for (const id of _identities(blk)) if (_activeIds.has(id)) _dupes.push(id.slice(0, 70));
+    }
+    if (_dupes.length) {
+      failJson(has('--json'), 'restore_conflict',
+        `이미 active 에 동일 항목 존재 — 중복 생성 방지로 복원 거부 (${_dupes.length}건: ${_dupes.slice(0, 2).join(' · ')}). ` +
+        `archive 는 그대로 두었으니 active 쪽을 정리 후 재시도하거나, 의도한 중복이면 --force`);
+      return;
+    }
+  }
   // active 파일에 복귀 (헤더 보존)
   for (const blk of restoredBlocks) {
     append(activePath, '\n' + blk + '\n');
@@ -19057,6 +19113,17 @@ function mcpServeCmd(root) {
 
   // stdin JSON-RPC 한 줄 단위
   let buf = '';
+  // 1.36.74 (9차 헌트 #7): 한 줄 처리 로직을 함수로 — EOF 시 개행 없이 남은 마지막 요청이 조용히 유실되던 것
+  //   (실측: 개행 없는 ping 은 무응답 exit 0, 개행 있는 동일 요청은 정상 응답). 클라이언트가 flush 를 개행 없이 끝내면 요청 손실.
+  const _handleLine = (line) => {
+    if (!line) return;
+    // 1.36.39 (#3): 파싱과 핸들링 분리 — 핸들러 내부 예외가 -32700 "Parse error"(id null)로 오보되지 않게.
+    let req = null;
+    try { req = JSON.parse(line); }
+    catch (e) { send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error: ' + e.message } }); return; }
+    try { handleRequest(req); }
+    catch (e) { send({ jsonrpc: '2.0', id: (req && req.id != null) ? req.id : null, error: { code: -32603, message: 'Internal error: ' + e.message } }); }
+  };
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', chunk => {
     buf += chunk;
@@ -19064,16 +19131,15 @@ function mcpServeCmd(root) {
     while ((nl = buf.indexOf('\n')) !== -1) {
       const line = buf.slice(0, nl).trim();
       buf = buf.slice(nl + 1);
-      if (!line) continue;
-      // 1.36.39 (#3): 파싱과 핸들링 분리 — 핸들러 내부 예외가 -32700 "Parse error"(id null)로 오보되지 않게.
-      let req = null;
-      try { req = JSON.parse(line); }
-      catch (e) { send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error: ' + e.message } }); continue; }
-      try { handleRequest(req); }
-      catch (e) { send({ jsonrpc: '2.0', id: (req && req.id != null) ? req.id : null, error: { code: -32603, message: 'Internal error: ' + e.message } }); }
+      _handleLine(line);
     }
   });
-  process.stdin.on('end', () => process.exit(0));
+  process.stdin.on('end', () => {
+    const rest = buf.trim();
+    buf = '';
+    if (rest) _handleLine(rest);   // 개행 없이 끝난 마지막 요청도 처리
+    process.exit(0);
+  });
   // 인터럽트 처리
   process.on('SIGINT', () => process.exit(0));
   process.on('SIGTERM', () => process.exit(0));
@@ -20248,7 +20314,32 @@ function _loadLeernessState(root) {
   const f = path.join(_leernessStateDir(root), 'state.json');
   if (!exists(f)) return { schemaVersion: 1, project: detectProjectName(root), currentRunId: null, runCounter: 0, updatedAt: null };
   // 1.36.28 (#3): 손상 파일을 빈 상태로 오인하면 카운터가 0으로 리셋돼 run-0001 을 덮어쓴다(데이터 유실). 파싱 실패는 던진다.
-  try { return JSON.parse(read(f)); } catch { throw Object.assign(new Error(`.leerness/state.json 손상 — 덮어쓰기 거부: ${f} (복구/삭제 후 재시도)`), { code: 'E_STORE_CORRUPT', file: f }); }
+  let _st;
+  try { _st = JSON.parse(read(f)); } catch { throw Object.assign(new Error(`.leerness/state.json 손상 — 덮어쓰기 거부: ${f} (복구/삭제 후 재시도)`), { code: 'E_STORE_CORRUPT', file: f }); }
+  // 1.36.74 (9차 헌트 #1 P1): "파싱은 되지만 스키마 무효"(예: `{}`)가 위 가드를 통과해 runCounter 를 0 으로 되돌리고
+  //   기존 run-0001.json 을 덮어쓰던 것(실측: original-goal → replacement-goal). 형태 검증도 fail-closed.
+  //   단, runs 디렉토리가 비어 있으면(진짜 신규/빈 상태) 관대하게 기본값 — 없는 데이터를 지킬 필요는 없다.
+  const _shapeOk = _st && typeof _st === 'object' && !Array.isArray(_st)
+    && Number.isInteger(_st.runCounter) && _st.runCounter >= 0
+    && (_st.currentRunId === null || typeof _st.currentRunId === 'string');
+  // 디스크의 최대 run 번호 — 카운터의 진실성 대조 기준
+  let _maxRun = 0;
+  try {
+    for (const x of fs.readdirSync(path.join(_leernessStateDir(root), 'runs'))) {
+      const m = /^run-(\d+)\.json$/.exec(x);
+      if (m) _maxRun = Math.max(_maxRun, parseInt(m[1], 10));
+    }
+  } catch {}
+  if (!_shapeOk) {
+    if (_maxRun > 0) throw Object.assign(new Error(`.leerness/state.json 스키마 무효 — 덮어쓰기 거부: ${f} (runs/ 에 기존 기록 있음 · 복구/삭제 후 재시도)`), { code: 'E_STORE_CORRUPT', file: f });
+    return { schemaVersion: 1, project: detectProjectName(root), currentRunId: null, runCounter: 0, updatedAt: null };
+  }
+  // 1.36.74 (검수 High-1): 형태는 유효한데 값이 stale 한 카운터(runCounter < 실재 최대 run)도 다음 start 가
+  //   기존 run 파일을 덮어쓴다(실측 ORIGINAL→REPLACEMENT). 형태 검증만으론 부족 — 디스크 실재와 대조해 fail-closed.
+  if (_st.runCounter < _maxRun) {
+    throw Object.assign(new Error(`.leerness/state.json 카운터 불일치 — 덮어쓰기 거부: runCounter=${_st.runCounter} < 실재 run-${String(_maxRun).padStart(4, '0')} (${f} 복구 또는 runCounter 를 ${_maxRun} 이상으로 수정 후 재시도)`), { code: 'E_STORE_CORRUPT', file: f });
+  }
+  return _st;
 }
 function _saveLeernessState(root, state) {
   const dir = _leernessStateDir(root); mkdirp(dir);

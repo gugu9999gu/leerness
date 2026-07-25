@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.36.74 — 2026-07-25 — codex 9차 홀리스틱 헌트: 미점검 표면 6건 수정 (P1 3·P2 3)
+
+표면 회전 원칙에 따라 최근 라운드가 비추지 않은 사용자 데이터 표면(MCP 프로토콜·memory archive/restore·.leerness state·api-skill)을 헌트. 8건 보고 중 자체 재현 확정 6건 수정.
+
+- **P1 `.leerness/state.json` 스키마 무효 통과**: 파싱은 되지만 형태가 무효인 파일(`{}`)이 손상 가드를 통과해 runCounter 를 0 으로 되돌리고 **기존 run 을 덮어썼다**(실측 original-goal → replacement-goal). 형태 검증도 fail-closed — 단 runs/ 가 비어 있으면 관대(없는 데이터를 지킬 필요 없음).
+- **P1 memory restore 가 활성 중복 생성**: drop → 같은 제목 재생성 → restore 시 동일 제목 2건이 조용히 생겨 어느 쪽이 진짜인지 알 수 없었다. 충돌 기본 거부(`restore_conflict`) + `--force` 우회 — 복원은 되살리기지 복제가 아니다. archive 는 그대로 두어 재시도 가능.
+- **P1 api-skill skeleton 경로 id 충돌**: fetch 경로에만 있던 충돌 해소기가 skeleton 폴백엔 없어 URL 이 다른데 slug 가 같으면 앞 항목을 통째로 덮어썼다(alpha URL·방향 소실 실측). 동일 규칙 공유.
+- **P2 MCP 마지막 요청 유실**: 개행 없이 끝난 마지막 JSON-RPC 요청이 EOF 에서 조용히 버려졌다(실측: 무응답 exit 0). EOF 시 잔여 버퍼도 동일 경로로 처리.
+- **P2 손상 api-skill 이 정상처럼 노출**: frontmatter 깨진 파일이 "URL 0개 정상 스킬"로 강등돼 목록에 섞이던 것 — `corrupt`/`corruptCount` 표기 + 텍스트 경고(로드 자체는 유지, 비파괴).
+- **P2 `api-skill add --json` 계약 위반**(자체 관측): 사람용 진행 로그·실패 메시지가 stdout 을 오염시켜 JSON 소비자가 파싱 불가 — 진행 로그 억제 + 실패 구조화(`{ok:false, code:'fetch_failed'}`), drop/show 에러도 failJson 통일.
+- **(R-0001 검수 17회전이 제 수정의 불완전성 2건을 차단)**: ① state 형태 검증만으론 부족 — **형태는 유효하나 stale 한 runCounter**(0 < 실재 run-0001)가 여전히 기존 run 을 덮어썼다(실측). 디스크 최대 run 번호와 대조해 fail-closed. ② restore 충돌 판정이 "첫 줄 substring"이라 **날짜만 다른 논리적 중복은 통과**시키고 **같은 날 무관한 lesson·'Deploy' vs 'Deploy v2' 는 오탐 차단**했다(양쪽 실측) — 표면별 정체성(decision=title/lesson=text/plan=제목) 파싱 정확 일치로 교체. (검수 Low) 빈 api-skill 저장소도 `corruptCount` 동일 형태.
+- 미재현 이월: 잘린 UTF-8 아카이브 복원(#3)은 제 절단 변형에선 U+FFFD 미유입 — 정확한 바이트 조작 재현 후 별도 판단. MCP 티어/텔레메트리(#2)·긴 파생 id(#8)는 다음 라운드.
+- 정상 확인: MCP 잘못된 JSON(-32700)·미지 도구(-32601)·연속 요청 프레이밍·1MiB 라인, state 동시 8start/12record 무손실, 손상 state 파싱 실패 fail-closed.
+
 ## 1.36.73 — 2026-07-25 — 8차 헌트 완전 종결: F12 skills-lock 정합 + F9 설계 결정
 
 8차 홀리스틱 헌트(16건)의 마지막 설계 판단 2건을 결론 — 이로써 16/16 전건 처리 완료.

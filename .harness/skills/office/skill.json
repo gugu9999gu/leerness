@@ -1,6 +1,7 @@
 {
   "name": "office",
   "displayNameKo": "마이크로소프트 오피스 자동화 스킬 라이브러리",
+  "description": "문서 산출물이 필요할 때 사용 — Word/Excel/PowerPoint 파일을 만들거나 편집하거나 템플릿으로 문서를 뽑아야 할 때. Use when the task produces or edits Office documents.",
   "version": "1.0.0",
   "lastUpdated": "2026-05-08",
   "verification": {

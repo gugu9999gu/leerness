@@ -7337,5 +7337,80 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.74 (9차 헌트): state 스키마 fail-closed · restore 중복 거부 · api-skill skeleton 충돌 · MCP 마지막 줄 · 손상 표시 · --json 계약
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    // #1 파싱되지만 스키마 무효인 state.json → 기존 run 보호
+    const d1 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9s-')); _d.push(d1);
+    cp.spawnSync(process.execPath, [CLI, 'state', 'start', 'original-goal', '--path', d1, '--json'], { encoding: 'utf8', timeout: 30000 });
+    const runFile = path.join(d1, '.leerness', 'runs', 'run-0001.json');
+    const before = fs.readFileSync(runFile, 'utf8');
+    fs.writeFileSync(path.join(d1, '.leerness', 'state.json'), '{}\n');
+    const s2 = cp.spawnSync(process.execPath, [CLI, 'state', 'start', 'replacement-goal', '--path', d1, '--json'], { encoding: 'utf8', timeout: 30000 });
+    const stateOk = s2.status === 1 && fs.readFileSync(runFile, 'utf8') === before;
+    // 신규(빈 runs) 프로젝트에서는 관대 — 무효 state 가 있어도 정상 시작
+    const d1b = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9s2-')); _d.push(d1b);
+    fs.mkdirSync(path.join(d1b, '.leerness'), { recursive: true });
+    fs.writeFileSync(path.join(d1b, '.leerness', 'state.json'), '{}\n');
+    const freshOk = cp.spawnSync(process.execPath, [CLI, 'state', 'start', 'g', '--path', d1b, '--json'], { encoding: 'utf8', timeout: 30000 }).status === 0;
+    // #4 restore 충돌 거부 + 정상 복원 무회귀 + --force 우회
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9r-')); _d.push(d2);
+    cp.spawnSync(process.execPath, [CLI, 'init', d2, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const D = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d2], { encoding: 'utf8', timeout: 20000 });
+    D(['decision', 'add', 'Collision Decision', '--reason', 'archived-original']);
+    D(['decision', 'drop', 'Collision Decision']);
+    D(['decision', 'add', 'Collision Decision', '--reason', 'active-replacement']);
+    const conflict = D(['memory', 'restore', 'decisions', 'Collision Decision']);
+    const cnt = () => { try { return (JSON.parse(D(['decision', 'list', '--json']).stdout).decisions || []).filter(x => x.title === 'Collision Decision').length; } catch { return -1; } };
+    const restoreOk = conflict.status === 1 && cnt() === 1 && D(['memory', 'restore', 'decisions', 'Collision Decision', '--force']).status === 0 && cnt() === 2;
+    // (검수 High-1) 형태는 유효하나 stale 한 runCounter 도 기존 run 을 덮어쓰면 안 된다
+    const d1c = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9st-')); _d.push(d1c);
+    cp.spawnSync(process.execPath, [CLI, 'state', 'start', 'ORIGINAL', '--path', d1c, '--json'], { encoding: 'utf8', timeout: 30000 });
+    const rf1 = path.join(d1c, '.leerness', 'runs', 'run-0001.json');
+    const beforeStale = fs.readFileSync(rf1, 'utf8');
+    const stp = path.join(d1c, '.leerness', 'state.json');
+    const stj = JSON.parse(fs.readFileSync(stp, 'utf8')); stj.runCounter = 0; stj.currentRunId = null;
+    fs.writeFileSync(stp, JSON.stringify(stj, null, 2));
+    const staleR = cp.spawnSync(process.execPath, [CLI, 'state', 'start', 'REPLACEMENT', '--path', d1c, '--json'], { encoding: 'utf8', timeout: 30000 });
+    const staleOk = staleR.status === 1 && fs.readFileSync(rf1, 'utf8') === beforeStale;
+    // (검수 High-2) 날짜만 다른 논리적 중복도 차단 · (검수 Medium) 같은 날 무관한 항목은 오탐 없이 복원
+    const d2b = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9id-')); _d.push(d2b);
+    cp.spawnSync(process.execPath, [CLI, 'init', d2b, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const D2 = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d2b], { encoding: 'utf8', timeout: 20000 });
+    D2(['decision', 'add', 'Dup Title', '--reason', 'first']); D2(['decision', 'drop', 'Dup Title']);
+    const ap2 = path.join(d2b, '.harness', 'decisions.archive.md');
+    if (fs.existsSync(ap2)) fs.writeFileSync(ap2, fs.readFileSync(ap2, 'utf8').replace(/### \d{4}-\d{2}-\d{2}/g, '### 2020-01-01'));
+    D2(['decision', 'add', 'Dup Title', '--reason', 'second']);
+    const logicalOk = D2(['memory', 'restore', 'decisions', 'Dup Title']).status === 1;
+    D2(['lesson', 'save', 'AAA 무관한 교훈']); D2(['lesson', 'save', 'BBB 다른 교훈']); D2(['lesson', 'drop', 'AAA 무관한 교훈']);
+    const noFpOk = D2(['memory', 'restore', 'lessons', 'AAA']).status === 0;   // 같은 날 저장이어도 정당한 복원은 통과
+    // #5 skeleton 경로 id 충돌 → 양쪽 보존
+    const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9a-')); _d.push(d3);
+    const A = (u, dir) => cp.spawnSync(process.execPath, [CLI, 'api-skill', 'add', u, '--skeleton', '--no-crawl', '--direction', dir, '--path', d3, '--json'], { encoding: 'utf8', timeout: 25000 });
+    A('ftp://example.test/docs?alpha', 'alpha-direction'); A('ftp://example.test/docs?beta', 'beta-direction');
+    const askDir = path.join(d3, '.harness', 'api-skills');
+    const all = fs.existsSync(askDir) ? fs.readdirSync(askDir).map(f => fs.readFileSync(path.join(askDir, f), 'utf8')).join('\n') : '';
+    const apiOk = /alpha-direction/.test(all) && /beta-direction/.test(all);
+    // #7 개행 없는 마지막 MCP 요청도 응답
+    const noNl = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: JSON.stringify({ jsonrpc: '2.0', id: 101, method: 'ping' }) });
+    let mcpOk = false;
+    try { mcpOk = JSON.parse((noNl.stdout || '').trim()).id === 101; } catch {}
+    // #6 손상 frontmatter 표시 + api-skill --json 계약(사람용 텍스트 오염 0)
+    const d4 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9c-')); _d.push(d4);
+    fs.mkdirSync(path.join(d4, '.harness', 'api-skills'), { recursive: true });
+    fs.writeFileSync(path.join(d4, '.harness', 'api-skills', 'bad.md'), '---\nid: intended\nname: X\n# no closing');
+    let corruptOk = false, jsonOk = false;
+    try { const j = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'api-skill', 'list', '--path', d4, '--json'], { encoding: 'utf8', timeout: 20000 }).stdout); corruptOk = j.corruptCount === 1 && j.skills[0].corrupt === true; } catch {}
+    try { const j = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'api-skill', 'add', 'not-a-url', '--path', d4, '--json'], { encoding: 'utf8', timeout: 25000 }).stdout); jsonOk = j.ok === false && j.code === 'fetch_failed'; } catch {}
+    ok = stateOk && freshOk && restoreOk && staleOk && logicalOk && noFpOk && apiOk && mcpOk && corruptOk && jsonOk;
+    if (!ok) console.log(`   [h9 디버그] state=${stateOk} fresh=${freshOk} restore=${restoreOk} stale=${staleOk} logical=${logicalOk} noFp=${noFpOk} api=${apiOk} mcp=${mcpOk} corrupt=${corruptOk} json=${jsonOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.74) 9차헌트: state 스키마 fail-closed · restore 충돌거부(--force 우회) · skeleton 충돌보존 · MCP 마지막줄 · 손상표시 · --json 계약' : '✗ 9차 헌트 수정 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

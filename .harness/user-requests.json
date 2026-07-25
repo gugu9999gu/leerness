@@ -742,7 +742,17 @@
       "notes": "",
       "updatedAt": "2026-07-22T07:51:26.127Z",
       "completedAt": "2026-07-22T07:51:26.127Z"
+    },
+    {
+      "id": "UR-0065",
+      "text": "웹페이지/디자인 작업 시 코드 구현 전 디자인 시안을 먼저 사용자에게 제시하고 수정/승인을 질문으로 받는 흐름 구현",
+      "recordedAt": "2026-07-25T08:09:45.504Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-07-22T07:51:26.127Z"
+  "updatedAt": "2026-07-25T08:09:45.504Z"
 }

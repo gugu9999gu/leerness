@@ -27,6 +27,6 @@
     "filesystem.delete",
     "network.fetch"
   ],
-  "generatedAt": "2026-06-17T00:27:09.153Z",
-  "leernessVersion": "1.32.0"
+  "generatedAt": "2026-07-25T06:57:52.737Z",
+  "leernessVersion": "1.36.73"
 }
