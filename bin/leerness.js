@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.76';
+const VERSION = '1.36.77';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -18975,6 +18975,25 @@ function _mcpToCliArgs(name, args, targetPath) {
           case 'leerness_state_show':
             cliArgs = ['state', 'show', '--path', targetPath, '--json'];
             break;
+          // 1.36.77 (UR-0061/0066): clarify/preview 워크플로 MCP 노출 — MCP 전용 에이전트도 질문·시안 승인 흐름 사용
+          case 'leerness_clarify':
+            cliArgs = ['clarify', String(args.text || ''), '--path', targetPath, '--json'];
+            break;
+          case 'leerness_preview': {
+            const _pa = String(args.action || 'list');
+            cliArgs = ['preview', _pa, '--path', targetPath, '--json'];
+            if (_pa === 'add') {
+              cliArgs.splice(2, 0, String(args.title || ''));
+              if (args.design) cliArgs.push('--design', String(args.design));
+              if (args.features) cliArgs.push('--features', String(args.features));
+              if (args.mockup) cliArgs.push('--mockup', String(args.mockup));
+            } else if (['show', 'approve', 'revise', 'mockup'].includes(_pa)) {
+              cliArgs.splice(2, 0, String(args.id || ''));
+              if (_pa === 'revise' && args.note) cliArgs.push('--note', String(args.note));
+              if (_pa === 'mockup' && args.force) cliArgs.push('--force');
+            }
+            break;
+          }
           case 'leerness_state_start':
             cliArgs = ['state', 'start', String(args.goal || ''), '--path', targetPath, '--json'];
             if (args.agent) cliArgs.push('--agent', String(args.agent));

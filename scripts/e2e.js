@@ -7511,5 +7511,40 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.77 (UR-0061/0066 MCP 완결): leerness_clarify + leerness_preview 도구 — MCP 전용 에이전트도 질문·시안 승인 흐름
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcp77-')); _d.push(d);
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const MCP = (name, args) => {
+      const req = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n';
+      const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: req, maxBuffer: 8 * 1024 * 1024 });
+      for (const l of (r.stdout || '').trim().split('\n')) { try { const j = JSON.parse(l); if (j.result) return j.result; } catch {} }
+      return null;
+    };
+    const inner = (res) => { try { return JSON.parse(res.content[0].text); } catch { return null; } };
+    const cl = inner(MCP('leerness_clarify', { text: '적당히 이쁘게 그거 고쳐줘', path: d }));
+    const clOk = cl && cl.ambiguous === true && Array.isArray(cl.questions) && cl.questions.length >= 2;
+    const ad = inner(MCP('leerness_preview', { action: 'add', title: '신규 페이지 디자인', design: '밝게', path: d }));
+    const mk = inner(MCP('leerness_preview', { action: 'mockup', id: 'P-0001', path: d }));
+    const flowOk = ad && ad.id === 'P-0001' && mk && mk.mockupPath === '.harness/previews/P-0001-mockup.html'
+      && fs.existsSync(path.join(d, '.harness', 'previews', 'P-0001-mockup.html'));
+    const ap = inner(MCP('leerness_preview', { action: 'approve', id: 'P-0001', path: d }));
+    const noteErr = MCP('leerness_preview', { action: 'revise', id: 'P-0001', path: d });
+    const contractOk = ap && ap.status === 'approved' && noteErr && noteErr.isError === true;
+    // 도구 수 정합 (README 가드와 별개로 정의 자체)
+    const T = require(path.resolve(path.dirname(CLI), '..', 'lib', 'mcp-tools.js'));
+    const defOk = T.some(t => t.name === 'leerness_clarify' && t.requiredTier === 'read-only')
+      && T.some(t => t.name === 'leerness_preview' && t.requiredTier === 'safe-write');
+    ok = clOk && flowOk && contractOk && defOk;
+    if (!ok) console.log(`   [mcp77 디버그] cl=${clOk} flow=${flowOk} contract=${contractOk} def=${defOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.77) MCP clarify/preview 노출: 질문 생성 + add→mockup→approve 왕복 + revise 노트 계약 + 티어' : '✗ MCP clarify/preview 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

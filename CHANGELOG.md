@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.77 — 2026-07-25 — UR-0061/0066 MCP 완결: leerness_clarify + leerness_preview (86→88 도구)
+
+clarify/preview 워크플로가 CLI 전용이라 MCP 전용 에이전트(Claude Desktop 등)는 질문·시안 승인 흐름을 쓸 수 없던 갭.
+
+- **`leerness_clarify`** (read-only): 요청 텍스트 모호성 신호 → 질문 목록 JSON.
+- **`leerness_preview`** (safe-write): action 파라미터로 add/list/show/approve/revise/mockup 전체 — 시안 스캐폴드 생성·승인·수정요구를 MCP 로. revise 노트 필수 계약 유지(isError 실측).
+- README 도구 수 86→88 정합(selftest 문서-drift 가드가 잡아준 대로).
+- 검증: MCP 왕복 실측(clarify ambiguous·add→mockup→approve·revise 거부), selftest 334, e2e +1.
+
 ## 1.36.76 — 2026-07-25 — 9차 헌트 이월 3건 종결 (P1 1·P2 2) — 헌트 8/8 전건 처리
 
 - **P1 (#3) 손상 아카이브 복원 거부**: 잘린 UTF-8 아카이브가 U+FFFD 를 품은 채 "정상 복원"돼 손상 데이터가 active 로 유입되고 아카이브 원본이 소비되던 것(codex 정확 재현으로 확정 — 지난 라운드 제 절단 변형은 미재현이라 이월했었다). 치환문자 감지 시 복원 중단·아카이브 무변경.
