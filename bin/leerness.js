@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.81';
+const VERSION = '1.36.82';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -208,6 +208,26 @@ function arg(name, def = null) {
   return eq ? eq.slice(name.length + 1) : def;
 }
 function has(name) { return process.argv.includes(name); }
+// 1.36.82: 반복 지정 값 플래그를 `--flag=v` 형태까지 포함해 수집하고, **값 누락도 보고**한다.
+//   (검수 High#4) 값 없는 `--require-referee` 나 `--require-referee=` 를 조용히 버리면
+//   CI 의 `--require-referee=$EMPTY_ENV` 가 아무 게이팅 없이 exit 0 — fail-open 이다.
+//   기존 argAll() 은 값만 돌려주므로 누락을 알 수 없어, 누락 개수를 함께 반환하는 변형을 쓴다.
+function _argAllStrict(name) {
+  const values = [];
+  let missing = 0;
+  const a = process.argv;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === name) {
+      const next = a[i + 1];
+      if (next != null && !next.startsWith('-')) { values.push(next); i++; }
+      else missing++;
+    } else if (a[i].startsWith(name + '=')) {
+      const v = a[i].slice(name.length + 1);
+      if (v) values.push(v); else missing++;
+    }
+  }
+  return { values, missing };
+}
 // 공통 root 해석 (외부리뷰 CV-1/UR-0076): --path(=값 포함) 플래그 > 유효 positional > cwd.
 //   여러 dispatcher 가 positional 또는 --path 한쪽만 처리하던 불일치(특히 session close 의 wrong-root 쓰기) 해소.
 function _resolveRoot(positional) {
@@ -218,7 +238,7 @@ function _resolveRoot(positional) {
 }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--to','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when','--test-cmd']);  // 1.14.2 (UR-0032): --done-when 값이 positional 로 누출돼 milestone 제목에 흡수되던 것 차단. 1.17.2 (UR-0045): --test-cmd 동일 원칙(신규 value-flag 는 반드시 여기 등록)
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--to','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when','--test-cmd','--require-referee','--referee','--expect-bad','--good','--bad','--static-dir','--dev-url']);  // 1.14.2 (UR-0032): --done-when 값이 positional 로 누출돼 milestone 제목에 흡수되던 것 차단. 1.17.2 (UR-0045): --test-cmd 동일 원칙(신규 value-flag 는 반드시 여기 등록). 1.36.82 (검수 High#3): --require-referee 미등록으로 `gate --require-referee <id>` 의 값이 positional 경로로 흡수돼 root 가 <cwd>/<id> 가 됐다 — 툴이 안내하는 문법 그대로 쓰면 깨졌다. 1.36.80/81 신규 value-flag 도 소급 등록.
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -4442,8 +4462,15 @@ function _selfTestCases() {
       // 1) done 기본 claimsChecked(--strict-claims 옵트인 아님) 2) --json 에 claimsConsistent+gitCrossCheck 3) --lenient 탈출 4) optimism 전체스캔(walk root) 5) git strongMismatch 는 advisory(기본 게이트 제외)
       const defaultGate = src.includes("const claimsChecked = !lenient && (isDoneClaim || has('--require-evidence') || has('--strict-claims'));");
       const jsonExposed = src.includes('claimsConsistent: !claimsChecked ? null : strictOk') && src.includes('gitCrossCheck: !gitApplicable ? null : !gitStrongMismatch');
-      const jsonGate = src.includes('(claimsChecked && !strictOk) || !gitClaimOk) return process.exit(1);');
-      const overall = src.includes('(claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk;');
+      // 1.36.82 (공허한 가드 스윕 High): 이 리터럴은 리팩터로 사라진 옛 표현이라 **자기 줄만 매칭**하고 있었다 —
+      //   verify-claim 의 --json exit 게이트가 어떤 selftest 로도 보호되지 않았다(게이트를 통째로 지워도 초록).
+      //   현재 구현(reasons 기반 단일 판정 + exit 전파)을 검사한다.
+      const jsonGate = src.includes("if (claimsChecked && !strictOk) out.reasons.push('optimism/honesty')")
+        && src.includes('out.ok = out.reasons.length === 0;') && src.includes('if (!out.ok) return process.exit(1);');
+      // 1.36.82: 끝의 `;` 때문에 실제 overallFail 라인과 어긋나 **자기 줄만 매칭**하고 있었다(리팩터로 뒤에 항이 추가됨).
+      //   현재 라인과 일치시키고, 1.36.82 에 추가한 unverifiableClaim 게이팅이 human 경로에 배선됐는지도 함께 단언한다.
+      const overall = src.includes('(claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk')
+        && /const overallFail = unverifiableClaim \|\|/.test(src);
       const wholeScan = src.includes('function _scanCodeForPatterns(root)') && src.includes('walk(root, 0);');
       const gitAdvisory = src.includes("const gitClaimOk = !(has('--strict-claims') && gitStrongMismatch);");
       return defaultGate && jsonExposed && jsonGate && overall && wholeScan && gitAdvisory;
@@ -4463,7 +4490,12 @@ function _selfTestCases() {
       const src = read(__filename);
       const coreDef = src.match(/function _verifyClaimsAll\(root\) \{[\s\S]*?\n\}/);  // 함수 본문만 캡처(첫 줄머리 } 까지)
       const core = !!coreDef && coreDef[0].includes('return { ok: failed.length === 0, total: doneRows.length, failed: failed.length, results };') && !/process\.exit\(/.test(coreDef[0]);  // 코어는 절대 process.exit( 안 함(게이트 step 집계 보호)
-      const gateOptIn = src.includes("const withClaims = has('--claims');") && src.includes('# leerness gate (${withClaims ? 6 : 5} checks)') && src.includes("if (withClaims) step('verify-claims', () => { const r = _verifyClaimsAll(root);");
+      // 1.36.82: 헤더 문자열을 **정확 리터럴**로 잡으면 그 줄을 만질 때마다 자기 줄만 매칭해 조용히 통과한다
+      //   (이번 라운드에만 두 번 그렇게 됐다). 표현이 아니라 **불변식**을 본다:
+      //   헤더가 withClaims 로 5/6 을 계산하고, --claims 일 때만 verify-claims 단계가 붙는다.
+      const gateOptIn = src.includes("const withClaims = has('--claims');")
+        && /# leerness gate \(\$\{[^}]*withClaims \? 6 : 5[^}]*\} checks\)/.test(src)
+        && src.includes("if (withClaims) step('verify-claims', () => { const r = _verifyClaimsAll(root);");
       const reuse = src.includes('const res = _verifyClaimsAll(root);');  // CLI 도 코어 공유(분기 없음)
       const tools = require('../lib/mcp-tools');
       const def = tools.find(t => t.name === 'leerness_verify_claim_all');
@@ -4772,9 +4804,13 @@ function _selfTestCases() {
         && src.includes("else if (surface === 'lessons') _saveLessons(root, _parseLessonEntries(read(activePath)))");
       // P2-4: plan remove 가 모든 헤딩(#{1,3} )을 경계로 split (사용자 h2 섹션 흡수 방지)
       const planOk = src.includes('const blocks = text.split(/\\n(?=#{1,3} )/);');
-      // P2-5: FILE_RE + _evidenceQuality basename 첫 글자에 숫자 허용 (저-백슬래시 판별 조각)
-      const fileReOk = src.includes(')?[A-Za-z0-9][');
-      const analyzersOk = read(path.join(__dirname, '..', 'lib', 'analyzers.js')).includes('[A-Za-z0-9][\\w./');
+      // P2-5: 숫자로 시작하는 실파일('123.js'·'2fa.ts')이 추출돼야 한다 — 안 되면 존재검사가 공허통과했다.
+      // 1.36.82: 정규식 **조각 문자열**을 검사하던 것을 **행위 검사**로 교체 — 추출기를 단일 출처(lib/analyzers)로
+      //   옮기자 조각이 사라져 가드가 자기 줄만 매칭할 뻔했다(정확 리터럴 가드의 전형적 부패).
+      const _re = require('../lib/analyzers')._EVIDENCE_FILE_RE('g');
+      const _hit = (s) => Array.from(String(s).matchAll(_re), m => m[0]);
+      const fileReOk = _hit('123.js 수정').includes('123.js') && _hit('2fa.ts 추가').includes('2fa.ts');
+      const analyzersOk = require('../lib/analyzers')._evidenceQuality('123.js 수정, tests: 1/1 passed').hasFile === true;
       // P2-3: archive 쓰기에 _lineSafe (개행 델리미터 위조 차단)
       const archiveOk = src.includes('`\\n## 제거 ${today()} (target: "${_lineSafe(target)}")\\n${archiveBlocks}\\n`');
       // P2-7: drop/remove not-found 가 failJson (--json 에러 구조화)
@@ -4934,6 +4970,85 @@ function _selfTestCases() {
       while ((m = re.exec(self)) !== null) { if (m[1].includes(NL)) offenders++; }
       return offenders === 0;
     } },
+    { name: '자기참조 소스가드 확산 금지 (1.36.82, 공허한 가드 스윕): 제품에 없는 코드 리터럴을 붙잡은 selftest 가 늘어나면 실패 (메타가드)', run: () => {
+      // 사고: 소스가드가 `read(__filename)` 로 자기 파일을 읽는데, 검사하려는 코드 리터럴이 리팩터로 사라지면
+      //   그 문자열은 **가드 자신의 줄에만** 남는다 → includes 는 계속 참 → 기능을 통째로 지워도 초록.
+      //   실제로 verify-claim 의 --json exit 게이트와 개인키 파일 스캔 강제포함 가드가 이 상태였다.
+      // 판정: selftest 영역 밖(제품 코드 = bin 나머지 + lib/ + scripts/)에 존재하지 않는 **코드형** 리터럴.
+      //   데이터 문자열(파일명·placeholder 등)이 제품에 없는 건 정상이므로 코드 신호가 있는 것만 본다(false-BLOCK 회피).
+      const src = read(__filename);
+      // (검수 High#6) 1차판은 `'selfref' + '-guard-own'` 을 MARK 로 써서 **소스 본문에는 결합된 문자열이 없어**
+      //   자기 제외가 한 번도 동작하지 않았다(자기 자신을 안 센 건 우연이었다). 소스에 그대로 존재하는 표식을 쓴다.
+      const MARK = 'SELFREF_METAGUARD_OWN_CASE';
+      const s = src.indexOf('function _selfTestCases(');
+      if (s < 0) return false;
+      const nextFn = src.indexOf('\nfunction ', s + 10);
+      const e = nextFn < 0 ? src.length : nextFn;
+      let outside = src.slice(0, s) + src.slice(e);
+      for (const sub of ['lib', 'scripts']) {
+        const dir = path.join(path.dirname(__filename), '..', sub);
+        if (!exists(dir)) continue;
+        for (const f of fs.readdirSync(dir)) if (f.endsWith('.js')) outside += '\n' + read(path.join(dir, f));
+      }
+      const region = src.slice(s, e);
+      // (검수 High#6) 1차판의 종결자 기반 정규식(`\n    } },`)은 337건 중 170건만 매치했다 —
+      //   여러 케이스를 하나로 뭉치거나(마지막 무쉼표 케이스 등) 통째로 놓쳐 가드 자신이 반쯤 공허했다.
+      //   케이스 **시작 경계**로 분할한다(줄머리 `    { name:`) — 종결 형태에 의존하지 않는다.
+      const chunks = region.split(/\n(?=    \{ name: )/).slice(1);
+      // 백틱 리터럴도 스캔한다(1차판은 따옴표만 봐서 `.includes(\`…\`)` 로 우회 가능했다).
+      const litRe = /\.includes\((['"`])((?:\\.|(?!\1)[\s\S])*?)\1\)/g;
+      const codeish = (L) => /[(){}=;]|=>|\|\||&&/.test(L) && /[a-zA-Z_$]{3,}/.test(L);
+      let offenders = 0;
+      for (const body of chunks) {
+        if (body.includes(MARK)) continue;                 // 이 메타가드 자신 (표식은 소스에 그대로 존재)
+        if (!/read\(__filename\)/.test(body)) continue;
+        litRe.lastIndex = 0;
+        let lm;
+        while ((lm = litRe.exec(body)) !== null) {
+          const L = lm[2].replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+          if (L.length >= 20 && codeish(L) && !outside.includes(L)) { offenders++; break; }
+        }
+      }
+      // 1.36.82 실측 잔여 부채 = 12건(파싱 교정 후 전수 337 케이스 기준) — 늘어나면 실패한다.
+      //   줄이는 방향으로만 갱신할 것. "아직 남아 있음"을 숨기지 않기 위해 수치를 명시한다.
+      //   1차판이 보고하던 9 는 케이스 파싱이 337 중 170 만 잡던 과소집계였다(검수 High#6).
+      return offenders <= 12;
+    } },
+    { name: '동봉 문서의 낡을 수치 주장 금지 (1.36.82): README/docs 의 MCP 도구·selftest 케이스 수가 실측과 불일치 시 실패 (메타가드)', run: () => {
+      // 사고: docs/interoperability.md 가 "86 도구"(3릴리스 낡음), README.ko.md 가 "selftest 210 케이스"(실제 335) 를
+      //   **현재 상태**로 주장한 채 npm 에 실려 나갔다. README.md 는 readmeSync 관리구간이라 동적으로 맞았지만
+      //   관리구간 밖 문서는 아무도 맞춰주지 않는다 — leerness 자신이 "측정 안 된 수치 주장 금지"를 강제하는 도구인데 자기 문서가 어겼다.
+      // 범위(정직하게 좁힘): 현재 상태를 서술하는 문서만. AGENTS.md/CLAUDE.md/CHANGELOG.md 는 **버전별 과거 라운드 로그**라
+      //   과거 수치가 정당하므로 제외한다(포함하면 false-BLOCK 이 된다).
+      const root = path.join(path.dirname(__filename), '..');
+      // (검수 Medium) npm tarball 에 실리는 루트 문서를 빠짐없이 — CONTRIBUTING/SECURITY 도 대상이다.
+      const targets = ['README.md', 'README.ko.md', 'CONTRIBUTING.md', 'SECURITY.md'].map(f => path.join(root, f));
+      const docsDir = path.join(root, 'docs');
+      if (exists(docsDir)) for (const f of fs.readdirSync(docsDir)) if (f.endsWith('.md')) targets.push(path.join(docsDir, f));
+      const mcpN = _mcpToolCount();
+      const selfN = _selfTestCases().length;
+      let coreN = 0; try { coreN = (require('../lib/mcp-tools').CORE || []).length; } catch {}
+      for (const f of targets) {
+        if (!exists(f)) continue;
+        for (const raw of read(f).split('\n')) {
+          // 버전 표기는 카운트 주장이 아니다 — 지우고 본다(1.36.81 을 "36 도구"로 오독하는 것 방지)
+          const line = raw.replace(/\bv?\d+\.\d+(?:\.\d+)?\b/g, ' ');
+          // (검수 Medium) core 프로필 문맥의 수치는 full 과 비교하면 거짓 차단이다 — 그 줄은 core 기준으로 본다.
+          const coreCtx = /\bcore\b|코어|프로필/i.test(line);
+          const expectMcp = coreCtx ? coreN : mcpN;
+          // "80+" 같은 하한 표현은 정확 수치 주장이 아니다 — 대상에서 제외(false-BLOCK 회피).
+          if (/\d\s*\+/.test(line)) continue;
+          // (검수 Medium FN) 어순 양방향: "89 도구" 와 "MCP tools: 89" 둘 다 잡는다.
+          //   주의: JS \b 는 ASCII 기준이라 한글 뒤에서 성립하지 않는다 → 경계는 영문 tools 에만 붙인다.
+          let m = /\b(\d{2,3})\s*(?:개\s*)?(?:MCP\s*)?(?:도구|tools?\b)/i.exec(line)
+               || /(?:MCP[- ]?tools?|MCP\s*도구)\s*[:=]?\s*(\d{2,3})\b/i.exec(line);
+          if (m && expectMcp && Number(m[1]) !== expectMcp) return false;
+          m = /selftest[^\n]{0,16}?\b(\d{2,4})\b/i.exec(line) || /\b(\d{2,4})\s*selftest/i.exec(line);
+          if (m && Number(m[1]) !== selfN) return false;
+        }
+      }
+      return true;
+    } },
     { name: '출하 소스 생 NUL 금지 (1.36.81, 클린룸 실측): bin/lib 전수 0 — 구분자를 이스케이프로 (메타가드)', run: () => {
       // 1.36.80 사고: 지문/ID 구분자를 소스에 **생 NUL 바이트**로 써서 도구가 파일을 바이너리로 취급했다(grep 차단).
       //   정규화 도구가 조용히 지우면 해시 입력이 바뀌어 전 프로젝트의 캘리브레이션/ID 가 한꺼번에 어긋난다.
@@ -5043,7 +5158,10 @@ function _selfTestCases() {
       const bin = read(__filename);
       const cat = read(path.join(path.dirname(__filename), '..', 'lib', 'catalogs.js'));
       const pu = read(path.join(path.dirname(__filename), '..', 'lib', 'pure-utils.js'));
-      const keyFile = bin.includes('const isKeyFile =') && bin.includes('!isKeyFile) continue;');
+      // 1.36.82 (공허한 가드 스윕): `!isKeyFile) continue;` 는 1.36.56 리팩터로 사라진 코드다 —
+      //   그 문자열이 이 가드 자신의 줄에만 남아 **자기참조로 통과**하고 있었다(개인키 스캔을 꺼도 초록).
+      //   현재 구현(_known 강제 포함)을 검사하도록 교체 + 행위로도 확인한다.
+      const keyFile = bin.includes('const isKeyFile =') && bin.includes('|| isEnvFamily || isKeyFile');
       const dbVg = /DB connection string[^\n]*valueGroup: 1/.test(cat);
       const phPlaceholder = pu.includes('root|admin|user|username|yourpassword');
       const retroGuard = bin.includes("failJson(has('--json'), 'invalid_arg'") && bin.includes('Math.min(days, 36500)');
@@ -12984,7 +13102,12 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   // codex 버그헌트 P2: basename 첫 글자를 [A-Za-z] 로만 잡아 '123.js'·'2fa.ts' 같은 숫자시작 실파일이
   //   추출 안 돼 존재검사가 vacuous-pass → 없는 파일 인용한 done 주장이 통과(gate FN). 첫 글자에 숫자 허용.
   //   (prev-separator 가드가 UNC/드라이브/URL 꼬리 오탐은 계속 차단하므로 FP 억제 유지)
-  const FILE_RE = new RegExp(`(?:[A-Za-z][A-Za-z0-9_-]*[\\/\\\\])?[A-Za-z0-9][\\w./\\\\-]*\\.(?:${FILE_EXTS})\\b`, 'g');
+  // 1.36.82 (검수 High#2): 추출기와 `_evidenceQuality` 의 "파일 언급" 판정이 각자 따로였다(주석만 "정합").
+  //   같은 명령 안에서 정의가 갈리면 정직한 주장이 사유 없이 거부되므로 **단일 출처**(lib/analyzers)를 쓴다.
+  //   해소된 사각지대: 다단계 경로의 bare 파일(ops/containers/Dockerfile) · 선두 점 디렉토리(.github/workflows/ci.yml
+  //   가 github/… 로 잘리던 것) · 점파일(.gitignore) · Dockerfile.dev 가 Dockerfile 로 잘려 "없는 파일"이 되던 것.
+  void FILE_EXTS;   // (구 상수 — 위 단일 출처로 대체. 주변 주석의 이력 보존용)
+  const FILE_RE = require('../lib/analyzers')._EVIDENCE_FILE_RE('g');
   // 1.36.11 (클린룸 P1-B): 매치 직전 문자가 경로 구분자면 더 긴 경로의 "꼬리"만 잡은 것(UNC \\\\server\\..., 드라이브 X:\\...,
   //   숫자 시작 선두 세그먼트 등) — 잘린 꼬리를 루트-상대 경로로 검증하면 무관한 로컬 파일이 통과(우회성). 그런 매치는 버린다.
   const filePatterns = [];
@@ -13148,14 +13271,32 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   // 1.9.309: 기본 임계는 비례적 — 근거 일부(파일·테스트·로그 중 하나)만 있으면 통과(Opus 의 "증거 0" 만 차단).
   //   --require-evidence(명시) 는 엄격(파일+테스트 모두, 1.9.287). 과탐 방지.
   const evidenceQualityOk = !mustHaveEvidence || (has('--require-evidence') ? evq.ok : (evq.hasFile || evq.hasTest || evq.hasLog));
-  //   공허참("증거 0 done") 은 evidenceQualityOk 가 차단하므로 filesAllExist 는 표준 의미 유지(주장 파일들이 실제 존재하는가).
+  //   filesAllExist 는 "주장 파일들이 실제 존재하는가" — 주장 파일이 0건이면 공허참(빈 배열의 every)이다.
   const filesAllExist = fileChecks.every(c => c.exists);
+  // 1.36.82 (공허한 가드 스윕 High #1, 실측 재현): **아무것도 대조하지 못한 주장을 통과로 보고하지 않는다.**
+  //   이전 주석은 "공허참은 evidenceQualityOk 가 차단한다"고 적혀 있었으나 전제가 거짓이었다 —
+  //   기본 모드의 evidenceQualityOk 는 hasFile||hasTest||hasLog 라 evidence 에 "tests: 32/32 passed" 문자열
+  //   하나만 있어도 통과한다. 그 결과 파일 0건·테스트 0개 프로젝트에서 done 을 선언하면
+  //   filesAllExist(빈배열)=true · implementationSubstance(검사대상 0)=true · gitApplicable(files>0 요구)=false 로
+  //   **전 판정이 공허참**이 되어 ok:true/exit 0 이 나왔다.
+  //   단조성이 뒤집혀 있었다: 파일명을 적어 검증 가능하게 쓸수록 FAIL, 아무것도 안 적고 날조할수록 PASS.
+  //   탈출구는 두 가지뿐 — evidence 에 수정 파일 경로를 적거나, --run-tests 로 실제 실행 결과를 붙인다.
+  //   기존 opt-out(--lenient)이 그대로 적용되므로 의도된 예외는 사용자가 되돌릴 수 있다.
+  //   (같은 저장소의 `contract verify` 가 이미 빈 계약을 empty_contract 로 거부하는 것과 대칭.)
+  //   계산은 claimsChecked 선언 이후에 둔다(아래) — 여기서 참조하면 TDZ 다.
 
   // 1.11.2 (14th 버그헌트 P1-CRITICAL, UR-0175): 허위완료 차단을 "기본값"에서 작동 — done 주장은 optimism(evidence 주장↔코드 호출 흔적) + git 교차검증을 기본 게이팅.
   //   이전엔 --strict-claims 옵트인일 때만 잡아 기본 모드(verify-claim --run-tests)가 허위완료를 통과(exit 0)시켰고, --json 은 git 신호조차 누락(머신 경로가 더 위험)했음.
   //   범위: done/완료 주장(또는 --require-evidence/--strict-claims). opt-out: --lenient. --json/human 양 경로가 동일 계산을 공유.
   const lenient = has('--lenient');
   const claimsChecked = !lenient && (isDoneClaim || has('--require-evidence') || has('--strict-claims'));
+  // 1.36.82 (High #1): "아무것도 대조하지 못함" — 위 주석 참조. 세 경로(collect/--json/human)가 이 하나를 공유한다.
+  // (검수 High#2-d, 실측 재현) 처음엔 `runResult.parsed` 를 요구했는데 그건 **같은 역전을 다시 만든 것**이었다:
+  //   `--test-cmd 'node -e "process.exit(0)"'` 처럼 실제로 실행해 exit 0 을 받았어도 출력이 파싱 불가면 차단되고,
+  //   반대로 evidence 에 "1/1 passed" 문자열만 적은 날조는 통과했다. 커스텀 리포터·go test 등 정직한 실행이 벌을 받는다.
+  //   판정 기준은 **실행 확증**이어야 한다 — 실제로 돌았고 실패하지 않았는가(allPassed = exit 0 이며 파싱됐다면 전부 통과).
+  const _runProven = !!(runResult && !runResult.skipped && runResult.allPassed);
+  const unverifiableClaim = claimsChecked && files.length === 0 && !_runProven;
   let optimismSuspects = [], honestyFindings = [], strictOk = true;
   if (claimsChecked) {
     const codeText = _scanCodeForPatterns(root);
@@ -13183,6 +13324,7 @@ function verifyClaimCmd(root, taskId, opts = {}) {
     const _tcMatch = declaredTestCount == null ? null : (!testMeasured ? null : actualTestCount >= declaredTestCount);
     const _runFail = !!(runResult && !runResult.skipped && !runResult.allPassed);
     const reasons = [];
+    if (unverifiableClaim) reasons.push('unverifiable-claim');   // 1.36.82 (High #1): 대조된 것이 하나도 없음
     if (!filesAllExist) reasons.push('files-missing');
     if (_tcMatch === false) reasons.push('test-count-short');
     if (!evidenceQualityOk) reasons.push('evidence-incomplete');
@@ -13231,6 +13373,7 @@ function verifyClaimCmd(root, taskId, opts = {}) {
     // 1.35.7 (UR-0013 GPT5.5평가 개선②): top-level ok/reasons — CI 가 verdict 필드를 재조합하지 않아도 되도록 collect 경로와 동일 어휘.
     //   exit 는 reasons 기반 단일 판정(ok↔exit 불일치 원천 차단) — 기존 게이트(1.11.2/1.17.3/1.17.4) 동일 + declared-pass-mismatch 추가.
     out.reasons = [];
+    if (unverifiableClaim) out.reasons.push('unverifiable-claim');   // 1.36.82 (High #1)
     if (!filesAllExist) out.reasons.push('files-missing');
     if (out.verdict.testCountMatch === false) out.reasons.push('test-count-short');
     if (!evidenceQualityOk) out.reasons.push('evidence-incomplete');
@@ -13328,7 +13471,10 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   }
   // 1.9.309 (UR-0048): done 주장 evidence 완전성 — 기본 강제(상단 pre-compute). --lenient 로 opt-out.
   if (mustHaveEvidence) {
-    log(`  - ${t('evidence 완전성 (done 기본 강제)', 'evidence completeness (done default)')}: ${evidenceQualityOk ? t('✓ pass (파일+테스트 근거 있음)', '✓ pass (file + test evidence present)') : `✗ FAIL ${t(`(누락: ${evq.missing.join(', ')})`, `(missing: ${evq.missing.join(', ')})`)}`}`);
+    // 1.36.82 (스윕 medium): 기본 모드의 통과 조건은 hasFile||hasTest||hasLog 인데 라벨은 늘 "파일+테스트 근거 있음"이라
+    //   hasFile:false 인 같은 실행의 JSON 과 정면 모순하는 **거짓 표기**였다. 실제로 확인된 근거만 나열한다.
+    const _evParts = [evq.hasFile && t('파일 경로', 'file path'), evq.hasTest && t('테스트', 'test'), evq.hasLog && t('실행 로그', 'run log')].filter(Boolean);
+    log(`  - ${t('evidence 완전성 (done 기본 강제)', 'evidence completeness (done default)')}: ${evidenceQualityOk ? `✓ pass (${_evParts.join(' + ') || t('근거 없음', 'none')})` : `✗ FAIL ${t(`(누락: ${evq.missing.join(', ')})`, `(missing: ${evq.missing.join(', ')})`)}`}`);
     if (!evidenceQualityOk) log(`    · ${t('done 주장은 수정 파일 경로 + 테스트명/개수 가 evidence 에 있어야 함 (테스트 통과만으로는 불충분). 완화: --lenient', 'a done claim needs changed-file paths + test name/count in evidence (passing tests alone is insufficient). relax: --lenient')}`);
   }
   // 1.17.3 (UR-0046): 구현 실체(스텁) + 테스트-구현 연결 — Attack C(주석뿐 구현+assert(true)) 차단.
@@ -13342,7 +13488,12 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   } else if (testLinkOk === true && claimsChecked) {
     log(`  - ${t('테스트-구현 연결', 'test-impl link')}: ${t('✓ pass (테스트가 구현을 참조)', '✓ pass (test references the impl)')}`);
   }
-  const overallFail = !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk || (claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false) || _declaredPassMismatch;  // 1.35.7 (UR-0013): declared-pass 부풀림 게이팅
+  // 1.36.82 (High #1): 대조된 것이 하나도 없으면 "일치"가 아니라 **검증 불가**다 — 통과로 보고하지 않는다.
+  if (unverifiableClaim) {
+    log(`  - ${t('검증 가능성', 'verifiability')}: ${t('✗ FAIL — 이 주장에서 실제로 대조된 것이 없습니다(주장 파일 0건 · 실행 확증 없음)', '✗ FAIL — nothing in this claim was actually checked (0 claimed files · no run evidence)')}`);
+    log(`    · ${t('evidence 에 수정 파일 경로를 적거나 --run-tests 로 실제 실행 결과를 붙이세요. 의도한 예외면 --lenient.', 'add changed-file paths to evidence, or attach a real run with --run-tests. If intended, use --lenient.')}`);
+  }
+  const overallFail = unverifiableClaim || !allFilesOk || !testOk || (runResult && !runResult.skipped && !runTestsOk) || (claimsChecked && !strictOk) || !evidenceQualityOk || !gitClaimOk || (claimsChecked && stubFiles.length > 0) || (has('--strict-claims') && testLinkOk === false) || _declaredPassMismatch;  // 1.35.7 (UR-0013): declared-pass 부풀림 게이팅 · 1.36.82 (High #1): unverifiableClaim
   // 1.9.287: 정직한 한계 고지 — 테스트 통과 ≠ 의미적 구현 정확성
   if (claimsChecked || mustHaveEvidence) {
     log('');
@@ -15362,7 +15513,9 @@ function gate(root) {
   //   1.34.1 (16th리뷰 정직화): 기본 5체크(특히 lazy detect)는 워크스페이스-상태(handoff/test-run/evidence 부재) 신호로 거짓완료를 잡지, 콘텐츠(파일/카운트/스텁)는 검사하지 않음.
   //   --claims 는 콘텐츠-레벨 검증을 추가 — 워크스페이스가 깨끗한 성숙 프로젝트에선 기본 5체크가 통과(exit 0)해도 --claims 만 콘텐츠 거짓을 잡아(exit 1) README 약속("claims fail → cannot merge")을 문자 그대로 강제. (실증 가드: e2e B(1.34.1))
   const withClaims = has('--claims');
-  if (!jsonMode) log(`# leerness gate (${withClaims ? 6 : 5} checks)`);
+  const _ref1 = _argAllStrict('--require-referee');   // 1.36.82 (High #2): 안내만 하고 구현이 없던 플래그 — 실제 게이팅
+  const _refIds = _ref1.values, _refMissing = _ref1.missing;
+  if (!jsonMode) log(`# leerness gate (${(withClaims ? 6 : 5) + _refIds.length + _refMissing} checks)`);
   function step(label, fn) {
     const code0 = process.exitCode || 0;
     if (!jsonMode) log(`\n## ${label}`);
@@ -15373,9 +15526,13 @@ function gate(root) {
     const failed = threw != null || !!(process.exitCode && process.exitCode !== code0);
     if (threw && !jsonMode) fail(`${label} threw: ${threw.message}`);
     if (failed) bad++;
-    checks.push({ name: label, ok: !failed, ...(threw ? { error: threw.message } : {}) });
+    // 1.36.82 (검수 Medium): --json 에서 모든 실패가 {name, ok:false} 로만 축약돼
+    //   referee_not_found / referee_stale / timeout / spawn 오류가 구분되지 않았다 — 단계가 남긴 진단을 그대로 싣는다.
+    checks.push({ name: label, ok: !failed, ...(threw ? { error: threw.message } : {}), ..._stepDetail });
+    _stepDetail = {};
     process.exitCode = 0;
   }
+  let _stepDetail = {};   // step 내부에서 채우면 그 단계의 checks[] 항목에 병합된다
   step('verify', () => verify(root));
   step('audit', () => audit(root));
   step('scan secrets', () => scanSecrets(root));
@@ -15383,6 +15540,38 @@ function gate(root) {
   step('lazy detect', () => lazyDetect(root));
   // 1.33.3: opt-in 정밀 per-claim 검증. 코어(_verifyClaimsAll)는 exit 안 하고 결과만 반환 → step 의 exitCode 감지로 실패 집계. 비-json 모드는 불일치 task 를 fail() 로 표면화.
   if (withClaims) step('verify-claims', () => { const r = _verifyClaimsAll(root); if (!r.ok) { process.exitCode = 1; if (!jsonMode) r.results.filter(x => x && !x.ok).forEach(x => fail(`${x.id} 불일치: ${x.reasons.join(', ')}`)); } });
+  // 1.36.82 (공허한 가드 스윕 High #2, 실측 확인): `referee verify` 성공 시 툴이 사용자에게
+  //   "이제 gate --require-referee <id> 가 이 검증기를 신뢰합니다" 라고 **안내하는데 gate 는 이 플래그를 읽지도 않았다**.
+  //   사용자는 안내받은 명령을 CI 에 넣고 검증기가 머지를 막는다고 믿지만 아무 일도 일어나지 않았고,
+  //   무효/부재 referee 여도 exit 0 이라 오배선을 알아챌 신호조차 없었다 — 안내가 곧 거짓 약속이었다.
+  //   이제 실제로 게이팅한다: 미검증/무효/부재 검증기는 실행 전에 거부하고, 검증기가 현재 상태를 거부하면 게이트가 실패한다.
+  // (검수 High#4) 값 누락은 조용히 버리지 않는다 — CI 의 빈 환경변수가 게이팅을 무력화하는 fail-open 을 막는다.
+  for (let i = 0; i < _refMissing; i++) {
+    step('referee:(값 없음)', () => {
+      process.exitCode = 1;
+      _stepDetail = { code: 'referee_missing_value' };
+      if (!jsonMode) fail('--require-referee 에 검증기 id 가 없습니다 (예: --require-referee build-check). 값이 비면 게이팅이 사라지므로 실패로 처리합니다.');
+    });
+  }
+  // (검수 Low) 같은 id 반복은 같은 명령을 중복 실행할 뿐 — 순서를 보존해 중복만 제거한다.
+  for (const _rid of Array.from(new Set(_refIds))) {
+    step(`referee:${_rid}`, () => {
+      const g = _ref.requireReferee(root, _rid);
+      if (!g.ok) { process.exitCode = 1; _stepDetail = { code: g.code }; if (!jsonMode) fail(`${g.code}: ${g.message}`); return; }
+      // (검수 Medium) 캘리브레이션과 동일한 시간 정책 — referee verify --timeout 으로 늘린 검증기를
+      //   gate 에서만 10분에 끊으면 정직한 검증기가 거짓 차단된다. 저장된 값이 있으면 그것을 쓴다.
+      const _to = Math.max(1000, Number(g.referee.timeoutMs) || 600000);
+      const rr = cp.spawnSync(g.referee.check, { cwd: root, shell: true, encoding: 'utf8', timeout: _to, maxBuffer: 8 * 1024 * 1024 });
+      const code = rr.status == null ? 1 : rr.status;
+      const timedOut = !!(rr.error && /ETIMEDOUT|timed? ?out/i.test(String(rr.error.message || rr.error.code || '')));
+      if (code !== 0) {
+        process.exitCode = 1;
+        const why = rr.error ? ` (${rr.error.code || rr.error.message})` : '';
+        _stepDetail = { code: timedOut ? 'referee_timeout' : 'referee_failed', exit: code, ...(timedOut ? { timedOut: true } : {}), ...(rr.error ? { spawnError: String(rr.error.code || rr.error.message) } : {}), ...(rr.signal ? { signal: rr.signal } : {}) };
+        if (!jsonMode) fail(`referee ${_rid} 가 현재 상태를 거부(exit ${code})${why}: ${g.referee.check}`);
+      }
+    });
+  }
   if (jsonMode) { log(JSON.stringify({ version: VERSION, root, ok: bad === 0, total: checks.length, failed: bad, checks }, null, 2)); if (bad) process.exitCode = 1; return; }
   log(`\n# gate summary: ${bad} 단계 실패`);
   if (bad) process.exitCode = 1;

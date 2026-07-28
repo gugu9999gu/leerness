@@ -6569,6 +6569,118 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.82 회귀 (공허한 가드 스윕 High #1): **아무것도 대조하지 못한 done 주장**을 통과로 보고하지 않는다.
+//   사고: evidence 에 파일 경로가 없으면 fileChecks=[] → filesAllExist(빈배열 every)=true,
+//   stubFiles=[] → implementationSubstance=true, gitApplicable 은 files>0 요구 → skip.
+//   전 판정이 공허참이라 "코드도 테스트도 없이 done" 이 ok:true/exit 0 이었고, 단조성이 뒤집혀 있었다
+//   (파일명을 적어 검증 가능하게 쓸수록 FAIL, 날조할수록 PASS). 판별 케이스로 고정한다.
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vac-'));
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 60000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 60000 });
+    const J = (r) => { try { return JSON.parse(r.stdout); } catch { return null; } };
+    const mkDone = (req, ev) => {
+      const id = (R(['task', 'add', req]).stdout.match(/T-\d{4,}/) || [])[0];
+      R(['task', 'update', id, '--status', 'done', '--evidence', ev, '--next', 'none']);
+      return id;
+    };
+    // (1) 날조: 소스도 테스트도 없이 done + 테스트 모양 문자열만 → 차단돼야
+    const fake = mkDone('결제 재시도 구현', 'tests: 32/32 passed');
+    const rFake = R(['verify-claim', fake, '--json']);
+    const jFake = J(rFake) || {};
+    const blocked = rFake.status === 1 && (jFake.reasons || []).includes('unverifiable-claim');
+    // (2) --lenient opt-out 은 존중돼야 (기존 계약 유지)
+    const lenientOk = R(['verify-claim', fake, '--lenient', '--json']).status === 0;
+    // (3) 정직한 주장은 통과해야 — false-BLOCK 0 (이 게이트의 최악 실패모드)
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'src', 'pay.js'), 'function retry(fn,n){let e;for(let i=0;i<n;i++){try{return fn()}catch(x){e=x}}throw e}\nmodule.exports={retry}\n');
+    fs.mkdirSync(path.join(d, 'tests2'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'tests2', 'pay.test.js'), 'const {retry}=require("../src/pay.js");\ntest("r",()=>{if(retry(()=>1,2)!==1)throw 0});\n');
+    const honest = mkDone('재시도 헬퍼 추가', 'src/pay.js 구현 + tests2/pay.test.js 1개 테스트 (1/1 통과)');
+    const honestOk = R(['verify-claim', honest, '--json']).status === 0;
+    // (4) 추출기 사각지대가 정직한 주장의 거짓 차단이 되지 않도록 — 검수(High#2)가 짚은 4형태를 모두 고정
+    fs.writeFileSync(path.join(d, 'Dockerfile'), 'FROM node:18\n');
+    fs.writeFileSync(path.join(d, 'Dockerfile.dev'), 'FROM node:18\n');
+    fs.writeFileSync(path.join(d, '.gitignore'), 'node_modules\n');
+    fs.mkdirSync(path.join(d, 'ops', 'containers'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'ops', 'containers', 'Dockerfile'), 'FROM node:18\n');
+    fs.mkdirSync(path.join(d, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.github', 'workflows', 'ci.yml'), 'name: ci\n');
+    const bareCases = [
+      ['도커 베이스 갱신', 'Dockerfile 베이스 이미지 변경 (1/1 통과)'],
+      ['도커 dev 갱신', 'Dockerfile.dev 수정 (1/1 통과)'],
+      ['무시목록 갱신', '.gitignore 갱신 (1/1 통과)'],
+      ['다단계 경로', 'ops/containers/Dockerfile 갱신 (1/1 통과)'],
+      ['선두 점 디렉토리', '.github/workflows/ci.yml 수정 (1/1 통과)'],
+    ];
+    const bareOk = bareCases.every(([req, ev]) => R(['verify-claim', mkDone(req, ev), '--json']).status === 0);
+    // (4b) 실제 실행 확증(exit 0)은 출력이 파싱 불가여도 면제돼야 — 커스텀 리포터를 벌하지 않는다
+    const runId = mkDone('실행 확증', 'tests: 1/1 passed');
+    const runOk = cp.spawnSync(process.execPath, [CLI, 'verify-claim', runId, '--path', d, '--run-tests', '--test-cmd', 'node -e "process.exit(0)"', '--json'], { encoding: 'utf8', timeout: 90000 }).status === 0;
+    // (5) 일괄/게이트 경로도 동일 판정 공유
+    const all = J(R(['verify-claim', '--all', '--json'])) || {};
+    const allCatches = (all.results || []).some(x => x && x.id === fake && x.ok === false);
+    const gcj = J(R(['gate', '.', '--claims', '--json'])) || {};
+    const vc = (gcj.checks || []).find(c => c.name === 'verify-claims');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok = blocked && lenientOk && honestOk && bareOk && runOk && allCatches && !!vc && vc.ok === false;
+    if (!ok) console.log(`   [공허주장 디버그] blocked=${blocked} lenient=${lenientOk} honest=${honestOk} bare=${bareOk} run=${runOk} all=${allCatches} gate=${vc && vc.ok}`);
+  } catch (e) {}
+  console.log(ok ? '✓ B(1.36.82) 공허한 done 주장 차단: 대조 0건 → unverifiable-claim(exit 1) · --lenient 존중 · 정직한 주장/추출기 사각지대 5형태/실행확증 통과(false-BLOCK 0) · --all/gate 동일판정' : '✗ 공허한 done 주장 차단 가드 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.82 회귀 (High #2): `gate --require-referee <id>` — 툴이 사용자에게 안내하면서 gate 는 읽지도 않아
+//   조용히 exit 0 이던 플래그. 이제 실제 게이팅한다(미존재/미증명/무효 거부 + 검증기가 현재 상태를 거부하면 실패).
+total++;
+{
+  let ok = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-refgate-'));
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 60000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 60000 });
+    const J = (r) => { try { return JSON.parse(r.stdout); } catch { return null; } };
+    const N = (js) => `node -e "${js}"`;
+    const stepOf = (g, name) => ((g && g.checks) || []).find(c => c.name === name);
+    // 안내 문구와 실제 지원이 일치하는가 — 이 불일치가 이번 사고의 본질이었다
+    const advertised = fs.readFileSync(path.join(__dirname, '..', 'lib', 'referee.js'), 'utf8').includes('gate --require-referee');
+    // (검수 High#3) **안내된 문법 그대로** — positional/--path 없이 cwd 에서. 이전 픽스처는 항상 '.' 과 --path 를
+    //   같이 줘서 "값이 positional 경로로 흡수되던" 결함을 가렸다. 픽스처가 버그를 숨기지 않게 한다.
+    const asAdvertised = cp.spawnSync(process.execPath, [CLI, 'gate', '--require-referee', 'nope', '--json'], { cwd: d, encoding: 'utf8', timeout: 60000 });
+    let aj = null; try { aj = JSON.parse(asAdvertised.stdout); } catch {}
+    const rootOk = !!aj && path.resolve(aj.root) === path.resolve(d);   // root 가 <cwd>/nope 로 오인되면 실패
+    // (검수 High#4) 값 누락은 조용히 사라지면 안 된다 — CI 의 빈 환경변수 fail-open 차단
+    const bare = J(R(['gate', '.', '--require-referee', '--json']));
+    const bareBlocked = !!bare && bare.ok === false && (bare.checks || []).some(c => c.code === 'referee_missing_value');
+    const missing = J(R(['gate', '.', '--require-referee', 'nope', '--json']));
+    const mStep = stepOf(missing, 'referee:nope');
+    R(['referee', 'add', 'r1', '--check', N('process.exit(0)'), '--good', N('process.exit(0)'), '--bad', N("console.log('SIG'); process.exit(1)"), '--expect-bad', 'SIG']);
+    const uncal = stepOf(J(R(['gate', '.', '--require-referee', 'r1', '--json'])), 'referee:r1');
+    R(['referee', 'verify', 'r1']);
+    const cal = stepOf(J(R(['gate', '.', '--require-referee', 'r1', '--json'])), 'referee:r1');
+    R(['referee', 'add', 'r2', '--check', N('process.exit(7)'), '--good', N('process.exit(0)'), '--bad', N("console.log('SIG'); process.exit(1)"), '--expect-bad', 'SIG']);
+    R(['referee', 'verify', 'r2']);
+    const rejects = stepOf(J(R(['gate', '.', '--require-referee', 'r2', '--json'])), 'referee:r2');
+    // 플래그 없으면 기존 5체크 무변경(회귀 0)
+    const plain = J(R(['gate', '.', '--json']));
+    const noRegression = plain && plain.total === 5 && !(plain.checks || []).some(c => /referee/.test(c.name));
+    // 반복 지정
+    const twice = J(R(['gate', '.', '--require-referee', 'r1', '--require-referee', 'r2', '--json']));
+    const bothRan = ((twice && twice.checks) || []).filter(c => /^referee:/.test(c.name)).length === 2;
+    fs.rmSync(d, { recursive: true, force: true });
+    // 진단 코드가 --json 에 실려야 한다(모든 실패가 {name,ok:false} 로 축약되면 오배선을 구분할 수 없다)
+    const codeExposed = !!mStep && mStep.code === 'referee_not_found';
+    ok = advertised && rootOk && bareBlocked && codeExposed && !!mStep && mStep.ok === false && !!uncal && uncal.ok === false
+      && !!cal && cal.ok === true && !!rejects && rejects.ok === false && noRegression && bothRan;
+    if (!ok) console.log(`   [referee게이트 디버그] adv=${advertised} rootOk=${rootOk} bare=${bareBlocked} code=${codeExposed} missing=${mStep && mStep.ok} uncal=${uncal && uncal.ok} cal=${cal && cal.ok} reject=${rejects && rejects.ok} noReg=${noRegression} both=${bothRan}`);
+  } catch (e) {}
+  console.log(ok ? '✓ B(1.36.82) gate --require-referee 실제 게이팅: 안내문법 그대로 root 정상 · 미존재/미증명 거부(code 노출) · 값누락 차단 · 캘리브레이션 후 통과 · 검증기 거부 시 실패 · 반복 지정 · 플래그 없으면 5체크 무변경' : '✗ gate --require-referee 가드 실패');
+  if (!ok) failed++;
+}
+
 // 1.35.10 (자체 gate 적대적 헌트): gate 를 "보안 가드레일"로 검증 — 8-프로브 헌트(FP 4 + FN 3 + by-design 1) 결과 제품 결함 0 확인 후, 유일 커버리지 갭(gate 레벨 보안 동작)을 회귀 가드로 고정. 커밋된 실키 → 차단(exit 1, scan secrets step), 정상 .env.example placeholder → 오탐 없이 통과(exit 0). scan-step 리팩터가 가드레일 보안을 조용히 무너뜨리는 회귀 차단.
 total++;
 {

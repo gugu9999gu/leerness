@@ -154,7 +154,7 @@ leerness mcp serve                          # JSON-RPC over stdio, 80+ 도구
 - **원자적 UTF-8 쓰기** — temp + rename 으로 부분쓰기 손상 방지, BOM 자동 strip.
 - **shell 미경유 MCP** — `mcp serve` 의 도구 호출은 셸을 거치지 않고 인자를 직접 전달(명령 주입 차단).
 - **순수 `--json` / 일관 exit code** — 성공·실패·미존재 경로 모두 파싱 가능한 JSON(`{ok,error,code}`) + 실패 시 exit 1. 자동화·CI 친화.
-- **모듈 분리(DI)** + **내장 자가검증** — `lib/` 순수 유틸/IO/카탈로그 분리, `selftest` 210 케이스로 설치 무결성 검증(`doctor` 가 함께 실행). 문서(README) 부재에도 코어 무결성 진단은 통과.
+- **모듈 분리(DI)** + **내장 자가검증** — `lib/` 순수 유틸/IO/카탈로그 분리, `selftest` 가 코어 함수 무결성을 자가 검증(`doctor` 가 함께 실행하며 케이스 수를 실측 출력). 문서(README) 부재에도 코어 무결성 진단은 통과.
 
 ---
 
