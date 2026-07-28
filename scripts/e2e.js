@@ -4144,7 +4144,11 @@ total++;
     const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     // 1.9.334: catalogs import 블록 추출 후 이름 포함 확인(순서/추가 비의존 — 이후 import 추가 허용)
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];
-    const movedOut = !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(harnessSrc) && harnessSrc.includes('_matchConstraints(_loadPlatformConstraints(root), text)')
+    // 1.36.83 (공허가드 스윕 후속): 이 정확 리터럴은 **bin 안의 selftest 가드 줄**에만 존재해 통과하고 있었다 —
+    //   파일을 넘나든 자기참조(e2e 가 bin 을 읽는데, 그 문자열의 유일한 출처가 bin 의 다른 가드였다).
+    //   1.36.83 이 그 가드를 불변식으로 바꾸자 리터럴이 사라져 이 단언의 공허함이 드러났다.
+    //   호출부는 실제로 `_matchConstraints(_loadPlatformConstraints(root), text, lang)` 이므로 인자 추가에 견디는 불변식으로 바꾼다.
+    const movedOut = !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(harnessSrc) && /_matchConstraints\(_loadPlatformConstraints\(root\), text/.test(harnessSrc)
       && _catImp.includes('_DEFAULT_PLATFORM_CONSTRAINTS');
     // 소비 명령 회귀: constraints check (review-request 도 _checkRequestConstraints 사용)
     const cd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-con-'));

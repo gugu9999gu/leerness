@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.82';
+const VERSION = '1.36.83';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3442,7 +3442,31 @@ function _selfTestCases() {
       const forceGuard = s.includes("const effForce = opts.force && !_USER_STATE.has(f);") && s.includes("'.harness/progress-tracker.md', '.harness/plan.md', '.harness/task-log.md'");
       const skillGuard = s.includes('유효하지 않은 skill name (path traversal/경로 문자 차단)') && s.includes('이미 설치된 skill: ${skillId} — 내용이 다릅니다');
       const settingsGuard = s.includes('settings.local.json 이 손상돼(JSON 파싱 실패) hook 설치를 중단');
-      const symlinkGuard = s.includes("if (stat.isSymbolicLink()) { report.skippedFiles.push(rel + ' (symlink — 따라가지 않음')") || s.includes('symlink — 따라가지 않음');
+      // 1.36.83 (공허가드 스윕): 종전 정확-리터럴 가드는 이 줄 자신만 매칭해 기능을 지워도 초록이었다.
+      //   불변식 정규식(심링크면 push 후 중단) + **행위검사**(실제 junction/symlink 를 따라가지 않는지)로 대체.
+      //   판별력: lstat→stat 로 되돌리면 소스 정규식은 그대로 통과하지만 행위검사가 잡는다(실측).
+      let symlinkGuard = /isSymbolicLink\(\)\s*\)\s*\{[^\n]*skippedFiles\.push\([^\n]*symlink/.test(s);
+      {
+        const _st = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sym_'));
+        let _linked = false;
+        try {
+          fs.mkdirSync(path.join(_st, '.harness'), { recursive: true });
+          fs.writeFileSync(path.join(_st, '.harness', 'HARNESS_VERSION'), VERSION);
+          fs.mkdirSync(path.join(_st, 'outside'), { recursive: true });
+          fs.writeFileSync(path.join(_st, 'outside', 'a.txt'), 'A');
+          fs.symlinkSync(path.join(_st, 'outside'), path.join(_st, '.harness', 'loop'), process.platform === 'win32' ? 'junction' : 'dir');
+          _linked = true;
+        } catch {}   // 심링크 생성 권한 없는 환경 → 소스 불변식만으로 판정(false-BLOCK 회피)
+        if (_linked) {
+          try {
+            const _rep = _migrateWorkspaceDir(_st, { dryRun: true });
+            const _skipped = _rep.skippedFiles.some(f => /^loop\b/.test(f) && f.includes('symlink'));
+            const _notFollowed = !_rep.copiedFiles.some(f => /^loop[\\/]/.test(f));
+            symlinkGuard = symlinkGuard && _skipped && _notFollowed;
+          } catch { symlinkGuard = false; }
+        }
+        try { fs.rmSync(_st, { recursive: true, force: true }); } catch {}
+      }
       const copySafe = /function copyRecursiveSafe[\s\S]{0,400}lstatSync/.test(s);
       return forceGuard && skillGuard && settingsGuard && symlinkGuard && copySafe;
     } },
@@ -3872,13 +3896,22 @@ function _selfTestCases() {
     } },
     { name: 'MCP notification 준수: id없는 요청 무응답 가드 + ping {} (UR-0049 설치리뷰 1.9.313)', run: () => { const src = read(__filename); const guard = src.includes("const isNotification = !('id' in req)") && src.includes("req.method.startsWith('notifications/')") && src.includes('if (isNotification) return;'); const ping = src.includes("req.method === 'ping'") && /ping[\s\S]{0,140}result: \{\} \}/.test(src); return guard && ping; } },
     { name: 'PowerShell 감지: pwsh7(channel/Documents\\PowerShell/install) + ps5.1 영구경로 과경고 안함 (UR-0052 설치리뷰 1.9.314)', run: () => { const f = _detectPwshFromEnv; const pwsh7a = f({ POWERSHELL_DISTRIBUTION_CHANNEL: 'MSI:Windows 10' }).version === '7'; const pwsh7b = f({ PSModulePath: 'C:\\Users\\me\\Documents\\PowerShell\\Modules' }).version === '7'; const pwsh7c = f({ PSModulePath: 'C:\\Program Files\\PowerShell\\7\\Modules' }).version === '7'; const noFalsePs5 = f({ PSModulePath: 'C:\\Users\\me\\Documents\\WindowsPowerShell\\Modules' }).isPowerShell === false; const cmdSys = f({ PSModulePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules' }).isPowerShell === false; const empty = f({}).isPowerShell === false; const src = read(__filename); const wired = src.includes('const fromEnv = _detectPwshFromEnv()') && src.includes('const pwshEnv = _detectPwshFromEnv()'); return pwsh7a && pwsh7b && pwsh7c && noFalsePs5 && cmdSys && empty && wired; } },
-    { name: 'doc/surface 정합: doctor 명령 + stale MCP 카운트 동적화(commands/banner) (UR-0054 설치리뷰 1.9.315)', run: () => { const src = read(__filename); const doctorOk = typeof doctorCmd === 'function' && /cmd === 'doctor'/.test(src) && /# leerness doctor/.test(src); const dynCount = /MCP 도구: \$\{_mcpToolCount\(\)\}/.test(src) && /외부 AI 통합 \(MCP \$\{_mcpToolCount\(\)\} 도구\)/.test(src); return doctorOk && dynCount; } },
-    { name: 'drift 마커 버그: session-handoff 프론트매터는 ^--- 일 때만 + drift 최신 Last generated (1.9.316)', run: () => { const src = read(__filename); const scSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js')); const writeFix = scSrc.includes('if (/^---\\r?\\n/.test(cur))') && scSrc.includes('writeUtf8(handoffPath(root), frontmatter + block)'); const readFix = src.includes('matchAll(/Last generated') && src.includes('allGen[allGen.length - 1]'); return writeFix && readFix; } },
+    { name: 'doc/surface 정합: doctor 명령 + stale MCP 카운트 동적화(commands/banner) (UR-0054 설치리뷰 1.9.315)', run: () => { const src = read(__filename); /* 1.36.83 (검수 Medium#1): `/# leerness doctor/.test(src)` 는 **이 가드 줄 자신**을 매칭했다 — 실제 헤더는 lib/diagnostics.js 에 있다. 구현 파일을 읽는다. */ const doctorOk = typeof doctorCmd === 'function' && /cmd === 'doctor'/.test(src) && /# leerness doctor/.test(read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js'))); const dynCount = /MCP 도구: \$\{_mcpToolCount\(\)\}/.test(src) && /외부 AI 통합 \(MCP \$\{_mcpToolCount\(\)\} 도구\)/.test(src); return doctorOk && dynCount; } },
+    { name: 'drift 마커 버그: session-handoff 프론트매터는 ^--- 일 때만 + drift 최신 Last generated (1.9.316)', run: () => { const src = read(__filename); const scSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js')); const writeFix = scSrc.includes('if (/^---\\r?\\n/.test(cur))') && scSrc.includes('writeUtf8(handoffPath(root), frontmatter + block)'); /* 1.36.82: 이 가드는 bin(src)을 검사했지만 구현은 lib/drift.js 로 옮겨갔다 — 리터럴이 가드 자신의 줄에만 남아
+   자기참조로 통과했다(원 버그를 되살려도 초록). 읽는 파일을 실제 구현 위치로 바로잡는다. */
+      const drSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'drift.js'));
+      const readFix = drSrc.includes('matchAll(/Last generated') && drSrc.includes('allGen[allGen.length - 1]'); return writeFix && readFix; } },
     { name: '텔레메트리 분리: 내부 auto-call(LEERNESS_INTERNAL) usage 집계 제외 + 주요 spawn 마킹 (UR-0051 설치리뷰 1.9.317)', run: () => { const src = read(__filename); const guard = src.includes("process.env.LEERNESS_INTERNAL !== '1'"); const marked = (src.match(/LEERNESS_INTERNAL: '1'/g) || []).length >= 10; const reviewMarked = /'review-request'[\s\S]{0,200}LEERNESS_INTERNAL: '1'/.test(src); return guard && marked && reviewMarked; } },
     { name: 'lib/pure-utils: HTML 파싱 유틸 3종 모듈 분리 + 동작 + 인라인 제거 (UR-0025 1.9.318)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._htmlToText === 'function' && typeof m._extractTitle === 'function' && typeof m._extractLinks === 'function'; const work = m._htmlToText('<p>Hello <b>World</b></p>') === 'Hello World' && m._extractTitle('<html><title>My &amp; Page</title></html>') === 'My & Page' && m._extractLinks('<a href="/a">A</a><a href="https://other.com/b">B</a>', 'https://x.com/').length === 1; const moved = m._htmlToText === _htmlToText && !/^function _htmlToText\(html\) \{/m.test(read(__filename)); return fnOk && work && moved; } },
     { name: 'MCP ToolRegistry 일치성: 모든 도구 def 가 dispatch case 보유 + 고아 case 0 + requiredTier 완비 (UR-0044 1.9.319)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const missing = tools.filter(t => !src.includes("case '" + t.name + "':")); const cases = [...src.matchAll(/case '(leerness_[a-z_]+)':/g)].map(m => m[1]); const defNames = new Set(tools.map(t => t.name)); const orphans = [...new Set(cases)].filter(c => !defNames.has(c)); const tierOk = tools.every(t => typeof t.requiredTier === 'string' && PERMISSION_TIERS.includes(t.requiredTier)); return tools.length >= 83 && missing.length === 0 && orphans.length === 0 && tierOk; } },
     { name: 'count drift 수정: _countDatedBlocks 코드펜스(템플릿) 제외 (UR-0053 1.9.320; memory count canonical 전환 후 legacy parser 보존)', run: () => { const f = _countDatedBlocks; const withTpl = '# D\n\n```md\n### 2026-01-01 — Decision 제목\n- Decision:\n```\n\n### 2026-06-04 — 실제\n- Decision: 실제\n'; const c1 = f(withTpl) === 1; const c0 = f('```md\n### 2026-01-01 — x\n```\n') === 0; const c2 = f('### 2026-01-01 — A\n### 2026-02-02 — B\n') === 2; return typeof f === 'function' && c1 && c0 && c2; } },
-    { name: 'decision/lesson 필드 파싱: 빈 필드가 다음 줄로 안 샘 ([ \\t]* 사용) (UR-0053 1.9.321)', run: () => { const block = '### 2026-06-05 — X\n- Decision: X\n- Reason: r\n- Alternatives: \n- Impact: 보안\n'; const alt = block.match(/- Alternatives:[ \t]*(.+)/); const imp = block.match(/- Impact:[ \t]*(.+)/); const altNoBleed = !alt || !/Impact/.test(alt[1]); const impOk = !!imp && imp[1].trim() === '보안'; const src = read(__filename); const fixedOk = src.includes('- Alternatives:[ \\t]*(.+)') && src.includes('- Lesson:[ \\t]*(.+)') && src.includes('- Impact:[ \\t]*(.+)'); return altNoBleed && impOk && fixedOk; } },
+    { name: 'decision/lesson 필드 파싱: 빈 필드가 다음 줄로 안 샘 ([ \\t]* 사용) (UR-0053 1.9.321)', run: () => { const block = '### 2026-06-05 — X\n- Decision: X\n- Reason: r\n- Alternatives: \n- Impact: 보안\n'; const alt = block.match(/- Alternatives:[ \t]*(.+)/); const imp = block.match(/- Impact:[ \t]*(.+)/); const altNoBleed = !alt || !/Impact/.test(alt[1]); const impOk = !!imp && imp[1].trim() === '보안'; /* 1.36.82: 파서가 lib/pure-utils.js 로 이동했는데 가드는 bin 을 검사해 자기 줄만 매칭했다 —
+   구현 파일을 읽고, 소스 문자열만이 아니라 **실제 파서 동작**으로도 확인한다(빈 필드가 다음 줄을 먹지 않는가). */
+      const puSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'pure-utils.js'));
+      const fixedOk = puSrc.includes('- Alternatives:[ \\t]*(.+)') && puSrc.includes('- Lesson:[ \\t]*(.+)') && puSrc.includes('- Impact:[ \\t]*(.+)');
+      const parsed = require('../lib/pure-utils')._extractDecisionBlocks ? true : false;
+      const behav = (() => { const objs = require('../lib/pure-utils')._decisionsFromMd('### 2026-06-05 — X\n- Decision: X\n- Reason: r\n- Alternatives: \n- Impact: 보안\n'); return objs.length === 1 && String(objs[0].alternatives || '').trim() === '' && String(objs[0].impact || '').trim() === '보안'; })();
+      return altNoBleed && impOk && fixedOk && parsed && behav; } },
     { name: 'MCP handler 통합: _mcpToCliArgs 단일 함수 + mcpServeCmd 호출 + 인라인 switch 단일화 (UR-0044 1.9.322)', run: () => { const src = read(__filename); const fnDef = /function _mcpToCliArgs\(name, args, targetPath\) \{/.test(src); const called = src.includes('cliArgs = _mcpToCliArgs(name, args, targetPath)'); const switchCount = (src.match(/switch \(name\) \{/g) || []).length; const nullPath = src.includes('if (cliArgs === null) return send('); return fnDef && called && switchCount === 1 && nullPath; } },
     { name: 'fresh-init gate 통과: lazy detect 부재신호(handoff/test/progress) done-work 없으면 비차단 (UR-0054 ⑥ 1.9.323)', run: () => { const src = read(__filename); const doneWork = src.includes("const _hasDoneWork = rows.some(r => /^(done|completed|verified)$/i.test(r.status))"); const advisory = src.includes('_ADVISORY_KINDS') && src.includes("'handoff_never_generated'") && src.includes("'no_test_run'"); const blocking = src.includes('const blockingIssues = Math.max(0, issues - advisoryCount)') && src.includes('if (blockingIssues > 0) process.exitCode = 1'); return doneWork && advisory && blocking; } },
     { name: 'lib/pure-utils: 메모리 MD 파서 분리(_countDatedBlocks/_extractDecisionBlocks) + _compareSemver 중복제거 (UR-0025 1.9.324)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._countDatedBlocks === 'function' && typeof m._extractDecisionBlocks === 'function'; const work = m._countDatedBlocks('```md\n### 2026-01-01 — T\n```\n### 2026-06-05 — R\n') === 1 && m._extractDecisionBlocks('### 2026-06-05 — A\n- Decision: x\n').length === 1; const src = read(__filename); const moved = m._countDatedBlocks === _countDatedBlocks && m._extractDecisionBlocks === _extractDecisionBlocks && !/^function _countDatedBlocks\(/m.test(src) && !/^function _compareSemver\(/m.test(src); return fnOk && work && moved; } },
@@ -3890,7 +3923,7 @@ function _selfTestCases() {
     { name: 'lib/pure-utils: project-brief config 분리(_BRIEF_FIELDS/_briefFilled) + 인라인 제거 (UR-0025 1.9.330)', run: () => { const m = require('../lib/pure-utils'); const cfgOk = Array.isArray(m._BRIEF_FIELDS) && m._BRIEF_FIELDS.length === 10 && m._BRIEF_FIELDS[0].key === 'intro'; const work = m._briefFilled({ intro: 'x', features: ['a'] }) === 2 && m._briefFilled({}) === 0; const src = read(__filename); const moved = m._briefFilled === _briefFilled && m._BRIEF_FIELDS === _BRIEF_FIELDS && !/^const _BRIEF_FIELDS = \[/m.test(src) && !/^function _briefFilled\(/m.test(src); return cfgOk && work && moved; } },
     { name: 'lib/pure-utils: brief 빌더 분리(_briefReadmeBlock/_briefBlueprint + BRIEF 마커, VERSION 주입) (UR-0025 1.9.331)', run: () => { const m = require('../lib/pure-utils'); const fnOk = typeof m._briefReadmeBlock === 'function' && typeof m._briefBlueprint === 'function' && m.BRIEF_START.includes('project-brief:start'); const b = { project: 'X', intro: 'i', features: ['f1'] }; const rb = m._briefReadmeBlock(b); const bp = m._briefBlueprint(b, '9.9.9'); const work = rb.includes(m.BRIEF_START) && rb.includes(m.BRIEF_END) && /f1/.test(rb) && /Blueprint/.test(bp) && /leerness v9\.9\.9/.test(bp); const src = read(__filename); const moved = m._briefBlueprint === _briefBlueprint && m.BRIEF_START === BRIEF_START && !/^function _briefReadmeBlock\(/m.test(src) && !/^function _briefBlueprint\(/m.test(src) && !/^const BRIEF_START =/m.test(src); return fnOk && work && moved; } },
     { name: 'lib/pure-utils: lessons.md 파서 분리(_parseLessonEntries) + 인라인 제거 (UR-0025 1.9.332)', run: () => { const m = require('../lib/pure-utils'); const r = m._parseLessonEntries('### 2026-06-05\n- Lesson: A\n- Tag: t\n\n### 2026-06-04\n- Lesson: B'); const work = r.length === 2 && r[0].text === 'A' && r[0].tag === 't' && r[1].tag === null && r[0].date === '2026-06-05'; const src = read(__filename); const moved = m._parseLessonEntries === _parseLessonEntries && !/^function _parseLessonEntries\(/m.test(src) && src.includes('_parseLessonEntries(read(mp))'); return work && moved; } },
-    { name: 'UR-0025 심층: constraints catalog→lib/catalogs + _matchConstraints→pure-utils 분리 (1.9.333) + i18n en(1.31.2)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6 && !!c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe; const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제'); const work = r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0; const _H = /[가-힣]/; const enSug = (m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'generic api integration widget', 'en').suggestions || [])[0] || ''; const koSug = (m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'generic api integration widget', 'ko').suggestions || [])[0] || ''; const i18nOk = c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe.constraints.some(x => x.detailEn && !_H.test(x.detailEn)) && enSug.length > 0 && !_H.test(enSug) && _H.test(koSug); const src = read(__filename); const moved = _DEFAULT_PLATFORM_CONSTRAINTS === c._DEFAULT_PLATFORM_CONSTRAINTS && _matchConstraints === m._matchConstraints && !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(src) && src.includes('_matchConstraints(_loadPlatformConstraints(root), text)'); return catOk && work && i18nOk && moved; } },
+    { name: 'UR-0025 심층: constraints catalog→lib/catalogs + _matchConstraints→pure-utils 분리 (1.9.333) + i18n en(1.31.2)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_PLATFORM_CONSTRAINTS && Object.keys(c._DEFAULT_PLATFORM_CONSTRAINTS.platforms).length === 6 && !!c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe; const r = m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'stripe 결제'); const work = r.matched.length === 1 && r.matched[0].platform === 'stripe' && r.totalPlatforms === 6 && m._matchConstraints(null, 'x').matched.length === 0; const _H = /[가-힣]/; const enSug = (m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'generic api integration widget', 'en').suggestions || [])[0] || ''; const koSug = (m._matchConstraints(c._DEFAULT_PLATFORM_CONSTRAINTS, 'generic api integration widget', 'ko').suggestions || [])[0] || ''; const i18nOk = c._DEFAULT_PLATFORM_CONSTRAINTS.platforms.stripe.constraints.some(x => x.detailEn && !_H.test(x.detailEn)) && enSug.length > 0 && !_H.test(enSug) && _H.test(koSug); const src = read(__filename); const moved = _DEFAULT_PLATFORM_CONSTRAINTS === c._DEFAULT_PLATFORM_CONSTRAINTS && _matchConstraints === m._matchConstraints && !/const _DEFAULT_PLATFORM_CONSTRAINTS = \{/.test(src) && /_matchConstraints\(_loadPlatformConstraints\(root\), text/.test(src); /* 1.36.82: 호출부가 lang 인자를 얻으며 정확 리터럴이 어긋나 자기 줄만 매칭했다 — 인자 추가에 견디는 불변식으로 */ return catOk && work && i18nOk && moved; } },
     { name: 'UR-0025 심층(Codex 위임·검증): intent domain catalog→lib/catalogs + _matchDomain→pure-utils 분리 (1.9.334)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._DEFAULT_DOMAIN_CATALOG && Object.keys(c._DEFAULT_DOMAIN_CATALOG.domains).length === 5 && !!c._DEFAULT_DOMAIN_CATALOG.domains.game; const r = m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'unity 게임'); const work = r.domain === 'game' && Array.isArray(r.components) && m._matchDomain(c._DEFAULT_DOMAIN_CATALOG, 'zzz없음').domain === null && m._matchDomain(null, 'x').domain === null; const src = read(__filename); const moved = _DEFAULT_DOMAIN_CATALOG === c._DEFAULT_DOMAIN_CATALOG && _matchDomain === m._matchDomain && !/const _DEFAULT_DOMAIN_CATALOG = \{/.test(src) && src.includes('_matchDomain(_loadDomainCatalog(root), text)'); return catOk && work && moved; } },
     { name: 'UR-0025 심층: LSP catalog→lib/catalogs(_LSP_LANG_PATTERNS) + _detectLspLang/_matchLspSymbols→pure-utils 분리 (1.9.335)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c._LSP_LANG_PATTERNS && Object.keys(c._LSP_LANG_PATTERNS).length === 5 && Array.isArray(c._LSP_LANG_PATTERNS.javascript); const langOk = m._detectLspLang('a.py') === 'python' && m._detectLspLang('b.go') === 'go' && m._detectLspLang('c.md') === 'javascript'; const sy = m._matchLspSymbols(c._LSP_LANG_PATTERNS, 'function alpha(){}\nclass Beta{}', 'javascript'); const work = sy.length === 2 && sy[0].name === 'alpha' && sy[0].kind === 'function' && sy[1].kind === 'class' && m._matchLspSymbols(null, 'x', 'javascript').length === 0; const src = read(__filename); const moved = _LSP_LANG_PATTERNS === c._LSP_LANG_PATTERNS && _detectLspLang === m._detectLspLang && _matchLspSymbols === m._matchLspSymbols && !/const _LSP_LANG_PATTERNS = \{/.test(src) && !/function _detectLspLang\(/.test(src); return catOk && langOk && work && moved; } },
     { name: 'UR-0025 심층(Codex 위임·검증): anti-laziness catalog→lib/catalogs(OPTIMISM_PATTERNS) + optimism 순수로직→pure-utils 분리 (1.9.336)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = Array.isArray(c.OPTIMISM_PATTERNS) && c.OPTIMISM_PATTERNS.length === 10 && c.OPTIMISM_PATTERNS[0].kind === 'API'; const ev = 'API 호출 완료, POST /users'; const sus = m._detectOptimism(c.OPTIMISM_PATTERNS, ev, 'function x(){}'); const conf = m._computeConfidence(c.OPTIMISM_PATTERNS, ev, 'function x(){}'); const work = sus.some(s => s.kind === 'API' && s.severity === 'high') && conf < 0.5 && m._computeConfidence(c.OPTIMISM_PATTERNS, '정리함', 'x') === 1 && m._detectOptimism(null, ev, 'x').length === 0 && m._extractUrlClaims('POST /a').length === 1 && m._verifyUrlClaim({ path: '/a' }, 'has /a') === true; const src = read(__filename); const moved = OPTIMISM_PATTERNS === c.OPTIMISM_PATTERNS && _puDetectOptimism === m._detectOptimism && !/const OPTIMISM_PATTERNS = \[/.test(src) && !/function _extractUrlClaims\(/.test(src); return catOk && work && moved; } },
@@ -3941,7 +3974,7 @@ function _selfTestCases() {
     { name: 'UR-0025 큰핸들러토대: lib/io.js fs 프리미티브(read/writeUtf8/exists/mkdirp/append/rel/absRoot) 분리 + round-trip (1.9.383)', run: () => { const io = require('../lib/io'); const exp = ['absRoot', 'exists', 'read', 'readBuf', 'mkdirp', 'writeUtf8', 'append', 'rel'].every(k => typeof io[k] === 'function') && io.read === read && io.writeUtf8 === writeUtf8 && io.exists === exists; const src = read(__filename); const moved = !/^function writeUtf8\(p, s\) \{/m.test(src) && !/^function read\(p\) \{/m.test(src) && !/^function exists\(p\) \{/m.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_io_')); let rt = false; try { const f = path.join(tmp, 'a', 'b.txt'); io.writeUtf8(f, '한글RT'); rt = io.exists(f) && io.read(f) === '한글RT' && io.rel(tmp, f) === 'a/b.txt'; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return exp && moved && rt; } },
     { name: '5th외부평가/UR-0085: status --json 구조화 출력 + verify --json 와이어 (1.9.384)', run: () => { if (typeof status !== 'function' || typeof verify !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sj_')); const save = process.argv; const _w = process.stdout.write; let so = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'status', tmp, '--json']; process.stdout.write = s => { so += s; return true; }; status(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let sj; try { sj = JSON.parse(so); } catch {} const statusOk = !!sj && typeof sj.total === 'number' && typeof sj.present === 'number' && 'healthy' in sj && Array.isArray(sj.missing); const src = read(__filename); const verifyWired = /function verify\(root\) \{[\s\S]*?has\('--json'\)[\s\S]*?JSON\.stringify\(\{ ok:/.test(src); return statusOk && verifyWired; } },
     { name: '5th외부평가/UR-0086: _parseContractSpec markdown bullet 함수 감지 + 순수 추출 (1.9.385)', run: () => { const m = require('../lib/pure-utils'); if (m._parseContractSpec !== _parseContractSpec) return false; const p = _parseContractSpec('# Spec\n- add(a,b)\n* subtract(a,b)\n1. multiply(a,b)\nfunction legacy(x)\n`mentioned(`\ntick.amount\n'); const declOk = ['add', 'subtract', 'multiply', 'legacy'].every(n => p.declared.includes(n)) && p.declared.length === 4; const menOk = p.mentioned.includes('mentioned') && !p.declared.includes('mentioned'); const fieldOk = p.fields.includes('amount'); const fpOk = _parseContractSpec('- 합계 (a+b)\n- result (total)\n- foo: bar(x)\n**bold**').declared.length === 0; const src = read(__filename); const moved = src.includes('_parseContractSpec(specText)') && !/specText\.matchAll\(\/function/.test(src); return declOk && menOk && fieldOk && fpOk && moved; } },
-    { name: '5th외부평가/UR-0087: _gitignoreMatch git 일치(.env↛.env.bad) + env-family 스캔 (1.9.386)', run: () => { const m = require('../lib/pure-utils'); if (m._gitignoreMatch !== _gitignoreMatch) return false; const gm = _gitignoreMatch; const semOk = gm('.env', '.env') === true && gm('.env', '.env.bad') === false && gm('.env', '.env.local') === false && gm('.env.*', '.env.bad') === true && gm('.env*', '.env') === true && gm('*.pem', 'k.pem') === true && gm('src/', 'src/a.txt') === true; const src = read(__filename); const envFamilyScan = src.includes('const isEnvFamily =') && src.includes('!SCAN_TEXT_EXT.has(ext) && !isEnvFamily'); const delegated = src.includes('return _gitignoreMatch(gi, fileRel)'); return semOk && envFamilyScan && delegated; } },
+    { name: '5th외부평가/UR-0087: _gitignoreMatch git 일치(.env↛.env.bad) + env-family 스캔 (1.9.386)', run: () => { const m = require('../lib/pure-utils'); if (m._gitignoreMatch !== _gitignoreMatch) return false; const gm = _gitignoreMatch; const semOk = gm('.env', '.env') === true && gm('.env', '.env.bad') === false && gm('.env', '.env.local') === false && gm('.env.*', '.env.bad') === true && gm('.env*', '.env') === true && gm('*.pem', 'k.pem') === true && gm('src/', 'src/a.txt') === true; const src = read(__filename); let envFamilyScan = false; { /* 1.36.83 (공허가드 스윕): 종전 리터럴 '!SCAN_TEXT_EXT.has(ext) && !isEnv' + 'Family' 은 1.36.56 리팩터(_known)로 제품에서 사라져 이 줄 자신만 매칭하던 공허 가드였다. env-family 강제포함을 행위로 검사한다: .env.production 은 확장자('.production')가 allow-list 밖 + 64KB 초과라, isEnvFamily 가 _known 에서 빠지면 '작은 텍스트' 폴백 경로에서 크기로 걸러져 미탐된다(실측 1→0). */ const _t = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_envfam_')); try { fs.writeFileSync(path.join(_t, '.env.production'), 'x'.repeat(70 * 1024) + '\nAWS_ACCESS_KEY_ID=' + 'AKIAJQXMP7RZ2KL9WXYZ' + '\n'); const _r = _collectSecretFindings(_t); envFamilyScan = _r.findings.some(f => f.file === '.env.production' && f.name === 'AWS Access Key'); } catch { envFamilyScan = false; } finally { try { fs.rmSync(_t, { recursive: true, force: true }); } catch {} } } const delegated = src.includes('return _gitignoreMatch(gi, fileRel)'); return semOk && envFamilyScan && delegated; } },
     { name: 'UR-0088 5th외부평가 일관성: incident/runs list 빈 케이스 --json 구조화 (1.9.387)', run: () => { if (typeof incidentListCmd !== 'function' || typeof runsListCmd !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lj_')); const save = process.argv; const _w = process.stdout.write; let io = '', ro = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'incident', 'list', '--json']; process.stdout.write = s => { io += s; return true; }; incidentListCmd(tmp); process.stdout.write = _w; process.argv = ['node', 'h', 'runs', 'list', '--json']; process.stdout.write = s => { ro += s; return true; }; runsListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let ij, rj; try { ij = JSON.parse(io); rj = JSON.parse(ro); } catch {} return !!ij && ij.total === 0 && Array.isArray(ij.items) && !!rj && rj.total === 0 && Array.isArray(rj.items); } },
     { name: 'UR-0025 큰핸들러 모듈화: migrate audit/apply/plan → lib/migrate.js + DI 위임 + 동작 (1.9.388)', run: () => { const m = require('../lib/migrate'); const expOk = typeof m.migrateAuditCmd === 'function' && typeof m.migrateApplyCmd === 'function' && typeof m.migratePlanCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/migrate')") && src.includes('_migrate.migrateAuditCmd(root, opts, _migrateDeps())') && src.includes('_migrate.migratePlanCmd(root, opts, _migrateDeps())'); const movedToLib = read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).includes('leerness-plan-'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_mig_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'HARNESS_VERSION'), VERSION); process.argv = ['node', 'h', 'migrate', 'audit', tmp, '--json']; process.stdout.write = s => { out += s; return true; }; migrateAuditCmd(tmp, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && typeof j.willChange === 'number' && Array.isArray(j.findings); } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: 'UR-0025 큰핸들러 모듈화: teamCmd → lib/team.js + DI 위임 + 동작 (1.9.389)', run: () => { const m = require('../lib/team'); const expOk = typeof m.teamCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/team')") && src.includes('_team.teamCmd(root, sub, id, opts,'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const movedToLib = teamSrc.includes("require('./pure-utils')") && teamSrc.includes('_teamDeployGate') && teamSrc.includes('알 수 없는 team 하위명령'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tm_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'team', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; teamCmd(tmp, 'list', undefined, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && j.count === 0 && Array.isArray(j.teams); } catch {} return expOk && delegated && movedToLib && behavOk; } },
@@ -3962,7 +3995,25 @@ function _selfTestCases() {
     { name: '7번째 버그헌트 P1-B (UR-0105): verify-claim/optimism-check/honesty-check --json 에러 구조화 (1.9.400)', run: () => { const src = read(__filename); const vc = /function verifyClaimCmd[\s\S]{0,1200}?failJson\(_j, 'not_found'/.test(src); const oc = /function optimismCheckCmd[\s\S]{0,700}?failJson\(_j, 'not_found'/.test(src); const hc = /function honestyCheckCmd[\s\S]{0,900}?failJson\(has\('--json'\), 'not_found'/.test(src); return vc && oc && hc; } },  // 1.30.5: {0,400}→{0,700} (F4 가 missing_args 라인을 en/ko 로 늘려 not_found 가 창 밖) · 1.33.2: vc {0,700}→{0,1200} (opts.collect 가드 라인이 not_found 를 더 밀어냄)
     { name: '7번째 버그헌트 P1-C (UR-0106): 시크릿 FN — gitignore 부정(!) + placeholder substring 정밀화 (1.9.401)', run: () => { const m = require('../lib/pure-utils'); const gm = m._gitignoreMatch; const negOk = gm('*.example\n!.env.example', '.env.example') === false && gm('*.log', 'a.log') === true && gm('a.log\n!a.log', 'a.log') === false && gm('.env', '.env') === true; const ph = m._isPlaceholderSecret; const phOk = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false && ph('your-key-here') === true && ph('changeme') === true && ph('example') === true && ph('xxxxxxxxxxxxxxxxxxxxxxxxxxxx') === true; return negOk && phOk; } },
     { name: '7번째 버그헌트 P1-A 잔여 (UR-0108): decisions/lessons MD projection 개행 주입 차단 _lineSafe (1.9.402)', run: () => { const m = require('../lib/pure-utils'); if (m._lineSafe !== _lineSafe) return false; const lsOk = _lineSafe('a\nb\r\nc') === 'a b c'; const md = m._renderDecisionsMd([{ date: '2026-06-07', title: 'real\n### 2099-01-01 — FAKE\n- Decision: forged', decision: 'd', reason: 'r' }]); const re = m._decisionsFromMd(md); const noInject = re.length === 1 && !/^### 2099-01-01 — FAKE/m.test(md); const lmd = m._renderLessonsMd([{ date: '2026-06-07', text: 'l1\n### FAKE\n- Lesson: x', tag: 't' }]); const lre = m._parseLessonEntries(lmd); const lNoInject = lre.length === 1; return lsOk && noInject && lNoInject; } },
-    { name: '7번째 버그헌트 P2 (UR-0107): api-skill show/drop 에러 exit code 1 (1.9.403)', run: () => { const src = read(__filename); const showId = src.includes("api-skill show <id>')); process.exitCode = 1"); const dropId = src.includes("api-skill drop <id>')); process.exitCode = 1"); const addUrl = src.includes("api-skill add <url> [--direction") && src.includes('process.exitCode = 1'); return showId && dropId && addUrl; } },
+    { name: '7번째 버그헌트 P2 (UR-0107): api-skill show/drop 에러 exit code 1 (1.9.403)', run: () => {
+      // 낡은 소스-리터럴(인라인 `process.exitCode = 1`) 대신 **행위 검사**: 1.36.74 에서 에러 경로가 failJson 으로
+      //   리팩터되며 리터럴이 가드 자기 줄에만 남아 공허참이 됐다. 실제로 호출해 exit code 를 확인한다.
+      if (typeof apiSkillCmd !== 'function') return false;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_apisk_'));
+      const save = process.argv; const _w = process.stdout.write; const _e = process.stderr.write; const savedExit = process.exitCode;
+      const c = {};
+      try {
+        process.stdout.write = () => true; process.stderr.write = () => true;
+        const ex = (tail, sub) => { process.argv = ['node', 'h'].concat(tail); process.exitCode = 0; const p = apiSkillCmd(tmp, sub); if (p && typeof p.catch === 'function') p.catch(() => {}); return process.exitCode || 0; };
+        c.showNoId = ex(['api-skill', 'show'], 'show');
+        c.dropNoId = ex(['api-skill', 'drop'], 'drop');
+        c.showNf = ex(['api-skill', 'show', 'NOPE'], 'show');
+        c.dropNf = ex(['api-skill', 'drop', 'NOPE'], 'drop');
+        c.addNoUrl = ex(['api-skill', 'add'], 'add');
+        c.list = ex(['api-skill', 'list'], 'list');
+      } catch (e) { return false; } finally { process.stdout.write = _w; process.stderr.write = _e; process.argv = save; process.exitCode = savedExit; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      return c.showNoId === 1 && c.dropNoId === 1 && c.showNf === 1 && c.dropNf === 1 && c.addNoUrl === 1 && c.list === 0;
+    } },
     { name: '7번째 버그헌트 P2 (UR-0105 잔여): reuse autodetect / creds check --json 에러 구조화 (1.9.404)', run: () => { const src = read(__filename); const reuseOk = src.includes("failJson(has('--json'), 'no_scan_dir'"); const credsOk = src.includes("failJson(has('--json'), 'no_service'"); return reuseOk && credsOk; } },
     { name: '8번째 버그헌트 회귀수정 (UR-0109): 긴 서술형 placeholder FP 차단(마커 우선) + 실키 FN 유지 (1.9.405)', run: () => { const m = require('../lib/pure-utils'); const ph = m._isPlaceholderSecret; const fpFixed = ph('your-super-secret-api-key-example-value') === true && ph('this-is-just-an-example-placeholder-value') === true && ph('example-api-key-do-not-use-1234567890') === true; const fnKept = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false; const realKept = ph('a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6') === false; const shortPh = ph('your-api-key-here') === true && ph('changeme') === true; return fpFixed && fnKept && realKept && shortPh; } },
     { name: '8번째 버그헌트 (UR-0110): rule/decision/lesson add 동시쓰기 _withLock 직렬화 (UR-0043 갭 메움) (1.9.406)', run: () => { const src = read(__filename); const L = '_withLock('; const ruleLock = src.includes(L + 'rulesPath' + '(root), () =>'); const decLock = src.includes(L + 'decisionsJsonPath' + '(root), () =>'); const lesLock = src.includes(L + 'lessonsJsonPath' + '(root), () =>'); return ruleLock && decLock && lesLock; } },
@@ -3972,10 +4023,56 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0114): absRoot 비문자열(--path 값없음 boolean true) → cwd 폴백(raw TypeError 차단) (1.9.410)', run: () => { const io = require('../lib/io'); const cwd = process.cwd(); const tBool = io.absRoot(true) === cwd; const tEmpty = io.absRoot('') === cwd; const tUndef = io.absRoot(undefined) === cwd; const tSpace = io.absRoot('   ') === cwd; const tReal = io.absRoot(os.tmpdir()) === path.resolve(os.tmpdir()); return tBool && tEmpty && tUndef && tSpace && tReal; } },
     { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
     { name: '6번째 외부평가 Opus P1 (UR-0100): list-family(decision/feature/plan/runs/team list) positional path 지원 (조용한 cwd 오독 차단) (1.9.412)', run: () => { const src = read(__filename); const L = '_resolveRoot('; const decOk = src.includes("decisionListCmd(absRoot(" + L + "args[2]))"); const planOk = src.includes("planListCmd(absRoot(" + L + "args[2]))"); const featOk = src.includes("featureListCmd(absRoot(" + L + "args[2]))"); const runsOk = src.includes("runsListCmd(absRoot(" + L + "args[2]))"); const teamOk = src.includes(L + "args[1] === 'list' ? args[2] : null)"); return decOk && planOk && featOk && runsOk && teamOk; } },
-    { name: '6번째 외부평가 codex P2 (UR-0101): action 명령(task/decision/rule/lesson add) --json 구조화 출력 (1.9.413)', run: () => { const src = read(__filename); const taskJ = src.includes("log(JSON.stringify({ ok: true, id, status: arg('--status', 'requested'), request: text }))"); const decJ = src.includes("log(JSON.stringify({ ok: true, title }))"); const lesJ = src.includes("log(JSON.stringify({ ok: true, text, tag: tag || null }))"); const ruleJ = src.includes("skipped: !!result.skip"); return taskJ && decJ && lesJ && ruleJ; } },
+    { name: '6번째 외부평가 codex P2 (UR-0101): action 명령(task/decision/rule/lesson add) --json 구조화 출력 (1.9.413)', run: () => {
+      // 낡은 소스-리터럴(task 의 status 표현이 _normTaskStatus 로 바뀌며 썩음) 대신 **행위 검사**:
+      //   4개 add 명령을 --json 으로 실제 호출해 구조화 페이로드(단일 JSON 문서)를 파싱·검증한다.
+      if (typeof taskAdd !== 'function' || typeof decisionAdd !== 'function' || typeof lessonSave !== 'function' || typeof ruleAdd !== 'function') return false;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_addjson_'));
+      const save = process.argv; const _w = process.stdout.write; const savedExit = process.exitCode;
+      let t = null, d = null, l = null, r = null, rDup = null;
+      try {
+        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.harness', 'HARNESS_VERSION'), VERSION);
+        const cap = (argv, fn) => {
+          let out = ''; process.argv = argv; process.stdout.write = s => { out += s; return true; };
+          try { fn(); } finally { process.stdout.write = _w; }
+          const line = out.split(/\r?\n/).map(x => x.trim()).filter(x => x.startsWith('{')).pop();
+          try { return JSON.parse(line); } catch { return null; }
+        };
+        t = cap(['node', 'h', 'task', 'add', 'JSON계약 T', '--json', '--no-review'], () => taskAdd(tmp, 'JSON계약 T'));
+        d = cap(['node', 'h', 'decision', 'add', 'JSON계약 D', '--json'], () => decisionAdd(tmp, 'JSON계약 D'));
+        l = cap(['node', 'h', 'lesson', 'save', 'JSON계약 L', '--json', '--tag', 'tg'], () => lessonSave(tmp, 'JSON계약 L'));
+        r = cap(['node', 'h', 'rule', 'add', 'JSON계약 R', '--json', '--trigger', 'every-session'], () => ruleAdd(tmp, 'JSON계약 R'));
+        rDup = cap(['node', 'h', 'rule', 'add', 'JSON계약 R', '--json', '--trigger', 'every-session'], () => ruleAdd(tmp, 'JSON계약 R'));
+      } catch (e) { return false; } finally { process.stdout.write = _w; process.argv = save; process.exitCode = savedExit; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      const taskJ = !!t && t.ok === true && /^T-\d{4}/.test(String(t.id)) && t.status === 'requested' && t.request === 'JSON계약 T';
+      const decJ = !!d && d.ok === true && d.title === 'JSON계약 D';
+      const lesJ = !!l && l.ok === true && l.text === 'JSON계약 L' && l.tag === 'tg';
+      const ruleJ = !!r && r.ok === true && r.rule === 'JSON계약 R' && r.trigger === 'every-session' && r.skipped === false && !!rDup && rDup.skipped === true;
+      return taskJ && decJ && lesJ && ruleJ;
+    } },
     { name: '9th 외부평가 Codex P2 (UR-0121 잔여): health 보안 정직화(커밋 시크릿 반영) + status scope:install (1.9.418)', run: () => {
       const src = read(__filename);
-      const healthWired = src.includes('_collectSecretFindings(root)') && src.includes('committedSecrets') && src.includes('커밋 대상 하드코딩 시크릿');
+      // 1.36.83 (검수 High#1, 실측 확정): 이 세 단언은 bin 을 읽지만 검증 대상은 lib/health.js 에 있다 —
+      //   `_collectSecretFindings(root)`/`committedSecrets` 는 bin 의 **무관한 다른 호출**이 만족시키고
+      //   한국어 문구는 이 가드 줄 자신이 만족시킨다. 실제로 lib/health.js 의 스캐너 연결을 제거해
+      //   커밋된 시크릿이 있는데도 healthy:true 가 나오게 만들어도 selftest 는 337/337 초록이었다.
+      //   → 실제 시크릿을 심은 워크스페이스로 healthCmd 를 돌려 **행위**로 검증한다.
+      let healthWired = false;
+      {
+        const _hd = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_health_'));
+        try {
+          mkdirp(path.join(_hd, '.harness'));
+          writeUtf8(path.join(_hd, '.harness', 'HARNESS_VERSION'), VERSION);
+          // 다른 selftest 케이스가 "placeholder 아님"으로 단언하는 실 탐지 대상 값(분할 표기로 자기참조 회피)
+          writeUtf8(path.join(_hd, 'cfg.js'), 'const k = "' + 'AKIA' + 'JQXMP7RZ2KL9WXYZ' + '";\n');
+          const _r = cp.spawnSync(process.execPath, [__filename, 'health', _hd, '--json'],
+            { encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
+          const _j = JSON.parse(_r.stdout.slice(_r.stdout.indexOf('{')));
+          const _s = (_j.checks || {}).security || {};
+          healthWired = _s.committedSecrets >= 1 && _s.critical === true && _j.healthy === false;
+        } catch { healthWired = false; } finally { try { fs.rmSync(_hd, { recursive: true, force: true }); } catch {} }
+      }
       const statusScope = src.includes("scope: 'install'") && src.includes('healthyMeaning');
       return healthWired && statusScope && typeof healthCmd === 'function' && typeof status === 'function';
     } },
@@ -4043,10 +4140,23 @@ function _selfTestCases() {
       return expOk && delegated && movedToLib;
     } },
     { name: '10th 외부평가 Sonnet P2: rule add flag/경로 break(_parseAddTitle) — trigger 값/경로 흡수 차단 (1.9.426)', run: () => {
-      const src = read(__filename);
-      const wired = src.includes("ruleAdd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), _parseAddTitle(args, 2))");
+      // 낡은 소스-리터럴(디스패처 한 줄 그대로)은 1.30.4/1.9.445 리팩터로 썩어 자기참조 공허참이 됐다.
+      //   대신 **실행 검사**: rule add 를 실제 spawn 해 (a) 제목이 --trigger 값/후행 경로를 흡수하지 않는지,
+      //   (b) positional path 가 root 로 쓰이고 cwd 는 오염되지 않는지 확인한다.
       const m = require('../lib/pure-utils');
       const u = m._parseAddTitle(['rule', 'add', '세션', '점검', '--trigger', 'every-session', '/p'], 2) === '세션 점검';
+      const proj = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ruleproj_'));
+      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rulecwd_'));
+      let wired = false;
+      try {
+        for (const d of [proj, cwd]) { fs.mkdirSync(path.join(d, '.harness'), { recursive: true }); fs.writeFileSync(path.join(d, '.harness', 'HARNESS_VERSION'), VERSION); }
+        const r = cp.spawnSync(process.execPath, [__filename, 'rule', 'add', '세션', '점검', '--trigger', 'every-session', proj, '--json'], { encoding: 'utf8', cwd, timeout: 30000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1' } });
+        const line = (r.stdout || '').split(/\r?\n/).map(x => x.trim()).filter(x => x.startsWith('{')).pop();
+        const j = JSON.parse(line);
+        const titleOk = j.ok === true && j.rule === '세션 점검' && j.trigger === 'every-session';
+        const rootOk = fs.existsSync(path.join(proj, '.harness', 'rules.md')) && !fs.existsSync(path.join(cwd, '.harness', 'rules.md'));
+        wired = titleOk && rootOk;
+      } catch (e) { wired = false; } finally { for (const d of [proj, cwd]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} } }
       return wired && u;
     } },
     { name: '클린룸 (UR-0184): feature add/show/link/impact positional-path 와이어 + 미초기화 게이트 + _taskPositionalPath 값-플래그 skip (1.36.2)', run: () => {
@@ -4330,7 +4440,24 @@ function _selfTestCases() {
     { name: 'UR-0151: decision/lesson/rule add positional path 지원(_taskPositionalPath 재사용, cwd 오염 차단) (1.9.445)', run: () => {
       const src = read(__filename);
       // 1.12.1 (UR-0008): 멀티라인 exact-string includes 는 공백/줄바꿈/환경에 취약(클린룸 selftest false-alarm) → 공백 유연 정규식(\s+)으로 견고화.
-      const rule = src.includes("ruleAdd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), _parseAddTitle(args, 2))");
+      // 1.36.80 (가드 부패 수리): 낡은 exact-literal "…, _parseAddTitle(args, 2))" 은 1.30.4 리팩터(_desc 변수 추출)로 제품 코드에서
+      //   사라졌고 이 가드 줄 자신에만 남아 includes 가 영원히 참이었다(자기참조 false-pass — dispatch 를 통째로 process.cwd() 로 바꿔도 초록).
+      //   → 소스 문자열 대신 실제 CLI 실행으로 "positional 경로에 기록 + cwd 미오염"을 행위 검증한다.
+      let rule = false;
+      const _rt = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ur0151_'));
+      try {
+        const _proj = path.join(_rt, 'proj'), _cwdDir = path.join(_rt, 'cwd');
+        fs.mkdirSync(path.join(_proj, '.harness'), { recursive: true });
+        fs.writeFileSync(path.join(_proj, '.harness', 'HARNESS_VERSION'), VERSION);   // init 게이트 통과용 최소 마커
+        fs.mkdirSync(_cwdDir, { recursive: true });                                    // 미초기화 — cwd 로 새면 write 자체가 차단됨
+        const _rtitle = 'UR-0151 positional path 회귀가드';
+        cp.spawnSync(process.execPath, [__filename, 'rule', 'add', _rtitle, _proj, '--trigger', 'every-session', '--json'],
+          { cwd: _cwdDir, encoding: 'utf8', timeout: 60000, maxBuffer: 8 * 1024 * 1024 });
+        const _inProj = readRules(_proj).some(r => r.rule === _rtitle && r.status === 'active');
+        const _cwdRules = path.join(_cwdDir, '.harness', 'rules.md');
+        const _inCwd = exists(_cwdRules) && read(_cwdRules).includes(_rtitle);
+        rule = _inProj && !_inCwd;
+      } catch {} finally { try { fs.rmSync(_rt, { recursive: true, force: true }); } catch {} }
       const lesson = /if \(cmd === 'lesson'\) \{\s+const root = absRoot\(arg\('--path', null\) \|\| _taskPositionalPath\(args, 2\) \|\| process\.cwd\(\)\)/.test(src);
       const decision = /if \(cmd === 'decision'\) \{\s+const root = absRoot\(arg\('--path', null\) \|\| _taskPositionalPath\(args, 2\) \|\| process\.cwd\(\)\)/.test(src);
       // rule add 의 --trigger 값은 경로 아님(path-like 아님) + 값-플래그 제외
@@ -4552,8 +4679,31 @@ function _selfTestCases() {
     } },
     { name: '15th 잔여 클러스터 (UR-0017~0021): api-skill CRLF + shell-guard 공백없는&& + stat-before-read + 중첩skip + requirements 디렉티브 (1.12.5)', run: () => {
       const src = read(__filename);
-      const apiCrlf = src.includes("const content = read(fp).replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');") && src.includes('urls: [], name: id, body: content }');
-      const statBeforeRead = src.includes('if (fs.statSync(file).size > 1024 * 1024) continue;') && src.includes('if (fs.statSync(file).size > 5 * 1024 * 1024) continue;') && src.includes('if (fs.statSync(fp2).size > budget) continue;');
+      // 1.36.80 (가드 부패 수리): 낡은 exact-literal 두 개(_loadAPISkill 손상-fallback 객체 리터럴 / 스캔 루프의 1MB stat 한 줄)는
+      //   각각 1.36.74(손상 frontmatter 표시 필드 추가) · 1.36.56(stat 1회화 리팩터)로 제품 코드에서 사라졌고 이 가드 줄 자신에만 남아
+      //   includes 가 영원히 참이었다(자기참조 false-pass). → CRLF 정규화/손상 fallback 은 _loadAPISkill 실호출,
+      //   1MB 상한은 _collectSecretFindings 실호출로 행위 검증하고, "stat 이 read 보다 먼저"라는 순서만 불변식 정규식으로 확인한다.
+      let apiCrlf = false, statBeforeRead = false;
+      const _t15 = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_g15_'));
+      try {
+        const _sk = path.join(_t15, '.harness', 'api-skills');
+        fs.mkdirSync(_sk, { recursive: true });
+        fs.writeFileSync(path.join(_sk, 'crlf.md'), '---\r\nid: crlf\r\nname: CRLF Skill\r\nurls:\r\n  - https://ex.test/doc\r\n---\r\n본문\r\n');
+        fs.writeFileSync(path.join(_sk, 'broken.md'), '---\nid: broken\n닫는 구분자 없음 — frontmatter 손상\n');
+        const _s1 = _loadAPISkill(_t15, 'crlf');      // CRLF: raw read 였다면 frontmatter 전부 유실
+        const _s2 = _loadAPISkill(_t15, 'broken');    // 손상: body 없으면 _matchAPISkills 의 s.body.slice 크래시
+        apiCrlf = !!_s1 && _s1.name === 'CRLF Skill' && _s1.urls.length === 1 && _s1.urls[0] === 'https://ex.test/doc' && !/\r/.test(String(_s1.body))
+          && !!_s2 && typeof _s2.body === 'string' && _s2.body.length > 0 && Array.isArray(_s2.urls) && _s2.name === 'broken';
+        const _sec = 'module.exports={apiKey:"sk-test-1234567890abcdefghijklmnopqrstuvwxyz"};';
+        fs.writeFileSync(path.join(_t15, 'small.js'), _sec);
+        fs.writeFileSync(path.join(_t15, 'big.js'), '// ' + 'x'.repeat(1024 * 1024) + '\n' + _sec);
+        const _hits = _collectSecretFindings(_t15).findings || [];
+        const _capOk = _hits.some(f => /small\.js/.test(f.file)) && !_hits.some(f => /big\.js/.test(f.file));   // 1MB 초과는 스캔 제외
+        const _order = /statSync\(file\)[\s\S]{0,240}?size > 1024 \* 1024\)\s*continue;[\s\S]{0,600}?read(?:FileSync)?\(file\)/.test(src)
+          && /statSync\(file\)\.size > 5 \* 1024 \* 1024\)\s*continue;[\s\S]{0,240}?readBuf\(file\)/.test(src)
+          && /statSync\(fp2\)\.size > budget\)\s*continue;[\s\S]{0,160}?read\(fp2\)/.test(src);
+        statBeforeRead = _capOk && _order;
+      } catch {} finally { try { fs.rmSync(_t15, { recursive: true, force: true }); } catch {} }
       const nestedSkip = src.includes('segs.some(s => SCAN_SKIP_DIRS.has(s))');
       const an = require('../lib/analyzers');
       const sg = an._shellGuardAnalyze('npm run build&&npm test', { shell: 'powershell', psVersion: 5 });
@@ -4575,11 +4725,33 @@ function _selfTestCases() {
     } },
     { name: 'Karpathy 가이드라인4 (UR-0032): plan --done-when 검증가능 완료조건 저장/파싱/표시 (1.14.2)', run: () => {
       const src = read(__filename);
-      const wired = src.includes("const doneWhen = _lineSafe(arg('--done-when', '') || '(미정)')") && src.includes('Done-When: ${doneWhen}') && src.includes("const doneWhenMatch = b.match(/^Done-When:") && src.includes('doneWhen: doneWhenMatch ? doneWhenMatch[1].trim() : null')
-        && src.includes("'--ps-version','--done-when'");  // 잠복버그 회귀가드: nonFlagArgs withValue 에 --done-when (제목 흡수 차단)
-      const b = '### M-0001. 로그인\nStatus: planned\nProgress: 0%\nDone-When: 로그인 e2e 테스트 통과\n\nTasks:\n- [ ] x\n';
-      const dw = (b.match(/^Done-When:\s*(.+)$/m) || [])[1];
-      return wired && dw === '로그인 e2e 테스트 통과';
+      // 1.36.80 (가드 부패 수리): planAdd 의 doneWhen 기본값 한 줄을 통째로 박아둔 낡은 exact-literal 은 1.36.63 다국어화로
+      //   제품 코드에서 사라졌고 이 가드 줄 자신에만 남아 includes 가 영원히 참이었다(자기참조 false-pass — --done-when 을 통째로 무시해도 초록).
+      //   아래 dw 계산도 제품 파서가 아니라 이 케이스가 새로 쓴 정규식이라 아무것도 지키지 못했다.
+      //   → plan add 를 실제 실행해 저장(plan.md)과 파싱(planListCmd)을 행위 검증. 표시/기본값은 언어별이라 불변식 정규식으로.
+      let wired = false;
+      const _tp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_dw_'));
+      try {
+        fs.mkdirSync(path.join(_tp, '.harness'), { recursive: true });
+        fs.writeFileSync(path.join(_tp, '.harness', 'HARNESS_VERSION'), VERSION);
+        const _cond = '로그인 e2e 테스트 통과';
+        const _mtitle = 'Done-When 회귀가드';
+        cp.spawnSync(process.execPath, [__filename, 'plan', 'add', _mtitle, '--path', _tp, '--done-when', _cond, '--json'],
+          { cwd: _tp, encoding: 'utf8', timeout: 60000, maxBuffer: 8 * 1024 * 1024 });
+        // 저장: milestone 블록에 Done-When 줄 + 제목이 --done-when 값을 흡수하지 않음(nonFlagArgs withValue 회귀가드)
+        const _pm = read(planPath(_tp));
+        const _stored = new RegExp('^### M-\\d{4,}\\. ' + _mtitle + '$[\\s\\S]*?^Done-When: ' + _cond + '$', 'm').test(_pm);
+        // 파싱: 제품 파서(planListCmd)가 doneWhen 을 실제로 되돌려줌
+        let _out = ''; const _wr = process.stdout.write;
+        try { process.stdout.write = x => { _out += x; return true; }; planListCmd(_tp, { json: true }); } finally { process.stdout.write = _wr; }
+        let _ms = []; try { _ms = JSON.parse(_out).milestones || []; } catch {}
+        const _parsed = _ms.length === 1 && _ms[0].doneWhen === _cond && _ms[0].title === _mtitle;
+        // 표시 + 미지정 기본값: 1.36.63 다국어화로 값이 언어별 → exact 리터럴 대신 불변식
+        const _shown = /완료기준\(Done-When\): \$\{m\.doneWhen/.test(src);
+        const _hasDefault = /const doneWhen = _lineSafe\(arg\('--done-when', ''\)\s*\|\|/.test(src);
+        wired = _stored && _parsed && _shown && _hasDefault;
+      } catch {} finally { try { fs.rmSync(_tp, { recursive: true, force: true }); } catch {} }
+      return wired;
     } },
     { name: '16th 버그헌트 F1/F2: scan secrets 패턴당 멀티매치(break 제거) + task/rule list 파이프 셀안전 (1.15.1)', run: () => {
       const src = read(__filename);
@@ -4589,8 +4761,18 @@ function _selfTestCases() {
     } },
     { name: '외부클린룸 C2/C3/C4: gate --json 단일객체 + memory search --json + about .harness 정합 (1.16.1)', run: () => {
       const src = read(__filename);
-      const c2 = src.includes("const jsonMode = has('--json');  // 외부리뷰 C2") && src.includes('ok: bad === 0, total: checks.length, failed: bad, checks');
-      const c3 = src.includes('// 외부리뷰 C3: --json 일관성') && src.includes('JSON.stringify({ version: VERSION, query, total, includeCode');
+      // 자기참조 제거: 낡은 리터럴("const jsonMode = has('--json');  // 외부리뷰 C2")은 리팩터로 제품 코드에서 사라져 가드 자기 줄에서만 매치했다.
+      //   gate() 함수 소스만(셀프테스트 영역 제외) 불변식 정규식으로 검사 — 단일 집계 객체 + 단계 출력 억제.
+      const _gateSrc = gate.toString();
+      const c2 = /const jsonMode = has\('--json'\)/.test(_gateSrc)
+        && /if \(jsonMode\) process\.stdout\.write = \(\) => true;/.test(_gateSrc)
+        && /if \(jsonMode\) \{ log\(JSON\.stringify\(\{[^\n}]*ok: bad === 0, total: checks\.length, failed: bad, checks\b/.test(_gateSrc);
+      // 자기참조 제거: 낡은 리터럴('JSON.stringify({ version: VERSION, query, total, includeCode')은 필드 추가 리팩터로
+      //   제품 코드에서 사라졌다(가드 자기 줄만 매치). memorySearch() 함수 소스만 불변식 정규식으로 검사.
+      const _msSrc = memorySearch.toString();
+      const c3 = /const jsonMode = has\('--json'\)/.test(_msSrc)
+        && /if \(!jsonMode\) log\(/.test(_msSrc)
+        && /if \(jsonMode\) \{ log\(JSON\.stringify\(\{ version: VERSION, query,[^\n]*\btotal,[^\n]*\bincludeCode:[^\n]*\bresults\b/.test(_msSrc);
       const _badDir = '.leern' + 'ess/ 에 영속화 (state start';  // 자기참조 회피: 분할 — about state 줄이 .leerness 로 남아있으면 감지
       const c4 = src.includes('상태/결정/진행을 .harness/ 에 영속화 (task/decision') && !src.includes('상태/결정/진행을 ' + _badDir);
       return c2 && c3 && c4;
@@ -4984,7 +5166,8 @@ function _selfTestCases() {
       if (s < 0) return false;
       const nextFn = src.indexOf('\nfunction ', s + 10);
       const e = nextFn < 0 ? src.length : nextFn;
-      let outside = src.slice(0, s) + src.slice(e);
+      const binOutside = src.slice(0, s) + src.slice(e);   // bin 에서 selftest 영역만 제외한 부분
+      let outside = binOutside;
       for (const sub of ['lib', 'scripts']) {
         const dir = path.join(path.dirname(__filename), '..', sub);
         if (!exists(dir)) continue;
@@ -4996,23 +5179,35 @@ function _selfTestCases() {
       //   케이스 **시작 경계**로 분할한다(줄머리 `    { name:`) — 종결 형태에 의존하지 않는다.
       const chunks = region.split(/\n(?=    \{ name: )/).slice(1);
       // 백틱 리터럴도 스캔한다(1차판은 따옴표만 봐서 `.includes(\`…\`)` 로 우회 가능했다).
-      const litRe = /\.includes\((['"`])((?:\\.|(?!\1)[\s\S])*?)\1\)/g;
+      // 1.36.82 (자체 발견): **파일-인지** 판정 — 리터럴이 "제품 어딘가"에 있으면 통과시키던 것을 고친다.
+      //   가드가 read(__filename)(=bin) 을 검사하는데 그 구현이 lib/ 로 옮겨갔다면 그 가드는 여전히 자기 줄만
+      //   매칭한다(실측 3건: drift 최신 Last generated · decision 필드 파싱 · constraints 호출부).
+      //   bin 을 읽는 변수의 리터럴은 **bin 안에서만** 찾고, 다른 변수(lib 파일 등)는 전체에서 찾는다.
+      //   수신 변수 매칭에 단어 경계는 필수 — 없으면 `s.includes` 가 `tps.includes` 에 걸려 오탐이 난다(자체 실측).
+      const litRe = /(\w+)\.includes\((['"`])((?:\\.|(?!\2)[\s\S])*?)\2\)/g;
       const codeish = (L) => /[(){}=;]|=>|\|\||&&/.test(L) && /[a-zA-Z_$]{3,}/.test(L);
       let offenders = 0;
       for (const body of chunks) {
         if (body.includes(MARK)) continue;                 // 이 메타가드 자신 (표식은 소스에 그대로 존재)
         if (!/read\(__filename\)/.test(body)) continue;
+        const binVars = new Set([...body.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*read\(__filename\)/g)].map(m => m[1]));
         litRe.lastIndex = 0;
         let lm;
         while ((lm = litRe.exec(body)) !== null) {
-          const L = lm[2].replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-          if (L.length >= 20 && codeish(L) && !outside.includes(L)) { offenders++; break; }
+          const L = lm[3].replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+          if (L.length < 20 || !codeish(L)) continue;
+          // 템플릿 보간은 **백틱에서만** 일어난다 — 백틱 needle 의 `${...}` 는 런타임 치환이라 원문 비교가 불가능하므로
+          //   제외한다(정상 가드 오탐 1건 실측). 그러나 따옴표 리터럴의 '${...}' 는 그냥 문자열이므로 반드시 검사한다.
+          //   (검수 High#2) 1차판이 따옴표까지 싸잡아 제외해 16개 가드가 무방비가 됐다 — 실측 우회 재현됨.
+          if (lm[2] === '`' && L.includes('${')) continue;
+          const haystack = binVars.has(lm[1]) ? binOutside : outside;
+          if (!haystack.includes(L)) { offenders++; break; }
         }
       }
-      // 1.36.82 실측 잔여 부채 = 12건(파싱 교정 후 전수 337 케이스 기준) — 늘어나면 실패한다.
-      //   줄이는 방향으로만 갱신할 것. "아직 남아 있음"을 숨기지 않기 위해 수치를 명시한다.
-      //   1차판이 보고하던 9 는 케이스 파싱이 337 중 170 만 잡던 과소집계였다(검수 High#6).
-      return offenders <= 12;
+      // 1.36.83: 잔여 부채 **0** — 1.36.82 가 baseline 12 로 유예했던 것을 이 라운드에서 전부 수리했다
+      //   (각 가드는 지키던 동작을 실제로 깨뜨렸을 때 실패함을 변이로 증명). 이제 하나라도 생기면 즉시 실패한다.
+      //   유예 수치를 남겨두면 그 안에서 조용히 썩으므로, 갚은 뒤에는 반드시 0 으로 조인다.
+      return offenders === 0;
     } },
     { name: '동봉 문서의 낡을 수치 주장 금지 (1.36.82): README/docs 의 MCP 도구·selftest 케이스 수가 실측과 불일치 시 실패 (메타가드)', run: () => {
       // 사고: docs/interoperability.md 가 "86 도구"(3릴리스 낡음), README.ko.md 가 "selftest 210 케이스"(실제 335) 를
@@ -5088,8 +5283,22 @@ function _selfTestCases() {
     } },
     { name: 'CLI 영어화 Phase 3 (1.21.2, UR-0010): verify-claim 출력 t() 경유 + 한국어 기본 보존 (소스 가드)', run: () => {
       const src = read(__filename);
-      const en = src.includes('## File check') && src.includes('## Test count') && src.includes('## Summary')
-        && src.includes('implementation substance (done default)') && src.includes('evidence claim matches actual files');
+      // 1.36.83 (검수 Medium#1, 실측 확정): '## File check' / '## Test count' 는 **가드 자신의 줄에만** 존재했다 —
+      //   실제 출력은 이모지가 들어간 '## 📂 File check (0 claimed)' / '## 🧪 Test count' 라 정확 리터럴이 어긋난다.
+      //   → 실제 CLI 를 en 으로 돌려 헤딩이 영어로 렌더되는지 **행위**로 확인하고, ko 보존은 소스로 확인한다.
+      let en = false;
+      {
+        const _ed = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_en3_'));
+        try {
+          cp.spawnSync(process.execPath, [__filename, 'init', _ed, '--yes', '--no-env', '--no-stale-check', '--language', 'en'], { encoding: 'utf8', timeout: 90000 });
+          cp.spawnSync(process.execPath, [__filename, 'task', 'add', 'probe', '--path', _ed], { encoding: 'utf8', timeout: 60000 });
+          const _md = read(path.join(_ed, '.harness', 'progress-tracker.md'));
+          const _tid = [...String(_md).matchAll(/\|\s*(T-\d{4})\s*\|/g)].map(m => m[1]).pop();
+          cp.spawnSync(process.execPath, [__filename, 'progress', 'update', _tid, '--status', 'done', '--evidence', 'bin/leerness.js', '--path', _ed], { encoding: 'utf8', timeout: 60000 });
+          const _o = (cp.spawnSync(process.execPath, [__filename, 'verify-claim', _tid, '--path', _ed, '--language', 'en'], { encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024 }).stdout) || '';
+          en = /^##[^\n]*File check/m.test(_o) && /^##[^\n]*Test count/m.test(_o) && /^##[^\n]*Summary/m.test(_o) && !/[가-힣]/.test(_o.split('\n').filter(l => /^##/.test(l)).join('\n'));
+        } catch { en = false; } finally { try { fs.rmSync(_ed, { recursive: true, force: true }); } catch {} }
+      }
       const koPreserved = src.includes('## 종합') && src.includes('구현 실체 (done 기본)');  // ko 원문이 t() ko 인자로 남아 e2e(ko) 무회귀
       return en && koPreserved;
     } },
@@ -5131,7 +5340,13 @@ function _selfTestCases() {
       const sc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js'));
       const rowsEn = sc.includes("t('- 없음', '- none')") && sc.includes('_retroOneLine(agg, uiLang)');
       const retroEn = bin.includes('function _retroOneLine(agg, lang)') && bin.includes('`done ${done}/${total}') && bin.includes('decisions ${agg.decisionBlocks} accumulated');
-      const roadmapEn = bin.includes('roadmap.html auto-updated (${trigger})');
+      // 자기참조 제거: 1.36.30 에서 자동 생성 대상이 roadmap.html → leerness.html(온톨로지 그래프)로 바뀌며
+      //   'roadmap.html auto-updated (${trigger})' 는 제품 코드에서 사라졌다(가드 자기 줄만 매치).
+      //   _autoRoadmap() 함수 소스만 검사 — en/ko 두 분기가 모두 살아있는지(영어화 정직성).
+      const _arSrc = _autoRoadmap.toString();
+      const roadmapEn = /_uiLang\(root\) === 'en'/.test(_arSrc)
+        && /ontology graph auto-updated \(\${trigger}\)/.test(_arSrc)
+        && /온톨로지 그래프 자동 갱신 \(\${trigger}\)/.test(_arSrc);
       const koPreserved = bin.includes('완료 ${done}/${total}') && bin.includes('온톨로지 그래프 자동 갱신 (${trigger})') && sc.includes("t('- 없음', '- none')");  // ko 인자 보존
       return rowsEn && retroEn && roadmapEn && koPreserved;
     } },
@@ -5422,8 +5637,12 @@ function _selfTestCases() {
       // F-07: 단수형 별칭 매핑 존재
       const aliasOk = s.includes("({ decision: 'decisions', lesson: 'lessons', plans: 'plan' })[surface]");
       // F-02: 비율형 완전-통과 → declaredTestCount 승격 + 신뢰 경계 필드
-      const ratioOk = s.includes('declaredPass.num === declaredPass.denom) declaredTestCount = declaredPass.denom')
-        && s.includes('semanticVerified: false') && s.includes("? 'executed' : 'static'");
+      // 자기참조 제거: 낡은 리터럴('...denom) declaredTestCount = declaredPass.denom')은 블록화 리팩터
+      //   ({ declaredTestCount = ...; _ratioPromoted = true; })로 제품 코드에서 사라졌다(가드 자기 줄만 매치).
+      //   verifyClaimCmd() 함수 소스만 불변식 정규식으로 검사 — 전부-통과(N/N)만 승격.
+      const _vcSrc = verifyClaimCmd.toString();
+      const ratioOk = /declaredTestCount == null && declaredPass && declaredPass\.num === declaredPass\.denom\)[\s\S]{0,40}?declaredTestCount = declaredPass\.denom/.test(_vcSrc)
+        && /semanticVerified: false/.test(_vcSrc) && /\? 'executed' : 'static'/.test(_vcSrc);
       // F-08: Unix .env 0600
       const envOk = /mergeEnvFile[\s\S]{0,600}chmodSync\(p, 0o600\)/.test(s);
       return langOk && aliasOk && ratioOk && envOk;
