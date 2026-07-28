@@ -16,7 +16,7 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 <!-- leerness:migration-preserved -->
 ## Preserved previous content
 
-> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.73-2026-07-25T06-57-47-815Z`
+> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.77-2026-07-28T00-26-08-808Z`
 
 ## 사용자 명시 신규 7종 (1.9.207~213) — 백로그 완전 소진
 ### 1.9.207 — 사용자 요청 누락 확인 절차

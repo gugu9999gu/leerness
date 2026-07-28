@@ -99,3 +99,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0076 | done | 9차 헌트 6건+검수 2건 (1.36.74) | state fail-closed, restore 정체성 판정, skeleton 충돌, MCP EOF, selftest 334, e2e 397/397, npm 게시 | 다음 액션 작성 | 2026-07-25 |
 | T-0077 | done | UR-0066 디자인 시안 워크플로 (1.36.75) | preview mockup+--mockup+AGENTS 계약, 검수 7건, selftest 334, e2e 398/398, npm 게시 | 다음 액션 작성 | 2026-07-25 |
 | T-0078 | done | 9차 이월 3건+티어 교정 (1.36.76) | fatal decode, 티어 9종 재분류, id 안전화, selftest 334, e2e 399/399, npm 게시 | 다음 액션 작성 | 2026-07-25 |
+| T-0079 | done | MCP clarify/preview (1.36.77) | 88도구, MCP 왕복 실측, selftest 334, e2e 400/400, npm 게시 | 다음 액션 작성 | 2026-07-26 |

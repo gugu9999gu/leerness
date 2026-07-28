@@ -29,6 +29,7 @@
 - 작업 시작 시 `leerness handoff .`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).
 - **모호성 질문 의무**: 사용자 요청에 판단이 갈리는 부분(모호한 수식어/지시대명사/복수 선택지/불명확한 범위)이 있으면 **추측으로 구현하지 말고 먼저 사용자에게 질문**합니다. `leerness clarify "<요청>"` 이 감지한 질문 목록을 그대로 사용자에게 물어보세요. 신호가 없어도 스스로 판단이 갈리면 질문이 우선입니다.
 - **미리보기 승인 의무 (신규 기능)**: 사용자가 신규 기능 추가/구현을 요청하면 **코드를 먼저 작성하지 않습니다**. ① `leerness preview add "<기능>" --design "<디자인/UX 설명>" --features "<기능 목록>"` 으로 미리보기를 등록하고 ② 그 내용을 사용자에게 제시해 승인 또는 수정사항을 질문으로 받습니다. ③ 사용자가 승인하면 `leerness preview approve <P-ID>`, 수정 요구면 `leerness preview revise <P-ID> --note "..."` 후 미리보기를 고쳐 다시 제시합니다. **approve 전에는 해당 기능의 코드를 작성하지 않습니다.**
+- **디자인 시안 의무 (웹페이지/디자인 작업)**: 신규 페이지 제작·디자인/리디자인 요청이면 텍스트 설명만으로 끝내지 않습니다. `leerness preview mockup <P-ID>` 로 자립형 HTML 시안 스캐폴드(`.harness/previews/<P-ID>-mockup.html`)를 만들고, **placeholder 영역을 실제 레이아웃 초안(HTML/CSS, 외부 리소스 없이)으로 교체**한 뒤 사용자에게 브라우저로 열어 보여주고 수정/승인을 질문으로 받습니다. 수정 요구가 오면 시안 파일을 고쳐 다시 제시하고, **approve 전에는 실제 페이지/기능 코드를 작성하지 않습니다.** (이미 만든 시안이 있으면 `preview add ... --mockup <파일>` 로 첨부)
 - 작업 분류는 `leerness route <task-type>`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).
 - 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.
 - 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.
@@ -78,7 +79,7 @@ leerness가 자동 검증 가능한 trigger:
 <!-- leerness:migration-preserved -->
 ## Preserved previous content
 
-> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.73-2026-07-25T06-57-47-815Z`
+> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.77-2026-07-28T00-26-08-808Z`
 
 - 완료 선언 전 `leerness check .` 또는 `leerness lazy detect .`로 자기검증합니다.
 ## 사용자 명시 신규 7종 (1.9.207~213) — 백로그 완전 소진

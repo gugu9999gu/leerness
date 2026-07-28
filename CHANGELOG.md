@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.36.78 — 2026-07-28 — codex 10차 홀리스틱 헌트: 오케스트레이션/분석 명령군 7건 수정 (병렬 적대검증 8건 중 7 CONFIRMED·1 REFUTED)
+
+표면 회전으로 team/agents·constraints/intent·contract·milestones 를 헌트. 8건 보고를 8개 독립 에이전트로 병렬 재현(워크플로) → 7 CONFIRMED 수정, 1 REFUTED(pulse).
+
+- **F1 team 스토어 형상 무효 → 데이터 손실**: 객체 루트(`{teams:[...]}`)/문자열 members 를 조용히 `[]`로 coerce → list 는 0건(무경고), 이어지는 add 가 원본을 통째로 덮었다. previews/state 규율 적용 — 로더가 invalid 반환, 변경 거부(원본 보존), 유효 항목 members/personas 배열 정규화(string→[] 크래시 제거).
+- **F2 constraints 무효/중복 저장**: `--constraint` 가 `kind:detail` 형식 위반(콜론 없음/빈 kind/빈 detail)이면 조용히 버려지고 exit 0 + 빈 플랫폼을 쓰던 거짓 성공 → 저장 없이 거부. 동일 {kind,detail} 중복 누적 방지(멱등).
+- **F3 손상 constraints 읽기가 기본값을 권위처럼 노출**: list/check 가 손상 store 를 조용히 defaults 로 폴백 → `corruptStore` 표기 + 경고(커스텀 제약 미반영 명시). add 는 이미 fail-closed.
+- **F4 team --json 계약/exit 불일치**: add/remove/show/preview/deploy 의 --json 이 사람용 텍스트를 뱉고, deploy 는 사람모드 exit 1 vs --json exit 0 이던 것 → 전 서브명령 구조화 JSON + exit 일치.
+- **F5 광고된 `agents recommend` 미구현**: review-request 가 안내하는 명령이 핸들러 부재로 usage(exit 1)만 뱉던 것 → 내부 `_recommendAgent` 를 정식 서브명령으로 노출(구조화 JSON).
+- **F6 빈 contract 공허 통과**: 선언 0건 spec 이 항상 `ok:true`(CI 에서 빈/오탈자 spec 통과 위험) → 검증 불가로 거부, 의도적이면 `--allow-empty`.
+- **F8 1태그 ETA 조작**: 태그 1개면 경과 구간이 없어 속도 관측 불가인데 `days=max(1,0)` 로 avg=1 을 지어내 구체 ETA 를 보였다 → 유효 태그 2+ & 양의 구간일 때만 속도/ETA(아니면 avg=0·eta=null). milestones + round-history 양쪽.
+- **F7 REFUTED**: pulse 는 `.json` 만 손상시켜도 MD 프로젝션 폴백이 정확한 카운트를 복구 — 4파일 모두 지워야 0(진짜 빈 상태). 설계가 이미 옳아 무변경.
+- **(R-0001 검수 20회전이 제 수정의 불완전성 3건 차단)**: ① team add 락 획득 후 재로드가 여전히 무효→[] coerce 라 대기 중 스토어가 무효로 바뀌면 덮어썼다 → 락내 재로드도 checked. ② deploy execute --json 이 gate JSON 후 사람 로그+inherited child stdout 을 뱉어 exact-once JSON 위반 → 자식 출력 캡처 후 단일 JSON. ③ `typeof []==='object'` 라 배열형 platforms(`{"platforms":[]}`)가 손상으로 안 잡혀 add 가 덮어썼다 → 배열 명시 배제 + add 도 checked 로더 fail-closed.
+- 검증: 7건 재현→수정→재확인 실측(F8 은 실 git repo) + 검수 3건 재확인, selftest 334, e2e +1(15 단언).
+
 ## 1.36.77 — 2026-07-25 — UR-0061/0066 MCP 완결: leerness_clarify + leerness_preview (86→88 도구)
 
 clarify/preview 워크플로가 CLI 전용이라 MCP 전용 에이전트(Claude Desktop 등)는 질문·시안 승인 흐름을 쓸 수 없던 갭.

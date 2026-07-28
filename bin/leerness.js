@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.77';
+const VERSION = '1.36.78';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2400,12 +2400,17 @@ function _computeRoundHistory(root) {
       result.nextMilestone = next;
       result.roundsToNextMilestone = next - result.roundCount;
     }
-    // 일일 평균
+    // 일일 평균 — 1.36.78 (F8): 태그 2+ & 양의 구간일 때만(1개면 속도 관측 불가 → 0 유지)
     const first = new Date(result.firstTagAt).getTime();
     const last = new Date(result.latestTagAt).getTime();
-    const days = Math.max(1, Math.floor((last - first) / 86400000));
-    result.daysActive = days;
-    result.avgRoundsPerDay = Math.round((result.roundCount / days) * 100) / 100;
+    const spanDays = (last - first) / 86400000;
+    if (tags.length >= 2 && spanDays > 0) {
+      result.daysActive = Math.max(1, Math.floor(spanDays));
+      result.avgRoundsPerDay = Math.round((result.roundCount / spanDays) * 100) / 100;
+    } else {
+      result.daysActive = 0;
+      result.avgRoundsPerDay = 0;
+    }
   } catch {}
   return result;
 }
@@ -2451,16 +2456,23 @@ function _computeMilestones(root) {
       }
     }
     // 다음 마일스톤 + 평균 속도로 ETA 계산
+    // 1.36.78 (10차 헌트 F8): 태그 1개면 경과 구간이 없어 속도를 관측할 수 없다 — 종전엔 days=max(1,0)=1 로
+    //   avgPerDay=1 을 지어내 구체적 ETA 를 보였다. 유효 태그 2+ 이고 양의 구간일 때만 속도/ETA 산출(아니면 null).
     const lastTime = new Date(tags[tags.length - 1].date).getTime();
-    const days = Math.max(1, Math.floor((lastTime - baselineTime) / 86400000));
-    const avgPerDay = (tags.length / days);
-    result.avgRoundsPerDay = Math.round(avgPerDay * 100) / 100;
+    const spanDays = (lastTime - baselineTime) / 86400000;
     const nextM = milestones.find(m => m > tags.length);
-    if (nextM != null) {
-      const roundsRemaining = nextM - tags.length;
-      const etaDays = avgPerDay > 0 ? Math.ceil(roundsRemaining / avgPerDay) : null;
-      const etaDate = etaDays != null ? new Date(Date.now() + etaDays * 86400000).toISOString().split('T')[0] : null;
-      result.next = { milestone: nextM, roundsRemaining, etaDays, etaDate };
+    if (tags.length >= 2 && spanDays > 0) {
+      const avgPerDay = tags.length / spanDays;
+      result.avgRoundsPerDay = Math.round(avgPerDay * 100) / 100;
+      if (nextM != null) {
+        const roundsRemaining = nextM - tags.length;
+        const etaDays = Math.ceil(roundsRemaining / avgPerDay);
+        const etaDate = new Date(Date.now() + etaDays * 86400000).toISOString().split('T')[0];
+        result.next = { milestone: nextM, roundsRemaining, etaDays, etaDate };
+      }
+    } else if (nextM != null) {
+      // 속도 관측 불가 — 다음 마일스톤은 표시하되 ETA 는 null(추정 없음)
+      result.next = { milestone: nextM, roundsRemaining: nextM - tags.length, etaDays: null, etaDate: null };
     }
   } catch {}
   return result;
@@ -3375,10 +3387,10 @@ function _selfTestCases() {
       const stateLock = s.includes("const _mut = ['start', 'record', 'verify', 'handoff'].includes(sub || '')")
         && s.includes("_withLock(path.join(_leernessStateDir(root), 'state.json'), () => stateCmd(root, sub, ...args))")
         && s.includes("!_heldLocks.has(path.join(_leernessStateDir(root), 'state.json') + '.lock')");
-      // #2: team add 가 락 안 재로드→중복검사→저장 + EPERM 재시도
+      // #2: team add 가 락 안 재로드→중복검사→저장 + EPERM 재시도. 1.36.78: 락내 재로드가 checked 로더로(형상무효 레이스 거부).
       const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js'));
-      const teamLock = teamSrc.includes('const cur = _loadTeams(root);') && teamSrc.includes("deps._withLock(require('path').join(root, '.harness', 'teams.json'), _doAdd)") && teamSrc.includes("e.code === 'EPERM'");
-      const teamWired = s.includes('_detectShellCtx, arg, has, _withLock }');
+      const teamLock = teamSrc.includes('_loadTeamsChecked(root)') && teamSrc.includes("deps._withLock(require('path').join(root, '.harness', 'teams.json'), _doAdd)") && teamSrc.includes("e.code === 'EPERM'") && teamSrc.includes('_rechk.invalid');
+      const teamWired = s.includes('_loadTeamsChecked, _saveTeams, _detectShellCtx, arg, has, _withLock, failJson }');
       // #7: pre-wake 매처가 테이블형+YAML형 모두 (행위)
       const both = ('| T-0001 | in-progress | x |\nstatus: in-progress\n'.match(/^\|\s*T-\d{4,}\s*\|\s*in-progress\s*\|/gm) || []).length === 1;
       const pwWired = /_runPreWakeAudit[\s\S]{0,2200}\^\\\|\\s\*T-\\d\{4,\}\\s\*\\\|\\s\*in-progress/.test(s);
@@ -6735,7 +6747,7 @@ function commandsCmd(root) {
       { cmd: 'session close [path] [--json] [--auto-apply-delivered]', desc: '세션 마감 + 9 카테고리 + 자동 통합' },
       { cmd: 'resume [path]', desc: 'auto-resume-plan 적용 (1.9.203)' },
       { cmd: 'route <task-type>', desc: '작업 유형 분류 (11종)' },
-      { cmd: 'agents list|check|quota|dispatch|multi', desc: '외부 AI CLI 오케스트레이션 (dispatch --role 모델 라우팅 1.9.270)' },
+      { cmd: 'agents list|check|quota|dispatch|multi|recommend', desc: '외부 AI CLI 오케스트레이션 (dispatch --role 모델 라우팅 1.9.270)' },
       { cmd: 'roles list|set|unset|catalog|suggest|verify', desc: '모델별 역할 부여 (코딩/검수/지휘/디자인/디버그/설계/분배) — 1.9.270' },
       { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272' },
       { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278' },
@@ -6870,19 +6882,22 @@ function roundHistoryCmd(root) {
 //   기본 catalog 6종: Stripe / OpenAI / Anthropic / GitHub / Discord / Twitter
 function _platformConstraintsPath(root) { return path.join(root, '.harness', 'platform-constraints.json'); }
 // 1.9.333 (UR-0025 심층): _DEFAULT_PLATFORM_CONSTRAINTS → lib/catalogs.js 로 이동 (순수 데이터, require 사용).
+// 1.36.78 (10차 헌트 F3): 손상 store 를 조용히 defaults 로 폴백해 "권위 있는 정상 목록"처럼 보이던 것 —
+//   사용자 커스텀 제약이 사라졌는데도 알 수 없었다. 손상 여부를 함께 반환해 list/check 가 표면화(read 는 폴백 유지 + 경고).
+function _loadPlatformConstraintsChecked(root) {
+  const fp = _platformConstraintsPath(root);
+  if (!exists(fp)) return { catalog: _DEFAULT_PLATFORM_CONSTRAINTS, corrupt: false };
+  let j;
+  try { j = JSON.parse(read(fp)); } catch { return { catalog: _DEFAULT_PLATFORM_CONSTRAINTS, corrupt: true }; }
+  // 1.36.78 (검수 #3): typeof []==='object' 라 배열 루트/배열 platforms 가 통과하던 것 — 명시 배제(비객체 취급).
+  if (!j || typeof j !== 'object' || Array.isArray(j) || (j.platforms != null && (typeof j.platforms !== 'object' || Array.isArray(j.platforms)))) return { catalog: _DEFAULT_PLATFORM_CONSTRAINTS, corrupt: true };
+  const merged = { ...JSON.parse(JSON.stringify(_DEFAULT_PLATFORM_CONSTRAINTS)) };
+  if (j.platforms) for (const k of Object.keys(j.platforms)) merged.platforms[k] = j.platforms[k];
+  return { catalog: merged, corrupt: false };
+}
 function _loadPlatformConstraints(root) {
   try {
-    const fp = _platformConstraintsPath(root);
-    if (!exists(fp)) return _DEFAULT_PLATFORM_CONSTRAINTS;
-    const j = JSON.parse(read(fp));
-    // user catalog 와 default merge — user override 우선
-    const merged = { ...JSON.parse(JSON.stringify(_DEFAULT_PLATFORM_CONSTRAINTS)) };
-    if (j.platforms) {
-      for (const k of Object.keys(j.platforms)) {
-        merged.platforms[k] = j.platforms[k];
-      }
-    }
-    return merged;
+    return _loadPlatformConstraintsChecked(root).catalog;
   } catch { return _DEFAULT_PLATFORM_CONSTRAINTS; }
 }
 function _writePlatformConstraints(root, catalog) {
@@ -7882,8 +7897,10 @@ function constraintsCmd(root, sub, ...rest) {
   }
 
   if (sub === 'list') {
-    const catalog = _loadPlatformConstraints(root);
-    if (has('--json')) { log(JSON.stringify(catalog, null, 2)); return; }
+    const _chk = _loadPlatformConstraintsChecked(root);   // 1.36.78 (F3): 손상 표면화
+    const catalog = _chk.catalog;
+    if (has('--json')) { log(JSON.stringify({ ...catalog, ...(_chk.corrupt ? { corruptStore: true, note: 'platform-constraints.json 손상 — 기본값만 표시(커스텀 제약 미반영)' } : {}) }, null, 2)); return; }
+    if (_chk.corrupt) log(yel(_t('  ⚠ platform-constraints.json 손상 — 기본값만 표시(커스텀 제약 미반영). 복구 후 재시도', '  ⚠ platform-constraints.json corrupt — showing defaults only (custom constraints omitted). Repair and retry')));
     log(cyan(`# leerness constraints list (1.9.208)`));
     log(`  total platforms: ${Object.keys(catalog.platforms).length}`);
     log('');
@@ -7904,8 +7921,10 @@ function constraintsCmd(root, sub, ...rest) {
   if (sub === 'check') {
     const text = rest.filter(x => !x.startsWith('-')).join(' ');
     if (!text) return failJson(has('--json'), 'missing_query', 'Usage: leerness constraints check "<request text>"');  // 1.32.1 (15th리뷰 C2): --json 구조화
+    const _corrupt = _loadPlatformConstraintsChecked(root).corrupt;   // 1.36.78 (F3): 손상 표면화
     const result = _checkRequestConstraints(root, text, _L);
-    if (has('--json')) { log(JSON.stringify({ query: text, ...result }, null, 2)); return; }
+    if (has('--json')) { log(JSON.stringify({ query: text, ...result, ...(_corrupt ? { corruptStore: true } : {}) }, null, 2)); return; }
+    if (_corrupt) log(yel(_t('  ⚠ platform-constraints.json 손상 — 커스텀 제약 미반영(기본값만 대조)', '  ⚠ platform-constraints.json corrupt — custom constraints omitted (defaults only)')));
     log(cyan(`# leerness constraints check (1.9.208)`));
     log(`  query: ${text.slice(0, 80)}${text.length > 80 ? '…' : ''}`);
     log('');
@@ -7936,15 +7955,24 @@ function constraintsCmd(root, sub, ...rest) {
   if (sub === 'add') {
     const id = rest[0];
     if (!id) return failJson(has('--json'), 'missing_platform_id', 'Usage: leerness constraints add <platform-id> --constraint "kind:detail"');  // 1.32.1 (15th리뷰 C2)
-    const catalog = _loadPlatformConstraints(root);
+    // 1.36.78 (검수 #3): add 도 checked 로더로 — 손상/배열형 store 위 변경 거부(기존 커스텀·metadata 보존).
+    const _cchk = _loadPlatformConstraintsChecked(root);
+    if (_cchk.corrupt) return failJson(has('--json'), 'store_corrupt', `platform-constraints.json 손상/형상 무효 — 덮어쓰기 거부: ${_platformConstraintsPath(root)} (복구 후 재시도)`);
+    const catalog = _cchk.catalog;
     const aliases = (arg('--alias', '') || '').split(',').map(s => s.trim()).filter(Boolean);
     const detailRaw = arg('--constraint', '');
-    if (!detailRaw) return failJson(has('--json'), 'missing_constraint', '--constraint "kind:detail" required');  // 1.32.1 (15th리뷰 C2)
-    const [kind, ...rest2] = detailRaw.split(':');
+    if (!detailRaw || detailRaw === true) return failJson(has('--json'), 'missing_constraint', '--constraint "kind:detail" required');  // 1.32.1 (15th리뷰 C2)
+    const [kind, ...rest2] = String(detailRaw).split(':');
+    const kindTrim = (kind || '').trim();
     const detail = rest2.join(':').trim();
+    // 1.36.78 (10차 헌트 F2): 무효 kind:detail(콜론 없음/빈 kind/빈 detail)은 조용히 버려지고 exit 0 + 빈-constraints 플랫폼을
+    //   쓰던 것(거짓 성공). 형식 위반은 저장 없이 거부. 플랫폼 생성도 검증 통과 후로 이동.
+    if (!kindTrim || !detail) return failJson(has('--json'), 'invalid_constraint', '--constraint 는 "kind:detail" 형식(빈 kind/detail 불가) — 예: "auth:token required"');
     if (!catalog.platforms[id]) catalog.platforms[id] = { aliases: [], constraints: [] };
     if (aliases.length) catalog.platforms[id].aliases = [...new Set([...(catalog.platforms[id].aliases || []), ...aliases])];
-    if (kind && detail) catalog.platforms[id].constraints.push({ kind: kind.trim(), detail });
+    // 1.36.78 (F2): 동일 {kind,detail} 중복 누적 방지(멱등)
+    const _cons = catalog.platforms[id].constraints;
+    if (!_cons.some(c => c.kind === kindTrim && c.detail === detail)) _cons.push({ kind: kindTrim, detail });
     _writePlatformConstraints(root, catalog);
     if (has('--json')) { log(JSON.stringify(catalog.platforms[id], null, 2)); return; }
     log(grn(_t(`✓ platform "${id}" 갱신 — constraints: ${catalog.platforms[id].constraints.length}`, `✓ platform "${id}" updated — constraints: ${catalog.platforms[id].constraints.length}`)));
@@ -9126,11 +9154,20 @@ function _saveDecisions(root, decisions) {
 // 1.9.371 (UR-0073 Phase A): agent team 정의 레지스트리 — canonical JSON(teams.json) 주 + teams.md projection. opt-in · 정의 전용(자동 실행 X).
 const teamsJsonPath = root => path.join(root, '.harness/teams.json');
 const teamsPath = root => path.join(root, '.harness/teams.md');
-function _loadTeams(root) {
+// 1.36.78 (10차 헌트 F1): teams.json 이 "파싱은 되지만 형상 무효"(객체 루트 {teams:[...]}/항목 비객체/id 없음)일 때
+//   종전엔 조용히 []로 coerce → list 는 count:0(무경고), 이어지는 add 가 배열을 써서 원본을 통째로 덮었다(데이터 손실).
+//   previews/state 와 동일 규율: 로더가 invalid 를 함께 반환하고 변경 진입점은 거부. 유효 항목은 members/personas 를 배열로 정규화(string→[]).
+function _loadTeamsChecked(root) {
   const jp = teamsJsonPath(root);
-  if (exists(jp)) { try { const arr = JSON.parse(read(jp)); if (Array.isArray(arr)) return arr; } catch {} }
-  return [];
+  if (!exists(jp)) return { teams: [], invalid: false };
+  let parsed;
+  try { parsed = JSON.parse(read(jp)); } catch { return { teams: [], invalid: true }; }
+  if (!Array.isArray(parsed) || parsed.some(e => !e || typeof e !== 'object' || typeof e.id !== 'string')) return { teams: [], invalid: true };
+  const _arr = a => Array.isArray(a) ? a : (a == null ? [] : [String(a)]);   // 무효 members(string) → 크래시 대신 배열 정규화
+  const teams = parsed.map(t => Object.assign({}, t, { members: _arr(t.members), personas: _arr(t.personas) }));
+  return { teams, invalid: false };
 }
+function _loadTeams(root) { return _loadTeamsChecked(root).teams; }
 function _saveTeams(root, teams) {
   const arr = Array.isArray(teams) ? teams : [];
   _assertStoreParsable(teamsJsonPath(root), 'team');   // 1.36.28 (#3): 손상 teams.json 을 덮어써 기존 팀 유실 방지
@@ -9144,7 +9181,7 @@ const _team = require('../lib/team');
 const _tgl = require('../lib/toggles');   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동 — gate/lens/auto-graph/delegation-brief)
 const _clar = require('../lib/clarify');  // 1.36.51 (UR-0061): 모호성 질문 + 미리보기 승인 워크플로
 const _tech = require('../lib/tech-profile');  // 1.36.53 (UR-0062): 기술 프로필 (언어·서비스 감지 + 변경 이력)
-function teamCmd(root, sub, id, opts = {}) { return _team.teamCmd(root, sub, id, opts, { VERSION, _loadTeams, _saveTeams, _detectShellCtx, arg, has, _withLock }); }   // 1.36.31: add 경합 락
+function teamCmd(root, sub, id, opts = {}) { return _team.teamCmd(root, sub, id, opts, { VERSION, _loadTeams, _loadTeamsChecked, _saveTeams, _detectShellCtx, arg, has, _withLock, failJson }); }   // 1.36.31: add 경합 락 · 1.36.78: 형상무효 가드 + failJson
 
 // 1.9.112: 전용 lessons.md (Memory Write Surface 5번째)
 const lessonsPath = root => path.join(root, '.harness/lessons.md');
@@ -22363,6 +22400,12 @@ function contractVerifyCmd(specPath, implPath) {
     const _fe = f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (!new RegExp(`(?<![\\w$])${_fe}(?![\\w$])`).test(implSrc)) fieldMissing.push(f);
   }
+  // 1.36.78 (10차 헌트 F6): 선언(강함수+필드)이 0건인 spec 은 검사할 게 없어 항상 ok:true 로 "공허 통과"했다
+  //   (CI 에서 빈/오탈자 spec 이 계약을 통과시키는 위험). 검증 불가로 취급 — 명시적 --allow-empty 로만 허용.
+  if (declaredSpec.size === 0 && fieldSpec.size === 0 && !has('--allow-empty')) {
+    failJson(_j, 'empty_contract', 'spec 에 검증할 함수/필드 선언이 없습니다 — 공허 통과 방지(의도된 빈 계약이면 --allow-empty). "- name(args)" 또는 "## Fields\\n- fieldName" 으로 선언하세요');
+    return process.exit(process.exitCode || 1);
+  }
   // 출력
   if (has('--json')) {
     const okJson = missing.length === 0 && fieldMissing.length === 0;
@@ -22973,7 +23016,7 @@ STATUS & DIAGNOSTICS
 VERIFICATION (evidence-gated "done")
   verify-claim <T-ID> [--run-tests] [--test-cmd "..."] [--json]
                                   Check evidence vs reality (stub / fake-test / inflated-count detection)
-  contract verify <spec.md> <impl.js> [--json]    Spec <-> implementation match
+  contract verify <spec.md> <impl.js> [--json] [--allow-empty]   Spec <-> implementation match (empty spec rejected unless --allow-empty)
   verify-code [path] [--build] [--bench]          Run tests/lint/typecheck, record evidence
   gate [path]                     One-call CI gate: verify + audit + scan + encoding + lazy
   lens [code|design|docs|test|security|database|debug] [--json]  Quality self-question lenses

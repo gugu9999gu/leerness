@@ -6103,11 +6103,15 @@ total++;
     // (4) codex #9: 코드펜스 예제 함수는 계약 아님 → 통과(exit 0) + specFunctions 에 helper 없음
     fs.writeFileSync(path.join(d, 'fen.md'), '# S\n```js\nfunction helper(){}\n```\n');
     fs.writeFileSync(path.join(d, 'fen.js'), 'module.exports={};\n');
-    const cfen = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'fen.md'), path.join(d, 'fen.js'), '--json'], { encoding: 'utf8', timeout: 15000 });
+    // 1.36.78 (10차 F6): 펜스-only spec 은 선언 0건이라 이제 empty_contract 로 거부됨 — 이 테스트 의도는 "helper 가 specFunctions 에 없음"(펜스 제외)이므로 --allow-empty 로 유지.
+    const cfen = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'fen.md'), path.join(d, 'fen.js'), '--json', '--allow-empty'], { encoding: 'utf8', timeout: 15000 });
     let fenceOk = false; try { const j = JSON.parse(cfen.stdout); fenceOk = cfen.status === 0 && j.ok === true && !(j.specFunctions || []).includes('helper'); } catch {}
+    // 1.36.78 (10차 F6): 펜스-only(--allow-empty 없음)는 empty_contract 거부(exit 1)
+    const cfenReject = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'fen.md'), path.join(d, 'fen.js'), '--json'], { encoding: 'utf8', timeout: 15000 });
+    let fenceRejectOk = false; try { fenceRejectOk = cfenReject.status === 1 && JSON.parse(cfenReject.stdout).code === 'empty_contract'; } catch {}
     fs.rmSync(d, { recursive: true, force: true });
-    ok = fpFixed && fnGuard && bracketOk && fenceOk;
-    if (!ok) console.log(`   [cvdollar 디버그] fpFixed=${fpFixed} fnGuard=${fnGuard} bracket=${bracketOk} fence=${fenceOk}`);
+    ok = fpFixed && fnGuard && bracketOk && fenceOk && fenceRejectOk;
+    if (!ok) console.log(`   [cvdollar 디버그] fpFixed=${fpFixed} fnGuard=${fnGuard} bracket=${bracketOk} fence=${fenceOk} fenceReject=${fenceRejectOk}`);
   } catch {}
   console.log(ok ? '✓ B(1.35.11) 자체 contract 헌트 + codex 교차: $필드 정규식 안전화 + bracket export(#8) + 코드펜스 예제 제외(#9) FP 3종 + no-FN' : '✗ contract 헌트 FP 3종 수정 실패');
   if (!ok) failed++;
@@ -7543,6 +7547,75 @@ total++;
     if (!ok) console.log(`   [mcp77 디버그] cl=${clOk} flow=${flowOk} contract=${contractOk} def=${defOk}`);
   } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? '✓ B(1.36.77) MCP clarify/preview 노출: 질문 생성 + add→mockup→approve 왕복 + revise 노트 계약 + 티어' : '✗ MCP clarify/preview 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.78 (10차 헌트 확정 7건): team 형상/계약 · constraints 검증/손상 · agents recommend · 빈 contract
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h10-')); _d.push(d);
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const T = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const J = (r) => { try { return JSON.parse(r.stdout); } catch { return null; } };
+    // F1: 객체 루트 teams.json → 변경 거부 + 원본 보존
+    const tj = path.join(d, '.harness', 'teams.json');
+    fs.writeFileSync(tj, '{"teams":[{"id":"preserved","members":["codex"]}],"metadata":{"revision":7}}');
+    const beforeT = fs.readFileSync(tj, 'utf8');
+    const f1a = T(['team', 'add', 'newteam', '--members', 'claude', '--json']);
+    const f1Ok = f1a.status === 1 && fs.readFileSync(tj, 'utf8') === beforeT;
+    // F1 variant2: string members → 크래시 대신 정규화(list 정상)
+    fs.writeFileSync(tj, '[{"id":"bad","members":"codex","personas":[],"schedule":"manual","status":"active"}]');
+    let f1bOk = false; try { f1bOk = Array.isArray(J(T(['team', 'list', '--json'])).teams[0].members); } catch {}
+    // F4: team --json 순수 + exit 일치
+    fs.writeFileSync(tj, '[]');
+    const addJson = T(['team', 'add', 'alpha', '--members', 'claude,codex', '--json']);
+    const f4addOk = J(addJson) && J(addJson).ok === true;
+    const dupJson = T(['team', 'add', 'alpha', '--members', 'x', '--json']);
+    const f4dupOk = J(dupJson) && J(dupJson).ok === false && dupJson.status === 1;
+    const rmMiss = T(['team', 'remove', 'nope', '--json']);
+    const f4rmOk = J(rmMiss) && rmMiss.status === 1;
+    const depHuman = T(['team', 'deploy', 'alpha']);
+    const depJson = T(['team', 'deploy', 'alpha', '--json']);
+    const f4depOk = depHuman.status === depJson.status && depHuman.status === 1 && J(depJson) != null;
+    // F2: 무효 constraint 거부 + dedup
+    const _pcf = path.join(d, '.harness', 'platform-constraints.json');   // 무효 add 는 파일 자체를 안 만들 수 있음(부재 = 미저장)
+    const f2malOk = T(['constraints', 'add', 'x1', '--alias', 'x1', '--constraint', 'rate-limit', '--json']).status === 1
+      && T(['constraints', 'add', 'x2', '--alias', 'x2', '--constraint', 'auth:', '--json']).status === 1
+      && !(fs.existsSync(_pcf) && fs.readFileSync(_pcf, 'utf8').includes('"x1"'));
+    T(['constraints', 'add', 'dp', '--alias', 'dp', '--constraint', 'auth:token required', '--json']);
+    const dup2 = J(T(['constraints', 'add', 'dp', '--alias', 'dp', '--constraint', 'auth:token required', '--json']));
+    const f2dupOk = dup2 && dup2.constraints.length === 1;
+    // F3: 손상 constraints store 표면화
+    fs.writeFileSync(path.join(d, '.harness', 'platform-constraints.json'), '{"platforms":');
+    const f3Ok = J(T(['constraints', 'list', '--json'])).corruptStore === true
+      && J(T(['constraints', 'check', 'stripe API', '--json'])).corruptStore === true;
+    // F5: agents recommend 존재
+    const rec = J(cp.spawnSync(process.execPath, [CLI, 'agents', 'recommend', 'refactor payment module', '--json'], { encoding: 'utf8', timeout: 20000 }));
+    const f5Ok = rec && rec.ok === true && typeof rec.recommended === 'string';
+    // F6: 빈 contract 거부 + --allow-empty
+    fs.writeFileSync(path.join(d, 'SPEC.md'), '# Spec\nprose'); fs.writeFileSync(path.join(d, 'impl.js'), '// empty');
+    const f6Ok = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'SPEC.md'), path.join(d, 'impl.js'), '--json'], { encoding: 'utf8', timeout: 20000 }).status === 1
+      && cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'SPEC.md'), path.join(d, 'impl.js'), '--json', '--allow-empty'], { encoding: 'utf8', timeout: 20000 }).status === 0;
+    // (검수 #3) 배열형 platforms 도 손상 표면화 + add 거부(metadata 보존)
+    const pc = path.join(d, '.harness', 'platform-constraints.json');
+    fs.writeFileSync(pc, '{"platforms":[],"metadata":{"revision":7}}');
+    const beforePc = fs.readFileSync(pc, 'utf8');
+    const arrOk = J(T(['constraints', 'list', '--json'])).corruptStore === true
+      && T(['constraints', 'add', 'p', '--alias', 'p', '--constraint', 'auth:x', '--json']).status === 1
+      && fs.readFileSync(pc, 'utf8') === beforePc;
+    // (검수 #2) deploy execute --json exact-once JSON
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h10dep-')); _d.push(d2);
+    cp.spawnSync(process.execPath, [CLI, 'init', d2, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    cp.spawnSync(process.execPath, [CLI, 'team', 'add', 'dep', '--members', 'claude', '--deploy', 'node -e "process.exit(0)"', '--path', d2], { encoding: 'utf8', timeout: 20000 });
+    const depExec = cp.spawnSync(process.execPath, [CLI, 'team', 'deploy', 'dep', '--yes', '--json', '--path', d2], { encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_TEAM_DEPLOY: '1' } });
+    let depExecOk = false; try { const j = JSON.parse(depExec.stdout); depExecOk = j.executed === true && j.exitStatus === 0 && depExec.status === 0; } catch {}
+    ok = f1Ok && f1bOk && f4addOk && f4dupOk && f4rmOk && f4depOk && f2malOk && f2dupOk && f3Ok && f5Ok && f6Ok && arrOk && depExecOk;
+    if (!ok) console.log(`   [h10 디버그] f1=${f1Ok} f1b=${f1bOk} f4add=${f4addOk} f4dup=${f4dupOk} f4rm=${f4rmOk} f4dep=${f4depOk} f2mal=${f2malOk} f2dup=${f2dupOk} f3=${f3Ok} f5=${f5Ok} f6=${f6Ok} arr=${arrOk} depExec=${depExecOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.78) 10차헌트: team 형상거부/정규화·JSON계약 · constraints 검증/dedup/손상표면 · agents recommend · 빈 contract 거부' : '✗ 10차 헌트 수정 실패');
   if (!ok) failed++;
 }
 

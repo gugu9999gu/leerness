@@ -176,7 +176,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 <!-- leerness:migration-preserved -->
 ## Preserved previous content
 
-> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.73-2026-07-25T06-57-47-815Z`
+> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.77-2026-07-28T00-26-08-808Z`
 
   - 파일 직접 수정 → gemini --yolo (정확)
 leerness session close .             # 1.9.59+ — --suggest default 활성 (마감 + 다음 라운드 자동)
