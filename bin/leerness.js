@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.80';
+const VERSION = '1.36.81';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -4934,6 +4934,19 @@ function _selfTestCases() {
       while ((m = re.exec(self)) !== null) { if (m[1].includes(NL)) offenders++; }
       return offenders === 0;
     } },
+    { name: '출하 소스 생 NUL 금지 (1.36.81, 클린룸 실측): bin/lib 전수 0 — 구분자를 이스케이프로 (메타가드)', run: () => {
+      // 1.36.80 사고: 지문/ID 구분자를 소스에 **생 NUL 바이트**로 써서 도구가 파일을 바이너리로 취급했다(grep 차단).
+      //   정규화 도구가 조용히 지우면 해시 입력이 바뀌어 전 프로젝트의 캘리브레이션/ID 가 한꺼번에 어긋난다.
+      //   런타임 값이 동일한 유니코드 이스케이프 표기로만 쓴다 — 이 가드 자신은 이스케이프 표기라 자기참조 안전.
+      // (codex 검수 ③) scripts/ 도 package.json files 에 포함돼 npm 으로 함께 실린다 — "출하 소스"라면 같이 봐야 한다.
+      const NUL = String.fromCharCode(0);
+      const files = [__filename];
+      for (const sub of ['lib', 'scripts']) {
+        const dir = path.join(path.dirname(__filename), '..', sub);
+        if (exists(dir)) for (const f of fs.readdirSync(dir)) if (f.endsWith('.js')) files.push(path.join(dir, f));
+      }
+      return files.every(f => !read(f).includes(NUL));
+    } },
     { name: 'CLI 영어화 Phase 1 (1.20.2, UR-0010): _uiLang 해석(flag>env>manifest>ko) + 첫화면 _t 적용 (행위+소스)', run: () => {
       const save = process.argv; const saveEnv = process.env.LEERNESS_LANG;
       try {
@@ -6039,7 +6052,7 @@ function _apiSkillsDir(root) {
 //   정체성(같은 URL·다른 name 이 같은 id 로 붕괴하던 것), Windows 예약 이름(con/prn/aux/nul/com1..9/lpt1..9) 회피.
 //   충돌 접미사(-hash) 추가 후에도 이 함수를 다시 거쳐 상한이 유지된다.
 function _apiSkillIdCap(id, url, name) {
-  const seed = String(url || '') + ' ' + String(name || '');
+  const seed = String(url || '') + '\u0000' + String(name || '');
   if (!id || id.length > 80) id = (id || 'api').slice(0, 72).replace(/-+$/, '') + '-' + _shortHash(seed);
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(id)) id = id + '-' + _shortHash(seed);
   return id;

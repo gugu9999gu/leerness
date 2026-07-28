@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.36.81 — 2026-07-28 — 게시본 클린룸 실측이 잡은 2건 (referee 상태 신호 정확화 · 출하 소스 생 NUL 제거)
+
+1.36.80 을 게시한 뒤 **게시된 tarball 로** 신규 기능을 실행해 본 결과 2건이 나왔다. 둘 다 게이트(selftest 334 · e2e 404)는 초록이었다 — 단언이 없던 자리다.
+
+- **referee 상태 신호가 부정확했다** — `isStale()` 이 "캘리브레이션이 아예 없음"까지 stale 로 묶어, **한 번도 검증한 적 없는** 검증기가 `verify-claim` 게이트에서 `referee_stale` 로 보고됐다. 두 상태는 사용자가 취할 조치가 다르다(캘리브레이션 실행 vs 재검증). 정직한 신호가 존재 이유인 기능에서 신호 자체가 틀린 셈이라 고쳤다: stale 은 **"한때 증명됐으나 정의가 바뀌어 무효"** 만을 뜻하고, 미증명은 `referee_uncalibrated`, 캘리브레이션 실패도 `referee_uncalibrated`(사유 포함). fail-closed 동작은 이전과 동일 — 어느 상태든 통과시키지 않는다. e2e 가 미존재/미증명/무효/검증기실패 **4구분**을 고정한다.
+- **출하 소스에 생 NUL 바이트** — 지문·ID 구분자를 소스에 raw NUL 로 써서 git/grep 이 `bin/leerness.js` 와 `lib/referee.js` 를 **바이너리로 취급**했다(diff 가 `Bin 16408 -> 17121 bytes` 로만 표시, 코드 검색 차단). 더 위험한 쪽은 정규화 도구가 이 바이트를 조용히 지우면 해시 입력이 바뀌어 **기존 프로젝트의 캘리브레이션 지문과 api-skill ID 가 한꺼번에 어긋난다**는 점이다. 런타임 값이 동일한 유니코드 이스케이프 표기로 치환(기존 지문/ID 불변 — 실측 확인) + selftest 메타가드로 bin/lib 전수 0 을 상시 강제.
+**검수 23회전이 잡은 4건** (전건 직접 재현 확인):
+
+- **High — fail-closed 기능의 fail-open**: `calibration.ok` 가 `"false"`(truthy 문자열)나 `1` 로 손상/조작되면 `!r.calibration.ok` 가 false 가 되어 **미증명 검증기가 게이트를 그대로 통과**했고 `referee show` 는 `calibrated: true` 로 표시했다. 이 기능의 전제 자체를 뚫는 구멍이다. `_entryValid` 가 `ok`(boolean)·`fingerprint`(비어있지 않은 문자열)를 형상 검증해 거부하고(스토어 전체 fail-closed — previews/teams 와 동일 규율), 판정 지점도 `=== true` 엄격 비교로 이중 방어. 형상 무효는 "없음" 대신 `referee_store_invalid` 로 정확히 보고한다.
+- **캘리브레이션 실패 + 정의 변경을 `referee_stale` 로 오분류** — 증명된 적이 없는데 "있던 증명이 무효화됐다"는 거짓 서사였다. 실패 상태는 정의가 바뀌어도 `referee_uncalibrated`.
+- **메타가드 스캔 범위가 이름보다 좁음** — `scripts/` 도 `package.json` `files` 에 포함돼 npm 에 함께 실리는데 스캔하지 않았다. bin/lib/scripts 전수로 확장.
+- **공허한 e2e 단언 2건** — "FP 프로브 3종 거부" 중 둘은 `--expect-bad` 없이 `add` 해서 **add 자체가 `missing_args` 로 실패**했고, 이어진 `verify` 가 돌려준 `not_found`(ok:false)를 e2e 가 "거부됨"으로 통과 처리했다. 탐지력 없는 검증기를 거부한다는 걸 전혀 증명하지 못했다. add 성공을 먼저 단언하고 거부 **사유**까지 확인하도록 교체.
+
+- 검증: selftest 335 · e2e 전건 · 게시본 실측 프로브(게이트 4구분 · 지문 동치 · 임시 워크스페이스 정리 · 포트 5337) · 검수 지적 4건 수정 전/후 실측 대조.
+
 ## 1.36.80 — 2026-07-28 — referee 캘리브레이션 · 라이브 미리보기 · 기본 스킬 정리 · 최소성 사다리 — MCP 89 도구 · R-0001 검수 22회전
 
 **이 릴리스에 함께 들어간 것** (아래 상세):

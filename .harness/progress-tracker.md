@@ -102,3 +102,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0079 | done | MCP clarify/preview (1.36.77) | 88도구, MCP 왕복 실측, selftest 334, e2e 400/400, npm 게시 | 다음 액션 작성 | 2026-07-26 |
 | T-0080 | done | 10차 헌트 7건+검수 3건 (1.36.78) | team/constraints/agents/contract/milestones, 병렬검증, selftest 334, e2e 401/401, npm 게시 | 다음 액션 작성 | 2026-07-28 |
 | T-0081 | done | 도그푸딩 P1 5건 + 검수 7건 (1.36.79) | 실 프로젝트 60개 감사, selftest 334, e2e 402/402, npm 게시 | 다음 액션 작성 | 2026-07-28 |
+| T-0082 | requested | 1.36.81 후보 diff 적대적 릴리스 검수: referee fail-closed 상태 전이, NUL 이스케이프 런타임 동치, e2e 회귀력, 문서 과장 여부 | user-request | 다음 액션 작성 | 2026-07-28 |

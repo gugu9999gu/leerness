@@ -7723,15 +7723,23 @@ total++;
     const good = verify('okref');
     const happyOk = good && good.ok === true && good.goodExit === 0 && good.badExit === 1 && good.expectMatched === true;
     // FP 프로브 ①: known-good 이 이미 빨간 상태 → 거부(기준선 무효)
-    add('redbase', N('process.exit(0)'), N('process.exit(3)'), N('process.exit(1)'), '');
+    // 1.36.81 (codex 검수 ④, 실측 확인): 이전 두 프로브는 --expect-bad 를 빼고 add 해서 add 자체가 missing_args 로
+    //   실패했고, 이어진 verify 는 not_found(ok:false)를 돌려줬다 — e2e 는 ok===false 만 보고 "거부됨"으로 통과시켰다.
+    //   즉 "탐지력 없는 검증기를 거부한다"를 전혀 증명하지 못하는 공허한 단언이었다.
+    //   → add 성공을 먼저 단언하고, 거부 **사유**까지 확인한다.
+    const a1 = add('redbase', N('process.exit(0)'), N('process.exit(3)'), N("console.log('SIG'); process.exit(1)"), 'SIG');
     const p1 = verify('redbase');
-    // FP 프로브 ②: known-bad 가 통과 → 탐지력 없음 거부
-    add('nopower', N('process.exit(0)'), N('process.exit(0)'), N('process.exit(0)'), '');
+    // FP 프로브 ②: known-bad 가 통과(exit 0) → 탐지력 없음 거부
+    const a2 = add('nopower', N('process.exit(0)'), N('process.exit(0)'), N("console.log('SIG'); process.exit(0)"), 'SIG');
     const p2 = verify('nopower');
     // FP 프로브 ③: bad 가 무관한 이유로 실패 → 사유 불일치 거부
-    add('wrongreason', N('process.exit(0)'), N('process.exit(0)'), N("console.log('Error: cannot find module'); process.exit(1)"), 'AssertionError');
+    const a3 = add('wrongreason', N('process.exit(0)'), N('process.exit(0)'), N("console.log('Error: cannot find module'); process.exit(1)"), 'AssertionError');
     const p3 = verify('wrongreason');
-    const probesOk = p1 && p1.ok === false && p2 && p2.ok === false && p3 && p3.ok === false && p3.expectMatched === false;
+    const _rz = (p) => (p && p.reasons || []).join(' | ');
+    const probesOk = a1.status === 0 && a2.status === 0 && a3.status === 0
+      && p1 && p1.ok === false && /known-good/.test(_rz(p1))          // 기준선이 이미 빨감
+      && p2 && p2.ok === false && /exit 0|통과시킴/.test(_rz(p2))      // 심어둔 결함을 못 잡음
+      && p3 && p3.ok === false && p3.expectMatched === false && /사유 불일치|런처/.test(_rz(p3));
     // 지문(stale): 캘리브레이션 후 명령이 바뀌면 신뢰 철회
     const store = path.join(d, '.harness', 'referees.json');
     const js = JSON.parse(fs.readFileSync(store, 'utf8'));
@@ -7747,8 +7755,31 @@ total++;
     add('failing', N('process.exit(2)'), N('process.exit(0)'), N("console.log('AssertionError'); process.exit(1)"), 'AssertionError');
     verify('failing');
     const refFail = R(['verify-claim', 'T-0002', '--referee', 'failing', '--json']);
+    // 1.36.81 (클린룸 실측): 세 상태는 서로 다른 코드로 보고돼야 한다 — 한 번도 검증 안 한 검증기를
+    //   stale("한때 유효했으나 무효화됨")로 보고하면 사용자가 취할 조치를 잘못 알려준다.
+    add('nevercal', N('process.exit(0)'), N('process.exit(0)'), N("console.log('AssertionError'); process.exit(1)"), 'AssertionError');
+    const neverUse = R(['verify-claim', 'T-0002', '--referee', 'nevercal', '--json']);
+    const neverShown = J(R(['referee', 'show', 'nevercal', '--json']));
+    const uncalOk = neverUse.status === 1 && (J(neverUse) || {}).code === 'referee_uncalibrated'
+      && neverShown && neverShown.stale === false && neverShown.calibrated === false;
+    // 1.36.81 (codex 검수 ① High, 실측 확인): calibration.ok 가 truthy 비-boolean 이면 게이트가 통과했다 —
+    //   "미증명 검증기는 신뢰하지 않는다"는 이 기능의 전제를 정면으로 깨는 fail-open. 손상/조작 모두 차단돼야 한다.
+    add('failopen', N('process.exit(0)'), N('process.exit(0)'), N("console.log('AssertionError'); process.exit(1)"), 'AssertionError');
+    verify('failopen');
+    const foStore = JSON.parse(fs.readFileSync(store, 'utf8'));
+    foStore.find(x => x.id === 'failopen').calibration.ok = 'false';   // truthy 문자열
+    fs.writeFileSync(store, JSON.stringify(foStore, null, 2));
+    const foUse = R(['verify-claim', 'T-0002', '--referee', 'failopen', '--json']);
+    const foShow = J(R(['referee', 'show', 'failopen', '--json']));
+    const failOpenOk = foUse.status === 1 && (J(foUse) || {}).code !== undefined
+      && (J(foUse) || {}).code !== 'referee_failed'      // 검증기 실행까지 갔다면 이미 신뢰한 것
+      && !(foShow && foShow.calibrated === true);        // 사용자에게 "증명됨"으로 표시해서도 안 된다
+    // 원복(이후 단언들이 이 스토어를 씀)
+    foStore.find(x => x.id === 'failopen').calibration.ok = true;
+    fs.writeFileSync(store, JSON.stringify(foStore, null, 2));
     const gateOk = missing.status === 1 && (J(missing) || {}).code === 'referee_not_found'
       && staleUse.status === 1 && (J(staleUse) || {}).code === 'referee_stale'
+      && uncalOk && failOpenOk
       && refFail.status === 1 && (J(refFail) || {}).code === 'referee_failed';
     // 스토어 규율: 손상 위 변경 거부 + --json 순수
     const listPure = (() => { try { JSON.parse(R(['referee', 'list', '--json']).stdout); return true; } catch { return false; } })();
@@ -7758,7 +7789,7 @@ total++;
     ok = happyOk && probesOk && staleOk && gateOk && storeOk;
     if (!ok) console.log(`   [referee 디버그] happy=${happyOk} probes=${probesOk} stale=${staleOk} gate=${gateOk} store=${storeOk}`);
   } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
-  console.log(ok ? '✓ B(1.36.80) referee 캘리브레이션: 탐지력 증명(good통과+bad를 기대사유로 거부) · FP프로브 3종 거부 · 명령변경 stale · verify-claim 게이팅 · 스토어 규율' : '✗ referee 캘리브레이션 실패');
+  console.log(ok ? '✓ B(1.36.80) referee 캘리브레이션: 탐지력 증명(good통과+bad를 기대사유로 거부) · FP프로브 3종 거부 · 명령변경 stale · verify-claim 게이팅(미존재/미검증/무효/검증기실패 4구분) · 스토어 규율' : '✗ referee 캘리브레이션 실패');
   if (!ok) failed++;
 }
 

@@ -762,7 +762,17 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": ""
+    },
+    {
+      "id": "UR-0067",
+      "text": "1.36.81 후보 diff 적대적 릴리스 검수: referee fail-closed 상태 전이, NUL 이스케이프 런타임 동치, e2e 회귀력, 문서 과장 여부",
+      "recordedAt": "2026-07-28T08:26:37.304Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-07-28T05:48:47.493Z"
+  "updatedAt": "2026-07-28T08:26:37.305Z"
 }
