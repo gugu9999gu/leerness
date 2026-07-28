@@ -752,7 +752,17 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": ""
+    },
+    {
+      "id": "UR-0066",
+      "text": "신규 기능 미리보기를 임시 저장소에 프로젝트 언어에 맞춰 생성하고 로컬 서버로 띄워 확인 → 확인 절차 후 임시 저장소 정리",
+      "recordedAt": "2026-07-28T05:48:47.493Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-07-25T08:09:45.504Z"
+  "updatedAt": "2026-07-28T05:48:47.493Z"
 }

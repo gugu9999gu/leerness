@@ -153,12 +153,12 @@ total++;
 run('route planning',      ['route', 'planning']);
 run('route bugfix',        ['route', 'bugfix']);
 run('skill list',          ['skill', 'list']);
-run('skill info',          ['skill', 'info', 'office']);
+run('skill info',          ['skill', 'info', 'feature-implementation']);
 
 // 1.9.2: 스킬 학습 사이클 회귀
 run('skill learn (new)',   ['skill', 'learn', 'open-meteo', '--doc', 'https://open-meteo.com/en/docs', '--command', 'fetch hourly+daily JSON', '--capability', 'http fetch', '--capability', 'cache', '--note', 'e2e learn', '--display', 'Open-Meteo 날씨 스킬', '--path', tmp]);
 run('skill use (new)',     ['skill', 'use', 'open-meteo', '--note', 'first call', '--path', tmp]);
-run('skill use (catalog)', ['skill', 'use', 'office', '--note', 'catalog skill materialize', '--path', tmp]);
+run('skill use (catalog)', ['skill', 'use', 'feature-implementation', '--note', 'catalog skill materialize', '--path', tmp]);
 run('skill optimize',      ['skill', 'optimize', 'open-meteo', '--before', 'no cache', '--after', 'If-Modified-Since', '--note', 'e2e opt', '--path', tmp]);
 
 total++;
@@ -1183,7 +1183,7 @@ total++;
   } else {
     const jsonR = fn(JSON.stringify({ skills: [{ name: 'a', description: 'A' }] }), null);
     const rssR = fn('<rss><channel><item><title>X</title><link>http://x.com/s.md</link></item></channel></rss>', null);
-    const mdR = fn('- [office](o.md) — Office\n- [crawling](c.md) — Web', null);
+    const mdR = fn('- [feature-implementation](f.md) — Feature\n- [project-roadmap-generator](r.md) — Roadmap', null);
     const urlR = fn('https://x.com/foo/SKILL.md', null);
     const ok = jsonR[0].format === 'json' && rssR[0].format === 'rss'
       && mdR[0].format === 'markdown' && urlR[0].format === 'urls';
@@ -1234,14 +1234,13 @@ total++;
 {
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-match-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
-  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'match', 'Office 문서 자동화', '--path', tmpC, '--json'], { encoding: 'utf8', timeout: 15000 });
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'match', '기능 구현 재사용 검사', '--path', tmpC, '--json'], { encoding: 'utf8', timeout: 15000 });
   let parsed = null;
   try { parsed = JSON.parse(r.stdout); } catch {}
   const ok = parsed
     && parsed.top
-    && parsed.top.length > 0
-    && parsed.top[0].id === 'office'; // office가 최상위 매칭
-  console.log(ok ? '✓ B(1.9.45) skill match: jaccard 매칭 → office 최상위' : `✗ skill match 실패`);
+    && parsed.top.length > 0;   // 1.36.80: 내장 카탈로그 축소 — 특정 id 고정 대신 매칭 존재만 단언
+  console.log(ok ? '✓ B(1.9.45) skill match: jaccard 매칭 → 최상위 후보 반환' : `✗ skill match 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
@@ -1276,7 +1275,7 @@ total++;
   const ok = r.status === 0
     && fs.existsSync(publishDir)
     && manifest
-    && manifest.skills && manifest.skills.length >= 5
+    && manifest.skills && manifest.skills.length >= 2   // 1.36.80: 내장 카탈로그 축소
     && manifest.format === 'agentskills.io';
   console.log(ok ? `✓ B(1.9.47) skill publish: ${manifest ? manifest.skills.length : 0} skill + manifest 생성` : `✗ skill publish 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
@@ -1308,7 +1307,7 @@ total++;
   const exportDir = path.join(tmpC, '.harness', 'skills-export');
   const exists2 = fs.existsSync(exportDir);
   const count = exists2 ? fs.readdirSync(exportDir).length : 0;
-  const ok = r.status === 0 && exists2 && count >= 5;
+  const ok = r.status === 0 && exists2 && count >= 2;   // 1.36.80: 내장 카탈로그 축소(도메인 7종 제거)
   console.log(ok ? `✓ B(1.9.43) skill export-all: ${count}개 skill 일괄 SKILL.md 생성` : `✗ export-all 실패 (count=${count})`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
@@ -1393,13 +1392,13 @@ total++;
   // skill export → SKILL.md frontmatter 정확 생성
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-skex-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'export', 'office', '--path', tmpC], { encoding: 'utf8', timeout: 15000 });
-  const skillFile = path.join(tmpC, '.harness', 'skills-export', 'office', 'SKILL.md');
+  const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'export', 'feature-implementation', '--path', tmpC], { encoding: 'utf8', timeout: 15000 });
+  const skillFile = path.join(tmpC, '.harness', 'skills-export', 'feature-implementation', 'SKILL.md');
   const exists2 = fs.existsSync(skillFile);
   const body = exists2 ? fs.readFileSync(skillFile, 'utf8') : '';
   const ok = r.status === 0
     && exists2
-    && /^---\nname: office\ndescription:/.test(body)
+    && /^---\nname: feature-implementation\ndescription:/.test(body)
     && /\n---\n/.test(body);
   console.log(ok ? '✓ B(1.9.42) skill export: agentskills.io 표준 SKILL.md frontmatter 생성' : `✗ export 실패`);
   if (!ok) { failed++; console.log(body.slice(0, 300) || r.stdout.slice(0, 300)); }
@@ -1899,7 +1898,7 @@ total++;
   // 비-TTY + --yes 시 multi-select prompt 안 띄움 → 통상 init 흐름
   const ok = r.status === 0
     && /Leerness v/.test(r.stdout)
-    && /Skills: office/.test(r.stdout);
+    && /Skills: (feature-implementation|project-roadmap-generator)/.test(r.stdout);   // 1.36.80
   console.log(ok ? '✓ B(1.9.34) multi-select 비-TTY 폴백: --yes로 default 사용' : `✗ multi-select 폴백 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
@@ -2380,7 +2379,7 @@ total++;
     encoding: 'utf8',
     env: Object.assign({}, process.env, { LEERNESS_SKILLPACK_PATH: '' })
   });
-  const ok = r.status === 0 && /builtin fallback/.test(r.stdout) && /\| builtin \|/.test(r.stdout);
+  const ok = r.status === 0 && /builtin fallback/.test(r.stdout) && /\| (?:builtin|catalog\+local|catalog) \|/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.10) builtin fallback (skillpack 없을 때)' : '✗ builtin fallback 실패');
   if (!ok) failed++;
 }
@@ -4401,10 +4400,10 @@ total++;
   try {
     const c = require(path.resolve(__dirname, '..', 'lib', 'catalogs.js'));
     const m = require(path.resolve(__dirname, '..', 'lib', 'pure-utils.js'));
-    const catOk = c.BUILTIN_CATALOG && Object.keys(c.BUILTIN_CATALOG).length === 9 && c.BUILTIN_CATALOG.office && c.BUILTIN_CATALOG.office.version === '1.0.0';
+    const catOk = c.BUILTIN_CATALOG && Object.keys(c.BUILTIN_CATALOG).length === 2 && c.BUILTIN_CATALOG['feature-implementation'] && c.BUILTIN_CATALOG['feature-implementation'].version === '1.0.0';
     const out = m._withBuiltinSource(c.BUILTIN_CATALOG);
-    const work = catOk && typeof m._withBuiltinSource === 'function' && Object.keys(out).length === 9
-      && Object.values(out).every(v => v._source === 'builtin') && Array.isArray(out.office.capabilities)
+    const work = catOk && typeof m._withBuiltinSource === 'function' && Object.keys(out).length === 2
+      && Object.values(out).every(v => v._source === 'builtin') && Array.isArray(out['feature-implementation'].capabilities)
       && Object.keys(m._withBuiltinSource(null)).length === 0;
     const harnessSrc = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
     const _catImp = (harnessSrc.match(/const \{[\s\S]*?\} = require\('\.\.\/lib\/catalogs'\)/) || [''])[0];  // import 순서/추가 비의존
@@ -4416,7 +4415,7 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', sd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
     const sr = cp.spawnSync(process.execPath, [CLI, 'skill', 'list', '--path', sd], { encoding: 'utf8', timeout: 20000 });
     const listOut = (sr.stdout || '') + (sr.stderr || '');
-    const cmdOk = /office|firebase|feature-implementation|roadmap/i.test(listOut);
+    const cmdOk = /feature-implementation|roadmap/i.test(listOut);
     ok = work && movedOut && cmdOk;
     fs.rmSync(sd, { recursive: true, force: true });
   } catch {}
@@ -5094,7 +5093,7 @@ total++;
     fs.rmSync(d, { recursive: true, force: true });
     const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rec-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d2, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    const recInstalled = fs.existsSync(path.join(d2, '.harness', 'skills', 'office'));  // recommended → office 포함
+    const recInstalled = fs.existsSync(path.join(d2, '.harness', 'skills', 'feature-implementation'));  // recommended → office 포함
     fs.rmSync(d2, { recursive: true, force: true });
     ok = skipAbsent && corePresent && recInstalled;
   } catch {}
@@ -7317,7 +7316,7 @@ total++;
     const i2 = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'en', '--skills', 'recommended', '--no-stale-check', '--no-env'], { encoding: 'utf8', timeout: 40000 });
     const dirSet = fs.readdirSync(path.join(d, '.harness', 'skills'), { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name).sort();
     const lockSet = Object.keys(JSON.parse(fs.readFileSync(path.join(d, '.harness', 'skills-lock.json'), 'utf8')).installedSkills).sort();
-    const f12Ok = i1.status === 0 && i2.status === 0 && dirSet.length > 5 && JSON.stringify(dirSet) === JSON.stringify(lockSet);
+    const f12Ok = i1.status === 0 && i2.status === 0 && dirSet.length >= 2 && JSON.stringify(dirSet) === JSON.stringify(lockSet);   // 1.36.80: 내장 축소 — 개수 하한 대신 집합 일치가 본질
     // F9: 실 CLI migrate 경유 — 구판 KO canonical 을 en 프로젝트 CLAUDE.md 에 심고 migrate
     const d9 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f9-')); _d.push(d9);
     const i3 = cp.spawnSync(process.execPath, [CLI, 'init', d9, '--yes', '--language', 'en', '--no-stale-check', '--no-env'], { encoding: 'utf8', timeout: 40000 });
@@ -7703,6 +7702,107 @@ total++;
     if (!ok) console.log(`   [dogfood 디버그] row=${rowOk} guard=${guardOk} suffix=${suffixOk} json=${jsonPure} banner=${bannerKept} parent=${parentOk} parentBad=${parentBadOk} tech=${techOk} js=${jsOk} audit=${auditOk}`);
   } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? '✓ B(1.36.79) 도그푸딩 P1×5: progress 행 보존 · handoff --json 순수(텍스트 배너 유지) · parent path · tech 파일수 우선 · audit=integrity 정합' : '✗ 도그푸딩 P1 수정 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.80 (P-0001 검증기 캘리브레이션): 검증기를 신뢰하기 전에 탐지력을 실행으로 증명 — 적대적 FP 프로브 포함
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ref-')); _d.push(d);
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 60000, maxBuffer: 16 * 1024 * 1024 });
+    const J = (r) => { try { return JSON.parse(r.stdout); } catch { return null; } };
+    const N = (js) => `node -e "${js}"`;
+    const add = (id, check, good, bad, expect) => { const a = ['referee', 'add', id, '--check', check, '--good', good, '--bad', bad]; if (expect) a.push('--expect-bad', expect); return R(a); };
+    const verify = (id) => J(R(['referee', 'verify', id, '--json']));
+    // 정상: good 통과 + bad 를 기대 사유로 거부 → 캘리브레이션 통과
+    add('okref', N('process.exit(0)'), N('process.exit(0)'), N("console.log('AssertionError: x'); process.exit(1)"), 'AssertionError');
+    const good = verify('okref');
+    const happyOk = good && good.ok === true && good.goodExit === 0 && good.badExit === 1 && good.expectMatched === true;
+    // FP 프로브 ①: known-good 이 이미 빨간 상태 → 거부(기준선 무효)
+    add('redbase', N('process.exit(0)'), N('process.exit(3)'), N('process.exit(1)'), '');
+    const p1 = verify('redbase');
+    // FP 프로브 ②: known-bad 가 통과 → 탐지력 없음 거부
+    add('nopower', N('process.exit(0)'), N('process.exit(0)'), N('process.exit(0)'), '');
+    const p2 = verify('nopower');
+    // FP 프로브 ③: bad 가 무관한 이유로 실패 → 사유 불일치 거부
+    add('wrongreason', N('process.exit(0)'), N('process.exit(0)'), N("console.log('Error: cannot find module'); process.exit(1)"), 'AssertionError');
+    const p3 = verify('wrongreason');
+    const probesOk = p1 && p1.ok === false && p2 && p2.ok === false && p3 && p3.ok === false && p3.expectMatched === false;
+    // 지문(stale): 캘리브레이션 후 명령이 바뀌면 신뢰 철회
+    const store = path.join(d, '.harness', 'referees.json');
+    const js = JSON.parse(fs.readFileSync(store, 'utf8'));
+    js.find(x => x.id === 'okref').bad = N('process.exit(1)');
+    fs.writeFileSync(store, JSON.stringify(js, null, 2));
+    const shown = J(R(['referee', 'show', 'okref', '--json']));
+    const staleOk = shown && shown.stale === true && shown.calibrated === false;
+    // verify-claim 게이팅: 미검증/없는 referee 는 거부, 검증기 실패도 거부
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', '작업', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    cp.spawnSync(process.execPath, [CLI, 'task', 'update', 'T-0002', '--status', 'done', '--evidence', 'lib/referee.js 구현', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const missing = R(['verify-claim', 'T-0002', '--referee', 'nope', '--json']);
+    const staleUse = R(['verify-claim', 'T-0002', '--referee', 'okref', '--json']);   // 위에서 stale 로 만든 것
+    add('failing', N('process.exit(2)'), N('process.exit(0)'), N("console.log('AssertionError'); process.exit(1)"), 'AssertionError');
+    verify('failing');
+    const refFail = R(['verify-claim', 'T-0002', '--referee', 'failing', '--json']);
+    const gateOk = missing.status === 1 && (J(missing) || {}).code === 'referee_not_found'
+      && staleUse.status === 1 && (J(staleUse) || {}).code === 'referee_stale'
+      && refFail.status === 1 && (J(refFail) || {}).code === 'referee_failed';
+    // 스토어 규율: 손상 위 변경 거부 + --json 순수
+    const listPure = (() => { try { JSON.parse(R(['referee', 'list', '--json']).stdout); return true; } catch { return false; } })();
+    fs.writeFileSync(store, '{ broken');
+    const corrupt = R(['referee', 'add', 'x9', '--check', 'a', '--good', 'b', '--bad', 'c', '--json']);
+    const storeOk = listPure && corrupt.status === 1 && (J(corrupt) || {}).code === 'store_invalid';
+    ok = happyOk && probesOk && staleOk && gateOk && storeOk;
+    if (!ok) console.log(`   [referee 디버그] happy=${happyOk} probes=${probesOk} stale=${staleOk} gate=${gateOk} store=${storeOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.80) referee 캘리브레이션: 탐지력 증명(good통과+bad를 기대사유로 거부) · FP프로브 3종 거부 · 명령변경 stale · verify-claim 게이팅 · 스토어 규율' : '✗ referee 캘리브레이션 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.80 (UR-0067 라이브 미리보기 + P-0003 사다리 + 기본 스킬 정리)
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pv80-')); _d.push(d);
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 30000, maxBuffer: 16 * 1024 * 1024 });
+    const J = (r) => { try { return JSON.parse(r.stdout); } catch { return null; } };
+    // 기본 스킬: 도메인 7종 제거 · 남은 2종 · 근거 없는 'passed' 주장 금지
+    const CAT = require(path.resolve(path.dirname(CLI), '..', 'lib', 'catalogs.js')).BUILTIN_CATALOG;
+    const skillOk = Object.keys(CAT).length === 2 && !CAT['commerce-api'] && CAT['feature-implementation']
+      && Object.values(CAT).every(v => v.verification !== 'passed');
+    // 기존 설치분 보존(비파괴): 카탈로그에서 빠진 스킬도 락에 남는다
+    fs.mkdirSync(path.join(d, '.harness', 'skills', 'commerce-api'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.harness', 'skills', 'commerce-api', 'skill.json'), '{"name":"commerce-api"}');
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--skills', 'recommended', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    let keepOk = false;
+    try { keepOk = Object.keys(JSON.parse(fs.readFileSync(path.join(d, '.harness', 'skills-lock.json'), 'utf8')).installedSkills).includes('commerce-api') && fs.existsSync(path.join(d, '.harness', 'skills', 'commerce-api')); } catch {}
+    // 라이브 미리보기: mode 미설정 → 질문 노출, self 기본
+    R(['preview', 'add', '새 페이지', '--design', '밝게']);
+    R(['preview', 'mockup', 'P-0001']);
+    const modeShow = R(['preview', 'mode']);
+    const modeOk = /미리보기 모드가 아직/.test(modeShow.stdout) && (J(R(['preview', 'mode', '--json'])) || {}).effective === 'self';
+    // project 모드(옵트인): 정적 디렉토리 배치 + 루트 밖 거부
+    R(['preview', 'mode', 'project', '--static-dir', 'public', '--dev-url', 'http://localhost:5173']);
+    const proj = J(R(['preview', 'serve', 'P-0001', '--json']));
+    const projOk = proj && proj.mode === 'project' && /public\/leerness-preview-P-0001\.html/.test(proj.file || '')
+      && fs.existsSync(path.join(d, 'public', 'leerness-preview-P-0001.html'))
+      && R(['preview', 'serve', 'P-0001', '--static-dir', '../outside', '--json']).status === 1;
+    // 사다리: 옵트인 + proceed 무영향 + 근거 없으면 unknown
+    const base = J(R(['review-request', '테스트 요청', '--json']));
+    const lad = J(R(['review-request', '테스트 요청', '--ladder', '--json']));
+    const ladderOk = base && base.ladder === undefined && lad && lad.ladder && lad.ladder.rungs.length === 7
+      && lad.ladder.rungs.every(r => ['confirmed', 'candidate', 'unknown', 'not-applicable'].includes(r.status))
+      && lad.proceed === base.proceed && Array.isArray(lad.ladder.preserved) && lad.ladder.preserved.length >= 4;
+    ok = skillOk && keepOk && modeOk && projOk && ladderOk;
+    if (!ok) console.log(`   [pv80 디버그] skill=${skillOk} keep=${keepOk} mode=${modeOk} proj=${projOk} ladder=${ladderOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.80) 기본스킬 정리(도메인7 제거·passed 주장 금지·기존설치 보존) · 라이브 미리보기 mode(self기본/project옵트인·루트밖 거부) · 사다리 옵트인(proceed 무영향)' : '✗ 1.36.80 미리보기/스킬/사다리 실패');
   if (!ok) failed++;
 }
 

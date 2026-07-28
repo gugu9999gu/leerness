@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.79';
+const VERSION = '1.36.80';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -532,14 +532,19 @@ function skillLock(skills, root) {
   const set = new Set(skills);
   try {
     if (root) {
+      // 1.36.80: 내장 카탈로그에서 빠진 스킬(도메인 7종 제거)이라도 **이미 설치돼 있으면** 락에 남긴다 —
+      //   디스크 실재를 기록한다는 F12 원칙 유지 + 기존 사용자의 스킬이 락에서 유령처럼 사라지지 않게(비파괴).
+      //   판단 근거는 skill.json/SKILL.md 존재(= leerness 가 설치한 흔적) — 임의 디렉토리는 여전히 배제.
       const dir = path.join(root, '.harness', 'skills');
       if (exists(dir)) for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (e.isDirectory() && skillCatalog[e.name]) set.add(e.name);
+        if (!e.isDirectory()) continue;
+        if (skillCatalog[e.name]) { set.add(e.name); continue; }
+        if (exists(path.join(dir, e.name, 'skill.json')) || exists(path.join(dir, e.name, 'SKILL.md'))) set.add(e.name);
       }
     }
   } catch {}
   const data = { leernessVersion: VERSION, updatedAt: now(), installedSkills: {} };
-  for (const s of [...set].sort()) data.installedSkills[s] = skillCatalog[s] || { version: 'unknown' };   // (검수 #4) 정렬 직렬화 — 동일 멤버십이면 바이트 동일(no-op 보존)
+  for (const s of [...set].sort()) data.installedSkills[s] = skillCatalog[s] || { version: 'unknown', source: 'installed', note: 'not in built-in catalog (user-installed or removed from defaults)' };   // (검수 #4) 정렬 직렬화 — 동일 멤버십이면 바이트 동일(no-op 보존)
   return JSON.stringify(data, null, 2) + '\n';
 }
 
@@ -1020,6 +1025,12 @@ async function resolveInstallOptions(root, opts = {}) {
   const explicitSkills = arg('--skills', null);
   let lang = explicitLang ? detectLanguageValue(root, explicitLang) : detectLanguageValue(root, 'auto');
   let skills = explicitSkills ? parseSkillsValue(explicitSkills) : [];
+  // 1.36.80 (검수 #10): 사용자가 **명시한** 스킬 id 가 카탈로그에 없으면 조용히 무시하지 않고 분명히 알린다
+  //   (1.36.80 에서 도메인 7종을 내장에서 제거했으므로 구 명령이 조용히 0개 설치로 끝나는 것을 막는다).
+  if (explicitSkills && skills.unknown && skills.unknown.length) {
+    warn(`요청한 스킬 미존재: ${skills.unknown.join(', ')} — 1.36.80 에서 내장 기본 스킬이 정리되었습니다(사용 가능: ${Object.keys(skillCatalog).join(', ') || '(없음)'})`);
+    log(`  ⓘ 이미 설치된 스킬은 그대로 유지됩니다. 외부 스킬은 leerness skill install <경로|URL> 로 추가하세요.`);
+  }
   const shouldAsk = !has('--yes') && !opts.nonInteractive && process.stdin.isTTY && process.stdout.isTTY && !opts.migration;
   // 1.9.269 (UR-0022): 비대화형 auto 설치(npx leerness init --yes 등)에서 OS 시스템 언어가 적용됐으면 투명성 안내.
   //   --language 명시 시 미발화 (explicitLang). 대화형은 이후 언어 prompt 가 처리.
@@ -3867,7 +3878,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심층: i18n STRINGS catalog→lib/catalogs + _translate→pure-utils 분리 (1.9.338)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.STRINGS && typeof c.STRINGS['common.ready'] === 'object' && c.STRINGS['common.ready'].en === 'Ready'; const work = m._translate(c.STRINGS, 'common.ready', 'en') === 'Ready' && m._translate(c.STRINGS, 'common.ready', 'ko') === '준비 완료' && m._translate(c.STRINGS, 'no.such.key', 'en') === 'no.such.key' && m._translate(null, 'x', 'ko') === 'x' && m._translate({ k: { ko: '케이' } }, 'k', 'en') === '케이'; const src = read(__filename); const moved = STRINGS === c.STRINGS && _translate === m._translate && !/const STRINGS = \{/.test(src); return catOk && work && moved; } },
     { name: 'UR-0053: decisions canonical JSON 레이어(_loadDecisions/_saveDecisions/decisionsJsonPath) + pure 파서/렌더 round-trip (1.9.339)', run: () => { const m = require('../lib/pure-utils'); const md = '# Decisions\n\n### 2026-06-05 — A\n- Decision: a\n- Reason: r\n- Alternatives: alt\n- Impact: imp\n\n### 2026-06-04 — B\n- Decision: b\n- Alternatives:\n'; const objs = m._decisionsFromMd(md); const parseOk = objs.length === 2 && objs[0].alternatives === 'alt' && objs[0].impact === 'imp' && objs[1].alternatives === null && objs[1].title === 'B'; const rt = m._decisionsFromMd(m._renderDecisionsMd(objs)); const rtOk = JSON.stringify(rt) === JSON.stringify(objs); const tplOk = m._decisionsFromMd(m._renderDecisionsMd([])).length === 0; const layerOk = typeof _loadDecisions === 'function' && typeof _saveDecisions === 'function' && typeof decisionsJsonPath === 'function' && _decisionsFromMd === m._decisionsFromMd; return parseOk && rtOk && tplOk && layerOk; } },
     { name: 'UR-0058: lessons canonical JSON 레이어(_loadLessons/_saveLessons/lessonsJsonPath) + pure 파서/렌더 round-trip', run: () => { const m = require('../lib/pure-utils'); const objs = [{ date: '2026-06-05', text: 'A', tag: 't' }, { date: '2026-06-04', text: 'B', tag: null }]; const rt = m._parseLessonEntries(m._renderLessonsMd(objs)); const rtOk = JSON.stringify(rt) === JSON.stringify(objs); const tplOk = m._parseLessonEntries(m._renderLessonsMd([])).length === 0; const layerOk = typeof _loadLessons === 'function' && typeof _saveLessons === 'function' && typeof lessonsJsonPath === 'function' && _renderLessonsMd === m._renderLessonsMd; return rtOk && tplOk && layerOk; } },
-    { name: 'UR-0025 심층: BUILTIN_CATALOG→lib/catalogs + _withBuiltinSource→pure-utils 분리 (1.9.341)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.BUILTIN_CATALOG && Object.keys(c.BUILTIN_CATALOG).length === 9 && c.BUILTIN_CATALOG.office && c.BUILTIN_CATALOG.office.version === '1.0.0'; const out = m._withBuiltinSource(c.BUILTIN_CATALOG); const work = Object.keys(out).length === 9 && Object.values(out).every(v => v._source === 'builtin') && out.office.version === '1.0.0' && Array.isArray(out.office.capabilities) && Object.keys(m._withBuiltinSource(null)).length === 0; const src = read(__filename); const moved = BUILTIN_CATALOG === c.BUILTIN_CATALOG && _withBuiltinSource === m._withBuiltinSource && !/const BUILTIN_CATALOG = \{/.test(src); return catOk && work && moved; } },
+    { name: 'UR-0025 심층: BUILTIN_CATALOG→lib/catalogs + _withBuiltinSource→pure-utils 분리 (1.9.341)', run: () => { const c = require('../lib/catalogs'); const m = require('../lib/pure-utils'); const catOk = c.BUILTIN_CATALOG && Object.keys(c.BUILTIN_CATALOG).length === 2 && c.BUILTIN_CATALOG['feature-implementation'] && c.BUILTIN_CATALOG['project-roadmap-generator'] && Object.values(c.BUILTIN_CATALOG).every(v => v.verification !== 'passed'); const out = m._withBuiltinSource(c.BUILTIN_CATALOG); const work = Object.keys(out).length === 2 && Object.values(out).every(v => v._source === 'builtin') && out['feature-implementation'].version === '1.0.0' && Array.isArray(out['feature-implementation'].capabilities) && Object.keys(m._withBuiltinSource(null)).length === 0; const src = read(__filename); const moved = BUILTIN_CATALOG === c.BUILTIN_CATALOG && _withBuiltinSource === m._withBuiltinSource && !/const BUILTIN_CATALOG = \{/.test(src); return catOk && work && moved; } },
     { name: 'UR-0025 심층: ROADMAP_STATUS_LABEL/COLOR→lib/catalogs 분리 (1.9.342)', run: () => { const c = require('../lib/catalogs'); const lblOk = c.ROADMAP_STATUS_LABEL && Object.keys(c.ROADMAP_STATUS_LABEL).length === 11 && c.ROADMAP_STATUS_LABEL.done === '완료' && c.ROADMAP_STATUS_LABEL.blocked === '오류'; const colOk = c.ROADMAP_STATUS_COLOR && Object.keys(c.ROADMAP_STATUS_COLOR).length === 11 && c.ROADMAP_STATUS_COLOR.done === '#16a34a' && c.ROADMAP_STATUS_COLOR.skill === '#8b5cf6'; const src = read(__filename); const moved = ROADMAP_STATUS_LABEL === c.ROADMAP_STATUS_LABEL && ROADMAP_STATUS_COLOR === c.ROADMAP_STATUS_COLOR && !/const ROADMAP_STATUS_LABEL = \{/.test(src); return lblOk && colOk && moved; } },
     { name: 'UR-0025 심층: SECRET_PATTERNS→lib/catalogs 보안 응집 분리 (1.9.343)', run: () => { const c = require('../lib/catalogs'); const catOk = Array.isArray(c.SECRET_PATTERNS) && c.SECRET_PATTERNS.length === 20 && c.SECRET_PATTERNS.every(p => p.name && p.re instanceof RegExp); const A = 'A'.repeat(40); const hit = (s) => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('AKIA' + 'ABCD1234EFGH5678') && hit('sk-' + 'ant-api03-' + A + '_' + A) && !hit('const u = "john' + '_doe_2024";'); const moved = SECRET_PATTERNS === c.SECRET_PATTERNS; return catOk && det && moved; } },
     { name: 'UR-0025 심층: SKILL_CATALOG_PRESETS→lib/catalogs 분리 (1.9.344)', run: () => { const c = require('../lib/catalogs'); const catOk = c.SKILL_CATALOG_PRESETS && Object.keys(c.SKILL_CATALOG_PRESETS).length === 2 && c.SKILL_CATALOG_PRESETS.vercel && c.SKILL_CATALOG_PRESETS.vercel.owner === 'vercel-labs' && c.SKILL_CATALOG_PRESETS.anthropic && c.SKILL_CATALOG_PRESETS.anthropic.repo === 'skills'; const moved = SKILL_CATALOG_PRESETS === c.SKILL_CATALOG_PRESETS; return catOk && moved; } },
@@ -6799,6 +6810,7 @@ function commandsCmd(root) {
       { cmd: 'clarify "<사용자 요청>" [--json]', desc: '요청 모호성 신호 감지 → 사용자에게 물을 질문 생성 (추측 구현 방지) — 1.36.51 UR-0061' },
       { cmd: 'tech [--json]', desc: '기술 프로필 — 개발 언어·연결 서비스 자동 감지 + 마이그레이션/언어전환 이력, 그래프 🛠 탭 표시 — 1.36.53 UR-0062' },
       { cmd: 'integrity check [--repair] [--json]', desc: 'managed 정책-문서 12종 무결성(부재/H1 상실/절단) 점검 — --repair: archive 대피 후 템플릿 재생성 — 1.36.57 감사 F-04' },
+      { cmd: 'referee add|verify|list|show|drop', desc: '검증기 캘리브레이션 — 신뢰 전에 탐지력 증명(known-good 통과 + 망가뜨린 known-bad 를 기대 사유로 거부). verify-claim --referee / gate 게이팅 — 1.36.80 P-0001' },
       { cmd: 'preview add|list|show|approve|revise|mockup', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약. mockup <P-ID> [--force]: 자립형 HTML 디자인 시안 스캐폴드 · add --mockup <파일>: 기존 시안 첨부 — 1.36.51 UR-0061 · 1.36.75 UR-0066' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
       { cmd: 'brainstorm "<topic>" [--include-code]', desc: '워크스페이스 회수 + 코드 grep' }
@@ -9215,6 +9227,9 @@ function _saveTeams(root, teams) {
 const _team = require('../lib/team');
 const _tgl = require('../lib/toggles');   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동 — gate/lens/auto-graph/delegation-brief)
 const _clar = require('../lib/clarify');  // 1.36.51 (UR-0061): 모호성 질문 + 미리보기 승인 워크플로
+const _ref = require('../lib/referee');   // 1.36.80 (P-0001): 검증기 캘리브레이션 — 검증기 자신의 탐지력을 실행으로 증명
+const _pvsrv = require('../lib/preview-serve');   // 1.36.80 (UR-0067): 라이브 미리보기 — 임시 워크스페이스 + 로컬 서버 + 확인 후 정리
+function refereeCmd(root, sub, rest) { return _ref.refereeCmd(root, sub, rest, { has, arg, VERSION, _withLock }); }
 const _tech = require('../lib/tech-profile');  // 1.36.53 (UR-0062): 기술 프로필 (언어·서비스 감지 + 변경 이력)
 function teamCmd(root, sub, id, opts = {}) { return _team.teamCmd(root, sub, id, opts, { VERSION, _loadTeams, _loadTeamsChecked, _saveTeams, _detectShellCtx, arg, has, _withLock, failJson }); }   // 1.36.31: add 경합 락 · 1.36.78: 형상무효 가드 + failJson
 
@@ -12926,6 +12941,21 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   const rows = readProgressRows(root);
   const row = rows.find(r => r.id === taskId);
   if (!row) { if (opts.collect) return { id: taskId, ok: false, reasons: ['not-found'] }; return failJson(_j, 'not_found', `progress-tracker.md에 ${taskId} 없음.`); }
+  // 1.36.80 (P-0001): --referee <id> — 캘리브레이션된 검증기만 신뢰한다. 미검증/무효(stale) 검증기의 통과는 증거가 아니므로
+  //   실행 전에 거부한다(검증기 자신의 탐지력이 증명되지 않은 상태에서 나온 초록은 정보가 없다).
+  const _refId = opts.refereeId || arg('--referee', null);
+  let _refereeResult = null;
+  if (_refId && _refId !== true) {
+    const _g = _ref.requireReferee(root, String(_refId));
+    if (!_g.ok) { if (opts.collect) return { id: taskId, ok: false, reasons: [_g.code] }; return failJson(_j, _g.code, _g.message); }
+    const _rr = cp.spawnSync(_g.referee.check, { cwd: root, shell: true, encoding: 'utf8', timeout: 600000, maxBuffer: 8 * 1024 * 1024 });
+    _refereeResult = { id: _g.referee.id, check: _g.referee.check, exit: (_rr.status == null ? 1 : _rr.status), calibratedAt: _g.referee.calibration.at };
+    if (_refereeResult.exit !== 0) {
+      const _msg = `referee ${_g.referee.id} 검증 실패(exit ${_refereeResult.exit}) — 캘리브레이션된 검증기가 이 상태를 거부했습니다: ${_g.referee.check}`;
+      if (opts.collect) return { id: taskId, ok: false, reasons: ['referee_failed'], referee: _refereeResult };
+      return failJson(_j, 'referee_failed', _msg);
+    }
+  }
 
   const evidence = row.evidence || '';
   // 1.9.20: 파일 경로 추출 — 도메인 폴더 자동 인식 + 루트 메타파일
@@ -18898,7 +18928,7 @@ function _mcpToCliArgs(name, args, targetPath) {
           case 'leerness_handoff':         cliArgs = ['handoff', targetPath, '--compact', '--no-drift-check']; break;
           case 'leerness_drift_check':     cliArgs = ['drift', 'check', targetPath, '--json']; break;
           case 'leerness_audit':           cliArgs = ['audit', targetPath, '--json', ...(args.fix ? ['--fix'] : []), ...(args.strict ? ['--strict'] : [])]; break;
-          case 'leerness_verify_claim':    cliArgs = ['verify-claim', args.taskId, '--path', targetPath, ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : [])]; break;
+          case 'leerness_verify_claim':    cliArgs = ['verify-claim', args.taskId, '--path', targetPath, ...(args.refereeId ? ['--referee', String(args.refereeId)] : []), ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : [])]; break;
           case 'leerness_verify_claim_all': cliArgs = ['verify-claim', '--all', '--path', targetPath, '--json', ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : [])]; break;  // 1.33.3: 모든 done 주장 일괄 검증(--json 강제 → process.exitCode 만, 하드 exit 없음)
           case 'leerness_contract_verify': cliArgs = ['contract', 'verify', args.spec, args.impl]; break;
           case 'leerness_agents_list':     cliArgs = ['agents', 'list', '--json']; break;
@@ -19105,6 +19135,20 @@ function _mcpToCliArgs(name, args, targetPath) {
           case 'leerness_clarify':
             cliArgs = ['clarify', String(args.text || ''), '--path', targetPath, '--json'];
             break;
+          case 'leerness_referee': {   // 1.36.80 (P-0001)
+            const _ra = String(args.action || 'list');
+            cliArgs = ['referee', _ra, '--path', targetPath, '--json'];
+            if (_ra === 'add') {
+              cliArgs.splice(2, 0, String(args.id || ''));
+              if (args.check) cliArgs.push('--check', String(args.check));
+              if (args.good) cliArgs.push('--good', String(args.good));
+              if (args.bad) cliArgs.push('--bad', String(args.bad));
+              if (args.expectBad) cliArgs.push('--expect-bad', String(args.expectBad));
+            } else if (['show', 'verify', 'drop'].includes(_ra)) {
+              cliArgs.splice(2, 0, String(args.id || ''));
+            }
+            break;
+          }
           case 'leerness_preview': {
             const _pa = String(args.action || 'list');
             cliArgs = ['preview', _pa, '--path', targetPath, '--json'];
@@ -23437,7 +23481,20 @@ async function main() {
       if (_pvRaw[i].startsWith('--')) { if (['--design', '--features', '--note', '--path', '--mockup'].includes(_pvRaw[i]) && _pvRaw[i + 1]) i++; continue; }   // 1.36.75 (검수 #2): --mockup 값이 제목에 흡수되던 것
       _pvToks.push(_pvRaw[i]);
     }
-    return _clar.previewCmd(arg('--path', process.cwd()), _pvToks[0], _pvToks.slice(1), { has, arg, _withLock });   // 1.36.54 (#2): 변경은 락 직렬화
+    // 1.36.80 (UR-0067): 라이브 미리보기 — serve(로컬 서버) / mode(self|project) 는 별도 모듈로 위임
+    const _pvRoot = arg('--path', process.cwd());
+    if (_pvToks[0] === 'serve') return _pvsrv.previewServeCmd(_pvRoot, _pvToks[1], { has, arg, previews: _clar._loadPreviews(_pvRoot) });
+    if (_pvToks[0] === 'mode') return _pvsrv.previewModeCmd(_pvRoot, _pvToks[1], { has, arg });
+    return _clar.previewCmd(_pvRoot, _pvToks[0], _pvToks.slice(1), { has, arg, _withLock, _onResolved: (id) => _pvsrv.cleanupServeDir(_pvRoot, id) });   // 1.36.54 (#2): 변경은 락 직렬화 · 1.36.80: 승인/수정 시 임시 워크스페이스 정리
+  }
+  // 1.36.80 (P-0001): referee — 값 플래그가 positional 로 새지 않게 원시 argv 파싱(preview 와 동일 패턴)
+  if (cmd === 'referee') {
+    const _rvRaw = process.argv.slice(2); const _rvI = _rvRaw.indexOf('referee'); const _rvToks = [];
+    for (let i = _rvI + 1; i < _rvRaw.length && _rvI >= 0; i++) {
+      if (_rvRaw[i].startsWith('--')) { if (['--check', '--good', '--bad', '--expect-bad', '--path', '--timeout'].includes(_rvRaw[i]) && _rvRaw[i + 1]) i++; continue; }
+      _rvToks.push(_rvRaw[i]);
+    }
+    return refereeCmd(arg('--path', process.cwd()), _rvToks[0], _rvToks.slice(1));
   }
   if (cmd === 'lens')                               return lensCmd(args[1]);  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈
   // 1.9.233: leerness commands — 카테고리화된 전체 CLI 명령 목록

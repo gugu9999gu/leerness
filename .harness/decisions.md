@@ -69,3 +69,9 @@
 - Reason: 사용자 질의로 검토 — 미고려가 아닌 고려-후-결정 상태로 전환
 - Alternatives: 
 - Impact: 
+
+### 2026-07-28 — 검증기 캘리브레이션(referee) 채택 — 검증기 자신의 탐지력을 실행으로 증명
+- Decision: 검증기 캘리브레이션(referee) 채택 — 검증기 자신의 탐지력을 실행으로 증명
+- Reason: leerness 전 검사가 정적·텍스트 대리 지표라 '검증기가 실패를 잡을 수 있는가'를 증명하는 장치가 없었다. codex 독립검토와 4렌즈 분석이 만장일치 최우선으로 지목
+- Alternatives: ponytail 명령군 이식(기각: lens/reuse/review-request 중복) · 마이그레이션 러너(기각: 정체성 변질) · 룰 스냅샷(이연) · ladder 영수증(이연)
+- Impact: verify-claim/gate 가 '캘리브레이션된 검증기'만 신뢰하도록 — done 은 증거를 요구한다의 형제 명제
