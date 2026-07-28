@@ -1,0 +1,59 @@
+[
+  {
+    "id": "P-0001",
+    "title": "검증기 캘리브레이션 (referee) — judge를 신뢰하기 전에 탐지력 증명",
+    "design": "known-good 통과 + 일부러 망가뜨린 known-bad 거부(+사유 일치)를 실행으로 증명해야 그 검증기의 PASS 를 게이트가 신뢰. 명령/픽스처 해시 변경 시 캘리브레이션 stale.",
+    "features": [
+      "referee add/verify/show",
+      "verify-claim --referee",
+      "gate --require-referee",
+      "handoff·session close 에 stale 노출",
+      "MCP 단일 action 도구"
+    ],
+    "status": "proposed",
+    "createdAt": "2026-07-28T05:14:47.288Z",
+    "history": [
+      {
+        "at": "2026-07-28T05:14:47.288Z",
+        "event": "proposed"
+      }
+    ]
+  },
+  {
+    "id": "P-0002",
+    "title": "룰 거버넌스 — decide-once 스냅샷 + 제안/승인 분리",
+    "design": "캠페인 단위로 승인된 룰을 동결(해시)하고, 워커는 제안만 가능·활성화는 사람 승인. 기존 rule/decision 스토어 확장(새 RULEBOOK 서브시스템 아님).",
+    "features": [
+      "rule propose/approve",
+      "rule snapshot --label",
+      "gate --rule-snapshot",
+      "모순 결정 탐지"
+    ],
+    "status": "proposed",
+    "createdAt": "2026-07-28T05:14:47.704Z",
+    "history": [
+      {
+        "at": "2026-07-28T05:14:47.704Z",
+        "event": "proposed"
+      }
+    ]
+  },
+  {
+    "id": "P-0003",
+    "title": "review-request --ladder — 순서 있는 최소성 결정 영수증",
+    "design": "필요한가→기존코드→stdlib→네이티브→설치된 의존성→한 줄 조합→최소 구현 순으로 각 단의 답(confirmed|candidate|unknown|n-a)과 근거를 하나의 산출물로 기록. 자문(advisory) 전용, 차단 안 함.",
+    "features": [
+      "기존 review-request 확장",
+      "--json 계약",
+      "보존 요구사항(검증·보안·접근성) 명시 기록"
+    ],
+    "status": "proposed",
+    "createdAt": "2026-07-28T05:14:48.131Z",
+    "history": [
+      {
+        "at": "2026-07-28T05:14:48.131Z",
+        "event": "proposed"
+      }
+    ]
+  }
+]

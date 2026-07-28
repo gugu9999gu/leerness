@@ -7619,5 +7619,92 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.79 (실 프로젝트 60개 도그푸딩 P1 5건): progress 행 보존 · handoff --json 순수 · parent path · tech 언어 순위 · audit=integrity 정합
+total++;
+{
+  let ok = false;
+  const _d = [];
+  try {
+    // P1-A: 비-T/M/D 행(R-/UR-)이 쓰기 경로에서 소실되면 안 된다 + 클래스 가드
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-a-')); _d.push(d);
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const pt = path.join(d, '.harness', 'progress-tracker.md');
+    fs.writeFileSync(pt, fs.readFileSync(pt, 'utf8').trimEnd() + '\n| R-0001 | done | 사용자 이력 | 증거 | - | 2026-05-07 |\n| UR-0002 | done | 다른 요청 | 증거2 | - | 2026-05-07 |\n');
+    const rowsOf = () => (fs.readFileSync(pt, 'utf8').match(/^\|\s*[A-Z]{1,3}-\d{3,}\s*\|/gm) || []).length;
+    const beforeRows = rowsOf();
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'brand new', '--path', d], { encoding: 'utf8', timeout: 20000 });
+    const rowOk = rowsOf() === beforeRows + 1
+      && fs.readFileSync(pt, 'utf8').includes('R-0001') && fs.readFileSync(pt, 'utf8').includes('UR-0002');
+    // 클래스 가드: 파서가 못 읽는 행-모양 라인(셀 부족)이 있으면 쓰기 중단 + 원본 보존 (자체 재설계 후 실동작)
+    const dG = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-a2-')); _d.push(dG);
+    cp.spawnSync(process.execPath, [CLI, 'init', dG, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const ptG = path.join(dG, '.harness', 'progress-tracker.md');
+    fs.appendFileSync(ptG, '| R-0007 | done | 셀부족행 |\n');
+    const beforeG = fs.readFileSync(ptG, 'utf8');
+    const guardR = cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'x', '--path', dG], { encoding: 'utf8', timeout: 20000 });
+    const guardOk = guardR.status === 1 && fs.readFileSync(ptG, 'utf8') === beforeG;
+    // (검수 #2) 무관한 참조표는 task 로 흡수되지 않고, 표 뒤 사용자 콘텐츠는 재작성에도 보존
+    const dS = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-a3-')); _d.push(dS);
+    cp.spawnSync(process.execPath, [CLI, 'init', dS, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const ptS = path.join(dS, '.harness', 'progress-tracker.md');
+    fs.appendFileSync(ptS, '\n## 참고표\n\n| Code | Owner | Note |\n|---|---|---|\n| API-123 | owner | 무관 참조 |\n');
+    let absorbed = true;
+    try { absorbed = (JSON.parse(cp.spawnSync(process.execPath, [CLI, 'task', 'list', '--path', dS, '--json'], { encoding: 'utf8', timeout: 20000 }).stdout).tasks || []).some(t => t.id === 'API-123'); } catch {}
+    cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'x', '--path', dS], { encoding: 'utf8', timeout: 20000 });
+    const suffixOk = !absorbed && fs.readFileSync(ptS, 'utf8').includes('| API-123 | owner |') && fs.readFileSync(ptS, 'utf8').includes('## 참고표');
+    // P1-B: stale 프로젝트에서도 handoff --json 은 순수 JSON (사람용 drift 배너 미오염)
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-b-')); _d.push(d2);
+    cp.spawnSync(process.execPath, [CLI, 'init', d2, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const hp = path.join(d2, '.harness', 'session-handoff.md');
+    if (fs.existsSync(hp)) fs.writeFileSync(hp, fs.readFileSync(hp, 'utf8').replace(/Last generated:.*/, 'Last generated: 2026-01-01T00:00:00.000Z'));
+    const pt2 = path.join(d2, '.harness', 'progress-tracker.md');
+    if (fs.existsSync(pt2)) fs.writeFileSync(pt2, fs.readFileSync(pt2, 'utf8').replace(/2026-\d\d-\d\d/g, '2026-01-01'));
+    const hj = cp.spawnSync(process.execPath, [CLI, 'handoff', d2, '--json'], { encoding: 'utf8', timeout: 40000, maxBuffer: 32 * 1024 * 1024 });
+    let jsonPure = false; try { JSON.parse(hj.stdout); jsonPure = true; } catch {}
+    // 텍스트 모드에서는 배너 유지(무회귀)
+    const ht = cp.spawnSync(process.execPath, [CLI, 'handoff', d2], { encoding: 'utf8', timeout: 40000, maxBuffer: 32 * 1024 * 1024 });
+    const bannerKept = /drift 감지|drift detected/.test(ht.stdout);
+    // P1-C: parent detect 가 positional path 를 존중
+    const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-c-')); _d.push(d3);
+    cp.spawnSync(process.execPath, [CLI, 'init', d3, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    let parentOk = false;
+    try { const j = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'parent', 'detect', d3, '--json'], { encoding: 'utf8', timeout: 20000, cwd: path.dirname(path.dirname(CLI)) }).stdout); parentOk = String(j.root || j.child || '').includes(path.basename(d3)); } catch {}
+    // P1-D: 소스 파일 수가 마커 파일보다 우선 (Python 모노레포 오라벨 방지) + 진짜 JS 무회귀
+    const d4 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-d-')); _d.push(d4);
+    cp.spawnSync(process.execPath, [CLI, 'init', d4, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    fs.mkdirSync(path.join(d4, 'src'), { recursive: true });
+    for (let i = 0; i < 30; i++) fs.writeFileSync(path.join(d4, 'src', `m${i}.py`), 'def f():\n    return 1\n');
+    fs.writeFileSync(path.join(d4, 'requirements.txt'), 'requests\n');
+    fs.writeFileSync(path.join(d4, 'package.json'), JSON.stringify({ name: 'x', devDependencies: { tailwindcss: '^3' } }));
+    let techOk = false;
+    try { techOk = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'tech', '--json', '--path', d4], { encoding: 'utf8', timeout: 25000 }).stdout).current.languages[0].id === 'python'; } catch {}
+    const d5 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-d2-')); _d.push(d5);
+    cp.spawnSync(process.execPath, [CLI, 'init', d5, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    fs.mkdirSync(path.join(d5, 'src'), { recursive: true });
+    for (let i = 0; i < 20; i++) fs.writeFileSync(path.join(d5, 'src', `m${i}.js`), 'export const a = 1;\n');
+    fs.writeFileSync(path.join(d5, 'package.json'), JSON.stringify({ name: 'js', dependencies: { react: '^18' } }));
+    let jsOk = false;
+    try { jsOk = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'tech', '--json', '--path', d5], { encoding: 'utf8', timeout: 25000 }).stdout).current.languages[0].id === 'javascript'; } catch {}
+    // P1-E: 코어 문서가 대량 사라진 설치를 audit 이 healthy 로 보고하면 안 된다(integrity 와 정합)
+    const d6 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-e-')); _d.push(d6);
+    cp.spawnSync(process.execPath, [CLI, 'init', d6, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
+    const hd = path.join(d6, '.harness');
+    const keep = new Set(['progress-tracker.md', 'HARNESS_VERSION', 'plan.md']);
+    for (const f of fs.readdirSync(hd)) { if (!keep.has(f)) { try { fs.rmSync(path.join(hd, f), { recursive: true, force: true }); } catch {} } }
+    let auditOk = false;
+    try {
+      const au = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'audit', d6, '--json'], { encoding: 'utf8', timeout: 30000 }).stdout);
+      const ic = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'integrity', 'check', d6, '--json'], { encoding: 'utf8', timeout: 30000 }).stdout);
+      auditOk = au.healthy === false && au.failures >= 1 && ic.ok === false;   // 두 명령 판정 일치
+    } catch {}
+    // (검수 #3) parent 없는 경로 거부
+    const parentBadOk = cp.spawnSync(process.execPath, [CLI, 'parent', 'detect', 'C:/no/such/dir', '--json'], { encoding: 'utf8', timeout: 20000 }).status === 1;
+    ok = rowOk && guardOk && suffixOk && jsonPure && bannerKept && parentOk && parentBadOk && techOk && jsOk && auditOk;
+    if (!ok) console.log(`   [dogfood 디버그] row=${rowOk} guard=${guardOk} suffix=${suffixOk} json=${jsonPure} banner=${bannerKept} parent=${parentOk} parentBad=${parentBadOk} tech=${techOk} js=${jsOk} audit=${auditOk}`);
+  } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.79) 도그푸딩 P1×5: progress 행 보존 · handoff --json 순수(텍스트 배너 유지) · parent path · tech 파일수 우선 · audit=integrity 정합' : '✗ 도그푸딩 P1 수정 실패');
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

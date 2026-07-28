@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.78';
+const VERSION = '1.36.79';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5880,6 +5880,41 @@ const _INTEGRITY_DOCS = [
   '.harness/consistency-policy.md', '.harness/testing-strategy.md', '.harness/review-checklist.md',
   '.harness/release-checklist.md', '.harness/session-close-policy.md', '.harness/plan-progress-boundary.md',
 ];
+// 1.36.79 (도그푸딩 P1-E): integrity 의 "관리 문서 부재/손상" 판정을 audit 도 공유하도록 경량 추출.
+//   audit 이 존재-여부만 보고 healthy 를 선언해 integrity 와 모순되던 것 해소(두 명령 단일 진실).
+//   (검수 #5) 임계값·H1 판정을 재구현하면 두 명령이 갈린다(실측: 10KB→520B 문서를 integrity 는 truncated, audit 은 무탐).
+//   integrityCmd 와 **동일한 단일 판정기**를 쓴다 — 여기가 유일한 구현이고 integrityCmd 도 이 함수를 호출한다.
+function _integrityFindings(root) {
+  root = absRoot(root);
+  if (!exists(path.join(root, '.harness'))) return [];
+  let minimal = false;
+  try { minimal = !!JSON.parse(read(path.join(root, '.harness', 'manifest.json'))).minimal; } catch {}
+  const lang = detectLanguageValue(root, 'auto');
+  const templates = coreFiles(root, lang, [], { minimal });
+  const out = [];
+  for (const key of _INTEGRITY_DOCS.filter(k => typeof templates[k] === 'string')) {
+    const tmpl = templates[key];
+    const fp = path.join(root, key);
+    let kind = null;
+    if (!exists(fp)) kind = 'missing';
+    else {
+      let cur = ''; try { cur = read(fp); } catch { kind = 'unreadable'; }
+      if (!kind) {
+        // 코드펜스 안의 `# 주석`을 H1 로 오인하지 않도록 펜스 밖 라인만 검사 (integrityCmd 와 동일 규칙)
+        let _fence = false;
+        const _hasH1 = cur.split('\n').some(l => {
+          const t = l.trim();
+          if (t.startsWith('```')) { _fence = !_fence; return false; }
+          return !_fence && /^# \S/.test(t);
+        });
+        if (!_hasH1) kind = 'h1_lost';
+        else if (cur.length < tmpl.length * 0.4) kind = 'truncated';
+      }
+    }
+    if (kind) out.push({ file: key, kind, templateBytes: Buffer.byteLength(tmpl, 'utf8') });
+  }
+  return out;
+}
 function integrityCmd(root) {
   root = absRoot(root);
   const json = has('--json');
@@ -8541,7 +8576,7 @@ function _autoFixIdempotency(root) {
         kept.push(r);
       }
       if (removedExact > 0 || droppedSameText > 0) {
-        writeProgressRows(root, header, kept);
+        writeProgressRows(root, header, kept, { expectedShrink: removedExact });   // 1.36.79 (검수 #1): 제거한 만큼만 축소 허용 — 손상 행은 여전히 차단
         fixed.push({ kind: 'task-duplicate-request', action: 'deduped', removedExact, droppedSameText });
       }
     }
@@ -9210,11 +9245,19 @@ function nextId(root, prefix) {
   return `${prefix}-${String(max + 1).padStart(4, '0')}`;
 }
 
+// 1.36.79 (도그푸딩 P1-A, 실 프로젝트 데이터 손실): ID 접두를 T/M/D 로만 인정해 R-/UR- 등 다른 접두 행이
+//   파싱에서 탈락 → writeProgressRows 가 파싱된 행만으로 파일을 재작성하며 **사용자 이력을 조용히 삭제**했다
+//   (실측: auto-Trading 9행 → 1행, 942B 소실, exit 0 무경고). migrate 만이 아니라 task add 등 모든 쓰기 경로 공통.
+//   접두를 일반화(대문자 1~3자)해 왕복 보존.
+//   (검수 #2) 다만 `[A-Z]{1,3}` 전면 개방은 과했다 — 사용자가 트래커에 붙여 둔 무관한 표(`| API-123 | owner | ... |`)까지
+//   task 로 흡수해 task list 에 노출·정규화됐다(실측). leerness 가 실제 발급하는 **등록 네임스페이스만** 인정한다.
+const _PROGRESS_ID_NS = ['T', 'M', 'D', 'R', 'UR', 'F', 'P'];
+const _PROGRESS_ROW_RE = new RegExp('^\\|\\s*(?:' + _PROGRESS_ID_NS.join('|') + ')-\\d{3,}\\s*\\|');
 function readProgressRows(root) {
   const text = exists(progressPath(root)) ? read(progressPath(root)) : '';
   const rows = [];
   for (const line of text.split('\n')) {
-    if (!/^\| (?:T|M|D)-\d{4,} \|/.test(line)) continue;
+    if (!_PROGRESS_ROW_RE.test(line)) continue;
     // 1.9.399 (7번째 버그헌트 P1-A, UR-0104): 비이스케이프 파이프에서만 분리 + 셀 복원 — 사용자 텍스트의 '|'(이스케이프됨)이 컬럼을 깨지 않음.
     const cells = line.split(/(?<!\\)\|/).slice(1, -1).map(s => _cellUnescape(s).trim());
     if (cells.length < 6) continue;
@@ -9245,11 +9288,54 @@ function progressHeader(root) {
   }
   return text.slice(0, text.indexOf('\n', idx)).trimEnd();
 }
-function writeProgressRows(root, header, rows) {
+function writeProgressRows(root, header, rows, opts = {}) {
+  // 1.36.79 (도그푸딩 P1-A 클래스 가드): 파서가 놓친 행이 재작성으로 사라지는 사고를 규칙 하나가 아니라 **불변식**으로 차단 —
+  //   디스크의 행-모양 라인 수가 쓰려는 행 수보다 많으면 쓰기를 중단한다(향후 파서 강화/CRLF/셀부족 등 같은 클래스 전부 포착).
+  //   단 **의도적 행 감소**(audit --fix 의 완전중복 dedup)는 opts.allowShrink 로 명시 옵트인 — 오탐으로 정당한 정리를 막지 않는다.
+  //   판정 기준은 "변이 후 행 수"가 아니라 **디스크에 파서가 못 읽는 행-모양 라인이 있는가** — upsert 가 행을 추가하면
+  //   개수 비교는 손실을 상쇄해 무력화된다(실측: 디스크 2 vs 쓰기 2 로 통과, 셀부족 행 소실).
+  //   (검수 #1) 의도적 축소는 boolean 우회가 아니라 **예상 감소량**으로 — allowShrink:true 는 가드를 통째로 꺼서
+  //   dedup 중 손상 행까지 조용히 삭제했다. expectedShrink 만큼만 허용하고 손상 행 존재는 여전히 차단한다.
+  try {
+    const _cur = exists(progressPath(root)) ? read(progressPath(root)) : '';
+    if (_cur) {
+      let _shaped = 0, _parsable = 0;
+      for (const line of _cur.split('\n')) {
+        if (!_PROGRESS_ROW_RE.test(line)) continue;
+        _shaped++;
+        if (line.split(/(?<!\\)\|/).slice(1, -1).length >= 6) _parsable++;
+      }
+      if (_parsable < _shaped) {
+        const _msg = `progress-tracker.md 행 손실 위험 — 행-모양 ${_shaped}건 중 ${_parsable}건만 파싱 가능(셀 부족/형식 이상). ` +
+          `쓰면 나머지 ${_shaped - _parsable}행이 사라지므로 중단합니다(데이터 보호): ${progressPath(root)} 의 해당 행을 6칸으로 고치거나 .harness/archive 백업 복원 후 재시도`;
+        throw Object.assign(new Error(_msg), { code: 'E_PROGRESS_ROW_LOSS' });
+      }
+      const _expect = Number.isInteger(opts.expectedShrink) ? Math.max(0, opts.expectedShrink) : 0;
+      if (_parsable - _expect > rows.length) {
+        const _msg = `progress-tracker.md 행 손실 위험 — 파싱 ${_parsable}행 − 예상감소 ${_expect} > 쓰려는 ${rows.length}행. 쓰기 중단(데이터 보호): ${progressPath(root)}`;
+        throw Object.assign(new Error(_msg), { code: 'E_PROGRESS_ROW_LOSS' });
+      }
+    }
+  } catch (e) { if (e && e.code === 'E_PROGRESS_ROW_LOSS') throw e; }
   // 1.9.399 (7번째 버그헌트 P1-A, UR-0104): 셀 콘텐츠 안전화 — 개행→공백, '|'→'\|'. 사용자 텍스트의 파이프/개행이 표 행을 손상/주입 못 함.
+  // 1.36.79 (검수 #2 후반): 표 **뒤에 사용자가 쓴 내용**(참조표·메모·`Status values:` 푸터)이 재작성 때 통째로 사라지던 것 —
+  //   마지막 task 행 이후의 비-행 콘텐츠를 그대로 이어붙여 보존한다.
+  let _suffix = '';
+  try {
+    const _cur0 = exists(progressPath(root)) ? read(progressPath(root)) : '';
+    if (_cur0) {
+      const _lines = _cur0.split('\n');
+      let _lastRow = -1;
+      for (let i = 0; i < _lines.length; i++) if (_PROGRESS_ROW_RE.test(_lines[i])) _lastRow = i;
+      if (_lastRow >= 0) {
+        const _tail = _lines.slice(_lastRow + 1).join('\n').replace(/^\n+/, '');
+        if (_tail.trim()) _suffix = '\n' + _tail.replace(/\s+$/, '') + '\n';
+      }
+    }
+  } catch {}
   const composed = header + '\n' +
     rows.map(r => `| ${_cellSafe(r.id)} | ${_cellSafe(r.status)} | ${_cellSafe(r.request)} | ${_cellSafe(r.evidence)} | ${_cellSafe(r.nextAction)} | ${_cellSafe(r.updated)} |`).join('\n') +
-    (rows.length ? '\n' : '');
+    (rows.length ? '\n' : '') + _suffix;
   writeUtf8(progressPath(root), composed);
 }
 function upsertProgress(root, row) {
@@ -10295,7 +10381,7 @@ function debug(root) {
 
 const _audit = require('../lib/audit');
 // 1.9.421 (UR-0025/UR-0125 큰 핸들러 모듈화 6번째): audit → lib/audit.js (DI 위임, thin wrapper)
-function audit(root, opts = {}) { return _audit.audit(root, opts, { VERSION, arg, has, planPath, readProgressRows, currentStatePath, handoffPath, envDiff, _readFeatureGraph, _matchAPISkills, _listAPISkills, _collectSecretFindings }); }
+function audit(root, opts = {}) { return _audit.audit(root, opts, { VERSION, arg, has, planPath, readProgressRows, currentStatePath, handoffPath, envDiff, _readFeatureGraph, _matchAPISkills, _listAPISkills, _collectSecretFindings, _integrityFindings }); }   // 1.36.79: integrity 신호 공유
 
 // 1.9.312 (UR-0050, 설치리뷰 3중수렴): secret 스캐너 현대 키 패턴 보강.
 //   배경: 기존 OpenAI 패턴 `sk-[A-Za-z0-9]{32,}` 은 하이픈에서 끊겨 sk-proj-/sk-svcacct- (modern 프로젝트/서비스 키)를 놓침.
@@ -12440,7 +12526,10 @@ function handoffCmd(root) {
   // 1.9.38 (A): drift 임계 시 .harness/agent-reminders.md 자동 생성 — 메인 에이전트 프롬프트에 표시되도록.
   // 1.9.38 (D): skip 횟수 학습 — --no-drift-check 빈도 ≥5 시 임계 완화 (1d → 2d).
   const absR0 = absRoot(root || process.cwd());
-  if (exists(path.join(absR0, '.harness')) && process.env.LEERNESS_NO_DRIFT_CHECK !== '1') {
+  // 1.36.79 (도그푸딩 P1-B, 실 프로젝트 27/37 해당): 이 사람용 drift 배너가 --json 모드에서도 stdout 에 찍혀
+  //   handoff --json 등의 응답을 통째로 파싱 불가로 만들었다(실측: JSON.parse 실패). stale 프로젝트에서만 발화해
+  //   합성 픽스처 헌트가 못 봤다. --json 이면 배너 억제(구조화 필드/텍스트 모드로만 노출).
+  if (exists(path.join(absR0, '.harness')) && process.env.LEERNESS_NO_DRIFT_CHECK !== '1' && !has('--json')) {
     // skip 카운트
     if (has('--no-drift-check')) {
       try {
@@ -23006,7 +23095,7 @@ SETUP & UPDATE
 
 STATUS & DIAGNOSTICS
   status [path]                   Install status (files present)
-  health [path] | doctor [path]   Install/state diagnostics
+  health [path] | doctor [--json]   health: project state · doctor: CLI install/environment (no path arg)
   verify [path]                   Required-file verification
   which [--json]                  Resolve current binary/version (npm cache conflicts)
   selftest [--json]               Core-function integrity self-check (CI-friendly)
@@ -23093,7 +23182,7 @@ function help() {
   leerness rule add "<설명>" --trigger every-session|every-update|every-commit|session-start|session-close|pre-publish  # 사용자 룰 등록 (1.9.8)
   leerness rule list|verify|pause <id>|resume <id>|remove <id>|stop|resume-all
   leerness context [path] [--json]            # 에이전트 온보딩 컨텍스트 (1.9.292, UR-0065)
-  leerness health [path] [--json] · leerness doctor [path]   # 설치/상태 진단
+  leerness health [path] [--json] · leerness doctor [--json]   # health: 프로젝트 상태 · doctor: CLI 설치/환경(경로 인자 없음)
   leerness pulse [path] · leerness milestones [path] · leerness round-history [path]   # 종합 지표
   leerness decision add "<title>" [--reason ...] | decision list|drop <id>   # 결정 메모리 (.harness, canonical JSON)
   leerness lesson save "<text>" [--tag t] | lesson list|drop <date|text>     # 교훈 메모리
@@ -23421,7 +23510,19 @@ async function main() {
   if (cmd === 'wakeup-interval')                    return wakeupIntervalCmd(arg('--path', process.cwd()), args[1], args[2]);
   // 1.9.211: leerness workspace-dir <get|guide> — 현재 워크스페이스 디렉토리 / AI 참조 가이드 (사용자 명시)
   if (cmd === 'workspace-dir')                      return workspaceDirCmd(arg('--path', process.cwd()), args[1]);
-  if (cmd === 'parent')                             return parentCmd(arg('--path', process.cwd()), args[1]);
+  // 1.36.79 (도그푸딩 P1-C): positional 경로(`parent detect <path>`)를 무시하고 cwd 를 분석해 자신만만한 오답(exit 0)을 내던 것
+  //   — positional path 잔존 클래스(1.36.33)의 미소진 지점. --path 우선, 없으면 sub 다음 positional.
+  //   (검수 #3) _taskPositionalPath 는 './' 접두 등 "경로처럼 보이는" 값만 인정해 `parent detect parent\child` 같은 맨 상대경로를
+  //   무시하고 cwd 를 분석했다. parent 는 하위명령 뒤 첫 non-flag 를 경로로 받고, 존재하는 디렉토리인지 먼저 검증한다.
+  if (cmd === 'parent') {
+    const _pPos = args.slice(2).find(a => a && !a.startsWith('-'));
+    const _pRoot = arg('--path', null) || _pPos || process.cwd();
+    const _pAbs = path.resolve(_pRoot);
+    if (_pPos || arg('--path', null)) {
+      if (!exists(_pAbs) || !fs.statSync(_pAbs).isDirectory()) { failJson(has('--json'), 'path_not_found', `경로 없음 또는 디렉토리 아님: ${_pAbs}`); return; }
+    }
+    return parentCmd(_pAbs, args[1]);
+  }
   // 1.9.211: leerness migrate-workspace-dir — .harness → .leerness 마이그레이션 (사용자 명시)
   if (cmd === 'migrate-workspace-dir')              return migrateWorkspaceDirCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());   // 1.36.33: positional path 무시 → cwd 오염 (1.36.21/24 계열 잔존 — 실제로 이 버그로 소스 저장소가 오염될 뻔)
   // 1.9.212: leerness idempotency audit — 멱등성 위반 탐지 (사용자 명시)
