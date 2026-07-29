@@ -7817,6 +7817,85 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.90 (P-0006, 사용자 승인 범위=대시보드만): 읽기 전용 대시보드 + **넘지 않기로 한 경계**를 가드로 못 박는다.
+//   경계가 문서에만 있으면 다음 라운드에 조용히 넘는다 — .harness 실행코드 0 · 루트 실행기 미생성 ·
+//   게이트 미판정 · 정적 leerness.html 존속을 테스트가 강제한다.
+total++;
+{
+  let ok = false;
+  const _d = [];
+  const R = (args, cwd) => { const r = cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 120000, cwd }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
+  let S1 = false, S2 = false, S3 = false, X1 = false, B1 = false, B2 = false, B3 = false, B4 = false, R1 = false, R2 = false, R3 = false, P1 = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dash-')); _d.push(d);
+    R(['init', d, '--yes', '--language', 'ko', '--no-stale-check']);
+    R(['task', 'add', '<script>alert(1)</script> XSS 픽스처', '--path', d, '--json', '--no-review']);
+    // S1: --json 스냅샷이 서버 없이 같은 데이터를 낸다(테스트·CI 가 서버를 띄우지 않아도 되게)
+    let snap = null; try { const o = R(['dashboard', '--path', d, '--json']).o; snap = JSON.parse(o.slice(o.indexOf('{'))); } catch {}
+    S1 = !!snap && snap.ok === true && snap.readOnly === true && Array.isArray(snap.toggles) && snap.toggles.length > 0
+      && snap.tasks && typeof snap.tasks.total === 'number' && snap.tasks.total > 0;
+    // S2: 기본 OFF 토글이 OFF 로 보인다(대시보드가 상태를 왜곡하지 않는다)
+    S2 = !!snap && snap.toggles.some(t => t.defaultOff === true && t.on === false);
+    // S3: 게이트를 판정하지 않는다는 것을 화면이 말한다 + 정적 뷰가 대체되지 않았다고 말한다
+    S3 = !!snap && /게이트를 실행하거나 통과시키지 않/.test(snap.gateNote || '') && /graph --html/.test(snap.staticNote || '');
+    // X1: HTML 이스케이프 — task 제목이 그대로 실행되면 안 된다(사람이 여는 화면이다).
+    //   판정은 **원시 태그 존재**로 한다 — `onerror=alert(1)` 문자열은 이스케이프된 텍스트에도 남아 지표가 못 된다(실측).
+    const html = require(path.join(path.dirname(CLI), '..', 'lib', 'dashboard.js')).renderHtml(snap);
+    X1 = !/<script>alert\(1\)<\/script>/.test(html) && !/<img\s/i.test(html) && /&lt;script&gt;/.test(html);
+    // B1~B3: **승인 시 기록한 경계** — 넘으면 실패.
+    //   codex 29차 #4: 종전엔 `.harness` 최상위만 봐서 `.harness/dashboard/server.js` 가 통과했고,
+    //   `leerness.*` 정확 일치만 봐서 `start-leerness.js` 가 통과했으며, init 이 이미 만든 leerness.html 을
+    //   확인해 `graph --html` 이 깨져도 통과했다. 셋 다 좁혔다.
+    const EXEC_EXT = /\.(js|mjs|cjs|ts|py|sh|bash|ps1|bat|cmd|exe)$/i;
+    const walk = (dir, acc = []) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p, acc); else if (e.isFile()) acc.push(p);
+      }
+      return acc;
+    };
+    B1 = walk(path.join(d, '.harness')).filter(f => EXEC_EXT.test(f)).length === 0;      // .harness 실행코드 0 (재귀)
+    B2 = !fs.readdirSync(d).some(f => /leerness/i.test(f) && EXEC_EXT.test(f));           // 루트 실행기 미생성 (이름 변형 포함)
+    const gp = path.join(d, 'leerness.html');
+    try { fs.rmSync(gp, { force: true }); } catch {}
+    const gr = R(['graph', '--html', '--path', d]);
+    B3 = gr.s === 0 && fs.existsSync(gp) && fs.statSync(gp).size > 1000;                  // 정적 단일파일 뷰 존속(실제 재생성)
+    // B4: **읽기 전용의 정확한 범위** — 하네스 상태 파일은 대시보드 실행으로 바뀌지 않는다.
+    //   (CLI 는 모든 명령에서 .harness/cache/usage-stats.json 을 갱신한다 — 그건 제외하고 단언해야
+    //    "아무것도 안 쓴다"는 과장 대신 실제로 참인 불변식을 지킨다. 화면 문구도 그렇게 적었다.)
+    const stateSig = () => fs.readdirSync(path.join(d, '.harness'), { withFileTypes: true })
+      .filter(e => e.isFile()).map(e => { const p = path.join(d, '.harness', e.name); const st = fs.statSync(p); return `${e.name}:${st.size}:${Math.round(st.mtimeMs)}`; }).sort().join('|');
+    const sigBefore = stateSig();
+    R(['dashboard', '--path', d, '--json']);
+    B4 = stateSig() === sigBefore;
+    // R1~R3 (codex 29차 #1/#2/#3): 형상 이상 스토어로 죽지 않고 · 시크릿을 내보내지 않고 · 게이트와 같은 술어를 쓴다
+    fs.writeFileSync(path.join(d, '.harness', 'previews.json'), '[null]');
+    const crash = R(['dashboard', '--path', d, '--json']);
+    fs.writeFileSync(path.join(d, '.harness', 'previews.json'), '{}');
+    const nonArr = R(['dashboard', '--path', d, '--json']);
+    let nj = null; try { nj = JSON.parse(nonArr.o.slice(nonArr.o.indexOf('{'))); } catch {}
+    R1 = crash.s === 0 && !/TypeError|Cannot read/.test(crash.o)
+      && nonArr.s === 0 && !!nj && (nj.notes || []).some(n => /previews\.json/.test(n));   // 조용히 "비어 있음"으로 보이면 안 된다
+    fs.writeFileSync(path.join(d, '.harness', 'previews.json'), '[]');
+    fs.writeFileSync(path.join(d, '.harness', 'bugfix-receipts.json'), JSON.stringify([
+      { id: 'T-0777', repro: 'API_TOKEN=sk-live-LEAKME npm test', expectBad: 'x', baseline: { failed: true, exit: 1 }, rootCause: 'rc', siblingScope: { checked: [] } },
+    ]));
+    const leak = R(['dashboard', '--path', d, '--json']);
+    let lj = null; try { lj = JSON.parse(leak.o.slice(leak.o.indexOf('{'))); } catch {}
+    R2 = !!lj && !/sk-live-LEAKME/.test(leak.o) && /API_TOKEN=\*\*\*/.test(JSON.stringify(lj));
+    //   빈 checked 는 게이트가 "미완"으로 보므로 대시보드도 미기록이어야 한다(표면마다 다른 판정 금지)
+    R3 = !!lj && Array.isArray(lj.bugfix) && lj.bugfix.length === 1 && lj.bugfix[0].siblingScope === false;
+    fs.rmSync(path.join(d, '.harness', 'bugfix-receipts.json'), { force: true });
+    // 범위 밖 포트/타임아웃은 크래시가 아니라 명확한 거부(codex 29차 #6)
+    P1 = R(['dashboard', '--path', d, '--port', '99999']).s === 1 && R(['dashboard', '--path', d, '--timeout', '2147484']).s === 1;
+    ok = S1 && S2 && S3 && X1 && B1 && B2 && B3 && B4 && R1 && R2 && R3 && P1;
+    if (!ok) console.log(`   [dashboard 디버그] 스냅샷=${S1} 토글상태=${S2} 고지=${S3} XSS=${X1} harness실행코드0=${B1} 루트실행기없음=${B2} 정적뷰존속=${B3} 상태무변경=${B4} 형상내성=${R1} 시크릿마스킹=${R2} 술어일치=${R3} 범위검증=${P1}`);
+  } catch (e) { console.log('   [dashboard 디버그] 예외: ' + ((e && e.message) || e)); }
+  finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.90) dashboard 읽기전용: 스냅샷/토글상태 · 게이트 미판정·정적뷰 존속 고지 · XSS 이스케이프 · 경계 3종(재귀 .harness 실행코드0 · 루트 실행기 미생성 · leerness.html 실제 재생성) · 상태 무변경 · 형상내성/시크릿마스킹/게이트와 동일 술어 · 포트·타임아웃 범위검증' : '✗ dashboard 실패');
+  if (!ok) failed++;
+}
+
 // 1.36.76 (9차 헌트 이월 3건 종결): 손상 아카이브 복원 거부 · MCP read-only 무변형 · 긴 파생 id 안전화
 total++;
 {

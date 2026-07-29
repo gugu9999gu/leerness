@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.89';
+const VERSION = '1.36.90';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7471,6 +7471,7 @@ function commandsCmd(root) {
       { cmd: 'integrity check [--repair] [--json]', desc: 'managed 정책-문서 12종 무결성(부재/H1 상실/절단) 점검 — --repair: archive 대피 후 템플릿 재생성 — 1.36.57 감사 F-04' },
       { cmd: 'referee add|verify|list|show|drop', desc: '검증기 캘리브레이션 — 신뢰 전에 탐지력 증명(known-good 통과 + 망가뜨린 known-bad 를 기대 사유로 거부). verify-claim --referee / gate 게이팅 — 1.36.80 P-0001' },
       { cmd: 'preview add|list|show|approve|revise|mockup', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약. mockup <P-ID> [--force]: 자립형 HTML 디자인 시안 스캐폴드 · add --mockup <파일>: 기존 시안 첨부 — 1.36.51 UR-0061 · 1.36.75 UR-0066' },
+      { cmd: 'dashboard [path] [--port N] [--timeout SEC] [--json]', desc: '.harness 읽기 전용 대시보드 — 토글·task·마일스톤·미리보기·라우팅기록·bugfix probe 를 localhost 에서 열람. 설정 변경·게이트 판정은 하지 않는다(CLI 가 판정). --json 은 서버 없이 같은 스냅샷 출력. 정적 단일파일 뷰(leerness.html)는 leerness graph --html 로 그대로 — 1.36.90 P-0006' },
       { cmd: 'agents route "<작업>" [--tier tiny|normal|high-risk] [--confirm --approved-by "<승인자>"] [--log]', desc: '작업 난이도 판정(결정적 규칙) → 추상 역할(architect/commander/coder/reviewer) 배치 제안. 모델명 하드코딩 없이 `roles set` 매핑을 쓰고, 실행은 명시 확인 필요. 토글 기본 OFF: leerness toggle set difficulty-routing on — 1.36.89 P-0007' },
       { cmd: 'bugfix start|receipt|drop|list', desc: 'bugfix 완료 영수증 — 수정 전 재현 probe 를 등록(2회 연속 실패해야 등록)하고, done 전이에서 통과 + 근본원인/형제범위 영수증을 요구. 토글 기본 OFF: leerness toggle set bugfix-receipt on — 1.36.87 P-0005' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
@@ -24222,6 +24223,14 @@ async function main() {
     // _taskExists: 존재하지 않는 id 로 등록되면 오타 하나로 "보호받는 줄 아는" 무보호 상태가 된다(출하전 헌트 #3)
     return require('../lib/bugfix').bugfixCmd(_bfRoot || process.cwd(), _bfSub, _bfRest,
       { has, arg, _withLock, _taskExists: (r, id) => readProgressRows(r).some(x => x.id === id) });
+  }
+  // 1.36.90 (P-0006, 사용자 승인 범위=대시보드만): .harness 읽기 전용 대시보드. 코드는 npm 패키지가 소유하고
+  //   `.harness` 는 데이터만 갖는다 — 실행 코드를 설치 프로젝트에 복사하지 않는다(업그레이드 드리프트 차단).
+  if (cmd === 'dashboard') {
+    return require('../lib/dashboard').dashboardCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), {
+      has, arg, VERSION, _roadmapData, _loadDecisions, _loadLessons,
+      _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY,
+    });
   }
   if (cmd === 'lens')                               return lensCmd(args[1]);  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈
   // 1.9.233: leerness commands — 카테고리화된 전체 CLI 명령 목록
