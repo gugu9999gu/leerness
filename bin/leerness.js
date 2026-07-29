@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.85';
+const VERSION = '1.36.86';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5111,6 +5111,73 @@ function _selfTestCases() {
           && /lessons\.md:3\b/.test(ht) && /lessons\.md:10\b/.test(ht)
           && /decisions\.md:7\b/.test(ht) && /decisions\.md:14\b/.test(ht);
         return lessonsOk && decisionsOk && humanOk;
+      } catch { return false; } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: 'brainstorm 두 경로 등가 (1.36.86): 사람용/--json 이 표면별로 같은 결과 — 수집 단일화 회귀 가드 (행위)', run: () => {
+      // 사고: 사람용이 자체 수집 코드를 갖고 있어 `--include-code` 에서 --json 은 code 1건,
+      //   사람용은 "관련 자원 없음" 을 냈다. 수집을 _brainstormFor 로 단일화(중복 149줄 제거)하고
+      //   총계도 _brainstormTotal 하나로 통일했다(이전엔 lessons/archive/code 를 서로 다르게 누락).
+      //   표면별로 "JSON 이 hit 을 보고하면 사람용도 반드시 보여준다"를 강제한다.
+      const d = _selftestFixture('ko');
+      if (!d) return false;
+      try {
+        const KW = 'eqv' + 'probe';
+        const _run = (a) => cp.spawnSync(process.execPath, [__filename, 'brainstorm', KW, '--path', d, ...a],
+          { encoding: 'utf8', timeout: 90000, maxBuffer: 16 * 1024 * 1024 });
+        // 여러 표면에 동시에 심는다 — 한 표면만 보면 다른 표면의 불일치를 놓친다
+        mkdirp(path.join(d, 'src'));
+        writeUtf8(path.join(d, 'src', 'a.js'), `// ${KW} 구현\n`);
+        writeUtf8(path.join(d, '.harness', 'lessons.md'), `# L\n\n### 2026-01-01\n- Lesson: ${KW} 교훈\n`);
+        writeUtf8(path.join(d, '.harness', 'plan.md'), `# P\n\n### M-0001. ${KW} 마일스톤\nStatus: planned\nProgress: 0%\n`);
+        writeUtf8(path.join(d, '.harness', 'decisions.md'), `# D\n\n### 2026-01-01 — ${KW} 결정\n- Decision: ${KW}\n`);
+        const rj = _run(['--include-code', '--json']);
+        if (rj.status !== 0) return false;
+        const j = JSON.parse(rj.stdout.slice(rj.stdout.indexOf('{')));
+        const h = j.hits || {};
+        const n = (x) => (x && x.length) || 0;
+        // JSON 이 실제로 여러 표면을 잡았는가(픽스처가 무력하면 이 가드도 공허해진다)
+        if (!(n(h.code) && n(h.lessonsExplicit) && n(h.planMilestones) && n(h.decisions))) return false;
+        // 총계는 **독립 계산**과 비교한다 — `_brainstormTotal(h)` 로 비교하면 그 함수를 망가뜨려도
+        //   양변이 같이 변해 통과하는 동어반복이 된다(1차판이 실제로 그랬다: code 항을 빼도 초록).
+        const _arc = h.archive ? Object.values(h.archive).reduce((s, v) => s + n(v), 0) : 0;
+        const _expect = n(h.decisions) + n(h.skills) + n(h.tasks) + n(h.rules) + n(h.evidence) + n(h.lessons)
+          + n(h.code) + n(h.skillHistory) + n(h.taskLogFails) + n(h.lessonsExplicit) + n(h.planMilestones) + _arc;
+        if (j.total !== _expect) return false;
+        const ht = (_run(['--include-code']).stdout) || '';
+        if (/관련 자원 없음/.test(ht)) return false;                 // hit 이 있는데 "없음" 은 자기모순
+        // 표면별 건수가 사람용 헤딩에도 그대로 나타나야
+        const shown = [
+          [n(h.code), /관련 소스 코드 \((\d+)\)/],
+          [n(h.lessonsExplicit), /관련 lessons \((\d+)\)/],
+          [n(h.planMilestones), /관련 plan milestones \((\d+)\)/],
+          [n(h.decisions), /관련 결정 \((\d+)\)/],
+        ];
+        // 사람용 헤더의 **내역 합 = 총계** — 총계에만 반영되고 내역에서 빠진 표면이 있으면 사용자가 더했을 때 안 맞는다
+        const _hdr = (ht.match(/총 (\d+)건 발견 \(([^)]*)\)/) || []);
+        const _sum = (_hdr[2] || '').split('·').map(s => Number((s.trim().match(/(\d+)$/) || [])[1] || 0)).reduce((a, b) => a + b, 0);
+        const headerOk = Number(_hdr[1]) === j.total && _sum === j.total;
+        if (!(shown.every(([cnt, re]) => { const m = re.exec(ht); return !!m && Number(m[1]) === cnt; }) && headerOk)) return false;
+        // 1.36.86 (검수 High#1): **workspace 경로**도 같은 계약을 지켜야 한다 —
+        //   집계에는 넣고 렌더는 빠뜨려 "3건" 이라 적고 1건만 보여주던 상태였다(실측).
+        //   프로젝트 헤더의 건수만큼 실제 항목 줄이 나와야 한다.
+        const _wsBase = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ws_'));
+        try {
+          const _app = path.join(_wsBase, 'app');
+          mkdirp(path.join(_app, '.harness'));
+          writeUtf8(path.join(_app, '.harness', 'HARNESS_VERSION'), VERSION);
+          writeUtf8(path.join(_app, '.harness', 'lessons.md'), `# L\n\n### 2026-01-01\n- Lesson: ${KW} 교훈\n`);
+          writeUtf8(path.join(_app, '.harness', 'plan.md'), `# P\n\n### M-0001. ${KW} 마일스톤\nStatus: planned\nProgress: 0%\n`);
+          writeUtf8(path.join(_app, '.harness', 'decisions.md'), `# D\n\n### 2026-01-01 — ${KW} 결정\n- Decision: ${KW}\n`);
+          const _opt = { cwd: _wsBase, encoding: 'utf8', timeout: 90000, maxBuffer: 16 * 1024 * 1024 };
+          const _wj = cp.spawnSync(process.execPath, [__filename, 'brainstorm', KW, '--include', 'app', '--json'], _opt);
+          const _wh = cp.spawnSync(process.execPath, [__filename, 'brainstorm', KW, '--include', 'app'], _opt);
+          if (_wj.status !== 0 || _wh.status !== 0) return false;
+          const _wjj = JSON.parse(_wj.stdout.slice(_wj.stdout.indexOf('{')));
+          const _wt = (_wh.stdout || '');
+          const _hdrN = Number((_wt.match(/^## app \((\d+)건\)/m) || [])[1] || -1);
+          const _items = (_wt.match(/^ {4}- /gm) || []).length;   // 실제 렌더된 항목 줄
+          return _hdrN === _wjj.total && _items >= _wjj.total;     // 헤더 건수 = 총계 = 실제 표시 항목
+        } catch { return false; } finally { try { fs.rmSync(_wsBase, { recursive: true, force: true }); } catch {} }
       } catch { return false; } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
     } },
     { name: '자기소스 검사 동결 (1.36.84): selftest 가 자기 소스를 읽어 검증하는 케이스는 더 늘지 않는다 — 신규는 행위검사로 (메타가드)', run: () => {
@@ -16463,12 +16530,18 @@ function _brainstormFor(root, topic) {
   // 1.9.25: --include-code 옵션 — 소스 본문 검색 추가 (모순 감지 핵심)
   if (has('--include-code')) {
     const codeDirs = ['src', 'tests', 'bin', 'lib'];
+    // 1.36.86 (검수 M3): 상한 20 이 **재귀 프레임만** 종료해 형제 디렉토리와 다음 codeDir 은 계속 훑었다
+    //   (실측: 30개 하위 디렉토리 → 30건 수집). 진입·복귀·바깥 루프 모두에서 전역 상한을 본다.
+    const CODE_CAP = 20;
     for (const dir of codeDirs) {
+      if (hits.code.length >= CODE_CAP) break;
       const dp = path.join(root, dir);
       if (!exists(dp)) continue;
       function walkCode(d) {
+        if (hits.code.length >= CODE_CAP) return;
         let entries; try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
         for (const e of entries) {
+          if (hits.code.length >= CODE_CAP) return;
           const p = path.join(d, e.name);
           if (e.isDirectory()) { walkCode(p); continue; }
           if (!/\.(js|ts|jsx|tsx|gd|cs|py|rb|go|rs)$/i.test(e.name)) continue;
@@ -16481,7 +16554,7 @@ function _brainstormFor(root, topic) {
               line: firstHit >= 0 ? firstHit + 1 : 0,
               preview: firstHit >= 0 ? lines[firstHit].trim().slice(0, 120) : ''
             });
-            if (hits.code.length >= 20) return; // 너무 많으면 stop
+            if (hits.code.length >= CODE_CAP) return;   // 전역 상한 — 위 진입/복귀 검사와 함께 동작
           }
         }
       }
@@ -16491,7 +16564,17 @@ function _brainstormFor(root, topic) {
   return hits;
 }
 
-function _brainstormTotal(h) { return h.decisions.length + h.skills.length + h.tasks.length + h.rules.length + h.evidence.length + (h.code?.length || 0) + (h.skillHistory?.length || 0) + (h.taskLogFails?.length || 0) + (h.lessonsExplicit?.length || 0) + (h.planMilestones?.length || 0); }
+// 1.36.86: 모든 표면을 센다 — 이전엔 `lessons` 와 `archive` 가 빠져 있어 **JSON 이 hit 을 보여주면서 total=0** 을
+//   보고했다(자기모순). 사람용도 자체 인라인 합계를 쓰다 `code` 까지 빠뜨렸다 → 두 경로가 이 한 함수를 공유한다.
+function _brainstormTotal(h) {
+  if (!h) return 0;
+  const n = (x) => (x && x.length) || 0;
+  const arc = h.archive ? Object.values(h.archive).reduce((s, v) => s + n(v), 0) : 0;
+  // `lessons` 는 **evidence 의 파생 뷰**다 — 같은 블록을 실패 키워드로 한 번 더 투영한 것이라
+  //   더하면 같은 자원을 두 번 센다(검수 확인: evidence=1/lessons=1 인데 total 이 2). 고유 자원 수를 뜻하도록 제외한다.
+  return n(h.decisions) + n(h.skills) + n(h.tasks) + n(h.rules) + n(h.evidence)
+    + n(h.code) + n(h.skillHistory) + n(h.taskLogFails) + n(h.lessonsExplicit) + n(h.planMilestones) + arc;
+}
 
 // 1.9.16: 워크스페이스 통합 brainstorm
 function _brainstormWorkspace(rootBase, topic) {
@@ -16535,8 +16618,35 @@ function _brainstormWorkspace(rootBase, topic) {
     }
     // 1.9.25: 소스 코드 본문 hits
     if (h.code && h.code.length) {
-      log(`  💻 코드 (${h.code.length})`);
-      h.code.slice(0, 5).forEach(c => log(`    - ${c.file}:${c.line} — ${c.preview}`));
+      const _s = Math.min(5, h.code.length);
+      log(`  💻 코드 (${h.code.length}${h.code.length > _s ? ` — 상위 ${_s}건` : ''})`);
+      h.code.slice(0, _s).forEach(c => log(`    - ${c.file}:${c.line} — ${c.preview}`));
+    }
+    // 1.36.86 (검수 High#1): 아래 5개 표면은 **집계에는 들어가는데 렌더되지 않아**
+    //   "3건" 이라 적고 1건만 보여주는 상태였다(실측). 단일 프로젝트 경로와 같은 표면을 모두 보여준다.
+    if (h.skillHistory && h.skillHistory.length) {
+      log(`  📒 skill match 이력 (${h.skillHistory.length})`);
+      h.skillHistory.slice(0, 3).forEach(x => log(`    - skill-suggestions.md:${x.line || '?'} — [${x.at}] "${x.query}"`));
+    }
+    if (h.taskLogFails && h.taskLogFails.length) {
+      log(`  📜 task-log 실패 (${h.taskLogFails.length})`);
+      h.taskLogFails.slice(0, 3).forEach(x => log(`    - task-log.md:${x.line || '?'} — ${x.title}`));
+    }
+    if (h.lessonsExplicit && h.lessonsExplicit.length) {
+      log(`  💡 lessons (${h.lessonsExplicit.length})`);
+      h.lessonsExplicit.slice(0, 3).forEach(x => log(`    - lessons.md:${x.line || '?'} — ${x.title}`));
+    }
+    if (h.planMilestones && h.planMilestones.length) {
+      log(`  🗺 plan milestones (${h.planMilestones.length})`);
+      h.planMilestones.slice(0, 3).forEach(x => log(`    - plan.md:${x.line || '?'} — ${x.id} ${x.title}`));
+    }
+    if (h.archive) {
+      const _arc = Object.entries(h.archive).filter(([, v]) => v && v.length);
+      const _arcN = _arc.reduce((s, [, v]) => s + v.length, 0);
+      if (_arcN) {
+        log(`  🗑 archive 후보 (${_arcN})`);
+        _arc.forEach(([k, v]) => v.slice(0, 2).forEach(x => log(`    - ${k}-archive.md:${x.line || '?'} — ${x.originalHeader || x.target || ''}`)));
+      }
     }
   }
   log(`\n## 📊 워크스페이스 총합: ${grandTotal}건 매치 (${paths.length} 프로젝트)${has('--include-code') ? ' (소스 코드 포함)' : ''}`);
@@ -16559,157 +16669,24 @@ function brainstormCmd(root, topic) {
   log(`# Brainstorm — "${topic}"`);
   log(`\n누적된 leerness 데이터에서 주제 관련 자원을 회수합니다.`);
 
-  // 1.9.14 B: 토큰 기반 매칭 — unicode word boundary. unicode 모드에서 하이픈은 escape 불필요.
-  function _escUnicode(s) { return String(s).replace(/[\\^$*+?.()|[\]{}]/g, '\\$&'); }
-  const tokens = String(topic).split(/\s+/).filter(t => t.length >= 2);
-  const wordRes = tokens.map(t => new RegExp(`(?<![\\p{L}\\p{N}_])${_escUnicode(t)}(?![\\p{L}\\p{N}_])`, 'iu'));
-  function matches(text) { return wordRes.every(re => re.test(text)); }
-  // 1.9.72: skillHistory + taskLogFails 필드 추가 (brainstorm에 누적 컨텍스트 추가 회수)
-  const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [], code: [], skillHistory: [], taskLogFails: [] };
-
-  // decisions (1.9.14: 코드블록/Template 제외, 1.9.15: 라인 번호)
-  const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
-  const decLines = dec.split('\n');
-  for (const { block: b, line: _dln } of _decisionBlocksWithOffset(dec)) {
-    if (matches(b)) {
-      const t = (b.match(/^### (.+)$/m) || [, ''])[1];
-      const lineNo = _dln;
-      hits.decisions.push({ title: t, preview: b.slice(0, 200).replace(/\n+/g, ' '), line: lineNo });
-    }
-  }
-  // skills
-  const skillsDir = path.join(root, '.harness/skills');
-  if (exists(skillsDir)) {
-    for (const id of fs.readdirSync(skillsDir)) {
-      const f = path.join(skillsDir, id, 'skill.json');
-      if (!exists(f)) continue;
-      try {
-        const s = JSON.parse(read(f));
-        const text = JSON.stringify(s);
-        if (matches(text)) hits.skills.push({ id, displayNameKo: s.displayNameKo, capabilities: s.capabilities, usage: s.usage });
-      } catch {}
-    }
-  }
-  // tasks (1.9.14: token 매칭, 1.9.15: 매치 필드 + 라인 번호)
-  const rows = readProgressRows(root);
-  const progressText = exists(progressPath(root)) ? read(progressPath(root)) : '';
-  for (const r of rows) {
-    const fields = [];
-    if (matches(r.request)) fields.push('request');
-    if (matches(r.evidence)) fields.push('evidence');
-    if (matches(r.nextAction)) fields.push('nextAction');
-    if (fields.length) {
-      const idx = progressText.indexOf(`| ${r.id} |`);
-      const lineNo = idx >= 0 ? progressText.slice(0, idx).split('\n').length : 0;
-      hits.tasks.push({ ...r, _fields: fields, line: lineNo });
-    }
-  }
-  // rules (1.9.15: 라인 번호)
-  if (exists(rulesPath(root))) {
-    const rulesText = read(rulesPath(root));
-    for (const r of readRules(root)) {
-      if (matches(r.rule)) {
-        const idx = rulesText.indexOf(`| ${r.id} |`);
-        const lineNo = idx >= 0 ? rulesText.slice(0, idx).split('\n').length : 0;
-        hits.rules.push({ ...r, line: lineNo });
-      }
-    }
-  }
-  // evidence — lessons 키워드 (fail/롤백/incomplete) 동반 (1.9.15: 라인 번호)
-  const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
-  for (const { block: block, line: _ln } of _blocksWithOffset(ev, /\n(?=## )/)) {
-    if (!block.startsWith('## ')) continue;
-    if (matches(block)) {
-      const t = (block.match(/^## (.+)$/m) || [, ''])[1];
-      const lineNo = _ln;
-      hits.evidence.push({ title: t.trim(), preview: block.slice(0, 200).replace(/\n+/g, ' '), line: lineNo });
-      if (/✗|fail|롤백|incomplete|버그/i.test(block)) hits.lessons.push({ title: t.trim(), line: lineNo });
-    }
-  }
-  // 1.9.72: skill-suggestions.md rolling history hits (이전 매칭 결과 회수)
-  const histPath = path.join(root, '.harness', 'skill-suggestions.md');
-  if (exists(histPath)) {
-    const histTxt = read(histPath);
-    let pos = 0;
-    for (const { block: block, line: _ln } of _blocksWithOffset(histTxt, /\n(?=## )/)) {
-      if (!block.startsWith('## ')) { pos += block.length + 1; continue; }
-      const h = block.match(/^## ([\d-]+ [\d:]+) — query "([^"]+)"/);
-      if (h && matches(block)) {
-        const lineNo = _ln;
-        hits.skillHistory.push({ at: h[1], query: h[2], preview: block.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
-      }
-    }
-  }
-  // 1.9.72: task-log.md 실패 라인 hits
-  const tlogPath = path.join(root, '.harness', 'task-log.md');
-  if (exists(tlogPath)) {
-    const tlog = read(tlogPath);
-    const lines = tlog.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.length > 4 && /✗|\bfail|롤백|재발|incomplete|버그/i.test(line) && matches(line)) {
-        hits.taskLogFails.push({ title: line.replace(/^[-*]\s*/, '').slice(0, 100), line: i + 1 });
-      }
-    }
-  }
-  // 1.9.131: 3 archive 파일 hits (brainstormCmd 변종) — DELETE 5종 archive 도 brainstorm 후보로
-  if (!hits.archive) hits.archive = { decisions: [], lessons: [], plan: [] };
-  const archiveSources_bsCmd = [
-    { key: 'decisions', file: 'decisions.archive.md' },
-    { key: 'lessons',   file: 'lessons.archive.md' },
-    { key: 'plan',      file: 'plan.archive.md' }
-  ];
-  for (const src of archiveSources_bsCmd) {
-    const fp = path.join(root, '.harness', src.file);
-    if (!exists(fp)) continue;
-    const txt = read(fp);
-    const blocks = _blocksWithOffset(txt, /\n(?=## 제거 )/);
-    for (const { block: b, line: _ln } of blocks) {
-      const m = b.match(/^## 제거 (\d{4}-\d{2}-\d{2})\s*\(target:\s*"([^"]*)"\)/);
-      if (!m) continue;
-      if (matches(b)) {
-        const headerMatch = b.match(/^### (.+)$/m);
-        const lineNo = _ln;
-        hits.archive[src.key].push({
-          date: m[1],
-          target: m[2],
-          originalHeader: headerMatch ? headerMatch[1].trim() : null,
-          preview: b.slice(0, 220).replace(/\n+/g, ' '),
-          line: lineNo
-        });
-      }
-    }
-  }
-  // 1.9.116: lessons.md + plan.md milestone hits (Memory Surface 5종 완전 통합)
-  if (!hits.lessonsExplicit) hits.lessonsExplicit = [];
-  if (!hits.planMilestones) hits.planMilestones = [];
-  const lp_b2 = lessonsPath(root);
-  if (exists(lp_b2)) {
-    const lessonsText = read(lp_b2);
-    for (const { block: block, line: _ln } of _blocksWithOffset(lessonsText, /\n(?=### )/)) {
-      if (!block.startsWith('### ')) continue;
-      const lessonMatch = block.match(/- Lesson:[ \t]*(.+)/);
-      if (lessonMatch && matches(block)) {
-        const lineNo = _ln;
-        hits.lessonsExplicit.push({ title: lessonMatch[1].trim().slice(0, 120), preview: block.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
-      }
-    }
-  }
-  const planFile_b2 = planPath(root);
-  if (exists(planFile_b2)) {
-    const planText = read(planFile_b2);
-    const milestoneBlocks = _blocksWithOffset(planText, /\n(?=### M-\d{4,}\.)/);
-    for (const { block: b, line: _ln } of milestoneBlocks) {
-      const m = b.match(/^### (M-\d{4,})\.[ \t]*(.+?)$/m);
-      if (m && matches(b)) {
-        const lineNo = _ln;
-        hits.planMilestones.push({ id: m[1], title: m[2].trim().slice(0, 120), preview: b.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
-      }
-    }
-  }
-
-  const total = hits.decisions.length + hits.skills.length + hits.tasks.length + hits.rules.length + hits.evidence.length + (hits.skillHistory ? hits.skillHistory.length : 0) + (hits.taskLogFails ? hits.taskLogFails.length : 0) + (hits.lessonsExplicit ? hits.lessonsExplicit.length : 0) + (hits.planMilestones ? hits.planMilestones.length : 0);
-  log(`\n📦 총 ${total}건 발견 (decisions ${hits.decisions.length} · skills ${hits.skills.length} · tasks ${hits.tasks.length} · rules ${hits.rules.length} · evidence ${hits.evidence.length}${hits.skillHistory && hits.skillHistory.length ? ` · skill-history ${hits.skillHistory.length}` : ''}${hits.taskLogFails && hits.taskLogFails.length ? ` · task-log-fails ${hits.taskLogFails.length}` : ''}${hits.lessonsExplicit && hits.lessonsExplicit.length ? ` · lessons ${hits.lessonsExplicit.length}` : ''}${hits.planMilestones && hits.planMilestones.length ? ` · plan ${hits.planMilestones.length}` : ''})`);
+  // 1.36.86: 사람용도 **같은 수집기**(_brainstormFor)를 쓴다 — 이전엔 사람용이 자체 수집 코드를 갖고 있어
+  //   `--include-code` 에서 --json 은 code 1건, 사람용은 "없음" 을 내는 등 두 경로가 실제로 갈렸다(실측).
+  //   수집은 하나, 렌더만 둘 — 구조적으로 드리프트가 불가능해진다(중복 ~145줄 제거).
+  const hits = _brainstormFor(root, topic);
+  // 1.36.86: 사람용 인라인 합계는 code(그리고 lessons/archive)를 빠뜨려 --json 과 달랐다 → 공유 함수 사용.
+  const total = _brainstormTotal(hits);
+  // 1.36.86: 내역에 code/lessons(과거 실패)/archive 를 포함한다 — 총계에는 들어가는데 내역에 없어
+  //   사용자가 내역을 더하면 총계와 맞지 않았다(총 7건인데 내역 합 6).
+  const _arcN = hits.archive ? Object.values(hits.archive).reduce((s, v) => s + ((v && v.length) || 0), 0) : 0;
+  const _part = (label, n) => (n ? ` · ${label} ${n}` : '');
+  log(`\n📦 총 ${total}건 발견 (decisions ${hits.decisions.length} · skills ${hits.skills.length} · tasks ${hits.tasks.length} · rules ${hits.rules.length} · evidence ${hits.evidence.length}`
+    + _part('code', hits.code && hits.code.length)
+    + _part('past-fails', hits.lessons && hits.lessons.length)
+    + _part('skill-history', hits.skillHistory && hits.skillHistory.length)
+    + _part('task-log-fails', hits.taskLogFails && hits.taskLogFails.length)
+    + _part('lessons', hits.lessonsExplicit && hits.lessonsExplicit.length)
+    + _part('plan', hits.planMilestones && hits.planMilestones.length)
+    + _part('archive', _arcN) + ')');
 
   // 1.9.15: 모든 출력에 출처 파일:라인 표시
   if (hits.decisions.length) {
@@ -16735,6 +16712,14 @@ function brainstormCmd(root, topic) {
   if (hits.lessons.length) {
     log(`\n## ⚠ 같은 주제 과거 실패/롤백 (${hits.lessons.length}) — 같은 실수 방지`);
     hits.lessons.slice(0, 5).forEach(l => log(`  - .harness/review-evidence.md:${l.line || '?'} — ${l.title}`));
+  }
+  // 1.36.86: `--include-code` 결과를 사람용에도 렌더한다 — 이전엔 --json 만 code 를 보여주고
+  //   사람용은 같은 입력에 "관련 자원 없음" 을 출력했다(실측 확인된 두 경로 불일치).
+  if (hits.code && hits.code.length) {
+    // 1.36.86 (검수): 헤딩은 전체 건수인데 5건만 보여주면서 안내가 없어 **조용한 절단**이었다 — 표시 수를 명시한다.
+    const _shown = Math.min(5, hits.code.length);
+    log(`\n## 💻 관련 소스 코드 (${hits.code.length}${hits.code.length > _shown ? ` — 상위 ${_shown}건 표시` : ''}) — --include-code 매칭`);
+    hits.code.slice(0, _shown).forEach(c => log(`  - ${c.file}${c.line ? ':' + c.line : ''}${c.preview ? ' — ' + String(c.preview).slice(0, 100) : ''}`));
   }
   // 1.9.72: skill-suggestions.md rolling history hits
   if (hits.skillHistory.length) {

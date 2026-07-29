@@ -92,5 +92,19 @@
         "event": "approved"
       }
     ]
+  },
+  {
+    "id": "P-0005",
+    "title": "버그 재발 방지 — 증상 수정 차단",
+    "design": "재발 신호 자동 표면화 + 완료 게이트",
+    "features": [],
+    "status": "proposed",
+    "createdAt": "2026-07-29T05:32:30.187Z",
+    "history": [
+      {
+        "at": "2026-07-29T05:32:30.187Z",
+        "event": "proposed"
+      }
+    ]
   }
 ]
