@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.86';
+const VERSION = '1.36.88';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -238,7 +238,7 @@ function _resolveRoot(positional) {
 }
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--to','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when','--test-cmd','--require-referee','--referee','--expect-bad','--good','--bad','--static-dir','--dev-url']);  // 1.14.2 (UR-0032): --done-when 값이 positional 로 누출돼 milestone 제목에 흡수되던 것 차단. 1.17.2 (UR-0045): --test-cmd 동일 원칙(신규 value-flag 는 반드시 여기 등록). 1.36.82 (검수 High#3): --require-referee 미등록으로 `gate --require-referee <id>` 의 값이 positional 경로로 흡수돼 root 가 <cwd>/<id> 가 됐다 — 툴이 안내하는 문법 그대로 쓰면 깨졌다. 1.36.80/81 신규 value-flag 도 소급 등록.
+  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--to','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when','--test-cmd','--require-referee','--referee','--expect-bad','--good','--bad','--static-dir','--dev-url','--repro','--root-cause','--siblings','--siblings-na','--previous-gap']);  // 1.14.2 (UR-0032): --done-when 값이 positional 로 누출돼 milestone 제목에 흡수되던 것 차단. 1.17.2 (UR-0045): --test-cmd 동일 원칙(신규 value-flag 는 반드시 여기 등록). 1.36.82 (검수 High#3): --require-referee 미등록으로 `gate --require-referee <id>` 의 값이 positional 경로로 흡수돼 root 가 <cwd>/<id> 가 됐다 — 툴이 안내하는 문법 그대로 쓰면 깨졌다. 1.36.80/81 신규 value-flag 도 소급 등록.
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -619,6 +619,10 @@ leerness drift check .        # 4 신호 + 4단계 레벨
 \`\`\`
 - 사용자 요청을 5W1H로 분해. 모호하면 명확화 질문 (autonomous 모드 제외).
 - drift critical 시 \`leerness session close .\` 또는 \`drift check --auto-fix\` 우선 실행.
+- **버그 수정 요청이면 코드를 고치기 전에 재현부터**: \`leerness bugfix start <T-ID> --repro "<재현 명령>" --expect-bad "<실패 신호>"\`
+  → 지금 실패하는 probe 를 먼저 등록해야, 나중에 "고쳤다"가 **증상만 덮은 것인지** 구분된다. 수정 후엔
+  \`leerness bugfix receipt <T-ID> --root-cause "..." --siblings "같은 원인이 걸린 다른 지점들"\` 로 근본원인과 형제 범위를 남긴다.
+  (완료 게이트는 옵트인: \`leerness toggle set bugfix-receipt on\`)
 
 ## Step 2. 계획 수립
 - 작업이 3 step 이상 → TodoWrite 또는 \`leerness plan add\` 사용.
@@ -631,10 +635,10 @@ leerness agents list                  # ready CLI 확인
 leerness agents quota                 # 한도 확인
 leerness agents dispatch "<task>" --to <id>   # 작업 유형 추천 자동
 \`\`\`
-- 작업 유형별 최적 sub-agent:
-  - 텍스트/번역/분석 → claude (1.7× 빠름)
-  - 깊은 코드 추론 → codex (가장 상세)
-  - 파일 직접 수정 → agy --yolo (정확, Antigravity CLI)
+- 작업 유형별 기본 sub-agent 매핑 (leerness 의 **기본 관례**이며 측정된 성능·품질 순위가 아닙니다):
+  - 텍스트/번역/분석 → claude
+  - 깊은 코드 추론 → codex
+  - 파일 직접 수정 → agy --yolo (Antigravity CLI)
   - 보안 리뷰 → \`leerness review --persona security\`
 - **충돌 방지 규칙 (필수)**:
   - 각 sub-agent에 *자신만 수정할 파일 경로* 명시
@@ -3413,10 +3417,23 @@ function _selfTestCases() {
         fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
         // 토글 저장/로드 행위 + 기본 ON
         const d0 = tg.loadToggles(tmp);
-        const defOn = Object.values(d0).every(v => v === true);
+        // 1.36.87: 원래 의도는 "**기존** 토글이 조용히 꺼지지 않는다" 이지 "모든 토글이 영원히 기본 ON" 이 아니다.
+        //   기존 동작을 바꾸는 신규 토글은 반드시 defaultOff(옵트인)여야 업그레이드만으로 사용자 워크플로가 깨지지 않는다.
+        //   → 레지스트리 표시대로인지 양방향 단언(기본 ON 이어야 할 것 · 기본 OFF 여야 할 것 둘 다).
+        const defOn = Object.entries(d0).every(([k, v]) => v === !(tg.TOGGLE_REGISTRY[k] || {}).defaultOff)
+          && ['gate', 'lens', 'auto-graph', 'delegation-brief'].every(k => d0[k] === true)
+          && Object.keys(tg.TOGGLE_REGISTRY).some(k => tg.TOGGLE_REGISTRY[k].defaultOff && d0[k] === false);
         tg.saveToggles(tmp, Object.assign({}, d0, { gate: false }));
         const offOk = tg.loadToggles(tmp).gate === false && tg.toggleOn(tmp, 'lens') === true;
-        behavOk = defOn && offOk;
+        // 1.36.87: 값 해석 — 인식 불가 값이 **차단 게이트를 켜면 안 된다**(종전 `v !== false` 는 null/0/"off" 를 ON 으로 읽었다, 실측).
+        //   반대로 손으로 쓴 "off" 문자열이 보호 게이트를 켠 채로 두던 것도 함께 고친다.
+        const tf = path.join(tmp, '.harness', 'toggles.json');
+        const withVal = (v) => { fs.writeFileSync(tf, JSON.stringify({ 'bugfix-receipt': v, gate: v })); return tg.loadToggles(tmp); };
+        const coerceOk = [null, 0, 'off', 'OFF', 'false', [], {}].every(v => withVal(v)['bugfix-receipt'] === false)
+          && withVal(true)['bugfix-receipt'] === true && withVal('on')['bugfix-receipt'] === true
+          && withVal('off').gate === false && withVal(undefined).gate === true && withVal(undefined)['bugfix-receipt'] === false;
+        fs.writeFileSync(tf, JSON.stringify(Object.assign({}, d0, { gate: false })));
+        behavOk = defOn && offOk && coerceOk;
         // 그래프 HTML: 탭 3종 + roadmap/toggles 데이터 + 임베드 JS 문법
         const m = require('../lib/graph');
         const out = path.join(tmp, 'leerness.html');
@@ -3898,7 +3915,7 @@ function _selfTestCases() {
       return compoundEnv && jsonKey && camelKey && slackApp && dictFP && plainStart && djangoKey && pkVariants && dbDefaultFP;
     } },
     { name: 'honesty-check: AI 인식론적 정직성 3차원 + MCP/CLI/strict 통합 (사용자명시 1.9.305)', run: () => { const h = _epistemicHonestyCheck; const d1 = h('이 기능은 항상 정상 동작합니다').findings.some(f => f.dim === 'pretend-knowledge'); const d2 = h('아마 될 것 같습니다. 구현 완료했습니다').findings.some(f => f.dim === 'premature-judgment'); const d3 = h('이 API 의 rate limit 은 초당 5회입니다').findings.some(f => f.dim === 'no-info-gathering'); const clean = h('src/api.js 수정, 12/12 통과 (Exit: 0)').ok === true; const src = read(__filename); const wired = require('../lib/mcp-tools').some(t => t.name === 'leerness_honesty_check') && /if \(cmd === 'honesty-check'\)/.test(src) && /honestyFindings = _epistemicHonestyCheck/.test(src); return d1 && d2 && d3 && clean && wired; } },
-    { name: 'exit code 일관성: fail()→exitCode 1 행위 + unknown 명령 안내 (UR-0045 / CV-5 행위화 1.9.366)', run: () => { if (typeof fail !== 'function') return false; const saved = process.exitCode; const _w = process.stdout.write; let setOk = false; try { process.stdout.write = () => true; process.exitCode = 0; fail('selftest probe'); setOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } const src = read(__filename); const dispatchOk = /알 수 없는 명령: \$\{cmd\}/.test(src); return setOk && dispatchOk; } },
+    { name: 'exit code 일관성: fail()→exitCode 1 행위 + unknown 명령 안내 (UR-0045 / CV-5 행위화 1.9.366)', run: () => { if (typeof fail !== 'function') return false; const saved = process.exitCode; const _w = process.stdout.write, _e = process.stderr.write; let setOk = false; try { process.stdout.write = () => true; process.stderr.write = () => true; process.exitCode = 0; fail('selftest probe'); setOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.stderr.write = _e; process.exitCode = saved; setQuiet(false); } const src = read(__filename); const dispatchOk = /알 수 없는 명령: \$\{cmd\}/.test(src); return setOk && dispatchOk; } },
     { name: 'brief: 프로젝트 청사진 set/show/export + README 개요 섹션 (UR-0055 사용자명시 1.9.307)', run: () => { const src = read(__filename); const fnOk = typeof briefCmd === 'function' && typeof _loadBrief === 'function' && typeof _briefBlueprint === 'function' && _BRIEF_FIELDS.length === 10; const b = { project: 'X', intro: 'i', purpose: 'p', problem: '', features: ['f1', 'f2'], stack: ['s'], architecture: '', users: [], success: [], nonGoals: [], currentState: '' }; const bp = _briefBlueprint(b, VERSION); const bpOk = /Blueprint/.test(bp) && /소개 \(Intro\)/.test(bp) && /f1/.test(bp) && /신규 프로젝트 시작 가이드/.test(bp); const rb = _briefReadmeBlock(b); const rbOk = rb.includes(BRIEF_START) && rb.includes(BRIEF_END) && /프로젝트 개요/.test(rb) && /\*\*목적\*\*/.test(rb); return fnOk && bpOk && rbOk && /if \(cmd === 'brief'\)/.test(src); } },
     { name: 'brief 2단계: update --direction 이력 + MCP leerness_brief + context 통합 (UR-0055 1.9.308)', run: () => { const src = read(__filename); const b = { project: 'X', intro: '', purpose: '', problem: '', features: [], stack: [], architecture: '', users: [], success: [], nonGoals: [], currentState: '', directionHistory: ['2026-06-04: 확대'] }; const bpOk = /개발 방향 이력/.test(_briefBlueprint(b, VERSION)) && /최근 개발 방향 변경/.test(_briefReadmeBlock(b)); const histWired = /sub === 'update'/.test(src) && /brief\.directionHistory \|\| \[\]\), `\$\{today\(\)\}/.test(src); const mcpOk = require('../lib/mcp-tools').some(t => t.name === 'leerness_brief'); const ctxOk = /brief: \{ intro:/.test(src); return bpOk && histWired && mcpOk && ctxOk; } },
     { name: 'verify-claim: done 주장 evidence 기본강제 + --lenient + MCP/json 도달 (UR-0048 설치리뷰 critical 1.9.309)', run: () => { const src = read(__filename); const def = /const mustHaveEvidence = !has\('--lenient'\) && \(isDoneClaim \|\| has\('--require-evidence'\)\)/.test(src); const threshold = /has\('--require-evidence'\) \? evq\.ok : \(evq\.hasFile \|\| evq\.hasTest \|\| evq\.hasLog\)/.test(src); const jsonWired = /evidenceComplete:/.test(src) && /if \(!evidenceQualityOk\) out\.reasons\.push\('evidence-incomplete'\)/.test(src) && /if \(!out\.ok\) return process\.exit\(1\)/.test(src); /* 1.35.7: reasons 기반 단일 exit 재배선(의도 동일 — evidence 게이트가 json exit 도달) */ const mcpLenient = !!require('../lib/mcp-tools').find(t => t.name === 'leerness_verify_claim').inputSchema.properties.lenient; return def && threshold && jsonWired && mcpLenient; } },
@@ -3996,7 +4013,7 @@ function _selfTestCases() {
     { name: 'UR-0025 심화: pulse 렌더 코어 분리 — _memorySurface + _renderPulseLine 행위 (1.9.379)', run: () => { const m = require('../lib/pure-utils'); if (typeof _memorySurface !== 'function' || typeof _renderPulseLine !== 'function' || m._memorySurface !== _memorySurface || m._renderPulseLine !== _renderPulseLine) return false; const ms = _memorySurface({ tasks: 1, decisions: 2, rules: 3, milestones: 4, lessons: 5 }) === 'T1/D2/R3/P4/L5' && _memorySurface({}) === 'T0/D0/R0/P0/L0'; const base = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'T0/D1/R0/P2/L0' }); const ln = base.includes('v1.0.0') && base.includes('R7') && base.includes('MCP 85') && base.includes('T0/D1/R0/P2/L0') && !base.includes('🎯') && !base.includes('abnormal'); const full = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'x', nextMilestone: 400, etaDays: 6, abnormalShutdown: 'high' }); const ln2 = full.includes('🎯 R400 (6d)') && full.includes('abnormal:high'); const wired = read(__filename).includes('const line = _renderPulseLine(data)') && read(__filename).includes('data.memorySurface = _memorySurface('); return ms && ln && ln2 && wired; } },
     { name: 'UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 — verify/migrate audit·apply 3중 중복 제거 (1.9.380)', run: () => { const c = require('../lib/catalogs'); if (REQUIRED_WORKSPACE_FILES !== c.REQUIRED_WORKSPACE_FILES) return false; const listOk = Array.isArray(c.REQUIRED_WORKSPACE_FILES) && c.REQUIRED_WORKSPACE_FILES.length === 9 && c.REQUIRED_WORKSPACE_FILES.includes('AGENTS.md') && c.REQUIRED_WORKSPACE_FILES.includes('.harness/plan.md'); const harnessUses = (read(__filename).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 1; const migUses = (read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 2; return listOk && harnessUses && migUses; } },
     { name: 'UR-0025: KEYWORD_STOPWORDS 단일출처 — handoff/lessons 키워드 stopwords 2중 중복 제거 (1.9.381)', run: () => { const c = require('../lib/catalogs'); if (KEYWORD_STOPWORDS !== c.KEYWORD_STOPWORDS) return false; const setOk = c.KEYWORD_STOPWORDS instanceof Set && c.KEYWORD_STOPWORDS.has('작업') && c.KEYWORD_STOPWORDS.has('task') && !c.KEYWORD_STOPWORDS.has('고유단어') && c.KEYWORD_STOPWORDS.size >= 25; const usesConst = (read(__filename).match(/const stopwords = KEYWORD_STOPWORDS;/g) || []).length >= 2 && !/const stopwords = new Set\(\[/.test(read(__filename)); return setOk && usesConst; } },
-    { name: 'UR-0025 큰핸들러토대: lib/io.js 프리미티브(log/ok/warn/fail/today/now) 모듈 분리 + 동작 (1.9.382)', run: () => { const io = require('../lib/io'); const exportsOk = ['log', 'ok', 'warn', 'fail', 'today', 'now'].every(k => typeof io[k] === 'function') && io.log === log && io.fail === fail && io.now === now; const todayOk = /^\d{4}-\d{2}-\d{2}$/.test(io.today()) && /^\d{4}-\d{2}-\d{2}T/.test(io.now()); const src = read(__filename); const moved = src.includes("require('../lib/io')") && !/^function fail\(s\) \{ log/m.test(src) && !/^function now\(\) \{ return new Date/m.test(src); let exitOk = false; const saved = process.exitCode; const _w = process.stdout.write; try { process.stdout.write = () => true; process.exitCode = 0; io.fail('probe'); exitOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.exitCode = saved; } return exportsOk && todayOk && moved && exitOk; } },
+    { name: 'UR-0025 큰핸들러토대: lib/io.js 프리미티브(log/ok/warn/fail/today/now) 모듈 분리 + 동작 (1.9.382)', run: () => { const io = require('../lib/io'); const exportsOk = ['log', 'ok', 'warn', 'fail', 'today', 'now'].every(k => typeof io[k] === 'function') && io.log === log && io.fail === fail && io.now === now; const todayOk = /^\d{4}-\d{2}-\d{2}$/.test(io.today()) && /^\d{4}-\d{2}-\d{2}T/.test(io.now()); const src = read(__filename); const moved = src.includes("require('../lib/io')") && !/^function fail\(s\) \{ log/m.test(src) && !/^function now\(\) \{ return new Date/m.test(src); let exitOk = false; const saved = process.exitCode; const _w = process.stdout.write, _e = process.stderr.write; try { process.stdout.write = () => true; process.stderr.write = () => true; process.exitCode = 0; io.fail('probe'); exitOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.stderr.write = _e; process.exitCode = saved; io.setQuiet(false); } return exportsOk && todayOk && moved && exitOk; } },
     { name: 'UR-0025 큰핸들러토대: lib/io.js fs 프리미티브(read/writeUtf8/exists/mkdirp/append/rel/absRoot) 분리 + round-trip (1.9.383)', run: () => { const io = require('../lib/io'); const exp = ['absRoot', 'exists', 'read', 'readBuf', 'mkdirp', 'writeUtf8', 'append', 'rel'].every(k => typeof io[k] === 'function') && io.read === read && io.writeUtf8 === writeUtf8 && io.exists === exists; const src = read(__filename); const moved = !/^function writeUtf8\(p, s\) \{/m.test(src) && !/^function read\(p\) \{/m.test(src) && !/^function exists\(p\) \{/m.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_io_')); let rt = false; try { const f = path.join(tmp, 'a', 'b.txt'); io.writeUtf8(f, '한글RT'); rt = io.exists(f) && io.read(f) === '한글RT' && io.rel(tmp, f) === 'a/b.txt'; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return exp && moved && rt; } },
     { name: '5th외부평가/UR-0085: status --json 구조화 출력 + verify --json 와이어 (1.9.384)', run: () => { if (typeof status !== 'function' || typeof verify !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sj_')); const save = process.argv; const _w = process.stdout.write; let so = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'status', tmp, '--json']; process.stdout.write = s => { so += s; return true; }; status(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let sj; try { sj = JSON.parse(so); } catch {} const statusOk = !!sj && typeof sj.total === 'number' && typeof sj.present === 'number' && 'healthy' in sj && Array.isArray(sj.missing); const src = read(__filename); const verifyWired = /function verify\(root\) \{[\s\S]*?has\('--json'\)[\s\S]*?JSON\.stringify\(\{ ok:/.test(src); return statusOk && verifyWired; } },
     { name: '5th외부평가/UR-0086: _parseContractSpec markdown bullet 함수 감지 + 순수 추출 (1.9.385)', run: () => { const m = require('../lib/pure-utils'); if (m._parseContractSpec !== _parseContractSpec) return false; const p = _parseContractSpec('# Spec\n- add(a,b)\n* subtract(a,b)\n1. multiply(a,b)\nfunction legacy(x)\n`mentioned(`\ntick.amount\n'); const declOk = ['add', 'subtract', 'multiply', 'legacy'].every(n => p.declared.includes(n)) && p.declared.length === 4; const menOk = p.mentioned.includes('mentioned') && !p.declared.includes('mentioned'); const fieldOk = p.fields.includes('amount'); const fpOk = _parseContractSpec('- 합계 (a+b)\n- result (total)\n- foo: bar(x)\n**bold**').declared.length === 0; const src = read(__filename); const moved = src.includes('_parseContractSpec(specText)') && !/specText\.matchAll\(\/function/.test(src); return declOk && menOk && fieldOk && fpOk && moved; } },
@@ -4022,7 +4039,7 @@ function _selfTestCases() {
     { name: '6번째 외부평가/codex P1-B: task drop 존재확인 가드 — 없는 ID 가짜 row 방지 (1.9.396)', run: () => { const src = read(__filename); const i = src.indexOf('function taskDrop(root, id)'); if (i < 0) return false; const body = src.slice(i, i + 700); return body.includes('not found in progress-tracker.md') && body.includes('rows.find(r => r.id === id)') && body.includes('_requireInit'); } },
     { name: '6번째 외부평가/codex P1-A (UR-0098): install-safety 레시피 셸-무관 + hardeningNote (1.9.397)', run: () => { if (typeof installSafetyCmd !== 'function') return false; const save = process.argv; const _w = process.stdout.write; let out = ''; try { process.argv = ['node', 'h', 'install-safety', '--json']; process.stdout.write = s => { out += s; return true; }; installSafetyCmd({ json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; } let j; try { j = JSON.parse(out); } catch {} const noPosixPrefix = !!j && Array.isArray(j.safeInstall) && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim())); const crossShell = !!j && j.safeInstall.filter(x => String(x).includes('npx --yes')).length >= 2; const noteOk = !!j && typeof j.hardeningNote === 'string' && j.hardeningNote.includes('PowerShell'); return noPosixPrefix && crossShell && noteOk; } },
     { name: '6번째 외부평가/codex P1-C (UR-0099): --json 에러 경로 구조화 failJson + 와이어 (1.9.398)', run: () => { const io = require('../lib/io'); if (io.failJson !== failJson) return false; const _w = process.stdout.write; const saved = process.exitCode; let jOut = '', hOut = ''; let jExit = 0; try { process.stdout.write = s => { jOut += s; return true; }; process.exitCode = 0; failJson(true, 'tc', 'm'); jExit = process.exitCode; process.stdout.write = s => { hOut += s; return true; }; process.exitCode = 0; failJson(false, 'c', 'humanmsg'); } catch {} finally { process.stdout.write = _w; process.exitCode = saved; } let pj; try { pj = JSON.parse(jOut); } catch {} const jsonOk = !!pj && pj.ok === false && pj.code === 'tc' && pj.error === 'm' && jExit === 1; const humanOk = hOut.includes('✗') && hOut.includes('humanmsg') && !hOut.includes('{'); const src = read(__filename); const wired = src.includes("failJson(_j, 'missing_args'") && src.includes("failJson(_j, 'spec_not_found'"); return jsonOk && humanOk && wired; } },
-    { name: 'T-0077 graph --html: leerness.html 온톨로지 생성 + 노드/엣지/XSS 무결성 (1.34.3)', run: () => { const m = require('../lib/graph'); const expOk = typeof m.graphHtmlCmd === 'function' && typeof m.buildGraphData === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/" + "graph')") && src.includes('function graphHtmlCmd(root) { return ' + '_graph.graphHtmlCmd('); const gSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'graph.js')); const movedToLib = gSrc.includes('buildGraphData') && gSrc.includes('String.raw') && gSrc.includes('/*__DATA__' + '*/null'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_graph_')); const _w = process.stdout.write; try { process.stdout.write = () => true; fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | first task | - | - | 2026-06-26 |\n| T-0002 | in-progress | follow-up to T-0001 </scr' + 'ipt> | - | - | 2026-06-26 |\n'); const deps = { _roadmapData, _loadDecisions, _loadLessons }; const data = m.buildGraphData(tmp, deps); const dataOk = data.nodes.some(n => n.id === 'T-0001') && data.nodes.some(n => n.id === 'T-0002') && data.counts.task >= 2; const edgeOk = data.edges.some(e => e.source === 'T-0002' && e.target === 'T-0001'); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, Object.assign({ has: () => false }, deps), out); const html = fs.readFileSync(out, 'utf8'); const placeholderGone = !html.includes('/*__DATA__' + '*/null'); const hasNode = html.includes('T-0002'); const xssSafe = (html.match(/<\/script>/g) || []).length === 1; behavOk = dataOk && edgeOk && placeholderGone && hasNode && xssSafe && !!r && r.ok === true && fs.existsSync(out); } catch (e) { behavOk = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return expOk && delegated && movedToLib && behavOk; } },
+    { name: 'T-0077 graph --html: leerness.html 온톨로지 생성 + 노드/엣지/XSS 무결성 (1.34.3)', run: () => { const m = require('../lib/graph'); const expOk = typeof m.graphHtmlCmd === 'function' && typeof m.buildGraphData === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/" + "graph')") && src.includes('function graphHtmlCmd(root) { return ' + '_graph.graphHtmlCmd('); const gSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'graph.js')); const movedToLib = gSrc.includes('buildGraphData') && gSrc.includes('String.raw') && gSrc.includes('/*__DATA__' + '*/null'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_graph_')); const _w = process.stdout.write; try { process.stdout.write = () => true; fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | first task | - | - | 2026-06-26 |\n| T-0002 | in-progress | follow-up to T-0001 </scr' + 'ipt> | - | - | 2026-06-26 |\n'); const deps = { _roadmapData, _loadDecisions, _loadLessons }; const data = m.buildGraphData(tmp, deps); const dataOk = data.nodes.some(n => n.id === 'T-0001') && data.nodes.some(n => n.id === 'T-0002') && data.counts.task >= 2; const edgeOk = data.edges.some(e => e.source === 'T-0002' && e.target === 'T-0001'); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, Object.assign({ has: () => false }, deps, { quiet: true }), out); const html = fs.readFileSync(out, 'utf8'); const placeholderGone = !html.includes('/*__DATA__' + '*/null'); const hasNode = html.includes('T-0002'); const xssSafe = (html.match(/<\/script>/g) || []).length === 1; behavOk = dataOk && edgeOk && placeholderGone && hasNode && xssSafe && !!r && r.ok === true && fs.existsSync(out); } catch (e) { behavOk = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return expOk && delegated && movedToLib && behavOk; } },
     { name: 'T-0077 후속 graph auto-gen: handoff opt-in 배선 + quiet 무로그 (1.34.4)', run: () => { const m = require('../lib/graph'); const src = read(__filename); const wired = src.includes('_maybeAuto' + 'Graph(_hp)') && src.includes('LEERNESS_AUTO_' + 'GRAPH'); let quietOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_autograph_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | x | - | - | 2026-06-26 |\n'); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, { _roadmapData, _loadDecisions, _loadLessons, quiet: true }, out); quietOk = !!r && r.ok === true && fs.existsSync(out) && so === ''; } catch (e) { quietOk = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return wired && quietOk; } },
     { name: 'graph --html: 빈/미초기화 하네스 무크래시 + 유효 빈 HTML (1.35.0 방어가드)', run: () => { const m = require('../lib/graph'); let ok = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_emptyg_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); const data = m.buildGraphData(tmp, {}); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, { quiet: true }, out); const html = fs.readFileSync(out, 'utf8'); const closers = html.split('</' + 'script>').length - 1; const dm = html.match(/var DATA = (\{[\s\S]*?\});/); let parsed = null; try { parsed = JSON.parse(dm[1]); } catch (e) {} ok = !!data && Array.isArray(data.nodes) && data.nodes.length === 0 && !!r && r.ok === true && r.nodes === 0 && fs.existsSync(out) && closers === 1 && !!parsed && parsed.nodes.length === 0 && so === ''; } catch (e) { ok = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return ok; } },
     { name: 'graph --html: 임베드 script JS 신택스 유효성(U+2028/정규식 리터럴 회귀 영구 차단, 1.35.2)', run: () => { const m = require('../lib/graph'); let ok = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_gjs_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | x </scr' + 'ipt> & <b> ' + String.fromCharCode(0x24) + '{y} | M-0002 | - | 2026-06-26 |\n'); const out = path.join(tmp, 'leerness.html'); m.graphHtmlCmd(tmp, { _roadmapData, _loadDecisions, _loadLessons, quiet: true }, out); const html = fs.readFileSync(out, 'utf8'); const o = '<scr' + 'ipt>', c = '</scr' + 'ipt>'; const js = html.slice(html.indexOf(o) + o.length, html.lastIndexOf(c)); let synOk = false; try { new Function(js); synOk = true; } catch (e) { synOk = false; } ok = js.length > 200 && synOk; } catch (e) { ok = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return ok; } },
@@ -5111,6 +5128,83 @@ function _selfTestCases() {
           && /lessons\.md:3\b/.test(ht) && /lessons\.md:10\b/.test(ht)
           && /decisions\.md:7\b/.test(ht) && /decisions\.md:14\b/.test(ht);
         return lessonsOk && decisionsOk && humanOk;
+      } catch { return false; } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+    } },
+    { name: 'bugfix 완료 영수증 (1.36.87, P-0005): 기본 무영향 · 탐지력 없는 probe 거부 · 미수정 done 차단 · 통과 시 선언 명시 (행위)', run: () => {
+      // 설계 계약(검토 통과분): 개입 지점은 `--status done` 하나. 무영향 조건 3중 —
+      //   토글 OFF(기본) · done 전이 아님 · 해당 task 에 probe 미등록. 셋 중 하나면 기존 동작 그대로여야 한다.
+      //   기계 검증은 probe(수정 전 실패 → 수정 후 통과)뿐이고 근본원인/형제범위는 선언이다 — 출력이 그렇게 말해야 한다.
+      // 비용 주의: 1차판은 CLI 를 10회 spawn 해 selftest 에 **+6초**를 더했고, 이미 여유 0.9초였던
+      //   e2e 의 doctor(내부에서 selftest 실행, 제한 20s)를 확정적으로 넘겼다 — 게이트가 잡았다.
+      //   상태기계 전이는 **in-process** 로 검사하고, 배선(디스패치·토글·출력문구)만 CLI 1회로 확인한다.
+      const _bf = require('../lib/bugfix');
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_bfx_'));
+      try {
+        mkdirp(path.join(d, '.harness'));
+        writeUtf8(path.join(d, '.harness', 'HARNESS_VERSION'), VERSION);
+        const ID = 'T-0009';
+        const _flag = path.join(d, 'bf_fixed.txt');
+        const _probe = `node -e "const f=require('fs');if(!f.existsSync('bf_fixed.txt')){console.error('BUG_HERE');process.exit(3)}"`;
+        // in-process 호출은 stdout 에 쓴다 — `selftest --json` 의 출력을 오염시켜 소비자의 JSON.parse 가 깨진다
+        //   (실측: 첫 `{` 가 이 가드의 출력이 됐다). --json 순수성은 leerness 가 반복해 고쳐온 계약이므로 억제한다.
+        const _quiet = (fn) => { const w = process.stdout.write; process.stdout.write = () => true; try { return fn(); } finally { process.stdout.write = w; } };
+        // ① probe 미등록 → 무영향(선언하지 않은 task 는 막지 않는다)
+        if (_bf.checkDoneTransition(d, ID).blocked !== false) return false;
+        // ② 재현되는 probe 등록(수정 전 상태에서 실패해야 등록됨)
+        _quiet(() => _bf.bugfixCmd(d, 'start', [ID], { has: (f) => f === '--json', arg: (f) => (f === '--repro' ? _probe : f === '--expect-bad' ? 'BUG_HERE' : '') }));
+        const _st = _bf._loadChecked(d);
+        if (_st.invalid || !_st.list.some(x => x.id === ID && x.baseline && x.baseline.failed)) return false;
+        // ③ 수정 전 done 차단
+        if (_bf.checkDoneTransition(d, ID).code !== 'probe_still_failing') return false;
+        // ④ 수정 후에도 영수증 없으면 차단
+        writeUtf8(_flag, 'ok');
+        if (_bf.checkDoneTransition(d, ID).code !== 'receipt_incomplete') return false;
+        // ⑤ 영수증 후 통과 + 출력이 "선언"임을 명시
+        _quiet(() => _bf.bugfixCmd(d, 'receipt', [ID], { has: (f) => f === '--json', arg: (f) => (f === '--root-cause' ? '원인 한 문장' : f === '--siblings-na' ? '단일 경로' : '') }));
+        const _pass = _bf.checkDoneTransition(d, ID);
+        if (_pass.blocked !== false) return false;
+        const _txt = (_pass.lines || []).join('\n');
+        if (!(/재현 probe 통과/.test(_txt) && /선언/.test(_txt) && /진위는 검증하지 않았/.test(_txt))) return false;
+        // ⑥ **배선**만 CLI 로 1회 — 모듈 로드/디스패치/토글 연결이 실제로 되는지(in-process 로는 안 드러남)
+        const _cli = cp.spawnSync(process.execPath, [__filename, 'bugfix', 'list', '--path', d, '--json'],
+          { encoding: 'utf8', timeout: 60000, maxBuffer: 8 * 1024 * 1024 });
+        if (_cli.status !== 0) return false;
+        const _j = JSON.parse(_cli.stdout.slice(_cli.stdout.indexOf('{')));
+        if (!(_j.ok === true && (_j.receipts || []).some(r => r.id === ID && r.rootCause))) return false;
+        // ⑦⑧⑨ 1.36.87 자체 헌트로 실측한 3결함 — 전부 손편집/구버전 스토어와 정상 앱 출력에서 나온다.
+        const _put = (list) => writeUtf8(path.join(d, '.harness', 'bugfix-receipts.json'), JSON.stringify(list, null, 2));
+        const _ok0 = `node -e "process.exit(0)"`;
+        // ⑦ baseline 없는/재현된 적 없는 엔트리는 **형상 무효**로 보류한다 — 종전엔 유효로 통과해
+        //   (a) 완료 렌더에서 TypeError 로 `task update` 가 통째로 죽고 (b) 손으로 써넣은 probe 가 게이트를 통과했다.
+        _put([{ id: 'T-0101', repro: _ok0, expectBad: 'X', rootCause: 'rc', siblingScope: { checked: ['a'] } }]);
+        if (_bf.checkDoneTransition(d, 'T-0101').code !== 'store_invalid') return false;   // 던지면 바깥 catch 로 떨어져 실패 처리됨
+        _put([{ id: 'T-0101', repro: _ok0, expectBad: 'X', baseline: { failed: false, exit: 0 }, rootCause: 'rc', siblingScope: { checked: ['a'] } }]);
+        if (_bf.checkDoneTransition(d, 'T-0101').code !== 'store_invalid') return false;
+        // ⑧ 빈 형제 목록은 "기록됨"이 아니다 (`--siblings ","` 가 checked:[] 로 통과하던 공허 영수증)
+        _put([{ id: 'T-0102', repro: _ok0, expectBad: 'X', baseline: { failed: true, exit: 3 }, rootCause: 'rc', siblingScope: { checked: [] } }]);
+        if (_bf.checkDoneTransition(d, 'T-0102').code !== 'receipt_incomplete') return false;
+        // ⑨ 앱이 정상적으로 뱉는 문자열(SyntaxError 등)을 런처 오류로 오분류해 **완료를 막던** false-BLOCK
+        const _synProbe = `node -e "console.log('SyntaxError: Unexpected token < in JSON at position 0')"`;
+        _put([{ id: 'T-0103', repro: _synProbe, expectBad: 'SyntaxError', baseline: { failed: true, exit: 1 }, rootCause: 'rc', siblingScope: { notApplicable: '단일' } }]);
+        if (_bf.checkDoneTransition(d, 'T-0103').blocked !== false) return false;
+        // ⑩ 1회성 probe 거부 — 상태를 남겨 등록 때만 실패하는 probe 는 제품 코드를 한 줄도 안 고치고 통과시킨다.
+        //   등록은 **2회 연속** 재현을 요구해야 한다(codex 26차 #3).
+        const _once = path.join(d, 'once.flag').replace(/\\/g, '/');
+        const _oneShot = `node -e "const f=require('fs');if(!f.existsSync('${_once}')){f.writeFileSync('${_once}','1');console.error('BUG_HERE');process.exit(3)}"`;
+        _put([]);
+        // 등록 거부는 process.exitCode 를 1로 세운다 — in-process 로 부르면 selftest 자신의 종료코드가 오염된다. 복원.
+        const _ec = process.exitCode;
+        _quiet(() => { _bf.bugfixCmd(d, 'start', ['T-0105'], { has: (f) => f === '--json', arg: (f) => (f === '--repro' ? _oneShot : f === '--expect-bad' ? 'BUG_HERE' : '') }); });
+        process.exitCode = _ec;
+        if (_bf._loadChecked(d).list.some(x => x.id === 'T-0105')) return false;
+        // ⑪ CLI 도 같은 규칙 — 빈 형제 목록은 거부(exit 1 + code) · 등록 취소 경로 존재
+        _put([{ id: 'T-0104', repro: _ok0, expectBad: 'X', baseline: { failed: true, exit: 3 } }]);
+        const _cli2 = cp.spawnSync(process.execPath, [__filename, 'bugfix', 'receipt', 'T-0104', '--siblings', ',', '--path', d, '--json'],
+          { encoding: 'utf8', timeout: 60000, maxBuffer: 8 * 1024 * 1024 });
+        const _j2 = JSON.parse(_cli2.stdout.slice(_cli2.stdout.indexOf('{')));
+        if (!(_cli2.status === 1 && _j2.ok === false && _j2.code === 'empty_siblings')) return false;
+        _quiet(() => _bf.bugfixCmd(d, 'drop', ['T-0104'], { has: (f) => f === '--json', arg: () => '' }));
+        return !_bf._loadChecked(d).list.some(x => x.id === 'T-0104') && _bf.checkDoneTransition(d, 'T-0104').blocked === false;
       } catch { return false; } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
     } },
     { name: 'brainstorm 두 경로 등가 (1.36.86): 사람용/--json 이 표면별로 같은 결과 — 수집 단일화 회귀 가드 (행위)', run: () => {
@@ -7377,6 +7471,7 @@ function commandsCmd(root) {
       { cmd: 'integrity check [--repair] [--json]', desc: 'managed 정책-문서 12종 무결성(부재/H1 상실/절단) 점검 — --repair: archive 대피 후 템플릿 재생성 — 1.36.57 감사 F-04' },
       { cmd: 'referee add|verify|list|show|drop', desc: '검증기 캘리브레이션 — 신뢰 전에 탐지력 증명(known-good 통과 + 망가뜨린 known-bad 를 기대 사유로 거부). verify-claim --referee / gate 게이팅 — 1.36.80 P-0001' },
       { cmd: 'preview add|list|show|approve|revise|mockup', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약. mockup <P-ID> [--force]: 자립형 HTML 디자인 시안 스캐폴드 · add --mockup <파일>: 기존 시안 첨부 — 1.36.51 UR-0061 · 1.36.75 UR-0066' },
+      { cmd: 'bugfix start|receipt|drop|list', desc: 'bugfix 완료 영수증 — 수정 전 재현 probe 를 등록(2회 연속 실패해야 등록)하고, done 전이에서 통과 + 근본원인/형제범위 영수증을 요구. 토글 기본 OFF: leerness toggle set bugfix-receipt on — 1.36.87 P-0005' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
       { cmd: 'brainstorm "<topic>" [--include-code]', desc: '워크스페이스 회수 + 코드 grep' }
     ],
@@ -9918,7 +10013,21 @@ function writeProgressRows(root, header, rows, opts = {}) {
     (rows.length ? '\n' : '') + _suffix;
   writeUtf8(progressPath(root), composed);
 }
+// 1.36.88 (출하전 헌트 #1/#2/#17/#18): bugfix 완료 게이트를 **여기 한 곳**에서 건다.
+//   종전엔 taskUpdate 에만 배선돼 있었고, 실측 결과 `task sync --from`(하네스가 세션 워크플로에서
+//   직접 지시하는 TodoWrite 왕복 경로)이 경고 한 줄 없이 exit 0 으로 done 을 기록했다.
+//   progress 행을 쓰는 경로는 전부 이 함수를 지나므로, 새 호출부가 생겨도 자동으로 게이트를 탄다.
+//   막힐 때 **던지는** 이유: 반환값을 무시하면 무언 통과가 되고, 그게 이 결함 클래스의 재발 양식이다.
+let _lastBugfixLines = null;   // 통과 시 렌더용 — 직후 호출자가 _consumeBugfixLines() 로 가져간다
+function _consumeBugfixLines() { const l = _lastBugfixLines; _lastBugfixLines = null; return l; }
 function upsertProgress(root, row) {
+  // 게이트는 **락 밖에서** — probe 는 최대 10분까지 도는 사용자 명령이라 progress 락을 물고 있으면 안 된다.
+  if (row && row.status === 'done' && _tgl.toggleOn(root, 'bugfix-receipt')) {
+    const _bfm = require('../lib/bugfix');
+    const _r = _bfm.checkDoneTransition(root, row.id);
+    if (_r.blocked) throw new _bfm.BugfixBlocked(_r, row.id);
+    _lastBugfixLines = _r.lines || null;
+  }
   // 1.9.303 (UR-0043): read-modify-write 전체를 락으로 직렬화 — 동시 task 쓰기 lost-update 방지.
   return _withLock(progressPath(root), () => {
     const header = progressHeader(root);
@@ -10274,10 +10383,33 @@ function taskUpdate(root, id) {
   if (arg('--evidence') !== null) patch.evidence = arg('--evidence');
   if (arg('--next') !== null) patch.nextAction = arg('--next');
   if (arg('--note')) patch.request = arg('--note');
-  upsertProgress(root, patch);
+  // 1.36.87 (P-0005, codex+자체 이중검토 통과분): bugfix 완료 게이트 — **`done` 전이가 유일한 개입 지점**이다.
+  //   leerness 는 이미 debug 렌즈·review-request 로 올바른 절차를 안내하지만 그건 조언 텍스트일 뿐
+  //   완료 시점에 소비되지 않는다(조언을 더 만드는 것이야말로 증상 처방).
+  //   무영향 조건 3중: 토글 OFF(기본) · done 전이가 아님 · 해당 task 에 bugfix probe 미등록 → 기존 동작 그대로.
+  // 1.36.88: 게이트 판정은 upsertProgress(단일 병목) 안에서 일어난다 — 여기서는 렌더만 한다.
+  //   1.36.87 은 "이미 done 이면 스킵"을 넣었지만(codex 26차 #9), 그게 **재오픈 버그 시나리오를 정확히 무력화**했다:
+  //   1라운드에서 done → 회귀 → probe 등록 → 다시 done 이 그대로 통과. 이 기능의 동기가 바로 그 시나리오다.
+  //   probe 가 낡아 갇히는 문제는 스킵이 아니라 `leerness bugfix drop <ID>` 로 푼다(문서화된 탈출구).
+  let _bfLines = null;
+  try {
+    upsertProgress(root, patch);
+    _bfLines = _consumeBugfixLines();
+  } catch (e) {
+    if (!e || e.name !== 'BugfixBlocked') throw e;
+    if (has('--json')) { log(JSON.stringify({ ok: false, code: e.code, id, error: e.message }, null, 2)); }
+    else {
+      fail(`done 보류 — ${e.message}`);
+      (e.lines || []).forEach(l => log('    ' + l));
+      log(`    ⓘ 탈출구: leerness bugfix drop ${id} (probe 등록 취소) · leerness toggle set bugfix-receipt off (프로젝트 정책)`);
+    }
+    process.exitCode = 1;
+    return;
+  }
   // 1.36.0 (클린룸 리뷰 B, --json 무결성): task add(1.9.413) 는 --json 성공 출력이 있으나 task update 는 누락 — 성공 시 평문만 내보내 JSON 소비 스크립트가 성공 경로에서만 크래시(에러 경로는 이미 구조화). 동일 패턴으로 보강.
-  if (has('--json')) { log(JSON.stringify({ ok: true, ...patch })); return; }
+  if (has('--json')) { log(JSON.stringify({ ok: true, ...patch, ...(_bfLines ? { bugfixReceipt: _bfLines } : {}) })); return; }
   ok(`task updated: ${id}`);
+  if (_bfLines) _bfLines.forEach(l => log('  ' + l));
   _autoRoadmap(absRoot(root), 'data-change');
   _emitHandoffNudge(root);   // 1.36.8: 넛지 확장 — 작업 중 가장 자주 실행하는 명령(update)에도 노출
 }
@@ -15160,20 +15292,21 @@ function _recommendAgent(task) {
   if (!task || typeof task !== 'string') return { target: null, reason: '' };
   const t = task.toLowerCase();
   const hasAny = (keywords) => keywords.some(k => t.includes(k));
-  // 텍스트 분석/번역 → claude (가장 빠름, 1.7×)
+  // 1.36.88: 사유 문구에서 **검증되지 않은 성능·품질 주장**을 제거한다("1.7× 빠름" · "가장 상세" · "정확").
+  //   leerness 는 이 수치를 측정한 적이 없고, 벤더 모델은 몇 달마다 바뀌어 순위 주장은 곧 낡는다.
+  //   이 매핑은 **기본 관례**이지 벤치마크 결과가 아니며, 사유 문구가 그렇게 말해야 한다.
+  //   (근거 표시는 추후 난이도 라우팅 P-0007 의 감사기록에서 확장된다.)
   if (hasAny(['translate', 'summary', 'explain', 'describe', 'analyze', 'review',
               '번역', '요약', '설명', '분석', '리뷰'])) {
-    return { target: 'claude', reason: '텍스트 분석·요약·번역은 claude가 1.7× 빠름' };
+    return { target: 'claude', reason: '키워드 매칭: 텍스트 분석·요약·번역 → claude (기본 관례이며 측정된 성능 비교 아님)' };
   }
-  // 깊은 코드 추론
   if (hasAny(['architecture', 'design pattern', 'refactor', 'trace', 'complex', 'critical path',
               '아키텍처', '리팩터', '복잡'])) {
-    return { target: 'codex', reason: '깊은 코드 추론은 codex가 가장 상세' };
+    return { target: 'codex', reason: '키워드 매칭: 깊은 코드 추론 → codex (기본 관례이며 측정된 품질 비교 아님)' };
   }
-  // 파일 작성·수정·생성
   if (hasAny(['create', 'write', 'generate', 'patch', 'fix', 'implement', 'edit',
               '구현', '생성', '작성', '수정', '추가'])) {
-    return { target: 'agy', reason: '워크스페이스 직접 수정은 agy --yolo (Antigravity) 가 정확' };
+    return { target: 'agy', reason: '키워드 매칭: 워크스페이스 직접 수정 → agy --yolo (기본 관례이며 측정된 정확도 비교 아님)' };
   }
   return { target: null, reason: '' };
 }
@@ -23012,21 +23145,41 @@ function taskSyncCmd(root) {
   catch (e) { fail(`JSON 파싱 실패: ${e.message}`); return process.exit(1); }
   if (!Array.isArray(todos)) { fail('JSON 최상위는 배열이어야 함'); return process.exit(1); }
   let imported = 0, updated = 0;
+  // 1.36.88 (출하전 헌트 #1/#17): 이 경로가 bugfix 완료 게이트를 통째로 우회했다 — TodoWrite 를 completed 로
+  //   바꿔 되돌려 넣는 것이 이 명령의 정규 사용법이라, 게이트가 막으려는 주체가 명령 하나로 무력화했다.
+  //   게이트는 upsertProgress 안에서 던진다. 여기서는 **한 건이 막혀도 나머지는 처리**하고, 막힌 건을 보고한다.
+  const blocked = [];
   for (const t of todos) {
     if (!t || !t.content) continue;
     const status = t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'in-progress' : 'planned';
     // 이미 같은 request 있는지
     const existing = readProgressRows(root).find(r => r.request === t.content);
-    if (existing) {
-      if (existing.status !== status) {
-        upsertProgress(root, { id: existing.id, status });
-        updated++;
+    try {
+      if (existing) {
+        if (existing.status !== status) {
+          upsertProgress(root, { id: existing.id, status });
+          updated++;
+        }
+      } else {
+        const id = nextId(root, 'T');
+        upsertProgress(root, { id, status, request: t.content, evidence: 'todowrite-sync', nextAction: t.activeForm || '다음 액션' });
+        imported++;
       }
-    } else {
-      const id = nextId(root, 'T');
-      upsertProgress(root, { id, status, request: t.content, evidence: 'todowrite-sync', nextAction: t.activeForm || '다음 액션' });
-      imported++;
+    } catch (e) {
+      if (!e || e.name !== 'BugfixBlocked') throw e;
+      blocked.push({ id: e.taskId, content: String(t.content).slice(0, 60), code: e.code, message: e.message });
     }
+  }
+  if (blocked.length) {
+    if (has('--json')) {
+      log(JSON.stringify({ ok: false, code: 'bugfix_blocked', imported, updated, blocked }, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+    fail(`${blocked.length}건이 bugfix 완료 게이트에 걸려 done 으로 반영되지 않았습니다`);
+    blocked.forEach(b => log(`    - ${b.id} ${b.content} — ${b.message}`));
+    log(`    ⓘ 탈출구: leerness bugfix drop <ID> · leerness toggle set bugfix-receipt off (프로젝트 정책)`);
+    process.exitCode = 1;
   }
   log(`# leerness task sync (1.9.38)`);
   log(`from: ${full}`);
@@ -24038,6 +24191,25 @@ async function main() {
     }
     return refereeCmd(arg('--path', process.cwd()), _rvToks[0], _rvToks.slice(1));
   }
+  // 1.36.87 (P-0005): bugfix 완료 영수증 — 값 플래그가 positional 로 새지 않게 원시 argv 파싱(referee/preview 와 동일 패턴)
+  if (cmd === 'bugfix') {
+    const _bfRaw = process.argv.slice(2); const _bfI = _bfRaw.indexOf('bugfix'); const _bfToks = [];
+    for (let i = _bfI + 1; i < _bfRaw.length && _bfI >= 0; i++) {
+      if (_bfRaw[i].startsWith('--')) { if (['--repro', '--expect-bad', '--root-cause', '--siblings', '--siblings-na', '--previous-gap', '--path'].includes(_bfRaw[i]) && _bfRaw[i + 1]) i++; continue; }
+      _bfToks.push(_bfRaw[i]);
+    }
+    // 1.36.88 (출하전 헌트 #7): `bugfix list <path>` 가 위치 경로를 조용히 무시하고 cwd 를 읽어,
+    //   등록된 probe 를 "없음"으로 보고했다 — 다른 명령들과 같은 규율로 위치 경로를 받는다.
+    //   (start/receipt/drop 의 첫 토큰은 task id 이므로, 경로로 오인하지 않도록 list/무인자에서만 적용)
+    const _bfSub = _bfToks[0];
+    const _bfRest = _bfToks.slice(1);
+    let _bfRoot = arg('--path', null);
+    if (!_bfRoot && (!_bfSub || _bfSub === 'list')) _bfRoot = _taskPositionalPath(['bugfix', ...(_bfSub ? [_bfSub] : []), ..._bfRest], _bfSub ? 2 : 1);
+    // _withLock: 동시 등록이 서로를 지우면 게이트가 조용히 꺼진다(실측 4→2)
+    // _taskExists: 존재하지 않는 id 로 등록되면 오타 하나로 "보호받는 줄 아는" 무보호 상태가 된다(출하전 헌트 #3)
+    return require('../lib/bugfix').bugfixCmd(_bfRoot || process.cwd(), _bfSub, _bfRest,
+      { has, arg, _withLock, _taskExists: (r, id) => readProgressRows(r).some(x => x.id === id) });
+  }
   if (cmd === 'lens')                               return lensCmd(args[1]);  // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈
   // 1.9.233: leerness commands — 카테고리화된 전체 CLI 명령 목록
   if (cmd === 'commands')                           return commandsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
@@ -24312,7 +24484,16 @@ async function main() {
 if (require.main === module) {
   main()
     .then(() => { if (process.exitCode && process.exitCode !== 0) process.exit(process.exitCode); })
-    .catch(err => { fail(err && err.message ? err.message : String(err)); process.exit(1); });
+    .catch(err => {
+      fail(err && err.message ? err.message : String(err));
+      // 1.36.88: 완료 게이트는 upsertProgress 에서 던진다 — taskUpdate/taskSync 외의 경로로 올라와도
+      //   스택 트레이스 대신 탈출구를 보여준다(막힌 사용자가 빠져나갈 방법을 알아야 한다).
+      if (err && err.name === 'BugfixBlocked') {
+        (err.lines || []).forEach(l => log('    ' + l));
+        log(`    ⓘ 탈출구: leerness bugfix drop ${err.taskId} (probe 등록 취소) · leerness toggle set bugfix-receipt off (프로젝트 정책)`);
+      }
+      process.exit(1);
+    });
 }
 
 // 1.9.255: 테스트/디버그용 내부 함수 export (require.main 가드 덕분에 require 시 CLI 미실행).

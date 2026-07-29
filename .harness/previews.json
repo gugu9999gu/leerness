@@ -98,12 +98,66 @@
     "title": "버그 재발 방지 — 증상 수정 차단",
     "design": "재발 신호 자동 표면화 + 완료 게이트",
     "features": [],
-    "status": "proposed",
+    "status": "revision-requested",
     "createdAt": "2026-07-29T05:32:30.187Z",
     "history": [
       {
         "at": "2026-07-29T05:32:30.187Z",
         "event": "proposed"
+      },
+      {
+        "at": "2026-07-29T06:19:13.598Z",
+        "event": "revision-requested",
+        "note": "codex+자체 검토 수렴: 신호3(형제분기 자동제시) 기각 — 구문 분기와 도메인 형제는 다름(order-status-label.ts 실증). 신호1은 차단 금지(재오픈 정밀도 19% 실측). 신호2는 MVP 제외(dirty worktree 오염·hot file 오탐). 개입 지점을 review-request 조언이 아니라 --status done 전이로 이동. MVP = bugfix receipt(재현 실패→수정→동일 probe 통과)를 done 전제로, probe 탐지력은 기존 referee 로 증명."
+      }
+    ]
+  },
+  {
+    "id": "P-0006",
+    "title": "하네스 서버화 — leerness.html 제거 + .harness 코드화 + 루트 실행기",
+    "design": "설치 프로젝트의 .harness 안에 node/python 코드를 두고, 루트에 실행기를 만들어 leerness 로컬 서버를 띄운다. 서버에서 gate 활성화/디자인 미리보기/플랜·핸드오프·이력 열람. 기존 정적 leerness.html(92KB 단일파일)은 제거.",
+    "features": [
+      "루트 실행기",
+      "로컬 서버",
+      "gate 활성화 UI",
+      "디자인 미리보기",
+      "하네스 상태 열람",
+      "leerness.html 제거"
+    ],
+    "status": "approved",
+    "createdAt": "2026-07-29T08:59:05.917Z",
+    "history": [
+      {
+        "at": "2026-07-29T08:59:05.917Z",
+        "event": "proposed"
+      },
+      {
+        "at": "2026-07-29T09:07:01.316Z",
+        "event": "approved"
+      }
+    ]
+  },
+  {
+    "id": "P-0007",
+    "title": "작업 난이도별 AI 모델 라우팅 (토글)",
+    "design": "설치된 CLI(codex/claude/agy 등 10종)의 설치·활성 여부를 감지해 작업 난이도(초소형/일반/고위험)별로 모델을 라우팅한다. 기본 OFF 토글로 켜고 끈다. 기존 agents recommend/dispatch --role 을 확장.",
+    "features": [
+      "난이도 분류",
+      "가용성 기반 라우팅",
+      "토글 on/off",
+      "에스컬레이션 규칙",
+      "라우팅 근거 표시"
+    ],
+    "status": "approved",
+    "createdAt": "2026-07-29T08:59:06.394Z",
+    "history": [
+      {
+        "at": "2026-07-29T08:59:06.394Z",
+        "event": "proposed"
+      },
+      {
+        "at": "2026-07-29T09:07:01.863Z",
+        "event": "approved"
       }
     ]
   }

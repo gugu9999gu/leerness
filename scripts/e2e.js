@@ -7,6 +7,8 @@ const path = require('path');
 const cp = require('child_process');
 
 // 1.9.12: e2e 안정성을 위해 자식 프로세스의 npm 호출 차단 (hang 방지)
+// 1.36.87: 일부 e2e 타임아웃을 상향했다 — 격리 실측(agents list 5.2s · init --language 8.5s) 대비
+//   여유가 3배 미만이라 전체 스위트 부하에서 간헐 초과했다. 검사 대상은 속도가 아니라 동작이다.
 process.env.LEERNESS_OFFLINE = process.env.LEERNESS_OFFLINE || '1';
 // 1.9.284 (UR-0029): e2e 속도 — 기본 roadmap.html(70KB HTML) 자동 생성 OFF (roadmap 전용 테스트 블록만 일시 ON).
 //   대부분의 init/session 테스트는 roadmap 을 검증하지 않으므로 생성 비용 제거 → 5분 내 완료.
@@ -804,7 +806,7 @@ total++;
 {
   // agents list — claude가 환경변수 + PATH 둘 다 충족 시 ready
   const env1 = { ...process.env, LEERNESS_ENABLE_CLAUDE: '1', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_GROK: '0', LEERNESS_ENABLE_COPILOT: '0' };
-  const r1 = cp.spawnSync(process.execPath, [CLI, 'agents', 'list'], { encoding: 'utf8', timeout: 15000, env: env1 });
+  const r1 = cp.spawnSync(process.execPath, [CLI, 'agents', 'list'], { encoding: 'utf8', timeout: 90000, env: env1 });
   const okList = r1.status === 0
     && /외부 AI CLI 오케스트레이션 \(1\.9\.30\)/.test(r1.stdout)
     && /\| claude \|/.test(r1.stdout)
@@ -816,7 +818,7 @@ total++;
   // 1.9.146: Ollama → 5 · 1.9.268: grok → 6 · 1.9.277: opencode/qwen/aider/goose → 10 CLI
   const offAll = { LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_GROK: '0', LEERNESS_ENABLE_OPENCODE: '0', LEERNESS_ENABLE_QWEN: '0', LEERNESS_ENABLE_AIDER: '0', LEERNESS_ENABLE_GOOSE: '0', LEERNESS_ENABLE_COPILOT: '0', LEERNESS_ENABLE_OLLAMA: '0' };
   const env2 = { ...process.env, ...offAll };
-  const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'list', '--json'], { encoding: 'utf8', timeout: 15000, env: env2 });
+  const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'list', '--json'], { encoding: 'utf8', timeout: 90000, env: env2 });
   let parsed = null;
   try { parsed = JSON.parse(r2.stdout); } catch {}
   const okJson = parsed && Array.isArray(parsed.agents) && parsed.agents.length === 10 && parsed.agents.every(a => a.status !== 'ready');
@@ -849,7 +851,7 @@ total++;
 {
   // agents quota — env=0 시 모두 disabled/not-installed, 안내 메시지 포함
   const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_GROK: '0', LEERNESS_ENABLE_COPILOT: '0' };
-  const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota'], { encoding: 'utf8', timeout: 15000, env });
+  const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota'], { encoding: 'utf8', timeout: 90000, env });
   const okText = r.status === 0
     && /외부 AI CLI quota 추정 \(1\.9\.31\)/.test(r.stdout)
     && /\| claude \|/.test(r.stdout)
@@ -859,7 +861,7 @@ total++;
     && /\| copilot \|/.test(r.stdout)
     && /provider 대시보드 참조/.test(r.stdout);
   // JSON 출력
-  const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota', '--json'], { encoding: 'utf8', timeout: 15000, env });
+  const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota', '--json'], { encoding: 'utf8', timeout: 90000, env });
   let parsed = null;
   try { parsed = JSON.parse(r2.stdout); } catch {}
   // 1.9.277: opencode/qwen/aider/goose → 10 CLI
@@ -4639,9 +4641,11 @@ total++;
     const sr = cp.spawnSync(process.execPath, [CLI, 'selftest'], { cwd: ni, encoding: 'utf8', timeout: 180000 });
     const sout = (sr.stdout || '') + (sr.stderr || '');
     const selftestOk = sr.status === 0 && /전체 \d+건 통과/.test(sout) && !/설치 손상/.test(sout);
-    const dr = cp.spawnSync(process.execPath, [CLI, 'doctor'], { cwd: ni, encoding: 'utf8', timeout: 30000 });
+    const dr = cp.spawnSync(process.execPath, [CLI, 'doctor'], { cwd: ni, encoding: 'utf8', timeout: 120000 });   // 1.36.87: doctor 는 selftest 를 내장한다(19~24s)
     const dout = (dr.stdout || '') + (dr.stderr || '');
-    const doctorOk = !/문제 감지|설치 손상|재설치/.test(dout) && /설치 정상|통과/.test(dout);
+    // 1.36.87 (codex 26차 #11): 종료코드를 안 보면 **타임아웃/중단이 통과로 보인다**(spawnSync 타임아웃은 status=null,
+    //   이미 찍힌 "통과" 문자열은 남는다). 제한을 120s 로 올린 만큼 status 단언이 반드시 함께 가야 한다.
+    const doctorOk = dr.status === 0 && !/문제 감지|설치 손상|재설치/.test(dout) && /설치 정상|통과/.test(dout);
     ok = selftestOk && doctorOk;
     fs.rmSync(ni, { recursive: true, force: true });
   } catch {}
@@ -5055,6 +5059,29 @@ total++;
     ok = j.ok === true && j.pass === j.total && j.fail === 0 && j.total >= 112 && r.status === 0;
   } catch {}
   console.log(ok ? '✓ B(1.9.366) CV-5: selftest 무결성 (--json pass===total, 행위 전환 writeUtf8/fail 포함) (UR-0080)' : '✗ selftest 무결성 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.88 (--json 단일 JSON 계약 회귀): selftest --json 은 stdout 에 JSON 1개만 내야 한다 — **리포 루트 cwd** 에서도.
+//   사각지대: 위 5049 블록은 e2e 기본 tmp cwd 로만 돌아 "실제 하네스가 있는 cwd 에서만 보이는 오염"을 놓친다.
+//   또한 stderr 잡음 0 을 함께 단언한다 — 잡음의 실제 원인(프로브가 fail() 의 stderr 를 안 가로챔 · graph 케이스 quiet 누락)은
+//   io 래치가 사람용 log 를 stderr 로 강등해 주는 **우연** 덕에 stdout 만 겨우 지켜졌다. 래치가 바뀌면 곧장 stdout 오염이 된다.
+//   → stdout 순수성만 단언하면 "우연히 통과"하므로, 잡음 자체를 0 으로 고정해 원인 단계에서 막는다.
+total++;
+{
+  let ok = false;
+  try {
+    const repoRoot = path.resolve(__dirname, '..');
+    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { cwd: repoRoot, encoding: 'utf8', timeout: 180000, maxBuffer: 64 * 1024 * 1024 });
+    const pureStdout = typeof r.stdout === 'string' && r.stdout.trimStart().startsWith('{');
+    const j = JSON.parse(r.stdout);                       // 계약: stdout 전체가 단일 JSON 문서
+    const payloadOk = j.ok === true && j.pass === j.total && j.fail === 0 && j.total > 0;
+    const se = r.stderr || '';
+    // 알려진 유출원 3종: fail() 프로브의 '✗ ' · graph 사람용 3줄(파일경로/노드수/안내)
+    const noiseFree = !se.includes('✗ ') && !se.includes('leerness.html →') && !/nodes · /.test(se);
+    ok = pureStdout && payloadOk && noiseFree && r.status === 0;
+  } catch {}
+  console.log(ok ? '✓ B(1.36.88) selftest --json 계약: 리포 루트 cwd stdout 순수 JSON + stderr 잡음 0' : '✗ selftest --json 계약 실패 (stdout 오염 또는 stderr 잡음)');
   if (!ok) failed++;
 }
 
@@ -6923,9 +6950,13 @@ total++;
     const drKo = out(cp.spawnSync(process.execPath, [CLI, 'drift', 'check', d], { encoding: 'utf8', timeout: 20000 }));
     const driftOk = /signal \| age \| threshold/.test(drEn) && !H.test(drEn) && /신호 \| age \| 임계/.test(drKo);
     // ⑦ (1.28.2 Phase 10c) doctor: en 영어(한글 0) + ko 기본 한글 보존
-    const docEn = out(cp.spawnSync(process.execPath, [CLI, 'doctor', '--language', 'en'], { encoding: 'utf8', timeout: 20000, cwd: d }));
-    const docKo = out(cp.spawnSync(process.execPath, [CLI, 'doctor'], { encoding: 'utf8', timeout: 20000, cwd: d }));
-    const doctorOk = /install\/environment diagnosis/.test(docEn) && !H.test(docEn) && /설치\/환경 진단/.test(docKo);
+    // 1.36.87: doctor 는 내부에서 selftest 를 돌린다 — 실측 19~24s 인데 제한이 20s 라 여유가 없었다(1.36.86 에서도 0.9s).
+    //   제한을 올린 대신 종료코드도 함께 단언한다 — 타임아웃(status=null)이 출력 매칭만으로 통과하면 안 된다(codex 26차 #11).
+    const docEnR = cp.spawnSync(process.execPath, [CLI, 'doctor', '--language', 'en'], { encoding: 'utf8', timeout: 120000, cwd: d });
+    const docKoR = cp.spawnSync(process.execPath, [CLI, 'doctor'], { encoding: 'utf8', timeout: 120000, cwd: d });
+    const docEn = out(docEnR), docKo = out(docKoR);
+    const doctorOk = docEnR.status === 0 && docKoR.status === 0
+      && /install\/environment diagnosis/.test(docEn) && !H.test(docEn) && /설치\/환경 진단/.test(docKo);
     fs.rmSync(d, { recursive: true, force: true });
     // ⑧ (1.29.1) handoff 보안 요약 섹션: .env + 미흡한 .gitignore → en 영어(섹션 라인 한글 0) + ko 기본 한글.
     //   소스가드만으로는 못 잡는 회귀를 e2e 로 보강: 보안 요약 블록은 headline 의 t() 스코프 밖이라,
@@ -6987,19 +7018,22 @@ total++;
     fs.rmSync(da, { recursive: true, force: true });
     // ⑫ (1.30.5 #156 F3+F4) handoff 본문 워크플로 가이드 + 메모리 변동 en 영어(섹션 한글 0) + ko 보존 · verify-claim/optimism-check 미입력 에러 en/ko.
     const df3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-f3-'));
-    cp.spawnSync(process.execPath, [CLI, 'init', df3, '--yes', '--language', 'en'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', df3, '--yes', '--language', 'en'], { encoding: 'utf8', timeout: 120000 });
     const hf3En = out(cp.spawnSync(process.execPath, [CLI, 'handoff', df3], { encoding: 'utf8', timeout: 25000 }));
     const wfLines = hf3En.split('\n').filter(l => /Session workflow|Analyze request|sub-agent work|to disable:/.test(l));
     const f3En = /Session workflow/.test(hf3En) && wfLines.length >= 3 && !wfLines.some(l => H.test(l));
     const df3ko = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-f3k-'));
-    cp.spawnSync(process.execPath, [CLI, 'init', df3ko, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    cp.spawnSync(process.execPath, [CLI, 'init', df3ko, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 120000 });
     const f3Ko = /세션 워크플로 6단계/.test(out(cp.spawnSync(process.execPath, [CLI, 'handoff', df3ko], { encoding: 'utf8', timeout: 25000 })));
     const vcEn = out(cp.spawnSync(process.execPath, [CLI, 'verify-claim', '--path', df3, '--language', 'en'], { encoding: 'utf8', timeout: 15000 }));
     const vcKo = out(cp.spawnSync(process.execPath, [CLI, 'verify-claim', '--path', df3ko], { encoding: 'utf8', timeout: 15000 }));
     const f4 = /required\. ex:/.test(vcEn) && !H.test(vcEn) && /필요\. 예:/.test(vcKo);
     [df3, df3ko].forEach(d => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} });
     ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk && edEnOk && edKoOk && shEnOk && shKoOk && agEnOk && agKoOk && f3En && f3Ko && f4;
-  } catch {}
+    // 1.36.87: 단언 18개를 && 로 묶고 실패 시 어느 것인지 알려주지 않아, 진단하려면 22분짜리 스위트를 통째로
+    //   다시 돌려야 했다. 다른 블록들과 같은 규율으로 실패 플래그를 노출한다.
+    if (!ok) console.log('   [i18n 디버그] ' + JSON.stringify({ lensKoOk, lensEnOk, noLeak, stOk, healthOk, driftOk, doctorOk, hoEnOk, hoKoOk, edEnOk, edKoOk, shEnOk, shKoOk, agEnOk, agKoOk, f3En, f3Ko, f4 }));
+  } catch (e) { console.log('   [i18n 디버그] 예외: ' + ((e && e.message) || e)); }
   console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1/1.29.2/1.29.3/1.29.4/1.30.5) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약/env-detect/shell-guard/agent-slash/워크플로가이드/verify-claim) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
   if (!ok) failed++;
 }
@@ -7597,6 +7631,79 @@ total++;
     if (!ok) console.log(`   [ur66 디버그] detect=${detectOk} mk=${mkOk} show=${showOk} protect=${protectOk} xss=${xssOk} attach=${attachOk} miss=${missOk} dir=${dirOk} out=${outOk} evil=${evilOk} appr=${apprOk}`);
   } catch (e) {} finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? '✓ B(1.36.75) UR-0066: preview mockup 시안(스캐폴드·보호·XSS·감지힌트·--mockup 첨부)' : '✗ UR-0066 시안 워크플로 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.88 (출하전 헌트 #1/#2/#3/#13/#17/#18): bugfix 완료 게이트 **배선** 회귀 가드.
+//   selftest 는 checkDoneTransition 을 in-process 로만 불러, `task update --status done` 배선을 한 줄도
+//   실행하지 않았다 — 게이트를 통째로 죽여도 341/341 그린이었다(변이로 실측). 실제 CLI 경로로 못 박는다.
+//   특히 done 을 기록하는 경로가 taskUpdate 하나가 아니다: task sync --from(TodoWrite 왕복)이 우회했다.
+total++;
+{
+  let ok = false;
+  const _d = [];
+  const R = (args, cwd) => { const r = cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 180000, cwd }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
+  let A = false, B = false, C = false, D = false, E = false, F = false, G = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bfgate-')); _d.push(d);
+    R(['init', d, '--yes', '--language', 'ko', '--no-stale-check']);
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    const BUGGY = 'console.log("BUG_HERE"); process.exit(3);';
+    fs.writeFileSync(path.join(d, 'src', 'app.js'), BUGGY);
+    const ID = ((R(['task', 'add', 'fix order status', '--path', d, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
+    // G: 토글 OFF(기본)에서는 probe 가 있어도 done 이 막히지 않는다 — 옵트인 계약
+    R(['bugfix', 'start', ID, '--repro', 'node src/app.js', '--expect-bad', 'BUG_HERE', '--path', d, '--json']);
+    G = R(['task', 'update', ID, '--status', 'in-progress', '--path', d]).s === 0
+      && R(['task', 'update', ID, '--status', 'done', '--path', d]).s === 0;
+    // 이후는 토글 ON 상태에서 (별 프로젝트 — G 가 done 을 기록했으므로)
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bfgate2-')); _d.push(d2);
+    R(['init', d2, '--yes', '--language', 'ko', '--no-stale-check']);
+    R(['toggle', 'set', 'bugfix-receipt', 'on', '--path', d2]);
+    fs.mkdirSync(path.join(d2, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(d2, 'src', 'app.js'), BUGGY);
+    const ID2 = ((R(['task', 'add', 'fix order status', '--path', d2, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
+    // F: progress-tracker 에 없는 id 는 등록 거부 — 오타 하나로 "보호받는 줄 아는" 무보호가 되던 구멍
+    F = R(['bugfix', 'start', 'T-9999', '--repro', 'node src/app.js', '--expect-bad', 'BUG_HERE', '--path', d2, '--json']).s === 1;
+    R(['bugfix', 'start', ID2, '--repro', 'node src/app.js', '--expect-bad', 'BUG_HERE', '--path', d2, '--json']);
+    // A: task update 차단 (대조군). **사유까지** 단언한다 — exit 만 보면 probe 검사와 영수증 검사가
+    //   서로를 가려, 둘 중 하나를 죽여도 다른 하나가 막아서 변이가 안 잡힌다(실측 M6/M7 생존).
+    const ar = R(['task', 'update', ID2, '--status', 'done', '--path', d2, '--json']);
+    A = ar.s === 1 && /"code":\s*"probe_still_failing"/.test(ar.o);
+    // B: task sync --from 우회 차단 + tracker 에 done 이 **기록되지 않아야** (exit 만 보면 놓친다)
+    R(['task', 'export', '--to', path.join(d2, 'todo.json'), '--path', d2]);
+    const todo = JSON.parse(fs.readFileSync(path.join(d2, 'todo.json'), 'utf8'));
+    todo.forEach(t => { if (t.content === 'fix order status') t.status = 'completed'; });
+    fs.writeFileSync(path.join(d2, 'todo.json'), JSON.stringify(todo));
+    const bs = R(['task', 'sync', '--from', path.join(d2, 'todo.json'), '--path', d2]);
+    const tracker = fs.readFileSync(path.join(d2, '.harness', 'progress-tracker.md'), 'utf8');
+    B = bs.s === 1 && !(new RegExp('\\|\\s*' + ID2 + '\\s*\\|\\s*done\\s*\\|').test(tracker));
+    // C: 재오픈 시나리오 — 1라운드에서 이미 done 인 task 가 회귀했을 때도 막아야 한다(이 기능의 동기)
+    const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bfgate3-')); _d.push(d3);
+    R(['init', d3, '--yes', '--language', 'ko', '--no-stale-check']);
+    R(['toggle', 'set', 'bugfix-receipt', 'on', '--path', d3]);
+    fs.mkdirSync(path.join(d3, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(d3, 'src', 'app.js'), BUGGY);
+    const ID3 = ((R(['task', 'add', 'fix order status', '--path', d3, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
+    R(['task', 'update', ID3, '--status', 'done', '--evidence', 'r1', '--path', d3]);   // 1라운드 완료(probe 없음)
+    R(['bugfix', 'start', ID3, '--repro', 'node src/app.js', '--expect-bad', 'BUG_HERE', '--path', d3, '--json']);
+    C = R(['task', 'update', ID3, '--status', 'done', '--evidence', 'r2', '--path', d3]).s === 1;
+    // C2: **수정은 했지만 영수증이 없는** 상태 — probe 는 통과하므로 여기서 막는 것은 영수증 검사뿐이다.
+    //   이 단계가 있어야 probe 검사와 영수증 검사가 서로를 가리지 않는다(판별 케이스).
+    fs.writeFileSync(path.join(d3, 'src', 'app.js'), 'process.exit(0);');
+    const c2 = R(['task', 'update', ID3, '--status', 'done', '--path', d3, '--json']);
+    C = C && c2.s === 1 && /"code":\s*"receipt_incomplete"/.test(c2.o);
+    // D: 수정 + 영수증 후에는 통과하고 "선언" 고지가 나온다 — 강화가 정상 흐름을 죽이면 안 된다
+    R(['bugfix', 'receipt', ID3, '--root-cause', '상태 매핑 누락', '--siblings', 'ssg,11st', '--path', d3, '--json']);
+    const dr = R(['task', 'update', ID3, '--status', 'done', '--evidence', 'r3', '--path', d3]);
+    D = dr.s === 0 && /선언/.test(dr.o) && /진위는 검증하지 않았/.test(dr.o);
+    // E: 탈출구 — drop 하면 다시 무영향
+    E = R(['bugfix', 'drop', ID3, '--path', d3, '--json']).s === 0
+      && R(['task', 'update', ID3, '--status', 'done', '--path', d3]).s === 0;
+    ok = A && B && C && D && E && F && G;
+    if (!ok) console.log(`   [bugfix게이트 디버그] update차단(probe사유)=${A} sync차단=${B} 재오픈차단+영수증사유=${C} 정상통과=${D} drop탈출=${E} 없는id거부=${F} 토글OFF무영향=${G}`);
+  } catch (e) { console.log('   [bugfix게이트 디버그] 예외: ' + ((e && e.message) || e)); }
+  finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.88) bugfix 완료 게이트 배선: task update·task sync 양 경로 차단 · 재오픈 차단 · 수정후 통과(선언 고지) · drop 탈출 · 없는id 거부 · 토글OFF 무영향' : '✗ bugfix 완료 게이트 배선 실패');
   if (!ok) failed++;
 }
 
