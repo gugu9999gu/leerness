@@ -26,7 +26,7 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
   _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm,
-  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd, _briefUnfilled, _planGoalUnfilled, _draftAnchors, _replaceMdSection, _mdSectionBody } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리 · 1.36.36 anchors
+  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd, _briefUnfilled, _planGoalUnfilled, _draftAnchors, _replaceMdSection, _mdSectionBody, _blocksWithOffset, _decisionBlocksWithOffset } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리 · 1.36.36 anchors
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.84';
+const VERSION = '1.36.85';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3193,6 +3193,28 @@ function pathSetupCmd(root, opts = {}) {
   }
 }
 
+// 1.36.85: selftest 행위 가드용 **공유 픽스처 캐시**.
+//   소스 문자열 검사를 행위 검사로 바꾸면서 케이스마다 `init` 을 spawn 했더니 selftest 가 4초대 → 14초가 됐고,
+//   30초 타임아웃을 쓰던 e2e 소비자가 전체 부하에서 실패했다(게이트가 잡음).
+//   실측 비용: init 1330ms · 초기화된 디렉토리 복사 78ms(17배 저렴) · CLI 1회 기동 434ms.
+//   → 언어별로 **한 번만** init 하고 이후는 복사해서 쓴다. 각 호출자는 자기 사본을 받으므로 상호 오염이 없다.
+const _stFixtureCache = new Map();
+function _selftestFixture(lang) {
+  const key = lang || 'ko';
+  if (!_stFixtureCache.has(key)) {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_stfx_' + key + '_'));
+    const args = [__filename, 'init', base, '--yes', '--no-env', '--no-stale-check'];
+    if (key !== 'ko') args.push('--language', key);
+    const r = cp.spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
+    _stFixtureCache.set(key, r.status === 0 ? base : null);
+  }
+  const base = _stFixtureCache.get(key);
+  if (!base) return null;                       // init 실패 시 호출자가 스스로 판단(조용한 통과 금지)
+  const dst = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_stuse_'));
+  fs.cpSync(base, dst, { recursive: true });
+  return dst;
+}
+
 // 1.9.258: leerness selftest — 설치된 leerness 바이너리의 코어 순수 함수 자가 검증.
 //   1.9.255~257 에서 export 한 보안/정확성/인코딩-핵심 함수를 실제 호출해 무결성 확인.
 //   사용자/CI 가 "내 leerness 가 정상인가?" 를 1초 내 검증 (npm 캐시 손상/부분 설치 감지).
@@ -4792,10 +4814,9 @@ function _selfTestCases() {
         // 1.36.84 (검수 M4): **en 분기 기본값**도 따로 검사 — ko 만 보면 en 기본값을 ''로 없애도 통과했다(실측).
         let _enOk = false;
         //   언어는 수동 파일이 아니라 실제 init(--language en)으로만 확정된다(수동 .harness/LANGUAGE·manifest 로는 미적용 — 실측).
-        const _te = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_dwen_'));
+        const _te = _selftestFixture('en');   // 1.36.85: 공유 en 픽스처
         try {
-          cp.spawnSync(process.execPath, [__filename, 'init', _te, '--yes', '--no-env', '--no-stale-check', '--language', 'en'],
-            { encoding: 'utf8', timeout: 90000, maxBuffer: 8 * 1024 * 1024 });
+          if (!_te) { _enOk = false; throw new Error('fixture'); }
           const _re = cp.spawnSync(process.execPath, [__filename, 'plan', 'add', 'EN default guard', '--path', _te, '--json'],
             { cwd: _te, encoding: 'utf8', timeout: 60000, maxBuffer: 8 * 1024 * 1024 });
           _enOk = _re.status === 0 && /^Done-When: \(unset\)[ \t]*$/m.test(read(planPath(_te)).replace(/\r\n/g, '\n'));
@@ -5053,6 +5074,44 @@ function _selfTestCases() {
         && src.includes("failJson(has('--json'), 'task_not_found'")
         && src.includes("failJson(has('--json'), 'rule_not_found'");
       return restoreOk && planOk && fileReOk && analyzersOk && archiveOk && jsonOk;
+    } },
+    { name: 'brainstorm 줄번호 정확성 + 두 경로 동등 (1.36.85): 동일 내용 블록이 각자 위치로 보고 · 사람용/--json 일치 (행위)', run: () => {
+      // 사고: 줄번호를 `text.indexOf(block)` 로 구해, 내용이 같은 블록이 둘이면 **둘 다 첫 번째 줄번호**를 보고했다.
+      //   (실측: 3행·10행의 동일 lesson 블록이 둘 다 line=3). 오프셋 누적으로 교체하며 이 가드를 세운다.
+      // 함께 잡는 것: 이 수정 중 `_blocksWithOffset` import 를 빠뜨려 brainstorm 이 통째로 죽었는데도
+      //   selftest 338/338 이 초록이었다 — 실행 경로가 어떤 케이스에도 없었다. 그래서 **실제 명령**을 돌린다.
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_bsline_'));
+      try {
+        mkdirp(path.join(d, '.harness'));
+        writeUtf8(path.join(d, '.harness', 'HARNESS_VERSION'), VERSION);
+        // (검수 1.36.85 M3) 1차판은 "서로 다르고 양수" 만 봐서, `_lineOfOffset` 을 `offset + 1` 로 바꿔
+        //   엉뚱한 값이 나와도 통과했다(실측). **정확한 줄번호**를 단언한다.
+        const KW = 'zzq' + 'unique';
+        // 3행과 10행에 동일 내용 블록(사이에 다른 블록) — 기대 line = [3, 10]
+        writeUtf8(path.join(d, '.harness', 'lessons.md'),
+          `# Lessons\n\n### 2026-01-01\n- Lesson: ${KW} 교훈\n- Tag: t\n\n### 2026-02-02\n- Lesson: 사이에 낀 다른 것\n\n### 2026-01-01\n- Lesson: ${KW} 교훈\n- Tag: t\n`);
+        // 같은 제목의 decision 도 3행·10행 — findIndex 기반 오보(검수 M1) 회귀 차단.
+        //   **코드펜스 블록을 앞에 둔다**: decision 추출은 펜스를 길이 보존 마스킹으로 제외하는데,
+        //   길이가 바뀌는 방식(삭제)으로 되돌리면 이후 모든 오프셋이 밀린다 — 펜스가 없는 픽스처로는 그 회귀를 못 잡는다.
+        const _fence = String.fromCharCode(96).repeat(3);
+        writeUtf8(path.join(d, '.harness', 'decisions.md'),
+          `# Decisions\n\n${_fence}md\n### 2099-12-31 — 펜스 안 예시(집계 제외)\n${_fence}\n\n### 2026-01-01 — ${KW} 결정\n- Decision: ${KW} 채택\n- Reason: r\n\n### 2026-02-02 — 다른 결정\n- Decision: x\n\n### 2026-01-01 — ${KW} 결정\n- Decision: ${KW} 채택\n- Reason: r\n`);
+        const _run = (a) => cp.spawnSync(process.execPath, [__filename, ...a, '--path', d],
+          { encoding: 'utf8', timeout: 90000, maxBuffer: 16 * 1024 * 1024 });
+        const rj = _run(['brainstorm', KW, '--json']);
+        if (rj.status !== 0) return false;                       // 명령 자체가 죽으면 실패(위 사고 재발 차단)
+        const j = JSON.parse(rj.stdout.slice(rj.stdout.indexOf('{')));
+        const _lines = (arr) => (arr || []).map(x => x.line);
+        const lessonsOk = JSON.stringify(_lines(j.hits && j.hits.lessonsExplicit)) === '[3,10]';
+        const decisionsOk = JSON.stringify(_lines(j.hits && j.hits.decisions)) === '[7,14]';
+        // 사람용 경로는 별도 구현이라 같은 입력에 같은 건수 + 같은 줄번호를 내야 한다(중복 구현 드리프트 가드)
+        const rh = _run(['brainstorm', KW]);
+        const ht = rh.stdout || '';
+        const humanOk = rh.status === 0 && /관련 lessons \(2\)/.test(ht) && /관련 결정 \(2\)/.test(ht)
+          && /lessons\.md:3\b/.test(ht) && /lessons\.md:10\b/.test(ht)
+          && /decisions\.md:7\b/.test(ht) && /decisions\.md:14\b/.test(ht);
+        return lessonsOk && decisionsOk && humanOk;
+      } catch { return false; } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
     } },
     { name: '자기소스 검사 동결 (1.36.84): selftest 가 자기 소스를 읽어 검증하는 케이스는 더 늘지 않는다 — 신규는 행위검사로 (메타가드)', run: () => {
       // 왜 "탐지"가 아니라 "동결"인가:
@@ -5377,9 +5436,9 @@ function _selfTestCases() {
       //   → 실제 CLI 를 en 으로 돌려 헤딩이 영어로 렌더되는지 **행위**로 확인하고, ko 보존은 소스로 확인한다.
       let en = false;
       {
-        const _ed = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_en3_'));
+        const _ed = _selftestFixture('en');   // 1.36.85: init spawn(1.3s) 대신 공유 픽스처 복사(78ms)
         try {
-          cp.spawnSync(process.execPath, [__filename, 'init', _ed, '--yes', '--no-env', '--no-stale-check', '--language', 'en'], { encoding: 'utf8', timeout: 90000 });
+          if (!_ed) return false;             // 픽스처 준비 실패는 조용히 통과시키지 않는다
           cp.spawnSync(process.execPath, [__filename, 'task', 'add', 'probe', '--path', _ed], { encoding: 'utf8', timeout: 60000 });
           const _md = read(path.join(_ed, '.harness', 'progress-tracker.md'));
           const _tid = [...String(_md).matchAll(/\|\s*(T-\d{4})\s*\|/g)].map(m => m[1]).pop();
@@ -16270,11 +16329,10 @@ function _brainstormFor(root, topic) {
   const hits = { decisions: [], skills: [], tasks: [], rules: [], evidence: [], lessons: [], code: [], skillHistory: [], taskLogFails: [], lessonsExplicit: [], planMilestones: [] };
   const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
   const decLines = dec.split('\n');
-  for (const b of _extractDecisionBlocks(dec)) {
+  for (const { block: b, line: _dln } of _decisionBlocksWithOffset(dec)) {
     if (matches(b)) {
       const t = (b.match(/^### (.+)$/m) || [, ''])[1];
-      const lineIdx = decLines.findIndex(line => line === `### ${t}`);
-      const lineNo = lineIdx >= 0 ? lineIdx + 1 : 0;
+      const lineNo = _dln;
       hits.decisions.push({ title: t, preview: b.slice(0, 200).replace(/\n+/g, ' '), line: lineNo });
     }
   }
@@ -16313,12 +16371,11 @@ function _brainstormFor(root, topic) {
     }
   }
   const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
-  for (const block of ev.split(/\n(?=## )/)) {
+  for (const { block: block, line: _ln } of _blocksWithOffset(ev, /\n(?=## )/)) {
     if (!block.startsWith('## ')) continue;
     if (matches(block)) {
       const t = (block.match(/^## (.+)$/m) || [, ''])[1];
-      const idx = ev.indexOf(block);
-      const lineNo = idx >= 0 ? ev.slice(0, idx).split('\n').length : 0;
+      const lineNo = _ln;
       hits.evidence.push({ title: t.trim(), preview: block.slice(0, 200).replace(/\n+/g, ' '), line: lineNo });
       if (/✗|fail|롤백|incomplete|버그/i.test(block)) hits.lessons.push({ title: t.trim(), line: lineNo });
     }
@@ -16327,12 +16384,11 @@ function _brainstormFor(root, topic) {
   const histPath = path.join(root, '.harness', 'skill-suggestions.md');
   if (exists(histPath)) {
     const histTxt = read(histPath);
-    for (const block of histTxt.split(/\n(?=## )/)) {
+    for (const { block: block, line: _ln } of _blocksWithOffset(histTxt, /\n(?=## )/)) {
       if (!block.startsWith('## ')) continue;
       const h = block.match(/^## ([\d-]+ [\d:]+) — query "([^"]+)"/);
       if (h && matches(block)) {
-        const idx = histTxt.indexOf(block);
-        const lineNo = idx >= 0 ? histTxt.slice(0, idx).split('\n').length : 0;
+        const lineNo = _ln;
         hits.skillHistory.push({ at: h[1], query: h[2], preview: block.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
       }
     }
@@ -16341,12 +16397,11 @@ function _brainstormFor(root, topic) {
   const lp_brainstorm = lessonsPath(root);
   if (exists(lp_brainstorm)) {
     const lessonsText = read(lp_brainstorm);
-    for (const block of lessonsText.split(/\n(?=### )/)) {
+    for (const { block: block, line: _ln } of _blocksWithOffset(lessonsText, /\n(?=### )/)) {
       if (!block.startsWith('### ')) continue;
       const lessonMatch = block.match(/- Lesson:[ \t]*(.+)/);
       if (lessonMatch && matches(block)) {
-        const idx = lessonsText.indexOf(block);
-        const lineNo = idx >= 0 ? lessonsText.slice(0, idx).split('\n').length : 0;
+        const lineNo = _ln;
         hits.lessonsExplicit.push({ title: lessonMatch[1].trim().slice(0, 120), preview: block.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
       }
     }
@@ -16355,12 +16410,11 @@ function _brainstormFor(root, topic) {
   const planFile_brainstorm = planPath(root);
   if (exists(planFile_brainstorm)) {
     const planText = read(planFile_brainstorm);
-    const milestoneBlocks = planText.split(/\n(?=### M-\d{4,}\.)/);
-    for (const b of milestoneBlocks) {
+    const milestoneBlocks = _blocksWithOffset(planText, /\n(?=### M-\d{4,}\.)/);
+    for (const { block: b, line: _ln } of milestoneBlocks) {
       const m = b.match(/^### (M-\d{4,})\.[ \t]*(.+?)$/m);
       if (m && matches(b)) {
-        const idx = planText.indexOf(b);
-        const lineNo = idx >= 0 ? planText.slice(0, idx).split('\n').length : 0;
+        const lineNo = _ln;
         hits.planMilestones.push({ id: m[1], title: m[2].trim().slice(0, 120), preview: b.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
       }
     }
@@ -16389,14 +16443,13 @@ function _brainstormFor(root, topic) {
     const fp = path.join(root, '.harness', src.file);
     if (!exists(fp)) continue;
     const txt = read(fp);
-    const blocks = txt.split(/\n(?=## 제거 )/);
-    for (const b of blocks) {
+    const blocks = _blocksWithOffset(txt, /\n(?=## 제거 )/);
+    for (const { block: b, line: _ln } of blocks) {
       const m = b.match(/^## 제거 (\d{4}-\d{2}-\d{2})\s*\(target:\s*"([^"]*)"\)/);
       if (!m) continue;
       if (matches(b)) {
         const headerMatch = b.match(/^### (.+)$/m);
-        const idx = txt.indexOf(b);
-        const lineNo = idx >= 0 ? txt.slice(0, idx).split('\n').length : 0;
+        const lineNo = _ln;
         hits.archive[src.key].push({
           date: m[1],
           target: m[2],
@@ -16517,11 +16570,10 @@ function brainstormCmd(root, topic) {
   // decisions (1.9.14: 코드블록/Template 제외, 1.9.15: 라인 번호)
   const dec = exists(decisionsPath(root)) ? read(decisionsPath(root)) : '';
   const decLines = dec.split('\n');
-  for (const b of _extractDecisionBlocks(dec)) {
+  for (const { block: b, line: _dln } of _decisionBlocksWithOffset(dec)) {
     if (matches(b)) {
       const t = (b.match(/^### (.+)$/m) || [, ''])[1];
-      const lineIdx = decLines.findIndex(line => line === `### ${t}`);
-      const lineNo = lineIdx >= 0 ? lineIdx + 1 : 0;
+      const lineNo = _dln;
       hits.decisions.push({ title: t, preview: b.slice(0, 200).replace(/\n+/g, ' '), line: lineNo });
     }
   }
@@ -16565,12 +16617,11 @@ function brainstormCmd(root, topic) {
   }
   // evidence — lessons 키워드 (fail/롤백/incomplete) 동반 (1.9.15: 라인 번호)
   const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
-  for (const block of ev.split(/\n(?=## )/)) {
+  for (const { block: block, line: _ln } of _blocksWithOffset(ev, /\n(?=## )/)) {
     if (!block.startsWith('## ')) continue;
     if (matches(block)) {
       const t = (block.match(/^## (.+)$/m) || [, ''])[1];
-      const idx = ev.indexOf(block);
-      const lineNo = idx >= 0 ? ev.slice(0, idx).split('\n').length : 0;
+      const lineNo = _ln;
       hits.evidence.push({ title: t.trim(), preview: block.slice(0, 200).replace(/\n+/g, ' '), line: lineNo });
       if (/✗|fail|롤백|incomplete|버그/i.test(block)) hits.lessons.push({ title: t.trim(), line: lineNo });
     }
@@ -16580,12 +16631,11 @@ function brainstormCmd(root, topic) {
   if (exists(histPath)) {
     const histTxt = read(histPath);
     let pos = 0;
-    for (const block of histTxt.split(/\n(?=## )/)) {
+    for (const { block: block, line: _ln } of _blocksWithOffset(histTxt, /\n(?=## )/)) {
       if (!block.startsWith('## ')) { pos += block.length + 1; continue; }
       const h = block.match(/^## ([\d-]+ [\d:]+) — query "([^"]+)"/);
       if (h && matches(block)) {
-        const idx = histTxt.indexOf(block);
-        const lineNo = idx >= 0 ? histTxt.slice(0, idx).split('\n').length : 0;
+        const lineNo = _ln;
         hits.skillHistory.push({ at: h[1], query: h[2], preview: block.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
       }
     }
@@ -16613,14 +16663,13 @@ function brainstormCmd(root, topic) {
     const fp = path.join(root, '.harness', src.file);
     if (!exists(fp)) continue;
     const txt = read(fp);
-    const blocks = txt.split(/\n(?=## 제거 )/);
-    for (const b of blocks) {
+    const blocks = _blocksWithOffset(txt, /\n(?=## 제거 )/);
+    for (const { block: b, line: _ln } of blocks) {
       const m = b.match(/^## 제거 (\d{4}-\d{2}-\d{2})\s*\(target:\s*"([^"]*)"\)/);
       if (!m) continue;
       if (matches(b)) {
         const headerMatch = b.match(/^### (.+)$/m);
-        const idx = txt.indexOf(b);
-        const lineNo = idx >= 0 ? txt.slice(0, idx).split('\n').length : 0;
+        const lineNo = _ln;
         hits.archive[src.key].push({
           date: m[1],
           target: m[2],
@@ -16637,12 +16686,11 @@ function brainstormCmd(root, topic) {
   const lp_b2 = lessonsPath(root);
   if (exists(lp_b2)) {
     const lessonsText = read(lp_b2);
-    for (const block of lessonsText.split(/\n(?=### )/)) {
+    for (const { block: block, line: _ln } of _blocksWithOffset(lessonsText, /\n(?=### )/)) {
       if (!block.startsWith('### ')) continue;
       const lessonMatch = block.match(/- Lesson:[ \t]*(.+)/);
       if (lessonMatch && matches(block)) {
-        const idx = lessonsText.indexOf(block);
-        const lineNo = idx >= 0 ? lessonsText.slice(0, idx).split('\n').length : 0;
+        const lineNo = _ln;
         hits.lessonsExplicit.push({ title: lessonMatch[1].trim().slice(0, 120), preview: block.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
       }
     }
@@ -16650,12 +16698,11 @@ function brainstormCmd(root, topic) {
   const planFile_b2 = planPath(root);
   if (exists(planFile_b2)) {
     const planText = read(planFile_b2);
-    const milestoneBlocks = planText.split(/\n(?=### M-\d{4,}\.)/);
-    for (const b of milestoneBlocks) {
+    const milestoneBlocks = _blocksWithOffset(planText, /\n(?=### M-\d{4,}\.)/);
+    for (const { block: b, line: _ln } of milestoneBlocks) {
       const m = b.match(/^### (M-\d{4,})\.[ \t]*(.+?)$/m);
       if (m && matches(b)) {
-        const idx = planText.indexOf(b);
-        const lineNo = idx >= 0 ? planText.slice(0, idx).split('\n').length : 0;
+        const lineNo = _ln;
         hits.planMilestones.push({ id: m[1], title: m[2].trim().slice(0, 120), preview: b.slice(0, 220).replace(/\n+/g, ' '), line: lineNo });
       }
     }

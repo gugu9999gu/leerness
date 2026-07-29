@@ -4633,7 +4633,10 @@ total++;
   let ok = false;
   try {
     const ni = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noinit-'));  // .harness 없는 비초기화 dir
-    const sr = cp.spawnSync(process.execPath, [CLI, 'selftest'], { cwd: ni, encoding: 'utf8', timeout: 30000 });
+    // 1.36.85: selftest 가 소스문자열 검사 → **행위 검사**로 바뀌며 4초대 → 약 13초가 됐다(CLI spawn 비용).
+    //   30s 는 4초 시절 기준이라 전체 e2e 부하에서 타임아웃으로 터졌다(격리 재현 3/3 통과 = 검사 자체는 정상).
+    //   여유를 넉넉히 준다 — 이 블록이 재는 것은 "비초기화 dir 에서도 통과하는가"이지 속도가 아니다.
+    const sr = cp.spawnSync(process.execPath, [CLI, 'selftest'], { cwd: ni, encoding: 'utf8', timeout: 180000 });
     const sout = (sr.stdout || '') + (sr.stderr || '');
     const selftestOk = sr.status === 0 && /전체 \d+건 통과/.test(sout) && !/설치 손상/.test(sout);
     const dr = cp.spawnSync(process.execPath, [CLI, 'doctor'], { cwd: ni, encoding: 'utf8', timeout: 30000 });
@@ -5046,7 +5049,8 @@ total++;
 {
   let ok = false;
   try {
-    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { encoding: 'utf8', timeout: 30000 });
+    // 1.36.85: 행위검사 전환으로 selftest 약 13s — 4초 시절 기준 30s 는 전체 부하에서 터진다.
+    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { encoding: 'utf8', timeout: 180000 });
     const j = JSON.parse(r.stdout);
     ok = j.ok === true && j.pass === j.total && j.fail === 0 && j.total >= 112 && r.status === 0;
   } catch {}
