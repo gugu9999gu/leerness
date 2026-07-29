@@ -7707,6 +7707,116 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.89 (P-0007, 사용자 승인 범위=제안+확인후실행): agents route 난이도 라우팅.
+//   판별 케이스를 함께 넣는다 — 거부 사유(code)까지 단언하지 않으면 여러 거부 조건이 서로를 가려
+//   하나를 죽여도 다른 하나가 막는다(1.36.88 에서 변이 6/8 로 실측한 함정).
+total++;
+{
+  let ok = false;
+  const _d = [];
+  const R = (args, cwd) => { const r = cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 120000, cwd }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
+  const J = (x) => { try { return JSON.parse(x.o.slice(x.o.indexOf('{'))); } catch { return null; } };
+  let C1 = false, C2 = false, C3 = false, C4 = false, D1 = false, D2 = false, D3 = false, D4 = false, D5 = false, H1 = false, H2 = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-route-')); _d.push(d);
+    R(['init', d, '--yes', '--language', 'ko', '--no-stale-check']);
+    const cls = (t, extra = []) => J(R(['agents', 'route', t, '--path', d, '--json', ...extra]));
+    // 분류: 고위험 도메인 · 고위험+초소형 충돌은 보수적으로 high-risk · 초소형 · 근거부족은 normal(과소평가 금지)
+    C1 = (cls('결제 환불 로직 수정') || {}).tier === 'high-risk'
+      // codex 28차 #5: 영문 어간(authentication/authorization/permissions/concurrency/idempotency)이
+      //   뒤쪽 \b 때문에 전부 빠져나가 **tiny 로 떨어졌다**(실측). 한글 케이스만 보면 놓친다.
+      && ['fix typo in authentication middleware', 'fix typo in authorization permissions',
+          'fix typo in concurrency and idempotency control'].every(t => (cls(t) || {}).tier === 'high-risk')
+      // 오탐 대조군: author 는 auth 가 아니고, tokenizer 는 token 이 아니다(과대escalation 방지)
+      && (cls('fix typo in author bio css') || {}).tier === 'tiny';
+    const conf = cls('인증 문서 오타 수정') || {};
+    C2 = conf.tier === 'high-risk' && conf.conflict === true && conf.confidence === 'low';
+    C3 = (cls('버튼 여백 4px 조정') || {}).tier === 'tiny'
+      // codex 28차 #4: tiny 키워드 하나로 거대 작업이 tiny 가 됐다 — 광범위 신호/긴 설명은 tiny 가 아니다
+      && (cls('Rewrite the entire compiler, replace the storage engine, and also fix one typo') || {}).tier === 'normal'
+      && (cls('전체 아키텍처를 갈아엎고 저장 엔진을 교체하고 오타도 수정') || {}).tier === 'normal';
+    const weak = cls('x') || {};
+    C4 = weak.tier === 'normal' && weak.confidence === 'low'   // tiny 로 내려가면 안 된다
+      // codex 28차 #3: --tier 를 주면 빈 작업이 통과했다 — 어떤 경로로도 빈 작업은 받지 않는다
+      && /"code":\s*"empty_task"/.test(R(['agents', 'route', '--tier', 'tiny', '--path', d, '--json']).o);
+    // 사용자 명시 우선 + 잘못된 값 거부
+    const dec = cls('결제 로직 오타', ['--tier', 'tiny']) || {};
+    // 잘못된 --tier 는 **사유(code)까지** 단언한다 — exit 1 만 보면 검증을 없앴을 때 나는 크래시(TIER_ROLES 미정의)와
+    //   구분되지 않아, 검증 제거 변이가 그대로 통과했다(실측 M7 생존).
+    const badTier = R(['agents', 'route', 'x', '--tier', 'huge', '--path', d, '--json']);
+    D1 = dec.tier === 'tiny' && dec.confidence === 'declared' && (dec.reasons || []).some(r => /의도한 것인지/.test(r))
+      && badTier.s === 1 && /"code":\s*"invalid_tier"/.test(badTier.o);
+    // 토글 OFF → dispatch 거부 (사유까지)
+    const off = R(['agents', 'route', '주문 필터 추가', '--confirm', '--path', d, '--json']);
+    D2 = off.s === 1 && /"routing_disabled"/.test(off.o);
+    // 토글 ON + 역할 미설정 → 거부 (판별: 토글 거부와 다른 사유여야)
+    R(['toggle', 'set', 'difficulty-routing', 'on', '--path', d]);
+    const nr = R(['agents', 'route', '주문 필터 추가', '--confirm', '--path', d, '--json']);
+    D3 = nr.s === 1 && /"role_unresolved"/.test(nr.o) && !/"routing_disabled"/.test(nr.o);
+    // 역할 설정 후 normal 은 실행 확정
+    R(['roles', 'set', 'commander', '--provider', 'claude', '--path', d]);
+    R(['roles', 'set', 'coder', '--provider', 'codex', '--path', d]);
+    R(['roles', 'set', 'reviewer', '--provider', 'claude', '--path', d]);
+    const okd = J(R(['agents', 'route', '주문 필터 추가', '--confirm', '--path', d, '--json'])) || {};
+    D4 = okd.confirmed === true && okd.plan && okd.plan.reviewerIndependent === true;
+    // 고위험: 승인자 없으면 fail-closed (판별: 역할은 다 설정된 상태여야 role_unresolved 가 아님이 증명된다)
+    R(['roles', 'set', 'architect', '--provider', 'codex', '--path', d]);
+    const hr = R(['agents', 'route', '결제 환불 로직 수정', '--confirm', '--path', d, '--json']);
+    H1 = hr.s === 1 && /"human_approval_required"/.test(hr.o) && !/"role_unresolved"/.test(hr.o);
+    const hr2 = J(R(['agents', 'route', '결제 환불 로직 수정', '--confirm', '--approved-by', '승인자', '--path', d, '--json'])) || {};
+    D5 = hr2.confirmed === true;
+    // 독립성: 구현자와 검수자가 같은 provider 면 고위험은 거부 (승인자가 있는데도 막혀야 한다 = 판별)
+    R(['roles', 'set', 'reviewer', '--provider', 'codex', '--path', d]);
+    const dep = R(['agents', 'route', '결제 환불 로직 수정', '--confirm', '--approved-by', '승인자', '--path', d, '--json']);
+    H2 = dep.s === 1 && /"reviewer_not_independent"/.test(dep.o) && !/"human_approval_required"/.test(dep.o);
+    // codex 28차 #6: 손으로 편집한 역할 설정의 **빈 provider** 가 "해석됨"으로 통과했다 —
+    //   `roles set` 은 빈 값을 안 받으므로 이 상태는 파일 편집으로만 생긴다. 그래서 파일을 직접 만들어 검증한다.
+    const rolesFile = path.join(d, '.harness', 'agent-roles.json');
+    const savedRoles = fs.existsSync(rolesFile) ? fs.readFileSync(rolesFile, 'utf8') : null;
+    //   스키마는 `{roles:{...}}` 다 — 최상위에 쓰면 _loadRoles 가 {} 를 돌려줘 "역할 없음"으로 통과하고,
+    //   빈 provider 를 검증한 것이 아니라 **셋업 실패를 통과로 읽는다**(실측으로 잡았다).
+    fs.writeFileSync(rolesFile, JSON.stringify({ schemaVersion: 1, roles: { coder: { provider: '   ' } } }));
+    const emptyProv = R(['agents', 'route', '버튼 여백 4px 조정', '--confirm', '--path', d, '--json']);
+    const emptyProvJ = J(emptyProv) || {};
+    // 셋업이 유효했는지 함께 단언: coder 가 실제로 목록에 있어야 한다(없으면 다른 이유로 막힌 것)
+    const emptyProvOk = emptyProv.s === 1 && /"role_unresolved"/.test(emptyProv.o)
+      && ((emptyProvJ.plan || {}).assignments || []).some(a => a.role === 'coder' && a.resolved === false);
+    if (savedRoles !== null) fs.writeFileSync(rolesFile, savedRoles); else fs.rmSync(rolesFile, { force: true });
+    // 감사 기록 — codex 28차 #10: 종전엔 `total >= 8` 만 봐서 **전 항목이 {} 여도 통과**했다. 내용을 본다.
+    const lg = J(R(['agents', 'route', '--log', '--path', d, '--json'])) || {};
+    const ents = lg.entries || [];
+    const auditOk = (lg.total || 0) >= 8
+      && ents.some(e => e.tier === 'high-risk' && e.confirmed === true && e.approvedBy === '승인자'
+        && Array.isArray(e.assignments) && e.assignments.some(a => a.role === 'coder' && a.provider)
+        && Array.isArray(e.signals) && e.signals.some(s => /^high-risk:/.test(s)))
+      && ents.some(e => e.confirmed === false && Array.isArray(e.refusals) && e.refusals.length > 0);   // 거부된 시도도 남는다
+    // 손상 감사로그를 조용히 덮어쓰지 않는다(codex 28차 #8)
+    const lp = path.join(d, '.harness', 'routing-log.json');
+    const savedLog = fs.readFileSync(lp, 'utf8');
+    fs.writeFileSync(lp, '{"소중한":"기록"}');
+    R(['agents', 'route', '무해한 조회', '--path', d]);
+    const auditPreserved = fs.readFileSync(lp, 'utf8') === '{"소중한":"기록"}';
+    fs.writeFileSync(lp, savedLog);
+    // 정직성: 하지 않은 확인을 했다고 말하지 않고, 실행하지 않는다는 사실을 사람용·JSON·--log 모두에서 말한다
+    const human = R(['agents', 'route', '주문 필터', '--path', d]).o;
+    const logHuman = R(['agents', 'route', '--log', '--path', d]).o;
+    const cj = J(R(['agents', 'route', '주문 필터 추가', '--confirm', '--path', d, '--json'])) || {};
+    const honestOk = /확인하지 않았습니다/.test(human) && /측정값이 아닙니다/.test(human)
+      && !/설치·활성 여부만 확인/.test(human)                       // 하지 않은 확인을 했다고 말하던 옛 문구
+      && /확인하지 않았습니다/.test(logHuman) && /외부 CLI 를 실행하지 않습니다/.test(logHuman)
+      && cj.executed === false && typeof cj.confirmed === 'boolean' && !('dispatched' in cj)
+      && /외부 CLI 를 실행하지 않습니다/.test(JSON.stringify(cj));
+    // 모델명 비하드코딩 — 정책 모듈에 벤더 모델 id 가 있으면 안 된다(몇 달이면 낡는다)
+    //   경로는 CLI 기준으로 잡는다 — 검사 대상이 "지금 실행 중인 그 설치본"이어야 한다(__dirname 은 실행 위치에 따라 어긋난다).
+    const srcOk = !/(claude-(opus|sonnet|haiku)|gpt-[45]|o[34]-mini|gemini-)/i.test(fs.readFileSync(path.join(path.dirname(CLI), '..', 'lib', 'routing.js'), 'utf8'));
+    ok = C1 && C2 && C3 && C4 && D1 && D2 && D3 && D4 && D5 && H1 && H2 && auditOk && auditPreserved && honestOk && srcOk && emptyProvOk;
+    if (!ok) console.log(`   [route 디버그] C1=${C1} C2=${C2} C3=${C3} C4=${C4} D1=${D1} OFF거부=${D2} 역할미설정거부=${D3} normal실행=${D4} 고위험실행=${D5} 승인필요=${H1} 독립성=${H2} 감사=${auditOk} 손상보존=${auditPreserved} 정직=${honestOk} 소스=${srcOk} 빈provider=${emptyProvOk} log=${lg.total}`);
+  } catch (e) { console.log('   [route 디버그] 예외: ' + ((e && e.message) || e)); }
+  finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.89) agents route 난이도 라우팅: 결정적 분류(충돌시 보수적·근거부족시 normal) · 토글OFF/역할미설정/사람승인/검수독립성 4중 fail-closed · 감사기록 · 모델명 비하드코딩 · 미검증 고지' : '✗ agents route 라우팅 실패');
+  if (!ok) failed++;
+}
+
 // 1.36.76 (9차 헌트 이월 3건 종결): 손상 아카이브 복원 거부 · MCP read-only 무변형 · 긴 파생 id 안전화
 total++;
 {

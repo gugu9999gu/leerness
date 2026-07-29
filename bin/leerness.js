@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.88';
+const VERSION = '1.36.89';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7471,6 +7471,7 @@ function commandsCmd(root) {
       { cmd: 'integrity check [--repair] [--json]', desc: 'managed 정책-문서 12종 무결성(부재/H1 상실/절단) 점검 — --repair: archive 대피 후 템플릿 재생성 — 1.36.57 감사 F-04' },
       { cmd: 'referee add|verify|list|show|drop', desc: '검증기 캘리브레이션 — 신뢰 전에 탐지력 증명(known-good 통과 + 망가뜨린 known-bad 를 기대 사유로 거부). verify-claim --referee / gate 게이팅 — 1.36.80 P-0001' },
       { cmd: 'preview add|list|show|approve|revise|mockup', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약. mockup <P-ID> [--force]: 자립형 HTML 디자인 시안 스캐폴드 · add --mockup <파일>: 기존 시안 첨부 — 1.36.51 UR-0061 · 1.36.75 UR-0066' },
+      { cmd: 'agents route "<작업>" [--tier tiny|normal|high-risk] [--confirm --approved-by "<승인자>"] [--log]', desc: '작업 난이도 판정(결정적 규칙) → 추상 역할(architect/commander/coder/reviewer) 배치 제안. 모델명 하드코딩 없이 `roles set` 매핑을 쓰고, 실행은 명시 확인 필요. 토글 기본 OFF: leerness toggle set difficulty-routing on — 1.36.89 P-0007' },
       { cmd: 'bugfix start|receipt|drop|list', desc: 'bugfix 완료 영수증 — 수정 전 재현 probe 를 등록(2회 연속 실패해야 등록)하고, done 전이에서 통과 + 근본원인/형제범위 영수증을 요구. 토글 기본 OFF: leerness toggle set bugfix-receipt on — 1.36.87 P-0005' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
       { cmd: 'brainstorm "<topic>" [--include-code]', desc: '워크스페이스 회수 + 코드 grep' }
@@ -24046,6 +24047,18 @@ async function main() {
   if (cmd === 'honesty-check') return honestyCheckCmd(arg('--path', process.cwd()), args[1]);
   if (cmd === 'persona') return personaCmd(arg('--path', process.cwd()), args[1], args[2]);
   if (cmd === 'review') return reviewCmd(arg('--path', process.cwd()), args[1]);
+  // 1.36.89 (P-0007): agents route — 난이도 판정 + 추상 역할 배치 제안. `agents recommend|dispatch` 와 같은 집에 둔다.
+  //   (최상위 `route` 는 이미 컨텍스트 라우팅 명령이라 가리면 안 된다 — 실측으로 확인하고 이름을 옮겼다.)
+  //   값 플래그가 positional 로 새지 않게 원시 argv 파싱(referee/preview/bugfix 와 동일 패턴).
+  if (cmd === 'agents' && args[1] === 'route') {
+    const _rtRaw = process.argv.slice(2); const _rtI = _rtRaw.indexOf('route'); const _rtToks = [];
+    for (let i = _rtI + 1; i < _rtRaw.length && _rtI >= 0; i++) {
+      if (_rtRaw[i].startsWith('--')) { if (['--tier', '--approved-by', '--path'].includes(_rtRaw[i]) && _rtRaw[i + 1] && !_rtRaw[i + 1].startsWith('--')) i++; continue; }
+      _rtToks.push(_rtRaw[i]);
+    }
+    return require('../lib/routing').routeCmd(arg('--path', process.cwd()), _rtToks.join(' '),
+      { has, arg, _withLock, _resolveRole, _toggleOn: (r, id) => _tgl.toggleOn(r, id) });
+  }
   if (cmd === 'agents') return agentsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.157: Provider Registry — 사용자 정의 provider 동적 추가
   if (cmd === 'provider') return providerCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
