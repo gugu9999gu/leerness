@@ -2,12 +2,6 @@
   "queue": [
     {
       "icon": "🧬",
-      "title": "stress-v211 마지막 갱신 1226h 전 — 새 stress test 작성 권장",
-      "command": "node _apps/leerness-stress/bin/stress-v212.js",
-      "addedAt": "2026-07-22T11:53:13.854Z"
-    },
-    {
-      "icon": "🧬",
       "title": "stress-v211 마지막 갱신 1227h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js",
       "addedAt": "2026-07-22T13:33:40.254Z"
@@ -119,7 +113,13 @@
       "title": "stress-v211 마지막 갱신 1369h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js",
       "addedAt": "2026-07-28T11:03:26.634Z"
+    },
+    {
+      "icon": "🧬",
+      "title": "stress-v211 마지막 갱신 1373h 전 — 새 stress test 작성 권장",
+      "command": "node _apps/leerness-stress/bin/stress-v212.js",
+      "addedAt": "2026-07-28T15:12:30.486Z"
     }
   ],
-  "at": "2026-07-28T11:03:26.635Z"
+  "at": "2026-07-28T15:12:30.486Z"
 }

@@ -4153,8 +4153,13 @@ total++;
     // 소비 명령 회귀: constraints check (review-request 도 _checkRequestConstraints 사용)
     const cd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-con-'));
     cp.spawnSync(process.execPath, [CLI, 'init', cd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    const cr = cp.spawnSync(process.execPath, [CLI, 'constraints', 'check', 'stripe 결제 구현', '--path', cd], { encoding: 'utf8', timeout: 20000 });
-    const cmdOk = /stripe|플랫폼 매칭/.test(cr.stdout || '');
+    // 1.36.84 (검수 Medium#8): 종전 `/stripe|플랫폼 매칭/.test(cr.stdout)` 는 **exit 를 보지 않아**
+    //   올바른 텍스트를 찍고 exit 1 로 죽어도 통과했다(부분-stdout 정규식 = 실패 무감지).
+    //   → --json 으로 실행해 exit 0 + 에러계약 부재 + 전체 stdout 파싱 + 매칭 결과까지 단언한다.
+    const cr = cp.spawnSync(process.execPath, [CLI, 'constraints', 'check', 'stripe 결제 구현', '--path', cd, '--json'], { encoding: 'utf8', timeout: 20000 });
+    let _cj = null; try { _cj = JSON.parse(cr.stdout || ''); } catch {}
+    const cmdOk = cr.status === 0 && !!_cj && !_cj.error && Array.isArray(_cj.matched)
+      && _cj.matched.length > 0 && _cj.matched[0].platform === 'stripe';
     ok = work && movedOut && cmdOk;
     fs.rmSync(cd, { recursive: true, force: true });
   } catch {}
