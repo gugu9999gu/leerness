@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.93';
+const VERSION = '1.36.94';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -10037,12 +10037,12 @@ function upsertProgress(root, row) {
         code: 'toggles_unreadable',
         message: `toggles.json 을 신뢰할 수 없어(${_why}) 완료 판정을 보류합니다 — 켜 두었던 게이트가 꺼진 채 통과하는 것을 막습니다: ${_tgl._togglesPath(root)}`,
         lines: [`복구: 파일을 고치거나 삭제 후 leerness toggle set <id> on|off 로 다시 설정하세요.`],
-      }, row.id);
+      }, row.id, root);
     }
     if (_tchk.toggles['bugfix-receipt'] === true) {
       const _bfm = require('../lib/bugfix');
       const _r = _bfm.checkDoneTransition(root, row.id);
-      if (_r.blocked) throw new _bfm.BugfixBlocked(_r, row.id);
+      if (_r.blocked) throw new _bfm.BugfixBlocked(_r, row.id, root);
       _lastBugfixLines = _r.lines || null;
     }
   }
@@ -10420,11 +10420,13 @@ function taskUpdate(root, id) {
     _bfLines = _consumeBugfixLines();
   } catch (e) {
     if (!e || e.name !== 'BugfixBlocked') throw e;
-    if (has('--json')) { log(JSON.stringify({ ok: false, code: e.code, id, error: e.message }, null, 2)); }
+    //   1.36.94: 회복 절차를 **평문에만** 넣으면 --json 소비자(스크립트·MCP)는 사유만 받고 빠져나갈 길을 못 받는다.
+    //   같은 문자열을 두 표면이 공유하게 한다(표면마다 따로 만들면 한쪽만 고치는 실패가 되풀이된다).
+    const _rec = (e.lines || []).concat([require('../lib/bugfix').escapeHint(e.code, id, e.root)].filter(Boolean));
+    if (has('--json')) { log(JSON.stringify({ ok: false, code: e.code, id, error: e.message, recovery: _rec }, null, 2)); }
     else {
       fail(`done 보류 — ${e.message}`);
-      (e.lines || []).forEach(l => log('    ' + l));
-      log(`    ⓘ 탈출구: leerness bugfix drop ${id} (probe 등록 취소) · leerness toggle set bugfix-receipt off (프로젝트 정책)`);
+      _rec.forEach(l => log('    ' + l));
     }
     process.exitCode = 1;
     return;
@@ -14993,14 +14995,41 @@ function _allProviders(root) {
     for (const u of userList) {
       if (!u || !u.id) continue;
       // 정상화 — 누락 필드는 빌트인에서 fallback
+      const _bi = EXTERNAL_AGENTS.find(a => a.id === u.id);
+      const _bin = u.bin || u.id;
+      // 1.36.94 (헌트 #16/#21): 정규화가 6개 필드만 복사해 빌트인 `authCheck` 를 **조용히 버렸다** —
+      //   `provider add codex --bin codex`(사실상 무변경 등록) 한 번으로 인증 축이 영원히 unknown 이 되고,
+      //   고위험 fail-closed(provider_not_authenticated)가 경고 없이 꺼졌다(실측: 로그아웃 codex 로 exit 0 확정).
+      //   게다가 UI 는 "등록된 확인 명령 없음"이라고 **단언**했다 — 등록돼 있는데 override 가 떨어뜨린 것이라 거짓이다.
+      //   **같은 bin 일 때만** 빌트인 확인 명령을 물려받는다(다른 실행파일에 남의 하위명령을 쏘면 안 된다).
+      //   사용자 JSON 의 authCheck 는 절대 신뢰하지 않는다(임의 명령 주입 경로) — 빌트인에서만 온다.
+      //   같은 실행파일이면 물려받는다(별칭 정규화) — 다른 실행파일에 남의 하위명령을 쏘지는 않는다.
+      const _inherited = (_bi && _bi.authCheck && _binKey(_bin) === _binKey(_bi.bin)) ? _bi.authCheck : undefined;
+      //   versionArgs 도 **같은 규율**로 다룬다. 종전엔 사용자 값을 그대로 실어 `shell:true` 로 돌렸는데,
+      //   메타문자가 있으면 두 번째 명령이 됐다(실측: `agents list` 한 번으로 마커 파일 생성).
+      //   한때 "플래그만 허용"으로 좁혔다가 되돌렸다 — `kubectl version --client` · `gh copilot --version` ·
+      //   `go version` 처럼 **하위명령이 정상인 CLI** 를 false-BLOCK 해서 설치된 도구를 미설치로 보이게 했다.
+      //   두 번째 명령을 막는 실질 조건은 메타문자 부재이고, bin 은 위 _binSafe 로 따로 잠근다.
+      const _uva = Array.isArray(u.versionArgs) ? u.versionArgs : null;
+      const _uvaOk = !!_uva && _argsSafe(_uva);
+      //   폴백은 **같은 실행파일일 때만** 빌트인 값을 쓴다 — 아니면 남의 하위명령(`gh copilot --version`)을
+      //   엉뚱한 bin 에 쏜다(검수 실측: `kubectl copilot --version`).
+      const _fallbackVa = (_bi && _binKey(_bin) === _binKey(_bi.bin) && _bi.versionArgs) || ['--version'];
+      //   bin 이 명령줄이면 실행 자체를 하지 않는다 — 이 provider 는 '미설치'로 보이고 사유를 말한다.
+      const _binOk = _binSafe(_bin);
       userOverrides.set(u.id, {
         id: u.id,
-        bin: u.bin || u.id,
-        envFlag: u.envFlag || `LEERNESS_ENABLE_${String(u.id).toUpperCase()}`,
-        versionArgs: Array.isArray(u.versionArgs) ? u.versionArgs : ['--version'],
-        desc: u.desc || `(user) ${u.id}`,
-        installHint: u.installHint || '',
-        installCmd: u.installCmd || ''
+        bin: _bin,
+        ...(_binOk ? {} : { binRejectedReason: `providers.json 의 bin 이 실행파일 이름/경로가 아니어서 실행하지 않았습니다(공백·셸 메타문자 불가): ${String(_bin).slice(0, 80)}` }),
+        envFlag: u.envFlag || (_bi && _bi.envFlag) || `LEERNESS_ENABLE_${String(u.id).toUpperCase()}`,
+        versionArgs: _uvaOk ? _uva : _fallbackVa,
+        ...((_uva && !_uvaOk) ? { versionArgsRejectedReason: `providers.json 의 versionArgs 에 셸 메타문자가 있어 실행하지 않았습니다: ${JSON.stringify(_uva).slice(0, 120)}` } : {}),
+        desc: u.desc || (_bi && _bi.desc) || `(user) ${u.id}`,
+        installHint: u.installHint || (_bi && _bi.installHint) || '',
+        installCmd: u.installCmd || (_bi && _bi.installCmd) || '',
+        ...(_inherited ? { authCheck: _inherited } : {}),
+        // 빌트인에 확인 명령이 있는데 bin 을 바꿔 물려받지 못한 경우 — UI 가 사유를 정확히 말할 수 있게 표시한다
+        ...((_bi && _bi.authCheck && !_inherited) ? { authCheckDroppedReason: `override 된 bin(${_bin})이 빌트인(${_bi.bin})과 달라 확인 명령을 물려받지 않았습니다` } : {}),
       });
     }
     // 빌트인 먼저, user override 적용
@@ -15137,14 +15166,22 @@ function providerCmd(root, sub, ...args) {
       let added = 0, updated = 0, skipped = 0;
       for (const e of entries) {
         if (!e.id || !e.bin || !validIdRegex.test(e.id)) { skipped++; continue; }
+        // 1.36.94: **원격 catalog 는 실행 인자를 정하지 못한다.** 여기 저장된 값은 나중에 `agents list/check`
+        //   같은 읽기성 명령에서 `shell:true` 로 실행된다 — 즉 원격 문자열이 곧 로컬 실행이다.
+        //   메타문자만 막는 것으로는 부족하다: `npm exec --yes <패키지>` 처럼 **메타문자 없이도** 임의 코드를
+        //   받아오는 조합이 존재한다. 그래서 versionArgs 는 원격에서 받지 않고 항상 `--version` 으로 고정한다
+        //   (문서화된 catalog 형식은 `id|bin|desc` 이므로 형식 손실도 없다).
+        //   bin 은 형식 검증을 통과한 것만 받는다 — 실행파일 이름/경로가 아니면 그 자체가 명령줄이 된다.
+        if (!_binSafe(e.bin)) { skipped++; log(`  ⚠ ${e.id} 무시 — bin 이 실행파일 이름/경로가 아닙니다: ${String(e.bin).slice(0, 60)}`); continue; }
         const entry = {
           id: e.id,
           bin: e.bin,
           envFlag: e.envFlag || `LEERNESS_ENABLE_${String(e.id).toUpperCase()}`,
-          versionArgs: Array.isArray(e.versionArgs) ? e.versionArgs : (typeof e.versionArgs === 'string' ? e.versionArgs.split(/\s+/) : ['--version']),
+          versionArgs: ['--version'],
           desc: e.desc || `(synced) ${e.id}`,
           installHint: e.installHint || ''
         };
+        if (e.versionArgs) log(`  ⓘ ${e.id}: 원격 versionArgs 는 사용하지 않습니다(--version 고정) — 원격 값이 로컬 실행 인자가 되지 않게 합니다`);
         if (existingIds.has(e.id)) {
           const idx = userList.findIndex(u => u.id === e.id);
           if (!dryRun) userList[idx] = entry;
@@ -15334,12 +15371,47 @@ function _recommendAgent(task) {
   return { target: null, reason: '' };
 }
 
+//   args 는 shell:true 로 실행되므로(윈도우 .cmd 심 해석에 필요) **셸 메타문자가 없어야** 한다.
+//   있으면 인용이 깨져 엉뚱한 실행이 되고(실측: 따옴표 포함 args 가 파싱 실패로 exit 1), 주입 표면도 된다.
+//   1.36.94: 이 술어가 authCheck 안쪽에만 있어서 **바로 위의 versionArgs 는 무방비였다** — providers.json 을
+//   손으로 고치거나 `provider sync` 로 받은 catalog 에 `versionArgs` 를 넣으면 `agents list` 한 번으로
+//   임의 명령·셸 메타문자가 돌았다(실측: 마커 파일 생성 · 별도 프로세스 실행 · exit 0 · 경고 0).
+//   같은 파일에서 실행되는 것은 **전부** 같은 술어를 통과해야 한다(키 하나만 막고 닫혔다고 말하지 않는다).
+function _argsSafe(a) {
+  return Array.isArray(a) && a.length > 0 && a.every(x => typeof x === 'string' && /^[A-Za-z0-9._:@/\\-]+$/.test(x));
+}
+
+//   bin 은 **실행파일 이름/경로**여야 한다 — 명령줄이 아니다. `shell:true` 로 넘기므로 여기에 공백이나
+//   메타문자가 있으면 그 자체가 두 번째 명령이 된다(`cmd /c whoami & rem`). versionArgs 만 막고 닫혔다고
+//   말했던 것이 검수에서 반증됐다: `provider sync` 는 원격 catalog 의 `bin` 을 그대로 저장하고,
+//   그 값은 읽기성 명령인 `agents list/check` 에서 실행된다. 공백을 막는 것은 회귀가 아니다 —
+//   `shell:true` 에서 공백 있는 bin 은 지금도 첫 토큰만 명령으로 해석돼 어차피 동작하지 않는다.
+function _binSafe(b) {
+  return typeof b === 'string' && b.length > 0 && b.length <= 260 && /^[A-Za-z0-9._:@/\\-]+$/.test(b);
+}
+
+//   같은 실행파일을 가리키는 **정상적인 별칭**까지 다른 것으로 보면, 이번에 되살린 인증 차단이
+//   `codex.cmd`·대문자·절대경로 등록만으로 다시 사라진다(검수 실측: Windows 에서 `CODEX --version` 동작).
+//   확장자·대소문자(win32)·디렉토리를 정규화한 **basename** 으로 비교한다.
+function _binKey(b) {
+  let s = String(b || '').replace(/\\/g, '/');
+  s = s.slice(s.lastIndexOf('/') + 1).replace(/\.(exe|cmd|bat|ps1|com)$/i, '');
+  return process.platform === 'win32' ? s.toLowerCase() : s;
+}
+
 function _checkAgent(agent, opts = {}) {
   const enabled = process.env[agent.envFlag] === '1';
   // PATH 존재 확인 (which / where)
   let installed = false, version = null, error = null;
+  //   안전하지 않은 versionArgs 는 **실행하지 않고** 빌트인 기본값으로 되돌린다(거부보다 낫다 — 설치 확인 자체는 해야 한다).
+  const _vaRaw = agent.versionArgs;
+  const _vaSafe = _argsSafe(_vaRaw);
+  const _versionArgs = _vaSafe ? _vaRaw : ['--version'];
+  //   bin 이 실행파일 이름/경로가 아니면 **아무것도 실행하지 않는다** — 여기가 shell:true 명령 위치다.
+  const _binOk = _binSafe(agent.bin);
   try {
-    const r = cp.spawnSync(agent.bin, agent.versionArgs, { encoding: 'utf8', timeout: 5000, shell: true });
+    if (!_binOk) throw new Error('bin 형식 거부');
+    const r = cp.spawnSync(agent.bin, _versionArgs, { encoding: 'utf8', timeout: 5000, shell: true });
     if (r.status === 0 || (r.stdout && r.stdout.trim())) {
       installed = true;
       version = (r.stdout || r.stderr || '').trim().split('\n')[0].slice(0, 80);
@@ -15353,9 +15425,6 @@ function _checkAgent(agent, opts = {}) {
   //   아무것도 증명하지 않는다. 무료·비대화형·부작용 없음이 확인된 authCheck 를 가진 provider 만 실제로 판정하고,
   //   나머지는 'unknown' 으로 **남긴다**(모르는 것을 안다고 말하지 않는다). opts.auth 일 때만 실행 — 지연 비용이 있다.
   let auth = 'unknown', authEvidence = null, authSource = null;
-  //   args 는 shell:true 로 실행되므로(윈도우 .cmd 심 해석에 필요) **셸 메타문자가 없어야** 한다.
-  //   있으면 인용이 깨져 엉뚱한 실행이 되고(실측: 따옴표 포함 args 가 파싱 실패로 exit 1), 주입 표면도 된다.
-  const _argsSafe = (a) => Array.isArray(a) && a.length > 0 && a.every(x => typeof x === 'string' && /^[A-Za-z0-9._:@/\\-]+$/.test(x));
   if (installed && opts.auth && agent.authCheck && _argsSafe(agent.authCheck.args)) {
     authSource = `${agent.bin} ${agent.authCheck.args.join(' ')}`;
     try {
@@ -15391,6 +15460,14 @@ function _checkAgent(agent, opts = {}) {
     id: agent.id, bin: agent.bin, desc: agent.desc, envFlag: agent.envFlag,
     enabled, installed, version, error,
     auth, authEvidence, authSource,
+    //   확인 명령이 없는 사유를 구분해 전달한다 — "원래 없음"과 "override 로 물려받지 못함"은 다른 말이다(헌트 #21).
+    authCheckDroppedReason: agent.authCheckDroppedReason || null,
+    //   조용히 기본값으로 바꾸지 않는다 — 사용자가 적어 둔 값이 무시됐다는 사실을 말해야 고칠 수 있다.
+    //   판정은 _allProviders(단일 병목)에서 내리고, 여기 _argsSafe/_binSafe 는 그 경로를 타지 않는 호출에 대한 2차 방어다.
+    versionArgsRejected: agent.versionArgsRejectedReason
+      || (_vaSafe ? null : `versionArgs 에 셸 메타문자가 있어 실행하지 않았습니다(--version 으로 대체): ${JSON.stringify(_vaRaw)}`),
+    binRejected: agent.binRejectedReason
+      || (_binOk ? null : `bin 이 실행파일 이름/경로가 아니어서 실행하지 않았습니다: ${String(agent.bin).slice(0, 80)}`),
     // 인증까지 확인된 경우에만 'ready' 라고 부르지 않는다 — 기존 status 의미(설치+활성)는 그대로 두고,
     //   인증은 별도 축으로 노출한다. 두 축을 한 단어에 섞으면 무엇이 검증됐는지 알 수 없어진다.
     status: enabled && installed ? 'ready' : !installed ? 'not-installed' : !enabled ? 'disabled' : 'unknown'
@@ -23284,7 +23361,13 @@ function taskSyncCmd(root) {
       }
     } catch (e) {
       if (!e || e.name !== 'BugfixBlocked') throw e;
-      blocked.push({ id: e.taskId, content: String(t.content).slice(0, 60), code: e.code, message: e.message });
+      //   1.36.94: `e.lines`(회복 절차)를 버리면 안 된다 — 종전 sync 는 사유만 담고 빠져나갈 길을 통째로 잃어,
+      //   "틀린 안내"가 "무안내"로 바뀐 회귀였다. task update 와 **같은 문자열**을 갖도록 여기서 조립한다.
+      const _bh = require('../lib/bugfix').escapeHint(e.code, e.taskId, e.root);
+      blocked.push({
+        id: e.taskId, content: String(t.content).slice(0, 60), code: e.code, message: e.message,
+        recovery: (e.lines || []).concat([_bh].filter(Boolean)),
+      });
     }
   }
   if (blocked.length) {
@@ -23295,7 +23378,8 @@ function taskSyncCmd(root) {
     }
     fail(`${blocked.length}건이 bugfix 완료 게이트에 걸려 done 으로 반영되지 않았습니다`);
     blocked.forEach(b => log(`    - ${b.id} ${b.content} — ${b.message}`));
-    log(`    ⓘ 탈출구: leerness bugfix drop <ID> · leerness toggle set bugfix-receipt off (프로젝트 정책)`);
+    //   같은 회복 문장이 여러 건에서 반복되지 않게 중복만 접는다(사유별로 다르면 각각 나온다).
+    blocked.flatMap(b => b.recovery).filter((h, i, a) => h && a.indexOf(h) === i).forEach(h => log(`    ${h}`));
     process.exitCode = 1;
   }
   log(`# leerness task sync (1.9.38)`);
@@ -24662,7 +24746,8 @@ if (require.main === module) {
       //   스택 트레이스 대신 탈출구를 보여준다(막힌 사용자가 빠져나갈 방법을 알아야 한다).
       if (err && err.name === 'BugfixBlocked') {
         (err.lines || []).forEach(l => log('    ' + l));
-        log(`    ⓘ 탈출구: leerness bugfix drop ${err.taskId} (probe 등록 취소) · leerness toggle set bugfix-receipt off (프로젝트 정책)`);
+        const _h = require('../lib/bugfix').escapeHint(err.code, err.taskId, err.root);
+        if (_h) log('    ' + _h);
       }
       process.exit(1);
     });

@@ -8169,6 +8169,264 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.94 (헌트 이월 2건 + 자체 검수 반영): ① 형상 무효 스토어에서 **차단 메시지가 안내한 탈출구가
+//   같은 사유로 거부**돼, 남는 실행 가능한 선택지가 "보호를 끄기" 하나였다.
+//   ② `provider add codex --bin codex` 라는 사실상 무변경 재등록이 빌트인 authCheck 를 지워 인증 축을
+//   unknown 으로 만들고, 고위험 확정의 유일한 인증 차단이 조용히 꺼졌다(실측: exit 0 · confirmed=true).
+//   ①의 1차 수정으로 `drop --force`(손상 파일을 도구가 치움)를 넣었다가 **걷어냈다** — 검수에서 그 한 명령이
+//   데이터 유실 경로 5개를 들여온 것이 실행으로 확인됐다(락 밖 rename 으로 동시 writer 의 정상 스토어 파괴
+//   자연 경합 19.5% · 읽기 실패를 손상으로 오인 · <ID> 무시 전역 삭제 · 되돌릴 수 없는 게이트 무장해제 ·
+//   안내가 --path 를 잃어 애먼 프로젝트 파괴). 손으로 고치는 회복은 그 다섯이 전부 없고 되돌리면 게이트도
+//   살아난다 — 그래서 도구가 할 일은 대신 지워 주는 게 아니라 **어디를 어떻게 고치면 되는지 말하는 것**이다.
+total++;
+{
+  let ok = false;
+  const _d = [];
+  let E1 = false, E2 = false, E3 = false, E4 = false, E5 = false;
+  const dbg = {};
+  try {
+    const isWin = process.platform === 'win32';
+    const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sh94-')); _d.push(shimDir);
+    const pwned = path.join(shimDir, 'PWNED.txt');
+    const metaFile = path.join(shimDir, 'META.txt');
+    //   심은 **판별형**이어야 한다: 모르는 하위명령에는 로그아웃 문구가 아니라 usage 오류를 낸다.
+    //   그러지 않으면 상속 args 를 엉뚱한 값으로 바꾸는 변이가 같은 출력을 내며 통과한다(검수 지적).
+    const codexBody = isWin
+      ? '@echo off\r\nif "%1"=="--version" (echo codex-shim 1.0.0& exit /b 0)\r\nif "%1"=="login" (if "%2"=="status" (echo You are not logged in. Run codex login.& exit /b 1))\r\necho usage: codex [--version^|login status]\r\nexit /b 2\r\n'
+      : '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-shim 1.0.0"; exit 0; fi\nif [ "$1" = "login" ] && [ "$2" = "status" ]; then echo "You are not logged in. Run codex login."; exit 1; fi\necho "usage: codex [--version|login status]"\nexit 2\n';
+    if (isWin) {
+      fs.writeFileSync(path.join(shimDir, 'codex.cmd'), codexBody);
+      fs.writeFileSync(path.join(shimDir, 'claude.cmd'), '@echo off\r\nif "%1"=="--version" (echo claude-shim 1.0.0& exit /b 0)\r\necho ok\r\nexit /b 0\r\n');
+      fs.writeFileSync(path.join(shimDir, 'evil.cmd'), '@echo off\r\nif "%1"=="--version" (echo evil-shim 1.0.0& exit /b 0)\r\n>"' + pwned + '" echo ran\r\nexit /b 0\r\n');
+    } else {
+      const wsh = (n, body) => { const p = path.join(shimDir, n); fs.writeFileSync(p, body); try { fs.chmodSync(p, 0o755); } catch {} };
+      wsh('codex', codexBody);
+      wsh('claude', '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "claude-shim 1.0.0"; exit 0; fi\necho ok\nexit 0\n');
+      wsh('evil', '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "evil-shim 1.0.0"; exit 0; fi\necho ran > "' + pwned + '"\nexit 0\n');
+    }
+    const env = Object.assign({}, process.env, {
+      PATH: shimDir + path.delimiter + process.env.PATH,
+      LEERNESS_ENABLE_CODEX: '1', LEERNESS_ENABLE_CLAUDE: '1', LEERNESS_ENABLE_EVIL: '1',
+    });
+    const RS = (a, o) => { const r = cp.spawnSync(process.execPath, [CLI, ...a], Object.assign({ encoding: 'utf8', timeout: 180000, env }, o || {})); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
+    const JS = (x) => { try { return JSON.parse(x.o.slice(x.o.indexOf('{'))); } catch { return null; } };
+    const CORRUPT = '<<<<<<< HEAD\n[]\n=======\n[{"id":"T-0002"}]\n>>>>>>> branch\n';
+    const hasRecovery = (s) => /bugfix-receipts\.json/.test(s) && /고치|옮기/.test(s);
+
+    // ── E1: 도구는 손상 스토어를 **건드리지 않는다**. --force 로도 파괴되지 않아야 한다.
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-esc94-')); _d.push(d);
+    RS(['init', d, '--yes', '--language', 'ko', '--no-stale-check']);
+    RS(['toggle', 'set', 'bugfix-receipt', 'on', '--path', d]);
+    const idP = ((RS(['task', 'add', 'probe 있는 작업', '--path', d, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
+    const idQ = ((RS(['task', 'add', 'probe 없는 작업', '--path', d, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
+    fs.writeFileSync(path.join(d, 'app.js'), 'console.error("BUG_HERE"); process.exit(3);');
+    const stReg = RS(['bugfix', 'start', idP, '--repro', 'node app.js', '--expect-bad', 'BUG_HERE', '--path', d, '--json']);
+    const storeF = path.join(d, '.harness', 'bugfix-receipts.json');
+    fs.writeFileSync(storeF, CORRUPT);
+    const forced = RS(['bugfix', 'drop', idP, '--force', '--path', d]);
+    //   파일이 사라지면 예외가 아니라 **단언 실패**로 떨어져야 한다 — 크래시는 "검증한 척"이라 사유를 못 남긴다.
+    let survived = false;
+    try { survived = fs.readFileSync(storeF, 'utf8') === CORRUPT; } catch { survived = false; }
+    const noBackups = fs.readdirSync(path.join(d, '.harness')).filter(f => /corrupt-/.test(f)).length === 0;
+    //   셋업이 조용히 실패하면 아래 단언이 공허해진다 — 등록 성공을 먼저 못 박는다.
+    dbg.setup = stReg.s;
+    E1 = stReg.s === 0 && forced.s === 1 && survived && noBackups
+      && !/--force/.test(forced.o) && hasRecovery(forced.o);
+
+    // ── E2: 회복 절차가 **모든 표면**에 같은 문장으로 도달한다(평문 · --json · sync).
+    //   종전엔 sync/--json 에서 통째로 사라져 "틀린 안내"가 "무안내"로 회귀했다.
+    const upd = RS(['task', 'update', idQ, '--status', 'done', '--path', d]);
+    const updJraw = RS(['task', 'update', idQ, '--status', 'done', '--path', d, '--json']);
+    const updJ = JS(updJraw);
+    const listJ = JS(RS(['bugfix', 'list', '--path', d, '--json']));
+    const todoF = path.join(d, 'todo.json');
+    RS(['task', 'export', '--to', todoF, '--path', d]);
+    try { const td = JSON.parse(fs.readFileSync(todoF, 'utf8')); td.forEach(t => { t.status = 'completed'; }); fs.writeFileSync(todoF, JSON.stringify(td)); } catch {}
+    const sync = RS(['task', 'sync', '--from', todoF, '--path', d]);
+    const syncJraw = RS(['task', 'sync', '--from', todoF, '--path', d, '--json']);
+    const syncJ = JS(syncJraw);
+    const recLine = ((updJ && updJ.recovery) || []).find(hasRecovery) || '';
+    //   판별: 다섯 표면 전부 **존재**를 요구하고(부재만 보면 무안내가 통과한다), 같은 문자열인지까지 본다.
+    //   --json 경로는 exit 코드도 함께 본다 — 사유만 주고 exit 0 이면 자동화가 통과로 읽는다.
+    E2 = upd.s === 1 && hasRecovery(upd.o) && upd.o.includes(recLine)
+      && !!recLine && updJraw.s === 1
+      && sync.s === 1 && sync.o.includes(recLine)
+      && !!syncJ && syncJraw.s === 1 && (syncJ.blocked || []).some(b => (b.recovery || []).includes(recLine))
+      && !!listJ && (listJ.recovery || []).includes(recLine)
+      //   그리고 회복 후에는 실제로 통과해야 한다 — 안내가 사실인지 실행으로 확인한다.
+      && (fs.renameSync(storeF, storeF + '.bak'), RS(['task', 'update', idQ, '--status', 'done', '--path', d]).s === 0)
+      //   되돌리면 게이트도 되살아난다 — 이게 파괴적 회복과 갈리는 지점이므로 **다시 막히는지** 실행으로 본다.
+      && (fs.renameSync(storeF + '.bak', storeF), RS(['task', 'update', idQ, '--status', 'done', '--path', d]).s === 1)
+      && /🟢 ON/.test(RS(['toggle', 'list', '--path', d]).o.split('\n').find(l => /bugfix-receipt/.test(l)) || '');
+
+    // ── E3: 안내가 **--path 를 잃지 않는다** — cwd 와 대상이 다르면 애먼 프로젝트를 파괴한다(실측된 경로).
+    const dB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-esc94b-')); _d.push(dB);
+    RS(['init', dB, '--yes', '--language', 'ko', '--no-stale-check']);
+    RS(['toggle', 'set', 'bugfix-receipt', 'on', '--path', dB]);
+    const idB = ((RS(['task', 'add', '대상 작업', '--path', dB, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
+    fs.writeFileSync(path.join(dB, '.harness', 'bugfix-receipts.json'), CORRUPT);
+    const cross = RS(['task', 'update', idB, '--status', 'done', '--path', dB], { cwd: d });
+    //   판별: 회복 문장은 스토어 절대경로를 담으므로 그것만 보면 `--path` 부착이 무력화돼도 통과한다.
+    //   그래서 **다른 사유**(probe 가 아직 실패 — 공통 푸터가 붙는 코드)로 한 번 더 막고, 그 푸터가
+    //   `--path <절대경로>` 를 달고 있는지, 그리고 그 문장이 sync/--json 에도 오는지 함께 본다.
+    const dC2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-esc94c-')); _d.push(dC2);
+    RS(['init', dC2, '--yes', '--language', 'ko', '--no-stale-check']);
+    RS(['toggle', 'set', 'bugfix-receipt', 'on', '--path', dC2]);
+    const idC = ((RS(['task', 'add', '아직 안 고친 작업', '--path', dC2, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
+    fs.writeFileSync(path.join(dC2, 'app.js'), 'console.error("BUG_HERE"); process.exit(3);');
+    const regC = RS(['bugfix', 'start', idC, '--repro', 'node app.js', '--expect-bad', 'BUG_HERE', '--path', dC2, '--json']);
+    const stillPlain = RS(['task', 'update', idC, '--status', 'done', '--path', dC2], { cwd: d });
+    const stillJson = JS(RS(['task', 'update', idC, '--status', 'done', '--path', dC2, '--json'], { cwd: d }));
+    const todoC = path.join(dC2, 'todo.json');
+    RS(['task', 'export', '--to', todoC, '--path', dC2]);
+    try { const td = JSON.parse(fs.readFileSync(todoC, 'utf8')); td.forEach(t => { t.status = 'completed'; }); fs.writeFileSync(todoC, JSON.stringify(td)); } catch {}
+    const stillSync = RS(['task', 'sync', '--from', todoC, '--path', dC2], { cwd: d });
+    const footer = (((stillJson || {}).recovery) || []).find(l => /탈출구/.test(l)) || '';
+    E3 = !!idB && cross.s === 1 && cross.o.includes(path.join(dB, '.harness')) && !cross.o.includes(path.join(d, '.harness'))
+      && regC.s === 0 && stillPlain.s === 1
+      //   푸터가 존재하고 · 대상 절대경로를 달고 있고 · 세 표면이 같은 문장을 쓴다
+      && !!footer && footer.includes(dC2) && /--path/.test(footer)
+      && stillPlain.o.includes(footer) && stillSync.s === 1 && stillSync.o.includes(footer);
+
+    // ── E4: 같은 bin 재등록에도 인증 축과 고위험 차단이 살아 있다.
+    //   판별 케이스 — reviewer 를 독립 provider 로 두어 **인증이 유일한 차단 사유**가 되게 한다.
+    const mk = (over) => {
+      const w = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ov94-')); _d.push(w);
+      RS(['init', w, '--yes', '--language', 'ko', '--no-stale-check']);
+      ['commander', 'coder', 'architect'].forEach(x => RS(['roles', 'set', x, '--provider', 'codex', '--path', w]));
+      RS(['roles', 'set', 'reviewer', '--provider', 'claude', '--path', w]);
+      RS(['toggle', 'set', 'difficulty-routing', 'on', '--path', w]);
+      //   셋업 실패를 삼키면 A/B 대조가 같아져 변이가 살아남는다 — exit 와 **저장 결과**를 함께 단언한다.
+      if (over) {
+        const ar = RS(['provider', 'add', 'codex', '--bin', over, '--path', w]);
+        let saved = false;
+        try {
+          const raw = JSON.parse(fs.readFileSync(path.join(w, '.harness', 'providers.json'), 'utf8'));
+          saved = (Array.isArray(raw) ? raw : (raw.providers || [])).some(p => p.id === 'codex' && p.bin === over);
+        } catch {}
+        if (ar.s !== 0 || !saved) return null;
+      }
+      return w;
+    };
+    const axis = (w) => { const j = JS(RS(['agents', 'check', '--path', w, '--json'])) || {}; return ((j.agents || []).find(a => a.id === 'codex') || {}); };
+    const route = (w) => { const r = RS(['agents', 'route', '인증 토큰 재발급 로직 변경', '--confirm', '--approved-by', '검증자', '--path', w, '--json']); return { s: r.s, j: JS(r) }; };
+    //   판별: 사유 코드를 **구조에서** 읽고, 인증이 **유일한** 차단 사유인지까지 본다 —
+    //   다른 blocker 가 끼면 인증이 꺼져도 exit 1 이라 회귀를 놓친다.
+    const blockedByAuth = (r) => r.s === 1 && !!r.j && r.j.confirmed === false
+      && (r.j.refusals || []).length === 1 && (r.j.refusals || [])[0].code === 'provider_not_authenticated';
+    //   같은 실행파일을 가리키는 **정상 별칭** 전부에서 유지돼야 한다 — 문자열 완전일치로 비교하면
+    //   `codex.cmd`·대문자·절대경로 등록만으로 이번에 되살린 차단이 다시 사라진다(실측).
+    const aliases = [null, 'codex', 'CODEX', 'codex.cmd', path.join(shimDir, isWin ? 'codex.cmd' : 'codex')];
+    let aliasOk = true, aliasBad = '';
+    for (const al of aliases) {
+      const w = mk(al);
+      if (!w) { aliasOk = false; aliasBad = String(al) + ':setup'; break; }
+      if (axis(w).auth !== 'no' || !blockedByAuth(route(w))) { aliasOk = false; aliasBad = String(al); break; }
+    }
+    dbg.alias = aliasBad;
+    E4 = aliasOk;
+
+    // ── E5: providers.json 은 **실행 가능한 값을 주는 통로가 아니다**(authCheck · versionArgs 둘 다).
+    const inject = (w, id, patch) => {
+      const pf = path.join(w, '.harness', 'providers.json');
+      const raw = JSON.parse(fs.readFileSync(pf, 'utf8'));
+      (Array.isArray(raw) ? raw : (raw.providers || [])).forEach(p => { if (p.id === id) Object.assign(p, patch); });
+      fs.writeFileSync(pf, JSON.stringify(raw, null, 2));
+    };
+    //   (1) user-only provider · (2) **빌트인 override** 갈래 — 갈래 하나만 시험하면 나머지 변이가 살아남는다.
+    const wD = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-inj94-')); _d.push(wD);
+    RS(['init', wD, '--yes', '--language', 'ko', '--no-stale-check']);
+    RS(['provider', 'add', 'evil', '--bin', 'evil', '--path', wD]);
+    inject(wD, 'evil', { authCheck: { args: ['pwn'], timeoutMs: 5000, noPattern: 'never', note: '주입' }, versionArgs: ['pwn'] });
+    RS(['agents', 'list', '--path', wD]);
+    const injJ = JS(RS(['agents', 'check', '--path', wD, '--json']));
+    const evilA = (((injJ || {}).agents) || []).find(a => a.id === 'evil') || {};
+    const wE = mk('codex');
+    if (wE) inject(wE, 'codex', { authCheck: { args: ['pwn'], timeoutMs: 5000, noPattern: 'never' }, versionArgs: ['--version', '&', 'echo', 'META', '>', metaFile] });
+    const bJ = wE ? JS(RS(['agents', 'check', '--path', wE, '--json'])) : null;
+    const codexA = (((bJ || {}).agents) || []).find(a => a.id === 'codex') || {};
+    //   bin 이 달라 물려받지 못하면 **사유를 말한다** — 못 찾으면 '' 이라 부정식만으로는 공허하게 참이 된다.
+    const wC = mk('node');
+    const lineC = wC ? (RS(['agents', 'check', '--path', wC]).o.split('\n').find(l => /codex/.test(l) && /확인안됨|사용가능|사용불가/.test(l)) || '') : '';
+    dbg.lineC = lineC.slice(0, 40);
+    //   **bin 자체가 shell:true 명령 위치다** — versionArgs 만 막으면 닫히지 않는다(원격 catalog 가 심는다).
+    const wF = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bin94-')); _d.push(wF);
+    RS(['init', wF, '--yes', '--language', 'ko', '--no-stale-check']);
+    RS(['provider', 'add', 'x1', '--bin', 'x1', '--path', wF]);
+    inject(wF, 'x1', { bin: 'cmd /c echo INJECTED > "' + path.join(shimDir, 'BIN.txt') + '" & rem' });
+    RS(['agents', 'list', '--path', wF]);
+    const binJ = JS(RS(['agents', 'check', '--path', wF, '--json']));
+    const x1A = (((binJ || {}).agents) || []).find(a => a.id === 'x1') || {};
+    //   정상 하위명령 versionArgs 는 막지 않는다(false-BLOCK 금지 — 설치된 CLI 가 미설치로 보였다)
+    RS(['provider', 'add', 'ktool', '--bin', 'codex', '--path', wF]);
+    inject(wF, 'ktool', { versionArgs: ['version', '--client'] });
+    const kJ = JS(RS(['agents', 'check', '--path', wF, '--json']));
+    const ktA = (((kJ || {}).agents) || []).find(a => a.id === 'ktool') || {};
+    //   거부 시 폴백이 **남의 하위명령을 다른 bin 에 쏘면 안 된다**(`kubectl copilot --version`).
+    //   심이 받은 인자를 그대로 출력하므로 version 문자열로 관측한다 — 사유 필드만 보면 구분되지 않는다.
+    const echoBin = isWin ? 'echoargs.cmd' : 'echoargs';
+    if (isWin) fs.writeFileSync(path.join(shimDir, echoBin), '@echo off\r\necho ARGS %*\r\nexit /b 0\r\n');
+    else { const p = path.join(shimDir, echoBin); fs.writeFileSync(p, '#!/bin/sh\necho "ARGS $@"\nexit 0\n'); try { fs.chmodSync(p, 0o755); } catch {} }
+    RS(['provider', 'add', 'copilot', '--bin', 'echoargs', '--path', wF]);
+    inject(wF, 'copilot', { versionArgs: ['--version', '&', 'x'] });
+    const cpJ = JS(RS(['agents', 'check', '--path', wF, '--json']));
+    const cpA = (((cpJ || {}).agents) || []).find(a => a.id === 'copilot') || {};
+    dbg.fallback = String(cpA.version || '').slice(0, 40);
+    const builtinNoise = (((kJ || {}).agents) || []).filter(a => ['codex', 'claude', 'copilot', 'ollama'].indexOf(a.id) >= 0 && (a.binRejected || a.versionArgsRejected));
+    //   **원격 catalog 는 실행 인자를 정하지 못한다** — 메타문자만 막으면 `npm exec --yes <패키지>` 처럼
+    //   메타문자 없이 임의 코드를 받아오는 조합이 남는다. sync 결과에 원격 versionArgs 가 반영되면 안 된다.
+    //   서버는 **별도 프로세스**여야 한다 — 이 스크립트는 spawnSync 로 자식을 기다리므로 같은 프로세스의
+    //   http 서버는 그 동안 요청을 처리할 수 없다(내 첫 프로브가 그래서 timeout 으로 오판했다).
+    const catalog = path.join(shimDir, 'catalog.json');
+    const srvJs = path.join(shimDir, 'srv.js');
+    const portFile = path.join(shimDir, 'port.txt');
+    fs.writeFileSync(srvJs, `const fs=require('fs'),http=require('http');
+const s=http.createServer((q,r)=>{r.writeHead(200,{'content-type':'application/json'});r.end(fs.readFileSync(process.argv[2]));});
+s.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[3],String(s.address().port)));`);
+    const napMs = (ms) => { try { cp.spawnSync(process.execPath, ['-e', `setTimeout(function(){},${ms})`], { timeout: ms + 5000 }); } catch {} };
+    const syncOnce = (entries) => {
+      fs.writeFileSync(catalog, JSON.stringify(entries));
+      try { fs.rmSync(portFile, { force: true }); } catch {}
+      const child = cp.spawn(process.execPath, [srvJs, catalog, portFile], { stdio: 'ignore', detached: false });
+      let port = null;
+      for (let i = 0; i < 60 && !port; i++) { napMs(100); try { port = fs.readFileSync(portFile, 'utf8').trim() || null; } catch {} }
+      //   이 스위트는 전역 LEERNESS_OFFLINE=1 로 외부 fetch 를 막는다(옳다). 여기서만 예외를 두되
+      //   대상은 **루프백 서버**이므로 "테스트가 네트워크에 의존하지 않는다"는 보장은 그대로다.
+      if (port) RS(['provider', 'sync', `http://127.0.0.1:${port}/c.json`, '--path', wF], { env: Object.assign({}, env, { LEERNESS_OFFLINE: '0' }) });
+      try { child.kill(); } catch {}
+      try { return JSON.parse(fs.readFileSync(path.join(wF, '.harness', 'providers.json'), 'utf8')); } catch { return null; }
+    };
+    const asList = (raw) => (Array.isArray(raw) ? raw : ((raw && raw.providers) || []));
+    let syncedVa = null, syncSkippedBadBin = false;
+    const r1 = syncOnce([{ id: 'remote1', bin: 'evil', versionArgs: ['pwn'], desc: 'r' }]);
+    const got1 = asList(r1).find(p => p.id === 'remote1');
+    syncedVa = got1 ? JSON.stringify(got1.versionArgs) : null;
+    //   같은 경로로 명령줄 bin 이 들어오면 아예 등록되지 않아야 한다
+    const r2 = syncOnce([{ id: 'remote2', bin: 'cmd /c echo X & rem', desc: 'r' }]);
+    syncSkippedBadBin = !!r2 && !asList(r2).some(p => p.id === 'remote2');
+    dbg.syncedVa = syncedVa;
+    E5 = !fs.existsSync(metaFile) && !fs.existsSync(path.join(shimDir, 'BIN.txt'))
+      && evilA.auth === 'unknown'
+      //   빌트인 override 갈래도 주입을 신뢰하지 않는다 — 상속된 authCheck 로 판정하고 auth 는 no 로 남는다
+      && !!wE && codexA.auth === 'no' && codexA.authSource === 'codex login status' && !!codexA.versionArgsRejected
+      //   긍정 단언: 줄을 실제로 찾았고 그 줄이 사유를 담고 있다
+      && !!wC && /override/.test(lineC) && /node/.test(lineC) && !/등록된 확인 명령 없음/.test(lineC)
+      //   bin 거부는 사유를 말하고 **평문에도** 나온다(JSON 에만 넣으면 사람은 왜 미설치인지 모른다)
+      && !!x1A.binRejected && /⚠ x1:/.test(RS(['agents', 'list', '--path', wF]).o)
+      //   정상 하위명령 versionArgs 는 막지 않는다(설치된 CLI 가 미설치로 보이던 false-BLOCK)
+      && !ktA.versionArgsRejected && builtinNoise.length === 0
+      //   폴백은 빌트인 하위명령을 **다른 bin 에 쏘지 않는다** — 실제로 전달된 인자를 심 출력으로 확인한다
+      && /ARGS/.test(String(cpA.version || '')) && !/copilot/.test(String(cpA.version || ''))
+      //   원격은 실행 인자를 정하지 못하고, 명령줄 bin 은 등록조차 되지 않는다
+      && syncedVa === '["--version"]' && syncSkippedBadBin;
+    ok = E1 && E2 && E3 && E4 && E5;
+    if (!ok) console.log(`   [이월94 디버그] 무파괴=${E1}(setup ${dbg.setup}) 안내전달=${E2} path보존=${E3} 축유지=${E4}(별칭실패 "${dbg.alias}") 주입차단=${E5}(lineC "${dbg.lineC}" syncedVa=${dbg.syncedVa} 폴백="${dbg.fallback}")`);
+  } catch (e) { console.log('   [이월94 디버그] 예외: ' + ((e && e.message) || e)); }
+  finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.94) 헌트 이월 2건: 손상 스토어를 도구가 건드리지 않음(--force 로도) · 회복 절차가 평문/--json/sync 에 같은 문장으로 도달하고 실제로 통과시킴 · 안내가 --path 유지 · 같은 bin 재등록에도 인증 차단 유지(사유 코드로 판별) · providers.json 의 authCheck/versionArgs 미실행(user·빌트인 두 갈래)' : '✗ 헌트 이월 2건(1.36.94) 실패');
+  if (!ok) failed++;
+}
+
 // 1.36.76 (9차 헌트 이월 3건 종결): 손상 아카이브 복원 거부 · MCP read-only 무변형 · 긴 파생 id 안전화
 total++;
 {

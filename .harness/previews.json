@@ -188,5 +188,24 @@
         "note": "사용자 결정: 지금은 보류(방향만 기록). 재개 시 범위 = codex 31차 권장 MVP — 포크 없이 기존 저장소에 .claude-plugin/marketplace.json + plugins/leerness/. 배포 경로는 자체 매니페스트만(커뮤니티 마켓플레이스 제출 안 함). 넘지 않을 경계: 저장소 포크 금지 · bin/ 에 CLI 번들 금지(얇은 해석기만: 로컬→PATH→버전범위 확인→없으면 명확히 실패) · npx 자동 다운로드 금지 · 89 도구 래핑 금지 · MVP 에 강제 훅 금지(세션종료 훅은 보장 불가) · 오류를 삼켜 성공 반환 금지 · .harness 에 실행코드 금지 · 'Codex 플러그인' 이라는 표현 금지(규격 없음, AGENTS.md+MCP 로만). 스킬은 좁게(.harness 존재 시 컨텍스트 적재 · 게이트 켜진 상태의 완료 직전 검증)."
       }
     ]
+  },
+  {
+    "id": "P-0009",
+    "title": "설치본에 박힌 낡은 지시문 정리 + 검증 스캐폴딩 토글 (모델 인지 없음)",
+    "design": "[동기] 사용자 질문: \"Opus 5 처럼 모델에 검증 기능이 내장돼 있으면 하네스가 검증을 또 시키는 것은 낭비 아닌가. 구동 모델을 인지해 맞춤으로 알려줄 수 있나?\" — 조사 결과 두 가지가 뒤집혔다. [기각 1] 모델 자동 인지 — 실측으로 불가 판정. env 전수(CLAUDE* 17개)에 모델 성분 0. CLAUDE_CODE_SESSION_ID 로 transcript 파일은 정확히 1건 특정되지만 그 안의 .message.model 은 비공개 내부 포맷이고, 서브에이전트마다 모델이 달라 턴 단위 정확도가 성립하지 않는다. MCP clientInfo 는 클라이언트만 준다. statusLine stdin 이 유일한 공식 계약이나 이 진입점(claude-desktop)에서 미확인. 모델→프로파일 매핑을 갖는 순간 role-catalog.js:11 (claude-opus-4-7 \"최신\") 과 같은 운명이며, 1.36.89 의 \"모델 이름은 한 줄도 하드코딩하지 않는다\" 와 충돌한다. [기각 2] \"템플릿에서 낭비 지시문을 빼면 된다\" — 부호가 반대다(실측). _managedMerge(lib/pure-utils.js:854) 는 새 템플릿에 없는 줄을 사용자 커스텀으로 보고 Preserved 로 되붙인다. 실제 사용자 프로젝트 실측: CLAUDE.md 한 줄 삭제 -> 그 줄 생존 + 파일 155자 증가. session-workflow 의도 6357자 감소 -> 실제 2498자. [확정된 실제 낭비] 모델 판단이 들어가지 않는 제품 내부 사실 (.harness 보유 26개 프로젝트 전수) 1) session-workflow.md 의 60.5%(6356자)가 낡은 릴리스 이력 — 16개 프로젝트. 내용은 \"MCP 18 도구\"/\"30 도구 마일스톤\" 인데 현재 89개. AGENTS.md 필독 1번이자 CLAUDE.md 가 \"매 세션 첫 행동\" 으로 가리키는 파일이다. 2) 출처 없는 성능 주장 \"claude (1.7x 빠름)\" 이 16개 설치본에 생존 — 템플릿(bin/leerness.js:638)은 이미 면책 문구로 고쳤는데 전파되지 않았다(템플릿 수정 미전파의 직접 증거). 3) 4개 프로젝트가 1.9.40 세대(2628자)에 동결. 툴은 1.36.94. 4) bin/leerness.js:11843 이 \"Decisions (last 40 lines)\" 라벨로 앞 4000자를 자른다 — 단위도 방향도 반대. [제안 A — 승인 불필요 수준의 부채 상환] 삭제 메커니즘은 이미 있다: lib/pure-utils.js:864 가 session-workflow 의 자동생성 이력 줄을 머지에서 제외한다 (주석: \"릴리스마다 낡는 생성물 — 좁은 시그니처만 필터\"). 1.36.60 이 이미 인지했으나 정규식이 좁아 52줄 중 20줄만 잡는다. 신설이 아니라 시그니처 확대. e2e 회귀 + 실측 재검증 없이는 머지하지 않는다. 함께: (4) 라벨/동작 불일치 수정. [제안 B — 사용자 승인 필요] 검증 스캐폴딩 토글 3개 workflow-distribute / double-verify / full-reread. 기존 토글 레지스트리 안, 신규 스토어 0, 신규 명령 0. 기본 ON(현행 무변경). 설명문에 모델명/성능/\"어느 모델에 좋다\" 를 한 글자도 쓰지 않는다 — leerness 는 아무것도 주장하지 않고 사용자가 자기 관측으로 끈다. 경계: 토글이 꺼져도 \"도구가 실제로 명령을 실행해 남기는 증거\"(gate/verify-claim/bugfix probe/scan)는 그대로다. 모델의 자기검증으로 대체 가능한 것은 \"AI 에게 또 시키는 지시문\" 뿐이다. 이 A층 보존 계약을 변이 테스트로 고정하고, 그 테스트가 통과하지 않으면 토글을 출하하지 않는다. [주장하지 않을 것] \"leerness 가 세션당 N 토큰을 절약합니다\" 를 릴리스 노트/README 에 쓰지 않는다. 토큰 계측 코드가 0줄이다(input_tokens|totalTokens grep 전체 0건). 숫자를 쓰면 72% production-ready 의 재발이다. [근거] Anthropic \"Prompting Claude Opus 5\" — Task scope and over-verification: \"The same applies to legacy harness scaffolding that adds separate verification steps.\"",
+    "features": [
+      "A: pure-utils.js:864 정리 필터 시그니처 확대(신설 아님) — 16개 설치본의 낡은 이력 6356자",
+      "A: bin/leerness.js:11843 라벨/동작 불일치(last 40 lines vs 앞 4000자) 수정",
+      "B: 검증 스캐폴딩 토글 3개(workflow-distribute/double-verify/full-reread) 기본 ON · 모델명 0",
+      "기각: 모델 자동 인지(실측 불가) · 신규 profile 명령(머지가 되붙여 순효과 27자) · 토큰 절감 수치 주장(계측 0줄)"
+    ],
+    "status": "proposed",
+    "createdAt": "2026-07-30T09:16:31.330Z",
+    "history": [
+      {
+        "at": "2026-07-30T09:16:31.330Z",
+        "event": "proposed"
+      }
+    ]
   }
 ]
