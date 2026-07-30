@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.91';
+const VERSION = '1.36.92';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -10024,11 +10024,27 @@ let _lastBugfixLines = null;   // 통과 시 렌더용 — 직후 호출자가 _
 function _consumeBugfixLines() { const l = _lastBugfixLines; _lastBugfixLines = null; return l; }
 function upsertProgress(root, row) {
   // 게이트는 **락 밖에서** — probe 는 최대 10분까지 도는 사용자 명령이라 progress 락을 물고 있으면 안 된다.
-  if (row && row.status === 'done' && _tgl.toggleOn(root, 'bugfix-receipt')) {
-    const _bfm = require('../lib/bugfix');
-    const _r = _bfm.checkDoneTransition(root, row.id);
-    if (_r.blocked) throw new _bfm.BugfixBlocked(_r, row.id);
-    _lastBugfixLines = _r.lines || null;
+  if (row && row.status === 'done') {
+    // 1.36.92 (codex 32차 #1 BLOCK): 손상 토글에서 기본값으로 조용히 되돌아가면 **켜 뒀던 차단 게이트가 꺼진다**
+    //   (bugfix-receipt 는 defaultOff → 손상 = OFF). `toggle list` 에만 경고를 달았던 앞선 수정은
+    //   **강제 시점을 그대로 뒀다** — 정작 막아야 할 곳이 무언 통과였다. 여기서 fail-closed 한다.
+    const _tchk = _tgl.loadTogglesChecked(root);
+    const _tBad = _tchk.corrupt || (_tchk.unreadable || []).includes('bugfix-receipt');
+    if (_tBad) {
+      const _why = _tchk.corrupt ? (_tchk.reason || '형상 무효') : `'bugfix-receipt' 값을 읽을 수 없음`;
+      const _bfm = require('../lib/bugfix');
+      throw new _bfm.BugfixBlocked({
+        code: 'toggles_unreadable',
+        message: `toggles.json 을 신뢰할 수 없어(${_why}) 완료 판정을 보류합니다 — 켜 두었던 게이트가 꺼진 채 통과하는 것을 막습니다: ${_tgl._togglesPath(root)}`,
+        lines: [`복구: 파일을 고치거나 삭제 후 leerness toggle set <id> on|off 로 다시 설정하세요.`],
+      }, row.id);
+    }
+    if (_tchk.toggles['bugfix-receipt'] === true) {
+      const _bfm = require('../lib/bugfix');
+      const _r = _bfm.checkDoneTransition(root, row.id);
+      if (_r.blocked) throw new _bfm.BugfixBlocked(_r, row.id);
+      _lastBugfixLines = _r.lines || null;
+    }
   }
   // 1.9.303 (UR-0043): read-modify-write 전체를 락으로 직렬화 — 동시 task 쓰기 lost-update 방지.
   return _withLock(progressPath(root), () => {
@@ -24107,7 +24123,11 @@ async function main() {
     const _providerAuth = (pid) => {
       if (_authCache.has(pid)) return _authCache.get(pid);
       const def = (_allProviders(_authRoot) || []).find(a => a.id === pid);
-      const v = (def && def.authCheck) ? (_checkAgent(def, { auth: true }).auth || 'unknown') : 'unknown';
+      // 1.36.92 (codex 32차 #2): 문서화된 opt-out 을 실제로 지킨다 — `LEERNESS_ENABLE_<X>=1` 이 아닌 provider 는
+      //   프로세스를 띄우지 않는다. 종전엔 `enabled` 를 계산만 하고 확인 실행 전에 보지 않아, 외부 도구를 꺼 뒀다고
+      //   믿는 사용자의 환경에서 CLI 가 실행됐다(실측: 플래그 유무와 무관하게 동일 spawn).
+      const _enabled = !!(def && def.envFlag && process.env[def.envFlag] === '1');
+      const v = (def && def.authCheck && _enabled) ? (_checkAgent(def, { auth: true }).auth || 'unknown') : 'unknown';
       _authCache.set(pid, v);
       return v;
     };
@@ -24270,9 +24290,27 @@ async function main() {
     //   등록된 probe 를 "없음"으로 보고했다 — 다른 명령들과 같은 규율로 위치 경로를 받는다.
     //   (start/receipt/drop 의 첫 토큰은 task id 이므로, 경로로 오인하지 않도록 list/무인자에서만 적용)
     const _bfSub = _bfToks[0];
-    const _bfRest = _bfToks.slice(1);
+    let _bfRest = _bfToks.slice(1);
     let _bfRoot = arg('--path', null);
     if (!_bfRoot && (!_bfSub || _bfSub === 'list')) _bfRoot = _taskPositionalPath(['bugfix', ...(_bfSub ? [_bfSub] : []), ..._bfRest], _bfSub ? 2 : 1);
+    // 1.36.92 (헌트 #9, High): start/receipt/drop 은 위치 경로를 **조용히 무시**했다 — `bugfix start T-0002 <경로>` 가
+    //   지목한 프로젝트가 아니라 cwd 프로젝트에 probe 를 등록해, 지목한 쪽은 무보호로 done 되고 cwd 의 같은 번호
+    //   task 는 영문도 모른 채 갇혔다(실측). id 뒤의 경로형 토큰을 인식하고, 인식할 수 없으면 **거부**한다.
+    if (_bfSub === 'start' || _bfSub === 'receipt' || _bfSub === 'drop') {
+      //   UNC(\\server\share)도 경로다. 판별 못 하는 토큰은 **거부**한다 — 조용히 버리면 엉뚱한 프로젝트에 쓴다.
+      const _pathLike = (s) => typeof s === 'string' && /^([A-Za-z]:[\\/]|\\\\|\/|\.\.?[\\/])/.test(s);
+      const _stray = _bfRest.slice(1).filter(Boolean);
+      if (_stray.length) {
+        const _p = _stray.find(_pathLike);
+        // codex 32차 #5: 위치 경로와 --path 를 **둘 다** 주면 종전엔 위치 경로를 조용히 버렸다 —
+        //   어느 프로젝트에 쓸지 사용자 의도가 갈리는데 한쪽을 말없이 무시하면 안 된다. 거부한다.
+        if (_p && _stray.length === 1 && arg('--path', null)) {
+          fail(`경로가 두 번 지정됐습니다: 위치 인자 '${_p}' 와 --path '${arg('--path', null)}' — 하나만 쓰세요`); process.exitCode = 1; return;
+        }
+        if (_p && _stray.length === 1) { _bfRoot = absRoot(_p); _bfRest = [_bfRest[0]]; }
+        else { fail(`알 수 없는 인자: ${_stray.join(' ')} — 경로는 마지막에 하나만 두거나 --path <경로> 를 쓰세요 (예: leerness bugfix ${_bfSub} ${_bfRest[0] || '<T-ID>'} --path .)`); process.exitCode = 1; return; }
+      }
+    }
     // _withLock: 동시 등록이 서로를 지우면 게이트가 조용히 꺼진다(실측 4→2)
     // _taskExists: 존재하지 않는 id 로 등록되면 오타 하나로 "보호받는 줄 아는" 무보호 상태가 된다(출하전 헌트 #3)
     return require('../lib/bugfix').bugfixCmd(_bfRoot || process.cwd(), _bfSub, _bfRest,

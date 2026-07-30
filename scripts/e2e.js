@@ -7801,15 +7801,18 @@ total++;
     const human = R(['agents', 'route', '주문 필터', '--path', d]).o;
     const logHuman = R(['agents', 'route', '--log', '--path', d]).o;
     const cj = J(R(['agents', 'route', '주문 필터 추가', '--confirm', '--path', d, '--json'])) || {};
-    const honestOk = /확인하지 않았습니다/.test(human) && /측정값이 아닙니다/.test(human)
+    const honestOk = /확인하지 않습니다/.test(human) && /측정값이 아닙니다/.test(human)
       && !/설치·활성 여부만 확인/.test(human)                       // 하지 않은 확인을 했다고 말하던 옛 문구
-      && /확인하지 않았습니다/.test(logHuman) && /작업을 대신 수행하지 않습니다/.test(logHuman)
+      && /확인하지 않습니다/.test(logHuman) && /작업을 대신 수행하지 않습니다/.test(logHuman)
       && cj.executed === false && typeof cj.confirmed === 'boolean' && !('dispatched' in cj)
-      //   1.36.91: 인증 축이 생기면서 "외부 CLI 를 전혀 실행하지 않는다"는 **거짓이 됐다**(고위험에서 상태 명령을 실행한다).
-      //   문구가 그 구분을 담고 있는지 단언하고, 옛 과장 문구가 되살아나지 않는지도 함께 본다.
+      //   1.36.91: 인증 축이 생기면서 "외부 CLI 를 전혀 실행하지 않는다"는 **거짓이 됐다**(확정 시 상태 명령을 실행한다).
+      //   1.36.92: "상태 명령만" 도 부정확했다 — `--version` 도 함께 돈다. 문구가 실행 시점과 대상을 정확히
+      //   말하는지 단언하고, **옛 과장 문구 두 형태가 되살아나지 않는지**도 함께 본다.
       && /모델 호출\(과금\)은 하지 않습니다/.test(JSON.stringify(cj))
-      && /인증 확인을 위해 해당 CLI 의 상태 명령만 실행/.test(JSON.stringify(cj))
-      && !/외부 CLI 를 실행하지 않습니다/.test(JSON.stringify(cj));
+      && /--confirm 으로 확정할 때만/.test(JSON.stringify(cj))
+      && /버전 확인과 로그인 상태 명령을 실행/.test(JSON.stringify(cj))
+      && !/외부 CLI 를 실행하지 않습니다/.test(JSON.stringify(cj))
+      && !/상태 명령만 실행/.test(JSON.stringify(cj));
     // 모델명 비하드코딩 — 정책 모듈에 벤더 모델 id 가 있으면 안 된다(몇 달이면 낡는다)
     //   경로는 CLI 기준으로 잡는다 — 검사 대상이 "지금 실행 중인 그 설치본"이어야 한다(__dirname 은 실행 위치에 따라 어긋난다).
     const srcOk = !/(claude-(opus|sonnet|haiku)|gpt-[45]|o[34]-mini|gemini-)/i.test(fs.readFileSync(path.join(path.dirname(CLI), '..', 'lib', 'routing.js'), 'utf8'));
@@ -7979,31 +7982,124 @@ total++;
     // A4~A6: 라우팅 연동 — unknown 은 통과, 확실한 미인증만 고위험에서 차단, normal 은 무관
     const RTm = require(path.join(path.dirname(CLI), '..', 'lib', 'routing.js'));
     const roles = { architect: 'codex', commander: 'codex', coder: 'codex', reviewer: 'claude' };
-    const planWith = (tier, authMap) => RTm.plan(d, { tier }, {
+    //   1.36.92: 인증 확인은 **확정 요청(authAllowed)** 일 때만 돈다 — 제안이 외부 프로세스를 띄우던 동의 위반을 막았다.
+    //   그래서 차단 판정을 보려면 authAllowed:true 를 줘야 하고, 주지 않으면 확인 자체가 없어야 한다(판별 대조).
+    const planWith = (tier, authMap, allowed = true) => RTm.plan(d, { tier }, {
+      authAllowed: allowed,
       _resolveRole: (r, role) => ({ provider: roles[role] }),
       _providerAuth: (pid) => authMap[pid] || 'unknown',
     });
     const hasAuthBlock = (p) => p.blockers.some(b => b.code === 'provider_not_authenticated');
-    A4 = !hasAuthBlock(planWith('high-risk', {}));                       // 전부 unknown → 막지 않는다
+    A4 = !hasAuthBlock(planWith('high-risk', {}))                        // 전부 unknown → 막지 않는다
+      && !hasAuthBlock(planWith('high-risk', { codex: 'no' }, false));   // 확정 요청 없으면 확인도 차단도 없다
     A5 = hasAuthBlock(planWith('high-risk', { codex: 'no', claude: 'ok' }));  // 확실한 미인증 → 막는다
     //   codex 30차 #3: 인증 확인은 외부 프로세스를 띄운다 — 차단에 쓰이는 고위험에서만 확인해야
     //   tiny/normal 에 지연이 붙지 않고, "여기서 CLI 를 실행한다"는 범위도 좁게 유지된다.
     //   호출 횟수를 직접 센다(결과만 보면 "확인은 하고 무시하는" 구현과 구분되지 않는다).
     let calls = 0;
-    const counting = (tier) => RTm.plan(d, { tier }, {
+    const counting = (tier, allowed) => RTm.plan(d, { tier }, {
+      authAllowed: allowed,
       _resolveRole: (r, role) => ({ provider: roles[role] }),
       _providerAuth: () => { calls++; return 'no'; },
     });
-    calls = 0; const normalPlan = counting('normal'); const normalCalls = calls;
-    calls = 0; counting('high-risk'); const highCalls = calls;
+    calls = 0; const normalPlan = counting('normal', true); const normalCalls = calls;
+    calls = 0; counting('high-risk', true); const highCalls = calls;
+    calls = 0; counting('high-risk', false); const noConsentCalls = calls;
     A6 = !hasAuthBlock(planWith('normal', { codex: 'no', claude: 'no' }))     // normal 은 무관
       && !hasAuthBlock(normalPlan) && normalCalls === 0 && highCalls > 0      // normal 은 확인 자체를 안 한다
+      && noConsentCalls === 0                                                 // 확정 요청 없으면 고위험도 확인 안 한다(동의)
       && planWith('high-risk', {}).assignments.every(a => 'auth' in a);       // auth 축이 계획에 실린다
     ok = A1 && A2 && A3 && A4 && A5 && A6;
     if (!ok) console.log(`   [인증축 디버그] 축노출=${A1} 미확인은unknown=${A2} list무확인=${A3} unknown통과=${A4} 미인증차단=${A5} normal무관+축노출=${A6}`);
   } catch (e) { console.log('   [인증축 디버그] 예외: ' + ((e && e.message) || e)); }
   finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? '✓ B(1.36.91) 인증 축(설치됨≠사용가능): 확인 명령 있는 provider 만 ok/no · 나머지는 unknown 유지 · list 는 미확인(지연) · 라우팅은 unknown 통과 / 확실한 미인증만 고위험 차단' : '✗ 인증 축 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.92 (신규표면 헌트 확정 5건): 동의 없는 외부 CLI 실행 · 사유 오귀인 · 다국어 과소평가 ·
+//   위치경로 무시 · Bearer 토큰 미마스킹 · 손상 토글 무경고.
+//   **PATH shim** 으로 "프로세스를 띄우지 않는다"를 증명한다 — 종전 테스트에는 그걸 증명할 수단이 아예 없었다.
+total++;
+{
+  let ok = false;
+  const _d = [];
+  let N1 = false, N2 = false, N3 = false, N4 = false, N5 = false;
+  try {
+    const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-shim-')); _d.push(shimDir);
+    const shimLog = path.join(shimDir, 'calls.log');
+    const isWin = process.platform === 'win32';
+    //   codex 32차 #8: shim 이 codex 하나뿐이면 다른 provider 로 새는 회귀를 못 잡는다 — 배치된 provider 전부에 건다.
+    for (const binName of ['codex', 'claude']) {
+      if (isWin) fs.writeFileSync(path.join(shimDir, `${binName}.cmd`), `@echo off\r\n>>"${shimLog}" echo ${binName} %*\r\nif "%1"=="--version" (echo ${binName}-shim 1.0.0& exit /b 0)\r\necho Logged in using shim\r\nexit /b 0\r\n`);
+      else { const p = path.join(shimDir, binName); fs.writeFileSync(p, `#!/bin/sh\necho "${binName} $@" >> "${shimLog}"\nif [ "$1" = "--version" ]; then echo "${binName}-shim 1.0.0"; exit 0; fi\necho "Logged in using shim"\nexit 0\n`); try { fs.chmodSync(p, 0o755); } catch {} }
+    }
+    //   provider opt-in 을 **켠 상태**로 돌린다 — 그래야 "확정에서는 실행된다"는 대조가 성립하고,
+    //   아래 N1b 가 "끄면 실행되지 않는다"를 별도로 확인한다(문서화된 opt-out 의 실제 검증).
+    const env = Object.assign({}, process.env, {
+      PATH: shimDir + path.delimiter + process.env.PATH,
+      LEERNESS_ENABLE_CODEX: '1', LEERNESS_ENABLE_CLAUDE: '1',
+    });
+    const envOff = Object.assign({}, env, { LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_CLAUDE: '0' });
+    const RS = (a, e) => { const r = cp.spawnSync(process.execPath, [CLI, ...a], { encoding: 'utf8', timeout: 120000, env: e || env }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
+    const calls = () => { try { return fs.readFileSync(shimLog, 'utf8').trim().split('\n').filter(Boolean).length; } catch { return 0; } };
+    const clear = () => { try { fs.rmSync(shimLog, { force: true }); } catch {} };
+
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h2-')); _d.push(d);
+    RS(['init', d, '--yes', '--language', 'ko', '--no-stale-check']);
+    ['commander', 'coder', 'architect'].forEach(x => RS(['roles', 'set', x, '--provider', 'codex', '--path', d]));
+    RS(['roles', 'set', 'reviewer', '--provider', 'claude', '--path', d]);
+    // N1: **제안은 외부 프로세스를 띄우지 않는다**(동의 전 실행 금지). 확정에서는 띄운다 — 판별 대조.
+    clear(); RS(['agents', 'route', 'implement oauth token refresh', '--path', d]);
+    const suggestCalls = calls();
+    clear(); RS(['agents', 'route', 'implement oauth token refresh', '--path', d, '--json']);
+    const suggestJsonCalls = calls();
+    RS(['toggle', 'set', 'difficulty-routing', 'on', '--path', d]);
+    clear(); RS(['agents', 'route', 'implement oauth token refresh', '--confirm', '--approved-by', '검증자', '--path', d]);
+    const confirmCalls = calls();
+    //   N1b: **문서화된 opt-out 을 실제로 지키는지** — LEERNESS_ENABLE_* 를 끄면 확정에서도 띄우지 않는다.
+    //   (종전엔 이 플래그가 이 경로에서 완전한 no-op 이라, 외부 도구를 껐다고 믿는 사용자 환경에서 CLI 가 돌았다.)
+    clear(); RS(['agents', 'route', 'implement oauth token refresh', '--confirm', '--approved-by', '검증자', '--path', d], envOff);
+    const optOutCalls = calls();
+    N1 = suggestCalls === 0 && suggestJsonCalls === 0 && confirmCalls > 0 && optOutCalls === 0;
+    // N2: "확인 안 함"과 "확인 수단 없음"을 구분해 말한다(같은 provider 가 등급에 따라 갈리던 오귀인)
+    const tinyOut = RS(['agents', 'route', 'fix typo in button label', '--path', d]).o;
+    N2 = /이 등급에서는 확인하지 않음/.test(tinyOut)
+      && !/무료·비대화형 확인 명령이 있는 provider 만 판정한 결과/.test(tinyOut)
+      && /버전 확인과 로그인 상태 명령을 실행/.test(RS(['agents', 'route', '--log', '--path', d]).o);
+    // N3: 규칙이 못 읽는 문자 체계가 섞이면 tiny 로 내리지 않는다(결제·인증이 tiny 로 확정되던 구멍)
+    const RTm = require(path.join(path.dirname(CLI), '..', 'lib', 'routing.js'));
+    N3 = RTm.classify('支付退款逻辑修改 css').tier === 'normal'
+      && RTm.classify('決済リファンド css 修正').tier === 'normal'
+      && RTm.classify('fix typo in css').tier === 'tiny'           // 대조군: 커버되는 언어는 그대로 tiny
+      //   전각 문자로 고위험 규칙을 우회할 수 있었다(ＰＡＹＭＥＮＴ → normal) — 매칭 전 NFKC 정규화
+      && RTm.classify('ＰＡＹＭＥＮＴ ｒｅｆｕｎｄ ｌｏｇｉｃ').tier === 'high-risk';
+    // N4: bugfix start 가 위치 경로를 인식한다(cwd 오염 없이 대상 프로젝트에 등록)
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h2b-')); _d.push(d2);
+    RS(['init', d2, '--yes', '--language', 'ko', '--no-stale-check']);
+    const aid = ((RS(['task', 'add', '대상 작업', '--path', d2, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
+    fs.writeFileSync(path.join(d2, 'app.js'), 'console.error("BUG_HERE"); process.exit(3);');
+    const stRes = RS(['bugfix', 'start', aid, '--repro', 'node app.js', '--expect-bad', 'BUG_HERE', d2]);
+    N4 = stRes.s === 0 && fs.existsSync(path.join(d2, '.harness', 'bugfix-receipts.json'));
+    // N5: Bearer/Basic 토큰 마스킹 + 손상 토글 무경고 금지
+    const red = require(path.join(path.dirname(CLI), '..', 'lib', 'pure-utils.js')).redactSecrets;
+    const maskOk = !red('Authorization: Bearer sk-live-ABCDEFGH12345', 200).includes('sk-live-ABCDEFGH12345')
+      && !red('curl -H "Authorization: Basic dXNlcjpwYXNz" api', 200).includes('dXNlcjpwYXNz');
+    fs.writeFileSync(path.join(d, '.harness', 'toggles.json'), '{손상');
+    const tl = RS(['toggle', 'list', '--path', d]);
+    let tj = null; try { const o = RS(['toggle', 'list', '--path', d, '--json']).o; tj = JSON.parse(o.slice(o.indexOf('{'))); } catch {}
+    //   감사 기록은 **입력 원문**(분류용 정규화본이 아님)을 남기되, git 추적 파일이므로 시크릿은 가린다
+    const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h2c-')); _d.push(d3);
+    RS(['init', d3, '--yes', '--language', 'ko', '--no-stale-check']);
+    RS(['agents', 'route', 'ＰＡＹＭＥＮＴ 수정 API_TOKEN=sk-live-SECRET123', '--path', d3]);
+    const lgRaw = fs.readFileSync(path.join(d3, '.harness', 'routing-log.json'), 'utf8');
+    const auditOk = !/sk-live-SECRET123/.test(lgRaw) && /API_TOKEN=\*\*\*/.test(lgRaw) && /ＰＡＹＭＥＮＴ/.test(lgRaw);
+    N5 = maskOk && auditOk && /toggles\.json 손상/.test(tl.o) && !!tj && tj.corrupt === true;
+    ok = N1 && N2 && N3 && N4 && N5;
+    if (!ok) console.log(`   [헌트5 디버그] 제안무실행=${N1}(제안 ${suggestCalls}/${suggestJsonCalls} · 확정 ${confirmCalls} · optout ${optOutCalls}) 사유구분=${N2} 다국어=${N3} 위치경로=${N4} 마스킹+손상고지=${N5}`);
+  } catch (e) { console.log('   [헌트5 디버그] 예외: ' + ((e && e.message) || e)); }
+  finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.92) 신규표면 헌트 5건: 제안은 외부 프로세스 0회(PATH shim 증명)·확정에서만 실행 · 인증 미확인 사유 구분 · 미커버 문자체계는 tiny 금지 · bugfix 위치경로 인식 · Bearer 마스킹 + 손상 토글 경고' : '✗ 신규표면 헌트 5건 실패');
   if (!ok) failed++;
 }
 
