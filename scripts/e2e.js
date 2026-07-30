@@ -7351,8 +7351,17 @@ total++;
     // 무효 limit 은 기본값 폴백 (0/-5/abc)
     const badLim = ['0', '-5', 'abc'].every(v => { try { return JSON.parse(R(['--from', '1.9.33', '--json', '--limit', v]).stdout).shown === 30; } catch { return false; } });
     // 절단 없을 때 hint 부재
-    const small = JSON.parse(R(['--from', '1.36.60', '--json']).stdout);
-    const smallOk = small.truncated === false && small.hint === undefined && small.shown === small.totalVersions;
+    //   1.36.93: `--from` 을 하드코딩(1.36.60)했더니 **릴리스가 쌓여 기본 상한 30 을 넘는 순간 만료**됐다
+    //   (실측: 1.36.60 이후 31개 → truncated=true 라 "절단 없음" 단언이 깨졌다). 제품 결함이 아니라
+    //   시한폭탄 테스트다. 현재 버전에서 몇 단계만 거슬러 잡아 상한에 걸리지 않게 자동 산출한다.
+    //   codex 33차 #4: 버전 계산(patch-3)은 `1.37.0`·prerelease·patch<3 에서 **0건**을 돌려주고
+    //   `shown === totalVersions === 0` 이라 공허하게 통과한다. CHANGELOG 에 **실재하는** 최근 버전을 골라 쓰고,
+    //   결과가 비어 있지 않은지(shown > 0)까지 단언한다.
+    const _chg = fs.readFileSync(path.join(path.dirname(CLI), '..', 'CHANGELOG.md'), 'utf8');
+    const _vers = (_chg.match(/^## (\d+\.\d+\.\d+)/gm) || []).map(s => s.replace('## ', ''));
+    const _fromRecent = _vers[Math.min(3, _vers.length - 1)] || _vers[0];
+    const small = JSON.parse(R(['--from', _fromRecent, '--json']).stdout);
+    const smallOk = small.truncated === false && small.hint === undefined && small.shown === small.totalVersions && small.shown > 0;
     // MCP 인자 전달 (limit)
     const mcpReq = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_whats_new', arguments: { from: '1.9.33', limit: 2 } } });
     const mcpR = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: mcpReq + '\n', maxBuffer: 32 * 1024 * 1024 });
@@ -8100,6 +8109,63 @@ total++;
   } catch (e) { console.log('   [헌트5 디버그] 예외: ' + ((e && e.message) || e)); }
   finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? '✓ B(1.36.92) 신규표면 헌트 5건: 제안은 외부 프로세스 0회(PATH shim 증명)·확정에서만 실행 · 인증 미확인 사유 구분 · 미커버 문자체계는 tiny 금지 · bugfix 위치경로 인식 · Bearer 마스킹 + 손상 토글 경고' : '✗ 신규표면 헌트 5건 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.93 (헌트 이월 2건): ① MCP 래퍼 타임아웃이 probe 예산보다 짧아 정직하게 고친 사용자가 done 을 못 하고,
+//   응답이 `(no output)` 이라 진단 단서가 0 이었다 ② `plan add --status verified` 가 정규화 없이 저장돼
+//   lazy detect 는 done 으로 세는데 verify-claim/gate 는 그 행을 아예 보지 않았다(검증기가 못 보는 완료 행).
+total++;
+{
+  let ok = false;
+  const _d = [];
+  const R = (args, env) => { const r = cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 300000, env: env || process.env }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
+  let T1 = false, T2 = false, T3 = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-carry-')); _d.push(d);
+    R(['init', d, '--yes', '--language', 'ko', '--no-stale-check']);
+    // T1: plan add 의 상태도 task add 와 **같은 정규화**를 탄다 — 저장 형태가 갈리면 집계마다 다르게 센다
+    R(['task', 'add', 'A', '--path', d, '--status', 'completed', '--json', '--no-review']);
+    R(['plan', 'add', 'B', '--path', d, '--status', 'completed', '--json']);
+    R(['plan', 'add', 'C', '--path', d, '--status', 'verified', '--json']);
+    const rows = fs.readFileSync(path.join(d, '.harness', 'progress-tracker.md'), 'utf8')
+      .split('\n').filter(l => /^\|\s*T-\d/.test(l)).map(l => l.split('|').map(s => s.trim())[2]);
+    const doneCount = rows.filter(s => s === 'done').length;
+    let vcTotal = null; try { const o = R(['verify-claim', '--all', '--path', d, '--json']).o; vcTotal = JSON.parse(o.slice(o.indexOf('{'))).total; } catch {}
+    //   판별: 정규화 안 된 행이 0 이고, **검증기가 보는 수 = done 행 수** 여야 한다(전엔 2 vs 3 으로 갈렸다)
+    T1 = rows.filter(s => s === 'completed' || s === 'verified').length === 0 && doneCount === 3 && vcTotal === doneCount;
+    // T2/T3: MCP 래퍼 타임아웃 — 사유를 사실대로 전달하고, 기본 한도는 probe 예산(600s) 위여야 한다
+    const mcp = (ms) => {
+      const msgs = [JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: {} }),
+        JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_selftest', arguments: { path: d } } })].join('\n') + '\n';
+      const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve', '--path', d], {
+        input: msgs, encoding: 'utf8', timeout: 200000,
+        env: Object.assign({}, process.env, ms ? { LEERNESS_MCP_TIMEOUT_MS: String(ms) } : {}),
+      });
+      const lines = ((r.stdout || '')).split('\n').filter(l => l.includes('"id":1'));
+      return lines[lines.length - 1] || '';
+    };
+    const shortRes = mcp(5000);   // selftest 는 ~20초 — 5초 한도면 반드시 걸린다
+    T2 = !/no output/.test(shortRes) && /초 안에 끝나지 않아 중단/.test(shortRes)
+      && /LEERNESS_MCP_TIMEOUT_MS/.test(shortRes) && /터미널에서 직접/.test(shortRes)
+      //   codex 33차 #5: 메시지의 초 값이 **실제 적용된 한도**여야 한다 — 소스 리터럴만 보면
+      //   `Math.min(MCP_TIMEOUT_MS, 60000)` 같은 변조가 그대로 통과한다. 5초 지정 → "5초" 로 찍혀야 한다.
+      && /⏱ 5초 안에/.test(shortRes)
+      //   codex 33차 #3: probe 설명은 probe 가 돌 수 있는 호출에만 — selftest 에는 붙으면 안 된다
+      && !/bugfix probe 가 등록된 task/.test(shortRes);
+    //   codex 33차 #2: 긴 예산은 **done 전이/sync 에만** 준다 — 전역으로 올리면 단일 스레드 서버가 그만큼 얼어붙는다.
+    const srcTxt = fs.readFileSync(CLI, 'utf8');
+    const probeBudget = (srcTxt.match(/MCP_TIMEOUT_PROBE_MS = (\d+)/) || [])[1];
+    const defBudget = (srcTxt.match(/MCP_TIMEOUT_DEFAULT_MS = (\d+)/) || [])[1];
+    T3 = !!probeBudget && Number(probeBudget) > 600000              // probe 예산 위
+      && !!defBudget && Number(defBudget) <= 120000                 // 기본은 짧게(서버 정지 시간 제한)
+      && /timeout: budget,/.test(srcTxt)                            // 배선: 계산된 예산이 실제로 쓰인다
+      && /_needsProbeBudget\(cliArgs\)/.test(srcTxt);
+    ok = T1 && T2 && T3;
+    if (!ok) console.log(`   [이월2 디버그] plan정규화=${T1}(done=${doneCount} vc=${vcTotal}) 타임아웃사유=${T2} 기본한도=${T3}(${srcTimeout})`);
+  } catch (e) { console.log('   [이월2 디버그] 예외: ' + ((e && e.message) || e)); }
+  finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.93) 헌트 이월 2건: plan add 상태 정규화(검증기가 보는 수 = done 행 수) · MCP 타임아웃 사유 전달(+CLI 대안·한도조절) · 기본 한도 > probe 예산' : '✗ 헌트 이월 2건 실패');
   if (!ok) failed++;
 }
 

@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.92';
+const VERSION = '1.36.93';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -10125,7 +10125,12 @@ function planListCmd(root, opts = {}) {
 function planAdd(root, text) {
   if (!_requireInit(root, 'plan add')) return;  // 1.9.311 (UR-0047): init 가드
   if (!_validateChoice(arg('--status', null), TASK_STATUSES, 'plan status')) { process.exitCode = 1; return; }  // 1.9.310 (UR-0046)
-  const status = arg('--status','planned'), progress = arg('--progress','0'), nextAction = arg('--next', _uiLang(root) === 'en' ? 'write the next action' : '다음 액션 작성');   // 1.36.63
+  // 1.36.93 (헌트 #11): `--status` 를 **정규화 없이** progress 행에 그대로 썼다 — `plan add "x" --status verified` 가
+  //   `verified` 로 저장되면 lazy detect 는 done 으로 세는데 verify-claim --all / gate --claims 의 done 필터는
+  //   그 행을 통째로 건너뛴다. `--force` 도 손편집도 없이 "검증기가 보지 않는 완료 행"이 만들어졌다.
+  //   1.11.3 이 completed/verified 를 저장 시 done 으로 정규화한 이유가 바로 이 집계 불일치를 없애기 위함인데
+  //   plan add 만 그 경로를 타지 않았다. 같은 정규화를 태운다.
+  const status = _normTaskStatus(arg('--status','planned')), progress = arg('--progress','0'), nextAction = arg('--next', _uiLang(root) === 'en' ? 'write the next action' : '다음 액션 작성');   // 1.36.63
   // 1.14.2 (Karpathy 원칙4 "성공기준 정의", UR-0032): --done-when 으로 검증가능 완료조건을 milestone 에 기록. 미지정 시 (미정) — plan show/audit 가 환기.
   const doneWhen = _lineSafe(arg('--done-when', '') || (_uiLang(root) === 'en' ? '(unset)' : '(미정)'));   // 1.36.63 (검수 #2)
   // 1.9.303 (UR-0043): M-id append + T-id upsert 를 하나의 락으로 — 동시 plan add ID 충돌 방지.
@@ -19954,12 +19959,65 @@ function mcpServeCmd(root) {
   function send(obj) {
     process.stdout.write(JSON.stringify(obj) + '\n');
   }
+  // 1.36.93 (헌트 #8): 래퍼 타임아웃(60s)이 bugfix probe 예산(600s)보다 짧아, 버그를 **진짜 고치고**
+  //   영수증까지 채운 사용자가 MCP 표면에서는 done 을 영영 기록하지 못했다. 게다가 stdout 이 비어 있어
+  //   응답이 `(no output)` 뿐 — 차단 사유도, 타임아웃이라는 사실도 전달되지 않았다(진단 단서 0).
+  //   ① 기본값을 probe 예산 위로 올리고 ② env 로 조절 가능하게 하며 ③ 타임아웃을 **사실대로** 보고한다.
+  //   (MCP 클라이언트 자체 타임아웃은 leerness 가 어쩌지 못한다 — 그래서 메시지에 CLI 대안을 함께 준다.)
+  //   codex 33차 #2: 한도를 **전역으로** 올리면 `spawnSync` 가 단일 스레드 서버를 그만큼 얼린다 —
+  //   무관한 도구가 멎어도 11분간 ping·취소 통지조차 못 읽는다. 그래서 긴 예산은 **probe 를 실행할 수 있는
+  //   호출에만** 준다(done 전이 · task sync). 나머지는 종전대로 60초.
+  const MCP_TIMEOUT_DEFAULT_MS = 60000;
+  const MCP_TIMEOUT_PROBE_MS = 660000;     // probe 예산(600s) 위 — 이 값이 적용되는 호출은 아래 _needsProbeBudget 뿐
+  const MCP_TIMEOUT_OVERRIDE_MS = (() => {
+    const v = parseInt(process.env.LEERNESS_MCP_TIMEOUT_MS || '', 10);
+    return (Number.isFinite(v) && v >= 5000 && v <= 3600000) ? v : null;
+  })();
+  // bugfix probe 가 도는 경로만 긴 예산을 받는다 — done 전이(task update --status done)와 TodoWrite 왕복(task sync).
+  function _needsProbeBudget(cliArgs) {
+    const a = (cliArgs || []).map(String);
+    if (a[0] !== 'task') return false;
+    if (a[1] === 'sync') return true;
+    if (a[1] !== 'update') return false;
+    const i = a.indexOf('--status');
+    return i >= 0 && ['done', 'completed', 'verified'].includes(a[i + 1]);
+  }
+  function _mcpTimeoutFor(cliArgs) {
+    return MCP_TIMEOUT_OVERRIDE_MS != null ? MCP_TIMEOUT_OVERRIDE_MS
+      : (_needsProbeBudget(cliArgs) ? MCP_TIMEOUT_PROBE_MS : MCP_TIMEOUT_DEFAULT_MS);
+  }
+  const _shQuote = (s) => (/[\s"']/.test(String(s)) ? `"${String(s).replace(/"/g, '\\"')}"` : String(s));
   function callLeerness(cliArgs) {
+    const budget = _mcpTimeoutFor(cliArgs);
     const r = cp.spawnSync(process.execPath, [__filename, ...cliArgs], {
       encoding: 'utf8',
-      timeout: 60000,
+      timeout: budget,
       env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_WORKFLOW_GUIDE: '1' }
     });
+    const cmd = `leerness ${cliArgs.map(_shQuote).join(' ')}`;
+    const partial = ((r.stdout || '') + (r.stderr || '')).trim();
+    //   codex 33차 #1: `status == null && !stdout` 은 EPERM·시그널 종료까지 타임아웃으로 오인하고
+    //   부분 출력을 버렸다. **ETIMEDOUT 만** 타임아웃으로 보고, 나머지 오류는 실제 코드로 알린다.
+    if (r.error && String(r.error.code) === 'ETIMEDOUT') {
+      return {
+        ok: false, exit: null, stdout: '',
+        stderr: `⏱ ${Math.round(budget / 1000)}초 안에 끝나지 않아 중단했습니다: ${cmd}\n`
+          //   probe 설명은 probe 가 실제로 돌 수 있는 호출에만 — 무관한 도구에 엉뚱한 원인을 대지 않는다(#3).
+          + (_needsProbeBudget(cliArgs) ? `  · bugfix probe 가 등록된 task 를 done 으로 바꾸면 probe(최대 600초)가 실행됩니다 — 그만큼 시간이 필요합니다.\n` : '')
+          + `  · 한도 조절: LEERNESS_MCP_TIMEOUT_MS=<밀리초> (5000~3600000)\n`
+          + `  · 또는 터미널에서 직접: ${cmd}`
+          + (partial ? `\n  · 중단 전 출력:\n${partial.slice(0, 2000)}` : ''),
+      };
+    }
+    if (r.error) {
+      return {
+        ok: false, exit: null, stdout: r.stdout || '',
+        stderr: `✗ 실행 실패(${r.error.code || r.error.message}): ${cmd}` + (partial ? `\n${partial.slice(0, 2000)}` : ''),
+      };
+    }
+    if (r.status == null && r.signal) {
+      return { ok: false, exit: null, stdout: r.stdout || '', stderr: `✗ 시그널 ${r.signal} 로 종료됨: ${cmd}` + (partial ? `\n${partial.slice(0, 2000)}` : '') };
+    }
     return { ok: r.status === 0, exit: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
   }
   function handleRequest(req) {
