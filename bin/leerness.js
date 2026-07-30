@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.90';
+const VERSION = '1.36.91';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -15328,9 +15328,50 @@ function _checkAgent(agent, opts = {}) {
       error = `exit ${r.status}`;
     }
   } catch (e) { error = e.message; }
+  // 1.36.91: **설치됨 ≠ 사용가능**. 위 확인은 바이너리가 뜨는지만 본다 — 인증·모델 사용권한·쿼터·과금 권한은
+  //   아무것도 증명하지 않는다. 무료·비대화형·부작용 없음이 확인된 authCheck 를 가진 provider 만 실제로 판정하고,
+  //   나머지는 'unknown' 으로 **남긴다**(모르는 것을 안다고 말하지 않는다). opts.auth 일 때만 실행 — 지연 비용이 있다.
+  let auth = 'unknown', authEvidence = null, authSource = null;
+  //   args 는 shell:true 로 실행되므로(윈도우 .cmd 심 해석에 필요) **셸 메타문자가 없어야** 한다.
+  //   있으면 인용이 깨져 엉뚱한 실행이 되고(실측: 따옴표 포함 args 가 파싱 실패로 exit 1), 주입 표면도 된다.
+  const _argsSafe = (a) => Array.isArray(a) && a.length > 0 && a.every(x => typeof x === 'string' && /^[A-Za-z0-9._:@/\\-]+$/.test(x));
+  if (installed && opts.auth && agent.authCheck && _argsSafe(agent.authCheck.args)) {
+    authSource = `${agent.bin} ${agent.authCheck.args.join(' ')}`;
+    try {
+      const ar = cp.spawnSync(agent.bin, agent.authCheck.args, {
+        encoding: 'utf8', timeout: agent.authCheck.timeoutMs || 8000, shell: true, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const aout = ((ar.stdout || '') + (ar.stderr || '')).trim();
+      // **"실행하지 못함"을 "확실히 미인증"으로 둔갑시키지 않는다.** `no` 는 고위험 작업을 차단하므로,
+      //   런처/파싱 수준 실패를 no 로 읽으면 멀쩡한 사용자가 부당하게 잠긴다(bugfix probe 와 같은 규율).
+      //   스택 프레임(`\n    at file:line:col`)은 확인 명령 자체가 던진 것이다 — CLI 가 내는 "not logged in"
+      //   메시지와 형태가 명확히 다르므로 이것으로 가른다(실측: 크래시하는 확인 명령이 `no` 로 읽혔다).
+      const launcherish = /(?:not recognized as an internal or external command|command not found|cannot find module|\[eval\]|ENOENT)/i.test(aout)
+        || /\n\s+at .+:\d+:\d+/.test(aout)
+        || ar.status === 127 || ar.status === 9009;
+      //   evidence 는 사람이 보는 출력·JSON·CI 로그에 실린다 — 토큰 마스킹 + 제어문자(터미널 이스케이프) 제거.
+      const _clean = (s) => require('../lib/pure-utils').redactSecrets(String(s).replace(new RegExp('[\\u0000-\\u001f\\u007f]', 'g'), ' '), 80).trim();
+      if (ar.error || ar.status == null) { auth = 'unknown'; authEvidence = `확인 실패(${(ar.error && ar.error.code) || 'timeout'})`; }
+      else if (launcherish) { auth = 'unknown'; authEvidence = `확인 명령을 실행하지 못함(exit ${ar.status})`; }
+      else if (ar.status === 0) { auth = 'ok'; authEvidence = _clean(aout.split('\n')[0]) || 'exit 0'; }
+      else {
+        // **nonzero 를 곧바로 "확실히 미인증"으로 읽지 않는다.** 구버전(하위명령 없음)·설정 오류·내부 오류도
+        //   nonzero 다. `no` 는 고위험을 차단하므로, 로그아웃으로 **알아볼 수 있는 문구**가 함께 있을 때만 no.
+        //   아니면 unknown — 차단하지 않는 쪽으로 실패한다(false-BLOCK 방지).
+        let looksLoggedOut = false;
+        try { looksLoggedOut = !!(agent.authCheck.noPattern && new RegExp(agent.authCheck.noPattern, 'i').test(aout)); } catch {}
+        auth = looksLoggedOut ? 'no' : 'unknown';
+        authEvidence = looksLoggedOut ? (_clean(aout.split('\n')[0]) || `exit ${ar.status}`)
+          : `판정 불가(exit ${ar.status}) — 로그아웃으로 알아볼 문구 없음`;
+      }
+    } catch (e) { auth = 'unknown'; authEvidence = `확인 실패(${e.message})`; }
+  }
   return {
     id: agent.id, bin: agent.bin, desc: agent.desc, envFlag: agent.envFlag,
     enabled, installed, version, error,
+    auth, authEvidence, authSource,
+    // 인증까지 확인된 경우에만 'ready' 라고 부르지 않는다 — 기존 status 의미(설치+활성)는 그대로 두고,
+    //   인증은 별도 축으로 노출한다. 두 축을 한 단어에 섞으면 무엇이 검증됐는지 알 수 없어진다.
     status: enabled && installed ? 'ready' : !installed ? 'not-installed' : !enabled ? 'disabled' : 'unknown'
   };
 }
@@ -24057,8 +24098,21 @@ async function main() {
       if (_rtRaw[i].startsWith('--')) { if (['--tier', '--approved-by', '--path'].includes(_rtRaw[i]) && _rtRaw[i + 1] && !_rtRaw[i + 1].startsWith('--')) i++; continue; }
       _rtToks.push(_rtRaw[i]);
     }
+    // _providerAuth (1.36.91): 인증 축을 라우팅이 소비한다 — 확인 가능한 provider 만 ok/no, 나머지는 unknown.
+    //   확인 명령이 없는 provider 는 프로세스를 띄우지 않는다(불필요한 지연 방지).
+    //   codex 30차 #1: 종전엔 EXTERNAL_AGENTS 만 봐서 **프로젝트의 provider 재정의(.harness)를 무시**했다 —
+    //   `agents check` 는 재정의된 CLI 를, 라우팅은 전역 동명 CLI 를 확인하는 불일치가 생긴다. 같은 해석기를 쓴다.
+    const _authRoot = arg('--path', process.cwd());
+    const _authCache = new Map();
+    const _providerAuth = (pid) => {
+      if (_authCache.has(pid)) return _authCache.get(pid);
+      const def = (_allProviders(_authRoot) || []).find(a => a.id === pid);
+      const v = (def && def.authCheck) ? (_checkAgent(def, { auth: true }).auth || 'unknown') : 'unknown';
+      _authCache.set(pid, v);
+      return v;
+    };
     return require('../lib/routing').routeCmd(arg('--path', process.cwd()), _rtToks.join(' '),
-      { has, arg, _withLock, _resolveRole, _toggleOn: (r, id) => _tgl.toggleOn(r, id) });
+      { has, arg, _withLock, _resolveRole, _providerAuth, _toggleOn: (r, id) => _tgl.toggleOn(r, id) });
   }
   if (cmd === 'agents') return agentsCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
   // 1.9.157: Provider Registry — 사용자 정의 provider 동적 추가
@@ -24540,6 +24594,9 @@ module.exports = {
   _parseSlashFromHelp, _probeAgentSlash, _refreshAgentSlashCommands,
   // 1.9.269: 시스템(OS) 언어 감지 (UR-0022) + 언어 판별 — 단위 테스트
   _detectSystemLang, detectLanguageValue,
+  // 1.36.91: 인증 축(설치됨≠사용가능) — authCheck 실행 여부를 **결정적으로** 검증하려면 함수 단위 접근이 필요하다
+  //   (실제 CLI 설치 여부에 의존하는 단언은 그 CLI 가 없는 머신에서 공허해진다).
+  _checkAgent,
   // 1.9.270: agent roles — 모델별 역할 부여 (사용자 명시) — 단위 테스트
   ROLE_CATALOG, _normalizeRole, _pickModel, _rolesFile, _loadRoles, _saveRoles, _resolveRole, _suggestRoles, rolesCmd, _dispatchCommand,
   // 1.9.272: 권한/보안 표면 공개 (GPT-5.5 리뷰) — 단위 테스트

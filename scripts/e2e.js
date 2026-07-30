@@ -7803,9 +7803,13 @@ total++;
     const cj = J(R(['agents', 'route', '주문 필터 추가', '--confirm', '--path', d, '--json'])) || {};
     const honestOk = /확인하지 않았습니다/.test(human) && /측정값이 아닙니다/.test(human)
       && !/설치·활성 여부만 확인/.test(human)                       // 하지 않은 확인을 했다고 말하던 옛 문구
-      && /확인하지 않았습니다/.test(logHuman) && /외부 CLI 를 실행하지 않습니다/.test(logHuman)
+      && /확인하지 않았습니다/.test(logHuman) && /작업을 대신 수행하지 않습니다/.test(logHuman)
       && cj.executed === false && typeof cj.confirmed === 'boolean' && !('dispatched' in cj)
-      && /외부 CLI 를 실행하지 않습니다/.test(JSON.stringify(cj));
+      //   1.36.91: 인증 축이 생기면서 "외부 CLI 를 전혀 실행하지 않는다"는 **거짓이 됐다**(고위험에서 상태 명령을 실행한다).
+      //   문구가 그 구분을 담고 있는지 단언하고, 옛 과장 문구가 되살아나지 않는지도 함께 본다.
+      && /모델 호출\(과금\)은 하지 않습니다/.test(JSON.stringify(cj))
+      && /인증 확인을 위해 해당 CLI 의 상태 명령만 실행/.test(JSON.stringify(cj))
+      && !/외부 CLI 를 실행하지 않습니다/.test(JSON.stringify(cj));
     // 모델명 비하드코딩 — 정책 모듈에 벤더 모델 id 가 있으면 안 된다(몇 달이면 낡는다)
     //   경로는 CLI 기준으로 잡는다 — 검사 대상이 "지금 실행 중인 그 설치본"이어야 한다(__dirname 은 실행 위치에 따라 어긋난다).
     const srcOk = !/(claude-(opus|sonnet|haiku)|gpt-[45]|o[34]-mini|gemini-)/i.test(fs.readFileSync(path.join(path.dirname(CLI), '..', 'lib', 'routing.js'), 'utf8'));
@@ -7893,6 +7897,113 @@ total++;
   } catch (e) { console.log('   [dashboard 디버그] 예외: ' + ((e && e.message) || e)); }
   finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? '✓ B(1.36.90) dashboard 읽기전용: 스냅샷/토글상태 · 게이트 미판정·정적뷰 존속 고지 · XSS 이스케이프 · 경계 3종(재귀 .harness 실행코드0 · 루트 실행기 미생성 · leerness.html 실제 재생성) · 상태 무변경 · 형상내성/시크릿마스킹/게이트와 동일 술어 · 포트·타임아웃 범위검증' : '✗ dashboard 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.91: **설치됨 ≠ 사용가능** — 인증 축. 확인 가능한 provider 만 판정하고 나머지는 unknown 으로 남긴다.
+//   unknown 을 차단 사유로 쓰면 확인 수단이 없는 대부분의 CLI 에서 고위험 작업이 전부 잠긴다(false-BLOCK) —
+//   "확실히 아닌 것"만 막는다는 비대칭이 이 축의 핵심이고, 그걸 테스트가 못 박는다.
+total++;
+{
+  let ok = false;
+  const _d = [];
+  const R = (args) => { const r = cp.spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 120000 }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
+  const J = (x) => { try { return JSON.parse(x.o.slice(x.o.indexOf('{'))); } catch { return null; } };
+  let A1 = false, A2 = false, A3 = false, A4 = false, A5 = false, A6 = false;
+  try {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auth-')); _d.push(d);
+    R(['init', d, '--yes', '--language', 'ko', '--no-stale-check']);
+    const chk = J(R(['agents', 'check', '--path', d, '--json'])) || {};
+    // A1: 인증은 별도 축이고, 판정/미판정이 구분돼 노출된다(설치됨을 사용가능이라 부르지 않는다)
+    A1 = Array.isArray(chk.agents) && chk.agents.length > 0
+      && chk.agents.every(a => ['ok', 'no', 'unknown'].includes(a.auth))
+      && Array.isArray(chk.authUnknown) && chk.authUnknown.length > 0
+      && /쿼터·과금 권한은 어느 provider 도 확인하지 않았/.test(chk.authNote || '');
+    // A2: 확인 명령이 없는 provider 는 반드시 unknown — 추정으로 ok/no 를 붙이지 않는다
+    const reg = require(path.join(path.dirname(CLI), '..', 'lib', 'agent-registry.js')).EXTERNAL_AGENTS;
+    const noCheckIds = reg.filter(a => !a.authCheck).map(a => a.id);
+    //   codex 30차 #6: `!a || …` 는 provider 가 응답에서 **빠져도** 통과한다(누락을 성공으로 읽음).
+    //   레지스트리 id 는 반드시 존재해야 하고, 그 다음에 unknown 이어야 한다.
+    A2 = noCheckIds.length > 0 && noCheckIds.every(id => {
+      const a = chk.agents.find(x => x.id === id);
+      return !!a && a.auth === 'unknown';
+    });
+    // A3: `list` 는 인증 확인을 하지 않는다(매 목록 조회마다 외부 프로세스를 띄우면 안 된다)
+    //   + **확인이 실제로 수행되는지**를 결정적으로 증명한다. 실제 CLI 설치 여부에 의존하면 그 CLI 가 없는
+    //   머신에서 단언이 공허해지므로, 종료코드를 우리가 정하는 합성 provider 로 메커니즘 자체를 검사한다
+    //   (실측: 이 단언이 없을 때 "인증 확인을 통째로 끄는" 변이가 그대로 통과했다).
+    const _ck = require(CLI)._checkAgent;
+    //   bin 은 PATH 의 `node` 를 쓴다 — process.execPath 는 공백 포함 경로("C:\\Program Files\\...")라
+    //   _checkAgent 의 shell:true 실행에서 깨진다(실측: 기준선이 통째로 실패했다).
+    //   args 는 **스크립트 파일 경로**로 준다 — `-e "process.exit(0)"` 는 괄호 때문에 메타문자 가드에
+    //   걸려 실행되지 않는다(실측: 내 가드가 내 테스트를 정확히 거부했다).
+    const _mkScript = (name, body) => { const p = path.join(d, name).replace(/\\/g, '/'); fs.writeFileSync(p, body); return p; };
+    const S_OK = _mkScript('auth_ok.js', 'process.exit(0)');
+    const S_NO = _mkScript('auth_no.js', 'console.log("Not logged in"); process.exit(3)');
+    const S_ODD = _mkScript('auth_odd.js', 'console.log("config parse failed"); process.exit(2)');
+    const mkAgent = (script) => ({ id: 'synthetic', bin: 'node', envFlag: 'LEERNESS_NO_SUCH_FLAG',
+      versionArgs: [S_OK], desc: 'synthetic',
+      authCheck: { args: [script], timeoutMs: 8000, noPattern: 'not logged in|logged out' } });
+    const okRes = _ck(mkAgent(S_OK), { auth: true });
+    const noRes = _ck(mkAgent(S_NO), { auth: true });
+    const offRes = _ck(mkAgent(S_OK), {});                    // opts.auth 없으면 확인하지 않는다
+    //   codex 30차 #2: **nonzero ≠ 미인증**. 로그아웃으로 알아볼 문구가 없으면 unknown 이어야 한다 —
+    //   구버전·설정오류·내부오류를 no 로 읽으면 멀쩡한 사용자의 고위험 작업이 잠긴다(false-BLOCK).
+    const oddRes = _ck(mkAgent(S_ODD), { auth: true });
+    //   + 실행 실패를 "확실히 미인증"으로 둔갑시키지 않는다: `no` 는 고위험을 차단하므로, 확인 명령 자체가
+    //   깨졌을 때 no 를 내면 멀쩡한 사용자가 잠긴다(실측: 크래시하는 확인 명령이 no 로 읽혔다).
+    //   + evidence 는 사람이 보는 출력에 실리므로 토큰이 섞여 나오면 안 된다.
+    const crashScript = path.join(d, 'authcrash.js').replace(/\\/g, '/');
+    fs.writeFileSync(crashScript, 'throw new Error("broken check")');
+    const leakScript = path.join(d, 'authleak.js').replace(/\\/g, '/');
+    fs.writeFileSync(leakScript, 'console.log("token=sk-live-LEAKME ok"); process.exit(0)');
+    const fileAgent = (f) => ({ id: 'syn', bin: 'node', envFlag: 'LEERNESS_NO_SUCH_FLAG', versionArgs: ['-e', 'process.exit(0)'], desc: 's',
+      authCheck: { args: [f], timeoutMs: 8000 } });
+    const crashRes = _ck(fileAgent(crashScript), { auth: true });
+    const leakRes = _ck(fileAgent(leakScript), { auth: true });
+    //   셸 메타문자가 든 args 는 실행 자체를 거부한다(인용이 깨져 엉뚱한 실행이 되고 주입 표면이 된다)
+    const metaRes = _ck({ id: 'syn', bin: 'node', envFlag: 'X', versionArgs: ['-e', 'process.exit(0)'], desc: 's',
+      authCheck: { args: ['-e', 'console.log(1) && whoami'], timeoutMs: 3000 } }, { auth: true });
+    //   codex 30차 #5: 제목 부재만 보면 "list 가 auth:true 로 부르되 표만 그대로 내는" 변경이 통과한다.
+    //   list 의 **데이터**에도 판정이 실리지 않는지 함께 본다(auth 가 전부 unknown 이어야 한다).
+    const listJson = J(R(['agents', 'list', '--path', d, '--json']));
+    const listNoAuth = !listJson || !Array.isArray(listJson.agents)
+      || listJson.agents.every(a => a.auth === undefined || a.auth === 'unknown');
+    A3 = !/인증 확인 \(1\.36\.91\)/.test(R(['agents', 'list', '--path', d]).o) && listNoAuth
+      && okRes.auth === 'ok' && noRes.auth === 'no' && offRes.auth === 'unknown'
+      && oddRes.auth === 'unknown'                               // nonzero 인데 로그아웃 문구 없음 → 판정 불가
+      && typeof okRes.authSource === 'string' && okRes.authSource.length > 0
+      && crashRes.auth === 'unknown'
+      && leakRes.auth === 'ok' && !/sk-live-LEAKME/.test(String(leakRes.authEvidence)) && /token=\*\*\*/.test(String(leakRes.authEvidence))
+      && metaRes.auth === 'unknown' && metaRes.authSource === null;
+    // A4~A6: 라우팅 연동 — unknown 은 통과, 확실한 미인증만 고위험에서 차단, normal 은 무관
+    const RTm = require(path.join(path.dirname(CLI), '..', 'lib', 'routing.js'));
+    const roles = { architect: 'codex', commander: 'codex', coder: 'codex', reviewer: 'claude' };
+    const planWith = (tier, authMap) => RTm.plan(d, { tier }, {
+      _resolveRole: (r, role) => ({ provider: roles[role] }),
+      _providerAuth: (pid) => authMap[pid] || 'unknown',
+    });
+    const hasAuthBlock = (p) => p.blockers.some(b => b.code === 'provider_not_authenticated');
+    A4 = !hasAuthBlock(planWith('high-risk', {}));                       // 전부 unknown → 막지 않는다
+    A5 = hasAuthBlock(planWith('high-risk', { codex: 'no', claude: 'ok' }));  // 확실한 미인증 → 막는다
+    //   codex 30차 #3: 인증 확인은 외부 프로세스를 띄운다 — 차단에 쓰이는 고위험에서만 확인해야
+    //   tiny/normal 에 지연이 붙지 않고, "여기서 CLI 를 실행한다"는 범위도 좁게 유지된다.
+    //   호출 횟수를 직접 센다(결과만 보면 "확인은 하고 무시하는" 구현과 구분되지 않는다).
+    let calls = 0;
+    const counting = (tier) => RTm.plan(d, { tier }, {
+      _resolveRole: (r, role) => ({ provider: roles[role] }),
+      _providerAuth: () => { calls++; return 'no'; },
+    });
+    calls = 0; const normalPlan = counting('normal'); const normalCalls = calls;
+    calls = 0; counting('high-risk'); const highCalls = calls;
+    A6 = !hasAuthBlock(planWith('normal', { codex: 'no', claude: 'no' }))     // normal 은 무관
+      && !hasAuthBlock(normalPlan) && normalCalls === 0 && highCalls > 0      // normal 은 확인 자체를 안 한다
+      && planWith('high-risk', {}).assignments.every(a => 'auth' in a);       // auth 축이 계획에 실린다
+    ok = A1 && A2 && A3 && A4 && A5 && A6;
+    if (!ok) console.log(`   [인증축 디버그] 축노출=${A1} 미확인은unknown=${A2} list무확인=${A3} unknown통과=${A4} 미인증차단=${A5} normal무관+축노출=${A6}`);
+  } catch (e) { console.log('   [인증축 디버그] 예외: ' + ((e && e.message) || e)); }
+  finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.91) 인증 축(설치됨≠사용가능): 확인 명령 있는 provider 만 ok/no · 나머지는 unknown 유지 · list 는 미확인(지연) · 라우팅은 unknown 통과 / 확실한 미인증만 고위험 차단' : '✗ 인증 축 실패');
   if (!ok) failed++;
 }
 

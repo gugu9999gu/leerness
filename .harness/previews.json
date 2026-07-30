@@ -160,5 +160,33 @@
         "event": "approved"
       }
     ]
+  },
+  {
+    "id": "P-0008",
+    "title": "Claude Code 플러그인 + 스킬로 배포 (포크 없이 같은 저장소)",
+    "design": "leerness 를 Claude Code 플러그인으로 배포한다. 같은 저장소에 .claude-plugin/marketplace.json + plugins/leerness/ 를 두어 포크 없이 호스팅(공식 스펙상 한 저장소가 마켓플레이스와 플러그인을 동시 호스팅 가능). 플러그인은 skills/(모델 자동 호출) + commands/(슬래시) + .mcp.json(MCP 89도구 자동 배선) + hooks/(세션 시작 handoff) 를 담는다. Codex 쪽은 AGENTS.md 규약을 그대로 쓰되 설치 안내를 정리.",
+    "features": [
+      "marketplace.json",
+      "plugin.json",
+      "skills/SKILL.md",
+      "commands 이관",
+      ".mcp.json 자동배선",
+      "hooks 세션훅",
+      "claude plugin validate 게이트",
+      "Codex AGENTS.md 안내"
+    ],
+    "status": "revision-requested",
+    "createdAt": "2026-07-30T01:48:25.746Z",
+    "history": [
+      {
+        "at": "2026-07-30T01:48:25.746Z",
+        "event": "proposed"
+      },
+      {
+        "at": "2026-07-30T01:53:54.318Z",
+        "event": "revision-requested",
+        "note": "사용자 결정: 지금은 보류(방향만 기록). 재개 시 범위 = codex 31차 권장 MVP — 포크 없이 기존 저장소에 .claude-plugin/marketplace.json + plugins/leerness/. 배포 경로는 자체 매니페스트만(커뮤니티 마켓플레이스 제출 안 함). 넘지 않을 경계: 저장소 포크 금지 · bin/ 에 CLI 번들 금지(얇은 해석기만: 로컬→PATH→버전범위 확인→없으면 명확히 실패) · npx 자동 다운로드 금지 · 89 도구 래핑 금지 · MVP 에 강제 훅 금지(세션종료 훅은 보장 불가) · 오류를 삼켜 성공 반환 금지 · .harness 에 실행코드 금지 · 'Codex 플러그인' 이라는 표현 금지(규격 없음, AGENTS.md+MCP 로만). 스킬은 좁게(.harness 존재 시 컨텍스트 적재 · 게이트 켜진 상태의 완료 직전 검증)."
+      }
+    ]
   }
 ]
