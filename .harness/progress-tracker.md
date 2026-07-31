@@ -103,3 +103,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0080 | done | 10차 헌트 7건+검수 3건 (1.36.78) | team/constraints/agents/contract/milestones, 병렬검증, selftest 334, e2e 401/401, npm 게시 | 다음 액션 작성 | 2026-07-28 |
 | T-0081 | done | 도그푸딩 P1 5건 + 검수 7건 (1.36.79) | 실 프로젝트 60개 감사, selftest 334, e2e 402/402, npm 게시 | 다음 액션 작성 | 2026-07-28 |
 | T-0082 | requested | 1.36.81 후보 diff 적대적 릴리스 검수: referee fail-closed 상태 전이, NUL 이스케이프 런타임 동치, e2e 회귀력, 문서 과장 여부 | user-request | 다음 액션 작성 | 2026-07-28 |
+| T-0083 | requested | audit --fix 가 README 관리블록의 Last synced 도장만 갱신하고 본문(하네스 버전 3곳·도구 수)은 낡은 채로 둔다 → 탐지기가 영구 침묵. 실측: --fix 후 낡은 1.20.0 3곳 잔존, 재감지 false. readme sync 는 0곳 잔존. 수정: --fix 가 readme sync 경로를 호출 | user-request | 다음 액션 작성 | 2026-07-31 |

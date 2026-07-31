@@ -8169,6 +8169,163 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.95 (P-0009 A · 부채 상환 — 범위 축소): AI 가 매 세션 읽도록 지시받는 파일의 절반이 낡은 릴리스 이력이었다.
+//   한글 session-workflow 템플릿 10,308자 중 5,216자(50.6%)가 MCP 도구 수를 18→42 로 세는 로그였고
+//   실제 도구 수는 89 다. 영문 템플릿은 이미 깨끗했다(표면 불일치).
+//   **기존 설치본의 이력까지 지우는 기능은 이 릴리스에서 뺐다.** 정확 일치 목록으로 시도했지만
+//   검수가 9회에 걸쳐 사용자 데이터 삭제/변형 반례를 계속 찾아냈다 — 문자열로는 "우리가 내보낸 줄"과
+//   "사용자가 그 줄을 적은 것"을 구분할 수 없기 때문이다(바이트가 같다). 근본 해결은 생성 영역 마커
+//   (provenance)이고 별도 라운드로 다룬다. 여기서는 **삭제하지 않는 변경만** 출하한다.
+total++;
+{
+  let ok = false;
+  const _d = [];
+  let T1 = false, T2 = false, T3 = false;
+  const dbg = {};
+  try {
+    const R = (a) => { const r = cp.spawnSync(process.execPath, [CLI, ...a], { encoding: 'utf8', timeout: 180000 }); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
+    const mkTpl = (lang) => {
+      const w = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tpl95-')); _d.push(w);
+      R(['init', w, '--yes', '--language', lang, '--no-stale-check']);
+      return fs.readFileSync(path.join(w, '.harness', 'session-workflow.md'), 'utf8');
+    };
+    const ko = mkTpl('ko'), en = mkTpl('en');
+
+    // ── T1: 출하 템플릿에 낡은 릴리스 이력이 없다(양쪽 언어).
+    //   개수를 고쳐 적는 것은 다음 릴리스에 또 낡는다 — **수치 주장 자체가 0** 인지 단언한다.
+    //   `\b` 를 한글 뒤에 붙이면 절대 매치되지 않으므로 쓰지 않는다(초안이 그래서 아무것도 세지 않았다).
+    //   조사/단위(`23개 도구`)가 끼어도 세야 한다.
+    //   영문은 `Tools` 처럼 대문자로도 쓴다 — 대소문자를 구분하면 `**99 Tools**` 변이가 그대로 통과한다(검수 실측).
+    const staleCount = (s) => (s.match(/\d+\s*(?:개|여|여개)?\s*(?:도구|tools)/gi) || []).length;
+    dbg.stale = staleCount(ko) + '/' + staleCount(en);
+    dbg.size = ko.length + '/' + en.length;
+    T1 = staleCount(ko) === 0 && staleCount(en) === 0
+      && !/MCP server/.test(ko) && !/마일스톤/.test(ko)
+      //   본문 계약은 그대로 — 지운 것은 이력뿐이다(대조: 6단계 구조와 운영 사실이 살아 있어야 한다)
+      && /## Step 6/.test(ko) && /## 자동 회복/.test(ko) && /session close가 누락되면/.test(ko)
+      && /## Step 6/.test(en) && /Auto-recovery/.test(en)
+      //   두 언어의 크기가 비슷해야 한다 — 한쪽만 이력을 이고 있던 상태가 재발하면 여기서 걸린다
+      && Math.abs(ko.length - en.length) < 1500;
+
+    // ── T3: 이 릴리스는 **삭제하지 않는다**. 템플릿에서 이력을 지우면 그 줄들이 처음으로 머지 경로를 타게 되고,
+    //   1.36.60 이 넣어 둔 자동생성 이력 필터가 그때 발화해 **간접적으로** 삭제가 일어났다(검수 실측:
+    //   설치본 21개의 이력 731줄 중 346줄 삭제 + 사용자 문장 유실). 그 필터를 걷어냈고, 여기서 못 박는다.
+    const PU = require(path.join(path.dirname(CLI), '..', 'lib', 'pure-utils.js'));
+    const MG = (prev) => PU._managedMerge('.harness/session-workflow.md', ko, prev, '.harness/archive', new Set(), { lang: 'ko' });
+    //   (a) 옛 필터의 시그니처와 겹치는 **사용자 문장** — 필터가 살아 있으면 삭제된다
+    const userProse = [
+      '- 사용자 메모: MCP **77 도구** 는 우리 내부 표현이며 삭제 금지',
+      '- 프로젝트 정책: MCP **3 도구는 별도 승인 후 사용한다',
+      '- 🏆 마일스톤은 고객 승인 뒤에만 확정한다',
+      '- 🎉 **2 라운드 인터뷰 후 가격을 결정한다',
+      '- MCP **7명의 담당자만 운영 배포를 승인한다',
+    ];
+    const mProse = MG(userProse.join('\n') + '\n');
+    const proseOk = userProse.every(s => mProse.includes(s));
+    //   (b) 우리 이력 줄도 **삭제가 아니라 이월**이어야 한다(과보존이 이 파일의 계약이다)
+    const hist = ['- 1.9.86+ MCP server **18 도구** (handoff/drift)', '- 1.9.100 🏆 마일스톤 — 30 라운드 자율 누적'];
+    const mHist = MG(hist.join('\n') + '\n');
+    const carryOk = hist.every(s => mHist.includes(s)) && /Preserved previous content/.test(mHist);
+    //   (c) 멱등
+    const idemOk = MG(mHist) === MG(MG(mHist));
+    //   (d) **새 템플릿이 실제로 적용**돼야 한다 — 위 셋만 보면 "이전 파일을 그대로 두고 Preserved 헤더만
+    //   덧붙이는" 머지도 통과한다(검수가 그 변이를 살렸다). 그러면 기존 설치본이 낡은 이력을 계속
+    //   **활성 본문**으로 읽는데 CI 는 초록이다. 관리 영역이 새 템플릿과 같은지, 옛 줄은 태그 뒤에 있는지 본다.
+    const _tag = '<!-- leerness:migration-preserved -->';
+    const _cut = mHist.indexOf(_tag);
+    //   태그 앞에는 구분선(`---`)이 붙는다 — 그대로 비교하면 정상 코드에서도 실패한다(실제로 겪었다).
+    const appliedOk = _cut >= 0
+      && mHist.slice(0, _cut).replace(/\n*-{3,}\n*$/, '').trim() === ko.trim()
+      && hist.every(s => mHist.slice(_cut).includes(s));
+    dbg.nodel = `산문 ${proseOk} 이월 ${carryOk} 멱등 ${idemOk} 템플릿적용 ${appliedOk}`;
+    T3 = proseOk && carryOk && idemOk && appliedOk;
+
+    // ── T2: handoff 의 `last N lines` 라벨이 동작과 일치한다.
+    //   종전엔 파일 전체를 넣고 **앞** 4000자를 잘랐다(단위도 방향도 반대).
+    //   수정 과정에서 세 번의 회귀가 있었고(헤더 잡아먹음 · O(n²) · 유니코드 파손) 전부 여기서 잡는다.
+    const w5 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-hd95-')); _d.push(w5);
+    R(['init', w5, '--yes', '--language', 'ko', '--no-stale-check']);
+    const decPath = path.join(w5, '.harness', 'decisions.md');
+    const mkDec = (n, pad) => '# Decisions\n' + Array.from({ length: n }, (_, i) => `- 결정 ${String(i + 1).padStart(3, '0')} ` + 'x'.repeat(pad)).join('\n') + '\n';
+    const seg = (o) => o.slice(o.indexOf('=== Decisions'), o.indexOf('=== Task Log') > 0 ? o.indexOf('=== Task Log') : undefined);
+    //   (a) 마지막 40줄이 **끊김 없이** 나온다 — 양 끝만 보면 중간 유실을 놓친다.
+    fs.writeFileSync(decPath, mkDec(120, 4));
+    const sA = seg(R(['handoff', w5]).o);
+    const idsA = (sA.match(/- 결정 (\d{3})/g) || []).map(x => Number(x.slice(-3)));
+    const contiguous = idsA.length === 40 && idsA[0] === 81 && idsA[39] === 120 && idsA.every((v, i) => i === 0 || v === idsA[i - 1] + 1);
+    //   (b) 상한이 걸려도 **헤더는 잘리지 않고** 라벨의 표시 줄 수가 실제와 같아야 한다.
+    //   표시 줄 수만 맞추면 "모든 줄 길이를 1로 계산" 같은 변이가 산다 — 렌더된 본문의 실제 문자 수를 잰다.
+    fs.writeFileSync(decPath, mkDec(120, 150));
+    const sB = seg(R(['handoff', w5]).o);
+    const mB = sB.match(/(\d+)\/(\d+) 줄/);
+    const cntB = (sB.match(/- 결정 \d{3}/g) || []).length;
+    const bodyB = sB.slice(sB.indexOf('===\n') + 4).replace(/\n=== [\s\S]*$/, '').trim();
+    const capOk = /=== Decisions \(last 40 lines\)/.test(sB) && !!mB && Number(mB[1]) === cntB && cntB > 0 && /결정 120/.test(sB)
+      && bodyB.length <= 4000 && bodyB.length > 3000;
+    //   (c) 정확히 상한인 본문을 초과로 오판하면 안 된다 — 마지막 줄에도 개행을 세면 절반을 버린다.
+    //   합이 **정확히 4,000자**여야 판별된다(3,999 면 버그 구현도 통과). 2000 + 구분자 1 + 1999.
+    fs.writeFileSync(decPath, 'z'.repeat(2000) + '\n' + 'z'.repeat(1999));
+    const exactSeg = seg(R(['handoff', w5]).o);
+    const exactOk = /2\/2 줄/.test(exactSeg) && !/상한으로 잘림/.test(exactSeg);
+    //   (d) 한 줄이 상한을 넘으면 **코드포인트 경계**에서 잘라야 한다. 경계가 이모지 안쪽에 오도록 구성한다.
+    fs.writeFileSync(decPath, '# D\n- ' + 'y'.repeat(300) + '😀' + 'x'.repeat(3999) + '\n');
+    const oU = R(['handoff', w5]).o;
+    const uniOk = !/�/.test(oU) && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(oU);
+    //   (e) Task Log 도 같은 계약(Decisions 만 보면 tailLines 누락 변이가 산다). 총 줄 수는 헤더 포함 201.
+    fs.writeFileSync(path.join(w5, '.harness', 'task-log.md'), '# Task Log\n' + Array.from({ length: 200 }, (_, i) => `- 작업 ${String(i + 1).padStart(3, '0')}`).join('\n') + '\n');
+    const oT = R(['handoff', w5]).o;
+    const sT = oT.slice(oT.indexOf('=== Task Log'));
+    //   **실제로 60줄인지** 세야 한다 — 라벨만 보면 tailLines 를 59 로 바꾼 변이가 통과한다(검수 실측).
+    const taskIds = (sT.match(/- 작업 (\d{3})/g) || []).map(x => Number(x.slice(-3)));
+    const taskOk = taskIds.length === 60 && taskIds[0] === 141 && taskIds[59] === 200
+      && taskIds.every((v, i) => i === 0 || v === taskIds[i - 1] + 1) && /60\/201 줄/.test(sT);
+    //   (f) 빈 파일을 `1/1 줄` 이라고 말하면 안 된다(`''.split('\n')` 가 `['']` 이다)
+    fs.writeFileSync(decPath, '');
+    fs.writeFileSync(path.join(w5, '.harness', 'task-log.md'), '');
+    const emptyOk = !/1\/1 줄/.test(R(['handoff', w5]).o);
+    //   (g) --json 은 누적 로그의 **뒤를** 남긴다(같은 명령이 표면마다 반대 방향이면 안 된다).
+    //   totalChars 는 원문 길이와 정확히 같아야 하고, content 는 마커 포함 8,000자를 넘지 않아야 한다.
+    fs.writeFileSync(decPath, mkDec(600, 40));
+    const decRaw = fs.readFileSync(decPath, 'utf8');
+    let jd = null;
+    try { const t = R(['handoff', w5, '--json']).o; jd = JSON.parse(t.slice(t.indexOf('{'))).files.decisions; } catch (e) { dbg.json = String(e && e.message).slice(0, 40); }
+    const jsonOk = !!jd && /결정 600/.test(jd.content) && !/결정 001/.test(jd.content)
+      && jd.truncated === true && jd.kept === 'tail' && jd.totalChars === decRaw.length && jd.content.length <= 8000;
+    //   (g2) --json 절단도 **코드포인트 경계**여야 한다. 예산은 마커를 포함하므로 8000 이 아니다 —
+    //   상수를 박으면 경계가 이모지를 비껴가 변이가 산다(실제로 겪었다).
+    //   `head + 😀 + 'x'×(예산-1)` 이면 경계 = len-예산 = head.length+1 = 낮은 서로게이트로 자명하다.
+    const _jbud = 8000 - '\n…(truncated)'.length;
+    fs.writeFileSync(decPath, '# D\n' + 'y'.repeat(400) + '😀' + 'x'.repeat(_jbud - 1));
+    let jd2 = null;
+    try { const t = R(['handoff', w5, '--json']).o; jd2 = JSON.parse(t.slice(t.indexOf('{'))).files.decisions; } catch (e) { dbg.json2 = String(e && e.message).slice(0, 30); }
+    const jsonUniOk = !!jd2 && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(jd2.content) && !/�/.test(jd2.content);
+    //   (h) non-tail 파일(plan)은 **앞을** 남겨야 한다 — 방향을 뒤집어도 decisions 만 보면 통과한다.
+    fs.writeFileSync(path.join(w5, '.harness', 'plan.md'), '# Plan\nFIRST_MARKER\n' + 'p'.repeat(9000) + '\nLAST_MARKER\n');
+    let jp = null;
+    try { const t = R(['handoff', w5, '--json']).o; jp = JSON.parse(t.slice(t.indexOf('{'))).files.plan; } catch (e) { dbg.plan = String(e && e.message).slice(0, 30); }
+    //   head 방향에도 **같은 계약**이 걸린다 — totalChars 정확성과 마커 예산을 tail 에서만 재면
+    //   non-tail 쪽 변이(totalChars 0 · 마커 예산 미적용으로 8,013자)가 그대로 통과한다(검수 실측).
+    const planRaw = fs.readFileSync(path.join(w5, '.harness', 'plan.md'), 'utf8');
+    const jsonHeadOk = !!jp && jp.kept === 'head' && /FIRST_MARKER/.test(jp.content) && !/LAST_MARKER/.test(jp.content)
+      && jp.totalChars === planRaw.length && jp.content.length <= 8000 && jp.truncated === true;
+    //   (i) 본문 상한이 **선형**이어야 한다 — 줄마다 join() 하는 구현은 O(n²) 라 48,000줄에서 30초대였다.
+    //   임계값 20초는 정상(수 초)과 회귀(30초대) 사이에 넉넉히 있어 느린 머신에서도 오탐하지 않는다.
+    fs.writeFileSync(path.join(w5, '.harness', 'progress-tracker.md'),
+      '# P\n' + Array.from({ length: 48000 }, (_, i) => `| T-${String(i).padStart(5, '0')} | done | ` + 'x'.repeat(80) + ' |').join('\n') + '\n');
+    const _t0 = Date.now();
+    R(['handoff', w5]);
+    dbg.perf = Date.now() - _t0;
+    const perfOk = dbg.perf < 20000;
+    dbg.hd = `연속=${contiguous} 상한=${capOk}(${mB ? mB[0] : '-'} 본문 ${bodyB.length}자) 정확상한=${exactOk} 유니코드=${uniOk}/${jsonUniOk} 작업로그=${taskOk} 빈파일=${emptyOk} json=${jsonOk} head방향=${jsonHeadOk} 성능=${perfOk}(${dbg.perf}ms)`;
+    T2 = contiguous && capOk && exactOk && uniOk && jsonUniOk && taskOk && emptyOk && jsonOk && jsonHeadOk && perfOk;
+    ok = T1 && T2 && T3;
+    if (!ok) console.log(`   [P9A 디버그] 템플릿=${T1}(낡은수치 ${dbg.stale} 크기 ${dbg.size}) 무삭제=${T3}(${dbg.nodel}) handoff=${T2}(${dbg.hd})`);
+  } catch (e) { console.log('   [P9A 디버그] 예외: ' + ((e && e.message) || e)); }
+  finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.95) 부채 상환: 템플릿 낡은 이력 0(ko/en · 수치 주장 자체가 0) · 머지 삭제 0(옛 이력 필터 제거 — 사용자 산문 보존 · 이력은 이월) · handoff last-N 라벨=동작(헤더 불가침 · 줄 경계 · 정확 상한 · 코드포인트 · Task Log · 빈 파일 · --json tail/head 방향 · totalChars · 선형 성능)' : '✗ 부채 상환(1.36.95) 실패');
+  if (!ok) failed++;
+}
+
 // 1.36.94 (헌트 이월 2건 + 자체 검수 반영): ① 형상 무효 스토어에서 **차단 메시지가 안내한 탈출구가
 //   같은 사유로 거부**돼, 남는 실행 가능한 선택지가 "보호를 끄기" 하나였다.
 //   ② `provider add codex --bin codex` 라는 사실상 무변경 재등록이 빌트인 authCheck 를 지워 인증 축을
@@ -8791,3 +8948,4 @@ total++;
 
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
+

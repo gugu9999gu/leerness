@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.94';
+const VERSION = '1.36.95';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -693,6 +693,8 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 3. handoff 가 매 세션 자동으로 24h 내 archive 활동 알림
 
 
+## 자동 회복 · 보안
+
 - session close가 누락되면 다음 세션 시작 시 drift critical 발생.
 - 자동 회복 옵션: \`drift check --auto-fix\` (critical 시 session close 자동 실행).
 - handoff가 매 세션 시작 시 **과거 lessons 자동 재상기** (현재 task 키워드 기준).
@@ -704,49 +706,6 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 - handoff Date/Project 직후 통합 헤드라인 한 줄 (drift / 보안 / MCP / skill query / 설치 skill 수).
 - \`leerness health\` 한 줄로 종합 점검 (drift + 보안 + skills + usage + tasks).
 - \`leerness drift check --auto-fix\` 가 보안 신호 발견 시 \`audit --fix\` 자동 실행 → 재검사.
-- MCP server **18 도구** (handoff/drift/audit/verify_claim/contract/agents/reuse/whats_new/usage_stats/session_close/skill_suggest/lessons/task_export/env_check/brainstorm/skill_match/skill_list/health).
-- MCP server **21 도구** (skill_search/skill_info/benchmark 추가).
-- \`leerness handoff --json\` (외부 AI/MCP 통합용 구조화 출력).
-- \`leerness skill publish\` 보안 사전 점검 통합 (health 통과 후 publish).
-- \`leerness handoff --quiet\` (자동화/CI 모드 — 자동 회수 라인 비활성).
-- 🏆 마일스톤 — 30 라운드 자율 누적, stress-v45 30/30 PASS, e2e 219/219 PASS.
-- \`leerness lazy detect --json\` + MCP **22 도구** (\`leerness_lazy_detect\` 추가 — 거짓 완료/empty handoff/no test run/TODO 미추적 신호 JSON).
-- \`leerness audit --json\` 구조화 출력 (findings 11종 kind: design_dup/design_system_default/reuse_map_empty/milestone_unlinked/handoff_not_generated/current_state_stale/readme_version_mismatch/npm_cve/gitignore_missing_secrets/env_keys_missing/strict_promoted). MCP \`leerness_audit\`도 JSON 자동.
-- \`leerness session close --json\` 마감 통계 JSON (taskCounts/rules/skillCandidates/drift/topCommands/mcpStats/workspacePeers). MCP \`leerness_session_close\`도 JSON 자동.
-- MCP **23 도구** (\`leerness_retro\` 추가 — 4세션 누적 회고 JSON 외부 AI 노출).
-- MCP **24 도구** (\`leerness_task_add\` 추가 — 외부 AI 가 task 즉시 등록, 양방향 제어 완성).
-- MCP **25 도구** (\`leerness_task_update\` 추가 — task 상태/evidence/nextAction 갱신, read+add+update 3종 surface 완성).
-- MCP **26 도구** (\`leerness_task_drop\` 추가 — task 폐기, **task CRUD 완성**: read/add/update/drop).
-- \`leerness decision add\` CLI + MCP **27 도구** (\`leerness_decision_add\` — decisions.md 영구화 + handoff lessons 회수와 통합).
-- \`leerness rule list --json\` + MCP **29 도구** (\`leerness_rule_add\` + \`leerness_rule_list\` — 자연어 영구 룰 R/W).
-- MCP **30 도구 🎉 30 도구 마일스톤** (\`leerness_plan_add\` — plan.md milestone + progress-tracker 자동 동기화).
-- MCP **31 도구** (\`leerness_lesson_save\` — lessons.md 직접 write, **Memory Write Surface 5종 완성**: tasks/decisions/rules/plan/lessons).
-- handoff 통합 헤드라인에 **🧠 mem T/D/R/P/L 카운트** 추가 — 5종 메모리 영구화 상태 한눈에 확인.
-- \`leerness memory status [--json]\` + MCP **32 도구** (\`leerness_memory_status\`) — 상세 상태 + 최근 항목 조회.
-- \`leerness handoff --json\` 응답에 **\`memorySurface\` 필드 통합** — 단일 호출로 컨텍스트 + 5종 메모리 상태 동시 회수.
-- \`leerness brainstorm\` 회수 범위에 **lessons.md + plan.md** milestone 추가 — Memory Surface 5종 완전 통합.
-- \`leerness lesson list [--tag] [--json]\` + MCP **33 도구** (\`leerness_lesson_list\`) — lessons.md 전용 조회 + tag 필터.
-- \`leerness decision list [--json]\` + MCP **34 도구** (\`leerness_decision_list\`) — decisions.md 전체 조회 (Decision/Reason/Alternatives/Impact 메타).
-- \`leerness plan list [--json]\` + MCP **35 도구** (\`leerness_plan_list\`) — plan.md milestone 전체 (Status/Progress/Tasks). **Memory Surface READ 5종 완전 완성**.
-- handoff 6번째 자동 회수 \`🆕 최근 24h 메모리 변동\` — 5종 surface 의 24h 내 추가 항목 자동 노출.
-- \`session close --json\` 응답에도 \`memorySurface\` 필드 통합 — 마감 시 5종 메모리 상태 동시 회수.
-- \`health --json\` 응답에도 \`memorySurface\` 필드 통합 — handoff/session close/memory status 모든 JSON 명령 일관성.
-- \`leerness lesson drop <target>\` + MCP **36 도구** (\`leerness_lesson_drop\`) — 잘못 저장한 lesson 제거 (archive 자동 보존).
-- \`leerness decision drop <target>\` + MCP **37 도구** (\`leerness_decision_drop\`) — 잘못 저장한 결정 제거 (archive 보존).
-- \`leerness plan remove <M-XXXX|title>\` + MCP **38 도구** (\`leerness_plan_remove\`) — milestone 영구 제거 (archive 보존). **Memory Surface DELETE 5종 완전 완성** 🎉.
-- \`leerness memory archive list [--surface decisions|lessons|plan] [--json]\` + MCP **39 도구** (\`leerness_memory_archive_list\`) — DELETE 5종 archive 통합 조회 (복원 후보 회수).
-- \`leerness memory restore <surface> <target>\` + MCP **40 도구 🎉** (\`leerness_memory_restore\`) — archive → active 복귀 (DELETE→RESTORE cycle 완성). **MCP 40 도구 마일스톤**.
-- handoff **7번째 자동 회수** — \`🗑 최근 24h archive\` (D/L/P 카운트 + 복원 후보 안내). DELETE 활동 자동 인지.
-- 🎉 **60 라운드 자율 모드 마일스톤** — JSON 4종 (handoff/memory status/session close/health) \`memorySurface.archive\` 필드 통합. MCP 40 / handoff auto-recovery 7 / DELETE-RESTORE cycle 완성.
-- \`brainstorm\` 회수 범위에 3 archive 파일 (decisions/lessons/plan archive) 통합 — 과거 제거된 ideas 가 새 brainstorm 시 다시 후보로 노출. \`hits.archive\` 필드 + 복원 안내 라인.
-- \`session close\` 텍스트 모드에 archive 누적 라인 추가 — 마감 시점 DELETE 활동 가시화 (handoff 7번째 회수와 symmetric). archive 가시성 6 surface 완성.
-- \`brainstorm\` 텍스트 모드 lessonsExplicit / planMilestones display 추가 — 데이터 수집은 됐지만 display 가 누락돼 있던 gap 보완 fix.
-- \`leerness task list --json\` + MCP **41 도구** (\`leerness_task_list\`) — progress-tracker.md task JSON 조회 + \`--status\` 필터 (1.36.72 부터 기본 최신 100행, 전체는 \`--all\`). Task surface CRUD MCP 완전 완성 (add/list/update/drop).
-- MCP **42 도구** (\`leerness_rule_remove\`) — rules.md 에서 특정 rule 제거 + archive 보존. **5 surface CRUD MCP 완전 완성** (task/decision/lesson/plan/rule 모두 add/list/delete MCP 노출).
-- MCP \`leerness_drift_check\` JSON 응답 fix — \`--json\` 플래그 자동 추가하여 외부 AI가 구조화된 drift 신호 회수 (score, level, signals[], healthy).
-- \`.harness/session-workflow.md\` 템플릿에 **🧠 Memory CRUD Quick Reference** 섹션 추가 — 5 surface × CRUD 매트릭스 + archive cycle 워크플로 가이드. 신규 \`init\` 워크스페이스 즉시 적용.
-- \`leerness memory archive list --query <keyword>\` + MCP \`leerness_memory_archive_list\` query 인자 — archive 항목 키워드 case-insensitive 검색 (target/originalHeader 매칭).
-- \`leerness lesson list --query\` + \`leerness decision list --query\` + MCP 동일 인자 — active Memory 항목 키워드 검색 (lesson: text/tag, decision: title/decision/reason/alternatives/impact).
 
 ---
 
@@ -11589,18 +11548,34 @@ function handoff(root) {
       version: VERSION,
       files: {}
     };
-    function _addFile(key, p) {
-      if (exists(p)) {
-        const content = read(p);
-        result.files[key] = { path: rel(root, p), content: content.length > 8000 ? content.slice(0, 8000) + '\n…(truncated)' : content };
-      }
+    // 1.36.95: 같은 명령의 두 표면이 **반대 방향**으로 잘랐다 — 평문은 최근 N줄, JSON 은 앞 8000자.
+    //   외부 AI/MCP 용이라고 문서화된 JSON 소비자가 가장 오래된 결정만 받았다(실측: 15MB decisions.md 에서
+    //   최신 결정 미포함 · AEGIRINE task-log 529,747자 중 앞 1.5%). 누적 로그는 **뒤가 최신**이므로 뒤를 남긴다.
+    function _addFile(key, p, tailFirst) {
+      if (!exists(p)) return;
+      const content = read(p);
+      if (content.length <= 8000) { result.files[key] = { path: rel(root, p), content }; return; }
+      //   **코드포인트 경계**에서 자른다 — 문자 인덱스 slice 는 서로게이트 쌍을 쪼개 JSON 에 단독 surrogate 를
+      //   남긴다(검수 실측: 0xDE00). 일부 소비자는 그걸 거부하거나 U+FFFD 로 바꾼다.
+      const _safe = (s, n, fromEnd) => {
+        const cps = Array.from(s); let len = 0, k = 0;
+        if (fromEnd) { for (let i = cps.length - 1; i >= 0 && len + cps[i].length <= n; i--) { len += cps[i].length; k++; } return cps.slice(cps.length - k).join(''); }
+        for (let i = 0; i < cps.length && len + cps[i].length <= n; i++) { len += cps[i].length; k++; }
+        return cps.slice(0, k).join('');
+      };
+      //   마커를 상한 **바깥**에 붙이면 content 가 8,013자가 되어 8,000자를 예산으로 잡은 소비자가 넘긴다
+      //   (검수 실측). 마커까지 포함해 8,000자를 넘지 않게 한다.
+      const MARK = '\n…(truncated)';
+      const budget = 8000 - MARK.length;
+      const cut = tailFirst ? MARK.trimStart() + '\n' + _safe(content, budget, true) : _safe(content, budget, false) + MARK;
+      result.files[key] = { path: rel(root, p), content: cut, truncated: true, totalChars: content.length, kept: tailFirst ? 'tail' : 'head' };
     }
     _addFile('sessionHandoff', handoffPath(root));
     _addFile('currentState', currentStatePath(root));
     _addFile('plan', planPath(root));
-    _addFile('progressTracker', progressPath(root));
-    _addFile('decisions', decisionsPath(root));
-    _addFile('taskLog', taskLogPath(root));
+    _addFile('progressTracker', progressPath(root), true);
+    _addFile('decisions', decisionsPath(root), true);
+    _addFile('taskLog', taskLogPath(root), true);
     // active rules
     const activeRules = readRules(root).filter(r => r.status === 'active');
     if (activeRules.length) result.activeRules = activeRules.map(r => ({ id: r.id, trigger: r.trigger, rule: r.rule }));
@@ -11833,17 +11808,54 @@ function handoff(root) {
     return;
   }
   const sections = [];
-  function block(label, p) {
+  // 1.36.95: 라벨과 동작이 어긋나 있었다 — `last 40 lines` 라고 써 놓고 파일 전체를 넣은 뒤
+  //   **앞** 4000자를 잘랐다(단위도 줄↔문자로, 방향도 마지막↔처음으로 반대). 결정/작업로그는
+  //   최근 항목이 쓸모 있으므로 라벨대로 **뒤에서** N줄을 취하고, 안전 상한도 뒤를 남긴다.
+  //   **헤더는 절대 잘리지 않는다.** 1.36.95 초안은 섹션 전체를 `slice(-4000)` 해서 `=== Decisions … ===`
+  //   헤더가 1순위로 잘려 나갔고(헤더가 문자열 맨 앞에 있다), 그 결과 결정 내용이 앞 섹션 꼬리에 붙어
+  //   AI 가 소속을 오독했다(실사용 50개 중 4개 발화). 상한은 **본문에만** 적용한다.
+  //   그리고 잘릴 때도 라벨이 사실이어야 한다 — 줄 경계에서 자르고 실제 표시 줄 수를 함께 적는다
+  //   (종전엔 `last 40 lines` 라면서 25줄을 문장 중간에서 잘라 보여줬다).
+  const BODY_CAP = 4000;
+  function block(label, p, tailLines) {
     if (!exists(p)) return;
-    sections.push(`\n=== ${label} (${rel(root,p)}) ===\n${read(p).trim()}`);
+    const body = read(p).trim();
+    //   빈 파일은 `''.split('\n') === ['']` 이라 종전엔 `1/1 줄` 로 표시됐다(라벨이 거짓).
+    let ls = body ? body.split('\n') : [];
+    const total = ls.length;
+    if (tailLines && ls.length > tailLines) ls = ls.slice(-tailLines);
+    let truncated = false;
+    //   본문 상한은 **줄 단위**로 채운다. 매 반복마다 join() 하면 O(n²) 다 — 검수 실측으로 48,000줄에서
+    //   30.7초가 걸렸다(입력 2배마다 4배). 누적 길이를 한 번에 계산해 자를 지점만 찾는다(선형).
+    if (ls.length) {
+      //   구분자(\n)는 **줄 사이에만** 있다 — 마지막 줄에도 +1 을 더하면 정확히 상한인 본문을 초과로 오판해
+      //   절반을 버린다(검수 실측: 4,000자 2줄이 `1/2 줄 (상한으로 잘림)` 이 됐다).
+      let acc = 0, keep = 0;
+      const fits = (i) => acc + (keep ? 1 : 0) + ls[i].length <= BODY_CAP;
+      if (tailLines) { for (let i = ls.length - 1; i >= 0; i--) { if (!fits(i) && keep > 0) break; acc += (keep ? 1 : 0) + ls[i].length; keep++; } if (keep < ls.length) { ls = ls.slice(-keep); truncated = true; } }
+      else { for (let i = 0; i < ls.length; i++) { if (!fits(i) && keep > 0) break; acc += (keep ? 1 : 0) + ls[i].length; keep++; } if (keep < ls.length) { ls = ls.slice(0, keep); truncated = true; } }
+    }
+    //   한 줄이 상한보다 길면 그 줄만 자른다 — **코드포인트 경계**에서 자른다.
+    //   문자 인덱스로 자르면 서로게이트 쌍이 쪼개져 U+FFFD 나 단독 surrogate 가 남는다(검수 실측).
+    if (ls.length === 1 && ls[0].length > BODY_CAP) {
+      const cp = Array.from(ls[0]);
+      let n = 0, len = 0;
+      if (tailLines) { for (let i = cp.length - 1; i >= 0 && len + cp[i].length <= BODY_CAP; i--) { len += cp[i].length; n++; } ls = [cp.slice(cp.length - n).join('')]; }
+      else { for (let i = 0; i < cp.length && len + cp[i].length <= BODY_CAP; i++) { len += cp[i].length; n++; } ls = [cp.slice(0, n).join('')]; }
+      truncated = true;
+    }
+    const note = (tailLines || truncated)
+      ? ` — ${ls.length}/${total} 줄${truncated ? ' (상한으로 잘림)' : ''}`
+      : '';
+    sections.push(`\n=== ${label}${note} (${rel(root,p)}) ===\n${ls.join('\n')}`);
   }
   block('Session Handoff', handoffPath(root));
   block('Current State', currentStatePath(root));
   block('Plan', planPath(root));
   block('Progress Tracker', progressPath(root));
-  block('Decisions (last 40 lines)', decisionsPath(root));
-  block('Task Log (last 60 lines)', taskLogPath(root));
-  const out = sections.map(s => s.length <= 4000 ? s : s.slice(0, 4000) + '\n…(truncated)').join('\n');
+  block('Decisions (last 40 lines)', decisionsPath(root), 40);
+  block('Task Log (last 60 lines)', taskLogPath(root), 60);
+  const out = sections.join('\n');
   log('# Session Start Context');
   log(`Date: ${today()}`);
   log(`Project: ${detectProjectName(root)}`);
