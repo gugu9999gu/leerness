@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.97';
+const VERSION = '1.36.98';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -6153,7 +6153,29 @@ function _selfTestCases() {
         && tps.includes('prev = null') && tps.includes('_mergeManifests(root, 2)')
         && io2.includes('!_jsonErrEmitted && t && (t[0]') && /process\.on\('exit', \(code\) => \{ if \(code !== 0/.test(io2) && io2.includes('.corrupt-${Date.now()}-${process.pid}-')
         && s.includes('declaredTestCount != null && runResult && !runResult.skipped && runResult.allPassed');
-      return clar && shape && noDbUrl && reqOk && guards;
+      // 1.36.98 (P-0013): UI 스택 감지 — 라이브러리 인벤토리/시안 생성기가 스택별 전략을 고르는 근거라 오판이 곧 잘못된 산출물이 된다.
+      //   실측(실제 12개 프로젝트)에서 Tailwind 프로젝트는 CSS 변수가 0~5개뿐이고 유틸 어휘가 74~121종이라 토큰 출처가 정반대다.
+      const tmp3 = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ui98_'));
+      let uiOk = false;
+      try {
+        const mk = (sub, files) => { const d = path.join(tmp3, sub); fs.mkdirSync(path.join(d, '.harness'), { recursive: true }); for (const [n, c] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(d, n)), { recursive: true }); fs.writeFileSync(path.join(d, n), c); } return d; };
+        const idsOf = (d) => (tp.detectTechProfile(d).ui || []).map(u => u.id);
+        const langsOf = (d) => tp.detectTechProfile(d).languages.map(l => l.id);
+        const nextApp = mk('nextapp', { 'package.json': JSON.stringify({ dependencies: { next: '14', react: '18', tailwindcss: '3' } }), 'index.html': '<html></html>' });
+        const plain = mk('plain', { 'package.json': JSON.stringify({ dependencies: {} }), 'a.html': '<html></html>', 'b.html': '<html></html>', 'app.js': 'const x=1' });
+        const nA = idsOf(nextApp), nP = idsOf(plain);
+        uiOk = ['next', 'react', 'tailwind'].every(k => nA.includes(k))
+          && !nA.includes('plain-html')                       // 프레임워크가 있으면 index.html 이 있어도 플레인 아님
+          && nP.includes('plain-html') && nP.length === 1     // 신호 0 + html 존재 → 플레인
+          && !langsOf(plain).includes('html') && !langsOf(plain).some(l => l[0] === '#')   // html 이 '언어' 로 새지 않는다
+          && Array.isArray(tp.detectTechProfile(plain).ui);
+        // ui 만 바뀌어도 프로필이 다시 기록되는가 — 빼먹으면 기존 프로젝트에 ui 가 영영 안 남는다
+        const detA = tp.detectTechProfile(nextApp);
+        fs.writeFileSync(path.join(nextApp, '.harness', 'tech-profile.json'), JSON.stringify({ current: { languages: detA.languages, services: detA.services }, updatedAt: 'x', history: [] }));
+        uiOk = uiOk && tp.refreshTechProfile(nextApp).changed === true
+          && (JSON.parse(read(path.join(nextApp, '.harness', 'tech-profile.json'))).current.ui || []).some(u => u.id === 'tailwind');
+      } catch { uiOk = false; } finally { try { fs.rmSync(tmp3, { recursive: true, force: true }); } catch {} }
+      return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved();
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -7528,6 +7550,96 @@ const LENS_CATALOG = {
 };
 // 1.36.97 (P-0011): 도메인 목록을 세 표면(help ko · help en · commands)에 각각 손으로 적어 두었더니, 축을 추가할 때마다
 //   세 곳을 동시에 고쳐야 했고 한 곳만 놓쳐도 낡은 목록이 계속 광고된다. 카탈로그에서 파생시켜 어긋날 수 없게 한다.
+// 1.36.98 (P-0013): 라이브러리 추출기 행위 가드. 실측이 잡은 오탐/누락을 그대로 케이스로 박는다 —
+//   ① zod 스키마가 컴포넌트로 잡혔다(TS 제네릭 `Array<string>` 이 JSX 태그와 글자가 같아서)
+//   ② 창을 고정 문자 수로 자르면 30% 를 놓치고, 들여쓰기된 선언을 경계로 삼으면 반대로 붕괴한다
+//   ③ 플레인 HTML 프로젝트에 순진하게 돌리면 가짜 컴포넌트가 쏟아진다(실측 62개)
+function _p0013LibraryOk() {
+  const os = require('os');
+  const lib = require('../lib/library');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lib98_'));
+  try {
+    const W = (rel, txt) => { const p = path.join(d, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, txt); };
+    fs.mkdirSync(path.join(d, '.harness'), { recursive: true });
+    W('src/Button.tsx', 'import React from "react";\nexport function Button({ label }) {\n  const [on, setOn] = React.useState(false);\n  const cls = "px-3 py-1 rounded-lg bg-brand-500";\n  return (\n    <button className="px-3 py-1 rounded-lg bg-brand-500" onClick={() => setOn(!on)}>{label}</button>\n  );\n}\n');
+    // 제네릭은 '실제로 JSX 태그와 같은 글자' 인 것을 써야 판별된다 — Record<string, number> 는 원래 안 잡혀서 대조군이 못 된다.
+    W('src/schemas.ts', 'import { z } from "zod";\nexport const UserSchema = z.object({ id: z.string() });\nexport const FetchUser = async (id: string): Promise<Response> => fetch(id);\nexport const LIMITS: Array<number> = [1, 2];\n');
+    W('src/consts.ts', 'export const API_URL = "https://x";\nexport const MAX_RETRY = 3;\n');
+    // 대문자 상수인데 자기 창 안에 진짜 마크업이 있는 경우 — 상수 필터가 없으면 이게 '컴포넌트' 로 실린다.
+    W('src/empty-state.tsx', 'export const EMPTY_STATE = <div className="px-3 py-1 rounded-lg">Nothing</div>;\n');
+    // 선언에서 마크업까지 1,500자를 넘는 진짜 컴포넌트 — 창을 고정 길이로 되돌리면 이게 사라진다(실측 p90 = 3,248자).
+    //   괄호 주의: .repeat 이 줄 전체에 걸려야 한다(마지막 조각에만 걸면 235자밖에 안 돼 이 케이스가 무의미해진다).
+    W('src/LongForm.tsx', 'export function LongForm(props) {\n' + ('  const pad = "' + 'x'.repeat(60) + '";\n').repeat(40) + '  return <form className="px-3 py-1 rounded-lg">{props.children}</form>;\n}\n');
+    W('src/Card.vue', '<template><div class="p-4 rounded-lg bg-brand-500" /></template>\n');
+    W('src/page.astro', '<html></html>\n');
+    W('src/Hero.astro', '<section class="p-4 rounded-lg bg-brand-500"></section>\n');
+    W('src/theme.css', ':root { --brand-500: #2563eb; --radius-lg: 12px; }\n');
+    W('src/inline.html', '<style>:root{--surface-1:#fff}</style><div class="px-3 py-1 rounded-lg"></div>\n');
+    // CSS 문맥 밖의 `--이름:` 은 토큰이 아니다 — 실측에서 주석 속 CLI 플래그(audit --fix: …)가 디자인 토큰으로 실렸다.
+    W('src/docs.ts', '// audit --fix: 누락 키 자동 추가\n// health --strict: 모든 issue 시 exit 1\nexport const runFix = () => 1;\n');
+    // 문자열·주석의 자리표시자는 태그처럼 생겼다 — 실측에서 UI 를 그리지 않는 감시 클래스 4개가 이것 때문에 컴포넌트로 실렸다.
+    W('src/Watcher.ts', 'export class SessionWatcher {\n  url = "ws://host:<svc>/probe";\n  // path: /sessions/<uuid>/events — usage: watch <path> --json\n}\n');
+    // 반대로 속성이 있으면 소문자 요소도 진짜 마크업이다(자리표시자와의 판별선)
+    W('src/Glyph.tsx', 'export const Glyph = wrap(<path d="M0 0h4" className="rounded-lg" />);\n');
+    W('src/rare.tsx', 'export function Rare() { return <i className="tracking-wide" />; }\n');
+    W('node_modules/pkg/Evil.tsx', 'export function Evil() { return <div className="px-3 py-1 rounded-lg bg-brand-500" />; }\n');
+    W('src/Button.test.tsx', 'export function TestOnly() { return <div className="px-3 py-1 rounded-lg bg-brand-500" />; }\n');
+    const r = lib.scanLibrary(d);
+    const names = r.components.map(c => c.name);
+    const compOk = names.includes('Button') && names.includes('Card') && names.includes('Hero') && names.includes('Rare')
+      && names.includes('LongForm')                                                                 // 선언→마크업이 멀어도 놓치지 않는다
+      && !names.includes('UserSchema') && !names.includes('FetchUser') && !names.includes('LIMITS')  // TS 제네릭(Promise<Response>)을 JSX 로 오인하지 않는다
+      && !names.includes('API_URL') && !names.includes('MAX_RETRY') && !names.includes('EMPTY_STATE') // 대문자 상수는 마크업을 담고 있어도 컴포넌트가 아니다
+      && names.includes('Glyph')                                                                    // 속성 있는 소문자 요소는 진짜 마크업
+      && !names.includes('SessionWatcher')                                                          // 문자열 속 <svc>/<uuid>/<path> 자리표시자는 마크업이 아니다
+      && !names.includes('page')                                                                    // 소문자 .astro 는 페이지
+      && !names.includes('Evil') && !names.includes('TestOnly');                                    // 벤더·테스트는 인벤토리 밖
+    const varNames = r.tokens.cssVars.map(v => v.name);
+    const brand = r.tokens.cssVars.find(v => v.name === 'brand-500');
+    const tokOk = varNames.includes('brand-500') && varNames.includes('radius-lg') && !!brand && /#2563eb/.test(brand.value)
+      && varNames.includes('surface-1')                                    // <style> 블록 안도 CSS 문맥이다
+      && !varNames.includes('fix') && !varNames.includes('strict');        // 주석 속 CLI 플래그는 토큰이 아니다
+    // 빈도 문턱: 3회 이상만 싣는다(1~2회는 우연) — 문턱을 지우면 tracking-wide 가 섞인다
+    const utilNames = r.tokens.utilities.map(u => u.name);
+    const utilOk = utilNames.includes('rounded-lg') && utilNames.includes('bg-brand-500') && !utilNames.includes('tracking-wide');
+    // 아무것도 못 찾으면 빈 결과를 그럴듯하게 내지 말고 이유를 말한다
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lib98e_'));
+    fs.mkdirSync(path.join(empty, '.harness'), { recursive: true });
+    fs.writeFileSync(path.join(empty, 'readme.txt'), 'no ui here');
+    const er = lib.scanLibrary(empty);
+    // '노트가 하나라도 있다' 로는 부족하다 — 다른 분기가 대신 채우면 통과해 버린다(변이에서 실제로 그랬다).
+    //   '스캔된 파일이 0' 이라는 사실을 말하는 노트인지까지 본다.
+    const emptyOk = er.components.length === 0 && er.tokenSource === 'none'
+      && er.stats.scanned === 0 && er.notes.some(n => n.includes('스캔된 UI 파일이 없다'));
+    try { fs.rmSync(empty, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ }
+    return compOk && tokOk && utilOk && emptyOk;
+  } catch { return false; } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
+}
+// 1.36.98 (사용자 보고, hive-analytics): session close 가 current-state.md 를 통째로 갈아치웠다(재현: 440자 → 88자,
+//   사용자 작성 섹션 2개 소실). 원인은 `/## Blockers\n[\s\S]*$/` — 섹션이 아니라 '파일 끝까지' 를 교체했다.
+//   이 명령은 제품이 매 세션 끝에 실행하라고 지시하는 것이라 손실이 상시로 일어났다. 보존을 행위로 못박는다.
+function _p0088CurrentStatePreserved() {
+  const os = require('os');
+  const sc = require('../lib/session-close');
+  const U = sc._upsertAutoLines;
+  if (typeof U !== 'function') return false;
+  const doc = ['# Current State', 'Updated: 2026-08-01', '', '## Now', '- 사람이 쓴 진행 메모', '- 두 번째 줄', '',
+    '## Next', '- 사람이 쓴 다음 계획', '', '## Blockers', '- 사람이 쓴 차단 사유', '',
+    '## 결정 로그', '- 2026-07-28: 재시도 상한 5회', '', '## 인수인계 메모', '- docs/x.md 부터', ''].join('\n');
+  const once = U(U(U(doc, 'Now', ['- 자동요약']), 'Next', ['- 자동다음']), 'Blockers', ['- (없음)']);
+  const twice = U(U(U(once, 'Now', ['- 자동요약']), 'Next', ['- 자동다음']), 'Blockers', ['- (없음)']);
+  const human = ['사람이 쓴 진행 메모', '두 번째 줄', '사람이 쓴 다음 계획', '사람이 쓴 차단 사유', '## 결정 로그', '2026-07-28: 재시도 상한 5회', '## 인수인계 메모', 'docs/x.md 부터'];
+  const preserved = human.every(l => once.includes(l) && twice.includes(l));   // Blockers 아래 섹션이 살아 있어야 한다
+  const idempotent = once === twice;                                            // 반복 실행에 자동줄/빈줄이 쌓이지 않는다
+  const autoCount = (twice.match(/leerness:auto/g) || []).length === 3;
+  const noBlankRun = !/\n\n\n/.test(twice);
+  const untouched = U('# Current State\n자유 메모만\n', 'Now', ['- x']) === '# Current State\n자유 메모만\n';  // 섹션 없으면 문서를 바꾸지 않는다
+  // 소스 가드: EOF 까지 지우던 '코드' 가 되살아나면 실패.
+  //   패턴 자체를 grep 하면 이 결함을 설명하는 주석에 스스로 걸린다(자기참조 함정) — 옛 코드 형태로 앵커를 잡는다.
+  const src = read(path.join(__dirname, '..', 'lib', 'session-close.js'));
+  const noEofWipe = !src.includes('cs.replace(/## Block' + 'ers');
+  return preserved && idempotent && autoCount && noBlankRun && untouched && noEofWipe;
+}
 function _lensDomainList() { return Object.keys(LENS_CATALOG).join('|'); }
 // 1.36.97: 완료 검증의 인라인 렌즈 줄은 '목차'다 — 본문이 아니다.
 //   심화 문항은 한 문단이라 통째로 찍으면 80칸에서 한 축이 3~4줄을 먹는다(검수 실측: advisory 블록이 8줄 → 15줄).
@@ -24906,6 +25018,8 @@ async function main() {
   if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
   // 1.36.53 (UR-0062): 기술 프로필 · 1.36.67 (F15): 변경 시 기존 leerness.html 동반 갱신(있을 때만)
   if (cmd === 'tech')                              return _tech.techCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1], { has, regenGraph: (r) => { if (exists(path.join(r, 'leerness.html'))) _graph.graphHtmlCmd(r, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, quiet: true }); } });
+  // 1.36.98 (P-0013): 재사용 인벤토리 — 새 화면 조각을 만들기 전에 '이미 있는 것' 을 먼저 본다(reuse-map 의 UI 판).
+  if (cmd === 'library')                           return require('../lib/library').libraryCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1], { has, log, ok, warn, failJson });
   if (cmd === 'integrity') {                       // 1.36.57 (감사 F-04): managed 문서 무결성 점검/복구
     if (args[1] && args[1] !== 'check') { failJson(has('--json'), 'unknown_subcommand', `알 수 없는 integrity 하위명령: ${args[1]} (가능: check [--repair] [--force])`); return process.exit(process.exitCode || 1); }
     return integrityCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());

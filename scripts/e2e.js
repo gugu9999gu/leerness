@@ -9455,6 +9455,79 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.98: session close 가 current-state.md 의 사용자 작성 내용을 지우지 않는가 (사용자 보고 재현 → 실 CLI 로 고정)
+//   selftest 는 순수 함수만 본다. 손실은 '명령을 실제로 돌렸을 때' 났으므로 여기서 실 CLI 로 건다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cs98-'));
+  const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 120000 });
+  try {
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'p', version: '0.1.0' }));
+    R(['init', d, '--yes', '--language', 'ko', '--skills', 'recommended']);
+    const csp = path.join(d, '.harness', 'current-state.md');
+    const authored = ['# Current State', 'Updated: 2026-08-01', '', '## Now', '- 사람이 쓴 진행 메모', '- 미해결 항목 1건', '',
+      '## Next', '- 사람이 쓴 다음 계획', '', '## Blockers', '- 사람이 쓴 차단 사유', '',
+      '## 결정 로그', '- 2026-07-28: 재시도 상한 5회', '', '## 인수인계 메모', '- docs/x.md 부터 읽을 것', ''].join('\n');
+    fs.writeFileSync(csp, authored);
+    R(['session', 'close', d]);
+    const after1 = fs.readFileSync(csp, 'utf8');
+    R(['session', 'close', d]);
+    const after2 = fs.readFileSync(csp, 'utf8');
+    R(['session', 'close', d]);
+    const after3 = fs.readFileSync(csp, 'utf8');
+    const human = ['사람이 쓴 진행 메모', '미해결 항목 1건', '사람이 쓴 다음 계획', '사람이 쓴 차단 사유', '## 결정 로그', '2026-07-28: 재시도 상한 5회', '## 인수인계 메모', 'docs/x.md 부터 읽을 것'];
+    const preserved = human.every(l => after1.includes(l) && after3.includes(l));
+    const stable = after2 === after3;                                     // 반복 마감에 누적되지 않는다
+    const autoOnce = (after3.match(/leerness:auto/g) || []).length === 3;  // 자동줄은 섹션당 하나
+    const noBlankRun = !/\n\n\n/.test(after3);
+    const grew = after3.length >= authored.length - 20;                    // 80% 파괴가 재발하면 여기서 걸린다
+    Object.assign(dbg, { preserved, stable, autoOnce, noBlankRun, len: after3.length, was: authored.length });
+    ok = preserved && stable && autoOnce && noBlankRun && grew;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ B(1.36.98) session close 가 current-state.md 의 사용자 작성 섹션을 보존 — 3회 반복에도 누적 0 (사용자 보고 재현 고정)'
+    : '✗ 1.36.98 current-state 보존 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// ── 1.36.98 (P-0013): 재사용 인벤토리 CLI — 추출 결과가 아니라 '무엇을 싣지 않는가' 를 건다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lib98-'));
+  const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 120000 });
+  const out = (r) => (r.stdout || '') + (r.stderr || '');
+  try {
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'p', version: '0.1.0', dependencies: { react: '18', tailwindcss: '3' } }));
+    R(['init', d, '--yes', '--language', 'ko', '--skills', 'recommended']);
+    const W = (rel, t) => { const p = path.join(d, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t); };
+    W('src/Button.tsx', 'export function Button(){ return <button className="px-3 py-1 rounded-lg">go</button> }\n');
+    W('src/schemas.ts', 'export const UserSchema = z.object({ id: z.string() });\nexport const FetchUser = async (i: string): Promise<Response> => fetch(i);\n');
+    W('src/theme.css', ':root { --brand-500: #2563eb; }\n');
+    W('src/notes.ts', '// audit --fix: 누락 키 자동 추가\nexport const runFix = () => 1;\n');
+    const show = out(R(['library', '--path', d]));
+    const shows = /Button/.test(show) && !/UserSchema/.test(show) && !/FetchUser/.test(show);
+    const aiRaw = (R(['library', '--ai', '--path', d]).stdout || '').trim();
+    let aiJson = null; try { aiJson = JSON.parse(aiRaw); } catch {}
+    const aiOk = !!aiJson && Array.isArray(aiJson.components) && aiJson.components.some(c => c.n === 'Button')
+      && !aiJson.components.some(c => c.n === 'UserSchema')
+      && (aiJson.tokens.cssVars || []).includes('brand-500')
+      && !(aiJson.tokens.cssVars || []).includes('fix')            // 주석 속 CLI 플래그는 토큰이 아니다
+      && aiJson.stack.includes('tailwind');
+    const pg = R(['library', 'page', '--path', d]);
+    const html = fs.existsSync(path.join(d, 'leerness-library.html')) ? fs.readFileSync(path.join(d, 'leerness-library.html'), 'utf8') : '';
+    const pageOk = pg.status === 0 && /Button/.test(html) && !/UserSchema/.test(html)
+      && !/(?:src|href)\s*=\s*["'](?!#)/i.test(html) && !/<script/i.test(html);   // 오프라인 단일 파일(외부 리소스·스크립트 0)
+    //   사람용 페이지가 에이전트 페이로드보다 커야 분리의 의미가 있다
+    const splitOk = html.length > aiRaw.length;
+    Object.assign(dbg, { shows, aiOk, pageOk, splitOk, html: html.length, ai: aiRaw.length });
+    ok = shows && aiOk && pageOk && splitOk;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ B(1.36.98/P-0013) 재사용 인벤토리: 컴포넌트 추출 + zod/제네릭 오탐 0 + 주석 CLI 플래그 토큰화 0 + 오프라인 페이지(외부참조 0) + AI 압축 분리'
+    : '✗ 1.36.98 재사용 인벤토리 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

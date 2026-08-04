@@ -107,4 +107,5 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0084 | requested | 기존 _SECRET_ASSIGN 오탐: 키 이름에 KEY/AUTH 가 들어가면 값이 시크릿이 아니어도 마스킹한다. 실측(실제 문서 189개 10431줄): 72줄이 마스킹되고 그중 idempotency_key=run:phase:step, auth_scheme='', AEGIRINE_DEV_HEADER_AUTH=false 같은 설계 메모가 포함. catalogs 의 requireSecretLike/_looksSecretLike 게이트를 이 규칙에도 적용 검토 | user-request | 다음 액션 작성 | 2026-07-31 |
 | T-0085 | requested | 카탈로그 SECRET_PATTERNS 의 Hardcoded Bearer token 문자군이 [A-Za-z0-9_\-.=] 라 base64 의 / 와 + 에서 끊긴다. 실측: 앞 8자 뒤 / 인 40자 토큰이 스캐너에서 미탐. 표시용 마스킹은 1.36.96 에서 별도 규칙(_SECRET_BEARER)으로 막았지만 스캐너 자체는 그대로다 — 문자군에 /+ 추가 검토(오탐 영향 측정 필요) | user-request | 다음 액션 작성 | 2026-08-04 |
 | T-0086 | requested | 제품 코드의 주석 없는 catch {} 스윕 — lib/ 31개 중 16개에 bare catch. 신설 recovery 렌즈 5번 문항(왜 안전한지 한 줄) 기준으로 삼키기 의도/사고 구분 | user-request | 다음 액션 작성 | 2026-08-04 |
-| T-0087 | done | 1.36.97 렌즈 3축 심화 구현 | 구현 bin/leerness.js · scripts/e2e.js 수정, selftest 343건 통과 | 다음 액션 작성 | 2026-08-04 |
+| T-0087 | done | 1.36.97 렌즈 3축 심화 구현 | 구현 bin/leerness.js , scripts/e2e.js 수정 · selftest 343 pass · 변이 40/41 · 게이트 417/417 · 1.36.97 게시 | 다음 액션 작성 | 2026-08-04 |
+| T-0088 | requested | session close 가 current-state.md 를 덮어쓴다 — 사용자 보고(hive-analytics): AI 이력에 '또 덮어썼습니다. 복원하겠습니다' 가 남음. 데이터 손실 계열이라 재현 후 보존 경로 확인 필요 | user-request | 다음 액션 작성 | 2026-08-04 |

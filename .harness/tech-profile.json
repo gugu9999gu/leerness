@@ -3,11 +3,28 @@
     "languages": [
       {
         "id": "javascript",
-        "evidence": "package.json"
+        "evidence": "package.json · 33 source files"
       }
     ],
-    "services": []
+    "services": [],
+    "ui": [
+      {
+        "id": "plain-html",
+        "evidence": "2 html files · 프레임워크 신호 없음"
+      }
+    ]
   },
-  "updatedAt": "2026-07-21T08:01:36.071Z",
-  "history": []
+  "updatedAt": "2026-08-04T13:01:34.867Z",
+  "history": [
+    {
+      "at": "2026-08-04T13:01:34.867Z",
+      "addedLanguages": [],
+      "removedLanguages": [],
+      "addedServices": [],
+      "removedServices": [],
+      "addedUi": [
+        "plain-html"
+      ]
+    }
+  ]
 }
