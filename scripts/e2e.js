@@ -8326,6 +8326,461 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.96 (P-0010, 사용자 승인 범위): leerness.html 에 📄 문서 탭 — .harness 핵심 문서 7종을 그대로 읽는다.
+//   사용자 요청은 "exe 실행기"였지만 실행기는 **런타임 의존성 0 · install script 0** 경계를 깬다(1.36.90 에서
+//   같은 경계를 테스트로 못박았다). 같은 목적을 정적 단일 파일 안에서 이룬다.
+//   렌더러는 **최소 부분집합**만 해석한다(제목·목록·코드펜스·표·링크·강조). 나머지는 이스케이프된 평문 —
+//   파서를 넓힐수록 XSS 면이 넓어지고, 이 파일은 사용자 문서를 그대로 싣는다.
+//   이 블록이 잡아야 하는 것(전부 변이로 확인): 원시 HTML 통과 · javascript:/data: 링크 · 표/제목/링크텍스트
+//   미이스케이프 · 코드펜스 안 마크다운 해석 · 코드스팬 자리표시자가 본문 숫자를 삼킴 · 시크릿 미마스킹 ·
+//   누적 로그 방향 뒤집힘 · 줄경계/코드포인트 절단 붕괴 · 전체 상한에서 조용한 누락.
+total++;
+{
+  let ok = false;
+  const _d = [];
+  const dbg = {};
+  try {
+    const vm = require('vm');
+    const G = require(path.resolve(path.dirname(CLI), '..', 'lib', 'graph.js'));
+    const w = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-docs96-')); _d.push(w);
+    fs.writeFileSync(path.join(w, 'package.json'), JSON.stringify({ name: 'd96', version: '0.1.0' }, null, 2));
+    cp.spawnSync(process.execPath, [CLI, 'init', w, '--yes', '--no-stale-check'], { encoding: 'utf8', timeout: 180000 });
+    const H = path.join(w, '.harness');
+    const setupOk = fs.existsSync(H);            // 셋업이 조용히 실패하면 아래 단언이 공허해진다
+
+    // ── T1: 렌더러 — 허용 부분집합만 해석하고, 그 밖은 전부 이스케이프된 평문.
+    //   생성된 HTML 에서 함수를 **떼어내 실제로 실행**한다(소스 grep 이 아니라 동작).
+    cp.spawnSync(process.execPath, [CLI, 'graph', w, '--html'], { encoding: 'utf8', timeout: 180000 });
+    const html = fs.readFileSync(path.join(w, 'leerness.html'), 'utf8');
+    const wired = html.includes('data-v="docs"') && /"docs":\{/.test(html) && html.includes('세션 핸드오프');
+    const grab = (n) => { const i = html.indexOf('function ' + n + '('); if (i < 0) return ''; const j = html.indexOf('\nfunction ', i + 1); return html.slice(i, j < 0 ? html.indexOf('\n(function(){', i) : j); };
+    const sb = { console };
+    vm.createContext(sb);
+    vm.runInContext(['mdEsc', 'mdUrl', 'mdInline', 'mdRender'].map(grab).join('\n') + '\nthis.R=mdRender;this.I=mdInline;this.U=mdUrl;', sb);
+    const R2 = sb.R, I2 = sb.I, U2 = sb.U;
+    //   검수 지적: 제목은 H2 만, 허용 링크는 HTTPS 하나만 검사해 나머지가 끊겨도 통과했다.
+    //   경계(H1·H6)와 허용 스킴 전 종류를 각각 단언한다.
+    const T1 = wired
+      && R2('# 하나') === '<h1>하나</h1>' && R2('## 제목') === '<h2>제목</h2>'
+      && R2('### 셋') === '<h3>셋</h3>' && R2('#### 넷') === '<h4>넷</h4>'
+      && R2('##### 다섯') === '<h5>다섯</h5>' && R2('###### 여섯') === '<h6>여섯</h6>'
+      && R2('####### 일곱') === '<p>####### 일곱</p>'      // 7단계는 제목이 아니다(평문)
+      && R2('- a\n- b') === '<ul><li>a</li><li>b</li></ul>'
+      && R2('1. a') === '<ol start="1"><li>a</li></ol>'
+      //   원문 번호를 지키지 않으면 "2. two" 가 브라우저에서 "1. two" 로 보인다 — 문서 의미가 조용히 바뀐다(검수 실측).
+      && R2('2. two') === '<ol start="2"><li>two</li></ol>'
+      && R2('1. one\n3. three') === '<ol start="1"><li>one</li><li value="3">three</li></ol>'
+      //   구분행의 콜론을 문법으로 받으면서 정렬을 버리면 사용자가 지정한 의미가 사라진다(검수 실측).
+      && (function () { const s = R2('| a | b | c |\n|:---|:---:|---:|\n| 1 | 2 | 3 |');
+        return s.includes('text-align:left') && s.includes('text-align:center') && s.includes('text-align:right'); })()
+      && R2('| a |\n|---|\n| 1 |') === '<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table>'
+      && I2('**굵게** 와 *기울임*') === '<b>굵게</b> 와 <i>기울임</i>'
+      && I2('명령 `npm test` 실행') === '명령 <code>npm test</code> 실행'
+      && R2('```js\nvar a=1;\n```') === '<pre><code>var a=1;</code></pre>'
+      && R2('| a |\n|---|\n| 1 |') === '<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table>'
+      //   허용 스킴 4종을 각각 — HTTPS 하나만 보면 http/mailto/앵커/상대경로가 끊겨도 통과한다(검수 실측 변이).
+      && I2('[d](https://example.com/x)') === '<a href="https://example.com/x" target="_blank" rel="noopener noreferrer">d</a>'
+      && /href="http:\/\/e\.test\/a"/.test(I2('[d](http://e.test/a)'))
+      && /href="mailto:a@b\.c"/.test(I2('[d](mailto:a@b.c)'))
+      && /href="#앵커"/.test(I2('[d](#앵커)'))
+      && /href="\.harness\/plan\.md"/.test(I2('[d](.harness/plan.md)'))
+      //   상한은 **이스케이프 후** 길이에 걸린다 — 원문 796자 URL 이 &amp; 팽창으로 거부됐다(검수 실측).
+      //   픽스처가 1,192자라 상한을 1,200 으로 낮추는 변이가 통과했다 — 4,000 에 가까운 길이로 판별한다.
+      && I2('[d](https://e.test/q?' + Array.from({ length: 260 }, (_, i) => 'k' + i + '=v' + i).join('&') + ')').includes('<a ')
+      // 코드스팬 자리표시자가 감싸는 문자를 잃으면 본문의 **모든 숫자**가 코드로 바뀐다(초안이 그랬다)
+      && I2('버전 1.36.96 에서 89 도구') === '버전 1.36.96 에서 89 도구'
+      && I2('`a` 뒤 42 그리고 `b`') === '<code>a</code> 뒤 42 그리고 <code>b</code>'
+      // XSS · 스킴 거부
+      && !/<script/i.test(R2('<script>alert(1)</script>')) && R2('<script>alert(1)</script>').includes('&lt;script&gt;')
+      && !/<img/i.test(R2('<img src=x onerror=alert(1)>')) && R2('<img src=x onerror=alert(1)>').includes('&lt;img')
+      //   부재만 단언하면 함수가 **빈 문자열을 돌려줘도** 통과한다 — 거부된 링크는 원문이 글자로 남아야 하므로
+      //   완전 일치로 단언한다(4가지 위험 스킴 + 프로토콜 상대).
+      && I2('[x](javascript:alert(1))') === '[x](javascript:alert(1))'
+      && I2('[x](JaVaScRiPt:alert(1))') === '[x](JaVaScRiPt:alert(1))'
+      && I2('[x](data:text/html,y)') === '[x](data:text/html,y)'
+      && I2('[x](vbscript:m)') === '[x](vbscript:m)'
+      && I2('[x](//evil.example)') === '[x](//evil.example)'
+      //   브라우저는 역슬래시를 슬래시처럼 읽는다 — 슬래시 2개만 막으면 역슬래시 2개가 통과한다(검수 실측).
+      && U2('\\\\evil.example/share') === null && U2('/\\evil.example/share') === null
+      //   링크를 만든 뒤 강조 정규식이 href 안까지 다시 해석해 URL 을 훼손했다(검수 실측).
+      && I2('[t](https://a/**b**/c)') === '<a href="https://a/**b**/c" target="_blank" rel="noopener noreferrer">t</a>'
+      //   문서에 U+0001/U+0002 가 실제로 있으면 자리표시자와 충돌한다 — 입력에서 제거한다.
+      && I2('a\x01b \u0060c\u0060') === 'ab <code>c</code>' && I2('x\x020y') === 'x0y'
+      //   닫히지 않은 대괄호마다 남은 문자열을 다시 훑던 O(n²)(실측 64KB 1,825ms) — 유계 수량자로 선형.
+      && (function () { const t0 = Date.now(); R2('['.repeat(65536)); return Date.now() - t0 < 400; })()
+      //   "나쁜 것이 없다"만 보면 링크 텍스트를 URL 로 바꿔치기하는 변이가 통과한다(실제로 살아남았다).
+      //   **옳은 것이 있다**(이스케이프된 원문 텍스트)까지 함께 단언한다.
+      && !/<b>/.test(I2('[<b>t</b>](https://a.b)')) && I2('[<b>t</b>](https://a.b)').includes('&lt;b&gt;t&lt;/b&gt;')
+      && !/onmouseover="alert/.test(I2('[x](https://a" onmouseover="alert(1))')) && I2('[x](https://a" onmouseover="alert(1))').includes('&quot;')
+      && !/<b>|<i>/.test(R2('| <b>x</b> |\n|---|\n| <i>y</i> |')) && R2('| <b>x</b> |\n|---|\n| <i>y</i> |').includes('&lt;b&gt;x&lt;/b&gt;')
+      && !/<img/i.test(R2('# <img src=x onerror=1>')) && R2('# <img src=x onerror=1>').includes('&lt;img')
+      //   브라우저는 URL 에서 탭/개행/CR 을 제거한 뒤 스킴을 읽는다(실측: href="java\tscript:…" → protocol
+      //   javascript:). 링크 토크나이저가 공백류를 배제하는 것에 기대지 않고 **술어 자체**가 거부해야 한다.
+      && U2('java\tscript:alert(1)') === null && U2('java\nscript:alert(1)') === null
+      && U2('java\rscript:alert(1)') === null && U2('\tjavascript:alert(1)') === null
+      //   탭·개행만 지우면 다른 C0 제어문자로 빠져나간다(검수 실측: \x03·\x01·\x00·\x1F·\x7F 전부 통과했다)
+      && ['\x00', '\x01', '\x03', '\x1F', '\x7F'].every(c => U2(c + 'javascript:alert(1)') === null)
+      && U2('java\x03script:alert(1)') === null && U2('java\x7Fscript:alert(1)') === null
+      && U2('https://ok.example/a') === 'https://ok.example/a'   // 정상 URL 은 그대로(과잉 거부 아님)
+      // 엔티티·제로폭은 브라우저에서 상대 URL 로 떨어진다(실측: protocol=file:) — 링크가 생겨도 무해하다
+      && !/href="javascript:/i.test(I2('[t](javascript&#58;alert(1))'))
+      // 코드펜스 안은 이스케이프될 뿐 아니라 **마크다운도 해석되지 않아야** 한다
+      //   (mdInline 도 mdEsc 를 부르므로 XSS 단언만으로는 이 변이가 살아남는다)
+      && (function () { const s = R2('```\n**굵게** 와 [링크](https://a.b)\n```'); return s.includes('**굵게**') && !/<b>/.test(s) && !/<a /.test(s); })()
+      //   미종료 코드펜스의 내용을 버려도 잡히지 않았다(검수 실측) — 내용 보존까지 단언한다.
+      && R2('```\nkept line one\nkept line two') === '<pre><code>kept line one\nkept line two</code></pre>'
+      // 허용 밖은 평문 — 주석·CDATA 회귀가 정확한 단언들 사이를 빠져나갔다(검수 실측)
+      && R2('<div class="x">y</div>').includes('&lt;div') && R2('---') === '<p>---</p>'
+      && R2('<!--<img src=x onerror=1>-->') === '<p>&lt;!--&lt;img src=x onerror=1&gt;--&gt;</p>'
+      && R2('<![CDATA[<script>x</script>]]>') === '<p>&lt;![CDATA[&lt;script&gt;x&lt;/script&gt;]]&gt;</p>'
+      && R2('a & b < c > d "e"') === '<p>a &amp; b &lt; c &gt; d &quot;e&quot;</p>';
+    dbg.render = String(T1) + (wired ? '' : ' (배선X)');
+
+    // ── T2: 데이터 — 마스킹 · 방향 · 줄경계 · 코드포인트 · 결측 고지.
+    //   마스킹은 **스캐너와 같은 목록**(catalogs.SECRET_PATTERNS)을 써야 한다. 자체 축소판을 쓰던 종전엔
+    //   DB 접속문자열 비밀번호 · GitLab PAT · npm · Stripe · SendGrid · 개인키 본문이 그대로 화면에 실렸다(검수 실측 6종).
+    //   픽스처는 길이를 손으로 세지 말고 생성한다 — 손으로 센 SendGrid 길이가 세 번 틀렸다.
+    const _CH = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let _sd = 7;
+    const _rnd = (n) => { let s = ''; for (let i = 0; i < n; i++) { _sd = (_sd * 1103515245 + 12345) % 2147483648; s += _CH[_sd % _CH.length]; } return s; };
+    const _dbPw = _rnd(20);                     // 값을 직접 들고 있는다 — URL 을 다시 파싱하면 인덱스를 틀린다
+    const SEC = {
+      dbUrl: 'DATABASE_URL=postgres://alice:' + _dbPw + '@db.example/app',
+      glpat: 'glpat-' + _rnd(24),
+      npm: 'npm_' + _rnd(36),
+      stripe: 'sk_live_' + _rnd(24),
+      sendgrid: 'SG.' + _rnd(22) + '.' + _rnd(43),
+      pem: '-----BEGIN RSA PRIVATE KEY-----\n' + _rnd(60) + '\n-----END RSA PRIVATE KEY-----',
+      //   END 줄이 없으면 BEGIN 만 지워지고 본문이 남았다(검수 실측). 붙여넣다 잘린 키가 흔하다.
+      pemOpen: '-----BEGIN EC PRIVATE KEY-----\n' + _rnd(58) + '\n',
+      //   암호화 키는 헤더 뒤 **빈 줄**이 오고 본문이 시작한다 — 빈 줄에서 멈추면 본문이 샌다(검수 실측).
+      pemEnc: '-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,9F8E7D6C\n\n' + _rnd(60) + '\n-----END RSA PRIVATE KEY-----',
+      //   영문자만으로 된 32자 토큰도 자격증명이다(검수 실측: 그냥 샜다).
+      bearerLetters: 'Bearer QwErTyUiOpAsDfGhJkLzXcVbNmQwErTy',
+      //   구분자 없는 AWS 문맥 실값 — 문맥 패턴을 통째로 제외했더니 샜다(검수 실측).
+      awsBare: 'aws secret access key ' + _rnd(40),
+    };
+    //   가림은 **탐지용 문맥 휴리스틱**을 그대로 쓰면 안 된다 — 정상 산문이 통째로 사라진다(검수 실측).
+    //   **공백이 있는 줄**(=문단)은 보존된다. 공백 없는 단일 토큰 줄과 20자 이상 Bearer 값은
+    //   의도적으로 가린다 — 값의 조성으로는 시크릿과 산문을 가를 수 없고, 표시용 마스킹은 안전한 쪽으로 실패한다.
+    const PROSE_OK = [
+      'Bearer 인증을 도입한다',
+      'Bearer token 을 쓴다',
+      //   BEGIN 을 인용한 정책 문서의 산문(Name: value 형태 포함)을 삼키면 안 된다(검수 실측).
+      'Note: 개인키는 커밋하지 않습니다',
+      'Status: 검토중',
+    ];
+    //   문맥 패턴은 **값만** 지운다 — 문장을 통째로 삼키던 것을 고쳤으므로 구조가 남아야 한다.
+    const PROSE_STRUCT = ['결정: AWS secret commit ', ' was reverted.'];
+    //   plan.md 는 **표지 없는 정상 문서** — 본문이 그대로 실려야 한다(가드가 과잉이면 기능이 죽는다).
+    fs.writeFileSync(path.join(H, 'plan.md'), '# Goal\n\n평범한 문장.\n' + PROSE_OK.join('\n') + '\n'
+      + PROSE_STRUCT[0] + '0123456789abcdef0123456789abcdef01234567' + PROSE_STRUCT[1] + '\n');
+    //   skill-index.md 는 **표지가 있는 문서** — 본문을 아예 싣지 않아야 한다.
+    //   값 단위 마스킹은 다섯 라운드 동안 계속 새어서(인용문 `> ` PEM · base64 의 `/`·`+` · 소문자 bearer ·
+    //   placeholder 모양 토큰) **안전의 전제에서 뺐다**. 표지가 있으면 통째로 제외한다.
+    fs.writeFileSync(path.join(H, 'skill-index.md'), '# Skills\n\n' + Object.values(SEC).join('\n') + '\n');
+    const N2 = 4000;
+    fs.writeFileSync(path.join(H, 'decisions.md'), Array.from({ length: N2 }, (_, i) => '- D' + String(i + 1).padStart(4, '0') + ' 결정 — 근거와 대안을 함께 적는다').join('\n'));
+    //   줄 길이를 들쭉날쭉하게 — 상한이 우연히 줄 끝에 맞으면 "원문 그대로 자르기" 변이가 살아남는다
+    fs.writeFileSync(path.join(H, 'current-state.md'), Array.from({ length: N2 }, (_, i) => '- S' + String(i + 1).padStart(4, '0') + ' 상태 항목 — 충분히 길게 적어 상한을 넘긴다' + 'x'.repeat(i % 7)).join('\n'));
+    //   이모지만 반복하면 상한이 서로게이트 쌍 경계에 정확히 맞아 쪼갤 자리가 없다 — 앞에 1글자를 끼운다
+    //   (skill-index 는 위에서 표지 문서로 쓰므로 서로게이트 검사는 tech-profile 로 옮긴다)
+    fs.writeFileSync(path.join(H, 'tech-profile.json'), 'a' + '🎉'.repeat(G.DOC_PER_CAP));
+    //   검수 지적: tech·progress 두 문서는 T2 에서 아무것도 확인하지 않아 경로가 끊겨도 통과했다.
+    fs.writeFileSync(path.join(H, 'progress-tracker.md'), Array.from({ length: 300 }, (_, i) => '- P' + String(i + 1).padStart(4, '0') + ' 진행 기록').join('\n'));
+    fs.rmSync(path.join(H, 'session-handoff.md'), { force: true });
+    const D2 = G.buildDocsData(w, '2026-07-31T12:34:56.000Z');
+    const g = (k) => D2.files.find(f => f.key === k) || {};
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    const _blob = JSON.stringify(D2);
+    const T2 = D2.files.length === 7 && D2.at === '2026-07-31T12:34:56.000Z'
+      //   표지 있는 문서: **본문을 싣지 않는다**. 부분 마스킹의 빈틈으로 새는 것을 구조적으로 막는다.
+      && g('skills').guarded === true && g('skills').text === '' && g('skills').charsTotal > 0
+      //   그리고 임베드 전체 어디에도 실값이 없어야 한다(문자열 전수 검사 — 어느 필드로 새든 잡힌다)
+      && ![_dbPw, SEC.glpat, SEC.npm, SEC.stripe, SEC.sendgrid, SEC.bearerLetters.slice(7),
+        SEC.pem.split('\n')[1], SEC.pemOpen.split('\n')[1], SEC.pemEnc.split('\n')[4], SEC.awsBare.slice(-40),
+      ].some(s => _blob.includes(s))
+      //   반대로 **표지 없는 문서는 그대로 실려야 한다** — 가드가 과잉이면 기능이 죽는다
+      && g('plan').guarded !== true && g('plan').text.includes('평범한 문장.')
+      && PROSE_OK.every(s => g('plan').text.includes(s))
+      && PROSE_STRUCT.every(s => g('plan').text.includes(s))
+      //   가드를 통과한 문서에도 **두 번째 층(마스킹)은 살아 있어야 한다** — 문맥 패턴의 값은 가려지고
+      //   문장 구조는 남는다. 이 단언이 없으면 마스킹을 통째로 지워도 테스트가 통과한다(변이로 확인).
+      && g('plan').text.includes('결정: AWS secret commit ***')
+      && !g('plan').text.includes('0123456789abcdef0123456789abcdef01234567')
+      //   tech(JSON, 코드블록으로 표시) · progress(누적 로그, 뒤를 남김) 두 경로가 실제로 연결돼 있다
+      && g('tech').lang === 'json' && g('tech').missing !== true
+      && g('progress').tail === true && g('progress').text.includes('P0300') && g('progress').missing !== true
+      && g('decisions').truncated === true && g('decisions').text.length <= G.DOC_PER_CAP
+      && g('decisions').text.includes('D' + N2) && !g('decisions').text.includes('D0001')
+      && g('decisions').text.split('\n').every(l => /^- D\d{4} /.test(l))
+      && g('state').text.includes('S0001') && !g('state').text.includes('S' + N2)
+      && g('state').truncated === true && g('state').text.split('\n').every(l => /^- S\d{4} 상태 항목 — 충분히 길게 적어 상한을 넘긴다x*$/.test(l))
+      && !lone.test(g('tech').text) && g('tech').text.length <= G.DOC_PER_CAP   // 서로게이트 검사는 tech 로 이동
+      && g('handoff').missing === true && g('handoff').text === ''
+      && !JSON.stringify(D2.files.map(f => f.rel)).includes(w.replace(/\\/g, '\\\\'));
+    //   마스킹 규칙은 **격리된 입력**으로 직접 잰다. 한 문서에 여러 PEM 을 몰아넣으면 종료되지 않은 키가
+    //   뒤쪽 END 줄과 짝지어져 서로를 가려 주고, 그 덕에 규칙이 깨져도 단언이 통과한다(변이 실험으로 확인).
+    const PUx = require(path.resolve(path.dirname(CLI), '..', 'lib', 'pure-utils.js'));
+    const encBody = _rnd(60), openBody = _rnd(58), letters = 'QwErTyUiOpAsDfGhJkLzXcVbNmQwErTy', awsVal = _rnd(40);
+    const M = {
+      //   ① 암호화 키: 헤더 뒤 **빈 줄**이 오고 본문이 시작한다. END 없이도 본문이 가려져야 한다.
+      encOpen: PUx.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,9F8E\n\n' + encBody + '\n'),
+      //   ② END 없는 평문 키.
+      plainOpen: PUx.redactSecrets('-----BEGIN EC PRIVATE KEY-----\n' + openBody + '\n'),
+      //   ③ BEGIN 을 인용한 정책 문서 — PEM 표준 헤더처럼 보이는 산문도 남아야 한다.
+      prose: PUx.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nComment: 이 키는 예시입니다\nNote: 커밋 금지\n일반 문장.'),
+      //   판별용: 뒤에 base64 줄이 있어야 헤더 규칙이 실제로 발동한다. 표준 헤더(Comment)는 먹더라도
+      //   **비표준 헤더 형태의 산문**(Note:)에서 멈춰야 한다 — 아무 Name: value 나 먹으면 산문이 사라진다.
+      proseB: PUx.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nComment: 예시\nNote: 커밋 금지\n' + _rnd(40)),
+      //   ④ 종료되지 않은 키와 무관한 END 가 멀리 떨어져 있어도 그 사이 산문을 삼키면 안 된다.
+      span: PUx.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\n\n중간 산문입니다\n또 다른 줄\n\n-----END RSA PRIVATE KEY-----'),
+      bearer: PUx.redactSecrets('Bearer ' + letters),
+      //   길이 문턱(32자)으로 갈랐더니 20~31자 영문 토큰이 샜다(검수 실측) — 길이가 아니라 모양으로 가른다.
+      bearer20: PUx.redactSecrets('Bearer AbCdEfGhIjKlMnOpQrSt'),
+      bearer31: PUx.redactSecrets('Bearer AbCdEfGhIjKlMnOpQrStUvWxYzABCDE'),
+      //   낱말 예외를 없앴다 — 유효한 불투명 토큰이 소문자/낱말꼴일 수 있어 예외가 곧 누출이었다(검수 실측).
+      bearerWord: PUx.redactSecrets('Use Bearer authenticationMiddleware for API requests.'),
+      bearerLower: PUx.redactSecrets('Bearer abcdefghijklmnopqrst'),
+      bearerCamel: PUx.redactSecrets('Bearer CorrectHorseBatteryStaple'),
+      bearerShort: PUx.redactSecrets('Bearer 인증을 도입한다'),
+      //   카탈로그 문자군이 base64 의 `/` `+` 에서 끊겨 실토큰이 통째로 남았다(실측: 앞 8자 뒤 `/`).
+      bearerSlash: PUx.redactSecrets('Bearer abcdefgh/ijklmnopqrstuvwxyz0123456789'),
+      bearerPlus: PUx.redactSecrets('Bearer abcde+fghijklmnopqrstuvwxyz0123456789'),
+      //   BEGIN 인용 뒤의 **평범한 영문 식별자** 한 줄을 본문으로 오인해 지웠다(검수 실측).
+      //   그렇다고 길이로 올리면 줄이 짧게 감긴 키 본문이 샌다 — 내용(숫자/기호 포함)으로 가른다.
+      quoteWord: PUx.redactSecrets('정책 인용:\n-----BEGIN RSA PRIVATE KEY-----\nNeverCommitPrivateKeys\n다음 문단'),
+      shortBody: PUx.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA7x9fQ2\nkLmN0pQrStUvWxYz\n-----END RSA PRIVATE KEY-----'),
+      //   PGP 블록은 END 앞에 =CRC 줄이 온다 — 허용하지 않으면 CRC 와 END 가 남는다.
+      pgp: PUx.redactSecrets('-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: GnuPG v2\n\n' + _rnd(64) + '\n=AbCd\n-----END PGP PRIVATE KEY BLOCK-----'),
+      awsBare: PUx.redactSecrets('aws secret access key ' + awsVal),
+      awsProse: PUx.redactSecrets('결정: AWS secret commit 0123456789abcdef0123456789abcdef01234567 was reverted.'),
+    };
+    const T2b = !M.encOpen.includes(encBody) && !M.plainOpen.includes(openBody)
+      && M.prose.includes('Comment: 이 키는 예시입니다') && M.prose.includes('Note: 커밋 금지') && M.prose.includes('일반 문장.')
+      && M.proseB.includes('Note: 커밋 금지')
+      && M.span.includes('중간 산문입니다') && M.span.includes('또 다른 줄')
+      && !M.bearer.includes(letters)
+      && !M.bearer20.includes('AbCdEfGhIjKlMnOpQrSt') && !M.bearer31.includes('AbCdEfGhIjKlMnOpQrStUvWxYzABCDE')
+      //   소문자만·낱말꼴 토큰도 가려야 한다(예외를 두면 그 예외가 누출 경로가 된다)
+      && !M.bearerLower.includes('abcdefghijklmnopqrst') && !M.bearerCamel.includes('CorrectHorseBatteryStaple')
+      && M.bearerWord === 'Use *** for API requests.'          // 산문도 함께 가려지는 것이 **의도한 절충**
+      && M.bearerShort === 'Bearer 인증을 도입한다'                 // 20자 미만은 영향 없음
+      && M.bearerSlash === '***' && M.bearerPlus === '***'      // base64 의 / + 에서 끊기면 안 된다
+      //   BEGIN 뒤 공백 없는 단일 토큰 줄은 가려진다(의도) — 그러나 **문단**은 남아야 한다
+      && !M.quoteWord.includes('NeverCommitPrivateKeys') && M.quoteWord.includes('다음 문단')
+      && !M.shortBody.includes('MIIEowIBAAKCAQEA7x9fQ2') && !M.shortBody.includes('kLmN0pQrStUvWxYz')
+      && M.pgp === '***'
+      && !M.awsBare.includes(awsVal)
+      && M.awsProse.includes('결정: AWS secret commit ') && M.awsProse.includes(' was reverted.');
+    //   표지 술어는 **표지 하나씩 격리**해서 잰다. 한 파일에 여러 시크릿을 몰아넣으면 다른 표지가 대신
+    //   가드해 줘서, 특정 표지를 무력화하는 변이가 그대로 통과한다(변이 실험으로 확인).
+    //   표지는 값이 아니라 **형식**으로 정의했으므로 줄 앞 접두어·대소문자·문자군 우회가 모두 막혀야 한다.
+    const HC = PUx.hasCredentialMarker;
+    const T2c = [
+      '-----BEGIN RSA PRIVATE KEY-----',
+      '> -----BEGIN RSA PRIVATE KEY-----',           // 인용문 접두(검수가 재현한 전량 노출 경로)
+      '- -----BEGIN EC PRIVATE KEY-----',            // 목록 접두
+      '    -----BEGIN PGP PRIVATE KEY BLOCK-----',   // 들여쓰기
+      'bearer dddddddddddddddddddddddd',             // 소문자 스킴
+      'Bearer /cccccccccccccccccccccccc',            // base64 의 / 로 시작
+      'Bearer aaaaaaaaaaaaaaaaaaa~ZZZZZZZZZZZZZZZZZZZZ', // token68 의 ~
+      //   특수문자를 **가운데** 두고 양쪽 조각을 16자 미만으로 — 문자군에서 `+ / ~` 를 빼면 여기서 갈린다.
+      //   맨 앞에 두면 접두 허용(`[^A-Za-z0-9]{0,4}`)이 흡수해 뒤 조각만으로 매치돼 변이가 살아남는다(실측).
+      'Bearer abcdefghij/klmnopqrst', 'Bearer abcdefghij+klmnopqrst', 'Bearer abcdefghij~klmnopqrst',
+      'Authorization: Basic YTpi',
+      //   검수가 표지를 빠져나가는 네 형태를 보였다 — 짧은 RFC6750 토큰 · 쿠키 · 5분절 JWE · 강조로 감싼 스킴.
+      'Bearer mF_9.B5f-4.1JqM_x',                        // 19자(RFC6750 은 길이를 보장하지 않는다)
+      'Cookie: session=s%3AabcdefghijklmnopqrstuvwxyzAB',
+      'Set-Cookie: sid=abcdefghijklmnopqrstuvwxyz; HttpOnly',
+      'eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..48V1_ALb6US0.7gg.XFBoMYUZodetZdvTiFvSkQ',  // compact JWE
+      '**Bearer** eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij',
+      '`Bearer` AbCdEfGhIjKlMnOpQrStUvWx',
+      'glpat-abcdefghijklmnopqrstuvwx', 'npm_' + _rnd(36), 'ghp_' + _rnd(36), 'AKIA' + _rnd(16),
+      'DATABASE_URL=postgres://alice:pw123456@db/app',
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc',
+    ].every(s => HC(s) === true)
+      //   반대로 평범한 문서는 표지가 없어야 한다 — 여기서 참이 되면 문서가 통째로 안 보인다
+      && ['# 제목\n\n첫 문단입니다.', '- 목록 항목\n- 또 다른 항목', 'Bearer 인증을 도입한다',
+        'https://example.com/docs/keys 를 참고하세요', 'password 정책을 문서화한다',
+        '결정: 인증 방식을 변경한다', 'BEGIN 과 END 사이를 확인하라', 'cookie 정책을 정리한다',
+        'authorization 흐름을 검토한다'].every(s => HC(s) === false);
+    dbg.marker = String(T2c);
+
+    // ── T2d: **문서 탭만 가드하면 소용없다.** 같은 내용이 그래프 노드·로드맵으로도 임베드된다 —
+    //   `decision add "Authorization: Bearer <토큰>"` 이 DATA.nodes[].label / detail 로 원문 그대로 실렸다(검수 실측).
+    //   임베드 직전 한 곳에서 모든 문자열을 통과시키므로, **실제 CLI 경로**로 어느 표면으로든 새지 않는지 확인한다.
+    const w2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-gph96-')); _d.push(w2);
+    fs.writeFileSync(path.join(w2, 'package.json'), JSON.stringify({ name: 'g96', version: '0.1.0' }, null, 2));
+    const L2 = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { encoding: 'utf8', timeout: 180000, cwd: w2 });
+    L2(['init', w2, '--yes', '--no-stale-check']);
+    const NEEDLE = { decision: 'DECISIONLEAK_' + _rnd(20), task: 'TASKLEAK_' + _rnd(20), plan: 'PLANLEAK_' + _rnd(20) };
+    L2(['decision', 'add', 'Authorization: Bearer ' + NEEDLE.decision, '--reason', 'audit', '--path', w2]);
+    //   **표지만 잡고 마스킹은 못 잡는 형태**로도 확인한다 — 쿠키는 키 이름에 KEY/TOKEN 이 없어
+    //   마스킹 규칙에 걸리지 않는다. 이게 없으면 "표지 가드 제거" 변이가 마스킹에 가려 살아남는다(실측).
+    L2(['task', 'add', 'Cookie: session=' + NEEDLE.task, '--path', w2]);
+    L2(['plan', 'add', 'Set-Cookie: sid=' + NEEDLE.plan, '--path', w2]);
+    L2(['task', 'add', '평범한 작업 항목입니다', '--path', w2]);
+    L2(['graph', w2, '--html']);
+    const gHtml = fs.readFileSync(path.join(w2, 'leerness.html'), 'utf8');
+    //   **출구 전수 조사** — "고친 출구 하나만 보고 안전을 선언"한 실수를 되풀이하지 않으려면 출구를 세어야 한다.
+    //   사용자 텍스트가 leerness.html 로 나가는 경로를 하나씩 오염시켜, 어느 하나라도 새면 실패한다.
+    //   표지는 **마스킹이 못 잡는 쿠키 형태**로 심는다(마스킹에 가려 통과하는 것을 막는다).
+    const H2 = path.join(w2, '.harness');
+    const SURF = [
+      ['lesson', () => L2(['lesson', 'save', 'Cookie: session=LEAKLESSON_QwErTyUiOpAsDfGh', '--path', w2])],
+      ['rule', () => L2(['rule', 'add', 'Cookie: session=LEAKRULE_QwErTyUiOpAsDfGh', '--trigger', 'every-round', '--path', w2])],
+      ['planfile', () => fs.writeFileSync(path.join(H2, 'plan.md'), '# Goal\n\nCookie: session=LEAKPLANFILE_QwErTyUiOpAsDfGh\n')],
+      ['progress', () => fs.appendFileSync(path.join(H2, 'progress-tracker.md'), '\n- Cookie: session=LEAKPROGRESS_QwErTyUiOpAsDfGh\n')],
+      ['state', () => fs.writeFileSync(path.join(H2, 'current-state.md'), 'Cookie: session=LEAKSTATE_QwErTyUiOpAsDfGh\n')],
+      ['handoff', () => fs.writeFileSync(path.join(H2, 'session-handoff.md'), 'Cookie: session=LEAKHANDOFF_QwErTyUiOpAsDfGh\n')],
+      ['skills', () => fs.writeFileSync(path.join(H2, 'skill-index.md'), 'Cookie: session=LEAKSKILLS_QwErTyUiOpAsDfGh\n')],
+      ['feature', () => fs.writeFileSync(path.join(H2, 'feature-graph.md'), '## F-0001 Cookie: session=LEAKFEATURE_QwErTyUiOpAsDfGh\n- depends-on: F-0002\n')],
+      ['tech', () => { const p = path.join(H2, 'tech-profile.json'); let jj = {}; try { jj = JSON.parse(fs.readFileSync(p, 'utf8')); } catch {} jj.current = jj.current || {}; jj.current.services = [{ id: 'svc', evidence: 'Cookie: session=LEAKTECH_QwErTyUiOpAsDfGh' }]; fs.writeFileSync(p, JSON.stringify(jj, null, 2)); }],
+      //   **깊이 상한을 두면 그 너머가 통째로 우회한다.** tech-profile.json 은 임의 JSON 이라 실 CLI 로 도달 가능하다
+      //   (검수 실측: 12단계 밖 문자열에 정규화가 아예 걸리지 않았다). 얕은 픽스처만으로는 이 변이를 못 잡는다.
+      ['deep', () => {
+        const p = path.join(H2, 'tech-profile.json');
+        let jj = {}; try { jj = JSON.parse(fs.readFileSync(p, 'utf8')); } catch {}
+        let node = { evidence: 'Cookie: session=LEAKDEEP_QwErTyUiOpAsDfGh' };
+        for (let k = 0; k < 40; k++) node = { w: node };
+        jj.deep = node;
+        fs.writeFileSync(p, JSON.stringify(jj, null, 1));
+      }],
+    ];
+    for (const [, fn] of SURF) fn();
+    //   **표지 없는 문서 하나**는 반드시 남겨 둔다 — 전부 가드되면 임베드 텍스트가 0 이라
+    //   "보고 spent = 실제 바이트" 불변식이 공허하게 참이 된다(변이 실험으로 확인).
+    //   내용은 `redactSecrets` 가 **비멱등**인 형태로 둔다(`auth_scheme=***,` 의 쉼표를 2회차에 먹는다 — 실측).
+    //   그래야 "임베드 직전에 다시 변환" 변이가 회계 어긋남으로 드러난다.
+    fs.writeFileSync(path.join(H2, 'decisions.md'),
+      '# 결정\n\n설계 메모: idempotency_key=run:phase:step, auth_scheme=\'\', X_AUTH=false 를 확인한다.\n정상 문단입니다.\n');
+    L2(['graph', w2, '--html']);
+    const gHtml2 = fs.readFileSync(path.join(w2, 'leerness.html'), 'utf8');
+    const T2d = Object.values(NEEDLE).every(v => !gHtml.includes(v))
+      && gHtml.includes('평범한 작업 항목입니다')        // 가드가 과잉이면 그래프가 비어 버린다
+      && SURF.every(([n]) => !gHtml2.includes('LEAK' + n.toUpperCase() + '_QwErTyUiOpAsDfGh'))
+      && gHtml2.includes('평범한 작업 항목입니다')
+      //   **보고한 spent = 실제 임베드 바이트** 불변식. 문서 텍스트를 임베드 직전에 다시 변환하면
+      //   회계만 옛 값으로 남아 어긋난다(검수 실측: 1바이트). 생성물에서 직접 확인한다.
+      && (function () {
+        const gi = gHtml2.indexOf('var DATA = '), gj = gHtml2.indexOf(';\n', gi);
+        const gd = JSON.parse(gHtml2.slice(gi + 11, gj).replace(/\\u003c/g, '<'));
+        const sum = (gd.docs.files || []).reduce((a, f) => a + Buffer.byteLength(f.text || '', 'utf8'), 0);
+        return gd.docs.spent === sum && sum > 0;    // sum===0 이면 불변식이 공허하게 참이다
+      })();
+    //   임베드 정규화의 **경계 3종** — 주입 API 로만 만들 수 있는 형태까지 포함한다.
+    //   ① 공유 참조(순환 아님)를 지우면 정상 데이터가 조용히 사라진다(방문 집합을 전역으로 두면 그렇게 된다).
+    //   ② 진짜 순환은 끊고 생성은 성공해야 한다. ③ 아주 깊은 유효 JSON 으로 **생성 자체가 실패하면 안 된다**
+    //   — 상한이 fail-open(원본 통과)이면 우회, fail-safe(자리표시자 대체)면 보호다. 그 구분을 여기서 못 박는다.
+    const shared = { id: 'svc', evidence: 'SHAREDMARK' };
+    const dShared = G.buildGraphData(w2, { _loadTechProfile: () => ({ current: { languages: [shared], services: [shared] }, history: [] }) });
+    const cyc = { evidence: 'CYCMARK' }; cyc.self = cyc;
+    let cycOk = false;
+    try {
+      const cs = JSON.stringify(G.buildGraphData(w2, { _loadTechProfile: () => ({ current: { languages: [cyc], services: [] }, history: [] }) }));
+      //   순환은 **곧바로** 끊겨야 한다. 깊이 상한이 대신 끊어 주면 결과는 나오지만 200단계가 부풀어 실린다
+      //   — 크기까지 봐야 "순환 차단 제거" 변이가 판별된다(그렇지 않으면 살아남았다).
+      cycOk = cs.includes('CYCMARK') && (cs.match(/"self"/g) || []).length <= 1;
+    } catch { cycOk = false; }
+    let deep = { evidence: 'DEEPMARK' };
+    for (let k = 0; k < 5000; k++) deep = { w: deep };
+    let deepOk = false;
+    try { deepOk = typeof JSON.stringify(G.buildGraphData(w2, { _loadTechProfile: () => ({ current: { languages: [], services: [] }, history: [], deep }) })) === 'string'; } catch { deepOk = false; }
+    //   상한은 **넉넉해야** 한다 — 낮추면 누출은 없지만 정상 데이터가 조용히 사라진다.
+    //   "생성 성공"만 보면 상한을 12 로 낮추는 변이가 통과한다(실측). 보통 깊이의 값이 남는지도 본다.
+    let mid = { evidence: 'MIDMARK' };
+    for (let k = 0; k < 30; k++) mid = { w: mid };
+    let midOk = false;
+    try { midOk = JSON.stringify(G.buildGraphData(w2, { _loadTechProfile: () => ({ current: { languages: [], services: [] }, history: [], mid }) })).includes('MIDMARK'); } catch { midOk = false; }
+    deepOk = deepOk && midOk;
+    const T2e = (JSON.stringify(dShared.tech).match(/SHAREDMARK/g) || []).length === 2 && cycOk && deepOk;
+    dbg.embed = String(T2e);
+    dbg.graph = String(T2d) + ' (출구 ' + (SURF.length + 3) + '종)';
+    dbg.mask = String(T2b);
+    dbg.data = String(T2) + ` (dec ${g('decisions').text.length}/${g('decisions').totalChars} · skills ${g('skills').text.length})`;
+
+    // ── T3: 전체 상한에서 **조용한 누락이 없다**.
+    //   기본값(7종 × 64KB = 448KB)으로는 512KB 상한에 닿을 수 없어 이 분기가 아예 안 돈다 —
+    //   작은 상한을 주입해 실제로 발화시키고, "발화했다"까지 단언한다(안 그러면 every 가 공허하게 참).
+    //   ASCII 픽스처만 쓰면 예산을 **코드 단위로 세는 회귀**가 그대로 통과한다(검수 실측) — 한글을 섞는다.
+    for (const f of ['plan.md', 'skill-index.md', 'current-state.md', 'progress-tracker.md', 'decisions.md']) {
+      fs.writeFileSync(path.join(H, f), ('한글이 섞인 줄 ' + 'x'.repeat(180) + '\n').repeat(400));
+    }
+    const S2 = G.buildDocsData(w, 'x', { perCap: 4096, totalCap: 9000 });
+    //   보고된 spent 가 **실제 바이트**와 같아야 한다 — 코드 단위로 세면 여기서 어긋난다.
+    const S2bytes = S2.files.reduce((a, f) => a + Buffer.byteLength(f.text || '', 'utf8'), 0);
+    const sk2 = S2.files.filter(x => x.skipped);
+    //   상한은 **UTF-8 바이트**여야 한다. 코드 단위로 세면서 "64KB"라 적으면 한글 문서에서 3배가 실린다
+    //   (검수 실측: 합계 512KB 주장 → 실제 1,152KB · HTML 1.21MB).
+    const KO = '한'.repeat(30000);
+    for (const f of ['plan.md', 'skill-index.md', 'current-state.md', 'progress-tracker.md', 'decisions.md', 'tech-profile.json']) {
+      fs.writeFileSync(path.join(H, f), KO);
+    }
+    const B2 = G.buildDocsData(w, 'x');
+    const byteSum = B2.files.reduce((a, f) => a + Buffer.byteLength(f.text || '', 'utf8'), 0);
+    const perByteOk = B2.files.every(f => Buffer.byteLength(f.text || '', 'utf8') <= G.DOC_PER_CAP);
+    //   경계에 **빈 줄**이 하나만 있어도 keep 은 1 이 되지만 담긴 내용은 0자였다 — 초장문 문서가 통째로
+    //   빈 화면이 됐다(검수 실측 70,000자 → 0자). 앞뒤 양쪽 방향으로 확인한다.
+    //   빈 줄 **한 개**만 보면 두 개에서 재발하는 것을 못 잡는다(검수 실측: 1개는 통과, 2개는 1자로 유실).
+    const LONG = 'a'.repeat(70000);
+    const capHead = G._capDoc('\n' + LONG, 65536, false);
+    const capTail = G._capDoc(LONG + '\n', 65536, true);
+    const capHead2 = G._capDoc('\n\n' + LONG, 65536, false);
+    const capTail2 = G._capDoc(LONG + '\n\n', 65536, true);
+    const capHead3 = G._capDoc('\n\n\n\n' + LONG, 65536, false);
+    //   빈 줄의 "내용" 을 세는 방식은 세 번 틀렸다 — CRLF 의 \r, 공백, 탭이 모두 내용으로 세어졌다(검수 실측).
+    //   이제 줄 단위 결과와 코드포인트 절단 결과 중 **긴 쪽**을 쓰므로 어떤 공백 조합에도 예산을 채운다.
+    const capWs = [
+      G._capDoc('\r\n' + LONG, 65536, false), G._capDoc('\r\n\r\n' + LONG, 65536, false),
+      G._capDoc('   \n' + LONG, 65536, false), G._capDoc('\t\n' + LONG, 65536, false),
+      G._capDoc(LONG + '\r\n', 65536, true), G._capDoc(LONG + '\n   ', 65536, true),
+    ];
+    //   코드포인트 고지: **이모지** 문서라야 판별된다 — 한글은 UTF-16 길이와 코드포인트 수가 같아
+    //   고지를 String.length 로 되돌리는 변이가 그대로 통과한다(검수 실측).
+    fs.writeFileSync(path.join(H, 'current-state.md'), '🎉'.repeat(30000));
+    const emo = G.buildDocsData(w, 'x');
+    const anyDoc = emo.files.find(f => f.key === 'state') || {};
+    const T3 = sk2.length > 0 && S2.spent <= 9000 && S2.perCap === 4096 && S2.totalCap === 9000
+      //   화면 고지는 charsTotal(코드포인트)을 쓴다 — totalChars 만 보면 고지를 0 으로 바꿔도 통과한다(검수 실측).
+      && sk2.every(x => x.text === '' && x.totalChars > 0 && x.charsTotal > 0 && x.truncated === true)
+      //   **정확히 상한**인 문서를 "잘렸다"고 표시하면 안 된다(경계 오판) — 잡히지 않던 변이다.
+      && G._capDoc('a'.repeat(65536), 65536, false).truncated === false
+      && G._capDoc('a'.repeat(65537), 65536, false).truncated === true
+      //   minSlice 를 사실상 없애면 **의미 없는 조각**이 실린다 — skipped 개수가 아니라 "조각이 없음"을 단언한다.
+      && S2.files.every(x => x.skipped || x.missing || x.guarded || Buffer.byteLength(x.text || '', 'utf8') >= 256)
+      && S2.files.filter(x => !x.missing).every(x => x.skipped || x.truncated !== undefined)
+      && perByteOk && byteSum <= G.DOC_TOTAL_CAP && byteSum > G.DOC_PER_CAP   // 실제로 여러 문서가 실렸다
+      && S2.spent === S2bytes                                                 // 보고 예산 = 실제 바이트
+      && [capHead, capTail, capHead2, capTail2, capHead3, ...capWs].every(c => c.text.replace(/\s/g, '').length > 60000 && Buffer.byteLength(c.text, 'utf8') <= 65536)
+      //   "앞부분만/뒷부분만" 고지가 참이어야 한다 — 경계 줄이 길다고 제목·푸터를 버리면 안 된다(검수 실측).
+      && G._capDoc('TITLE\n' + LONG, 65536, false).text.startsWith('TITLE\n')
+      && G._capDoc(LONG + '\nFOOTER', 65536, true).text.endsWith('\nFOOTER')
+      && !/\r$/.test(G._capDoc(LONG + '\r\nFOOTER', 65536, true).text)
+      //   `\n` 으로만 나누므로 CRLF 문서는 줄 끝에 `\r` 이 남는다 — head 에서 다음 줄이 안 들어가면
+      //   재조립 때 개행이 붙지 않아 **고립된 CR** 이 꼬리에 남았다(검수 실측: "A\r").
+      //   경계 줄이 **상한 안에 들어가는** 경우라야 판별된다 — 초장문이면 잘린 조각이 이어붙어
+      //   CR 뒤에 개행이 생기고 고립되지 않는다(그 픽스처로는 변이가 살아남았다).
+      && !/\r(?!\n)/.test(G._capDoc('A\r\nBB\r\nC', 4, false).text)
+      && !/\r(?!\n)/.test(G._capDoc('AAAA\r\n' + LONG, 65536, false).text)
+      && Buffer.byteLength(G._capDoc('TITLE\n' + LONG, 65536, false).text, 'utf8') <= 65536
+      //   이모지 문서에서 코드포인트 수는 UTF-16 길이의 **절반**이다 — 두 값이 달라야 판별력이 있다.
+      && anyDoc.chars === Array.from(anyDoc.text || '').length && anyDoc.chars * 2 === (anyDoc.text || '').length
+      && anyDoc.charsTotal === 30000 && anyDoc.totalChars === 60000
+      //   데이터가 코드포인트를 실어도 **화면 고지가 String.length 로 되돌아가면** 사용자가 보는 수치는 다시 틀린다.
+      //   그 변이는 데이터 단언만으로는 살아남았다(실측) — 고지가 어느 값을 쓰는지 생성물에서 확인한다.
+      && /'\+\(f\.chars\|\|0\)\+'\/'\+\(f\.charsTotal\|\|0\)\+'자\(/.test(html)
+      && !/\(f\.text\|\|''\)\.length\+'\/'/.test(html);
+    dbg.cap = String(T3) + ` (skipped ${sk2.length} · spent ${S2.spent}/${S2bytes} · 바이트합 ${byteSum} · 빈경계 ${capHead.text.length}/${capTail.text.length}/${capHead2.text.length}/${capTail2.text.length})`;
+
+    ok = setupOk && T1 && T2 && T2b && T2c && T2d && T2e && T3;
+    if (!ok) console.log(`   [P-0010 디버그] 셋업=${setupOk} 렌더=${dbg.render} 데이터=${dbg.data} 표지=${dbg.marker} 그래프=${dbg.graph} 임베드=${dbg.embed} 마스킹=${dbg.mask} 상한=${dbg.cap}`);
+  } catch (e) { console.log('   [P-0010 디버그] 예외: ' + ((e && e.message) || e)); }
+  finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? '✓ B(1.36.96) P-0010 문서 탭: 최소 부분집합 렌더(제목·목록·펜스·표·링크·강조) · XSS 8방향 차단(원시HTML·javascript/data/vbscript/프로토콜상대·속성탈출·표/제목/링크텍스트) · 펜스 안 미해석 · **자격증명 표지 문서는 본문 미포함**(마스킹은 두 번째 층) · 누적로그 tail/일반 head · 줄경계+코드포인트 절단 · 결측/전체상한 명시 고지' : '✗ P-0010 문서 탭 실패');
+  if (!ok) failed++;
+}
+
 // 1.36.94 (헌트 이월 2건 + 자체 검수 반영): ① 형상 무효 스토어에서 **차단 메시지가 안내한 탈출구가
 //   같은 사유로 거부**돼, 남는 실행 가능한 선택지가 "보호를 끄기" 하나였다.
 //   ② `provider add codex --bin codex` 라는 사실상 무변경 재등록이 빌트인 authCheck 를 지워 인증 축을
