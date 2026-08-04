@@ -9528,6 +9528,45 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.99 (P-0012): 시안 정확도 — 시안이 '빈 종이' 가 아니라 이 앱의 재료로 시작하는가.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mk99-'));
+  const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 120000 });
+  const out = (r) => (r.stdout || '') + (r.stderr || '');
+  try {
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'shop', version: '0.1.0', dependencies: { react: '18', next: '14', tailwindcss: '3' } }));
+    R(['init', d, '--yes', '--language', 'ko', '--skills', 'recommended']);
+    const W = (rel, t) => { const p = path.join(d, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t); };
+    W('src/theme.css', ':root { --brand-500: #2563eb; --surface-1: #0f1115; }\n');
+    W('src/components/Button.tsx', 'export function Button(){ return <button className="px-3 py-1 rounded-lg bg-brand-500">go</button> }\n');
+    W('src/components/Card.tsx', 'export function Card(){ return <div className="p-4 rounded-lg bg-surface-1">x</div> }\n');
+    W('src/pages/Cart.tsx', 'export function Cart(){\n  return (\n    <main className="p-6 rounded-lg bg-surface-1">\n      <h1 className="text-xl tracking-wide">장바구니</h1>\n    </main>\n  )\n}\n');
+    //   자기 산출물을 픽스처에 명시적으로 둔다 — 없으면 아래 noOwn 단언이 공허하게 통과한다(실제로 그렇게 살아남았다).
+    //   e2e 는 LEERNESS_NO_AUTO_ROADMAP=1 로 돌아 대시보드가 자동 생성되지 않으므로 직접 쓴다.
+    W('leerness.html', '<style>:root{--panel:#111;--mut:#888}</style><div class="px-3 py-1 rounded-lg">dash</div>\n');
+    const id = (/(P-\d{4,})/.exec(out(R(['preview', 'add', '장바구니 개편', '--design', '기존 카드 재사용']))) || [])[1];
+    const mk = out(R(['preview', 'mockup', id, '--target', 'src/pages/Cart.tsx']));
+    const html = fs.readFileSync(path.join(d, '.harness', 'previews', id + '-mockup.html'), 'utf8');
+    const materials = /--brand-500:\s*#2563eb/.test(html) && /Button/.test(html) && /Card/.test(html) && /rounded-lg/.test(html) && /tailwind/.test(html);
+    const targeted = /Cart\.tsx/.test(html) && /p-6 rounded-lg bg-surface-1/.test(html) && /&lt;main&gt;/.test(html);
+    //   leerness 가 만든 대시보드 변수를 사용자 토큰인 척 싣지 않는다(실측: 실제 프로젝트마다 3~10개 유령 토큰이 있었다)
+    const noOwn = !/--panel\s*:/.test(html) && !/--mut\s*:/.test(html);
+    const offline = !/(?:src|href)\s*=\s*["'](?!#)/i.test(html) && !/<script/i.test(html);
+    //   대상이 루트 밖이면 읽지 않는다
+    R(['preview', 'mockup', id, '--target', '../../etc/passwd', '--force']);
+    const esc = fs.readFileSync(path.join(d, '.harness', 'previews', id + '-mockup.html'), 'utf8');
+    const guarded = /루트 밖/.test(esc);
+    const reports = /재료: 컴포넌트 \d+/.test(mk);
+    Object.assign(dbg, { materials, targeted, noOwn, offline, guarded, reports, len: html.length });
+    ok = materials && targeted && noOwn && offline && guarded && reports;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ B(1.36.99/P-0012) 시안 정확도: 실제 토큰 :root 주입 + 기존 컴포넌트 어휘 + 대상 화면 실클래스 + 자기산출물 오염 0 + 오프라인 + 루트밖 거부'
+    : '✗ 1.36.99 시안 정확도 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

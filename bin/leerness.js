@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.98';
+const VERSION = '1.36.99';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7575,6 +7575,10 @@ function _p0013LibraryOk() {
     W('src/Hero.astro', '<section class="p-4 rounded-lg bg-brand-500"></section>\n');
     W('src/theme.css', ':root { --brand-500: #2563eb; --radius-lg: 12px; }\n');
     W('src/inline.html', '<style>:root{--surface-1:#fff}</style><div class="px-3 py-1 rounded-lg"></div>\n');
+    // leerness 가 사용자 저장소에 만들어 두는 산출물은 '이 앱의 것' 이 아니다 — 실측에서 대시보드 변수가 사용자 토큰으로 실렸고,
+    //   시안이 존재하지 않는 토큰(var(--panel))을 쓰라고 지시할 뻔했다.
+    W('leerness.html', '<style>:root{--panel:#111;--mut:#888}</style><div class="px-3 py-1 rounded-lg">dash</div>\n');
+    W('roadmap.html', '<style>:root{--roadmapOnly:#222}</style>\n');
     // CSS 문맥 밖의 `--이름:` 은 토큰이 아니다 — 실측에서 주석 속 CLI 플래그(audit --fix: …)가 디자인 토큰으로 실렸다.
     W('src/docs.ts', '// audit --fix: 누락 키 자동 추가\n// health --strict: 모든 issue 시 exit 1\nexport const runFix = () => 1;\n');
     // 문자열·주석의 자리표시자는 태그처럼 생겼다 — 실측에서 UI 를 그리지 않는 감시 클래스 4개가 이것 때문에 컴포넌트로 실렸다.
@@ -7598,7 +7602,8 @@ function _p0013LibraryOk() {
     const brand = r.tokens.cssVars.find(v => v.name === 'brand-500');
     const tokOk = varNames.includes('brand-500') && varNames.includes('radius-lg') && !!brand && /#2563eb/.test(brand.value)
       && varNames.includes('surface-1')                                    // <style> 블록 안도 CSS 문맥이다
-      && !varNames.includes('fix') && !varNames.includes('strict');        // 주석 속 CLI 플래그는 토큰이 아니다
+      && !varNames.includes('fix') && !varNames.includes('strict')         // 주석 속 CLI 플래그는 토큰이 아니다
+      && !varNames.includes('panel') && !varNames.includes('mut') && !varNames.includes('roadmapOnly');   // 자기 산출물(leerness.html/roadmap.html)은 남의 것으로 세지 않는다
     // 빈도 문턱: 3회 이상만 싣는다(1~2회는 우연) — 문턱을 지우면 tracking-wide 가 섞인다
     const utilNames = r.tokens.utilities.map(u => u.name);
     const utilOk = utilNames.includes('rounded-lg') && utilNames.includes('bg-brand-500') && !utilNames.includes('tracking-wide');
