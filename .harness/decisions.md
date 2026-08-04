@@ -75,3 +75,9 @@
 - Reason: leerness 전 검사가 정적·텍스트 대리 지표라 '검증기가 실패를 잡을 수 있는가'를 증명하는 장치가 없었다. codex 독립검토와 4렌즈 분석이 만장일치 최우선으로 지목
 - Alternatives: ponytail 명령군 이식(기각: lens/reuse/review-request 중복) · 마이그레이션 러너(기각: 정체성 변질) · 룰 스냅샷(이연) · ladder 영수증(이연)
 - Impact: verify-claim/gate 가 '캘리브레이션된 검증기'만 신뢰하도록 — done 은 증거를 요구한다의 형제 명제
+
+### 2026-08-04 — P-0013 추출기는 스택 탐지 후 스택별 전략을 쓰고, 증명 가능한 하한만 싣는다
+- Decision: P-0013 추출기는 스택 탐지 후 스택별 전략을 쓰고, 증명 가능한 하한만 싣는다
+- Reason: 실측(실제 12개 프로젝트): 대문자 export 를 컴포넌트로 세면 auto-influencer 83->33, view-work 116->66, Adzento 62->0 으로 2~3배 부풀려진다. Adzento 는 플레인 HTML 이라 순진한 추출기가 가짜 컴포넌트 62개를 만든다. 토큰도 출처가 정반대다 — Tailwind 프로젝트(12개 중 7개)는 CSS 변수가 0~5개이고 유틸 어휘가 74~121종(text-ink-50 417회), Adzento 는 CSS 변수 58개에 Tailwind 0. 한쪽만 보는 추출기는 절반에서 무용지물이 된다.
+- Alternatives: 
+- Impact: 

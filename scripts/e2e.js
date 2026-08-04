@@ -9401,6 +9401,60 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.97 (P-0011): 렌즈 3축 심화 — CLI 표면 행위. selftest 는 함수만 보므로 실제 렌더/로케일/완료검증 인라인은 여기서 잰다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lens97-'));
+  const R = (a, o = {}) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: o.cwd || d, encoding: 'utf8', timeout: 60000 });
+  const out = (r) => (r.stdout || '') + (r.stderr || '');
+  const HAN = /[가-힣]/;
+  try {
+    R(['init', d, '--yes', '--language', 'ko', '--skills', 'recommended']);
+    // ① 심화 렌즈가 실제로 렌더되고 12문항이 다 나오는가(카탈로그에만 있고 표면에 안 나오면 없는 것과 같다)
+    const c = out(R(['lens', 'contract', '--path', d]));
+    const contractOk = /## contract/.test(c) && /12\. /.test(c) && !/13\. /.test(c) && /breaking/.test(c);
+    const rc = out(R(['lens', 'recovery', '--path', d]));
+    const recOk = /## recovery/.test(rc) && /fail-open/.test(rc) && /12\. /.test(rc);
+    const ob = out(R(['lens', 'observability', '--path', d]));
+    const obsOk = /## observability/.test(ob) && /민감정보/.test(ob) && /12\. /.test(ob);
+    const ax = out(R(['lens', 'axes', '--path', d]));
+    const axesOk = /## axes/.test(ax) && /8\. /.test(ax) && !/9\. /.test(ax) && /leerness lens database/.test(ax);
+    // ② 알 수 없는 도메인 안내가 신규 축까지 광고하는가(파생 목록이 표면에 실제로 도달했는지 — 하드코딩이면 여기서 빠진다)
+    const un = R(['lens', 'nosuchaxis', '--path', d]);
+    const unknownOk = un.status === 1 && /observability/.test(out(un)) && /contract/.test(out(un)) && /axes/.test(out(un));
+    // ②-b 도메인 목록을 손으로 적던 세 표면(help ko · help en · commands)이 카탈로그에서 파생되는가.
+    //   위 unknownOk 는 lensCmd 자체 목록이라 이 셋의 낡음을 못 본다 — 절제 시험에서 실제로 통과해 버렸다.
+    const surfaces = [out(R(['commands', '--path', d])), out(R(['--help'])), out(R(['--help', '--language', 'en']))];
+    const surfaceOk = surfaces.every(s => /lens \[/.test(s) && /observability/.test(s) && /\|axes\]/.test(s));
+    // ③ en 로케일 누수 0 — 한글로만 확인하면 영문 경로 구멍을 통째로 놓친다(1.36.89 재발 방지)
+    const en = out(R(['lens', 'recovery', '--language', 'en', '--path', d]));
+    const enOk = /failure & recovery/.test(en) && /fail-open/.test(en) && !HAN.test(en);
+    // ④ 완료 검증 인라인: 경로에 단서 없는 파일이라도 '내용'으로 소환되는가 + 대조군은 조용한가
+    fs.writeFileSync(path.join(d, 'worker.mjs'), 'export async function run(){ try { await go() } catch (e) {} }\n');
+    fs.writeFileSync(path.join(d, 'pure.mjs'), 'export const add = (a, b) => a + b\n');
+    fs.writeFileSync(path.join(d, 'loop.mjs'), 'export async function all(ids){ for (const id of ids) { await fetchOne(id) } }\n');
+    const mk = (title, file) => {
+      const j = R(['task', 'add', title, '--json']);
+      let id = ''; try { id = (JSON.parse(j.stdout || '{}').task || {}).id || ''; } catch {}
+      if (!id) { const m = /(T-\d+)/.exec(out(j)); id = m ? m[1] : ''; }
+      R(['task', 'update', id, '--status', 'done', '--evidence', `구현 ${file} 수정`]);
+      return out(R(['verify-claim', id, '--path', d]));
+    };
+    const vRec = mk('워커 정리', 'worker.mjs');
+    const vPure = mk('순수 헬퍼', 'pure.mjs');
+    const vLoop = mk('일괄 조회', 'loop.mjs');
+    const recallOk = /· recovery\(/.test(vRec) && !/· recovery\(/.test(vPure) && /· code\(/.test(vPure);
+    // ⑤ 경량 축은 신호가 있을 때만 한 줄 — 모든 변경에 붙으면 곧 읽히지 않는 배경음이 된다
+    const axisOk = /· axes\(/.test(vLoop) && /성능·확장성/.test(vLoop) && !/· axes\(/.test(vPure);
+    Object.assign(dbg, { contractOk, recOk, obsOk, axesOk, unknownOk, surfaceOk, enOk, recallOk, axisOk });
+    ok = contractOk && recOk && obsOk && axesOk && unknownOk && surfaceOk && enOk && recallOk && axisOk;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ B(1.36.97/P-0011) 렌즈 3축 심화: contract/recovery/observability 12문항 렌더 + axes 8축 + 파생 도메인 목록 + en 누수0 + 내용기반 소환(대조군 침묵) + 축 힌트 조건부'
+    : '✗ 1.36.97 렌즈 3축 심화 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

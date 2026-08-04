@@ -1,0 +1,40 @@
+[
+  {
+    "at": "2026-07-30T08:28:42.417Z",
+    "task": "stripe 결제 환불 처리 구현",
+    "tier": "high-risk",
+    "confidence": "high",
+    "conflict": false,
+    "signals": [
+      "high-risk:payment"
+    ],
+    "assignments": [
+      {
+        "role": "architect",
+        "provider": null,
+        "model": null
+      },
+      {
+        "role": "commander",
+        "provider": null,
+        "model": null
+      },
+      {
+        "role": "coder",
+        "provider": null,
+        "model": null
+      },
+      {
+        "role": "reviewer",
+        "provider": null,
+        "model": null
+      }
+    ],
+    "reviewerIndependent": null,
+    "requested": "suggest",
+    "confirmed": false,
+    "executed": false,
+    "approvedBy": null,
+    "refusals": []
+  }
+]

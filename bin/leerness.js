@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.96';
+const VERSION = '1.36.97';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3686,7 +3686,10 @@ function _selfTestCases() {
       const affectsOk = Array.isArray(d.affects) && d.affects.length && d.affects.every(a => !!LENS_CATALOG[a]);
       const s = read(__filename);
       const routeHint = s.includes("if (name === 'bugfix') log(") && s.includes('leerness lens debug');
-      const surface = s.includes('lens [code|design|docs|test|security|database|debug]');
+      // 1.36.97: 표면이 도메인 목록을 손으로 적지 않고 카탈로그에서 파생하는지 — 축을 추가해도 세 표면이 어긋날 수 없다.
+      //   needle 을 쪼개 조립: 이 줄 자체가 grep 대상 소스라 통짜로 적으면 자기 자신에 매칭된다(자기참조 함정).
+      const _needle = 'lens [' + '${_lensDom' + 'ainList()}]';
+      const surface = s.split(_needle).length - 1 >= 3;   // commands · help(en) · help(ko)
       // 파일 확장자 매핑 미확장(오탐 방지): _lensDomainsForFiles 가 debug 를 반환하지 않는다
       const noFileMap = !JSON.stringify(_lensDomainsForFiles(['a.sql', 'b.js', 'c.md'])).includes('debug');
       return parity && koOk && enOk && affectsOk && routeHint && surface && noFileMap;
@@ -4949,7 +4952,9 @@ function _selfTestCases() {
     } },
     { name: '품질 렌즈 (1.18.3): lens 명령 표면 등재 + REPL 설치문항 제거 (소스 가드)', run: () => {
       const src = read(__filename);
-      const surface = src.includes("if (cmd === 'lens')") && src.includes("cmd: 'lens [code|design|docs|test|security|database|debug]") && src.includes('leerness lens [code|design|docs|test|security|database|debug]');
+      // 1.36.97: 하드코딩 목록 대신 파생 목록(행위) — 모든 카탈로그 키가 실제로 노출되는지 확인한다.
+      const _list = _lensDomainList();
+      const surface = src.includes("if (cmd === 'lens')") && Object.keys(LENS_CATALOG).every(k => _list.split('|').includes(k)) && _list.split('|').length === Object.keys(LENS_CATALOG).length;
       const replGone = !src.includes('설치 완료 후 REPL agent ' + '모드를 즉시 시작할까요') && src.includes('REPL agent 모드 진입 ' + '문항 제거');
       return surface && replGone;
     } },
@@ -5285,8 +5290,10 @@ function _selfTestCases() {
         && !T('const total = items.reduce((a,b)=>a+b,0)')
         && !T('return items.filter(x => x.from && x.where)')
         && !T('updateProfile(user) // app update, no SQL');
-      // 병합: database 우선 노출 + 최대 2 캡
-      const mergeOk = eq(W(['code']), ['database', 'code']) && eq(W(['code', 'design']), ['database', 'code']) && eq(W([]), ['database']);
+      // 병합: database 우선 노출 + 캡. 1.36.97 에서 총 상한이 2 → 3 으로 바뀌었다(구체 축 ≤2 + 일반 축 ≤2, 합 ≤3).
+      //   근거: 구체 축을 앞세우고 전체를 2 로 자르면 실제 커밋 62% 에서 일반 렌즈가 통째로 사라졌다(검수 실측).
+      //   그래서 ['code','design'] 은 이제 design 까지 남는다 — database 가 design 을 밀어내지 않는다.
+      const mergeOk = eq(W(['code']), ['database', 'code']) && eq(W(['code', 'design']), ['database', 'code', 'design']) && eq(W([]), ['database']);
       return hit && noFp && mergeOk;
     } },
     { name: 'DB 렌즈 recall 보안·특례 (codex FN검수 P2/P3, 1.36.4): _anyDbContentInFiles root 제한 + 테스트파일 제외 (행위)', run: () => {
@@ -5303,6 +5310,169 @@ function _selfTestCases() {
         const traversalBlocked = _anyDbContentInFiles(['../outside.mjs'], dir) === false   // codex P2: ../ 거부
           && _anyDbContentInFiles([path.join(parent, 'outside.mjs')], dir) === false;      // 절대경로 거부
         return plain && testExcluded && traversalBlocked;
+      } finally { try { fs.rmSync(parent, { recursive: true, force: true }); } catch { /* ignore */ } }
+    } },
+    { name: '렌즈 3축 심화 (1.36.97, P-0011): contract/recovery/observability 12문항 + 내용 소환 판별력(양성 vs 대조군) + 우선순위·캡 (행위)', run: () => {
+      const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      // ① 심화 3축은 database 급 깊이 + KO/EN 동수. 얕은 스텁으로 되돌아가면 실패한다.
+      const deepOk = ['contract', 'recovery', 'observability'].every(k => {
+        const l = LENS_CATALOG[k];
+        return l && l.questions.length >= 8 && l.questions.length === l.questionsEn.length
+          && l.questions.every(q => q.length > 80) && l.questionsEn.every(q => q.length > 80)   // 이름만 나열한 한 줄 스텁 금지
+          && (l.affects || []).length && l.affects.every(a => !!LENS_CATALOG[a]);
+      });
+      // 축의 정체성 — 각 렌즈가 자기 주제를 실제로 묻는가(문항이 통째로 다른 축으로 바뀌면 실패)
+      const idOk = LENS_CATALOG.contract.questions.some(q => q.includes('breaking'))
+        && LENS_CATALOG.recovery.questions.some(q => q.includes('fail-open') && q.includes('fail-safe'))
+        && LENS_CATALOG.observability.questions.some(q => q.includes('민감정보'))
+        && LENS_CATALOG.axes.questions.length === 8 && LENS_CATALOG.axes.questionsEn.length === 8;
+      // 영문 표면도 같은 주제를 묻는가 + 한글이 섞이지 않았는가. 한국어로만 단언하면 en 로케일 누수를 통째로 놓친다
+      //   (1.36.89 에서 실제로 겪음: 한글 픽스처만으로 짠 적대 테스트가 영문 경로의 구멍을 못 봤다).
+      const enOk = ['contract', 'recovery', 'observability', 'axes'].every(k => LENS_CATALOG[k].questionsEn.every(q => !/[가-힣]/.test(q)))
+        && LENS_CATALOG.contract.questionsEn.some(q => q.includes('breaking'))
+        && LENS_CATALOG.recovery.questionsEn.some(q => q.includes('open') && q.includes('safe'))
+        && LENS_CATALOG.observability.questionsEn.some(q => q.includes('sensitive'));
+      // ② 내용 술어: 양성만 재면 항상-참 술어도 통과한다 — 같은 주제의 산문/무관 코드가 꺼지는지 함께 잰다.
+      const R = _isRecoveryContentText, O = _isObsContentText, C = _isContractContentText;
+      const posOk = R('try { f() } catch (e) {}') && R('const maxRetries = 3') && R('new AbortController()')
+        && R("retry(fn, { backoff: 200 })") && R("process.on('SIGTERM', shutdown)")
+        && O('logger.error("x", e)') && O('const id = h["x-request-id"]') && O('try { f() } catch (e) { console.error(e) }')
+        && O("import { trace } from '@opentelemetry/api'") && O('"@sentry/node": "^7.0.0"')      // \b+@ 로 죽어 있던 대안
+        && O('metrics.inc({ route })')
+        && C("app.get('/users/:id', h)") && C('res.status(404).json({})') && C('/** @deprecated */')
+        && C('openapi: 3.0.3\ninfo:\n  title: x') && C('message Order {\n  string id = 1;\n}');
+      // 대조군 — 1.36.97 검수가 실제로 재현한 오탐들. 낱말만으로 켜지면 여기서 죽는다.
+      const ctrlOk = !R('try { f() } catch (e) { report(e); throw e }')      // 처리하는 catch 는 아님
+        && !R('// we should retry this later, maybe add a backoff')          // 산문의 낱말만으론 아님(fallback→backoff 로 강화)
+        && !R("'error.backoff': 'Too many attempts — slowing down.'")        // i18n 카탈로그의 사용자 문구
+        && !R("const REQUIRED = ['fetch','AbortController','ResizeObserver']") // 기능 탐지 배열의 이름 나열
+        && !O('console.log("hello")') && !O('// TODO: improve logging someday')
+        && !O('const counter = new Map(); counter.set(w, 1)')                // 개수 세는 평범한 Map
+        && !O('const tracer = makeTracer(scene); tracer.trace()')            // 레이 트레이서
+        && !O("const p = faker.company.catchPhrase();\nconsole.log(p)")      // 'catch' 부분문자열
+        && !O("const requestId = crypto.randomUUID()")                       // 멱등키는 원격측정이 아니다
+        && !C('// this is the contract between modules') && !C('module.exports = { a, b }');
+      // ②-b 2차 폭발 회귀 가드 — 줄머리 앵커 뒤에 \s* 를 쓰면 개행까지 먹어 빈 줄 연속에서 O(n²) 가 된다(512KB 에 227초, 실 CLI 재현).
+      //   구버전 정규식은 이 입력(256KB)에 수십 초가 걸린다. 대조군(같은 크기의 평범한 소스)과 함께 재 검사기가 살아 있음을 보인다.
+      const blank = '// gen\n' + '\n'.repeat(256 * 1024) + '// end\n';
+      const normal = '// gen\n' + 'const a = 1;\n'.repeat(20 * 1024) + '// end\n';
+      const _ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(process.hrtime.bigint() - t0) / 1e6; };
+      const tBlank = _ms(() => C(blank)), tNormal = _ms(() => C(normal));
+      const redosOk = tBlank < 2000 && C(blank) === false && C(normal) === false && tNormal < 2000;
+      // ③ 경로 매핑: 신규 계약 표면은 켜지고, 매 릴리스 바뀌는 package.json 은 켜지지 않는다(상시 오탐 방지)
+      const F = _lensDomainsForFiles;
+      const pathOk = F(['api/users.js']).includes('contract') && F(['t/x.d.ts']).includes('contract') && F(['p/order.proto']).includes('contract')
+        && !F(['package.json']).includes('contract') && !F(['src/util.js']).includes('contract')
+        && !F(['api/x.test.js']).includes('contract')                          // 테스트는 test 렌즈 유지
+        // 1.36.96 은 여기서 ['database','code'] 였다 — 총 상한이 3 이 되면서 docs 가 더 붙는다(밀어낸 게 아니라 더한 것).
+        && eq(F(['a.sql', 'b.js', 'c.md']), ['database', 'code', 'docs'])
+        && eq(F(['a.css', 'b.md', 'c.js', 'd.test.js']), ['code', 'design']);  // 구체 축 0건이면 1.36.96 과 글자 그대로 동일(일반 2개)
+      // ④ 캡: 구체 축이 일반 축을 '없애지는' 않는다 — 검수 실측에서 실제 커밋 62% 가 일반 렌즈를 통째로 잃었다.
+      const W = _withLensDomain;
+      const capOk = eq(W(W(['code'], 'recovery'), 'contract'), ['contract', 'recovery', 'code'])   // 구체 2 + 일반 1
+        && eq(W(['code'], 'database'), ['database', 'code'])
+        && eq(_withDbDomain(['code', 'design']), ['database', 'code', 'design'])                    // 구체 1 → 일반 2 유지
+        && eq(_capLensDomains(['code', 'design', 'docs']), ['code', 'design'])                     // 구체 0건 → 종전 그대로 2개
+        && eq(_capLensDomains(['contract', 'code', 'test']), ['contract', 'code', 'test'])          // 구현+테스트 커밋이 test 를 잃지 않음
+        && eq(W(W(W(['docs'], 'recovery'), 'contract'), 'database'), ['database', 'contract', 'docs'])  // 구체는 2 로 잘려도 일반은 남는다
+        // 상한: 구체 2 + 일반 2 = 4. 일반 상한(2)은 1.36.96 그대로라 '보이던 렌즈가 사라지는' 입력이 존재하지 않는다.
+        && eq(_capLensDomains(['database', 'contract', 'recovery', 'code', 'design']), ['database', 'contract', 'code', 'design'])
+        && _capLensDomains(['database', 'contract', 'recovery', 'observability', 'code', 'design', 'docs', 'test']).length === 4
+        // 인라인은 목차다 — 첫 절만 남는다(심화 문항 전문을 찍으면 한 축이 여러 줄을 먹는다)
+        && _lensInlineQ(LENS_CATALOG.contract.questions[0]).length < 60
+        && _lensInlineQ(LENS_CATALOG.recovery.questionsEn[0]).length < 80
+        && LENS_CATALOG.contract.questions[0].startsWith(_lensInlineQ(LENS_CATALOG.contract.questions[0]));
+      // ⑤ 파생 목록 — 표면(help/commands)이 손으로 적은 목록과 어긋날 수 없음
+      const listOk = _lensDomainList() === Object.keys(LENS_CATALOG).join('|') && _lensDomainList().split('|').includes('observability');
+      // ⑥ 프로젝트가 이미 같은 이름의 커스텀 렌즈를 갖고 있을 때 — 질문도 제목도 잃지 않는다.
+      //   신규 내장 도메인을 추가하면 그 이름을 먼저 쓰고 있던 프로젝트를 덮게 된다. 로케일도 분리해서 받는다.
+      const merged = _mergeLensCatalog(LENS_CATALOG, {
+        contract: { title: '우리팀 계약', persona: '계약 담당자', questions: ['우리 팀 규칙: 스키마 변경을 공지했는가?'] },
+        recovery: { questions: ['우리 팀 규칙: 롤백 런북을 붙였는가?'] },
+      });
+      const customOk = merged.contract.title === '우리팀 계약' && merged.contract.persona === '계약 담당자'
+        && merged.contract.titleEn === LENS_CATALOG.contract.titleEn                      // ko 제목만 준 프로젝트의 en 은 한글이 새면 안 된다
+        && merged.contract.questions.some(q => q.includes('우리 팀 규칙'))                  // 사용자 질문 보존
+        && merged.contract.questions.length === LENS_CATALOG.contract.questions.length + 1  // 내장은 그대로 + 1
+        && merged.recovery.title === LENS_CATALOG.recovery.title                            // 제목을 안 준 경우는 내장 유지
+        && merged.recovery.questions.some(q => q.includes('롤백 런북'));
+      return deepOk && idOk && enOk && posOk && ctrlOk && redosOk && pathOk && capOk && listOk && customOk;
+    } },
+    { name: '렌즈 3축 소환 (1.36.97, P-0011): 공유 스캐너 보안가드 상속 + 축 힌트 침묵 기본값 (행위)', run: () => {
+      const os = require('os');
+      const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'lz-lens97-'));
+      const dir = path.join(parent, 'proj'); fs.mkdirSync(dir);
+      try {
+        fs.writeFileSync(path.join(dir, 'worker.mjs'), 'export async function run(){ try { await go() } catch (e) {} }\n');
+        fs.writeFileSync(path.join(dir, 'worker.test.mjs'), 'try { f() } catch (e) {}\n');
+        fs.writeFileSync(path.join(dir, 'pure.mjs'), 'export const add = (a,b) => a+b\n');
+        fs.writeFileSync(path.join(dir, 'loop.mjs'), 'for (const id of ids) { await fetchOne(id) }\n');
+        fs.writeFileSync(path.join(parent, 'outside.mjs'), 'try { f() } catch (e) {}\n');   // root 밖(존재+신호)
+        for (const ext of ['jsx', 'vue', 'svelte', 'tsx']) fs.writeFileSync(path.join(dir, 'C.' + ext), 'export function A(){ try { go() } catch (e) {} }\n');
+        // 셋업이 조용히 실패하면 아래 '거부' 단언들이 전부 공허하게 통과한다 — 픽스처가 실제로 감지되는지 먼저 못박는다.
+        const setupOk = _isRecoveryContentText(fs.readFileSync(path.join(dir, 'worker.mjs'), 'utf8')) === true
+          && _isRecoveryContentText(fs.readFileSync(path.join(parent, 'outside.mjs'), 'utf8')) === true
+          && _isRecoveryContentText(fs.readFileSync(path.join(dir, 'pure.mjs'), 'utf8')) === false;
+        // 경로에 단서 없는 파일도 내용으로 소환되고, 신호 없는 파일은 기존대로 code 만
+        const recallOk = _lensDomainsWithContent(['worker.mjs'], dir).includes('recovery')
+          && JSON.stringify(_lensDomainsWithContent(['pure.mjs'], dir)) === '["code"]'
+          && !_lensDomainsWithContent(['worker.test.mjs'], dir).includes('recovery');       // 테스트 제외 특례 상속
+        // 같은 내용은 확장자와 무관하게 같은 축을 받아야 한다(종전엔 .tsx 만 스캔돼 .jsx 의 빈 catch 가 보이지 않았다)
+        const extOk = ['jsx', 'vue', 'svelte', 'tsx'].every(e => _lensDomainsWithContent(['C.' + e], dir).includes('recovery'));
+        // 스캐너의 '축별 배선'을 축마다 따로 건다 — recovery 만 검증하면 나머지 세 축을 통째로 빼도 통과한다
+        //   (변이 M25b 가 실제로 그렇게 살아남았다). 각 축은 자기 신호에서만 켜지고 남의 신호에서는 꺼져야 한다.
+        fs.writeFileSync(path.join(dir, 'ax-contract.mjs'), "app.get('/u/:id', h)\n");
+        fs.writeFileSync(path.join(dir, 'ax-obs.mjs'), "logger.error('boom', e)\n");
+        fs.writeFileSync(path.join(dir, 'ax-db.mjs'), "db.prepare('SELECT id FROM t WHERE x = ?')\n");
+        const wiringOk = [['ax-contract.mjs', 'contract'], ['ax-obs.mjs', 'obs'], ['ax-db.mjs', 'db'], ['worker.mjs', 'recovery']]
+          .every(([f, key]) => { const s = _scanLensSignals([f], dir); return s[key] === true && ['contract', 'obs', 'db', 'recovery'].filter(k => k !== key).every(k => s[k] === false); })
+          && _lensDomainsWithContent(['ax-contract.mjs'], dir).includes('contract')      // 실사용 경로까지 도달하는가
+          && _lensDomainsWithContent(['ax-obs.mjs'], dir).includes('observability')
+          && _lensDomainsWithContent(['ax-db.mjs'], dir).includes('database');
+        // DB 렌즈에만 있던 경로 가드가 공유 스캐너를 통해 새 축에도 그대로 적용되는가(대조군: root 안은 읽힘)
+        const guardOk = _anyLensContentInFiles(['../outside.mjs'], dir, /\.mjs$/i, _isRecoveryContentText) === false
+          && _anyLensContentInFiles([path.join(parent, 'outside.mjs')], dir, /\.mjs$/i, _isRecoveryContentText) === false
+          && _anyLensContentInFiles(['worker.mjs'], dir, /\.mjs$/i, _isRecoveryContentText) === true;
+        // 축 힌트는 신호가 있을 때만 — 모든 변경에 고정 문구를 붙이면 곧 배경음이 된다
+        const axisOk = _axisHintForFiles(['loop.mjs'], dir) === 4 && _axisHintForFiles(['pure.mjs'], dir) === null;
+        // 크기 상한 분기를 실제로 주행 — 픽스처가 이 분기를 지나지 않으면 가드를 지워도 테스트가 통과한다(4MB 상한 초과로 재설정).
+        fs.writeFileSync(path.join(dir, 'huge.mjs'), 'try { f() } catch (e) {}\n' + 'x'.repeat(5 * 1024 * 1024));
+        // 디렉토리 정션은 Windows 에서 권한 없이 만들 수 있다 — 문자열 접두 봉쇄만으론 이 경로로 root 밖이 읽혔다(검수 재현).
+        //   심볼릭 파일 링크는 권한이 필요해 이 호스트에서 종종 실패하므로, 판별력은 정션 쪽에 둔다(둘 다 실패하면 미검증으로 남긴다).
+        //   두 진입점을 모두 건다: _anyLensContentInFiles(공유 헬퍼)와 _lensDomainsWithContent(실제 verify-claim 경로).
+        //   한쪽만 걸면 다른 쪽의 봉쇄를 통째로 지워도 테스트가 통과한다 — 변이에서 실제로 그렇게 살아남았다.
+        let linkOk = true, linkTested = false;
+        for (const [type, target, name] of [['junction', parent, 'linkdir'], ['file', path.join(dir, 'worker.mjs'), 'link.mjs']]) {
+          try {
+            fs.symlinkSync(target, path.join(dir, name), type);
+            const probe = type === 'junction' ? 'linkdir/outside.mjs' : 'link.mjs';
+            linkOk = linkOk && _anyLensContentInFiles([probe], dir, /\.mjs$/i, _isRecoveryContentText) === false
+              && _scanLensSignals([probe], dir).recovery === false
+              && !_lensDomainsWithContent([probe], dir).includes('recovery');
+            linkTested = true;
+          } catch { /* 권한/미지원 → 이 갈래는 건너뜀 */ }
+        }
+        // 대조군: 같은 진입점이 root 안 파일은 정상적으로 감지해야 한다(봉쇄가 전부를 막아 통과하는 공허함 차단)
+        linkOk = linkOk && _scanLensSignals(['worker.mjs'], dir).recovery === true;
+        const capFileOk = _anyLensContentInFiles(['huge.mjs'], dir, /\.mjs$/i, _isRecoveryContentText) === false && linkOk && linkTested;
+        // 호출당 총 예산은 기본값(32MB)으로 재려면 픽스처가 36MB 필요하다 — 상한을 낮춰 넣어 같은 분기를 싸게 주행한다.
+        //   신호는 '마지막' 파일에만 둔다: 예산이 무시되면 거기까지 도달해 true 가 되고, 지켜지면 도달하지 못한다.
+        const pad = 'z'.repeat(400);
+        for (let i = 0; i < 3; i++) fs.writeFileSync(path.join(dir, 'b' + i + '.mjs'), pad);
+        fs.writeFileSync(path.join(dir, 'zlast.mjs'), 'try { f() } catch (e) {}\n');
+        const many = ['b0.mjs', 'b1.mjs', 'b2.mjs', 'zlast.mjs'];
+        //   예산 810: b0·b1(400×2)이 다 먹고 10 만 남아 b2 도 zlast(25B)도 못 읽는다 → false.
+        //   예산 1200: b0·b1·b2 뒤 0 이 남지만... 이 아니라 b0~b2 로 1200 을 정확히 소진하고 zlast 가 걸린다 → false 가 아니라
+        //   설계상 '초과분만 건너뛴다' 를 확인하려면 별도 케이스가 필요하다(아래 skipsBigKeepsSmall).
+        const budgetOk = _anyLensContentInFiles(many, dir, /\.mjs$/i, _isRecoveryContentText, { totalCap: 810 }) === false
+          && _anyLensContentInFiles(many, dir, /\.mjs$/i, _isRecoveryContentText, { totalCap: 5000 }) === true               // 대조군: 예산이 넉넉하면 도달
+          && _scanLensSignals(many, dir, { totalCap: 810 }).recovery === false                                               // 실사용 경로도 같은 예산을 지키는가
+          && _scanLensSignals(many, dir, { totalCap: 5000 }).recovery === true
+          && _scanLensSignals(['zlast.mjs'], dir, { fileCap: 10 }).recovery === false                                        // 파일당 상한도 주입으로 주행
+          && _scanLensSignals(['zlast.mjs'], dir, { fileCap: 5000 }).recovery === true
+          // 예산 초과는 '중단' 이 아니라 '건너뜀' 이다 — 큰 파일 하나가 뒤의 작은 파일을 막으면 안 된다(break 로 되돌리면 실패).
+          && _scanLensSignals(['b0.mjs', 'zlast.mjs'], dir, { totalCap: 300 }).recovery === true;
+        return setupOk && recallOk && extOk && wiringOk && guardOk && axisOk && capFileOk && budgetOk;
       } finally { try { fs.rmSync(parent, { recursive: true, force: true }); } catch { /* ignore */ } }
     } },
     { name: 'GPT-5.5 평가 #5 (1.19.1, UR-0009) + 정직성 calibration (1.35.12): 클린룸 문서 공개 + 한계 명시 + self-administered 라벨 (행위)', run: () => {
@@ -7217,8 +7387,159 @@ const LENS_CATALOG = {
     ],
     affects: ['test', 'code'], affectsNote: '근본원인을 한 문장으로 못 쓰겠으면 코드가 복잡하다는 신호 — code 질문으로. 수정엔 그 버그를 재현하는 회귀 테스트가 따라와야 함(수정 후 초록불은 증거가 아님)',
     affectsNoteEn: 'if you cannot state the root cause in one sentence, the code is too complex — revisit the code lens; every fix needs a regression test that reproduces the bug'
+  },
+  // 1.36.97 (P-0011 렌즈 3축 심화): 계약 / 실패·복구 / 관측 가능성.
+  //   동기(실측): 이 도구의 렌즈는 database 12문항 vs 나머지 3문항으로 극단적으로 치우쳐 있었는데,
+  //   직전 라운드(1.36.96)에서 외부 검수 8회가 막은 57건은 계약·실패복구·신뢰보안 축에 몰렸고
+  //   12문항짜리 동시성 축에서는 0건이었다 — 가장 많이 물리는 축을 가장 얕게 묻고 있었다.
+  //   database 렌즈가 작동한 이유를 그대로 복제한다: (a) 이름이 아니라 구체적 반례, (b) 파일 내용 기반 자동 소환.
+  //   반례는 되도록 이 저장소에서 실제로 물린 사건으로 채운다(일반론은 읽히지 않는다).
+  contract: {
+    title: '계약(경계의 약속)', persona: '남의 코드를 깨뜨려 본 API 소유자 — 이미 나간 버전은 되돌릴 수 없다는 걸 아는 메인테이너',
+    titleEn: 'contract (promises at a boundary)', personaEn: 'an API owner who has broken other people’s code and knows a shipped version cannot be recalled',
+    questions: [
+      "이 변경이 기존 호출자를 깨는가 — 시그니처·반환형·에러 타입·기본값·필드 유무만이 아니라 '필드의 의미'까지 봤는가? 이름이 그대로여도 뜻이 바뀌면 breaking 이다(count 가 '전체'에서 '이 페이지'로, path 가 절대에서 상대로). 되돌릴 수 없는 경계(게시된 패키지·URL·DB 컬럼·파일 포맷·CLI 플래그)라면 추가만 하고 제거·의미변경은 유예 기간을 뒀는가?",
+      "성공/실패를 무엇으로 알리는가 — 예외 · 반환값 · 상태코드 · exit code 가 한 모듈 안에서 섞여 있지 않은가? 그리고 '부분 성공'(10건 중 7건 처리)을 표현할 자리가 계약에 있는가 — 없으면 호출자는 그것을 전부 성공으로 읽는다.",
+      "호출자가 이 에러를 보고 '분기'할 수 있는가 — throw new Error('failed') 는 재시도해도 되는 일시 실패와 재시도하면 안 되는 영구 실패를 구분하지 못해, 호출자는 메시지 문자열을 파싱하거나 전부 재시도한다. 안정적인 code/kind/cause 를 실었는가?",
+      "옵션의 기본값이 안전한 쪽인가 — 미지정 시 '검증 끄기 · 타임아웃 무한 · 전체 조회 · 덮어쓰기'가 되는 기본은 호출자가 모른 채 밟는다. 그리고 새 옵션을 추가할 때 기존 호출자의 동작이 글자 그대로 같은가(기본값 = 기존 동작)?",
+      "입력 검증을 경계에서 하는가, 아니면 안쪽 깊은 곳에서 하는가 — 깊은 곳에서 거부하면 이미 절반이 처리된 뒤다. 그리고 그 검증이 '거부'인지 '조용한 보정(coerce)'인지 계약에 적었는가 — 말없이 고쳐 주면 호출자의 버그가 영원히 숨는다.",
+      "이 약속을 '문서가 아니라' 무엇이 강제하는가 — README 의 문장은 아무것도 막지 못한다. 타입·스키마·계약 테스트 중 무엇이 이걸 지키며, 그 검사는 약속을 어긴 코드에서 실제로 실패하는가(어긴 버전을 만들어 돌려 봤는가)? — 이름·필드 존재 수준의 대조는 leerness contract verify 로 훑을 수 있지만 그건 '있는가'만 보지 '지키는가'는 못 본다. 의미를 지키는 건 결국 위반을 시도하는 테스트다.",
+      "생산자와 소비자를 따로 배포할 수 있는가 — 둘이 동시에 나가야만 동작하면 그건 계약이 아니라 결합이다. 롤링 배포·캐시된 클라이언트·구버전 설치본 때문에 신·구는 반드시 공존하니, (구소비자 + 신생산자)와 (신소비자 + 구생산자)가 각각 동작하는지 확인했는가?",
+      "모르는 필드를 만나면 어떻게 하는가 — 거부? 무시? 보존? 중간 계층이 미지 필드를 '드롭'하면 신버전이 보낸 정보가 왕복(read-modify-write)에서 조용히 사라진다. 반대로 엄격 거부는 생산자가 필드를 추가하는 순간 소비자를 죽인다. 어느 쪽인지 정하고 적었는가?",
+      "값의 단위·시간대·정밀도·null 의미가 계약에 있는가 — timeout: 30 이 초인지 밀리초인지, 날짜가 UTC 인지 로컬인지, 금액이 원인지 전인지, null 이 '없음'인지 '모름'인지. 이름만으로 추측하게 두면 반드시 한쪽이 틀리게 읽는다. (실측: 이 저장소에서 상한 512KB 를 UTF-16 코드 단위로 세는 바람에 한글 문서에서 실제 1,152KB 가 통과했다 — 단위를 안 적은 대가다.)",
+      "열거형·상태값에 나중에 항목이 추가될 수 있는가 — 소비자가 switch 로 전수 처리하면 신규 값이 조용히 빠지고(기본 분기 필요), 반대로 소비자가 모르는 값을 저장했다 되돌려주면 오염이 남는다. 미래의 값을 어떻게 다룰지 지금 정했는가?",
+      "에러 메시지·로그 문구·출력 형식을 호출자가 파싱하기 시작해, '내부 표현이 사실상 계약'이 되어 있지 않은가 — 그러면 문구 하나 다듬는 것이 breaking 이 된다. 기계가 읽을 표면(안정적 코드·--json)을 따로 주고, 사람이 읽을 문구는 자유롭게 두었는가?",
+      "이 계약의 '모든 표면'을 함께 바꿨는가 — CLI 플래그 · MCP 도구 스키마 · JSON 출력 · 타입 정의 · 문서 · 예제가 같은 약속을 말하는가? 한 표면만 고치면 나머지가 낡은 계약을 계속 광고한다(실측: 같은 판정을 두 표면에 따로 구현해, 한쪽에서 고친 버그를 다른 쪽에서 되살린 적이 있다 — 표면마다 다시 짜지 말고 술어를 공유하라)."
+    ],
+    questionsEn: [
+      "Does this change break existing callers — not just the signature, return type, error type, defaults, and presence of fields, but the MEANING of a field? A same-named field whose meaning shifts is breaking (count going from 'total' to 'this page', path from absolute to relative). If the boundary is irreversible (a published package, a URL, a DB column, a file format, a CLI flag), did you only ADD, and give removals / meaning-changes a deprecation period?",
+      "What signals success vs failure — exceptions, return values, status codes, exit codes — and are those mixed within one module? And does the contract have a place to express PARTIAL success (7 of 10 processed)? If not, callers will read it as total success.",
+      "Can a caller BRANCH on this error? throw new Error('failed') cannot distinguish a transient failure worth retrying from a permanent one that must not be retried — so callers parse the message string or retry everything. Did you attach a stable code/kind/cause?",
+      "Do the option defaults fail toward safety? A default that means 'validation off / no timeout / fetch everything / overwrite' is stepped on by callers who never chose it. And when you add a new option, is the behavior of every existing caller byte-for-byte unchanged (default == previous behavior)?",
+      "Is input validated at the boundary, or deep inside? Rejecting deep inside means half the work already happened. And does the contract say whether invalid input is REJECTED or silently COERCED? Silent coercion hides the caller's bug forever.",
+      "What ENFORCES this promise, other than prose? A sentence in the README stops nothing. Which of type / schema / contract test holds this promise, and does that check actually fail on code that breaks it (did you build the violating version and run it)? `leerness contract verify` can sweep the name/field level — but it only checks that things EXIST, not that they are honored; only a test that attempts a violation holds the meaning.",
+      "Can the producer and the consumer be deployed independently? If both must ship together, that is coupling, not a contract. Rolling deploys, cached clients, and old installs guarantee old and new coexist — did you verify (old consumer + new producer) AND (new consumer + old producer)?",
+      "What happens on an UNKNOWN field — reject, ignore, or preserve? A middle layer that DROPS unknown fields silently destroys information on a read-modify-write round trip; strict rejection, conversely, kills consumers the moment a producer adds a field. Did you decide which, and write it down?",
+      "Are units, time zone, precision, and the meaning of null part of the contract? Is timeout: 30 seconds or milliseconds; is that date UTC or local; is the amount in dollars or cents; does null mean 'absent' or 'unknown'? Leave it to be inferred from the name and one side will read it wrong. (Measured here: a 512KB cap counted in UTF-16 code units let 1,152KB through for Korean documents — the price of not stating the unit.)",
+      "Can this enum / status gain new members later? A consumer switching exhaustively silently drops the new value (it needs a default branch); conversely a consumer that stores and echoes back a value it doesn't understand leaves corruption behind. Did you decide NOW how future values are handled?",
+      "Have callers started parsing your error messages, log wording, or human-readable output — making an internal representation into a de-facto contract, so that rewording a sentence becomes breaking? Give machines a separate stable surface (stable codes, --json) and leave the prose free.",
+      "Did you change EVERY surface of this contract together — CLI flags, MCP tool schema, JSON output, type definitions, docs, examples? Fix one and the rest keep advertising the old promise. (Measured here: the same decision was implemented separately on two surfaces, and a bug fixed on one was resurrected on the other — share the predicate instead of re-deriving it per surface.)"
+    ],
+    affects: ['docs', 'test', 'code'], affectsNote: '계약을 바꾸면 그 계약을 말하는 모든 표면(문서·타입·JSON·MCP·예제)을 같은 커밋에서 함께 바꿔야 하고, 호환성 주장에는 구·신 조합을 실제로 돌린 테스트가 따라와야 함',
+    affectsNoteEn: 'changing a contract means changing every surface that states it in the same commit, and a compatibility claim needs a test that actually runs the old/new combinations'
+  },
+  recovery: {
+    title: '실패·복구', persona: '새벽 3시에 호출당해 로그만 보고 복구해야 했던 당직자',
+    titleEn: 'failure & recovery', personaEn: 'the on-call engineer woken at 3am who had only the logs to recover from',
+    questions: [
+      "이 가드가 판정에 실패했을 때 '어느 쪽으로' 기우는가 — 통과시키는가(fail-open), 거부하는가(fail-safe)? 파싱 실패·타임아웃·상한 초과·예외처럼 '모르는 상태'의 기본이 통과면, 그 상한 자체가 우회 경로가 된다. (실측: 순환을 막으려 넣은 깊이 상한이 그 너머의 값을 원본 그대로 통과시켜, 상한 너머 전체를 무방비로 만들었다. 같은 상한에 자리표시자 대체를 붙이자 그제서야 보호가 됐다 — 문제는 상한이 아니라 실패 방향이었다.)",
+      "이 재시도가 두 번 실행돼도 안전한가 — 재시도 범위 안에 결제·발송·카운터 증가·파일 append 같은 비멱등 부수효과가 있으면 재시도가 곧 중복이다. 멱등키를 실었거나, 부수효과를 재시도 밖으로 뺐는가?",
+      "무엇을 재시도하고 무엇을 재시도하지 않는지 구분했는가 — 입력이 틀려서 난 실패(400·401·403·404·422)는 같은 요청을 다시 보내도 영원히 실패하고, 일시 장애(5xx·타임아웃·커넥션 리셋, 그리고 4xx 중에도 재시도가 옳은 408·425·429)를 재시도하지 않으면 남의 딸꾹질이 내 사용자의 실패가 된다. 상태코드 앞자리로 뭉뚱그리지 말고 '이 실패가 저절로 나아질 수 있는가'로 갈랐는가(429 는 Retry-After 를 지켜야 한다). 횟수 상한 · 지수 백오프 · 지터가 있는가(고정 간격이면 모든 클라이언트가 같은 순간에 다시 몰린다)?",
+      "타임아웃 없는 대기가 있는가 — 무한 대기는 '느림'이 아니라 자원 고갈로 나타난다(커넥션·워커·큐가 묶여 무관한 기능까지 죽는다). 그리고 타임아웃으로 포기한 뒤에도 상대는 계속 처리 중일 수 있다 — 취소를 전파했는가(AbortSignal/컨텍스트), 아니면 결과가 불확실한 채 재시도해 중복을 만드는가?",
+      "이 catch 가 실패를 삼키고 있지 않은가 — 빈 catch, catch { return null }, .catch(() => {}) 는 실패를 '정상'으로 바꿔 호출자에게 거짓말한다. 삼키기로 했다면 (a) 왜 안전한지 한 줄로 적었고 (b) 최소한 흔적(로그·카운터)을 남기며 (c) 삼키는 범위가 예상한 그 에러 하나인가(전부 삼키면 오타·TypeError 까지 숨는다)?",
+      "부분 실패를 어떻게 표현하는가 — N건 중 3건이 실패했을 때 전체 롤백인가, 성공분만 확정인가, 실패분만 재시도인가? 어느 쪽이든 호출자가 '무엇이 남았는지' 알 수 있는가. Promise.all 은 첫 거부에서 곧바로 거부하지만 나머지 작업을 취소하지는 않는다 — 그것들은 계속 실행되고 그 결과(성공이든 실패든)는 버려진다. 무엇이 실제로 끝났는지 알아야 한다면 allSettled 로 전부 거두거나, 취소를 전파하라. (거부가 '처리되지 않은 채' 남지는 않는다 — all 은 모든 프라미스를 구독한다. 반대로 프라미스를 만들어 놓고 아무도 await 하지 않으면 그때가 진짜 미처리 거부다.)",
+      "지금 이 순간 프로세스가 죽으면(SIGTERM·배포·OOM·정전) 무엇이 중간 상태로 남는가 — 쓰기와 쓰기 사이, 커밋과 발행 사이, 파일 rename 전후를 하나씩 짚었는가? 그리고 재시작했을 때 그 중간 상태에서 '앞으로' 굴러가는가, 아니면 이미 성공한 것을 되돌리는가(성공한 결제를 보상하고 주문을 지우는 사고)?",
+      "정리(cleanup)가 모든 경로에서 실행되는가 — 조기 return · 예외 · 타임아웃 · 중단 신호 · 그리고 성공 경로. 그리고 정리 자체가 실패하면 무엇을 하는가? 정리 실패를 삼키면 락·임시파일·핸들이 조용히 샌다.",
+      "이 폴백이 원래 실패보다 더 나쁜 결과를 만들 수 있는가 — 캐시 폴백이 만료된 가격을 정가처럼 보여주거나, 기본값 폴백이 '권한 없음'을 '권한 있음'으로 만들거나, 전면 재시도가 이미 아픈 상대를 확실히 죽이는 경우. 폴백에도 '무엇을 포기했는지'가 남는가?",
+      "이 복구 경로가 한 번이라도 실행된 적이 있는가 — 롤백 스크립트 · 백업 복원 · 페일오버 · 마이그레이션 되돌리기는 실행해 보지 않으면 존재하지 않는 것과 같다. 테스트가 실패를 실제로 '주입'하는가(던지는 목 · 강제 타임아웃 · 프로세스 강제 종료 · 디스크 가득), 아니면 정상 경로만 확인하고 복구를 상상하는가?",
+      "한 곳의 실패가 번지는가 — 느린 의존성 하나가 커넥션·스레드·워커 풀을 채워 무관한 요청까지 죽이지 않도록 격벽(기능별 풀 분리) · 동시성 상한 · 차단기를 뒀는가? 그리고 회복될 때 모두가 동시에 재접속해 2차 폭주를 만들지 않는가?",
+      "사용자에게 뭐라고 말하는가 — '오류가 발생했습니다'만 남기면 사용자는 다시 눌러도 되는지, 내 데이터가 저장됐는지 알 수 없어 결국 두 번 결제한다. 재시도가 안전한지, 무엇이 저장됐는지, 다음에 뭘 하면 되는지를 말하는가?"
+    ],
+    questionsEn: [
+      "When this guard cannot decide, WHICH WAY does it fail — open (pass) or safe (deny)? If the default for 'unknown' states (parse failure, timeout, exceeded cap, exception) is to pass, then the cap itself becomes the bypass. (Measured here: a depth cap added to stop cycles passed everything BEYOND it through unmodified, leaving the entire far side unprotected; the same cap plus placeholder substitution finally became a protection — the bug was the failure direction, not the cap.)",
+      "Is this retry safe to run twice? If the retried region contains a non-idempotent side effect (a charge, an email, a counter increment, a file append), retrying IS duplicating. Did you attach an idempotency key, or move the side effect out of the retried region?",
+      "Did you separate what is retryable from what is not? A failure caused by the request itself (400/401/403/404/422) fails forever no matter how often you resend it; NOT retrying a transient one (5xx, timeout, connection reset — and the retryable 4xx codes 408/425/429) turns someone else's hiccup into your user's failure. Split on 'can this heal by itself?', not on the leading digit of the status code (and honor Retry-After on 429). Are there a bounded attempt count, exponential backoff, and jitter (fixed intervals make every client return at the same instant)?",
+      "Is there any wait without a timeout? An unbounded wait shows up not as 'slow' but as resource exhaustion — connections, workers, and queues are pinned and unrelated features die. And after you give up, the other side may still be working: did you propagate cancellation (AbortSignal / context), or do you retry into an uncertain outcome and create duplicates?",
+      "Is this catch SWALLOWING the failure? An empty catch, catch { return null }, .catch(() => {}) turns a failure into 'normal' and lies to the caller. If you chose to swallow, did you (a) write one line on why that is safe, (b) leave at least a trace (log, counter), and (c) narrow it to the one expected error — swallowing everything hides your typos and TypeErrors too?",
+      "How is PARTIAL failure expressed? When 3 of N fail: roll back everything, keep the successes, retry only the failures? Whichever you choose, can the caller tell WHAT REMAINS? And did you account for Promise.all rejecting immediately on the first rejection WITHOUT cancelling the rest — they keep running and their outcomes are discarded? If you need to know what actually finished, collect them all with allSettled, or propagate cancellation. (They are not left as unhandled rejections — all subscribes to every promise; the real unhandled case is a promise nobody ever awaits.)",
+      "If the process dies right now (SIGTERM, deploy, OOM, power loss), what is left half-done? Did you walk the gaps one by one — between two writes, between commit and publish, before and after a file rename? And on restart, does it roll FORWARD from that half state, or does it undo work that already succeeded (compensating a captured payment and deleting the order)?",
+      "Does cleanup run on EVERY path — early return, exception, timeout, abort signal, and the success path? And what happens when cleanup itself fails? Swallowing a cleanup failure silently leaks locks, temp files, and handles.",
+      "Can this fallback produce an outcome WORSE than the original failure — a cache fallback showing a stale price as current, a default-value fallback turning 'not authorized' into 'authorized', a blanket retry finishing off an already-struggling dependency? Does the fallback record what was given up?",
+      "Has this recovery path ever actually RUN? A rollback script, a backup restore, a failover, a down-migration that has never been executed does not exist. Do the tests INJECT failure (a throwing mock, a forced timeout, killing the process, a full disk), or do they check the happy path and imagine the recovery?",
+      "Does one failure spread? Is there a bulkhead (separate pools per feature), a concurrency cap, and a circuit breaker so one slow dependency can't fill the connection/thread/worker pool and kill unrelated requests? And on recovery, does everything reconnect at once and cause a second surge?",
+      "What do you tell the user? 'An error occurred' leaves them unable to tell whether pressing again is safe or whether their data was saved — so they pay twice. Does the message say whether a retry is safe, what was persisted, and what to do next?"
+    ],
+    affects: ['test', 'code', 'docs'], affectsNote: '복구 경로 주장에는 실패를 실제로 주입한 테스트가 따라와야 함(정상 경로 초록불은 증거가 아님) — 그리고 fail-open/fail-safe 선택은 코드가 아니라 결정으로 남길 것',
+    affectsNoteEn: 'a recovery claim needs a test that actually injects the failure (a green happy path is not evidence) — and record the fail-open/fail-safe choice as a decision, not just in code'
+  },
+  observability: {
+    title: '관측 가능성', persona: '재현되지 않는 장애를 남은 로그만으로 설명해야 하는 조사관',
+    titleEn: 'observability', personaEn: 'an investigator who must explain an unreproducible incident from the surviving logs alone',
+    questions: [
+      "이 코드가 프로덕션에서 실패했을 때, 남는 것만 보고 원인을 짚을 수 있는가 — 어떤 입력으로 · 어느 분기에서 · 무엇을 하려다 실패했는지가 남는가? 'Error: failed' 한 줄은 아무 말도 하지 않는다. (실측: 이 저장소에서 대량 테스트 실패를 '환경 탓'으로 오진했다가, stderr 전문을 끝까지 읽고서야 내 코드의 문법 오류였음을 알았다 — 첫 줄만 남기면 그 진단은 불가능하다.)",
+      "이 로그에 민감정보가 실리는가 — 에러 객체·요청·설정을 통째로 찍으면 헤더의 토큰 · 연결 문자열 · 쿠키가 함께 나간다. 무엇이 실제로 출력되는지 눈으로 확인했는가, 아니면 '민감한 건 안 찍겠지'라고 가정했는가? 마스킹이 있다면 그 마스킹을 통과하는 형식(짧은 토큰 · 줄바꿈된 키 · 인용문 안의 값)을 시험했는가?",
+      "요청 하나를 끝까지 이을 수 있는가 — 상관관계 ID(요청·작업·트레이스)가 진입점에서 만들어져 하위 호출 · 비동기 작업 · 큐 메시지 · 재시도까지 전파되는가? 없으면 동시 요청의 로그가 뒤섞여 인과를 세울 수 없다.",
+      "이 지표가 누군가의 행동을 바꾸는가 — 아무도 안 보고 아무 결정도 못 내리는 지표는 비용일 뿐이다. 거꾸로, 장애가 났을 때 '가장 먼저 볼 것'은 정해져 있는가(성공률 · 지연 분포 · 큐 적체 · 포화도)?",
+      "평균을 보고 있지 않은가 — 평균 지연은 꼬리를 숨긴다(p50 은 멀쩡한데 p99 가 10초). 사용자가 겪는 것은 꼬리이고, 합계/평균은 소수의 심각한 실패를 다수의 성공으로 희석한다.",
+      "로그 수준이 의미를 갖는가 — 전부 info 면 아무것도 error 가 아니다. error 는 사람이 조치해야 하는 것만인가, 아니면 정상적인 재시도·예상된 404 까지 error 로 찍혀 경보 피로를 만드는가? 경보가 울렸을 때 '무엇을 하라'는 게 붙어 있는가?",
+      "아무 일도 일어나지 않는 실패를 감지할 수 있는가 — 크론이 돌지 않음 · 소비자가 죽어 큐 적체 · 웹훅이 안 옴 · 백업이 조용히 0바이트. 에러가 없다는 것은 정상의 증거가 아니다. '있어야 할 일이 일어났는가'를 재는 신호(하트비트 · 신선도 · 처리 건수)가 있는가?",
+      "관측 자체가 장애를 만들지 않는가 — 요청마다 큰 객체를 직렬화하거나 동기 파일 쓰기를 하면 그게 병목이 되고, 폭주 시 로그가 디스크를 채워 서비스를 죽인다. 샘플링 · 상한 · 회전이 있는가?",
+      "배포·설정 변경을 시각으로 맞출 수 있는가 — 언제 무엇이 바뀌었는지(버전 · 플래그 · 마이그레이션)가 남지 않으면 '이때부터 이상하다'와 원인을 연결할 수 없다.",
+      "이 실패를 재현할 만큼의 맥락이 남는가 — 버전 · 설정 플래그 · 입력 요약(전체가 아니라) · 환경(OS · 런타임 · 로케일 · 인코딩). 특히 한 환경에서만 나는 실패는 그 환경 정보가 없으면 영원히 '재현 불가'로 닫힌다.",
+      "관측이 거짓말하지 않는가 — 성공률을 '성공 응답'이 아니라 '요청 수'로 재고 있지 않은가? 카운터를 늘리는 코드가 early return 뒤에 있어 실패 때만 빠지지 않는가? 대시보드의 숫자가 실제와 같은지 한 번이라도 손으로 맞춰 봤는가(측정기를 검증하지 않으면 0건도 5건도 의미가 없다)?",
+      "사후에 물어볼 질문을 지금 정했는가 — '몇 명이 영향받았나' · '언제 시작됐나' · '지금은 회복됐나' · '재발했는지 어떻게 아나'에 답할 데이터가 남는가? 그 질문에 답할 수 없다면 지금이 계측을 넣을 때다."
+    ],
+    questionsEn: [
+      "When this code fails in production, can you name the cause from what survives — which input, which branch, what it was attempting? 'Error: failed' says nothing. (Measured here: a mass test failure was misdiagnosed as 'environmental' until the FULL stderr was read to the end and revealed a syntax error in my own code — with only the first line kept, that diagnosis is impossible.)",
+      "Does this log carry sensitive data? Dumping a whole error / request / config object ships the header token, the connection string, and the cookies with it. Did you LOOK at what is actually emitted, or assume 'it probably won't log the secret'? If masking exists, did you test the shapes that slip past it (short tokens, line-wrapped keys, values inside quotes)?",
+      "Can you follow ONE request end to end? Is a correlation id (request / job / trace) created at the entry point and propagated through downstream calls, async work, queue messages, and retries? Without it, concurrent requests interleave and causality cannot be reconstructed.",
+      "Does this metric change anyone's behavior? A metric nobody looks at and nobody can decide from is pure cost. Conversely, is it settled what you look at FIRST during an incident (success rate, latency distribution, queue depth, saturation)?",
+      "Are you looking at averages? Mean latency hides the tail (p50 fine, p99 at 10 seconds). Users live in the tail, and sums/averages dilute a few severe failures into many successes.",
+      "Do log levels mean anything? If everything is info, nothing is an error. Is error reserved for things a human must act on, or do normal retries and expected 404s get logged as errors until alert fatigue sets in? Does each alert say what to DO?",
+      "Can you detect a failure where NOTHING happens — a cron that didn't fire, a dead consumer letting a queue build, a webhook that never arrived, a backup silently writing zero bytes? Absence of errors is not evidence of health. Is there a signal measuring that the expected thing HAPPENED (heartbeat, freshness, processed count)?",
+      "Can the instrumentation itself cause the outage — serializing a large object per request, writing log files synchronously, or filling the disk during a surge? Are there sampling, caps, and rotation?",
+      "Can you line up deploys and config changes in time? Without a record of when what changed (version, flag, migration), 'it's been broken since about then' can never be tied to a cause.",
+      "Is there enough context to REPRODUCE this failure — version, config flags, an input summary (not the whole input), environment (OS, runtime, locale, encoding)? A failure that only occurs in one environment is closed as 'cannot reproduce' forever without that environment data.",
+      "Does the instrumentation lie? Is the success rate measured over successful RESPONSES or merely over requests? Is the counter increment placed after an early return, so failures never get counted? Have you ever hand-reconciled a dashboard number against reality (an unvalidated detector makes both '0 findings' and '5 findings' meaningless)?",
+      "Did you decide NOW what you will ask afterward — 'how many were affected', 'when did it start', 'has it recovered', 'how would we know it recurred'? If the data can't answer those, this is the moment to add the instrumentation."
+    ],
+    affects: ['code', 'test', 'security'], affectsNote: '로그/지표를 추가하면 민감정보가 실리는지 실제 출력으로 확인해야 하고(보안 렌즈), 지표를 신뢰하려면 그 지표가 틀렸을 때 실패하는 검증이 있어야 함',
+    affectsNoteEn: 'adding logs/metrics requires checking the real output for sensitive data (security lens), and trusting a metric requires a check that fails when the metric is wrong'
+  },
+  // 나머지 설계 축 — 한 축당 한 문항(심화 3축과 달리 '빠뜨리지 않게 하는' 용도).
+  //   이미 깊은 렌즈가 있는 축(순서·동시성 → database, 신뢰·보안 → security, 인간 요소 → design/docs)은
+  //   중복 서술 대신 해당 렌즈로 넘긴다 — 같은 내용을 두 곳에 적으면 한쪽이 반드시 낡는다.
+  axes: {
+    title: '설계 축(경량 점검)', persona: '설계를 시작하기 전 빠뜨린 축이 없는지 훑는 검토자',
+    titleEn: 'design axes (light pass)', personaEn: 'a reviewer skimming for an axis you forgot before design starts',
+    questions: [
+      "상태 — 이 사실의 진실 원본은 어디 하나인가? 같은 사실이 두 곳에 저장되면 반드시 어긋난다(파생값은 저장하지 말고 계산하거나, 원본에서 재생성하는 경로를 둬라).",
+      "소유권 — 이걸 바꿀 수 있는 주체가 정확히 하나인가? 둘 이상이 쓰면 마지막에 쓴 쪽이 이기고, 그 '마지막'은 아무도 정하지 않았다.",
+      "생명주기 — 이건 언제 생기고 언제 사라지는가? 만드는 경로만 있고 지우는 경로가 없으면 자원·데이터·플래그·임시파일이 영원히 쌓인다.",
+      "불변조건 — 항상 참이어야 하는 조건을 한 문장으로 쓸 수 있는가, 그리고 그걸 '깨뜨리려 시도하는' 테스트가 있는가? (지키는 테스트만으론 가드가 죽었는지 알 수 없다.)",
+      "성능·확장성 — 입력이 10배·1000배가 되면 무엇이 먼저 무너지는가? 반복문 안의 I/O(N+1) · 전체 메모리 적재 · 무제한 동시성 · 상한 없는 큐.",
+      "순서·동시성 — 두 요청이 동시에 이걸 하면 어떻게 되는가? → 자세히: leerness lens database",
+      "신뢰·보안 — 이 입력이 적대적이라면? 경계 밖에서 온 값을 검증 없이 믿고 있지 않은가? → 자세히: leerness lens security",
+      "인간 요소 — 처음 보는 사람이 오해할 이름·기본값·경고 문구가 있는가? 실수했을 때 되돌릴 수 있는가? → 자세히: leerness lens design · leerness lens docs"
+    ],
+    questionsEn: [
+      "State — where is the single source of truth for this fact? Store the same fact twice and the copies will diverge (don't store derived values: compute them, or provide a path to regenerate them from the source).",
+      "Ownership — is there exactly one party allowed to change this? With two or more writers, last-write-wins, and nobody decided who is last.",
+      "Lifecycle — when is this created and when does it go away? A create path with no delete path piles up resources, rows, flags, and temp files forever.",
+      "Invariant — can you state in one sentence what must always be true, and is there a test that TRIES TO BREAK it? (A test that only upholds it cannot tell you the guard is dead.)",
+      "Performance & scale — at 10x and 1000x the input, what breaks first? I/O inside a loop (N+1), loading everything into memory, unbounded concurrency, an unbounded queue.",
+      "Ordering & concurrency — what happens if two requests do this at the same time? → in depth: leerness lens database",
+      "Trust & security — what if this input is hostile? Are you trusting a value from outside the boundary without validating it? → in depth: leerness lens security",
+      "Human factors — is there a name, default, or warning a newcomer would misread? Can they undo a mistake? → in depth: leerness lens design · leerness lens docs"
+    ],
+    affects: ['code', 'design'], affectsNote: '여기서 걸리는 축이 있으면 그 축의 전용 렌즈로 들어갈 것 — 이 목록은 빠뜨림 방지용이지 깊이용이 아님',
+    affectsNoteEn: 'if an axis catches here, go into that axis’s dedicated lens — this list prevents omissions, it does not provide depth'
   }
 };
+// 1.36.97 (P-0011): 도메인 목록을 세 표면(help ko · help en · commands)에 각각 손으로 적어 두었더니, 축을 추가할 때마다
+//   세 곳을 동시에 고쳐야 했고 한 곳만 놓쳐도 낡은 목록이 계속 광고된다. 카탈로그에서 파생시켜 어긋날 수 없게 한다.
+function _lensDomainList() { return Object.keys(LENS_CATALOG).join('|'); }
+// 1.36.97: 완료 검증의 인라인 렌즈 줄은 '목차'다 — 본문이 아니다.
+//   심화 문항은 한 문단이라 통째로 찍으면 80칸에서 한 축이 3~4줄을 먹는다(검수 실측: advisory 블록이 8줄 → 15줄).
+//   문항은 모두 "핵심 질문 — 근거/반례" 꼴로 썼으므로 첫 절만 남긴다. 전문은 leerness lens <domain> 이 준다.
+function _lensInlineQ(q) {
+  const s = String(q || '');
+  const i = s.indexOf(' — ');
+  if (i > 0) return s.slice(0, i);
+  const j = s.indexOf('? ');
+  if (j > 0 && j < 160) return s.slice(0, j + 1);
+  return s.length > 120 ? s.slice(0, 119) + '…' : s;
+}
 // 1.19.3 (UR-0003 렌즈 완전판 v3): 프로젝트별 커스텀 렌즈 — .harness/quality-lenses.json 읽기-병합(쓰기 명령 없음, AI/사용자가 편집).
 //   포맷: { "domains": { "code": { "questions": ["추가 질문"] }, "a11y": { "title":"접근성", "persona":"스크린리더 사용자", "questions":[...], "affects":["design"] } } }
 // 1.36.42 (codex 5차 #9): 손상 파일을 무언 무시하면 사용자는 커스텀 렌즈가 적용된 줄 안다 — 에러를 함께 반환(Ex), 기존 시그니처는 래퍼.
@@ -7251,6 +7572,13 @@ function _mergeLensCatalog(builtin, custom) {
       out[k].questions = out[k].questions.slice(0, 16);       // 내장이 앞에 있어 커스텀이 tail 에서 절단됨(내장 보존)
       if (before > 16) out[k]._droppedCustom = before - 16;   // codex F6: 조용한 절단 대신 가시화 (렌더가 경고)
       out[k]._customAdded = cq.length > 0;
+      // 1.36.97: 프로젝트가 명시한 제목/페르소나는 살린다. 신규 내장 도메인(contract 등)이 같은 이름의 기존 커스텀 렌즈를
+      //   덮으면서 사용자가 적어 둔 제목이 조용히 사라졌다 — 질문은 보존되는데 이름만 바뀌니 오히려 더 헷갈린다.
+      //   로케일별로 따로 받는다: ko 제목만 준 프로젝트의 en 출력에 한글이 새면 안 된다.
+      if (typeof c.title === 'string' && c.title.trim()) out[k].title = c.title.trim();
+      if (typeof c.titleEn === 'string' && c.titleEn.trim()) out[k].titleEn = c.titleEn.trim();
+      if (typeof c.persona === 'string' && c.persona.trim()) out[k].persona = c.persona.trim();
+      if (typeof c.personaEn === 'string' && c.personaEn.trim()) out[k].personaEn = c.personaEn.trim();
     } else if (cq.length) {
       out[k] = { title: (c.title || k), persona: (c.persona || '검토자'), questions: cq.slice(0, 16), affects: Array.isArray(c.affects) ? c.affects : [], affectsNote: c.affectsNote || '(프로젝트 정의)', _custom: true };
       if (cq.length > 16) out[k]._droppedCustom = cq.length - 16;
@@ -7262,6 +7590,11 @@ function _effectiveLensCatalog(root) { return _mergeLensCatalog(LENS_CATALOG, _l
 
 // 1.19.2 (UR-0003 렌즈 완전판 v2): 주장된 파일 확장자 → 관련 품질 렌즈 도메인 (결정적, 키워드 추론 아님).
 //   verify-claim 이 완료-검증 순간(사용자: "완료 선언 전 자기질문")에 해당 분야 질문을 advisory 로 노출하는 데 사용.
+// 1.36.97 (P-0011): 도메인 우선순위 — _lensDomainsForFiles 와 _withLensDomain 이 공유(표면마다 따로 적으면 반드시 어긋난다).
+//   순서 = 구체적인 축 먼저 · 되돌리기 어려운 축 먼저. 선언은 사용처보다 위에 둔다(TDZ 사고 방지).
+const _LENS_ORDER = ['database', 'contract', 'recovery', 'observability', 'code', 'design', 'docs', 'test'];
+// 계약 표면 경로: IDL(.proto/.graphql) · 타입 선언(.d.ts) · OpenAPI/Swagger 문서 · 경계 디렉토리(api/routes/controllers/handlers) · *.schema.* / *.contract.* / *.dto.*
+const _CONTRACT_PATH_RE = /\.(?:proto|graphql|gql)$|\.d\.ts$|(^|[\\/])(?:openapi|swagger)[^\\/]*\.(?:ya?ml|json)$|(^|[\\/])(?:api|routes?|controllers?|handlers?|endpoints?)[\\/]|[._-](?:schema|contract|dto)\.[a-z]+$/i;
 function _lensDomainsForFiles(files) {
   const out = [];
   const arr = Array.isArray(files) ? files : [];
@@ -7275,9 +7608,13 @@ function _lensDomainsForFiles(files) {
   const _dbRe = /\.sql$|\.prisma$|(^|[\\/])(migrations?|migrate|db|database)[\\/]|(^|[\\/])(models?|entities|repositor(?:y|ies)|daos?)[\\/]|[._-](repository|entity|model|dao|schema|migration)\.[a-z]+$|(^|[\\/])(schema|db|database|data-source|ormconfig|knexfile|drizzle\.config|typeorm\.config)\.[a-z]+$/i;
   const _testRe = /(^|[\\/])(test_[^\\/]+\.[a-z]+|[^\\/]+[._-]test\.[a-z]+|[^\\/]+\.spec\.[a-z]+)$|(^|[\\/])tests?[\\/]/i;
   if (arr.some(f => typeof f === 'string' && _dbRe.test(f) && !_testRe.test(f))) out.push('database');
-  // 순서: database 먼저(DB 파일이면 동시성/트랜잭션 질문을 인라인 노출), 그다음 code/design/docs/test. 중복 제거 + 최대 2개(클러터 방지).
-  const ordered = ['database', 'code', 'design', 'docs', 'test'].filter(d => out.includes(d));
-  return ordered.slice(0, 2);
+  // 1.36.97 (P-0011): 계약 표면 — 경계를 '정의하는' 파일(IDL/스키마/타입선언/라우트 디렉토리)만. 경로 신호가 확실한 것만 넣는다.
+  //   package.json 은 제외: 버전 범프만으로 매 릴리스 켜져 상시 오탐이 된다(계약 신호가 아니라 배포 부산물).
+  //   types.ts 류도 제외: 너무 흔해 신호 대비 클러터가 크다 — 내용 신호(_isContractContentText)로만 잡는다.
+  if (arr.some(f => typeof f === 'string' && _CONTRACT_PATH_RE.test(f) && !_testRe.test(f))) out.push('contract');
+  // 순서: 구체적인 축(database → contract → recovery → observability) 먼저, 그다음 일반 축(code/design/docs/test).
+  //   되돌리기 어려운 순서이기도 하다(데이터 손실 · 남의 코드 깨짐 > 자기 코드 복잡도). 캡 규칙은 _capLensDomains 하나에서만 온다.
+  return _capLensDomains(out);
 }
 // 1.36.x (dogfood FN): path 휴리스틱은 관습적 이름(models/·.repository.·.sql 등)만 잡아, 평범한 이름의 DB 모듈
 //   (inventory.safe.mjs · orders.occ.mjs 처럼 DB 를 다루지만 이름에 단서 없음)을 놓친다. 내용 기반으로 보강한다:
@@ -7298,29 +7635,178 @@ function _isDbContentText(txt) {
 // claimed 파일 중 코드 파일을 읽어 DB 내용 신호가 있으면 true. 미존재/큰 파일(>512KB)은 건너뜀(안전·비용).
 //   보안(codex P2): 경로는 root 안으로 제한 — 절대경로/../ 트래버설로 워크스페이스 밖 파일을 읽지 않는다. 심볼릭 링크는 스킵.
 //   codex P3: 테스트 파일은 DB 증강에서 제외 — test 렌즈를 축출하지 않도록(_lensDomainsForFiles 의 test 특례와 일관).
-function _anyDbContentInFiles(files, root) {
+function _anyDbContentInFiles(files, root) { return _anyLensContentInFiles(files, root, _LENS_CODE_EXT_RE, _isDbContentText); }
+// 1.36.97 (P-0011): 위 스캔 규칙(코드 파일만 · root 안 · 심볼릭 링크 스킵 · 512KB 상한 · 테스트 제외)을 축마다 다시 적지 않는다.
+//   같은 규칙을 네 번 복사하면 한 곳에서 고친 보안 가드(경로 트래버설 거부)가 나머지 세 곳에 없게 된다 — 실제로 겪은 실패 방식이다.
+//   1.36.97 검수: .tsx 만 있고 .jsx/.vue/.svelte 가 빠져 있어, 같은 코드가 확장자만으로 다른 렌즈를 받았다
+//   (.jsx 의 빈 catch 는 아예 스캔되지 않음). 같은 내용은 같은 축을 받아야 한다.
+const _LENS_CODE_EXT_RE = /\.(js|mjs|cjs|jsx|ts|tsx|vue|svelte|py|rb|go|rs|java|cs|php)$/i;
+//   계약은 코드 밖에도 산다: IDL · 스키마 · OpenAPI 문서까지 읽는다(단, 마크다운/산문은 제외 — 오탐원).
+const _CONTRACT_EXT_RE = /\.(js|mjs|cjs|jsx|ts|tsx|vue|svelte|py|rb|go|rs|java|cs|php|json|ya?ml|proto|graphql|gql)$/i;
+const _LENS_TEST_PATH_RE = /(^|[\\/])(test_[^\\/]+\.[a-z]+|[^\\/]+[._-]test\.[a-z]+|[^\\/]+\.spec\.[a-z]+)$|(^|[\\/])tests?[\\/]/i;
+// 파일당 상한: 이 프로젝트의 bin/leerness.js(1.8MB)·scripts/e2e.js(0.7MB) 가 종전 512KB 상한에 걸려 내용 소환이 아예 닿지
+//   못했다(도그푸드로 발견 — 주력 파일이 영구 배제되면 기능이 없는 것과 같다). 상한을 올리는 전제로 아래 두 가지를 함께 했다:
+//   ① 정규식에서 2차 폭발을 제거(상한만 올리면 비용이 상한의 제곱으로 는다) ② 호출당 총 예산으로 파일 수에 대한 선형 증가를 묶는다.
+const _LENS_SCAN_FILE_CAP = 4 * 1024 * 1024;
+const _LENS_SCAN_TOTAL_CAP = 32 * 1024 * 1024;
+// 한 파일을 열어 '모든' 신호를 한 번에 본다. 축마다 따로 열면 같은 파일을 6번 읽고, 그만큼 폭발 위험도 6배가 된다.
+//   반환: { db, contract, recovery, obs, axis } — axis 는 걸린 경량축 인덱스(없으면 null).
+//   상한 두 개는 테스트에서 낮춰 넣을 수 있게 열어 둔다(opts) — 기본값으로 32MB 픽스처를 만들지 않고도
+//   '상한이 실제로 동작하는가' 를 매 실행 검증할 수 있다. 프로덕션 경로는 인자를 주지 않으므로 동작 불변.
+function _scanLensSignals(files, root, opts) {
+  const fileCap = (opts && opts.fileCap) || _LENS_SCAN_FILE_CAP;
+  const totalCap = (opts && opts.totalCap) || _LENS_SCAN_TOTAL_CAP;
   const arr = Array.isArray(files) ? files : [];
   const base = path.resolve(root || process.cwd());
-  const _testRe = /(^|[\\/])(test_[^\\/]+\.[a-z]+|[^\\/]+[._-]test\.[a-z]+|[^\\/]+\.spec\.[a-z]+)$|(^|[\\/])tests?[\\/]/i;
+  // 봉쇄는 realpath 로 판정한다 — 문자열 접두만 보면 중간 디렉토리가 정션/심볼릭일 때 root 밖이 읽힌다(검수 재현).
+  //   양쪽 다 realpath 해야 한다: 프로젝트 루트 자체가 심볼릭 경로일 수 있다(임시 디렉토리가 흔히 그렇다).
+  let realBase = base;
+  try { realBase = fs.realpathSync(base); } catch { /* 루트 해석 실패 → 문자열 비교로 폴백 */ }
+  const out = { db: false, contract: false, recovery: false, obs: false, axis: null };
+  let budget = totalCap;
   for (const f of arr) {
     if (typeof f !== 'string') continue;
-    if (!/\.(js|mjs|cjs|ts|tsx|py|rb|go|rs|java|cs|php)$/i.test(f)) continue;
-    if (_testRe.test(f)) continue;                                  // 테스트 파일 → test 렌즈 유지(DB 증강 제외)
+    if (!_CONTRACT_EXT_RE.test(f)) continue;                        // 계약 확장자가 코드 확장자를 포함하는 상위 집합
+    if (_LENS_TEST_PATH_RE.test(f)) continue;                       // 테스트 파일 → test 렌즈 유지(내용 증강 제외)
     try {
       const p = path.resolve(base, f);
       if (p !== base && !p.startsWith(base + path.sep)) continue;   // root 밖(../·절대경로) 거부
       const st = fs.lstatSync(p);                                    // 심볼릭 링크는 따라가지 않음(isFile()=false → 스킵)
-      if (!st.isFile() || st.size > 512 * 1024) continue;
-      if (_isDbContentText(fs.readFileSync(p, 'utf8'))) return true;
+      if (!st.isFile() || st.size > fileCap) continue;
+      if (st.size > budget) continue;                                // 예산 초과분만 건너뛴다(뒤의 작은 파일은 계속 본다)
+      const rp = fs.realpathSync(p);                                 // 중간 정션/심볼릭 디렉토리까지 해석한 뒤 재봉쇄
+      if (rp !== realBase && !rp.startsWith(realBase + path.sep)) continue;
+      budget -= st.size;
+      const txt = fs.readFileSync(p, 'utf8');
+      const isCode = _LENS_CODE_EXT_RE.test(f);
+      if (!out.contract && _isContractContentText(txt)) out.contract = true;
+      if (isCode) {
+        if (!out.db && _isDbContentText(txt)) out.db = true;
+        if (!out.recovery && _isRecoveryContentText(txt)) out.recovery = true;
+        if (!out.obs && _isObsContentText(txt)) out.obs = true;
+        if (out.axis == null) { for (const trg of _AXIS_TRIGGERS) if (_anyRe(trg.res, txt)) { out.axis = trg.idx; break; } }
+      }
+    } catch { /* 미존재/권한/해석불가 → 무시 */ }
+  }
+  return out;
+}
+function _anyLensContentInFiles(files, root, extRe, predicate, opts) {
+  const fileCap = (opts && opts.fileCap) || _LENS_SCAN_FILE_CAP;
+  const arr = Array.isArray(files) ? files : [];
+  const base = path.resolve(root || process.cwd());
+  let realBase = base;
+  try { realBase = fs.realpathSync(base); } catch { /* 폴백 */ }
+  let budget = (opts && opts.totalCap) || _LENS_SCAN_TOTAL_CAP;
+  for (const f of arr) {
+    if (typeof f !== 'string') continue;
+    if (!extRe.test(f)) continue;
+    if (_LENS_TEST_PATH_RE.test(f)) continue;                       // 테스트 파일 → test 렌즈 유지(내용 증강 제외)
+    try {
+      const p = path.resolve(base, f);
+      if (p !== base && !p.startsWith(base + path.sep)) continue;   // root 밖(../·절대경로) 거부
+      const st = fs.lstatSync(p);                                    // 심볼릭 링크는 따라가지 않음(isFile()=false → 스킵)
+      if (!st.isFile() || st.size > fileCap) continue;
+      if (st.size > budget) continue;
+      const rp = fs.realpathSync(p);                                 // 중간 정션/심볼릭 디렉토리까지 해석
+      if (rp !== realBase && !rp.startsWith(realBase + path.sep)) continue;
+      budget -= st.size;
+      if (predicate(fs.readFileSync(p, 'utf8'))) return true;
     } catch { /* 미존재/권한 → 무시 */ }
   }
   return false;
 }
-// database 를 도메인 목록에 병합(우선 노출 + 최대 2 캡). database 가 code/design 등보다 앞선다.
-function _withDbDomain(domains) {
+// ── 1.36.97 (P-0011) 내용 기반 소환 — database 렌즈와 같은 방식. 신호는 '실수가 실제로 사는 모양'으로만 좁힌다.
+//    오탐 1건의 대가가 크다: 캡이 2라서 잘못 켜지면 code 렌즈를 밀어낸다. 그래서 흔한 단어(retry/fallback/log)는 쓰지 않고,
+//    복합 식별자·구체적 호출 형태만 신호로 삼는다. (반대로 FN 은 '렌즈가 안 뜬다'로 끝나므로 비대칭적으로 보수적으로 잡는다.)
+//    1.36.97 검수가 이 원칙을 실제로 못 지켰음을 보였다 — "낱말이 있다"는 신호는 산문·UI 문구·i18n 카탈로그에서 그대로 켜졌고
+//    (i18n 파일 하나가 recovery+observability 를 띄워 code 렌즈를 통째로 밀어냈다), 어떤 대안은 아예 매칭될 수 없었다.
+//    그래서 전부 **"코드 모양으로 쓰였는가"** 로 조인다: 낱말은 대입/속성/호출 문맥에서만 인정한다.
+//    (배경: 값의 조성으로 산문과 코드를 가르려는 시도는 1.36.96 에서 이미 여섯 번 반례를 만났다. 문맥이 값보다 안전하다.)
+const _RECOVERY_RES = [
+  /catch\s*(?:\([^)]{0,60}\))?\s*\{\s*\}/,                                            // 빈 catch — 실패를 정상으로 바꾸는 대표 형태
+  /\.catch\s*\(\s*\(\s*[\w$]{0,20}\s*\)\s*=>\s*(?:\{\s*\}|null|undefined|void 0)\s*\)/, // .catch(() => {}) / (e) => null
+  //  재시도 어휘는 '식별자로 쓰였을 때'만 — 대입/속성키/인자 문맥. 산문·UI 문구의 backoff/jitter 는 켜지지 않는다.
+  //  대소문자 구분: 문장 첫머리의 Backoff/Jitter 를 배제하고 camelCase·snake_case 식별자만 남긴다.
+  /\b(?:maxRetries|max_retries|maxAttempts|max_attempts|retryCount|retry_count|retryDelay|retry_delay|retryLimit|retry_limit|backoff|backoffMs|backoff_ms|exponentialBackoff|jitter)\s*[:=]/,
+  /\bnew\s+AbortController\b|\bAbortSignal\s*\.\s*(?:timeout|abort|any)\b|\bsignal\s*:\s*[\w$]/,   // 취소를 '쓰는' 모양(문자열 목록의 이름 나열 제외)
+  /\b(?:timeoutMs|timeout_ms|requestTimeout|request_timeout|connectTimeout|connect_timeout|idleTimeout|idle_timeout|deadlineMs|deadline_ms)\s*[:=]/,
+  /process\.on\s*\(\s*['"](?:SIGTERM|SIGINT|SIGHUP|uncaughtException|unhandledRejection)/,
+  /\b(?:circuitBreaker|circuit_breaker|failOpen|fail_open|failSafe|fail_safe|gracefulShutdown|graceful_shutdown)\s*[:=(]/,
+  /\bPromise\.(?:allSettled|race)\s*\(/,                                              // 부분 실패/경쟁 — 계약이 필요한 지점
+];
+const _OBS_RES = [
+  //  스코프 패키지는 \b 를 앞에 둘 수 없다 — '@' 는 비단어 문자라 import 문에서 경계가 생기지 않아 '절대 매칭되지 않는' 죽은 대안이었다.
+  /\b(?:winston|pino|bunyan|log4js|prom-client|newrelic|datadog)\b|@(?:opentelemetry|sentry)\//,
+  /\b(?:logger|log|logging)\.(?:info|warn|error|debug|trace|fatal)\s*\(/,
+  //  실패 경로의 출력 — catch '블록'을 실제로 요구한다. 종전엔 'catch' 부분문자열이면 됐고 faker.company.catchPhrase() 가 켜졌다.
+  /\bcatch\s*(?:\([^)]{0,60}\))?\s*\{[\s\S]{0,160}?console\.(?:error|warn|log)\s*\(/,
+  //  지표 동사만 — .set()/.add()/.get() 은 평범한 Map 의 모양이라 단어 세는 코드가 켜졌다.
+  /\b(?:metrics|meter|counter|histogram|gauge)\.(?:inc|increment|observe|record|labels|startTimer)\s*\(/,
+  //  상관관계 ID 는 명백히 원격측정인 것만 — 맨 requestId 는 멱등키 등으로도 흔해 제외한다.
+  /\b(?:traceId|trace_id|correlationId|correlation_id|spanId|span_id)\b|['"]x-request-id['"]/i,
+  /\bstartSpan\s*\(|\bstartActiveSpan\s*\(|\bgetTracer\s*\(|\btracer\s*\.\s*start/,   // 맨 tracer 는 레이 트레이서와 충돌
+];
+const _CONTRACT_RES = [
+  //  줄머리 앵커 뒤의 \s* 는 개행까지 먹어 빈 줄이 이어지면 O(n²) 로 폭발했다(512KB 빈 줄에 227초, 실제 CLI 재현).
+  //  들여쓰기는 공백/탭이지 개행이 아니다 — [ \t]* 로 조이면 폭발이 사라지고 인식 결과는 동일하다.
+  /(?:^|\n)[ \t]*(?:openapi|swagger)[ \t]*:/i,                                        // OpenAPI 문서 루트 키
+  /"\$schema"\s*:/,
+  /\b(?:z|Joi|yup)\.object\s*\(/,
+  /\bres\.status\s*\(\s*\d{3}|\bstatusCode\s*[:=]\s*\d{3}\b/,
+  /\b(?:app|router|server)\.(?:get|post|put|patch|delete|head|options)\s*\(\s*['"`]\//,
+  /@[Dd]eprecated\b|\[Obsolete[\](]|#\[deprecated/,                                    // 폐기 예고 = 호환성 관리 중(JS/Java/C#/Rust)
+  /(?:^|\n)[ \t]*(?:message|service|rpc)[ \t]+[A-Z]\w*[ \t]*[{(]/,                      // protobuf IDL
+];
+const _anyRe = (res, txt) => typeof txt === 'string' && res.some(r => r.test(txt));
+function _isRecoveryContentText(txt) { return _anyRe(_RECOVERY_RES, txt); }
+function _isObsContentText(txt) { return _anyRe(_OBS_RES, txt); }
+function _isContractContentText(txt) { return _anyRe(_CONTRACT_RES, txt); }
+// 도메인을 목록에 병합(우선 노출 + 캡). _LENS_ORDER 를 공유하므로 우선순위가 표면마다 어긋나지 않는다.
+//   1.36.97 검수 실측: 구체 축을 앞에 두고 전체를 2개로 자르면, 실제 커밋 226개 중 141개(62%)에서 출력이 바뀌고
+//   일반 렌즈(code/design/docs/test)가 보이는 커밋이 99% → 57% 로 떨어졌다. code+README 커밋이 docs 질문을 아예 안 받는다.
+//   구체 축은 더 유용하지만 일반 축을 '없애는' 값은 아니다 → 구체 최대 2 + 일반 최대 1(총 3)로 두 축을 분리해 캡한다.
+const _LENS_SPECIFIC = ['database', 'contract', 'recovery', 'observability'];
+function _capLensDomains(merged) {
+  const ordered = _LENS_ORDER.filter(d => merged.includes(d));
+  // 새 축은 '더하는' 것이지 '없애는' 것이 아니다 — 일반 축 상한(2)은 1.36.96 그대로 두고 구체 축을 그 위에 얹는다.
+  //   그래서 1.36.96 이 보여주던 렌즈는 어떤 입력에서도 사라지지 않는다(실측: 실제 커밋 188개에서 제거 0).
+  //   줄 수가 최대 4 로 늘지만 인라인은 질문 첫 절만 찍으므로(_lensInlineQ) 실제 출력 높이는 오히려 줄어든다.
+  const spec = ordered.filter(d => _LENS_SPECIFIC.includes(d)).slice(0, 2);
+  const gen = ordered.filter(d => !_LENS_SPECIFIC.includes(d)).slice(0, 2);
+  return [...spec, ...gen];
+}
+function _withLensDomain(domains, key) {
   const merged = Array.isArray(domains) ? domains.slice() : [];
-  if (!merged.includes('database')) merged.unshift('database');
-  return ['database', 'code', 'design', 'docs', 'test'].filter(d => merged.includes(d)).slice(0, 2);
+  if (key && !merged.includes(key)) merged.push(key);
+  return _capLensDomains(merged);
+}
+function _withDbDomain(domains) { return _withLensDomain(domains, 'database'); }
+// claimed 파일 내용으로 켜지는 축을 한 번에 판정 — verify-claim 이 쓰는 단일 진입점.
+//   파일을 축마다 다시 열지 않는다(종전 6회 → 1회): 같은 파일을 여섯 번 읽으면 IO 도 여섯 배, 폭발 위험도 여섯 배다.
+function _lensDomainsWithContent(files, root) {
+  const merged = _lensDomainsForFiles(files).slice();
+  const sig = _scanLensSignals(files, root);
+  for (const [key, on] of [['database', sig.db], ['contract', sig.contract], ['recovery', sig.recovery], ['observability', sig.obs]]) {
+    if (on && !merged.includes(key)) merged.push(key);
+  }
+  return _capLensDomains(merged);
+}
+// 1.36.97 (P-0011): 경량 축(axes)은 도메인 캡을 두고 경쟁하지 않는다 — 심화 렌즈를 밀어내면 안 되므로.
+//   대신 '파일 내용에 그 축의 전형적 실수 모양이 있을 때만' 한 줄 붙인다. 신호가 없으면 아무것도 붙이지 않는다
+//   (모든 변경에 고정 문구를 붙이면 곧 읽히지 않는 배경음이 된다 — 이 프로젝트에서 낡은 경고가 무시되는 걸 이미 봤다).
+//   axes 자체는 설계 시작 시점(review-request)에서 8축 전체로 훑는 게 본 용도.
+const _AXIS_TRIGGERS = [
+  // idx 4 = 성능·확장성: 반복 안의 I/O(N+1) — 목록이 커지는 순간 처음 무너지는 자리
+  { idx: 4, res: [/for\s*\([^)]{0,160}\)\s*\{[\s\S]{0,400}?\bawait\b/, /\bfor\s+(?:const|let|var)\s[\s\S]{0,120}?\bof\b[\s\S]{0,300}?\bawait\b/, /\.(?:map|forEach|filter|reduce)\s*\(\s*async\b/] },
+  // idx 2 = 생명주기: 만들기만 하고 거두는 경로가 빠지기 쉬운 것들
+  { idx: 2, res: [/\bsetInterval\s*\(/, /\.addEventListener\s*\(/, /\.subscribe\s*\(/, /\bcreateServer\s*\(/, /\bnew\s+Worker\s*\(/, /\bfs\.(?:createReadStream|createWriteStream|watch)\s*\(/] },
+];
+// 걸린 축의 인덱스 하나(없으면 null). 우선순위는 배열 순서 — 여러 개 걸려도 한 줄만 붙인다.
+function _axisHintForFiles(files, root) {
+  for (const trg of _AXIS_TRIGGERS) {
+    if (_anyLensContentInFiles(files, root, _LENS_CODE_EXT_RE, (txt) => _anyRe(trg.res, txt))) return trg.idx;
+  }
+  return null;
 }
 function lensCmd(domain, opts = {}) {
   const jsonMode = !!opts.json || has('--json');
@@ -7355,7 +7841,8 @@ function lensCmd(domain, opts = {}) {
     let qs = l.questions;
     if (L === 'en' && l.questionsEn) qs = l.questions.length > l.questionsEn.length ? [...l.questionsEn, ...l.questions.slice(l.questionsEn.length)] : l.questionsEn;
     log(`## ${key} (${title}) — ${t('페르소나', 'persona')}: ${persona}${cflag}`);
-    if (l._droppedCustom) log(t(`  ⚠ 프로젝트 질문 ${l._droppedCustom}개가 12+커스텀 상한(16)을 넘어 잘림 — 핵심 질문을 앞쪽에 두거나 별도 도메인으로 분리하세요`, `  ⚠ ${l._droppedCustom} project question(s) dropped past the 12+custom cap (16) — put key ones first or use a separate domain`));
+    // 상한 문구의 '내장 문항 수'는 도메인마다 다르다(axes 는 8, database 는 12) — 고정 숫자를 적으면 반드시 낡는다.
+    if (l._droppedCustom) { const _bi = ((LENS_CATALOG[key] || {}).questions || []).length; log(t(`  ⚠ 프로젝트 질문 ${l._droppedCustom}개가 상한(내장 ${_bi} + 커스텀, 총 16)을 넘어 잘림 — 핵심 질문을 앞쪽에 두거나 별도 도메인으로 분리하세요`, `  ⚠ ${l._droppedCustom} project question(s) dropped past the cap (${_bi} builtin + custom, 16 total) — put key ones first or use a separate domain`)); }
     qs.forEach((q, i) => log(`  ${i + 1}. ${q}`));
     log(t(`  ↔ 인과: ${key} 를 바꾸면 → ${(l.affects || []).join(', ') || '(없음)'} 질문도 다시 — ${note}`, `  ↔ causality: change ${key} → re-check ${(l.affects || []).join(', ') || '(none)'} too — ${note}`));
   }
@@ -7401,7 +7888,7 @@ function commandsCmd(root) {
       { cmd: 'encoding check [path]', desc: '인코딩 검증' },
       { cmd: 'lazy detect [path] [--json]', desc: '게으른 작업 감지 (1.9.101)' },
       { cmd: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<명령>"] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --all: 모든 done 주장 일괄 검증(CI·스케일, 1.33.2) · --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287) · --test-cmd: 비-JS 테스트 명령 (1.17.2)' },
-      { cmd: 'lens [code|design|docs|test|security|database|debug] [--json]', desc: '분야별 자기질문 품질 렌즈 + 분야간 인과관계 (1.18.3, database: 동시성/트랜잭션)' },
+      { cmd: `lens [${_lensDomainList()}] [--json]`, desc: '분야별 자기질문 품질 렌즈 + 분야간 인과관계 (1.18.3 · database/contract/recovery/observability 는 심화, axes 는 8축 경량 점검)' },
       { cmd: 'optimism-check <T-ID>', desc: '낙관적 API 감지 (1.9.26)' },
       { cmd: 'requests audit|list|complete|drop|auto-complete', desc: '사용자 요청 추적 (1.9.207/223)' },
       { cmd: 'pre-wake-audit [path] [--last]', desc: 'sleep 전 점검 (1.9.209)' },
@@ -14103,9 +14590,8 @@ function verifyClaimCmd(root, taskId, opts = {}) {
     log(t(`  ℹ 한계: 테스트 통과는 "의미적 구현 정확성"을 보장하지 않음 — evidence 가 해당 주장(수정 파일/테스트)을 직접 링크해야 신뢰도↑.`, `  ℹ Limit: passing tests do not guarantee "semantic correctness" — evidence should directly link the claimed files/tests for higher confidence.`));
     // 1.19.2 (UR-0003 렌즈 완전판 v2): 완료-검증 순간에 분야별 자기질문 advisory — 주장 파일 확장자 기반(결정적).
     //   기계검증(파일/테스트/스텁)을 통과해도 "사람이 보기에 좋은가"는 별개 → AI 가 스스로 답하도록 권장(advisory, 게이트 아님).
-    let _lensDoms = _lensDomainsForFiles(files);
-    // 1.36.x (dogfood FN): path 가 놓친 평범한 이름의 DB 모듈 — claimed 파일 내용에 DB 신호가 있으면 database 렌즈 보강.
-    if (!_lensDoms.includes('database') && _anyDbContentInFiles(files, root)) _lensDoms = _withDbDomain(_lensDoms);
+    // 1.36.x (dogfood FN) + 1.36.97 (P-0011): path 가 놓친 파일을 내용으로 보강 — database·contract·recovery·observability 동일 방식.
+    let _lensDoms = _lensDomainsWithContent(files, root);
     if (_lensDoms.length) {
       const _lensCat = _effectiveLensCatalog(root);  // 1.19.3: 프로젝트 커스텀 질문도 포함
       log('');
@@ -14114,9 +14600,24 @@ function verifyClaimCmd(root, taskId, opts = {}) {
         const l = _lensCat[d];
         // 1.36.11 (클린룸 P2-B): en 로케일에서 렌즈 제목/질문이 한국어로 새던 것 — titleEn/questionsEn 사용(lensCmd 와 동일 규칙).
         const _en = _uiLang(root) === 'en';
-        if (l) log(`     · ${d}(${(_en && l.titleEn) || l.title}): ${(_en && l.questionsEn && l.questionsEn[0]) || l.questions[0]}`);
+        // 제목은 괄호 앞까지만(‘contract (promises at a boundary)’ → ‘contract’), 도메인 키와 같으면 아예 생략 —
+        // 종전엔 `contract(contract (promises at a boundary))` 처럼 같은 말을 두 번 적어 en 에서만 줄이 접혔다.
+        if (!l) continue;
+        const _tt = String((_en && l.titleEn) || l.title).split('(')[0].trim();
+        const _lbl = _tt.toLowerCase() === d ? d : `${d}(${_tt})`;
+        log(`     · ${_lbl}: ${_lensInlineQ((_en && l.questionsEn && l.questionsEn[0]) || l.questions[0])}`);
       }
-      log(`     ${t('→ 전체 질문', '→ full questions')}: leerness lens ${_lensDoms[0]}`);
+      // 1.36.97 (P-0011): 경량 축 — 파일 내용에 그 축의 전형적 실수 모양이 있을 때만 한 줄(없으면 침묵).
+      const _ax = _axisHintForFiles(files, root);
+      const _axL = _lensCat.axes;
+      if (_ax != null && _axL) {
+        const _en2 = _uiLang(root) === 'en';
+        const _aq = (_en2 && _axL.questionsEn && _axL.questionsEn[_ax]) || _axL.questions[_ax];
+        if (_aq) log(`     · axes(${(_en2 && _axL.titleEn) || _axL.title}): ${_lensInlineQ(_aq)}`);
+      }
+      // 전문 안내는 '보여준 렌즈 전부'를 가리킨다 — 첫 축만 링크하면 나머지는 어디서 읽는지 알 수 없다(검수 지적).
+      //   명령을 축마다 반복하면 줄이 접히므로 한 줄로 묶는다.
+      log(`     ${t('→ 전체 질문', '→ full questions')}: leerness lens <${_lensDoms.concat(_ax != null ? ['axes'] : []).join('|')}>`);
     }
   }
   if (overallFail) {
@@ -24060,7 +24561,7 @@ VERIFICATION (evidence-gated "done")
   contract verify <spec.md> <impl.js> [--json] [--allow-empty]   Spec <-> implementation match (empty spec rejected unless --allow-empty)
   verify-code [path] [--build] [--bench]          Run tests/lint/typecheck, record evidence
   gate [path]                     One-call CI gate: verify + audit + scan + encoding + lazy
-  lens [code|design|docs|test|security|database|debug] [--json]  Quality self-question lenses
+  lens [${_lensDomainList()}] [--json]  Quality self-question lenses
 
 SECURITY & HYGIENE
   scan secrets [path]             Committed-secret detection
@@ -24122,7 +24623,7 @@ function help() {
   // 1.23.1 (UR-0010 Phase 6): 영어 opt-in 시 큐레이트 영어판. 기본(ko) 은 아래 한국어 help 그대로.
   if (_uiLang(arg('--path', process.cwd())) === 'en') { _helpEn(); return; }
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/agy/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합
-  leerness lens [code|design|docs|test|security|database|debug] [--json]   # 1.18.3 분야별 자기질문 품질 렌즈 (database: 동시성/트랜잭션 — 완료 선언 전 자가 점검)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  leerness lens [${_lensDomainList()}] [--json]   # 1.18.3/1.36.97 분야별 자기질문 품질 렌즈 (database·contract·recovery·observability 심화 · axes 8축 경량 — 완료 선언 전 자가 점검)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -24821,6 +25322,9 @@ module.exports = {
   // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈 — 단위 테스트. 1.19.2: 파일→도메인 매핑(완료-검증 advisory)
   LENS_CATALOG, lensCmd, _lensDomainsForFiles, _mergeLensCatalog, _loadProjectLenses, _effectiveLensCatalog,
   _isDbContentText, _anyDbContentInFiles, _withDbDomain,
+  _isContractContentText, _isRecoveryContentText, _isObsContentText,   // 1.36.97 (P-0011)
+  _anyLensContentInFiles, _withLensDomain, _lensDomainsWithContent, _axisHintForFiles, _lensDomainList,
+  _capLensDomains, _scanLensSignals,
   _handoffNudgeState, _getLastHandoffGap, _recordLastHandoff,
   _detectOptimism, _scanCodeForPatterns
 };
