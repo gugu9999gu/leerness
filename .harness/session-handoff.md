@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-07-17T00:40:24.067Z
+Last generated: 2026-08-05T01:59:53.472Z
 
 ## Completed
 - T-0002 1.36.4~1.36.11 릴리스 아크: DB렌즈 recall + 정직성 감사 3연 + handoff 넛지 + optimism/백슬래시 FP + 17th 클린룸 4/4 → next: 다음 액션 작성
@@ -58,6 +58,39 @@ Last generated: 2026-07-17T00:40:24.067Z
 - T-0047 enforce 하드닝 (1.36.44) — FP/worktree/--no-verify audit → next: 다음 액션 작성
 - T-0048 adapter codex --global (1.36.45) — goal 모드 전역 조건부 지침, 사용자 머신 실설치 → next: 다음 액션 작성
 - T-0049 JSON 계약 완결 (1.36.46) — persona/review/guide, codex 5차 완전 소진 → next: 다음 액션 작성
+- T-0050 ACP 입장 명문화 (1.36.48) — docs/interoperability.md + decision, 사용자 질의 대응 → next: 다음 액션 작성
+- T-0051 codex 6차 헌트 — 신작 표면(1.36.28~48) 10건 전수 수정 (1.36.49) → next: 다음 액션 작성
+- T-0052 결함 클래스 3종 전수 스윕 (1.36.50) → next: 다음 액션 작성
+- T-0053 외부 GPT 감사 P0 채택 (1.36.52) → next: 다음 액션 작성
+- T-0054 UR-0061 clarify/preview (1.36.51) + UR-0062 tech 프로필/그래프 탭 (1.36.53) → next: 다음 액션 작성
+- T-0055 codex 7차 헌트 12건 전수 수정 (1.36.54) → next: 다음 액션 작성
+- T-0056 E2E 아티팩트 이식성 6건 자기완결화 (1.36.55) → next: 다음 액션 작성
+- T-0057 F-06 스캐너 개선 + R-0001 codex 검수 사이클 1회전 (1.36.56) → next: 다음 액션 작성
+- T-0058 integrity check --repair (1.36.57, 감사 F-04 종결) → next: 다음 액션 작성
+- T-0059 MCP core 프로필 (1.36.58, 감사 F-09 종결) → next: 다음 액션 작성
+- T-0060 F-05 1회차 en 지시레이어 완역 (1.36.59) → next: 다음 액션 작성
+- T-0061 언어 전환 현지화 병합 (1.36.60, F-05 2회차) → next: 다음 액션 작성
+- T-0062 F-05 3회차 정책문서 en 완역 (1.36.61) → next: 다음 액션 작성
+- T-0063 leerness.com GEO/AEO/SEO (UR-0064) → next: 다음 액션 작성
+- T-0064 F-05 4회차 commands/AX en 완역 (1.36.62) → next: 다음 액션 작성
+- T-0065 F-05 시리즈 완결 (1.36.63) → next: 다음 액션 작성
+- T-0066 lint 게이트 (1.36.64, 감사 F-10) → next: 다음 액션 작성
+- T-0067 no-op 재설치 (1.36.65, 감사 F-08) → next: 다음 액션 작성
+- T-0068 codex 8차 홀리스틱 헌트 11건 수정 (1.36.66) → next: 다음 액션 작성
+- T-0069 F15 tech-graph 정합 (1.36.67), F14 이연 → next: 다음 액션 작성
+- T-0070 F14 재구현 완결 (1.36.68) → next: 다음 액션 작성
+- T-0071 whats-new 응답 상한 (1.36.69) → next: 다음 액션 작성
+- T-0072 migrate 보고 상한 (1.36.70) → next: 다음 액션 작성
+- T-0073 retro/insights rows 상한 + 워크스페이스 --days 버그 (1.36.71) → next: 다음 액션 작성
+- T-0074 task list 상한 + lint F16 (1.36.72) → next: 다음 액션 작성
+- T-0075 8차 헌트 종결 F12+F9 (1.36.73) → next: 다음 액션 작성
+- T-0076 9차 헌트 6건+검수 2건 (1.36.74) → next: 다음 액션 작성
+- T-0077 UR-0066 디자인 시안 워크플로 (1.36.75) → next: 다음 액션 작성
+- T-0078 9차 이월 3건+티어 교정 (1.36.76) → next: 다음 액션 작성
+- T-0079 MCP clarify/preview (1.36.77) → next: 다음 액션 작성
+- T-0080 10차 헌트 7건+검수 3건 (1.36.78) → next: 다음 액션 작성
+- T-0081 도그푸딩 P1 5건 + 검수 7건 (1.36.79) → next: 다음 액션 작성
+- T-0087 1.36.97 렌즈 3축 심화 구현 → next: 다음 액션 작성
 
 ## In Progress
 - 없음

@@ -15,13 +15,16 @@ doNotStore:
 <!-- leerness:managed -->
 # Current State
 
-Updated: 2026-08-04
+Updated: 2026-08-05
 
 ## Now
+- 대기 중 <!-- leerness:auto -->
 - 대기 중
 
 ## Next
+- 프로젝트 계획 정리 <!-- leerness:auto -->
 - 프로젝트 계획 정리
 
 ## Blockers
+- (없음) <!-- leerness:auto -->
 -

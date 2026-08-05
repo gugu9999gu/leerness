@@ -109,3 +109,4 @@ Status values: requested, planned, in-progress, waiting, on-hold, blocked, incom
 | T-0086 | requested | 제품 코드의 주석 없는 catch {} 스윕 — lib/ 31개 중 16개에 bare catch. 신설 recovery 렌즈 5번 문항(왜 안전한지 한 줄) 기준으로 삼키기 의도/사고 구분 | user-request | 다음 액션 작성 | 2026-08-04 |
 | T-0087 | done | 1.36.97 렌즈 3축 심화 구현 | 구현 bin/leerness.js , scripts/e2e.js 수정 · selftest 343 pass · 변이 40/41 · 게이트 417/417 · 1.36.97 게시 | 다음 액션 작성 | 2026-08-04 |
 | T-0088 | requested | session close 가 current-state.md 를 덮어쓴다 — 사용자 보고(hive-analytics): AI 이력에 '또 덮어썼습니다. 복원하겠습니다' 가 남음. 데이터 손실 계열이라 재현 후 보존 경로 확인 필요 | user-request | 다음 액션 작성 | 2026-08-04 |
+| T-0089 | requested | e2e 타임아웃 여유 스윕 — doctor(30s→120s)만 고쳤고 agents/session 계열 11곳이 여유 1.2~2.6배로 남음. 각 호출의 하위명령별 실제 비용을 측정해 3배 미만인 곳만 상향(근거: 1.36.87 선례 '검사 대상은 속도가 아니라 동작'). 명령 단위 근사 실측: doctor 35.7s selftest 35.3s session 11.4s agents 8.2s (e2e 환경) | user-request | 다음 액션 작성 | 2026-08-05 |

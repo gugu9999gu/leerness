@@ -79,7 +79,7 @@ leerness가 자동 검증 가능한 trigger:
 <!-- leerness:migration-preserved -->
 ## Preserved previous content
 
-> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.77-2026-07-28T00-26-08-808Z`
+> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.100-2026-08-05T01-57-13-913Z`
 
 - 완료 선언 전 `leerness check .` 또는 `leerness lazy detect .`로 자기검증합니다.
 ## 사용자 명시 신규 7종 (1.9.207~213) — 백로그 완전 소진

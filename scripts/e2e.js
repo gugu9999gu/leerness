@@ -3744,7 +3744,11 @@ total++;
 {
   let ok = false;
   try {
-    const r = cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { encoding: 'utf8', timeout: 30000 });
+    // 1.36.100: 이 호출만 30초로 남아 있었다 — doctor 는 selftest 를 내장해 격리 실측 31s(게시된 1.36.98 도 동일)라
+    //   전체 스위트 부하에서 간헐 초과했고, 실제로 게이트 한 번을 실패시켰다(내 변경 때문이 아니라 잠복 결함).
+    //   같은 명령의 다른 호출(4644·6955)은 1.36.87 에서 이미 120초로 올려 뒀다 — 여기만 빠져 있었다.
+    //   검사 대상은 속도가 아니라 동작이다.
+    const r = cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { encoding: 'utf8', timeout: 120000 });
     let j = null; try { j = JSON.parse(r.stdout); } catch {}
     const doctorOk = j && j.version && typeof j.mcpTools === 'number' && j.mcpTools >= 80 && j.selftest && j.selftest.total > 0 && j.healthy === true && r.status === 0;
     // commands 요약 + banner 가 실제 MCP 수 노출 (하드코딩 65/46 아님)
@@ -9564,6 +9568,54 @@ total++;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
   console.log(ok ? '✓ B(1.36.99/P-0012) 시안 정확도: 실제 토큰 :root 주입 + 기존 컴포넌트 어휘 + 대상 화면 실클래스 + 자기산출물 오염 0 + 오프라인 + 루트밖 거부'
     : '✗ 1.36.99 시안 정확도 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// ── 1.36.100 (P-0012 후반): 승인 시 시안을 계약으로 고정 → 구현 후 존재 대조. 과장하지 않는 것까지 함께 건다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ct100-'));
+  const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 120000 });
+  const out = (r) => (r.stdout || '') + (r.stderr || '');
+  try {
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'shop', version: '0.1.0', dependencies: { react: '18', tailwindcss: '3' } }));
+    R(['init', d, '--yes', '--language', 'ko', '--skills', 'recommended']);
+    const W = (rel, t) => { const p = path.join(d, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t); };
+    W('src/theme.css', ':root { --brand-500: #2563eb; --surface-1: #0f1115; }\n');
+    W('src/components/Button.tsx', 'export function Button(){ return <button className="px-3 py-1 rounded-lg">go</button> }\n');
+    const id = (/(P-\d{4,})/.exec(out(R(['preview', 'add', '장바구니', '--design', 'x']))) || [])[1];
+    R(['preview', 'mockup', id]);
+    const mp = path.join(d, '.harness', 'previews', id + '-mockup.html');
+    // 안 그린 시안을 승인하면 계약이 비었다고 말한다(조용히 빈 계약을 만들지 않는다)
+    const ap0 = out(R(['preview', 'approve', id]));
+    const warnsEmpty = /아직 안 그렸습니다/.test(ap0);
+    // AI 가 마커 사이를 채운 뒤 재승인 → 계약 고정
+    R(['preview', 'revise', id, '--note', '초안 반영']);
+    let html = fs.readFileSync(mp, 'utf8');
+    const drawn = '\n<header class="topbar p-4 rounded-lg" style="background:var(--surface-1)"><h1 class="text-xl">장바구니</h1></header>\n<ul class="cart-list gap-2"><li class="cart-item px-3 py-1" style="border-color:var(--brand-500)">항목</li></ul>\n';
+    fs.writeFileSync(mp, html.replace(/(leerness:draw-start[^>]*-->)[\s\S]*?(<!-- leerness:draw-end)/, `$1${drawn}$2`));
+    const ap = out(R(['preview', 'approve', id]));
+    const fixed = /계약 고정: 클래스 [1-9]/.test(ap);
+    const store = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'previews.json'), 'utf8'));
+    const rec = ((store.previews || store) || []).find(x => x.id === id);
+    const stored = !!(rec && rec.contract && rec.contract.classes.includes('topbar') && rec.contract.tokens.includes('--brand-500'))
+      && !rec.contract.classes.some(c => ['mock', 'notes', 'chips', 'placeholder'].includes(c));   // 스캐폴드 장식은 계약이 아니다
+    // 미준수 구현 → 낮은 존재율 · 준수 구현 → 100%
+    W('src/pages/Cart.tsx', 'export function Cart(){ return <main className="p-4">x</main> }\n');
+    const low = Number((/존재율 (\d+)%/.exec(out(R(['preview', 'verify', id, '--files', 'src/pages/Cart.tsx']))) || [, '100'])[1]);
+    W('src/pages/Cart.tsx', 'import "./cart.css";\nexport function Cart(){ return (<main><header className="topbar p-4 rounded-lg"><h1 className="text-xl">장바구니</h1></header><ul className="cart-list gap-2"><li className="cart-item px-3 py-1">항목</li></ul></main>) }\n');
+    W('src/pages/cart.css', '.topbar{background:var(--surface-1)} .cart-item{border-color:var(--brand-500)}\n');
+    const v2 = out(R(['preview', 'verify', id, '--files', 'src/pages/Cart.tsx,src/pages/cart.css']));
+    const high = Number((/존재율 (\d+)%/.exec(v2) || [, '0'])[1]);
+    //   과장 금지: '존재' 검사라는 한계를 매번 말한다(1.36.5 에서 고쳤던 과장의 재발 방지)
+    const honest = /'존재' 검사입니다/.test(v2) && /같아 보이는지는 보지 않습니다/.test(v2);
+    const guarded = /루트 밖/.test(out(R(['preview', 'verify', id, '--files', '../../etc/passwd'])));
+    Object.assign(dbg, { warnsEmpty, fixed, stored, low, high, honest, guarded });
+    ok = warnsEmpty && fixed && stored && low < 50 && high === 100 && honest && guarded;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ B(1.36.100/P-0012) 승인 시 시안→계약 고정 + 구현 존재 대조(미준수 저율/준수 100%) + 한계 고지 + 루트밖 거부 + 빈 시안 경고'
+    : '✗ 1.36.100 시안 계약 실패 ' + JSON.stringify(dbg));
   if (!ok) failed++;
 }
 

@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.99';
+const VERSION = '1.36.100';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -8033,7 +8033,7 @@ function commandsCmd(root) {
       { cmd: 'tech [--json]', desc: '기술 프로필 — 개발 언어·연결 서비스 자동 감지 + 마이그레이션/언어전환 이력, 그래프 🛠 탭 표시 — 1.36.53 UR-0062' },
       { cmd: 'integrity check [--repair] [--json]', desc: 'managed 정책-문서 12종 무결성(부재/H1 상실/절단) 점검 — --repair: archive 대피 후 템플릿 재생성 — 1.36.57 감사 F-04' },
       { cmd: 'referee add|verify|list|show|drop', desc: '검증기 캘리브레이션 — 신뢰 전에 탐지력 증명(known-good 통과 + 망가뜨린 known-bad 를 기대 사유로 거부). verify-claim --referee / gate 게이팅 — 1.36.80 P-0001' },
-      { cmd: 'preview add|list|show|approve|revise|mockup', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약. mockup <P-ID> [--force]: 자립형 HTML 디자인 시안 스캐폴드 · add --mockup <파일>: 기존 시안 첨부 — 1.36.51 UR-0061 · 1.36.75 UR-0066' },
+      { cmd: 'preview add|list|show|approve|revise|mockup|verify', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약. mockup <P-ID> [--target <파일>] [--force]: 프로젝트의 실제 토큰·컴포넌트·대상 화면 클래스를 심은 시안 · approve 시 그 시안이 계약으로 고정됨 · verify <P-ID> --files a,b: 구현이 계약을 지켰는지 존재 대조(시각적 일치는 보증하지 않음) — 1.36.51 UR-0061 · 1.36.75 UR-0066 · 1.36.99/1.36.100 P-0012' },
       { cmd: 'dashboard [path] [--port N] [--timeout SEC] [--json]', desc: '.harness 읽기 전용 대시보드 — 토글·task·마일스톤·미리보기·라우팅기록·bugfix probe 를 localhost 에서 열람. 설정 변경·게이트 판정은 하지 않는다(CLI 가 판정). --json 은 서버 없이 같은 스냅샷 출력. 정적 단일파일 뷰(leerness.html)는 leerness graph --html 로 그대로 — 1.36.90 P-0006' },
       { cmd: 'agents route "<작업>" [--tier tiny|normal|high-risk] [--confirm --approved-by "<승인자>"] [--log]', desc: '작업 난이도 판정(결정적 규칙) → 추상 역할(architect/commander/coder/reviewer) 배치 제안. 모델명 하드코딩 없이 `roles set` 매핑을 쓰고, 실행은 명시 확인 필요. 토글 기본 OFF: leerness toggle set difficulty-routing on — 1.36.89 P-0007' },
       { cmd: 'bugfix start|receipt|drop|list', desc: 'bugfix 완료 영수증 — 수정 전 재현 probe 를 등록(2회 연속 실패해야 등록)하고, done 전이에서 통과 + 근본원인/형제범위 영수증을 요구. 토글 기본 OFF: leerness toggle set bugfix-receipt on — 1.36.87 P-0005' },

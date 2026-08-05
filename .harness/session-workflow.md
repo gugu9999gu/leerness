@@ -25,6 +25,10 @@ leerness drift check .        # 4 신호 + 4단계 레벨
 ```
 - 사용자 요청을 5W1H로 분해. 모호하면 명확화 질문 (autonomous 모드 제외).
 - drift critical 시 `leerness session close .` 또는 `drift check --auto-fix` 우선 실행.
+- **버그 수정 요청이면 코드를 고치기 전에 재현부터**: `leerness bugfix start <T-ID> --repro "<재현 명령>" --expect-bad "<실패 신호>"`
+  → 지금 실패하는 probe 를 먼저 등록해야, 나중에 "고쳤다"가 **증상만 덮은 것인지** 구분된다. 수정 후엔
+  `leerness bugfix receipt <T-ID> --root-cause "..." --siblings "같은 원인이 걸린 다른 지점들"` 로 근본원인과 형제 범위를 남긴다.
+  (완료 게이트는 옵트인: `leerness toggle set bugfix-receipt on`)
 
 ## Step 2. 계획 수립
 - 작업이 3 step 이상 → TodoWrite 또는 `leerness plan add` 사용.
@@ -37,10 +41,10 @@ leerness agents list                  # ready CLI 확인
 leerness agents quota                 # 한도 확인
 leerness agents dispatch "<task>" --to <id>   # 작업 유형 추천 자동
 ```
-- 작업 유형별 최적 sub-agent:
-  - 텍스트/번역/분석 → claude (1.7× 빠름)
-  - 깊은 코드 추론 → codex (가장 상세)
-  - 파일 직접 수정 → agy --yolo (정확, Antigravity CLI)
+- 작업 유형별 기본 sub-agent 매핑 (leerness 의 **기본 관례**이며 측정된 성능·품질 순위가 아닙니다):
+  - 텍스트/번역/분석 → claude
+  - 깊은 코드 추론 → codex
+  - 파일 직접 수정 → agy --yolo (Antigravity CLI)
   - 보안 리뷰 → `leerness review --persona security`
 - **충돌 방지 규칙 (필수)**:
   - 각 sub-agent에 *자신만 수정할 파일 경로* 명시
@@ -95,6 +99,8 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 3. handoff 가 매 세션 자동으로 24h 내 archive 활동 알림
 
 
+## 자동 회복 · 보안
+
 - session close가 누락되면 다음 세션 시작 시 drift critical 발생.
 - 자동 회복 옵션: `drift check --auto-fix` (critical 시 session close 자동 실행).
 - handoff가 매 세션 시작 시 **과거 lessons 자동 재상기** (현재 task 키워드 기준).
@@ -106,6 +112,39 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 - handoff Date/Project 직후 통합 헤드라인 한 줄 (drift / 보안 / MCP / skill query / 설치 skill 수).
 - `leerness health` 한 줄로 종합 점검 (drift + 보안 + skills + usage + tasks).
 - `leerness drift check --auto-fix` 가 보안 신호 발견 시 `audit --fix` 자동 실행 → 재검사.
+
+---
+
+## 빠른 체크리스트
+
+세션 끝나기 전 다음이 모두 ✓이어야 한다:
+- [ ] plan/progress-tracker에 이번 라운드 task 등록됨 (또는 task sync)
+- [ ] 모든 done 항목에 evidence 첨부됨 (verify-claim PASS)
+- [ ] sub-agent 사용 시 contract verify PASS
+- [ ] drift 점수 ≤ 30 (attention 이하) — `leerness drift check` (5신호 + 보안)
+- [ ] session close 호출됨
+- [ ] `leerness health`로 종합 점검 — drift + 보안 + skill + MCP + tasks
+- [ ] `.env` 사용 중이면 `.gitignore` 시크릿 패턴 OK + `.env.example` 동기화
+- [ ] 보안 critical 시 `LEERNESS_AUTO_SECURITY_FIX=1` 또는 `audit --fix`로 자동 회복
+
+## Anti-pattern (drift 신호)
+
+- ⚠ "작업 끝났으니 보고만 하고 끝" → session close 누락 → 다음 세션 drift critical
+- ⚠ "TodoWrite만 갱신하고 leerness 안 씀" → `task sync --from` 또는 `task add` 필수
+- ⚠ sub-agent 분배 시 파일 경로 미명시 → 동시 쓰기 충돌
+- ⚠ "테스트 돌렸으니 PASS" 자기 보고만 → verify-claim --run-tests 미실행
+- ⚠ contract verify 생략 → 사양 불일치 BUG가 사용자에게 노출
+
+---
+<!-- leerness:migration-preserved -->
+## Preserved previous content
+
+> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.100-2026-08-05T01-57-13-913Z`
+
+- 작업 유형별 최적 sub-agent:
+  - 텍스트/번역/분석 → claude (1.7× 빠름)
+  - 깊은 코드 추론 → codex (가장 상세)
+  - 파일 직접 수정 → agy --yolo (정확, Antigravity CLI)
 - MCP server **18 도구** (handoff/drift/audit/verify_claim/contract/agents/reuse/whats_new/usage_stats/session_close/skill_suggest/lessons/task_export/env_check/brainstorm/skill_match/skill_list/health).
 - MCP server **21 도구** (skill_search/skill_info/benchmark 추가).
 - `leerness handoff --json` (외부 AI/MCP 통합용 구조화 출력).
@@ -149,35 +188,6 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 - `.harness/session-workflow.md` 템플릿에 **🧠 Memory CRUD Quick Reference** 섹션 추가 — 5 surface × CRUD 매트릭스 + archive cycle 워크플로 가이드. 신규 `init` 워크스페이스 즉시 적용.
 - `leerness memory archive list --query <keyword>` + MCP `leerness_memory_archive_list` query 인자 — archive 항목 키워드 case-insensitive 검색 (target/originalHeader 매칭).
 - `leerness lesson list --query` + `leerness decision list --query` + MCP 동일 인자 — active Memory 항목 키워드 검색 (lesson: text/tag, decision: title/decision/reason/alternatives/impact).
-
----
-
-## 빠른 체크리스트
-
-세션 끝나기 전 다음이 모두 ✓이어야 한다:
-- [ ] plan/progress-tracker에 이번 라운드 task 등록됨 (또는 task sync)
-- [ ] 모든 done 항목에 evidence 첨부됨 (verify-claim PASS)
-- [ ] sub-agent 사용 시 contract verify PASS
-- [ ] drift 점수 ≤ 30 (attention 이하) — `leerness drift check` (5신호 + 보안)
-- [ ] session close 호출됨
-- [ ] `leerness health`로 종합 점검 — drift + 보안 + skill + MCP + tasks
-- [ ] `.env` 사용 중이면 `.gitignore` 시크릿 패턴 OK + `.env.example` 동기화
-- [ ] 보안 critical 시 `LEERNESS_AUTO_SECURITY_FIX=1` 또는 `audit --fix`로 자동 회복
-
-## Anti-pattern (drift 신호)
-
-- ⚠ "작업 끝났으니 보고만 하고 끝" → session close 누락 → 다음 세션 drift critical
-- ⚠ "TodoWrite만 갱신하고 leerness 안 씀" → `task sync --from` 또는 `task add` 필수
-- ⚠ sub-agent 분배 시 파일 경로 미명시 → 동시 쓰기 충돌
-- ⚠ "테스트 돌렸으니 PASS" 자기 보고만 → verify-claim --run-tests 미실행
-- ⚠ contract verify 생략 → 사양 불일치 BUG가 사용자에게 노출
-
----
-<!-- leerness:migration-preserved -->
-## Preserved previous content
-
-> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.77-2026-07-28T00-26-08-808Z`
-
   - 파일 직접 수정 → gemini --yolo (정확)
 leerness session close .             # 1.9.59+ — --suggest default 활성 (마감 + 다음 라운드 자동)
 leerness skill suggest .             # 1.9.53 — 반복 패턴 → 새 skill 후보
