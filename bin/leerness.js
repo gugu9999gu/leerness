@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.101';
+const VERSION = '1.36.102';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -6199,7 +6199,7 @@ function _selfTestCases() {
           && (JSON.parse(read(path.join(nextApp, '.harness', 'tech-profile.json'))).current.ui || []).some(u => u.id === 'tailwind');
       } catch { uiOk = false; } finally { try { fs.rmSync(tmp3, { recursive: true, force: true }); } catch {} }
       return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved()
-        && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk();
+        && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk() && _p0102HonestyOk();
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -7786,6 +7786,39 @@ function _p0101PathStrictOk() {
   } catch { controlOk = false; } finally { try { fs.rmSync(okDir, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
   //   표본이 조용히 줄어들면 가드가 약해진 걸 모른다 — 목록/표본 크기도 함께 못박는다.
   return bad.length === 0 && controlOk && _sample.length >= 7 && _PATH_STRICT_CMDS.length >= 20;
+}
+// 1.36.102 (명령 표면 감사 P1 2건): 회귀 가드.
+//   ① update --check 가 레지스트리 조회에 실패하고도 "up to date" 라고 단정했다 —
+//      바로 윗줄에 "(unavailable — 판정 보류)" 를 찍어 놓고 아랫줄에서 결론을 뒤집는 자기모순이었다.
+//      그리고 --json 이 사람용 텍스트를 냈다(계약: 단일 유효 JSON).
+//   ② plan init <경로> 가 positional 을 무시하고 cwd 에 워크스페이스 71개 파일을 깔았다(실측: cwd 1 → 72).
+function _p0102HonestyOk() {
+  const os2 = require('os');
+  const cp2 = require('child_process');
+  const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p102-'));
+  try {
+    const proj = path.join(arena, 'proj'); fs.mkdirSync(proj, { recursive: true });
+    fs.writeFileSync(path.join(proj, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const R = (a, cwd) => cp2.spawnSync(process.execPath, [__filename, ...a], { cwd: cwd || proj, encoding: 'utf8', timeout: 180000, env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1' }) });
+    R(['init', proj, '--yes']);
+    // ① 조회 실패 시 '최신' 이라 단정하지 않는다 + --json 은 순수 JSON
+    const human = ((R(['update', proj, '--check']).stdout) || '');
+    const noAssert = /확인 불가/.test(human) && !/→ up to date/.test(human);
+    const raw = ((R(['update', proj, '--check', '--json']).stdout) || '').trim();
+    let j = null; try { j = JSON.parse(raw); } catch { j = null; }
+    const jsonOk = !!j && j.verdict === 'unknown' && j.registryReachable === false && j.latest === null;
+    // ② plan init <경로> 는 그 경로에 적용하고 cwd 를 건드리지 않는다
+    const cwdDir = path.join(arena, 'cwd'); const target = path.join(arena, 'target');
+    fs.mkdirSync(cwdDir, { recursive: true }); fs.mkdirSync(target, { recursive: true });
+    fs.writeFileSync(path.join(cwdDir, 'package.json'), '{"name":"c","version":"0.1.0"}');
+    fs.writeFileSync(path.join(target, 'package.json'), '{"name":"t","version":"0.1.0"}');
+    const cnt = (d) => { let n = 0; (function w(x) { for (const e of fs.readdirSync(x, { withFileTypes: true })) { const p = path.join(x, e.name); if (e.isDirectory()) w(p); else n++; } })(d); return n; };
+    R(['plan', 'init', target], cwdDir);
+    const planOk = cnt(cwdDir) === 1 && cnt(target) > 5;
+    // 없는 경로를 주면 만들지 말고 거부한다
+    const rejects = R(['plan', 'init', path.join(arena, 'NO-SUCH')], cwdDir).status !== 0 && !exists(path.join(arena, 'NO-SUCH'));
+    return noAssert && jsonOk && planOk && rejects;
+  } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
 }
 function _p0101SkillIdOk() {
   const bad = ['../..', '../../../victim', '..\\..\\x', '/etc/passwd', 'C:\\Windows', 'a/b', 'a\\b', '.', '..', '.hidden', '', null, 'x'.repeat(65)];
@@ -19582,27 +19615,35 @@ async function updateCmd(root, opts = {}) {
   // 1.9.364 (4번째 외부평가 9.3 + Codex CV-2 후속): --quiet — SessionStart hook 비침투화.
   //   up-to-date 시 무음, 업데이트 가능 시에만 1줄 통지 (매 세션 노이즈 제거). hook 명령이 이 모드를 사용.
   const quiet = !!opts.quiet || has('--quiet');
+  // 1.36.102: --json 은 사람용 줄을 섞으면 안 된다(계약: 단일 유효 JSON). quiet 과 별개로 둔다 —
+  //   `const quiet = ...` 줄 자체는 다른 selftest 가 문자열로 붙잡고 있어 건드리지 않는다.
+  const _humanQuiet = quiet || has('--json');
   const verF = path.join(root, '.harness/HARNESS_VERSION');
   const cur = exists(verF) ? parseHarnessVersion(read(verF)) : { plus: null, base: null, raw: '(not installed)' };
-  if (!quiet) log(`# leerness update`);
-  if (!quiet) log(`Current: ${cur.raw}`);
+  if (!_humanQuiet) log(`# leerness update`);
+  if (!_humanQuiet) log(`Current: ${cur.raw}`);
   const fromTar = arg('--from', null);
   const cacheHours = opts.checkOnly ? 24 : 0;
   let nextLeerness = VERSION;
-  if (fromTar) { if (!quiet) log(`Local tarball mode: ${fromTar}`); }
+  // 1.36.102 (명령 표면 감사 P1): 레지스트리 조회에 실패했는데 결론은 "up to date" 였다 —
+  //   바로 윗줄에서 "(unavailable — 판정 보류)" 라고 해 놓고 아랫줄에서 최신이라 단정하는 자기모순이다.
+  //   모르는 것은 모른다고 말한다. 이 값이 판정 분기까지 흘러간다.
+  let _registryUnknown = false;
+  if (fromTar) { if (!_humanQuiet) log(`Local tarball mode: ${fromTar}`); }
   else {
     const cached = readUpdateCache(root);
     // 1.36.34 (codex 3차 #5): 조회 실패(null)를 24h 캐시로 굳히면 다음 실행이 "up to date" 로 오답 — null 은 캐시하지 않고 재시도.
     if (cacheFresh(cached, cacheHours) && cached.nextLeerness) {
       nextLeerness = cached.nextLeerness;
-      if (!quiet) log(`(cached ${Math.round((Date.now() - cached.at) / 60000)}m ago)`);
-      if (!quiet) log(`npm leerness latest: ${cached.nextLeerness}`);
+      if (!_humanQuiet) log(`(cached ${Math.round((Date.now() - cached.at) / 60000)}m ago)`);
+      if (!_humanQuiet) log(`npm leerness latest: ${cached.nextLeerness}`);
     } else {
-      if (!quiet) log('Checking npm registry…');
+      if (!_humanQuiet) log('Checking npm registry…');
       const latest = await fetchNpmLatest('leerness');
       nextLeerness = latest || VERSION;
       if (latest) writeUpdateCache(root, { nextLeerness: latest, runningCli: VERSION });
-      if (!quiet) log(`npm leerness latest: ${latest || '(unavailable — 판정 보류, 다음 실행에서 재조회)'}`);
+      else _registryUnknown = true;   // 1.36.102: 조회 실패를 판정까지 끌고 간다(아래 --check 결론에서 사용)
+      if (!_humanQuiet) log(`npm leerness latest: ${latest || '(unavailable — 판정 보류, 다음 실행에서 재조회)'}`);
     }
   }
   // What is "current"? canonical=base; legacy plus also rolls into leerness 1.9.0+
@@ -19616,8 +19657,15 @@ async function updateCmd(root, opts = {}) {
     if (compareVer(nextLeerness, '1.9.0') >= 0) { needsMigrate = true; reason = 'consolidate legacy plus@ marker into canonical'; }
   }
   if (opts.checkOnly) {
-    if (quiet) { if (needsMigrate) log(`↑ leerness 업데이트 가능: ${reason} — leerness update --yes`); return; }  // up-to-date 시 무음
+    // 1.36.102: --json 이 사람용 텍스트를 내던 것도 함께 고친다(--json 계약: 단일 유효 JSON).
+    const _verdict = needsMigrate ? 'migration_available' : (_registryUnknown ? 'unknown' : 'up_to_date');
+    if (has('--json')) {
+      log(JSON.stringify({ ok: true, current: installed || null, cli: VERSION, latest: _registryUnknown ? null : nextLeerness, registryReachable: !_registryUnknown, verdict: _verdict, reason: needsMigrate ? reason : null }, null, 2));
+      return;
+    }
+    if (quiet) { if (needsMigrate) log(`↑ leerness 업데이트 가능: ${reason} — leerness update --yes`); return; }  // up-to-date/unknown 시 무음
     if (needsMigrate) log(`\n→ migration available: ${reason}`);
+    else if (_registryUnknown) log('\n→ 확인 불가 — 레지스트리를 조회하지 못했습니다(최신 여부를 알 수 없음). 네트워크 복구 후 다시 실행하세요.');
     else log('\n→ up to date');
     return;
   }
@@ -25455,7 +25503,19 @@ async function main() {
   if (cmd === 'plan') {
     const root = absRoot(arg('--path', process.cwd())); const sub = args[1] || 'show';
     if (sub==='show')     return planShow(root);
-    if (sub==='init')     return planInit(root);
+    // 1.36.102 (명령 표면 감사 P1): `plan init <경로>` 가 positional 을 무시하고 **cwd 에** 워크스페이스를 깔았다.
+    //   실측 재현: cwd 1개 파일 → 72개, 대상 디렉토리는 1개 그대로. 홈에서 실행하면 홈이 오염된다.
+    //   plan 그룹은 --path 만 읽고 positional 은 list 만 지원했다 — 파괴적인 init 이 그 갭에 있었다.
+    //   무시하지 말고 명시적으로 처리한다: 준 경로에 적용하되, 존재하지 않으면 만들지 말고 거부한다.
+    if (sub==='init') {
+      const _pos = args[2] && !args[2].startsWith('-') ? args[2] : null;
+      if (_pos) {
+        const _abs = absRoot(_pos);
+        if (!exists(_abs) || !fs.statSync(_abs).isDirectory()) { failJson(has('--json'), 'path_not_found', `경로 없음 또는 디렉토리 아님: ${_abs}`); return; }
+        return planInit(_abs);
+      }
+      return planInit(root);
+    }
     if (sub==='add')      return planAdd(root, args.slice(2).join(' ').trim() || '새 계획');  // 17th 버그헌트 P2: 공백-only 제목이 || 기본값을 우회(truthy)해 plan.md 손상(파서가 다음 줄 'Status:' 흡수) → trim 후 판정
     if (sub==='drop')     return planDrop(root, args.slice(2).join(' ') || '드랍 항목');
     if (sub==='remove')   return planRemoveCmd(root, args[2]);

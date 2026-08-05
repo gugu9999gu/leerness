@@ -67,9 +67,13 @@ run('memory search',       ['memory', 'search', '마일스톤', '--path', tmp]);
 const offline = Object.assign({}, process.env, { LEERNESS_OFFLINE: '1' });
 total++;
 {
+  // 1.36.102: 이 단언이 결함을 고정하고 있었다 — 오프라인(레지스트리 조회 불가)에서 "up to date" 가 나오는 것을
+  //   정답으로 못박고 있었다. 모르는 것을 안다고 말하는 게 정답일 수 없다. 계약을 바꾼다:
+  //   조회에 실패하면 '확인 불가' 여야 하고, 마이그레이션이 필요하면 그건 조회와 무관하니 그대로 인정한다.
   const r = cp.spawnSync(process.execPath, [CLI, 'update', tmp, '--check'], { env: offline, encoding: 'utf8' });
-  const ok = r.status === 0 && /up to date|migration available/.test(r.stdout || '');
-  console.log(ok ? '✓ update --check (offline)' : `✗ update --check (offline) exit=${r.status}`);
+  const _o = r.stdout || '';
+  const ok = r.status === 0 && /확인 불가|migration available/.test(_o) && !/→ up to date/.test(_o);
+  console.log(ok ? '✓ update --check (offline): 조회 실패를 "최신" 으로 단정하지 않음 (1.36.102)' : `✗ update --check (offline) exit=${r.status}`);
   if (!ok) { failed++; console.log(r.stdout || ''); console.error(r.stderr || ''); }
 }
 
