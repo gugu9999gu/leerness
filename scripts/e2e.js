@@ -9750,6 +9750,144 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.104: MCP 사용량 귀속 — 실제로 일한 프로젝트가 그 사실을 말한다.
+//   _bumpMcpUsage 는 stats.mcp.tools 에 기록하는데 usage 표시는 commands 가 비면 이른 return 이라
+//   그 아래 MCP 섹션에 도달하지 못했다 → MCP 로만 일하는 에이전트의 프로젝트가 "사용 기록 없음".
+//   동시에 서버 프로세스가 cwd 에 `mcp: N` 을 쌓아 남의 프로젝트 통계를 오염시켰다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-us104-'));
+  try {
+    const cwdP = path.join(arena, 'CWDPROJ'), tgt = path.join(arena, 'TARGETPROJ');
+    for (const x of [cwdP, tgt]) {
+      fs.mkdirSync(x, { recursive: true });
+      fs.writeFileSync(path.join(x, 'package.json'), '{"name":"x","version":"0.1.0"}');
+      cp.spawnSync(process.execPath, [CLI, 'init', x, '--yes'], { cwd: x, encoding: 'utf8', timeout: 120000 });
+    }
+    const mcp = (name) => cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], {
+      cwd: cwdP, encoding: 'utf8', timeout: 120000, maxBuffer: 32 * 1024 * 1024,
+      input: [
+        { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'e', version: '1' } } },
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: { path: tgt } } },
+      ].map(r => JSON.stringify(r)).join('\n') + '\n'
+    });
+    mcp('leerness_about'); mcp('leerness_pulse');
+    const U = (x) => ((cp.spawnSync(process.execPath, [CLI, 'usage', '--path', x], { cwd: cwdP, encoding: 'utf8', timeout: 60000 }).stdout) || '');
+    const uT = U(tgt), uC = U(cwdP);
+    dbg.showsMcp = /leerness_about/.test(uT) && /leerness_pulse/.test(uT) && !/\(사용 기록 없음\)/.test(uT);
+    dbg.cwdClean = !/\|\s*mcp\s*\|/.test(uC);
+    // 대조군 — 평범한 CLI 경로는 여전히 명령 표에 남는다
+    cp.spawnSync(process.execPath, [CLI, 'audit', '--path', tgt], { cwd: cwdP, encoding: 'utf8', timeout: 120000 });
+    const uT2 = U(tgt);
+    dbg.cliStill = /\|\s*audit\s*\|/.test(uT2) && /leerness_about/.test(uT2);
+    ok = dbg.showsMcp && dbg.cwdClean && dbg.cliStill;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ D(1.36.104) MCP 사용량이 실제 대상 프로젝트에 보고됨 + 서버 cwd 무오염 + CLI 집계 무회귀'
+    : '✗ 1.36.104 usage 귀속 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// ── 1.36.104 (P-0014): 시크릿 인정 기제 — 오경보를 없애되 눈이 멀지는 않는다.
+//   동기: leerness 자기 저장소가 63건을 보고했고 전부 의도적 가짜였다(e2e.js 47 · e2e-core.js 5 · pure-utils 4 · 보고서 7).
+//   매 세션 같은 숫자가 뜨면 진짜 유출이 하나 섞여도 구분되지 않는다. 그래서 대조군 3종을 함께 건다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sb104-'));
+  try {
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 120000 });
+    R(['init', d, '--yes']);
+    const J = (a) => { try { return JSON.parse(((R(a).stdout) || '').trim()); } catch { return null; } };
+    const FIX = path.join(d, 'fixtures.test.js');
+    fs.writeFileSync(FIX, 'const A="sk-proj-FakeFixtureKey1234567890abcdef";\n');
+    fs.writeFileSync(path.join(d, 'other.test.js'), 'const B="sk-proj-SecondFixtureKey098765432100";\n');
+    const b0 = J(['scan', 'secrets', '--json']);
+    dbg.before = !!b0 && b0.unacknowledgedCount === 2 && b0.ok === false;
+    const rec = J(['scan', 'secrets', '--baseline', '--json']);
+    const stored = fs.readFileSync(path.join(d, '.harness', 'secret-baseline.json'), 'utf8');
+    dbg.recorded = !!rec && rec.recorded === 2;
+    dbg.noPlaintext = !stored.includes('FakeFixtureKey');          // 원문 시크릿을 베이스라인에 남기지 않는다
+    const b1 = J(['scan', 'secrets', '--json']);
+    dbg.quiet = !!b1 && b1.unacknowledgedCount === 0 && b1.ok === true && b1.acknowledgedCount === 2 && b1.count === 2;
+    dbg.headlineQuiet = !/🚨 시크릿/.test((R(['handoff', '.']).stdout) || '');
+    // 대조군 ① 신규 유출은 여전히 잡는다(조용해진 게 아니라 눈이 먼 것인지 판별)
+    fs.writeFileSync(path.join(d, 'leaked.js'), 'const K="sk-proj-BrandNewRealLeak9876543210zyxw";\n');
+    const b2 = J(['scan', 'secrets', '--json']);
+    dbg.catchesNew = !!b2 && b2.unacknowledgedCount === 1 && b2.ok === false;
+    dbg.headlineAlarms = /🚨 시크릿/.test((R(['handoff', '.']).stdout) || '');
+    // 대조군 ② 인정된 자리의 값이 바뀌면 자동 재경고 · 안 바뀐 것은 유지 · 사라진 지문은 stale
+    fs.unlinkSync(path.join(d, 'leaked.js'));
+    fs.writeFileSync(FIX, 'const A="sk-proj-CHANGEDToRealKey1234567890ab";\n');
+    const b3 = J(['scan', 'secrets', '--json']);
+    dbg.rearms = !!b3 && b3.unacknowledgedCount === 1 && b3.acknowledgedCount === 1
+      && Array.isArray(b3.staleBaseline) && b3.staleBaseline.length === 1;
+    // 대조군 ③ 손상된 베이스라인은 fail-safe(인정 0) — 오경보는 나도 누락은 안 난다
+    fs.writeFileSync(path.join(d, '.harness', 'secret-baseline.json'), '{ broken json');
+    const b4 = J(['scan', 'secrets', '--json']);
+    dbg.failSafe = !!b4 && b4.acknowledgedCount === 0 && b4.unacknowledgedCount === 2;
+    // 대조군 ④ (codex 검수 HIGH#1) 표시용 snippet 은 32자로 잘린다 — 그걸 해싱하면 앞 32자가 같은
+    //   서로 다른 키가 같은 지문을 갖는다(= 새 키가 자동 인정). 지문은 전체 매치값으로 만들어야 한다.
+    const t2 = path.join(d, 'trunc'); fs.mkdirSync(t2, { recursive: true });
+    fs.writeFileSync(path.join(t2, 'package.json'), '{"name":"t","version":"0.1.0"}');
+    cp.spawnSync(process.execPath, [CLI, 'init', t2, '--yes'], { cwd: t2, encoding: 'utf8', timeout: 120000 });
+    const R2 = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: t2, encoding: 'utf8', timeout: 120000 });
+    const J2 = (a) => { try { return JSON.parse(((R2(a).stdout) || '').trim()); } catch { return null; } };
+    const PRE = 'sk-proj-a1B2c3D4e5F6g7H8i9J0kLmN';                  // 두 키가 공유하는 앞부분(32자 경계 안)
+    const K1 = PRE + 'Q2w3E4r5T6y7U8i9', K2 = PRE + 'M9n8B7v6C5x4Z3q2';
+    dbg.fixtureValid = K1.slice(0, 32) === K2.slice(0, 32) && K1 !== K2;   // 픽스처가 조건을 만족하는지 먼저 단언
+    fs.writeFileSync(path.join(t2, 'fixture.js'), 'const A="' + K1 + '";\n');
+    R2(['scan', 'secrets', '--baseline']);
+    fs.writeFileSync(path.join(t2, 'fixture.js'), 'const A="' + K1 + '";\nconst B="' + K2 + '";\n');
+    const tr = J2(['scan', 'secrets', '--json']);
+    dbg.noCollision = !!tr && tr.count === 2 && tr.unacknowledgedCount === 1 && tr.ok === false;
+    // 대조군 ⑤ (codex 검수 MEDIUM#4) 파일 경로 + --baseline 은 ENOTDIR 로 죽지 않고 구조화 거절
+    const fb = J2(['scan', 'secrets', path.join(t2, 'fixture.js'), '--baseline', '--json']);
+    dbg.rejectsFile = !!fb && fb.code === 'baseline_needs_project';
+    ok = dbg.before && dbg.recorded && dbg.noPlaintext && dbg.quiet && dbg.headlineQuiet
+      && dbg.catchesNew && dbg.headlineAlarms && dbg.rearms && dbg.failSafe
+      && dbg.fixtureValid && dbg.noCollision && dbg.rejectsFile;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ E(1.36.104/P-0014) 시크릿 인정: 오경보 해소 + 신규 유출 포착 + 값변경 재경고 + 손상 fail-safe + 접두충돌 차단 + 원문 미저장'
+    : '✗ P-0014 시크릿 인정 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// ── 1.36.104: handoff 가 보호 파일을 지웠다 — 표식 줄의 본문 해시로 '우리가 쓴 그대로' 일 때만 청소한다.
+//   실측 귀속: 명령을 하나씩 단독 실행하니 handoff 였다(이전 라운드엔 외부 검수 탓으로 오귀속하고 있었다).
+{
+  total++;
+  let ok = false; const dbg = {};
+  const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rem104-'));
+  try {
+    const MARK = '<!-- leerness:managed:auto';
+    const sha = (b) => require('crypto').createHash('sha256').update(b).digest('hex').slice(0, 16);
+    const mk = (tag, body) => {
+      const d = path.join(arena, tag); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 120000 });
+      fs.writeFileSync(path.join(d, '.harness', 'agent-reminders.md'), body);
+      cp.spawnSync(process.execPath, [CLI, 'handoff', '.'], { cwd: d, encoding: 'utf8', timeout: 180000 });
+      return path.join(d, '.harness', 'agent-reminders.md');
+    };
+    const B = '# 🔔 자동 reminder\ndrift critical 감지\n';
+    const human = mk('human', '# 내 리마인더\nHUMAN-KEEPME 사용자가 직접 쓴 줄\n');
+    dbg.humanKept = fs.existsSync(human) && fs.readFileSync(human, 'utf8').includes('HUMAN-KEEPME');
+    const pasted = mk('pasted', MARK + ' -->\nUSER-DO-NOT-DELETE: production note\n');      // 표식만 복붙(해시 없음)
+    dbg.pastedKept = fs.existsSync(pasted) && fs.readFileSync(pasted, 'utf8').includes('USER-DO-NOT-DELETE');
+    const appended = mk('appended', MARK + ' sha=' + sha(B) + ' -->\n' + B + 'USER-APPENDED 메모\n');
+    dbg.appendKept = fs.existsSync(appended) && fs.readFileSync(appended, 'utf8').includes('USER-APPENDED');
+    const auto = mk('auto', MARK + ' sha=' + sha(B) + ' -->\n' + B);                        // 손대지 않은 자동 생성분
+    dbg.autoCleaned = !fs.existsSync(auto);
+    ok = dbg.humanKept && dbg.pastedKept && dbg.appendKept && dbg.autoCleaned;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ F(1.36.104) handoff 가 사람 손이 닿은 agent-reminders.md 를 지우지 않음(복붙 표식·덧붙임 포함) + 자동분은 여전히 청소'
+    : '✗ 1.36.104 보호 파일 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

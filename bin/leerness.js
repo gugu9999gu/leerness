@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.103';
+const VERSION = '1.36.104';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -260,7 +260,7 @@ const _VALUE_FLAGS = new Set(['--language','--skills','--path','--status','--pro
 for (const _bf of _BRIEF_FIELDS) { if (_bf && _bf.flag) _VALUE_FLAGS.add('--' + _bf.flag); }
 // 부울 플래그(값 없음) — 오타 경고의 대조군. 여기 있거나 _VALUE_FLAGS 에 있으면 '실재하는 플래그' 로 본다.
 //   판정에만 쓰이고 파싱 동작에는 관여하지 않으므로, 넓게 잡아도 안전하다(과다 포함 = 경고 억제).
-const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--all-presets','--allow-empty','--allow-unrelated','--apply','--audit','--auto','--auto-apply-delivered','--auto-cleanup-branches','--auto-fix','--auto-fix-bom','--auto-fix-encoding','--auto-main-push','--auto-recover','--auto-track','--banner','--bench','--build','--bundle-only','--claims','--close','--compact','--detect','--dry-run','--dry-run-npm','--embedding','--enforce','--fail-on-candidates','--fail-on-violation','--force','--gh-pages','--gh-release','--git-push','--global','--guide','--help','--html','--include-code','--interactive','--json','--last','--lenient','--major','--minimal','--minor','--no-animate','--no-auto-roadmap','--no-auto-update','--no-banner','--no-brainstorm-hits','--no-cache','--no-context-inject','--no-crawl','--no-drift-check','--no-enforce','--no-env','--no-env-detect','--no-feature-impact','--no-headline','--no-init-check','--no-interactive-select','--no-lazy-warn','--no-lessons','--no-longterm-recall','--no-mem-delta','--no-multiagent-hint','--no-next-actions','--no-npm','--no-official-skills','--no-on-every-change','--no-pre-wake','--no-preserve-link','--no-readme-sync','--no-record','--no-repl','--no-review','--no-save','--no-security-check','--no-security-summary','--no-setup-agents','--no-skill-suggest','--no-stale-check','--no-suggest','--no-synonyms','--no-team-reminders','--no-wakeup-miss','--no-workflow-guide','--no-write','--npm-publish','--offline','--on-every-change','--pack','--parent-migrate','--publish-npm','--pulse','--quiet','--record','--refresh','--remove','--repair','--repl','--require-evidence','--run-tests','--skeleton','--strict','--strict-claims','--strict-elements','--strict-exit','--suggest','--version','--yes',
+const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--baseline','--all-presets','--allow-empty','--allow-unrelated','--apply','--audit','--auto','--auto-apply-delivered','--auto-cleanup-branches','--auto-fix','--auto-fix-bom','--auto-fix-encoding','--auto-main-push','--auto-recover','--auto-track','--banner','--bench','--build','--bundle-only','--claims','--close','--compact','--detect','--dry-run','--dry-run-npm','--embedding','--enforce','--fail-on-candidates','--fail-on-violation','--force','--gh-pages','--gh-release','--git-push','--global','--guide','--help','--html','--include-code','--interactive','--json','--last','--lenient','--major','--minimal','--minor','--no-animate','--no-auto-roadmap','--no-auto-update','--no-banner','--no-brainstorm-hits','--no-cache','--no-context-inject','--no-crawl','--no-drift-check','--no-enforce','--no-env','--no-env-detect','--no-feature-impact','--no-headline','--no-init-check','--no-interactive-select','--no-lazy-warn','--no-lessons','--no-longterm-recall','--no-mem-delta','--no-multiagent-hint','--no-next-actions','--no-npm','--no-official-skills','--no-on-every-change','--no-pre-wake','--no-preserve-link','--no-readme-sync','--no-record','--no-repl','--no-review','--no-save','--no-security-check','--no-security-summary','--no-setup-agents','--no-skill-suggest','--no-stale-check','--no-suggest','--no-synonyms','--no-team-reminders','--no-wakeup-miss','--no-workflow-guide','--no-write','--npm-publish','--offline','--on-every-change','--pack','--parent-migrate','--publish-npm','--pulse','--quiet','--record','--refresh','--remove','--repair','--repl','--require-evidence','--run-tests','--skeleton','--strict','--strict-claims','--strict-elements','--strict-exit','--suggest','--version','--yes',
   // 소스에 리터럴로만 존재해 소비 형태를 기계 추출하지 못한 것들 — 실재하는 플래그이므로 오타로 오인하면 안 된다
   '--commands','--decision','--errors','--expand-all','--fix','--list','--notes','--print','--raw','--select-all','--skip-git-repo-check','--tests','--verbose','--yolo',
   // lib/*.js 의 부울 소비자 — bin/ 만 훑었다면 `agents route --confirm` 같은 실재 문법에 오탐 경고를 냈을 것이다
@@ -6263,7 +6263,8 @@ function _selfTestCases() {
       } catch { uiOk = false; } finally { try { fs.rmSync(tmp3, { recursive: true, force: true }); } catch {} }
       return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved()
         && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk() && _p0102HonestyOk()
-        && _p0103FlagsOk() && _p0103JsonOk() && _p0103RootOk();
+        && _p0103FlagsOk() && _p0103JsonOk() && _p0103RootOk() && _p0104UsageOk()
+        && _p0014SecretBaselineOk() && _p0104ReminderOk();
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -7889,6 +7890,149 @@ function _p0103RootOk() {
     const typoRejected = typo.status !== 0 && /NOPEZZ/.test((typo.stdout || '') + (typo.stderr || ''));
     const typoTech = R(['tech', 'NOPEZZ']).status !== 0;
     return wroteTarget && bareIsCwd && pageBare && pageWithPath && libTarget && typoRejected && typoTech;
+  } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
+}
+// 1.36.104: handoff 가 사람이 쓴 .harness/agent-reminders.md 를 통째로 지웠다(exit 0 · 안내 없음 · 백업 없음).
+//   대조군이 필수다 — 자동 생성분까지 남기면 그 파일이 영구 잔존해 매 세션 거짓 경보가 된다.
+function _p0104ReminderOk() {
+  const os2 = require('os');
+  const cp2 = require('child_process');
+  const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p104r-'));
+  try {
+    const env2 = Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' });
+    const mk = (body) => {
+      const d = path.join(arena, 'p' + Math.abs(body.length));
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      cp2.spawnSync(process.execPath, [__filename, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 180000, env: env2 });
+      writeUtf8(path.join(d, '.harness', 'agent-reminders.md'), body);
+      cp2.spawnSync(process.execPath, [__filename, 'handoff', '.'], { cwd: d, encoding: 'utf8', timeout: 300000, env: env2 });
+      return path.join(d, '.harness', 'agent-reminders.md');
+    };
+    // ① 사람이 쓴 파일은 살아남고 내용도 그대로
+    const human = mk('# 내 리마인더\nHUMAN-KEEPME 사용자가 직접 쓴 줄\n');
+    const kept = exists(human) && read(human).includes('HUMAN-KEEPME');
+    // ② 대조군 — 우리가 쓴 그대로(표식+본문 해시 일치)면 여전히 자동 청소된다
+    const body = '# 🔔 자동 reminder\ndrift critical 감지\n다음 라운드 정리 필요\n';
+    const auto = mk(_autoReminderText(body));
+    const cleaned = !exists(auto);
+    // ③ (codex 검수 HIGH#3) 문서에서 표식만 복붙한 사용자 파일 — 해시가 없으므로 보존
+    const pasted = mk('<!-- leerness:managed:auto -->\nUSER-DO-NOT-DELETE: production migration note\n');
+    const pastedKept = exists(pasted) && read(pasted).includes('USER-DO-NOT-DELETE');
+    // ④ (codex 검수 HIGH#3) 자동 생성분에 사용자가 덧붙인 경우 — 해시가 어긋나므로 보존
+    const appended = mk(_autoReminderText(body) + 'USER-APPENDED 메모\n');
+    const appendKept = exists(appended) && read(appended).includes('USER-APPENDED');
+    // ⑤ 표식 검사 판별 케이스 — 표식으로 시작하지 않지만 첫 줄에 우연히 `sha=<16hex>` 가 있고 그 값이
+    //    본문 해시와 일치하는 사용자 파일. 해시 검사만으로는 지워지고, 표식 검사가 있어야 보존된다.
+    const body5 = 'USER-CONTENT 내 메모\n';
+    const trap = mk('<!-- note sha=' + _reminderBodyHash(body5) + ' -->\n' + body5);
+    const trapKept = exists(trap) && read(trap).includes('USER-CONTENT');
+    return kept && cleaned && pastedKept && appendKept && trapKept;
+  } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
+}
+// 1.36.104 (P-0014): 시크릿 인정 기제 — "조용해졌다" 와 "눈이 멀었다" 를 대조군으로 가른다.
+//   동기: 자기 저장소가 63건을 보고했고 전부 의도적 가짜였다 → 매 세션 같은 숫자가 떠서 진짜 유출이 섞여도 묻힌다.
+//   그래서 가드는 '조용해짐' 만 보지 않는다 — 신규 유출·값 변경·손상 베이스라인 세 방향을 함께 건다.
+function _p0014SecretBaselineOk() {
+  const os2 = require('os');
+  const cp2 = require('child_process');
+  const d = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p014-'));
+  try {
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const env2 = Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' });
+    const R = (a) => cp2.spawnSync(process.execPath, [__filename, ...a], { cwd: d, encoding: 'utf8', timeout: 180000, env: env2 });
+    R(['init', d, '--yes']);
+    const J = (a) => { try { return JSON.parse(((R(a).stdout) || '').trim()); } catch { return null; } };
+    const FIX = path.join(d, 'fixtures.test.js'), OTH = path.join(d, 'other.test.js');
+    fs.writeFileSync(FIX, 'const A="sk-proj-FakeFixtureKey1234567890abcdef";\n');
+    fs.writeFileSync(OTH, 'const B="sk-proj-SecondFixtureKey098765432100";\n');
+    const before = J(['scan', 'secrets', '--json']);
+    if (!before || before.unacknowledgedCount !== 2 || before.ok !== false) return false;
+    // 인정 기록 — 원문 시크릿은 절대 저장하지 않는다
+    const rec = J(['scan', 'secrets', '--baseline', '--json']);
+    const stored = read(path.join(d, '.harness', 'secret-baseline.json'));
+    if (!rec || rec.recorded !== 2 || stored.includes('FakeFixtureKey')) return false;
+    // 조용해지되 사라지지 않는다
+    const after = J(['scan', 'secrets', '--json']);
+    const quiet = !!after && after.unacknowledgedCount === 0 && after.ok === true && after.acknowledgedCount === 2 && after.count === 2;
+    // health 도 같은 술어를 쓰는가 — 표면마다 따로 세면 헤드라인과 health 가 어긋난다(변이로 드러난 공백).
+    //   반드시 '전부 인정된 시점' 에서 재야 한다 — 아래 손상-베이스라인 시험 뒤에 재면 항상 2가 나온다.
+    let healthOk = false;
+    try {
+      const hj = JSON.parse(((R(['health', '--json']).stdout) || '').trim());
+      healthOk = !!hj && !!hj.checks && !!hj.checks.security && hj.checks.security.committedSecrets === 0;
+    } catch { healthOk = false; }
+    // 대조군 ① 신규 유출은 여전히 잡는다
+    fs.writeFileSync(path.join(d, 'leaked.js'), 'const K="sk-proj-BrandNewRealLeak9876543210zyxw";\n');
+    const leak = J(['scan', 'secrets', '--json']);
+    const catches = !!leak && leak.unacknowledgedCount === 1 && leak.ok === false;
+    // 대조군 ② 인정된 자리의 값이 바뀌면 자동 재경고 · 안 바뀐 것은 유지 · 사라진 지문은 stale
+    fs.unlinkSync(path.join(d, 'leaked.js'));
+    fs.writeFileSync(FIX, 'const A="sk-proj-CHANGEDToRealKey1234567890ab";\n');
+    const chg = J(['scan', 'secrets', '--json']);
+    const rearms = !!chg && chg.unacknowledgedCount === 1 && chg.acknowledgedCount === 1
+      && Array.isArray(chg.staleBaseline) && chg.staleBaseline.length === 1;
+    // 대조군 ③ 손상된 베이스라인은 fail-safe (인정 0)
+    writeUtf8(path.join(d, '.harness', 'secret-baseline.json'), '{ broken json');
+    const broken = J(['scan', 'secrets', '--json']);
+    const failSafe = !!broken && broken.acknowledgedCount === 0 && broken.unacknowledgedCount === 2;
+    // 대조군 ④ (codex 검수 HIGH#1) 앞 32자가 같은 다른 키가 자동 인정되면 안 된다.
+    //   표시용 snippet 은 32자로 잘리므로, 그걸 해싱하면 서로 다른 두 키가 같은 지문을 갖는다.
+    const d2 = path.join(d, 'trunc'); fs.mkdirSync(d2, { recursive: true });
+    fs.writeFileSync(path.join(d2, 'package.json'), '{"name":"t","version":"0.1.0"}');
+    cp2.spawnSync(process.execPath, [__filename, 'init', d2, '--yes'], { cwd: d2, encoding: 'utf8', timeout: 180000, env: env2 });
+    const R2 = (a) => cp2.spawnSync(process.execPath, [__filename, ...a], { cwd: d2, encoding: 'utf8', timeout: 180000, env: env2 });
+    const J2 = (a) => { try { return JSON.parse(((R2(a).stdout) || '').trim()); } catch { return null; } };
+    const K1 = 'sk-proj-a1B2c3D4e5F6g7H8i9J0kLmNQ2w3E4r5T6y7U8i9';
+    const K2 = 'sk-proj-a1B2c3D4e5F6g7H8i9J0kLmNM9n8B7v6C5x4Z3q2';   // 앞 32자 동일
+    if (K1.slice(0, 32) !== K2.slice(0, 32)) return false;           // 픽스처가 조건을 만족하는지 먼저 단언
+    fs.writeFileSync(path.join(d2, 'fixture.js'), 'const A="' + K1 + '";\n');
+    R2(['scan', 'secrets', '--baseline']);
+    fs.writeFileSync(path.join(d2, 'fixture.js'), 'const A="' + K1 + '";\nconst B="' + K2 + '";\n');
+    const tr = J2(['scan', 'secrets', '--json']);
+    const noCollision = !!tr && tr.count === 2 && tr.unacknowledgedCount === 1 && tr.ok === false;
+    // 대조군 ⑤ (codex 검수 MEDIUM#4) 파일 경로 + --baseline 은 ENOTDIR 로 죽지 않고 구조화 거절
+    const fileBase = J2(['scan', 'secrets', path.join(d2, 'fixture.js'), '--baseline', '--json']);
+    const rejectsFile = !!fileBase && fileBase.code === 'baseline_needs_project';
+    return quiet && healthOk && catches && rearms && failSafe && noCollision && rejectsFile;
+  } catch { return false; } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
+}
+// 1.36.104: MCP 사용량 귀속 — 쓰는 쪽과 읽는 쪽이 같은 파일의 다른 키를 보고 있었다.
+//   _bumpMcpUsage 는 stats.mcp.tools 에 기록하는데, usage 표시는 commands 가 비면 이른 return 으로
+//   그 아래 MCP 섹션(1.9.70)에 도달하지 못했다 → MCP 로만 일하는 에이전트의 프로젝트가 "사용 기록 없음".
+//   동시에 서버 프로세스 자신이 cwd 에 `mcp: N` 을 쌓아, 사용자가 쓴 적 없는 명령이 남의 통계에 떴다.
+function _p0104UsageOk() {
+  const os2 = require('os');
+  const cp2 = require('child_process');
+  const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p104-'));
+  try {
+    const cwdP = path.join(arena, 'CWDPROJ'), tgt = path.join(arena, 'TARGETPROJ');
+    const env2 = Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' });
+    for (const d of [cwdP, tgt]) {
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"x","version":"0.1.0"}');
+      cp2.spawnSync(process.execPath, [__filename, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 180000, env: env2 });
+    }
+    const mcp = (name) => cp2.spawnSync(process.execPath, [__filename, 'mcp', 'serve'], {
+      cwd: cwdP, encoding: 'utf8', timeout: 180000, env: env2, maxBuffer: 32 * 1024 * 1024,
+      input: [
+        { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'g', version: '1' } } },
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: { path: tgt } } },
+      ].map(r => JSON.stringify(r)).join('\n') + '\n'
+    });
+    mcp('leerness_about'); mcp('leerness_pulse');
+    const U = (d) => ((cp2.spawnSync(process.execPath, [__filename, 'usage', '--path', d], { cwd: cwdP, encoding: 'utf8', timeout: 120000, env: env2 }).stdout) || '');
+    const uT = U(tgt), uC = U(cwdP);
+    // ① 실제로 일한 프로젝트가 그 사실을 말한다
+    const shows = /leerness_about/.test(uT) && /leerness_pulse/.test(uT) && !/\(사용 기록 없음\)/.test(uT);
+    // ② 서버가 우연히 서 있던 프로젝트에 남의 활동이 기록되지 않는다
+    const cwdClean = !/\|\s*mcp\s*\|/.test(uC);
+    // ③ 대조군 — 평범한 CLI 경로는 그대로 명령 표에 남는다(표시 조건을 바꾸며 죽이지 않았는가)
+    cp2.spawnSync(process.execPath, [__filename, 'audit', '--path', tgt], { cwd: cwdP, encoding: 'utf8', timeout: 180000, env: env2 });
+    const uT2 = U(tgt);
+    const cliStillCounted = /\|\s*audit\s*\|/.test(uT2) && /leerness_about/.test(uT2);
+    return shows && cwdClean && cliStillCounted;
   } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
 }
 // 1.36.103: --json 계약 회귀 가드 — "실패해도 stdout 은 항상 파싱 가능한 JSON 하나".
@@ -12202,33 +12346,126 @@ function _collectSecretFindings(root) {
         const _valKey = `${_valOff}:${String(val || '').length}`;
         if (_seenAt.has(_valKey)) { if (re.lastIndex === m.index) re.lastIndex++; continue; }
         _seenAt.add(_valKey);
-        findings.push({ file: fileRel, line, name, snippet: m[0].slice(0, 32), gitignored });
+        // 1.36.104 (codex 검수 HIGH#1): 지문은 **전체 매치값**으로 만든다. 표시용 snippet 은 32자로 잘리는데
+        //   그걸 해싱하면 앞 32자가 같은 다른 키가 같은 지문이 돼 자동으로 인정된다(실측 재현: 인정 2 / 미인정 0).
+        //   fp 는 여기서 계산해 finding 에 실어 보낸다 — 전체 값을 finding 에 담으면 --json 이 시크릿을 더 노출한다.
+        findings.push({ file: fileRel, line, name, snippet: m[0].slice(0, 32), gitignored, fp: _fpOf(fileRel, name, m[0]) });
         // 16th 버그헌트 F1: break 제거 — 같은 패턴이 한 파일에 여러 번(예: secret: + api_key: 둘 다 'Hardcoded password') 나오면 모두 보고(보안 FN 차단). zero-width 매치는 lastIndex 전진으로 무한루프 방지.
         if (re.lastIndex === m.index) re.lastIndex++;
       }
     }
   }
   // gitignored(.env 등 안전 보관)는 info, 커밋 대상 발견만 실패.
-  return { findings, committed: findings.filter(f => !f.gitignored), ignored: findings.filter(f => f.gitignored) };
+  const committed = findings.filter(f => !f.gitignored);
+  const ignored = findings.filter(f => f.gitignored);
+  // 1.36.104 (P-0014): 알려진 가짜(테스트 픽스처·보안 문서)를 '인정' 으로 분류한다.
+  //   실측 동기 — leerness 자기 저장소가 63건을 보고했고 **전부** 의도적 가짜였다
+  //   (scripts/e2e.js 47 · e2e-core.js 5 · pure-utils.js 4 · 헌트 보고서 7). 매 세션 헤드라인이 영구 오경보라
+  //   진짜 유출이 섞여도 묻힌다. 숨기지 않고 **분류만** 한다 — 인정 항목도 항상 열람 가능하고,
+  //   지문에 내용이 들어가므로 값이 바뀌면 자동으로 다시 미인정이 된다.
+  const base = _loadSecretBaseline(root);
+  const acknowledged = [], unacknowledged = [];
+  for (const f of committed) (base.has(_secretFp(f)) ? acknowledged : unacknowledged).push(f);
+  // 베이스라인 부패 방지 — 기록만 남고 대응 발견이 사라진 항목은 알린다(조용히 불어나지 않게).
+  const live = new Set(committed.map(_secretFp));
+  const stale = [...base].filter(fp => !live.has(fp));
+  return { findings, committed, ignored, acknowledged, unacknowledged, staleBaseline: stale };
+}
+// 1.36.104 (P-0014): 지문은 파일+패턴명+스니펫. **줄 번호는 뺀다** — 서식 변경으로 재알림하면 아무도 안 쓴다.
+//   반대로 내용은 넣는다 — 같은 자리의 값이 진짜 키로 바뀌면 인정이 자동 해제돼야 한다.
+// 1.36.104: handoff 가 회복 판정 시 .harness/agent-reminders.md 를 **무조건** unlink 했다.
+//   그 파일은 drift critical 일 때 도구가 만드는 자동 산출물이지만, 본문 스스로 "사용자가 이 파일을 보고
+//   리마인더 전달 가능" 이라 안내한다 — 그리고 CLAUDE.md 는 보호 파일 삭제를 금지한다.
+//   실측: 사용자가 쓴 줄을 넣고 `leerness handoff .` 한 번 → 파일 통째 삭제, exit 0, 안내 없음, 백업 없음.
+//   (자기 저장소에서 반복해서 사라졌는데 외부 검수 탓으로 오귀속하고 있었다. 명령 단독 실행으로 귀속하니 handoff 였다.)
+//   1.36.98 의 current-state.md 처리와 같은 규약을 쓴다 — **표식이 있는 자동 생성분만** 지운다.
+//   codex 검수 HIGH#3: 표식 유무만 보면 (a) 사용자가 문서에서 표식을 복붙했거나 (b) 자동 파일에 메모를 덧붙인
+//   경우에 여전히 내용을 지운다. 그래서 표식 줄에 **본문 해시**를 함께 적고, 청소는 '우리가 쓴 그대로일 때' 만 한다.
+//   한 글자라도 사람이 고치면 해시가 달라져 보존된다 — 판정이 정확하고 추측이 없다.
+const _AUTO_REMINDER_MARK = '<!-- leerness:managed:auto';
+function _reminderBodyHash(body) {
+  return require('crypto').createHash('sha256').update(String(body)).digest('hex').slice(0, 16);
+}
+function _autoReminderText(body) { return `${_AUTO_REMINDER_MARK} sha=${_reminderBodyHash(body)} -->\n${body}`; }
+function _cleanAutoReminder(root) {
+  try {
+    const p = path.join(root, '.harness', 'agent-reminders.md');
+    if (!exists(p)) return;
+    const txt = read(p);
+    const nl = txt.indexOf('\n');
+    if (nl < 0) return;
+    const head = txt.slice(0, nl);
+    if (!head.startsWith(_AUTO_REMINDER_MARK)) return;              // 사람이 만든 파일 — 건드리지 않는다
+    const m = /sha=([0-9a-f]{16})/.exec(head);
+    if (!m) return;                                                 // 해시 없는 옛 표식 — 손댄 흔적을 알 수 없으니 보존
+    if (_reminderBodyHash(txt.slice(nl + 1)) !== m[1]) return;      // 사람이 고쳤다 — 보존
+    fs.unlinkSync(p);
+  } catch { /* 청소 실패는 handoff 실패가 아니다 */ }
+}
+const _FP_SEP = String.fromCharCode(31);   // 출하 소스에 생 NUL 을 두지 않는다(1.36.81 메타가드) — 이스케이프도 두지 않고 코드로 만든다
+function _fpOf(file, name, fullValue) {
+  return require('crypto').createHash('sha256')
+    .update(String(file) + _FP_SEP + String(name) + _FP_SEP + String(fullValue)).digest('hex');
+}
+//   구버전 finding(fp 없음)은 잘린 snippet 으로 폴백하지 않는다 — 폴백하면 위 결함이 그대로 살아난다.
+function _secretFp(f) { return f && f.fp ? f.fp : null; }
+function _secretBaselinePath(root) { return path.join(absRoot(root), '.harness', 'secret-baseline.json'); }
+function _loadSecretBaseline(root) {
+  try {
+    const p = _secretBaselinePath(root);
+    if (!exists(p)) return new Set();
+    const j = JSON.parse(read(p));
+    return new Set((Array.isArray(j.entries) ? j.entries : []).map(e => e && e.fp).filter(Boolean));
+  } catch { return new Set(); }   // 손상된 베이스라인은 '인정 없음' 으로 — 오경보는 나도 누락은 안 난다
 }
 
 function scanSecrets(root, opts = {}) {
   root = absRoot(root);
   // 1.10.3 (13th 버그헌트 P2, UR-0174): 없는 경로에서 --json 비-JSON(ENOENT) 차단 → 구조화 에러. 단 파일 경로는 지원(UR-0072: _collectSecretFindings 가 파일 root 단일 스캔) → 존재성만 검사(디렉토리 강제 X).
   if (!exists(root)) { failJson(has('--json') || opts.json, 'path_not_found', `경로 없음: ${root}`); return; }
-  const { committed, ignored } = _collectSecretFindings(root);
-  // 1.9.415 (9th 외부평가 Opus/Codex): --json 일관성 — 기존엔 --json 무시하고 사람용 텍스트만 출력하던 FN.
-  if (has('--json') || opts.json) {
-    log(JSON.stringify({ version: VERSION, root, ok: committed.length === 0, count: committed.length, committed, ignored }, null, 2));
-    if (committed.length) process.exitCode = 1;
+  const { committed, ignored, acknowledged, unacknowledged, staleBaseline } = _collectSecretFindings(root);
+  const jsonMode = has('--json') || opts.json;
+  // 1.36.104 (P-0014): --baseline 은 현재 커밋 대상 발견을 '인정' 으로 기록한다.
+  //   위험 수용 행위이므로 무엇을 인정했는지 파일·패턴별로 반드시 출력한다(조용히 잠재우지 않는다).
+  if (has('--baseline')) {
+    // codex 검수 MEDIUM#4: `scan secrets <파일> --baseline` 은 <파일>/.harness 를 만들려다 ENOTDIR 로 죽었다.
+    //   베이스라인은 프로젝트 단위 결정이므로, 파일 스캔과의 조합은 스캔 전에 분명히 거절한다.
+    let _isFile = false; try { _isFile = fs.statSync(root).isFile(); } catch {}
+    if (_isFile) { failJson(jsonMode, 'baseline_needs_project', `--baseline 은 프로젝트 디렉토리에서만 씁니다 (받은 값: 파일 ${root}) — 상위 프로젝트 경로로 실행하세요`); return; }
+    const entries = committed.map(f => ({ fp: _secretFp(f), file: f.file, name: f.name, line: f.line })).filter(e => e.fp);
+    const p = _secretBaselinePath(root);
+    mkdirp(path.dirname(p));
+    writeUtf8(p, JSON.stringify({ version: VERSION, recordedAt: new Date().toISOString(), note: '알려진 가짜(테스트 픽스처/보안 문서) 인정 기록 — 원문 시크릿은 저장하지 않는다(파일·패턴명·해시만)', entries }, null, 2) + '\n');
+    if (jsonMode) { log(JSON.stringify({ ok: true, baseline: rel(root, p), recorded: entries.length, byFile: entries.reduce((m, e) => (m[e.file] = (m[e.file] || 0) + 1, m), {}) }, null, 2)); return; }
+    ok(`시크릿 베이스라인 기록: ${entries.length}건 → ${rel(root, p)}`);
+    const byFile = entries.reduce((m, e) => (m[e.file] = (m[e.file] || 0) + 1, m), {});
+    Object.entries(byFile).sort((a, b) => b[1] - a[1]).forEach(([f, n]) => log(`    ${String(n).padStart(3)}  ${f}`));
+    log('  ⓘ 인정은 "가짜라고 사람이 판단했다" 는 뜻입니다 — 값이 바뀌면 자동으로 다시 경고합니다.');
     return;
   }
-  if (committed.length) {
-    fail(`secret patterns found: ${committed.length}`);
-    committed.forEach(f => log(`  ${f.file}:${f.line}  ${f.name}  ${f.snippet}…`));
+  // 1.9.415 (9th 외부평가 Opus/Codex): --json 일관성 — 기존엔 --json 무시하고 사람용 텍스트만 출력하던 FN.
+  if (jsonMode) {
+    log(JSON.stringify({
+      version: VERSION, root, ok: unacknowledged.length === 0,
+      count: committed.length, unacknowledgedCount: unacknowledged.length, acknowledgedCount: acknowledged.length,
+      committed, unacknowledged, acknowledged, ignored, staleBaseline
+    }, null, 2));
+    if (unacknowledged.length) process.exitCode = 1;
+    return;
+  }
+  if (unacknowledged.length) {
+    fail(`secret patterns found: ${unacknowledged.length}`);
+    unacknowledged.forEach(f => log(`  ${f.file}:${f.line}  ${f.name}  ${f.snippet}…`));
     process.exitCode = 1;
   } else {
     ok('no obvious secret patterns (커밋 대상)');
+  }
+  if (acknowledged.length) {
+    log(`  ⓘ 인정됨 ${acknowledged.length}건 (베이스라인 — 값이 바뀌면 자동 재경고): ${[...new Set(acknowledged.map(f => f.file))].slice(0, 6).join(', ')}`);
+    if (has('--all')) acknowledged.forEach(f => log(`      ${f.file}:${f.line}  ${f.name}`));
+  }
+  if (staleBaseline.length) {
+    log(`  ⚠ 베이스라인 낡음 ${staleBaseline.length}건 — 대응 발견이 사라졌습니다. 정리: leerness scan secrets --baseline`);
   }
   if (ignored.length) {
     log(`  ⓘ gitignored ${ignored.length}건 (커밋 제외 — 설계상 안전 보관, 비실패): ${[...new Set(ignored.map(f => f.file))].join(', ')}`);
@@ -12913,8 +13150,10 @@ function handoff(root) {
       //   이제 커밋 대상 시크릿이 있으면 '🚨 시크릿 N건', 없을 때만 '보안 OK'(.env 미무시는 별도 경고).
       try {
         const sec = _collectSecretFindings(root);
-        if (sec.committed.length) {
-          parts.push(t(`🚨 시크릿 ${sec.committed.length}건`, `🚨 ${sec.committed.length} secret(s)`));
+        // 1.36.104 (P-0014): 헤드라인은 **미인정**만 센다. 인정된 픽스처까지 세면 매 세션 같은 숫자가 떠서
+        //   진짜 유출이 하나 섞여도 구분되지 않는다(실측: 자기 저장소 63건 전부 가짜였다).
+        if (sec.unacknowledged.length) {
+          parts.push(t(`🚨 시크릿 ${sec.unacknowledged.length}건`, `🚨 ${sec.unacknowledged.length} secret(s)`));
         } else {
           const envPath = path.join(root, '.env');
           if (exists(envPath)) {
@@ -14014,7 +14253,8 @@ function handoff(root) {
       // 0) 1.30.1 (14th 외부리뷰 F2): 커밋된 plaintext 시크릿을 보안 요약에 노출 — headline '🚨 시크릿 N건' 과 일관.
       //    envExists 무관(소스에 커밋된 시크릿은 .env 없어도 위험). gitignored 는 _collectSecretFindings 가 committed 에서 제외.
       let committedSecrets = [];
-      try { committedSecrets = _collectSecretFindings(root).committed || []; } catch {}
+      // 1.36.104 (P-0014): 세 표면(headline·health·audit)이 같은 술어를 쓴다 — 미인정만 '문제' 로 센다.
+      try { committedSecrets = _collectSecretFindings(root).unacknowledged || []; } catch {}
       if (committedSecrets.length) issues.push(t(`커밋된 시크릿 ${committedSecrets.length}건 (소스 노출)`, `${committedSecrets.length} committed secret(s) (exposed in source)`));
       if (envExists) {
         // 1) env diff
@@ -14369,22 +14609,16 @@ function handoffCmd(root) {
           if (sevStale) {
             try {
               const remPath = path.join(absR0, '.harness', 'agent-reminders.md');
-              const body = `<!-- leerness:managed:auto -->\n# 🔔 메인 에이전트용 자동 reminder\n\n_생성: ${new Date().toISOString()}_\n\n## drift critical 감지\n현재 워크스페이스의 메타파일이 매우 stale합니다. 이번 라운드 작업 끝에 반드시 다음 명령을 호출하세요:\n\n\`\`\`bash\nleerness session close .\n\`\`\`\n\n또는 상세 점검:\n\`\`\`bash\nleerness drift check .\n\`\`\`\n\nstale 신호:\n${shAge !== null ? `- session-handoff.md: ${shAge.toFixed(1)}일 stale\n` : ''}${ptAge !== null ? `- progress-tracker: ${ptAge.toFixed(1)}일 stale\n` : ''}\n\n_이 파일은 leerness 1.9.38+가 자동 갱신합니다. session close 후 자동 삭제.\n_사용자가 이 파일을 보고 메인 에이전트에 reminder 전달 가능._\n`;
-              writeUtf8(remPath, body);
+              const body = `# 🔔 메인 에이전트용 자동 reminder\n\n_생성: ${new Date().toISOString()}_\n\n## drift critical 감지\n현재 워크스페이스의 메타파일이 매우 stale합니다. 이번 라운드 작업 끝에 반드시 다음 명령을 호출하세요:\n\n\`\`\`bash\nleerness session close .\n\`\`\`\n\n또는 상세 점검:\n\`\`\`bash\nleerness drift check .\n\`\`\`\n\nstale 신호:\n${shAge !== null ? `- session-handoff.md: ${shAge.toFixed(1)}일 stale\n` : ''}${ptAge !== null ? `- progress-tracker: ${ptAge.toFixed(1)}일 stale\n` : ''}\n\n_이 파일은 leerness 1.9.38+가 자동 갱신합니다. session close 후 자동 삭제.\n_사용자가 이 파일을 보고 메인 에이전트에 reminder 전달 가능._\n`;
+              writeUtf8(remPath, _autoReminderText(body));   // 1.36.104: 표식 줄에 본문 해시 — 사람이 고치면 청소 대상에서 빠진다
             } catch {}
           } else {
-            // attention 등급으로 회복했으면 reminder 파일 삭제
-            try {
-              const remPath = path.join(absR0, '.harness', 'agent-reminders.md');
-              if (exists(remPath)) fs.unlinkSync(remPath);
-            } catch {}
+            // attention 등급으로 회복했으면 reminder 파일 삭제 (자동 생성분에 한해)
+            _cleanAutoReminder(absR0);
           }
         } else {
-          // healthy → reminder 파일 자동 청소
-          try {
-            const remPath = path.join(absR0, '.harness', 'agent-reminders.md');
-            if (exists(remPath)) fs.unlinkSync(remPath);
-          } catch {}
+          // healthy → reminder 파일 자동 청소 (자동 생성분에 한해)
+          _cleanAutoReminder(absR0);
         }
       } catch {}
     }
@@ -24350,16 +24584,26 @@ function usageStatsCmd(root) {
   log(`since: ${stats.since || '(unknown)'} · last: ${stats.lastAt || '(none)'}`);
   log('');
   const entries = Object.entries(stats.commands || {}).sort((a, b) => b[1] - a[1]);
-  if (!entries.length) {
+  // 1.36.104: 이 자리의 이른 return 이 아래 MCP 섹션(1.9.70)을 **도달 불가**로 만들고 있었다.
+  //   MCP 로만 일하는 에이전트는 commands 가 늘 비어 있다(도구 호출은 stats.mcp.tools 에 기록된다) →
+  //   실제로 89개 도구를 돌린 프로젝트가 "사용 기록 없음" 이라고 보고했다(실측: mcp.tools 3건 기록됨에도).
+  //   쓰는 쪽과 읽는 쪽이 같은 파일의 다른 키를 보고 있었다 — 기록이 있으면 무엇이든 보여준다.
+  const _mcpTools = (stats.mcp && stats.mcp.tools) || {};
+  const _hasMcp = Object.keys(_mcpTools).length > 0;
+  if (!entries.length && !_hasMcp) {
     log('  (사용 기록 없음)');
     return;
   }
-  log(`| 명령 | 호출 수 |`);
-  log(`|---|---:|`);
-  for (const [cmd, n] of entries.slice(0, 30)) log(`| ${cmd} | ${n} |`);
-  const total = entries.reduce((s, [, n]) => s + n, 0);
-  log('');
-  log(`총 ${total} 회 호출 · 종류 ${entries.length} 가지`);
+  if (entries.length) {
+    log(`| 명령 | 호출 수 |`);
+    log(`|---|---:|`);
+    for (const [cmd, n] of entries.slice(0, 30)) log(`| ${cmd} | ${n} |`);
+    const total = entries.reduce((s, [, n]) => s + n, 0);
+    log('');
+    log(`총 ${total} 회 호출 · 종류 ${entries.length} 가지`);
+  } else {
+    log('  (CLI 명령 기록 없음 — 아래 MCP 호출 통계 참조)');
+  }
   if (stats.drift) {
     log('');
     log(`drift 통계: critical 발견 ${stats.drift.criticalSeen || 0} · skip ${stats.drift.skipped || 0} · 자동 해소 ${stats.drift.autoResolved || 0}`);
@@ -25328,7 +25572,10 @@ async function main() {
   if (!args[0] && process.argv.slice(2).some(a => a.startsWith('-'))) { help(); return; }
   // 1.9.38 (B): 사용 통계 카운터 — usage stats 명령 자체와 비차단 경로는 제외
   // 1.9.317 (UR-0051, 설치리뷰): 내부 auto-call(LEERNESS_INTERNAL=1) 은 usage 집계 제외 — 텔레메트리 오염(거짓 skill 추천) 방지.
-  if (process.env.LEERNESS_INTERNAL !== '1' && cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== '--version' && cmd !== '--help') {
+  // 1.36.104: 'mcp' 를 제외한다. MCP 서버는 프로젝트 명령이 아니라 상주 프로세스라, 서버의 cwd 가 우연히
+  //   leerness 프로젝트면 거기에 `mcp: N` 이 쌓였다 — 사용자가 그 프로젝트에서 쓴 적 없는 '명령' 이 통계에 뜬다
+  //   (실측: 대상 프로젝트는 "사용 기록 없음", 무관한 cwd 는 "총 3회 호출"). 도구별 귀속은 _bumpMcpUsage 가 이미 한다.
+  if (process.env.LEERNESS_INTERNAL !== '1' && cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== 'mcp' && cmd !== '--version' && cmd !== '--help') {
     try {
       // 1.9.352 (UR-0069 외부리뷰): usage 루트 — --path 우선, 없으면 args[1] 이 .harness 보유 디렉토리일 때만 path(positional 보존), 아니면 cwd. (이전: args[1] 무조건 path 가정 → subcommand[decision add 등] root=cwd/add → .harness 못 찾아 미집계)
       const _pathArg = arg('--path', null);

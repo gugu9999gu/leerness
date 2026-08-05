@@ -297,5 +297,29 @@
         "event": "approved"
       }
     ]
+  },
+  {
+    "id": "P-0014",
+    "title": "시크릿 스캐너 오경보 해소 — 알려진 가짜(픽스처/문서) 인정 기제",
+    "design": "gitleaks/detect-secrets 처럼 베이스라인 파일(.harness/secret-baseline.json)에 파일:줄:패턴 지문을 기록해 인정. 숨기지 않고 '인정됨'으로 분류만 하며, 헤드라인은 '미인정 N건'만 알린다. 지문이 바뀌면(내용 변경) 자동으로 다시 미인정.",
+    "features": [
+      "scan secrets --baseline(현 발견을 인정 기록)",
+      "scan secrets --json 에 acknowledged 분류 추가",
+      "handoff 헤드라인은 미인정 건수만",
+      "인정 항목도 --all 로 항상 열람 가능",
+      "지문 불일치 시 자동 재알림"
+    ],
+    "status": "approved",
+    "createdAt": "2026-08-05T13:09:20.055Z",
+    "history": [
+      {
+        "at": "2026-08-05T13:09:20.055Z",
+        "event": "proposed"
+      },
+      {
+        "at": "2026-08-05T13:25:43.251Z",
+        "event": "approved"
+      }
+    ]
   }
 ]
