@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.100';
+const VERSION = '1.36.101';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1593,7 +1593,21 @@ function skillInfo(name, root) {
   if ((v.optimizations || []).length) { log('Optimizations:'); v.optimizations.forEach(o => log(`- ${o.at}: ${o.note || ''}`)); }
 }
 
+// 1.36.101 (명령 표면 감사 P1): skill id 가 검증되지 않아 경로를 탈출했다. 실측 재현 —
+//   `skill remove "../../../../../victim"` → exit 0 · "✓ user skill removed" 와 함께 **프로젝트 밖 디렉토리를 재귀 삭제**.
+//   `skill learn "../.."` → 프로젝트 README.md 를 4,243바이트 → 125바이트로 덮어씀.
+//   id 는 사용자 입력이고 그대로 경로에 붙는다. 호출부마다 막으면 다음에 새 진입점에서 또 샌다 —
+//   id 를 쓰는 모든 함수가 통과하는 단일 병목에서 거부한다.
+const _SKILL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+function _badSkillId(id) {
+  if (typeof id !== 'string' || !id) return 'id required';
+  if (!_SKILL_ID_RE.test(id) || id.includes('..')) {
+    return `잘못된 skill id: ${JSON.stringify(id)} — 영숫자/./_/- 만 허용하며 경로 구분자와 '..' 는 쓸 수 없습니다`;
+  }
+  return null;
+}
 function skillLearn(root, id) {
+  { const e = _badSkillId(id); if (e) return fail(e); }
   if (!id) return fail('id required (e.g., skill learn open-meteo --command "..." --doc URL)');
   const docs = argAll('--doc');
   const command = arg('--command', null);
@@ -1617,6 +1631,7 @@ function skillLearn(root, id) {
 }
 
 function skillUse(root, id) {
+  { const e = _badSkillId(id); if (e) return fail(e); }
   if (!id) return fail('id required');
   let data = loadUserSkill(root, id);
   if (!data) {
@@ -1633,6 +1648,7 @@ function skillUse(root, id) {
 }
 
 function skillOptimize(root, id) {
+  { const e = _badSkillId(id); if (e) return fail(e); }
   if (!id) return fail('id required');
   let data = loadUserSkill(root, id);
   if (!data) {
@@ -1648,8 +1664,13 @@ function skillOptimize(root, id) {
 }
 
 function skillRemove(root, id) {
+  { const e = _badSkillId(id); if (e) return fail(e); }
   if (!id) return fail('id required');
   const dir = path.join(userSkillsDir(root), id);
+  // 이중 가드 — id 검증을 통과해도 삭제 대상이 skills 디렉토리 안인지 경로로 재확인한다(파괴적 작업이라 두 겹으로 막는다).
+  const base = path.resolve(userSkillsDir(root));
+  const target = path.resolve(dir);
+  if (target === base || !target.startsWith(base + path.sep)) return fail(`삭제 대상이 skills 디렉토리를 벗어남: ${id}`);
   if (!exists(dir)) return fail(`skill folder not found: ${id}`);
   // 1.9.66: 캐시 invalidate
   try { _SKILLS_LIST_CACHE.delete(absRoot(root)); } catch {}
@@ -4829,8 +4850,10 @@ function _selfTestCases() {
       return c2 && c3 && c4;
     } },
     { name: '외부클린룸 UR-0042: bare 명령그룹(rule/skill/feature/memory) → 사용법 힌트(unknown command 아님) (1.16.2)', run: () => {
-      const src = read(__filename);
-      return src.includes('const _GROUP_USAGE = {') && src.includes("if (_GROUP_USAGE[cmd] && !args[1])") && src.includes("'subcommand_required'");
+      // 1.36.101: 소스 grep 이던 것을 데이터/행위로 바꿨다 — 선언 이름이 바뀌자 이 가드가 허공을 가리켰고 메타가드가 잡았다.
+      //   지켜야 할 성질은 '그 변수명이 존재한다' 가 아니라 '네 그룹이 사용법 안내를 받는다' 이다.
+      return ['rule', 'skill', 'feature', 'memory'].every(c => typeof _GROUP_USAGE_KO[c] === 'string' && _GROUP_USAGE_KO[c].includes(c))
+        && read(__filename).includes("'subcommand_required'");
     } },
     { name: '17th 버그헌트 P2: plan add 공백제목 trim(기본값) + milestone 파서 개행 미흡수 (1.17.1)', run: () => {
       const src = read(__filename);
@@ -6175,7 +6198,8 @@ function _selfTestCases() {
         uiOk = uiOk && tp.refreshTechProfile(nextApp).changed === true
           && (JSON.parse(read(path.join(nextApp, '.harness', 'tech-profile.json'))).current.ui || []).some(u => u.id === 'tailwind');
       } catch { uiOk = false; } finally { try { fs.rmSync(tmp3, { recursive: true, force: true }); } catch {} }
-      return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved();
+      return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved()
+        && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk();
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -7645,6 +7669,158 @@ function _p0088CurrentStatePreserved() {
   const noEofWipe = !src.includes('cs.replace(/## Block' + 'ers');
   return preserved && idempotent && autoCount && noBlankRun && untouched && noEofWipe;
 }
+// 1.36.101 (명령 표면 감사): '있는데 안 보이는 명령' 과 '하위명령이 필요한데 알 수 없다고 답하는 명령' 을 기계가 막는다.
+//   실측 — 디스패처 126개 중 46개가 leerness commands 에 없었고, 그중 library(내가 1.36.98 에 넣은 것)는 --help 에도 없었다.
+//   그리고 readme/contract/self 같은 그룹 명령은 하위명령 없이 부르면 "알 수 없는 명령" 이라고 거짓으로 답했다.
+//   여기서 지키는 건 '전부 등재' 가 아니라 **핵심 사용자 명령이 최소 한 표면에는 보인다** 는 것이다 —
+//   내부 진입점(slash·usage·about 등)까지 강제하면 가드가 잡음이 되어 무시된다.
+const _SURFACE_MUST_LIST = ['library', 'lens', 'preview', 'task', 'plan', 'gate', 'audit', 'handoff', 'health', 'tech', 'toggle', 'verify-claim'];
+// 1.16.2 (외부클린룸 UR-0042): 유효 명령그룹을 하위명령 없이 부르면 'unknown command'(혼란) 대신 사용법 힌트.
+//   1.36.101: main() 안의 지역 변수였던 것을 모듈 스코프로 올렸다 — selftest 가 '두 맵의 키 집합이 같은가' 를
+//   데이터로 검사할 수 있어야 한다. 문자열 실행으로만 검사하면 --language en 이 프로젝트 밖에서 전환되지 않아
+//   en 맵이 무방비로 남는다(변이에서 en 항목을 지워도 통과했다 — 1.36.89·1.36.97 에 이은 같은 사각지대의 3회차).
+//   그리고 이 맵이 4개뿐이라 readme/contract/self 같은 그룹은 "알 수 없는 명령" 이라는 거짓 안내를 냈다 —
+//   readme 는 알 수 없는 명령이 아니라 `readme sync` 가 필요한 명령이다. 실행으로 전수 확인해 10개를 채웠다.
+const _GROUP_USAGE_KO = {
+  rule: 'rule add "<텍스트>" --trigger <트리거> | rule list | rule pause/resume/remove <ID> | rule verify',
+  skill: 'skill list | skill add <id> | skill use <id> | skill search "<키>" | skill match "<텍스트>"',
+  feature: 'feature add "<이름>" | feature list | feature show <ID> | feature link <A> <B> | feature impact <ID>',
+  memory: 'memory search "<키>" [--json] | memory status | memory archive | memory restore',
+  readme: 'readme sync [path]',
+  contract: 'contract verify <spec.md> <impl.js> [--json] [--allow-empty]',
+  self: 'self check [path]',
+  reuse: 'reuse autodetect [path] [--apply] [--json] | reuse find "<capability>"',
+  consistency: 'consistency check [path] | consistency merge-design-guide [path]',
+  mcp: 'mcp serve [--profile core|all]',
+  hook: 'hook install [path] | hook status',
+  'llm-bench': 'llm-bench record --score N --model X [--label L] [--tokens T]',
+  'auto-update': 'auto-update install [path] | auto-update status',
+  ui: 'ui check | ui open',
+};
+// 1.23.2 (UR-0010 Phase 7): 영어 자리표시자 병렬맵 — 키 집합은 ko 와 항상 같아야 한다(selftest 가 단언).
+const _GROUP_USAGE_EN = {
+  rule: 'rule add "<text>" --trigger <trigger> | rule list | rule pause/resume/remove <ID> | rule verify',
+  skill: 'skill list | skill add <id> | skill use <id> | skill search "<key>" | skill match "<text>"',
+  feature: 'feature add "<name>" | feature list | feature show <ID> | feature link <A> <B> | feature impact <ID>',
+  memory: 'memory search "<key>" [--json] | memory status | memory archive | memory restore',
+  readme: 'readme sync [path]',
+  contract: 'contract verify <spec.md> <impl.js> [--json] [--allow-empty]',
+  self: 'self check [path]',
+  reuse: 'reuse autodetect [path] [--apply] [--json] | reuse find "<capability>"',
+  consistency: 'consistency check [path] | consistency merge-design-guide [path]',
+  mcp: 'mcp serve [--profile core|all]',
+  hook: 'hook install [path] | hook status',
+  'llm-bench': 'llm-bench record --score N --model X [--label L] [--tokens T]',
+  'auto-update': 'auto-update install [path] | auto-update status',
+  ui: 'ui check | ui open',
+};
+const _SUBCOMMAND_GROUPS = Object.keys(_GROUP_USAGE_KO);
+function _p0101SurfaceOk() {
+  // 소스 grep 으로 하면 안 된다 — `const _GROUP_USAGE = {` 라는 문자열이 '다른 selftest 의 소스 가드' 안에도 있어서
+  //   슬라이스가 실제 선언 대신 그 리터럴을 집었다(자기참조 함정). 표면 검사는 실제 출력으로 한다.
+  const cp2 = require('child_process');
+  const run = (a) => { const r = cp2.spawnSync(process.execPath, [__filename, ...a], { encoding: 'utf8', timeout: 60000, env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1' }) }); return (r.stdout || '') + (r.stderr || ''); };
+  const cmdsOut = run(['commands']);
+  const helpOut = run(['--help']);
+  if (!cmdsOut || !helpOut) return false;                              // 셋업 실패를 통과로 세지 않는다
+  // ① 핵심 사용자 명령이 commands 목록에 실제로 보이는가(불릿 항목의 첫 토큰으로)
+  const listed = new Set();
+  for (const l of cmdsOut.split('\n')) { const m = /^\s*[•*\-•]\s+([a-z][\w-]*)\b/.exec(l); if (m) listed.add(m[1]); }
+  const listedOk = listed.size > 50 && _SURFACE_MUST_LIST.every(c => listed.has(c));   // size 가드: 파싱 실패 시 공허 통과 방지
+  // ② 하위명령 그룹을 인자 없이 부르면 '알 수 없는 명령' 이 아니라 사용법을 안내해야 한다(거짓 안내 금지)
+  //   지키는 성질은 '특정 문구' 가 아니라 **사용자를 오타 찾기로 보내지 않는 것** 이다 —
+  //   rule 처럼 자기 핸들러가 이미 좋은 안내("알 수 없는 rule 하위명령 — leerness rule add|list|…")를 내는 경우도 통과해야 한다.
+  //   문구를 고정하면 멀쩡한 안내를 결함으로 잡는다(실제로 그렇게 오탐했다).
+  const groupOk = _SUBCOMMAND_GROUPS.every(c => {
+    const o = run([c]);
+    const generic = new RegExp('알 수 없는 명령: ' + c.replace('-', '\\-') + '\\b').test(o) || new RegExp('Unknown command: ' + c.replace('-', '\\-') + '\\b').test(o);
+    const guides = /하위명령|subcommand/i.test(o);
+    return guides && !generic;
+  });
+  // ③ ko/en 병렬맵의 키 집합이 같은가 — 실행으로는 en 경로가 프로젝트 밖에서 전환되지 않아 무방비였다. 데이터로 단언한다.
+  const ko = Object.keys(_GROUP_USAGE_KO).sort().join(',');
+  const en = Object.keys(_GROUP_USAGE_EN).sort().join(',');
+  const parityOk = ko === en && Object.keys(_GROUP_USAGE_KO).length >= 14
+    && Object.values(_GROUP_USAGE_EN).every(v => !/[가-힣]/.test(v));   // en 맵에 한글이 새면 안 된다
+  return listedOk && groupOk && parityOk;
+}
+// 1.36.101 (명령 표면 감사 P1): skill id 경로 탈출 회귀 가드.
+//   실측 재현 — remove 는 프로젝트 밖 디렉토리를 재귀 삭제했고, learn 은 README(4,243B)를 125B 로 덮어썼다.
+//   판별식으로 검사한다: 탈출 id 는 전부 거부되고, 평범한 id 는 전부 통과해야 한다(한쪽만 재면 '전부 거부'도 통과한다).
+// 1.36.101 (명령 표면 감사): '없는 경로에 초록 보고' 클래스. 실측 — session-resume/pulse/round-history/milestones 는
+//   존재하지 않는 디렉토리에 exit 0 과 "✓ 비정상 종료 신호 없음 / R0 / 정상 운영 중" 을 냈다. 오타 하나가 안심 보고가 된다.
+//   같은 클래스를 UR-0136 에서 이미 한 번 스윕했는데(13981행 주석) 또 구멍이 남았다 —
+//   그래서 이번엔 목록을 테스트가 강제한다: 아래 명령들은 없는 경로에서 반드시 0이 아닌 exit 로 끝나야 한다.
+//   (init/update 처럼 '없는 경로를 만드는' 명령은 당연히 제외한다.)
+//   목록은 두 부류다: (A) 이번에 새로 막은 것(디스패처 가드) · (B) 원래 자기 가드를 갖고 있던 것.
+//   둘 다 '없는 경로 → 0 아닌 exit' 라는 같은 계약을 지켜야 하므로 함께 못박는다.
+const _PATH_STRICT_CMDS = [
+  // (A) 1.36.101 에서 새로 막은 것 — 전에는 없는 경로에 초록 보고를 냈다
+  ['pulse'], ['round-history'], ['milestones'], ['session-resume'], ['tech'], ['library'],
+  ['memory', 'status'], ['consistency', 'check'], ['env', 'check'], ['pre-wake-audit'], ['idempotency', 'audit'],
+  ['retro'], ['insights'], ['reuse-map'], ['py-check'], ['api-skill', 'list'],
+  // (B) 원래 지키고 있던 것 — 회귀 방지용(이쪽 메시지·로케일은 각 명령이 소유한다)
+  ['handoff'], ['health'], ['status'], ['audit'], ['gate'], ['lazy', 'detect'], ['scan', 'secrets'], ['encoding', 'check'], ['drift', 'check'],
+];
+function _p0101PathStrictOk() {
+  const os2 = require('os');
+  const bogus = path.join(os2.tmpdir(), 'leerness-no-such-dir-' + process.pid + '-zz');
+  if (exists(bogus)) return false;                                  // 셋업 전제가 깨지면 통과로 세지 않는다
+  const cp2 = require('child_process');
+  const bad = [];
+  //   가드는 디스패처 한 곳이라 26개를 다 띄우는 건 중복이고 selftest 를 13초 늘렸다(32s → 45.5s).
+  //   두 해석 형태(단일 토큰 / 쌍)와 '전에 실제로 뚫려 있던' 명령을 대표로 고른다 — 목록 자체는 정책 문서로 남긴다.
+  const _sample = [['pulse'], ['session-resume'], ['tech'], ['library'], ['memory', 'status'], ['env', 'check'], ['retro']];
+  for (const argv of _sample) {
+    const r = cp2.spawnSync(process.execPath, [__filename, ...argv, bogus], { encoding: 'utf8', timeout: 60000, env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1' }) });
+    if (r.status === 0) bad.push(argv.join(' '));
+  }
+  // 대조군: 같은 명령이 '정상 경로' 에서는 성공해야 한다(전부 실패시키는 구현으로도 위 단언은 통과한다)
+  const okDir = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-pathok-'));
+  let controlOk = false;
+  try {
+    fs.writeFileSync(path.join(okDir, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    cp2.spawnSync(process.execPath, [__filename, 'init', okDir, '--yes'], { encoding: 'utf8', timeout: 180000, env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1' }) });
+    const r = cp2.spawnSync(process.execPath, [__filename, 'health', okDir], { encoding: 'utf8', timeout: 60000, env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1' }) });
+    controlOk = r.status === 0;
+  } catch { controlOk = false; } finally { try { fs.rmSync(okDir, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
+  //   표본이 조용히 줄어들면 가드가 약해진 걸 모른다 — 목록/표본 크기도 함께 못박는다.
+  return bad.length === 0 && controlOk && _sample.length >= 7 && _PATH_STRICT_CMDS.length >= 20;
+}
+function _p0101SkillIdOk() {
+  const bad = ['../..', '../../../victim', '..\\..\\x', '/etc/passwd', 'C:\\Windows', 'a/b', 'a\\b', '.', '..', '.hidden', '', null, 'x'.repeat(65)];
+  const good = ['open-meteo', 'stripe', 'my_skill', 'v1.2.3', 'a', 'A-Z_0.9'];
+  const rejects = bad.every(v => !!_badSkillId(v));
+  const accepts = good.every(v => _badSkillId(v) === null);
+  // 술어만 시험하면 '배선' 이 빠진 걸 못 본다 — skillLearn 에서 호출을 지워도 통과했다(변이로 확인).
+  //   그리고 소스 grep 으로 이중가드를 확인하려 했더니 그 문자열이 이 가드 자신에 있어 자기참조로 통과했다(3회차).
+  //   그래서 실제로 명령을 돌려 '밖의 파일이 살아남는가' 를 본다.
+  const os2 = require('os');
+  const cp2 = require('child_process');
+  const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-skid-'));
+  let wiredOk = false;
+  try {
+    const victim = path.join(arena, 'victim');
+    fs.mkdirSync(victim, { recursive: true });
+    fs.writeFileSync(path.join(victim, 'KEEP.txt'), 'user data');
+    const proj = path.join(arena, 'a', 'b', 'proj');
+    fs.mkdirSync(proj, { recursive: true });
+    fs.writeFileSync(path.join(proj, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const R = (a) => cp2.spawnSync(process.execPath, [__filename, ...a], { cwd: proj, encoding: 'utf8', timeout: 180000, env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1' }) });
+    R(['init', proj, '--yes']);
+    const readmeBefore = exists(path.join(proj, 'README.md')) ? read(path.join(proj, 'README.md')).length : 0;
+    const rmDepth = Array(5).fill('..').join('/') + '/victim';
+    const r1 = R(['skill', 'remove', rmDepth]);
+    const r2 = R(['skill', 'learn', '../..', '--capability', 'boom']);
+    const readmeAfter = exists(path.join(proj, 'README.md')) ? read(path.join(proj, 'README.md')).length : 0;
+    const okId = R(['skill', 'learn', 'open-meteo', '--capability', 'weather']);   // 대조군: 평범한 id 는 여전히 동작
+    wiredOk = r1.status !== 0 && r2.status !== 0
+      && exists(path.join(victim, 'KEEP.txt'))                                     // 밖의 파일이 살아 있어야 한다
+      && readmeBefore > 0 && readmeAfter === readmeBefore                          // README 가 그대로여야 한다
+      && okId.status === 0;
+  } catch { wiredOk = false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
+  return rejects && accepts && wiredOk;
+}
 function _lensDomainList() { return Object.keys(LENS_CATALOG).join('|'); }
 // 1.36.97: 완료 검증의 인라인 렌즈 줄은 '목차'다 — 본문이 아니다.
 //   심화 문항은 한 문단이라 통째로 찍으면 80칸에서 한 축이 3~4줄을 먹는다(검수 실측: advisory 블록이 8줄 → 15줄).
@@ -8006,6 +8182,8 @@ function commandsCmd(root) {
       { cmd: 'lazy detect [path] [--json]', desc: '게으른 작업 감지 (1.9.101)' },
       { cmd: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<명령>"] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --all: 모든 done 주장 일괄 검증(CI·스케일, 1.33.2) · --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287) · --test-cmd: 비-JS 테스트 명령 (1.17.2)' },
       { cmd: `lens [${_lensDomainList()}] [--json]`, desc: '분야별 자기질문 품질 렌즈 + 분야간 인과관계 (1.18.3 · database/contract/recovery/observability 는 심화, axes 는 8축 경량 점검)' },
+      // 1.36.101 (명령 표면 감사): 1.36.98 에서 디스패처에만 붙이고 commands/--help 에 등재하지 않아 '있는데 안 보이는' 명령이었다.
+      { cmd: 'library [show|page] [path] [--json] [--ai]', desc: '재사용 인벤토리 — 컴포넌트·디자인 토큰을 저장소에서 추출. page: 오프라인 단일 HTML · --ai: 에이전트용 압축 JSON (1.36.98 P-0013)' },
       { cmd: 'optimism-check <T-ID>', desc: '낙관적 API 감지 (1.9.26)' },
       { cmd: 'requests audit|list|complete|drop|auto-complete', desc: '사용자 요청 추적 (1.9.207/223)' },
       { cmd: 'pre-wake-audit [path] [--last]', desc: 'sleep 전 점검 (1.9.209)' },
@@ -8071,6 +8249,9 @@ function commandsCmd(root) {
       { cmd: 'migrate --guide', desc: 'AI 에이전트용 크로스버전 마이그레이션 가이드 (1.9.355)' },
       { cmd: 'doctor [--json]', desc: '설치/환경 진단 (1.9.315)' },
       { cmd: 'selftest [--json]', desc: '코어 함수 무결성 자가 검증 (1.9.258)' },
+      // 1.36.101 (명령 표면 감사): 둘 다 실행되고 문서에도 있는데 이 목록에만 없었다 — '있는데 안 보이는 명령'.
+      { cmd: 'gate [path]', desc: 'CI 한 번 호출 게이트 — verify + audit + scan + encoding + lazy' },
+      { cmd: 'toggle get|set|list <기능> [on|off]', desc: '기능 토글 (gate/lens/auto-graph/delegation-brief) — leerness.html ⚙ 탭과 연동 (1.36.30)' },
       { cmd: 'install-safety [--json]', desc: '설치 안전 프로필 — 0 deps/0 install-script (1.9.359)' },
       { cmd: 'env check|sync|detect [path]', desc: '셸/인코딩 환경 진단 (1.9.241)' },
       { cmd: 'shell-guard "<command>"', desc: '셸 호환성 정적 분석 (1.9.260)' },
@@ -24679,6 +24860,7 @@ VERIFICATION (evidence-gated "done")
   verify-code [path] [--build] [--bench]          Run tests/lint/typecheck, record evidence
   gate [path]                     One-call CI gate: verify + audit + scan + encoding + lazy
   lens [${_lensDomainList()}] [--json]  Quality self-question lenses
+  library [show|page] [path] [--json] [--ai]      Reusable inventory (components + design tokens) — page: offline HTML, --ai: compact JSON
 
 SECURITY & HYGIENE
   scan secrets [path]             Committed-secret detection
@@ -24740,7 +24922,7 @@ function help() {
   // 1.23.1 (UR-0010 Phase 6): 영어 opt-in 시 큐레이트 영어판. 기본(ko) 은 아래 한국어 help 그대로.
   if (_uiLang(arg('--path', process.cwd())) === 'en') { _helpEn(); return; }
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/agy/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합
-  leerness lens [${_lensDomainList()}] [--json]   # 1.18.3/1.36.97 분야별 자기질문 품질 렌즈 (database·contract·recovery·observability 심화 · axes 8축 경량 — 완료 선언 전 자가 점검)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  leerness lens [${_lensDomainList()}] [--json]   # 1.18.3/1.36.97 분야별 자기질문 품질 렌즈 (database·contract·recovery·observability 심화 · axes 8축 경량 — 완료 선언 전 자가 점검)\n  leerness library [show|page] [path] [--json] [--ai]   # 1.36.98 재사용 인벤토리 — 컴포넌트·디자인 토큰 추출 (page: 오프라인 HTML · --ai: 에이전트용 압축)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -24773,6 +24955,34 @@ async function main() {
     return log(VERSION);
   }
   if (has('--help') || has('-h')) return help();
+  // 1.36.101 (명령 표면 감사): '없는 경로에 초록 보고' 클래스를 디스패처 한 곳에서 막는다.
+  //   실측 — 32개 조사 대상 중 16개가 존재하지 않는 디렉토리에 exit 0 과 정상 보고를 냈다
+  //   (pulse/round-history/milestones/session-resume 는 "✓ 비정상 종료 신호 없음 · R0 · 정상 운영 중" 까지 찍었다 — 오타가 안심 보고가 된다).
+  //   같은 클래스를 UR-0136 에서 이미 한 번 스윕했는데 절반이 남아 있었다. 명령마다 고치면 다음 명령에서 또 빠지므로
+  //   경로 해석 방식(--path / positional / _resolveRoot)이 제각각인 것을 여기서 한 번에 검사한다.
+  //   '없는 경로를 만드는' 명령(init/migrate/update 등)은 대상에서 제외한다 — 그쪽은 부재가 정상 입력이다.
+  {
+    //   대상은 '실제로 뚫려 있던 것' 만이다. 이미 자기 가드를 가진 명령(handoff/health/status/scan secrets/...)까지 넣었더니
+    //   그쪽의 고유 메시지와 en 로케일을 가로채 기존 e2e 4건이 깨졌다 — 고쳐야 할 것만 고친다.
+    //   (scan secrets 처럼 '파일 경로' 가 정상 입력인 명령도 있어, 디렉토리 강제는 그 명령들엔 맞지 않는다.)
+    const _strict = new Set(['pulse', 'round-history', 'milestones', 'session-resume',
+      'tech', 'library', 'retro', 'insights', 'reuse-map', 'py-check', 'pre-wake-audit']);
+    const _strictPair = { memory: 'status', consistency: 'check', env: 'check', idempotency: 'audit', 'api-skill': 'list' };
+    const _isStrict = _strict.has(cmd) || (_strictPair[cmd] && args[1] === _strictPair[cmd]);
+    if (_isStrict) {
+      // 사용자가 '경로를 명시했을 때만' 검사한다 — 미지정(cwd)은 항상 존재하므로 검사할 것이 없다.
+      const _explicit = arg('--path', null) || [args[1], args[2]].find(a => a && !a.startsWith('-') && a !== _strictPair[cmd]);
+      if (_explicit) {
+        const _abs = absRoot(_explicit);
+        if (!exists(_abs) || !fs.statSync(_abs).isDirectory()) {
+          // 로케일을 붙인다 — en 프로젝트에서 이 가드만 한국어를 내면 그 자체가 i18n 누수다.
+          const _en = _uiLang(_abs) === 'en' || _uiLang(process.cwd()) === 'en';
+          failJson(has('--json'), 'path_not_found', _en ? `path not found or not a directory: ${_abs}` : `경로 없음 또는 디렉토리 아님: ${_abs}`);
+          return;
+        }
+      }
+    }
+  }
   // 1.13.1 (15th 블라인드 리뷰 P1, codex gpt-5.5): 무명령 + 옵션만(예: leerness --json) 은 묵시적 init 쓰기를 하지 않음 — cwd 에 .harness 가 의도치 않게 생성되던 부작용 차단. 명시 명령 없이 옵션만이면 help (bare leerness 온보딩 init 은 유지).
   if (!args[0] && process.argv.slice(2).some(a => a.startsWith('-'))) { help(); return; }
   // 1.9.38 (B): 사용 통계 카운터 — usage stats 명령 자체와 비차단 경로는 제외
@@ -25347,20 +25557,9 @@ async function main() {
   // 1.9.306 (UR-0045): 명시적 help 요청은 exit 0, 그 외 미인식 명령은 안내 + exit 1 (실패를 성공으로 오판 방지).
   if (cmd === 'help' || cmd === 'commands' || cmd === '--help' || cmd === '-h') { help(); return; }
   // 1.16.2 (외부클린룸 UR-0042): 유효 명령그룹을 하위명령 없이 부르면 'unknown command'(혼란) 대신 사용법 힌트 — decision/lesson 과 일관.
-  const _GROUP_USAGE = {
-    rule: 'rule add "<텍스트>" --trigger <트리거> | rule list | rule pause/resume/remove <ID> | rule verify',
-    skill: 'skill list | skill add <id> | skill use <id> | skill search "<키>" | skill match "<텍스트>"',
-    feature: 'feature add "<이름>" | feature list | feature show <ID> | feature link <A> <B> | feature impact <ID>',
-    memory: 'memory search "<키>" [--json] | memory status | memory archive | memory restore',
-  };
-  // 1.23.2 (UR-0010 Phase 7): 영어 자리표시자 병렬맵 — ko 맵은 불변(e2e 안전), en 은 <text>/<trigger>/<key>/<name>.
-  const _GROUP_USAGE_EN = {
-    rule: 'rule add "<text>" --trigger <trigger> | rule list | rule pause/resume/remove <ID> | rule verify',
-    skill: 'skill list | skill add <id> | skill use <id> | skill search "<key>" | skill match "<text>"',
-    feature: 'feature add "<name>" | feature list | feature show <ID> | feature link <A> <B> | feature impact <ID>',
-    memory: 'memory search "<key>" [--json] | memory status | memory archive | memory restore',
-  };
-  if (_GROUP_USAGE[cmd] && !args[1]) { const _gu = _uiLang(arg('--path', process.cwd())) === 'en' ? `${cmd} subcommand required — usage: leerness ${_GROUP_USAGE_EN[cmd]}` : `${cmd} 하위명령 필요 — 사용법: leerness ${_GROUP_USAGE[cmd]}`; failJson(has('--json'), 'subcommand_required', _gu); return; }
+  //   1.36.101: 두 맵을 모듈 스코프(_GROUP_USAGE_KO/_EN)로 올려 selftest 가 '키 집합이 같은가' 를 데이터로 검사한다.
+  //   문자열 실행으로만 검사하면 --language en 이 프로젝트 밖에서 전환되지 않아 en 맵이 무방비로 남는다(변이로 확인).
+  if (_GROUP_USAGE_KO[cmd] && !args[1]) { const _gu = _uiLang(arg('--path', process.cwd())) === 'en' ? `${cmd} subcommand required — usage: leerness ${_GROUP_USAGE_EN[cmd]}` : `${cmd} 하위명령 필요 — 사용법: leerness ${_GROUP_USAGE_KO[cmd]}`; failJson(has('--json'), 'subcommand_required', _gu); return; }
   // 1.9.437 (11th 외부평가 Codex P2, UR-0138): --json 모드 unknown command 도 순수 JSON.
   failJson(has('--json'), 'unknown_command', `알 수 없는 명령: ${cmd}  (leerness --help 로 전체 명령 확인)`);
   return;
