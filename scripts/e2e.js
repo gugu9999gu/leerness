@@ -9623,6 +9623,133 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.103 A: 값-플래그의 값이 사용자 데이터/경로로 흡수되지 않는다.
+//   허용목록이 소비자보다 45개 뒤처져 있었고, 같은 클래스의 목록이 다섯 벌로 갈라져 각자 따로 뒤처졌다.
+//   실측 재현: `preview add "제목" --select X` → 저장 제목 「제목 X」 · `review --persona security f.js` → 파일이 "security".
+{
+  total++;
+  let ok = false; const dbg = {};
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fl103-'));
+  const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 120000 });
+  const out = (r) => (r.stdout || '') + (r.stderr || '');
+  try {
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'fl', version: '0.1.0' }));
+    fs.writeFileSync(path.join(d, 'sample.js'), 'function f(){ return 1; }\n');
+    R(['init', d, '--yes']);
+    const allText = () => { let s = ''; (function w(y) { for (const e of fs.readdirSync(y, { withFileTypes: true })) { const p = path.join(y, e.name); if (e.isDirectory()) { if (!/node_modules|\.git$/.test(e.name)) w(p); } else { try { s += fs.readFileSync(p, 'utf8'); } catch {} } } })(d); return s; };
+    R(['preview', 'add', 'cart page', '--select', 'ZZA1']);
+    R(['task', 'add', 'do work', '--priority', 'ZZA2']);
+    R(['requests', 'add', 'add mode', '--summary', 'ZZA3']);
+    const txt = allText();
+    dbg.absorbed = ['ZZA1', 'ZZA2', 'ZZA3'].filter(m => txt.includes(m));
+    // 제품이 스스로 안내하는 문법(persona list 의 "leerness review <file> --persona <id>")은 순서와 무관해야 한다
+    const rev = R(['review', '--persona', 'security', 'sample.js']);
+    dbg.revOk = rev.status === 0 && /sample\.js/.test(rev.stdout || '');
+    // 오타는 조용히 삼키지 않고 stderr 로 알린다 — 판별 대조군: 실재 플래그엔 침묵
+    const W = /알 수 없는 플래그|Unknown flag/;
+    dbg.typoWarns = W.test(R(['task', 'add', 'x', '--prio', 'high']).stderr || '');
+    dbg.realQuiet = !W.test(R(['task', 'list', '--json']).stderr || '') && !W.test(R(['audit', '--no-secret-scan']).stderr || '');
+    // 경고가 stdout/JSON 을 오염시키지 않는다
+    const jr = R(['pulse', '--json', '--nosuchflagzz']);
+    let jsonOk = false; try { JSON.parse((jr.stdout || '').trim()); jsonOk = true; } catch {}
+    dbg.jsonOk = jsonOk && !W.test(jr.stdout || '');
+    // 등호형(--flag=value)이 다음 토큰까지 먹지 않는다 — 인라인 목록을 공유 집합으로 바꾸며 내가 만든 회귀(codex 검수 #5~#8)
+    R(['preview', 'add', '--select=ZZEQ', 'equals title']);
+    const pvp = path.join(d, '.harness', 'previews.json');
+    const pvt = fs.existsSync(pvp) ? fs.readFileSync(pvp, 'utf8') : '';
+    dbg.equals = pvt.includes('equals title') && !pvt.includes('ZZEQ');
+    const rEq = R(['agents', 'route', '--tier=normal', 'fix the parser']);
+    dbg.equalsRoute = !/비어 있|empty_task/.test((rEq.stdout || '') + (rEq.stderr || ''));
+    // 동적 레지스트리(brief set 은 arg('--'+f.flag))에 오탐 경고 없음 + 진짜 오타는 경고(판별 대조군)
+    dbg.dynamic = !W.test((R(['brief', 'set', '--intro', 'hello']).stderr) || '') && W.test((R(['brief', 'set', '--introo', 'x']).stderr) || '');
+    ok = dbg.absorbed.length === 0 && dbg.revOk && dbg.typoWarns && dbg.realQuiet && dbg.jsonOk
+      && dbg.equals && dbg.equalsRoute && dbg.dynamic;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ A(1.36.103) 값-플래그 흡수 차단(제목/경로) + 등호형 무흡수 + 동적 레지스트리 무오탐 + 오타만 stderr 경고 + JSON 무오염'
+    : '✗ 1.36.103 플래그 계약 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// ── 1.36.103 B: --json 은 실패해도 stdout 에 파싱 가능한 JSON 하나를 남긴다.
+//   위반 5건이 서로 다른 이유였다 — 경고가 stdout 선점 / 실패 분기에 JSON 없음 / 출력을 삼키는 구간에서 표식만 서서 폴백 차단.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-js103-'));
+  const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 180000 });
+  try {
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'js', version: '0.1.0' }));
+    R(['init', d, '--yes']);
+    const J = (a) => { const r = R(a); const t = ((r.stdout) || '').trim(); let j = null; try { j = JSON.parse(t); } catch {} return { r, j, empty: !t }; };
+    const g = J(['gate', 'no-such-gate', '--json']);
+    const rc = J(['release', 'cleanup', '--json']);
+    const inc = J(['reuse-map', '--include', 'no-such-project-zz', '--json']);
+    dbg.gate = !!g.j && g.j.ok === false && !g.empty;
+    dbg.release = !!rc.j && rc.j.code === 'not_a_git_repo';
+    dbg.include = !!inc.j;
+    // 대조군 — 성공 경로에 폴백이 끼어들면 "항상 ok:false" 로도 통과한다
+    const p = J(['pulse', '--json']);
+    dbg.success = p.r.status === 0 && !!p.j && p.j.ok !== false && p.j.version !== undefined;
+    // --keep 은 준 값을 조용히 바꾸지 않는다 (0 은 유효, abc/-3 은 거부)
+    const kb = J(['release', 'cleanup', '--keep', 'abc', '--json']);
+    const kn = J(['release', 'cleanup', '--keep', '-3', '--json']);
+    const ki = J(['init', path.join(d, 'KEEPTEST'), '--yes', '--keep', 'abc', '--json']);   // 소비처 둘이 서로 다르게 굴던 것(codex 검수 #9)
+    const k0 = J(['release', 'cleanup', '--keep', '0', '--json']);                          // 대조군: 0 은 유효
+    dbg.keep = !!kb.j && kb.j.code === 'invalid_keep' && !!kn.j && kn.j.code === 'invalid_keep'
+      && !!ki.j && ki.j.code === 'invalid_keep' && !!k0.j && k0.j.code !== 'invalid_keep';
+    // 개별 케이스가 아니라 계약을 건다 — 표면을 훑어 "stdout 은 언제나 JSON 문서 하나" 를 단언한다.
+    //   여기 셋(consistency check · agent-mode tick · graph)은 --json 구현 자체가 없어 사람용 텍스트를 냈다
+    //   (게시된 1.36.102 에서 3/30 위반으로 확인 → 구현 후 0/30).
+    const SWEEP = [
+      ['consistency', 'check', '--json'], ['agent-mode', 'tick', '--json'], ['graph', '--json'],
+      ['anchors', '--json'], ['capabilities', '--json'], ['verify', '--json'], ['status', '--json'],
+      ['enforce', 'status', '--json'], ['constraints', 'list', '--json'], ['next-action', 'list', '--json'],
+    ];
+    const swept = SWEEP.map(a => ({ a, r: J(a) })).filter(x => !x.r.j);
+    dbg.sweepBad = swept.map(x => x.a.join(' '));
+    ok = dbg.gate && dbg.release && dbg.include && dbg.success && dbg.keep && swept.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ B(1.36.103) --json 실패 경로 3종이 유효 JSON + 성공 경로 무간섭(대조군) + --keep 값 무시 금지 + 10표면 스윕'
+    : '✗ 1.36.103 JSON 계약 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// ── 1.36.103 C: 검증한 경로를 실제로 쓴다 + 하위명령을 경로로 오인하지 않는다.
+//   1.36.101 의 path-strict 가 args[1] 을 무조건 경로로 봐서 `leerness library page` 를 거부했고(게시된 1.36.102
+//   에서 확인), 같은 두 명령이 root 해석은 index 2 부터 시작해 검증된 경로를 건너뛰고 cwd 에 썼다.
+//   관측값은 파일시스템이다 — 문구가 아니라 '어디에 썼는지'.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rt103-'));
+  try {
+    const cwdDir = path.join(arena, 'CWDPROJ'), target = path.join(arena, 'TARGETPROJ');
+    for (const x of [cwdDir, target]) { fs.mkdirSync(x, { recursive: true }); fs.writeFileSync(path.join(x, 'package.json'), '{"name":"x","version":"0.1.0"}'); }
+    const R = (a, cwd) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: cwd || cwdDir, encoding: 'utf8', timeout: 120000 });
+    R(['init', cwdDir, '--yes'], cwdDir); R(['init', target, '--yes'], target);
+    const tp = (x) => path.join(x, '.harness', 'tech-profile.json');
+    const clear = (...ps) => { for (const p of ps) { try { fs.unlinkSync(p); } catch {} } };
+    clear(tp(cwdDir), tp(target)); R(['tech', target]);
+    dbg.wroteTarget = fs.existsSync(tp(target)) && !fs.existsSync(tp(cwdDir));
+    clear(tp(cwdDir), tp(target)); R(['tech']);
+    dbg.bareIsCwd = fs.existsSync(tp(cwdDir)) && !fs.existsSync(tp(target));
+    const htmlC = path.join(cwdDir, 'leerness-library.html'), htmlT = path.join(target, 'leerness-library.html');
+    clear(htmlC, htmlT);
+    R(['library', 'page']); dbg.pageBare = fs.existsSync(htmlC);
+    R(['library', 'page', target]); dbg.pageWithPath = fs.existsSync(htmlT);
+    const lo = (R(['library', target]).stdout) || '';
+    dbg.libTarget = lo.includes('TARGETPROJ') && !lo.includes('CWDPROJ');
+    // 좁히면서 false-PASS 를 만들지 않았는가 — 맨이름 오타는 여전히 거부
+    dbg.typo = R(['library', 'NOPEZZ']).status !== 0 && R(['tech', 'NOPEZZ']).status !== 0;
+    // 1.36.101 무회귀 — 경로형 오타는 그대로 거부
+    dbg.strictKept = R(['pulse', path.join(arena, 'NOPE-zz')]).status !== 0 && R(['library', './NOPE-zz']).status !== 0;
+    ok = dbg.wroteTarget && dbg.bareIsCwd && dbg.pageBare && dbg.pageWithPath && dbg.libTarget && dbg.typo && dbg.strictKept;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ C(1.36.103) 준 경로에 적용(파일시스템 관측) + library page 회귀 수리 + 오타 거부 유지(1.36.101 무회귀)'
+    : '✗ 1.36.103 root/하위명령 계약 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

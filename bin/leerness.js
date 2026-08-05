@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.102';
+const VERSION = '1.36.103';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -236,9 +236,49 @@ function _resolveRoot(positional) {
   if (positional && !String(positional).startsWith('-')) return positional;
   return process.cwd();
 }
+// 1.36.103: 값-플래그 목록이 자기 소비자보다 45개 뒤처져 있었다.
+//   미등록 값-플래그는 토큰만 건너뛰고 **값이 positional 로 떨어져** 사용자 데이터를 오염시킨다. 실측:
+//     leerness preview add "my page" --select ZZ   → 저장된 제목 「my page ZZ」
+//     leerness review --persona security sample.js → "✗ 파일 없음: <cwd>\security" (값이 파일 경로로 소비)
+//   같은 사고가 개별 등록으로 네 번 반복됐다 — --done-when(1.14.2) · --test-cmd(1.17.2) ·
+//   --require-referee(1.36.82, "툴이 안내하는 문법 그대로 쓰면 깨졌다") · 1.36.80/81 소급.
+//   목록에 한 줄 더 넣는 대신 구조를 바꾼다: 목록을 모듈 스코프로 올려 selftest 가 소비자(arg('--x'))와
+//   대조해 **완전성을 강제**하고(누락 시 게이트 실패), 어느 집합에도 없는 플래그는 오타로 보고 stderr 로 알린다.
+//   동작은 바꾸지 않는다 — 미분류 부울 리터럴이 47개 남아 있어 '모르는 플래그의 값을 건너뛰기' 로 기본값을
+//   뒤집으면 그쪽에서 positional 을 삼키는 새 회귀가 난다(가드는 false-BLOCK 이 아니라 false-PASS 쪽으로).
+const _VALUE_FLAGS = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--to','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when','--test-cmd','--require-referee','--referee','--expect-bad','--good','--bad','--static-dir','--dev-url','--repro','--root-cause','--siblings','--siblings-na','--previous-gap',
+  // 1.36.103 일괄 등록 — 소스의 arg()/argAll() 소비자에서 기계 추출한 미등록 45종(각각이 위 사고와 같은 오염 지점이었다)
+  '--alias','--bin','--cmd','--constraint','--desc','--design','--direction','--emit','--env-flag','--exit','--features','--file','--github','--in','--install-hint','--kind','--lang','--max','--measure','--min','--mockup','--name','--npm-otp','--npm-tag','--ollama-url','--persona','--preset','--presets','--profile','--project','--result','--scenario','--select','--selector','--source','--summary','--task','--text','--tier','--url','--version-args','--where','--window','--x','--y',
+  // bin/ 만 훑었을 때 놓친 lib/*.js 소비자 — 특히 --priority 는 _TASK_VALUE_FLAGS 에만 있고 여기 없어 값이 제목에 붙었다
+  '--files-changed','--files-read','--members','--only','--personas','--priority','--purpose','--schedule',
+  // --approved-by 는 `agents route` 가 값으로 쓴다(자체 인라인 목록에만 있었다) — 부울로 오분류하면 값이 토큰으로 샌다.
+  // --title 도 같다(_TASK_VALUE_FLAGS 소속). 둘 다 완전성 가드가 잡아냈다 — 손으로 분류한 것은 손으로 틀린다.
+  '--approved-by', '--title']);
+// 1.36.103 (codex 검수 #10/#11): `brief set` 은 플래그를 정적 리터럴이 아니라 레지스트리에서 만든다
+//   (`arg('--' + f.flag)`). 정적 추출로는 보이지 않아 `brief set --intro hello` 가 "알 수 없는 플래그" 오탐을 냈다.
+//   손으로 10개를 베껴 적으면 그 목록이 또 뒤처진다 — 레지스트리에서 **유도**한다(이 라운드의 요지 그대로).
+for (const _bf of _BRIEF_FIELDS) { if (_bf && _bf.flag) _VALUE_FLAGS.add('--' + _bf.flag); }
+// 부울 플래그(값 없음) — 오타 경고의 대조군. 여기 있거나 _VALUE_FLAGS 에 있으면 '실재하는 플래그' 로 본다.
+//   판정에만 쓰이고 파싱 동작에는 관여하지 않으므로, 넓게 잡아도 안전하다(과다 포함 = 경고 억제).
+const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--all-presets','--allow-empty','--allow-unrelated','--apply','--audit','--auto','--auto-apply-delivered','--auto-cleanup-branches','--auto-fix','--auto-fix-bom','--auto-fix-encoding','--auto-main-push','--auto-recover','--auto-track','--banner','--bench','--build','--bundle-only','--claims','--close','--compact','--detect','--dry-run','--dry-run-npm','--embedding','--enforce','--fail-on-candidates','--fail-on-violation','--force','--gh-pages','--gh-release','--git-push','--global','--guide','--help','--html','--include-code','--interactive','--json','--last','--lenient','--major','--minimal','--minor','--no-animate','--no-auto-roadmap','--no-auto-update','--no-banner','--no-brainstorm-hits','--no-cache','--no-context-inject','--no-crawl','--no-drift-check','--no-enforce','--no-env','--no-env-detect','--no-feature-impact','--no-headline','--no-init-check','--no-interactive-select','--no-lazy-warn','--no-lessons','--no-longterm-recall','--no-mem-delta','--no-multiagent-hint','--no-next-actions','--no-npm','--no-official-skills','--no-on-every-change','--no-pre-wake','--no-preserve-link','--no-readme-sync','--no-record','--no-repl','--no-review','--no-save','--no-security-check','--no-security-summary','--no-setup-agents','--no-skill-suggest','--no-stale-check','--no-suggest','--no-synonyms','--no-team-reminders','--no-wakeup-miss','--no-workflow-guide','--no-write','--npm-publish','--offline','--on-every-change','--pack','--parent-migrate','--publish-npm','--pulse','--quiet','--record','--refresh','--remove','--repair','--repl','--require-evidence','--run-tests','--skeleton','--strict','--strict-claims','--strict-elements','--strict-exit','--suggest','--version','--yes',
+  // 소스에 리터럴로만 존재해 소비 형태를 기계 추출하지 못한 것들 — 실재하는 플래그이므로 오타로 오인하면 안 된다
+  '--commands','--decision','--errors','--expand-all','--fix','--list','--notes','--print','--raw','--select-all','--skip-git-repo-check','--tests','--verbose','--yolo',
+  // lib/*.js 의 부울 소비자 — bin/ 만 훑었다면 `agents route --confirm` 같은 실재 문법에 오탐 경고를 냈을 것이다
+  '--confirm','--dispatch','--execute','--ladder','--log','--multi','--no-env-check','--no-feature-check','--no-gitignore-check','--no-npm-audit','--no-secret-scan','--readonly','--write']);
+// 1.36.103: 하위명령이 '선택' 인 명령에서 `<cmd> <경로>` 의 경로가 하위명령 자리로 읽히던 것 차단.
+//   tech/library 는 경로가 args[1] 인데 root 해석이 _taskPositionalPath(args, 2) 로 한 칸 늦게 시작해
+//   positional 을 통째로 건너뛰고 cwd 에 썼다(실측: `tech <TARGET>` 이 CWD 에 tech-profile.json 생성).
+//   더 나쁜 건 1.36.101 path-strict 가드가 그 경로의 존재를 **검증해 준 뒤** 버렸다는 것이다 —
+//   도구가 "그 경로 맞다" 고 확인하고 다른 곳에 쓴다. 경로형 토큰이면 하위명령이 아니라고 본다.
+function _optSub(a) {
+  const v = a && a[1];
+  if (typeof v !== 'string' || !v) return undefined;
+  if (/^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(v)) return undefined;   // 선행 구분자 path-like → 하위명령 아님
+  return v;
+}
 function nonFlagArgs() {
   const out = [];
-  const withValue = new Set(['--language','--skills','--path','--status','--progress','--goal','--reason','--next','--target','--token-env','--package','--out','--from','--to','--repo','--id','--note','--evidence','--query','--limit','--action','--agent','--tool','--doc','--command','--capability','--before','--after','--display','--threshold','--trigger','--check','--set','--min-score','--include','--days','--gh-pages-src','--roadmap','--since','--agents','--model','--timeout','--retry-on-fail','--label','--score','--tokens','--alternatives','--impact','--tag','--surface','--depends-on','--affects','--co-changes-with','--files','--branch','--remote','--task-add','--next-action','--role','--provider','--env-var','--deploy','--token-lifetime-hours','--port','--secret','--keep','--shell','--ps-version','--done-when','--test-cmd','--require-referee','--referee','--expect-bad','--good','--bad','--static-dir','--dev-url','--repro','--root-cause','--siblings','--siblings-na','--previous-gap']);  // 1.14.2 (UR-0032): --done-when 값이 positional 로 누출돼 milestone 제목에 흡수되던 것 차단. 1.17.2 (UR-0045): --test-cmd 동일 원칙(신규 value-flag 는 반드시 여기 등록). 1.36.82 (검수 High#3): --require-referee 미등록으로 `gate --require-referee <id>` 의 값이 positional 경로로 흡수돼 root 가 <cwd>/<id> 가 됐다 — 툴이 안내하는 문법 그대로 쓰면 깨졌다. 1.36.80/81 신규 value-flag 도 소급 등록.
+  const withValue = _VALUE_FLAGS;
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
@@ -868,7 +908,15 @@ function createBackup(root, reason, files, dry = false) {
     candidates
   }, null, 2) + '\n');
   // CV-4/UR-0079: 새 스냅샷 기록 후 retention 적용 (기본 10, --keep N 조정) — 무한 누적 차단.
-  const keep = Math.max(1, parseInt(arg('--keep', '10'), 10) || 10);
+  // 1.36.103: 여기도 `|| 10` 이라 --keep 0 이 조용히 10 이 됐다. 유효하지 않은 값은 기본값을 쓰되 그렇다고 말하고,
+  //   0(=직전에 쓴 스냅샷만 남김)은 최소 1 로 고정한다 — 방금 만든 백업까지 지우는 것은 이 명령의 의도가 아니다.
+  const _keepRaw = arg('--keep', null);
+  let keep = 10;
+  if (_keepRaw !== null) {
+    const n = Number(_keepRaw);
+    if (!Number.isInteger(n) || n < 0) warn(`--keep 무시: 0 이상의 정수가 아닙니다 (받은 값: ${_keepRaw}) — 기본 10 적용`);
+    else keep = Math.max(1, n);
+  }
   const pruned = _pruneArchives(root, keep);
   return { archiveDir: ar, candidates, pruned };
 }
@@ -2674,6 +2722,17 @@ function agentModeCmd(root, sub) {
   }
   if (sub === 'tick') {
     // 가벼움 우선 — pulse 만 호출
+    // 1.36.103: --json 일 때 헤더 문구 + 사람용 pulse 출력을 그대로 흘려 stdout 이 파싱 불가였다(게시본 동일).
+    //   tick 은 pulse 의 얇은 래퍼이므로 자식에게 --json 을 넘겨 그 페이로드를 그대로 통과시킨다.
+    if (has('--json')) {
+      const rj = spawnChild(['pulse', '--path', root, '--json']);
+      const raw = (rj.stdout || '').trim();
+      let parsed = null; try { parsed = JSON.parse(raw); } catch { parsed = null; }
+      if (!parsed) { failJson(true, 'pulse_failed', `agent-mode tick: pulse 출력을 읽지 못했습니다 (exit ${rj.status})`); return; }
+      log(JSON.stringify(Object.assign({ ok: true, mode: 'tick' }, parsed), null, 2));
+      if (rj.status !== 0) process.exitCode = 1;
+      return;
+    }
     log(cy(`# leerness agent-mode tick (1.9.239) — 가벼운 상태 확인`));
     const r = spawnChild(['pulse', '--path', root]);
     process.stdout.write(r.stdout || '');
@@ -6174,7 +6233,11 @@ function _selfTestCases() {
       const tps = read(path.join(__dirname, '..', 'lib', 'tech-profile.js'));
       const guards = cl.includes('_withLock(_previewsPath(root)') && cl.includes("failJson(json, 'note_required'")
         && tps.includes('prev = null') && tps.includes('_mergeManifests(root, 2)')
-        && io2.includes('!_jsonErrEmitted && t && (t[0]') && /process\.on\('exit', \(code\) => \{ if \(code !== 0/.test(io2) && io2.includes('.corrupt-${Date.now()}-${process.pid}-')
+        // 1.36.103: #7b(성공 exit 엔 폴백 오류 JSON 금지)는 소스 문자열이 아니라 행위로 단언한다.
+        //   훅을 _installJsonExitFallback 으로 옮기자 예전 정규식이 형태만 보고 깨졌다 — 보호 대상은 그대로였는데.
+        //   지금은 _p0103JsonOk() 가 양방향으로 검사한다: 실패 경로는 ok:false JSON 을 내고, 성공 경로(pulse --json,
+        //   exit 0)는 폴백이 끼어들지 않아 자기 페이로드가 그대로 나온다.
+        && io2.includes('!_jsonErrEmitted && t && (t[0]') && io2.includes('_installJsonExitFallback') && io2.includes('.corrupt-${Date.now()}-${process.pid}-')
         && s.includes('declaredTestCount != null && runResult && !runResult.skipped && runResult.allPassed');
       // 1.36.98 (P-0013): UI 스택 감지 — 라이브러리 인벤토리/시안 생성기가 스택별 전략을 고르는 근거라 오판이 곧 잘못된 산출물이 된다.
       //   실측(실제 12개 프로젝트)에서 Tailwind 프로젝트는 CSS 변수가 0~5개뿐이고 유틸 어휘가 74~121종이라 토큰 출처가 정반대다.
@@ -6199,7 +6262,8 @@ function _selfTestCases() {
           && (JSON.parse(read(path.join(nextApp, '.harness', 'tech-profile.json'))).current.ui || []).some(u => u.id === 'tailwind');
       } catch { uiOk = false; } finally { try { fs.rmSync(tmp3, { recursive: true, force: true }); } catch {} }
       return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved()
-        && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk() && _p0102HonestyOk();
+        && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk() && _p0102HonestyOk()
+        && _p0103FlagsOk() && _p0103JsonOk() && _p0103RootOk();
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -7786,6 +7850,149 @@ function _p0101PathStrictOk() {
   } catch { controlOk = false; } finally { try { fs.rmSync(okDir, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
   //   표본이 조용히 줄어들면 가드가 약해진 걸 모른다 — 목록/표본 크기도 함께 못박는다.
   return bad.length === 0 && controlOk && _sample.length >= 7 && _PATH_STRICT_CMDS.length >= 20;
+}
+// 1.36.103: 검증한 경로를 실제로 쓴다 — `<cmd> <경로>` 의 positional 이 root 가 되는가.
+//   tech/library 는 1.36.101 path-strict 가 args[1] 의 존재를 검증하는데 root 해석은 index 2 부터 시작해
+//   그 경로를 건너뛰고 cwd 에 썼다. 관측값은 출력 문구가 아니라 **파일시스템 부작용**이다(tech-profile.json 위치).
+//   대조군 두 개가 필수다: 인자 없으면 cwd 그대로 · 하위명령은 여전히 하위명령(경로로 오인 금지).
+function _p0103RootOk() {
+  const os2 = require('os');
+  const cp2 = require('child_process');
+  const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p103r-'));
+  try {
+    const cwdDir = path.join(arena, 'CWDPROJ'), target = path.join(arena, 'TARGETPROJ');
+    for (const d of [cwdDir, target]) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'package.json'), '{"name":"x","version":"0.1.0"}'); }
+    const env2 = Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' });
+    const R = (a, cwd) => cp2.spawnSync(process.execPath, [__filename, ...a], { cwd: cwd || cwdDir, encoding: 'utf8', timeout: 180000, env: env2 });
+    R(['init', cwdDir, '--yes'], cwdDir); R(['init', target, '--yes'], target);
+    const tp = (d) => path.join(d, '.harness', 'tech-profile.json');
+    const clear = () => { for (const d of [cwdDir, target]) { try { fs.unlinkSync(tp(d)); } catch { /* 없으면 그만 */ } } };
+    // ① 준 경로에 쓴다
+    clear(); R(['tech', target]);
+    const wroteTarget = exists(tp(target)) && !exists(tp(cwdDir));
+    // ② 대조군 A — 인자가 없으면 예전처럼 cwd
+    clear(); R(['tech']);
+    const bareIsCwd = exists(tp(cwdDir)) && !exists(tp(target));
+    // ③ 하위명령은 경로로 오인되지 않는다. 1.36.101 의 path-strict 가 args[1] 을 무조건 경로로 봐서
+    //    `leerness library page` 가 "경로 없음: <cwd>\page" 로 거부됐다 — 게시된 1.36.102 에서 확인한 회귀다.
+    const htmlT = path.join(target, 'leerness-library.html'), htmlC = path.join(cwdDir, 'leerness-library.html');
+    for (const h of [htmlT, htmlC]) { try { fs.unlinkSync(h); } catch { /* 없으면 그만 */ } }
+    R(['library', 'page']);                       // 경로 없이도 동작해야 한다(제품이 안내하는 형태)
+    const pageBare = exists(htmlC);
+    R(['library', 'page', target]);
+    const pageWithPath = exists(htmlT);
+    // ④ library 도 준 경로를 본다 — 헤더가 그 디렉토리 이름을 말한다
+    const libOut = ((R(['library', target]).stdout) || '');
+    const libTarget = libOut.includes('TARGETPROJ') && !libOut.includes('CWDPROJ');
+    // ⑤ 좁히면서 false-PASS 를 만들지 않았는가 — 맨이름 오타는 여전히 거부한다(가능한 하위명령을 알려주면서)
+    const typo = R(['library', 'NOPEZZ']);
+    const typoRejected = typo.status !== 0 && /NOPEZZ/.test((typo.stdout || '') + (typo.stderr || ''));
+    const typoTech = R(['tech', 'NOPEZZ']).status !== 0;
+    return wroteTarget && bareIsCwd && pageBare && pageWithPath && libTarget && typoRejected && typoTech;
+  } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
+}
+// 1.36.103: --json 계약 회귀 가드 — "실패해도 stdout 은 항상 파싱 가능한 JSON 하나".
+//   실측 위반 5건이 서로 다른 이유로 났다: 경고가 오류보다 먼저 나와 stdout 오염(reuse-map/retro/insights),
+//   실패 분기에 JSON 갈래가 없음(release cleanup 비-git), 그리고 stdout 을 삼키는 구간에서 표식만 서서
+//   폴백이 막힘(gate). 그래서 한 자리가 아니라 계약 자체를 단언한다.
+function _p0103JsonOk() {
+  const os2 = require('os');
+  const cp2 = require('child_process');
+  const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p103j-'));
+  try {
+    const proj = path.join(arena, 'proj'); fs.mkdirSync(proj, { recursive: true });
+    fs.writeFileSync(path.join(proj, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const R = (a, cwd) => cp2.spawnSync(process.execPath, [__filename, ...a], { cwd: cwd || proj, encoding: 'utf8', timeout: 180000, env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' }) });
+    R(['init', proj, '--yes']);
+    const parse = (r) => { const t = ((r.stdout) || '').trim(); if (!t) return null; try { return JSON.parse(t); } catch { return null; } };
+    // ① 실패 경로 3종 — 각각 다른 원인이었다
+    const gateJ = parse(R(['gate', 'no-such-gate', '--json']));                        // stdout 을 삼키는 구간
+    const relJ = parse(R(['release', 'cleanup', '--json']));                           // 실패 분기에 JSON 없음 (비-git)
+    const incJ = parse(R(['reuse-map', '--include', 'no-such-project-zz', '--json']));  // 경고가 stdout 을 선점
+    const failuresOk = !!gateJ && gateJ.ok === false && !!relJ && relJ.ok === false && !!incJ;
+    // ② 성공 경로는 폴백이 끼어들지 않는다 (대조군 — 없으면 "항상 ok:false" 로도 통과한다)
+    const pulseR = R(['pulse', '--json']);
+    const pulseJ = parse(pulseR);
+    const successOk = pulseR.status === 0 && !!pulseJ && pulseJ.ok !== false;
+    // ③ --keep 은 준 값을 조용히 바꾸지 않는다
+    const keepBad = R(['release', 'cleanup', '--keep', 'abc', '--json']);
+    const keepBadJ = parse(keepBad);
+    // --keep 은 소비처가 둘이었고 서로 다르게 굴었다 — 진입점에서 통일했으므로 init 쪽도 함께 건다(codex 검수 #9).
+    const keepInit = R(['init', path.join(arena, 'K'), '--yes', '--keep', 'abc', '--json']);
+    let keepInitJ = null; try { keepInitJ = JSON.parse(((keepInit.stdout) || '').trim()); } catch { keepInitJ = null; }
+    const keepOk = !!keepBadJ && keepBadJ.code === 'invalid_keep' && keepBad.status !== 0
+      && !!keepInitJ && keepInitJ.code === 'invalid_keep' && keepInit.status !== 0;
+    // ④ --json 이 아예 구현되지 않아 사람용 텍스트를 내던 표면(게시본 3/30) — 계약 스윕
+    const sweepBad = [['consistency', 'check', '--json'], ['agent-mode', 'tick', '--json'], ['graph', '--json']]
+      .filter(a => !parse(R(a)));
+    return failuresOk && successOk && keepOk && sweepBad.length === 0;
+  } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
+}
+// 1.36.103: 값-플래그 등록 완전성 + 오타 가시성 회귀 가드.
+//   이 클래스는 개별 등록으로 네 번 재발했다(--done-when/--test-cmd/--require-referee/소급 2종).
+//   그래서 '고쳤다' 가 아니라 '뒤처질 수 없다' 를 단언한다 — 소스의 소비자(arg/argAll)를 열거해
+//   _VALUE_FLAGS 를 **데이터로** 대조하므로, 새 값-플래그를 등록 없이 추가하면 여기서 게이트가 붉어진다.
+function _p0103FlagsOk() {
+  const os2 = require('os');
+  const cp2 = require('child_process');
+  // ① 완전성 — 값으로 소비되는 플래그는 전부 등록돼 있어야 한다.
+  //   범위는 bin + lib 전체다. bin/ 만 훑었을 때 --priority(_TASK_VALUE_FLAGS 에만 있던 것)와
+  //   lib 의 --purpose/--personas/--members/--only/--schedule/--files-read 를 통째로 놓쳤다.
+  const libDir = path.join(path.dirname(__filename), '..', 'lib');
+  let src = read(__filename);
+  try { for (const f of fs.readdirSync(libDir)) if (f.endsWith('.js')) src += '\n' + read(path.join(libDir, f)); } catch { return false; }
+  const IGNORE = new Set(['--definitely-not-real-xyz']);   // selftest 전용 리터럴(실재 플래그 아님)
+  const consumed = new Set();
+  let m; const re = /\b_?arg(?:All(?:Strict)?)?\(\s*'(--[a-z0-9-]+)'/g;
+  while ((m = re.exec(src))) if (!IGNORE.has(m[1])) consumed.add(m[1]);
+  // 다른 기제로 값을 취하는 집합도 같은 계약을 진다. (_TASK_VALUE_FLAGS 는 pure-utils 내부 상수라
+  //  export 되지 않으므로, 이어붙인 소스에서 읽는다 — 임의 결합 대신 정의 위치를 그대로 참조한다.)
+  const tvf = src.match(/const _TASK_VALUE_FLAGS = new Set\(\[([\s\S]*?)\]\)/);
+  if (!tvf) return false;
+  for (const q of (tvf[1].match(/'(--[a-z0-9-]+)'/g) || [])) consumed.add(q.slice(1, -1));
+  const unregistered = [...consumed].filter(f => !_VALUE_FLAGS.has(f));
+  // 열거 자체가 죽으면 공허참이 된다 — 표본 하한과 알려진 항목 존재를 함께 단언한다.
+  const enumeratedOk = consumed.size >= 100 && consumed.has('--persona') && consumed.has('--select')
+    && consumed.has('--require-referee') && consumed.has('--priority') && consumed.has('--purpose');
+  if (unregistered.length || !enumeratedOk) return false;
+
+  // ② 행위 — 등록된 값-플래그의 값이 더 이상 본문/경로로 흡수되지 않는다.
+  const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p103-'));
+  try {
+    const proj = path.join(arena, 'proj'); fs.mkdirSync(proj, { recursive: true });
+    fs.writeFileSync(path.join(proj, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    fs.writeFileSync(path.join(proj, 'sample.js'), 'function f(){ return 1; }\n');
+    const R = (a) => cp2.spawnSync(process.execPath, [__filename, ...a], { cwd: proj, encoding: 'utf8', timeout: 180000, env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' }) });
+    R(['init', proj, '--yes']);
+    R(['preview', 'add', 'my page', '--select', 'ZZABSORB']);
+    const pv = exists(path.join(proj, '.harness', 'previews.json')) ? read(path.join(proj, '.harness', 'previews.json')) : '';
+    const titleClean = pv.includes('my page') && !pv.includes('ZZABSORB');
+    // 제품이 스스로 안내하는 문법(persona list 의 "leerness review <file> --persona <id>") 이 순서와 무관하게 동작해야 한다
+    const rev = R(['review', '--persona', 'security', 'sample.js']);
+    const revOut = (rev.stdout || '') + (rev.stderr || '');
+    const pathClean = !/security['"]?\s*$/m.test(revOut) && !revOut.includes(path.join(proj, 'security'));
+
+    // ③ 등호형(--flag=value)은 값을 자기가 들고 있다 — 다음 토큰까지 먹으면 위치인자가 사라진다.
+    //    인라인 목록을 _VALUE_FLAGS 로 바꾸며 멤버십을 split('=')[0] 로 본 탓에 내가 만든 회귀다(codex 검수 #5~#8).
+    R(['preview', 'add', '--select=ZZEQ', 'equals form title']);
+    const pv2 = exists(path.join(proj, '.harness', 'previews.json')) ? read(path.join(proj, '.harness', 'previews.json')) : '';
+    const eqOk = pv2.includes('equals form title') && !pv2.includes('ZZEQ');
+    const rtEq = R(['agents', 'route', '--tier=normal', 'fix the parser']);
+    const eqRoute = !/비어 있|empty_task/.test((rtEq.stdout || '') + (rtEq.stderr || ''));
+    // ④ 동적 레지스트리 플래그(brief set 은 arg('--'+f.flag) 로 만든다)에 오탐 경고가 없어야 한다 — 판별 대조군 포함
+    const W2 = /알 수 없는 플래그|Unknown flag/;
+    const dynOk = !W2.test((R(['brief', 'set', '--intro', 'hello']).stderr) || '')
+      && W2.test((R(['brief', 'set', '--introo', 'x']).stderr) || '');
+    // ⑤ 오타 가시성 — 판별 대조군: 실재 플래그는 조용하고, 없는 플래그만 경고한다.
+    const good = R(['pulse', '--json']);
+    const typo = R(['pulse', '--json', '--nosuchflagzz']);
+    const quietOnReal = !/알 수 없는 플래그|Unknown flag/.test(good.stderr || '');
+    const warnsOnTypo = /알 수 없는 플래그/.test(typo.stderr || '') && (typo.stderr || '').includes('--nosuchflagzz');
+    // 경고는 stderr 전용 — stdout(기계 소비자) 은 오염되지 않는다
+    const stdoutClean = !/알 수 없는 플래그|Unknown flag/.test(typo.stdout || '');
+    let jsonStillValid = false; try { JSON.parse((typo.stdout || '').trim()); jsonStillValid = true; } catch { jsonStillValid = false; }
+    return titleClean && pathClean && eqOk && eqRoute && dynOk && quietOnReal && warnsOnTypo && stdoutClean && jsonStillValid;
+  } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
 }
 // 1.36.102 (명령 표면 감사 P1 2건): 회귀 가드.
 //   ① update --check 가 레지스트리 조회에 실패하고도 "up to date" 라고 단정했다 —
@@ -17021,6 +17228,9 @@ function consistencyCheck(root) {
   root = absRoot(root);
   const cands = ['designguide.md','design-guide.md','.harness/designguide.md','docs/designguide.md','docs/design-guide.md'];
   const found = cands.filter(f => exists(path.join(root,f)));
+  // 1.36.103: --json 이 전역 플래그로 광고되는데 여기선 구현이 없어 사람용 텍스트가 나갔다(게시본에서도 동일).
+  //   기계 소비자에겐 파싱 불가 = 미구현과 같다 — 같은 데이터를 JSON 으로 낸다.
+  if (has('--json')) { log(JSON.stringify({ ok: true, root, canonical: '.harness/design-system.md', mergeCandidates: found }, null, 2)); return; }
   log('Canonical design file: .harness/design-system.md');
   if (found.length) { warn('merge candidates found:'); found.forEach(x => log('- ' + x)); }
   else ok('no duplicate design guide candidates');
@@ -18701,10 +18911,25 @@ function releaseCleanupCmd(root) {
   const rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   const apply = has('--apply');
-  const keep = parseInt(arg('--keep', '5'), 10) || 5;
+  const jsonMode = has('--json');
+  // 1.36.103: `parseInt(...) || 5` 는 사용자가 준 0 을 조용히 5 로 바꿨다(실측: `--keep 0` → "merged 0 ≤ keep 5").
+  //   0 은 "merged 전부 정리" 라는 명확한 의사표시다. 반대로 `--keep -3`/`--keep abc` 는 그대로 통과하거나
+  //   조용히 기본값이 됐다 — 준 값을 무시하려면 최소한 그렇다고 말해야 한다.
+  const _keepRaw = arg('--keep', null);
+  let keep = 5;
+  if (_keepRaw !== null) {
+    const n = Number(_keepRaw);
+    if (!Number.isInteger(n) || n < 0) {
+      failJson(jsonMode, 'invalid_keep', `--keep 은 0 이상의 정수여야 합니다 (받은 값: ${_keepRaw})`);
+      return;
+    }
+    keep = n;
+  }
   // 1) git 저장소 확인
   const headR = cp.spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf8' });
   if (headR.status !== 0) {
+    // 1.36.103: --json 이 사람용 텍스트를 내던 자리 — 기계 소비자는 여기서 JSON.parse 에 실패했다.
+    if (jsonMode) { log(JSON.stringify({ ok: false, error: 'git 저장소가 아닙니다', code: 'not_a_git_repo', root, deleted: [], candidates: [] }, null, 2)); process.exitCode = 1; return; }
     log(rd('# leerness release cleanup (1.9.235) — git 저장소 아님'));
     return;
   }
@@ -19530,6 +19755,13 @@ function graphCmd(root) {
   for (const e of edges) lines.push(`  "${e.src}" --> "${e.dst}"`);
   lines.push('```');
   const md = `# Code dependency graph\n\n생성: ${now()}\n노드: ${nodeSet.size}, 엣지: ${edges.length}\n\n` + lines.join('\n') + '\n';
+  // 1.36.103: --json 미구현이라 mermaid 마크다운이 stdout 으로 나갔다 — 그래프야말로 기계가 읽을 데이터다.
+  if (has('--json')) {
+    const payload = { ok: true, root, generatedAt: now(), nodes: [...nodeSet], edges, counts: { nodes: nodeSet.size, edges: edges.length } };
+    if (out) { writeUtf8(path.resolve(root, out), md); payload.written = out; }
+    log(JSON.stringify(payload, null, 2));
+    return;
+  }
   if (out) {
     writeUtf8(path.resolve(root, out), md);
     ok(`graph 저장: ${out}`);
@@ -25003,6 +25235,42 @@ async function main() {
     return log(VERSION);
   }
   if (has('--help') || has('-h')) return help();
+  // 1.36.103: 실재하지 않는 플래그(오타)를 조용히 삼키지 않는다.
+  //   값-플래그 미등록 45종은 _VALUE_FLAGS 등록으로 닫았지만, 사용자 오타(--prio, --resaon)는 여전히
+  //   그 값이 본문에 붙는다(실측: `decision add "use redis" --resaon faster` → 저장된 제목 "use redis faster").
+  //   파싱 기본값을 뒤집으면 미분류 부울 리터럴 쪽에서 positional 을 삼키는 새 회귀가 나므로, 동작 대신
+  //   가시성을 준다 — stderr 로만 알리고 stdout/--json/exit code 는 건드리지 않는다(기계 소비자 무영향).
+  {
+    const _unknownFlags = [];
+    for (const _tok of process.argv.slice(2)) {
+      if (typeof _tok !== 'string' || !_tok.startsWith('--') || _tok === '--') continue;
+      const _name = _tok.split('=')[0];
+      if (_VALUE_FLAGS.has(_name) || _BOOL_FLAGS.has(_name)) continue;
+      if (!_unknownFlags.includes(_name)) _unknownFlags.push(_name);
+    }
+    if (_unknownFlags.length) {
+      const _L = _uiLang(process.cwd());
+      console.error(_L === 'en'
+        ? `⚠ Unknown flag: ${_unknownFlags.join(' ')} — no such flag in leerness. Its value can be absorbed into the text or path argument. Check: leerness --help`
+        : `⚠ 알 수 없는 플래그: ${_unknownFlags.join(' ')} — leerness 에 없는 이름입니다. 그 값이 본문이나 경로 인자에 섞일 수 있습니다. 확인: leerness --help`);
+    }
+  }
+  // 1.36.103 (codex 검수 #9): --keep 은 소비처가 둘인데 한쪽(release cleanup)은 거부하고 다른 쪽(아카이브 retention)은
+  //   조용히 기본값 10 이 됐다 — `init . --keep abc --json` 이 exit 0 + {ok:true} 로 끝났다.
+  //   "준 값을 조용히 바꾸지 않는다" 를 소비처마다 반복하지 않고 진입점 한 곳에서 강제한다.
+  {
+    const _k = arg('--keep', null);
+    if (_k !== null) {
+      const _kn = Number(_k);
+      if (!Number.isInteger(_kn) || _kn < 0) {
+        const _enK = _uiLang(process.cwd()) === 'en';
+        failJson(has('--json'), 'invalid_keep', _enK
+          ? `--keep must be an integer >= 0 (got: ${_k})`
+          : `--keep 은 0 이상의 정수여야 합니다 (받은 값: ${_k})`);
+        return;
+      }
+    }
+  }
   // 1.36.101 (명령 표면 감사): '없는 경로에 초록 보고' 클래스를 디스패처 한 곳에서 막는다.
   //   실측 — 32개 조사 대상 중 16개가 존재하지 않는 디렉토리에 exit 0 과 정상 보고를 냈다
   //   (pulse/round-history/milestones/session-resume 는 "✓ 비정상 종료 신호 없음 · R0 · 정상 운영 중" 까지 찍었다 — 오타가 안심 보고가 된다).
@@ -25019,7 +25287,32 @@ async function main() {
     const _isStrict = _strict.has(cmd) || (_strictPair[cmd] && args[1] === _strictPair[cmd]);
     if (_isStrict) {
       // 사용자가 '경로를 명시했을 때만' 검사한다 — 미지정(cwd)은 항상 존재하므로 검사할 것이 없다.
-      const _explicit = arg('--path', null) || [args[1], args[2]].find(a => a && !a.startsWith('-') && a !== _strictPair[cmd]);
+      // 1.36.103 (자기 회귀 수리): 이 가드는 args[1] 을 무조건 경로로 봤다. 하위명령을 가진 명령에서는 그게 틀린다 —
+      //   `leerness library page` 가 "경로 없음: <cwd>\page" 로 거부됐다(1.36.101/102 에 게시된 상태로 확인).
+      //   그건 library 가 자기 출력에서 안내하는 명령이고, P-0013 사람용 페이지의 유일한 진입점이다.
+      //   하위명령을 받는 명령에 한해 **선행 구분자 path-like 일 때만** 경로로 본다. 나머지(하위명령 없는 명령)는
+      //   맨이름 오타도 경로로 잡아야 하므로 1.36.101 동작을 그대로 둔다.
+      //   tech 는 sub 를 받기만 하고 쓰지 않는다(하위명령 없음) → args[1] 은 언제나 경로다. library 만 'page' 를 갖는다.
+      //   알려진 하위명령도 아니고 경로형도 아니면 그건 오타다 — 조용히 cwd 에서 초록 보고를 내는 대신 그렇다고 말한다
+      //   (좁히다가 false-BLOCK 을 false-PASS 로 바꾸면 1.36.101 이 잡던 바로 그 증상이 되돌아온다).
+      const _SUBS = { library: new Set(['page']) };
+      const _looksPath = (a) => /^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(a);
+      let _cands = [args[1], args[2]];
+      if (_SUBS[cmd] && args[1] && !args[1].startsWith('-')) {
+        if (_SUBS[cmd].has(args[1])) _cands = [null, args[2]];                      // 하위명령 — 경로 아님
+        // codex 검수 #4 는 "존재하는 디렉토리면 맨이름도 경로로 받아 달라" 였다 — 받지 않는다.
+        //   root 해석(_taskPositionalPath)은 선행 구분자만 경로로 인정한다(제목 'src/auth' 를 경로로 오인하지 않기 위한 계약).
+        //   여기서만 통과시키면 검증은 하고 root 는 cwd 로 가는, 이 라운드가 고치고 있는 바로 그 형태가 된다.
+        //   그래서 거부하되 무엇을 치면 되는지(./name) 를 문장에 넣는다.
+        else if (!_looksPath(args[1])) {
+          const _en0 = _uiLang(process.cwd()) === 'en';
+          failJson(has('--json'), 'unknown_subcommand', _en0
+            ? `unknown ${cmd} subcommand: ${args[1]} (available: ${[..._SUBS[cmd]].join(', ')}) — for a path use an explicit form like ./${args[1]}`
+            : `알 수 없는 ${cmd} 하위명령: ${args[1]} (가능: ${[..._SUBS[cmd]].join(', ')}) — 경로라면 ./${args[1]} 처럼 명시하세요`);
+          return;
+        }
+      }
+      const _explicit = arg('--path', null) || _cands.find(a => a && !a.startsWith('-') && a !== _strictPair[cmd]);
       if (_explicit) {
         const _abs = absRoot(_explicit);
         if (!exists(_abs) || !fs.statSync(_abs).isDirectory()) {
@@ -25141,7 +25434,10 @@ async function main() {
   if (cmd === 'agents' && args[1] === 'route') {
     const _rtRaw = process.argv.slice(2); const _rtI = _rtRaw.indexOf('route'); const _rtToks = [];
     for (let i = _rtI + 1; i < _rtRaw.length && _rtI >= 0; i++) {
-      if (_rtRaw[i].startsWith('--')) { if (['--tier', '--approved-by', '--path'].includes(_rtRaw[i]) && _rtRaw[i + 1] && !_rtRaw[i + 1].startsWith('--')) i++; continue; }
+      // 1.36.103: 자체 인라인 목록(--tier/--approved-by/--path)을 단일 출처 _VALUE_FLAGS 로 교체.
+      //   같은 클래스의 허용목록이 다섯 벌 있었고 각각 따로 뒤처졌다 — 목록이 늘어나면 갭도 같이 늘어난다.
+      //   등호형(--tier=normal)은 값을 자기가 들고 있다 — 다음 토큰까지 건너뛰면 위치인자를 먹는다(codex 검수 #6 재현).
+      if (_rtRaw[i].startsWith('--')) { if (!_rtRaw[i].includes('=') && _VALUE_FLAGS.has(_rtRaw[i]) && _rtRaw[i + 1] && !_rtRaw[i + 1].startsWith('--')) i++; continue; }
       _rtToks.push(_rtRaw[i]);
     }
     // _providerAuth (1.36.91): 인증 축을 라우팅이 소비한다 — 확인 가능한 provider 만 ok/no, 나머지는 unknown.
@@ -25280,9 +25576,9 @@ async function main() {
   if (cmd === 'anchors')                           return anchorsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), args[1] && !args[1].startsWith('-') ? args[1] : null);   // 1.36.36: 정체성앵커 초안
   if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
   // 1.36.53 (UR-0062): 기술 프로필 · 1.36.67 (F15): 변경 시 기존 leerness.html 동반 갱신(있을 때만)
-  if (cmd === 'tech')                              return _tech.techCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1], { has, regenGraph: (r) => { if (exists(path.join(r, 'leerness.html'))) _graph.graphHtmlCmd(r, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, quiet: true }); } });
+  if (cmd === 'tech')                              return _tech.techCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), _optSub(args), { has, regenGraph: (r) => { if (exists(path.join(r, 'leerness.html'))) _graph.graphHtmlCmd(r, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, quiet: true }); } });
   // 1.36.98 (P-0013): 재사용 인벤토리 — 새 화면 조각을 만들기 전에 '이미 있는 것' 을 먼저 본다(reuse-map 의 UI 판).
-  if (cmd === 'library')                           return require('../lib/library').libraryCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1], { has, log, ok, warn, failJson });
+  if (cmd === 'library')                           return require('../lib/library').libraryCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), _optSub(args), { has, log, ok, warn, failJson });
   if (cmd === 'integrity') {                       // 1.36.57 (감사 F-04): managed 문서 무결성 점검/복구
     if (args[1] && args[1] !== 'check') { failJson(has('--json'), 'unknown_subcommand', `알 수 없는 integrity 하위명령: ${args[1]} (가능: check [--repair] [--force])`); return process.exit(process.exitCode || 1); }
     return integrityCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());
@@ -25293,7 +25589,7 @@ async function main() {
     // 미지 플래그(--design/--features/--note)의 값이 positional 로 새는 것 차단 — 원시 argv 에서 플래그+값 스킵 (1.36.49 release note 패턴)
     const _pvRaw = process.argv.slice(2); const _pvI = _pvRaw.indexOf('preview'); const _pvToks = [];
     for (let i = _pvI + 1; i < _pvRaw.length && _pvI >= 0; i++) {
-      if (_pvRaw[i].startsWith('--')) { if (['--design', '--features', '--note', '--path', '--mockup'].includes(_pvRaw[i]) && _pvRaw[i + 1]) i++; continue; }   // 1.36.75 (검수 #2): --mockup 값이 제목에 흡수되던 것
+      if (_pvRaw[i].startsWith('--')) { if (!_pvRaw[i].includes('=') && _VALUE_FLAGS.has(_pvRaw[i]) && _pvRaw[i + 1]) i++; continue; }   // 1.36.75 (검수 #2): --mockup 값이 제목에 흡수되던 것. 1.36.103: 인라인 목록 → _VALUE_FLAGS (--select 등이 제목에 붙던 것) + 등호형은 다음 토큰을 먹지 않음(codex 검수 #5 재현)
       _pvToks.push(_pvRaw[i]);
     }
     // 1.36.80 (UR-0067): 라이브 미리보기 — serve(로컬 서버) / mode(self|project) 는 별도 모듈로 위임
@@ -25306,7 +25602,7 @@ async function main() {
   if (cmd === 'referee') {
     const _rvRaw = process.argv.slice(2); const _rvI = _rvRaw.indexOf('referee'); const _rvToks = [];
     for (let i = _rvI + 1; i < _rvRaw.length && _rvI >= 0; i++) {
-      if (_rvRaw[i].startsWith('--')) { if (['--check', '--good', '--bad', '--expect-bad', '--path', '--timeout'].includes(_rvRaw[i]) && _rvRaw[i + 1]) i++; continue; }
+      if (_rvRaw[i].startsWith('--')) { if (!_rvRaw[i].includes('=') && _VALUE_FLAGS.has(_rvRaw[i]) && _rvRaw[i + 1]) i++; continue; }   // 1.36.103: 인라인 목록 → _VALUE_FLAGS · 등호형 제외(codex 검수 #7)
       _rvToks.push(_rvRaw[i]);
     }
     return refereeCmd(arg('--path', process.cwd()), _rvToks[0], _rvToks.slice(1));
@@ -25315,7 +25611,7 @@ async function main() {
   if (cmd === 'bugfix') {
     const _bfRaw = process.argv.slice(2); const _bfI = _bfRaw.indexOf('bugfix'); const _bfToks = [];
     for (let i = _bfI + 1; i < _bfRaw.length && _bfI >= 0; i++) {
-      if (_bfRaw[i].startsWith('--')) { if (['--repro', '--expect-bad', '--root-cause', '--siblings', '--siblings-na', '--previous-gap', '--path'].includes(_bfRaw[i]) && _bfRaw[i + 1]) i++; continue; }
+      if (_bfRaw[i].startsWith('--')) { if (!_bfRaw[i].includes('=') && _VALUE_FLAGS.has(_bfRaw[i]) && _bfRaw[i + 1]) i++; continue; }   // 1.36.103: 인라인 목록 → _VALUE_FLAGS · 등호형 제외(codex 검수 #8)
       _bfToks.push(_bfRaw[i]);
     }
     // 1.36.88 (출하전 헌트 #7): `bugfix list <path>` 가 위치 경로를 조용히 무시하고 cwd 를 읽어,
