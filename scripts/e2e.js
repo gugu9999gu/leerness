@@ -3752,7 +3752,10 @@ total++;
     //   전체 스위트 부하에서 간헐 초과했고, 실제로 게이트 한 번을 실패시켰다(내 변경 때문이 아니라 잠복 결함).
     //   같은 명령의 다른 호출(4644·6955)은 1.36.87 에서 이미 120초로 올려 뒀다 — 여기만 빠져 있었다.
     //   검사 대상은 속도가 아니라 동작이다.
-    const r = cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { encoding: 'utf8', timeout: 120000 });
+    // 1.36.105: 여유가 1.2배뿐이라 전체 부하에서 반복해 터진다(이번 세션 1회 · 1.36.100 에서 1회).
+    //   측정 근거 — **게시된 1.36.104** 격리 실측 doctor 97s / selftest 99s, 작업 트리 101s/94s (동일 수준).
+    //   즉 내 변경이 느리게 만든 게 아니라 제한이 처음부터 빠듯했다. 3배 여유로 올린다(검사 대상은 속도가 아니라 동작).
+    const r = cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { encoding: 'utf8', timeout: 300000 });
     let j = null; try { j = JSON.parse(r.stdout); } catch {}
     const doctorOk = j && j.version && typeof j.mcpTools === 'number' && j.mcpTools >= 80 && j.selftest && j.selftest.total > 0 && j.healthy === true && r.status === 0;
     // commands 요약 + banner 가 실제 MCP 수 노출 (하드코딩 65/46 아님)
@@ -4649,7 +4652,7 @@ total++;
     const sr = cp.spawnSync(process.execPath, [CLI, 'selftest'], { cwd: ni, encoding: 'utf8', timeout: 180000 });
     const sout = (sr.stdout || '') + (sr.stderr || '');
     const selftestOk = sr.status === 0 && /전체 \d+건 통과/.test(sout) && !/설치 손상/.test(sout);
-    const dr = cp.spawnSync(process.execPath, [CLI, 'doctor'], { cwd: ni, encoding: 'utf8', timeout: 120000 });   // 1.36.87: doctor 는 selftest 를 내장한다(19~24s)
+    const dr = cp.spawnSync(process.execPath, [CLI, 'doctor'], { cwd: ni, encoding: 'utf8', timeout: 300000 });   // 1.36.87: doctor 는 selftest 를 내장한다 · 1.36.105: 실측 97~101s(게시본 포함) 라 120s 는 여유 1.2배였다 → 300s
     const dout = (dr.stdout || '') + (dr.stderr || '');
     // 1.36.87 (codex 26차 #11): 종료코드를 안 보면 **타임아웃/중단이 통과로 보인다**(spawnSync 타임아웃은 status=null,
     //   이미 찍힌 "통과" 문자열은 남는다). 제한을 120s 로 올린 만큼 status 단언이 반드시 함께 가야 한다.
@@ -9885,6 +9888,150 @@ total++;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
   console.log(ok ? '✓ F(1.36.104) handoff 가 사람 손이 닿은 agent-reminders.md 를 지우지 않음(복붙 표식·덧붙임 포함) + 자동분은 여전히 청소'
     : '✗ 1.36.104 보호 파일 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// ── 1.36.105 (P-0015): 운영 등급 — 등급이 '이름' 이 아니라 '읽히는 양' 을 바꾸는가.
+//   실측 동기: init --minimal 은 디스크 파일만 줄이고 세션 적재는 2,800→2,790 tok(-0.3%) 였다.
+//   대조군 둘이 핵심이다 — 기존 사용자는 무변경이어야 하고, 최소 등급에서도 핵심 3종은 살아 있어야 한다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-md105-'));
+  try {
+    const mk = (tag, extra) => {
+      const d = path.join(arena, tag); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', ...(extra || [])], { cwd: d, encoding: 'utf8', timeout: 180000 });
+      return d;
+    };
+    const R = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 120000 });
+    const J = (d, a) => { try { return JSON.parse((((R(d, a)).stdout) || '').trim()); } catch { return null; } };
+    // 대조군 ① 등급 미지정 = standard, 지침 크기 종전 그대로
+    const std = mk('std');
+    const sB = J(std, ['context', 'budget', '--json']);
+    dbg.stdDefault = (J(std, ['mode', '--json']) || {}).mode === 'standard'
+      && fs.statSync(path.join(std, 'AGENTS.md')).size > 7000 && !!sB && sB.over === false;
+    // 최소 등급은 실제로 줄인다
+    const min = mk('min', ['--mode', 'minimal']);
+    const mB = J(min, ['context', 'budget', '--json']);
+    dbg.shrinks = !!mB && !!sB && mB.total < sB.total / 5;
+    dbg.shortAgents = fs.statSync(path.join(min, 'AGENTS.md')).size < 1200;
+    // minimal 은 문서 본문도 워크플로 안내도 싣지 않는다(적재 총량이 목적) — 그러면서 헤드라인은 남는다
+    const minHo = (R(min, ['handoff', '.']).stdout) || '';
+    dbg.minLean = !/=== Current State/.test(minHo) && !/세션 워크플로 6단계/.test(minHo)
+      && /문서 본문 생략/.test(minHo) && /헤드라인/.test(minHo);
+    // 대조군 ② 최소 등급에서도 핵심 3종은 문서에 남고 실제로 동작한다 (기능 제거가 아님)
+    const ag = fs.readFileSync(path.join(min, 'AGENTS.md'), 'utf8');
+    dbg.coreDoc = /handoff/.test(ag) && /verify-claim/.test(ag) && /session close/.test(ag);
+    R(min, ['task', 'add', 'sample']);
+    dbg.coreRuns = R(min, ['handoff', '.']).status === 0 && R(min, ['session', 'close', '.']).status === 0;
+    // 등급 전환이 산출물을 바꾸고 되돌아온다 (이름만 바뀌면 무의미)
+    const sw = mk('sw');
+    const b0 = fs.statSync(path.join(sw, 'AGENTS.md')).size;
+    R(sw, ['mode', 'set', 'minimal']);
+    const b1 = fs.statSync(path.join(sw, 'AGENTS.md')).size;
+    R(sw, ['mode', 'set', 'standard']);
+    const b2 = fs.statSync(path.join(sw, 'AGENTS.md')).size;
+    dbg.switches = b1 < b0 / 3 && Math.abs(b2 - b0) < 200;
+    // 등급 전환이 사용자 내용을 지우지 않는다 — LF/CRLF 둘 다 (검수가 두 경우 모두 삭제를 재현했다)
+    const uc = mk('user');
+    fs.appendFileSync(path.join(uc, 'AGENTS.md'), '\nDIRECT-USER-INSTRUCTION-DO-NOT-LOSE\n');
+    R(uc, ['mode', 'set', 'minimal']);
+    dbg.keepsUserLf = fs.readFileSync(path.join(uc, 'AGENTS.md'), 'utf8').includes('DIRECT-USER-INSTRUCTION-DO-NOT-LOSE');
+    const cr = mk('crlf');
+    const crp = path.join(cr, 'AGENTS.md');
+    fs.writeFileSync(crp, fs.readFileSync(crp, 'utf8').replace(/\n/g, '\r\n') + '\r\n---\r\n## Preserved previous content\r\n\r\nCRLF-PRESERVED-USER-INSTRUCTION\r\n');
+    R(cr, ['mode', 'set', 'minimal']);
+    dbg.keepsUserCrlf = fs.readFileSync(crp, 'utf8').includes('CRLF-PRESERVED-USER-INSTRUCTION');
+    // 이월은 전량 보존 — 상한을 넣었다가 뺐다(앞에 붙인 최신 지시가 삭제되고 보관본에도 없었다)
+    const pu2 = require(path.join(__dirname, '..', 'lib', 'pure-utils.js'));
+    const nx = '# T\ncanon\n';
+    const pv = '# T\ncanon\nNEWEST-PREPENDED\n' + Array.from({ length: 40 }, (_, i) => `- old ${i}`).join('\n') + '\n';
+    const mg = pu2._managedMerge('CLAUDE.md', nx, pv, '.harness/archive', null, { preservedCap: 5 });
+    dbg.noPreservedDrop = mg.includes('NEWEST-PREPENDED') && mg.includes('- old 0') && mg.includes('- old 39');
+    // strict 는 제거됐다 — 없는 등급을 광고하지 않는다
+    dbg.noFakeTier = !/strict/.test((R(sw, ['mode']).stdout) || '') && (J(sw, ['mode', '--json']) || {}).modes.length === 2;
+    // 측정은 읽기여야 한다 — budget 이 last-handoff stamp / tech-profile 을 바꾸면 세션 탐지가 오염된다
+    //   (자체 적대 검사로 실제 발견: budget 한 번이 두 파일을 바꿨다)
+    const hSnap = (x) => { const m = {}; (function w(y, rel) { for (const e of fs.readdirSync(y, { withFileTypes: true })) { const p = path.join(y, e.name); const r = rel + '/' + e.name; if (e.isDirectory()) w(p, r); else if (!/environment\.json|cache\//.test(r)) { try { m[r] = fs.readFileSync(p, 'utf8'); } catch { m[r] = 'x'; } } } })(path.join(x, '.harness'), ''); return m; };
+    const preB = hSnap(std); R(std, ['context', 'budget']); const postB = hSnap(std);
+    dbg.budgetReadOnly = Object.keys({ ...preB, ...postB }).every(k => preB[k] === postB[k]);
+    // 예산 초과는 조용히 넘어가지 않는다
+    fs.appendFileSync(path.join(min, 'AGENTS.md'), '\n' + 'x'.repeat(20000) + '\n');
+    const ov = J(min, ['context', 'budget', '--json']);
+    dbg.overLoud = !!ov && ov.over === true && R(min, ['context', 'budget', '--json']).status !== 0;
+    ok = dbg.stdDefault && dbg.shrinks && dbg.shortAgents && dbg.minLean && dbg.coreDoc && dbg.coreRuns
+      && dbg.switches && dbg.keepsUserLf && dbg.keepsUserCrlf && dbg.noPreservedDrop && dbg.noFakeTier
+      && dbg.budgetReadOnly && dbg.overLoud;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ G(1.36.105/P-0015) 운영 등급: 기존 무변경(대조군) + minimal 적재 1/5 미만 + 핵심 3종 생존 + 전환 왕복 + 예산 초과 경고'
+    : '✗ P-0015 운영 등급 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// ── 1.36.105 (P-0009 B, 사용자 승인): 검증 스캐폴딩 토글 3종.
+//   승인 조건이 "경계 계약을 시험으로 고정" 이었다 — 토글이 끄는 것은 **지시문** 뿐이고,
+//   도구가 실제로 실행해 남기는 증거(scan/audit/gate/verify-claim/session close)는 어떤 조합에서도 살아야 한다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sc105-'));
+  try {
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 180000 });
+    R(['init', d, '--yes']); R(['task', 'add', '리팩터링 작업']);
+    const SC = ['workflow-distribute', 'double-verify', 'full-reread'];
+    // 기본 ON = 현행 무변경
+    const h0 = (R(['handoff', '.']).stdout) || '';
+    dbg.defaultOn = /세션 워크플로 6단계/.test(h0) && /=== Current State/.test(h0);
+    dbg.registered = (((R(['toggle', 'list']).stdout) || '').match(/🟢 ON\s+(workflow-distribute|double-verify|full-reread)/g) || []).length === 3;
+    // 설명문에 모델명/성능 주장이 없다 (승인 조건 — leerness 는 아무것도 주장하지 않는다)
+    const reg = require(path.join(__dirname, '..', 'lib', 'toggles.js')).TOGGLE_REGISTRY;
+    const desc = SC.map(k => (reg[k] || {}).desc || '').join(' ');
+    dbg.noModelClaim = !/claude|opus|sonnet|haiku|gpt|codex|gemini|qwen|grok/i.test(desc)
+      && !/\d+(\.\d+)?\s*(x|배)\b|빠름|faster|절약|saves?\b/i.test(desc);
+    // 토글마다 **격리** 해서 본다 — 한꺼번에 끄면 full-reread 의 early-return 이 나머지를 가려
+    //   workflow-distribute 배선을 떼도 통과한다(변이 M7 이 실제로 생존해 드러난 함정).
+    R(['toggle', 'set', 'workflow-distribute', 'off']);
+    const hw = (R(['handoff', '.']).stdout) || '';
+    dbg.isolWorkflow = !/세션 워크플로 6단계/.test(hw) && /=== Current State/.test(hw);
+    R(['toggle', 'set', 'workflow-distribute', 'on']);
+    R(['toggle', 'set', 'full-reread', 'off']);
+    const hr = (R(['handoff', '.']).stdout) || '';
+    dbg.isolReread = !/=== Current State/.test(hr) && /세션 워크플로 6단계/.test(hr);
+    R(['toggle', 'set', 'full-reread', 'on']);
+    // OFF(전부) → 지시문만 사라진다
+    for (const id of SC) R(['toggle', 'set', id, 'off']);
+    const h1 = (R(['handoff', '.']).stdout) || '';
+    dbg.guidanceGone = !/세션 워크플로 6단계/.test(h1) && !/=== Current State/.test(h1);
+    dbg.signalKept = /헤드라인/.test(h1) && /toggle set full-reread on/.test(h1);
+    // 토글은 **지시문만** 끈다 — 지속 상태를 바꾸면 계약 위반이다(검수 MEDIUM#9: double-verify OFF 가
+    //   next-action 큐를 지웠다). 특정 파일에 기대면 그 파일이 안 생기는 픽스처에서 단언이 공허해지므로
+    //   (실측: 이 픽스처에선 큐가 0B/0B 라 판별력이 없었다) **.harness 전체를 스냅샷 대조**한다.
+    const hs = (x) => { const m = {}; (function w(y, rel) { for (const e of fs.readdirSync(y, { withFileTypes: true })) { const p = path.join(y, e.name); const r = rel + '/' + e.name; if (e.isDirectory()) w(p, r); else if (!/environment\.json|last-handoff\.json|cache\/|toggles\.json|pre-wake-report\.json/.test(r)) { try { m[r] = fs.readFileSync(p, 'utf8'); } catch { m[r] = 'x'; } } } })(path.join(x, '.harness'), ''); return m; };
+    R(['toggle', 'set', 'double-verify', 'on']); R(['handoff', '.']);
+    const stOn = hs(d);
+    R(['toggle', 'set', 'double-verify', 'off']); R(['handoff', '.']);
+    const stOff = hs(d);
+    dbg.stateUntouched = Object.keys({ ...stOn, ...stOff }).every(k => stOn[k] === stOff[k]);
+    // 경계 계약 — 증거는 그대로다
+    fs.writeFileSync(path.join(d, 'leak.js'), 'const K="sk-proj-BoundaryTestKey1234567890abcdefgh";\n');
+    const sc = R(['scan', 'secrets', '--json']);
+    let sj = null; try { sj = JSON.parse((sc.stdout || '').trim()); } catch {}
+    const parses = (r) => { try { return !!JSON.parse(((r.stdout) || '').trim()); } catch { return false; } };
+    dbg.evidenceAlive = !!sj && sj.unacknowledgedCount >= 1 && sc.status !== 0
+      && parses(R(['audit', '--json'])) && parses(R(['gate', '--json']))
+      && R(['session', 'close', '.']).status === 0;
+    // 되돌리면 원상복귀
+    for (const id of SC) R(['toggle', 'set', id, 'on']);
+    const h2 = (R(['handoff', '.']).stdout) || '';
+    dbg.restores = /세션 워크플로 6단계/.test(h2) && /=== Current State/.test(h2);
+    ok = dbg.defaultOn && dbg.registered && dbg.noModelClaim && dbg.isolWorkflow && dbg.isolReread
+      && dbg.stateUntouched && dbg.guidanceGone && dbg.signalKept && dbg.evidenceAlive && dbg.restores;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ H(1.36.105/P-0009B) 스캐폴딩 토글: 기본 무변경 + 지시문만 OFF + 증거 계층 생존(경계 계약) + 모델명 0 + 복귀'
+    : '✗ P-0009B 스캐폴딩 토글 실패 ' + JSON.stringify(dbg));
   if (!ok) failed++;
 }
 

@@ -321,5 +321,32 @@
         "event": "approved"
       }
     ]
+  },
+  {
+    "id": "P-0015",
+    "title": "운영 등급(minimal/standard/strict) + 세션 컨텍스트 상한 — 절차를 프로젝트 크기에 맞춘다",
+    "design": "실측 근거: init --minimal 은 디스크 파일만 54→33개로 줄이고 AI 가 매 세션 읽는 양은 2800→2790 tok(-0.3%) 로 사실상 그대로다. 토글 6종도 전부 '동작' 만 끄고 컨텍스트 레버가 없다. 더 큰 문제는 증가다 — 신규 2,800 tok 이 427라운드 프로젝트에서 16,341 tok(5.8배)이 됐고(AGENTS.md 7.6KB->19KB, CLAUDE.md 1KB->14.7KB, 마이그레이션 Preserved 이월), 상한이 없다. 등급을 '무엇을 실행하나' 가 아니라 '무엇을 읽히나' 에 연결하고, 세션 적재에 예산을 둔다. 최소 등급에서도 핵심 3종(모델 독립 상태 · 완료 증거 검증 · 인수인계)은 절대 끄지 않는다.",
+    "features": [
+      "leerness mode get|set minimal|standard|strict (init --mode 로도 지정)",
+      "등급별 AGENTS.md 생성 — 최소는 핵심 3종 규약만 (~400 tok 목표)",
+      "handoff 출력 등급화 — 최소는 헤드라인+활성 task 만",
+      "AGENTS.md 의 '읽어라' 목록도 등급 연동",
+      "세션 적재 토큰 예산 + 초과 시 경고(leerness context budget)",
+      "Preserved 이월 이력에 상한 — 최근 N 라운드만 본문 유지 나머지는 archive 링크",
+      "verify-claim/session close 는 모든 등급에서 유지(끌 수 없음)",
+      "기존 프로젝트는 standard 로 무변경 시작"
+    ],
+    "status": "approved",
+    "createdAt": "2026-08-07T01:08:44.977Z",
+    "history": [
+      {
+        "at": "2026-08-07T01:08:44.977Z",
+        "event": "proposed"
+      },
+      {
+        "at": "2026-08-07T01:10:44.852Z",
+        "event": "approved"
+      }
+    ]
   }
 ]

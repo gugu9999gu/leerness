@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.104';
+const VERSION = '1.36.105';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -250,7 +250,7 @@ const _VALUE_FLAGS = new Set(['--language','--skills','--path','--status','--pro
   // 1.36.103 일괄 등록 — 소스의 arg()/argAll() 소비자에서 기계 추출한 미등록 45종(각각이 위 사고와 같은 오염 지점이었다)
   '--alias','--bin','--cmd','--constraint','--desc','--design','--direction','--emit','--env-flag','--exit','--features','--file','--github','--in','--install-hint','--kind','--lang','--max','--measure','--min','--mockup','--name','--npm-otp','--npm-tag','--ollama-url','--persona','--preset','--presets','--profile','--project','--result','--scenario','--select','--selector','--source','--summary','--task','--text','--tier','--url','--version-args','--where','--window','--x','--y',
   // bin/ 만 훑었을 때 놓친 lib/*.js 소비자 — 특히 --priority 는 _TASK_VALUE_FLAGS 에만 있고 여기 없어 값이 제목에 붙었다
-  '--files-changed','--files-read','--members','--only','--personas','--priority','--purpose','--schedule',
+  '--files-changed','--files-read','--members','--only','--personas','--priority','--purpose','--schedule','--mode',
   // --approved-by 는 `agents route` 가 값으로 쓴다(자체 인라인 목록에만 있었다) — 부울로 오분류하면 값이 토큰으로 샌다.
   // --title 도 같다(_TASK_VALUE_FLAGS 소속). 둘 다 완전성 가드가 잡아냈다 — 손으로 분류한 것은 손으로 틀린다.
   '--approved-by', '--title']);
@@ -609,6 +609,34 @@ function skillLock(skills, root) {
 }
 
 // 1.9.276/1.9.369 (UR-0025): MINIMAL_SKIP_KEYS → lib/catalogs (init --minimal 제외 키).
+// ── 1.36.105 (P-0015, 사용자 승인): 운영 등급 — 절차가 아니라 **읽히는 양**에 등급을 건다.
+//   실측 동기: `init --minimal` 은 디스크 파일만 54→33개로 줄이고 세션 적재는 2,800→2,790 tok(-0.3%) 로 그대로였다.
+//   토글 6종도 전부 '동작' 만 끈다 — 컨텍스트에 대한 레버가 없었다. 게다가 적재는 나이에 비례해 자란다:
+//   신규 2,800 tok → 427라운드 프로젝트 16,341 tok(5.8배, AGENTS.md 7.6→19KB · CLAUDE.md 1→14.7KB).
+//   등급은 무엇을 '실행' 하나가 아니라 무엇을 '읽히나' 를 정한다. 최소 등급에서도 핵심 3종
+//   (모델 독립 상태 · 완료 증거 검증 · 인수인계)은 끄지 않는다.
+// 1.36.105 (codex 검수 HIGH#2): 처음엔 strict 를 넣고 "standard + 독립 검수/승인 게이트" 라고 안내했는데,
+//   생성물도 동작도 standard 와 **바이트 동일**이었다 — 이름만 있는 등급이었다. 없는 것을 광고하지 않는다.
+//   두 등급이 정직하게 도는 편이 셋 중 하나가 거짓말하는 것보다 낫다. strict 는 실제 게이트를 갖출 때 다시 연다.
+const _MODES = ['minimal', 'standard'];
+function _normMode(v) { const s = String(v || '').toLowerCase(); return _MODES.includes(s) ? s : 'standard'; }
+// `--mode` 는 **등급을 정하는 명령에서만** 읽는다(init · mode).
+//   codex 검수 HIGH#1: 전역으로 읽으면 `handoff . --mode minimal` 처럼 무관한 명령에 붙은 플래그가
+//   등급 미지정 프로젝트의 출력을 바꾼다 — 영속되지 않아도 놀람이고, "미지정=standard" 라는 승인 조건을 흐린다.
+function _modeFlagAllowed() {
+  try { const c = (process.argv[2] || ''); return c === 'init' || c === 'mode'; } catch { return false; }
+}
+function _projectMode(root) {
+  try {
+    if (_modeFlagAllowed()) {
+      const flag = String(arg('--mode', '') || '').toLowerCase();
+      if (_MODES.includes(flag)) return flag;
+    }
+    const mf = path.join(absRoot(root || process.cwd()), '.harness', 'manifest.json');
+    if (exists(mf)) return _normMode((JSON.parse(read(mf)) || {}).mode);
+  } catch {}
+  return 'standard';   // 기존 프로젝트는 무변경 — 매니페스트에 mode 가 없으면 standard
+}
 function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
   const project = detectProjectName(root);
   const skillRows = Object.entries(skillCatalog).map(([k, v]) => `| ${k} | ${v.displayNameKo} | ${v.capabilities.join(', ')} | ${v.lastUpdated} | ${v.verification} |`).join('\n');
@@ -620,7 +648,8 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
     '.github/copilot-instructions.md': `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`,
     '.harness/HARNESS_VERSION': VERSION + '\n',
     '.harness/LANGUAGE': lang + '\n',
-    '.harness/manifest.json': JSON.stringify({ project, leernessVersion: VERSION, language: lang, installedAt: now(), minimal: !!opts.minimal }, null, 2) + '\n',
+    // 1.36.105 (P-0015): mode 를 매니페스트에 기록. 기본은 standard = 종전 동작과 바이트 동일.
+    '.harness/manifest.json': JSON.stringify({ project, leernessVersion: VERSION, language: lang, mode: _normMode(opts.mode), installedAt: now(), minimal: !!opts.minimal }, null, 2) + '\n',
     '.harness/skills-lock.json': skillLock(selectedSkills, root),
     '.harness/project-brief.md': fm('project-brief', ['프로젝트 목적 확인','신규 기능 판단','계획 수립'], ['프로젝트 목적 변경','사용자/범위 변경'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- 이 프로젝트의 목적을 실제 내용으로 업데이트하세요.\n\n## Users\n-\n\n## Success Criteria\n-\n`),
     '.harness/plan.md': fm('plan', ['작업 시작 전','새 요청 접수','범위 변경','신규 프로젝트 감지'], ['계획 추가/수정/드랍','milestone 변경','목표 변경'], `# Plan\n\n## Goal\n- 사용자 목적을 기준으로 전체 계획을 유지합니다.\n\n## Scope\n- 포함 범위를 기록합니다.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. 프로젝트 계획 정리\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] project-brief.md를 실제 프로젝트 목적에 맞게 작성\n- [ ] context-map.md를 실제 파일 구조에 맞게 작성\n`),
@@ -849,8 +878,40 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
   }
   // 1.9.276: minimal 모드 — 코어가 요구하지 않는 파일 제외 (verify 필수 파일은 유지).
   if (opts.minimal) { for (const k of MINIMAL_SKIP_KEYS) delete _files[k]; }
+  // 1.36.105 (P-0015): mode=minimal 은 **AI 가 매 세션 읽는 지침 자체**를 줄인다.
+  //   --minimal(파일 수)과 다른 축이다 — 그쪽은 세션 적재를 0.3% 밖에 못 줄였다(실측).
+  //   남기는 것은 핵심 3종뿐: 모델 독립 상태 · 완료 증거 검증 · 인수인계. verify-claim/session close 는 여기서도 필수다.
+  if (_normMode(opts.mode) === 'minimal') {
+    _files['AGENTS.md'] = `${MARK}\n` + (lang === 'en' ? _AGENTS_MINIMAL_EN : _AGENTS_MINIMAL_KO);
+    _files['CLAUDE.md'] = `${MARK}\n` + (lang === 'en'
+      ? `# Claude Code Instructions\n\nFollow AGENTS.md.\n`
+      : `# Claude Code Instructions\n\nAGENTS.md 를 따르세요.\n`);
+  }
   return _files;
 }
+// 최소 등급 지침 — 목표는 "짧다" 가 아니라 "끄면 안 되는 것만 남긴다".
+const _AGENTS_MINIMAL_KO = `# Leerness Agent Instructions (minimal)
+
+이 프로젝트는 **최소 등급**입니다. 규약은 셋뿐입니다.
+
+1. **세션 시작**: \`leerness handoff .\` — 이전 세션의 상태/결정을 받는다.
+2. **완료 주장 전**: \`leerness verify-claim <T-ID>\` — 증거 없이 "완료" 라고 말하지 않는다.
+3. **세션 종료**: \`leerness session close .\` — 다음 세션으로 상태를 넘긴다.
+
+상태는 \`.harness/\` 안의 일반 파일이다(모델이 바뀌어도 남는다). 보호 파일은 삭제하지 않는다.
+더 필요해지면 \`leerness mode set standard\` 로 올린다.
+`;
+const _AGENTS_MINIMAL_EN = `# Leerness Agent Instructions (minimal)
+
+This project runs in **minimal mode**. There are only three rules.
+
+1. **Session start**: \`leerness handoff .\` — pick up state and decisions from the last session.
+2. **Before claiming done**: \`leerness verify-claim <T-ID>\` — never say "done" without evidence.
+3. **Session end**: \`leerness session close .\` — hand state to the next session.
+
+State lives as plain files in \`.harness/\` (it survives a change of model). Do not delete protected files.
+Raise the tier with \`leerness mode set standard\` when you need more.
+`;
 
 function copyRecursiveSafe(src, dst) {
   if (!exists(src)) return;
@@ -923,7 +984,11 @@ function createBackup(root, reason, files, dry = false) {
 
 // 1.9.1 P2 / 1.9.368 (UR-0025): MERGE_OVERWRITE_FILES → lib/catalogs, managedMerge 순수 코어 → lib/pure-utils. 얇은 래퍼.
 function managedMerge(file, next, previous, archiveDir, mergeOpts = {}) {
-  const archiveRel = archiveDir ? path.relative(process.cwd(), archiveDir).replace(/\\/g, '/') : '.harness/archive';
+  // 1.36.105 (codex 검수 HIGH#4): 경로를 **cwd 기준**으로 만들어 프로젝트 파일 안에 박았다 —
+  //   다른 디렉토리에서 실행하면 "전체 원본 백업: <경로>" 가 존재하지 않는 곳을 가리킨다(검수 재현).
+  //   그 문장은 "삭제하지 않았다" 는 약속의 근거이므로 반드시 프로젝트 기준이어야 한다.
+  const _base = mergeOpts && mergeOpts.root ? mergeOpts.root : process.cwd();
+  const archiveRel = archiveDir ? path.relative(_base, archiveDir).replace(/\\/g, '/') : '.harness/archive';
   return _managedMerge(file, next, previous, archiveRel, MERGE_OVERWRITE_FILES, mergeOpts);   // 1.36.60: altTemplate/lang 전달
 }
 
@@ -935,7 +1000,7 @@ function writeIfSafe(root, file, content, opts = {}) {
   //   병합을 우회해 CLAUDE.md 커스텀 지시가 archive 에만 남았다(1.36.28 보존 재설계의 force 구멍).
   if (already && opts.mergeManaged) {
     const prev = read(p);
-    writeUtf8(p, managedMerge(file, content, prev, opts.archiveDir, { altTemplate: opts.altTemplate, lang: opts.lang }));
+    writeUtf8(p, managedMerge(file, content, prev, opts.archiveDir, { altTemplate: opts.altTemplate, lang: opts.lang, root: opts.root || root }));
     return { action: 'merged', file };
   }
   if (already && !opts.force) return { action: 'preserved', file };
@@ -1183,7 +1248,7 @@ async function install(root, opts = {}) {
   if (resolved.permissionMode) log(`Agent 권한 모드: ${resolved.permissionMode}  (1.9.174 — REPL에서 \`:permissions extended|full\` 로 즉시 변경 가능)`);
   // 1.9.10: 스킬 카탈로그 출처 안내
   // 1.9.184 (사용자 명시): leerness-skillpack 미사용 정책 — 안내 메시지 제거. builtin catalog 만 사용.
-  const files = coreFiles(root, lang, skills, { minimal: !!opts.minimal });
+  const files = coreFiles(root, lang, skills, { minimal: !!opts.minimal, mode: opts.mode });
   // 1.36.60 (F-05 2회차, 검수 #1 High): 반대-언어 canonical 템플릿 — 언어 전환 재init/마이그레이션 시
   //   구 언어 템플릿 라인을 "사용자 커스텀"으로 오인해 통째로 Preserved 에 이월하던 것을 차감 병합으로 해소.
   //   (검수 2차 High): 차감은 "실제 언어 전환일 때만" — 동일-언어 재init 에 무조건 적용하면 반대-언어 템플릿과
@@ -1279,7 +1344,7 @@ async function install(root, opts = {}) {
       actions.push({ file:f, action });
       continue;
     }
-    const r = writeIfSafe(root, f, c, { force: effForce, mergeManaged, archiveDir: backup.archiveDir, altTemplate: _altFiles[f], lang });
+    const r = writeIfSafe(root, f, c, { force: effForce, mergeManaged, archiveDir: backup.archiveDir, altTemplate: _altFiles[f], lang, root });
     actions.push(r);
     _done++;
     drawProgress(_done, f);
@@ -6264,7 +6329,7 @@ function _selfTestCases() {
       return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved()
         && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk() && _p0102HonestyOk()
         && _p0103FlagsOk() && _p0103JsonOk() && _p0103RootOk() && _p0104UsageOk()
-        && _p0014SecretBaselineOk() && _p0104ReminderOk();
+        && _p0014SecretBaselineOk() && _p0104ReminderOk() && _p0015ModeOk();
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -7891,6 +7956,48 @@ function _p0103RootOk() {
     const typoTech = R(['tech', 'NOPEZZ']).status !== 0;
     return wroteTarget && bareIsCwd && pageBare && pageWithPath && libTarget && typoRejected && typoTech;
   } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
+}
+// 1.36.105 (P-0015, 사용자 승인): 운영 등급 — 등급이 '이름' 이 아니라 '읽히는 양' 을 바꾸는가.
+//   대조군 없이는 무의미하다: (a) 기존 사용자(등급 미지정)는 종전과 동일해야 하고,
+//   (b) 최소 등급에서도 핵심 3종(handoff·verify-claim·session close)은 살아 있어야 한다.
+//   그 둘이 깨지면 이건 개선이 아니라 기능 제거다.
+//   selftest 는 **가볍게** 유지한다 — 첫 판에서 여기에 init 4회+spawn 15회를 넣었더니 selftest 가 느려져
+//   doctor(선테스트 내장)와 '위치독립' e2e 두 건이 타임아웃으로 터졌다. 행위 전수는 e2e 블록 G 가 맡고,
+//   여기서는 **순수 호출**로 계약의 핵심만 본다(스폰 0). 공허해지지 않게 대조군을 함께 둔다.
+function _p0015ModeOk() {
+  try {
+    // ① 등급 해석 — 알 수 없는 값은 standard 로 (기존 프로젝트 무변경이 승인 조건이었다)
+    //   `strict` 는 1.36.105 에서 **뺐다** — 생성물이 standard 와 바이트 동일인데 "독립 검수 요구" 라고
+    //   안내하고 있었다(검수가 지적). 없는 등급을 광고하지 않는다. 그래서 여기서도 standard 로 떨어져야 한다.
+    const normOk = _normMode('minimal') === 'minimal' && _normMode('standard') === 'standard'
+      && _normMode('') === 'standard' && _normMode('MINIMAL') === 'minimal'
+      && _normMode('banana') === 'standard' && _normMode(null) === 'standard'
+      && _normMode('strict') === 'standard' && _MODES.length === 2;
+    // ② 생성물이 실제로 갈린다 — 이름만 바뀌면 이 기능은 무의미하다
+    const full = coreFiles('.', 'ko', [], {});
+    const min = coreFiles('.', 'ko', [], { mode: 'minimal' });
+    const std = coreFiles('.', 'ko', [], { mode: 'standard' });
+    const shrinks = min['AGENTS.md'].length < full['AGENTS.md'].length / 5
+      && min['CLAUDE.md'].length < full['CLAUDE.md'].length / 5;
+    const stdUnchanged = std['AGENTS.md'] === full['AGENTS.md'] && std['CLAUDE.md'] === full['CLAUDE.md'];  // 대조군
+    // ③ 최소 등급에서도 핵심 3종은 지침에 남는다 (덜어내는 건 주변이지 핵심이 아니다)
+    const ag = min['AGENTS.md'];
+    const coreKept = /leerness handoff/.test(ag) && /verify-claim/.test(ag) && /session close/.test(ag);
+    // ④ 매니페스트에 등급이 실제로 기록된다
+    let manifestOk = false;
+    try { manifestOk = JSON.parse(min['.harness/manifest.json']).mode === 'minimal'
+      && JSON.parse(full['.harness/manifest.json']).mode === 'standard'; } catch { manifestOk = false; }
+    // ⑤ 이월은 **전량 보존**이다 — 1.36.105 에서 상한을 넣었다가 뺐다(검수가 "앞에 붙인 최신 지시가 삭제되고
+    //   보관본에도 없다" 를 재현). 이 파일의 계약은 false-DROP 이 버그이므로, 어떤 옵션으로도 줄지 않아야 한다.
+    const pu = require('../lib/pure-utils');
+    const nextT = '# T\ncanon\n';
+    const prevT = '# T\ncanon\n' + Array.from({ length: 50 }, (_, i) => `- custom line ${i}`).join('\n') + '\n';
+    const merged = pu._managedMerge('CLAUDE.md', nextT, prevT, '.harness/archive', null, {});
+    const withOpt = pu._managedMerge('CLAUDE.md', nextT, prevT, '.harness/archive', null, { preservedCap: 10 });
+    const noDrop = merged.includes('custom line 0') && merged.includes('custom line 49')
+      && withOpt === merged;   // 상한 옵션이 남아 있어도 아무것도 줄이지 않는다(되돌림이 확실한가)
+    return normOk && shrinks && stdUnchanged && coreKept && manifestOk && noDrop;
+  } catch { return false; }
 }
 // 1.36.104: handoff 가 사람이 쓴 .harness/agent-reminders.md 를 통째로 지웠다(exit 0 · 안내 없음 · 백업 없음).
 //   대조군이 필수다 — 자동 생성분까지 남기면 그 파일이 영구 잔존해 매 세션 거짓 경보가 된다.
@@ -13673,7 +13780,24 @@ function handoff(root) {
     for (const r of activeRules) log(`- ${r.id} [${r.trigger}] ${r.rule} (lastVerified: ${r.lastVerified || '-'})`);
     log('');
   }
-  log(out);
+  // 1.36.105 (P-0015): 최소 등급은 문서 본문 블록(Current State/Plan/Progress/Decisions/Task Log)을 붙이지 않는다.
+  //   실측 — 신규 프로젝트에서도 이 블록들이 handoff 출력의 대부분이고, 오래된 프로젝트에서는 18KB 까지 자란다.
+  //   대신 어디를 읽으면 되는지만 알린다. 헤드라인·활성 룰·경고는 등급과 무관하게 유지한다(끄면 안 되는 신호).
+  // 1.36.105 (P-0009 B): `full-reread` 토글도 같은 지점을 끈다 — 등급과 독립적으로 사용자가 직접 고를 수 있다.
+  //   문서와 상태는 그대로 남는다. 바뀌는 것은 "매 세션 전부 실어 준다" → "필요할 때 읽어라" 뿐이다.
+  // ⚠ return 하지 않는다. 처음엔 여기서 return 했는데, 그러면 `full-reread` 하나가 뒤따르는 워크플로 안내까지
+  //   함께 꺼서 `workflow-distribute` 의 영역을 침범했다(토글을 격리해서 시험하니 드러났다 — 한꺼번에 끄면
+  //   앞 토글의 return 이 뒤 토글을 가려 배선을 통째로 떼도 통과한다). 토글은 자기 것만 꺼야 한다.
+  if (_projectMode(root) === 'minimal' || !_tgl.toggleOn(root, 'full-reread')) {
+    const _en = _uiLang(root) === 'en';
+    log(_en
+      ? `(document bodies omitted. Read on demand: .harness/current-state.md · plan.md · progress-tracker.md · decisions.md)`
+      : `(문서 본문 생략. 필요할 때 읽으세요: .harness/current-state.md · plan.md · progress-tracker.md · decisions.md)`);
+    log(_en ? `Restore: leerness toggle set full-reread on  ·  tier: leerness mode set standard`
+      : `되돌리기: leerness toggle set full-reread on  ·  등급: leerness mode set standard`);
+  } else {
+    log(out);
+  }
   if (exists(currentStatePath(root))) {
     const cs = read(currentStatePath(root)).replace(/Updated: \d{4}-\d{2}-\d{2}/, `Updated: ${today()}`);
     writeUtf8(currentStatePath(root), cs);
@@ -13838,6 +13962,10 @@ function handoff(root) {
           //   "다음 단계로 무엇을 할지" 3개를 즉시 제안 (사용자가 직접 채우지 않아도 AI에게 노출됨)
           //   skill installed 여부와 무관 — keyword 만 있으면 동작 (게으름 방지는 모든 워크스페이스 필수)
           //   끄기: --no-next-actions 또는 LEERNESS_NO_NEXT_ACTIONS=1
+          // 1.36.105 (P-0009 B): `double-verify` 토글 — "완료 전에 한 번 더 확인하라" 류 **안내**를 끈다.
+          //   codex 검수 MEDIUM#9: 처음엔 이 블록 전체를 토글로 감쌌는데, 그 안에 next-action **큐 저장**이 있어
+          //   토글을 끄면 지속 상태(next-action-queue.json)까지 사라졌다 — 내가 세운 계약("지시문만 끈다") 위반이다.
+          //   큐 저장은 도구가 실제로 남기는 상태이므로 유지하고, 출력만 토글에 건다.
           if (!has('--no-next-actions') && !has('--quiet') && process.env.LEERNESS_NO_NEXT_ACTIONS !== '1') {
             try {
               const actions = _suggestNextActions(root, latestRow, keyword);
@@ -13845,18 +13973,20 @@ function handoff(root) {
                 const isTty = process.stdout && process.stdout.isTTY;
                 const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
                 const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
-                log(grn(`## 🎯 다음 단계 자동 제안 (1.9.194 E축 — 게으름 방지) — 키워드 "${keyword}"`));
-                for (const a of actions) {
-                  log(dim(`  ${a.icon} ${a.title}`));
-                  if (a.command) log(dim(`     \`${a.command}\``));
+                const _showAdvice = _tgl.toggleOn(root, 'double-verify');
+                if (_showAdvice) {
+                  log(grn(`## 🎯 다음 단계 자동 제안 (1.9.194 E축 — 게으름 방지) — 키워드 "${keyword}"`));
+                  for (const a of actions) {
+                    log(dim(`  ${a.icon} ${a.title}`));
+                    if (a.command) log(dim(`     \`${a.command}\``));
+                  }
                 }
-                // 1.9.201: queue 자동 저장 — `leerness next-action take` 로 즉시 task add 가능
+                // 1.9.201: queue 자동 저장 — `leerness next-action take` 로 즉시 task add 가능 (토글과 무관: 상태다)
                 try {
                   const added = _enqueueNextActions(root, actions);
-                  if (added > 0) log(dim(`  → 즉시 task add: leerness next-action take  (큐 +${added}건 저장됨, 1.9.201)`));
+                  if (added > 0 && _showAdvice) log(dim(`  → 즉시 task add: leerness next-action take  (큐 +${added}건 저장됨, 1.9.201)`));
                 } catch {}
-                log(dim(`  → 직접 입력: leerness next-action add "<text>"`));
-                log('');
+                if (_showAdvice) { log(dim(`  → 직접 입력: leerness next-action add "<text>"`)); log(''); }
               }
             } catch {}
           }
@@ -14335,7 +14465,11 @@ function handoff(root) {
     } catch {}
   }
   // 1.9.39: handoff 출력 끝에 6단계 워크플로 가이드 자동 표시 (메인 에이전트가 매 세션 인지)
-  if (!has('--no-workflow-guide') && !has('--compact') && process.env.LEERNESS_NO_WORKFLOW_GUIDE !== '1') {
+  // 1.36.105 (P-0009 B, 사용자 승인): `workflow-distribute` 토글로도 끌 수 있다(기본 ON = 현행 무변경).
+  //   이건 **지시문**이다 — 끄더라도 gate/verify-claim/scan/audit 이 실제로 실행해 남기는 증거는 그대로다.
+  //   minimal 등급은 적재 총량을 줄이는 것이 목적이라 안내도 싣지 않는다(토글과 별개 축).
+  if (!has('--no-workflow-guide') && !has('--compact') && process.env.LEERNESS_NO_WORKFLOW_GUIDE !== '1'
+      && _projectMode(root) !== 'minimal' && _tgl.toggleOn(root, 'workflow-distribute')) {
     const isTty = process.stdout && process.stdout.isTTY;
     const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
     const b = s => isTty ? `\x1b[1m${s}\x1b[0m` : s;
@@ -25605,9 +25739,127 @@ async function main() {
     } catch {}
   }
   // 1.9.276 (GPT-5.5 2차 리뷰): init --dry-run(미리보기) / --minimal(핵심 파일만) / --no-env(.env 생략)
+  // 1.36.105 (P-0015): 운영 등급 조회/변경 + 세션 적재 예산.
+  if (cmd === 'mode') {
+    const _tty = process.stdout && process.stdout.isTTY;
+    const _cy = s => _tty ? `\x1b[36m${s}\x1b[0m` : s, _dm = s => _tty ? `\x1b[2m${s}\x1b[0m` : s;
+    const _mRoot = absRoot(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
+    const _mj = has('--json');
+    if (!exists(path.join(_mRoot, '.harness'))) { failJson(_mj, 'harness_missing', `leerness 미설치: ${_mRoot} — 먼저 leerness init`); return; }
+    const sub = args[1] && !args[1].startsWith('-') && !_MODES.includes(args[1]) && !/^[.\/\\]|^[A-Za-z]:/.test(args[1]) ? args[1] : (_MODES.includes(args[1]) ? 'set' : 'get');
+    const cur = _projectMode(_mRoot);
+    if (sub === 'get') {
+      if (_mj) { log(JSON.stringify({ ok: true, root: _mRoot, mode: cur, modes: _MODES }, null, 2)); return; }
+      log(_cy(`# leerness mode — ${cur}`));
+      log(`  minimal   핵심 3종만 읽힌다 (handoff · verify-claim · session close)`);
+      log(`  standard  현재 기본 — 전체 지침/상태 문서`);
+      // 목록은 _MODES 에서 유도한다 — 하드코딩하면 등급을 뺐을 때 안내만 남아 없는 등급을 계속 광고한다
+      //   (실제로 strict 제거 후 이 줄만 살아남아 게이트가 잡았다).
+      log(_dm(`  변경: leerness mode set <${_MODES.join('|')}>  ·  적재량: leerness context budget`));
+      return;
+    }
+    if (sub === 'set') {
+      const want = _normMode(args.find(a => _MODES.includes(a)));
+      if (!args.some(a => _MODES.includes(a))) { failJson(_mj, 'invalid_mode', `mode 는 ${_MODES.join('|')} 중 하나입니다`); return; }
+      const mf = path.join(_mRoot, '.harness', 'manifest.json');
+      let m = {}; try { m = JSON.parse(read(mf)) || {}; } catch { m = {}; }
+      m.mode = want; writeUtf8(mf, JSON.stringify(m, null, 2) + '\n');
+      // 지침 파일은 등급의 산출물이므로 즉시 재생성한다 — 안 그러면 mode 는 이름만 바뀌고 읽히는 양은 그대로다.
+      let regenerated = 0;
+      try {
+        const _l = _uiLang(_mRoot);
+        const gen = coreFiles(_mRoot, _l, [], { mode: want });
+        let prevGen = null;
+        try { prevGen = coreFiles(_mRoot, _l, [], { mode: cur }); } catch { prevGen = null; }   // 직전 등급 템플릿(차감용)
+        for (const k of ['AGENTS.md', 'CLAUDE.md']) {
+          if (!gen[k]) continue;
+          const p = path.join(_mRoot, k);
+          const prev = exists(p) ? read(p) : '';
+          // 1.36.105 (codex 검수 HIGH#5/#6): 처음엔 `\n---\n## Preserved...` 를 indexOf 로 잘라 붙였다.
+          //   그 형태는 두 방향으로 사용자 내용을 지웠다 — (a) 그 블록 밖에 덧붙인 줄은 통째로 사라지고,
+          //   (b) CRLF 파일은 앵커가 아예 안 잡혀 Preserved 블록까지 사라졌다(검수가 둘 다 재현했다).
+          //   등급 변경은 템플릿 교체이지 사용자 데이터 편집이 아니다 — 이미 검증된 병합 기제를 쓴다.
+          //   altTemplate 에는 **직전 등급의 템플릿**을 준다. 안 주면 옛 템플릿이 "사용자 커스텀" 으로 오인돼
+          //   Preserved 에 통째 이월되고, `mode set minimal` 이 파일을 줄이는 대신 키운다(실측 7,627 → 8,392B).
+          //   이 차감은 1.36.60 이 언어 전환용으로 만든 것과 같은 기제다 — 축만 다르다.
+          writeUtf8(p, managedMerge(k, gen[k], prev, path.join(_mRoot, '.harness', 'archive'),
+            { lang: _l, root: _mRoot, altTemplate: (prevGen && prevGen[k]) || '' }));
+          regenerated++;
+        }
+      } catch {}
+      if (_mj) { log(JSON.stringify({ ok: true, root: _mRoot, mode: want, previous: cur, regenerated }, null, 2)); return; }
+      ok(`운영 등급: ${cur} → ${want} (지침 ${regenerated}개 재생성)`);
+      log(_dm(`  적재량 확인: leerness context budget`));
+      return;
+    }
+    failJson(_mj, 'unknown_subcommand', `알 수 없는 mode 하위명령: ${sub} (가능: get, set)`);
+    return;
+  }
+  if (cmd === 'context' && args[1] === 'budget') {
+    const _tty2 = process.stdout && process.stdout.isTTY;
+    const _cy = s => _tty2 ? `\x1b[36m${s}\x1b[0m` : s, _dm = s => _tty2 ? `\x1b[2m${s}\x1b[0m` : s;
+    const _bRoot = absRoot(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());
+    const _bj = has('--json');
+    if (!exists(path.join(_bRoot, '.harness'))) { failJson(_bj, 'harness_missing', `leerness 미설치: ${_bRoot} — 먼저 leerness init`); return; }
+    const _tok = (s) => Math.round(String(s || '').length / 3.2);   // 한글 혼합 대략치 — 절대값이 아니라 추세/비교용
+    const parts = [];
+    for (const f of ['AGENTS.md', 'CLAUDE.md']) {
+      const p = path.join(_bRoot, f);
+      parts.push({ what: f, bytes: exists(p) ? fs.statSync(p).size : 0, tokens: exists(p) ? _tok(read(p)) : 0 });
+    }
+    // 1.36.105 (codex 검수 HIGH#7): AGENTS.md 가 "읽어라" 고 지목하는 .harness 문서를 빼고 재면 예산이 거짓이 된다
+    //   (검수 재현: session-workflow.md 에 100,000자를 넣어도 ok:true). 지목된 문서를 합산에 넣는다.
+    try {
+      const agp = path.join(_bRoot, 'AGENTS.md');
+      const refs = exists(agp) ? [...new Set((read(agp).match(/\.harness\/[A-Za-z0-9._-]+\.md/g) || []))] : [];
+      let rb = 0, rt = 0, rn = 0;
+      for (const r of refs) {
+        const p = path.join(_bRoot, r.replace(/\//g, path.sep));
+        if (!exists(p)) continue;
+        rn++; rb += fs.statSync(p).size; rt += _tok(read(p));
+      }
+      if (rn) parts.push({ what: `AGENTS.md 가 지목하는 문서 ${rn}종`, bytes: rb, tokens: rt });
+    } catch {}
+    // spawnChild 는 자기 스코프의 root 를 cwd 로 쓰므로 여기서는 직접 부른다(측정 대상이 빈 문자열이 되면 예산이 무의미해진다).
+    let ho = '';
+    try {
+      // 측정은 읽기여야 한다 — `--no-record` + LEERNESS_HOOK=1 로 stamp/프로필/그래프 쓰기를 전부 막는다.
+      //   (이 옵션들이 이미 있었는데 처음엔 쓰지 않아, budget 한 번이 last-handoff.json 과 tech-profile.json 을 바꿨다.)
+      const r = cp.spawnSync(process.execPath, [__filename, 'handoff', _bRoot, '--no-drift-check', '--no-record'], {
+        cwd: _bRoot, encoding: 'utf8', timeout: 180000, maxBuffer: 32 * 1024 * 1024,
+        env: Object.assign({}, process.env, { LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_HOOK: '1', LEERNESS_NO_AUTO_ROADMAP: '1' })
+      });
+      ho = (r && r.stdout) || '';
+    } catch {}
+    if (!ho) { log(_dm('  ⚠ handoff 출력을 측정하지 못했습니다 — 합계는 지침 파일만 반영합니다')); }
+    parts.push({ what: 'handoff 출력', bytes: Buffer.byteLength(ho), tokens: _tok(ho) });
+    const total = parts.reduce((s, p) => s + p.tokens, 0);
+    const mode = _projectMode(_bRoot);
+    // 예산은 **실측에서** 정한다. 지목 문서(11종 4,133 tok)를 합산에 넣자 신규 standard 설치가 6,933 tok 이 됐다 —
+    //   기본 설치가 자기 예산을 즉시 못 지키면 그건 신호가 아니라 잡음이다(이번 라운드에 시크릿에서 고친 오경보와 같은 형태).
+    //   기준점: 신규 standard 6,933 · 427라운드 프로젝트 16,341(지목 문서 제외 값이라 실제로는 더 크다).
+    //   12,000 은 신규 설치에 약 40% 여유를 주면서 오래 자란 프로젝트는 확실히 잡는 선이다.
+    const budget = { minimal: 1200, standard: 12000 }[mode] || 12000;
+    const over = total > budget;
+    if (_bj) { log(JSON.stringify({ ok: !over, root: _bRoot, mode, budget, total, over, parts }, null, 2)); if (over) process.exitCode = 1; return; }
+    log(_cy(`# leerness context budget — mode ${mode}`));
+    for (const p of parts) log(`  ${String(p.tokens).padStart(6)} tok  ${String(p.bytes).padStart(7)} B   ${p.what}`);
+    log(`  ${String(total).padStart(6)} tok  합계 · 예산 ${budget} tok`);
+    log('');
+    if (over) {
+      fail(`세션 적재가 예산을 넘습니다 (${total} > ${budget})`);
+      log(_dm(`  → 등급을 낮추거나: leerness mode set minimal`));
+      log(_dm(`  → 이월 이력을 줄이거나: AGENTS.md/CLAUDE.md 의 "Preserved previous content" 를 archive 로 옮기세요`));
+    } else {
+      ok(`예산 이내 (${total}/${budget} tok)`);
+    }
+    log(_dm('  ⓘ 토큰은 길이 기반 추정치입니다 — 절대값이 아니라 추세/비교용으로 쓰세요.'));
+    return;
+  }
   if (cmd === 'init') {
     const _initRoot = absRoot(arg('--path', args[1] && !args[1].startsWith('-') ? args[1] : process.cwd()));
-    const _initOpts = { force:has('--force'), dry:has('--dry-run'), migration:false, minimal:has('--minimal'), noEnv:has('--no-env') };
+    // 1.36.105 (P-0015): --mode 는 '무엇을 읽히나' 를 정한다. --minimal(파일 수)과 직교하며 함께 쓸 수 있다.
+    const _initOpts = { force:has('--force'), dry:has('--dry-run'), migration:false, minimal:has('--minimal'), noEnv:has('--no-env'), mode:_normMode(arg('--mode', null)) };
     if (has('--json')) {
       // 1.10.2 (UR-0146): init --json — 사람용 출력 묵음(setQuiet) + 순수 JSON 요약 1개. 기존엔 --json 을 silent ignore(배너만 출력).
       // 1.10.3 (UR-0173): json:true → 배너/진행바 억제(TTY 누출 차단), nonInteractive:true → 대화 메뉴 차단(머신 계약).
@@ -25664,7 +25916,11 @@ async function main() {
   if (cmd === 'lazy' && args[1] === 'detect')    return lazyDetect(_resolveRoot(args[2]), { json: has('--json') });
   if (cmd === 'memory' && args[1] === 'search')  return memorySearch(arg('--path', process.cwd()), args.slice(2).join(' '));
   if (cmd === 'hook' && args[1] === 'session-start') return hookSessionStartCmd(arg('--path', args[2] || process.cwd()));  // 1.36.22: SessionStart 컨텍스트 주입(쓰기 0)
-  if (cmd === 'handoff')      { const _hp = arg('--path', args[1] || process.cwd()); const _hr = handoffCmd(_hp); try { _tech.refreshTechProfile(_hp); } catch {} _maybeAutoGraph(_hp); return _hr; }   // 1.36.53: 기술 프로필 자동 갱신(마이그레이션 이력) — 그래프 생성 전에
+  // 1.36.105: 읽기전용 호출(LEERNESS_HOOK=1)은 부수 쓰기를 하지 않는다 — 1.36.22 가 last-handoff stamp 에 세운 규약을
+  //   같은 진입점의 나머지 쓰기(tech-profile 갱신 · 그래프 재생성)에도 적용한다. `context budget` 이 측정을 위해
+  //   handoff 를 자식으로 부르는데, 그것만으로 last-handoff.json 과 tech-profile.json 이 바뀌었다(자체 적대 검사로 발견).
+  //   측정이 관측 대상을 바꾸면 안 된다.
+  if (cmd === 'handoff')      { const _hp = arg('--path', args[1] || process.cwd()); const _hr = handoffCmd(_hp); if (process.env.LEERNESS_HOOK !== '1') { try { _tech.refreshTechProfile(_hp); } catch {} _maybeAutoGraph(_hp); } return _hr; }   // 1.36.53: 기술 프로필 자동 갱신(마이그레이션 이력) — 그래프 생성 전에
   if (cmd === 'reuse-map')    return reuseMapCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'verify-claim') { const _p = arg('--path', process.cwd()); if (args[1] === '--all' || has('--all')) return verifyClaimAllCmd(_p); return verifyClaimCmd(_p, args[1]); }  // 1.33.2: --all → 모든 done 주장 일괄 검증
   if (cmd === 'orchestrate')  return await orchestrateCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')));

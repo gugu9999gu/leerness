@@ -15,7 +15,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Current State
 
-Updated: 2026-08-05
+Updated: 2026-08-07
 
 ## Now
 - 대기 중 <!-- leerness:auto -->
