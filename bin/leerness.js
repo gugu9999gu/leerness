@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.105';
+const VERSION = '1.36.106';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3307,13 +3307,36 @@ function pathSetupCmd(root, opts = {}) {
 //   실측 비용: init 1330ms · 초기화된 디렉토리 복사 78ms(17배 저렴) · CLI 1회 기동 434ms.
 //   → 언어별로 **한 번만** init 하고 이후는 복사해서 쓴다. 각 호출자는 자기 사본을 받으므로 상호 오염이 없다.
 const _stFixtureCache = new Map();
+// 1.36.106 (T-0090): 캐시된 base 는 호출자가 지울 수 없어 **프로세스마다 언어 수만큼 남았다**(실측 누적 3,190개).
+//   selftest/doctor 는 CI 에서 반복 실행되는 명령이라 그대로 두면 사용자 tmpdir 이 무한히 자란다.
+//   프로세스 종료 시 한 번에 치운다 — 캐시의 수명이 곧 프로세스 수명이므로 exit 훅이 정확한 자리다.
+let _stCleanupHooked = false;
+function _stSweepFixtures() {
+  for (const b of _stFixtureCache.values()) {
+    if (!b) continue;
+    try { fs.rmSync(b, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ }
+  }
+}
+function _stHookCleanup() {
+  if (_stCleanupHooked) return;
+  _stCleanupHooked = true;
+  process.on('exit', _stSweepFixtures);
+  // codex 검수 MEDIUM#1: Ctrl+C 는 'exit' 리스너를 거치지 않는다(SIGINT 리스너가 없으면 기본 종료가 즉시 죽인다).
+  //   CI 에서 중단되는 일이 드물지 않으므로 SIGINT 도 잡아 치우고 표준 종료코드로 나간다.
+  //   이 훅은 selftest/doctor 경로에서만 등록된다(대화형 prompt 가 있는 명령에는 걸리지 않는다).
+  process.on('SIGINT', () => { _stSweepFixtures(); process.exit(130); });
+}
 function _selftestFixture(lang) {
   const key = lang || 'ko';
   if (!_stFixtureCache.has(key)) {
+    _stHookCleanup();
     const base = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_stfx_' + key + '_'));
     const args = [__filename, 'init', base, '--yes', '--no-env', '--no-stale-check'];
     if (key !== 'ko') args.push('--language', key);
     const r = cp.spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
+    // codex 검수 MEDIUM#2: init 실패 시 캐시에 null 을 넣는데, 그러면 **이미 만든 base 가 훅의 시야에서 사라진다**.
+    //   실패 경로야말로 정리가 필요한 자리다 — 그 자리에서 바로 지운다.
+    if (r.status !== 0) { try { fs.rmSync(base, { recursive: true, force: true }); } catch {} }
     _stFixtureCache.set(key, r.status === 0 ? base : null);
   }
   const base = _stFixtureCache.get(key);
@@ -4266,13 +4289,19 @@ function _selfTestCases() {
       const encJson = src.includes('function encodingCheck(root, opts = {})');
       const contractExit = src.includes('if (!okJson) process.exitCode = 1;');
       let behav = false;
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sec_'));
+      // 1.36.106 (T-0090): 대조군 디렉토리를 익명으로 만들어 **정리할 수 없었다** — 실측 tmpdir 누적 4,574개.
+      //   selftest 는 CI 친화 명령으로 광고되므로 커밋마다 쌓인다. 이름을 붙여 finally 에서 함께 지운다.
+      // codex 검수 LOW#3: 둘을 try 밖에서 만들면 **두 번째 생성이 실패할 때 첫 번째가 남는다**(ENOSPC 등).
+      //   생성을 try 안으로 넣어 어느 쪽이 실패해도 finally 가 만들어진 것만 정확히 치우게 한다.
+      let tmp = null, cleanDir = null;
       try {
+        tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sec_'));
+        cleanDir = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_clean_'));
         fs.writeFileSync(path.join(tmp, 'c.js'), 'module.exports={apiKey:"sk-test-1234567890abcdefghijklmnopqrstuvwxyz"};');
         const r = _collectSecretFindings(tmp);
-        const clean = _collectSecretFindings(fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_clean_')));
+        const clean = _collectSecretFindings(cleanDir);
         behav = r.committed.length >= 1 && clean.committed.length === 0;
-      } catch {} finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      } catch {} finally { for (const _d of [tmp, cleanDir]) { if (_d) { try { fs.rmSync(_d, { recursive: true, force: true }); } catch {} } } }
       return handoffWired && scanJson && encJson && contractExit && behav;
     } },
     { name: '9라운드 (UR-0119/0120): team review(메인 검수) — _composeTeamPlan reviewStep + handoff 검수필요 + team add 와이어 (1.9.414)', run: () => { const m = require('../lib/pure-utils'); const on = m._composeTeamPlan({ id: 't', members: ['a', 'b'], personas: ['security'] }, '점검'); const off = m._composeTeamPlan({ id: 't', members: ['a'], review: false }, '점검'); const planOk = on.review === true && !!on.reviewStep && on.reviewStep.suggestedCommand.includes('verify-claim') && off.review === false && !off.reviewStep; const rem = m._teamHandoffReminders([{ id: 'r', schedule: 'every-session', status: 'active', members: ['a'], review: true }]); const remOk = rem.length === 1 && rem[0].includes('검수필요'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const wired = teamSrc.includes("review: !has('--no-review')") && teamSrc.includes('메인 검수 (필수)'); return planOk && remOk && wired; } },

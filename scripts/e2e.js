@@ -10035,6 +10035,57 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.106 (T-0090): selftest/doctor 가 임시 디렉토리를 흘렸다 — 실행당 8개/3개, 실측 누적 83,135개.
+//   selftest 는 "CI 친화" 로 광고되는 명령이라 커밋마다 쌓인다. 정적으로는 안 보이고 **실행 전후 증가분**으로만 잡힌다.
+//   대조군: 사용자 명령(handoff/audit)은 원래 0이어야 하고, 여기서도 0이어야 한다(회귀 감시).
+{
+  total++;
+  let ok = false; const dbg = {};
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tl106-'));
+  // 자식의 TMPDIR 를 격리한다 — 이 블록은 임시 디렉토리를 세므로 전체 스위트의 다른 블록이 만드는
+  //   임시 디렉토리에 오염되면 판정이 흔들린다(그리고 파괴적 변이 시험이 실제 tmpdir 을 지우는 것도 막는다).
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tlbox-'));
+  try {
+    fs.writeFileSync(path.join(proj, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const ENV = Object.assign({}, process.env, { TMPDIR: sandbox, TEMP: sandbox, TMP: sandbox });
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: proj, encoding: 'utf8', timeout: 300000, env: ENV });
+    R(['init', proj, '--yes']);
+    const count = () => { try { return fs.readdirSync(sandbox).filter(x => /^(__leerness_|leerness-)/.test(x)).length; } catch { return -1; } };
+    const delta = (a) => { const b = count(); R(a); return count() - b; };
+    dbg.selftest = delta(['selftest']);
+    dbg.doctor = delta(['doctor']);
+    dbg.handoff = delta(['handoff', '.']);       // 대조군 — 원래 0
+    dbg.audit = delta(['audit']);                // 대조군 — 원래 0
+    // 반복해도 누적되지 않는가 (한 번만 0 이고 두 번째부터 새면 의미 없다)
+    dbg.selftest2 = delta(['selftest']);
+    // 잔존 보고는 **잔존이 있을 때만** 판별력이 있다 — 주변 상태에 기대지 말고 조건을 직접 만들고 직접 치운다.
+    for (let i = 0; i < 250; i++) { try { fs.mkdirSync(path.join(sandbox, '__leerness_probe_' + i)); } catch {} }
+    let dj = null; try { dj = JSON.parse(((R(['doctor', '--json']).stdout) || '').trim()); } catch {}
+    const beforeReport = count();
+    R(['doctor']);
+    dbg.doctorReadOnly = count() - beforeReport === 0;    // doctor 는 지우지 않는다(사용자 디스크)
+    dbg.reportsLeftover = !!dj && !!dj.tmpLeftover && dj.tmpLeftover.count >= 250;
+    dbg.healthyUnaffected = !!dj && dj.healthy === true;   // 잔존은 '문제 감지' 가 아니다
+    // codex 검수 LOW#4: **파일**을 "임시 디렉토리" 로 세면 안 된다 (leerness-note.txt 210개는 잔존 0)
+    const fbox = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fbox-'));
+    for (let i = 0; i < 210; i++) fs.writeFileSync(path.join(fbox, 'leerness-user-note-' + i + '.txt'), 'x');
+    let fj = null; try { fj = JSON.parse(((cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { cwd: proj, encoding: 'utf8', timeout: 300000, env: Object.assign({}, process.env, { TMPDIR: fbox, TEMP: fbox, TMP: fbox }) }).stdout) || '').trim()); } catch {}
+    dbg.filesNotCounted = !!fj && fj.tmpLeftover === null;
+    // codex 검수 LOW#5: Windows 는 대소문자를 구분하지 않는다 — 대문자 접두도 잡아야 한다
+    const cbox = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cbox-'));
+    for (let i = 0; i < 210; i++) fs.mkdirSync(path.join(cbox, '__LEERNESS_probe_' + i));
+    let cj = null; try { cj = JSON.parse(((cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { cwd: proj, encoding: 'utf8', timeout: 300000, env: Object.assign({}, process.env, { TMPDIR: cbox, TEMP: cbox, TMP: cbox }) }).stdout) || '').trim()); } catch {}
+    dbg.caseInsensitive = !!cj && !!cj.tmpLeftover && cj.tmpLeftover.count >= 210;
+    for (const _b of [fbox, cbox]) { try { fs.rmSync(_b, { recursive: true, force: true }); } catch {} }
+    ok = dbg.selftest === 0 && dbg.doctor === 0 && dbg.selftest2 === 0
+      && dbg.handoff === 0 && dbg.audit === 0 && dbg.doctorReadOnly && dbg.reportsLeftover && dbg.healthyUnaffected
+      && dbg.filesNotCounted && dbg.caseInsensitive;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { for (const _p of [proj, sandbox]) { try { fs.rmSync(_p, { recursive: true, force: true }); } catch {} } }
+  console.log(ok ? '✓ I(1.36.106/T-0090) selftest·doctor 임시 디렉토리 누수 0 (반복 포함) + 사용자 명령 대조군 0 + 잔존은 보고만'
+    : '✗ T-0090 임시 디렉토리 누수 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 
