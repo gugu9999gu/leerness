@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.106';
+const VERSION = '1.36.107';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -620,11 +620,38 @@ function skillLock(skills, root) {
 //   두 등급이 정직하게 도는 편이 셋 중 하나가 거짓말하는 것보다 낫다. strict 는 실제 게이트를 갖출 때 다시 연다.
 const _MODES = ['minimal', 'standard'];
 function _normMode(v) { const s = String(v || '').toLowerCase(); return _MODES.includes(s) ? s : 'standard'; }
+// 1.36.107: 재init 이 사용자의 선택을 되돌리지 않게 하는 두 술어. 우선순위는 **명시 플래그 > 기존 저장값 > 기본값**.
+//   opts.mode 는 호출부에서 정규화하지 않고 원본을 넘겨야 한다 — 미리 _normMode 를 걸면 '미지정' 과 '--mode standard'
+//   가 구분되지 않아 명시적으로 standard 로 올리는 것과 그냥 재init 한 것이 같아진다.
+//   손상 매니페스트에서는 prevManifest 가 비어 오므로 자연히 기본값으로 새로 만든다(init 은 복구 경로이기도 하다).
+function _initMode(opts) {
+  const o = opts || {};
+  if (o.mode) return _normMode(o.mode);
+  const prev = (o.prevManifest && typeof o.prevManifest === 'object') ? o.prevManifest : {};
+  return _normMode(prev.mode);
+}
+function _initInstalledAt(opts) {
+  const prev = (opts && opts.prevManifest && typeof opts.prevManifest === 'object') ? opts.prevManifest : {};
+  return (typeof prev.installedAt === 'string' && prev.installedAt) ? prev.installedAt : now();
+}
 // `--mode` 는 **등급을 정하는 명령에서만** 읽는다(init · mode).
 //   codex 검수 HIGH#1: 전역으로 읽으면 `handoff . --mode minimal` 처럼 무관한 명령에 붙은 플래그가
 //   등급 미지정 프로젝트의 출력을 바꾼다 — 영속되지 않아도 놀람이고, "미지정=standard" 라는 승인 조건을 흐린다.
 function _modeFlagAllowed() {
   try { const c = (process.argv[2] || ''); return c === 'init' || c === 'mode'; } catch { return false; }
+}
+// 1.36.107 (손상 스토어 사냥): manifest 는 **읽기 실패를 구분해서** 돌려준다.
+//   종전엔 손상이든 미설정이든 똑같이 'standard' 로 떨어져, 사용자는 자기 등급이 날아간 걸 몰랐다.
+//   같은 규율이 토글에는 1.36.49 에 섰는데(fail-closed) manifest 에는 없었고, 나는 거기에 **쓰기**를 추가했다.
+function _readManifestChecked(root) {
+  const mf = path.join(absRoot(root || process.cwd()), '.harness', 'manifest.json');
+  if (!exists(mf)) return { path: mf, exists: false, corrupt: false, data: {} };
+  let raw = null;
+  try { raw = read(mf); } catch { return { path: mf, exists: true, corrupt: true, reason: '읽기 실패', data: {} }; }
+  let j = null;
+  try { j = JSON.parse(raw); } catch { return { path: mf, exists: true, corrupt: true, reason: 'JSON 파싱 실패', data: {} }; }
+  if (!j || typeof j !== 'object' || Array.isArray(j)) return { path: mf, exists: true, corrupt: true, reason: '최상위가 객체가 아님', data: {} };
+  return { path: mf, exists: true, corrupt: false, data: j };
 }
 function _projectMode(root) {
   try {
@@ -632,8 +659,8 @@ function _projectMode(root) {
       const flag = String(arg('--mode', '') || '').toLowerCase();
       if (_MODES.includes(flag)) return flag;
     }
-    const mf = path.join(absRoot(root || process.cwd()), '.harness', 'manifest.json');
-    if (exists(mf)) return _normMode((JSON.parse(read(mf)) || {}).mode);
+    const m = _readManifestChecked(root);
+    if (!m.corrupt) return _normMode(m.data.mode);
   } catch {}
   return 'standard';   // 기존 프로젝트는 무변경 — 매니페스트에 mode 가 없으면 standard
 }
@@ -649,7 +676,12 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
     '.harness/HARNESS_VERSION': VERSION + '\n',
     '.harness/LANGUAGE': lang + '\n',
     // 1.36.105 (P-0015): mode 를 매니페스트에 기록. 기본은 standard = 종전 동작과 바이트 동일.
-    '.harness/manifest.json': JSON.stringify({ project, leernessVersion: VERSION, language: lang, mode: _normMode(opts.mode), installedAt: now(), minimal: !!opts.minimal }, null, 2) + '\n',
+    // 1.36.107 (같은 라운드 2번째 지점): 재init 이 사용자의 등급 선택을 조용히 되돌리던 것 차단.
+    //   `mode set minimal` 로 등급을 낮춘 뒤 업그레이드 재init 하면 mode 가 standard 로 되돌아갔다(실측, exit 0 · 무경고).
+    //   manifest 는 managedOverwrite 목록에 있어 매번 템플릿으로 재생성되는데, 템플릿은 사용자 선택을 모른다.
+    //   기존 값을 기본으로 삼고 **명시 플래그(--mode)만 이긴다**. installedAt 도 마찬가지 — 매번 갱신되면 이름이 거짓말이 된다.
+    //   이전 값은 호출부가 읽어 넘긴다(coreFiles 가 디스크를 몰래 읽으면 CWD 에 따라 산출물이 달라진다).
+    '.harness/manifest.json': JSON.stringify({ project, leernessVersion: VERSION, language: lang, mode: _initMode(opts), installedAt: _initInstalledAt(opts), minimal: !!opts.minimal }, null, 2) + '\n',
     '.harness/skills-lock.json': skillLock(selectedSkills, root),
     '.harness/project-brief.md': fm('project-brief', ['프로젝트 목적 확인','신규 기능 판단','계획 수립'], ['프로젝트 목적 변경','사용자/범위 변경'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- 이 프로젝트의 목적을 실제 내용으로 업데이트하세요.\n\n## Users\n-\n\n## Success Criteria\n-\n`),
     '.harness/plan.md': fm('plan', ['작업 시작 전','새 요청 접수','범위 변경','신규 프로젝트 감지'], ['계획 추가/수정/드랍','milestone 변경','목표 변경'], `# Plan\n\n## Goal\n- 사용자 목적을 기준으로 전체 계획을 유지합니다.\n\n## Scope\n- 포함 범위를 기록합니다.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. 프로젝트 계획 정리\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] project-brief.md를 실제 프로젝트 목적에 맞게 작성\n- [ ] context-map.md를 실제 파일 구조에 맞게 작성\n`),
@@ -881,7 +913,9 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
   // 1.36.105 (P-0015): mode=minimal 은 **AI 가 매 세션 읽는 지침 자체**를 줄인다.
   //   --minimal(파일 수)과 다른 축이다 — 그쪽은 세션 적재를 0.3% 밖에 못 줄였다(실측).
   //   남기는 것은 핵심 3종뿐: 모델 독립 상태 · 완료 증거 검증 · 인수인계. verify-claim/session close 는 여기서도 필수다.
-  if (_normMode(opts.mode) === 'minimal') {
+  // 1.36.107: 등급 판정은 manifest 와 **같은 술어**를 써야 한다. 여기만 opts.mode 를 보면
+  //   재init 시 manifest 는 minimal 인데 지침 파일은 standard 로 재생성되는 불일치가 난다.
+  if (_initMode(opts) === 'minimal') {
     _files['AGENTS.md'] = `${MARK}\n` + (lang === 'en' ? _AGENTS_MINIMAL_EN : _AGENTS_MINIMAL_KO);
     _files['CLAUDE.md'] = `${MARK}\n` + (lang === 'en'
       ? `# Claude Code Instructions\n\nFollow AGENTS.md.\n`
@@ -1248,7 +1282,12 @@ async function install(root, opts = {}) {
   if (resolved.permissionMode) log(`Agent 권한 모드: ${resolved.permissionMode}  (1.9.174 — REPL에서 \`:permissions extended|full\` 로 즉시 변경 가능)`);
   // 1.9.10: 스킬 카탈로그 출처 안내
   // 1.9.184 (사용자 명시): leerness-skillpack 미사용 정책 — 안내 메시지 제거. builtin catalog 만 사용.
-  const files = coreFiles(root, lang, skills, { minimal: !!opts.minimal, mode: opts.mode });
+  // 1.36.107: 기존 매니페스트를 한 번 읽어 넘긴다 — 재init 이 mode/installedAt 을 되돌리지 않도록.
+  //   손상이면 data 가 비어 오고, init 은 새로 만든다(복구). 경고는 아래에서 한 번 낸다.
+  const _prevMani = _readManifestChecked(root);
+  const _coreOpts = { minimal: !!opts.minimal, mode: opts.mode, prevManifest: _prevMani.corrupt ? {} : _prevMani.data };
+  if (_prevMani.corrupt) log(`  ⚠ manifest.json 손상(${_prevMani.reason}) — 기존 등급/설치시각을 읽을 수 없어 기본값으로 재생성합니다: ${_prevMani.path}`);
+  const files = coreFiles(root, lang, skills, _coreOpts);
   // 1.36.60 (F-05 2회차, 검수 #1 High): 반대-언어 canonical 템플릿 — 언어 전환 재init/마이그레이션 시
   //   구 언어 템플릿 라인을 "사용자 커스텀"으로 오인해 통째로 Preserved 에 이월하던 것을 차감 병합으로 해소.
   //   (검수 2차 High): 차감은 "실제 언어 전환일 때만" — 동일-언어 재init 에 무조건 적용하면 반대-언어 템플릿과
@@ -1259,7 +1298,9 @@ async function install(root, opts = {}) {
   const _langSwitched = !!(_prevLang && (_prevLang === 'ko' || _prevLang === 'en') && _prevLang !== lang);
   const _altLang = lang === 'en' ? 'ko' : 'en';
   let _altFiles = {};
-  if (_langSwitched) { try { _altFiles = coreFiles(root, _altLang, skills, { minimal: !!opts.minimal }); } catch {} }
+  // 1.36.107: 차감용 반대-언어 템플릿도 **같은 등급**으로 만들어야 한다. 등급이 다르면 차감이 어긋나
+  //   minimal 프로젝트가 언어를 바꿀 때 구 언어 템플릿이 "사용자 커스텀" 으로 오인돼 Preserved 로 이월된다.
+  if (_langSwitched) { try { _altFiles = coreFiles(root, _altLang, skills, Object.assign({}, _coreOpts)); } catch {} }
   const managedOverwrite = new Set([
     'AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md',
     '.harness/session-workflow.md',   // 1.36.60 (검수 #1): managed 편입 — 종전엔 재init 시 구 언어/구 버전 그대로 방치
@@ -25777,9 +25818,12 @@ async function main() {
     if (!exists(path.join(_mRoot, '.harness'))) { failJson(_mj, 'harness_missing', `leerness 미설치: ${_mRoot} — 먼저 leerness init`); return; }
     const sub = args[1] && !args[1].startsWith('-') && !_MODES.includes(args[1]) && !/^[.\/\\]|^[A-Za-z]:/.test(args[1]) ? args[1] : (_MODES.includes(args[1]) ? 'set' : 'get');
     const cur = _projectMode(_mRoot);
+    // 1.36.107: 손상을 조용히 'standard' 로 보고하지 않는다 — 사용자는 설정이 날아간 걸 알아야 한다.
+    const _mChk = _readManifestChecked(_mRoot);
     if (sub === 'get') {
-      if (_mj) { log(JSON.stringify({ ok: true, root: _mRoot, mode: cur, modes: _MODES }, null, 2)); return; }
+      if (_mj) { log(JSON.stringify({ ok: !_mChk.corrupt, root: _mRoot, mode: cur, modes: _MODES, corrupt: !!_mChk.corrupt, corruptReason: _mChk.reason || null }, null, 2)); if (_mChk.corrupt) process.exitCode = 1; return; }
       log(_cy(`# leerness mode — ${cur}`));
+      if (_mChk.corrupt) log(`  ⚠ manifest.json 손상(${_mChk.reason}) — 위 값은 **저장값이 아니라 기본값**입니다: ${_mChk.path}`);
       log(`  minimal   핵심 3종만 읽힌다 (handoff · verify-claim · session close)`);
       log(`  standard  현재 기본 — 전체 지침/상태 문서`);
       // 목록은 _MODES 에서 유도한다 — 하드코딩하면 등급을 뺐을 때 안내만 남아 없는 등급을 계속 광고한다
@@ -25790,8 +25834,18 @@ async function main() {
     if (sub === 'set') {
       const want = _normMode(args.find(a => _MODES.includes(a)));
       if (!args.some(a => _MODES.includes(a))) { failJson(_mj, 'invalid_mode', `mode 는 ${_MODES.join('|')} 중 하나입니다`); return; }
-      const mf = path.join(_mRoot, '.harness', 'manifest.json');
-      let m = {}; try { m = JSON.parse(read(mf)) || {}; } catch { m = {}; }
+      // 1.36.107 (손상 스토어 사냥): 종전엔 `catch { m = {} }` 후 덮어썼다 — 손상 매니페스트 위에 새로 쓰면서
+      //   project·language·installedAt 등 **남아 있던 필드까지 통째로 날렸다**(실측 3/3 손상 유형에서 재현).
+      //   1.36.49 가 토글에 세운 규율과 같다: 변경 진입점은 fail-closed. 읽지 못하면 쓰지 않는다.
+      if (_mChk.corrupt) {
+        failJson(_mj, 'manifest_corrupt', `manifest.json 손상(${_mChk.reason}) — 덮어쓰기 거부: ${_mChk.path}\n  복구 후 재시도하세요(지금 쓰면 project/language 등 남은 필드가 사라집니다)`);
+        return;
+      }
+      const mf = _mChk.path;
+      // 1.36.107 (codex 검수, 재현됨): Object.assign 은 [[Set]] 을 쓰므로 `__proto__` 키에서 setter 가 걸려
+      //   그 필드를 **조용히 버린다**(실측: 주입 후 mode set → 파일에서 사라짐). 스프레드는 CreateDataProperty 라 보존한다.
+      //   병적인 입력이긴 하나 이 수정이 내건 계약이 "남은 필드를 전부 보존" 이므로, 예외를 두면 계약이 거짓이 된다.
+      const m = { ..._mChk.data };
       m.mode = want; writeUtf8(mf, JSON.stringify(m, null, 2) + '\n');
       // 지침 파일은 등급의 산출물이므로 즉시 재생성한다 — 안 그러면 mode 는 이름만 바뀌고 읽히는 양은 그대로다.
       let regenerated = 0;
@@ -25870,8 +25924,14 @@ async function main() {
     //   12,000 은 신규 설치에 약 40% 여유를 주면서 오래 자란 프로젝트는 확실히 잡는 선이다.
     const budget = { minimal: 1200, standard: 12000 }[mode] || 12000;
     const over = total > budget;
-    if (_bj) { log(JSON.stringify({ ok: !over, root: _bRoot, mode, budget, total, over, parts }, null, 2)); if (over) process.exitCode = 1; return; }
+    // 1.36.107 (codex 검수 P3, 재현됨): `mode` 는 손상을 알리는데 여기서는 조용히 standard 로 떨어져
+    //   같은 매니페스트를 두고 두 표면이 다른 말을 했다(mode → exit 1 + corrupt, context budget → exit 0 + ok).
+    //   등급을 파생시키는 표면은 손상 상태를 함께 실어야 한다 — 안 그러면 "예산 이내" 라는 판정이
+    //   실은 읽지 못한 등급의 기본값 위에서 나온 것이 된다. 술어를 공유하지 않으면 표면마다 진실이 갈린다.
+    const _bChk = _readManifestChecked(_bRoot);
+    if (_bj) { log(JSON.stringify({ ok: !over && !_bChk.corrupt, root: _bRoot, mode, budget, total, over, corrupt: !!_bChk.corrupt, corruptReason: _bChk.reason || null, parts }, null, 2)); if (over || _bChk.corrupt) process.exitCode = 1; return; }
     log(_cy(`# leerness context budget — mode ${mode}`));
+    if (_bChk.corrupt) log(`  ⚠ manifest.json 손상(${_bChk.reason}) — 위 등급은 **저장값이 아니라 기본값**입니다: ${_bChk.path}`);
     for (const p of parts) log(`  ${String(p.tokens).padStart(6)} tok  ${String(p.bytes).padStart(7)} B   ${p.what}`);
     log(`  ${String(total).padStart(6)} tok  합계 · 예산 ${budget} tok`);
     log('');
@@ -25888,7 +25948,13 @@ async function main() {
   if (cmd === 'init') {
     const _initRoot = absRoot(arg('--path', args[1] && !args[1].startsWith('-') ? args[1] : process.cwd()));
     // 1.36.105 (P-0015): --mode 는 '무엇을 읽히나' 를 정한다. --minimal(파일 수)과 직교하며 함께 쓸 수 있다.
-    const _initOpts = { force:has('--force'), dry:has('--dry-run'), migration:false, minimal:has('--minimal'), noEnv:has('--no-env'), mode:_normMode(arg('--mode', null)) };
+    // 1.36.107: 여기서 _normMode 를 걸면 미지정이 'standard' 로 굳어 **기존 등급을 되돌린다**.
+    //   원본을 넘기고 정규화는 _initMode 가 한다(명시 > 저장값 > 기본). 잘못된 값은 거기서 standard 로 떨어진다.
+    const _initMode_flag = arg('--mode', null);
+    if (_initMode_flag !== null && !_MODES.includes(String(_initMode_flag).toLowerCase())) {
+      warn(`알 수 없는 등급 '${_initMode_flag}' — ${_MODES.join('|')} 중 하나여야 합니다. standard 로 진행합니다.`);
+    }
+    const _initOpts = { force:has('--force'), dry:has('--dry-run'), migration:false, minimal:has('--minimal'), noEnv:has('--no-env'), mode:_initMode_flag };
     if (has('--json')) {
       // 1.10.2 (UR-0146): init --json — 사람용 출력 묵음(setQuiet) + 순수 JSON 요약 1개. 기존엔 --json 을 silent ignore(배너만 출력).
       // 1.10.3 (UR-0173): json:true → 배너/진행바 억제(TTY 누출 차단), nonInteractive:true → 대화 메뉴 차단(머신 계약).

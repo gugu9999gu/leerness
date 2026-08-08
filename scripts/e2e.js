@@ -10086,6 +10086,139 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.107: 손상된 manifest.json 위에 덮어써서 남은 필드를 날렸다.
+//   손상 스토어 클래스는 이 저장소에서 3회 재발했고(토글 1.36.49 · preview 형상 1.36.28 · 토글 값 1.36.92),
+//   스토어 9종 × 손상 3유형 = 27조합을 실제로 돌려보니 **manifest 만** 3/3 실패였다 —
+//   다른 8종은 fail-closed 규율이 서 있는데 manifest 에는 없었고, 1.36.105 가 거기에 쓰기(mode set)를 추가했다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mf107-'));
+  try {
+    const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb });
+    const mk = (tag) => { const d = path.join(sb, tag); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}'); cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 180000, env: ENV }); return d; };
+    const R = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 120000, env: ENV });
+    // 손상 3유형 — 파싱 실패 · 타입 뒤바뀜 · 배열
+    const kinds = { broken: '{ this is not json', typeflip: '"a string"', arr: '[1,2,3]' };
+    const res = [];
+    for (const [tag, body] of Object.entries(kinds)) {
+      const d = mk('c-' + tag);
+      const mf = path.join(d, '.harness', 'manifest.json');
+      const orig = fs.readFileSync(mf, 'utf8');
+      fs.writeFileSync(mf, body);
+      const rg = R(d, ['mode']);
+      const warns = /손상/.test((rg.stdout || '') + (rg.stderr || ''));            // 조용히 기본값으로 떨어지지 않는다
+      const rs = R(d, ['mode', 'set', 'minimal']);
+      const refused = rs.status !== 0 && fs.readFileSync(mf, 'utf8') === body;      // 손상 위에 쓰지 않는다
+      fs.writeFileSync(mf, orig);
+      const rs2 = R(d, ['mode', 'set', 'minimal']);
+      let after = null; try { after = JSON.parse(fs.readFileSync(mf, 'utf8')); } catch {}
+      const recovers = rs2.status === 0 && !!after && after.mode === 'minimal' && !!after.project && !!after.language;
+      res.push(warns && refused && recovers);
+    }
+    dbg.corruptHandled = res.length === 3 && res.every(Boolean);
+    // 대조군 — 정상 매니페스트는 종전대로 동작하고 기존 필드가 전부 살아남는다
+    const good = mk('good');
+    const gmf = path.join(good, '.harness', 'manifest.json');
+    const before = JSON.parse(fs.readFileSync(gmf, 'utf8'));
+    const gr = R(good, ['mode']);
+    dbg.noFalseAlarm = gr.status === 0 && !/손상/.test((gr.stdout || '') + (gr.stderr || ''));
+    R(good, ['mode', 'set', 'minimal']);
+    const afterG = JSON.parse(fs.readFileSync(gmf, 'utf8'));
+    dbg.fieldsPreserved = afterG.mode === 'minimal' && afterG.project === before.project
+      && afterG.language === before.language && afterG.installedAt === before.installedAt;
+    // codex 검수 P3(재현됨): 등급을 **파생시키는 다른 표면**도 같은 말을 해야 한다.
+    //   손상인데 `mode` 는 exit 1 + corrupt, `context budget` 은 exit 0 + ok 였다 — 같은 파일을 두고 두 표면이 갈렸다.
+    //   술어를 공유하지 않으면 "예산 이내" 라는 판정이 읽지 못한 등급의 기본값 위에서 나온다.
+    const dsurf = mk('surf');
+    const smf = path.join(dsurf, '.harness', 'manifest.json');
+    const sorig = fs.readFileSync(smf, 'utf8');
+    fs.writeFileSync(smf, '{ not valid json');
+    const rb = R(dsurf, ['context', 'budget', '--json']);
+    let bj = null; try { bj = JSON.parse(rb.stdout); } catch {}
+    const surfCorrupt = rb.status === 1 && !!bj && bj.corrupt === true && bj.ok === false;
+    fs.writeFileSync(smf, sorig);                                    // 대조군 — 정상이면 손상 표시가 없어야 한다
+    const rb2 = R(dsurf, ['context', 'budget', '--json']);
+    let bj2 = null; try { bj2 = JSON.parse(rb2.stdout); } catch {}
+    dbg.surfaceAgrees = surfCorrupt && !!bj2 && bj2.corrupt === false;
+    ok = dbg.corruptHandled && dbg.noFalseAlarm && dbg.fieldsPreserved && dbg.surfaceAgrees;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ J(1.36.107) 손상 manifest: 조용한 기본값 금지 + 덮어쓰기 거부(fail-closed) + 복구 후 정상 + 대조군 무회귀'
+    : '✗ 1.36.107 손상 manifest 처리 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// ── 1.36.107 블록 K: 같은 라운드에서 **두 번째 쓰기 지점**이 나왔다.
+//   손상 스토어를 고치고 나서 "manifest 에 쓰는 곳이 또 있나" 를 훑었더니 재init 이 있었다:
+//   `mode set minimal` 로 등급을 낮춘 프로젝트를 업그레이드하려 재init 하면 mode 가 standard 로 되돌아갔다
+//   (실측 exit 0 · 무경고). manifest 는 managedOverwrite 목록에 있어 매번 템플릿으로 재생성되는데
+//   템플릿은 사용자 선택을 모른다. installedAt 도 매 재init 마다 갱신돼 이름이 거짓말을 하고 있었다.
+//   고치면서 반대 실패(등급을 바꿀 수 없게 되는 false-STICK)를 만들지 않았는지 함께 단언한다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mk107-'));
+  try {
+    const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb });
+    const R = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 180000, env: ENV });
+    const mk = (tag, extra) => { const d = path.join(sb, tag); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}'); R(d, ['init', d, '--yes'].concat(extra || [])); return d; };
+    const M = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, '.harness', 'manifest.json'), 'utf8')); } catch { return {}; } };
+
+    // 1) 재init 이 등급/설치시각을 되돌리지 않는다 (원래 결함)
+    const d1 = mk('keep', ['--mode', 'minimal']);
+    const first = M(d1);
+    dbg.setup = first.mode === 'minimal' && !!first.installedAt;
+    R(d1, ['init', d1, '--yes']);
+    const kept = M(d1);
+    dbg.modeKept = kept.mode === 'minimal';
+    // installedAt 은 **쓰기가 실제로 일어난 재init** 으로 봐야 한다. 플래그 없는 재init 은 no-op 감지에 걸려
+    //   파일을 아예 안 쓰므로(그리고 no-op 비교는 installedAt 을 휘발 필드로 정규화한다) 값이 그대로다 —
+    //   변이 시험이 이 단언을 공허하다고 잡아냈다(항상 now() 로 바꿔도 생존). --force 로 쓰기를 강제한다.
+    R(d1, ['init', d1, '--yes', '--force']);
+    const forced = M(d1);
+    dbg.installedAtKept = forced.installedAt === first.installedAt && forced.mode === 'minimal';
+    // 지침 파일이 manifest 와 같은 등급이어야 한다 — 여기만 opts.mode 를 보면 둘이 어긋난다
+    const agentsBytes = fs.readFileSync(path.join(d1, 'AGENTS.md'), 'utf8').length;
+
+    // 2) 되돌리는 길은 살아 있어야 한다 (false-STICK 방지) — 명시 플래그가 저장값을 이긴다
+    R(d1, ['init', d1, '--yes', '--mode', 'standard']);
+    const up = M(d1);
+    dbg.explicitWins = up.mode === 'standard';
+    dbg.templateFollows = fs.readFileSync(path.join(d1, 'AGENTS.md'), 'utf8').length > agentsBytes * 1.5;
+
+    // 3) 손상 위 재init 은 복구 경로 — 크래시 없이 경고 + 유효 매니페스트
+    const d2 = mk('corrupt', ['--mode', 'minimal']);
+    fs.writeFileSync(path.join(d2, '.harness', 'manifest.json'), '{ broken ]]]');
+    const rc = R(d2, ['init', d2, '--yes']);
+    const rebuilt = M(d2);
+    // '손상' 한 단어로 잡으면 안 된다 — init 이 부르는 state-integrity 점검도 같은 낱말을 쓴다.
+    //   변이 시험이 이걸 잡아냈다(경고를 지워도 다른 줄에 걸려 통과). 이 경고 고유의 문구로 단언한다.
+    dbg.corruptReinit = rc.status === 0 && /기존 등급\/설치시각을 읽을 수 없어/.test((rc.stdout || '') + (rc.stderr || ''))
+      && rebuilt.mode === 'standard' && !!rebuilt.project;
+
+    // 4) 신규 설치는 여전히 현재 시각을 기록한다 (보존이 '항상 빈 값' 이 되지 않았는지)
+    const d3 = mk('fresh');
+    const ia = M(d3).installedAt;
+    dbg.freshStamped = typeof ia === 'string' && !isNaN(Date.parse(ia)) && Math.abs(Date.now() - Date.parse(ia)) < 900000;
+
+    // 5) codex 검수(재현됨): Object.assign 은 __proto__ 키를 [[Set]] 으로 지나가 **조용히 버린다**.
+    //   "남은 필드를 전부 보존" 이 이 라운드의 계약이므로 예외를 두면 계약이 거짓이 된다.
+    const d4 = mk('proto');
+    const mf4 = path.join(d4, '.harness', 'manifest.json');
+    const j4 = JSON.parse(fs.readFileSync(mf4, 'utf8'));
+    fs.writeFileSync(mf4, JSON.stringify(Object.assign({ __PH__: 0 }, j4), null, 2).replace('"__PH__": 0', '"__proto__": {"a":1}') + '\n');
+    const rp = R(d4, ['mode', 'set', 'minimal']);
+    const rawAfter = fs.readFileSync(mf4, 'utf8');
+    dbg.protoPreserved = rp.status === 0 && /"__proto__"/.test(rawAfter) && JSON.parse(rawAfter).mode === 'minimal';
+
+    ok = dbg.setup && dbg.modeKept && dbg.installedAtKept && dbg.explicitWins && dbg.templateFollows
+      && dbg.corruptReinit && dbg.freshStamped && dbg.protoPreserved;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ K(1.36.107) 재init: 등급/설치시각 보존 + 명시 플래그 우선 + 지침 동조 + 손상 복구 + __proto__ 보존'
+    : '✗ 1.36.107 재init 매니페스트 보존 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 
