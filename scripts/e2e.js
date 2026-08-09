@@ -10219,6 +10219,145 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.108 블록 L (T-0097): 사용자 상태 쓰기는 **락 안에서** 일어난다.
+//   이 저장소는 스토어별로 락을 하나씩 달아 왔고, 그래서 같은 스토어 안에서도 진입점마다 갈렸다 —
+//   rules.md 는 `rule add` 만 보호되고 remove/pause/resume/stop/resume-all 다섯이 락 밖이었다(런타임 계측 실측).
+//   개별 수정은 다음 기능이 들어오면 또 샌다. 그래서 **불변식 자체를 실행으로 단언**한다.
+//
+//   왜 소스 검사가 아닌가: `_withLock(` 괄호 균형으로 판정하려 했더니 주석/정규식 리터럴에서 범위가 폭주해
+//   selftest 픽스처 수천 줄이 '보호됨' 으로 나왔다. 락은 파일별이 아니라 **구간별**이기도 하다
+//   (decisions.json 의 락을 쥔 채 decisions.md 를 쓴다). scripts/lock-probe.js 가 _withLock 을 미러링해 실행으로 관측한다.
+//
+//   유실은 가설이 아니라 재현이다: 읽기 직후를 4초 늘린 프로세스 A 와 그 창의 프로세스 B 를 붙이면
+//   락 있는 스토어는 B 가 2.4초 대기 후 둘 다 생존하고, 락 없던 user-requests.json 은 B 의 요청이 통째로 사라졌다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lock108-'));
+  try {
+    const ENV0 = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb });
+    const PRELOAD = path.join(path.dirname(CLI), '..', 'scripts', 'lock-probe.js').replace(/\\/g, '/');
+    // 병합 대상이 없어 lost-update 가 성립하지 않는 쓰기 — **사유가 있어야 목록에 남는다**.
+    //   조용한 상한을 두지 않기 위해 여기 적힌 것 외에는 전부 실패로 본다.
+    const EXEMPT = {
+      'task-log.md': 'append 전용(appendFileSync = O_APPEND) — 동시 추가가 서로를 지우지 않는다',
+      'agent-permissions.json': '상수 프리셋 전체 쓰기 — 읽기가 없어 병합할 이전 값이 없다',
+    };
+    const DERIVED = /^(cache\/|last-handoff\.json|environment\.json|tech-profile\.json|update-cache\.json|provider-probe-cache\.json|leerness\.html)/;
+    // 스토어를 각각 건드리는 변경 명령들. seed 로 기존 항목을 만들어 **읽기가 실제로 일어나게** 한다.
+    const CASES = [
+      ['task add', ['task', 'add', '락프로브']],
+      ['decision add', ['decision', 'add', '락프로브', '--why', 'x']],
+      ['lesson save', ['lesson', 'save', '락프로브']],
+      ['rule add', ['rule', 'add', '락프로브', '--trigger', 'every-session']],
+      ['rule pause', ['rule', 'pause', 'R-0001'], ['rule', 'add', '씨앗룰', '--trigger', 'every-session']],
+      ['plan add', ['plan', 'add', '락프로브']],
+      ['preview add', ['preview', 'add', '락프로브', '--design', 'd', '--features', 'f']],
+      ['requests add', ['requests', 'add', '락프로브']],
+      ['next-action add', ['next-action', 'add', '락프로브']],
+      ['toggle set', ['toggle', 'set', 'bugfix-receipt', 'off']],
+      ['mode set', ['mode', 'set', 'minimal']],
+      ['feature add', ['feature', 'add', '락프로브기능']],
+      ['constraints add', ['constraints', 'add', 'probeapi', '--alias', 'probe', '--constraint', 'auth:token']],
+      ['provider add', ['provider', 'add', 'probeprov']],
+      ['wakeup-interval set', ['wakeup-interval', 'set', '900']],
+      ['slash-commands --record', ['slash-commands', '--record']],
+      ['session close', ['session', 'close', '.']],
+      // audit --fix 는 session close 와 **같은 두 문서**를 쓴다 — 둘을 함께 돌려야 락 키 불일치가 드러난다
+      //   (검수가 재현한 결함이 정확히 이 조합이었다: 한쪽은 handoff 락, 다른 쪽은 current-state 락).
+      //   ⚠ 신규 프로젝트에서는 current-state 가 신선해 audit --fix 가 그 파일을 **아예 쓰지 않는다** —
+      //   조건을 만들지 않으면 이 케이스는 조용히 아무것도 관측하지 못한다(변이 시험이 그걸 잡아냈다).
+      ['audit --fix', ['audit', '.', '--fix'], (d) => {
+        const cs = path.join(d, '.harness', 'current-state.md');
+        if (fs.existsSync(cs)) fs.writeFileSync(cs, fs.readFileSync(cs, 'utf8').replace(/Updated: \d{4}-\d{2}-\d{2}/, 'Updated: 2000-01-01'));
+        const sh = path.join(d, '.harness', 'session-handoff.md');
+        if (fs.existsSync(sh) && !/Last generated:/.test(fs.readFileSync(sh, 'utf8'))) fs.appendFileSync(sh, '\nLast generated: (자동)\n');
+      }],
+    ];
+    // codex 검수가 지적한 커버리지 구멍: `provider sync` 는 네트워크가 필요해 목록에 없었고,
+    //   바로 그 명령이 async 를 돌려줘 락이 조기 해제되고 있었다 — 가드가 통과하는 채로.
+    //   외부망은 쓰지 않는다(게이트가 불안정해진다). 로컬 루프백 서버를 **별도 프로세스**로 띄운다:
+    //   같은 프로세스에서 서빙하면 spawnSync 가 이벤트 루프를 막아 자식 요청이 영영 응답을 못 받는다.
+    const srvJs = path.join(sb, 'srv.js');
+    fs.writeFileSync(srvJs, [
+      "const http=require('http'),fs=require('fs');",
+      "const s=http.createServer((q,r)=>{r.writeHead(200,{'Content-Type':'text/plain'});r.end('probealpha|probealpha-cli|probe provider');});",
+      "s.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[2], String(s.address().port)));"
+    ].join('\n'));
+    const portFile = path.join(sb, 'port.txt');
+    const srv = cp.spawn(process.execPath, [srvJs, portFile], { stdio: 'ignore' });
+    let syncUrl = null;
+    for (let i = 0; i < 100 && !syncUrl; i++) {
+      try { const p = fs.readFileSync(portFile, 'utf8').trim(); if (p) syncUrl = `http://127.0.0.1:${p}/providers.txt`; } catch {}
+      if (!syncUrl) { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50); } catch {} }
+    }
+    // 서버가 떴을 때만 추가한다 — 못 띄웠으면 '통과' 가 아니라 커버리지 부족으로 아래에서 실패시킨다.
+    if (syncUrl) CASES.push(['provider sync', ['provider', 'sync', syncUrl]]);
+    dbg.syncCovered = !!syncUrl;
+    const offenders = [], failedCmds = [];
+    const keysByFile = {};   // 파일 → 그 파일을 쓸 때 쥐고 있던 락 키 집합(명령을 가로질러 모은다)
+    let lockedSeen = 0, rows = 0;
+    for (const [label, argv, seed] of CASES) {
+      const d = path.join(sb, label.replace(/[^a-z0-9]+/gi, '_'));
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV0 });
+      if (typeof seed === 'function') seed(d);
+      else if (seed) cp.spawnSync(process.execPath, [CLI, ...seed, '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV0 });
+      const out = path.join(d, 'lock.jsonl');
+      // e2e 는 맨 위에서 LEERNESS_OFFLINE=1 을 켠다(외부망 차단). provider sync 는 **루프백**이라
+      //   그 정책의 대상이 아니다 — 이 케이스만 명시적으로 해제한다(다른 케이스는 그대로 차단 유지).
+      const caseEnv = Object.assign({}, ENV0, { LOCKPROBE_OUT: out });
+      if (label === 'provider sync') caseEnv.LEERNESS_OFFLINE = '0';
+      const r = cp.spawnSync(process.execPath, ['--require', PRELOAD, CLI, ...argv, '--path', d],
+        { cwd: d, encoding: 'utf8', timeout: 600000, env: caseEnv });
+      // 실패한 명령은 아무것도 안 써서 자동으로 '안전' 처럼 보인다 — 안전이 아니라 판정 불가다.
+      if (r.status !== 0) { failedCmds.push(label + '(exit=' + r.status + ')'); continue; }
+      let lines = [];
+      try { lines = fs.readFileSync(out, 'utf8').split('\n').filter(Boolean).map(JSON.parse); } catch {}
+      const byFile = {};
+      for (const l of lines) {
+        byFile[l.file] = (l.file in byFile ? byFile[l.file] : true) && l.locked;
+        // 어느 락 키로 지켰는지 모은다 — 파일 자신의 락이 아니면 다른 명령과 서로 배제되지 않는다.
+        if (l.locked && !DERIVED.test(l.file) && !EXEMPT[l.file]) {
+          (keysByFile[l.file] = keysByFile[l.file] || new Set());
+          for (const k of (l.heldOn || [])) keysByFile[l.file].add(k);
+        }
+      }
+      for (const [f, lockedOk] of Object.entries(byFile)) {
+        if (DERIVED.test(f)) continue;
+        rows++;
+        if (lockedOk) { lockedSeen++; continue; }
+        if (EXEMPT[f]) continue;
+        offenders.push(label + ' → ' + f);
+      }
+    }
+    // codex 검수 P2(재현됨): "락을 하나라도 쥐었나" 는 너무 약하다. 상호배제는 **같은 키**를 쥘 때만 성립한다.
+    //   session close 는 session-handoff.md.lock 을 쥔 채 current-state.md 를 썼고 audit --fix 는
+    //   current-state.md.lock 을 쥐었다 — 둘 다 '락 보유' 인 채로 audit 의 갱신이 덮였다.
+    //   올바른 불변식은 "자기 이름의 락" 이 아니라 **"그 파일의 모든 쓰기가 같은 키를 쓴다"** 이다.
+    //   (decisions.md 를 decisions.json.lock 아래에서 쓰는 것은 정상 — 그 파일을 쓰는 유일한 경로가 거기뿐이면.)
+    const wrongKey = [];
+    for (const [f, keys] of Object.entries(keysByFile)) {
+      if (keys.size !== 1) wrongKey.push(f + ' ← 서로 다른 락 ' + [...keys].sort().join(' / '));
+    }
+    dbg.wrongKey = wrongKey;
+    dbg.offenders = offenders;
+    dbg.failedCmds = failedCmds;
+    dbg.lockedSeen = lockedSeen;
+    dbg.rows = rows;
+    // 판별력: 락을 쥔 쓰기가 하나도 안 잡히면 계측이 죽은 것 — 그 상태의 "위반 0" 은 아무 의미가 없다.
+    dbg.probeAlive = lockedSeen >= 10;
+    // 명령이 대량으로 실패하면 커버리지가 무너진 것 — 그것도 통과로 보지 않는다.
+    dbg.coverage = failedCmds.length === 0;
+    ok = dbg.probeAlive && dbg.coverage && dbg.syncCovered && offenders.length === 0 && wrongKey.length === 0;
+    try { srv.kill(); } catch {}
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ L(1.36.108/T-0097) 사용자 상태 쓰기 ${dbg.rows}건 전부 락 안 + 파일당 락 키 일관 (락 관측 ${dbg.lockedSeen}건 = 계측 살아있음 · 명령 실패 0)`
+    : '✗ 1.36.108 락 불변식 위반 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

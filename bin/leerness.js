@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.107';
+const VERSION = '1.36.108';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -175,6 +175,9 @@ function _withLock(targetPath, fn, opts = {}) {
   if (_heldLocks.has(lockPath)) return fn();  // 이미 이 프로세스가 보유 → 재진입(중첩 호출 안전)
   const maxWaitMs = opts.maxWaitMs || 10000;  // 1.9.375 (UR-0084): 5s→10s — 고부하 경합 시 fail-open(락 없이 진행) 전 인내 상향, lost-update 창 축소
   const staleMs = opts.staleMs || 30000;
+  // ⚠ 여기서 mkdirp 를 빼면 안 된다(1.36.108 에서 한 번 뺐다가 게이트가 5건을 잡았다).
+  //   `state`·hunts 등 여러 호출부가 **이 mkdirp 가 만들어 주는 디렉토리에 기대어** 곧바로 파일을 쓴다 —
+  //   공유 헬퍼의 부작용을 없애면 그 의존이 한꺼번에 끊긴다. 미초기화 디렉토리 문제는 락을 다는 쪽에서 막는다.
   try { mkdirp(path.dirname(lockPath)); } catch {}
   const start = Date.now();
   let held = false;
@@ -187,8 +190,18 @@ function _withLock(targetPath, fn, opts = {}) {
     }
   }
   if (held) _heldLocks.add(lockPath);
-  try { return fn(); }
-  finally { if (held) { _heldLocks.delete(lockPath); try { fs.unlinkSync(lockPath); } catch {} } }
+  // 1.36.108 (T-0097, 자체 적대 검사에서 발견): fn 이 **프로미스를 돌려주면** 동기 finally 가 그 즉시 락을 푼다 —
+  //   비동기 본체(네트워크 fetch 등)는 락 없이 도는데 호출부는 보호받는다고 믿는다. 가장 나쁜 조합이다
+  //   (`provider sync` 를 감싸면서 실제로 이 형태를 만들었다). thenable 이면 **정착 후에** 푼다.
+  const release = () => { if (held) { _heldLocks.delete(lockPath); try { fs.unlinkSync(lockPath); } catch {} } };
+  let out;
+  try { out = fn(); }
+  catch (e) { release(); throw e; }
+  if (out && typeof out.then === 'function') {
+    return out.then(v => { release(); return v; }, e => { release(); throw e; });
+  }
+  release();
+  return out;
 }
 // 1.9.327 (UR-0025): _getLocalTz / _formatLocal → lib/pure-utils.js 로 이동 (순수 TZ/날짜 포맷, require 사용).
 // 자동 모드 활성 여부 (R-XXXX every-round 룰 존재 시 true)
@@ -2417,8 +2430,16 @@ function _writeUserRequests(root, requests) {
     return true;
   } catch { return false; }
 }
+// 1.36.108 (T-0097): read-modify-write 를 락으로 감싼다. **함수 안에서** 감싸는 것이 핵심이다 —
+//   호출부마다 거는 방식은 이 저장소에서 이미 실패했다: rules.md 는 add 만 보호되고 pause/resume/remove
+//   셋이 락 밖이었다(런타임 계측으로 실측). 진입점이 늘면 그만큼 구멍이 는다.
+//   유실은 가설이 아니라 재현이다 — 2프로세스 프로브에서 동시 `requests add` 한쪽이 통째로 사라졌다
+//   (대조군 previews/decisions 는 B 가 2.4초 대기 후 둘 다 생존 → 락이 실제로 막는다는 것도 같이 확인).
 function _recordUserRequest(root, text, opts = {}) {
   if (!text || typeof text !== 'string') return null;
+  return _withLock(_userRequestsPath(root), () => _recordUserRequestLocked(root, text, opts));
+}
+function _recordUserRequestLocked(root, text, opts) {
   const state = _loadUserRequests(root);
   if (state.unrecognized) { warn(`user-requests.json 형태 인식 불가 — 기록 건너뜀(원본 덮어쓰기 방지). 파일 확인: ${_userRequestsPath(root)}`); return null; }  // 1.36.21: 읽지 못한 데이터 파괴 차단
   // 중복 방지: 동일 텍스트 + open 상태 이미 존재 시 skip
@@ -2443,6 +2464,9 @@ function _recordUserRequest(root, text, opts = {}) {
   return entry;
 }
 function _updateUserRequest(root, id, patch) {
+  return _withLock(_userRequestsPath(root), () => _updateUserRequestLocked(root, id, patch));
+}
+function _updateUserRequestLocked(root, id, patch) {
   const state = _loadUserRequests(root);
   if (state.unrecognized) { warn(`user-requests.json 형태 인식 불가 — 업데이트 건너뜀(원본 덮어쓰기 방지). 파일 확인: ${_userRequestsPath(root)}`); return null; }  // 1.36.21
   const idx = state.requests.findIndex(r => r && r.id === id);
@@ -6399,7 +6423,7 @@ function _selfTestCases() {
       return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved()
         && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk() && _p0102HonestyOk()
         && _p0103FlagsOk() && _p0103JsonOk() && _p0103RootOk() && _p0104UsageOk()
-        && _p0014SecretBaselineOk() && _p0104ReminderOk() && _p0015ModeOk();
+        && _p0014SecretBaselineOk() && _p0104ReminderOk() && _p0015ModeOk() && _p0097AsyncLockOk();
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -8071,6 +8095,40 @@ function _p0015ModeOk() {
 }
 // 1.36.104: handoff 가 사람이 쓴 .harness/agent-reminders.md 를 통째로 지웠다(exit 0 · 안내 없음 · 백업 없음).
 //   대조군이 필수다 — 자동 생성분까지 남기면 그 파일이 영구 잔존해 매 세션 거짓 경보가 된다.
+// 1.36.108 (T-0097, 자체 적대 검사에서 발견): `_withLock` 에 **비동기 fn** 을 넘기면 동기 finally 가
+//   프로미스가 정착하기 전에 락을 푼다 — 본체는 락 없이 돌면서 호출부는 보호받는다고 믿는다.
+//   `provider sync`(15초 네트워크 fetch)를 감싸며 실제로 이 형태를 만들었고, e2e 는 그 명령을 돌리지 않아 못 잡았다.
+//   순수 호출로 계약을 고정한다: 프로미스가 끝나기 전에는 락 파일이 살아 있어야 하고, 끝나면 사라져야 한다.
+//   selftest 는 `c.run() === true` 만 통과시키므로(프로미스는 자동 실패) **동기 thenable** 로 같은 분기를
+//   결정적으로 밟는다 — `typeof out.then === 'function'` 이라는 판별 조건이 동일하다.
+function _p0097AsyncLockOk() {
+  const os2 = require('os');
+  const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p97lk-'));
+  try {
+    const target = path.join(arena, 'store.json');
+    const lockFile = target + '.lock';
+    fs.writeFileSync(target, '{}');
+    // ① 비동기 본체: 아직 정착하지 않은 동안 락이 살아 있어야 한다(조기 해제 = 보호 0).
+    let heldWhilePending = null;
+    const thenable = { then(onOk) { heldWhilePending = fs.existsSync(lockFile); onOk('done'); return 'settled'; } };
+    const r1 = _withLock(target, () => thenable);
+    const releasedAfterSettle = !fs.existsSync(lockFile) && r1 === 'settled';
+    // ② 대조군 — 동기 fn 은 종전대로 즉시 해제되고 값을 그대로 돌려준다(회귀로 락을 붙잡지 않았는지).
+    const r2 = _withLock(target, () => 42);
+    const syncReleased = !fs.existsSync(lockFile) && r2 === 42;
+    // ③ 예외 경로도 해제되어야 한다 — 안 그러면 한 번 던진 뒤 그 스토어가 영구 잠긴다.
+    let threw = false;
+    try { _withLock(target, () => { throw new Error('x'); }); } catch { threw = true; }
+    const errReleased = threw && !fs.existsSync(lockFile);
+    // ④ 거부된 thenable 도 해제 + 사유 전파.
+    let rejThrew = false;
+    const badThenable = { then(onOk, onErr) { onErr(new Error('boom')); return 'rejected'; } };
+    try { _withLock(target, () => badThenable); } catch { rejThrew = true; }
+    const rejReleased = rejThrew && !fs.existsSync(lockFile);
+    return heldWhilePending === true && releasedAfterSettle && syncReleased && errReleased && rejReleased;
+  } catch { return false; }
+  finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
+}
 function _p0104ReminderOk() {
   const os2 = require('os');
   const cp2 = require('child_process');
@@ -9062,13 +9120,16 @@ function _runPreWakeAudit(root) {
   };
   return audit;
 }
+// 1.36.108 (T-0097): append 형 RMW — session close 와 pre-wake-audit 가 겹칠 수 있다.
 function _saveAndAppendPreWakeReport(root, audit) {
-  const state = _loadPreWakeReport(root);
-  state.reports.push(audit);
-  // 최근 10개만 유지
-  if (state.reports.length > 10) state.reports = state.reports.slice(-10);
-  _writePreWakeReport(root, state.reports);
-  return audit;
+  return _withLock(_preWakeReportPath(root), () => {
+    const state = _loadPreWakeReport(root);
+    state.reports.push(audit);
+    // 최근 10개만 유지
+    if (state.reports.length > 10) state.reports = state.reports.slice(-10);
+    _writePreWakeReport(root, state.reports);
+    return audit;
+  });
 }
 
 // 1.9.220: 비정상 종료 감지 + 자율 재개 (사용자 명시)
@@ -9226,14 +9287,18 @@ function _writeWakeupHistory(root, state) {
     return true;
   } catch { return false; }
 }
+// 1.36.108 (T-0097): append 형 RMW — 락 밖이면 동시 기록이 서로를 지운다.
+//   이 스토어는 자동(스케줄)과 사용자 트리거가 동시에 들어올 수 있어 겹칠 여지가 실제로 있다.
 function _recordWakeupFire(root, kind) {
   // kind: 'auto' (scheduled), 'user-trigger' (사용자 명시 다음라운드), 'wakeup-miss'
-  const state = _loadWakeupHistory(root);
-  state.fires.push({ at: new Date().toISOString(), kind: kind || 'auto' });
-  // 최근 50개만 유지
-  if (state.fires.length > 50) state.fires = state.fires.slice(-50);
-  _writeWakeupHistory(root, state);
-  return state;
+  return _withLock(_wakeupHistoryPath(root), () => {
+    const state = _loadWakeupHistory(root);
+    state.fires.push({ at: new Date().toISOString(), kind: kind || 'auto' });
+    // 최근 50개만 유지
+    if (state.fires.length > 50) state.fires = state.fires.slice(-50);
+    _writeWakeupHistory(root, state);
+    return state;
+  });
 }
 // 권장 interval 계산 (sec)
 //   user-trigger 빈도 + pre-wake critical + 최근 평균 gap 기반
@@ -9891,6 +9956,13 @@ function sessionResumeCmd(root) {
 //   add <id> --aliases ... --constraint "kind:detail" → 사용자 정의 플랫폼 추가
 function constraintsCmd(root, sub, ...rest) {
   root = absRoot(root);
+  // 1.36.108 (T-0097): 변경 하위명령은 읽기~쓰기 전체를 직렬화한다(clarify/referee 와 같은 재진입 패턴).
+  //   손상 거부(1.36.78)는 손상만 막고 **동시 쓰기 유실**은 못 막는다 — 두 제약을 동시에 추가하면 하나가 조용히 사라진다.
+  if (sub === 'add' && !_withLock.__inConstraints) {
+    _withLock.__inConstraints = true;
+    try { return _withLock(_platformConstraintsPath(root), () => constraintsCmd(root, sub, ...rest)); }
+    finally { _withLock.__inConstraints = false; }
+  }
   const isTty = process.stdout && process.stdout.isTTY;
   const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
   const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
@@ -10135,9 +10207,12 @@ function wakeupIntervalCmd(root, sub, val) {
   if (sub === 'set') {
     const n = Number(val);
     if (!val || isNaN(n) || n < 60) { fail('Usage: leerness wakeup-interval set <secs ≥ 60>'); process.exit(1); }   // 1.36.50 (스윕 B)
-    const state = _loadWakeupHistory(root);
-    state.override = n;
-    _writeWakeupHistory(root, state);
+    // 1.36.108 (T-0097): override 만 바꾸는데도 파일 전체를 다시 쓴다 — 락 밖이면 그 사이 기록된 fires 가 사라진다.
+    _withLock(_wakeupHistoryPath(root), () => {
+      const state = _loadWakeupHistory(root);
+      state.override = n;
+      _writeWakeupHistory(root, state);
+    });
     if (has('--json')) { log(JSON.stringify({ override: n }, null, 2)); return; }
     log(grn(`✓ wakeup-interval override 설정: ${n}s (${Math.round(n/60)}min)`));
     log(dim(`  해제: leerness wakeup-interval auto`));
@@ -10145,9 +10220,11 @@ function wakeupIntervalCmd(root, sub, val) {
   }
 
   if (sub === 'auto') {
-    const state = _loadWakeupHistory(root);
-    state.override = null;
-    _writeWakeupHistory(root, state);
+    _withLock(_wakeupHistoryPath(root), () => {
+      const state = _loadWakeupHistory(root);
+      state.override = null;
+      _writeWakeupHistory(root, state);
+    });
     const result = _computeAdaptiveInterval(root);
     if (has('--json')) { log(JSON.stringify({ override: null, current: result }, null, 2)); return; }
     log(grn(`✓ override 해제 — 자동 계산 모드`));
@@ -10864,21 +10941,25 @@ function _writeNextActionQueue(root, queue) {
   } catch { return false; }
 }
 // handoff 에서 제안된 next-action 들을 큐에 자동 저장 (중복 방지: 이미 있는 title 은 skip)
+// 1.36.108 (T-0097): 읽기~쓰기를 락으로 직렬화. 이 큐는 handoff 가 자동으로도 채우기 때문에
+//   사용자가 `next-action add` 하는 순간 handoff 가 겹칠 수 있다 — 실사용에서 가장 겹치기 쉬운 조합이다.
 function _enqueueNextActions(root, actions) {
   if (!Array.isArray(actions) || actions.length === 0) return 0;
-  const state = _loadNextActionQueue(root);
-  const existingTitles = new Set(state.queue.map(a => a.title));
-  let added = 0;
-  for (const a of actions) {
-    if (existingTitles.has(a.title)) continue;
-    state.queue.push({ ...a, addedAt: new Date().toISOString() });
-    existingTitles.add(a.title);
-    added++;
-  }
-  // 최근 20개만 유지
-  if (state.queue.length > 20) state.queue = state.queue.slice(-20);
-  if (added > 0) _writeNextActionQueue(root, state.queue);
-  return added;
+  return _withLock(_nextActionQueuePath(root), () => {
+    const state = _loadNextActionQueue(root);
+    const existingTitles = new Set(state.queue.map(a => a.title));
+    let added = 0;
+    for (const a of actions) {
+      if (existingTitles.has(a.title)) continue;
+      state.queue.push({ ...a, addedAt: new Date().toISOString() });
+      existingTitles.add(a.title);
+      added++;
+    }
+    // 최근 20개만 유지
+    if (state.queue.length > 20) state.queue = state.queue.slice(-20);
+    if (added > 0) _writeNextActionQueue(root, state.queue);
+    return added;
+  });
 }
 
 // 1.9.201: next-action CLI 명령 — handoff 가 저장한 queue 에서 take/list/clear
@@ -10916,8 +10997,14 @@ async function nextActionCmd(root, sub, ...rest) {
     try {
       const taskTitle = action.title.replace(/^[^\w가-힣]+/, '').slice(0, 100);
       // 큐에서 제거 → write
-      state.queue.splice(n, 1);
-      _writeNextActionQueue(root, state.queue);
+      // 1.36.108 (T-0097): 락 안에서 **다시 읽고** 제거한다. 함수 머리에서 읽은 state 로 지우면
+      //   그 사이에 handoff 가 큐에 넣은 항목이 통째로 사라진다(handoff 는 자동으로 이 큐를 채운다).
+      _withLock(_nextActionQueuePath(root), () => {
+        const fresh = _loadNextActionQueue(root);
+        const idx = fresh.queue.findIndex(a => a && a.title === action.title);
+        if (idx >= 0) fresh.queue.splice(idx, 1);
+        _writeNextActionQueue(root, fresh.queue);
+      });
       // leerness task add 호출
       const taskResult = cp.spawnSync(process.execPath, [__filename, 'task', 'add', taskTitle, '--path', root], { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_INTERNAL: '1' } });
       if (taskResult.status === 0) {
@@ -12423,7 +12510,7 @@ function debug(root) {
 
 const _audit = require('../lib/audit');
 // 1.9.421 (UR-0025/UR-0125 큰 핸들러 모듈화 6번째): audit → lib/audit.js (DI 위임, thin wrapper)
-function audit(root, opts = {}) { return _audit.audit(root, opts, { VERSION, arg, has, planPath, readProgressRows, currentStatePath, handoffPath, envDiff, _readFeatureGraph, _matchAPISkills, _listAPISkills, _collectSecretFindings, _integrityFindings }); }   // 1.36.79: integrity 신호 공유
+function audit(root, opts = {}) { return _audit.audit(root, opts, { VERSION, arg, has, planPath, readProgressRows, currentStatePath, handoffPath, envDiff, _readFeatureGraph, _matchAPISkills, _listAPISkills, _collectSecretFindings, _integrityFindings, _withLock }); }   // 1.36.79: integrity 신호 공유 · 1.36.108: 락 주입(T-0097)
 
 // 1.9.312 (UR-0050, 설치리뷰 3중수렴): secret 스캐너 현대 키 패턴 보강.
 //   배경: 기존 OpenAI 패턴 `sk-[A-Za-z0-9]{32,}` 은 하이픈에서 끊겨 sk-proj-/sk-svcacct- (modern 프로젝트/서비스 키)를 놓침.
@@ -13868,9 +13955,13 @@ function handoff(root) {
   } else {
     log(out);
   }
+  // 1.36.108 (T-0097): 날짜 스탬프도 read-modify-write 다 — 사용자가 쓴 본문 전체를 다시 쓴다.
+  //   락 밖이면 그 사이 session close 가 갱신한 Now/Next/Blockers 를 낡은 사본으로 되돌린다.
   if (exists(currentStatePath(root))) {
-    const cs = read(currentStatePath(root)).replace(/Updated: \d{4}-\d{2}-\d{2}/, `Updated: ${today()}`);
-    writeUtf8(currentStatePath(root), cs);
+    _withLock(currentStatePath(root), () => {
+      const cs = read(currentStatePath(root)).replace(/Updated: \d{4}-\d{2}-\d{2}/, `Updated: ${today()}`);
+      writeUtf8(currentStatePath(root), cs);
+    });
   }
   // 1.9.56: handoff에 lessons --auto 자동 통합 — 현재 in-progress task와 관련된 과거 실수/결정 자동 재상기
   // 매 세션 시작 시 AI가 과거에 같은 키워드로 실패한 사례를 잊지 않도록.
@@ -16284,22 +16375,26 @@ function _loadAgentSlashCommands(root) {
 //   기존 사용자 override 가 있으면 보존(병합 결과 기록). force 시 빌트인으로 덮어쓰기.
 function _recordAgentSlashCommands(root, opts = {}) {
   const f = _agentSlashFile(root);
-  let agents;
-  if (opts.force || !exists(f)) {
-    agents = {};
-    for (const [id, def] of Object.entries(AGENT_SLASH_COMMANDS)) {
-      agents[id] = { label: def.label, asOf: def.asOf, invoke: def.invoke || 'slash', note: def.note || undefined, commands: def.commands.slice() };
-    }
-  } else {
-    const merged = _loadAgentSlashCommands(root);
-    agents = {};
-    for (const [id, def] of Object.entries(merged)) {
-      agents[id] = { label: def.label, asOf: def.asOf, invoke: def.invoke, note: def.note || undefined, commands: def.commands };
-    }
-  }
   mkdirp(path.dirname(f));
-  writeUtf8(f, JSON.stringify({ schemaVersion: 1, recordedAt: new Date().toISOString(), agents }, null, 2) + '\n');
-  return { file: f, agentCount: Object.keys(agents).length };
+  // 1.36.108 (T-0097): 비-force 경로는 기존 파일을 읽어 병합한 결과를 쓴다 = read-modify-write.
+  //   락 밖이면 그 사이 --refresh 가 probe 로 갱신한 agent 가 낡은 병합본에 덮인다(둘 다 이 파일을 쓴다).
+  return _withLock(f, () => {
+    let agents;
+    if (opts.force || !exists(f)) {
+      agents = {};
+      for (const [id, def] of Object.entries(AGENT_SLASH_COMMANDS)) {
+        agents[id] = { label: def.label, asOf: def.asOf, invoke: def.invoke || 'slash', note: def.note || undefined, commands: def.commands.slice() };
+      }
+    } else {
+      const merged = _loadAgentSlashCommands(root);
+      agents = {};
+      for (const [id, def] of Object.entries(merged)) {
+        agents[id] = { label: def.label, asOf: def.asOf, invoke: def.invoke, note: def.note || undefined, commands: def.commands };
+      }
+    }
+    writeUtf8(f, JSON.stringify({ schemaVersion: 1, recordedAt: new Date().toISOString(), agents }, null, 2) + '\n');
+    return { file: f, agentCount: Object.keys(agents).length };
+  });
 }
 // dispatch 참조용 — 특정 agent 의 슬래시 명령어 힌트 (서브에이전트 프롬프트에 주입할 1줄 요약 + 배열).
 //   2단계에서 agents multi/agent dispatch 가 이 헬퍼로 각 에이전트에 맞는 슬래시 명령을 안내.
@@ -16375,7 +16470,17 @@ function _refreshAgentSlashCommands(root, targets, opts = {}) {
   if (anyOk && !opts.dryRun) {
     file = _agentSlashFile(root);
     mkdirp(path.dirname(file));
-    writeUtf8(file, JSON.stringify({ schemaVersion: 1, recordedAt: new Date().toISOString(), refreshedAt: new Date().toISOString(), agents }, null, 2) + '\n');
+    // 1.36.108 (T-0097): probe 는 외부 CLI 를 띄우느라 오래 걸린다 — **락 밖에서** 돌리고 저장만 락 안에서 한다
+    //   (lib/referee.js 가 캘리브레이션에 세운 규칙과 같다: 긴 작업을 락 안에 넣으면 stale 30s 에 락을 뺏겨
+    //   오히려 남의 결과를 지운다). 락 안에서 파일을 **다시 읽어** 이번에 성공한 agent 만 덮어쓴다.
+    const probed = results.filter(r => r.ok).map(r => r.id);
+    _withLock(file, () => {
+      const fresh = _loadAgentSlashCommands(root);
+      const out = {};
+      for (const [id, d] of Object.entries(fresh)) out[id] = { label: d.label, asOf: d.asOf, invoke: d.invoke, note: d.note || undefined, commands: d.commands };
+      for (const id of probed) out[id] = agents[id];
+      writeUtf8(file, JSON.stringify({ schemaVersion: 1, recordedAt: new Date().toISOString(), refreshedAt: new Date().toISOString(), agents: out }, null, 2) + '\n');
+    });
   }
   return { results, file, anyOk };
 }
@@ -16532,6 +16637,14 @@ function _allProviders(root) {
 }
 function providerCmd(root, sub, ...args) {
   root = absRoot(root || process.cwd());
+  // 1.36.108 (T-0097): 변경 하위명령은 읽기~쓰기를 직렬화. 목록 RMW 라 동시 등록 시 한쪽이 조용히 사라진다(실측).
+  //   `sync` 는 **여기서 감싸지 않는다** — 최대 15초 네트워크 fetch 를 락 안에 두면 stale(30s) 창에 다가가고,
+  //   다른 프로세스가 락을 뺏어 둘 다 쓰게 된다(lib/referee.js 가 캘리브레이션에 세운 규칙). 저장만 아래에서 감싼다.
+  if (['add', 'remove'].includes(sub) && !providerCmd.__locked) {
+    providerCmd.__locked = true;
+    try { return _withLock(_providersFile(root), () => providerCmd(root, sub, ...args)); }
+    finally { providerCmd.__locked = false; }
+  }
   _loadEnvFile(root);
   if (!sub || sub === 'list') {
     const all = _allProviders(root);
@@ -16683,7 +16796,14 @@ function providerCmd(root, sub, ...args) {
           log(`  + ${e.id} (신규)`);
         }
       }
-      if (!dryRun) _writeUserProviders(root, userList);
+      // 1.36.108 (T-0097): 네트워크는 락 밖에서 끝났다. 저장만 락 안에서 하되 **다시 읽어** 병합한다 —
+      //   위의 userList 는 fetch 전 스냅샷이라, 그 사이 `provider add` 한 항목을 그대로 덮으면 지운다.
+      if (!dryRun) _withLock(_providersFile(root), () => {
+        const fresh = _readUserProviders(root);
+        const byId = new Map(fresh.map(u => [u.id, u]));
+        for (const u of userList) byId.set(u.id, u);      // 이번 sync 결과가 이긴다(그게 sync 의 의미다)
+        _writeUserProviders(root, [...byId.values()]);
+      });
       log('');
       log(`✓ sync 완료: 신규 ${added} · 갱신 ${updated} · 무시 ${skipped}${dryRun ? ' (--dry-run)' : ''}`);
       if (!dryRun) log(`   .env 에 LEERNESS_ENABLE_<X>=1 설정 후 \`leerness agents list\` 로 확인`);
@@ -17659,7 +17779,7 @@ function llmBenchRecordCmd(root) {
 
 const _sessionClose = require('../lib/session-close');
 // 1.9.425 (UR-0025/UR-0125 큰 핸들러 모듈화 10번째): sessionClose → lib/session-close.js (DI 위임)
-function sessionClose(root, opts = {}) { return _sessionClose.sessionClose(root, opts, { VERSION, STATUSES, MARK, has, arg, uiLang: _uiLang(root), harnessPath: __filename, readProgressRows, evidencePath, handoffPath, currentStatePath, taskLogPath, verifyRules, _autoRoadmap, _readUsageStats, readSessionCounter, writeSessionCounter, _retroAggregate, _retroOneLine, retroCmd, _loadDecisions, readRules, planPath, _loadLessons, _readFeatureGraph, _auditUserRequests, _detectDeliveredRequests, _computeRoundHistory, _computeMilestones, _computeRecentChanges, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _scanShellScriptsEncoding, _listAPISkills, _matchAPISkills, _loadShellFailures, _shellEnvDrift, _runPreWakeAudit, _saveAndAppendPreWakeReport, _runIdempotencyAudit, _detectAbnormalShutdown, _updateUserRequest, _detectOptimism, _scanCodeForPatterns, _collectSecretFindings }); }  // 1.17.6 (UR-0049): 마감 정합 — done 낙관 재확인 + 시크릿 재확인
+function sessionClose(root, opts = {}) { return _sessionClose.sessionClose(root, opts, { VERSION, STATUSES, MARK, has, arg, uiLang: _uiLang(root), harnessPath: __filename, readProgressRows, evidencePath, handoffPath, currentStatePath, taskLogPath, verifyRules, _autoRoadmap, _readUsageStats, readSessionCounter, writeSessionCounter, _retroAggregate, _retroOneLine, retroCmd, _loadDecisions, readRules, planPath, _loadLessons, _readFeatureGraph, _auditUserRequests, _detectDeliveredRequests, _computeRoundHistory, _computeMilestones, _computeRecentChanges, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _scanShellScriptsEncoding, _listAPISkills, _matchAPISkills, _loadShellFailures, _shellEnvDrift, _runPreWakeAudit, _saveAndAppendPreWakeReport, _runIdempotencyAudit, _detectAbnormalShutdown, _updateUserRequest, _detectOptimism, _scanCodeForPatterns, _collectSecretFindings, _withLock }); }  // 1.17.6 (UR-0049): 마감 정합 — done 낙관 재확인 + 시크릿 재확인 · 1.36.108: 락 주입(T-0097)
 
 function readmeCmd(root) { syncReadme(absRoot(root)); }
 function consistencyCheck(root) {
@@ -18991,28 +19111,48 @@ function ruleList(root) {
   for (const r of rules) log(`| ${r.id} | ${_cellSafe(r.trigger)} | ${_cellSafe(r.rule)} | ${r.status} | ${r.lastVerified} |`);  // 16th 버그헌트 F2: 파이프 칼럼 깨짐 차단(표시 _cellSafe)
 }
 
+// 1.36.108 (T-0097): rules.md 의 read-modify-write 병목. 종전엔 `rule add` **하나만** 락 안이었고
+//   remove/pause/resume/stop/resume-all 다섯이 락 밖이었다(런타임 계측으로 실측 — 같은 스토어, 진입점 6개, 보호 1개).
+//   진입점마다 거는 방식은 이렇게 샌다. 읽기와 쓰기를 한 함수에 묶어 그 안에서 직렬화한다.
+//   mutate 가 문자열을 돌려주면 그것을 실패 사유로 보고 쓰기를 건너뛴다(락 안에서 중단).
+function _updateRules(root, mutate) {
+  return _withLock(rulesPath(root), () => {
+    const rules = readRules(root);
+    const r = mutate(rules);
+    if (typeof r === 'string') return { error: r };
+    writeRules(root, rules);
+    return { ok: true, value: r };
+  });
+}
+
 function ruleRemove(root, id) {
   root = absRoot(root);
   if (!id) return fail('id required');
-  const rules = readRules(root);
-  const i = rules.findIndex(r => r.id === id);
-  if (i < 0) return failJson(has('--json'), 'rule_not_found', `rule not found: ${id}`);   // codex P2: --json 에러 구조화
-  const removed = rules.splice(i, 1)[0];
-  writeRules(root, rules);
-  const archive = exists(rulesArchivePath(root)) ? read(rulesArchivePath(root)) : '# Rules archive\n\n| ID | Trigger | Rule | Added | Status | Removed |\n|---|---|---|---|---|---|\n';
-  // 1.11.3 (14th 버그헌트 P2, UR-0179): 아카이브 셀도 _cellSafe — 기존엔 removed.rule/trigger 를 raw 기록해 파이프(|) 포함 룰이 아카이브 표를 깨뜨렸음(rules.md 는 이미 _cellSafe 적용).
-  writeUtf8(rulesArchivePath(root), archive + `| ${_cellSafe(removed.id)} | ${_cellSafe(removed.trigger)} | ${_cellSafe(removed.rule)} | ${_cellSafe(removed.added)} | removed | ${today()} |\n`);
+  let removed = null;
+  const res = _updateRules(root, (rules) => {
+    const i = rules.findIndex(r => r.id === id);
+    if (i < 0) return 'rule_not_found';
+    removed = rules.splice(i, 1)[0];
+    // 아카이브 추가도 같은 락 안에서 — 표 갱신과 아카이브가 갈라지면 룰이 양쪽 어디에도 없게 된다.
+    const archive = exists(rulesArchivePath(root)) ? read(rulesArchivePath(root)) : '# Rules archive\n\n| ID | Trigger | Rule | Added | Status | Removed |\n|---|---|---|---|---|---|\n';
+    // 1.11.3 (14th 버그헌트 P2, UR-0179): 아카이브 셀도 _cellSafe — 기존엔 removed.rule/trigger 를 raw 기록해 파이프(|) 포함 룰이 아카이브 표를 깨뜨렸음(rules.md 는 이미 _cellSafe 적용).
+    writeUtf8(rulesArchivePath(root), archive + `| ${_cellSafe(removed.id)} | ${_cellSafe(removed.trigger)} | ${_cellSafe(removed.rule)} | ${_cellSafe(removed.added)} | removed | ${today()} |\n`);
+    return removed;
+  });
+  if (res.error) return failJson(has('--json'), 'rule_not_found', `rule not found: ${id}`);   // codex P2: --json 에러 구조화
   ok(`rule removed: ${id} (보존: .harness/rules.archive.md)`);
 }
 
 function rulePause(root, id) {
   root = absRoot(root);
   if (!id) return fail('id required');
-  const rules = readRules(root);
-  const r = rules.find(x => x.id === id);
-  if (!r) return fail(`rule not found: ${id}`);
-  r.status = 'paused';
-  writeRules(root, rules);
+  const res = _updateRules(root, (rules) => {
+    const r = rules.find(x => x.id === id);
+    if (!r) return 'rule_not_found';
+    r.status = 'paused';
+    return r;
+  });
+  if (res.error) return fail(`rule not found: ${id}`);
   ok(`rule paused: ${id}`);
   _autoRoadmap(root, 'data-change');
 }
@@ -19020,31 +19160,35 @@ function rulePause(root, id) {
 function ruleResume(root, id) {
   root = absRoot(root);
   if (!id) return fail('id required');
-  const rules = readRules(root);
-  const r = rules.find(x => x.id === id);
-  if (!r) return fail(`rule not found: ${id}`);
-  r.status = 'active';
-  writeRules(root, rules);
+  const res = _updateRules(root, (rules) => {
+    const r = rules.find(x => x.id === id);
+    if (!r) return 'rule_not_found';
+    r.status = 'active';
+    return r;
+  });
+  if (res.error) return fail(`rule not found: ${id}`);
   ok(`rule resumed: ${id}`);
   _autoRoadmap(root, 'data-change');
 }
 
 function ruleStop(root) {
   root = absRoot(root);
-  const rules = readRules(root);
-  let n = 0;
-  for (const r of rules) if (r.status === 'active') { r.status = 'paused'; n++; }
-  writeRules(root, rules);
-  ok(`${n}개 룰 일시 정지 (rule resume <id> 또는 rule resume-all로 재개)`);
+  const res = _updateRules(root, (rules) => {
+    let n = 0;
+    for (const r of rules) if (r.status === 'active') { r.status = 'paused'; n++; }
+    return n;
+  });
+  ok(`${res.value}개 룰 일시 정지 (rule resume <id> 또는 rule resume-all로 재개)`);
 }
 
 function ruleResumeAll(root) {
   root = absRoot(root);
-  const rules = readRules(root);
-  let n = 0;
-  for (const r of rules) if (r.status === 'paused') { r.status = 'active'; n++; }
-  writeRules(root, rules);
-  ok(`${n}개 룰 재개`);
+  const res = _updateRules(root, (rules) => {
+    let n = 0;
+    for (const r of rules) if (r.status === 'paused') { r.status = 'active'; n++; }
+    return n;
+  });
+  ok(`${res.value}개 룰 재개`);
 }
 
 function captureProjectState(root) {
@@ -19980,8 +20124,17 @@ function _writeFeatureGraph(root, nodes) {
 //   _featureImpactBfs 는 pure-utils 로 이동(handoff/audit 공유). feature-graph I/O 헬퍼(_readFeatureGraph 등)는 공유라 harness 유지+주입.
 const _feature = require('../lib/feature');
 function _featureDeps() { return { _ensureFeatureGraph, _readFeatureGraph, _writeFeatureGraph, arg, has, _requireInit }; }  // 1.36.2: _requireInit 주입 — feature add 미초기화 dir scaffold 게이트
-function featureAddCmd(root, title) { return _feature.featureAddCmd(root, title, _featureDeps()); }
-function featureLinkCmd(root, fromId) { return _feature.featureLinkCmd(root, fromId, _featureDeps()); }
+// 1.36.108 (T-0097): feature add/link 는 읽기~쓰기 RMW 다(그래프 전체를 다시 렌더링해 저장).
+//   락을 여기서 감싼다 — lib/feature.js 는 I/O 를 주입받으므로 호출 경계가 가장 좁은 병목이다.
+//   단 **`.harness` 가 이미 있을 때만** 감싼다. `_withLock` 은 락 파일을 만들려고 디렉토리를 만드는데,
+//   미초기화 디렉토리에서 이 명령은 scaffold 게이트로 막혀야 하고 잔여 파일을 남기지 않아야 한다(1.36.2 계약).
+//   게이트에 걸릴 경우엔 아무것도 쓰지 않으므로 락도 필요 없다.
+function _featureLocked(root, fn) {
+  const r = absRoot(root);
+  return exists(path.join(r, '.harness')) ? _withLock(featureGraphPath(r), fn) : fn();
+}
+function featureAddCmd(root, title) { return _featureLocked(root, () => _feature.featureAddCmd(root, title, _featureDeps())); }
+function featureLinkCmd(root, fromId) { return _featureLocked(root, () => _feature.featureLinkCmd(root, fromId, _featureDeps())); }
 function featureImpactCmd(root, fromId) { return _feature.featureImpactCmd(root, fromId, _featureDeps()); }
 function featureListCmd(root) { return _feature.featureListCmd(root, _featureDeps()); }
 function featureShowCmd(root, fromId) { return _feature.featureShowCmd(root, fromId, _featureDeps()); }
@@ -25842,11 +25995,18 @@ async function main() {
         return;
       }
       const mf = _mChk.path;
-      // 1.36.107 (codex 검수, 재현됨): Object.assign 은 [[Set]] 을 쓰므로 `__proto__` 키에서 setter 가 걸려
-      //   그 필드를 **조용히 버린다**(실측: 주입 후 mode set → 파일에서 사라짐). 스프레드는 CreateDataProperty 라 보존한다.
-      //   병적인 입력이긴 하나 이 수정이 내건 계약이 "남은 필드를 전부 보존" 이므로, 예외를 두면 계약이 거짓이 된다.
-      const m = { ..._mChk.data };
-      m.mode = want; writeUtf8(mf, JSON.stringify(m, null, 2) + '\n');
+      // 1.36.108 (T-0097): 락 안에서 **다시 읽는다**. 1.36.107 은 손상 판정과 필드 보존을 넣었지만 그 사이 창은 남아 있었다 —
+      //   codex 검수가 rename 직전에 writer 를 주입해 그 writer 의 project/language/installedAt 이 전부 사라지는 것을 재현했다.
+      //   락 밖에서 읽은 _mChk.data 로 쓰면 "보존" 하는 것이 **낡은 스냅샷**이라 옆 프로세스의 변경을 지운다.
+      _withLock(mf, () => {
+        const fresh = _readManifestChecked(_mRoot);
+        if (fresh.corrupt) return;                       // 락 대기 중 손상됐다면 쓰지 않는다(fail-closed 유지)
+        // 1.36.107 (codex 검수, 재현됨): Object.assign 은 [[Set]] 을 쓰므로 `__proto__` 키에서 setter 가 걸려
+        //   그 필드를 **조용히 버린다**(실측: 주입 후 mode set → 파일에서 사라짐). 스프레드는 CreateDataProperty 라 보존한다.
+        //   병적인 입력이긴 하나 이 수정이 내건 계약이 "남은 필드를 전부 보존" 이므로, 예외를 두면 계약이 거짓이 된다.
+        const m = { ...fresh.data };
+        m.mode = want; writeUtf8(mf, JSON.stringify(m, null, 2) + '\n');
+      });
       // 지침 파일은 등급의 산출물이므로 즉시 재생성한다 — 안 그러면 mode 는 이름만 바뀌고 읽히는 양은 그대로다.
       let regenerated = 0;
       try {
@@ -26172,7 +26332,9 @@ async function main() {
   if (cmd === 'pulse')                              return pulseCmd(_resolveRoot(args[1]));
   if (cmd === 'enforce')                           return enforceCmd(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd(), args[1]);   // 1.36.43: 사용 강제 (git pre-commit)
   if (cmd === 'anchors')                           return anchorsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), args[1] && !args[1].startsWith('-') ? args[1] : null);   // 1.36.36: 정체성앵커 초안
-  if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
+  // 1.36.108 (T-0097): _withLock 을 넘긴다 — lib 모듈이 락을 deps 로 받는 기존 관례(clarify·referee·routing·bugfix)에
+  //   toggles 만 빠져 있어 `toggle set` 이 락 밖 read-modify-write 였다(런타임 계측으로 실측).
+  if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION, _withLock });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
   // 1.36.53 (UR-0062): 기술 프로필 · 1.36.67 (F15): 변경 시 기존 leerness.html 동반 갱신(있을 때만)
   if (cmd === 'tech')                              return _tech.techCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), _optSub(args), { has, regenGraph: (r) => { if (exists(path.join(r, 'leerness.html'))) _graph.graphHtmlCmd(r, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, quiet: true }); } });
   // 1.36.98 (P-0013): 재사용 인벤토리 — 새 화면 조각을 만들기 전에 '이미 있는 것' 을 먼저 본다(reuse-map 의 UI 판).
