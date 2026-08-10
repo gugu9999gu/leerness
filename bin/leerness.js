@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.110';
+const VERSION = '1.36.111';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -8854,141 +8854,160 @@ function commandsCmd(root) {
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   const cats = {
     status: [
-      { cmd: 'handoff [path] [--json] [--pulse] [--compact] [--quiet]', desc: '세션 시작 컨텍스트 + 7 통합 필드' },
-      { cmd: 'health [path] [--json] [--strict]', desc: '종합 헬스 + drift/security/skill/memory/featureGraph/roundHistory/milestones' },
-      { cmd: 'pulse [path] [--json]', desc: '한 줄 종합 요약 (1.9.231)' },
-      { cmd: 'round-history [path] [--json]', desc: 'git tag 기반 자율 라운드 통계 (1.9.226)' },
-      { cmd: 'milestones [path] [--json]', desc: '도달 마일스톤 + 다음 ETA (1.9.229)' },
-      { cmd: 'session-resume [path] [--auto-fix] [--json]', desc: '비정상 종료 감지 + 자율 재개 (1.9.220/222)' },
-      { cmd: 'which', desc: '활성 provider + 경로 진단' },
-      { cmd: 'memory status [path] [--json]', desc: 'T/D/R/P/L Memory Surface (1.9.114)' }
+      { cmd: 'handoff [path] [--json] [--pulse] [--compact] [--quiet]', desc: '세션 시작 컨텍스트 + 7 통합 필드', descEn: 'session-start context + 7 integrated fields' },
+      { cmd: 'health [path] [--json] [--strict]', desc: '종합 헬스 + drift/security/skill/memory/featureGraph/roundHistory/milestones', descEn: 'overall health + drift/security/skill/memory/featureGraph/roundHistory/milestones' },
+      { cmd: 'pulse [path] [--json]', desc: '한 줄 종합 요약 (1.9.231)', descEn: 'one-line overall summary (1.9.231)' },
+      { cmd: 'round-history [path] [--json]', desc: 'git tag 기반 자율 라운드 통계 (1.9.226)', descEn: 'autonomous round stats from git tags (1.9.226)' },
+      { cmd: 'milestones [path] [--json]', desc: '도달 마일스톤 + 다음 ETA (1.9.229)', descEn: 'reached milestones + next ETA (1.9.229)' },
+      { cmd: 'session-resume [path] [--auto-fix] [--json]', desc: '비정상 종료 감지 + 자율 재개 (1.9.220/222)', descEn: 'detect abnormal shutdown + autonomous resume (1.9.220/222)' },
+      { cmd: 'which', desc: '활성 provider + 경로 진단', descEn: 'active provider + path diagnosis' },
+      { cmd: 'memory status [path] [--json]', desc: 'T/D/R/P/L Memory Surface (1.9.114)', descEn: 'T/D/R/P/L memory surface (1.9.114)' }
     ],
     task: [
-      { cmd: 'task add "<request>"', desc: 'task 추가 (자동 dedup 1.9.212, review trigger 1.9.177)' },
-      { cmd: 'task update <id> --status <S>', desc: 'task 상태 갱신' },
-      { cmd: 'task drop <id>', desc: 'task 드롭' },
-      { cmd: 'task export --to <path>', desc: 'TodoWrite JSON 형식 export (1.9.60)' },
-      { cmd: 'next-action take|list [--json]', desc: 'next-action queue (1.9.201)' }
+      { cmd: 'task add "<request>"', desc: 'task 추가 (자동 dedup 1.9.212, review trigger 1.9.177)', descEn: 'add a task (auto-dedup 1.9.212, review trigger 1.9.177)' },
+      { cmd: 'task update <id> --status <S>', desc: 'task 상태 갱신', descEn: 'update task status' },
+      { cmd: 'task drop <id>', desc: 'task 드롭', descEn: 'drop a task' },
+      { cmd: 'task export --to <path>', desc: 'TodoWrite JSON 형식 export (1.9.60)', descEn: 'export in TodoWrite JSON format (1.9.60)' },
+      { cmd: 'next-action take|list [--json]', desc: 'next-action queue (1.9.201)', descEn: 'next-action queue (1.9.201)' }
     ],
     memory: [
-      { cmd: 'decision add|list|drop <id>', desc: 'decisions.md CRUD (1.9.108/118/125)' },
-      { cmd: 'rule add|list|pause|resume|remove', desc: 'rules.md CRUD (1.9.8/109)' },
-      { cmd: 'plan add|list <M-id>', desc: 'plan.md milestone CRUD (1.9.110/119)' },
-      { cmd: 'lesson save|list|drop', desc: 'lessons.md CRUD (1.9.112/117/124)' }
+      { cmd: 'decision add|list|drop <id>', desc: 'decisions.md CRUD (1.9.108/118/125)', descEn: 'decisions.md CRUD (1.9.108/118/125)' },
+      { cmd: 'rule add|list|pause|resume|remove', desc: 'rules.md CRUD (1.9.8/109)', descEn: 'rules.md CRUD (1.9.8/109)' },
+      { cmd: 'plan add|list <M-id>', desc: 'plan.md milestone CRUD (1.9.110/119)', descEn: 'plan.md milestone CRUD (1.9.110/119)' },
+      { cmd: 'lesson save|list|drop', desc: 'lessons.md CRUD (1.9.112/117/124)', descEn: 'lessons.md CRUD (1.9.112/117/124)' }
     ],
     audit: [
-      { cmd: 'audit [path] [--fix] [--strict] [--json]', desc: '메타 + 보안 + npm CVE 통합 감사' },
-      { cmd: 'drift check [path] [--auto-fix] [--json]', desc: 'drift 신호 + 자동 회복 (1.9.37/82/225)' },
-      { cmd: 'scan secrets [path]', desc: '시크릿 탐지' },
-      { cmd: 'encoding check [path]', desc: '인코딩 검증' },
-      { cmd: 'lazy detect [path] [--json]', desc: '게으른 작업 감지 (1.9.101)' },
-      { cmd: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<명령>"] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --all: 모든 done 주장 일괄 검증(CI·스케일, 1.33.2) · --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287) · --test-cmd: 비-JS 테스트 명령 (1.17.2)' },
-      { cmd: `lens [${_lensDomainList()}] [--json]`, desc: '분야별 자기질문 품질 렌즈 + 분야간 인과관계 (1.18.3 · database/contract/recovery/observability 는 심화, axes 는 8축 경량 점검)' },
+      { cmd: 'audit [path] [--fix] [--strict] [--json]', desc: '메타 + 보안 + npm CVE 통합 감사', descEn: 'combined meta + security + npm CVE audit' },
+      { cmd: 'drift check [path] [--auto-fix] [--json]', desc: 'drift 신호 + 자동 회복 (1.9.37/82/225)', descEn: 'drift signals + auto-recovery (1.9.37/82/225)' },
+      { cmd: 'scan secrets [path]', desc: '시크릿 탐지', descEn: 'secret detection' },
+      { cmd: 'encoding check [path]', desc: '인코딩 검증', descEn: 'encoding verification' },
+      { cmd: 'lazy detect [path] [--json]', desc: '게으른 작업 감지 (1.9.101)', descEn: 'detect lazy/incomplete work (1.9.101)' },
+      { cmd: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<명령>"] [--strict-claims] [--require-evidence]', cmdEn: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<command>"] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --all: 모든 done 주장 일괄 검증(CI·스케일, 1.33.2) · --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287) · --test-cmd: 비-JS 테스트 명령 (1.17.2)', descEn: 'verify a claim (1.9.18~26) — --all: verify every done claim at once (CI/scale, 1.33.2) · --require-evidence: require file + test evidence on done claims (1.9.287) · --test-cmd: non-JS test command (1.17.2)' },
+      { cmd: `lens [${_lensDomainList()}] [--json]`, desc: '분야별 자기질문 품질 렌즈 + 분야간 인과관계 (1.18.3 · database/contract/recovery/observability 는 심화, axes 는 8축 경량 점검)', descEn: 'per-domain self-question quality lenses + cross-domain causality (1.18.3 · database/contract/recovery/observability are deep dives, axes is a light 8-axis check)' },
       // 1.36.101 (명령 표면 감사): 1.36.98 에서 디스패처에만 붙이고 commands/--help 에 등재하지 않아 '있는데 안 보이는' 명령이었다.
-      { cmd: 'library [show|page] [path] [--json] [--ai]', desc: '재사용 인벤토리 — 컴포넌트·디자인 토큰을 저장소에서 추출. page: 오프라인 단일 HTML · --ai: 에이전트용 압축 JSON (1.36.98 P-0013)' },
-      { cmd: 'optimism-check <T-ID>', desc: '낙관적 API 감지 (1.9.26)' },
-      { cmd: 'requests audit|list|complete|drop|auto-complete', desc: '사용자 요청 추적 (1.9.207/223)' },
-      { cmd: 'pre-wake-audit [path] [--last]', desc: 'sleep 전 점검 (1.9.209)' },
-      { cmd: 'idempotency audit', desc: '멱등성 위반 탐지 (1.9.212)' }
+      { cmd: 'library [show|page] [path] [--json] [--ai]', desc: '재사용 인벤토리 — 컴포넌트·디자인 토큰을 저장소에서 추출. page: 오프라인 단일 HTML · --ai: 에이전트용 압축 JSON (1.36.98 P-0013)', descEn: 'reuse inventory — extracts components and design tokens from the repo. page: offline single HTML · --ai: compact JSON for agents (1.36.98 P-0013)' },
+      { cmd: 'optimism-check <T-ID>', desc: '낙관적 API 감지 (1.9.26)', descEn: 'detect optimistic API claims (1.9.26)' },
+      { cmd: 'requests audit|list|complete|drop|auto-complete', desc: '사용자 요청 추적 (1.9.207/223)', descEn: 'track user requests (1.9.207/223)' },
+      { cmd: 'pre-wake-audit [path] [--last]', desc: 'sleep 전 점검 (1.9.209)', descEn: 'pre-sleep checks (1.9.209)' },
+      { cmd: 'idempotency audit', desc: '멱등성 위반 탐지 (1.9.212)', descEn: 'detect idempotency violations (1.9.212)' }
     ],
     workflow: [
-      { cmd: 'session close [path] [--json] [--auto-apply-delivered]', desc: '세션 마감 + 9 카테고리 + 자동 통합' },
-      { cmd: 'resume [path]', desc: 'auto-resume-plan 적용 (1.9.203)' },
-      { cmd: 'route <task-type>', desc: '작업 유형 분류 (11종)' },
-      { cmd: 'agents list|check|quota|dispatch|multi|recommend', desc: '외부 AI CLI 오케스트레이션 (dispatch --role 모델 라우팅 1.9.270)' },
-      { cmd: 'roles list|set|unset|catalog|suggest|verify', desc: '모델별 역할 부여 (코딩/검수/지휘/디자인/디버그/설계/분배) — 1.9.270' },
-      { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272' },
-      { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278' },
-      { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280' },
-      { cmd: 'ci init [path] [--force]', desc: 'PR 마다 leerness gate 실행하는 GitHub Actions 워크플로 생성 (.github/workflows/leerness-gate.yml) — 1.9.444' },
-      { cmd: 'export|prompt --target <agent>', desc: 'adapter 별칭 — 도구별 지침/계약 파일 생성 (claude/cursor/codex/agents-md/...) — 1.9.448' },
-      { cmd: 'glossary [build|show] [--lang ko|en|both] [--json]', desc: '의존성 용어집 — package.json/requirements 라이브러리를 비개발자용 한 줄 설명으로 (.harness/glossary.md) — 1.11.4' },
-      { cmd: 'policy show|set|check', desc: '권한 등급 (read-only…publish) — opt-in enforced (위험 명령 차단) — 1.9.281' },
-      { cmd: 'reuse-check "<기능>"', desc: '외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인 카테고리+체크리스트) — 1.9.285' },
-      { cmd: 'skill impact', desc: '스킬 설치 영향 경량 상관추적 (사용 빈도 ↔ 검증 통과율, advisory) — 1.9.286' },
-      { cmd: 'release channel [--json]', desc: '릴리스 채널 정책 (latest 안정 / next 실험 / 버전 고정) — 1.9.275' },
-      { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)' },
-      { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)' },
-      { cmd: 'clarify "<사용자 요청>" [--json]', desc: '요청 모호성 신호 감지 → 사용자에게 물을 질문 생성 (추측 구현 방지) — 1.36.51 UR-0061' },
-      { cmd: 'tech [--json]', desc: '기술 프로필 — 개발 언어·연결 서비스 자동 감지 + 마이그레이션/언어전환 이력, 그래프 🛠 탭 표시 — 1.36.53 UR-0062' },
-      { cmd: 'integrity check [--repair] [--json]', desc: 'managed 정책-문서 12종 무결성(부재/H1 상실/절단) 점검 — --repair: archive 대피 후 템플릿 재생성 — 1.36.57 감사 F-04' },
-      { cmd: 'referee add|verify|list|show|drop', desc: '검증기 캘리브레이션 — 신뢰 전에 탐지력 증명(known-good 통과 + 망가뜨린 known-bad 를 기대 사유로 거부). verify-claim --referee / gate 게이팅 — 1.36.80 P-0001' },
-      { cmd: 'preview add|list|show|approve|revise|mockup|verify', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약. mockup <P-ID> [--target <파일>] [--force]: 프로젝트의 실제 토큰·컴포넌트·대상 화면 클래스를 심은 시안 · approve 시 그 시안이 계약으로 고정됨 · verify <P-ID> --files a,b: 구현이 계약을 지켰는지 존재 대조(시각적 일치는 보증하지 않음) — 1.36.51 UR-0061 · 1.36.75 UR-0066 · 1.36.99/1.36.100 P-0012' },
-      { cmd: 'dashboard [path] [--port N] [--timeout SEC] [--json]', desc: '.harness 읽기 전용 대시보드 — 토글·task·마일스톤·미리보기·라우팅기록·bugfix probe 를 localhost 에서 열람. 설정 변경·게이트 판정은 하지 않는다(CLI 가 판정). --json 은 서버 없이 같은 스냅샷 출력. 정적 단일파일 뷰(leerness.html)는 leerness graph --html 로 그대로 — 1.36.90 P-0006' },
-      { cmd: 'agents route "<작업>" [--tier tiny|normal|high-risk] [--confirm --approved-by "<승인자>"] [--log]', desc: '작업 난이도 판정(결정적 규칙) → 추상 역할(architect/commander/coder/reviewer) 배치 제안. 모델명 하드코딩 없이 `roles set` 매핑을 쓰고, 실행은 명시 확인 필요. 토글 기본 OFF: leerness toggle set difficulty-routing on — 1.36.89 P-0007' },
-      { cmd: 'bugfix start|receipt|drop|list', desc: 'bugfix 완료 영수증 — 수정 전 재현 probe 를 등록(2회 연속 실패해야 등록)하고, done 전이에서 통과 + 근본원인/형제범위 영수증을 요구. 토글 기본 OFF: leerness toggle set bugfix-receipt on — 1.36.87 P-0005' },
-      { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)' },
-      { cmd: 'brainstorm "<topic>" [--include-code]', desc: '워크스페이스 회수 + 코드 grep' }
+      { cmd: 'session close [path] [--json] [--auto-apply-delivered]', desc: '세션 마감 + 9 카테고리 + 자동 통합', descEn: 'close the session + 9 categories + auto integration' },
+      { cmd: 'resume [path]', desc: 'auto-resume-plan 적용 (1.9.203)', descEn: 'apply the auto-resume plan (1.9.203)' },
+      { cmd: 'route <task-type>', desc: '작업 유형 분류 (11종)', descEn: 'classify the task type (11 kinds)' },
+      { cmd: 'agents list|check|quota|dispatch|multi|recommend', desc: '외부 AI CLI 오케스트레이션 (dispatch --role 모델 라우팅 1.9.270)', descEn: 'orchestrate external AI CLIs (dispatch --role model routing 1.9.270)' },
+      { cmd: 'roles list|set|unset|catalog|suggest|verify', desc: '모델별 역할 부여 (코딩/검수/지휘/디자인/디버그/설계/분배) — 1.9.270', descEn: 'assign roles per model (coding/review/command/design/debug/architecture/dispatch) — 1.9.270' },
+      { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272', descEn: 'disclose the permission/security surface (what it does + opt-outs + commands to watch) — 1.9.272' },
+      { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278', descEn: '.leerness/ JSON state substrate (cross-agent handoff standard) — 1.9.278' },
+      { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280', descEn: 'generate per-tool instructions/.mcp.json selectively (claude/cursor/codex/goose/...) — 1.9.280' },
+      { cmd: 'ci init [path] [--force]', desc: 'PR 마다 leerness gate 실행하는 GitHub Actions 워크플로 생성 (.github/workflows/leerness-gate.yml) — 1.9.444', descEn: 'create a GitHub Actions workflow that runs leerness gate on every PR (.github/workflows/leerness-gate.yml) — 1.9.444' },
+      { cmd: 'export|prompt --target <agent>', desc: 'adapter 별칭 — 도구별 지침/계약 파일 생성 (claude/cursor/codex/agents-md/...) — 1.9.448', descEn: 'adapter alias — generate per-tool instruction/contract files (claude/cursor/codex/agents-md/...) — 1.9.448' },
+      { cmd: 'glossary [build|show] [--lang ko|en|both] [--json]', desc: '의존성 용어집 — package.json/requirements 라이브러리를 비개발자용 한 줄 설명으로 (.harness/glossary.md) — 1.11.4', descEn: 'dependency glossary — one-line plain-language descriptions of package.json/requirements libraries (.harness/glossary.md) — 1.11.4' },
+      { cmd: 'policy show|set|check', desc: '권한 등급 (read-only…publish) — opt-in enforced (위험 명령 차단) — 1.9.281', descEn: 'permission tiers (read-only…publish) — opt-in enforcement (blocks risky commands) — 1.9.281' },
+      { cmd: 'reuse-check "<기능>"', cmdEn: 'reuse-check "<capability>"', desc: '외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인 카테고리+체크리스트) — 1.9.285', descEn: 'build-vs-reuse decision gate for external OSS (offline categories + checklist) — 1.9.285' },
+      { cmd: 'skill impact', desc: '스킬 설치 영향 경량 상관추적 (사용 빈도 ↔ 검증 통과율, advisory) — 1.9.286', descEn: 'lightweight correlation of skill installs (usage frequency vs verification pass rate, advisory) — 1.9.286' },
+      { cmd: 'release channel [--json]', desc: '릴리스 채널 정책 (latest 안정 / next 실험 / 버전 고정) — 1.9.275', descEn: 'release channel policy (latest stable / next experimental / pinned) — 1.9.275' },
+      { cmd: 'slash-commands [agent] [--json --record --detect --refresh]', desc: 'CLI 에이전트 슬래시 명령 레지스트리 + --help probe 자동 갱신 (1.9.265~267, UR-0021)', descEn: 'slash-command registry for CLI agents + auto refresh via --help probe (1.9.265~267, UR-0021)' },
+      { cmd: 'review-request "<request>"', desc: '사용자 요청 사전 검토 (1.9.176)', descEn: 'pre-review a user request (1.9.176)' },
+      { cmd: 'clarify "<사용자 요청>" [--json]', cmdEn: 'clarify "<user request>" [--json]', desc: '요청 모호성 신호 감지 → 사용자에게 물을 질문 생성 (추측 구현 방지) — 1.36.51 UR-0061', descEn: 'detect ambiguity signals in a request → generate questions to ask the user (prevents guess-implementation) — 1.36.51 UR-0061' },
+      { cmd: 'tech [--json]', desc: '기술 프로필 — 개발 언어·연결 서비스 자동 감지 + 마이그레이션/언어전환 이력, 그래프 🛠 탭 표시 — 1.36.53 UR-0062', descEn: 'tech profile — auto-detect languages and connected services + migration/language-switch history, shown on the graph 🛠 tab — 1.36.53 UR-0062' },
+      { cmd: 'integrity check [--repair] [--json]', desc: 'managed 정책-문서 12종 무결성(부재/H1 상실/절단) 점검 — --repair: archive 대피 후 템플릿 재생성 — 1.36.57 감사 F-04', descEn: 'integrity check for the 12 managed policy documents (missing/lost H1/truncated) — --repair: archive the old copy then regenerate from template — 1.36.57 audit F-04' },
+      { cmd: 'referee add|verify|list|show|drop', desc: '검증기 캘리브레이션 — 신뢰 전에 탐지력 증명(known-good 통과 + 망가뜨린 known-bad 를 기대 사유로 거부). verify-claim --referee / gate 게이팅 — 1.36.80 P-0001', descEn: 'verifier calibration — prove detection power before trusting it (passes known-good, rejects a broken known-bad for the expected reason). Gates verify-claim --referee / gate — 1.36.80 P-0001' },
+      { cmd: 'preview add|list|show|approve|revise|mockup|verify', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약. mockup <P-ID> [--target <파일>] [--force]: 프로젝트의 실제 토큰·컴포넌트·대상 화면 클래스를 심은 시안 · approve 시 그 시안이 계약으로 고정됨 · verify <P-ID> --files a,b: 구현이 계약을 지켰는지 존재 대조(시각적 일치는 보증하지 않음) — 1.36.51 UR-0061 · 1.36.75 UR-0066 · 1.36.99/1.36.100 P-0012', descEn: 'preview-approval workflow for new features — contract: no code before approve. mockup <P-ID> [--target <file>] [--force]: a draft seeded with the project\'s real tokens/components/target-screen classes · approve freezes that draft as the contract · verify <P-ID> --files a,b: existence check that the implementation kept the contract (visual match is NOT guaranteed) — 1.36.51 UR-0061 · 1.36.75 UR-0066 · 1.36.99/1.36.100 P-0012' },
+      { cmd: 'dashboard [path] [--port N] [--timeout SEC] [--json]', desc: '.harness 읽기 전용 대시보드 — 토글·task·마일스톤·미리보기·라우팅기록·bugfix probe 를 localhost 에서 열람. 설정 변경·게이트 판정은 하지 않는다(CLI 가 판정). --json 은 서버 없이 같은 스냅샷 출력. 정적 단일파일 뷰(leerness.html)는 leerness graph --html 로 그대로 — 1.36.90 P-0006', descEn: 'read-only .harness dashboard — browse toggles/tasks/milestones/previews/routing history/bugfix probes on localhost. It never changes settings or makes gate verdicts (the CLI does). --json prints the same snapshot without a server. The static single-file view (leerness.html) is still leerness graph --html — 1.36.90 P-0006' },
+      { cmd: 'agents route "<작업>" [--tier tiny|normal|high-risk] [--confirm --approved-by "<승인자>"] [--log]', cmdEn: 'agents route "<task>" [--tier tiny|normal|high-risk] [--confirm --approved-by "<approver>"] [--log]', desc: '작업 난이도 판정(결정적 규칙) → 추상 역할(architect/commander/coder/reviewer) 배치 제안. 모델명 하드코딩 없이 `roles set` 매핑을 쓰고, 실행은 명시 확인 필요. 토글 기본 OFF: leerness toggle set difficulty-routing on — 1.36.89 P-0007', descEn: 'judge task difficulty (deterministic rules) → propose an abstract-role assignment (architect/commander/coder/reviewer). Uses your `roles set` mapping instead of hardcoded model names, and execution needs explicit confirmation. Toggle is OFF by default: leerness toggle set difficulty-routing on — 1.36.89 P-0007' },
+      { cmd: 'bugfix start|receipt|drop|list', desc: 'bugfix 완료 영수증 — 수정 전 재현 probe 를 등록(2회 연속 실패해야 등록)하고, done 전이에서 통과 + 근본원인/형제범위 영수증을 요구. 토글 기본 OFF: leerness toggle set bugfix-receipt on — 1.36.87 P-0005', descEn: 'bugfix completion receipt — register a reproduction probe before the fix (it must fail twice in a row to register), then require it to pass at the done transition plus a root-cause/sibling-scope receipt. Toggle is OFF by default: leerness toggle set bugfix-receipt on — 1.36.87 P-0005' },
+      { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)', descEn: 'persona-based review (1.9.29)' },
+      { cmd: 'brainstorm "<topic>" [--include-code]', desc: '워크스페이스 회수 + 코드 grep', descEn: 'recall from the workspace + grep the code' }
     ],
     release: [
-      { cmd: 'release sync-main [path]', desc: 'main merge + push + 자동 npm publish (1.9.140/178)' },
-      { cmd: 'release pack', desc: 'tarball 생성' },
-      { cmd: 'release publish', desc: 'GitHub release 발행' },
-      { cmd: 'release channel [path] [--json]', desc: '릴리스 채널 정책 (stable/next/고정) — 1.9.275' },
-      { cmd: 'release cadence [path] [--json]', desc: '릴리스 빈도 진단 + 권장 (외부리뷰 케이던스 가시화) — UR-0074, 1.9.374' }
+      { cmd: 'release sync-main [path]', desc: 'main merge + push + 자동 npm publish (1.9.140/178)', descEn: 'merge to main + push + auto npm publish (1.9.140/178)' },
+      { cmd: 'release pack', desc: 'tarball 생성', descEn: 'build the tarball' },
+      { cmd: 'release publish', desc: 'GitHub release 발행', descEn: 'publish a GitHub release' },
+      { cmd: 'release channel [path] [--json]', desc: '릴리스 채널 정책 (stable/next/고정) — 1.9.275', descEn: 'release channel policy (stable/next/pinned) — 1.9.275' },
+      { cmd: 'release cadence [path] [--json]', desc: '릴리스 빈도 진단 + 권장 (외부리뷰 케이던스 가시화) — UR-0074, 1.9.374', descEn: 'release cadence diagnosis + recommendation — UR-0074, 1.9.374' }
     ],
     skill: [
-      { cmd: 'skill list|info|learn|use|optimize|match|suggest', desc: 'skill 카탈로그 CRUD' },
-      { cmd: 'skill install|install-top|publish|search|discover', desc: 'skill 배포 + 검색' }
+      { cmd: 'skill list|info|learn|use|optimize|match|suggest', desc: 'skill 카탈로그 CRUD', descEn: 'skill catalog CRUD' },
+      { cmd: 'skill install|install-top|publish|search|discover', desc: 'skill 배포 + 검색', descEn: 'skill distribution + search' }
     ],
     bridge: [
-      { cmd: 'web check|screenshot|extract <url>', desc: 'playwright bridge (opt-in, 1.9.165)' },
-      { cmd: 'pc check|click|type|screenshot', desc: 'robotjs/nut-tree bridge (opt-in, 1.9.166)' },
-      { cmd: 'lsp check|symbols|references', desc: 'LSP 어댑터 (1.9.167)' }
+      { cmd: 'web check|screenshot|extract <url>', desc: 'playwright bridge (opt-in, 1.9.165)', descEn: 'playwright bridge (opt-in, 1.9.165)' },
+      { cmd: 'pc check|click|type|screenshot', desc: 'robotjs/nut-tree bridge (opt-in, 1.9.166)', descEn: 'robotjs/nut-tree bridge (opt-in, 1.9.166)' },
+      { cmd: 'lsp check|symbols|references', desc: 'LSP 어댑터 (1.9.167)', descEn: 'LSP adapter (1.9.167)' }
     ],
     config: [
-      { cmd: 'init [path]', desc: '워크스페이스 초기화' },
-      { cmd: 'migrate [path] [--dry-run]', desc: '업데이트 마이그레이션' },
-      { cmd: 'update [--check|--yes|--force]', desc: '자가 업데이트' },
-      { cmd: 'wakeup-interval get|set|auto|history|record', desc: 'adaptive wakeup (1.9.210)' },
-      { cmd: 'workspace-dir get|guide', desc: '워크스페이스 디렉토리 (1.9.211)' },
-      { cmd: 'parent detect|adopt [--select <kinds>] [--apply]', desc: '상위 leerness 부모 탐지 + 자산 게이트형 adopt (1.30.2~3)' },
-      { cmd: 'intent classify|expand|domains "<request>"', desc: '의도 파악 + scope (1.9.213)' },
-      { cmd: 'constraints list|check|add', desc: '플랫폼/API 제약 (1.9.208)' },
-      { cmd: 'provider list|add|remove|sync', desc: 'Provider Registry (1.9.157~160)' },
-      { cmd: 'commands [--json]', desc: '전체 명령 카테고리 목록 (1.9.233)' },
-      { cmd: 'migrate audit|apply|plan [path] [--json] [--yes]', desc: '크로스버전 마이그레이션 진단/적용/플랜 (UR-0075, 1.9.356~358)' },
-      { cmd: 'migrate --guide', desc: 'AI 에이전트용 크로스버전 마이그레이션 가이드 (1.9.355)' },
-      { cmd: 'doctor [--json]', desc: '설치/환경 진단 (1.9.315)' },
-      { cmd: 'selftest [--json]', desc: '코어 함수 무결성 자가 검증 (1.9.258)' },
+      { cmd: 'init [path]', desc: '워크스페이스 초기화', descEn: 'initialize the workspace' },
+      { cmd: 'migrate [path] [--dry-run]', desc: '업데이트 마이그레이션', descEn: 'update migration' },
+      { cmd: 'update [--check|--yes|--force]', desc: '자가 업데이트', descEn: 'self-update' },
+      { cmd: 'wakeup-interval get|set|auto|history|record', desc: 'adaptive wakeup (1.9.210)', descEn: 'adaptive wakeup interval (1.9.210)' },
+      { cmd: 'workspace-dir get|guide', desc: '워크스페이스 디렉토리 (1.9.211)', descEn: 'workspace directory (1.9.211)' },
+      { cmd: 'parent detect|adopt [--select <kinds>] [--apply]', desc: '상위 leerness 부모 탐지 + 자산 게이트형 adopt (1.30.2~3)', descEn: 'detect a parent leerness above + gated asset adoption (1.30.2~3)' },
+      { cmd: 'intent classify|expand|domains "<request>"', desc: '의도 파악 + scope (1.9.213)', descEn: 'infer intent + scope (1.9.213)' },
+      { cmd: 'constraints list|check|add', desc: '플랫폼/API 제약 (1.9.208)', descEn: 'platform/API constraints (1.9.208)' },
+      { cmd: 'provider list|add|remove|sync', desc: 'Provider Registry (1.9.157~160)', descEn: 'provider registry (1.9.157~160)' },
+      { cmd: 'commands [--json]', desc: '전체 명령 카테고리 목록 (1.9.233)', descEn: 'full command catalog by category (1.9.233)' },
+      { cmd: 'migrate audit|apply|plan [path] [--json] [--yes]', desc: '크로스버전 마이그레이션 진단/적용/플랜 (UR-0075, 1.9.356~358)', descEn: 'cross-version migration diagnose/apply/plan (UR-0075, 1.9.356~358)' },
+      { cmd: 'migrate --guide', desc: 'AI 에이전트용 크로스버전 마이그레이션 가이드 (1.9.355)', descEn: 'cross-version migration guide for AI agents (1.9.355)' },
+      { cmd: 'doctor [--json]', desc: '설치/환경 진단 (1.9.315)', descEn: 'install/environment diagnosis (1.9.315)' },
+      { cmd: 'selftest [--json]', desc: '코어 함수 무결성 자가 검증 (1.9.258)', descEn: 'self-verify core function integrity (1.9.258)' },
       // 1.36.101 (명령 표면 감사): 둘 다 실행되고 문서에도 있는데 이 목록에만 없었다 — '있는데 안 보이는 명령'.
-      { cmd: 'gate [path]', desc: 'CI 한 번 호출 게이트 — verify + audit + scan + encoding + lazy' },
-      { cmd: 'toggle get|set|list <기능> [on|off]', desc: '기능 토글 (gate/lens/auto-graph/delegation-brief) — leerness.html ⚙ 탭과 연동 (1.36.30)' },
-      { cmd: 'install-safety [--json]', desc: '설치 안전 프로필 — 0 deps/0 install-script (1.9.359)' },
-      { cmd: 'env check|sync|detect [path]', desc: '셸/인코딩 환경 진단 (1.9.241)' },
-      { cmd: 'shell-guard "<command>"', desc: '셸 호환성 정적 분석 (1.9.260)' },
-      { cmd: 'path-setup [--apply]', desc: 'CLI PATH 자동 등록 (1.9.254)' }
+      { cmd: 'gate [path]', desc: 'CI 한 번 호출 게이트 — verify + audit + scan + encoding + lazy', descEn: 'single-call CI gate — verify + audit + scan + encoding + lazy' },
+      { cmd: 'toggle get|set|list <기능> [on|off]', cmdEn: 'toggle get|set|list <feature> [on|off]', desc: '기능 토글 (gate/lens/auto-graph/delegation-brief) — leerness.html ⚙ 탭과 연동 (1.36.30)', descEn: 'feature toggles (gate/lens/auto-graph/delegation-brief) — synced with the leerness.html ⚙ tab (1.36.30)' },
+      { cmd: 'install-safety [--json]', desc: '설치 안전 프로필 — 0 deps/0 install-script (1.9.359)', descEn: 'install safety profile — 0 deps / 0 install scripts (1.9.359)' },
+      { cmd: 'env check|sync|detect [path]', desc: '셸/인코딩 환경 진단 (1.9.241)', descEn: 'shell/encoding environment diagnosis (1.9.241)' },
+      { cmd: 'shell-guard "<command>"', desc: '셸 호환성 정적 분석 (1.9.260)', descEn: 'static shell-compatibility analysis (1.9.260)' },
+      { cmd: 'path-setup [--apply]', desc: 'CLI PATH 자동 등록 (1.9.254)', descEn: 'register the CLI on PATH automatically (1.9.254)' }
     ],
     ops: [
-      { cmd: 'feature add|link|impact|list|show', desc: '기능 그래프(feature-graph) 추적' },
-      { cmd: 'permissions list|set', desc: 'agent 권한 모드 (1.9.174)' },
-      { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (1.9.272)' },
-      { cmd: 'creds list|register|check|refresh', desc: '크리덴셜 메타 추적 (값 미저장)' },
-      { cmd: 'incident list|show|handle', desc: '인시던트 관리' },
-      { cmd: 'webhook serve', desc: '웹훅 수신 서버' },
-      { cmd: 'deploy auto', desc: '배포 자동화' },
-      { cmd: 'runs list|show', desc: '실행 이력' },
-      { cmd: 'whats-new [path]', desc: '최근 버전 변경 요약' },
-      { cmd: 'team list|add|show|remove|preview|deploy <id> [--name --purpose --personas --members --schedule --task --deploy --yes]', desc: '에이전트 팀 정의 + preview(dry-run) + deploy(2중 게이트) — UR-0073 A~D, opt-in · 배포는 --yes+LEERNESS_TEAM_DEPLOY=1' }
+      { cmd: 'feature add|link|impact|list|show', desc: '기능 그래프(feature-graph) 추적', descEn: 'feature-graph tracking' },
+      { cmd: 'permissions list|set', desc: 'agent 권한 모드 (1.9.174)', descEn: 'agent permission mode (1.9.174)' },
+      { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (1.9.272)', descEn: 'disclose the permission/security surface (1.9.272)' },
+      { cmd: 'creds list|register|check|refresh', desc: '크리덴셜 메타 추적 (값 미저장)', descEn: 'credential metadata tracking (values never stored)' },
+      { cmd: 'incident list|show|handle', desc: '인시던트 관리', descEn: 'incident management' },
+      { cmd: 'webhook serve', desc: '웹훅 수신 서버', descEn: 'webhook receiver server' },
+      { cmd: 'deploy auto', desc: '배포 자동화', descEn: 'deployment automation' },
+      { cmd: 'runs list|show', desc: '실행 이력', descEn: 'run history' },
+      { cmd: 'whats-new [path]', desc: '최근 버전 변경 요약', descEn: 'summary of recent version changes' },
+      { cmd: 'team list|add|show|remove|preview|deploy <id> [--name --purpose --personas --members --schedule --task --deploy --yes]', desc: '에이전트 팀 정의 + preview(dry-run) + deploy(2중 게이트) — UR-0073 A~D, opt-in · 배포는 --yes+LEERNESS_TEAM_DEPLOY=1', descEn: 'define agent teams + preview (dry-run) + deploy (double gate) — UR-0073 A~D, opt-in · deploy needs --yes + LEERNESS_TEAM_DEPLOY=1' }
     ]
   };
+  // 1.36.111 (T-0092): 영어 모드에서 이 명령이 **출력 218줄 중 105줄**을 한국어로 냈다 — 단일 최대 누출원이었다.
+  //   leerness 는 한국어 우선 도구가 아니다. 카탈로그에 descEn 을 두고 여기서 고른다(없으면 desc 로 폴백 —
+  //   새 항목이 번역 없이 들어와도 목록에서 사라지지 않게. 누락은 e2e 래칫이 잡는다).
+  //   ⚠ 선언은 `--json` 조기 반환 **앞**에 있어야 한다 — 뒤에 두면 JSON 경로에서 TDZ 로 죽는다(작성 중 실측).
+  const _cL = _uiLang(root) === 'en';
+  const ct = (ko, en) => (_cL ? en : ko);
+  // 1.36.111 (codex 검수 P1, 재현됨): 카탈로그를 그대로 직렬화하면 `descEn`/`cmdEn` 이 payload 에 실려
+  //   **70.5% 커진다**(12,786 → 21,795 B · ~3,875 → ~6,605 tok, 실측). 이 payload 는 MCP 로 에이전트에 나가므로
+  //   그대로 컨텍스트 비용이다. 항목 스키마는 종전과 같은 `{cmd, desc}` 로 유지하고 **값만** 언어에 맞춘다.
+  //   검수의 "기계 계약을 암묵적으로 로케일에 흔들지 마라" 지적은 타당하다 — 그래서 흔들리는 사실을
+  //   `lang` 필드로 **명시**한다. 소비자는 어느 언어의 payload 인지 알 수 있고, 크기는 늘지 않는다.
   if (has('--json')) {
-    log(JSON.stringify({ version: VERSION, totalCommands: Object.values(cats).reduce((s, a) => s + a.length, 0), categories: cats }, null, 2));
+    const _lang = _cL ? 'en' : 'ko';
+    const _localized = Object.fromEntries(Object.entries(cats).map(([k, list]) => [k, list.map(c => ({
+      cmd: _cL ? (c.cmdEn || c.cmd) : c.cmd,
+      desc: _cL ? (c.descEn || c.desc) : c.desc,
+    }))]));
+    log(JSON.stringify({ version: VERSION, lang: _lang, totalCommands: Object.values(cats).reduce((s, a) => s + a.length, 0), categories: _localized }, null, 2));
     return;
   }
-  log(cy(`# leerness commands (1.9.233) — 전체 CLI 명령 카테고리 목록`));
+  log(cy(ct(`# leerness commands (1.9.233) — 전체 CLI 명령 카테고리 목록`, `# leerness commands (1.9.233) — full CLI command catalog by category`)));
   log('');
   for (const [catName, list] of Object.entries(cats)) {
-    log(gr(`## ${catName} (${list.length}개)`));
+    // 단위 표기도 언어별로 — 여기서 `개` 를 통째로 뺐다가 한국어 출력이 바뀌는 회귀를 냈다(직전 커밋과 바이트 비교로 잡음).
+    log(gr(ct(`## ${catName} (${list.length}개)`, `## ${catName} (${list.length})`)));
     list.forEach(c => {
-      log(`  • ${c.cmd}`);
-      log(dm(`    ${c.desc}`));
+      // 자리표시자도 표면이다 — `<명령>`·`<기능>` 같은 한국어 placeholder 가 영어 사용법에 남으면 그대로 누출이다.
+      log(`  • ${_cL ? (c.cmdEn || c.cmd) : c.cmd}`);
+      log(dm(`    ${_cL ? (c.descEn || c.desc) : c.desc}`));
     });
     log('');
   }
-  log(dm(`  → 총 ${Object.values(cats).reduce((s, a) => s + a.length, 0)} 명령 (${Object.keys(cats).length} 카테고리)`));
-  log(dm(`  → MCP 도구: ${_mcpToolCount()} (외부 AI 노출)`));  // 1.9.315 (UR-0054): 하드코딩 65 → 동적
-  log(dm(`  → 빠른 시작: leerness pulse | handoff | health`));
+  const _tot = Object.values(cats).reduce((s, a) => s + a.length, 0);
+  log(dm(ct(`  → 총 ${_tot} 명령 (${Object.keys(cats).length} 카테고리)`, `  → ${_tot} commands in ${Object.keys(cats).length} categories`)));
+  log(dm(ct(`  → MCP 도구: ${_mcpToolCount()} (외부 AI 노출)`, `  → MCP tools: ${_mcpToolCount()} (exposed to external AI)`)));  // 1.9.315 (UR-0054): 하드코딩 65 → 동적
+  log(dm(ct(`  → 빠른 시작: leerness pulse | handoff | health`, `  → quick start: leerness pulse | handoff | health`)));
 }
 
 // 1.9.374 (UR-0074): release cadence — 릴리스 빈도 진단 + 권장 (외부리뷰 반복 지적 "릴리스 케이던스 과다" 가시화). git tag 재사용, 읽기 전용.

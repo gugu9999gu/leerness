@@ -10529,6 +10529,82 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.111 블록 O (T-0092): 영어 모드에서 한국어가 새는 양을 **래칫**으로 고정한다.
+//   leerness 는 한국어 우선 도구가 아니다(포지셔닝). 영어 사용자가 한국어 UI 를 보는 것은 결함이다.
+//   기준선 실측: 43개 명령 중 31개가 새고 누출 234줄. 이번 라운드에 `commands` 카탈로그를 이중언어화해
+//   234 → 134 로 줄였다. 나머지는 **부채**이고, 이 가드는 그 부채가 **늘지 못하게** 한다.
+//   ⚠ baseline 은 목표가 아니라 측정값이다. 줄이는 방향으로만 갱신한다(갚은 뒤에는 반드시 조인다).
+{
+  total++;
+  let ok = false; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n111-'));
+  try {
+    const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_LANG: 'en' });
+    const d = path.join(sb, 'proj');
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"proj","version":"0.1.0"}');
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'en'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+    const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+    // 상태를 조금 만든다 — 빈 프로젝트는 출력이 짧아 누출을 과소평가한다. 입력은 전부 영어.
+    R(['task', 'add', 'Implement the parser']);
+    R(['decision', 'add', 'Use JSON storage', '--why', 'simplest']);
+    R(['plan', 'add', 'Ship v1']);
+    const HANGUL = /[가-힣ㄱ-ㆎ]/;
+    // 측정 대상은 **도구가 말하는 표면**이다. 사용자 데이터(프로젝트명·과거 기록)는 한국어여도 정상이므로
+    //   여기서는 영어 입력만 넣은 새 프로젝트를 쓴다 — 나오는 한글은 전부 도구의 것이다.
+    // codex 검수 P2(재현됨): 목록이 좁으면 누출이 **목록 밖으로 옮겨가** 래칫을 빠져나간다.
+    //   커버리지를 넓히고, 아래에서 목록 크기 자체도 단언한다(누가 케이스를 지워 통과시키지 못하게).
+    const CMDS = [['commands'], ['status'], ['health'], ['pulse'], ['check'], ['mode'], ['toggle', 'list'],
+      ['task', 'list'], ['decision', 'list'], ['plan', 'list'], ['lesson', 'list'], ['rule', 'list'],
+      ['lens'], ['route', 'feature'], ['milestones'], ['round-history'], ['memory', 'status'],
+      ['reuse-map'], ['preview', 'list'], ['feature', 'list'], ['requests', 'list'], ['roles', 'list'],
+      ['permissions', 'list'], ['insights'], ['agents', 'list'], ['constraints', 'list'],
+      ['provider', 'list'], ['skill', 'list'], ['next-action', 'list'], ['session-resume'],
+      ['idempotency', 'audit'], ['context', 'budget'], ['drift', 'check'], ['verify'],
+      ['encoding', 'check'], ['scan', 'secrets'], ['which'], ['glossary'], ['release', 'cadence']];
+    let leaky = 0, produced = 0; const worst = [], silent = [];
+    for (const a of CMDS) {
+      const r = R(a);
+      const out = String(r.stdout || '') + String(r.stderr || '');
+      // codex 검수 P2(재현됨): 명령이 죽으면 출력이 없어 "누출 0" 이 되고, 그게 곧 통과였다 —
+      //   **깨진 명령이 래칫을 낮춰 주는** 형태다. 실패도 무출력도 그 자체로 실패로 본다.
+      if (r.status === 0 && out.trim()) produced++; else silent.push(a.join(' ') + '(exit=' + r.status + ')');
+      const n = out.split('\n').filter(l => HANGUL.test(l)).length;
+      leaky += n;
+      if (n) worst.push(a.join(' ') + ':' + n);
+    }
+    dbg.leaky = leaky; dbg.produced = produced; dbg.worst = worst.slice(0, 8); dbg.silent = silent;
+    // 계측 판별력 — **모든** 프로브가 성공하고 출력을 내야 한다. 한 건이라도 조용하면 판정 불가다.
+    dbg.probeAlive = silent.length === 0 && produced === CMDS.length;
+    dbg.coverage = CMDS.length >= 39;   // 케이스를 지워 통과시키는 우회 차단(줄이려면 근거를 적고 이 수도 함께 낮춰라)
+    // 래칫: 지금 측정된 부채보다 **늘면 실패**. 줄어드는 것은 언제나 통과.
+    // 1.36.111 실측. 처음엔 21개 명령만 재서 46 이었는데, 검수 지적으로 커버리지를 39개로 넓히자 **111** 이 드러났다 —
+    //   좁은 목록의 기준선은 실제 부채보다 낙관적이었다. 줄인 만큼만 낮춘다(느슨하게 두면 그 안에서 조용히 썩는다).
+    const BASELINE = 111;
+    dbg.baseline = BASELINE;
+    dbg.withinRatchet = leaky <= BASELINE;
+    // 이번 라운드가 고친 표면은 **0 이어야** 한다 — 래칫과 별개로 회귀를 직접 막는다.
+    const cmdOut = String(R(['commands']).stdout || '');
+    dbg.commandsClean = cmdOut.split('\n').filter(l => HANGUL.test(l)).length === 0;
+    // 한국어 사용자가 보던 것은 **바뀌면 안 된다**. 영어화하면서 `개` 단위를 양쪽에서 없애는 회귀를 냈고
+    //   직전 커밋과의 바이트 비교가 잡았다. 여기서는 한국어 출력이 여전히 한국어 관례를 지키는지 단언한다.
+    const koEnv = Object.assign({}, ENV, { LEERNESS_LANG: 'ko' });
+    const koOut = String(cp.spawnSync(process.execPath, [CLI, 'commands', '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: koEnv }).stdout || '');
+    dbg.koIntact = /## status \(\d+개\)/.test(koOut) && /총 \d+ 명령/.test(koOut) && HANGUL.test(koOut);
+    // --json 은 기계 계약이다 — 기존 키(cmd/desc)가 살아 있고 카테고리 수가 그대로여야 한다(추가 키는 하위호환).
+    let cj = null;
+    try { cj = JSON.parse(String(R(['commands', '--json']).stdout || '')); } catch {}
+    dbg.jsonContract = !!cj && typeof cj.totalCommands === 'number' && cj.totalCommands > 50
+      && Object.values(cj.categories).every(list => list.every(e => typeof e.cmd === 'string' && typeof e.desc === 'string'
+        && e.descEn === undefined && e.cmdEn === undefined))     // 내부 번역 키가 payload 로 새면 70% 부풀었다(검수 P1 실측)
+      && cj.lang === 'en';                                        // 로케일 의존을 **명시**한다 — 암묵적으로 흔들리지 않는다
+    ok = dbg.probeAlive && dbg.coverage && dbg.withinRatchet && dbg.commandsClean && dbg.koIntact && dbg.jsonContract;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ O(1.36.111/T-0092) 영어 누출 ${dbg.leaky}줄 ≤ 래칫 ${dbg.baseline} · commands 표면 0 · 한국어 출력 불변 · --json 계약 유지 · 계측 살아있음`
+    : '✗ 1.36.111 i18n 래칫 위반 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 
