@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.109';
+const VERSION = '1.36.110';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -6430,7 +6430,7 @@ function _selfTestCases() {
       return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved()
         && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk() && _p0102HonestyOk()
         && _p0103FlagsOk() && _p0103JsonOk() && _p0103RootOk() && _p0104UsageOk()
-        && _p0014SecretBaselineOk() && _p0104ReminderOk() && _p0015ModeOk() && _p0097AsyncLockOk() && _p0109ClaimGateOk();
+        && _p0014SecretBaselineOk() && _p0104ReminderOk() && _p0015ModeOk() && _p0097AsyncLockOk() && _p0109ClaimGateOk() && _p0110HonestyOk();
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -8110,6 +8110,60 @@ function _p0015ModeOk() {
 //   결정적으로 밟는다 — `typeof out.then === 'function'` 이라는 판별 조건이 동일하다.
 // 1.36.109 (완료게이트 사냥): 두 결함을 **순수 호출**로 고정한다. 둘 다 양방향으로 단언한다 —
 //   막아야 할 것을 막는지, 그리고 통과해야 할 것이 계속 통과하는지. false-BLOCK 은 false-PASS 보다 나쁘다.
+// 1.36.110 (T-0099): 미검증 자백/헤지 탐지 — **언어 대칭**과 **오탐 0** 을 순수 호출로 고정한다.
+//   기준선은 재현율 1/16(6%), 한국어 0/8 이었다. 같은 뜻의 주장이 표기 언어에 따라 갈리면 판정이 아니라 우연이다.
+//   재현율보다 FP 가 먼저다 — 정직한 주장이 막히면 사용자는 게이트를 끈다. 실제 done 이력 139건 발화 0 으로 확인했다.
+function _p0110HonestyOk() {
+  try {
+    const an = require('../lib/analyzers');
+    const F = (t, done) => an._epistemicHonestyCheck(t, done ? { claimedDone: true } : undefined).findings;
+    const high = (t, done) => F(t, done).filter(f => f.severity === 'high').length > 0;
+    // 이 라운드가 추가한 것은 **권고**다 — 차단하지 않는다. 가드도 그 계약을 그대로 단언한다.
+    const hit = (t, done) => F(t, done).some(f => f.dim === 'unverified-admission');
+    // ① 언어 대칭 — 같은 뜻의 ko/en 쌍이 같은 판정을 받아야 한다(1차 강화에서 4쌍이 갈렸고,
+    //   그중 하나는 한국어 음절 합성 때문이었다: `듯하다` 는 잡히는데 `듯합니다` 는 안 잡혔다).
+    //   이 라운드가 **권고로** 잡는 것 — 직접적인 미검증 자백. 두 언어가 같은 판정을 받아야 한다.
+    const pairs = [
+      ['테스트는 아직 안 돌렸지만 완료했습니다', 'Done, but not tested yet.'],
+      ['로직 반영했는데 엣지 케이스는 안 봤습니다.', 'Logic applied; edge cases unchecked.'],
+    ];
+    const symmetric = pairs.every(([ko, en]) => hit(ko, true) === hit(en, true) && hit(ko, true) === true);
+    // ①-c **차단하지 않는다** — 이 신호로 done 을 막지 않기로 한 결정을 고정한다.
+    //   차단으로 올리려면 산문 파싱이 아니라 도구 자신의 실행 증거를 근거로 삼아야 한다(별도 과제).
+    const neverBlocks = pairs.every(([ko, en]) => high(ko, true) === false && high(en, true) === false);
+    //   기존 차단 차원(추정 표현)은 **그대로**여야 한다. 한국어 음절 합성 회귀를 여기서 고정한다 —
+    //   `듯\s*(?:하|싶)` 는 "듯하다" 는 잡지만 "듯합니다"(하+ㅂ→합)는 못 잡아 ko/en 이 갈렸다.
+    const highPairs = [['해결된 듯합니다. 다음에 확인하겠습니다', 'Looks resolved. I will confirm next time.']];
+    const highSymmetric = highPairs.every(([ko, en]) => high(ko, true) === true && high(en, true) === true);
+    // ①-b **의도적으로 잡지 않는 것** — 미래 범위 표현. "추후 확인 예정" 은 (a) 이 작업을 검증 안 했다 와
+    //   (b) 앞으로 더 볼 게 남았다 를 모두 뜻할 수 있어 정규식으로 가를 수 없다. 자체 FP 헌트에서 이 표현이
+    //   문서 수정·설정 변경·의존성 bump·revert 를 막았다(전부 정직한 완료 주장). 애매하면 통과시킨다.
+    const futureScopeAllowed = [
+      'docs/guide.md 갱신. 오탈자가 더 있을 수 있어 추후 확인 예정.',
+      'package.json 의존성 3개 bump. 호환성은 추후 확인.',
+      'Bumped deps in package.json. Compatibility will be checked later.',
+    ].every(t => hit(t, true) === false);
+    // ② 오탐 0 — 근거를 댄 정직한 주장은 어떤 표현을 써도 통과한다. `!hasSource` 가 방어선이다.
+    const honest = [
+      'src/queue.ts 재작성. jest 88 passed, 0 failed.',
+      'Rewrote src/queue.ts. jest: 88 passed, 0 failed.',
+      'src/a.js 구현. 테스트 20/20 통과. 성능 개선 효과는 추후 측정 예정.',   // 헤지 낱말 + 근거 → 통과해야 한다
+      '오타 수정만 했습니다. 검증 필요 없는 주석 변경. src/c.js',              // "필요 없는" 은 반대 의미
+      'Comment typo only in src/c.js — needs no verification.',
+      // 러너 이름을 열거하지 않는다는 계약 — 실행했는데 막히면 명백한 오차단이다(자체 FP 헌트가 6건 잡았다).
+      'app/src/Main.kt 구현. ./gradlew test 통과. 엣지 케이스는 안 봤습니다.',
+      'Program.cs 구현. dotnet test 실행 완료. 통합 시나리오는 아직 확인 못 했습니다.',
+      'app/models/user.rb 구현. bundle exec rspec 실행. 엣지 케이스는 안 봤습니다.',
+      'src/x.ts 구현. ./scripts/verify.sh 실행해 통과. 회귀는 아직 안 봤습니다.',
+    ];
+    const noFalseBlock = honest.every(t => hit(t, true) === false);
+    // ③ claimedDone 은 **호출부가 아는 사실**을 받는 옵션이다 — 기본값 동작은 바뀌지 않아야 한다
+    //   (독립 표면 `honesty-check --text` 가 갑자기 더 엄해지면 그건 이 라운드가 약속한 범위 밖이다).
+    const optIn = hit('로직 반영했는데 엣지 케이스는 안 봤습니다.', true) === true
+      && hit('엣지 케이스는 안 봤습니다.', false) === false;   // 산문에 완료 낱말이 없으면 기본값에선 안 잡는다
+    return symmetric && neverBlocks && highSymmetric && futureScopeAllowed && noFalseBlock && optIn;
+  } catch { return false; }
+}
 function _p0109ClaimGateOk() {
   try {
     const an = require('../lib/analyzers');
@@ -15513,11 +15567,17 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   //   판정 기준은 **실행 확증**이어야 한다 — 실제로 돌았고 실패하지 않았는가(allPassed = exit 0 이며 파싱됐다면 전부 통과).
   const _runProven = !!(runResult && !runResult.skipped && runResult.allPassed);
   const unverifiableClaim = claimsChecked && files.length === 0 && !_runProven;
-  let optimismSuspects = [], honestyFindings = [], strictOk = true;
+  let optimismSuspects = [], honestyFindings = [], honestyAdvisory = [], strictOk = true;
   if (claimsChecked) {
     const codeText = _scanCodeForPatterns(root);
     optimismSuspects = _detectOptimism(evidence, codeText);
-    honestyFindings = _epistemicHonestyCheck(evidence).findings.filter(f => f.severity === 'high');
+    // 1.36.110 (T-0099): 여기 도달했다는 것은 이미 완료 주장(done/--require-evidence/--strict-claims)이라는 뜻이다.
+    //   그 사실을 넘겨 산문에서 완료 낱말을 다시 찾는 중복 요구를 없앤다(그것이 재현율 병목이었다).
+    const _hAll = _epistemicHonestyCheck(evidence, { claimedDone: true }).findings;
+    honestyFindings = _hAll.filter(f => f.severity === 'high');
+    // 미검증 자백은 **권고**다 — 게이팅하지 않는다(왜 그렇게 정했는지는 lib/analyzers.js 주석 참조).
+    //   다만 보이지 않으면 탐지한 의미가 없으므로 사람 출력과 --json 에 함께 싣는다.
+    honestyAdvisory = _hAll.filter(f => f.severity !== 'high');
     strictOk = optimismSuspects.length === 0 && honestyFindings.length === 0;
   }
   const gitStrongMismatch = gitApplicable && claimedInGit.length === 0;  // 변경 있는데 주장 파일이 git 변경에 전무
@@ -15574,7 +15634,8 @@ function verifyClaimCmd(root, taskId, opts = {}) {
       },
       stubFiles: stubFiles.slice(0, 10),
       evidence: { required: mustHaveEvidence, ...evq },
-      claims: !claimsChecked ? null : { ok: strictOk, optimism: optimismSuspects.map(s => ({ kind: s.kind, label: s.label })), honesty: honestyFindings.map(f => ({ dim: f.dim, label: f.label })) },
+      // 1.36.110: `advisory` 는 **게이팅하지 않는** 신호다(ok 에 영향 없음). 소비자가 경계를 오인하지 않도록 키를 분리한다.
+      claims: !claimsChecked ? null : { ok: strictOk, optimism: optimismSuspects.map(s => ({ kind: s.kind, label: s.label })), honesty: honestyFindings.map(f => ({ dim: f.dim, label: f.label })), advisory: honestyAdvisory.map(f => ({ dim: f.dim, label: f.label, severity: f.severity })) },
       git: gitChanged === null ? { applicable: false, reason: 'not-a-git-repo' } : (!gitApplicable ? { applicable: false, reason: 'no-working-changes-or-no-claimed-files' } : { applicable: true, claimedInGit: claimedInGit.length, claimedNotInGit, strongMismatch: gitStrongMismatch, changedNotClaimed }),
       scopeCreep: !gitApplicable ? null : { count: changedNotClaimed.length, files: changedNotClaimed.slice(0, 10) }  // 1.13.2 (Karpathy 외과적 변경): 요청/주장 밖 변경 파일(advisory)
     };
@@ -15672,6 +15733,11 @@ function verifyClaimCmd(root, taskId, opts = {}) {
       log(t(`  - 낙관적 표시 + 정직성 (done 기본 — 완화: --lenient): ⚠ FAIL (낙관 ${optimismSuspects.length} · 정직성 ${honestyFindings.length})`, `  - optimism + honesty (done default — relax: --lenient): ⚠ FAIL (optimism ${optimismSuspects.length} · honesty ${honestyFindings.length})`));
       for (const s of optimismSuspects) log(t(`    · [${s.kind}] ${s.label}: evidence에 주장 있는데 코드에 호출 흔적 없음`, `    · [${s.kind}] ${s.label}: claimed in evidence but no call trace in code`));
       for (const f of honestyFindings) log(`    · [${t('정직성', 'honesty')}:${f.dim}] ${f.label}: ${f.detail}`);
+    }
+    // 1.36.110 (T-0099): 권고는 통과/실패와 **무관하게** 보여 준다 — 안 보이면 탐지한 의미가 없다.
+    //   차단하지 않는 이유(오차단 위험·우회 가능성)는 lib/analyzers.js 에 적었다.
+    for (const f of honestyAdvisory) {
+      log(t(`  - ⓘ 권고(차단 아님) [${f.dim}] ${f.label}: ${f.detail}`, `  - ⓘ advisory (non-blocking) [${f.dim}] ${f.label}: ${f.detail}`));
     }
   }
   // 1.9.302 (UR-0042) + 1.11.2 (UR-0175): git diff 시맨틱 교차검증 — 주장 파일이 실제 git 변경에 있는가. gitClaimOk/gitStrongMismatch 는 상단 공유(done 기본 게이팅, --lenient 완화).

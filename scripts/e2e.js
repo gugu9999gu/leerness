@@ -10457,6 +10457,78 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.110 블록 N (T-0099): 미검증 자백이 done 을 통과시키던 것.
+//   기준선 실측: 재현율 1/16(6%) — `should work, will test later` 는 잡고 같은 뜻의 한국어는 0/8 이었다.
+//   같은 뜻의 주장이 표기 언어에 따라 통과/차단이 갈리면 그건 판정이 아니라 우연이다.
+//   구조적 병목은 "산문에 완료 낱말이 있는가" 를 다시 요구한 것이었다 — verify-claim 은 이미 done 행에만
+//   이 검사를 돌린다. 호출부가 아는 사실(claimedDone)을 넘겨 중복 요구를 없앴다.
+//   FP 를 먼저 고정했다: 실제 done 이력 139건 발화 0 · 홀드아웃 정직 주장 8/8 무탐지.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-honest110-'));
+  try {
+    const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb });
+    let seq = 0;
+    const mk = (setup) => {
+      const d = path.join(sb, 'p' + (++seq));
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+      if (setup) setup(d); return d;
+    };
+    const R = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+    const W = (d, rel, body) => { const p = path.join(d, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, body); };
+    const verdict = (d, ev, extra = []) => {
+      const id = (String(R(d, ['task', 'add', '주장']).stdout || '').match(/T-\d{4,}/) || [])[0];
+      R(d, ['task', 'update', id, '--status', 'done', '--evidence', ev]);
+      const r = R(d, ['verify-claim', id, '--json', ...extra]);
+      let j = null; try { j = JSON.parse(String(r.stdout || '')); } catch {}
+      const adv = (j && j.claims && Array.isArray(j.claims.advisory)) ? j.claims.advisory : [];
+      return { ok: j ? j.ok : null, reasons: j ? (j.reasons || []) : [], advisory: adv.map(a => a.dim), out: String(r.stdout || '') };
+    };
+    const impl = d => W(d, 'src/impl.js', 'function f(){return 1;}\nmodule.exports={f};\n');
+
+    // ① 미검증 자백 → **권고로 보고하되 차단하지 않는다**. ko/en 이 같은 판정이어야 한다(언어 대칭).
+    //   차단하지 않기로 한 이유: 직접 자백 표현이 두 언어에서 유계가 아니고, "검증 안 함"과 "부분만 검증"과
+    //   "해당 없음(문서 수정)"을 정규식으로 가를 수 없으며, evidence 에 `Exit: 0` 한 줄이면 반박된다.
+    //   자체 FP 헌트 6건 + 외부 검수 3건이 전부 그 경계에서 나왔다. 차단으로 올리려면 산문 파싱이 아니라
+    //   도구 자신의 실행 증거(`--run-tests`)를 근거로 삼아야 한다(별도 과제).
+    const vKo = verdict(mk(impl), 'src/impl.js 반영했는데 엣지 케이스는 안 봤습니다.');
+    const vEn = verdict(mk(impl), 'src/impl.js applied; edge cases unchecked.');
+    dbg.koAdvised = vKo.advisory.includes('unverified-admission');
+    dbg.enAdvised = vEn.advisory.includes('unverified-admission');
+    dbg.symmetric = dbg.koAdvised === dbg.enAdvised;
+    dbg.notBlocking = vKo.ok === true && vEn.ok === true;          // 권고는 게이팅하지 않는다
+    dbg.visibleToUser = /권고|advisory/i.test(vKo.out);            // 안 보이면 탐지한 의미가 없다
+
+    // ② 대조군 — 근거를 댄 정직한 주장은 권고조차 붙지 않는다.
+    const vHonest = verdict(mk(impl), 'src/impl.js 구현. 테스트 12/12 통과 (Exit: 0).');
+    dbg.honestClean = vHonest.ok === true && vHonest.advisory.length === 0;
+    const vHedgedButSourced = verdict(mk(impl), 'src/impl.js 구현. 20/20 passed. 성능 개선 효과는 추후 측정 예정.');
+    dbg.sourcedHedgeClean = vHedgedButSourced.ok === true && vHedgedButSourced.advisory.length === 0;
+    // "검증 필요 없는" 은 반대 의미 · 미래 범위 표현은 의도적으로 잡지 않는다
+    const vNegated = verdict(mk(impl), 'src/impl.js 오타 수정만. 검증 필요 없는 주석 변경. 12/12 통과.');
+    dbg.negationClean = vNegated.ok === true && vNegated.advisory.length === 0;
+    const vFuture = verdict(mk(impl), 'src/impl.js 설정값만 변경. 호환성은 추후 확인.');
+    dbg.futureScopeClean = vFuture.ok === true && vFuture.advisory.length === 0;
+    // 러너 이름을 열거하지 않는다 — 실행했는데 권고가 붙으면 사용자에게 잘못된 신호다
+    const vGradle = verdict(mk(impl), 'src/impl.js 구현. ./gradlew test 통과. 엣지 케이스는 안 봤습니다.');
+    dbg.unlistedRunnerClean = vGradle.ok === true && vGradle.advisory.length === 0;
+
+    // ③ 기존 차단 동작은 그대로 — 이 라운드가 게이팅을 바꾸지 않았다는 것을 고정한다.
+    const vStub = verdict(mk(d => W(d, 'src/empty.js', '')), 'src/empty.js 구현 완료');
+    dbg.existingGateIntact = vStub.ok === false && vStub.reasons.includes('stub-impl');
+
+    ok = dbg.koAdvised && dbg.enAdvised && dbg.symmetric && dbg.notBlocking && dbg.visibleToUser
+      && dbg.honestClean && dbg.sourcedHedgeClean && dbg.negationClean && dbg.futureScopeClean
+      && dbg.unlistedRunnerClean && dbg.existingGateIntact;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ N(1.36.110/T-0099) 미검증 자백을 **권고로** 보고(차단 아님) · ko/en 동일 · 사용자에게 노출 · 정직 주장·미래범위·목록밖 러너 무탐 · 기존 게이팅 불변'
+    : '✗ 1.36.110 정직성 판정 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 
