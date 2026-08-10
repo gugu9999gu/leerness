@@ -10358,6 +10358,105 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.109 블록 M: 완료 게이트 — "done 에는 증거가 필요하다" 는 제품의 이름값이다.
+//   적대 사냥에서 두 방향으로 뚫려 있었다(대조군 2/2 통과 상태에서 측정 — 전부 거부하는 고장난 게이트가 아니었다):
+//     · false-PASS: `touch src/x.js` 후 "src/x.js 구현 완료" 로 done 이 통과했다.
+//       공백 3자짜리 파일은 stub-impl 로 막히는데 **0바이트는 통과** — 더 비어 있을수록 쉽게 통과하는 역전이었다.
+//       원인은 `!body` 를 스킵 조건에 둔 것이고, 같은 falsy 함정이 호출부와 `_vcImplIsEmpty` **두 곳**에 있어
+//       한 곳만 고치면 구멍이 남았다(가드가 서로를 가리는 형태).
+//     · false-BLOCK: `src/_helpers.js` 를 인용하면 추출기가 `helpers.js` 로 **잘라서** 없는 파일을 찾았다.
+//       Next.js `pages/_app.tsx`, 파이썬 `__init__.py` 처럼 흔한 이름이 전부 여기 걸렸다. 이유 없이 막히면
+//       사용자는 게이트를 끈다 — false-BLOCK 이 false-PASS 보다 나쁘다.
+//   두 방향을 한 블록에서 함께 단언한다. 한쪽만 보면 "전부 거부" 나 "전부 통과" 로 도망갈 수 있다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-claim109-'));
+  try {
+    const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb });
+    let seq = 0;
+    const mk = (setup) => {
+      const d = path.join(sb, 'p' + (++seq));
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+      setup(d); return d;
+    };
+    const R = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+    const verdict = (d, evidence) => {
+      const id = (String(R(d, ['task', 'add', '주장']).stdout || '').match(/T-\d{4,}/) || [])[0];
+      R(d, ['task', 'update', id, '--status', 'done', '--evidence', evidence]);
+      const r = R(d, ['verify-claim', id, '--json']);
+      let j = null; try { j = JSON.parse(String(r.stdout || '')); } catch {}
+      return { ok: j ? j.ok : null, reasons: j ? (j.reasons || []) : [] };
+    };
+    const W = (d, rel, body) => { const p = path.join(d, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, body); };
+
+    // ① 0바이트 = 스텁 (그리고 공백만도 여전히 스텁 — 둘이 같은 판정이어야 한다)
+    const dEmpty = mk(d => W(d, 'src/empty.js', ''));
+    const vEmpty = verdict(dEmpty, 'src/empty.js 구현 완료');
+    const dBlank = mk(d => W(d, 'src/blank.js', '   \n\n '));
+    const vBlank = verdict(dBlank, 'src/blank.js 구현 완료');
+    dbg.emptyBlocked = vEmpty.ok === false && vEmpty.reasons.includes('stub-impl');
+    dbg.blankBlocked = vBlank.ok === false && vBlank.reasons.includes('stub-impl');
+
+    // ② 대조군 — 실제 구현은 계속 통과해야 한다(게이트가 전부 거부하면 이 블록은 무의미하다)
+    const dReal = mk(d => W(d, 'src/real.js', 'function f(){return 1;}\nmodule.exports={f};\n'));
+    dbg.realPasses = verdict(dReal, 'src/real.js 구현 완료').ok === true;
+
+    // ③ 밑줄 시작 파일명이 잘리지 않는다 — 실존하는데 files-missing 이 나면 정직한 주장의 오차단
+    const dUs = mk(d => W(d, 'src/_helpers.js', 'function h(){return 1;}\nmodule.exports={h};\n'));
+    const vUs = verdict(dUs, 'src/_helpers.js 구현 완료');
+    dbg.underscoreOk = vUs.ok === true && !vUs.reasons.includes('files-missing');
+    const dNext = mk(d => W(d, 'pages/_app.tsx', 'export default function App(){ return null; }\n'));
+    const vNext = verdict(dNext, 'pages/_app.tsx 수정 완료');
+    dbg.nextjsOk = vNext.ok === true && !vNext.reasons.includes('files-missing');
+    // 디렉토리 이름이 `_` 로 시작하는 경우도 같은 결함이다 — 경로 접두와 basename 은 별개 문자 클래스라
+    //   한쪽만 고치면 나머지가 남는다(변이 시험에서 basename 만 되돌렸을 때 이 케이스는 통과했다).
+    const dPriv = mk(d => W(d, '_private/util.ts', 'export function u(){ return 1; }\n'));
+    const vPriv = verdict(dPriv, '_private/util.ts 정리 완료');
+    dbg.privDirOk = vPriv.ok === true && !vPriv.reasons.includes('files-missing');
+
+    // ④ 관례상 빈 파일(__init__.py)은 스텁으로 막지 않는다 — 단, **다른 실질 파일과 함께일 때만**.
+    const dPy = mk(d => { W(d, 'pkg/__init__.py', ''); W(d, 'pkg/core.py', 'def f():\n    return 1\n'); });
+    const vPy = verdict(dPy, 'pkg/__init__.py, pkg/core.py 구현 완료');
+    dbg.initPyExempt = vPy.ok === true;
+    // ④-b codex 검수 P1(재현됨): 마커 **단독**은 구현 증거가 아니다. 처음 판에서는 무조건 예외라
+    //   빈 `__init__.py` 하나만 인용한 done 이 통과했고, 이 블록은 ④가 core.py 를 함께 인용한 탓에 못 잡았다.
+    //   가드가 놓친 이유가 "조건을 안 만들어서" 였다 — 조건을 만든다.
+    const dPyOnly = mk(d => W(d, 'pkg/__init__.py', ''));
+    const vPyOnly = verdict(dPyOnly, 'pkg/__init__.py 구현 완료');
+    dbg.markerOnlyBlocked = vPyOnly.ok === false && vPyOnly.reasons.includes('stub-impl');
+    // ④-c 타입 스텁(PEP 561)도 같은 규칙 — 인식되어야 예외가 도달한다(안 그러면 광고만 하는 코드).
+    const dPyi = mk(d => { W(d, 'pkg/__init__.pyi', ''); W(d, 'pkg/core.pyi', 'def f() -> int: ...\n'); });
+    const vPyi = verdict(dPyi, 'pkg/__init__.pyi, pkg/core.pyi 타입 스텁 추가');
+    dbg.pyiRecognized = vPyi.ok === true;
+    // ⑤-b URL 조각 / 드라이브 상대 경로는 루트 상대 파일 주장이 아니다 — 실존 파일이 있어도 세탁되면 안 된다.
+    const dFrag = mk(d => W(d, '_anchor.js', 'function a(){return 1;}\nmodule.exports={a};\n'));
+    const vFrag = verdict(dFrag, 'https://example.test/docs#_anchor.js 검토 완료');
+    dbg.urlFragBlocked = vFrag.ok === false;
+    const dDrive = mk(d => W(d, '_anchor.js', 'function a(){return 1;}\nmodule.exports={a};\n'));
+    const vDrive = verdict(dDrive, 'C:_anchor.js 검토 완료');
+    dbg.driveRelBlocked = vDrive.ok === false;
+    // 대조군 — 정상 표기 `파일:src/x.js` 는 계속 인식돼야 한다(`:` 를 통째로 막지 않았는지)
+    const dColon = mk(d => W(d, 'src/colon.js', 'function c(){return 1;}\nmodule.exports={c};\n'));
+    const vColon = verdict(dColon, '파일:src/colon.js 구현 완료');
+    dbg.colonFormOk = vColon.ok === true;
+
+    // ⑤ 없는 파일은 여전히 막힌다(추출기를 넓혔다고 존재 검사가 느슨해지지 않았는지)
+    const dGhost = mk(() => {});
+    const vGhost = verdict(dGhost, 'src/_ghost.js 구현 완료');
+    dbg.ghostStillBlocked = vGhost.ok === false && vGhost.reasons.includes('files-missing');
+
+    ok = dbg.emptyBlocked && dbg.blankBlocked && dbg.realPasses && dbg.underscoreOk
+      && dbg.nextjsOk && dbg.privDirOk && dbg.initPyExempt && dbg.ghostStillBlocked
+      && dbg.markerOnlyBlocked && dbg.pyiRecognized && dbg.urlFragBlocked && dbg.driveRelBlocked && dbg.colonFormOk;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ M(1.36.109) 완료 게이트: 0바이트=스텁(공백과 동일 판정) + 밑줄 파일명 무손실 추출 + __init__.py 예외 + 실구현/없는파일 대조군'
+    : '✗ 1.36.109 완료 게이트 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

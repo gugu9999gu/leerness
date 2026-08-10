@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.108';
+const VERSION = '1.36.109';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5178,10 +5178,17 @@ function _selfTestCases() {
         && E('module.exports = require("./x"); void 0;\n') === false;
       return base && bypass && real && noop && noopFP;
     } },
-    { name: '위장 스텁 차단 (1.18.2): stub 루프 _vcImplIsEmpty 사용 + 메시지 + FILE_EXTS java/php 정합 (소스 가드)', run: () => {
-      const src = read(__filename);
-      return src.includes('if (_vcImplIsEmpty(body)) stubFiles.push(c.file);') && src.includes('비주석 코드 0줄 또는 빈 export 껍데기')
-        && /const FILE_EXTS = '[^']*\bjava\b[^']*\bphp\b[^']*'/.test(src);
+    { name: '위장 스텁 차단 (1.18.2 · 1.36.109 행위전환): 빈껍데기 판정이 실제로 동작 + 스텁 루프가 그 판정을 쓴다', run: () => {
+      // 1.36.109: 종전엔 스텁 루프의 호출 줄을 **정확 리터럴**로 붙잡았다. 이번 라운드에 그 줄을 리팩터하자
+      //   (마커 파일 판정을 끼워야 했다) 리터럴이 사라져 메타가드가 즉시 잡았다 — 자기참조 소스가드가 공허해지는 형태다.
+      //   표현이 아니라 **동작**을 본다.
+      //   ⚠ 배선(루프가 이 판정을 실제로 호출하는가)은 **여기서 소스로 확인하지 않는다**: 그 정규식을 쓰자
+      //   바로 위 설명 주석이 스스로를 만족시켜 변이가 생존했다(자체 변이 시험이 잡았다 — 같은 함정의 재생산).
+      //   배선은 e2e 블록 M 이 행위로 지킨다(0바이트 파일 → stub-impl). 배선을 끊으면 그 블록이 실패한다.
+      const shells = ['', '   \n\n ', '/' + '/ TODO\n' + '/' + '/ later\n', '"use strict"; module.exports = {};\n', '/* c */\nvoid 0;\n'];
+      const reals = ['function f(){return 1;}\nmodule.exports={f};\n', 'def f():\n    return 1\n', 'export const x = 1;\nexport function g(){ return x; }\n'];
+      const judged = shells.every(s => _vcImplIsEmpty(s) === true) && reals.every(s => _vcImplIsEmpty(s) === false);
+      return judged && read(__filename).includes('비주석 코드 0줄 또는 빈 export 껍데기');
     } },
     { name: '품질 렌즈 (1.18.3): 카탈로그 무결성 — 사용자 원문 질문 + affects 상호참조 유효 (행위)', run: () => {
       const keys = Object.keys(LENS_CATALOG);
@@ -6423,7 +6430,7 @@ function _selfTestCases() {
       return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved()
         && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk() && _p0102HonestyOk()
         && _p0103FlagsOk() && _p0103JsonOk() && _p0103RootOk() && _p0104UsageOk()
-        && _p0014SecretBaselineOk() && _p0104ReminderOk() && _p0015ModeOk() && _p0097AsyncLockOk();
+        && _p0014SecretBaselineOk() && _p0104ReminderOk() && _p0015ModeOk() && _p0097AsyncLockOk() && _p0109ClaimGateOk();
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -8101,6 +8108,28 @@ function _p0015ModeOk() {
 //   순수 호출로 계약을 고정한다: 프로미스가 끝나기 전에는 락 파일이 살아 있어야 하고, 끝나면 사라져야 한다.
 //   selftest 는 `c.run() === true` 만 통과시키므로(프로미스는 자동 실패) **동기 thenable** 로 같은 분기를
 //   결정적으로 밟는다 — `typeof out.then === 'function'` 이라는 판별 조건이 동일하다.
+// 1.36.109 (완료게이트 사냥): 두 결함을 **순수 호출**로 고정한다. 둘 다 양방향으로 단언한다 —
+//   막아야 할 것을 막는지, 그리고 통과해야 할 것이 계속 통과하는지. false-BLOCK 은 false-PASS 보다 나쁘다.
+function _p0109ClaimGateOk() {
+  try {
+    const an = require('../lib/analyzers');
+    // ① 빈 파일은 가장 명백한 스텁이다. 종전엔 `!body` 때문에 "스텁 아님" 이었고, 공백 3자보다 0바이트가 더 쉽게 통과했다.
+    const emptyIsStub = _vcImplIsEmpty('') === true && _vcImplIsEmpty('   \n\n ') === true;
+    const realIsNot = _vcImplIsEmpty('function f(){return 1;}\nmodule.exports={f};\n') === false
+      && _vcImplIsEmpty('def f():\n    return 1\n') === false;          // 대조군 — 실코드는 스텁이 아니다
+    const badInput = _vcImplIsEmpty(null) === false && _vcImplIsEmpty(undefined) === false;  // 문자열 아닌 입력은 판정하지 않는다
+    // ② 밑줄로 시작하는 파일명이 **잘리지 않고 통째로** 추출돼야 한다. 잘리면 없는 파일을 찾아 정직한 주장을 거부한다.
+    const grab = (s) => (String(s).match(an._EVIDENCE_FILE_RE()) || [])[0] || null;
+    const underscore = grab('src/_helpers.js 구현 완료') === 'src/_helpers.js'
+      && grab('pages/_app.tsx 수정') === 'pages/_app.tsx'
+      && grab('pkg/__init__.py 추가') === 'pkg/__init__.py'
+      && grab('_private/util.ts 정리') === '_private/util.ts';
+    const plainStill = grab('src/normal.js 구현') === 'src/normal.js'                 // 대조군 — 기존 인식 유지
+      && grab('ops/containers/Dockerfile 작성') === 'ops/containers/Dockerfile'
+      && grab('.github/workflows/ci.yml 갱신') === '.github/workflows/ci.yml';
+    return emptyIsStub && realIsNot && badInput && underscore && plainStill;
+  } catch { return false; }
+}
 function _p0097AsyncLockOk() {
   const os2 = require('os');
   const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p97lk-'));
@@ -15165,7 +15194,12 @@ const _VC_EMPTY_SHELL_RE = new RegExp(
   ].join('|') + ')(?:\\s+as\\s+[A-Za-z0-9_$.<>\\[\\] ]+?)?\\s*;?$'           // 선택적 TS 캐스트(as any) + ;
 );
 function _vcImplIsEmpty(body) {
-  if (typeof body !== 'string' || !body) return false;
+  // 1.36.109 (완료게이트 사냥): 빈 문자열은 **가장 명백한 스텁**인데 `!body` 가 그걸 "스텁 아님" 으로 만들었다.
+  //   공백 3자짜리 파일은 stub-impl 로 막히는데 0바이트는 통과했다 — 같은 것이 더 비어 있을수록 통과하는 역전이다.
+  //   (`touch src/x.js` + evidence "src/x.js 구현 완료" → verify-claim 통과, 실측.)
+  //   읽기 실패는 호출부가 catch 로 걸러 여기 오지 않는다. 빈 본문은 곧 빈 구현이다.
+  if (typeof body !== 'string') return false;
+  if (body === '') return true;
   // 블록주석 제거 → 줄별 trim/주석줄 제거 → 인라인 // 주석 제거(따옴표 없는 줄만, 문자열 보호) → join.
   const codeLines = body.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => {
     let t = l.trim();
@@ -15271,6 +15305,12 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   for (const m of evidence.matchAll(FILE_RE)) {
     const prev = m.index > 0 ? evidence[m.index - 1] : '';
     if (prev === '\\' || prev === '/') continue;   // suffix-of-longer-path(UNC \\srv\..., C:\..., URL) → skip. ':' 는 "파일:src/x.js" 정상 케이스라 스킵 안 함
+    // 1.36.109 (codex 검수 P2, 재현됨): 구분자만 보던 가드에 두 구멍이 있었다 —
+    //   `https://…/docs#_anchor.js` 의 URL 조각과 `C:_anchor.js` 의 드라이브 상대 경로가 **루트 상대 파일 주장**이 됐다.
+    //   (밑줄 확장 전에도 같은 형태로 `anchor.js` 가 통과했다 — 내가 만든 클래스는 아니지만 여기서 닫는다.)
+    //   `:` 를 통째로 막으면 "파일:src/x.js" 같은 정상 표기가 죽으므로, **앞이 단일 영문자인 `:` 만** 드라이브로 본다.
+    if (prev === '#') continue;                                               // URL 조각
+    if (prev === ':' && /^[A-Za-z]$/.test(evidence[m.index - 2] || '')) continue;   // C:name (드라이브 상대)
     filePatterns.push(m[0].replace(/\\/g, '/'));
   }
   // 중복 제거 + "tests/test.js" 같은 결과를 유지 (이미 `..` 없으니 그대로)
@@ -15317,15 +15357,34 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   // 1.17.3 (UR-0046 범용성 P1②): 빈껍데기(스텁) 구현 + 테스트-구현 연결 검사 — "주석뿐 구현 + assert(true) 테스트"가 verify-claim 을 exit 0 으로 통과하던 공격(5축 실증 Attack C) 차단.
   //   ① 스텁: 주장된 코드 파일(테스트 제외)의 비주석 코드줄이 0 이면 확정 스텁 — done 게이팅 FAIL(확실 신호만, 과탐 0).
   //   ② 연결: 주장에 구현+테스트가 모두 있는데 어떤 테스트도 구현 파일명(basename)을 참조하지 않으면 — 기본 advisory ⚠, --strict-claims 시 FAIL.
-  const _VC_CODE_EXT = /\.(js|mjs|cjs|jsx|ts|tsx|py|rb|go|rs|java|cs|php)$/i;
+  // 1.36.109 (codex 검수 P2): `pyi` 추가 — 여기에 없으면 위의 마커 예외가 **도달 불가**다(광고만 하고 안 도는 코드).
+  const _VC_CODE_EXT = /\.(js|mjs|cjs|jsx|ts|tsx|pyi|py|rb|go|rs|java|cs|php)$/i;
   const _VC_TEST_PAT = /(^|[\\/])(test_[^\\/]+\.[a-z]+|[^\\/]+[._-]test\.[a-z]+|[^\\/]+\.spec\.[a-z]+)$|(^|[\\/])tests?[\\/]/i;
   const stubFiles = [];
+  // 1.36.109 (codex 검수 P1, 재현됨): 관례상 비어 있는 **마커 파일**은 스텁으로 몰면 안 되지만,
+  //   그것만으로 "구현했다" 가 성립해서도 안 된다. 처음엔 무조건 예외로 뒀더니 빈 `pkg/__init__.py` **하나만**
+  //   인용한 done 이 exit 0 을 받았다(검수가 재현) — 내가 막겠다고 고친 바로 그 형태를 예외가 되살린 것이다.
+  //   그래서 예외는 "다른 실질 파일이 함께 인용됐을 때만" 적용한다. 판정은 루프 뒤로 미룬다.
+  const markerFiles = [];
+  const _isPkgMarker = (f) => /(^|[\\/])__init__\.pyi?$/.test(f);
   for (const c of fileChecks) {
     if (!c.exists || !_VC_CODE_EXT.test(c.file) || _VC_TEST_PAT.test(c.file)) continue;
     let body = ''; try { body = read(path.join(root, c.file)); } catch { continue; }
-    if (!body || body.length > 512 * 1024) continue;
+    // 1.36.109: `!body` 를 스킵 조건에 두면 0바이트 파일이 스텁 검사를 통째로 건너뛴다(가드 두 겹이 서로를 가림 —
+    //   여기와 `_vcImplIsEmpty` 양쪽에 같은 falsy 함정이 있었고 한 곳만 고치면 구멍이 남는다). 크기 상한만 남긴다.
+    if (body.length > 512 * 1024) continue;
     // 1.18.2: 코드 0줄(기존) + 빈 export 껍데기(위장 스텁) 통합 판정.
-    if (_vcImplIsEmpty(body)) stubFiles.push(c.file);
+    if (!_vcImplIsEmpty(body)) continue;
+    if (_isPkgMarker(c.file)) { markerFiles.push(c.file); continue; }   // 판정 보류 — 아래에서 결정
+    stubFiles.push(c.file);
+  }
+  // 빈 마커를 봐 주는 조건: 같이 인용된 **비어 있지 않은** 코드 파일이 하나라도 있어야 한다.
+  //   (파이썬 패키지 추가는 보통 `__init__.py` + 실제 모듈이 함께 온다 — 그 정직한 형태만 통과시킨다.)
+  if (markerFiles.length) {
+    const substantive = fileChecks.some(c =>
+      c.exists && _VC_CODE_EXT.test(c.file) && !_VC_TEST_PAT.test(c.file) && !_isPkgMarker(c.file)
+      && !stubFiles.includes(c.file));
+    if (!substantive) for (const f of markerFiles) stubFiles.push(f);
   }
   const _vcImpl = fileChecks.filter(c => c.exists && _VC_CODE_EXT.test(c.file) && !_VC_TEST_PAT.test(c.file)).map(c => c.file);
   const _vcTests = fileChecks.filter(c => c.exists && _VC_CODE_EXT.test(c.file) && _VC_TEST_PAT.test(c.file)).map(c => c.file);
