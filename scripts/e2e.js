@@ -10580,7 +10580,9 @@ total++;
     // 래칫: 지금 측정된 부채보다 **늘면 실패**. 줄어드는 것은 언제나 통과.
     // 1.36.111 실측. 처음엔 21개 명령만 재서 46 이었는데, 검수 지적으로 커버리지를 39개로 넓히자 **111** 이 드러났다 —
     //   좁은 목록의 기준선은 실제 부채보다 낙관적이었다. 줄인 만큼만 낮춘다(느슨하게 두면 그 안에서 조용히 썩는다).
-    const BASELINE = 111;
+    // 1.36.112: 106 으로 조인다. `context budget` 을 손대는 김에 영어화해 5줄을 갚았다(111 → 106, 실측).
+    //   갚은 만큼만 낮춘다 — 여유를 남기면 그 안에서 조용히 썩는다(1.36.82 의 자기참조 가드에서 겪은 형태).
+    const BASELINE = 106;
     dbg.baseline = BASELINE;
     dbg.withinRatchet = leaky <= BASELINE;
     // 이번 라운드가 고친 표면은 **0 이어야** 한다 — 래칫과 별개로 회귀를 직접 막는다.
@@ -10602,6 +10604,237 @@ total++;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
   console.log(ok ? `✓ O(1.36.111/T-0092) 영어 누출 ${dbg.leaky}줄 ≤ 래칫 ${dbg.baseline} · commands 표면 0 · 한국어 출력 불변 · --json 계약 유지 · 계측 살아있음`
     : '✗ 1.36.111 i18n 래칫 위반 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// ── 1.36.112 블록 P: 이월분(Preserved previous content) 비용을 `context budget` 이 **분해해 보인다**.
+//   왜: 1.36.95 와 1.36.105 가 각각 "기존 설치본 정리는 provenance 라운드로", "오래된 이월을 줄이는 일은
+//   별도 라운드로" 미뤘다. 두 판단(삭제는 안전을 증명 못 한다 · false-DROP 이 버그)은 지금도 유효하다.
+//   미룬 두 번이 건너뛴 것은 **비용 측정**이다 — 설치본 45개 중 12개가 이월분을 갖고 합계 10,895 tok,
+//   최악(이 저장소)은 지침 파일의 78.0%(6,048 tok)이고, minimal 로 낮춰도 적재 7,242 tok 중 83% 가 그것이다.
+//   (이 수치는 **출하되는 `_splitPreserved` 로** 다시 잰 값이다 — 분해기를 엄격하게 고친 뒤 재측정했다.)
+//   이 가드는 "재서 보인다" 만 지킨다. 지우는 동작은 여전히 없고, 그게 없다는 것도 아래에서 단언한다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-carry112-'));
+  const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb });
+  try {
+    const mk = (name, lang) => {
+      const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"proj","version":"0.1.0"}');
+      cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', lang || 'ko'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+      return d;
+    };
+    const R = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: env || ENV });
+    const J = (d, a, env) => { try { return JSON.parse(String((R(d, a.concat(['--json']), env)).stdout || '').trim()); } catch { return null; } };
+
+    // 대조군 ①: 이월분이 **없는** 프로젝트는 0 이어야 한다. 없는 부채를 보고하면 이 지표 자체를 못 믿는다.
+    const clean = mk('clean');
+    const cleanB = J(clean, ['context', 'budget']);
+    dbg.cleanZero = !!cleanB && cleanB.carried && cleanB.carried.tokens === 0
+      && cleanB.parts.every(p => !p.carriedTokens)
+      && !/이월|carried-over/.test(String(R(clean, ['context', 'budget']).stdout || ''));
+
+    // 측정 대상 블록은 **실제 writer 로** 만든다. 손으로 흉내 내면 형식이 갈릴 때 가드가 조용히 죽는다.
+    const PU = require(path.resolve(path.dirname(CLI), '..', 'lib', 'pure-utils'));
+    const carried = mk('carried');
+    const agp = path.join(carried, 'AGENTS.md');
+    const base = fs.readFileSync(agp, 'utf8');
+    const legacy = Array.from({ length: 150 }, (_, i) => `- LEGACY-CARRY-${i} 과거 릴리스 이력 항목 (1.9.${100 + i})`).join('\n');
+    const merged = PU._managedMerge('AGENTS.md', base, base + '\n' + legacy + '\n', '.harness/archive', new Set(), {});
+    dbg.writerMadeBlock = merged.includes(PU.PRESERVED_TAG) && merged.includes('LEGACY-CARRY-149');
+    fs.writeFileSync(agp, merged);
+
+    // ② 분해기는 writer 가 쓴 것을 **한 바이트도 잃지 않고** 가른다 (관리분 + 이월분 === 원문)
+    const sp = PU._splitPreserved(merged);
+    dbg.roundTrip = (sp.managed + sp.preserved) === merged && sp.preserved.includes('LEGACY-CARRY-0')
+      && !sp.managed.includes('LEGACY-CARRY-0') && sp.preserved.startsWith('\n');
+    // 이월 블록이 없는 입력은 통째로 관리분이다(경계 없는 곳에 경계를 만들지 않는다)
+    const spNone = PU._splitPreserved(base);
+    dbg.splitNoop = spNone.preserved === '' && spNone.managed === base && spNone.at === -1;
+
+    // ③ 실제로 센다 — 파일 라인과 carried 합계 양쪽에서
+    const cb = J(carried, ['context', 'budget']);
+    const agPart = cb && cb.parts.find(p => p.key === 'AGENTS.md');
+    dbg.counts = !!cb && cb.carried.tokens > 500 && !!agPart && agPart.carriedTokens > 500
+      && cb.carried.tokens === agPart.carriedTokens && cb.carried.pctOfTotal > 0;
+
+    // ④ **이 라운드의 핵심 주장**: 이월분은 등급을 낮춰도 남는다. 주장을 출력만 하지 말고 측정으로 확인한다.
+    R(carried, ['mode', 'set', 'minimal']);
+    const mb = J(carried, ['context', 'budget']);
+    dbg.survivesMode = !!mb && mb.mode === 'minimal' && mb.total < cb.total
+      && mb.carried.tokens === cb.carried.tokens && mb.carried.tokens > 0
+      && mb.carried.pctOfTotal > cb.carried.pctOfTotal;   // 총량이 줄어 이월분의 **비중은 오히려 커진다**
+    R(carried, ['mode', 'set', 'standard']);
+
+    // ⑤ 백업 존재 판정은 **양방향**으로 움직여야 한다. 한 방향만 보면 상수를 반환해도 통과한다.
+    //   (작성 중 실제로 오경보를 냈다 — 안내가 아카이브 '루트' 를 가리키는 형식을 상정하지 않아서였다.)
+    const arch = path.join(carried, '.harness', 'archive', 'leerness-1.0.0-x', 'files');
+    fs.mkdirSync(arch, { recursive: true }); fs.writeFileSync(path.join(arch, 'AGENTS.md'), base);
+    const withArch = J(carried, ['context', 'budget']);
+    fs.rmSync(path.join(carried, '.harness', 'archive'), { recursive: true, force: true });
+    const noArch = J(carried, ['context', 'budget']);
+    dbg.archiveBothWays = !!withArch && !!noArch
+      && withArch.carried.archive && withArch.carried.archive.exists === true
+      && noArch.carried.archive && noArch.carried.archive.exists === false;
+
+    // ⑥ 권고는 **실측 절감액 순**이다. 순서는 권고가 **둘 다 있을 때만** 판별되므로 양방향 픽스처를 쓴다.
+    //   1차 작성 때 minimal 케이스만 뒀다가 "고정 순서로 되돌림" 변이가 살아남았다 — 권고가 하나뿐이면
+    //   어떤 정렬을 써도 결과가 같다(정렬을 주장해 놓고 정렬을 시험하지 않은 공허한 커버리지).
+    //   ⑥-a 등급 절감 > 이월분  → 등급 권고가 먼저   (뒤집기 변이를 잡는다)
+    //   ⑥-b 이월분 > 등급 절감  → 이월분 권고가 먼저 (정렬 제거 변이를 잡는다 — 삽입 순서가 곧 옛 고정 순서다)
+    const remLines = (d) => String(R(d, ['context', 'budget']).stdout || '').split('\n').filter(l => /^\s*→ /.test(l));
+    fs.appendFileSync(path.join(carried, 'CLAUDE.md'), '\n' + 'x'.repeat(20000) + '\n');   // 관리분만 키운다(이월분 불변)
+    const aStd = J(carried, ['context', 'budget']);
+    const aRef = aStd && aStd.parts.find(p => p.key === 'referencedDocs');
+    const aLines = remLines(carried);
+    dbg.remedyOrderModeFirst = !!aStd && aStd.over === true && !!aRef
+      && aRef.tokens > aStd.carried.tokens            // 판별 조건이 실제로 성립했는지 **먼저** 단언
+      && aLines.length === 2 && /mode set minimal/.test(aLines[0]) && /이월분/.test(aLines[1]);
+
+    const big = mk('big');
+    const bagp = path.join(big, 'AGENTS.md');
+    const bbase = fs.readFileSync(bagp, 'utf8');
+    const huge = Array.from({ length: 1200 }, (_, i) => `- LEGACY-BIG-${i} 과거 릴리스 이력 항목 (1.9.${i})`).join('\n');
+    fs.writeFileSync(bagp, PU._managedMerge('AGENTS.md', bbase, bbase + '\n' + huge + '\n', '.harness/archive', new Set(), {}));
+    const bStd = J(big, ['context', 'budget']);
+    const bRef = bStd && bStd.parts.find(p => p.key === 'referencedDocs');
+    const bLines = remLines(big);
+    dbg.remedyOrderCarriedFirst = !!bStd && bStd.over === true && !!bRef
+      && bStd.carried.tokens > bRef.tokens
+      && bLines.length === 2 && /이월분/.test(bLines[0]) && /mode set minimal/.test(bLines[1]);
+
+    // minimal 에서는 등급 권고의 절감이 0 이므로 이월분 권고만 남아야 한다
+    //   (종전엔 순서가 고정이라, 등급을 낮춰도 예산을 못 지키는 프로젝트에 헛수고를 먼저 권했다).
+    R(carried, ['mode', 'set', 'minimal']);
+    const minOut = String(R(carried, ['context', 'budget']).stdout || '');
+    const lines = minOut.split('\n').filter(l => /^\s*→ /.test(l));
+    dbg.remedyOrder = lines.length === 1 && /이월분/.test(lines[0]) && !lines.some(l => /mode set minimal/.test(l));
+    dbg.remedyQuantified = /이월분 \d+ tok \(합계의 \d+%\) 은 \*\*등급을 낮춰도 남습니다\*\*/.test(minOut);
+
+    // ⑦ 이 라운드는 **지우지 않는다**. 이월 블록이 그대로 남아 있어야 한다(측정이 삭제로 번지지 않았음을 단언).
+    dbg.noDeletion = fs.readFileSync(path.join(carried, 'AGENTS.md'), 'utf8').includes('LEGACY-CARRY-149');
+
+    // ⑧ 영어 모드에서 이 표면은 한글을 내지 않는다(T-0100 상환분 — 래칫 여유에 숨지 못하게 직접 단언).
+    //   ⚠ 종전엔 **예산 이내** 신규 프로젝트만 봐서 `if (over)` 안의 영어 문구 6종이 한 번도 렌더되지 않았다
+    //   (독립 검수 지적). 한국어가 되살아나기 가장 쉬운 절반을 가드가 못 보고 있었다 — 초과·이월 분기를 실제로 밟힌다.
+    const en = mk('en_carry', 'en');
+    const enEnv = Object.assign({}, ENV, { LEERNESS_LANG: 'en' });
+    {
+      const p = path.join(en, 'AGENTS.md'); const t = fs.readFileSync(p, 'utf8');
+      const extra = Array.from({ length: 200 }, (_, i) => `- CARRY-EN-${i} legacy release note`).join('\n');
+      fs.writeFileSync(p, PU._managedMerge('AGENTS.md', t, t + '\n' + extra + '\n', '.harness/archive', new Set(), { lang: 'en' }));
+      fs.appendFileSync(path.join(en, 'CLAUDE.md'), '\n' + 'x'.repeat(40000) + '\n');
+    }
+    const enOut = String(R(en, ['context', 'budget'], enEnv).stdout || '');
+    const enJ = J(en, ['context', 'budget'], enEnv);
+    // 손상 경고까지 영어여야 한다 — 사유 문자열이 한국어면 그 줄은 여전히 누출이다(별도 프로젝트로 분리 측정).
+    const enCorrupt = mk('en_corrupt', 'en');
+    fs.writeFileSync(path.join(enCorrupt, '.harness', 'manifest.json'), '{ not json');
+    const enCorruptOut = String(R(enCorrupt, ['context', 'budget'], enEnv).stdout || '');
+    dbg.enClean = enOut.split('\n').filter(l => /[가-힣ㄱ-ㆎ]/.test(l)).length === 0
+      && enCorruptOut.split('\n').filter(l => /[가-힣ㄱ-ㆎ]/.test(l)).length === 0
+      && /manifest\.json corrupt \(invalid JSON\)/.test(enCorruptOut)   // 손상 분기를 실제로 밟았는지 단언
+      && !!enJ && enJ.lang === 'en'
+      && enJ.over === true && enJ.carried.tokens > 0                    // 초과·이월 분기를 실제로 밟았는지 단언
+      && /carried-over/.test(enOut) && /survives a mode change/.test(enOut)
+      && /at least/.test(enOut) && /session load exceeds the budget/.test(enOut)
+      && enJ.parts.every(p => typeof p.key === 'string');   // 기계는 로케일 흔들리는 라벨 대신 안정 키를 본다
+
+    // ⑨ 두 파일이 **모두** 이월분을 가진 형태 — 이 라운드의 근거 수치(77.6%)가 나온 저장소가 바로 이 형태다.
+    //   종전 픽스처는 AGENTS.md 에만 넣어 **합산이 한 번도 시험되지 않았고**, 독립 검수가
+    //   `carriedTok = Math.max(carriedTok, cT)` 변이의 생존을 지적했다(합계가 최댓값과 구별되지 않았다).
+    const both = mk('both');
+    for (const f of ['AGENTS.md', 'CLAUDE.md']) {
+      const p = path.join(both, f); const t = fs.readFileSync(p, 'utf8');
+      const extra = Array.from({ length: f === 'AGENTS.md' ? 140 : 55 }, (_, i) => `- CARRY-${f}-${i} 과거 항목`).join('\n');
+      fs.writeFileSync(p, PU._managedMerge(f, t, t + '\n' + extra + '\n', '.harness/archive', new Set(), {}));
+    }
+    const twoJ = J(both, ['context', 'budget']);
+    const pA = twoJ && twoJ.parts.find(p => p.key === 'AGENTS.md');
+    const pC = twoJ && twoJ.parts.find(p => p.key === 'CLAUDE.md');
+    dbg.twoFileSum = !!twoJ && !!pA && !!pC && pA.carriedTokens > 0 && pC.carriedTokens > 0
+      && pA.carriedTokens !== pC.carriedTokens                                   // 합계와 최댓값이 갈리는 입력인지 **먼저** 확인
+      && twoJ.carried.tokens === pA.carriedTokens + pC.carriedTokens
+      && twoJ.carried.bytes > twoJ.carried.tokens;                               // bytes 가 tokens 의 복사본이 아님(계약 필드 커버리지)
+
+    // ⑩ 백업 판정은 이월분을 가진 **모든** 파일을 본다. AGENTS 만 백업된 상태에서 "보관돼 있습니다" 는 거짓이다.
+    const snap2 = path.join(both, '.harness', 'archive', 'leerness-1.0.0-x', 'files');
+    fs.mkdirSync(snap2, { recursive: true }); fs.writeFileSync(path.join(snap2, 'AGENTS.md'), 'x');
+    const partial = J(both, ['context', 'budget']);
+    fs.writeFileSync(path.join(snap2, 'CLAUDE.md'), 'x');
+    const full = J(both, ['context', 'budget']);
+    dbg.archivePerFile = !!partial && !!full && !!partial.carried.archive && !!full.carried.archive
+      && partial.carried.archive.exists === false && full.carried.archive.exists === true
+      && full.carried.archive.files === 2;
+
+    // ⑪ 프로젝트 **밖**을 가리키는 안내는 백업으로 인정하지 않는다(안내 문구는 프로젝트 파일에서 온 입력이다)
+    const esc = mk('esc');
+    {
+      const outside = path.join(sb, 'outside', 'files'); fs.mkdirSync(outside, { recursive: true });
+      fs.writeFileSync(path.join(outside, 'AGENTS.md'), 'x');
+      const p = path.join(esc, 'AGENTS.md'); const t = fs.readFileSync(p, 'utf8');
+      fs.writeFileSync(p, PU._managedMerge('AGENTS.md', t, t + '\n- CARRY-ESC\n', '.harness/archive', new Set(), {})
+        .replace('`.harness/archive`', '`../outside`'));
+    }
+    const escJ = J(esc, ['context', 'budget']);
+    dbg.noEscape = !!escJ && !!escJ.carried.archive && escJ.carried.archive.exists === false;
+
+    // ⑫ 이월 블록 **안의** `.harness/*.md` 지목은 등급 절감으로 치지 않는다 — 등급을 낮춰도 그 언급은 남기 때문이다.
+    //   독립 검수가 이 머신의 실제 설치본(_bench/v19-demo)에서 옛 문서 목록이 통째로 이월된 형태를 확인했다.
+    //   구분하지 않으면 "등급을 낮추면 N tok 이 빠진다" 가 최악의 경우 **전부 허수**가 된다.
+    const refc = mk('refcarry');
+    {
+      const p = path.join(refc, 'AGENTS.md');
+      const stripped = fs.readFileSync(p, 'utf8').replace(/\.harness\//g, 'dot-harness/');   // 관리분에서 지목 제거
+      fs.writeFileSync(p, PU._managedMerge('AGENTS.md', stripped,
+        stripped + '\n- 읽어라: .harness/plan.md\n- 읽어라: .harness/decisions.md\n', '.harness/archive', new Set(), {}));
+      fs.appendFileSync(path.join(refc, 'CLAUDE.md'), '\n' + 'x'.repeat(60000) + '\n');       // 예산 초과 유도
+    }
+    const refJ = J(refc, ['context', 'budget']);
+    const refPart = refJ && refJ.parts.find(p => p.key === 'referencedDocs');
+    const refLines = remLines(refc);
+    //   판별 대조군: **같은 지목**을 관리분에 둔 쌍둥이 프로젝트. 두 값의 차이가 정확히 지목 토큰이어야 한다.
+    //   ⚠ 표시 문자열만 단언하면 공허하다 — 변이가 **정렬에 쓰는 값**만 바꾸면 화면은 그대로다(변이 M18 이 그렇게 생존했다).
+    //   ⚠ "절감 < 지목" 같은 크기 가정도 못 쓴다 — 신규 프로젝트에서는 그 관계가 성립하지 않는다(작성 중 실측).
+    const refm = mk('refmanaged');
+    {
+      const p = path.join(refm, 'AGENTS.md');
+      const stripped = fs.readFileSync(p, 'utf8').replace(/\.harness\//g, 'dot-harness/');
+      const withRefs = stripped + '\n- 읽어라: .harness/plan.md\n- 읽어라: .harness/decisions.md\n';
+      fs.writeFileSync(p, PU._managedMerge('AGENTS.md', withRefs, withRefs + '\n- CARRY-FILLER\n', '.harness/archive', new Set(), {}));
+      fs.appendFileSync(path.join(refm, 'CLAUDE.md'), '\n' + 'x'.repeat(60000) + '\n');
+    }
+    const refmJ = J(refm, ['context', 'budget']);
+    const refmPart = refmJ && refmJ.parts.find(p => p.key === 'referencedDocs');
+    dbg.carriedRefsNotCounted = !!refJ && refJ.over === true
+      && !!refPart && refPart.tokens > 0                    // 총량에는 들어간다 — AI 는 이월 블록도 읽는다
+      && typeof refJ.modeSavesAtLeast === 'number' && !!refmJ && typeof refmJ.modeSavesAtLeast === 'number'
+      && !!refmPart && refmPart.tokens === refPart.tokens   // 두 프로젝트가 같은 문서를 가리키는지 먼저 확인
+      && refmJ.modeSavesAtLeast - refJ.modeSavesAtLeast === refPart.tokens
+      && refLines.some(l => /지목 문서 0 /.test(l));         // 표시도 0 이어야 한다
+
+    // ⑬ 관리 영역에 **사용자가 덧붙인** 내용은 등급을 낮춰도 삭제되지 않고 이월 블록으로 옮겨간다(managedMerge 의 계약).
+    //   따라서 절감으로 세면 안 된다. 처음엔 `관리분 − 최소템플릿` 으로 재서 이 몫이 절감에 섞여 있었다.
+    const pad = mk('padded');
+    const padBefore = J(pad, ['context', 'budget']);
+    fs.appendFileSync(path.join(pad, 'AGENTS.md'), '\n' + '사용자가 덧붙인 지침 줄입니다.\n'.repeat(2000));
+    const padAfter = J(pad, ['context', 'budget']);
+    const padA = padBefore && padBefore.parts.find(p => p.key === 'AGENTS.md');
+    const padB = padAfter && padAfter.parts.find(p => p.key === 'AGENTS.md');
+    dbg.userContentNotSaving = !!padA && !!padB
+      && padB.tokens - padA.tokens > 5000                                    // 덧붙임이 실제로 컸는지 먼저 확인
+      && padAfter.modeSavesAtLeast === padBefore.modeSavesAtLeast;           // 그런데 절감은 그대로여야 한다
+
+    ok = dbg.cleanZero && dbg.writerMadeBlock && dbg.roundTrip && dbg.splitNoop && dbg.counts
+      && dbg.survivesMode && dbg.archiveBothWays && dbg.remedyOrder && dbg.remedyQuantified
+      && dbg.remedyOrderModeFirst && dbg.remedyOrderCarriedFirst
+      && dbg.twoFileSum && dbg.archivePerFile && dbg.noEscape && dbg.carriedRefsNotCounted
+      && dbg.userContentNotSaving && dbg.noDeletion && dbg.enClean;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ P(1.36.112) 이월분 계량: 무이월 0 · 분해 무손실(왕복) · 경계없음 무동작 · 두 파일 합산(≠최댓값) · bytes 계약 · **등급을 낮춰도 잔존**(비중은 증가) · 백업판정 양방향+파일별+경로가둠 · 이월 안의 지목은 절감 아님 · 권고 절감액순(양방향 판별) + 수치동반 · 삭제 없음 · 영어표면 한글 0'
+    : '✗ 1.36.112 이월분 계량 실패 ' + JSON.stringify(dbg));
   if (!ok) failed++;
 }
 

@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.111';
+const VERSION = '1.36.112';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -660,10 +660,13 @@ function _readManifestChecked(root) {
   const mf = path.join(absRoot(root || process.cwd()), '.harness', 'manifest.json');
   if (!exists(mf)) return { path: mf, exists: false, corrupt: false, data: {} };
   let raw = null;
-  try { raw = read(mf); } catch { return { path: mf, exists: true, corrupt: true, reason: '읽기 실패', data: {} }; }
+  // 1.36.112: `reason` 은 한국어 문장뿐이라, 이걸 끼워 넣는 영어 문장이 한국어를 새게 한다
+  //   (영어 손상 경고 안에 `읽기 실패` 가 그대로 박혔다 — 이 저장소가 래칫으로 세는 바로 그 결함이다).
+  //   기존 소비자(`corruptReason`)를 위해 `reason` 은 그대로 두고, 표시 쪽이 언어를 고르도록 **안정 코드**를 함께 싣는다.
+  try { raw = read(mf); } catch { return { path: mf, exists: true, corrupt: true, reason: '읽기 실패', code: 'read_failed', data: {} }; }
   let j = null;
-  try { j = JSON.parse(raw); } catch { return { path: mf, exists: true, corrupt: true, reason: 'JSON 파싱 실패', data: {} }; }
-  if (!j || typeof j !== 'object' || Array.isArray(j)) return { path: mf, exists: true, corrupt: true, reason: '최상위가 객체가 아님', data: {} };
+  try { j = JSON.parse(raw); } catch { return { path: mf, exists: true, corrupt: true, reason: 'JSON 파싱 실패', code: 'json_parse_failed', data: {} }; }
+  if (!j || typeof j !== 'object' || Array.isArray(j)) return { path: mf, exists: true, corrupt: true, reason: '최상위가 객체가 아님', code: 'not_an_object', data: {} };
   return { path: mf, exists: true, corrupt: false, data: j };
 }
 function _projectMode(root) {
@@ -6430,7 +6433,7 @@ function _selfTestCases() {
       return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved()
         && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk() && _p0102HonestyOk()
         && _p0103FlagsOk() && _p0103JsonOk() && _p0103RootOk() && _p0104UsageOk()
-        && _p0014SecretBaselineOk() && _p0104ReminderOk() && _p0015ModeOk() && _p0097AsyncLockOk() && _p0109ClaimGateOk() && _p0110HonestyOk();
+        && _p0014SecretBaselineOk() && _p0104ReminderOk() && _p0015ModeOk() && _p0097AsyncLockOk() && _p0109ClaimGateOk() && _p0110HonestyOk() && _p0112CarryOk();
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -8162,6 +8165,51 @@ function _p0110HonestyOk() {
     const optIn = hit('로직 반영했는데 엣지 케이스는 안 봤습니다.', true) === true
       && hit('엣지 케이스는 안 봤습니다.', false) === false;   // 산문에 완료 낱말이 없으면 기본값에선 안 잡는다
     return symmetric && neverBlocks && highSymmetric && futureScopeAllowed && noFalseBlock && optIn;
+  } catch { return false; }
+}
+// 1.36.112: 이월 블록의 **경계 판정**. 쓰는 쪽(_managedMerge)과 읽는 쪽(_splitPreserved)이 같은 상수를 봐야 한다 —
+//   어긋나면 `context budget` 이 이월분을 0 으로 보고하고, 두 번(1.36.95 · 1.36.105) 미뤄진 부채가 다시 안 보이게 된다.
+//   양방향으로 단언한다: 있는 경계를 찾는지, 그리고 **없는 경계를 만들지 않는지**. 후자가 더 위험하다 —
+//   사용자 산문을 이월분으로 오인하면 "지침의 100% 가 이월" 이라는 거짓 보고가 나온다.
+function _p0112CarryOk() {
+  try {
+    const p = require('../lib/pure-utils');
+    const base = '# T\n\n- managed line\n';
+    const merged = p._managedMerge('AGENTS.md', base, base + '\n- CUSTOM-CARRY-A\n- CUSTOM-CARRY-B\n', '.harness/archive', new Set(), {});
+    const s = p._splitPreserved(merged);
+    // ① 무손실 — 관리분 + 이월분이 원문과 **바이트 동일**. 한쪽이라도 흘리면 계량이 조용히 틀린다.
+    const lossless = (s.managed + s.preserved) === merged;
+    // ② 경계가 옳은 쪽에 있다
+    const placed = s.preserved.includes('CUSTOM-CARRY-A') && !s.managed.includes('CUSTOM-CARRY-A')
+      && s.managed.includes('- managed line') && s.preserved.includes(p.PRESERVED_TAG);
+    // ③ 경계가 없으면 만들지 않는다
+    const noop = (() => { const n = p._splitPreserved(base); return n.preserved === '' && n.managed === base && n.at === -1; })();
+    // ④ 태그가 지워진 구형 설치본은 제목으로 가르되, **생성 안내문이 뒤따를 때만** 인정한다.
+    const legacy = (() => {
+      const r = p._splitPreserved(base + '\n---\n## Preserved previous content\n\n> 이전 버전에서 이어진 내용. 전체 원본 백업: `.harness/archive`\n\n- OLD-LINE\n');
+      return r.preserved.includes('OLD-LINE') && !r.managed.includes('OLD-LINE');
+    })();
+    // ④-b 같은 제목이어도 안내문이 없으면 경계가 아니다 — 사용자가 쓴 동명 섹션을 통째로 삼키지 않기 위해서다.
+    //    편향은 **과소 보고** 쪽에 둔다: 못 세는 것보다, 사용자 산문을 "옮기세요" 라고 권하는 쪽이 나쁘다.
+    const legacyNeedsNote = p._splitPreserved(base + '\n---\n## Preserved previous content\n\n- 사용자가 직접 쓴 항목\n').preserved === '';
+    // ⑤ 본문에 그 낱말이 **문장으로** 나오는 것만으로는 가르지 않는다(제목 줄 전체를 앵커로 쓰는 이유)
+    const inline = (() => {
+      const r = p._splitPreserved('# T\n\nWe keep Preserved previous content in the wiki, not here.\n');
+      return r.preserved === '' && r.at === -1;
+    })();
+    // ⑤-b 태그가 **문장 안에 인용**된 경우도 경계가 아니다 — 생성기는 태그를 자기 줄에 쓰고 바로 다음 줄에 제목을 쓴다.
+    //    (leerness 자신을 설명하는 문서가 이 마커를 인용하면, 그 뒤 전부가 '이월분' 이 되던 형태다.)
+    const quoted = p._splitPreserved(`# T\n\n우리는 이 마커를 씁니다: \`${p.PRESERVED_TAG}\`\n\n- 실제 지침\n`).preserved === '';
+    // ⑥ 빈/비문자열 입력에서 죽지 않는다
+    const edge = p._splitPreserved('').preserved === '' && p._splitPreserved(null).managed === ''
+      && p._splitPreserved(undefined).at === -1;
+    // ⑦ 병적 입력에서 선형이어야 한다. 초안은 접두 **전체**를 정규식으로 훑어 개행 40만 개 입력이 **52,790ms** 였다
+    //    (5만 642ms → 40만 52,790ms, 명백한 2차식). 꼬리만 보도록 고친 뒤 0.2ms. 넉넉히 1.5초로 건다.
+    const perf = (() => {
+      const big = '\n'.repeat(400000) + p.PRESERVED_TAG + '\n## Preserved previous content\n';
+      const t0 = Date.now(); p._splitPreserved(big); return (Date.now() - t0) < 1500;
+    })();
+    return lossless && placed && noop && legacy && legacyNeedsNote && inline && quoted && edge && perf;
   } catch { return false; }
 }
 function _p0109ClaimGateOk() {
@@ -26187,25 +26235,88 @@ async function main() {
     const _cy = s => _tty2 ? `\x1b[36m${s}\x1b[0m` : s, _dm = s => _tty2 ? `\x1b[2m${s}\x1b[0m` : s;
     const _bRoot = absRoot(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());
     const _bj = has('--json');
-    if (!exists(path.join(_bRoot, '.harness'))) { failJson(_bj, 'harness_missing', `leerness 미설치: ${_bRoot} — 먼저 leerness init`); return; }
+    // 1.36.112 (T-0100 일부 상환): 이 명령은 i18n 래칫의 측정 대상이다. 여기에 한국어 줄을 더하면 부채가 는다 —
+    //   손대는 표면은 영어화까지 하고 간다(leerness 는 한국어 우선 도구가 아니다). 아래 `_bt` 로 고른다.
+    const _bEn = _uiLang(_bRoot) === 'en';
+    const _bt = (ko, en) => (_bEn ? en : ko);
+    if (!exists(path.join(_bRoot, '.harness'))) { failJson(_bj, 'harness_missing', _bt(`leerness 미설치: ${_bRoot} — 먼저 leerness init`, `leerness not installed: ${_bRoot} — run leerness init first`)); return; }
     const _tok = (s) => Math.round(String(s || '').length / 3.2);   // 한글 혼합 대략치 — 절대값이 아니라 추세/비교용
     const parts = [];
+    // 1.36.112: 지침 파일을 **관리분 / 이월분**으로 갈라 잰다.
+    //   종전엔 `AGENTS.md 4,248 tok` 처럼 덩어리로만 보여, 그 안의 몇 %가 마이그레이션이 실어 나른
+    //   과거 내용인지 알 수 없었다. 실측(이 저장소)에서 지침 파일의 **78.0%(6,048 tok)** 가 이월분이고,
+    //   그건 등급을 minimal 로 낮춰도 **그대로 남는다**(33,928 → 7,242 tok 로 줄지만 그중 83% 가 이월분).
+    //   즉 예산 초과의 주원인이 첫 번째 권고로는 해결되지 않는데 출력이 그 사실을 숨기고 있었다.
+    //   여기서는 재기만 한다 — 이월분 삭제는 1.36.95/1.36.105 가 안전을 증명 못 해 뺀 그대로 두고,
+    //   그 판단(false-DROP 이 버그)은 유효하다. 다만 **비용을 모르면 우선순위를 못 정한다**.
+    const { _splitPreserved } = require('../lib/pure-utils');
+    let carriedTok = 0, carriedB = 0;
+    const _carryFiles = [];
     for (const f of ['AGENTS.md', 'CLAUDE.md']) {
       const p = path.join(_bRoot, f);
-      parts.push({ what: f, bytes: exists(p) ? fs.statSync(p).size : 0, tokens: exists(p) ? _tok(read(p)) : 0 });
+      if (!exists(p)) { parts.push({ key: f, what: f, bytes: 0, tokens: 0, carriedTokens: 0 }); continue; }
+      const txt = read(p);
+      const sp = _splitPreserved(txt);
+      const cT = sp.preserved ? _tok(sp.preserved) : 0;
+      carriedTok += cT; carriedB += sp.preserved ? Buffer.byteLength(sp.preserved) : 0;
+      if (cT) _carryFiles.push({ file: f, preserved: sp.preserved });
+      parts.push({ key: f, what: f, bytes: fs.statSync(p).size, tokens: _tok(txt), carriedTokens: cT });
+    }
+    // 이월 안내는 "전체 원본 백업: `<경로>`" 라고 **약속**한다. "옮겨도 안전하다" 는 권고는 그 약속 위에 서 있으므로
+    //   권고하기 전에 백업이 실재하는지 확인한다(설치본 표본 22건 중 4건은 .harness/archive 없이 복사된 사본이었다).
+    //   판정은 **이월분을 가진 파일 전부**에 대해 한다. 종전엔 첫 파일(AGENTS.md)만 보고 그 결과를 두 파일에
+    //   적용해, AGENTS 만 백업된 상태에서 "원본은 이미 보관돼 있습니다" 라고 말했다(검수 재현). 하나라도 없으면 false.
+    let _archive = null;
+    if (_carryFiles.length) {
+      let allOk = true, shown = null;
+      for (const c of _carryFiles) {
+        try {
+          const m = /(?:전체 원본 백업|Full original backup):\s*`([^`]+)`/.exec(c.preserved);
+          if (!m) { allOk = false; continue; }
+          const rel = m[1].trim();
+          if (!shown) shown = rel;
+          const abs = path.resolve(_bRoot, rel);
+          // 안내 문구는 **프로젝트 파일에서 온 입력**이다. `../` 탈출이나 절대경로로 프로젝트 밖을 가리키면
+          //   남의 디렉토리 구조를 백업으로 인정하게 된다(검수 재현: `../outside` → exists:true). 루트 안으로 가둔다.
+          if (abs !== _bRoot && !abs.startsWith(_bRoot + path.sep)) { allOk = false; continue; }
+          // 안내는 두 형식으로 존재한다 — 스냅샷 경로(`.harness/archive/leerness-1.36.100-…`)와
+          //   아카이브 루트(`.harness/archive`, archiveRel 미주입 시의 폴백). 한쪽만 상정하면 백업이
+          //   멀쩡한 프로젝트에 "백업이 없습니다" 라고 말한다(작성 중 실제로 냈다 — 오경보는 이 경고를 못 믿게 만든다).
+          let found = exists(path.join(abs, 'files', c.file));
+          if (!found && exists(abs)) {
+            // 항목 수가 병적으로 많은 디렉토리에서 비용이 터지지 않게 상한을 둔다(정상 아카이브는 마이그레이션당 1개).
+            try { found = fs.readdirSync(abs).slice(0, 500).some(d => exists(path.join(abs, d, 'files', c.file))); } catch {}
+          }
+          if (!found) allOk = false;
+        } catch { allOk = false; }
+      }
+      if (shown) _archive = { path: shown, exists: allOk, files: _carryFiles.length };
     }
     // 1.36.105 (codex 검수 HIGH#7): AGENTS.md 가 "읽어라" 고 지목하는 .harness 문서를 빼고 재면 예산이 거짓이 된다
     //   (검수 재현: session-workflow.md 에 100,000자를 넣어도 ok:true). 지목된 문서를 합산에 넣는다.
+    //   1.36.112 (독립 검수, 실제 설치본에서 조건 확인): 지목은 **파일 전체**에서 세야 맞다(이월 블록 안의
+    //   언급도 AI 는 그대로 읽는다). 그러나 등급 절감으로 칠 수 있는 것은 **관리분 안의 지목뿐**이다 —
+    //   이월 블록은 등급을 낮춰도 그대로 남으므로 거기서 나온 지목은 사라지지 않는다.
+    //   구분하지 않으면 "등급을 낮추면 N tok 이 빠진다" 가 최악의 경우 전부 허수가 된다(_bench/v19-demo 가 그 형태다:
+    //   옛 템플릿의 문서 목록 전체가 이월 블록 안에 들어가 있다). 두 집합을 따로 센다.
+    let _refManagedTok = 0;
     try {
       const agp = path.join(_bRoot, 'AGENTS.md');
-      const refs = exists(agp) ? [...new Set((read(agp).match(/\.harness\/[A-Za-z0-9._-]+\.md/g) || []))] : [];
+      const _agTxt = exists(agp) ? read(agp) : '';
+      const _REF_RE = /\.harness\/[A-Za-z0-9._-]+\.md/g;
+      const refs = [...new Set(_agTxt.match(_REF_RE) || [])];
+      const _managedRefs = new Set(_splitPreserved(_agTxt).managed.match(_REF_RE) || []);
       let rb = 0, rt = 0, rn = 0;
       for (const r of refs) {
         const p = path.join(_bRoot, r.replace(/\//g, path.sep));
         if (!exists(p)) continue;
-        rn++; rb += fs.statSync(p).size; rt += _tok(read(p));
+        const t = _tok(read(p));
+        rn++; rb += fs.statSync(p).size; rt += t;
+        if (_managedRefs.has(r)) _refManagedTok += t;   // 등급을 낮추면 실제로 빠지는 몫만 따로 센다
       }
-      if (rn) parts.push({ what: `AGENTS.md 가 지목하는 문서 ${rn}종`, bytes: rb, tokens: rt });
+      // `what` 은 사람용 라벨이라 로케일에 따라 흔들린다 — 기계가 그걸 파싱하지 않도록 안정 키를 함께 싣는다
+      //   (1.36.111 에서 배운 것: 값을 로케일화할 거면 의존을 **명시**하고, 기계 계약은 흔들리지 않는 축을 준다).
+      if (rn) parts.push({ key: 'referencedDocs', what: _bt(`AGENTS.md 가 지목하는 문서 ${rn}종`, `${rn} docs referenced by AGENTS.md`), bytes: rb, tokens: rt, count: rn });
     } catch {}
     // spawnChild 는 자기 스코프의 root 를 cwd 로 쓰므로 여기서는 직접 부른다(측정 대상이 빈 문자열이 되면 예산이 무의미해진다).
     let ho = '';
@@ -26218,8 +26329,8 @@ async function main() {
       });
       ho = (r && r.stdout) || '';
     } catch {}
-    if (!ho) { log(_dm('  ⚠ handoff 출력을 측정하지 못했습니다 — 합계는 지침 파일만 반영합니다')); }
-    parts.push({ what: 'handoff 출력', bytes: Buffer.byteLength(ho), tokens: _tok(ho) });
+    if (!ho) { log(_dm(_bt('  ⚠ handoff 출력을 측정하지 못했습니다 — 합계는 지침 파일만 반영합니다', '  ⚠ could not measure handoff output — the total covers instruction files only'))); }
+    parts.push({ key: 'handoff', what: _bt('handoff 출력', 'handoff output'), bytes: Buffer.byteLength(ho), tokens: _tok(ho) });
     const total = parts.reduce((s, p) => s + p.tokens, 0);
     const mode = _projectMode(_bRoot);
     // 예산은 **실측에서** 정한다. 지목 문서(11종 4,133 tok)를 합산에 넣자 신규 standard 설치가 6,933 tok 이 됐다 —
@@ -26233,20 +26344,81 @@ async function main() {
     //   등급을 파생시키는 표면은 손상 상태를 함께 실어야 한다 — 안 그러면 "예산 이내" 라는 판정이
     //   실은 읽지 못한 등급의 기본값 위에서 나온 것이 된다. 술어를 공유하지 않으면 표면마다 진실이 갈린다.
     const _bChk = _readManifestChecked(_bRoot);
-    if (_bj) { log(JSON.stringify({ ok: !over && !_bChk.corrupt, root: _bRoot, mode, budget, total, over, corrupt: !!_bChk.corrupt, corruptReason: _bChk.reason || null, parts }, null, 2)); if (over || _bChk.corrupt) process.exitCode = 1; return; }
+    // 등급을 낮추면 사라지는 것과 남는 것을 **각각** 센다. minimal 은 지목 문서를 아예 싣지 않지만(→0),
+    //   이월분은 지침 파일 안에 있어 등급과 무관하게 남는다. 실측: 33,879 → 7,165 tok 인데 그 7,165 의 84% 가 이월분이다.
+    const _refPart = parts.find(p => p.key === 'referencedDocs');
+    // 등급 절감 = 지목 문서(minimal 은 아예 안 싣는다 → 0) + **관리분 템플릿 축소분**.
+    //   종전엔 지목 문서만 셌고, 검수가 그게 실제 절감을 크게 밑돈다는 것을 재현했다(실제 6,600 vs 4,133).
+    //   그 과소평가는 정렬을 뒤집을 수 있다 — 이월분이 두 값 **사이**에 있으면 순서가 틀린다.
+    //   템플릿 축소분은 minimal 템플릿을 실제로 생성해 정확히 잰다. handoff 감소분은 여기서 못 재므로
+    //   포함하지 않는다 → 이 값은 여전히 **하한**이고, 출력도 "최소" 라고 말한다.
+    //   ⚠ 축소분은 **템플릿끼리** 비교해야 한다. 처음엔 `관리분 − 최소템플릿` 으로 쟀는데, 관리 영역에 사용자가
+    //   덧붙인 줄은 등급을 바꿔도 **삭제되지 않고 이월 블록으로 옮겨간다**(managedMerge 의 계약이 그렇다).
+    //   그걸 절감으로 세면 "낮추면 N tok 빠진다" 가 다시 허수를 포함한다 — 현재 등급의 템플릿과 최소 템플릿만 견준다.
+    let _tplShrink = 0;
+    if (mode !== 'minimal') {
+      try {
+        const _l = _uiLang(_bRoot);
+        const _now = coreFiles(_bRoot, _l, [], { mode });
+        const _min = coreFiles(_bRoot, _l, [], { mode: 'minimal' });
+        for (const f of ['AGENTS.md', 'CLAUDE.md']) {
+          if (!_now[f] || !_min[f]) continue;
+          const d = _tok(_now[f]) - _tok(_min[f]);
+          if (d > 0) _tplShrink += d;
+        }
+      } catch {}
+    }
+    //   지목 문서 중 **관리분에서 나온 것만** 절감으로 친다(이월 블록의 지목은 등급을 낮춰도 남는다).
+    const _modeSaves = (mode !== 'minimal') ? (_refManagedTok + _tplShrink) : 0;
+    if (_bj) {
+      log(JSON.stringify({
+        ok: !over && !_bChk.corrupt, root: _bRoot, lang: _bEn ? 'en' : 'ko', mode, budget, total, over,
+        corrupt: !!_bChk.corrupt, corruptReason: _bChk.reason || null,
+        // 1.36.112: 이월분은 등급으로 못 줄이는 **바닥값**이다 — 기계도 그걸 알아야 우선순위를 정한다.
+        carried: { tokens: carriedTok, bytes: carriedB, pctOfTotal: total ? Math.round(carriedTok / total * 100) : 0, survivesModeChange: true, archive: _archive },
+        // 하한임을 이름으로 못박는다 — handoff 감소분은 여기서 재지 않는다(정확한 값인 척하지 않는다).
+        modeSavesAtLeast: _modeSaves,
+        parts
+      }, null, 2));
+      if (over || _bChk.corrupt) process.exitCode = 1; return;
+    }
     log(_cy(`# leerness context budget — mode ${mode}`));
-    if (_bChk.corrupt) log(`  ⚠ manifest.json 손상(${_bChk.reason}) — 위 등급은 **저장값이 아니라 기본값**입니다: ${_bChk.path}`);
-    for (const p of parts) log(`  ${String(p.tokens).padStart(6)} tok  ${String(p.bytes).padStart(7)} B   ${p.what}`);
-    log(`  ${String(total).padStart(6)} tok  합계 · 예산 ${budget} tok`);
+    // 사유까지 언어를 맞춘다 — 영어 문장에 한국어 사유를 끼워 넣으면 그 줄은 여전히 누출이다.
+    const _reasonEn = { read_failed: 'unreadable', json_parse_failed: 'invalid JSON', not_an_object: 'top level is not an object' }[_bChk.code] || 'unknown';
+    if (_bChk.corrupt) log(_bt(`  ⚠ manifest.json 손상(${_bChk.reason}) — 위 등급은 **저장값이 아니라 기본값**입니다: ${_bChk.path}`,
+      `  ⚠ manifest.json corrupt (${_reasonEn}) — the mode above is the **default, not the stored value**: ${_bChk.path}`));
+    for (const p of parts) {
+      const cp2 = p.carriedTokens ? _dm(_bt(`   · 이월 ${p.carriedTokens} tok (${Math.round(p.carriedTokens / (p.tokens || 1) * 100)}%)`,
+        `   · carried-over ${p.carriedTokens} tok (${Math.round(p.carriedTokens / (p.tokens || 1) * 100)}%)`)) : '';
+      log(`  ${String(p.tokens).padStart(6)} tok  ${String(p.bytes).padStart(7)} B   ${p.what}${cp2}`);
+    }
+    log(`  ${String(total).padStart(6)} tok  ` + _bt(`합계 · 예산 ${budget} tok`, `total · budget ${budget} tok`));
     log('');
     if (over) {
-      fail(`세션 적재가 예산을 넘습니다 (${total} > ${budget})`);
-      log(_dm(`  → 등급을 낮추거나: leerness mode set minimal`));
-      log(_dm(`  → 이월 이력을 줄이거나: AGENTS.md/CLAUDE.md 의 "Preserved previous content" 를 archive 로 옮기세요`));
+      fail(_bt(`세션 적재가 예산을 넘습니다 (${total} > ${budget})`, `session load exceeds the budget (${total} > ${budget})`));
+      // 종전엔 권고 2줄이 **고정 순서**였고 절감액이 없었다. 등급을 낮춰도 예산을 못 지키는 프로젝트에서
+      //   첫 권고를 따르는 것은 헛수고인데 출력이 그 사실을 말하지 않았다 — 실측 절감액 순으로 낸다.
+      const rem = [];
+      if (_modeSaves) rem.push({ save: _modeSaves, line: _bt(
+        `등급을 낮추면 최소 ${_modeSaves} tok 이 빠집니다 (지목 문서 ${_refManagedTok} + 템플릿 축소 ${_tplShrink}, handoff 감소분 제외): leerness mode set minimal`,
+        `lowering the mode drops at least ${_modeSaves} tok (referenced docs ${_refManagedTok} + template shrink ${_tplShrink}; handoff reduction not counted): leerness mode set minimal`) });
+      if (carriedTok) {
+        const where = _archive ? (_archive.exists
+          ? _bt(` — 원본은 ${_archive.path} 에 이미 보관돼 있습니다`, ` — the original is already archived at ${_archive.path}`)
+          : _bt(` — ⚠ 안내가 가리키는 백업(${_archive.path})이 없습니다. 옮기기 전에 직접 복사해 두세요`, ` — ⚠ the referenced backup (${_archive.path}) is missing. Copy it yourself before moving anything`))
+          : '';
+        rem.push({ save: carriedTok, line: _bt(
+          `이월분 ${carriedTok} tok (합계의 ${Math.round(carriedTok / total * 100)}%) 은 **등급을 낮춰도 남습니다** — AGENTS.md/CLAUDE.md 의 "Preserved previous content" 를 옮기세요${where}`,
+          `carried-over content is ${carriedTok} tok (${Math.round(carriedTok / total * 100)}% of the total) and **survives a mode change** — move the "Preserved previous content" section out of AGENTS.md/CLAUDE.md${where}`) });
+      }
+      rem.sort((a, b) => b.save - a.save);
+      for (const r of rem) log(_dm(`  → ${r.line}`));
+      if (!rem.length) log(_dm(_bt(`  → 지침 파일과 handoff 출력을 줄이세요`, `  → trim the instruction files and handoff output`)));
     } else {
-      ok(`예산 이내 (${total}/${budget} tok)`);
+      ok(_bt(`예산 이내 (${total}/${budget} tok)`, `within budget (${total}/${budget} tok)`));
     }
-    log(_dm('  ⓘ 토큰은 길이 기반 추정치입니다 — 절대값이 아니라 추세/비교용으로 쓰세요.'));
+    log(_dm(_bt('  ⓘ 토큰은 길이 기반 추정치입니다 — 절대값이 아니라 추세/비교용으로 쓰세요.',
+      '  ⓘ Token counts are length-based estimates — use them for trends and comparisons, not as absolute values.')));
     return;
   }
   if (cmd === 'init') {
