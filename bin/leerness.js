@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.113';
+const VERSION = '1.36.114';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7085,9 +7085,17 @@ function _assertStoreParsable(file, label) {
     catch { throw Object.assign(new Error(`${label} 저장 파일이 손상돼(JSON 파싱 실패) 덮어쓰기를 거부합니다: ${file} — 파일을 복구하거나 삭제 후 재시도하세요`), { code: 'E_STORE_CORRUPT', file }); }
   }
 }
+// 1.36.114: 동기 try/catch 만 있어 **async 명령에서는 통째로 무력**이었다 — 던진 예외가 거부된 프로미스가 되어
+//   래퍼를 그냥 지나갔다. 실측: `next-action add --json` 이 사람용 `✗` 줄을 JSON **앞에** 흘리고
+//   code 가 `store_corrupt` 대신 `error` 였다(기계 계약 파손: JSON.parse(stdout) 실패).
+//   1.36.107 이 `_withLock` 에서 고친 것과 같은 형태다 — thenable 이면 프로미스 경로로도 같은 처리를 한다.
 function _guardStore(jsonMode, fn) {
-  try { return fn(); }
-  catch (e) { if (e && e.code === 'E_STORE_CORRUPT') { failJson(jsonMode, 'store_corrupt', e.message); return undefined; } throw e; }
+  const handle = (e) => { if (e && e.code === 'E_STORE_CORRUPT') { failJson(jsonMode, 'store_corrupt', e.message); return undefined; } throw e; };
+  let out;
+  try { out = fn(); }
+  catch (e) { return handle(e); }
+  if (out && typeof out.then === 'function') return out.then(v => v, handle);
+  return out;
 }
 // 1.36.28 (#4): 0-deps 짧은 결정적 해시 (URL 충돌 구분용, 보안 아님).
 function _shortHash(s) {
@@ -9433,9 +9441,13 @@ function _loadWakeupHistory(root) {
 function _writeWakeupHistory(root, state) {
   try {
     mkdirp(path.join(root, '.harness'));
+    _assertStoreParsable(_wakeupHistoryPath(root), 'wakeup-history');   // 1.36.114: 손상 스토어 덮어쓰기 거부
     writeUtf8(_wakeupHistoryPath(root), JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2));
     return true;
-  } catch { return false; }
+  } catch (e) {
+    if (e && e.code === 'E_STORE_CORRUPT') throw e;   // 1.36.114: 조용한 무동작 + 성공 표시 방지(위 _writeNextActionQueue 와 같은 이유)
+    return false;
+  }
 }
 // 1.36.108 (T-0097): append 형 RMW — 락 밖이면 동시 기록이 서로를 지운다.
 //   이 스토어는 자동(스케줄)과 사용자 트리거가 동시에 들어올 수 있어 겹칠 여지가 실제로 있다.
@@ -10147,11 +10159,11 @@ function constraintsCmd(root, sub, ...rest) {
     for (const [pid, plat] of Object.entries(catalog.platforms)) {
       // 1.31.2: aliases are matchers (kept for matching); hide Hangul-only aliases from EN display
       const aliasList = _L === 'en' ? (plat.aliases || []).filter(a => !/[가-힣]/.test(a)) : (plat.aliases || []);
-      log(grn(`  📦 ${pid}`) + dim(`  aliases: ${aliasList.join(', ')}`));
-      log(dim(`     docs: ${plat.docs || '-'}`));
+      log(grn(`  📦 ${_lineSafe(pid)}`) + dim(`  aliases: ${_lineSafe(aliasList.join(', '))}`));
+      log(dim(`     docs: ${_lineSafe(plat.docs || '-')}`));
       for (const c of plat.constraints || []) {
         const icon = c.kind === 'rate-limit' ? '🚦' : (c.kind === 'cost' ? '💰' : (c.kind === 'auth' ? '🔐' : '📋'));
-        log(`     ${icon} [${c.kind}] ${_L === 'en' && c.detailEn ? c.detailEn : c.detail}`);
+        log(`     ${icon} [${_lineSafe(c.kind)}] ${_lineSafe(_L === 'en' && c.detailEn ? c.detailEn : c.detail)}`);   // 1.36.114 (검수): ID·alias 만 막고 kind/detail 이 raw 였다
       }
       log('');
     }
@@ -10180,11 +10192,11 @@ function constraintsCmd(root, sub, ...rest) {
     log(red(_t(`  ⚠ ${result.matched.length}개 플랫폼 매칭 — 제약 사전 확인 필요:`, `  ⚠ ${result.matched.length} platform(s) matched — review constraints before building:`)));
     log('');
     for (const m of result.matched) {
-      log(grn(`  📦 ${m.platform}`) + dim(` (matched: "${m.matchedAlias}")`));
-      log(dim(`     docs: ${m.docs || '-'}`));
+      log(grn(`  📦 ${_lineSafe(m.platform)}`) + dim(` (matched: "${_lineSafe(m.matchedAlias)}")`));
+      log(dim(`     docs: ${_lineSafe(m.docs || '-')}`));
       for (const c of m.constraints || []) {
         const icon = c.kind === 'rate-limit' ? '🚦' : (c.kind === 'cost' ? '💰' : (c.kind === 'auth' ? '🔐' : '📋'));
-        log(`     ${icon} [${c.kind}] ${_L === 'en' && c.detailEn ? c.detailEn : c.detail}`);
+        log(`     ${icon} [${_lineSafe(c.kind)}] ${_lineSafe(_L === 'en' && c.detailEn ? c.detailEn : c.detail)}`);   // 1.36.114 (검수): ID·alias 만 막고 kind/detail 이 raw 였다
       }
       log('');
     }
@@ -10215,7 +10227,7 @@ function constraintsCmd(root, sub, ...rest) {
     if (!_cons.some(c => c.kind === kindTrim && c.detail === detail)) _cons.push({ kind: kindTrim, detail });
     _writePlatformConstraints(root, catalog);
     if (has('--json')) { log(JSON.stringify(catalog.platforms[id], null, 2)); return; }
-    log(grn(_t(`✓ platform "${id}" 갱신 — constraints: ${catalog.platforms[id].constraints.length}`, `✓ platform "${id}" updated — constraints: ${catalog.platforms[id].constraints.length}`)));
+    log(grn(_t(`✓ platform "${_lineSafe(id)}" 갱신 — constraints: ${catalog.platforms[id].constraints.length}`, `✓ platform "${_lineSafe(id)}" updated — constraints: ${catalog.platforms[id].constraints.length}`)));
     return;
   }
 
@@ -10965,7 +10977,7 @@ function intentCmd(root, sub, ...rest) {
     log(`  total domains: ${Object.keys(catalog.domains).length}`);
     log('');
     for (const [name, info] of Object.entries(catalog.domains)) {
-      log(grn(`  📦 ${name}`) + dim(`  aliases: ${(info.aliases || []).join(', ')}`));
+      log(grn(`  📦 ${_lineSafe(name)}`) + dim(`  aliases: ${_lineSafe((info.aliases || []).join(', '))}`));
       for (const c of info.components || []) {
         log(`     • ${c.key.padEnd(12)} ${dim(c.desc)}`);
       }
@@ -11090,9 +11102,16 @@ function _loadNextActionQueue(root) {
 function _writeNextActionQueue(root, queue) {
   try {
     mkdirp(path.join(root, '.harness'));
+    _assertStoreParsable(_nextActionQueuePath(root), 'next-action-queue');   // 1.36.114: 손상 스토어 덮어쓰기 거부
     writeUtf8(_nextActionQueuePath(root), JSON.stringify({ queue, at: new Date().toISOString() }, null, 2));
     return true;
-  } catch { return false; }
+  } catch (e) {
+    // 1.36.114: 이 catch 가 손상 신호까지 삼켜, 아무것도 저장되지 않았는데 호출부가 `✓ 추가` 를 찍고 exit 0 이었다
+    //   (실측). 조용한 무동작에 성공 표시를 붙이는 것은 조용한 유실보다 나쁘다 — 사용자는 저장됐다고 믿는다.
+    //   손상만 위로 올린다(그 외 I/O 실패는 종전대로 false).
+    if (e && e.code === 'E_STORE_CORRUPT') throw e;
+    return false;
+  }
 }
 // handoff 에서 제안된 next-action 들을 큐에 자동 저장 (중복 방지: 이미 있는 title 은 skip)
 // 1.36.108 (T-0097): 읽기~쓰기를 락으로 직렬화. 이 큐는 handoff 가 자동으로도 채우기 때문에
@@ -11141,7 +11160,10 @@ async function nextActionCmd(root, sub, ...rest) {
   }
   if (sub === 'take') {
     const n = rest[0] !== undefined ? Number(rest[0]) : state.queue.length - 1;
-    if (state.queue.length === 0) { fail('큐 비어있음 — handoff 먼저 실행'); return process.exit(1); }
+    // 1.36.114 (검수 #3, 재현됨): 로더가 손상 파일을 **빈 큐**로 폴백해 "큐 비어있음 — handoff 먼저 실행" 이라고
+    //   오진했다. 사용자는 큐가 비었다고 믿고 handoff 를 다시 돌린다 — 원인(손상)은 끝까지 안 보인다.
+    //   읽기 자체는 종전대로 resilient 하게 두고, **판정 지점에서만** 빈 것과 손상된 것을 가른다.
+    if (state.queue.length === 0) { _assertStoreParsable(_nextActionQueuePath(root), 'next-action-queue'); fail('큐 비어있음 — handoff 먼저 실행'); return process.exit(1); }
     if (isNaN(n) || n < 0 || n >= state.queue.length) { fail(`잘못된 index: ${n} (0~${state.queue.length - 1})`); return process.exit(1); }
     const action = state.queue[n];
     log(`# leerness next-action take [${n}] (1.9.201)`);
@@ -11169,7 +11191,11 @@ async function nextActionCmd(root, sub, ...rest) {
         log(`  ⚠ task add 실패 (exit ${taskResult.status}) — 수동: leerness task add "${taskTitle}"`);
       }
     } catch (e) {
-      log(`  ⚠ 처리 실패: ${e.message}`);
+      // 1.36.114 (검수 지적, 재현됨): 이 catch 가 손상 신호까지 삼켜 `take` 는 경고만 찍고 **exit 0** 이었다.
+      //   `_guardStore` 의 thenable 처리가 정상이어도 예외가 여기서 죽으면 래퍼까지 도달하지 못한다 —
+      //   가드는 예외가 실제로 올라올 때만 가드다. 손상만 위로 올린다(그 외는 종전대로 경고).
+      if (e && e.code === 'E_STORE_CORRUPT') throw e;
+      log(`  ⚠ 처리 실패: ${_lineSafe(e.message)}`);
     }
     return;
   }
@@ -11402,6 +11428,9 @@ function _loadDecisions(root) {
 // canonical 저장 — decisions.json(canonical) + decisions.md(projection) 동시 기록 (단일 진실소스 write path).
 function _saveDecisions(root, decisions) {
   const arr = Array.isArray(decisions) ? decisions : [];
+  // 1.36.114 (스토어 전수 대조에서 발견): 손상된 decisions.json 을 빈 배열로 오인해 덮어써 **영구 기억이 사라졌다**.
+  //   표적 사냥(creds 등)으로는 못 봤고, .harness 아래 JSON 스토어를 **열거해 하나씩 손상시키는** 전수 스윕이 잡았다.
+  _assertStoreParsable(decisionsJsonPath(root), 'decisions');
   mkdirp(path.dirname(decisionsJsonPath(root)));
   writeUtf8(decisionsJsonPath(root), JSON.stringify(arr, null, 2) + '\n');
   writeUtf8(decisionsPath(root), _renderDecisionsMd(arr));
@@ -11454,6 +11483,7 @@ function _loadLessons(root) {
 }
 function _saveLessons(root, lessons) {
   const arr = Array.isArray(lessons) ? lessons : [];
+  _assertStoreParsable(lessonsJsonPath(root), 'lessons');   // 1.36.114: decisions 와 같은 클래스 — 손상 위에 덮어써 교훈이 사라졌다
   mkdirp(path.dirname(lessonsJsonPath(root)));
   writeUtf8(lessonsJsonPath(root), JSON.stringify(arr, null, 2) + '\n');
   writeUtf8(lessonsPath(root), _renderLessonsMd(arr));
@@ -22410,6 +22440,7 @@ function _writePermissionsPreset(root, mode) {
   preset.generatedAt = new Date().toISOString();
   preset.leernessVersion = VERSION;
   mkdirp(path.dirname(_permissionsPath(root)));
+  _assertStoreParsable(_permissionsPath(root), 'agent-permissions');   // 1.36.114: 손상 스토어 덮어쓰기 거부(1.36.28 클래스 누락 지점)
   writeUtf8(_permissionsPath(root), JSON.stringify(preset, null, 2) + '\n');
   return preset;
 }
@@ -24827,6 +24858,11 @@ function _readCredentials(root) {
 }
 function _writeCredentials(root, data) {
   const p = _credentialsPath(root);
+  // 1.36.114 (방치 명령 사냥): 손상된 스토어를 "빈 값" 으로 오인해 덮어쓰던 fail-open — 1.36.28 이 teams/
+  //   platform-constraints 에서 고친 클래스인데 여기는 빠져 있었다. 실측: 파일을 잘라 두고 `creds register` 하면
+  //   exit 0 으로 성공하며 **기존 서비스 등록이 사라졌다**(_readCredentials 의 catch 가 {} 를 돌려주기 때문).
+  //   술어는 이미 있으니 재구현하지 않고 공유한다.
+  _assertStoreParsable(p, 'credentials');
   mkdirp(path.dirname(p));
   writeUtf8(p, JSON.stringify(data, null, 2) + '\n');
   // 1.9.147: gitignore + npmignore 자동 보강 (보안)
@@ -24846,14 +24882,16 @@ function credsListCmd(root) {
   if (has('--json')) { log(JSON.stringify(j, null, 2)); return; }
   log(`# leerness creds list (1.9.147)`);
   const services = Object.entries(j.services || {});
-  if (!services.length) { log('(등록된 자격증명 없음 — leerness creds register <service> --env-var <NAME>)'); return; }
+  // 1.36.114: "없음" 과 "손상" 을 가른다 — 손상인데 '없음' 이라 말하면 사용자는 등록이 지워졌다고 오해한다.
+  //   읽기 자체는 resilient 하게 두고 **판정 지점에서만** 구분한다(check/refresh 와 같은 방식).
+  if (!services.length) { _assertStoreParsable(_credentialsPath(root), 'credentials'); log('(등록된 자격증명 없음 — leerness creds register <service> --env-var <NAME>)'); return; }
   log(`총 ${services.length}개 서비스 (값 미저장 — env-ref 만)`);
   for (const [name, meta] of services) {
     const present = meta.envVars.every(v => process.env[v] !== undefined && process.env[v] !== '');
     const last = meta.lastRefreshed ? new Date(meta.lastRefreshed) : null;
     const ageDays = last ? Math.floor((Date.now() - last.getTime()) / 86400000) : null;
     const ageWarn = (meta.tokenLifetimeHours && last && (Date.now() - last.getTime()) > meta.tokenLifetimeHours * 3600 * 1000);
-    log(`  ${name}: env=${meta.envVars.join(',')} · ${present ? '✓ 환경변수 있음' : '⚠ 미설정'}${ageDays !== null ? ` · ${ageDays}일 전 refresh${ageWarn ? ' (만료 가능)' : ''}` : ''}`);
+    log(`  ${_lineSafe(name)}: env=${_lineSafe(meta.envVars.join(','))} · ${present ? '✓ 환경변수 있음' : '⚠ 미설정'}${ageDays !== null ? ` · ${ageDays}일 전 refresh${ageWarn ? ' (만료 가능)' : ''}` : ''}`);
     if (meta.deployCommand) log(`    deploy: ${meta.deployCommand}`);
   }
 }
@@ -24885,7 +24923,8 @@ function credsCheckCmd(root, service) {
   const j = _readCredentials(root);
   const result = { service: service || null, services: {}, ok: true };
   const targets = service ? (j.services[service] ? { [service]: j.services[service] } : {}) : (j.services || {});
-  if (!Object.keys(targets).length) { failJson(has('--json'), 'no_service', `등록된 서비스 없음${service ? ` (${service})` : ''}`); return; }  // 1.9.404 (UR-0105 잔여): --json 에러 구조화
+  // 1.36.114 (검수 #2, 재현됨): 손상 파일을 빈 registry 로 폴백해 "등록된 서비스 없음" 이라 오진했다 — 판정 지점에서 가른다
+  if (!Object.keys(targets).length) { _assertStoreParsable(_credentialsPath(root), 'credentials'); failJson(has('--json'), 'no_service', `등록된 서비스 없음${service ? ` (${service})` : ''}`); return; }  // 1.9.404 (UR-0105 잔여): --json 에러 구조화
   for (const [name, meta] of Object.entries(targets)) {
     // 1.36.34 (codex 3차 #9): 손상 레코드(null/비객체) → raw TypeError 크래시, 파싱 불가 날짜(NaN) → false-ready. 구조화 판정.
     if (!meta || typeof meta !== 'object' || !Array.isArray(meta.envVars)) {
@@ -24915,7 +24954,7 @@ function credsRefreshTimestampCmd(root, service) {
   root = absRoot(root || process.cwd());
   if (!service) return fail('service 이름 필요');
   const j = _readCredentials(root);
-  if (!j.services[service]) return fail(`등록된 서비스 없음: ${service} — leerness creds register 먼저`);
+  if (!j.services[service]) { _assertStoreParsable(_credentialsPath(root), 'credentials'); return fail(`등록된 서비스 없음: ${service} — leerness creds register 먼저`); }   // 1.36.114: 손상과 미등록을 가른다
   j.services[service].lastRefreshed = new Date().toISOString();
   _writeCredentials(root, j);
   ok(`creds refreshed: ${service} · lastRefreshed=${j.services[service].lastRefreshed}`);
@@ -26577,17 +26616,17 @@ async function main() {
   if (cmd === 'env' && args[1] === 'detect') return envDetectCmd(args[2] || arg('--path', process.cwd()));
   // 1.9.146: agent 권한 시스템 + CLI 에이전트 모드 (사용자 명시 요청 #4, #5)
   if (cmd === 'permissions' && args[1] === 'list') return permissionsListCmd(arg('--path', process.cwd()));
-  if (cmd === 'permissions' && args[1] === 'set')  return permissionsSetCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'permissions' && args[1] === 'set')  return _guardStore(has('--json'), () => permissionsSetCmd(arg('--path', process.cwd()), args[2]));
   if (cmd === 'agent') return agentCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('--')).join(' '));
   // 1.9.147: 자동 유지보수 시스템 (사용자 명시 요청)
   if (cmd === 'webhook' && args[1] === 'serve')   return webhookServeCmd(arg('--path', process.cwd()));
   if (cmd === 'incident' && args[1] === 'list')   return incidentListCmd(arg('--path', process.cwd()));
   if (cmd === 'incident' && args[1] === 'show')   return incidentShowCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'incident' && args[1] === 'handle') return incidentHandleCmd(arg('--path', process.cwd()), args[2]);
-  if (cmd === 'creds' && args[1] === 'list')      return credsListCmd(arg('--path', process.cwd()));
-  if (cmd === 'creds' && args[1] === 'register')  return credsRegisterCmd(arg('--path', process.cwd()), args[2]);
-  if (cmd === 'creds' && args[1] === 'check')     return credsCheckCmd(arg('--path', process.cwd()), args[2]);
-  if (cmd === 'creds' && args[1] === 'refresh')   return credsRefreshTimestampCmd(arg('--path', process.cwd()), args[2]);
+  if (cmd === 'creds' && args[1] === 'list')      return _guardStore(has('--json'), () => credsListCmd(arg('--path', process.cwd())));
+  if (cmd === 'creds' && args[1] === 'register')  return _guardStore(has('--json'), () => credsRegisterCmd(arg('--path', process.cwd()), args[2]));
+  if (cmd === 'creds' && args[1] === 'check')     return _guardStore(has('--json'), () => credsCheckCmd(arg('--path', process.cwd()), args[2]));
+  if (cmd === 'creds' && args[1] === 'refresh')   return _guardStore(has('--json'), () => credsRefreshTimestampCmd(arg('--path', process.cwd()), args[2]));
   if (cmd === 'deploy' && args[1] === 'auto')     return deployAutoCmd(arg('--path', process.cwd()), args[2]);
   // 1.9.149: observability lite + runs list/show
   if (cmd === 'runs' && args[1] === 'list')       return runsListCmd(absRoot(_resolveRoot(args[2])));  // 1.9.412 (UR-0100): positional path 지원
@@ -26643,7 +26682,7 @@ async function main() {
   if (cmd === 'roadmap' && args[1] === 'auto')      return roadmapAutoCmd(arg('--path', process.cwd()), args[2]);
   if (cmd === 'roadmap')                            return roadmapCmd(arg('--path', args[1] || process.cwd()));
   // 1.9.201: next-action queue CLI (E축 9.5→10)
-  if (cmd === 'next-action')                        return nextActionCmd(arg('--path', process.cwd()), args[1], ...args.slice(2));
+  if (cmd === 'next-action')                        return _guardStore(has('--json'), () => nextActionCmd(arg('--path', process.cwd()), args[1], ...args.slice(2)));
   // 1.9.203: leerness resume — auto-resume-plan 읽고 다음 라운드 즉시 안내 (사용자 명시)
   if (cmd === 'resume')                             return resumeCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
   // 1.9.207: leerness requests <audit|add|list|complete|drop> — 사용자 요청 누락 확인 절차 (사용자 명시)
@@ -26809,7 +26848,7 @@ async function main() {
   // 1.9.209: leerness pre-wake-audit — sleep 전 sub-agent audit (사용자 명시)
   if (cmd === 'pre-wake-audit')                     return preWakeAuditCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.210: leerness wakeup-interval <get|set|auto|history|record> — adaptive interval (사용자 명시)
-  if (cmd === 'wakeup-interval')                    return wakeupIntervalCmd(arg('--path', process.cwd()), args[1], args[2]);
+  if (cmd === 'wakeup-interval')                    return _guardStore(has('--json'), () => wakeupIntervalCmd(arg('--path', process.cwd()), args[1], args[2]));
   // 1.9.211: leerness workspace-dir <get|guide> — 현재 워크스페이스 디렉토리 / AI 참조 가이드 (사용자 명시)
   if (cmd === 'workspace-dir')                      return workspaceDirCmd(arg('--path', process.cwd()), args[1]);
   // 1.36.79 (도그푸딩 P1-C): positional 경로(`parent detect <path>`)를 무시하고 cwd 를 분석해 자신만만한 오답(exit 0)을 내던 것
@@ -26958,7 +26997,7 @@ async function main() {
       const _text = textParts.join(' ');
       // 1.30.4 (14th리뷰 F6): 빈 입력 시 --json 에서도 구조화 JSON(task/decision add 와 일관). 종전엔 lessonSave 내부 fail() 가 평문 출력.
       if (!_text) { failJson(has('--json'), 'empty_text', 'lesson save "<text>" 필요 (빈/경로-only 거부)'); return process.exit(process.exitCode || 1); }
-      return lessonSave(root, _text);
+      return _guardStore(has('--json'), () => lessonSave(root, _text));   // 1.36.114: 손상 스토어 사유를 구조화(store_corrupt)
     }
     if (sub === 'list') {
       return lessonListCmd(root, { json: has('--json') });
@@ -26983,7 +27022,7 @@ async function main() {
       // 1.9.351 (UR-0064) → 1.9.416 (UR-0122): 공유 헬퍼 _parseAddTitle 로 단일화(flag/경로 break) + 빈 입력 거부
       const title = _parseAddTitle(args, 2);
       if (!title) { failJson(has('--json'), 'empty_title', 'decision add "<제목>" 필요'); return process.exit(process.exitCode || 1); }
-      return decisionAdd(root, title);
+      return _guardStore(has('--json'), () => decisionAdd(root, title));   // 1.36.114: 손상 스토어 사유를 구조화(store_corrupt)
     }
     if (sub === 'list') {
       return decisionListCmd(absRoot(_resolveRoot(args[2])), { json: has('--json') });  // 1.9.412 (UR-0100): positional path 지원(add 의 args[2]=title 와 분리)

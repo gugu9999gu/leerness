@@ -10966,6 +10966,185 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.114 블록 R: **방치된 명령**에 남아 있던 두 기지(旣知) 클래스를 고정한다.
+//   왜 여기까지 왔나: e2e 실행 커버리지에서 17개 명령이 한 번도 안 돌고 있었다. 그 방치 구역에는
+//   leerness 가 **다른 곳에서는 이미 고친** 결함이 그대로 남아 있었다.
+//     클래스 A(1.36.28): 손상된 JSON 스토어를 "빈 값" 으로 오인해 덮어써 기존 데이터를 잃는다.
+//       실측 유실: credentials.local.json · agent-permissions.json · wakeup-history.json · next-action-queue.json
+//       (보호돼 있던 대조군: user-requests.json · previews.json · toggles.json — 술어 `_assertStoreParsable` 는 이미 있었다.)
+//     클래스 B(1.36.113): 사용자 텍스트의 개행이 목록에서 가짜 항목을 만든다. creds·constraints 가 지난 라운드 목록 밖이었다.
+//   ⚠ 이 라운드가 만든 회귀도 여기서 잡았다: 손상 시 저장은 막혔는데 명령이 `✓ 추가` 를 찍고 exit 0 이었다.
+//     조용한 무동작 + 성공 표시는 조용한 유실보다 나쁘다 — 사용자는 저장됐다고 믿는다. 그래서 **세 가지를 함께** 단언한다:
+//     안 쓴다 · 성공이라 말하지 않는다 · 정상 스토어에서는 오차단하지 않는다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-neg114-'));
+  const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_NO_PROMPT: '1' });
+  try {
+    let seq = 0;
+    const mk = () => {
+      const d = path.join(sb, 'p' + (++seq)); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+      return d;
+    };
+    const R = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+    const bad = [];
+
+    // ── 클래스 A: 손상 스토어. 대조군(이미 보호되던 표면)을 **같은 표에** 넣어야 판정이 의미를 갖는다.
+    const STORES = [
+      ['creds',           'credentials.local.json', ['creds', 'register', 'aaa', '--env-var', 'A_KEY'], ['creds', 'register', 'bbb', '--env-var', 'B_KEY']],
+      ['permissions',     'agent-permissions.json', ['permissions', 'set', 'extended'],                 ['permissions', 'set', 'basic']],
+      ['wakeup-interval', 'wakeup-history.json',    ['wakeup-interval', 'set', '900'],                  ['wakeup-interval', 'set', '1200']],
+      ['next-action',     'next-action-queue.json', ['next-action', 'add', 'aaa'],                      ['next-action', 'add', 'bbb']],
+      ['requests(대조)',   'user-requests.json',     ['requests', 'add', 'aaa'],                         ['requests', 'add', 'bbb']],
+      ['preview(대조)',    'previews.json',          ['preview', 'add', 'aaa'],                          ['preview', 'add', 'bbb']],
+      // 대조군 3종을 다 넣는다 — toggles 가 빠져 있어 "보호 대조군 유지" 주장이 2/3 만 증명됐다(검수 지적).
+      ['toggle(대조)',     'toggles.json',           ['toggle', 'set', 'gate', 'off'],                   ['toggle', 'set', 'lens', 'off']],
+    ];
+    let setupOk = 0;
+    for (const [name, file, first, second] of STORES) {
+      const d = mk();
+      const r1 = R(d, first);
+      const fp = path.join(d, '.harness', file);
+      if (r1.status !== 0 || !fs.existsSync(fp)) { bad.push(`${name}:셋업실패`); continue; }   // 조용한 셋업 실패가 '통과' 로 둔갑하지 못하게
+      setupOk++;
+      fs.writeFileSync(fp, '{ "broken": ');
+      const before = fs.readFileSync(fp, 'utf8');
+      const r2 = R(d, second);
+      const out = String(r2.stdout || '') + String(r2.stderr || '');
+      if (fs.readFileSync(fp, 'utf8') !== before) bad.push(`${name}:손상위덮어씀`);
+      if (r2.status === 0 || /^\s*✓/m.test(out)) bad.push(`${name}:성공이라말함`);       // 이 라운드가 낸 회귀를 고정
+      if (/\n\s+at .*:\d+:\d+/.test(out)) bad.push(`${name}:스택노출`);
+      // 기계 계약 — `--json` 은 **순수 JSON**(stdout 에 사람용 줄이 섞이면 JSON.parse 가 깨진다) + ok:false + exit≠0.
+      //   이 단언이 없어서 `_guardStore` 를 떼는 변이가 살아남았다 — 그 래퍼는 async 명령에서 아예 무력이었고,
+      //   실측에서 `next-action add --json` 이 `✗` 줄을 JSON 앞에 흘리고 있었다.
+      //   ⚠ 사유 코드는 표면마다 다르다(store_corrupt / store_invalid / error). 통일은 기존 두 표면의 계약을
+      //   바꾸는 일이라 이 라운드에서 하지 않는다 — **이번에 고친 4종만** store_corrupt 를 요구하고, 나머지는 형태만 본다.
+      fs.writeFileSync(fp, '{ "broken": ');
+      const brokenJ = fs.readFileSync(fp, 'utf8');
+      const rj = R(d, second.concat(['--json']));
+      let parsed = null; try { parsed = JSON.parse(String(rj.stdout || '').trim()); } catch {}
+      if (!parsed) bad.push(`${name}:json_stdout오염`);
+      else {
+        if (parsed.ok !== false) bad.push(`${name}:json_ok아님`);
+        if (!/대조/.test(name) && parsed.code !== 'store_corrupt') bad.push(`${name}:json_코드(${parsed.code})`);
+      }
+      if (rj.status === 0) bad.push(`${name}:json_exit0`);
+      // ⚠ JSON 경로에서도 **파일이 그대로인지** 봐야 한다. 검수 지적: 종전엔 파싱·ok·exit 만 봐서
+      //   "덮어쓰고 나서 {ok:false} 를 돌려주는" 변이가 그대로 통과했다. stderr 스택도 함께 본다.
+      if (fs.readFileSync(fp, 'utf8') !== brokenJ) bad.push(`${name}:json경로_손상위덮어씀`);
+      if (/\n\s+at .*:\d+:\d+/.test(String(rj.stderr || ''))) bad.push(`${name}:json_stderr스택`);
+      // 오차단 방지 — 정상 스토어에서는 성공해야 하고, **실제로 저장돼야** 한다.
+      //   종전엔 exit code 만 봐서 조용한 no-op(성공 코드 + 성공 메시지, 저장 없음)이 통과했다(검수 지적).
+      const d2 = mk(); R(d2, first);
+      const fp2 = path.join(d2, '.harness', file);
+      const pre = fs.existsSync(fp2) ? fs.readFileSync(fp2, 'utf8') : null;
+      if (R(d2, second).status !== 0) bad.push(`${name}:정상스토어_오차단`);
+      const post = fs.existsSync(fp2) ? fs.readFileSync(fp2, 'utf8') : null;
+      if (pre === null || post === null || post === pre) bad.push(`${name}:정상스토어_저장안됨`);
+    }
+    dbg.setupOk = setupOk;
+    if (setupOk !== STORES.length) bad.push(`셋업 ${setupOk}/${STORES.length}`);
+
+    // ── 클래스 B: 개행 위조. 지난 라운드 9표면 목록 **밖**이었던 두 곳.
+    for (const [name, add, list] of [
+      ['creds',       (d, t) => R(d, ['creds', 'register', t, '--env-var', 'X_KEY']),       (d) => R(d, ['creds', 'list'])],
+      ['constraints', (d, t) => R(d, ['constraints', 'add', t, '--constraint', 'k:v']),     (d) => R(d, ['constraints', 'list'])],
+      // ⚠ ID 에만 개행을 넣으면 **값 쪽 필드**를 놓친다 — 검수가 `--constraint` 의 kind/detail 이 raw 임을 지적했다.
+      //   같은 명령이라도 인자마다 따로 확인해야 한다(1.36.113 에서 plan 의 --progress 를 놓친 것과 같은 형태).
+      ['constraints(detail)', (d, t) => R(d, ['constraints', 'add', 'PLAT', '--constraint', `auth:${t}`]), (d) => R(d, ['constraints', 'list'])],
+    ]) {
+      const d = mk();
+      if (add(d, 'real ZR4A\n  fake ZR4F · 등록됨').status !== 0) { bad.push(`${name}:주입add실패`); continue; }
+      const o = String(list(d).stdout || '');
+      if (!o.includes('ZR4A')) bad.push(`${name}:항목미노출`);                              // 계측 판별력
+      if (o.split('\n').some(l => l.includes('ZR4F') && !l.includes('ZR4A'))) bad.push(`${name}:개행위조`);
+    }
+
+    // ── 전수 대조: `.harness` 아래 **사용자 데이터 JSON 스토어 전부**를 하나씩 손상시키고 변경 명령을 돌린다.
+    //   표적 사냥으로는 4종만 봤는데, 이 열거식 스윕이 decisions.json · lessons.json 을 더 찾았다
+    //   (leerness 가 내세우는 '영구 메모리' 표면이 손상 위에 덮어써져 사라지고 있었다).
+    //   목록을 박아 두면 **가드 없는 새 스토어가 추가될 때** 실패한다 — 개별 발견이 아니라 목록을 지키는 가드다.
+    {
+      const SEED = [['requests', 'add', 'seed'], ['preview', 'add', 'seed'], ['toggle', 'set', 'gate', 'off'],
+        ['creds', 'register', 'seed', '--env-var', 'K'], ['permissions', 'set', 'extended'], ['wakeup-interval', 'set', '900'],
+        ['next-action', 'add', 'seed'], ['constraints', 'add', 'seed', '--constraint', 'k:v'],
+        ['decision', 'add', 'seed', '--why', 'r'], ['lesson', 'save', 'seed']];
+      const MUT = [['requests', 'add', 'x2'], ['preview', 'add', 'x2'], ['toggle', 'set', 'lens', 'off'],
+        ['creds', 'register', 'x2', '--env-var', 'K2'], ['permissions', 'set', 'basic'], ['wakeup-interval', 'set', '1200'],
+        ['next-action', 'add', 'x2'], ['constraints', 'add', 'x2', '--constraint', 'k:v'],
+        ['decision', 'add', 'x2', '--why', 'r'], ['lesson', 'save', 'x2'], ['task', 'add', 'x2'], ['plan', 'add', 'x2']];
+      const DERIVED = new Set(['manifest.json', 'skills-lock.json', 'leerness-config.json', 'environment.json']);
+      const seeded = () => { const d = mk(); for (const a of SEED) R(d, a); return d; };
+      const base = seeded();
+      const stores = [];
+      (function w(x, rel) { for (const e of fs.readdirSync(x, { withFileTypes: true })) {
+        const p = path.join(x, e.name), r = rel ? rel + '/' + e.name : e.name;
+        if (e.isDirectory()) { if (!/cache|archive|skills$/.test(e.name)) w(p, r); }
+        else if (/\.json$/.test(e.name)) stores.push(r); } })(path.join(base, '.harness'), '');
+      const userStores = stores.filter(f => !DERIVED.has(path.basename(f)));
+      dbg.stores = userStores.length;
+      // 계측 판별력 — 스토어가 갑자기 줄면(시드 실패 등) "유실 0" 이 공허해진다. 실측 9종 이상.
+      if (userStores.length < 9) bad.push(`스토어열거부족(${userStores.length})`);
+      for (const rel of userStores) {
+        const d = seeded();
+        const fp = path.join(d, '.harness', rel.replace(/\//g, path.sep));
+        if (!fs.existsSync(fp)) continue;
+        fs.writeFileSync(fp, '{ "broken": ');
+        const broken = fs.readFileSync(fp, 'utf8');
+        for (const a of MUT) {
+          R(d, a);
+          if (fs.existsSync(fp) && fs.readFileSync(fp, 'utf8') !== broken) { bad.push(`전수:${rel}←${a.join(' ')}`); break; }
+        }
+      }
+    }
+
+    // ── "손상 ≠ 없음": 읽기 계열 명령이 손상 스토어를 **빈 값**으로 오인해 엉뚱한 진단을 내지 않는가.
+    //   검수가 지적한 형태다 — `creds refresh` 가 "등록된 서비스 없음", `next-action take` 가 "큐 비어있음" 이라 했다.
+    //   사용자는 등록이 지워졌다고 믿고 다시 등록하거나 handoff 를 또 돌린다. 원인(손상)은 끝까지 안 보인다.
+    //   ⚠ 대조군이 반드시 필요하다 — **정상 스토어에서 진짜로 없는** 경우까지 store_corrupt 라 하면 오차단이다.
+    {
+      const codeOf = (r) => { try { return (JSON.parse(String(r.stdout || '').trim()) || {}).code; } catch { return null; } };
+      const seedCreds = (d) => R(d, ['creds', 'register', 'svc', '--env-var', 'K']);
+      const corrupt = (d, f) => fs.writeFileSync(path.join(d, '.harness', f), '{ "broken": ');
+      // (a) 손상 → store_corrupt 로 진단
+      for (const [label, seed, file, act] of [
+        ['creds check',      seedCreds, 'credentials.local.json', ['creds', 'check']],
+        ['creds refresh',    seedCreds, 'credentials.local.json', ['creds', 'refresh', 'svc']],
+        ['next-action take', (d) => R(d, ['next-action', 'add', 'aaa']), 'next-action-queue.json', ['next-action', 'take', '0']],
+      ]) {
+        const d = mk(); if (seed(d).status !== 0) { bad.push(`손상진단:${label}:셋업실패`); continue; }
+        corrupt(d, file);
+        const r = R(d, act.concat(['--json']));
+        if (r.status === 0) bad.push(`손상진단:${label}:exit0`);
+        if (codeOf(r) !== 'store_corrupt') bad.push(`손상진단:${label}:코드(${codeOf(r)})`);
+      }
+      // (b) 손상 → 사람용 읽기(list)도 조용히 "없음" 이라 하지 않는다
+      { const d = mk(); seedCreds(d); corrupt(d, 'credentials.local.json');
+        const r = R(d, ['creds', 'list']);
+        if (r.status === 0) bad.push('손상진단:creds list:조용히통과'); }
+      // (c) 대조군 — 정상 스토어에서 **진짜 없는** 경우는 store_corrupt 가 아니어야 한다(오차단 방지)
+      { const d = mk(); seedCreds(d);
+        const r = R(d, ['creds', 'refresh', 'nosuch', '--json']);
+        if (codeOf(r) === 'store_corrupt') bad.push('손상진단:대조군_미등록을_손상이라함'); }
+      { const d = mk();   // 빈 registry(정상)는 그냥 "없음" 이어야 한다
+        const r = R(d, ['creds', 'list']);
+        if (r.status !== 0) bad.push('손상진단:대조군_빈registry_오차단'); }
+      { const d = mk(); R(d, ['next-action', 'add', 'aaa']); R(d, ['next-action', 'take', '0']);
+        const r = R(d, ['next-action', 'take', '0', '--json']);   // 정상인데 비어 있음 → 손상 아님
+        if (codeOf(r) === 'store_corrupt') bad.push('손상진단:대조군_빈큐를_손상이라함'); }
+    }
+
+    dbg.bad = bad.slice(0, 12);
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ R(1.36.114) 방치 명령의 기지 클래스: 손상 스토어 6종(안 씀·성공이라 안 함·스택 없음·정상 오차단 없음·--json 계약) · 사용자 스토어 ${dbg.stores}종 전수 무유실 · 개행 위조 0(creds·constraints)`
+    : '✗ 1.36.114 방치 명령 클래스 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 
