@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.112';
+const VERSION = '1.36.113';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -9832,8 +9832,8 @@ function resumeCmd(root) {
     log('');
     log(grn(`## 사전 정리된 next-actions (${plan.nextActions.length}건)`));
     for (const a of plan.nextActions) {
-      log(`  ${a.icon || '•'} ${a.title}`);
-      if (a.command) log(dim(`     \`${a.command}\``));
+      log(`  ${a.icon || '•'} ${_lineSafe(a.title)}`);
+      if (a.command) log(dim(`     \`${_lineSafe(a.command)}\``));
     }
     log('');
     log(dim(`  → 즉시 task 추가: leerness next-action take`));
@@ -9898,7 +9898,7 @@ function requestsCmd(root, sub, ...rest) {
     }
     log(yel(`  📥 delivered 패턴 후보 ${detected.candidates.length}건:`));
     detected.candidates.forEach(c => {
-      log(`    • [${c.id}] v${c.claimedVersion} (${c.deliveredKeyword}) — ${c.text.slice(0, 80)}…`);
+      log(`    • [${c.id}] v${c.claimedVersion} (${c.deliveredKeyword}) — ${_lineSafe(c.text).slice(0, 80)}…`);
     });
     log('');
     if (apply) {
@@ -9939,7 +9939,11 @@ function requestsCmd(root, sub, ...rest) {
     for (const r of list) {
       const statusIcon = r.status === 'completed' ? '✓' : (r.status === 'dropped' ? '✗' : (r.status === 'in-progress' ? '▶' : '◯'));
       const recordedDay = (r.recordedAt || '').slice(0, 10);
-      log(`  ${statusIcon} [${r.id}] ${dim(recordedDay)} ${r.text.slice(0, 100)}${r.text.length > 100 ? '…' : ''}`);
+      // 1.36.113: 목록 줄에 raw 텍스트를 넣으면 사용자 요청의 개행이 **두 번째 줄**을 만든다. 그 줄은
+      //   `◯ [UR-9999] …` 처럼 진짜 항목과 구별되지 않아, 이 목록을 읽는 AI 가 없는 요청을 실재로 오인한다.
+      //   적대적 입력만의 문제가 아니다 — 사용자가 여러 줄로 요청을 적는 것은 평범한 일이다(실측에서 갈라졌다).
+      //   터미널 출력에 _lineSafe 를 거는 것은 이 저장소의 기존 방식이다(compact/statusline 이 이미 그렇게 한다).
+      log(`  ${statusIcon} [${r.id}] ${dim(recordedDay)} ${_lineSafe(r.text).slice(0, 100)}${r.text.length > 100 ? '…' : ''}`);
       if (r.linkedTaskIds && r.linkedTaskIds.length > 0) log(dim(`       linked tasks: ${r.linkedTaskIds.join(', ')}`));
     }
     return;
@@ -9977,7 +9981,7 @@ function requestsCmd(root, sub, ...rest) {
     } else {
       log(red(`  ⚠ 누락 후보 ${audit.missing.length}건 (open 상태이나 task/plan/decisions 매칭 없음):`));
       for (const m of audit.missing) {
-        log(`    • [${m.id}] ${m.text.slice(0, 90)}${m.text.length > 90 ? '…' : ''}`);
+        log(`    • [${m.id}] ${_lineSafe(m.text).slice(0, 90)}${m.text.length > 90 ? '…' : ''}`);
         log(dim(`         ${m.recordedAt.slice(0, 10)} · hits=${m.hits}/${m.words}`));
       }
       log('');
@@ -9987,7 +9991,7 @@ function requestsCmd(root, sub, ...rest) {
       log('');
       log(grn(`  ✓ tracked ${audit.tracked.length}건 (open + task/plan/decisions 매칭됨):`));
       for (const t of audit.tracked.slice(0, 5)) {
-        log(`    • [${t.id}] ${t.text.slice(0, 80)}${t.text.length > 80 ? '…' : ''} ${dim(`(hits=${t.hits})`)}`);
+        log(`    • [${t.id}] ${_lineSafe(t.text).slice(0, 80)}${t.text.length > 80 ? '…' : ''} ${dim(`(hits=${t.hits})`)}`);
       }
     }
     if (audit.stale.length > 0) {
@@ -9995,7 +9999,7 @@ function requestsCmd(root, sub, ...rest) {
       log(yel(`  ⏳ stale ${audit.stale.length}건 (7일+ open):`));
       for (const s of audit.stale.slice(0, 5)) {
         const days = Math.floor((Date.now() - new Date(s.recordedAt).getTime()) / 86400000);
-        log(`    • [${s.id}] ${days}일 ${s.text.slice(0, 70)}…`);
+        log(`    • [${s.id}] ${days}일 ${_lineSafe(s.text).slice(0, 70)}…`);
       }
     }
     return;
@@ -11128,8 +11132,8 @@ async function nextActionCmd(root, sub, ...rest) {
     log('');
     for (let i = 0; i < state.queue.length; i++) {
       const a = state.queue[i];
-      log(`  [${i}] ${a.icon || '•'} ${a.title}`);
-      if (a.command) log(`      \`${a.command}\``);
+      log(`  [${i}] ${a.icon || '•'} ${_lineSafe(a.title)}`);   // 1.36.113: 개행이 가짜 큐 항목 줄을 만든다
+      if (a.command) log(`      \`${_lineSafe(a.command)}\``);
     }
     log('');
     log(`  → 가져오기: leerness next-action take [N]  (N 생략 시 최신 [${state.queue.length - 1}])`);
@@ -11141,8 +11145,8 @@ async function nextActionCmd(root, sub, ...rest) {
     if (isNaN(n) || n < 0 || n >= state.queue.length) { fail(`잘못된 index: ${n} (0~${state.queue.length - 1})`); return process.exit(1); }
     const action = state.queue[n];
     log(`# leerness next-action take [${n}] (1.9.201)`);
-    log(`  ${action.icon || '•'} ${action.title}`);
-    if (action.command) log(`  \`${action.command}\``);
+    log(`  ${action.icon || '•'} ${_lineSafe(action.title)}`);
+    if (action.command) log(`  \`${_lineSafe(action.command)}\``);
     // task add 자동 호출
     try {
       const taskTitle = action.title.replace(/^[^\w가-힣]+/, '').slice(0, 100);
@@ -11159,8 +11163,8 @@ async function nextActionCmd(root, sub, ...rest) {
       const taskResult = cp.spawnSync(process.execPath, [__filename, 'task', 'add', taskTitle, '--path', root], { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_INTERNAL: '1' } });
       if (taskResult.status === 0) {
         const m = (taskResult.stdout || '').match(/T-\d{4,}/);
-        log(`  ✓ task 추가: ${m ? m[0] : '?'} — "${taskTitle}"`);
-        if (action.command) log(`  💡 실행 명령: ${action.command}`);
+        log(`  ✓ task 추가: ${m ? m[0] : '?'} — "${_lineSafe(taskTitle)}"`);   // 1.36.113: 확인 줄도 같은 클래스다
+        if (action.command) log(`  💡 실행 명령: ${_lineSafe(action.command)}`);
       } else {
         log(`  ⚠ task add 실패 (exit ${taskResult.status}) — 수동: leerness task add "${taskTitle}"`);
       }
@@ -11678,7 +11682,11 @@ function planAdd(root, text) {
   // 1.9.303 (UR-0043): M-id append + T-id upsert 를 하나의 락으로 — 동시 plan add ID 충돌 방지.
   const { id, tid } = _withLock(progressPath(root), () => {
     const id = nextId(root, 'M');
-    append(planPath(root), `\n### ${id}. ${text}\nStatus: ${status}\nProgress: ${progress}%\nDone-When: ${doneWhen}\n\nTasks:\n- [ ] ${text}\n`);
+    // 1.36.113 (방치 표면 사냥): `text` 만 raw 였다 — 같은 문장의 doneWhen 은 1.36.63 검수가 _lineSafe 를 걸었고
+    //   바로 아래 planDrop 은 _cellSafe 를 쓰는데, 여기만 빠져 있었다(수정 클래스 스윕 누락의 전형).
+    //   개행 하나로 `### M-9999. 가짜 마일스톤` 헤더를 plan.md 에 위조할 수 있고, **plan.md 는 handoff 가 읽는다** —
+    //   측정한 9개 사용자텍스트 표면 중 handoff 까지 전파되는 유일한 지점이었다.
+    append(planPath(root), `\n### ${id}. ${_lineSafe(text)}\nStatus: ${status}\nProgress: ${_lineSafe(progress)}%\nDone-When: ${doneWhen}\n\nTasks:\n- [ ] ${_lineSafe(text)}\n`);
     const tid = nextId(root, 'T');
     upsertProgress(root, { id: tid, status, request: text, evidence: `plan:${id}`, nextAction });
     return { id, tid };
@@ -12282,8 +12290,8 @@ function lessonListCmd(root, opts = {}) {
   }
   log(`총 ${lessons.length}건${tagFilter ? ` (tag: ${tagFilter})` : ''}${queryFilter ? ` (query: "${queryFilter}")` : ''}:`);
   for (const l of lessons) {
-    log(`\n[${l.date || '?'}]${l.tag ? ` #${l.tag}` : ''}`);
-    log(`  ${l.text}`);
+    log(`\n[${_lineSafe(l.date || '?')}]${l.tag ? ` #${_lineSafe(l.tag)}` : ''}`);
+    log(`  ${_lineSafe(l.text)}`);   // 1.36.113: 저장(md)만 막혀 있고 목록 출력은 raw 였다
   }
 }
 
@@ -12371,11 +12379,13 @@ function decisionListCmd(root, opts = {}) {
   log(`# 🧠 Decisions (1.9.118)${queryFilter ? ` — query: "${queryFilter}"` : ''}\n`);
   if (!decisions.length) return ok(queryFilter ? `"${queryFilter}" 매칭 decision 없음` : 'decisions 비어있음');
   log(`총 ${decisions.length}건${queryFilter ? ` (query: "${queryFilter}")` : ''}:`);
+  // 1.36.113: 저장(md)은 _lineSafe 로 막혀 있는데 **이 목록 출력만** raw 였다 — 보호가 파일에만 걸려 있었다.
+  //   개행이 있으면 `[2099-01-01] 가짜 결정` 같은 줄이 별도 항목처럼 보인다(사람도 AI 도 구별 못 한다).
   for (const d of decisions) {
-    log(`\n[${d.date || '?'}] ${d.title}`);
-    if (d.reason) log(`  Reason: ${d.reason}`);
-    if (d.alternatives) log(`  Alternatives: ${d.alternatives}`);
-    if (d.impact) log(`  Impact: ${d.impact}`);
+    log(`\n[${_lineSafe(d.date || '?')}] ${_lineSafe(d.title)}`);
+    if (d.reason) log(`  Reason: ${_lineSafe(d.reason)}`);
+    if (d.alternatives) log(`  Alternatives: ${_lineSafe(d.alternatives)}`);
+    if (d.impact) log(`  Impact: ${_lineSafe(d.impact)}`);
   }
 }
 
@@ -12479,10 +12489,10 @@ function taskRelink(root) {
       .map(r => ({ r, score: _jaccard(milestoneTokens, _tokenizeForSim(r.request)) }))
       .filter(x => x.score >= minScore)
       .sort((a, b) => b.score - a.score);
-    log(`\n${m.id}: ${m.text}`);
+    log(`\n${m.id}: ${_lineSafe(m.text)}`);
     if (!candidates.length) {
       log(`  ⓘ 매칭 후보 없음 (score ≥ ${minScore})`);
-      log(`  → 새 task: leerness task add "${m.text}" --status planned --evidence "plan:${m.id}"`);
+      log(`  → 새 task: leerness task add "${_lineSafe(m.text)}" --status planned --evidence "plan:${m.id}"`);
       continue;
     }
     const best = candidates[0];
@@ -14068,7 +14078,7 @@ function handoff(root) {
       log('');
       log(yl4(`## 📥 사용자 요청 자동 완료 가능 (1.9.224, ${delivered.candidates.length}건)`));
       delivered.candidates.slice(0, 5).forEach(c => {
-        log(`  • [${c.id}] v${c.claimedVersion} (${c.deliveredKeyword}) — ${c.text.slice(0, 70)}${c.text.length > 70 ? '…' : ''}`);
+        log(`  • [${c.id}] v${c.claimedVersion} (${c.deliveredKeyword}) — ${_lineSafe(c.text).slice(0, 70)}${c.text.length > 70 ? '…' : ''}`);
       });
       if (delivered.candidates.length > 5) {
         log(dm4(`  ... +${delivered.candidates.length - 5}건 더`));
@@ -14288,8 +14298,8 @@ function handoff(root) {
                 if (_showAdvice) {
                   log(grn(`## 🎯 다음 단계 자동 제안 (1.9.194 E축 — 게으름 방지) — 키워드 "${keyword}"`));
                   for (const a of actions) {
-                    log(dim(`  ${a.icon} ${a.title}`));
-                    if (a.command) log(dim(`     \`${a.command}\``));
+                    log(dim(`  ${a.icon} ${_lineSafe(a.title)}`));
+                    if (a.command) log(dim(`     \`${_lineSafe(a.command)}\``));
                   }
                 }
                 // 1.9.201: queue 자동 저장 — `leerness next-action take` 로 즉시 task add 가능 (토글과 무관: 상태다)
@@ -18308,7 +18318,7 @@ function retroCmd(root) {
 
   log(`\n## 🧠 최근 결정 (top 5)`);
   if (!agg.recentDecisions.length) log('  (없음)');
-  else agg.recentDecisions.slice(0, 5).forEach(d => log(`  - ${d.title}`));
+  else agg.recentDecisions.slice(0, 5).forEach(d => log(`  - ${_lineSafe(d.title)}`));
 
   if (agg.durations.length >= 4) {
     const mid = Math.floor(agg.durations.length / 2);
@@ -18673,7 +18683,7 @@ function _brainstormWorkspace(rootBase, topic) {
     log(`\n## ${path.basename(p)} (${n}건)`);
     if (h.decisions.length) {
       log(`  🧠 결정 (${h.decisions.length})`);
-      h.decisions.slice(0, 3).forEach(d => log(`    - decisions.md:${d.line || '?'} — ${d.title}`));
+      h.decisions.slice(0, 3).forEach(d => log(`    - decisions.md:${d.line || '?'} — ${_lineSafe(d.title)}`));
     }
     if (h.skills.length) {
       log(`  📚 스킬 (${h.skills.length})`);
@@ -18769,7 +18779,7 @@ function brainstormCmd(root, topic) {
   // 1.9.15: 모든 출력에 출처 파일:라인 표시
   if (hits.decisions.length) {
     log(`\n## 🧠 관련 결정 (${hits.decisions.length})`);
-    hits.decisions.slice(0, 5).forEach(d => log(`  - .harness/decisions.md:${d.line || '?'} — ${d.title}`));
+    hits.decisions.slice(0, 5).forEach(d => log(`  - .harness/decisions.md:${d.line || '?'} — ${_lineSafe(d.title)}`));
   }
   if (hits.skills.length) {
     log(`\n## 📚 관련 스킬 (${hits.skills.length}) — 시작 전 \`skill info <id>\` 권장`);
@@ -20439,7 +20449,7 @@ function reuseFind(root, query) {
   log(`# reuse find: "${query}"`);
   if (!matches.length) return ok('기존 자원 없음 — 새로 만드는 것이 최선의 선택일 수 있음');
   log(`${matches.length}개 후보:`);
-  for (const m of matches.slice(0, _parseLimit(arg('--limit', '20'), 20))) log(`- ${m.source}:${m.line}  ${m.text}`);
+  for (const m of matches.slice(0, _parseLimit(arg('--limit', '20'), 20))) log(`- ${m.source}:${m.line}  ${_lineSafe(m.text)}`);
   log(`\n💡 새로 만들기 전에 위 자원을 재사용/확장 가능한지 확인하세요.`);
 }
 
@@ -23438,7 +23448,8 @@ function briefCmd(root, sub) {
     const brief = _loadBrief(root);
     if (has('--json')) { log(JSON.stringify(brief, null, 2)); return; }
     log(cy(`# leerness brief — ${brief.project}`));
-    for (const f of _BRIEF_FIELDS) { const v = brief[f.key]; const filled = f.multi ? (v && v.length) : v; log(`  ${filled ? gr('✓') : dm('·')} ${f.label}: ${filled ? (f.multi ? v.join(', ') : v).slice(0, 90) : dm('(미입력)')}`); }
+    // 1.36.113: brief 값은 사용자가 여러 줄로 넣을 수 있고(`brief set --intro`), 그대로 찍으면 둘째 줄이 별도 항목처럼 보인다
+    for (const f of _BRIEF_FIELDS) { const v = brief[f.key]; const filled = f.multi ? (v && v.length) : v; log(`  ${filled ? gr('✓') : dm('·')} ${f.label}: ${filled ? _lineSafe(f.multi ? v.join(', ') : v).slice(0, 90) : dm('(미입력)')}`); }
     log('');
     log(dm(`  채움 ${_briefFilled(brief)}/${_BRIEF_FIELDS.length} · 설정: leerness brief set --intro "..." · 복사용: leerness brief export`));
     return;
@@ -23503,8 +23514,8 @@ function contextCmd(root, opts = {}) {
   const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   log(cy(`# leerness context (1.9.292) — 에이전트 온보딩 컨텍스트 (v${VERSION})`));
-  if (intent) log(`  🎯 의도: ${intent}`);
-  if (ctx.brief.intro || ctx.brief.features.length) log(dm(`  📘 청사진: ${ctx.brief.intro || ''}${ctx.brief.features.length ? ` · 기능 ${ctx.brief.features.length}` : ''}${ctx.brief.latestDirection ? ` · 최근방향 ${ctx.brief.latestDirection.slice(0, 50)}` : ''} (leerness brief show)`));
+  if (intent) log(`  🎯 의도: ${_lineSafe(intent)}`);
+  if (ctx.brief.intro || ctx.brief.features.length) log(dm(`  📘 청사진: ${_lineSafe(ctx.brief.intro || '')}${ctx.brief.features.length ? ` · 기능 ${ctx.brief.features.length}` : ''}${ctx.brief.latestDirection ? ` · 최근방향 ${_lineSafe(ctx.brief.latestDirection).slice(0, 50)}` : ''} (leerness brief show)`));
   log('');
   if (ctx.currentTask) {
     log(gr(`▶ 현재 작업: ${ctx.currentTask.id} — ${ctx.currentTask.request}`));
@@ -23512,12 +23523,12 @@ function contextCmd(root, opts = {}) {
   } else log(dm('▶ 현재 진행 중 작업 없음'));
   log('');
   log(`📥 미답 요청: ${ctx.openRequests.count}건`);
-  ctx.openRequests.items.forEach(r => log(dm(`    • [${r.id}] ${r.text}`)));
+  ctx.openRequests.items.forEach(r => log(dm(`    • [${r.id}] ${_lineSafe(r.text)}`)));   // 1.36.113: 개행이 가짜 항목 줄을 만든다
   log('');
   log(`🧠 메모리: 진행 ${memory.tasksInProgress} / 결정 ${memory.decisions} / 룰 ${memory.rulesActive} / 교훈 ${memory.lessons}`);
-  if (recentDecisions.length) { log(''); log('🗂 최근 결정:'); recentDecisions.forEach(d => log(dm(`    • ${d.date || '?'} — ${d.title}`))); }
-  if (ctx.activeRules.length) { log(''); log('⚡ 활성 룰:'); ctx.activeRules.forEach(r => log(dm(`    • [${r.id}] (${r.trigger}) ${r.rule}`))); }
-  if (nextActions.length) { log(''); log('👉 다음 액션:'); nextActions.forEach(a => log(dm(`    • ${a.title}${a.command ? ' → ' + a.command : ''}`))); }
+  if (recentDecisions.length) { log(''); log('🗂 최근 결정:'); recentDecisions.forEach(d => log(dm(`    • ${d.date || '?'} — ${_lineSafe(d.title)}`))); }
+  if (ctx.activeRules.length) { log(''); log('⚡ 활성 룰:'); ctx.activeRules.forEach(r => log(dm(`    • [${r.id}] (${r.trigger}) ${_lineSafe(r.rule)}`))); }
+  if (nextActions.length) { log(''); log('👉 다음 액션:'); nextActions.forEach(a => log(dm(`    • ${_lineSafe(a.title)}${a.command ? ' → ' + _lineSafe(a.command) : ''}`))); }
   return ctx;
 }
 function stateCmd(root, sub, ...args) {
@@ -24938,7 +24949,7 @@ function incidentListCmd(root) {
     try {
       const j = JSON.parse(read(path.join(dir, f)));
       const e = j.payload?.error || j.payload?.message || '(no description)';
-      log(`  ${j.id}  ·  ${String(e).slice(0, 80)}`);
+      log(`  ${j.id}  ·  ${_lineSafe(String(e)).slice(0, 80)}`);
     } catch {}
   }
 }
@@ -24966,7 +24977,7 @@ async function incidentHandleCmd(root, id) {
   log(`incident: ${j.id}  ·  permission mode: ${p.mode || 'basic'}`);
   const err = j.payload?.error || j.payload?.message || '';
   const stack = j.payload?.stack || '';
-  log(`error: ${String(err).slice(0, 200)}`);
+  log(`error: ${_lineSafe(String(err)).slice(0, 200)}`);
   if (stack) log(`stack head:\n${String(stack).split('\n').slice(0, 4).join('\n')}`);
   // (1) feature impact 자동 회수 — error 키워드 매칭
   try {
@@ -25005,7 +25016,9 @@ async function incidentHandleCmd(root, id) {
   j.permissionMode = p.mode || 'basic';
   writeUtf8(fp, JSON.stringify(j, null, 2) + '\n');
   ok(`incident handled: ${j.id} (분석/회수 완료)`);
-  log(`  → 후속: leerness agent "fix: ${String(err).slice(0, 80)}" / leerness verify-code . / leerness deploy auto`);
+  // 1.36.113: 이 줄은 **복붙해서 실행하라고** 주는 명령이다 — 외부 webhook 이 넣은 개행이 여기서 갈리면
+  //   따옴표가 닫히지 않은 채 둘째 줄이 별도 명령처럼 보인다. 인용 대상은 반드시 한 줄로 접는다.
+  log(`  → 후속: leerness agent "fix: ${_lineSafe(String(err)).slice(0, 80)}" / leerness verify-code . / leerness deploy auto`);
 }
 
 // ---- (3) Webhook Listener ----
@@ -25847,7 +25860,7 @@ function lspCmd(root, sub, ...args) {
     } else {
       log(`# leerness lsp references (1.9.167)`);
       log(`symbol: "${name}" · ${refs.length} references · ${dt}ms`);
-      refs.slice(0, 30).forEach(r => log(`  ${r.file}:${r.line}  ${r.text}`));
+      refs.slice(0, 30).forEach(r => log(`  ${r.file}:${r.line}  ${_lineSafe(r.text)}`));
       if (refs.length > 30) log(`  ... ${refs.length - 30} more`);
     }
     try { _recordRun(root, { kind: 'lsp_references', name, count: refs.length, durationMs: dt, ok: true }); } catch {}

@@ -10838,6 +10838,134 @@ total++;
   if (!ok) failed++;
 }
 
+// ── 1.36.113 블록 Q: 사용자 텍스트의 **개행이 가짜 항목을 만들지 못한다** (9개 표면 × 3축 행렬).
+//   왜 이 라운드에 왔나: e2e 실행 커버리지를 재니 93개 명령 중 17개가 한 번도 안 돌고 있었고,
+//   그중 `requests` 는 **사용자 명시 요청(UR-XXXX)** 을 담는 표면이다. 거기서 시작해 클래스를 스윕했다.
+//   1.9.402(UR-0108)가 decisions/lessons 의 **md 투영**에 _lineSafe 를 걸었지만, 같은 클래스의
+//   나머지 발화점이 남아 있었다 — plan.md 쓰기(handoff 까지 전파) + 목록 출력 12곳.
+//   가드는 발견 하나가 아니라 **행렬 전체**를 고정한다. 한 표면만 막으면 다음 헌트에서 옆 표면이 나온다.
+{
+  total++;
+  let ok = false; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-inj113-'));
+  const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb });
+  try {
+    let seq = 0;
+    const mk = () => {
+      const d = path.join(sb, 'p' + (++seq)); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+      return d;
+    };
+    const R = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+    const M = 'ZQ9';
+    const SURFACES = [
+      ['requests',    (d, t) => R(d, ['requests', 'add', t]),                         (d) => [R(d, ['requests', 'list']), R(d, ['requests', 'audit'])]],
+      ['task',        (d, t) => R(d, ['task', 'add', t]),                             (d) => [R(d, ['task', 'list'])]],
+      ['decision',    (d, t) => R(d, ['decision', 'add', t, '--why', 'r']),           (d) => [R(d, ['decision', 'list'])]],
+      ['lesson',      (d, t) => R(d, ['lesson', 'save', t]),                          (d) => [R(d, ['lesson', 'list'])]],
+      ['rule',        (d, t) => R(d, ['rule', 'add', t, '--trigger', 'every-round']), (d) => [R(d, ['rule', 'list'])]],
+      ['plan',        (d, t) => R(d, ['plan', 'add', t]),                             (d) => [R(d, ['plan', 'list'])]],
+      ['next-action', (d, t) => R(d, ['next-action', 'add', t]),                      (d) => [R(d, ['next-action', 'list'])]],
+      ['preview',     (d, t) => R(d, ['preview', 'add', t]),                          (d) => [R(d, ['preview', 'list'])]],
+      ['feature',     (d, t) => R(d, ['feature', 'add', t]),                          (d) => [R(d, ['feature', 'list'])]],
+    ];
+    // 위조 판정: 주입한 **둘째 줄 표식만** 단독으로 실린 줄이 있는가(첫 줄 표식과 같은 줄이면 안전하게 접힌 것).
+    const forged = (txt) => String(txt).split('\n').some(l => l.includes(M + 'FORGED') && !l.includes(M + 'A'));
+    const split = (txt) => String(txt).split('\n').some(l => /^\s*-?\s*세부 항목 1\s*$/.test(l));
+    const bad = [];
+    let addOk = 0, sawFirst = 0;
+    for (const [name, add, shows] of SURFACES) {
+      // ① 적대적: 그 표면의 목록 형식을 흉내 낸 둘째 줄
+      const d = mk();
+      if (add(d, `진짜 ${M}A\n  ◯ [UR-9999] 2026-01-01 위조 ${M}FORGED`).status !== 0) { bad.push(`${name}:add실패`); continue; }
+      addOk++;
+      const outs = shows(d).map(s => String(s.stdout || ''));
+      // 계측 판별력 — 목록이 **첫 줄 표식을 실제로 보여줘야** "위조 없음" 이 의미를 갖는다(무출력은 통과가 아니다)
+      if (outs.some(o => o.includes(M + 'A'))) sawFirst++; else bad.push(`${name}:항목미노출`);
+      if (outs.some(forged)) bad.push(`${name}:목록위조`);
+      const H = path.join(d, '.harness');
+      for (const f of fs.readdirSync(H)) {
+        if (f.endsWith('.md') && forged(fs.readFileSync(path.join(H, f), 'utf8'))) bad.push(`${name}:파일오염(${f})`);
+      }
+      // handoff 는 다음 세션 AI 가 통째로 읽는다 — 전파 경로 중 가장 넓다(plan.md 가 이 경로로 샜었다)
+      if (forged(R(d, ['handoff', d, '--no-drift-check', '--no-record']).stdout)) bad.push(`${name}:handoff전파`);
+      // ② 평범한 여러 줄 — 적대적 입력이 아니라 **일상 입력**에서 갈라지면 그게 더 흔한 피해다.
+      //   ⚠ 초안은 `add 성공 && 분리됨` 이라 **add 가 실패하면 조용히 통과**했다(codex 검수 P2, 재현됨) —
+      //   "일상 입력도 지원한다" 는 주장이 공허해진다. 성공·노출을 각각 단언한다.
+      const d2 = mk();
+      if (add(d2, `첫 줄 요약 ${M}B\n- 세부 항목 1\n- 세부 항목 2`).status !== 0) bad.push(`${name}:여러줄add실패`);
+      else {
+        const o2 = shows(d2).map(s => String(s.stdout || ''));
+        if (!o2.some(o => o.includes(M + 'B'))) bad.push(`${name}:여러줄항목미노출`);
+        if (o2.some(split)) bad.push(`${name}:여러줄분리`);
+      }
+
+      // ③ **플래그 경로**도 같은 클래스다. `plan add --progress` 가 raw 로 plan.md 에 들어가
+      //   `### M-9999.` 헤더를 위조했다(codex 검수 P1, 재현 — plan list·handoff 까지 전파).
+      //   positional 만 찌르면 이 경로를 통째로 놓친다.
+      if (name === 'plan') {
+        const d3 = mk();
+        R(d3, ['plan', 'add', `진짜 ${M}A`, '--progress', `0%\n### M-9999. 위조 ${M}FORGED\nStatus: planned\nProgress: 0`]);
+        const pf = fs.readFileSync(path.join(d3, '.harness', 'plan.md'), 'utf8');
+        // ⚠ 판정은 **구조**로 한다. 안전화되면 주입 문자열은 `Progress:` 값 안에 한 줄로 남으므로
+        //   단순 `M-9999` 부분일치는 고쳐진 뒤에도 참이다(작성 중 실제로 오탐을 냈다).
+        if (/^### M-9999\./m.test(pf)) bad.push('plan:progress플래그로_파일위조');
+        let ms = null;
+        try { const j = JSON.parse(String(R(d3, ['plan', 'list', '--json']).stdout || '')); ms = (j.milestones || j.plan || []).map(x => x.id); } catch {}
+        if (!ms) bad.push('plan:progress케이스_json파싱실패');
+        else if (ms.includes('M-9999')) bad.push('plan:progress플래그로_마일스톤위조');
+        else if (ms.length !== 2) bad.push(`plan:progress케이스_마일스톤수이상(${ms.length})`);   // 계측 판별력: 기본 1 + 방금 추가 1
+        if (!/진짜 ZQ9A/.test(pf)) bad.push('plan:progress케이스_본문미기록');
+      }
+    }
+    // ④ 목록 **외의** 출력 경로도 같은 클래스다. codex 검수가 여기서 4건을 더 찾았다 —
+    //   목록만 막고 끝내면 "고쳤다" 는 말이 절반만 참이 된다(발견이 아니라 클래스를 스윕해야 하는 이유).
+    const line2 = (out, first, forgedMark) => String(out).split('\n').some(l => l.includes(forgedMark) && !l.includes(first));
+    {
+      // next-action take — 큐 제목이 take 확인 줄에서 다시 갈렸다
+      const d = mk();
+      R(d, ['next-action', 'add', `진짜 ${M}A\n  [99] 📝 위조 ${M}FORGED`]);
+      const o = String(R(d, ['next-action', 'take', '0']).stdout || '');
+      if (!o.includes(M + 'A')) bad.push('take:항목미노출');
+      if (line2(o, M + 'A', M + 'FORGED')) bad.push('take:위조');
+    }
+    {
+      // incident — payload 는 **외부 webhook 입력**이다. 목록·처리·후속명령 세 줄 모두 본다.
+      const d = mk();
+      const idir = path.join(d, '.harness', 'incidents'); fs.mkdirSync(idir, { recursive: true });
+      fs.writeFileSync(path.join(idir, 'inc-1.json'), JSON.stringify({
+        id: 'inc-1', at: new Date().toISOString(), source: 'webhook', status: 'open',
+        payload: { error: `실제 ${M}A\n  inc-9999 · 위조 ${M}FORGED` } }, null, 2));
+      const o = String(R(d, ['incident', 'list']).stdout || '') + '\n' + String(R(d, ['incident', 'handle', 'inc-1']).stdout || '');
+      if (!o.includes(M + 'A')) bad.push('incident:항목미노출');
+      if (line2(o, M + 'A', M + 'FORGED')) bad.push('incident:위조');
+    }
+    {
+      // brief — 사용자가 여러 줄로 넣을 수 있고, brief show 와 context 두 표면이 읽는다
+      const d = mk();
+      R(d, ['brief', 'set', '--intro', `정상 ${M}A\n  • 위조 ${M}FORGED`]);
+      const o = String(R(d, ['brief', 'show']).stdout || '') + '\n' + String(R(d, ['context']).stdout || '');
+      if (!o.includes(M + 'A')) bad.push('brief:항목미노출');
+      if (line2(o, M + 'A', M + 'FORGED')) bad.push('brief:위조');
+    }
+    {
+      // preview 제목의 **단독 CR** — 개행이 아니라 커서 되돌림으로 앞부분(ID·상태)을 덮어쓴다
+      const d = mk();
+      R(d, ['preview', 'add', `정상 ${M}A\r위조 ${M}FORGED`]);
+      const o = String(R(d, ['preview', 'list']).stdout || '');
+      if (!o.includes(M + 'A')) bad.push('preview:항목미노출');
+      if (/\r/.test(o)) bad.push('preview:단독CR잔존');
+    }
+    dbg.addOk = addOk; dbg.sawFirst = sawFirst; dbg.bad = bad.slice(0, 12);
+    // 대조군: 9개 표면이 전부 add 성공 + 항목 노출이어야 판정이 성립한다(조용한 실패가 '위조 0' 으로 둔갑하지 못하게)
+    ok = addOk === SURFACES.length && sawFirst === SURFACES.length && bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ Q(1.36.113) 개행 주입 차단 행렬: 9표면 × (목록·.md파일·handoff) 위조 0 · plan --progress 플래그 경로 · next-action take · incident(외부입력) · brief/context · preview 단독CR · 평범한 여러 줄도 안 갈라짐 · 계측 살아있음(9/9 노출)`
+    : '✗ 1.36.113 개행 주입 차단 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 
