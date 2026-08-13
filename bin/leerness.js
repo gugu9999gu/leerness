@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.114';
+const VERSION = '1.36.116';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -273,7 +273,7 @@ const _VALUE_FLAGS = new Set(['--language','--skills','--path','--status','--pro
 for (const _bf of _BRIEF_FIELDS) { if (_bf && _bf.flag) _VALUE_FLAGS.add('--' + _bf.flag); }
 // 부울 플래그(값 없음) — 오타 경고의 대조군. 여기 있거나 _VALUE_FLAGS 에 있으면 '실재하는 플래그' 로 본다.
 //   판정에만 쓰이고 파싱 동작에는 관여하지 않으므로, 넓게 잡아도 안전하다(과다 포함 = 경고 억제).
-const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--baseline','--all-presets','--allow-empty','--allow-unrelated','--apply','--audit','--auto','--auto-apply-delivered','--auto-cleanup-branches','--auto-fix','--auto-fix-bom','--auto-fix-encoding','--auto-main-push','--auto-recover','--auto-track','--banner','--bench','--build','--bundle-only','--claims','--close','--compact','--detect','--dry-run','--dry-run-npm','--embedding','--enforce','--fail-on-candidates','--fail-on-violation','--force','--gh-pages','--gh-release','--git-push','--global','--guide','--help','--html','--include-code','--interactive','--json','--last','--lenient','--major','--minimal','--minor','--no-animate','--no-auto-roadmap','--no-auto-update','--no-banner','--no-brainstorm-hits','--no-cache','--no-context-inject','--no-crawl','--no-drift-check','--no-enforce','--no-env','--no-env-detect','--no-feature-impact','--no-headline','--no-init-check','--no-interactive-select','--no-lazy-warn','--no-lessons','--no-longterm-recall','--no-mem-delta','--no-multiagent-hint','--no-next-actions','--no-npm','--no-official-skills','--no-on-every-change','--no-pre-wake','--no-preserve-link','--no-readme-sync','--no-record','--no-repl','--no-review','--no-save','--no-security-check','--no-security-summary','--no-setup-agents','--no-skill-suggest','--no-stale-check','--no-suggest','--no-synonyms','--no-team-reminders','--no-wakeup-miss','--no-workflow-guide','--no-write','--npm-publish','--offline','--on-every-change','--pack','--parent-migrate','--publish-npm','--pulse','--quiet','--record','--refresh','--remove','--repair','--repl','--require-evidence','--run-tests','--skeleton','--strict','--strict-claims','--strict-elements','--strict-exit','--suggest','--version','--yes',
+const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--baseline','--all-presets','--allow-empty','--allow-unrelated','--apply','--audit','--auto','--auto-apply-delivered','--auto-cleanup-branches','--auto-fix','--auto-fix-bom','--auto-fix-encoding','--auto-main-push','--auto-recover','--auto-track','--banner','--bench','--build','--bundle-only','--claims','--close','--compact','--detect','--dry-run','--dry-run-npm','--embedding','--enforce','--fail-on-candidates','--fail-on-violation','--force','--gh-pages','--gh-release','--git-push','--global','--guide','--help','--html','--include-code','--interactive','--json','--last','--lenient','--major','--minimal','--minor','--no-animate','--no-auto-roadmap','--no-auto-update','--no-banner','--no-brainstorm-hits','--no-cache','--no-context-inject','--no-crawl','--no-drift-check','--no-enforce','--no-env','--no-env-detect','--no-feature-impact','--no-headline','--no-init-check','--no-interactive-select','--no-lazy-warn','--no-lessons','--no-longterm-recall','--no-mcp','--no-mem-delta','--no-multiagent-hint','--no-next-actions','--no-npm','--no-official-skills','--no-on-every-change','--no-pre-wake','--no-preserve-link','--no-readme-sync','--no-record','--no-repl','--no-review','--no-save','--no-security-check','--no-security-summary','--no-setup-agents','--no-skill-suggest','--no-stale-check','--no-suggest','--no-synonyms','--no-team-reminders','--no-wakeup-miss','--no-workflow-guide','--no-write','--npm-publish','--offline','--on-every-change','--pack','--parent-migrate','--publish-npm','--pulse','--quiet','--record','--refresh','--remove','--repair','--repl','--require-evidence','--run-tests','--skeleton','--strict','--strict-claims','--strict-elements','--strict-exit','--suggest','--version','--yes',
   // 소스에 리터럴로만 존재해 소비 형태를 기계 추출하지 못한 것들 — 실재하는 플래그이므로 오타로 오인하면 안 된다
   '--commands','--decision','--errors','--expand-all','--fix','--list','--notes','--print','--raw','--select-all','--skip-git-repo-check','--tests','--verbose','--yolo',
   // lib/*.js 의 부울 소비자 — bin/ 만 훑었다면 `agents route --confirm` 같은 실재 문법에 오탐 경고를 냈을 것이다
@@ -686,7 +686,7 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
   const _files = {
     'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ 매 세션 첫 행동\n**반드시 \`.harness/session-workflow.md\`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.\n\n## 정적 vs 동적 — leerness 역할 경계\n**AGENTS.md = 정적 프로젝트 지침** (코딩 규칙·테스트 명령·금지 사항·배포 절차 — 자주 안 변함).\n**leerness = 동적 작업 상태·기억·검증·인수인계** (현재 목표·수정 파일·실패 시도·검증 결과·다음 에이전트 인계 — 매 작업 변함).\n- 규칙/명령/금지는 여기 AGENTS.md 에 적는다.\n- 동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 \`.harness/\`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). \`leerness handoff\` · \`decision add\` · \`lesson save\` 등이 여기에 쓴다.\n- (선택) \`leerness state show|start|record|verify|handoff\` (또는 MCP \`leerness_state_*\`) 의 JSON 상태 substrate 는 \`.leerness/\` (에이전트 간 인수인계 표준 — state 명령 사용 시 생성). 메인 워크스페이스(.harness)와 별개.\n- leerness 는 AGENTS.md 를 **대체하지 않고 보완**한다. 정적 지침은 여기, 동적 상태는 leerness.\n\n## Mandatory read order (session start)\n1. **.harness/session-workflow.md** (6단계 워크플로 — 최우선)\n2. .harness/context-routing.md\n3. .harness/session-handoff.md\n4. .harness/current-state.md\n5. .harness/plan.md\n6. .harness/progress-tracker.md\n7. .harness/guideline.md\n8. .harness/protected-files.md\n9. .harness/writeback-policy.md\n10. .harness/anti-lazy-work-policy.md\n11. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- **모호성 질문 의무**: 사용자 요청에 판단이 갈리는 부분(모호한 수식어/지시대명사/복수 선택지/불명확한 범위)이 있으면 **추측으로 구현하지 말고 먼저 사용자에게 질문**합니다. \`leerness clarify "<요청>"\` 이 감지한 질문 목록을 그대로 사용자에게 물어보세요. 신호가 없어도 스스로 판단이 갈리면 질문이 우선입니다.\n- **미리보기 승인 의무 (신규 기능)**: 사용자가 신규 기능 추가/구현을 요청하면 **코드를 먼저 작성하지 않습니다**. ① \`leerness preview add "<기능>" --design "<디자인/UX 설명>" --features "<기능 목록>"\` 으로 미리보기를 등록하고 ② 그 내용을 사용자에게 제시해 승인 또는 수정사항을 질문으로 받습니다. ③ 사용자가 승인하면 \`leerness preview approve <P-ID>\`, 수정 요구면 \`leerness preview revise <P-ID> --note "..."\` 후 미리보기를 고쳐 다시 제시합니다. **approve 전에는 해당 기능의 코드를 작성하지 않습니다.**
 - **디자인 시안 의무 (웹페이지/디자인 작업)**: 신규 페이지 제작·디자인/리디자인 요청이면 텍스트 설명만으로 끝내지 않습니다. \`leerness preview mockup <P-ID>\` 로 자립형 HTML 시안 스캐폴드(\`.harness/previews/<P-ID>-mockup.html\`)를 만들고, **placeholder 영역을 실제 레이아웃 초안(HTML/CSS, 외부 리소스 없이)으로 교체**한 뒤 사용자에게 브라우저로 열어 보여주고 수정/승인을 질문으로 받습니다. 수정 요구가 오면 시안 파일을 고쳐 다시 제시하고, **approve 전에는 실제 페이지/기능 코드를 작성하지 않습니다.** (이미 만든 시안이 있으면 \`preview add ... --mockup <파일>\` 로 첨부)\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증하고, \`leerness lens\`의 분야별 자기질문에 답합니다 (코드: "선임 개발자가 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 이쁘고 직관적이라 느낄까?").\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
-    'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ 매 세션 첫 행동**: \`.harness/session-workflow.md\`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 \`leerness drift check --auto-fix\`로 자동 회복.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
+    'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ 매 세션 첫 행동**: \`.harness/session-workflow.md\`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 \`leerness drift check --auto-fix\`로 자동 회복.\n\n**완료 주장 전**: \`leerness verify-claim <T-ID>\` — 증거 없이 "완료" 라고 말하지 않는다.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
     '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .harness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`,
     '.github/copilot-instructions.md': `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`,
     '.harness/HARNESS_VERSION': VERSION + '\n',
@@ -869,13 +869,13 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
     '.claude/commands/lazy-detect.md': `# /lazy-detect\n\n게으름 방지 자동 평가를 실행합니다.\n\n\`\`\`\n!leerness lazy detect .\n\`\`\`\n`,
     // 1.36.65: auto-update 훅 설치기와 동일 내용(단일화) — 재init no-op 판정이 어긋나지 않게
     '.claude/commands/update.md': `# /update\n\nleerness 자동 업데이트 (감지 → 마이그레이션 → 검증).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\n체크만:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`,
-    '.claude/skills/leerness.md': `---\nname: leerness\ndescription: Leerness harness commands - handoff, audit, scan secrets, encoding check, lazy detect, session close, update. Use when the user asks to load project context, verify work quality, scan secrets, check encoding, or end a session.\n---\n\n# leerness skill\n\n## When to use\n- 사용자가 프로젝트 컨텍스트를 로드해달라고 할 때\n- 완료 선언 전 자기 검증을 요청할 때\n- 세션을 종료하거나 인수인계를 요청할 때\n- 시크릿/한글 인코딩 점검을 요청할 때\n- 새 leerness 버전 적용을 요청할 때\n\n## Commands\n\n\`\`\`bash\nleerness handoff .             # 컨텍스트 로드\nleerness check .               # pre-action 체크\nleerness audit .               # 일관성/계획 정렬 감사\nleerness scan secrets .        # 시크릿 패턴 스캔\nleerness encoding check .      # UTF-8/BOM/NUL\nleerness lazy detect .         # 게으름 평가\nleerness memory search "key"   # 결정/이력 검색\nleerness session close .       # 종료 보고 + handoff 자동 생성\nleerness update --yes          # 자동 업데이트\n\`\`\`\n`,
+    '.claude/skills/leerness/SKILL.md': `---\nname: leerness\ndescription: Leerness harness commands - handoff, audit, scan secrets, encoding check, lazy detect, session close, update. Use when the user asks to load project context, verify work quality, scan secrets, check encoding, or end a session.\n---\n\n# leerness skill\n\n## When to use\n- 사용자가 프로젝트 컨텍스트를 로드해달라고 할 때\n- 완료 선언 전 자기 검증을 요청할 때\n- 세션을 종료하거나 인수인계를 요청할 때\n- 시크릿/한글 인코딩 점검을 요청할 때\n- 새 leerness 버전 적용을 요청할 때\n\n## Commands\n\n\`\`\`bash\nleerness handoff .             # 컨텍스트 로드\nleerness check .               # pre-action 체크\nleerness audit .               # 일관성/계획 정렬 감사\nleerness scan secrets .        # 시크릿 패턴 스캔\nleerness encoding check .      # UTF-8/BOM/NUL\nleerness lazy detect .         # 게으름 평가\nleerness memory search "key"   # 결정/이력 검색\nleerness session close .       # 종료 보고 + handoff 자동 생성\nleerness update --yes          # 자동 업데이트\n\`\`\`\n`,
   };
   // 1.36.59 (외부감사 F-05 시리즈 1회차): en 프로젝트에서 에이전트가 "지시"로 읽는 최상위 5종은 완전 영어 —
   //   실측: en init 산출물 61개 중 53개 한글 잔존, 그중 지시 레이어가 최고 영향. 나머지 표면은 후속 회차.
   if (lang === 'en') {
     _files['AGENTS.md'] = `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ First action every session\n**Read \`.harness/session-workflow.md\` first and follow its 6-step workflow**: analyze request → plan → distribute → sub-agent work → integrated verification → close. Keep the same flow regardless of round length/complexity — that is what prevents drift.\n\n## Static vs dynamic — the leerness boundary\n**AGENTS.md = static project instructions** (coding rules, test commands, prohibitions, deploy steps — rarely change).\n**leerness = dynamic work state, memory, verification, handoff** (current goal, changed files, failed attempts, verification results, next-agent handoff — change every task).\n- Put rules/commands/prohibitions here in AGENTS.md.\n- Dynamic state (decisions/lessons/plan/progress/verification/handoff) is recorded by leerness in the **default workspace \`.harness/\`** (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md) via \`leerness handoff\`, \`decision add\`, \`lesson save\`, etc.\n- (Optional) the JSON state substrate of \`leerness state show|start|record|verify|handoff\` (or MCP \`leerness_state_*\`) lives in \`.leerness/\` — the cross-agent handoff standard, separate from the main workspace.\n- leerness **complements** AGENTS.md, it does not replace it. Static instructions here, dynamic state in leerness.\n\n## Mandatory read order (session start)\n1. **.harness/session-workflow.md** (6-step workflow — highest priority)\n2. .harness/context-routing.md\n3. .harness/session-handoff.md\n4. .harness/current-state.md\n5. .harness/plan.md\n6. .harness/progress-tracker.md\n7. .harness/guideline.md\n8. .harness/protected-files.md\n9. .harness/writeback-policy.md\n10. .harness/anti-lazy-work-policy.md\n11. **.harness/rules.md** (user-defined standing rules — follow every session)\n\n## Required behavior\n- Run \`leerness handoff .\` at session start to load context (handoff prints active rules automatically).\n- **Ask-on-ambiguity duty**: if the user's request has parts open to interpretation (vague qualifiers, pronouns, multiple alternatives, unclear scope), **ask the user instead of guessing**. Ask the questions produced by \`leerness clarify "<request>"\` verbatim. Even without detected signals, when your own judgment is split, asking wins.\n- **Preview-approval duty (new features)**: when the user asks for a new feature, **do not write code first**. ① Register a preview with \`leerness preview add "<feature>" --design "<design/UX>" --features "<list>"\`, ② present it and ask for approval or revisions, ③ on approval run \`leerness preview approve <P-ID>\`; on revision \`leerness preview revise <P-ID> --note "..."\` and re-present. **Never write the feature's code before approve.**\n- **Design-mockup duty (web pages / design work)**: for a new page, redesign, or any visual design request, do not stop at a text description. Run \`leerness preview mockup <P-ID>\` to generate a self-contained HTML mockup scaffold (\`.harness/previews/<P-ID>-mockup.html\`), **replace the placeholder with a real layout draft (HTML/CSS, no external resources)**, show it to the user in a browser, and ask for revisions or approval. On revision requests, edit the mockup and re-present. **Never write the actual page/feature code before approve.** (If you already built a mockup, attach it with \`preview add ... --mockup <file>\`.)\n- Classify work with \`leerness route <task-type>\` (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- Never delete protected files/managed sections — merge, archive, or mark deprecated instead.\n- After meaningful changes update progress-tracker, current-state, task-log, session-handoff.\n- Before claiming completion, self-verify with \`leerness check .\` or \`leerness lazy detect .\` and answer the \`leerness lens\` self-questions per domain (code: "would a senior developer find this needlessly complex?" / design: "would a senior designer and an ordinary user find this pretty and intuitive?").\n- Before changes run the guards: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- Before duplicating a capability check design-system.md, consistency-policy.md, reuse-map.md.\n- Close every session with \`leerness session close .\` — 9 categories (done/in-progress/incomplete/planned/waiting/on-hold/blocked/dropped/verification) + active-rule verification.\n- Updates: \`leerness update --check\` (detect) → \`leerness update --yes\` (auto-migrate).\n\n## Natural-language retro/insights/brainstorm\n| User phrase | Run immediately |\n|---|---|\n| "retrospective / look back / wrap up" | \`leerness retro\` |\n| "retro for last N days" | \`leerness retro --days N\` |\n| "stats / cumulative metrics / insights" | \`leerness insights\` |\n| "brainstorm about X / materials on X / review before starting X" | \`leerness brainstorm "X"\` |\n\nsession close prints a one-line summary automatically every time and runs a deep retrospective every 5 sessions; call the commands immediately when the user asks explicitly.\n\n## Natural-language standing rules\nWhen the user states a standing rule ("do Y every X"), register it immediately:\n\n| User phrase | Run immediately |\n|---|---|\n| "bump the version every update" | \`leerness rule add "bump version (patch)" --trigger every-update\` |\n| "add patch notes every commit" | \`leerness rule add "add patch notes" --trigger every-commit\` |\n| "deploy at session close" | \`leerness rule add "deploy (release publish)" --trigger session-close\` |\n| "pause/stop rule X" | \`leerness rule pause <ID>\` (find the ID with \`rule list\`) |\n| "remove rule X" | \`leerness rule remove <ID>\` |\n| "stop all rules" | \`leerness rule stop\` |\n| "resume rules" | \`leerness rule resume-all\` or \`leerness rule resume <ID>\` |\n\nAfter registering, report the result (ID + trigger + description) and apply it every session until the user explicitly says stop/remove.\n\n## Automatic rule verification\n- **every-update / version rules**: checks package.json version change.\n- **CHANGELOG / patch-note rules**: checks CHANGELOG.md mtime.\n- **test / verify rules**: checks today's verify traces in review-evidence.md.\n- **deploy / publish / push rules**: not auto-verifiable → guides \`leerness release publish\`.\n\nAutomate verifiable rules with \`leerness release bump\`, \`leerness release note "..."\`, and \`leerness release publish\`.\n`;
-    _files['CLAUDE.md'] = `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ First action every session**: follow the 6-step workflow in \`.harness/session-workflow.md\` (analyze → plan → distribute → sub-agent → verify → close). On drift critical, recover with \`leerness drift check --auto-fix\`.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## Natural-language standing rules\nWhen the user states "do Y every X", immediately run \`leerness rule add "Y" --trigger every-X\`. Registered rules are printed by every \`handoff\` and verified by \`session close\`. Only \`rule pause/remove\` when the user explicitly says stop/remove.\n\nSee the "Natural-language standing rules" table in AGENTS.md for the full mapping.\n`;
+    _files['CLAUDE.md'] = `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ First action every session**: follow the 6-step workflow in \`.harness/session-workflow.md\` (analyze → plan → distribute → sub-agent → verify → close). On drift critical, recover with \`leerness drift check --auto-fix\`.\n\n**Before claiming done**: \`leerness verify-claim <T-ID>\` — never say "done" without evidence.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## Natural-language standing rules\nWhen the user states "do Y every X", immediately run \`leerness rule add "Y" --trigger every-X\`. Registered rules are printed by every \`handoff\` and verified by \`session close\`. Only \`rule pause/remove\` when the user explicitly says stop/remove.\n\nSee the "Natural-language standing rules" table in AGENTS.md for the full mapping.\n`;
     // 1.36.62 (F-05 4회차): commands/AX/잔여 참조층 en 완역
     _files['.harness/test-evidence-policy.md'] = fm('test-evidence-policy', ['recording verification results'], ['verification format changes'], `# Test Evidence Policy\n\nEvery verification is appended to \`.harness/review-evidence.md\`.\n\n## Format\n\`\`\`\n## YYYY-MM-DD HH:MM\nTask: T-XXXX\nCommand: <command>\nExit: <code>\nNote: <key result summary>\nArtifacts: <screenshot/log paths>\n\`\`\`\n`, 'en');
     _files['.harness/review-evidence.md'] = fm('review-evidence', ['progress reports', 'release review'], ['verification results recorded'], `# Review Evidence\n\nVerification command/result history. Append-only.\n`, 'en');
@@ -891,7 +891,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
     _files['.claude/commands/audit.md'] = `# /audit\n\nCheck plan-progress alignment, design/reuse consistency, secrets, and encoding in one pass.\n\n\`\`\`\n!leerness audit .\n!leerness scan secrets .\n!leerness encoding check .\n\`\`\`\n`;
     _files['.claude/commands/lazy-detect.md'] = `# /lazy-detect\n\nRun the lazy-work (false-done) automatic evaluation.\n\n\`\`\`\n!leerness lazy detect .\n\`\`\`\n`;
     _files['.claude/commands/update.md'] = `# /update\n\nRun the leerness auto-update (detect → migrate → verify).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\nCheck only:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`;
-    _files['.claude/skills/leerness.md'] = `---\nname: leerness\ndescription: Leerness harness commands - handoff, audit, scan secrets, encoding check, lazy detect, session close, update. Use when the user asks to load project context, verify work quality, scan secrets, check encoding, or end a session.\n---\n\n# leerness skill\n\n## When to use\n- When the user asks to load project context\n- When self-verification is requested before claiming completion\n- When ending a session or asked for a handoff\n- When secret/encoding checks are requested\n- When applying a new leerness version\n\n## Commands\n\n\`\`\`bash\nleerness handoff .             # load context\nleerness check .               # pre-action check\nleerness audit .               # consistency/plan-alignment audit\nleerness scan secrets .        # secret pattern scan\nleerness encoding check .      # UTF-8/BOM/NUL\nleerness lazy detect .         # lazy-work evaluation\nleerness memory search "key"   # search decisions/history\nleerness session close .       # close report + auto handoff\nleerness update --yes          # auto-update\n\`\`\`\n`;
+    _files['.claude/skills/leerness/SKILL.md'] = `---\nname: leerness\ndescription: Leerness harness commands - handoff, audit, scan secrets, encoding check, lazy detect, session close, update. Use when the user asks to load project context, verify work quality, scan secrets, check encoding, or end a session.\n---\n\n# leerness skill\n\n## When to use\n- When the user asks to load project context\n- When self-verification is requested before claiming completion\n- When ending a session or asked for a handoff\n- When secret/encoding checks are requested\n- When applying a new leerness version\n\n## Commands\n\n\`\`\`bash\nleerness handoff .             # load context\nleerness check .               # pre-action check\nleerness audit .               # consistency/plan-alignment audit\nleerness scan secrets .        # secret pattern scan\nleerness encoding check .      # UTF-8/BOM/NUL\nleerness lazy detect .         # lazy-work evaluation\nleerness memory search "key"   # search decisions/history\nleerness session close .       # close report + auto handoff\nleerness update --yes          # auto-update\n\`\`\`\n`;
     // 1.36.61 (F-05 3회차): .harness 정책·시드 문서군 en 완역 — 지시 5종(1.36.59)에 이어 read-order 가 가리키는 참조층.
     _files['.harness/project-brief.md'] = fm('project-brief', ['confirming project purpose', 'judging new features', 'planning'], ['project purpose changes', 'users/scope change'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- Update this with the real purpose of the project.\n\n## Users\n-\n\n## Success Criteria\n-\n`, 'en');
     _files['.harness/plan.md'] = fm('plan', ['before starting work', 'new request received', 'scope change', 'new project detected'], ['plan add/update/drop', 'milestone changes', 'goal changes'], `# Plan\n\n## Goal\n- Maintain the overall plan around the user's purpose.\n\n## Scope\n- Record what is in scope.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. Organize the project plan\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] Fill project-brief.md with the real project purpose\n- [ ] Fill context-map.md with the real file structure\n`, 'en');
@@ -933,9 +933,14 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
   //   재init 시 manifest 는 minimal 인데 지침 파일은 standard 로 재생성되는 불일치가 난다.
   if (_initMode(opts) === 'minimal') {
     _files['AGENTS.md'] = `${MARK}\n` + (lang === 'en' ? _AGENTS_MINIMAL_EN : _AGENTS_MINIMAL_KO);
+    // 1.36.115 (사용자 보고): 최소 등급의 CLAUDE.md 가 "AGENTS.md 를 따르세요" 한 줄이라 **지시 사슬이 끊겼다**.
+    //   Claude Code 가 세션 시작에 읽는 것은 CLAUDE.md 다 — AGENTS.md 로 미루면 그 파일을 안 읽는 도구에서는
+    //   leerness 가 설치돼 있어도 handoff 를 아무도 부르지 않는다(사용자 보고: "leerness 를 참조하지 않는다").
+    //   이건 P-0015 등급 도입 때 내가 만든 회귀다: 적재량을 줄인다며 **도구를 쓰게 만드는 문장**을 들어냈다.
+    //   최소 등급의 목표는 "짧다" 가 아니라 "끄면 안 되는 것만 남긴다" 이고, 이 3줄이 바로 그것이다(+약 260B).
     _files['CLAUDE.md'] = `${MARK}\n` + (lang === 'en'
-      ? `# Claude Code Instructions\n\nFollow AGENTS.md.\n`
-      : `# Claude Code Instructions\n\nAGENTS.md 를 따르세요.\n`);
+      ? `# Claude Code Instructions\n\nFollow AGENTS.md. Three rules, always:\n\n1. **Session start**: \`leerness handoff .\`\n2. **Before claiming done**: \`leerness verify-claim <T-ID>\` — never say "done" without evidence.\n3. **Session end**: \`leerness session close .\`\n`
+      : `# Claude Code Instructions\n\nAGENTS.md 를 따르세요. 규약은 셋뿐입니다.\n\n1. **세션 시작**: \`leerness handoff .\`\n2. **완료 주장 전**: \`leerness verify-claim <T-ID>\` — 증거 없이 "완료" 라고 말하지 않는다.\n3. **세션 종료**: \`leerness session close .\`\n`);
   }
   return _files;
 }
@@ -1332,7 +1337,7 @@ async function install(root, opts = {}) {
     '.harness/leerness-maintenance.md','.harness/protected-files.md','.harness/AX_MIGRATION_GUIDE.md',
     '.harness/AX_NEW_PROJECT_GUIDE.md','.harness/AX_SKILL_LIBRARY_GUIDE.md','.harness/skill-index.md',
     '.claude/commands/handoff.md','.claude/commands/session-close.md','.claude/commands/audit.md','.claude/commands/lazy-detect.md','.claude/commands/update.md',
-    '.claude/skills/leerness.md'
+    '.claude/skills/leerness/SKILL.md'
   ]);
   // 1.36.65 (외부감사 F-08): no-op 재설치 감지 — 계산 결과가 현재와 전부 동일하면 백업/쓰기/타임스탬프를 만들지 않는다.
   //   비교는 휘발 필드 정규화 후: manifest/lock 의 시각류 키, preserved 래퍼의 아카이브 경로 라인.
@@ -1566,6 +1571,30 @@ async function install(root, opts = {}) {
       }
     } catch {}
     // 1.9.276: --minimal 시 .claude SessionStart hook 도 건너뜀 (침투성 완화)
+    // 1.36.115 (사용자 보고): `init` 이 .claude/* 를 깔면서 **MCP 배선만 빠뜨렸다**.
+    //   `adapter list` 는 claude 어댑터에 "[+.mcp.json]" 이라 광고하는데, 문서화된 진입점인 `init` 은 그걸 안 만든다 —
+    //   그래서 init 만 한 사용자의 Claude Code 는 leerness 도구를 하나도 못 본다("leerness 를 참조하지 않는다").
+    //   병합기는 이미 있고 손상 .mcp.json 을 보존/중단하므로(1.36.41) 그대로 재사용한다. 실패해도 설치는 계속한다.
+    if (!has('--no-mcp')) {
+      // 1.36.116 (검수 P1-D): Cursor 의 **프로젝트별** MCP 설정 위치는 `.cursor/mcp.json` 이다. 루트 `.mcp.json` 은
+      //   Claude Code 규약이고, 그걸 만들어 놓고 "Cursor 도 인식합니다" 라고 말하던 것은 거짓 안내였다.
+      //   (검수 P2-A): 여기서 예외를 warning 으로만 삼키면 MCP 미등록인데 설치는 성공으로 끝난다 — 눈에 띄게 알린다.
+      try {
+        const m = _mergeMcpJson(root);
+        if (m.preserved) log(`  = .mcp.json 의 기존 leerness 항목을 그대로 두었습니다(사용자 설정으로 판단)`);
+        else log(`  ✓ .mcp.json ${m.action} — Claude Code 가 leerness MCP 를 인식합니다`);
+      } catch (e) { warn(`✗ .mcp.json 에 MCP 를 등록하지 못했습니다 — leerness 도구가 보이지 않습니다: ${(e && e.message) || e}`); }
+    }
+    // 1.36.115: 구버전은 스킬을 `.claude/skills/leerness.md`(평면)로 깔았고 그 형식은 발견되지 않는다.
+    //   새 위치로 옮겨 심었지만 **옛 파일은 지우지 않는다** — 사용자가 손댔을 수 있고, 이 저장소의 계약은 false-DROP 이 버그다.
+    //   대신 사본 2벌이 생겼다는 사실과 어느 쪽이 실제로 읽히는지 알린다(안 그러면 옛 파일을 고치고 반영 안 돼 혼란).
+    try {
+      const _legacySkill = path.join(root, '.claude', 'skills', 'leerness.md');
+      if (exists(_legacySkill)) {
+        warn(`구 스킬 파일이 남아 있습니다: .claude/skills/leerness.md`);
+        log(`     → 실제로 읽히는 것은 .claude/skills/leerness/SKILL.md 입니다(Claude Code 규약). 옛 파일은 무시되며, 필요 없으면 직접 지우세요.`);
+      }
+    } catch {}
     if (!has('--no-auto-update') && !opts.minimal) {
       try { autoUpdateInstall(root); } catch (e) { warn('auto-update hook install skipped: ' + (e && e.message)); }
     } else if (opts.minimal) {
@@ -3454,7 +3483,7 @@ function _selfTestCases() {
     { name: '_reuseDetect: 키워드→OSS 카테고리 + 체크리스트 (1.9.285)', run: () => { const a = _reuseDetect('JWT 인증 구현'); const b = _reuseDetect('날짜 포맷 date'); const c = _reuseDetect('전혀무관한xyzzy'); return a.some(x => x.key === 'auth') && b.some(x => x.key === 'date') && c.length === 0 && REUSE_CHECKLIST.length >= 5 && REUSE_CATEGORIES.length >= 12; } },
     { name: 'AGENTS.md: 정적 vs 동적 leerness 역할 경계 (1.9.282)', run: () => { const a = coreFiles('.', 'ko', [])['AGENTS.md']; return /정적 vs 동적/.test(a) && /대체하지 않고 \*\*보완\*\*|대체하지 않고 보완/.test(a) && /leerness state/.test(a) && /\.leerness\//.test(a); } },
     { name: '권한 등급: _requiredTier + _policyAllows 순서 (1.9.281)', run: () => { return _requiredTier('release publish') === 'publish' && _requiredTier('agents multi --execute') === 'shell-write' && _requiredTier('handoff') === 'read-only' && _requiredTier('init') === 'project-write' && _policyAllows('project-write', 'safe-write') === true && _policyAllows('project-write', 'publish') === false && _tierRank('read-only') < _tierRank('publish'); } },
-    { name: 'ADAPTERS + _mcpJsonContent: 도구 매핑 + .mcp.json 등록 (1.9.280)', run: () => { const ids = Object.keys(ADAPTERS); const okMap = ['claude','cursor','codex','goose','opencode'].every(id => ADAPTERS[id] && Array.isArray(ADAPTERS[id].keys) && ADAPTERS[id].keys.length); const m = JSON.parse(_mcpJsonContent()); return ids.length >= 9 && okMap && ADAPTERS.claude.mcp === true && ADAPTERS.copilot.mcp === false && m.mcpServers.leerness.command === 'npx' && m.mcpServers.leerness.args.join(' ') === 'leerness mcp serve'; } },
+    { name: 'ADAPTERS + _mcpJsonContent: 도구 매핑 + .mcp.json 등록 (1.9.280)', run: () => { const ids = Object.keys(ADAPTERS); const okMap = ['claude','cursor','codex','goose','opencode'].every(id => ADAPTERS[id] && Array.isArray(ADAPTERS[id].keys) && ADAPTERS[id].keys.length); const m = JSON.parse(_mcpJsonContent()); return ids.length >= 9 && okMap && ADAPTERS.claude.mcp === true && ADAPTERS.copilot.mcp === false && m.mcpServers.leerness.command === 'npx' && m.mcpServers.leerness.args.join(' ') === '-y leerness mcp serve'; } },   // 1.36.116: `-y` — GUI 클라이언트는 npx 설치 프롬프트에 답할 수 없다
     { name: '_newRunRecord: GPT-5.5 권고 스키마 14필드 + 기본값 (1.9.278)', run: () => { const r = _newRunRecord({ run_id: 'run-0001', goal: 'g', started_at: '2026-06-03T00:00:00Z' }); return r.schemaVersion === 1 && r.run_id === 'run-0001' && r.started_at === '2026-06-03T00:00:00Z' && Array.isArray(r.files_changed) && Array.isArray(r.commands_run) && Array.isArray(r.tests_run) && Array.isArray(r.decisions) && r.verification_result === null && r.status === 'in-progress' && 'handoff_summary' in r && 'model_name' in r && 'task_id' in r; } },
     { name: 'coreFiles --minimal: 핵심 유지 + 비핵심 제외 + verify 필수 보존 (1.9.276)', run: () => { const full = coreFiles('.', 'ko', []); const min = coreFiles('.', 'ko', [], { minimal: true }); const keep = ['.harness/plan.md','.harness/progress-tracker.md','.harness/session-handoff.md','AGENTS.md','CLAUDE.md','.harness/consistency-policy.md','.harness/reuse-map.md','.harness/encoding-policy.md','.harness/secret-policy.md']; const drop = ['.cursor/rules/leerness.mdc','.harness/skill-index.md','.harness/architecture.md']; const verifyReq = ['.harness/design-system.md','.harness/protected-files.md','.harness/current-state.md']; if (!verifyReq.every(k => min[k])) return false; return Object.keys(min).length < Object.keys(full).length && keep.every(k => min[k]) && drop.every(k => !min[k]); } },
     { name: '_cliBootstrap: CLI 부작용 require.main 가드 격리 (Codex #4 UR-0037 1.9.290)', run: () => { if (typeof _cliBootstrap !== 'function' || typeof _ensureStdoutEncoding !== 'function') return false; const src = read(__filename); const guarded = /if \(require\.main === module\) _cliBootstrap\(\);/.test(src); const inFn = /function _cliBootstrap\(\)\s*\{[\s\S]*?removeAllListeners\('warning'\)[\s\S]*?NODE_OPTIONS[\s\S]*?_ensureStdoutEncoding\(\);[\s\S]*?\n\}/.test(src); const noTopIife = !/\}\)\(\);\s*\n\n\/\/ 1\.9\.184/.test(src); return guarded && inFn && noTopIife; } },
@@ -4198,7 +4227,7 @@ function _selfTestCases() {
     { name: 'CV-6/UR-0081: 시크릿 스캐너 FP/FN — _isPlaceholderSecret + _looksSecretLike 행위', run: () => { if (typeof _isPlaceholderSecret !== 'function' || typeof _looksSecretLike !== 'function') return false; const fp = _isPlaceholderSecret('change-me') && _isPlaceholderSecret('your-api-key-here') && _isPlaceholderSecret('<token>') && _isPlaceholderSecret('') && !_isPlaceholderSecret('hunter2realpass'); const fn = _looksSecretLike('secret123') && _looksSecretLike('a'.repeat(24)) && !_looksSecretLike('processEnv') && !_looksSecretLike('reqBodyPassword'); return fp && fn; } },
     { name: 'UR-0025: _mergeLines/_mergeEnvLines 순수 코어 모듈 분리 + 행위 (1.9.367)', run: () => { if (typeof _mergeLines !== 'function' || typeof _mergeEnvLines !== 'function') return false; const m = require('../lib/pure-utils'); const moved = m._mergeLines === _mergeLines && m._mergeEnvLines === _mergeEnvLines; const ml = _mergeLines('a\n', ['a', 'b']) === 'a\nb\n'; const meKeep = _mergeEnvLines('FOO=keep\n', ['FOO=new']) === 'FOO=keep\n'; const meAdd = _mergeEnvLines('FOO=keep\n', ['BAR=add']).includes('BAR=add'); return moved && ml && meKeep && meAdd; } },
     { name: 'UR-0025: _mergeReadmeSection/_managedMerge + MERGE_OVERWRITE_FILES 모듈 분리 + 행위 (1.9.368)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _mergeReadmeSection !== 'function' || typeof _managedMerge !== 'function') return false; const moved = m._mergeReadmeSection === _mergeReadmeSection && m._managedMerge === _managedMerge && MERGE_OVERWRITE_FILES === c.MERGE_OVERWRITE_FILES; const rd = _mergeReadmeSection('', 'BLOCK', '<s>', '<e>') === '# Project\n\nBLOCK\n'; const mm = _managedMerge('a.md', 'NEW', 'OLD', '.h', new Set()).includes('migration-preserved'); const ow = _managedMerge('.harness/manifest.json', 'NEW', 'OLD', '.h', c.MERGE_OVERWRITE_FILES) === 'NEW'; const same = _managedMerge('a.md', 'X', 'X', '.h', new Set()) === 'X'; return moved && rd && mm && ow && same; } },
-    { name: 'UR-0025: _parseSkillsValue(catalog 주입) + MINIMAL_SKIP_KEYS 모듈 분리 + 행위 (1.9.369)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _parseSkillsValue !== 'function') return false; const moved = m._parseSkillsValue === _parseSkillsValue && MINIMAL_SKIP_KEYS === c.MINIMAL_SKIP_KEYS; const cat = { office: {}, foo: {} }; const empty = _parseSkillsValue('', cat).length === 0; const all = _parseSkillsValue('all', cat).length === 2; const rec = _parseSkillsValue('recommended', cat).includes('office'); const csv = JSON.stringify(_parseSkillsValue('office,bar', cat)) === JSON.stringify(['office']); return moved && empty && all && rec && csv && MINIMAL_SKIP_KEYS.has('.claude/skills/leerness.md'); } },
+    { name: 'UR-0025: _parseSkillsValue(catalog 주입) + MINIMAL_SKIP_KEYS 모듈 분리 + 행위 (1.9.369)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _parseSkillsValue !== 'function') return false; const moved = m._parseSkillsValue === _parseSkillsValue && MINIMAL_SKIP_KEYS === c.MINIMAL_SKIP_KEYS; const cat = { office: {}, foo: {} }; const empty = _parseSkillsValue('', cat).length === 0; const all = _parseSkillsValue('all', cat).length === 2; const rec = _parseSkillsValue('recommended', cat).includes('office'); const csv = JSON.stringify(_parseSkillsValue('office,bar', cat)) === JSON.stringify(['office']); return moved && empty && all && rec && csv && MINIMAL_SKIP_KEYS.has('.claude/skills/leerness/SKILL.md'); } },
     { name: 'UR-0025: _parseArchiveBlocks/_parseSkillCatalog 순수 파서 모듈 분리 + 행위 (1.9.370)', run: () => { const m = require('../lib/pure-utils'); if (typeof _parseArchiveBlocks !== 'function' || typeof _parseSkillCatalog !== 'function') return false; const moved = m._parseArchiveBlocks === _parseArchiveBlocks && m._parseSkillCatalog === _parseSkillCatalog; const ab = _parseArchiveBlocks('## 제거 2026-01-01 (target: ' + '"T-1")\n### 헤더\n'); const abOk = ab.length === 1 && ab[0].date === '2026-01-01' && ab[0].target === 'T-1' && ab[0].originalHeader === '헤더'; const md = _parseSkillCatalog('- [nm](https://x/SKILL.md) — d', ''); const mdOk = md.length === 1 && md[0].name === 'nm' && md[0].format === 'markdown'; const js = _parseSkillCatalog('{' + '"skills":[{"id":"a","url":"u"}]}', ''); const jsOk = js.length === 1 && js[0].name === 'a' && js[0].format === 'json'; return moved && abOk && mdOk && jsOk; } },
     { name: 'UR-0073 Phase A: team 정의 레지스트리 (_renderTeamsMd + canonical load/save) 행위 (1.9.371)', run: () => { const m = require('../lib/pure-utils'); if (typeof teamCmd !== 'function' || typeof _renderTeamsMd !== 'function' || m._renderTeamsMd !== _renderTeamsMd) return false; const md = _renderTeamsMd([{ id: 't1', name: 'N', personas: ['security'], members: ['claude'], schedule: 'daily', status: 'active' }]); const mdOk = md.includes('## t1') && md.includes('security') && md.includes('daily') && md.includes('정의 전용'); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_team_')); let rtOk = false; try { _saveTeams(tmp, [{ id: 'x', name: 'X', personas: [], members: [], schedule: 'manual', status: 'active' }]); const loaded = _loadTeams(tmp); rtOk = loaded.length === 1 && loaded[0].id === 'x' && fs.existsSync(path.join(tmp, '.harness', 'teams.json')) && fs.existsSync(path.join(tmp, '.harness', 'teams.md')); } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return mdOk && rtOk; } },
     { name: 'UR-0073 Phase B: _composeTeamPlan dry-run 실행 계획 (멤버별 dispatch, 실행 없음) 행위 (1.9.372)', run: () => { const m = require('../lib/pure-utils'); if (typeof _composeTeamPlan !== 'function' || m._composeTeamPlan !== _composeTeamPlan) return false; const team = { id: 'rev', name: 'R', purpose: 'PR 리뷰', personas: ['security', 'perf'], members: ['claude', 'codex'], schedule: 'manual' }; const p1 = _composeTeamPlan(team, '점검'); const ok1 = p1.steps.length === 2 && p1.task === '점검' && p1.steps[0].member === 'claude' && p1.steps[0].suggestedCommand.includes('agents dispatch') && p1.steps[0].suggestedCommand.includes('--to claude') && p1.steps[0].dispatchPrompt.includes('security'); const p2 = _composeTeamPlan(team, null); const ok2 = p2.task === 'PR 리뷰'; const p3 = _composeTeamPlan({ id: 'e', personas: [], members: [] }, 'x'); const ok3 = p3.steps.length === 0 && p3.memberCount === 0; return ok1 && ok2 && ok3; } },
@@ -7933,7 +7962,7 @@ const _GROUP_USAGE_KO = {
   self: 'self check [path]',
   reuse: 'reuse autodetect [path] [--apply] [--json] | reuse find "<capability>"',
   consistency: 'consistency check [path] | consistency merge-design-guide [path]',
-  mcp: 'mcp serve [--profile core|all]',
+  mcp: 'mcp serve [--profile core|all] | mcp install (Claude Desktop 등록 안내)',
   hook: 'hook install [path] | hook status',
   'llm-bench': 'llm-bench record --score N --model X [--label L] [--tokens T]',
   'auto-update': 'auto-update install [path] | auto-update status',
@@ -7950,7 +7979,8 @@ const _GROUP_USAGE_EN = {
   self: 'self check [path]',
   reuse: 'reuse autodetect [path] [--apply] [--json] | reuse find "<capability>"',
   consistency: 'consistency check [path] | consistency merge-design-guide [path]',
-  mcp: 'mcp serve [--profile core|all]',
+  // ⚠ 여기는 **영문 표면**이다. 1.36.116 에서 전역 치환으로 한국어가 한 번 샜고 selftest(_p0101SurfaceOk)가 잡았다.
+  mcp: 'mcp serve [--profile core|all] | mcp install (Claude Desktop setup guide)',
   hook: 'hook install [path] | hook status',
   'llm-bench': 'llm-bench record --score N --model X [--label L] [--tokens T]',
   'auto-update': 'auto-update install [path] | auto-update status',
@@ -8089,12 +8119,22 @@ function _p0015ModeOk() {
     const full = coreFiles('.', 'ko', [], {});
     const min = coreFiles('.', 'ko', [], { mode: 'minimal' });
     const std = coreFiles('.', 'ko', [], { mode: 'standard' });
+    // 1.36.115 (사용자 보고에서 드러남): 이 단언은 **크기 비율**을 요구하고 있었다 — `CLAUDE.md < full/5`.
+    //   그런데 아래 ③의 핵심-보존 검사는 **AGENTS.md 만** 봤다. 그 틈으로 실제 회귀가 나갔다:
+    //   최소 등급 CLAUDE.md 가 "AGENTS.md 를 따르세요" 한 줄(72B)이 되어도 두 단언이 모두 초록이었고,
+    //   Claude Code 가 읽는 파일에 지시가 사라져 "설치했는데 leerness 를 안 쓴다" 가 됐다.
+    //   가드가 "짧을수록 좋다" 를 encode 하면 제품도 그렇게 간다. 목표를 바꾼다:
+    //   **줄되, 핵심을 빼고 줄지는 않는다.** AGENTS.md 는 종전 비율을 유지하고(주변 설명이 많아 여전히 유효),
+    //   CLAUDE.md 는 "더 작다" 만 요구하되 세 지시를 반드시 담는다.
     const shrinks = min['AGENTS.md'].length < full['AGENTS.md'].length / 5
-      && min['CLAUDE.md'].length < full['CLAUDE.md'].length / 5;
+      && min['CLAUDE.md'].length < full['CLAUDE.md'].length;
     const stdUnchanged = std['AGENTS.md'] === full['AGENTS.md'] && std['CLAUDE.md'] === full['CLAUDE.md'];  // 대조군
     // ③ 최소 등급에서도 핵심 3종은 지침에 남는다 (덜어내는 건 주변이지 핵심이 아니다)
+    //    ⚠ **두 파일 모두** 본다. 도구마다 읽는 파일이 다르다 — Claude Code 는 CLAUDE.md 를 읽는다.
     const ag = min['AGENTS.md'];
-    const coreKept = /leerness handoff/.test(ag) && /verify-claim/.test(ag) && /session close/.test(ag);
+    const cl3 = min['CLAUDE.md'];
+    const core3 = (t) => /leerness handoff/.test(t) && /verify-claim/.test(t) && /session close/.test(t);
+    const coreKept = core3(ag) && core3(cl3) && core3(full['CLAUDE.md']);
     // ④ 매니페스트에 등급이 실제로 기록된다
     let manifestOk = false;
     try { manifestOk = JSON.parse(min['.harness/manifest.json']).mode === 'minimal'
@@ -23681,8 +23721,8 @@ function stateCmd(root, sub, ...args) {
 // ADAPTERS → lib/catalogs.js (1.9.295 UR-0025 4단계)
 // _mcpJsonContent → lib/pure-utils.js 로 이동 (1.9.283 UR-0025 2단계)
 // .mcp.json 병합 — 기존 mcpServers 보존하고 leerness 항목만 추가/갱신.
-function _mergeMcpJson(root) {
-  const f = path.join(absRoot(root), '.mcp.json');
+function _mergeMcpJson(root, rel) {
+  const f = path.join(absRoot(root), ...String(rel || '.mcp.json').split('/'));
   let obj = {};
   // 1.36.41 (codex 5차 #1, 1.36.28 손상-스토어 클래스): 손상 .mcp.json 을 {} 로 오인해 사용자의 다른 MCP 서버
   //   등록을 통째로 날렸다 — 파싱 실패/비객체 루트는 원본 보존 + 중단.
@@ -23690,11 +23730,30 @@ function _mergeMcpJson(root) {
     try { obj = JSON.parse(read(f)); } catch { throw Object.assign(new Error(`.mcp.json 이 손상돼(JSON 파싱 실패) 병합을 중단합니다 — 복구 후 재시도: ${f}`), { code: 'E_STORE_CORRUPT', file: f }); }
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw Object.assign(new Error(`.mcp.json 루트가 객체가 아님 — 병합 중단: ${f}`), { code: 'E_STORE_CORRUPT', file: f });
   }
+  // 1.36.116 (검수 #2): 루트만 검사했더니 `{"mcpServers":[]}` 처럼 **유효 JSON·틀린 스키마** 에서
+  //   배열에 named property 를 붙이고 `JSON.stringify` 가 그걸 버려 — 등록이 하나도 안 됐는데 `created` 로
+  //   성공 보고했다(조용한 무동작 + 성공 표시). 자료형이 틀리면 원본을 보존하고 중단한다.
+  if (Object.prototype.hasOwnProperty.call(obj, 'mcpServers')) {
+    const _ms = obj.mcpServers;
+    if (!_ms || typeof _ms !== 'object' || Array.isArray(_ms)) {
+      throw Object.assign(new Error(`.mcp.json 의 mcpServers 가 객체가 아님(${Array.isArray(_ms) ? 'array' : typeof _ms}) — 병합 중단: ${f}`), { code: 'E_STORE_CORRUPT', file: f });
+    }
+  }
   obj.mcpServers = obj.mcpServers || {};
-  const already = !!obj.mcpServers.leerness;
-  obj.mcpServers.leerness = { command: 'npx', args: ['leerness', 'mcp', 'serve'] };
+  const prev = obj.mcpServers.leerness;
+  const already = !!prev;
+  // 1.36.116 (검수 P1): 기존 `leerness` 항목을 무조건 덮어써서 사용자의 래퍼·버전 고정·env 가 유실됐다.
+  //   이 저장소의 계약은 false-DROP 이 버그다. **우리가 만든 형태**(npx + leerness mcp serve)일 때만 갱신하고,
+  //   그 밖은 사용자 설정으로 보고 보존한다. 그래야 `-y` 같은 마이그레이션은 되면서 남의 설정은 안 건드린다.
+  const _ours = (e) => !!e && typeof e === 'object' && !Array.isArray(e) && e.command === 'npx'
+    && Array.isArray(e.args) && e.args.filter(a => a !== '-y').join(' ') === 'leerness mcp serve'
+    && !e.env && !e.cwd;
+  const _rel = String(rel || '.mcp.json');
+  if (already && !_ours(prev)) return { file: _rel, action: 'preserved', preserved: true };
+  obj.mcpServers.leerness = { command: 'npx', args: ['-y', 'leerness', 'mcp', 'serve'] };
+  mkdirp(path.dirname(f));
   writeUtf8(f, JSON.stringify(obj, null, 2) + '\n');
-  return { file: '.mcp.json', action: already ? 'updated' : 'created' };
+  return { file: _rel, action: already ? 'updated' : 'created' };
 }
 // 1.11.4 (UR-0007): 의존성 용어집 — package.json/requirements deps → 큐레이션 카탈로그 plain-ko/en. 미카탈로그는 node_modules 로컬 description fallback, 미정의는 AI 보완 프롬프트. 무LLM·0deps.
 function glossaryCmd(root, sub) {
@@ -23798,7 +23857,17 @@ function adapterCmd(root, tool, opts = {}) {
   const a = ADAPTERS[tool];
   if (!a) return fail(`알 수 없는 adapter: ${tool} (가능: ${Object.keys(ADAPTERS).join(', ')})`);
   const lang = exists(path.join(root, '.harness/LANGUAGE')) ? read(path.join(root, '.harness/LANGUAGE')).trim() : 'ko';
-  const files = coreFiles(root, lang === 'en' ? 'en' : 'ko', []);
+  // 1.36.116 (검수 #11): adapter 가 manifest 의 설치 등급을 **안 읽고** 항상 standard 템플릿을 만들었다 —
+  //   `init --minimal` 로 232B 로 줄여 놓은 CLAUDE.md 가 adapter 한 번에 1099B standard 로 되돌아간다.
+  //   사용자가 고른 침투성 등급을 다른 명령이 조용히 뒤집으면 그 설정은 의미가 없다.
+  let _instMode = null;
+  try { _instMode = (JSON.parse(read(path.join(root, '.harness', 'manifest.json'))) || {}).mode || null; } catch {}
+  //   ⚠ 옵션이 둘로 갈린다: `minimal:true` 는 **어떤 키를 만들지**, `mode:'minimal'` 은 **템플릿을 줄일지** 다.
+  //   처음에 `minimal:true` 만 넘겨서 이 수정이 무동작이었다(크기 그대로 1099B).
+  //   그 다음엔 둘 다 넘겼다가 검수가 모순을 짚었다: `MINIMAL_SKIP_KEYS` 에 이 어댑터의 SKILL.md 가 들어 있어
+  //   **"claude 를 배선해 달라" 는 명시 요청인데 배선 파일을 빼는** 결과가 된다. 등급은 템플릿 크기를 줄이는 것이지
+  //   요청받은 도구의 연결 파일을 빼는 것이 아니다 — `mode` 만 넘긴다.
+  const files = coreFiles(root, lang === 'en' ? 'en' : 'ko', [], { mode: _instMode || undefined });
   const managedOverwrite = new Set(['AGENTS.md', 'CLAUDE.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md']);
   const planned = a.keys.filter(k => files[k] != null);
   if (a.mcp) planned.push('.mcp.json');
@@ -23817,10 +23886,14 @@ function adapterCmd(root, tool, opts = {}) {
     results.push(writeIfSafe(root, k, files[k], { mergeManaged: managedOverwrite.has(k), lang: lang === 'en' ? 'en' : 'ko' }));   // 1.36.60 (검수 2차 #2): 래퍼 언어 전달 (altTemplate 은 전환-감지 없는 이 경로에선 미적용 — High 회귀 방지)
   }
   if (a.mcp) results.push(_mergeMcpJson(root));
+  // 1.36.116 (검수 P1-D): Cursor 의 프로젝트별 MCP 설정은 `.cursor/mcp.json` 이다. 루트 `.mcp.json` 만 만들어 놓고
+  //   "Cursor 도 인식한다" 고 말하던 것은 거짓 안내였다 — 이 어댑터의 목적 자체가 그 도구를 배선하는 것이다.
+  //   루트 파일도 그대로 둔다(다른 도구가 쓴다). 같은 병합기라 손상 파일은 여전히 보존/중단된다.
+  if (tool === 'cursor') { _assertStoreParsable(path.join(root, '.cursor', 'mcp.json'), '.cursor/mcp.json'); results.push(_mergeMcpJson(root, '.cursor/mcp.json')); }
   if (json) { log(JSON.stringify({ adapter: tool, files: results }, null, 2)); return; }
   ok(`adapter ${tool} (${a.label}) 적용 — ${results.length}개 파일`);
   for (const r of results) log(`  ${r.action}: ${r.file}`);
-  if (a.mcp) log(`  ℹ .mcp.json 등록 — 이 도구가 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`);
+  if (a.mcp) log(`  ℹ MCP 등록 — 이 도구가 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`);
   return;
 }
 
@@ -26673,6 +26746,67 @@ async function main() {
   // 1.9.192: skill auto-cache — 공식 organization catalog 24h 캐시 관리 (C축 보강)
   if (cmd === 'skill' && args[1] === 'auto-cache')   return await skillAutoCacheCmd(absRoot(arg('--path', process.cwd())), args[2] || 'status');
   if (cmd === 'mcp' && args[1] === 'serve')         return mcpServeCmd(absRoot(arg('--path', process.cwd())));
+  // 1.36.115 (사용자 보고): Claude **Desktop** 은 프로젝트의 `.mcp.json` 을 읽지 않는다 — 앱 설정에 등록돼야 도구가 보인다.
+  //   그래서 "설치했는데 Desktop 이 leerness 를 모른다" 가 된다. 앱 설정 파일은 시스템 설정이라 **자동으로 쓰지 않고**,
+  //   경로와 붙여넣을 JSON 을 정확히 알려준다(사용자가 직접 넣는다).
+  if (cmd === 'mcp' && (args[1] === 'install' || args[1] === 'desktop')) {
+    const _mj = has('--json');
+    const _tty = process.stdout && process.stdout.isTTY;
+    const cy = s => _tty ? `\x1b[36m${s}\x1b[0m` : s, dm = s => _tty ? `\x1b[2m${s}\x1b[0m` : s;
+    const home = os.homedir();
+    const cfg = process.platform === 'win32' ? path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json')
+      : process.platform === 'darwin' ? path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+        // 1.36.116 (검수 #14): Linux 는 XDG_CONFIG_HOME 이 설정돼 있으면 그쪽이 정답이다 — ~/.config 는 그 기본값일 뿐이다.
+        : path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'Claude', 'claude_desktop_config.json');
+    // 1.36.116 (검수 #13): `npx leerness` 는 패키지가 없으면 설치 여부를 **되묻는다**. Desktop 은 GUI 라 그 프롬프트에
+    //   답할 수 없어 서버가 그대로 뜨지 않는다 — `-y` 로 무인 설치를 명시한다(.mcp.json 쪽도 동일 값으로 맞춘다).
+    const entry = { command: 'npx', args: ['-y', 'leerness', 'mcp', 'serve'] };
+    const snippet = { mcpServers: { leerness: entry } };
+    // 1.36.116 (검수 P1): `!!leerness` 만 보면 `{"leerness":{}}` 처럼 **실행 불가능한 껍데기**도 "이미 등록됨" 이 된다 —
+    //   Desktop 은 그걸로 아무것도 못 띄우는데 사용자는 다 됐다고 믿는다. 실행 가능한 형태인지까지 본다.
+    const _regState = () => {
+      try {
+        const e = (JSON.parse(read(cfg)).mcpServers || {}).leerness;
+        if (!e || typeof e !== 'object' || Array.isArray(e)) return 'none';
+        return (typeof e.command === 'string' && e.command) ? 'ok' : 'broken';
+      } catch { return 'unreadable'; }
+    };
+    if (_mj) { const st = exists(cfg) ? _regState() : 'none'; log(JSON.stringify({ ok: true, configPath: cfg, exists: exists(cfg), registered: st === 'ok', registeredState: st, snippet, entry }, null, 2)); return; }
+    // 1.36.116 (검수 P3): 이 명령만 프로젝트 언어를 안 읽고 항상 한국어를 냈다. leerness 는 한국어 우선 도구가
+    //   아니라 **언어 대칭**이 기준이다 — 영문 프로젝트에서는 영문으로 안내한다.
+    const _en = _uiLang(absRoot(arg('--path', process.cwd()))) === 'en';
+    log(cy(_en ? `# leerness mcp install — register with Claude Desktop` : `# leerness mcp install — Claude Desktop 등록 안내`));
+    log('');
+    log(`  ${_en ? 'Config file' : '설정 파일'}: ${cfg}`);
+    const _states = _en
+      ? { missing: 'file not found (it is created the first time you run the app)', ok: '✓ leerness already registered', broken: '⚠ a leerness entry exists but has no "command", so it never starts — replace it with the block below', none: '⚠ leerness not registered', unreadable: '⚠ the file does not parse as JSON — check it by hand' }
+      : { missing: '파일 없음(앱을 한 번 실행하면 생성됩니다)', ok: '✓ leerness 이미 등록됨', broken: '⚠ leerness 항목은 있으나 command 가 없어 실행되지 않습니다 — 아래로 교체하세요', none: '⚠ leerness 미등록', unreadable: '⚠ 파일이 JSON 으로 파싱되지 않음 — 직접 확인 필요' };
+    log(`  ${_en ? 'Current state' : '현재 상태'}: ${!exists(cfg) ? _states.missing : _states[_regState()]}`);
+    log('');
+    // 1.36.116 (검수 #1, P1): 여기서 전체 객체를 출력하면서 "mcpServers 안에 넣으세요" 라고 하면
+    //   문구대로 따른 사용자는 `mcpServers.mcpServers.leerness` 를 만든다 → Desktop 이 서버를 못 찾아
+    //   **이 명령이 고치려던 바로 그 증상**(leerness 를 참조하지 않음)을 다시 만든다.
+    //   그래서 두 경우를 갈라서 각각 **그대로 쓰면 맞는 것**만 보여준다.
+    const _ind = (o) => JSON.stringify(o, null, 2).split('\n').forEach(l => log('    ' + l));
+    // ⚠ ⓐ 를 "mcpServers 가 없다면" 으로 걸면 안 된다(검수 P1) — 설정 파일에 다른 top-level 항목만 있고
+    //   mcpServers 만 없는 흔한 경우에 "파일 전체를 아래로 저장" 하면 그 설정들이 전부 사라진다.
+    //   조건은 **파일 자체가 없거나 비어 있을 때**로 좁히고, 파일이 있으면 항상 병합형(ⓑ)을 따르게 한다.
+    log(_en ? `  ⓐ If the config file does not exist yet or is empty — save the whole file as:`
+      : `  ⓐ 설정 파일이 아직 없거나 비어 있다면 — 파일 전체를 아래로 저장하세요:`);
+    log('');
+    _ind(snippet);
+    log('');
+    log(_en ? `  ⓑ If the file already has content — add just this one entry inside ${'"mcpServers"'} (do not delete other settings or servers):`
+      : `  ⓑ 파일에 내용이 이미 있다면 — ${'"mcpServers"'} 안에 아래 항목 하나만 추가하세요(다른 설정과 기존 서버는 지우지 마세요):`);
+    log('');
+    ('"leerness": ' + JSON.stringify(entry, null, 2)).split('\n').forEach(l => log('    ' + l));
+    log('');
+    log(dm(_en ? `  ⓘ This command never edits the app config for you — it is a system setting, so you apply it yourself.`
+      : `  ⓘ 이 명령은 앱 설정을 자동으로 바꾸지 않습니다 — 시스템 설정이라 직접 넣으시는 편이 안전합니다.`));
+    log(dm(_en ? `  ⓘ Claude Code (terminal/IDE) reads the project's .mcp.json, so it needs no separate registration.`
+      : `  ⓘ Claude Code(터미널/IDE)는 프로젝트의 .mcp.json 을 읽으므로 별도 등록이 필요 없습니다.`));
+    return;
+  }
   if (cmd === 'gate')                               return gate(arg('--path', args[1] || process.cwd()));
   if (cmd === 'verify-code')                        return verifyCodeCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'lessons')                            return lessonsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
