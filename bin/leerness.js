@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.118';
+const VERSION = '1.36.119';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -4781,7 +4781,9 @@ function _selfTestCases() {
       const wired = src.includes("if (cmd === 'export' || cmd === 'prompt') {")
         && src.includes("arg('--target', null)")
         && src.includes("'agents-md': 'codex'")
-        && src.includes('return adapterCmd(arg(\'--path\', process.cwd()), _xTool);');
+        // 1.36.119: 별칭도 `adapter` 와 **같은 손상 가드**를 타야 한다 — 전엔 일반 error 로 떨어져
+        //   자동화가 '손상' 과 '그 밖의 실패' 를 구분할 수 없었다(검수 P2).
+        && src.includes('_guardStore(has(\'--json\'), () => adapterCmd(arg(\'--path\', process.cwd()), _xTool))');
       return wired;
     } },
     { name: '12th 외부평가 Sonnet P3 (UR-0143): plan drop 은 plan.md(D-)만 기록, progress-tracker T- 행 미생성 (1.9.449)', run: () => {
@@ -23913,22 +23915,26 @@ function adapterCmd(root, tool, opts = {}) {
     if (files[k] == null) continue;
     results.push(writeIfSafe(root, k, files[k], { mergeManaged: managedOverwrite.has(k), lang: lang === 'en' ? 'en' : 'ko' }));   // 1.36.60 (검수 2차 #2): 래퍼 언어 전달 (altTemplate 은 전환-감지 없는 이 경로에선 미적용 — High 회귀 방지)
   }
-  if (a.mcp) results.push(_mergeMcpJson(root));
+  // 1.36.119 (검수): 아래 안내 문구의 판정 대상을 **MCP 병합 결과로 한정**한다. 전에는 `results` 전체를 훑었고,
+  //   지금 맞는 이유는 `writeIfSafe` 가 'merged'/'preserved' 만 돌려주기 때문이다 — 그 이름이 바뀌면
+  //   지침 파일을 썼다는 이유로 "MCP 호출 가능" 이라고 말하게 된다(우연한 정합은 계약이 아니다).
+  const mcpResults = [];
+  if (a.mcp) { const _m = _mergeMcpJson(root); results.push(_m); mcpResults.push(_m); }
   // 1.36.116 (검수 P1-D): Cursor 의 프로젝트별 MCP 설정은 `.cursor/mcp.json` 이다. 루트 `.mcp.json` 만 만들어 놓고
   //   "Cursor 도 인식한다" 고 말하던 것은 거짓 안내였다 — 이 어댑터의 목적 자체가 그 도구를 배선하는 것이다.
   //   루트 파일도 그대로 둔다(다른 도구가 쓴다). 같은 병합기라 손상 파일은 여전히 보존/중단된다.
-  if (tool === 'cursor') { _assertStoreParsable(path.join(root, '.cursor', 'mcp.json'), '.cursor/mcp.json'); results.push(_mergeMcpJson(root, '.cursor/mcp.json')); }
+  if (tool === 'cursor') { _assertStoreParsable(path.join(root, '.cursor', 'mcp.json'), '.cursor/mcp.json'); const _m2 = _mergeMcpJson(root, '.cursor/mcp.json'); results.push(_m2); mcpResults.push(_m2); }
   if (json) { log(JSON.stringify({ adapter: tool, files: results }, null, 2)); return; }
   ok(`adapter ${tool} (${a.label}) 적용 — ${results.length}개 파일`);
   for (const r of results) log(`  ${r.action}: ${r.file}`);
   // 1.36.117 (검수 P1): 깨진 항목을 보존했을 때도 "직접 호출 가능" 이라고 말하고 있었다 — 그건 거짓 성공이다.
-  const _brk = results.filter(r => r.broken);
+  const _brk = mcpResults.filter(r => r.broken);
   if (_brk.length) _brk.forEach(r => warn(`${r.file} 의 leerness 항목에 command 가 없어 서버가 뜨지 않습니다 — 사용자 설정이라 보존했습니다`));
   // 1.36.118 (자체 헌트): **보존**했을 때도 "leerness MCP verb 를 직접 호출 가능" 이라고 말하고 있었다.
   //   보존한 항목이 leerness 를 띄우는지는 우리가 확인하지 않았다(사용자가 다른 서버를 적어 뒀을 수도 있다) —
   //   우리가 쓴 항목이 하나라도 있을 때만 그렇게 말한다. 그 밖에는 무엇을 보존했는지만 알린다.
-  const _wrote = results.filter(r => r.action === 'created' || r.action === 'updated');
-  const _kept = results.filter(r => r.preserved && !r.broken);
+  const _wrote = mcpResults.filter(r => r.action === 'created' || r.action === 'updated');
+  const _kept = mcpResults.filter(r => r.preserved && !r.broken);
   if (a.mcp && _wrote.length) log(`  ℹ MCP 등록 — 이 도구가 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`);
   _kept.forEach(r => log(`  ℹ ${r.file} 의 기존 leerness 항목을 그대로 두었습니다 — 그 항목이 leerness MCP 를 띄우는지는 확인하지 않았습니다`));
   // 보존은 안전하지만 **막다른 길이면 안 된다** — 우리 것이 망가졌을 때 되돌릴 방법을 알려 준다(자체 헌트).
@@ -27022,7 +27028,9 @@ async function main() {
     const _ADAPTER_ALIAS = { 'agents-md': 'codex', 'agents': 'codex', 'agent': 'codex', 'agents.md': 'codex' };
     let _xTool = arg('--target', null) || (args[1] && !args[1].startsWith('-') ? args[1] : 'list');
     _xTool = _ADAPTER_ALIAS[String(_xTool).toLowerCase()] || _xTool;
-    return adapterCmd(arg('--path', process.cwd()), _xTool);
+    // 1.36.119 (검수 P2): 같은 공개 명령의 **별칭**인데 `adapter` 만 손상을 구조화해 내고 여기는 일반 error 였다 —
+    //   자동화가 '손상' 과 '그 밖의 실패' 를 구분할 수 없다. 같은 가드를 태운다.
+    return _guardStore(has('--json'), () => adapterCmd(arg('--path', process.cwd()), _xTool));
   }
   // 1.9.245: API skill cache — 공식 문서·관련링크 자동 정리 (사용자 명시 UR-0015)
   if (cmd === 'api-skill')                           return apiSkillCmd(arg('--path', process.cwd()), args[1] || 'help');

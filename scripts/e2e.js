@@ -11222,6 +11222,26 @@ total++;
       cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', dm2], { cwd: dm2, encoding: 'utf8', timeout: 300000, env: ENV });
       const afterLen = fs.readFileSync(path.join(dm2, 'CLAUDE.md'), 'utf8').length;
       if (afterLen > beforeLen * 1.5) bad.push(`adapter:등급무시(${beforeLen}→${afterLen})`);
+      // (검수 P3) manifest **형상** 5종을 고정한다 — `_assertStoreParsable` 은 문법만 보므로
+      //   `null`·`[]`·`false`·`0`·문자열이 통과한 뒤 조용히 standard 로 되돌아갔다.
+      for (const shape of ['null', '[]', 'false', '0', '"minimal"']) {
+        const dsh = mk(['--mode', 'minimal']);
+        const shLen = fs.readFileSync(path.join(dsh, 'CLAUDE.md'), 'utf8').length;
+        fs.writeFileSync(path.join(dsh, '.harness', 'manifest.json'), shape);
+        const rsh = cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', dsh], { cwd: dsh, encoding: 'utf8', timeout: 300000, env: ENV });
+        if (rsh.status === 0) bad.push(`manifest형상:${shape}에서_중단안함`);
+        if (fs.readFileSync(path.join(dsh, 'CLAUDE.md'), 'utf8').length !== shLen) bad.push(`manifest형상:${shape}에서_등급뒤집힘`);
+      }
+      // 판별력 — 정상 객체(구형: mode 없음)는 통과해야 한다(형상 검사가 과하면 기존 설치가 깨진다)
+      const dok = mk(['--mode', 'minimal']);
+      fs.writeFileSync(path.join(dok, '.harness', 'manifest.json'), JSON.stringify({ installedAt: '2026-01-01' }, null, 2));
+      if (cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', dok], { cwd: dok, encoding: 'utf8', timeout: 300000, env: ENV }).status !== 0) bad.push('manifest형상:정상객체를_거부');
+      // (검수 P2) `export`/`prompt` 는 같은 명령의 별칭이다 — 손상을 구조화해 내야 자동화가 구분한다
+      const dex = mk(['--mode', 'minimal']);
+      fs.writeFileSync(path.join(dex, '.harness', 'manifest.json'), 'false');
+      const rex = cp.spawnSync(process.execPath, [CLI, 'export', 'claude', '--path', dex, '--json'], { cwd: dex, encoding: 'utf8', timeout: 300000, env: ENV });
+      let jex = null; try { jex = JSON.parse(String(rex.stdout || '').trim()); } catch {}
+      if (!jex || jex.code !== 'store_corrupt' || rex.status === 0) bad.push(`export별칭:손상코드아님(${jex && jex.code}/${rex.status})`);
       // 판별력 — standard 프로젝트에서는 adapter 가 여전히 standard 를 유지해야 한다(등급 반영이 전부를 줄이면 안 된다)
       const ds2 = mk();
       const sBefore = fs.readFileSync(path.join(ds2, 'CLAUDE.md'), 'utf8').length;
@@ -11556,6 +11576,8 @@ total++;
           if (f.severity !== 'warn') bad.push(`권고아님(${f.severity})`);            // 차단으로 승격되면 안 된다
           if (!(f.orphanScripts || []).includes('test:orphan-guard')) bad.push('audit_대상누락');
           if (!f.reason) bad.push('audit_근거없음');
+          // (검수 P3) 범위 메타데이터는 고아가 **있을 때도** 실려야 한다 — 0건 분기에만 넣으면 계약이 갈린다.
+          if (!('monorepoOutOfScope' in f) || !('deferred' in f)) bad.push('audit_범위메타누락');
         }
       }
       // 대조군 — 고아가 없으면 이 발견이 나오면 안 된다(오탐 0)
@@ -11765,6 +11787,35 @@ total++;
         const cr = ci.runners.find(r => /tools[\\/]ci\.js$/.test(r.file)) || {};
         if (!cr.unconditional) bad.push('CI직접호출_출처_유실');
         if (PU._detectOrphanGuards(ci).orphanScripts.length) bad.push('CI직접호출인데_고아로_오탐');
+        // (검수 P2) CMD 스텝의 `REM` 주석에서 제품 진입점을 러너로 승격시키면 자기참조가 되살아난다
+        const d6c = path.join(sb4, 'rem');
+        fs.mkdirSync(path.join(d6c, 'bin'), { recursive: true });
+        fs.mkdirSync(path.join(d6c, '.github', 'workflows'), { recursive: true });
+        fs.writeFileSync(path.join(d6c, 'package.json'), JSON.stringify({ name: 'r', version: '0.1.0', bin: { r: 'bin/phantom.js' },
+          scripts: { test: 'node t.js', 'check:leaf': 'node l.js' } }));
+        fs.writeFileSync(path.join(d6c, '.github', 'workflows', 'ci.yml'),
+          'jobs:\n  a:\n    steps:\n      - shell: cmd\n        run: |\n          REM debug only: node .\\bin\\phantom.js\n          echo harmless\n      - run: npm test\n');
+        fs.writeFileSync(path.join(d6c, 'bin', 'phantom.js'), 'const x = "npm run check:leaf";\n');
+        const remInp = AUD._collectGuardInputs(d6c);
+        if (remInp.runners.some(r => /phantom\.js$/.test(r.file))) bad.push('CMD주석에서_진입점_수집');
+        if (!PU._detectOrphanGuards(remInp).orphanScripts.includes('check:leaf')) bad.push('CMD주석이_고아를_덮음');
+        // (검수 P2) 상대 경로 해석: 주석 속 참조는 무시, 루트 밖은 내부 파일로 오인 금지, 역슬래시도 해석
+        const rel1 = PU._detectOrphanGuards({
+          packageScripts: { test: 'node scripts/run-a.js && node scripts/run-b.js' },
+          runners: [{ file: '.github/workflows/ci.yml', text: 'run: npm test', viaScript: null, viaScripts: [], unconditional: true },
+            { file: 'scripts/run-a.js', text: '// require("./a/check.js")\n', viaScript: 'test', viaScripts: ['test'] },
+            { file: 'scripts/run-b.js', text: 'require("./b/check.js");\n', viaScript: 'test', viaScripts: ['test'] }],
+          scriptFiles: ['scripts/a/check.js', 'scripts/b/check.js'],
+        });
+        if (!rel1.orphanFiles.includes('scripts/a/check.js')) bad.push('주석속_상대참조를_실행으로');
+        if (rel1.orphanFiles.includes('scripts/b/check.js')) bad.push('실제_상대참조를_고아로');
+        const rel2 = PU._detectOrphanGuards({
+          packageScripts: { test: 'node scripts/run.js' },
+          runners: [{ file: '.github/workflows/ci.yml', text: 'run: npm test', viaScript: null, viaScripts: [], unconditional: true },
+            { file: 'scripts/run.js', text: 'require("../../outside/check.js");\n', viaScript: 'test', viaScripts: ['test'] }],
+          scriptFiles: ['scripts/check.js'],
+        });
+        if (!rel2.orphanFiles.includes('scripts/check.js')) bad.push('루트밖_참조가_내부파일을_덮음');
       } finally { try { fs.rmSync(sb4, { recursive: true, force: true }); } catch {} }
     }
     // ⑰ (검수 P2) 와일드카드가 있다고 실행은 아니다 — `echo "test:*"` 는 아무것도 안 돌린다.
@@ -11838,6 +11889,10 @@ total++;
       ['산문만', 'jobs:\n  a:\n    steps:\n      - name: TODO check:leaf 붙이기\n        run: echo skip\n', true],
       ['name 뒤 실제 run', 'jobs:\n  a:\n    steps:\n      - name: Run check:leaf\n        run: npm run check:leaf\n', false],
       ['matrix', 'jobs:\n  a:\n    strategy:\n      matrix:\n        script: [check:leaf]\n    steps:\n      - run: npm run ${{ matrix.script }}\n', false],
+      // ⚠ 한때 **허용 목록**(실행 키만 본다)으로 뒤집었다가 되돌렸다 — 아래 두 케이스가 그때 고아로 뒤집혔다(오탐).
+      //   이 저장소의 편향은 "오탐이 경고를 죽인다" 이므로 방향은 과소 보고다. 이 두 줄이 그 결정을 고정한다.
+      ['matrix 변수명(실행키 아님)', 'jobs:\n  a:\n    strategy:\n      matrix:\n        target: [check:leaf]\n    steps:\n      - run: npm run ${{ matrix.target }}\n', false],
+      ['Azure customCommand', 'steps:\n- task: Npm@1\n  inputs:\n    command: custom\n    customCommand: run check:leaf\n', false],
     ]) {
       const rr = PU._detectOrphanGuards({ packageScripts: { test: 'node t.js', 'check:leaf': 'node l.js' },
         runners: [{ file: '.github/workflows/ci.yml', text, viaScript: null, viaScripts: [] }], scriptFiles: [] });
