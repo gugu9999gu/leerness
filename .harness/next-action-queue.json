@@ -1,12 +1,6 @@
 {
   "queue": [
     {
-      "icon": "🔄",
-      "title": "progress-tracker 79h 정체 — task T-0032 status 갱신",
-      "command": "leerness task update T-0032 --status completed",
-      "addedAt": "2026-08-08T12:29:12.000Z"
-    },
-    {
       "icon": "🧬",
       "title": "stress-v211 마지막 갱신 1634h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js",
@@ -119,7 +113,13 @@
       "title": "stress-v211 마지막 갱신 1752h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js",
       "addedAt": "2026-08-13T10:25:47.578Z"
+    },
+    {
+      "icon": "🧬",
+      "title": "stress-v211 마지막 갱신 1770h 전 — 새 stress test 작성 권장",
+      "command": "node _apps/leerness-stress/bin/stress-v212.js",
+      "addedAt": "2026-08-14T04:08:04.293Z"
     }
   ],
-  "at": "2026-08-13T10:25:47.579Z"
+  "at": "2026-08-14T04:08:04.295Z"
 }
