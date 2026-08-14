@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.116';
+const VERSION = '1.36.117';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1581,7 +1581,8 @@ async function install(root, opts = {}) {
       //   (검수 P2-A): 여기서 예외를 warning 으로만 삼키면 MCP 미등록인데 설치는 성공으로 끝난다 — 눈에 띄게 알린다.
       try {
         const m = _mergeMcpJson(root);
-        if (m.preserved) log(`  = .mcp.json 의 기존 leerness 항목을 그대로 두었습니다(사용자 설정으로 판단)`);
+        if (m.broken) warn(`.mcp.json 의 leerness 항목에 command 가 없어 서버가 뜨지 않습니다 — 사용자 설정이라 보존했습니다. 직접 고치거나 항목을 지운 뒤 다시 실행하세요`);
+        else if (m.preserved) log(`  = .mcp.json 의 기존 leerness 항목을 그대로 두었습니다(사용자 설정으로 판단)`);
         else log(`  ✓ .mcp.json ${m.action} — Claude Code 가 leerness MCP 를 인식합니다`);
       } catch (e) { warn(`✗ .mcp.json 에 MCP 를 등록하지 못했습니다 — leerness 도구가 보이지 않습니다: ${(e && e.message) || e}`); }
     }
@@ -23740,16 +23741,27 @@ function _mergeMcpJson(root, rel) {
     }
   }
   obj.mcpServers = obj.mcpServers || {};
-  const prev = obj.mcpServers.leerness;
-  const already = !!prev;
   // 1.36.116 (검수 P1): 기존 `leerness` 항목을 무조건 덮어써서 사용자의 래퍼·버전 고정·env 가 유실됐다.
-  //   이 저장소의 계약은 false-DROP 이 버그다. **우리가 만든 형태**(npx + leerness mcp serve)일 때만 갱신하고,
-  //   그 밖은 사용자 설정으로 보고 보존한다. 그래야 `-y` 같은 마이그레이션은 되면서 남의 설정은 안 건드린다.
-  const _ours = (e) => !!e && typeof e === 'object' && !Array.isArray(e) && e.command === 'npx'
+  //   이 저장소의 계약은 false-DROP 이 버그다. **우리가 만든 형태**일 때만 갱신하고 그 밖은 보존한다.
+  //   1.36.117 (검수 P1 2건 추가):
+  //   ① `!e.env && !e.cwd` 로만 걸렀더니 `envFile`·`disabled` 같은 **모르는 키**가 붙은 항목을 우리 것으로 보고
+  //      통째로 갈아치워 그 키들이 사라졌다. 우리 것으로 인정하려면 `command`/`args` **외의 키가 없어야** 한다.
+  //   ② 존재 판정을 `!!prev` 로 했더니 `{"leerness": false}` / `null` / `""` 처럼 **명시적으로 적힌 값**을
+  //      '없음' 으로 보고 덮어쓰면서 `created` 라고 보고했다. 존재는 키 유무로 판단한다.
+  const hasEntry = Object.prototype.hasOwnProperty.call(obj.mcpServers, 'leerness');
+  const prev = hasEntry ? obj.mcpServers.leerness : undefined;
+  const _isObj = (e) => !!e && typeof e === 'object' && !Array.isArray(e);
+  const _oursExact = (e) => _isObj(e) && e.command === 'npx'
     && Array.isArray(e.args) && e.args.filter(a => a !== '-y').join(' ') === 'leerness mcp serve'
-    && !e.env && !e.cwd;
+    && Object.keys(e).every(k => k === 'command' || k === 'args');
+  const _runnable = (e) => _isObj(e) && typeof e.command === 'string' && !!e.command.trim();
   const _rel = String(rel || '.mcp.json');
-  if (already && !_ours(prev)) return { file: _rel, action: 'preserved', preserved: true };
+  if (hasEntry && !_oursExact(prev)) {
+    // 보존하되, **실행 불가능한 항목이면 성공이라고 말하지 않는다** — 그건 조용한 거짓 성공이다.
+    const broken = !_runnable(prev);
+    return { file: _rel, action: broken ? 'preserved-broken' : 'preserved', preserved: true, broken };
+  }
+  const already = hasEntry;
   obj.mcpServers.leerness = { command: 'npx', args: ['-y', 'leerness', 'mcp', 'serve'] };
   mkdirp(path.dirname(f));
   writeUtf8(f, JSON.stringify(obj, null, 2) + '\n');
@@ -23860,8 +23872,16 @@ function adapterCmd(root, tool, opts = {}) {
   // 1.36.116 (검수 #11): adapter 가 manifest 의 설치 등급을 **안 읽고** 항상 standard 템플릿을 만들었다 —
   //   `init --minimal` 로 232B 로 줄여 놓은 CLAUDE.md 가 adapter 한 번에 1099B standard 로 되돌아간다.
   //   사용자가 고른 침투성 등급을 다른 명령이 조용히 뒤집으면 그 설정은 의미가 없다.
+  //   ⚠ 손상 manifest 를 조용히 삼키면 minimal 설치가 standard 로 **되돌아간다**(사용자가 고른 등급을 소리 없이 뒤집는다).
+  //   이 저장소의 손상-스토어 계약대로 원본 보존 + 중단이다(검수 P2).
   let _instMode = null;
-  try { _instMode = (JSON.parse(read(path.join(root, '.harness', 'manifest.json'))) || {}).mode || null; } catch {}
+  {
+    const _mf = path.join(root, '.harness', 'manifest.json');
+    if (exists(_mf)) {
+      _assertStoreParsable(_mf, '.harness/manifest.json');
+      try { _instMode = (JSON.parse(read(_mf)) || {}).mode || null; } catch { _instMode = null; }
+    }
+  }
   //   ⚠ 옵션이 둘로 갈린다: `minimal:true` 는 **어떤 키를 만들지**, `mode:'minimal'` 은 **템플릿을 줄일지** 다.
   //   처음에 `minimal:true` 만 넘겨서 이 수정이 무동작이었다(크기 그대로 1099B).
   //   그 다음엔 둘 다 넘겼다가 검수가 모순을 짚었다: `MINIMAL_SKIP_KEYS` 에 이 어댑터의 SKILL.md 가 들어 있어
@@ -23893,7 +23913,10 @@ function adapterCmd(root, tool, opts = {}) {
   if (json) { log(JSON.stringify({ adapter: tool, files: results }, null, 2)); return; }
   ok(`adapter ${tool} (${a.label}) 적용 — ${results.length}개 파일`);
   for (const r of results) log(`  ${r.action}: ${r.file}`);
-  if (a.mcp) log(`  ℹ MCP 등록 — 이 도구가 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`);
+  // 1.36.117 (검수 P1): 깨진 항목을 보존했을 때도 "직접 호출 가능" 이라고 말하고 있었다 — 그건 거짓 성공이다.
+  const _brk = results.filter(r => r.broken);
+  if (_brk.length) _brk.forEach(r => warn(`${r.file} 의 leerness 항목에 command 가 없어 서버가 뜨지 않습니다 — 사용자 설정이라 보존했습니다`));
+  else if (a.mcp) log(`  ℹ MCP 등록 — 이 도구가 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`);
   return;
 }
 
@@ -26764,11 +26787,16 @@ async function main() {
     const snippet = { mcpServers: { leerness: entry } };
     // 1.36.116 (검수 P1): `!!leerness` 만 보면 `{"leerness":{}}` 처럼 **실행 불가능한 껍데기**도 "이미 등록됨" 이 된다 —
     //   Desktop 은 그걸로 아무것도 못 띄우는데 사용자는 다 됐다고 믿는다. 실행 가능한 형태인지까지 본다.
+    //   1.36.117 (검수 P2): `[]`·`false` 처럼 **적혀는 있으나 실행 불가능한** 값이 'none'(미등록)으로 분류돼
+    //   "추가하세요" 라고만 안내했고, `command: " "` 는 'ok'(녹색)로 나왔다. 존재는 키 유무로, 유효는 trim 으로 본다.
     const _regState = () => {
       try {
-        const e = (JSON.parse(read(cfg)).mcpServers || {}).leerness;
-        if (!e || typeof e !== 'object' || Array.isArray(e)) return 'none';
-        return (typeof e.command === 'string' && e.command) ? 'ok' : 'broken';
+        const ms = JSON.parse(read(cfg)).mcpServers;
+        if (!ms || typeof ms !== 'object' || Array.isArray(ms)) return ms === undefined ? 'none' : 'broken';
+        if (!Object.prototype.hasOwnProperty.call(ms, 'leerness')) return 'none';
+        const e = ms.leerness;
+        if (!e || typeof e !== 'object' || Array.isArray(e)) return 'broken';
+        return (typeof e.command === 'string' && e.command.trim()) ? 'ok' : 'broken';
       } catch { return 'unreadable'; }
     };
     if (_mj) { const st = exists(cfg) ? _regState() : 'none'; log(JSON.stringify({ ok: true, configPath: cfg, exists: exists(cfg), registered: st === 'ok', registeredState: st, snippet, entry }, null, 2)); return; }
@@ -26800,6 +26828,11 @@ async function main() {
       : `  ⓑ 파일에 내용이 이미 있다면 — ${'"mcpServers"'} 안에 아래 항목 하나만 추가하세요(다른 설정과 기존 서버는 지우지 마세요):`);
     log('');
     ('"leerness": ' + JSON.stringify(entry, null, 2)).split('\n').forEach(l => log('    ' + l));
+    log('');
+    // 1.36.117 (검수 P2): 파일에 내용은 있는데 `mcpServers` 키 자체가 없는 흔한 경우를 ⓐ·ⓑ 어느 쪽도 안 다뤘다.
+    //   ⓐ 를 따르면 기존 설정이 날아가고, ⓑ 는 넣을 자리가 없다.
+    log(_en ? `     (If the file has content but no ${'"mcpServers"'} key, add ${'"mcpServers": { … }'} at the top level with the entry above inside it.)`
+      : `     (내용은 있는데 ${'"mcpServers"'} 키가 없다면, 최상위에 ${'"mcpServers": { … }'} 를 만들고 그 안에 위 항목을 넣으세요.)`);
     log('');
     log(dm(_en ? `  ⓘ This command never edits the app config for you — it is a system setting, so you apply it yourself.`
       : `  ⓘ 이 명령은 앱 설정을 자동으로 바꾸지 않습니다 — 시스템 설정이라 직접 넣으시는 편이 안전합니다.`));

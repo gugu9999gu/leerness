@@ -11305,6 +11305,76 @@ total++;
       fs.writeFileSync(path.join(dc2, '.cursor', 'mcp.json'), brokenC);
       cp.spawnSync(process.execPath, [CLI, 'adapter', 'cursor', '--path', dc2], { cwd: dc2, encoding: 'utf8', timeout: 300000, env: ENV });
       if (fs.readFileSync(path.join(dc2, '.cursor', 'mcp.json'), 'utf8') !== brokenC) bad.push('cursor:손상파일덮어씀');
+      // 새 경로에도 **사용자 설정 보존** 계약이 걸리는지 — 경로만 바꾸고 계약을 안 가져오면 그게 데이터 손실이다.
+      const dc3 = mk();
+      fs.mkdirSync(path.join(dc3, '.cursor'), { recursive: true });
+      fs.writeFileSync(path.join(dc3, '.cursor', 'mcp.json'), JSON.stringify({ mcpServers: { other: { command: 'x' }, leerness: { command: 'node', args: ['./w.js'] } } }, null, 2));
+      cp.spawnSync(process.execPath, [CLI, 'adapter', 'cursor', '--path', dc3], { cwd: dc3, encoding: 'utf8', timeout: 300000, env: ENV });
+      let jc3 = null; try { jc3 = JSON.parse(fs.readFileSync(path.join(dc3, '.cursor', 'mcp.json'), 'utf8')); } catch {}
+      if (!jc3 || jc3.mcpServers.leerness.command !== 'node' || !jc3.mcpServers.other) bad.push('cursor:사용자설정미보존');
+    }
+    // ⑦ (검수 P1) `_ours` 경계 — 우리가 만든 **정확한 형태**만 갱신하고, 모르는 키가 하나라도 붙으면 보존한다.
+    //    그리고 명시적으로 적힌 falsy 값을 '없음' 으로 오인해 덮어쓰면 안 된다.
+    {
+      const cases = [
+        ['모르는키', { command: 'npx', args: ['-y', 'leerness', 'mcp', 'serve'], envFile: '.env.x' }, 'preserve'],
+        ['비활성화', { command: 'npx', args: ['-y', 'leerness', 'mcp', 'serve'], disabled: true }, 'preserve'],
+        ['우리형태', { command: 'npx', args: ['leerness', 'mcp', 'serve'] }, 'update'],
+        ['false', false, 'preserve'],
+        ['null', null, 'preserve'],
+        ['빈객체', {}, 'preserve'],
+      ];
+      for (const [label, val, expect] of cases) {
+        const d = mk();
+        fs.writeFileSync(path.join(d, '.mcp.json'), JSON.stringify({ mcpServers: { leerness: val } }, null, 2));
+        const r = cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+        let j = null; try { j = JSON.parse(fs.readFileSync(path.join(d, '.mcp.json'), 'utf8')); } catch {}
+        const same = j && JSON.stringify(j.mcpServers.leerness) === JSON.stringify(val);
+        if (expect === 'preserve' && !same) bad.push(`_ours:${label}을_덮어씀`);
+        if (expect === 'update' && (!j || (j.mcpServers.leerness.args || [])[0] !== '-y')) bad.push(`_ours:${label}을_갱신안함`);
+        // 실행 불가능한 항목을 보존했으면 **성공이라고 말하지 않는다**
+        const out = String(r.stdout || '') + String(r.stderr || '');
+        const runnable = !!(val && typeof val === 'object' && val.command);
+        if (!runnable && expect === 'preserve' && !/command 가 없어/.test(out)) bad.push(`_ours:${label}에_경고없음`);
+        if (!runnable && expect === 'preserve' && /직접 호출 가능/.test(out)) bad.push(`_ours:${label}에_거짓성공`);
+      }
+    }
+    // ⑧ (검수 P3) Desktop 상태·영문 표면을 **실제로** 검증한다 — 지금까지는 필드 존재만 봤다.
+    {
+      const de = mk(['--language', 'en']);
+      const hEn = String(cp.spawnSync(process.execPath, [CLI, 'mcp', 'install', '--path', de], { cwd: de, encoding: 'utf8', timeout: 120000, env: ENV }).stdout || '');
+      const ko = mk();
+      const hKo = String(cp.spawnSync(process.execPath, [CLI, 'mcp', 'install', '--path', ko], { cwd: ko, encoding: 'utf8', timeout: 120000, env: ENV }).stdout || '');
+      if (/[가-힣]/.test(hEn)) bad.push(`desktop:영문표면에한국어(${(hEn.match(/[가-힣]+/g) || [])[0]})`);
+      if (!/[가-힣]/.test(hKo)) bad.push('desktop:한국어표면이비어있음');
+      // `mcpServers` 키가 없는 파일을 위한 안내가 있어야 한다(ⓐ 를 따르면 기존 설정이 날아간다)
+      if (!/mcpServers[^\n]*(키가 없|no .*key)/i.test(hKo)) bad.push('desktop:mcpServers키없는경우_안내없음');
+      // `registeredState` **네 상태**를 격리해서 실제로 잰다(검수 P3: 지금까지는 필드 존재만 봤다 —
+      //   `_regState` 를 상수 'none' 으로 바꾸는 변이가 생존했다). 사용자의 진짜 설정은 건드리지 않는다:
+      //   Windows 는 APPDATA, Linux 는 XDG_CONFIG_HOME 으로 앱 설정 경로를 임시 디렉터리에 묶는다.
+      const _cfgVar = process.platform === 'win32' ? 'APPDATA' : (process.platform === 'linux' ? 'XDG_CONFIG_HOME' : null);
+      if (_cfgVar) {
+        const states = [
+          [{ mcpServers: { leerness: { command: 'npx', args: ['-y', 'leerness', 'mcp', 'serve'] } } }, 'ok'],
+          [{ mcpServers: { leerness: {} } }, 'broken'],
+          [{ mcpServers: { leerness: [] } }, 'broken'],
+          [{ mcpServers: { leerness: { command: ' ' } } }, 'broken'],
+          [{ mcpServers: { other: { command: 'x' } } }, 'none'],
+          ['{ broken', 'unreadable'],
+        ];
+        for (const [content, expect] of states) {
+          const home = fs.mkdtempSync(path.join(sb, 'cfg-'));
+          fs.mkdirSync(path.join(home, 'Claude'), { recursive: true });
+          fs.writeFileSync(path.join(home, 'Claude', 'claude_desktop_config.json'),
+            typeof content === 'string' ? content : JSON.stringify(content, null, 2));
+          const env3 = Object.assign({}, ENV); env3[_cfgVar] = home;
+          const rr = cp.spawnSync(process.execPath, [CLI, 'mcp', 'install', '--path', ko, '--json'], { cwd: ko, encoding: 'utf8', timeout: 120000, env: env3 });
+          let jj = null; try { jj = JSON.parse(String(rr.stdout || '').trim()); } catch {}
+          if (!jj) { bad.push(`desktop:상태검사_json아님(${expect})`); continue; }
+          if (jj.registeredState !== expect) bad.push(`desktop:상태오분류(기대 ${expect} · 실제 ${jj.registeredState})`);
+          if (jj.registered !== (expect === 'ok')) bad.push(`desktop:registered불일치(${expect}→${jj.registered})`);
+        }
+      }
     }
     // ④ Desktop 안내 — 앱 설정을 **자동으로 쓰지 않고** 경로와 스니펫을 준다
     {
@@ -11585,7 +11655,26 @@ total++;
         const wInc = PU._detectOrphanGuards(Object.assign({}, inp, { readErrors: 2 }));
         if (!wInc.scanIncomplete) bad.push('불완전_미전파');
         if (!/수집 불완전/.test(wInc.reason || '')) bad.push('불완전_근거미표기');
+        // (검수 P2) monorepo 는 범위 밖이라는 사실을 표시해야 한다 — 조용한 0건이면 사용자가 커버됐다고 믿는다
+        const wMono = PU._detectOrphanGuards(Object.assign({}, inp, { workspaces: true }));
+        if (!wMono.monorepoOutOfScope || !/범위 밖/.test(wMono.reason || '')) bad.push('monorepo_범위미표시');
       } finally { try { fs.rmSync(sb2, { recursive: true, force: true }); } catch {} }
+      // (검수 P2) **audit 의 실제 보고**를 고정한다 — 순수 함수에 필드가 있어도 CLI 가 침묵하면 사용자는 모른다.
+      {
+        const sbA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-defer116-'));
+        try {
+          const dA = path.join(sbA, 'a'); fs.mkdirSync(dA, { recursive: true });
+          fs.writeFileSync(path.join(dA, 'package.json'), JSON.stringify({ name: 'a', version: '0.1.0', scripts: { test: 'turbo run build', 'check:x': 'node x.js' } }));
+          cp.spawnSync(process.execPath, [CLI, 'init', dA, '--yes'], { cwd: dA, encoding: 'utf8', timeout: 300000, env: ENV2 });
+          const rA = cp.spawnSync(process.execPath, [CLI, 'audit', '--path', dA, '--json'], { cwd: dA, encoding: 'utf8', timeout: 300000, env: ENV2 });
+          let jA = null; try { jA = JSON.parse(String(rA.stdout || '').trim()); } catch {}
+          const fA = jA && (jA.findings || []).find(x => x.kind === 'orphan_guard_scan_incomplete');
+          if (!fA) bad.push('보류인데_audit이_침묵');
+          else if (!fA.deferred) bad.push('보류사유_미표기');
+          const hA = String(cp.spawnSync(process.execPath, [CLI, 'audit', '--path', dA], { cwd: dA, encoding: 'utf8', timeout: 300000, env: ENV2 }).stdout || '');
+          if (!/불완전/.test(hA)) bad.push('보류가_사람용출력에_없음');
+        } finally { try { fs.rmSync(sbA, { recursive: true, force: true }); } catch {} }
+      }
     }
     // ⑬ (검수 #10) 대용량 파일은 통째로 읽지 않는다 — 일반 예외와 달리 OOM/장시간 정지는 바깥 try/catch 로 회복되지 않는다.
     {
@@ -11621,6 +11710,32 @@ total++;
       scriptFiles: [],
     });
     if (r16b.orphanScripts.length) bad.push('산_러너파일의_잎을_오탐:' + r16b.orphanScripts.join(','));
+    // 출처가 여럿인 파일 — **하나라도 살아 있으면** 그 러너는 돈다. 파일당 출처를 하나만 기억하면
+    //   package.json 의 **선언 순서**가 판정을 바꾼다(죽은 wrapper 가 위에 있으면 정상 가드가 고아로 나왔다, 실측).
+    const r16c = PU._detectOrphanGuards({
+      packageScripts: { 'dead-wrapper': 'node tools/x.js', test: 'node tools/x.js', 'check:leaf': 'node l.js' },
+      runners: [{ file: '.github/workflows/ci.yml', text: 'run: npm test', viaScript: null, viaScripts: [] },
+        { file: 'tools/x.js', text: 'sh("npm run check:leaf")', viaScript: 'dead-wrapper', viaScripts: ['dead-wrapper', 'test'] }],
+      scriptFiles: [],
+    });
+    if (r16c.orphanScripts.length) bad.push('출처_선언순서에_판정이_의존:' + r16c.orphanScripts.join(','));
+    // 그리고 **실제 수집기**가 출처를 모으는지 — 순수 함수만 재면 이 결함은 안 보인다(수집기가 하나만 담고 있었다)
+    {
+      const sb4 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-via116-'));
+      try {
+        const d4 = path.join(sb4, 'o');
+        fs.mkdirSync(path.join(d4, 'tools'), { recursive: true });
+        fs.mkdirSync(path.join(d4, '.github', 'workflows'), { recursive: true });
+        fs.writeFileSync(path.join(d4, 'package.json'), JSON.stringify({ name: 'o', version: '0.1.0',
+          scripts: { 'dead-wrapper': 'node tools/x.js', test: 'node tools/x.js', 'check:leaf': 'node l.js' } }));
+        fs.writeFileSync(path.join(d4, '.github', 'workflows', 'ci.yml'), 'jobs:\n  a:\n    steps:\n      - run: npm test\n');
+        fs.writeFileSync(path.join(d4, 'tools', 'x.js'), 'sh("npm run check:leaf")\n');
+        const vi = AUD._collectGuardInputs(d4);
+        const rr = (vi.runners.find(r => /tools[\\/]x\.js$/.test(r.file)) || {});
+        if (!(rr.viaScripts || []).includes('test')) bad.push('수집기가_출처를_하나만_담음');
+        if (PU._detectOrphanGuards(vi).orphanScripts.length) bad.push('실측_선언순서_오탐');
+      } finally { try { fs.rmSync(sb4, { recursive: true, force: true }); } catch {} }
+    }
     // ⑰ (검수 P2) 와일드카드가 있다고 실행은 아니다 — `echo "test:*"` 는 아무것도 안 돌린다.
     const r17 = PU._detectOrphanGuards({
       packageScripts: { test: 'echo "test:*"', 'test:secrets': 'node s.js' },
@@ -11648,6 +11763,23 @@ total++;
       runners: [{ file: '.github/workflows/ci.yml', text: 'run: npm test', viaScript: null }], scriptFiles: [],
     });
     if (r19b.orphanScripts.length) bad.push('산_turbo에서_보류_미작동');
+    // 같은 우회로가 **동적 열거자**에도 있었다: 아무도 안 부르는 스크립트가 참조하는 열거자 파일이
+    //   "전부 태운다" 로 잡히면 경고 전체가 꺼진다. 열거자 판정도 live 러너에서만 한다.
+    const r19c = PU._detectOrphanGuards({
+      packageScripts: { test: 'node t.js', 'dead-enum': 'node scripts/enum.mjs', 'check:leaf': 'node l.js' },
+      runners: [{ file: '.github/workflows/ci.yml', text: 'run: npm test', viaScript: null, viaScripts: [] },
+        { file: 'scripts/enum.mjs', text: `const pkg=require("./package.json");\nfor (const n of ${_ENUM_LIT}) run(n);`, viaScript: 'dead-enum', viaScripts: ['dead-enum'] }],
+      scriptFiles: [],
+    });
+    if (!r19c.orphanScripts.includes('check:leaf')) bad.push('죽은_열거자가_전체를_덮음');
+    // 판별력 — **도달 가능한** 스크립트가 부르는 열거자는 여전히 전체를 덮어야 한다(정상 저장소를 시끄럽게 만들면 안 된다)
+    const r19d = PU._detectOrphanGuards({
+      packageScripts: { test: 'node scripts/enum.mjs', 'check:leaf': 'node l.js' },
+      runners: [{ file: '.github/workflows/ci.yml', text: 'run: npm test', viaScript: null, viaScripts: [] },
+        { file: 'scripts/enum.mjs', text: `const pkg=require("./package.json");\nfor (const n of ${_ENUM_LIT}) run(n);`, viaScript: 'test', viaScripts: ['test'] }],
+      scriptFiles: [],
+    });
+    if (r19d.orphanScripts.length) bad.push('산_열거자를_무시:' + r19d.orphanScripts.join(','));
     // ⑳ (검수 P2) npm 이 스스로 돌리는 생명주기 스크립트(postinstall 등)는 루트다 — 그 잎을 고아라 하면 오탐이다.
     const r20 = PU._detectOrphanGuards({
       packageScripts: { postinstall: 'npm run check:generated', 'check:generated': 'node g.js' },
@@ -11663,22 +11795,37 @@ total++;
       const selfRes = PU._detectOrphanGuards(selfInp);
       if (!selfInp.runners.some(r => /e2e\.js$/.test(r.file))) bad.push('자기수집:e2e.js가러너에없음');   // 셋업 유효성
       if (selfRes.dynamicRunners.some(f => /e2e\.js$|e2e-core\.js$/.test(f))) bad.push(`자기참조:테스트픽스처가열거자로읽힘(${selfRes.dynamicRunners.join(',')})`);
-      if (selfInp.runners.some(r => /bin[\\/]leerness\.js$/.test(r.file))) bad.push('자기참조:자기CLI가러너로수집됨');
-      // 기준값을 **값으로** 고정한다(검수 P2): dynamicRunners 만 보면, 비주석 코드에 `test:smoke` 를 한 번 적는
-      //   변이로 이 저장소의 실측 기준이 조용히 사라져도 통과한다. 이 둘은 실제로 어떤 러너도 부르지 않는다 —
-      //   ci.yml 은 `test:fast` 만 돌리고, `test:core` 는 자기가 실행하는 파일에서만 언급된다.
-      //   ⚠ 나중에 이것들을 CI 에 배선하면 이 단언을 **의도적으로** 갱신하라(자동으로 넘어가면 안 된다).
+      // 기준값은 **탐지기**를 재는 것이지 수집 정책을 재는 것이 아니다. 이 저장소의 `bin/leerness.js` 는
+      //   *다른 프로젝트용* CI 를 생성하는 코드라 `npm run test:smoke` 같은 문자열을 담고 있고,
+      //   CI 가 그 파일을 직접 실행하므로 러너로 수집된다(정상 프로젝트에선 그게 맞는 판단이다).
+      //   그래서 기준값은 **우리 CLI 소스를 뺀 입력**으로 잰다 — 탐지기가 망가지면 여기서 잡힌다.
+      //   ⚠ `test:core`·`test:smoke` 는 실제로 어떤 러너도 부르지 않는다(ci.yml 은 `test:fast` 만 돌린다).
+      //   나중에 CI 에 배선하면 이 단언을 **의도적으로** 갱신하라.
+      const selfNoBin = Object.assign({}, selfInp, { runners: selfInp.runners.filter(r => !/bin[\\/]leerness\.js$/.test(r.file)) });
+      const selfBase = PU._detectOrphanGuards(selfNoBin);
       for (const expect of ['test:smoke', 'test:core']) {
-        if (!selfRes.orphanScripts.includes(expect)) bad.push(`자기기준:${expect}가고아목록에없음(${selfRes.orphanScripts.join(',') || '없음'})`);
+        if (!selfBase.orphanScripts.includes(expect)) bad.push(`자기기준:${expect}가고아목록에없음(${selfBase.orphanScripts.join(',') || '없음'})`);
       }
-      if (selfRes.orphanScripts.includes('test:fast')) bad.push('자기기준:CI가도는test:fast를오탐');
+      if (selfBase.orphanScripts.includes('test:fast')) bad.push('자기기준:CI가도는test:fast를오탐');
       // 그리고 **불변식**으로 고정한다: 이 테스트 파일 자체가 판정을 바꾸면 안 된다.
       //   리터럴 쪼개기로 막으면 다음에 누가 이름을 적는 순간 또 뚫린다 — 값이 아니라 성질을 단언한다.
-      const selfNoE2e = PU._detectOrphanGuards(Object.assign({}, selfInp,
-        { runners: selfInp.runners.filter(r => !/e2e\.js$/.test(r.file)) }));
-      if (JSON.stringify(selfRes.orphanScripts.slice().sort()) !== JSON.stringify(selfNoE2e.orphanScripts.slice().sort())) {
-        bad.push(`자기참조:테스트파일이_판정을_바꿈(${selfRes.orphanScripts.join(',')} vs ${selfNoE2e.orphanScripts.join(',')})`);
+      const selfNoE2e = PU._detectOrphanGuards(Object.assign({}, selfNoBin,
+        { runners: selfNoBin.runners.filter(r => !/e2e\.js$/.test(r.file)) }));
+      //   ⚠ 비교 대상을 `orphanScripts` 하나로 두면 약한 불변식이다(검수 P3) — 판정 전체를 비교한다.
+      //   `orphanFiles` 는 뺀다 — **측정해 보고 내린 결론**이다: 러너를 하나 제거하면 그 러너가 언급하던
+      //   파일 경로가 사라지므로 파일 커버리지가 바뀌는 것이 정상이다(실측: e2e.js 를 빼면 e2e-core.js 가
+      //   고아 파일로 뜬다 — `test:core` 가 고아라 실제로도 안 도는 파일이다).
+      //   이 불변식이 잡으려는 것은 **스크립트 이름이 우리 테스트 데이터에서 읽히는** 자기참조다.
+      const _shape = (x) => JSON.stringify({
+        s: x.orphanScripts.slice().sort(),
+        d: x.dynamicRunners.slice().sort(), p: x.enumPrefixes.slice().sort(),
+        i: x.scanIncomplete, o: x.deferred, m: x.monorepoOutOfScope,
+      });
+      if (_shape(selfBase) !== _shape(selfNoE2e)) {
+        bad.push(`자기참조:테스트파일이_판정을_바꿈(${selfBase.orphanScripts.join(',')} vs ${selfNoE2e.orphanScripts.join(',')})`);
       }
+      // 셋업 유효성 — e2e.js 가 실제로 live 러너여야 이 불변식이 의미가 있다(비어 있으면 공허하게 통과한다)
+      if (!selfNoBin.runners.some(r => /e2e\.js$/.test(r.file))) bad.push('자기참조:불변식이_공허(e2e.js가입력에없음)');
     }
     // ⑭ (검수 #14) Linux 는 XDG_CONFIG_HOME 이 있으면 그쪽이 정답이다 — ~/.config 는 기본값일 뿐이다.
     {
