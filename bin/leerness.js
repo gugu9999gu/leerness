@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.117';
+const VERSION = '1.36.118';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -23879,7 +23879,15 @@ function adapterCmd(root, tool, opts = {}) {
     const _mf = path.join(root, '.harness', 'manifest.json');
     if (exists(_mf)) {
       _assertStoreParsable(_mf, '.harness/manifest.json');
-      try { _instMode = (JSON.parse(read(_mf)) || {}).mode || null; } catch { _instMode = null; }
+      // 1.36.118 (검수 P1): `_assertStoreParsable` 은 **문법**만 본다. `null`·`[]`·`false`·`"x"` 는 유효 JSON 이라
+      //   통과한 뒤 `.mode` 가 없어 조용히 standard 로 떨어졌다 — minimal 설치가 다시 뒤집힌다.
+      //   "손상이면 중단" 계약은 형상까지 봐야 지켜진다.
+      let _mo = null;
+      try { _mo = JSON.parse(read(_mf)); } catch { _mo = undefined; }
+      if (!_mo || typeof _mo !== 'object' || Array.isArray(_mo)) {
+        throw Object.assign(new Error(`.harness/manifest.json 이 객체가 아님(${Array.isArray(_mo) ? 'array' : typeof _mo}) — 설치 등급을 읽을 수 없어 중단합니다: ${_mf}`), { code: 'E_STORE_CORRUPT', file: _mf });
+      }
+      _instMode = _mo.mode || null;
     }
   }
   //   ⚠ 옵션이 둘로 갈린다: `minimal:true` 는 **어떤 키를 만들지**, `mode:'minimal'` 은 **템플릿을 줄일지** 다.
@@ -23916,7 +23924,15 @@ function adapterCmd(root, tool, opts = {}) {
   // 1.36.117 (검수 P1): 깨진 항목을 보존했을 때도 "직접 호출 가능" 이라고 말하고 있었다 — 그건 거짓 성공이다.
   const _brk = results.filter(r => r.broken);
   if (_brk.length) _brk.forEach(r => warn(`${r.file} 의 leerness 항목에 command 가 없어 서버가 뜨지 않습니다 — 사용자 설정이라 보존했습니다`));
-  else if (a.mcp) log(`  ℹ MCP 등록 — 이 도구가 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`);
+  // 1.36.118 (자체 헌트): **보존**했을 때도 "leerness MCP verb 를 직접 호출 가능" 이라고 말하고 있었다.
+  //   보존한 항목이 leerness 를 띄우는지는 우리가 확인하지 않았다(사용자가 다른 서버를 적어 뒀을 수도 있다) —
+  //   우리가 쓴 항목이 하나라도 있을 때만 그렇게 말한다. 그 밖에는 무엇을 보존했는지만 알린다.
+  const _wrote = results.filter(r => r.action === 'created' || r.action === 'updated');
+  const _kept = results.filter(r => r.preserved && !r.broken);
+  if (a.mcp && _wrote.length) log(`  ℹ MCP 등록 — 이 도구가 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`);
+  _kept.forEach(r => log(`  ℹ ${r.file} 의 기존 leerness 항목을 그대로 두었습니다 — 그 항목이 leerness MCP 를 띄우는지는 확인하지 않았습니다`));
+  // 보존은 안전하지만 **막다른 길이면 안 된다** — 우리 것이 망가졌을 때 되돌릴 방법을 알려 준다(자체 헌트).
+  if (_kept.length || _brk.length) log(`     → 표준 설정으로 되돌리려면 그 파일의 "leerness" 항목을 지우고 이 명령을 다시 실행하세요`);
   return;
 }
 
