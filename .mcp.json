@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "leerness": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "leerness",
+        "mcp",
+        "serve"
+      ]
+    }
+  }
+}

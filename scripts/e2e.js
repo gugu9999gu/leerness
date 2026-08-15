@@ -5091,7 +5091,8 @@ total++;
     // 1.36.120: 잡음을 **열거**하는 대신 stderr 를 통째로 0 으로 고정한다. audit 이 `--json` 에서 stdout 만 막고
     //   stderr 는 열어 둬서 사람용 경고가 샜고(309B), 그 문구가 **프로젝트 상태에 따라** 달라져
     //   같은 코드로 게이트가 통과/실패로 갈렸다(실측). 열거는 유계가 아니다 — 원인 단계에서 막았으니 여기선 0을 요구한다.
-    const noiseFree = se.trim() === '';
+    //   ⚠ `trim()===''` 은 개행만 있는 출력을 통과시킨다 — 문구가 "0 바이트" 면 검사도 0 바이트여야 한다(검수 P3).
+    const noiseFree = se.length === 0;
     ok = pureStdout && payloadOk && noiseFree && r.status === 0;
   } catch {}
   console.log(ok ? '✓ B(1.36.88) selftest --json 계약: 리포 루트 cwd stdout 순수 JSON + stderr 잡음 0' : '✗ selftest --json 계약 실패 (stdout 오염 또는 stderr 잡음)');
@@ -5121,7 +5122,8 @@ total++;
       if (!out.trim()) { bad.push(`${c}:출력없음`); continue; }
       let j = null; try { j = JSON.parse(out.trim()); } catch {}
       if (!j) { bad.push(`${c}:stdout이JSON아님`); continue; }
-      if (err.trim() !== '') bad.push(`${c}:stderr잡음(${err.length}B:${err.trim().split('\n')[0].slice(0, 40)})`);
+      // 문구가 "0 바이트" 면 검사도 0 바이트여야 한다 — `trim()===''` 은 개행만 있는 출력을 통과시킨다(검수 P3).
+      if (err.length !== 0) bad.push(`${c}:stderr잡음(${err.length}B:${err.trim().split('\n')[0].slice(0, 40)})`);
     }
     // 판별력 — 이 검사가 실제로 무언가를 실행했는지(전부 건너뛰면 공허하게 통과한다)
     if (bad.length === 0 && CMDS.length < 10) bad.push('대상이_너무적음');
@@ -5166,6 +5168,48 @@ total++;
     ok = after.includes('CUSTOM_USER_EDIT_MARKER_42') && after.includes('migration-preserved');
   } catch {}
   console.log(ok ? '✓ B(1.9.368) UR-0025: _managedMerge 분리 — migrate 가 사용자 편집 preserved 블록 보존' : '✗ managedMerge 보존 실패');
+  if (!ok) failed++;
+}
+
+// 1.36.122 (자기 저장소 도그푸딩): 보존 블록의 **백업 포인터**가 재실행에 덮여 사라졌다.
+//   `adapter` 처럼 새 백업을 만들지 않는 실행이 일반 경로(`.harness/archive`)를 채워 넘겨서,
+//   이전 마이그레이션이 적어 둔 구체 경로(`.harness/archive/leerness-1.36.100-…`)를 덮었다.
+//   그 문장은 "삭제하지 않았다" 는 약속의 근거이므로 격하는 곧 정보 손실이다. 세 방향을 모두 잰다.
+total++;
+{
+  let ok = false; const bad = [];
+  try {
+    const PUx = require(path.resolve(path.dirname(CLI), '..', 'lib', 'pure-utils'));
+    const next = '# T\nmanaged\n';
+    const prev = '# T\nmanaged\nCUSTOM-LINE\n';
+    const ptr = (s) => { const m = /(?:전체 원본 백업|Full original backup):\s*`([^`]+)`/.exec(s); return m && m[1]; };
+    // ① 이전 포인터가 없고 새 백업도 없으면 기본값
+    if (ptr(PUx._managedMerge('CLAUDE.md', next, prev, null, null)) !== '.harness/archive') bad.push('기본값아님');
+    // ② 이전 포인터가 **구체 경로**면 새 백업이 없을 때 그대로 둔다(격하 금지)
+    const prev2 = prev + '\n> 전체 원본 백업: `.harness/archive/leerness-1.2.3-STAMP`\n';
+    if (ptr(PUx._managedMerge('CLAUDE.md', next, prev2, null, null)) !== '.harness/archive/leerness-1.2.3-STAMP') bad.push('구체경로가_격하됨');
+    // ③ 새 백업이 있으면 그쪽으로 갱신(보존이 과해 최신 백업을 못 가리키면 안 된다)
+    if (ptr(PUx._managedMerge('CLAUDE.md', next, prev2, '.harness/archive/NEW', null)) !== '.harness/archive/NEW') bad.push('새백업으로_갱신안됨');
+    // ④ 실제 CLI 경로 — 새 백업 없이 adapter 를 두 번 돌려도 포인터가 유지돼야 한다
+    const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ptr122-'));
+    try {
+      const d = path.join(sb, 'p'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      const ENVp = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_NO_PROMPT: '1' });
+      cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENVp });
+      const cf = path.join(d, 'CLAUDE.md');
+      // 사용자 커스텀 + 구체 백업 포인터를 가진 보존 블록을 만든다
+      fs.writeFileSync(cf, fs.readFileSync(cf, 'utf8')
+        + '\n<!-- leerness:migration-preserved -->\n## Preserved previous content\n\n> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-9.9.9-STAMP`\n\nUSER-KEEP-LINE\n');
+      cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENVp });
+      const after2 = fs.readFileSync(cf, 'utf8');
+      if (!/leerness-9\.9\.9-STAMP/.test(after2)) bad.push('CLI경로에서_포인터_격하');
+      if (!after2.includes('USER-KEEP-LINE')) bad.push('CLI경로에서_사용자라인_유실');
+    } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+    ok = bad.length === 0;
+  } catch (e) { bad.push('ERR:' + String(e && e.message).slice(0, 80)); }
+  console.log(ok ? '✓ B(1.36.122) 보존 블록 백업 포인터: 새 백업 없으면 기존 구체 경로 유지 · 있으면 갱신 · 없으면 기본값'
+    : '✗ 보존 블록 백업 포인터 실패 ' + JSON.stringify(bad));
   if (!ok) failed++;
 }
 
@@ -11976,6 +12020,27 @@ total++;
           scriptFiles: [],
         });
         if (!cmt.orphanScripts.includes('check:leaf')) bad.push('판정기가_CMD주석을_실행으로');
+        // (검수) 러너 **자신의 경로**에 dot-segment 가 있으면 해석 결과가 후보와 어긋났다 — 실제로 도는 가드가 고아로.
+        const ddot = path.join(sb4, 'dotnest');
+        fs.mkdirSync(path.join(ddot, 'scripts', 'a'), { recursive: true });
+        fs.mkdirSync(path.join(ddot, '.github', 'workflows'), { recursive: true });
+        fs.writeFileSync(path.join(ddot, 'package.json'), JSON.stringify({ name: 'd', version: '0.1.0', scripts: { test: 'node scripts/./a/run.js' } }));
+        fs.writeFileSync(path.join(ddot, '.github', 'workflows', 'ci.yml'), 'jobs:\n  a:\n    steps:\n      - run: npm test\n');
+        fs.writeFileSync(path.join(ddot, 'scripts', 'a', 'run.js'), 'require("./check.js");\n');
+        fs.writeFileSync(path.join(ddot, 'scripts', 'a', 'check.js'), '// guard\n');
+        const dotRes = PU._detectOrphanGuards(AUD._collectGuardInputs(ddot));
+        if (dotRes.orphanFiles.includes('scripts/a/check.js')) bad.push('러너경로_dot세그먼트_오탐');
+        // (검수 P3) 수집기와 판정기의 **주석 표기가 같아야** 한다 — `*`(블록 주석 이어짐)를 한쪽에만 두면 입력이 갈린다.
+        const dstar = path.join(sb4, 'star');
+        fs.mkdirSync(path.join(dstar, 'scripts'), { recursive: true });
+        fs.mkdirSync(path.join(dstar, '.github', 'workflows'), { recursive: true });
+        fs.writeFileSync(path.join(dstar, 'package.json'), JSON.stringify({ name: 's', version: '0.1.0', scripts: { test: 'node t.js', 'check:leaf': 'node l.js' } }));
+        fs.writeFileSync(path.join(dstar, '.github', 'workflows', 'ci.yml'),
+          'jobs:\n  a:\n    steps:\n      - run: |\n          /*\n           * node scripts/ghost.js\n           */\n          npm test\n');
+        fs.writeFileSync(path.join(dstar, 'scripts', 'ghost.js'), 'sh("npm run check:leaf")\n');
+        const starInp = AUD._collectGuardInputs(dstar);
+        if (starInp.runners.some(r => /ghost\.js$/.test(r.file))) bad.push('블록주석에서_러너_수집');
+        if (!PU._detectOrphanGuards(starInp).orphanScripts.includes('check:leaf')) bad.push('블록주석이_고아를_덮음');
         // (자체 헌트) Windows CI 는 `node scripts\x\check.js` 로 적는다. 후보 경로는 `/` 표기라
         //   전체 경로가 안 맞고 basename 경계 판정도 앞의 `\` 때문에 걸러져 **정상 배선이 고아로 보고**됐다.
         for (const [label, ref] of [['posix', 'scripts/x/check.js'], ['win', 'scripts\\x\\check.js'], ['win-dot', '.\\scripts\\x\\check.js']]) {

@@ -5,6 +5,8 @@ Follow AGENTS.md. Always run `leerness handoff .` at the start and `leerness ses
 
 **⭐ 매 세션 첫 행동**: `.harness/session-workflow.md`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 `leerness drift check --auto-fix`로 자동 회복.
 
+**완료 주장 전**: `leerness verify-claim <T-ID>` — 증거 없이 "완료" 라고 말하지 않는다.
+
 Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.
 
 ## 자연어 영구 룰

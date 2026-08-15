@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.121';
+const VERSION = '1.36.122';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1043,7 +1043,10 @@ function managedMerge(file, next, previous, archiveDir, mergeOpts = {}) {
   //   다른 디렉토리에서 실행하면 "전체 원본 백업: <경로>" 가 존재하지 않는 곳을 가리킨다(검수 재현).
   //   그 문장은 "삭제하지 않았다" 는 약속의 근거이므로 반드시 프로젝트 기준이어야 한다.
   const _base = mergeOpts && mergeOpts.root ? mergeOpts.root : process.cwd();
-  const archiveRel = archiveDir ? path.relative(_base, archiveDir).replace(/\\/g, '/') : '.harness/archive';
+  // 1.36.122 (자기 저장소 도그푸딩): 백업을 만들지 않는 실행(`adapter` 등)은 여기서 일반 경로를 **채워** 넘겼고,
+  //   그러면 이전 마이그레이션이 적어 둔 **구체 백업 경로가 덮여** 사라졌다(우리 repo 에서 실측).
+  //   백업이 없으면 `null` 을 넘겨, 이전 문서의 포인터를 그대로 두게 한다(보존 블록의 정보 손실 방지).
+  const archiveRel = archiveDir ? path.relative(_base, archiveDir).replace(/\\/g, '/') : null;
   return _managedMerge(file, next, previous, archiveRel, MERGE_OVERWRITE_FILES, mergeOpts);   // 1.36.60: altTemplate/lang 전달
 }
 

@@ -1,6 +1,6 @@
 {
-  "capturedAt": "2026-08-15T09:24:33.985Z",
-  "leernessVersion": "1.36.121",
+  "capturedAt": "2026-08-15T12:45:02.647Z",
+  "leernessVersion": "1.36.122",
   "os": {
     "platform": "win32",
     "type": "Windows_NT",
@@ -12,7 +12,7 @@
     "cpuCount": 20,
     "cpuModel": "Intel(R) Core(TM) Ultra 7 265K",
     "totalMemoryGB": 127.4,
-    "freeMemoryGB": 68.4
+    "freeMemoryGB": 66.9
   },
   "locale": {
     "lang": null,
