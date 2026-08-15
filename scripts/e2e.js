@@ -5088,8 +5088,10 @@ total++;
     const j = JSON.parse(r.stdout);                       // 계약: stdout 전체가 단일 JSON 문서
     const payloadOk = j.ok === true && j.pass === j.total && j.fail === 0 && j.total > 0;
     const se = r.stderr || '';
-    // 알려진 유출원 3종: fail() 프로브의 '✗ ' · graph 사람용 3줄(파일경로/노드수/안내)
-    const noiseFree = !se.includes('✗ ') && !se.includes('leerness.html →') && !/nodes · /.test(se);
+    // 1.36.120: 잡음을 **열거**하는 대신 stderr 를 통째로 0 으로 고정한다. audit 이 `--json` 에서 stdout 만 막고
+    //   stderr 는 열어 둬서 사람용 경고가 샜고(309B), 그 문구가 **프로젝트 상태에 따라** 달라져
+    //   같은 코드로 게이트가 통과/실패로 갈렸다(실측). 열거는 유계가 아니다 — 원인 단계에서 막았으니 여기선 0을 요구한다.
+    const noiseFree = se.trim() === '';
     ok = pureStdout && payloadOk && noiseFree && r.status === 0;
   } catch {}
   console.log(ok ? '✓ B(1.36.88) selftest --json 계약: 리포 루트 cwd stdout 순수 JSON + stderr 잡음 0' : '✗ selftest --json 계약 실패 (stdout 오염 또는 stderr 잡음)');
@@ -11242,6 +11244,21 @@ total++;
       const rex = cp.spawnSync(process.execPath, [CLI, 'export', 'claude', '--path', dex, '--json'], { cwd: dex, encoding: 'utf8', timeout: 300000, env: ENV });
       let jex = null; try { jex = JSON.parse(String(rex.stdout || '').trim()); } catch {}
       if (!jex || jex.code !== 'store_corrupt' || rex.status === 0) bad.push(`export별칭:손상코드아님(${jex && jex.code}/${rex.status})`);
+      // (검수 P3) `prompt` 도 같은 별칭이다 — `export` 만 검사하면 `prompt` 를 가드 밖으로 빼는 변이가 산다.
+      const dpr = mk(['--mode', 'minimal']);
+      fs.writeFileSync(path.join(dpr, '.harness', 'manifest.json'), 'false');
+      const rpr = cp.spawnSync(process.execPath, [CLI, 'prompt', 'claude', '--path', dpr, '--json'], { cwd: dpr, encoding: 'utf8', timeout: 300000, env: ENV });
+      let jpr = null; try { jpr = JSON.parse(String(rpr.stdout || '').trim()); } catch {}
+      if (!jpr || jpr.code !== 'store_corrupt' || rpr.status === 0) bad.push(`prompt별칭:손상코드아님(${jpr && jpr.code}/${rpr.status})`);
+      // (검수 P3) MCP 안내가 **MCP 결과에만** 결부되는지 — 지침 파일이 새로 생기는 경로에서 검사해야
+      //   `results` 로 되돌리는 변이가 죽는다(기존 픽스처는 모두 init 이 끝난 뒤라 우연히 같았다).
+      const dmr = path.join(sb, 'mcponly'); fs.mkdirSync(dmr, { recursive: true });
+      fs.writeFileSync(path.join(dmr, 'package.json'), '{"name":"m","version":"0.1.0"}');
+      fs.writeFileSync(path.join(dmr, '.mcp.json'), JSON.stringify({ mcpServers: { leerness: { command: 'node', args: ['./mine.js'] } } }, null, 2));
+      const rmr = cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', dmr], { cwd: dmr, encoding: 'utf8', timeout: 300000, env: ENV });
+      const omr = String(rmr.stdout || '') + String(rmr.stderr || '');
+      if (/MCP 등록 —/.test(omr)) bad.push('MCP안내가_지침파일생성으로_발화');
+      if (!/확인하지 않았습니다/.test(omr)) bad.push('MCP보존_중립문구없음');
       // 판별력 — standard 프로젝트에서는 adapter 가 여전히 standard 를 유지해야 한다(등급 반영이 전부를 줄이면 안 된다)
       const ds2 = mk();
       const sBefore = fs.readFileSync(path.join(ds2, 'CLAUDE.md'), 'utf8').length;
@@ -11332,6 +11349,19 @@ total++;
       cp.spawnSync(process.execPath, [CLI, 'adapter', 'cursor', '--path', dc3], { cwd: dc3, encoding: 'utf8', timeout: 300000, env: ENV });
       let jc3 = null; try { jc3 = JSON.parse(fs.readFileSync(path.join(dc3, '.cursor', 'mcp.json'), 'utf8')); } catch {}
       if (!jc3 || jc3.mcpServers.leerness.command !== 'node' || !jc3.mcpServers.other) bad.push('cursor:사용자설정미보존');
+      // (검수·자체 재현) cursor 는 MCP 설정이 **둘**이다. 한쪽만 우리가 썼는데 "이 도구가 직접 호출 가능" 이라고 하면
+      //   정작 그 도구가 읽는 파일은 남의 설정일 수 있다 — 주장은 우리가 쓴 **파일 이름과 함께** 해야 한다.
+      const dc4 = mk();
+      fs.rmSync(path.join(dc4, '.mcp.json'), { force: true });
+      fs.mkdirSync(path.join(dc4, '.cursor'), { recursive: true });
+      fs.writeFileSync(path.join(dc4, '.cursor', 'mcp.json'), JSON.stringify({ mcpServers: { leerness: { command: 'node', args: ['./mine.js'] } } }, null, 2));
+      const rc4 = cp.spawnSync(process.execPath, [CLI, 'adapter', 'cursor', '--path', dc4], { cwd: dc4, encoding: 'utf8', timeout: 300000, env: ENV });
+      const oc4 = String(rc4.stdout || '') + String(rc4.stderr || '');
+      if (!/\.mcp\.json 에 MCP 등록/.test(oc4)) bad.push('cursor:쓴파일_범위표기없음');
+      if (/\.cursor[\\/]mcp\.json 에 MCP 등록/.test(oc4)) bad.push('cursor:보존파일까지_호출가능주장');
+      if (!/확인하지 않았습니다/.test(oc4)) bad.push('cursor:보존_중립문구없음');
+      let jc4 = null; try { jc4 = JSON.parse(fs.readFileSync(path.join(dc4, '.cursor', 'mcp.json'), 'utf8')); } catch {}
+      if (!jc4 || jc4.mcpServers.leerness.command !== 'node') bad.push('cursor:보존실패');
     }
     // ⑦ (검수 P1) `_ours` 경계 — 우리가 만든 **정확한 형태**만 갱신하고, 모르는 키가 하나라도 붙으면 보존한다.
     //    그리고 명시적으로 적힌 falsy 값을 '없음' 으로 오인해 덮어쓰면 안 된다.
@@ -11799,6 +11829,33 @@ total++;
         const remInp = AUD._collectGuardInputs(d6c);
         if (remInp.runners.some(r => /phantom\.js$/.test(r.file))) bad.push('CMD주석에서_진입점_수집');
         if (!PU._detectOrphanGuards(remInp).orphanScripts.includes('check:leaf')) bad.push('CMD주석이_고아를_덮음');
+        // (검수 P3) `REM` 만 검사하면 `::`·`@REM` 변이가 산다 — 주석 표기별로 잰다.
+        for (const [tag, mark] of [['::', '::'], ['@REM', '@REM']]) {
+          fs.writeFileSync(path.join(d6c, '.github', 'workflows', 'ci.yml'),
+            `jobs:\n  a:\n    steps:\n      - shell: cmd\n        run: |\n          ${mark} debug: node .\\bin\\phantom.js\n          echo harmless\n      - run: npm test\n`);
+          const ri = AUD._collectGuardInputs(d6c);
+          if (ri.runners.some(r => /phantom\.js$/.test(r.file))) bad.push(`CMD주석(${tag})에서_진입점_수집`);
+        }
+        // (검수 P3) bare 진입점(`main: index.js`)의 설명 필터 — 픽스처가 없어 되돌리는 변이가 살았다.
+        const dbe = path.join(sb4, 'bare');
+        fs.mkdirSync(path.join(dbe, '.github', 'workflows'), { recursive: true });
+        fs.writeFileSync(path.join(dbe, 'package.json'), JSON.stringify({ name: 'b', version: '0.1.0', main: 'index.js',
+          scripts: { test: 'node t.js', 'check:leaf': 'node l.js' } }));
+        fs.writeFileSync(path.join(dbe, '.github', 'workflows', 'ci.yml'), 'jobs:\n  a:\n    steps:\n      - name: archive index.js\n        run: npm test\n');
+        fs.writeFileSync(path.join(dbe, 'index.js'), 'sh("npm run check:leaf")\n');
+        const beInp = AUD._collectGuardInputs(dbe);
+        if (beInp.runners.some(r => /index\.js$/.test(r.file))) bad.push('설명필드가_bare진입점을_승격');
+        if (!PU._detectOrphanGuards(beInp).orphanScripts.includes('check:leaf')) bad.push('설명필드_승격이_고아를_덮음');
+        // 판별력 — 실제 실행이면 수집돼야 한다
+        fs.writeFileSync(path.join(dbe, '.github', 'workflows', 'ci.yml'), 'jobs:\n  a:\n    steps:\n      - run: node index.js --guard\n');
+        const beInp2 = AUD._collectGuardInputs(dbe);
+        if (!beInp2.runners.some(r => /index\.js$/.test(r.file))) bad.push('실제실행인데_bare진입점_미수집');
+        // (검수 P3) 0바이트 package.json 을 **실제로 수집**해서 계상되는지 — 지금까지는 readErrors 를 주입만 했다.
+        const dz = path.join(sb4, 'zero'); fs.mkdirSync(dz, { recursive: true });
+        fs.writeFileSync(path.join(dz, 'package.json'), '');
+        const zInp = AUD._collectGuardInputs(dz);
+        if (!zInp.readErrors) bad.push('0바이트_package.json_미계상');
+        if (!/수집 불완전/.test(PU._detectOrphanGuards(zInp).reason || '')) bad.push('0바이트_근거미표기');
         // (검수 P2) 상대 경로 해석: 주석 속 참조는 무시, 루트 밖은 내부 파일로 오인 금지, 역슬래시도 해석
         const rel1 = PU._detectOrphanGuards({
           packageScripts: { test: 'node scripts/run-a.js && node scripts/run-b.js' },
@@ -11816,6 +11873,56 @@ total++;
           scriptFiles: ['scripts/check.js'],
         });
         if (!rel2.orphanFiles.includes('scripts/check.js')) bad.push('루트밖_참조가_내부파일을_덮음');
+        // ⚠ 루트 이탈(`../../../…`) 가드는 **여기서 관측할 수 없다** — 측정해 보고 단언을 뺐다:
+        //   `allText` 의 전체 경로 비교가 부분 문자열이라, 이탈 경로도 우리 후보를 접미로 포함하면 어차피 덮인다.
+        //   경계 판정을 전체 경로에까지 걸면 흔한 `./scripts/x.js` 표기가 깨지므로 그렇게 하지 않는다.
+        //   가드 자체는 남긴다(해석 결과가 접미가 아닌 경우를 위한 방어) — 다만 공허한 단언을 두지는 않는다.
+        const relIn = PU._detectOrphanGuards({
+          packageScripts: { test: 'node scripts/a/run.js' },
+          runners: [{ file: '.github/workflows/ci.yml', text: 'run: npm test', viaScript: null, viaScripts: [], unconditional: true },
+            { file: 'scripts/a/run.js', text: 'require("../../scripts/./check.js");\n', viaScript: 'test', viaScripts: ['test'] }],
+          scriptFiles: ['scripts/check.js'],
+        });
+        if (relIn.orphanFiles.length) bad.push(`루트내_dot세그먼트_경로_오탐(${relIn.orphanFiles.join(',')})`);
+        // (검수 P3) 역슬래시 상대경로 — 픽스처가 없어 `[/\\]` 를 `/` 로 줄이는 변이가 살았다.
+        const relBs = PU._detectOrphanGuards({
+          packageScripts: { test: 'node scripts/a/run.js' },
+          runners: [{ file: '.github/workflows/ci.yml', text: 'run: npm test', viaScript: null, viaScripts: [], unconditional: true },
+            { file: 'scripts/a/run.js', text: 'require(".\\check.js");\n', viaScript: 'test', viaScripts: ['test'] }],
+          scriptFiles: ['scripts/a/check.js', 'scripts/b/check.js'],
+        });
+        if (relBs.orphanFiles.includes('scripts/a/check.js')) bad.push('역슬래시_상대경로_미해석');
+        // (검수) CI 설정의 명령은 **프로젝트 루트**에서 돈다 — 설정 파일 위치 기준으로 풀면 실제 호출을 놓친다.
+        const relRoot = PU._detectOrphanGuards({
+          packageScripts: { test: 'node t.js' },
+          runners: [{ file: '.github/workflows/ci.yml', viaScript: null, viaScripts: [], unconditional: true,
+            text: 'jobs:\n  a:\n    steps:\n      - run: node ./scripts/deep/check.js\n      - run: npm test\n' }],
+          scriptFiles: ['scripts/deep/check.js'],
+        });
+        if (relRoot.orphanFiles.length) bad.push(`CI상대경로_루트기준아님(${relRoot.orphanFiles.join(',')})`);
+        // dot-segment 가 낀 전체 경로도 정규화돼야 한다
+        const relDot = PU._detectOrphanGuards({
+          packageScripts: { test: 'node run.sh' },
+          runners: [{ file: '.github/workflows/ci.yml', text: 'run: npm test', viaScript: null, viaScripts: [], unconditional: true },
+            { file: 'run.sh', text: 'node scripts/./check.js\n', viaScript: 'test', viaScripts: ['test'] }],
+          scriptFiles: ['scripts/check.js'],
+        });
+        if (relDot.orphanFiles.length) bad.push(`dot세그먼트_경로_오탐(${relDot.orphanFiles.join(',')})`);
+        // (자체 헌트) Windows CI 는 `node scripts\x\check.js` 로 적는다. 후보 경로는 `/` 표기라
+        //   전체 경로가 안 맞고 basename 경계 판정도 앞의 `\` 때문에 걸러져 **정상 배선이 고아로 보고**됐다.
+        for (const [label, ref] of [['posix', 'scripts/x/check.js'], ['win', 'scripts\\x\\check.js'], ['win-dot', '.\\scripts\\x\\check.js']]) {
+          const rw = PU._detectOrphanGuards({ packageScripts: { test: 'node t.js' },
+            runners: [{ file: '.github/workflows/ci.yml', viaScript: null, viaScripts: [], unconditional: true,
+              text: `jobs:\n  a:\n    steps:\n      - run: node ${ref}\n      - run: npm test\n` }],
+            scriptFiles: ['scripts/x/check.js'] });
+          if (rw.orphanFiles.includes('scripts/x/check.js')) bad.push(`경로표기_오탐:${label}`);
+        }
+        // 판별력 — 루트의 동명 파일을 부르는 것은 하위 디렉터리 후보를 덮지 않는다(경계 판정의 목적)
+        const rw2 = PU._detectOrphanGuards({ packageScripts: { test: 'node t.js' },
+          runners: [{ file: '.github/workflows/ci.yml', viaScript: null, viaScripts: [], unconditional: true,
+            text: 'jobs:\n  a:\n    steps:\n      - run: node .\\check.js\n      - run: npm test\n' }],
+          scriptFiles: ['scripts/x/check.js', 'scripts/y/check.js'] });
+        if (rw2.orphanFiles.length !== 2) bad.push(`경로경계_과다커버(${rw2.orphanFiles.join(',')})`);
       } finally { try { fs.rmSync(sb4, { recursive: true, force: true }); } catch {} }
     }
     // ⑰ (검수 P2) 와일드카드가 있다고 실행은 아니다 — `echo "test:*"` 는 아무것도 안 돌린다.
@@ -11893,6 +12000,9 @@ total++;
       //   이 저장소의 편향은 "오탐이 경고를 죽인다" 이므로 방향은 과소 보고다. 이 두 줄이 그 결정을 고정한다.
       ['matrix 변수명(실행키 아님)', 'jobs:\n  a:\n    strategy:\n      matrix:\n        target: [check:leaf]\n    steps:\n      - run: npm run ${{ matrix.target }}\n', false],
       ['Azure customCommand', 'steps:\n- task: Npm@1\n  inputs:\n    command: custom\n    customCommand: run check:leaf\n', false],
+      // (검수) `name:` 을 **무조건** 설명으로 보면 matrix 변수명이 `name` 인 정상 배선이 잘린다.
+      //   값이 산문일 때만 설명이다 — 목록·단일 토큰은 데이터일 수 있으므로 남긴다.
+      ['matrix 변수명이 name', 'jobs:\n  a:\n    strategy:\n      matrix:\n        name: [check:leaf]\n    steps:\n      - run: npm run ${{ matrix.name }}\n', false],
     ]) {
       const rr = PU._detectOrphanGuards({ packageScripts: { test: 'node t.js', 'check:leaf': 'node l.js' },
         runners: [{ file: '.github/workflows/ci.yml', text, viaScript: null, viaScripts: [] }], scriptFiles: [] });

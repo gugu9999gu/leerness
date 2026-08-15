@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.119';
+const VERSION = '1.36.120';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -23935,7 +23935,10 @@ function adapterCmd(root, tool, opts = {}) {
   //   우리가 쓴 항목이 하나라도 있을 때만 그렇게 말한다. 그 밖에는 무엇을 보존했는지만 알린다.
   const _wrote = mcpResults.filter(r => r.action === 'created' || r.action === 'updated');
   const _kept = mcpResults.filter(r => r.preserved && !r.broken);
-  if (a.mcp && _wrote.length) log(`  ℹ MCP 등록 — 이 도구가 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`);
+  // 1.36.120 (검수·자체 재현): cursor 는 MCP 설정이 **둘**(루트 `.mcp.json` + `.cursor/mcp.json`)이다.
+  //   한쪽만 우리가 썼는데 "이 도구가 직접 호출 가능" 이라고 하면, 정작 그 도구가 읽는 파일은 남의 설정일 수 있다.
+  //   주장은 **파일 단위**로 한다 — 우리가 쓴 파일만 이름을 대고 말한다.
+  _wrote.forEach(r => log(`  ℹ ${r.file} 에 MCP 등록 — 이 파일을 읽는 도구는 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`));
   _kept.forEach(r => log(`  ℹ ${r.file} 의 기존 leerness 항목을 그대로 두었습니다 — 그 항목이 leerness MCP 를 띄우는지는 확인하지 않았습니다`));
   // 보존은 안전하지만 **막다른 길이면 안 된다** — 우리 것이 망가졌을 때 되돌릴 방법을 알려 준다(자체 헌트).
   if (_kept.length || _brk.length) log(`     → 표준 설정으로 되돌리려면 그 파일의 "leerness" 항목을 지우고 이 명령을 다시 실행하세요`);
