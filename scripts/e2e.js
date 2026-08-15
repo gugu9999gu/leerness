@@ -5098,6 +5098,41 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.121 — `--json` stderr 계약을 **selftest 하나가 아니라 명령 전반**에 건다.
+//   1.36.120 에서 audit 이 json 모드에 stdout 만 막고 stderr 를 열어 둔 것이 드러났고, 그 잡음의 내용이
+//   프로젝트 상태에 따라 달라져 같은 코드로 게이트가 통과/실패로 갈렸다. 한 곳에서 나온 결함은 대개 클래스다 —
+//   실측 스윕(조회성 79개)에서 정보성 누출은 audit 하나였고 나머지 4건은 **사용법 오류의 stderr 진단**(CLI 관례)이었다.
+//   그 측정을 래칫으로 고정한다: 성공 경로의 `--json` 은 stderr 가 비어야 한다.
+total++;
+{
+  let ok = false; const bad = [];
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-json121-'));
+  const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  try {
+    const d = path.join(sb, 'p'); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0","scripts":{"test":"node t.js"}}');
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+    // 성공 경로만 — 인자 없이도 동작하는 조회성 명령 (사용법 오류 경로는 stderr 진단이 관례라 대상 아님)
+    const CMDS = ['audit', 'health', 'doctor', 'drift', 'plan', 'task', 'pulse', 'tech', 'handoff',
+      'capabilities', 'commands', 'which', 'gate', 'dashboard', 'state'];
+    for (const c of CMDS) {
+      const r = cp.spawnSync(process.execPath, [CLI, c, '--path', d, '--json'], { cwd: d, encoding: 'utf8', timeout: 180000, env: ENV });
+      const out = String(r.stdout || ''), err = String(r.stderr || '');
+      if (!out.trim()) { bad.push(`${c}:출력없음`); continue; }
+      let j = null; try { j = JSON.parse(out.trim()); } catch {}
+      if (!j) { bad.push(`${c}:stdout이JSON아님`); continue; }
+      if (err.trim() !== '') bad.push(`${c}:stderr잡음(${err.length}B:${err.trim().split('\n')[0].slice(0, 40)})`);
+    }
+    // 판별력 — 이 검사가 실제로 무언가를 실행했는지(전부 건너뛰면 공허하게 통과한다)
+    if (bad.length === 0 && CMDS.length < 10) bad.push('대상이_너무적음');
+    ok = bad.length === 0;
+  } catch (e) { bad.push('ERR:' + String(e && e.message).slice(0, 80)); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ B(1.36.121) --json stderr 계약 스윕: 조회성 15종 모두 stdout 단일 JSON + stderr 0'
+    : '✗ --json stderr 계약 스윕 실패 ' + JSON.stringify(bad.slice(0, 6)));
+  if (!ok) failed++;
+}
+
 // 1.9.367 회귀 (UR-0025): _mergeEnvLines 모듈 분리 — migrate 가 사용자 .env 값을 key-aware 로 보존 (덮어쓰기 X)
 total++;
 {
@@ -11908,6 +11943,39 @@ total++;
           scriptFiles: ['scripts/check.js'],
         });
         if (relDot.orphanFiles.length) bad.push(`dot세그먼트_경로_오탐(${relDot.orphanFiles.join(',')})`);
+        // (검수) 합성 문자열이 아니라 **실제 파일 바이트**로 잰다: JS 원문의 `require(".\\check.js")` 는
+        //   backslash 가 두 개다. 한 번만 치환하면 `.//check.js` 가 남아 실제로 도는 가드가 고아로 보고됐다.
+        //   같은 픽스처가 **중첩 러너**(`scripts/a/run.js`)도 함께 잰다 — 그건 아예 수집되지 않고 있었다.
+        const dwin = path.join(sb4, 'winrel');
+        fs.mkdirSync(path.join(dwin, 'scripts', 'a'), { recursive: true });
+        fs.mkdirSync(path.join(dwin, 'scripts', 'b'), { recursive: true });
+        fs.mkdirSync(path.join(dwin, '.github', 'workflows'), { recursive: true });
+        fs.writeFileSync(path.join(dwin, 'package.json'), JSON.stringify({ name: 'w', version: '0.1.0', scripts: { test: 'node scripts/a/run.js' } }));
+        fs.writeFileSync(path.join(dwin, '.github', 'workflows', 'ci.yml'), 'jobs:\n  a:\n    steps:\n      - run: npm test\n');
+        fs.writeFileSync(path.join(dwin, 'scripts', 'a', 'run.js'), 'require(".\\\\check.js");\n');
+        fs.writeFileSync(path.join(dwin, 'scripts', 'a', 'check.js'), '// guard\n');
+        fs.writeFileSync(path.join(dwin, 'scripts', 'b', 'check.js'), '// other\n');
+        const winInp = AUD._collectGuardInputs(dwin);
+        if (!winInp.runners.some(r => /scripts[\\/]a[\\/]run\.js$/.test(r.file))) bad.push('중첩러너_미수집');
+        const winRes = PU._detectOrphanGuards(winInp);
+        if (winRes.orphanFiles.includes('scripts/a/check.js')) bad.push('실제JS의_윈도우_상대경로_오탐');
+        if (!winRes.orphanFiles.includes('scripts/b/check.js')) bad.push('판별력:무관파일까지_덮음');
+        // 반복 dot-segment 정규화
+        const relDot2 = PU._detectOrphanGuards({
+          packageScripts: { test: 'node t.js' },
+          runners: [{ file: '.github/workflows/ci.yml', viaScript: null, viaScripts: [], unconditional: true,
+            text: 'jobs:\n  a:\n    steps:\n      - run: node scripts/././check.js\n      - run: npm test\n' }],
+          scriptFiles: ['scripts/check.js'],
+        });
+        if (relDot2.orphanFiles.length) bad.push(`반복dot세그먼트_오탐(${relDot2.orphanFiles.join(',')})`);
+        // 판정기의 주석 규칙이 수집기와 같아야 한다 — CMD 표기를 한쪽에만 넣으면 주석 속 이름이 호출로 계상된다
+        const cmt = PU._detectOrphanGuards({
+          packageScripts: { test: 'node t.js', 'check:leaf': 'node l.js' },
+          runners: [{ file: '.github/workflows/ci.yml', viaScript: null, viaScripts: [], unconditional: true,
+            text: 'jobs:\n  a:\n    steps:\n      - shell: cmd\n        run: |\n          REM npm run check:leaf\n          echo hi\n      - run: npm test\n' }],
+          scriptFiles: [],
+        });
+        if (!cmt.orphanScripts.includes('check:leaf')) bad.push('판정기가_CMD주석을_실행으로');
         // (자체 헌트) Windows CI 는 `node scripts\x\check.js` 로 적는다. 후보 경로는 `/` 표기라
         //   전체 경로가 안 맞고 basename 경계 판정도 앞의 `\` 때문에 걸러져 **정상 배선이 고아로 보고**됐다.
         for (const [label, ref] of [['posix', 'scripts/x/check.js'], ['win', 'scripts\\x\\check.js'], ['win-dot', '.\\scripts\\x\\check.js']]) {
