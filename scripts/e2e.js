@@ -5482,7 +5482,11 @@ total++;
     const pu = require(path.resolve(__dirname, '..', 'lib', 'pure-utils'));
     const g = pu._renderWorkspaceReferenceGuide('.harness', '1.2.3', '2026-01-01T00:00:00.000Z');
     ok = typeof g === 'string' && g.includes('.harness/progress-tracker.md') && g.includes('by leerness 1.2.3')
-      && g.includes('## 📁 디렉토리 구조 (핵심)') && g.includes('## 🧭 자주 묻는 위치') && g.includes('## 🔄 마이그레이션 안내') && g.includes('plan.md');
+      && g.includes('## 📁 디렉토리 구조 (핵심)') && g.includes('## 🧭 자주 묻는 위치') && g.includes('plan.md')
+      // 1.36.126 (T-0107): 여기도 제목 리터럴('## 🔄 마이그레이션 안내')을 붙잡고 있었다 — selftest 쪽만 고치고
+      //   이 **복제본**을 놓쳐 게이트가 깨졌다(같은 단언이 두 표면에 있으면 둘 다 고쳐야 한다).
+      //   제목이 아니라 계약을 건다: 가이드는 `.leerness` 를 다루되 그리로 **가라고 지시하지 않는다**.
+      && /\.leerness/.test(g) && !/우선 사용/.test(g) && !/로 가야 함/.test(g) && /읽지 마십시오/.test(g);
   } catch {}
   console.log(ok ? '✓ B(1.9.377) UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 (빌더 동작 + 핵심 섹션)' : '✗ workspace guide 빌더 실패');
   if (!ok) failed++;
@@ -12408,6 +12412,169 @@ total++;
   finally { _dirs.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
   console.log(ok ? `✓ U(1.36.125) verify-claim --all --run-tests: 스위트 1회만 실행(주장 수만큼 반복 금지) · 실패 결과가 ${N}개 주장 **전부**에 전파 · 통과 시 거짓 실패 0 ${JSON.stringify(dbg)}`
     : '✗ 1.36.125 --all 테스트 메모화 실패 ' + JSON.stringify({ bad: bad.slice(0, 6), dbg }));
+  if (!ok) failed++;
+}
+
+// 1.36.126 (T-0107): `migrate-workspace-dir` 는 **배달할 수 없는 것을 배달했다고** 말하고 있었다.
+//   실측: 58파일을 복사하고 "✓ 마이그레이션 완료 → 다음 handoff부터 .leerness 우선 사용" 이라 찍은 뒤,
+//   바로 이어지는 `task add` 는 여전히 `.harness` 에 썼다(env 를 켜도 동일). 즉 `.leerness` 는 복사 시점에
+//   얼어붙은 사본이 되고, 같이 생성되는 WHERE_TO_FIND.md 가 **AI 를 그 낡은 상태로 안내**한다.
+//   배선 비용 실측: 경로 구성 252곳 + 안내 문자열 634곳 vs 해석기 소비처 9곳 → 이번 라운드에 배선 불가.
+//   그래서 ① 함정을 만들지 않고(fail-closed) ② 이미 당한 프로젝트를 알리고 ③ 평범한 프로젝트는 조용하다.
+total++;
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ws126-'));
+  const envW = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG', 'LEERNESS_MCP_PROFILE', 'LEERNESS_MCP_TIMEOUT_MS']) delete envW[k];
+  const mkP = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"w","version":"0.1.0"}');
+    const r = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 600000, env: envW });
+    if (r.status !== 0) bad.push(`${name}:init실패(${r.status})`);
+    return d;
+  };
+  const RW = (d, args, extra) => cp.spawnSync(process.execPath, [CLI, ...args],
+    { cwd: d, encoding: 'utf8', timeout: 600000, env: Object.assign({}, envW, extra || {}), maxBuffer: 32 * 1024 * 1024 });
+  try {
+    // ① 함정을 만들지 않는다 — 복사 0 · 명시적 실패 · 사유와 실측 근거를 함께 말한다
+    const A = mkP('A');
+    const m = RW(A, ['migrate-workspace-dir', '--apply', '--path', A]);
+    if (fs.existsSync(path.join(A, '.leerness'))) bad.push('①.leerness가생성됨');
+    if (m.status === 0) bad.push('①조용한성공(exit 0)');
+    if (!/죽은 사본|옮길 수 없습니다/.test(m.stdout || '')) bad.push('①사유없음');
+    //   ⚠ 여기에 리터럴(252)을 박아 뒀더니 다음 편집에서 곧바로 틀렸다 — 사유의 숫자는 **실측과 같은지**로 본다.
+    //   실제 대조는 아래 ⑥(제품 보고 == e2e 실측). 여기서는 "숫자를 아예 안 대는" 경우만 잡는다.
+    if (!/\d{2,}곳이 '\.harness'/.test(m.stdout || '')) bad.push('①실측근거없음');
+    const mj = RW(A, ['migrate-workspace-dir', '--apply', '--path', A, '--json']);
+    let mjj = null; try { mjj = JSON.parse(mj.stdout); } catch { bad.push('①JSON아님'); }
+    if (mjj && mjj.blocked !== true) bad.push('①json:blocked아님');
+    if (mjj && mjj.blockedReason !== 'workspace-dir-alt-unsupported') bad.push(`①json:reason=${mjj && mjj.blockedReason}`);
+    if (mj.status === 0) bad.push('①json:exit 0');
+    if (mjj && Array.isArray(mjj.copiedFiles) && mjj.copiedFiles.length) bad.push('①json:복사보고');
+    dbg.A = { exit: m.status, created: fs.existsSync(path.join(A, '.leerness')) };
+
+    // ② 이미 당한 프로젝트 — 옛 버전이 남긴 상태를 재현(옛 바이너리가 없으므로 손으로 만든다)
+    const B = mkP('B');
+    fs.mkdirSync(path.join(B, '.leerness'), { recursive: true });
+    fs.copyFileSync(path.join(B, '.harness', 'progress-tracker.md'), path.join(B, '.leerness', 'progress-tracker.md'));
+    fs.writeFileSync(path.join(B, '.leerness', 'MIGRATED_FROM_HARNESS'), 'migrated');
+    fs.writeFileSync(path.join(B, '.leerness', 'WHERE_TO_FIND.md'), '# 어디서 찾나\n');
+    RW(B, ['task', 'add', '사본 이후 작업', '--path', B, '--json']);
+    const au = RW(B, ['audit', '--path', B, '--json']);
+    let aj = null; try { aj = JSON.parse(au.stdout); } catch { bad.push('②auditJSON아님'); }
+    const fnd = aj && Array.isArray(aj.findings) ? aj.findings.find(x => x.kind === 'stale_workspace_copy') : null;
+    if (!fnd) bad.push('②죽은사본_미탐지');
+    else if (fnd.guidePresent !== true) bad.push('②가이드파일_미보고');
+    const wdj = RW(B, ['workspace-dir', 'get', '--path', B, '--json']);
+    let wj = null; try { wj = JSON.parse(wdj.stdout); } catch { bad.push('②wdJSON아님'); }
+    if (wj && wj.current !== '.harness') bad.push(`②현재=${wj.current}`);
+    if (wj && wj.staleCopy !== true) bad.push('②staleCopy아님');
+    if (wj && wj.altSupported !== false) bad.push('②altSupported참');
+    if (!/죽은 사본/.test(RW(B, ['workspace-dir', 'get', '--path', B]).stdout || '')) bad.push('②사람용경고없음');
+    //   마커·env 가 있어도 **쓰기는 정상**이어야 한다(예전엔 _isInitialized 가 .leerness 를 봐서 "미초기화" 거부했다)
+    const w = RW(B, ['task', 'add', '마커 있어도 쓰기', '--path', B, '--json'], { LEERNESS_WORKSPACE_DIR: '.leerness' });
+    if (w.status !== 0) bad.push(`②마커상태쓰기실패(${w.status})`);
+    if (!fs.readFileSync(path.join(B, '.harness', 'progress-tracker.md'), 'utf8').includes('마커 있어도 쓰기')) bad.push('②쓰기가.harness에없음');
+    dbg.B = { finding: !!fnd, staleCopy: wj && wj.staleCopy, writeExit: w.status };
+
+    // ③ 대조군 — 평범한 프로젝트는 조용하다(오탐이 이 경고를 죽인다)
+    const C = mkP('C');
+    const au2 = RW(C, ['audit', '--path', C, '--json']);
+    let aj2 = null; try { aj2 = JSON.parse(au2.stdout); } catch { bad.push('③auditJSON아님'); }
+    const n2 = aj2 && Array.isArray(aj2.findings) ? aj2.findings.filter(x => x.kind === 'stale_workspace_copy').length : -1;
+    if (n2 !== 0) bad.push(`③대조군오탐 ${n2}건`);
+    const wd2 = RW(C, ['workspace-dir', 'get', '--path', C]).stdout || '';
+    if (/죽은 사본|적용되지 않습니다/.test(wd2)) bad.push('③대조군에경고문구');
+    dbg.C = { falsePositives: n2 };
+
+    // ③-c 마커가 지워진 사본도 잡는다(검수 P2) + **남의 `.leerness` 는 건드리지 않는다**(오탐이 경고를 죽인다)
+    {
+      const D = mkP('D');                                   // 마커 없음 · 우리 가이드 파일만 남음
+      fs.mkdirSync(path.join(D, '.leerness'), { recursive: true });
+      fs.writeFileSync(path.join(D, '.leerness', 'WHERE_TO_FIND.md'), 'Generated: 2026-01-01T00:00:00.000Z by leerness 1.36.100\n');
+      const ad = RW(D, ['audit', '--path', D, '--json']);
+      let adj = null; try { adj = JSON.parse(ad.stdout); } catch { bad.push('③c auditJSON아님'); }
+      const fd = adj && Array.isArray(adj.findings) ? adj.findings.find(x => x.kind === 'stale_workspace_copy') : null;
+      if (!fd) bad.push('③c마커없는사본_미탐지');
+      else if (fd.markerPresent !== false || fd.guideIsOurs !== true) bad.push(`③c근거오류(${fd.markerPresent}/${fd.guideIsOurs})`);
+
+      const E = mkP('E');                                   // 남의 도구가 만든 .leerness — 우리 서명 없음
+      fs.mkdirSync(path.join(E, '.leerness'), { recursive: true });
+      fs.writeFileSync(path.join(E, '.leerness', 'WHERE_TO_FIND.md'), '# someone else\n');
+      fs.writeFileSync(path.join(E, '.leerness', 'config.yml'), 'a: 1\n');
+      const ae = RW(E, ['audit', '--path', E, '--json']);
+      let aej = null; try { aej = JSON.parse(ae.stdout); } catch { bad.push('③c(대조)auditJSON아님'); }
+      const fe = aej && Array.isArray(aej.findings) ? aej.findings.filter(x => x.kind === 'stale_workspace_copy').length : -1;
+      if (fe !== 0) bad.push(`③c남의.leerness오탐 ${fe}건`);
+      dbg.D = { detected: !!fd, foreignFalsePositives: fe };
+    }
+
+    // ③-b 부모 자산 — 부모에 죽은 사본이 있어도 **살아 있는 저장소**의 자산을 물려받아야 한다.
+    //   (`_findParentWorkspace` 는 해석기를 안 쓰고 자체 로직으로 `.leerness` 를 우선하고 있었다 —
+    //    같은 클래스가 다른 자리에 남아 있던 경우. 자식이 낡은 design-system 을 물려받는다.)
+    {
+      const P = mkP('P');                                   // 부모
+      fs.writeFileSync(path.join(P, '.harness', 'design-system.md'), '# LIVE\n');
+      fs.mkdirSync(path.join(P, '.leerness'), { recursive: true });
+      fs.writeFileSync(path.join(P, '.leerness', 'MIGRATED_FROM_HARNESS'), 'x');
+      fs.writeFileSync(path.join(P, '.leerness', 'design-system.md'), '# STALE\n');
+      const kid = path.join(P, 'kid'); fs.mkdirSync(kid, { recursive: true });
+      fs.writeFileSync(path.join(kid, 'package.json'), '{"name":"kid","version":"0.1.0"}');
+      const pw = RW(kid, ['parent', 'detect', '--path', kid, '--json']);
+      let pj = null; try { pj = JSON.parse(pw.stdout); } catch { bad.push('③b parentJSON아님'); }
+      const par = pj && pj.parent;
+      if (!par) bad.push('③b부모미탐지(셋업실패면 아래 단언이 공허해진다)');
+      else {
+        if (par.workspaceDir !== '.harness') bad.push(`③b부모워크스페이스=${par.workspaceDir}`);
+        if (!String(par.workspaceAbs || '').endsWith('.harness')) bad.push('③b부모abs가.harness아님');
+        if (par.assets && par.assets.designSystem !== true) bad.push('③b살아있는자산미탐지(계측붕괴)');
+        // 판별: 실제로 읽히는 파일이 LIVE 인가(경로만 맞고 내용이 STALE 이면 의미 없다)
+        const body = fs.readFileSync(path.join(par.workspaceAbs, 'design-system.md'), 'utf8');
+        if (!/LIVE/.test(body)) bad.push('③b읽히는자산이 STALE');
+      }
+      dbg.P = { workspaceDir: par && par.workspaceDir, depth: par && par.depth };
+    }
+
+    // ④ 순서 강제 — 하드코딩이 남아 있는 한 "지원함" 이라 말할 수 없다.
+    //   (selftest 는 자기 소스를 못 읽는다 — 1.36.84 메타가드. 그래서 이 불변식은 여기서 건다.)
+    const binSrc = fs.readFileSync(CLI, 'utf8');
+    const libDir = path.resolve(path.dirname(CLI), '..', 'lib');   // CLI 에서 유도 — 실행 위치에 의존하지 않는다
+    let libSrc = '';
+    for (const f of fs.readdirSync(libDir)) if (f.endsWith('.js')) libSrc += '\n' + fs.readFileSync(path.join(libDir, f), 'utf8');
+    const hard = ((binSrc + libSrc).match(/path\.join\([^)]*'\.harness'/g) || []).length;
+    if (hard < 50) bad.push(`④하드코딩계측붕괴(${hard})`);            // 0건이면 측정이 깨진 것 — 공허통과 금지
+    const claims = /const WORKSPACE_DIR_ALT_SUPPORTED = (true|false);/.exec(binSrc);
+    if (!claims) bad.push('④지원상수없음');
+    else if (claims[1] === 'true' && hard > 0) bad.push(`④하드코딩 ${hard}곳인데 지원함이라 주장`);
+    // ⑤ 내부 시험 통로가 **제품 경로**로 새지 않는다.
+    //   (검수 P3) 정확 카운트는 안전한 리팩터만으로 깨진다 — 개수가 아니라 **어디에 있는가**로 본다:
+    //   selftest 케이스 영역(_selfTestCases) 밖에 이 옵션을 넘기는 곳이 있으면 제품 경로 누출이다.
+    const selfStart = binSrc.indexOf('function _selfTestCases(');
+    const selfEnd = selfStart < 0 ? -1 : binSrc.indexOf('\nfunction ', selfStart + 10);
+    if (selfStart < 0 || selfEnd < 0) bad.push('⑤selftest영역경계못찾음');
+    else {
+      const outside = binSrc.slice(0, selfStart) + binSrc.slice(selfEnd);
+      const inside = binSrc.slice(selfStart, selfEnd);
+      //   "언급" 이 아니라 **넘기는 것**만 센다 — 주석·선언(`opts.allowUnsupported !== true`)은 호출이 아니다.
+      const passes = (s) => (s.match(/allowUnsupported\s*:/g) || []).length;
+      const leaked = passes(outside);
+      if (leaked > 0) bad.push(`⑤시험통로가 제품 경로에 ${leaked}곳`);
+      if (passes(inside) < 1) bad.push('⑤시험통로를 아무도 안 태움(보호가 썩는다)');
+      dbg.seam = { leaked, insideUses: passes(inside) };
+    }
+    dbg.src = { hard, claims: claims && claims[1] };
+    // ⑥ 거부 사유의 숫자는 **실행 시 측정**이어야 한다(검수 P2: 손으로 적은 252가 곧 255로 낡았다).
+    //   제품이 보고한 수와 여기서 센 수가 같아야 한다 — 다르면 둘 중 하나가 거짓말이다.
+    if (mjj && mjj.measured) {
+      if (mjj.measured.hardcodedPathSites !== hard) bad.push(`⑥보고=${mjj.measured.hardcodedPathSites} vs 실측=${hard}`);
+      if (!(mjj.measured.resolverConsumers > 0)) bad.push('⑥해석기 소비처 0(계측붕괴)');
+    } else bad.push('⑥measured 없음');
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ V(1.36.126/T-0107) 워크스페이스 대체 디렉터리: migrate 가 죽은 사본을 만들지 않고 명시적으로 실패(사유+실측) · 이미 당한 프로젝트를 audit/workspace-dir 가 알림 · 마커·env 가 있어도 쓰기 정상(.harness) · 대조군 오탐 0 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.126 워크스페이스 대체 디렉터리 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
   if (!ok) failed++;
 }
 

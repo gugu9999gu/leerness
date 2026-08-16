@@ -89,7 +89,7 @@ leerness가 자동 검증 가능한 trigger:
 | 1.9.208 | 플랫폼/API 제약 사전 체크 (6종 기본) | `constraints list\|check\|add` |
 | 1.9.209 | pre-wake sub-agent audit (6 영역) | `pre-wake-audit [--last]` |
 | 1.9.210 | adaptive wakeup interval (10~45min) | `wakeup-interval get\|set\|auto\|history\|record` |
-| 1.9.211 | .harness → .leerness opt-in migration | `migrate-workspace-dir [--dry-run]` + `workspace-dir get\|guide` |
+| 1.9.211 | .harness → .leerness opt-in migration — **비활성(1.36.126)**: 복사만 되고 이후 쓰기는 `.harness` 로 가 죽은 사본이 됨. `migrate-workspace-dir` 는 사유를 설명하고 거부한다 (T-0107) | `workspace-dir get\|guide` |
 | 1.9.212 | 멱등성 감사 + ruleAdd/taskAdd dedup | `idempotency audit` + `rule add` / `task add` 자동 dedup |
 | 1.9.213 | intent inference + 5도메인 scope expansion | `intent classify\|expand\|domains` |
 ### handoff 헤드라인 자동 노출 (1.9.215+)

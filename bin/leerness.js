@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.125';
+const VERSION = '1.36.126';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3748,7 +3748,8 @@ function _selfTestCases() {
         } catch {}   // 심링크 생성 권한 없는 환경 → 소스 불변식만으로 판정(false-BLOCK 회피)
         if (_linked) {
           try {
-            const _rep = _migrateWorkspaceDir(_st, { dryRun: true });
+            // 1.36.126: CLI 는 fail-closed 지만 복사 구현의 안전 속성은 계속 시험한다(내부 통로).
+            const _rep = _migrateWorkspaceDir(_st, { dryRun: true, allowUnsupported: true });
             const _skipped = _rep.skippedFiles.some(f => /^loop\b/.test(f) && f.includes('symlink'));
             const _notFollowed = !_rep.copiedFiles.some(f => /^loop[\\/]/.test(f));
             symlinkGuard = symlinkGuard && _skipped && _notFollowed;
@@ -4261,7 +4262,7 @@ function _selfTestCases() {
     { name: 'UR-0074: _cadenceAssessment 릴리스 빈도 평가 (임계값) 행위 (1.9.374)', run: () => { const m = require('../lib/pure-utils'); if (typeof _cadenceAssessment !== 'function' || m._cadenceAssessment !== _cadenceAssessment || typeof releaseCadenceCmd !== 'function') return false; return _cadenceAssessment(7, 1, 1).level === 'very-high' && _cadenceAssessment(3, 1, 1).level === 'high' && _cadenceAssessment(1, 1, 1).level === 'moderate' && _cadenceAssessment(0.2, 1, 1).level === 'healthy' && _cadenceAssessment(7, 1, 1).recommendation.length > 0; } },
     { name: 'UR-0084: _withLock 획득/재진입/해제 + maxWaitMs 하드닝(10s) 행위 (1.9.375)', run: () => { if (typeof _withLock !== 'function') return false; const src = read(__filename); const hardened = /maxWaitMs = opts\.maxWaitMs \|\| 10000/.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lock_')); try { const target = path.join(tmp, 'f.md'); let reentrant = false; const lockSeen = _withLock(target, () => { const exists = fs.existsSync(target + '.lock'); reentrant = (_withLock(target, () => 42) === 42); return exists; }); const cleaned = !fs.existsSync(target + '.lock'); return hardened && lockSeen === true && reentrant === true && cleaned; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'UR-0073 Phase D: _teamDeployGate 이중 게이트 (dry-run 기본/env 게이트/실행) 행위 (1.9.376)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamDeployGate !== 'function' || m._teamDeployGate !== _teamDeployGate) return false; const team = { id: 'd', deployCommand: 'echo hi' }; const noCmd = _teamDeployGate({ id: 'x' }, { yes: true, envOn: true }).mode === 'no-command'; const dry = _teamDeployGate(team, { yes: false, envOn: true }).mode === 'dry-run'; const gated = _teamDeployGate(team, { yes: true, envOn: false }).mode === 'gated'; const exec = _teamDeployGate(team, { yes: true, envOn: true }).mode === 'execute'; return noCmd && dry && gated && exec; } },
-    { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + 빌더 동작 (1.9.377)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide('.leerness', '9.9.9', '2026-01-01T00:00:00.000Z'); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString())'); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && g.includes('마이그레이션 안내') && wrapperThin; } },
+    { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + 빌더 동작 (1.9.377)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide('.leerness', '9.9.9', '2026-01-01T00:00:00.000Z'); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString())'); /* 1.36.126 (T-0107): 제목 리터럴('마이그레이션 안내')을 붙잡던 자리 — 그 절이 바로 **AI 를 죽은 사본으로 안내**하고 있었다. 제목이 아니라 계약을 건다: ① `.leerness` 상황을 다루는 절이 여전히 있고 ② 그 절이 "우선 사용/가야 함" 같은 **지시**를 하지 않는다(생성 결과 문자열에 대한 행위 단언 — 소스 자기참조가 아니다). */ const guideSafe = /\.leerness/.test(g) && !/우선 사용/.test(g) && !/로 가야 함/.test(g) && /읽지 마십시오/.test(g); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && guideSafe && wrapperThin; } },
     { name: 'UR-0073: team MCP 도구 2종(read-only) 정의 + dispatch 와이어 (1.9.378)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const tl = tools.find(t => t.name === 'leerness_team_list'); const tp = tools.find(t => t.name === 'leerness_team_preview'); const defsOk = tl && tl.requiredTier === 'read-only' && tp && tp.requiredTier === 'read-only' && tp.inputSchema.required && tp.inputSchema.required.includes('id'); const wired = src.includes("case " + "'leerness_team_list':") && src.includes("case " + "'leerness_team_preview':") && /cliArgs = \['team', 'list'/.test(src) && /cliArgs = \['team', 'preview'/.test(src); return !!defsOk && wired; } },
     { name: 'UR-0025 심화: pulse 렌더 코어 분리 — _memorySurface + _renderPulseLine 행위 (1.9.379)', run: () => { const m = require('../lib/pure-utils'); if (typeof _memorySurface !== 'function' || typeof _renderPulseLine !== 'function' || m._memorySurface !== _memorySurface || m._renderPulseLine !== _renderPulseLine) return false; const ms = _memorySurface({ tasks: 1, decisions: 2, rules: 3, milestones: 4, lessons: 5 }) === 'T1/D2/R3/P4/L5' && _memorySurface({}) === 'T0/D0/R0/P0/L0'; const base = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'T0/D1/R0/P2/L0' }); const ln = base.includes('v1.0.0') && base.includes('R7') && base.includes('MCP 85') && base.includes('T0/D1/R0/P2/L0') && !base.includes('🎯') && !base.includes('abnormal'); const full = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'x', nextMilestone: 400, etaDays: 6, abnormalShutdown: 'high' }); const ln2 = full.includes('🎯 R400 (6d)') && full.includes('abnormal:high'); const wired = read(__filename).includes('const line = _renderPulseLine(data)') && read(__filename).includes('data.memorySurface = _memorySurface('); return ms && ln && ln2 && wired; } },
     { name: 'UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 — verify/migrate audit·apply 3중 중복 제거 (1.9.380)', run: () => { const c = require('../lib/catalogs'); if (REQUIRED_WORKSPACE_FILES !== c.REQUIRED_WORKSPACE_FILES) return false; const listOk = Array.isArray(c.REQUIRED_WORKSPACE_FILES) && c.REQUIRED_WORKSPACE_FILES.length === 9 && c.REQUIRED_WORKSPACE_FILES.includes('AGENTS.md') && c.REQUIRED_WORKSPACE_FILES.includes('.harness/plan.md'); const harnessUses = (read(__filename).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 1; const migUses = (read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 2; return listOk && harnessUses && migUses; } },
@@ -6692,6 +6693,45 @@ function _selfTestCases() {
       } finally { if (saved !== undefined) process.env.LEERNESS_MCP_TIMEOUT_MS = saved; else delete process.env.LEERNESS_MCP_TIMEOUT_MS; }
     } },
     // 1.36.125: 측정 통제 자체의 가드 — 목록이 비거나 배선이 끊기면 selftest 는 다시 사용자 설정에 휘둘린다.
+    // 1.36.126 (T-0107): `.leerness` 를 살아 있는 저장소로 **주장하지 않는다**.
+    //   ⚠ 이 케이스는 **행위검사만** 한다(자기 소스 읽기 금지 — 1.36.84 메타가드). 상수와 하드코딩 수의
+    //     모순 금지 불변식은 e2e V 블록이 소스를 읽어 건다. 여기서는 실제 함수를 불러 결과를 본다.
+    { name: '1.36.126 (T-0107): 워크스페이스 대체 디렉터리 — 해석기가 살아 있는 저장소를 말함 + 무시 고지 + 대조군 침묵 (행위검사)', run: () => {
+      // 행위 ① 해석기는 env·마커가 있어도 살아 있는 저장소를 말한다(예전엔 `.leerness` 를 말해 미초기화 오판을 냈다)
+      const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ws126-'));
+      const savedEnv = process.env.LEERNESS_WORKSPACE_DIR;
+      try {
+        fs.mkdirSync(path.join(arena, '.leerness'), { recursive: true });
+        fs.writeFileSync(path.join(arena, '.leerness', 'MIGRATED_FROM_HARNESS'), 'x');
+        fs.mkdirSync(path.join(arena, '.harness'), { recursive: true });
+        fs.writeFileSync(path.join(arena, '.harness', 'HARNESS_VERSION'), VERSION);
+        process.env.LEERNESS_WORKSPACE_DIR = '.leerness';
+        if (_workspaceDirName(arena) !== '.harness') return false;
+        if (!_workspaceDirAbs(arena).endsWith('.harness')) return false;
+        // 마커가 있어도 초기화된 프로젝트로 인식해야 한다(예전엔 여기서 "미초기화" 오판이 났다)
+        if (_isInitialized(arena) !== true) return false;
+        // 행위 ② 무시한 설정은 **말한다** — env·마커 각각, 그리고 아무것도 없으면 침묵(오탐 0)
+        const both = _workspaceDirAltIgnored(arena);
+        if (!both || both.env !== '.leerness' || both.marker !== true || both.effective !== '.harness') return false;
+        delete process.env.LEERNESS_WORKSPACE_DIR;
+        const markerOnly = _workspaceDirAltIgnored(arena);
+        if (!markerOnly || markerOnly.env !== null || markerOnly.marker !== true) return false;
+        const clean = path.join(arena, 'clean'); fs.mkdirSync(clean, { recursive: true });
+        if (_workspaceDirAltIgnored(clean) !== null) return false;   // 대조군 — 평범한 프로젝트는 조용하다
+        // 행위 ③ 코어가 실제로 거부하는가 — CLI 인자 없이 함수를 직접 불러 판정(문자열이 아니라 결과로)
+        const blocked = _migrateWorkspaceDir(arena, { dryRun: true });
+        if (blocked.blocked !== true || blocked.blockedReason !== 'workspace-dir-alt-unsupported') return false;
+        if ((blocked.copiedFiles || []).length !== 0) return false;
+        // 그리고 내부 시험 통로는 여전히 복사 구현을 태운다(안전 속성이 도달 불가로 썩지 않게)
+        const seam = _migrateWorkspaceDir(arena, { dryRun: true, allowUnsupported: true });
+        if (seam.blocked === true) return false;
+        return true;
+      } catch { return false; }
+      finally {
+        if (savedEnv !== undefined) process.env.LEERNESS_WORKSPACE_DIR = savedEnv; else delete process.env.LEERNESS_WORKSPACE_DIR;
+        try { fs.rmSync(arena, { recursive: true, force: true }); } catch {}
+      }
+    } },
     { name: '1.36.125 (검수 P2): selftest 측정 통제 — 통제 목록 실재 + 실제 삭제 + 무시 사실 보고(조용한 무시 금지)', run: () => {
       const must = ['LEERNESS_MCP_PROFILE', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG', 'LEERNESS_MCP_TIMEOUT_MS'];
       if (!must.every(k => _SELFTEST_CONTROLLED_ENV.includes(k))) return false;
@@ -9201,7 +9241,7 @@ function commandsCmd(root) {
       { cmd: 'migrate [path] [--dry-run]', desc: '업데이트 마이그레이션', descEn: 'update migration' },
       { cmd: 'update [--check|--yes|--force]', desc: '자가 업데이트', descEn: 'self-update' },
       { cmd: 'wakeup-interval get|set|auto|history|record', desc: 'adaptive wakeup (1.9.210)', descEn: 'adaptive wakeup interval (1.9.210)' },
-      { cmd: 'workspace-dir get|guide', desc: '워크스페이스 디렉토리 (1.9.211)', descEn: 'workspace directory (1.9.211)' },
+      { cmd: 'workspace-dir get|guide', desc: '워크스페이스 디렉토리 확인 — 이 빌드는 .harness 만 사용 (migrate-workspace-dir 는 1.36.126 부터 거부, T-0107)', descEn: 'show the workspace directory — this build uses .harness only (migrate-workspace-dir refuses since 1.36.126, T-0107)' },
       { cmd: 'parent detect|adopt [--select <kinds>] [--apply]', desc: '상위 leerness 부모 탐지 + 자산 게이트형 adopt (1.30.2~3)', descEn: 'detect a parent leerness above + gated asset adoption (1.30.2~3)' },
       { cmd: 'intent classify|expand|domains "<request>"', desc: '의도 파악 + scope (1.9.213)', descEn: 'infer intent + scope (1.9.213)' },
       { cmd: 'constraints list|check|add', desc: '플랫폼/API 제약 (1.9.208)', descEn: 'platform/API constraints (1.9.208)' },
@@ -9756,20 +9796,49 @@ function _computeAdaptiveInterval(root) {
 //   - LEERNESS_WORKSPACE_DIR env 또는 .leerness/MARKER 존재 시 .leerness 사용
 //   - leerness migrate-workspace-dir CLI: .harness → .leerness copy + AI reference guide 생성
 //   - AI 참조 가이드: WHERE_TO_FIND.md (디렉토리 구조 + 파일별 역할 + 마이그레이션 history)
-function _workspaceDirName(root) {
-  // 1) env override
-  if (process.env.LEERNESS_WORKSPACE_DIR) {
-    const v = process.env.LEERNESS_WORKSPACE_DIR.trim();
-    if (v) return v;
-  }
-  // 2) .leerness 마이그레이션 마커 존재 시 .leerness 우선
+// 1.36.126 (T-0107 실측): 이 해석기는 **소수파**였다. 실측 —
+//   해석기 소비처 9곳 vs `.harness` 경로 구성 252곳(bin 215 · lib 37) + 안내/템플릿 문자열 634곳.
+//   그래서 env 나 마커로 `.leerness` 를 고르게 해도 **쓰기는 전부 `.harness` 로 갔다**(실측:
+//   migrate 후 `task add` 가 `.leerness` 에 안 남음. env 를 켜도 동일). 결과는 두 가지 해악이었다:
+//     ① `_isInitialized` 만 `.leerness` 를 봐서 정상 프로젝트를 "미초기화" 로 오판(실측 selftest 4건 실패)
+//     ② `.leerness` 는 마이그레이션 시점에 얼어붙은 **죽은 사본**이 되고 WHERE_TO_FIND.md 가 AI 를 그리로 안내
+//   즉 소수파를 따르는 것은 "다르게 동작" 이 아니라 **틀리게 동작**이었다. 살아 있는 저장소를 그대로 말한다.
+//   ⚠ 이 상수를 true 로 바꾸려면 하드코딩 252곳을 먼저 없애야 한다 — selftest 가 그 순서를 강제한다.
+const WORKSPACE_DIR_ALT_SUPPORTED = false;
+// 거부 사유로 대는 숫자는 **실행 시** 센다 — 손으로 적으면 다음 편집에서 곧바로 낡는다(검수 P2 실측: 252→255).
+//   거부 경로에서만 불리므로 비용은 문제되지 않는다. 세다가 실패하면 숫자를 지어내지 말고 null 로 둔다.
+function _measureWorkspaceHardcoding() {
+  const out = { resolverConsumers: null, hardcodedPathSites: null, hardcodedTextMentions: null };
   try {
-    if (root && exists(path.join(root, '.leerness', 'MIGRATED_FROM_HARNESS'))) {
-      return '.leerness';
+    let src = read(__filename);
+    const libDir = path.join(__dirname, '..', 'lib');
+    for (const f of fs.readdirSync(libDir)) if (f.endsWith('.js')) src += '\n' + read(path.join(libDir, f));
+    out.hardcodedPathSites = (src.match(/path\.join\([^)]*'\.harness'/g) || []).length;
+    out.hardcodedTextMentions = (src.match(/\.harness\/[A-Za-z0-9_.-]+/g) || []).length;
+    out.resolverConsumers = (src.match(/_workspaceDir(?:Name|Abs)\(/g) || []).length;
+  } catch { /* 셀 수 없으면 null — 지어내지 않는다 */ }
+  return out;
+}
+// 사용자가 켠 설정이 **안 먹는다는 사실**은 반드시 말해야 한다(조용한 무시 금지 — 1.36.125 와 같은 원칙).
+function _workspaceDirAltIgnored(root) {
+  if (WORKSPACE_DIR_ALT_SUPPORTED) return null;
+  const env = (process.env.LEERNESS_WORKSPACE_DIR || '').trim();
+  let marker = false;
+  try { marker = !!(root && exists(path.join(root, '.leerness', 'MIGRATED_FROM_HARNESS'))); } catch {}
+  if (!env && !marker) return null;
+  return { env: env || null, marker, effective: '.harness' };
+}
+function _workspaceDirName(root) {
+  if (WORKSPACE_DIR_ALT_SUPPORTED) {
+    if (process.env.LEERNESS_WORKSPACE_DIR) {
+      const v = process.env.LEERNESS_WORKSPACE_DIR.trim();
+      if (v) return v;
     }
-  } catch {}
-  // 3) default
-  return '.harness';
+    try {
+      if (root && exists(path.join(root, '.leerness', 'MIGRATED_FROM_HARNESS'))) return '.leerness';
+    } catch {}
+  }
+  return '.harness';   // 살아 있는 저장소 — 위 주석의 실측대로 이 빌드에서는 항상 여기다
 }
 function _workspaceDirAbs(root) {
   return path.join(root, _workspaceDirName(root));
@@ -9788,7 +9857,12 @@ function _findParentWorkspace(root, opts = {}) {
       const hasHarness = exists(path.join(cur, '.harness'));
       const hasLeerness = exists(path.join(cur, '.leerness'));
       if (hasHarness || hasLeerness) {
-        const wd = (hasLeerness && exists(path.join(cur, '.leerness', 'MIGRATED_FROM_HARNESS'))) ? '.leerness' : (hasHarness ? '.harness' : '.leerness');
+        // 1.36.126 (T-0107): 여기는 해석기를 안 쓰고 **자체 로직으로 `.leerness` 를 우선**하고 있었다 —
+        //   부모가 옛 migrate 를 돌렸다면 그 `.leerness` 는 죽은 사본이므로, 자식이 **낡은 자산**
+        //   (design-system·reuse-map·skills)을 물려받는다. 살아 있는 저장소가 있으면 그쪽이 먼저다.
+        //   `.leerness` 만 있는 경우(사용자가 믿고 `.harness` 를 지운 상태)는 부모 탐지 자체를 잃는 것보다
+        //   읽어 주는 편이 낫다 — 읽기 전용 자산 탐지이고, 그 프로젝트는 audit 이 미초기화로 따로 알린다.
+        const wd = hasHarness ? '.harness' : '.leerness';
         const wsAbs = path.join(cur, wd);
         const assets = {
           designSystem: exists(path.join(wsAbs, 'design-system.md')),
@@ -9821,6 +9895,24 @@ function _migrateWorkspaceDir(root, opts = {}) {
     errors: [],
     dryRun
   };
+  // 1.36.126 (T-0107): 이 명령은 **배달할 수 없는 것을 배달했다고 말하고 있었다**. 실측 —
+  //   복사(58파일)는 성공하고 "✓ 마이그레이션 완료 → 다음 handoff부터 .leerness 우선 사용" 이라고 찍는데,
+  //   그 직후 `task add` 는 여전히 `.harness` 에 쓴다. 결과물은 마이그레이션이 아니라 **얼어붙은 사본**이고,
+  //   같이 만들어지는 WHERE_TO_FIND.md 는 AI 를 그 낡은 상태로 안내한다 — 우리가 막으려는 바로 그 실패다.
+  //   그래서 복사를 하지 않는다. 반쯤 된 상태를 만들 바에는 **아무것도 만들지 않는 편이 낫다**(fail-closed).
+  //   되살리려면 하드코딩 252곳을 해석기로 바꾸는 것이 선행 조건이다(T-0107).
+  //   ⚠ `allowUnsupported` 는 **내부 시험 전용 통로**다. 복사 구현(심링크 미추종 등 1.36.33 안전 속성)을
+  //     도달 불가로 만들면 그 보호가 조용히 썩는다 — T-0107 이 풀리면 다시 살아날 코드이므로 계속 시험한다.
+  //     CLI 경로는 이 옵션을 절대 넘기지 않는다(e2e 가 호출부를 열거해 단언한다).
+  if (!WORKSPACE_DIR_ALT_SUPPORTED && opts.allowUnsupported !== true) {
+    report.blocked = true;
+    report.blockedReason = 'workspace-dir-alt-unsupported';
+    //   ⚠ 이 숫자를 손으로 적어 뒀더니 곧바로 낡았다(적을 땐 252, 이 라운드 편집 후 실제 255 — 검수 P2).
+    //     "실측" 이라 말하면서 낡은 수를 보여 주는 것은 이 라운드가 고치는 결함과 같은 클래스다. 실행 시 센다.
+    report.measured = _measureWorkspaceHardcoding();
+    report.errors.push('이 빌드는 .leerness 를 살아 있는 저장소로 쓰지 못합니다 — 복사하면 죽은 사본이 됩니다');
+    return report;
+  }
   if (!report.srcExists) {
     report.errors.push('source .harness not found');
     return report;
@@ -10638,6 +10730,7 @@ function workspaceDirCmd(root, sub) {
   const isTty = process.stdout && process.stdout.isTTY;
   const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
   const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
+  const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
 
   if (!sub || sub === 'get') {
@@ -10646,19 +10739,37 @@ function workspaceDirCmd(root, sub) {
     const hasHarness = exists(path.join(root, '.harness'));
     const hasLeerness = exists(path.join(root, '.leerness'));
     const migrated = exists(path.join(root, '.leerness', 'MIGRATED_FROM_HARNESS'));
-    const result = { current: dirName, abs: dirAbs, hasHarness, hasLeerness, migrated };
+    // 1.36.126 (T-0107): `migrated: true` 를 그대로 보여 주면 "옮겨졌다" 는 **거짓 인상**을 준다 —
+    //   실제로는 그 뒤 모든 쓰기가 .harness 로 간다. 마커의 의미를 사실대로 옮겨 적는다.
+    const ignored = _workspaceDirAltIgnored(root);
+    // 1.36.126 (검수 P2): 마커가 지워진 사본도 잡되, 남의 `.leerness` 는 건드리지 않는다 —
+    //   두 번째 신호는 **우리 생성물의 서명**(가이드 헤더). audit 과 같은 술어를 쓴다.
+    let ourGuide = false;
+    try { ourGuide = exists(path.join(root, '.leerness', 'WHERE_TO_FIND.md'))
+      && /by leerness \d+\.\d+\.\d+/.test(read(path.join(root, '.leerness', 'WHERE_TO_FIND.md'))); } catch {}
+    const staleCopy = (migrated || ourGuide) && dirName === '.harness';
+    const result = { current: dirName, abs: dirAbs, hasHarness, hasLeerness, migrated,
+      altSupported: WORKSPACE_DIR_ALT_SUPPORTED, ignoredSetting: ignored, staleCopy };
     if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
-    log(cyan(`# leerness workspace-dir (1.9.211)`));
-    log(`  현재 디렉토리: ${grn(dirName + '/')}`);
+    log(cyan(`# leerness workspace-dir (1.36.126)`));
+    log(`  현재 디렉토리: ${grn(dirName + '/')}  ${dim('(읽기·쓰기가 실제로 일어나는 곳)')}`);
     log(`  abs: ${dirAbs}`);
     log(`  .harness 존재: ${hasHarness ? '✓' : '✗'}`);
     log(`  .leerness 존재: ${hasLeerness ? '✓' : '✗'}`);
-    log(`  마이그레이션 완료: ${migrated ? '✓' : '✗'}`);
+    log(`  .leerness 마커: ${migrated ? '✓' : '✗'}`);
     log('');
-    if (hasHarness && !hasLeerness) {
-      log(dim(`  → 마이그레이션: leerness migrate-workspace-dir`));
-    } else if (migrated) {
-      log(dim(`  → AI 참조 가이드: leerness workspace-dir guide`));
+    if (ignored) {
+      log(yel(`  ⚠ ${ignored.env ? `LEERNESS_WORKSPACE_DIR=${ignored.env}` : '.leerness/MIGRATED_FROM_HARNESS 마커'} 는 이 빌드에서 적용되지 않습니다.`));
+      log(`     실제 저장소는 ${grn(ignored.effective + '/')} 입니다 — 설정을 켜 두어도 동작은 바뀌지 않습니다(T-0107).`);
+    }
+    if (staleCopy) {
+      log('');
+      log(yel(`  ⚠ .leerness/ 는 **죽은 사본**입니다 — 마이그레이션 시점에 멈춰 있고 이후 변경이 반영되지 않습니다.`));
+      log(`     .leerness/WHERE_TO_FIND.md 를 AI 에게 주지 마세요(낡은 상태로 안내합니다).`);
+      log(dim(`     안전하게 지우려면: 내용을 .harness 와 비교해 필요한 것이 없는지 확인한 뒤 직접 삭제하세요.`));
+      log(dim(`     (leerness 는 사용자 데이터를 대신 지우지 않습니다)`));
+    } else if (hasHarness && !hasLeerness) {
+      log(dim(`  → 이 빌드는 .harness 만 사용합니다(디렉터리 이름 변경은 T-0107 이후).`));
     }
     return;
   }
@@ -10801,7 +10912,29 @@ function migrateWorkspaceDirCmd(root) {
   const force = has('--force');
   const report = _migrateWorkspaceDir(root, { dryRun, force });
 
-  if (has('--json')) { log(JSON.stringify(report, null, 2)); return; }
+  if (has('--json')) { log(JSON.stringify(report, null, 2)); if (report.blocked) process.exitCode = 1; return; }
+  // 1.36.126: 못 하는 일을 했다고 말하지 않는다 — 사유와 **실측 근거**를 함께 준다.
+  if (report.blocked) {
+    const m = report.measured || {};
+    log(cyan(`# leerness migrate-workspace-dir (1.36.126)`));
+    log('');
+    log(red(`  ✗ 이 빌드는 .leerness 로 옮길 수 없습니다 — 복사만 하면 죽은 사본이 됩니다.`));
+    log('');
+    if (m.hardcodedPathSites != null) {
+      log(`  왜: leerness 내부에서 워크스페이스 경로를 만드는 곳 ${m.hardcodedPathSites}곳이 '.harness' 를 그대로 쓰고,`);
+      log(`      경로 해석기를 거치는 곳은 ${m.resolverConsumers}곳뿐입니다(안내 문구 ${m.hardcodedTextMentions}곳은 별도).`);
+    } else {
+      log(`  왜: leerness 내부 대부분이 '.harness' 경로를 그대로 쓰고 있어, 복사해도 그쪽으로는 아무것도 쓰이지 않습니다.`);
+      log(`      (이 실행에서는 소스를 세지 못해 정확한 수를 대지 못합니다 — 판정 자체는 바뀌지 않습니다.)`);
+    }
+    log(`      그래서 복사한 뒤에도 모든 쓰기는 .harness 로 갑니다 — .leerness 는 복사 시점에 멈춘 사본이 되고,`);
+    log(`      함께 만들어지던 WHERE_TO_FIND.md 가 AI 를 그 낡은 상태로 안내합니다.`);
+    log('');
+    log(dim(`  지금 할 수 있는 것: 그대로 .harness 를 쓰시면 됩니다(기능 차이 없음 — 디렉터리 이름만 다릅니다).`));
+    log(dim(`  진행 상황: 이 제약은 T-0107 로 등록돼 있습니다 — 해결되면 이 명령이 다시 동작합니다.`));
+    process.exitCode = 1;
+    return;
+  }
   log(cyan(`# leerness migrate-workspace-dir (1.9.211)${dryRun ? ' [DRY-RUN]' : ''}`));
   log(`  src: ${report.src}  ${report.srcExists ? '✓' : red('✗ 없음')}`);
   log(`  dst: ${report.dst}  ${report.dstExists ? yel('⚠ 이미 존재') : '(생성)'}`);
