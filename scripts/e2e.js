@@ -5147,34 +5147,83 @@ total++;
   let ok = false; const bad = [];
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcp124-'));
   const ENVm = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  // 1.36.125 (검수 P3 + 실측): 이 블록은 **부모 환경을 상속하면 안 된다**. 사용자가 켜 둔 공개 설정 하나로
+  //   e2e 가 환경 의존적 거짓 실패를 낸다 — LEERNESS_MCP_TIMEOUT_MS 는 예산을, MCP_PROFILE 은 도구 수를,
+  //   WORKSPACE_DIR 은 상태 위치를, LANG 은 기대 문자열을 바꾼다(selftest 쪽 실측으로 확인된 같은 클래스).
+  for (const k of ['LEERNESS_MCP_TIMEOUT_MS', 'LEERNESS_MCP_PROFILE', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete ENVm[k];
   try {
     const d = path.join(sb, 'p'); fs.mkdirSync(d, { recursive: true });
     fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
-    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENVm });
+    // 셋업 실패를 통과로 세지 않는다(검수 P1) — init 이 죽으면 이후 단언은 무의미하다.
+    const rInit = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENVm });
+    if (rInit.status !== 0) bad.push(`셋업init실패(exit=${rInit.status})`);
     const rpc = (id, method, params) => JSON.stringify({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) }) + '\n';
+    // 1.36.125: 같은 세션에서 **오류 규격**도 함께 받는다(추가 spawn 없이).
+    //   지난 라운드엔 도구 하나만 불러 봤다 — 한 곳에서 나온 결함(타임아웃·거짓 실패)이 클래스인지 보려면 폭이 필요하다.
+    // 규격(2024-11-05 lifecycle)상 initialize 성공 뒤 클라이언트는 `notifications/initialized` 를 보낸다 —
+    //   그걸 빼면 "실제 왕복" 이라면서 수명주기를 재현하지 않은 것이다(검수 P2). 알림은 id 가 없다.
+    const notify = (method) => JSON.stringify({ jsonrpc: '2.0', method }) + '\n';
     const input = rpc(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'e2e', version: '0' } })
-      + rpc(2, 'tools/list') + rpc(3, 'tools/call', { name: 'leerness_selftest', arguments: { path: d } });
+      + notify('notifications/initialized')
+      + rpc(2, 'tools/list') + rpc(3, 'tools/call', { name: 'leerness_selftest', arguments: { path: d } })
+      + rpc(4, 'tools/call', { name: 'leerness_brainstorm', arguments: { path: d } })          // 필수 인자 누락 → -32602
+      + rpc(5, 'tools/call', { name: 'leerness_does_not_exist', arguments: {} })                // 미지 도구 → -32601
+      + rpc(6, 'unknown/method', {});                                                          // 미지 메서드 → -32601
     const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve', '--path', d],
       { cwd: d, input, encoding: 'utf8', timeout: 900000, env: ENVm, maxBuffer: 64 * 1024 * 1024 });
     const msgs = [];
     for (const line of String(r.stdout || '').split('\n')) { const s = line.trim(); if (s) { try { msgs.push(JSON.parse(s)); } catch { bad.push('비JSON줄'); } } }
     const by = (i) => msgs.find(m => m.id === i);
+    // 서버 자체의 종료 상태도 본다(검수 P1) — 응답만 보면 **비정상 종료·타임아웃**을 성공으로 센다.
+    if (r.error) bad.push(`서버오류(${r.error.code || r.error.message})`);
+    if (r.signal) bad.push(`서버시그널(${r.signal})`);
+    if (r.status !== 0) bad.push(`서버exit=${r.status}`);
     if (String(r.stderr || '').length !== 0) bad.push(`stderr(${String(r.stderr).length}B)`);
     const init = by(1); if (!init || init.error || !(init.result && init.result.serverInfo)) bad.push('initialize실패');
     const tools = by(2) && by(2).result && by(2).result.tools;
-    if (!Array.isArray(tools) || tools.length < 50) bad.push(`tools/list(${Array.isArray(tools) ? tools.length : 'none'})`);
+    // 1.36.125 (검수 P2): `>= 50` 은 도구가 39개 사라져도 통과한다. 등록부(lib/mcp-tools.js)와 **정확히** 대조한다 —
+    //   서버가 걸러 내거나 프로필이 새면 그 자리에서 어긋난다. 그리고 실제로 부를 도구가 목록에 있는지도 본다
+    //   (dispatch 는 되는데 discoverability 에서 사라지는 경우가 있다).
+    const REG = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools.js'));
+    if (!Array.isArray(tools) || tools.length !== REG.length) bad.push(`tools/list(${Array.isArray(tools) ? tools.length : 'none'}≠등록부 ${REG.length})`);
     else {
       if (tools.some(t => !t.description || !String(t.description).trim())) bad.push('도구설명없음');
       if (tools.some(t => !t.inputSchema || typeof t.inputSchema !== 'object')) bad.push('도구스키마없음');
+      if (!tools.some(t => t.name === 'leerness_selftest')) bad.push('호출할도구가목록에없음');
+      // 1.36.125 (검수 P2): 길이 + "등록부 밖 없음" 만으로는 **중복이 누락을 상쇄**한다(A 를 두 번 내고 B 를 빼면 통과).
+      //   집합 동등으로 본다 — 이름 유일 + 등록부 전체 포함(양방향).
+      const regNames = new Set(REG.map(t => t.name));
+      const gotNames = tools.map(t => t.name);
+      const uniq = new Set(gotNames);
+      if (uniq.size !== gotNames.length) bad.push(`도구이름중복(${gotNames.length - uniq.size}건)`);
+      const extra = gotNames.filter(n => !regNames.has(n));
+      if (extra.length) bad.push(`목록에등록부밖도구(${extra.slice(0, 3).join(',')})`);
+      const missing = [...regNames].filter(n => !uniq.has(n));
+      if (missing.length) bad.push(`등록부인데목록에없음(${missing.slice(0, 3).join(',')})`);
     }
     const call = by(3);
     const txt = call && call.result && Array.isArray(call.result.content) ? String((call.result.content[0] || {}).text || '') : '';
     // ⚠ content 가 비어 있지 않다는 것만 보면 **타임아웃 문구도 성공**으로 센다(내 첫 프로브가 그랬다).
     if (!call || call.error) bad.push('tools/call오류');
+    else if (call.result && call.result.isError) bad.push('tools/call_isError');   // 도구 실패를 성공으로 세던 자리(검수 P1)
     else if (/안에 끝나지 않아 중단/.test(txt)) bad.push('tools/call타임아웃');
     else if (!/"total"\s*:\s*\d+|전체 \d+건 통과/.test(txt)) bad.push('tools/call결과아님');
     // MCP 경유 selftest 가 **실패를 보고하면** 그건 거짓 보고다(같은 프로젝트에서 CLI 는 통과한다)
-    else { const m = /"fail"\s*:\s*(\d+)/.exec(txt); if (m && Number(m[1]) > 0) bad.push(`MCP경유_selftest_거짓실패(fail=${m[1]})`); }
+    //   ⚠ `fail` 필드가 **없으면** 통과시키던 자리 — 계약상 반드시 있고 0 이어야 하며 pass===total 이어야 한다(검수 P1).
+    else {
+      const m = /"fail"\s*:\s*(\d+)/.exec(txt);
+      if (!m) bad.push('selftest_fail필드없음');
+      else if (Number(m[1]) > 0) bad.push(`MCP경유_selftest_거짓실패(fail=${m[1]})`);
+      const p = /"pass"\s*:\s*(\d+)/.exec(txt), t = /"total"\s*:\s*(\d+)/.exec(txt);
+      if (!p || !t || Number(p[1]) !== Number(t[1])) bad.push(`selftest_pass≠total(${p && p[1]}/${t && t[1]})`);
+    }
+    // 오류 규격 — 잘못된 호출을 **JSON-RPC 오류 코드**로 거절해야 한다(조용한 성공/크래시 금지).
+    for (const [id, code, label] of [[4, -32602, '필수인자누락'], [5, -32601, '미지도구'], [6, -32601, '미지메서드']]) {
+      const m = by(id);
+      if (!m) bad.push(`${label}:무응답`);
+      else if (!m.error) bad.push(`${label}:오류아님`);
+      else if (m.error.code !== code) bad.push(`${label}:코드=${m.error.code}(기대 ${code})`);
+    }
     ok = bad.length === 0;
   } catch (e) { bad.push('ERR:' + String(e && e.message).slice(0, 80)); }
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
@@ -8310,16 +8359,21 @@ total++;
       //   codex 33차 #5: 메시지의 초 값이 **실제 적용된 한도**여야 한다 — 소스 리터럴만 보면
       //   `Math.min(MCP_TIMEOUT_MS, 60000)` 같은 변조가 그대로 통과한다. 5초 지정 → "5초" 로 찍혀야 한다.
       && /⏱ 5초 안에/.test(shortRes)
-      //   codex 33차 #3: probe 설명은 probe 가 돌 수 있는 호출에만 — selftest 에는 붙으면 안 된다
-      && !/bugfix probe 가 등록된 task/.test(shortRes);
-    //   codex 33차 #2: 긴 예산은 **done 전이/sync 에만** 준다 — 전역으로 올리면 단일 스레드 서버가 그만큼 얼어붙는다.
+      //   codex 33차 #3 → 1.36.125 개정: 사유 줄은 그 호출에만 붙는다. 예전 단언은 사라진 문구를 부정해
+      //   **공허참**이 돼 있었다(문구를 지워도 초록). 이제 "명시 override 가 걸리면 표의 사유를 말하지 않는다"
+      //   는 실제 계약을 건다 — 5초에 잘린 사용자에게 "긴 예산 300초" 라고 말하면 거짓말이기 때문.
+      && !/긴 예산\(/.test(shortRes);
+    //   codex 33차 #2: 긴 예산은 그 예산이 필요한 호출에만 — 전역으로 올리면 단일 스레드 서버가 그만큼 얼어붙는다.
     const srcTxt = fs.readFileSync(CLI, 'utf8');
     const probeBudget = (srcTxt.match(/MCP_TIMEOUT_PROBE_MS = (\d+)/) || [])[1];
     const defBudget = (srcTxt.match(/MCP_TIMEOUT_DEFAULT_MS = (\d+)/) || [])[1];
     T3 = !!probeBudget && Number(probeBudget) > 600000              // probe 예산 위
       && !!defBudget && Number(defBudget) <= 120000                 // 기본은 짧게(서버 정지 시간 제한)
       && /timeout: budget,/.test(srcTxt)                            // 배선: 계산된 예산이 실제로 쓰인다
-      && /_needsProbeBudget\(cliArgs\)/.test(srcTxt);
+      //   1.36.125: 이름 술어(_needsProbeBudget)는 표(MCP_LONG_PATHS)로 대체됐다 — 배선은 그 표를 쓰는지로 본다.
+      //   ⚠ 정확한 예산 계산 자체는 selftest 가 **실행으로** 단언한다(소스 문자열은 배선 유무만).
+      && /_mcpTimeoutHint\(cliArgs\)/.test(srcTxt)
+      && /const MCP_LONG_PATHS = \[/.test(srcTxt);
     ok = T1 && T2 && T3;
     if (!ok) console.log(`   [이월2 디버그] plan정규화=${T1}(done=${doneCount} vc=${vcTotal}) 타임아웃사유=${T2} 기본한도=${T3}(${srcTimeout})`);
   } catch (e) { console.log('   [이월2 디버그] 예외: ' + ((e && e.message) || e)); }
@@ -12300,6 +12354,60 @@ total++;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
   console.log(ok ? '✓ T(1.36.116) 고아 가드 탐지: 러너루트 도달성(죽은 wrapper·순환 잡음) · glob 러너 오탐 0 · guard:* 후보 · 정규식 접두 · 무관접두 무시 · turbo 보류 · **수집기→판정기 배선** 변이대조 · audit 권고 · 고아 없으면 침묵'
     : '✗ 1.36.116 고아 가드 탐지 실패 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
+// 1.36.125 (검수 P2): `verify-claim --all --run-tests` 는 done 행마다 verifyClaimCmd 를 부르는데
+//   `--run-tests` 는 전역 플래그다 → 같은 테스트 스위트를 **주장 수만큼** 반복 실행했다(100주장 × 300초 = 8시간).
+//   메모화로 1회로 줄였다. 그런데 "안 돌렸다" 와 "한 번 돌리고 결과를 나눠 줬다" 는 겉보기가 같다 —
+//   그래서 **실패하는 스위트**를 판별 케이스로 쓴다: 전파되면 N개 주장 **전부** 실패하고, 끊기면 첫 주장만 실패한다.
+//   대조군(통과 스위트)도 함께 둔다 — 메모가 없는 실패를 지어내지 않는지.
+total++;
+{
+  let ok = false; const bad = []; const dbg = {};
+  const _dirs = [];
+  const N = 3;
+  const scenario = (label, testBody, expectFail) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-memo125-')); _dirs.push(d);
+    const env = Object.assign({}, process.env, { TMPDIR: d, TEMP: d, TMP: d, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+    const counter = path.join(d, 'runs.txt');
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'memo', version: '0.1.0', scripts: { test: 'node t.js' } }));
+    fs.writeFileSync(path.join(d, 't.js'), `require('fs').appendFileSync(${JSON.stringify(counter)}, 'x\\n'); ${testBody}`);
+    const ri = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env });
+    if (ri.status !== 0) { bad.push(`${label}:init실패(${ri.status})`); return; }
+    for (let i = 0; i < N; i++) {
+      const ra = cp.spawnSync(process.execPath, [CLI, 'task', 'add', `주장${i}`, '--path', d, '--json'], { cwd: d, encoding: 'utf8', timeout: 300000, env });
+      let id = null; try { id = JSON.parse(ra.stdout || '{}').id; } catch {}
+      if (!id) { bad.push(`${label}:task add 실패`); return; }
+      const ru = cp.spawnSync(process.execPath, [CLI, 'task', 'update', id, '--status', 'done', '--evidence', 't.js 테스트 3건 통과', '--path', d],
+        { cwd: d, encoding: 'utf8', timeout: 600000, env });
+      if (ru.status !== 0) { bad.push(`${label}:task update 실패(${ru.status})`); return; }
+    }
+    // 셋업이 조용히 실패하면 아래 판정이 공허해진다 — done 행이 실제로 N개인지 먼저 확인한다.
+    const tracker = fs.readFileSync(path.join(d, '.harness', 'progress-tracker.md'), 'utf8');
+    const doneRows = tracker.split('\n').filter(l => /^\|\s*T-\d+/.test(l) && /\|\s*done\s*\|/.test(l)).length;
+    if (doneRows !== N) { bad.push(`${label}:셋업done행 ${doneRows}(기대 ${N})`); return; }
+    try { fs.unlinkSync(counter); } catch {}
+    const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', '--all', '--path', d, '--json', '--run-tests'],
+      { cwd: d, encoding: 'utf8', timeout: 900000, env, maxBuffer: 32 * 1024 * 1024 });
+    let runs = 0; try { runs = fs.readFileSync(counter, 'utf8').trim().split('\n').filter(Boolean).length; } catch {}
+    let j = null; try { j = JSON.parse(r.stdout); } catch {}
+    if (!j || !Array.isArray(j.results)) { bad.push(`${label}:JSON아님`); return; }
+    if (j.total !== N) bad.push(`${label}:total=${j.total}(기대 ${N})`);
+    if (runs !== 1) bad.push(`${label}:스위트실행 ${runs}회(기대 1)`);
+    const failedClaims = j.results.filter(x => x && x.ok === false).length;
+    if (expectFail && failedClaims !== N) bad.push(`${label}:실패전파 ${failedClaims}/${N}`);
+    if (!expectFail && failedClaims !== 0) bad.push(`${label}:거짓실패 ${failedClaims}건`);
+    dbg[label] = { runs, total: j.total, failedClaims };
+  };
+  try {
+    scenario('통과', "console.log('3 passed, 0 failed'); process.exit(0);", false);
+    scenario('실패', "console.log('1 passed, 2 failed'); process.exit(1);", true);
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { _dirs.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
+  console.log(ok ? `✓ U(1.36.125) verify-claim --all --run-tests: 스위트 1회만 실행(주장 수만큼 반복 금지) · 실패 결과가 ${N}개 주장 **전부**에 전파 · 통과 시 거짓 실패 0 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.125 --all 테스트 메모화 실패 ' + JSON.stringify({ bad: bad.slice(0, 6), dbg }));
   if (!ok) failed++;
 }
 

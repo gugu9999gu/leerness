@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.124';
+const VERSION = '1.36.125';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -4920,7 +4920,12 @@ function _selfTestCases() {
       const sigOpts = /function verifyClaimCmd\(root, taskId, opts = \{\}\)/.test(src);
       const fn = /function verifyClaimAllCmd\(root\)/.test(src);
       const doneFilter = src.includes("rows.filter(r => /done|완료|completed/i.test(String(r.status || '')))");
-      const reuse = src.includes("doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true }))");
+      //   1.36.125: 여기에 `runMemo` 가 함께 넘어가는 것도 이제 **계약**이다 — 빠지면 같은 테스트 스위트를
+      //   done 행 수만큼 반복 실행한다(100주장 × 300초). 그래서 리터럴을 갱신만 하지 않고 메모 배선까지 건다.
+      //   ⚠ 실행 횟수 자체는 소스가 아니라 e2e U 블록이 **실제로 세어** 판정한다(소스가드는 배선 유무만).
+      const reuse = src.includes("doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true, runMemo }))")
+        && src.includes('const runMemo = {};')
+        && src.includes('if (_runMemo) _runMemo.result = runResult;');
       // collect 게이팅 부울이 --json/human 경로와 동일 출처(분기 없음) — 정밀 검사를 일괄 모드에서도 그대로 재사용
       const collectGate = src.includes('if (opts.collect) {') && src.includes("if (!filesAllExist) reasons.push('files-missing')") && src.includes("if (claimsChecked && !strictOk) reasons.push('optimism/honesty')") && src.includes("if (!gitClaimOk) reasons.push('git-mismatch')") && src.includes("if (claimsChecked && stubFiles.length > 0) reasons.push('stub-impl')");
       const routed = src.includes("if (args[1] === '--all' || has('--all')) return verifyClaimAllCmd(_p)");
@@ -6633,10 +6638,116 @@ function _selfTestCases() {
           && s.includes('const lang = detectLanguageValue(root, ') && s.includes("managedMerge(key, tmpl, cur, null, { lang, root })")   // 1.36.124: 대상 루트 전달이 계약이다(검수 P1);
         return f13ok && skipOk && f7ok && f11ok && guards;
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
-    } }
+    } },
+    // 1.36.125 (검수 P2 클래스 스윕): MCP 호출 예산은 **그 명령이 스스로 거는 내부 타임아웃보다 커야** 한다.
+    //   1.36.124 는 `selftest` 이름 하나만 구제했고, 그 사이 verify-claim --run-tests(내부 300초)·
+    //   referee verify(600초)·api-skill add(최대 110초)는 60초에 잘려 **정상 동작을 거짓 실패로** 보고했다.
+    //   이 가드는 소스 문자열이 아니라 **실제 `_mcpTimeoutFor()` 호출**로 판정한다(문자열 가드는 표가 바뀌면 조용히 죽는다).
+    //   그리고 내부 한도는 손으로 적은 숫자가 아니라 **해당 파일에서 실제로 읽어** 대조한다 — 내부 한도를
+    //   올리고 표를 안 고치면 여기서 깨진다(허용목록이 소비자보다 뒤처지는 것을 막는 유일한 기제).
+    { name: '1.36.125 (검수 P2): MCP 긴 예산 표 — 실제 예산 > 각 경로의 내부 타임아웃 + 대조군(무관 명령은 기본값)', run: () => {
+      if (!Array.isArray(MCP_LONG_PATHS) || MCP_LONG_PATHS.length < 5) return false;
+      const saved = process.env.LEERNESS_MCP_TIMEOUT_MS;
+      delete process.env.LEERNESS_MCP_TIMEOUT_MS;   // override 가 켜져 있으면 표를 재는 것이 아니다
+      try {
+        // ① 표의 각 경로가 실제로 그 예산을 받는가 + 예산이 내부 한도를 넘는가
+        const probes = {
+          'selftest': ['selftest', '--json'],
+          'task-done-probe': ['task', 'update', 'T-1', '--status', 'done'],
+          'verify-claim-run-tests': ['verify-claim', 'T-1', '--path', '.', '--run-tests'],
+          'referee-verify': ['referee', 'verify', 'r1', '--path', '.', '--json'],
+          'api-skill-add': ['api-skill', 'add', '--path', '.', '--url', 'https://example.com', '--json'],
+        };
+        for (const p of MCP_LONG_PATHS) {
+          const args = probes[p.id];
+          if (!args) return false;                                   // 표에 새 항목이 생기면 프로브도 함께 적어야 한다
+          const got = _mcpTimeoutFor(args);
+          if (got !== p.budgetMs) return false;                      // 술어가 그 인자를 실제로 집어내는가
+          if (!(got > p.mustExceedMs)) return false;                 // 예산이 내부 한도를 넘는가
+          if (p.src) {                                               // 내부 한도를 **소스에서 실제로 읽어** 대조
+            const raw = read(path.join(__dirname, '..', p.src.file));
+            const m = p.src.re.exec(raw);
+            if (!m) return false;                                    // 리터럴을 못 찾으면 공허통과가 아니라 실패
+            const actual = Number(m[1]) * (p.src.scale || 1);
+            if (!Number.isFinite(actual) || actual !== p.mustExceedMs) return false;   // 소스가 바뀌면 표도 바뀌어야
+            if (!(got > actual)) return false;
+          }
+        }
+        // ② 대조군 — 무관한 명령은 기본값을 받는다(긴 예산이 옆으로 새면 서버가 11분씩 얼어붙는다)
+        const ctrl = [['health', '--json'], ['task', 'list'], ['task', 'update', 'T-1', '--status', 'in_progress'],
+          ['verify-claim', 'T-1', '--path', '.'], ['referee', 'list', '--path', '.'], ['api-skill', 'list', '--path', '.']];
+        if (!ctrl.every(a => _mcpTimeoutFor(a) === MCP_TIMEOUT_DEFAULT_MS)) return false;
+        // ③ 타임아웃 사유 한 줄은 **그 호출에만** 붙고, 다른 경로의 사유가 새지 않는다
+        const hintSelf = _mcpTimeoutHint(['selftest', '--json']);
+        if (!/긴 예산\(300초\)/.test(hintSelf) || !hintSelf.includes('실측 116초')) return false;
+        if (/실측 116초/.test(_mcpTimeoutHint(['referee', 'verify', 'r1']))) return false;   // 옆 경로 사유가 새면 실패
+        if (_mcpTimeoutHint(['health', '--json']) !== '') return false;                       // 무관한 도구엔 아무 사유도 없다
+        // ④ 명시 override 는 여전히 최우선이고, 그때는 **표의 사유를 말하지 않는다**(5초에 잘린 사용자에게
+        //    "긴 예산 300초를 받습니다" 라고 하면 거짓말이다 — 1.36.125 에서 실제로 그렇게 쓸 뻔했다)
+        process.env.LEERNESS_MCP_TIMEOUT_MS = '7000';
+        const overridden = _mcpTimeoutFor(['selftest', '--json']) === 7000 && _mcpTimeoutFor(['health']) === 7000
+          && _mcpTimeoutHint(['selftest', '--json']) === '';
+        delete process.env.LEERNESS_MCP_TIMEOUT_MS;
+        return overridden;
+      } finally { if (saved !== undefined) process.env.LEERNESS_MCP_TIMEOUT_MS = saved; else delete process.env.LEERNESS_MCP_TIMEOUT_MS; }
+    } },
+    // 1.36.125: 측정 통제 자체의 가드 — 목록이 비거나 배선이 끊기면 selftest 는 다시 사용자 설정에 휘둘린다.
+    { name: '1.36.125 (검수 P2): selftest 측정 통제 — 통제 목록 실재 + 실제 삭제 + 무시 사실 보고(조용한 무시 금지)', run: () => {
+      const must = ['LEERNESS_MCP_PROFILE', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG', 'LEERNESS_MCP_TIMEOUT_MS'];
+      if (!must.every(k => _SELFTEST_CONTROLLED_ENV.includes(k))) return false;
+      // 하네스가 일부러 켜는 것은 통제 목록에 들어가면 안 된다(측정 계약을 스스로 지우는 셈)
+      if (['LEERNESS_OFFLINE', 'LEERNESS_INTERNAL'].some(k => _SELFTEST_CONTROLLED_ENV.includes(k))) return false;
+      const savedP = process.env.LEERNESS_MCP_PROFILE, savedL = process.env.LEERNESS_LANG;
+      try {
+        process.env.LEERNESS_MCP_PROFILE = 'core'; process.env.LEERNESS_LANG = 'en';
+        const dropped = _controlSelftestEnv();
+        const gone = process.env.LEERNESS_MCP_PROFILE === undefined && process.env.LEERNESS_LANG === undefined;
+        const told = dropped.some(s => s.startsWith('LEERNESS_MCP_PROFILE=')) && dropped.some(s => s.startsWith('LEERNESS_LANG='));
+        // 검수 P1: "검증 중에만" 이라고 말했으면 **끝나면 되돌려 놔야** 한다(export 된 함수라 호출자 설정이 영구히 사라졌다)
+        dropped.restore();
+        const restored = process.env.LEERNESS_MCP_PROFILE === 'core' && process.env.LEERNESS_LANG === 'en';
+        // 대조군 — 설정이 없으면 아무것도 보고하지 않는다(빈 컬렉션 공허참으로 통과하지 않게 위에서 실제 값을 넣었다)
+        delete process.env.LEERNESS_MCP_PROFILE; delete process.env.LEERNESS_LANG;
+        const quiet = _controlSelftestEnv().length === 0;
+        return gone && told && restored && quiet;
+      } finally {
+        if (savedP !== undefined) process.env.LEERNESS_MCP_PROFILE = savedP; else delete process.env.LEERNESS_MCP_PROFILE;
+        if (savedL !== undefined) process.env.LEERNESS_LANG = savedL; else delete process.env.LEERNESS_LANG;
+      }
+    } },
   ];
 }
+// 1.36.125 (검수 P2 + 클래스 스윕 실측): selftest 는 **자기가 재는 환경을 스스로 통제해야** 한다.
+//   실측(대조군 무설정 343/343 통과) — 공개 설정 하나를 켜 두기만 해도 설치 검증 도구가 거짓 실패를 냈다:
+//     LEERNESS_MCP_PROFILE=core        → 342/343 (프로브가 프로필을 상속해 없는 도구를 호출)
+//     LEERNESS_WORKSPACE_DIR=.leerness → 339/343 + stderr 722B ("미초기화 디렉토리" 오판)
+//     LEERNESS_LANG=en                 → 341/343 (픽스처가 정한 언어를 env 가 덮어써 ko 기대값이 어긋남)
+//   즉 "설치가 손상됐다" 는 보고가 사실은 **사용자 설정 때문**이었다 — 진단 도구가 낼 수 있는 최악의 거짓말이다.
+//   같은 방식으로 잰 AUTONOMOUS·ENFORCE_POLICY·HOOK·SKILL_AUTO_INSTALL·TZ 5종은 **343/343 무해**여서 넣지 않는다
+//   (손 분류로 목록을 부풀리지 않는다 — 깨지는 것만 넣고, 안 깨지는 것은 안 깨진다고 적는다).
+//   1.36.124 는 이 클래스를 프로브 2개에만(_probeEnv) 적용했다. 프로브마다 지우면 새 프로브가 빠지므로
+//   병목에서 한 번 지운다 — 여기서 지우면 이 프로세스가 띄우는 **모든 자식**이 통제된 환경을 물려받는다.
+//   ⚠ LEERNESS_OFFLINE / LEERNESS_INTERNAL 등 하네스가 **일부러 켜는** 것은 지우지 않는다(측정 계약의 일부).
+//   ⚠ LANG 을 지워도 영어 커버리지는 죽지 않는다 — en 경로는 `_selftestFixture('en')`(init --language en)이
+//      따로 검증한다. 지우는 목적은 "언어의 출처를 픽스처 하나로 되돌리는" 것이지 en 을 안 보는 것이 아니다.
+const _SELFTEST_CONTROLLED_ENV = ['LEERNESS_MCP_PROFILE', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_MCP_TIMEOUT_MS', 'LEERNESS_LANG'];
+function _controlSelftestEnv() {
+  const dropped = [], saved = {};
+  for (const k of _SELFTEST_CONTROLLED_ENV) {
+    if (process.env[k] !== undefined) { dropped.push(`${k}=${process.env[k]}`); saved[k] = process.env[k]; delete process.env[k]; }
+  }
+  //   1.36.125 (검수 P1): `selfTestCmd` 는 **export 된 라이브러리 함수**다. CLI/MCP 는 자식이 끝나며 격리되지만
+  //   직접 호출하면 호출자 프로세스의 설정이 **영구히** 사라진다(실측: en/.leerness → undefined).
+  //   게다가 우리 출력은 "검증 중에만 무시" 라고 말한다 — 복원하지 않으면 그 안내 자체가 거짓이 된다.
+  const restore = () => { for (const k of Object.keys(saved)) process.env[k] = saved[k]; };
+  // 조용히 지우지 않는다 — 무엇을 무시했는지 사람과 JSON 소비자 모두에게 말한다.
+  return Object.assign(dropped, { restore });
+}
 function selfTestCmd(opts = {}) {
+  const droppedEnv = _controlSelftestEnv();
+  try { return _selfTestCmdInner(opts, droppedEnv); } finally { droppedEnv.restore(); }
+}
+function _selfTestCmdInner(opts, droppedEnv) {
   const isTty = process.stdout && process.stdout.isTTY;
   const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
   const rd = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;
@@ -6651,12 +6762,18 @@ function selfTestCmd(opts = {}) {
   const pass = results.filter(r => r.ok).length;
   const fail = results.length - pass;
   if (opts.json) {
-    log(JSON.stringify({ version: VERSION, total: results.length, pass, fail, ok: fail === 0, results }, null, 2));
+    log(JSON.stringify({ version: VERSION, total: results.length, pass, fail, ok: fail === 0, controlledEnv: droppedEnv, results }, null, 2));
     if (fail > 0) process.exitCode = 1;
     return;
   }
   log(cy(`# leerness selftest (1.9.258) — 코어 함수 무결성 검증 (v${VERSION})`));
   log('');
+  // 무시한 설정은 반드시 보인다 — 사용자가 켜 둔 것이 안 먹었다는 사실을 숨기면 그 자체가 거짓 보고다(1.36.125).
+  if (droppedEnv.length) {
+    log(dm(`  ⓘ 측정 통제: 검증 중에만 ${droppedEnv.length}개 환경설정을 무시합니다 — ${droppedEnv.join(', ')}`));
+    log(dm(`     (이 설정들이 켜져 있으면 selftest 가 "설치 손상" 을 거짓 보고했습니다 — 실제 제품 동작은 그대로입니다)`));
+    log('');
+  }
   results.forEach(r => {
     if (r.ok) log(`  ${gr('✓')} ${r.name}`);
     else log(`  ${rd('✗')} ${r.name}${r.err ? dm(' — ' + r.err) : ''}`);
@@ -8339,9 +8456,14 @@ function _p0097AsyncLockOk() {
   finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
 }
 // 1.36.124 (살아 있는 MCP 통신 실측): selftest 프로브가 `process.env` 를 그대로 상속했다 —
-//   MCP 래퍼는 `LEERNESS_NO_WORKFLOW_GUIDE` 등으로 **안내 출력을 일부러 끄고** 자식을 띄우므로,
-//   "안내가 뜬다" 를 단언하는 프로브가 MCP 경유에서만 실패했다. 그 결과 `leerness_selftest` 가
+//   MCP 래퍼는 자식을 띄울 때 안내·점검 계열 변수를 **일부러 켜 두는데**, 그 환경에서 도는 프로브가
+//   "그 동작이 살아 있다" 를 단언하다 MCP 경유에서만 실패했다. 그 결과 `leerness_selftest` 가
 //   AI 에게 "설치가 깨졌다" 고 **거짓 보고**했다(343 중 1 실패). 프로브는 억제 변수를 걷어낸 환경에서 돈다.
+//   1.36.125 (검수 P3, 주석 정정): 직접 원인은 workflow guide 의 stdout 이 아니다 — reminder 쪽은
+//   `LEERNESS_NO_DRIFT_CHECK`, usage 쪽은 `LEERNESS_INTERNAL` 이었다. 원인을 잘못 적어 두면 다음 회귀
+//   분석이 엉뚱한 곳을 판다. 목록 전체를 걷어내는 처방 자체는 그대로 유효하다.
+//   ⚠ 이 목록은 **프로브 단위** 처방이다. 프로필·워크스페이스·언어처럼 제품 의미를 바꾸는 설정은
+//     프로브마다 지우면 새 프로브가 빠지므로 selftest 진입점에서 통제한다(_SELFTEST_CONTROLLED_ENV).
 const _PROBE_SUPPRESS_ENV = ['LEERNESS_INTERNAL', 'LEERNESS_NO_BANNER', 'LEERNESS_NO_PROMPT',
   'LEERNESS_NO_WORKFLOW_GUIDE', 'LEERNESS_NO_STALE_CHECK', 'LEERNESS_NO_DRIFT_CHECK',
   'LEERNESS_NO_HEADLINE', 'LEERNESS_NO_LAZY_WARN'];
@@ -15674,7 +15796,17 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   //   이전엔 npm test 하드코딩 → 비-JS(파이썬 등) 프로젝트에서 npm init 잔재 placeholder("no test specified"&&exit 1)가 실행돼
   //   테스트 전부 통과한 작업을 "주장 불일치 FAIL"로 오판(5축 클린룸 실증 P1). placeholder 는 테스트가 아니므로 skip 처리.
   let runResult = null;
-  if (has('--run-tests')) {
+  // 1.36.125 (검수 P2): `verify-claim --all --run-tests` 는 done 행마다 verifyClaimCmd 를 부르고
+  //   `--run-tests` 는 전역 플래그다 → **같은 테스트 스위트를 task 수만큼 반복 실행**했다.
+  //   한 번의 호출 안에서 같은 root·같은 명령의 결과는 정의상 동일하다(주장별로 달라질 수 없다).
+  //   그래서 --all 스윕이 넘겨준 메모를 재사용한다. 효과는 두 가지 —
+  //   ① N×300초가 1×300초가 되어 MCP 예산(660초) 안에 들어온다(거짓 타임아웃 제거)
+  //   ② 우리 자신처럼 스위트가 79분인 프로젝트에서 N번 도는 낭비가 사라진다.
+  //   ⚠ 메모는 **호출자가 명시로 넘길 때만** 쓴다(모듈 전역 캐시로 두면 장수 프로세스에서 낡은 결과를 재사용한다).
+  const _runMemo = opts && opts.runMemo && typeof opts.runMemo === 'object' ? opts.runMemo : null;
+  if (has('--run-tests') && _runMemo && Object.prototype.hasOwnProperty.call(_runMemo, 'result')) {
+    runResult = _runMemo.result;
+  } else if (has('--run-tests')) {
     let testCmd = arg('--test-cmd', null);
     if (!testCmd) {
       try { const cfg = JSON.parse(read(path.join(root, '.harness', 'leerness-config.json'))); if (cfg && typeof cfg.testCommand === 'string' && cfg.testCommand.trim()) testCmd = cfg.testCommand.trim(); } catch {}
@@ -15713,6 +15845,8 @@ function verifyClaimCmd(root, taskId, opts = {}) {
         }
       }
     }
+    // 이 호출에서 실제로 실행한 결과를 메모에 남긴다 — 다음 주장부터는 재실행하지 않는다(검수 P2).
+    if (_runMemo) _runMemo.result = runResult;
   }
 
   // 1.9.309 (UR-0048, 설치리뷰 Opus critical): done 주장은 evidence(파일+테스트) 기본 강제 — 거짓완료 차단을 기본값·MCP·json 모두에서 작동.
@@ -16020,7 +16154,10 @@ function _verifyClaimsAll(root) {
   root = absRoot(root);
   const rows = readProgressRows(root);
   const doneRows = rows.filter(r => /done|완료|completed/i.test(String(r.status || '')));
-  const results = doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true }));
+  // 1.36.125 (검수 P2): `--run-tests` 는 전역 플래그라 종전엔 스위트를 done 행 수만큼 반복 실행했다
+  //   (100개 주장 × 300초 = 8시간 — MCP 예산으로는 어떤 값도 못 덮는다). 한 스윕 = 한 번 실행.
+  const runMemo = {};
+  const results = doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true, runMemo }));
   const failed = results.filter(x => x && !x.ok);
   return { ok: failed.length === 0, total: doneRows.length, failed: failed.length, results };
 }
@@ -22017,6 +22154,68 @@ function _mcpToCliArgs(name, args, targetPath) {
 }
 
 // 프로토콜: MCP 표준 (JSON-RPC 2.0). 메서드: initialize, tools/list, tools/call
+// 1.36.93 (헌트 #8): 래퍼 타임아웃(60s)이 bugfix probe 예산(600s)보다 짧아, 버그를 **진짜 고치고**
+//   영수증까지 채운 사용자가 MCP 표면에서는 done 을 영영 기록하지 못했다. 게다가 stdout 이 비어 있어
+//   응답이 `(no output)` 뿐 — 차단 사유도, 타임아웃이라는 사실도 전달되지 않았다(진단 단서 0).
+//   ① 기본값을 probe 예산 위로 올리고 ② env 로 조절 가능하게 하며 ③ 타임아웃을 **사실대로** 보고한다.
+//   (MCP 클라이언트 자체 타임아웃은 leerness 가 어쩌지 못한다 — 그래서 메시지에 CLI 대안을 함께 준다.)
+//   codex 33차 #2: 한도를 **전역으로** 올리면 `spawnSync` 가 단일 스레드 서버를 그만큼 얼린다 —
+//   무관한 도구가 멎어도 11분간 ping·취소 통지조차 못 읽는다. 그래서 긴 예산은 그 예산이 필요한 호출에만 준다.
+const MCP_TIMEOUT_DEFAULT_MS = 60000;
+const MCP_TIMEOUT_PROBE_MS = 660000;     // 제품 내부 최대 한도(600s) 위
+const MCP_TIMEOUT_LONG_MS = 300000;
+function _mcpTimeoutOverrideMs() {
+  const v = parseInt(process.env.LEERNESS_MCP_TIMEOUT_MS || '', 10);
+  return (Number.isFinite(v) && v >= 5000 && v <= 3600000) ? v : null;
+}
+// 1.36.125 (검수 P2 · 클래스 스윕): 1.36.124 는 `selftest` **한 이름만** 예산에서 구제했다 — 전형적인
+//   "가드는 자기가 밟은 경로만 지킨다". 60초를 넘길 수 있는 경로는 그것만이 아니고, 판별 기준도 이름이 아니라
+//   **그 명령이 스스로 거는 내부 타임아웃**이다. 예산이 내부 한도보다 짧으면 정상 동작을 잘라 놓고
+//   AI 에게 거짓 실패를 보고한다(1.36.124 와 같은 클래스). 그래서 술어를 흩뿌리지 않고 한 표로 모으고,
+//   각 항목이 반드시 넘어야 할 내부 한도(mustExceedMs)를 함께 적는다 — selftest 가 그 숫자를 **소스에서
+//   실제로 읽어** `budget > 내부한도` 를 단언하므로, 내부 한도를 올리고 표를 안 고치면 게이트가 깨진다.
+//   ⚠ 남는 한계(정직하게): referee verify 는 good/bad/check 세 번을 각각 내부 한도까지 쓸 수 있어
+//      최악(3×600초)은 어떤 예산으로도 못 덮는다 — 그 경우의 탈출구는 타임아웃 메시지가 안내하는
+//      `LEERNESS_MCP_TIMEOUT_MS` 다. 예산을 3배로 키우면 이번엔 서버가 30분간 얼어붙어 더 나쁘다.
+const MCP_LONG_PATHS = [
+  { id: 'selftest', budgetMs: MCP_TIMEOUT_LONG_MS, mustExceedMs: 116000,
+    why: '실측 116초(1.36.124) — 소스 리터럴이 아니라 측정값',
+    match: (a) => a[0] === 'selftest' },
+  // bugfix probe 가 도는 경로 — done 전이(task update --status done)와 TodoWrite 왕복(task sync).
+  { id: 'task-done-probe', budgetMs: MCP_TIMEOUT_PROBE_MS, mustExceedMs: 600000,
+    why: 'lib/bugfix.js 의 probe 실행 한도', src: { file: 'lib/bugfix.js', re: /shell: true, encoding: 'utf8', timeout: (\d+)/ },
+    match: (a) => a[0] === 'task' && (a[1] === 'sync'
+      || (a[1] === 'update' && a.includes('--status') && ['done', 'completed', 'verified'].includes(a[a.indexOf('--status') + 1]))) },
+  { id: 'verify-claim-run-tests', budgetMs: MCP_TIMEOUT_PROBE_MS, mustExceedMs: 300000,
+    why: '프로젝트 테스트 실행 한도(runCommandSafe kind:verify_claim_test)',
+    src: { file: 'bin/leerness.js', re: /timeout: (\d+) \* 60 \* 1000, kind: 'verify_claim_test'/, scale: 60000 },
+    match: (a) => a[0] === 'verify-claim' && a.includes('--run-tests') },
+  { id: 'referee-verify', budgetMs: MCP_TIMEOUT_PROBE_MS, mustExceedMs: 600000,
+    why: 'lib/referee.js calibrate 기본 한도(good/bad/check 각각)',
+    src: { file: 'lib/referee.js', re: /Number\(opts\.timeoutMs\) \|\| (\d+)/ },
+    match: (a) => a[0] === 'referee' && a[1] === 'verify' },
+  { id: 'api-skill-add', budgetMs: MCP_TIMEOUT_LONG_MS, mustExceedMs: 110000,
+    why: '본문 1 + same-domain 링크 최대 10 요청 × 요청당 10초',
+    match: (a) => a[0] === 'api-skill' && a[1] === 'add' },
+];
+function _mcpLongPathFor(cliArgs) {
+  const a = (cliArgs || []).map(String);
+  return MCP_LONG_PATHS.find(p => { try { return p.match(a) === true; } catch { return false; } }) || null;
+}
+function _mcpTimeoutFor(cliArgs) {
+  const ov = _mcpTimeoutOverrideMs();
+  if (ov != null) return ov;
+  const p = _mcpLongPathFor(cliArgs);
+  return p ? p.budgetMs : MCP_TIMEOUT_DEFAULT_MS;
+}
+// 타임아웃 사유 한 줄 — **실제로 적용된 예산**과 어긋나면 안 된다. 명시 override 가 걸린 호출에
+//   "이 호출은 긴 예산(300초)을 받습니다" 라고 말하면 5초에 잘린 사용자에게 거짓말을 하는 것이다.
+//   순수 함수로 두는 이유: 진짜 타임아웃을 기다리지 않고도 두 분기를 실행으로 단언할 수 있게(1.36.125).
+function _mcpTimeoutHint(cliArgs) {
+  if (_mcpTimeoutOverrideMs() != null) return '';        // 예산을 정한 것은 표가 아니라 사용자다
+  const p = _mcpLongPathFor(cliArgs);
+  return p ? `  · 이 호출은 긴 예산(${Math.round(p.budgetMs / 1000)}초)을 받습니다 — ${p.why}.\n` : '';
+}
 function mcpServeCmd(root) {
   root = absRoot(root || process.cwd());
   // 노출할 leerness 도구 목록
@@ -22032,42 +22231,8 @@ function mcpServeCmd(root) {
   function send(obj) {
     process.stdout.write(JSON.stringify(obj) + '\n');
   }
-  // 1.36.93 (헌트 #8): 래퍼 타임아웃(60s)이 bugfix probe 예산(600s)보다 짧아, 버그를 **진짜 고치고**
-  //   영수증까지 채운 사용자가 MCP 표면에서는 done 을 영영 기록하지 못했다. 게다가 stdout 이 비어 있어
-  //   응답이 `(no output)` 뿐 — 차단 사유도, 타임아웃이라는 사실도 전달되지 않았다(진단 단서 0).
-  //   ① 기본값을 probe 예산 위로 올리고 ② env 로 조절 가능하게 하며 ③ 타임아웃을 **사실대로** 보고한다.
-  //   (MCP 클라이언트 자체 타임아웃은 leerness 가 어쩌지 못한다 — 그래서 메시지에 CLI 대안을 함께 준다.)
-  //   codex 33차 #2: 한도를 **전역으로** 올리면 `spawnSync` 가 단일 스레드 서버를 그만큼 얼린다 —
-  //   무관한 도구가 멎어도 11분간 ping·취소 통지조차 못 읽는다. 그래서 긴 예산은 **probe 를 실행할 수 있는
-  //   호출에만** 준다(done 전이 · task sync). 나머지는 종전대로 60초.
-  const MCP_TIMEOUT_DEFAULT_MS = 60000;
-  const MCP_TIMEOUT_PROBE_MS = 660000;     // probe 예산(600s) 위 — 이 값이 적용되는 호출은 아래 _needsProbeBudget 뿐
-  const MCP_TIMEOUT_OVERRIDE_MS = (() => {
-    const v = parseInt(process.env.LEERNESS_MCP_TIMEOUT_MS || '', 10);
-    return (Number.isFinite(v) && v >= 5000 && v <= 3600000) ? v : null;
-  })();
-  // 1.36.124 (살아 있는 MCP 통신 실측): `leerness_selftest` 는 **항상** 60초 한도를 넘겨 타임아웃만 돌려줬다.
-  //   실측 116초(우리 repo·빈 임시 프로젝트 둘 다) — 즉 광고된 89개 도구 중 **설치 검증 도구가 MCP 로는 무용**이었다.
-  //   전역 한도를 올리지 않는 이유는 위와 같다(무관한 도구가 서버를 그만큼 얼린다). 그래서 이 명령에만 준다.
-  const MCP_TIMEOUT_LONG_MS = 300000;      // 실측 116초 대비 2.5배 여유
-  function _needsLongBudget(cliArgs) {
-    const a = (cliArgs || []).map(String);
-    return a[0] === 'selftest';
-  }
-  // bugfix probe 가 도는 경로만 긴 예산을 받는다 — done 전이(task update --status done)와 TodoWrite 왕복(task sync).
-  function _needsProbeBudget(cliArgs) {
-    const a = (cliArgs || []).map(String);
-    if (a[0] !== 'task') return false;
-    if (a[1] === 'sync') return true;
-    if (a[1] !== 'update') return false;
-    const i = a.indexOf('--status');
-    return i >= 0 && ['done', 'completed', 'verified'].includes(a[i + 1]);
-  }
-  function _mcpTimeoutFor(cliArgs) {
-    return MCP_TIMEOUT_OVERRIDE_MS != null ? MCP_TIMEOUT_OVERRIDE_MS
-      : (_needsProbeBudget(cliArgs) ? MCP_TIMEOUT_PROBE_MS
-        : (_needsLongBudget(cliArgs) ? MCP_TIMEOUT_LONG_MS : MCP_TIMEOUT_DEFAULT_MS));
-  }
+  // 예산 표(MCP_LONG_PATHS)와 _mcpTimeoutFor 는 모듈 스코프에 있다 — selftest 가 소스 grep 이 아니라
+  //   **실제 호출**로 `budget > 내부한도` 를 단언할 수 있게 하기 위함(1.36.125).
   const _shQuote = (s) => (/[\s"']/.test(String(s)) ? `"${String(s).replace(/"/g, '\\"')}"` : String(s));
   function callLeerness(cliArgs) {
     const budget = _mcpTimeoutFor(cliArgs);
@@ -22084,8 +22249,9 @@ function mcpServeCmd(root) {
       return {
         ok: false, exit: null, stdout: '',
         stderr: `⏱ ${Math.round(budget / 1000)}초 안에 끝나지 않아 중단했습니다: ${cmd}\n`
-          //   probe 설명은 probe 가 실제로 돌 수 있는 호출에만 — 무관한 도구에 엉뚱한 원인을 대지 않는다(#3).
-          + (_needsProbeBudget(cliArgs) ? `  · bugfix probe 가 등록된 task 를 done 으로 바꾸면 probe(최대 600초)가 실행됩니다 — 그만큼 시간이 필요합니다.\n` : '')
+          //   원인 설명은 그 호출에 실제로 해당하는 것만 — 무관한 도구에 엉뚱한 원인을 대지 않는다(#3).
+          //   1.36.125: 표의 `why` 를 그대로 쓴다(예산을 준 근거와 사용자에게 대는 이유가 갈라지지 않게).
+          + _mcpTimeoutHint(cliArgs)
           + `  · 한도 조절: LEERNESS_MCP_TIMEOUT_MS=<밀리초> (5000~3600000)\n`
           + `  · 또는 터미널에서 직접: ${cmd}`
           + (partial ? `\n  · 중단 전 출력:\n${partial.slice(0, 2000)}` : ''),
