@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.123';
+const VERSION = '1.36.124';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1068,7 +1068,11 @@ function managedMerge(file, next, previous, archiveDir, mergeOpts = {}) {
   if (!archiveRel && previous) {
     const _m = /(?:전체 원본 백업|Full original backup):\s*`([^`]+)`/.exec(String(previous));
     if (_m && _m[1] && _m[1] !== '.harness/archive') {
-      archiveRel = exists(path.join(_base, _m[1])) ? _m[1] : '.harness/archive';
+      //   절대 경로 포인터도 있다(구버전이 cwd 기준으로 박아 둔 것) — `path.join` 으로 이어 붙이면
+      //   존재하지 않는 경로가 돼 정상 포인터를 격하시킨다(검수 P2). 절대면 그대로 본다.
+      const _p = _m[1];
+      const _abs = path.isAbsolute(_p) || /^[A-Za-z]:[\\/]/.test(_p);
+      archiveRel = exists(_abs ? _p : path.join(_base, _p)) ? _p : '.harness/archive';
     }
   }
   return _managedMerge(file, next, previous, archiveRel, MERGE_OVERWRITE_FILES, mergeOpts);   // 1.36.60: altTemplate/lang 전달
@@ -1382,7 +1386,7 @@ async function install(root, opts = {}) {
       if (!exists(p)) { _noop = false; if (process.env.LEERNESS_DEBUG_NOOP) log(`[noop-debug] missing: ${f}`); break; }
       if (managedOverwrite.has(f)) {
         let cur = ''; try { cur = read(p); } catch { _noop = false; break; }
-        const wouldBe = managedMerge(f, c, cur, null, { altTemplate: _altFiles[f], lang });
+        const wouldBe = managedMerge(f, c, cur, null, { altTemplate: _altFiles[f], lang, root });   // 1.36.124: 같은 이유로 root 전달
         if (_normVolatile(f, wouldBe) !== _normVolatile(f, cur)) { _noop = false; if (process.env.LEERNESS_DEBUG_NOOP) log(`[noop-debug] differs: ${f}`); break; }
       }
       // 비-managed 는 preserve(불변) 경로 — 존재하면 변경 없음
@@ -6626,7 +6630,7 @@ function _selfTestCases() {
         const guards = /if \(level === '🔴 critical'\) process\.exitCode = 1;\s*\n\s*log\(JSON\.stringify/.test(dr)
           && s.includes("writeIfSafe(root, '.claude/commands/update.md', _updContent")
           && s.includes('force: !!opts.force, dry: false, migration: true')
-          && s.includes('const lang = detectLanguageValue(root, ') && s.includes("managedMerge(key, tmpl, cur, null, { lang })");
+          && s.includes('const lang = detectLanguageValue(root, ') && s.includes("managedMerge(key, tmpl, cur, null, { lang, root })")   // 1.36.124: 대상 루트 전달이 계약이다(검수 P1);
         return f13ok && skipOk && f7ok && f11ok && guards;
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     } }
@@ -7100,7 +7104,9 @@ function integrityCmd(root) {
         //   raw 교체는 사용자가 추가한 커스텀 안전 규칙까지 지웠다. 부재/판독불가만 raw 재생성.
         if (_readable && exists(fp)) {
           let cur = ''; try { cur = read(fp); } catch {}
-          writeUtf8(fp, managedMerge(key, tmpl, cur, null, { lang }));
+          // 1.36.124 (검수 P1): 대상 루트를 안 넘기면 보존-포인터 실재 판정이 **cwd 기준**이 된다 —
+          //   `integrity check --repair --path <다른 프로젝트>` 를 다른 디렉터리에서 돌리면 정상 포인터를 격하시킨다.
+          writeUtf8(fp, managedMerge(key, tmpl, cur, null, { lang, root }));
         } else {
           writeUtf8(fp, tmpl);
         }
@@ -8332,12 +8338,24 @@ function _p0097AsyncLockOk() {
   } catch { return false; }
   finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
 }
+// 1.36.124 (살아 있는 MCP 통신 실측): selftest 프로브가 `process.env` 를 그대로 상속했다 —
+//   MCP 래퍼는 `LEERNESS_NO_WORKFLOW_GUIDE` 등으로 **안내 출력을 일부러 끄고** 자식을 띄우므로,
+//   "안내가 뜬다" 를 단언하는 프로브가 MCP 경유에서만 실패했다. 그 결과 `leerness_selftest` 가
+//   AI 에게 "설치가 깨졌다" 고 **거짓 보고**했다(343 중 1 실패). 프로브는 억제 변수를 걷어낸 환경에서 돈다.
+const _PROBE_SUPPRESS_ENV = ['LEERNESS_INTERNAL', 'LEERNESS_NO_BANNER', 'LEERNESS_NO_PROMPT',
+  'LEERNESS_NO_WORKFLOW_GUIDE', 'LEERNESS_NO_STALE_CHECK', 'LEERNESS_NO_DRIFT_CHECK',
+  'LEERNESS_NO_HEADLINE', 'LEERNESS_NO_LAZY_WARN'];
+function _probeEnv(extra) {
+  const e = Object.assign({}, process.env, extra || {});
+  for (const k of _PROBE_SUPPRESS_ENV) delete e[k];
+  return e;
+}
 function _p0104ReminderOk() {
   const os2 = require('os');
   const cp2 = require('child_process');
   const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p104r-'));
   try {
-    const env2 = Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' });
+    const env2 = _probeEnv({ LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' });
     const mk = (body) => {
       const d = path.join(arena, 'p' + Math.abs(body.length));
       fs.mkdirSync(d, { recursive: true });
@@ -8445,7 +8463,7 @@ function _p0104UsageOk() {
   const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p104-'));
   try {
     const cwdP = path.join(arena, 'CWDPROJ'), tgt = path.join(arena, 'TARGETPROJ');
-    const env2 = Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' });
+    const env2 = _probeEnv({ LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' });   // 억제 변수 제거(위 주석)
     for (const d of [cwdP, tgt]) {
       fs.mkdirSync(d, { recursive: true });
       fs.writeFileSync(path.join(d, 'package.json'), '{"name":"x","version":"0.1.0"}');
@@ -22028,6 +22046,14 @@ function mcpServeCmd(root) {
     const v = parseInt(process.env.LEERNESS_MCP_TIMEOUT_MS || '', 10);
     return (Number.isFinite(v) && v >= 5000 && v <= 3600000) ? v : null;
   })();
+  // 1.36.124 (살아 있는 MCP 통신 실측): `leerness_selftest` 는 **항상** 60초 한도를 넘겨 타임아웃만 돌려줬다.
+  //   실측 116초(우리 repo·빈 임시 프로젝트 둘 다) — 즉 광고된 89개 도구 중 **설치 검증 도구가 MCP 로는 무용**이었다.
+  //   전역 한도를 올리지 않는 이유는 위와 같다(무관한 도구가 서버를 그만큼 얼린다). 그래서 이 명령에만 준다.
+  const MCP_TIMEOUT_LONG_MS = 300000;      // 실측 116초 대비 2.5배 여유
+  function _needsLongBudget(cliArgs) {
+    const a = (cliArgs || []).map(String);
+    return a[0] === 'selftest';
+  }
   // bugfix probe 가 도는 경로만 긴 예산을 받는다 — done 전이(task update --status done)와 TodoWrite 왕복(task sync).
   function _needsProbeBudget(cliArgs) {
     const a = (cliArgs || []).map(String);
@@ -22039,7 +22065,8 @@ function mcpServeCmd(root) {
   }
   function _mcpTimeoutFor(cliArgs) {
     return MCP_TIMEOUT_OVERRIDE_MS != null ? MCP_TIMEOUT_OVERRIDE_MS
-      : (_needsProbeBudget(cliArgs) ? MCP_TIMEOUT_PROBE_MS : MCP_TIMEOUT_DEFAULT_MS);
+      : (_needsProbeBudget(cliArgs) ? MCP_TIMEOUT_PROBE_MS
+        : (_needsLongBudget(cliArgs) ? MCP_TIMEOUT_LONG_MS : MCP_TIMEOUT_DEFAULT_MS));
   }
   const _shQuote = (s) => (/[\s"']/.test(String(s)) ? `"${String(s).replace(/"/g, '\\"')}"` : String(s));
   function callLeerness(cliArgs) {

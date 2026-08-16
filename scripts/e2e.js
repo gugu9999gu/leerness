@@ -5138,6 +5138,51 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.124 — MCP 서버를 **실제 JSON-RPC 로** 두드린다. 단위 테스트가 초록이어도 살아 있는 통신은 깨질 수 있다.
+//   실측으로 두 결함이 나왔다: ① `leerness_selftest` 는 실측 116초인데 MCP 기본 한도가 60초라 **항상 타임아웃**
+//   (광고된 89개 도구 중 설치 검증 도구가 MCP 로는 무용) ② selftest 프로브가 `process.env` 를 상속해
+//   MCP 래퍼가 끄는 안내를 단언 → MCP 경유에서만 1건 실패 = AI 에게 "설치가 깨졌다" 는 **거짓 보고**.
+total++;
+{
+  let ok = false; const bad = [];
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mcp124-'));
+  const ENVm = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  try {
+    const d = path.join(sb, 'p'); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENVm });
+    const rpc = (id, method, params) => JSON.stringify({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) }) + '\n';
+    const input = rpc(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'e2e', version: '0' } })
+      + rpc(2, 'tools/list') + rpc(3, 'tools/call', { name: 'leerness_selftest', arguments: { path: d } });
+    const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve', '--path', d],
+      { cwd: d, input, encoding: 'utf8', timeout: 900000, env: ENVm, maxBuffer: 64 * 1024 * 1024 });
+    const msgs = [];
+    for (const line of String(r.stdout || '').split('\n')) { const s = line.trim(); if (s) { try { msgs.push(JSON.parse(s)); } catch { bad.push('비JSON줄'); } } }
+    const by = (i) => msgs.find(m => m.id === i);
+    if (String(r.stderr || '').length !== 0) bad.push(`stderr(${String(r.stderr).length}B)`);
+    const init = by(1); if (!init || init.error || !(init.result && init.result.serverInfo)) bad.push('initialize실패');
+    const tools = by(2) && by(2).result && by(2).result.tools;
+    if (!Array.isArray(tools) || tools.length < 50) bad.push(`tools/list(${Array.isArray(tools) ? tools.length : 'none'})`);
+    else {
+      if (tools.some(t => !t.description || !String(t.description).trim())) bad.push('도구설명없음');
+      if (tools.some(t => !t.inputSchema || typeof t.inputSchema !== 'object')) bad.push('도구스키마없음');
+    }
+    const call = by(3);
+    const txt = call && call.result && Array.isArray(call.result.content) ? String((call.result.content[0] || {}).text || '') : '';
+    // ⚠ content 가 비어 있지 않다는 것만 보면 **타임아웃 문구도 성공**으로 센다(내 첫 프로브가 그랬다).
+    if (!call || call.error) bad.push('tools/call오류');
+    else if (/안에 끝나지 않아 중단/.test(txt)) bad.push('tools/call타임아웃');
+    else if (!/"total"\s*:\s*\d+|전체 \d+건 통과/.test(txt)) bad.push('tools/call결과아님');
+    // MCP 경유 selftest 가 **실패를 보고하면** 그건 거짓 보고다(같은 프로젝트에서 CLI 는 통과한다)
+    else { const m = /"fail"\s*:\s*(\d+)/.exec(txt); if (m && Number(m[1]) > 0) bad.push(`MCP경유_selftest_거짓실패(fail=${m[1]})`); }
+    ok = bad.length === 0;
+  } catch (e) { bad.push('ERR:' + String(e && e.message).slice(0, 80)); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? '✓ B(1.36.124) MCP 살아있는 통신: initialize · tools/list(설명·스키마 전수) · tools/call selftest 결과 반환 · stderr 0'
+    : '✗ MCP 살아있는 통신 실패 ' + JSON.stringify(bad.slice(0, 6)));
+  if (!ok) failed++;
+}
+
 // 1.9.367 회귀 (UR-0025): _mergeEnvLines 모듈 분리 — migrate 가 사용자 .env 값을 key-aware 로 보존 (덮어쓰기 X)
 total++;
 {
