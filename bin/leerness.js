@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.122';
+const VERSION = '1.36.123';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1037,6 +1037,21 @@ function createBackup(root, reason, files, dry = false) {
   return { archiveDir: ar, candidates, pruned };
 }
 
+// 1.36.115: 구버전은 스킬을 `.claude/skills/leerness.md`(평면)로 깔았고 그 형식은 발견되지 않는다.
+//   새 위치로 옮겨 심었지만 **옛 파일은 지우지 않는다** — 사용자가 손댔을 수 있고, 이 저장소의 계약은 false-DROP 이 버그다.
+//   대신 사본 2벌이 생겼다는 사실과 어느 쪽이 실제로 읽히는지 알린다(안 그러면 옛 파일을 고치고 반영 안 돼 혼란).
+//   1.36.123 (자기 저장소 도그푸딩): 이 경고가 `init` 에만 있었다 — 도구 배선의 **문서화된 진입점**인 `adapter`
+//   로 들어온 사용자는 사본 2벌을 갖고도 아무 말을 못 들었다(우리 repo 에서 실제로 그랬다). 두 경로가 같이 쓴다.
+function _warnLegacySkillFile(root) {
+  try {
+    const f = path.join(root, '.claude', 'skills', 'leerness.md');
+    if (!exists(f)) return false;
+    warn(`구 스킬 파일이 남아 있습니다: .claude/skills/leerness.md`);
+    log(`     → 실제로 읽히는 것은 .claude/skills/leerness/SKILL.md 입니다(Claude Code 규약). 옛 파일은 무시되며, 필요 없으면 직접 지우세요.`);
+    return true;
+  } catch { return false; }
+}
+
 // 1.9.1 P2 / 1.9.368 (UR-0025): MERGE_OVERWRITE_FILES → lib/catalogs, managedMerge 순수 코어 → lib/pure-utils. 얇은 래퍼.
 function managedMerge(file, next, previous, archiveDir, mergeOpts = {}) {
   // 1.36.105 (codex 검수 HIGH#4): 경로를 **cwd 기준**으로 만들어 프로젝트 파일 안에 박았다 —
@@ -1046,7 +1061,16 @@ function managedMerge(file, next, previous, archiveDir, mergeOpts = {}) {
   // 1.36.122 (자기 저장소 도그푸딩): 백업을 만들지 않는 실행(`adapter` 등)은 여기서 일반 경로를 **채워** 넘겼고,
   //   그러면 이전 마이그레이션이 적어 둔 **구체 백업 경로가 덮여** 사라졌다(우리 repo 에서 실측).
   //   백업이 없으면 `null` 을 넘겨, 이전 문서의 포인터를 그대로 두게 한다(보존 블록의 정보 손실 방지).
-  const archiveRel = archiveDir ? path.relative(_base, archiveDir).replace(/\\/g, '/') : null;
+  //   ⚠ 1.36.123 (자체 헌트): 그 유지가 **없어진 아카이브를 영구 고착**시킬 수 있다 — 그 문장은
+  //   "전체 원본 백업: <경로>" 라는 **약속**이므로, 가리키는 곳이 사라졌으면 거짓 약속이 된다.
+  //   여기(fs 접근 가능)에서 실재를 확인해, 없으면 일반 경로로 되돌린다. 순수 함수는 그대로 둔다.
+  let archiveRel = archiveDir ? path.relative(_base, archiveDir).replace(/\\/g, '/') : null;
+  if (!archiveRel && previous) {
+    const _m = /(?:전체 원본 백업|Full original backup):\s*`([^`]+)`/.exec(String(previous));
+    if (_m && _m[1] && _m[1] !== '.harness/archive') {
+      archiveRel = exists(path.join(_base, _m[1])) ? _m[1] : '.harness/archive';
+    }
+  }
   return _managedMerge(file, next, previous, archiveRel, MERGE_OVERWRITE_FILES, mergeOpts);   // 1.36.60: altTemplate/lang 전달
 }
 
@@ -1592,13 +1616,7 @@ async function install(root, opts = {}) {
     // 1.36.115: 구버전은 스킬을 `.claude/skills/leerness.md`(평면)로 깔았고 그 형식은 발견되지 않는다.
     //   새 위치로 옮겨 심었지만 **옛 파일은 지우지 않는다** — 사용자가 손댔을 수 있고, 이 저장소의 계약은 false-DROP 이 버그다.
     //   대신 사본 2벌이 생겼다는 사실과 어느 쪽이 실제로 읽히는지 알린다(안 그러면 옛 파일을 고치고 반영 안 돼 혼란).
-    try {
-      const _legacySkill = path.join(root, '.claude', 'skills', 'leerness.md');
-      if (exists(_legacySkill)) {
-        warn(`구 스킬 파일이 남아 있습니다: .claude/skills/leerness.md`);
-        log(`     → 실제로 읽히는 것은 .claude/skills/leerness/SKILL.md 입니다(Claude Code 규약). 옛 파일은 무시되며, 필요 없으면 직접 지우세요.`);
-      }
-    } catch {}
+    _warnLegacySkillFile(root);
     if (!has('--no-auto-update') && !opts.minimal) {
       try { autoUpdateInstall(root); } catch (e) { warn('auto-update hook install skipped: ' + (e && e.message)); }
     } else if (opts.minimal) {
@@ -23943,6 +23961,8 @@ function adapterCmd(root, tool, opts = {}) {
   //   주장은 **파일 단위**로 한다 — 우리가 쓴 파일만 이름을 대고 말한다.
   _wrote.forEach(r => log(`  ℹ ${r.file} 에 MCP 등록 — 이 파일을 읽는 도구는 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`));
   _kept.forEach(r => log(`  ℹ ${r.file} 의 기존 leerness 항목을 그대로 두었습니다 — 그 항목이 leerness MCP 를 띄우는지는 확인하지 않았습니다`));
+  // 스킬을 까는 어댑터면 구 평면 파일도 같이 알린다(1.36.123: `init` 에만 있어 이 경로는 조용했다)
+  if (a.keys.some(k => String(k).includes('.claude/skills/'))) _warnLegacySkillFile(root);
   // 보존은 안전하지만 **막다른 길이면 안 된다** — 우리 것이 망가졌을 때 되돌릴 방법을 알려 준다(자체 헌트).
   if (_kept.length || _brk.length) log(`     → 표준 설정으로 되돌리려면 그 파일의 "leerness" 항목을 지우고 이 명령을 다시 실행하세요`);
   return;

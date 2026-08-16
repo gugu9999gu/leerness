@@ -5124,6 +5124,9 @@ total++;
       if (!j) { bad.push(`${c}:stdout이JSON아님`); continue; }
       // 문구가 "0 바이트" 면 검사도 0 바이트여야 한다 — `trim()===''` 은 개행만 있는 출력을 통과시킨다(검수 P3).
       if (err.length !== 0) bad.push(`${c}:stderr잡음(${err.length}B:${err.trim().split('\n')[0].slice(0, 40)})`);
+      // "성공 경로 15종" 이라고 말하려면 **성공인지도** 봐야 한다 — 실패 JSON(`ok:false`, exit 1)도 세고 있었다(검수 P2).
+      if (r.status !== 0) bad.push(`${c}:exit=${r.status}`);
+      if (j.ok === false) bad.push(`${c}:ok=false`);
     }
     // 판별력 — 이 검사가 실제로 무언가를 실행했는지(전부 건너뛰면 공허하게 통과한다)
     if (bad.length === 0 && CMDS.length < 10) bad.push('대상이_너무적음');
@@ -5201,10 +5204,29 @@ total++;
       // 사용자 커스텀 + 구체 백업 포인터를 가진 보존 블록을 만든다
       fs.writeFileSync(cf, fs.readFileSync(cf, 'utf8')
         + '\n<!-- leerness:migration-preserved -->\n## Preserved previous content\n\n> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-9.9.9-STAMP`\n\nUSER-KEEP-LINE\n');
-      cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENVp });
+      // ⚠ adapter 가 **실제로 무언가 했는지**부터 확인한다 — no-op/실패여도 미리 심은 포인터와 사용자 줄은
+      //   그대로 남아 이 단언이 공허하게 통과한다(검수 P2). 아카이브도 실재해야 유지가 정당하다.
+      fs.mkdirSync(path.join(d, '.harness', 'archive', 'leerness-9.9.9-STAMP'), { recursive: true });
+      fs.rmSync(path.join(d, '.mcp.json'), { force: true });
+      const rAd = cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENVp });
+      if (rAd.status !== 0) bad.push(`adapter실패(exit=${rAd.status})`);
+      if (!fs.existsSync(path.join(d, '.mcp.json'))) bad.push('adapter가_아무것도_안함(공허)');
       const after2 = fs.readFileSync(cf, 'utf8');
       if (!/leerness-9\.9\.9-STAMP/.test(after2)) bad.push('CLI경로에서_포인터_격하');
       if (!after2.includes('USER-KEEP-LINE')) bad.push('CLI경로에서_사용자라인_유실');
+      // ⚠ 위 픽스처는 아카이브가 **실재**한다(위에서 만든다). 실재하지 않으면 그 문장은 거짓 약속이므로
+      //   일반 경로로 되돌려야 한다 — 유지가 과하면 없어진 백업을 영구 고착시킨다(자체 헌트가 잡은 자리).
+      const dgone = path.join(sb, 'gone'); fs.mkdirSync(dgone, { recursive: true });
+      fs.writeFileSync(path.join(dgone, 'package.json'), '{"name":"g","version":"0.1.0"}');
+      cp.spawnSync(process.execPath, [CLI, 'init', dgone, '--yes'], { cwd: dgone, encoding: 'utf8', timeout: 300000, env: ENVp });
+      const gf = path.join(dgone, 'CLAUDE.md');
+      fs.writeFileSync(gf, fs.readFileSync(gf, 'utf8')
+        + '\n<!-- leerness:migration-preserved -->\n## Preserved previous content\n\n> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/GONE-9.9.9`\n\nUSER-KEEP-LINE\n');
+      cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', dgone], { cwd: dgone, encoding: 'utf8', timeout: 300000, env: ENVp });
+      const gAfter = fs.readFileSync(gf, 'utf8');
+      if (/GONE-9\.9\.9/.test(gAfter)) bad.push('없어진_아카이브를_계속_가리킴');
+      if (!/전체 원본 백업: `\.harness\/archive`/.test(gAfter)) bad.push('없어진_아카이브인데_일반경로로_안내림');
+      if (!gAfter.includes('USER-KEEP-LINE')) bad.push('격하시_사용자라인_유실');
     } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
     ok = bad.length === 0;
   } catch (e) { bad.push('ERR:' + String(e && e.message).slice(0, 80)); }
@@ -11284,6 +11306,22 @@ total++;
       }
       // 평면 파일을 새로 만들지 않는다(구버전 잔재는 별개 — 지우지 않되 새로 만들지도 않는다)
       if (fs.existsSync(path.join(d, '.claude', 'skills', 'leerness.md'))) bad.push('skill:평면파일을새로만듦');
+      // (자기 저장소 도그푸딩) 구 평면 잔재 경고가 `init` 에만 있었다 — 도구 배선의 문서화된 진입점인
+      //   `adapter` 로 들어온 사용자는 사본 2벌을 갖고도 아무 말을 못 들었다(우리 repo 가 그 상태였다).
+      {
+        const dleg = mk();
+        fs.rmSync(path.join(dleg, '.claude', 'skills', 'leerness'), { recursive: true, force: true });
+        fs.writeFileSync(path.join(dleg, '.claude', 'skills', 'leerness.md'), '---\nname: leerness\n---\nold\n');
+        const rleg = cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', dleg], { cwd: dleg, encoding: 'utf8', timeout: 300000, env: ENV });
+        const oleg = String(rleg.stdout || '') + String(rleg.stderr || '');
+        if (!fs.existsSync(path.join(dleg, '.claude', 'skills', 'leerness', 'SKILL.md'))) bad.push('skill:adapter가_새경로_미생성');
+        if (!/구 스킬 파일/.test(oleg)) bad.push('skill:adapter가_구파일_미경고');
+        if (!fs.existsSync(path.join(dleg, '.claude', 'skills', 'leerness.md'))) bad.push('skill:구파일을_지움(false-DROP)');
+        // 판별력 — 잔재가 없으면 그 경고가 뜨면 안 된다
+        const dclean = mk();
+        const rcl = cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', dclean], { cwd: dclean, encoding: 'utf8', timeout: 300000, env: ENV });
+        if (/구 스킬 파일/.test(String(rcl.stdout || '') + String(rcl.stderr || ''))) bad.push('skill:잔재없는데_경고');
+      }
       // ⚠ `init` 만 밟으면 안 된다. 실제로 `lib/catalogs.js` 의 어댑터 목록이 옛 평면 경로를 유지하고 있어
       //   `adapter claude` 가 이 수정을 되돌리고 있었다(1.36.116 에서 발견) — 가드가 밟지 않은 경로였다.
       const da = mk(['--minimal']);
@@ -12041,6 +12079,26 @@ total++;
         const starInp = AUD._collectGuardInputs(dstar);
         if (starInp.runners.some(r => /ghost\.js$/.test(r.file))) bad.push('블록주석에서_러너_수집');
         if (!PU._detectOrphanGuards(starInp).orphanScripts.includes('check:leaf')) bad.push('블록주석이_고아를_덮음');
+        // ⚠ 위는 **수집기만** 잰다 — 판정기의 `*` 처리를 지워도 통과한다(검수 P3: 수집기가 이미 걸러 놨으니까).
+        //   판정기 쪽은 러너를 **직접 주입해** 따로 잰다: 주석 줄에만 이름이 있으면 고아여야 한다.
+        const starDet = PU._detectOrphanGuards({
+          packageScripts: { test: 'node t.js', 'check:leaf': 'node l.js' },
+          runners: [{ file: '.github/workflows/ci.yml', viaScript: null, viaScripts: [], unconditional: true,
+            text: 'jobs:\n  a:\n    steps:\n      - run: npm test\n' },
+            { file: 'scripts/x.js', viaScript: 'test', viaScripts: ['test'],
+              text: '/*\n * npm run check:leaf\n */\nconsole.log(1);\n' }],
+          scriptFiles: [],
+        });
+        if (!starDet.orphanScripts.includes('check:leaf')) bad.push('판정기가_블록주석을_실행으로');
+        // 판별력 — 주석이 아닌 실제 호출은 여전히 덮여야 한다
+        const starLive = PU._detectOrphanGuards({
+          packageScripts: { test: 'node t.js', 'check:leaf': 'node l.js' },
+          runners: [{ file: '.github/workflows/ci.yml', viaScript: null, viaScripts: [], unconditional: true,
+            text: 'jobs:\n  a:\n    steps:\n      - run: npm test\n' },
+            { file: 'scripts/x.js', viaScript: 'test', viaScripts: ['test'], text: 'sh("npm run check:leaf");\n' }],
+          scriptFiles: [],
+        });
+        if (starLive.orphanScripts.length) bad.push('판정기_주석필터가_실제호출까지_지움');
         // (자체 헌트) Windows CI 는 `node scripts\x\check.js` 로 적는다. 후보 경로는 `/` 표기라
         //   전체 경로가 안 맞고 basename 경계 판정도 앞의 `\` 때문에 걸러져 **정상 배선이 고아로 보고**됐다.
         for (const [label, ref] of [['posix', 'scripts/x/check.js'], ['win', 'scripts\\x\\check.js'], ['win-dot', '.\\scripts\\x\\check.js']]) {
