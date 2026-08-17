@@ -4649,7 +4649,7 @@ total++;
     // 1.36.85: selftest 가 소스문자열 검사 → **행위 검사**로 바뀌며 4초대 → 약 13초가 됐다(CLI spawn 비용).
     //   30s 는 4초 시절 기준이라 전체 e2e 부하에서 타임아웃으로 터졌다(격리 재현 3/3 통과 = 검사 자체는 정상).
     //   여유를 넉넉히 준다 — 이 블록이 재는 것은 "비초기화 dir 에서도 통과하는가"이지 속도가 아니다.
-    const sr = cp.spawnSync(process.execPath, [CLI, 'selftest'], { cwd: ni, encoding: 'utf8', timeout: 180000 });
+    const sr = cp.spawnSync(process.execPath, [CLI, 'selftest'], { cwd: ni, encoding: 'utf8', timeout: 300000 });
     const sout = (sr.stdout || '') + (sr.stderr || '');
     const selftestOk = sr.status === 0 && /전체 \d+건 통과/.test(sout) && !/설치 손상/.test(sout);
     const dr = cp.spawnSync(process.execPath, [CLI, 'doctor'], { cwd: ni, encoding: 'utf8', timeout: 300000 });   // 1.36.87: doctor 는 selftest 를 내장한다 · 1.36.105: 실측 97~101s(게시본 포함) 라 120s 는 여유 1.2배였다 → 300s
@@ -5065,7 +5065,7 @@ total++;
   let ok = false;
   try {
     // 1.36.85: 행위검사 전환으로 selftest 약 13s — 4초 시절 기준 30s 는 전체 부하에서 터진다.
-    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { encoding: 'utf8', timeout: 180000 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { encoding: 'utf8', timeout: 300000 });
     const j = JSON.parse(r.stdout);
     ok = j.ok === true && j.pass === j.total && j.fail === 0 && j.total >= 112 && r.status === 0;
   } catch {}
@@ -5083,7 +5083,7 @@ total++;
   let ok = false;
   try {
     const repoRoot = path.resolve(__dirname, '..');
-    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { cwd: repoRoot, encoding: 'utf8', timeout: 180000, maxBuffer: 64 * 1024 * 1024 });
+    const r = cp.spawnSync(process.execPath, [CLI, 'selftest', '--json'], { cwd: repoRoot, encoding: 'utf8', timeout: 300000, maxBuffer: 64 * 1024 * 1024 });
     const pureStdout = typeof r.stdout === 'string' && r.stdout.trimStart().startsWith('{');
     const j = JSON.parse(r.stdout);                       // 계약: stdout 전체가 단일 JSON 문서
     const payloadOk = j.ok === true && j.pass === j.total && j.fail === 0 && j.total > 0;
@@ -7164,8 +7164,12 @@ total++;
     // ⑦ (1.28.2 Phase 10c) doctor: en 영어(한글 0) + ko 기본 한글 보존
     // 1.36.87: doctor 는 내부에서 selftest 를 돌린다 — 실측 19~24s 인데 제한이 20s 라 여유가 없었다(1.36.86 에서도 0.9s).
     //   제한을 올린 대신 종료코드도 함께 단언한다 — 타임아웃(status=null)이 출력 매칭만으로 통과하면 안 된다(codex 26차 #11).
-    const docEnR = cp.spawnSync(process.execPath, [CLI, 'doctor', '--language', 'en'], { encoding: 'utf8', timeout: 120000, cwd: d });
-    const docKoR = cp.spawnSync(process.execPath, [CLI, 'doctor'], { encoding: 'utf8', timeout: 120000, cwd: d });
+    // 1.36.127 (실측): 1.36.105 가 형제 블록의 doctor 제한을 120s→300s 로 올리며 "여유가 1.2배뿐이라
+    //   전체 부하에서 반복해 터진다" 고 적었는데, **이 클론은 120s 로 남아 있었다**(같은 수정의 누락분).
+    //   이번 게이트에서 실제로 여기서만 터졌고, 격리 실측은 `doctor --language en` **120s**(= 제한과 동일, 여유 1.0배).
+    //   측정 대상은 속도가 아니라 언어 렌더이므로 넉넉히 준다.
+    const docEnR = cp.spawnSync(process.execPath, [CLI, 'doctor', '--language', 'en'], { encoding: 'utf8', timeout: 300000, cwd: d });
+    const docKoR = cp.spawnSync(process.execPath, [CLI, 'doctor'], { encoding: 'utf8', timeout: 300000, cwd: d });
     const docEn = out(docEnR), docKo = out(docKoR);
     const doctorOk = docEnR.status === 0 && docKoR.status === 0
       && /install\/environment diagnosis/.test(docEn) && !H.test(docEn) && /설치\/환경 진단/.test(docKo);
@@ -12315,14 +12319,29 @@ total++;
       //   *다른 프로젝트용* CI 를 생성하는 코드라 `npm run test:smoke` 같은 문자열을 담고 있고,
       //   CI 가 그 파일을 직접 실행하므로 러너로 수집된다(정상 프로젝트에선 그게 맞는 판단이다).
       //   그래서 기준값은 **우리 CLI 소스를 뺀 입력**으로 잰다 — 탐지기가 망가지면 여기서 잡힌다.
-      //   ⚠ `test:core`·`test:smoke` 는 실제로 어떤 러너도 부르지 않는다(ci.yml 은 `test:fast` 만 돌린다).
-      //   나중에 CI 에 배선하면 이 단언을 **의도적으로** 갱신하라.
+      //   ⚠ (1.36.127) 위 주석은 "`test:core`·`test:smoke` 를 아무도 안 부른다 — 배선하면 **의도적으로**
+      //   이 단언을 갱신하라" 고 적어 두었다. 이번 라운드에 실제로 배선했다(`e2e-core.js` → npm test + CI),
+      //   그리고 `test:smoke` 는 그 파일이 `test:fast` 로 이미 도는 **별칭**이라 면제 대상이 됐다.
+      //   그래서 기대값을 0건으로 바꾼다 — 다만 **0건을 그냥 단언하면 탐지기가 죽어도 통과한다**.
+      //   실제 수집 입력에 **가짜 잠든 가드를 심어** 잡히는지 함께 본다(계측이 살아 있다는 증거).
       const selfNoBin = Object.assign({}, selfInp, { runners: selfInp.runners.filter(r => !/bin[\\/]leerness\.js$/.test(r.file)) });
       const selfBase = PU._detectOrphanGuards(selfNoBin);
-      for (const expect of ['test:smoke', 'test:core']) {
-        if (!selfBase.orphanScripts.includes(expect)) bad.push(`자기기준:${expect}가고아목록에없음(${selfBase.orphanScripts.join(',') || '없음'})`);
-      }
+      if (selfBase.orphanScripts.length) bad.push(`자기기준:이제0이어야(${selfBase.orphanScripts.join(',')})`);
       if (selfBase.orphanScripts.includes('test:fast')) bad.push('자기기준:CI가도는test:fast를오탐');
+      {
+        //   ⚠ 자기참조 7회차: 심을 이름을 **소스에 적으면** 이 파일(scripts/e2e.js)이 러너로 수집되면서
+        //   그 이름이 '덮인 것'이 돼 계측이 조용히 죽는다(실측으로 재현했다). 리터럴 쪼개기는 다음 사람이
+        //   이름을 적는 순간 또 뚫린다 — 그래서 이름 자체를 **실행 시 생성**한다(소스에 존재할 수 없음).
+        const uniq = `check-${process.pid.toString(36)}${(selfNoBin.scriptFiles || []).length.toString(36)}.js`;
+        const uniqPath = `scripts/${uniq}`;
+        const planted = Object.assign({}, selfNoBin, {
+          packageScripts: Object.assign({}, selfNoBin.packageScripts, { 'test:planted': `node ${uniqPath}` }),
+          scriptFiles: (selfNoBin.scriptFiles || []).concat(uniqPath),
+        });
+        const pr = PU._detectOrphanGuards(planted);
+        if (!pr.orphanScripts.includes('test:planted')) bad.push('자기기준:심은잠든가드를못잡음(탐지기죽음)');
+        if (!pr.orphanFiles.includes(uniqPath)) bad.push(`자기기준:심은파일을못잡음(${uniqPath})`);
+      }
       // 그리고 **불변식**으로 고정한다: 이 테스트 파일 자체가 판정을 바꾸면 안 된다.
       //   리터럴 쪼개기로 막으면 다음에 누가 이름을 적는 순간 또 뚫린다 — 값이 아니라 성질을 단언한다.
       const selfNoE2e = PU._detectOrphanGuards(Object.assign({}, selfNoBin,
@@ -12575,6 +12594,117 @@ total++;
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
   console.log(ok ? `✓ V(1.36.126/T-0107) 워크스페이스 대체 디렉터리: migrate 가 죽은 사본을 만들지 않고 명시적으로 실패(사유+실측) · 이미 당한 프로젝트를 audit/workspace-dir 가 알림 · 마커·env 가 있어도 쓰기 정상(.harness) · 대조군 오탐 0 ${JSON.stringify(dbg)}`
     : '✗ 1.36.126 워크스페이스 대체 디렉터리 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
+// 1.36.127 (T-0105/T-0106 도그푸딩): 고아 가드 탐지기가 **자기 저장소에서 눈이 멀어 있었다**.
+//   CI 가 `bin/leerness.js` 를 실행하므로 그 파일이 러너로 잡히고, 그 안의 selftest 단언 문자열
+//   (`'test:core'`·`e2e-core.js`)이 호출로 읽혀 leerness 자신의 진짜 고아가 0건으로 보고됐다.
+//   ① audit 이 그 가림을 **사용자에게 말하는가** ② 대조군은 조용한가 ③ 그리고 우리 자신이 실제로 배선했는가.
+total++;
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mask127-'));
+  const envM = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG', 'LEERNESS_MCP_PROFILE', 'LEERNESS_MCP_TIMEOUT_MS']) delete envM[k];
+  try {
+    // ① 피해자 픽스처 — 자기 진입점이 잠든 가드 이름을 **문자열로만** 담는다
+    const d = path.join(sb, 'p'); fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(d, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({
+      name: 'p', version: '0.1.0', bin: { p: 'bin/p.js' },
+      scripts: { test: 'node scripts/check-a.js', 'test:dead': 'node scripts/check-dead.js' },
+    }, null, 2));
+    fs.mkdirSync(path.join(d, 'bin'), { recursive: true });
+    //   호출이 아니라 **문서 문자열** — 사람 눈에는 명백히 호출이 아니지만 탐지기는 구분하지 못한다(0-deps 파서 없음).
+    fs.writeFileSync(path.join(d, 'bin', 'p.js'), 'const help = "run test:dead (scripts/check-dead.js) manually";\nconsole.log(help);\n');
+    fs.writeFileSync(path.join(d, 'scripts', 'check-a.js'), 'process.exit(0);\n');
+    fs.writeFileSync(path.join(d, 'scripts', 'check-dead.js'), 'process.exit(0);\n');
+    fs.writeFileSync(path.join(d, '.github', 'workflows', 'ci.yml'), 'jobs:\n  t:\n    steps:\n      - run: npm test\n      - run: node ./bin/p.js\n');
+    const ri = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 600000, env: envM });
+    if (ri.status !== 0) bad.push(`①init실패(${ri.status})`);
+    const au = cp.spawnSync(process.execPath, [CLI, 'audit', '--path', d, '--json'], { cwd: d, encoding: 'utf8', timeout: 600000, env: envM, maxBuffer: 32 * 1024 * 1024 });
+    let aj = null; try { aj = JSON.parse(au.stdout); } catch { bad.push('①auditJSON아님'); }
+    const fs2 = aj && Array.isArray(aj.findings) ? aj.findings : [];
+    const mask = fs2.find(x => x.kind === 'orphan_guard_masked_by_own_entry');
+    if (!mask) bad.push('①가림_미보고');
+    else {
+      if (!(mask.maskedScripts || []).includes('test:dead')) bad.push(`①가림목록=${JSON.stringify(mask.maskedScripts)}`);
+      if (!(mask.maskedFiles || []).includes('scripts/check-dead.js')) bad.push(`①가림파일=${JSON.stringify(mask.maskedFiles)}`);
+    }
+    //   판정 자체는 종전대로 조용해야 한다(오탐 편향 유지 — 가림 보고는 **추가**이지 판정 변경이 아니다)
+    if (fs2.some(x => x.kind === 'orphan_guard')) bad.push('①판정이바뀜(오탐편향깨짐)');
+    if (!/자신의 진입점 텍스트에 가려질 수 있습니다/.test(
+      cp.spawnSync(process.execPath, [CLI, 'audit', '--path', d], { cwd: d, encoding: 'utf8', timeout: 600000, env: envM }).stdout || '')) bad.push('①사람용문구없음');
+    dbg.masked = mask ? { s: mask.maskedScripts, f: mask.maskedFiles } : null;
+
+    // ② 대조군 — 진입점이 그 이름을 담지 않으면 가림 보고는 없고, 진짜 고아가 그대로 잡힌다
+    const d2 = path.join(sb, 'q'); fs.mkdirSync(path.join(d2, 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(d2, '.github', 'workflows'), { recursive: true });
+    fs.mkdirSync(path.join(d2, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(d2, 'package.json'), JSON.stringify({
+      name: 'q', version: '0.1.0', bin: { q: 'bin/q.js' },
+      scripts: { test: 'node scripts/check-a.js', 'test:dead': 'node scripts/check-dead.js' },
+    }, null, 2));
+    fs.writeFileSync(path.join(d2, 'bin', 'q.js'), 'console.log("nothing to see");\n');
+    fs.writeFileSync(path.join(d2, 'scripts', 'check-a.js'), 'process.exit(0);\n');
+    fs.writeFileSync(path.join(d2, 'scripts', 'check-dead.js'), 'process.exit(0);\n');
+    fs.writeFileSync(path.join(d2, '.github', 'workflows', 'ci.yml'), 'jobs:\n  t:\n    steps:\n      - run: npm test\n      - run: node ./bin/q.js\n');
+    cp.spawnSync(process.execPath, [CLI, 'init', d2, '--yes'], { cwd: d2, encoding: 'utf8', timeout: 600000, env: envM });
+    let aj2 = null;
+    try { aj2 = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'audit', '--path', d2, '--json'], { cwd: d2, encoding: 'utf8', timeout: 600000, env: envM, maxBuffer: 32 * 1024 * 1024 }).stdout); } catch { bad.push('②auditJSON아님'); }
+    const f2 = aj2 && Array.isArray(aj2.findings) ? aj2.findings : [];
+    if (f2.some(x => x.kind === 'orphan_guard_masked_by_own_entry')) bad.push('②대조군에가림보고');
+    const og = f2.find(x => x.kind === 'orphan_guard');
+    if (!og) bad.push('②진짜고아_미탐지(계측붕괴)');
+    else if (!(og.orphanScripts || []).includes('test:dead')) bad.push(`②고아목록=${JSON.stringify(og.orphanScripts)}`);
+    dbg.control = { masked: f2.some(x => x.kind === 'orphan_guard_masked_by_own_entry'), orphan: !!og };
+
+    // ②-b (검수 P1) 경로 표기가 조금만 달라도 가림 경고가 통째로 빠지면 안 된다 —
+    //   CI 가 `node ./bin/./p.js` 로 적으면 수집 파일명은 `bin/./p.js`, 선언은 `bin/p.js` 라
+    //   정확 일치 비교가 어긋나 `ownEntry:false` 가 되고 **조용한 0건이 그대로 재발**했다(실측 재현).
+    {
+      const d3 = path.join(sb, 'r'); fs.mkdirSync(path.join(d3, 'scripts'), { recursive: true });
+      fs.mkdirSync(path.join(d3, '.github', 'workflows'), { recursive: true });
+      fs.mkdirSync(path.join(d3, 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(d3, 'package.json'), JSON.stringify({
+        name: 'r', version: '0.1.0', bin: 'bin/r.js',
+        scripts: { test: 'node scripts/check-a.js', 'test:dead': 'node scripts/check-dead.js' },
+      }, null, 2));
+      fs.writeFileSync(path.join(d3, 'bin', 'r.js'), 'const help = "run test:dead (scripts/check-dead.js) manually";\n');
+      fs.writeFileSync(path.join(d3, 'scripts', 'check-a.js'), 'process.exit(0);\n');
+      fs.writeFileSync(path.join(d3, 'scripts', 'check-dead.js'), 'process.exit(0);\n');
+      //   ⚠ 중간 dot-segment — 이 표기 하나가 예전엔 경고를 통째로 없앴다
+      fs.writeFileSync(path.join(d3, '.github', 'workflows', 'ci.yml'), 'jobs:\n  t:\n    steps:\n      - run: npm test\n      - run: node ./bin/./r.js\n');
+      cp.spawnSync(process.execPath, [CLI, 'init', d3, '--yes'], { cwd: d3, encoding: 'utf8', timeout: 600000, env: envM });
+      let aj3 = null;
+      try { aj3 = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'audit', '--path', d3, '--json'], { cwd: d3, encoding: 'utf8', timeout: 600000, env: envM, maxBuffer: 32 * 1024 * 1024 }).stdout); } catch { bad.push('②b auditJSON아님'); }
+      const f3 = aj3 && Array.isArray(aj3.findings) ? aj3.findings : [];
+      const m3 = f3.find(x => x.kind === 'orphan_guard_masked_by_own_entry');
+      if (!m3) bad.push('②b dot-segment 표기에서 가림보고 사라짐');
+      else if (!(m3.maskedScripts || []).includes('test:dead')) bad.push(`②b가림목록=${JSON.stringify(m3.maskedScripts)}`);
+      dbg.dotSeg = { masked: !!m3 };
+    }
+
+    // ③ 우리 자신 — 도구가 알려준 것을 실제로 고쳤는가(66초짜리 42블록이 안 돌고 있었다)
+    //   (검수 P2) 단순 부분문자열이면 `echo scripts/e2e-core.js` 로도 통과한다 — **실행 형태**를 요구한다:
+    //   npm test 본문에서 `node …e2e-core.js` 가 명령 경계(시작 또는 `&&`)에 있어야 하고,
+    //   CI 는 `run:` 줄의 **명령 첫 토큰**이 node 여야 한다. 완전한 실행 의미 검증은 아니지만 echo 위조는 막는다.
+    const ownPkg = JSON.parse(fs.readFileSync(path.resolve(path.dirname(CLI), '..', 'package.json'), 'utf8'));
+    const testBody = String(ownPkg.scripts && ownPkg.scripts.test || '');
+    const inNpmTest = /(^|&&)\s*node\s+\.?\/?scripts\/e2e-core\.js(\s|$|&)/.test(testBody);
+    if (!inNpmTest) bad.push(`③e2e-core가 npm test 에 실행형태로 미배선(${testBody.slice(0, 80)})`);
+    const ciText = fs.readFileSync(path.resolve(path.dirname(CLI), '..', '.github', 'workflows', 'ci.yml'), 'utf8');
+    const inCi = ciText.split('\n').some(l => /^\s*(-\s*)?run:\s*node\s+\.?\/?scripts\/e2e-core\.js\s*$/.test(l));
+    if (!inCi) bad.push('③e2e-core가 CI 에 실행형태로 미배선');
+    //   위조 대조군 — 같은 단언이 `echo …` 를 **거부하는지** 함께 확인한다(단언이 살아 있다는 증거).
+    if (/(^|&&)\s*node\s+\.?\/?scripts\/e2e-core\.js(\s|$|&)/.test('echo scripts/e2e-core.js')) bad.push('③단언이 echo 위조를 통과시킴');
+    dbg.self = { inNpmTest, inCi };
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ W(1.36.127/T-0105) 고아 가드 가림: 자기 진입점 문자열이 판정을 가리면 **후보를 이름으로** 보고(판정은 불변) · 대조군은 조용하고 진짜 고아는 그대로 · 우리 자신도 e2e-core 배선 완료 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.127 고아 가드 가림 보고 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
   if (!ok) failed++;
 }
 

@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.126';
+const VERSION = '1.36.127';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -6693,6 +6693,62 @@ function _selfTestCases() {
       } finally { if (saved !== undefined) process.env.LEERNESS_MCP_TIMEOUT_MS = saved; else delete process.env.LEERNESS_MCP_TIMEOUT_MS; }
     } },
     // 1.36.125: 측정 통제 자체의 가드 — 목록이 비거나 배선이 끊기면 selftest 는 다시 사용자 설정에 휘둘린다.
+    // 1.36.127 (T-0105/T-0106 도그푸딩): 고아 가드 탐지기가 **자기 저장소에서 눈이 멀어 있었다** —
+    //   CI 가 `bin/leerness.js` 를 실행하므로 그 파일이 러너로 잡히고, 그 안의 selftest 단언 문자열
+    //   (`'test:core'` 등)이 호출로 읽혀 진짜 고아 2건이 0건으로 보고됐다(실측).
+    //   ① 판정은 그대로 두고 **반사실**(자기 진입점 텍스트를 뺀 결과와의 차이)을 함께 보고한다.
+    //   ② 자기가 부르는 파일이 전부 다른 곳에서 이미 도는 **별칭**은 잠든 검사가 아니므로 면제한다.
+    //   순수 함수라 픽스처로 행위 검증한다(우리 저장소는 이제 배선을 끝내 이 경로를 안 밟는다 —
+    //   그래서 저장소에 의존하면 이 기능이 조용히 썩는다).
+    { name: '1.36.127 (T-0105): 고아 가드 — 자기 진입점 텍스트에 가려진 후보 보고 + 별칭 면제 + 진짜 고아/인라인 대조군', run: () => {
+      const pu = require('../lib/pure-utils');
+      const ci = { file: '.github/workflows/ci.yml', unconditional: true, viaScripts: [], text: 'run: npm test' };
+      const base = { readErrors: 0, skippedLarge: 0, workspaces: false };
+      // ① 반사실 — 자기 진입점이 잠든 가드 이름을 **문자열로만** 담고 있으면 그 사실을 말해야 한다
+      const masked = pu._detectOrphanGuards(Object.assign({}, base, {
+        packageScripts: { test: 'node scripts/a.js', 'test:dead': 'node scripts/dead.js' },
+        scriptFiles: ['scripts/a.js', 'scripts/dead.js'],
+        runners: [ci, { file: 'bin/prod.js', unconditional: true, viaScripts: [], ownEntry: true, text: 'const doc = "run test:dead (scripts/dead.js)";' }],
+      }));
+      if (masked.orphanScripts.length !== 0 || masked.orphanFiles.length !== 0) return false;   // 판정은 종전대로 조용
+      if (!masked.maskedByOwnEntry) return false;                                               // 그러나 가려진 사실은 말한다
+      if (!masked.maskedByOwnEntry.scripts.includes('test:dead')) return false;
+      if (!masked.maskedByOwnEntry.files.includes('scripts/dead.js')) return false;
+      // ② 대조군 — 자기 진입점이 없으면 반사실은 아예 없다(조용해야 할 때 조용한가)
+      const plain = pu._detectOrphanGuards(Object.assign({}, base, {
+        packageScripts: { test: 'node scripts/a.js', 'test:dead': 'node scripts/dead.js' },
+        scriptFiles: ['scripts/a.js', 'scripts/dead.js'], runners: [ci],
+      }));
+      if (plain.maskedByOwnEntry !== null) return false;
+      if (!plain.orphanScripts.includes('test:dead')) return false;      // 진짜 고아는 여전히 잡힌다
+      // ③ 별칭 면제 — 부르는 파일이 전부 이미 도는 스크립트는 잠든 검사가 아니다
+      const alias = pu._detectOrphanGuards(Object.assign({}, base, {
+        packageScripts: { test: 'node scripts/a.js && node scripts/b.js', 'test:alias': 'node scripts/a.js' },
+        scriptFiles: ['scripts/a.js', 'scripts/b.js'], runners: [ci],
+      }));
+      if (alias.orphanScripts.length !== 0) return false;
+      // ④ 면제가 너무 넓지 않은가 — 파일을 하나도 안 부르는 인라인 스크립트는 근거가 없으므로 면제 금지
+      const inline = pu._detectOrphanGuards(Object.assign({}, base, {
+        packageScripts: { test: 'node scripts/a.js', 'test:inline': 'node -e "process.exit(0)"' },
+        scriptFiles: ['scripts/a.js'], runners: [ci],
+      }));
+      if (!inline.orphanScripts.includes('test:inline')) return false;
+      // ⑤ (검수 P1, 실측 재현) 면제가 **다른 파일을 같은 파일로 착각**하면 안 된다 —
+      //    확장자 뒤 경계가 없으면 `check.tsx` 가 `check.ts` 로 잘려 죽은 가드가 별칭으로 사라졌다.
+      const extBoundary = pu._detectOrphanGuards(Object.assign({}, base, {
+        packageScripts: { test: 'tsx scripts/check.tsx', 'test:dead': 'tsx scripts/check.ts' },
+        scriptFiles: ['scripts/check.tsx', 'scripts/check.ts'], runners: [ci],
+      }));
+      if (!extBoundary.orphanScripts.includes('test:dead')) return false;
+      // ⑥ (검수 P1, 실측 재현) **주석 속 경로**는 실행 근거가 아니다 —
+      //    `# scripts/dead.js 는 나중에 정리` 한 줄로 그 가드가 목록에서 사라졌다.
+      const commented = pu._detectOrphanGuards(Object.assign({}, base, {
+        packageScripts: { test: 'node scripts/a.js', 'test:dead': 'node scripts/dead.js' },
+        scriptFiles: ['scripts/a.js', 'scripts/dead.js'],
+        runners: [{ file: '.github/workflows/ci.yml', unconditional: true, viaScripts: [], text: '# scripts/dead.js 는 나중에 정리\n      - run: npm test' }],
+      }));
+      return commented.orphanScripts.includes('test:dead');
+    } },
     // 1.36.126 (T-0107): `.leerness` 를 살아 있는 저장소로 **주장하지 않는다**.
     //   ⚠ 이 케이스는 **행위검사만** 한다(자기 소스 읽기 금지 — 1.36.84 메타가드). 상수와 하드코딩 수의
     //     모순 금지 불변식은 e2e V 블록이 소스를 읽어 건다. 여기서는 실제 함수를 불러 결과를 본다.

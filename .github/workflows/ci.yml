@@ -43,6 +43,13 @@ jobs:
         run: node ./bin/leerness.js --version
       - name: selftest
         run: node ./bin/leerness.js selftest
+      # 1.36.127 (T-0105): 이 중간 티어(42블록·66초)는 만들어 놓고 **아무도 부르지 않았다**.
+      #   우리 고아 가드 탐지기가 0건이라 한 것은 bin/leerness.js 안의 문자열에 가려졌기 때문이다.
+      #   사람이 기억해야만 도는 가드는 결국 안 돈다 — 여기와 npm test 양쪽에 배선한다.
+      - name: e2e-core
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: node ./scripts/e2e-core.js
       - name: e2e
         env:
           LEERNESS_OFFLINE: "1"
