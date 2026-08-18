@@ -782,7 +782,17 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": ""
+    },
+    {
+      "id": "UR-0069",
+      "text": "hive-analytics 에서 여러 세션 동시작업 시 세션간 소통이 원활하지 않음 — 실측: 설치본 1.36.114 라 presence(1.36.129) 미설치, .harness/cache/sessions 없음. 유일한 인계 수단인 session-handoff.md 는 단일 파일 last-writer-wins 라 채널이 아님. 사용자가 procs.txt 로 node 프로세스 4개를 손으로 추적 중. → P-0016 P3(양방향 메일박스/작업범위 인계) 의 실사용 근거.",
+      "recordedAt": "2026-08-18T13:57:41.730Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-08-18T01:56:35.736Z"
+  "updatedAt": "2026-08-18T13:57:41.731Z"
 }

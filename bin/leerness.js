@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.129';
+const VERSION = '1.36.131';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -11304,6 +11304,13 @@ function _autoFixIdempotency(root) {
   try {
     const pt = path.join(root, '.harness', 'progress-tracker.md');
     if (exists(pt)) {
+      // 1.36.130 (P2-a, 실측 3/3 유실): 이 구획은 **락 없이** 읽고 다시 썼다 — 그 사이에 착지한
+      //   동시 `task add` 의 행이 통째로 사라졌고 양쪽 모두 exit 0 이었다(조용한 유실).
+      //   진입점은 둘: `idempotency audit --auto-fix` 와 `drift check --auto-fix`
+      //   (후자는 이 프로젝트 CLAUDE.md 가 **직접 지시하는 경로**다).
+      //   정상 경로(`upsertProgress`)가 이미 하는 형태를 그대로 따른다 — **락 안에서 읽고, 머지하고, 쓴다**.
+      //   ⚠ 이 구획은 순수 파일 작업뿐이라 락 보유 중 자식 프로세스를 띄우지 않는다.
+      _withLock(progressPath(root), () => {
       const header = progressHeader(root);
       const rows = readProgressRows(root);
       const seenExact = new Set();
@@ -11330,6 +11337,7 @@ function _autoFixIdempotency(root) {
         writeProgressRows(root, header, kept, { expectedShrink: removedExact });   // 1.36.79 (검수 #1): 제거한 만큼만 축소 허용 — 손상 행은 여전히 차단
         fixed.push({ kind: 'task-duplicate-request', action: 'deduped', removedExact, droppedSameText });
       }
+      });
     }
   } catch (e) { fixed.push({ kind: 'task-duplicate-request', action: 'error', detail: String(e.message || e) }); }
   // 2) user-requests.json open 중복 — 동일 텍스트 중 최초만 open 유지, 나머지 dropped(보존)
@@ -11379,6 +11387,8 @@ function idempotencyCmd(root, sub) {
     const fixes = autoFix ? _autoFixIdempotency(root) : [];
     const audit = _runIdempotencyAudit(root);  // auto-fix 후 상태 반영
     if (autoFix) audit.autoFixed = fixes;
+    // 1.36.131 (검수 P1): --json 도 같은 계약 — auto-fix 가 실패했으면 성공 종료코드로 나가지 않는다.
+    if (autoFix && fixes.some(f => f.action === 'error')) { audit.autoFixFailed = fixes.filter(f => f.action === 'error').length; process.exitCode = 1; }
     if (has('--json')) { log(JSON.stringify(audit, null, 2)); return; }
     log(cyan(`# leerness idempotency audit (1.9.212)`));
     log(`  audited at: ${audit.auditedAt}`);
@@ -11407,15 +11417,24 @@ function idempotencyCmd(root, sub) {
     }
     if (autoFix) {
       log('');
-      if (fixes.length) {
-        log(grn(`## 🔧 auto-fix 적용 (${fixes.length})`));
-        fixes.forEach(f => {
+      // 1.36.131 (검수 P1): 종전엔 실패 항목(`action:'error'`)도 "auto-fix 적용 (N)" 에 섞여 세어졌고 exit 0 이었다 —
+      //   중복이 그대로 남았는데 자동화는 고쳐졌다고 판단했다(거짓 성공). 적용과 실패를 갈라 세고, 실패는 exit 1 로 만든다.
+      const _applied = fixes.filter(f => f.action !== 'error');
+      const _failedFix = fixes.filter(f => f.action === 'error');
+      if (_applied.length) {
+        log(grn(`## 🔧 auto-fix 적용 (${_applied.length})`));
+        _applied.forEach(f => {
           if (f.kind === 'task-duplicate-request') log(`  - [tasks] 완전중복 ${f.removedExact || 0}행 제거 · 동일텍스트 ${f.droppedSameText || 0}건 dropped 처리`);
           else if (f.kind === 'user-request-duplicate') log(`  - [user-requests] open 중복 ${f.count || 0}건 dropped 처리`);
           else log(dim(`  - [${f.kind}] ${f.action}${f.detail ? ' — ' + f.detail : ''}`));
         });
-      } else {
+      } else if (!_failedFix.length) {
         log(dim('  🔧 auto-fix: 적용할 중복 없음 (이미 정합)'));
+      }
+      if (_failedFix.length) {
+        log(red(`## ❌ auto-fix 실패 (${_failedFix.length}) — 고쳐지지 않았다. 수동 확인 필요`));
+        _failedFix.forEach(f => log(`  - [${f.kind}] ${f.detail || '원인 미상'}`));
+        process.exitCode = 1;
       }
     }
     return;
@@ -20061,7 +20080,78 @@ function writeRules(root, rules) {
   const tail = damaged.length ? '\n<!-- ⚠ 아래 행은 손상돼 파싱 불가 — 삭제하지 않고 보존함. 수동 복구 후 위 표로 병합하세요 -->\n' + damaged.join('\n') + '\n' : '';
   // 1.36.63: 저장 시 헤더 언어 = 프로젝트 언어 (en rules.md 가 rule add 로 ko 회귀하지 않게)
   let _rlLang = 'ko'; try { _rlLang = read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch {}
-  writeUtf8(rulesPath(root), _rulesHeader(_rlLang) + '\n' + body + (body ? '\n' : '') + tail);
+  // 1.36.130 (P2-c, 실측 재현): 이 함수는 헤더+행+손상tail 로 **전체를 재구성**해 왔다 — 즉 표가 아닌
+  //   사용자 텍스트(머리말·꼬리 절·메모)는 존재하지 않는 것과 같았고, `session close` 마다 조용히 사라졌다.
+  //   실측: rules.md 에 머리말/꼬리말을 넣고 `session close` → 931B → 807B, 두 문구 모두 grep 0건.
+  //   이 파일의 목적은 **사용자가 명시한 영구 룰**을 담는 것이다 — 그 파일에서 사용자 글을 지우는 것은
+  //   기능이 아니라 데이터 유실이다. 우리가 소유한 구역(헤더 + 표 + 손상tail) 밖은 그대로 되돌려 놓는다.
+  const _managed = _rulesHeader(_rlLang) + '\n' + body + (body ? '\n' : '') + tail;
+  writeUtf8(rulesPath(root), _rulesPreserveOuter(root, _managed, rules));
+}
+// 1.36.131 (검수 P1 ×3 · P2 · P3): 첫 판은 **줄을 하나씩 분류**해 "우리 것 같으면 버린다" 였다.
+//   그 형태는 분류가 틀릴 때마다 사용자 데이터가 사라지고, 실제로 네 갈래로 틀렸다(전부 재현함):
+//     · `/^\|/` 가 **사용자 마크다운 표**까지 지웠다(`| 김 | 백엔드 |` → 0행).
+//     · 파일 어디에 있든 첫 `---` 를 frontmatter 시작으로 봐서 **그 뒤 전부**를 삼켰다(닫는 `---` 가 없으면 EOF 까지).
+//     · 앞에 있던 사용자 글이 **표 뒤로 재배치**됐다(주석은 "앞은 앞에" 라고 적혀 있었다 — 안내와 구현 불일치).
+//     · 언어를 바꾸면 이전 언어 헤더가 "사용자 글" 로 오인돼 남았다.
+//   → 분류를 없앤다. 관리 구역을 **위치로** 잡고(마커 → 표 → 손상tail), 그 **바깥은 손대지 않고 그대로** 되돌린다.
+//   판정할 줄이 없으면 틀릴 줄도 없다.
+function _rulesManagedSpan(lines) {
+  const mark = lines.findIndex(l => /^<!--\s*leerness:managed\s*-->/.test(l.trim()));
+  if (mark < 0) return null;
+  //   시작 — 마커 **바로 앞**에 붙어 있는 frontmatter 블록까지가 우리 구역이다.
+  //   (파일 어딘가의 `---` 를 찾지 않는다. 마커에 인접한 것만 본다.)
+  let s = mark;
+  {
+    let i = mark - 1;
+    while (i >= 0 && !lines[i].trim()) i--;
+    if (i >= 0 && lines[i].replace(/^﻿/, '').trim() === '---') {
+      let j = i - 1;
+      while (j >= 0 && lines[j].replace(/^﻿/, '').trim() !== '---') j--;
+      if (j >= 0) s = j;
+    }
+  }
+  //   끝 — 마커 뒤 첫 표 구분선에서 시작하는 **연속된 표 행**, 그리고 붙어 있는 손상행 보존 블록까지.
+  //   연속이 끊기는 순간 우리 구역도 끝난다 → 그 아래 사용자 표는 구역 밖이라 그대로 산다.
+  const sep = lines.findIndex((l, i) => i > mark && /^\|\s*:?-{3,}/.test(l.trim()));
+  if (sep < 0) return null;
+  let e = sep;
+  while (e + 1 < lines.length && /^\|/.test(lines[e + 1].trim())) e++;
+  let k = e + 1;
+  while (k < lines.length && !lines[k].trim()) k++;
+  if (k < lines.length && /^<!--\s*⚠/.test(lines[k].trim())) {
+    e = k;
+    while (e + 1 < lines.length && /^\| R-\d/.test(lines[e + 1].trim())) e++;
+  }
+  return { s, e };
+}
+function _rulesPreserveOuter(root, managed, rules) {
+  let prev = '';
+  try { prev = exists(rulesPath(root)) ? read(rulesPath(root)) : ''; } catch { prev = ''; }
+  if (!prev.trim()) return managed;
+  const lines = prev.replace(/\r\n/g, '\n').split('\n');
+  const span = _rulesManagedSpan(lines);
+  let head, tail;
+  if (span) {
+    head = lines.slice(0, span.s).join('\n');
+    tail = lines.slice(span.e + 1).join('\n');
+  } else {
+    //   마커/표를 못 찾았다 = 우리가 쓴 파일이 아니거나 사람이 구조를 바꿨다.
+    //   이때 **지우는 쪽으로 실패하지 않는다** — 전체를 머리말로 살리고 관리 블록을 아래에 놓는다.
+    //   다만 지금 다시 찍을 룰 행과 표 골격만 빼서 같은 룰이 두 번 파싱되는 것을 막는다.
+    const ids = new Set((rules || []).map(r => String(r.id)));
+    head = lines.filter(l => {
+      const t = l.trim();
+      const m = t.match(/^\|\s*(R-\d{4,})\s*\|/);
+      if (m && ids.has(m[1])) return false;
+      if (/^\|\s*:?-{3,}/.test(t)) return false;
+      if (/^\|\s*(ID|아이디)\s*\|/.test(t)) return false;
+      return true;
+    }).join('\n');
+    tail = '';
+  }
+  const H = head.replace(/\n+$/, ''), T = tail.replace(/^\n+/, '').replace(/\n+$/, '');
+  return (H ? H + '\n\n' : '') + managed.replace(/\n*$/, '\n') + (T ? '\n' + T + '\n' : '');
 }
 
 function nextRuleId(root) {
@@ -20094,7 +20184,9 @@ function ruleAdd(root, description) {
   root = absRoot(root);
   if (!_requireInit(root, 'rule add')) return;  // 1.9.311 (UR-0047): init 가드
   if (!description) return fail('rule description required (e.g., rule add "매 업데이트마다 버전 bump" --trigger every-update)');
-  if (!exists(rulesPath(root))) writeRules(root, []);
+  // 1.36.131 (검수 P1 동류): 부트스트랩도 락 안에서 한다 — exists 확인과 쓰기 사이에 동시 `rule add` 가
+  //   착지하면 빈 표로 덮어써 그 룰이 사라졌다(같은 락이라 아래 블록과 재진입 안전).
+  _withLock(rulesPath(root), () => { if (!exists(rulesPath(root))) writeRules(root, []); });
   const trigger = arg('--trigger', 'every-session');
   // 1.9.310 (UR-0046): 무효 trigger 거부 (이전엔 warn 후 등록 → 오타 룰 등록됨). --force 우회.
   if (!_validateChoice(trigger, RULE_TRIGGERS, 'rule trigger')) { process.exitCode = 1; return; }
@@ -20281,11 +20373,11 @@ function verifyRules(root) {
     results.push({ ...r, verified, note, clauses: clauses.length > 1 ? clauses.map(c => ({ kind: c.kind, verified: c.verified })) : undefined });
   }
   // lastVerified 갱신 (pass인 경우만)
-  for (const r of rules) {
-    const m = results.find(x => x.id === r.id);
-    if (m && m.verified === 'pass') r.lastVerified = todayStr;
-  }
-  writeRules(root, rules);
+  // 1.36.131 (검수 P1): 종전엔 위에서 읽은 배열을 그대로 `writeRules` 로 되썼다 — **락 밖 RMW**라
+  //   그 사이 착지한 동시 `rule add` 의 룰이 통째로 사라지고 양쪽 다 성공했다(`session close` 가 이 경로를 탄다).
+  //   1.36.108 이 만들어 둔 초크포인트로 태운다: 락 안에서 **다시 읽고** id 로 lastVerified 만 병합한다.
+  const _passIds = new Set(results.filter(x => x.verified === 'pass').map(x => x.id));
+  _updateRules(root, (cur2) => { for (const r of cur2) if (_passIds.has(r.id)) r.lastVerified = todayStr; });
   writeUtf8(rulesCachePath(root), JSON.stringify(cur, null, 2));
   return results;
 }

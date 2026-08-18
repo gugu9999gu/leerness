@@ -13004,6 +13004,168 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.131 (UR-0068 / P-0016 P2, 검수 P1 ×4 반영): 다중 세션 쓰기 보호 — **측정된 유실**만 막는다.
+//   ⚠ 원래 계획(해시 기준선 compare-and-set)은 정찰 실측으로 폐기했다: 이미 안전한 경로에서 100% 발화하고
+//     실제로 파괴하는 경로에서는 침묵했다. 신호가 위험과 무관하면 차단은 게이트 없느니만 못하다.
+//   ⚠ 1.36.130 의 첫 판은 두 군데가 공허했다 — 둘 다 검수가 잡았고 여기서 고쳤다:
+//     · 락 대기를 setInterval 로 관측했는데 메인스레드가 막혀 콜백이 아예 안 돌았다(관측값이 상수 false).
+//       → 이제 **별도 프로세스**가 해제 시각을 파일로 남기고, 대상 파일 **mtime 과 비교**한다.
+//       "잠깐 기다렸다 무락으로 쓰기" 도 mtime < 해제시각 이라 걸린다.
+//     · 사용자 글 보존을 `includes` 로만 봐서 **표 뒤로 재배치**해도 통과했다 → 이제 **위치**를 단언한다.
+total++;
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-p2-131-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'CI', 'GITHUB_ACTIONS', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
+  const RP = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 600000, env: envP, maxBuffer: 32 * 1024 * 1024 });
+  const mkP = (name, full) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const r = RP(d, ['init', d, '--yes'].concat(full ? [] : ['--minimal']));
+    if (r.status !== 0) bad.push(`${name}:init실패(${r.status})`);
+    return d;
+  };
+  //   락 준수 프로브 — 이벤트 루프에 의존하지 않는다. 외부에서 락을 잡고, **별도 프로세스**가 2.5초 뒤
+  //   놓으면서 해제 시각을 남긴다. 제품은 spawnSync 로 돌린 뒤 대상 파일 mtime 과 해제 시각을 비교한다.
+  const lockProbe = (tag, d, target, argv) => {
+    const lock = target + '.lock', relFile = path.join(d, `released-${tag}.json`);
+    fs.writeFileSync(lock, String(process.pid));
+    const rs = path.join(sb, `rel-${tag}.js`);
+    fs.writeFileSync(rs, 'const fs=require("fs");setTimeout(()=>{try{fs.unlinkSync(' + JSON.stringify(lock) + ')}catch{};fs.writeFileSync(' + JSON.stringify(relFile) + ',String(Date.now()))},2500);');
+    const rel = cp.spawn(process.execPath, [rs], { detached: true, stdio: 'ignore' }); rel.unref();
+    const t0 = Date.now();
+    const r = RP(d, argv);
+    const elapsed = Date.now() - t0;
+    let tr = null; try { tr = Number(fs.readFileSync(relFile, 'utf8')); } catch {}
+    let tw = null; try { tw = fs.statSync(target).mtimeMs; } catch {}
+    try { fs.unlinkSync(lock); } catch {}
+    //   해제 파일이 없다 = 우리가 놓기도 전에 제품이 끝났다 = 락을 무시했다(무락 절제가 정확히 여기서 걸린다).
+    if (!tr) bad.push(`${tag}:해제 전에 끝남(${elapsed}ms) — 락 무시`);
+    else if (!(tw >= tr - 150)) bad.push(`${tag}:락 보유 중에 씀(해제 대비 ${Math.round(tw - tr)}ms)`);
+    else if (elapsed < 2000) bad.push(`${tag}:기다리지 않음(${elapsed}ms)`);
+    return { exit: r.status, elapsed, lagMs: (tr && tw) ? Math.round(tw - tr) : null };
+  };
+  try {
+    // ① rules.md — 사람이 쓴 텍스트가 **원래 자리 그대로** 살아남는다. 사용자 표도 산다. 표는 계속 파싱된다.
+    {
+      const d = mkP('rules', true);
+      const ra = RP(d, ['rule', 'add', '매 세션 점검', '--trigger', 'every-session', '--path', d, '--json']);
+      if (ra.status !== 0) bad.push(`①rule add exit=${ra.status}`);
+      const rp = path.join(d, '.harness', 'rules.md');
+      const HEAD = 'HEADNOTE' + process.pid.toString(36), TAIL = 'TAILNOTE' + process.pid.toString(36);
+      fs.writeFileSync(rp, `# ${HEAD}\n\n` + fs.readFileSync(rp, 'utf8')
+        + `\n\n## ${TAIL}\n자유 서술 문단.\n\n| 이름 | 담당 |\n|---|---|\n| 김 | 백엔드 |\n`);
+      const rc = RP(d, ['session', 'close', d]);
+      if (rc.status !== 0) bad.push(`①session close exit=${rc.status}`);
+      const L = fs.readFileSync(rp, 'utf8').split('\n');
+      const at = (s) => L.findIndex(l => l.includes(s));
+      const iH = at(HEAD), iT = at(TAIL), iTable = L.findIndex(l => /^\| R-\d/.test(l.trim())), iUser = at('| 김 | 백엔드 |');
+      if (iH < 0) bad.push('①머리말 유실');
+      if (iT < 0) bad.push('①꼬리말 유실');
+      //   위치 단언 — `includes` 만 보면 "표 뒤로 재배치" 를 통과시킨다(1.36.130 의 실제 결함).
+      if (!(iH >= 0 && iTable >= 0 && iH < iTable)) bad.push(`①머리말이 앞자리를 잃음(head=${iH} table=${iTable})`);
+      if (!(iT >= 0 && iTable >= 0 && iT > iTable)) bad.push(`①꼬리말이 뒷자리를 잃음(tail=${iT} table=${iTable})`);
+      if (iUser < 0) bad.push('①사용자 마크다운 표가 지워짐');
+      let rl = null; try { rl = JSON.parse(String(RP(d, ['rule', 'list', '--path', d, '--json']).stdout || '')); } catch { bad.push('①rule list JSON 아님'); }
+      const nRules = rl ? (Array.isArray(rl) ? rl.length : (rl.rules || []).length) : -1;
+      if (nRules !== 1) bad.push(`①룰 행 ${nRules}건(기대 1) — 보존이 표를 깼다`);
+      for (let i = 0; i < 3; i++) RP(d, ['session', 'close', d]);
+      const fin = fs.readFileSync(rp, 'utf8');
+      const cH = (fin.match(new RegExp(HEAD, 'g')) || []).length, cT = (fin.match(new RegExp(TAIL, 'g')) || []).length;
+      if (cH !== 1 || cT !== 1) bad.push(`①멱등 아님(머리 ${cH} 꼬리 ${cT})`);
+      dbg.rules = { head: iH, table: iTable, tail: iT, userTable: iUser, rules: nRules, idem: cH === 1 && cT === 1 };
+    }
+
+    // ①b 선두 frontmatter 가 없고 본문 중간에 `---` 가 있는 파일 — 첫 판은 그 뒤 전부를 삼켰다.
+    {
+      const d = mkP('rules-nofm', true);
+      const rp = path.join(d, '.harness', 'rules.md');
+      fs.writeFileSync(rp, '# 메모\n앞 문단 HEADSENT\n---\n뒤 문단 TAILSENT\n');
+      const ra = RP(d, ['rule', 'add', '첫 룰', '--trigger', 'every-session', '--path', d, '--json']);
+      if (ra.status !== 0) bad.push(`①b rule add exit=${ra.status}(셋업 실패 — 아래 단언이 공허해진다)`);
+      const t = fs.readFileSync(rp, 'utf8');
+      if (!t.includes('HEADSENT')) bad.push('①b 앞 문단 유실');
+      if (!t.includes('TAILSENT')) bad.push('①b 중간 `---` 뒤 문단 유실(frontmatter 오인)');
+      let rl = null; try { rl = JSON.parse(String(RP(d, ['rule', 'list', '--path', d, '--json']).stdout || '')); } catch {}
+      const n2 = rl ? (Array.isArray(rl) ? rl.length : (rl.rules || []).length) : -1;
+      if (n2 !== 1) bad.push(`①b 룰 ${n2}건(기대 1)`);
+      dbg.noFm = { head: t.includes('HEADSENT'), tail: t.includes('TAILSENT'), rules: n2 };
+    }
+
+    // ② `--auto-fix` 의 progress RMW 가 **락을 존중**한다 + 그러면서 dedup 기능은 살아 있다.
+    //    두 축을 다 재야 한다: 락만 재면 "아무것도 안 하는 구현"이 통과하고, 기능만 재면 무락이 통과한다.
+    {
+      const d = mkP('autofix', false);
+      const pt = path.join(d, '.harness', 'progress-tracker.md');
+      const RID = 'T-7' + String(process.pid % 1000).padStart(3, '0');
+      const row = `| ${RID} | requested | 중복행 | - | - | 2026-08-18 |`;
+      fs.writeFileSync(pt, fs.readFileSync(pt, 'utf8').replace(/\n?$/, '\n') + row + '\n' + row + '\n');
+      if ((fs.readFileSync(pt, 'utf8').match(new RegExp(RID, 'g')) || []).length !== 2) bad.push('②픽스처에 중복행이 없음(계측 붕괴)');
+      const p = lockProbe('②autofix', d, pt, ['idempotency', 'audit', '--auto-fix', '--path', d]);
+      const nAfter = (fs.readFileSync(pt, 'utf8').match(new RegExp(RID, 'g')) || []).length;
+      if (nAfter !== 1) bad.push(`②dedup 안 됨(중복행 ${nAfter}, 기대 1) — 락이 기능을 죽였다`);
+      dbg.autofix = Object.assign(p, { dupAfter: nAfter });
+    }
+
+    // ③ `session close` 의 rules 쓰기(verifyRules)도 **락 안**이다. 종전엔 무락 RMW 라 동시 `rule add` 를 삼켰다.
+    //    쓰기가 실제로 일어나는 상태를 만들어야 한다 — writeUtf8 은 동일 내용이면 쓰지 않는다(1.36.65).
+    {
+      const d = mkP('verifyrules', true);
+      const rp = path.join(d, '.harness', 'rules.md');
+      const ra = RP(d, ['rule', 'add', '매 커밋마다 버전 bump', '--trigger', 'every-commit', '--path', d, '--json']);
+      if (ra.status !== 0) bad.push(`③rule add exit=${ra.status}`);
+      const rv = RP(d, ['rule', 'verify', '--path', d]);
+      if (rv.status !== 0) bad.push(`③rule verify exit=${rv.status}`);
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.2.0"}');   // → version 절 pass → lastVerified 갱신 → 실제 쓰기
+      const p = lockProbe('③rules', d, rp, ['session', 'close', d]);
+      if (!/\| R-\d/.test(fs.readFileSync(rp, 'utf8'))) bad.push('③룰 표가 사라짐');
+      dbg.verifyRules = p;
+    }
+
+    // ④ auto-fix 가 **실패했는데 성공으로 보고**하지 않는다(고칠 수 없는 손상행이 섞인 경우).
+    {
+      const d = mkP('falsesuccess', false);
+      const pt = path.join(d, '.harness', 'progress-tracker.md');
+      const RID = 'T-8' + String(process.pid % 1000).padStart(3, '0');
+      const row = `| ${RID} | requested | 중복행 | - | - | 2026-08-18 |`;
+      fs.writeFileSync(pt, fs.readFileSync(pt, 'utf8').replace(/\n?$/, '\n') + row + '\n' + row + '\n| T-9999 | requested | 셀부족 |\n');
+      const r = RP(d, ['idempotency', 'audit', '--auto-fix', '--path', d]);
+      const outTxt = String(r.stdout || '') + String(r.stderr || '');
+      const stillDup = (fs.readFileSync(pt, 'utf8').match(new RegExp(RID, 'g')) || []).length;
+      if (stillDup < 2) bad.push(`④전제 붕괴: 중복이 실제로 고쳐졌다(${stillDup}) — 이 케이스는 실패 경로가 아니다`);
+      else {
+        if (r.status === 0) bad.push('④고치지 못했는데 exit 0 (거짓 성공)');
+        if (/auto-fix 적용/.test(outTxt)) bad.push('④고치지 못했는데 "auto-fix 적용" 이라고 보고');
+        if (!/auto-fix 실패/.test(outTxt)) bad.push('④실패를 말하지 않음(조용한 무동작)');
+      }
+      const dr = RP(d, ['drift', 'check', '--auto-fix', '--path', d]);
+      if (!/auto-fix 실패/.test(String(dr.stdout || '') + String(dr.stderr || ''))) bad.push('④drift --auto-fix 가 실패를 감춤');
+      dbg.falseSuccess = { exit: r.status, stillDup, driftLoud: /auto-fix 실패/.test(String(dr.stdout || '')) };
+    }
+
+    // ⑤ 대조군 — 평범한 단일 에이전트 흐름에서 아무것도 느려지거나 실패하지 않는다(오탐/회귀 0)
+    {
+      const d = mkP('plain', false);
+      const t0 = Date.now();
+      for (const a of [['task', 'add', '보통 작업', '--path', d, '--json'], ['handoff', d], ['session', 'close', d]]) {
+        const r = RP(d, a);
+        if (r.status !== 0) bad.push(`⑤평범한 흐름 실패: ${a[0]} exit=${r.status}`);
+      }
+      let tl = null; try { tl = JSON.parse(String(RP(d, ['task', 'list', '--path', d, '--json']).stdout || '')); } catch { bad.push('⑤task list JSON 아님'); }
+      const n = tl ? (Array.isArray(tl) ? tl.length : (tl.tasks || tl.rows || []).length) : -1;
+      if (!(n >= 1)) bad.push(`⑤작업이 사라짐(${n})`);
+      dbg.plain = { ms: Date.now() - t0, tasks: n };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ Z(1.36.131/P-0016 P2) 쓰기 유실 차단: rules.md 사람 글이 **자리까지** 보존(사용자 표·중간 --- 포함, 멱등) · progress/rules RMW 가 락 해제 뒤에만 씀(mtime 대조) · auto-fix 실패를 성공으로 보고하지 않음 · 평범한 단일 흐름 무회귀 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.131 쓰기 유실 차단 실패 ' + JSON.stringify({ bad: bad.slice(0, 10), dbg }));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

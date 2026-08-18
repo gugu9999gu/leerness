@@ -110,5 +110,13 @@
     "reason": "1.36.101: 명령 표면 감사에서 소스 grep 가드가 두 번 연속 무너졌다 — (1) 'const _GROUP_USAGE = {' 문자열이 다른 selftest 의 가드 안에도 있어 슬라이스가 엉뚱한 곳을 집었고 (2) 선언 이름을 바꾸자 옛 가드가 허공을 가리켜 메타가드가 잡았다. 표면은 실제 CLI 출력으로, 병렬맵은 데이터(키 집합)로 단언한다.",
     "alternatives": null,
     "impact": null
+  },
+  {
+    "date": "2026-08-18",
+    "title": "P-0016 의 P2 를 '범위 클레임' 에서 '쓰기 측 compare-and-set(로스트 업데이트 가드)' 으로 바꾼다. 근거: P1 정찰/적대적 검수가, 클레임은 leerness 를 부르는 에이전트만 덮는 반면 compare-and-set 은 leerness 를 한 번도 안 부르는 에이전트의 변경까지 잡고 오탐이 원리적으로 불가능(해시가 실제로 달라야 발화)하다고 판단. 클레임은 P3 로 미룬다.",
+    "decision": "P-0016 의 P2 를 '범위 클레임' 에서 '쓰기 측 compare-and-set(로스트 업데이트 가드)' 으로 바꾼다. 근거: P1 정찰/적대적 검수가, 클레임은 leerness 를 부르는 에이전트만 덮는 반면 compare-and-set 은 leerness 를 한 번도 안 부르는 에이전트의 변경까지 잡고 오탐이 원리적으로 불가능(해시가 실제로 달라야 발화)하다고 판단. 클레임은 P3 로 미룬다.",
+    "reason": null,
+    "alternatives": null,
+    "impact": null
   }
 ]
