@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.131';
+const VERSION = '1.36.132';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -170,8 +170,17 @@ function _sleepSyncMs(ms) {
 //   O_EXCL(wx) 원자적 생성으로 상호배제. 다른 프로세스가 보유 중이면 짧게 대기 후 재시도.
 //   stale(보유 프로세스 crash) 은 staleMs 초과 시 탈취. 타임아웃(maxWaitMs) 시 락 없이 진행(원자쓰기로 손상은 이미 방지, lost-update 만 rare 노출).
 const _heldLocks = new Set();  // 프로세스 내 재진입 추적 (중첩 _withLock 데드락 방지)
+// 1.36.132: 락 파일을 "지금은 못 만든다" 로 읽어야 하는 오류들. Windows 에서는 상대가 unlink 하는 순간에
+//   열면 EPERM/EACCES 가, 파일 핸들이 아직 살아 있으면 EBUSY 가 난다 — 전부 **재시도 대상**이지 포기 사유가 아니다.
+const _LOCK_RETRY_CODES = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
+const _lockFailOpen = [];   // 보호 없이 진행한 기록(관측용) — 조용한 fail-open 을 막는다
+// 1.36.132 (검수 P1, 재현): 부모가 stderr 파이프를 먼저 닫으면 우리 경고 한 줄이 **비동기 EPIPE** 로 올라와
+//   완전한 JSON 을 이미 출력한 성공 명령이 exit 1 이 됐다. try/catch 는 동기 예외만 잡으므로 소용이 없다.
+//   경고를 못 전달하는 것은 감수한다 — 그 때문에 성공을 실패로 보고하는 것은 감수하지 않는다.
+for (const _st of [process.stderr, process.stdout]) { try { _st.on('error', (e) => { if (!e || e.code !== 'EPIPE') return; }); } catch {} }
 function _withLock(targetPath, fn, opts = {}) {
   const lockPath = targetPath + '.lock';
+  let bailCode = null, lastCode = null;
   if (_heldLocks.has(lockPath)) return fn();  // 이미 이 프로세스가 보유 → 재진입(중첩 호출 안전)
   const maxWaitMs = opts.maxWaitMs || 10000;  // 1.9.375 (UR-0084): 5s→10s — 고부하 경합 시 fail-open(락 없이 진행) 전 인내 상향, lost-update 창 축소
   const staleMs = opts.staleMs || 30000;
@@ -184,16 +193,48 @@ function _withLock(targetPath, fn, opts = {}) {
   while (Date.now() - start <= maxWaitMs) {
     try { const fd = fs.openSync(lockPath, 'wx'); fs.closeSync(fd); held = true; break; }  // 원자적 배타 생성
     catch (e) {
-      if (e.code !== 'EEXIST') break;  // 예기치 못한 오류 → 락 없이 진행
+      // 1.36.132 (P1, 실측): 종전엔 `EEXIST` 가 아니면 즉시 **락 없이 진행**했다. 그런데 Windows 에서
+      //   상대가 락을 지우는 그 순간에 열면 `EPERM` 이 난다 — 즉 **경합이 심할수록** 보호가 꺼졌다.
+      //   격리 실측(N=32, 획득 루프만): 현행 = 무보호 진행 1 · 유실 1행(3.1%) · EPERM 크래시 1,
+      //   재시도 술어만 바꾼 대조군 = 무보호 0 · 유실 0 · 크래시 0 (대기시간 동일 ~1.0s).
+      //   제품 경로(16 프로세스 동시 `task add`)는 파일 연산이 많아 6.3% 유실 + exit 1 이 2회 연속 재현됐다.
+      //   이 코드들은 전부 "지금은 못 잡는다" 이지 "잡을 수 없다" 가 아니다 → 기다린다.
+      lastCode = e.code || null;   // 1.36.132 (검수 P2): 10초를 기다린 뒤 'timeout' 이라고만 하면 영구 권한 오류를 경합으로 오진한다
+      if (!_LOCK_RETRY_CODES.has(e.code)) { bailCode = e.code || 'unknown'; break; }
       try { const st = fs.statSync(lockPath); if (Date.now() - st.mtimeMs > staleMs) { fs.unlinkSync(lockPath); continue; } } catch {}
       _sleepSyncMs(15 + Math.floor((Date.now() - start) / 50));  // 점증 backoff
     }
   }
   if (held) _heldLocks.add(lockPath);
+  else {
+    // 1.36.132: fail-open 은 **정책**이라 유지하되(명령이 멈추면 안 된다), 조용히 하지는 않는다.
+    //   종전엔 보호 없이 진행하면서 아무 말도 안 했다 — 유실이 나도 사용자에겐 성공으로만 보였다.
+    //   stdout 은 `--json` 계약이 있으므로 건드리지 않는다. 경고는 stderr 로만 낸다.
+    const _why = bailCode || (lastCode && lastCode !== 'EEXIST' ? `${lastCode} 지속(${maxWaitMs}ms)` : 'timeout');
+    _lockFailOpen.push({ file: path.basename(targetPath), reason: _why, waitedMs: Date.now() - start });
+    if (process.env.LEERNESS_NO_LOCK_WARN !== '1') {
+      try {
+        process.stderr.write(`⚠ 락 획득 실패 — 보호 없이 진행합니다: ${path.basename(targetPath)} (${_why}). 동시 실행 중인 다른 세션이 있으면 이 쓰기가 유실될 수 있습니다.\n`);
+      } catch { /* stderr 가 닫혀 있어도 진행은 막지 않는다 */ }
+    }
+  }
   // 1.36.108 (T-0097, 자체 적대 검사에서 발견): fn 이 **프로미스를 돌려주면** 동기 finally 가 그 즉시 락을 푼다 —
   //   비동기 본체(네트워크 fetch 등)는 락 없이 도는데 호출부는 보호받는다고 믿는다. 가장 나쁜 조합이다
   //   (`provider sync` 를 감싸면서 실제로 이 형태를 만들었다). thenable 이면 **정착 후에** 푼다.
-  const release = () => { if (held) { _heldLocks.delete(lockPath); try { fs.unlinkSync(lockPath); } catch {} } };
+  //   1.36.132 (검수 P1): 해제 실패를 조용히 삼키면 **고아 락**이 남고 뒤따르는 쓰기들이 10초씩 기다렸다가
+  //   한꺼번에 무보호로 진행한다(stale 30초 탈취 전까지). 잠깐 다시 시도하고, 그래도 안 되면 말한다.
+  const release = () => {
+    if (!held) return;
+    _heldLocks.delete(lockPath);
+    for (let i = 0; i < 6; i++) {
+      try { fs.unlinkSync(lockPath); return; }
+      catch (e) { if (e.code === 'ENOENT') return; _sleepSyncMs(10 + i * 10); }
+    }
+    _lockFailOpen.push({ file: path.basename(targetPath), reason: 'release-failed', waitedMs: 0 });
+    if (process.env.LEERNESS_NO_LOCK_WARN !== '1') {
+      try { process.stderr.write(`⚠ 락 파일을 지우지 못했습니다: ${path.basename(lockPath)} — 다음 쓰기가 최대 30초 기다린 뒤 진행합니다.\n`); } catch {}
+    }
+  };
   let out;
   try { out = fn(); }
   catch (e) { release(); throw e; }
@@ -6958,7 +6999,9 @@ const _SELFTEST_CONTROLLED_ENV = ['LEERNESS_MCP_PROFILE', 'LEERNESS_WORKSPACE_DI
   //   통제하지 않으면 tmp 픽스처에 진짜 세션이 등록되고, 측정 결과가 '누가 돌렸는지' 에 종속된다.
   'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDECODE',
   'CODEX_MANAGED_BY_NPM', 'CODEX_MANAGED_BY_PNPM', 'CODEX_MANAGED_BY_BUN', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
-  'CURSOR_AGENT', 'LEERNESS_NO_SESSION_PRESENCE'];
+  'CURSOR_AGENT', 'LEERNESS_NO_SESSION_PRESENCE',
+  //   1.36.132: 새 키 출처 2종도 통제한다 — 통제 목록이 키 출처를 따라가지 않으면 '누가 돌렸는지' 가 측정에 샌다.
+  'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID'];
 function _controlSelftestEnv() {
   const dropped = [], saved = {};
   for (const k of _SELFTEST_CONTROLLED_ENV) {
@@ -11630,10 +11673,18 @@ function _sessionPresenceRecord(root, phase) {
           try { fs.unlinkSync(fp); } catch { /* 지우지 못해도 아래 쓰기가 덮는다 */ }
         }
       }
+      const _prevAgent = prev && prev.outermostAgent;
+      //   1.36.132 (검수 P2): 라벨 순서를 안 맞추면 `A<->B` 와 `B<->A` 가 번갈아 기록되며 **매 handoff 마다** 새 경고가 났다.
+      //   같은 두 에이전트는 같은 표식이어야 한다 — 정렬해서 순서를 없앤다.
+      const _sharedAgents = (_prevAgent && _prevAgent !== 'unknown' && det.agent !== 'unknown' && _prevAgent !== det.agent)
+        ? [_prevAgent, det.agent].sort().join('<->') : ((prev && prev.sharedKeyAgents) || null);
+      if (_sharedAgents && !(prev && prev.sharedKeyAgents === _sharedAgents) && process.env.LEERNESS_NO_LOCK_WARN !== '1') {
+        try { process.stderr.write(`⚠ 세션 주소 공유 감지: ${key} 를 서로 다른 에이전트(${_sharedAgents})가 쓰고 있습니다 — 두 세션이 한 기록으로 합쳐져 서로를 못 봅니다. 세션마다 다른 LEERNESS_SESSION_ID 를 쓰세요.\n`); } catch {}
+      }
       const rec = {
         schemaVersion: 1,
         sessionKey: key,
-        keySource: process.env.CLAUDE_CODE_HOST_SESSION_ID ? 'CLAUDE_CODE_HOST_SESSION_ID' : 'CLAUDE_CODE_SESSION_ID',
+        keySource: SP.keySource(process.env),   // 1.36.132: 3종(LEERNESS_SESSION_ID 우선) — 손으로 적은 삼항은 새 출처를 놓친다
         outermostAgent: det.agent,
         agentEvidence: det.evidence,                 // 결론이 아니라 원증거 키 이름 — 규칙이 틀려도 원자료가 남는다
         hostId: _sessionHostId(root),
@@ -11643,6 +11694,10 @@ function _sessionPresenceRecord(root, phase) {
         lastHandoffAt: phase === 'close' ? ((prev && prev.lastHandoffAt) || nowIso) : nowIso,
         handoffCount: (Number((prev && prev.handoffCount) || 0) || 0) + (phase === 'close' ? 0 : 1),
         closedAt: phase === 'close' ? nowIso : null,
+        //   1.36.132 (검수 실측): 같은 주소를 두 세션이 쓰면 레코드가 조용히 병합됐다(others=0·헤드라인 침묵·
+        //   라벨이 마지막 기록자로 덮임). 라벨이 **둘 다 unknown 이 아니면서** 바뀌었다면 그건 공유의 증거다.
+        //   unknown 을 제외하는 이유: 셸마다 env 가시성이 달라 라벨이 흔들릴 때 오탐이 난다(실측).
+        sharedKeyAgents: _sharedAgents,
       };
       writeUtf8(fp, JSON.stringify(rec, null, 2) + '\n');
       res = { written: true, reason: null };
@@ -11675,6 +11730,95 @@ function _sessionPresenceRecord(root, phase) {
     return { written: false, reason: 'unavailable:' + String((e && e.code) || (e && e.message) || e).slice(0, 40) };
   }
 }
+// 1.36.132 (UR-0069): 세션 신호를 **한 곳에서** 만든다. 종전엔 헤드라인 한 군데에만 인라인으로 있었고
+//   `--json`·`--compact` 에는 없었다 — 표면마다 따로 짜면 새 표면이 빠진다(1.36.108 이 고친 형태와 같다).
+// 1.36.132 (검수 P1, 재현): 첫 판은 `exists()` 만 보고 `_sessionHostId` 를 불렀는데, 그 함수는 염이
+//   **형식에 안 맞으면 새로 만들어 덮어쓴다** — 실측: 훅(쓰기 0 계약)이 `INVALID_SALT` 를 새 32자 랜덤으로 교체했다.
+//   존재 확인이 아니라 **직접 읽고 직접 검증**한다. 쓰는 함수는 부르지 않는다.
+//   염이 없거나 깨졌으면 hostId 를 모른다 → `hostRelation` 이 3상태라 'unknown' 으로 정직하게 답한다.
+function _sessionHostIdIfPresent(root) {
+  try {
+    const sp = path.join(_sessionStoreDir(root), '.host-salt');
+    if (!exists(sp)) return null;
+    const v = String(read(sp) || '').trim();
+    if (!/^[0-9a-f]{32}$/.test(v)) return null;
+    return require('crypto').createHash('sha256').update(v + '|' + String(os.hostname())).digest('hex').slice(0, 12);
+  } catch { return null; }
+}
+function _sessionSignal(root, opts = {}) {
+  const SP = require('../lib/session-presence');
+  const snap = _readSessionEntries(root);
+  const selfKey = SP.deriveSessionKey(process.env);
+  //   1.36.132 (검수 P1, 재현): 종전엔 readOnly 가 아닐 때 `_sessionHostId` 를 불러 **염을 만들었다** —
+  //   그래서 `handoff --json --no-record` 가 파일 3개를 만들었다(기록하지 말라고 했는데 만들었다).
+  //   **신호를 재는 일은 어떤 경우에도 쓰기가 아니다.** 염 생성은 실제로 기록하는 `_sessionPresenceRecord` 만 한다.
+  const others = SP.countOtherSessions(snap.entries.map(e => e.record), selfKey, _sessionHostIdIfPresent(root));
+  //   내 레코드가 공유 주소로 표시돼 있으면 그것도 신호다(플래그 생성기가 짧은 표면에도 싣는다).
+  //   1.36.132 (검수 P1, 재현): `selfRegistered: !!selfKey` 는 **주소가 있다**를 **등록됐다**로 보고했다 —
+  //   `--no-record`/훅에서는 레코드가 0개인데 true 였다. 키 유무가 아니라 **내 파일이 실제로 있는지**로 답한다.
+  let mine = null;
+  try { mine = selfKey ? (snap.entries.find(e => e.record && e.record.sessionKey === selfKey) || null) : null; } catch {}
+  const sharedKeyAgents = (mine && mine.record && mine.record.sharedKeyAgents) || null;
+  return {
+    others,                                                   // 다른 세션 **기록** 수(활성 여부는 판정하지 않는다)
+    sharedKeyAgents,
+    //   1.36.132 (검수 P1): 명시 주소가 형식에 안 맞으면 종전엔 조용히 다음 출처로 넘어갔다(오타를 안 알림).
+    invalidExplicitKey: SP.invalidExplicitKey(process.env),
+    //   1.36.132 (검수 P1): 저장소를 못 읽은 것을 `others:0` 으로 축약하지 않는다 — 이 저장소의 규율이다.
+    storeError: snap.storeError || null,
+    selfRegistered: !!mine,
+    selfAddressed: !!selfKey,                                 // 주소는 있다(등록됐다와 다르다)
+    selfSuppressedReason: SP.suppressionReason(process.env, exists(path.join(root, '.harness'))) || (selfKey ? null : 'not-identifiable'),
+    unreadableRecords: snap.unreadable || 0,
+    //   못 보는 것을 함께 적는다 — "0건" 이 '아무도 없다' 로 읽히면 그건 과대주장이다.
+    //   1.36.132 (검수 P3): codex 는 이제 주소가 있다 — 사람 표면과 기계 표면이 같은 사실을 말해야 한다.
+    blindSpots: ['handoff 를 부르지 않는 세션', 'MCP 전용 클라이언트(LEERNESS_INTERNAL)',
+      '주소가 없는 에이전트(cursor/vscode/grok 등 · codex 는 CODEX_THREAD_ID 가 없는 실행에서만, TUI 미검증)',
+      '다른 머신', '구버전 설치본'],
+  };
+}
+// 1.36.132 (검수): 짧은 표면(--compact·훅)에 실을 세션 플래그를 **한 곳에서** 만든다.
+//   실측 비대칭: 👥(남이 보인다)는 4표면 전부에 갔는데 🙈(나는 안 보인다)는 평문 1곳뿐이었다.
+//   내가 안 보인다는 것은 남이 나를 피해 갈 수 없다는 뜻이라, 오히려 짧은 표면일수록 필요한 신호다.
+function _sessionSignalFlags(ss) {
+  const out = [];
+  if (ss.others > 0) out.push(`👥 다른 세션 ${ss.others}`);
+  if (!ss.selfRegistered && ss.selfSuppressedReason !== 'internal' && ss.selfSuppressedReason !== 'child-agent') {
+    out.push(`🙈 나는 안 보임(${ss.selfSuppressedReason})`);
+  }
+  if (ss.sharedKeyAgents) out.push(`⚠ 주소 공유(${ss.sharedKeyAgents})`);
+  if (ss.storeError) out.push(`⚠ 세션저장소 읽기실패(${ss.storeError})`);
+  if (ss.invalidExplicitKey) out.push(`⚠ LEERNESS_SESSION_ID 형식 오류("${ss.invalidExplicitKey}") — 무시됨`);
+  return out;
+}
+// 1.36.132 (UR-0069): `.harness/agent-reminders.md` 는 leerness 안의 유일한 "에이전트에게 보내는 메시지" 파일인데
+//   **읽는 배선이 없었다** — 실측: handoff 200줄에 0건, `hook session-start` 319바이트에 0건, 현재 관리 문서 지시 0건
+//   (아카이브 README 에만 남아 있다). 파일 자신이 "사용자가 이 파일을 보고 메인 에이전트에 전달 가능" 이라고 적어
+//   배달을 사람에게 떠넘긴다. drift critical 때 만들어 놓고 아무도 보여주지 않으면 그것은 기능이 아니라 침묵이다.
+function _agentReminderSignal(root) {
+  const p = path.join(root, '.harness', 'agent-reminders.md');
+  if (!exists(p)) return null;
+  //   1.36.132 (검수 P2): 통째로 읽으면 커진 파일에서 복제·분할 비용이 그대로 터진다(64MiB 에서 2.16초 실측).
+  //   헤드라인에 쓰는 것은 앞 몇 줄뿐이니 앞부분만 읽는다. 줄 수는 '읽은 범위 기준' 이라고 표시한다.
+  const CAP = 64 * 1024;
+  let body = '', truncated = false;
+  try {
+    const st = fs.statSync(p);
+    if (st.size > CAP) {
+      const fd = fs.openSync(p, 'r'); const buf = Buffer.alloc(CAP);
+      const got = fs.readSync(fd, buf, 0, CAP, 0); fs.closeSync(fd);
+      body = buf.slice(0, got).toString('utf8'); truncated = true;
+    } else { body = read(p); }
+  } catch { return null; }
+  if (!body.trim()) return null;
+  const lines = body.replace(/\r\n/g, '\n').split('\n').filter(l => l.trim() && !/^<!--/.test(l.trim()));
+  //   1.36.132 (검수 P1, 재현): 이 내용은 **사람이 편집하는 파일**인데 그대로 헤드라인·JSON 에 실렸다 —
+  //   실제 ANSI 이스케이프·고립 CR·가짜 `=== 구획 ===`·비밀값 표식이 생바이트로 나갔다.
+  //   제어문자를 지우고(터미널·문서 경계 위조 차단) 토큰을 마스킹한 뒤에만 싣는다. 기존 술어를 재사용한다.
+  const _clean = (s) => require('../lib/pure-utils').redactSecrets(
+    String(s).replace(new RegExp('[\u0000-\u001f\u007f]', 'g'), ' ').replace(/^[=\-]{3,}/, ''), 200).trim();
+  return { path: rel(root, p), lines: lines.length, truncated, head: lines.slice(0, 6).map(l => _clean(l).slice(0, 200)).filter(Boolean) };
+}
 // 1.36.129 (UR-0068 / P-0016 P1): `leerness sessions` — 이 프로젝트에 남은 세션 **기록**을 보여 준다.
 //   ⚠ 문구 원칙: 검증하지 않은 것을 주장하지 않는다. "활성/active" 라는 말을 쓰지 않고,
 //     close 기록이 없다는 사실만 말한다. 그리고 **못 보는 것을 항상 함께 적는다** —
@@ -11687,7 +11831,10 @@ function sessionsCmd(root) {
   const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   const selfKey = SP.deriveSessionKey(process.env);
-  const selfHost = _sessionHostId(root);
+  // 1.36.132 (검수): **조회 명령이 남의 디렉토리에 파일을 만들었다** — 빈 디렉토리에 `sessions --json` 1회로
+  //   .harness/ · cache/ · sessions/ · .host-salt 4개 생성(exit 0). 읽기는 읽기여야 한다.
+  //   염이 없으면 hostId 를 모른다 → hostRelation 이 이미 3상태라 'unknown' 으로 정직하게 답한다.
+  const selfHost = _sessionHostIdIfPresent(root);
   const _scan = _readSessionEntries(root);
   const recs = _scan.entries.map(e => e.record).sort((a, b) => (Date.parse(b.lastHandoffAt || b.openedAt || '') || 0) - (Date.parse(a.lastHandoffAt || a.openedAt || '') || 0));
   const suppressed = SP.suppressionReason(process.env, exists(path.join(root, '.harness')));
@@ -11723,6 +11870,10 @@ function sessionsCmd(root) {
     t('leerness handoff 를 돌리지 않은 에이전트 세션', 'agent sessions that never ran `leerness handoff`'),
     t('MCP 도구만 쓰는 클라이언트', 'clients that only use MCP tools'),
     t(`${VERSION} 이전 버전으로 시작된 세션`, `sessions started on a version older than ${VERSION}`),
+    //   1.36.132: 종전엔 '세션키가 없는 에이전트(codex/cursor 등)' 이라고 적었는데 codex 는 이제 주소가 있다.
+    //   자기 도구의 능력을 과소·과대 주장하지 않는다 — 실측 범위를 그대로 적는다(codex exec 경로에서 확인).
+    t('주소가 없는 에이전트 — cursor/vscode/grok 등. codex 는 CODEX_THREAD_ID 가 없는 실행에서만 (TUI 는 미검증)',
+      'agents without an address - cursor/vscode/grok etc. codex only when CODEX_THREAD_ID is absent (TUI unverified)'),
     t('다른 머신·컨테이너의 세션 (기록은 보이되 상태는 확인 불가)', 'sessions on another machine/container (record visible, state unverifiable)'),
     t("'close 기록 없음' 은 그 세션이 지금 살아있다는 뜻이 아닙니다 — 프로세스 상태는 판정하지 않습니다",
       "'no close recorded' does NOT mean that session is alive — process state is never judged"),
@@ -11746,6 +11897,12 @@ function sessionsCmd(root) {
         `  ⓘ A record for this session exists, but **this invocation** does not update it (reason: ${suppressed}).`)
       : t(`  ⓘ 이 세션은 레지스트리에 등록되지 않습니다 (사유: ${suppressed}) — 다른 세션에게 보이지 않습니다.`,
         `  ⓘ This session is not registered (reason: ${suppressed}) — other sessions cannot see it.`));
+    //   1.36.132 (UR-0069): 사유만 말하고 **처방을 안 주면** 사용자는 여기서 막힌다.
+    //   `not-identifiable` 은 곧 "이 에이전트는 세션 식별자를 환경에 안 남긴다" 이고, 그건 주소를 주면 풀린다.
+    if (suppressed === 'not-identifiable') {
+      log(t(`     → 이 세션을 주소로 만들려면: 에이전트를 띄울 때 LEERNESS_SESSION_ID 를 **세션마다 다른 값**으로 설정하세요 (8~64자, 영숫자/_/-).`,
+        `     → to give this session an address: set LEERNESS_SESSION_ID to a **unique value per session** when launching the agent (8-64 chars, alphanumeric/_/-).`));
+    }
     log('');
   }
   //   '없음' 과 '확인 불가' 를 같은 문장으로 말하지 않는다(검수 P1).
@@ -14276,6 +14433,12 @@ function handoff(root) {
         resumeGuide: ad.resumeGuide
       };
     } catch {}
+    // 1.36.132 (UR-0069 / P-0016 P3 선결): 세션 신호가 **기계 경로에 아예 없었다**.
+    //   실측: `handoff --json` 17키에 headline·sessions 필드 0 · `--compact` 는 200줄→3줄로 헤드라인을 통째로 죽인다.
+    //   MCP `leerness_handoff` 와 내부 호출자들이 바로 그 두 경로를 쓴다 → 다른 세션이 있어도 **구조적으로 못 본다**.
+    //   채널(메일박스)을 새로 만들기 전에, 이미 있는 신호가 도달하게 하는 것이 먼저다.
+    try { result.sessions = _sessionSignal(root); } catch { /* 레지스트리를 못 읽어도 handoff 는 진행 */ }
+    try { const _rem = _agentReminderSignal(root); if (_rem) result.agentReminders = _rem; } catch {}
     log(JSON.stringify(result, null, 2));
     return;
   }
@@ -14300,6 +14463,10 @@ function handoff(root) {
     const flags = [];
     if (openReq) flags.push(`📥 미답 ${openReq}`);
     if (blocked) flags.push(`🚫 blocked ${blocked}`);
+    // 1.36.132 (UR-0069): 다른 세션 기록과 대기 중인 에이전트 메시지는 **압축해도 지우면 안 되는 신호**다.
+    //   이 경로가 MCP handoff·REPL·agent-mode 가 실제로 쓰는 경로이고, 종전엔 여기서 헤드라인이 통째로 사라졌다(200줄→3줄).
+    try { const _ss = _sessionSignal(root); flags.push(..._sessionSignalFlags(_ss)); } catch {}
+    try { const _rm = _agentReminderSignal(root); if (_rm) flags.push(`🔔 리마인더 ${_rm.lines}줄`); } catch {}
     log(_lineSafe(`leerness compact: ${detectProjectName(root)} · ${done}/${rows.length}(${pct}%) done · WIP ${wip} · T${wip}/D${decN}/R${rulesActive}/P${mileN}/L${lessN}${flags.length ? ' · ' + flags.join(' · ') : ''}`));   // 1.36.18 (codex F4): projectName 개행 주입 차단
     if (nx) log(_lineSafe(`다음: ${nx.id} [${nx.status}] ${nx.nextAction || nx.request || ''}`).slice(0, 200));
     log('핵심 규칙: 의존성0 · 한국어주석 · UTF-8noBOM · reuse-map등록 · anti-lazy-work · verify-claim자동검수');
@@ -14347,6 +14514,9 @@ function handoff(root) {
       : '';
     sections.push(`\n=== ${label}${note} (${rel(root,p)}) ===\n${ls.join('\n')}`);
   }
+  // 1.36.132 (UR-0069): 리마인더를 **본문 맨 앞**에 둔다 — 이 파일은 drift critical 때 "다음 세션이 읽도록" 만들어졌는데
+  //   1.9.38 이후 지금까지 어떤 표면도 내용을 보여주지 않았다(handoff 200줄 0건 · hook 319B 0건 · 관리문서 지시 0건).
+  block('🔔 Agent Reminders (pending)', path.join(root, '.harness', 'agent-reminders.md'));
   block('Session Handoff', handoffPath(root));
   block('Current State', currentStatePath(root));
   block('Plan', planPath(root));
@@ -14423,12 +14593,34 @@ function handoff(root) {
         //   0이면 침묵한다 — 이 레지스트리는 handoff 를 안 부르는 에이전트·MCP 전용 클라이언트·
         //   구버전 세션·다른 머신을 구조적으로 못 본다. "0건" 은 '아무도 없다' 로 읽히므로 쓰지 않는다.
         //   "활성" 이라는 말도 쓰지 않는다(프로세스 상태는 판정하지 않는다 — pid 라이브니스 실측 5.2% 오탐).
+        //   1.36.132: 계산을 `_sessionSignal` 한 곳으로 옮겼다 — 표면(헤드라인·--json·--compact)마다 따로 짜면 새 표면이 빠진다.
         try {
-          const _SPh = require('../lib/session-presence');
-          const _others = _SPh.countOtherSessions(_readSessionRecords(root), _SPh.deriveSessionKey(process.env), _sessionHostId(root));
-          if (_others > 0) parts.push(t(`👥 다른 세션 기록 ${_others}건 (close 기록 없음) → leerness sessions`,
-            `👥 ${_others} other session record(s), no close recorded → leerness sessions`));
+          const _ss = _sessionSignal(root);
+          if (_ss.others > 0) parts.push(t(`👥 다른 세션 기록 ${_ss.others}건 (close 기록 없음) → leerness sessions`,
+            `👥 ${_ss.others} other session record(s), no close recorded → leerness sessions`));
+          //   1.36.132 (검수 P2): 공유 주소 경고가 **평문에만** 없었다(compact·훅·--json 에는 있었다).
+          //   stderr 경고는 처음 한 번뿐이라 평문에서 빠지면 그 뒤로 영영 안 보인다.
+          if (_ss.sharedKeyAgents) parts.push(t(`⚠ 세션 주소 공유(${_ss.sharedKeyAgents}) — 두 세션이 한 기록으로 합쳐집니다`,
+            `⚠ session address shared (${_ss.sharedKeyAgents}) - two sessions collapse into one record`));
+          //   저장소를 못 읽었으면 "0건" 이라 말하지 않는다.
+          if (_ss.storeError) parts.push(t(`⚠ 세션 저장소를 읽지 못함(${_ss.storeError}) — 기록이 없다는 뜻이 아닙니다`,
+            `⚠ session store unreadable (${_ss.storeError}) - this does NOT mean there are none`));
+          if (_ss.invalidExplicitKey) parts.push(t(`⚠ LEERNESS_SESSION_ID 가 형식에 안 맞아 무시됐습니다("${_ss.invalidExplicitKey}") — 8~64자 영숫자/_/-`,
+            `⚠ LEERNESS_SESSION_ID ignored, invalid format ("${_ss.invalidExplicitKey}") - 8-64 chars, alphanumeric/_/-`));
+          //   1.36.132 (검수): **비대칭이 조용했다** — 등록되지 않은 세션도 "남이 N건 있다" 는 듣지만
+          //   "나는 그들에게 보이지 않는다" 는 못 들었다. 사용자가 이 사실을 발견할 경로가 없었다.
+          //   내가 안 보인다는 것은 남이 나를 피해 갈 수 없다는 뜻이라 겹침 사고의 직접 원인이다. 그러니 말한다.
+          if (!_ss.selfRegistered && _ss.selfSuppressedReason !== 'internal' && _ss.selfSuppressedReason !== 'child-agent') {
+            parts.push(t(`🙈 이 세션은 다른 세션에게 보이지 않습니다 (${_ss.selfSuppressedReason}) → LEERNESS_SESSION_ID 를 세션마다 고유값으로 설정`,
+              `🙈 this session is invisible to others (${_ss.selfSuppressedReason}) → set a unique LEERNESS_SESSION_ID per session`));
+          }
         } catch { /* 레지스트리를 못 읽어도 handoff 는 그대로 진행한다 */ }
+        //   1.36.132 (UR-0069): 대기 중인 에이전트 리마인더를 **처음으로** 노출한다(그전엔 만들어만 놓고 아무도 안 보여줬다).
+        try {
+          const _rm = _agentReminderSignal(root);
+          if (_rm) parts.push(t(`🔔 에이전트 리마인더 대기 ${_rm.lines}줄 → ${_rm.path}`,
+            `🔔 ${_rm.lines} line(s) of pending agent reminders → ${_rm.path}`));
+        } catch {}
       } catch {}
       // 3) MCP 활동 누적
       try {
@@ -15789,6 +15981,11 @@ function hookSessionStartCmd(root) {
     const flags = [];
     if (openReq) flags.push(`📥 미답 요청 ${openReq}`);
     if (blocked) flags.push(`🚫 blocked ${blocked}`);
+    // 1.36.132 (UR-0069, 검수 fatal #2): 세션 신호가 4표면 중 1곳(평문 헤드라인)에만 닿았고, 못 가는 3곳에
+    //   **유일한 강제 경로인 이 훅**이 들어 있었다. 여기서 안 보이면 에이전트는 끝내 모른다.
+    //   ⚠ 이 경로는 **쓰기 0** 계약이라 readOnly 로 읽는다(염 파일을 새로 만들지 않는다).
+    try { const _ss = _sessionSignal(root, { readOnly: true }); flags.push(..._sessionSignalFlags(_ss)); } catch {}
+    try { const _rm = _agentReminderSignal(root); if (_rm) flags.push(`🔔 리마인더 ${_rm.lines}줄`); } catch {}
     const lines = [_lineSafe(`[leerness] ${detectProjectName(root)} · ${done}/${rows.length}(${pct}%) done · WIP ${wip}${flags.length ? ' · ' + flags.join(' · ') : ''}`)];
     if (nx) lines.push(_lineSafe(`다음: ${nx.id} [${nx.status}] ${nx.nextAction || nx.request || ''}`).slice(0, 200));
     // 자기 라벨링(1.9.272 투명성 불변식): 요약임을 밝히고 전체 컨텍스트 경로와 끄는 법을 함께 준다.
@@ -18818,7 +19015,9 @@ function llmBenchRecordCmd(root) {
 
 const _sessionClose = require('../lib/session-close');
 // 1.9.425 (UR-0025/UR-0125 큰 핸들러 모듈화 10번째): sessionClose → lib/session-close.js (DI 위임)
-function sessionClose(root, opts = {}) { try { _sessionPresenceRecord(root, 'close'); } catch {}   // 1.36.129 (P-0016 P1): close 는 '기록됨' 일 뿐 '프로세스가 죽었다' 가 아니다
+function sessionClose(root, opts = {}) { // 1.36.132 (검수): handoff 는 --no-record/LEERNESS_HOOK 게이트 뒤에서 기록하는데 여기는 **게이트 없이** 기록했다
+  //   (실측: handoff --no-record → 0건, session close --no-record → 1건). 같은 스토어의 같은 계약은 같은 문장으로.
+  if (!has('--no-record') && process.env.LEERNESS_HOOK !== '1') { try { _sessionPresenceRecord(root, 'close'); } catch {} }     // 1.36.129 (P-0016 P1): close 는 '기록됨' 일 뿐 '프로세스가 죽었다' 가 아니다
   return _sessionClose.sessionClose(root, opts, { VERSION, STATUSES, MARK, has, arg, uiLang: _uiLang(root), harnessPath: __filename, readProgressRows, evidencePath, handoffPath, currentStatePath, taskLogPath, verifyRules, _autoRoadmap, _readUsageStats, readSessionCounter, writeSessionCounter, _retroAggregate, _retroOneLine, retroCmd, _loadDecisions, readRules, planPath, _loadLessons, _readFeatureGraph, _auditUserRequests, _detectDeliveredRequests, _computeRoundHistory, _computeMilestones, _computeRecentChanges, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _scanShellScriptsEncoding, _listAPISkills, _matchAPISkills, _loadShellFailures, _shellEnvDrift, _runPreWakeAudit, _saveAndAppendPreWakeReport, _runIdempotencyAudit, _detectAbnormalShutdown, _updateUserRequest, _detectOptimism, _scanCodeForPatterns, _collectSecretFindings, _withLock }); }  // 1.17.6 (UR-0049): 마감 정합 — done 낙관 재확인 + 시크릿 재확인 · 1.36.108: 락 주입(T-0097)
 
 function readmeCmd(root) { syncReadme(absRoot(root)); }

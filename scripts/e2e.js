@@ -3311,7 +3311,10 @@ total++;
     const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
     const tmpLeftover = walk(path.join(aDir, '.harness')).filter(f => /\.tmp-\d+-\d+$/.test(f));
     // (3) 소스에 renameSync 원자 패턴 존재
-    const srcOk = /fs\.renameSync\(tmp, p\)/.test(fs.readFileSync(path.resolve(__dirname, '..', 'lib', 'io.js'), 'utf8'));  // 1.9.383: writeUtf8 → lib/io.js
+    //   1.36.132: 종전엔 `fs.renameSync(tmp, p)` 리터럴을 붙잡았다 — rename 재시도를 헬퍼로 빼자 그 자리에서 깨졌다.
+    //   지키려는 것은 **임시파일에 쓰고 rename 으로 교체**하는 형태지 호출 문자열이 아니다 — 의도로 단언한다.
+    const _ioSrc = fs.readFileSync(path.resolve(__dirname, '..', 'lib', 'io.js'), 'utf8');  // 1.9.383: writeUtf8 → lib/io.js
+    const srcOk = /writeFileSync\(tmp,/.test(_ioSrc) && /renameSync\(/.test(_ioSrc) && !/writeFileSync\(p,\s*s/.test(_ioSrc);
     ok = tasksOk && tmpLeftover.length === 0 && srcOk;
     fs.rmSync(aDir, { recursive: true, force: true });
   } catch {}
@@ -13165,6 +13168,290 @@ total++;
     : '✗ 1.36.131 쓰기 유실 차단 실패 ' + JSON.stringify({ bad: bad.slice(0, 10), dbg }));
   if (!ok) failed++;
 }
+// 1.36.132 (UR-0069 / P-0016 P3 선결): **채널을 만들기 전에, 쓰기가 실제로 잠기고 신호가 실제로 도달하는지**부터.
+//   정찰·적대검수가 P-0017(메일박스)을 build-modified 로 판정했고 fatal 3건이 전부 이 블록의 대상이다:
+//     ① 주소가 claude 에만 있었다 — codex/cursor/vscode/grok/kimi/glm 은 **남을 보기만 하는 단방향 거울**이었다.
+//     ② 세션 신호가 4표면 중 1곳에만 닿았고, 못 가는 3곳에 유일한 강제 경로(훅)·MCP 경로·기계 경로가 들어 있었다.
+//     ③ 억제된 세션은 "남이 N건 있다" 는 듣지만 "나는 안 보인다" 는 못 들었다(비대칭이 조용했다).
+//   그리고 그 밑에서 락 자체가 새고 있었다(아래 ①).
+total++;
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-132-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CI', 'GITHUB_ACTIONS', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'CODEX_MANAGED_BY_PNPM', 'CODEX_MANAGED_BY_BUN', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
+    //   1.36.132 (검수 P1): CODEX_THREAD_ID 를 안 지우면 **codex 안에서 돌릴 때** 상속된 값이 '주소 없는 세션' 을 등록시켜
+    //   같은 코드가 실행 주체에 따라 통과/실패한다. 키 출처가 늘면 통제 목록도 같이 늘어야 한다.
+    'CODEX_THREAD_ID']) delete envP[k];   // CLAUDECODE 를 남기면 최외곽이 늘 claude 로 잡혀 ③이 거짓이 된다
+  const RP = (d, a, extra) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 600000, env: Object.assign({}, envP, extra || {}), maxBuffer: 32 * 1024 * 1024 });
+  const mkP = (name, full) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const r = RP(d, ['init', d, '--yes'].concat(full ? [] : ['--minimal']));
+    if (r.status !== 0) bad.push(`${name}:init실패(${r.status})`);
+    return d;
+  };
+  try {
+    // ① 동시 쓰기에서 **한 행도 잃지 않는다**. 종전엔 잃었다 — 원인이 둘이고 둘 다 실측했다:
+    //    (a) 락 획득이 Windows 의 EPERM 을 "예기치 못한 오류" 로 보고 **보호 없이 진행**했다
+    //        (격리 N=64 통제표본 14쌍: 현행 4/14 실행에서 무보호 7건·유실 7행 · 재시도 술어만 고친 대조군 0/14).
+    //    (b) 락을 제대로 잡아도 `writeUtf8` 의 rename 이 **동시 독자** 때문에 EPERM 으로 죽었다
+    //        (제품 N=32 통제표본 8쌍: 절제 7/8 실행에서 유실 11행·크래시 11 · 수정본 0/8).
+    {
+      const d = mkP('concurrent', false);
+      const N = 24;
+      const t0 = Date.now();
+      //   ⚠ 자식 종료를 'close' 이벤트로 세면 안 된다 — 이 e2e 는 동기라 이벤트 루프가 돌지 않는다
+      //     (1.36.130 이 정확히 그 함정에 빠져 공허한 단언을 만들었다). **마커 파일**로 세고 폴링은 블로킹 sleep 으로 한다.
+      const mk = path.join(sb, 'markers'); fs.mkdirSync(mk, { recursive: true });
+      const runner = path.join(sb, 'runner.js');
+      fs.writeFileSync(runner, [
+        'const cp=require("child_process"),fs=require("fs");',
+        'const a=process.argv.slice(2);',
+        'const r=cp.spawnSync(process.execPath,[a[0],"task","add","동시-"+a[2]+"-xxxxxxxxxxxxxxxx","--path",a[1],"--json"],{cwd:a[1],encoding:"utf8",timeout:300000});',
+        'fs.writeFileSync(a[3]+"/"+a[2]+".done",JSON.stringify({code:r.status,err:String(r.stderr||"").slice(0,150)}));',
+      ].join('\n'));
+      for (let i = 0; i < N; i++) {
+        const c = cp.spawn(process.execPath, [runner, CLI, d, String(i), mk], { cwd: d, env: envP, stdio: 'ignore', detached: true });
+        c.unref();
+      }
+      const sleep = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {} };
+      const deadline = Date.now() + 300000;
+      while (fs.readdirSync(mk).length < N && Date.now() < deadline) sleep(100);
+      const marks = fs.readdirSync(mk).map(f => { try { return JSON.parse(fs.readFileSync(path.join(mk, f), 'utf8')); } catch { return { code: -1 }; } });
+      const codes = marks.map(m => m.code); const errs = marks.map(m => m.err).filter(Boolean);
+      const txt = fs.readFileSync(path.join(d, '.harness', 'progress-tracker.md'), 'utf8');
+      let present = 0; for (let i = 0; i < N; i++) if (txt.includes(`동시-${i}-`)) present++;
+      const crashed = codes.filter(c => c !== 0).length;
+      if (codes.length < N) bad.push(`①자식 ${codes.length}/${N} 만 종료(계측 붕괴)`);
+      if (present !== N) bad.push(`①동시 쓰기 유실 ${N - present}행 (${present}/${N} 생존)`);
+      if (crashed > 0) bad.push(`①자식 크래시 ${crashed}건 — rename/락 경합에서 죽었다: ${errs[0] || '?'}`);
+      //   1.36.132 (검수 P1): 유실 0 만 보면 "보호 없이 진행했는데 운 좋게 안 겹친" 경우를 통과시킨다.
+      //   fail-open 은 그 자체로 실패다 — 제품이 stderr 로 말하게 해 놨으니 그것을 단언한다.
+      const failOpen = errs.filter(e => /락 획득 실패/.test(e)).length;
+      if (failOpen > 0) bad.push(`①락 fail-open ${failOpen}건 — 보호 없이 진행했다(유실이 없어도 실패다)`);
+      dbg.concurrent = { N, present, crashed, failOpen: errs.filter(e => /락 획득 실패/.test(e)).length, ms: Date.now() - t0 };
+    }
+
+    // ② 배달 — 세션 신호가 **4표면 전부**에 나온다. 종전엔 평문 헤드라인 1곳뿐이었고,
+    //    못 가는 3곳이 하필 (a) 유일한 강제 경로인 훅 (b) MCP 가 쓰는 --compact (c) 유일한 기계 경로 --json 이었다.
+    {
+      const d = mkP('delivery', true);
+      //    다른 세션 기록을 실제 제품으로 만든다(픽스처 손조립 금지 — hostId 를 손으로 적으면 계측이 거짓이 된다).
+      const ro = RP(d, ['handoff', d], { LEERNESS_SESSION_ID: 'peersession00001' });
+      if (ro.status !== 0) bad.push(`②피어 handoff exit=${ro.status}`);
+      fs.writeFileSync(path.join(d, '.harness', 'agent-reminders.md'), '# 리마인더\n- DELIVERTEST 이 줄이 보여야 한다\n');
+      const me = { LEERNESS_SESSION_ID: 'mysession00000001' };
+      const plain = RP(d, ['handoff', d], me);
+      const compact = RP(d, ['handoff', d, '--compact'], me);
+      const jsonR = RP(d, ['handoff', d, '--json'], me);
+      //   1.36.132 (검수 P1): 최상위 엔트리만 세면 `.harness/cache/sessions/.host-salt` 생성을 놓친다 —
+      //   실제로 그 회귀가 있었고 이 검사가 공허하게 통과했다. **재귀 전수 목록**으로 비교한다.
+      const walk = (dir) => { const out = []; for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fp = path.join(dir, e.name); if (e.isDirectory()) out.push(...walk(fp)); else out.push(fp); } return out.sort(); };
+      const before = walk(path.join(d, '.harness'));
+      const hook = RP(d, ['hook', 'session-start'], me);
+      const after = walk(path.join(d, '.harness'));
+      const P = String(plain.stdout || ''), C = String(compact.stdout || ''), H = String(hook.stdout || '');
+      let J = null; try { J = JSON.parse(String(jsonR.stdout || '')); } catch { bad.push('②--json 이 JSON 이 아님'); }
+      if (!/👥 다른 세션 기록 1건/.test(P)) bad.push('②평문 헤드라인에 다른 세션 없음');
+      if (!/👥 다른 세션 1/.test(C)) bad.push('②--compact 에 다른 세션 없음(MCP 경로가 못 본다)');
+      if (!J || !J.sessions || J.sessions.others !== 1) bad.push(`②--json.sessions.others=${J && J.sessions ? J.sessions.others : 'none'} (기대 1) — 기계 경로가 못 본다`);
+      if (!/👥 다른 세션 1/.test(H)) bad.push('②훅에 다른 세션 없음(유일한 강제 경로가 못 본다)');
+      //    죽은 채널 — agent-reminders.md 는 1.9.38 부터 만들어졌지만 어떤 표면도 내용을 보여주지 않았다.
+      if (!/DELIVERTEST/.test(P)) bad.push('④리마인더 본문이 handoff 에 안 나옴(죽은 채널)');
+      if (!J || !J.agentReminders) bad.push('④--json 에 리마인더 없음');
+      if (!/🔔 리마인더/.test(H)) bad.push('④훅에 리마인더 없음');
+      //    훅은 **쓰기 0** 계약이다 — 신호를 얹으면서 염 파일을 만들면 그 계약이 깨진다.
+      if (after.length !== before.length) bad.push(`②훅이 파일을 만들었다(${after.filter(f => !before.includes(f)).map(f => path.basename(f)).join(',')}) — 쓰기 0 계약 위반`);
+      //   내용까지 본다 — 개수가 같아도 덮어썼을 수 있다(무효 salt 가 새 랜덤으로 교체된 실제 회귀).
+      const saltP = path.join(d, '.harness', 'cache', 'sessions', '.host-salt');
+      if (fs.existsSync(saltP)) {
+        const s0 = fs.readFileSync(saltP, 'utf8');
+        RP(d, ['hook', 'session-start'], me);
+        if (fs.readFileSync(saltP, 'utf8') !== s0) bad.push('②훅이 .host-salt 를 바꿨다 — 쓰기 0 계약 위반');
+      }
+      if (String(hook.stderr || '').length) bad.push('②훅 stderr 비어있지 않음');
+      dbg.delivery = { plain: /👥/.test(P), compact: /👥/.test(C), json: J && J.sessions ? J.sessions.others : null, hook: /👥/.test(H), hookWrites: after.length - before.length };
+    }
+
+    // ③ 주소 — claude 아닌 에이전트도 **자기 기록을 남기고 서로를 본다**. 그리고 주소가 없으면 그 사실을 말한다.
+    {
+      const d = mkP('address', true);
+      const codexEnv = { CODEX_MANAGED_BY_NPM: '1' };
+      const r1 = RP(d, ['handoff', d], codexEnv);
+      const dir = path.join(d, '.harness', 'cache', 'sessions');
+      const n1 = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /\.json$/.test(f)).length : 0;
+      if (n1 !== 0) bad.push(`③주소 없는 세션이 등록됨(${n1}) — 식별 불가인데 기록했다`);
+      if (!/🙈/.test(String(r1.stdout || ''))) bad.push('③주소 없는 세션에게 "안 보인다"고 말하지 않음(비대칭이 조용하다)');
+      //    (a) codex 는 **설정 없이도** 주소를 갖는다 — codex-cli 가 CODEX_THREAD_ID 를 이미 환경에 둔다
+      //        (실측 codex-cli 0.147.0: 소문자 UUIDv7 36자, 한 세션의 자식 호출들에서 동일, 세션이 바뀌면 값이 바뀜).
+      const TID = '01a01570-54a6-70e2-a002-55291c73a3ce';
+      const rT = RP(d, ['handoff', d], Object.assign({}, codexEnv, { CODEX_THREAD_ID: TID }));
+      if (rT.status !== 0) bad.push(`③codex(thread) handoff exit=${rT.status}`);
+      const dirT = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /[.]json$/.test(f)) : [];
+      if (!dirT.includes(TID + '.json')) bad.push(`③CODEX_THREAD_ID 로 등록 안 됨(파일: ${dirT.join(',')}) — codex 는 설정 없이 주소를 가져야 한다`);
+      let recT = null; try { recT = JSON.parse(fs.readFileSync(path.join(dir, TID + '.json'), 'utf8')); } catch {}
+      if (!recT || recT.keySource !== 'CODEX_THREAD_ID') bad.push(`③thread keySource=${recT && recT.keySource}`);
+      //    (b) claude 가 띄운 codex 는 부모 키로 접힌다(기존 동작 유지 — 독립 세션이 아니라 중첩이다).
+      const rN = RP(d, ['handoff', d], Object.assign({}, codexEnv, { CODEX_THREAD_ID: TID, CLAUDE_CODE_SESSION_ID: 'parentclaude0001' }));
+      if (rN.status !== 0) bad.push(`③중첩 codex handoff exit=${rN.status}`);
+      if (!fs.readdirSync(dir).includes('parentclaude0001.json')) bad.push('③claude 하위 codex 가 부모 키로 접히지 않음');
+      //    (c) 명시 주소는 무엇보다 우선한다.
+      const r2 = RP(d, ['handoff', d], Object.assign({}, codexEnv, { CODEX_THREAD_ID: TID, LEERNESS_SESSION_ID: 'codexsession0001' }));
+      if (r2.status !== 0) bad.push(`③codex handoff exit=${r2.status}`);
+      const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /\.json$/.test(f)) : [];
+      if (!files.includes('codexsession0001.json')) bad.push(`③LEERNESS_SESSION_ID 로도 등록 안 됨(파일: ${files.join(',')})`);
+      let rec = null; try { rec = JSON.parse(fs.readFileSync(path.join(dir, 'codexsession0001.json'), 'utf8')); } catch {}
+      if (!rec || rec.keySource !== 'LEERNESS_SESSION_ID') bad.push(`③keySource=${rec && rec.keySource} (기대 LEERNESS_SESSION_ID)`);
+      if (!rec || rec.outermostAgent !== 'codex-cli') bad.push(`③에이전트 라벨=${rec && rec.outermostAgent} (기대 codex-cli)`);
+      //    반대 방향 — claude 세션이 codex 세션을 본다(사용자가 든 바로 그 시나리오).
+      const r3 = RP(d, ['handoff', d, '--json'], { CLAUDE_CODE_SESSION_ID: 'claudesession0001' });
+      let J3 = null; try { J3 = JSON.parse(String(r3.stdout || '')); } catch {}
+      if (!J3 || !J3.sessions || J3.sessions.others !== 3) bad.push(`③claude 가 codex 세션들을 못 봄(others=${J3 && J3.sessions ? J3.sessions.others : 'none'}, 기대 3)`);
+      if (!J3 || J3.sessions.selfRegistered !== true) bad.push('③claude 세션이 등록 안 됨(기존 동작 회귀)');
+      dbg.address = { unaddressed: n1, threadKeySource: recT && recT.keySource, keySource: rec && rec.keySource, agent: rec && rec.outermostAgent, claudeSeesCodex: J3 && J3.sessions && J3.sessions.others };
+    }
+
+    // ⑥ 선결 결함 3종 — 전부 이번 라운드가 만든/드러낸 것이고 전부 재현했다.
+    {
+      //    (a) **조회 명령이 남의 디렉토리에 쓴다**: 빈 디렉토리에 `sessions --json` 1회 → .harness/·cache/·sessions/·.host-salt 4개 생성(exit 0).
+      const empty = path.join(sb, 'empty-not-a-project'); fs.mkdirSync(empty, { recursive: true });
+      const rq = RP(empty, ['sessions', empty, '--json']);
+      const made = fs.readdirSync(empty).length;
+      if (made !== 0) bad.push(`⑥조회 명령이 파일을 만들었다(${made}개) — 읽기는 읽기여야 한다`);
+      if (rq.status !== 0) bad.push(`⑥sessions --json exit=${rq.status}`);
+      //    (b) **--no-record 비대칭**: handoff 는 0건인데 session close 는 1건을 남겼다.
+      const d2 = mkP('norecord', false);
+      const me2 = { LEERNESS_SESSION_ID: 'norecordsess0001' };
+      RP(d2, ['handoff', d2, '--no-record'], me2);
+      const dir2 = path.join(d2, '.harness', 'cache', 'sessions');
+      const afterHandoff = fs.existsSync(dir2) ? fs.readdirSync(dir2).filter(f => /[.]json$/.test(f)).length : 0;
+      RP(d2, ['session', 'close', d2, '--no-record'], me2);
+      const afterClose = fs.existsSync(dir2) ? fs.readdirSync(dir2).filter(f => /[.]json$/.test(f)).length : 0;
+      if (afterHandoff !== 0) bad.push(`⑥handoff --no-record 가 기록함(${afterHandoff})`);
+      if (afterClose !== 0) bad.push(`⑥session close --no-record 가 기록함(${afterClose}) — 같은 스토어인데 계약이 갈렸다`);
+      //    (c) **🙈 가 짧은 표면에 없었다**: 👥 는 4/4 인데 🙈 는 평문 1곳뿐이었다(비대칭).
+      const d3 = mkP('invisible', true);
+      RP(d3, ['handoff', d3], { LEERNESS_SESSION_ID: 'visiblepeer00001' });
+      const noAddr = { CODEX_MANAGED_BY_NPM: '1' };
+      const iP = String(RP(d3, ['handoff', d3], noAddr).stdout || '');
+      const iC = String(RP(d3, ['handoff', d3, '--compact'], noAddr).stdout || '');
+      const iH = String(RP(d3, ['hook', 'session-start'], noAddr).stdout || '');
+      if (!/🙈/.test(iP)) bad.push('⑥평문에 "나는 안 보임" 없음');
+      if (!/🙈/.test(iC)) bad.push('⑥--compact 에 "나는 안 보임" 없음(짧은 표면일수록 필요한 신호다)');
+      if (!/🙈/.test(iH)) bad.push('⑥훅에 "나는 안 보임" 없음');
+      dbg.prereq = { readOnlyWrites: made, afterHandoff, afterClose, invisible: [/🙈/.test(iP), /🙈/.test(iC), /🙈/.test(iH)] };
+    }
+
+    // ⑦ 주소 공유 — 두 세션이 같은 LEERNESS_SESSION_ID 를 쓰면 레코드가 **조용히 병합**됐다(실측: others=0·헤드라인 침묵·
+    //    라벨이 마지막 기록자로 덮임). 명시 주소를 지원하는 대가로 이 실패는 **말할 수 있는 실패**여야 한다.
+    {
+      const d = mkP('sharedkey', true);
+      const KEY = 'sharedaddr000001';
+      RP(d, ['handoff', d], { CLAUDECODE: '1', LEERNESS_SESSION_ID: KEY });
+      const r2 = RP(d, ['handoff', d], { CODEX_MANAGED_BY_NPM: '1', LEERNESS_SESSION_ID: KEY });
+      const warned = /주소 공유/.test(String(r2.stderr || ''));
+      if (!warned) bad.push('⑦같은 주소를 다른 에이전트가 써도 조용함(조용한 병합)');
+      let rec = null; try { rec = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'cache', 'sessions', KEY + '.json'), 'utf8')); } catch {}
+      if (!rec || !rec.sharedKeyAgents) bad.push('⑦레코드에 공유 표식 없음');
+      const shEnv = { CODEX_MANAGED_BY_NPM: '1', LEERNESS_SESSION_ID: KEY };
+      const cOut = String(RP(d, ['handoff', d, '--compact'], shEnv).stdout || '');
+      if (!/주소 공유/.test(cOut)) bad.push('⑦--compact 에 공유 경고 없음');
+      const pOut = String(RP(d, ['handoff', d], shEnv).stdout || '');
+      if (!/주소 공유/.test(pOut)) bad.push('⑦평문에 공유 경고 없음 — stderr 는 한 번뿐이라 여기서 빠지면 영영 안 보인다');
+      const hOut = String(RP(d, ['hook', 'session-start'], shEnv).stdout || '');
+      if (!/주소 공유/.test(hOut)) bad.push('⑦훅에 공유 경고 없음');
+      //    대조군 — 서로 다른 주소면 경고가 뜨면 안 된다(오탐 0). 라벨이 unknown 인 경우도 발화하면 안 된다.
+      const d2 = mkP('distinctkey', true);
+      RP(d2, ['handoff', d2], { CLAUDECODE: '1', LEERNESS_SESSION_ID: 'distinctkeyA0001' });
+      const rB = RP(d2, ['handoff', d2], { CODEX_MANAGED_BY_NPM: '1', LEERNESS_SESSION_ID: 'distinctkeyB0001' });
+      if (/주소 공유/.test(String(rB.stderr || ''))) bad.push('⑦서로 다른 주소인데 공유 경고(오탐)');
+      const d3 = mkP('unknownlabel', true);
+      RP(d3, ['handoff', d3], { LEERNESS_SESSION_ID: 'unknownlabel0001' });
+      const rU = RP(d3, ['handoff', d3], { CODEX_MANAGED_BY_NPM: '1', LEERNESS_SESSION_ID: 'unknownlabel0001' });
+      if (/주소 공유/.test(String(rU.stderr || ''))) bad.push('⑦라벨이 unknown 이었는데 공유 경고(셸별 env 가시성 차이로 오탐)');
+      dbg.sharedKey = { warned, tag: rec && rec.sharedKeyAgents };
+    }
+
+    // ⑧ 정직성 3종 — 전부 "모르는 것을 아는 척하지 않는다" 계열이고 전부 재현했다.
+    {
+      const d = mkP('honesty', true);
+      const me = { LEERNESS_SESSION_ID: 'honestysess00001' };
+      //    (a) `--no-record` 인데 selfRegistered=true 였다(주소 있음 ≠ 등록됨). 그리고 세션 파일·염을 만들면 안 된다.
+      const jr = RP(d, ['handoff', d, '--json', '--no-record'], me);
+      let J = null; try { J = JSON.parse(String(jr.stdout || '')); } catch { bad.push('⑧--no-record --json 파싱 실패'); }
+      const sdir = path.join(d, '.harness', 'cache', 'sessions');
+      const madeAny = fs.existsSync(sdir) ? fs.readdirSync(sdir).length : 0;
+      if (madeAny !== 0) bad.push(`⑧--no-record 가 세션 스토어에 ${madeAny}개를 만들었다(염 포함)`);
+      if (!J || J.sessions.selfRegistered !== false) bad.push('⑧--no-record 인데 selfRegistered=true (거짓 성공)');
+      if (!J || J.sessions.selfAddressed !== true) bad.push('⑧주소는 있는데 selfAddressed=false');
+      //    (b) 저장소를 못 읽는 상태를 "0건" 으로 축약하지 않는다.
+      fs.mkdirSync(path.dirname(sdir), { recursive: true });
+      fs.writeFileSync(sdir, 'not-a-directory');
+      const jr2 = RP(d, ['handoff', d, '--json'], me);
+      let J2 = null; try { J2 = JSON.parse(String(jr2.stdout || '')); } catch {}
+      if (!J2 || !J2.sessions.storeError) bad.push('⑧저장소 읽기 실패를 others:0 으로 축약(못 읽은 것은 없는 것이 아니다)');
+      const p2 = String(RP(d, ['handoff', d], me).stdout || '');
+      if (!/읽지 못함/.test(p2)) bad.push('⑧평문이 저장소 오류를 말하지 않음');
+      try { fs.unlinkSync(sdir); } catch {}
+      //    (c) 명시 주소가 형식에 안 맞으면 조용히 다음 출처로 넘어가지 않는다.
+      const p3 = String(RP(d, ['handoff', d], { LEERNESS_SESSION_ID: 'short', CLAUDE_CODE_SESSION_ID: 'fallbackkey00001' }).stdout || '');
+      if (!/LEERNESS_SESSION_ID/.test(p3)) bad.push('⑧무효한 명시 주소를 조용히 무시(사용자 설정을 말없이 뒤집음)');
+      //    (d) 대소문자만 다른 주소가 서로 다른 척하다 한 파일로 병합되지 않는다 — 접어서 **한 주소**로 다룬다.
+      const d2 = mkP('casefold', true);
+      RP(d2, ['handoff', d2], { LEERNESS_SESSION_ID: 'CaseKey01ABCD' });
+      RP(d2, ['handoff', d2], { LEERNESS_SESSION_ID: 'casekey01abcd' });
+      const cdir = path.join(d2, '.harness', 'cache', 'sessions');
+      const cf = fs.readdirSync(cdir).filter(f => /casekey/i.test(f));
+      if (!(cf.length === 1 && cf[0] === 'casekey01abcd.json')) bad.push(`⑧대소문자 주소 처리 불일치(${cf.join(',')})`);
+      let cr = null; try { cr = JSON.parse(fs.readFileSync(path.join(cdir, cf[0]), 'utf8')); } catch {}
+      if (!cr || cr.sessionKey !== 'casekey01abcd') bad.push(`⑧레코드 키가 파일명과 불일치(${cr && cr.sessionKey})`);
+      //    (e) 리마인더 내용이 제어문자·비밀값 그대로 표면에 나가지 않는다.
+      const d3 = mkP('sanitize', true);
+      fs.writeFileSync(path.join(d3, '.harness', 'agent-reminders.md'),
+        '# R\n- ' + String.fromCharCode(27) + '[2J' + ' token sk_live_' + 'ABCDEFGHIJKLMNOP1234\n');
+      const jr3 = RP(d3, ['handoff', d3, '--json'], { LEERNESS_SESSION_ID: 'sanitizesess0001' });
+      let J3 = null; try { J3 = JSON.parse(String(jr3.stdout || '')); } catch {}
+      const headTxt = J3 && J3.agentReminders ? J3.agentReminders.head.join(' ') : '';
+      if (!J3 || !J3.agentReminders) bad.push('⑧리마인더 신호 없음(셋업 실패)');
+      else {
+        if (headTxt.includes(String.fromCharCode(27))) bad.push('⑧제어문자(ESC)가 그대로 출력됨');
+        if (/sk_live_[A-Z]/.test(headTxt)) bad.push('⑧비밀값 표식이 마스킹되지 않음');
+      }
+      dbg.honesty = { madeAny, selfRegistered: J && J.sessions.selfRegistered, storeError: J2 && J2.sessions.storeError, caseFiles: cf.length };
+    }
+
+    // ⑤ 대조군 — 평범한 단일 흐름은 아무것도 달라지지 않는다(새 경고·새 필드가 오탐을 만들지 않는다).
+    {
+      const d = mkP('plain', false);
+      const me = { LEERNESS_SESSION_ID: 'solosession000001' };
+      for (const a of [['task', 'add', '보통 작업', '--path', d, '--json'], ['handoff', d], ['session', 'close', d]]) {
+        const r = RP(d, a, me);
+        if (r.status !== 0) bad.push(`⑤평범한 흐름 실패: ${a[0]} exit=${r.status}`);
+      }
+      const solo = RP(d, ['handoff', d], me);
+      if (/👥/.test(String(solo.stdout || ''))) bad.push('⑤혼자인데 다른 세션이 있다고 말함(오탐)');
+      if (/🙈/.test(String(solo.stdout || ''))) bad.push('⑤등록됐는데 안 보인다고 말함(오탐)');
+      if (String(solo.stderr || '').includes('락 획득 실패')) bad.push('⑤경합 없는데 락 경고가 뜸(오탐)');
+      if (String(solo.stderr || '').includes('주소 공유')) bad.push('⑤혼자인데 주소 공유 경고(오탐)');
+      const soloOut = String(solo.stdout || '');
+      for (const noise of ['읽지 못함', 'LEERNESS_SESSION_ID 가 형식', '주소 공유']) {
+        if (soloOut.includes(noise)) bad.push(`⑤정상 상태인데 경고가 뜸(오탐): ${noise}`);
+      }
+      dbg.plain = { falsePositives: 0 };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AA(1.36.132/UR-0069) 다중세션 토대: 동시 24쓰기 무유실·무크래시(락 EPERM 무보호진행 + rename 동시독자 EPERM 둘 다 차단) · 세션 신호가 4표면 전부에 도달(평문·--compact·--json·훅, 훅은 쓰기 0 유지) · claude 아닌 에이전트도 주소를 갖고 서로를 봄 + 주소 없으면 그 사실을 말함 · 죽은 채널(agent-reminders) 노출 · 단일 흐름 오탐 0 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.132 다중세션 토대 실패 ' + JSON.stringify({ bad: bad.slice(0, 10), dbg }));
+  if (!ok) failed++;
+}
+
 
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

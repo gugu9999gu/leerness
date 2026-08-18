@@ -370,5 +370,19 @@
         "event": "approved"
       }
     ]
+  },
+  {
+    "id": "P-0017",
+    "title": "P-0016 P3 — 세션간 양방향 소통(메일박스) 실사용 근거(UR-0069, hive-analytics 실측): 설치본 1.36.114 라 presence 미설치 · 유일한 인계 수단 session-handoff.md 는 단일파일 last-writer-wins 라 채널이 아님 · 사용자가 procs.txt 로 node 4개를 손으로 추적. 제안: .harness/cache/mailbox/ 에 append-only 메시지(from/to/scope/kind: claim|handoff|ask|reply) + leerness sessions send/inbox/claim · handoff 가 미읽음 자동 노출 · 에이전트 무관(파일 기반이라 codex/cursor/vscode/grok 등 동일). 코드는 승인 후.",
+    "design": "",
+    "features": [],
+    "status": "proposed",
+    "createdAt": "2026-08-18T14:29:03.163Z",
+    "history": [
+      {
+        "at": "2026-08-18T14:29:03.163Z",
+        "event": "proposed"
+      }
+    ]
   }
 ]
