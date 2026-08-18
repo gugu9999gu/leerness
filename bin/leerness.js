@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.127';
+const VERSION = '1.36.128';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -6693,6 +6693,34 @@ function _selfTestCases() {
       } finally { if (saved !== undefined) process.env.LEERNESS_MCP_TIMEOUT_MS = saved; else delete process.env.LEERNESS_MCP_TIMEOUT_MS; }
     } },
     // 1.36.125: 측정 통제 자체의 가드 — 목록이 비거나 배선이 끊기면 selftest 는 다시 사용자 설정에 휘둘린다.
+    // 1.36.128 (실측, T-0104): `adapter <tool> [+.mcp.json]` 은 **그 도구가 그 파일을 읽는다**는 외부 제품에 대한 주장이다.
+    //   이 머신에 설치된 CLI 로 직접 재 보니 5종 중 2종이 틀렸다:
+    //     codex    — `.mcp.json` 을 둔 디렉터리에서 `codex mcp list` 가 대조군과 동일, `codex mcp get` 은 not found (거짓)
+    //     opencode — 같은 파일을 두면 `opencode mcp list` 에 `connected` 로 등장(서버 7 vs 6) (참)
+    //   판정을 바꾸는 것이 아니라 **주장과 사실을 맞춘다**: 안 읽는 도구엔 파일을 쓰지 않고 되는 명령을 안내한다.
+    { name: '1.36.128 (T-0104): 어댑터 MCP 주장 — 안 읽는 도구는 mcp:false + 근거·대안 필수 · 읽는 도구는 파일 목록 필수 (카탈로그 계약)', run: () => {
+      const c = require('../lib/catalogs');
+      const A = c.ADAPTERS;
+      if (A !== ADAPTERS) return false;
+      // ① 실측으로 거짓이 확인된 두 종은 주장하지 않는다 + 사용자가 막히지 않게 대안을 준다
+      for (const id of ['codex', 'goose']) {
+        const a = A[id];
+        if (!a || a.mcp !== false) return false;
+        if (!a.mcpSetup || !a.mcpWhy) return false;
+        if (!/^(measured|measured-partial)$/.test(String(a.mcpEvidence || ''))) return false;
+      }
+      // ② 실측으로 참인 opencode 는 근거를 measured 로 남긴다(다음 사람이 또 추측하지 않게)
+      if (A.opencode.mcp !== true || A.opencode.mcpEvidence !== 'measured') return false;
+      // ③ `mcp:true` 인 모든 어댑터는 **어떤 파일**을 쓰는지 밝힌다(빈 배열 공허참 차단)
+      const trues = Object.entries(A).filter(([, a]) => a.mcp === true);
+      if (trues.length < 2) return false;
+      if (!trues.every(([, a]) => Array.isArray(a.mcpFiles) && a.mcpFiles.length > 0 && a.mcpFiles.every(f => /\.json$/.test(f)))) return false;
+      // ④ 대조군 — MCP 를 아예 안 다루는 어댑터는 대안 안내도 없어야 한다(잡음 금지)
+      if (A.copilot.mcp !== false || A.copilot.mcpSetup) return false;
+      // ⑤ 배선(카탈로그만 고치고 쓰기가 남으면 무의미)은 **e2e X 블록이 CLI 행위로** 잰다 —
+      //   여기서 소스를 읽으면 자기소스 검사 동결(1.36.84 메타가드)에 걸리고, 실제로 걸렸다.
+      return true;
+    } },
     // 1.36.127 (T-0105/T-0106 도그푸딩): 고아 가드 탐지기가 **자기 저장소에서 눈이 멀어 있었다** —
     //   CI 가 `bin/leerness.js` 를 실행하므로 그 파일이 러너로 잡히고, 그 안의 selftest 단언 문자열
     //   (`'test:core'` 등)이 호출로 읽혀 진짜 고아 2건이 0건으로 보고됐다(실측).
@@ -24232,8 +24260,12 @@ function adapterCmd(root, tool, opts = {}) {
     log(`  init 전체 대신 특정 도구의 지침/연결 파일만 생성합니다. (권장: leerness init . --minimal 후 adapter)`);
     log('');
     for (const [id, a] of Object.entries(ADAPTERS)) {
-      log(`  ${id.padEnd(9)} ${a.label}${a.mcp ? '  [+.mcp.json]' : ''}`);
+      // 1.36.128 (실측): `[+.mcp.json]` 은 **그 도구가 그 파일을 읽는다**는 주장이다. 실제로 두 종(codex·goose)은
+      //   읽지 않았다(codex: `mcp get` 이 not found · goose: 실효 설정에 미등장). 안 읽는 도구엔 파일 대신 **되는 명령**을 준다.
+      log(`  ${id.padEnd(9)} ${a.label}${a.mcp ? `  [+${(a.mcpFiles || ['.mcp.json']).join(' +')}]` : ''}`);
       log(`     ${a.keys.join(', ')}`);
+      if (!a.mcp && a.mcpSetup) log(`     MCP: ${a.mcpWhy}
+           → ${a.mcpSetup}`);
     }
     log(`\n  사용: leerness adapter <tool> [--dry-run]`);
     return;
@@ -24303,7 +24335,10 @@ function adapterCmd(root, tool, opts = {}) {
   const files = coreFiles(root, lang === 'en' ? 'en' : 'ko', [], { mode: _instMode || undefined });
   const managedOverwrite = new Set(['AGENTS.md', 'CLAUDE.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md']);
   const planned = a.keys.filter(k => files[k] != null);
-  if (a.mcp) planned.push('.mcp.json');
+  // 1.36.128 (검수 P1, 실측 재현): dry-run 계획이 `.mcp.json` 만 하드코딩해, cursor 는 실제 실행이
+  //   **계획에 없던 `.cursor/mcp.json`(사용자 설정)** 까지 병합했다 — dry-run 이 보여주지 않은 파일을 건드리면
+  //   그건 조용한 변경이다. 카탈로그의 `mcpFiles` 를 계획 생성에 그대로 태운다(단일 출처).
+  if (a.mcp) planned.push(...(a.mcpFiles && a.mcpFiles.length ? a.mcpFiles : ['.mcp.json']));
   if (dry) {
     if (json) { log(JSON.stringify({ adapter: tool, dryRun: true, files: planned }, null, 2)); return; }
     log(`# leerness adapter ${tool} [dry-run] — 생성/갱신 예정 ${planned.length}개 (실제 변경 0)`);
@@ -24343,6 +24378,12 @@ function adapterCmd(root, tool, opts = {}) {
   //   주장은 **파일 단위**로 한다 — 우리가 쓴 파일만 이름을 대고 말한다.
   _wrote.forEach(r => log(`  ℹ ${r.file} 에 MCP 등록 — 이 파일을 읽는 도구는 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`));
   _kept.forEach(r => log(`  ℹ ${r.file} 의 기존 leerness 항목을 그대로 두었습니다 — 그 항목이 leerness MCP 를 띄우는지는 확인하지 않았습니다`));
+  // 1.36.128 (실측): 이 도구가 프로젝트 MCP 파일을 **안 읽는** 경우, 파일을 안 쓰는 것으로 끝내면
+  //   사용자는 "그럼 어떻게 등록하나" 를 모른 채 남는다. 못 하는 이유와 **되는 명령**을 함께 준다.
+  if (!a.mcp && a.mcpSetup) {
+    log(`  ℹ MCP: ${a.mcpWhy}`);
+    log(`     → ${a.mcpSetup}`);
+  }
   // 스킬을 까는 어댑터면 구 평면 파일도 같이 알린다(1.36.123: `init` 에만 있어 이 경로는 조용했다)
   if (a.keys.some(k => String(k).includes('.claude/skills/'))) _warnLegacySkillFile(root);
   // 보존은 안전하지만 **막다른 길이면 안 된다** — 우리 것이 망가졌을 때 되돌릴 방법을 알려 준다(자체 헌트).

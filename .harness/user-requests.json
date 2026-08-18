@@ -772,7 +772,17 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": ""
+    },
+    {
+      "id": "UR-0068",
+      "text": "leerness 설치 프로젝트에서 채팅 시, 같은 프로젝트를 작업 중인 별도 AI 세션들을 파악하고 서로의 작업을 인지해 충돌을 막는다. 겹치면 한쪽이 인계받도록 양방향 소통(예: claude 가 작업 중인 범위를 codex 가 확인하고 범위를 전달). 대상 에이전트: codex, claude, cursor, vscode, grok, kimi, glm 등.",
+      "recordedAt": "2026-08-18T01:56:35.736Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-07-28T08:26:37.305Z"
+  "updatedAt": "2026-08-18T01:56:35.736Z"
 }

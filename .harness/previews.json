@@ -348,5 +348,23 @@
         "event": "approved"
       }
     ]
+  },
+  {
+    "id": "P-0016",
+    "title": "다중 AI 세션 인지·범위 조율·인계 (UR-0068)",
+    "design": "파일 기반 세션 레지스트리 + 범위 클레임 + 우편함. 데몬/서버 없음(0-deps·오프라인 원칙 유지). 이질적 에이전트(claude/codex/cursor/vscode/grok/kimi/glm)가 공통으로 할 수 있는 것은 '레포의 파일'과 'leerness CLI/MCP 호출' 뿐이므로 그 둘만 쓴다. 기존 state 기판은 currentRunId 단일 슬롯이라 동시 세션을 표현 못 함 — 다중 슬롯 레지스트리를 새로 둔다.",
+    "features": [
+      "P1 세션 레지스트리: .harness/sessions/<id>.json (agent종류·pid·cwd·started·last_seen). 에이전트 종류는 env 지문으로 추정하되 모르면 unknown(추측 금지). handoff 가 '다른 세션 N개 활동중'을 헤드라인에 노출. | P2 범위 클레임: claim add/list/check --paths 글롭 + TTL. 겹침은 **권고**로 보고(차단 아님 — 휴리스틱 차단은 오차단으로 죽는다). --strict 로만 차단 opt-in. | P3 우편함: session msg <to>",
+      "session inbox",
+      "handoff 제안/accept/decline — 클레임 소유권 이전. | P4 MCP 도구 + adapter 안내로 모든 에이전트가 같은 표면 사용."
+    ],
+    "status": "proposed",
+    "createdAt": "2026-08-18T01:57:41.793Z",
+    "history": [
+      {
+        "at": "2026-08-18T01:57:41.793Z",
+        "event": "proposed"
+      }
+    ]
   }
 ]

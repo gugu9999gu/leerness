@@ -12708,6 +12708,86 @@ total++;
   if (!ok) failed++;
 }
 
+// 1.36.128 (T-0104 실측): `adapter <tool> [+.mcp.json]` 은 **외부 제품이 그 파일을 읽는다**는 주장이다.
+//   이 머신의 실제 CLI 로 재 보니 codex 는 읽지 않았고(`codex mcp get` → not found) opencode 는 읽었다(connected).
+//   그래서 안 읽는 도구에는 파일을 **쓰지 않고** 되는 명령을 안내한다. 그 계약을 CLI 행위로 고정한다.
+total++;
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-adp128-'));
+  const envA = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG', 'LEERNESS_MCP_PROFILE', 'LEERNESS_MCP_TIMEOUT_MS']) delete envA[k];
+  const mkA = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"a","version":"0.1.0"}');
+    const r = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--minimal'], { cwd: d, encoding: 'utf8', timeout: 600000, env: envA });
+    if (r.status !== 0) bad.push(`${name}:init실패(${r.status})`);
+    try { fs.unlinkSync(path.join(d, '.mcp.json')); } catch {}
+    return d;
+  };
+  const RA = (d, args) => cp.spawnSync(process.execPath, [CLI, ...args], { cwd: d, encoding: 'utf8', timeout: 600000, env: envA, maxBuffer: 32 * 1024 * 1024 });
+  try {
+    const dC = mkA('codexp');
+    const rC = RA(dC, ['adapter', 'codex', '--path', dC]);
+    const oC = String(rC.stdout || '');
+    // (검수 P3) 안내만 찍고 exit 1 로 죽어도 통과하던 자리 — 적용 자체가 성공했는지 본다
+    if (rC.status !== 0) bad.push(`①codex adapter exit=${rC.status}`);
+    if (fs.existsSync(path.join(dC, '.mcp.json'))) bad.push('①codex에 무동작 .mcp.json 생성');
+    if (!/읽지 않는다/.test(oC)) bad.push('①이유 미고지');
+    if (!/codex mcp add leerness/.test(oC)) bad.push('①되는 명령 미고지');
+    dbg.codex = { wroteMcp: fs.existsSync(path.join(dC, '.mcp.json')) };
+    // (검수 P3) goose 도 `mcp:false` + 대안 안내 경로다 — 카탈로그만 고치고 경로를 안 태우면 무의미하다.
+    const dG = mkA('goosep');
+    const rG = RA(dG, ['adapter', 'goose', '--path', dG]);
+    const oG = String(rG.stdout || '');
+    if (rG.status !== 0) bad.push(`①goose adapter exit=${rG.status}`);
+    if (fs.existsSync(path.join(dG, '.mcp.json'))) bad.push('①goose에 무동작 .mcp.json 생성');
+    if (!/goose session --with-extension "npx -y leerness mcp serve"/.test(oG)) bad.push('①goose 안내 명령 형태 불일치');
+    dbg.goose = { wroteMcp: fs.existsSync(path.join(dG, '.mcp.json')), exit: rG.status };
+
+    const dL = mkA('claudep');
+    const rL = RA(dL, ['adapter', 'claude', '--path', dL]);
+    const oL = String(rL.stdout || '');
+    if (rL.status !== 0) bad.push(`②claude adapter exit=${rL.status}`);
+    if (!fs.existsSync(path.join(dL, '.mcp.json'))) bad.push('②claude에 .mcp.json 미생성');
+    if (/codex mcp add|goose session --with-extension/.test(oL)) bad.push('②남의 대안 안내 누출');
+    if (!/\.mcp\.json 에 MCP 등록/.test(oL)) bad.push('②등록 문구 없음');
+    dbg.claude = { wroteMcp: fs.existsSync(path.join(dL, '.mcp.json')) };
+    // (검수 P1) dry-run 이 안 보여준 사용자 설정 파일을 실제 실행이 건드리면 조용한 변경이다.
+    //   cursor 는 MCP 파일이 **둘**이라 이 어긋남이 실제로 있었다 — 계획 ⊇ 실제를 단언한다.
+    {
+      const dR = mkA('cursorp');
+      let pj = null;
+      try { pj = JSON.parse(String(RA(dR, ['adapter', 'cursor', '--path', dR, '--dry-run', '--json']).stdout || '')); } catch { bad.push('②bdryJSON아님'); }
+      const planned = (pj && pj.files) || [];
+      if (!planned.includes('.cursor/mcp.json')) bad.push(`②b계획에 .cursor/mcp.json 없음(${JSON.stringify(planned)})`);
+      const rR = RA(dR, ['adapter', 'cursor', '--path', dR]);
+      if (rR.status !== 0) bad.push(`②bcursor adapter exit=${rR.status}`);
+      for (const f of ['.cursor/mcp.json', '.mcp.json']) {
+        if (fs.existsSync(path.join(dR, f)) && !planned.includes(f)) bad.push(`②b계획에 없던 파일을 생성: ${f}`);
+      }
+      dbg.cursor = { planned };
+    }
+    const listR = RA(sb, ['adapter']);
+    if (listR.status !== 0) bad.push(`③adapter list exit=${listR.status}`);
+    const list = String(listR.stdout || '');
+    const codexBracket = /codex\s+OpenAI Codex CLI\s+\[\+/.test(list);
+    if (codexBracket) bad.push('③목록이 codex 에 여전히 대괄호 표기');
+    if (!/opencode\s+opencode\s+\[\+\.mcp\.json\]/.test(list)) bad.push('③opencode 표기 사라짐');
+    let lj = null; try { lj = JSON.parse(String(RA(sb, ['adapter', 'list', '--json']).stdout || '')); } catch { bad.push('③listJSON아님'); }
+    if (lj && lj.adapters) {
+      if (lj.adapters.codex.mcp !== false) bad.push('③json:codex.mcp가 false 아님');
+      if (lj.adapters.claude.mcp !== true) bad.push('③json:claude.mcp가 true 아님');
+    }
+    dbg.list = { codexBracket };
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ X(1.36.128/T-0104) 어댑터 MCP 주장: 안 읽는 도구(codex)엔 무동작 파일 미생성 + 이유·되는 명령 고지 · 읽는 도구(claude)는 그대로 등록하고 남의 안내 누출 0 · 목록/JSON 표기 일치 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.128 어댑터 MCP 주장 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 
