@@ -4643,7 +4643,7 @@ total++;
 // 1.9.349 회귀 (외부리뷰 UR-0063, GPT5.5+Opus 교차검증): selftest/doctor 위치독립 — 비초기화 dir 에서도 통과(거짓 "설치 손상" 없음)
 total++;
 {
-  let ok = false;
+  let ok = false; let _liDbg = null;
   try {
     const ni = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noinit-'));  // .harness 없는 비초기화 dir
     // 1.36.85: selftest 가 소스문자열 검사 → **행위 검사**로 바뀌며 4초대 → 약 13초가 됐다(CLI spawn 비용).
@@ -4658,9 +4658,15 @@ total++;
     //   이미 찍힌 "통과" 문자열은 남는다). 제한을 120s 로 올린 만큼 status 단언이 반드시 함께 가야 한다.
     const doctorOk = dr.status === 0 && !/문제 감지|설치 손상|재설치/.test(dout) && /설치 정상|통과/.test(dout);
     ok = selftestOk && doctorOk;
+    //   1.36.129: 이 블록은 실패해도 **사유를 말하지 못했다**(전부 catch {} 로 삼킴) — 전체 부하에서만
+    //   터졌을 때 타임아웃인지 판정 실패인지 구분할 수 없었다. 실측을 함께 찍는다.
+    if (!ok) _liDbg = { sExit: sr.status, dExit: dr.status, sPass: /전체 \d+건 통과/.test(sout),
+      sBroken: /설치 손상/.test(sout), dBad: /문제 감지|설치 손상|재설치/.test(dout), dOk: /설치 정상|통과/.test(dout),
+      sTail: String(sout).trim().split(String.fromCharCode(10)).slice(-2).join(' | ').slice(0, 160),
+      dTail: String(dout).trim().split(String.fromCharCode(10)).slice(-2).join(' | ').slice(0, 160) };
     fs.rmSync(ni, { recursive: true, force: true });
-  } catch {}
-  console.log(ok ? '✓ B(1.9.349) 외부리뷰 UR-0063: selftest/doctor 위치독립 — 비초기화 dir 통과 (UR-0063)' : '✗ selftest 위치독립 실패');
+  } catch (e) { _liDbg = { err: String(e && e.message).slice(0, 160) }; }
+  console.log(ok ? '✓ B(1.9.349) 외부리뷰 UR-0063: selftest/doctor 위치독립 — 비초기화 dir 통과 (UR-0063)' : '✗ selftest 위치독립 실패 ' + JSON.stringify(_liDbg));
   if (!ok) failed++;
 }
 
@@ -12785,6 +12791,216 @@ total++;
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
   console.log(ok ? `✓ X(1.36.128/T-0104) 어댑터 MCP 주장: 안 읽는 도구(codex)엔 무동작 파일 미생성 + 이유·되는 명령 고지 · 읽는 도구(claude)는 그대로 등록하고 남의 안내 누출 0 · 목록/JSON 표기 일치 ${JSON.stringify(dbg)}`
     : '✗ 1.36.128 어댑터 MCP 주장 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
+// 1.36.129 (UR-0068 / P-0016 P1): 세션 프레즌스 — CLI 행위로 잰다.
+//   설계 경계는 전부 실측에서 나왔다: PID 라이브니스는 양방향으로 틀리고(5초에 재사용 7건, 죽은 pid 5.2%가 ALIVE),
+//   `leerness selftest` 1회가 leerness 프로세스 129개를 띄우므로 "모든 호출마다 등록" 은 불가능하다.
+//   그래서 쓰기 지점은 handoff · session close 둘뿐이고, 판정("활성")은 아예 하지 않는다.
+total++;
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-sess129-'));
+  //   ⚠ 이 e2e 는 **살아있는 Claude Code 세션 안에서** 돈다 — 주변 env 를 비우지 않으면
+  //     픽스처에 진짜 세션이 등록돼 측정이 '누가 돌렸는지' 에 종속된다.
+  const envS = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDECODE',
+    'CODEX_MANAGED_BY_NPM', 'CODEX_MANAGED_BY_PNPM', 'CODEX_MANAGED_BY_BUN', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
+    'CURSOR_AGENT', 'LEERNESS_NO_SESSION_PRESENCE', 'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'CI', 'GITHUB_ACTIONS',
+    'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG', 'LEERNESS_MCP_PROFILE', 'LEERNESS_MCP_TIMEOUT_MS']) delete envS[k];
+  //   캐너리 키는 **실행 시 생성**한다 — 소스에 적으면 이 파일이 러너로 읽히는 자기참조 함정(8회차)에 걸린다.
+  const KEY = (tag) => `sess-${process.pid.toString(36)}-${tag}`;
+  const STORE = ['.harness', 'cache', 'sessions'];
+  const storeDir = (d) => path.join(d, ...STORE);
+  const nRec = (d) => { try { return fs.readdirSync(storeDir(d)).filter(f => /\.json$/.test(f)).length; } catch { return 0; } };
+  const RS = (d, args, extra) => cp.spawnSync(process.execPath, [CLI, ...args],
+    { cwd: d, encoding: 'utf8', timeout: 600000, env: Object.assign({}, envS, extra || {}), maxBuffer: 32 * 1024 * 1024 });
+  const mkS = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"s","version":"0.1.0"}');
+    const r = RS(d, [CLI ? 'init' : 'init', d, '--yes', '--minimal']);
+    if (r.status !== 0) bad.push(`${name}:init실패(${r.status})`);
+    return d;
+  };
+  let observedRecords = 0, cliCases = 0;
+  try {
+    // ① 반복 호출이 세션당 **1개**로 접히고, 하트비트가 무동작이 아니다
+    const dA = mkS('a'); const kA = KEY('a');
+    for (let i = 0; i < 3; i++) { RS(dA, ['handoff', dA], { CLAUDE_CODE_SESSION_ID: kA }); cliCases++; }
+    if (nRec(dA) !== 1) bad.push(`①레코드 ${nRec(dA)}개(기대 1)`);
+    let recA = null; try { recA = JSON.parse(fs.readFileSync(path.join(storeDir(dA), `${kA}.json`), 'utf8')); } catch { bad.push('①레코드 파싱 실패'); }
+    if (recA) {
+      observedRecords++;
+      if (recA.handoffCount !== 3) bad.push(`①handoffCount=${recA.handoffCount}(기대 3 — 하트비트 무동작)`);
+      if (recA.closedAt !== null) bad.push('①closedAt이 null이 아님');
+      if ('pid' in recA) bad.push('①pid를 기록함(라이브니스 판정 금지 계약 위반)');
+    }
+    // ② 억제 — 내부/자식/opt-out 은 등록하지 않는다. **각각 격리 입력**(한 픽스처에 몰면 서로를 가린다)
+    for (const [tag, extra] of [['int', { LEERNESS_INTERNAL: '1' }], ['kid', { CLAUDE_CODE_CHILD_SESSION: '1' }],
+      ['off', { LEERNESS_NO_SESSION_PRESENCE: '1' }], ['ci', { CI: '1' }]]) {
+      const d = mkS('s' + tag);
+      RS(d, ['handoff', d], Object.assign({ CLAUDE_CODE_SESSION_ID: KEY(tag) }, extra)); cliCases++;
+      if (nRec(d) !== 0) bad.push(`②${tag} 억제 실패(${nRec(d)}개)`);
+    }
+    //    대조군 — 억제 없이 같은 절차면 1개가 생긴다(위 0들이 "아무것도 안 쓰는 구현" 때문이 아님을 증명)
+    const dCtl = mkS('ctl');
+    RS(dCtl, ['handoff', dCtl], { CLAUDE_CODE_SESSION_ID: KEY('ctl') }); cliCases++;
+    if (nRec(dCtl) !== 1) bad.push(`②대조군이 0개 — 계측 붕괴(${nRec(dCtl)})`);
+    else observedRecords++;
+    //    세션 id 가 없으면 등록하지 않는다(추론 금지)
+    const dNo = mkS('noid'); RS(dNo, ['handoff', dNo]); cliCases++;
+    if (nRec(dNo) !== 0) bad.push(`②세션id 없이 등록됨(${nRec(dNo)})`);
+
+    // ③ 헤드라인 — 0이면 침묵, 1이면 발화, 다른 머신은 침묵 (양성만 재면 "항상 출력"이 통과한다)
+    const dH = mkS('h'); const kMe = KEY('me'), kOther = KEY('other');
+    const h1 = String(RS(dH, ['handoff', dH], { CLAUDE_CODE_SESSION_ID: kMe }).stdout || ''); cliCases++;
+    if (/다른 세션 기록|other session record/.test(h1)) bad.push('③자기 레코드만인데 헤드라인 발화');
+    RS(dH, ['handoff', dH], { CLAUDE_CODE_SESSION_ID: kOther }); cliCases++;
+    const h2 = String(RS(dH, ['handoff', dH], { CLAUDE_CODE_SESSION_ID: kMe }).stdout || ''); cliCases++;
+    if (!/다른 세션 기록|other session record/.test(h2)) bad.push('③다른 레코드가 있는데 침묵');
+    if (/활성|active session/.test(h2)) bad.push('③"활성"이라는 단어 사용(라이브니스 판정 금지)');
+    observedRecords += nRec(dH);
+    //    다른 머신 레코드만 → 침묵
+    try {
+      const op = path.join(storeDir(dH), `${kOther}.json`);
+      const oj = JSON.parse(fs.readFileSync(op, 'utf8')); oj.hostId = 'ffffffffffff';
+      fs.writeFileSync(op, JSON.stringify(oj, null, 2));
+    } catch { bad.push('③다른머신 픽스처 준비 실패'); }
+    const h3 = String(RS(dH, ['handoff', dH], { CLAUDE_CODE_SESSION_ID: kMe }).stdout || ''); cliCases++;
+    if (/다른 세션 기록|other session record/.test(h3)) bad.push('③다른 머신 레코드에 발화');
+
+    // ④ 손상 레코드에서도 `--json` 계약 유지(stderr 0바이트) + **레코드가 실제로 갱신**됨
+    const dJ = mkS('j'); const kJ = KEY('j');
+    RS(dJ, ['handoff', dJ], { CLAUDE_CODE_SESSION_ID: kJ }); cliCases++;
+    fs.writeFileSync(path.join(storeDir(dJ), `${kJ}.json`), '{{{broken');
+    const rj = RS(dJ, ['handoff', dJ, '--json'], { CLAUDE_CODE_SESSION_ID: kJ }); cliCases++;
+    if (rj.status !== 0) bad.push(`④손상 레코드에서 exit=${rj.status}`);
+    if (String(rj.stderr || '').length !== 0) bad.push(`④stderr ${String(rj.stderr).length}B(계약 위반)`);
+    try { JSON.parse(String(rj.stdout || '')); } catch { bad.push('④stdout이 순수 JSON 아님'); }
+    try {
+      const rec = JSON.parse(fs.readFileSync(path.join(storeDir(dJ), `${kJ}.json`), 'utf8'));
+      if (!(Number(rec.handoffCount) >= 1)) bad.push('④손상 후 레코드가 갱신되지 않음(공허 통과)');
+      observedRecords++;
+    } catch { bad.push('④손상 후 레코드 복구 실패'); }
+
+    // ⑤ 경로 탈옥 — 탈출 키는 등록되지 않고 스토어 밖에 파일을 만들지 않는다
+    const dE = mkS('esc');
+    const before = fs.readdirSync(dE).length;
+    for (const k of ['..', '../../x', 'a/b', 'C:\\x', 'short']) { RS(dE, ['handoff', dE], { CLAUDE_CODE_SESSION_ID: k }); cliCases++; }
+    if (nRec(dE) !== 0) bad.push(`⑤탈출 키가 등록됨(${nRec(dE)})`);
+    if (fs.readdirSync(dE).length !== before) bad.push('⑤프로젝트 루트에 파일이 생김');
+
+    // ⑥ sessions 명령 — 목록/JSON 계약 + **못 보는 것 고지** + "활성" 금지
+    const rs = RS(dH, ['sessions', dH]); cliCases++;
+    if (rs.status !== 0) bad.push(`⑥sessions exit=${rs.status}`);
+    const so = String(rs.stdout || '');
+    if (!/이 목록이 보지 못하는 것|what this list cannot see/.test(so)) bad.push('⑥한계 고지 없음');
+    if (/활성|\bactive\b/.test(so)) bad.push('⑥"활성" 단어 사용');
+    const rj2 = RS(dH, ['sessions', dH, '--json']); cliCases++;
+    let sj = null; try { sj = JSON.parse(String(rj2.stdout || '')); } catch { bad.push('⑥sessions --json 파싱 실패'); }
+    if (sj) {
+      if (String(rj2.stderr || '').length !== 0) bad.push(`⑥sessions --json stderr ${String(rj2.stderr).length}B`);
+      if (!Array.isArray(sj.blindSpots) || sj.blindSpots.length < 3) bad.push('⑥blindSpots 미노출');
+      if (sj.storePath !== STORE.join('/')) bad.push(`⑥storePath=${sj.storePath}`);
+      if (!(sj.total >= 1)) bad.push('⑥sessions 가 레코드를 못 봄');
+    }
+
+    // ⑦ git 유출 없음 — 세션 파일은 무시되고, **다른 .harness 파일은 보인다**(git 이 실제로 관측 중임을 증명)
+    const dG = mkS('git');
+    const gi = cp.spawnSync('git', ['init', '-q'], { cwd: dG, encoding: 'utf8', timeout: 60000 });
+    if (gi.status !== 0) bad.push('⑦git init 실패 — 이 검사는 스킵이 아니라 실패다(측정 붕괴를 통과로 세지 않는다)');
+    else {
+      RS(dG, ['handoff', dG], { CLAUDE_CODE_SESSION_ID: KEY('g') }); cliCases++;
+      //   ⚠ `--porcelain` 만 쓰면 untracked 디렉터리가 `?? .harness/` 한 줄로 **접혀서** 양쪽 판정이 모두
+      //     공허해진다(내 대조군이 실제로 그걸 잡았다). `-uall` 로 파일 단위 열거를 강제한다.
+      const st = String(cp.spawnSync('git', ['status', '--porcelain', '-uall'], { cwd: dG, encoding: 'utf8', timeout: 60000 }).stdout || '');
+      if (/cache[\\/]sessions/.test(st)) bad.push('⑦세션 파일이 git 에 노출됨');
+      if (!/last-handoff\.json/.test(st)) bad.push('⑦대조군 실패 — git 이 .harness 를 아예 안 보고 있음(위 판정이 공허)');
+      observedRecords += nRec(dG);
+    }
+
+    // ⑦ (검수 P3) `session close` 경로는 **한 번도 실행되지 않았다** — 배선을 지워도 통과했다.
+    //    close 기록과, 그 뒤 헤드라인에서 빠지는 것까지 함께 잰다.
+    {
+      const dC2 = mkS('close'); const kC = KEY('c1'), kO = KEY('c2');
+      RS(dC2, ['handoff', dC2], { CLAUDE_CODE_SESSION_ID: kC }); cliCases++;
+      RS(dC2, ['handoff', dC2], { CLAUDE_CODE_SESSION_ID: kO }); cliCases++;
+      const beforeMark = /다른 세션 기록|other session record/.test(String(RS(dC2, ['handoff', dC2], { CLAUDE_CODE_SESSION_ID: kC }).stdout || '')); cliCases++;
+      if (!beforeMark) bad.push('⑦close 전 헤드라인이 침묵(계측 붕괴)');
+      const rc2 = RS(dC2, ['session', 'close', dC2], { CLAUDE_CODE_SESSION_ID: kO }); cliCases++;
+      if (rc2.status !== 0) bad.push(`⑦session close exit=${rc2.status}`);
+      let recC = null; try { recC = JSON.parse(fs.readFileSync(path.join(storeDir(dC2), `${kO}.json`), 'utf8')); } catch { bad.push('⑦close 레코드 파싱 실패'); }
+      if (recC && !recC.closedAt) bad.push('⑦closedAt 미기록(배선 없음)');
+      const afterMark = /다른 세션 기록|other session record/.test(String(RS(dC2, ['handoff', dC2], { CLAUDE_CODE_SESSION_ID: kC }).stdout || '')); cliCases++;
+      if (afterMark) bad.push('⑦close 기록 후에도 헤드라인이 발화');
+      observedRecords += nRec(dC2);
+      dbg.close = { closedAt: !!(recC && recC.closedAt), before: beforeMark, after: afterMark };
+    }
+
+    // ⑧ (검수 P1) `sessions --json` 이 **읽기 실패**를 "기록 없음" 으로 보고하지 않는다 + selfRecordPresent 는
+    //    '지금 등록 가능한가' 가 아니라 **실제 레코드 유무**를 말한다(양방향 대조군).
+    {
+      const dS = mkS('state'); const kS = KEY('s1');
+      let j0 = null; try { j0 = JSON.parse(String(RS(dS, ['sessions', dS, '--json'], { CLAUDE_CODE_SESSION_ID: kS }).stdout || '')); } catch { bad.push('⑧빈상태 JSON 아님'); }
+      cliCases++;
+      if (j0 && (j0.selfRecordPresent !== false || j0.total !== 0 || j0.registryState !== 'ok')) bad.push(`⑧빈상태=${JSON.stringify({ p: j0.selfRecordPresent, t: j0.total, r: j0.registryState })}`);
+      RS(dS, ['handoff', dS], { CLAUDE_CODE_SESSION_ID: kS }); cliCases++;
+      let j1 = null; try { j1 = JSON.parse(String(RS(dS, ['sessions', dS, '--json'], { CLAUDE_CODE_SESSION_ID: kS }).stdout || '')); } catch { bad.push('⑧등록후 JSON 아님'); }
+      cliCases++;
+      if (j1 && j1.selfRecordPresent !== true) bad.push('⑧등록했는데 selfRecordPresent=false');
+      if (j1 && j1.sessions[0] && j1.sessions[0].hostRelation !== 'same') bad.push(`⑧hostRelation=${j1.sessions[0].hostRelation}`);
+      //    opt-out 으로 읽어도 **레코드는 그대로 보인다**(억제는 '갱신 안 함' 이지 '없음' 이 아니다)
+      let j2 = null; try { j2 = JSON.parse(String(RS(dS, ['sessions', dS, '--json'], { CLAUDE_CODE_SESSION_ID: kS, LEERNESS_NO_SESSION_PRESENCE: '1' }).stdout || '')); } catch { bad.push('⑧optout JSON 아님'); }
+      cliCases++;
+      if (j2 && (j2.selfRecordPresent !== true || j2.selfSuppressedReason !== 'opt-out')) bad.push(`⑧optout=${JSON.stringify({ p: j2.selfRecordPresent, r: j2.selfSuppressedReason })}`);
+      //    손상 레코드 → '없음' 이 아니라 '부분'
+      fs.writeFileSync(path.join(storeDir(dS), `${kS}.json`), '{{{broken');
+      let j3 = null; try { j3 = JSON.parse(String(RS(dS, ['sessions', dS, '--json'], { CLAUDE_CODE_SESSION_ID: kS }).stdout || '')); } catch { bad.push('⑧손상 JSON 아님'); }
+      cliCases++;
+      if (j3 && (j3.registryState !== 'partial' || j3.unreadableRecords !== 1)) bad.push(`⑧손상=${JSON.stringify({ r: j3.registryState, u: j3.unreadableRecords })}`);
+      //    ⚠ 이 단언은 처음에 `/기록 없음/` 로 넓게 잡아 **한계 고지문의 `'close 기록 없음'`** 을 잡았다
+      //      (제품이 아니라 내 단언이 틀렸다). 빈 목록 문구는 마침표까지 붙은 독립 줄이므로 그것만 본다.
+      const _brokenOut = String(RS(dS, ['sessions', dS], { CLAUDE_CODE_SESSION_ID: kS }).stdout || '');
+      if (/^\s*기록 없음\.\s*$/m.test(_brokenOut)) bad.push('⑧손상인데 "기록 없음" 이라 말함');
+      if (!/읽지 못한 레코드/.test(_brokenOut)) bad.push('⑧손상 사실을 사람용 출력에서 안 알림');
+      cliCases++;
+      dbg.state = { empty: j0 && j0.selfRecordPresent, after: j1 && j1.selfRecordPresent, partial: j3 && j3.registryState };
+    }
+
+    // ⑨ (검수 P1) hostId 는 **무염 해시가 아니다** — 프로젝트별 염이 붙어 사전 대입/교차 상관이 끊긴다
+    {
+      const dH1 = mkS('salt1'), dH2 = mkS('salt2');
+      const k1 = KEY('h1'), k2 = KEY('h2');
+      RS(dH1, ['handoff', dH1], { CLAUDE_CODE_SESSION_ID: k1 }); cliCases++;
+      RS(dH2, ['handoff', dH2], { CLAUDE_CODE_SESSION_ID: k2 }); cliCases++;
+      let a = null, b = null;
+      try { a = JSON.parse(fs.readFileSync(path.join(storeDir(dH1), `${k1}.json`), 'utf8')); } catch { bad.push('⑨salt1 레코드 없음'); }
+      try { b = JSON.parse(fs.readFileSync(path.join(storeDir(dH2), `${k2}.json`), 'utf8')); } catch { bad.push('⑨salt2 레코드 없음'); }
+      if (a && b) {
+        observedRecords += 2;
+        if (!a.hostId || !b.hostId) bad.push('⑨hostId 없음');
+        else if (a.hostId === b.hostId) bad.push('⑨프로젝트가 달라도 hostId 동일(교차 상관 가능)');
+        const naive = require('crypto').createHash('sha256').update(String(os.hostname())).digest('hex').slice(0, 12);
+        if (a.hostId === naive) bad.push('⑨무염 해시 그대로(사전 대입 가능)');
+        //    레코드에 원 hostname/cwd 가 없어야 한다
+        const raw = JSON.stringify(a);
+        if (raw.includes(os.hostname())) bad.push('⑨레코드에 hostname 원문');
+        if (raw.includes(dH1)) bad.push('⑨레코드에 cwd 경로');
+        if ('pid' in a) bad.push('⑨pid 기록됨');
+      }
+      dbg.salt = { differs: !!(a && b && a.hostId !== b.hostId) };
+    }
+
+    // ⑩ 계측 생존 하한 — 픽스처가 조용히 죽으면 위 단언이 전부 공허참이 된다
+    if (observedRecords < 8) bad.push(`⑩관측 레코드 ${observedRecords}건(<8) — 계측 붕괴`);
+    if (cliCases < 30) bad.push(`⑩실행 CLI ${cliCases}건(<30) — 표본 축소`);
+    dbg.observedRecords = observedRecords; dbg.cliCases = cliCases;
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ Y(1.36.129/P-0016 P1) 세션 프레즌스: 세션당 1레코드(하트비트 살아있음) · 억제 4종 각각 격리 대조군 · 헤드라인 0침묵/1발화/타머신침묵 · 손상 레코드에서도 --json stderr 0B + 실제 갱신 · 경로탈옥 0 · sessions 한계고지 · git 미노출(대조군 포함) · "활성" 미사용 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.129 세션 프레즌스 실패 ' + JSON.stringify({ bad: bad.slice(0, 10), dbg }));
   if (!ok) failed++;
 }
 

@@ -358,12 +358,16 @@
       "session inbox",
       "handoff 제안/accept/decline — 클레임 소유권 이전. | P4 MCP 도구 + adapter 안내로 모든 에이전트가 같은 표면 사용."
     ],
-    "status": "proposed",
+    "status": "approved",
     "createdAt": "2026-08-18T01:57:41.793Z",
     "history": [
       {
         "at": "2026-08-18T01:57:41.793Z",
         "event": "proposed"
+      },
+      {
+        "at": "2026-08-18T03:23:45.713Z",
+        "event": "approved"
       }
     ]
   }
