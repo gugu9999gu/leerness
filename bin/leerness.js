@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.133';
+const VERSION = '1.36.134';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -3986,8 +3986,11 @@ function _selfTestCases() {
     } },
     { name: 'enforce 하드닝 (1.36.44, 적대적 자체헌트): .harness 無 체크아웃 FP 방지 + worktree 훅경로 + --no-verify 사후감지 audit + 한계 정직 (소스가드)', run: () => {
       const s = read(__filename);
-      const fpFix = s.includes("if [ ! -d \".harness\" ]; then") && s.includes('오차단(FP) 방지');
-      const wtOk = s.includes("'rev-parse', '--git-common-dir'");
+      // 1.36.134: 이 가드는 **옛 리터럴**을 붙잡고 있었다 — 하위 디렉토리 우회를 고치며 훅이 `$LRN_DIR` 를 쓰고
+      //   훅 경로를 `--git-path`(core.hooksPath 반영)로 바꾸자 그대로 깨졌다. 지키려는 것은 문자열이 아니라 **성질**이다:
+      //   ① harness 가 없는 체크아웃에서 오차단하지 않는다 ② 훅 경로를 git 에게 묻는다.
+      const fpFix = s.includes('if [ ! -d "$LRN_DIR" ]; then') && s.includes('오차단(FP) 방지');
+      const wtOk = s.includes("'rev-parse', '--git-path', 'hooks/pre-commit'") || s.includes("'rev-parse', '--git-common-dir'");
       const auditOk = s.includes("sub === 'audit'") && s.includes('우회 의심') && s.includes("'git_log_failed'");
       const honestOk = s.includes('git commit --no-verify 는 git 설계상 훅을 스킵');
       return fpFix && wtOk && auditOk && honestOk;
@@ -7193,23 +7196,45 @@ function _enforceCfg(root) {
 }
 function _gitHookPath(root) {
   // 1.36.44 (하드닝): worktree 에선 .git 이 파일 — 훅은 공용 디렉토리에 산다. git 에게 물어 해석(양쪽 다 정답).
+  // 1.36.134 (검수 실측): `--git-common-dir` 는 **`core.hooksPath` 를 모른다** — 그 설정이 있는 저장소에서
+  //   우리는 `.git/hooks/pre-commit` 에 쓰고 "설치됨" 이라 답했지만 git 은 그 파일을 **절대 실행하지 않는다**(거짓 성공).
+  //   판별 대조군: 같은 두 저장소가 `core.hooksPath` 하나만 다를 때 하나는 차단되고 하나는 그냥 통과했다.
+  //   `--git-path hooks/pre-commit` 은 그 설정을 반영한 **git 자신의 답**이다. 이것을 쓴다.
   try {
-    const r = _gitSpawn(['-C', root, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', timeout: 5000 });
+    const r = _gitSpawn(['-C', root, 'rev-parse', '--git-path', 'hooks/pre-commit'], { encoding: 'utf8', timeout: 5000 });
     if (r.status === 0 && r.stdout.trim()) {
-      const gd = r.stdout.trim();
+      const p = r.stdout.trim();
+      return path.isAbsolute(p) ? p : path.join(root, p);
+    }
+  } catch {}
+  try {
+    const r2 = _gitSpawn(['-C', root, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', timeout: 5000 });
+    if (r2.status === 0 && r2.stdout.trim()) {
+      const gd = r2.stdout.trim();
       return path.join(path.isAbsolute(gd) ? gd : path.join(root, gd), 'hooks', 'pre-commit');
     }
   } catch {}
   return path.join(root, '.git', 'hooks', 'pre-commit');
 }
 function enforceCmd(root, sub) {
+  //   1.36.134 (실측): 이 함수의 사람 모드 출력이 스코프에 없는 흐림 헬퍼를 불러 **정상 저장소에서도 exit 1** 로 죽었다
+  //     (`enforce status` → `✗ dm is not defined`). e2e 가 `--json` 만 재서 사람 경로의 크래시가 안 보였다.
+  //     이 파일의 다른 함수들과 같은 형태로 지역 정의한다.
+  const dim = t => (process.stdout.isTTY && !has('--json') ? `[2m${t}[0m` : t);   // 자립적으로 — 바깥 스코프 변수에 기대면 같은 클래스가 반복된다
   root = absRoot(root);
   const json = has('--json');
   sub = sub || 'status';
   const hookP = _gitHookPath(root);
   const chainedP = hookP + '.pre-leerness';
   if (sub === 'install') {
-    if (!exists(path.join(root, '.git'))) { failJson(json, 'not_a_git_repo', `git 저장소가 아님: ${root} — pre-commit 강제는 git 저장소에서만 가능`); return; }
+    // 1.36.134: 종전엔 `.git` 디렉토리 존재만 봤다 — 손상된 저장소에서 훅 파일만 쓰고 성공이라 답했다(거짓 성공).
+    //   기존 사유 코드(`not_a_git_repo`)는 그대로 유지하고, 새 상태만 **추가**한다(소비자 계약 보존).
+    const _gsInstall = _gitState(root);
+    if (!GIT_STATE_USABLE.has(_gsInstall)) {
+      const _code = _gsInstall === 'not-a-repo' ? 'not_a_git_repo' : (_gsInstall === 'no-git' ? 'git_unavailable' : 'git_broken');
+      failJson(json, _code, `pre-commit 강제를 걸 수 없습니다 (git 상태: ${_gsInstall}) — ${root}`);
+      return;
+    }
     if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root} — 먼저 leerness init`); return; }
     // 1.36.49 (codex 6차 #8): 명시된 무효 window 는 24로 무언 보정하지 않고 거부 — 종전엔 0/NaN→24,
     //   400자리 정수→Infinity 가 그대로 설치돼 훅에 WIN_MIN=Infinity(find -mmin 상시 실패=상시 차단)가 박혔다.
@@ -7218,7 +7243,8 @@ function enforceCmd(root, sub) {
     if (!Number.isInteger(windowHours) || windowHours < 1 || windowHours > 8760) { failJson(json, 'invalid_window', `--window 는 1~8760 정수(시간)만: 받음 "${winRaw}"`); return; }
     const strict = has('--strict');
     mkdirp(path.dirname(_enforceCfgPath(root)));
-    writeUtf8(_enforceCfgPath(root), JSON.stringify({ windowHours, strict, installedAt: now() }, null, 2) + '\n');
+    // 1.36.134 (검수 P1): 여기서 설정을 쓰면 **실패한 설치가 installedAt 을 남긴다** — 다음 실행이 설치됐다고 믿는다.
+    //   쓰기는 훅 발화 검증을 통과한 뒤로 옮겼다(아래).
     mkdirp(path.dirname(hookP));
     // 기존 훅 보존: 우리 것이 아니면 체인 파일로 이동 후 호출
     if (exists(hookP) && !read(hookP).includes(_ENFORCE_MARK)) {
@@ -7227,22 +7253,36 @@ function enforceCmd(root, sub) {
     }
     // 훅은 자기완결 sh — 설치된 leerness 버전/네트워크/PATH 에 무의존(구버전 전역 CLI 가 enforce 를 몰라 오차단하던 실측 함정 회피).
     // 핵심 체크 = last-handoff.json 의 mtime 이 window 안인지 (find -mmin, git bash 표준).
+    // 1.36.134: git 이 훅을 부를 때의 작업 디렉토리 = toplevel. harness 위치를 그 기준 상대경로로 고정한다.
+    let topLevel = root;
+    {
+      const tl = _gitSpawn(['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 10000 });
+      if (tl.status === 0 && String(tl.stdout || '').trim()) topLevel = path.resolve(String(tl.stdout).trim());
+    }
+    const harnessRel = (path.relative(topLevel, path.join(root, '.harness')) || '.harness').replace(/\\/g, '/');
     const hook = [
       '#!/bin/sh',
       _ENFORCE_MARK + ' — leerness 사용 강제 (제거: leerness enforce remove)',
       'if [ "$LEERNESS_ENFORCE_BYPASS" = "1" ]; then exit 0; fi',
+      // 1.36.134 (검수 P1, 재현): 훅은 **git toplevel** 에서 돈다. `.harness` 가 하위 디렉토리에 있으면
+      //   `-d ".harness"` 가 거짓이라 조용히 통과했다 — 설치는 `verified:'fired'` 인데 루트 커밋이 그냥 통과.
+      //   설치 시점에 **toplevel 기준 상대경로**를 훅에 박아 넣어, 커밋이 어디서 나든 같은 곳을 본다.
+      `LRN_DIR="${harnessRel}"`,
       '# 1.36.44: .harness 없는 체크아웃(워크트리/구브랜치)은 강제 대상 아님 — 오차단(FP) 방지',
-      'if [ ! -d ".harness" ]; then',
+      'if [ ! -d "$LRN_DIR" ]; then',
       '  if [ -f "$(dirname "$0")/pre-commit.pre-leerness" ]; then exec sh "$(dirname "$0")/pre-commit.pre-leerness" "$@"; fi',
       '  exit 0',
       'fi',
-      `LH=".harness/last-handoff.json"`,
+      `LH="$LRN_DIR/last-handoff.json"`,
       `WIN_MIN=${windowHours * 60}`,
       'if [ ! -f "$LH" ] || [ -z "$(find "$LH" -mmin -"$WIN_MIN" 2>/dev/null)" ]; then',
       `  echo "🔒 leerness 강제: 최근 ${windowHours}h 내 handoff 흔적 없음 — 커밋 전 실행: leerness handoff ." >&2`,
       '  echo "   긴급 우회(명시): LEERNESS_ENFORCE_BYPASS=1 git commit ..." >&2',
       '  exit 1',
       'fi',
+      // 1.36.134 (검수 P1): 설치 중 발화 검증이 **사용자의 기존 훅과 strict gate 를 실제로 두 번 실행**했다
+      //   (부작용 · 기존 훅이 enforce install 을 부르면 재귀). 검증 모드에서는 **자기 판정만 하고 즉시 끝낸다.**
+      'if [ -n "$LEERNESS_ENFORCE_PROBE" ]; then exit 0; fi',
       ...(strict ? [
         'if command -v leerness >/dev/null 2>&1; then LEERNESS_INTERNAL=1 leerness gate . || exit 1;',
         'elif command -v npx >/dev/null 2>&1; then LEERNESS_INTERNAL=1 npx -y leerness gate . || exit 1; fi',
@@ -7252,7 +7292,76 @@ function enforceCmd(root, sub) {
     ].join('\n');
     writeUtf8(hookP, hook);
     try { fs.chmodSync(hookP, 0o755); } catch {}
-    if (json) { log(JSON.stringify({ ok: true, installed: true, windowHours, strict, hook: hookP }, null, 2)); return; }
+    // 1.36.134 (검수 실측): 종전 성공 판정은 **"바이트가 떨어졌다"** 였다 — `core.hooksPath` 저장소에서
+    //   파일은 잘 떨어지고 `ok:true` 가 나왔지만 git 은 그 훅을 **절대 부르지 않았다**(판별 대조군: 그 설정 하나만
+    //   다른 두 저장소가 하나는 커밋 차단, 하나는 그냥 통과). 관측하지 못한 강제를 주장하지 않는다.
+    //   → 쓴 훅을 **git 이 부르는 방식대로 직접 두 번 돌려** 판별성을 확인한다(커밋 불필요, 프로세스 2개).
+    //     handoff 흔적이 창 안이면 통과(0), 창 밖이면 차단(≠0) 이어야 한다. 둘이 같으면 그 훅은 죽은 파일이다.
+    const _verifyHookFires = () => {
+      const lhp = _lastHandoffPath(root);
+      //   ⚠ 이 파일은 **실데이터**다. 내용뿐 아니라 **mtime 도** 되돌려야 한다 —
+      //     훅이 신선도를 판정하는 근거가 바로 그 mtime 이라, 안 되돌리면 설치 행위 자체가
+      //     "방금 handoff 했다" 는 상태를 만들어 **지금 설치하는 게이트를 스스로 약화**시킨다(실측: mtime 이 갱신됐다).
+      let saved = null, savedTimes = null;
+      try {
+        if (exists(lhp)) { saved = read(lhp); const st = fs.statSync(lhp); savedTimes = [st.atime, st.mtime]; }
+      } catch { return 'skipped'; }
+      const runHook = () => {
+        //   PROBE=1 이면 훅이 자기 판정 직후 끝난다 — 사용자 기존 훅·strict gate 를 실행하지 않는다.
+        //   ⚠ cwd 는 **git 이 훅을 부르는 곳**(toplevel)이어야 한다 — `root` 로 재면 하위 디렉토리 설치에서
+        //     "발화한다" 고 잘못 답한다(실제로 그렇게 오답했고 루트 커밋이 통과했다).
+        const r = cp.spawnSync('sh', [hookP], { cwd: topLevel, encoding: 'utf8', timeout: 20000,
+          env: Object.assign({}, process.env, { LEERNESS_ENFORCE_BYPASS: '', LEERNESS_ENFORCE_PROBE: '1' }) });
+        if (r.error) return null;                                  // sh 가 없다 — 판정하지 않는다
+        return r.status;
+      };
+      try {
+        //   ⚠ 훅은 JSON 내용이 아니라 **파일 mtime** 을 본다(`find -mmin`). 내용만 바꾸면 두 번 다 통과해
+        //     정상 저장소까지 'not-fired' 로 오판한다(실제로 그렇게 만들었다가 과잉 차단을 냈다).
+        const stamp = (ageH) => {
+          writeUtf8(lhp, JSON.stringify({ last: new Date(Date.now() - ageH * 3600000).toISOString() }, null, 2));
+          const t = new Date(Date.now() - ageH * 3600000);
+          try { fs.utimesSync(lhp, t, t); } catch {}
+        };
+        stamp(0);
+        const inWindow = runHook();
+        stamp(windowHours + 24);
+        const outWindow = runHook();
+        if (inWindow === null || outWindow === null) return 'skipped';
+        return (inWindow === 0 && outWindow !== 0) ? 'fired' : 'not-fired';
+      } catch { return 'skipped'; }
+      finally {
+        try {
+          if (saved === null) { if (exists(lhp)) fs.unlinkSync(lhp); }
+          else { writeUtf8(lhp, saved); if (savedTimes) fs.utimesSync(lhp, savedTimes[0], savedTimes[1]); }
+        } catch {}
+      }
+    };
+    // 1.36.134 (검수 P1): 설치가 실패하면 **흔적을 남기지 않는다** — 종전엔 실패해도 우리 훅과 `.pre-leerness`
+    //   백업이 그대로 남아 사용자 저장소가 중간 상태가 됐다. 설치 전 상태를 정확히 되돌린다.
+    const _rollbackHook = () => {
+      try {
+        if (exists(chainedP)) { fs.copyFileSync(chainedP, hookP); fs.unlinkSync(chainedP); try { fs.chmodSync(hookP, 0o755); } catch {} }
+        else if (exists(hookP) && read(hookP).includes(_ENFORCE_MARK)) fs.unlinkSync(hookP);
+      } catch { /* 되돌리지 못하면 아래 실패 보고에 그대로 드러난다 */ }
+    };
+    const _fired = _verifyHookFires();
+    // 1.36.134 (검수 P1): `sh` 가 없어 **관측을 못 했는데** `ok:true` 로 답했다 — 이 라운드의 계약은
+    //   "성공 = 발화하고 판별한다" 이므로, 관측 불가는 성공이 아니다. 사유와 함께 실패로 답한다.
+    //   (opt-out: 관측 수단이 없는 환경에서 그래도 걸고 싶으면 `--skip-verify`.)
+    if (_fired === 'skipped' && !has('--skip-verify')) {
+      _rollbackHook();
+      failJson(json, 'verify_unavailable', `훅 발화를 확인할 수 없습니다(sh 없음) — 관측하지 못한 강제를 성공이라 하지 않습니다. 그래도 설치하려면 --skip-verify`);
+      return;
+    }
+    if (_fired === 'not-fired') {
+      //   ⚠ 실패한 설치가 흔적을 남기면 안 된다(검수 P1): 우리 훅·백업·설정 전부 이전 상태로 되돌린다.
+      _rollbackHook();
+      failJson(json, 'hook_inert', `훅을 썼지만 발화하지 않습니다 (${hookP}) — core.hooksPath 리다이렉트·실행권한·sh 부재를 확인하세요`);
+      return;
+    }
+    writeUtf8(_enforceCfgPath(root), JSON.stringify({ windowHours, strict, installedAt: now() }, null, 2) + '\n');
+    if (json) { log(JSON.stringify({ ok: true, installed: true, windowHours, strict, hook: hookP, verified: _fired }, null, 2)); return; }
     ok(`enforce 설치 — 커밋 전 leerness 사용(최근 ${windowHours}h 내 handoff${strict ? ' + gate 통과' : ''})을 git pre-commit 에서 강제`);
     log(`  대상: 어떤 에이전트/모드든(codex goal 모드 포함) — 커밋이 보편 관문이라 문서를 안 읽는 경로도 강제됨`);
     log(`  긴급 우회: LEERNESS_ENFORCE_BYPASS=1 git commit …  ·  해제: leerness enforce remove`);
@@ -7260,6 +7369,17 @@ function enforceCmd(root, sub) {
   }
   if (sub === 'check') {
     if (!exists(path.join(root, '.harness'))) return;   // leerness 미설치 저장소 — 강제 대상 아님(무음 통과)
+    // 1.36.134 (검수 실측): `check` 는 네 번째 표면인데 **git 상태를 아예 안 봤다** — git 아님·HEAD 손상·gitdir 깨짐에서
+    //   전부 `ok:true exit 0`. 훅이 개념적으로 부르는 표면이라 여기서 조용하면 강제 자체가 조용해진다.
+    //   같은 술어를 태운다. 단 **차단하지 않는다** — 커밋 훅 경로에서 우리 판정 실패로 사용자 커밋을 막지 않는다(권고 원칙).
+    {
+      const _gsCheck = _gitState(root);
+      if (!GIT_STATE_USABLE.has(_gsCheck)) {
+        if (json) { log(JSON.stringify({ ok: true, enforced: false, gitState: _gsCheck, note: 'git_unusable' }, null, 2)); return; }
+        warn(`  ⚠ enforce check: git 상태가 ${_gsCheck} — 강제를 적용할 수 없습니다(차단하지 않고 통과)`);
+        return;
+      }
+    }
     const cfg = _enforceCfg(root);
     const lhf = _lastHandoffPath(root);
     let lastAt = null;
@@ -7297,7 +7417,13 @@ function enforceCmd(root, sub) {
       if (json) { log(JSON.stringify({ checked: 0, windowHours: cfg2.windowHours, suspects: [], note: 'no_commits' }, null, 2)); return; }
       ok('  커밋 0개 — 검사 대상 없음'); return;
     }
-    if (gl.status !== 0) { failJson(json, 'git_log_failed', 'git log 실패 — git 저장소인지 확인'); return; }
+    if (gl.status !== 0) {
+      // 1.36.134: `install` 과 **같은 술어**로 사유를 말한다 — 종전엔 install 이 ok:true 를 내는 저장소에서
+      //   audit 만 'git_log_failed' 라 두 표면이 서로를 반박했다.
+      const _gsAudit = _gitState(root);
+      failJson(json, 'git_log_failed', `git log 실패 (git 상태: ${_gsAudit}) — ${root}`);
+      return;
+    }
     const winMs = cfg2.windowHours * 3600000;
     const suspects = [];
     for (const line of (gl.stdout || '').split('\n').filter(Boolean)) {
@@ -7333,12 +7459,19 @@ function enforceCmd(root, sub) {
   // status
   const installed = exists(hookP) && read(hookP).includes(_ENFORCE_MARK);
   const cfg = _enforceCfg(root);
-  if (json) { log(JSON.stringify({ installed, ...cfg }, null, 2)); return; }
+  // 1.36.134 (실측): 종전엔 git 아님 / unborn / 정상 / HEAD 손상 / gitdir 깨짐 **5상태에서 payload 가 동일**했다 —
+  //   '설치 안 됨' 과 '설치할 데가 없음' 이 구분되지 않았다. 기존 필드는 그대로 두고 상태를 **추가**한다.
+  const _gsStatus = _gitState(root);
+  if (json) { log(JSON.stringify({ installed, ...cfg, gitState: _gsStatus, installable: GIT_STATE_USABLE.has(_gsStatus) }, null, 2)); return; }
   log(`# leerness enforce — 사용 강제 (git pre-commit)`);
   log(`  상태: ${installed ? `🟢 설치됨 (window ${cfg.windowHours}h${cfg.strict ? ' · strict=gate' : ''})` : '⚪ 미설치'}`);
   log(`  ${installed ? '해제: leerness enforce remove' : '설치: leerness enforce install [--window 24] [--strict]'}`);
+  //   1.36.134: 설치할 수 없는 상태면 그 사실을 말한다 — 안 그러면 '미설치' 만 보고 설치를 시도하다 실패한다.
+  if (!GIT_STATE_USABLE.has(_gsStatus)) log(`  ⚠ 지금은 설치할 수 없습니다 (git 상태: ${_gsStatus})`);
   // 1.36.44 (정직성): 한계 명시 — 과장 금지
-  log(dm(`  ⓘ 한계: git commit --no-verify 는 git 설계상 훅을 스킵 — 사후 감지는 leerness enforce audit, 우회 불가 하드 레이어는 CI(leerness ci init + branch protection)`));
+  // 1.36.134 (실측): 이 줄의 `dm` 은 이 스코프에 없어 **정상 저장소에서도 `enforce status` 가 exit 1 로 죽었다**
+  //   (`✗ dm is not defined`). e2e 가 `--json` 만 봐서 사람 경로의 크래시가 안 보였다 — 표면을 하나만 재면 이렇게 된다.
+  log(dim(`  ⓘ 한계: git commit --no-verify 는 git 설계상 훅을 스킵 — 사후 감지는 leerness enforce audit, 우회 불가 하드 레이어는 CI(leerness ci init + branch protection)`));
 }
 
 // 1.36.36 (도그푸딩 실측 후속): `leerness anchors [status|draft [--apply]]` — 정체성앵커(brief Purpose / plan Goal) 미작성 전환 지원.
@@ -16343,6 +16476,31 @@ function reuseMapCmd(root) {
 //   `.git/index` 를 **다시 쓴다** — 실측(추적파일 200개 touch 후): 현행 mtime 변경 O, `--no-optional-locks` 변경 X.
 //   즉 "조회" 라고 광고한 프로브가 사용자 저장소를 고쳤다. 호출을 한 곳으로 모아 최상위 옵션을 붙인다.
 //   ⚠ 이 플래그는 모든 서브명령에 안전한 최상위 옵션이다(쓰기 명령에서도 동작을 바꾸지 않는다).
+// 1.36.134 (실측 재현): `enforce` 의 세 표면이 **서로 다른 근거**로 git 을 판정해 모순을 냈다 —
+//   `install` 은 `.git` **디렉토리 존재**만 봤고, `audit` 은 `git log` 실행 결과를 봤고, `status` 는 아무것도 안 봤다.
+//   그래서 HEAD 가 손상돼 **커밋 자체가 불가능한** 저장소에서 `install` 은 `{ok:true, installed:true}` 를 내고
+//   같은 디렉토리의 `audit` 은 `git_log_failed` 를 냈다(한 기능의 두 표면이 서로를 반박한다).
+//   그리고 `status --json` 은 git 아님/정상/손상 3상태에서 **payload 가 동일**해, '설치 안 됨' 과 '설치할 데가 없음' 이 구분 불가였다.
+//   → 술어를 한 곳에 두고 세 표면이 같은 어휘로 답한다.
+//   'unborn'(커밋 0인 정상 저장소)은 **정상 취급**한다 — 훅을 걸어 두면 첫 커밋부터 동작한다.
+function _gitState(root) {
+  //   1.36.134 (검수 실측): 첫 판은 `exists(root/.git)` 로 단락했다 — 정상 저장소의 **하위 디렉토리**에서
+  //   한 payload 안에 `installed:true` 와 `gitState:'not-a-repo'` 가 동시에 나왔다(자기모순).
+  //   훅 경로는 git 에게 묻는데 상태만 파일 존재로 판정하면 두 답이 갈린다. **git 에게 물어 한 답으로 만든다.**
+  const r = _gitSpawn(['-C', root, 'rev-parse', '--git-dir'], { encoding: 'utf8', timeout: 10000 });
+  if ((r.error && r.error.code === 'ENOENT') || r.status === null) return 'no-git';
+  if (r.status !== 0) return exists(path.join(root, '.git')) ? 'broken' : 'not-a-repo';
+  // 1.36.134 (검수 P1): bare 저장소에는 워킹트리가 없어 `git commit`/pre-commit 경로 자체가 없다 —
+  //   훅을 걸고 "강제됨" 이라 답하면 거짓이다. 실측: `git init --bare` 에서 ok:true, verified:'fired' 였다.
+  const bare = _gitSpawn(['-C', root, 'rev-parse', '--is-bare-repository'], { encoding: 'utf8', timeout: 10000 });
+  if (bare.status === 0 && String(bare.stdout || '').trim() === 'true') return 'bare';
+  const h = _gitSpawn(['-C', root, 'rev-parse', '--verify', 'HEAD'], { encoding: 'utf8', timeout: 10000 });
+  if (h.status === 0) return 'ok';
+  //   커밋이 아직 없는 정상 저장소와 HEAD 손상을 가른다(둘 다 `--verify HEAD` 는 실패한다).
+  const sr = _gitSpawn(['-C', root, 'symbolic-ref', '-q', 'HEAD'], { encoding: 'utf8', timeout: 10000 });
+  return sr.status === 0 ? 'unborn' : 'broken';
+}
+const GIT_STATE_USABLE = new Set(['ok', 'unborn']);
 function _gitSpawn(args, opts) {
   //   ⚠ 인자 배열을 **변수로 먼저** 만든다. 인라인 배열 호출 형태를 여기 두면
   //     이 함수가 자기 자신을 초크포인트 전환 대상으로 잡아 무한 재귀가 된다

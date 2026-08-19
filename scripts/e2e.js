@@ -13650,6 +13650,262 @@ total++;
     : '✗ 1.36.133 기반 결함 실패 ' + JSON.stringify({ bad: bad.slice(0, 10), dbg }));
   if (!ok) failed++;
 }
+// 1.36.134: `enforce` 의 **거짓 성공**과 표면 간 모순. 실측 재현:
+//   HEAD 가 손상돼 **커밋 자체가 불가능한** 저장소에서 `install --json` 이 `{ok:true, installed:true}` 를 냈고,
+//   같은 디렉토리의 `audit --json` 은 `{ok:false, code:'git_log_failed'}` 를 냈다 — 한 기능의 두 표면이 서로를 반박했다.
+//   그리고 `status --json` 은 git 아님/unborn/정상/HEAD손상/gitdir깨짐 **5상태에서 payload 가 동일**해
+//   '설치 안 됨' 과 '설치할 데가 없음' 이 구분되지 않았다.
+//   원인은 근거가 셋이었다는 것이다: install=`.git` **디렉토리 존재**, audit=`git log` 실행 결과, status=아무것도 안 봄.
+total++;
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-134-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
+  const RP = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 300000, env: envP, maxBuffer: 32 * 1024 * 1024 });
+  const G = (d, a) => cp.spawnSync('git', ['--no-optional-locks', '-C', d, ...a], { encoding: 'utf8', timeout: 60000 });
+  const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  const mk = (name, prep) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const ri = RP(d, ['init', d, '--yes', '--minimal']);
+    if (ri.status !== 0) bad.push(`${name}:init exit=${ri.status}`);
+    if (prep) prep(d);
+    return d;
+  };
+  const commit = (d) => {
+    G(d, ['init', '-q', '.']); G(d, ['config', 'user.email', 't@t']); G(d, ['config', 'user.name', 't']);
+    fs.writeFileSync(path.join(d, 'a.txt'), 'a'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
+  };
+  try {
+    const cases = {
+      'not-a-repo': mk('nogit', null),
+      unborn: mk('unborn', (d) => { G(d, ['init', '-q', '.']); }),
+      ok: mk('normal', commit),
+      brokenHead: mk('brokenhead', (d) => { commit(d); fs.writeFileSync(path.join(d, '.git', 'HEAD'), 'GARBAGE\n'); }),
+      brokenDir: mk('brokendir', (d) => { fs.rmSync(path.join(d, '.git'), { recursive: true, force: true }); fs.writeFileSync(path.join(d, '.git'), 'gitdir: /nonexistent/path\n'); }),
+    };
+    const seen = {};
+    for (const [label, d] of Object.entries(cases)) {
+      const st = J(RP(d, ['enforce', 'status', '--path', d, '--json']));
+      const ins = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      if (!st) { bad.push(`①${label}: status --json 파싱 실패`); continue; }
+      if (!ins) { bad.push(`①${label}: install --json 파싱 실패`); continue; }
+      seen[label] = { gitState: st.gitState, installable: st.installable, insOk: ins.ok === true, code: ins.code || null };
+      //   ① 설치 가능 여부와 실제 설치 결과가 **같은 말을 해야** 한다.
+      if (st.installable !== (ins.ok === true)) bad.push(`①${label}: status.installable=${st.installable} 인데 install.ok=${ins.ok} (두 표면이 모순)`);
+      //   ② 커밋이 불가능한 저장소에 "설치했다" 고 말하지 않는다 — 훅 파일을 썼다 ≠ 훅이 동작한다.
+      if ((label === 'brokenHead' || label === 'brokenDir') && ins.ok === true) bad.push(`①${label}: 커밋 불가 저장소인데 install ok=true (거짓 성공)`);
+      //   ③ 기존 공개 사유 코드는 유지한다(소비자 계약).
+      if (label === 'not-a-repo' && ins.code !== 'not_a_git_repo') bad.push(`①not-a-repo 사유=${ins.code} (기존 공개값이 바뀌면 소비자가 깨진다)`);
+      //   ④ 정상·unborn 에는 설치된다(과잉 차단 대조군 — "전부 거부" 로 고쳐 통과하는 길을 막는다).
+      if ((label === 'ok' || label === 'unborn') && ins.ok !== true) bad.push(`①${label}: 설치 가능한데 거부됨(과잉 차단) code=${ins.code}`);
+    }
+    //   ⑤ 5상태가 **서로 구분**돼야 한다. 종전엔 status payload 가 전부 같았다.
+    const states = Object.values(seen).map(v => `${v.gitState}/${v.installable}`);
+    if (new Set(states).size < 3) bad.push(`①status 가 5상태를 구분 못 함: ${JSON.stringify(states)}`);
+    if (seen['not-a-repo'] && seen['not-a-repo'].gitState === (seen.ok || {}).gitState) bad.push('①git 아님과 정상이 같은 상태로 보고됨');
+    if (seen.brokenHead && seen.brokenHead.gitState === (seen.ok || {}).gitState) bad.push('①HEAD 손상과 정상이 같은 상태로 보고됨');
+
+    //   ⑥ audit 도 **같은 어휘**로 답한다(종전엔 install 이 ok:true 인 저장소에서 audit 만 실패했다).
+    {
+      const d = cases.brokenHead;
+      const au = J(RP(d, ['enforce', 'audit', '--path', d, '--json']));
+      if (!au) bad.push('⑥audit --json 파싱 실패');
+      else {
+        if (au.ok !== false) bad.push(`⑥손상 저장소인데 audit ok=${au.ok}`);
+        if (!/git 상태/.test(String(au.error || ''))) bad.push('⑥audit 이 git 상태 어휘를 쓰지 않음(두 표면이 다른 말을 한다)');
+      }
+      //   대조군 — 정상 저장소에서는 audit 이 실패하지 않는다.
+      const au2 = J(RP(cases.ok, ['enforce', 'audit', '--path', cases.ok, '--json']));
+      if (au2 && au2.ok === false) bad.push('⑥정상 저장소인데 audit 실패(오탐)');
+      dbg.audit = { broken: au && au.code, normal: au2 ? (au2.ok === false ? 'fail' : 'pass') : 'parse-fail' };
+    }
+    //   ⑦ **사람 경로도 잰다.** 이 블록의 첫 판은 `--json` 만 봤고, 그 사이 사람 모드 `status` 는
+    //      정상 저장소에서 `dim is not defined` 로 **exit 1** 이었다. 표면을 하나만 재면 다른 표면의 크래시가 안 보인다.
+    {
+      for (const sub of ['status', 'install', 'remove']) {
+        const r = RP(cases.ok, ['enforce', sub, '--path', cases.ok]);
+        const txt = String(r.stdout || '') + String(r.stderr || '');
+        if (r.status !== 0) bad.push(`⑦사람 모드 enforce ${sub} exit=${r.status}: ${txt.trim().split('\n').pop().slice(0, 80)}`);
+        if (/is not defined|ReferenceError|TypeError/.test(txt)) bad.push(`⑦사람 모드 enforce ${sub} 에서 런타임 오류: ${txt.match(/[A-Za-z]+ is not defined|ReferenceError|TypeError/)[0]}`);
+      }
+    }
+
+    //   ⑧ **하위 디렉토리에서 자기모순이 없다.** 훅 경로는 git 에게 묻는데 상태만 파일 존재로 판정하면
+    //      한 payload 안에 `installed:true` 와 `gitState:'not-a-repo'` 가 동시에 나온다(실측된 자기모순).
+    {
+      const sub = path.join(cases.ok, 'nested', 'deep');
+      fs.mkdirSync(sub, { recursive: true });
+      RP(cases.ok, ['enforce', 'install', '--path', cases.ok, '--json']);
+      const st = J(RP(sub, ['enforce', 'status', '--path', sub, '--json']));
+      if (!st) bad.push('⑧하위 디렉토리 status --json 파싱 실패');
+      else {
+        if (st.gitState === 'not-a-repo') bad.push('⑧정상 저장소의 하위 디렉토리를 "저장소 아님" 이라 함');
+        if (st.installed === true && st.installable !== true) bad.push(`⑧한 payload 안에서 모순: installed=${st.installed} installable=${st.installable} gitState=${st.gitState}`);
+      }
+      dbg.nested = st ? { installed: st.installed, gitState: st.gitState, installable: st.installable } : null;
+    }
+
+    //   ⑨ **`core.hooksPath` 가 설정된 저장소에서 훅이 실제로 발화한다.** 종전엔 `.git/hooks/` 에 쓰고
+    //      "설치됨" 이라 답했지만 git 은 그 파일을 절대 실행하지 않았다(거짓 성공). 판별 대조군은 이 설정 하나만 다르다.
+    {
+      const d = mk('hookspath', (dd) => {
+        G(dd, ['init', '-q', '.']); G(dd, ['config', 'user.email', 't@t']); G(dd, ['config', 'user.name', 't']);
+        fs.mkdirSync(path.join(dd, 'myhooks'), { recursive: true });
+        G(dd, ['config', 'core.hooksPath', 'myhooks']);
+        fs.writeFileSync(path.join(dd, 'a.txt'), 'a'); G(dd, ['add', '-A']); G(dd, ['commit', '-qm', 'i']);
+      });
+      const ins = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      if (!ins || ins.ok !== true) bad.push(`⑨hooksPath 저장소에 설치 실패 ok=${ins && ins.ok} code=${ins && ins.code}`);
+      if (!fs.existsSync(path.join(d, 'myhooks', 'pre-commit'))) bad.push('⑨훅을 git 이 실제로 읽는 경로(core.hooksPath)에 쓰지 않음');
+      //    성공의 뜻이 **"바이트가 떨어졌다"가 아니라 "발화하고 판별한다"** 여야 한다.
+      if (!ins || ins.verified !== 'fired') bad.push(`⑨설치 성공인데 발화 검증이 없다/실패(verified=${ins && ins.verified})`);
+      //    행위로 확인 — 커밋이 실제로 차단돼야 한다("썼다" 가 아니라 "동작한다").
+      fs.writeFileSync(path.join(d, 'b.txt'), 'b'); G(d, ['add', '-A']);
+      const cm = G(d, ['commit', '-m', 'should-be-blocked']);
+      if (cm.status === 0) bad.push('⑨설치했다고 했는데 커밋이 그냥 통과 — 훅이 발화하지 않는다(거짓 성공)');
+      dbg.hooksPath = { wroteToHooksPath: fs.existsSync(path.join(d, 'myhooks', 'pre-commit')), commitBlocked: cm.status !== 0 };
+    }
+    //   ⑩ 발화 검증이 **공허하지 않다** — 훅이 두 상태를 실제로 갈라야 한다.
+    //      (제품이 쓰는 판별을 테스트가 직접 재현해 본다: handoff 흔적이 창 안이면 통과, 창 밖이면 차단.)
+    {
+      const d = cases.ok;
+      const ri = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      if (!ri || ri.verified !== 'fired') bad.push(`⑩정상 저장소 설치의 verified=${ri && ri.verified} (기대 fired)`);
+      const hookP = ri && ri.hook;
+      if (hookP && fs.existsSync(hookP)) {
+        const lhp = path.join(d, '.harness', 'last-handoff.json');
+        const stamp = (ageH) => {
+          fs.writeFileSync(lhp, JSON.stringify({ last: new Date(Date.now() - ageH * 3600000).toISOString() }, null, 2));
+          const t = new Date(Date.now() - ageH * 3600000);
+          try { fs.utimesSync(lhp, t, t); } catch {}
+        };
+        const run = () => cp.spawnSync('sh', [hookP], { cwd: d, encoding: 'utf8', timeout: 20000, env: envP }).status;
+        stamp(0); const a = run();
+        stamp(240); const b = run();
+        if (a === null || b === null) bad.push('⑩sh 로 훅을 돌리지 못함(계측 불가)');
+        else if (!(a === 0 && b !== 0)) bad.push(`⑩훅이 두 상태를 구분하지 못함(창안=${a} 창밖=${b}) — 발화 검증이 공허하다`);
+        dbg.discriminates = { inWindow: a, outWindow: b };
+      }
+    }
+
+    //   ⑬ **하위 디렉토리 설치가 실제 커밋에서 우회되지 않는다.** (검수 P1, 재현)
+    //      훅은 git **toplevel** 에서 돈다. `.harness` 가 하위에 있으면 종전엔 `-d ".harness"` 가 거짓이라
+    //      조용히 통과했다 — 설치는 `verified:'fired'` 인데 루트 커밋이 그냥 지나갔다.
+    //      설치 시점에 toplevel 기준 상대경로를 훅에 박고, **검증도 toplevel 을 cwd 로** 쓴다.
+    {
+      const R = path.join(sb, 'subdir-repo'); fs.mkdirSync(path.join(R, 'pkg'), { recursive: true });
+      G(R, ['init', '-q', '.']); G(R, ['config', 'user.email', 't@t']); G(R, ['config', 'user.name', 't']);
+      fs.writeFileSync(path.join(R, 'pkg', 'package.json'), '{"name":"p","version":"0.1.0"}');
+      fs.writeFileSync(path.join(R, 'rootfile'), 'r');
+      G(R, ['add', '-A']); G(R, ['commit', '-qm', 'i']);
+      const P = path.join(R, 'pkg');
+      const ri = RP(P, ['init', P, '--yes', '--minimal']);
+      if (ri.status !== 0) bad.push(`⑬init exit=${ri.status}`);
+      RP(P, ['handoff', P]);
+      const ins = J(RP(P, ['enforce', 'install', '--path', P, '--json']));
+      if (!ins || ins.ok !== true) bad.push(`⑬하위 디렉토리 설치 실패 ok=${ins && ins.ok} code=${ins && ins.code}`);
+      if (!ins || ins.verified !== 'fired') bad.push(`⑬하위 설치 verified=${ins && ins.verified}`);
+      const lhp = path.join(P, '.harness', 'last-handoff.json');
+      const stamp = (ageH) => { const t = new Date(Date.now() - ageH * 3600000); try { fs.utimesSync(lhp, t, t); } catch {} };
+      //    오래된 handoff → **루트에서** 커밋하면 차단돼야 한다(여기가 우회 지점이었다).
+      stamp(200);
+      fs.writeFileSync(path.join(R, 'z.txt'), 'z'); G(R, ['add', '-A']);
+      const blocked = G(R, ['commit', '-m', 'stale-must-block']);
+      if (blocked.status === 0) bad.push('⑬하위 디렉토리 설치인데 루트 커밋이 통과 — 강제가 우회된다');
+      //    오탐 대조군 — 최신 handoff 면 통과해야 한다.
+      stamp(0);
+      fs.writeFileSync(path.join(R, 'y.txt'), 'y'); G(R, ['add', '-A']);
+      const passed = G(R, ['commit', '-m', 'fresh-must-pass']);
+      if (passed.status !== 0) bad.push('⑬최신 handoff 인데 커밋이 차단됨(오차단)');
+      dbg.subdir = { verified: ins && ins.verified, staleBlocked: blocked.status !== 0, freshPassed: passed.status === 0 };
+    }
+
+    //   ⑭ **설치가 실패하면 흔적을 남기지 않는다 · 검증이 사용자 훅을 실행하지 않는다 · bare 는 거부한다.**
+    {
+      //    (a) 사용자 기존 훅이 설치 **도중에** 실행되면 안 된다(부작용·재귀).
+      const d = mk('sidefx', commit);
+      const hooks = path.join(d, '.git', 'hooks'); fs.mkdirSync(hooks, { recursive: true });
+      const mark = path.join(d, 'SIDEEFFECT.txt');
+      fs.writeFileSync(path.join(hooks, 'pre-commit'),
+        '#!/bin/sh\necho ran >> ' + JSON.stringify(mark.replace(/\\/g, '/')) + '\nexit 0\n');
+      try { fs.chmodSync(path.join(hooks, 'pre-commit'), 0o755); } catch {}
+      RP(d, ['handoff', d]);
+      RP(d, ['enforce', 'install', '--path', d, '--json']);
+      const ran = fs.existsSync(mark) ? fs.readFileSync(mark, 'utf8').trim().split('\n').filter(Boolean).length : 0;
+      if (ran !== 0) bad.push(`⑭설치 중 사용자 기존 훅이 ${ran}회 실행됨(부작용)`);
+      //    (b) bare 저장소는 강제할 수 없다 — 워킹트리가 없어 pre-commit 경로 자체가 없다.
+      const b = path.join(sb, 'bare'); fs.mkdirSync(b, { recursive: true });
+      fs.writeFileSync(path.join(b, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      RP(b, ['init', b, '--yes', '--minimal']);
+      try { fs.rmSync(path.join(b, '.git'), { recursive: true, force: true }); } catch {}
+      cp.spawnSync('git', ['--no-optional-locks', 'init', '-q', '--bare', path.join(b, '.git')], { encoding: 'utf8' });
+      const bi = J(RP(b, ['enforce', 'install', '--path', b, '--json']));
+      if (bi && bi.ok === true) bad.push('⑭bare 저장소에 "설치됨" 이라 답함(강제될 수 없는 곳이다)');
+      //    (c) **실패한 설치는 흔적을 남기지 않는다.** 실제로 실패하는 경우로 잰다(bare 저장소).
+      //        ⚠ `core.hooksPath` 를 없는 디렉토리로 두는 것은 실패 케이스가 아니다 — 제품이 그 디렉토리를 만들고
+      //          git 도 그 경로를 쓰므로 설치가 **정상 성공**한다(내 첫 픽스처가 틀렸다).
+      const failLeft = fs.existsSync(path.join(b, '.harness', 'enforce.json'));
+      if (failLeft) bad.push('⑭실패한 설치(bare)가 enforce.json 을 남김');
+      const bareHook = path.join(b, '.git', 'hooks', 'pre-commit');
+      if (fs.existsSync(bareHook)) bad.push('⑭실패한 설치(bare)가 훅 파일을 남김');
+      dbg.noTrace = { userHookRuns: ran, bareOk: bi && bi.ok, failLeft, bareHookLeft: fs.existsSync(bareHook) };
+    }
+
+    //   ⑫ **설치 행위가 자기가 설치하는 게이트를 약화시키지 않는다.** 발화 검증은 `.harness/last-handoff.json`(실데이터)을
+    //      임시로 덮는데, 훅이 신선도를 판정하는 근거가 그 파일의 **mtime** 이다 — 안 되돌리면 설치만으로
+    //      "방금 handoff 했다" 가 되어 다음 windowHours 동안 무임승차가 생긴다(실측으로 그렇게 만들었다가 고쳤다).
+    {
+      const d = mk('selfweaken', commit);
+      RP(d, ['handoff', d]);
+      const lhp = path.join(d, '.harness', 'last-handoff.json');
+      if (!fs.existsSync(lhp)) bad.push('⑫셋업 실패: last-handoff.json 없음');
+      else {
+        const oldT = new Date(Date.now() - 100 * 3600000);
+        fs.utimesSync(lhp, oldT, oldT);
+        const before = Math.round(fs.statSync(lhp).mtimeMs);
+        const before_txt = fs.readFileSync(lhp, 'utf8');
+        const ins = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+        const after = Math.round(fs.statSync(lhp).mtimeMs);
+        if (!ins || ins.ok !== true) bad.push(`⑫설치 실패 ok=${ins && ins.ok}`);
+        if (fs.readFileSync(lhp, 'utf8') !== before_txt) bad.push('⑫설치가 사용자 실데이터(last-handoff.json) 내용을 바꿨다');
+        if (Math.abs(after - before) > 1500) bad.push(`⑫설치가 handoff mtime 을 갱신했다(${before}→${after}) — 설치가 게이트를 약화시킨다`);
+        //    행위로 확인 — 오래된 handoff 상태이므로 설치 직후 커밋은 **차단**돼야 한다.
+        fs.writeFileSync(path.join(d, 'z.txt'), 'z'); G(d, ['add', '-A']);
+        const cm = G(d, ['commit', '-m', 'must-block']);
+        if (cm.status === 0) bad.push('⑫오래된 handoff 인데 설치 직후 커밋이 통과 — 설치가 무임승차를 만들었다');
+        dbg.selfWeaken = { mtimeDrift: after - before, blocked: cm.status !== 0 };
+      }
+    }
+
+    //   ⑪ `check` 는 네 번째 표면인데 git 상태를 아예 안 봤다 — 훅이 개념적으로 부르는 표면이라 여기서 조용하면 강제가 조용해진다.
+    //      단 **차단하지는 않는다**(커밋 훅 경로에서 우리 판정 실패로 사용자 커밋을 막지 않는다).
+    {
+      const ck = J(RP(cases.brokenHead, ['enforce', 'check', '--path', cases.brokenHead, '--json']));
+      if (!ck) bad.push('⑪손상 저장소 check --json 파싱 실패');
+      else {
+        if (!ck.gitState) bad.push('⑪check 가 git 상태를 말하지 않음(조용한 통과)');
+        if (ck.enforced !== false) bad.push(`⑪git 을 못 쓰는데 enforced=${ck.enforced}`);
+        if (ck.ok !== true) bad.push('⑪check 가 사용자 커밋을 막았다(권고 원칙 위반)');
+      }
+      //    대조군 — 정상 저장소에서는 이 경로가 발동하지 않는다.
+      const ck2 = J(RP(cases.ok, ['enforce', 'check', '--path', cases.ok, '--json']));
+      if (ck2 && ck2.note === 'git_unusable') bad.push('⑪정상 저장소인데 git 사용불가로 판정(오탐)');
+      dbg.check = { broken: ck && ck.gitState, normalNote: ck2 && ck2.note };
+    }
+    dbg.states = seen;
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AC(1.36.134) enforce 정직성: 커밋 불가 저장소에 "설치했다" 고 말하지 않음 · status/install/audit 이 **한 술어**를 공유(모순 0) · git 5상태 구분 · 기존 사유 코드 유지 · 정상/unborn 과잉차단 0 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.134 enforce 정직성 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
 
 
 
