@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.132';
+const VERSION = '1.36.133';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -2669,7 +2669,7 @@ function _computeRoundHistory(root) {
   };
   try {
     // git tag --list 'v1.9.*' --sort=creatordate (시간순)
-    const r = cp.spawnSync('git', ['tag', '--list', 'v*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
+    const r = _gitSpawn(['tag', '--list', 'v*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
       cwd: root, encoding: 'utf8', timeout: 5000
     });
     if (r.status !== 0 || !r.stdout) return result;
@@ -2719,7 +2719,7 @@ function _computeMilestones(root) {
     baselineAt: null
   };
   try {
-    const r = cp.spawnSync('git', ['tag', '--list', 'v*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
+    const r = _gitSpawn(['tag', '--list', 'v*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
       cwd: root, encoding: 'utf8', timeout: 5000
     });
     if (r.status !== 0 || !r.stdout) return result;
@@ -2986,7 +2986,7 @@ function agentModeCmd(root, sub) {
 function _computeRecentChanges(root, limit = 5) {
   const items = [];
   try {
-    const r = cp.spawnSync('git', ['log', '--tags', '--simplify-by-decoration', '--pretty=format:%H|%D|%ad|%s', '--date=short', '-n', String(limit * 3)], {
+    const r = _gitSpawn(['log', '--tags', '--simplify-by-decoration', '--pretty=format:%H|%D|%ad|%s', '--date=short', '-n', String(limit * 3)], {
       cwd: root, encoding: 'utf8', timeout: 5000
     });
     if (r.status !== 0 || !r.stdout) return items;
@@ -3972,7 +3972,7 @@ function _selfTestCases() {
       let behavOk = true;
       try {
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_enf_'));
-        const g = cp.spawnSync('git', ['-C', tmp, 'init'], { encoding: 'utf8', timeout: 10000 });
+        const g = _gitSpawn(['-C', tmp, 'init'], { encoding: 'utf8', timeout: 10000 });
         if (g.status === 0) {
           fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
           const save = process.argv; const _w = process.stdout.write;
@@ -7194,7 +7194,7 @@ function _enforceCfg(root) {
 function _gitHookPath(root) {
   // 1.36.44 (하드닝): worktree 에선 .git 이 파일 — 훅은 공용 디렉토리에 산다. git 에게 물어 해석(양쪽 다 정답).
   try {
-    const r = cp.spawnSync('git', ['-C', root, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', timeout: 5000 });
+    const r = _gitSpawn(['-C', root, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', timeout: 5000 });
     if (r.status === 0 && r.stdout.trim()) {
       const gd = r.stdout.trim();
       return path.join(path.isAbsolute(gd) ? gd : path.join(root, gd), 'hooks', 'pre-commit');
@@ -7291,7 +7291,7 @@ function enforceCmd(root, sub) {
     const cfg2 = _enforceCfg(root);
     let handoffs = [];
     try { const j = JSON.parse(read(_lastHandoffPath(root))); handoffs = (j.history || []).map(t => new Date(t).getTime()).filter(n => !Number.isNaN(n)); } catch {}
-    const gl = cp.spawnSync('git', ['-C', root, 'log', '-n', '30', '--pretty=format:%H|%ct|%s'], { encoding: 'utf8', timeout: 10000 });
+    const gl = _gitSpawn(['-C', root, 'log', '-n', '30', '--pretty=format:%H|%ct|%s'], { encoding: 'utf8', timeout: 10000 });
     // 1.36.49 (codex 6차 #9): 커밋 0개(unborn HEAD)는 정상 저장소 — 실패가 아니라 "검사 대상 없음" 성공.
     if (gl.status !== 0 && /does not have any commits|unknown revision|bad default revision|ambiguous argument/i.test(gl.stderr || '')) {
       if (json) { log(JSON.stringify({ checked: 0, windowHours: cfg2.windowHours, suspects: [], note: 'no_commits' }, null, 2)); return; }
@@ -9858,7 +9858,7 @@ function _detectAbnormalShutdown(root) {
 
   // 5) release/X.X.X branch 있음 + main 미머지 (git 상태)
   try {
-    const r = cp.spawnSync('git', ['branch', '--list', 'release/*'], { cwd: root, encoding: 'utf8', timeout: 3000 });
+    const r = _gitSpawn(['branch', '--list', 'release/*'], { cwd: root, encoding: 'utf8', timeout: 3000 });
     if (r.status === 0) {
       const branches = (r.stdout || '').split('\n').map(s => s.trim().replace(/^\*?\s*/, '')).filter(b => b.startsWith('release/'));
       if (branches.length >= 2) {  // 2개 이상이면 누락 가능성
@@ -11699,6 +11699,34 @@ function _sessionPresenceRecord(root, phase) {
         //   unknown 을 제외하는 이유: 셸마다 env 가시성이 달라 라벨이 흔들릴 때 오탐이 난다(실측).
         sharedKeyAgents: _sharedAgents,
       };
+      // 1.36.133 (정찰 실측): `rec` 는 닫힌 리터럴이라 **우리가 모르는 키는 다음 handoff 에서 사라졌다** —
+      //   주입한 `scope`/`futureField` 가 handoff 한 번에 소멸, exit 0, **stderr 0바이트**. 버전 혼재가 이 기계에 실재한다
+      //   (전역 설치본이 저장소보다 낮음) → 새 버전이 쓴 필드를 옛 버전이 조용히 지운다.
+      //   지우는 쪽으로 실패하지 않는다: 모르는 키는 **그대로 실어 나르고**, 실어 날랐다는 사실을 말한다.
+      //   ⚠ 무제한 병합은 하지 않는다 — 개수/크기 상한을 넘으면 버리되 **버렸다고 말한다**(조용한 유실 금지).
+      //   1.36.133 (검수 P1 ×3): 첫 판에 세 갈래로 틀렸다 —
+      //     · 메타 키(`carriedUnknownKeys`/`droppedUnknownKeys`)가 **다음 회차에 자기 슬롯을 잡아먹어** 진짜 10번째 키를 버렸다.
+      //     · `__proto__` 는 `rec[k]=` 로 own property 가 되지 않아 **이월했다고 적고 실제로는 잃었다**(거짓 보고).
+      //     · drop 경고를 stderr 로 냈더니 성공한 `handoff --json` 의 stderr-0 계약을 깼고, 억제하면 조용한 유실이 됐다.
+      //   → 메타 키를 알려진 키로 등록하고, 위험한 키 이름은 이월 대신 **드롭으로 정직하게** 세고,
+      //     사실은 stderr 가 아니라 **레코드와 신호 표면**에 남긴다(계약을 안 깨고도 보인다).
+      const _META = ['carriedUnknownKeys', 'droppedUnknownKeys'];
+      const _UNSAFE = new Set(['__proto__', 'constructor', 'prototype']);
+      const _known = new Set([...Object.keys(rec), ..._META]);
+      const _carried = [], _dropped = [];
+      if (prev && typeof prev === 'object') {
+        for (const k of Object.keys(prev)) {
+          if (_known.has(k)) continue;
+          if (_UNSAFE.has(k)) { _dropped.push(k); continue; }         // 이월할 수 없는 이름 — 세고 버린다
+          if (_carried.length >= 10) { _dropped.push(k); continue; }
+          let _sz = 0; try { _sz = JSON.stringify(prev[k]).length; } catch { _sz = Infinity; }
+          if (!(_sz <= 4096)) { _dropped.push(k); continue; }
+          Object.defineProperty(rec, k, { value: prev[k], enumerable: true, writable: true, configurable: true });
+          _carried.push(k);
+        }
+      }
+      if (_carried.length) rec.carriedUnknownKeys = _carried;
+      if (_dropped.length) rec.droppedUnknownKeys = _dropped.slice(0, 10);
       writeUtf8(fp, JSON.stringify(rec, null, 2) + '\n');
       res = { written: true, reason: null };
     });
@@ -11772,7 +11800,11 @@ function _sessionSignal(root, opts = {}) {
     unreadableRecords: snap.unreadable || 0,
     //   못 보는 것을 함께 적는다 — "0건" 이 '아무도 없다' 로 읽히면 그건 과대주장이다.
     //   1.36.132 (검수 P3): codex 는 이제 주소가 있다 — 사람 표면과 기계 표면이 같은 사실을 말해야 한다.
+    //   1.36.133: **서브에이전트가 빠져 있었다.** 이 프로젝트의 session-workflow 는 파일 경로를 나눠 주는
+    //   병렬 sub-agent 를 의무화하는데, 그들은 `child-agent` 로 억제돼 레지스트리에 아예 안 나타난다 —
+    //   즉 겹침이 가장 잘 나는 주체가 구조적으로 안 보인다. 못 보는 것을 안 적으면 "0건" 이 거짓말이 된다.
     blindSpots: ['handoff 를 부르지 않는 세션', 'MCP 전용 클라이언트(LEERNESS_INTERNAL)',
+      '병렬 sub-agent (CLAUDE_CODE_CHILD_SESSION — 억제되어 등록되지 않음)',
       '주소가 없는 에이전트(cursor/vscode/grok 등 · codex 는 CODEX_THREAD_ID 가 없는 실행에서만, TUI 미검증)',
       '다른 머신', '구버전 설치본'],
   };
@@ -15047,7 +15079,7 @@ function handoff(root) {
   // 1.9.237: handoff 본문 release/* 누적 경고 — 50+ branches merged 시 자동 안내
   //   1.9.220 비정상종료 release-branch-pending 신호의 본문 보강 (handoff 헤드라인은 ‘🔌 비정상종료’ 만 표시)
   try {
-    const branchR = cp.spawnSync('git', ['branch', '--merged', 'main', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
+    const branchR = _gitSpawn(['branch', '--merged', 'main', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
     if (branchR.status === 0) {
       const mergedCnt = (branchR.stdout || '').split('\n').filter(l => l.trim() && /release\/\d+\.\d+\.\d+/.test(l)).length;
       if (mergedCnt > 50) {
@@ -16298,22 +16330,63 @@ function reuseMapCmd(root) {
 // 1.9.302 (UR-0042, 외부리뷰 Opus G-1): git 변경 파일 집합 — verify-claim 시맨틱 교차검증용.
 //   working tree(staged/unstaged/untracked) + 직전 커밋(HEAD~1..HEAD) 변경을 합쳐, "주장한 파일이 실제로 변경됐는가" 판정.
 //   git repo 아니거나 git 미설치면 null(검증 불가 → 페널티 X). 경로는 root-relative forward-slash.
-function _gitChangedFiles(root) {
+// 1.36.133 (P3-A 정찰이 실측): 이 함수는 이름과 달리 **워킹트리 신호가 아니었다** —
+//   `status --porcelain` 과 `diff HEAD~1 HEAD` 를 **합집합**으로 돌려줘서, 방금 커밋만 한 파일이
+//   "지금 변경 중" 으로 둔갑했다. 실측(임시 저장소): 더티는 dirty.txt 하나뿐인데 committed-only.txt 가 함께 나왔다.
+//   소비자(verify-claim)가 묻는 것은 "이 주장이 **실제 변경**으로 뒷받침되는가" 이므로 이건 오타가 아니라 잘못된 계약이다.
+//   그리고 비ASCII 경로가 통째로 깨졌다 — git 은 기본적으로 따옴표+8진 이스케이프로 내보내는데
+//   따옴표만 벗겨서 `한글더티.txt` 가 `/355/225/234/…` 가 됐다(한국어 사용자 환경에서 **전부 미탐**).
+//   → `-z`(NUL 구분) 한 번으로 이스케이프 자체를 없앤다. trim/따옴표제거/역슬래시치환을 전부 버린다.
+//   반환도 3상태로 바꾼다. 종전엔 "git 없음"·"저장소 아님"·"출력 과대"가 모두 `null` 이라 소비자가 사유를 말할 수 없었다.
+// 1.36.133 (P3-A 정찰 실측 · '남의 프로젝트는 읽기 전용' 원칙 위반): 우리는 git 을 **48 지점**에서 직접 불렀고
+//   `--no-optional-locks` 는 저장소 전체에 **0건**이었다. 맨 `git status` 는 인덱스 stat 캐시를 갱신하려고
+//   `.git/index` 를 **다시 쓴다** — 실측(추적파일 200개 touch 후): 현행 mtime 변경 O, `--no-optional-locks` 변경 X.
+//   즉 "조회" 라고 광고한 프로브가 사용자 저장소를 고쳤다. 호출을 한 곳으로 모아 최상위 옵션을 붙인다.
+//   ⚠ 이 플래그는 모든 서브명령에 안전한 최상위 옵션이다(쓰기 명령에서도 동작을 바꾸지 않는다).
+function _gitSpawn(args, opts) {
+  //   ⚠ 인자 배열을 **변수로 먼저** 만든다. 인라인 배열 호출 형태를 여기 두면
+  //     이 함수가 자기 자신을 초크포인트 전환 대상으로 잡아 무한 재귀가 된다
+  //     (실제로 한 번 그렇게 만들어 스택 오버플로로 모든 git 조회가 'git-error' 가 됐다).
+  //     가드도 이 형태를 세므로 주석에도 적지 않는다(자기참조 트랩).
+  const _argv = ['--no-optional-locks', ...args];
+  return cp.spawnSync('git', _argv, opts);
+}
+function _gitWorkingTree(root) {
+  let r;
   try {
-    const st = cp.spawnSync('git', ['-C', root, 'status', '--porcelain', '--untracked-files=all'], { encoding: 'utf8', timeout: 10000 });
-    if (st.status !== 0) return null;  // git repo 아님 / git 없음
-    const out = new Set();
-    for (let line of (st.stdout || '').split('\n')) {
-      if (line.length < 4) continue;
-      let p = line.slice(3).trim();           // 'XY ' 상태 프리픽스 제거
-      if (p.includes(' -> ')) p = p.split(' -> ').pop();  // rename
-      p = p.replace(/^"|"$/g, '');            // quoted path
-      if (p) out.add(p.replace(/\\/g, '/'));
-    }
-    const df = cp.spawnSync('git', ['-C', root, 'diff', '--name-only', 'HEAD~1', 'HEAD'], { encoding: 'utf8', timeout: 10000 });
-    if (df.status === 0) for (let line of (df.stdout || '').split('\n')) { line = line.trim(); if (line) out.add(line.replace(/\\/g, '/')); }
-    return out;
-  } catch { return null; }
+    r = _gitSpawn(['-C', root, 'status', '--porcelain=v1', '-z',   // 1.36.133: 최상위 읽기 플래그는 `_gitSpawn` 이 붙인다(중복 금지)
+      '--untracked-files=all', '--no-renames', '--', '.'],
+      { encoding: 'buffer', timeout: 15000, maxBuffer: 256 * 1024 * 1024 });
+  } catch (e) { return { ok: false, reason: 'git-error', detail: String(e && e.code || e).slice(0, 40) }; }
+  if (r.error && r.error.code === 'ENOENT') return { ok: false, reason: 'no-git' };
+  if (r.error && r.error.code === 'ENOBUFS') return { ok: false, reason: 'output-too-large' };
+  if (r.error) return { ok: false, reason: 'git-error', detail: String(r.error.code || '').slice(0, 40) };
+  if (r.status === null) return { ok: false, reason: 'no-git' };            // 죽거나 실행 자체가 안 됨
+  if (r.status !== 0) return { ok: false, reason: 'not-a-git-repo' };   // 1.36.133 (검수 P1): 기존 공개 JSON 값을 유지한다 — 새 사유는 **추가**만 한다
+  const files = new Set();
+  for (const rec of String(r.stdout || '').split('\0')) {
+    if (rec.length < 4) continue;
+    const p = rec.slice(3);                    // 'XY ' 프리픽스만 제거 — 그 뒤는 git 이 준 원문 그대로다
+    if (p) files.add(p.replace(/\\/g, '/'));
+  }
+  return { ok: true, files };
+}
+// 1.36.133 (검수 P1): 한 번에 두 가지를 바꾼 것이 소비자를 깼다 — **파싱 결함**(비ASCII·이스케이프)과
+//   **집합 정의**(워킹트리 ∪ 직전커밋)를 같이 손대자 `verify-claim --strict-claims` 가 거짓 실패했다.
+//   실측: 주장한 파일을 이미 커밋했으면 워킹트리에는 없으므로 "변경 안 됨" 이 된다 — 커밋은 일을 안 했다는 뜻이 아니다.
+//   → **고쳐야 했던 것은 파싱뿐이다.** 집합 정의(직전 커밋 포함)는 그대로 두고, 정확해진 파서 위에서 합집합을 만든다.
+//   워킹트리만 필요한 곳은 `_gitWorkingTree` 를 직접 쓴다(3상태로 사유까지 답한다).
+function _gitChangedFiles(root) {
+  const wt = _gitWorkingTree(root);
+  if (!wt.ok) return null;
+  const out = new Set(wt.files);
+  //   직전 커밋도 "이번 작업의 변경" 으로 본다(1.9.302 이래의 계약). `-z` 로 받아 경로를 원문 그대로 쓴다.
+  const df = _gitSpawn(['-C', root, 'diff', '--name-only', '-z', 'HEAD~1', 'HEAD'],
+    { encoding: 'buffer', timeout: 15000, maxBuffer: 256 * 1024 * 1024 });
+  if (!df.error && df.status === 0) {
+    for (const p of String(df.stdout || '').split('\0')) if (p) out.add(p.replace(/\\/g, '/'));
+  }
+  return out;
 }
 // 주장 파일이 git 변경 집합에 있는지(상대경로 prefix 차이 허용).
 // _claimFileInGit → lib/analyzers.js (1.9.304 UR-0025)
@@ -16545,7 +16618,12 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   }
   // 1.9.302 (UR-0042, 외부리뷰 Opus G-1): git diff 시맨틱 교차검증 — 주장한 파일이 실제로 변경됐는가.
   //   "파일 존재"만으로는 "테스트만 통과하면 done" 허위완료를 못 막음(Opus). git working tree+직전커밋 변경과 대조.
-  const gitChanged = _gitChangedFiles(root);  // Set | null(git repo 아님 → 검증 불가)
+  // 1.36.133 (정찰 실측): 종전엔 `null` 하나로 "git 없음"·"저장소 아님"·"출력 과대"를 뭉뚱그려
+  //   진짜 저장소인데 git 이 PATH 에 없을 뿐인 상황에서도 **'not-a-git-repo' 라고 단정**했다(사실이 아닌 주장).
+  //   사유를 그대로 실어 보낸다 — 모르는 것과 아닌 것을 같은 말로 하지 않는다.
+  const _gitProbe = _gitWorkingTree(root);
+  const gitChanged = _gitProbe.ok ? _gitProbe.files : null;
+  const gitUnavailableReason = _gitProbe.ok ? null : _gitProbe.reason;
   const gitApplicable = !!gitChanged && gitChanged.size > 0 && files.length > 0;
   const claimedInGit = gitApplicable ? files.filter(f => _claimFileInGit(f, gitChanged)) : [];
   const claimedNotInGit = gitApplicable ? files.filter(f => !_claimFileInGit(f, gitChanged)) : [];
@@ -16744,7 +16822,8 @@ function verifyClaimCmd(root, taskId, opts = {}) {
       evidence: { required: mustHaveEvidence, ...evq },
       // 1.36.110: `advisory` 는 **게이팅하지 않는** 신호다(ok 에 영향 없음). 소비자가 경계를 오인하지 않도록 키를 분리한다.
       claims: !claimsChecked ? null : { ok: strictOk, optimism: optimismSuspects.map(s => ({ kind: s.kind, label: s.label })), honesty: honestyFindings.map(f => ({ dim: f.dim, label: f.label })), advisory: honestyAdvisory.map(f => ({ dim: f.dim, label: f.label, severity: f.severity })) },
-      git: gitChanged === null ? { applicable: false, reason: 'not-a-git-repo' } : (!gitApplicable ? { applicable: false, reason: 'no-working-changes-or-no-claimed-files' } : { applicable: true, claimedInGit: claimedInGit.length, claimedNotInGit, strongMismatch: gitStrongMismatch, changedNotClaimed }),
+      // 1.36.133: 사유를 뭉개지 않는다 — no-git / not-a-repo / output-too-large / git-error 를 구분해서 싣는다.
+      git: gitChanged === null ? { applicable: false, reason: gitUnavailableReason || 'not-a-repo' } : (!gitApplicable ? { applicable: false, reason: 'no-working-changes-or-no-claimed-files' } : { applicable: true, claimedInGit: claimedInGit.length, claimedNotInGit, strongMismatch: gitStrongMismatch, changedNotClaimed }),
       scopeCreep: !gitApplicable ? null : { count: changedNotClaimed.length, files: changedNotClaimed.slice(0, 10) }  // 1.13.2 (Karpathy 외과적 변경): 요청/주장 밖 변경 파일(advisory)
     };
     if (runResult) {
@@ -20664,7 +20743,7 @@ function releaseNote(root, text) {
 
 // 1.9.10: git remote 자동 감지 + gh-release + gh-pages 배포
 function detectGitRemote(root) {
-  const r = cp.spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', shell: true });
+  const r = _gitSpawn(['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', shell: true });
   if (r.status !== 0) return null;
   const url = (r.stdout || '').trim();
   if (!url) return null;
@@ -20691,35 +20770,35 @@ function deployGhPages(root, sourceFile) {
   const wt = path.join(root, '.harness/cache', `ghpages-${stamp}`);
   mkdirp(path.dirname(wt));
   // worktree (기존 gh-pages 있으면 fetch, 없으면 orphan)
-  const fetchR = cp.spawnSync('git', ['fetch', 'origin', 'gh-pages'], { cwd: root, encoding: 'utf8', shell: true });
+  const fetchR = _gitSpawn(['fetch', 'origin', 'gh-pages'], { cwd: root, encoding: 'utf8', shell: true });
   const hasBranch = fetchR.status === 0;
   let wtArgs;
   if (hasBranch) wtArgs = ['worktree', 'add', wt, 'origin/gh-pages'];
   else wtArgs = ['worktree', 'add', '--orphan', '-b', 'gh-pages', wt];
-  const wtR = cp.spawnSync('git', wtArgs, { cwd: root, encoding: 'utf8', shell: true });
+  const wtR = _gitSpawn(wtArgs, { cwd: root, encoding: 'utf8', shell: true });   // 1.36.133: 초크포인트 경유(전수 0 유지)
   if (wtR.status !== 0) { fail('worktree 생성 실패: ' + (wtR.stderr || '').slice(0, 200)); process.exitCode = 1; return; }
   try {
     // orphan인 경우 초기화
     if (!hasBranch) {
-      cp.spawnSync('git', ['rm', '-rf', '.'], { cwd: wt, encoding: 'utf8', shell: true });
+      _gitSpawn(['rm', '-rf', '.'], { cwd: wt, encoding: 'utf8', shell: true });
     }
     // 소스 복사 (index.html로 이름 변경)
     const destName = path.basename(src) === 'index.html' ? 'index.html' : 'index.html';
     fs.copyFileSync(src, path.join(wt, destName));
     // 원본 파일명도 보존
     if (path.basename(src) !== 'index.html') fs.copyFileSync(src, path.join(wt, path.basename(src)));
-    cp.spawnSync('git', ['add', '-A'], { cwd: wt, encoding: 'utf8' });
-    const commit = cp.spawnSync('git', ['commit', '-m', `deploy: ${path.basename(src)} ${stamp}`], { cwd: wt, encoding: 'utf8' });
+    _gitSpawn(['add', '-A'], { cwd: wt, encoding: 'utf8' });
+    const commit = _gitSpawn(['commit', '-m', `deploy: ${path.basename(src)} ${stamp}`], { cwd: wt, encoding: 'utf8' });
     if (commit.status !== 0 && !/nothing to commit/.test(commit.stdout || '')) {
       fail('commit 실패: ' + (commit.stdout || commit.stderr || '').slice(0, 200));
       process.exitCode = 1;
     } else {
-      const pushR = cp.spawnSync('git', ['push', 'origin', 'gh-pages'], { cwd: wt, encoding: 'utf8' });
+      const pushR = _gitSpawn(['push', 'origin', 'gh-pages'], { cwd: wt, encoding: 'utf8' });
       if (pushR.status !== 0) { fail('push 실패: ' + (pushR.stderr || '').slice(0, 200)); process.exitCode = 1; }
       else ok(`gh-pages push 완료 → https://${remote.owner}.github.io/${remote.repo}/`);
     }
   } finally {
-    cp.spawnSync('git', ['worktree', 'remove', '--force', wt], { cwd: root, encoding: 'utf8', shell: true });
+    _gitSpawn(['worktree', 'remove', '--force', wt], { cwd: root, encoding: 'utf8', shell: true });
   }
 }
 
@@ -20731,7 +20810,7 @@ function releaseSyncMainCmd(root) {
   const remoteName = arg('--remote', 'origin');
   log('# leerness release sync-main (1.9.140)');
 
-  const headR = cp.spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf8' });
+  const headR = _gitSpawn(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf8' });
   if (headR.status !== 0) { fail('git 저장소가 아닙니다 — sync-main 스킵'); process.exitCode = 1; return; }
   const fromBranch = branchArg || (headR.stdout || '').trim();
   if (!fromBranch || fromBranch === 'main' || fromBranch === 'master') {
@@ -20743,27 +20822,27 @@ function releaseSyncMainCmd(root) {
   if (dryRun) { log('(dry-run) merge & push 스킵'); return; }
 
   // 1) main checkout (있으면 reuse, 없으면 origin/main에서 생성)
-  const coR = cp.spawnSync('git', ['checkout', 'main'], { cwd: root, encoding: 'utf8' });
+  const coR = _gitSpawn(['checkout', 'main'], { cwd: root, encoding: 'utf8' });
   if (coR.status !== 0) {
-    const co2 = cp.spawnSync('git', ['checkout', '-b', 'main', `${remoteName}/main`], { cwd: root, encoding: 'utf8' });
+    const co2 = _gitSpawn(['checkout', '-b', 'main', `${remoteName}/main`], { cwd: root, encoding: 'utf8' });
     if (co2.status !== 0) { fail('main 체크아웃 실패: ' + (co2.stderr || '').slice(0, 200)); process.exitCode = 1; return; }
   }
   // 2) origin/main pull (최신화)
-  cp.spawnSync('git', ['pull', '--ff-only', remoteName, 'main'], { cwd: root, encoding: 'utf8' });
+  _gitSpawn(['pull', '--ff-only', remoteName, 'main'], { cwd: root, encoding: 'utf8' });
   // 3) release branch merge (fast-forward 우선, 안 되면 no-ff merge commit)
   // 1.9.140+: --allow-unrelated 또는 LEERNESS_ALLOW_UNRELATED=1 (최초 main 동기화 시 release branch와 history 분리)
   const allowUnrelated = has('--allow-unrelated') || process.env.LEERNESS_ALLOW_UNRELATED === '1';
   let mergeArgs = ['merge', '--no-edit', fromBranch];
-  let mergeR = cp.spawnSync('git', mergeArgs, { cwd: root, encoding: 'utf8' });
+  let mergeR = _gitSpawn(mergeArgs, { cwd: root, encoding: 'utf8' });   // 1.36.133: 초크포인트 경유
   if (mergeR.status !== 0 && /unrelated histories/.test(mergeR.stderr || mergeR.stdout || '')) {
     if (allowUnrelated) {
       warn('unrelated histories 감지 — --allow-unrelated 재시도');
-      cp.spawnSync('git', ['merge', '--abort'], { cwd: root, encoding: 'utf8' });
-      mergeR = cp.spawnSync('git', ['merge', '--no-edit', '--allow-unrelated-histories', fromBranch], { cwd: root, encoding: 'utf8' });
+      _gitSpawn(['merge', '--abort'], { cwd: root, encoding: 'utf8' });
+      mergeR = _gitSpawn(['merge', '--no-edit', '--allow-unrelated-histories', fromBranch], { cwd: root, encoding: 'utf8' });
     } else {
       fail('main merge 실패 — unrelated histories: --allow-unrelated 옵션 추가하세요 (또는 LEERNESS_ALLOW_UNRELATED=1)');
-      cp.spawnSync('git', ['merge', '--abort'], { cwd: root, encoding: 'utf8' });
-      cp.spawnSync('git', ['checkout', fromBranch], { cwd: root, encoding: 'utf8' });
+      _gitSpawn(['merge', '--abort'], { cwd: root, encoding: 'utf8' });
+      _gitSpawn(['checkout', fromBranch], { cwd: root, encoding: 'utf8' });
       process.exitCode = 1;
       return;
     }
@@ -20771,18 +20850,18 @@ function releaseSyncMainCmd(root) {
   if (mergeR.status !== 0) {
     fail('main merge 실패 — 충돌 가능성: ' + (mergeR.stderr || mergeR.stdout || '').slice(0, 300));
     // checkout back to original
-    cp.spawnSync('git', ['merge', '--abort'], { cwd: root, encoding: 'utf8' });
-    cp.spawnSync('git', ['checkout', fromBranch], { cwd: root, encoding: 'utf8' });
+    _gitSpawn(['merge', '--abort'], { cwd: root, encoding: 'utf8' });
+    _gitSpawn(['checkout', fromBranch], { cwd: root, encoding: 'utf8' });
     process.exitCode = 1;
     return;
   }
   ok(`main merged: ${fromBranch}`);
   // 4) main push
-  const pushR = cp.spawnSync('git', ['push', remoteName, 'main'], { cwd: root, encoding: 'utf8' });
+  const pushR = _gitSpawn(['push', remoteName, 'main'], { cwd: root, encoding: 'utf8' });
   if (pushR.status !== 0) { fail('main push 실패: ' + (pushR.stderr || '').slice(0, 200)); process.exitCode = 1; }
   else ok(`main pushed → ${remoteName}/main`);
   // 5) return to source branch (release 작업 흐름 보존)
-  cp.spawnSync('git', ['checkout', fromBranch], { cwd: root, encoding: 'utf8' });
+  _gitSpawn(['checkout', fromBranch], { cwd: root, encoding: 'utf8' });
 
   // 1.9.178: 자동 npm publish (사용자 명시 — .env NPM_TOKEN 있으면 자동 배포).
   //   opt-out: --no-npm 또는 LEERNESS_NO_NPM_PUBLISH=1
@@ -20820,7 +20899,7 @@ function releaseCleanupCmd(root) {
     keep = n;
   }
   // 1) git 저장소 확인
-  const headR = cp.spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf8' });
+  const headR = _gitSpawn(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf8' });
   if (headR.status !== 0) {
     // 1.36.103: --json 이 사람용 텍스트를 내던 자리 — 기계 소비자는 여기서 JSON.parse 에 실패했다.
     if (jsonMode) { log(JSON.stringify({ ok: false, error: 'git 저장소가 아닙니다', code: 'not_a_git_repo', root, deleted: [], candidates: [] }, null, 2)); process.exitCode = 1; return; }
@@ -20829,12 +20908,12 @@ function releaseCleanupCmd(root) {
   }
   const currentBranch = (headR.stdout || '').trim();
   // 2) local release/* branches + merged 상태 회수
-  const branchR = cp.spawnSync('git', ['branch', '--merged', 'main', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
+  const branchR = _gitSpawn(['branch', '--merged', 'main', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
   const mergedBranches = (branchR.stdout || '').split('\n')
     .map(l => l.replace(/^\*?\s+/, '').trim())
     .filter(l => l && /^release\/\d+\.\d+\.\d+$/.test(l));
   // 3) 모든 release/* 도 회수 (unmerged 분석용)
-  const allR = cp.spawnSync('git', ['branch', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
+  const allR = _gitSpawn(['branch', '--list', 'release/*'], { cwd: root, encoding: 'utf8' });
   const allBranches = (allR.stdout || '').split('\n')
     .map(l => l.replace(/^\*?\s+/, '').trim())
     .filter(l => l && /^release\/\d+\.\d+\.\d+$/.test(l));
@@ -20853,7 +20932,7 @@ function releaseCleanupCmd(root) {
   let deleted = 0, deleteFailed = 0;
   if (apply) {
     for (const b of toDelete) {
-      const r = cp.spawnSync('git', ['branch', '-d', b], { cwd: root, encoding: 'utf8' });
+      const r = _gitSpawn(['branch', '-d', b], { cwd: root, encoding: 'utf8' });
       if (r.status === 0) deleted++; else deleteFailed++;
     }
     if (deleteFailed > 0) process.exitCode = 1;   // 실패 시 nonzero exit
@@ -21169,10 +21248,10 @@ function releasePublish(root) {
       log('(dry-run) git push / git push --tags 생략 (실행 안 함)');
     } else {
       log('git push:');
-      const r1 = cp.spawnSync('git', ['push'], { cwd: root, encoding: 'utf8', shell: true });
+      const r1 = _gitSpawn(['push'], { cwd: root, encoding: 'utf8', shell: true });
       log((r1.stdout || r1.stderr || '').slice(-200) || '(no output)');
       if (r1.status !== 0) { fail('git push 실패'); pubFail = true; }
-      const r2 = cp.spawnSync('git', ['push', '--tags'], { cwd: root, encoding: 'utf8', shell: true });
+      const r2 = _gitSpawn(['push', '--tags'], { cwd: root, encoding: 'utf8', shell: true });
       log((r2.stdout || r2.stderr || '').slice(-200) || '(no output)');
       if (r2.status !== 0) { fail('git push --tags 실패'); pubFail = true; }
     }

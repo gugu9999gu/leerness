@@ -13451,6 +13451,206 @@ total++;
     : '✗ 1.36.132 다중세션 토대 실패 ' + JSON.stringify({ bad: bad.slice(0, 10), dbg }));
   if (!ok) failed++;
 }
+// 1.36.133 (T-0109): **P3-A(범위 선언)를 만들지 않았다** — 라운드 전에 못 박은 중단 규칙이 실제로 물었다.
+//   자동유도 96.9% · 명시선언 63.1% · 혼합(채택률 1.0) 94.0% 로 전부 40% 초과였고, 유일한 생존 구성은
+//   **충돌이 실제로 나는 파일(bin/leerness.js, 커밋의 68.8%)을 음소거해서** 조용해진 것이었다(무출력은 통과가 아니다).
+//   대신 그 정찰이 실측한 **기반 결함**을 고친다 — 전부 P3-A 없이도 이미 출하돼 있던 동작이다.
+total++;
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-133-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
+  const RP = (d, a, extra) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 600000, env: Object.assign({}, envP, extra || {}), maxBuffer: 32 * 1024 * 1024 });
+  const G = (d, a) => cp.spawnSync('git', ['--no-optional-locks', '-C', d, ...a], { encoding: 'utf8', timeout: 60000 });
+  const mkRepo = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    G(d, ['init', '-q', '.']); G(d, ['config', 'user.email', 't@t']); G(d, ['config', 'user.name', 't']);
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    return d;
+  };
+  //   제품의 워킹트리 판정을 **제품 소스에서 그대로 떼어** 돌린다(재구현하면 다른 것을 재게 된다).
+  const _src = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
+  const _i = _src.indexOf('function _gitSpawn(args, opts)'), _j = _src.indexOf('function _gitChangedFiles(root)');
+  let _gitWorkingTree = null;
+  try { _gitWorkingTree = (new Function('cp', _src.slice(_i, _j) + '\nreturn _gitWorkingTree;'))(cp); } catch (e) { bad.push('①제품 함수 추출 실패: ' + e.message); }
+  try {
+    // ① 워킹트리 계약 — 종전엔 `status` ∪ `diff HEAD~1 HEAD` 라 **커밋만 한 파일이 "지금 변경 중"** 으로 나왔고,
+    //    비ASCII 경로는 git 의 8진 이스케이프를 안 풀어 `/355/225/…` 로 깨졌다(한국어 환경 전량 미탐).
+    if (_gitWorkingTree) {
+      const d = mkRepo('gitwt');
+      fs.writeFileSync(path.join(d, 'committed-only.txt'), 'c'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'first']);
+      const KO = '한글더티.txt';
+      fs.writeFileSync(path.join(d, 'dirty.txt'), 'd');
+      fs.writeFileSync(path.join(d, KO), 'k');
+      fs.writeFileSync(path.join(d, 'space name.txt'), 's');
+      const r = _gitWorkingTree(d);
+      if (!r.ok) bad.push(`①정상 저장소인데 ok=false(${r.reason})`);
+      else {
+        const f = [...r.files];
+        if (f.includes('committed-only.txt')) bad.push('①커밋만 한 파일이 "변경 중" 으로 섞임(워킹트리 계약 위반)');
+        if (!f.includes(KO)) bad.push(`①한글 파일명 미포착 — 실제: ${JSON.stringify(f)}`);
+        if (!f.includes('space name.txt')) bad.push('①공백 포함 파일명 미포착');
+        if (!f.includes('dirty.txt')) bad.push('①평범한 더티 파일 미포착(계측 붕괴)');
+      }
+      //    오탐 대조군 — 커밋해서 깨끗해지면 0이어야 한다("항상 0" 으로 고쳐 통과하는 길을 위 단언이 막는다).
+      G(d, ['add', '-A']); G(d, ['commit', '-qm', 'second']);
+      const r2 = _gitWorkingTree(d);
+      if (!(r2.ok && r2.files.size === 0)) bad.push(`①깨끗한 저장소가 0이 아님(${r2.ok ? r2.files.size : r2.reason})`);
+      //    3상태 — "모른다" 를 "아니다" 로 말하지 않는다.
+      const nonRepo = path.join(sb, 'not-a-repo'); fs.mkdirSync(nonRepo, { recursive: true });
+      const r3 = _gitWorkingTree(nonRepo);
+      if (r3.ok || r3.reason !== 'not-a-git-repo') bad.push(`①비-git 디렉토리 사유=${r3.reason} (기존 공개값을 지우면 소비자 계약이 깨진다)`);
+      const savedPath = process.env.PATH;
+      process.env.PATH = fs.mkdtempSync(path.join(sb, 'nopath-'));
+      const r4 = _gitWorkingTree(d);
+      process.env.PATH = savedPath;
+      if (r4.ok || r4.reason !== 'no-git') bad.push(`①git 부재 사유=${r4.reason} (기대 no-git — "저장소 아님" 과 구분돼야 한다)`);
+      //    (검수 P1) 파싱만 고치고 **집합 정의는 그대로 둔다** — 워킹트리 전용으로 바꿨더니
+      //    이미 커밋한 주장 파일이 "변경 안 됨" 이 돼 `verify-claim --strict-claims` 가 거짓 실패했다.
+      const _chEnd = _src.indexOf('// 주장 파일이 git 변경 집합에');
+      const _ch = (new Function('cp', _src.slice(_i, _chEnd) + '\nreturn _gitChangedFiles;'))(cp);
+      fs.writeFileSync(path.join(d, 'committed-claim.js'), 'q'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'third']);
+      fs.writeFileSync(path.join(d, 'now-dirty.js'), 'z');
+      const chSet = _ch(d);
+      if (!chSet || !chSet.has('committed-claim.js')) bad.push('①변경집합에 직전 커밋 파일이 없음 — 커밋한 주장이 거짓 실패한다');
+      if (!chSet || !chSet.has('now-dirty.js')) bad.push('①변경집합에 더티 파일이 없음');
+      dbg.gitwt = { dirty: r.ok ? r.files.size : r.reason, clean: r2.ok ? r2.files.size : r2.reason, nonRepo: r3.reason, noGit: r4.reason, unionHasCommitted: !!(chSet && chSet.has('committed-claim.js')) };
+    }
+
+    // ② 읽기 명령이 **사용자 저장소를 쓰지 않는다**. 실측: 맨 `git status` 는 `.git/index` 를 다시 쓴다.
+    {
+      const d = mkRepo('readonly');
+      for (let i = 0; i < 60; i++) fs.writeFileSync(path.join(d, `f${i}.txt`), 'x' + i);
+      G(d, ['add', '-A']); G(d, ['commit', '-qm', 'init']);
+      const ri = RP(d, ['init', d, '--yes', '--minimal']);
+      if (ri.status !== 0) bad.push(`②init exit=${ri.status}`);
+      const idx = path.join(d, '.git', 'index');
+      const now = new Date();
+      for (let i = 0; i < 60; i++) fs.utimesSync(path.join(d, `f${i}.txt`), now, now);   // git 이 stat 캐시를 갱신하고 싶어지는 조건
+      const before = fs.statSync(idx).mtimeMs;
+      const rh = RP(d, ['handoff', d]);
+      const after = fs.statSync(idx).mtimeMs;
+      if (rh.status !== 0) bad.push(`②handoff exit=${rh.status}`);
+      if (before !== after) bad.push('②조회 명령이 사용자 저장소의 .git/index 를 다시 썼다');
+      //    열거 전수 — 초크포인트 밖 직접 호출이 0이어야 한다(한 곳만 고치면 다음 호출부가 또 샌다).
+      const direct = ['bin/leerness.js', 'lib/drift.js', 'lib/session-close.js']
+        .map(f => (fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8').match(/cp\.spawnSync\('git', \[/g) || []).length)   // 인라인 배열 형태만 센다 — 초크포인트 자신은 변수로 부른다
+        .reduce((a, b) => a + b, 0);
+      if (direct !== 0) bad.push(`②초크포인트 밖 git 직접 호출 ${direct}건`);
+      dbg.readonly = { indexChanged: before !== after, directCalls: direct };
+    }
+
+    // ③ verify-claim 이 **사실이 아닌 것을 말하지 않는다** — git 이 PATH 에 없을 뿐인 진짜 저장소를
+    //    "저장소가 아니다" 라고 단정했다.
+    {
+      const d = mkRepo('claim');
+      fs.writeFileSync(path.join(d, 'a.js'), 'a'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
+      const ri = RP(d, ['init', d, '--yes', '--minimal']);
+      if (ri.status !== 0) bad.push(`③init exit=${ri.status}`);
+      const ta = RP(d, ['task', 'add', 'a.js 수정', '--path', d, '--json']);
+      if (ta.status !== 0) bad.push(`③task add exit=${ta.status}`);
+      const getGit = (extra) => {
+        const r = RP(d, ['verify-claim', 'T-0001', '--path', d, '--json'], extra);
+        try { return JSON.parse(String(r.stdout || '')).git; } catch { return { parse: false, exit: r.status }; }
+      };
+      const normal = getGit();
+      const emptyDir = fs.mkdtempSync(path.join(sb, 'nogitpath-'));
+      const noGit = getGit({ PATH: emptyDir + path.delimiter + path.dirname(process.execPath) });
+      if (!normal || normal.parse === false) bad.push('③정상 PATH 에서 --json 파싱 실패(계측 붕괴)');
+      if (!noGit || noGit.parse === false) bad.push('③git 없는 PATH 에서 --json 파싱 실패');
+      else if (noGit.reason === 'not-a-git-repo' || noGit.reason === 'not-a-repo') bad.push(`③git 부재를 "저장소 아님" 이라 단정(${noGit.reason})`);
+      else if (noGit.reason !== 'no-git') bad.push(`③git 부재 사유=${noGit.reason} (기대 no-git)`);
+      dbg.claim = { normal: normal && normal.reason !== undefined ? normal.reason : (normal && normal.applicable), noGit: noGit && noGit.reason };
+    }
+
+    // ④ 세션 레코드가 **모르는 키를 조용히 지우지 않는다**. 버전 혼재가 이 기계에 실재한다(전역본 < 저장소).
+    {
+      const d = path.join(sb, 'carry'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      const ri = RP(d, ['init', d, '--yes', '--minimal']);
+      if (ri.status !== 0) bad.push(`④init exit=${ri.status}`);
+      const KEY = 'carrysession0001', me = { LEERNESS_SESSION_ID: KEY };
+      RP(d, ['handoff', d], me);
+      const fp = path.join(d, '.harness', 'cache', 'sessions', KEY + '.json');
+      if (!fs.existsSync(fp)) bad.push('④세션 레코드가 만들어지지 않음(셋업 실패)');
+      else {
+        const j = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        j.scope = { files: ['src/a.js'] }; j.futureField = 'x';
+        fs.writeFileSync(fp, JSON.stringify(j, null, 2));
+        const r = RP(d, ['handoff', d], me);
+        const after = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        if (!after.scope || !after.futureField) bad.push('④모르는 키가 조용히 사라짐(다음 버전의 필드를 옛 버전이 파괴한다)');
+        if (!(after.carriedUnknownKeys || []).includes('scope')) bad.push('④실어 날랐다는 사실을 말하지 않음');
+        if (String(r.stderr || '').length) bad.push('④정상 이월인데 경고가 남(오탐)');
+        //   상한 초과는 **버리되 말한다**(무제한 병합도, 조용한 유실도 아니다).
+        const j2 = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        for (let i = 0; i < 14; i++) j2['extra' + i] = i;
+        fs.writeFileSync(fp, JSON.stringify(j2, null, 2));
+        const r2 = RP(d, ['handoff', d], me);
+        const after2 = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        if (!(after2.droppedUnknownKeys || []).length) bad.push('④상한 초과인데 버렸다고 말하지 않음(조용한 유실)');
+        if ((after2.carriedUnknownKeys || []).length > 10) bad.push('④상한이 지켜지지 않음');
+        //   (검수 P1) 사실은 stderr 가 아니라 레코드에 남긴다 — 성공한 `--json` 의 stderr 0바이트 계약을 깨면 안 된다.
+        if (String(r2.stderr || '').length) bad.push('④drop 사실을 stderr 로 내보내 --json 계약을 깨뜨렸다');
+        //   (검수 P1) 메타 키가 자기 슬롯을 잡아먹으면 진짜 10번째 키가 사라진다.
+        const j3 = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        //   앞 케이스가 이월해 둔 키까지 지워야 슬롯 계산이 맞다(안 지우면 11개가 되어 제품이 옳게 버린다).
+        for (const k of (j3.carriedUnknownKeys || [])) delete j3[k];
+        delete j3.carriedUnknownKeys; delete j3.droppedUnknownKeys;
+        for (const k of Object.keys(j3)) if (/^(extra|slot)[0-9]+$/.test(k)) delete j3[k];
+        for (let i = 1; i <= 9; i++) j3['slot' + i] = i;
+        fs.writeFileSync(fp, JSON.stringify(j3, null, 2));
+        RP(d, ['handoff', d], me);
+        const j4 = JSON.parse(fs.readFileSync(fp, 'utf8')); j4.slot10 = 'tenth';
+        fs.writeFileSync(fp, JSON.stringify(j4, null, 2));
+        RP(d, ['handoff', d], me);
+        const j5 = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        if (j5.slot10 !== 'tenth') bad.push('④메타 키가 이월 슬롯을 잡아먹어 진짜 10번째 키가 사라짐');
+        //   (검수 P1) `__proto__` 는 이월할 수 없다 — 이월했다고 **적으면** 그게 거짓 보고다.
+        const rawTxt = fs.readFileSync(fp, 'utf8').replace(/^\{/, '{\n  "__proto__": {"polluted": true},');
+        fs.writeFileSync(fp, rawTxt);
+        RP(d, ['handoff', d], me);
+        const j6 = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        if ((j6.carriedUnknownKeys || []).includes('__proto__')) bad.push('④__proto__ 를 이월했다고 거짓 보고');
+        if (!(j6.droppedUnknownKeys || []).includes('__proto__')) bad.push('④__proto__ 를 버렸다는 사실을 안 적음');
+        dbg.carry = { carried: (after.carriedUnknownKeys || []).length, capped: (after2.carriedUnknownKeys || []).length };
+      }
+      // ⑤ 못 보는 것에 **병렬 sub-agent** 가 들어 있다(이 프로젝트가 의무화한 워크플로의 주체다).
+      const jr = RP(d, ['handoff', d, '--json'], { LEERNESS_SESSION_ID: KEY });
+      let J = null; try { J = JSON.parse(String(jr.stdout || '')); } catch { bad.push('⑤--json 파싱 실패'); }
+      const bs = J && J.sessions ? J.sessions.blindSpots : [];
+      if (!bs.some(x => /sub-agent|CHILD/i.test(x))) bad.push('⑤blindSpots 에 병렬 sub-agent 없음 — 겹침이 가장 잘 나는 주체가 안 보인다');
+      dbg.blindSpots = bs.length;
+    }
+
+    // ⑥ 전역 오탐 대조군 — 정상 단일 세션·깨끗한 트리·정상 git 에서 **새 문구가 하나도 안 나온다**.
+    //    이번 라운드의 기본값은 침묵이다.
+    {
+      const d = mkRepo('quiet');
+      fs.writeFileSync(path.join(d, 'x.js'), 'x'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
+      const me = { LEERNESS_SESSION_ID: 'quietsession0001' };
+      RP(d, ['init', d, '--yes', '--minimal']);
+      const outs = [RP(d, ['handoff', d], me), RP(d, ['handoff', d, '--compact'], me), RP(d, ['hook', 'session-start'], me)];
+      const noise = ['주소 공유', '읽지 못함', 'LEERNESS_SESSION_ID 가 형식', '락 획득 실패'];
+      for (const r of outs) {
+        const txt = String(r.stdout || '') + String(r.stderr || '');
+        for (const w of noise) if (txt.includes(w)) bad.push(`⑥정상 상태인데 경고가 뜸: ${w}`);
+        if (r.status !== 0) bad.push(`⑥정상 흐름 exit=${r.status}`);
+      }
+      dbg.quiet = { surfaces: outs.length, exits: outs.map(r => r.status) };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AB(1.36.133/T-0109) P3-A 미구현 + 기반 결함: 워킹트리 계약 회복(커밋 누출 0 · 한글/공백 경로 보존 · 3상태 no-git≠not-a-repo) · 조회 명령이 사용자 .git/index 를 안 씀(초크포인트 밖 직접호출 0) · verify-claim 이 git 부재를 "저장소 아님" 이라 단정하지 않음 · 세션 레코드가 모르는 키를 조용히 지우지 않음(상한 초과는 말하고 버림) · blindSpots 에 병렬 sub-agent · 정상 상태 침묵 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.133 기반 결함 실패 ' + JSON.stringify({ bad: bad.slice(0, 10), dbg }));
+  if (!ok) failed++;
+}
+
 
 
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
