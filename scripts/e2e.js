@@ -13474,9 +13474,19 @@ total++;
   };
   //   제품의 워킹트리 판정을 **제품 소스에서 그대로 떼어** 돌린다(재구현하면 다른 것을 재게 된다).
   const _src = fs.readFileSync(path.resolve(__dirname, '..', 'bin', 'leerness.js'), 'utf8');
-  const _i = _src.indexOf('function _gitSpawn(args, opts)'), _j = _src.indexOf('function _gitChangedFiles(root)');
+  //   ⚠ 1.36.140: 종전 앵커는 `function _gitSpawn(args, opts)` 였는데, 그 함수를 `lib/git.js` 로 옮기자
+  //     앵커가 사라져 `indexOf` 가 -1 이 되고 추출이 조용히 깨졌다(게이트가 잡았다).
+  //     앵커는 **재려는 함수 자신**으로 잡고, git 실행은 제품의 진짜 초크포인트를 주입한다
+  //     (사본을 만들면 제품이 아니라 사본을 재게 된다).
+  const _i = _src.indexOf('function _gitWorkingTree(root)'), _j = _src.indexOf('function _gitChangedFiles(root)');
   let _gitWorkingTree = null;
-  try { _gitWorkingTree = (new Function('cp', _src.slice(_i, _j) + '\nreturn _gitWorkingTree;'))(cp); } catch (e) { bad.push('①제품 함수 추출 실패: ' + e.message); }
+  if (_i < 0 || _j <= _i) bad.push(`①제품 함수 앵커를 찾지 못함(i=${_i} j=${_j}) — 이름이 바뀌었으면 앵커도 바꿔야 한다`);
+  else {
+    try {
+      const _prodGitSpawn = require(path.resolve(__dirname, '..', 'lib', 'git.js')).gitSpawn;
+      _gitWorkingTree = (new Function('cp', '_gitSpawn', _src.slice(_i, _j) + '\nreturn _gitWorkingTree;'))(cp, _prodGitSpawn);
+    } catch (e) { bad.push('①제품 함수 추출 실패: ' + e.message); }
+  }
   try {
     // ① 워킹트리 계약 — 종전엔 `status` ∪ `diff HEAD~1 HEAD` 라 **커밋만 한 파일이 "지금 변경 중"** 으로 나왔고,
     //    비ASCII 경로는 git 의 8진 이스케이프를 안 풀어 `/355/225/…` 로 깨졌다(한국어 환경 전량 미탐).
@@ -13512,7 +13522,10 @@ total++;
       //    (검수 P1) 파싱만 고치고 **집합 정의는 그대로 둔다** — 워킹트리 전용으로 바꿨더니
       //    이미 커밋한 주장 파일이 "변경 안 됨" 이 돼 `verify-claim --strict-claims` 가 거짓 실패했다.
       const _chEnd = _src.indexOf('// 주장 파일이 git 변경 집합에');
-      const _ch = (new Function('cp', _src.slice(_i, _chEnd) + '\nreturn _gitChangedFiles;'))(cp);
+      //   ⚠ 1.36.140: 여기도 같은 앵커를 쓴다 — `_gitSpawn` 이 모듈로 빠졌으므로 함께 주입해야
+      //     호출 시점에 ReferenceError 로 죽으며 두 단언이 "없다" 로 잘못 발화한다(게이트가 잡았다).
+      const _ch = (new Function('cp', '_gitSpawn', _src.slice(_i, _chEnd) + '\nreturn _gitChangedFiles;'))(
+        cp, require(path.resolve(__dirname, '..', 'lib', 'git.js')).gitSpawn);
       fs.writeFileSync(path.join(d, 'committed-claim.js'), 'q'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'third']);
       fs.writeFileSync(path.join(d, 'now-dirty.js'), 'z');
       const chSet = _ch(d);
@@ -14042,8 +14055,249 @@ total++;
   if (!ok) failed++;
 }
 
+total++;
+// AD(1.36.140) — **초크포인트는 하나여야 한다.**
+//   1.36.135/139 는 `bin/leerness.js` 의 git 초크포인트에만 환경 세척을 넣었고,
+//   `lib/drift.js` · `lib/session-close.js` 는 같은 이름의 복제본을 갖고 있었다(세척 없음).
+//   기존 가드는 "인라인 배열 형태의 직접 호출 0건" 만 셌다 — 세 복제본이 전부 변수 형태라 **모양은 통과**했다.
+//   가드가 밟지 않는 경로는 가드가 지키지 못한다. 그래서 여기서는 **행위로** 잰다:
+//     상속된 GIT_DIR 아래에서 남의 저장소 브랜치가 지워지는가(실측: 고치기 전 60 → 10, 50건 삭제).
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-140-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG',
+    'GIT_DIR', 'GIT_WORK_TREE']) delete envP[k];
+  const G = (d, a, env) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP });
+  const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 300000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
+  const mkRepo = (name, nBranches) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    G(d, ['init', '-q', '-b', 'main', '.']); G(d, ['config', 'user.email', 't@t']); G(d, ['config', 'user.name', 't']);
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    fs.writeFileSync(path.join(d, 'a.txt'), 'a'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
+    for (let i = 0; i < nBranches; i++) G(d, ['branch', 'release/1.0.' + i]);   // main 에서 갈라졌으니 전부 merged
+    return d;
+  };
+  const relCount = (d) => (G(d, ['branch', '--list', 'release/*']).stdout || '').split('\n').filter(l => l.trim()).length;
+  try {
+    // ① **행위** — 상속된 GIT_DIR 이 남의 저장소를 지우지 못한다.
+    {
+      const victim = mkRepo('victim', 60);
+      const work = mkRepo('work', 0);
+      RP(work, ['init', work, '--yes', '--minimal']);
+      const before = relCount(victim);
+      const poisoned = Object.assign({}, envP, { GIT_DIR: path.join(victim, '.git') });
+      const r = RP(work, ['drift', 'check', '--auto-fix'], poisoned);
+      const after = relCount(victim);
+      if (after !== before) bad.push(`①상속된 GIT_DIR 로 남의 저장소 브랜치 ${before - after}개 삭제(${before}→${after})`);
+      dbg.crossRepo = { before, after, deleted: before - after, exit: r.status };
+      // ②   소문자로도 같은 결과여야 한다(Windows 환경변수는 대소문자를 구분하지 않는다).
+      //      ⚠ ① 과 **다른 저장소**를 쓴다 — 같은 것을 쓰면 ① 이 이미 10개로 줄여 놓아
+      //        정리 임계값(50+)에 못 미쳐 ② 가 조용히 통과한다(가드가 서로를 가린다).
+      const victim2 = mkRepo('victim2', 60);
+      const before2 = relCount(victim2);
+      const lower = Object.assign({}, envP); lower.git_dir = path.join(victim2, '.git');
+      RP(work, ['drift', 'check', '--auto-fix'], lower);
+      const after2 = relCount(victim2);
+      if (after2 !== before2) bad.push(`②소문자 git_dir 로 남의 저장소 브랜치 ${before2 - after2}개 삭제(${before2}→${after2})`);
+      dbg.lowercase = { before: before2, after: after2 };
+    }
+    // ③ **양성 대조군** — "안 지운다" 가 기능이 죽어서 0 인지 가른다. 제 저장소는 그대로 정리돼야 한다.
+    {
+      const own = mkRepo('own', 60);
+      RP(own, ['init', own, '--yes', '--minimal']);
+      const before = relCount(own);
+      const r = RP(own, ['drift', 'check', '--auto-fix']);
+      const after = relCount(own);
+      if (before - after !== 50) bad.push(`③제 저장소 정리가 동작하지 않음(${before}→${after}, 기대 50건 삭제) — 보호가 기능을 죽였다`);
+      dbg.ownRepo = { before, after, deleted: before - after, exit: r.status };
+    }
+    // ④ **구조** — git 실행 지점이 하나여야 한다. 복제본이 늘면 세척이 또 갈라진다.
+    {
+      const files = ['bin/leerness.js', 'lib/git.js', 'lib/drift.js', 'lib/session-close.js', 'lib/io.js', 'lib/analyzers.js'];
+      const sites = files.map((f) => {
+        let src = ''; try { src = fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8'); } catch { return [f, 0]; }
+        return [f, (src.match(/spawnSync\('git'/g) || []).length + (src.match(/execSync\('git/g) || []).length];
+      }).filter(([, n]) => n > 0);
+      if (sites.length !== 1 || sites[0][0] !== 'lib/git.js') {
+        bad.push(`④git 실행 지점이 하나가 아니다: ${JSON.stringify(sites)}`);
+      }
+      dbg.sites = sites;
+      //    그 한 곳이 실제로 세척하는지 — 모듈을 직접 불러 **어느 저장소를 가리키는지**를 본다.
+      //    ("실패했다" 로 재면 다른 이유로 실패해도 통과하는 공허한 단언이 된다.)
+      const gm = require(path.resolve(__dirname, '..', 'lib', 'git.js'));
+      const own = path.join(sb, 'own'), victim = path.join(sb, 'victim');
+      const seenDir = (envx) => {
+        const r = gm.gitSpawn(['rev-parse', '--absolute-git-dir'], { cwd: own, encoding: 'utf8', env: envx });
+        return r.status === 0 ? path.resolve(String(r.stdout).trim()) : 'ERR:' + r.status;
+      };
+      const clean = seenDir(envP);
+      const poisonedDir = seenDir(Object.assign({}, envP, { GIT_DIR: path.join(victim, '.git') }));
+      if (clean !== path.resolve(own, '.git')) bad.push(`④정상 환경에서 제 저장소를 못 찾음(${clean}) — 판별 불가`);
+      if (poisonedDir !== clean) bad.push(`④GIT_DIR 이 초크포인트를 통과해 대상이 바뀜(${poisonedDir})`);
+      dbg.chokeScrub = { clean, poisoned: poisonedDir };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AD(1.36.140) git 초크포인트 단일화: 상속된 GIT_DIR/git_dir 이 **남의 저장소 브랜치를 지우지 못함**(고치기 전 60→10) · 제 저장소 정리는 그대로(60→10) · 실행 지점 1곳 · 그 한 곳이 실제로 세척 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.140 git 초크포인트 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
 
 
+
+
+total++;
+// AE(1.36.140) — 재검수가 지적하고 **내가 재현한** 것들을 고정한다.
+//   전부 "고치려고 넣은 코드가 만든 다음 결함" 이다:
+//     · 복합 키 예산(1.36.139) → `date` 안의 `|` 로 두 항목이 같은 키가 되어 **무관 항목 삭제 + archive 불일치**
+//     · 롤백(1.36.134~139) → 정의가 실패 지점보다 뒤라 EPERM 이 최상위로 튀며 **체인 백업이 덮인 채 남음**
+//     · archive 를 락 밖에서 씀 → 동시 drop 둘 다 성공 보고 + 이중 archive → 복원이 중복 생성
+//   판정값은 모두 **실측 전/후 비교**다(문자열 존재가 아니라 무엇이 남았는지).
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-140b-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG',
+    'GIT_DIR', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'GIT_CEILING_DIRECTORIES']) delete envP[k];
+  const G = (d, a) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
+  const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 300000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
+  const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  const mk = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    G(d, ['init', '-q', '-b', 'main', '.']); G(d, ['config', 'user.email', 't@t']); G(d, ['config', 'user.name', 't']);
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    fs.writeFileSync(path.join(d, 'a.txt'), 'a'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
+    RP(d, ['init', d, '--yes', '--minimal']); RP(d, ['handoff', d]);
+    return d;
+  };
+  try {
+    // ① 구분자가 접혀도 **무관한 항목을 지우지 않는다** — 두 입력 순서 모두에서.
+    {
+      const res = {};
+      for (const order of ['target-first', 'bystander-first']) {
+        const d = mk('drop-' + order);
+        const lp = path.join(d, '.harness', 'lessons.json');
+        const A = { date: '2026-08-20', text: 'foo|bar', tag: 'TARGET' };       // 'foo|bar' 는 이것만 매칭
+        const B = { date: '2026-08-20|foo', text: 'bar', tag: 'BYSTANDER' };    // 복합 키로는 A 와 같아진다
+        fs.writeFileSync(lp, JSON.stringify(order === 'target-first' ? [A, B] : [B, A], null, 2) + '\n');
+        RP(d, ['lesson', 'drop', 'foo|bar', '--path', d]);
+        const after = JSON.parse(fs.readFileSync(lp, 'utf8')).map((x) => x.tag);
+        let arc = ''; try { arc = fs.readFileSync(path.join(d, '.harness', 'lessons.archive.md'), 'utf8'); } catch {}
+        res[order] = { after, archiveHasBystander: arc.includes('BYSTANDER') };
+        if (after.length !== 1 || after[0] !== 'BYSTANDER') bad.push(`①${order}: 무관 항목이 지워짐(남은 것=${JSON.stringify(after)})`);
+        if (arc.includes('BYSTANDER')) bad.push(`①${order}: archive 가 지우지 않은 항목을 지웠다고 기록`);
+      }
+      dbg.dropKey = res;
+    }
+    // ② 실패한 설치가 **기존 체인 백업을 파괴하지 않는다**(읽기 전용 훅 → 쓰기 EPERM).
+    {
+      const d = mk('rohook');
+      const hook = path.join(d, '.git', 'hooks', 'pre-commit');
+      const chain = hook + '.pre-leerness';
+      fs.mkdirSync(path.dirname(hook), { recursive: true });
+      fs.writeFileSync(hook, '#!/bin/sh\necho ORIGINAL-HOOK\n');
+      fs.writeFileSync(chain, '#!/bin/sh\necho ORIGINAL-CHAIN\n');
+      cp.spawnSync('attrib', ['+R', hook], { encoding: 'utf8' });
+      const j = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      cp.spawnSync('attrib', ['-R', hook], { encoding: 'utf8' });
+      let chainNow = ''; try { chainNow = fs.readFileSync(chain, 'utf8'); } catch {}
+      const preserved = /ORIGINAL-CHAIN/.test(chainNow);
+      //    이 축은 쓰기가 실제로 막혀야 의미가 있다 — 안 막혔으면 공허하므로 그 사실을 말한다.
+      const reallyFailed = !!j && j.ok === false;
+      if (!reallyFailed) bad.push('②읽기전용인데 설치가 성공 — 판별 조건이 서지 않았다(공허)');
+      else if (!preserved) bad.push('②실패한 설치가 기존 체인 백업을 파괴');
+      dbg.roHook = { installOk: j && j.ok, code: j && j.code, chainPreserved: preserved };
+    }
+    // ③ 동시 drop 둘 중 **하나만** 성공하고 archive 도 한 번만 쌓인다(복원이 중복을 만들지 않는다).
+    {
+      const d = mk('dupdrop');
+      const dj = path.join(d, '.harness', 'decisions.json');
+      fs.writeFileSync(dj, JSON.stringify([{ date: '2026-08-20', title: 'dup-title', decision: 'D', reason: 'R' }], null, 2) + '\n');
+      const marks = path.join(sb, 'marks'); fs.mkdirSync(marks, { recursive: true });
+      const runner = path.join(sb, 'dropr.js');
+      fs.writeFileSync(runner, [
+        'const cp=require("child_process"),fs=require("fs");const a=process.argv.slice(2);',
+        'const r=cp.spawnSync(process.execPath,[a[0],"decision","drop","dup-title","--path",a[1]],{cwd:a[1],encoding:"utf8",timeout:120000});',
+        'fs.writeFileSync(a[3]+"/"+a[2]+".done",String(r.status));',
+      ].join('\n'));
+      for (const i of ['0', '1']) {
+        const c = cp.spawn(process.execPath, [runner, CLI, d, i, marks], { cwd: d, env: envP, stdio: 'ignore', detached: true });
+        c.unref();
+      }
+      const sleep = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {} };
+      const dl = Date.now() + 180000;
+      while (fs.readdirSync(marks).length < 2 && Date.now() < dl) sleep(100);
+      const codes = fs.readdirSync(marks).map((f) => fs.readFileSync(path.join(marks, f), 'utf8')).sort();
+      let arc = ''; try { arc = fs.readFileSync(path.join(d, '.harness', 'decisions.archive.md'), 'utf8'); } catch {}
+      const blocks = (arc.match(/^## 제거 /gm) || []).length;
+      RP(d, ['memory', 'restore', 'decisions', 'dup-title', '--path', d]);
+      let restored = []; try { restored = JSON.parse(fs.readFileSync(dj, 'utf8')); } catch {}
+      if (codes.length !== 2) bad.push(`③동시 drop 두 프로세스가 끝나지 않음(${codes.length})`);
+      else if (codes.filter((c) => c === '0').length !== 1) bad.push(`③둘 다 성공이라 보고(exits=${JSON.stringify(codes)})`);
+      if (blocks !== 1) bad.push(`③archive 블록 ${blocks}개(기대 1) — 지우지 않은 것을 기록`);
+      if (restored.length !== 1) bad.push(`③복원이 ${restored.length}건을 만듦(기대 1)`);
+      dbg.dupDrop = { exits: codes, archiveBlocks: blocks, restoredCount: restored.length };
+    }
+    // ④ 없는 경로의 `roles unset` 이 디렉토리를 만들지 않는다.
+    {
+      const ghost = path.join(sb, 'ghost-parent', 'nope');
+      const r = RP(sb, ['roles', 'unset', 'coder', '--path', ghost]);
+      const created = fs.existsSync(ghost);
+      if (r.status === 0) bad.push('④없는 경로인데 성공이라 보고');
+      if (created) bad.push('④실패하면서 없는 경로를 만들었다');
+      dbg.ghostPath = { exit: r.status, created };
+    }
+    // ⑤ 한 번짜리 설정 주입(`GIT_CONFIG_COUNT`)이 **남의 저장소**에 훅을 쓰지 못한다 + 지목한 저장소에는 쓴다.
+    {
+      const foreign = mk('cfg-foreign'), target = mk('cfg-target');
+      const env = Object.assign({}, envP, {
+        GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath',
+        GIT_CONFIG_VALUE_0: path.join(foreign, '.git', 'hooks').replace(/\\/g, '/'),
+      });
+      RP(target, ['enforce', 'install', '--path', target, '--json', '--skip-verify'], env);
+      const foreignHook = fs.existsSync(path.join(foreign, '.git', 'hooks', 'pre-commit'));
+      const targetHook = fs.existsSync(path.join(target, '.git', 'hooks', 'pre-commit'));
+      if (foreignHook) bad.push('⑤설정 주입으로 남의 저장소에 훅을 씀');
+      if (!targetHook) bad.push('⑤지목한 저장소에 훅이 없음 — 강제가 아예 걸리지 않았다');
+      dbg.cfgInject = { foreignHook, targetHook };
+    }
+    // ⑥ 공유 판정이 **모양이 아니라 실제 위치**로 — 대소문자만 다른 `.GIT/hooks` 는 공유가 아니다.
+    {
+      const d = mk('casehooks');
+      G(d, ['config', 'core.hooksPath', '.GIT/hooks']);
+      const j = J(RP(d, ['enforce', 'status', '--path', d, '--json']));
+      if (!j || j.hooksPathShared !== false) bad.push(`⑥대소문자 차이를 공유로 오탐(hooksPathShared=${j && j.hooksPathShared})`);
+      dbg.caseHooks = { shared: j && j.hooksPathShared };
+    }
+    // ⑦ 연결된 worktree 사실을 고지한다(설정이 없어도 훅은 공용이다).
+    {
+      const main = mk('wtmain');
+      const wt = path.join(sb, 'wtlinked');
+      const add = G(main, ['worktree', 'add', '-qb', 'linked', wt]);
+      const j = J(RP(main, ['enforce', 'install', '--path', main, '--json', '--skip-verify']));
+      const human = String(RP(main, ['enforce', 'status', '--path', main]).stdout || '');
+      if (add.status !== 0) bad.push(`⑦worktree 생성 실패(${add.status}) — 판별 불가`);
+      else {
+        if (!j || j.worktrees !== 2) bad.push(`⑦worktree 수를 말하지 않음(${j && j.worktrees})`);
+        if (!/worktree 가 2개/.test(human)) bad.push('⑦사람 모드가 worktree 공용 사실을 말하지 않음');
+      }
+      dbg.worktree = { addExit: add.status, worktrees: j && j.worktrees, humanSays: /worktree 가 2개/.test(human) };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AE(1.36.140) 수정이 만든 다음 결함 고정: 복합 키가 접혀도 무관 항목 보존(두 순서) · 실패한 설치가 체인 백업을 파괴하지 않음 · 동시 drop 은 하나만 성공하고 archive 도 한 번 · 없는 경로에 디렉토리 안 만듦 · 한번짜리 설정 주입이 남의 저장소에 못 씀 · 대소문자 오탐 0 · worktree 공용 고지 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.140 후속결함 고정 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
 
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);

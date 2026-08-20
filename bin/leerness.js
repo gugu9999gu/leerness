@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.139';
+const VERSION = '1.36.140';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7247,7 +7247,31 @@ function enforceCmd(root, sub) {
       if (cd.status !== 0 || !String(cd.stdout || '').trim()) return null;   // 모르면 주장하지 않는다
       const gd = String(cd.stdout).trim();
       const abs = path.resolve(path.isAbsolute(gd) ? gd : path.join(root, gd));
-      return !path.resolve(hookP).startsWith(abs + path.sep);
+      //   1.36.140 (재검수 P1/P2, 재현): 문자열 비교는 **모양만** 본다 —
+      //     · `.git` 안의 junction/symlink 가 바깥 공유 디렉토리를 가리켜도 "안" 이라 읽어 미탐(실측).
+      //     · Windows 는 경로 대소문자를 안 가리는데 비교는 가려서, `.GIT/hooks` 가 "밖" 이 돼 오탐(실측).
+      //   실제 위치(realpath)로, 그리고 그 플랫폼이 쓰는 방식으로 비교한다.
+      const _real = (p) => {
+        let r = p;
+        try { r = fs.realpathSync.native ? fs.realpathSync.native(p) : fs.realpathSync(p); } catch { /* 없는 경로는 그대로 */ }
+        r = path.resolve(r);
+        return process.platform === 'win32' ? r.toLowerCase() : r;
+      };
+      //   훅 파일 자체는 아직 없을 수 있으므로 **디렉토리**로 비교한다.
+      const hookDir = _real(path.dirname(hookP));
+      const commonDir = _real(abs);
+      return !(hookDir === commonDir || hookDir.startsWith(commonDir + path.sep));
+    } catch { return null; }
+  })();
+  //   1.36.140 (재검수 P1, 재현): 연결된 worktree 들은 `core.hooksPath` 설정이 없어도 **같은 훅 파일**을 쓴다 —
+  //     한 worktree 에 설치하면 형제 worktree 의 커밋까지 차단된다. `hooksPathShared` 는 설정에 관한 사실이므로
+  //     그 뜻을 늘리지 않고, **별도 사실**로 센다(모르면 주장하지 않는다).
+  const _worktreeCount = (() => {
+    try {
+      const wl = _gitSpawn(['-C', root, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', timeout: 5000 });
+      if (wl.status !== 0) return null;
+      const n = String(wl.stdout || '').split('\n').filter((l) => l.startsWith('worktree ')).length;
+      return n > 0 ? n : null;
     } catch { return null; }
   })();
   const chainedP = hookP + '.pre-leerness';
@@ -7275,11 +7299,20 @@ function enforceCmd(root, sub) {
     // 1.36.135 (재검수 P1): 첫 판은 "백업이 있으면 그걸 되돌린다" 였는데 **재설치**에서 틀린다 —
     //   그때 백업은 *최초 설치 이전*의 사용자 훅이라, 되돌리면 **멀쩡히 동작하던 우리 강제가 조용히 사라진다**.
     //   되돌릴 대상은 "설치 이전" 이 아니라 "**이번 명령 이전**" 이다. 그 상태를 미리 찍어 두고 그대로 복원한다.
+    // 1.36.140 (재검수 P1, 재현): 바이트만 찍으면 **모양이 사라진다** — 기존 symlink 훅이 롤백에서
+    //   일반 파일이 되고, 깨진 symlink 는 `existsSync` 가 false 라 아예 지워졌다. 권한도 늘 0755 로 넓어졌다.
+    //   되돌린다는 것은 내용뿐 아니라 **종류와 권한**을 되돌리는 것이다.
+    const _lexists = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
+    const _snapOne = (p) => {
+      const st = fs.lstatSync(p);                      // 없으면 throw → 바깥에서 kind:'none'
+      if (st.isSymbolicLink()) return { kind: 'link', target: fs.readlinkSync(p) };
+      return { kind: 'file', buf: readBuf(p), mode: st.mode & 0o7777 };
+    };
     const _snapHook = (() => {
       try {
         return {
-          hook: exists(hookP) ? readBuf(hookP) : null,
-          chained: exists(chainedP) ? readBuf(chainedP) : null,
+          hook: _lexists(hookP) ? _snapOne(hookP) : { kind: 'none' },
+          chained: _lexists(chainedP) ? _snapOne(chainedP) : { kind: 'none' },
         };
       } catch { return null; }
     })();
@@ -7289,6 +7322,21 @@ function enforceCmd(root, sub) {
       failJson(json, 'snapshot_failed', `기존 훅 상태를 읽지 못해 설치를 시작하지 않았습니다 — 되돌릴 수 없는 변경은 하지 않습니다`);
       return;
     }
+    // 1.36.140 (재검수 P1, 재현): 롤백 정의가 **실패 지점보다 뒤**에 있었고 변경 구간을 감싸는 catch 가 없어,
+    //   읽기 전용 훅에서 쓰기가 EPERM 으로 튀면 예외가 최상위까지 올라가 **체인 백업이 덮인 채로 남았다**
+    //   (실측: 기존 `.pre-leerness` 내용이 사라지고 훅 내용으로 바뀜). 정의를 앞으로 옮기고 구간을 감싼다.
+    const _restoreOne = (p, snap) => {
+      if (_lexists(p)) { try { fs.unlinkSync(p); } catch {} }
+      if (snap.kind === 'none') return;
+      if (snap.kind === 'link') { fs.symlinkSync(snap.target, p); return; }
+      fs.writeFileSync(p, snap.buf);
+      try { fs.chmodSync(p, snap.mode); } catch {}     // 원래 권한으로 — 늘 0755 로 넓히지 않는다
+    };
+    const _rollbackHook = () => {
+      try { _restoreOne(hookP, _snapHook.hook); } catch { /* 되돌리지 못하면 아래 실패 보고에 드러난다 */ }
+      try { _restoreOne(chainedP, _snapHook.chained); } catch {}
+    };
+    try {
     mkdirp(path.dirname(hookP));
     // 기존 훅 보존: 우리 것이 아니면 체인 파일로 이동 후 호출
     if (exists(hookP) && !read(hookP).includes(_ENFORCE_MARK)) {
@@ -7416,15 +7464,6 @@ function enforceCmd(root, sub) {
         try { if (exists(probeHookP)) fs.unlinkSync(probeHookP); } catch {}   // 임시 사본은 남기지 않는다
       }
     };
-    const _rollbackHook = () => {
-      if (!_snapHook) return;
-      try {
-        if (_snapHook.hook === null) { if (exists(hookP)) fs.unlinkSync(hookP); }
-        else { fs.writeFileSync(hookP, _snapHook.hook); try { fs.chmodSync(hookP, 0o755); } catch {} }
-        if (_snapHook.chained === null) { if (exists(chainedP)) fs.unlinkSync(chainedP); }
-        else { fs.writeFileSync(chainedP, _snapHook.chained); try { fs.chmodSync(chainedP, 0o755); } catch {} }
-      } catch { /* 되돌리지 못하면 아래 실패 보고에 그대로 드러난다 */ }
-    };
     const _fired = _verifyHookFires();
     // 1.36.134 (검수 P1): `sh` 가 없어 **관측을 못 했는데** `ok:true` 로 답했다 — 이 라운드의 계약은
     //   "성공 = 발화하고 판별한다" 이므로, 관측 불가는 성공이 아니다. 사유와 함께 실패로 답한다.
@@ -7450,11 +7489,21 @@ function enforceCmd(root, sub) {
       failJson(json, 'config_write_failed', `설정을 저장하지 못해 설치를 되돌렸습니다: ${String(e && e.code || e.message || e).slice(0, 80)}`);
       return;
     }
-    if (json) { log(JSON.stringify({ ok: true, installed: true, windowHours, strict, hook: hookP, verified: _fired, hooksPathShared: _hooksShared }, null, 2)); return; }
+    if (json) { log(JSON.stringify({ ok: true, installed: true, windowHours, strict, hook: hookP, verified: _fired, hooksPathShared: _hooksShared, worktrees: _worktreeCount }, null, 2)); return; }
     ok(`enforce 설치 — 커밋 전 leerness 사용(최근 ${windowHours}h 내 handoff${strict ? ' + gate 통과' : ''})을 git pre-commit 에서 강제`);
+    log(`  훅 파일: ${hookP}`);
+    // 1.36.140 (재검수 P1): `--json` 에만 있던 공유 사실이 사람 출력에는 없었다 — 사람이 더 모른다.
+    if (_hooksShared === true) warn(`  ⚠ 이 훅은 **공유 core.hooksPath** 에 있습니다 — 같은 설정을 쓰는 다른 저장소에도 걸립니다`);
+    if (_worktreeCount > 1) warn(`  ⚠ 이 저장소는 worktree 가 ${_worktreeCount}개입니다 — 훅은 공용이라 **형제 worktree 의 커밋도** 차단됩니다`);
     log(`  대상: 어떤 에이전트/모드든(codex goal 모드 포함) — 커밋이 보편 관문이라 문서를 안 읽는 경로도 강제됨`);
     log(`  긴급 우회: LEERNESS_ENFORCE_BYPASS=1 git commit …  ·  해제: leerness enforce remove`);
     return;
+    } catch (e) {
+      //   되돌릴 수 있는 데까지 되돌리고, 무슨 일이 있었는지 말한다(조용한 중간 상태를 남기지 않는다).
+      _rollbackHook();
+      failJson(json, 'install_failed', `설치 중 실패해 되돌렸습니다: ${String((e && (e.code || e.message)) || e).slice(0, 120)}`);
+      return;
+    }
   }
   if (sub === 'check') {
     if (!exists(path.join(root, '.harness'))) return;   // leerness 미설치 저장소 — 강제 대상 아님(무음 통과)
@@ -7551,7 +7600,7 @@ function enforceCmd(root, sub) {
   // 1.36.134 (실측): 종전엔 git 아님 / unborn / 정상 / HEAD 손상 / gitdir 깨짐 **5상태에서 payload 가 동일**했다 —
   //   '설치 안 됨' 과 '설치할 데가 없음' 이 구분되지 않았다. 기존 필드는 그대로 두고 상태를 **추가**한다.
   const _gsStatus = _gitState(root);
-  if (json) { log(JSON.stringify({ installed, ...cfg, gitState: _gsStatus, installable: GIT_STATE_USABLE.has(_gsStatus), hooksPathShared: _hooksShared, hook: hookP }, null, 2)); return; }
+  if (json) { log(JSON.stringify({ installed, ...cfg, gitState: _gsStatus, installable: GIT_STATE_USABLE.has(_gsStatus), hooksPathShared: _hooksShared, worktrees: _worktreeCount, hook: hookP }, null, 2)); return; }
   log(`# leerness enforce — 사용 강제 (git pre-commit)`);
   log(`  상태: ${installed ? `🟢 설치됨 (window ${cfg.windowHours}h${cfg.strict ? ' · strict=gate' : ''})` : '⚪ 미설치'}`);
   log(`  ${installed ? '해제: leerness enforce remove' : '설치: leerness enforce install [--window 24] [--strict]'}`);
@@ -7559,6 +7608,7 @@ function enforceCmd(root, sub) {
   if (!GIT_STATE_USABLE.has(_gsStatus)) log(`  ⚠ 지금은 설치할 수 없습니다 (git 상태: ${_gsStatus})`);
   //   1.36.135: '설치됨' 이 프로젝트 전용이 아닐 수 있다 — 공유 hooksPath 는 그 설정을 쓰는 **모든** 저장소에 걸린다.
   if (_hooksShared === true) log(`  ⚠ 이 훅은 **공유 core.hooksPath** 에 있습니다(${hookP}) — 같은 설정을 쓰는 다른 저장소에도 걸립니다`);
+  if (_worktreeCount > 1) log(`  ⚠ 이 저장소는 worktree 가 ${_worktreeCount}개입니다 — 훅은 공용이라 **형제 worktree 의 커밋도** 차단됩니다`);
   // 1.36.44 (정직성): 한계 명시 — 과장 금지
   // 1.36.134 (실측): 이 줄의 `dm` 은 이 스코프에 없어 **정상 저장소에서도 `enforce status` 가 exit 1 로 죽었다**
   //   (`✗ dm is not defined`). e2e 가 `--json` 만 봐서 사람 경로의 크래시가 안 보였다 — 표면을 하나만 재면 이렇게 된다.
@@ -13524,39 +13574,37 @@ function lessonListCmd(root, opts = {}) {
 function lessonDropCmd(root, target) {
   root = absRoot(root);
   if (!target) return fail('lesson drop <date|text-substring> 필요. 예: leerness lesson drop "2026-05-20" 또는 leerness lesson drop "JWT"');
-  const kept = [];
-  const removed = [];
-  const all = _loadLessons(root);
-  if (!all.length) return failJson(has('--json'), 'no_lessons', 'lessons 없음');   // codex P2: --json 에러 구조화
-  for (const l of all) {
-    if (l.date === target || (l.text || '').includes(target)) removed.push(l);
-    else kept.push(l);
-  }
-  if (!removed.length) return failJson(has('--json'), 'lesson_not_found', `매칭 lesson 없음: "${target}"`);
   // archive 보존 — lessons.archive.md 에 projection MD 블록 형태로 추가
   const archivePath = path.join(root, '.harness/lessons.archive.md');
-  const archiveHeader = exists(archivePath) ? '' : '# Lessons archive\n\n';
-  // codex 버그헌트 P2: 사용자 텍스트(l.text/l.tag/target)를 archive MD 에 raw 삽입하면 개행으로
-  //   `## 제거 …` 델리미터를 위조해 가짜 archive 엔트리를 만들 수 있다(archive list/restore 오염). _lineSafe 로 개행 무력화.
-  const archiveBlocks = removed.map(l =>
-    `\n### ${_lineSafe(l.date)}\n- Lesson: ${_lineSafe(l.text)}\n${l.tag ? `- Tag: ${_lineSafe(l.tag)}\n` : ''}`
-  ).join('');
-  append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`);
-  // 1.36.138 (동시성 감사 실측): `lesson save` 는 락 안인데 **drop 은 락 밖**이었다 — 같은 클래스다.
-  //   락 안에서 다시 읽어 지울 것만 지운다(그 사이 저장된 교훈이 살아남는다).
-  //   ⚠ 같은 이유로 개수만큼만 지운다(동시 저장된 동일 키 교훈을 보존한다).
-  const _rmLCount = new Map();
-  for (const l of removed) { const k = `${l.date || ''}|${l.text || ''}`; _rmLCount.set(k, (_rmLCount.get(k) || 0) + 1); }
+  // 1.36.140 (재검수 P1, 재현): 종전엔 락 **밖**에서 매칭한 뒤 락 안에서 `${date}|${text}` 복합 키로
+  //   개수만큼 지웠다. `date` 안에 `|` 가 있으면 서로 다른 두 항목이 같은 키로 접혀
+  //   **무관한 항목이 지워지고 archive 에는 대상이 지워졌다고 적혔다**(실측: 순서를 뒤집으면 대상이 남았다).
+  //   키를 고치는 대신 **셈을 없앤다** — 판정을 락 안에서 다시 하면 키가 필요 없다.
+  //   archive 도 "지우려던 것" 이 아니라 **실제로 지운 것**을 락 안에서 남긴다
+  //   (그래야 동시 drop 두 개가 각각 1건 성공이라 보고하고 archive 를 두 번 쌓는 일이 없다).
+  let removed = [];
+  let loadErr = null;
   _withLock(lessonsJsonPath(root), () => {
     const cur = _loadLessons(root);
-    const budget = new Map(_rmLCount);
-    _saveLessons(root, cur.filter(l => {
-      const k = `${l.date || ''}|${l.text || ''}`;
-      const left = budget.get(k) || 0;
-      if (left > 0) { budget.set(k, left - 1); return false; }
-      return true;
-    }));
+    if (!cur.length) { loadErr = 'no_lessons'; return; }
+    const keep = [], gone = [];
+    for (const l of cur) {
+      if (l.date === target || (l.text || '').includes(target)) gone.push(l);
+      else keep.push(l);
+    }
+    if (!gone.length) { loadErr = 'lesson_not_found'; return; }
+    // codex 버그헌트 P2: 사용자 텍스트(l.text/l.tag/target)를 archive MD 에 raw 삽입하면 개행으로
+    //   `## 제거 …` 델리미터를 위조해 가짜 archive 엔트리를 만들 수 있다(archive list/restore 오염). _lineSafe 로 개행 무력화.
+    const archiveBlocks = gone.map(l =>
+      `\n### ${_lineSafe(l.date)}\n- Lesson: ${_lineSafe(l.text)}\n${l.tag ? `- Tag: ${_lineSafe(l.tag)}\n` : ''}`
+    ).join('');
+    const archiveHeader = exists(archivePath) ? '' : '# Lessons archive\n\n';
+    append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`);
+    _saveLessons(root, keep);
+    removed = gone;
   });
+  if (loadErr === 'no_lessons') return failJson(has('--json'), 'no_lessons', 'lessons 없음');   // codex P2: --json 에러 구조화
+  if (loadErr === 'lesson_not_found' || !removed.length) return failJson(has('--json'), 'lesson_not_found', `매칭 lesson 없음: "${target}"`);
   ok(`lesson dropped: ${removed.length}건 (보존: .harness/lessons.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -13633,41 +13681,37 @@ function decisionDropCmd(root, target) {
   root = absRoot(root);
   if (!target) return fail('decision drop <date|title-substring> 필요. 예: leerness decision drop "2026-05-20" 또는 leerness decision drop "PostgreSQL"');
   // 1.9.339 (UR-0053): canonical JSON 기준 drop (date 또는 title substring 매칭) — JSON+MD projection 동시 갱신.
-  const all = _loadDecisions(root);
-  if (!all.length) return failJson(has('--json'), 'no_decisions', 'decisions 없음');   // codex P2: --json 에러 구조화
-  const kept = [];
-  const removed = [];
-  for (const d of all) {
-    if (d.date === target || (d.title || '').includes(target)) removed.push(d);
-    else kept.push(d);
-  }
-  if (!removed.length) return failJson(has('--json'), 'decision_not_found', `매칭 decision 없음: "${target}"`);
-  // archive 보존 (projection MD 블록 형태)
   const archivePath = path.join(root, '.harness/decisions.archive.md');
-  const archiveHeader = exists(archivePath) ? '' : '# Decisions archive\n\n';
-  // codex 버그헌트 P2: 사용자 필드 raw 삽입 → 개행으로 `## 제거` 델리미터 위조 가능. _lineSafe 로 무력화.
-  const archiveBlocks = removed.map(d => {
-    const head = d.date ? `${_lineSafe(d.date)} — ${_lineSafe(d.title)}` : _lineSafe(d.title);
-    return `\n### ${head}\n- Decision: ${_lineSafe(d.decision || '')}\n- Reason: ${_lineSafe(d.reason || '')}\n- Alternatives: ${_lineSafe(d.alternatives || '')}\n- Impact: ${_lineSafe(d.impact || '')}\n`;
-  }).join('');
-  append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`);
   // 1.36.138 (동시성 감사 실측): `decision add` 는 락 안인데 **drop 은 락 밖**이었다 —
   //   드롭이 위에서 읽은 낡은 배열을 그대로 되써서 **락 안에서 커밋된 add 를 파괴**했다(8동시에서 1~3건).
-  //   위험한 조합은 add+add 가 아니라 **add + drop** 이다. 락 안에서 **다시 읽어** 지울 것만 지운다.
-  //   ⚠ 1.36.139 (재검수 P1): 키가 같은 항목이 여럿이면 Set 매칭이 **그 사이 추가된 동일 키 항목까지** 지웠다.
-  //     지울 것은 "이 키를 가진 전부" 가 아니라 **내가 세어 둔 개수만큼**이다. 애매하면 남기는 쪽으로 실패한다.
-  const _rmCount = new Map();
-  for (const d of removed) { const k = `${d.date || ''}|${d.title || ''}`; _rmCount.set(k, (_rmCount.get(k) || 0) + 1); }
+  //   위험한 조합은 add+add 가 아니라 **add + drop** 이다.
+  // 1.36.140 (재검수 P1, 재현): 그 다음 판인 `${date}|${title}` 개수 예산은 **구분자가 접혔다** —
+  //   `date` 안의 `|` 로 서로 다른 두 항목이 같은 키가 되어 무관한 항목이 지워지고
+  //   archive 에는 대상이 지워졌다고 적혔다(복원 불가). 키를 고치는 대신 **셈을 없앤다**:
+  //   판정을 락 안에서 다시 하고, archive 는 **실제로 지운 것**을 같은 락 안에서 남긴다.
+  let removed = [];
+  let loadErr = null;
   _withLock(decisionsJsonPath(root), () => {
     const cur = _loadDecisions(root);
-    const budget = new Map(_rmCount);
-    _saveDecisions(root, cur.filter(d => {
-      const k = `${d.date || ''}|${d.title || ''}`;
-      const left = budget.get(k) || 0;
-      if (left > 0) { budget.set(k, left - 1); return false; }
-      return true;
-    }));
+    if (!cur.length) { loadErr = 'no_decisions'; return; }
+    const keep = [], gone = [];
+    for (const d of cur) {
+      if (d.date === target || (d.title || '').includes(target)) gone.push(d);
+      else keep.push(d);
+    }
+    if (!gone.length) { loadErr = 'decision_not_found'; return; }
+    // codex 버그헌트 P2: 사용자 필드 raw 삽입 → 개행으로 `## 제거` 델리미터 위조 가능. _lineSafe 로 무력화.
+    const archiveBlocks = gone.map(d => {
+      const head = d.date ? `${_lineSafe(d.date)} — ${_lineSafe(d.title)}` : _lineSafe(d.title);
+      return `\n### ${head}\n- Decision: ${_lineSafe(d.decision || '')}\n- Reason: ${_lineSafe(d.reason || '')}\n- Alternatives: ${_lineSafe(d.alternatives || '')}\n- Impact: ${_lineSafe(d.impact || '')}\n`;
+    }).join('');
+    const archiveHeader = exists(archivePath) ? '' : '# Decisions archive\n\n';
+    append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`);
+    _saveDecisions(root, keep);
+    removed = gone;
   });
+  if (loadErr === 'no_decisions') return failJson(has('--json'), 'no_decisions', 'decisions 없음');   // codex P2: --json 에러 구조화
+  if (loadErr === 'decision_not_found' || !removed.length) return failJson(has('--json'), 'decision_not_found', `매칭 decision 없음: "${target}"`);
   ok(`decision dropped: ${removed.length}건 (보존: .harness/decisions.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -16622,25 +16666,11 @@ function _gitState(root) {
   return sr.status === 0 ? 'unborn' : 'broken';
 }
 const GIT_STATE_USABLE = new Set(['ok', 'unborn']);
-function _gitSpawn(args, opts) {
-  //   ⚠ 인자 배열을 **변수로 먼저** 만든다. 인라인 배열 호출 형태를 여기 두면
-  //     이 함수가 자기 자신을 초크포인트 전환 대상으로 잡아 무한 재귀가 된다
-  //     (실제로 한 번 그렇게 만들어 스택 오버플로로 모든 git 조회가 'git-error' 가 됐다).
-  //     가드도 이 형태를 세므로 주석에도 적지 않는다(자기참조 트랩).
-  const _argv = ['--no-optional-locks', ...args];
-  // 1.36.135 (재검수 P1, 재현): 환경에 `GIT_DIR`/`GIT_WORK_TREE` 가 있으면 우리가 `-C <root>` 로 지목한 것과
-  //   **다른 저장소**를 조작한다. 실측: `--path B`(git 아님) 로 설치했는데 저장소 **A** 의 훅이 1→2 로 늘고 ok:true.
-  //   사용자가 지목하지 않은 저장소를 고치는 것은 어떤 이유로도 정당화되지 않는다.
-  //   우리는 항상 `-C` 로 대상을 명시하므로, 그 명시를 덮어쓰는 환경변수는 **전부 걷어낸다**.
-  //   ⚠ 1.36.139 (재검수 P1, 재현): 대문자 키만 지웠더니 **소문자 `git_dir` 로 그대로 우회**됐다 —
-  //     Windows 환경변수는 대소문자를 구분하지 않는데 JS 객체 키는 구분한다(실측: A 의 훅이 1→2).
-  //     이름을 **접어서** 비교한다. 목록에 없는 `GIT_*` 도 대상 후보이므로 접두로도 훑는다.
-  const _env = Object.assign({}, (opts && opts.env) || process.env);
-  const _drop = new Set(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR',
-    'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE']);
-  for (const k of Object.keys(_env)) if (_drop.has(k.toUpperCase())) delete _env[k];
-  return cp.spawnSync('git', _argv, Object.assign({}, opts, { env: _env }));
-}
+// 1.36.140 (재검수 자체발견 P1): 초크포인트가 **셋**인데 세척은 여기 하나뿐이었다.
+//   `lib/drift.js` · `lib/session-close.js` 가 같은 이름의 함수를 복제해 두고 환경을 안 걷어냈고,
+//   그 복제본이 `git branch -d` 를 부른다 — 실측으로 **남의 저장소 브랜치 50개가 지워졌다**.
+//   세척을 세 곳에 다시 심는 대신 실행 지점을 `lib/git.js` **하나**로 만들었다.
+const _gitSpawn = require('../lib/git').gitSpawn;
 function _gitWorkingTree(root) {
   let r;
   try {
@@ -24583,6 +24613,11 @@ function _suggestRoles(root) {
 // leerness roles <list|set|unset|catalog|suggest|verify>
 function rolesCmd(root, sub, ...args) {
   root = absRoot(root || process.cwd());
+  // 1.36.140 (재검수 P3, 재현): 오타 난 `--path` 로 `roles unset` 하면 **실패하면서 그 경로와 `.harness/` 를 만들었다**.
+  //   락/쓰기 헬퍼가 부모 디렉토리를 만들기 때문이다. 없는 경로면 아무것도 만들지 않고 그 사실을 말한다.
+  if (!exists(root)) {
+    return failJson(has('--json'), 'path_not_found', `경로가 없습니다: ${root} — 디렉토리를 새로 만들지 않았습니다`);
+  }
   try { _loadEnvFile(root); _loadEnvFile(path.join(root, '..')); } catch {}
   const json = has('--json');
   sub = sub || 'list';
@@ -24625,7 +24660,8 @@ function rolesCmd(root, sub, ...args) {
   if (sub === 'unset' || sub === 'remove' || sub === 'rm') {
     const role = _normalizeRole(args.find(a => a && !a.startsWith('-')));
     // 1.36.139 (재검수 P1): 존재 판정이 **락 밖**이라 동시 제거 두 개가 모두 "제거했다" 고 답했다.
-    //   판정과 변경은 같은 락 안에 있어야 한다 — mutate 가 문자열을 돌려주면 `_updateRoles` 가 실패로 다룬다.
+    //   판정과 변경은 같은 락 안에 있어야 한다 — mutate 가 `false` 를 돌려주면 `_updateRoles` 가 쓰지 않고,
+    //   사유는 바깥의 `_unsetErr` 로 전달한다(락 안에서 출력하지 않는다).
     let _unsetErr = null;
     const f = _updateRoles(root, (roles) => {
       if (!roles[role]) { _unsetErr = `설정되지 않은 역할: ${role}`; return false; }
