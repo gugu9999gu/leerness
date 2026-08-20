@@ -13679,7 +13679,13 @@ total++;
     'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
   const RP = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 300000, env: envP, maxBuffer: 32 * 1024 * 1024 });
-  const G = (d, a) => cp.spawnSync('git', ['--no-optional-locks', '-C', d, ...a], { encoding: 'utf8', timeout: 60000 });
+  //   ⚠ 1.36.140 (재검수 P1): 픽스처가 사용자의 **전역/시스템 git 설정을 상속**하면,
+  //     전역 `core.hooksPath` 를 쓰는 환경에서 이 테스트가 **사용자 실제 훅**을 갈아끼우고 남긴다.
+  //     샌드박스 안 빈 파일로 고정해 격리한다(제품은 이 두 변수를 일부러 안 걷어낸다 — 그래서 격리가 전파된다).
+  envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gitconfig-global');
+  envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gitconfig-system');
+  try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
+  const G = (d, a) => cp.spawnSync('git', ['--no-optional-locks', '-C', d, ...a], { encoding: 'utf8', timeout: 60000, env: envP });
   const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
   //   git 자신이 말하는 훅 경로(core.hooksPath 반영) — 하드코딩하면 이 클래스를 못 잡는다.
   const _gitHookOf = (d) => {
@@ -14070,6 +14076,12 @@ total++;
     'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
     'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG',
     'GIT_DIR', 'GIT_WORK_TREE']) delete envP[k];
+  //   ⚠ 1.36.140 (재검수 P1): 픽스처가 사용자의 **전역/시스템 git 설정을 상속**하면,
+  //     전역 `core.hooksPath` 를 쓰는 환경에서 이 테스트가 **사용자 실제 훅**을 갈아끼우고 남긴다.
+  //     샌드박스 안 빈 파일로 고정해 격리한다(제품은 이 두 변수를 일부러 안 걷어내므로 격리가 전파된다).
+  envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gitconfig-global');
+  envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gitconfig-system');
+  try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
   const G = (d, a, env) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP });
   const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 300000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
@@ -14117,7 +14129,15 @@ total++;
     }
     // ④ **구조** — git 실행 지점이 하나여야 한다. 복제본이 늘면 세척이 또 갈라진다.
     {
-      const files = ['bin/leerness.js', 'lib/git.js', 'lib/drift.js', 'lib/session-close.js', 'lib/io.js', 'lib/analyzers.js'];
+      //   ⚠ 고정 목록은 **새 모듈**을 놓친다(목록에 없는 파일이 git 을 직접 불러도 0건으로 보인다).
+      //     배포되는 소스를 전수 열거한다.
+      const _root = path.resolve(__dirname, '..');
+      const files = [];
+      for (const dir of ['bin', 'lib']) {
+        let ents = []; try { ents = fs.readdirSync(path.join(_root, dir)); } catch {}
+        for (const f of ents) if (f.endsWith('.js')) files.push(dir + '/' + f);
+      }
+      if (files.length < 3) bad.push(`④소스 열거가 ${files.length}건 — 계측이 붕괴했다`);
       const sites = files.map((f) => {
         let src = ''; try { src = fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8'); } catch { return [f, 0]; }
         return [f, (src.match(/spawnSync\('git'/g) || []).length + (src.match(/execSync\('git/g) || []).length];
@@ -14166,6 +14186,12 @@ total++;
     'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
     'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG',
     'GIT_DIR', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'GIT_CEILING_DIRECTORIES']) delete envP[k];
+  //   ⚠ 1.36.140 (재검수 P1): 픽스처가 사용자의 **전역/시스템 git 설정을 상속**하면,
+  //     전역 `core.hooksPath` 를 쓰는 환경에서 이 테스트가 **사용자 실제 훅**을 갈아끼우고 남긴다.
+  //     샌드박스 안 빈 파일로 고정해 격리한다(제품은 이 두 변수를 일부러 안 걷어낸다 — 그래서 격리가 전파된다).
+  envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gitconfig-global');
+  envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gitconfig-system');
+  try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
   const G = (d, a) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
   const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 300000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
@@ -14205,16 +14231,32 @@ total++;
       fs.mkdirSync(path.dirname(hook), { recursive: true });
       fs.writeFileSync(hook, '#!/bin/sh\necho ORIGINAL-HOOK\n');
       fs.writeFileSync(chain, '#!/bin/sh\necho ORIGINAL-CHAIN\n');
-      cp.spawnSync('attrib', ['+R', hook], { encoding: 'utf8' });
-      const j = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
-      cp.spawnSync('attrib', ['-R', hook], { encoding: 'utf8' });
+      //    ⚠ 읽기전용 주입은 플랫폼마다 다르다 — Windows 는 `attrib +R`, POSIX 는 부모 디렉토리 권한.
+      //      종전엔 `attrib` 만 썼어서 Linux 에선 주입이 무효화되고 정상 설치가 **테스트 실패**로 찍혔다.
+      //      주입이 실제로 먹혔는지를 먼저 확인하고, 안 먹혔으면 실패가 아니라 **건너뛰었다고** 말한다.
+      const hookDir = path.dirname(hook);
+      let injected = false;
+      if (process.platform === 'win32') {
+        cp.spawnSync('attrib', ['+R', hook], { encoding: 'utf8' });
+      } else {
+        try { fs.chmodSync(hook, 0o444); fs.chmodSync(hookDir, 0o555); } catch {}
+      }
+      try { fs.writeFileSync(hook, 'probe'); } catch { injected = true; }   // 쓸 수 없어야 주입 성공
+      let j = null;
+      if (injected) j = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      if (process.platform === 'win32') cp.spawnSync('attrib', ['-R', hook], { encoding: 'utf8' });
+      else { try { fs.chmodSync(hookDir, 0o755); fs.chmodSync(hook, 0o644); } catch {} }
       let chainNow = ''; try { chainNow = fs.readFileSync(chain, 'utf8'); } catch {}
       const preserved = /ORIGINAL-CHAIN/.test(chainNow);
-      //    이 축은 쓰기가 실제로 막혀야 의미가 있다 — 안 막혔으면 공허하므로 그 사실을 말한다.
-      const reallyFailed = !!j && j.ok === false;
-      if (!reallyFailed) bad.push('②읽기전용인데 설치가 성공 — 판별 조건이 서지 않았다(공허)');
-      else if (!preserved) bad.push('②실패한 설치가 기존 체인 백업을 파괴');
-      dbg.roHook = { installOk: j && j.ok, code: j && j.code, chainPreserved: preserved };
+      if (!injected) {
+        dbg.roHook = { skipped: '이 플랫폼에서 쓰기를 막지 못해 미검증' };
+      } else if (!(j && j.ok === false)) {
+        bad.push(`②쓰기를 막았는데 설치가 성공(ok=${j && j.ok}) — 판별 조건이 서지 않았다`);
+        dbg.roHook = { installOk: j && j.ok, chainPreserved: preserved };
+      } else {
+        if (!preserved) bad.push('②실패한 설치가 기존 체인 백업을 파괴');
+        dbg.roHook = { installOk: j.ok, code: j.code, chainPreserved: preserved };
+      }
     }
     // ③ 동시 drop 둘 중 **하나만** 성공하고 archive 도 한 번만 쌓인다(복원이 중복을 만들지 않는다).
     {
@@ -14246,14 +14288,21 @@ total++;
       if (restored.length !== 1) bad.push(`③복원이 ${restored.length}건을 만듦(기대 1)`);
       dbg.dupDrop = { exits: codes, archiveBlocks: blocks, restoredCount: restored.length };
     }
-    // ④ 없는 경로의 `roles unset` 이 디렉토리를 만들지 않는다.
+    // ④ 없는 경로의 **쓰기**는 거절하고 디렉토리를 만들지 않는다 —
+    //    그러나 **조회는 그대로 돌아야 한다**. 첫 판은 검사를 명령 진입부에 둬서
+    //    없는 경로에서도 잘 돌던 `roles catalog`(정적) · `roles list`(읽기) 를 exit 1 로 만들었다(회귀).
+    //    한쪽만 재면 과차단으로 되돌아가도 통과한다 — 양쪽을 같이 잰다.
     {
       const ghost = path.join(sb, 'ghost-parent', 'nope');
-      const r = RP(sb, ['roles', 'unset', 'coder', '--path', ghost]);
+      const w1 = RP(sb, ['roles', 'unset', 'coder', '--path', ghost]);
+      const w2 = RP(sb, ['roles', 'set', 'coder', '--provider', 'codex', '--force', '--path', ghost]);
       const created = fs.existsSync(ghost);
-      if (r.status === 0) bad.push('④없는 경로인데 성공이라 보고');
+      const rd = ['catalog', 'list'].map((s) => RP(sb, ['roles', s, '--path', ghost]).status);
+      if (w1.status === 0) bad.push('④없는 경로인데 unset 이 성공이라 보고');
+      if (w2.status === 0) bad.push('④없는 경로인데 set 이 성공이라 보고');
       if (created) bad.push('④실패하면서 없는 경로를 만들었다');
-      dbg.ghostPath = { exit: r.status, created };
+      if (rd.some((s) => s !== 0)) bad.push(`④조회 하위명령까지 막았다(catalog/list exit=${JSON.stringify(rd)}) — 과차단 회귀`);
+      dbg.ghostPath = { unset: w1.status, set: w2.status, created, readExits: rd };
     }
     // ⑤ 한 번짜리 설정 주입(`GIT_CONFIG_COUNT`)이 **남의 저장소**에 훅을 쓰지 못한다 + 지목한 저장소에는 쓴다.
     {

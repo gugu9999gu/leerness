@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.140';
+const VERSION = '1.36.141';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7251,10 +7251,19 @@ function enforceCmd(root, sub) {
       //     · `.git` 안의 junction/symlink 가 바깥 공유 디렉토리를 가리켜도 "안" 이라 읽어 미탐(실측).
       //     · Windows 는 경로 대소문자를 안 가리는데 비교는 가려서, `.GIT/hooks` 가 "밖" 이 돼 오탐(실측).
       //   실제 위치(realpath)로, 그리고 그 플랫폼이 쓰는 방식으로 비교한다.
-      const _real = (p) => {
-        let r = p;
-        try { r = fs.realpathSync.native ? fs.realpathSync.native(p) : fs.realpathSync(p); } catch { /* 없는 경로는 그대로 */ }
-        r = path.resolve(r);
+      //   ⚠ 없는 경로면 realpath 가 그대로 되돌려줘 **링크를 따라가지 못한다**(아직 없는 훅 디렉토리 등).
+      //     존재하는 **가장 깊은 조상**까지 풀고 나머지를 다시 붙인다.
+      const _real = (p0) => {
+        let head = path.resolve(p0);
+        const tail = [];
+        for (let i = 0; i < 64; i++) {
+          try { head = fs.realpathSync.native ? fs.realpathSync.native(head) : fs.realpathSync(head); break; } catch {}
+          const parent = path.dirname(head);
+          if (!parent || parent === head) break;
+          tail.unshift(path.basename(head));
+          head = parent;
+        }
+        const r = path.resolve(head, ...tail);
         return process.platform === 'win32' ? r.toLowerCase() : r;
       };
       //   훅 파일 자체는 아직 없을 수 있으므로 **디렉토리**로 비교한다.
@@ -7268,6 +7277,10 @@ function enforceCmd(root, sub) {
   //     그 뜻을 늘리지 않고, **별도 사실**로 센다(모르면 주장하지 않는다).
   const _worktreeCount = (() => {
     try {
+      //   ⚠ `core.hooksPath` 가 **worktree 범위**면 그 worktree 전용 훅이라 형제는 안 막힌다 —
+      //     그때 "형제도 차단된다" 고 말하면 거짓 경고다(재검수 P2). 모르면 주장하지 않는다.
+      const wsc = _gitSpawn(['-C', root, 'config', '--show-scope', '--get', 'core.hooksPath'], { encoding: 'utf8', timeout: 5000 });
+      if (wsc.status === 0 && String(wsc.stdout || '').trim().split(/\s+/)[0] === 'worktree') return null;
       const wl = _gitSpawn(['-C', root, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', timeout: 5000 });
       if (wl.status !== 0) return null;
       const n = String(wl.stdout || '').split('\n').filter((l) => l.startsWith('worktree ')).length;
@@ -7326,16 +7339,34 @@ function enforceCmd(root, sub) {
     //   읽기 전용 훅에서 쓰기가 EPERM 으로 튀면 예외가 최상위까지 올라가 **체인 백업이 덮인 채로 남았다**
     //   (실측: 기존 `.pre-leerness` 내용이 사라지고 훅 내용으로 바뀜). 정의를 앞으로 옮기고 구간을 감싼다.
     const _restoreOne = (p, snap) => {
+      //   ⚠ 지우고 나서 쓰면 그 사이에 실패했을 때 **원본이 사라진다**. 흔한 경우(파일 → 파일)는
+      //     제자리 덮어쓰기로 그 틈을 없애고, 종류가 바뀔 때만 지운다.
+      if (snap.kind === 'file') {
+        const cur = _lexists(p) ? (() => { try { return fs.lstatSync(p); } catch { return null; } })() : null;
+        if (cur && !cur.isSymbolicLink()) {
+          try {
+            fs.writeFileSync(p, snap.buf);
+            try { fs.chmodSync(p, snap.mode); } catch {}   // 원래 권한으로 — 늘 0755 로 넓히지 않는다
+            return;
+          } catch { /* 제자리 쓰기가 막히면 아래 지우고-쓰기로 넘어간다 */ }
+        }
+      }
       if (_lexists(p)) { try { fs.unlinkSync(p); } catch {} }
       if (snap.kind === 'none') return;
       if (snap.kind === 'link') { fs.symlinkSync(snap.target, p); return; }
       fs.writeFileSync(p, snap.buf);
-      try { fs.chmodSync(p, snap.mode); } catch {}     // 원래 권한으로 — 늘 0755 로 넓히지 않는다
+      try { fs.chmodSync(p, snap.mode); } catch {}
     };
+    // 1.36.140 (재검수 P1): 되돌리기가 실패해도 조용히 삼키고 "되돌렸습니다" 라고 말했다 —
+    //   되돌리지 못한 것을 되돌렸다고 하면 안 된다. 실패를 모아 실패 보고에 함께 싫는다.
+    let _rbFail = [];
     const _rollbackHook = () => {
-      try { _restoreOne(hookP, _snapHook.hook); } catch { /* 되돌리지 못하면 아래 실패 보고에 드러난다 */ }
-      try { _restoreOne(chainedP, _snapHook.chained); } catch {}
+      _rbFail = [];
+      try { _restoreOne(hookP, _snapHook.hook); } catch (e) { _rbFail.push('hook:' + String((e && (e.code || e.message)) || e).slice(0, 40)); }
+      try { _restoreOne(chainedP, _snapHook.chained); } catch (e) { _rbFail.push('chain:' + String((e && (e.code || e.message)) || e).slice(0, 40)); }
+      return _rbFail.length === 0;
     };
+    const _rbNote = () => (_rbFail.length ? ` ⚠ 되돌리지 못한 것: ${_rbFail.join(' · ')}` : '');
     try {
     mkdirp(path.dirname(hookP));
     // 기존 훅 보존: 우리 것이 아니면 체인 파일로 이동 후 호출
@@ -7470,13 +7501,13 @@ function enforceCmd(root, sub) {
     //   (opt-out: 관측 수단이 없는 환경에서 그래도 걸고 싶으면 `--skip-verify`.)
     if (_fired === 'skipped' && !has('--skip-verify')) {
       _rollbackHook();
-      failJson(json, 'verify_unavailable', `훅 발화를 확인할 수 없습니다(sh 없음) — 관측하지 못한 강제를 성공이라 하지 않습니다. 그래도 설치하려면 --skip-verify`);
+      failJson(json, 'verify_unavailable', `훅 발화를 확인할 수 없습니다(sh 없음) — 관측하지 못한 강제를 성공이라 하지 않습니다. 그래도 설치하려면 --skip-verify` + _rbNote());
       return;
     }
     if (_fired === 'not-fired') {
       //   ⚠ 실패한 설치가 흔적을 남기면 안 된다(검수 P1): 우리 훅·백업·설정 전부 이전 상태로 되돌린다.
       _rollbackHook();
-      failJson(json, 'hook_inert', `훅을 썼지만 발화하지 않습니다 (${hookP}) — core.hooksPath 리다이렉트·실행권한·sh 부재를 확인하세요`);
+      failJson(json, 'hook_inert', `훅을 썼지만 발화하지 않습니다 (${hookP}) — core.hooksPath 리다이렉트·실행권한·sh 부재를 확인하세요` + _rbNote());
       return;
     }
     // 1.36.136 (재검수 P1, 재현): 이 쓰기가 실패하면 **훅은 설치된 채로 남고** raw 예외가 튀어나왔다
@@ -7486,7 +7517,7 @@ function enforceCmd(root, sub) {
       writeUtf8(_enforceCfgPath(root), JSON.stringify({ windowHours, strict, installedAt: now() }, null, 2) + '\n');
     } catch (e) {
       _rollbackHook();
-      failJson(json, 'config_write_failed', `설정을 저장하지 못해 설치를 되돌렸습니다: ${String(e && e.code || e.message || e).slice(0, 80)}`);
+      failJson(json, 'config_write_failed', `설정을 저장하지 못해 설치를 되돌렸습니다: ${String(e && e.code || e.message || e).slice(0, 80)}` + _rbNote());
       return;
     }
     if (json) { log(JSON.stringify({ ok: true, installed: true, windowHours, strict, hook: hookP, verified: _fired, hooksPathShared: _hooksShared, worktrees: _worktreeCount }, null, 2)); return; }
@@ -7501,7 +7532,7 @@ function enforceCmd(root, sub) {
     } catch (e) {
       //   되돌릴 수 있는 데까지 되돌리고, 무슨 일이 있었는지 말한다(조용한 중간 상태를 남기지 않는다).
       _rollbackHook();
-      failJson(json, 'install_failed', `설치 중 실패해 되돌렸습니다: ${String((e && (e.code || e.message)) || e).slice(0, 120)}`);
+      failJson(json, 'install_failed', `설치 중 실패해 되돌렸습니다: ${String((e && (e.code || e.message)) || e).slice(0, 120)}` + _rbNote());
       return;
     }
   }
@@ -13573,6 +13604,9 @@ function lessonListCmd(root, opts = {}) {
 // 1.9.124: lesson drop — lessons.md 에서 특정 date 또는 text 매칭 블록 제거
 function lessonDropCmd(root, target) {
   root = absRoot(root);
+  // 1.36.140 (재검수 P3): 락/쓰기 헬퍼가 부모를 만들기 때문에, 오타 난 `--path` 로 실패하면서도
+  //   그 경로와 `.harness/` 를 만들었다(1.36.139 는 안 만들었다 — 대조군). 없으면 아무것도 만들지 않는다.
+  if (!exists(root)) return failJson(has('--json'), 'path_not_found', `경로가 없습니다: ${root} — 디렉토리를 새로 만들지 않았습니다`);
   if (!target) return fail('lesson drop <date|text-substring> 필요. 예: leerness lesson drop "2026-05-20" 또는 leerness lesson drop "JWT"');
   // archive 보존 — lessons.archive.md 에 projection MD 블록 형태로 추가
   const archivePath = path.join(root, '.harness/lessons.archive.md');
@@ -13679,6 +13713,9 @@ function decisionListCmd(root, opts = {}) {
 // 1.9.125: decision drop — decisions.md 에서 특정 결정 제거 (date 또는 title substring 매칭)
 function decisionDropCmd(root, target) {
   root = absRoot(root);
+  // 1.36.140 (재검수 P3): 락/쓰기 헬퍼가 부모를 만들기 때문에, 오타 난 `--path` 로 실패하면서도
+  //   그 경로와 `.harness/` 를 만들었다(1.36.139 는 안 만들었다 — 대조군). 없으면 아무것도 만들지 않는다.
+  if (!exists(root)) return failJson(has('--json'), 'path_not_found', `경로가 없습니다: ${root} — 디렉토리를 새로 만들지 않았습니다`);
   if (!target) return fail('decision drop <date|title-substring> 필요. 예: leerness decision drop "2026-05-20" 또는 leerness decision drop "PostgreSQL"');
   // 1.9.339 (UR-0053): canonical JSON 기준 drop (date 또는 title substring 매칭) — JSON+MD projection 동시 갱신.
   const archivePath = path.join(root, '.harness/decisions.archive.md');
@@ -24615,9 +24652,14 @@ function rolesCmd(root, sub, ...args) {
   root = absRoot(root || process.cwd());
   // 1.36.140 (재검수 P3, 재현): 오타 난 `--path` 로 `roles unset` 하면 **실패하면서 그 경로와 `.harness/` 를 만들었다**.
   //   락/쓰기 헬퍼가 부모 디렉토리를 만들기 때문이다. 없는 경로면 아무것도 만들지 않고 그 사실을 말한다.
-  if (!exists(root)) {
-    return failJson(has('--json'), 'path_not_found', `경로가 없습니다: ${root} — 디렉토리를 새로 만들지 않았습니다`);
-  }
+  //   ⚠ 첫 판은 이 검사를 **명령 진입부**에 뒀는데, 그러자 없는 경로에서도 잘 돌던
+  //     `roles catalog`(정적 목록) · `roles list`(읽기) 가 exit 1 이 됐다(대조군으로 확인: 1.36.139 는 둘 다 exit 0).
+  //     막아야 할 것은 조회가 아니라 **쓰기**다. 쓰는 하위명령에서만 부른다.
+  const _requireExistingPath = () => {
+    if (exists(root)) return false;
+    failJson(has('--json'), 'path_not_found', `경로가 없습니다: ${root} — 디렉토리를 새로 만들지 않았습니다`);
+    return true;
+  };
   try { _loadEnvFile(root); _loadEnvFile(path.join(root, '..')); } catch {}
   const json = has('--json');
   sub = sub || 'list';
@@ -24645,6 +24687,7 @@ function rolesCmd(root, sub, ...args) {
     let model = arg('--model', null);
     if (!model) model = _pickModel(provider, (ROLE_CATALOG[role] || {}).modelKind || 'top');
     const persona = arg('--persona', null) || (ROLE_CATALOG[role] ? ROLE_CATALOG[role].desc : '');
+    if (_requireExistingPath()) return;
     const f = _updateRoles(root, (roles) => { roles[role] = { provider, model: model || null, persona }; });
     // 비활성 provider 경고 (verify 사전 노출)
     let warnMsg = '';
@@ -24662,6 +24705,7 @@ function rolesCmd(root, sub, ...args) {
     // 1.36.139 (재검수 P1): 존재 판정이 **락 밖**이라 동시 제거 두 개가 모두 "제거했다" 고 답했다.
     //   판정과 변경은 같은 락 안에 있어야 한다 — mutate 가 `false` 를 돌려주면 `_updateRoles` 가 쓰지 않고,
     //   사유는 바깥의 `_unsetErr` 로 전달한다(락 안에서 출력하지 않는다).
+    if (_requireExistingPath()) return;
     let _unsetErr = null;
     const f = _updateRoles(root, (roles) => {
       if (!roles[role]) { _unsetErr = `설정되지 않은 역할: ${role}`; return false; }
@@ -24676,6 +24720,7 @@ function rolesCmd(root, sub, ...args) {
   if (sub === 'suggest') {
     const { ready, suggestions } = _suggestRoles(root);
     if (has('--apply')) {
+      if (_requireExistingPath()) return;
       let applied = 0;
       const f = _updateRoles(root, (roles) => {
         applied = 0;
