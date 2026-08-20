@@ -7259,7 +7259,26 @@ function enforceCmd(root, sub) {
       const tl = _gitSpawn(['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 10000 });
       if (tl.status === 0 && String(tl.stdout || '').trim()) topLevel = path.resolve(String(tl.stdout).trim());
     }
-    const harnessRel = (path.relative(topLevel, path.join(root, '.harness')) || '.harness').replace(/\\/g, '/');
+    // 1.36.134 (재검수 P1, 재현): junction/symlink 로 저장소를 열면 `path.relative` 가 toplevel **밖**을 가리키는
+    //   `../…` 를 만들어 그것이 영구 훅에 박혔다(실측: `LRN_DIR='../__container/alias/.harness'`).
+    //   양쪽을 realpath 로 펴서 비교하고, 그래도 밖이면 상대경로로 표현하지 않고 **절대경로**를 쓴다.
+    let _hDir = path.join(root, '.harness'), _top = topLevel;
+    try { _hDir = fs.realpathSync(_hDir); } catch {}
+    try { _top = fs.realpathSync(_top); } catch {}
+    let harnessRel = (path.relative(_top, _hDir) || '.harness').replace(/\\/g, '/');
+    if (harnessRel.startsWith('..')) harnessRel = _hDir.replace(/\\/g, '/');
+    // 1.36.134 (검수 P1, 재현): 이 값을 훅 셸 스크립트에 그대로 박았다 — 디렉토리 이름이 `pkg$(touch PWNED)` 면
+    //   **설치만으로 임의 코드가 실행**됐다(실측: PWNED 생성). 값을 신뢰하지 않는다.
+    //   ① 셸에서 특별한 뜻을 갖는 문자가 하나라도 있으면 설치를 거부한다(조용히 이스케이프하고 넘어가지 않는다 —
+    //      우리가 못 다루는 입력을 다루는 척하지 않는다). ② 그리고 작은따옴표로 감싼다(따옴표 자체는 위 검사가 막는다).
+    //   ⚠ 첫 판은 화이트리스트로 **거부**했는데 그게 오차단이었다 — 실측: `내프로젝트`(한글)와 `my project`(공백)가
+    //     둘 다 `unsafe_path` 로 막혔다. 한국어 환경에서 흔한 경로다. 거부가 아니라 **제대로 인용**하는 것이 답이다.
+    //     POSIX sh 의 작은따옴표 안에서는 `'` 를 제외한 모든 문자가 리터럴이다 — `'` 만 표준 관용구로 탈출시킨다.
+    const shQuote = (v) => "'" + String(v).replace(/'/g, "'\''") + "'";
+    if (/[\r\n]/.test(harnessRel)) {
+      failJson(json, 'unsafe_path', `경로에 개행이 있어 훅 스크립트에 넣을 수 없습니다: ${JSON.stringify(harnessRel)}`);
+      return;
+    }
     const hook = [
       '#!/bin/sh',
       _ENFORCE_MARK + ' — leerness 사용 강제 (제거: leerness enforce remove)',
@@ -7267,7 +7286,7 @@ function enforceCmd(root, sub) {
       // 1.36.134 (검수 P1, 재현): 훅은 **git toplevel** 에서 돈다. `.harness` 가 하위 디렉토리에 있으면
       //   `-d ".harness"` 가 거짓이라 조용히 통과했다 — 설치는 `verified:'fired'` 인데 루트 커밋이 그냥 통과.
       //   설치 시점에 **toplevel 기준 상대경로**를 훅에 박아 넣어, 커밋이 어디서 나든 같은 곳을 본다.
-      `LRN_DIR="${harnessRel}"`,
+      `LRN_DIR=${shQuote(harnessRel)}`,
       '# 1.36.44: .harness 없는 체크아웃(워크트리/구브랜치)은 강제 대상 아님 — 오차단(FP) 방지',
       'if [ ! -d "$LRN_DIR" ]; then',
       '  if [ -f "$(dirname "$0")/pre-commit.pre-leerness" ]; then exec sh "$(dirname "$0")/pre-commit.pre-leerness" "$@"; fi',
@@ -7282,7 +7301,14 @@ function enforceCmd(root, sub) {
       'fi',
       // 1.36.134 (검수 P1): 설치 중 발화 검증이 **사용자의 기존 훅과 strict gate 를 실제로 두 번 실행**했다
       //   (부작용 · 기존 훅이 enforce install 을 부르면 재귀). 검증 모드에서는 **자기 판정만 하고 즉시 끝낸다.**
-      'if [ -n "$LEERNESS_ENFORCE_PROBE" ]; then exit 0; fi',
+      // 1.36.134 (검수 P1, 재현): 이것을 **환경변수**로 두자 실제 커밋에서 우회 통로가 됐다 —
+      //   체인된 사용자 훅이 exit 1 인 저장소에서 `LEERNESS_ENFORCE_PROBE=1 git commit` 이 통과했다.
+      //   git 은 pre-commit 을 **인자 없이** 부른다 → 인자로 바꾸면 사용자가 환경으로 켤 수 없다.
+      //   1.36.134 (재검수 P1 ×2, 재현): 검증용 조기 종료를 **출하되는 훅에 넣지 않는다.**
+      //     환경변수로 두자 `LEERNESS_ENFORCE_PROBE=1 git commit` 이 체인 훅을 건너뛰었고,
+      //     인자로 바꾸자 `git hook run pre-commit -- --leerness-probe` 로 또 뚫렸다.
+      //     사용자가 켤 수 있는 스위치를 훅에 두면 그것이 곧 우회 통로다 — **스위치 자체를 없앤다.**
+      //     검증은 아래에서 체인·strict 를 걷어낸 **임시 사본**으로 돌린다(출하물에 흔적 0).
       ...(strict ? [
         'if command -v leerness >/dev/null 2>&1; then LEERNESS_INTERNAL=1 leerness gate . || exit 1;',
         'elif command -v npx >/dev/null 2>&1; then LEERNESS_INTERNAL=1 npx -y leerness gate . || exit 1; fi',
@@ -7297,6 +7323,13 @@ function enforceCmd(root, sub) {
     //   다른 두 저장소가 하나는 커밋 차단, 하나는 그냥 통과). 관측하지 못한 강제를 주장하지 않는다.
     //   → 쓴 훅을 **git 이 부르는 방식대로 직접 두 번 돌려** 판별성을 확인한다(커밋 불필요, 프로세스 2개).
     //     handoff 흔적이 창 안이면 통과(0), 창 밖이면 차단(≠0) 이어야 한다. 둘이 같으면 그 훅은 죽은 파일이다.
+    //   검증 전용 사본: 체인 호출과 strict gate 줄만 걷어낸 같은 스크립트. 임시 디렉토리에 두고 끝나면 지운다.
+    //   출하되는 훅에는 검증 분기가 없으므로 사용자가 켤 수 있는 우회 스위치도 없다.
+    const probeHookP = path.join(os.tmpdir(), `leerness-probe-${process.pid}-${Date.now()}.sh`);
+    try {
+      writeUtf8(probeHookP, hook.split('\n').filter(l => !/pre-commit\.pre-leerness|leerness gate \./.test(l)).join('\n'));
+      try { fs.chmodSync(probeHookP, 0o755); } catch {}
+    } catch { /* 못 만들면 아래 검증이 'skipped' 로 답한다 */ }
     const _verifyHookFires = () => {
       const lhp = _lastHandoffPath(root);
       //   ⚠ 이 파일은 **실데이터**다. 내용뿐 아니라 **mtime 도** 되돌려야 한다 —
@@ -7310,8 +7343,9 @@ function enforceCmd(root, sub) {
         //   PROBE=1 이면 훅이 자기 판정 직후 끝난다 — 사용자 기존 훅·strict gate 를 실행하지 않는다.
         //   ⚠ cwd 는 **git 이 훅을 부르는 곳**(toplevel)이어야 한다 — `root` 로 재면 하위 디렉토리 설치에서
         //     "발화한다" 고 잘못 답한다(실제로 그렇게 오답했고 루트 커밋이 통과했다).
-        const r = cp.spawnSync('sh', [hookP], { cwd: topLevel, encoding: 'utf8', timeout: 20000,
-          env: Object.assign({}, process.env, { LEERNESS_ENFORCE_BYPASS: '', LEERNESS_ENFORCE_PROBE: '1' }) });
+        //   체인·strict 를 뺀 **임시 사본**을 돌린다 — 사용자 기존 훅과 gate 는 실행되지 않는다(부작용 0 · 재귀 0).
+        const r = cp.spawnSync('sh', [probeHookP], { cwd: topLevel, encoding: 'utf8', timeout: 20000,
+          env: Object.assign({}, process.env, { LEERNESS_ENFORCE_BYPASS: '' }) });
         if (r.error) return null;                                  // sh 가 없다 — 판정하지 않는다
         return r.status;
       };
@@ -7335,6 +7369,7 @@ function enforceCmd(root, sub) {
           if (saved === null) { if (exists(lhp)) fs.unlinkSync(lhp); }
           else { writeUtf8(lhp, saved); if (savedTimes) fs.utimesSync(lhp, savedTimes[0], savedTimes[1]); }
         } catch {}
+        try { if (exists(probeHookP)) fs.unlinkSync(probeHookP); } catch {}   // 임시 사본은 남기지 않는다
       }
     };
     // 1.36.134 (검수 P1): 설치가 실패하면 **흔적을 남기지 않는다** — 종전엔 실패해도 우리 훅과 `.pre-leerness`

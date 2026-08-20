@@ -235,5 +235,5 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.36.134: 2026-08-19
+Last synced by Leerness v1.36.134: 2026-08-20
 <!-- leerness:project-readme:end -->

@@ -13856,6 +13856,38 @@ total++;
       dbg.noTrace = { userHookRuns: ran, bareOk: bi && bi.ok, failLeft, bareHookLeft: fs.existsSync(bareHook) };
     }
 
+    //   ⑮ **출하되는 훅에 우회 스위치가 없다.** (재검수 P1 ×2, 재현)
+    //      검증용 조기 종료를 환경변수로 두자 `LEERNESS_ENFORCE_PROBE=1 git commit` 이 체인 훅을 건너뛰었고,
+    //      인자로 바꾸자 `git hook run pre-commit -- --leerness-probe` 로 또 뚫렸다.
+    //      사용자가 켤 수 있는 스위치를 훅에 두면 그것이 곧 우회 통로다 — 스위치 자체를 없애고
+    //      검증은 체인·strict 를 걷어낸 **임시 사본**으로만 돌린다.
+    {
+      const d = mk('noswitch', commit);
+      RP(d, ['handoff', d]);
+      const ins = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      if (!ins || ins.ok !== true) bad.push(`⑮설치 실패 ok=${ins && ins.ok}`);
+      const hookP = ins && ins.hook;
+      //    ① 설치된 훅 파일 자체에 검증용 분기가 **한 글자도** 없어야 한다.
+      if (hookP && fs.existsSync(hookP)) {
+        const body = fs.readFileSync(hookP, 'utf8');
+        if (/ENFORCE_PROBE|leerness-probe/.test(body)) bad.push('⑮출하되는 훅에 검증용 우회 스위치가 남아 있다');
+      } else bad.push('⑮훅 파일을 찾지 못함(계측 붕괴)');
+      //    ② 행위로 확인 — 오래된 handoff 에서 어떤 스위치를 써도 커밋이 통과하면 안 된다.
+      const lhp = path.join(d, '.harness', 'last-handoff.json');
+      const old = new Date(Date.now() - 200 * 3600000); try { fs.utimesSync(lhp, old, old); } catch {}
+      fs.writeFileSync(path.join(d, 'p1.txt'), '1'); G(d, ['add', '-A']);
+      const viaEnv = cp.spawnSync('git', ['--no-optional-locks', '-C', d, 'commit', '-m', 'env'],
+        { encoding: 'utf8', timeout: 60000, env: Object.assign({}, envP, { LEERNESS_ENFORCE_PROBE: '1' }) });
+      if (viaEnv.status === 0) bad.push('⑮환경변수로 강제가 우회됨');
+      const viaRun = G(d, ['hook', 'run', 'pre-commit', '--', '--leerness-probe']);
+      if (viaRun.status === 0) bad.push('⑮`git hook run` 에 인자를 넘겨 강제가 우회됨');
+      //    ③ 임시 사본이 남지 않는다.
+      const leftovers = fs.readdirSync(os.tmpdir()).filter(f => /^leerness-probe-/.test(f)).length;
+      if (leftovers > 0) bad.push(`⑮검증용 임시 사본 ${leftovers}개 잔존`);
+      dbg.noSwitch = { hookHasSwitch: hookP && fs.existsSync(hookP) ? /ENFORCE_PROBE|leerness-probe/.test(fs.readFileSync(hookP, 'utf8')) : null,
+        envBypass: viaEnv.status === 0, runBypass: viaRun.status === 0, leftovers };
+    }
+
     //   ⑫ **설치 행위가 자기가 설치하는 게이트를 약화시키지 않는다.** 발화 검증은 `.harness/last-handoff.json`(실데이터)을
     //      임시로 덮는데, 훅이 신선도를 판정하는 근거가 그 파일의 **mtime** 이다 — 안 되돌리면 설치만으로
     //      "방금 handoff 했다" 가 되어 다음 windowHours 동안 무임승차가 생긴다(실측으로 그렇게 만들었다가 고쳤다).
