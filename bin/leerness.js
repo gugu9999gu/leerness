@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.137';
+const VERSION = '1.36.139';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7229,8 +7229,20 @@ function enforceCmd(root, sub) {
   //   모든 저장소에 걸린다. 실측: A 에만 설치했는데 B 가 `installed:true` 이고 B 의 커밋이 차단됐다 —
   //   사용자는 B 를 opt-in 한 적이 없다. 이건 git 의 설계라 **차단하지 않는다**. 다만 프로젝트 전용 설치인 척
   //   말하지 않는다 — 공유라는 사실을 표면에 싣는다("설치됨" 이 무엇을 뜻하는지 사용자가 알아야 한다).
+  //   1.36.139 (재검수 P1): 첫 판은 **경로 포함관계**로 추정했다 — 공유 설정이 우연히 저장소 안을 가리키면 미탐,
+  //     로컬 설정이 저장소 밖을 가리키면 오탐이었다. 추정 대신 **git 에게 범위를 묻는다**:
+  //     `core.hooksPath` 가 global/system 에서 왔으면 다른 저장소에도 걸린다. local 이면 이 저장소 것이다.
   const _hooksShared = (() => {
     try {
+      //   두 조건의 **합집합**이다 — 어느 쪽이든 이 저장소 밖에 영향이 간다:
+      //     (1) 설정이 global/system 에서 왔다(다른 저장소도 같은 훅을 쓴다)
+      //     (2) 훅 경로가 이 저장소의 git 디렉토리 **밖**이다(다른 저장소가 같은 디렉토리를 가리킬 수 있다).
+      //   (1)만 쓰면 두 저장소가 각자 local 설정으로 같은 디렉토리를 가리키는 **실제 공유**를 놓친다(게이트가 잡았다).
+      //   (2)만 쓰면 검수가 지적한 오탐/미탐이 남는다. 둘 다 본다.
+      const sc = _gitSpawn(['-C', root, 'config', '--show-scope', '--get', 'core.hooksPath'], { encoding: 'utf8', timeout: 5000 });
+      const scope = sc.status === 0 ? (String(sc.stdout || '').trim().split(/\s+/)[0] || '') : '';
+      if (scope === 'global' || scope === 'system') return true;
+      if (sc.status !== 0) return false;                       // 설정 없음 → 기본 훅 디렉토리(공유 아님)
       const cd = _gitSpawn(['-C', root, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', timeout: 5000 });
       if (cd.status !== 0 || !String(cd.stdout || '').trim()) return null;   // 모르면 주장하지 않는다
       const gd = String(cd.stdout).trim();
@@ -7271,6 +7283,12 @@ function enforceCmd(root, sub) {
         };
       } catch { return null; }
     })();
+    // 1.36.139 (재검수 P1): 스냅샷을 못 찍었는데 설치를 계속하면 **롤백이 무동작**이 된다 —
+    //   실패해도 되돌릴 수 없는 설치가 된다. 되돌릴 수 없으면 시작하지 않는다.
+    if (!_snapHook) {
+      failJson(json, 'snapshot_failed', `기존 훅 상태를 읽지 못해 설치를 시작하지 않았습니다 — 되돌릴 수 없는 변경은 하지 않습니다`);
+      return;
+    }
     mkdirp(path.dirname(hookP));
     // 기존 훅 보존: 우리 것이 아니면 체인 파일로 이동 후 호출
     if (exists(hookP) && !read(hookP).includes(_ENFORCE_MARK)) {
@@ -13524,7 +13542,21 @@ function lessonDropCmd(root, target) {
     `\n### ${_lineSafe(l.date)}\n- Lesson: ${_lineSafe(l.text)}\n${l.tag ? `- Tag: ${_lineSafe(l.tag)}\n` : ''}`
   ).join('');
   append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`);
-  _saveLessons(root, kept);
+  // 1.36.138 (동시성 감사 실측): `lesson save` 는 락 안인데 **drop 은 락 밖**이었다 — 같은 클래스다.
+  //   락 안에서 다시 읽어 지울 것만 지운다(그 사이 저장된 교훈이 살아남는다).
+  //   ⚠ 같은 이유로 개수만큼만 지운다(동시 저장된 동일 키 교훈을 보존한다).
+  const _rmLCount = new Map();
+  for (const l of removed) { const k = `${l.date || ''}|${l.text || ''}`; _rmLCount.set(k, (_rmLCount.get(k) || 0) + 1); }
+  _withLock(lessonsJsonPath(root), () => {
+    const cur = _loadLessons(root);
+    const budget = new Map(_rmLCount);
+    _saveLessons(root, cur.filter(l => {
+      const k = `${l.date || ''}|${l.text || ''}`;
+      const left = budget.get(k) || 0;
+      if (left > 0) { budget.set(k, left - 1); return false; }
+      return true;
+    }));
+  });
   ok(`lesson dropped: ${removed.length}건 (보존: .harness/lessons.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -13619,7 +13651,23 @@ function decisionDropCmd(root, target) {
     return `\n### ${head}\n- Decision: ${_lineSafe(d.decision || '')}\n- Reason: ${_lineSafe(d.reason || '')}\n- Alternatives: ${_lineSafe(d.alternatives || '')}\n- Impact: ${_lineSafe(d.impact || '')}\n`;
   }).join('');
   append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`);
-  _saveDecisions(root, kept);
+  // 1.36.138 (동시성 감사 실측): `decision add` 는 락 안인데 **drop 은 락 밖**이었다 —
+  //   드롭이 위에서 읽은 낡은 배열을 그대로 되써서 **락 안에서 커밋된 add 를 파괴**했다(8동시에서 1~3건).
+  //   위험한 조합은 add+add 가 아니라 **add + drop** 이다. 락 안에서 **다시 읽어** 지울 것만 지운다.
+  //   ⚠ 1.36.139 (재검수 P1): 키가 같은 항목이 여럿이면 Set 매칭이 **그 사이 추가된 동일 키 항목까지** 지웠다.
+  //     지울 것은 "이 키를 가진 전부" 가 아니라 **내가 세어 둔 개수만큼**이다. 애매하면 남기는 쪽으로 실패한다.
+  const _rmCount = new Map();
+  for (const d of removed) { const k = `${d.date || ''}|${d.title || ''}`; _rmCount.set(k, (_rmCount.get(k) || 0) + 1); }
+  _withLock(decisionsJsonPath(root), () => {
+    const cur = _loadDecisions(root);
+    const budget = new Map(_rmCount);
+    _saveDecisions(root, cur.filter(d => {
+      const k = `${d.date || ''}|${d.title || ''}`;
+      const left = budget.get(k) || 0;
+      if (left > 0) { budget.set(k, left - 1); return false; }
+      return true;
+    }));
+  });
   ok(`decision dropped: ${removed.length}건 (보존: .harness/decisions.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -16584,9 +16632,13 @@ function _gitSpawn(args, opts) {
   //   **다른 저장소**를 조작한다. 실측: `--path B`(git 아님) 로 설치했는데 저장소 **A** 의 훅이 1→2 로 늘고 ok:true.
   //   사용자가 지목하지 않은 저장소를 고치는 것은 어떤 이유로도 정당화되지 않는다.
   //   우리는 항상 `-C` 로 대상을 명시하므로, 그 명시를 덮어쓰는 환경변수는 **전부 걷어낸다**.
+  //   ⚠ 1.36.139 (재검수 P1, 재현): 대문자 키만 지웠더니 **소문자 `git_dir` 로 그대로 우회**됐다 —
+  //     Windows 환경변수는 대소문자를 구분하지 않는데 JS 객체 키는 구분한다(실측: A 의 훅이 1→2).
+  //     이름을 **접어서** 비교한다. 목록에 없는 `GIT_*` 도 대상 후보이므로 접두로도 훑는다.
   const _env = Object.assign({}, (opts && opts.env) || process.env);
-  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR',
-    'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE']) delete _env[k];
+  const _drop = new Set(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR',
+    'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE']);
+  for (const k of Object.keys(_env)) if (_drop.has(k.toUpperCase())) delete _env[k];
   return cp.spawnSync('git', _argv, Object.assign({}, opts, { env: _env }));
 }
 function _gitWorkingTree(root) {
@@ -24498,7 +24550,8 @@ function _loadRoles(root) {
 function _updateRoles(root, mutate) {
   return _withLock(_rolesFile(root), () => {
     const roles = _loadRoles(root);
-    mutate(roles);
+    //   mutate 가 false 를 돌려주면 **쓰지 않는다** — 바꿀 것이 없는데 파일을 건드리지 않는다.
+    if (mutate(roles) === false) return null;
     return _saveRoles(root, roles);
   });
 }
@@ -24571,8 +24624,14 @@ function rolesCmd(root, sub, ...args) {
 
   if (sub === 'unset' || sub === 'remove' || sub === 'rm') {
     const role = _normalizeRole(args.find(a => a && !a.startsWith('-')));
-    if (!_loadRoles(root)[role]) return fail(`설정되지 않은 역할: ${role}`);
-    const f = _updateRoles(root, (roles) => { delete roles[role]; });
+    // 1.36.139 (재검수 P1): 존재 판정이 **락 밖**이라 동시 제거 두 개가 모두 "제거했다" 고 답했다.
+    //   판정과 변경은 같은 락 안에 있어야 한다 — mutate 가 문자열을 돌려주면 `_updateRoles` 가 실패로 다룬다.
+    let _unsetErr = null;
+    const f = _updateRoles(root, (roles) => {
+      if (!roles[role]) { _unsetErr = `설정되지 않은 역할: ${role}`; return false; }
+      delete roles[role];
+    });
+    if (_unsetErr) return fail(_unsetErr);
     if (json) { log(JSON.stringify({ removed: role, file: f }, null, 2)); return; }
     ok(`역할 제거: ${role}`);
     return;
