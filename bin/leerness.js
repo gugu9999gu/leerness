@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.136';
+const VERSION = '1.36.137';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -22319,6 +22319,15 @@ function _readUsageStats(root) {
 }
 function _bumpUsage(root, cmdName) {
   // 가벼운 카운터 — 명령 실행마다 호출 (sync write로 작은 파일)
+  // 1.36.137 (동시성 감사 실측): 이 함수는 **모든 명령이 공유하는 단 하나의 파일**을 락 없이 RMW 했다 —
+  //   2 프로세스부터 카운터가 38~46% 사라졌다(8프로세스×15회=120 실행 → 74 계수). exit 0 · 경고 0 · 손상 0.
+  //   카운터 하나 때문에 명령을 오래 붙잡을 수는 없으므로 **짧은 대기**만 준다 —
+  //   못 잡으면 `_withLock` 이 fail-open 으로 진행한다(드물게 한 건 놓치는 것이, 40%를 잃는 것보다 낫다).
+  try {
+    return _withLock(_usageStatsPath(root), () => _bumpUsageLocked(root, cmdName), { maxWaitMs: 300 });
+  } catch { /* 카운터 실패가 명령을 실패시키지 않는다 */ }
+}
+function _bumpUsageLocked(root, cmdName) {
   try {
     const stats = _readUsageStats(root);
     if (!stats.commands) stats.commands = {};
@@ -24482,6 +24491,17 @@ function _loadRoles(root) {
   if (!exists(f)) return {};
   try { const j = JSON.parse(read(f)); return (j && j.roles && typeof j.roles === 'object') ? j.roles : {}; } catch { return {}; }
 }
+// 1.36.137 (동시성 감사 실측): `roles set/unset/suggest --apply` 는 load→mutate→save 를 **락 없이** 했다 —
+//   4 프로세스만으로 28.8%, 16 프로세스에서 11~15/16 만 살아남았다(exit 0 · 경고 0 · 손상 0).
+//   저장만 잠그면 소용이 없다(읽기와 쓰기 사이가 창이다). 읽기·변경·쓰기를 **한 락 안**에 묶는다 —
+//   1.36.108 이 rules.md 에서 만든 형태 그대로다.
+function _updateRoles(root, mutate) {
+  return _withLock(_rolesFile(root), () => {
+    const roles = _loadRoles(root);
+    mutate(roles);
+    return _saveRoles(root, roles);
+  });
+}
 function _saveRoles(root, roles) {
   const f = _rolesFile(root);
   mkdirp(path.dirname(f));
@@ -24537,9 +24557,7 @@ function rolesCmd(root, sub, ...args) {
     let model = arg('--model', null);
     if (!model) model = _pickModel(provider, (ROLE_CATALOG[role] || {}).modelKind || 'top');
     const persona = arg('--persona', null) || (ROLE_CATALOG[role] ? ROLE_CATALOG[role].desc : '');
-    const roles = _loadRoles(root);
-    roles[role] = { provider, model: model || null, persona };
-    const f = _saveRoles(root, roles);
+    const f = _updateRoles(root, (roles) => { roles[role] = { provider, model: model || null, persona }; });
     // 비활성 provider 경고 (verify 사전 노출)
     let warnMsg = '';
     try { const st = _checkAgent(EXTERNAL_AGENTS.find(a => a.id === provider) || { id: provider, bin: provider, versionArgs: ['--version'], envFlag: `LEERNESS_ENABLE_${provider.toUpperCase()}` }); if (st.status !== 'ready') warnMsg = `⚠ ${provider} 현재 비활성(${st.status}) — 활성화: LEERNESS_ENABLE_${provider.toUpperCase()}=1 + CLI 설치`; } catch {}
@@ -24553,10 +24571,8 @@ function rolesCmd(root, sub, ...args) {
 
   if (sub === 'unset' || sub === 'remove' || sub === 'rm') {
     const role = _normalizeRole(args.find(a => a && !a.startsWith('-')));
-    const roles = _loadRoles(root);
-    if (!roles[role]) return fail(`설정되지 않은 역할: ${role}`);
-    delete roles[role];
-    const f = _saveRoles(root, roles);
+    if (!_loadRoles(root)[role]) return fail(`설정되지 않은 역할: ${role}`);
+    const f = _updateRoles(root, (roles) => { delete roles[role]; });
     if (json) { log(JSON.stringify({ removed: role, file: f }, null, 2)); return; }
     ok(`역할 제거: ${role}`);
     return;
@@ -24565,10 +24581,11 @@ function rolesCmd(root, sub, ...args) {
   if (sub === 'suggest') {
     const { ready, suggestions } = _suggestRoles(root);
     if (has('--apply')) {
-      const roles = _loadRoles(root);
       let applied = 0;
-      for (const s of suggestions) { if (s.ready) { roles[s.role] = { provider: s.provider, model: s.model, persona: ROLE_CATALOG[s.role].desc }; applied++; } }
-      const f = _saveRoles(root, roles);
+      const f = _updateRoles(root, (roles) => {
+        applied = 0;
+        for (const s of suggestions) { if (s.ready) { roles[s.role] = { provider: s.provider, model: s.model, persona: ROLE_CATALOG[s.role].desc }; applied++; } }
+      });
       if (json) { log(JSON.stringify({ applied, ready, file: f, suggestions }, null, 2)); return; }
       ok(`제안 적용: ${applied}개 역할 → ${f}`);
       for (const s of suggestions.filter(x => x.ready)) log(`  ${s.role.padEnd(11)} → ${s.provider} / ${s.model}`);
