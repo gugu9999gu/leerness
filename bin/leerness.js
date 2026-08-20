@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.134';
+const VERSION = '1.36.135';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7225,6 +7225,19 @@ function enforceCmd(root, sub) {
   const json = has('--json');
   sub = sub || 'status';
   const hookP = _gitHookPath(root);
+  // 1.36.135 (재검수 P1, 재현): `core.hooksPath` 가 **공유/전역**이면 한 저장소에 설치한 훅이 그 설정을 쓰는
+  //   모든 저장소에 걸린다. 실측: A 에만 설치했는데 B 가 `installed:true` 이고 B 의 커밋이 차단됐다 —
+  //   사용자는 B 를 opt-in 한 적이 없다. 이건 git 의 설계라 **차단하지 않는다**. 다만 프로젝트 전용 설치인 척
+  //   말하지 않는다 — 공유라는 사실을 표면에 싣는다("설치됨" 이 무엇을 뜻하는지 사용자가 알아야 한다).
+  const _hooksShared = (() => {
+    try {
+      const cd = _gitSpawn(['-C', root, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', timeout: 5000 });
+      if (cd.status !== 0 || !String(cd.stdout || '').trim()) return null;   // 모르면 주장하지 않는다
+      const gd = String(cd.stdout).trim();
+      const abs = path.resolve(path.isAbsolute(gd) ? gd : path.join(root, gd));
+      return !path.resolve(hookP).startsWith(abs + path.sep);
+    } catch { return null; }
+  })();
   const chainedP = hookP + '.pre-leerness';
   if (sub === 'install') {
     // 1.36.134: 종전엔 `.git` 디렉토리 존재만 봤다 — 손상된 저장소에서 훅 파일만 쓰고 성공이라 답했다(거짓 성공).
@@ -7374,10 +7387,24 @@ function enforceCmd(root, sub) {
     };
     // 1.36.134 (검수 P1): 설치가 실패하면 **흔적을 남기지 않는다** — 종전엔 실패해도 우리 훅과 `.pre-leerness`
     //   백업이 그대로 남아 사용자 저장소가 중간 상태가 됐다. 설치 전 상태를 정확히 되돌린다.
-    const _rollbackHook = () => {
+    // 1.36.135 (재검수 P1): 첫 판은 "백업이 있으면 그걸 되돌린다" 였는데 **재설치**에서 틀린다 —
+    //   그때 백업은 *최초 설치 이전*의 사용자 훅이라, 되돌리면 **멀쩡히 동작하던 우리 강제가 조용히 사라진다**.
+    //   되돌릴 대상은 "설치 이전" 이 아니라 "**이번 명령 이전**" 이다. 그 상태를 미리 찍어 두고 그대로 복원한다.
+    const _snapHook = (() => {
       try {
-        if (exists(chainedP)) { fs.copyFileSync(chainedP, hookP); fs.unlinkSync(chainedP); try { fs.chmodSync(hookP, 0o755); } catch {} }
-        else if (exists(hookP) && read(hookP).includes(_ENFORCE_MARK)) fs.unlinkSync(hookP);
+        return {
+          hook: exists(hookP) ? readBuf(hookP) : null,
+          chained: exists(chainedP) ? readBuf(chainedP) : null,
+        };
+      } catch { return null; }
+    })();
+    const _rollbackHook = () => {
+      if (!_snapHook) return;
+      try {
+        if (_snapHook.hook === null) { if (exists(hookP)) fs.unlinkSync(hookP); }
+        else { fs.writeFileSync(hookP, _snapHook.hook); try { fs.chmodSync(hookP, 0o755); } catch {} }
+        if (_snapHook.chained === null) { if (exists(chainedP)) fs.unlinkSync(chainedP); }
+        else { fs.writeFileSync(chainedP, _snapHook.chained); try { fs.chmodSync(chainedP, 0o755); } catch {} }
       } catch { /* 되돌리지 못하면 아래 실패 보고에 그대로 드러난다 */ }
     };
     const _fired = _verifyHookFires();
@@ -7396,7 +7423,7 @@ function enforceCmd(root, sub) {
       return;
     }
     writeUtf8(_enforceCfgPath(root), JSON.stringify({ windowHours, strict, installedAt: now() }, null, 2) + '\n');
-    if (json) { log(JSON.stringify({ ok: true, installed: true, windowHours, strict, hook: hookP, verified: _fired }, null, 2)); return; }
+    if (json) { log(JSON.stringify({ ok: true, installed: true, windowHours, strict, hook: hookP, verified: _fired, hooksPathShared: _hooksShared }, null, 2)); return; }
     ok(`enforce 설치 — 커밋 전 leerness 사용(최근 ${windowHours}h 내 handoff${strict ? ' + gate 통과' : ''})을 git pre-commit 에서 강제`);
     log(`  대상: 어떤 에이전트/모드든(codex goal 모드 포함) — 커밋이 보편 관문이라 문서를 안 읽는 경로도 강제됨`);
     log(`  긴급 우회: LEERNESS_ENFORCE_BYPASS=1 git commit …  ·  해제: leerness enforce remove`);
@@ -7497,12 +7524,14 @@ function enforceCmd(root, sub) {
   // 1.36.134 (실측): 종전엔 git 아님 / unborn / 정상 / HEAD 손상 / gitdir 깨짐 **5상태에서 payload 가 동일**했다 —
   //   '설치 안 됨' 과 '설치할 데가 없음' 이 구분되지 않았다. 기존 필드는 그대로 두고 상태를 **추가**한다.
   const _gsStatus = _gitState(root);
-  if (json) { log(JSON.stringify({ installed, ...cfg, gitState: _gsStatus, installable: GIT_STATE_USABLE.has(_gsStatus) }, null, 2)); return; }
+  if (json) { log(JSON.stringify({ installed, ...cfg, gitState: _gsStatus, installable: GIT_STATE_USABLE.has(_gsStatus), hooksPathShared: _hooksShared, hook: hookP }, null, 2)); return; }
   log(`# leerness enforce — 사용 강제 (git pre-commit)`);
   log(`  상태: ${installed ? `🟢 설치됨 (window ${cfg.windowHours}h${cfg.strict ? ' · strict=gate' : ''})` : '⚪ 미설치'}`);
   log(`  ${installed ? '해제: leerness enforce remove' : '설치: leerness enforce install [--window 24] [--strict]'}`);
   //   1.36.134: 설치할 수 없는 상태면 그 사실을 말한다 — 안 그러면 '미설치' 만 보고 설치를 시도하다 실패한다.
   if (!GIT_STATE_USABLE.has(_gsStatus)) log(`  ⚠ 지금은 설치할 수 없습니다 (git 상태: ${_gsStatus})`);
+  //   1.36.135: '설치됨' 이 프로젝트 전용이 아닐 수 있다 — 공유 hooksPath 는 그 설정을 쓰는 **모든** 저장소에 걸린다.
+  if (_hooksShared === true) log(`  ⚠ 이 훅은 **공유 core.hooksPath** 에 있습니다(${hookP}) — 같은 설정을 쓰는 다른 저장소에도 걸립니다`);
   // 1.36.44 (정직성): 한계 명시 — 과장 금지
   // 1.36.134 (실측): 이 줄의 `dm` 은 이 스코프에 없어 **정상 저장소에서도 `enforce status` 가 exit 1 로 죽었다**
   //   (`✗ dm is not defined`). e2e 가 `--json` 만 봐서 사람 경로의 크래시가 안 보였다 — 표면을 하나만 재면 이렇게 된다.
@@ -16542,7 +16571,14 @@ function _gitSpawn(args, opts) {
   //     (실제로 한 번 그렇게 만들어 스택 오버플로로 모든 git 조회가 'git-error' 가 됐다).
   //     가드도 이 형태를 세므로 주석에도 적지 않는다(자기참조 트랩).
   const _argv = ['--no-optional-locks', ...args];
-  return cp.spawnSync('git', _argv, opts);
+  // 1.36.135 (재검수 P1, 재현): 환경에 `GIT_DIR`/`GIT_WORK_TREE` 가 있으면 우리가 `-C <root>` 로 지목한 것과
+  //   **다른 저장소**를 조작한다. 실측: `--path B`(git 아님) 로 설치했는데 저장소 **A** 의 훅이 1→2 로 늘고 ok:true.
+  //   사용자가 지목하지 않은 저장소를 고치는 것은 어떤 이유로도 정당화되지 않는다.
+  //   우리는 항상 `-C` 로 대상을 명시하므로, 그 명시를 덮어쓰는 환경변수는 **전부 걷어낸다**.
+  const _env = Object.assign({}, (opts && opts.env) || process.env);
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR',
+    'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE']) delete _env[k];
+  return cp.spawnSync('git', _argv, Object.assign({}, opts, { env: _env }));
 }
 function _gitWorkingTree(root) {
   let r;

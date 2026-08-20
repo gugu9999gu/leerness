@@ -13888,6 +13888,78 @@ total++;
         envBypass: viaEnv.status === 0, runBypass: viaRun.status === 0, leftovers };
     }
 
+    //   ⑯ **우리가 지목받지 않은 저장소를 고치지 않는다.** (재검수 P1, 재현)
+    //      환경에 `GIT_DIR`/`GIT_WORK_TREE` 가 있으면 우리가 `-C <root>` 로 지목한 것과 다른 저장소가 조작됐다 —
+    //      실측: `--path B`(git 아님)로 설치했는데 저장소 **A** 의 훅이 1→2 로 늘고 ok:true.
+    {
+      const A = path.join(sb, 'other-repo'); fs.mkdirSync(A, { recursive: true });
+      G(A, ['init', '-q', '.']); G(A, ['config', 'user.email', 't@t']); G(A, ['config', 'user.name', 't']);
+      fs.writeFileSync(path.join(A, 'a.txt'), 'a'); G(A, ['add', '-A']); G(A, ['commit', '-qm', 'i']);
+      const B = path.join(sb, 'not-a-repo-target'); fs.mkdirSync(B, { recursive: true });
+      fs.writeFileSync(path.join(B, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      RP(B, ['init', B, '--yes', '--minimal']);
+      const hooksA = path.join(A, '.git', 'hooks');
+      const before = fs.existsSync(hooksA) ? fs.readdirSync(hooksA).filter(f => /^pre-commit/.test(f)).length : 0;
+      const r = cp.spawnSync(process.execPath, [CLI, 'enforce', 'install', '--path', B, '--json'],
+        { cwd: B, encoding: 'utf8', timeout: 300000,
+          env: Object.assign({}, envP, { GIT_DIR: path.join(A, '.git'), GIT_WORK_TREE: A }) });
+      const after = fs.existsSync(hooksA) ? fs.readdirSync(hooksA).filter(f => /^pre-commit/.test(f)).length : 0;
+      let ins = null; try { ins = JSON.parse(String(r.stdout || '')); } catch {}
+      if (after !== before) bad.push(`⑯GIT_DIR 상속으로 지목받지 않은 저장소를 고쳤다(${before}→${after})`);
+      if (ins && ins.ok === true) bad.push('⑯git 아닌 대상인데 설치 성공이라 답함');
+      dbg.envScope = { otherRepoHooks: `${before}->${after}`, ok: ins && ins.ok, code: ins && ins.code };
+    }
+
+    //   ⑰ **공유 `core.hooksPath` 를 프로젝트 전용인 것처럼 말하지 않는다.** (재검수 P1, 재현)
+    //      A 에만 설치했는데 B 가 `installed:true` 이고 B 의 커밋이 차단됐다 — 사용자는 B 를 opt-in 한 적이 없다.
+    //      git 의 설계라 **차단하지 않는다.** 다만 공유라는 사실을 표면에 싣는다.
+    {
+      const shared = path.join(sb, 'shared-hooks'); fs.mkdirSync(shared, { recursive: true });
+      const mkShared = (name, useShared) => {
+        const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+        G(d, ['init', '-q', '.']); G(d, ['config', 'user.email', 't@t']); G(d, ['config', 'user.name', 't']);
+        if (useShared) G(d, ['config', 'core.hooksPath', shared]);
+        fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+        fs.writeFileSync(path.join(d, 'a.txt'), 'a'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
+        RP(d, ['init', d, '--yes', '--minimal']); RP(d, ['handoff', d]);
+        return d;
+      };
+      const sA = mkShared('sharedA', true), sN = mkShared('privateN', false);
+      const iA = J(RP(sA, ['enforce', 'install', '--path', sA, '--json']));
+      const iN = J(RP(sN, ['enforce', 'install', '--path', sN, '--json']));
+      if (!iA || iA.hooksPathShared !== true) bad.push(`⑰공유 hooksPath 인데 밝히지 않음(hooksPathShared=${iA && iA.hooksPathShared})`);
+      if (!iN || iN.hooksPathShared !== false) bad.push(`⑰전용인데 공유라고 함(오탐, hooksPathShared=${iN && iN.hooksPathShared})`);
+      const hA = String(RP(sA, ['enforce', 'status', '--path', sA]).stdout || '');
+      const hN = String(RP(sN, ['enforce', 'status', '--path', sN]).stdout || '');
+      if (!/공유 core\.hooksPath/.test(hA)) bad.push('⑰사람 모드가 공유 사실을 말하지 않음');
+      if (/공유 core\.hooksPath/.test(hN)) bad.push('⑰전용 저장소에 공유 경고(오탐)');
+      dbg.sharedHooks = { shared: iA && iA.hooksPathShared, private: iN && iN.hooksPathShared };
+    }
+
+    //   ⑱ **실패한 재설치가 기존 설치를 지우지 않는다.** (재검수 P1)
+    //      첫 판의 롤백은 "백업이 있으면 되돌린다" 였는데, 재설치에서 그 백업은 *최초 설치 이전*의 사용자 훅이라
+    //      되돌리면 **멀쩡히 동작하던 강제가 조용히 사라진다**. 되돌릴 대상은 "이번 명령 이전" 이다.
+    {
+      const d = mk('reinstall', commit);
+      RP(d, ['handoff', d]);
+      const hooks = path.join(d, '.git', 'hooks'); fs.mkdirSync(hooks, { recursive: true });
+      fs.writeFileSync(path.join(hooks, 'pre-commit'), '#!/bin/sh\necho user\nexit 0\n');
+      try { fs.chmodSync(path.join(hooks, 'pre-commit'), 0o755); } catch {}
+      const i1 = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      if (!i1 || i1.ok !== true) bad.push(`⑱1차 설치 실패 ok=${i1 && i1.ok}`);
+      const hp = path.join(hooks, 'pre-commit'), cp2 = hp + '.pre-leerness';
+      const h1 = fs.existsSync(hp) ? fs.readFileSync(hp, 'utf8') : null;
+      const c1 = fs.existsSync(cp2) ? fs.readFileSync(cp2, 'utf8') : null;
+      G(d, ['config', 'core.bare', 'true']);                 // 재설치를 실패시킨다
+      const i2 = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      if (i2 && i2.ok === true) bad.push('⑱실패시켰는데 설치 성공이라 답함(계측 붕괴)');
+      const h2 = fs.existsSync(hp) ? fs.readFileSync(hp, 'utf8') : null;
+      const c2 = fs.existsSync(cp2) ? fs.readFileSync(cp2, 'utf8') : null;
+      if (h1 !== h2) bad.push('⑱실패한 재설치가 기존 훅을 바꿨다(강제가 조용히 사라진다)');
+      if (c1 !== c2) bad.push('⑱실패한 재설치가 체인 백업을 바꿨다');
+      dbg.reinstall = { hookSame: h1 === h2, chainSame: c1 === c2, secondOk: i2 && i2.ok };
+    }
+
     //   ⑫ **설치 행위가 자기가 설치하는 게이트를 약화시키지 않는다.** 발화 검증은 `.harness/last-handoff.json`(실데이터)을
     //      임시로 덮는데, 훅이 신선도를 판정하는 근거가 그 파일의 **mtime** 이다 — 안 되돌리면 설치만으로
     //      "방금 handoff 했다" 가 되어 다음 windowHours 동안 무임승차가 생긴다(실측으로 그렇게 만들었다가 고쳤다).

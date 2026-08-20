@@ -1,7 +1,7 @@
-<!-- leerness:managed:auto sha=3cfda3ba3c5f0af0 -->
+<!-- leerness:managed:auto sha=b2dad8a7e10dbd5b -->
 # 🔔 메인 에이전트용 자동 reminder
 
-_생성: 2026-08-20T01:47:03.604Z_
+_생성: 2026-08-20T03:08:52.359Z_
 
 ## drift critical 감지
 현재 워크스페이스의 메타파일이 매우 stale합니다. 이번 라운드 작업 끝에 반드시 다음 명령을 호출하세요:
