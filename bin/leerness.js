@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.135';
+const VERSION = '1.36.136';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -314,7 +314,7 @@ const _VALUE_FLAGS = new Set(['--language','--skills','--path','--status','--pro
 for (const _bf of _BRIEF_FIELDS) { if (_bf && _bf.flag) _VALUE_FLAGS.add('--' + _bf.flag); }
 // 부울 플래그(값 없음) — 오타 경고의 대조군. 여기 있거나 _VALUE_FLAGS 에 있으면 '실재하는 플래그' 로 본다.
 //   판정에만 쓰이고 파싱 동작에는 관여하지 않으므로, 넓게 잡아도 안전하다(과다 포함 = 경고 억제).
-const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--baseline','--all-presets','--allow-empty','--allow-unrelated','--apply','--audit','--auto','--auto-apply-delivered','--auto-cleanup-branches','--auto-fix','--auto-fix-bom','--auto-fix-encoding','--auto-main-push','--auto-recover','--auto-track','--banner','--bench','--build','--bundle-only','--claims','--close','--compact','--detect','--dry-run','--dry-run-npm','--embedding','--enforce','--fail-on-candidates','--fail-on-violation','--force','--gh-pages','--gh-release','--git-push','--global','--guide','--help','--html','--include-code','--interactive','--json','--last','--lenient','--major','--minimal','--minor','--no-animate','--no-auto-roadmap','--no-auto-update','--no-banner','--no-brainstorm-hits','--no-cache','--no-context-inject','--no-crawl','--no-drift-check','--no-enforce','--no-env','--no-env-detect','--no-feature-impact','--no-headline','--no-init-check','--no-interactive-select','--no-lazy-warn','--no-lessons','--no-longterm-recall','--no-mcp','--no-mem-delta','--no-multiagent-hint','--no-next-actions','--no-npm','--no-official-skills','--no-on-every-change','--no-pre-wake','--no-preserve-link','--no-readme-sync','--no-record','--no-repl','--no-review','--no-save','--no-security-check','--no-security-summary','--no-setup-agents','--no-skill-suggest','--no-stale-check','--no-suggest','--no-synonyms','--no-team-reminders','--no-wakeup-miss','--no-workflow-guide','--no-write','--npm-publish','--offline','--on-every-change','--pack','--parent-migrate','--publish-npm','--pulse','--quiet','--record','--refresh','--remove','--repair','--repl','--require-evidence','--run-tests','--skeleton','--strict','--strict-claims','--strict-elements','--strict-exit','--suggest','--version','--yes',
+const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--baseline','--all-presets','--allow-empty','--allow-unrelated','--apply','--audit','--auto','--auto-apply-delivered','--auto-cleanup-branches','--auto-fix','--auto-fix-bom','--auto-fix-encoding','--auto-main-push','--auto-recover','--auto-track','--banner','--bench','--build','--bundle-only','--claims','--close','--compact','--detect','--dry-run','--dry-run-npm','--embedding','--enforce','--fail-on-candidates','--fail-on-violation','--force','--gh-pages','--gh-release','--git-push','--global','--guide','--help','--html','--include-code','--interactive','--json','--last','--lenient','--major','--minimal','--minor','--no-animate','--no-auto-roadmap','--no-auto-update','--no-banner','--no-brainstorm-hits','--no-cache','--no-context-inject','--no-crawl','--no-drift-check','--no-enforce','--no-env','--no-env-detect','--no-feature-impact','--no-headline','--no-init-check','--no-interactive-select','--no-lazy-warn','--no-lessons','--no-longterm-recall','--no-mcp','--no-mem-delta','--no-multiagent-hint','--no-next-actions','--no-npm','--no-official-skills','--no-on-every-change','--no-pre-wake','--no-preserve-link','--no-readme-sync','--no-record','--no-repl','--no-review','--no-save','--no-security-check','--no-security-summary','--no-setup-agents','--no-skill-suggest','--no-stale-check','--no-suggest','--no-synonyms','--no-team-reminders','--no-wakeup-miss','--no-workflow-guide','--no-write','--npm-publish','--offline','--on-every-change','--pack','--parent-migrate','--publish-npm','--pulse','--quiet','--record','--refresh','--remove','--repair','--repl','--require-evidence','--run-tests','--skeleton','--skip-verify','--strict','--strict-claims','--strict-elements','--strict-exit','--suggest','--version','--yes',
   // 소스에 리터럴로만 존재해 소비 형태를 기계 추출하지 못한 것들 — 실재하는 플래그이므로 오타로 오인하면 안 된다
   '--commands','--decision','--errors','--expand-all','--fix','--list','--notes','--print','--raw','--select-all','--skip-git-repo-check','--tests','--verbose','--yolo',
   // lib/*.js 의 부울 소비자 — bin/ 만 훑었다면 `agents route --confirm` 같은 실재 문법에 오탐 경고를 냈을 것이다
@@ -7258,6 +7258,19 @@ function enforceCmd(root, sub) {
     mkdirp(path.dirname(_enforceCfgPath(root)));
     // 1.36.134 (검수 P1): 여기서 설정을 쓰면 **실패한 설치가 installedAt 을 남긴다** — 다음 실행이 설치됐다고 믿는다.
     //   쓰기는 훅 발화 검증을 통과한 뒤로 옮겼다(아래).
+    // 1.36.134 (검수 P1): 설치가 실패하면 **흔적을 남기지 않는다** — 종전엔 실패해도 우리 훅과 `.pre-leerness`
+    //   백업이 그대로 남아 사용자 저장소가 중간 상태가 됐다. 설치 전 상태를 정확히 되돌린다.
+    // 1.36.135 (재검수 P1): 첫 판은 "백업이 있으면 그걸 되돌린다" 였는데 **재설치**에서 틀린다 —
+    //   그때 백업은 *최초 설치 이전*의 사용자 훅이라, 되돌리면 **멀쩡히 동작하던 우리 강제가 조용히 사라진다**.
+    //   되돌릴 대상은 "설치 이전" 이 아니라 "**이번 명령 이전**" 이다. 그 상태를 미리 찍어 두고 그대로 복원한다.
+    const _snapHook = (() => {
+      try {
+        return {
+          hook: exists(hookP) ? readBuf(hookP) : null,
+          chained: exists(chainedP) ? readBuf(chainedP) : null,
+        };
+      } catch { return null; }
+    })();
     mkdirp(path.dirname(hookP));
     // 기존 훅 보존: 우리 것이 아니면 체인 파일로 이동 후 호출
     if (exists(hookP) && !read(hookP).includes(_ENFORCE_MARK)) {
@@ -7385,19 +7398,6 @@ function enforceCmd(root, sub) {
         try { if (exists(probeHookP)) fs.unlinkSync(probeHookP); } catch {}   // 임시 사본은 남기지 않는다
       }
     };
-    // 1.36.134 (검수 P1): 설치가 실패하면 **흔적을 남기지 않는다** — 종전엔 실패해도 우리 훅과 `.pre-leerness`
-    //   백업이 그대로 남아 사용자 저장소가 중간 상태가 됐다. 설치 전 상태를 정확히 되돌린다.
-    // 1.36.135 (재검수 P1): 첫 판은 "백업이 있으면 그걸 되돌린다" 였는데 **재설치**에서 틀린다 —
-    //   그때 백업은 *최초 설치 이전*의 사용자 훅이라, 되돌리면 **멀쩡히 동작하던 우리 강제가 조용히 사라진다**.
-    //   되돌릴 대상은 "설치 이전" 이 아니라 "**이번 명령 이전**" 이다. 그 상태를 미리 찍어 두고 그대로 복원한다.
-    const _snapHook = (() => {
-      try {
-        return {
-          hook: exists(hookP) ? readBuf(hookP) : null,
-          chained: exists(chainedP) ? readBuf(chainedP) : null,
-        };
-      } catch { return null; }
-    })();
     const _rollbackHook = () => {
       if (!_snapHook) return;
       try {
@@ -7422,7 +7422,16 @@ function enforceCmd(root, sub) {
       failJson(json, 'hook_inert', `훅을 썼지만 발화하지 않습니다 (${hookP}) — core.hooksPath 리다이렉트·실행권한·sh 부재를 확인하세요`);
       return;
     }
-    writeUtf8(_enforceCfgPath(root), JSON.stringify({ windowHours, strict, installedAt: now() }, null, 2) + '\n');
+    // 1.36.136 (재검수 P1, 재현): 이 쓰기가 실패하면 **훅은 설치된 채로 남고** raw 예외가 튀어나왔다
+    //   (실측: `.harness/enforce.json` 을 디렉토리로 만들어 두면 EPERM 크래시 + 훅 마커 4건 잔존).
+    //   설정 없는 강제는 어중간한 상태다 — 실패하면 이번 명령 이전으로 되돌리고 사유를 말한다.
+    try {
+      writeUtf8(_enforceCfgPath(root), JSON.stringify({ windowHours, strict, installedAt: now() }, null, 2) + '\n');
+    } catch (e) {
+      _rollbackHook();
+      failJson(json, 'config_write_failed', `설정을 저장하지 못해 설치를 되돌렸습니다: ${String(e && e.code || e.message || e).slice(0, 80)}`);
+      return;
+    }
     if (json) { log(JSON.stringify({ ok: true, installed: true, windowHours, strict, hook: hookP, verified: _fired, hooksPathShared: _hooksShared }, null, 2)); return; }
     ok(`enforce 설치 — 커밋 전 leerness 사용(최근 ${windowHours}h 내 handoff${strict ? ' + gate 통과' : ''})을 git pre-commit 에서 강제`);
     log(`  대상: 어떤 에이전트/모드든(codex goal 모드 포함) — 커밋이 보편 관문이라 문서를 안 읽는 경로도 강제됨`);

@@ -13668,6 +13668,13 @@ total++;
     { cwd: d, encoding: 'utf8', timeout: 300000, env: envP, maxBuffer: 32 * 1024 * 1024 });
   const G = (d, a) => cp.spawnSync('git', ['--no-optional-locks', '-C', d, ...a], { encoding: 'utf8', timeout: 60000 });
   const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  //   git 자신이 말하는 훅 경로(core.hooksPath 반영) — 하드코딩하면 이 클래스를 못 잡는다.
+  const _gitHookOf = (d) => {
+    const r = G(d, ['rev-parse', '--git-path', 'hooks/pre-commit']);
+    if (r.status !== 0 || !String(r.stdout || '').trim()) return null;
+    const p2 = String(r.stdout).trim();
+    return path.isAbsolute(p2) ? p2 : path.join(d, p2);
+  };
   const mk = (name, prep) => {
     const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
     fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
@@ -13958,6 +13965,31 @@ total++;
       if (h1 !== h2) bad.push('⑱실패한 재설치가 기존 훅을 바꿨다(강제가 조용히 사라진다)');
       if (c1 !== c2) bad.push('⑱실패한 재설치가 체인 백업을 바꿨다');
       dbg.reinstall = { hookSame: h1 === h2, chainSame: c1 === c2, secondOk: i2 && i2.ok };
+    }
+
+    //   ⑲ **설정 저장이 실패하면 설치를 되돌린다.** (재검수 P1, 재현)
+    //      종전엔 raw EPERM 이 튀어나오고 **훅은 설치된 채 남았다**(설정 없는 강제 = 어중간한 상태).
+    //      ⚠ 첫 수정은 스냅샷을 훅을 **쓴 뒤에** 찍어서 롤백이 우리 훅을 복원했다 — 되돌릴 상태를 먼저 찍어야 한다.
+    {
+      const d = mk('cfgfail', commit);
+      RP(d, ['handoff', d]);
+      const cfg = path.join(d, '.harness', 'enforce.json');
+      try { if (fs.existsSync(cfg)) fs.rmSync(cfg, { force: true }); } catch {}
+      fs.mkdirSync(cfg, { recursive: true });                 // 디렉토리라 파일 쓰기가 실패한다
+      const r = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      if (r && r.ok === true) bad.push('⑲설정 저장이 실패했는데 설치 성공이라 답함');
+      if (!r || r.code !== 'config_write_failed') bad.push(`⑲사유가 뭉개짐(code=${r && r.code})`);
+      const hookP = _gitHookOf(d);
+      const left = hookP && fs.existsSync(hookP) ? /leerness/.test(fs.readFileSync(hookP, 'utf8')) : false;
+      if (left) bad.push('⑲실패한 설치가 훅을 남겼다(설정 없는 강제)');
+      //    대조군 — 방해물을 치우면 정상 설치된다(과잉 차단 아님).
+      try { fs.rmdirSync(cfg); } catch {}
+      const r2 = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      if (!r2 || r2.ok !== true || r2.verified !== 'fired') bad.push(`⑲방해물 제거 후에도 설치 실패(ok=${r2 && r2.ok})`);
+      //    P2 — `--skip-verify` 가 플래그 레지스트리에 있어야 "알 수 없는 플래그" 경고가 안 난다.
+      const sv = RP(d, ['enforce', 'status', '--path', d, '--skip-verify']);
+      if (/알 수 없는/.test(String(sv.stdout || '') + String(sv.stderr || ''))) bad.push('⑲--skip-verify 가 미등록 플래그로 경고됨');
+      dbg.cfgFail = { code: r && r.code, hookLeft: left, recovered: r2 && r2.ok };
     }
 
     //   ⑫ **설치 행위가 자기가 설치하는 게이트를 약화시키지 않는다.** 발화 검증은 `.harness/last-handoff.json`(실데이터)을
