@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.147';
+const VERSION = '1.36.148';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7374,11 +7374,13 @@ function enforceCmd(root, sub) {
       if (snap.kind === 'file') {
         const cur = _lexists(p) ? (() => { try { return fs.lstatSync(p); } catch { return null; } })() : null;
         if (cur && !cur.isSymbolicLink()) {
-          try {
-            fs.writeFileSync(p, snap.buf);
-            try { fs.chmodSync(p, snap.mode); } catch {}   // 원래 권한으로 — 늘 0755 로 넓히지 않는다
-            return;
-          } catch { /* 제자리 쓰기가 막히면 아래 지우고-쓰기로 넘어간다 */ }
+          //   ⚠ 1.36.148 (재검수 P1): 제자리 쓰기가 실패하면 **지우고 다시 쓰기**로 넘어갔는데,
+          //     그 재쓰기까지 실패하면 사용자 훅과 체인 백업을 **둘 다** 잃는다.
+          //     같은 종류(파일→파일)면 지우지 않는다 — 실패는 위로 던져 `_rbFail` 에 잡히고,
+          //     최소한 원본은 남는다("애매하면 남기는 쪽으로 실패한다").
+          fs.writeFileSync(p, snap.buf);
+          try { fs.chmodSync(p, snap.mode); } catch {}     // 원래 권한으로 — 늘 0755 로 넓히지 않는다
+          return;
         }
       }
       //   ⚠ 1.36.143 (재검수 P1): 삭제 실패를 삼키면 **우리 차단 훅이 살아있는데** 되돌렸다고 말하게 된다.
@@ -24957,6 +24959,10 @@ function policyCmd(root, sub, ...args) {
 //   향후 UR-0031(MCP verb)/UR-0033(adapter) 가 이 스키마를 공통 호출 표면으로 사용.
 function _leernessStateDir(root) { return path.join(absRoot(root), '.leerness'); }
 // _newRunRecord → lib/pure-utils.js 로 이동 (1.9.283 UR-0025 2단계)
+// 1.36.148 (재검수 P1, 재현): run id 를 "빈 문자열만 아니면 통과" 로 본 탓에
+//   `../../evil` 같은 경로형이 소유 맵에 들어가 `state handoff` 가 `.leerness` **밖**에 썼다.
+//   run id 는 우리가 만드는 것이고 모양이 정해져 있다 — 그 모양만 받는다.
+const _RUN_ID_RE = /^run-\d{1,12}$/;
 function _loadLeernessState(root) {
   const f = path.join(_leernessStateDir(root), 'state.json');
   if (!exists(f)) return { schemaVersion: 1, project: detectProjectName(root), currentRunId: null, runCounter: 0, updatedAt: null };
@@ -24974,7 +24980,7 @@ function _loadLeernessState(root) {
     //   모양이 아니면 손상으로 다룬다(없는 것은 정상 — 업그레이드 전 상태).
     && (_st.runsBySession === undefined
       || (_st.runsBySession && typeof _st.runsBySession === 'object' && !Array.isArray(_st.runsBySession)
-        && Object.values(_st.runsBySession).every((v) => typeof v === 'string' && v)));
+        && Object.values(_st.runsBySession).every((v) => _RUN_ID_RE.test(String(v)))));
   // 디스크의 최대 run 번호 — 카운터의 진실성 대조 기준
   let _maxRun = 0;
   try {
@@ -28044,6 +28050,18 @@ async function main() {
           : `경로 없음: ${_abs} — 디렉토리를 새로 만들지 않았습니다`);
         return;
       }
+      // 1.36.148 (재검수 P2): 존재성만 봐서 **일반 파일**이 프로젝트 root 로 통과했고,
+      //   그 아래에 `.harness` 가 있을 리 없으니 "빈 상태" 를 정상 결과처럼 보고했다.
+      //   프로젝트 root 는 디렉토리다. 파일이면 그렇다고 말한다(스캔처럼 파일이 정상 입력인 경로는 위 _strict 가 따로 다룬다).
+      try {
+        if (!fs.statSync(_abs).isDirectory()) {
+          const _en2 = _uiLang(process.cwd()) === 'en';
+          failJson(has('--json'), 'path_not_a_directory', _en2
+            ? `--path is not a directory: ${_abs}`
+            : `--path 가 디렉토리가 아닙니다: ${_abs}`);
+          return;
+        }
+      } catch { /* stat 실패는 위 존재 검사에서 이미 걸러졌다 */ }
     }
   }
   // 1.13.1 (15th 블라인드 리뷰 P1, codex gpt-5.5): 무명령 + 옵션만(예: leerness --json) 은 묵시적 init 쓰기를 하지 않음 — cwd 에 .harness 가 의도치 않게 생성되던 부작용 차단. 명시 명령 없이 옵션만이면 help (bare leerness 온보딩 init 은 유지).

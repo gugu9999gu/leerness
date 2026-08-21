@@ -15057,6 +15057,126 @@ total++;
   if (!ok) failed++;
 }
 
+total++;
+// AL(1.36.148) — 앞 라운드 수정들이 **다른 조건에서 무력화**되던 자리들.
+//   ① `keySource` 가 child 억제를 **명시 주소보다 먼저** 검사해, MCP 서버가
+//      `CLAUDE_CODE_CHILD_SESSION=1` 을 상속하면 1.36.145 의 주소 전달이 통째로 죽었다.
+//      같은 파일 주석은 "명시값을 앞에 둔다" 라고 적혀 있었다 — 구현이 자기 원칙과 반대였다.
+//   ② run id 를 "빈 문자열만 아니면" 으로 봐서 `../../evil` 이 소유 맵에 들어가면 `.leerness` 밖에 썼다.
+//   ③ 중앙 `--path` 가드가 존재성만 봐서 **일반 파일**이 프로젝트 root 로 통과했다.
+//   ④ dry-run 가드는 파일·git 만 봤다 — `team deploy --yes --dry-run` 이 배포 subprocess 를 실제 실행했다.
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-148-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
+  const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 120000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
+  const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  const mk = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const ri = RP(d, ['init', d, '--yes', '--minimal']);
+    if (ri.status !== 0) bad.push(`${name}:init exit=${ri.status}`);
+    return d;
+  };
+  try {
+    // ① 명시 주소가 child 억제를 이긴다 — 다만 **추론 경로의 억제는 그대로**여야 한다.
+    {
+      const SP = require(path.resolve(__dirname, '..', 'lib', 'session-presence'));
+      const plain = SP.deriveSessionKey({ LEERNESS_SESSION_ID: 'session-alpha01' });
+      const child = SP.deriveSessionKey({ LEERNESS_SESSION_ID: 'session-alpha01', CLAUDE_CODE_CHILD_SESSION: '1' });
+      const inferred = SP.deriveSessionKey({ CLAUDE_CODE_SESSION_ID: 'claude-sess-0001', CLAUDE_CODE_CHILD_SESSION: '1' });
+      if (plain !== 'session-alpha01') bad.push('①명시 주소를 못 읽음 — 판별 불가');
+      if (child !== 'session-alpha01') bad.push('①child 억제가 명시 주소를 삼킴');
+      if (inferred !== null) bad.push('①추론 주소에서 child 억제가 사라짐 — sub-agent 가 별도 세션이 된다(회귀)');
+      dbg.keySource = { plain, child, inferredUnderChild: inferred };
+    }
+    // ② **행위** — 자식 세션 env 를 상속한 MCP 서버에서도 증거가 안 섞인다.
+    {
+      const d = mk('mcpchild');
+      const env = Object.assign({}, envP, { CLAUDE_CODE_CHILD_SESSION: '1' });
+      const call = (name, a, id) => JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: a } });
+      const req = [
+        JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '1' } } }),
+        call('leerness_state_start', { path: d, goal: 'A', sessionKey: 'session-alpha01' }, 1),
+        call('leerness_state_start', { path: d, goal: 'B', sessionKey: 'session-bravo01' }, 2),
+        call('leerness_state_record', { path: d, filesChanged: 'a.js', sessionKey: 'session-alpha01' }, 3),
+        call('leerness_state_verify', { path: d, result: 'pass', sessionKey: 'session-bravo01' }, 4),
+      ].join('\n') + '\n';
+      const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: d, input: req, encoding: 'utf8', env, timeout: 300000 });
+      const lines = String(r.stdout || '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      const jsonOf = (id) => { try { return JSON.parse(lines.find((x) => x.id === id).result.content[0].text); } catch { return null; } };
+      const s1 = jsonOf(1), s2 = jsonOf(2), rec = jsonOf(3), ver = jsonOf(4);
+      if (!s1 || !s2 || s1.started === s2.started) bad.push('②자식 env 에서 두 세션이 같은 run — 판별 불가');
+      else {
+        if (!rec || rec.recorded !== s1.started) bad.push(`②자식 env 에서 증거가 엉뚱한 run 에 붙음(${rec && rec.recorded})`);
+        if (ver && ver.completion_claim_allowed && ver.completion_claim_allowed.allowed) bad.push('②자식 env 에서 놀던 세션이 완료 허용을 받음');
+      }
+      dbg.mcpChild = { A: s1 && s1.started, recordedTo: rec && rec.recorded,
+        bAllowed: !!(ver && ver.completion_claim_allowed && ver.completion_claim_allowed.allowed) };
+    }
+    // ③ 경로형 run id 가 `.leerness` 밖으로 못 나간다.
+    {
+      const d = mk('traversal');
+      const eA = Object.assign({}, envP, { LEERNESS_SESSION_ID: 'session-alpha01' });
+      RP(d, ['state', 'start', 'A', '--json'], eA);
+      const stf = path.join(d, '.leerness', 'state.json');
+      const st = JSON.parse(fs.readFileSync(stf, 'utf8'));
+      st.runsBySession = { 'session-alpha01': '../../evil' };
+      fs.writeFileSync(stf, JSON.stringify(st, null, 2) + '\n');
+      const r = RP(d, ['state', 'handoff', '요약'], eA);
+      const escaped = fs.existsSync(path.join(sb, 'evil.json')) || fs.existsSync(path.join(d, 'evil.json'));
+      if (escaped) bad.push('③경로형 run id 로 .leerness 밖에 씀');
+      if (r.status === 0) bad.push('③손상된 소유 맵인데 성공이라 보고');
+      dbg.traversal = { exit: r.status, escaped };
+    }
+    // ④ `--path` 에 일반 파일은 거절 — **디렉토리는 그대로**(대조군).
+    {
+      const d = mk('filepath');
+      const f = path.join(sb, 'notadir.txt'); fs.writeFileSync(f, 'x');
+      const rf = RP(d, ['status', '--path', f]);
+      const rd = RP(d, ['status', '--path', d]);
+      if (rf.status === 0) bad.push('④일반 파일을 프로젝트 root 로 승인');
+      if (rd.status !== 0) bad.push(`④디렉토리를 거절(과차단, exit=${rd.status})`);
+      dbg.filePath = { fileExit: rf.status, dirExit: rd.status };
+    }
+    // ⑤ dry-run 이 **외부 명령 실행**도 막는다(파일도 git 도 아닌 세 번째 부작용).
+    {
+      const d = mk('team');
+      const marker = path.join(sb, 'DEPLOYED.txt');
+      RP(d, ['team', 'add', 'zz', '--path', d]);
+      const tf = path.join(d, '.harness', 'teams.json');
+      let prepared = false;
+      try {
+        const t = JSON.parse(fs.readFileSync(tf, 'utf8'));
+        const arr = Array.isArray(t) ? t : (t.teams || []);
+        //   ⚠ 마커 **절대경로를 JS 문자열 안에 박으면** Windows 역슬래시가 이스케이프를 깨뜨렸다
+        //     (제가 한 번 그것으로 거짓 실패를 만들었다). 경로는 **환경변수**로 넘긴다.
+        if (arr[0]) { arr[0].deployCommand = `node -e "require('fs').writeFileSync(process.env.LEERNESS_E2E_MARK,'1')"`; prepared = true; }
+        fs.writeFileSync(tf, JSON.stringify(t, null, 2) + '\n');
+      } catch {}
+      if (!prepared) bad.push('⑤team 픽스처를 만들지 못함 — 판별 불가');
+      else {
+        const env = Object.assign({}, envP, { LEERNESS_TEAM_DEPLOY: '1', LEERNESS_E2E_MARK: marker });
+        RP(d, ['team', 'deploy', 'zz', '--yes', '--dry-run', '--path', d], env);
+        if (fs.existsSync(marker)) bad.push('⑤--dry-run 인데 배포 명령을 실제 실행');
+        //   대조군 — 플래그 없이 게이트를 다 통과하면 **실제로 실행돼야** 한다(가드가 기능을 죽이면 안 된다).
+        RP(d, ['team', 'deploy', 'zz', '--yes', '--path', d], env);
+        if (!fs.existsSync(marker)) bad.push('⑤플래그 없는 배포가 실행되지 않음 — 가드가 기능을 죽였다');
+      }
+      dbg.teamDeploy = { prepared, ranUnderDryRun: false, ranForReal: fs.existsSync(marker) };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AL(1.36.148) 명시 세션 주소가 child 억제를 이김(추론 억제는 유지) · 자식 env MCP 에서도 귀속 정상 · 경로형 run id 가 .leerness 밖으로 못 나감 · --path 에 파일 거절(디렉토리는 통과) · dry-run 이 **외부 명령 실행**까지 막음(플래그 없으면 실행) ${JSON.stringify(dbg)}`
+    : '✗ 1.36.148 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

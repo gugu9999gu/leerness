@@ -2,18 +2,6 @@
   "queue": [
     {
       "icon": "🧬",
-      "title": "stress-v211 마지막 갱신 1887h 전 — 새 stress test 작성 권장",
-      "command": "node _apps/leerness-stress/bin/stress-v212.js",
-      "addedAt": "2026-08-19T01:04:19.520Z"
-    },
-    {
-      "icon": "🧬",
-      "title": "stress-v211 마지막 갱신 1900h 전 — 새 stress test 작성 권장",
-      "command": "node _apps/leerness-stress/bin/stress-v212.js",
-      "addedAt": "2026-08-19T14:32:20.885Z"
-    },
-    {
-      "icon": "🧬",
       "title": "stress-v211 마지막 갱신 1912h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js",
       "addedAt": "2026-08-20T01:47:11.700Z"
@@ -119,7 +107,19 @@
       "title": "stress-v211 마지막 갱신 1949h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js",
       "addedAt": "2026-08-21T15:14:48.143Z"
+    },
+    {
+      "icon": "🔄",
+      "title": "progress-tracker 51h 정체 — task T-0032 status 갱신",
+      "command": "leerness task update T-0032 --status completed",
+      "addedAt": "2026-08-21T16:41:44.764Z"
+    },
+    {
+      "icon": "🧬",
+      "title": "stress-v211 마지막 갱신 1951h 전 — 새 stress test 작성 권장",
+      "command": "node _apps/leerness-stress/bin/stress-v212.js",
+      "addedAt": "2026-08-21T16:41:44.764Z"
     }
   ],
-  "at": "2026-08-21T15:14:48.144Z"
+  "at": "2026-08-21T16:41:44.765Z"
 }
