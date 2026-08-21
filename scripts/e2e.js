@@ -14288,21 +14288,30 @@ total++;
       if (restored.length !== 1) bad.push(`③복원이 ${restored.length}건을 만듦(기대 1)`);
       dbg.dupDrop = { exits: codes, archiveBlocks: blocks, restoredCount: restored.length };
     }
-    // ④ 없는 경로의 **쓰기**는 거절하고 디렉토리를 만들지 않는다 —
-    //    그러나 **조회는 그대로 돌아야 한다**. 첫 판은 검사를 명령 진입부에 둬서
-    //    없는 경로에서도 잘 돌던 `roles catalog`(정적) · `roles list`(읽기) 를 exit 1 로 만들었다(회귀).
-    //    한쪽만 재면 과차단으로 되돌아가도 통과한다 — 양쪽을 같이 잰다.
+    // ④ 없는 경로는 **아무것도 만들지 않고 거절**한다 — 그러나 **동작하던 사용법은 깨지 않는다**.
+    //    ⚠ 이 축은 한 번 뒤집혔다. 처음엔 "없는 경로에서도 `roles catalog`/`list` 는 exit 0 이어야 한다" 고 적었다 —
+    //      1.36.139 가 그랬기 때문이다. 그런데 1.36.143 이 `--path` 규칙을 **모든 명령에 일관되게** 적용하자
+    //      이 단언이 게이트를 깨뜨렸다. 다시 재보니 옛 동작이 지키던 것은 **오타를 조용히 성공시키는 것**이었다:
+    //        `--path` 없음 → 동작(경로 무관 사용) · `--path <실재>` → 동작 · `--path <오타>` → exit 0 (조용한 성공)
+    //      마지막 칸만 거절로 바뀌었고 그게 맞다. 그래서 축을 "오타에도 성공" 이 아니라
+    //      **"실제로 쓰던 두 사용법이 살아 있다"** 로 다시 쓴다 — 과차단 보호는 그대로 유지된다.
     {
       const ghost = path.join(sb, 'ghost-parent', 'nope');
       const w1 = RP(sb, ['roles', 'unset', 'coder', '--path', ghost]);
       const w2 = RP(sb, ['roles', 'set', 'coder', '--provider', 'codex', '--force', '--path', ghost]);
       const created = fs.existsSync(ghost);
-      const rd = ['catalog', 'list'].map((s) => RP(sb, ['roles', s, '--path', ghost]).status);
+      const r1 = RP(sb, ['roles', 'catalog', '--path', ghost]);
+      //   과차단 대조군 — 경로를 안 주는 사용과 실재 경로를 주는 사용은 **둘 다 살아 있어야 한다**.
+      const real = mk('roles-real');
+      const noPath = RP(real, ['roles', 'catalog']).status;
+      const realPath = ['catalog', 'list'].map((s) => RP(real, ['roles', s, '--path', real]).status);
       if (w1.status === 0) bad.push('④없는 경로인데 unset 이 성공이라 보고');
       if (w2.status === 0) bad.push('④없는 경로인데 set 이 성공이라 보고');
       if (created) bad.push('④실패하면서 없는 경로를 만들었다');
-      if (rd.some((s) => s !== 0)) bad.push(`④조회 하위명령까지 막았다(catalog/list exit=${JSON.stringify(rd)}) — 과차단 회귀`);
-      dbg.ghostPath = { unset: w1.status, set: w2.status, created, readExits: rd };
+      if (r1.status === 0) bad.push('④오타 난 --path 를 조용히 성공시킴');
+      if (noPath !== 0) bad.push(`④--path 없는 사용을 막았다(exit=${noPath}) — 과차단 회귀`);
+      if (realPath.some((s) => s !== 0)) bad.push(`④실재 경로 조회를 막았다(exit=${JSON.stringify(realPath)}) — 과차단 회귀`);
+      dbg.ghostPath = { unset: w1.status, set: w2.status, created, ghostRead: r1.status, noPath, realPath };
     }
     // ⑤ 한 번짜리 설정 주입(`GIT_CONFIG_COUNT`)이 **남의 저장소**에 훅을 쓰지 못한다 + 지목한 저장소에는 쓴다.
     {
@@ -14345,6 +14354,249 @@ total++;
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
   console.log(ok ? `✓ AE(1.36.140) 수정이 만든 다음 결함 고정: 복합 키가 접혀도 무관 항목 보존(두 순서) · 실패한 설치가 체인 백업을 파괴하지 않음 · 동시 drop 은 하나만 성공하고 archive 도 한 번 · 없는 경로에 디렉토리 안 만듦 · 한번짜리 설정 주입이 남의 저장소에 못 씀 · 대소문자 오탐 0 · worktree 공용 고지 ${JSON.stringify(dbg)}`
     : '✗ 1.36.140 후속결함 고정 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
+total++;
+// AF(1.36.142/T-0116) — **증거는 일한 세션에 붙어야 한다.**
+//   `.leerness/state.json` 의 `currentRunId` 는 전역 슬롯 하나였다. 두 세션이 같은 프로젝트에서 일하면
+//   뒤에 `state start` 한 쪽이 앞사람 슬롯을 덮어썼고, 실측으로:
+//     · A 의 증거(files_changed · tests)가 **B 의 run 에 붙었고**
+//     · 일하지 않은 B 가 `completion_claim_allowed: true` 를 받았고
+//     · A 는 `state show` 로 **자기 run 을 볼 수조차 없었다**.
+//   락 문제가 아니다(직렬로 돌려도 재현된다) — 주소가 없는 것이 문제다.
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-142-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
+  const R = (d, env, a) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 300000, env, maxBuffer: 32 * 1024 * 1024 });
+  const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  const mk = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const ri = R(d, envP, ['init', d, '--yes', '--minimal']);
+    if (ri.status !== 0) bad.push(`${name}:init exit=${ri.status}`);
+    return d;
+  };
+  //   ⚠ 세션 키는 제품의 유효성 규칙을 통과해야 한다 — 짧은 이름은 `deriveSessionKey` 가 null 을 준다.
+  //     (한 번 그렇게 재서 "제품이 아니라 픽스처" 를 측정했다. 여기서 먼저 확인하고 시작한다.)
+  const SP = require(path.resolve(__dirname, '..', 'lib', 'session-presence'));
+  const KA = 'session-alpha01', KB = 'session-bravo01';
+  if (!SP.deriveSessionKey({ LEERNESS_SESSION_ID: KA }) || !SP.deriveSessionKey({ LEERNESS_SESSION_ID: KB })) {
+    bad.push('픽스처 세션 키가 무효 — 이 블록은 아무것도 재지 못한다');
+  }
+  const eA = Object.assign({}, envP, { LEERNESS_SESSION_ID: KA });
+  const eB = Object.assign({}, envP, { LEERNESS_SESSION_ID: KB });
+  try {
+    // ① 증거 귀속 + 완료 게이트 — A 가 일하고 B 는 놀았다.
+    {
+      const d = mk('attrib');
+      const sA = J(R(d, eA, ['state', 'start', 'A 목표', '--agent', 'agentA', '--json']));
+      const sB = J(R(d, eB, ['state', 'start', 'B 목표', '--agent', 'agentB', '--json']));
+      const rA = J(R(d, eA, ['state', 'record', '--files-changed', 'a.js', '--tests', 'npm test: 10/10', '--json']));
+      const vB = J(R(d, eB, ['state', 'verify', '--result', 'pass', '--json']));
+      if (!sA || !sB || sA.started === sB.started) bad.push('①두 세션이 같은 run 을 받았다 — 판별 불가');
+      if (!rA || rA.recorded !== (sA && sA.started)) bad.push(`①A 의 증거가 A 의 run 이 아닌 곳에 붙음(${rA && rA.recorded})`);
+      const cca = vB && vB.completion_claim_allowed && vB.completion_claim_allowed.allowed;
+      if (cca) bad.push('①일하지 않은 세션이 완료 허용을 받았다 — 증거 게이트가 뒤집힘');
+      const showA = J(R(d, eA, ['state', 'show', '--json']));
+      if (!showA || showA.resolvedRunId !== (sA && sA.started)) bad.push(`①A 가 자기 run 을 못 본다(${showA && showA.resolvedRunId})`);
+      dbg.attrib = { A: sA && sA.started, B: sB && sB.started, recordedTo: rA && rA.recorded, bAllowed: !!cca, aSees: showA && showA.resolvedRunId };
+    }
+    // ② 남의 run 에 조용히 쓰지 않고 **사유를 말한다**(증거는 그대로 남는다).
+    {
+      const d = mk('refuse');
+      R(d, eA, ['state', 'start', 'A 목표', '--json']);
+      const rB = R(d, eB, ['state', 'record', '--files-changed', 'stolen.js']);
+      const msg = String(rB.stdout || '') + String(rB.stderr || '');
+      let runA = null; try { runA = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'runs', 'run-0001.json'), 'utf8')); } catch {}
+      if (rB.status === 0) bad.push('②남의 run 인데 성공이라 보고');
+      if (!/다른 세션이 진행 중/.test(msg)) bad.push('②거절 사유를 말하지 않음');
+      if (!runA || runA.files_changed.length !== 0) bad.push('②거절했는데 남의 증거가 오염됨');
+      dbg.refuse = { exit: rB.status, saysWhy: /다른 세션이 진행 중/.test(msg), aFiles: runA && runA.files_changed.length };
+    }
+    // ③ 남의 handoff 가 내 run 을 끊지 않는다.
+    {
+      const d = mk('release');
+      R(d, eA, ['state', 'start', 'A', '--json']);
+      R(d, eB, ['state', 'start', 'B', '--json']);
+      R(d, eB, ['state', 'handoff', 'B 마감', '--json']);
+      const aShow = J(R(d, eA, ['state', 'show', '--json']));
+      const aRec = J(R(d, eA, ['state', 'record', '--files-changed', 'a2.js', '--json']));
+      if (!aShow || aShow.resolvedRunId !== 'run-0001') bad.push(`③남의 handoff 뒤 내 run 이 사라짐(${aShow && aShow.resolvedRunId})`);
+      if (!aRec || aRec.recorded !== 'run-0001') bad.push(`③남의 handoff 뒤 기록 불가(${aRec && aRec.recorded})`);
+      dbg.release = { aResolved: aShow && aShow.resolvedRunId, aRecorded: aRec && aRec.recorded };
+    }
+    // ④ **대조군 — 기존 단일 사용자(세션 키 없음)는 종전 그대로.**
+    //    한쪽만 재면 "주소 없는 사람을 막아 버리는" 회귀가 통과한다.
+    {
+      const d = mk('single');
+      const st = J(R(d, envP, ['state', 'start', '목표', '--json']));
+      const rc = J(R(d, envP, ['state', 'record', '--files-changed', 'x.js', '--tests', 'npm test: 3/3', '--json']));
+      const vf = J(R(d, envP, ['state', 'verify', '--result', 'pass', '--json']));
+      const ho = J(R(d, envP, ['state', 'handoff', '요약', '--json']));
+      const after = J(R(d, envP, ['state', 'show', '--json']));
+      const chain = [rc && rc.recorded, vf && vf.verified, ho && ho.handoff];
+      if (!st || chain.some((x) => x !== st.started)) bad.push(`④세션키 없는 단일 흐름이 깨짐(${JSON.stringify(chain)})`);
+      if (!after || after.resolvedRunId !== null) bad.push(`④handoff 뒤에도 run 이 남음(${after && after.resolvedRunId})`);
+      if (!vf || !vf.completion_claim_allowed || vf.completion_claim_allowed.allowed !== true) {
+        bad.push('④일한 단일 사용자가 완료 허용을 못 받음 — 게이트가 과차단');
+      }
+      dbg.single = { started: st && st.started, chain, after: after && after.resolvedRunId,
+        allowed: vf && vf.completion_claim_allowed && vf.completion_claim_allowed.allowed };
+    }
+    // ⑤ 업그레이드 이전 상태(전역 슬롯만)를 **인수**한다 — 쓰던 사람이 멈추지 않는다.
+    {
+      const d = mk('migrate');
+      R(d, envP, ['state', 'start', '업그레이드 전', '--json']);
+      const stFile = path.join(d, '.leerness', 'state.json');
+      const before = JSON.parse(fs.readFileSync(stFile, 'utf8'));
+      delete before.runsBySession;
+      fs.writeFileSync(stFile, JSON.stringify(before, null, 2) + '\n');
+      const rc = J(R(d, eA, ['state', 'record', '--files-changed', 'y.js', '--json']));
+      if (!rc || rc.recorded !== before.currentRunId) bad.push(`⑤예전 run 을 인수하지 못함(${rc && rc.recorded} vs ${before.currentRunId})`);
+      dbg.migrate = { old: before.currentRunId, recorded: rc && rc.recorded };
+    }
+    // ⑥ 무효한 명시 주소를 **조용히 무시하지 않는다**(무시하면 전역 슬롯으로 떨어져 이 버그가 되살아난다).
+    {
+      const d = mk('badkey');
+      const eBad = Object.assign({}, envP, { LEERNESS_SESSION_ID: 'x' });
+      const r = R(d, eBad, ['state', 'start', '목표']);
+      const msg = String(r.stdout || '') + String(r.stderr || '');
+      if (SP.deriveSessionKey({ LEERNESS_SESSION_ID: 'x' })) bad.push('⑥픽스처 키가 유효해져 이 축이 공허해졌다');
+      else if (!/형식에 맞지 않아 무시/.test(msg)) bad.push('⑥무효한 세션 주소를 조용히 무시');
+      dbg.badKey = { warned: /형식에 맞지 않아 무시/.test(msg) };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AF(1.36.142/T-0116) 증거 귀속: 두 세션이 같은 프로젝트에서 일해도 증거가 **일한 세션**에 붙고 놀던 세션은 완료 허용을 못 받음 · 남의 run 거절+사유 · 남의 handoff 가 내 run 을 안 끊음 · 세션키 없는 기존 흐름 무회귀 · 예전 상태 인수 · 무효 주소 고지 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.142 증거 귀속 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
+total++;
+// AG(1.36.143) — **없는 `--path` 는 아무것도 만들지 않는다** + 공유 판정은 추정하지 않는다.
+//   검수는 `provider add` · `team add` · `creds register` 3건을 지목했다. 이름을 더 넣는 대신
+//   모든 명령에 없는 `--path` 를 주고 전수로 재니 **33건**이 그 경로를 만들었다 —
+//   다수는 **성공이라 말하면서**(`provider add` · `team add` · `skill learn` · `glossary` · `wakeup-interval`),
+//   그중엔 직전 라운드에 내가 넣은 `state start` 도 있었다. 개별 등록은 이미 세 번째였다.
+//   그래서 이름 목록이 아니라 **성질**로 막고, 여기서도 이름이 아니라 **열거**로 잰다.
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-143-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG',
+    'GIT_DIR', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_NOSYSTEM']) delete envP[k];
+  envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gitconfig-global');
+  envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gitconfig-system');
+  try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
+  const G = (d, a) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
+  const RP = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 60000, env: envP, maxBuffer: 32 * 1024 * 1024 });
+  const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  const cwd = path.join(sb, 'cwd'); fs.mkdirSync(cwd, { recursive: true });
+  try {
+    // ① 전수 — 제품 자신에게 명령 목록을 묻고, 하위명령까지 펴서 없는 `--path` 로 부른다.
+    {
+      let usages = [];
+      const lr = RP(cwd, ['commands', '--json']);
+      try {
+        const collect = (v) => {
+          if (Array.isArray(v)) for (const x of v) collect(x);
+          else if (v && typeof v === 'object') { if (typeof v.cmd === 'string') usages.push(v.cmd); else if (typeof v.name === 'string') usages.push(v.name); else for (const k of Object.keys(v)) collect(v[k]); }
+          else if (typeof v === 'string') usages.push(v);
+        };
+        collect(JSON.parse(lr.stdout));
+      } catch (e) { bad.push('①명령 목록을 얻지 못함: ' + String(e.message).slice(0, 60)); }
+      //   부재가 정상 입력인 명령(경로를 만드는 것이 그 일)은 대상이 아니다.
+      const CREATORS = /^(init|migrate|migrate-workspace-dir|update|auto-update|adapter|ci)\b/;
+      const invocations = []; const seen = new Set();
+      for (const raw of Array.from(new Set(usages))) {
+        const u = String(raw).replace(/^leerness\s+/, '').trim();
+        if (!u || CREATORS.test(u)) continue;
+        const toks = u.split(/\s+/); const head = toks[0];
+        if (!/^[a-z][a-z0-9-]*$/.test(head)) continue;
+        const second = toks[1] || '';
+        let subs = [null];
+        if (second && second.includes('|') && !/^[[<]/.test(second)) subs = second.split('|').map((x) => x.replace(/[[\]<>"]/g, '')).filter((x) => /^[a-z][a-z0-9-]*$/.test(x));
+        else if (second && /^[a-z][a-z0-9-]*$/.test(second)) subs = [second];
+        for (const sub of subs) {
+          for (const extra of [[], ['zzprobe']]) {
+            const argv = sub ? [head, sub, ...extra] : [head, ...extra];
+            const label = argv.join(' ');
+            if (!seen.has(label)) { seen.add(label); invocations.push({ label, argv }); }
+          }
+        }
+      }
+      //   열거가 붕괴하면 "0건" 은 아무 뜻이 없다 — 크기를 함께 단언한다.
+      if (invocations.length < 100) bad.push(`①열거가 ${invocations.length}건 — 계측 붕괴(0건 통과가 무의미해진다)`);
+      const leaks = [];
+      for (let i = 0; i < invocations.length; i++) {
+        const ghost = path.join(sb, 'g' + i, 'nope');
+        const r = RP(cwd, [...invocations[i].argv, '--path', ghost]);
+        if (fs.existsSync(ghost)) leaks.push(`${invocations[i].label}(exit=${r.status})`);
+      }
+      if (leaks.length) bad.push(`①없는 경로를 만든 호출 ${leaks.length}건: ${leaks.slice(0, 6).join(' · ')}`);
+      dbg.ghostSweep = { invocations: invocations.length, leaks: leaks.length };
+    }
+    // ② 대조군 — 존재하는 프로젝트에서는 그대로 동작해야 한다(과차단으로 통과하면 안 된다).
+    {
+      const d = path.join(sb, 'real'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      RP(d, ['init', d, '--yes', '--minimal']);
+      const exits = ['handoff', 'status', 'audit'].map((c) => RP(d, [c, '--path', d]).status);
+      if (exits.some((x) => x !== 0)) bad.push(`②정상 프로젝트에서 조회가 막힘(exits=${JSON.stringify(exits)})`);
+      dbg.realProject = { exits };
+    }
+    // ③ worktree 형제 차단을 **추정하지 않고 각 worktree 에게 묻는다**.
+    {
+      const mkRepo = (name) => {
+        const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+        G(d, ['init', '-q', '-b', 'main', '.']); G(d, ['config', 'user.email', 't@t']); G(d, ['config', 'user.name', 't']);
+        fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+        fs.writeFileSync(path.join(d, 'a.txt'), 'a'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
+        RP(d, ['init', d, '--yes', '--minimal']); RP(d, ['handoff', d]);
+        return d;
+      };
+      const m1 = mkRepo('wt-shared');
+      const add1 = G(m1, ['worktree', 'add', '-qb', 'lk', path.join(sb, 'wt-shared-linked')]);
+      const j1 = J(RP(m1, ['enforce', 'install', '--path', m1, '--json', '--skip-verify']));
+      const m2 = mkRepo('wt-own');
+      G(m2, ['config', 'extensions.worktreeConfig', 'true']);
+      const add2 = G(m2, ['worktree', 'add', '-qb', 'lk2', path.join(sb, 'wt-own-linked')]);
+      fs.mkdirSync(path.join(m2, '.git', 'wt-hooks'), { recursive: true });
+      const cfg = G(m2, ['config', '--worktree', 'core.hooksPath', '.git/wt-hooks']);
+      const j2 = J(RP(m2, ['enforce', 'status', '--path', m2, '--json']));
+      if (add1.status !== 0 || add2.status !== 0 || cfg.status !== 0) bad.push('③worktree 픽스처를 만들지 못함 — 판별 불가');
+      else {
+        if (!j1 || j1.worktrees !== 2) bad.push(`③공용 훅인데 형제 차단을 말하지 않음(worktrees=${j1 && j1.worktrees})`);
+        if (!j2 || j2.worktrees !== 1) bad.push(`③worktree 전용 훅인데 형제도 막힌다고 함(worktrees=${j2 && j2.worktrees})`);
+      }
+      dbg.worktree = { shared: j1 && j1.worktrees, perWorktree: j2 && j2.worktrees };
+    }
+    // ④ 세척 클래스의 **경계** — 지워야 할 것과 남겨야 할 것을 같이 잰다(한쪽만 재면 과세척이 통과한다).
+    {
+      const g = require(path.resolve(__dirname, '..', 'lib', 'git.js'));
+      const mustDrop = ['GIT_DIR', 'git_dir', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_7', 'GIT_CONFIG_VALUE_7'];
+      const mustKeep = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CEILING_DIRECTORIES', 'GIT_AUTHOR_NAME', 'GIT_SSH_COMMAND', 'GIT_EDITOR'];
+      const droppedNot = mustDrop.filter((k) => !g._shouldDrop(k));
+      const keptNot = mustKeep.filter((k) => g._shouldDrop(k));
+      if (droppedNot.length) bad.push(`④세척해야 하는데 안 함: ${droppedNot.join(', ')}`);
+      if (keptNot.length) bad.push(`④남겨야 하는데 세척함(과세척): ${keptNot.join(', ')}`);
+      dbg.scrub = { droppedNot, keptNot, total: g.GIT_LOCATION_ENV.length };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AG(1.36.143) 없는 --path 는 아무것도 만들지 않음(전수 열거, 고치기 전 33건) · 정상 프로젝트 무회귀 · worktree 형제 차단을 추정 대신 **각 worktree 에게 물어** 판정 · 세척 클래스 경계(지울 것/남길 것 양방향) ${JSON.stringify(dbg)}`
+    : '✗ 1.36.143 경로/공유 판정 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
   if (!ok) failed++;
 }
 

@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.141';
+const VERSION = '1.36.143';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -7275,16 +7275,33 @@ function enforceCmd(root, sub) {
   //   1.36.140 (재검수 P1, 재현): 연결된 worktree 들은 `core.hooksPath` 설정이 없어도 **같은 훅 파일**을 쓴다 —
   //     한 worktree 에 설치하면 형제 worktree 의 커밋까지 차단된다. `hooksPathShared` 는 설정에 관한 사실이므로
   //     그 뜻을 늘리지 않고, **별도 사실**로 센다(모르면 주장하지 않는다).
+  //   ⚠ 1.36.143 (재검수 P1): 첫 판은 "worktree 범위 설정이면 형제는 안 막힌다" 고 **추정**해 `null` 을 냈다.
+  //     그런데 worktree 범위 설정이 그냥 공용 `.git/hooks` 를 가리키면 형제는 **실제로 막힌다** — 사실을 숨긴 것이다.
+  //     추정하지 말고 **각 worktree 에게 자기 훅 경로를 직접 묻는다.** 우리가 쓰는 파일과 같은 곳을 보는 수를 센다.
   const _worktreeCount = (() => {
     try {
-      //   ⚠ `core.hooksPath` 가 **worktree 범위**면 그 worktree 전용 훅이라 형제는 안 막힌다 —
-      //     그때 "형제도 차단된다" 고 말하면 거짓 경고다(재검수 P2). 모르면 주장하지 않는다.
-      const wsc = _gitSpawn(['-C', root, 'config', '--show-scope', '--get', 'core.hooksPath'], { encoding: 'utf8', timeout: 5000 });
-      if (wsc.status === 0 && String(wsc.stdout || '').trim().split(/\s+/)[0] === 'worktree') return null;
       const wl = _gitSpawn(['-C', root, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', timeout: 5000 });
       if (wl.status !== 0) return null;
-      const n = String(wl.stdout || '').split('\n').filter((l) => l.startsWith('worktree ')).length;
-      return n > 0 ? n : null;
+      const dirs = String(wl.stdout || '').split('\n')
+        .filter((l) => l.startsWith('worktree '))
+        .map((l) => l.slice('worktree '.length).trim())
+        .filter(Boolean);
+      if (dirs.length <= 1) return dirs.length || null;
+      const norm = (q) => {
+        let r = q;
+        try { r = fs.realpathSync.native ? fs.realpathSync.native(q) : fs.realpathSync(q); } catch {}
+        r = path.resolve(r);
+        return process.platform === 'win32' ? r.toLowerCase() : r;
+      };
+      const mine = norm(hookP);
+      let sharing = 0;
+      for (const wd of dirs) {
+        const hp = _gitSpawn(['-C', wd, 'rev-parse', '--git-path', 'hooks/pre-commit'], { encoding: 'utf8', timeout: 5000 });
+        if (hp.status !== 0 || !String(hp.stdout || '').trim()) return null;   // 하나라도 모르면 주장하지 않는다
+        const raw = String(hp.stdout).trim();
+        if (norm(path.isAbsolute(raw) ? raw : path.join(wd, raw)) === mine) sharing++;
+      }
+      return sharing > 0 ? sharing : null;
     } catch { return null; }
   })();
   const chainedP = hookP + '.pre-leerness';
@@ -7351,7 +7368,9 @@ function enforceCmd(root, sub) {
           } catch { /* 제자리 쓰기가 막히면 아래 지우고-쓰기로 넘어간다 */ }
         }
       }
-      if (_lexists(p)) { try { fs.unlinkSync(p); } catch {} }
+      //   ⚠ 1.36.143 (재검수 P1): 삭제 실패를 삼키면 **우리 차단 훅이 살아있는데** 되돌렸다고 말하게 된다.
+      //     되돌리기 실패는 밖으로 던져 `_rbFail` 에 잡힌다.
+      if (_lexists(p)) fs.unlinkSync(p);
       if (snap.kind === 'none') return;
       if (snap.kind === 'link') { fs.symlinkSync(snap.target, p); return; }
       fs.writeFileSync(p, snap.buf);
@@ -7368,12 +7387,9 @@ function enforceCmd(root, sub) {
     };
     const _rbNote = () => (_rbFail.length ? ` ⚠ 되돌리지 못한 것: ${_rbFail.join(' · ')}` : '');
     try {
-    mkdirp(path.dirname(hookP));
-    // 기존 훅 보존: 우리 것이 아니면 체인 파일로 이동 후 호출
-    if (exists(hookP) && !read(hookP).includes(_ENFORCE_MARK)) {
-      fs.copyFileSync(hookP, chainedP);
-      try { fs.chmodSync(chainedP, 0o755); } catch {}
-    }
+    // 1.36.143 (재검수 P1): 경로 검사를 **어떤 변경보다도 앞**으로 옮겼다.
+    //   종전엔 체인 백업을 이미 덮어쓴 뒤에 `unsafe_path` 로 반환해 **백업이 파괴된 채로 남았다**.
+    //   거절할 입력이면 아무것도 건드리기 전에 거절한다.
     // 훅은 자기완결 sh — 설치된 leerness 버전/네트워크/PATH 에 무의존(구버전 전역 CLI 가 enforce 를 몰라 오차단하던 실측 함정 회피).
     // 핵심 체크 = last-handoff.json 의 mtime 이 window 안인지 (find -mmin, git bash 표준).
     // 1.36.134: git 이 훅을 부를 때의 작업 디렉토리 = toplevel. harness 위치를 그 기준 상대경로로 고정한다.
@@ -7390,6 +7406,18 @@ function enforceCmd(root, sub) {
     try { _top = fs.realpathSync(_top); } catch {}
     let harnessRel = (path.relative(_top, _hDir) || '.harness').replace(/\\/g, '/');
     if (harnessRel.startsWith('..')) harnessRel = _hDir.replace(/\\/g, '/');
+    //   ⚠ 1.36.143 (재검수 P1): 이 거부가 **체인 백업 복사 뒤**에 있었다 — 거절하면서 백업을 파괴했다.
+    //     계산은 읽기뿐이므로 여기까지 올려도 안전하고, 거절은 **아무것도 쓰기 전에** 끝난다.
+    if (/[\r\n]/.test(harnessRel)) {
+      failJson(json, 'unsafe_path', `경로에 개행이 있어 훅 스크립트에 넣을 수 없습니다: ${JSON.stringify(harnessRel)}`);
+      return;   // ← 아직 아무것도 쓰지 않았다
+    }
+    mkdirp(path.dirname(hookP));
+    // 기존 훅 보존: 우리 것이 아니면 체인 파일로 이동 후 호출
+    if (exists(hookP) && !read(hookP).includes(_ENFORCE_MARK)) {
+      fs.copyFileSync(hookP, chainedP);
+      try { fs.chmodSync(chainedP, 0o755); } catch {}
+    }
     // 1.36.134 (검수 P1, 재현): 이 값을 훅 셸 스크립트에 그대로 박았다 — 디렉토리 이름이 `pkg$(touch PWNED)` 면
     //   **설치만으로 임의 코드가 실행**됐다(실측: PWNED 생성). 값을 신뢰하지 않는다.
     //   ① 셸에서 특별한 뜻을 갖는 문자가 하나라도 있으면 설치를 거부한다(조용히 이스케이프하고 넘어가지 않는다 —
@@ -7398,10 +7426,6 @@ function enforceCmd(root, sub) {
     //     둘 다 `unsafe_path` 로 막혔다. 한국어 환경에서 흔한 경로다. 거부가 아니라 **제대로 인용**하는 것이 답이다.
     //     POSIX sh 의 작은따옴표 안에서는 `'` 를 제외한 모든 문자가 리터럴이다 — `'` 만 표준 관용구로 탈출시킨다.
     const shQuote = (v) => "'" + String(v).replace(/'/g, "'\''") + "'";
-    if (/[\r\n]/.test(harnessRel)) {
-      failJson(json, 'unsafe_path', `경로에 개행이 있어 훅 스크립트에 넣을 수 없습니다: ${JSON.stringify(harnessRel)}`);
-      return;
-    }
     const hook = [
       '#!/bin/sh',
       _ENFORCE_MARK + ' — leerness 사용 강제 (제거: leerness enforce remove)',
@@ -25165,6 +25189,39 @@ function stateCmd(root, sub, ...args) {
   }
   const json = has('--json');
   sub = sub || 'show';
+  // 1.36.142 (T-0116, 재현): `currentRunId` 가 **전역 슬롯 하나**라 두 세션이 같은 프로젝트에서
+  //   일하면 뒤사람이 앞사람의 슬롯을 덮어쓴다. 실측: A 의 증거(files_changed · tests)가
+  //   **B 의 run 에 붙고**, 일하지 않은 B 가 `completion_claim_allowed: true` 를 받았으며,
+  //   A 는 `state show` 로 자기 run 을 볼 수조차 없었다. 증거 게이트가 그대로 뒤집힌다.
+  //   락으로 막힐 문제가 아니다(직렬로 돌려도 재현된다) — **주소가 없는 것**이 문제다.
+  const _SPst = require('../lib/session-presence');
+  const _sessKey = _SPst.deriveSessionKey(process.env);
+  //   ⚠ 명시한 주소가 형식에 안 맞으면 조용히 전역 슬롯으로 떨어진다 — 그게 바로 이 버그다.
+  //     사용자는 주소가 있다고 믿는데 없는 상태가 되므로, 무시했다면 반드시 말한다.
+  const _badKey = _SPst.invalidExplicitKey(process.env);
+  if (_badKey && !json) warn(`⚠ LEERNESS_SESSION_ID 가 형식에 맞지 않아 무시됩니다("${_badKey}") — 이 세션은 주소 없이 전역 슬롯을 씨니다`);
+  const _ownedBy = (st) => (st && st.runsBySession && typeof st.runsBySession === 'object' && !Array.isArray(st.runsBySession)) ? st.runsBySession : {};
+  //   이 세션의 run 을 고른다. 없으면 **다른 세션이 소유하지 않은** 전역 슬롯만 인수한다
+  //   (업그레이드 전에 시작한 run · 세션 키가 없는 단일 에이전트는 종전처럼 동작한다).
+  const _resolveRunId = (st) => {
+    const owned = _ownedBy(st);
+    if (_sessKey && owned[_sessKey]) return owned[_sessKey];
+    const others = new Set(Object.entries(owned).filter(([k]) => k !== _sessKey).map(([, v]) => v));
+    if (st.currentRunId && !others.has(st.currentRunId)) return st.currentRunId;
+    return null;
+  };
+  const _claimRun = (st, runId) => {
+    if (_sessKey) { st.runsBySession = Object.assign({}, _ownedBy(st)); st.runsBySession[_sessKey] = runId; }
+    st.currentRunId = runId;   // 기존 소비자 계약 유지(마지막 시작된 run)
+  };
+  const _releaseRun = (st, runId) => {
+    if (_sessKey && _ownedBy(st)[_sessKey] === runId) {
+      st.runsBySession = Object.assign({}, _ownedBy(st));
+      delete st.runsBySession[_sessKey];
+    }
+    //   ⚠ 전역 슬롯은 **내 run 일 때만** 비운다 — 남의 run 을 끊지 않는다.
+    if (st.currentRunId === runId) st.currentRunId = null;
+  };
 
   if (sub === 'start') {
     // 1.9.311 (UR-0047): state 는 .leerness substrate(standalone) — .harness init 가드 미적용 (회귀 방지)
@@ -25179,9 +25236,9 @@ function stateCmd(root, sub, ...args) {
       model_name: arg('--model', null)
     });
     _saveRun(root, rec);
-    state.currentRunId = run_id;
+    _claimRun(state, run_id);
     _saveLeernessState(root, state);
-    if (json) { log(JSON.stringify({ started: run_id, run: rec }, null, 2)); return; }
+    if (json) { log(JSON.stringify({ started: run_id, run: rec, sessionKey: _sessKey || null, keySource: _SPst.keySource(process.env) || null }, null, 2)); return; }
     ok(`run 시작: ${run_id}${rec.agent_name ? ' · agent=' + rec.agent_name : ''}${rec.model_name ? ' · model=' + rec.model_name : ''}`);
     if (goal) log(`  goal: ${goal}`);
     log(`  → 기록: leerness state record --files-changed "a,b" --commands "npm test" --decision "..."`);
@@ -25189,8 +25246,14 @@ function stateCmd(root, sub, ...args) {
   }
 
   const state = _loadLeernessState(root);
-  const curId = state.currentRunId;
+  const curId = _resolveRunId(state);
   if ((sub === 'record' || sub === 'verify' || sub === 'handoff') && !curId) {
+    //   다른 세션이 쓰는 run 이 있으면 그 사실을 말한다 — 조용히 남의 run 에 쓰지 않는다.
+    const _others = Object.entries(_ownedBy(state)).filter(([k]) => k !== _sessKey);
+    if (_others.length) {
+      return fail(`이 세션의 run 이 없습니다 — 다른 세션이 진행 중입니다(${_others.map(([k, v]) => `${String(k).slice(0, 8)}…:${v}`).join(', ')}). `
+        + `남의 run 에 증거를 붙이지 않습니다 — 먼저 leerness state start "<goal>"`);
+    }
     return fail('진행 중 run 없음 — 먼저 leerness state start "<goal>"');
   }
 
@@ -25236,7 +25299,7 @@ function stateCmd(root, sub, ...args) {
     writeUtf8(path.join(hdir, 'latest.json'), JSON.stringify({ ...rec, completion_claim_allowed: _ccaH }, null, 2) + '\n');
     writeUtf8(path.join(hdir, 'latest.md'),
       `# Handoff — ${rec.run_id}\n\n- task: ${rec.task_id || '-'}\n- agent: ${rec.agent_name || '-'} · model: ${rec.model_name || '-'}\n- goal: ${rec.goal || '-'}\n- files_changed: ${rec.files_changed.join(', ') || '-'}\n- tests_run: ${rec.tests_run.join(', ') || '-'}\n- verification: ${rec.verification_result || '-'}\n- completion_claim_allowed: ${_ccaH.allowed ? 'yes' : 'no (' + _ccaH.reasons.join(', ') + ')'}\n\n## Summary\n${rec.handoff_summary}\n`);
-    state.currentRunId = null;  // 다음 에이전트가 새 run 시작
+    _releaseRun(state, rec.run_id);   // 내 소유만 놓는다(남의 run 은 건드리지 않는다)
     _saveLeernessState(root, state);
     if (json) { log(JSON.stringify({ handoff: rec.run_id, run: rec, completion_claim_allowed: _ccaH }, null, 2)); return; }
     ok(`handoff 작성: ${rec.run_id} → .leerness/handoff/latest.{md,json}`);
@@ -25246,7 +25309,14 @@ function stateCmd(root, sub, ...args) {
   // default: show
   const rec = curId ? _loadRun(root, curId) : null;
   // 1.9.443 (UR-0153): evidence-first 완료 게이트 파생 노출.
-  if (json) { log(JSON.stringify({ state, currentRun: rec, completion_claim_allowed: rec ? _completionClaimAllowed(rec) : null }, null, 2)); return; }
+  if (json) {
+    log(JSON.stringify({
+      state, currentRun: rec, completion_claim_allowed: rec ? _completionClaimAllowed(rec) : null,
+      sessionKey: _sessKey || null, keySource: _SPst.keySource(process.env) || null,
+      runsBySession: _ownedBy(state), resolvedRunId: curId,
+    }, null, 2));
+    return;
+  }
   log(`# leerness state (1.9.278, UR-0032) — .leerness/ 구조화 상태`);
   log(`project: ${state.project} · runs 누적: ${state.runCounter || 0} · 현재 run: ${curId || '(없음)'}`);
   if (rec) {
@@ -27851,6 +27921,26 @@ async function main() {
           failJson(has('--json'), 'path_not_found', _en ? `path not found or not a directory: ${_abs}` : `경로 없음 또는 디렉토리 아님: ${_abs}`);
           return;
         }
+      }
+    }
+  }
+  // 1.36.143 (전수 스윕): 위 가드는 **이름 목록**(_strict)이라 소비자를 못 따라갔다 — 검수는 3건을 지목했지만
+  //   모든 명령에 없는 `--path` 를 주고 실측하니 **33건**이 그 경로를 만들었다(`.harness` 25 · `.leerness` 7 · 기타).
+  //   그중 다수는 **성공이라 말하면서** 만든다(`provider add` · `team add` · `skill learn` · `glossary` · `wakeup-interval`).
+  //   `roles` · `decision drop` · `lesson drop` 을 개별 등록한 게 세 번째였다 — 네 번째를 만들지 않으려면 이름이 아니라
+  //   **성질**로 막아야 한다: 사용자가 `--path` 로 **명시한** 경로는 존재해야 한다. 부재가 정상 입력인 명령만 뺀다.
+  //   (위치인자 경로 해석은 명령마다 계약이 달라 건드리지 않는다 — 명시 플래그만 다룬다.)
+  {
+    const _PATH_MAY_BE_ABSENT = new Set(['init', 'migrate', 'migrate-workspace-dir', 'update', 'auto-update', 'adapter', 'ci']);
+    const _p = arg('--path', null);
+    if (_p && !_PATH_MAY_BE_ABSENT.has(cmd)) {
+      const _abs = absRoot(_p);
+      if (!exists(_abs)) {
+        const _en = _uiLang(process.cwd()) === 'en';
+        failJson(has('--json'), 'path_not_found', _en
+          ? `path not found: ${_abs} — no directory was created`
+          : `경로 없음: ${_abs} — 디렉토리를 새로 만들지 않았습니다`);
+        return;
       }
     }
   }
