@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.144';
+const VERSION = '1.36.145';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -23588,12 +23588,16 @@ function mcpServeCmd(root) {
   // 예산 표(MCP_LONG_PATHS)와 _mcpTimeoutFor 는 모듈 스코프에 있다 — selftest 가 소스 grep 이 아니라
   //   **실제 호출**로 `budget > 내부한도` 를 단언할 수 있게 하기 위함(1.36.125).
   const _shQuote = (s) => (/[\s"']/.test(String(s)) ? `"${String(s).replace(/"/g, '\\"')}"` : String(s));
-  function callLeerness(cliArgs) {
+  // 1.36.145 (재검수 P1, 재현): T-0116 을 CLI 에서만 고쳤다 — MCP 도구에는 **세션 주소 입력이 없어**
+  //   한 서버의 모든 호출이 같은(=무)주소로 접혀 전역 슬롯 오귀속이 그대로 남아 있었다.
+  //   실측: A 의 증거가 B 의 run 에 붙고, 일하지 않은 B 가 `completion_claim_allowed: true` 를 받았다.
+  //   자식 프로세스로 돌리므로 **env 로 주소를 넘길 수 있다** — 호출마다 다른 주소를 준다.
+  function callLeerness(cliArgs, extraEnv) {
     const budget = _mcpTimeoutFor(cliArgs);
     const r = cp.spawnSync(process.execPath, [__filename, ...cliArgs], {
       encoding: 'utf8',
       timeout: budget,
-      env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_WORKFLOW_GUIDE: '1' }
+      env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_WORKFLOW_GUIDE: '1', ...(extraEnv || {}) }
     });
     const cmd = `leerness ${cliArgs.map(_shQuote).join(' ')}`;
     const partial = ((r.stdout || '') + (r.stderr || '')).trim();
@@ -23689,7 +23693,9 @@ function mcpServeCmd(root) {
             return send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `정책 차단(policy): ${pol.reason}` }], isError: true } });
           }
         } catch {}
-        const r = callLeerness(cliArgs);
+        //   세션 주소를 그대로 전달한다(문자열일 때만). 형식이 안 맞으면 CLI 가 무시하고 그 사실을 말한다.
+        const _sk = (args && typeof args.sessionKey === 'string' && args.sessionKey.trim()) ? args.sessionKey.trim() : null;
+        const r = callLeerness(cliArgs, _sk ? { LEERNESS_SESSION_ID: _sk } : null);
         // 1.9.61: cursor 기반 페이지네이션 — 긴 출력은 cursor offset로 다음 청크
         const fullText = r.stdout || r.stderr || '(no output)';
         // 1.12.4 (15th 버그헌트 P2, UR-0016): _chunkSize 를 양의 정수로 클램프 — 음수/소수면 slice 빈 출력 + nextCursor 음수 → 무한 빈-루프(데이터 손실)였음.
@@ -25337,9 +25343,16 @@ function stateCmd(root, sub, ...args) {
     const hdir = path.join(_leernessStateDir(root), 'handoff'); mkdirp(hdir);
     // 1.9.443 (UR-0153): handoff evidence 에 completion_claim_allowed 포함 — 다음 에이전트/PR 이 증거 게이트를 직접 읽음.
     const _ccaH = _completionClaimAllowed(rec);
-    writeUtf8(path.join(hdir, 'latest.json'), JSON.stringify({ ...rec, completion_claim_allowed: _ccaH }, null, 2) + '\n');
-    writeUtf8(path.join(hdir, 'latest.md'),
-      `# Handoff — ${rec.run_id}\n\n- task: ${rec.task_id || '-'}\n- agent: ${rec.agent_name || '-'} · model: ${rec.model_name || '-'}\n- goal: ${rec.goal || '-'}\n- files_changed: ${rec.files_changed.join(', ') || '-'}\n- tests_run: ${rec.tests_run.join(', ') || '-'}\n- verification: ${rec.verification_result || '-'}\n- completion_claim_allowed: ${_ccaH.allowed ? 'yes' : 'no (' + _ccaH.reasons.join(', ') + ')'}\n\n## Summary\n${rec.handoff_summary}\n`);
+    const _payload = JSON.stringify({ ...rec, completion_claim_allowed: _ccaH }, null, 2) + '\n';
+    const _md = `# Handoff — ${rec.run_id}\n\n- task: ${rec.task_id || '-'}\n- agent: ${rec.agent_name || '-'} · model: ${rec.model_name || '-'}\n- goal: ${rec.goal || '-'}\n- files_changed: ${rec.files_changed.join(', ') || '-'}\n- tests_run: ${rec.tests_run.join(', ') || '-'}\n- verification: ${rec.verification_result || '-'}\n- completion_claim_allowed: ${_ccaH.allowed ? 'yes' : 'no (' + _ccaH.reasons.join(', ') + ')'}\n\n## Summary\n${rec.handoff_summary}\n`;
+    // 1.36.145 (재검수 P2): run 은 세션별인데 인수인계 산출물은 **전역 파일 하나**였다 —
+    //   다른 세션이 뒤이어 마감하면 앞사람의 인수인계가 읽히기 전에 덮였다.
+    //   run 별 사본을 먼저 남긴다(잃을 것이 없다). `latest.*` 는 계약대로 "가장 최근" 을 유지하되
+    //   누구의 것인지 알 수 있게 run_id 를 본문에 싣는다(이미 rec 에 있다).
+    writeUtf8(path.join(hdir, `${rec.run_id}.json`), _payload);
+    writeUtf8(path.join(hdir, `${rec.run_id}.md`), _md);
+    writeUtf8(path.join(hdir, 'latest.json'), _payload);
+    writeUtf8(path.join(hdir, 'latest.md'), _md);
     _releaseRun(state, rec.run_id);   // 내 소유만 놓는다(남의 run 은 건드리지 않는다)
     _saveLeernessState(root, state);
     if (json) { log(JSON.stringify({ handoff: rec.run_id, run: rec, completion_claim_allowed: _ccaH }, null, 2)); return; }

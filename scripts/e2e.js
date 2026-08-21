@@ -14761,6 +14761,100 @@ total++;
   if (!ok) failed++;
 }
 
+total++;
+// AI(1.36.145) — **MCP 표면에도 세션 주소가 있어야 한다.**
+//   T-0116 을 CLI 에서만 고쳤다. MCP `state` 도구에는 주소 입력이 없어 한 서버의 모든 호출이
+//   같은(=무)주소로 접혀 전역 슬롯 오귀속이 그대로 남아 있었다 — 실측: A 의 증거가 B 의 run 에 붙고
+//   일하지 않은 B 가 `completion_claim_allowed: true` 를 받았다. 가드는 자기가 밟는 경로만 지킨다.
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-145-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
+  const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 120000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
+  const mk = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const ri = RP(d, ['init', d, '--yes', '--minimal']);
+    if (ri.status !== 0) bad.push(`${name}:init exit=${ri.status}`);
+    return d;
+  };
+  const KA = 'session-alpha01', KB = 'session-bravo01';
+  try {
+    // ① MCP 로 두 세션이 일해도 증거가 **일한 세션**에 붙는다.
+    {
+      const d = mk('mcp');
+      const call = (name, a, id) => JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: a } });
+      const req = [
+        JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '1' } } }),
+        call('leerness_state_start', { path: d, goal: 'A', sessionKey: KA }, 1),
+        call('leerness_state_start', { path: d, goal: 'B', sessionKey: KB }, 2),
+        call('leerness_state_record', { path: d, filesChanged: 'a.js', tests: 'npm test: 10/10', sessionKey: KA }, 3),
+        call('leerness_state_verify', { path: d, result: 'pass', sessionKey: KB }, 4),
+      ].join('\n') + '\n';
+      const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: d, input: req, encoding: 'utf8', env: envP, timeout: 300000 });
+      const lines = String(r.stdout || '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      const jsonOf = (id) => { try { return JSON.parse(lines.find((x) => x.id === id).result.content[0].text); } catch { return null; } };
+      const s1 = jsonOf(1), s2 = jsonOf(2), rec = jsonOf(3), ver = jsonOf(4);
+      if (!s1 || !s2 || s1.started === s2.started) bad.push('①MCP 두 세션이 같은 run 을 받음 — 판별 불가');
+      else {
+        if (!rec || rec.recorded !== s1.started) bad.push(`①MCP: A 의 증거가 A 의 run 이 아닌 곳에 붙음(${rec && rec.recorded})`);
+        const allowed = ver && ver.completion_claim_allowed && ver.completion_claim_allowed.allowed;
+        if (allowed) bad.push('①MCP: 일하지 않은 세션이 완료 허용을 받음 — 증거 게이트가 뒤집힘');
+      }
+      //   도구 스키마가 실제로 주소를 받는다고 **광고**해야 한다(안 그러면 클라이언트가 줄 이유가 없다).
+      const T = require(path.resolve(__dirname, '..', 'lib', 'mcp-tools'));
+      const st = T.filter((t) => /^leerness_state_/.test(t.name));
+      const withKey = st.filter((t) => t.inputSchema && t.inputSchema.properties && t.inputSchema.properties.sessionKey);
+      if (st.length === 0 || withKey.length !== st.length) bad.push(`①state 도구 ${st.length}종 중 ${withKey.length}종만 sessionKey 를 광고`);
+      dbg.mcp = { A: s1 && s1.started, B: s2 && s2.started, recordedTo: rec && rec.recorded,
+        bAllowed: !!(ver && ver.completion_claim_allowed && ver.completion_claim_allowed.allowed),
+        schemaTools: st.length, schemaWithKey: withKey.length };
+    }
+    // ② 인수인계 산출물이 **덮이지 않는다** — run 별 사본이 남고 `latest` 는 계약대로 최신.
+    {
+      const d = mk('handoff');
+      const eA = Object.assign({}, envP, { LEERNESS_SESSION_ID: KA });
+      const eB = Object.assign({}, envP, { LEERNESS_SESSION_ID: KB });
+      RP(d, ['state', 'start', 'A', '--json'], eA);
+      RP(d, ['state', 'start', 'B', '--json'], eB);
+      RP(d, ['state', 'handoff', 'A 의 인수인계', '--json'], eA);
+      RP(d, ['state', 'handoff', 'B 의 인수인계', '--json'], eB);
+      const hd = path.join(d, '.leerness', 'handoff');
+      const readJ = (f) => { try { return JSON.parse(fs.readFileSync(path.join(hd, f), 'utf8')); } catch { return null; } };
+      const a = readJ('run-0001.json'), latest = readJ('latest.json');
+      if (!a || a.handoff_summary !== 'A 의 인수인계') bad.push('②앞 세션의 인수인계가 덮여 사라짐');
+      if (!latest || latest.run_id !== 'run-0002') bad.push(`②latest 가 최신이 아님(${latest && latest.run_id})`);
+      dbg.handoff = { files: (() => { try { return fs.readdirSync(hd).length; } catch { return 0; } })(),
+        aKept: !!(a && a.handoff_summary === 'A 의 인수인계'), latestRun: latest && latest.run_id };
+    }
+    // ③ 대조군 — 주소를 **안 주면** 종전처럼 동작한다(주소 없는 클라이언트를 막지 않는다).
+    {
+      const d = mk('nokey');
+      const call = (name, a, id) => JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: a } });
+      const req = [
+        JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '1' } } }),
+        call('leerness_state_start', { path: d, goal: '단독' }, 1),
+        call('leerness_state_record', { path: d, filesChanged: 'x.js' }, 2),
+      ].join('\n') + '\n';
+      const r = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: d, input: req, encoding: 'utf8', env: envP, timeout: 300000 });
+      const lines = String(r.stdout || '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      const jsonOf = (id) => { try { return JSON.parse(lines.find((x) => x.id === id).result.content[0].text); } catch { return null; } };
+      const s = jsonOf(1), rec = jsonOf(2);
+      if (!s || !rec || rec.recorded !== s.started) bad.push(`③주소 없는 단독 흐름이 깨짐(${rec && rec.recorded} vs ${s && s.started})`);
+      dbg.noKey = { started: s && s.started, recorded: rec && rec.recorded };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AI(1.36.145) MCP 표면 증거 귀속: 도구가 세션 주소를 받아 **일한 세션**에 증거가 붙고 놀던 세션은 완료 허용을 못 받음(스키마 광고 포함) · 인수인계가 덮이지 않음(run 별 사본 + latest 최신) · 주소 없는 단독 클라이언트 무회귀 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.145 MCP 귀속 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 
