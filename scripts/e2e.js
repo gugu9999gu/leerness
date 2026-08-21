@@ -14855,6 +14855,126 @@ total++;
   if (!ok) failed++;
 }
 
+total++;
+// AJ(1.36.146) — dry-run 가드가 **쓰기만** 보고 있었다.
+//   1.36.144 의 가드는 `writeUtf8`/`append`/`mkdirp` 세 함수만 봤다. io 를 우회하는 `fs.*` 변경 호출은
+//   정적으로 **330건**(unlinkSync 15 · rmSync 85 · writeFileSync 125 …) 이었고, 실측으로:
+//     · `enforce remove --dry-run` 이 **진짜 pre-commit 훅을 삭제**했다
+//     · `release cleanup --apply --dry-run` 이 **브랜치 60 → 10** 으로 지웠다
+//     · 면제 정규식이 `cache` 를 경로 어디서나 매칭해 `…/cache/proj/` 프로젝트는 **가드가 통째로 꺼졌다**
+//     · MCP 의 빈 `path` 가 서버 root 로 대체돼 엉뚱한 저장소에 썼다
+//   330곳을 배선하면 330개의 새 실수 자리가 생긴다 — 프로세스 진입점에서 한 번 막고, git 은 초크포인트에서 막는다.
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-146-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG', 'GIT_DIR']) delete envP[k];
+  envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gcg'); envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gcs');
+  try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
+  const G = (d, a) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
+  const RP = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 120000, env: envP, maxBuffer: 32 * 1024 * 1024 });
+  const mk = (dir, branches) => {
+    fs.mkdirSync(dir, { recursive: true });
+    G(dir, ['init', '-q', '-b', 'main', '.']); G(dir, ['config', 'user.email', 't@t']); G(dir, ['config', 'user.name', 't']);
+    fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'a'); G(dir, ['add', '-A']); G(dir, ['commit', '-qm', 'i']);
+    for (let i = 0; i < (branches || 0); i++) G(dir, ['branch', 'release/1.0.' + i]);
+    RP(dir, ['init', dir, '--yes', '--minimal']); RP(dir, ['handoff', dir]);
+    return dir;
+  };
+  try {
+    // ① **삭제**도 막는다 — `enforce remove --dry-run` 이 진짜 훅을 지우지 않는다.
+    {
+      const d = mk(path.join(sb, 'enf'));
+      RP(d, ['enforce', 'install', '--path', d, '--json', '--skip-verify']);
+      const hook = path.join(d, '.git', 'hooks', 'pre-commit');
+      const had = fs.existsSync(hook);
+      const r = RP(d, ['enforce', 'remove', '--path', d, '--dry-run']);
+      const still = fs.existsSync(hook);
+      if (!had) bad.push('①설치가 안 돼 판별 조건이 서지 않음(공허)');
+      else if (!still) bad.push('①--dry-run 인데 실제 훅을 삭제');
+      else if (r.status === 0) bad.push('①삭제를 막았는데 성공이라 보고');
+      //    대조군 — 플래그 없이는 실제로 제거돼야 한다.
+      const r2 = RP(d, ['enforce', 'remove', '--path', d]);
+      if (fs.existsSync(hook)) bad.push(`②플래그 없는 remove 가 훅을 못 지움(exit=${r2.status}) — 가드가 기능을 죽였다`);
+      dbg.enforceRemove = { had, afterDry: still, dryExit: r.status, afterReal: fs.existsSync(hook) };
+    }
+    // ② **git 부작용**도 막는다 — `release cleanup --apply --dry-run` 이 브랜치를 지우지 않는다.
+    {
+      const d = mk(path.join(sb, 'rel'), 60);
+      const cnt = () => (G(d, ['branch', '--list', 'release/*']).stdout || '').split('\n').filter((l) => l.trim()).length;
+      const before = cnt();
+      const r = RP(d, ['release', 'cleanup', '--apply', '--keep', '10', '--dry-run', '--path', d]);
+      const afterDry = cnt();
+      if (before < 50) bad.push(`②픽스처 브랜치 ${before}개 — 정리 임계값에 못 미쳐 공허`);
+      else if (afterDry !== before) bad.push(`②--dry-run 인데 브랜치 ${before - afterDry}개 삭제`);
+      //    대조군 — 플래그 없이는 실제로 정리돼야 한다.
+      RP(d, ['release', 'cleanup', '--apply', '--keep', '10', '--path', d]);
+      const afterReal = cnt();
+      if (afterReal >= before) bad.push(`②플래그 없는 정리가 동작하지 않음(${before}→${afterReal}) — 가드가 기능을 죽였다`);
+      dbg.releaseCleanup = { before, afterDry, afterReal, dryExit: r.status };
+    }
+    // ③ 면제 경계 — `cache` 가 **경로 어디에나** 있다고 가드가 꺼지면 안 된다.
+    {
+      const holder = path.join(sb, 'cache'); fs.mkdirSync(holder, { recursive: true });
+      const d = path.join(holder, 'proj'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      RP(d, ['init', d, '--yes', '--minimal']);
+      const dj = path.join(d, '.harness', 'decisions.json');
+      const before = (() => { try { return fs.readFileSync(dj, 'utf8'); } catch { return ''; } })();
+      const r = RP(d, ['decision', 'add', 'CACHEPATH', '--reason', 'r', '--dry-run', '--path', d]);
+      const after = (() => { try { return fs.readFileSync(dj, 'utf8'); } catch { return ''; } })();
+      if (before !== after) bad.push('③cache/ 하위 프로젝트에서 가드가 통째로 꺼짐');
+      if (r.status === 0) bad.push('③cache/ 하위인데 성공이라 보고');
+      //    대조군 — 그 프로젝트도 플래그 없이는 정상 기록돼야 한다.
+      RP(d, ['decision', 'add', 'CACHEPATH', '--reason', 'r', '--path', d]);
+      const real = (() => { try { return fs.readFileSync(dj, 'utf8'); } catch { return ''; } })();
+      if (!/CACHEPATH/.test(real)) bad.push('③cache/ 하위에서 정상 기록이 막힘 — 과차단');
+      dbg.cacheDir = { dryChanged: before !== after, dryExit: r.status, realWrote: /CACHEPATH/.test(real) };
+    }
+    // ④ MCP 의 빈 `path` 가 서버 root 로 대체되지 않는다.
+    {
+      const server = mk(path.join(sb, 'mcpserver'));
+      const dj = path.join(server, '.harness', 'decisions.json');
+      const before = (() => { try { return fs.readFileSync(dj, 'utf8'); } catch { return ''; } })();
+      const req = [
+        JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '1' } } }),
+        JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_decision_add', arguments: { path: '', title: 'MCPSNEAK', reason: 'r' } } }),
+      ].join('\n') + '\n';
+      cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: server, input: req, encoding: 'utf8', env: envP, timeout: 180000 });
+      const after = (() => { try { return fs.readFileSync(dj, 'utf8'); } catch { return ''; } })();
+      if (/MCPSNEAK/.test(after) && !/MCPSNEAK/.test(before)) bad.push('④MCP 빈 path 가 서버 root 저장소에 씀');
+      dbg.mcpEmptyPath = { wrote: /MCPSNEAK/.test(after) && !/MCPSNEAK/.test(before) };
+    }
+    // ⑤ **과차단 대조군** — 플래그 없는 평범한 흐름이 전부 그대로 돈다(fs 전면 패치의 최대 위험).
+    {
+      const d = path.join(sb, 'plain'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+      const exits = [
+        RP(d, ['init', d, '--yes', '--minimal']).status,
+        RP(d, ['handoff', d]).status,
+        RP(d, ['task', 'add', '작업', '--path', d]).status,
+        RP(d, ['decision', 'add', '결정', '--reason', 'r', '--path', d]).status,
+        RP(d, ['audit', '--path', d]).status,
+      ];
+      if (exits.some((x) => x !== 0)) bad.push(`⑤플래그 없는 정상 흐름이 막힘(exits=${JSON.stringify(exits)})`);
+      //    dry-run 을 **구현한** 명령은 여전히 성공해야 한다.
+      const impl = [RP(d, ['migrate', 'audit', '--path', d, '--dry-run']).status,
+        RP(d, ['init', d, '--yes', '--minimal', '--dry-run']).status];
+      if (impl.some((x) => x !== 0)) bad.push(`⑤dry-run 구현 명령이 막힘(exits=${JSON.stringify(impl)})`);
+      dbg.noRegression = { plain: exits, dryImplemented: impl };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AJ(1.36.146) dry-run 이 **삭제·git 부작용**까지 막음: enforce remove 가 훅을 안 지움 · release cleanup 이 브랜치를 안 지움(둘 다 플래그 없으면 동작) · cache/ 하위에서도 가드 유효 · MCP 빈 path 차단 · 평범한 흐름 무회귀 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.146 dry-run 전면가드 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

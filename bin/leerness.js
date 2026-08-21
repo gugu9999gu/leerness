@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.145';
+const VERSION = '1.36.146';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -23676,6 +23676,13 @@ function mcpServeCmd(root) {
       }
       // 1.12.2 (14th 버그헌트, UR-0181): MCP 서버는 generic 설계 — cwd 에서 실행 후 각 호출의 path 로 대상 프로젝트 지정(의도된 기능, e2e 가 검증). 즉 path-타게팅 자체는 취약점 아님(신뢰된 로컬 MCP). policy 도 대상-프로젝트별로 path 에서 로드(올바름).
       //   진짜 버그는 unknown tool 도 _bumpMcpUsage 가 임의 경로에 무조건 쓰던 것 → 사용 통계를 unknown-tool 검증 "후"로 이동. (프로젝트-scoped 가둠은 opt-in 플래그로 별도 검토 — UR backlog)
+      //   1.36.146 (재검수 P1, 재현): 빈 `path` 가 falsy 라 **서버 root** 로 떨어져
+      //     CLI 의 `path_missing_value` 가드를 우회하고 엉뚜한 저장소에 썼다(실측: MCPSNEAK 기록됨).
+      //     키를 준 이상 값은 문자열이어야 한다 — 아니면 그렇다고 말한다.
+      if (args && Object.prototype.hasOwnProperty.call(args, 'path')
+        && (typeof args.path !== 'string' || !args.path.trim())) {
+        return send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'path 에 값이 없습니다 — 아무것도 하지 않았습니다(서버 작업디렉토리로 대체하지 않음)' }], isError: true } });
+      }
       const targetPath = args.path || root;
       let cliArgs;
       try {
@@ -27895,7 +27902,7 @@ async function main() {
   if (has('--help') || has('-h')) return help();
   // 1.36.144 (T-0117, 전수 실측): `--dry-run` 을 받았으면 쓰기를 막는다 — 구현한 명령은 애초에 안 쓰므로
   //   영향이 없고, 무시하던 명령은 첫 쓰기에서 멈춰 **아무것도 바꾸지 않은 채** 사유를 말한다.
-  if (has('--dry-run')) setDryRunGuard(true);
+  if (has('--dry-run')) { setDryRunGuard(true); try { require('../lib/git').setGitDryRun(true); } catch {} }
   // 1.36.103: 실재하지 않는 플래그(오타)를 조용히 삼키지 않는다.
   //   값-플래그 미등록 45종은 _VALUE_FLAGS 등록으로 닫았지만, 사용자 오타(--prio, --resaon)는 여전히
   //   그 값이 본문에 붙는다(실측: `decision add "use redis" --resaon faster` → 저장된 제목 "use redis faster").
