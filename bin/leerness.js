@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
-const { log, ok, warn, fail, failJson, setQuiet, today, now, absRoot, exists, read, readBuf, mkdirp, writeUtf8, append, rel } = require('../lib/io');  // 1.9.382/383 (UR-0025): 출력/시간/파일 프리미티브 공유 모듈 · 1.10.2 (UR-0146): setQuiet
+const { log, ok, warn, fail, failJson, setQuiet, today, now, absRoot, exists, read, readBuf, mkdirp, writeUtf8, append, rel, setDryRunGuard, mkdirpRaw } = require('../lib/io');  // 1.9.382/383 (UR-0025): 출력/시간/파일 프리미티브 공유 모듈 · 1.10.2 (UR-0146): setQuiet
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.143';
+const VERSION = '1.36.144';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -180,6 +180,9 @@ const _lockFailOpen = [];   // 보호 없이 진행한 기록(관측용) — 조
 for (const _st of [process.stderr, process.stdout]) { try { _st.on('error', (e) => { if (!e || e.code !== 'EPIPE') return; }); } catch {} }
 function _withLock(targetPath, fn, opts = {}) {
   const lockPath = targetPath + '.lock';
+  // 1.36.144 (T-0117): dry-run 이면 **락을 잡지 않는다** — 쓰기가 어차피 가드에 막히므로 지킬 것이 없고,
+  //   락 디렉토리를 만드는 것만으로 "변경 없음" 이 거짓이 된다(실측: `state *` 8건이 빈 `.leerness/` 를 남겼다).
+  if (has('--dry-run')) return fn();
   let bailCode = null, lastCode = null;
   if (_heldLocks.has(lockPath)) return fn();  // 이미 이 프로세스가 보유 → 재진입(중첩 호출 안전)
   const maxWaitMs = opts.maxWaitMs || 10000;  // 1.9.375 (UR-0084): 5s→10s — 고부하 경합 시 fail-open(락 없이 진행) 전 인내 상향, lost-update 창 축소
@@ -187,7 +190,7 @@ function _withLock(targetPath, fn, opts = {}) {
   // ⚠ 여기서 mkdirp 를 빼면 안 된다(1.36.108 에서 한 번 뺐다가 게이트가 5건을 잡았다).
   //   `state`·hunts 등 여러 호출부가 **이 mkdirp 가 만들어 주는 디렉토리에 기대어** 곧바로 파일을 쓴다 —
   //   공유 헬퍼의 부작용을 없애면 그 의존이 한꺼번에 끊긴다. 미초기화 디렉토리 문제는 락을 다는 쪽에서 막는다.
-  try { mkdirp(path.dirname(lockPath)); } catch {}
+  try { mkdirpRaw(path.dirname(lockPath)); } catch {}   // 1.36.144: 락은 dry-run 가드 예외(막으면 무보호 진행으로 떨어진다)
   const start = Date.now();
   let held = false;
   while (Date.now() - start <= maxWaitMs) {
@@ -1332,7 +1335,10 @@ async function resolveInstallOptions(root, opts = {}) {
 }
 
 async function install(root, opts = {}) {
-  root = absRoot(root); mkdirp(root);
+  // 1.36.144 (게이트가 잡음): `--dry-run` 인데 **여기서 프로젝트 디렉토리를 먼저 만들었다** —
+  //   enforce 에서 고쳤던 것과 같은 순서 결함이다(거절/미리보기는 어떤 변경보다 앞서야 한다).
+  //   dry 모드에서는 만들지 않는다. 아래 흐름은 존재하지 않는 root 에서도 요약까지 도달한다.
+  root = absRoot(root); if (!opts.dry) mkdirp(root);
   // 1.9.184+1.9.190: 설치 도중 Ctrl+C 시 즉시 종료 (사용자 명시 BUG fix — npx 설치 진행 차단).
   //   1.9.184 의 2단계 confirm 은 readline raw mode 가 SIGINT 가로채서 호출 안 됨 → 1.9.190 즉시 종료로 단순화.
   //   _selectOne/_selectMany 는 stdin '\x03' 직접 처리, ask() 는 rl.on('SIGINT') 처리, 이 핸들러는 fallback.
@@ -7295,12 +7301,19 @@ function enforceCmd(root, sub) {
       };
       const mine = norm(hookP);
       let sharing = 0;
+      //   ⚠ 1.36.144 (재검수 P1): "하나라도 모르면 null" 로 했더니 **사라진(prunable) worktree 하나**가
+      //     살아 있는 형제들의 실제 차단까지 통째로 숨겼다. 모르는 것은 세지 않되, **아는 것은 그대로 센다**.
+      //     디렉토리가 없어진 worktree 는 애초에 커밋하지 않으므로 셈에서 빠지는 것이 옳다.
+      let unknown = 0;
       for (const wd of dirs) {
+        if (!exists(wd)) { unknown++; continue; }                       // prunable — 실재하지 않는다
         const hp = _gitSpawn(['-C', wd, 'rev-parse', '--git-path', 'hooks/pre-commit'], { encoding: 'utf8', timeout: 5000 });
-        if (hp.status !== 0 || !String(hp.stdout || '').trim()) return null;   // 하나라도 모르면 주장하지 않는다
+        if (hp.status !== 0 || !String(hp.stdout || '').trim()) { unknown++; continue; }
         const raw = String(hp.stdout).trim();
         if (norm(path.isAbsolute(raw) ? raw : path.join(wd, raw)) === mine) sharing++;
       }
+      //   아무것도 못 알아냈을 때만 "모른다" 고 한다.
+      if (sharing === 0 && unknown > 0) return null;
       return sharing > 0 ? sharing : null;
     } catch { return null; }
   })();
@@ -21569,7 +21582,10 @@ async function releasePackCmd(root) {
   }
 
   // 4. 자동 task add — 매 release 라운드가 progress-tracker에 흔적 남도록
-  if (taskTitle) {
+  //   ⚠ 1.36.144 (게이트가 잡음): 이 단계가 `dryRun` 을 안 봐서 **"mode: dry-run" 이라 찍고는
+  //     progress-tracker 에 실제로 썼다**. dry 면 무엇을 할지만 말한다.
+  if (taskTitle && dryRun) log(`  (dry-run) task add 스킵: ${taskTitle}`);
+  if (taskTitle && !dryRun) {
     const v = getCurrentVersion(root) || VERSION;
     const id = nextId(root, 'T');
     upsertProgress(root, {
@@ -21583,7 +21599,9 @@ async function releasePackCmd(root) {
   }
 
   // 5. session close
-  if (close) {
+  //   ⚠ 같은 이유로 dry 면 건너뛴다 — 마감은 보존 파일을 새로 쓴다.
+  if (close && dryRun) log('\n  (dry-run) session close 스킵');
+  if (close && !dryRun) {
     log('\n[session close]');
     try {
       const r = sessionClose(root);
@@ -22461,6 +22479,9 @@ function _readUsageStats(root) {
   } catch { return { commands: {}, drift: {}, since: today() }; }
 }
 function _bumpUsage(root, cmdName) {
+  // 1.36.144 (T-0117): dry-run 은 아무것도 바꾸지 않는다 — 사용량 카운터도 예외가 아니다.
+  //   (전수 실측에서 378 호출 중 155건이 이 카운터 하나 때문에 "썼다" 로 잡혔다.)
+  if (has('--dry-run')) return;
   // 가벼운 카운터 — 명령 실행마다 호출 (sync write로 작은 파일)
   // 1.36.137 (동시성 감사 실측): 이 함수는 **모든 명령이 공유하는 단 하나의 파일**을 락 없이 RMW 했다 —
   //   2 프로세스부터 카운터가 38~46% 사라졌다(8프로세스×15회=120 실행 → 74 계수). exit 0 · 경고 0 · 손상 0.
@@ -23381,7 +23402,10 @@ function _mcpToCliArgs(name, args, targetPath) {
             break;
           case 'leerness_release_cleanup':
             // 1.9.236 (1.9.235): local release/* branches 정리
-            cliArgs = ['release', 'cleanup', '--json'];
+            //   ⚠ 1.36.144 (재검수 P1, 재현): 여기서 `targetPath` 를 빠뜨려 요청한 저장소가 아니라
+            //     **MCP 서버의 cwd** 저장소 브랜치를 지웠다(실측: 요청 path=target 인데 victim 60 → 10, 50건 삭제 + 성공 보고).
+            //     `drift --auto-fix` 때와 같은 클래스가 MCP 표면에 남아 있었다 — 가드는 자기가 밟는 경로만 지킨다.
+            cliArgs = ['release', 'cleanup', '--path', targetPath, '--json'];
             if (args.apply === true) cliArgs.push('--apply');
             if (typeof args.keep === 'number') cliArgs.push('--keep', String(args.keep));
             break;
@@ -24931,7 +24955,13 @@ function _loadLeernessState(root) {
   //   단, runs 디렉토리가 비어 있으면(진짜 신규/빈 상태) 관대하게 기본값 — 없는 데이터를 지킬 필요는 없다.
   const _shapeOk = _st && typeof _st === 'object' && !Array.isArray(_st)
     && Number.isInteger(_st.runCounter) && _st.runCounter >= 0
-    && (_st.currentRunId === null || typeof _st.currentRunId === 'string');
+    && (_st.currentRunId === null || typeof _st.currentRunId === 'string')
+    // 1.36.144 (재검수 P2): `runsBySession` 이 형태 검증에서 빠져 배열·문자열·null 이 와도 통과했고,
+    //   그 경우 소유권이 통째로 '없음' 이 되어 **다른 세션의 run 을 인수**하는 fail-open 이 됐다.
+    //   모양이 아니면 손상으로 다룬다(없는 것은 정상 — 업그레이드 전 상태).
+    && (_st.runsBySession === undefined
+      || (_st.runsBySession && typeof _st.runsBySession === 'object' && !Array.isArray(_st.runsBySession)
+        && Object.values(_st.runsBySession).every((v) => typeof v === 'string' && v)));
   // 디스크의 최대 run 번호 — 카운터의 진실성 대조 기준
   let _maxRun = 0;
   try {
@@ -25200,7 +25230,14 @@ function stateCmd(root, sub, ...args) {
   //     사용자는 주소가 있다고 믿는데 없는 상태가 되므로, 무시했다면 반드시 말한다.
   const _badKey = _SPst.invalidExplicitKey(process.env);
   if (_badKey && !json) warn(`⚠ LEERNESS_SESSION_ID 가 형식에 맞지 않아 무시됩니다("${_badKey}") — 이 세션은 주소 없이 전역 슬롯을 씨니다`);
-  const _ownedBy = (st) => (st && st.runsBySession && typeof st.runsBySession === 'object' && !Array.isArray(st.runsBySession)) ? st.runsBySession : {};
+  //   1.36.144 (재검수 P2): `__proto__` 같은 키는 plain object 에 넣으면 프로토타입에 먹혀
+  //     `start` 는 성공하는데 소유가 사라지고 `record` 가 실패했다. 소유 맵은 **프로토타입 없는 객체**로 다룬다.
+  const _ownedBy = (st) => {
+    const raw = (st && st.runsBySession && typeof st.runsBySession === 'object' && !Array.isArray(st.runsBySession)) ? st.runsBySession : {};
+    const o = Object.create(null);
+    for (const k of Object.keys(raw)) if (typeof raw[k] === 'string' && raw[k]) o[k] = raw[k];
+    return o;
+  };
   //   이 세션의 run 을 고른다. 없으면 **다른 세션이 소유하지 않은** 전역 슬롯만 인수한다
   //   (업그레이드 전에 시작한 run · 세션 키가 없는 단일 에이전트는 종전처럼 동작한다).
   const _resolveRunId = (st) => {
@@ -25211,13 +25248,17 @@ function stateCmd(root, sub, ...args) {
     return null;
   };
   const _claimRun = (st, runId) => {
-    if (_sessKey) { st.runsBySession = Object.assign({}, _ownedBy(st)); st.runsBySession[_sessKey] = runId; }
+    if (_sessKey) {
+      const o = _ownedBy(st); o[_sessKey] = runId;
+      //   직렬화 전에 평범한 객체로 되돌린다(프로토타입 없는 객체도 JSON 은 그대로 쓴다 — 명시적으로 복사한다).
+      st.runsBySession = Object.fromEntries(Object.keys(o).map((k) => [k, o[k]]));
+    }
     st.currentRunId = runId;   // 기존 소비자 계약 유지(마지막 시작된 run)
   };
   const _releaseRun = (st, runId) => {
     if (_sessKey && _ownedBy(st)[_sessKey] === runId) {
-      st.runsBySession = Object.assign({}, _ownedBy(st));
-      delete st.runsBySession[_sessKey];
+      const o = _ownedBy(st); delete o[_sessKey];
+      st.runsBySession = Object.fromEntries(Object.keys(o).map((k) => [k, o[k]]));
     }
     //   ⚠ 전역 슬롯은 **내 run 일 때만** 비운다 — 남의 run 을 끊지 않는다.
     if (st.currentRunId === runId) st.currentRunId = null;
@@ -25313,7 +25354,11 @@ function stateCmd(root, sub, ...args) {
     log(JSON.stringify({
       state, currentRun: rec, completion_claim_allowed: rec ? _completionClaimAllowed(rec) : null,
       sessionKey: _sessKey || null, keySource: _SPst.keySource(process.env) || null,
-      runsBySession: _ownedBy(state), resolvedRunId: curId,
+      //   1.36.144 (재검수 P2): 남의 세션 키를 그대로 내보내면 **그 키를 흉내내 남의 run 을 고칠 수 있다**.
+      //     몇 개가 진행 중인지와 내 것이 무엇인지는 말하되, 남의 주소는 접두만 보인다.
+      runsBySession: Object.fromEntries(Object.keys(_ownedBy(state)).map((k) => [
+        k === _sessKey ? k : (String(k).slice(0, 6) + '…'), _ownedBy(state)[k]])),
+      resolvedRunId: curId,
     }, null, 2));
     return;
   }
@@ -27835,6 +27880,9 @@ async function main() {
     return log(VERSION);
   }
   if (has('--help') || has('-h')) return help();
+  // 1.36.144 (T-0117, 전수 실측): `--dry-run` 을 받았으면 쓰기를 막는다 — 구현한 명령은 애초에 안 쓰므로
+  //   영향이 없고, 무시하던 명령은 첫 쓰기에서 멈춰 **아무것도 바꾸지 않은 채** 사유를 말한다.
+  if (has('--dry-run')) setDryRunGuard(true);
   // 1.36.103: 실재하지 않는 플래그(오타)를 조용히 삼키지 않는다.
   //   값-플래그 미등록 45종은 _VALUE_FLAGS 등록으로 닫았지만, 사용자 오타(--prio, --resaon)는 여전히
   //   그 값이 본문에 붙는다(실측: `decision add "use redis" --resaon faster` → 저장된 제목 "use redis faster").
@@ -27933,6 +27981,17 @@ async function main() {
   {
     const _PATH_MAY_BE_ABSENT = new Set(['init', 'migrate', 'migrate-workspace-dir', 'update', 'auto-update', 'adapter', 'ci']);
     const _p = arg('--path', null);
+    // 1.36.144 (재검수 P1, 재현): `--path=` 는 빈 문자열(falsy), 값 없는 `--path` 는 boolean true 가 된다 —
+    //   둘 다 이 가드를 그냥 지나쳐 **cwd 에 쓰고 성공을 보고**했다(실측: `decision add SNEAKY --path=` → ✓ 기록됨).
+    //   플래그를 적었는데 값이 없으면 그건 오타다. 조용히 cwd 로 떨어뜨리지 않는다.
+    const _pathTyped = process.argv.slice(2).some((t) => t === '--path' || (typeof t === 'string' && t.startsWith('--path=')));
+    if (_pathTyped && (typeof _p !== 'string' || !_p.trim())) {
+      const _en = _uiLang(process.cwd()) === 'en';
+      failJson(has('--json'), 'path_missing_value', _en
+        ? '--path was given without a value — nothing was done'
+        : '--path 에 값이 없습니다 — 아무것도 하지 않았습니다');
+      return;
+    }
     if (_p && !_PATH_MAY_BE_ABSENT.has(cmd)) {
       const _abs = absRoot(_p);
       if (!exists(_abs)) {
@@ -28905,6 +28964,12 @@ if (require.main === module) {
   main()
     .then(() => { if (process.exitCode && process.exitCode !== 0) process.exit(process.exitCode); })
     .catch(err => {
+      // 1.36.144 (T-0117): dry-run 인데 쓰려다 멈춘 것은 크래시가 아니라 **계약 위반 보고**다.
+      if (err && err.code === 'E_DRY_RUN_WRITE') {
+        failJson(process.argv.includes('--json'), 'dry_run_unsupported',
+          `이 명령은 --dry-run 을 구현하지 않았습니다 — ${err.file} 을(를) 쓰려다 멈췄습니다. 변경된 것은 없습니다(--dry-run 을 빼고 실행하세요).`);
+        process.exit(1);
+      }
       fail(err && err.message ? err.message : String(err));
       // 1.36.88: 완료 게이트는 upsertProgress 에서 던진다 — taskUpdate/taskSync 외의 경로로 올라와도
       //   스택 트레이스 대신 탈출구를 보여준다(막힌 사용자가 빠져나갈 방법을 알아야 한다).

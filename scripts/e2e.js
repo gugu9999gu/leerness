@@ -1514,13 +1514,26 @@ total++;
   // init 후 가벼운 package.json 흉내 (release pack은 npm pack 시도하므로 dry-run으로 우회)
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.writeFileSync(path.join(tmpC, 'package.json'), JSON.stringify({ name: 'rp-test', version: '0.0.1' }), 'utf8');
+  //   ⚠ 1.36.144: 이 축의 **판정을 바꿨다**. 종전엔 `--dry-run` 인데 `/task added/` 를, 즉
+  //     **dry-run 이 실제로 progress-tracker 에 쓰는 것**을 단언하고 있었다. 그것이 T-0117 의 그 결함이다
+  //     (같은 실행이 "mode: dry-run" 과 "(dry-run) npm pack 스킵" 을 찍으면서 task 는 진짜로 추가했다).
+  //     dry 는 "하겠다" 고만 말해야 한다. 그리고 **플래그 없는 실행은 여전히 등록해야** 하므로 대조군으로 같이 잰다
+  //     (한쪽만 재면 "아무것도 안 하는 release pack" 이 통과한다).
+  const _tracker = path.join(tmpC, '.harness', 'progress-tracker.md');
+  const _before = (() => { try { return fs.readFileSync(_tracker, 'utf8'); } catch { return ''; } })();
   const r = cp.spawnSync(process.execPath, [CLI, 'release', 'pack', tmpC, '--dry-run', '--task-add', '1.9.40 e2e 검증', '--no-readme-sync'], { encoding: 'utf8', timeout: 30000 });
+  const _afterDry = (() => { try { return fs.readFileSync(_tracker, 'utf8'); } catch { return ''; } })();
+  const r2 = cp.spawnSync(process.execPath, [CLI, 'release', 'pack', tmpC, '--task-add', '1.9.40 e2e 검증', '--no-readme-sync'], { encoding: 'utf8', timeout: 60000 });
+  const _afterReal = (() => { try { return fs.readFileSync(_tracker, 'utf8'); } catch { return ''; } })();
+  const dryQuiet = _afterDry === _before && !/task added/.test(r.stdout) && /\(dry-run\) task add 스킵/.test(r.stdout);
+  const realWrote = _afterReal !== _before && /task added/.test(r2.stdout);
   const ok = r.status === 0
     && /release pack \(1\.9\.40\)/.test(r.stdout)
-    && /task added/.test(r.stdout)
-    && /dry-run/.test(r.stdout);
-  console.log(ok ? '✓ B(1.9.40) release pack: --dry-run + --task-add 자동 등록' : `✗ release pack 실패`);
-  if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
+    && /dry-run/.test(r.stdout)
+    && dryQuiet && realWrote;
+  console.log(ok ? '✓ B(1.9.40/1.36.144) release pack: --dry-run 은 task 를 **쓰지 않고 말만** 하고, 플래그 없는 실행은 그대로 등록(대조군)'
+    : `✗ release pack 실패 ${JSON.stringify({ dryQuiet, realWrote, dryExit: r.status, realExit: r2.status })}`);
+  if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); console.log('--- real ---'); console.log(r2.stdout.slice(0, 400)); }
 }
 
 total++;
@@ -6103,18 +6116,26 @@ total++;
   if (!ok) failed++;
 }
 
-// 1.9.410 회귀 (8번째 버그헌트, UR-0114): 값 없는 --path (boolean true) 가 raw TypeError 크래시 안 함(cwd 폴백)
+// 1.9.410 회귀 (8번째 버그헌트, UR-0114): 값 없는 --path (boolean true) 가 raw TypeError 로 크래시하지 않는다.
+//   ⚠ 1.36.144 에서 이 축의 **판정을 바꿨다**. 종전엔 "cwd 로 폴백해 정상 실행" 을 단언했는데,
+//     그 폴백이 바로 이번에 고친 결함이다 — `decision add SNEAKY --path=` 가 cwd 에 쓰고 "✓ 기록됨" 을 냈다(실측).
+//     플래그를 적었는데 값이 없으면 그건 오타다. 원래 목적(**raw TypeError 를 흘리지 않는다**)은 그대로 두고,
+//     "조용한 폴백" 대신 "사유를 말하는 거절" 을 단언한다. 그리고 값을 준 경우가 여전히 도는지 대조군으로 잰다.
 total++;
 {
   let ok = false;
   try {
     const r = cp.spawnSync(process.execPath, [CLI, 'status', '--path'], { encoding: 'utf8', timeout: 15000 });
     const out = (r.stdout || '') + (r.stderr || '');
-    const noCrash = !/paths\[0\].*argument must be of type string|Received type boolean/.test(out);  // raw TypeError 누출 안 됨
-    const ran = /Leerness:/.test(out) || /Files:/.test(out);  // cwd 로 폴백해 정상 실행
-    ok = noCrash && ran;
+    const noCrash = !/paths\[0\].*argument must be of type string|Received type boolean|at Object\.<anonymous>/.test(out);
+    const saysWhy = /--path 에 값이 없습니다|--path was given without a value/.test(out);
+    const refused = r.status !== 0;
+    //   대조군 — 값을 준 `--path` 는 그대로 동작해야 한다(거절이 과차단으로 번지면 여기서 잡힌다).
+    const r2 = cp.spawnSync(process.execPath, [CLI, 'status', '--path', tmp], { encoding: 'utf8', timeout: 15000 });
+    const stillWorks = /Leerness:|Files:/.test((r2.stdout || '') + (r2.stderr || ''));
+    ok = noCrash && saysWhy && refused && stillWorks;
   } catch {}
-  console.log(ok ? '✓ B(1.9.410) 8th버그헌트: 값없는 --path raw TypeError 차단(cwd 폴백) (UR-0114)' : '✗ --path 크래시 가드 실패');
+  console.log(ok ? '✓ B(1.9.410/1.36.144) 값없는 --path: raw TypeError 없이 **사유를 말하는 거절**(조용한 cwd 폴백 제거) + 값 준 경우 무회귀 (UR-0114)' : '✗ --path 크래시 가드 실패');
   if (!ok) failed++;
 }
 
@@ -14597,6 +14618,146 @@ total++;
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
   console.log(ok ? `✓ AG(1.36.143) 없는 --path 는 아무것도 만들지 않음(전수 열거, 고치기 전 33건) · 정상 프로젝트 무회귀 · worktree 형제 차단을 추정 대신 **각 worktree 에게 물어** 판정 · 세척 클래스 경계(지울 것/남길 것 양방향) ${JSON.stringify(dbg)}`
     : '✗ 1.36.143 경로/공유 판정 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
+total++;
+// AH(1.36.144/T-0117) — **`--dry-run` 은 아무것도 쓰지 않는다** + 재검수 P1/P2.
+//   `--dry-run` 은 등록된 전역 플래그인데 많은 명령이 그냥 무시하고 썼다. 378 호출을 전후 트리 비교로 재니
+//   183건이 썼고 그중 28건이 **사용자 데이터**를 바꿨다(`session close` 가 실제 마감을 수행, `task/decision/rule/plan add`
+//   가 실제로 추가). 명령마다 분기를 심으면 16개의 새 실수 자리가 생기므로 **쓰기 시점 하나**에서 막는다.
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-144-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG',
+    'GIT_DIR', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_NOSYSTEM']) delete envP[k];
+  envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gcg'); envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gcs');
+  try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
+  const G = (d, a) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
+  const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
+  const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  const snap = (d) => {
+    const out = {};
+    const walk = (q) => {
+      let ents = []; try { ents = fs.readdirSync(q, { withFileTypes: true }); } catch { return; }
+      for (const e of ents) {
+        const full = path.join(q, e.name);
+        if (e.isDirectory()) { out[path.relative(d, full) + '/'] = 'DIR'; walk(full); }
+        else { let h = 'ERR'; try { h = String(fs.readFileSync(full).length); } catch {} out[path.relative(d, full)] = h; }
+      }
+    };
+    walk(d); return out;
+  };
+  const diffKeys = (a, b) => Array.from(new Set([...Object.keys(a), ...Object.keys(b)])).filter((k) => a[k] !== b[k]);
+  const mkGit = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    G(d, ['init', '-q', '-b', 'main', '.']); G(d, ['config', 'user.email', 't@t']); G(d, ['config', 'user.name', 't']);
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    fs.writeFileSync(path.join(d, 'a.txt'), 'a'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
+    RP(d, ['init', d, '--yes', '--minimal']); RP(d, ['handoff', d]);
+    return d;
+  };
+  try {
+    // ① 실제로 썼던 명령들이 이제 **아무것도 바꾸지 않고** 거절한다 + 실행하면 동작한다(대조군).
+    {
+      const cases = [['task', 'add', '작업'], ['decision', 'add', '결정', '--reason', 'r'], ['rule', 'add', '룰'],
+        ['plan', 'add', '계획'], ['lesson', 'save', '교훈'], ['session', 'close'], ['state', 'start', '목표']];
+      const wrote = [], notRefused = [];
+      for (let i = 0; i < cases.length; i++) {
+        const d = mkGit('dry' + i);
+        const before = snap(d);
+        const r = RP(d, [...cases[i], '--dry-run', '--path', d]);
+        const changed = diffKeys(before, snap(d));
+        if (changed.length) wrote.push(`${cases[i].join(' ')}→${changed.slice(0, 3).join(',')}`);
+        if (r.status === 0) notRefused.push(cases[i].join(' '));
+      }
+      if (wrote.length) bad.push(`①--dry-run 인데 바뀐 것: ${wrote.join(' · ')}`);
+      if (notRefused.length) bad.push(`①--dry-run 을 구현 안 했는데 성공이라 보고: ${notRefused.join(' · ')}`);
+      //    대조군 — 같은 명령을 플래그 없이 돌리면 **실제로 동작해야** 한다(과차단으로 통과하면 안 된다).
+      const d2 = mkGit('real');
+      const okExits = [RP(d2, ['task', 'add', '작업', '--path', d2]).status,
+        RP(d2, ['decision', 'add', '결정', '--reason', 'r', '--path', d2]).status];
+      if (okExits.some((x) => x !== 0)) bad.push(`①플래그 없는 정상 실행이 막힘(exits=${JSON.stringify(okExits)})`);
+      dbg.dryRun = { wrote: wrote.length, notRefused: notRefused.length, realExits: okExits };
+    }
+    // ② `--path=` / 값 없는 `--path` 가 가드를 우회해 cwd 에 쓰지 않는다.
+    {
+      const d = mkGit('emptypath');
+      const before = snap(d);
+      const r1 = RP(d, ['decision', 'add', 'SNEAKY1', '--reason', 'r', '--path=']);
+      const r2 = RP(d, ['decision', 'add', 'SNEAKY2', '--reason', 'r', '--path']);
+      const changed = diffKeys(before, snap(d));
+      if (r1.status === 0 || r2.status === 0) bad.push(`②빈 --path 인데 성공이라 보고(${r1.status}/${r2.status})`);
+      if (changed.length) bad.push(`②빈 --path 가 cwd 에 씀: ${changed.slice(0, 3).join(',')}`);
+      dbg.emptyPath = { exits: [r1.status, r2.status], changed: changed.length };
+    }
+    // ③ MCP `release_cleanup` 이 **요청한 저장소**만 건드린다(서버 cwd 가 아니라).
+    {
+      const victim = mkGit('mcp-victim');
+      for (let i = 0; i < 60; i++) G(victim, ['branch', 'release/1.0.' + i]);
+      const target = mkGit('mcp-target');
+      const cnt = () => (G(victim, ['branch', '--list', 'release/*']).stdout || '').split('\n').filter((l) => l.trim()).length;
+      const before = cnt();
+      const req = [
+        JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '1' } } }),
+        JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'leerness_release_cleanup', arguments: { path: target, apply: true, keep: 10 } } }),
+      ].join('\n') + '\n';
+      cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { cwd: victim, input: req, encoding: 'utf8', env: envP, timeout: 180000 });
+      const after = cnt();
+      if (after !== before) bad.push(`③MCP 가 서버 cwd 저장소의 브랜치 ${before - after}개를 지움(${before}→${after})`);
+      dbg.mcpCleanup = { before, after };
+    }
+    // ④ 세션 소유가 **손상값 · `__proto__` · 노출**에 견딘다.
+    {
+      const eA = Object.assign({}, envP, { LEERNESS_SESSION_ID: 'session-alpha01' });
+      const eB = Object.assign({}, envP, { LEERNESS_SESSION_ID: 'session-bravo01' });
+      const d = mkGit('own');
+      RP(d, ['state', 'start', 'A', '--json'], eA);
+      const stf = path.join(d, '.leerness', 'state.json');
+      const st = JSON.parse(fs.readFileSync(stf, 'utf8'));
+      st.runsBySession = ['corrupt'];
+      fs.writeFileSync(stf, JSON.stringify(st, null, 2) + '\n');
+      const rB = RP(d, ['state', 'record', '--files-changed', 'stolen.js'], eB);
+      const runA = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'runs', 'run-0001.json'), 'utf8'));
+      if (rB.status === 0) bad.push('④손상된 소유맵에서 남의 run 에 기록 성공(fail-open)');
+      if (runA.files_changed.length) bad.push('④손상된 소유맵에서 남의 증거가 오염됨');
+      //    `__proto__` 키
+      const d2 = mkGit('own2');
+      const eP = Object.assign({}, envP, { LEERNESS_SESSION_ID: '__proto__aaaa' });
+      const s1 = J(RP(d2, ['state', 'start', 'P', '--json'], eP));
+      const r1 = J(RP(d2, ['state', 'record', '--files-changed', 'p.js', '--json'], eP));
+      if (!s1 || !r1 || r1.recorded !== s1.started) bad.push(`④__proto__ 키에서 소유가 사라짐(${r1 && r1.recorded})`);
+      //    남의 키 노출
+      const d3 = mkGit('own3');
+      RP(d3, ['state', 'start', 'A', '--json'], eA);
+      RP(d3, ['state', 'start', 'B', '--json'], eB);
+      const show = J(RP(d3, ['state', 'show', '--json'], eB));
+      const keys = Object.keys((show && show.runsBySession) || {});
+      if (keys.includes('session-alpha01')) bad.push('④남의 세션 키를 그대로 노출(그 키로 남의 run 을 고칠 수 있다)');
+      if (!keys.includes('session-bravo01')) bad.push('④내 세션 키를 못 보여줌 — 내 것을 확인할 수 없다');
+      dbg.ownership = { corruptExit: rB.status, protoRecorded: r1 && r1.recorded, keys };
+    }
+    // ⑤ 사라진(prunable) worktree 하나가 **살아 있는 형제의 차단을 숨기지 않는다**.
+    {
+      const m = mkGit('wt');
+      const live = path.join(sb, 'wt-live'), gone = path.join(sb, 'wt-gone');
+      const a1 = G(m, ['worktree', 'add', '-qb', 'live', live]);
+      const a2 = G(m, ['worktree', 'add', '-qb', 'gone', gone]);
+      fs.rmSync(gone, { recursive: true, force: true });
+      const j = J(RP(m, ['enforce', 'install', '--path', m, '--json', '--skip-verify']));
+      if (a1.status !== 0 || a2.status !== 0) bad.push('⑤worktree 픽스처 실패 — 판별 불가');
+      else if (!j || j.worktrees !== 2) bad.push(`⑤prunable 하나가 전체 판정을 가림(worktrees=${j && j.worktrees}, 기대 2)`);
+      dbg.prunable = { worktrees: j && j.worktrees };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AH(1.36.144/T-0117) --dry-run 이 아무것도 안 씀(고치기 전 378중 183) + 구현 안 한 명령은 거절 · 플래그 없는 실행은 그대로 · 빈 --path 가 cwd 에 못 씀 · MCP 가 서버 cwd 저장소를 안 지움 · 소유맵이 손상/__proto__/노출에 견딤 · prunable 이 형제 차단을 안 숨김 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.144 dry-run/소유 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
   if (!ok) failed++;
 }
 
