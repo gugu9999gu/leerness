@@ -14975,6 +14975,88 @@ total++;
   if (!ok) failed++;
 }
 
+total++;
+// AK(1.36.147) — 소유권 코드가 만든 세 결함. 전부 **내가 T-0116 을 고치며 넣은 것**이다.
+//   ① 인수는 했는데 **소유를 저장하지 않아** 두 세션이 같은 legacy run 을 각자 인수했다
+//      (실측: 한 run 에 A.js 와 B.js 가 함께 들어갔다 — T-0116 이 잡으려던 바로 그 증거 혼합).
+//   ② 같은 세션 키로 두 번 `start` 하면 둘 다 성공하고 마지막만 소유해 **첫 run 이 증거 없이 고아**가 됐다.
+//   ③ 남의 세션 키 가림이 최상위 필드에만 걸려 **중첩 `state.runsBySession`** 으로 원본이 그대로 샜다.
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-147-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
+  const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 120000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
+  const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  const mk = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const ri = RP(d, ['init', d, '--yes', '--minimal']);
+    if (ri.status !== 0) bad.push(`${name}:init exit=${ri.status}`);
+    return d;
+  };
+  const KA = 'session-alpha01', KB = 'session-bravo01';
+  const eA = Object.assign({}, envP, { LEERNESS_SESSION_ID: KA });
+  const eB = Object.assign({}, envP, { LEERNESS_SESSION_ID: KB });
+  try {
+    // ① 인수는 **이름을 달아** 둔다 — 두 번째 세션은 같은 run 을 인수하지 못한다.
+    {
+      const d = mk('legacy');
+      RP(d, ['state', 'start', '업그레이드 전', '--json']);       // 주소 없이 시작
+      const stf = path.join(d, '.leerness', 'state.json');
+      const st = JSON.parse(fs.readFileSync(stf, 'utf8'));
+      delete st.runsBySession;                                     // 예전 스키마 재현
+      fs.writeFileSync(stf, JSON.stringify(st, null, 2) + '\n');
+      const rA = J(RP(d, ['state', 'record', '--files-changed', 'A.js', '--json'], eA));
+      const rB = RP(d, ['state', 'record', '--files-changed', 'B.js'], eB);
+      let run = null; try { run = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'runs', 'run-0001.json'), 'utf8')); } catch {}
+      //    대조군 겸 무회귀 — **첫 세션의 인수 자체는 성공해야** 한다(업그레이드 전 사용자가 멈추면 안 된다).
+      if (!rA || rA.recorded !== 'run-0001') bad.push(`①업그레이드 전 run 을 인수하지 못함(${rA && rA.recorded})`);
+      if (rB.status === 0) bad.push('①두 번째 세션이 남의 run 을 인수해 성공이라 보고');
+      if (!run || run.files_changed.includes('B.js')) bad.push(`①한 run 에 두 세션의 증거가 섞임(${run && JSON.stringify(run.files_changed)})`);
+      dbg.legacy = { aRecorded: rA && rA.recorded, bExit: rB.status, files: run && run.files_changed };
+    }
+    // ② 한 세션에 진행 중 run 은 하나 — 두 번째 start 는 거절하되 `--force` 로 넘어갈 수 있다.
+    {
+      const d = mk('samekey');
+      const s1 = J(RP(d, ['state', 'start', '첫째', '--json'], eA));
+      const s2 = RP(d, ['state', 'start', '둘째', '--json'], eA);
+      const rec = J(RP(d, ['state', 'record', '--files-changed', 'x.js', '--json'], eA));
+      if (!s1) bad.push('②첫 start 실패 — 판별 불가');
+      if (s2.status === 0) bad.push('②같은 세션에 run 이 열려 있는데 두 번째 start 가 성공');
+      if (!/진행 중인 run/.test(String(s2.stdout || '') + String(s2.stderr || ''))) bad.push('②거절 사유에 열린 run 을 말하지 않음');
+      if (!rec || rec.recorded !== (s1 && s1.started)) bad.push(`②거절 뒤 기록이 첫 run 으로 가지 않음(${rec && rec.recorded})`);
+      //    막다른 길을 만들지 않는다 — 명시하면 넘어갈 수 있어야 한다(크래시 후 재시작).
+      const s3 = J(RP(d, ['state', 'start', '셋째', '--json', '--force'], eA));
+      if (!s3 || !s3.started || s3.started === (s1 && s1.started)) bad.push('②--force 로도 새 run 을 시작하지 못함 — 막다른 길');
+      dbg.sameKey = { first: s1 && s1.started, secondExit: s2.status, recordedTo: rec && rec.recorded, forced: s3 && s3.started };
+    }
+    // ③ 가림은 **내보내는 모든 자리**에 걸린다(최상위 · 중첩).
+    {
+      const d = mk('leak');
+      const eS = Object.assign({}, envP, { LEERNESS_SESSION_ID: 'session-secret01' });
+      const eV = Object.assign({}, envP, { LEERNESS_SESSION_ID: 'session-viewer01' });
+      RP(d, ['state', 'start', 'A', '--json'], eS);
+      RP(d, ['state', 'start', 'B', '--json'], eV);
+      const show = J(RP(d, ['state', 'show', '--json'], eV));
+      const top = Object.keys((show && show.runsBySession) || {});
+      const nested = Object.keys((show && show.state && show.state.runsBySession) || {});
+      if (top.includes('session-secret01')) bad.push('③최상위에서 남의 키 노출');
+      if (nested.includes('session-secret01')) bad.push('③중첩 state.runsBySession 에서 남의 키 노출');
+      if (!top.includes('session-viewer01') || !nested.includes('session-viewer01')) bad.push('③내 키를 못 보여줌 — 내 것을 확인할 수 없다');
+      dbg.redaction = { top, nested };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AK(1.36.147) 소유권: 인수가 **이름을 남겨** 두 세션이 같은 run 에 증거를 못 섞음(첫 인수는 그대로 성공) · 한 세션에 열린 run 은 하나(사유 명시 + --force 탈출구) · 남의 세션 키 가림이 최상위·중첩 모두 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.147 소유권 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
 

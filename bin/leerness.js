@@ -34,7 +34,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 
-const VERSION = '1.36.146';
+const VERSION = '1.36.147';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -25281,6 +25281,18 @@ function stateCmd(root, sub, ...args) {
     // 1.9.311 (UR-0047): state 는 .leerness substrate(standalone) — .harness init 가드 미적용 (회귀 방지)
     const goal = (args.find(a => a && !a.startsWith('-')) || arg('--goal', '')).trim();
     const state = _loadLeernessState(root);
+    // 1.36.147 (재검수 P1, 재현): 같은 세션 키로 두 번 `start` 하면 둘 다 성공하고
+    //   마지막만 소유해 **첫 run 이 증거 없이 고아**가 됐다(실측: run-0001 버려지고 run-0002 에 기록).
+    //   한 세션에는 진행 중 run 이 하나다. 무엇이 열려 있는지 말하고, 넘어가려면 명시하게 한다.
+    {
+      const _open = _sessKey ? _ownedBy(state)[_sessKey] : null;
+      if (_open && !has('--force')) {
+        return failJson(json, 'run_already_open',
+          `이 세션에 진행 중인 run 이 있습니다: ${_open} — 먼저 마감하세요(leerness state handoff "<요약>"). `
+          + `그래도 새 run 을 시작하려면 --force (${_open} 은 증거 없이 남습니다)`);
+      }
+      if (_open && has('--force')) warn(`⚠ 진행 중이던 ${_open} 을 놓고 새 run 을 시작합니다 — 그 run 은 증거 없이 남습니다`);
+    }
     state.runCounter = (state.runCounter || 0) + 1;
     const run_id = `run-${String(state.runCounter).padStart(4, '0')}`;
     const rec = _newRunRecord({
@@ -25301,6 +25313,14 @@ function stateCmd(root, sub, ...args) {
 
   const state = _loadLeernessState(root);
   const curId = _resolveRunId(state);
+  // 1.36.147 (재검수 P1, 재현): 인수는 했는데 **소유를 저장하지 않았다** —
+  //   그래서 두 세션이 같은 legacy run 을 각자 인수해 증거가 섮였다
+  //   (실측: 한 run 에 A.js 와 B.js 가 함께 들어갔다). 인수했으면 그 자리에서 이름을 달아 둔다.
+  if (_sessKey && curId && _ownedBy(state)[_sessKey] !== curId
+    && ['record', 'verify', 'handoff'].includes(sub || '')) {
+    _claimRun(state, curId);
+    try { _saveLeernessState(root, state); } catch { /* 저장 실패는 아래 흐름이 드러낸다 */ }
+  }
   if ((sub === 'record' || sub === 'verify' || sub === 'handoff') && !curId) {
     //   다른 세션이 쓰는 run 이 있으면 그 사실을 말한다 — 조용히 남의 run 에 쓰지 않는다.
     const _others = Object.entries(_ownedBy(state)).filter(([k]) => k !== _sessKey);
@@ -25371,8 +25391,11 @@ function stateCmd(root, sub, ...args) {
   const rec = curId ? _loadRun(root, curId) : null;
   // 1.9.443 (UR-0153): evidence-first 완료 게이트 파생 노출.
   if (json) {
+    const _redactedOwners = Object.fromEntries(Object.keys(_ownedBy(state)).map((k) => [
+      k === _sessKey ? k : (String(k).slice(0, 6) + '…'), _ownedBy(state)[k]]));
+    const _stateOut = Object.assign({}, state, { runsBySession: _redactedOwners });
     log(JSON.stringify({
-      state, currentRun: rec, completion_claim_allowed: rec ? _completionClaimAllowed(rec) : null,
+      state: _stateOut, currentRun: rec, completion_claim_allowed: rec ? _completionClaimAllowed(rec) : null,
       sessionKey: _sessKey || null, keySource: _SPst.keySource(process.env) || null,
       //   1.36.144 (재검수 P2): 남의 세션 키를 그대로 내보내면 **그 키를 흉내내 남의 run 을 고칠 수 있다**.
       //     몇 개가 진행 중인지와 내 것이 무엇인지는 말하되, 남의 주소는 접두만 보인다.
