@@ -18,6 +18,23 @@ const norm = p => { try { return path.resolve(String(p)); } catch { return Strin
 // archive/ 는 백업 사본이라 경쟁 대상이 아니다. .lock 자체와 원자쓰기 임시파일도 제외(최종 경로는 rename 이 알려준다).
 const isState = p => /[\\/]\.harness[\\/]/.test(p) && !/[\\/]archive[\\/]/.test(p) && !/\.lock$/.test(p) && !/\.tmp-\d+-\d+$/.test(p);
 const relOf = p => (p.split(/[\\/]\.harness[\\/]/)[1] || p).replace(/\\/g, '/');
+// 선택형 경쟁 창 확대. 제품에는 영향을 주지 않으며, 테스트가 명시적으로 이 모듈을 preload 하고
+// LOCKPROBE_STALL_TARGET/LOCKPROBE_STALL_MS 를 함께 준 경우에만 최종 rename 직전에 멈춘다.
+// 락이 있는 명령은 이 대기 동안에도 같은 락을 유지하고, 락이 없는 이전 RMW는 뒤늦은 쓰기가 새 데이터를 덮는다.
+const STALL_TARGET = String(process.env.LOCKPROBE_STALL_TARGET || '').replace(/\\/g, '/').replace(/^\.?\/+/, '');
+const STALL_PREFIX = String(process.env.LOCKPROBE_STALL_PREFIX || '').replace(/\\/g, '/').replace(/^\.?\/+/, '');
+const STALL_MS = Math.max(0, Math.min(10000, Number(process.env.LOCKPROBE_STALL_MS) || 0));
+const READY_FILE = process.env.LOCKPROBE_READY_FILE ? path.resolve(process.env.LOCKPROBE_READY_FILE) : null;
+let stalled = false;
+const shouldStall = p => {
+  if (stalled || STALL_MS <= 0) return false;
+  const rel = relOf(norm(p));
+  return (STALL_TARGET && rel === STALL_TARGET) || (STALL_PREFIX && rel.startsWith(STALL_PREFIX));
+};
+const stall = ms => {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+  catch { const until = Date.now() + ms; while (Date.now() < until) {} }
+};
 
 const _open = fs.openSync.bind(fs);
 fs.openSync = function (p, flags, ...a) {
@@ -43,7 +60,24 @@ const note = (target, how) => {
 const _w = fs.writeFileSync.bind(fs);
 fs.writeFileSync = function (p, ...a) { try { note(p, 'write'); } catch {} return _w(p, ...a); };
 const _r = fs.renameSync.bind(fs);
-fs.renameSync = function (from, to) { try { note(to, 'rename'); } catch {} return _r(from, to); };
+fs.renameSync = function (from, to) {
+  try { note(to, 'rename'); } catch {}
+  try {
+    if (shouldStall(to)) {
+      stalled = true;
+      const target = norm(to);
+      if (READY_FILE) {
+        _w(READY_FILE, JSON.stringify({
+          target: relOf(target),
+          locked: held.has(target + '.lock'),
+          heldOn: [...held].map(relOf).sort()
+        }), 'utf8');
+      }
+      stall(STALL_MS);
+    }
+  } catch {}
+  return _r(from, to);
+};
 const _a = fs.appendFileSync.bind(fs);
 fs.appendFileSync = function (p, ...args) { try { note(p, 'append'); } catch {} return _a(p, ...args); };
 

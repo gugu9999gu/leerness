@@ -25,6 +25,10 @@ npx -y leerness init . --yes   # adds .harness/ memory + guard files to your pro
 npx leerness handoff .         # everything your AI should know right now, in one call
 ```
 
+`handoff` is safe to run from several AI sessions at once: by default it does not rewrite Git-tracked harness files and updates only an ignored per-session record under `.harness/cache/sessions/`. Use `handoff --writeback` only when legacy automation explicitly needs refreshed `current-state.md`, `environment.json`, `last-handoff.json`, or generated graph projections.
+
+For Cursor, run `npx leerness adapter cursor --path .` once. It preserves existing project hooks and adds a local `sessionStart` bridge that maps Cursor's session address to `LEERNESS_SESSION_ID`, so concurrent Cursor/Claude/Codex sessions remain separately traceable. Cursor Cloud currently does not run `sessionStart`/`sessionEnd` hooks; in that environment the agent must provide an explicit session address or run `handoff` itself.
+
 Your project now has agent-independent memory. To see the flagship feature — catching a false "done" claim:
 
 ```bash
@@ -102,7 +106,7 @@ For secrets, pair the gate with a **dedicated scanner** in the same workflow. `s
 - **Verification** — `verify-claim` (evidence vs reality, stub/fake-test/inflated-count detection, `--run-tests --test-cmd` for any language; `--all` checks **every** completed claim at once for CI) · `contract verify` (spec ↔ impl) · `gate` (one-call CI gate).
 - **Audit** — `audit` · `lazy detect` · `drift check` keep the workspace honest over time.
 - **Security** — `scan secrets` (committed-secret detection) · `encoding check` (BOM/CP949) — also runs at `session close`.
-- **Visualize** — `graph --html` writes a self-contained interactive ontology graph (`leerness.html`) of the whole harness (memory surfaces + skills + feature-graph) — click a node to read its content. Optional auto-refresh on `handoff` (`LEERNESS_AUTO_GRAPH=1`).
+- **Visualize** — `graph --html` writes a self-contained interactive ontology graph (`leerness.html`) of the whole harness (memory surfaces + skills + feature-graph) — click a node to read its content. Optional tracked auto-refresh: `LEERNESS_AUTO_GRAPH=1 leerness handoff . --writeback`.
 
 Full command reference, workflows, and architecture: **[README.ko.md](./README.ko.md)** (Korean) · `leerness commands` · `leerness help`.
 
@@ -122,7 +126,7 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.36.148 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.36.158 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
@@ -176,7 +180,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.36.148는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **89개 도구**를 노출:
+Leerness v1.36.158는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **89개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -197,7 +201,7 @@ Leerness v1.36.148는 stdio JSON-RPC MCP server를 내장합니다 — Claude Co
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) 회귀 테스트 갱신 → 4) 전체 e2e 스위트 통과 → 5) npm publish + git tag → 6) main push → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **v1.9.x → 1.36.148 릴리스 태그 이력** (수백 라운드) · _reports/는 비공개 보존.
+현재 누적: **v1.9.x → 1.36.158 릴리스 태그 이력** (수백 라운드) · _reports/는 비공개 보존.
 
 ### 성능 가이드
 
@@ -235,5 +239,5 @@ leerness release pack --close --auto-main-push
 - `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.36.148: 2026-08-21
+Last synced by Leerness v1.36.158: 2026-08-24
 <!-- leerness:project-readme:end -->

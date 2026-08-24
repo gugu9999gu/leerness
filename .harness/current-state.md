@@ -15,14 +15,14 @@ doNotStore:
 <!-- leerness:managed -->
 # Current State
 
-Updated: 2026-08-21
+Updated: 2026-08-24
 
 ## Now
 - 대기 중 <!-- leerness:auto -->
 - 대기 중
 
 ## Next
-- 프로젝트 계획 정리 <!-- leerness:auto -->
+- R2: 온톨로지 그래프 기본 활성(install 자동생성) + roadmap 탭 통합 + 기능 토글 스위치(gate 등, toggles.json + CLI + handoff 노출 + gate 준수) <!-- leerness:auto -->
 - 프로젝트 계획 정리
 
 ## Blockers

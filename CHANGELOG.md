@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.36.158 — 2026-08-24
+
+- 최종 외부 리뷰 수렴: enforce 설치 probe를 예약 난수 세션으로 격리하고 marker 락을 공유하며, 실제 handoff 동시 경합을 행동 테스트로 고정
+
+## 1.36.157 — 2026-08-24
+
+- 최종 외부 리뷰 수렴: 주소 있는 세션의 legacy handoff 우회를 차단하고 anonymous 예약키·case/child/길이경계·probe 복원·부분쓰기 rollback·CI handoff gate를 행동 테스트로 고정
+
+## 1.36.156 — 2026-08-24
+
+- 외부 Codex 재검수: Git hook 세션키 파생을 CLI와 일치시키고 synthetic install probe를 전용 handoff marker로 격리했으며, release bump를 preflight+rollback transaction으로 전환
+
+## 1.36.155 — 2026-08-24
+
+- enforce freshness를 handoff 전용 ignored marker로 분리해 주소 없는 세션도 정상 커밋하고 session close만으로 gate를 우회할 수 없도록 수정
+
+## 1.36.154 — 2026-08-24
+
+- T-0136: concurrent-safe handoff — default tracked-write 0, per-session freshness history, version-skew warning, Cursor sessionStart address bridge, and parallel/dry-run/enforce regression coverage
+
+## 1.36.153 — 2026-08-23
+
+- T-0122: release bump --patch를 정상 인식하고 leerness 자체 package/bin/README 버전 표면을 함께 동기화
+
+## 1.36.152 — 2026-08-23
+
+- T-0115: credentials·team remove·memory restore/plan RMW를 공유 락 트랜잭션으로 보강하고 지연 경쟁 회귀 6쌍을 추가
+
+## 1.36.151 — 2026-08-23
+
+- enforce worktree 공유 판정: 아직 없는 pre-commit의 조상 junction/symlink를 실제 위치로 해석해 형제 worktree 차단 사실을 설치 전부터 정확히 고지한다.
+
+## 1.36.150 — 2026-08-23
+
+- GIT_CONFIG_NOSYSTEM 보존: 설치기와 같은 셸의 git commit이 같은 hooksPath를 보도록 해 enforce 우회를 차단하고 실제 커밋 회귀 검사를 추가했다.
+
+## 1.36.149 — 2026-08-23
+
+- state run-id 경로 탈출 차단: legacy currentRunId와 run record run_id를 fail-closed 검증하고 두 입력 경로의 회귀 e2e를 추가했다.
+
 ## 1.36.102 — 2026-08-05 — 모르는 것을 안다고 말하지 않는다 · 준 경로에 적용한다
 
 1.36.101 의 명령 표면 감사에서 남겨 둔 P1 두 건을 닫는다. 둘 다 **재현부터 하고** 고쳤다.

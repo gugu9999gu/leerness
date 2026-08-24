@@ -1,6 +1,6 @@
 {
-  "capturedAt": "2026-08-21T16:41:44.775Z",
-  "leernessVersion": "1.36.148",
+  "capturedAt": "2026-08-24T06:36:35.716Z",
+  "leernessVersion": "1.36.153",
   "os": {
     "platform": "win32",
     "type": "Windows_NT",
@@ -12,11 +12,11 @@
     "cpuCount": 20,
     "cpuModel": "Intel(R) Core(TM) Ultra 7 265K",
     "totalMemoryGB": 127.4,
-    "freeMemoryGB": 72
+    "freeMemoryGB": 73
   },
   "locale": {
-    "lang": null,
-    "encoding": "cp949(default)"
+    "lang": "C.UTF-8",
+    "encoding": "C.UTF-8"
   },
   "shell": {
     "name": "cmd.exe"
@@ -28,7 +28,7 @@
   "tools": {
     "git": {
       "version": "git version 2.54.0.windows.1",
-      "path": "C:\\Program Files\\Git\\mingw64\\bin\\git.exe"
+      "path": "C:\\Program Files\\Git\\cmd\\git.exe"
     },
     "python": {
       "version": "Python 3.11.9",
@@ -76,7 +76,7 @@
     },
     {
       "command": "sync",
-      "foundInPath": true,
+      "foundInPath": false,
       "usedBy": "prepack"
     }
   ]

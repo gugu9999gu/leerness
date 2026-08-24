@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # Quick feedback (<30s) — full e2e runs in the `test` matrix below.
+      # Bounded quick feedback — full e2e runs in the `test` matrix below.
       - name: test:fast
         env:
           LEERNESS_OFFLINE: "1"
@@ -50,6 +50,14 @@ jobs:
         env:
           LEERNESS_OFFLINE: "1"
         run: node ./scripts/e2e-core.js
+      - name: e2e-command-surface
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: npm run test:commands
+      - name: e2e-handoff-enforcement
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: npm run test:handoff
       - name: e2e
         env:
           LEERNESS_OFFLINE: "1"

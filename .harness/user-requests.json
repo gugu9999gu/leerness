@@ -792,7 +792,101 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": ""
+    },
+    {
+      "id": "UR-0070",
+      "text": "이전 작업의 다음 우선순위인 enforce hooksPath ancestor junction/symlink 우회 점검 및 차단을 진행",
+      "recordedAt": "2026-08-23T04:51:46.849Z",
+      "status": "completed",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": "",
+      "updatedAt": "2026-08-23T06:17:38.429Z",
+      "completedAt": "2026-08-23T06:17:38.429Z"
+    },
+    {
+      "id": "UR-0071",
+      "text": "T-0114 enforce 잔여 검증을 진행하고 GitHub·npm·leerness.com 배포 상태를 확인해줘",
+      "recordedAt": "2026-08-23T06:40:21.906Z",
+      "status": "completed",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": "",
+      "updatedAt": "2026-08-23T08:33:19.602Z",
+      "completedAt": "2026-08-23T08:33:19.602Z"
+    },
+    {
+      "id": "UR-0072",
+      "text": "다음작업 이어서 진행",
+      "recordedAt": "2026-08-23T15:05:34.901Z",
+      "status": "completed",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": "",
+      "updatedAt": "2026-08-23T15:26:58.112Z",
+      "completedAt": "2026-08-23T15:26:58.112Z"
+    },
+    {
+      "id": "UR-0073",
+      "text": "다음 작업 이어서 진행",
+      "recordedAt": "2026-08-24T00:46:53.419Z",
+      "status": "completed",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": "",
+      "updatedAt": "2026-08-24T02:06:40.232Z",
+      "completedAt": "2026-08-24T02:06:40.232Z"
+    },
+    {
+      "id": "UR-0074",
+      "text": "다음 작업 이어서 진행",
+      "recordedAt": "2026-08-24T02:18:17.421Z",
+      "status": "completed",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": "",
+      "updatedAt": "2026-08-24T02:22:45.580Z",
+      "completedAt": "2026-08-24T02:22:45.580Z"
+    },
+    {
+      "id": "UR-0075",
+      "text": "다음 작업 이어서 진행해줘",
+      "recordedAt": "2026-08-24T02:29:20.383Z",
+      "status": "completed",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": "",
+      "updatedAt": "2026-08-24T02:37:08.763Z",
+      "completedAt": "2026-08-24T02:37:08.763Z"
+    },
+    {
+      "id": "UR-0076",
+      "text": "leerness 적용 프로젝트에서 Cursor/Codex/Claude 등 동시 AI 세션의 소통·충돌 방지·상태 추적 구현 여부를 검증하고, 전체 CLI/MCP 명령을 안전한 픽스처에서 테스트·디버그한다",
+      "recordedAt": "2026-08-24T02:43:29.073Z",
+      "status": "completed",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": "",
+      "updatedAt": "2026-08-24T06:03:39.409Z",
+      "completedAt": "2026-08-24T06:03:39.409Z"
+    },
+    {
+      "id": "UR-0077",
+      "text": "다음 작업을 이어서 진행하고 npm, GitHub, leerness.com을 매 의미 있는 변경 라운드마다 최신 버전으로 배포·갱신·검증",
+      "recordedAt": "2026-08-24T09:50:22.742Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-08-18T13:57:41.731Z"
+  "updatedAt": "2026-08-24T09:50:22.742Z"
 }

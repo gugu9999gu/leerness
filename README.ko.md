@@ -69,6 +69,10 @@ leerness gate .                 # verify + audit + scan secrets + encoding + laz
 leerness session close .
 ```
 
+기본 `handoff`는 여러 AI 세션에서 동시에 실행해도 Git 추적 하네스 파일을 다시 쓰지 않고, `.harness/cache/sessions/` 아래 ignored 세션별 레코드만 갱신합니다. 구형 자동화가 `current-state.md`, `environment.json`, `last-handoff.json`, 생성 그래프 projection 갱신을 명시적으로 필요로 할 때만 `handoff --writeback`을 사용하세요.
+
+Cursor 프로젝트에는 `leerness adapter cursor --path .`를 한 번 실행하세요. 기존 project hook을 보존하면서 로컬 `sessionStart` 브리지를 추가해 Cursor 세션 주소를 `LEERNESS_SESSION_ID`로 전달하므로 Cursor/Claude/Codex 동시 세션을 각각 추적할 수 있습니다. Cursor Cloud는 현재 `sessionStart`/`sessionEnd` hook을 실행하지 않으므로, 그 환경에서는 에이전트가 명시 세션 주소를 전달하거나 직접 `handoff`를 실행해야 합니다.
+
 CLAUDE.md / AGENTS.md 에 `세션 시작 시 leerness handoff .`, `종료 전 leerness session close .` 지침을 추가하면 에이전트가 자동으로 호출합니다.
 
 ---
@@ -187,4 +191,3 @@ leerness mcp serve                          # JSON-RPC over stdio, 80+ 도구
 ## 라이선스
 
 MIT
-

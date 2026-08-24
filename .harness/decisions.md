@@ -99,3 +99,9 @@
 - Reason: 
 - Alternatives: 
 - Impact: 
+
+### 2026-08-23 — GIT_CONFIG_NOSYSTEM을 Git 위치 격리 목록에서 제외
+- Decision: GIT_CONFIG_NOSYSTEM을 Git 위치 격리 목록에서 제외
+- Reason: 이 변수는 저장소 대상을 바꾸지 않고 시스템 Git 설정 가시성만 바꾼다. 내부 git에서만 삭제하면 enforce 설치 경로와 같은 셸의 실제 git commit 경로가 달라져 훅이 우회된다.
+- Alternatives: GIT_CONFIG_NOSYSTEM을 내부 Git에서만 제거하는 방식은 거부한다. 설치기와 호출자 Git의 설정 가시성이 달라진다.
+- Impact: enforce 설치와 같은 셸의 Git commit이 동일한 시스템 Git 설정 가시성을 사용한다.

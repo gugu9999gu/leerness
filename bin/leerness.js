@@ -33,8 +33,9 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, MEMORY_SYNONYMS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
+const _cursorHook = require('../lib/cursor-session-hook');
 
-const VERSION = '1.36.148';
+const VERSION = '1.36.158';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -317,7 +318,7 @@ const _VALUE_FLAGS = new Set(['--language','--skills','--path','--status','--pro
 for (const _bf of _BRIEF_FIELDS) { if (_bf && _bf.flag) _VALUE_FLAGS.add('--' + _bf.flag); }
 // 부울 플래그(값 없음) — 오타 경고의 대조군. 여기 있거나 _VALUE_FLAGS 에 있으면 '실재하는 플래그' 로 본다.
 //   판정에만 쓰이고 파싱 동작에는 관여하지 않으므로, 넓게 잡아도 안전하다(과다 포함 = 경고 억제).
-const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--baseline','--all-presets','--allow-empty','--allow-unrelated','--apply','--audit','--auto','--auto-apply-delivered','--auto-cleanup-branches','--auto-fix','--auto-fix-bom','--auto-fix-encoding','--auto-main-push','--auto-recover','--auto-track','--banner','--bench','--build','--bundle-only','--claims','--close','--compact','--detect','--dry-run','--dry-run-npm','--embedding','--enforce','--fail-on-candidates','--fail-on-violation','--force','--gh-pages','--gh-release','--git-push','--global','--guide','--help','--html','--include-code','--interactive','--json','--last','--lenient','--major','--minimal','--minor','--no-animate','--no-auto-roadmap','--no-auto-update','--no-banner','--no-brainstorm-hits','--no-cache','--no-context-inject','--no-crawl','--no-drift-check','--no-enforce','--no-env','--no-env-detect','--no-feature-impact','--no-headline','--no-init-check','--no-interactive-select','--no-lazy-warn','--no-lessons','--no-longterm-recall','--no-mcp','--no-mem-delta','--no-multiagent-hint','--no-next-actions','--no-npm','--no-official-skills','--no-on-every-change','--no-pre-wake','--no-preserve-link','--no-readme-sync','--no-record','--no-repl','--no-review','--no-save','--no-security-check','--no-security-summary','--no-setup-agents','--no-skill-suggest','--no-stale-check','--no-suggest','--no-synonyms','--no-team-reminders','--no-wakeup-miss','--no-workflow-guide','--no-write','--npm-publish','--offline','--on-every-change','--pack','--parent-migrate','--publish-npm','--pulse','--quiet','--record','--refresh','--remove','--repair','--repl','--require-evidence','--run-tests','--skeleton','--skip-verify','--strict','--strict-claims','--strict-elements','--strict-exit','--suggest','--version','--yes',
+const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--baseline','--all-presets','--allow-empty','--allow-unrelated','--apply','--audit','--auto','--auto-apply-delivered','--auto-cleanup-branches','--auto-fix','--auto-fix-bom','--auto-fix-encoding','--auto-main-push','--auto-recover','--auto-track','--banner','--bench','--build','--bundle-only','--claims','--close','--compact','--detect','--dry-run','--dry-run-npm','--embedding','--enforce','--fail-on-candidates','--fail-on-violation','--force','--gh-pages','--gh-release','--git-push','--global','--guide','--help','--html','--include-code','--interactive','--json','--last','--lenient','--major','--minimal','--minor','--no-animate','--no-auto-roadmap','--no-auto-update','--no-banner','--no-brainstorm-hits','--no-cache','--no-context-inject','--no-crawl','--no-drift-check','--no-enforce','--no-env','--no-env-detect','--no-feature-impact','--no-headline','--no-init-check','--no-interactive-select','--no-lazy-warn','--no-lessons','--no-longterm-recall','--no-mcp','--no-mem-delta','--no-multiagent-hint','--no-next-actions','--no-npm','--no-official-skills','--no-on-every-change','--no-pre-wake','--no-preserve-link','--no-readme-sync','--no-record','--no-repl','--no-review','--no-save','--no-security-check','--no-security-summary','--no-setup-agents','--no-skill-suggest','--no-stale-check','--no-suggest','--no-synonyms','--no-team-reminders','--no-wakeup-miss','--no-workflow-guide','--no-write','--npm-publish','--offline','--on-every-change','--pack','--parent-migrate','--patch','--publish-npm','--pulse','--quiet','--record','--refresh','--remove','--repair','--repl','--require-evidence','--run-tests','--skeleton','--skip-verify','--strict','--strict-claims','--strict-elements','--strict-exit','--suggest','--version','--writeback','--yes',
   // 소스에 리터럴로만 존재해 소비 형태를 기계 추출하지 못한 것들 — 실재하는 플래그이므로 오타로 오인하면 안 된다
   '--commands','--decision','--errors','--expand-all','--fix','--list','--notes','--print','--raw','--select-all','--skip-git-repo-check','--tests','--verbose','--yolo',
   // lib/*.js 의 부울 소비자 — bin/ 만 훑었다면 `agents route --confirm` 같은 실재 문법에 오탐 경고를 냈을 것이다
@@ -426,14 +427,14 @@ function ask(question) {
 }
 
 // 1.9.140: managedReadmeBlock 자동 풍부화 — 매 release pack 마다 명령/MCP/성능/가이드 갱신
-function managedReadmeBlock(project, lang = 'ko') {
+function managedReadmeBlock(project, lang = 'ko', version = VERSION) {
   // 1.36.63 (F-05 5회차): en 프로젝트 README 관리 섹션 완전 영어 — 계약 동등(정체성/5계층/명령/CRUD/MCP/빠른시작/planning files)
   if (lang === 'en') {
     return [
       README_START,
       '## Leerness Project Harness',
       '',
-      `This project uses the Leerness v${VERSION} harness. AI agents must load context with \`leerness handoff\` before working, and run \`leerness check\` / \`leerness audit\` / \`leerness session close\` afterwards.`,
+      `This project uses the Leerness v${version} harness. AI agents must load context with \`leerness handoff\` before working, and run \`leerness check\` / \`leerness audit\` / \`leerness session close\` afterwards.`,
       '',
       '### Identity — an operating layer for AI agents',
       '',
@@ -489,7 +490,7 @@ function managedReadmeBlock(project, lang = 'ko') {
       '',
       '### MCP server (external AI integration)',
       '',
-      `Leerness v${VERSION} ships a stdio JSON-RPC MCP server — exposing **${_mcpToolCount()} tools** to Claude Code · Cursor · Codex CLI and others (\`leerness mcp serve\`; \`--profile core\` = 20 essentials).`,
+      `Leerness v${version} ships a stdio JSON-RPC MCP server — exposing **${_mcpToolCount()} tools** to Claude Code · Cursor · Codex CLI and others (\`leerness mcp serve\`; \`--profile core\` = 20 essentials).`,
       '',
       '### Quick start',
       '',
@@ -508,7 +509,7 @@ function managedReadmeBlock(project, lang = 'ko') {
       '- `.harness/session-handoff.md`: next-session handoff (auto-written)',
       '- `.harness/lessons.md` / `decisions.md` / `rules.md`: permanent memory (5 surfaces)',
       '',
-      `Last synced by Leerness v${VERSION}: ${today()}`,
+      `Last synced by Leerness v${version}: ${today()}`,
       README_END,
       ''
     ].join('\n');
@@ -517,7 +518,7 @@ function managedReadmeBlock(project, lang = 'ko') {
     README_START,
     '## Leerness Project Harness',
     '',
-    `이 프로젝트는 Leerness v${VERSION} 하네스를 사용합니다. AI 에이전트는 작업 전 \`leerness handoff\`로 컨텍스트를 적재하고, 작업 후 \`leerness check\`/\`leerness audit\`/\`leerness session close\`를 수행해야 합니다.`,
+    `이 프로젝트는 Leerness v${version} 하네스를 사용합니다. AI 에이전트는 작업 전 \`leerness handoff\`로 컨텍스트를 적재하고, 작업 후 \`leerness check\`/\`leerness audit\`/\`leerness session close\`를 수행해야 합니다.`,
     '',
     '### 정체성 — AI 에이전트 운영 레이어 (UR-0030)',
     '',
@@ -571,7 +572,7 @@ function managedReadmeBlock(project, lang = 'ko') {
     '',
     '### MCP server (외부 AI 통합)',
     '',
-    `Leerness v${VERSION}는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **${_mcpToolCount()}개 도구**를 노출:`,
+    `Leerness v${version}는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **${_mcpToolCount()}개 도구**를 노출:`,
     '',
     '```jsonc',
     '// 카테고리별',
@@ -593,7 +594,7 @@ function managedReadmeBlock(project, lang = 'ko') {
     '`<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:',
     '1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) 회귀 테스트 갱신 → 4) 전체 e2e 스위트 통과 → 5) npm publish + git tag → 6) main push → 7) session close → 8) 다음 라운드 예약.',
     '',
-    `현재 누적: **v1.9.x → ${VERSION} 릴리스 태그 이력** (수백 라운드) · _reports/는 비공개 보존.`,
+    `현재 누적: **v1.9.x → ${version} 릴리스 태그 이력** (수백 라운드) · _reports/는 비공개 보존.`,
     '',
     '### 성능 가이드',
     '',
@@ -631,7 +632,7 @@ function managedReadmeBlock(project, lang = 'ko') {
     '- `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)',
     '- `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)',
     '',
-    `Last synced by Leerness v${VERSION}: ${today()}`,
+    `Last synced by Leerness v${version}: ${today()}`,
     README_END,
     ''
   ].join('\n');
@@ -968,6 +969,17 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
     _files['.github/copilot-instructions.md'] = `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`;
     _files['.harness/session-workflow.md'] = fm('session-workflow', ['session start', 'new user request arrives', 'before distributing complex work'], ['workflow step changes'], `# Session Workflow — 6 steps of AI harness engineering\n\n> **At the start of every session the main agent reads this document first and follows the 6 steps as written.**\n> Same flow regardless of round length/complexity — that is what prevents drift.\n\n## Step 1. Analyze the request + check the environment\n\`\`\`bash\nleerness handoff .            # load context + automatic drift warning\nleerness drift check .        # signals + 4-level verdict\n\`\`\`\n- Decompose the request (5W1H). If ambiguous, ask clarifying questions (except autonomous mode).\n- On drift critical, run \`leerness session close .\` or \`drift check --auto-fix\` first.\n\n## Step 2. Plan\n- 3+ steps → use TodoWrite or \`leerness plan add\`.\n- New capability → search existing assets first via \`leerness reuse-map\` / \`reuse find <query>\`.\n- Multiple modules → define an integration spec up front (e.g. TICK_SPEC.md).\n\n## Step 3. Distribute — sub-agent mapping\n\`\`\`bash\nleerness agents list                  # ready CLIs\nleerness agents quota                 # limits\nleerness agents dispatch "<task>" --to <id>\n\`\`\`\n- Best sub-agent by task type: text/translation/analysis → claude · deep code reasoning → codex · direct file edits → agy --yolo · security review → \`leerness review --persona security\`.\n- **Conflict-prevention rules (mandatory)**: give each sub-agent *the exact files only it may modify*; require mtime-verification reports (concurrent writes risk last-writer-wins); verify against the spec afterwards with \`leerness contract verify\`.\n\n## Step 4. Sub-agent work + individual self-verification\n- Each sub-agent reports only after passing its own module tests.\n- Report format: line counts, tests N/N PASS, issues found, mtime verification.\n\n## Step 5. Integrated verification\n\`\`\`bash\nleerness contract verify SPEC.md src/<mod>.js\nleerness verify-claim T-XXX --run-tests --strict-claims\nleerness review <file> --persona security,performance,ux\n\`\`\`\n- The main agent writes and runs its own integration scenario (independent verification).\n- Cross-check that sub-agent verification and main verification *agree*.\n\n## Step 6. Close + handoff + next-round suggestion\n\`\`\`bash\nleerness session close .             # --suggest on by default\nleerness session close . --no-suggest\n\n# or separately:\nleerness skill suggest .\nleerness drift check .\nleerness audit . --fix\n\`\`\`\n\n## 🧠 Memory CRUD Quick Reference\n\n| Surface | CREATE | READ | DELETE | RESTORE |\n|---|---|---|---|---|\n| **tasks** | task add | task list --json | task drop | task update |\n| **decisions** | decision add | decision list --json | decision drop | memory restore decisions |\n| **lessons** | lesson save | lesson list [--tag] | lesson drop | memory restore lessons |\n| **plan** | plan add | plan list --json | plan remove | memory restore plan |\n| **rules** | rule add | rule list --json | rule remove | (rule pause/resume) |\n\n\`\`\`bash\nleerness memory status [--json]\nleerness memory archive list [--surface s]\nleerness memory restore <surface> <target>\n\`\`\`\n\n**Recovering a wrongly saved item**:\n1. \`memory archive list\` — list restore candidates\n2. \`memory restore decisions "PostgreSQL"\` — archive → active\n3. handoff automatically notes archive activity within 24h every session\n\n## Auto-recovery & security\n- A skipped session close triggers drift critical at the next session start — recover with \`drift check --auto-fix\` (runs session close automatically on critical).\n- handoff auto-recalls past lessons (by current task keywords) and auto-suggests installed skills.\n- handoff prints a 1–2 line security summary (.env ↔ .env.example sync + .gitignore secret gaps); a missing .env in .gitignore is 🚨 CRITICAL — \`LEERNESS_AUTO_SECURITY_FIX=1\` runs \`audit --fix\` automatically.\n- \`leerness health\` gives a one-line combined check (drift + security + skills + usage + tasks).\n\n---\n\n## Quick checklist (before the session ends)\n- [ ] This round's tasks are registered in plan/progress-tracker (or task sync)\n- [ ] Every done item has evidence attached (verify-claim PASS)\n- [ ] contract verify PASS when sub-agents were used\n- [ ] drift score ≤ 30 — \`leerness drift check\`\n- [ ] session close was run\n- [ ] \`leerness health\` overall check\n- [ ] If .env is used: .gitignore secret patterns OK + .env.example synced\n- [ ] On security critical: \`LEERNESS_AUTO_SECURITY_FIX=1\` or \`audit --fix\`\n\n## Anti-patterns (drift signals)\n- ⚠ "work is done, just report and stop" → missed session close → drift critical next session\n- ⚠ "only TodoWrite updated, leerness unused" → \`task sync --from\` or \`task add\` is mandatory\n- ⚠ distributing to sub-agents without explicit file paths → concurrent-write conflicts\n- ⚠ self-reported "tests ran, PASS" only → verify-claim --run-tests not executed\n- ⚠ skipping contract verify → spec-mismatch bugs reach the user\n`, 'en');
   }
+  // T-0136: handoff is a tracked-read boundary. The localized templates predate that contract,
+  // so normalize the one stale sentence after language selection from a single place.
+  _files['AGENTS.md'] = _files['AGENTS.md']
+    .replace(
+      '동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 `.harness/`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). `leerness handoff` · `decision add` · `lesson save` 등이 여기에 쓴다.',
+      '동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 `.harness/`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). 기본 `leerness handoff`는 이를 읽고 ignored 세션 runtime record만 갱신하며, 추적 상태 갱신은 `decision add` · `lesson save` · `session close` 같은 명시 쓰기 명령 또는 `handoff --writeback`이 수행한다.'
+    )
+    .replace(
+      'Dynamic state (decisions/lessons/plan/progress/verification/handoff) is recorded by leerness in the **default workspace `.harness/`** (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md) via `leerness handoff`, `decision add`, `lesson save`, etc.',
+      'Dynamic state (decisions/lessons/plan/progress/verification/handoff) is recorded by leerness in the **default workspace `.harness/`** (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). Default `leerness handoff` reads it and updates only an ignored per-session runtime record; tracked state changes come from explicit write commands such as `decision add`, `lesson save`, `session close`, or `handoff --writeback`.'
+    );
   // 1.9.276: minimal 모드 — 코어가 요구하지 않는 파일 제외 (verify 필수 파일은 유지).
   if (opts.minimal) { for (const k of MINIMAL_SKIP_KEYS) delete _files[k]; }
   // 1.36.105 (P-0015): mode=minimal 은 **AI 가 매 세션 읽는 지침 자체**를 줄인다.
@@ -1197,12 +1209,12 @@ function writeMigrationReport(root, backup, actions, opts = {}) {
   writeUtf8(p, `# Leerness Migration Report\n\nVersion: ${VERSION}\nDate: ${now()}\nBackup: ${rel(root, backup.archiveDir)}\n${opts.fromV ? `Previous: ${opts.fromV}\n` : ''}${aiReadBlock}\n## Policy\n\n- Existing harness, skill, and instruction files are backed up before migration.\n- Project memory files are preserved by default.\n- Managed instruction files are merged with previous content instead of being blindly overwritten.\n- .env.example/.gitignore are line-merged only.\n\n## Backed Up Candidates\n\n${backup.candidates.map(x => '- ' + x).join('\n')}\n\n## File Actions\n\n| File | Action |\n|---|---|\n${rows}\n`);
 }
 
-function syncReadme(root) {
+function syncReadme(root, versionOverride = null) {
   const p = path.join(root, 'README.md');
   const existing = exists(p) ? read(p) : '';
   // 1.9.40: 자체 README도 동기화 — version 배지, e2e 카운트, package.json#version 일관성
   const _rmLang = (() => { try { return read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch { return 'ko'; } })();   // 1.36.63 (F-05 5회차)
-  let updated = mergeReadmeSection(existing, managedReadmeBlock(detectProjectName(root), _rmLang));
+  let updated = mergeReadmeSection(existing, managedReadmeBlock(detectProjectName(root), _rmLang, versionOverride || VERSION));
   try {
     // package.json#version 또는 .harness/HARNESS_VERSION을 참조하여 README 배지 자동 갱신
     const pkgPath = path.join(root, 'package.json');
@@ -1241,6 +1253,55 @@ function syncReadme(root) {
   } catch {}
   if (updated !== existing) writeUtf8(p, updated);
   ok('README.md Leerness section synced');
+}
+
+// release bump은 일반 프로젝트의 package.json만 바꾸는 기존 계약을 유지한다.
+// 다만 leerness 자체 패키지를 대상으로 할 땐 package/bin/README가 같은 출하 버전을 말해야 한다.
+function _releasePathIdentity(p) {
+  let resolved = path.resolve(p);
+  try { resolved = fs.realpathSync.native ? fs.realpathSync.native(resolved) : fs.realpathSync(resolved); } catch {}
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+function _prepareOwnReleaseVersionSurfaces(root, version) {
+  // Windows의 드라이브 문자/경로 대소문자와 junction을 같은 패키지로 본다.
+  if (_releasePathIdentity(root) !== _releasePathIdentity(path.resolve(__dirname, '..'))) return null;
+  const source = read(__filename);
+  const declarations = source.match(/^const VERSION = '[^']+';$/gm) || [];
+  if (declarations.length !== 1) throw new Error('bin/leerness.js VERSION 선언을 단일하게 찾지 못해 동기화를 중단했습니다');
+  const updated = source.replace(/^const VERSION = '[^']+';$/m, `const VERSION = '${version}';`);
+  if (updated === source) throw new Error('bin/leerness.js VERSION이 갱신되지 않아 동기화를 중단했습니다');
+  const readmePath = path.join(root, 'README.md');
+  if (exists(readmePath)) fs.readFileSync(readmePath, 'utf8'); // 쓰기 전에 모든 자체 출하 표면의 읽기 가능성 확인
+  return { sourcePath: __filename, source, updated, readmePath };
+}
+function syncOwnReleaseVersionSurfaces(root, version, prepared = null) {
+  const plan = prepared || _prepareOwnReleaseVersionSurfaces(root, version);
+  if (!plan) return false;
+  writeUtf8(plan.sourcePath, plan.updated);
+  syncReadme(root, version);
+  return true;
+}
+function _releaseFileSnapshot(file) {
+  return { file, existed: exists(file), text: exists(file) ? fs.readFileSync(file, 'utf8') : null };
+}
+function _restoreReleaseSnapshots(snapshots) {
+  const errors = [];
+  for (const snap of snapshots.slice().reverse()) {
+    try {
+      if (snap.existed) writeUtf8(snap.file, snap.text);
+      else if (exists(snap.file)) fs.unlinkSync(snap.file);
+    } catch (e) {
+      errors.push(`${rel(path.dirname(snap.file), snap.file)}:${String((e && (e.code || e.message)) || e).slice(0, 50)}`);
+    }
+  }
+  return errors;
+}
+function _runReleaseTransaction(snapshots, action) {
+  try {
+    return { ok: true, value: action(), rollbackErrors: [] };
+  } catch (error) {
+    return { ok: false, error, rollbackErrors: _restoreReleaseSnapshots(snapshots) };
+  }
 }
 
 // 1.9.369 (UR-0025): 순수 코어 _parseSkillsValue (lib/pure-utils) + skillCatalog 주입 래퍼.
@@ -3518,7 +3579,7 @@ function _selftestFixture(lang) {
 
 // 1.9.258: leerness selftest — 설치된 leerness 바이너리의 코어 순수 함수 자가 검증.
 //   1.9.255~257 에서 export 한 보안/정확성/인코딩-핵심 함수를 실제 호출해 무결성 확인.
-//   사용자/CI 가 "내 leerness 가 정상인가?" 를 1초 내 검증 (npm 캐시 손상/부분 설치 감지).
+//   사용자/CI 가 "내 leerness 가 정상인가?" 를 검증 (행위 검사가 포함돼 환경에 따라 수십 초 소요).
 //   --json: 기계 판독. 실패 시 exit 1 (CI 친화).
 function _selfTestCases() {
   // 각 케이스: { name, run: () => boolean }  — 순수 함수만 (파일/네트워크 부작용 0)
@@ -3971,23 +4032,24 @@ function _selfTestCases() {
       const s = read(__filename);
       const wired = typeof enforceCmd === 'function' && s.includes("cmd === 'enforce'");
       // 훅 자기완결(구버전 전역 CLI 무의존 — 실측 함정): leerness 호출 없이 find -mmin 으로 판정
-      const selfContained = s.includes('find "$LH" -mmin -"$WIN_MIN"') && s.includes('LEERNESS_ENFORCE_BYPASS');
+      const selfContained = s.includes('find "$SESSION_FILE" -mmin -"$WIN_MIN"') && s.includes('FRESH_HANDOFF') && s.includes('LEERNESS_ENFORCE_BYPASS');
       const chainOk = s.includes('pre-commit.pre-leerness');
       const initAuto = s.includes("!has('--no-enforce') && process.env.LEERNESS_NO_ENFORCE !== '1'");
       // 행위: 임시 git repo — install→(handoff 無)차단 메시지, mtime 신선→통과 (git 없으면 skip-통과)
       let behavOk = true;
+      let tmp = null;
       try {
-        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_enf_'));
+        tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_enf_'));
         const g = _gitSpawn(['-C', tmp, 'init'], { encoding: 'utf8', timeout: 10000 });
         if (g.status === 0) {
           fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
           const save = process.argv; const _w = process.stdout.write;
           try { process.argv = ['node', 'h', 'enforce', 'install']; process.stdout.write = () => true; enforceCmd(tmp, 'install'); } finally { process.stdout.write = _w; process.argv = save; }
           const hk = fs.readFileSync(path.join(tmp, '.git', 'hooks', 'pre-commit'), 'utf8');
-          behavOk = hk.includes(_ENFORCE_MARK) && hk.includes('find "$LH"');
+          behavOk = hk.includes(_ENFORCE_MARK) && hk.includes('find "$SESSION_FILE"') && hk.includes('FRESH_HANDOFF');
         }
-        fs.rmSync(tmp, { recursive: true, force: true });
       } catch { behavOk = false; }
+      finally { if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } }
       return wired && selfContained && chainOk && initAuto && behavOk;
     } },
     { name: 'enforce 하드닝 (1.36.44, 적대적 자체헌트): .harness 無 체크아웃 FP 방지 + worktree 훅경로 + --no-verify 사후감지 audit + 한계 정직 (소스가드)', run: () => {
@@ -4124,16 +4186,18 @@ function _selfTestCases() {
       const _selfE = _selfI < 0 ? -1 : s.indexOf(String.fromCharCode(10) + 'function ', _selfI + 10);
       const _prod = (_selfI < 0 || _selfE < 0) ? '' : s.slice(0, _selfI) + s.slice(_selfE);
       const _gateStart = _prod.indexOf("if (!has('--no-record') && process.env.LEERNESS_HOOK !== '1') {");
-      const _gateStmt = _gateStart < 0 ? '' : _prod.slice(_gateStart, _prod.indexOf(String.fromCharCode(10), _gateStart));
+      const _gateStmt = _gateStart < 0 ? '' : _prod.slice(_gateStart, _prod.indexOf('// 1.9.203:', _gateStart));
       const zeroWrite = _prod.length > 0 && _gateStart > 0
-        && _gateStmt.includes('_recordLastHandoff(root)')
         && _gateStmt.includes("_sessionPresenceRecord(root, 'open')")
+        && _gateStmt.includes('_recordHandoffFreshness(root)')
+        && /has\('--writeback'\)[\s\S]*?_recordLastHandoff\(root\)/.test(_gateStmt)
         //   ⚠ 정의 줄(`function _recordLastHandoff(root) {`)까지 세면 2가 된다 — **호출만** 센다.
-        && (_prod.match(/_recordLastHandoff\(root\);/g) || []).length === 1
+        && (_prod.match(/_recordLastHandoff\(root\)/g) || []).length === 2
+        && (_prod.match(/_recordHandoffFreshness\(root\)/g) || []).length === 2
         && (_prod.match(/_sessionPresenceRecord\(root, 'open'\)/g) || []).length === 1;
       // split-literal: 앵커를 통짜 문자열로 두면 이 selftest 줄 자신이 먼저 매칭돼 43자짜리 자기 슬라이스를 잡는다(자기참조 트랩, UR-0009 계열).
       const hookBody = s.slice(s.indexOf('function ' + 'hookSessionStartCmd'), s.indexOf('function ' + 'handoffCmd'));
-      const noHandoffCall = hookBody.length > 100 && !/handoffCmd\(|_recordLastHandoff\(|writeUtf8\(|mkdirp\(/.test(hookBody);   // 쓰기/handoff 호출 0
+      const noHandoffCall = hookBody.length > 100 && !/handoffCmd\(|_recordLastHandoff\(|_recordHandoffFreshness\(|writeUtf8\(|mkdirp\(/.test(hookBody);   // 쓰기/handoff 호출 0
       const jsonContract = hookBody.includes("hookEventName: 'SessionStart'") && hookBody.includes('additionalContext');
       const optOut = hookBody.includes("has('--no-context-inject')") && hookBody.includes("LEERNESS_NO_CONTEXT_INJECT");
       const selfLabel = hookBody.includes('위는 요약');                                          // 1.9.272 투명성: 요약임을 자기 라벨링
@@ -5884,15 +5948,20 @@ function _selfTestCases() {
       const hd = path.join(dir, '.harness'); fs.mkdirSync(hd);
       const lhf = path.join(hd, 'last-handoff.json');
       const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
+      const stampLegacy = (msAgo, history = [iso(msAgo)]) => {
+        const at = new Date(Date.now() - msAgo);
+        fs.writeFileSync(lhf, JSON.stringify({ last: at.toISOString(), history }));
+        fs.utimesSync(lhf, at, at); // enforce hook과 같은 canonical clock
+      };
       try {
         const noneOk = _handoffNudgeState(dir) === null;                                 // 부재 → 넛지 없음(신규 프로젝트 FP 방지)
-        fs.writeFileSync(lhf, JSON.stringify({ last: iso(3 * 3600 * 1000), history: [iso(3 * 3600 * 1000)] }));
+        stampLegacy(3 * 3600 * 1000);
         const st = _handoffNudgeState(dir);
         const staleOk = !!st && st.gapMin >= 120;                                        // 3h 오래됨 → 넛지
-        fs.writeFileSync(lhf, JSON.stringify({ last: iso(5 * 60 * 1000), history: [iso(5 * 60 * 1000)] }));
+        stampLegacy(5 * 60 * 1000);
         const freshOk = _handoffNudgeState(dir) === null;                                // 5min 최근 → 없음
         process.env.LEERNESS_NO_HANDOFF_NUDGE = '1';
-        fs.writeFileSync(lhf, JSON.stringify({ last: iso(3 * 3600 * 1000), history: [] }));
+        stampLegacy(3 * 3600 * 1000, []);
         const optOutOk = _handoffNudgeState(dir) === null;                               // opt-out 존중
         delete process.env.LEERNESS_NO_HANDOFF_NUDGE;
         return noneOk && staleOk && freshOk && optOutOk;
@@ -6769,7 +6838,8 @@ function _selfTestCases() {
       // ② 경로 탈옥 — 정상 5종은 통과, 탈출 6종은 전부 거부(한쪽만 재면 '전부 거부'가 통과한다)
       const okKeys = ['f3d070f6-f51d-4d44-becd-0026daa0c538', 'a'.repeat(64), 'abc-123_x', '12345678', 'A'.repeat(8)];
       if (!okKeys.every(k => SP.isValidKey(k))) return false;
-      const badKeys = ['..', '../../x', 'a/b', 'a\\b', 'C:\\x', '', 'short', 'a'.repeat(65)];
+      const badKeys = ['..', '../../x', 'a/b', 'a\\b', 'C:\\x', '', 'short', 'a'.repeat(65),
+        'unaddressed', 'UNADDRESSED', 'leerness-internal-probe-0001', 'LEERNESS-INTERNAL-PROBE-0001'];
       if (badKeys.some(k => SP.isValidKey(k))) return false;
       // ③ 최외곽 라벨 — CLAUDECODE 우선. **금지 신호로는 절대 판정하지 않는다**(실측: 이 저장소의 Claude 세션에
       //    CODEX_COMPANION_SESSION_ID 가 실재한다 — 그걸 근거로 삼으면 즉발 오라벨).
@@ -7200,6 +7270,22 @@ function _enforceCfg(root) {
   try { if (exists(_enforceCfgPath(root))) return Object.assign(def, JSON.parse(read(_enforceCfgPath(root)))); } catch {}
   return def;
 }
+// Git 훅은 아직 만들어지지 않은 파일을 가리킬 수 있다. 그 파일에 full-path realpath 를 쓰면 ENOENT가 되어
+// 조상 junction/symlink를 놓친다. 가장 깊은 기존 조상만 실제 위치로 풀고, 없는 꼬리를 다시 붙여 비교 키를 만든다.
+// Windows는 파일 시스템이 대소문자를 구별하지 않으므로 같은 방식으로 접는다.
+function _gitPathIdentity(p0) {
+  let head = path.resolve(p0);
+  const tail = [];
+  for (let i = 0; i < 64; i++) {
+    try { head = fs.realpathSync.native ? fs.realpathSync.native(head) : fs.realpathSync(head); break; } catch {}
+    const parent = path.dirname(head);
+    if (!parent || parent === head) break;
+    tail.unshift(path.basename(head));
+    head = parent;
+  }
+  const resolved = path.resolve(head, ...tail);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
 function _gitHookPath(root) {
   // 1.36.44 (하드닝): worktree 에선 .git 이 파일 — 훅은 공용 디렉토리에 산다. git 에게 물어 해석(양쪽 다 정답).
   // 1.36.134 (검수 실측): `--git-common-dir` 는 **`core.hooksPath` 를 모른다** — 그 설정이 있는 저장소에서
@@ -7221,6 +7307,19 @@ function _gitHookPath(root) {
     }
   } catch {}
   return path.join(root, '.git', 'hooks', 'pre-commit');
+}
+function _gitShellCommand(root) {
+  if (process.platform !== 'win32') return 'sh';
+  try {
+    const r = _gitSpawn(['-C', root, '--exec-path'], { encoding: 'utf8', timeout: 5000 });
+    if (r.status === 0 && String(r.stdout || '').trim()) {
+      const installRoot = path.resolve(String(r.stdout).trim(), '..', '..', '..');
+      for (const candidate of [path.join(installRoot, 'bin', 'sh.exe'), path.join(installRoot, 'usr', 'bin', 'sh.exe')]) {
+        if (exists(candidate)) return candidate;
+      }
+    }
+  } catch {}
+  return 'sh';
 }
 function enforceCmd(root, sub) {
   //   1.36.134 (실측): 이 함수의 사람 모드 출력이 스코프에 없는 흐림 헬퍼를 불러 **정상 저장소에서도 exit 1** 로 죽었다
@@ -7257,24 +7356,9 @@ function enforceCmd(root, sub) {
       //     · `.git` 안의 junction/symlink 가 바깥 공유 디렉토리를 가리켜도 "안" 이라 읽어 미탐(실측).
       //     · Windows 는 경로 대소문자를 안 가리는데 비교는 가려서, `.GIT/hooks` 가 "밖" 이 돼 오탐(실측).
       //   실제 위치(realpath)로, 그리고 그 플랫폼이 쓰는 방식으로 비교한다.
-      //   ⚠ 없는 경로면 realpath 가 그대로 되돌려줘 **링크를 따라가지 못한다**(아직 없는 훅 디렉토리 등).
-      //     존재하는 **가장 깊은 조상**까지 풀고 나머지를 다시 붙인다.
-      const _real = (p0) => {
-        let head = path.resolve(p0);
-        const tail = [];
-        for (let i = 0; i < 64; i++) {
-          try { head = fs.realpathSync.native ? fs.realpathSync.native(head) : fs.realpathSync(head); break; } catch {}
-          const parent = path.dirname(head);
-          if (!parent || parent === head) break;
-          tail.unshift(path.basename(head));
-          head = parent;
-        }
-        const r = path.resolve(head, ...tail);
-        return process.platform === 'win32' ? r.toLowerCase() : r;
-      };
       //   훅 파일 자체는 아직 없을 수 있으므로 **디렉토리**로 비교한다.
-      const hookDir = _real(path.dirname(hookP));
-      const commonDir = _real(abs);
+      const hookDir = _gitPathIdentity(path.dirname(hookP));
+      const commonDir = _gitPathIdentity(abs);
       return !(hookDir === commonDir || hookDir.startsWith(commonDir + path.sep));
     } catch { return null; }
   })();
@@ -7293,12 +7377,8 @@ function enforceCmd(root, sub) {
         .map((l) => l.slice('worktree '.length).trim())
         .filter(Boolean);
       if (dirs.length <= 1) return dirs.length || null;
-      const norm = (q) => {
-        let r = q;
-        try { r = fs.realpathSync.native ? fs.realpathSync.native(q) : fs.realpathSync(q); } catch {}
-        r = path.resolve(r);
-        return process.platform === 'win32' ? r.toLowerCase() : r;
-      };
+      // 아직 없는 pre-commit 파일도 상위 junction까지 같은 실제 위치로 풀어 비교한다.
+      const norm = _gitPathIdentity;
       const mine = norm(hookP);
       let sharing = 0;
       //   ⚠ 1.36.144 (재검수 P1): "하나라도 모르면 null" 로 했더니 **사라진(prunable) worktree 하나**가
@@ -7406,7 +7486,8 @@ function enforceCmd(root, sub) {
     //   종전엔 체인 백업을 이미 덮어쓴 뒤에 `unsafe_path` 로 반환해 **백업이 파괴된 채로 남았다**.
     //   거절할 입력이면 아무것도 건드리기 전에 거절한다.
     // 훅은 자기완결 sh — 설치된 leerness 버전/네트워크/PATH 에 무의존(구버전 전역 CLI 가 enforce 를 몰라 오차단하던 실측 함정 회피).
-    // 핵심 체크 = last-handoff.json 의 mtime 이 window 안인지 (find -mmin, git bash 표준).
+    // 핵심 체크 = **handoff 때만** 갱신되는 ignored freshness marker mtime 이 window 안인지
+    //   (주소가 없는 셸은 최신 marker fallback). presence record 는 session close 도 갱신하므로 근거로 쓰지 않는다.
     // 1.36.134: git 이 훅을 부를 때의 작업 디렉토리 = toplevel. harness 위치를 그 기준 상대경로로 고정한다.
     let topLevel = root;
     {
@@ -7454,9 +7535,35 @@ function enforceCmd(root, sub) {
       '  if [ -f "$(dirname "$0")/pre-commit.pre-leerness" ]; then exec sh "$(dirname "$0")/pre-commit.pre-leerness" "$@"; fi',
       '  exit 0',
       'fi',
-      `LH="$LRN_DIR/last-handoff.json"`,
       `WIN_MIN=${windowHours * 60}`,
-      'if [ ! -f "$LH" ] || [ -z "$(find "$LH" -mmin -"$WIN_MIN" 2>/dev/null)" ]; then',
+      // 1.36.156 (외부 Codex P1): JS `deriveSessionKey` 와 같은 우선순위/검증을 쓴다.
+      //   "값이 있음"은 "유효한 주소"가 아니다. 잘못된 명시값은 유효한 fallback 을 가리면 안 되고,
+      //   주소가 없을 때도 다른 세션 전체를 wildcard 로 훑지 않고 handoff 가 실제로 쓰는 unaddressed 슬롯만 본다.
+      'normalize_session_key() {',
+      '  case "$1" in ""|*[!A-Za-z0-9_-]*) return 1 ;; esac',
+      '  [ "${#1}" -ge 8 ] && [ "${#1}" -le 64 ] || return 1',
+      '  NORMALIZED_KEY=$(printf "%s" "$1" | tr "[:upper:]" "[:lower:]")',
+      '  [ "$NORMALIZED_KEY" != "unaddressed" ] || return 1',
+      '  case "$NORMALIZED_KEY" in leerness-internal-*) return 1 ;; esac',
+      '  printf "%s" "$NORMALIZED_KEY"',
+      '}',
+      'SESSION_KEY=""',
+      'SESSION_ADDRESSED=0',
+      'if SESSION_KEY=$(normalize_session_key "$LEERNESS_SESSION_ID"); then',
+      '  SESSION_ADDRESSED=1',
+      'elif [ "$CLAUDE_CODE_CHILD_SESSION" != "1" ]; then',
+      '  for SESSION_CANDIDATE in "$CLAUDE_CODE_HOST_SESSION_ID" "$CLAUDE_CODE_SESSION_ID" "$CODEX_THREAD_ID"; do',
+      '    if SESSION_KEY=$(normalize_session_key "$SESSION_CANDIDATE"); then SESSION_ADDRESSED=1; break; fi',
+      '  done',
+      'fi',
+      'if [ -z "$SESSION_KEY" ]; then SESSION_KEY=unaddressed; fi',
+      'HANDOFF_DIR="$LRN_DIR/cache/handoffs"',
+      'FRESH_HANDOFF=""',
+      'SESSION_FILE="$HANDOFF_DIR/$SESSION_KEY.json"',
+      'if [ -f "$SESSION_FILE" ]; then FRESH_HANDOFF=$(find "$SESSION_FILE" -mmin -"$WIN_MIN" -print -quit 2>/dev/null); fi',
+      // legacy 전역 파일에는 세션 주소가 없다. 주소가 있는 세션의 증거로 쓰면 다른 세션 handoff를 빌려 통과한다.
+      'if [ "$SESSION_ADDRESSED" = "0" ] && [ -z "$FRESH_HANDOFF" ] && [ -f "$LRN_DIR/last-handoff.json" ]; then FRESH_HANDOFF=$(find "$LRN_DIR/last-handoff.json" -mmin -"$WIN_MIN" -print -quit 2>/dev/null); fi',
+      'if [ -z "$FRESH_HANDOFF" ]; then',
       `  echo "🔒 leerness 강제: 최근 ${windowHours}h 내 handoff 흔적 없음 — 커밋 전 실행: leerness handoff ." >&2`,
       '  echo "   긴급 우회(명시): LEERNESS_ENFORCE_BYPASS=1 git commit ..." >&2',
       '  exit 1',
@@ -7487,52 +7594,76 @@ function enforceCmd(root, sub) {
     //     handoff 흔적이 창 안이면 통과(0), 창 밖이면 차단(≠0) 이어야 한다. 둘이 같으면 그 훅은 죽은 파일이다.
     //   검증 전용 사본: 체인 호출과 strict gate 줄만 걷어낸 같은 스크립트. 임시 디렉토리에 두고 끝나면 지운다.
     //   출하되는 훅에는 검증 분기가 없으므로 사용자가 켤 수 있는 우회 스위치도 없다.
+    // 실제 세션이 선택할 수 없는 예약 prefix + 호출별 난수 주소를 쓴다. 고정된 유효 주소는 동시 handoff와
+    // 충돌할 수 있고, 설치 probe가 저장했던 과거 바이트로 복원하면서 방금 쓴 handoff를 지울 수 있다.
+    const probeKey = `leerness-internal-probe-${require('crypto').randomBytes(12).toString('hex')}`;
     const probeHookP = path.join(os.tmpdir(), `leerness-probe-${process.pid}-${Date.now()}.sh`);
     try {
-      writeUtf8(probeHookP, hook.split('\n').filter(l => !/pre-commit\.pre-leerness|leerness gate \./.test(l)).join('\n'));
+      const probeHook = hook.split('\n')
+        .filter(l => !/pre-commit\.pre-leerness|leerness gate \./.test(l))
+        .join('\n')
+        // 출하 훅에는 내부 우회 분기가 없다. 임시 사본만 예약 주소를 직접 가리킨다.
+        .replace('if [ -z "$SESSION_KEY" ]; then SESSION_KEY=unaddressed; fi',
+          `SESSION_KEY=${shQuote(probeKey)}\nSESSION_ADDRESSED=1`);
+      writeUtf8(probeHookP, probeHook);
       try { fs.chmodSync(probeHookP, 0o755); } catch {}
     } catch { /* 못 만들면 아래 검증이 'skipped' 로 답한다 */ }
     const _verifyHookFires = () => {
-      const lhp = _lastHandoffPath(root);
-      //   ⚠ 이 파일은 **실데이터**다. 내용뿐 아니라 **mtime 도** 되돌려야 한다 —
-      //     훅이 신선도를 판정하는 근거가 바로 그 mtime 이라, 안 되돌리면 설치 행위 자체가
-      //     "방금 handoff 했다" 는 상태를 만들어 **지금 설치하는 게이트를 스스로 약화**시킨다(실측: mtime 이 갱신됐다).
-      let saved = null, savedTimes = null;
-      try {
-        if (exists(lhp)) { saved = read(lhp); const st = fs.statSync(lhp); savedTimes = [st.atime, st.mtime]; }
-      } catch { return 'skipped'; }
+      // 1.36.156 (외부 Codex P1): probe 가 검사하는 주소와 probe 가 찍는 marker 를 같게 한다.
+      //   legacy last-handoff.json 을 찍으면 설치 자체는 성공해도 실제 addressed 세션에는 marker 가 없어
+      //   다음 커밋이 막힐 수 있었다. 합성 주소 전용 ignored marker 를 잠깐 만들고 원상복구한다.
+      const lhp = _handoffFreshnessPath(root, probeKey);
+      const handoffDir = _handoffFreshnessDir(root);
+      const hadDir = exists(handoffDir);
       const runHook = () => {
         //   PROBE=1 이면 훅이 자기 판정 직후 끝난다 — 사용자 기존 훅·strict gate 를 실행하지 않는다.
         //   ⚠ cwd 는 **git 이 훅을 부르는 곳**(toplevel)이어야 한다 — `root` 로 재면 하위 디렉토리 설치에서
         //     "발화한다" 고 잘못 답한다(실제로 그렇게 오답했고 루트 커밋이 통과했다).
         //   체인·strict 를 뺀 **임시 사본**을 돌린다 — 사용자 기존 훅과 gate 는 실행되지 않는다(부작용 0 · 재귀 0).
-        const r = cp.spawnSync('sh', [probeHookP], { cwd: topLevel, encoding: 'utf8', timeout: 20000,
-          env: Object.assign({}, process.env, { LEERNESS_ENFORCE_BYPASS: '' }) });
+        const r = cp.spawnSync(_gitShellCommand(root), [probeHookP], { cwd: topLevel, encoding: 'utf8', timeout: 20000,
+          env: Object.assign({}, process.env, {
+            LEERNESS_ENFORCE_BYPASS: '', LEERNESS_SESSION_ID: '', CLAUDE_CODE_HOST_SESSION_ID: '',
+            CLAUDE_CODE_SESSION_ID: '', CODEX_THREAD_ID: '', CLAUDE_CODE_CHILD_SESSION: '1'
+          }) });
         if (r.error) return null;                                  // sh 가 없다 — 판정하지 않는다
         return r.status;
       };
+      let result = 'skipped';
       try {
-        //   ⚠ 훅은 JSON 내용이 아니라 **파일 mtime** 을 본다(`find -mmin`). 내용만 바꾸면 두 번 다 통과해
-        //     정상 저장소까지 'not-fired' 로 오판한다(실제로 그렇게 만들었다가 과잉 차단을 냈다).
-        const stamp = (ageH) => {
-          writeUtf8(lhp, JSON.stringify({ last: new Date(Date.now() - ageH * 3600000).toISOString() }, null, 2));
-          const t = new Date(Date.now() - ageH * 3600000);
-          try { fs.utimesSync(lhp, t, t); } catch {}
-        };
-        stamp(0);
-        const inWindow = runHook();
-        stamp(windowHours + 24);
-        const outWindow = runHook();
-        if (inWindow === null || outWindow === null) return 'skipped';
-        return (inWindow === 0 && outWindow !== 0) ? 'fired' : 'not-fired';
-      } catch { return 'skipped'; }
+        // 예약·난수 주소라 실제 handoff와 겹치지 않지만, 동시 설치까지 같은 marker lock 계약으로 보호한다.
+        result = _withLock(lhp, () => {
+          let saved = null, savedTimes = null;
+          try {
+            if (exists(lhp)) { saved = read(lhp); const st = fs.statSync(lhp); savedTimes = [st.atime, st.mtime]; }
+            //   ⚠ 훅은 JSON 내용이 아니라 **파일 mtime** 을 본다(`find -mmin`). 내용만 바꾸면 두 번 다 통과해
+            //     정상 저장소까지 'not-fired' 로 오판한다(실제로 그렇게 만들었다가 과잉 차단을 냈다).
+            const stamp = (ageH) => {
+              const last = new Date(Date.now() - ageH * 3600000).toISOString();
+              writeUtf8(lhp, JSON.stringify({ schemaVersion: 1, sessionKey: probeKey, last, history: [last] }, null, 2) + '\n');
+              const t = new Date(Date.now() - ageH * 3600000);
+              try { fs.utimesSync(lhp, t, t); } catch {}
+            };
+            stamp(0);
+            const inWindow = runHook();
+            stamp(windowHours + 24);
+            const outWindow = runHook();
+            if (inWindow === null || outWindow === null) return 'skipped';
+            return (inWindow === 0 && outWindow !== 0) ? 'fired' : 'not-fired';
+          } catch { return 'skipped'; }
+          finally {
+            try {
+              if (saved === null) { if (exists(lhp)) fs.unlinkSync(lhp); }
+              else { writeUtf8(lhp, saved); if (savedTimes) fs.utimesSync(lhp, savedTimes[0], savedTimes[1]); }
+            } catch {}
+          }
+        });
+      } catch { result = 'skipped'; }
       finally {
-        try {
-          if (saved === null) { if (exists(lhp)) fs.unlinkSync(lhp); }
-          else { writeUtf8(lhp, saved); if (savedTimes) fs.utimesSync(lhp, savedTimes[0], savedTimes[1]); }
-        } catch {}
+        // _withLock가 lock 파일을 놓은 뒤에만 새 디렉토리를 정리할 수 있다.
+        try { if (!hadDir && exists(handoffDir) && fs.readdirSync(handoffDir).length === 0) fs.rmdirSync(handoffDir); } catch {}
         try { if (exists(probeHookP)) fs.unlinkSync(probeHookP); } catch {}   // 임시 사본은 남기지 않는다
       }
+      return result;
     };
     const _fired = _verifyHookFires();
     // 1.36.134 (검수 P1): `sh` 가 없어 **관측을 못 했는데** `ok:true` 로 답했다 — 이 라운드의 계약은
@@ -7540,7 +7671,7 @@ function enforceCmd(root, sub) {
     //   (opt-out: 관측 수단이 없는 환경에서 그래도 걸고 싶으면 `--skip-verify`.)
     if (_fired === 'skipped' && !has('--skip-verify')) {
       _rollbackHook();
-      failJson(json, 'verify_unavailable', `훅 발화를 확인할 수 없습니다(sh 없음) — 관측하지 못한 강제를 성공이라 하지 않습니다. 그래도 설치하려면 --skip-verify` + _rbNote());
+      failJson(json, 'verify_unavailable', `훅 발화를 확인할 수 없습니다(Git shell 사용 불가) — 관측하지 못한 강제를 성공이라 하지 않습니다. 그래도 설치하려면 --skip-verify` + _rbNote());
       return;
     }
     if (_fired === 'not-fired') {
@@ -7589,9 +7720,10 @@ function enforceCmd(root, sub) {
       }
     }
     const cfg = _enforceCfg(root);
-    const lhf = _lastHandoffPath(root);
-    let lastAt = null;
-    try { if (exists(lhf)) { const j = JSON.parse(read(lhf)); lastAt = j.last || (Array.isArray(j.history) && j.history.length ? j.history[j.history.length - 1] : null); } } catch {}
+    // 1.36.155 (외부 Codex P1): hook 과 check 가 서로 다른 저장소를 읽으면 같은 handoff 를 두고
+    //   하나는 통과, 하나는 차단한다. 둘 다 handoff-only marker → legacy 순서로 판정한다.
+    const gap = _getLastHandoffGap(root);
+    let lastAt = gap && gap.hasLast ? gap.lastAt : null;
     // 1.36.49 (codex 6차 #2 High): 손상 타임스탬프 fail-closed — 종전엔 new Date('not-a-date') → NaN,
     //   NaN > windowHours 가 false 라서 손상 파일이 강제를 통과("handoff NaNh 전")했다.
     const lastMs = lastAt ? new Date(lastAt).getTime() : NaN;
@@ -7618,7 +7750,7 @@ function enforceCmd(root, sub) {
     if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root}`); return; }
     const cfg2 = _enforceCfg(root);
     let handoffs = [];
-    try { const j = JSON.parse(read(_lastHandoffPath(root))); handoffs = (j.history || []).map(t => new Date(t).getTime()).filter(n => !Number.isNaN(n)); } catch {}
+    try { const j = _getLastHandoffGap(root); handoffs = (j.history || []).map(t => new Date(t).getTime()).filter(Number.isFinite); } catch {}
     const gl = _gitSpawn(['-C', root, 'log', '-n', '30', '--pretty=format:%H|%ct|%s'], { encoding: 'utf8', timeout: 10000 });
     // 1.36.49 (codex 6차 #9): 커밋 0개(unborn HEAD)는 정상 저장소 — 실패가 아니라 "검사 대상 없음" 성공.
     if (gl.status !== 0 && /does not have any commits|unknown revision|bad default revision|ambiguous argument/i.test(gl.stderr || '')) {
@@ -9102,7 +9234,7 @@ function _p0104ReminderOk() {
       fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
       cp2.spawnSync(process.execPath, [__filename, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 180000, env: env2 });
       writeUtf8(path.join(d, '.harness', 'agent-reminders.md'), body);
-      cp2.spawnSync(process.execPath, [__filename, 'handoff', '.'], { cwd: d, encoding: 'utf8', timeout: 300000, env: env2 });
+      cp2.spawnSync(process.execPath, [__filename, 'handoff', '.', '--writeback'], { cwd: d, encoding: 'utf8', timeout: 300000, env: env2 });
       return path.join(d, '.harness', 'agent-reminders.md');
     };
     // ① 사람이 쓴 파일은 살아남고 내용도 그대로
@@ -9732,7 +9864,7 @@ function commandsCmd(root) {
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   const cats = {
     status: [
-      { cmd: 'handoff [path] [--json] [--pulse] [--compact] [--quiet]', desc: '세션 시작 컨텍스트 + 7 통합 필드', descEn: 'session-start context + 7 integrated fields' },
+      { cmd: 'handoff [path] [--json] [--pulse] [--compact] [--quiet] [--writeback]', desc: '세션 시작 컨텍스트 + 세션별 runtime 기록 (--writeback: legacy projection 갱신)', descEn: 'session-start context + per-session runtime record (--writeback: refresh legacy projections)' },
       { cmd: 'health [path] [--json] [--strict]', desc: '종합 헬스 + drift/security/skill/memory/featureGraph/roundHistory/milestones', descEn: 'overall health + drift/security/skill/memory/featureGraph/roundHistory/milestones' },
       { cmd: 'pulse [path] [--json]', desc: '한 줄 종합 요약 (1.9.231)', descEn: 'one-line overall summary (1.9.231)' },
       { cmd: 'round-history [path] [--json]', desc: 'git tag 기반 자율 라운드 통계 (1.9.226)', descEn: 'autonomous round stats from git tags (1.9.226)' },
@@ -10134,22 +10266,14 @@ function _detectAbnormalShutdown(root) {
 
   // 1) last-handoff gap > 60min (정상 25min interval 대비)
   try {
-    const lhFp = path.join(root, '.harness', 'last-handoff.json');
-    if (exists(lhFp)) {
-      const j = JSON.parse(read(lhFp));
-      const last = j.lastAt || (j.history && j.history.length > 0 ? j.history[j.history.length - 1] : null);
-      if (last && Number.isFinite(new Date(last).getTime())) {   // 1.36.50 (NaN 날짜 클래스): 손상 타임스탬프는 신호 산출 불가 — 스킵
-        const lastMs = new Date(last).getTime();
-        const gapMin = Math.floor((now - lastMs) / 60000);
-        if (gapMin > 60) {
-          result.signals.push({
-            kind: 'last-handoff-stale',
-            gapMin,
-            detail: `last handoff ${gapMin}분 전 (정상 25min 간격 대비 ${Math.round(gapMin/25)}x 초과) — 절전/종료 의심`,
-            severity: gapMin > 240 ? 'high' : 'medium'
-          });
-        }
-      }
+    const gap = _getLastHandoffGap(root);
+    if (gap && gap.hasLast && gap.gapMin > 60) {
+      result.signals.push({
+        kind: 'last-handoff-stale',
+        gapMin: gap.gapMin,
+        detail: `last handoff ${gap.gapMin}분 전 (정상 25min 간격 대비 ${Math.round(gap.gapMin/25)}x 초과) — 절전/종료 의심`,
+        severity: gap.gapMin > 240 ? 'high' : 'medium'
+      });
     }
   } catch {}
 
@@ -12025,6 +12149,8 @@ function _sessionPresenceRecord(root, phase) {
       if (_sharedAgents && !(prev && prev.sharedKeyAgents === _sharedAgents) && process.env.LEERNESS_NO_LOCK_WARN !== '1') {
         try { process.stderr.write(`⚠ 세션 주소 공유 감지: ${key} 를 서로 다른 에이전트(${_sharedAgents})가 쓰고 있습니다 — 두 세션이 한 기록으로 합쳐져 서로를 못 봅니다. 세션마다 다른 LEERNESS_SESSION_ID 를 쓰세요.\n`); } catch {}
       }
+      const _handoffHistory = Array.isArray(prev && prev.handoffHistory) ? prev.handoffHistory.slice(-10) : [];
+      if (phase !== 'close') { _handoffHistory.push(nowIso); if (_handoffHistory.length > 10) _handoffHistory.shift(); }
       const rec = {
         schemaVersion: 1,
         sessionKey: key,
@@ -12035,8 +12161,11 @@ function _sessionPresenceRecord(root, phase) {
         platform: process.platform,
         leernessVersion: VERSION,
         openedAt: (prev && prev.openedAt) || nowIso,
-        lastHandoffAt: phase === 'close' ? ((prev && prev.lastHandoffAt) || nowIso) : nowIso,
+        // 1.36.155 (외부 Codex P1): close-only 세션에 handoff 시각을 발명하지 않는다.
+        //   종전 `|| nowIso` 는 session close 자체를 handoff 로 만들어 enforcement 를 우회했다.
+        lastHandoffAt: phase === 'close' ? ((prev && prev.lastHandoffAt) || null) : nowIso,
         handoffCount: (Number((prev && prev.handoffCount) || 0) || 0) + (phase === 'close' ? 0 : 1),
+        handoffHistory: _handoffHistory,
         closedAt: phase === 'close' ? nowIso : null,
         //   1.36.132 (검수 실측): 같은 주소를 두 세션이 쓰면 레코드가 조용히 병합됐다(others=0·헤드라인 침묵·
         //   라벨이 마지막 기록자로 덮임). 라벨이 **둘 다 unknown 이 아니면서** 바뀌었다면 그건 공유의 증거다.
@@ -12311,29 +12440,110 @@ function sessionsCmd(root) {
   for (const b of blindSpots) log(dim(`   · ${b}`));
 }
 function _lastHandoffPath(root) { return path.join(root, '.harness', 'last-handoff.json'); }
+const _HANDOFF_FRESHNESS_REL = ['.harness', 'cache', 'handoffs'];
+const HANDOFF_FRESHNESS_RE = /^[A-Za-z0-9_-]{8,64}\.json$/;
+function _handoffFreshnessDir(root) { return path.join(absRoot(root), ..._HANDOFF_FRESHNESS_REL); }
+function _handoffFreshnessKey() {
+  try {
+    const SP = require('../lib/session-presence');
+    const key = SP.deriveSessionKey(process.env);
+    return SP.isValidKey(key) ? key : 'unaddressed';
+  } catch { return 'unaddressed'; }
+}
+function _handoffFreshnessPath(root, key) {
+  return path.join(_handoffFreshnessDir(root), `${key || _handoffFreshnessKey()}.json`);
+}
+// 1.36.155 (T-0137 / 외부 Codex P1): enforcement freshness 는 presence record 와 분리한다.
+//   presence 는 session close 에서도 갱신되므로 mtime 을 handoff 증거로 쓸 수 없다. 이 ignored marker 는
+//   **실제 handoff 에서만** 쓰며, 주소 없는 Cursor/VS Code/일반 셸도 공용 unaddressed 슬롯에 흔적을 남긴다.
+function _recordHandoffFreshness(root) {
+  try {
+    root = absRoot(root);
+    if (!exists(path.join(root, '.harness'))) return { written: false, reason: 'not-a-leerness-project' };
+    const key = _handoffFreshnessKey();
+    const dir = _handoffFreshnessDir(root);
+    const fp = _handoffFreshnessPath(root, key);
+    mkdirp(dir);
+    if (path.dirname(path.resolve(fp)) !== path.resolve(dir)) return { written: false, reason: 'path-escape' };
+    _withLock(fp, () => {
+      let history = [];
+      if (exists(fp)) {
+        try { const j = JSON.parse(read(fp)); if (Array.isArray(j.history)) history = j.history; } catch {}
+      }
+      const nowIso = new Date().toISOString();
+      history.push(nowIso);
+      if (history.length > 10) history = history.slice(-10);
+      writeUtf8(fp, JSON.stringify({ schemaVersion: 1, sessionKey: key === 'unaddressed' ? null : key, last: nowIso, history }, null, 2) + '\n');
+    });
+    return { written: true, reason: null, key };
+  } catch (e) {
+    return { written: false, reason: 'unavailable:' + String((e && (e.code || e.message)) || e).slice(0, 40) };
+  }
+}
+function _latestHandoffFreshness(root) {
+  try {
+    const SP = require('../lib/session-presence');
+    const dir = _handoffFreshnessDir(root);
+    const selfKey = SP.deriveSessionKey(process.env);
+    // 1.36.156 (외부 Codex P1): 주소가 있으면 그 주소만, 없으면 handoff 가 실제로 쓰는
+    //   unaddressed 슬롯만 본다. 다른 세션의 최신 marker 로 내 세션 freshness 를 대체하지 않는다.
+    const names = [`${SP.isValidKey(selfKey) ? selfKey : 'unaddressed'}.json`];
+    const found = [];
+    for (const name of names) {
+      if (!HANDOFF_FRESHNESS_RE.test(name)) continue;
+      const fp = path.join(dir, name);
+      if (path.dirname(path.resolve(fp)) !== path.resolve(dir) || !exists(fp)) continue;
+      try {
+        // Git hook 의 canonical 판정도 `find -mmin` 이다. 같은 marker 를 두 표면이 다르게
+        // 해석하지 않도록 freshness 는 mtime 을 쓰고 JSON history 는 진단 정보로만 읽는다.
+        // JSON이 손상돼도 hook은 mtime을 보므로 JS만 다르게 차단하지 않는다.
+        const mtime = fs.statSync(fp).mtime;
+        let history = [];
+        try { const j = JSON.parse(read(fp)); if (Array.isArray(j.history)) history = j.history; } catch {}
+        if (Number.isFinite(mtime.getTime())) found.push({ last: mtime.toISOString(), history, key: name.replace(/\.json$/, '') });
+      } catch {}
+    }
+    return found.sort((a, b) => Date.parse(b.last) - Date.parse(a.last))[0] || null;
+  } catch { return null; }
+}
 function _recordLastHandoff(root) {
   try {
     mkdirp(path.join(root, '.harness'));
     const fp = _lastHandoffPath(root);
-    let history = [];
-    if (exists(fp)) {
-      try { const j = JSON.parse(read(fp)); if (Array.isArray(j.history)) history = j.history; } catch {}
-    }
-    const now = new Date().toISOString();
-    history.push(now);
-    // 최근 10개만 유지
-    if (history.length > 10) history = history.slice(-10);
-    writeUtf8(fp, JSON.stringify({ last: now, history }, null, 2));
+    _withLock(fp, () => {
+      let history = [];
+      if (exists(fp)) {
+        try { const j = JSON.parse(read(fp)); if (Array.isArray(j.history)) history = j.history; } catch {}
+      }
+      const now = new Date().toISOString();
+      history.push(now);
+      if (history.length > 10) history = history.slice(-10);
+      writeUtf8(fp, JSON.stringify({ last: now, history }, null, 2) + '\n');
+    });
     return true;
   } catch { return false; }
 }
 function _getLastHandoffGap(root) {
   try {
-    const fp = _lastHandoffPath(root);
-    if (!exists(fp)) return { hasLast: false };
-    const j = JSON.parse(read(fp));
-    if (!j.last) return { hasLast: false };
-    const lastMs = new Date(j.last).getTime();
+    const SP = require('../lib/session-presence');
+    const selfKey = SP.deriveSessionKey(process.env);
+    const marker = _latestHandoffFreshness(root);
+    let last = marker && marker.last;
+    let history = marker && Array.isArray(marker.history) ? marker.history : [];
+    // 주소가 있는 세션은 자신의 marker만 증거다. 전역 legacy 파일은 주소를 만들 수 없던
+    // 구버전/일반 셸의 무주소 호환 경로에서만 허용한다.
+    if (!last && !SP.isValidKey(selfKey)) {
+      const fp = _lastHandoffPath(root);
+      if (!exists(fp)) return { hasLast: false };
+      const legacy = JSON.parse(read(fp));
+      // legacy hook도 `find -mmin`으로 파일 mtime을 판정한다. JSON 내부 시각이 새롭고
+      // 파일이 오래된 경우 JS만 통과하지 않도록 같은 canonical clock을 쓴다.
+      const legacyMtime = fs.statSync(fp).mtime;
+      last = Number.isFinite(legacyMtime.getTime()) ? legacyMtime.toISOString() : null;
+      history = Array.isArray(legacy.history) ? legacy.history : [];
+    }
+    if (!last) return { hasLast: false };
+    const lastMs = new Date(last).getTime();
     if (!Number.isFinite(lastMs)) return { hasLast: false };   // 1.36.50 (NaN 날짜 클래스): 손상 타임스탬프 = 정보 부재로 취급
     const gapMs = Date.now() - lastMs;
     const gapMin = Math.floor(gapMs / 60000);
@@ -12341,8 +12551,36 @@ function _getLastHandoffGap(root) {
     const expected = 25;
     const isMiss = gapMin > 35;
     const isLong = gapMin > 60;
-    return { hasLast: true, lastAt: j.last, gapMin, expected, isMiss, isLong, history: j.history || [] };
+    return { hasLast: true, lastAt: last, gapMin, expected, isMiss, isLong, history };
   } catch { return { hasLast: false }; }
+}
+function _handoffVersionSkew(root) {
+  try {
+    const versionFile = path.join(absRoot(root), '.harness', 'HARNESS_VERSION');
+    if (!exists(versionFile)) return null;
+    const parsed = parseHarnessVersion(read(versionFile));
+    const harnessVersion = parsed.plus || parsed.base;
+    if (!harnessVersion) return { detected: true, kind: 'invalid-harness-version', cliVersion: VERSION, harnessVersion: parsed.raw };
+    const order = compareVer(VERSION, harnessVersion);
+    if (order === 0) return null;
+    return {
+      detected: true,
+      kind: order < 0 ? 'cli-older' : 'harness-older',
+      cliVersion: VERSION,
+      harnessVersion,
+      action: order < 0 ? 'update the leerness CLI before write commands' : 'run leerness update --yes for this project'
+    };
+  } catch { return null; }
+}
+function _emitHandoffVersionSkew(skew) {
+  if (!skew) return;
+  if (skew.kind === 'cli-older') {
+    warn(`버전 불일치: 실행 CLI v${skew.cliVersion} < 프로젝트 하네스 v${skew.harnessVersion} — 쓰기 명령 전 CLI를 업데이트하세요`);
+  } else if (skew.kind === 'harness-older') {
+    warn(`버전 불일치: 실행 CLI v${skew.cliVersion} > 프로젝트 하네스 v${skew.harnessVersion} — leerness update --yes 권장`);
+  } else {
+    warn(`프로젝트 HARNESS_VERSION 을 해석할 수 없습니다: ${skew.harnessVersion}`);
+  }
 }
 // 1.36.7 (메타-테스트 도그푸드): 세션에서 작업 중(task/decision add)인데 handoff 가 오래됨/미실행이면 넛지.
 //   실측(트랜스크립트)에서 확인된 사각지대: compaction/resume 후 세션-시작 handoff 리추얼을 건너뜀 → 컨텍스트 미적재.
@@ -12949,6 +13187,9 @@ function upsertProgress(root, row) {
 }
 
 function planShow(root) { const p = planPath(root); const has_ = exists(p); const content = has_ ? read(p) : ''; if (has('--json')) { const milestones = (content.match(/^### (M-\d{4,})\b.*$/gm) || []).map(l => l.replace(/^###\s*/, '').trim()); log(JSON.stringify({ exists: has_, milestones, raw: content }, null, 2)); return; } log(has_ ? content : 'plan.md not found'); }  // 1.9.428 (UR-0128): plan show --json 구조화
+// plan.md와 progress-tracker.md를 함께 다루는 모든 RMW의 공통 키. plan restore도 이 키를 써야
+// plan add/drop/remove과 같은 스냅샷을 본다 (1.36.152/T-0115).
+function _withPlanTransaction(root, fn) { return _withLock(progressPath(root), fn); }
 function planInit(root) { const goal = arg('--goal', ''); if (!exists(planPath(root))) return install(root); append(planPath(root), `\n## User Goal\n- ${goal || '사용자 목적을 작성하세요.'}\n`); ok('plan goal appended'); }
 // 1.9.119: plan list — plan.md 의 모든 milestone (M-XXXX) 조회 (CLI + --json + MCP)
 function planListCmd(root, opts = {}) {
@@ -13025,7 +13266,7 @@ function planAdd(root, text) {
   // 1.14.2 (Karpathy 원칙4 "성공기준 정의", UR-0032): --done-when 으로 검증가능 완료조건을 milestone 에 기록. 미지정 시 (미정) — plan show/audit 가 환기.
   const doneWhen = _lineSafe(arg('--done-when', '') || (_uiLang(root) === 'en' ? '(unset)' : '(미정)'));   // 1.36.63 (검수 #2)
   // 1.9.303 (UR-0043): M-id append + T-id upsert 를 하나의 락으로 — 동시 plan add ID 충돌 방지.
-  const { id, tid } = _withLock(progressPath(root), () => {
+  const { id, tid } = _withPlanTransaction(root, () => {
     const id = nextId(root, 'M');
     // 1.36.113 (방치 표면 사냥): `text` 만 raw 였다 — 같은 문장의 doneWhen 은 1.36.63 검수가 _lineSafe 를 걸었고
     //   바로 아래 planDrop 은 _cellSafe 를 쓰는데, 여기만 빠져 있었다(수정 클래스 스윕 누락의 전형).
@@ -13042,19 +13283,23 @@ function planAdd(root, text) {
   _autoRoadmap(absRoot(root), 'data-change');
 }
 function planDrop(root, text) {
-  const id = nextId(root, 'D');
   const reason = arg('--reason', _uiLang(root) === 'en' ? 'dropped by user request' : '사용자 요청으로 제외');   // 1.36.63 (검수 #2)
   // 1.10.4 (13th 버그헌트 P3, UR-0170): text/reason 의 파이프(|)·개행이 plan.md 마크다운 표 칼럼을 깨뜨림 → _cellSafe 셀 안전화(task/rule UR-0104 와 동일).
   const safeText = _cellSafe(text); const safeReason = _cellSafe(reason);
-  const planFile = planPath(root); let p = exists(planFile) ? read(planFile) : '';
-  const droppedHeader = '## Out of Scope / Dropped';
-  if (p.includes(droppedHeader)) {
-    p = p.replace(droppedHeader + '\n| ID | Item | Reason | Date |\n|---|---|---|---|\n',
-      droppedHeader + '\n| ID | Item | Reason | Date |\n|---|---|---|---|\n' + `| ${id} | ${safeText} | ${safeReason} | ${today()} |\n`);
-    writeUtf8(planFile, p);
-  } else {
-    append(planFile, `\n${droppedHeader}\n| ID | Item | Reason | Date |\n|---|---|---|---|\n| ${id} | ${safeText} | ${safeReason} | ${today()} |\n`);
-  }
+  let id;
+  // 1.36.152 (T-0115): plan restore/add와 같은 plan.md를 RMW한다. D-ID 생성과 저장까지 한 키에서 처리한다.
+  _withPlanTransaction(root, () => {
+    id = nextId(root, 'D');
+    const planFile = planPath(root); let p = exists(planFile) ? read(planFile) : '';
+    const droppedHeader = '## Out of Scope / Dropped';
+    if (p.includes(droppedHeader)) {
+      p = p.replace(droppedHeader + '\n| ID | Item | Reason | Date |\n|---|---|---|---|\n',
+        droppedHeader + '\n| ID | Item | Reason | Date |\n|---|---|---|---|\n' + `| ${id} | ${safeText} | ${safeReason} | ${today()} |\n`);
+      writeUtf8(planFile, p);
+    } else {
+      append(planFile, `\n${droppedHeader}\n| ID | Item | Reason | Date |\n|---|---|---|---|\n| ${id} | ${safeText} | ${safeReason} | ${today()} |\n`);
+    }
+  });
   // 1.9.449 (12th 외부평가 Sonnet P3, UR-0143): progress-tracker 에 dropped task(T-) 행 생성 제거 — plan drop 은 plan.md "Out of Scope / Dropped"(D-) 에만 기록.
   //   기존엔 scope 드랍이 phantom T- task 로도 생겨 plan↔progress 역할 혼선 + task list 노이즈. 드랍 기록의 단일 출처 = plan.md.
   ok(`plan dropped: ${id} → .harness/plan.md (Out of Scope / Dropped)`);
@@ -13083,39 +13328,47 @@ function planRemoveCmd(root, target) {
   if (!target) return fail('plan remove <M-XXXX|title-substring> 필요 — 매칭되는 milestone 블록을 제거하고 .harness/plan.archive.md에 보존');
   const pp = planPath(root);
   if (!exists(pp)) return fail('plan.md 없음');
-  const text = read(pp);
-  // milestone 블록은 "### M-XXXX. 제목" 으로 시작; "## " (Out of Scope 등) 헤더 또는 EOF 이전까지
-  // codex 버그헌트 P2: `### ` 만 경계로 쓰면 마지막 마일스톤 뒤의 사용자 h1/h2 섹션(예: `## Risks`)이
-  // 그 마일스톤 블록에 흡수돼 함께 삭제된다. 모든 헤딩(#{1,3} )을 경계로 잘라 각 섹션을 독립 블록화.
-  const blocks = text.split(/\n(?=#{1,3} )/);
   let removed = 0;
-  const kept = [];
-  for (const b of blocks) {
-    if (!b.startsWith('### ')) { kept.push(b); continue; }   // 마일스톤(### M-) 블록만 삭제 후보
-    const headerMatch = b.match(/^### (.+)$/m);
-    if (!headerMatch) { kept.push(b); continue; }
-    const titleLine = headerMatch[1].trim();
-    // M-XXXX. 제목 형태 파싱
-    const mMatch = titleLine.match(/^(M-\d+)\.\s*(.+)$/);
-    const mid = mMatch ? mMatch[1] : null;
-    const title = mMatch ? mMatch[2].trim() : titleLine;
-    // Template / 템플릿 블록 자동 보호
-    if (/^Template(?:\s|\b|\()/i.test(titleLine) || /^템플릿/.test(titleLine)) {
-      kept.push(b); continue;
+  let disappeared = false;
+  // 1.36.152 (T-0115): plan restore/add와 archive를 공유한다. 락 안에서 다시 읽어야 새 milestone을 덮지 않는다.
+  _withPlanTransaction(root, () => {
+    if (!exists(pp)) { disappeared = true; return; }
+    const text = read(pp);
+    // milestone 블록은 "### M-XXXX. 제목" 으로 시작; "## " (Out of Scope 등) 헤더 또는 EOF 이전까지
+    // codex 버그헌트 P2: `### ` 만 경계로 쓰면 마지막 마일스톤 뒤의 사용자 h1/h2 섹션(예: `## Risks`)이
+    // 그 마일스톤 블록에 흡수돼 함께 삭제된다. 모든 헤딩(#{1,3} )을 경계로 잘라 각 섹션을 독립 블록화.
+    const blocks = text.split(/\n(?=#{1,3} )/);
+    removed = 0;
+    const kept = [];
+    for (const b of blocks) {
+      if (!b.startsWith('### ')) { kept.push(b); continue; }   // 마일스톤(### M-) 블록만 삭제 후보
+      const headerMatch = b.match(/^### (.+)$/m);
+      if (!headerMatch) { kept.push(b); continue; }
+      const titleLine = headerMatch[1].trim();
+      // M-XXXX. 제목 형태 파싱
+      const mMatch = titleLine.match(/^(M-\d+)\.\s*(.+)$/);
+      const mid = mMatch ? mMatch[1] : null;
+      const title = mMatch ? mMatch[2].trim() : titleLine;
+      // Template / 템플릿 블록 자동 보호
+      if (/^Template(?:\s|\b|\()/i.test(titleLine) || /^템플릿/.test(titleLine)) {
+        kept.push(b); continue;
+      }
+      const isIdTarget = mid === target;
+      const isTitleTarget = title.includes(target);
+      if (isIdTarget || isTitleTarget) {
+        removed++;
+        const archivePath = path.join(root, '.harness/plan.archive.md');
+        const archiveHeader = exists(archivePath) ? '' : '# Plan archive\n\n';
+        append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${target}")\n${b}\n`);
+        continue;
+      }
+      kept.push(b);
     }
-    const isIdTarget = mid === target;
-    const isTitleTarget = title.includes(target);
-    if (isIdTarget || isTitleTarget) {
-      removed++;
-      const archivePath = path.join(root, '.harness/plan.archive.md');
-      const archiveHeader = exists(archivePath) ? '' : '# Plan archive\n\n';
-      append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${target}")\n${b}\n`);
-      continue;
-    }
-    kept.push(b);
-  }
+    if (removed === 0) return;
+    writeUtf8(pp, kept.join('\n'));
+  });
+  if (disappeared) return fail('plan.md 없음');
   if (removed === 0) return failJson(has('--json'), 'milestone_not_found', `매칭 milestone 없음: "${target}"`);   // codex P2: --json 에러 구조화
-  writeUtf8(pp, kept.join('\n'));
   ok(`milestone removed: ${removed}건 (보존: .harness/plan.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -13504,6 +13757,15 @@ function memoryRestoreCmd(root, surface, target) {
   if (!target) return fail('memory restore <surface> <target> — target 누락');
   const hd = path.join(root, '.harness');
   const archivePath = path.join(hd, `${surface}.archive.md`);
+  const activePath = surface === 'decisions' ? decisionsPath(root)
+                    : surface === 'lessons'   ? lessonsPath(root)
+                    : planPath(root);
+  // 1.36.152 (T-0115): restore는 active canonical store와 archive를 함께 RMW한다.
+  // decisions/lessons는 add/drop의 JSON 키, plan은 plan add/drop의 progress 키를 공유해야 한다.
+  const memoryLockPath = surface === 'decisions' ? decisionsJsonPath(root)
+                       : surface === 'lessons'   ? lessonsJsonPath(root)
+                       : progressPath(root);
+  const restoredCount = _withLock(memoryLockPath, () => {
   if (!exists(archivePath)) return fail(`${surface}.archive.md 없음 — 복원할 항목 없음`);
   // 1.36.76 (9차 헌트 #3 P1) → (검수 #2): 잘린/깨진 UTF-8 아카이브가 손상 데이터를 active 로 유입시키던 것.
   //   판정은 "디코딩 결과에 U+FFFD 포함"이 아니라 **원시 바이트의 UTF-8 유효성**(fatal decode) — 사용자가 정당하게
@@ -13536,10 +13798,6 @@ function memoryRestoreCmd(root, surface, target) {
     }
   }
   if (restoredBlocks.length === 0) return fail(`매칭 archive entry 없음: surface=${surface}, target="${target}"`);
-  // active 파일 경로
-  const activePath = surface === 'decisions' ? decisionsPath(root)
-                    : surface === 'lessons'   ? lessonsPath(root)
-                    : planPath(root);
   // 1.36.74 (9차 헌트 #4 P1): 같은 항목이 이미 active 에 있으면 복원이 조용히 중복 레코드를 만들었다
   //   (drop → 같은 제목 재생성 → restore = 동일 제목 2건, 어느 쪽이 진짜인지 불명). 충돌은 기본 거부하고
   //   --force 로만 진행 — 복원은 "되살리기"지 "복제"가 아니다. archive 는 손대지 않으므로 재시도 가능.
@@ -13590,7 +13848,10 @@ function memoryRestoreCmd(root, surface, target) {
   } else {
     writeUtf8(archivePath, archiveHeader + kept.join('\n'));
   }
-  ok(`${surface} restored: ${restoredBlocks.length}건 (archive에서 active로 복귀)`);
+  return restoredBlocks.length;
+  });
+  if (!restoredCount) return;
+  ok(`${surface} restored: ${restoredCount}건 (archive에서 active로 복귀)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
 
@@ -14375,9 +14636,14 @@ function lazyDetect(root, opts = {}) {
   let todoCount = 0;
   const newTodos = [];
   const cliSelf = path.resolve(__filename);
+  // This detector promises code TODOs. Reusing the broad text allow-list from
+  // encoding/secret scans also included prose docs, so a README explaining the
+  // word "TODO" became a blocking work item. Keep source/config files in scope,
+  // but do not reinterpret ordinary Markdown/text prose as code annotations.
+  const todoProseExt = new Set(['.md', '.txt']);
   for (const file of walk(root)) {
     const ext = path.extname(file).toLowerCase();
-    if (!SCAN_TEXT_EXT.has(ext)) continue;
+    if (!SCAN_TEXT_EXT.has(ext) || todoProseExt.has(ext)) continue;
     if (file.includes('.harness')) continue;
     if (path.resolve(file) === cliSelf) continue;
     if (/[\\/]bin[\\/]harness\.js$/.test(file)) continue;
@@ -14591,13 +14857,18 @@ function memorySearch(root, query) {
 
 function handoff(root) {
   root = absRoot(root);
+  const _versionSkew = _handoffVersionSkew(root);
   // 1.9.199: handoff 진입 시 1) 이전 timestamp 보존 → 2) 현재 timestamp 기록
   //   detector 가 prior gap 을 정확히 측정 (overwrite 전 값 필요). 함수 최상단에 선언.
   let _priorHandoffGap = { hasLast: false };
   try { _priorHandoffGap = _getLastHandoffGap(root); } catch {}
   // 1.36.22: 읽기전용/hook 호출이 last-handoff stamp 를 찍으면 detector 3종(핸드오프 넛지·abnormal shutdown·R-0001 interval)이
   //   "방금 handoff 했다"고 오판해 오염된다. --no-record / LEERNESS_HOOK=1 로 stamp 생략(기본 동작 불변).
-  if (!has('--no-record') && process.env.LEERNESS_HOOK !== '1') { try { _recordLastHandoff(root); } catch {} try { _sessionPresenceRecord(root, 'open'); } catch {} }   // 1.36.129 (P-0016 P1): 프레즌스는 **기존 게이트에 얹는다** — 새 쓰기 표면 0
+  if (!has('--no-record') && process.env.LEERNESS_HOOK !== '1') {
+    try { _recordHandoffFreshness(root); } catch {}
+    try { _sessionPresenceRecord(root, 'open'); } catch {}
+    if (has('--writeback')) { try { _recordLastHandoff(root); } catch {} }
+  }
   // 1.9.203: auto-resume-plan 자동 로드 (사용자 명시 — 자동 모드 알람 트리거)
   let _autoResumePlan = null;
   try { _autoResumePlan = _loadAutoResumePlan(root); } catch {}
@@ -14607,6 +14878,7 @@ function handoff(root) {
       date: today(),
       project: detectProjectName(root),
       version: VERSION,
+      versionSkew: _versionSkew,
       files: {}
     };
     // 1.36.95: 같은 명령의 두 표면이 **반대 방향**으로 잘랐다 — 평문은 최근 N줄, JSON 은 앞 8000자.
@@ -14848,6 +15120,7 @@ function handoff(root) {
     log(JSON.stringify(result, null, 2));
     return;
   }
+  _emitHandoffVersionSkew(_versionSkew);
   // 1.36.18 (UR-0052 P3-8): 단일 워크스페이스 --compact 단축. 종전엔 --compact 가 섹션 몇 개만 억제하고
   //   본문(session-handoff/progress/decisions…) 186줄을 전량 출력 → 문서상 "~500자 1줄 요약"인 --compact 가
   //   단일 경로에서 사실상 무효(멀티 워크스페이스 _handoffWorkspace 에만 compact 존재). MCP handoff·REPL preview·
@@ -15537,7 +15810,7 @@ function handoff(root) {
   }
   // 1.36.108 (T-0097): 날짜 스탬프도 read-modify-write 다 — 사용자가 쓴 본문 전체를 다시 쓴다.
   //   락 밖이면 그 사이 session close 가 갱신한 Now/Next/Blockers 를 낡은 사본으로 되돌린다.
-  if (exists(currentStatePath(root))) {
+  if (has('--writeback') && process.env.LEERNESS_HOOK !== '1' && exists(currentStatePath(root))) {
     _withLock(currentStatePath(root), () => {
       const cs = read(currentStatePath(root)).replace(/Updated: \d{4}-\d{2}-\d{2}/, `Updated: ${today()}`);
       writeUtf8(currentStatePath(root), cs);
@@ -16091,9 +16364,9 @@ function handoff(root) {
       const prev = _readEnvSnapshot(root);
       const curr = _detectEnvironment(root);
       const diff = _diffEnvSnapshots(prev, curr);
-      // 첫 캡처면 silent persist (signal 없음)
+      // 기본 handoff 는 관측만 한다. 추적 baseline 갱신은 명시적 --writeback 또는 `env detect` 의 책임이다.
       const snapPath = _envSnapshotPath(root);
-      if (!prev) {
+      if (!prev && has('--writeback') && process.env.LEERNESS_HOOK !== '1') {
         try { mkdirp(path.dirname(snapPath)); writeUtf8(snapPath, JSON.stringify(curr, null, 2) + '\n'); } catch {}
       } else if (diff.changes.length || (diff.missing && diff.missing.length)) {
         // 변동/누락 알림
@@ -16107,8 +16380,9 @@ function handoff(root) {
         }
         log(edDim(t(`  → 상세: leerness env detect . --json`, `  → details: leerness env detect . --json`)));
         log('');
-        // 갱신 (다음 비교 baseline)
-        try { writeUtf8(snapPath, JSON.stringify(curr, null, 2) + '\n'); } catch {}
+        if (has('--writeback') && process.env.LEERNESS_HOOK !== '1') {
+          try { writeUtf8(snapPath, JSON.stringify(curr, null, 2) + '\n'); } catch {}
+        }
       }
     } catch {}
   }
@@ -16486,17 +16760,17 @@ function handoffCmd(root) {
           }
           log('');
           // 1.9.38 (A): critical 시 .harness/agent-reminders.md 자동 생성 — 다음 세션 시작 시 메인 에이전트가 읽도록.
-          if (sevStale) {
+          if (sevStale && has('--writeback') && process.env.LEERNESS_HOOK !== '1') {
             try {
               const remPath = path.join(absR0, '.harness', 'agent-reminders.md');
               const body = `# 🔔 메인 에이전트용 자동 reminder\n\n_생성: ${new Date().toISOString()}_\n\n## drift critical 감지\n현재 워크스페이스의 메타파일이 매우 stale합니다. 이번 라운드 작업 끝에 반드시 다음 명령을 호출하세요:\n\n\`\`\`bash\nleerness session close .\n\`\`\`\n\n또는 상세 점검:\n\`\`\`bash\nleerness drift check .\n\`\`\`\n\nstale 신호:\n${shAge !== null ? `- session-handoff.md: ${shAge.toFixed(1)}일 stale\n` : ''}${ptAge !== null ? `- progress-tracker: ${ptAge.toFixed(1)}일 stale\n` : ''}\n\n_이 파일은 leerness 1.9.38+가 자동 갱신합니다. session close 후 자동 삭제.\n_사용자가 이 파일을 보고 메인 에이전트에 reminder 전달 가능._\n`;
               writeUtf8(remPath, _autoReminderText(body));   // 1.36.104: 표식 줄에 본문 해시 — 사람이 고치면 청소 대상에서 빠진다
             } catch {}
-          } else {
+          } else if (has('--writeback') && process.env.LEERNESS_HOOK !== '1') {
             // attention 등급으로 회복했으면 reminder 파일 삭제 (자동 생성분에 한해)
             _cleanAutoReminder(absR0);
           }
-        } else {
+        } else if (has('--writeback') && process.env.LEERNESS_HOOK !== '1') {
           // healthy → reminder 파일 자동 청소 (자동 생성분에 한해)
           _cleanAutoReminder(absR0);
         }
@@ -21087,11 +21361,39 @@ function releaseBump(root) {
   if (kind === 'major') next = isPre && min === 0 && pat === 0 ? `${maj}.0.0` : `${maj + 1}.0.0`;
   else if (kind === 'minor') next = isPre && pat === 0 ? `${maj}.${min}.0` : `${maj}.${min + 1}.0`;
   else next = isPre ? `${maj}.${min}.${pat}` : `${maj}.${min}.${pat + 1}`;
-  pkg.version = next;
-  writeUtf8(pkgFile, JSON.stringify(pkg, null, 2) + '\n');
   const hv = path.join(root, '.harness/HARNESS_VERSION');
-  if (exists(hv) && /^\d+\.\d+\.\d+/.test(read(hv).trim())) writeUtf8(hv, next + '\n');
-  ok(`version bumped: ${cur} → ${next} (${kind})`);
+  const updateHarnessVersion = exists(hv) && /^\d+\.\d+\.\d+/.test(read(hv).trim());
+  // 1.36.156 (외부 Codex P2): package/HARNESS_VERSION 을 먼저 쓴 뒤 bin/README 검증이 실패하면
+  //   출하 버전 표면이 반쯤 갱신됐다. 자체 패키지 표면을 모두 preflight 하고, 이후 쓰기는 snapshot
+  //   transaction 으로 묶어 어느 한 단계가 실패해도 명령 전 바이트로 되돌린다.
+  let ownPlan = null;
+  try { ownPlan = _prepareOwnReleaseVersionSurfaces(root, next); }
+  catch (e) {
+    failJson(has('--json'), 'release_preflight_failed', `버전 표면 사전검증 실패 — 변경 없음: ${String(e && e.message || e).slice(0, 160)}`);
+    return;
+  }
+  const targetFiles = [pkgFile];
+  if (updateHarnessVersion) targetFiles.push(hv);
+  if (ownPlan) targetFiles.push(ownPlan.sourcePath, ownPlan.readmePath);
+  let snapshots;
+  try { snapshots = targetFiles.map(_releaseFileSnapshot); }
+  catch (e) {
+    failJson(has('--json'), 'release_preflight_failed', `버전 표면 snapshot 실패 — 변경 없음: ${String(e && e.message || e).slice(0, 160)}`);
+    return;
+  }
+  const transaction = _runReleaseTransaction(snapshots, () => {
+    pkg.version = next;
+    writeUtf8(pkgFile, JSON.stringify(pkg, null, 2) + '\n');
+    if (updateHarnessVersion) writeUtf8(hv, next + '\n');
+    return syncOwnReleaseVersionSurfaces(root, next, ownPlan);
+  });
+  if (!transaction.ok) {
+    const rollback = transaction.rollbackErrors.length ? `rollback 일부 실패(${transaction.rollbackErrors.join(', ')})` : '모든 표면 원상복구';
+    failJson(has('--json'), 'release_bump_failed', `버전 갱신 실패 — ${rollback}: ${String(transaction.error && transaction.error.message || transaction.error).slice(0, 160)}`);
+    return;
+  }
+  const syncedOwnSurfaces = transaction.value;
+  ok(`version bumped: ${cur} → ${next} (${kind})${syncedOwnSurfaces ? ' · bin/README synced' : ''}`);
 }
 
 function releaseNote(root, text) {
@@ -23793,6 +24095,9 @@ function envDiff(root) {
 function envCheckCmd(root) {
   const d = envDiff(root);
   const isJson = has('--json');
+  // JSON 출력도 사람용 출력과 같은 판정 계약을 가진다. 이 값을 early return 뒤에 두면
+  // 누락 키를 정확히 보고하면서 exit 0을 내는 false-success가 된다(T-0132).
+  if (d.inEnvOnly.length) process.exitCode = 1;
   if (isJson) { log(JSON.stringify(d, null, 2)); return; }
   log(`# leerness env check (1.9.71)`);
   log(`.env 존재: ${exists(d.envPath)} · .env.example 존재: ${exists(d.examplePath)}`);
@@ -23814,8 +24119,6 @@ function envCheckCmd(root) {
     log('');
     log(`💡 자동 동기화: leerness env sync${d.inEnvOnly.length ? ' (.env.example에 누락 키 추가 — 값은 빈 문자열)' : ''}`);
   }
-  // 1.9.71: exit code = .env.example 누락 키 있으면 1 (보안 가시화)
-  if (d.inEnvOnly.length) process.exitCode = 1;
 }
 function envSyncCmd(root) {
   const d = envDiff(root);
@@ -24457,14 +24760,18 @@ const _ENV_SAFE_KEYS = new Set([
 function _scrubEnv(extraEnv) {
   const out = {};
   for (const k of Object.keys(process.env || {})) {
-    if (_ENV_SAFE_KEYS.has(k) || k.startsWith('LEERNESS_') || k.startsWith('NPM_CONFIG_')) {
-      out[k] = process.env[k];
+    // Windows environment keys are case-insensitive, but enumeration commonly exposes
+    // `Path`/`ComSpec` while this allow-list is canonical uppercase. Raw comparison
+    // silently removed PATH from child processes and broke shell-backed verification.
+    const safeKey = process.platform === 'win32' ? k.toUpperCase() : k;
+    if (_ENV_SAFE_KEYS.has(safeKey) || safeKey.startsWith('LEERNESS_') || safeKey.startsWith('NPM_CONFIG_')) {
+      out[safeKey] = process.env[k];
     }
   }
   if (extraEnv && typeof extraEnv === 'object') {
     for (const k of Object.keys(extraEnv)) {
       // Allow caller overrides — explicit opt-in
-      if (extraEnv[k] !== undefined) out[k] = String(extraEnv[k]);
+      if (extraEnv[k] !== undefined) out[process.platform === 'win32' ? k.toUpperCase() : k] = String(extraEnv[k]);
     }
   }
   return out;
@@ -24963,6 +25270,10 @@ function _leernessStateDir(root) { return path.join(absRoot(root), '.leerness');
 //   `../../evil` 같은 경로형이 소유 맵에 들어가 `state handoff` 가 `.leerness` **밖**에 썼다.
 //   run id 는 우리가 만드는 것이고 모양이 정해져 있다 — 그 모양만 받는다.
 const _RUN_ID_RE = /^run-\d{1,12}$/;
+function _isRunId(id) { return typeof id === 'string' && _RUN_ID_RE.test(id); }
+function _runStoreError(message, file) {
+  return Object.assign(new Error(message), { code: 'E_STORE_CORRUPT', file });
+}
 function _loadLeernessState(root) {
   const f = path.join(_leernessStateDir(root), 'state.json');
   if (!exists(f)) return { schemaVersion: 1, project: detectProjectName(root), currentRunId: null, runCounter: 0, updatedAt: null };
@@ -24974,13 +25285,16 @@ function _loadLeernessState(root) {
   //   단, runs 디렉토리가 비어 있으면(진짜 신규/빈 상태) 관대하게 기본값 — 없는 데이터를 지킬 필요는 없다.
   const _shapeOk = _st && typeof _st === 'object' && !Array.isArray(_st)
     && Number.isInteger(_st.runCounter) && _st.runCounter >= 0
-    && (_st.currentRunId === null || typeof _st.currentRunId === 'string')
+    // 1.36.149 (T-0116 follow-up): 1.36.148 은 세션 소유 맵만 검증했다.
+    //   그런데 legacy/current 전역 슬롯과 run 파일 내부의 run_id 도 같은 파일 경로 병목으로 흐른다.
+    //   여기서 fail-closed 하지 않으면 `currentRunId=../../...` 가 handoff/record 의 쓰기 경로가 된다.
+    && (_st.currentRunId === null || _isRunId(_st.currentRunId))
     // 1.36.144 (재검수 P2): `runsBySession` 이 형태 검증에서 빠져 배열·문자열·null 이 와도 통과했고,
     //   그 경우 소유권이 통째로 '없음' 이 되어 **다른 세션의 run 을 인수**하는 fail-open 이 됐다.
     //   모양이 아니면 손상으로 다룬다(없는 것은 정상 — 업그레이드 전 상태).
     && (_st.runsBySession === undefined
       || (_st.runsBySession && typeof _st.runsBySession === 'object' && !Array.isArray(_st.runsBySession)
-        && Object.values(_st.runsBySession).every((v) => _RUN_ID_RE.test(String(v)))));
+        && Object.values(_st.runsBySession).every(_isRunId)));
   // 디스크의 최대 run 번호 — 카운터의 진실성 대조 기준
   let _maxRun = 0;
   try {
@@ -25005,9 +25319,34 @@ function _saveLeernessState(root, state) {
   state.updatedAt = new Date().toISOString();
   writeUtf8(path.join(dir, 'state.json'), JSON.stringify(state, null, 2) + '\n');
 }
-function _runFile(root, id) { return path.join(_leernessStateDir(root), 'runs', `${id}.json`); }
-function _loadRun(root, id) { const f = _runFile(root, id); if (!exists(f)) return null; try { return JSON.parse(read(f)); } catch { return null; } }
-function _saveRun(root, rec) { const f = _runFile(root, rec.run_id); mkdirp(path.dirname(f)); writeUtf8(f, JSON.stringify(rec, null, 2) + '\n'); }
+// 1.36.149 (T-0116 follow-up): state.json 만 검사하면 충분하지 않다. `currentRunId` 와
+// run record 의 `run_id` 모두 아래 파일 경로로 들어간다. 이 병목에서 다시 확인해
+// 미래 호출부도 .leerness/runs 밖에 읽거나 쓰지 못하게 한다.
+function _runFile(root, id) {
+  if (!_isRunId(id)) {
+    throw _runStoreError('.leerness run id 스키마 무효 — 읽기/쓰기 거부 (run-<숫자> 형식만 허용)', path.join(_leernessStateDir(root), 'runs'));
+  }
+  return path.join(_leernessStateDir(root), 'runs', `${id}.json`);
+}
+function _loadRun(root, id) {
+  const f = _runFile(root, id);
+  if (!exists(f)) return null;
+  let rec;
+  try { rec = JSON.parse(read(f)); }
+  catch { throw _runStoreError(`.leerness run record 손상 — 읽기/쓰기 거부: ${f}`, f); }
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec) || !_isRunId(rec.run_id) || rec.run_id !== id) {
+    throw _runStoreError(`.leerness run record 스키마 무효 — 읽기/쓰기 거부: ${f}`, f);
+  }
+  return rec;
+}
+function _saveRun(root, rec) {
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) {
+    throw _runStoreError('.leerness run record 스키마 무효 — 쓰기 거부', path.join(_leernessStateDir(root), 'runs'));
+  }
+  const f = _runFile(root, rec.run_id);
+  mkdirp(path.dirname(f));
+  writeUtf8(f, JSON.stringify(rec, null, 2) + '\n');
+}
 // 1.9.303 (UR-0043): run 레코드 read-modify-write 를 락으로 직렬화 — 동시 state record/verify/handoff lost-update 방지.
 function _updateRun(root, id, mutator) {
   return _withLock(_runFile(root, id), () => {
@@ -25482,6 +25821,62 @@ function _mergeMcpJson(root, rel) {
   writeUtf8(f, JSON.stringify(obj, null, 2) + '\n');
   return { file: _rel, action: already ? 'updated' : 'created' };
 }
+
+function _cursorHookPath(root, relativePath) {
+  return path.join(absRoot(root), ...String(relativePath).split('/'));
+}
+function _readCursorHooksConfig(root) {
+  const file = _cursorHookPath(root, _cursorHook.CURSOR_HOOK_CONFIG);
+  if (!exists(file)) return {};
+  let config;
+  try { config = JSON.parse(read(file)); }
+  catch { throw Object.assign(new Error(`Cursor hooks.json 이 손상돼 병합을 중단합니다 — 복구 후 재시도: ${file}`), { code: 'E_STORE_CORRUPT', file }); }
+  try { return _cursorHook.validateCursorHooksConfig(config); }
+  catch (error) { throw Object.assign(new Error(`${error.message} — 병합 중단: ${file}`), { code: 'E_STORE_CORRUPT', file }); }
+}
+function _assertCursorHookTargets(root) {
+  _readCursorHooksConfig(root);
+  const script = _cursorHookPath(root, _cursorHook.CURSOR_HOOK_SCRIPT);
+  if (exists(script)) {
+    const current = read(script);
+    if (current !== _cursorHook.cursorSessionHookScript() && !_cursorHook.isManagedCursorHookScript(current)) {
+      throw Object.assign(new Error(`Cursor hook script 경로에 사용자 파일이 있어 덮어쓰지 않습니다: ${script}`), { code: 'E_STORE_CONFLICT', file: script });
+    }
+  }
+}
+function _mergeCursorSessionHooks(root) {
+  const scriptRel = _cursorHook.CURSOR_HOOK_SCRIPT;
+  const scriptPath = _cursorHookPath(root, scriptRel);
+  let scriptResult;
+  _withLock(scriptPath, () => {
+    const next = _cursorHook.cursorSessionHookScript();
+    const had = exists(scriptPath);
+    const current = had ? read(scriptPath) : '';
+    if (had && current !== next && !_cursorHook.isManagedCursorHookScript(current)) {
+      throw Object.assign(new Error(`Cursor hook script 경로에 사용자 파일이 있어 덮어쓰지 않습니다: ${scriptPath}`), { code: 'E_STORE_CONFLICT', file: scriptPath });
+    }
+    if (current === next) { scriptResult = { file: scriptRel, action: 'preserved' }; return; }
+    mkdirp(path.dirname(scriptPath));
+    writeUtf8(scriptPath, next);
+    scriptResult = { file: scriptRel, action: had ? 'updated' : 'created' };
+  });
+
+  const configRel = _cursorHook.CURSOR_HOOK_CONFIG;
+  const configPath = _cursorHookPath(root, configRel);
+  let configResult;
+  _withLock(configPath, () => {
+    const had = exists(configPath);
+    const currentText = had ? read(configPath) : '';
+    const current = _readCursorHooksConfig(root);
+    const merged = _cursorHook.mergeCursorHooksConfig(current).config;
+    const nextText = JSON.stringify(merged, null, 2) + '\n';
+    if (currentText === nextText) { configResult = { file: configRel, action: 'preserved' }; return; }
+    mkdirp(path.dirname(configPath));
+    writeUtf8(configPath, nextText);
+    configResult = { file: configRel, action: had ? 'updated' : 'created' };
+  });
+  return [configResult, scriptResult];
+}
 // 1.11.4 (UR-0007): 의존성 용어집 — package.json/requirements deps → 큐레이션 카탈로그 plain-ko/en. 미카탈로그는 node_modules 로컬 description fallback, 미정의는 AI 보완 프롬프트. 무LLM·0deps.
 function glossaryCmd(root, sub) {
   root = absRoot(root || process.cwd());
@@ -25537,7 +25932,7 @@ function adapterCmd(root, tool, opts = {}) {
   const json = has('--json');
   const dry = has('--dry-run') || opts.dryRun;
   if (!tool || tool === 'list') {
-    if (json) { log(JSON.stringify({ adapters: Object.fromEntries(Object.entries(ADAPTERS).map(([k, v]) => [k, { label: v.label, files: v.keys, mcp: v.mcp }])) }, null, 2)); return; }
+    if (json) { log(JSON.stringify({ adapters: Object.fromEntries(Object.entries(ADAPTERS).map(([k, v]) => [k, { label: v.label, files: [...v.keys, ...(v.hookFiles || [])], mcp: v.mcp }])) }, null, 2)); return; }
     log(`# leerness adapter (1.9.280, UR-0033) — 도구별 선택 설치`);
     log(`  init 전체 대신 특정 도구의 지침/연결 파일만 생성합니다. (권장: leerness init . --minimal 후 adapter)`);
     log('');
@@ -25545,7 +25940,7 @@ function adapterCmd(root, tool, opts = {}) {
       // 1.36.128 (실측): `[+.mcp.json]` 은 **그 도구가 그 파일을 읽는다**는 주장이다. 실제로 두 종(codex·goose)은
       //   읽지 않았다(codex: `mcp get` 이 not found · goose: 실효 설정에 미등장). 안 읽는 도구엔 파일 대신 **되는 명령**을 준다.
       log(`  ${id.padEnd(9)} ${a.label}${a.mcp ? `  [+${(a.mcpFiles || ['.mcp.json']).join(' +')}]` : ''}`);
-      log(`     ${a.keys.join(', ')}`);
+      log(`     ${[...a.keys, ...(a.hookFiles || [])].join(', ')}`);
       if (!a.mcp && a.mcpSetup) log(`     MCP: ${a.mcpWhy}
            → ${a.mcpSetup}`);
     }
@@ -25617,6 +26012,7 @@ function adapterCmd(root, tool, opts = {}) {
   const files = coreFiles(root, lang === 'en' ? 'en' : 'ko', [], { mode: _instMode || undefined });
   const managedOverwrite = new Set(['AGENTS.md', 'CLAUDE.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md']);
   const planned = a.keys.filter(k => files[k] != null);
+  planned.push(...(a.hookFiles || []));
   // 1.36.128 (검수 P1, 실측 재현): dry-run 계획이 `.mcp.json` 만 하드코딩해, cursor 는 실제 실행이
   //   **계획에 없던 `.cursor/mcp.json`(사용자 설정)** 까지 병합했다 — dry-run 이 보여주지 않은 파일을 건드리면
   //   그건 조용한 변경이다. 카탈로그의 `mcpFiles` 를 계획 생성에 그대로 태운다(단일 출처).
@@ -25630,11 +26026,16 @@ function adapterCmd(root, tool, opts = {}) {
   }
   // 1.36.41 (codex 5차 #1b): mcp 병합이 실패할 파일이면 지침 파일도 쓰기 전에 중단 — 부분 적용 방지(선검증).
   if (a.mcp) _assertStoreParsable(path.join(root, '.mcp.json'), '.mcp.json');
+  if (tool === 'cursor') {
+    _assertStoreParsable(path.join(root, '.cursor', 'mcp.json'), '.cursor/mcp.json');
+    _assertCursorHookTargets(root);
+  }
   const results = [];
   for (const k of a.keys) {
     if (files[k] == null) continue;
     results.push(writeIfSafe(root, k, files[k], { mergeManaged: managedOverwrite.has(k), lang: lang === 'en' ? 'en' : 'ko' }));   // 1.36.60 (검수 2차 #2): 래퍼 언어 전달 (altTemplate 은 전환-감지 없는 이 경로에선 미적용 — High 회귀 방지)
   }
+  if (tool === 'cursor') results.push(..._mergeCursorSessionHooks(root));
   // 1.36.119 (검수): 아래 안내 문구의 판정 대상을 **MCP 병합 결과로 한정**한다. 전에는 `results` 전체를 훑었고,
   //   지금 맞는 이유는 `writeIfSafe` 가 'merged'/'preserved' 만 돌려주기 때문이다 — 그 이름이 바뀌면
   //   지침 파일을 썼다는 이유로 "MCP 호출 가능" 이라고 말하게 된다(우연한 정합은 계약이 아니다).
@@ -25643,7 +26044,7 @@ function adapterCmd(root, tool, opts = {}) {
   // 1.36.116 (검수 P1-D): Cursor 의 프로젝트별 MCP 설정은 `.cursor/mcp.json` 이다. 루트 `.mcp.json` 만 만들어 놓고
   //   "Cursor 도 인식한다" 고 말하던 것은 거짓 안내였다 — 이 어댑터의 목적 자체가 그 도구를 배선하는 것이다.
   //   루트 파일도 그대로 둔다(다른 도구가 쓴다). 같은 병합기라 손상 파일은 여전히 보존/중단된다.
-  if (tool === 'cursor') { _assertStoreParsable(path.join(root, '.cursor', 'mcp.json'), '.cursor/mcp.json'); const _m2 = _mergeMcpJson(root, '.cursor/mcp.json'); results.push(_m2); mcpResults.push(_m2); }
+  if (tool === 'cursor') { const _m2 = _mergeMcpJson(root, '.cursor/mcp.json'); results.push(_m2); mcpResults.push(_m2); }
   if (json) { log(JSON.stringify({ adapter: tool, files: results }, null, 2)); return; }
   ok(`adapter ${tool} (${a.label}) 적용 — ${results.length}개 파일`);
   for (const r of results) log(`  ${r.action}: ${r.file}`);
@@ -25660,6 +26061,10 @@ function adapterCmd(root, tool, opts = {}) {
   //   주장은 **파일 단위**로 한다 — 우리가 쓴 파일만 이름을 대고 말한다.
   _wrote.forEach(r => log(`  ℹ ${r.file} 에 MCP 등록 — 이 파일을 읽는 도구는 leerness MCP verb(state_show/start/record/verify/handoff)를 직접 호출 가능`));
   _kept.forEach(r => log(`  ℹ ${r.file} 의 기존 leerness 항목을 그대로 두었습니다 — 그 항목이 leerness MCP 를 띄우는지는 확인하지 않았습니다`));
+  if (tool === 'cursor') {
+    log(`  ℹ Cursor IDE sessionStart hook 이 대화별 LEERNESS_SESSION_ID 를 자동 설정합니다`);
+    log(`  ℹ Cursor Cloud 는 sessionStart hook 을 실행하지 않으므로 그 환경에서는 LEERNESS_SESSION_ID 를 명시하세요`);
+  }
   // 1.36.128 (실측): 이 도구가 프로젝트 MCP 파일을 **안 읽는** 경우, 파일을 안 쓰는 것으로 끝내면
   //   사용자는 "그럼 어떻게 등록하나" 를 모른 채 남는다. 못 하는 이유와 **되는 명령**을 함께 준다.
   if (!a.mcp && a.mcpSetup) {
@@ -26725,6 +27130,18 @@ function _writeCredentials(root, data) {
     }
   } catch {}
 }
+// 1.36.152 (T-0115): register/refresh 는 같은 JSON을 read→mutate→write 하는 짝이다.
+// 저장만 잠그면 읽은 사본이 이미 낡아 독립 서비스 등록도 사라진다. 읽기부터 저장까지 한 키로 묶는다.
+function _updateCredentials(root, mutate) {
+  return _withLock(_credentialsPath(root), () => {
+    const j = _readCredentials(root);
+    j.services = j.services || {};
+    const result = mutate(j);
+    if (result === false) return null;  // 변경할 항목이 없으면 mtime도 건드리지 않는다.
+    _writeCredentials(root, j);
+    return result;
+  });
+}
 function credsListCmd(root) {
   root = absRoot(root || process.cwd());
   const j = _readCredentials(root);
@@ -26752,16 +27169,17 @@ function credsRegisterCmd(root, service) {
   const envVars = envVarArg.split(',').map(s => s.trim()).filter(Boolean);
   const deployCmd = arg('--deploy', null);
   const lifetime = parseInt(arg('--token-lifetime-hours', '0'), 10) || null;
-  const j = _readCredentials(root);
-  j.services = j.services || {};
-  j.services[service] = {
-    envVars,
-    deployCommand: deployCmd || j.services[service]?.deployCommand || null,
-    tokenLifetimeHours: lifetime || j.services[service]?.tokenLifetimeHours || null,
-    lastRefreshed: j.services[service]?.lastRefreshed || null,
-    registeredAt: j.services[service]?.registeredAt || new Date().toISOString()
-  };
-  _writeCredentials(root, j);
+  _updateCredentials(root, j => {
+    const previous = j.services[service] || {};
+    j.services[service] = {
+      envVars,
+      deployCommand: deployCmd || previous.deployCommand || null,
+      tokenLifetimeHours: lifetime || previous.tokenLifetimeHours || null,
+      lastRefreshed: previous.lastRefreshed || null,
+      registeredAt: previous.registeredAt || new Date().toISOString()
+    };
+    return true;
+  });
   ok(`creds registered: ${service} · env=${envVars.join(',')}${deployCmd ? ` · deploy="${deployCmd}"` : ''}`);
   // 환경변수 즉시 확인
   const missing = envVars.filter(v => !process.env[v]);
@@ -26802,11 +27220,15 @@ function credsCheckCmd(root, service) {
 function credsRefreshTimestampCmd(root, service) {
   root = absRoot(root || process.cwd());
   if (!service) return fail('service 이름 필요');
-  const j = _readCredentials(root);
-  if (!j.services[service]) { _assertStoreParsable(_credentialsPath(root), 'credentials'); return fail(`등록된 서비스 없음: ${service} — leerness creds register 먼저`); }   // 1.36.114: 손상과 미등록을 가른다
-  j.services[service].lastRefreshed = new Date().toISOString();
-  _writeCredentials(root, j);
-  ok(`creds refreshed: ${service} · lastRefreshed=${j.services[service].lastRefreshed}`);
+  let refreshedAt = null;
+  const updated = _updateCredentials(root, j => {
+    if (!j.services[service]) return false;
+    refreshedAt = new Date().toISOString();
+    j.services[service].lastRefreshed = refreshedAt;
+    return true;
+  });
+  if (!updated) { _assertStoreParsable(_credentialsPath(root), 'credentials'); return fail(`등록된 서비스 없음: ${service} — leerness creds register 먼저`); }   // 1.36.114: 손상과 미등록을 가른다
+  ok(`creds refreshed: ${service} · lastRefreshed=${refreshedAt}`);
 }
 
 // ---- (2) Incident Handler ----
@@ -27844,7 +28266,7 @@ SECURITY & HYGIENE
   shell-guard "<command>" [--json]                Shell-compatibility linter (PowerShell 5.1 etc.)
 
 HANDOFF & SESSION
-  handoff [path] [--compact] [--all-apps] [--json]  Session-start context in one call
+  handoff [path] [--compact] [--all-apps] [--json] [--writeback]  Session context; tracked writeback is explicit
   session close [path]            Closing report + auto handoff
   context [path] [--json]         Agent onboarding context
   retro | insights [path] [--json] [--limit N|--all]   Retrospective / cumulative stats (JSON rows: newest 30 by default; rowsTotal = lifetime count, not the --days window)
@@ -28438,7 +28860,7 @@ async function main() {
   //   같은 진입점의 나머지 쓰기(tech-profile 갱신 · 그래프 재생성)에도 적용한다. `context budget` 이 측정을 위해
   //   handoff 를 자식으로 부르는데, 그것만으로 last-handoff.json 과 tech-profile.json 이 바뀌었다(자체 적대 검사로 발견).
   //   측정이 관측 대상을 바꾸면 안 된다.
-  if (cmd === 'handoff')      { const _hp = arg('--path', args[1] || process.cwd()); const _hr = handoffCmd(_hp); if (process.env.LEERNESS_HOOK !== '1') { try { _tech.refreshTechProfile(_hp); } catch {} _maybeAutoGraph(_hp); } return _hr; }   // 1.36.53: 기술 프로필 자동 갱신(마이그레이션 이력) — 그래프 생성 전에
+  if (cmd === 'handoff')      { const _hp = arg('--path', args[1] || process.cwd()); const _hr = handoffCmd(_hp); if (has('--writeback') && process.env.LEERNESS_HOOK !== '1') { try { _tech.refreshTechProfile(_hp); } catch {} _maybeAutoGraph(_hp); } return _hr; }   // T-0136: 기본은 추적 파일 쓰기 0. 명시적 --writeback 만 기존 프로필/그래프 투영을 갱신한다.
   if (cmd === 'reuse-map')    return reuseMapCmd(arg('--path', args[1] || process.cwd()));
   if (cmd === 'verify-claim') { const _p = arg('--path', process.cwd()); if (args[1] === '--all' || has('--all')) return verifyClaimAllCmd(_p); return verifyClaimCmd(_p, args[1]); }  // 1.33.2: --all → 모든 done 주장 일괄 검증
   if (cmd === 'orchestrate')  return await orchestrateCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')));
@@ -28524,7 +28946,29 @@ async function main() {
   if (cmd === 'creds' && args[1] === 'refresh')   return _guardStore(has('--json'), () => credsRefreshTimestampCmd(arg('--path', process.cwd()), args[2]));
   if (cmd === 'deploy' && args[1] === 'auto')     return deployAutoCmd(arg('--path', process.cwd()), args[2]);
   // 1.9.149: observability lite + runs list/show
-  if (cmd === 'sessions')                        return sessionsCmd(absRoot(_resolveRoot(args[1])));   // 1.36.129 (P-0016 P1)
+  if (cmd === 'sessions') {                       // 1.36.129 (P-0016 P1) · T-0129: 미구현 verb 성공오판 차단
+    const positional = args[1] && !args[1].startsWith('-') ? args[1] : null;
+    if (positional) {
+      const candidate = absRoot(positional);
+      const isDirectory = exists(candidate) && fs.statSync(candidate).isDirectory();
+      const looksPath = /^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(positional);
+      if (!isDirectory && !looksPath) {
+        const en = _uiLang(process.cwd()) === 'en';
+        failJson(has('--json'), 'unknown_subcommand', en
+          ? `unknown sessions subcommand: ${positional} — this command only lists records; for a path use an explicit form like ./${positional}`
+          : `알 수 없는 sessions 하위명령: ${positional} — 이 명령은 기록 조회만 지원합니다. 경로라면 ./${positional} 처럼 명시하세요`);
+        return;
+      }
+      if (!isDirectory) {
+        const en = _uiLang(process.cwd()) === 'en';
+        failJson(has('--json'), 'path_not_found', en
+          ? `path not found or not a directory: ${candidate}`
+          : `경로 없음 또는 디렉토리 아님: ${candidate}`);
+        return;
+      }
+    }
+    return sessionsCmd(absRoot(_resolveRoot(positional)));
+  }
   if (cmd === 'runs' && args[1] === 'list')       return runsListCmd(absRoot(_resolveRoot(args[2])));  // 1.9.412 (UR-0100): positional path 지원
   if (cmd === 'runs' && args[1] === 'show')       return runsShowCmd(arg('--path', process.cwd()), args[2]);
   // 1.9.85: leerness health — 종합 헬스 체크
@@ -29102,6 +29546,7 @@ module.exports = {
   _isContractContentText, _isRecoveryContentText, _isObsContentText,   // 1.36.97 (P-0011)
   _anyLensContentInFiles, _withLensDomain, _lensDomainsWithContent, _axisHintForFiles, _lensDomainList,
   _capLensDomains, _scanLensSignals,
-  _handoffNudgeState, _getLastHandoffGap, _recordLastHandoff,
+  _handoffNudgeState, _getLastHandoffGap, _recordLastHandoff, _recordHandoffFreshness,
+  _releaseFileSnapshot, _runReleaseTransaction,
   _detectOptimism, _scanCodeForPatterns
 };

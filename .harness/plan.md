@@ -36,12 +36,12 @@ doNotStore:
 ## Milestones
 
 ### M-0001. 프로젝트 계획 정리
-Status: planned
-Progress: 0%
+Status: completed
+Progress: 100%
 
 Tasks:
-- [ ] project-brief.md를 실제 프로젝트 목적에 맞게 작성
-- [ ] context-map.md를 실제 파일 구조에 맞게 작성
+- [x] project-brief.md를 실제 프로젝트 목적에 맞게 작성
+- [x] context-map.md를 실제 파일 구조에 맞게 작성
 
 ### M-0002. Adversarial review of v1.36.18 P2-6 masking, P3-8 compact handoff, P1-2 10k ID parsing: source audit plus scratch reproduction
 Status: planned
@@ -82,3 +82,11 @@ Done-When: Valid-JavaScript false-blank, missed-comment, caller-integration, and
 
 Tasks:
 - [x] Final line-leading-only _maskComments adversarial review
+
+### M-0008. T-0122: release bump --patch 플래그와 버전 표면 동기화 회귀 보강
+Status: completed
+Progress: 100%
+Done-When: --patch를 경고 없이 수용하고 leerness 자체 package/bin/README 버전을 동기화하며, 일반 npm 패키지의 package.json-only 계약을 유지한다.
+
+Tasks:
+- [x] T-0122: release bump --patch 플래그와 버전 표면 동기화 회귀 보강

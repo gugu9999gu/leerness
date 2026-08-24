@@ -1688,7 +1688,7 @@ total++;
     fs.writeFileSync(shPath, body, 'utf8');
   }
   // handoff 호출 → reminder 자동 생성
-  cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC, '--compact'], { encoding: 'utf8', timeout: 10000 });
+  cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC, '--compact', '--writeback'], { encoding: 'utf8', timeout: 10000 });
   const remPath = path.join(tmpC, '.harness', 'agent-reminders.md');
   const ok = fs.existsSync(remPath) && /drift critical/.test(fs.readFileSync(remPath, 'utf8'));
   console.log(ok ? '✓ B(1.9.38) drift critical → agent-reminders.md 자동 생성' : `✗ reminder 파일 실패`);
@@ -2473,6 +2473,17 @@ total++;
   if (!(okPatch && okMinor && okMajor)) failed++;
 }
 
+// T-0122: --patch는 경고 없이 수용하고, leerness 패키지의 package/bin/README 버전 표면을 함께 갱신한다.
+total++;
+{
+  const probe = cp.spawnSync(process.execPath, [path.join(__dirname, 'release-bump-probe.js')], {
+    cwd: path.resolve(__dirname, '..'), encoding: 'utf8', timeout: 30000
+  });
+  const ok = probe.status === 0 && /release-bump probe passed/.test(probe.stdout || '') && !/unknown flag|알 수 없는 플래그/i.test(probe.stderr || '');
+  console.log(ok ? '✓ B(T-0122) release bump: --patch + package/bin/README 동기화' : `✗ B(T-0122) release bump 동기화 실패 (exit=${probe.status})`);
+  if (!ok) { failed++; process.stdout.write(probe.stdout || ''); process.stderr.write(probe.stderr || ''); }
+}
+
 // 1.9.8: release note → CHANGELOG.md 자동 갱신
 total++;
 {
@@ -2953,7 +2964,10 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', aDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000 });
   // adapter cursor: .cursor + .mcp.json 생성, .claude 미생성(minimal이라 commands는 있으나 cursor adapter는 안 건드림)
   const rCur = cp.spawnSync(process.execPath, [CLI, 'adapter', 'cursor', aDir], { encoding: 'utf8', timeout: 15000 });
-  const cursorOk = rCur.status === 0 && fs.existsSync(path.join(aDir, '.cursor', 'rules', 'leerness.mdc'));
+  const cursorOk = rCur.status === 0
+    && fs.existsSync(path.join(aDir, '.cursor', 'rules', 'leerness.mdc'))
+    && fs.existsSync(path.join(aDir, '.cursor', 'hooks.json'))
+    && fs.existsSync(path.join(aDir, '.cursor', 'hooks', 'leerness-session.cjs'));
   let mcpOk = false;
   try { const m = JSON.parse(fs.readFileSync(path.join(aDir, '.mcp.json'), 'utf8')); mcpOk = m.mcpServers && m.mcpServers.leerness && m.mcpServers.leerness.args.join(' ') === '-y leerness mcp serve'; } catch {}
   // adapter list --json: 9종
@@ -2965,7 +2979,7 @@ total++;
   const rDry = cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--dry-run', '--path', dDir], { encoding: 'utf8', timeout: 15000 });
   const dryOk = /\[dry-run\]/.test(rDry.stdout) && fs.readdirSync(dDir).length === 0;
   const ok = cursorOk && mcpOk && listOk && dryOk;
-  console.log(ok ? '✓ B(1.9.280) adapter: cursor(.cursor+.mcp.json)/list 9종/dry-run(0파일)' : `✗ adapter 실패 (cursor=${cursorOk} mcp=${mcpOk} list=${listOk} dry=${dryOk})`);
+  console.log(ok ? '✓ B(1.9.280) adapter: cursor(.cursor rules+MCP+session hook)/list 9종/dry-run(0파일)' : `✗ adapter 실패 (cursor=${cursorOk} mcp=${mcpOk} list=${listOk} dry=${dryOk})`);
   if (!ok) { failed++; console.log((rCur.stdout || '').slice(0, 200)); }
 }
 
@@ -7224,11 +7238,11 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', de, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     const snap = path.join(de, '.harness', 'environment.json');
     const forceEnvChange = () => { try { const s = JSON.parse(fs.readFileSync(snap, 'utf8')); if (s.node) s.node.version = 'v0.0.0-test'; fs.writeFileSync(snap, JSON.stringify(s, null, 2) + '\n'); } catch {} };
-    cp.spawnSync(process.execPath, [CLI, 'handoff', de], { encoding: 'utf8', timeout: 25000 }); // 첫 캡처(silent)
+    cp.spawnSync(process.execPath, [CLI, 'handoff', de, '--writeback'], { encoding: 'utf8', timeout: 25000 }); // 첫 legacy projection 캡처(silent)
     forceEnvChange();
-    const edEn = out(cp.spawnSync(process.execPath, [CLI, 'handoff', de, '--language', 'en'], { encoding: 'utf8', timeout: 25000 }));
+    const edEn = out(cp.spawnSync(process.execPath, [CLI, 'handoff', de, '--language', 'en', '--writeback'], { encoding: 'utf8', timeout: 25000 }));
     forceEnvChange(); // en 실행이 스냅샷 갱신 → ko 위해 재변경
-    const edKo = out(cp.spawnSync(process.execPath, [CLI, 'handoff', de], { encoding: 'utf8', timeout: 25000 }));
+    const edKo = out(cp.spawnSync(process.execPath, [CLI, 'handoff', de, '--writeback'], { encoding: 'utf8', timeout: 25000 }));
     const edEnLines = edEn.split('\n').filter(l => /Runtime environment|env detect|change\(s\) detected/i.test(l));
     const edEnOk = /Runtime environment/.test(edEn) && edEnLines.length >= 1 && !edEnLines.some(l => H.test(l));
     const edKoOk = /실행 환경/.test(edKo);
@@ -7243,11 +7257,11 @@ total++;
       try { const s = JSON.parse(fs.readFileSync(ssnap, 'utf8')); if (s.node) s.node.version = 'v0.0.0-test'; fs.writeFileSync(ssnap, JSON.stringify(s, null, 2) + '\n'); } catch {}
       fs.writeFileSync(sfail, JSON.stringify({ failures: [{ cmd: 'ls && pwd', exitCode: 1, shell: 'powershell-5.1', issues: ['ps5-chain'] }] }, null, 2) + '\n');
     };
-    cp.spawnSync(process.execPath, [CLI, 'handoff', ds], { encoding: 'utf8', timeout: 25000 }); // 첫 캡처(silent)
+    cp.spawnSync(process.execPath, [CLI, 'handoff', ds, '--writeback'], { encoding: 'utf8', timeout: 25000 }); // 첫 legacy projection 캡처(silent)
     seedSh();
-    const shEn = out(cp.spawnSync(process.execPath, [CLI, 'handoff', ds, '--language', 'en'], { encoding: 'utf8', timeout: 25000 }));
+    const shEn = out(cp.spawnSync(process.execPath, [CLI, 'handoff', ds, '--language', 'en', '--writeback'], { encoding: 'utf8', timeout: 25000 }));
     seedSh(); // en 실행이 스냅샷 갱신 → ko 위해 재구성
-    const shKo = out(cp.spawnSync(process.execPath, [CLI, 'handoff', ds], { encoding: 'utf8', timeout: 25000 }));
+    const shKo = out(cp.spawnSync(process.execPath, [CLI, 'handoff', ds, '--writeback'], { encoding: 'utf8', timeout: 25000 }));
     const shEnLines = shEn.split('\n').filter(l => /shell guard|shell failure|review past shell|shell-guard|check before running/i.test(l));
     const shEnOk = /Terminal shell guard/.test(shEn) && shEnLines.length >= 2 && !shEnLines.some(l => H.test(l));
     const shKoOk = /셸 가드/.test(shKo);
@@ -10112,7 +10126,7 @@ total++;
       fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
       cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 120000 });
       fs.writeFileSync(path.join(d, '.harness', 'agent-reminders.md'), body);
-      cp.spawnSync(process.execPath, [CLI, 'handoff', '.'], { cwd: d, encoding: 'utf8', timeout: 180000 });
+      cp.spawnSync(process.execPath, [CLI, 'handoff', '.', '--writeback'], { cwd: d, encoding: 'utf8', timeout: 180000 });
       return path.join(d, '.harness', 'agent-reminders.md');
     };
     const B = '# 🔔 자동 reminder\ndrift critical 감지\n';
@@ -10485,6 +10499,8 @@ total++;
     };
     const DERIVED = /^(cache\/|last-handoff\.json|environment\.json|tech-profile\.json|update-cache\.json|provider-probe-cache\.json|leerness\.html)/;
     // 스토어를 각각 건드리는 변경 명령들. seed 로 기존 항목을 만들어 **읽기가 실제로 일어나게** 한다.
+    const SEED = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d],
+      { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV0 });
     const CASES = [
       ['task add', ['task', 'add', '락프로브']],
       ['decision add', ['decision', 'add', '락프로브', '--why', 'x']],
@@ -10492,6 +10508,16 @@ total++;
       ['rule add', ['rule', 'add', '락프로브', '--trigger', 'every-session']],
       ['rule pause', ['rule', 'pause', 'R-0001'], ['rule', 'add', '씨앗룰', '--trigger', 'every-session']],
       ['plan add', ['plan', 'add', '락프로브']],
+      // 1.36.152 (T-0115): 같은 RMW 클래스의 덜 쓰이는 진입점도 실행 계측에 넣는다.
+      ['creds register', ['creds', 'register', '락프로브', '--env-var', 'LOCK_PROBE']],
+      ['creds refresh', ['creds', 'refresh', '락프로브'], d => SEED(d, ['creds', 'register', '락프로브', '--env-var', 'LOCK_PROBE'])],
+      // team ID는 ASCII slug만 허용한다. 표시 라벨과 달리 seed/삭제 대상은 실제 유효 ID를 쓴다.
+      ['team remove', ['team', 'remove', 'lock-probe'], d => SEED(d, ['team', 'add', 'lock-probe', '--name', 'lock'])],
+      ['memory restore decisions', ['memory', 'restore', 'decisions', '락프로브'], d => { SEED(d, ['decision', 'add', '락프로브', '--why', 'x']); SEED(d, ['decision', 'drop', '락프로브']); }],
+      ['memory restore lessons', ['memory', 'restore', 'lessons', '락프로브'], d => { SEED(d, ['lesson', 'save', '락프로브']); SEED(d, ['lesson', 'drop', '락프로브']); }],
+      ['memory restore plan', ['memory', 'restore', 'plan', '락프로브'], d => { SEED(d, ['plan', 'add', '락프로브']); SEED(d, ['plan', 'remove', '락프로브']); }],
+      ['plan drop', ['plan', 'drop', '락프로브']],
+      ['plan remove', ['plan', 'remove', '락프로브'], d => SEED(d, ['plan', 'add', '락프로브'])],
       ['preview add', ['preview', 'add', '락프로브', '--design', 'd', '--features', 'f']],
       ['requests add', ['requests', 'add', '락프로브']],
       ['next-action add', ['next-action', 'add', '락프로브']],
@@ -12378,9 +12404,9 @@ total++;
         { runners: selfNoBin.runners.filter(r => !/e2e\.js$/.test(r.file)) }));
       //   ⚠ 비교 대상을 `orphanScripts` 하나로 두면 약한 불변식이다(검수 P3) — 판정 전체를 비교한다.
       //   `orphanFiles` 를 통째로 빼면 자기참조 회귀를 못 잡는다(검수 P3) — **측정된 차이만 허용**한다.
-      //   허용치: `scripts/e2e-core.js`. 근거는 실측이다 — e2e.js 가 그 경로를 언급하고, 그 파일은
-      //   고아인 `test:core` 만 실행하므로 e2e.js 를 빼면 고아로 뜬다. 그 밖의 차이는 자기참조 회귀다.
-      const _FILE_ALLOW = new Set(['scripts/e2e-core.js']);
+      //   허용치: e2e.js가 직접 실행하는 보조 테스트 세 개. e2e.js를 입력에서 빼면 이 파일들은
+      //   고아처럼 보이지만, 실제 CI 진입점인 e2e.js에서 실행된다. 그 밖의 차이는 자기참조 회귀다.
+      const _FILE_ALLOW = new Set(['scripts/e2e-core.js', 'scripts/e2e-concurrency.js', 'scripts/release-bump-probe.js']);
       const _shape = (x) => JSON.stringify({
         s: x.orphanScripts.slice().sort(),
         d: x.dynamicRunners.slice().sort(), p: x.enumPrefixes.slice().sort(),
@@ -12793,7 +12819,7 @@ total++;
       if (!planned.includes('.cursor/mcp.json')) bad.push(`②b계획에 .cursor/mcp.json 없음(${JSON.stringify(planned)})`);
       const rR = RA(dR, ['adapter', 'cursor', '--path', dR]);
       if (rR.status !== 0) bad.push(`②bcursor adapter exit=${rR.status}`);
-      for (const f of ['.cursor/mcp.json', '.mcp.json']) {
+      for (const f of ['.cursor/mcp.json', '.mcp.json', '.cursor/hooks.json', '.cursor/hooks/leerness-session.cjs']) {
         if (fs.existsSync(path.join(dR, f)) && !planned.includes(f)) bad.push(`②b계획에 없던 파일을 생성: ${f}`);
       }
       dbg.cursor = { planned };
@@ -12832,6 +12858,7 @@ total++;
   for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDECODE',
     'CODEX_MANAGED_BY_NPM', 'CODEX_MANAGED_BY_PNPM', 'CODEX_MANAGED_BY_BUN', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
     'CURSOR_AGENT', 'LEERNESS_NO_SESSION_PRESENCE', 'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'CI', 'GITHUB_ACTIONS',
+    'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID',
     'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG', 'LEERNESS_MCP_PROFILE', 'LEERNESS_MCP_TIMEOUT_MS']) delete envS[k];
   //   캐너리 키는 **실행 시 생성**한다 — 소스에 적으면 이 파일이 러너로 읽히는 자기참조 함정(8회차)에 걸린다.
   const KEY = (tag) => `sess-${process.pid.toString(36)}-${tag}`;
@@ -12930,17 +12957,20 @@ total++;
       if (!(sj.total >= 1)) bad.push('⑥sessions 가 레코드를 못 봄');
     }
 
-    // ⑦ git 유출 없음 — 세션 파일은 무시되고, **다른 .harness 파일은 보인다**(git 이 실제로 관측 중임을 증명)
+    // ⑦ git 유출 없음 — 세션 파일과 기본 handoff의 동적 projection은 보이지 않고,
+    //    **의도적으로 만든 다른 .harness 파일은 보인다**(git 이 실제로 관측 중임을 증명).
     const dG = mkS('git');
     const gi = cp.spawnSync('git', ['init', '-q'], { cwd: dG, encoding: 'utf8', timeout: 60000 });
     if (gi.status !== 0) bad.push('⑦git init 실패 — 이 검사는 스킵이 아니라 실패다(측정 붕괴를 통과로 세지 않는다)');
     else {
       RS(dG, ['handoff', dG], { CLAUDE_CODE_SESSION_ID: KEY('g') }); cliCases++;
+      fs.writeFileSync(path.join(dG, '.harness', 'git-visible-control.txt'), 'control\n');
       //   ⚠ `--porcelain` 만 쓰면 untracked 디렉터리가 `?? .harness/` 한 줄로 **접혀서** 양쪽 판정이 모두
       //     공허해진다(내 대조군이 실제로 그걸 잡았다). `-uall` 로 파일 단위 열거를 강제한다.
       const st = String(cp.spawnSync('git', ['status', '--porcelain', '-uall'], { cwd: dG, encoding: 'utf8', timeout: 60000 }).stdout || '');
       if (/cache[\\/]sessions/.test(st)) bad.push('⑦세션 파일이 git 에 노출됨');
-      if (!/last-handoff\.json/.test(st)) bad.push('⑦대조군 실패 — git 이 .harness 를 아예 안 보고 있음(위 판정이 공허)');
+      if (/environment\.json|last-handoff\.json|tech-profile\.json/.test(st)) bad.push('⑦기본 handoff 동적 projection이 git 에 노출됨');
+      if (!/git-visible-control\.txt/.test(st)) bad.push('⑦대조군 실패 — git 이 .harness 를 아예 안 보고 있음(위 판정이 공허)');
       observedRecords += nRec(dG);
     }
 
@@ -13698,6 +13728,11 @@ total++;
   for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
     'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
     'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
+  // handoff freshness is session-scoped and handoff-only. Keep the fixture on one explicit address so both the
+  // CLI and the git hook inspect the same ignored marker instead of the presence lifecycle/legacy projection.
+  const ENFORCE_SESSION = 'e2e-enforce-runtime';
+  envP.LEERNESS_SESSION_ID = ENFORCE_SESSION;
+  const handoffRecord = (d) => path.join(d, '.harness', 'cache', 'handoffs', ENFORCE_SESSION + '.json');
   const RP = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 300000, env: envP, maxBuffer: 32 * 1024 * 1024 });
   //   ⚠ 1.36.140 (재검수 P1): 픽스처가 사용자의 **전역/시스템 git 설정을 상속**하면,
@@ -13821,22 +13856,34 @@ total++;
     //      (제품이 쓰는 판별을 테스트가 직접 재현해 본다: handoff 흔적이 창 안이면 통과, 창 밖이면 차단.)
     {
       const d = cases.ok;
+      RP(d, ['handoff', d]);
       const ri = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
       if (!ri || ri.verified !== 'fired') bad.push(`⑩정상 저장소 설치의 verified=${ri && ri.verified} (기대 fired)`);
       const hookP = ri && ri.hook;
       if (hookP && fs.existsSync(hookP)) {
-        const lhp = path.join(d, '.harness', 'last-handoff.json');
+        const lhp = handoffRecord(d);
         const stamp = (ageH) => {
-          fs.writeFileSync(lhp, JSON.stringify({ last: new Date(Date.now() - ageH * 3600000).toISOString() }, null, 2));
           const t = new Date(Date.now() - ageH * 3600000);
           try { fs.utimesSync(lhp, t, t); } catch {}
         };
-        const run = () => cp.spawnSync('sh', [hookP], { cwd: d, encoding: 'utf8', timeout: 20000, env: envP }).status;
+        let sh = 'sh';
+        if (process.platform === 'win32') {
+          const ep = G(d, ['--exec-path']);
+          const installRoot = ep.status === 0 ? path.resolve(String(ep.stdout || '').trim(), '..', '..', '..') : null;
+          if (installRoot) {
+            sh = [path.join(installRoot, 'bin', 'sh.exe'), path.join(installRoot, 'usr', 'bin', 'sh.exe')].find(p => fs.existsSync(p)) || sh;
+          }
+        }
+        const run = () => cp.spawnSync(sh, [hookP], { cwd: d, encoding: 'utf8', timeout: 20000, env: envP }).status;
         stamp(0); const a = run();
         stamp(240); const b = run();
-        if (a === null || b === null) bad.push('⑩sh 로 훅을 돌리지 못함(계측 불가)');
-        else if (!(a === 0 && b !== 0)) bad.push(`⑩훅이 두 상태를 구분하지 못함(창안=${a} 창밖=${b}) — 발화 검증이 공허하다`);
-        dbg.discriminates = { inWindow: a, outWindow: b };
+        // 외부 Codex P1: presence JSON의 mtime이 아니라 handoff-only marker를 봐야 한다.
+        // stale marker 뒤 session close를 해도 gate가 열리면 close가 handoff로 둔갑한 것이다.
+        RP(d, ['session', 'close', d, '--json']);
+        const c = run();
+        if (a === null || b === null || c === null) bad.push('⑩sh 로 훅을 돌리지 못함(계측 불가)');
+        else if (!(a === 0 && b !== 0 && c !== 0)) bad.push(`⑩훅 freshness 불변식 실패(창안=${a} 창밖=${b} close후=${c}) — close가 handoff로 둔갑하거나 판별이 공허하다`);
+        dbg.discriminates = { inWindow: a, outWindow: b, afterClose: c };
       }
     }
 
@@ -13857,7 +13904,7 @@ total++;
       const ins = J(RP(P, ['enforce', 'install', '--path', P, '--json']));
       if (!ins || ins.ok !== true) bad.push(`⑬하위 디렉토리 설치 실패 ok=${ins && ins.ok} code=${ins && ins.code}`);
       if (!ins || ins.verified !== 'fired') bad.push(`⑬하위 설치 verified=${ins && ins.verified}`);
-      const lhp = path.join(P, '.harness', 'last-handoff.json');
+      const lhp = handoffRecord(P);
       const stamp = (ageH) => { const t = new Date(Date.now() - ageH * 3600000); try { fs.utimesSync(lhp, t, t); } catch {} };
       //    오래된 handoff → **루트에서** 커밋하면 차단돼야 한다(여기가 우회 지점이었다).
       stamp(200);
@@ -13920,7 +13967,7 @@ total++;
         if (/ENFORCE_PROBE|leerness-probe/.test(body)) bad.push('⑮출하되는 훅에 검증용 우회 스위치가 남아 있다');
       } else bad.push('⑮훅 파일을 찾지 못함(계측 붕괴)');
       //    ② 행위로 확인 — 오래된 handoff 에서 어떤 스위치를 써도 커밋이 통과하면 안 된다.
-      const lhp = path.join(d, '.harness', 'last-handoff.json');
+      const lhp = handoffRecord(d);
       const old = new Date(Date.now() - 200 * 3600000); try { fs.utimesSync(lhp, old, old); } catch {}
       fs.writeFileSync(path.join(d, 'p1.txt'), '1'); G(d, ['add', '-A']);
       const viaEnv = cp.spawnSync('git', ['--no-optional-locks', '-C', d, 'commit', '-m', 'env'],
@@ -14032,14 +14079,14 @@ total++;
       dbg.cfgFail = { code: r && r.code, hookLeft: left, recovered: r2 && r2.ok };
     }
 
-    //   ⑫ **설치 행위가 자기가 설치하는 게이트를 약화시키지 않는다.** 발화 검증은 `.harness/last-handoff.json`(실데이터)을
-    //      임시로 덮는데, 훅이 신선도를 판정하는 근거가 그 파일의 **mtime** 이다 — 안 되돌리면 설치만으로
+    //   ⑫ **설치 행위가 자기가 설치하는 게이트를 약화시키지 않는다.** 발화 검증은 현재 세션의 runtime record를
+    //      임시로 다루며, 훅이 신선도를 판정하는 근거가 그 파일의 **mtime** 이다 — 안 되돌리면 설치만으로
     //      "방금 handoff 했다" 가 되어 다음 windowHours 동안 무임승차가 생긴다(실측으로 그렇게 만들었다가 고쳤다).
     {
       const d = mk('selfweaken', commit);
       RP(d, ['handoff', d]);
-      const lhp = path.join(d, '.harness', 'last-handoff.json');
-      if (!fs.existsSync(lhp)) bad.push('⑫셋업 실패: last-handoff.json 없음');
+      const lhp = handoffRecord(d);
+      if (!fs.existsSync(lhp)) bad.push('⑫셋업 실패: 세션 handoff record 없음');
       else {
         const oldT = new Date(Date.now() - 100 * 3600000);
         fs.utimesSync(lhp, oldT, oldT);
@@ -14048,7 +14095,7 @@ total++;
         const ins = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
         const after = Math.round(fs.statSync(lhp).mtimeMs);
         if (!ins || ins.ok !== true) bad.push(`⑫설치 실패 ok=${ins && ins.ok}`);
-        if (fs.readFileSync(lhp, 'utf8') !== before_txt) bad.push('⑫설치가 사용자 실데이터(last-handoff.json) 내용을 바꿨다');
+        if (fs.readFileSync(lhp, 'utf8') !== before_txt) bad.push('⑫설치가 세션 handoff record 내용을 바꿨다');
         if (Math.abs(after - before) > 1500) bad.push(`⑫설치가 handoff mtime 을 갱신했다(${before}→${after}) — 설치가 게이트를 약화시킨다`);
         //    행위로 확인 — 오래된 handoff 상태이므로 설치 직후 커밋은 **차단**돼야 한다.
         fs.writeFileSync(path.join(d, 'z.txt'), 'z'); G(d, ['add', '-A']);
@@ -14519,9 +14566,18 @@ total++;
   envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gitconfig-system');
   try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
   const G = (d, a) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
-  const RP = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a],
-    { cwd: d, encoding: 'utf8', timeout: 60000, env: envP, maxBuffer: 32 * 1024 * 1024 });
+  const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
   const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  // ③과 ③a가 같은 초기 저장소 계약을 사용한다. ③a는 별도 블록이므로 이 범위에 둬야 한다.
+  const mkRepo = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    G(d, ['init', '-q', '-b', 'main', '.']); G(d, ['config', 'user.email', 't@t']); G(d, ['config', 'user.name', 't']);
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    fs.writeFileSync(path.join(d, 'a.txt'), 'a'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
+    RP(d, ['init', d, '--yes', '--minimal']); RP(d, ['handoff', d]);
+    return d;
+  };
   const cwd = path.join(sb, 'cwd'); fs.mkdirSync(cwd, { recursive: true });
   try {
     // ① 전수 — 제품 자신에게 명령 목록을 묻고, 하위명령까지 펴서 없는 `--path` 로 부른다.
@@ -14578,14 +14634,6 @@ total++;
     }
     // ③ worktree 형제 차단을 **추정하지 않고 각 worktree 에게 묻는다**.
     {
-      const mkRepo = (name) => {
-        const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
-        G(d, ['init', '-q', '-b', 'main', '.']); G(d, ['config', 'user.email', 't@t']); G(d, ['config', 'user.name', 't']);
-        fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
-        fs.writeFileSync(path.join(d, 'a.txt'), 'a'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
-        RP(d, ['init', d, '--yes', '--minimal']); RP(d, ['handoff', d]);
-        return d;
-      };
       const m1 = mkRepo('wt-shared');
       const add1 = G(m1, ['worktree', 'add', '-qb', 'lk', path.join(sb, 'wt-shared-linked')]);
       const j1 = J(RP(m1, ['enforce', 'install', '--path', m1, '--json', '--skip-verify']));
@@ -14602,11 +14650,52 @@ total++;
       }
       dbg.worktree = { shared: j1 && j1.worktrees, perWorktree: j2 && j2.worktrees };
     }
+    // ③a 아직 없는 pre-commit의 **조상** junction도 실제 위치로 풀어 형제 차단을 숨기지 않는다.
+    //     첫 판은 훅 파일 자체만 realpath 했다. 설치 전에는 파일이 없어 두 worktree가 같은 훅을 보는데도 1개라고
+    //     답했고, 설치 직후 형제 커밋은 실제로 차단됐다. 가장 깊은 기존 조상(link-hooks)을 풀어야 한다.
+    {
+      const main = mkRepo('wt-ancestor-junction');
+      const sibling = path.join(sb, 'wt-ancestor-junction-linked');
+      const add = G(main, ['worktree', 'add', '-qb', 'lj', sibling]);
+      let linked = false;
+      const actual = path.join(main, '.git', 'shared-hooks');
+      const alias = path.join(main, '.git', 'link-hooks');
+      let before = null, installed = null, siblingCommit = null;
+      if (add.status !== 0) bad.push(`③a junction worktree 생성 실패(${add.status}) — 판별 불가`);
+      else {
+        try {
+          fs.mkdirSync(actual, { recursive: true });
+          fs.mkdirSync(path.join(sibling, '.harness'), { recursive: true });
+          fs.symlinkSync(actual, alias, process.platform === 'win32' ? 'junction' : 'dir');
+          linked = true;
+        } catch (e) {
+          dbg.ancestorJunction = { skipped: 'junction/symlink 생성 불가', error: String(e && e.code || e).slice(0, 80) };
+        }
+        if (linked) {
+          const cfg = [
+            G(main, ['config', 'extensions.worktreeConfig', 'true']),
+            G(main, ['config', '--worktree', 'core.hooksPath', alias]),
+            G(sibling, ['config', '--worktree', 'core.hooksPath', actual]),
+          ];
+          if (cfg.some((r) => r.status !== 0)) bad.push('③a worktree별 hooksPath 설정 실패 — 판별 불가');
+          else {
+            before = J(RP(main, ['enforce', 'status', '--path', main, '--json']));
+            installed = J(RP(main, ['enforce', 'install', '--path', main, '--json', '--skip-verify']));
+            siblingCommit = G(sibling, ['commit', '--allow-empty', '-m', 'ancestor-junction-probe']);
+            if (!before || before.worktrees !== 2) bad.push(`③a 없는 훅 파일의 조상 junction을 못 풀어 형제 차단을 숨김(before=${before && before.worktrees})`);
+            if (!installed || installed.worktrees !== 2) bad.push(`③a 설치 응답도 공유 worktree를 1개로 오보고(installed=${installed && installed.worktrees})`);
+            if (!siblingCommit || siblingCommit.status === 0) bad.push('③a 픽스처가 실제 형제 커밋 차단을 증명하지 못함');
+          }
+          dbg.ancestorJunction = { before: before && before.worktrees, installed: installed && installed.worktrees,
+            siblingCommitExit: siblingCommit && siblingCommit.status, sameTarget: fs.realpathSync(alias) === fs.realpathSync(actual) };
+        }
+      }
+    }
     // ④ 세척 클래스의 **경계** — 지워야 할 것과 남겨야 할 것을 같이 잰다(한쪽만 재면 과세척이 통과한다).
     {
       const g = require(path.resolve(__dirname, '..', 'lib', 'git.js'));
-      const mustDrop = ['GIT_DIR', 'git_dir', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_7', 'GIT_CONFIG_VALUE_7'];
-      const mustKeep = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CEILING_DIRECTORIES', 'GIT_AUTHOR_NAME', 'GIT_SSH_COMMAND', 'GIT_EDITOR'];
+      const mustDrop = ['GIT_DIR', 'git_dir', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_7', 'GIT_CONFIG_VALUE_7'];
+      const mustKeep = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM', 'GIT_CEILING_DIRECTORIES', 'GIT_AUTHOR_NAME', 'GIT_SSH_COMMAND', 'GIT_EDITOR'];
       const droppedNot = mustDrop.filter((k) => !g._shouldDrop(k));
       const keptNot = mustKeep.filter((k) => g._shouldDrop(k));
       if (droppedNot.length) bad.push(`④세척해야 하는데 안 함: ${droppedNot.join(', ')}`);
@@ -14616,7 +14705,7 @@ total++;
     ok = bad.length === 0;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
-  console.log(ok ? `✓ AG(1.36.143) 없는 --path 는 아무것도 만들지 않음(전수 열거, 고치기 전 33건) · 정상 프로젝트 무회귀 · worktree 형제 차단을 추정 대신 **각 worktree 에게 물어** 판정 · 세척 클래스 경계(지울 것/남길 것 양방향) ${JSON.stringify(dbg)}`
+  console.log(ok ? `✓ AG(1.36.143) 없는 --path 는 아무것도 만들지 않음(전수 열거, 고치기 전 33건) · 정상 프로젝트 무회귀 · worktree 형제 차단을 추정 대신 **각 worktree 에게 물어** 판정(없는 훅 파일의 조상 junction 포함) · 세척 클래스 경계(지울 것/남길 것 양방향) ${JSON.stringify(dbg)}`
     : '✗ 1.36.143 경로/공유 판정 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
   if (!ok) failed++;
 }
@@ -14683,6 +14772,22 @@ total++;
         RP(d2, ['decision', 'add', '결정', '--reason', 'r', '--path', d2]).status];
       if (okExits.some((x) => x !== 0)) bad.push(`①플래그 없는 정상 실행이 막힘(exits=${JSON.stringify(okExits)})`);
       dbg.dryRun = { wrote: wrote.length, notRefused: notRefused.length, realExits: okExits };
+    }
+    // ①a T-0117 재검수: 기존 픽스처는 세션 주소를 지워 프레즌스 기록 경로가 아예 실행되지 않았다.
+    //     그러면 `session close --dry-run` 이 .harness/cache/sessions/.host-salt와 세션 JSON을
+    //     남기는 실제 변경을 "트리 불변"으로 오판한다. 주소가 있는 실제 Codex/Claude 환경을 명시해
+    //     캐시도 dry-run 계약(영속 파일 변경 0)의 대상임을 실행으로 고정한다.
+    {
+      const d = mkGit('dry-presence');
+      const sessionEnv = Object.assign({}, envP, { LEERNESS_SESSION_ID: 'dryguard001' });
+      const before = snap(d);
+      const r = RP(d, ['session', 'close', '--dry-run', '--path', d], sessionEnv);
+      const changed = diffKeys(before, snap(d));
+      const sessionDir = path.join(d, '.harness', 'cache', 'sessions');
+      if (r.status === 0) bad.push('①a session close --dry-run 이 쓰기 차단 뒤에도 성공이라 보고');
+      if (changed.length) bad.push(`①a 세션 주소가 있을 때 --dry-run 이 바꾼 것: ${changed.slice(0, 4).join(',')}`);
+      if (fs.existsSync(sessionDir)) bad.push('①a --dry-run 이 session-presence cache를 생성');
+      dbg.dryPresence = { exit: r.status, changed: changed.length, sessionCacheCreated: fs.existsSync(sessionDir) };
     }
     // ② `--path=` / 값 없는 `--path` 가 가드를 우회해 cwd 에 쓰지 않는다.
     {
@@ -15177,6 +15282,151 @@ total++;
   if (!ok) failed++;
 }
 
+total++;
+// AM(1.36.149) — 1.36.148 의 run-id 경로 차단은 소유 맵만 덮었다.
+//   legacy `currentRunId` 와 디스크 run record 의 `run_id` 도 같은 파일 경로 병목을 탄다.
+//   둘 중 하나가 경로형이면 state record/handoff 가 프로젝트 밖에 쓰기 전에 손상으로 멈춰야 한다.
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-149-'));
+  const envP = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
+  for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+    'LEERNESS_INTERNAL', 'LEERNESS_HOOK', 'LEERNESS_SESSION_ID', 'CODEX_THREAD_ID', 'CI', 'GITHUB_ACTIONS',
+    'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
+  const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 120000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
+  const mk = (name) => {
+    const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
+    const ri = RP(d, ['init', d, '--yes', '--minimal']);
+    if (ri.status !== 0) bad.push(`${name}:init exit=${ri.status}`);
+    return d;
+  };
+  try {
+    // ① global/legacy slot: 소유 맵이 없는 구버전 state 도 입력 경로가 될 수 있다.
+    {
+      const d = mk('current-id');
+      RP(d, ['state', 'start', 'A', '--json']);
+      const stf = path.join(d, '.leerness', 'state.json');
+      const st = JSON.parse(fs.readFileSync(stf, 'utf8'));
+      delete st.runsBySession;
+      st.currentRunId = '../../escaped-current';
+      fs.writeFileSync(stf, JSON.stringify(st, null, 2) + '\n');
+      const r = RP(d, ['state', 'handoff', '요약']);
+      const escaped = fs.existsSync(path.join(d, 'escaped-current.json')) || fs.existsSync(path.join(d, 'escaped-current.md'));
+      if (r.status === 0) bad.push('①경로형 currentRunId 인데 성공이라 보고');
+      if (escaped) bad.push('①경로형 currentRunId 로 .leerness 밖에 씀');
+      dbg.currentRunId = { exit: r.status, escaped };
+    }
+    // ② run record: 파일명은 안전해도 내부 run_id 를 저장 대상으로 다시 쓰면 탈출한다.
+    {
+      const d = mk('record-id');
+      RP(d, ['state', 'start', 'A', '--json']);
+      const rf = path.join(d, '.leerness', 'runs', 'run-0001.json');
+      const rec = JSON.parse(fs.readFileSync(rf, 'utf8'));
+      rec.run_id = '../../escaped-record';
+      fs.writeFileSync(rf, JSON.stringify(rec, null, 2) + '\n');
+      const r = RP(d, ['state', 'handoff', '요약']);
+      const escaped = fs.existsSync(path.join(d, 'escaped-record.json')) || fs.existsSync(path.join(d, 'escaped-record.md'));
+      if (r.status === 0) bad.push('②경로형 record.run_id 인데 성공이라 보고');
+      if (escaped) bad.push('②경로형 record.run_id 로 .leerness 밖에 씀');
+      dbg.recordRunId = { exit: r.status, escaped };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AM(1.36.149) legacy currentRunId·run record run_id 모두 경로형이면 .leerness 밖 쓰기 전에 손상으로 차단 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.149 run-id 경로 차단 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
+total++;
+// AN(1.36.150/T-0120) — `GIT_CONFIG_NOSYSTEM`은 저장소 위치 주입이 아니라 호출자가 시스템 설정을
+// 숨기겠다는 의미다. 설치기만 이를 지우면 system core.hooksPath에 훅을 쓰지만, 같은 셸의 실제 git commit은
+// 기본 .git/hooks를 보아 오래된 handoff도 통과한다. 설치 경로와 실제 커밋 경로가 같은 환경에서 일치해야 한다.
+{
+  let ok = false; const bad = []; const dbg = {};
+  const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-150-'));
+  const stripGitTargetEnv = (source) => {
+    const out = Object.assign({}, source);
+    const drop = new Set(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT']);
+    for (const k of Object.keys(out)) if (drop.has(k.toUpperCase())) delete out[k];
+    return out;
+  };
+  const envP = stripGitTargetEnv(process.env);
+  envP.TMPDIR = sb; envP.TEMP = sb; envP.TMP = sb;
+  envP.LEERNESS_OFFLINE = '1'; envP.LEERNESS_NO_PROMPT = '1';
+  envP.LEERNESS_SESSION_ID = 'e2e-enforce-nosystem';
+  envP.GIT_CONFIG_GLOBAL = path.join(sb, 'global.gitconfig');
+  envP.GIT_CONFIG_SYSTEM = path.join(sb, 'system.gitconfig');
+  envP.GIT_CONFIG_NOSYSTEM = '1';
+  const G = (d, a, env) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP });
+  const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
+    { cwd: d, encoding: 'utf8', timeout: 120000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
+  const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  try {
+    const d = path.join(sb, 'repo'), systemHooks = path.join(sb, 'system-hooks');
+    fs.mkdirSync(d, { recursive: true }); fs.mkdirSync(systemHooks, { recursive: true });
+    fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, '');
+    fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, `[core]\n\thooksPath = ${systemHooks.replace(/\\/g, '/')}\n`);
+    const setup = [G(d, ['init', '-q', '-b', 'main', '.']), G(d, ['config', 'user.email', 't@example.invalid']), G(d, ['config', 'user.name', 'T'])];
+    fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}\n');
+    setup.push(G(d, ['add', '-A']), G(d, ['commit', '-qm', 'initial']));
+    if (setup.some((r) => r.status !== 0)) bad.push('①git 픽스처를 만들지 못함 — 판별 불가');
+    const withSystem = Object.assign({}, envP); delete withSystem.GIT_CONFIG_NOSYSTEM;
+    const systemCfg = G(d, ['config', '--show-scope', '--get', 'core.hooksPath'], withSystem);
+    const callerCfg = G(d, ['config', '--show-scope', '--get', 'core.hooksPath']);
+    if (systemCfg.status !== 0 || callerCfg.status === 0) bad.push('①GIT_CONFIG_NOSYSTEM 픽스처가 system 설정을 갈라내지 못함 — 판별 불가');
+    const init = RP(d, ['init', d, '--yes', '--minimal']);
+    const handoff = RP(d, ['handoff', d]);
+    const install = J(RP(d, ['enforce', 'install', '--path', d, '--json', '--skip-verify']));
+    if (init.status !== 0 || handoff.status !== 0 || !install || !install.ok) bad.push(`①설치 흐름 실패(init=${init.status}, handoff=${handoff.status}, install=${install && install.ok})`);
+    else {
+      const raw = String(G(d, ['rev-parse', '--git-path', 'hooks/pre-commit']).stdout || '').trim();
+      const callerHook = path.isAbsolute(raw) ? raw : path.join(d, raw);
+      const old = new Date(Date.now() - 72 * 3600 * 1000);
+      fs.utimesSync(path.join(d, '.harness', 'cache', 'sessions', 'e2e-enforce-nosystem.json'), old, old);
+      fs.writeFileSync(path.join(d, 'after.txt'), 'after\n'); G(d, ['add', '-A']);
+      const commit = G(d, ['commit', '-qm', 'must-be-blocked']);
+      const gitModule = require(path.resolve(__dirname, '..', 'lib', 'git.js'));
+      if (gitModule._shouldDrop('GIT_CONFIG_NOSYSTEM')) bad.push('①GIT_CONFIG_NOSYSTEM을 내부 git 에서만 삭제');
+      if (!gitModule._shouldDrop('GIT_CONFIG_PARAMETERS')) bad.push('①일회성 config 주입까지 보존 — 세척 경계 후퇴');
+      if (!fs.existsSync(callerHook)) bad.push(`①설치 훅과 실제 git 훅 경로 불일치(install=${install.hook}, caller=${callerHook})`);
+      if (commit.status === 0) bad.push('①오래된 handoff인데 실제 git commit이 통과 — 훅 우회');
+      dbg.nosystem = { installHook: install.hook, callerHook, callerHasHook: fs.existsSync(callerHook), commitExit: commit.status,
+        systemScope: systemCfg.status, callerScope: callerCfg.status };
+    }
+    ok = bad.length === 0;
+  } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
+  finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
+  console.log(ok ? `✓ AN(1.36.150/T-0120) GIT_CONFIG_NOSYSTEM을 보존해 설치기와 같은 셸의 git이 같은 hooksPath를 보고, 오래된 handoff 커밋이 실제로 차단됨 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.150 GIT_CONFIG_NOSYSTEM 훅 경로 일치 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  if (!ok) failed++;
+}
+
+total++;
+// AO(1.36.152/T-0115) — write 시점의 락 관측만으로는 "읽은 사본도 락 안인가"를 증명할 수 없다.
+// 첫 프로세스의 최종 rename을 강제로 멈추고 두 번째 쓰기를 붙여, 서로 다른 RMW 여섯 쌍이 모두 생존하는지 확인한다.
+{
+  let ok = false; const dbg = {};
+  try {
+    const race = cp.spawnSync(process.execPath, [path.join(__dirname, 'e2e-concurrency.js'), CLI], {
+      cwd: path.resolve(__dirname, '..'),
+      encoding: 'utf8',
+      timeout: 180000,
+      env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_LOCK_WARN: '1' }),
+      maxBuffer: 16 * 1024 * 1024
+    });
+    let report = null; try { report = JSON.parse(String(race.stdout || '').trim()); } catch {}
+    dbg.exit = race.status; dbg.report = report;
+    if (!report) dbg.stderr = String(race.stderr || '').slice(0, 500);
+    ok = race.status === 0 && !!report && report.ok === true
+      && Array.isArray(report.results) && report.results.length === 6 && report.results.every(r => r.ok === true);
+  } catch (e) { dbg.err = String(e && e.message || e).slice(0, 200); }
+  console.log(ok ? '✓ AO(1.36.152/T-0115) 지연 경쟁 6쌍 모두 exit 0 + 양쪽 기록 보존'
+    : '✗ 1.36.152 동시 RMW 회귀 ' + JSON.stringify(dbg));
+  if (!ok) failed++;
+}
+
 console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
 if (failed > 0) process.exit(1);
-

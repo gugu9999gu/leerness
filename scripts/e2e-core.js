@@ -163,6 +163,14 @@ console.log('# leerness core (test:core) — flagship behavioral guarantees');
     assert('lazy: TODO inside multi-line template NOT counted (FP fix)', j2 && j2.todoCount === 0);
     fs.rmSync(d, { recursive: true, force: true });
   }
+  // FP: README prose can describe the TODO detector without becoming a code task.
+  {
+    const d = fresh();
+    fs.writeFileSync(path.join(d, 'README.md'), '# Guide\nThe lazy detector reports untracked TODO work.\n');
+    const j = jget(d);
+    assert('lazy: README prose TODO ignored (not a code comment)', j && j.todoCount === 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
 }
 
 // (9) audit: 유저-프로젝트 FP 가드 (1.35.17)
@@ -258,6 +266,22 @@ console.log('# leerness core (test:core) — flagship behavioral guarantees');
   assert('feature add: --path 우선 보존(회귀 없음)', /^## F-\d{4} ViaFlag\s*$/m.test(graphOf(target)) && !fs.existsSync(path.join(outsider, '.harness')));
   fs.rmSync(target, { recursive: true, force: true });
   fs.rmSync(outsider, { recursive: true, force: true });
+}
+
+// (13) Windows child env + sessions false-success 회귀 (T-0129/T-0130)
+{
+  const scrubCase = require('../bin/leerness')._selfTestCases().find(c => c.name.startsWith('_scrubTestEnv:'));
+  assert('child env scrub keeps executable PATH while removing test secrets', !!scrubCase && scrubCase.run() === true);
+
+  const d = fresh();
+  const call = (args) => cp.spawnSync(process.execPath, [CLI, ...args], { cwd: d, encoding: 'utf8', timeout: 40000 });
+  const invalid = call(['sessions', 'send', '--path', d, '--json']);
+  let invalidJson = null; try { invalidJson = JSON.parse(invalid.stdout || ''); } catch {}
+  assert('sessions rejects unsupported send/inbox/scope-style verbs (no false-success)', invalid.status === 1 && invalidJson && invalidJson.code === 'unknown_subcommand');
+  const positional = call(['sessions', d, '--json']);
+  let positionalJson = null; try { positionalJson = JSON.parse(positional.stdout || ''); } catch {}
+  assert('sessions keeps the documented positional-path listing contract', positional.status === 0 && positionalJson && Array.isArray(positionalJson.sessions));
+  fs.rmSync(d, { recursive: true, force: true });
 }
 
 const dur = ((Date.now() - t0) / 1000).toFixed(1);
