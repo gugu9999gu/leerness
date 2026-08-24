@@ -9201,7 +9201,11 @@ total++;
       && (r.j.refusals || []).length === 1 && (r.j.refusals || [])[0].code === 'provider_not_authenticated';
     //   같은 실행파일을 가리키는 **정상 별칭** 전부에서 유지돼야 한다 — 문자열 완전일치로 비교하면
     //   `codex.cmd`·대문자·절대경로 등록만으로 이번에 되살린 차단이 다시 사라진다(실측).
-    const aliases = [null, 'codex', 'CODEX', 'codex.cmd', path.join(shimDir, isWin ? 'codex.cmd' : 'codex')];
+    // POSIX executable names are case-sensitive and do not resolve `.cmd`; those are aliases only on Windows.
+    // Treating CODEX as codex on Linux would hide a genuinely different (or missing) executable.
+    const aliases = [null, 'codex']
+      .concat(isWin ? ['CODEX', 'codex.cmd'] : [])
+      .concat([path.join(shimDir, isWin ? 'codex.cmd' : 'codex')]);
     let aliasOk = true, aliasBad = '';
     for (const al of aliases) {
       const w = mk(al);
@@ -13289,10 +13293,13 @@ total++;
       if (present !== N) bad.push(`①동시 쓰기 유실 ${N - present}행 (${present}/${N} 생존)`);
       if (crashed > 0) bad.push(`①자식 크래시 ${crashed}건 — rename/락 경합에서 죽었다: ${errs[0] || '?'}`);
       //   1.36.132 (검수 P1): 유실 0 만 보면 "보호 없이 진행했는데 운 좋게 안 겹친" 경우를 통과시킨다.
-      //   fail-open 은 그 자체로 실패다 — 제품이 stderr 로 말하게 해 놨으니 그것을 단언한다.
-      const failOpen = errs.filter(e => /락 획득 실패/.test(e)).length;
+      //   사용자 상태의 fail-open 은 그 자체로 실패다. 1.36.160부터 손실 허용을 명시한 usage telemetry만
+      //   별도 문구+파일명으로 fail-open 할 수 있으므로 상태 보호 실패와 섞어 세지 않는다.
+      const lockWarnings = errs.filter(e => /락 획득 실패/.test(e));
+      const telemetryFailOpen = lockWarnings.filter(e => /비핵심 기록만 보호 없이 진행합니다: usage-stats\.json\b/.test(e)).length;
+      const failOpen = lockWarnings.length - telemetryFailOpen;
       if (failOpen > 0) bad.push(`①락 fail-open ${failOpen}건 — 보호 없이 진행했다(유실이 없어도 실패다)`);
-      dbg.concurrent = { N, present, crashed, failOpen: errs.filter(e => /락 획득 실패/.test(e)).length, ms: Date.now() - t0 };
+      dbg.concurrent = { N, present, crashed, failOpen, telemetryFailOpen, ms: Date.now() - t0 };
     }
 
     // ② 배달 — 세션 신호가 **4표면 전부**에 나온다. 종전엔 평문 헤드라인 1곳뿐이었고,
@@ -13506,7 +13513,7 @@ total++;
     ok = bad.length === 0;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
-  console.log(ok ? `✓ AA(1.36.132/UR-0069) 다중세션 토대: 동시 24쓰기 무유실·무크래시(락 EPERM 무보호진행 + rename 동시독자 EPERM 둘 다 차단) · 세션 신호가 4표면 전부에 도달(평문·--compact·--json·훅, 훅은 쓰기 0 유지) · claude 아닌 에이전트도 주소를 갖고 서로를 봄 + 주소 없으면 그 사실을 말함 · 죽은 채널(agent-reminders) 노출 · 단일 흐름 오탐 0 ${JSON.stringify(dbg)}`
+  console.log(ok ? `✓ AA(1.36.132/UR-0069) 다중세션 토대: 동시 24쓰기 무유실·무크래시(상태락 fail-open 차단 · 비핵심 telemetry 분리 · rename 동시독자 EPERM 차단) · 세션 신호가 4표면 전부에 도달(평문·--compact·--json·훅, 훅은 쓰기 0 유지) · claude 아닌 에이전트도 주소를 갖고 서로를 봄 + 주소 없으면 그 사실을 말함 · 죽은 채널(agent-reminders) 노출 · 단일 흐름 오탐 0 ${JSON.stringify(dbg)}`
     : '✗ 1.36.132 다중세션 토대 실패 ' + JSON.stringify({ bad: bad.slice(0, 10), dbg }));
   if (!ok) failed++;
 }
