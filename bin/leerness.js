@@ -35,7 +35,7 @@ const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits:
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 const _cursorHook = require('../lib/cursor-session-hook');
 
-const VERSION = '1.36.158';
+const VERSION = '1.36.159';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -9459,7 +9459,9 @@ function _p0103FlagsOk() {
     const good = R(['pulse', '--json']);
     const typo = R(['pulse', '--json', '--nosuchflagzz']);
     const quietOnReal = !/알 수 없는 플래그|Unknown flag/.test(good.stderr || '');
-    const warnsOnTypo = /알 수 없는 플래그/.test(typo.stderr || '') && (typo.stderr || '').includes('--nosuchflagzz');
+    // 프로젝트가 OS locale 에 따라 en 으로 초기화돼도 같은 계약을 검증한다.
+    // 경고 정규식은 바로 위의 ko/en 공용 단일출처를 재사용해 CI locale 에 종속되지 않게 한다.
+    const warnsOnTypo = W2.test(typo.stderr || '') && (typo.stderr || '').includes('--nosuchflagzz');
     // 경고는 stderr 전용 — stdout(기계 소비자) 은 오염되지 않는다
     const stdoutClean = !/알 수 없는 플래그|Unknown flag/.test(typo.stdout || '');
     let jsonStillValid = false; try { JSON.parse((typo.stdout || '').trim()); jsonStillValid = true; } catch { jsonStillValid = false; }
