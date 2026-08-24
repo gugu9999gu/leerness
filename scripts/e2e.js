@@ -10,6 +10,14 @@ const cp = require('child_process');
 // 1.36.87: 일부 e2e 타임아웃을 상향했다 — 격리 실측(agents list 5.2s · init --language 8.5s) 대비
 //   여유가 3배 미만이라 전체 스위트 부하에서 간헐 초과했다. 검사 대상은 속도가 아니라 동작이다.
 process.env.LEERNESS_OFFLINE = process.env.LEERNESS_OFFLINE || '1';
+// The historical end-to-end fixtures assert the Korean default surface. Keep auto
+// detection deterministic on English CI hosts without LEERNESS_LANG, which would
+// override per-project English manifests and contaminate in-process doctor checks.
+// Language-specific cases below pass their own LANG/LC_ALL values explicitly.
+process.env.LC_ALL = '';
+process.env.LC_CTYPE = '';
+process.env.LANG = '';
+process.env.LANGUAGE = 'ko';
 // 1.9.284 (UR-0029): e2e 속도 — 기본 roadmap.html(70KB HTML) 자동 생성 OFF (roadmap 전용 테스트 블록만 일시 ON).
 //   대부분의 init/session 테스트는 roadmap 을 검증하지 않으므로 생성 비용 제거 → 5분 내 완료.
 process.env.LEERNESS_NO_AUTO_ROADMAP = '1';
@@ -14218,14 +14226,19 @@ total++;
       //    ("실패했다" 로 재면 다른 이유로 실패해도 통과하는 공허한 단언이 된다.)
       const gm = require(path.resolve(__dirname, '..', 'lib', 'git.js'));
       const own = path.join(sb, 'own'), victim = path.join(sb, 'victim');
+      const pathKey = (p) => {
+        let q = path.resolve(String(p));
+        try { q = fs.realpathSync.native ? fs.realpathSync.native(q) : fs.realpathSync(q); } catch {}
+        return process.platform === 'win32' ? q.toLowerCase() : q;
+      };
       const seenDir = (envx) => {
         const r = gm.gitSpawn(['rev-parse', '--absolute-git-dir'], { cwd: own, encoding: 'utf8', env: envx });
         return r.status === 0 ? path.resolve(String(r.stdout).trim()) : 'ERR:' + r.status;
       };
       const clean = seenDir(envP);
       const poisonedDir = seenDir(Object.assign({}, envP, { GIT_DIR: path.join(victim, '.git') }));
-      if (clean !== path.resolve(own, '.git')) bad.push(`④정상 환경에서 제 저장소를 못 찾음(${clean}) — 판별 불가`);
-      if (poisonedDir !== clean) bad.push(`④GIT_DIR 이 초크포인트를 통과해 대상이 바뀜(${poisonedDir})`);
+      if (pathKey(clean) !== pathKey(path.resolve(own, '.git'))) bad.push(`④정상 환경에서 제 저장소를 못 찾음(${clean}) — 판별 불가`);
+      if (pathKey(poisonedDir) !== pathKey(clean)) bad.push(`④GIT_DIR 이 초크포인트를 통과해 대상이 바뀜(${poisonedDir})`);
       dbg.chokeScrub = { clean, poisoned: poisonedDir };
     }
     ok = bad.length === 0;
@@ -14395,13 +14408,15 @@ total++;
       if (!targetHook) bad.push('⑤지목한 저장소에 훅이 없음 — 강제가 아예 걸리지 않았다');
       dbg.cfgInject = { foreignHook, targetHook };
     }
-    // ⑥ 공유 판정이 **모양이 아니라 실제 위치**로 — 대소문자만 다른 `.GIT/hooks` 는 공유가 아니다.
+    // ⑥ 공유 판정이 **모양이 아니라 실제 위치**로 — Windows 에서는 `.GIT/hooks` 가 `.git/hooks` 와
+    // 같은 위치라 비공유다. POSIX 에서는 서로 다른 외부 경로이므로 공유 위험으로 분류해야 한다.
     {
       const d = mk('casehooks');
       G(d, ['config', 'core.hooksPath', '.GIT/hooks']);
       const j = J(RP(d, ['enforce', 'status', '--path', d, '--json']));
-      if (!j || j.hooksPathShared !== false) bad.push(`⑥대소문자 차이를 공유로 오탐(hooksPathShared=${j && j.hooksPathShared})`);
-      dbg.caseHooks = { shared: j && j.hooksPathShared };
+      const expected = process.platform === 'win32' ? false : true;
+      if (!j || j.hooksPathShared !== expected) bad.push(`⑥플랫폼 경로 의미 오판(hooksPathShared=${j && j.hooksPathShared}, expected=${expected})`);
+      dbg.caseHooks = { shared: j && j.hooksPathShared, expected };
     }
     // ⑦ 연결된 worktree 사실을 고지한다(설정이 없어도 훅은 공용이다).
     {
@@ -14681,7 +14696,11 @@ total++;
           else {
             before = J(RP(main, ['enforce', 'status', '--path', main, '--json']));
             installed = J(RP(main, ['enforce', 'install', '--path', main, '--json', '--skip-verify']));
-            siblingCommit = G(sibling, ['commit', '--allow-empty', '-m', 'ancestor-junction-probe']);
+            // Some Git for Windows runners skip the pre-commit hook for an empty
+            // commit. Stage a real change so this always measures the normal path.
+            fs.writeFileSync(path.join(sibling, 'ancestor-junction-probe.txt'), 'probe\n');
+            G(sibling, ['add', '-A']);
+            siblingCommit = G(sibling, ['commit', '-m', 'ancestor-junction-probe']);
             if (!before || before.worktrees !== 2) bad.push(`③a 없는 훅 파일의 조상 junction을 못 풀어 형제 차단을 숨김(before=${before && before.worktrees})`);
             if (!installed || installed.worktrees !== 2) bad.push(`③a 설치 응답도 공유 worktree를 1개로 오보고(installed=${installed && installed.worktrees})`);
             if (!siblingCommit || siblingCommit.status === 0) bad.push('③a 픽스처가 실제 형제 커밋 차단을 증명하지 못함');
@@ -15188,16 +15207,21 @@ total++;
     return d;
   };
   try {
-    // ① 명시 주소가 child 억제를 이긴다 — 다만 **추론 경로의 억제는 그대로**여야 한다.
+    // ① 명시 주소는 상태 귀속에서 child 억제를 이긴다. presence는 부모의 env 주소까지 상속될 수
+    // 있으므로 child를 계속 억제한다. 실제 MCP 호출별 귀속은 바로 아래 행위검사가 증명한다.
     {
       const SP = require(path.resolve(__dirname, '..', 'lib', 'session-presence'));
       const plain = SP.deriveSessionKey({ LEERNESS_SESSION_ID: 'session-alpha01' });
       const child = SP.deriveSessionKey({ LEERNESS_SESSION_ID: 'session-alpha01', CLAUDE_CODE_CHILD_SESSION: '1' });
       const inferred = SP.deriveSessionKey({ CLAUDE_CODE_SESSION_ID: 'claude-sess-0001', CLAUDE_CODE_CHILD_SESSION: '1' });
+      const explicitSuppression = SP.suppressionReason({ LEERNESS_SESSION_ID: 'session-alpha01', CLAUDE_CODE_CHILD_SESSION: '1' }, true);
+      const inferredSuppression = SP.suppressionReason({ CLAUDE_CODE_SESSION_ID: 'claude-sess-0001', CLAUDE_CODE_CHILD_SESSION: '1' }, true);
       if (plain !== 'session-alpha01') bad.push('①명시 주소를 못 읽음 — 판별 불가');
       if (child !== 'session-alpha01') bad.push('①child 억제가 명시 주소를 삼킴');
       if (inferred !== null) bad.push('①추론 주소에서 child 억제가 사라짐 — sub-agent 가 별도 세션이 된다(회귀)');
-      dbg.keySource = { plain, child, inferredUnderChild: inferred };
+      if (explicitSuppression !== 'child-agent') bad.push(`①presence가 상속된 child 주소를 독립 세션으로 오인(${explicitSuppression})`);
+      if (inferredSuppression !== 'child-agent') bad.push(`①주소 없는 child presence 억제가 사라짐(${inferredSuppression})`);
+      dbg.keySource = { plain, child, inferredUnderChild: inferred, explicitSuppression, inferredSuppression };
     }
     // ② **행위** — 자식 세션 env 를 상속한 MCP 서버에서도 증거가 안 섞인다.
     {
@@ -15277,7 +15301,7 @@ total++;
     ok = bad.length === 0;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
-  console.log(ok ? `✓ AL(1.36.148) 명시 세션 주소가 child 억제를 이김(추론 억제는 유지) · 자식 env MCP 에서도 귀속 정상 · 경로형 run id 가 .leerness 밖으로 못 나감 · --path 에 파일 거절(디렉토리는 통과) · dry-run 이 **외부 명령 실행**까지 막음(플래그 없으면 실행) ${JSON.stringify(dbg)}`
+  console.log(ok ? `✓ AL(1.36.148) 상태용 명시 주소는 child에서도 유지·presence 상속 주소는 억제 · 자식 env MCP 에서도 귀속 정상 · 경로형 run id 가 .leerness 밖으로 못 나감 · --path 에 파일 거절(디렉토리는 통과) · dry-run 이 **외부 명령 실행**까지 막음(플래그 없으면 실행) ${JSON.stringify(dbg)}`
     : '✗ 1.36.148 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
   if (!ok) failed++;
 }
@@ -15385,7 +15409,8 @@ total++;
       const raw = String(G(d, ['rev-parse', '--git-path', 'hooks/pre-commit']).stdout || '').trim();
       const callerHook = path.isAbsolute(raw) ? raw : path.join(d, raw);
       const old = new Date(Date.now() - 72 * 3600 * 1000);
-      fs.utimesSync(path.join(d, '.harness', 'cache', 'sessions', 'e2e-enforce-nosystem.json'), old, old);
+      // 1.36.155부터 enforce freshness는 presence가 아니라 handoff 전용 marker를 본다.
+      fs.utimesSync(path.join(d, '.harness', 'cache', 'handoffs', 'e2e-enforce-nosystem.json'), old, old);
       fs.writeFileSync(path.join(d, 'after.txt'), 'after\n'); G(d, ['add', '-A']);
       const commit = G(d, ['commit', '-qm', 'must-be-blocked']);
       const gitModule = require(path.resolve(__dirname, '..', 'lib', 'git.js'));

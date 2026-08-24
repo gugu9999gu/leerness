@@ -119,6 +119,12 @@ async function waitForJson(file, timeoutMs = 10000) {
     firstRecord.sessionKey === 'probe-session-0001' && firstRecord.handoffCount === 1
       && Array.isArray(firstRecord.handoffHistory) && firstRecord.handoffHistory.length === 1,
     firstRecord);
+  const addressedChildId = 'addressed-child-0001';
+  must('child handoff with inherited explicit id', run(process.execPath,
+    [CLI, 'handoff', root, '--quiet', '--no-drift-check'],
+    { env: { ...handoffEnv(addressedChildId), CLAUDE_CODE_CHILD_SESSION: '1' } }));
+  assert('child does not merge inherited explicit id into parent presence',
+    !fs.existsSync(path.join(sessionDir, `${addressedChildId}.json`)), addressedChildId);
   const freshnessDir = path.join(root, '.harness', 'cache', 'handoffs');
   const proveAddressedEnforcement = (label, beforeEnv, expectedKey, handoffRunEnv = beforeEnv, afterEnv = beforeEnv) => {
     const before = run(process.execPath,

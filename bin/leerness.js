@@ -35,7 +35,7 @@ const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits:
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 const _cursorHook = require('../lib/cursor-session-hook');
 
-const VERSION = '1.36.159';
+const VERSION = '1.36.160';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -167,14 +167,201 @@ function _sleepSyncMs(ms) {
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(1, ms | 0)); }
   catch { const end = Date.now() + ms; while (Date.now() < end) {} }
 }
-// 1.9.303 (UR-0043, 외부리뷰 Codex/Opus): read-modify-write lost-update 방지 advisory 락.
-//   O_EXCL(wx) 원자적 생성으로 상호배제. 다른 프로세스가 보유 중이면 짧게 대기 후 재시도.
-//   stale(보유 프로세스 crash) 은 staleMs 초과 시 탈취. 타임아웃(maxWaitMs) 시 락 없이 진행(원자쓰기로 손상은 이미 방지, lost-update 만 rare 노출).
-const _heldLocks = new Set();  // 프로세스 내 재진입 추적 (중첩 _withLock 데드락 방지)
+// 1.9.303 (UR-0043, 외부리뷰 Codex/Opus): read-modify-write lost-update 방지 락.
+//   mkdir 원자적 생성으로 상호배제. 다른 프로세스가 보유 중이면 짧게 대기 후 재시도한다.
+//   1.36.160: PID/호스트/토큰 소유권을 기록하되 owner가 기록된 락은 자동 탈취하지 않고,
+//   기본 쓰기는 timeout 시 fail-closed 한다. 자동 회수는 mkdir 뒤 owner 쓰기 전의 빈 디렉터리만
+//   원자적 rmdir로 처리한다. fencing 없는 PID/mtime 판정은 clone/namespace에서 안전하지 않다.
+//   손실을 허용한 비핵심 telemetry 만 failOpen 을 명시한다.
+const _heldLocks = new Map();  // lockPath → owner token (프로세스 내 재진입 + 소유한 락만 해제)
 // 1.36.132: 락 파일을 "지금은 못 만든다" 로 읽어야 하는 오류들. Windows 에서는 상대가 unlink 하는 순간에
 //   열면 EPERM/EACCES 가, 파일 핸들이 아직 살아 있으면 EBUSY 가 난다 — 전부 **재시도 대상**이지 포기 사유가 아니다.
 const _LOCK_RETRY_CODES = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
 const _lockFailOpen = [];   // 보호 없이 진행한 기록(관측용) — 조용한 fail-open 을 막는다
+// Metadata-free lock directories are possible if a process dies between mkdir and the
+// metadata write. Owner records and legacy empty-file locks remain fail-closed because
+// ownership is unknowable; this duration is used only by adversarial age fixtures.
+const _LOCK_UNKNOWN_OWNER_STALE_MS = 5 * 60 * 1000;
+const _LOCK_LEASE = 'worker-v1';
+const _LOCK_OWNER_VERSION = 2;
+const _LOCK_OWNER_FILE_RE = /^owner-([a-f0-9]{32})\.json$/;
+// Date.now와 monotonic uptime의 차이는 이 Node 프로세스 인스턴스의 시작 시각이다.
+// 진단용 메타데이터이며 stale 자동 회수의 근거로 쓰지 않는다.
+const _PROCESS_STARTED_AT_MS = Math.round(Date.now() - process.uptime() * 1000);
+let _lockHostIdentityCache;
+let _lockPidScopeIdentityCache;
+function _readLockHostSeed(file) {
+  try { const v = String(fs.readFileSync(file, 'utf8') || '').trim(); return /^[a-f0-9]{64}$/i.test(v) ? v.toLowerCase() : null; }
+  catch { return null; }
+}
+function _persistentLockHostSeed() {
+  // Windows에는 Node 표준 API로 MachineGuid를 읽는 경로가 없다. roaming이 아닌 LOCALAPPDATA에
+  // 사용자·머신별 랜덤 seed를 한 번만 만들고, 동시 최초 생성은 wx로 한 승자만 허용한다.
+  const base = process.platform === 'win32'
+    ? String(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'))
+    : (process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support')
+      : String(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state')));
+  if (!base || !path.isAbsolute(base)) return null;
+  const dir = path.join(base, 'leerness'); const fp = path.join(dir, 'lock-host-id');
+  let seed = _readLockHostSeed(fp); if (seed) return seed;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const candidate = require('crypto').randomBytes(32).toString('hex');
+    fs.writeFileSync(fp, candidate + '\n', { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    return candidate;
+  } catch {}
+  // 다른 프로세스가 wx 경쟁에서 이겼지만 아직 쓰는 중일 수 있다. 짧게 재독하고, 끝내 확인되지
+  // 않으면 hostname으로 완화하지 않고 null(fail-closed)을 돌린다.
+  for (let i = 0; i < 4; i++) { _sleepSyncMs(10 + i * 10); seed = _readLockHostSeed(fp); if (seed) return seed; }
+  return null;
+}
+function _lockHostIdentity() {
+  if (_lockHostIdentityCache !== undefined) return _lockHostIdentityCache;
+  let raw = null;
+  try {
+    if (process.platform === 'linux') {
+      let machine = null; let boot = null;
+      for (const fp of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
+        try { const v = String(fs.readFileSync(fp, 'utf8') || '').trim(); if (/^[a-f0-9-]{16,}$/i.test(v)) { machine = v; break; } } catch {}
+      }
+      // 컨테이너/VM 복제에서 machine-id가 잘못 복제돼도 같은 공유 락의 로컬 머신으로 오인하지
+      // 않도록 boot_id를 반드시 함께 묶는다. 둘 중 하나라도 없으면 부분 식별자를 쓰지 않고
+      // 영속 랜덤 seed로 폴백한다. 재부팅 뒤 고아 락은 안전하게 fail-closed다.
+      try {
+        const v = String(fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8') || '').trim();
+        if (/^[a-f0-9-]{16,}$/i.test(v)) boot = v;
+      } catch {}
+      if (machine && boot) raw = `${machine}|boot:${boot}`;
+    }
+    if (!raw) raw = _persistentLockHostSeed();
+  } catch { raw = null; }
+  _lockHostIdentityCache = raw
+    ? require('crypto').createHash('sha256').update(`leerness-lock-host-v1|${process.platform}|${raw}`).digest('hex').slice(0, 32)
+    : null;
+  return _lockHostIdentityCache;
+}
+function _lockPidScopeIdentity() {
+  if (_lockPidScopeIdentityCache !== undefined) return _lockPidScopeIdentityCache;
+  const hostId = _lockHostIdentity();
+  if (!hostId) { _lockPidScopeIdentityCache = null; return null; }
+  let scope = hostId;
+  if (process.platform === 'linux') {
+    // machine-id/boot_id가 같은 컨테이너도 PID namespace가 다르면 상대 PID를 볼 수 없다.
+    // readlink 값(pid:[inode])은 같은 커널의 namespace 객체를 가리키므로, 이 값이 없으면
+    // kill(pid, 0)의 ESRCH를 "죽음"으로 해석할 근거가 없다.
+    try {
+      const ns = String(fs.readlinkSync('/proc/self/ns/pid') || '').trim();
+      if (!/^pid:\[[0-9]+\]$/.test(ns)) { _lockPidScopeIdentityCache = null; return null; }
+      scope = `${hostId}|${ns}`;
+    } catch { _lockPidScopeIdentityCache = null; return null; }
+  }
+  _lockPidScopeIdentityCache = require('crypto').createHash('sha256')
+    .update(`leerness-lock-pid-scope-v1|${process.platform}|${scope}`).digest('hex').slice(0, 32);
+  return _lockPidScopeIdentityCache;
+}
+let _lockHeartbeatWorker = null;
+let _lockHeartbeatUnavailable = false;
+function _ensureLockHeartbeat() {
+  if (_lockHeartbeatWorker) return true;
+  if (_lockHeartbeatUnavailable) return false;
+  try {
+    const { Worker } = require('worker_threads');
+    const worker = new Worker(`
+      'use strict';
+      const fs = require('fs');
+      const { parentPort } = require('worker_threads');
+      const locks = new Map();
+      function touch(ownerPath, token) {
+        try {
+          const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+          if (!owner || owner.token !== token || owner.lease !== 'worker-v1') { locks.delete(ownerPath); return; }
+          const d = new Date(); fs.utimesSync(ownerPath, d, d);
+        } catch { locks.delete(ownerPath); }
+      }
+      parentPort.on('message', (m) => {
+        if (!m || typeof m.ownerPath !== 'string') return;
+        if (m.op === 'add' && typeof m.token === 'string') { locks.set(m.ownerPath, m.token); touch(m.ownerPath, m.token); }
+        else if (m.op === 'remove') locks.delete(m.ownerPath);
+      });
+      const timer = setInterval(() => { for (const [p, t] of locks) touch(p, t); }, 1000);
+      if (timer.unref) timer.unref();
+    `, { eval: true });
+    worker.on('error', () => { _lockHeartbeatWorker = null; _lockHeartbeatUnavailable = true; });
+    worker.on('exit', (code) => { _lockHeartbeatWorker = null; if (code !== 0) _lockHeartbeatUnavailable = true; });
+    worker.unref();
+    _lockHeartbeatWorker = worker;
+    return true;
+  } catch { _lockHeartbeatUnavailable = true; return false; }
+}
+function _lockHeartbeat(op, ownerPath, token) {
+  try { if (_lockHeartbeatWorker) _lockHeartbeatWorker.postMessage({ op, ownerPath, token }); } catch {}
+}
+function _newLockOwner(lease) {
+  const hostId = _lockHostIdentity();
+  const pidScopeId = _lockPidScopeIdentity();
+  if (!hostId || !pidScopeId) {
+    const err = new Error('lock host or PID-scope identity is unavailable');
+    err.code = 'E_LOCK_HOST_ID';
+    throw err;
+  }
+  return {
+    v: _LOCK_OWNER_VERSION,
+    pid: process.pid,
+    host: String(os.hostname() || '').toLowerCase(),
+    hostId,
+    pidScopeId,
+    token: require('crypto').randomBytes(16).toString('hex'),
+    lease: lease ? _LOCK_LEASE : null,
+    processStartedAtMs: _PROCESS_STARTED_AT_MS,
+    createdAt: new Date().toISOString()
+  };
+}
+function _lockOwnerPath(lockPath, token) {
+  return path.join(lockPath, `owner-${token}.json`);
+}
+function _readLockOwner(ownerPath) {
+  let raw = null;
+  try { raw = fs.readFileSync(ownerPath, 'utf8'); }
+  catch (e) { return { raw: null, owner: null, error: (e && e.code) || 'unknown' }; }
+  try {
+    const value = JSON.parse(raw);
+    if (!value || !Number.isSafeInteger(value.pid) || value.pid <= 0
+      || typeof value.host !== 'string' || typeof value.token !== 'string' || value.token.length < 16) {
+      return { raw, owner: null, error: null };
+    }
+    return { raw, owner: value, error: null };
+  } catch { return { raw, owner: null, error: null }; }
+}
+function _sameLockDirectory(a, b) {
+  if (!a || !b || !a.isDirectory() || !b.isDirectory()) return false;
+  // ino/dev가 제공되는 플랫폼에서는 경로가 같은 새 디렉터리로 바뀐 ABA까지 구분한다.
+  // Windows처럼 둘 중 하나가 0이면 아래 단독-owner 검사가 이식 가능한 안전망이다.
+  return !a.ino || !b.ino || (a.ino === b.ino && a.dev === b.dev);
+}
+function _reclaimLockDirectory(lockPath, staleMs) {
+  let dirStat = null; let names = null;
+  try { dirStat = fs.statSync(lockPath); names = fs.readdirSync(lockPath); } catch { return false; }
+  if (!dirStat.isDirectory()) return false;
+  if (names.length === 0) {
+    // mkdir 뒤 owner 기록 전에 죽은 프로세스. 살아 있는 생성자가 뒤늦게 기록하면 rmdir 는 ENOTEMPTY로
+    // 실패하고, rmdir 가 먼저 이기면 그 생성자의 owner 쓰기가 실패해 임계구역에 들어오지 못한다.
+    if (!(Date.now() - dirStat.mtimeMs > staleMs)) return false;
+    try { fs.rmdirSync(lockPath); return true; } catch { return false; }
+  }
+  // owner가 하나라도 기록된 뒤에는 PID/host/mtime으로 자동 회수하지 않는다. VM 스냅샷·PID
+  // namespace·공유 볼륨에서는 어느 신호도 "원 소유자가 다시 실행되지 않는다"는 fencing 증명이
+  // 아니다. 잠금 소유자 엔트리는 수동 확인 후에만 복구한다(가용성보다 데이터 보존 우선).
+  return false;
+}
+function _reclaimStaleLock(lockPath, staleMs) {
+  let stat = null;
+  try { stat = fs.statSync(lockPath); } catch { return false; }
+  if (stat.isDirectory()) return _reclaimLockDirectory(lockPath, staleMs);
+  // v1 고정 파일도 살아 있는 구버전 프로세스가 재개할 수 있어 자동 삭제하지 않는다.
+  if (stat.isFile()) return false;
+  return false;
+}
 // 1.36.132 (검수 P1, 재현): 부모가 stderr 파이프를 먼저 닫으면 우리 경고 한 줄이 **비동기 EPIPE** 로 올라와
 //   완전한 JSON 을 이미 출력한 성공 명령이 exit 1 이 됐다. try/catch 는 동기 예외만 잡으므로 소용이 없다.
 //   경고를 못 전달하는 것은 감수한다 — 그 때문에 성공을 실패로 보고하는 것은 감수하지 않는다.
@@ -186,16 +373,47 @@ function _withLock(targetPath, fn, opts = {}) {
   if (has('--dry-run')) return fn();
   let bailCode = null, lastCode = null;
   if (_heldLocks.has(lockPath)) return fn();  // 이미 이 프로세스가 보유 → 재진입(중첩 호출 안전)
-  const maxWaitMs = opts.maxWaitMs || 10000;  // 1.9.375 (UR-0084): 5s→10s — 고부하 경합 시 fail-open(락 없이 진행) 전 인내 상향, lost-update 창 축소
-  const staleMs = opts.staleMs || 30000;
+  // 1.36.160: Windows CI의 실제 24세션 경합은 직렬 구간이 10초를 넘어 2개 쓰기가 fail-open 했다.
+  // 토큰 owner와 기본 fail-closed 정책 아래에서 대기할 여유를 두어 느린 러너에서도 보호를 유지한다.
+  const maxWaitMs = opts.maxWaitMs == null ? 35000 : Math.max(0, Number(opts.maxWaitMs) || 0);
+  const staleMs = opts.staleMs == null ? 30000 : Math.max(0, Number(opts.staleMs) || 0);
   // ⚠ 여기서 mkdirp 를 빼면 안 된다(1.36.108 에서 한 번 뺐다가 게이트가 5건을 잡았다).
   //   `state`·hunts 등 여러 호출부가 **이 mkdirp 가 만들어 주는 디렉토리에 기대어** 곧바로 파일을 쓴다 —
   //   공유 헬퍼의 부작용을 없애면 그 의존이 한꺼번에 끊긴다. 미초기화 디렉토리 문제는 락을 다는 쪽에서 막는다.
   try { mkdirpRaw(path.dirname(lockPath)); } catch {}   // 1.36.144: 락은 dry-run 가드 예외(막으면 무보호 진행으로 떨어진다)
   const start = Date.now();
-  let held = false;
+  let owner = null; let ownerPath = null; let held = false;
   while (Date.now() - start <= maxWaitMs) {
-    try { const fd = fs.openSync(lockPath, 'wx'); fs.closeSync(fd); held = true; break; }  // 원자적 배타 생성
+    try {
+      let fd = null; let madeDir = false; let madeOwner = false; let createdDirStat = null;
+      try {
+        fs.mkdirSync(lockPath); madeDir = true;            // 원자적 배타 디렉터리 생성
+        createdDirStat = fs.statSync(lockPath);
+        owner = _newLockOwner(_ensureLockHeartbeat());     // 획득 시도마다 새 토큰 — 경로 재사용 금지
+        ownerPath = _lockOwnerPath(lockPath, owner.token);
+        fd = fs.openSync(ownerPath, 'wx'); madeOwner = true;
+        fs.writeFileSync(fd, JSON.stringify(owner) + '\n', 'utf8');
+        fs.closeSync(fd); fd = null;
+        // 생성/쓰기 중 stale 빈 디렉터리 회수와 경합하면 현재 경로가 다른 디렉터리일 수 있다.
+        // 디렉터리 인스턴스(가능한 플랫폼)와 "내 owner 하나뿐"을 함께 확인한다. 단순 토큰 확인만
+        // 하면 교체 디렉터리에 두 owner가 생겨 둘 다 임계구역에 들어갈 수 있다.
+        const currentDirStat = fs.statSync(lockPath);
+        const names = fs.readdirSync(lockPath);
+        const confirmed = _readLockOwner(ownerPath);
+        if (!_sameLockDirectory(createdDirStat, currentDirStat)
+          || names.length !== 1 || names[0] !== path.basename(ownerPath)
+          || !confirmed || confirmed.error || !confirmed.owner || confirmed.owner.token !== owner.token) {
+          const verifyErr = new Error('lock ownership was not durable after creation');
+          verifyErr.code = 'E_LOCK_OWNERSHIP'; throw verifyErr;
+        }
+      } catch (e) {
+        if (fd !== null) { try { fs.closeSync(fd); } catch {} }
+        if (madeOwner && ownerPath) { try { fs.unlinkSync(ownerPath); } catch {} }
+        if (madeDir) { try { fs.rmdirSync(lockPath); } catch {} }
+        throw e;
+      }
+      held = true; break;
+    }
     catch (e) {
       // 1.36.132 (P1, 실측): 종전엔 `EEXIST` 가 아니면 즉시 **락 없이 진행**했다. 그런데 Windows 에서
       //   상대가 락을 지우는 그 순간에 열면 `EPERM` 이 난다 — 즉 **경합이 심할수록** 보호가 꺼졌다.
@@ -205,47 +423,101 @@ function _withLock(targetPath, fn, opts = {}) {
       //   이 코드들은 전부 "지금은 못 잡는다" 이지 "잡을 수 없다" 가 아니다 → 기다린다.
       lastCode = e.code || null;   // 1.36.132 (검수 P2): 10초를 기다린 뒤 'timeout' 이라고만 하면 영구 권한 오류를 경합으로 오진한다
       if (!_LOCK_RETRY_CODES.has(e.code)) { bailCode = e.code || 'unknown'; break; }
-      try { const st = fs.statSync(lockPath); if (Date.now() - st.mtimeMs > staleMs) { fs.unlinkSync(lockPath); continue; } } catch {}
+      if (_reclaimStaleLock(lockPath, staleMs)) continue;
       _sleepSyncMs(15 + Math.floor((Date.now() - start) / 50));  // 점증 backoff
     }
   }
-  if (held) _heldLocks.add(lockPath);
+  if (held) {
+    _heldLocks.set(lockPath, owner.token);
+    if (owner.lease === _LOCK_LEASE) _lockHeartbeat('add', ownerPath, owner.token);
+  }
   else {
-    // 1.36.132: fail-open 은 **정책**이라 유지하되(명령이 멈추면 안 된다), 조용히 하지는 않는다.
-    //   종전엔 보호 없이 진행하면서 아무 말도 안 했다 — 유실이 나도 사용자에겐 성공으로만 보였다.
-    //   stdout 은 `--json` 계약이 있으므로 건드리지 않는다. 경고는 stderr 로만 낸다.
     const _why = bailCode || (lastCode && lastCode !== 'EEXIST' ? `${lastCode} 지속(${maxWaitMs}ms)` : 'timeout');
-    _lockFailOpen.push({ file: path.basename(targetPath), reason: _why, waitedMs: Date.now() - start });
-    if (process.env.LEERNESS_NO_LOCK_WARN !== '1') {
-      try {
-        process.stderr.write(`⚠ 락 획득 실패 — 보호 없이 진행합니다: ${path.basename(targetPath)} (${_why}). 동시 실행 중인 다른 세션이 있으면 이 쓰기가 유실될 수 있습니다.\n`);
-      } catch { /* stderr 가 닫혀 있어도 진행은 막지 않는다 */ }
+    const waitedMs = Date.now() - start;
+    if (opts.failOpen === true) {
+      _lockFailOpen.push({ file: path.basename(targetPath), reason: _why, waitedMs });
+      if (process.env.LEERNESS_NO_LOCK_WARN !== '1') {
+        try {
+          process.stderr.write(`⚠ 락 획득 실패 — 비핵심 기록만 보호 없이 진행합니다: ${path.basename(targetPath)} (${_why}).\n`);
+        } catch { /* stderr 가 닫혀 있어도 진행은 막지 않는다 */ }
+      }
+    } else {
+      const err = new Error(`락 획득 실패 — 동시 쓰기로부터 데이터를 보호하기 위해 중단합니다: ${path.basename(targetPath)} (${_why})`);
+      err.code = bailCode === 'E_LOCK_HOST_ID' ? 'E_LOCK_HOST_ID' : 'E_LOCK_TIMEOUT';
+      err.lockPath = lockPath; err.waitedMs = waitedMs;
+      throw err;
     }
   }
   // 1.36.108 (T-0097, 자체 적대 검사에서 발견): fn 이 **프로미스를 돌려주면** 동기 finally 가 그 즉시 락을 푼다 —
   //   비동기 본체(네트워크 fetch 등)는 락 없이 도는데 호출부는 보호받는다고 믿는다. 가장 나쁜 조합이다
   //   (`provider sync` 를 감싸면서 실제로 이 형태를 만들었다). thenable 이면 **정착 후에** 푼다.
-  //   1.36.132 (검수 P1): 해제 실패를 조용히 삼키면 **고아 락**이 남고 뒤따르는 쓰기들이 10초씩 기다렸다가
-  //   한꺼번에 무보호로 진행한다(stale 30초 탈취 전까지). 잠깐 다시 시도하고, 그래도 안 되면 말한다.
+  //   1.36.132 (검수 P1) + 1.36.160: 해제 실패를 조용히 삼키면 **고아 락**이 남는다. 기본 쓰기는
+  //   더 이상 자동 탈취하지 않으므로 잠깐 재시도하고, 그래도 안 되면 현재 성공 주장 자체를 거부한다.
   const release = () => {
-    if (!held) return;
+    if (!held) return null;
+    _lockHeartbeat('remove', ownerPath, owner.token);
     _heldLocks.delete(lockPath);
+    let ownerRemoved = false;
+    const releaseFailure = (reason, code) => {
+      _lockFailOpen.push({ file: path.basename(targetPath), reason, waitedMs: 0 });
+      const err = new Error(`락 소유권을 확인하지 못해 작업 결과를 성공으로 확정하지 않습니다: ${path.basename(lockPath)} (${reason})`);
+      err.code = code || 'E_LOCK_RELEASE'; err.lockPath = lockPath;
+      if (process.env.LEERNESS_NO_LOCK_WARN !== '1') {
+        try { process.stderr.write(`⚠ ${err.message}\n`); } catch {}
+      }
+      return err;
+    };
     for (let i = 0; i < 6; i++) {
-      try { fs.unlinkSync(lockPath); return; }
-      catch (e) { if (e.code === 'ENOENT') return; _sleepSyncMs(10 + i * 10); }
+      try {
+        if (!ownerRemoved) {
+          const current = _readLockOwner(ownerPath);
+          if (!current || current.error) {
+            if (current && current.error === 'ENOENT') {
+              return releaseFailure('ownership-lost', 'E_LOCK_OWNERSHIP_LOST');
+            }
+            const readErr = new Error(`lock owner read failed: ${(current && current.error) || 'unknown'}`);
+            readErr.code = (current && current.error) || 'unknown';
+            throw readErr;
+          }
+          if (!current.owner || current.owner.token !== owner.token) {
+            return releaseFailure('ownership-lost', 'E_LOCK_OWNERSHIP_LOST');
+          }
+          fs.unlinkSync(ownerPath); ownerRemoved = true;
+        }
+        fs.rmdirSync(lockPath); return null;
+      }
+      catch (e) {
+        if (e.code === 'ENOENT') {
+          return ownerRemoved ? null : releaseFailure('ownership-lost', 'E_LOCK_OWNERSHIP_LOST');
+        }
+        if (e.code === 'ENOTEMPTY' || e.code === 'EEXIST') {
+          // 내 owner를 지운 뒤 다른 획득자가 새 디렉터리를 만든 정상 인계 창이다. 비재귀 삭제를
+          // 유지해 새 owner를 보존하고, 이미 끝난 내 임계구역의 성공은 훼손하지 않는다.
+          return ownerRemoved ? null : releaseFailure('ownership-lost', 'E_LOCK_OWNERSHIP_LOST');
+        }
+        _sleepSyncMs(10 + i * 10);
+      }
     }
-    _lockFailOpen.push({ file: path.basename(targetPath), reason: 'release-failed', waitedMs: 0 });
-    if (process.env.LEERNESS_NO_LOCK_WARN !== '1') {
-      try { process.stderr.write(`⚠ 락 파일을 지우지 못했습니다: ${path.basename(lockPath)} — 다음 쓰기가 최대 30초 기다린 뒤 진행합니다.\n`); } catch {}
-    }
+    return releaseFailure('release-failed', 'E_LOCK_RELEASE');
   };
   let out;
   try { out = fn(); }
-  catch (e) { release(); throw e; }
-  if (out && typeof out.then === 'function') {
-    return out.then(v => { release(); return v; }, e => { release(); throw e; });
+  catch (e) {
+    const releaseErr = release();
+    if (releaseErr && e && typeof e === 'object') e.lockReleaseError = releaseErr.code;
+    throw e;
   }
-  release();
+  if (out && typeof out.then === 'function') {
+    return out.then(v => {
+      const releaseErr = release(); if (releaseErr) throw releaseErr; return v;
+    }, e => {
+      const releaseErr = release();
+      if (releaseErr && e && typeof e === 'object') e.lockReleaseError = releaseErr.code;
+      throw e;
+    });
+  }
+  const releaseErr = release();
+  if (releaseErr) throw releaseErr;
   return out;
 }
 // 1.9.327 (UR-0025): _getLocalTz / _formatLocal → lib/pure-utils.js 로 이동 (순수 TZ/날짜 포맷, require 사용).
@@ -3633,7 +3905,7 @@ function _selfTestCases() {
     { name: 'shell 주입 표면 제거: fetchNpmLatest execFile+pkg검증 + runCommandSafe argList 인용 (UR-0040 외부리뷰 1.9.300)', run: () => { const src = read(__filename); const npmFix = /'view', pkg, 'version'/.test(src) && !/cp\.exec\(.npm view \$\{pkg\}/.test(src) && /패키지명 charset/.test(src) && !/cp\.execFile\('npm', \[[^\]]*\], \{ timeout: 12000, shell:/.test(src); const argFix = /argList\.map\(_shellQuoteArg\)\.join/.test(src); return npmFix && argFix && typeof _shellQuoteArg === 'function'; } },
     { name: 'MCP requiredTier 메타데이터 + 정책 minTier 게이트 (UR-0041 외부리뷰 1.9.301)', run: () => { const T = require('../lib/mcp-tools'); const allValid = T.length >= 81 && T.every(t => PERMISSION_TIERS.includes(t.requiredTier)); const get = n => (T.find(t => t.name === n) || {}).requiredTier; const classOk = get('leerness_state_record') === 'safe-write' && get('leerness_provider_add') === 'safe-write' && get('leerness_web') === 'network' && get('leerness_handoff') === 'safe-write' && get('leerness_audit') === 'safe-write' && get('leerness_task_export') === 'project-write'; const src = read(__filename); const gateOk = /_tierRank\(minTier\) > _tierRank\(required\)/.test(src) && /_policyEnforce\(targetPath, cliArgs\.join\(' '\), _toolDef/.test(src); return allValid && classOk && gateOk; } },
     { name: 'verify-claim git diff 시맨틱 교차검증: _gitChangedFiles/_claimFileInGit + strict FAIL 통합 (UR-0042 외부리뷰 1.9.302)', run: () => { const fnOk = typeof _gitChangedFiles === 'function' && typeof _claimFileInGit === 'function'; const matchOk = _claimFileInGit('src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('./src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('other.js', new Set(['src/api.js'])) === false && _claimFileInGit('x', null) === null; const src = read(__filename); const wired = /git diff 교차검증/.test(src) && /\|\| !gitClaimOk/.test(src) && /_gitChangedFiles\(root\)/.test(src); return fnOk && matchOk && wired; } },
-    { name: '_withLock/_updateRun: lost-update 락(O_EXCL+재진입) + 적용 (UR-0043 외부리뷰 1.9.303)', run: () => { const src = read(__filename); const fnOk = typeof _withLock === 'function' && typeof _sleepSyncMs === 'function' && typeof _updateRun === 'function'; const reentrant = /if \(_heldLocks\.has\(lockPath\)\) return fn\(\)/.test(src); const excl = /fs\.openSync\(lockPath, 'wx'\)/.test(src); const applied = /const id = _withLock\(progressPath\(root\)/.test(src) && /_updateRun\(root, curId/.test(src); return fnOk && reentrant && excl && applied; } },
+    { name: '_withLock/_updateRun: lost-update 락(원자적 디렉터리+재진입) + 적용 (UR-0043 외부리뷰 1.9.303)', run: () => { const src = read(__filename); const fnOk = typeof _withLock === 'function' && typeof _sleepSyncMs === 'function' && typeof _updateRun === 'function'; const reentrant = /if \(_heldLocks\.has\(lockPath\)\) return fn\(\)/.test(src); const excl = /fs\.mkdirSync\(lockPath\)/.test(src) && src.includes('owner-${token}.json'); const applied = /const id = _withLock\(progressPath\(root\)/.test(src) && /_updateRun\(root, curId/.test(src); return fnOk && reentrant && excl && applied; } },
     { name: 'lib/analyzers: 분석/검증 함수 4종 모듈 단일출처 분리 (UR-0025 1.9.304)', run: () => { const m = require('../lib/analyzers'); return m._evidenceQuality === _evidenceQuality && m._shellGuardAnalyze === _shellGuardAnalyze && m._parseEvidenceStats === _parseEvidenceStats && m._claimFileInGit === _claimFileInGit && !/function _evidenceQuality\(evidence\) \{/.test(read(__filename)) && !/function _shellGuardAnalyze\(cmd, ctx\) \{/.test(read(__filename)); } },
     { name: '17th헌트: _claimFileInGit bare-basename 충돌 차단 + scan .json5/.jsonc 포함 (1.35.5)', run: () => { const a = require('../lib/analyzers'); const collisionFixed = a._claimFileInGit('src/test.js', new Set(['test.js'])) !== true; const forwardOk = a._claimFileInGit('test.js', new Set(['src/test.js'])) === true; const exactOk = a._claimFileInGit('src/a.js', new Set(['src/a.js'])) === true; const nestedReverseOk = a._claimFileInGit('x/src/a.js', new Set(['src/a.js'])) === true; const src = read(__filename); const json5Ext = src.includes("'.js" + "on5'") && src.includes("'.js" + "onc'"); return collisionFixed && forwardOk && exactOk && nestedReverseOk && json5Ext; } },
     { name: '18th 위임실증: _harnessBrief 계약 브리프(handoff/task/verify-claim/session close, backtick·달러-free) + dispatch 접두 와이어 + bench stdin ignore (1.35.6)', run: () => {
@@ -4388,7 +4660,7 @@ function _selfTestCases() {
     { name: 'UR-0073 Phase B: _composeTeamPlan dry-run 실행 계획 (멤버별 dispatch, 실행 없음) 행위 (1.9.372)', run: () => { const m = require('../lib/pure-utils'); if (typeof _composeTeamPlan !== 'function' || m._composeTeamPlan !== _composeTeamPlan) return false; const team = { id: 'rev', name: 'R', purpose: 'PR 리뷰', personas: ['security', 'perf'], members: ['claude', 'codex'], schedule: 'manual' }; const p1 = _composeTeamPlan(team, '점검'); const ok1 = p1.steps.length === 2 && p1.task === '점검' && p1.steps[0].member === 'claude' && p1.steps[0].suggestedCommand.includes('agents dispatch') && p1.steps[0].suggestedCommand.includes('--to claude') && p1.steps[0].dispatchPrompt.includes('security'); const p2 = _composeTeamPlan(team, null); const ok2 = p2.task === 'PR 리뷰'; const p3 = _composeTeamPlan({ id: 'e', personas: [], members: [] }, 'x'); const ok3 = p3.steps.length === 0 && p3.memberCount === 0; return ok1 && ok2 && ok3; } },
     { name: 'UR-0073 Phase C: _teamHandoffReminders 스케줄 알림 (비-manual·active 만, 실행 트리거 아님) 행위 (1.9.373) + i18n en(1.31.3)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamHandoffReminders !== 'function' || m._teamHandoffReminders !== _teamHandoffReminders) return false; const r = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'] }, { id: 'man', schedule: 'manual', status: 'active' }, { id: 'paused', schedule: 'daily', status: 'paused' }]); const behaviorOk = r.length === 1 && r[0].includes('rev') && r[0].includes('every-session') && r[0].includes('team preview rev') && !r.join('|').includes('man') && !r.join('|').includes('paused'); const _H = /[가-힣]/; const en = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'], review: true }], 'en')[0] || ''; const ko = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'], review: true }])[0] || ''; const i18nOk = !_H.test(en) && /2 members/.test(en) && /review needed/.test(en) && /preview:/.test(en) && _H.test(ko) && /2명/.test(ko) && /검수필요/.test(ko); return behaviorOk && i18nOk; } },
     { name: 'UR-0074: _cadenceAssessment 릴리스 빈도 평가 (임계값) 행위 (1.9.374)', run: () => { const m = require('../lib/pure-utils'); if (typeof _cadenceAssessment !== 'function' || m._cadenceAssessment !== _cadenceAssessment || typeof releaseCadenceCmd !== 'function') return false; return _cadenceAssessment(7, 1, 1).level === 'very-high' && _cadenceAssessment(3, 1, 1).level === 'high' && _cadenceAssessment(1, 1, 1).level === 'moderate' && _cadenceAssessment(0.2, 1, 1).level === 'healthy' && _cadenceAssessment(7, 1, 1).recommendation.length > 0; } },
-    { name: 'UR-0084: _withLock 획득/재진입/해제 + maxWaitMs 하드닝(10s) 행위 (1.9.375)', run: () => { if (typeof _withLock !== 'function') return false; const src = read(__filename); const hardened = /maxWaitMs = opts\.maxWaitMs \|\| 10000/.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lock_')); try { const target = path.join(tmp, 'f.md'); let reentrant = false; const lockSeen = _withLock(target, () => { const exists = fs.existsSync(target + '.lock'); reentrant = (_withLock(target, () => 42) === 42); return exists; }); const cleaned = !fs.existsSync(target + '.lock'); return hardened && lockSeen === true && reentrant === true && cleaned; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
+    { name: 'UR-0084 + 1.36.160: _withLock 35s 대기 + 토큰 소유권 + owner fail-closed 행위', run: () => _p0160LockOwnershipOk() },
     { name: 'UR-0073 Phase D: _teamDeployGate 이중 게이트 (dry-run 기본/env 게이트/실행) 행위 (1.9.376)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamDeployGate !== 'function' || m._teamDeployGate !== _teamDeployGate) return false; const team = { id: 'd', deployCommand: 'echo hi' }; const noCmd = _teamDeployGate({ id: 'x' }, { yes: true, envOn: true }).mode === 'no-command'; const dry = _teamDeployGate(team, { yes: false, envOn: true }).mode === 'dry-run'; const gated = _teamDeployGate(team, { yes: true, envOn: false }).mode === 'gated'; const exec = _teamDeployGate(team, { yes: true, envOn: true }).mode === 'execute'; return noCmd && dry && gated && exec; } },
     { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + 빌더 동작 (1.9.377)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide('.leerness', '9.9.9', '2026-01-01T00:00:00.000Z'); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString())'); /* 1.36.126 (T-0107): 제목 리터럴('마이그레이션 안내')을 붙잡던 자리 — 그 절이 바로 **AI 를 죽은 사본으로 안내**하고 있었다. 제목이 아니라 계약을 건다: ① `.leerness` 상황을 다루는 절이 여전히 있고 ② 그 절이 "우선 사용/가야 함" 같은 **지시**를 하지 않는다(생성 결과 문자열에 대한 행위 단언 — 소스 자기참조가 아니다). */ const guideSafe = /\.leerness/.test(g) && !/우선 사용/.test(g) && !/로 가야 함/.test(g) && /읽지 마십시오/.test(g); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && guideSafe && wrapperThin; } },
     { name: 'UR-0073: team MCP 도구 2종(read-only) 정의 + dispatch 와이어 (1.9.378)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const tl = tools.find(t => t.name === 'leerness_team_list'); const tp = tools.find(t => t.name === 'leerness_team_preview'); const defsOk = tl && tl.requiredTier === 'read-only' && tp && tp.requiredTier === 'read-only' && tp.inputSchema.required && tp.inputSchema.required.includes('id'); const wired = src.includes("case " + "'leerness_team_list':") && src.includes("case " + "'leerness_team_preview':") && /cliArgs = \['team', 'list'/.test(src) && /cliArgs = \['team', 'preview'/.test(src); return !!defsOk && wired; } },
@@ -6855,10 +7127,15 @@ function _selfTestCases() {
       if (_cur.agent !== 'unknown' || !_cur.evidence.includes('CURSOR_AGENT')) return false;
       // ④ 억제 — 각 사유가 실제로 발화하고, 정상 조건에서는 null(대조군)
       const base = { CLAUDE_CODE_SESSION_ID: 'abcdefgh' };
+      const inheritedChild = { LEERNESS_SESSION_ID: 'addressed-child-01', CLAUDE_CODE_CHILD_SESSION: '1' };
       if (SP.suppressionReason(base, true) !== null) return false;
       if (SP.suppressionReason(Object.assign({}, base, { LEERNESS_INTERNAL: '1' }), true) !== 'internal') return false;
       if (SP.suppressionReason(Object.assign({}, base, { LEERNESS_HOOK: '1' }), true) !== 'hook') return false;
       if (SP.suppressionReason(Object.assign({}, base, { CLAUDE_CODE_CHILD_SESSION: '1' }), true) !== 'child-agent') return false;
+      // 상태 귀속은 MCP가 호출별 명시 주소를 사용할 수 있지만, presence는 부모 주소를 상속한 child를
+      // 독립 세션으로 오인하지 않는다.
+      if (SP.deriveSessionKey(inheritedChild) !== 'addressed-child-01'
+        || SP.suppressionReason(inheritedChild, true) !== 'child-agent') return false;
       if (SP.suppressionReason(Object.assign({}, base, { CI: '1' }), true) !== 'ci') return false;
       //    (검수 P2, 실측 재현) `CI="false"`/`"0"` 은 **억제가 아니다** — 명시적으로 아니라고 말한 환경이
       //    조용히 등록되지 않던 결함. 참/거짓 양쪽을 다 건다(한쪽만 재면 '전부 억제'가 통과한다).
@@ -9202,6 +9479,264 @@ function _p0097AsyncLockOk() {
     try { _withLock(target, () => badThenable); } catch { rejThrew = true; }
     const rejReleased = rejThrew && !fs.existsSync(lockFile);
     return heldWhilePending === true && releasedAfterSettle && syncReleased && errReleased && rejReleased;
+  } catch { return false; }
+  finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
+}
+// 1.36.160 (외부 Codex P1): maxWait(35s)가 stale(30s)를 넘는 순간 살아 있는 장기 작업을
+// 탈취하던 구조와 고정 파일 unlink TOCTOU를 함께 막았다. 고유 owner가 있으면 자동 회수하지 않는다.
+function _p0160LockOwnershipOk() {
+  const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-p160lk-'));
+  const target = path.join(arena, 'store.json');
+  const lockDir = target + '.lock';
+  const host = String(os.hostname() || '').toLowerCase();
+  const hostId = _lockHostIdentity();
+  const pidScopeId = _lockPidScopeIdentity();
+  const ownerBody = (pid, token, ownerHost = host, lease = null,
+    processStartedAtMs = pid === process.pid ? _PROCESS_STARTED_AT_MS : null,
+    ownerHostId = ownerHost === host ? hostId : null,
+    ownerPidScopeId = ownerHostId === hostId ? pidScopeId : null,
+    ownerVersion = _LOCK_OWNER_VERSION) => JSON.stringify({
+    v: ownerVersion, pid, host: ownerHost, hostId: ownerHostId, pidScopeId: ownerPidScopeId,
+    token, lease, processStartedAtMs,
+    createdAt: new Date(0).toISOString()
+  }) + '\n';
+  const agePath = (p, ms) => { const d = new Date(Date.now() - ms); fs.utimesSync(p, d, d); };
+  const cleanLock = () => { try { fs.rmSync(lockDir, { recursive: true, force: true }); } catch {} };
+  const seedOwner = (pid, token, ownerHost = host, lease = null, ageMs = 1000, body = null,
+    processStartedAtMs = pid === process.pid ? _PROCESS_STARTED_AT_MS : null,
+    ownerHostId = ownerHost === host ? hostId : null,
+    ownerPidScopeId = ownerHostId === hostId ? pidScopeId : null,
+    ownerVersion = _LOCK_OWNER_VERSION) => {
+    cleanLock(); fs.mkdirSync(lockDir);
+    const p = _lockOwnerPath(lockDir, token);
+    fs.writeFileSync(p, body === null
+      ? ownerBody(pid, token, ownerHost, lease, processStartedAtMs, ownerHostId,
+        ownerPidScopeId, ownerVersion) : body);
+    agePath(p, ageMs); return p;
+  };
+  try {
+    let reentrant = false; let metadataOk = false; let heartbeatOk = false;
+    const normal = _withLock(target, () => {
+      const names = fs.readdirSync(lockDir);
+      const ownerPath = path.join(lockDir, names[0] || 'missing');
+      const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+      metadataOk = names.length === 1 && _LOCK_OWNER_FILE_RE.test(names[0])
+        && owner.v === _LOCK_OWNER_VERSION && owner.pid === process.pid
+        && owner.host === host && owner.lease === _LOCK_LEASE
+        && /^[a-f0-9]{32}$/.test(hostId || '') && owner.hostId === hostId
+        && /^[a-f0-9]{32}$/.test(pidScopeId || '') && owner.pidScopeId === pidScopeId
+        && owner.processStartedAtMs === _PROCESS_STARTED_AT_MS
+        && /^[a-f0-9]{32}$/.test(owner.token) && ownerPath === _lockOwnerPath(lockDir, owner.token);
+      reentrant = _withLock(target, () => 42) === 42;
+      const beforeBeat = fs.statSync(ownerPath).mtimeMs;
+      _sleepSyncMs(1800);  // 메인 스레드가 막혀도 진단용 heartbeat freshness는 관측 가능해야 한다.
+      heartbeatOk = fs.statSync(ownerPath).mtimeMs > beforeBeat;
+      return fs.existsSync(lockDir);
+    });
+    const normalOk = normal === true && metadataOk && reentrant && heartbeatOk && !fs.existsSync(lockDir);
+
+    // 로컬 hostId를 만들 수 없으면 owner를 쓰거나 임계구역에 들어가지 않는다.
+    const identityTarget = path.join(arena, 'no-host-id.json');
+    const savedHostIdentity = _lockHostIdentityCache;
+    let noIdentityRan = false; let noIdentityCode = null;
+    try {
+      _lockHostIdentityCache = null;
+      _withLock(identityTarget, () => { noIdentityRan = true; }, { maxWaitMs: 5, staleMs: 1 });
+    } catch (e) { noIdentityCode = e && e.code; }
+    finally { _lockHostIdentityCache = savedHostIdentity; }
+    const noIdentityProtected = !noIdentityRan && noIdentityCode === 'E_LOCK_HOST_ID'
+      && !fs.existsSync(identityTarget + '.lock');
+
+    const retryTarget = path.join(arena, 'release-retry.json');
+    const retryLock = retryTarget + '.lock';
+    const originalRead = fs.readFileSync; let releaseReadRetried = false; let armReleaseRead = false;
+    let retryOwnerPath = null; let retryResult = null;
+    try {
+      fs.readFileSync = function (file, ...rest) {
+        if (armReleaseRead && !releaseReadRetried && retryOwnerPath
+          && path.resolve(String(file)) === path.resolve(retryOwnerPath)) {
+          releaseReadRetried = true;
+          const err = new Error('simulated transient Windows lock read'); err.code = 'EPERM'; throw err;
+        }
+        return originalRead.call(fs, file, ...rest);
+      };
+      retryResult = _withLock(retryTarget, () => {
+        retryOwnerPath = path.join(retryLock, fs.readdirSync(retryLock)[0]); armReleaseRead = true; return 9;
+      });
+    } finally { fs.readFileSync = originalRead; }
+    const releaseRetryOk = retryResult === 9 && releaseReadRetried && !fs.existsSync(retryLock);
+
+    const liveToken = 'a'.repeat(32);
+    const livePath = seedOwner(process.pid, liveToken);
+    let liveRan = false; let liveCode = null;
+    try { _withLock(target, () => { liveRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { liveCode = e && e.code; }
+    const liveProtected = !liveRan && liveCode === 'E_LOCK_TIMEOUT'
+      && JSON.parse(fs.readFileSync(livePath, 'utf8')).token === liveToken;
+
+    // heartbeat가 5분 넘게 갱신되지 않아도 owner가 있으면 자동 탈취하지 않는다.
+    const liveExpiredToken = '8'.repeat(32);
+    const liveExpiredPath = seedOwner(process.pid, liveExpiredToken, host, _LOCK_LEASE,
+      _LOCK_UNKNOWN_OWNER_STALE_MS + 1000);
+    let liveExpiredRan = false; let liveExpiredCode = null;
+    try { _withLock(target, () => { liveExpiredRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { liveExpiredCode = e && e.code; }
+    const liveExpiredLeaseProtected = !liveExpiredRan && liveExpiredCode === 'E_LOCK_TIMEOUT'
+      && JSON.parse(fs.readFileSync(liveExpiredPath, 'utf8')).token === liveExpiredToken;
+
+    // ESRCH나 PID 시작시각은 clone/namespace 밖 소유자가 다시 실행되지 않는다는 fencing 증명이
+    // 아니다. 명백히 없는 PID여도 owner가 기록된 락은 자동 회수하지 않는다.
+    const deadToken = 'b'.repeat(32);
+    const deadPath = seedOwner(2147483647, deadToken);
+    let deadRan = false; let deadCode = null;
+    try { _withLock(target, () => { deadRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { deadCode = e && e.code; }
+    const deadOwnerProtected = !deadRan && deadCode === 'E_LOCK_TIMEOUT'
+      && fs.existsSync(deadPath) && JSON.parse(fs.readFileSync(deadPath, 'utf8')).token === deadToken;
+
+    const reusedPidToken = 'f'.repeat(32);
+    seedOwner(process.pid, reusedPidToken, host, _LOCK_LEASE, _LOCK_UNKNOWN_OWNER_STALE_MS + 1000,
+      null, _PROCESS_STARTED_AT_MS - 60000);
+    let reusedPidRan = false; let reusedPidCode = null;
+    try { _withLock(target, () => { reusedPidRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { reusedPidCode = e && e.code; }
+    const reusedPidProtected = !reusedPidRan && reusedPidCode === 'E_LOCK_TIMEOUT'
+      && fs.existsSync(_lockOwnerPath(lockDir, reusedPidToken));
+
+    const malformedToken = '9'.repeat(32);
+    const malformedPath = seedOwner(process.pid, malformedToken, host, null, 1000, '');
+    let malformedRan = false; let malformedCode = null;
+    try { _withLock(target, () => { malformedRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { malformedCode = e && e.code; }
+    const malformedProtected = !malformedRan && malformedCode === 'E_LOCK_TIMEOUT' && fs.existsSync(malformedPath);
+    agePath(malformedPath, _LOCK_UNKNOWN_OWNER_STALE_MS + 1000);
+    let ancientMalformedRan = false; let ancientMalformedCode = null;
+    try { _withLock(target, () => { ancientMalformedRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { ancientMalformedCode = e && e.code; }
+    const ancientMalformedProtected = !ancientMalformedRan && ancientMalformedCode === 'E_LOCK_TIMEOUT'
+      && fs.existsSync(malformedPath);
+
+    cleanLock(); fs.mkdirSync(lockDir); agePath(lockDir, 1000);
+    const emptyRecovered = _withLock(target, () => 'empty-recovered', { maxWaitMs: 100, staleMs: 1 });
+    const orphanDirectoryRecovered = emptyRecovered === 'empty-recovered' && !fs.existsSync(lockDir);
+
+    cleanLock(); fs.writeFileSync(lockDir, ''); agePath(lockDir, 1000);
+    let legacyRan = false; let legacyCode = null;
+    try { _withLock(target, () => { legacyRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { legacyCode = e && e.code; }
+    const legacyProtected = !legacyRan && legacyCode === 'E_LOCK_TIMEOUT' && fs.existsSync(lockDir);
+    agePath(lockDir, _LOCK_UNKNOWN_OWNER_STALE_MS + 1000);
+    let ancientLegacyRan = false; let ancientLegacyCode = null;
+    try { _withLock(target, () => { ancientLegacyRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { ancientLegacyCode = e && e.code; }
+    const ancientLegacyProtected = !ancientLegacyRan && ancientLegacyCode === 'E_LOCK_TIMEOUT'
+      && fs.existsSync(lockDir);
+
+    const remoteNoLeaseToken = 'e'.repeat(32);
+    const remoteNoLeasePath = seedOwner(12345, remoteNoLeaseToken, 'legacy-host.invalid', null,
+      _LOCK_UNKNOWN_OWNER_STALE_MS + 1000);
+    let remoteNoLeaseRan = false; let remoteNoLeaseCode = null;
+    try { _withLock(target, () => { remoteNoLeaseRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { remoteNoLeaseCode = e && e.code; }
+    const remoteNoLeaseProtected = !remoteNoLeaseRan && remoteNoLeaseCode === 'E_LOCK_TIMEOUT'
+      && fs.existsSync(remoteNoLeasePath);
+
+    const remoteToken = 'd'.repeat(32);
+    const remotePath = seedOwner(12345, remoteToken, 'retired-host.invalid', _LOCK_LEASE,
+      _LOCK_UNKNOWN_OWNER_STALE_MS + 1000);
+    let remoteRan = false; let remoteCode = null;
+    try { _withLock(target, () => { remoteRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { remoteCode = e && e.code; }
+    const remoteOldProtected = !remoteRan && remoteCode === 'E_LOCK_TIMEOUT'
+      && JSON.parse(fs.readFileSync(remotePath, 'utf8')).token === remoteToken;
+
+    // 같은 hostname을 쓰는 다른 머신도 로컬 PID로 오인하지 않는다. 머신 ID가 다르면 remote와
+    // 똑같이 fail-closed다(공유 볼륨/컨테이너 hostname 충돌 회귀).
+    const collisionToken = '7'.repeat(32); const collisionHostId = '0'.repeat(32);
+    const collisionPath = seedOwner(2147483647, collisionToken, host, _LOCK_LEASE,
+      _LOCK_UNKNOWN_OWNER_STALE_MS + 1000, null, null, collisionHostId);
+    let collisionRan = false; let collisionCode = null;
+    try { _withLock(target, () => { collisionRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { collisionCode = e && e.code; }
+    const collidingHostnameProtected = !collisionRan && collisionCode === 'E_LOCK_TIMEOUT'
+      && fs.existsSync(collisionPath) && collisionHostId !== hostId;
+
+    // hostId가 같아도 PID namespace가 다르면 소유자를 회수하지 않는다.
+    const scopeToken = '5'.repeat(32); const foreignPidScope = '4'.repeat(32);
+    const scopePath = seedOwner(2147483647, scopeToken, host, _LOCK_LEASE,
+      _LOCK_UNKNOWN_OWNER_STALE_MS + 1000, null, null, hostId, foreignPidScope);
+    let scopeRan = false; let scopeCode = null;
+    try { _withLock(target, () => { scopeRan = true; }, { maxWaitMs: 5, staleMs: 1 }); }
+    catch (e) { scopeCode = e && e.code; }
+    const foreignPidScopeProtected = !scopeRan && scopeCode === 'E_LOCK_TIMEOUT'
+      && fs.existsSync(scopePath) && foreignPidScope !== pidScopeId;
+    cleanLock();  // 다음 해제-소유권 시나리오는 독립 픽스처에서 시작한다.
+
+    // mkdir 직후 정지한 생성자의 빈 디렉터리를 다른 회수자가 교체한 뒤, 원 생성자가 재개하는 ABA.
+    // 교체 디렉터리에 자기 owner를 추가해도 "단독 owner"/디렉터리 인스턴스 검사가 진입을 막아야 한다.
+    const creationRaceToken = '6'.repeat(32);
+    const creationRacePath = _lockOwnerPath(lockDir, creationRaceToken);
+    const originalOpen = fs.openSync; let creationReplaced = false;
+    let creationRaceRan = false; let creationRaceCode = null;
+    try {
+      fs.openSync = function (file, flags, ...rest) {
+        if (!creationReplaced && String(flags) === 'wx'
+          && path.resolve(path.dirname(String(file))) === path.resolve(lockDir)) {
+          creationReplaced = true;
+          fs.rmdirSync(lockDir); fs.mkdirSync(lockDir);
+          fs.writeFileSync(creationRacePath, ownerBody(process.pid, creationRaceToken, host, _LOCK_LEASE));
+        }
+        return originalOpen.call(fs, file, flags, ...rest);
+      };
+      _withLock(target, () => { creationRaceRan = true; }, { maxWaitMs: 5, staleMs: 1 });
+    } catch (e) { creationRaceCode = e && e.code; }
+    finally { fs.openSync = originalOpen; }
+    const creationReplacementProtected = creationReplaced && !creationRaceRan
+      && creationRaceCode === 'E_LOCK_TIMEOUT' && fs.existsSync(creationRacePath)
+      && JSON.parse(fs.readFileSync(creationRacePath, 'utf8')).token === creationRaceToken;
+    cleanLock();
+
+    // 해제 중 owner 내용이 바뀌면 자신의 디렉터리라고 단정하지 않고 보존하며, 성공도 주장하지 않는다.
+    const replacementToken = 'c'.repeat(32); let replacedPath = null;
+    let replacementCode = null;
+    const savedNoLockWarn = process.env.LEERNESS_NO_LOCK_WARN;
+    try {
+      process.env.LEERNESS_NO_LOCK_WARN = '1';
+      _withLock(target, () => {
+        replacedPath = path.join(lockDir, fs.readdirSync(lockDir)[0]);
+        fs.writeFileSync(replacedPath, ownerBody(process.pid, replacementToken));
+        return 7;
+      });
+    } catch (e) { replacementCode = e && e.code; }
+    finally {
+      if (savedNoLockWarn === undefined) delete process.env.LEERNESS_NO_LOCK_WARN;
+      else process.env.LEERNESS_NO_LOCK_WARN = savedNoLockWarn;
+    }
+    const replacementKept = replacementCode === 'E_LOCK_OWNERSHIP_LOST' && fs.existsSync(replacedPath)
+      && JSON.parse(fs.readFileSync(replacedPath, 'utf8')).token === replacementToken;
+
+    // 오래된 owner도 자동 unlink하지 않는다는 직접 행위검사. PID/host/mtime 휴리스틱을 다시
+    // 도입하면 clone/공유 저장소에서 이 검사가 즉시 실패한다.
+    const oldToken = '1'.repeat(32);
+    const oldPath = seedOwner(2147483647, oldToken);
+    agePath(oldPath, _LOCK_UNKNOWN_OWNER_STALE_MS + 1000);
+    const originalUnlink = fs.unlinkSync; let ownerUnlinkAttempted = false; let reclaimResult = false;
+    try {
+      fs.unlinkSync = function (file, ...rest) {
+        if (path.resolve(String(file)) === path.resolve(oldPath)) ownerUnlinkAttempted = true;
+        return originalUnlink.call(fs, file, ...rest);
+      };
+      reclaimResult = _reclaimStaleLock(lockDir, 1);
+    } finally { fs.unlinkSync = originalUnlink; }
+    const staleOwnerProtected = !reclaimResult && !ownerUnlinkAttempted && fs.existsSync(oldPath)
+      && JSON.parse(fs.readFileSync(oldPath, 'utf8')).token === oldToken;
+
+    return normalOk && noIdentityProtected && releaseRetryOk && liveProtected && liveExpiredLeaseProtected
+      && deadOwnerProtected && reusedPidProtected
+      && malformedProtected && ancientMalformedProtected && orphanDirectoryRecovered
+      && legacyProtected && ancientLegacyProtected && remoteNoLeaseProtected && remoteOldProtected
+      && collidingHostnameProtected && creationReplacementProtected
+      && foreignPidScopeProtected && replacementKept && staleOwnerProtected;
   } catch { return false; }
   finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
 }
@@ -22794,7 +23329,7 @@ function _bumpUsage(root, cmdName) {
   //   카운터 하나 때문에 명령을 오래 붙잡을 수는 없으므로 **짧은 대기**만 준다 —
   //   못 잡으면 `_withLock` 이 fail-open 으로 진행한다(드물게 한 건 놓치는 것이, 40%를 잃는 것보다 낫다).
   try {
-    return _withLock(_usageStatsPath(root), () => _bumpUsageLocked(root, cmdName), { maxWaitMs: 300 });
+    return _withLock(_usageStatsPath(root), () => _bumpUsageLocked(root, cmdName), { maxWaitMs: 300, failOpen: true });
   } catch { /* 카운터 실패가 명령을 실패시키지 않는다 */ }
 }
 function _bumpUsageLocked(root, cmdName) {
@@ -28206,7 +28741,23 @@ function reviewRequestCmd(root, request) { return _reviewRequest.reviewRequestCm
 // 1.9.392 (UR-0025 큰 핸들러 모듈화 4번째): doctor/which 진단 핸들러를 lib/diagnostics.js 로 분리.
 //   harness 는 deps(VERSION · _selfTestCases · _detectShellCtx · _mcpToolCount · has · harnessPath)를 구성해 위임(thin wrapper). 호출부/동작 무변경.
 const _diag = require('../lib/diagnostics');
-function doctorCmd(opts = {}) { return _diag.doctorCmd(opts, { VERSION, uiLang: _uiLang(arg('--path', process.cwd())), _selfTestCases, _detectShellCtx, _mcpToolCount, has, harnessPath: __filename }); }
+function _doctorSelftestReport() {
+  const r = cp.spawnSync(process.execPath, [__filename, 'selftest', '--json'], {
+    cwd: process.cwd(), encoding: 'utf8', timeout: 900000, windowsHide: true,
+    maxBuffer: 4 * 1024 * 1024, shell: false
+  });
+  try {
+    const j = JSON.parse(String(r.stdout || ''));
+    if (!j || !Number.isSafeInteger(j.pass) || !Number.isSafeInteger(j.total) || !Array.isArray(j.results)) throw new Error('invalid report');
+    const failed = j.results.filter(x => !x || x.ok !== true).map(x => String((x && x.name) || 'unnamed selftest'));
+    return { pass: j.pass, total: j.total, ok: r.status === 0 && j.ok === true && failed.length === 0, failed };
+  } catch {
+    const reason = r.error ? String(r.error.code || r.error.message || 'spawn error')
+      : (r.signal ? `signal ${r.signal}` : `exit ${r.status == null ? 'unknown' : r.status}`);
+    return { pass: 0, total: 1, ok: false, failed: [`selftest subprocess ${reason}`] };
+  }
+}
+function doctorCmd(opts = {}) { return _diag.doctorCmd(opts, { VERSION, uiLang: _uiLang(arg('--path', process.cwd())), _selfTestCases, _selfTestReport: _doctorSelftestReport, _controlSelftestEnv, _detectShellCtx, _mcpToolCount, has, harnessPath: __filename }); }
 function whichCmd() { return _diag.whichCmd({ VERSION, uiLang: _uiLang(arg('--path', process.cwd())), has, harnessPath: __filename }); }
 // 1.34.3 (T-0077): `graph --html` → lib/graph.js 온톨로지 HTML(leerness.html) 생성기 위임. 데이터는 in-process 로더 주입(자식 프로세스 셸링 X).
 const _graph = require('../lib/graph');
