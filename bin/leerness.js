@@ -453,23 +453,40 @@ function _withLock(targetPath, fn, opts = {}) {
   //   (`provider sync` 를 감싸면서 실제로 이 형태를 만들었다). thenable 이면 **정착 후에** 푼다.
   //   1.36.132 (검수 P1) + 1.36.160: 해제 실패를 조용히 삼키면 **고아 락**이 남는다. 기본 쓰기는
   //   더 이상 자동 탈취하지 않으므로 잠깐 재시도하고, 그래도 안 되면 현재 성공 주장 자체를 거부한다.
+  let releaseSettled = false;
+  let releaseResult = null;
   const release = () => {
+    // 성공과 실패를 모두 캐시한다. thenable 콜백에서 난 해제 오류가 바깥 `then.call` catch로
+    // 다시 올라와도 공개 lockPath나 tombstone을 두 번째로 검사하지 않는다.
+    if (releaseSettled) return releaseResult;
     if (!held) return null;
     _lockHeartbeat('remove', ownerPath, owner.token);
     _heldLocks.delete(lockPath);
+    // owner를 먼저 지우고 같은 lockPath를 재시도하면, 그 사이 경쟁자가 만든 새 빈 디렉터리를
+    // 지우는 ABA가 생긴다. 소유한 디렉터리 전체를 토큰 고유 tombstone으로 먼저 원자 이동해
+    // 공개 lockPath와 정리 대상을 분리한다. 이후 경쟁자는 즉시 새 lockPath를 만들 수 있고,
+    // 우리는 그 경로를 다시 건드리지 않는다.
+    const releasePath = `${lockPath}.release-${owner.token}`;
+    const releaseOwnerPath = _lockOwnerPath(releasePath, owner.token);
+    let quarantined = false;
     let ownerRemoved = false;
+    const releaseSuccess = () => {
+      releaseSettled = true; releaseResult = null; held = false; return null;
+    };
     const releaseFailure = (reason, code) => {
       _lockFailOpen.push({ file: path.basename(targetPath), reason, waitedMs: 0 });
       const err = new Error(`락 소유권을 확인하지 못해 작업 결과를 성공으로 확정하지 않습니다: ${path.basename(lockPath)} (${reason})`);
       err.code = code || 'E_LOCK_RELEASE'; err.lockPath = lockPath;
+      if (quarantined) err.releasePath = releasePath;
       if (process.env.LEERNESS_NO_LOCK_WARN !== '1') {
         try { process.stderr.write(`⚠ ${err.message}\n`); } catch {}
       }
-      return err;
+      releaseSettled = true; releaseResult = err;
+      return releaseResult;
     };
     for (let i = 0; i < 6; i++) {
       try {
-        if (!ownerRemoved) {
+        if (!quarantined) {
           const current = _readLockOwner(ownerPath);
           if (!current || current.error) {
             if (current && current.error === 'ENOENT') {
@@ -482,39 +499,103 @@ function _withLock(targetPath, fn, opts = {}) {
           if (!current.owner || current.owner.token !== owner.token) {
             return releaseFailure('ownership-lost', 'E_LOCK_OWNERSHIP_LOST');
           }
-          fs.unlinkSync(ownerPath); ownerRemoved = true;
+          fs.renameSync(lockPath, releasePath);
+          quarantined = true;
         }
-        fs.rmdirSync(lockPath); return null;
+        if (!ownerRemoved) {
+          // rename 뒤에도 같은 owner가 따라왔는지 확인한다. 외부 조작으로 경로가 교체됐다면
+          // unrelated tombstone을 지우지 않고 성공 주장도 거부한다.
+          const moved = _readLockOwner(releaseOwnerPath);
+          if (!moved || moved.error) {
+            if (moved && moved.error === 'ENOENT') {
+              return releaseFailure('ownership-lost-after-rename', 'E_LOCK_OWNERSHIP_LOST');
+            }
+            const readErr = new Error(`moved lock owner read failed: ${(moved && moved.error) || 'unknown'}`);
+            readErr.code = (moved && moved.error) || 'unknown';
+            throw readErr;
+          }
+          if (!moved.owner || moved.owner.token !== owner.token) {
+            return releaseFailure('ownership-lost-after-rename', 'E_LOCK_OWNERSHIP_LOST');
+          }
+          fs.unlinkSync(releaseOwnerPath); ownerRemoved = true;
+        }
+        fs.rmdirSync(releasePath); return releaseSuccess();
       }
       catch (e) {
         if (e.code === 'ENOENT') {
-          return ownerRemoved ? null : releaseFailure('ownership-lost', 'E_LOCK_OWNERSHIP_LOST');
+          return quarantined && ownerRemoved ? releaseSuccess() : releaseFailure('ownership-lost', 'E_LOCK_OWNERSHIP_LOST');
         }
         if (e.code === 'ENOTEMPTY' || e.code === 'EEXIST') {
-          // 내 owner를 지운 뒤 다른 획득자가 새 디렉터리를 만든 정상 인계 창이다. 비재귀 삭제를
-          // 유지해 새 owner를 보존하고, 이미 끝난 내 임계구역의 성공은 훼손하지 않는다.
-          return ownerRemoved ? null : releaseFailure('ownership-lost', 'E_LOCK_OWNERSHIP_LOST');
+          if (!quarantined || !ownerRemoved) {
+            _sleepSyncMs(10 + i * 10);
+            continue;
+          }
+          // Windows/Node 18에서는 마지막 owner를 unlink한 직후 **실제로 빈 디렉터리**에도
+          // rmdirSync가 순간적으로 ENOTEMPTY를 반환한다(로컬 1/3, CI 재현). 이를 곧바로
+          // 성공 처리하면 tombstone이 남는다. 빈 디렉터리/자기 deletion-pending owner만 재시도한다.
+          let remaining = null;
+          try { remaining = fs.readdirSync(releasePath); }
+          catch (readErr) {
+            if (readErr && readErr.code === 'ENOENT') return releaseSuccess();
+            _sleepSyncMs(10 + i * 10);
+            continue;
+          }
+          const ownName = path.basename(releaseOwnerPath);
+          if (remaining.some(name => name !== ownName)) {
+            return releaseFailure('release-tombstone-contaminated', 'E_LOCK_RELEASE');
+          }
+          _sleepSyncMs(10 + i * 10);
+          continue;
         }
         _sleepSyncMs(10 + i * 10);
       }
     }
     return releaseFailure('release-failed', 'E_LOCK_RELEASE');
   };
-  let out;
-  try { out = fn(); }
-  catch (e) {
+  const releaseAndRethrow = e => {
     const releaseErr = release();
     if (releaseErr && e && typeof e === 'object') e.lockReleaseError = releaseErr.code;
     throw e;
-  }
-  if (out && typeof out.then === 'function') {
-    return out.then(v => {
-      const releaseErr = release(); if (releaseErr) throw releaseErr; return v;
-    }, e => {
+  };
+  let out;
+  try { out = fn(); }
+  catch (e) { return releaseAndRethrow(e); }
+  let then = null;
+  try { then = out && out.then; }
+  catch (e) { return releaseAndRethrow(e); }
+  if (typeof then === 'function') {
+    // Promise/A+의 first-settlement 규칙을 비표준 thenable에도 적용한다. 여러 번 resolve/reject
+    // 하거나 resolve 뒤 던져도 첫 결과만 락 수명과 반환/예외를 결정해야 한다.
+    let settlement = null;
+    const onFulfilled = v => {
+      if (settlement) return settlement.kind === 'fulfilled' ? settlement.value : undefined;
+      settlement = { kind: 'fulfilled', value: v, error: null };
       const releaseErr = release();
-      if (releaseErr && e && typeof e === 'object') e.lockReleaseError = releaseErr.code;
-      throw e;
-    });
+      if (releaseErr) {
+        settlement.kind = 'release-failed'; settlement.error = releaseErr; throw releaseErr;
+      }
+      return v;
+    };
+    const onRejected = e => {
+      if (settlement) return undefined;
+      settlement = { kind: 'rejected', value: undefined, error: e };
+      return releaseAndRethrow(e);
+    };
+    let thenResult;
+    try {
+      thenResult = then.call(out, onFulfilled, onRejected);
+    } catch (e) {
+      if (!settlement) {
+        // 콜백을 타이머에 예약한 뒤 동기 throw하는 비준수 thenable도 있다. throw를 첫
+        // settlement로 기록해야 늦은 콜백이 해제를 다시 호출하거나 결과를 뒤집지 않는다.
+        settlement = { kind: 'rejected', value: undefined, error: e };
+        return releaseAndRethrow(e);
+      }
+      if (settlement.kind === 'fulfilled') return settlement.value;
+      throw settlement.error;
+    }
+    if (settlement && settlement.kind !== 'fulfilled') throw settlement.error;
+    return thenResult;
   }
   const releaseErr = release();
   if (releaseErr) throw releaseErr;
@@ -6898,10 +6979,24 @@ function _selfTestCases() {
         uiOk = uiOk && tp.refreshTechProfile(nextApp).changed === true
           && (JSON.parse(read(path.join(nextApp, '.harness', 'tech-profile.json'))).current.ui || []).some(u => u.id === 'tailwind');
       } catch { uiOk = false; } finally { try { fs.rmSync(tmp3, { recursive: true, force: true }); } catch {} }
-      return clar && shape && noDbUrl && reqOk && guards && uiOk && _p0013LibraryOk() && _p0088CurrentStatePreserved()
-        && _p0101SurfaceOk() && _p0101SkillIdOk() && _p0101PathStrictOk() && _p0102HonestyOk()
-        && _p0103FlagsOk() && _p0103JsonOk() && _p0103RootOk() && _p0104UsageOk()
-        && _p0014SecretBaselineOk() && _p0104ReminderOk() && _p0015ModeOk() && _p0097AsyncLockOk() && _p0109ClaimGateOk() && _p0110HonestyOk() && _p0112CarryOk();
+      // 이 회귀 묶음은 서로 무관한 23개 조건을 한 boolean 으로 접어 두어, CI flake가 나면
+      // `err: null` 하나만 남고 어느 조건이 실패했는지 알 수 없었다. 기존과 같은 순서/첫 실패
+      // short-circuit를 유지하되 이름을 붙여 진단 가능하게 한다.
+      const checks = [
+        ['clarify-signals', () => clar], ['preview-shape', () => shape], ['database-url', () => noDbUrl],
+        ['requirements-prefix', () => reqOk], ['source-guards', () => guards], ['ui-profile', () => uiOk],
+        ['library', _p0013LibraryOk], ['current-state', _p0088CurrentStatePreserved],
+        ['command-surface', _p0101SurfaceOk], ['skill-id', _p0101SkillIdOk], ['path-strict', _p0101PathStrictOk],
+        ['honesty-102', _p0102HonestyOk], ['value-flags', _p0103FlagsOk], ['json-contract', _p0103JsonOk],
+        ['root-routing', _p0103RootOk], ['usage-attribution', _p0104UsageOk],
+        ['secret-baseline', _p0014SecretBaselineOk], ['reminder-preservation', _p0104ReminderOk],
+        ['mode', _p0015ModeOk], ['async-lock', _p0097AsyncLockOk], ['claim-gate', _p0109ClaimGateOk],
+        ['honesty-110', _p0110HonestyOk], ['carry', _p0112CarryOk],
+      ];
+      for (const [name, check] of checks) {
+        if (!check()) throw new Error(`failed check: ${name}`);
+      }
+      return true;
     } },
     { name: '시크릿 스캐너 F-06 (1.36.56, 외부감사): 무명 확장자 소형 텍스트 스캔(이진 NUL 제외) + 같은 토큰 중복 보고 dedupe — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sc56_'));
@@ -9457,29 +9552,279 @@ function _p0109ClaimGateOk() {
 function _p0097AsyncLockOk() {
   const os2 = require('os');
   const arena = fs.mkdtempSync(path.join(os2.tmpdir(), 'leerness-p97lk-'));
+  let phase = 'setup';
   try {
     const target = path.join(arena, 'store.json');
     const lockFile = target + '.lock';
+    const samePath = (a, b) => !!b && path.resolve(String(a)) === path.resolve(String(b));
     fs.writeFileSync(target, '{}');
     // ① 비동기 본체: 아직 정착하지 않은 동안 락이 살아 있어야 한다(조기 해제 = 보호 0).
+    phase = 'thenable';
     let heldWhilePending = null;
     const thenable = { then(onOk) { heldWhilePending = fs.existsSync(lockFile); onOk('done'); return 'settled'; } };
     const r1 = _withLock(target, () => thenable);
     const releasedAfterSettle = !fs.existsSync(lockFile) && r1 === 'settled';
+    if (heldWhilePending !== true || !releasedAfterSettle) throw new Error(`pending=${heldWhilePending}, released=${releasedAfterSettle}`);
     // ② 대조군 — 동기 fn 은 종전대로 즉시 해제되고 값을 그대로 돌려준다(회귀로 락을 붙잡지 않았는지).
+    phase = 'sync';
     const r2 = _withLock(target, () => 42);
     const syncReleased = !fs.existsSync(lockFile) && r2 === 42;
+    if (!syncReleased) throw new Error(`released=${!fs.existsSync(lockFile)}, value=${r2}`);
     // ③ 예외 경로도 해제되어야 한다 — 안 그러면 한 번 던진 뒤 그 스토어가 영구 잠긴다.
+    phase = 'throw';
     let threw = false;
     try { _withLock(target, () => { throw new Error('x'); }); } catch { threw = true; }
     const errReleased = threw && !fs.existsSync(lockFile);
+    if (!errReleased) throw new Error(`threw=${threw}, released=${!fs.existsSync(lockFile)}`);
     // ④ 거부된 thenable 도 해제 + 사유 전파.
+    phase = 'reject';
     let rejThrew = false;
     const badThenable = { then(onOk, onErr) { onErr(new Error('boom')); return 'rejected'; } };
     try { _withLock(target, () => badThenable); } catch { rejThrew = true; }
     const rejReleased = rejThrew && !fs.existsSync(lockFile);
-    return heldWhilePending === true && releasedAfterSettle && syncReleased && errReleased && rejReleased;
-  } catch { return false; }
+    if (!rejReleased) throw new Error(`threw=${rejThrew}, released=${!fs.existsSync(lockFile)}`);
+
+    // ⑤ `then` getter/호출 자체가 동기 예외를 던져도, 정착 콜백에 도달하지 못했다는 이유로
+    // 락을 남기면 안 된다. 정상 Promise 밖의 사용자 thenable도 같은 경계에서 정리한다.
+    phase = 'throwing-thenable';
+    let getterThrew = false, callThrew = false;
+    const getterBoom = {};
+    Object.defineProperty(getterBoom, 'then', { get() { throw new Error('then getter boom'); } });
+    try { _withLock(target, () => getterBoom); } catch (e) { getterThrew = e && e.message === 'then getter boom'; }
+    const getterReleased = !fs.existsSync(lockFile);
+    try { _withLock(target, () => ({ then() { throw new Error('then call boom'); } })); }
+    catch (e) { callThrew = e && e.message === 'then call boom'; }
+    const callReleased = !fs.existsSync(lockFile);
+    if (!getterThrew || !getterReleased || !callThrew || !callReleased) {
+      throw new Error(`getter=${getterThrew}/${getterReleased}, call=${callThrew}/${callReleased}`);
+    }
+
+    // ⑤-b 비준수 thenable의 중복 settlement도 첫 호출만 유효하다. 양방향 순서와 같은
+    // callback 반복을 모두 강제해 두 번째 호출이 해제/결과를 덮지 못하게 한다.
+    phase = 'thenable-first-settlement';
+    const twiceResolved = _withLock(target, () => ({
+      then(onOk) { const a = onOk(10); const b = onOk(20); return [a, b]; }
+    }));
+    let twiceRejectMessage = null;
+    try {
+      _withLock(target, () => ({ then(onOk, onErr) {
+        try { onErr(new Error('reject-first')); } catch {}
+        try { onErr(new Error('reject-second')); } catch {}
+        return 'swallowed-rejects';
+      } }));
+    } catch (e) { twiceRejectMessage = e && e.message; }
+    const resolveThenReject = _withLock(target, () => ({
+      then(onOk, onErr) { onOk(30); onErr(new Error('late-reject')); return 'resolve-first'; }
+    }));
+    let rejectThenResolveMessage = null;
+    try {
+      _withLock(target, () => ({ then(onOk, onErr) {
+        try { onErr(new Error('reject-wins')); } catch {}
+        onOk(40); return 'late-resolve';
+      } }));
+    } catch (e) { rejectThenResolveMessage = e && e.message; }
+    const firstSettlementOk = Array.isArray(twiceResolved) && twiceResolved[0] === 10 && twiceResolved[1] === 10
+      && twiceRejectMessage === 'reject-first' && resolveThenReject === 'resolve-first'
+      && rejectThenResolveMessage === 'reject-wins' && !fs.existsSync(lockFile);
+    if (!firstSettlementOk) {
+      throw new Error(`resolveTwice=${JSON.stringify(twiceResolved)}, rejectTwice=${twiceRejectMessage}, mixed=${resolveThenReject}/${rejectThenResolveMessage}`);
+    }
+
+    // ⑤-c selftest 러너 자체는 동기이므로, 실제 pending native Promise는 격리 자식에서 await한다.
+    // 소스를 메모리 모듈로 컴파일해 제품 export 표면을 넓히지 않고 _withLock 실구현을 그대로 잰다.
+    phase = 'native-promise';
+    const nativeProbeSource = `
+      'use strict';
+      const fs = require('fs'), path = require('path'), os = require('os'), Module = require('module');
+      const filename = ${JSON.stringify(__filename)};
+      const source = fs.readFileSync(filename, 'utf8').replace(/^#![^\\r\\n]*\\r?\\n/, '')
+        + '\\nmodule.exports.__nativeLockProbe = _withLock;\\n';
+      const loaded = new Module(filename + '.native-promise-probe', module);
+      loaded.filename = filename; loaded.paths = Module._nodeModulePaths(path.dirname(filename));
+      loaded._compile(source, filename);
+      const withLock = loaded.exports.__nativeLockProbe;
+      (async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-native-lock-'));
+        const target = path.join(dir, 'store.json'), lock = target + '.lock';
+        try {
+          let fulfill;
+          const pendingFulfill = new Promise(resolve => { fulfill = resolve; });
+          const fulfilled = withLock(target, () => pendingFulfill);
+          const fulfillHeld = fs.existsSync(lock);
+          fulfill(41);
+          const fulfillValue = await fulfilled;
+          const fulfillReleased = !fs.existsSync(lock);
+
+          let reject;
+          const pendingReject = new Promise((resolve, rejectFn) => { reject = rejectFn; });
+          const rejected = withLock(target, () => pendingReject);
+          const rejectHeld = fs.existsSync(lock);
+          reject(new Error('native-reject'));
+          let rejectMessage = null;
+          try { await rejected; } catch (e) { rejectMessage = e && e.message; }
+          const rejectReleased = !fs.existsSync(lock);
+
+          let lateThrowMessage = null, lateCallbackRan = false;
+          let lateCallbackReturn = 'not-run', lateCallbackError = null;
+          try {
+            withLock(target, () => ({ then(onOk) {
+              setTimeout(() => {
+                lateCallbackRan = true;
+                try { lateCallbackReturn = onOk(99); }
+                catch (e) { lateCallbackError = e && e.message; }
+              }, 5);
+              throw new Error('sync-before-late-callback');
+            } }));
+          } catch (e) { lateThrowMessage = e && e.message; }
+          const lateReleasedImmediately = !fs.existsSync(lock);
+          await new Promise(resolve => setTimeout(resolve, 30));
+          const lateStillReleased = !fs.existsSync(lock);
+          const lateCallbackIgnored = lateCallbackRan && lateCallbackReturn === undefined && lateCallbackError === null;
+
+          const tombstones = fs.readdirSync(dir).filter(name => name.includes('.lock.release-'));
+          process.stdout.write(JSON.stringify({
+            ok: fulfillHeld && fulfillValue === 41 && fulfillReleased
+              && rejectHeld && rejectMessage === 'native-reject' && rejectReleased
+              && lateThrowMessage === 'sync-before-late-callback' && lateReleasedImmediately
+              && lateCallbackIgnored && lateStillReleased && tombstones.length === 0,
+            fulfillHeld, fulfillValue, fulfillReleased, rejectHeld, rejectMessage, rejectReleased,
+            lateThrowMessage, lateReleasedImmediately, lateCallbackRan, lateCallbackIgnored,
+            lateCallbackError, lateStillReleased, tombstones
+          }));
+        } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }
+      })().catch(e => { process.stdout.write(JSON.stringify({ ok: false, error: e && e.message })); process.exitCode = 1; });
+    `;
+    const nativeProbe = cp.spawnSync(process.execPath, ['-e', nativeProbeSource], {
+      encoding: 'utf8', timeout: 30000, windowsHide: true,
+      env: _probeEnv({ LEERNESS_NO_LOCK_WARN: '1' })
+    });
+    let nativeResult = null;
+    try { nativeResult = JSON.parse(String(nativeProbe.stdout || '').trim()); } catch {}
+    if (nativeProbe.status !== 0 || !nativeResult || nativeResult.ok !== true) {
+      throw new Error(`status=${nativeProbe.status}, signal=${nativeProbe.signal || ''}, result=${JSON.stringify(nativeResult)}, stderr=${String(nativeProbe.stderr || '').slice(0, 200)}`);
+    }
+
+    // ⑥ tombstone 이동 직후 owner 읽기가 Windows 공유 위반(EPERM)을 한 번 내도 소유권
+    // 상실로 오분류하지 않고 같은 고유 경로에서 재시도한다.
+    phase = 'moved-owner-read-retry';
+    const originalReadFile = fs.readFileSync;
+    let movedOwnerPath = null, movedReleasePath = null, movedReadRetried = 0, movedResult = null;
+    try {
+      fs.readFileSync = function (file, ...rest) {
+        if (samePath(file, movedOwnerPath) && movedReadRetried === 0) {
+          movedReadRetried++;
+          const err = new Error('simulated transient moved-owner read'); err.code = 'EPERM'; throw err;
+        }
+        return originalReadFile.call(fs, file, ...rest);
+      };
+      movedResult = _withLock(target, () => {
+        const ownerName = fs.readdirSync(lockFile)[0] || '';
+        const token = ((_LOCK_OWNER_FILE_RE.exec(ownerName) || [])[1]) || null;
+        movedReleasePath = token ? `${lockFile}.release-${token}` : null;
+        movedOwnerPath = movedReleasePath ? path.join(movedReleasePath, ownerName) : null;
+        return 6;
+      });
+    } finally { fs.readFileSync = originalReadFile; }
+    const movedReadOk = movedResult === 6 && movedReadRetried === 1
+      && !fs.existsSync(lockFile) && !fs.existsSync(movedReleasePath || '');
+    if (!movedReadOk) throw new Error(`value=${movedResult}, retried=${movedReadRetried}, released=${!fs.existsSync(lockFile)}`);
+
+    // ⑦ Windows/Node 18 결정적 회귀: tombstone 안의 owner unlink 직후 rmdir가 ENOTEMPTY를
+    // 내고, readdir에는 deletion-pending인 **자기 owner 이름**이 한 번 더 보인다.
+    // 실제 OS 타이밍에 기대지 않고 그 순서를 강제로 만든다.
+    phase = 'windows-delete-pending';
+    const originalRmdir = fs.rmdirSync, originalReaddir = fs.readdirSync;
+    let pendingOwnerName = null, pendingReleasePath = null;
+    let armed = false, fakePending = false, enotemptyInjected = 0;
+    let winResult = null;
+    try {
+      fs.rmdirSync = function (p, ...rest) {
+        if (armed && samePath(p, pendingReleasePath) && enotemptyInjected === 0) {
+          enotemptyInjected++; fakePending = true;
+          const err = new Error('simulated Windows deletion-pending directory'); err.code = 'ENOTEMPTY'; throw err;
+        }
+        return originalRmdir.call(fs, p, ...rest);
+      };
+      fs.readdirSync = function (p, ...rest) {
+        if (fakePending && samePath(p, pendingReleasePath)) { fakePending = false; return [pendingOwnerName]; }
+        return originalReaddir.call(fs, p, ...rest);
+      };
+      winResult = _withLock(target, () => {
+        pendingOwnerName = originalReaddir.call(fs, lockFile)[0] || null;
+        const token = ((_LOCK_OWNER_FILE_RE.exec(pendingOwnerName || '') || [])[1]) || null;
+        pendingReleasePath = token ? `${lockFile}.release-${token}` : null;
+        armed = true; return 7;
+      });
+    } finally { fs.rmdirSync = originalRmdir; fs.readdirSync = originalReaddir; }
+    const winRetryOk = winResult === 7 && enotemptyInjected === 1
+      && !fs.existsSync(lockFile) && !fs.existsSync(pendingReleasePath || '');
+    if (!winRetryOk) throw new Error(`value=${winResult}, injected=${enotemptyInjected}, released=${!fs.existsSync(lockFile)}`);
+
+    // ⑧ 외부 Codex P1 회귀: 정리 재시도 사이에 contender가 공개 lockPath를 새로 만들고
+    // owner 쓰기 직전에 선점돼도, 해제자는 토큰 고유 tombstone만 지워야 한다.
+    phase = 'release-aba';
+    let abaReleasePath = null, abaInjected = 0, contenderDirMade = false, abaResult = null;
+    try {
+      fs.rmdirSync = function (p, ...rest) {
+        if (samePath(p, abaReleasePath) && abaInjected === 0) {
+          abaInjected++;
+          fs.mkdirSync(lockFile); contenderDirMade = true;
+          const err = new Error('simulated preempted contender during release retry'); err.code = 'ENOTEMPTY'; throw err;
+        }
+        return originalRmdir.call(fs, p, ...rest);
+      };
+      abaResult = _withLock(target, () => {
+        const ownerName = originalReaddir.call(fs, lockFile)[0] || '';
+        const token = ((_LOCK_OWNER_FILE_RE.exec(ownerName) || [])[1]) || null;
+        abaReleasePath = token ? `${lockFile}.release-${token}` : null;
+        return 8;
+      });
+    } finally { fs.rmdirSync = originalRmdir; }
+    const contenderOwner = path.join(lockFile, 'owner-contender.json');
+    if (contenderDirMade && fs.existsSync(lockFile)) fs.writeFileSync(contenderOwner, '{}');
+    const abaOk = abaResult === 8 && abaInjected === 1 && fs.existsSync(contenderOwner)
+      && !fs.existsSync(abaReleasePath || '');
+    try { fs.rmSync(lockFile, { recursive: true, force: true }); } catch {}
+    if (!abaOk) throw new Error(`value=${abaResult}, injected=${abaInjected}, contenderPreserved=${fs.existsSync(contenderOwner)}`);
+
+    // ⑨ fulfillment 콜백에서 반복 ENOTEMPTY가 재시도 예산을 소진하면 바깥 then.call catch가
+    // 해제를 두 번 실행하지 않고 최초 E_LOCK_RELEASE를 그대로 보존한다.
+    phase = 'release-exhaustion';
+    let exhaustedReleasePath = null, exhaustedAttempts = 0, exhaustedCode = null, exhaustedErrorPath = null;
+    const savedNoLockWarn = process.env.LEERNESS_NO_LOCK_WARN;
+    try {
+      process.env.LEERNESS_NO_LOCK_WARN = '1';
+      fs.rmdirSync = function (p, ...rest) {
+        if (samePath(p, exhaustedReleasePath)) {
+          exhaustedAttempts++;
+          const err = new Error('simulated persistent Windows deletion-pending directory'); err.code = 'ENOTEMPTY'; throw err;
+        }
+        return originalRmdir.call(fs, p, ...rest);
+      };
+      try {
+        _withLock(target, () => {
+          const ownerName = originalReaddir.call(fs, lockFile)[0] || '';
+          const token = ((_LOCK_OWNER_FILE_RE.exec(ownerName) || [])[1]) || null;
+          exhaustedReleasePath = token ? `${lockFile}.release-${token}` : null;
+          return { then(onOk) { return onOk(9); } };
+        });
+      } catch (e) { exhaustedCode = e && e.code; exhaustedErrorPath = e && e.releasePath; }
+    } finally {
+      fs.rmdirSync = originalRmdir;
+      if (savedNoLockWarn === undefined) delete process.env.LEERNESS_NO_LOCK_WARN;
+      else process.env.LEERNESS_NO_LOCK_WARN = savedNoLockWarn;
+    }
+    const exhaustionOk = exhaustedAttempts === 6 && exhaustedCode === 'E_LOCK_RELEASE'
+      && samePath(exhaustedErrorPath, exhaustedReleasePath)
+      && !fs.existsSync(lockFile) && fs.existsSync(exhaustedReleasePath || '');
+    try { if (exhaustedReleasePath) fs.rmSync(exhaustedReleasePath, { recursive: true, force: true }); } catch {}
+    if (!exhaustionOk) throw new Error(`attempts=${exhaustedAttempts}, code=${exhaustedCode}, publicReleased=${!fs.existsSync(lockFile)}`);
+    return true;
+  } catch (e) {
+    const err = new Error(`async-lock ${phase}: ${(e && e.message) || String(e)}`);
+    if (e && e.code) err.code = e.code;
+    throw err;
+  }
   finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
 }
 // 1.36.160 (외부 Codex P1): maxWait(35s)가 stale(30s)를 넘는 순간 살아 있는 장기 작업을
