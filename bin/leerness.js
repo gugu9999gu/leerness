@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
 const { log, ok, warn, fail, failJson, setQuiet, today, now, absRoot, exists, read, readBuf, mkdirp, writeUtf8, append, rel, setDryRunGuard, mkdirpRaw } = require('../lib/io');  // 1.9.382/383 (UR-0025): 출력/시간/파일 프리미티브 공유 모듈 · 1.10.2 (UR-0146): setQuiet
+const { spawnNpmSync } = require('../lib/npm-process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
@@ -35,7 +36,7 @@ const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits:
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
 const _cursorHook = require('../lib/cursor-session-hook');
 
-const VERSION = '1.36.160';
+const VERSION = '1.36.161';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5237,7 +5238,9 @@ function _selfTestCases() {
     { name: 'GPT-5.5 전략리뷰 §6.7 (UR-0152): ci init — PR gate 워크플로 생성 + exit-code 정책 (1.9.444) + 강화(1.33.1 버전핀/권한/concurrency)', run: () => {
       if (typeof ciInitCmd !== 'function') return false;
       const wf = LEERNESS_GATE_WORKFLOW;
-      const contentOk = /name:\s*leerness-gate/.test(wf) && /on:\s*\n\s*pull_request:/.test(wf) && /exit code 정책/.test(wf) && /actions\/checkout@v4/.test(wf);
+      const contentOk = /name:\s*leerness-gate/.test(wf) && /on:\s*\n\s*pull_request:/.test(wf) && /exit code 정책/.test(wf)
+        && /actions\/checkout@v7/.test(wf) && /actions\/setup-node@v7/.test(wf)
+        && /node-version:\s*'24'/.test(wf) && /package-manager-cache:\s*false/.test(wf);
       // 1.33.1 강화: 버전 핀(leerness@x.y.z gate, latest 와 동일) + 최소권한 permissions + concurrency cancel
       const hardened = new RegExp('leerness@' + VERSION.replace(/\./g, '\\.') + ' gate \\.').test(wf)
         && /permissions:\s*\n\s*contents: read/.test(wf)
@@ -22618,7 +22621,7 @@ function releaseChannelCmd(root) {
   const tag = _resolveNpmTag(arg('--npm-tag', null));
   let distTags = null;
   if (!has('--offline') && process.env.LEERNESS_OFFLINE !== '1') {
-    try { const r = cp.spawnSync('npm', ['view', 'leerness', 'dist-tags', '--json'], { encoding: 'utf8', timeout: 10000, shell: true }); if (r.status === 0 && r.stdout) distTags = JSON.parse(r.stdout); } catch {}
+    try { const r = spawnNpmSync(['view', 'leerness', 'dist-tags', '--json'], { encoding: 'utf8', timeout: 10000 }); if (r.status === 0 && r.stdout) distTags = JSON.parse(r.stdout); } catch {}
   }
   if (json) { log(JSON.stringify({ version: v, defaultPublishTag: tag, distTags, policy: { stable: 'latest', experimental: 'next' } }, null, 2)); return; }
   log(`# leerness release channel (1.9.275, UR-0026)`);
@@ -22671,8 +22674,8 @@ function _publishToNpm(root, opts = {}) {
 
   // 1) 이미 publish된 버전인지 확인 (npm view <pkg>@<version> version)
   try {
-    const viewR = cp.spawnSync('npm', ['view', `${pkgName}@${pkgVersion}`, 'version'], {
-      cwd: root, encoding: 'utf8', shell: true, timeout: 15000
+    const viewR = spawnNpmSync(['view', `${pkgName}@${pkgVersion}`, 'version'], {
+      cwd: root, encoding: 'utf8', timeout: 15000
     });
     if (viewR.status === 0 && (viewR.stdout || '').trim() === pkgVersion) {
       log(`   ✓ 이미 npm registry에 publish됨 — skip`);
@@ -22684,7 +22687,7 @@ function _publishToNpm(root, opts = {}) {
   if (!opts.forcePublish) {
     let publishedLatest = null;
     try {
-      const latestR = cp.spawnSync('npm', ['view', pkgName, 'version'], { cwd: root, encoding: 'utf8', shell: true, timeout: 15000 });
+      const latestR = spawnNpmSync(['view', pkgName, 'version'], { cwd: root, encoding: 'utf8', timeout: 15000 });
       if (latestR.status === 0) publishedLatest = (latestR.stdout || '').trim();
     } catch {}
     const gate = _shouldPublishNpm(pkgVersion, publishedLatest, false);
@@ -22710,8 +22713,8 @@ function _publishToNpm(root, opts = {}) {
     if (otp) baseArgs.push(`--otp=${otp}`);
     const args = opts.dryRun ? [...baseArgs, '--dry-run'] : baseArgs;
     log(`   ${opts.dryRun ? '(dry-run) ' : ''}npm publish 시도 중... (dist-tag: ${npmTag})`);
-    const pubR = cp.spawnSync('npm', args, {
-      cwd: root, encoding: 'utf8', shell: true, timeout: 60000,
+    const pubR = spawnNpmSync(args, {
+      cwd: root, encoding: 'utf8', timeout: 60000,
       env: { ...process.env, npm_config_loglevel: 'warn' }
     });
     if (pubR.status === 0) {
@@ -22785,7 +22788,7 @@ async function releasePackCmd(root) {
 
   // 2. npm pack
   if (!dryRun) {
-    const r = cp.spawnSync('npm', ['pack'], { cwd: root, encoding: 'utf8', shell: true });
+    const r = spawnNpmSync(['pack'], { cwd: root, encoding: 'utf8' });
     if (r.status !== 0) { fail('npm pack 실패'); log(r.stderr); process.exitCode = 1; return; }
     const tarMatch = (r.stdout || '').match(/[^\s]+\.tgz/);
     if (tarMatch) ok(`npm pack → ${tarMatch[0]}`);
@@ -22866,7 +22869,7 @@ function releasePublish(root) {
   if (has('--pack') || has('--npm-publish') || (!has('--git-push') && !has('--gh-release') && !has('--gh-pages'))) {
     if (dryRun) { log('(dry-run) npm pack 생략 (실행 안 함)'); }
     else {
-      const packR = cp.spawnSync('npm', ['pack'], { cwd: root, encoding: 'utf8', shell: true });
+      const packR = spawnNpmSync(['pack'], { cwd: root, encoding: 'utf8' });
       if (packR.status !== 0) { fail('npm pack 실패'); log(packR.stderr); process.exitCode = 1; return; }
       ok('npm pack 완료');
     }
@@ -22923,7 +22926,7 @@ function releasePublish(root) {
     const npmTag = _resolveNpmTag(arg('--npm-tag', null));
     const args = dryRun ? ['publish', '--dry-run', '--tag', npmTag] : ['publish', '--access', 'public', '--tag', npmTag];
     log('npm ' + args.join(' '));
-    const r = cp.spawnSync('npm', args, { cwd: root, encoding: 'utf8', shell: true });
+    const r = spawnNpmSync(args, { cwd: root, encoding: 'utf8' });
     log((r.stdout || '').split('\n').slice(-5).join('\n'));
     if (r.status !== 0) { fail('npm publish 실패'); process.exitCode = 1; return; }
   }
@@ -25859,10 +25862,11 @@ const LEERNESS_GATE_WORKFLOW = [
   '  gate:',
   '    runs-on: ubuntu-latest',
   '    steps:',
-  '      - uses: actions/checkout@v4',
-  '      - uses: actions/setup-node@v4',
+  '      - uses: actions/checkout@v7',
+  '      - uses: actions/setup-node@v7',
   '        with:',
-  "          node-version: '20'",
+  "          node-version: '24'",
+  '          package-manager-cache: false',
   '      - name: leerness gate',
   '        run: npx -y leerness@' + VERSION + ' gate .',
   '',

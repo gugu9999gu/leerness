@@ -6746,12 +6746,15 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { encoding: 'utf8', timeout: 30000 });
     const ci = cp.spawnSync(process.execPath, [CLI, 'ci', 'init', d], { encoding: 'utf8', timeout: 15000 });
     const wf = fs.readFileSync(path.join(d, '.github', 'workflows', 'leerness-gate.yml'), 'utf8');
-    // 버전 핀(설치 버전 == package.json) · 미핀 latest 부재 · 최소권한 · concurrency 취소 · gate 호출
+    // 버전 핀(설치 버전 == package.json) · 미핀 latest 부재 · 최소권한 · concurrency 취소 · Node 24 액션/런타임 · gate 호출
     const pinned = new RegExp('run: npx -y leerness@' + ver.replace(/\./g, '\\.') + ' gate \\.').test(wf);
     const noUnpinned = !/npx -y leerness gate \./.test(wf);
     const perms = /permissions:\n\s*contents: read/.test(wf);
     const conc = /concurrency:\n\s*group: leerness-gate-\$\{\{ github\.ref \}\}\n\s*cancel-in-progress: true/.test(wf);
-    const stillGate = /leerness-gate/.test(wf) && /pull_request:/.test(wf) && /actions\/checkout@v4/.test(wf);
+    const stillGate = /leerness-gate/.test(wf) && /pull_request:/.test(wf)
+      && /actions\/checkout@v7/.test(wf) && /actions\/setup-node@v7/.test(wf)
+      && /node-version:\s*'24'/.test(wf) && /package-manager-cache:\s*false/.test(wf)
+      && !/actions\/(?:checkout|setup-node)@v4/.test(wf);
     fs.rmSync(d, { recursive: true, force: true });
     ok = ci.status === 0 && pinned && noUnpinned && perms && conc && stillGate;
   } catch {}
@@ -7216,12 +7219,15 @@ total++;
     // ⑦ (1.28.2 Phase 10c) doctor: en 영어(한글 0) + ko 기본 한글 보존
     // 1.36.87: doctor 는 내부에서 selftest 를 돌린다 — 실측 19~24s 인데 제한이 20s 라 여유가 없었다(1.36.86 에서도 0.9s).
     //   제한을 올린 대신 종료코드도 함께 단언한다 — 타임아웃(status=null)이 출력 매칭만으로 통과하면 안 된다(codex 26차 #11).
-    // 1.36.127 (실측): 1.36.105 가 형제 블록의 doctor 제한을 120s→300s 로 올리며 "여유가 1.2배뿐이라
-    //   전체 부하에서 반복해 터진다" 고 적었는데, **이 클론은 120s 로 남아 있었다**(같은 수정의 누락분).
-    //   이번 게이트에서 실제로 여기서만 터졌고, 격리 실측은 `doctor --language en` **120s**(= 제한과 동일, 여유 1.0배).
-    //   측정 대상은 속도가 아니라 언어 렌더이므로 넉넉히 준다.
-    const docEnR = cp.spawnSync(process.execPath, [CLI, 'doctor', '--language', 'en'], { encoding: 'utf8', timeout: 300000, cwd: d });
-    const docKoR = cp.spawnSync(process.execPath, [CLI, 'doctor'], { encoding: 'utf8', timeout: 300000, cwd: d });
+    // 1.36.161: 전체 E2E 108분 부하에서는 300s도 한 번 초과했다. 같은 픽스처 격리 실측은 en/ko 각각 139s,
+    //   종료 0·언어 계약 통과였다. 측정 대상은 속도가 아니라 언어 렌더이므로 4배 이상 여유를 주고,
+    //   다시 실패하면 status/error/시간/출력 꼬리를 아래 디버그에 남긴다.
+    const docEnAt = Date.now();
+    const docEnR = cp.spawnSync(process.execPath, [CLI, 'doctor', '--language', 'en'], { encoding: 'utf8', timeout: 600000, cwd: d });
+    const docEnMs = Date.now() - docEnAt;
+    const docKoAt = Date.now();
+    const docKoR = cp.spawnSync(process.execPath, [CLI, 'doctor'], { encoding: 'utf8', timeout: 600000, cwd: d });
+    const docKoMs = Date.now() - docKoAt;
     const docEn = out(docEnR), docKo = out(docKoR);
     const doctorOk = docEnR.status === 0 && docKoR.status === 0
       && /install\/environment diagnosis/.test(docEn) && !H.test(docEn) && /설치\/환경 진단/.test(docKo);
@@ -7300,7 +7306,10 @@ total++;
     ok = lensKoOk && lensEnOk && noLeak && stOk && healthOk && driftOk && doctorOk && hoEnOk && hoKoOk && edEnOk && edKoOk && shEnOk && shKoOk && agEnOk && agKoOk && f3En && f3Ko && f4;
     // 1.36.87: 단언 18개를 && 로 묶고 실패 시 어느 것인지 알려주지 않아, 진단하려면 22분짜리 스위트를 통째로
     //   다시 돌려야 했다. 다른 블록들과 같은 규율으로 실패 플래그를 노출한다.
-    if (!ok) console.log('   [i18n 디버그] ' + JSON.stringify({ lensKoOk, lensEnOk, noLeak, stOk, healthOk, driftOk, doctorOk, hoEnOk, hoKoOk, edEnOk, edKoOk, shEnOk, shKoOk, agEnOk, agKoOk, f3En, f3Ko, f4 }));
+    if (!ok) console.log('   [i18n 디버그] ' + JSON.stringify({ lensKoOk, lensEnOk, noLeak, stOk, healthOk, driftOk, doctorOk,
+      doctor: { en: { status: docEnR.status, error: docEnR.error && docEnR.error.code, ms: docEnMs, tail: docEn.trim().split(/\r?\n/).slice(-2) },
+        ko: { status: docKoR.status, error: docKoR.error && docKoR.error.code, ms: docKoMs, tail: docKo.trim().split(/\r?\n/).slice(-2) } },
+      hoEnOk, hoKoOk, edEnOk, edKoOk, shEnOk, shKoOk, agEnOk, agKoOk, f3En, f3Ko, f4 }));
   } catch (e) { console.log('   [i18n 디버그] 예외: ' + ((e && e.message) || e)); }
   console.log(ok ? '✓ B(1.25.1/1.25.2/1.27.2/1.28.2/1.29.1/1.29.2/1.29.3/1.29.4/1.30.5) i18n 행위: --language en 런타임 영어(lens/health/drift/doctor/handoff보안요약/env-detect/shell-guard/agent-slash/워크플로가이드/verify-claim) + ko 기본 보존 + --language positional 무누출 + status 에러 en/ko (UR-0010)' : '✗ i18n 행위 회귀 가드 실패');
   if (!ok) failed++;

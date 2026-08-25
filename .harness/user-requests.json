@@ -886,7 +886,17 @@
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
       "notes": ""
+    },
+    {
+      "id": "UR-0078",
+      "text": "GitHub Actions Node 20 런타임 경고와 npm publish shell:true 폐기 경고를 재현·수정하고 R-0001/R-0002 게이트로 다음 버전을 출하",
+      "recordedAt": "2026-08-25T05:23:26.438Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-08-24T09:50:22.742Z"
+  "updatedAt": "2026-08-25T05:23:26.438Z"
 }

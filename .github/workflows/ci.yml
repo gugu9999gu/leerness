@@ -19,10 +19,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
+          package-manager-cache: false
       # Bounded quick feedback — full e2e runs in the `test` matrix below.
       - name: test:fast
         env:
@@ -38,15 +39,18 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         node: [18, 20, 22]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
+          package-manager-cache: false
       # No dependencies to install (zero runtime deps) — run the integrity gate directly.
       - name: version
         run: node ./bin/leerness.js --version
       - name: selftest
         run: node ./bin/leerness.js selftest
+      - name: release runtime (shell-free npm)
+        run: node ./scripts/release-runtime-probe.js
       # 1.36.127 (T-0105): 이 중간 티어(42블록·66초)는 만들어 놓고 **아무도 부르지 않았다**.
       #   우리 고아 가드 탐지기가 0건이라 한 것은 bin/leerness.js 안의 문자열에 가려졌기 때문이다.
       #   사람이 기억해야만 도는 가드는 결국 안 돈다 — 여기와 npm test 양쪽에 배선한다.
@@ -66,3 +70,20 @@ jobs:
         env:
           LEERNESS_OFFLINE: "1"
         run: node ./scripts/e2e.js
+
+  release-runtime:
+    name: release runtime (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [24, 26]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - name: release runtime (shell-free npm)
+        run: node ./scripts/release-runtime-probe.js

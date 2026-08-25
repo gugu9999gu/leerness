@@ -289,5 +289,27 @@
       ]
     },
     "previousGuardGap": null
+  },
+  {
+    "id": "T-0138",
+    "repro": "node -e \"const fs=require('fs');const s=fs.readFileSync('bin/leerness.js','utf8');if(/const pubR[\\s\\S]{0,300}shell:\\s*true/.test(s)){console.error('DEP0190 publish shell:true');process.exit(1)}\"",
+    "expectBad": "DEP0190 publish shell:true",
+    "baseline": {
+      "at": "2026-08-25T05:24:33.788Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 96
+    },
+    "rootCause": "GitHub 워크플로가 Node 20 기반 v4 액션을 고정했고 Windows npm 실행이 .cmd EINVAL을 피하려 shell:true와 args 배열을 함께 사용해 Node 26 DEP0190 및 인자 재해석 위험을 만들었다",
+    "siblingScope": {
+      "checked": [
+        "제품 CI 4개 action ref",
+        "사이트 release/preview 4개 action ref",
+        "_publishToNpm의 view/latest/publish 및 release pack/publish npm 호출"
+      ]
+    },
+    "previousGuardGap": null
   }
 ]
