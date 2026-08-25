@@ -31,6 +31,17 @@ function runCli(args, env = process.env) {
   });
 }
 
+function overrideEnvCaseInsensitive(base, overrides) {
+  const env = { ...base };
+  for (const [name, value] of Object.entries(overrides)) {
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === name.toLowerCase()) delete env[key];
+    }
+    env[name] = value;
+  }
+  return env;
+}
+
 try {
   fs.mkdirSync(fakeNpmDir, { recursive: true });
   fs.writeFileSync(path.join(sandbox, 'package.json'), JSON.stringify({ name: 'release-runtime-probe', version: '9.9.9' }) + '\n');
@@ -77,15 +88,22 @@ try {
   if (/DEP0190|shell option true/i.test(warningText)) failures.push('npm 실행에서 DEP0190 경고가 발생함');
 
   const { resolveNpmCliPath, spawnNpmSync } = require(npmProcessPath);
-  const fakeEnv = {
-    ...process.env,
+  const fakeEnv = overrideEnvCaseInsensitive(process.env, {
     // test:fast deliberately runs the product offline. These cases exercise the
     // real npm-backed release paths with a local fake CLI, so keep that parent
     // policy from short-circuiting the behavior under test.
     LEERNESS_OFFLINE: '0',
     npm_execpath: fakeNpmCli,
     LEERNESS_NPM_PROBE_LOG: fakeNpmLog,
-  };
+  });
+  const casingProbe = overrideEnvCaseInsensitive(
+    { NPM_EXECPATH: path.join(sandbox, 'inherited-wrong-npm-cli.js') },
+    { npm_execpath: fakeNpmCli },
+  );
+  const casingKeys = Object.keys(casingProbe).filter(key => key.toLowerCase() === 'npm_execpath');
+  if (casingKeys.length !== 1 || casingKeys[0] !== 'npm_execpath' || casingProbe.npm_execpath !== fakeNpmCli) {
+    failures.push(`Windows npm_execpath 대소문자 alias 정규화 실패: ${JSON.stringify(casingKeys)}`);
+  }
   const resolved = resolveNpmCliPath({ env: fakeEnv });
   if (resolved !== fakeNpmCli) {
     failures.push(`자식 env의 npm_execpath를 사용하지 않음: ${resolved || '(없음)'}`);

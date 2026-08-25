@@ -4,7 +4,7 @@
 
 - 전체 E2E가 잡은 ci init의 낡은 v4 기대값을 v7/Node 24 계약으로 갱신했습니다. i18n doctor는 동일 픽스처에서 영문·한국어 각각 139초/exit 0으로 재현 통과해 제품 결함이 아닌 장시간 부하 타임아웃으로 판별했으며, 테스트 상한을 600초로 조정하고 실패 진단을 보강했습니다.
 
-- 외부 Codex 교차 검수에서 확인한 Windows 자식 env npm_execpath 불일치와 ci init 템플릿 v4 잔존을 수정했습니다. release channel/view/pack/publish 성공·실패, CLI 누락 ENOENT, 셸 메타문자 argv 보존을 실제 명령으로 검증하고 CI에 Node 24/26 전용 런타임 매트릭스를 추가했습니다. 이 실제 npm 경로 프로브는 상위 `LEERNESS_OFFLINE=1` 게이트에서도 로컬 fake CLI를 명시적으로 사용해 네트워크 없이 같은 계약을 검증합니다.
+- 외부 Codex 교차 검수에서 확인한 Windows 자식 env npm_execpath 불일치와 ci init 템플릿 v4 잔존을 수정했습니다. release channel/view/pack/publish 성공·실패, CLI 누락 ENOENT, 셸 메타문자 argv 보존을 실제 명령으로 검증하고 CI에 Node 24/26 전용 런타임 매트릭스를 추가했습니다. 이 실제 npm 경로 프로브는 상위 `LEERNESS_OFFLINE=1` 게이트에서도 대소문자가 다른 상속 `NPM_EXECPATH`를 제거하고 로컬 fake CLI를 단일 키로 명시해 네트워크 없이 같은 계약을 검증합니다.
 
 - GitHub Actions의 checkout/setup-node를 Node 24 기반 v7으로 올리고, Windows 릴리스 경로가 npm.cmd 셸 대신 npm-cli.js를 Node로 직접 실행하도록 바꿔 DEP0190과 셸 메타문자 재해석 위험을 제거했습니다. Linux/macOS는 shell:false npm 실행을 유지하며 전용 release-runtime 프로브를 fast/core/full 게이트에 연결했습니다.
 
