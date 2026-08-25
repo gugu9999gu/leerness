@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-24T09:41:54.020Z
+Last generated: 2026-08-25T04:48:24.991Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -41,7 +41,7 @@ Last generated: 2026-08-24T09:41:54.020Z
 - T-0028 skill 트리거 description 9종 + 합성 우선순위 + 하네스 문서 버전표기 제거 79건 (1.36.25) → next: 다음 액션 작성
 - T-0029 skill lint P1/P2 (1.36.26) — _lintSkillMeta 순수함수(2티어 severity, ko 트리거절, CJK 본문예산) + skill lint CLI → next: 다음 액션 작성
 - T-0030 debug 렌즈 (1.36.27) — systematic-debugging 을 자기질문 6문항으로(강제게이트 미이식/자기보고 명시/파일매핑 미확장) + route bugfix 힌트 + 표면 5곳 → next: 다음 액션 작성
-- T-0031 R1: agents multi(--execute 포함) 위임 브리프 접두 — 백그라운드 AI 가 leerness 프로토콜을 받도록 (dispatch 만 접두하던 갭) → next: 다음 액션 작성
+- T-0031 R1: agents multi(--execute 포함) 위임 브리프 접두 — 백그라운드 AI 가 leerness 프로토콜을 받도록 (dispatch 만 접두하던 갭) → next: 완료 — delegation-brief 토글과 --raw opt-out 유지
 - T-0033 R1+R2 (1.36.29/30) — multi 위임 브리프 + 온톨로지 그래프 기본활성/roadmap 통합/토글 → next: 다음 액션 작성
 - T-0034 동시성 직렬화 (1.36.31) — codex #1/#2/#5/#7: state 락 직렬화 + team add 락내 재로드 + EPERM 재시도 + pre-wake 테이블 매처 → next: 다음 액션 작성
 - T-0035 e2e 그린 복원 + 게이트 exit 마스킹 교정 (1.36.32, 자기 감사) — 1.36.30/31 e2e 실패 게시 정정 → next: 다음 액션 작성
@@ -117,6 +117,7 @@ Last generated: 2026-08-24T09:41:54.020Z
 - T-0134 새 command-surface 회귀 스위트가 npm test와 CI에 연결되지 않아 고아 가드가 되는 결함 수정 → next: test:commands를 npm test와 Linux/Windows CI gate에 연결
 - T-0135 lazy detect가 README 설명의 일반 TODO 단어를 실제 미추적 작업으로 오인하는 false-positive 수정 → next: TODO 주석 문법만 인식하도록 스캐너 회귀 추가
 - T-0136 handoff를 동시 세션 안전한 읽기 경로로 분리하고 Cursor 주소·버전 skew·공용 추적파일 쓰기를 함께 해결 → next: 릴리스 승인 시 GitHub/npm/사이트 배포를 검증하고, Cursor 작업이 멈춘 뒤 hive-analytics에서 leerness update --yes 및 adapter cursor 실증
+- T-0137 v1.36.154를 GitHub·npm·leerness.com에 배포하고 각 게시본을 재검증하며 R-0002 자동 배포 룰을 적용 → next: 후속 라운드: GitHub Actions Node 20 런타임 경고와 npm publish shell:true 폐기 경고를 재현·수정하고 R-0001/R-0002 게이트로 다음 버전을 출하
 
 ## In Progress
 - 없음

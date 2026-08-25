@@ -1,21 +1,37 @@
 {
-  "savedAt": "2026-06-19T12:22:41.010Z",
-  "nextRoundVersion": "next after 1.34.0",
-  "expectedFireAt": "2026-06-19T12:47:41.009Z",
+  "savedAt": "2026-08-25T04:47:43.244Z",
+  "nextRoundVersion": "next after 1.36.160",
+  "expectedFireAt": "2026-08-25T05:04:46.419Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.34.0",
+    "currentVersion": "1.36.160",
     "activeTaskId": null,
     "activeTaskRequest": null,
     "memorySurface": {
       "tasksInProgress": 0,
-      "decisions": 4,
-      "rulesActive": 0,
+      "decisions": 16,
+      "rulesActive": 2,
       "lessons": 14
     },
     "r0001Rule": "25분 간격 (사용자 명시, R-0001)"
   },
-  "nextActions": [],
+  "nextActions": [
+    {
+      "icon": "🛡",
+      "title": "과거 실패 회피 — lessons.md 에 \"leerness\" 관련 1건",
+      "command": "leerness lessons --auto --path ."
+    },
+    {
+      "icon": "💭",
+      "title": "decisions.md \"leerness\" 관련 결정 7건 영향 확인",
+      "command": "leerness decision list --filter \"leerness\""
+    },
+    {
+      "icon": "🧬",
+      "title": "stress-v211 마지막 갱신 2035h 전 — 새 stress test 작성 권장",
+      "command": "node _apps/leerness-stress/bin/stress-v212.js"
+    }
+  ],
   "note": "다음 wakeup 시: 1) leerness resume . 으로 plan 확인  2) leerness handoff . 실행  3) leerness next-action take 로 즉시 task 진입"
 }

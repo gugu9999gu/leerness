@@ -126,3 +126,9 @@ doNotStore:
 
 ## 2026-08-24 session-close
 - Generated session-handoff.md and refreshed current-state.md.
+
+## 2026-08-25 session-close
+- Generated session-handoff.md and refreshed current-state.md.
+
+## 2026-08-25 session-close
+- Generated session-handoff.md and refreshed current-state.md.
