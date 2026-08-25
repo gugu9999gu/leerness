@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-25T04:48:24.991Z
+Last generated: 2026-08-25T12:41:41.705Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -118,6 +118,7 @@ Last generated: 2026-08-25T04:48:24.991Z
 - T-0135 lazy detect가 README 설명의 일반 TODO 단어를 실제 미추적 작업으로 오인하는 false-positive 수정 → next: TODO 주석 문법만 인식하도록 스캐너 회귀 추가
 - T-0136 handoff를 동시 세션 안전한 읽기 경로로 분리하고 Cursor 주소·버전 skew·공용 추적파일 쓰기를 함께 해결 → next: 릴리스 승인 시 GitHub/npm/사이트 배포를 검증하고, Cursor 작업이 멈춘 뒤 hive-analytics에서 leerness update --yes 및 adapter cursor 실증
 - T-0137 v1.36.154를 GitHub·npm·leerness.com에 배포하고 각 게시본을 재검증하며 R-0002 자동 배포 룰을 적용 → next: 후속 라운드: GitHub Actions Node 20 런타임 경고와 npm publish shell:true 폐기 경고를 재현·수정하고 R-0001/R-0002 게이트로 다음 버전을 출하
+- T-0138 GitHub Actions Node 20 런타임 경고와 npm publish shell:true 폐기 경고를 재현·수정하고 R-0001/R-0002 게이트로 다음 버전을 출하 → next: T-0139에서 역사적 full-E2E 픽스처의 DEP0190 경고를 별도로 제거하고 비릴리스 spawn 표면을 감사
 
 ## In Progress
 - 없음
