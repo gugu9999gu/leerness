@@ -3951,6 +3951,16 @@ function _selfTestCases() {
     { name: '_unixPathBlock: 멱등 마커 + export', run: () => { const b = _unixPathBlock('/x/bin'); return b.includes('managed') && /export PATH="\$PATH:\/x\/bin"/.test(b); } },
     { name: '_shellGuardAnalyze: PS5.1 && → ps5-chain error', run: () => { const r = _shellGuardAnalyze('a && b', { shell: 'powershell', psVersion: '5' }); return r.issues.some(i => i.rule === 'ps5-chain' && i.severity === 'error'); } },
     { name: '_shellGuardAnalyze: bash && → 문제 없음', run: () => _shellGuardAnalyze('a && b', { shell: 'bash' }).issues.length === 0 },
+    { name: 'provider 실행 경로: Windows 8.3 tilde 허용 + 셸 메타문자 거부 (1.36.160)', run: () => {
+      const shortScript = 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\auth.js';
+      const shortBin = 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\codex.cmd';
+      const shortPolicy = process.platform === 'win32'
+        ? (_argsSafe([shortScript]) && _binSafe(shortBin))
+        : (!_argsSafe([shortScript]) && !_binSafe(shortBin));
+      return shortPolicy && !_argsSafe(['~/bin/provider']) && !_binSafe('~root/bin/provider')
+        && !_argsSafe(['safe.js', 'x&whoami']) && !_argsSafe(['safe.js', 'x|whoami'])
+        && !_binSafe('cmd /c whoami') && !_binSafe('codex&whoami');
+    } },
     { name: 'AGENT_SLASH_COMMANDS: claude/codex/agy/grok/copilot 5종 + 명령 보유', run: () => { const ids = Object.keys(AGENT_SLASH_COMMANDS); return ['claude', 'codex', 'agy', 'grok', 'copilot'].every(id => ids.includes(id) && AGENT_SLASH_COMMANDS[id].commands.length > 0); } },
     { name: '_agentSlashHint: grok 슬래시 요약 + copilot 하위명령 라벨', run: () => { const g = _agentSlashHint('.', 'grok'); const c = _agentSlashHint('.', 'copilot'); return !!g && g.count > 0 && /Grok/.test(g.summary) && !!c && c.invoke === 'subcommand' && /하위명령/.test(c.summary); } },
     { name: '_parseSlashFromHelp: 슬래시 검출 + 플래그 제외 (1.9.267)', run: () => { const r = _parseSlashFromHelp('  /help   show help\n  /model  switch model\n  --version  print version\n', 'slash'); return r.length === 2 && r[0].cmd === '/help' && /show help/.test(r[0].desc) && !r.some(c => /version/.test(c.cmd)); } },
@@ -4386,6 +4396,8 @@ function _selfTestCases() {
       const wired = typeof enforceCmd === 'function' && s.includes("cmd === 'enforce'");
       // 훅 자기완결(구버전 전역 CLI 무의존 — 실측 함정): leerness 호출 없이 find -mmin 으로 판정
       const selfContained = s.includes('find "$SESSION_FILE" -mmin -"$WIN_MIN"') && s.includes('FRESH_HANDOFF') && s.includes('LEERNESS_ENFORCE_BYPASS');
+      const worktreeRooted = s.includes('LRN_TOP=$(git rev-parse --show-toplevel 2>/dev/null) || {')
+        && s.includes('LRN_DIR="$LRN_TOP/$LRN_REL"');
       const chainOk = s.includes('pre-commit.pre-leerness');
       const initAuto = s.includes("!has('--no-enforce') && process.env.LEERNESS_NO_ENFORCE !== '1'");
       // 행위: 임시 git repo — install→(handoff 無)차단 메시지, mtime 신선→통과 (git 없으면 skip-통과)
@@ -4399,11 +4411,12 @@ function _selfTestCases() {
           const save = process.argv; const _w = process.stdout.write;
           try { process.argv = ['node', 'h', 'enforce', 'install']; process.stdout.write = () => true; enforceCmd(tmp, 'install'); } finally { process.stdout.write = _w; process.argv = save; }
           const hk = fs.readFileSync(path.join(tmp, '.git', 'hooks', 'pre-commit'), 'utf8');
-          behavOk = hk.includes(_ENFORCE_MARK) && hk.includes('find "$SESSION_FILE"') && hk.includes('FRESH_HANDOFF');
+          behavOk = hk.includes(_ENFORCE_MARK) && hk.includes('find "$SESSION_FILE"') && hk.includes('FRESH_HANDOFF')
+            && hk.includes('git rev-parse --show-toplevel') && hk.includes('LRN_DIR="$LRN_TOP/$LRN_REL"');
         }
       } catch { behavOk = false; }
       finally { if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } }
-      return wired && selfContained && chainOk && initAuto && behavOk;
+      return wired && selfContained && worktreeRooted && chainOk && initAuto && behavOk;
     } },
     { name: 'enforce 하드닝 (1.36.44, 적대적 자체헌트): .harness 無 체크아웃 FP 방지 + worktree 훅경로 + --no-verify 사후감지 audit + 한계 정직 (소스가드)', run: () => {
       const s = read(__filename);
@@ -7894,6 +7907,17 @@ function enforceCmd(root, sub) {
     //     둘 다 `unsafe_path` 로 막혔다. 한국어 환경에서 흔한 경로다. 거부가 아니라 **제대로 인용**하는 것이 답이다.
     //     POSIX sh 의 작은따옴표 안에서는 `'` 를 제외한 모든 문자가 리터럴이다 — `'` 만 표준 관용구로 탈출시킨다.
     const shQuote = (v) => "'" + String(v).replace(/'/g, "'\''") + "'";
+    // 공유 hooksPath의 같은 스크립트가 형제 worktree에서 실행될 때 설치한 main worktree의
+    // cwd/상태를 빌려보면, main의 fresh handoff로 sibling 커밋이 조용히 통과한다. Git이 훅을
+    // 어느 cwd에서 시작하든 현재 커밋 대상의 toplevel을 다시 물어 상대 harness 경로를 붙인다.
+    // root 밖 harness는 기존처럼 설치 시점의 절대경로를 고정한다.
+    const harnessSetup = path.isAbsolute(harnessRel) ? [
+      `LRN_DIR=${shQuote(harnessRel)}`,
+    ] : [
+      `LRN_REL=${shQuote(harnessRel)}`,
+      'LRN_TOP=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "🔒 leerness 강제: 현재 git worktree 루트를 확인할 수 없어 커밋을 중단합니다" >&2; exit 1; }',
+      'LRN_DIR="$LRN_TOP/$LRN_REL"',
+    ];
     const hook = [
       '#!/bin/sh',
       _ENFORCE_MARK + ' — leerness 사용 강제 (제거: leerness enforce remove)',
@@ -7901,7 +7925,7 @@ function enforceCmd(root, sub) {
       // 1.36.134 (검수 P1, 재현): 훅은 **git toplevel** 에서 돈다. `.harness` 가 하위 디렉토리에 있으면
       //   `-d ".harness"` 가 거짓이라 조용히 통과했다 — 설치는 `verified:'fired'` 인데 루트 커밋이 그냥 통과.
       //   설치 시점에 **toplevel 기준 상대경로**를 훅에 박아 넣어, 커밋이 어디서 나든 같은 곳을 본다.
-      `LRN_DIR=${shQuote(harnessRel)}`,
+      ...harnessSetup,
       '# 1.36.44: .harness 없는 체크아웃(워크트리/구브랜치)은 강제 대상 아님 — 오차단(FP) 방지',
       'if [ ! -d "$LRN_DIR" ]; then',
       '  if [ -f "$(dirname "$0")/pre-commit.pre-leerness" ]; then exec sh "$(dirname "$0")/pre-commit.pre-leerness" "$@"; fi',
@@ -19853,8 +19877,17 @@ function _recommendAgent(task) {
 //   손으로 고치거나 `provider sync` 로 받은 catalog 에 `versionArgs` 를 넣으면 `agents list` 한 번으로
 //   임의 명령·셸 메타문자가 돌았다(실측: 마커 파일 생성 · 별도 프로세스 실행 · exit 0 · 경고 0).
 //   같은 파일에서 실행되는 것은 **전부** 같은 술어를 통과해야 한다(키 하나만 막고 닫혔다고 말하지 않는다).
+function _shellAtomSafe(x) {
+  if (typeof x !== 'string' || !x) return false;
+  if (/^[A-Za-z0-9._:@/\\-]+$/.test(x)) return true;
+  // Windows CI/기업 이미지의 유효한 8.3 경로는 `C:\\Users\\RUNNER~1\\...` 형태다.
+  // POSIX의 `~`/`~user` 확장까지 허용하면 검증한 문자열과 shell:true가 실행하는 경로가 달라진다.
+  // Windows에서만, `NAME~숫자`인 8.3 구성요소로 한정한다. 실제 셸 메타문자는 계속 거부한다.
+  if (process.platform !== 'win32' || !/^[A-Za-z0-9._:@/\\~-]+$/.test(x)) return false;
+  return x.split(/[\\/]/).every(part => !part.includes('~') || /^[A-Za-z0-9_]{1,6}~[0-9]+(?:\.[A-Za-z0-9_]{1,3})?$/.test(part));
+}
 function _argsSafe(a) {
-  return Array.isArray(a) && a.length > 0 && a.every(x => typeof x === 'string' && /^[A-Za-z0-9._:@/\\-]+$/.test(x));
+  return Array.isArray(a) && a.length > 0 && a.every(_shellAtomSafe);
 }
 
 //   bin 은 **실행파일 이름/경로**여야 한다 — 명령줄이 아니다. `shell:true` 로 넘기므로 여기에 공백이나
@@ -19863,7 +19896,7 @@ function _argsSafe(a) {
 //   그 값은 읽기성 명령인 `agents list/check` 에서 실행된다. 공백을 막는 것은 회귀가 아니다 —
 //   `shell:true` 에서 공백 있는 bin 은 지금도 첫 토큰만 명령으로 해석돼 어차피 동작하지 않는다.
 function _binSafe(b) {
-  return typeof b === 'string' && b.length > 0 && b.length <= 260 && /^[A-Za-z0-9._:@/\\-]+$/.test(b);
+  return typeof b === 'string' && b.length <= 260 && _shellAtomSafe(b);
 }
 
 //   같은 실행파일을 가리키는 **정상적인 별칭**까지 다른 것으로 보면, 이번에 되살린 인증 차단이

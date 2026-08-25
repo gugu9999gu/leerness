@@ -48,11 +48,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node ./scripts/lint.js && node ./scripts/lock-probe.js && node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e-core.js && node ./scripts/handoff-readonly-probe.js && npm run test:commands && node ./scripts/e2e.js",
-    "test:core": "node ./scripts/lint.js && node ./scripts/lock-probe.js && node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e-core.js && node ./scripts/handoff-readonly-probe.js",
+    "test": "node ./scripts/lint.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e-core.js && node ./scripts/handoff-readonly-probe.js && npm run test:commands && node ./scripts/e2e.js",
+    "test:core": "node ./scripts/lint.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e-core.js && node ./scripts/handoff-readonly-probe.js",
     "test:commands": "node ./scripts/e2e-command-surface.js",
     "test:handoff": "node ./scripts/handoff-readonly-probe.js",
-    "test:fast": "node ./scripts/lint.js && node ./scripts/lock-probe.js && node ./scripts/smoke.js",
+    "test:fast": "node ./scripts/lint.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./scripts/smoke.js",
     "test:smoke": "node ./scripts/smoke.js",
     "lint": "node ./scripts/lint.js",
     "prepack": "node ./bin/leerness.js readme sync . && node ./bin/leerness.js --version"
