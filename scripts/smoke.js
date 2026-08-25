@@ -3,7 +3,8 @@
 
 // 1.9.273 (UR-0027, GPT-5.5 리뷰): 빠른 핵심-경로 smoke 테스트.
 //   전체 e2e(수백 케이스)는 CI/릴리스 게이트용. 이 smoke 는 개발 중 제한된 핵심 명령만 확인한다.
-//   Windows 에서는 selftest 자체가 30초를 넘을 수 있어 해당 단계만 120초 상한을 사용한다(T-0133).
+//   Windows 에서는 실제 Git shell 발화 검증까지 포함한 selftest가 120초를 넘을 수 있어
+//   해당 단계만 240초 상한을 사용한다(T-0133/T-0137).
 //   핵심 명령이 정상 동작하는지만 단일 임시 프로젝트에서 빠르게 확인한다.
 //   실패 시 exit 1 (CI 친화). 사용: npm run test:fast  또는  node scripts/smoke.js
 
@@ -33,7 +34,7 @@ console.log(`# leerness smoke (test:fast) @ ${tmp}`);
 
 // 1) 코어 무결성
 check('--version', ['--version'], { match: s => /^\d+\.\d+\.\d+/.test(s.trim()) });
-check('selftest (pure 함수 무결성)', ['selftest'], { timeout: 120000, match: s => /통과/.test(s) });
+check('selftest (pure 함수 무결성)', ['selftest'], { timeout: 240000, match: s => /통과/.test(s) });
 
 // 2) 설치 + 필수 파일
 check('init', ['init', tmp, '--yes', '--language', 'ko', '--skills', 'recommended']);

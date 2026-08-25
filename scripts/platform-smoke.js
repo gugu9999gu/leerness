@@ -20,6 +20,9 @@ const env = Object.assign({}, process.env, {
   LEERNESS_OFFLINE: '1',
   LEERNESS_NO_PROMPT: '1',
   LEERNESS_NO_STALE_CHECK: '1',
+  // 일부 POSIX 셸은 CDPATH를 사용한 cd 성공 경로를 stdout에 출력한다. 훅의 명령 치환이
+  // 그 출력에 오염되지 않는지 실제로 검증하도록 일부러 비어 있지 않게 둔다.
+  CDPATH: '.',
 });
 for (const key of [
   'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
@@ -41,7 +44,7 @@ const run = (cmd, args, cwd, timeout = 120000) => cp.spawnSync(cmd, args, {
   maxBuffer: 32 * 1024 * 1024,
 });
 const git = (cwd, args) => run('git', args, cwd, 60000);
-const leerness = (cwd, args) => run(process.execPath, [CLI, ...args], cwd);
+const leerness = (cwd, args, timeout = 120000) => run(process.execPath, [CLI, ...args], cwd, timeout);
 const parseJson = (r) => {
   try { return JSON.parse(String(r.stdout || '')); } catch { return null; }
 };
@@ -62,14 +65,24 @@ let failed = null;
 let cleanupError = null;
 const debug = {};
 try {
-  const selftest = leerness(sandbox, ['selftest', '--json']);
+  // Windows Node 20 runner에서 enforce의 실제 sh 발화 검증까지 포함한 전체 selftest가
+  // 120초를 근소하게 넘는다. 전체 E2E보다 먼저 실패를 잡는 fast gate 목적은 유지하되
+  // 프로세스를 중간에 잘라 거짓 실패로 만들지 않도록 이 단계만 240초를 허용한다.
+  const selftest = leerness(sandbox, ['selftest', '--json'], 240000);
   const selfJson = parseJson(selftest);
   const pathCase = selfJson && Array.isArray(selfJson.results)
     ? selfJson.results.find(row => /Windows 8\.3 tilde/.test(row.name || ''))
     : null;
-  debug.shortPath = { command: output(selftest), case: pathCase || null };
-  if (selftest.status !== 0 || !pathCase || pathCase.ok !== true) {
+  const selfFailures = selfJson && Array.isArray(selfJson.results)
+    ? selfJson.results.filter(row => row.ok !== true).slice(0, 10)
+    : [];
+  debug.shortPath = { command: output(selftest), case: pathCase || null, selfFailures };
+  if (selftest.error && selftest.error.code === 'ETIMEDOUT') {
+    failed = 'platform smoke 선행 selftest가 240초 안에 끝나지 않음';
+  } else if (!pathCase || pathCase.ok !== true) {
     failed = 'Windows 8.3 실행 경로 selftest가 통과하지 않음';
+  } else if (selftest.status !== 0) {
+    failed = `platform smoke 선행 selftest 실패: ${selfFailures.map(row => row.name).join(', ') || '원인 미확인'}`;
   }
 
   const main = path.join(sandbox, 'main');

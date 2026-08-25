@@ -4,7 +4,7 @@
 
 - CI 전체 E2E를 Linux/Windows에서 결정화하고, 다중 AI 세션 presence와 상태 쓰기 락을 고유 토큰 owner·heartbeat 가시성·기본 fail-closed로 강화했습니다. fencing 없는 PID/host/mtime 판정으로 기존 owner를 자동 탈취하지 않습니다.
 - Windows/Node 18의 deletion-pending 상태가 빈 `.lock`을 남기던 문제를 토큰 고유 release tombstone으로 해결했습니다. 해제 재시도는 새 경쟁자 락을 건드리지 않으며, native Promise·비표준 thenable·ABA·재시도 소진 경로와 tombstone을 상태 쓰기로 오인하지 않는 계측기 수명주기를 결정적 회귀로 검증합니다.
-- Windows 8.3 실행 경로(`RUNNER~1`)를 안전한 provider 경로로 인식하고, 공유 `core.hooksPath` 훅이 실행 시점의 현재 worktree에서 handoff 근거를 판정하도록 수정했습니다. Linux/Windows fast CI가 이 두 플랫폼 경계를 전체 E2E 전에 검증합니다.
+- Windows 8.3 실행 경로(`RUNNER~1`)를 안전한 provider 경로로 인식하고, 공유 `core.hooksPath` 훅이 실행 시점의 현재 worktree를 POSIX 셸의 물리 경로로 정규화한 뒤 handoff 근거를 판정하도록 수정했습니다. Linux/Windows fast CI가 이 두 플랫폼 경계를 전체 E2E 전에 검증합니다.
 - 잠금 프로토콜 전환 뒤에는 실행 중인 1.36.159 이하 에이전트 세션을 모두 재시작해야 합니다. 비정상 종료로 남은 owner/구버전 `.lock`은 자동 삭제하지 않으므로 소유자를 확인한 뒤 수동 복구해야 합니다.
 
 ## 1.36.159 — 2026-08-24

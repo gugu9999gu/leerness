@@ -4397,6 +4397,7 @@ function _selfTestCases() {
       // 훅 자기완결(구버전 전역 CLI 무의존 — 실측 함정): leerness 호출 없이 find -mmin 으로 판정
       const selfContained = s.includes('find "$SESSION_FILE" -mmin -"$WIN_MIN"') && s.includes('FRESH_HANDOFF') && s.includes('LEERNESS_ENFORCE_BYPASS');
       const worktreeRooted = s.includes('LRN_TOP=$(git rev-parse --show-toplevel 2>/dev/null) || {')
+        && s.includes('LRN_TOP=$(CDPATH= cd "$LRN_TOP" 2>/dev/null && pwd -P) || {')
         && s.includes('LRN_DIR="$LRN_TOP/$LRN_REL"');
       const chainOk = s.includes('pre-commit.pre-leerness');
       const initAuto = s.includes("!has('--no-enforce') && process.env.LEERNESS_NO_ENFORCE !== '1'");
@@ -4412,7 +4413,8 @@ function _selfTestCases() {
           try { process.argv = ['node', 'h', 'enforce', 'install']; process.stdout.write = () => true; enforceCmd(tmp, 'install'); } finally { process.stdout.write = _w; process.argv = save; }
           const hk = fs.readFileSync(path.join(tmp, '.git', 'hooks', 'pre-commit'), 'utf8');
           behavOk = hk.includes(_ENFORCE_MARK) && hk.includes('find "$SESSION_FILE"') && hk.includes('FRESH_HANDOFF')
-            && hk.includes('git rev-parse --show-toplevel') && hk.includes('LRN_DIR="$LRN_TOP/$LRN_REL"');
+            && hk.includes('git rev-parse --show-toplevel') && hk.includes('pwd -P')
+            && hk.includes('LRN_DIR="$LRN_TOP/$LRN_REL"');
         }
       } catch { behavOk = false; }
       finally { if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } }
@@ -7916,6 +7918,10 @@ function enforceCmd(root, sub) {
     ] : [
       `LRN_REL=${shQuote(harnessRel)}`,
       'LRN_TOP=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "🔒 leerness 강제: 현재 git worktree 루트를 확인할 수 없어 커밋을 중단합니다" >&2; exit 1; }',
+      // Git for Windows가 `C:/Users/RUNNER~1/...` 같은 DOS 별칭을 돌려줄 수 있다. Git의 sh에서
+      // 이 문자열을 곧바로 `-d`에 넘기면 실제 디렉터리인데도 거짓이 되는 runner 조합이 있다.
+      // subshell cd + pwd -P로 셸이 실제 접근한 물리 경로를 다시 받아 fail-open을 없앤다.
+      'LRN_TOP=$(CDPATH= cd "$LRN_TOP" 2>/dev/null && pwd -P) || { echo "🔒 leerness 강제: 현재 git worktree 경로에 접근할 수 없어 커밋을 중단합니다" >&2; exit 1; }',
       'LRN_DIR="$LRN_TOP/$LRN_REL"',
     ];
     const hook = [
