@@ -79,6 +79,10 @@ try {
   const { resolveNpmCliPath, spawnNpmSync } = require(npmProcessPath);
   const fakeEnv = {
     ...process.env,
+    // test:fast deliberately runs the product offline. These cases exercise the
+    // real npm-backed release paths with a local fake CLI, so keep that parent
+    // policy from short-circuiting the behavior under test.
+    LEERNESS_OFFLINE: '0',
     npm_execpath: fakeNpmCli,
     LEERNESS_NPM_PROBE_LOG: fakeNpmLog,
   };
