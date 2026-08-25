@@ -4398,7 +4398,8 @@ function _selfTestCases() {
       const selfContained = s.includes('find "$SESSION_FILE" -mmin -"$WIN_MIN"') && s.includes('FRESH_HANDOFF') && s.includes('LEERNESS_ENFORCE_BYPASS');
       const worktreeRooted = s.includes('LRN_TOP=$(git rev-parse --show-toplevel 2>/dev/null) || {')
         && s.includes('LRN_TOP=$(CDPATH= cd "$LRN_TOP" 2>/dev/null && pwd -P) || {')
-        && s.includes('LRN_DIR="$LRN_TOP/$LRN_REL"');
+        && s.includes('LRN_DIR="$LRN_TOP/$LRN_REL"')
+        && s.includes('fs.realpathSync.native || fs.realpathSync');
       const chainOk = s.includes('pre-commit.pre-leerness');
       const initAuto = s.includes("!has('--no-enforce') && process.env.LEERNESS_NO_ENFORCE !== '1'");
       // 행위: 임시 git repo — install→(handoff 無)차단 메시지, mtime 신선→통과 (git 없으면 skip-통과)
@@ -7885,8 +7886,13 @@ function enforceCmd(root, sub) {
     //   `../…` 를 만들어 그것이 영구 훅에 박혔다(실측: `LRN_DIR='../__container/alias/.harness'`).
     //   양쪽을 realpath 로 펴서 비교하고, 그래도 밖이면 상대경로로 표현하지 않고 **절대경로**를 쓴다.
     let _hDir = path.join(root, '.harness'), _top = topLevel;
-    try { _hDir = fs.realpathSync(_hDir); } catch {}
-    try { _top = fs.realpathSync(_top); } catch {}
+    // Node의 JS realpathSync는 Windows 8.3 별칭(`RUNNER~1`)을 그대로 둘 수 있지만 Git은
+    // --show-toplevel에서 긴 경로를 돌려준다. 같은 디렉터리가 달라 보여 harnessRel이 `..`로
+    // 시작하면 공유 worktree 훅에 main의 절대경로를 박는 fail-open이 된다. native realpath는
+    // 두 입력을 같은 긴 경로로 정규화한다(Node 18+); 구형 런타임만 기존 구현으로 폴백한다.
+    const _nativeRealpath = fs.realpathSync.native || fs.realpathSync;
+    try { _hDir = _nativeRealpath(_hDir); } catch {}
+    try { _top = _nativeRealpath(_top); } catch {}
     let harnessRel = (path.relative(_top, _hDir) || '.harness').replace(/\\/g, '/');
     if (harnessRel.startsWith('..')) harnessRel = _hDir.replace(/\\/g, '/');
     //   ⚠ 1.36.143 (재검수 P1): 이 거부가 **체인 백업 복사 뒤**에 있었다 — 거절하면서 백업을 파괴했다.

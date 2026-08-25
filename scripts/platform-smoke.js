@@ -126,16 +126,20 @@ try {
   const installed = parseJson(installResult);
   const mainHook = hookPath(main);
   const siblingHook = hookPath(sibling);
+  const installedHookBody = fs.existsSync(mainHook) ? fs.readFileSync(mainHook, 'utf8') : '';
   debug.hooks = {
     configs: configs.map(output), before, installed, install: output(installResult),
     mainHook, siblingHook,
     mainHookExists: fs.existsSync(mainHook), siblingHookExists: fs.existsSync(siblingHook),
     sameTarget: fs.existsSync(mainHook) && fs.existsSync(siblingHook)
       ? fs.realpathSync(mainHook) === fs.realpathSync(siblingHook) : false,
+    dynamicWorktreeRoot: installedHookBody.includes('LRN_REL=')
+      && installedHookBody.includes('git rev-parse --show-toplevel')
+      && installedHookBody.includes('CDPATH= cd "$LRN_TOP"'),
   };
   if (!failed && (configs.some(r => r.status !== 0) || !before || before.worktrees !== 2
       || installResult.status !== 0 || !installed || installed.worktrees !== 2
-      || !debug.hooks.sameTarget)) {
+      || !debug.hooks.sameTarget || !debug.hooks.dynamicWorktreeRoot)) {
     failed = '공유 hooksPath를 두 worktree가 함께 본다는 설치 계약 실패';
   }
 
