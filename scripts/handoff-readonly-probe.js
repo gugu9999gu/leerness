@@ -110,10 +110,10 @@ async function waitForJson(file, timeoutMs = 10000) {
   const initialStatus = git(['status', '--porcelain=v1', '--untracked-files=all']).trim();
   assert('default handoff leaves tracked workspace clean', initialStatus === '', initialStatus);
   for (const file of ['environment.json', 'last-handoff.json', 'tech-profile.json']) {
-    assert(`default handoff does not create .harness/${file}`,
-      !fs.existsSync(path.join(root, '.harness', file)), file);
+    assert(`default handoff does not create .leerness/${file}`,
+      !fs.existsSync(path.join(root, '.leerness', file)), file);
   }
-  const sessionDir = path.join(root, '.harness', 'cache', 'sessions');
+  const sessionDir = path.join(root, '.leerness', 'cache', 'sessions');
   const firstRecord = JSON.parse(fs.readFileSync(path.join(sessionDir, 'probe-session-0001.json'), 'utf8'));
   assert('session freshness is stored in ignored per-session record',
     firstRecord.sessionKey === 'probe-session-0001' && firstRecord.handoffCount === 1
@@ -125,7 +125,7 @@ async function waitForJson(file, timeoutMs = 10000) {
     { env: { ...handoffEnv(addressedChildId), CLAUDE_CODE_CHILD_SESSION: '1' } }));
   assert('child does not merge inherited explicit id into parent presence',
     !fs.existsSync(path.join(sessionDir, `${addressedChildId}.json`)), addressedChildId);
-  const freshnessDir = path.join(root, '.harness', 'cache', 'handoffs');
+  const freshnessDir = path.join(root, '.leerness', 'cache', 'handoffs');
   const proveAddressedEnforcement = (label, beforeEnv, expectedKey, handoffRunEnv = beforeEnv, afterEnv = beforeEnv) => {
     const before = run(process.execPath,
       [CLI, 'enforce', 'check', '--path', root, '--json'], { env: beforeEnv });
@@ -223,7 +223,7 @@ async function waitForJson(file, timeoutMs = 10000) {
     { status: addresslessCommit.status, stdout: addresslessCommit.stdout, stderr: addresslessCommit.stderr });
 
   // 구버전 global 파일이 방금 갱신됐어도 주소가 있는 세션은 자기 marker 없이는 통과하면 안 된다.
-  const legacyPath = path.join(root, '.harness', 'last-handoff.json');
+  const legacyPath = path.join(root, '.leerness', 'last-handoff.json');
   const legacyNow = new Date().toISOString();
   fs.writeFileSync(legacyPath, JSON.stringify({ last: legacyNow, history: [legacyNow] }, null, 2) + '\n', 'utf8');
   proveAddressedEnforcement('legacy-isolation', handoffEnv('legacy-isolation-session'), 'legacy-isolation-session');
@@ -346,8 +346,8 @@ async function waitForJson(file, timeoutMs = 10000) {
   const afterParallel = git(['status', '--porcelain=v1', '--untracked-files=all']).trim();
   assert('parallel handoffs keep git status clean', afterParallel === '', afterParallel);
 
-  fs.writeFileSync(path.join(root, '.harness', 'HARNESS_VERSION'), '9.9.9\n', 'utf8');
-  git(['add', '.harness/HARNESS_VERSION']);
+  fs.writeFileSync(path.join(root, '.leerness', 'HARNESS_VERSION'), '9.9.9\n', 'utf8');
+  git(['add', '.leerness/HARNESS_VERSION']);
   git(['commit', '-m', 'version skew fixture']);
   const skewText = must('version skew text handoff', run(process.execPath,
     [CLI, 'handoff', root, '--compact', '--no-drift-check'], { env: handoffEnv('version-skew-text') }));

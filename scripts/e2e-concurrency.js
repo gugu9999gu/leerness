@@ -45,7 +45,7 @@ function spawn(d, args, stallTarget) {
 
 function waitForStall(d, target) {
   const re = new RegExp('^' + target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.tmp-');
-  const hd = path.join(d, '.harness');
+  const hd = path.join(d, '.leerness');
   for (let i = 0; i < 800; i++) {
     try { if (fs.readdirSync(hd).some(name => re.test(name))) return true; } catch {}
     nap(10);
@@ -78,7 +78,7 @@ async function race(name, config) {
     first: ['creds', 'register', 'first', '--env-var', 'T0115_FIRST'],
     second: ['creds', 'register', 'second', '--env-var', 'T0115_SECOND'],
     inspect: d => {
-      const services = Object.keys(JSON.parse(fs.readFileSync(path.join(d, '.harness', 'credentials.local.json'), 'utf8')).services || {}).sort();
+      const services = Object.keys(JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'credentials.local.json'), 'utf8')).services || {}).sort();
       return { services, preserved: services.join(',') === 'first,second' };
     }
   }));
@@ -88,7 +88,7 @@ async function race(name, config) {
     first: ['creds', 'refresh', 'retained'],
     second: ['creds', 'register', 'survivor', '--env-var', 'T0115_SURVIVOR'],
     inspect: d => {
-      const services = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'credentials.local.json'), 'utf8')).services || {};
+      const services = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'credentials.local.json'), 'utf8')).services || {};
       return { names: Object.keys(services).sort(), refreshed: !!services.retained?.lastRefreshed, preserved: !!services.retained?.lastRefreshed && !!services.survivor };
     }
   }));
@@ -98,7 +98,7 @@ async function race(name, config) {
     first: ['team', 'remove', 'victim'],
     second: ['team', 'add', 'survivor', '--name', 'survivor'],
     inspect: d => {
-      const ids = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'teams.json'), 'utf8')).map(team => team.id).sort();
+      const ids = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'teams.json'), 'utf8')).map(team => team.id).sort();
       return { ids, preserved: ids.join(',') === 'survivor' };
     }
   }));
@@ -108,7 +108,7 @@ async function race(name, config) {
     first: ['memory', 'restore', 'decisions', 'archived'],
     second: ['decision', 'add', 'survivor', '--why', 'test'],
     inspect: d => {
-      const titles = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'decisions.json'), 'utf8')).map(item => item.title);
+      const titles = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'decisions.json'), 'utf8')).map(item => item.title);
       return { titles, preserved: titles.some(title => title.includes('archived')) && titles.some(title => title.includes('survivor')) };
     }
   }));
@@ -118,7 +118,7 @@ async function race(name, config) {
     first: ['memory', 'restore', 'lessons', 'archived'],
     second: ['lesson', 'save', 'survivor'],
     inspect: d => {
-      const texts = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'lessons.json'), 'utf8')).map(item => item.text);
+      const texts = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'lessons.json'), 'utf8')).map(item => item.text);
       return { texts, preserved: texts.includes('archived') && texts.includes('survivor') };
     }
   }));
@@ -128,7 +128,7 @@ async function race(name, config) {
     first: ['memory', 'restore', 'plan', 'archived'],
     second: ['plan', 'add', 'survivor'],
     inspect: d => {
-      const plan = fs.readFileSync(path.join(d, '.harness', 'plan.md'), 'utf8');
+      const plan = fs.readFileSync(path.join(d, '.leerness', 'plan.md'), 'utf8');
       return { archived: plan.includes('archived'), survivor: plan.includes('survivor'), preserved: plan.includes('archived') && plan.includes('survivor') };
     }
   }));

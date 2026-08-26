@@ -1,0 +1,331 @@
+[
+  {
+    "id": "T-0116",
+    "repro": "node -e \"const fs=require('fs'),p=require('path'),o=require('os'),c=require('child_process');const s=fs.mkdtempSync(p.join(o.tmpdir(),'lr-'));const d=p.join(s,'p'),cli=p.resolve('bin/leerness.js'),env={...process.env,LEERNESS_OFFLINE:'1',LEERNESS_NO_PROMPT:'1'};['LEERNESS_SESSION_ID','CODEX_THREAD_ID','CLAUDE_CODE_SESSION_ID','CLAUDE_CODE_HOST_SESSION_ID','CLAUDE_CODE_CHILD_SESSION'].forEach(k=>delete env[k]);const run=a=>c.spawnSync(process.execPath,[cli,...a],{cwd:d,env,encoding:'utf8',timeout:120000});try{fs.mkdirSync(d,{recursive:true});fs.writeFileSync(p.join(d,'package.json'),'{}');run(['init',d,'--yes','--minimal']);run(['state','start','x','--json']);const sf=p.join(d,'.leerness','state.json'),st=JSON.parse(fs.readFileSync(sf));st.currentRunId='../../../outside';delete st.runsBySession;fs.writeFileSync(sf,JSON.stringify(st));const rec=JSON.parse(fs.readFileSync(p.join(d,'.leerness','runs','run-0001.json')));rec.run_id='../../../outside';fs.writeFileSync(p.join(s,'outside.json'),JSON.stringify(rec));run(['state','handoff','x','--json']);if(fs.existsSync(p.join(s,'outside.md'))){console.error('STATE_PATH_TRAVERSAL');process.exitCode=1}}finally{fs.rmSync(s,{recursive:true,force:true})}\"",
+    "expectBad": "STATE_PATH_TRAVERSAL",
+    "baseline": {
+      "at": "2026-08-23T03:02:51.137Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 1984
+    },
+    "rootCause": "Persisted run IDs were trusted as filesystem path segments: 1.36.148 validated only runsBySession, not currentRunId or record.run_id.",
+    "siblingScope": {
+      "checked": [
+        "state.json currentRunId schema",
+        "_runFile path gateway",
+        "_loadRun record run_id"
+      ]
+    },
+    "previousGuardGap": "The 1.36.148 regression covered only runsBySession; it did not mutate the legacy global slot or stored run record."
+  },
+  {
+    "id": "T-0120",
+    "repro": "node -e \"eval(Buffer.from('Y29uc3QgZnM9cmVxdWlyZSgnZnMnKSxvcz1yZXF1aXJlKCdvcycpLHBhdGg9cmVxdWlyZSgncGF0aCcpLGNwPXJlcXVpcmUoJ2NoaWxkX3Byb2Nlc3MnKTsKY29uc3Qgc2I9ZnMubWtkdGVtcFN5bmMocGF0aC5qb2luKG9zLnRtcGRpcigpLCdscm4tbm9zeXN0ZW0tJykpLHJlcG89cGF0aC5qb2luKHNiLCdyZXBvJyksaG9va3M9cGF0aC5qb2luKHNiLCdob29rcycpLGNsaT1wYXRoLnJlc29sdmUocHJvY2Vzcy5jd2QoKSwnYmluL2xlZXJuZXNzLmpzJyk7CmNvbnN0IGVudj17Li4ucHJvY2Vzcy5lbnZ9OyBmb3IoY29uc3QgayBvZiBPYmplY3Qua2V5cyhlbnYpKSBpZigvXihHSVRfRElSfEdJVF9XT1JLX1RSRUV8R0lUX0lOREVYX0ZJTEV8R0lUX0NPTU1PTl9ESVJ8R0lUX0NPTkZJR19QQVJBTUVURVJTfEdJVF9DT05GSUdfQ09VTlQpJC9pLnRlc3QoaykpIGRlbGV0ZSBlbnZba107CmVudi5HSVRfQ09ORklHX0dMT0JBTD1wYXRoLmpvaW4oc2IsJ2dsb2JhbCcpOyBlbnYuR0lUX0NPTkZJR19TWVNURU09cGF0aC5qb2luKHNiLCdzeXN0ZW0nKTsgZW52LkdJVF9DT05GSUdfTk9TWVNURU09JzEnOyBlbnYuTEVFUk5FU1NfT0ZGTElORT0nMSc7IGVudi5MRUVSTkVTU19OT19QUk9NUFQ9JzEnOwpjb25zdCBydW49KHgsYSxjPXJlcG8pPT5jcC5zcGF3blN5bmMoeCxhLHtjd2Q6YyxlbnYsZW5jb2Rpbmc6J3V0ZjgnLHRpbWVvdXQ6NjAwMDB9KTsgY29uc3QgZ2l0PShhKT0+cnVuKCdnaXQnLGEpOyBjb25zdCBscm49KGEpPT5ydW4ocHJvY2Vzcy5leGVjUGF0aCxbY2xpLC4uLmFdKTsgY29uc3QganNvbj1yPT57dHJ5e3JldHVybiBKU09OLnBhcnNlKHIuc3Rkb3V0KX1jYXRjaHtyZXR1cm4gbnVsbH19Owp0cnl7ZnMubWtkaXJTeW5jKHJlcG8se3JlY3Vyc2l2ZTp0cnVlfSk7ZnMubWtkaXJTeW5jKGhvb2tzLHtyZWN1cnNpdmU6dHJ1ZX0pO2ZzLndyaXRlRmlsZVN5bmMoZW52LkdJVF9DT05GSUdfR0xPQkFMLCcnKTtmcy53cml0ZUZpbGVTeW5jKGVudi5HSVRfQ09ORklHX1NZU1RFTSwnW2NvcmVdXG5cdGhvb2tzUGF0aCA9ICcraG9va3MucmVwbGFjZSgvXFwvZywnLycpKydcbicpOwpmb3IoY29uc3QgYSBvZiBbWydpbml0JywnLXEnLCctYicsJ21haW4nLCcuJ10sWydjb25maWcnLCd1c2VyLmVtYWlsJywndEBleGFtcGxlLmludmFsaWQnXSxbJ2NvbmZpZycsJ3VzZXIubmFtZScsJ1QnXV0paWYoZ2l0KGEpLnN0YXR1cyl0aHJvdyBFcnJvcignZ2l0IHNldHVwJyk7CmZzLndyaXRlRmlsZVN5bmMocGF0aC5qb2luKHJlcG8sJ3BhY2thZ2UuanNvbicpLCd7Im5hbWUiOiJ0IiwidmVyc2lvbiI6IjEifScpO2lmKGdpdChbJ2FkZCcsJy1BJ10pLnN0YXR1c3x8Z2l0KFsnY29tbWl0JywnLXFtJywnaSddKS5zdGF0dXMpdGhyb3cgRXJyb3IoJ2luaXRpYWwgY29tbWl0Jyk7CmlmKGxybihbJ2luaXQnLHJlcG8sJy0teWVzJywnLS1taW5pbWFsJ10pLnN0YXR1c3x8bHJuKFsnaGFuZG9mZicscmVwb10pLnN0YXR1cyl0aHJvdyBFcnJvcignbGVlcm5lc3Mgc2V0dXAnKTsgY29uc3QgaW5zPWpzb24obHJuKFsnZW5mb3JjZScsJ2luc3RhbGwnLCctLXBhdGgnLHJlcG8sJy0tanNvbicsJy0tc2tpcC12ZXJpZnknXSkpO2lmKCFpbnN8fCFpbnMub2spdGhyb3cgRXJyb3IoJ2luc3RhbGwnKTsKY29uc3QgcmF3PVN0cmluZyhnaXQoWydyZXYtcGFyc2UnLCctLWdpdC1wYXRoJywnaG9va3MvcHJlLWNvbW1pdCddKS5zdGRvdXR8fCcnKS50cmltKCksY2FsbGVyPXBhdGguaXNBYnNvbHV0ZShyYXcpP3JhdzpwYXRoLmpvaW4ocmVwbyxyYXcpO2NvbnN0IG9sZD1uZXcgRGF0ZShEYXRlLm5vdygpLTcyKjM2MDAqMTAwMCk7ZnMudXRpbWVzU3luYyhwYXRoLmpvaW4ocmVwbywnLmhhcm5lc3MnLCdsYXN0LWhhbmRvZmYuanNvbicpLG9sZCxvbGQpO2ZzLndyaXRlRmlsZVN5bmMocGF0aC5qb2luKHJlcG8sJ3gnKSwneCcpO2dpdChbJ2FkZCcsJy1BJ10pO2NvbnN0IGNvbW1pdD1naXQoWydjb21taXQnLCctcW0nLCdtdXN0LWJsb2NrJ10pOwpjb25zdCBiYWQ9ZnMuZXhpc3RzU3luYyhpbnMuaG9vaykmJiFmcy5leGlzdHNTeW5jKGNhbGxlcikmJmNvbW1pdC5zdGF0dXM9PT0wO2NvbnNvbGUubG9nKGJhZD8nR0lUX0NPTkZJR19OT1NZU1RFTV9IT09LX01JU01BVENIJzonTk9fTUlTTUFUQ0gnKTtwcm9jZXNzLmV4aXRDb2RlPWJhZD8xOjA7Cn1jYXRjaChlKXtjb25zb2xlLmVycm9yKCdQUk9CRV9TRVRVUF9FUlJPUiAnK2UubWVzc2FnZSk7cHJvY2Vzcy5leGl0Q29kZT0yfWZpbmFsbHl7dHJ5e2ZzLnJtU3luYyhzYix7cmVjdXJzaXZlOnRydWUsZm9yY2U6dHJ1ZX0pfWNhdGNoe319','base64').toString())\"",
+    "expectBad": "GIT_CONFIG_NOSYSTEM_HOOK_MISMATCH",
+    "baseline": {
+      "at": "2026-08-23T03:27:33.563Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 4437
+    },
+    "rootCause": "gitSpawn가 GIT_CONFIG_NOSYSTEM을 저장소 위치 주입으로 오분류해 내부 훅 경로 해석에서만 시스템 설정을 보도록 했다",
+    "siblingScope": {
+      "checked": [
+        "lib/git.js sanitizer",
+        "scripts/e2e.js sanitizer-boundary regression",
+        "scripts/e2e.js actual enforce-install/commit regression"
+      ]
+    },
+    "previousGuardGap": "기존 검사는 정적 세척 목록만 확인하고 fixture에서 GIT_CONFIG_NOSYSTEM을 제거해 설치기와 같은 환경의 실제 git commit 경로를 대조하지 않았다"
+  },
+  {
+    "id": "T-0121",
+    "repro": "node -e \"eval(Buffer.from('Y29uc3QgZnM9cmVxdWlyZSgnZnMnKSwgb3M9cmVxdWlyZSgnb3MnKSwgcGF0aD1yZXF1aXJlKCdwYXRoJyksIGNwPXJlcXVpcmUoJ2NoaWxkX3Byb2Nlc3MnKTsKY29uc3QgY2xpPXBhdGgucmVzb2x2ZSgnYmluL2xlZXJuZXNzLmpzJyk7CmNvbnN0IHNiPWZzLm1rZHRlbXBTeW5jKHBhdGguam9pbihvcy50bXBkaXIoKSwnbGVlcm5lc3MtdDAxMjEtJykpOwpsZXQgZXhpdD0wOwp0cnkgewogIGNvbnN0IGdsb2JhbENmZz1wYXRoLmpvaW4oc2IsJ2dsb2JhbC5naXRjb25maWcnKSwgc3lzdGVtQ2ZnPXBhdGguam9pbihzYiwnc3lzdGVtLmdpdGNvbmZpZycpOwogIGZzLndyaXRlRmlsZVN5bmMoZ2xvYmFsQ2ZnLCcnKTsgZnMud3JpdGVGaWxlU3luYyhzeXN0ZW1DZmcsJycpOwogIGNvbnN0IGVudj1PYmplY3QuYXNzaWduKHt9LHByb2Nlc3MuZW52LHtHSVRfQ09ORklHX0dMT0JBTDpnbG9iYWxDZmcsR0lUX0NPTkZJR19TWVNURU06c3lzdGVtQ2ZnfSk7CiAgZm9yKGNvbnN0IGsgb2YgWydHSVRfRElSJywnR0lUX1dPUktfVFJFRScsJ0dJVF9JTkRFWF9GSUxFJywnR0lUX0NPTU1PTl9ESVInLCdHSVRfQ09ORklHX0NPVU5UJywnR0lUX0NPTkZJR19OT1NZU1RFTSddKSBkZWxldGUgZW52W2tdOwogIGNvbnN0IHJ1bj0oY21kLGFyZ3MsY3dkKT0+Y3Auc3Bhd25TeW5jKGNtZCxhcmdzLHtjd2QsZW52LGVuY29kaW5nOid1dGY4Jyx0aW1lb3V0OjMwMDAwfSk7CiAgY29uc3QgZ2l0PShjd2QsYXJncyk9PnJ1bignZ2l0JyxbJy1DJyxjd2QsLi4uYXJnc10sY3dkKTsKICBjb25zdCBjbGlSdW49KGN3ZCxhcmdzKT0+cnVuKHByb2Nlc3MuZXhlY1BhdGgsW2NsaSwuLi5hcmdzXSxjd2QpOwogIGNvbnN0IG11c3Q9KHIsbGFiZWwpPT57aWYoci5zdGF0dXMhPT0wKSB0aHJvdyBuZXcgRXJyb3IobGFiZWwrJzogJytTdHJpbmcoci5zdGRlcnJ8fHIuc3Rkb3V0fHxyLmVycm9yfHwnJykuc2xpY2UoMCwyNDApKTt9OwogIGNvbnN0IG1haW49cGF0aC5qb2luKHNiLCdtYWluJyksIHNpYmxpbmc9cGF0aC5qb2luKHNiLCdzaWJsaW5nJyk7IGZzLm1rZGlyU3luYyhtYWluLHtyZWN1cnNpdmU6dHJ1ZX0pOwogIG11c3QoZ2l0KG1haW4sWydpbml0JywnLXEnXSksJ2luaXQnKTsgbXVzdChnaXQobWFpbixbJ2NvbmZpZycsJ3VzZXIuZW1haWwnLCd0QGV4YW1wbGUuaW52YWxpZCddKSwnZW1haWwnKTsgbXVzdChnaXQobWFpbixbJ2NvbmZpZycsJ3VzZXIubmFtZScsJ1QnXSksJ25hbWUnKTsgbXVzdChnaXQobWFpbixbJ2NvbW1pdCcsJy0tYWxsb3ctZW1wdHknLCctcW0nLCdzZWVkJ10pLCdzZWVkJyk7CiAgbXVzdChnaXQobWFpbixbJ3dvcmt0cmVlJywnYWRkJywnLXFiJywnc2libGluZycsc2libGluZywnSEVBRCddKSwnd29ya3RyZWUnKTsKICBmcy5ta2RpclN5bmMocGF0aC5qb2luKG1haW4sJy5oYXJuZXNzJykpOyBmcy5ta2RpclN5bmMocGF0aC5qb2luKHNpYmxpbmcsJy5oYXJuZXNzJykpOwogIGNvbnN0IGFjdHVhbD1wYXRoLmpvaW4obWFpbiwnLmdpdCcsJ3NoYXJlZC1ob29rcycpLCBsaW5rPXBhdGguam9pbihtYWluLCcuZ2l0JywnbGluay1ob29rcycpOyBmcy5ta2RpclN5bmMoYWN0dWFsLHtyZWN1cnNpdmU6dHJ1ZX0pOyBmcy5zeW1saW5rU3luYyhhY3R1YWwsbGluayxwcm9jZXNzLnBsYXRmb3JtPT09J3dpbjMyJz8nanVuY3Rpb24nOidkaXInKTsKICBtdXN0KGdpdChtYWluLFsnY29uZmlnJywnZXh0ZW5zaW9ucy53b3JrdHJlZUNvbmZpZycsJ3RydWUnXSksJ3dvcmt0cmVlQ29uZmlnJyk7IG11c3QoZ2l0KG1haW4sWydjb25maWcnLCctLXdvcmt0cmVlJywnY29yZS5ob29rc1BhdGgnLGxpbmtdKSwnbWFpbiBob29rcycpOyBtdXN0KGdpdChzaWJsaW5nLFsnY29uZmlnJywnLS13b3JrdHJlZScsJ2NvcmUuaG9va3NQYXRoJyxhY3R1YWxdKSwnc2libGluZyBob29rcycpOwogIGNvbnN0IGJlZm9yZVI9Y2xpUnVuKG1haW4sWydlbmZvcmNlJywnc3RhdHVzJywnLS1wYXRoJyxtYWluLCctLWpzb24nXSk7IG11c3QoYmVmb3JlUiwnc3RhdHVzJyk7IGNvbnN0IGJlZm9yZT1KU09OLnBhcnNlKGJlZm9yZVIuc3Rkb3V0KTsKICBjb25zdCBpbnN0YWxsUj1jbGlSdW4obWFpbixbJ2VuZm9yY2UnLCdpbnN0YWxsJywnLS1wYXRoJyxtYWluLCctLWpzb24nLCctLXNraXAtdmVyaWZ5J10pOyBtdXN0KGluc3RhbGxSLCdpbnN0YWxsJyk7IGNvbnN0IGluc3RhbGxlZD1KU09OLnBhcnNlKGluc3RhbGxSLnN0ZG91dCk7CiAgY29uc3QgY29tbWl0PWdpdChzaWJsaW5nLFsnY29tbWl0JywnLS1hbGxvdy1lbXB0eScsJy1tJywncHJvYmUnXSk7CiAgY29uc3Qgc2FtZT1mcy5yZWFscGF0aFN5bmMobGluayk9PT1mcy5yZWFscGF0aFN5bmMoYWN0dWFsKTsKICBjb25zdCBidWc9c2FtZSAmJiBiZWZvcmUud29ya3RyZWVzPT09MSAmJiBpbnN0YWxsZWQud29ya3RyZWVzPT09MSAmJiBjb21taXQuc3RhdHVzIT09MDsKICBjb25zdCBkYmc9e3NhbWUsYmVmb3JlOmJlZm9yZS53b3JrdHJlZXMsaW5zdGFsbGVkOmluc3RhbGxlZC53b3JrdHJlZXMsY29tbWl0RXhpdDpjb21taXQuc3RhdHVzfTsKICBpZihidWcpe2NvbnNvbGUuZXJyb3IoJ0hPT0tfQU5DRVNUT1JfSlVOQ1RJT05fVU5DT1VOVEVEICcrSlNPTi5zdHJpbmdpZnkoZGJnKSk7ZXhpdD0xO30gZWxzZSBjb25zb2xlLmxvZygnSE9PS19BTkNFU1RPUl9KVU5DVElPTl9DT1VOVEVEICcrSlNPTi5zdHJpbmdpZnkoZGJnKSk7Cn0gY2F0Y2goZSkgeyBjb25zb2xlLmVycm9yKCdUMDEyMV9GSVhUVVJFX0VSUk9SICcrU3RyaW5nKGUmJmUubWVzc2FnZXx8ZSkpOyBleGl0PTI7IH0KZmluYWxseSB7IHRyeXtmcy5ybVN5bmMoc2Ise3JlY3Vyc2l2ZTp0cnVlLGZvcmNlOnRydWV9KTt9Y2F0Y2h7fSB9CnByb2Nlc3MuZXhpdENvZGU9ZXhpdDs=','base64').toString())\"",
+    "expectBad": "HOOK_ANCESTOR_JUNCTION_UNCOUNTED",
+    "baseline": {
+      "at": "2026-08-23T04:55:53.967Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 1577
+    },
+    "rootCause": "_worktreeCount가 아직 없는 pre-commit 전체 경로 realpath의 ENOENT를 lexical path로 남겨, 같은 조상 junction을 서로 다른 hooksPath로 오판했다.",
+    "siblingScope": {
+      "checked": [
+        "_hooksShared",
+        "_worktreeCount"
+      ]
+    },
+    "previousGuardGap": "기존 E2E는 존재하는 훅 또는 lexical 경로만 검사해, 설치 전 조상 junction과 미생성 pre-commit 조합을 만들지 않았다."
+  },
+  {
+    "id": "T-0122",
+    "repro": "node scripts/release-bump-probe.js",
+    "expectBad": "release-bump probe failed",
+    "baseline": {
+      "at": "2026-08-23T15:10:50.329Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 804
+    },
+    "rootCause": "전역 플래그 허용 목록에 --patch가 없어 경고가 발생했고 release bump가 leerness 자체 패키지의 bin과 README 버전을 갱신하지 않았다",
+    "siblingScope": {
+      "checked": [
+        "minor와 major도 같은 표면 동기화 경로를 사용하며",
+        "일반 npm 패키지는 package.json만 갱신하는 기존 계약을 격리 프로브로 대조"
+      ]
+    },
+    "previousGuardGap": null
+  },
+  {
+    "id": "T-0125",
+    "repro": "node -e \"const fs=require('fs'),os=require('os'),path=require('path'),cp=require('child_process');const root=process.cwd(),cli=path.join(root,'bin','leerness.js'),d=fs.mkdtempSync(path.join(os.tmpdir(),'leerness-dry-cache-')),env=Object.assign({},process.env,{LEERNESS_SESSION_ID:'dryguard001',LEERNESS_OFFLINE:'1',LEERNESS_NO_AUTO_ROADMAP:'1'});try{fs.writeFileSync(path.join(d,'package.json'),'{\\\"name\\\":\\\"probe\\\",\\\"version\\\":\\\"0.0.0\\\"}\\\\n');const init=cp.spawnSync(process.execPath,[cli,'init',d,'--yes','--minimal'],{cwd:root,encoding:'utf8',env});if(init.status!==0)throw new Error('init failed');const r=cp.spawnSync(process.execPath,[cli,'session','close','--path',d,'--dry-run'],{cwd:d,encoding:'utf8',env});const cache=path.join(d,'.leerness','cache','sessions');if(fs.existsSync(cache)){console.log('dry-run-session-cache-write');process.exitCode=1}else if(r.status===0){console.log('dry-run-session-close-unexpected-success');process.exitCode=1}}finally{try{fs.rmSync(d,{recursive:true,force:true})}catch{}}\"",
+    "expectBad": "dry-run-session-cache-write",
+    "baseline": {
+      "at": "2026-08-24T00:54:03.097Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 1752
+    },
+    "rootCause": "lib/io.js의 --dry-run 가드가 .leerness/cache 경로를 면제해 session close가 session-presence .host-salt와 세션 레코드를 실제로 생성했다",
+    "siblingScope": {
+      "checked": [
+        "lib/io.js 중앙 dry-run 쓰기 가드",
+        "session presence cache",
+        "cache 하위 모든 파일 변이"
+      ]
+    },
+    "previousGuardGap": "기존 T-0117 E2E 픽스처가 세션 주소를 삭제해 session-presence 쓰기 경로를 실행하지 않았다"
+  },
+  {
+    "id": "T-0129",
+    "repro": "node -e \"const c=require('child_process');const r=c.spawnSync(process.execPath,['bin/leerness.js','sessions','send','--path','.','--json'],{encoding:'utf8'});let j=null;try{j=JSON.parse(r.stdout)}catch{};if(r.status===0){console.error('BUG_SESSIONS_SUBCOMMAND_IGNORED');process.exit(1)}if(!j||j.code!=='unknown_subcommand'){console.error('WRONG_SESSIONS_SUBCOMMAND_ERROR');process.exit(1)}\"",
+    "expectBad": "BUG_SESSIONS_SUBCOMMAND_IGNORED",
+    "baseline": {
+      "at": "2026-08-24T02:48:19.738Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 427
+    },
+    "rootCause": "sessions dispatcher가 모든 첫 위치 인자를 프로젝트 경로로 해석해 미구현 send/inbox/scope 동사를 목록 조회로 흡수했다",
+    "siblingScope": {
+      "checked": [
+        "sessions 위치 경로 조회",
+        "sessions --path 조회",
+        "send inbox scope 미지원 동사"
+      ]
+    },
+    "previousGuardGap": "기존 테스트는 목록 조회만 확인하고 지원하지 않는 하위명령의 실패 계약을 확인하지 않았다"
+  },
+  {
+    "id": "T-0130",
+    "repro": "node -e \"const m=require('./bin/leerness.js');const c=m._selfTestCases().find(x=>x.name.startsWith('_scrubTestEnv:'));if(c&&c.run())process.exit(0);console.error('WINDOWS_PATH_SCRUB_BROKEN');process.exit(1)\"",
+    "expectBad": "WINDOWS_PATH_SCRUB_BROKEN",
+    "baseline": {
+      "at": "2026-08-24T04:08:38.526Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 359
+    },
+    "rootCause": "Windows 환경변수 키는 대소문자를 구분하지 않지만 _scrubEnv allowlist가 열거된 Path와 ComSpec을 대문자 상수와 대소문자 구분 비교해 자식 PATH를 제거했다",
+    "siblingScope": {
+      "checked": [
+        "runCommandSafe 테스트 환경",
+        "selftest 자식 프로세스",
+        "doctor 진단",
+        "MCP selftest",
+        "enforce 훅 검증",
+        "extraEnv override"
+      ]
+    },
+    "previousGuardGap": "POSIX 중심 회귀와 시크릿 제거 단언만 있어 Windows 자식 환경에서 실행 가능한 PATH 보존을 직접 확인하지 않았다"
+  },
+  {
+    "id": "T-0131",
+    "repro": "node -e \"const m=require('./bin/leerness.js');const c=m._selfTestCases().find(x=>x.name.startsWith('enforce 사용 강제'));if(c&&c.run())process.exit(0);console.error('WINDOWS_ENFORCE_SH_UNAVAILABLE');process.exit(1)\"",
+    "expectBad": "WINDOWS_ENFORCE_SH_UNAVAILABLE",
+    "baseline": {
+      "at": "2026-08-24T04:13:56.882Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 757
+    },
+    "rootCause": "enforce 발화 검증이 sh가 PATH에 있다고 가정해 Git for Windows에 번들된 shell을 발견하지 못하고 verify_unavailable을 반환했다",
+    "siblingScope": {
+      "checked": [
+        "enforce install 발화검증",
+        "독립 E2E pre-commit 실행",
+        "Git exec-path 탐색"
+      ]
+    },
+    "previousGuardGap": "Windows 테스트가 Git 설치에 포함된 sh와 PowerShell PATH 노출의 차이를 재현하지 않았다"
+  },
+  {
+    "id": "T-0132",
+    "repro": "node scripts/e2e-command-surface.js",
+    "expectBad": "39/40 passed",
+    "baseline": {
+      "at": "2026-08-24T04:28:08.336Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 17570
+    },
+    "rootCause": "envCheckCmd가 JSON 출력 직후 반환해 공통 누락 키 exit 1 판정에 도달하지 못했다",
+    "siblingScope": {
+      "checked": [
+        "env check 사람 출력",
+        "env check JSON 출력",
+        "env sync 후 clean 대조군"
+      ]
+    },
+    "previousGuardGap": "기존 검사는 JSON 페이로드 내용만 확인하고 누락 상태의 프로세스 종료 코드를 함께 단언하지 않았다"
+  },
+  {
+    "id": "T-0134",
+    "repro": "node -e \"const p=require('./package.json');if(!p.scripts.test.includes('test:commands')){console.error('ORPHAN_TEST_COMMANDS');process.exit(1)}\"",
+    "expectBad": "ORPHAN_TEST_COMMANDS",
+    "baseline": {
+      "at": "2026-08-24T05:55:13.942Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 55
+    },
+    "rootCause": "새 test:commands package script를 독립 실행 표면으로만 추가해 npm test와 CI의 도달성 그래프에서 고아로 남겼다",
+    "siblingScope": {
+      "checked": [
+        "package test 릴리스 체인",
+        "GitHub Actions Linux Windows matrix",
+        "고아 가드 자기 기준",
+        "command-surface 스크립트 파일 도달성"
+      ]
+    },
+    "previousGuardGap": "전용 스위트 자체 통과만 확인하고 테스트가 실제 릴리스와 CI 진입점에서 호출되는지는 확인하지 않았다"
+  },
+  {
+    "id": "T-0133",
+    "repro": "node scripts/smoke.js",
+    "expectBad": "12/13 passed",
+    "baseline": {
+      "at": "2026-08-24T04:33:42.745Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 39548
+    },
+    "rootCause": "smoke 러너가 모든 하위 명령에 30초 고정 timeout을 적용해 Windows에서 정상적인 78초 selftest를 ETIMEDOUT으로 거짓 실패시켰다",
+    "siblingScope": {
+      "checked": [
+        "smoke 직접 실행",
+        "npm test:fast 중복 selftest 제거",
+        "다른 스모크 명령 30초 상한 유지",
+        "MCP selftest 성능 설명"
+      ]
+    },
+    "previousGuardGap": "selftest 행위검사 증가 뒤 Windows 실행시간과 공개 성능 문구 및 smoke 시간 예산을 함께 회귀 측정하지 않았다"
+  },
+  {
+    "id": "T-0135",
+    "repro": "node scripts/e2e-core.js",
+    "expectBad": "lazy: README prose TODO ignored",
+    "baseline": {
+      "at": "2026-08-24T06:10:43.975Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 57189
+    },
+    "rootCause": "lazy detect가 코드 TODO 전용 의미인데 encoding/secret용 광범위 SCAN_TEXT_EXT를 재사용해 Markdown과 text 설명 문장까지 코드 작업 표지로 집계했다",
+    "siblingScope": {
+      "checked": [
+        "Markdown .md와 일반 text .txt 문서; .leerness 문서는 기존 제외 유지; JS 주석과 template/string 대조군"
+      ]
+    },
+    "previousGuardGap": "기존 회귀는 코드 문자열과 템플릿 오탐만 검사했고 README 같은 산문에서 TODO 단어를 설명하는 경우를 만들지 않았다"
+  },
+  {
+    "id": "T-0136",
+    "repro": "node scripts/handoff-readonly-probe.js",
+    "expectBad": "environment.json",
+    "baseline": {
+      "at": "2026-08-24T06:44:24.801Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 4353
+    },
+    "rootCause": "default handoff mixed context reads with tracked metadata projections and Cursor had no stable session address bootstrap",
+    "siblingScope": {
+      "checked": [
+        "current-state date",
+        "environment snapshot",
+        "last-handoff",
+        "tech profile",
+        "auto graph",
+        "drift reminder",
+        "enforce freshness"
+      ]
+    },
+    "previousGuardGap": null
+  },
+  {
+    "id": "T-0138",
+    "repro": "node -e \"const fs=require('fs');const s=fs.readFileSync('bin/leerness.js','utf8');if(/const pubR[\\s\\S]{0,300}shell:\\s*true/.test(s)){console.error('DEP0190 publish shell:true');process.exit(1)}\"",
+    "expectBad": "DEP0190 publish shell:true",
+    "baseline": {
+      "at": "2026-08-25T05:24:33.788Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 96
+    },
+    "rootCause": "GitHub 워크플로가 Node 20 기반 v4 액션을 고정했고 Windows npm 실행이 .cmd EINVAL을 피하려 shell:true와 args 배열을 함께 사용해 Node 26 DEP0190 및 인자 재해석 위험을 만들었다",
+    "siblingScope": {
+      "checked": [
+        "제품 CI 4개 action ref",
+        "사이트 release/preview 4개 action ref",
+        "_publishToNpm의 view/latest/publish 및 release pack/publish npm 호출"
+      ]
+    },
+    "previousGuardGap": null
+  },
+  {
+    "id": "T-0107",
+    "repro": "node scripts/workspace-dir-migration-probe.js",
+    "expectBad": "WORKSPACE_DIR_MIGRATION_FAILED",
+    "baseline": {
+      "at": "2026-08-25T12:57:29.046Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 2472
+    },
+    "rootCause": null,
+    "siblingScope": null,
+    "previousGuardGap": null
+  }
+]

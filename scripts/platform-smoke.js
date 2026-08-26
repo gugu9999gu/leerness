@@ -100,7 +100,7 @@ try {
   const mainHandoff = leerness(main, ['handoff', main]);
   const addWorktree = git(main, ['worktree', 'add', '-qb', 'sibling', sibling]);
   const initSibling = leerness(sibling, ['init', sibling, '--yes', '--minimal', '--no-enforce', '--no-stale-check']);
-  for (const marker of [path.join(sibling, '.harness', 'last-handoff.json'), path.join(sibling, '.harness', 'cache', 'handoffs')]) {
+  for (const marker of [path.join(sibling, '.leerness', 'last-handoff.json'), path.join(sibling, '.leerness', 'cache', 'handoffs')]) {
     try { fs.rmSync(marker, { recursive: true, force: true }); } catch {}
   }
   debug.fixture = {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.36.162 — 2026-08-26
+
+- 기본 작업 디렉터리를 `.leerness/`로 전환하고 기존 `.harness/` 상태를 충돌 감지·백업·검증·롤백이 가능한 방식으로 자동 마이그레이션했습니다. 동시 세션 핸드오프 경로 격리, 설치형 클린룸, 소스 ratchet 검증도 함께 보강했습니다.
+- 역사적 전체 E2E와 startup/handoff·Git/npm·진단·release·에이전트 설치/bench/REPL의 프로세스 호출을 PATH 전용 공용 shell-free 실행기로 통합했습니다. Windows npm `.cmd`/`.ps1`의 검증된 JS·PE 진입점과 Volta류 네이티브 `npm.exe`를 지원하고 해석 불가 shim·미해결 명령·cwd shadow는 실패-폐쇄합니다. 10개 내장 provider의 bench를 모두 정착시키되 모델 없는 Ollama는 명시적 unsupported로 보고하며, argv/stdin 보존과 PowerShell 경로 환경 데이터 채널을 공격성 프로브로 고정했습니다. DEP0190 억제 설정을 거부하고 부모·동기·비동기·detached 자식 경고를 한 파일에 집계하며 Windows Node 24 전체 E2E에서도 이를 검증합니다.
+- 프로젝트 `.env` 자동 로드를 `LEERNESS_*`와 명시 provider/release 키 allowlist로 제한해 `NODE_OPTIONS`·`NODE_PATH`·`NPM_EXECPATH`·PATH 계열의 자식 프로세스 제어를 차단했습니다. 호출자가 명시한 정상 `--redirect-warnings`는 portable/npm 자식까지 보존합니다. 거부 진단의 명령명은 `node -e` 옵션과 분리해 `--inspect`·`--cpu-prof`가 inspector나 프로필 파일을 만들지 못하도록 했습니다.
+- Git과 달랐던 중첩 디렉터리 `.gitignore` 판정을 바로잡고, 값이 변하면 계속 재경고하면서도 `.harness/` 시절의 인정 지문이 동일한 `.leerness/` 파일에만 이어지도록 시크릿 베이스라인 호환을 추가했습니다.
+- Windows에서 lock owner read/unlink의 일시 오류가 해제 재시도 예산을 먼저 소비할 수 있는 조건을 반영해, 비동기 락 회귀 검사가 호출 단계별 횟수 대신 실패-폐쇄 코드·격리 경로·공개 락 해제·중복 해제 방지를 안정적으로 검증하도록 수정했습니다.
+- portable runner의 명시적 126/127 실패를 Git 소비자가 `no-git`으로 해석해 실제 저장소를 손상 또는 비저장소로 오진하지 않도록 했습니다. 전체 E2E의 외부 CLI 픽스처는 임의 배치 파일 대신 실제 npm형 Node shim을 사용하고, Git 초크포인트 ratchet은 `spawnPortableSync`까지 추적해 shell-free 전환 뒤에도 같은 보안 계약을 검증합니다.
+
 ## 1.36.161 — 2026-08-25
 
 - 전체 E2E가 잡은 ci init의 낡은 v4 기대값을 v7/Node 24 계약으로 갱신했습니다. i18n doctor는 동일 픽스처에서 영문·한국어 각각 139초/exit 0으로 재현 통과해 제품 결함이 아닌 장시간 부하 타임아웃으로 판별했으며, 테스트 상한을 600초로 조정하고 실패 진단을 보강했습니다.

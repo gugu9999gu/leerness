@@ -5,7 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
 const { log, ok, warn, fail, failJson, setQuiet, today, now, absRoot, exists, read, readBuf, mkdirp, writeUtf8, append, rel, setDryRunGuard, mkdirpRaw } = require('../lib/io');  // 1.9.382/383 (UR-0025): 출력/시간/파일 프리미티브 공유 모듈 · 1.10.2 (UR-0146): setQuiet
-const { spawnNpmSync } = require('../lib/npm-process');
+const { resolveNpmCliPath, spawnNpmSync } = require('../lib/npm-process');
+const { resolvePortableLaunch, spawnPortable, spawnPortableSync } = require('../lib/portable-process');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
@@ -33,10 +34,20 @@ const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInG
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).
 const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE_CHECKLIST, _DEFAULT_PLATFORM_CONSTRAINTS, _DEFAULT_DOMAIN_CATALOG, _TOOL_CATALOG, _LSP_LANG_PATTERNS, OPTIMISM_PATTERNS, BUILT_IN_PERSONAS, STRINGS, BUILTIN_CATALOG, ROADMAP_STATUS_LABEL, ROADMAP_STATUS_COLOR, SECRET_PATTERNS, MERGE_OVERWRITE_FILES, MINIMAL_SKIP_KEYS, REQUIRED_WORKSPACE_FILES, KEYWORD_STOPWORDS, MEMORY_SYNONYMS, SKILL_CATALOG_PRESETS } = require('../lib/catalogs');  // 1.9.344/368/369 (UR-0025): catalog 분리 · 1.11.4 (UR-0007): _TOOL_CATALOG
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
-const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태 무결성 (audit/health/check 공유)
+const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .leerness/*.json 상태 무결성 (audit/health/check 공유)
 const _cursorHook = require('../lib/cursor-session-hook');
+const {
+  CANONICAL_WORKSPACE_DIR,
+  LEGACY_WORKSPACE_DIR,
+  PROTECTED_GITIGNORE_LINES,
+  inspectWorkspace,
+  resolveWorkspaceDirName,
+  canonicalWorkspacePath,
+  legacyWorkspacePath,
+  migrateLegacyWorkspace,
+} = require('../lib/workspace-dir');
 
-const VERSION = '1.36.161';
+const VERSION = '1.36.162';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -51,34 +62,42 @@ function _ensureStdoutEncoding() {
   if (process.env.LEERNESS_NO_AUTOCHCP === '1') return;
   if (process.env._LEERNESS_CHCP_DONE === '1') return;  // 자식 spawn 무한 재호출 방지
   try {
-    const r = cp.spawnSync('chcp.com', [], { encoding: 'utf8', timeout: 2000, shell: true });
+    // Windows는 bare 실행파일 이름을 PATH보다 cwd에서 먼저 찾을 수 있다. 프로젝트의
+    // chcp.com을 실행하지 않도록 OS System32의 확정 경로만 사용하고, 없으면 조용히 생략한다.
+    const systemRoot = process.env.SystemRoot || process.env.WINDIR;
+    const chcp = systemRoot ? path.join(systemRoot, 'System32', 'chcp.com') : null;
+    if (!chcp || !fs.existsSync(chcp)) { process.env._LEERNESS_CHCP_DONE = '1'; return; }
+    const r = cp.spawnSync(chcp, [], { encoding: 'utf8', timeout: 2000, shell: false });
     const out = (r.stdout || '') + (r.stderr || '');
     const m = out.match(/(\d+)\s*$/m);
     const code = m ? parseInt(m[1], 10) : null;
     // 65001 = UTF-8, 949 = CP949 (한국), 932 = CP932 (일본), 936 = CP936 (중국)
     if (code && code !== 65001) {
       try {
-        cp.spawnSync('chcp.com', ['65001'], { encoding: 'utf8', timeout: 2000, shell: true, stdio: 'ignore' });
+        cp.spawnSync(chcp, ['65001'], { encoding: 'utf8', timeout: 2000, shell: false, stdio: 'ignore' });
         process.env._LEERNESS_AUTOCHCP_APPLIED = String(code);  // 진단용 — handoff body 에서 노출
       } catch {}
     }
     process.env._LEERNESS_CHCP_DONE = '1';
   } catch {}
 }
-// 1.9.184/185: DEP0190 (shell:true) 경고 억제 — cross-platform .cmd resolution 위해 shell:true 의도 사용.
-//   warning listener 제거 + NODE_OPTIONS=--no-deprecation (자식 spawn 까지 전파). CLI 전용 → _cliBootstrap 내부.
+// 1.36.162: 경고를 숨기던 DEP0190 전역 억제를 제거했다. .cmd 호환 호출은 실제
+//   Node/native 진입점을 정적으로 해석하고, 네이티브/npm/git 경로와 함께 shell:false를 쓴다.
+//   따라서 진짜 런타임 경고는 사용자와 CI에 그대로 보인다.
 function _cliBootstrap() {
-  process.removeAllListeners('warning');
-  process.on('warning', (w) => {
-    if (w && (w.code === 'DEP0190' || /DEP0190/.test(String(w.message || '')))) return;
-    process.stderr.write(`(node:${process.pid}) ${w.name || 'Warning'}: ${w.message || w}\n`);
-  });
-  if (!/--no-deprecation/.test(process.env.NODE_OPTIONS || '')) {
-    process.env.NODE_OPTIONS = ((process.env.NODE_OPTIONS || '') + ' --no-deprecation').trim();
-  }
   _ensureStdoutEncoding();
 }
 if (require.main === module) _cliBootstrap();
+
+// Windows npm 전역 설치 CLI(.cmd)와 POSIX 실행파일을 같은 argv 계약으로 부른다.
+// portable-process가 npm shim의 Node 진입점(또는 동반 .ps1)을 찾아 shell:false로 실행하므로
+// DEP0190뿐 아니라 cmd.exe의 %ENV% 확장/BatBadBut/후행 역슬래시 손상도 함께 차단한다.
+function _spawnPortableArgvSync(file, args, options = {}) {
+  return spawnPortableSync(file, args, options);
+}
+function _spawnPortableArgv(file, args, options = {}) {
+  return spawnPortable(file, args, options);
+}
 
 const MARK = '<!-- leerness:managed -->';
 const README_START = '<!-- leerness:project-readme:start -->';
@@ -97,9 +116,13 @@ function _tryLoadSkillpack() {
   } catch {}
   // 3) npm global root
   try {
-    const root = cp.execSync('npm root -g', { encoding: 'utf8', timeout: 4000 }).trim();
-    const f = path.join(root, 'leerness-skillpack/catalog.json');
-    if (fs.existsSync(f)) return { src: 'global', data: JSON.parse(fs.readFileSync(f, 'utf8')) };
+    // module load 시마다 실행되는 경로이므로 untrusted cwd의 npm.cmd나 셸을 거치지 않는다.
+    const npmRoot = spawnNpmSync(['root', '-g'], { encoding: 'utf8', timeout: 4000, cwd: process.cwd() });
+    if (npmRoot.status === 0) {
+      const globalRoot = String(npmRoot.stdout || '').trim();
+      const f = path.join(globalRoot, 'leerness-skillpack/catalog.json');
+      if (fs.existsSync(f)) return { src: 'global', data: JSON.parse(fs.readFileSync(f, 'utf8')) };
+    }
   } catch {}
   // 4) 환경변수 명시 경로
   if (process.env.LEERNESS_SKILLPACK_PATH) {
@@ -142,17 +165,17 @@ function _loadSkillCatalog() {
 const skillCatalog = _loadSkillCatalog();
 
 const routes = {
-  planning:        { read: ['.harness/plan.md','.harness/progress-tracker.md','.harness/project-brief.md','.harness/current-state.md','.harness/guideline.md'], update: ['.harness/plan.md','.harness/progress-tracker.md','.harness/current-state.md','.harness/session-handoff.md'] },
-  feature:         { read: ['.harness/plan.md','.harness/current-state.md','.harness/architecture.md','.harness/context-map.md','.harness/feature-contracts.md','.harness/skills/feature-implementation/README.md','.harness/reuse-map.md'], update: ['.harness/progress-tracker.md','.harness/feature-contracts.md','.harness/current-state.md','.harness/task-log.md','.harness/session-handoff.md'] },
-  consistency:     { read: ['.harness/design-system.md','.harness/consistency-policy.md','.harness/reuse-map.md','.harness/context-map.md'], update: ['.harness/design-system.md','.harness/reuse-map.md','.harness/task-log.md','.harness/session-handoff.md'] },
-  release:         { read: ['.harness/plan.md','.harness/release-checklist.md','.harness/testing-strategy.md','.harness/current-state.md','.harness/leerness-maintenance.md'], update: ['.harness/release-checklist.md','.harness/progress-tracker.md','.harness/task-log.md','.harness/session-handoff.md'] },
-  migration:       { read: ['.harness/AX_MIGRATION_GUIDE.md','.harness/protected-files.md','.harness/context-routing.md','.harness/writeback-policy.md'], update: ['.harness/current-state.md','.harness/task-log.md','.harness/session-handoff.md'] },
-  'session-close': { read: ['.harness/session-close-policy.md','.harness/progress-tracker.md','.harness/anti-lazy-work-policy.md','.harness/plan.md'], update: ['.harness/session-handoff.md','.harness/progress-tracker.md','.harness/current-state.md','.harness/task-log.md'] },
-  'session-start': { read: ['.harness/session-handoff.md','.harness/current-state.md','.harness/plan.md','.harness/progress-tracker.md','.harness/decisions.md','.harness/task-log.md'], update: ['.harness/current-state.md'] },
-  'harness-maintenance': { read: ['.harness/leerness-maintenance.md','.harness/HARNESS_VERSION','.harness/protected-files.md'], update: ['.harness/task-log.md','.harness/session-handoff.md'] },
-  bugfix:          { read: ['.harness/plan.md','.harness/progress-tracker.md','.harness/decisions.md','.harness/feature-contracts.md','.harness/architecture.md'], update: ['.harness/progress-tracker.md','.harness/decisions.md','.harness/task-log.md','.harness/session-handoff.md'] },
-  refactor:        { read: ['.harness/plan.md','.harness/architecture.md','.harness/reuse-map.md','.harness/decisions.md'], update: ['.harness/architecture.md','.harness/reuse-map.md','.harness/decisions.md','.harness/task-log.md','.harness/session-handoff.md'] },
-  research:        { read: ['.harness/decisions.md','.harness/task-log.md','.harness/architecture.md','.harness/context-map.md'], update: ['.harness/decisions.md','.harness/task-log.md','.harness/current-state.md'] }
+  planning:        { read: ['.leerness/plan.md','.leerness/progress-tracker.md','.leerness/project-brief.md','.leerness/current-state.md','.leerness/guideline.md'], update: ['.leerness/plan.md','.leerness/progress-tracker.md','.leerness/current-state.md','.leerness/session-handoff.md'] },
+  feature:         { read: ['.leerness/plan.md','.leerness/current-state.md','.leerness/architecture.md','.leerness/context-map.md','.leerness/feature-contracts.md','.leerness/skills/feature-implementation/README.md','.leerness/reuse-map.md'], update: ['.leerness/progress-tracker.md','.leerness/feature-contracts.md','.leerness/current-state.md','.leerness/task-log.md','.leerness/session-handoff.md'] },
+  consistency:     { read: ['.leerness/design-system.md','.leerness/consistency-policy.md','.leerness/reuse-map.md','.leerness/context-map.md'], update: ['.leerness/design-system.md','.leerness/reuse-map.md','.leerness/task-log.md','.leerness/session-handoff.md'] },
+  release:         { read: ['.leerness/plan.md','.leerness/release-checklist.md','.leerness/testing-strategy.md','.leerness/current-state.md','.leerness/leerness-maintenance.md'], update: ['.leerness/release-checklist.md','.leerness/progress-tracker.md','.leerness/task-log.md','.leerness/session-handoff.md'] },
+  migration:       { read: ['.leerness/AX_MIGRATION_GUIDE.md','.leerness/protected-files.md','.leerness/context-routing.md','.leerness/writeback-policy.md'], update: ['.leerness/current-state.md','.leerness/task-log.md','.leerness/session-handoff.md'] },
+  'session-close': { read: ['.leerness/session-close-policy.md','.leerness/progress-tracker.md','.leerness/anti-lazy-work-policy.md','.leerness/plan.md'], update: ['.leerness/session-handoff.md','.leerness/progress-tracker.md','.leerness/current-state.md','.leerness/task-log.md'] },
+  'session-start': { read: ['.leerness/session-handoff.md','.leerness/current-state.md','.leerness/plan.md','.leerness/progress-tracker.md','.leerness/decisions.md','.leerness/task-log.md'], update: ['.leerness/current-state.md'] },
+  'harness-maintenance': { read: ['.leerness/leerness-maintenance.md','.leerness/HARNESS_VERSION','.leerness/protected-files.md'], update: ['.leerness/task-log.md','.leerness/session-handoff.md'] },
+  bugfix:          { read: ['.leerness/plan.md','.leerness/progress-tracker.md','.leerness/decisions.md','.leerness/feature-contracts.md','.leerness/architecture.md'], update: ['.leerness/progress-tracker.md','.leerness/decisions.md','.leerness/task-log.md','.leerness/session-handoff.md'] },
+  refactor:        { read: ['.leerness/plan.md','.leerness/architecture.md','.leerness/reuse-map.md','.leerness/decisions.md'], update: ['.leerness/architecture.md','.leerness/reuse-map.md','.leerness/decisions.md','.leerness/task-log.md','.leerness/session-handoff.md'] },
+  research:        { read: ['.leerness/decisions.md','.leerness/task-log.md','.leerness/architecture.md','.leerness/context-map.md'], update: ['.leerness/decisions.md','.leerness/task-log.md','.leerness/current-state.md'] }
 };
 
 const STATUSES = ['requested','planned','in-progress','waiting','on-hold','blocked','incomplete','done','dropped'];
@@ -718,21 +741,21 @@ function detectLanguageValue(root, value = 'auto') {
   // 1.36.66 (8차 헌트 F7): 소스별 개별 try — 손상 manifest 의 parse throw 가 유효한 LANGUAGE 폴백까지 건너뛰게 하던
   //   것 차단(en 프로젝트가 manifest 손상 시 콘텐츠 휴리스틱으로 ko 회귀). manifest → LANGUAGE → 콘텐츠 순.
   try {
-    const mf = path.join(root, '.harness', 'manifest.json');
+    const mf = path.join(root, '.leerness', 'manifest.json');
     if (exists(mf)) {
       const saved = String((JSON.parse(read(mf)) || {}).language || '').toLowerCase();
       if (saved === 'ko' || saved === 'en') return saved;
     }
   } catch {}
   try {
-    const lf = path.join(root, '.harness', 'LANGUAGE');
+    const lf = path.join(root, '.leerness', 'LANGUAGE');
     if (exists(lf)) {
       const saved = String(read(lf) || '').trim().toLowerCase();
       if (saved === 'ko' || saved === 'en') return saved;
     }
   } catch {}
   // ① 프로젝트 콘텐츠 한글 우선 — 콘텐츠가 있으면 그 의도를 존중 (기존 동작 보존).
-  const candidates = ['README.md', 'docs/guideline.md', '.harness/project-brief.md', '.harness/plan.md'];
+  const candidates = ['README.md', 'docs/guideline.md', '.leerness/project-brief.md', '.leerness/plan.md'];
   let text = '';
   for (const c of candidates) { const p = path.join(root, c); if (exists(p)) text += read(p).slice(0, 3000); }
   if (/[가-힣]/.test(text)) return 'ko';
@@ -746,7 +769,7 @@ function detectLanguageValue(root, value = 'auto') {
   return 'en';
 }
 // 1.20.2 (UR-0010 CLI 영어화 Phase 1): UI 출력 언어 해석 — 기본 ko(기존 사용자 기본값), 영어는 --language en / LEERNESS_LANG=en.
-//   우선순위: --language 플래그 > LEERNESS_LANG env > .harness/manifest.json 의 language(init 선택) > 'ko'.
+//   우선순위: --language 플래그 > LEERNESS_LANG env > .leerness/manifest.json 의 language(init 선택) > 'ko'.
 //   (system locale 은 의도적으로 미사용 — 영어 OS 한국 사용자 놀람 방지. 영어는 명시 opt-in.)
 function _uiLang(root) {
   try {
@@ -754,7 +777,7 @@ function _uiLang(root) {
     if (flag === 'en' || flag === 'ko') return flag;
     const env = String(process.env.LEERNESS_LANG || '').toLowerCase();
     if (env === 'en' || env === 'ko') return env;
-    const mf = path.join(absRoot(root || process.cwd()), '.harness', 'manifest.json');
+    const mf = path.join(absRoot(root || process.cwd()), '.leerness', 'manifest.json');
     if (exists(mf)) { const l = String((JSON.parse(read(mf)) || {}).language || '').toLowerCase(); if (l === 'en' || l === 'ko') return l; }
   } catch {}
   return 'ko';
@@ -794,7 +817,7 @@ function managedReadmeBlock(project, lang = 'ko', version = VERSION) {
       '',
       'Leerness is **not an executor or coding agent** — it is a **universal operating layer** that sits on top of any AI coding agent (Claude Code · Codex · Cursor · Goose, …). It provides five shared layers:',
       '',
-      '- **Memory** — persists project state/decisions/progress into `.harness/`',
+      '- **Memory** — persists project state/decisions/progress into `.leerness/`',
       '- **Policy** — 8-tier permission levels + enforce (read-only→publish), MCP call gate',
       '- **Handoff** — standard context transfer between agents + one-call onboarding via `get_project_context`',
       '- **Verification** — evidence-based completion checks that catch false "done" claims (advisory; blocking when required via the CI gate)',
@@ -857,11 +880,11 @@ function managedReadmeBlock(project, lang = 'ko', version = VERSION) {
       '',
       '### Planning Files',
       '',
-      '- `.harness/plan.md`: overall goal, milestones, dropped scope',
-      '- `.harness/progress-tracker.md`: per-request status and evidence',
-      '- `.harness/current-state.md`: what to continue right now',
-      '- `.harness/session-handoff.md`: next-session handoff (auto-written)',
-      '- `.harness/lessons.md` / `decisions.md` / `rules.md`: permanent memory (5 surfaces)',
+      '- `.leerness/plan.md`: overall goal, milestones, dropped scope',
+      '- `.leerness/progress-tracker.md`: per-request status and evidence',
+      '- `.leerness/current-state.md`: what to continue right now',
+      '- `.leerness/session-handoff.md`: next-session handoff (auto-written)',
+      '- `.leerness/lessons.md` / `decisions.md` / `rules.md`: permanent memory (5 surfaces)',
       '',
       `Last synced by Leerness v${version}: ${today()}`,
       README_END,
@@ -878,7 +901,7 @@ function managedReadmeBlock(project, lang = 'ko', version = VERSION) {
     '',
     'Leerness 는 **실행기/코딩 에이전트가 아니라**, 어떤 AI 코딩 에이전트(Claude Code · Codex · Cursor · Goose 등) 위에도 얹는 **범용 운영 레이어**입니다. 5개 공통 계층을 제공합니다:',
     '',
-    '- **기억(Memory)** — 프로젝트 상태/결정/진행을 `.harness/` 에 영속화',
+    '- **기억(Memory)** — 프로젝트 상태/결정/진행을 `.leerness/` 에 영속화',
     '- **정책(Policy)** — 8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트',
     '- **인수인계(Handoff)** — 에이전트 간 컨텍스트 표준 전달 + `get_project_context` 1콜 온보딩',
     '- **검증(Verification)** — 근거 기반 완료 검증으로 허위 완료 감지 (권고; CI 게이트 필수화 시 차단)',
@@ -980,11 +1003,11 @@ function managedReadmeBlock(project, lang = 'ko', version = VERSION) {
     '',
     '### Planning Files',
     '',
-    '- `.harness/plan.md`: 전체 목표, milestone, 제외/드랍 범위',
-    '- `.harness/progress-tracker.md`: 요청 단위 상태와 증거',
-    '- `.harness/current-state.md`: 지금 이어서 할 작업',
-    '- `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)',
-    '- `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)',
+    '- `.leerness/plan.md`: 전체 목표, milestone, 제외/드랍 범위',
+    '- `.leerness/progress-tracker.md`: 요청 단위 상태와 증거',
+    '- `.leerness/current-state.md`: 지금 이어서 할 작업',
+    '- `.leerness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)',
+    '- `.leerness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)',
     '',
     `Last synced by Leerness v${version}: ${today()}`,
     README_END,
@@ -1007,7 +1030,7 @@ function skillLock(skills, root) {
       // 1.36.80: 내장 카탈로그에서 빠진 스킬(도메인 7종 제거)이라도 **이미 설치돼 있으면** 락에 남긴다 —
       //   디스크 실재를 기록한다는 F12 원칙 유지 + 기존 사용자의 스킬이 락에서 유령처럼 사라지지 않게(비파괴).
       //   판단 근거는 skill.json/SKILL.md 존재(= leerness 가 설치한 흔적) — 임의 디렉토리는 여전히 배제.
-      const dir = path.join(root, '.harness', 'skills');
+      const dir = path.join(root, '.leerness', 'skills');
       if (exists(dir)) for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         if (!e.isDirectory()) continue;
         if (skillCatalog[e.name]) { set.add(e.name); continue; }
@@ -1056,7 +1079,7 @@ function _modeFlagAllowed() {
 //   종전엔 손상이든 미설정이든 똑같이 'standard' 로 떨어져, 사용자는 자기 등급이 날아간 걸 몰랐다.
 //   같은 규율이 토글에는 1.36.49 에 섰는데(fail-closed) manifest 에는 없었고, 나는 거기에 **쓰기**를 추가했다.
 function _readManifestChecked(root) {
-  const mf = path.join(absRoot(root || process.cwd()), '.harness', 'manifest.json');
+  const mf = path.join(absRoot(root || process.cwd()), '.leerness', 'manifest.json');
   if (!exists(mf)) return { path: mf, exists: false, corrupt: false, data: {} };
   let raw = null;
   // 1.36.112: `reason` 은 한국어 문장뿐이라, 이걸 끼워 넣는 영어 문장이 한국어를 새게 한다
@@ -1083,47 +1106,47 @@ function coreFiles(root, lang = 'ko', selectedSkills = [], opts = {}) {
   const project = detectProjectName(root);
   const skillRows = Object.entries(skillCatalog).map(([k, v]) => `| ${k} | ${v.displayNameKo} | ${v.capabilities.join(', ')} | ${v.lastUpdated} | ${v.verification} |`).join('\n');
   const _files = {
-    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ 매 세션 첫 행동\n**반드시 \`.harness/session-workflow.md\`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.\n\n## 정적 vs 동적 — leerness 역할 경계\n**AGENTS.md = 정적 프로젝트 지침** (코딩 규칙·테스트 명령·금지 사항·배포 절차 — 자주 안 변함).\n**leerness = 동적 작업 상태·기억·검증·인수인계** (현재 목표·수정 파일·실패 시도·검증 결과·다음 에이전트 인계 — 매 작업 변함).\n- 규칙/명령/금지는 여기 AGENTS.md 에 적는다.\n- 동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 \`.harness/\`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). \`leerness handoff\` · \`decision add\` · \`lesson save\` 등이 여기에 쓴다.\n- (선택) \`leerness state show|start|record|verify|handoff\` (또는 MCP \`leerness_state_*\`) 의 JSON 상태 substrate 는 \`.leerness/\` (에이전트 간 인수인계 표준 — state 명령 사용 시 생성). 메인 워크스페이스(.harness)와 별개.\n- leerness 는 AGENTS.md 를 **대체하지 않고 보완**한다. 정적 지침은 여기, 동적 상태는 leerness.\n\n## Mandatory read order (session start)\n1. **.harness/session-workflow.md** (6단계 워크플로 — 최우선)\n2. .harness/context-routing.md\n3. .harness/session-handoff.md\n4. .harness/current-state.md\n5. .harness/plan.md\n6. .harness/progress-tracker.md\n7. .harness/guideline.md\n8. .harness/protected-files.md\n9. .harness/writeback-policy.md\n10. .harness/anti-lazy-work-policy.md\n11. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- **모호성 질문 의무**: 사용자 요청에 판단이 갈리는 부분(모호한 수식어/지시대명사/복수 선택지/불명확한 범위)이 있으면 **추측으로 구현하지 말고 먼저 사용자에게 질문**합니다. \`leerness clarify "<요청>"\` 이 감지한 질문 목록을 그대로 사용자에게 물어보세요. 신호가 없어도 스스로 판단이 갈리면 질문이 우선입니다.\n- **미리보기 승인 의무 (신규 기능)**: 사용자가 신규 기능 추가/구현을 요청하면 **코드를 먼저 작성하지 않습니다**. ① \`leerness preview add "<기능>" --design "<디자인/UX 설명>" --features "<기능 목록>"\` 으로 미리보기를 등록하고 ② 그 내용을 사용자에게 제시해 승인 또는 수정사항을 질문으로 받습니다. ③ 사용자가 승인하면 \`leerness preview approve <P-ID>\`, 수정 요구면 \`leerness preview revise <P-ID> --note "..."\` 후 미리보기를 고쳐 다시 제시합니다. **approve 전에는 해당 기능의 코드를 작성하지 않습니다.**
-- **디자인 시안 의무 (웹페이지/디자인 작업)**: 신규 페이지 제작·디자인/리디자인 요청이면 텍스트 설명만으로 끝내지 않습니다. \`leerness preview mockup <P-ID>\` 로 자립형 HTML 시안 스캐폴드(\`.harness/previews/<P-ID>-mockup.html\`)를 만들고, **placeholder 영역을 실제 레이아웃 초안(HTML/CSS, 외부 리소스 없이)으로 교체**한 뒤 사용자에게 브라우저로 열어 보여주고 수정/승인을 질문으로 받습니다. 수정 요구가 오면 시안 파일을 고쳐 다시 제시하고, **approve 전에는 실제 페이지/기능 코드를 작성하지 않습니다.** (이미 만든 시안이 있으면 \`preview add ... --mockup <파일>\` 로 첨부)\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증하고, \`leerness lens\`의 분야별 자기질문에 답합니다 (코드: "선임 개발자가 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 이쁘고 직관적이라 느낄까?").\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
-    'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ 매 세션 첫 행동**: \`.harness/session-workflow.md\`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 \`leerness drift check --auto-fix\`로 자동 회복.\n\n**완료 주장 전**: \`leerness verify-claim <T-ID>\` — 증거 없이 "완료" 라고 말하지 않는다.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
-    '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .harness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`,
-    '.github/copilot-instructions.md': `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`,
-    '.harness/HARNESS_VERSION': VERSION + '\n',
-    '.harness/LANGUAGE': lang + '\n',
+    'AGENTS.md': `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ 매 세션 첫 행동\n**반드시 \`.leerness/session-workflow.md\`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.\n\n## 정적 vs 동적 — leerness 역할 경계\n**AGENTS.md = 정적 프로젝트 지침** (코딩 규칙·테스트 명령·금지 사항·배포 절차 — 자주 안 변함).\n**leerness = 동적 작업 상태·기억·검증·인수인계** (현재 목표·수정 파일·실패 시도·검증 결과·다음 에이전트 인계 — 매 작업 변함).\n- 규칙/명령/금지는 여기 AGENTS.md 에 적는다.\n- 동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 \`.leerness/\`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). \`leerness handoff\` · \`decision add\` · \`lesson save\` 등이 여기에 쓴다.\n- (선택) \`leerness state show|start|record|verify|handoff\` (또는 MCP \`leerness_state_*\`) 의 JSON 상태 substrate 는 \`.leerness/\` (에이전트 간 인수인계 표준 — state 명령 사용 시 생성). 메인 워크스페이스(.leerness)와 별개.\n- leerness 는 AGENTS.md 를 **대체하지 않고 보완**한다. 정적 지침은 여기, 동적 상태는 leerness.\n\n## Mandatory read order (session start)\n1. **.leerness/session-workflow.md** (6단계 워크플로 — 최우선)\n2. .leerness/context-routing.md\n3. .leerness/session-handoff.md\n4. .leerness/current-state.md\n5. .leerness/plan.md\n6. .leerness/progress-tracker.md\n7. .leerness/guideline.md\n8. .leerness/protected-files.md\n9. .leerness/writeback-policy.md\n10. .leerness/anti-lazy-work-policy.md\n11. **.leerness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)\n\n## Required behavior\n- 작업 시작 시 \`leerness handoff .\`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).\n- **모호성 질문 의무**: 사용자 요청에 판단이 갈리는 부분(모호한 수식어/지시대명사/복수 선택지/불명확한 범위)이 있으면 **추측으로 구현하지 말고 먼저 사용자에게 질문**합니다. \`leerness clarify "<요청>"\` 이 감지한 질문 목록을 그대로 사용자에게 물어보세요. 신호가 없어도 스스로 판단이 갈리면 질문이 우선입니다.\n- **미리보기 승인 의무 (신규 기능)**: 사용자가 신규 기능 추가/구현을 요청하면 **코드를 먼저 작성하지 않습니다**. ① \`leerness preview add "<기능>" --design "<디자인/UX 설명>" --features "<기능 목록>"\` 으로 미리보기를 등록하고 ② 그 내용을 사용자에게 제시해 승인 또는 수정사항을 질문으로 받습니다. ③ 사용자가 승인하면 \`leerness preview approve <P-ID>\`, 수정 요구면 \`leerness preview revise <P-ID> --note "..."\` 후 미리보기를 고쳐 다시 제시합니다. **approve 전에는 해당 기능의 코드를 작성하지 않습니다.**
+- **디자인 시안 의무 (웹페이지/디자인 작업)**: 신규 페이지 제작·디자인/리디자인 요청이면 텍스트 설명만으로 끝내지 않습니다. \`leerness preview mockup <P-ID>\` 로 자립형 HTML 시안 스캐폴드(\`.leerness/previews/<P-ID>-mockup.html\`)를 만들고, **placeholder 영역을 실제 레이아웃 초안(HTML/CSS, 외부 리소스 없이)으로 교체**한 뒤 사용자에게 브라우저로 열어 보여주고 수정/승인을 질문으로 받습니다. 수정 요구가 오면 시안 파일을 고쳐 다시 제시하고, **approve 전에는 실제 페이지/기능 코드를 작성하지 않습니다.** (이미 만든 시안이 있으면 \`preview add ... --mockup <파일>\` 로 첨부)\n- 작업 분류는 \`leerness route <task-type>\`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.\n- 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.\n- 완료 선언 전 \`leerness check .\` 또는 \`leerness lazy detect .\`로 자기검증하고, \`leerness lens\`의 분야별 자기질문에 답합니다 (코드: "선임 개발자가 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 이쁘고 직관적이라 느낄까?").\n- 변경 전 secret/encoding 가드: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- 같은 기능 중복 생성 전 design-system.md, consistency-policy.md, reuse-map.md를 확인합니다.\n- 매 세션 종료 시 \`leerness session close .\`로 9개 카테고리(완료/진행중/미완료/예정/대기/보류/차단/드랍/검증) + **활성 룰 검증 결과**를 보고합니다.\n- 업데이트는 \`leerness update --check\` (감지) → \`leerness update --yes\` (자동 마이그레이션).\n\n## 자연어 회고/통찰/브레인스토밍\n사용자가 자연어로 회고/통찰/브레인스토밍을 요청하면 즉시 leerness 명령으로 호출합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "회고해줘 / 돌아보자 / 정리해줘" | \`leerness retro\` |\n| "최근 N일 회고" | \`leerness retro --days N\` |\n| "통계 / 누적 지표 / insights" | \`leerness insights\` |\n| "X에 대해 브레인스토밍 / X 관련 자료 / X 시작 전 검토" | \`leerness brainstorm "X"\` |\n\nsession close가 매번 자동으로 한 줄 요약을 출력하고, 5세션마다 자동 깊은 회고를 실행합니다. 사용자가 명시 요청 시 즉시 호출.\n\n## 자연어 룰 처리\n사용자가 자연어로 영구 룰을 요청하면 즉시 leerness rule 명령으로 등록합니다.\n\n| 사용자 발화 (자연어) | 즉시 실행할 명령 |\n|---|---|\n| "매 업데이트마다 버전 bump해줘" | \`leerness rule add "버전을 patch로 bump" --trigger every-update\` |\n| "매 커밋마다 패치노트 추가해줘" | \`leerness rule add "패치노트 추가" --trigger every-commit\` |\n| "세션 종료마다 배포해줘" | \`leerness rule add "배포 (release publish)" --trigger session-close\` |\n| "X 룰 중지/그만/끄기" | \`leerness rule pause <ID>\` (해당 룰 ID는 list로 확인) |\n| "X 룰 제거/삭제" | \`leerness rule remove <ID>\` |\n| "모든 룰 중지" | \`leerness rule stop\` |\n| "룰 다시 켜줘" | \`leerness rule resume-all\` 또는 \`leerness rule resume <ID>\` |\n\n룰을 등록한 후 사용자에게 등록 결과(ID + trigger + 설명)를 보고하고, 그 이후 매 세션마다 자동 적용합니다. 사용자가 "중지" 또는 "제거"를 명시적으로 말하기 전까지는 룰을 비활성화하지 않습니다.\n\n## 룰 자동 적용\nleerness가 자동 검증 가능한 trigger:\n- **every-update / version bump 키워드 룰**: package.json의 version이 갱신됐는지 검사 (handoff/session close가 baseline 캐시와 비교).\n- **CHANGELOG / 패치노트 키워드 룰**: CHANGELOG.md의 mtime이 갱신됐는지 검사.\n- **test / 테스트 / verify 키워드 룰**: review-evidence.md에 오늘 verify-code 흔적이 있는지 검사.\n- **배포 / publish / push 키워드 룰**: 자동 검증 불가 → 사용자에게 release publish 명령을 안내.\n\n자동 검증 가능한 룰의 실행은 \`leerness release bump\`, \`leerness release note "..."\`, \`leerness release publish\`를 사용해 자동화합니다.\n`,
+    'CLAUDE.md': `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ 매 세션 첫 행동**: \`.leerness/session-workflow.md\`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 \`leerness drift check --auto-fix\`로 자동 회복.\n\n**완료 주장 전**: \`leerness verify-claim <T-ID>\` — 증거 없이 "완료" 라고 말하지 않는다.\n\nProtected files must not be deleted. Read .leerness/anti-lazy-work-policy.md before claiming completion.\n\n## 자연어 영구 룰\n사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 \`leerness rule add "Y" --trigger every-X\`로 등록하세요. 등록된 룰은 매 세션 \`handoff\`가 자동 출력하고, \`session close\`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 \`rule pause/remove\`를 호출합니다.\n\n자세한 매핑은 AGENTS.md의 "자연어 룰 처리" 표를 참고하세요.\n`,
+    '.cursor/rules/leerness.mdc': `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .leerness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`,
+    '.github/copilot-instructions.md': `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .leerness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`,
+    '.leerness/HARNESS_VERSION': VERSION + '\n',
+    '.leerness/LANGUAGE': lang + '\n',
     // 1.36.105 (P-0015): mode 를 매니페스트에 기록. 기본은 standard = 종전 동작과 바이트 동일.
     // 1.36.107 (같은 라운드 2번째 지점): 재init 이 사용자의 등급 선택을 조용히 되돌리던 것 차단.
     //   `mode set minimal` 로 등급을 낮춘 뒤 업그레이드 재init 하면 mode 가 standard 로 되돌아갔다(실측, exit 0 · 무경고).
     //   manifest 는 managedOverwrite 목록에 있어 매번 템플릿으로 재생성되는데, 템플릿은 사용자 선택을 모른다.
     //   기존 값을 기본으로 삼고 **명시 플래그(--mode)만 이긴다**. installedAt 도 마찬가지 — 매번 갱신되면 이름이 거짓말이 된다.
     //   이전 값은 호출부가 읽어 넘긴다(coreFiles 가 디스크를 몰래 읽으면 CWD 에 따라 산출물이 달라진다).
-    '.harness/manifest.json': JSON.stringify({ project, leernessVersion: VERSION, language: lang, mode: _initMode(opts), installedAt: _initInstalledAt(opts), minimal: !!opts.minimal }, null, 2) + '\n',
-    '.harness/skills-lock.json': skillLock(selectedSkills, root),
-    '.harness/project-brief.md': fm('project-brief', ['프로젝트 목적 확인','신규 기능 판단','계획 수립'], ['프로젝트 목적 변경','사용자/범위 변경'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- 이 프로젝트의 목적을 실제 내용으로 업데이트하세요.\n\n## Users\n-\n\n## Success Criteria\n-\n`),
-    '.harness/plan.md': fm('plan', ['작업 시작 전','새 요청 접수','범위 변경','신규 프로젝트 감지'], ['계획 추가/수정/드랍','milestone 변경','목표 변경'], `# Plan\n\n## Goal\n- 사용자 목적을 기준으로 전체 계획을 유지합니다.\n\n## Scope\n- 포함 범위를 기록합니다.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. 프로젝트 계획 정리\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] project-brief.md를 실제 프로젝트 목적에 맞게 작성\n- [ ] context-map.md를 실제 파일 구조에 맞게 작성\n`),
-    '.harness/progress-tracker.md': _canonicalProgressHeader(lang) + '\n',  // 1.9.293: _canonicalProgressHeader 단일 출처 · 1.36.63: lang 전달
-    '.harness/guideline.md': fm('guideline', ['구현 전 품질 기준 확인','계획 이행 기준 확인'], ['개발 기준 변경','검증 루틴 변경'], `# Guideline\n\n## Operating Principle\n- plan.md의 목표와 범위를 기준으로 작업합니다.\n- progress-tracker.md의 요청 상태를 기준으로 완료/미완료를 판단합니다.\n- guideline.md에는 진행률 수치를 직접 기록하지 않습니다. 진행률은 plan.md/progress-tracker.md가 단일 출처입니다.\n\n## Quality Gate\n- 변경 전 관련 route를 확인합니다 (\`leerness route <task-type>\`).\n- 변경 후 \`leerness verify\`, \`leerness audit\`, \`leerness check\`을 실행합니다.\n- 완료 선언 전 \`leerness lazy detect\`을 실행합니다.\n- 세션 종료 시 \`leerness session close\`를 실행합니다.\n`),
-    '.harness/plan-progress-boundary.md': fm('plan-progress-boundary', ['계획과 진행률이 중복될 때','작업 추적 구조 변경'], ['역할 분리 기준 변경'], `# Plan / Progress Boundary\n\n## plan.md\n- 전체 목표, milestone, 포함/제외 범위, 계획 변경 이력.\n\n## progress-tracker.md\n- 사용자 요청 단위의 상태, 증거, 다음 액션.\n- ID 규칙: T-0001부터 단조 증가. plan add 시 부여되는 ID는 plan/progress 양쪽에서 고유합니다.\n\n## guideline.md\n- plan/progress를 수행할 때 지켜야 할 실행 기준.\n`),
-    '.harness/current-state.md': fm('current-state', ['세션 시작','작업 이어받기'], ['현재 상태 변경','다음 작업 변경'], `# Current State\n\nUpdated: ${today()}\n\n## Now\n-\n\n## Next\n-\n\n## Blockers\n-\n`),
-    '.harness/context-routing.md': fm('context-routing', ['모든 작업 전','작업 유형 판단'], ['새 작업 유형 추가','참조 파일 변경'], `# Context Routing\n\n${Object.entries(routes).map(([k, v]) => `## ${k}\nRead:\n${v.read.map(x => '- ' + x).join('\n')}\n\nUpdate:\n${v.update.map(x => '- ' + x).join('\n')}`).join('\n\n')}\n`),
-    '.harness/writeback-policy.md': fm('writeback-policy', ['작업 완료 전','문서 갱신 판단'], ['기록 대상 변경'], `# Writeback Policy\n\n- plan.md: 사용자 목적, milestone, 범위 추가/제외\n- progress-tracker.md: 요청 단위 상태와 증거 (in-place 갱신)\n- current-state.md: 현재 상태와 다음 작업\n- task-log.md: 수행 이력 (자동 추가)\n- session-handoff.md: 다음 세션 인수인계 (\`session close\`가 자동 작성)\n- decisions.md: 되돌리기 어려운 결정\n- design-system.md: UI/UX/컴포넌트 기준\n- feature-contracts.md: 입력/출력/상태/오류 계약\n- review-evidence.md: 검증 결과 (자동 누적)\n`),
-    '.harness/task-type-map.md': fm('task-type-map', ['사용자 요청 분류'], ['작업 유형 추가'], `# Task Type Map\n\n| User Request | Task Type | Route |\n|---|---|---|\n| 계획 세워줘 / 로드맵 짜줘 | planning | leerness route planning |\n| 기능 구현 / 만들어줘 | feature | leerness route feature |\n| 버그 수정 / 고쳐줘 | bugfix | leerness route bugfix |\n| 리팩토링 / 정리 | refactor | leerness route refactor |\n| 리서치 / 비교/조사 | research | leerness route research |\n| 디자인 통일 / 일관성 | consistency | leerness route consistency |\n| 배포 / 릴리즈 | release | leerness route release |\n| 마이그레이션 | migration | leerness route migration |\n| 세션 시작 / 이어 작업 | session-start | leerness route session-start |\n| 세션 종료 | session-close | leerness route session-close |\n`),
-    '.harness/protected-files.md': fm('protected-files', ['파일 삭제/정리/마이그레이션 전'], ['보호 대상 변경'], `# Protected Files\n\nAI agents must not delete or reset these files without explicit user approval.\n\n- .harness/\n- .harness/skills/\n- .harness/library/\n- AGENTS.md\n- CLAUDE.md\n- .cursor/rules/leerness.mdc\n- .github/copilot-instructions.md\n- .claude/commands/\n- .claude/skills/\n- README.md Leerness managed section\n\nUse merge, archive, or deprecated markers instead of deletion.\n`),
-    '.harness/architecture.md': fm('architecture', ['기능 구현','리팩토링','마이그레이션'], ['구조 변경'], `# Architecture\n\n## Overview\n- 실제 구조를 기록하세요.\n\n## Data Flow\n-\n\n## External Dependencies\n-\n`),
-    '.harness/context-map.md': fm('context-map', ['관련 파일 탐색','기능 구현 전'], ['파일 구조 변경'], `# Context Map\n\n| Area | Files | Notes |\n|---|---|---|\n| App | src/** | 실제 경로로 업데이트 |\n| Tests | tests/** | 검증 경로 |\n`),
-    '.harness/decisions.md': fm('decisions', ['설계 결정 확인'], ['중요 결정 발생'], `# Decisions\n\n## Template (예시 — 실제 결정은 아래 코드블록 밖에 추가)\n\n\`\`\`md\n### ${today()} — Decision 제목\n- Decision:\n- Reason:\n- Alternatives:\n- Impact:\n\`\`\`\n`),
-    '.harness/task-log.md': fm('task-log', ['작업 이력 확인'], ['모든 의미 있는 작업 후'], `# Task Log\n\n## ${today()}\n- Leerness v${VERSION} initialized.\n`),
-    '.harness/guardrails.md': fm('guardrails', ['모든 작업 전','보안/권한/리팩토링 전'], ['금지 규칙 변경'], `# Guardrails\n\n- 토큰/키/비밀번호를 저장하지 않습니다. 환경변수 이름만 기록합니다.\n- 요청 없는 대규모 리팩토링을 하지 않습니다 (5개 이상 파일 변경 시 사용자 사전 승인).\n- API/DB/환경변수 변경은 영향 범위를 task-log에 기록합니다.\n- Leerness 보호 파일/관리 섹션을 삭제하지 않습니다.\n- 한글 인코딩은 BOM 없는 UTF-8을 유지합니다.\n- destructive Git 작업(\`git reset --hard\`, \`git push --force\` 등)은 사용자 명시 승인 후에만 수행합니다.\n`),
-    '.harness/design-system.md': fm('design-system', ['UI 변경','컴포넌트 추가','designguide 병합'], ['디자인 기준 변경','재사용 패턴 발견'], `# Design System\n\n## Canonical File\n이 파일은 designguide.md, design-guide.md와 같은 디자인 가이드의 기준 파일입니다.\n\n## Tokens\n| Token | Value | Notes |\n|---|---|---|\n| color.primary | (실제 값으로 업데이트) | |\n| color.surface | | |\n| spacing.unit | | |\n| typography.body | | |\n\n## Reusable Patterns\n| Pattern | Where | Reuse Rule |\n|---|---|---|\n`),
-    '.harness/consistency-policy.md': fm('consistency-policy', ['UI/기능 중복 생성 전','재사용 판단'], ['일관성 정책 변경'], `# Consistency Policy\n\n동일한 기능을 하는 요소는 새로 만들기 전에 기존 구현을 찾아 재사용/확장/연결합니다.\n\n## Recursive Reuse Rule\n1. 같은 기능의 기존 요소를 찾습니다.\n2. 자기 참조/기저 규칙/재귀 흐름이 필요한지 확인합니다.\n3. 기존 요소를 재사용하거나 확장합니다.\n4. 불가피하게 새로 만들면 reuse-map.md에 이유를 기록합니다.\n\n## Audit Trigger\n\`leerness audit\`는 다음을 검사합니다:\n- 디자인 가이드 중복 파일\n- design-system.md 토큰 미정의\n- reuse-map.md 비어있음 + 컴포넌트/유틸 ≥3개 발견\n- plan vs progress 정렬\n`),
-    '.harness/reuse-map.md': fm('reuse-map', ['새 컴포넌트/API/helper 생성 전','중복 기능 감지'], ['재사용 가능한 요소 추가'], `# Reuse Map\n\n| Capability | Existing Element | Reuse Method | Notes |\n|---|---|---|---|\n`),
-    '.harness/feature-contracts.md': fm('feature-contracts', ['기능 구현/수정 전'], ['기능 입출력/상태/오류 변경'], `# Feature Contracts\n\n## Template\n- Feature:\n- Input:\n- Output:\n- States:\n- Errors:\n- Related files:\n- Test evidence ID:\n`),
+    '.leerness/manifest.json': JSON.stringify({ project, leernessVersion: VERSION, language: lang, mode: _initMode(opts), installedAt: _initInstalledAt(opts), minimal: !!opts.minimal }, null, 2) + '\n',
+    '.leerness/skills-lock.json': skillLock(selectedSkills, root),
+    '.leerness/project-brief.md': fm('project-brief', ['프로젝트 목적 확인','신규 기능 판단','계획 수립'], ['프로젝트 목적 변경','사용자/범위 변경'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- 이 프로젝트의 목적을 실제 내용으로 업데이트하세요.\n\n## Users\n-\n\n## Success Criteria\n-\n`),
+    '.leerness/plan.md': fm('plan', ['작업 시작 전','새 요청 접수','범위 변경','신규 프로젝트 감지'], ['계획 추가/수정/드랍','milestone 변경','목표 변경'], `# Plan\n\n## Goal\n- 사용자 목적을 기준으로 전체 계획을 유지합니다.\n\n## Scope\n- 포함 범위를 기록합니다.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. 프로젝트 계획 정리\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] project-brief.md를 실제 프로젝트 목적에 맞게 작성\n- [ ] context-map.md를 실제 파일 구조에 맞게 작성\n`),
+    '.leerness/progress-tracker.md': _canonicalProgressHeader(lang) + '\n',  // 1.9.293: _canonicalProgressHeader 단일 출처 · 1.36.63: lang 전달
+    '.leerness/guideline.md': fm('guideline', ['구현 전 품질 기준 확인','계획 이행 기준 확인'], ['개발 기준 변경','검증 루틴 변경'], `# Guideline\n\n## Operating Principle\n- plan.md의 목표와 범위를 기준으로 작업합니다.\n- progress-tracker.md의 요청 상태를 기준으로 완료/미완료를 판단합니다.\n- guideline.md에는 진행률 수치를 직접 기록하지 않습니다. 진행률은 plan.md/progress-tracker.md가 단일 출처입니다.\n\n## Quality Gate\n- 변경 전 관련 route를 확인합니다 (\`leerness route <task-type>\`).\n- 변경 후 \`leerness verify\`, \`leerness audit\`, \`leerness check\`을 실행합니다.\n- 완료 선언 전 \`leerness lazy detect\`을 실행합니다.\n- 세션 종료 시 \`leerness session close\`를 실행합니다.\n`),
+    '.leerness/plan-progress-boundary.md': fm('plan-progress-boundary', ['계획과 진행률이 중복될 때','작업 추적 구조 변경'], ['역할 분리 기준 변경'], `# Plan / Progress Boundary\n\n## plan.md\n- 전체 목표, milestone, 포함/제외 범위, 계획 변경 이력.\n\n## progress-tracker.md\n- 사용자 요청 단위의 상태, 증거, 다음 액션.\n- ID 규칙: T-0001부터 단조 증가. plan add 시 부여되는 ID는 plan/progress 양쪽에서 고유합니다.\n\n## guideline.md\n- plan/progress를 수행할 때 지켜야 할 실행 기준.\n`),
+    '.leerness/current-state.md': fm('current-state', ['세션 시작','작업 이어받기'], ['현재 상태 변경','다음 작업 변경'], `# Current State\n\nUpdated: ${today()}\n\n## Now\n-\n\n## Next\n-\n\n## Blockers\n-\n`),
+    '.leerness/context-routing.md': fm('context-routing', ['모든 작업 전','작업 유형 판단'], ['새 작업 유형 추가','참조 파일 변경'], `# Context Routing\n\n${Object.entries(routes).map(([k, v]) => `## ${k}\nRead:\n${v.read.map(x => '- ' + x).join('\n')}\n\nUpdate:\n${v.update.map(x => '- ' + x).join('\n')}`).join('\n\n')}\n`),
+    '.leerness/writeback-policy.md': fm('writeback-policy', ['작업 완료 전','문서 갱신 판단'], ['기록 대상 변경'], `# Writeback Policy\n\n- plan.md: 사용자 목적, milestone, 범위 추가/제외\n- progress-tracker.md: 요청 단위 상태와 증거 (in-place 갱신)\n- current-state.md: 현재 상태와 다음 작업\n- task-log.md: 수행 이력 (자동 추가)\n- session-handoff.md: 다음 세션 인수인계 (\`session close\`가 자동 작성)\n- decisions.md: 되돌리기 어려운 결정\n- design-system.md: UI/UX/컴포넌트 기준\n- feature-contracts.md: 입력/출력/상태/오류 계약\n- review-evidence.md: 검증 결과 (자동 누적)\n`),
+    '.leerness/task-type-map.md': fm('task-type-map', ['사용자 요청 분류'], ['작업 유형 추가'], `# Task Type Map\n\n| User Request | Task Type | Route |\n|---|---|---|\n| 계획 세워줘 / 로드맵 짜줘 | planning | leerness route planning |\n| 기능 구현 / 만들어줘 | feature | leerness route feature |\n| 버그 수정 / 고쳐줘 | bugfix | leerness route bugfix |\n| 리팩토링 / 정리 | refactor | leerness route refactor |\n| 리서치 / 비교/조사 | research | leerness route research |\n| 디자인 통일 / 일관성 | consistency | leerness route consistency |\n| 배포 / 릴리즈 | release | leerness route release |\n| 마이그레이션 | migration | leerness route migration |\n| 세션 시작 / 이어 작업 | session-start | leerness route session-start |\n| 세션 종료 | session-close | leerness route session-close |\n`),
+    '.leerness/protected-files.md': fm('protected-files', ['파일 삭제/정리/마이그레이션 전'], ['보호 대상 변경'], `# Protected Files\n\nAI agents must not delete or reset these files without explicit user approval.\n\n- .leerness/\n- .leerness/skills/\n- .leerness/library/\n- AGENTS.md\n- CLAUDE.md\n- .cursor/rules/leerness.mdc\n- .github/copilot-instructions.md\n- .claude/commands/\n- .claude/skills/\n- README.md Leerness managed section\n\nUse merge, archive, or deprecated markers instead of deletion.\n`),
+    '.leerness/architecture.md': fm('architecture', ['기능 구현','리팩토링','마이그레이션'], ['구조 변경'], `# Architecture\n\n## Overview\n- 실제 구조를 기록하세요.\n\n## Data Flow\n-\n\n## External Dependencies\n-\n`),
+    '.leerness/context-map.md': fm('context-map', ['관련 파일 탐색','기능 구현 전'], ['파일 구조 변경'], `# Context Map\n\n| Area | Files | Notes |\n|---|---|---|\n| App | src/** | 실제 경로로 업데이트 |\n| Tests | tests/** | 검증 경로 |\n`),
+    '.leerness/decisions.md': fm('decisions', ['설계 결정 확인'], ['중요 결정 발생'], `# Decisions\n\n## Template (예시 — 실제 결정은 아래 코드블록 밖에 추가)\n\n\`\`\`md\n### ${today()} — Decision 제목\n- Decision:\n- Reason:\n- Alternatives:\n- Impact:\n\`\`\`\n`),
+    '.leerness/task-log.md': fm('task-log', ['작업 이력 확인'], ['모든 의미 있는 작업 후'], `# Task Log\n\n## ${today()}\n- Leerness v${VERSION} initialized.\n`),
+    '.leerness/guardrails.md': fm('guardrails', ['모든 작업 전','보안/권한/리팩토링 전'], ['금지 규칙 변경'], `# Guardrails\n\n- 토큰/키/비밀번호를 저장하지 않습니다. 환경변수 이름만 기록합니다.\n- 요청 없는 대규모 리팩토링을 하지 않습니다 (5개 이상 파일 변경 시 사용자 사전 승인).\n- API/DB/환경변수 변경은 영향 범위를 task-log에 기록합니다.\n- Leerness 보호 파일/관리 섹션을 삭제하지 않습니다.\n- 한글 인코딩은 BOM 없는 UTF-8을 유지합니다.\n- destructive Git 작업(\`git reset --hard\`, \`git push --force\` 등)은 사용자 명시 승인 후에만 수행합니다.\n`),
+    '.leerness/design-system.md': fm('design-system', ['UI 변경','컴포넌트 추가','designguide 병합'], ['디자인 기준 변경','재사용 패턴 발견'], `# Design System\n\n## Canonical File\n이 파일은 designguide.md, design-guide.md와 같은 디자인 가이드의 기준 파일입니다.\n\n## Tokens\n| Token | Value | Notes |\n|---|---|---|\n| color.primary | (실제 값으로 업데이트) | |\n| color.surface | | |\n| spacing.unit | | |\n| typography.body | | |\n\n## Reusable Patterns\n| Pattern | Where | Reuse Rule |\n|---|---|---|\n`),
+    '.leerness/consistency-policy.md': fm('consistency-policy', ['UI/기능 중복 생성 전','재사용 판단'], ['일관성 정책 변경'], `# Consistency Policy\n\n동일한 기능을 하는 요소는 새로 만들기 전에 기존 구현을 찾아 재사용/확장/연결합니다.\n\n## Recursive Reuse Rule\n1. 같은 기능의 기존 요소를 찾습니다.\n2. 자기 참조/기저 규칙/재귀 흐름이 필요한지 확인합니다.\n3. 기존 요소를 재사용하거나 확장합니다.\n4. 불가피하게 새로 만들면 reuse-map.md에 이유를 기록합니다.\n\n## Audit Trigger\n\`leerness audit\`는 다음을 검사합니다:\n- 디자인 가이드 중복 파일\n- design-system.md 토큰 미정의\n- reuse-map.md 비어있음 + 컴포넌트/유틸 ≥3개 발견\n- plan vs progress 정렬\n`),
+    '.leerness/reuse-map.md': fm('reuse-map', ['새 컴포넌트/API/helper 생성 전','중복 기능 감지'], ['재사용 가능한 요소 추가'], `# Reuse Map\n\n| Capability | Existing Element | Reuse Method | Notes |\n|---|---|---|---|\n`),
+    '.leerness/feature-contracts.md': fm('feature-contracts', ['기능 구현/수정 전'], ['기능 입출력/상태/오류 변경'], `# Feature Contracts\n\n## Template\n- Feature:\n- Input:\n- Output:\n- States:\n- Errors:\n- Related files:\n- Test evidence ID:\n`),
     // 1.9.141: Feature Causality Graph — 신규 기능/형식 변경 시 영향 범위 자동 추적 (사용자 요청)
-    '.harness/feature-graph.md': fm('feature-graph', ['신규 기능 추가 전','데이터 형식 변경 전','외부 API 매칭 작업 전'], ['feature 등록 / 링크 / impact 회수'], `# Feature Graph\n\n> **목적**: 각 기능의 인과관계를 정확히 정리해서 코드 작성 전 영향 범위를 자동 추적.\n> 신규 기능 추가, 데이터 형식 변경, 외부 API 매칭 작업 전 \`leerness feature impact <id>\`로 확인.\n> handoff가 현재 task 키워드로 자동 매칭해서 영향받는 feature 목록을 회수.\n\n## How to use\n\n\`\`\`bash\nleerness feature add "User Auth"                           # F-0001 자동 부여\nleerness feature link F-0002 --depends-on F-0001           # 의존 관계\nleerness feature link F-0001 --affects F-0002,F-0005        # 영향 관계 (다수)\nleerness feature link F-0001 --co-changes-with F-0011       # 함께 변해야 하는 기능\nleerness feature impact F-0001                              # 영향받는 전체 (transitive)\nleerness feature list --json                                # 그래프 JSON\nleerness feature show F-0001                                # 단일 상세\n\`\`\`\n\n## Nodes\n\n`),
-    '.harness/testing-strategy.md': fm('testing-strategy', ['검증 전','릴리즈 전'], ['테스트 전략 변경'], `# Testing Strategy\n\n- Typecheck (\`tsc --noEmit\` 또는 동등)\n- Lint (\`npm run lint\` 등)\n- Unit/Integration/E2E\n- Manual smoke test\n- Browser/UI smoke (frontend 변경 시)\n\n## Evidence Format\nEach completed task must reference an evidence ID stored in .harness/review-evidence.md.\n`),
-    '.harness/review-checklist.md': fm('review-checklist', ['PR/리뷰 전'], ['리뷰 기준 변경'], `# Review Checklist\n\n- [ ] 계획과 정렬되어 있는가\n- [ ] progress-tracker가 갱신되었는가\n- [ ] 보호 파일을 삭제하지 않았는가\n- [ ] 디자인/기능 재사용을 확인했는가\n- [ ] 시크릿이 코드에 들어가지 않았는가 (\`leerness scan secrets\`)\n- [ ] 한글 인코딩 OK (\`leerness encoding check\`)\n- [ ] 게으름 평가 통과 (\`leerness lazy detect\`)\n`),
-    '.harness/release-checklist.md': fm('release-checklist', ['배포 전'], ['배포 조건/환경변수/롤백 변경'], `# Release Checklist\n\n- [ ] \`leerness verify .\`\n- [ ] \`leerness audit .\`\n- [ ] \`leerness scan secrets .\`\n- [ ] \`leerness encoding check .\`\n- [ ] 프로젝트 typecheck/lint/test\n- [ ] 환경변수 (.env.example) 동기화\n- [ ] 롤백 방법 확인\n- [ ] CHANGELOG 갱신\n`),
-    '.harness/session-close-policy.md': fm('session-close-policy', ['세션 종료 전'], ['세션 종료 형식 변경'], `# Session Close Policy\n\nEvery session must list:\n- Completed\n- In progress\n- Incomplete\n- Planned\n- Waiting\n- On hold\n- Blocked\n- Dropped\n- Verification (commands run, results)\n- Recommended next direction\n- Next exact step\n\n\`leerness session close\`가 위 9개 카테고리를 자동 추출하고, session-handoff.md에 다음 세션을 위한 인수인계 블록을 자동 작성합니다.\n`),
-    '.harness/session-workflow.md': fm('session-workflow', ['세션 시작','새 사용자 요청 도착','복잡한 작업 분배 전'], ['워크플로 단계 변경'], `# Session Workflow — AI 하네스 엔지니어링 6단계
+    '.leerness/feature-graph.md': fm('feature-graph', ['신규 기능 추가 전','데이터 형식 변경 전','외부 API 매칭 작업 전'], ['feature 등록 / 링크 / impact 회수'], `# Feature Graph\n\n> **목적**: 각 기능의 인과관계를 정확히 정리해서 코드 작성 전 영향 범위를 자동 추적.\n> 신규 기능 추가, 데이터 형식 변경, 외부 API 매칭 작업 전 \`leerness feature impact <id>\`로 확인.\n> handoff가 현재 task 키워드로 자동 매칭해서 영향받는 feature 목록을 회수.\n\n## How to use\n\n\`\`\`bash\nleerness feature add "User Auth"                           # F-0001 자동 부여\nleerness feature link F-0002 --depends-on F-0001           # 의존 관계\nleerness feature link F-0001 --affects F-0002,F-0005        # 영향 관계 (다수)\nleerness feature link F-0001 --co-changes-with F-0011       # 함께 변해야 하는 기능\nleerness feature impact F-0001                              # 영향받는 전체 (transitive)\nleerness feature list --json                                # 그래프 JSON\nleerness feature show F-0001                                # 단일 상세\n\`\`\`\n\n## Nodes\n\n`),
+    '.leerness/testing-strategy.md': fm('testing-strategy', ['검증 전','릴리즈 전'], ['테스트 전략 변경'], `# Testing Strategy\n\n- Typecheck (\`tsc --noEmit\` 또는 동등)\n- Lint (\`npm run lint\` 등)\n- Unit/Integration/E2E\n- Manual smoke test\n- Browser/UI smoke (frontend 변경 시)\n\n## Evidence Format\nEach completed task must reference an evidence ID stored in .leerness/review-evidence.md.\n`),
+    '.leerness/review-checklist.md': fm('review-checklist', ['PR/리뷰 전'], ['리뷰 기준 변경'], `# Review Checklist\n\n- [ ] 계획과 정렬되어 있는가\n- [ ] progress-tracker가 갱신되었는가\n- [ ] 보호 파일을 삭제하지 않았는가\n- [ ] 디자인/기능 재사용을 확인했는가\n- [ ] 시크릿이 코드에 들어가지 않았는가 (\`leerness scan secrets\`)\n- [ ] 한글 인코딩 OK (\`leerness encoding check\`)\n- [ ] 게으름 평가 통과 (\`leerness lazy detect\`)\n`),
+    '.leerness/release-checklist.md': fm('release-checklist', ['배포 전'], ['배포 조건/환경변수/롤백 변경'], `# Release Checklist\n\n- [ ] \`leerness verify .\`\n- [ ] \`leerness audit .\`\n- [ ] \`leerness scan secrets .\`\n- [ ] \`leerness encoding check .\`\n- [ ] 프로젝트 typecheck/lint/test\n- [ ] 환경변수 (.env.example) 동기화\n- [ ] 롤백 방법 확인\n- [ ] CHANGELOG 갱신\n`),
+    '.leerness/session-close-policy.md': fm('session-close-policy', ['세션 종료 전'], ['세션 종료 형식 변경'], `# Session Close Policy\n\nEvery session must list:\n- Completed\n- In progress\n- Incomplete\n- Planned\n- Waiting\n- On hold\n- Blocked\n- Dropped\n- Verification (commands run, results)\n- Recommended next direction\n- Next exact step\n\n\`leerness session close\`가 위 9개 카테고리를 자동 추출하고, session-handoff.md에 다음 세션을 위한 인수인계 블록을 자동 작성합니다.\n`),
+    '.leerness/session-workflow.md': fm('session-workflow', ['세션 시작','새 사용자 요청 도착','복잡한 작업 분배 전'], ['워크플로 단계 변경'], `# Session Workflow — AI 하네스 엔지니어링 6단계
 
 > **매 세션 시작 시 메인 에이전트는 이 문서를 먼저 읽고 6단계를 그대로 따른다.**
 > 라운드 길이/복잡도 무관, 단순 작업도 동일 흐름 유지 — 그래야 drift 안 됨.
@@ -1245,23 +1268,23 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
 - ⚠ "테스트 돌렸으니 PASS" 자기 보고만 → verify-claim --run-tests 미실행
 - ⚠ contract verify 생략 → 사양 불일치 BUG가 사용자에게 노출
 `),
-    '.harness/anti-lazy-work-policy.md': fm('anti-lazy-work-policy', ['완료 선언 전'], ['게으른 작업 방지 기준 변경'], `# Anti Lazy Work Policy\n\n## Rules\n1. **증거 없는 완료 금지**: \"완료\"를 선언하려면 progress-tracker의 evidence 컬럼에 명령 출력/테스트 결과/스크린샷 경로 등이 있어야 합니다.\n2. **빈 핸드오프 금지**: 세션 종료 시 session-handoff.md의 Completed/In Progress/Next Exact Step이 모두 비어 있으면 close가 \"insufficient\" 상태로 표시됩니다.\n3. **부분 구현 자기보고**: 완전 구현이 아니면 status를 \`incomplete\`로, Next Exact Step에 \"무엇을 추가해야 끝나는지\" 한 줄을 적습니다.\n4. **검증 기록**: typecheck/lint/test 결과를 review-evidence.md에 누적 기록합니다.\n5. **TODO 표지**: 코드에 \`TODO\`/\`FIXME\`/\`XXX\`를 새로 도입하면 progress-tracker에 동일 ID로 추적합니다.\n6. **거짓 완료 자동 감지**: \`leerness lazy detect\`는 다음을 자동 점검합니다.\n   - progress-tracker에 done인데 evidence가 비어있는 row\n   - session-handoff의 Completed가 비어있고 Next Exact Step도 비어있음\n   - 코드에 새 TODO/FIXME 추가 + progress-tracker에 추적 항목 없음\n   - test 명령 실행 흔적 없음 (review-evidence.md 또는 task-log.md에 명령 기록)\n7. **품질 렌즈 자가질문**: 완료 선언 전 \`leerness lens\`의 분야별 질문에 스스로 답합니다 — 코드: "선임 개발자가 이 코드를 보고 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 봤을 때 이쁘고 편하고 직관적인가?". "그렇다(통과)"라고 답할 수 없으면 완료가 아닙니다. 분야를 바꾸면 인과관계로 연결된 분야(\`lens\` 출력의 ↔ 인과)의 질문도 다시 확인합니다.\n`),
-    '.harness/rules.md': _rulesHeader(lang) + '\n',   // 1.36.63: lang 전달
-    '.harness/session-handoff.md': fm('session-handoff', ['세션 시작','다음 작업 이어받기'], ['세션 종료'], `# Session Handoff\n\nLast generated: (자동)\n\n## Completed\n-\n\n## In Progress\n-\n\n## Incomplete / Waiting / On Hold / Blocked\n-\n\n## Dropped\n-\n\n## Verification\n-\n\n## Recommended Direction\n-\n\n## Next Exact Step\n-\n`),
-    '.harness/leerness-maintenance.md': fm('leerness-maintenance', ['작업 시작','마이그레이션/릴리즈 전'], ['버전 정책 변경'], `# Leerness Maintenance\n\nAI agents should check:\n\n\`\`\`bash\nleerness --version\nleerness self check .\nleerness update --check       # 24h 캐시 자동 감지\nleerness update --yes         # 새 버전 발견 시 자동 마이그레이션\ncat .harness/HARNESS_VERSION\nnpm view leerness version\n\`\`\`\n`),
-    '.harness/language-policy.md': fm('language-policy', ['문서 작성 전'], ['언어 변경'], `# Language Policy\n\nSelected language: ${lang}\n\n모든 Leerness 노트, 스킬 노트, 세션 보고, 작업 목록은 위 언어를 기본으로 사용합니다 (사용자가 다른 언어를 명시 요청 시 예외).\n`),
-    '.harness/secret-policy.md': fm('secret-policy', ['스킬/배포/설정 변경 전'], ['민감정보 정책 변경'], `# Secret Policy\n\n## Rules\n- 환경변수 이름만 기록하고 값은 .env.local, CI secrets, 클라우드 시크릿 매니저로 옮깁니다.\n- 코드/문서/로그에 토큰/비밀번호/쿠키/주민번호/카드번호 등을 평문으로 두지 않습니다.\n- 변경 전 \`leerness scan secrets .\`을 실행해 흔적을 확인합니다.\n\n## Patterns scanned\n- AWS Access Key (\`AKIA[0-9A-Z]{16}\`)\n- GitHub PAT (\`ghp_[A-Za-z0-9]{36}\`)\n- OpenAI key (\`sk-[A-Za-z0-9]{20,}\`)\n- Anthropic key (\`sk-ant-[A-Za-z0-9-]{20,}\`)\n- Google API key, Slack token, generic private key, hardcoded password\n`),
-    '.harness/encoding-policy.md': fm('encoding-policy', ['파일 생성 전','한글 깨짐 보고','배포 전'], ['인코딩 정책 변경'], `# Encoding Policy\n\n## Rules\n- 모든 텍스트 파일은 **BOM 없는 UTF-8**.\n- Windows .bat 최상단에 \`chcp 65001 >nul\`.\n- PowerShell .ps1 시작에 \`[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\`.\n- Python 파일은 첫 줄에 \`# -*- coding: utf-8 -*-\` (Python 2 호환 필요 시).\n- LF 라인 엔딩 권장 (Windows에서도 .gitattributes로 통일).\n\n## Auto check\n\`leerness encoding check\`는 BOM, NUL, .bat의 chcp 65001, 한글 라운드트립을 검사합니다.\n`),
-    '.harness/test-evidence-policy.md': fm('test-evidence-policy', ['검증 결과 기록 시'], ['검증 형식 변경'], `# Test Evidence Policy\n\n매 검증은 \`.harness/review-evidence.md\`에 누적 기록합니다.\n\n## Format\n\`\`\`\n## YYYY-MM-DD HH:MM\nTask: T-XXXX\nCommand: <명령>\nExit: <코드>\nNote: <주요 결과 요약>\nArtifacts: <스크린샷/로그 경로>\n\`\`\`\n`),
-    '.harness/review-evidence.md': fm('review-evidence', ['진행 보고','릴리즈 검토'], ['검증 결과 기록'], `# Review Evidence\n\nVerification command/result history. Append-only.\n`),
-    '.harness/AX_PLAN_GUIDE.md': fm('ax-plan-guide', ['계획 수립/변경','신규 프로젝트'], ['계획 가이드 변경'], `# AX Plan Guide\n\n1. 사용자 요청이 기존 plan.md 범위 내인지 확인합니다.\n2. 새 범위라면 plan.md(milestone)와 progress-tracker.md(T-id) 양쪽에 추가합니다.\n3. 사용자가 범위를 드랍하면 삭제 대신 dropped 표기를 추가합니다.\n4. 신규 프로젝트는 코딩 전에 plan.md/project-brief.md를 채웁니다.\n`),
-    '.harness/AX_MIGRATION_GUIDE.md': fm('ax-migration-guide', ['마이그레이션 전'], ['마이그레이션 정책 변경'], `# AX Migration Guide\n\n- Back up before changes (\`.harness/archive/\`).\n- 기존 프로젝트 메모리 보존 (preserve-by-default).\n- .env.example/.gitignore는 라인 단위 머지.\n- 보호 파일을 삭제하지 않습니다.\n- 마이그레이션 보고서는 \`.harness/migration-report.md\`.\n- 자동: \`leerness update --yes\`가 위 절차를 백업·머지·검증까지 한번에 수행합니다.\n`),
-    '.harness/AX_NEW_PROJECT_GUIDE.md': fm('ax-new-project-guide', ['신규 프로젝트 감지'], ['신규 설치 정책 변경'], `# AX New Project Guide\n\nBefore coding, ask or infer the project goal, users, scope, out-of-scope, stack, deployment target, and milestones. Then fill plan.md and project-brief.md.\n`),
-    '.harness/AX_SKILL_LIBRARY_GUIDE.md': fm('ax-skill-library-guide', ['스킬 학습/검증/업로드'], ['스킬 정책 변경'], `# AX Skill Library Guide\n\nValidated skills require metadata, sensitive data scan, AI verification, dry-run publish, and explicit execute approval.\n`),
-    '.harness/skill-index.md': fm('skill-index', ['작업별 스킬 선택'], ['스킬 추가/삭제'], `# Skill Index\n\n| ID | Korean Name | Capabilities | Last Updated | Verification |\n|---|---|---|---|---|\n${skillRows}\n`),
-    '.harness/templates/end-of-session-report.md': `# End of Session Report\n\n## Completed\n\n## In Progress\n\n## Incomplete\n\n## Planned\n\n## Waiting\n\n## On Hold\n\n## Blocked\n\n## Dropped\n\n## Verification\n\n## Recommended Direction\n\n## Next Exact Step\n`,
-    '.harness/templates/decision.md': '# Decision\n\n## Decision\n\n## Reason\n\n## Alternatives\n\n## Impact\n',
-    '.harness/templates/task-row.md': `# Task Row Template\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n| T-XXXX | requested | <request> | <evidence-id or empty> | <next> | YYYY-MM-DD |\n`,
+    '.leerness/anti-lazy-work-policy.md': fm('anti-lazy-work-policy', ['완료 선언 전'], ['게으른 작업 방지 기준 변경'], `# Anti Lazy Work Policy\n\n## Rules\n1. **증거 없는 완료 금지**: \"완료\"를 선언하려면 progress-tracker의 evidence 컬럼에 명령 출력/테스트 결과/스크린샷 경로 등이 있어야 합니다.\n2. **빈 핸드오프 금지**: 세션 종료 시 session-handoff.md의 Completed/In Progress/Next Exact Step이 모두 비어 있으면 close가 \"insufficient\" 상태로 표시됩니다.\n3. **부분 구현 자기보고**: 완전 구현이 아니면 status를 \`incomplete\`로, Next Exact Step에 \"무엇을 추가해야 끝나는지\" 한 줄을 적습니다.\n4. **검증 기록**: typecheck/lint/test 결과를 review-evidence.md에 누적 기록합니다.\n5. **TODO 표지**: 코드에 \`TODO\`/\`FIXME\`/\`XXX\`를 새로 도입하면 progress-tracker에 동일 ID로 추적합니다.\n6. **거짓 완료 자동 감지**: \`leerness lazy detect\`는 다음을 자동 점검합니다.\n   - progress-tracker에 done인데 evidence가 비어있는 row\n   - session-handoff의 Completed가 비어있고 Next Exact Step도 비어있음\n   - 코드에 새 TODO/FIXME 추가 + progress-tracker에 추적 항목 없음\n   - test 명령 실행 흔적 없음 (review-evidence.md 또는 task-log.md에 명령 기록)\n7. **품질 렌즈 자가질문**: 완료 선언 전 \`leerness lens\`의 분야별 질문에 스스로 답합니다 — 코드: "선임 개발자가 이 코드를 보고 복잡하다고 느끼지 않을까?" / 디자인: "선임 디자이너와 일반 사용자가 봤을 때 이쁘고 편하고 직관적인가?". "그렇다(통과)"라고 답할 수 없으면 완료가 아닙니다. 분야를 바꾸면 인과관계로 연결된 분야(\`lens\` 출력의 ↔ 인과)의 질문도 다시 확인합니다.\n`),
+    '.leerness/rules.md': _rulesHeader(lang) + '\n',   // 1.36.63: lang 전달
+    '.leerness/session-handoff.md': fm('session-handoff', ['세션 시작','다음 작업 이어받기'], ['세션 종료'], `# Session Handoff\n\nLast generated: (자동)\n\n## Completed\n-\n\n## In Progress\n-\n\n## Incomplete / Waiting / On Hold / Blocked\n-\n\n## Dropped\n-\n\n## Verification\n-\n\n## Recommended Direction\n-\n\n## Next Exact Step\n-\n`),
+    '.leerness/leerness-maintenance.md': fm('leerness-maintenance', ['작업 시작','마이그레이션/릴리즈 전'], ['버전 정책 변경'], `# Leerness Maintenance\n\nAI agents should check:\n\n\`\`\`bash\nleerness --version\nleerness self check .\nleerness update --check       # 24h 캐시 자동 감지\nleerness update --yes         # 새 버전 발견 시 자동 마이그레이션\ncat .leerness/HARNESS_VERSION\nnpm view leerness version\n\`\`\`\n`),
+    '.leerness/language-policy.md': fm('language-policy', ['문서 작성 전'], ['언어 변경'], `# Language Policy\n\nSelected language: ${lang}\n\n모든 Leerness 노트, 스킬 노트, 세션 보고, 작업 목록은 위 언어를 기본으로 사용합니다 (사용자가 다른 언어를 명시 요청 시 예외).\n`),
+    '.leerness/secret-policy.md': fm('secret-policy', ['스킬/배포/설정 변경 전'], ['민감정보 정책 변경'], `# Secret Policy\n\n## Rules\n- 환경변수 이름만 기록하고 값은 .env.local, CI secrets, 클라우드 시크릿 매니저로 옮깁니다.\n- 코드/문서/로그에 토큰/비밀번호/쿠키/주민번호/카드번호 등을 평문으로 두지 않습니다.\n- 변경 전 \`leerness scan secrets .\`을 실행해 흔적을 확인합니다.\n\n## Patterns scanned\n- AWS Access Key (\`AKIA[0-9A-Z]{16}\`)\n- GitHub PAT (\`ghp_[A-Za-z0-9]{36}\`)\n- OpenAI key (\`sk-[A-Za-z0-9]{20,}\`)\n- Anthropic key (\`sk-ant-[A-Za-z0-9-]{20,}\`)\n- Google API key, Slack token, generic private key, hardcoded password\n`),
+    '.leerness/encoding-policy.md': fm('encoding-policy', ['파일 생성 전','한글 깨짐 보고','배포 전'], ['인코딩 정책 변경'], `# Encoding Policy\n\n## Rules\n- 모든 텍스트 파일은 **BOM 없는 UTF-8**.\n- Windows .bat 최상단에 \`chcp 65001 >nul\`.\n- PowerShell .ps1 시작에 \`[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\`.\n- Python 파일은 첫 줄에 \`# -*- coding: utf-8 -*-\` (Python 2 호환 필요 시).\n- LF 라인 엔딩 권장 (Windows에서도 .gitattributes로 통일).\n\n## Auto check\n\`leerness encoding check\`는 BOM, NUL, .bat의 chcp 65001, 한글 라운드트립을 검사합니다.\n`),
+    '.leerness/test-evidence-policy.md': fm('test-evidence-policy', ['검증 결과 기록 시'], ['검증 형식 변경'], `# Test Evidence Policy\n\n매 검증은 \`.leerness/review-evidence.md\`에 누적 기록합니다.\n\n## Format\n\`\`\`\n## YYYY-MM-DD HH:MM\nTask: T-XXXX\nCommand: <명령>\nExit: <코드>\nNote: <주요 결과 요약>\nArtifacts: <스크린샷/로그 경로>\n\`\`\`\n`),
+    '.leerness/review-evidence.md': fm('review-evidence', ['진행 보고','릴리즈 검토'], ['검증 결과 기록'], `# Review Evidence\n\nVerification command/result history. Append-only.\n`),
+    '.leerness/AX_PLAN_GUIDE.md': fm('ax-plan-guide', ['계획 수립/변경','신규 프로젝트'], ['계획 가이드 변경'], `# AX Plan Guide\n\n1. 사용자 요청이 기존 plan.md 범위 내인지 확인합니다.\n2. 새 범위라면 plan.md(milestone)와 progress-tracker.md(T-id) 양쪽에 추가합니다.\n3. 사용자가 범위를 드랍하면 삭제 대신 dropped 표기를 추가합니다.\n4. 신규 프로젝트는 코딩 전에 plan.md/project-brief.md를 채웁니다.\n`),
+    '.leerness/AX_MIGRATION_GUIDE.md': fm('ax-migration-guide', ['마이그레이션 전'], ['마이그레이션 정책 변경'], `# AX Migration Guide\n\n- Back up before changes (\`.leerness/archive/\`).\n- 기존 프로젝트 메모리 보존 (preserve-by-default).\n- .env.example/.gitignore는 라인 단위 머지.\n- 보호 파일을 삭제하지 않습니다.\n- 마이그레이션 보고서는 \`.leerness/migration-report.md\`.\n- 자동: \`leerness update --yes\`가 위 절차를 백업·머지·검증까지 한번에 수행합니다.\n`),
+    '.leerness/AX_NEW_PROJECT_GUIDE.md': fm('ax-new-project-guide', ['신규 프로젝트 감지'], ['신규 설치 정책 변경'], `# AX New Project Guide\n\nBefore coding, ask or infer the project goal, users, scope, out-of-scope, stack, deployment target, and milestones. Then fill plan.md and project-brief.md.\n`),
+    '.leerness/AX_SKILL_LIBRARY_GUIDE.md': fm('ax-skill-library-guide', ['스킬 학습/검증/업로드'], ['스킬 정책 변경'], `# AX Skill Library Guide\n\nValidated skills require metadata, sensitive data scan, AI verification, dry-run publish, and explicit execute approval.\n`),
+    '.leerness/skill-index.md': fm('skill-index', ['작업별 스킬 선택'], ['스킬 추가/삭제'], `# Skill Index\n\n| ID | Korean Name | Capabilities | Last Updated | Verification |\n|---|---|---|---|---|\n${skillRows}\n`),
+    '.leerness/templates/end-of-session-report.md': `# End of Session Report\n\n## Completed\n\n## In Progress\n\n## Incomplete\n\n## Planned\n\n## Waiting\n\n## On Hold\n\n## Blocked\n\n## Dropped\n\n## Verification\n\n## Recommended Direction\n\n## Next Exact Step\n`,
+    '.leerness/templates/decision.md': '# Decision\n\n## Decision\n\n## Reason\n\n## Alternatives\n\n## Impact\n',
+    '.leerness/templates/task-row.md': `# Task Row Template\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n| T-XXXX | requested | <request> | <evidence-id or empty> | <next> | YYYY-MM-DD |\n`,
     '.claude/commands/handoff.md': `# /handoff\n\n현재 프로젝트의 컨텍스트를 적재합니다.\n\n\`\`\`\n!leerness handoff .\n\`\`\`\n`,
     '.claude/commands/session-close.md': `# /session-close\n\n세션 종료 보고를 자동 생성하고 session-handoff.md를 갱신합니다.\n\n\`\`\`\n!leerness session close .\n\`\`\`\n`,
     '.claude/commands/audit.md': `# /audit\n\n계획-진행 정렬, 디자인/재사용 일관성, 시크릿/인코딩을 일괄 점검합니다.\n\n\`\`\`\n!leerness audit .\n!leerness scan secrets .\n!leerness encoding check .\n\`\`\`\n`,
@@ -1273,66 +1296,66 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
   // 1.36.59 (외부감사 F-05 시리즈 1회차): en 프로젝트에서 에이전트가 "지시"로 읽는 최상위 5종은 완전 영어 —
   //   실측: en init 산출물 61개 중 53개 한글 잔존, 그중 지시 레이어가 최고 영향. 나머지 표면은 후속 회차.
   if (lang === 'en') {
-    _files['AGENTS.md'] = `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ First action every session\n**Read \`.harness/session-workflow.md\` first and follow its 6-step workflow**: analyze request → plan → distribute → sub-agent work → integrated verification → close. Keep the same flow regardless of round length/complexity — that is what prevents drift.\n\n## Static vs dynamic — the leerness boundary\n**AGENTS.md = static project instructions** (coding rules, test commands, prohibitions, deploy steps — rarely change).\n**leerness = dynamic work state, memory, verification, handoff** (current goal, changed files, failed attempts, verification results, next-agent handoff — change every task).\n- Put rules/commands/prohibitions here in AGENTS.md.\n- Dynamic state (decisions/lessons/plan/progress/verification/handoff) is recorded by leerness in the **default workspace \`.harness/\`** (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md) via \`leerness handoff\`, \`decision add\`, \`lesson save\`, etc.\n- (Optional) the JSON state substrate of \`leerness state show|start|record|verify|handoff\` (or MCP \`leerness_state_*\`) lives in \`.leerness/\` — the cross-agent handoff standard, separate from the main workspace.\n- leerness **complements** AGENTS.md, it does not replace it. Static instructions here, dynamic state in leerness.\n\n## Mandatory read order (session start)\n1. **.harness/session-workflow.md** (6-step workflow — highest priority)\n2. .harness/context-routing.md\n3. .harness/session-handoff.md\n4. .harness/current-state.md\n5. .harness/plan.md\n6. .harness/progress-tracker.md\n7. .harness/guideline.md\n8. .harness/protected-files.md\n9. .harness/writeback-policy.md\n10. .harness/anti-lazy-work-policy.md\n11. **.harness/rules.md** (user-defined standing rules — follow every session)\n\n## Required behavior\n- Run \`leerness handoff .\` at session start to load context (handoff prints active rules automatically).\n- **Ask-on-ambiguity duty**: if the user's request has parts open to interpretation (vague qualifiers, pronouns, multiple alternatives, unclear scope), **ask the user instead of guessing**. Ask the questions produced by \`leerness clarify "<request>"\` verbatim. Even without detected signals, when your own judgment is split, asking wins.\n- **Preview-approval duty (new features)**: when the user asks for a new feature, **do not write code first**. ① Register a preview with \`leerness preview add "<feature>" --design "<design/UX>" --features "<list>"\`, ② present it and ask for approval or revisions, ③ on approval run \`leerness preview approve <P-ID>\`; on revision \`leerness preview revise <P-ID> --note "..."\` and re-present. **Never write the feature's code before approve.**\n- **Design-mockup duty (web pages / design work)**: for a new page, redesign, or any visual design request, do not stop at a text description. Run \`leerness preview mockup <P-ID>\` to generate a self-contained HTML mockup scaffold (\`.harness/previews/<P-ID>-mockup.html\`), **replace the placeholder with a real layout draft (HTML/CSS, no external resources)**, show it to the user in a browser, and ask for revisions or approval. On revision requests, edit the mockup and re-present. **Never write the actual page/feature code before approve.** (If you already built a mockup, attach it with \`preview add ... --mockup <file>\`.)\n- Classify work with \`leerness route <task-type>\` (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- Never delete protected files/managed sections — merge, archive, or mark deprecated instead.\n- After meaningful changes update progress-tracker, current-state, task-log, session-handoff.\n- Before claiming completion, self-verify with \`leerness check .\` or \`leerness lazy detect .\` and answer the \`leerness lens\` self-questions per domain (code: "would a senior developer find this needlessly complex?" / design: "would a senior designer and an ordinary user find this pretty and intuitive?").\n- Before changes run the guards: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- Before duplicating a capability check design-system.md, consistency-policy.md, reuse-map.md.\n- Close every session with \`leerness session close .\` — 9 categories (done/in-progress/incomplete/planned/waiting/on-hold/blocked/dropped/verification) + active-rule verification.\n- Updates: \`leerness update --check\` (detect) → \`leerness update --yes\` (auto-migrate).\n\n## Natural-language retro/insights/brainstorm\n| User phrase | Run immediately |\n|---|---|\n| "retrospective / look back / wrap up" | \`leerness retro\` |\n| "retro for last N days" | \`leerness retro --days N\` |\n| "stats / cumulative metrics / insights" | \`leerness insights\` |\n| "brainstorm about X / materials on X / review before starting X" | \`leerness brainstorm "X"\` |\n\nsession close prints a one-line summary automatically every time and runs a deep retrospective every 5 sessions; call the commands immediately when the user asks explicitly.\n\n## Natural-language standing rules\nWhen the user states a standing rule ("do Y every X"), register it immediately:\n\n| User phrase | Run immediately |\n|---|---|\n| "bump the version every update" | \`leerness rule add "bump version (patch)" --trigger every-update\` |\n| "add patch notes every commit" | \`leerness rule add "add patch notes" --trigger every-commit\` |\n| "deploy at session close" | \`leerness rule add "deploy (release publish)" --trigger session-close\` |\n| "pause/stop rule X" | \`leerness rule pause <ID>\` (find the ID with \`rule list\`) |\n| "remove rule X" | \`leerness rule remove <ID>\` |\n| "stop all rules" | \`leerness rule stop\` |\n| "resume rules" | \`leerness rule resume-all\` or \`leerness rule resume <ID>\` |\n\nAfter registering, report the result (ID + trigger + description) and apply it every session until the user explicitly says stop/remove.\n\n## Automatic rule verification\n- **every-update / version rules**: checks package.json version change.\n- **CHANGELOG / patch-note rules**: checks CHANGELOG.md mtime.\n- **test / verify rules**: checks today's verify traces in review-evidence.md.\n- **deploy / publish / push rules**: not auto-verifiable → guides \`leerness release publish\`.\n\nAutomate verifiable rules with \`leerness release bump\`, \`leerness release note "..."\`, and \`leerness release publish\`.\n`;
-    _files['CLAUDE.md'] = `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ First action every session**: follow the 6-step workflow in \`.harness/session-workflow.md\` (analyze → plan → distribute → sub-agent → verify → close). On drift critical, recover with \`leerness drift check --auto-fix\`.\n\n**Before claiming done**: \`leerness verify-claim <T-ID>\` — never say "done" without evidence.\n\nProtected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.\n\n## Natural-language standing rules\nWhen the user states "do Y every X", immediately run \`leerness rule add "Y" --trigger every-X\`. Registered rules are printed by every \`handoff\` and verified by \`session close\`. Only \`rule pause/remove\` when the user explicitly says stop/remove.\n\nSee the "Natural-language standing rules" table in AGENTS.md for the full mapping.\n`;
+    _files['AGENTS.md'] = `${MARK}\n# Leerness Agent Instructions\n\n## ⭐ First action every session\n**Read \`.leerness/session-workflow.md\` first and follow its 6-step workflow**: analyze request → plan → distribute → sub-agent work → integrated verification → close. Keep the same flow regardless of round length/complexity — that is what prevents drift.\n\n## Static vs dynamic — the leerness boundary\n**AGENTS.md = static project instructions** (coding rules, test commands, prohibitions, deploy steps — rarely change).\n**leerness = dynamic work state, memory, verification, handoff** (current goal, changed files, failed attempts, verification results, next-agent handoff — change every task).\n- Put rules/commands/prohibitions here in AGENTS.md.\n- Dynamic state (decisions/lessons/plan/progress/verification/handoff) is recorded by leerness in the **default workspace \`.leerness/\`** (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md) via \`leerness handoff\`, \`decision add\`, \`lesson save\`, etc.\n- (Optional) the JSON state substrate of \`leerness state show|start|record|verify|handoff\` (or MCP \`leerness_state_*\`) lives in \`.leerness/\` — the cross-agent handoff standard, separate from the main workspace.\n- leerness **complements** AGENTS.md, it does not replace it. Static instructions here, dynamic state in leerness.\n\n## Mandatory read order (session start)\n1. **.leerness/session-workflow.md** (6-step workflow — highest priority)\n2. .leerness/context-routing.md\n3. .leerness/session-handoff.md\n4. .leerness/current-state.md\n5. .leerness/plan.md\n6. .leerness/progress-tracker.md\n7. .leerness/guideline.md\n8. .leerness/protected-files.md\n9. .leerness/writeback-policy.md\n10. .leerness/anti-lazy-work-policy.md\n11. **.leerness/rules.md** (user-defined standing rules — follow every session)\n\n## Required behavior\n- Run \`leerness handoff .\` at session start to load context (handoff prints active rules automatically).\n- **Ask-on-ambiguity duty**: if the user's request has parts open to interpretation (vague qualifiers, pronouns, multiple alternatives, unclear scope), **ask the user instead of guessing**. Ask the questions produced by \`leerness clarify "<request>"\` verbatim. Even without detected signals, when your own judgment is split, asking wins.\n- **Preview-approval duty (new features)**: when the user asks for a new feature, **do not write code first**. ① Register a preview with \`leerness preview add "<feature>" --design "<design/UX>" --features "<list>"\`, ② present it and ask for approval or revisions, ③ on approval run \`leerness preview approve <P-ID>\`; on revision \`leerness preview revise <P-ID> --note "..."\` and re-present. **Never write the feature's code before approve.**\n- **Design-mockup duty (web pages / design work)**: for a new page, redesign, or any visual design request, do not stop at a text description. Run \`leerness preview mockup <P-ID>\` to generate a self-contained HTML mockup scaffold (\`.leerness/previews/<P-ID>-mockup.html\`), **replace the placeholder with a real layout draft (HTML/CSS, no external resources)**, show it to the user in a browser, and ask for revisions or approval. On revision requests, edit the mockup and re-present. **Never write the actual page/feature code before approve.** (If you already built a mockup, attach it with \`preview add ... --mockup <file>\`.)\n- Classify work with \`leerness route <task-type>\` (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).\n- Never delete protected files/managed sections — merge, archive, or mark deprecated instead.\n- After meaningful changes update progress-tracker, current-state, task-log, session-handoff.\n- Before claiming completion, self-verify with \`leerness check .\` or \`leerness lazy detect .\` and answer the \`leerness lens\` self-questions per domain (code: "would a senior developer find this needlessly complex?" / design: "would a senior designer and an ordinary user find this pretty and intuitive?").\n- Before changes run the guards: \`leerness scan secrets .\`, \`leerness encoding check .\`.\n- Before duplicating a capability check design-system.md, consistency-policy.md, reuse-map.md.\n- Close every session with \`leerness session close .\` — 9 categories (done/in-progress/incomplete/planned/waiting/on-hold/blocked/dropped/verification) + active-rule verification.\n- Updates: \`leerness update --check\` (detect) → \`leerness update --yes\` (auto-migrate).\n\n## Natural-language retro/insights/brainstorm\n| User phrase | Run immediately |\n|---|---|\n| "retrospective / look back / wrap up" | \`leerness retro\` |\n| "retro for last N days" | \`leerness retro --days N\` |\n| "stats / cumulative metrics / insights" | \`leerness insights\` |\n| "brainstorm about X / materials on X / review before starting X" | \`leerness brainstorm "X"\` |\n\nsession close prints a one-line summary automatically every time and runs a deep retrospective every 5 sessions; call the commands immediately when the user asks explicitly.\n\n## Natural-language standing rules\nWhen the user states a standing rule ("do Y every X"), register it immediately:\n\n| User phrase | Run immediately |\n|---|---|\n| "bump the version every update" | \`leerness rule add "bump version (patch)" --trigger every-update\` |\n| "add patch notes every commit" | \`leerness rule add "add patch notes" --trigger every-commit\` |\n| "deploy at session close" | \`leerness rule add "deploy (release publish)" --trigger session-close\` |\n| "pause/stop rule X" | \`leerness rule pause <ID>\` (find the ID with \`rule list\`) |\n| "remove rule X" | \`leerness rule remove <ID>\` |\n| "stop all rules" | \`leerness rule stop\` |\n| "resume rules" | \`leerness rule resume-all\` or \`leerness rule resume <ID>\` |\n\nAfter registering, report the result (ID + trigger + description) and apply it every session until the user explicitly says stop/remove.\n\n## Automatic rule verification\n- **every-update / version rules**: checks package.json version change.\n- **CHANGELOG / patch-note rules**: checks CHANGELOG.md mtime.\n- **test / verify rules**: checks today's verify traces in review-evidence.md.\n- **deploy / publish / push rules**: not auto-verifiable → guides \`leerness release publish\`.\n\nAutomate verifiable rules with \`leerness release bump\`, \`leerness release note "..."\`, and \`leerness release publish\`.\n`;
+    _files['CLAUDE.md'] = `${MARK}\n# Claude Code Instructions\n\nFollow AGENTS.md. Always run \`leerness handoff .\` at the start and \`leerness session close .\` before ending a session.\n\n**⭐ First action every session**: follow the 6-step workflow in \`.leerness/session-workflow.md\` (analyze → plan → distribute → sub-agent → verify → close). On drift critical, recover with \`leerness drift check --auto-fix\`.\n\n**Before claiming done**: \`leerness verify-claim <T-ID>\` — never say "done" without evidence.\n\nProtected files must not be deleted. Read .leerness/anti-lazy-work-policy.md before claiming completion.\n\n## Natural-language standing rules\nWhen the user states "do Y every X", immediately run \`leerness rule add "Y" --trigger every-X\`. Registered rules are printed by every \`handoff\` and verified by \`session close\`. Only \`rule pause/remove\` when the user explicitly says stop/remove.\n\nSee the "Natural-language standing rules" table in AGENTS.md for the full mapping.\n`;
     // 1.36.62 (F-05 4회차): commands/AX/잔여 참조층 en 완역
-    _files['.harness/test-evidence-policy.md'] = fm('test-evidence-policy', ['recording verification results'], ['verification format changes'], `# Test Evidence Policy\n\nEvery verification is appended to \`.harness/review-evidence.md\`.\n\n## Format\n\`\`\`\n## YYYY-MM-DD HH:MM\nTask: T-XXXX\nCommand: <command>\nExit: <code>\nNote: <key result summary>\nArtifacts: <screenshot/log paths>\n\`\`\`\n`, 'en');
-    _files['.harness/review-evidence.md'] = fm('review-evidence', ['progress reports', 'release review'], ['verification results recorded'], `# Review Evidence\n\nVerification command/result history. Append-only.\n`, 'en');
-    _files['.harness/AX_PLAN_GUIDE.md'] = fm('ax-plan-guide', ['planning/plan changes', 'new project'], ['plan guide changes'], `# AX Plan Guide\n\n1. Check whether the user's request is within the current plan.md scope.\n2. If it is new scope, add it to both plan.md (milestone) and progress-tracker.md (T-id).\n3. When the user drops scope, mark it dropped instead of deleting.\n4. For new projects, fill plan.md/project-brief.md before coding.\n`, 'en');
-    _files['.harness/AX_MIGRATION_GUIDE.md'] = fm('ax-migration-guide', ['before migration'], ['migration policy changes'], `# AX Migration Guide\n\n- Back up before changes (\`.harness/archive/\`).\n- Preserve existing project memory (preserve-by-default).\n- Merge .env.example/.gitignore line by line.\n- Never delete protected files.\n- Migration report: \`.harness/migration-report.md\`.\n- Automatic: \`leerness update --yes\` performs backup, merge, and verification in one step.\n`, 'en');
-    _files['.harness/AX_NEW_PROJECT_GUIDE.md'] = fm('ax-new-project-guide', ['new project detected'], ['fresh-install policy changes'], `# AX New Project Guide\n\nBefore coding, ask or infer the project goal, users, scope, out-of-scope, stack, deployment target, and milestones. Then fill plan.md and project-brief.md.\n`, 'en');
-    _files['.harness/AX_SKILL_LIBRARY_GUIDE.md'] = fm('ax-skill-library-guide', ['skill learning/verification/upload'], ['skill policy changes'], `# AX Skill Library Guide\n\nValidated skills require metadata, sensitive data scan, AI verification, dry-run publish, and explicit execute approval.\n`, 'en');
-    _files['.harness/skill-index.md'] = fm('skill-index', ['choosing skills per task'], ['skills added/removed'], `# Skill Index\n\n| ID | Korean Name | Capabilities | Last Updated | Verification |\n|---|---|---|---|---|\n${skillRows}\n`, 'en');
-    _files['.harness/context-routing.md'] = fm('context-routing', ['before all work', 'judging task type'], ['task types added', 'reference files change'], `# Context Routing\n\n${Object.entries(routes).map(([k, v]) => `## ${k}\nRead:\n${v.read.map(x => '- ' + x).join('\n')}\n\nUpdate:\n${v.update.map(x => '- ' + x).join('\n')}`).join('\n\n')}\n`, 'en');
-    _files['.harness/feature-graph.md'] = fm('feature-graph', ['before adding features', 'before data-format changes', 'before external-API mapping work'], ['feature register / link / impact recall'], `# Feature Graph\n\n> **Purpose**: track each feature's causal relations so impact scope is known before writing code.\n> Before new features, format changes, or external-API mapping, run \`leerness feature impact <id>\`.\n> handoff auto-matches the current task keywords and recalls affected features.\n\n## How to use\n\n\`\`\`bash\nleerness feature add "User Auth"                           # F-0001 auto-assigned\nleerness feature link F-0002 --depends-on F-0001           # dependency\nleerness feature link F-0001 --affects F-0002,F-0005        # impact (multiple)\nleerness feature link F-0001 --co-changes-with F-0011       # must change together\nleerness feature impact F-0001                              # full transitive impact\nleerness feature list --json                                # graph JSON\nleerness feature show F-0001                                # single detail\n\`\`\`\n\n## Nodes\n\n`, 'en');
+    _files['.leerness/test-evidence-policy.md'] = fm('test-evidence-policy', ['recording verification results'], ['verification format changes'], `# Test Evidence Policy\n\nEvery verification is appended to \`.leerness/review-evidence.md\`.\n\n## Format\n\`\`\`\n## YYYY-MM-DD HH:MM\nTask: T-XXXX\nCommand: <command>\nExit: <code>\nNote: <key result summary>\nArtifacts: <screenshot/log paths>\n\`\`\`\n`, 'en');
+    _files['.leerness/review-evidence.md'] = fm('review-evidence', ['progress reports', 'release review'], ['verification results recorded'], `# Review Evidence\n\nVerification command/result history. Append-only.\n`, 'en');
+    _files['.leerness/AX_PLAN_GUIDE.md'] = fm('ax-plan-guide', ['planning/plan changes', 'new project'], ['plan guide changes'], `# AX Plan Guide\n\n1. Check whether the user's request is within the current plan.md scope.\n2. If it is new scope, add it to both plan.md (milestone) and progress-tracker.md (T-id).\n3. When the user drops scope, mark it dropped instead of deleting.\n4. For new projects, fill plan.md/project-brief.md before coding.\n`, 'en');
+    _files['.leerness/AX_MIGRATION_GUIDE.md'] = fm('ax-migration-guide', ['before migration'], ['migration policy changes'], `# AX Migration Guide\n\n- Back up before changes (\`.leerness/archive/\`).\n- Preserve existing project memory (preserve-by-default).\n- Merge .env.example/.gitignore line by line.\n- Never delete protected files.\n- Migration report: \`.leerness/migration-report.md\`.\n- Automatic: \`leerness update --yes\` performs backup, merge, and verification in one step.\n`, 'en');
+    _files['.leerness/AX_NEW_PROJECT_GUIDE.md'] = fm('ax-new-project-guide', ['new project detected'], ['fresh-install policy changes'], `# AX New Project Guide\n\nBefore coding, ask or infer the project goal, users, scope, out-of-scope, stack, deployment target, and milestones. Then fill plan.md and project-brief.md.\n`, 'en');
+    _files['.leerness/AX_SKILL_LIBRARY_GUIDE.md'] = fm('ax-skill-library-guide', ['skill learning/verification/upload'], ['skill policy changes'], `# AX Skill Library Guide\n\nValidated skills require metadata, sensitive data scan, AI verification, dry-run publish, and explicit execute approval.\n`, 'en');
+    _files['.leerness/skill-index.md'] = fm('skill-index', ['choosing skills per task'], ['skills added/removed'], `# Skill Index\n\n| ID | Korean Name | Capabilities | Last Updated | Verification |\n|---|---|---|---|---|\n${skillRows}\n`, 'en');
+    _files['.leerness/context-routing.md'] = fm('context-routing', ['before all work', 'judging task type'], ['task types added', 'reference files change'], `# Context Routing\n\n${Object.entries(routes).map(([k, v]) => `## ${k}\nRead:\n${v.read.map(x => '- ' + x).join('\n')}\n\nUpdate:\n${v.update.map(x => '- ' + x).join('\n')}`).join('\n\n')}\n`, 'en');
+    _files['.leerness/feature-graph.md'] = fm('feature-graph', ['before adding features', 'before data-format changes', 'before external-API mapping work'], ['feature register / link / impact recall'], `# Feature Graph\n\n> **Purpose**: track each feature's causal relations so impact scope is known before writing code.\n> Before new features, format changes, or external-API mapping, run \`leerness feature impact <id>\`.\n> handoff auto-matches the current task keywords and recalls affected features.\n\n## How to use\n\n\`\`\`bash\nleerness feature add "User Auth"                           # F-0001 auto-assigned\nleerness feature link F-0002 --depends-on F-0001           # dependency\nleerness feature link F-0001 --affects F-0002,F-0005        # impact (multiple)\nleerness feature link F-0001 --co-changes-with F-0011       # must change together\nleerness feature impact F-0001                              # full transitive impact\nleerness feature list --json                                # graph JSON\nleerness feature show F-0001                                # single detail\n\`\`\`\n\n## Nodes\n\n`, 'en');
     _files['.claude/commands/handoff.md'] = `# /handoff\n\nLoad the current project's context.\n\n\`\`\`\n!leerness handoff .\n\`\`\`\n`;
     _files['.claude/commands/session-close.md'] = `# /session-close\n\nGenerate the end-of-session report and update session-handoff.md.\n\n\`\`\`\n!leerness session close .\n\`\`\`\n`;
     _files['.claude/commands/audit.md'] = `# /audit\n\nCheck plan-progress alignment, design/reuse consistency, secrets, and encoding in one pass.\n\n\`\`\`\n!leerness audit .\n!leerness scan secrets .\n!leerness encoding check .\n\`\`\`\n`;
     _files['.claude/commands/lazy-detect.md'] = `# /lazy-detect\n\nRun the lazy-work (false-done) automatic evaluation.\n\n\`\`\`\n!leerness lazy detect .\n\`\`\`\n`;
     _files['.claude/commands/update.md'] = `# /update\n\nRun the leerness auto-update (detect → migrate → verify).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\nCheck only:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`;
     _files['.claude/skills/leerness/SKILL.md'] = `---\nname: leerness\ndescription: Leerness harness commands - handoff, audit, scan secrets, encoding check, lazy detect, session close, update. Use when the user asks to load project context, verify work quality, scan secrets, check encoding, or end a session.\n---\n\n# leerness skill\n\n## When to use\n- When the user asks to load project context\n- When self-verification is requested before claiming completion\n- When ending a session or asked for a handoff\n- When secret/encoding checks are requested\n- When applying a new leerness version\n\n## Commands\n\n\`\`\`bash\nleerness handoff .             # load context\nleerness check .               # pre-action check\nleerness audit .               # consistency/plan-alignment audit\nleerness scan secrets .        # secret pattern scan\nleerness encoding check .      # UTF-8/BOM/NUL\nleerness lazy detect .         # lazy-work evaluation\nleerness memory search "key"   # search decisions/history\nleerness session close .       # close report + auto handoff\nleerness update --yes          # auto-update\n\`\`\`\n`;
-    // 1.36.61 (F-05 3회차): .harness 정책·시드 문서군 en 완역 — 지시 5종(1.36.59)에 이어 read-order 가 가리키는 참조층.
-    _files['.harness/project-brief.md'] = fm('project-brief', ['confirming project purpose', 'judging new features', 'planning'], ['project purpose changes', 'users/scope change'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- Update this with the real purpose of the project.\n\n## Users\n-\n\n## Success Criteria\n-\n`, 'en');
-    _files['.harness/plan.md'] = fm('plan', ['before starting work', 'new request received', 'scope change', 'new project detected'], ['plan add/update/drop', 'milestone changes', 'goal changes'], `# Plan\n\n## Goal\n- Maintain the overall plan around the user's purpose.\n\n## Scope\n- Record what is in scope.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. Organize the project plan\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] Fill project-brief.md with the real project purpose\n- [ ] Fill context-map.md with the real file structure\n`, 'en');
-    _files['.harness/guideline.md'] = fm('guideline', ['checking quality bar before implementing', 'checking plan-execution criteria'], ['dev standards change', 'verification routine changes'], `# Guideline\n\n## Operating Principle\n- Work against the goal and scope in plan.md.\n- Judge done/not-done by request status in progress-tracker.md.\n- Never record progress percentages here — plan.md/progress-tracker.md are the single source.\n\n## Quality Gate\n- Check the relevant route before changes (\`leerness route <task-type>\`).\n- After changes run \`leerness verify\`, \`leerness audit\`, \`leerness check\`.\n- Before claiming completion run \`leerness lazy detect\`.\n- Close every session with \`leerness session close\`.\n`, 'en');
-    _files['.harness/plan-progress-boundary.md'] = fm('plan-progress-boundary', ['when plan and progress overlap', 'work-tracking structure changes'], ['role-separation criteria change'], `# Plan / Progress Boundary\n\n## plan.md\n- Overall goal, milestones, in/out of scope, plan-change history.\n\n## progress-tracker.md\n- Per-request status, evidence, next action.\n- ID rule: T-0001 monotonically increasing; IDs from plan add are unique across plan/progress.\n\n## guideline.md\n- The execution standards to follow while doing plan/progress work.\n`, 'en');
-    _files['.harness/current-state.md'] = fm('current-state', ['session start', 'taking over work'], ['current state changes', 'next work changes'], `# Current State\n\nUpdated: ${today()}\n\n## Now\n-\n\n## Next\n-\n\n## Blockers\n-\n`, 'en');
-    _files['.harness/writeback-policy.md'] = fm('writeback-policy', ['before finishing work', 'deciding what to update'], ['record targets change'], `# Writeback Policy\n\n- plan.md: user purpose, milestones, scope additions/exclusions\n- progress-tracker.md: per-request status and evidence (updated in place)\n- current-state.md: current state and next work\n- task-log.md: execution history (auto-appended)\n- session-handoff.md: next-session handoff (written by \`session close\`)\n- decisions.md: hard-to-reverse decisions\n- design-system.md: UI/UX/component standards\n- feature-contracts.md: input/output/state/error contracts\n- review-evidence.md: verification results (auto-accumulated)\n`, 'en');
-    _files['.harness/task-type-map.md'] = fm('task-type-map', ['classifying user requests'], ['task types added'], `# Task Type Map\n\n| User Request | Task Type | Route |\n|---|---|---|\n| plan this / draft a roadmap | planning | leerness route planning |\n| implement / build a feature | feature | leerness route feature |\n| fix a bug | bugfix | leerness route bugfix |\n| refactor / clean up | refactor | leerness route refactor |\n| research / compare | research | leerness route research |\n| unify design / consistency | consistency | leerness route consistency |\n| deploy / release | release | leerness route release |\n| migration | migration | leerness route migration |\n| session start / resume | session-start | leerness route session-start |\n| session end | session-close | leerness route session-close |\n`, 'en');
-    _files['.harness/protected-files.md'] = fm('protected-files', ['before deleting/cleaning/migrating files'], ['protected targets change'], `# Protected Files\n\nAI agents must not delete or reset these files without explicit user approval.\n\n- .harness/\n- .harness/skills/\n- .harness/library/\n- AGENTS.md\n- CLAUDE.md\n- .cursor/rules/leerness.mdc\n- .github/copilot-instructions.md\n- .claude/commands/\n- .claude/skills/\n- README.md Leerness managed section\n\nUse merge, archive, or deprecated markers instead of deletion.\n`, 'en');
-    _files['.harness/guardrails.md'] = fm('guardrails', ['before all work', 'before security/permissions/refactoring'], ['prohibition rules change'], `# Guardrails\n\n- Never store tokens/keys/passwords — record only environment-variable names.\n- No unrequested large refactors (user pre-approval when changing 5+ files).\n- Record the impact of API/DB/env-var changes in task-log.\n- Never delete Leerness protected files/managed sections.\n- Keep Korean text as UTF-8 without BOM.\n- Destructive Git operations (\`git reset --hard\`, \`git push --force\`, …) only after explicit user approval.\n`, 'en');
-    _files['.harness/consistency-policy.md'] = fm('consistency-policy', ['before duplicating UI/features', 'judging reuse'], ['consistency policy changes'], `# Consistency Policy\n\nBefore building something that does the same job, find and reuse/extend/connect the existing implementation.\n\n## Recursive Reuse Rule\n1. Find existing elements with the same capability.\n2. Check whether self-reference/base rules/recursive flow is needed.\n3. Reuse or extend the existing element.\n4. If you must build new, record why in reuse-map.md.\n\n## Audit Trigger\n\`leerness audit\` checks:\n- duplicate design-guide files\n- undefined design-system.md tokens\n- empty reuse-map.md with 3+ components/utils found\n- plan vs progress alignment\n`, 'en');
-    _files['.harness/testing-strategy.md'] = fm('testing-strategy', ['before verification', 'before release'], ['test strategy changes'], `# Testing Strategy\n\n- Typecheck (\`tsc --noEmit\` or equivalent)\n- Lint (\`npm run lint\` etc.)\n- Unit/Integration/E2E\n- Manual smoke test\n- Browser/UI smoke (on frontend changes)\n\n## Evidence Format\nEach completed task must reference an evidence ID stored in .harness/review-evidence.md.\n`, 'en');
-    _files['.harness/review-checklist.md'] = fm('review-checklist', ['before PR/review'], ['review criteria change'], `# Review Checklist\n\n- [ ] Aligned with the plan\n- [ ] progress-tracker updated\n- [ ] No protected files deleted\n- [ ] Design/feature reuse checked\n- [ ] No secrets in code (\`leerness scan secrets\`)\n- [ ] Korean encoding OK (\`leerness encoding check\`)\n- [ ] Lazy-work check passed (\`leerness lazy detect\`)\n`, 'en');
-    _files['.harness/release-checklist.md'] = fm('release-checklist', ['before deploy'], ['deploy conditions/env vars/rollback change'], `# Release Checklist\n\n- [ ] \`leerness verify .\`\n- [ ] \`leerness audit .\`\n- [ ] \`leerness scan secrets .\`\n- [ ] \`leerness encoding check .\`\n- [ ] project typecheck/lint/test\n- [ ] env vars (.env.example) synced\n- [ ] rollback path confirmed\n- [ ] CHANGELOG updated\n`, 'en');
-    _files['.harness/session-close-policy.md'] = fm('session-close-policy', ['before session end'], ['session-close format changes'], `# Session Close Policy\n\nEvery session must list:\n- Completed\n- In progress\n- Incomplete\n- Planned\n- Waiting\n- On hold\n- Blocked\n- Dropped\n- Verification (commands run, results)\n- Recommended next direction\n- Next exact step\n\n\`leerness session close\` extracts the 9 categories automatically and writes the handoff block for the next session into session-handoff.md.\n`, 'en');
-    _files['.harness/anti-lazy-work-policy.md'] = fm('anti-lazy-work-policy', ['before claiming completion'], ['lazy-work prevention criteria change'], `# Anti Lazy Work Policy\n\n## Rules\n1. **No completion without evidence**: claiming "done" requires command output/test results/screenshot paths in progress-tracker's evidence column.\n2. **No empty handoff**: if Completed/In Progress/Next Exact Step are all empty at session end, close is marked "insufficient".\n3. **Honest partial implementation**: if not fully implemented, set status \`incomplete\` and write one line in Next Exact Step describing what remains.\n4. **Verification records**: accumulate typecheck/lint/test results in review-evidence.md.\n5. **TODO tracking**: any new \`TODO\`/\`FIXME\`/\`XXX\` in code gets a same-ID row in progress-tracker.\n6. **Automatic false-done detection**: \`leerness lazy detect\` checks done rows without evidence, empty handoffs, untracked new TODOs, and missing test-run traces.\n7. **Quality-lens self-questions**: before claiming done, answer \`leerness lens\` per domain — code: "would a senior developer find this needlessly complex?" / design: "would a senior designer and an ordinary user find it pretty, comfortable, intuitive?". If you cannot answer "yes (pass)", it is not done. When changing one domain, re-check the causally linked domains (↔ in \`lens\` output).\n`, 'en');
-    _files['.harness/session-handoff.md'] = fm('session-handoff', ['session start', 'taking over next work'], ['session end'], `# Session Handoff\n\nLast generated: (auto)\n\n## Completed\n-\n\n## In Progress\n-\n\n## Incomplete / Waiting / On Hold / Blocked\n-\n\n## Dropped\n-\n\n## Verification\n-\n\n## Recommended Direction\n-\n\n## Next Exact Step\n-\n`, 'en');
-    _files['.harness/leerness-maintenance.md'] = fm('leerness-maintenance', ['work start', 'before migration/release'], ['version policy changes'], `# Leerness Maintenance\n\nAI agents should check:\n\n\`\`\`bash\nleerness --version\nleerness self check .\nleerness update --check       # auto-detect with 24h cache\nleerness update --yes         # auto-migrate when a new version is found\ncat .harness/HARNESS_VERSION\nnpm view leerness version\n\`\`\`\n`, 'en');
-    _files['.harness/language-policy.md'] = fm('language-policy', ['before writing documents'], ['language changes'], `# Language Policy\n\nSelected language: ${lang}\n\nAll Leerness notes, skill notes, session reports, and task lists default to the language above (except when the user explicitly requests another language).\n`, 'en');
-    _files['.harness/secret-policy.md'] = fm('secret-policy', ['before skill/deploy/config changes'], ['sensitive-data policy changes'], `# Secret Policy\n\n## Rules\n- Record only environment-variable names; move values to .env.local, CI secrets, or a cloud secret manager.\n- Never leave tokens/passwords/cookies/IDs/card numbers in plaintext in code/docs/logs.\n- Run \`leerness scan secrets .\` before changes.\n\n## Patterns scanned\n- AWS Access Key (\`AKIA[0-9A-Z]{16}\`)\n- GitHub PAT (\`ghp_[A-Za-z0-9]{36}\`)\n- OpenAI key (\`sk-[A-Za-z0-9]{20,}\`)\n- Anthropic key (\`sk-ant-[A-Za-z0-9-]{20,}\`)\n- Google API key, Slack token, generic private key, hardcoded password\n`, 'en');
-    _files['.harness/encoding-policy.md'] = fm('encoding-policy', ['before creating files', 'garbled-Korean reports', 'before deploy'], ['encoding policy changes'], `# Encoding Policy\n\n## Rules\n- All text files are **UTF-8 without BOM**.\n- Windows .bat files start with \`chcp 65001 >nul\`.\n- PowerShell .ps1 files start with \`[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\`.\n- Python files may need \`# -*- coding: utf-8 -*-\` (for Python 2 compat).\n- LF line endings recommended (unify via .gitattributes on Windows too).\n\n## Auto check\n\`leerness encoding check\` verifies BOM, NUL, chcp 65001 in .bat, and Korean round-trip.\n`, 'en');
-    _files['.harness/architecture.md'] = fm('architecture', ['feature work', 'refactoring', 'migration'], ['structure changes'], `# Architecture\n\n## Overview\n- Record the real structure.\n\n## Data Flow\n-\n\n## External Dependencies\n-\n`, 'en');
-    _files['.harness/context-map.md'] = fm('context-map', ['exploring related files', 'before implementing features'], ['file structure changes'], `# Context Map\n\n| Area | Files | Notes |\n|---|---|---|\n| App | src/** | update with real paths |\n| Tests | tests/** | verification paths |\n`, 'en');
-    _files['.harness/decisions.md'] = fm('decisions', ['checking design decisions'], ['important decisions made'], `# Decisions\n\n## Template (example — add real decisions below, outside the code block)\n\n\`\`\`md\n### ${today()} — Decision title\n- Decision:\n- Reason:\n- Alternatives:\n- Impact:\n\`\`\`\n`, 'en');
-    _files['.harness/task-log.md'] = fm('task-log', ['checking work history'], ['after every meaningful task'], `# Task Log\n\n## ${today()}\n- Leerness v${VERSION} initialized.\n`, 'en');
-    _files['.harness/design-system.md'] = fm('design-system', ['UI changes', 'adding components', 'merging design guides'], ['design standards change', 'reusable patterns found'], `# Design System\n\n## Canonical File\nThis file is the canonical design guide (over designguide.md, design-guide.md, etc.).\n\n## Tokens\n| Token | Value | Notes |\n|---|---|---|\n| color.primary | (update with real value) | |\n| color.surface | | |\n| spacing.unit | | |\n| typography.body | | |\n\n## Reusable Patterns\n| Pattern | Where | Reuse Rule |\n|---|---|---|\n`, 'en');
-    _files['.harness/reuse-map.md'] = fm('reuse-map', ['before creating new components/APIs/helpers', 'duplicate capability detected'], ['reusable elements added'], `# Reuse Map\n\n| Capability | Existing Element | Reuse Method | Notes |\n|---|---|---|---|\n`, 'en');
-    _files['.harness/feature-contracts.md'] = fm('feature-contracts', ['before implementing/changing features'], ['feature IO/state/error changes'], `# Feature Contracts\n\n## Template\n- Feature:\n- Input:\n- Output:\n- States:\n- Errors:\n- Related files:\n- Test evidence ID:\n`, 'en');
-    _files['.cursor/rules/leerness.mdc'] = `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .harness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`;
-    _files['.github/copilot-instructions.md'] = `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .harness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`;
-    _files['.harness/session-workflow.md'] = fm('session-workflow', ['session start', 'new user request arrives', 'before distributing complex work'], ['workflow step changes'], `# Session Workflow — 6 steps of AI harness engineering\n\n> **At the start of every session the main agent reads this document first and follows the 6 steps as written.**\n> Same flow regardless of round length/complexity — that is what prevents drift.\n\n## Step 1. Analyze the request + check the environment\n\`\`\`bash\nleerness handoff .            # load context + automatic drift warning\nleerness drift check .        # signals + 4-level verdict\n\`\`\`\n- Decompose the request (5W1H). If ambiguous, ask clarifying questions (except autonomous mode).\n- On drift critical, run \`leerness session close .\` or \`drift check --auto-fix\` first.\n\n## Step 2. Plan\n- 3+ steps → use TodoWrite or \`leerness plan add\`.\n- New capability → search existing assets first via \`leerness reuse-map\` / \`reuse find <query>\`.\n- Multiple modules → define an integration spec up front (e.g. TICK_SPEC.md).\n\n## Step 3. Distribute — sub-agent mapping\n\`\`\`bash\nleerness agents list                  # ready CLIs\nleerness agents quota                 # limits\nleerness agents dispatch "<task>" --to <id>\n\`\`\`\n- Best sub-agent by task type: text/translation/analysis → claude · deep code reasoning → codex · direct file edits → agy --yolo · security review → \`leerness review --persona security\`.\n- **Conflict-prevention rules (mandatory)**: give each sub-agent *the exact files only it may modify*; require mtime-verification reports (concurrent writes risk last-writer-wins); verify against the spec afterwards with \`leerness contract verify\`.\n\n## Step 4. Sub-agent work + individual self-verification\n- Each sub-agent reports only after passing its own module tests.\n- Report format: line counts, tests N/N PASS, issues found, mtime verification.\n\n## Step 5. Integrated verification\n\`\`\`bash\nleerness contract verify SPEC.md src/<mod>.js\nleerness verify-claim T-XXX --run-tests --strict-claims\nleerness review <file> --persona security,performance,ux\n\`\`\`\n- The main agent writes and runs its own integration scenario (independent verification).\n- Cross-check that sub-agent verification and main verification *agree*.\n\n## Step 6. Close + handoff + next-round suggestion\n\`\`\`bash\nleerness session close .             # --suggest on by default\nleerness session close . --no-suggest\n\n# or separately:\nleerness skill suggest .\nleerness drift check .\nleerness audit . --fix\n\`\`\`\n\n## 🧠 Memory CRUD Quick Reference\n\n| Surface | CREATE | READ | DELETE | RESTORE |\n|---|---|---|---|---|\n| **tasks** | task add | task list --json | task drop | task update |\n| **decisions** | decision add | decision list --json | decision drop | memory restore decisions |\n| **lessons** | lesson save | lesson list [--tag] | lesson drop | memory restore lessons |\n| **plan** | plan add | plan list --json | plan remove | memory restore plan |\n| **rules** | rule add | rule list --json | rule remove | (rule pause/resume) |\n\n\`\`\`bash\nleerness memory status [--json]\nleerness memory archive list [--surface s]\nleerness memory restore <surface> <target>\n\`\`\`\n\n**Recovering a wrongly saved item**:\n1. \`memory archive list\` — list restore candidates\n2. \`memory restore decisions "PostgreSQL"\` — archive → active\n3. handoff automatically notes archive activity within 24h every session\n\n## Auto-recovery & security\n- A skipped session close triggers drift critical at the next session start — recover with \`drift check --auto-fix\` (runs session close automatically on critical).\n- handoff auto-recalls past lessons (by current task keywords) and auto-suggests installed skills.\n- handoff prints a 1–2 line security summary (.env ↔ .env.example sync + .gitignore secret gaps); a missing .env in .gitignore is 🚨 CRITICAL — \`LEERNESS_AUTO_SECURITY_FIX=1\` runs \`audit --fix\` automatically.\n- \`leerness health\` gives a one-line combined check (drift + security + skills + usage + tasks).\n\n---\n\n## Quick checklist (before the session ends)\n- [ ] This round's tasks are registered in plan/progress-tracker (or task sync)\n- [ ] Every done item has evidence attached (verify-claim PASS)\n- [ ] contract verify PASS when sub-agents were used\n- [ ] drift score ≤ 30 — \`leerness drift check\`\n- [ ] session close was run\n- [ ] \`leerness health\` overall check\n- [ ] If .env is used: .gitignore secret patterns OK + .env.example synced\n- [ ] On security critical: \`LEERNESS_AUTO_SECURITY_FIX=1\` or \`audit --fix\`\n\n## Anti-patterns (drift signals)\n- ⚠ "work is done, just report and stop" → missed session close → drift critical next session\n- ⚠ "only TodoWrite updated, leerness unused" → \`task sync --from\` or \`task add\` is mandatory\n- ⚠ distributing to sub-agents without explicit file paths → concurrent-write conflicts\n- ⚠ self-reported "tests ran, PASS" only → verify-claim --run-tests not executed\n- ⚠ skipping contract verify → spec-mismatch bugs reach the user\n`, 'en');
+    // 1.36.61 (F-05 3회차): .leerness 정책·시드 문서군 en 완역 — 지시 5종(1.36.59)에 이어 read-order 가 가리키는 참조층.
+    _files['.leerness/project-brief.md'] = fm('project-brief', ['confirming project purpose', 'judging new features', 'planning'], ['project purpose changes', 'users/scope change'], `# Project Brief\n\n## Project\n${project}\n\n## Purpose\n- Update this with the real purpose of the project.\n\n## Users\n-\n\n## Success Criteria\n-\n`, 'en');
+    _files['.leerness/plan.md'] = fm('plan', ['before starting work', 'new request received', 'scope change', 'new project detected'], ['plan add/update/drop', 'milestone changes', 'goal changes'], `# Plan\n\n## Goal\n- Maintain the overall plan around the user's purpose.\n\n## Scope\n- Record what is in scope.\n\n## Out of Scope / Dropped\n| ID | Item | Reason | Date |\n|---|---|---|---|\n\n## Milestones\n\n### M-0001. Organize the project plan\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] Fill project-brief.md with the real project purpose\n- [ ] Fill context-map.md with the real file structure\n`, 'en');
+    _files['.leerness/guideline.md'] = fm('guideline', ['checking quality bar before implementing', 'checking plan-execution criteria'], ['dev standards change', 'verification routine changes'], `# Guideline\n\n## Operating Principle\n- Work against the goal and scope in plan.md.\n- Judge done/not-done by request status in progress-tracker.md.\n- Never record progress percentages here — plan.md/progress-tracker.md are the single source.\n\n## Quality Gate\n- Check the relevant route before changes (\`leerness route <task-type>\`).\n- After changes run \`leerness verify\`, \`leerness audit\`, \`leerness check\`.\n- Before claiming completion run \`leerness lazy detect\`.\n- Close every session with \`leerness session close\`.\n`, 'en');
+    _files['.leerness/plan-progress-boundary.md'] = fm('plan-progress-boundary', ['when plan and progress overlap', 'work-tracking structure changes'], ['role-separation criteria change'], `# Plan / Progress Boundary\n\n## plan.md\n- Overall goal, milestones, in/out of scope, plan-change history.\n\n## progress-tracker.md\n- Per-request status, evidence, next action.\n- ID rule: T-0001 monotonically increasing; IDs from plan add are unique across plan/progress.\n\n## guideline.md\n- The execution standards to follow while doing plan/progress work.\n`, 'en');
+    _files['.leerness/current-state.md'] = fm('current-state', ['session start', 'taking over work'], ['current state changes', 'next work changes'], `# Current State\n\nUpdated: ${today()}\n\n## Now\n-\n\n## Next\n-\n\n## Blockers\n-\n`, 'en');
+    _files['.leerness/writeback-policy.md'] = fm('writeback-policy', ['before finishing work', 'deciding what to update'], ['record targets change'], `# Writeback Policy\n\n- plan.md: user purpose, milestones, scope additions/exclusions\n- progress-tracker.md: per-request status and evidence (updated in place)\n- current-state.md: current state and next work\n- task-log.md: execution history (auto-appended)\n- session-handoff.md: next-session handoff (written by \`session close\`)\n- decisions.md: hard-to-reverse decisions\n- design-system.md: UI/UX/component standards\n- feature-contracts.md: input/output/state/error contracts\n- review-evidence.md: verification results (auto-accumulated)\n`, 'en');
+    _files['.leerness/task-type-map.md'] = fm('task-type-map', ['classifying user requests'], ['task types added'], `# Task Type Map\n\n| User Request | Task Type | Route |\n|---|---|---|\n| plan this / draft a roadmap | planning | leerness route planning |\n| implement / build a feature | feature | leerness route feature |\n| fix a bug | bugfix | leerness route bugfix |\n| refactor / clean up | refactor | leerness route refactor |\n| research / compare | research | leerness route research |\n| unify design / consistency | consistency | leerness route consistency |\n| deploy / release | release | leerness route release |\n| migration | migration | leerness route migration |\n| session start / resume | session-start | leerness route session-start |\n| session end | session-close | leerness route session-close |\n`, 'en');
+    _files['.leerness/protected-files.md'] = fm('protected-files', ['before deleting/cleaning/migrating files'], ['protected targets change'], `# Protected Files\n\nAI agents must not delete or reset these files without explicit user approval.\n\n- .leerness/\n- .leerness/skills/\n- .leerness/library/\n- AGENTS.md\n- CLAUDE.md\n- .cursor/rules/leerness.mdc\n- .github/copilot-instructions.md\n- .claude/commands/\n- .claude/skills/\n- README.md Leerness managed section\n\nUse merge, archive, or deprecated markers instead of deletion.\n`, 'en');
+    _files['.leerness/guardrails.md'] = fm('guardrails', ['before all work', 'before security/permissions/refactoring'], ['prohibition rules change'], `# Guardrails\n\n- Never store tokens/keys/passwords — record only environment-variable names.\n- No unrequested large refactors (user pre-approval when changing 5+ files).\n- Record the impact of API/DB/env-var changes in task-log.\n- Never delete Leerness protected files/managed sections.\n- Keep Korean text as UTF-8 without BOM.\n- Destructive Git operations (\`git reset --hard\`, \`git push --force\`, …) only after explicit user approval.\n`, 'en');
+    _files['.leerness/consistency-policy.md'] = fm('consistency-policy', ['before duplicating UI/features', 'judging reuse'], ['consistency policy changes'], `# Consistency Policy\n\nBefore building something that does the same job, find and reuse/extend/connect the existing implementation.\n\n## Recursive Reuse Rule\n1. Find existing elements with the same capability.\n2. Check whether self-reference/base rules/recursive flow is needed.\n3. Reuse or extend the existing element.\n4. If you must build new, record why in reuse-map.md.\n\n## Audit Trigger\n\`leerness audit\` checks:\n- duplicate design-guide files\n- undefined design-system.md tokens\n- empty reuse-map.md with 3+ components/utils found\n- plan vs progress alignment\n`, 'en');
+    _files['.leerness/testing-strategy.md'] = fm('testing-strategy', ['before verification', 'before release'], ['test strategy changes'], `# Testing Strategy\n\n- Typecheck (\`tsc --noEmit\` or equivalent)\n- Lint (\`npm run lint\` etc.)\n- Unit/Integration/E2E\n- Manual smoke test\n- Browser/UI smoke (on frontend changes)\n\n## Evidence Format\nEach completed task must reference an evidence ID stored in .leerness/review-evidence.md.\n`, 'en');
+    _files['.leerness/review-checklist.md'] = fm('review-checklist', ['before PR/review'], ['review criteria change'], `# Review Checklist\n\n- [ ] Aligned with the plan\n- [ ] progress-tracker updated\n- [ ] No protected files deleted\n- [ ] Design/feature reuse checked\n- [ ] No secrets in code (\`leerness scan secrets\`)\n- [ ] Korean encoding OK (\`leerness encoding check\`)\n- [ ] Lazy-work check passed (\`leerness lazy detect\`)\n`, 'en');
+    _files['.leerness/release-checklist.md'] = fm('release-checklist', ['before deploy'], ['deploy conditions/env vars/rollback change'], `# Release Checklist\n\n- [ ] \`leerness verify .\`\n- [ ] \`leerness audit .\`\n- [ ] \`leerness scan secrets .\`\n- [ ] \`leerness encoding check .\`\n- [ ] project typecheck/lint/test\n- [ ] env vars (.env.example) synced\n- [ ] rollback path confirmed\n- [ ] CHANGELOG updated\n`, 'en');
+    _files['.leerness/session-close-policy.md'] = fm('session-close-policy', ['before session end'], ['session-close format changes'], `# Session Close Policy\n\nEvery session must list:\n- Completed\n- In progress\n- Incomplete\n- Planned\n- Waiting\n- On hold\n- Blocked\n- Dropped\n- Verification (commands run, results)\n- Recommended next direction\n- Next exact step\n\n\`leerness session close\` extracts the 9 categories automatically and writes the handoff block for the next session into session-handoff.md.\n`, 'en');
+    _files['.leerness/anti-lazy-work-policy.md'] = fm('anti-lazy-work-policy', ['before claiming completion'], ['lazy-work prevention criteria change'], `# Anti Lazy Work Policy\n\n## Rules\n1. **No completion without evidence**: claiming "done" requires command output/test results/screenshot paths in progress-tracker's evidence column.\n2. **No empty handoff**: if Completed/In Progress/Next Exact Step are all empty at session end, close is marked "insufficient".\n3. **Honest partial implementation**: if not fully implemented, set status \`incomplete\` and write one line in Next Exact Step describing what remains.\n4. **Verification records**: accumulate typecheck/lint/test results in review-evidence.md.\n5. **TODO tracking**: any new \`TODO\`/\`FIXME\`/\`XXX\` in code gets a same-ID row in progress-tracker.\n6. **Automatic false-done detection**: \`leerness lazy detect\` checks done rows without evidence, empty handoffs, untracked new TODOs, and missing test-run traces.\n7. **Quality-lens self-questions**: before claiming done, answer \`leerness lens\` per domain — code: "would a senior developer find this needlessly complex?" / design: "would a senior designer and an ordinary user find it pretty, comfortable, intuitive?". If you cannot answer "yes (pass)", it is not done. When changing one domain, re-check the causally linked domains (↔ in \`lens\` output).\n`, 'en');
+    _files['.leerness/session-handoff.md'] = fm('session-handoff', ['session start', 'taking over next work'], ['session end'], `# Session Handoff\n\nLast generated: (auto)\n\n## Completed\n-\n\n## In Progress\n-\n\n## Incomplete / Waiting / On Hold / Blocked\n-\n\n## Dropped\n-\n\n## Verification\n-\n\n## Recommended Direction\n-\n\n## Next Exact Step\n-\n`, 'en');
+    _files['.leerness/leerness-maintenance.md'] = fm('leerness-maintenance', ['work start', 'before migration/release'], ['version policy changes'], `# Leerness Maintenance\n\nAI agents should check:\n\n\`\`\`bash\nleerness --version\nleerness self check .\nleerness update --check       # auto-detect with 24h cache\nleerness update --yes         # auto-migrate when a new version is found\ncat .leerness/HARNESS_VERSION\nnpm view leerness version\n\`\`\`\n`, 'en');
+    _files['.leerness/language-policy.md'] = fm('language-policy', ['before writing documents'], ['language changes'], `# Language Policy\n\nSelected language: ${lang}\n\nAll Leerness notes, skill notes, session reports, and task lists default to the language above (except when the user explicitly requests another language).\n`, 'en');
+    _files['.leerness/secret-policy.md'] = fm('secret-policy', ['before skill/deploy/config changes'], ['sensitive-data policy changes'], `# Secret Policy\n\n## Rules\n- Record only environment-variable names; move values to .env.local, CI secrets, or a cloud secret manager.\n- Never leave tokens/passwords/cookies/IDs/card numbers in plaintext in code/docs/logs.\n- Run \`leerness scan secrets .\` before changes.\n\n## Patterns scanned\n- AWS Access Key (\`AKIA[0-9A-Z]{16}\`)\n- GitHub PAT (\`ghp_[A-Za-z0-9]{36}\`)\n- OpenAI key (\`sk-[A-Za-z0-9]{20,}\`)\n- Anthropic key (\`sk-ant-[A-Za-z0-9-]{20,}\`)\n- Google API key, Slack token, generic private key, hardcoded password\n`, 'en');
+    _files['.leerness/encoding-policy.md'] = fm('encoding-policy', ['before creating files', 'garbled-Korean reports', 'before deploy'], ['encoding policy changes'], `# Encoding Policy\n\n## Rules\n- All text files are **UTF-8 without BOM**.\n- Windows .bat files start with \`chcp 65001 >nul\`.\n- PowerShell .ps1 files start with \`[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\`.\n- Python files may need \`# -*- coding: utf-8 -*-\` (for Python 2 compat).\n- LF line endings recommended (unify via .gitattributes on Windows too).\n\n## Auto check\n\`leerness encoding check\` verifies BOM, NUL, chcp 65001 in .bat, and Korean round-trip.\n`, 'en');
+    _files['.leerness/architecture.md'] = fm('architecture', ['feature work', 'refactoring', 'migration'], ['structure changes'], `# Architecture\n\n## Overview\n- Record the real structure.\n\n## Data Flow\n-\n\n## External Dependencies\n-\n`, 'en');
+    _files['.leerness/context-map.md'] = fm('context-map', ['exploring related files', 'before implementing features'], ['file structure changes'], `# Context Map\n\n| Area | Files | Notes |\n|---|---|---|\n| App | src/** | update with real paths |\n| Tests | tests/** | verification paths |\n`, 'en');
+    _files['.leerness/decisions.md'] = fm('decisions', ['checking design decisions'], ['important decisions made'], `# Decisions\n\n## Template (example — add real decisions below, outside the code block)\n\n\`\`\`md\n### ${today()} — Decision title\n- Decision:\n- Reason:\n- Alternatives:\n- Impact:\n\`\`\`\n`, 'en');
+    _files['.leerness/task-log.md'] = fm('task-log', ['checking work history'], ['after every meaningful task'], `# Task Log\n\n## ${today()}\n- Leerness v${VERSION} initialized.\n`, 'en');
+    _files['.leerness/design-system.md'] = fm('design-system', ['UI changes', 'adding components', 'merging design guides'], ['design standards change', 'reusable patterns found'], `# Design System\n\n## Canonical File\nThis file is the canonical design guide (over designguide.md, design-guide.md, etc.).\n\n## Tokens\n| Token | Value | Notes |\n|---|---|---|\n| color.primary | (update with real value) | |\n| color.surface | | |\n| spacing.unit | | |\n| typography.body | | |\n\n## Reusable Patterns\n| Pattern | Where | Reuse Rule |\n|---|---|---|\n`, 'en');
+    _files['.leerness/reuse-map.md'] = fm('reuse-map', ['before creating new components/APIs/helpers', 'duplicate capability detected'], ['reusable elements added'], `# Reuse Map\n\n| Capability | Existing Element | Reuse Method | Notes |\n|---|---|---|---|\n`, 'en');
+    _files['.leerness/feature-contracts.md'] = fm('feature-contracts', ['before implementing/changing features'], ['feature IO/state/error changes'], `# Feature Contracts\n\n## Template\n- Feature:\n- Input:\n- Output:\n- States:\n- Errors:\n- Related files:\n- Test evidence ID:\n`, 'en');
+    _files['.cursor/rules/leerness.mdc'] = `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .leerness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`;
+    _files['.github/copilot-instructions.md'] = `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .leerness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`;
+    _files['.leerness/session-workflow.md'] = fm('session-workflow', ['session start', 'new user request arrives', 'before distributing complex work'], ['workflow step changes'], `# Session Workflow — 6 steps of AI harness engineering\n\n> **At the start of every session the main agent reads this document first and follows the 6 steps as written.**\n> Same flow regardless of round length/complexity — that is what prevents drift.\n\n## Step 1. Analyze the request + check the environment\n\`\`\`bash\nleerness handoff .            # load context + automatic drift warning\nleerness drift check .        # signals + 4-level verdict\n\`\`\`\n- Decompose the request (5W1H). If ambiguous, ask clarifying questions (except autonomous mode).\n- On drift critical, run \`leerness session close .\` or \`drift check --auto-fix\` first.\n\n## Step 2. Plan\n- 3+ steps → use TodoWrite or \`leerness plan add\`.\n- New capability → search existing assets first via \`leerness reuse-map\` / \`reuse find <query>\`.\n- Multiple modules → define an integration spec up front (e.g. TICK_SPEC.md).\n\n## Step 3. Distribute — sub-agent mapping\n\`\`\`bash\nleerness agents list                  # ready CLIs\nleerness agents quota                 # limits\nleerness agents dispatch "<task>" --to <id>\n\`\`\`\n- Best sub-agent by task type: text/translation/analysis → claude · deep code reasoning → codex · direct file edits → agy --yolo · security review → \`leerness review --persona security\`.\n- **Conflict-prevention rules (mandatory)**: give each sub-agent *the exact files only it may modify*; require mtime-verification reports (concurrent writes risk last-writer-wins); verify against the spec afterwards with \`leerness contract verify\`.\n\n## Step 4. Sub-agent work + individual self-verification\n- Each sub-agent reports only after passing its own module tests.\n- Report format: line counts, tests N/N PASS, issues found, mtime verification.\n\n## Step 5. Integrated verification\n\`\`\`bash\nleerness contract verify SPEC.md src/<mod>.js\nleerness verify-claim T-XXX --run-tests --strict-claims\nleerness review <file> --persona security,performance,ux\n\`\`\`\n- The main agent writes and runs its own integration scenario (independent verification).\n- Cross-check that sub-agent verification and main verification *agree*.\n\n## Step 6. Close + handoff + next-round suggestion\n\`\`\`bash\nleerness session close .             # --suggest on by default\nleerness session close . --no-suggest\n\n# or separately:\nleerness skill suggest .\nleerness drift check .\nleerness audit . --fix\n\`\`\`\n\n## 🧠 Memory CRUD Quick Reference\n\n| Surface | CREATE | READ | DELETE | RESTORE |\n|---|---|---|---|---|\n| **tasks** | task add | task list --json | task drop | task update |\n| **decisions** | decision add | decision list --json | decision drop | memory restore decisions |\n| **lessons** | lesson save | lesson list [--tag] | lesson drop | memory restore lessons |\n| **plan** | plan add | plan list --json | plan remove | memory restore plan |\n| **rules** | rule add | rule list --json | rule remove | (rule pause/resume) |\n\n\`\`\`bash\nleerness memory status [--json]\nleerness memory archive list [--surface s]\nleerness memory restore <surface> <target>\n\`\`\`\n\n**Recovering a wrongly saved item**:\n1. \`memory archive list\` — list restore candidates\n2. \`memory restore decisions "PostgreSQL"\` — archive → active\n3. handoff automatically notes archive activity within 24h every session\n\n## Auto-recovery & security\n- A skipped session close triggers drift critical at the next session start — recover with \`drift check --auto-fix\` (runs session close automatically on critical).\n- handoff auto-recalls past lessons (by current task keywords) and auto-suggests installed skills.\n- handoff prints a 1–2 line security summary (.env ↔ .env.example sync + .gitignore secret gaps); a missing .env in .gitignore is 🚨 CRITICAL — \`LEERNESS_AUTO_SECURITY_FIX=1\` runs \`audit --fix\` automatically.\n- \`leerness health\` gives a one-line combined check (drift + security + skills + usage + tasks).\n\n---\n\n## Quick checklist (before the session ends)\n- [ ] This round's tasks are registered in plan/progress-tracker (or task sync)\n- [ ] Every done item has evidence attached (verify-claim PASS)\n- [ ] contract verify PASS when sub-agents were used\n- [ ] drift score ≤ 30 — \`leerness drift check\`\n- [ ] session close was run\n- [ ] \`leerness health\` overall check\n- [ ] If .env is used: .gitignore secret patterns OK + .env.example synced\n- [ ] On security critical: \`LEERNESS_AUTO_SECURITY_FIX=1\` or \`audit --fix\`\n\n## Anti-patterns (drift signals)\n- ⚠ "work is done, just report and stop" → missed session close → drift critical next session\n- ⚠ "only TodoWrite updated, leerness unused" → \`task sync --from\` or \`task add\` is mandatory\n- ⚠ distributing to sub-agents without explicit file paths → concurrent-write conflicts\n- ⚠ self-reported "tests ran, PASS" only → verify-claim --run-tests not executed\n- ⚠ skipping contract verify → spec-mismatch bugs reach the user\n`, 'en');
   }
   // T-0136: handoff is a tracked-read boundary. The localized templates predate that contract,
   // so normalize the one stale sentence after language selection from a single place.
   _files['AGENTS.md'] = _files['AGENTS.md']
     .replace(
-      '동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 `.harness/`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). `leerness handoff` · `decision add` · `lesson save` 등이 여기에 쓴다.',
-      '동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 `.harness/`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). 기본 `leerness handoff`는 이를 읽고 ignored 세션 runtime record만 갱신하며, 추적 상태 갱신은 `decision add` · `lesson save` · `session close` 같은 명시 쓰기 명령 또는 `handoff --writeback`이 수행한다.'
+      '동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 `.leerness/`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). `leerness handoff` · `decision add` · `lesson save` 등이 여기에 쓴다.',
+      '동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 `.leerness/`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). 기본 `leerness handoff`는 이를 읽고 ignored 세션 runtime record만 갱신하며, 추적 상태 갱신은 `decision add` · `lesson save` · `session close` 같은 명시 쓰기 명령 또는 `handoff --writeback`이 수행한다.'
     )
     .replace(
-      'Dynamic state (decisions/lessons/plan/progress/verification/handoff) is recorded by leerness in the **default workspace `.harness/`** (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md) via `leerness handoff`, `decision add`, `lesson save`, etc.',
-      'Dynamic state (decisions/lessons/plan/progress/verification/handoff) is recorded by leerness in the **default workspace `.harness/`** (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). Default `leerness handoff` reads it and updates only an ignored per-session runtime record; tracked state changes come from explicit write commands such as `decision add`, `lesson save`, `session close`, or `handoff --writeback`.'
+      'Dynamic state (decisions/lessons/plan/progress/verification/handoff) is recorded by leerness in the **default workspace `.leerness/`** (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md) via `leerness handoff`, `decision add`, `lesson save`, etc.',
+      'Dynamic state (decisions/lessons/plan/progress/verification/handoff) is recorded by leerness in the **default workspace `.leerness/`** (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). Default `leerness handoff` reads it and updates only an ignored per-session runtime record; tracked state changes come from explicit write commands such as `decision add`, `lesson save`, `session close`, or `handoff --writeback`.'
     );
   // 1.9.276: minimal 모드 — 코어가 요구하지 않는 파일 제외 (verify 필수 파일은 유지).
   if (opts.minimal) { for (const k of MINIMAL_SKIP_KEYS) delete _files[k]; }
@@ -1363,7 +1386,7 @@ const _AGENTS_MINIMAL_KO = `# Leerness Agent Instructions (minimal)
 2. **완료 주장 전**: \`leerness verify-claim <T-ID>\` — 증거 없이 "완료" 라고 말하지 않는다.
 3. **세션 종료**: \`leerness session close .\` — 다음 세션으로 상태를 넘긴다.
 
-상태는 \`.harness/\` 안의 일반 파일이다(모델이 바뀌어도 남는다). 보호 파일은 삭제하지 않는다.
+상태는 \`.leerness/\` 안의 일반 파일이다(모델이 바뀌어도 남는다). 보호 파일은 삭제하지 않는다.
 더 필요해지면 \`leerness mode set standard\` 로 올린다.
 `;
 const _AGENTS_MINIMAL_EN = `# Leerness Agent Instructions (minimal)
@@ -1374,13 +1397,13 @@ This project runs in **minimal mode**. There are only three rules.
 2. **Before claiming done**: \`leerness verify-claim <T-ID>\` — never say "done" without evidence.
 3. **Session end**: \`leerness session close .\` — hand state to the next session.
 
-State lives as plain files in \`.harness/\` (it survives a change of model). Do not delete protected files.
+State lives as plain files in \`.leerness/\` (it survives a change of model). Do not delete protected files.
 Raise the tier with \`leerness mode set standard\` when you need more.
 `;
 
 function copyRecursiveSafe(src, dst) {
   if (!exists(src)) return;
-  if (src.includes(path.sep + '.harness' + path.sep + 'archive')) return;
+  if (src.includes(path.sep + '.leerness' + path.sep + 'archive')) return;
   const st = fs.lstatSync(src);   // 1.36.33 (#6): symlink 미추종 — 자기참조 링크 시 MAX_PATH 까지 복제 폭주 방지
   if (st.isSymbolicLink()) return;
   if (st.isDirectory()) {
@@ -1401,7 +1424,7 @@ function migrationCandidates(root, files) {
     '.github/copilot-instructions.md','README.md','.env.example','.gitignore','.gitattributes',
     'docs/guideline.md','docs/history.md','guideline.md','history.md',
     'AI_HARNESS.md','HARNESS.md','PROJECT_CONTEXT.md','CONTEXT.md','ARCHITECTURE.md','DECISIONS.md','CURRENT_STATE.md','TASK_LOG.md',
-    '.harness','.ai','harness'
+    '.leerness','.ai','harness'
   ];
   const all = Array.from(new Set([...fixed, ...Object.keys(files)]));
   return all.filter(f => exists(path.join(root, f)));
@@ -1410,7 +1433,7 @@ function migrationCandidates(root, files) {
 // 외부리뷰 CV-4/UR-0079: archive 무한 누적 방지 — 최신 keep 개만 유지, 오래된 스냅샷 prune (mtime 기준).
 //   init/migrate 재실행마다 전체 archive copy 가 쌓이던 것(Opus: 5회→1.5M 중복) 을 bounded 로.
 function _pruneArchives(root, keep = 10) {
-  const adir = path.join(root, '.harness', 'archive');
+  const adir = path.join(root, '.leerness', 'archive');
   let names;
   try { names = fs.readdirSync(adir, { withFileTypes: true }).filter(e => e.isDirectory() && /^leerness-/.test(e.name)).map(e => e.name); } catch { return 0; }
   if (names.length <= keep) return 0;
@@ -1422,12 +1445,12 @@ function _pruneArchives(root, keep = 10) {
 }
 function createBackup(root, reason, files, dry = false) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const ar = path.join(root, '.harness/archive', `leerness-${VERSION}-${stamp}`);
+  const ar = path.join(root, '.leerness/archive', `leerness-${VERSION}-${stamp}`);
   const candidates = migrationCandidates(root, files);
   if (dry) return { archiveDir: ar, candidates };
   mkdirp(ar);
   const fileRoot = path.join(ar, 'files');
-  for (const f of candidates) copyRecursiveSafe(path.join(root, f), path.join(fileRoot, f === '.harness' ? '.harness-before-migration' : f));
+  for (const f of candidates) copyRecursiveSafe(path.join(root, f), path.join(fileRoot, f === '.leerness' ? '.leerness-before-migration' : f));
   writeUtf8(path.join(ar, 'migration-manifest.json'), JSON.stringify({
     version: VERSION, reason, createdAt: now(),
     policy: 'backup-before-write; preserve-by-default; merge-managed-files; merge-env-and-gitignore',
@@ -1477,12 +1500,12 @@ function managedMerge(file, next, previous, archiveDir, mergeOpts = {}) {
   let archiveRel = archiveDir ? path.relative(_base, archiveDir).replace(/\\/g, '/') : null;
   if (!archiveRel && previous) {
     const _m = /(?:전체 원본 백업|Full original backup):\s*`([^`]+)`/.exec(String(previous));
-    if (_m && _m[1] && _m[1] !== '.harness/archive') {
+    if (_m && _m[1] && _m[1] !== '.leerness/archive') {
       //   절대 경로 포인터도 있다(구버전이 cwd 기준으로 박아 둔 것) — `path.join` 으로 이어 붙이면
       //   존재하지 않는 경로가 돼 정상 포인터를 격하시킨다(검수 P2). 절대면 그대로 본다.
       const _p = _m[1];
       const _abs = path.isAbsolute(_p) || /^[A-Za-z]:[\\/]/.test(_p);
-      archiveRel = exists(_abs ? _p : path.join(_base, _p)) ? _p : '.harness/archive';
+      archiveRel = exists(_abs ? _p : path.join(_base, _p)) ? _p : '.leerness/archive';
     }
   }
   return _managedMerge(file, next, previous, archiveRel, MERGE_OVERWRITE_FILES, mergeOpts);   // 1.36.60: altTemplate/lang 전달
@@ -1520,7 +1543,7 @@ function mergeEnvFile(p, lines) {
 }
 
 function writeMigrationReport(root, backup, actions, opts = {}) {
-  const p = path.join(root, '.harness/migration-report.md');
+  const p = path.join(root, '.leerness/migration-report.md');
   const rows = actions.map(a => `| ${a.file} | ${a.action} |`).join('\n');
   // 1.9.41: AI must re-read 섹션 — migrate가 추가/변경한 파일을 AI 가독 포맷으로 추출
   // fromV가 명시되면 CHANGELOG 차분 포함
@@ -1555,7 +1578,7 @@ function writeMigrationReport(root, backup, actions, opts = {}) {
             aiReadBlock += `- ${v.version} — ${firstLine || '(no headline)'}\n`;
           }
           if (diff.length > _hlCap) aiReadBlock += `- … 외 ${diff.length - _hlCap}개 버전 — \`leerness whats-new --from ${fromV} --limit N\` 으로 조회\n`;
-          aiReadBlock += `\n**권장 행동**:\n1. 위 신규 명령을 \`--help\`로 확인\n2. \`AGENTS.md\` / \`CLAUDE.md\` / \`.harness/session-workflow.md\` 재독 (다음 \`leerness handoff\` 호출 시 자동 안내)\n3. 이전 청크의 기억 무효 — 새 도구 우선 시도\n4. 상세: \`leerness whats-new --from ${fromV}\`\n`;
+          aiReadBlock += `\n**권장 행동**:\n1. 위 신규 명령을 \`--help\`로 확인\n2. \`AGENTS.md\` / \`CLAUDE.md\` / \`.leerness/session-workflow.md\` 재독 (다음 \`leerness handoff\` 호출 시 자동 안내)\n3. 이전 청크의 기억 무효 — 새 도구 우선 시도\n4. 상세: \`leerness whats-new --from ${fromV}\`\n`;
         }
       }
     }
@@ -1567,17 +1590,17 @@ function syncReadme(root, versionOverride = null) {
   const p = path.join(root, 'README.md');
   const existing = exists(p) ? read(p) : '';
   // 1.9.40: 자체 README도 동기화 — version 배지, e2e 카운트, package.json#version 일관성
-  const _rmLang = (() => { try { return read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch { return 'ko'; } })();   // 1.36.63 (F-05 5회차)
+  const _rmLang = (() => { try { return read(path.join(root, '.leerness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch { return 'ko'; } })();   // 1.36.63 (F-05 5회차)
   let updated = mergeReadmeSection(existing, managedReadmeBlock(detectProjectName(root), _rmLang, versionOverride || VERSION));
   try {
-    // package.json#version 또는 .harness/HARNESS_VERSION을 참조하여 README 배지 자동 갱신
+    // package.json#version 또는 .leerness/HARNESS_VERSION을 참조하여 README 배지 자동 갱신
     const pkgPath = path.join(root, 'package.json');
     let v = null;
     if (exists(pkgPath)) {
       try { v = JSON.parse(read(pkgPath)).version; } catch {}
     }
     if (!v) {
-      const hv = path.join(root, '.harness', 'HARNESS_VERSION');
+      const hv = path.join(root, '.leerness', 'HARNESS_VERSION');
       if (exists(hv)) v = parseHarnessVersion(read(hv)).base;
     }
     if (v && /^\d+\.\d+\.\d+/.test(v)) {
@@ -1754,6 +1777,20 @@ async function install(root, opts = {}) {
   //   enforce 에서 고쳤던 것과 같은 순서 결함이다(거절/미리보기는 어떤 변경보다 앞서야 한다).
   //   dry 모드에서는 만들지 않는다. 아래 흐름은 존재하지 않는 root 에서도 요약까지 도달한다.
   root = absRoot(root); if (!opts.dry) mkdirp(root);
+  // Direct callers of install() get the same migration guarantee as the CLI
+  // dispatcher.  Dry-run remains strictly read-only.
+  if (!opts.dry) {
+    const ws = inspectWorkspace(root);
+    if (ws.legacy.live) {
+      const migration = _migrateWorkspaceDir(root, { force: opts.force === true });
+      if (migration.blocked) {
+        throw Object.assign(new Error(`workspace migration blocked (${migration.blockedReason}): ${(migration.errors || []).join('; ')}`), {
+          code: 'E_WORKSPACE_DIR_MIGRATION_BLOCKED', report: migration,
+        });
+      }
+      opts.workspaceMigration = migration;
+    }
+  }
   // 1.9.184+1.9.190: 설치 도중 Ctrl+C 시 즉시 종료 (사용자 명시 BUG fix — npx 설치 진행 차단).
   //   1.9.184 의 2단계 confirm 은 readline raw mode 가 SIGINT 가로채서 호출 안 됨 → 1.9.190 즉시 종료로 단순화.
   //   _selectOne/_selectMany 는 stdin '\x03' 직접 처리, ask() 는 rl.on('SIGINT') 처리, 이 핸들러는 fallback.
@@ -1768,7 +1805,7 @@ async function install(root, opts = {}) {
   const _cleanupSigint = () => { try { process.removeListener('SIGINT', _sigintHandler); clearTimeout(_sigintTimer); } catch {} };
   // 1.9.41: migrate 직전 이전 버전 캡처 — 차분 안내에 사용
   try {
-    const hv = path.join(root, '.harness', 'HARNESS_VERSION');
+    const hv = path.join(root, '.leerness', 'HARNESS_VERSION');
     if (exists(hv) && !opts._previousVersion) {
       const parsed = parseHarnessVersion(read(hv));
       opts._previousVersion = parsed.base || parsed.plus || null;
@@ -1777,7 +1814,7 @@ async function install(root, opts = {}) {
   // 1.9.32: init 시 ASCII 배너 + 빠른 시작 가이드 (migrate는 quiet)
   if (!opts.migration && !has('--no-banner') && !opts.json) _banner({ quickStart: !opts.dry });  // 1.10.3 (UR-0173): --json 시 배너 억제(순수 JSON)
   // 1.9.33: npx 캐시로 옛 버전이 실행될 때 경고 (migrate/--no-stale-check 시 스킵)
-  // 1.9.276: dry-run 시 스킵 — 캐시 파일(.harness/cache) 생성 방지 (dry = 부작용 0 보장)
+  // 1.9.276: dry-run 시 스킵 — 캐시 파일(.leerness/cache) 생성 방지 (dry = 부작용 0 보장)
   if (!opts.migration && !has('--no-stale-check') && !opts.nonInteractive && !opts.dry) {
     try { await _warnIfStale(root); } catch {}
   }
@@ -1807,8 +1844,8 @@ async function install(root, opts = {}) {
   //   (검수 2차 High): 차감은 "실제 언어 전환일 때만" — 동일-언어 재init 에 무조건 적용하면 반대-언어 템플릿과
   //   우연히 일치하는 정당한 커스텀이 유실된다. 이전 저장 언어를 쓰기 전에 포착해 전환 여부로 게이트.
   let _prevLang = null;
-  try { _prevLang = read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() || null; } catch {}
-  if (!_prevLang) { try { _prevLang = String(JSON.parse(read(path.join(root, '.harness', 'manifest.json'))).language || '').toLowerCase() || null; } catch {} }
+  try { _prevLang = read(path.join(root, '.leerness', 'LANGUAGE')).trim().toLowerCase() || null; } catch {}
+  if (!_prevLang) { try { _prevLang = String(JSON.parse(read(path.join(root, '.leerness', 'manifest.json'))).language || '').toLowerCase() || null; } catch {} }
   const _langSwitched = !!(_prevLang && (_prevLang === 'ko' || _prevLang === 'en') && _prevLang !== lang);
   const _altLang = lang === 'en' ? 'ko' : 'en';
   let _altFiles = {};
@@ -1817,18 +1854,18 @@ async function install(root, opts = {}) {
   if (_langSwitched) { try { _altFiles = coreFiles(root, _altLang, skills, Object.assign({}, _coreOpts)); } catch {} }
   const managedOverwrite = new Set([
     'AGENTS.md','CLAUDE.md','.cursor/rules/leerness.mdc','.github/copilot-instructions.md',
-    '.harness/session-workflow.md',   // 1.36.60 (검수 #1): managed 편입 — 종전엔 재init 시 구 언어/구 버전 그대로 방치
+    '.leerness/session-workflow.md',   // 1.36.60 (검수 #1): managed 편입 — 종전엔 재init 시 구 언어/구 버전 그대로 방치
     // 1.36.61 (검수 High): 순수 정책-문서 전체를 managed 병합 경로에 — 언어 전환 시 구 언어로 방치되던 나머지
     //   (사용자 상태 문서 plan/brief/decisions 등은 제외 — 구조-인지 전략 필요, 데이터라 raw 교체 금지)
-    '.harness/guideline.md','.harness/plan-progress-boundary.md','.harness/guardrails.md',
-    '.harness/consistency-policy.md','.harness/testing-strategy.md','.harness/review-checklist.md',
-    '.harness/AX_PLAN_GUIDE.md','.harness/test-evidence-policy.md',   // 1.36.62 (검수 #3): 누락 편입 (review-evidence/feature-graph 는 사용자 데이터 — _USER_STATE)
-    '.harness/release-checklist.md','.harness/session-close-policy.md','.harness/anti-lazy-work-policy.md',
-    '.harness/secret-policy.md','.harness/encoding-policy.md','.harness/language-policy.md',
-    '.harness/HARNESS_VERSION','.harness/manifest.json','.harness/LANGUAGE','.harness/skills-lock.json',
-    '.harness/context-routing.md','.harness/writeback-policy.md','.harness/task-type-map.md',
-    '.harness/leerness-maintenance.md','.harness/protected-files.md','.harness/AX_MIGRATION_GUIDE.md',
-    '.harness/AX_NEW_PROJECT_GUIDE.md','.harness/AX_SKILL_LIBRARY_GUIDE.md','.harness/skill-index.md',
+    '.leerness/guideline.md','.leerness/plan-progress-boundary.md','.leerness/guardrails.md',
+    '.leerness/consistency-policy.md','.leerness/testing-strategy.md','.leerness/review-checklist.md',
+    '.leerness/AX_PLAN_GUIDE.md','.leerness/test-evidence-policy.md',   // 1.36.62 (검수 #3): 누락 편입 (review-evidence/feature-graph 는 사용자 데이터 — _USER_STATE)
+    '.leerness/release-checklist.md','.leerness/session-close-policy.md','.leerness/anti-lazy-work-policy.md',
+    '.leerness/secret-policy.md','.leerness/encoding-policy.md','.leerness/language-policy.md',
+    '.leerness/HARNESS_VERSION','.leerness/manifest.json','.leerness/LANGUAGE','.leerness/skills-lock.json',
+    '.leerness/context-routing.md','.leerness/writeback-policy.md','.leerness/task-type-map.md',
+    '.leerness/leerness-maintenance.md','.leerness/protected-files.md','.leerness/AX_MIGRATION_GUIDE.md',
+    '.leerness/AX_NEW_PROJECT_GUIDE.md','.leerness/AX_SKILL_LIBRARY_GUIDE.md','.leerness/skill-index.md',
     '.claude/commands/handoff.md','.claude/commands/session-close.md','.claude/commands/audit.md','.claude/commands/lazy-detect.md','.claude/commands/update.md',
     '.claude/skills/leerness/SKILL.md'
   ]);
@@ -1841,7 +1878,7 @@ async function install(root, opts = {}) {
     t = t.replace(/(backup|백업): ?`[^`]*`/gi, '$1: `~`');   // (검수 2차 Low) 경로만 정규화 — 래퍼 문구 변경은 실변경으로 감지
     return t.replace(/\r\n/g, '\n').trim();
   };
-  let _noop = !opts.force && !opts.dry && !_langSwitched && exists(path.join(root, '.harness'));
+  let _noop = !opts.force && !opts.dry && !_langSwitched && exists(path.join(root, '.leerness'));
   if (_noop) {
     for (const [f, c] of Object.entries(files)) {
       const p = path.join(root, f);
@@ -1858,7 +1895,7 @@ async function install(root, opts = {}) {
   //   조기 return 은 "요청된 드리프트 복구"까지 건너뛰었다(--no-env→기본 재init 시 .env 미생성 등 6케이스 실측).
   //   생략 대상은 백업 생성 + coreFiles 쓰기 루프 + 마이그레이션 리포트뿐. 조정기의 무변경 churn 은
   //   writeUtf8 동일-내용 스킵(1.36.65)이 전역 해소.
-  let backup = { archiveDir: path.join(root, '.harness', 'archive'), candidates: [], skipped: true };
+  let backup = { archiveDir: path.join(root, '.leerness', 'archive'), candidates: [], skipped: true };
   if (_noop) {
     ok(`no-op: coreFiles 이미 v${VERSION} 최신 — 백업/파일쓰기 생략, 부속 구성(.env/훅/스킬)은 정합 확인 계속 (강제: --force)`);
   } else {
@@ -1887,7 +1924,7 @@ async function install(root, opts = {}) {
   let _done = 0;
   // 1.36.33 (codex 3차 #1, P1 데이터 유실): --force 가 사용자 상태 파일(진행 task/plan/결정/로그/인계 등)까지 새 템플릿으로
   //   덮어써 활성 기록이 archive 에만 남았다. force 는 가이드/템플릿 문서에만 적용 — 상태 파일은 force 여도 보존.
-  const _USER_STATE = new Set(['.harness/progress-tracker.md', '.harness/plan.md', '.harness/task-log.md', '.harness/decisions.md', '.harness/current-state.md', '.harness/session-handoff.md', '.harness/rules.md', '.harness/feature-graph.md', '.harness/reuse-map.md', '.harness/feature-contracts.md', '.harness/project-brief.md', '.harness/architecture.md', '.harness/context-map.md', '.harness/design-system.md', '.harness/review-evidence.md']);   // 1.36.62 (검수 #3): 검증 이력도 사용자 데이터
+  const _USER_STATE = new Set(['.leerness/progress-tracker.md', '.leerness/plan.md', '.leerness/task-log.md', '.leerness/decisions.md', '.leerness/current-state.md', '.leerness/session-handoff.md', '.leerness/rules.md', '.leerness/feature-graph.md', '.leerness/reuse-map.md', '.leerness/feature-contracts.md', '.leerness/project-brief.md', '.leerness/architecture.md', '.leerness/context-map.md', '.leerness/design-system.md', '.leerness/review-evidence.md']);   // 1.36.62 (검수 #3): 검증 이력도 사용자 데이터
   for (const [f, c] of Object.entries(files)) {
     if (_noop) break;   // 1.36.65: coreFiles 무변경 — 쓰기 루프 생략 (하위 조정기는 아래에서 계속)
     const existsNow = exists(path.join(root, f));
@@ -1926,12 +1963,7 @@ async function install(root, opts = {}) {
       // 1.9.153: .env 직접 생성 + 사용자 글로벌 룰 SECRET_PATTERNS 6종 일괄 ignore (audit 통합)
       //   audit 가 검사하는 6 패턴: .env / .env.local / .env.production / .env.*.local / *.pem / credentials.json
       '.env', '.env.local', '.env.production', '.env.*.local', '*.pem', 'credentials.json',
-      '.harness/skill-publish.local.json','.harness/**/*.local.json',
-      '.harness/archive/','.harness/migration-report.md','.harness/cache/',
-      // 1.9.147: 자동 유지보수 — 자격증명 + incident 페이로드 비공개 (보안)
-      '.harness/credentials.local.json','.harness/incidents/',
-      // 1.9.149: agent REPL 세션 + observability runs 비공개 (대화 내용 보호)
-      '.harness/agent-sessions/','.harness/runs/'
+      ...PROTECTED_GITIGNORE_LINES,
     ]);
     // 1.9.151: agentsOptIn 복수 선택 지원 — 배열 또는 'none' 또는 'all' (back-compat) 모두 처리
     const a = resolved.agentsOptIn || 'none';
@@ -1942,15 +1974,15 @@ async function install(root, opts = {}) {
       return new Set([a]);  // back-compat: 단일 문자열
     })();
     const enable = (cli) => enabledSet.has(cli);
-    // 1.9.187 (사용자 명시): .env 에는 시크릿만, 비시크릿 LEERNESS_* 는 .harness/leerness-config.json 으로 분리.
+    // 1.9.187 (사용자 명시): .env 에는 시크릿만, 비시크릿 LEERNESS_* 는 .leerness/leerness-config.json 으로 분리.
     //   배경: .env 는 .gitignore + 시크릿용 → AI 에이전트 가시성 없음.
-    //   비시크릿 (활성화 플래그, 모델, 공개 URL) 은 git checked-in 위치 (.harness/) 에 두면 AI 가 자동 읽음.
+    //   비시크릿 (활성화 플래그, 모델, 공개 URL) 은 git checked-in 위치 (.leerness/) 에 두면 AI 가 자동 읽음.
     //   호환성: leerness 시작 시 _loadLeernessConfig() 가 config → process.env inject. 기존 코드 그대로 작동.
     const envLines = [
-      '# Leerness — SECRET 환경변수만 (TOKEN/SECRET/PASSWORD). 비시크릿 설정은 .harness/leerness-config.json 사용.',
+      '# Leerness — SECRET 환경변수만 (TOKEN/SECRET/PASSWORD). 비시크릿 설정은 .leerness/leerness-config.json 사용.',
       `# Generated/migrated by leerness v${VERSION} at ${new Date().toISOString().slice(0, 10)}.`,
       `# .env 는 .gitignore — AI 에이전트(Claude Code, Cursor 등)에 노출되지 않음. 시크릿 안전 보관.`,
-      `# 비시크릿 (활성화 플래그/모델 이름/공개 URL) 은 .harness/leerness-config.json 참조 → AI 가시성 ↑.`,
+      `# 비시크릿 (활성화 플래그/모델 이름/공개 URL) 은 .leerness/leerness-config.json 참조 → AI 가시성 ↑.`,
       '',
       '# === 시크릿 (TOKEN/KEY) ===',
       'LEERNESS_NPM_TOKEN=',
@@ -1967,7 +1999,7 @@ async function install(root, opts = {}) {
         warn(`.env 생성/마이그레이션 실패 (계속 진행): ${e.message}`);
       }
     }
-    // 1.9.187: 비시크릿 LEERNESS_* 설정 → .harness/leerness-config.json (AI 가시성)
+    // 1.9.187: 비시크릿 LEERNESS_* 설정 → .leerness/leerness-config.json (AI 가시성)
     try {
       _writeLeernessConfig(root, {
         LEERNESS_OLLAMA_BASE_URL: enable('ollama') ? 'http://localhost:11434' : '',
@@ -1988,9 +2020,9 @@ async function install(root, opts = {}) {
         LEERNESS_SKILL_AUTO_PRESETS: 'vercel,anthropic'
       });
     } catch (e) {
-      warn(`.harness/leerness-config.json 생성 실패 (계속 진행): ${e.message}`);
+      warn(`.leerness/leerness-config.json 생성 실패 (계속 진행): ${e.message}`);
     }
-    // 1.9.187: 기존 .env에 비시크릿 LEERNESS_* 가 있으면 .harness/leerness-config.json 으로 마이그레이션 후 .env에서 제거.
+    // 1.9.187: 기존 .env에 비시크릿 LEERNESS_* 가 있으면 .leerness/leerness-config.json 으로 마이그레이션 후 .env에서 제거.
     try {
       _migrateNonsecretFromEnv(root);
     } catch (e) {
@@ -2010,7 +2042,7 @@ async function install(root, opts = {}) {
     // 1.9.41: migrate 후 (= 점프인 경우) 차분 안내를 stdout에 즉시 출력 — AI 컨텍스트에 새 도구 주입
     if (opts.migration && opts._previousVersion && opts._previousVersion !== VERSION) {
       try {
-        const reportPath = path.join(root, '.harness', 'migration-report.md');
+        const reportPath = path.join(root, '.leerness', 'migration-report.md');
         if (exists(reportPath)) {
           const rep = read(reportPath);
           const aiBlock = rep.match(/## 🤖 AI must re-read[\s\S]*?(?=\n## )/);
@@ -2112,17 +2144,17 @@ function installSkills(root, skills) { for (const name of skills) addSkill(root,
 function addSkill(root, name, silent = false) {
   const meta = skillCatalog[name];
   if (!meta) { fail(`Unknown skill: ${name}`); return; }
-  const dir = path.join(root, '.harness/skills', name); mkdirp(dir);
+  const dir = path.join(root, '.leerness/skills', name); mkdirp(dir);
   writeUtf8(path.join(dir, 'skill.json'), JSON.stringify({ name, ...meta, verification: { status: meta.verification, method: 'leerness-curated' } }, null, 2) + '\n');
   writeUtf8(path.join(dir, 'README.md'), `# ${meta.displayNameKo}\n\n## Capabilities\n${meta.capabilities.map(x => '- ' + x).join('\n')}\n\n## Sensitive Data Policy\n실제 토큰이나 비밀번호를 기록하지 않고 환경변수 이름만 기록합니다.\n`);
   if (!silent) ok(`skill installed: ${name}`);
 }
 
 // ===== Skill registry (catalog + user-defined merged) =====
-function userSkillsDir(root) { return path.join(absRoot(root), '.harness/skills'); }
+function userSkillsDir(root) { return path.join(absRoot(root), '.leerness/skills'); }
 
 // 1.36.26 (obra/superpowers P2): skill 메타 품질 lint — `leerness skill lint [id] [--all] [--json] [--strict]`.
-//   대상: 설치 스킬(.harness/skills/<id>/SKILL.md 우선, 없으면 skill.json) + 내장 카탈로그 9종(skill.json 형태로 lint).
+//   대상: 설치 스킬(.leerness/skills/<id>/SKILL.md 우선, 없으면 skill.json) + 내장 카탈로그 9종(skill.json 형태로 lint).
 //   기본 exit 0, ERROR 있을 때만 exit 1. --strict 는 WARNING 도 승격. INFO 는 절대 실패 아님(false-BLOCK 방지 설계).
 function skillLintCmd(root, id) {
   root = absRoot(root);
@@ -2439,7 +2471,7 @@ async function _httpFetch(urlStr, opts = {}) {
   });
 }
 
-// skill install <url-or-path> — SKILL.md 다운로드 + .harness/skills/<id>/에 설치
+// skill install <url-or-path> — SKILL.md 다운로드 + .leerness/skills/<id>/에 설치
 async function skillInstallCmd(root, source) {
   if (!source) { fail('사용법: leerness skill install <SKILL.md URL 또는 로컬 디렉토리>'); return process.exit(1); }
   let body = '';
@@ -2465,13 +2497,13 @@ async function skillInstallCmd(root, source) {
   const name = parsed.meta.name || parsed.meta.id;
   const description = parsed.meta.description || '';
   if (!name) { fail('SKILL.md frontmatter에 `name` 필수'); return process.exit(1); }
-  // .harness/skills/<id>/SKILL.md 저장
+  // .leerness/skills/<id>/SKILL.md 저장
   // 1.9.350 (UR-0062 외부리뷰): skill id 정규화 — 선행/후행 ./- 제거 + .. 거부 + jail (path traversal 차단)
   // 1.36.33 (codex 3차 #2): 원문(raw) name 부터 검증 — 정규화가 '../x' 의 ../ 를 벗겨 'x' 로 만들어 traversal 흔적을 지웠다.
   if (/(^|[\\/])\.\.([\\/]|$)|[\\/]/.test(String(name))) { fail(`유효하지 않은 skill name (path traversal/경로 문자 차단): ${name}`); return process.exit(1); }
   const skillId = String(name).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[.\-]+|[.\-]+$/g, '');
   if (!skillId || skillId.includes('..')) { fail(`유효하지 않은 skill id (path traversal 차단): ${name}`); return process.exit(1); }
-  const _skillsRoot = path.join(root, '.harness', 'skills');
+  const _skillsRoot = path.join(root, '.leerness', 'skills');
   const dir = path.join(_skillsRoot, skillId);
   if (!path.resolve(dir).startsWith(path.resolve(_skillsRoot) + path.sep)) { fail(`skill id jail 위반: ${name}`); return process.exit(1); }
   // 1.36.33 (codex 3차 #2): 같은 id 가 이미 설치돼 있고 내용이 다르면 무경고 덮어쓰기 금지 — --force 로만 교체(교체 전 .bak 백업).
@@ -2669,8 +2701,8 @@ async function skillDiscoverCmd(root) {
 
 // 1.9.202: C축 (공식 표준 스킬 자동 활용) 9.0→9.5 보강 — install 이력 기록 + 설치 상태 표시
 //   1.9.192 official catalog 매칭 시 "이미 설치됨" / "신규" 구분 → 중복 install 방지 + 사용자 인지 도움
-//   파일: .harness/skill-installed-log.json (비시크릿)
-function _skillInstalledLogPath(root) { return path.join(root, '.harness', 'skill-installed-log.json'); }
+//   파일: .leerness/skill-installed-log.json (비시크릿)
+function _skillInstalledLogPath(root) { return path.join(root, '.leerness', 'skill-installed-log.json'); }
 function _loadSkillInstalledLog(root) {
   try {
     const fp = _skillInstalledLogPath(root);
@@ -2686,7 +2718,7 @@ function _appendSkillInstalledLog(root, entry) {
     // 중복 (같은 name + source) 제거 후 append
     state.installed = state.installed.filter(x => !(x.name === e.name && x.source === e.source));
     state.installed.push(e);
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     writeUtf8(_skillInstalledLogPath(root), JSON.stringify({ installed: state.installed }, null, 2));
     return true;
   } catch { return false; }
@@ -2731,7 +2763,7 @@ async function skillInstallTopCmd(root) {
     await skillInstallCmd(root, top.url);
     _appendSkillInstalledLog(root, top);
     log('');
-    log(`✓ 설치 + 이력 기록 완료 (.harness/skill-installed-log.json)`);
+    log(`✓ 설치 + 이력 기록 완료 (.leerness/skill-installed-log.json)`);
   } catch (e) {
     fail(`install 실패: ${e.message}`);
     return process.exit(1);
@@ -2846,8 +2878,8 @@ async function skillAutoCacheCmd(root, sub) {
 
 // 1.9.206: i18n 시스템 (사용자 명시) — 설치 가이드 / REPL agent 다국어 + UI/UX 개선
 //   사용자 명시: "설치 가이드에서 언어 선택에 따라 설치 가이드 및 REPL agent 모드 등 설정된 언어로 표시"
-//   설계: 핵심 string table (ko/en) + _t(key, lang) helper. 설치 시 선택 언어 → .harness/LANGUAGE 저장.
-//   lang 결정: explicit > .harness/LANGUAGE > LEERNESS_LANG env > 'ko' (default)
+//   설계: 핵심 string table (ko/en) + _t(key, lang) helper. 설치 시 선택 언어 → .leerness/LANGUAGE 저장.
+//   lang 결정: explicit > .leerness/LANGUAGE > LEERNESS_LANG env > 'ko' (default)
 // 1.9.338 (UR-0025 심층): STRINGS (i18n ko/en catalog) 는 lib/catalogs.js 로 이전 (import). _t 는 _translate(STRINGS,..) 박막.
 // 현재 사용 언어 결정 (env > config > 'ko')
 // 1.9.338 (UR-0025 심층): 순수 _translate(STRINGS, key, lang) (lib/pure-utils) 박막 — STRINGS catalog 주입.
@@ -2871,10 +2903,10 @@ const _ui = {
 
 // 1.9.205: ScheduleWakeup 등록 추적 (사용자 명시)
 //   "예정된 알람이전에 사용자 요청이 들어오면 백그라운드의 알람을 종료후 다시 갱신"
-//   라운드 마무리 시 등록된 wakeup id/expectedFireAt 을 .harness/active-wakeups.json 에 기록 →
+//   라운드 마무리 시 등록된 wakeup id/expectedFireAt 을 .leerness/active-wakeups.json 에 기록 →
 //   handoff/resume 진입 시 expected fire 가 과거이면 "wakeup miss 또는 사용자 조기 진입" 감지 →
 //   메인 에이전트가 새 wakeup 호출하라는 명확한 안내
-function _activeWakeupsPath(root) { return path.join(root, '.harness', 'active-wakeups.json'); }
+function _activeWakeupsPath(root) { return path.join(root, '.leerness', 'active-wakeups.json'); }
 function _loadActiveWakeups(root) {
   try {
     const fp = _activeWakeupsPath(root);
@@ -2885,7 +2917,7 @@ function _loadActiveWakeups(root) {
 }
 function _writeActiveWakeups(root, wakeups) {
   try {
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     writeUtf8(_activeWakeupsPath(root), JSON.stringify({ wakeups, updatedAt: new Date().toISOString() }, null, 2));
     return true;
   } catch { return false; }
@@ -2925,10 +2957,10 @@ function _analyzeWakeupStatus(root) {
 
 // 1.9.207: 사용자 요청 누락 확인 절차 — 사용자 명시
 //   "최근에 명령받아 진행한 것중에 누락된게 없는지 확인하는 절차도 있는지"
-//   .harness/user-requests.json 에 사용자 명시 요청을 누적 기록 → audit 시 task-log/plan/decisions 와 매칭 → 누락 보고
+//   .leerness/user-requests.json 에 사용자 명시 요청을 누적 기록 → audit 시 task-log/plan/decisions 와 매칭 → 누락 보고
 //   레코드 구조: { id, text, recordedAt, status: 'open'|'in-progress'|'completed'|'dropped',
 //                  linkedTaskIds?, linkedPlanIds?, linkedDecisionIds?, notes?, completedAt?, droppedAt? }
-function _userRequestsPath(root) { return path.join(root, '.harness', 'user-requests.json'); }
+function _userRequestsPath(root) { return path.join(root, '.leerness', 'user-requests.json'); }
 // 1.36.21 (전수 sweep P2, 데이터손실): 종전엔 wrapper 가 아닌 "유효 JSON" 을 조용히 {requests:[]} 로 강제하고, 이후 mutation 이
 //   파일 전체를 새 배열로 덮어써 원본을 파괴했다(읽지 못한 데이터를 지우는 read-modify-write). 이제 (1) bare array 는 관대 수용해
 //   다음 쓰기에 자기치유(decisions/lessons 관례와 동일), (2) 그 외 미인식 형태/파싱 실패는 unrecognized 로 표시해 쓰기 경로가 bail.
@@ -2945,7 +2977,7 @@ function _loadUserRequests(root) {
 }
 function _writeUserRequests(root, requests) {
   try {
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     writeUtf8(_userRequestsPath(root), JSON.stringify({ requests, updatedAt: new Date().toISOString() }, null, 2));
     return true;
   } catch { return false; }
@@ -3001,9 +3033,9 @@ function _updateUserRequestLocked(root, id, patch) {
 function _auditUserRequests(root) {
   const state = _loadUserRequests(root);
   const open = state.requests.filter(r => r.status === 'open' || r.status === 'in-progress');
-  const taskLog = (() => { try { return read(path.join(root, '.harness', 'task-log.md')); } catch { return ''; } })();
-  const plan = (() => { try { return read(path.join(root, '.harness', 'plan.md')); } catch { return ''; } })();
-  const decisions = (() => { try { return read(path.join(root, '.harness', 'decisions.md')); } catch { return ''; } })();
+  const taskLog = (() => { try { return read(path.join(root, '.leerness', 'task-log.md')); } catch { return ''; } })();
+  const plan = (() => { try { return read(path.join(root, '.leerness', 'plan.md')); } catch { return ''; } })();
+  const decisions = (() => { try { return read(path.join(root, '.leerness', 'decisions.md')); } catch { return ''; } })();
   const haystack = (taskLog + '\n' + plan + '\n' + decisions).toLowerCase();
   const missing = [];
   const tracked = [];
@@ -3242,7 +3274,7 @@ function _collectPyFiles(root, limit = 100) {
       const fp = path.join(dir, e.name);
       if (e.isDirectory()) {
         // skip common heavy dirs
-        if (/^(node_modules|\.git|__pycache__|\.harness|venv|\.venv|dist|build|_apps|_reports)$/.test(e.name)) continue;
+        if (/^(node_modules|\.git|__pycache__|\.leerness|venv|\.venv|dist|build|_apps|_reports)$/.test(e.name)) continue;
         walk(fp);
       } else if (e.isFile() && /\.py$/i.test(e.name)) {
         out.push(fp);
@@ -3474,7 +3506,7 @@ function _collectRuntimeEnv() {
   try {
     if (env.os.platform === 'win32') {
       // chcp 출력으로 코드페이지 확인 (1.9.249 fix: 65001 (5자리) 까지 매칭 — 이전 \d{3,4} 는 "6500" 만 캡처 BUG)
-      const r = cp.spawnSync('chcp', [], { encoding: 'utf8', shell: true, timeout: 3000 });
+      const r = _spawnPortableArgvSync('chcp.com', [], { encoding: 'utf8', timeout: 3000 });
       const m = (r.stdout || '').match(/(\d{3,5})/);
       if (m) {
         const cp_num = parseInt(m[1], 10);
@@ -3508,7 +3540,7 @@ function _collectRuntimeEnv() {
         env.terminal.psEdition = fromEnv.edition;
       } else {
         // env 마커 불충분 → 보수적으로 Windows PowerShell(5.1) probe (미확정 시 && 경고 유지가 안전)
-        const r = cp.spawnSync('powershell', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8', timeout: 5000 });
+        const r = _spawnPortableArgvSync('powershell', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8', timeout: 5000 });
         if (r.status === 0 && (r.stdout || '').trim()) {
           env.terminal.powershell = (r.stdout || '').trim().split(/\r?\n/)[0].trim();
           env.terminal.psEdition = parseInt(env.terminal.powershell, 10) >= 6 ? 'Core' : 'Desktop';
@@ -3519,7 +3551,10 @@ function _collectRuntimeEnv() {
   // 도구 버전 감지
   for (const [tool, cmd] of [['git', 'git --version'], ['npm', 'npm --version'], ['python', 'python --version'], ['python3', 'python3 --version']]) {
     try {
-      const r = cp.spawnSync(cmd.split(' ')[0], cmd.split(' ').slice(1), { encoding: 'utf8', shell: true, timeout: 3000 });
+      const parts = cmd.split(' ');
+      const r = parts[0] === 'npm'
+        ? spawnNpmSync(parts.slice(1), { encoding: 'utf8', timeout: 3000 })
+        : _spawnPortableArgvSync(parts[0], parts.slice(1), { encoding: 'utf8', timeout: 3000 });
       if (r.status === 0) {
         const v = (r.stdout || r.stderr || '').trim().split('\n')[0];
         env.tools[tool] = v;
@@ -3729,7 +3764,7 @@ function envCmd(root, sub) {
 function _npmGlobalBin() {
   // 1) npm prefix -g (가장 정확) — Windows 는 prefix 자체가 bin, Unix 는 prefix/bin
   try {
-    const r = cp.spawnSync('npm', ['prefix', '-g'], { encoding: 'utf8', shell: true, timeout: 5000 });
+    const r = spawnNpmSync(['prefix', '-g'], { encoding: 'utf8', timeout: 5000 });
     if (r.status === 0) {
       const prefix = (r.stdout || '').trim().split(/\r?\n/).pop();
       if (prefix) return process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
@@ -3758,7 +3793,7 @@ function _dirInPath(dir) {
 function _leernessResolvable() {
   try {
     const probe = process.platform === 'win32' ? 'where' : 'which';
-    const r = cp.spawnSync(probe, ['leerness'], { encoding: 'utf8', shell: true, timeout: 5000 });
+    const r = _spawnPortableArgvSync(probe, ['leerness'], { encoding: 'utf8', timeout: 5000 });
     return r.status === 0 && /leerness/i.test((r.stdout || ''));
   } catch { return false; }
 }
@@ -3782,9 +3817,10 @@ function _pathDiagnose() {
 // 1.9.255 (UR-0019 2단계): Windows User PATH 등록용 PowerShell 스크립트 생성 (순수 함수 — 테스트/디버그 가능)
 //   setx 의 1024자 truncation 회피 위해 [Environment]::SetEnvironmentVariable User scope 사용.
 //   멱등: 현재 User PATH 에 이미 있으면 EXISTS, 없으면 append 후 ADDED. 시스템 PATH 불변 (관리자 권한 불요).
-function _winPathPsScript(bin) {
+function _winPathPsScript() {
   return [
-    "$b = " + JSON.stringify(bin) + ";",
+    // npm prefix is data. JSON double quotes are not PowerShell escaping: $()/backticks execute.
+    "$b = $env:LEERNESS_PATH_BIN;",
     "$u = [Environment]::GetEnvironmentVariable('PATH','User'); if (-not $u) { $u = '' }",
     "$parts = $u.Split(';') | Where-Object { $_ -ne '' }",
     "if ($parts -notcontains $b) {",
@@ -3812,7 +3848,10 @@ function _registerPath(diag) {
     // Windows: PowerShell [Environment]::SetEnvironmentVariable User scope (멱등, 관리자 권한 불요)
     try {
       const ps = _winPathPsScript(bin);
-      const r = cp.spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', timeout: 10000 });
+      const r = _spawnPortableArgvSync('powershell', ['-NoProfile', '-Command', ps], {
+        encoding: 'utf8', timeout: 10000,
+        env: { ...process.env, LEERNESS_PATH_BIN: bin },
+      });
       const out = (r.stdout || '').trim();
       if (r.status === 0 && /ADDED/.test(out)) return { ok: true, method: 'powershell-user-path', detail: `User PATH 에 추가됨 (새 터미널부터 적용): ${bin}` };
       if (r.status === 0 && /EXISTS/.test(out)) return { ok: true, method: 'already', detail: `User PATH 에 이미 존재: ${bin}` };
@@ -3960,7 +3999,8 @@ function _selfTestCases() {
         : (!_argsSafe([shortScript]) && !_binSafe(shortBin));
       return shortPolicy && !_argsSafe(['~/bin/provider']) && !_binSafe('~root/bin/provider')
         && !_argsSafe(['safe.js', 'x&whoami']) && !_argsSafe(['safe.js', 'x|whoami'])
-        && !_binSafe('cmd /c whoami') && !_binSafe('codex&whoami');
+        && !_binSafe('cmd /c whoami') && !_binSafe('codex&whoami')
+        && !_binSafe('--inspect') && !_binSafe('--cpu-prof');
     } },
     { name: 'AGENT_SLASH_COMMANDS: claude/codex/agy/grok/copilot 5종 + 명령 보유', run: () => { const ids = Object.keys(AGENT_SLASH_COMMANDS); return ['claude', 'codex', 'agy', 'grok', 'copilot'].every(id => ids.includes(id) && AGENT_SLASH_COMMANDS[id].commands.length > 0); } },
     { name: '_agentSlashHint: grok 슬래시 요약 + copilot 하위명령 라벨', run: () => { const g = _agentSlashHint('.', 'grok'); const c = _agentSlashHint('.', 'copilot'); return !!g && g.count > 0 && /Grok/.test(g.summary) && !!c && c.invoke === 'subcommand' && /하위명령/.test(c.summary); } },
@@ -3975,7 +4015,7 @@ function _selfTestCases() {
     { name: '_resolveNpmTag: latest 기본 + next 허용 + 잘못된 형식 폴백 (1.9.275)', run: () => _resolveNpmTag(null, {}) === 'latest' && _resolveNpmTag('next', {}) === 'next' && _resolveNpmTag(null, { LEERNESS_NPM_TAG: 'next' }) === 'next' && _resolveNpmTag('bad tag!', {}) === 'latest' && _resolveNpmTag('Beta', {}) === 'beta' },
     { name: '_sanitizeFences: 코드펜스 중립화 (Codex 수렴 1.9.287)', run: () => { const out = _sanitizeFences('text\n```js\ncode\n```\nmore'); return !/```/.test(out) && /'''/.test(out) && /code/.test(out); } },
     { name: '_mcpToolCount: 실제 도구 정의 수 (자기-매칭 오탐 없음) (Codex #5 1.9.288)', run: () => { const n = _mcpToolCount(); return n >= 75 && n < 200; } },
-    { name: '_shellQuoteArg: 프롬프트 셸 주입 중립화 (Codex #3 1.9.289)', run: () => { const q = _shellQuoteArg('a; rm -rf / && echo x'); if (process.platform === 'win32') return q === '"a; rm -rf / && echo x"' && _shellQuoteArg('a"b') === '"a""b"'; return q === "'a; rm -rf / && echo x'" && _shellQuoteArg("it's") === "'it'\\''s'"; } },
+    { name: '_shellQuoteArg: 프롬프트 셸 주입 중립화 (Codex #3 1.9.289)', run: () => { const q = _shellQuoteArg('a; rm -rf / && echo x'); if (process.platform === 'win32') { let rejected = 0; for (const bad of ['%PATH%', '!PATH!', 'a"b']) { try { _shellQuoteArg(bad); } catch { rejected++; } } return q === '"a; rm -rf / && echo x"' && rejected === 3 && _shellQuoteArg('tail\\') === '"tail\\\\"'; } return q === "'a; rm -rf / && echo x'" && _shellQuoteArg("it's") === "'it'\\''s'"; } },
     { name: '_evidenceQuality: 파일+테스트 근거 강제 (Codex 수렴 1.9.287)', run: () => { const good = _evidenceQuality('src/api.js 수정, npm test 12/12 통과 (Exit: 0)'); const weak = _evidenceQuality('테스트 통과함'); const noFile = _evidenceQuality('12 tests passed'); return good.ok === true && good.hasFile && good.hasTest && weak.ok === false && weak.missing.includes('수정 파일 경로') && noFile.ok === false; } },
     { name: '_parseEvidenceStats: review-evidence pass/fail 집계 (1.9.286)', run: () => { const s = _parseEvidenceStats('## 2026-06-03\nCommand: npm test\nExit: 0\n\n## 2026-06-03\nCommand: build\nExit: 1\n\n## 2026-06-03\nverify PASS 통과\n'); return s.entries === 3 && s.pass === 2 && s.fail === 1 && s.rate === 67; } },
     { name: '_reuseDetect: 키워드→OSS 카테고리 + 체크리스트 (1.9.285)', run: () => { const a = _reuseDetect('JWT 인증 구현'); const b = _reuseDetect('날짜 포맷 date'); const c = _reuseDetect('전혀무관한xyzzy'); return a.some(x => x.key === 'auth') && b.some(x => x.key === 'date') && c.length === 0 && REUSE_CHECKLIST.length >= 5 && REUSE_CATEGORIES.length >= 12; } },
@@ -3983,8 +4023,8 @@ function _selfTestCases() {
     { name: '권한 등급: _requiredTier + _policyAllows 순서 (1.9.281)', run: () => { return _requiredTier('release publish') === 'publish' && _requiredTier('agents multi --execute') === 'shell-write' && _requiredTier('handoff') === 'read-only' && _requiredTier('init') === 'project-write' && _policyAllows('project-write', 'safe-write') === true && _policyAllows('project-write', 'publish') === false && _tierRank('read-only') < _tierRank('publish'); } },
     { name: 'ADAPTERS + _mcpJsonContent: 도구 매핑 + .mcp.json 등록 (1.9.280)', run: () => { const ids = Object.keys(ADAPTERS); const okMap = ['claude','cursor','codex','goose','opencode'].every(id => ADAPTERS[id] && Array.isArray(ADAPTERS[id].keys) && ADAPTERS[id].keys.length); const m = JSON.parse(_mcpJsonContent()); return ids.length >= 9 && okMap && ADAPTERS.claude.mcp === true && ADAPTERS.copilot.mcp === false && m.mcpServers.leerness.command === 'npx' && m.mcpServers.leerness.args.join(' ') === '-y leerness mcp serve'; } },   // 1.36.116: `-y` — GUI 클라이언트는 npx 설치 프롬프트에 답할 수 없다
     { name: '_newRunRecord: GPT-5.5 권고 스키마 14필드 + 기본값 (1.9.278)', run: () => { const r = _newRunRecord({ run_id: 'run-0001', goal: 'g', started_at: '2026-06-03T00:00:00Z' }); return r.schemaVersion === 1 && r.run_id === 'run-0001' && r.started_at === '2026-06-03T00:00:00Z' && Array.isArray(r.files_changed) && Array.isArray(r.commands_run) && Array.isArray(r.tests_run) && Array.isArray(r.decisions) && r.verification_result === null && r.status === 'in-progress' && 'handoff_summary' in r && 'model_name' in r && 'task_id' in r; } },
-    { name: 'coreFiles --minimal: 핵심 유지 + 비핵심 제외 + verify 필수 보존 (1.9.276)', run: () => { const full = coreFiles('.', 'ko', []); const min = coreFiles('.', 'ko', [], { minimal: true }); const keep = ['.harness/plan.md','.harness/progress-tracker.md','.harness/session-handoff.md','AGENTS.md','CLAUDE.md','.harness/consistency-policy.md','.harness/reuse-map.md','.harness/encoding-policy.md','.harness/secret-policy.md']; const drop = ['.cursor/rules/leerness.mdc','.harness/skill-index.md','.harness/architecture.md']; const verifyReq = ['.harness/design-system.md','.harness/protected-files.md','.harness/current-state.md']; if (!verifyReq.every(k => min[k])) return false; return Object.keys(min).length < Object.keys(full).length && keep.every(k => min[k]) && drop.every(k => !min[k]); } },
-    { name: '_cliBootstrap: CLI 부작용 require.main 가드 격리 (Codex #4 UR-0037 1.9.290)', run: () => { if (typeof _cliBootstrap !== 'function' || typeof _ensureStdoutEncoding !== 'function') return false; const src = read(__filename); const guarded = /if \(require\.main === module\) _cliBootstrap\(\);/.test(src); const inFn = /function _cliBootstrap\(\)\s*\{[\s\S]*?removeAllListeners\('warning'\)[\s\S]*?NODE_OPTIONS[\s\S]*?_ensureStdoutEncoding\(\);[\s\S]*?\n\}/.test(src); const noTopIife = !/\}\)\(\);\s*\n\n\/\/ 1\.9\.184/.test(src); return guarded && inFn && noTopIife; } },
+    { name: 'coreFiles --minimal: 핵심 유지 + 비핵심 제외 + verify 필수 보존 (1.9.276)', run: () => { const full = coreFiles('.', 'ko', []); const min = coreFiles('.', 'ko', [], { minimal: true }); const keep = ['.leerness/plan.md','.leerness/progress-tracker.md','.leerness/session-handoff.md','AGENTS.md','CLAUDE.md','.leerness/consistency-policy.md','.leerness/reuse-map.md','.leerness/encoding-policy.md','.leerness/secret-policy.md']; const drop = ['.cursor/rules/leerness.mdc','.leerness/skill-index.md','.leerness/architecture.md']; const verifyReq = ['.leerness/design-system.md','.leerness/protected-files.md','.leerness/current-state.md']; if (!verifyReq.every(k => min[k])) return false; return Object.keys(min).length < Object.keys(full).length && keep.every(k => min[k]) && drop.every(k => !min[k]); } },
+    { name: '_cliBootstrap: require.main 격리 + 런타임 경고 비은폐 (Codex #4 UR-0037, 1.36.162)', run: () => { if (typeof _cliBootstrap !== 'function' || typeof _ensureStdoutEncoding !== 'function') return false; const src = read(__filename); const guarded = /if \(require\.main === module\) _cliBootstrap\(\);/.test(src); const inFn = /function _cliBootstrap\(\)\s*\{\s*_ensureStdoutEncoding\(\);\s*\}/.test(src); const boot = (src.match(/function _cliBootstrap\(\)\s*\{[^}]*\}/) || [''])[0]; const noSuppression = !boot.includes('removeAll' + 'Listeners') && !boot.includes('NODE_' + 'OPTIONS') && !boot.includes('--no-' + 'deprecation'); const noTopIife = !/\}\)\(\);\s*\n\n\/\/ 1\.9\.184/.test(src); return guarded && inFn && noSuppression && noTopIife; } },
     { name: 'lib/agent-registry: EXTERNAL_AGENTS/AGENT_SLASH_COMMANDS 모듈 단일출처 분리 (UR-0025 1.9.291)', run: () => { const m = require('../lib/agent-registry'); return m.EXTERNAL_AGENTS === EXTERNAL_AGENTS && m.AGENT_SLASH_COMMANDS === AGENT_SLASH_COMMANDS && m.EXTERNAL_AGENTS.length === 10 && Object.keys(m.AGENT_SLASH_COMMANDS).length === 9 && !/const EXTERNAL_AGENTS = \[/.test(read(__filename)); } },
     { name: 'get_project_context: MCP 시맨틱 verb 등록 + CLI context 디스패치 (UR-0031 1.9.292)', run: () => { const src = read(__filename); const mcpDef = require('../lib/mcp-tools').some(t => t.name === 'leerness_get_project_context'); const mcpCase = /case 'leerness_get_project_context':[\s\S]*?cliArgs = \['context'/.test(src); const cliDisp = /if \(cmd === 'context'\)\s+return contextCmd/.test(src); return typeof contextCmd === 'function' && mcpDef && mcpCase && cliDisp && _mcpToolCount() >= 80; } },
     { name: '_canonicalProgressHeader + idempotency auto-fix (근본 복제버그 fix 1.9.293)', run: () => { const h = _canonicalProgressHeader(); const headerOk = /leernessRole: progress-tracker/.test(h) && /\| ID \| Status \| Request \|/.test(h) && /\|---\|/.test(h); const src = read(__filename); const fnOk = typeof _autoFixIdempotency === 'function'; const noWholeTextFallback = src.includes('return _canonicalProgressHeader(_phLang);') && !/if \(idx < 0\) return text;/.test(src); const driftWired = /_autoFixIdempotency\(root\)/.test(src) && /idempotency 중복/.test(src); return headerOk && fnOk && noWholeTextFallback && driftWired; } },
@@ -3994,6 +4034,36 @@ function _selfTestCases() {
     { name: 'lib/mcp-tools: MCP 도구 정의 모듈 단일출처 (_mcpToolCount=모듈 length, Codex #5 영구해소) (UR-0025 1.9.297)', run: () => { const T = require('../lib/mcp-tools'); return Array.isArray(T) && T.length >= 81 && T.every(t => t.name && t.description && t.inputSchema) && T[0].name === 'leerness_handoff' && _mcpToolCount() === T.length && !/const TOOLS = \[/.test(read(__filename)); } },
     { name: 'writeUtf8: 원자적 쓰기(temp→rename) 손상방지 행위 (UR-0038 외부리뷰 / CV-5 행위화 1.9.366)', run: () => { if (typeof writeUtf8 !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wu_')); try { const f = path.join(tmp, 'sub', 'a.txt'); writeUtf8(f, '한글 UTF-8 내용'); const okContent = read(f) === '한글 UTF-8 내용'; const noTmpLeft = fs.readdirSync(path.dirname(f)).every(n => !n.includes('.tmp-')); return okContent && noTmpLeft; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: '_scrubTestEnv: npm test 시크릿 차단(_scrubEnv는 release 토큰 유지) (UR-0039 외부리뷰 1.9.299)', run: () => { const o = { N: process.env.NPM_TOKEN, L: process.env.LEERNESS_NPM_TOKEN }; process.env.NPM_TOKEN = 'sec1'; process.env.LEERNESS_NPM_TOKEN = 'sec2'; const base = _scrubEnv(); const test = _scrubTestEnv(); const r = base.NPM_TOKEN === 'sec1' && base.LEERNESS_NPM_TOKEN === 'sec2' && !test.NPM_TOKEN && !test.LEERNESS_NPM_TOKEN && !!test.PATH; if (o.N === undefined) delete process.env.NPM_TOKEN; else process.env.NPM_TOKEN = o.N; if (o.L === undefined) delete process.env.LEERNESS_NPM_TOKEN; else process.env.LEERNESS_NPM_TOKEN = o.L; return r; } },
+    { name: 'project dotenv trust boundary: Node/npm 제어키 거부 + provider allowlist + child scrub (1.36.162)', run: () => {
+      const keys = ['NODE_OPTIONS', 'NODE_NO_WARNINGS', 'NODE_REDIRECT_WARNINGS', 'NODE_PATH', 'NPM_EXECPATH', 'LEERNESS_ENABLE_CODEX', 'ANTHROPIC_API_KEY'];
+      const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dotenv-boundary-'));
+      try {
+        for (const key of keys) delete process.env[key];
+        writeUtf8(path.join(tmp, '.env'), [
+          'NODE_OPTIONS=--require=C:/untrusted/preload.js',
+          'NODE_NO_WARNINGS=1',
+          'NODE_REDIRECT_WARNINGS=C:/untrusted/warnings.log',
+          'NODE_PATH=C:/untrusted/modules',
+          'NPM_EXECPATH=C:/untrusted/npm-cli.js',
+          'LEERNESS_ENABLE_CODEX=1',
+          'ANTHROPIC_API_KEY=example',
+        ].join('\n') + '\n');
+        _loadEnvFile(tmp);
+        const childEnv = _scrubEnv();
+        return process.env.LEERNESS_ENABLE_CODEX === '1' && process.env.ANTHROPIC_API_KEY === 'example'
+          && !process.env.NODE_OPTIONS && !process.env.NODE_NO_WARNINGS && !process.env.NODE_REDIRECT_WARNINGS
+          && !process.env.NODE_PATH && !process.env.NPM_EXECPATH
+          && childEnv.ANTHROPIC_API_KEY === 'example'
+          && !childEnv.NODE_OPTIONS && !childEnv.NODE_NO_WARNINGS && !childEnv.NODE_REDIRECT_WARNINGS && !childEnv.NODE_PATH;
+      } finally {
+        for (const key of keys) {
+          if (before[key] === undefined) delete process.env[key];
+          else process.env[key] = before[key];
+        }
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+      }
+    } },
     { name: 'shell 주입 표면 제거: fetchNpmLatest execFile+pkg검증 + runCommandSafe argList 인용 (UR-0040 외부리뷰 1.9.300)', run: () => { const src = read(__filename); const npmFix = /'view', pkg, 'version'/.test(src) && !/cp\.exec\(.npm view \$\{pkg\}/.test(src) && /패키지명 charset/.test(src) && !/cp\.execFile\('npm', \[[^\]]*\], \{ timeout: 12000, shell:/.test(src); const argFix = /argList\.map\(_shellQuoteArg\)\.join/.test(src); return npmFix && argFix && typeof _shellQuoteArg === 'function'; } },
     { name: 'MCP requiredTier 메타데이터 + 정책 minTier 게이트 (UR-0041 외부리뷰 1.9.301)', run: () => { const T = require('../lib/mcp-tools'); const allValid = T.length >= 81 && T.every(t => PERMISSION_TIERS.includes(t.requiredTier)); const get = n => (T.find(t => t.name === n) || {}).requiredTier; const classOk = get('leerness_state_record') === 'safe-write' && get('leerness_provider_add') === 'safe-write' && get('leerness_web') === 'network' && get('leerness_handoff') === 'safe-write' && get('leerness_audit') === 'safe-write' && get('leerness_task_export') === 'project-write'; const src = read(__filename); const gateOk = /_tierRank\(minTier\) > _tierRank\(required\)/.test(src) && /_policyEnforce\(targetPath, cliArgs\.join\(' '\), _toolDef/.test(src); return allValid && classOk && gateOk; } },
     { name: 'verify-claim git diff 시맨틱 교차검증: _gitChangedFiles/_claimFileInGit + strict FAIL 통합 (UR-0042 외부리뷰 1.9.302)', run: () => { const fnOk = typeof _gitChangedFiles === 'function' && typeof _claimFileInGit === 'function'; const matchOk = _claimFileInGit('src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('./src/api.js', new Set(['src/api.js'])) === true && _claimFileInGit('other.js', new Set(['src/api.js'])) === false && _claimFileInGit('x', null) === null; const src = read(__filename); const wired = /git diff 교차검증/.test(src) && /\|\| !gitClaimOk/.test(src) && /_gitChangedFiles\(root\)/.test(src); return fnOk && matchOk && wired; } },
@@ -4007,8 +4077,10 @@ function _selfTestCases() {
       // (2) dispatch 와이어: lib/agents.js 가 --raw 옵트아웃으로 브리프를 접두하고, DI 로 _harnessBrief 를 받음.
       const agentsSrc = read(path.join(__dirname, '..', 'lib', 'agents.js'));
       const wired = /has\('--raw'\)[\s\S]{0,120}_harnessBrief\(\) \+ task/.test(agentsSrc) && read(__filename).includes("_harnessBrief: _tgl.toggleOn(root, 'delegation-brief')");   // 1.36.30: delegation-brief 토글 연동 형태 (리터럴 매치)
-      // (3) bench stdin hang 수정: codex exec 가 열린 stdin 파이프에서 EOF 대기(실측) → spawn stdio ignore.
-      const stdinFixed = agentsSrc.includes("{ shell: true, stdio: ['ignore', 'pipe', 'pipe'] }");
+      // (3) bench stdin hang 수정: codex exec 가 열린 stdin 파이프에서 EOF 대기(실측) → 실행 spec 이 stdin ignore.
+      const codexBench = require('../lib/agents')._benchLaunchSpec(EXTERNAL_AGENTS.find(a => a.id === 'codex'), 'probe', false);
+      const stdinFixed = codexBench.file === 'codex' && codexBench.stdin === 'ignore'
+        && JSON.stringify(codexBench.args) === JSON.stringify(['exec', '--skip-git-repo-check', 'probe']);
       // (4) 1.36.29 (사용자 보고): multi 도 브리프 접두 — --execute 실 spawn(_cliChat) + 명령 목록/JSON 3지점 전부 briefTask.
       const multiWired = agentsSrc.includes('_cliChat(root, def.id, briefTask,')
         && agentsSrc.includes('_dispatchCommand(x.def.id, briefTask, writeMode)')
@@ -4114,18 +4186,18 @@ function _selfTestCases() {
       const p = require('../lib/pure-utils');
       const next = '# T\nline A\nline B\n';
       const prev = '# T\nline A\nline B\nMY CUSTOM 1\n';
-      const m1 = p._managedMerge('CLAUDE.md', next, prev, '.harness/archive', null);
-      const m2 = p._managedMerge('CLAUDE.md', next, m1, '.harness/archive', null);
-      const m3 = p._managedMerge('CLAUDE.md', next, m2, '.harness/archive', null);
+      const m1 = p._managedMerge('CLAUDE.md', next, prev, '.leerness/archive', null);
+      const m2 = p._managedMerge('CLAUDE.md', next, m1, '.leerness/archive', null);
+      const m3 = p._managedMerge('CLAUDE.md', next, m2, '.leerness/archive', null);
       // 핵심 판별: 종전 구현은 m2 에서 MY CUSTOM 1 이 사라졌다 (previous 에 preserved 태그 있으면 next 만 반환)
       const survived = m1.includes('MY CUSTOM 1') && m2.includes('MY CUSTOM 1') && m3.includes('MY CUSTOM 1');
       const idem = m2 === m3;
       // 레거시 <details> 형식에서 커스텀 회수 + 래퍼 미이월
       const F = String.fromCharCode(96, 96, 96);
       const legacy = next + '\n---\n<!-- leerness:migration-preserved -->\n## Preserved previous content\n\n<details>\n<summary>Previous CLAUDE.md</summary>\n\n' + F + 'md\n# T\nOLD CUSTOM X\n' + F + '\n\n</details>\n';
-      const lm = p._managedMerge('CLAUDE.md', next, legacy, '.harness/archive', null);
+      const lm = p._managedMerge('CLAUDE.md', next, legacy, '.leerness/archive', null);
       const legacyOk = lm.includes('OLD CUSTOM X') && !lm.includes('<details>');
-      const cleanOk = p._managedMerge('CLAUDE.md', next, next, '.harness/archive', null) === next;
+      const cleanOk = p._managedMerge('CLAUDE.md', next, next, '.leerness/archive', null) === next;
       const owOk = p._managedMerge('x.md', next, prev, '.', new Set(['x.md'])) === next;
       return survived && idem && legacyOk && cleanOk && owOk;
     } },
@@ -4136,7 +4208,7 @@ function _selfTestCases() {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tgl_'));
       let behavOk = false, htmlOk = false;
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         // 토글 저장/로드 행위 + 기본 ON
         const d0 = tg.loadToggles(tmp);
         // 1.36.87: 원래 의도는 "**기존** 토글이 조용히 꺼지지 않는다" 이지 "모든 토글이 영원히 기본 ON" 이 아니다.
@@ -4149,7 +4221,7 @@ function _selfTestCases() {
         const offOk = tg.loadToggles(tmp).gate === false && tg.toggleOn(tmp, 'lens') === true;
         // 1.36.87: 값 해석 — 인식 불가 값이 **차단 게이트를 켜면 안 된다**(종전 `v !== false` 는 null/0/"off" 를 ON 으로 읽었다, 실측).
         //   반대로 손으로 쓴 "off" 문자열이 보호 게이트를 켠 채로 두던 것도 함께 고친다.
-        const tf = path.join(tmp, '.harness', 'toggles.json');
+        const tf = path.join(tmp, '.leerness', 'toggles.json');
         const withVal = (v) => { fs.writeFileSync(tf, JSON.stringify({ 'bugfix-receipt': v, gate: v })); return tg.loadToggles(tmp); };
         const coerceOk = [null, 0, 'off', 'OFF', 'false', [], {}].every(v => withVal(v)['bugfix-receipt'] === false)
           && withVal(true)['bugfix-receipt'] === true && withVal('on')['bugfix-receipt'] === true
@@ -4181,52 +4253,55 @@ function _selfTestCases() {
         && s.includes("!_heldLocks.has(path.join(_leernessStateDir(root), 'state.json') + '.lock')");
       // #2: team add 가 락 안 재로드→중복검사→저장 + EPERM 재시도. 1.36.78: 락내 재로드가 checked 로더로(형상무효 레이스 거부).
       const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js'));
-      const teamLock = teamSrc.includes('_loadTeamsChecked(root)') && teamSrc.includes("deps._withLock(require('path').join(root, '.harness', 'teams.json'), _doAdd)") && teamSrc.includes("e.code === 'EPERM'") && teamSrc.includes('_rechk.invalid');
+      const teamLock = teamSrc.includes('_loadTeamsChecked(root)') && teamSrc.includes("deps._withLock(require('path').join(root, '.leerness', 'teams.json'), _doAdd)") && teamSrc.includes("e.code === 'EPERM'") && teamSrc.includes('_rechk.invalid');
       const teamWired = s.includes('_loadTeamsChecked, _saveTeams, _detectShellCtx, arg, has, _withLock, failJson }');
       // #7: pre-wake 매처가 테이블형+YAML형 모두 (행위)
       const both = ('| T-0001 | in-progress | x |\nstatus: in-progress\n'.match(/^\|\s*T-\d{4,}\s*\|\s*in-progress\s*\|/gm) || []).length === 1;
       const pwWired = /_runPreWakeAudit[\s\S]{0,2200}\^\\\|\\s\*T-\\d\{4,\}\\s\*\\\|\\s\*in-progress/.test(s);
       return stateLock && teamLock && teamWired && both && pwWired;
     } },
-    { name: 'positional path 잔존 클래스 소진 (1.36.33): migrate-workspace-dir 외 8종 — cwd 오염 차단 (소스가드, 실제 자기 저장소 오염 사고로 발견)', run: () => {
+    { name: 'positional path 잔존 클래스 소진 (1.36.33/162): migrate bare-relative + 8종 cwd 오염 차단 (소스가드)', run: () => {
       const s = read(__filename);
       const P = "arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd()";
-      const cmds = ["'migrate-workspace-dir'", "'lessons'", "'resume'", "'session-resume'", "'commands'", "'py-check'", "'path-setup' || cmd === 'path'", "'capabilities' || cmd === 'security-surface'"];
-      return cmds.every(c => {
+      const cmds = ["'lessons'", "'resume'", "'session-resume'", "'commands'", "'py-check'", "'path-setup' || cmd === 'path'", "'capabilities' || cmd === 'security-surface'"];
+      const oldSurface = cmds.every(c => {
         const i = s.indexOf('if (cmd === ' + c + ')');
         if (i < 0) return false;
         return s.slice(i, s.indexOf('\n', i)).includes(P);
       });
+      // Compose the needle so this selftest does not match its own source.
+      const mi = s.indexOf('if (cmd === ' + "'migrate-workspace-dir'" + ')');
+      const migrateSurface = mi >= 0 && s.slice(mi, s.indexOf('\n', mi))
+        .includes("arg('--path', null) || (args[1] && !args[1].startsWith('-') ? args[1] : null) || process.cwd()");
+      return oldSurface && migrateSurface;
     } },
     { name: '데이터 보존 3종 (1.36.33, codex 3차 #1/#2/#3): migrate --force 상태파일 보존 + skill 충돌/raw-name 가드 + settings 손상 중단 + symlink 미추종 (소스가드)', run: () => {
       const s = read(__filename);
-      const forceGuard = s.includes("const effForce = opts.force && !_USER_STATE.has(f);") && s.includes("'.harness/progress-tracker.md', '.harness/plan.md', '.harness/task-log.md'");
+      const forceGuard = s.includes("const effForce = opts.force && !_USER_STATE.has(f);") && s.includes("'.leerness/progress-tracker.md', '.leerness/plan.md', '.leerness/task-log.md'");
       const skillGuard = s.includes('유효하지 않은 skill name (path traversal/경로 문자 차단)') && s.includes('이미 설치된 skill: ${skillId} — 내용이 다릅니다');
       const settingsGuard = s.includes('settings.local.json 이 손상돼(JSON 파싱 실패) hook 설치를 중단');
-      // 1.36.83 (공허가드 스윕): 종전 정확-리터럴 가드는 이 줄 자신만 매칭해 기능을 지워도 초록이었다.
-      //   불변식 정규식(심링크면 push 후 중단) + **행위검사**(실제 junction/symlink 를 따라가지 않는지)로 대체.
-      //   판별력: lstat→stat 로 되돌리면 소스 정규식은 그대로 통과하지만 행위검사가 잡는다(실측).
-      let symlinkGuard = /isSymbolicLink\(\)\s*\)\s*\{[^\n]*skippedFiles\.push\([^\n]*symlink/.test(s);
+      // Workspace migration fails closed on links/junctions; it never follows
+      // them and never reports a partial migration as success.
+      let symlinkGuard = false;
       {
         const _st = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sym_'));
         let _linked = false;
         try {
-          fs.mkdirSync(path.join(_st, '.harness'), { recursive: true });
-          fs.writeFileSync(path.join(_st, '.harness', 'HARNESS_VERSION'), VERSION);
+          const _legacy = legacyWorkspacePath(_st);
+          fs.mkdirSync(_legacy, { recursive: true });
+          fs.writeFileSync(path.join(_legacy, 'HARNESS_VERSION'), VERSION);
           fs.mkdirSync(path.join(_st, 'outside'), { recursive: true });
           fs.writeFileSync(path.join(_st, 'outside', 'a.txt'), 'A');
-          fs.symlinkSync(path.join(_st, 'outside'), path.join(_st, '.harness', 'loop'), process.platform === 'win32' ? 'junction' : 'dir');
+          fs.symlinkSync(path.join(_st, 'outside'), path.join(_legacy, 'loop'), process.platform === 'win32' ? 'junction' : 'dir');
           _linked = true;
         } catch {}   // 심링크 생성 권한 없는 환경 → 소스 불변식만으로 판정(false-BLOCK 회피)
         if (_linked) {
           try {
-            // 1.36.126: CLI 는 fail-closed 지만 복사 구현의 안전 속성은 계속 시험한다(내부 통로).
-            const _rep = _migrateWorkspaceDir(_st, { dryRun: true, allowUnsupported: true });
-            const _skipped = _rep.skippedFiles.some(f => /^loop\b/.test(f) && f.includes('symlink'));
-            const _notFollowed = !_rep.copiedFiles.some(f => /^loop[\\/]/.test(f));
-            symlinkGuard = symlinkGuard && _skipped && _notFollowed;
+            const _rep = _migrateWorkspaceDir(_st, { dryRun: true });
+            symlinkGuard = _rep.blocked === true && _rep.blockedReason === 'workspace-dir-symlink'
+              && _rep.copiedFiles.length === 0 && !fs.existsSync(canonicalWorkspacePath(_st));
           } catch { symlinkGuard = false; }
-        }
+        } else symlinkGuard = true;
         try { fs.rmSync(_st, { recursive: true, force: true }); } catch {}
       }
       const copySafe = /function copyRecursiveSafe[\s\S]{0,400}lstatSync/.test(s);
@@ -4247,7 +4322,7 @@ function _selfTestCases() {
       const sc = read(path.join(path.dirname(__filename), '..', 'lib', 'session-close.js'));
       const closeOk = sc.includes('_STATUS_ALIAS') && sc.includes("completed: 'done'") && sc.includes("cancelled: 'dropped'") && sc.includes('buckets.other.length');
       // #4: tarball 공백 경로 quoting + 설치 버전 재판독
-      const tarOk = s.includes('const _qw = a =>') && s.includes("read(path.join(root, '.harness', 'HARNESS_VERSION')).trim(); if (_hv) nextLeerness = _hv;");
+      const tarOk = s.includes('const _qw = a =>') && s.includes("read(path.join(root, '.leerness', 'HARNESS_VERSION')).trim(); if (_hv) nextLeerness = _hv;");
       return semverOk && cacheOk && policyOk && credsOk && closeOk && tarOk;
     } },
     { name: 'deps --run-tests 정직화 (1.36.35, codex 3차 #6): json/human 스윕 공용 + 절대경로 키(동명 프로젝트 오식별 방지) + 실패 시 exit1 (소스가드)', run: () => {
@@ -4309,8 +4384,8 @@ function _selfTestCases() {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rl_'));
       let salvage = false, preserve = false;
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
-        const f = path.join(tmp, '.harness', 'rules.md');
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
+        const f = path.join(tmp, '.leerness', 'rules.md');
         // 4셀 행(status/lastVerified 누락) + 2셀 행(파싱 불가)
         fs.writeFileSync(f, _rulesHeader() + '\n| R-0001 | every-session | 정상 룰 | 2026-07-16 | active | - |\n| R-0002 | every-commit | 절단 룰 | 2026-07-16 |\n| R-0003 | broken |\n');
         const rules = readRules(tmp);
@@ -4330,8 +4405,8 @@ function _selfTestCases() {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rt_'));
       let sigOk = false;
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
-        fs.writeFileSync(path.join(tmp, '.harness', 'task-log.md'), '# T\n\n## 2026-07-16\n- 수정 롤백 재발 password bypass undone\n');
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.leerness', 'task-log.md'), '# T\n\n## 2026-07-16\n- 수정 롤백 재발 password bypass undone\n');
         const agg = _retroAggregate(tmp);
         sigOk = agg.fixSignals === 3 && agg.passSignals === 0;
       } catch {} finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
@@ -4339,7 +4414,7 @@ function _selfTestCases() {
       const s = read(__filename);
       const tagOk = s.includes("'--list', 'v*'") && !s.includes("'--list', 'v1.9" + ".*'");
       const celebOk = (s.match(/이 저장소 계보의 릴리스 태그 이력 없음/g) || []).length >= 2;
-      const usageOk = s.includes("else if (args[2] && !args[2].startsWith('-') && exists(path.join(absRoot(args[2]), '.harness')))");
+      const usageOk = s.includes("else if (args[2] && !args[2].startsWith('-') && exists(path.join(absRoot(args[2]), '.leerness')))");
       const cutoffWired = s.includes('_retroAggregate(root, cutoff)');
       return filterOk && sigOk && tagOk && celebOk && usageOk && cutoffWired;
     } },
@@ -4368,9 +4443,9 @@ function _selfTestCases() {
       let gOk = false;
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_gl_'));
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         const p = require('../lib/pure-utils');
-        fs.writeFileSync(path.join(tmp, '.harness', 'glossary.md'), 'PREFACE\n' + p.GLOSSARY_START + '\nold\n' + p.GLOSSARY_END + '\nAPPENDIX\n');
+        fs.writeFileSync(path.join(tmp, '.leerness', 'glossary.md'), 'PREFACE\n' + p.GLOSSARY_START + '\nold\n' + p.GLOSSARY_END + '\nAPPENDIX\n');
         // splice 로직은 glossaryCmd 내부 — 소스가드 + 위 실측(E2E 사슬)으로 검증. 여기선 마커 상수 존재만 재확인.
         gOk = s.includes('_prev.slice(0, _si) + _gen + _prev.slice(_ei + GLOSSARY_END.length)');
       } catch {} finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
@@ -4410,7 +4485,8 @@ function _selfTestCases() {
         tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_enf_'));
         const g = _gitSpawn(['-C', tmp, 'init'], { encoding: 'utf8', timeout: 10000 });
         if (g.status === 0) {
-          fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+          fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
+          fs.writeFileSync(path.join(tmp, '.leerness', 'HARNESS_VERSION'), VERSION);
           const save = process.argv; const _w = process.stdout.write;
           try { process.argv = ['node', 'h', 'enforce', 'install']; process.stdout.write = () => true; enforceCmd(tmp, 'install'); } finally { process.stdout.write = _w; process.argv = save; }
           const hk = fs.readFileSync(path.join(tmp, '.git', 'hooks', 'pre-commit'), 'utf8');
@@ -4422,7 +4498,7 @@ function _selfTestCases() {
       finally { if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } }
       return wired && selfContained && worktreeRooted && chainOk && initAuto && behavOk;
     } },
-    { name: 'enforce 하드닝 (1.36.44, 적대적 자체헌트): .harness 無 체크아웃 FP 방지 + worktree 훅경로 + --no-verify 사후감지 audit + 한계 정직 (소스가드)', run: () => {
+    { name: 'enforce 하드닝 (1.36.44, 적대적 자체헌트): .leerness 無 체크아웃 FP 방지 + worktree 훅경로 + --no-verify 사후감지 audit + 한계 정직 (소스가드)', run: () => {
       const s = read(__filename);
       // 1.36.134: 이 가드는 **옛 리터럴**을 붙잡고 있었다 — 하위 디렉토리 우회를 고치며 훅이 `$LRN_DIR` 를 쓰고
       //   훅 경로를 `--git-path`(core.hooksPath 반영)로 바꾸자 그대로 깨졌다. 지키려는 것은 문자열이 아니라 **성질**이다:
@@ -4436,7 +4512,7 @@ function _selfTestCases() {
     { name: 'codex 전역 조건부 지침 (1.36.45, goal 모드 커버): adapter codex --global — 마커 병합/보존/멱등/remove (소스가드)', run: () => {
       const s = read(__filename);
       const wired = s.includes("tool === 'codex' && has('--global')") && s.includes('leerness:codex-global:start');
-      const conditional = s.includes('`.harness/` 디렉토리가 있을 때만');
+      const conditional = s.includes('`.leerness/` 디렉토리가 있을 때만');
       const mergeOk = s.includes('_mergeReadmeSection(existing, block, START, END)');
       const removeOk = /has\('--remove'\)[\s\S]{0,400}codex 전역 leerness 블록 제거/.test(s);
       return wired && conditional && mergeOk && removeOk;
@@ -4577,7 +4653,7 @@ function _selfTestCases() {
     } },
     { name: '경로/EOL/형태 견고성 4종 (1.36.21, 전수 sweep P2): handoff·env detect 없는경로 가드 + CRLF plan tasks + migrate 오타설치 차단 + user-requests 미인식 쓰기차단 — 소스가드 + 순수 행위', run: () => {
       const s = read(__filename);
-      // B: 없는 경로에 트리/.harness 를 만들고 빈 프로젝트로 보고하던 것 차단 (UR-0136 관례 정렬)
+      // B: 없는 경로에 트리/.leerness 를 만들고 빈 프로젝트로 보고하던 것 차단 (UR-0136 관례 정렬)
       const handoffGuard = s.includes("if (!exists(_hr) || !fs.statSync(_hr).isDirectory()) { failJson(has('--json'), 'path_not_found'");
       const envGuard = s.includes("if (!exists(root) || !fs.statSync(root).isDirectory()) { failJson(has('--json') || opts.json, 'path_not_found'");
       // A: CRLF plan → tasks 증발 (읽는 즉시 정규화)
@@ -4737,39 +4813,39 @@ function _selfTestCases() {
     { name: 'UR-0061(외부리뷰 P1): roadmap CSS 값 살균 — :root/</style> breakout 차단', run: () => { const m = require('../lib/pure-utils'); const css = m._roadmapTokenStyles({ 'color.primary': 'red;}' + '</style><script>alert(1)</script>' }, {}); const blocked = !css.includes('<') && !css.includes('>'); const primaryLine = (css.split('\n').find(l => l.includes('--lr-primary')) || ''); const noBreakout = !primaryLine.replace(/;$/, '').includes('}'); const preserved = m._roadmapTokenStyles({ 'color.primary': '#2563eb' }, {}).includes('--lr-primary: #2563eb'); return blocked && noBreakout && preserved; } },
     { name: 'UR-0060(외부리뷰 P1): SECRET_PATTERNS 20종 (unquoted 보강) — GitLab/JWT/DB-URI/SendGrid/AWS-secret/Bearer 보강 + 오탐 가드', run: () => { const c = require('../lib/catalogs'); const hit = s => c.SECRET_PATTERNS.some(p => { p.re.lastIndex = 0; return p.re.test(s); }); const det = hit('glpat-' + 'x'.repeat(20)) && hit('eyJ' + 'x'.repeat(15) + '.eyJ' + 'y'.repeat(15) + '.' + 'z'.repeat(15)) && hit('postgres://u:p@host:5432/db') && hit('SG.' + 'x'.repeat(22) + '.' + 'y'.repeat(43)) && hit('aws_secret_access_key = "' + 'x'.repeat(40) + '"') && hit('Bearer ' + 'x'.repeat(25)); const clean = !hit('const u = "john' + '_doe_2024";') && !hit('https://example.com/path/to/page'); return c.SECRET_PATTERNS.length === 20 && det && clean; } },
     { name: 'UR-0068(외부리뷰 P2): _roadmapParseMilestones 블록 경계 — 다음 milestone status 누출 차단', run: () => { const m = require('../lib/pure-utils'); const r = m._roadmapParseMilestones('### M-0001. A\n\n### M-0002. B\nStatus: done\nProgress: 80%\n'); return r.length === 2 && r[0].status === 'planned' && r[0].progress === 0 && r[1].status === 'done' && r[1].progress === 80; } },
-    { name: 'UR-0066(외부리뷰 P2): shell:true 주입 가드 — agents bench task _shellQuoteArg + fetchNpmLatest cmd.exe args', run: () => { const m = require('../lib/pure-utils'); const src = read(__filename); const agentsSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'agents.js')); const benchQuoted = agentsSrc.includes('const qTask = ' + '_shellQuoteArg(task)'); const npmSafe = /'\/d', '\/s', '\/c', 'npm', 'view'/.test(src); const q = m._shellQuoteArg('a & b'); const safe = (process.platform === 'win32' ? q === '"a & b"' : q === "'a & b'"); return benchQuoted && npmSafe && safe; } },
+    { name: 'UR-0066(외부리뷰 P2): 셸 주입 가드 — agents bench portable argv + fetchNpmLatest shell-free npm', run: () => { const m = require('../lib/pure-utils'); const src = read(__filename); const benchSpec = require('../lib/agents')._benchLaunchSpec; const benchPortable = EXTERNAL_AGENTS.every(agent => { const spec = benchSpec(agent, 'a & b', false); return agent.id === 'ollama' ? !!spec.unsupported : typeof spec.file === 'string' && Array.isArray(spec.args) && spec.args.includes('a & b') && spec.stdin === 'ignore'; }); const npmSafe = src.includes("spawnNpmSync(['view', pkg, 'version']"); const q = m._shellQuoteArg('a & b'); const safe = (process.platform === 'win32' ? q === '"a & b"' : q === "'a & b'"); return benchPortable && npmSafe && safe; } },
     { name: 'UR-0072(외부리뷰 P3): compareVer pre-release + _classifyCJK 한자 kana 귀속', run: () => { const m = require('../lib/pure-utils'); const verOk = m.compareVer('1.9.0-beta', '1.9.0') === -1 && m.compareVer('1.9.0', '1.9.0-beta') === 1 && m.compareVer('1.9.5', '1.9.5') === 0 && m.compareVer('1.9.6', '1.9.5') === 1; const jp = Buffer.from([0xE3, 0x81, 0x82, 0xE6, 0x97, 0xA5, 0xE6, 0x9C, 0xAC]); const cn = Buffer.from([0xE4, 0xB8, 0xAD, 0xE5, 0x9B, 0xBD]); const rj = m._classifyCJK(jp, jp.length); const rc = m._classifyCJK(cn, cn.length); const cjkOk = rj.japanese > rj.chinese && rc.chinese > 0 && rc.japanese === 0; return verOk && cjkOk; } },
     { name: 'UR-0075 Phase A: 마이그레이션 가이드(_migrationGuideText) + migrate --guide 와이어 + init/migrate/update --path', run: () => { const m = require('../lib/pure-utils'); const g = m._migrationGuideText('1.9.355'); const guideOk = typeof g === 'string' && g.includes('마이그레이션 가이드') && g.includes('update --check --path') && g.includes('selftest') && g.includes('canonical JSON') && g.includes('롤백') && g.includes('1.9.355'); const src = read(__filename); const wired = src.includes("has('--guide') || args[1] === " + "'guide'") && src.includes('install(arg(' + "'--path', _msub || process.cwd())") && src.includes('updateCmd(arg(' + "'--path', args[1] || process.cwd())"); return guideOk && wired; } },   // 1.36.21: migrate 는 존재가드 도입으로 args[1]→_msub (--path 와이어는 동일)
     { name: 'UR-0075 Phase B: migrate audit(dry-run 스키마 drift) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migrateAuditCmd === 'function' && src.includes('migrateAuditCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'audit'"); } },
     { name: 'UR-0075 Phase C: migrate apply(canonical 백필 비파괴 적용) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migrateApplyCmd === 'function' && src.includes('migrateApplyCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'apply'"); } },
     { name: 'UR-0075 Phase D: migrate plan(임시폴더 설치 후 비교) 명령 + 와이어', run: () => { const src = read(__filename); return typeof migratePlanCmd === 'function' && src.includes('migratePlanCmd(arg(' + "'--path'") && src.includes("args[1] === " + "'plan'"); } },
     { name: 'UR-0074: install-safety(0 런타임 deps · 0 install-script) 사실 가드', run: () => { if (typeof installSafetyCmd !== 'function') return false; let pkg = {}; try { pkg = JSON.parse(read(path.join(__dirname, '..', 'package.json'))); } catch { return false; } const deps = Object.keys(pkg.dependencies || {}).length; const hooks = ['preinstall','install','postinstall'].filter(h => (pkg.scripts||{})[h]).length; return deps === 0 && hooks === 0; } },
-    { name: 'CV-2/UR-0077: fetchNpmLatest 신형 Node win EINVAL 회피 (cmd.exe + try/catch + windowsHide)', run: () => { if (typeof fetchNpmLatest !== 'function') return false; const src = read(__filename); const i = src.indexOf('function fetchNpmLatest'); if (i < 0) return false; const body = src.slice(i, i + 1600); return body.includes('cmd.exe') && /try \{/.test(body) && body.includes('windowsHide'); } },
+    { name: 'CV-2/UR-0077: fetchNpmLatest 신형 Node win EINVAL 회피 (npm JS 진입점 + try/catch)', run: () => { if (typeof fetchNpmLatest !== 'function') return false; const src = read(__filename); const i = src.indexOf('function fetchNpmLatest'); if (i < 0) return false; const body = src.slice(i, i + 1600); return body.includes("spawnNpmSync(['view', pkg, 'version']") && /try \{/.test(body) && !/execFile\(|cmd\.exe \/d/.test(body); } },
     { name: 'CV-1/UR-0076: arg() --path=값 파싱 + _resolveRoot(--path>positional>cwd) 행위', run: () => { if (typeof _resolveRoot !== 'function') return false; const save = process.argv; try { process.argv = ['node', 'h', 'context', '--path=/tmp/eqform']; const eq = arg('--path', null) === '/tmp/eqform'; process.argv = ['node', 'h', 'context', 'X', '--path', '/tmp/flag']; const flagWins = _resolveRoot('X') === '/tmp/flag'; process.argv = ['node', 'h', 'context', '/tmp/pos']; const posWins = _resolveRoot('/tmp/pos') === '/tmp/pos'; process.argv = ['node', 'h', 'context']; const cwdFb = _resolveRoot(undefined) === process.cwd(); return eq && flagWins && posWins && cwdFb; } finally { process.argv = save; } } },
-    { name: 'CV-4/UR-0079: _pruneArchives archive retention (최신 keep 유지, 오래된 prune) 행위', run: () => { if (typeof _pruneArchives !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_prune_')); try { const adir = path.join(tmp, '.harness', 'archive'); fs.mkdirSync(adir, { recursive: true }); for (let i = 0; i < 5; i++) fs.mkdirSync(path.join(adir, 'leerness-1.9.' + i + '-stamp')); const pruned = _pruneArchives(tmp, 2); const left = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length; return pruned === 3 && left === 2; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
+    { name: 'CV-4/UR-0079: _pruneArchives archive retention (최신 keep 유지, 오래된 prune) 행위', run: () => { if (typeof _pruneArchives !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_prune_')); try { const adir = path.join(tmp, '.leerness', 'archive'); fs.mkdirSync(adir, { recursive: true }); for (let i = 0; i < 5; i++) fs.mkdirSync(path.join(adir, 'leerness-1.9.' + i + '-stamp')); const pruned = _pruneArchives(tmp, 2); const left = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length; return pruned === 3 && left === 2; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'CV-7/UR-0082: commands 카탈로그 + help 에 누락 명령군 등재 (표면 drift 가드)', run: () => { const src = read(__filename); const ci = src.indexOf('function commandsCmd'); const hi = src.indexOf('function help('); if (ci < 0 || hi < 0) return false; const cbody = src.slice(ci, ci + 8000); const hbody = src.slice(hi, hi + 7000); const must = ['install-safety', 'feature add', 'creds list', 'incident list', 'webhook serve', 'deploy auto', 'runs list', 'permissions list', 'whats-new', 'migrate audit']; return must.every(c => cbody.includes(c)) && hbody.includes('install-safety') && hbody.includes('feature add'); } },
     { name: 'UR-0083(4th외부평가 9.3): auto-update hook 비침투 (update --quiet 모드 + hook --check --quiet + 업그레이드)', run: () => { const src = read(__filename); const quietMode = /const quiet = !!opts\.quiet \|\| has\('--quiet'\)/.test(src); const hookQuiet = src.includes("command: 'leerness update --check --quiet'"); const upgrade = /includes\('leerness update --check'\) && !h\.command\.includes\('--quiet'\)/.test(src); return quietMode && hookQuiet && upgrade; } },
     { name: 'CV-6/UR-0081: 시크릿 스캐너 FP/FN — _isPlaceholderSecret + _looksSecretLike 행위', run: () => { if (typeof _isPlaceholderSecret !== 'function' || typeof _looksSecretLike !== 'function') return false; const fp = _isPlaceholderSecret('change-me') && _isPlaceholderSecret('your-api-key-here') && _isPlaceholderSecret('<token>') && _isPlaceholderSecret('') && !_isPlaceholderSecret('hunter2realpass'); const fn = _looksSecretLike('secret123') && _looksSecretLike('a'.repeat(24)) && !_looksSecretLike('processEnv') && !_looksSecretLike('reqBodyPassword'); return fp && fn; } },
     { name: 'UR-0025: _mergeLines/_mergeEnvLines 순수 코어 모듈 분리 + 행위 (1.9.367)', run: () => { if (typeof _mergeLines !== 'function' || typeof _mergeEnvLines !== 'function') return false; const m = require('../lib/pure-utils'); const moved = m._mergeLines === _mergeLines && m._mergeEnvLines === _mergeEnvLines; const ml = _mergeLines('a\n', ['a', 'b']) === 'a\nb\n'; const meKeep = _mergeEnvLines('FOO=keep\n', ['FOO=new']) === 'FOO=keep\n'; const meAdd = _mergeEnvLines('FOO=keep\n', ['BAR=add']).includes('BAR=add'); return moved && ml && meKeep && meAdd; } },
-    { name: 'UR-0025: _mergeReadmeSection/_managedMerge + MERGE_OVERWRITE_FILES 모듈 분리 + 행위 (1.9.368)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _mergeReadmeSection !== 'function' || typeof _managedMerge !== 'function') return false; const moved = m._mergeReadmeSection === _mergeReadmeSection && m._managedMerge === _managedMerge && MERGE_OVERWRITE_FILES === c.MERGE_OVERWRITE_FILES; const rd = _mergeReadmeSection('', 'BLOCK', '<s>', '<e>') === '# Project\n\nBLOCK\n'; const mm = _managedMerge('a.md', 'NEW', 'OLD', '.h', new Set()).includes('migration-preserved'); const ow = _managedMerge('.harness/manifest.json', 'NEW', 'OLD', '.h', c.MERGE_OVERWRITE_FILES) === 'NEW'; const same = _managedMerge('a.md', 'X', 'X', '.h', new Set()) === 'X'; return moved && rd && mm && ow && same; } },
+    { name: 'UR-0025: _mergeReadmeSection/_managedMerge + MERGE_OVERWRITE_FILES 모듈 분리 + 행위 (1.9.368)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _mergeReadmeSection !== 'function' || typeof _managedMerge !== 'function') return false; const moved = m._mergeReadmeSection === _mergeReadmeSection && m._managedMerge === _managedMerge && MERGE_OVERWRITE_FILES === c.MERGE_OVERWRITE_FILES; const rd = _mergeReadmeSection('', 'BLOCK', '<s>', '<e>') === '# Project\n\nBLOCK\n'; const mm = _managedMerge('a.md', 'NEW', 'OLD', '.h', new Set()).includes('migration-preserved'); const ow = _managedMerge('.leerness/manifest.json', 'NEW', 'OLD', '.h', c.MERGE_OVERWRITE_FILES) === 'NEW'; const same = _managedMerge('a.md', 'X', 'X', '.h', new Set()) === 'X'; return moved && rd && mm && ow && same; } },
     { name: 'UR-0025: _parseSkillsValue(catalog 주입) + MINIMAL_SKIP_KEYS 모듈 분리 + 행위 (1.9.369)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _parseSkillsValue !== 'function') return false; const moved = m._parseSkillsValue === _parseSkillsValue && MINIMAL_SKIP_KEYS === c.MINIMAL_SKIP_KEYS; const cat = { office: {}, foo: {} }; const empty = _parseSkillsValue('', cat).length === 0; const all = _parseSkillsValue('all', cat).length === 2; const rec = _parseSkillsValue('recommended', cat).includes('office'); const csv = JSON.stringify(_parseSkillsValue('office,bar', cat)) === JSON.stringify(['office']); return moved && empty && all && rec && csv && MINIMAL_SKIP_KEYS.has('.claude/skills/leerness/SKILL.md'); } },
     { name: 'UR-0025: _parseArchiveBlocks/_parseSkillCatalog 순수 파서 모듈 분리 + 행위 (1.9.370)', run: () => { const m = require('../lib/pure-utils'); if (typeof _parseArchiveBlocks !== 'function' || typeof _parseSkillCatalog !== 'function') return false; const moved = m._parseArchiveBlocks === _parseArchiveBlocks && m._parseSkillCatalog === _parseSkillCatalog; const ab = _parseArchiveBlocks('## 제거 2026-01-01 (target: ' + '"T-1")\n### 헤더\n'); const abOk = ab.length === 1 && ab[0].date === '2026-01-01' && ab[0].target === 'T-1' && ab[0].originalHeader === '헤더'; const md = _parseSkillCatalog('- [nm](https://x/SKILL.md) — d', ''); const mdOk = md.length === 1 && md[0].name === 'nm' && md[0].format === 'markdown'; const js = _parseSkillCatalog('{' + '"skills":[{"id":"a","url":"u"}]}', ''); const jsOk = js.length === 1 && js[0].name === 'a' && js[0].format === 'json'; return moved && abOk && mdOk && jsOk; } },
-    { name: 'UR-0073 Phase A: team 정의 레지스트리 (_renderTeamsMd + canonical load/save) 행위 (1.9.371)', run: () => { const m = require('../lib/pure-utils'); if (typeof teamCmd !== 'function' || typeof _renderTeamsMd !== 'function' || m._renderTeamsMd !== _renderTeamsMd) return false; const md = _renderTeamsMd([{ id: 't1', name: 'N', personas: ['security'], members: ['claude'], schedule: 'daily', status: 'active' }]); const mdOk = md.includes('## t1') && md.includes('security') && md.includes('daily') && md.includes('정의 전용'); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_team_')); let rtOk = false; try { _saveTeams(tmp, [{ id: 'x', name: 'X', personas: [], members: [], schedule: 'manual', status: 'active' }]); const loaded = _loadTeams(tmp); rtOk = loaded.length === 1 && loaded[0].id === 'x' && fs.existsSync(path.join(tmp, '.harness', 'teams.json')) && fs.existsSync(path.join(tmp, '.harness', 'teams.md')); } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return mdOk && rtOk; } },
+    { name: 'UR-0073 Phase A: team 정의 레지스트리 (_renderTeamsMd + canonical load/save) 행위 (1.9.371)', run: () => { const m = require('../lib/pure-utils'); if (typeof teamCmd !== 'function' || typeof _renderTeamsMd !== 'function' || m._renderTeamsMd !== _renderTeamsMd) return false; const md = _renderTeamsMd([{ id: 't1', name: 'N', personas: ['security'], members: ['claude'], schedule: 'daily', status: 'active' }]); const mdOk = md.includes('## t1') && md.includes('security') && md.includes('daily') && md.includes('정의 전용'); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_team_')); let rtOk = false; try { _saveTeams(tmp, [{ id: 'x', name: 'X', personas: [], members: [], schedule: 'manual', status: 'active' }]); const loaded = _loadTeams(tmp); rtOk = loaded.length === 1 && loaded[0].id === 'x' && fs.existsSync(path.join(tmp, '.leerness', 'teams.json')) && fs.existsSync(path.join(tmp, '.leerness', 'teams.md')); } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return mdOk && rtOk; } },
     { name: 'UR-0073 Phase B: _composeTeamPlan dry-run 실행 계획 (멤버별 dispatch, 실행 없음) 행위 (1.9.372)', run: () => { const m = require('../lib/pure-utils'); if (typeof _composeTeamPlan !== 'function' || m._composeTeamPlan !== _composeTeamPlan) return false; const team = { id: 'rev', name: 'R', purpose: 'PR 리뷰', personas: ['security', 'perf'], members: ['claude', 'codex'], schedule: 'manual' }; const p1 = _composeTeamPlan(team, '점검'); const ok1 = p1.steps.length === 2 && p1.task === '점검' && p1.steps[0].member === 'claude' && p1.steps[0].suggestedCommand.includes('agents dispatch') && p1.steps[0].suggestedCommand.includes('--to claude') && p1.steps[0].dispatchPrompt.includes('security'); const p2 = _composeTeamPlan(team, null); const ok2 = p2.task === 'PR 리뷰'; const p3 = _composeTeamPlan({ id: 'e', personas: [], members: [] }, 'x'); const ok3 = p3.steps.length === 0 && p3.memberCount === 0; return ok1 && ok2 && ok3; } },
     { name: 'UR-0073 Phase C: _teamHandoffReminders 스케줄 알림 (비-manual·active 만, 실행 트리거 아님) 행위 (1.9.373) + i18n en(1.31.3)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamHandoffReminders !== 'function' || m._teamHandoffReminders !== _teamHandoffReminders) return false; const r = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'] }, { id: 'man', schedule: 'manual', status: 'active' }, { id: 'paused', schedule: 'daily', status: 'paused' }]); const behaviorOk = r.length === 1 && r[0].includes('rev') && r[0].includes('every-session') && r[0].includes('team preview rev') && !r.join('|').includes('man') && !r.join('|').includes('paused'); const _H = /[가-힣]/; const en = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'], review: true }], 'en')[0] || ''; const ko = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'], review: true }])[0] || ''; const i18nOk = !_H.test(en) && /2 members/.test(en) && /review needed/.test(en) && /preview:/.test(en) && _H.test(ko) && /2명/.test(ko) && /검수필요/.test(ko); return behaviorOk && i18nOk; } },
     { name: 'UR-0074: _cadenceAssessment 릴리스 빈도 평가 (임계값) 행위 (1.9.374)', run: () => { const m = require('../lib/pure-utils'); if (typeof _cadenceAssessment !== 'function' || m._cadenceAssessment !== _cadenceAssessment || typeof releaseCadenceCmd !== 'function') return false; return _cadenceAssessment(7, 1, 1).level === 'very-high' && _cadenceAssessment(3, 1, 1).level === 'high' && _cadenceAssessment(1, 1, 1).level === 'moderate' && _cadenceAssessment(0.2, 1, 1).level === 'healthy' && _cadenceAssessment(7, 1, 1).recommendation.length > 0; } },
     { name: 'UR-0084 + 1.36.160: _withLock 35s 대기 + 토큰 소유권 + owner fail-closed 행위', run: () => _p0160LockOwnershipOk() },
     { name: 'UR-0073 Phase D: _teamDeployGate 이중 게이트 (dry-run 기본/env 게이트/실행) 행위 (1.9.376)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamDeployGate !== 'function' || m._teamDeployGate !== _teamDeployGate) return false; const team = { id: 'd', deployCommand: 'echo hi' }; const noCmd = _teamDeployGate({ id: 'x' }, { yes: true, envOn: true }).mode === 'no-command'; const dry = _teamDeployGate(team, { yes: false, envOn: true }).mode === 'dry-run'; const gated = _teamDeployGate(team, { yes: true, envOn: false }).mode === 'gated'; const exec = _teamDeployGate(team, { yes: true, envOn: true }).mode === 'execute'; return noCmd && dry && gated && exec; } },
-    { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + 빌더 동작 (1.9.377)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide('.leerness', '9.9.9', '2026-01-01T00:00:00.000Z'); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString())'); /* 1.36.126 (T-0107): 제목 리터럴('마이그레이션 안내')을 붙잡던 자리 — 그 절이 바로 **AI 를 죽은 사본으로 안내**하고 있었다. 제목이 아니라 계약을 건다: ① `.leerness` 상황을 다루는 절이 여전히 있고 ② 그 절이 "우선 사용/가야 함" 같은 **지시**를 하지 않는다(생성 결과 문자열에 대한 행위 단언 — 소스 자기참조가 아니다). */ const guideSafe = /\.leerness/.test(g) && !/우선 사용/.test(g) && !/로 가야 함/.test(g) && /읽지 마십시오/.test(g); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && guideSafe && wrapperThin; } },
+    { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + canonical migration 안내 (1.36.162)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide(CANONICAL_WORKSPACE_DIR, '9.9.9', '2026-01-01T00:00:00.000Z', LEGACY_WORKSPACE_DIR); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString(), LEGACY_WORKSPACE_DIR)'); const guideSafe = g.includes('canonical workspace') && g.includes('workspace-dir-conflict') && g.includes('.leerness/cache/agent-runs/') && g.includes(`${LEGACY_WORKSPACE_DIR}/`); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && guideSafe && wrapperThin; } },
     { name: 'UR-0073: team MCP 도구 2종(read-only) 정의 + dispatch 와이어 (1.9.378)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const tl = tools.find(t => t.name === 'leerness_team_list'); const tp = tools.find(t => t.name === 'leerness_team_preview'); const defsOk = tl && tl.requiredTier === 'read-only' && tp && tp.requiredTier === 'read-only' && tp.inputSchema.required && tp.inputSchema.required.includes('id'); const wired = src.includes("case " + "'leerness_team_list':") && src.includes("case " + "'leerness_team_preview':") && /cliArgs = \['team', 'list'/.test(src) && /cliArgs = \['team', 'preview'/.test(src); return !!defsOk && wired; } },
     { name: 'UR-0025 심화: pulse 렌더 코어 분리 — _memorySurface + _renderPulseLine 행위 (1.9.379)', run: () => { const m = require('../lib/pure-utils'); if (typeof _memorySurface !== 'function' || typeof _renderPulseLine !== 'function' || m._memorySurface !== _memorySurface || m._renderPulseLine !== _renderPulseLine) return false; const ms = _memorySurface({ tasks: 1, decisions: 2, rules: 3, milestones: 4, lessons: 5 }) === 'T1/D2/R3/P4/L5' && _memorySurface({}) === 'T0/D0/R0/P0/L0'; const base = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'T0/D1/R0/P2/L0' }); const ln = base.includes('v1.0.0') && base.includes('R7') && base.includes('MCP 85') && base.includes('T0/D1/R0/P2/L0') && !base.includes('🎯') && !base.includes('abnormal'); const full = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'x', nextMilestone: 400, etaDays: 6, abnormalShutdown: 'high' }); const ln2 = full.includes('🎯 R400 (6d)') && full.includes('abnormal:high'); const wired = read(__filename).includes('const line = _renderPulseLine(data)') && read(__filename).includes('data.memorySurface = _memorySurface('); return ms && ln && ln2 && wired; } },
-    { name: 'UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 — verify/migrate audit·apply 3중 중복 제거 (1.9.380)', run: () => { const c = require('../lib/catalogs'); if (REQUIRED_WORKSPACE_FILES !== c.REQUIRED_WORKSPACE_FILES) return false; const listOk = Array.isArray(c.REQUIRED_WORKSPACE_FILES) && c.REQUIRED_WORKSPACE_FILES.length === 9 && c.REQUIRED_WORKSPACE_FILES.includes('AGENTS.md') && c.REQUIRED_WORKSPACE_FILES.includes('.harness/plan.md'); const harnessUses = (read(__filename).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 1; const migUses = (read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 2; return listOk && harnessUses && migUses; } },
+    { name: 'UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 — verify/migrate audit·apply 3중 중복 제거 (1.9.380)', run: () => { const c = require('../lib/catalogs'); if (REQUIRED_WORKSPACE_FILES !== c.REQUIRED_WORKSPACE_FILES) return false; const listOk = Array.isArray(c.REQUIRED_WORKSPACE_FILES) && c.REQUIRED_WORKSPACE_FILES.length === 9 && c.REQUIRED_WORKSPACE_FILES.includes('AGENTS.md') && c.REQUIRED_WORKSPACE_FILES.includes('.leerness/plan.md'); const harnessUses = (read(__filename).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 1; const migUses = (read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 2; return listOk && harnessUses && migUses; } },
     { name: 'UR-0025: KEYWORD_STOPWORDS 단일출처 — handoff/lessons 키워드 stopwords 2중 중복 제거 (1.9.381)', run: () => { const c = require('../lib/catalogs'); if (KEYWORD_STOPWORDS !== c.KEYWORD_STOPWORDS) return false; const setOk = c.KEYWORD_STOPWORDS instanceof Set && c.KEYWORD_STOPWORDS.has('작업') && c.KEYWORD_STOPWORDS.has('task') && !c.KEYWORD_STOPWORDS.has('고유단어') && c.KEYWORD_STOPWORDS.size >= 25; const usesConst = (read(__filename).match(/const stopwords = KEYWORD_STOPWORDS;/g) || []).length >= 2 && !/const stopwords = new Set\(\[/.test(read(__filename)); return setOk && usesConst; } },
     { name: 'UR-0025 큰핸들러토대: lib/io.js 프리미티브(log/ok/warn/fail/today/now) 모듈 분리 + 동작 (1.9.382)', run: () => { const io = require('../lib/io'); const exportsOk = ['log', 'ok', 'warn', 'fail', 'today', 'now'].every(k => typeof io[k] === 'function') && io.log === log && io.fail === fail && io.now === now; const todayOk = /^\d{4}-\d{2}-\d{2}$/.test(io.today()) && /^\d{4}-\d{2}-\d{2}T/.test(io.now()); const src = read(__filename); const moved = src.includes("require('../lib/io')") && !/^function fail\(s\) \{ log/m.test(src) && !/^function now\(\) \{ return new Date/m.test(src); let exitOk = false; const saved = process.exitCode; const _w = process.stdout.write, _e = process.stderr.write; try { process.stdout.write = () => true; process.stderr.write = () => true; process.exitCode = 0; io.fail('probe'); exitOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.stderr.write = _e; process.exitCode = saved; io.setQuiet(false); } return exportsOk && todayOk && moved && exitOk; } },
     { name: 'UR-0025 큰핸들러토대: lib/io.js fs 프리미티브(read/writeUtf8/exists/mkdirp/append/rel/absRoot) 분리 + round-trip (1.9.383)', run: () => { const io = require('../lib/io'); const exp = ['absRoot', 'exists', 'read', 'readBuf', 'mkdirp', 'writeUtf8', 'append', 'rel'].every(k => typeof io[k] === 'function') && io.read === read && io.writeUtf8 === writeUtf8 && io.exists === exists; const src = read(__filename); const moved = !/^function writeUtf8\(p, s\) \{/m.test(src) && !/^function read\(p\) \{/m.test(src) && !/^function exists\(p\) \{/m.test(src); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_io_')); let rt = false; try { const f = path.join(tmp, 'a', 'b.txt'); io.writeUtf8(f, '한글RT'); rt = io.exists(f) && io.read(f) === '한글RT' && io.rel(tmp, f) === 'a/b.txt'; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return exp && moved && rt; } },
-    { name: '5th외부평가/UR-0085: status --json 구조화 출력 + verify --json 와이어 (1.9.384)', run: () => { if (typeof status !== 'function' || typeof verify !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sj_')); const save = process.argv; const _w = process.stdout.write; let so = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'status', tmp, '--json']; process.stdout.write = s => { so += s; return true; }; status(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let sj; try { sj = JSON.parse(so); } catch {} const statusOk = !!sj && typeof sj.total === 'number' && typeof sj.present === 'number' && 'healthy' in sj && Array.isArray(sj.missing); const src = read(__filename); const verifyWired = /function verify\(root\) \{[\s\S]*?has\('--json'\)[\s\S]*?JSON\.stringify\(\{ ok:/.test(src); return statusOk && verifyWired; } },
+    { name: '5th외부평가/UR-0085: status --json 구조화 출력 + verify --json 와이어 (1.9.384)', run: () => { if (typeof status !== 'function' || typeof verify !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_sj_')); const save = process.argv; const _w = process.stdout.write; let so = ''; try { fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); process.argv = ['node', 'h', 'status', tmp, '--json']; process.stdout.write = s => { so += s; return true; }; status(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let sj; try { sj = JSON.parse(so); } catch {} const statusOk = !!sj && typeof sj.total === 'number' && typeof sj.present === 'number' && 'healthy' in sj && Array.isArray(sj.missing); const src = read(__filename); const verifyWired = /function verify\(root\) \{[\s\S]*?has\('--json'\)[\s\S]*?JSON\.stringify\(\{ ok:/.test(src); return statusOk && verifyWired; } },
     { name: '5th외부평가/UR-0086: _parseContractSpec markdown bullet 함수 감지 + 순수 추출 (1.9.385)', run: () => { const m = require('../lib/pure-utils'); if (m._parseContractSpec !== _parseContractSpec) return false; const p = _parseContractSpec('# Spec\n- add(a,b)\n* subtract(a,b)\n1. multiply(a,b)\nfunction legacy(x)\n`mentioned(`\ntick.amount\n'); const declOk = ['add', 'subtract', 'multiply', 'legacy'].every(n => p.declared.includes(n)) && p.declared.length === 4; const menOk = p.mentioned.includes('mentioned') && !p.declared.includes('mentioned'); const fieldOk = p.fields.includes('amount'); const fpOk = _parseContractSpec('- 합계 (a+b)\n- result (total)\n- foo: bar(x)\n**bold**').declared.length === 0; const src = read(__filename); const moved = src.includes('_parseContractSpec(specText)') && !/specText\.matchAll\(\/function/.test(src); return declOk && menOk && fieldOk && fpOk && moved; } },
-    { name: '5th외부평가/UR-0087: _gitignoreMatch git 일치(.env↛.env.bad) + env-family 스캔 (1.9.386)', run: () => { const m = require('../lib/pure-utils'); if (m._gitignoreMatch !== _gitignoreMatch) return false; const gm = _gitignoreMatch; const semOk = gm('.env', '.env') === true && gm('.env', '.env.bad') === false && gm('.env', '.env.local') === false && gm('.env.*', '.env.bad') === true && gm('.env*', '.env') === true && gm('*.pem', 'k.pem') === true && gm('src/', 'src/a.txt') === true; const src = read(__filename); let envFamilyScan = false; { /* 1.36.83 (공허가드 스윕): 종전 리터럴 '!SCAN_TEXT_EXT.has(ext) && !isEnv' + 'Family' 은 1.36.56 리팩터(_known)로 제품에서 사라져 이 줄 자신만 매칭하던 공허 가드였다. env-family 강제포함을 행위로 검사한다: .env.production 은 확장자('.production')가 allow-list 밖 + 64KB 초과라, isEnvFamily 가 _known 에서 빠지면 '작은 텍스트' 폴백 경로에서 크기로 걸러져 미탐된다(실측 1→0). 1.36.84 (검수 Medium#4 — 과적합): .env.production 단일 픽스처는 제품 정규식을 `.env` 와 `.env.production` 만 허용하도록 좁혀도 통과했다(70KB `.env.local` 미탐). → env-family 3종을 테이블 픽스처로 전수 검사하고, 빈 배열 공허참(`[].every`)을 막으려 length 일치를 함께 요구한다. */ const _envFamNames = ['.env', '.env.production', '.env.local', '.env.development', '.env.qa7']; const _envFamHits = []; for (const _n of _envFamNames) { const _t = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_envfam_')); try { fs.writeFileSync(path.join(_t, _n), 'x'.repeat(70 * 1024) + '\nAWS_ACCESS_KEY_ID=' + 'AKIAJQXMP7RZ2KL9WXYZ' + '\n'); const _r = _collectSecretFindings(_t); _envFamHits.push(_r.findings.some(f => f.file === _n && f.name === 'AWS Access Key')); } catch { _envFamHits.push(false); } finally { try { fs.rmSync(_t, { recursive: true, force: true }); } catch {} } } /* 1.36.84 (검수 M2): ① 세 이름 열거는 여전히 과적합 — 제품 판정을 그 셋만 허용하도록 좁혀도 통과했다. bare `.env` 와 **열거되지 않은 임의 suffix**(.env.qa7)를 넣어 "접두 규칙" 자체를 검사한다. ② `_envFamNames.length > 0` 을 명시 — 배열이 비면 `[].every` 가 공허참이라 통과한다(내가 반복해 고쳐온 클래스가 이 수리안에 그대로 들어와 있었다). ③ 음성 대조: `.environment`/`.envx` 는 env-family 가 아니므로 강제포함되면 안 된다. */
+    { name: '5th외부평가/UR-0087: _gitignoreMatch git 일치(.env↛.env.bad) + env-family 스캔 (1.9.386)', run: () => { const m = require('../lib/pure-utils'); if (m._gitignoreMatch !== _gitignoreMatch) return false; const gm = _gitignoreMatch; const semOk = gm('.env', '.env') === true && gm('.env', '.env.bad') === false && gm('.env', '.env.local') === false && gm('.env.*', '.env.bad') === true && gm('.env*', '.env') === true && gm('*.pem', 'k.pem') === true && gm('src/', 'src/a.txt') === true && gm('src/', 'deep/src/a.txt') === true && gm('_reports/', '.leerness/_reports/a.md') === true; const src = read(__filename); let envFamilyScan = false; { /* 1.36.83 (공허가드 스윕): 종전 리터럴 '!SCAN_TEXT_EXT.has(ext) && !isEnv' + 'Family' 은 1.36.56 리팩터(_known)로 제품에서 사라져 이 줄 자신만 매칭하던 공허 가드였다. env-family 강제포함을 행위로 검사한다: .env.production 은 확장자('.production')가 allow-list 밖 + 64KB 초과라, isEnvFamily 가 _known 에서 빠지면 '작은 텍스트' 폴백 경로에서 크기로 걸러져 미탐된다(실측 1→0). 1.36.84 (검수 Medium#4 — 과적합): .env.production 단일 픽스처는 제품 정규식을 `.env` 와 `.env.production` 만 허용하도록 좁혀도 통과했다(70KB `.env.local` 미탐). → env-family 3종을 테이블 픽스처로 전수 검사하고, 빈 배열 공허참(`[].every`)을 막으려 length 일치를 함께 요구한다. */ const _envFamNames = ['.env', '.env.production', '.env.local', '.env.development', '.env.qa7']; const _envFamHits = []; for (const _n of _envFamNames) { const _t = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_envfam_')); try { fs.writeFileSync(path.join(_t, _n), 'x'.repeat(70 * 1024) + '\nAWS_ACCESS_KEY_ID=' + 'AKIAJQXMP7RZ2KL9WXYZ' + '\n'); const _r = _collectSecretFindings(_t); _envFamHits.push(_r.findings.some(f => f.file === _n && f.name === 'AWS Access Key')); } catch { _envFamHits.push(false); } finally { try { fs.rmSync(_t, { recursive: true, force: true }); } catch {} } } /* 1.36.84 (검수 M2): ① 세 이름 열거는 여전히 과적합 — 제품 판정을 그 셋만 허용하도록 좁혀도 통과했다. bare `.env` 와 **열거되지 않은 임의 suffix**(.env.qa7)를 넣어 "접두 규칙" 자체를 검사한다. ② `_envFamNames.length > 0` 을 명시 — 배열이 비면 `[].every` 가 공허참이라 통과한다(내가 반복해 고쳐온 클래스가 이 수리안에 그대로 들어와 있었다). ③ 음성 대조: `.environment`/`.envx` 는 env-family 가 아니므로 강제포함되면 안 된다. */
       envFamilyScan = _envFamNames.length > 0 && _envFamHits.length === _envFamNames.length && _envFamHits.every(Boolean);
       { const _neg = ['.environment', '.envx'];
         for (const _n of _neg) {
@@ -4779,22 +4855,22 @@ function _selfTestCases() {
             if ((_collectSecretFindings(_t).findings || []).some(f => f.file === _n)) envFamilyScan = false;   // env-family 로 오인하면 실패
           } catch { envFamilyScan = false; } finally { try { fs.rmSync(_t, { recursive: true, force: true }); } catch {} }
         } } } const delegated = src.includes('return _gitignoreMatch(gi, fileRel)'); return semOk && envFamilyScan && delegated; } },
-    { name: 'UR-0088 5th외부평가 일관성: incident/runs list 빈 케이스 --json 구조화 (1.9.387)', run: () => { if (typeof incidentListCmd !== 'function' || typeof runsListCmd !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lj_')); const save = process.argv; const _w = process.stdout.write; let io = '', ro = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'incident', 'list', '--json']; process.stdout.write = s => { io += s; return true; }; incidentListCmd(tmp); process.stdout.write = _w; process.argv = ['node', 'h', 'runs', 'list', '--json']; process.stdout.write = s => { ro += s; return true; }; runsListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let ij, rj; try { ij = JSON.parse(io); rj = JSON.parse(ro); } catch {} return !!ij && ij.total === 0 && Array.isArray(ij.items) && !!rj && rj.total === 0 && Array.isArray(rj.items); } },
-    { name: 'UR-0025 큰핸들러 모듈화: migrate audit/apply/plan → lib/migrate.js + DI 위임 + 동작 (1.9.388)', run: () => { const m = require('../lib/migrate'); const expOk = typeof m.migrateAuditCmd === 'function' && typeof m.migrateApplyCmd === 'function' && typeof m.migratePlanCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/migrate')") && src.includes('_migrate.migrateAuditCmd(root, opts, _migrateDeps())') && src.includes('_migrate.migratePlanCmd(root, opts, _migrateDeps())'); const movedToLib = read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).includes('leerness-plan-'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_mig_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'HARNESS_VERSION'), VERSION); process.argv = ['node', 'h', 'migrate', 'audit', tmp, '--json']; process.stdout.write = s => { out += s; return true; }; migrateAuditCmd(tmp, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && typeof j.willChange === 'number' && Array.isArray(j.findings); } catch {} return expOk && delegated && movedToLib && behavOk; } },
-    { name: 'UR-0025 큰핸들러 모듈화: teamCmd → lib/team.js + DI 위임 + 동작 (1.9.389)', run: () => { const m = require('../lib/team'); const expOk = typeof m.teamCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/team')") && src.includes('_team.teamCmd(root, sub, id, opts,'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const movedToLib = teamSrc.includes("require('./pure-utils')") && teamSrc.includes('_teamDeployGate') && teamSrc.includes('알 수 없는 team 하위명령'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tm_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'team', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; teamCmd(tmp, 'list', undefined, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && j.count === 0 && Array.isArray(j.teams); } catch {} return expOk && delegated && movedToLib && behavOk; } },
+    { name: 'UR-0088 5th외부평가 일관성: incident/runs list 빈 케이스 --json 구조화 (1.9.387)', run: () => { if (typeof incidentListCmd !== 'function' || typeof runsListCmd !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lj_')); const save = process.argv; const _w = process.stdout.write; let io = '', ro = ''; try { fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); process.argv = ['node', 'h', 'incident', 'list', '--json']; process.stdout.write = s => { io += s; return true; }; incidentListCmd(tmp); process.stdout.write = _w; process.argv = ['node', 'h', 'runs', 'list', '--json']; process.stdout.write = s => { ro += s; return true; }; runsListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } let ij, rj; try { ij = JSON.parse(io); rj = JSON.parse(ro); } catch {} return !!ij && ij.total === 0 && Array.isArray(ij.items) && !!rj && rj.total === 0 && Array.isArray(rj.items); } },
+    { name: 'UR-0025 큰핸들러 모듈화: migrate audit/apply/plan → lib/migrate.js + DI 위임 + 동작 (1.9.388)', run: () => { const m = require('../lib/migrate'); const expOk = typeof m.migrateAuditCmd === 'function' && typeof m.migrateApplyCmd === 'function' && typeof m.migratePlanCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/migrate')") && src.includes('_migrate.migrateAuditCmd(root, opts, _migrateDeps())') && src.includes('_migrate.migratePlanCmd(root, opts, _migrateDeps())'); const movedToLib = read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).includes('leerness-plan-'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_mig_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.leerness', 'HARNESS_VERSION'), VERSION); process.argv = ['node', 'h', 'migrate', 'audit', tmp, '--json']; process.stdout.write = s => { out += s; return true; }; migrateAuditCmd(tmp, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && typeof j.willChange === 'number' && Array.isArray(j.findings); } catch {} return expOk && delegated && movedToLib && behavOk; } },
+    { name: 'UR-0025 큰핸들러 모듈화: teamCmd → lib/team.js + DI 위임 + 동작 (1.9.389)', run: () => { const m = require('../lib/team'); const expOk = typeof m.teamCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/team')") && src.includes('_team.teamCmd(root, sub, id, opts,'); const teamSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'team.js')); const movedToLib = teamSrc.includes("require('./pure-utils')") && teamSrc.includes('_teamDeployGate') && teamSrc.includes('알 수 없는 team 하위명령'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tm_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); process.argv = ['node', 'h', 'team', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; teamCmd(tmp, 'list', undefined, { json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.version === VERSION && j.count === 0 && Array.isArray(j.teams); } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: 'UR-0025: feature-graph 순수 코어(_featureGraphTemplate/_parseFeatureGraph/_nextFeatureId/_featureBlock) → pure-utils + round-trip (1.9.390)', run: () => { const m = require('../lib/pure-utils'); const refOk = m._parseFeatureGraph === _parseFeatureGraph && m._featureGraphTemplate === _featureGraphTemplate && m._nextFeatureId === _nextFeatureId && m._featureBlock === _featureBlock; const tmpl = m._featureGraphTemplate(); const tmplOk = tmpl.includes('Feature Graph') && tmpl.includes('## Nodes'); const nodes = m._parseFeatureGraph('## F-0001 Auth\n- depends-on: F-0002\n- affects: F-0003\n- files: a.js\n'); const parseOk = nodes.length === 1 && nodes[0].id === 'F-0001' && nodes[0].title === 'Auth' && nodes[0].dependsOn[0] === 'F-0002' && nodes[0].affects[0] === 'F-0003' && nodes[0].files[0] === 'a.js'; const idOk = m._nextFeatureId(nodes) === 'F-0002'; const rt = m._parseFeatureGraph(m._featureBlock(nodes[0])); const rtOk = rt.length === 1 && rt[0].id === 'F-0001' && rt[0].dependsOn[0] === 'F-0002'; const src = read(__filename); const moved = src.includes("require('../lib/pure-utils')") && !/^function _parseFeatureGraph\(text\) \{/m.test(src) && !/^function _featureBlock\(node\) \{/m.test(src); return refOk && tmplOk && parseOk && idOk && rtOk && moved; } },
-    { name: 'UR-0025 큰핸들러 모듈화: feature add/link/impact/list/show → lib/feature.js + DI + _featureImpactBfs pure 공유 (1.9.391)', run: () => { const m = require('../lib/feature'); const p = require('../lib/pure-utils'); const expOk = ['featureAddCmd', 'featureLinkCmd', 'featureImpactCmd', 'featureListCmd', 'featureShowCmd'].every(k => typeof m[k] === 'function'); const bfsRefOk = p._featureImpactBfs === _featureImpactBfs; const nodes = [{ id: 'F-0001', title: 'A', affects: ['F-0002'], dependsOn: [], coChangesWith: [] }, { id: 'F-0002', title: 'B', affects: [], dependsOn: [], coChangesWith: [] }]; const r = p._featureImpactBfs(nodes, 'F-0001'); const bfsWork = r.length === 1 && r[0].id === 'F-0002' && r[0].via === 'affects'; const src = read(__filename); const delegated = src.includes("require('../lib/feature')") && src.includes('_feature.featureImpactCmd(root, fromId, _featureDeps())'); const featSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'feature.js')); const movedToLib = featSrc.includes("require('./pure-utils')") && featSrc.includes('feature added:'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ft_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); process.argv = ['node', 'h', 'feature', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; featureListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.total === 0 && Array.isArray(j.features); } catch {} return expOk && bfsRefOk && bfsWork && delegated && movedToLib && behavOk; } },
+    { name: 'UR-0025 큰핸들러 모듈화: feature add/link/impact/list/show → lib/feature.js + DI + _featureImpactBfs pure 공유 (1.9.391)', run: () => { const m = require('../lib/feature'); const p = require('../lib/pure-utils'); const expOk = ['featureAddCmd', 'featureLinkCmd', 'featureImpactCmd', 'featureListCmd', 'featureShowCmd'].every(k => typeof m[k] === 'function'); const bfsRefOk = p._featureImpactBfs === _featureImpactBfs; const nodes = [{ id: 'F-0001', title: 'A', affects: ['F-0002'], dependsOn: [], coChangesWith: [] }, { id: 'F-0002', title: 'B', affects: [], dependsOn: [], coChangesWith: [] }]; const r = p._featureImpactBfs(nodes, 'F-0001'); const bfsWork = r.length === 1 && r[0].id === 'F-0002' && r[0].via === 'affects'; const src = read(__filename); const delegated = src.includes("require('../lib/feature')") && src.includes('_feature.featureImpactCmd(root, fromId, _featureDeps())'); const featSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'feature.js')); const movedToLib = featSrc.includes("require('./pure-utils')") && featSrc.includes('feature added:'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ft_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); process.argv = ['node', 'h', 'feature', 'list', '--json']; process.stdout.write = s => { out += s; return true; }; featureListCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.total === 0 && Array.isArray(j.features); } catch {} return expOk && bfsRefOk && bfsWork && delegated && movedToLib && behavOk; } },
     { name: 'UR-0025 큰핸들러 모듈화: doctor/which → lib/diagnostics.js + DI 위임 + 동작 (1.9.392)', run: () => { const m = require('../lib/diagnostics'); const expOk = typeof m.doctorCmd === 'function' && typeof m.whichCmd === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/diagnostics')") && src.includes('_diag.doctorCmd(opts,') && src.includes('_diag.whichCmd('); const diagSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js')); const movedToLib = diagSrc.includes('leerness doctor') && diagSrc.includes('_selfTestCases'); let behavOk = false; const _w = process.stdout.write; const savedExit = process.exitCode; try { process.stdout.write = () => true; const rep = m.doctorCmd({ json: true }, { VERSION, _selfTestCases: () => [], _detectShellCtx: () => ({ shell: 'test', psVersion: null }), _mcpToolCount: () => 7, has: () => true, harnessPath: 'h.js' }); behavOk = !!rep && rep.version === VERSION && rep.selftest.total === 0 && rep.healthy === true && rep.mcpTools === 7; } catch {} finally { process.stdout.write = _w; process.exitCode = savedExit; } return expOk && delegated && movedToLib && behavOk; } },
-    { name: 'UR-0025/whats-new BUG-fix: _parseChangelogBetween pure 추출 + "## X — DATE — title" 헤더 파싱 (1.9.393)', run: () => { const m = require('../lib/pure-utils'); if (m._parseChangelogBetween !== _parseChangelogBetween) return false; const cl = '## 1.9.393 — 2026-06-06 — Title\n- `leerness foo`\n- `--flagx`\n- `.harness/x.md`\n\n## 1.9.392 — 2026-06-05 — Y\n- y\n\n## 1.9.391 — 2026-06-04 — Z\n- z\n'; const r = m._parseChangelogBetween(cl, '1.9.391', '1.9.393'); const rangeOk = r.length === 2 && r[0].version === '1.9.393' && r[1].version === '1.9.392'; const extractOk = r[0].newCommands.includes('foo') && r[0].newFlags.includes('--flagx') && r[0].newFiles.includes('.harness/x.md'); const titlelessOk = m._parseChangelogBetween('## 1.9.50\n- a\n## 1.9.49\n- b\n', '1.9.49', '1.9.50').length === 1; const src = read(__filename); const moved = src.includes("require('../lib/pure-utils')") && !/function _parseChangelogBetween\(changelogText/.test(src); return rangeOk && extractOk && titlelessOk && moved; } },
-    { name: 'UR-0025 whats-new 완결: whatsNewCmd → lib/diagnostics.js + DI 위임 + 동작 (1.9.394)', run: () => { const m = require('../lib/diagnostics'); const expOk = typeof m.whatsNewCmd === 'function'; const src = read(__filename); const delegated = src.includes('_diag.whatsNewCmd(root,'); const diagSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js')); const movedToLib = diagSrc.includes('leerness whats-new') && diagSrc.includes('_parseChangelogBetween'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wn_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, 'CHANGELOG.md'), '## 1.9.50 — 2026-06-06 — A\n- `leerness x`\n\n## 1.9.49 — 2026-06-05 — B\n- old\n'); process.argv = ['node', 'h', 'whats-new', tmp, '--from', '1.9.49', '--to', '1.9.50', '--json']; process.stdout.write = s => { out += s; return true; }; whatsNewCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.from === '1.9.49' && j.to === '1.9.50' && Array.isArray(j.versions) && j.versions.length === 1 && j.versions[0].version === '1.9.50'; } catch {} return expOk && delegated && movedToLib && behavOk; } },
+    { name: 'UR-0025/whats-new BUG-fix: _parseChangelogBetween pure 추출 + "## X — DATE — title" 헤더 파싱 (1.9.393)', run: () => { const m = require('../lib/pure-utils'); if (m._parseChangelogBetween !== _parseChangelogBetween) return false; const cl = '## 1.9.393 — 2026-06-06 — Title\n- `leerness foo`\n- `--flagx`\n- `.leerness/x.md`\n\n## 1.9.392 — 2026-06-05 — Y\n- y\n\n## 1.9.391 — 2026-06-04 — Z\n- z\n'; const r = m._parseChangelogBetween(cl, '1.9.391', '1.9.393'); const rangeOk = r.length === 2 && r[0].version === '1.9.393' && r[1].version === '1.9.392'; const extractOk = r[0].newCommands.includes('foo') && r[0].newFlags.includes('--flagx') && r[0].newFiles.includes('.leerness/x.md'); const titlelessOk = m._parseChangelogBetween('## 1.9.50\n- a\n## 1.9.49\n- b\n', '1.9.49', '1.9.50').length === 1; const src = read(__filename); const moved = src.includes("require('../lib/pure-utils')") && !/function _parseChangelogBetween\(changelogText/.test(src); return rangeOk && extractOk && titlelessOk && moved; } },
+    { name: 'UR-0025 whats-new 완결: whatsNewCmd → lib/diagnostics.js + DI 위임 + 동작 (1.9.394)', run: () => { const m = require('../lib/diagnostics'); const expOk = typeof m.whatsNewCmd === 'function'; const src = read(__filename); const delegated = src.includes('_diag.whatsNewCmd(root,'); const diagSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'diagnostics.js')); const movedToLib = diagSrc.includes('leerness whats-new') && diagSrc.includes('_parseChangelogBetween'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wn_')); const save = process.argv; const _w = process.stdout.write; let out = ''; try { fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(tmp, 'CHANGELOG.md'), '## 1.9.50 — 2026-06-06 — A\n- `leerness x`\n\n## 1.9.49 — 2026-06-05 — B\n- old\n'); process.argv = ['node', 'h', 'whats-new', tmp, '--from', '1.9.49', '--to', '1.9.50', '--json']; process.stdout.write = s => { out += s; return true; }; whatsNewCmd(tmp); } catch {} finally { process.stdout.write = _w; process.argv = save; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } try { const j = JSON.parse(out); behavOk = j.from === '1.9.49' && j.to === '1.9.50' && Array.isArray(j.versions) && j.versions.length === 1 && j.versions[0].version === '1.9.50'; } catch {} return expOk && delegated && movedToLib && behavOk; } },
     { name: '회귀가드: decisions/lessons canonical round-trip 엣지문자(pipe/dash/colon) 무손상 + idempotent (1.9.395)', run: () => { const m = require('../lib/pure-utils'); const d = [{ date: '2026-06-06', title: 'A | pipe', decision: 'use X | Y', reason: 'r—dash', alternatives: 'alt: colon', impact: 'i' }]; const dback = m._decisionsFromMd(m._renderDecisionsMd(d)); const dOk = dback.length === 1 && dback[0].title === 'A | pipe' && dback[0].decision === 'use X | Y' && dback[0].reason === 'r—dash'; const dIdem = JSON.stringify(dback) === JSON.stringify(m._decisionsFromMd(m._renderDecisionsMd(dback))); const l = [{ date: '2026-06-06', text: 'lesson | with — chars: ok', tag: 't' }]; const lback = m._parseLessonEntries(m._renderLessonsMd(l)); const lOk = lback.length === 1 && lback[0].text === 'lesson | with — chars: ok'; const lIdem = JSON.stringify(lback) === JSON.stringify(m._parseLessonEntries(m._renderLessonsMd(lback))); return dOk && dIdem && lOk && lIdem; } },
     { name: '6번째 외부평가/codex P1-B: task drop 존재확인 가드 — 없는 ID 가짜 row 방지 (1.9.396)', run: () => { const src = read(__filename); const i = src.indexOf('function taskDrop(root, id)'); if (i < 0) return false; const body = src.slice(i, i + 700); return body.includes('not found in progress-tracker.md') && body.includes('rows.find(r => r.id === id)') && body.includes('_requireInit'); } },
     { name: '6번째 외부평가/codex P1-A (UR-0098): install-safety 레시피 셸-무관 + hardeningNote (1.9.397)', run: () => { if (typeof installSafetyCmd !== 'function') return false; const save = process.argv; const _w = process.stdout.write; let out = ''; try { process.argv = ['node', 'h', 'install-safety', '--json']; process.stdout.write = s => { out += s; return true; }; installSafetyCmd({ json: true }); } catch {} finally { process.stdout.write = _w; process.argv = save; } let j; try { j = JSON.parse(out); } catch {} const noPosixPrefix = !!j && Array.isArray(j.safeInstall) && !j.safeInstall.some(x => /^npm_config_\w+=/.test(String(x).trim())); const crossShell = !!j && j.safeInstall.filter(x => String(x).includes('npx --yes')).length >= 2; const noteOk = !!j && typeof j.hardeningNote === 'string' && j.hardeningNote.includes('PowerShell'); return noPosixPrefix && crossShell && noteOk; } },
     { name: '6번째 외부평가/codex P1-C (UR-0099): --json 에러 경로 구조화 failJson + 와이어 (1.9.398)', run: () => { const io = require('../lib/io'); if (io.failJson !== failJson) return false; const _w = process.stdout.write; const saved = process.exitCode; let jOut = '', hOut = ''; let jExit = 0; try { process.stdout.write = s => { jOut += s; return true; }; process.exitCode = 0; failJson(true, 'tc', 'm'); jExit = process.exitCode; process.stdout.write = s => { hOut += s; return true; }; process.exitCode = 0; failJson(false, 'c', 'humanmsg'); } catch {} finally { process.stdout.write = _w; process.exitCode = saved; } let pj; try { pj = JSON.parse(jOut); } catch {} const jsonOk = !!pj && pj.ok === false && pj.code === 'tc' && pj.error === 'm' && jExit === 1; const humanOk = hOut.includes('✗') && hOut.includes('humanmsg') && !hOut.includes('{'); const src = read(__filename); const wired = src.includes("failJson(_j, 'missing_args'") && src.includes("failJson(_j, 'spec_not_found'"); return jsonOk && humanOk && wired; } },
-    { name: 'T-0077 graph --html: leerness.html 온톨로지 생성 + 노드/엣지/XSS 무결성 (1.34.3)', run: () => { const m = require('../lib/graph'); const expOk = typeof m.graphHtmlCmd === 'function' && typeof m.buildGraphData === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/" + "graph')") && src.includes('function graphHtmlCmd(root) { return ' + '_graph.graphHtmlCmd('); const gSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'graph.js')); const movedToLib = gSrc.includes('buildGraphData') && gSrc.includes('String.raw') && gSrc.includes('/*__DATA__' + '*/null'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_graph_')); const _w = process.stdout.write; try { process.stdout.write = () => true; fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | first task | - | - | 2026-06-26 |\n| T-0002 | in-progress | follow-up to T-0001 </scr' + 'ipt> | - | - | 2026-06-26 |\n'); const deps = { _roadmapData, _loadDecisions, _loadLessons }; const data = m.buildGraphData(tmp, deps); const dataOk = data.nodes.some(n => n.id === 'T-0001') && data.nodes.some(n => n.id === 'T-0002') && data.counts.task >= 2; const edgeOk = data.edges.some(e => e.source === 'T-0002' && e.target === 'T-0001'); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, Object.assign({ has: () => false }, deps, { quiet: true }), out); const html = fs.readFileSync(out, 'utf8'); const placeholderGone = !html.includes('/*__DATA__' + '*/null'); const hasNode = html.includes('T-0002'); const xssSafe = (html.match(/<\/script>/g) || []).length === 1; behavOk = dataOk && edgeOk && placeholderGone && hasNode && xssSafe && !!r && r.ok === true && fs.existsSync(out); } catch (e) { behavOk = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return expOk && delegated && movedToLib && behavOk; } },
-    { name: 'T-0077 후속 graph auto-gen: handoff opt-in 배선 + quiet 무로그 (1.34.4)', run: () => { const m = require('../lib/graph'); const src = read(__filename); const wired = src.includes('_maybeAuto' + 'Graph(_hp)') && src.includes('LEERNESS_AUTO_' + 'GRAPH'); let quietOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_autograph_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | x | - | - | 2026-06-26 |\n'); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, { _roadmapData, _loadDecisions, _loadLessons, quiet: true }, out); quietOk = !!r && r.ok === true && fs.existsSync(out) && so === ''; } catch (e) { quietOk = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return wired && quietOk; } },
-    { name: 'graph --html: 빈/미초기화 하네스 무크래시 + 유효 빈 HTML (1.35.0 방어가드)', run: () => { const m = require('../lib/graph'); let ok = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_emptyg_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); const data = m.buildGraphData(tmp, {}); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, { quiet: true }, out); const html = fs.readFileSync(out, 'utf8'); const closers = html.split('</' + 'script>').length - 1; const dm = html.match(/var DATA = (\{[\s\S]*?\});/); let parsed = null; try { parsed = JSON.parse(dm[1]); } catch (e) {} ok = !!data && Array.isArray(data.nodes) && data.nodes.length === 0 && !!r && r.ok === true && r.nodes === 0 && fs.existsSync(out) && closers === 1 && !!parsed && parsed.nodes.length === 0 && so === ''; } catch (e) { ok = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return ok; } },
-    { name: 'graph --html: 임베드 script JS 신택스 유효성(U+2028/정규식 리터럴 회귀 영구 차단, 1.35.2)', run: () => { const m = require('../lib/graph'); let ok = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_gjs_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.harness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | x </scr' + 'ipt> & <b> ' + String.fromCharCode(0x24) + '{y} | M-0002 | - | 2026-06-26 |\n'); const out = path.join(tmp, 'leerness.html'); m.graphHtmlCmd(tmp, { _roadmapData, _loadDecisions, _loadLessons, quiet: true }, out); const html = fs.readFileSync(out, 'utf8'); const o = '<scr' + 'ipt>', c = '</scr' + 'ipt>'; const js = html.slice(html.indexOf(o) + o.length, html.lastIndexOf(c)); let synOk = false; try { new Function(js); synOk = true; } catch (e) { synOk = false; } ok = js.length > 200 && synOk; } catch (e) { ok = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return ok; } },
+    { name: 'T-0077 graph --html: leerness.html 온톨로지 생성 + 노드/엣지/XSS 무결성 (1.34.3)', run: () => { const m = require('../lib/graph'); const expOk = typeof m.graphHtmlCmd === 'function' && typeof m.buildGraphData === 'function'; const src = read(__filename); const delegated = src.includes("require('../lib/" + "graph')") && src.includes('function graphHtmlCmd(root) { return ' + '_graph.graphHtmlCmd('); const gSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'graph.js')); const movedToLib = gSrc.includes('buildGraphData') && gSrc.includes('String.raw') && gSrc.includes('/*__DATA__' + '*/null'); let behavOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_graph_')); const _w = process.stdout.write; try { process.stdout.write = () => true; fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.leerness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | first task | - | - | 2026-06-26 |\n| T-0002 | in-progress | follow-up to T-0001 </scr' + 'ipt> | - | - | 2026-06-26 |\n'); const deps = { _roadmapData, _loadDecisions, _loadLessons }; const data = m.buildGraphData(tmp, deps); const dataOk = data.nodes.some(n => n.id === 'T-0001') && data.nodes.some(n => n.id === 'T-0002') && data.counts.task >= 2; const edgeOk = data.edges.some(e => e.source === 'T-0002' && e.target === 'T-0001'); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, Object.assign({ has: () => false }, deps, { quiet: true }), out); const html = fs.readFileSync(out, 'utf8'); const placeholderGone = !html.includes('/*__DATA__' + '*/null'); const hasNode = html.includes('T-0002'); const xssSafe = (html.match(/<\/script>/g) || []).length === 1; behavOk = dataOk && edgeOk && placeholderGone && hasNode && xssSafe && !!r && r.ok === true && fs.existsSync(out); } catch (e) { behavOk = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return expOk && delegated && movedToLib && behavOk; } },
+    { name: 'T-0077 후속 graph auto-gen: handoff opt-in 배선 + quiet 무로그 (1.34.4)', run: () => { const m = require('../lib/graph'); const src = read(__filename); const wired = src.includes('_maybeAuto' + 'Graph(_hp)') && src.includes('LEERNESS_AUTO_' + 'GRAPH'); let quietOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_autograph_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.leerness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | x | - | - | 2026-06-26 |\n'); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, { _roadmapData, _loadDecisions, _loadLessons, quiet: true }, out); quietOk = !!r && r.ok === true && fs.existsSync(out) && so === ''; } catch (e) { quietOk = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return wired && quietOk; } },
+    { name: 'graph --html: 빈/미초기화 하네스 무크래시 + 유효 빈 HTML (1.35.0 방어가드)', run: () => { const m = require('../lib/graph'); let ok = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_emptyg_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); const data = m.buildGraphData(tmp, {}); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, { quiet: true }, out); const html = fs.readFileSync(out, 'utf8'); const closers = html.split('</' + 'script>').length - 1; const dm = html.match(/var DATA = (\{[\s\S]*?\});/); let parsed = null; try { parsed = JSON.parse(dm[1]); } catch (e) {} ok = !!data && Array.isArray(data.nodes) && data.nodes.length === 0 && !!r && r.ok === true && r.nodes === 0 && fs.existsSync(out) && closers === 1 && !!parsed && parsed.nodes.length === 0 && so === ''; } catch (e) { ok = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return ok; } },
+    { name: 'graph --html: 임베드 script JS 신택스 유효성(U+2028/정규식 리터럴 회귀 영구 차단, 1.35.2)', run: () => { const m = require('../lib/graph'); let ok = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_gjs_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.leerness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | x </scr' + 'ipt> & <b> ' + String.fromCharCode(0x24) + '{y} | M-0002 | - | 2026-06-26 |\n'); const out = path.join(tmp, 'leerness.html'); m.graphHtmlCmd(tmp, { _roadmapData, _loadDecisions, _loadLessons, quiet: true }, out); const html = fs.readFileSync(out, 'utf8'); const o = '<scr' + 'ipt>', c = '</scr' + 'ipt>'; const js = html.slice(html.indexOf(o) + o.length, html.lastIndexOf(c)); let synOk = false; try { new Function(js); synOk = true; } catch (e) { synOk = false; } ok = js.length > 200 && synOk; } catch (e) { ok = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return ok; } },
     { name: '7번째 버그헌트 P1-A (UR-0104): 테이블셀 안전화 _cellSafe/_cellUnescape (파이프/개행 injection 차단) (1.9.399)', run: () => { const m = require('../lib/pure-utils'); if (m._cellSafe !== _cellSafe || m._cellUnescape !== _cellUnescape) return false; const safe = _cellSafe('fix | bug\nrow2'); const noRaw = !/(?<!\\)\|/.test(safe) && !/[\r\n]/.test(safe); const pipeRt = _cellUnescape(_cellSafe('a | b | c')) === 'a | b | c'; const nlGone = _cellSafe('a\nb') === 'a b'; const src = read(__filename); const wired = src.includes('_cellSafe(r.request)') && src.includes('_cellSafe(r.rule)'); return noRaw && pipeRt && nlGone && wired; } },
     { name: '7번째 버그헌트 P1-B (UR-0105): verify-claim/optimism-check/honesty-check --json 에러 구조화 (1.9.400)', run: () => { const src = read(__filename); const vc = /function verifyClaimCmd[\s\S]{0,1200}?failJson\(_j, 'not_found'/.test(src); const oc = /function optimismCheckCmd[\s\S]{0,700}?failJson\(_j, 'not_found'/.test(src); const hc = /function honestyCheckCmd[\s\S]{0,900}?failJson\(has\('--json'\), 'not_found'/.test(src); return vc && oc && hc; } },  // 1.30.5: {0,400}→{0,700} (F4 가 missing_args 라인을 en/ko 로 늘려 not_found 가 창 밖) · 1.33.2: vc {0,700}→{0,1200} (opts.collect 가드 라인이 not_found 를 더 밀어냄)
     { name: '7번째 버그헌트 P1-C (UR-0106): 시크릿 FN — gitignore 부정(!) + placeholder substring 정밀화 (1.9.401)', run: () => { const m = require('../lib/pure-utils'); const gm = m._gitignoreMatch; const negOk = gm('*.example\n!.env.example', '.env.example') === false && gm('*.log', 'a.log') === true && gm('a.log\n!a.log', 'a.log') === false && gm('.env', '.env') === true; const ph = m._isPlaceholderSecret; const phOk = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false && ph('your-key-here') === true && ph('changeme') === true && ph('example') === true && ph('xxxxxxxxxxxxxxxxxxxxxxxxxxxx') === true; return negOk && phOk; } },
@@ -4835,8 +4911,8 @@ function _selfTestCases() {
       const save = process.argv; const _w = process.stdout.write; const savedExit = process.exitCode;
       let t = null, d = null, l = null, r = null, rDup = null;
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
-        fs.writeFileSync(path.join(tmp, '.harness', 'HARNESS_VERSION'), VERSION);
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.leerness', 'HARNESS_VERSION'), VERSION);
         const cap = (argv, fn) => {
           let out = ''; process.argv = argv; process.stdout.write = s => { out += s; return true; };
           try { fn(); } finally { process.stdout.write = _w; }
@@ -4866,8 +4942,8 @@ function _selfTestCases() {
       {
         const _hd = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_health_'));
         try {
-          mkdirp(path.join(_hd, '.harness'));
-          writeUtf8(path.join(_hd, '.harness', 'HARNESS_VERSION'), VERSION);
+          mkdirp(path.join(_hd, '.leerness'));
+          writeUtf8(path.join(_hd, '.leerness', 'HARNESS_VERSION'), VERSION);
           // 다른 selftest 케이스가 "placeholder 아님"으로 단언하는 실 탐지 대상 값(분할 표기로 자기참조 회피)
           writeUtf8(path.join(_hd, 'cfg.js'), 'const k = "' + 'AKIA' + 'JQXMP7RZ2KL9WXYZ' + '";\n');
           const _r = cp.spawnSync(process.execPath, [__filename, 'health', _hd, '--json'],
@@ -4959,12 +5035,12 @@ function _selfTestCases() {
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rulecwd_'));
       let wired = false;
       try {
-        for (const d of [proj, cwd]) { fs.mkdirSync(path.join(d, '.harness'), { recursive: true }); fs.writeFileSync(path.join(d, '.harness', 'HARNESS_VERSION'), VERSION); }
+        for (const d of [proj, cwd]) { fs.mkdirSync(path.join(d, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(d, '.leerness', 'HARNESS_VERSION'), VERSION); }
         const r = cp.spawnSync(process.execPath, [__filename, 'rule', 'add', '세션', '점검', '--trigger', 'every-session', proj, '--json'], { encoding: 'utf8', cwd, timeout: 30000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1' } });
         const line = (r.stdout || '').split(/\r?\n/).map(x => x.trim()).filter(x => x.startsWith('{')).pop();
         const j = JSON.parse(line);
         const titleOk = j.ok === true && j.rule === '세션 점검' && j.trigger === 'every-session';
-        const rootOk = fs.existsSync(path.join(proj, '.harness', 'rules.md')) && !fs.existsSync(path.join(cwd, '.harness', 'rules.md'));
+        const rootOk = fs.existsSync(path.join(proj, '.leerness', 'rules.md')) && !fs.existsSync(path.join(cwd, '.leerness', 'rules.md'));
         wired = titleOk && rootOk;
       } catch (e) { wired = false; } finally { for (const d of [proj, cwd]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} } }
       return wired && u;
@@ -5001,7 +5077,7 @@ function _selfTestCases() {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_health_'));
       const _w = process.stdout.write; let out = '';
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         process.stdout.write = s => { out += s; return true; };
         m.healthCmd(tmp, { VERSION, STATUSES, has: f => f === '--json', arg: (k, d) => d, harnessPath: path.join(tmp, '__nope.js'), listAllSkills, planPath, readProgressRows, readRules, envDiff, _collectSecretFindings, _readUsageStats, _loadDecisions, _loadLessons, _loadShellFailures, _readFeatureGraph, _scanShellScriptsEncoding, _shellEnvDrift, _computeMilestones, _computeRecentChanges, _computeRoundHistory, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _listAPISkills, _matchAPISkills, _mcpToolCount });
       } catch (e) { out = 'ERR:' + e.message; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
@@ -5022,7 +5098,7 @@ function _selfTestCases() {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_drift_'));
       const _w = process.stdout.write; let out = '';
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         process.stdout.write = s => { out += s; return true; };
         // has: --json 만 true(JSON 출력) → --auto-fix false 라 spawn 없음.
         m.driftCheckCmd(tmp, { json: true }, { VERSION, has: f => f === '--json', arg: (k, d) => d, harnessPath: __filename, readProgressRows, planPath, handoffPath, currentStatePath, taskLogPath, envDiff, _usageStatsPath, _readUsageStats, _updateUserRequest, _scanShellScriptsEncoding, _readFeatureGraph, _detectDeliveredRequests, _autoFixIdempotency });
@@ -5042,7 +5118,7 @@ function _selfTestCases() {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_audit_'));
       const _w = process.stdout.write; let out = '';
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         fs.writeFileSync(path.join(tmp, 'AGENTS.md'), '# x');
         process.stdout.write = s => { out += s; return true; };
         m.audit(tmp, { json: true }, { VERSION, arg: (k, d) => d, has: f => f === '--json', planPath, readProgressRows, currentStatePath, handoffPath, envDiff, _readFeatureGraph, _matchAPISkills, _listAPISkills, _collectSecretFindings });
@@ -5063,7 +5139,7 @@ function _selfTestCases() {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rr_'));
       const _w = process.stdout.write; let out = '';
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         process.stdout.write = s => { out += s; return true; };
         // harnessPath 를 존재하지 않는 경로로 → 내부 brainstorm spawn 즉시 실패(무부작용). estimatedType/steps 는 spawn 이전 계산이라 검증 가능.
         m.reviewRequestCmd(tmp, '결제 기능 추가 구현', { has: () => true, harnessPath: path.join(tmp, '__nope.js'), _checkRequestConstraints: () => ({ matched: [], suggestions: [] }), _recordRun: () => {} });
@@ -5101,7 +5177,7 @@ function _selfTestCases() {
       const _w = process.stdout.write; let out = '';
       const _argv = process.argv.slice();  // 외부 호출(doctor --json/selftest --json)의 argv 격리·복원
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         const cap = fn => { out = ''; process.stdout.write = s => { out += s; return true; }; try { fn(); } finally { process.stdout.write = _w; } return out; };
         process.argv = _argv.filter(a => a !== '--json');  // 텍스트 모드 강제(외부 --json 제거)
         const a = cap(() => planShow(tmp));  // 텍스트 → JSON 아니어야
@@ -5259,14 +5335,14 @@ function _selfTestCases() {
       const _rt = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ur0151_'));
       try {
         const _proj = path.join(_rt, 'proj'), _cwdDir = path.join(_rt, 'cwd');
-        fs.mkdirSync(path.join(_proj, '.harness'), { recursive: true });
-        fs.writeFileSync(path.join(_proj, '.harness', 'HARNESS_VERSION'), VERSION);   // init 게이트 통과용 최소 마커
+        fs.mkdirSync(path.join(_proj, '.leerness'), { recursive: true });
+        fs.writeFileSync(path.join(_proj, '.leerness', 'HARNESS_VERSION'), VERSION);   // init 게이트 통과용 최소 마커
         fs.mkdirSync(_cwdDir, { recursive: true });                                    // 미초기화 — cwd 로 새면 write 자체가 차단됨
         const _rtitle = 'UR-0151 positional path 회귀가드';
         cp.spawnSync(process.execPath, [__filename, 'rule', 'add', _rtitle, _proj, '--trigger', 'every-session', '--json'],
           { cwd: _cwdDir, encoding: 'utf8', timeout: 60000, maxBuffer: 8 * 1024 * 1024 });
         const _inProj = readRules(_proj).some(r => r.rule === _rtitle && r.status === 'active');
-        const _cwdRules = path.join(_cwdDir, '.harness', 'rules.md');
+        const _cwdRules = path.join(_cwdDir, '.leerness', 'rules.md');
         const _inCwd = exists(_cwdRules) && read(_cwdRules).includes(_rtitle);
         rule = _inProj && !_inCwd;
       } catch {} finally { try { fs.rmSync(_rt, { recursive: true, force: true }); } catch {} }
@@ -5316,7 +5392,7 @@ function _selfTestCases() {
       const src = read(__filename);
       // planDrop 에서 upsertProgress(dropped task) 제거 + ok 메시지가 plan.md 가리킴
       const noTaskRow = !/function planDrop[\s\S]*?upsertProgress\(root, \{ id: tid, status: 'dropped'/.test(src);
-      const dropsToPlan = src.includes("ok(`plan dropped: ${id} → .harness/plan.md (Out of Scope / Dropped)`);");
+      const dropsToPlan = src.includes("ok(`plan dropped: ${id} → .leerness/plan.md (Out of Scope / Dropped)`);");
       return noTaskRow && dropsToPlan;
     } },
     { name: '12th 외부평가 Opus P3 (UR-0144): AWS …EXAMPLE 접미사 placeholder + 중간 example 실키 FN 보존 (1.10.1)', run: () => {
@@ -5384,10 +5460,10 @@ function _selfTestCases() {
     { name: '14th 버그헌트 P1 (UR-0176): nextId 가 셀 내부 토큰(T-9999) 무시, 라인앵커 한정 (1.11.1)', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_nid_'));
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         // 실제 행 T-0002 + Request 셀 안 텍스트 T-9999
-        fs.writeFileSync(path.join(tmp, '.harness', 'progress-tracker.md'), '# Progress Tracker\n\n| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0002 | done | fix T-9999 bug | e | n | 2026-06-08 |\n');
-        fs.writeFileSync(path.join(tmp, '.harness', 'plan.md'), '# Plan\n');
+        fs.writeFileSync(path.join(tmp, '.leerness', 'progress-tracker.md'), '# Progress Tracker\n\n| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0002 | done | fix T-9999 bug | e | n | 2026-06-08 |\n');
+        fs.writeFileSync(path.join(tmp, '.leerness', 'plan.md'), '# Plan\n');
         return nextId(tmp, 'T') === 'T-0003';  // 셀 안 T-9999 무시 → T-0003 (기존 버그면 T-10000)
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     } },
@@ -5505,7 +5581,7 @@ function _selfTestCases() {
       let apiCrlf = false, statBeforeRead = false;
       const _t15 = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_g15_'));
       try {
-        const _sk = path.join(_t15, '.harness', 'api-skills');
+        const _sk = path.join(_t15, '.leerness', 'api-skills');
         fs.mkdirSync(_sk, { recursive: true });
         fs.writeFileSync(path.join(_sk, 'crlf.md'), '---\r\nid: crlf\r\nname: CRLF Skill\r\nurls:\r\n  - https://ex.test/doc\r\n---\r\n본문\r\n');
         fs.writeFileSync(path.join(_sk, 'broken.md'), '---\nid: broken\n닫는 구분자 없음 — frontmatter 손상\n');
@@ -5566,8 +5642,8 @@ function _selfTestCases() {
       let wired = false;
       const _tp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_dw_'));
       try {
-        fs.mkdirSync(path.join(_tp, '.harness'), { recursive: true });
-        fs.writeFileSync(path.join(_tp, '.harness', 'HARNESS_VERSION'), VERSION);
+        fs.mkdirSync(path.join(_tp, '.leerness'), { recursive: true });
+        fs.writeFileSync(path.join(_tp, '.leerness', 'HARNESS_VERSION'), VERSION);
         const _cond = '로그인 e2e 테스트 통과';
         const _mtitle = 'Done-When 회귀가드';
         const _mdefault = 'Done-When 기본값 회귀가드';
@@ -5597,7 +5673,7 @@ function _selfTestCases() {
           && _human.includes('완료기준(Done-When): (미정)');
         // 1.36.84 (검수 M4): **en 분기 기본값**도 따로 검사 — ko 만 보면 en 기본값을 ''로 없애도 통과했다(실측).
         let _enOk = false;
-        //   언어는 수동 파일이 아니라 실제 init(--language en)으로만 확정된다(수동 .harness/LANGUAGE·manifest 로는 미적용 — 실측).
+        //   언어는 수동 파일이 아니라 실제 init(--language en)으로만 확정된다(수동 .leerness/LANGUAGE·manifest 로는 미적용 — 실측).
         const _te = _selftestFixture('en');   // 1.36.85: 공유 en 픽스처
         try {
           if (!_te) { _enOk = false; throw new Error('fixture'); }
@@ -5615,7 +5691,7 @@ function _selfTestCases() {
       const f2 = src.includes('_cellSafe(r.request)') && src.includes('_cellSafe(r.rule)');
       return f1 && f2;
     } },
-    { name: '외부클린룸 C2/C3/C4: gate --json 단일객체 + memory search --json + about .harness 정합 (1.16.1)', run: () => {
+    { name: '외부클린룸 C2/C3/C4: gate --json 단일객체 + memory search --json + about .leerness 정합 (1.16.1)', run: () => {
       const src = read(__filename);
       // 자기참조 제거: 낡은 리터럴("const jsonMode = has('--json');  // 외부리뷰 C2")은 리팩터로 제품 코드에서 사라져 가드 자기 줄에서만 매치했다.
       //   gate() 함수 소스만(셀프테스트 영역 제외) 불변식 정규식으로 검사 — 단일 집계 객체 + 단계 출력 억제.
@@ -5630,7 +5706,7 @@ function _selfTestCases() {
         && /if \(!jsonMode\) log\(/.test(_msSrc)
         && /if \(jsonMode\) \{ log\(JSON\.stringify\(\{ version: VERSION, query,[^\n]*\btotal,[^\n]*\bincludeCode:[^\n]*\bresults\b/.test(_msSrc);
       const _badDir = '.leern' + 'ess/ 에 영속화 (state start';  // 자기참조 회피: 분할 — about state 줄이 .leerness 로 남아있으면 감지
-      const c4 = src.includes('상태/결정/진행을 .harness/ 에 영속화 (task/decision') && !src.includes('상태/결정/진행을 ' + _badDir);
+      const c4 = src.includes('상태/결정/진행을 .leerness/ 에 영속화 (task/decision') && !src.includes('상태/결정/진행을 ' + _badDir);
       return c2 && c3 && c4;
     } },
     { name: '외부클린룸 UR-0042: bare 명령그룹(rule/skill/feature/memory) → 사용법 힌트(unknown command 아님) (1.16.2)', run: () => {
@@ -5877,19 +5953,19 @@ function _selfTestCases() {
       //   selftest 338/338 이 초록이었다 — 실행 경로가 어떤 케이스에도 없었다. 그래서 **실제 명령**을 돌린다.
       const d = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_bsline_'));
       try {
-        mkdirp(path.join(d, '.harness'));
-        writeUtf8(path.join(d, '.harness', 'HARNESS_VERSION'), VERSION);
+        mkdirp(path.join(d, '.leerness'));
+        writeUtf8(path.join(d, '.leerness', 'HARNESS_VERSION'), VERSION);
         // (검수 1.36.85 M3) 1차판은 "서로 다르고 양수" 만 봐서, `_lineOfOffset` 을 `offset + 1` 로 바꿔
         //   엉뚱한 값이 나와도 통과했다(실측). **정확한 줄번호**를 단언한다.
         const KW = 'zzq' + 'unique';
         // 3행과 10행에 동일 내용 블록(사이에 다른 블록) — 기대 line = [3, 10]
-        writeUtf8(path.join(d, '.harness', 'lessons.md'),
+        writeUtf8(path.join(d, '.leerness', 'lessons.md'),
           `# Lessons\n\n### 2026-01-01\n- Lesson: ${KW} 교훈\n- Tag: t\n\n### 2026-02-02\n- Lesson: 사이에 낀 다른 것\n\n### 2026-01-01\n- Lesson: ${KW} 교훈\n- Tag: t\n`);
         // 같은 제목의 decision 도 3행·10행 — findIndex 기반 오보(검수 M1) 회귀 차단.
         //   **코드펜스 블록을 앞에 둔다**: decision 추출은 펜스를 길이 보존 마스킹으로 제외하는데,
         //   길이가 바뀌는 방식(삭제)으로 되돌리면 이후 모든 오프셋이 밀린다 — 펜스가 없는 픽스처로는 그 회귀를 못 잡는다.
         const _fence = String.fromCharCode(96).repeat(3);
-        writeUtf8(path.join(d, '.harness', 'decisions.md'),
+        writeUtf8(path.join(d, '.leerness', 'decisions.md'),
           `# Decisions\n\n${_fence}md\n### 2099-12-31 — 펜스 안 예시(집계 제외)\n${_fence}\n\n### 2026-01-01 — ${KW} 결정\n- Decision: ${KW} 채택\n- Reason: r\n\n### 2026-02-02 — 다른 결정\n- Decision: x\n\n### 2026-01-01 — ${KW} 결정\n- Decision: ${KW} 채택\n- Reason: r\n`);
         const _run = (a) => cp.spawnSync(process.execPath, [__filename, ...a, '--path', d],
           { encoding: 'utf8', timeout: 90000, maxBuffer: 16 * 1024 * 1024 });
@@ -5918,8 +5994,8 @@ function _selfTestCases() {
       const _bf = require('../lib/bugfix');
       const d = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_bfx_'));
       try {
-        mkdirp(path.join(d, '.harness'));
-        writeUtf8(path.join(d, '.harness', 'HARNESS_VERSION'), VERSION);
+        mkdirp(path.join(d, '.leerness'));
+        writeUtf8(path.join(d, '.leerness', 'HARNESS_VERSION'), VERSION);
         const ID = 'T-0009';
         const _flag = path.join(d, 'bf_fixed.txt');
         const _probe = `node -e "const f=require('fs');if(!f.existsSync('bf_fixed.txt')){console.error('BUG_HERE');process.exit(3)}"`;
@@ -5950,7 +6026,7 @@ function _selfTestCases() {
         const _j = JSON.parse(_cli.stdout.slice(_cli.stdout.indexOf('{')));
         if (!(_j.ok === true && (_j.receipts || []).some(r => r.id === ID && r.rootCause))) return false;
         // ⑦⑧⑨ 1.36.87 자체 헌트로 실측한 3결함 — 전부 손편집/구버전 스토어와 정상 앱 출력에서 나온다.
-        const _put = (list) => writeUtf8(path.join(d, '.harness', 'bugfix-receipts.json'), JSON.stringify(list, null, 2));
+        const _put = (list) => writeUtf8(path.join(d, '.leerness', 'bugfix-receipts.json'), JSON.stringify(list, null, 2));
         const _ok0 = `node -e "process.exit(0)"`;
         // ⑦ baseline 없는/재현된 적 없는 엔트리는 **형상 무효**로 보류한다 — 종전엔 유효로 통과해
         //   (a) 완료 렌더에서 TypeError 로 `task update` 가 통째로 죽고 (b) 손으로 써넣은 probe 가 게이트를 통과했다.
@@ -5999,9 +6075,9 @@ function _selfTestCases() {
         // 여러 표면에 동시에 심는다 — 한 표면만 보면 다른 표면의 불일치를 놓친다
         mkdirp(path.join(d, 'src'));
         writeUtf8(path.join(d, 'src', 'a.js'), `// ${KW} 구현\n`);
-        writeUtf8(path.join(d, '.harness', 'lessons.md'), `# L\n\n### 2026-01-01\n- Lesson: ${KW} 교훈\n`);
-        writeUtf8(path.join(d, '.harness', 'plan.md'), `# P\n\n### M-0001. ${KW} 마일스톤\nStatus: planned\nProgress: 0%\n`);
-        writeUtf8(path.join(d, '.harness', 'decisions.md'), `# D\n\n### 2026-01-01 — ${KW} 결정\n- Decision: ${KW}\n`);
+        writeUtf8(path.join(d, '.leerness', 'lessons.md'), `# L\n\n### 2026-01-01\n- Lesson: ${KW} 교훈\n`);
+        writeUtf8(path.join(d, '.leerness', 'plan.md'), `# P\n\n### M-0001. ${KW} 마일스톤\nStatus: planned\nProgress: 0%\n`);
+        writeUtf8(path.join(d, '.leerness', 'decisions.md'), `# D\n\n### 2026-01-01 — ${KW} 결정\n- Decision: ${KW}\n`);
         const rj = _run(['--include-code', '--json']);
         if (rj.status !== 0) return false;
         const j = JSON.parse(rj.stdout.slice(rj.stdout.indexOf('{')));
@@ -6035,11 +6111,11 @@ function _selfTestCases() {
         const _wsBase = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ws_'));
         try {
           const _app = path.join(_wsBase, 'app');
-          mkdirp(path.join(_app, '.harness'));
-          writeUtf8(path.join(_app, '.harness', 'HARNESS_VERSION'), VERSION);
-          writeUtf8(path.join(_app, '.harness', 'lessons.md'), `# L\n\n### 2026-01-01\n- Lesson: ${KW} 교훈\n`);
-          writeUtf8(path.join(_app, '.harness', 'plan.md'), `# P\n\n### M-0001. ${KW} 마일스톤\nStatus: planned\nProgress: 0%\n`);
-          writeUtf8(path.join(_app, '.harness', 'decisions.md'), `# D\n\n### 2026-01-01 — ${KW} 결정\n- Decision: ${KW}\n`);
+          mkdirp(path.join(_app, '.leerness'));
+          writeUtf8(path.join(_app, '.leerness', 'HARNESS_VERSION'), VERSION);
+          writeUtf8(path.join(_app, '.leerness', 'lessons.md'), `# L\n\n### 2026-01-01\n- Lesson: ${KW} 교훈\n`);
+          writeUtf8(path.join(_app, '.leerness', 'plan.md'), `# P\n\n### M-0001. ${KW} 마일스톤\nStatus: planned\nProgress: 0%\n`);
+          writeUtf8(path.join(_app, '.leerness', 'decisions.md'), `# D\n\n### 2026-01-01 — ${KW} 결정\n- Decision: ${KW}\n`);
           const _opt = { cwd: _wsBase, encoding: 'utf8', timeout: 90000, maxBuffer: 16 * 1024 * 1024 };
           const _wj = cp.spawnSync(process.execPath, [__filename, 'brainstorm', KW, '--include', 'app', '--json'], _opt);
           const _wh = cp.spawnSync(process.execPath, [__filename, 'brainstorm', KW, '--include', 'app'], _opt);
@@ -6317,7 +6393,7 @@ function _selfTestCases() {
     { name: 'handoff 넛지 (1.36.7, 메타-테스트 도그푸드): 오래된 handoff→넛지 · 최근/부재→없음 · opt-out 존중 (행위)', run: () => {
       const os = require('os');
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lz-hn-'));
-      const hd = path.join(dir, '.harness'); fs.mkdirSync(hd);
+      const hd = path.join(dir, '.leerness'); fs.mkdirSync(hd);
       const lhf = path.join(hd, 'last-handoff.json');
       const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
       const stampLegacy = (msAgo, history = [iso(msAgo)]) => {
@@ -6366,7 +6442,7 @@ function _selfTestCases() {
     { name: 'FILE_RE 백슬래시 경로 (1.36.10, 선재 백로그): Windows 경로 추출+정규화 · forward 회귀 0 · FP 0 (행위)', run: () => {
       const os = require('os');
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lz-bs-'));
-      const hd = path.join(dir, '.harness'); fs.mkdirSync(hd);
+      const hd = path.join(dir, '.leerness'); fs.mkdirSync(hd);
       fs.mkdirSync(path.join(dir, 'src'));
       fs.writeFileSync(path.join(dir, 'src', 'thing.mjs'), 'export const x = 1;\n// real impl with enough content to not be a stub\nexport function go(){ return x + 1; }\n');
       try {
@@ -6549,7 +6625,7 @@ function _selfTestCases() {
         try {
           if (!_ed) return false;             // 픽스처 준비 실패는 조용히 통과시키지 않는다
           cp.spawnSync(process.execPath, [__filename, 'task', 'add', 'probe', '--path', _ed], { encoding: 'utf8', timeout: 60000 });
-          const _md = read(path.join(_ed, '.harness', 'progress-tracker.md'));
+          const _md = read(path.join(_ed, '.leerness', 'progress-tracker.md'));
           const _tid = [...String(_md).matchAll(/\|\s*(T-\d{4})\s*\|/g)].map(m => m[1]).pop();
           cp.spawnSync(process.execPath, [__filename, 'progress', 'update', _tid, '--status', 'done', '--evidence', 'bin/leerness.js', '--path', _ed], { encoding: 'utf8', timeout: 60000 });
           const _o = (cp.spawnSync(process.execPath, [__filename, 'verify-claim', _tid, '--path', _ed, '--language', 'en'], { encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024 }).stdout) || '';
@@ -6715,14 +6791,14 @@ function _selfTestCases() {
       const base = fsx.mkdtempSync(path.join(osx.tmpdir(), 'leer-parent-st-'));
       const alone = fsx.mkdtempSync(path.join(osx.tmpdir(), 'leer-alone-st-'));
       try {
-        fsx.mkdirSync(path.join(base, '.harness'), { recursive: true });
-        fsx.writeFileSync(path.join(base, '.harness', 'design-system.md'), '# ds');
+        fsx.mkdirSync(path.join(base, '.leerness'), { recursive: true });
+        fsx.writeFileSync(path.join(base, '.leerness', 'design-system.md'), '# ds');
         const sub = path.join(base, 'sub'); fsx.mkdirSync(sub, { recursive: true });
         const found = _findParentWorkspace(sub);
         const standalone = _findParentWorkspace(alone);
-        // 부모 탐지: 워크스페이스 .harness + assetCount≥1(design-system) · 독립: null · read-only(소스에 파일쓰기 없음 — adopt 미구현)
+        // 부모 탐지: 워크스페이스 .leerness + assetCount≥1(design-system) · 독립: null · read-only(소스에 파일쓰기 없음 — adopt 미구현)
         const readOnly = /이 명령은 아무 파일도 쓰지 않는다/.test(read(__filename));
-        return !!found && found.workspaceDir === '.harness' && found.assetCount >= 1 && standalone === null && readOnly;
+        return !!found && found.workspaceDir === '.leerness' && found.assetCount >= 1 && standalone === null && readOnly;
       } finally { try { fsx.rmSync(base, { recursive: true, force: true }); } catch {}; try { fsx.rmSync(alone, { recursive: true, force: true }); } catch {} }
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) },
@@ -6742,13 +6818,13 @@ function _selfTestCases() {
       if (typeof m.findCorruptedStateJson !== 'function') return false;
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_si_'));
       try {
-        const hd = path.join(tmp, '.harness'); fs.mkdirSync(hd, { recursive: true });
+        const hd = path.join(tmp, '.leerness'); fs.mkdirSync(hd, { recursive: true });
         fs.writeFileSync(path.join(hd, 'valid.json'), '{"a":1}');
         fs.writeFileSync(path.join(hd, 'empty.json'), '');                 // 빈 파일 = 그레이스풀 빈 상태(무오탐)
         fs.writeFileSync(path.join(hd, 'manifest.json'), '{ bad : json ]]]');
         const r = m.findCorruptedStateJson(tmp);
-        const onlyBad = r.length === 1 && r[0].file === '.harness/manifest.json' && !!r[0].error;
-        // .harness 부재 → 빈 배열(비-크래시)
+        const onlyBad = r.length === 1 && r[0].file === '.leerness/manifest.json' && !!r[0].error;
+        // .leerness 부재 → 빈 배열(비-크래시)
         const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_si2_'));
         const noHarness = m.findCorruptedStateJson(emptyDir).length === 0;
         try { fs.rmSync(emptyDir, { recursive: true, force: true }); } catch {}
@@ -6760,8 +6836,8 @@ function _selfTestCases() {
     { name: 'rules 손상행 ID 충돌 방지 (1.36.49, codex 6차 #1 High): nextRuleId 가 파싱불가 행의 R-id 도 카운트 — 행위검사', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rid_'));
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
-        fs.writeFileSync(path.join(tmp, '.harness', 'rules.md'), '| R-0007 | every-session |\n');
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.leerness', 'rules.md'), '| R-0007 | every-session |\n');
         return nextRuleId(tmp) === 'R-0008';   // 종전: 손상행 무시 → R-0001 재발급 → writeRules 가 손상행을 무언 삭제
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
     } },
@@ -6860,7 +6936,7 @@ function _selfTestCases() {
       const _w = process.stdout.write; const _ce = console.error;
       try {
         process.stdout.write = () => true; console.error = () => {};
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         const deps = { has: () => false, arg: (k, d) => (k === '--design' ? '카드형 목록 UI' : k === '--features' ? '검색,정렬' : d) };
         c.previewCmd(tmp, 'add', ['주문', '목록'], deps);
         let list = c._loadPreviews(tmp);
@@ -6885,8 +6961,8 @@ function _selfTestCases() {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lang_'));
       let langOk = false;
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
-        fs.writeFileSync(path.join(tmp, '.harness', 'manifest.json'), '{"language":"en"}');
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.leerness', 'manifest.json'), '{"language":"en"}');
         fs.writeFileSync(path.join(tmp, 'README.md'), '# 한국어 콘텐츠 가득한 리드미');   // 종전엔 이것이 ko 로 뒤집었다
         langOk = detectLanguageValue(tmp, 'auto') === 'en' && detectLanguageValue(tmp, 'ko') === 'ko';
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
@@ -6910,7 +6986,7 @@ function _selfTestCases() {
       const _w = process.stdout.write;
       try {
         process.stdout.write = () => true;
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'x', dependencies: { stripe: '^1', '@supabase/supabase-js': '^2' } }));
         fs.writeFileSync(path.join(tmp, '.env'), 'OPENAI_API_KEY=placeholder\n');
         const d1 = tp.detectTechProfile(tmp);
@@ -6941,7 +7017,7 @@ function _selfTestCases() {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_pv54_'));
       let shape = false;
       try {
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         fs.writeFileSync(c._previewsPath(tmp), '{"legacy":{"id":"P-0042"}}');
         const chk1 = c._loadPreviewsChecked(tmp);
         fs.writeFileSync(c._previewsPath(tmp), '[{"id":"P-0001","title":"ok"},null]');
@@ -6957,7 +7033,7 @@ function _selfTestCases() {
       const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_tp54_'));
       let reqOk = false;
       try {
-        fs.mkdirSync(path.join(tmp2, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp2, '.leerness'), { recursive: true });
         fs.writeFileSync(path.join(tmp2, 'requirements.txt'), 'openai.fake==1.0\ndiscord.js==2.0\n');
         const det = tp.detectTechProfile(tmp2);
         const ids = det.services.map(s => s.id);
@@ -6981,7 +7057,7 @@ function _selfTestCases() {
       const tmp3 = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ui98_'));
       let uiOk = false;
       try {
-        const mk = (sub, files) => { const d = path.join(tmp3, sub); fs.mkdirSync(path.join(d, '.harness'), { recursive: true }); for (const [n, c] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(d, n)), { recursive: true }); fs.writeFileSync(path.join(d, n), c); } return d; };
+        const mk = (sub, files) => { const d = path.join(tmp3, sub); fs.mkdirSync(path.join(d, '.leerness'), { recursive: true }); for (const [n, c] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(d, n)), { recursive: true }); fs.writeFileSync(path.join(d, n), c); } return d; };
         const idsOf = (d) => (tp.detectTechProfile(d).ui || []).map(u => u.id);
         const langsOf = (d) => tp.detectTechProfile(d).languages.map(l => l.id);
         const nextApp = mk('nextapp', { 'package.json': JSON.stringify({ dependencies: { next: '14', react: '18', tailwindcss: '3' } }), 'index.html': '<html></html>' });
@@ -6994,9 +7070,9 @@ function _selfTestCases() {
           && Array.isArray(tp.detectTechProfile(plain).ui);
         // ui 만 바뀌어도 프로필이 다시 기록되는가 — 빼먹으면 기존 프로젝트에 ui 가 영영 안 남는다
         const detA = tp.detectTechProfile(nextApp);
-        fs.writeFileSync(path.join(nextApp, '.harness', 'tech-profile.json'), JSON.stringify({ current: { languages: detA.languages, services: detA.services }, updatedAt: 'x', history: [] }));
+        fs.writeFileSync(path.join(nextApp, '.leerness', 'tech-profile.json'), JSON.stringify({ current: { languages: detA.languages, services: detA.services }, updatedAt: 'x', history: [] }));
         uiOk = uiOk && tp.refreshTechProfile(nextApp).changed === true
-          && (JSON.parse(read(path.join(nextApp, '.harness', 'tech-profile.json'))).current.ui || []).some(u => u.id === 'tailwind');
+          && (JSON.parse(read(path.join(nextApp, '.leerness', 'tech-profile.json'))).current.ui || []).some(u => u.id === 'tailwind');
       } catch { uiOk = false; } finally { try { fs.rmSync(tmp3, { recursive: true, force: true }); } catch {} }
       // 이 회귀 묶음은 서로 무관한 23개 조건을 한 boolean 으로 접어 두어, CI flake가 나면
       // `err: null` 하나만 남고 어느 조건이 실패했는지 알 수 없었다. 기존과 같은 순서/첫 실패
@@ -7049,23 +7125,23 @@ function _selfTestCases() {
       const _w = process.stdout.write; const saveArgv = process.argv; const saveExit = process.exitCode;
       try {
         process.stdout.write = () => true;
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         const tf = coreFiles(tmp, 'ko', [], {});
         for (const k of _INTEGRITY_DOCS) fs.mkdirSync(path.dirname(path.join(tmp, k)), { recursive: true }), fs.writeFileSync(path.join(tmp, k), tf[k]);
-        fs.writeFileSync(path.join(tmp, '.harness', 'manifest.json'), '{"language":"ko"}');
+        fs.writeFileSync(path.join(tmp, '.leerness', 'manifest.json'), '{"language":"ko"}');
         // 손상 주입: 절단 + 삭제 / 사용자 추가 편집(무탐 대상)
-        fs.writeFileSync(path.join(tmp, '.harness', 'context-routing.md'), 'x');
-        fs.rmSync(path.join(tmp, '.harness', 'guardrails.md'));
-        fs.appendFileSync(path.join(tmp, '.harness', 'testing-strategy.md'), '\n## 커스텀 절차\n- 내 규칙\n');
+        fs.writeFileSync(path.join(tmp, '.leerness', 'context-routing.md'), 'x');
+        fs.rmSync(path.join(tmp, '.leerness', 'guardrails.md'));
+        fs.appendFileSync(path.join(tmp, '.leerness', 'testing-strategy.md'), '\n## 커스텀 절차\n- 내 규칙\n');
         process.argv = ['node', 'x', 'integrity', 'check'];
         process.exitCode = 0; integrityCmd(tmp);
         const detected = process.exitCode === 1;
         process.argv = ['node', 'x', 'integrity', 'check', '--repair'];
         process.exitCode = 0; integrityCmd(tmp);
-        const routing = fs.readFileSync(path.join(tmp, '.harness', 'context-routing.md'), 'utf8');
-        const repaired = routing.includes('# Context Routing') && fs.existsSync(path.join(tmp, '.harness', 'guardrails.md'));
-        const backed = fs.readdirSync(path.join(tmp, '.harness', 'archive')).some(n => n.startsWith('integrity-context-routing'));
-        const customKept = fs.readFileSync(path.join(tmp, '.harness', 'testing-strategy.md'), 'utf8').includes('커스텀 절차');
+        const routing = fs.readFileSync(path.join(tmp, '.leerness', 'context-routing.md'), 'utf8');
+        const repaired = routing.includes('# Context Routing') && fs.existsSync(path.join(tmp, '.leerness', 'guardrails.md'));
+        const backed = fs.readdirSync(path.join(tmp, '.leerness', 'archive')).some(n => n.startsWith('integrity-context-routing'));
+        const customKept = fs.readFileSync(path.join(tmp, '.leerness', 'testing-strategy.md'), 'utf8').includes('커스텀 절차');
         process.argv = ['node', 'x', 'integrity', 'check'];
         process.exitCode = 0; integrityCmd(tmp);
         const cleanAfter = process.exitCode !== 1;
@@ -7089,17 +7165,17 @@ function _selfTestCases() {
       const enT = '# Instructions\nEnglish rule 1\nEnglish rule 2\n';
       const prev = koT + 'MY CUSTOM LINE\n';
       // 전환: KO(prev) → EN(next), altTemplate=koT — 한국어 템플릿 라인은 이월 안 되고 커스텀만
-      const m = p._managedMerge('AGENTS.md', enT, prev, '.harness/archive', null, { altTemplate: koT, lang: 'en' });
+      const m = p._managedMerge('AGENTS.md', enT, prev, '.leerness/archive', null, { altTemplate: koT, lang: 'en' });
       const noKoTemplate = !m.includes('한국어 규칙 1') && !m.includes('한국어 규칙 2');
       const customKept = (m.match(/MY CUSTOM LINE/g) || []).length === 1;
       const enWrapper = m.includes('carried over from the previous version') && !/[가-힣]/.test(m.replace('MY CUSTOM LINE', ''));
       // altTemplate 없이(구 동작): 커스텀 오인 이월 — 회귀 방지용 대조군 (구 언어 라인이 이월됨을 확인)
-      const m2 = p._managedMerge('AGENTS.md', enT, prev, '.harness/archive', null, {});
+      const m2 = p._managedMerge('AGENTS.md', enT, prev, '.leerness/archive', null, {});
       const control = m2.includes('한국어 규칙 1');
       // 멱등: 전환 결과에 같은 병합 재적용 시 커스텀 중복 없음
-      const m3 = p._managedMerge('AGENTS.md', enT, m, '.harness/archive', null, { altTemplate: koT, lang: 'en' });
+      const m3 = p._managedMerge('AGENTS.md', enT, m, '.leerness/archive', null, { altTemplate: koT, lang: 'en' });
       const idem = (m3.match(/MY CUSTOM LINE/g) || []).length === 1;
-      const wired = read(__filename).includes('altTemplate: _altFiles[f]') && read(__filename).includes("'.harness/session-workflow.md',   // 1.36.60");
+      const wired = read(__filename).includes('altTemplate: _altFiles[f]') && read(__filename).includes("'.leerness/session-workflow.md',   // 1.36.60");
       return noKoTemplate && customKept && enWrapper && control && idem && wired;
     } },
     { name: 'lint 게이트 (1.36.64, 외부감사 F-10): 구문/U+2028(실사고 재발 차단)/BOM/JSON — 클린 통과 + 위험문자 검출 행위검사 + npm test 배선', run: () => {
@@ -7142,9 +7218,9 @@ function _selfTestCases() {
         // 동일 바이트는 스킵(멱등) — mtime 안정
         const before = fs.statSync(f13).mtimeMs; io.writeUtf8(f13, '{"ok":true}'); const skipOk = fs.statSync(f13).mtimeMs === before;
         // F7: 손상 manifest + 유효 LANGUAGE → en 유지 (detectLanguageValue)
-        fs.mkdirSync(path.join(tmp, '.harness'), { recursive: true });
-        fs.writeFileSync(path.join(tmp, '.harness', 'manifest.json'), '{broken');
-        fs.writeFileSync(path.join(tmp, '.harness', 'LANGUAGE'), 'en\n');
+        fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.leerness', 'manifest.json'), '{broken');
+        fs.writeFileSync(path.join(tmp, '.leerness', 'LANGUAGE'), 'en\n');
         const f7ok = detectLanguageValue(tmp, 'auto') === 'en';
         // F11: en anchors 초안 영어
         const d = pu._draftAnchors({ pkgDescription: 'payment service', lang: 'en' });
@@ -7384,39 +7460,26 @@ function _selfTestCases() {
       }));
       return commented.orphanScripts.includes('test:dead');
     } },
-    // 1.36.126 (T-0107): `.leerness` 를 살아 있는 저장소로 **주장하지 않는다**.
-    //   ⚠ 이 케이스는 **행위검사만** 한다(자기 소스 읽기 금지 — 1.36.84 메타가드). 상수와 하드코딩 수의
-    //     모순 금지 불변식은 e2e V 블록이 소스를 읽어 건다. 여기서는 실제 함수를 불러 결과를 본다.
-    { name: '1.36.126 (T-0107): 워크스페이스 대체 디렉터리 — 해석기가 살아 있는 저장소를 말함 + 무시 고지 + 대조군 침묵 (행위검사)', run: () => {
-      // 행위 ① 해석기는 env·마커가 있어도 살아 있는 저장소를 말한다(예전엔 `.leerness` 를 말해 미초기화 오판을 냈다)
+    { name: '1.36.162 (T-0107): canonical workspace resolver + legacy/substrate migration + conflict fail-closed', run: () => {
       const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ws126-'));
       const savedEnv = process.env.LEERNESS_WORKSPACE_DIR;
       try {
-        fs.mkdirSync(path.join(arena, '.leerness'), { recursive: true });
-        fs.writeFileSync(path.join(arena, '.leerness', 'MIGRATED_FROM_HARNESS'), 'x');
-        fs.mkdirSync(path.join(arena, '.harness'), { recursive: true });
-        fs.writeFileSync(path.join(arena, '.harness', 'HARNESS_VERSION'), VERSION);
-        process.env.LEERNESS_WORKSPACE_DIR = '.leerness';
-        if (_workspaceDirName(arena) !== '.harness') return false;
-        if (!_workspaceDirAbs(arena).endsWith('.harness')) return false;
-        // 마커가 있어도 초기화된 프로젝트로 인식해야 한다(예전엔 여기서 "미초기화" 오판이 났다)
-        if (_isInitialized(arena) !== true) return false;
-        // 행위 ② 무시한 설정은 **말한다** — env·마커 각각, 그리고 아무것도 없으면 침묵(오탐 0)
-        const both = _workspaceDirAltIgnored(arena);
-        if (!both || both.env !== '.leerness' || both.marker !== true || both.effective !== '.harness') return false;
+        const legacy = legacyWorkspacePath(arena);
+        const canonical = canonicalWorkspacePath(arena);
+        fs.mkdirSync(path.join(legacy, 'runs'), { recursive: true });
+        fs.writeFileSync(path.join(legacy, 'HARNESS_VERSION'), VERSION);
+        fs.writeFileSync(path.join(legacy, 'runs', 'agent.jsonl'), '{}\n');
+        fs.mkdirSync(canonical, { recursive: true });
+        fs.writeFileSync(path.join(canonical, 'state.json'), '{"schemaVersion":1,"runCounter":0}\n');
         delete process.env.LEERNESS_WORKSPACE_DIR;
-        const markerOnly = _workspaceDirAltIgnored(arena);
-        if (!markerOnly || markerOnly.env !== null || markerOnly.marker !== true) return false;
-        const clean = path.join(arena, 'clean'); fs.mkdirSync(clean, { recursive: true });
-        if (_workspaceDirAltIgnored(clean) !== null) return false;   // 대조군 — 평범한 프로젝트는 조용하다
-        // 행위 ③ 코어가 실제로 거부하는가 — CLI 인자 없이 함수를 직접 불러 판정(문자열이 아니라 결과로)
-        const blocked = _migrateWorkspaceDir(arena, { dryRun: true });
-        if (blocked.blocked !== true || blocked.blockedReason !== 'workspace-dir-alt-unsupported') return false;
-        if ((blocked.copiedFiles || []).length !== 0) return false;
-        // 그리고 내부 시험 통로는 여전히 복사 구현을 태운다(안전 속성이 도달 불가로 썩지 않게)
-        const seam = _migrateWorkspaceDir(arena, { dryRun: true, allowUnsupported: true });
-        if (seam.blocked === true) return false;
-        return true;
+        if (_workspaceDirName(arena) !== LEGACY_WORKSPACE_DIR) return false;
+        if (_isInitialized(arena) !== true) return false;
+        const preview = _migrateWorkspaceDir(arena, { dryRun: true });
+        if (preview.blocked || !preview.mappedFiles.some((x) => /cache\/agent-runs/.test(x.to))) return false;
+        process.env.LEERNESS_WORKSPACE_DIR = '../escape';
+        let invalid = false;
+        try { _workspaceDirName(arena); } catch (error) { invalid = error.code === 'E_WORKSPACE_DIR_INVALID'; }
+        return invalid;
       } catch { return false; }
       finally {
         if (savedEnv !== undefined) process.env.LEERNESS_WORKSPACE_DIR = savedEnv; else delete process.env.LEERNESS_WORKSPACE_DIR;
@@ -7538,7 +7601,7 @@ function _selfTestCmdInner(opts, droppedEnv) {
 //   ctx: { shell: 'powershell'|'cmd'|'bash'|'sh', psVersion: '5'|'7'|null }
 //   반환: { shell, psVersion, issues: [{ rule, severity, detail, suggestion }] } — 순수 함수 (단위 테스트 가능)
 // _shellGuardAnalyze → lib/analyzers.js (1.9.304 UR-0025)
-function _shellFailuresPath(root) { return path.join(absRoot(root), '.harness', 'shell-failures.json'); }
+function _shellFailuresPath(root) { return path.join(absRoot(root), '.leerness', 'shell-failures.json'); }
 function _loadShellFailures(root) {
   try { const f = _shellFailuresPath(root); if (!exists(f)) return { failures: [] }; const j = JSON.parse(read(f)); return j && Array.isArray(j.failures) ? j : { failures: [] }; } catch { return { failures: [] }; }
 }
@@ -7570,7 +7633,7 @@ function _detectShellCtx() {
 // 환경 버전 변동 감지 (environment.json 스냅샷 vs 현재 — 사용자 명시: 과거↔현재 버전 업데이트)
 function _shellEnvDrift(root) {
   try {
-    const snapPath = path.join(absRoot(root), '.harness', 'environment.json');
+    const snapPath = path.join(absRoot(root), '.leerness', 'environment.json');
     if (!exists(snapPath)) return null;
     const snap = JSON.parse(read(snapPath));
     const cur = _collectRuntimeEnv();
@@ -7655,7 +7718,7 @@ function shellGuardCmd(root, cmd, opts = {}) {
 //   최근 handoff 흔적(기본 24h)이 없으면 커밋 차단 + 정확한 회복 명령 안내. --strict 는 gate 전체까지 요구.
 //   긴급 우회: LEERNESS_ENFORCE_BYPASS=1 (문서화된 명시 우회 — 무언 우회 아님).
 const _ENFORCE_MARK = '# leerness-enforce v1';
-function _enforceCfgPath(root) { return path.join(root, '.harness', 'enforce.json'); }
+function _enforceCfgPath(root) { return path.join(root, '.leerness', 'enforce.json'); }
 function _enforceCfg(root) {
   const def = { windowHours: 24, strict: false };
   try { if (exists(_enforceCfgPath(root))) return Object.assign(def, JSON.parse(read(_enforceCfgPath(root)))); } catch {}
@@ -7798,7 +7861,7 @@ function enforceCmd(root, sub) {
       failJson(json, _code, `pre-commit 강제를 걸 수 없습니다 (git 상태: ${_gsInstall}) — ${root}`);
       return;
     }
-    if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root} — 먼저 leerness init`); return; }
+    if (!exists(path.join(root, '.leerness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root} — 먼저 leerness init`); return; }
     // 1.36.49 (codex 6차 #8): 명시된 무효 window 는 24로 무언 보정하지 않고 거부 — 종전엔 0/NaN→24,
     //   400자리 정수→Infinity 가 그대로 설치돼 훅에 WIN_MIN=Infinity(find -mmin 상시 실패=상시 차단)가 박혔다.
     const winRaw = arg('--window', '24');
@@ -7886,9 +7949,9 @@ function enforceCmd(root, sub) {
       if (tl.status === 0 && String(tl.stdout || '').trim()) topLevel = path.resolve(String(tl.stdout).trim());
     }
     // 1.36.134 (재검수 P1, 재현): junction/symlink 로 저장소를 열면 `path.relative` 가 toplevel **밖**을 가리키는
-    //   `../…` 를 만들어 그것이 영구 훅에 박혔다(실측: `LRN_DIR='../__container/alias/.harness'`).
+    //   `../…` 를 만들어 그것이 영구 훅에 박혔다(실측: `LRN_DIR='../__container/alias/.leerness'`).
     //   양쪽을 realpath 로 펴서 비교하고, 그래도 밖이면 상대경로로 표현하지 않고 **절대경로**를 쓴다.
-    let _hDir = path.join(root, '.harness'), _top = topLevel;
+    let _hDir = path.join(root, '.leerness'), _top = topLevel;
     // Node의 JS realpathSync는 Windows 8.3 별칭(`RUNNER~1`)을 그대로 둘 수 있지만 Git은
     // --show-toplevel에서 긴 경로를 돌려준다. 같은 디렉터리가 달라 보여 harnessRel이 `..`로
     // 시작하면 공유 worktree 훅에 main의 절대경로를 박는 fail-open이 된다. native realpath는
@@ -7896,7 +7959,7 @@ function enforceCmd(root, sub) {
     const _nativeRealpath = fs.realpathSync.native || fs.realpathSync;
     try { _hDir = _nativeRealpath(_hDir); } catch {}
     try { _top = _nativeRealpath(_top); } catch {}
-    let harnessRel = (path.relative(_top, _hDir) || '.harness').replace(/\\/g, '/');
+    let harnessRel = (path.relative(_top, _hDir) || '.leerness').replace(/\\/g, '/');
     if (harnessRel.startsWith('..')) harnessRel = _hDir.replace(/\\/g, '/');
     //   ⚠ 1.36.143 (재검수 P1): 이 거부가 **체인 백업 복사 뒤**에 있었다 — 거절하면서 백업을 파괴했다.
     //     계산은 읽기뿐이므로 여기까지 올려도 안전하고, 거절은 **아무것도 쓰기 전에** 끝난다.
@@ -7922,7 +7985,7 @@ function enforceCmd(root, sub) {
     // cwd/상태를 빌려보면, main의 fresh handoff로 sibling 커밋이 조용히 통과한다. Git이 훅을
     // 어느 cwd에서 시작하든 현재 커밋 대상의 toplevel을 다시 물어 상대 harness 경로를 붙인다.
     // root 밖 harness는 기존처럼 설치 시점의 절대경로를 고정한다.
-    const harnessSetup = path.isAbsolute(harnessRel) ? [
+    const workspaceSetup = path.isAbsolute(harnessRel) ? [
       `LRN_DIR=${shQuote(harnessRel)}`,
     ] : [
       `LRN_REL=${shQuote(harnessRel)}`,
@@ -7937,11 +8000,11 @@ function enforceCmd(root, sub) {
       '#!/bin/sh',
       _ENFORCE_MARK + ' — leerness 사용 강제 (제거: leerness enforce remove)',
       'if [ "$LEERNESS_ENFORCE_BYPASS" = "1" ]; then exit 0; fi',
-      // 1.36.134 (검수 P1, 재현): 훅은 **git toplevel** 에서 돈다. `.harness` 가 하위 디렉토리에 있으면
-      //   `-d ".harness"` 가 거짓이라 조용히 통과했다 — 설치는 `verified:'fired'` 인데 루트 커밋이 그냥 통과.
+      // 1.36.134 (검수 P1, 재현): 훅은 **git toplevel** 에서 돈다. `.leerness` 가 하위 디렉토리에 있으면
+      //   `-d ".leerness"` 가 거짓이라 조용히 통과했다 — 설치는 `verified:'fired'` 인데 루트 커밋이 그냥 통과.
       //   설치 시점에 **toplevel 기준 상대경로**를 훅에 박아 넣어, 커밋이 어디서 나든 같은 곳을 본다.
-      ...harnessSetup,
-      '# 1.36.44: .harness 없는 체크아웃(워크트리/구브랜치)은 강제 대상 아님 — 오차단(FP) 방지',
+      ...workspaceSetup,
+      '# 1.36.44: .leerness 없는 체크아웃(워크트리/구브랜치)은 강제 대상 아님 — 오차단(FP) 방지',
       'if [ ! -d "$LRN_DIR" ]; then',
       '  if [ -f "$(dirname "$0")/pre-commit.pre-leerness" ]; then exec sh "$(dirname "$0")/pre-commit.pre-leerness" "$@"; fi',
       '  exit 0',
@@ -8031,7 +8094,7 @@ function enforceCmd(root, sub) {
         //   ⚠ cwd 는 **git 이 훅을 부르는 곳**(toplevel)이어야 한다 — `root` 로 재면 하위 디렉토리 설치에서
         //     "발화한다" 고 잘못 답한다(실제로 그렇게 오답했고 루트 커밋이 통과했다).
         //   체인·strict 를 뺀 **임시 사본**을 돌린다 — 사용자 기존 훅과 gate 는 실행되지 않는다(부작용 0 · 재귀 0).
-        const r = cp.spawnSync(_gitShellCommand(root), [probeHookP], { cwd: topLevel, encoding: 'utf8', timeout: 20000,
+        const r = _spawnPortableArgvSync(_gitShellCommand(root), [probeHookP], { cwd: topLevel, encoding: 'utf8', timeout: 20000,
           env: Object.assign({}, process.env, {
             LEERNESS_ENFORCE_BYPASS: '', LEERNESS_SESSION_ID: '', CLAUDE_CODE_HOST_SESSION_ID: '',
             CLAUDE_CODE_SESSION_ID: '', CODEX_THREAD_ID: '', CLAUDE_CODE_CHILD_SESSION: '1'
@@ -8092,7 +8155,7 @@ function enforceCmd(root, sub) {
       return;
     }
     // 1.36.136 (재검수 P1, 재현): 이 쓰기가 실패하면 **훅은 설치된 채로 남고** raw 예외가 튀어나왔다
-    //   (실측: `.harness/enforce.json` 을 디렉토리로 만들어 두면 EPERM 크래시 + 훅 마커 4건 잔존).
+    //   (실측: `.leerness/enforce.json` 을 디렉토리로 만들어 두면 EPERM 크래시 + 훅 마커 4건 잔존).
     //   설정 없는 강제는 어중간한 상태다 — 실패하면 이번 명령 이전으로 되돌리고 사유를 말한다.
     try {
       writeUtf8(_enforceCfgPath(root), JSON.stringify({ windowHours, strict, installedAt: now() }, null, 2) + '\n');
@@ -8118,7 +8181,7 @@ function enforceCmd(root, sub) {
     }
   }
   if (sub === 'check') {
-    if (!exists(path.join(root, '.harness'))) return;   // leerness 미설치 저장소 — 강제 대상 아님(무음 통과)
+    if (!exists(path.join(root, '.leerness'))) return;   // leerness 미설치 저장소 — 강제 대상 아님(무음 통과)
     // 1.36.134 (검수 실측): `check` 는 네 번째 표면인데 **git 상태를 아예 안 봤다** — git 아님·HEAD 손상·gitdir 깨짐에서
     //   전부 `ok:true exit 0`. 훅이 개념적으로 부르는 표면이라 여기서 조용하면 강제 자체가 조용해진다.
     //   같은 술어를 태운다. 단 **차단하지 않는다** — 커밋 훅 경로에서 우리 판정 실패로 사용자 커밋을 막지 않는다(권고 원칙).
@@ -8158,7 +8221,7 @@ function enforceCmd(root, sub) {
   if (sub === 'audit') {
     // 1.36.44 (하드닝): `git commit --no-verify` 는 git 설계상 훅을 스킵한다(클라이언트 차단 불가) — 사후 감지로 보완.
     //   최근 커밋 시각이 어떤 handoff 창(커밋 전 windowHours 내 handoff)에도 안 들면 우회 의심으로 표기 (advisory).
-    if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root}`); return; }
+    if (!exists(path.join(root, '.leerness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root}`); return; }
     const cfg2 = _enforceCfg(root);
     let handoffs = [];
     try { const j = _getLastHandoffGap(root); handoffs = (j.history || []).map(t => new Date(t).getTime()).filter(Number.isFinite); } catch {}
@@ -8234,8 +8297,8 @@ function enforceCmd(root, sub) {
 function anchorsCmd(root, sub) {
   root = absRoot(root);
   const json = has('--json');
-  if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root}`); return; }   // 코드명 주의: audit 고유 finding kind(초기화 미완 마커)는 selftest 가드가 bin 부재를 단언하므로 여기서 사용 금지
-  const bf = path.join(root, '.harness', 'project-brief.md');
+  if (!exists(path.join(root, '.leerness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root}`); return; }   // 코드명 주의: audit 고유 finding kind(초기화 미완 마커)는 selftest 가드가 bin 부재를 단언하므로 여기서 사용 금지
+  const bf = path.join(root, '.leerness', 'project-brief.md');
   const pf = planPath(root);
   const briefTxt = exists(bf) ? read(bf) : '';
   const planTxt = exists(pf) ? read(pf) : '';
@@ -8287,12 +8350,12 @@ function anchorsCmd(root, sub) {
 // 1.36.57 (외부 GPT 감사 F-04): managed 정책-문서 무결성 점검/복구 — drift(신선도)와 별개로 "파일 자체가
 //   잘리거나 사라진" 손상을 감지한다. 대상은 사용자가 편집하지 않는 순수 템플릿 문서군만(사용자 데이터 표면 제외 —
 //   plan/progress/brief/decisions 등은 절대 건드리지 않음). 판정은 보수적: 부재 / H1 상실 / 템플릿 대비 40% 미만 크기.
-//   --repair 는 손상 원본을 .harness/archive/ 로 대피 후 현재 버전 템플릿으로 재생성.
+//   --repair 는 손상 원본을 .leerness/archive/ 로 대피 후 현재 버전 템플릿으로 재생성.
 const _INTEGRITY_DOCS = [
-  '.harness/session-workflow.md', '.harness/context-routing.md', '.harness/writeback-policy.md',
-  '.harness/task-type-map.md', '.harness/protected-files.md', '.harness/guardrails.md',
-  '.harness/consistency-policy.md', '.harness/testing-strategy.md', '.harness/review-checklist.md',
-  '.harness/release-checklist.md', '.harness/session-close-policy.md', '.harness/plan-progress-boundary.md',
+  '.leerness/session-workflow.md', '.leerness/context-routing.md', '.leerness/writeback-policy.md',
+  '.leerness/task-type-map.md', '.leerness/protected-files.md', '.leerness/guardrails.md',
+  '.leerness/consistency-policy.md', '.leerness/testing-strategy.md', '.leerness/review-checklist.md',
+  '.leerness/release-checklist.md', '.leerness/session-close-policy.md', '.leerness/plan-progress-boundary.md',
 ];
 // 1.36.79 (도그푸딩 P1-E): integrity 의 "관리 문서 부재/손상" 판정을 audit 도 공유하도록 경량 추출.
 //   audit 이 존재-여부만 보고 healthy 를 선언해 integrity 와 모순되던 것 해소(두 명령 단일 진실).
@@ -8300,9 +8363,9 @@ const _INTEGRITY_DOCS = [
 //   integrityCmd 와 **동일한 단일 판정기**를 쓴다 — 여기가 유일한 구현이고 integrityCmd 도 이 함수를 호출한다.
 function _integrityFindings(root) {
   root = absRoot(root);
-  if (!exists(path.join(root, '.harness'))) return [];
+  if (!exists(path.join(root, '.leerness'))) return [];
   let minimal = false;
-  try { minimal = !!JSON.parse(read(path.join(root, '.harness', 'manifest.json'))).minimal; } catch {}
+  try { minimal = !!JSON.parse(read(path.join(root, '.leerness', 'manifest.json'))).minimal; } catch {}
   const lang = detectLanguageValue(root, 'auto');
   const templates = coreFiles(root, lang, [], { minimal });
   const out = [];
@@ -8333,9 +8396,9 @@ function integrityCmd(root) {
   root = absRoot(root);
   const json = has('--json');
   const repair = has('--repair');
-  if (!exists(path.join(root, '.harness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root} — 먼저 leerness init`); return; }
+  if (!exists(path.join(root, '.leerness'))) { failJson(json, 'harness_missing', `leerness 미설치: ${root} — 먼저 leerness init`); return; }
   let minimal = false;
-  try { minimal = !!JSON.parse(read(path.join(root, '.harness', 'manifest.json'))).minimal; } catch {}
+  try { minimal = !!JSON.parse(read(path.join(root, '.leerness', 'manifest.json'))).minimal; } catch {}
   // 1.36.66 (8차 헌트 F8): 언어는 init/migrate 와 동일 해석기 사용 — 손상 manifest 여도 LANGUAGE 폴백으로 en 유지
   //   (종전엔 manifest 만 봐서 손상 시 ko 로 복구 → en 프로젝트에 한국어 템플릿 재생성).
   const lang = detectLanguageValue(root, 'auto');
@@ -8372,7 +8435,7 @@ function integrityCmd(root) {
       try {
         const _readable = kind === 'h1_lost' || kind === 'truncated';
         if (exists(fp)) {
-          const bakDir = path.join(root, '.harness', 'archive');
+          const bakDir = path.join(root, '.leerness', 'archive');
           mkdirp(bakDir);
           // (검수 #4) 같은 ms 백업 충돌 방지 — pid+시퀀스 접미
           fs.copyFileSync(fp, path.join(bakDir, `integrity-${path.basename(key)}-${Date.now()}-${process.pid}-${++_integSeq}.bak`));
@@ -8404,7 +8467,7 @@ function integrityCmd(root) {
   if (!findings.length) { ok('  손상 없음 — 전 문서 구조 정상'); return; }
   for (const f of findings) {
     const icon = f.repaired ? '🔧 복구' : (f.advisory ? '⚠ 의심' : '✗ 손상');
-    log(`  ${icon} ${f.file} (${f.kind})${f.repaired && f.backedUp ? ' — 원본은 .harness/archive/ 대피' : ''}${f.advisory ? ' — 길이-단독 신호(advisory): 복구하려면 --repair --force' : ''}${f.error ? ` — 복구 실패: ${f.error}` : ''}`);
+    log(`  ${icon} ${f.file} (${f.kind})${f.repaired && f.backedUp ? ' — 원본은 .leerness/archive/ 대피' : ''}${f.advisory ? ' — 길이-단독 신호(advisory): 복구하려면 --repair --force' : ''}${f.error ? ` — 복구 실패: ${f.error}` : ''}`);
   }
   if (hardLeft.length && !repair) warn(`  복구: leerness integrity check --repair (손상 원본은 archive 로 대피 후 템플릿 재생성)`);
   if (repairFailed || hardLeft.length) process.exitCode = 1;
@@ -8443,10 +8506,10 @@ function _shortHash(s) {
 }
 
 // 1.9.245: API skill cache — 공식 문서 + 관련 링크 자동 정리 (사용자 명시 UR-0015)
-//   .harness/api-skills/<id>.md 에 frontmatter + 본문 저장. handoff 자동 매칭.
+//   .leerness/api-skills/<id>.md 에 frontmatter + 본문 저장. handoff 자동 매칭.
 //   Node built-in https (의존성 0), depth=1 same-domain crawl, max 10 links.
 function _apiSkillsDir(root) {
-  return path.join(absRoot(root), '.harness', 'api-skills');
+  return path.join(absRoot(root), '.leerness', 'api-skills');
 }
 // 1.36.76 (검수 #3/#4/Low): id 최종 안전화 단일 지점 — 상한 80(초과 시 절단+해시), 해시 시드는 url+name 전체
 //   정체성(같은 URL·다른 name 이 같은 id 로 붕괴하던 것), Windows 예약 이름(con/prn/aux/nul/com1..9/lpt1..9) 회피.
@@ -8727,7 +8790,7 @@ async function apiSkillCmd(root, sub) {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const md = _serializeAPISkill(id, skillName, [url], direction, doc);
       fs.writeFileSync(path.join(dir, id + '.md'), md, 'utf8');
-      _hlog(gr(`✓ 저장: .harness/api-skills/${id}.md`));
+      _hlog(gr(`✓ 저장: .leerness/api-skills/${id}.md`));
       _hlog(dm(`  title: ${doc.title || '(none)'}`));
       _hlog(dm(`  related links: ${(doc.related_links || []).length}`));
       _hlog(dm(`  text size: ${doc.text.length} chars`));
@@ -8755,7 +8818,7 @@ async function apiSkillCmd(root, sub) {
         };
         const md = _serializeAPISkill(id, skillName, [url], direction, stub);
         fs.writeFileSync(path.join(dir, id + '.md'), md, 'utf8');
-        _hlog(yl(`⚠ 빈 골격 생성 (--skeleton fallback): .harness/api-skills/${id}.md`));
+        _hlog(yl(`⚠ 빈 골격 생성 (--skeleton fallback): .leerness/api-skills/${id}.md`));
         _hlog(dm(`  → 직접 ${url} 내용을 복사해서 .md 파일에 채워넣어주세요`));
         _hlog(dm(`  → 이후 leerness handoff 가 매칭 시 참조됩니다`));
         if (_j) log(JSON.stringify({ ok: true, id, skeleton: true, url, name: skillName, fetchError: e.message }, null, 2));
@@ -8770,13 +8833,13 @@ async function apiSkillCmd(root, sub) {
   log(cy(`# leerness api-skill (1.9.245, UR-0015) — API 문서·관련링크 자동 정리`));
   log('');
   log(`  add <url> [--direction "..."] [--name "..."] [--no-crawl]`);
-  log(`     URL 페치 + same-domain 관련 링크 1단계 crawl (max 10) → .harness/api-skills/<id>.md`);
+  log(`     URL 페치 + same-domain 관련 링크 1단계 crawl (max 10) → .leerness/api-skills/<id>.md`);
   log(`  list [--json]                  → 저장된 api-skill 목록`);
   log(`  show <id>                      → 특정 skill 본문 출력`);
   log(`  match <query> [--json]         → task 키워드 매칭`);
   log(`  drop <id>                      → 삭제`);
   log('');
-  log(dm(`  저장: .harness/api-skills/<id>.md (frontmatter: id/name/urls/direction/captured_at/related_links)`));
+  log(dm(`  저장: .leerness/api-skills/<id>.md (frontmatter: id/name/urls/direction/captured_at/related_links)`));
   log(dm(`  fetch: Node built-in https (의존성 0), max 1MB body, 10s timeout, 5 redirect`));
   log(dm(`  자동 참조: handoff body 에 매칭 N건 자동 노출 (현재 task 키워드)`));
 }
@@ -8948,7 +9011,7 @@ const LENS_CATALOG = {
     affects: ['code', 'test'], affectsNote: '보안 가드를 넣었다면 우회/오탐 테스트가 따라와야 함',
     affectsNoteEn: 'if you added a security guard, bypass/false-positive tests should follow'
   },
-  // DB 안전성(동시성/트랜잭션) 렌즈 — race condition + ACID. .harness/db-safety-lens 키트에서 코어로 승격
+  // DB 안전성(동시성/트랜잭션) 렌즈 — race condition + ACID. .leerness/db-safety-lens 키트에서 코어로 승격
   // (6차원 워크플로 저작 → 적대적 비평 → codex 독립 검수 8채택/1반박 → 게시본 실증 → node:sqlite 데모 자가검증).
   database: {
     title: 'DB 안전성', persona: '이중 결제·유실된 갱신·크래시 후 사라진 커밋으로 호출당해 본 DBA 겸 동시성·분산 리뷰어',
@@ -9163,7 +9226,7 @@ function _p0013LibraryOk() {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lib98_'));
   try {
     const W = (rel, txt) => { const p = path.join(d, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, txt); };
-    fs.mkdirSync(path.join(d, '.harness'), { recursive: true });
+    fs.mkdirSync(path.join(d, '.leerness'), { recursive: true });
     W('src/Button.tsx', 'import React from "react";\nexport function Button({ label }) {\n  const [on, setOn] = React.useState(false);\n  const cls = "px-3 py-1 rounded-lg bg-brand-500";\n  return (\n    <button className="px-3 py-1 rounded-lg bg-brand-500" onClick={() => setOn(!on)}>{label}</button>\n  );\n}\n');
     // 제네릭은 '실제로 JSX 태그와 같은 글자' 인 것을 써야 판별된다 — Record<string, number> 는 원래 안 잡혀서 대조군이 못 된다.
     W('src/schemas.ts', 'import { z } from "zod";\nexport const UserSchema = z.object({ id: z.string() });\nexport const FetchUser = async (id: string): Promise<Response> => fetch(id);\nexport const LIMITS: Array<number> = [1, 2];\n');
@@ -9212,7 +9275,7 @@ function _p0013LibraryOk() {
     const utilOk = utilNames.includes('rounded-lg') && utilNames.includes('bg-brand-500') && !utilNames.includes('tracking-wide');
     // 아무것도 못 찾으면 빈 결과를 그럴듯하게 내지 말고 이유를 말한다
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_lib98e_'));
-    fs.mkdirSync(path.join(empty, '.harness'), { recursive: true });
+    fs.mkdirSync(path.join(empty, '.leerness'), { recursive: true });
     fs.writeFileSync(path.join(empty, 'readme.txt'), 'no ui here');
     const er = lib.scanLibrary(empty);
     // '노트가 하나라도 있다' 로는 부족하다 — 다른 분기가 대신 채우면 통과해 버린다(변이에서 실제로 그랬다).
@@ -9381,7 +9444,7 @@ function _p0103RootOk() {
     const env2 = Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' });
     const R = (a, cwd) => cp2.spawnSync(process.execPath, [__filename, ...a], { cwd: cwd || cwdDir, encoding: 'utf8', timeout: 180000, env: env2 });
     R(['init', cwdDir, '--yes'], cwdDir); R(['init', target, '--yes'], target);
-    const tp = (d) => path.join(d, '.harness', 'tech-profile.json');
+    const tp = (d) => path.join(d, '.leerness', 'tech-profile.json');
     const clear = () => { for (const d of [cwdDir, target]) { try { fs.unlinkSync(tp(d)); } catch { /* 없으면 그만 */ } } };
     // ① 준 경로에 쓴다
     clear(); R(['tech', target]);
@@ -9445,21 +9508,21 @@ function _p0015ModeOk() {
     const coreKept = core3(ag) && core3(cl3) && core3(full['CLAUDE.md']);
     // ④ 매니페스트에 등급이 실제로 기록된다
     let manifestOk = false;
-    try { manifestOk = JSON.parse(min['.harness/manifest.json']).mode === 'minimal'
-      && JSON.parse(full['.harness/manifest.json']).mode === 'standard'; } catch { manifestOk = false; }
+    try { manifestOk = JSON.parse(min['.leerness/manifest.json']).mode === 'minimal'
+      && JSON.parse(full['.leerness/manifest.json']).mode === 'standard'; } catch { manifestOk = false; }
     // ⑤ 이월은 **전량 보존**이다 — 1.36.105 에서 상한을 넣었다가 뺐다(검수가 "앞에 붙인 최신 지시가 삭제되고
     //   보관본에도 없다" 를 재현). 이 파일의 계약은 false-DROP 이 버그이므로, 어떤 옵션으로도 줄지 않아야 한다.
     const pu = require('../lib/pure-utils');
     const nextT = '# T\ncanon\n';
     const prevT = '# T\ncanon\n' + Array.from({ length: 50 }, (_, i) => `- custom line ${i}`).join('\n') + '\n';
-    const merged = pu._managedMerge('CLAUDE.md', nextT, prevT, '.harness/archive', null, {});
-    const withOpt = pu._managedMerge('CLAUDE.md', nextT, prevT, '.harness/archive', null, { preservedCap: 10 });
+    const merged = pu._managedMerge('CLAUDE.md', nextT, prevT, '.leerness/archive', null, {});
+    const withOpt = pu._managedMerge('CLAUDE.md', nextT, prevT, '.leerness/archive', null, { preservedCap: 10 });
     const noDrop = merged.includes('custom line 0') && merged.includes('custom line 49')
       && withOpt === merged;   // 상한 옵션이 남아 있어도 아무것도 줄이지 않는다(되돌림이 확실한가)
     return normOk && shrinks && stdUnchanged && coreKept && manifestOk && noDrop;
   } catch { return false; }
 }
-// 1.36.104: handoff 가 사람이 쓴 .harness/agent-reminders.md 를 통째로 지웠다(exit 0 · 안내 없음 · 백업 없음).
+// 1.36.104: handoff 가 사람이 쓴 .leerness/agent-reminders.md 를 통째로 지웠다(exit 0 · 안내 없음 · 백업 없음).
 //   대조군이 필수다 — 자동 생성분까지 남기면 그 파일이 영구 잔존해 매 세션 거짓 경보가 된다.
 // 1.36.108 (T-0097, 자체 적대 검사에서 발견): `_withLock` 에 **비동기 fn** 을 넘기면 동기 finally 가
 //   프로미스가 정착하기 전에 락을 푼다 — 본체는 락 없이 돌면서 호출부는 보호받는다고 믿는다.
@@ -9531,7 +9594,7 @@ function _p0112CarryOk() {
   try {
     const p = require('../lib/pure-utils');
     const base = '# T\n\n- managed line\n';
-    const merged = p._managedMerge('AGENTS.md', base, base + '\n- CUSTOM-CARRY-A\n- CUSTOM-CARRY-B\n', '.harness/archive', new Set(), {});
+    const merged = p._managedMerge('AGENTS.md', base, base + '\n- CUSTOM-CARRY-A\n- CUSTOM-CARRY-B\n', '.leerness/archive', new Set(), {});
     const s = p._splitPreserved(merged);
     // ① 무손실 — 관리분 + 이월분이 원문과 **바이트 동일**. 한쪽이라도 흘리면 계량이 조용히 틀린다.
     const lossless = (s.managed + s.preserved) === merged;
@@ -9542,7 +9605,7 @@ function _p0112CarryOk() {
     const noop = (() => { const n = p._splitPreserved(base); return n.preserved === '' && n.managed === base && n.at === -1; })();
     // ④ 태그가 지워진 구형 설치본은 제목으로 가르되, **생성 안내문이 뒤따를 때만** 인정한다.
     const legacy = (() => {
-      const r = p._splitPreserved(base + '\n---\n## Preserved previous content\n\n> 이전 버전에서 이어진 내용. 전체 원본 백업: `.harness/archive`\n\n- OLD-LINE\n');
+      const r = p._splitPreserved(base + '\n---\n## Preserved previous content\n\n> 이전 버전에서 이어진 내용. 전체 원본 백업: `.leerness/archive`\n\n- OLD-LINE\n');
       return r.preserved.includes('OLD-LINE') && !r.managed.includes('OLD-LINE');
     })();
     // ④-b 같은 제목이어도 안내문이 없으면 경계가 아니다 — 사용자가 쓴 동명 섹션을 통째로 삼키지 않기 위해서다.
@@ -9827,7 +9890,9 @@ function _p0097AsyncLockOk() {
     if (!abaOk) throw new Error(`value=${abaResult}, injected=${abaInjected}, contenderPreserved=${fs.existsSync(contenderOwner)}`);
 
     // ⑨ fulfillment 콜백에서 반복 ENOTEMPTY가 재시도 예산을 소진하면 바깥 then.call catch가
-    // 해제를 두 번 실행하지 않고 최초 E_LOCK_RELEASE를 그대로 보존한다.
+    // 해제를 두 번 실행하지 않고 최초 E_LOCK_RELEASE를 그대로 보존한다. Windows에서는 owner
+    // read/unlink의 일시 오류도 같은 6회 예산을 먼저 소비할 수 있으므로 rmdir 호출 수 자체는
+    // 1..6 범위로 검증하고, 실패 코드·격리 경로·공개 경로 해제를 함께 검증한다.
     phase = 'release-exhaustion';
     let exhaustedReleasePath = null, exhaustedAttempts = 0, exhaustedCode = null, exhaustedErrorPath = null;
     const savedNoLockWarn = process.env.LEERNESS_NO_LOCK_WARN;
@@ -9853,7 +9918,7 @@ function _p0097AsyncLockOk() {
       if (savedNoLockWarn === undefined) delete process.env.LEERNESS_NO_LOCK_WARN;
       else process.env.LEERNESS_NO_LOCK_WARN = savedNoLockWarn;
     }
-    const exhaustionOk = exhaustedAttempts === 6 && exhaustedCode === 'E_LOCK_RELEASE'
+    const exhaustionOk = exhaustedAttempts >= 1 && exhaustedAttempts <= 6 && exhaustedCode === 'E_LOCK_RELEASE'
       && samePath(exhaustedErrorPath, exhaustedReleasePath)
       && !fs.existsSync(lockFile) && fs.existsSync(exhaustedReleasePath || '');
     try { if (exhaustedReleasePath) fs.rmSync(exhaustedReleasePath, { recursive: true, force: true }); } catch {}
@@ -10152,9 +10217,9 @@ function _p0104ReminderOk() {
       fs.mkdirSync(d, { recursive: true });
       fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
       cp2.spawnSync(process.execPath, [__filename, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 180000, env: env2 });
-      writeUtf8(path.join(d, '.harness', 'agent-reminders.md'), body);
+      writeUtf8(path.join(d, '.leerness', 'agent-reminders.md'), body);
       cp2.spawnSync(process.execPath, [__filename, 'handoff', '.', '--writeback'], { cwd: d, encoding: 'utf8', timeout: 300000, env: env2 });
-      return path.join(d, '.harness', 'agent-reminders.md');
+      return path.join(d, '.leerness', 'agent-reminders.md');
     };
     // ① 사람이 쓴 파일은 살아남고 내용도 그대로
     const human = mk('# 내 리마인더\nHUMAN-KEEPME 사용자가 직접 쓴 줄\n');
@@ -10197,7 +10262,7 @@ function _p0014SecretBaselineOk() {
     if (!before || before.unacknowledgedCount !== 2 || before.ok !== false) return false;
     // 인정 기록 — 원문 시크릿은 절대 저장하지 않는다
     const rec = J(['scan', 'secrets', '--baseline', '--json']);
-    const stored = read(path.join(d, '.harness', 'secret-baseline.json'));
+    const stored = read(path.join(d, '.leerness', 'secret-baseline.json'));
     if (!rec || rec.recorded !== 2 || stored.includes('FakeFixtureKey')) return false;
     // 조용해지되 사라지지 않는다
     const after = J(['scan', 'secrets', '--json']);
@@ -10220,7 +10285,7 @@ function _p0014SecretBaselineOk() {
     const rearms = !!chg && chg.unacknowledgedCount === 1 && chg.acknowledgedCount === 1
       && Array.isArray(chg.staleBaseline) && chg.staleBaseline.length === 1;
     // 대조군 ③ 손상된 베이스라인은 fail-safe (인정 0)
-    writeUtf8(path.join(d, '.harness', 'secret-baseline.json'), '{ broken json');
+    writeUtf8(path.join(d, '.leerness', 'secret-baseline.json'), '{ broken json');
     const broken = J(['scan', 'secrets', '--json']);
     const failSafe = !!broken && broken.acknowledgedCount === 0 && broken.unacknowledgedCount === 2;
     // 대조군 ④ (codex 검수 HIGH#1) 앞 32자가 같은 다른 키가 자동 인정되면 안 된다.
@@ -10241,7 +10306,28 @@ function _p0014SecretBaselineOk() {
     // 대조군 ⑤ (codex 검수 MEDIUM#4) 파일 경로 + --baseline 은 ENOTDIR 로 죽지 않고 구조화 거절
     const fileBase = J2(['scan', 'secrets', path.join(d2, 'fixture.js'), '--baseline', '--json']);
     const rejectsFile = !!fileBase && fileBase.code === 'baseline_needs_project';
-    return quiet && healthOk && catches && rearms && failSafe && noCollision && rejectsFile;
+    // 대조군 ⑥ (1.36.162): legacy workspace 경로가 포함된 기존 지문은 워크스페이스
+    // 이동 뒤 동일 값·동일 상대 파일에만 유효해야 한다. 값이 바뀌면 즉시 재경고한다.
+    const d3 = path.join(d, 'workspace-dir-migration');
+    const canonicalDir = path.join(d3, '.leerness');
+    fs.mkdirSync(canonicalDir, { recursive: true });
+    const migratedRel = '.leerness/migrated-fixture.test.js';
+    const migratedFile = path.join(d3, migratedRel);
+    const oldKey = 'sk-proj-MigratedFixtureKey1234567890abcd';
+    fs.writeFileSync(migratedFile, `const M="${oldKey}";\n`);
+    const firstMigrated = _collectSecretFindings(d3);
+    const migratedFinding = firstMigrated.committed.find(f => f.file === migratedRel);
+    let migratedBaselineOk = false;
+    if (migratedFinding) {
+      const legacyFp = _fpOf(`${LEGACY_WORKSPACE_DIR}/migrated-fixture.test.js`, migratedFinding.name, oldKey);
+      writeUtf8(path.join(canonicalDir, 'secret-baseline.json'), JSON.stringify({ entries: [{ fp: legacyFp }] }));
+      const same = _collectSecretFindings(d3);
+      fs.writeFileSync(migratedFile, 'const M="sk-proj-MigratedFixtureChanged9876543210";\n');
+      const changed = _collectSecretFindings(d3);
+      migratedBaselineOk = same.acknowledged.length === 1 && same.unacknowledged.length === 0
+        && changed.acknowledged.length === 0 && changed.unacknowledged.length === 1;
+    }
+    return quiet && healthOk && catches && rearms && failSafe && noCollision && rejectsFile && migratedBaselineOk;
   } catch { return false; } finally { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
 }
 // 1.36.104: MCP 사용량 귀속 — 쓰는 쪽과 읽는 쪽이 같은 파일의 다른 키를 보고 있었다.
@@ -10356,7 +10442,7 @@ function _p0103FlagsOk() {
     const R = (a) => cp2.spawnSync(process.execPath, [__filename, ...a], { cwd: proj, encoding: 'utf8', timeout: 180000, env: Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1' }) });
     R(['init', proj, '--yes']);
     R(['preview', 'add', 'my page', '--select', 'ZZABSORB']);
-    const pv = exists(path.join(proj, '.harness', 'previews.json')) ? read(path.join(proj, '.harness', 'previews.json')) : '';
+    const pv = exists(path.join(proj, '.leerness', 'previews.json')) ? read(path.join(proj, '.leerness', 'previews.json')) : '';
     const titleClean = pv.includes('my page') && !pv.includes('ZZABSORB');
     // 제품이 스스로 안내하는 문법(persona list 의 "leerness review <file> --persona <id>") 이 순서와 무관하게 동작해야 한다
     const rev = R(['review', '--persona', 'security', 'sample.js']);
@@ -10366,7 +10452,7 @@ function _p0103FlagsOk() {
     // ③ 등호형(--flag=value)은 값을 자기가 들고 있다 — 다음 토큰까지 먹으면 위치인자가 사라진다.
     //    인라인 목록을 _VALUE_FLAGS 로 바꾸며 멤버십을 split('=')[0] 로 본 탓에 내가 만든 회귀다(codex 검수 #5~#8).
     R(['preview', 'add', '--select=ZZEQ', 'equals form title']);
-    const pv2 = exists(path.join(proj, '.harness', 'previews.json')) ? read(path.join(proj, '.harness', 'previews.json')) : '';
+    const pv2 = exists(path.join(proj, '.leerness', 'previews.json')) ? read(path.join(proj, '.leerness', 'previews.json')) : '';
     const eqOk = pv2.includes('equals form title') && !pv2.includes('ZZEQ');
     const rtEq = R(['agents', 'route', '--tier=normal', 'fix the parser']);
     const eqRoute = !/비어 있|empty_task/.test((rtEq.stdout || '') + (rtEq.stderr || ''));
@@ -10466,11 +10552,11 @@ function _lensInlineQ(q) {
   if (j > 0 && j < 160) return s.slice(0, j + 1);
   return s.length > 120 ? s.slice(0, 119) + '…' : s;
 }
-// 1.19.3 (UR-0003 렌즈 완전판 v3): 프로젝트별 커스텀 렌즈 — .harness/quality-lenses.json 읽기-병합(쓰기 명령 없음, AI/사용자가 편집).
+// 1.19.3 (UR-0003 렌즈 완전판 v3): 프로젝트별 커스텀 렌즈 — .leerness/quality-lenses.json 읽기-병합(쓰기 명령 없음, AI/사용자가 편집).
 //   포맷: { "domains": { "code": { "questions": ["추가 질문"] }, "a11y": { "title":"접근성", "persona":"스크린리더 사용자", "questions":[...], "affects":["design"] } } }
 // 1.36.42 (codex 5차 #9): 손상 파일을 무언 무시하면 사용자는 커스텀 렌즈가 적용된 줄 안다 — 에러를 함께 반환(Ex), 기존 시그니처는 래퍼.
 function _loadProjectLensesEx(root) {
-  const p = path.join(absRoot(root || process.cwd()), '.harness', 'quality-lenses.json');
+  const p = path.join(absRoot(root || process.cwd()), '.leerness', 'quality-lenses.json');
   if (!exists(p)) return { domains: {}, error: null };
   try {
     const j = JSON.parse(read(p));
@@ -10738,7 +10824,7 @@ function lensCmd(domain, opts = {}) {
   const jsonMode = !!opts.json || has('--json');
   // 1.19.1 (19th 버그헌트): 도메인 인자 정규화 — `lens Code` / `lens  CODE ` 도 인식(대소문자·공백 무관).
   if (domain != null) domain = String(domain).trim().toLowerCase();
-  // 1.19.3: 내장 + 프로젝트 커스텀(.harness/quality-lenses.json) 병합 catalog.
+  // 1.19.3: 내장 + 프로젝트 커스텀(.leerness/quality-lenses.json) 병합 catalog.
   const root = opts.root || arg('--path', process.cwd());
   // 1.36.42 (#9): 손상 커스텀 렌즈 파일은 무언 무시 대신 경고 (advisory — lens 자체는 계속 동작)
   try { const _lx = _loadProjectLensesEx(root); if (_lx.error && !jsonMode) warn(_lx.error); } catch {}
@@ -10755,7 +10841,7 @@ function lensCmd(domain, opts = {}) {
   const picked = domain ? { [domain]: catalog[domain] } : catalog;
   if (jsonMode) { log(JSON.stringify({ ok: true, lenses: picked }, null, 2)); return; }
   const hasCustom = Object.values(catalog).some(l => l && (l._custom || l._customAdded));
-  log(t(`# leerness lens — 분야별 자기질문 품질 렌즈 (v${VERSION})${hasCustom ? ' + 프로젝트 커스텀(.harness/quality-lenses.json)' : ''}`, `# leerness lens — quality self-question lenses (v${VERSION})${hasCustom ? ' + project custom (.harness/quality-lenses.json)' : ''}`));
+  log(t(`# leerness lens — 분야별 자기질문 품질 렌즈 (v${VERSION})${hasCustom ? ' + 프로젝트 커스텀(.leerness/quality-lenses.json)' : ''}`, `# leerness lens — quality self-question lenses (v${VERSION})${hasCustom ? ' + project custom (.leerness/quality-lenses.json)' : ''}`));
   log(t(`완료 선언 전 해당 분야 질문에 스스로 답해보세요. "그렇다(통과)"라고 답할 수 없으면 아직 완료가 아닙니다.`, `Before declaring done, answer each domain's questions yourself. If you can't answer "yes (pass)", it's not done yet.`));
   for (const [key, l] of Object.entries(picked)) {
     log('');
@@ -10774,7 +10860,7 @@ function lensCmd(domain, opts = {}) {
   }
   log('');
   log(t(`사용: leerness lens <${Object.keys(catalog).join('|')}> · 완료 검증과 함께: leerness verify-claim T-XXXX`, `Usage: leerness lens <${Object.keys(catalog).join('|')}> · with completion check: leerness verify-claim T-XXXX`));
-  if (!hasCustom) log(t(`프로젝트 커스텀 렌즈: .harness/quality-lenses.json 에 { "domains": { "code": { "questions": ["..."] } } } 추가`, `Project custom lenses: add { "domains": { "code": { "questions": ["..."] } } } to .harness/quality-lenses.json`));
+  if (!hasCustom) log(t(`프로젝트 커스텀 렌즈: .leerness/quality-lenses.json 에 { "domains": { "code": { "questions": ["..."] } } } 추가`, `Project custom lenses: add { "domains": { "code": { "questions": ["..."] } } } to .leerness/quality-lenses.json`));
 }
 
 function commandsCmd(root) {
@@ -10833,7 +10919,7 @@ function commandsCmd(root) {
       { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280', descEn: 'generate per-tool instructions/.mcp.json selectively (claude/cursor/codex/goose/...) — 1.9.280' },
       { cmd: 'ci init [path] [--force]', desc: 'PR 마다 leerness gate 실행하는 GitHub Actions 워크플로 생성 (.github/workflows/leerness-gate.yml) — 1.9.444', descEn: 'create a GitHub Actions workflow that runs leerness gate on every PR (.github/workflows/leerness-gate.yml) — 1.9.444' },
       { cmd: 'export|prompt --target <agent>', desc: 'adapter 별칭 — 도구별 지침/계약 파일 생성 (claude/cursor/codex/agents-md/...) — 1.9.448', descEn: 'adapter alias — generate per-tool instruction/contract files (claude/cursor/codex/agents-md/...) — 1.9.448' },
-      { cmd: 'glossary [build|show] [--lang ko|en|both] [--json]', desc: '의존성 용어집 — package.json/requirements 라이브러리를 비개발자용 한 줄 설명으로 (.harness/glossary.md) — 1.11.4', descEn: 'dependency glossary — one-line plain-language descriptions of package.json/requirements libraries (.harness/glossary.md) — 1.11.4' },
+      { cmd: 'glossary [build|show] [--lang ko|en|both] [--json]', desc: '의존성 용어집 — package.json/requirements 라이브러리를 비개발자용 한 줄 설명으로 (.leerness/glossary.md) — 1.11.4', descEn: 'dependency glossary — one-line plain-language descriptions of package.json/requirements libraries (.leerness/glossary.md) — 1.11.4' },
       { cmd: 'policy show|set|check', desc: '권한 등급 (read-only…publish) — opt-in enforced (위험 명령 차단) — 1.9.281', descEn: 'permission tiers (read-only…publish) — opt-in enforcement (blocks risky commands) — 1.9.281' },
       { cmd: 'reuse-check "<기능>"', cmdEn: 'reuse-check "<capability>"', desc: '외부 OSS 빌드 vs 재사용 결정 게이트 (오프라인 카테고리+체크리스트) — 1.9.285', descEn: 'build-vs-reuse decision gate for external OSS (offline categories + checklist) — 1.9.285' },
       { cmd: 'skill impact', desc: '스킬 설치 영향 경량 상관추적 (사용 빈도 ↔ 검증 통과율, advisory) — 1.9.286', descEn: 'lightweight correlation of skill installs (usage frequency vs verification pass rate, advisory) — 1.9.286' },
@@ -10845,7 +10931,7 @@ function commandsCmd(root) {
       { cmd: 'integrity check [--repair] [--json]', desc: 'managed 정책-문서 12종 무결성(부재/H1 상실/절단) 점검 — --repair: archive 대피 후 템플릿 재생성 — 1.36.57 감사 F-04', descEn: 'integrity check for the 12 managed policy documents (missing/lost H1/truncated) — --repair: archive the old copy then regenerate from template — 1.36.57 audit F-04' },
       { cmd: 'referee add|verify|list|show|drop', desc: '검증기 캘리브레이션 — 신뢰 전에 탐지력 증명(known-good 통과 + 망가뜨린 known-bad 를 기대 사유로 거부). verify-claim --referee / gate 게이팅 — 1.36.80 P-0001', descEn: 'verifier calibration — prove detection power before trusting it (passes known-good, rejects a broken known-bad for the expected reason). Gates verify-claim --referee / gate — 1.36.80 P-0001' },
       { cmd: 'preview add|list|show|approve|revise|mockup|verify', desc: '신규 기능 미리보기 승인 워크플로 — approve 전 코드 작성 금지 계약. mockup <P-ID> [--target <파일>] [--force]: 프로젝트의 실제 토큰·컴포넌트·대상 화면 클래스를 심은 시안 · approve 시 그 시안이 계약으로 고정됨 · verify <P-ID> --files a,b: 구현이 계약을 지켰는지 존재 대조(시각적 일치는 보증하지 않음) — 1.36.51 UR-0061 · 1.36.75 UR-0066 · 1.36.99/1.36.100 P-0012', descEn: 'preview-approval workflow for new features — contract: no code before approve. mockup <P-ID> [--target <file>] [--force]: a draft seeded with the project\'s real tokens/components/target-screen classes · approve freezes that draft as the contract · verify <P-ID> --files a,b: existence check that the implementation kept the contract (visual match is NOT guaranteed) — 1.36.51 UR-0061 · 1.36.75 UR-0066 · 1.36.99/1.36.100 P-0012' },
-      { cmd: 'dashboard [path] [--port N] [--timeout SEC] [--json]', desc: '.harness 읽기 전용 대시보드 — 토글·task·마일스톤·미리보기·라우팅기록·bugfix probe 를 localhost 에서 열람. 설정 변경·게이트 판정은 하지 않는다(CLI 가 판정). --json 은 서버 없이 같은 스냅샷 출력. 정적 단일파일 뷰(leerness.html)는 leerness graph --html 로 그대로 — 1.36.90 P-0006', descEn: 'read-only .harness dashboard — browse toggles/tasks/milestones/previews/routing history/bugfix probes on localhost. It never changes settings or makes gate verdicts (the CLI does). --json prints the same snapshot without a server. The static single-file view (leerness.html) is still leerness graph --html — 1.36.90 P-0006' },
+      { cmd: 'dashboard [path] [--port N] [--timeout SEC] [--json]', desc: '.leerness 읽기 전용 대시보드 — 토글·task·마일스톤·미리보기·라우팅기록·bugfix probe 를 localhost 에서 열람. 설정 변경·게이트 판정은 하지 않는다(CLI 가 판정). --json 은 서버 없이 같은 스냅샷 출력. 정적 단일파일 뷰(leerness.html)는 leerness graph --html 로 그대로 — 1.36.90 P-0006', descEn: 'read-only .leerness dashboard — browse toggles/tasks/milestones/previews/routing history/bugfix probes on localhost. It never changes settings or makes gate verdicts (the CLI does). --json prints the same snapshot without a server. The static single-file view (leerness.html) is still leerness graph --html — 1.36.90 P-0006' },
       { cmd: 'agents route "<작업>" [--tier tiny|normal|high-risk] [--confirm --approved-by "<승인자>"] [--log]', cmdEn: 'agents route "<task>" [--tier tiny|normal|high-risk] [--confirm --approved-by "<approver>"] [--log]', desc: '작업 난이도 판정(결정적 규칙) → 추상 역할(architect/commander/coder/reviewer) 배치 제안. 모델명 하드코딩 없이 `roles set` 매핑을 쓰고, 실행은 명시 확인 필요. 토글 기본 OFF: leerness toggle set difficulty-routing on — 1.36.89 P-0007', descEn: 'judge task difficulty (deterministic rules) → propose an abstract-role assignment (architect/commander/coder/reviewer). Uses your `roles set` mapping instead of hardcoded model names, and execution needs explicit confirmation. Toggle is OFF by default: leerness toggle set difficulty-routing on — 1.36.89 P-0007' },
       { cmd: 'bugfix start|receipt|drop|list', desc: 'bugfix 완료 영수증 — 수정 전 재현 probe 를 등록(2회 연속 실패해야 등록)하고, done 전이에서 통과 + 근본원인/형제범위 영수증을 요구. 토글 기본 OFF: leerness toggle set bugfix-receipt on — 1.36.87 P-0005', descEn: 'bugfix completion receipt — register a reproduction probe before the fix (it must fail twice in a row to register), then require it to pass at the done transition plus a root-cause/sibling-scope receipt. Toggle is OFF by default: leerness toggle set bugfix-receipt on — 1.36.87 P-0005' },
       { cmd: 'review <file> --persona <ids>', desc: '페르소나 리뷰 (1.9.29)', descEn: 'persona-based review (1.9.29)' },
@@ -10873,7 +10959,7 @@ function commandsCmd(root) {
       { cmd: 'update [--check|--yes|--force]', desc: '자가 업데이트', descEn: 'self-update' },
       { cmd: 'wakeup-interval get|set|auto|history|record', desc: 'adaptive wakeup (1.9.210)', descEn: 'adaptive wakeup interval (1.9.210)' },
       { cmd: 'sessions [path] [--json]', desc: '이 프로젝트에 남은 **다른 AI 세션 기록** (1.36.129, P-0016 P1) — 기록만 보여 주고 프로세스 상태는 판정하지 않는다', descEn: 'session records left by other AI sessions in this project (1.36.129, P-0016 P1) — records only; process state is never judged' },
-      { cmd: 'workspace-dir get|guide', desc: '워크스페이스 디렉토리 확인 — 이 빌드는 .harness 만 사용 (migrate-workspace-dir 는 1.36.126 부터 거부, T-0107)', descEn: 'show the workspace directory — this build uses .harness only (migrate-workspace-dir refuses since 1.36.126, T-0107)' },
+      { cmd: 'workspace-dir get|guide', desc: `워크스페이스 디렉토리 확인 — ${CANONICAL_WORKSPACE_DIR} canonical + 기존 ${LEGACY_WORKSPACE_DIR} 안전 마이그레이션 (T-0107)`, descEn: `show the workspace directory — canonical ${CANONICAL_WORKSPACE_DIR} + safe legacy ${LEGACY_WORKSPACE_DIR} migration (T-0107)` },
       { cmd: 'parent detect|adopt [--select <kinds>] [--apply]', desc: '상위 leerness 부모 탐지 + 자산 게이트형 adopt (1.30.2~3)', descEn: 'detect a parent leerness above + gated asset adoption (1.30.2~3)' },
       { cmd: 'intent classify|expand|domains "<request>"', desc: '의도 파악 + scope (1.9.213)', descEn: 'infer intent + scope (1.9.213)' },
       { cmd: 'constraints list|check|add', desc: '플랫폼/API 제약 (1.9.208)', descEn: 'platform/API constraints (1.9.208)' },
@@ -10984,9 +11070,9 @@ function roundHistoryCmd(root) {
 // 1.9.208: 플랫폼/API 제약 사전 체크 (사용자 명시)
 //   "사용자의 명령을 받으면, 고려해야하는 부분을 먼저 확인하고 진행하게 하면 어떨지"
 //   "특정 플랫폼의 API ... 호출속도가 초당 5회 이하로만 해야한다는 규정을 먼저 확인"
-//   .harness/platform-constraints.json 에 플랫폼별 제약 catalog 저장 → 요청 텍스트 키워드 매칭 → 적용 가능한 제약 보고
+//   .leerness/platform-constraints.json 에 플랫폼별 제약 catalog 저장 → 요청 텍스트 키워드 매칭 → 적용 가능한 제약 보고
 //   기본 catalog 6종: Stripe / OpenAI / Anthropic / GitHub / Discord / Twitter
-function _platformConstraintsPath(root) { return path.join(root, '.harness', 'platform-constraints.json'); }
+function _platformConstraintsPath(root) { return path.join(root, '.leerness', 'platform-constraints.json'); }
 // 1.9.333 (UR-0025 심층): _DEFAULT_PLATFORM_CONSTRAINTS → lib/catalogs.js 로 이동 (순수 데이터, require 사용).
 // 1.36.78 (10차 헌트 F3): 손상 store 를 조용히 defaults 로 폴백해 "권위 있는 정상 목록"처럼 보이던 것 —
 //   사용자 커스텀 제약이 사라졌는데도 알 수 없었다. 손상 여부를 함께 반환해 list/check 가 표면화(read 는 폴백 유지 + 경고).
@@ -11009,7 +11095,7 @@ function _loadPlatformConstraints(root) {
 function _writePlatformConstraints(root, catalog) {
   _assertStoreParsable(_platformConstraintsPath(root), 'platform-constraints');   // 1.36.28 (#3): 손상 파일 덮어써 커스텀 제약 유실 방지 (try 밖 — 삼켜지지 않게)
   try {
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     writeUtf8(_platformConstraintsPath(root), JSON.stringify({ ...catalog, updatedAt: new Date().toISOString() }, null, 2));
     return true;
   } catch { return false; }
@@ -11024,10 +11110,10 @@ function _checkRequestConstraints(root, text, lang) {
 //   "메인 에이전트가 슬립전에 서브에이전트를 호출해서 미비된 부분이 있는지, 충돌나는 부분이 있는지,
 //    이전에 누락된 작업이 있는지 등등 여러부분을 탐색하면서 필요한 내용을 정리하고
 //    메인 에이전트가 깨어났을때, 서브에이전트가 정리한 내용을 확인해보거나 하는 기능"
-//   .harness/pre-wake-report.json 에 sleep 전 audit 결과 누적 (최근 10개 유지) →
+//   .leerness/pre-wake-report.json 에 sleep 전 audit 결과 누적 (최근 10개 유지) →
 //   다음 handoff 에서 자동 노출 → 깨어남 직후 메인 에이전트가 검토 가능
 //   audit 영역: 미답 요청 / 24h+ 무진척 task / drift 신호 / feature_graph 충돌 / 플랫폼 제약 누락
-function _preWakeReportPath(root) { return path.join(root, '.harness', 'pre-wake-report.json'); }
+function _preWakeReportPath(root) { return path.join(root, '.leerness', 'pre-wake-report.json'); }
 function _loadPreWakeReport(root) {
   try {
     const fp = _preWakeReportPath(root);
@@ -11038,7 +11124,7 @@ function _loadPreWakeReport(root) {
 }
 function _writePreWakeReport(root, reports) {
   try {
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     writeUtf8(_preWakeReportPath(root), JSON.stringify({ reports, updatedAt: new Date().toISOString() }, null, 2));
     return true;
   } catch { return false; }
@@ -11072,7 +11158,7 @@ function _runPreWakeAudit(root) {
 
   // 2) 24h+ 무진척 task — progress-tracker 검사
   try {
-    const ptPath = path.join(root, '.harness', 'progress-tracker.md');
+    const ptPath = path.join(root, '.leerness', 'progress-tracker.md');
     if (exists(ptPath)) {
       const content = read(ptPath);
       const stat = fs.statSync(ptPath);
@@ -11095,7 +11181,7 @@ function _runPreWakeAudit(root) {
 
   // 3) drift 신호 — session-handoff/progress-tracker stale 검사
   try {
-    const handoffPath = path.join(root, '.harness', 'session-handoff.md');
+    const handoffPath = path.join(root, '.leerness', 'session-handoff.md');
     if (exists(handoffPath)) {
       const stat = fs.statSync(handoffPath);
       const ageDay = (Date.now() - stat.mtimeMs) / 86400000;
@@ -11213,7 +11299,7 @@ function _detectAbnormalShutdown(root) {
 
   // 3) in-progress task 24h+ stale (progress-tracker mtime + 활성 task 카운트)
   try {
-    const ptPath = path.join(root, '.harness', 'progress-tracker.md');
+    const ptPath = path.join(root, '.leerness', 'progress-tracker.md');
     if (exists(ptPath)) {
       const stat = fs.statSync(ptPath);
       const ageMin = Math.floor((now - stat.mtimeMs) / 60000);
@@ -11295,9 +11381,9 @@ function _detectAbnormalShutdown(root) {
 // 1.9.210: adaptive wakeup interval (사용자 명시)
 //   "wakeup 30분등 긴 시간이 필요없다면 간격을 타이트하게 자동으로 조절하도록"
 //   사용자 활동량 기반 권장 interval 계산 → ScheduleWakeup 시 자동 적용 (R-0001 룰 외 동적 보정)
-//   .harness/wakeup-history.json 에 fire 이력 누적 → 최근 N개 사이 평균 user-trigger gap 분석
+//   .leerness/wakeup-history.json 에 fire 이력 누적 → 최근 N개 사이 평균 user-trigger gap 분석
 //   opt-out: LEERNESS_FIXED_INTERVAL=1 (env) 또는 leerness wakeup-interval set <secs>
-function _wakeupHistoryPath(root) { return path.join(root, '.harness', 'wakeup-history.json'); }
+function _wakeupHistoryPath(root) { return path.join(root, '.leerness', 'wakeup-history.json'); }
 function _loadWakeupHistory(root) {
   try {
     const fp = _wakeupHistoryPath(root);
@@ -11308,7 +11394,7 @@ function _loadWakeupHistory(root) {
 }
 function _writeWakeupHistory(root, state) {
   try {
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     _assertStoreParsable(_wakeupHistoryPath(root), 'wakeup-history');   // 1.36.114: 손상 스토어 덮어쓰기 거부
     writeUtf8(_wakeupHistoryPath(root), JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2));
     return true;
@@ -11413,62 +11499,17 @@ function _computeAdaptiveInterval(root) {
   };
 }
 
-// 1.9.211: .harness → .leerness rename + migration + AI 참조 가이드 (사용자 명시)
-//   "leerness설치시 생성되는 .harness를 .leerness으로 변경할 수 있을까 / 기존 버전에서도 마이그레이션시 AI가 참조할 수 있기도하면 어떨까"
-//   접근 방식: opt-in 마이그레이션 (breaking change 최소화)
-//   - default: .harness 유지 (226+ path reference 안정)
-//   - LEERNESS_WORKSPACE_DIR env 또는 .leerness/MARKER 존재 시 .leerness 사용
-//   - leerness migrate-workspace-dir CLI: .harness → .leerness copy + AI reference guide 생성
-//   - AI 참조 가이드: WHERE_TO_FIND.md (디렉토리 구조 + 파일별 역할 + 마이그레이션 history)
-// 1.36.126 (T-0107 실측): 이 해석기는 **소수파**였다. 실측 —
-//   해석기 소비처 9곳 vs `.harness` 경로 구성 252곳(bin 215 · lib 37) + 안내/템플릿 문자열 634곳.
-//   그래서 env 나 마커로 `.leerness` 를 고르게 해도 **쓰기는 전부 `.harness` 로 갔다**(실측:
-//   migrate 후 `task add` 가 `.leerness` 에 안 남음. env 를 켜도 동일). 결과는 두 가지 해악이었다:
-//     ① `_isInitialized` 만 `.leerness` 를 봐서 정상 프로젝트를 "미초기화" 로 오판(실측 selftest 4건 실패)
-//     ② `.leerness` 는 마이그레이션 시점에 얼어붙은 **죽은 사본**이 되고 WHERE_TO_FIND.md 가 AI 를 그리로 안내
-//   즉 소수파를 따르는 것은 "다르게 동작" 이 아니라 **틀리게 동작**이었다. 살아 있는 저장소를 그대로 말한다.
-//   ⚠ 이 상수를 true 로 바꾸려면 하드코딩 252곳을 먼저 없애야 한다 — selftest 가 그 순서를 강제한다.
-const WORKSPACE_DIR_ALT_SUPPORTED = false;
-// 거부 사유로 대는 숫자는 **실행 시** 센다 — 손으로 적으면 다음 편집에서 곧바로 낡는다(검수 P2 실측: 252→255).
-//   거부 경로에서만 불리므로 비용은 문제되지 않는다. 세다가 실패하면 숫자를 지어내지 말고 null 로 둔다.
-function _measureWorkspaceHardcoding() {
-  const out = { resolverConsumers: null, hardcodedPathSites: null, hardcodedTextMentions: null };
-  try {
-    let src = read(__filename);
-    const libDir = path.join(__dirname, '..', 'lib');
-    for (const f of fs.readdirSync(libDir)) if (f.endsWith('.js')) src += '\n' + read(path.join(libDir, f));
-    out.hardcodedPathSites = (src.match(/path\.join\([^)]*'\.harness'/g) || []).length;
-    out.hardcodedTextMentions = (src.match(/\.harness\/[A-Za-z0-9_.-]+/g) || []).length;
-    out.resolverConsumers = (src.match(/_workspaceDir(?:Name|Abs)\(/g) || []).length;
-  } catch { /* 셀 수 없으면 null — 지어내지 않는다 */ }
-  return out;
-}
-// 사용자가 켠 설정이 **안 먹는다는 사실**은 반드시 말해야 한다(조용한 무시 금지 — 1.36.125 와 같은 원칙).
-function _workspaceDirAltIgnored(root) {
-  if (WORKSPACE_DIR_ALT_SUPPORTED) return null;
-  const env = (process.env.LEERNESS_WORKSPACE_DIR || '').trim();
-  let marker = false;
-  try { marker = !!(root && exists(path.join(root, '.leerness', 'MIGRATED_FROM_HARNESS'))); } catch {}
-  if (!env && !marker) return null;
-  return { env: env || null, marker, effective: '.harness' };
-}
+// 1.36.162 (T-0107): `.leerness/` is the canonical project-memory directory.
+// Existing legacy projects resolve to their old directory only until the
+// transactional migration runs.  All policy lives in lib/workspace-dir.js.
 function _workspaceDirName(root) {
-  if (WORKSPACE_DIR_ALT_SUPPORTED) {
-    if (process.env.LEERNESS_WORKSPACE_DIR) {
-      const v = process.env.LEERNESS_WORKSPACE_DIR.trim();
-      if (v) return v;
-    }
-    try {
-      if (root && exists(path.join(root, '.leerness', 'MIGRATED_FROM_HARNESS'))) return '.leerness';
-    } catch {}
-  }
-  return '.harness';   // 살아 있는 저장소 — 위 주석의 실측대로 이 빌드에서는 항상 여기다
+  return resolveWorkspaceDirName(root || process.cwd());
 }
 function _workspaceDirAbs(root) {
-  return path.join(root, _workspaceDirName(root));
+  return path.join(absRoot(root), _workspaceDirName(root));
 }
 // 1.30.2 (#157 사용자명시, 하위 프로젝트 방향 — 외부AI+Claude 교차검토 → 방향 C "탐지+게이트"):
-//   현재 root 의 '상위' 디렉토리 중 가장 가까운 leerness 부모(.harness/ 또는 .leerness/ 보유)를 탐지(read-only).
+//   현재 root 의 '상위' 디렉토리 중 가장 가까운 leerness 부모를 탐지(read-only).
 //   부모 자산(design-system/reuse-map/tone) 적용은 자동이 아니라 사용자 결정 게이트 — 이 함수는 '탐지만' 한다(적용 X).
 //   FP/안전: root 자신 제외(dirname 부터 시작) + 깊이 상한(monorepo/깊은 트리에서 무한 상승 방지) + 실제 워크스페이스 디렉토리만 매칭.
 function _findParentWorkspace(root, opts = {}) {
@@ -11478,15 +11519,18 @@ function _findParentWorkspace(root, opts = {}) {
     let cur = path.dirname(root);
     let prev = null, depth = 0;
     while (cur && cur !== prev && depth < maxDepth) {
-      const hasHarness = exists(path.join(cur, '.harness'));
-      const hasLeerness = exists(path.join(cur, '.leerness'));
-      if (hasHarness || hasLeerness) {
-        // 1.36.126 (T-0107): 여기는 해석기를 안 쓰고 **자체 로직으로 `.leerness` 를 우선**하고 있었다 —
-        //   부모가 옛 migrate 를 돌렸다면 그 `.leerness` 는 죽은 사본이므로, 자식이 **낡은 자산**
-        //   (design-system·reuse-map·skills)을 물려받는다. 살아 있는 저장소가 있으면 그쪽이 먼저다.
-        //   `.leerness` 만 있는 경우(사용자가 믿고 `.harness` 를 지운 상태)는 부모 탐지 자체를 잃는 것보다
-        //   읽어 주는 편이 낫다 — 읽기 전용 자산 탐지이고, 그 프로젝트는 audit 이 미초기화로 따로 알린다.
-        const wd = hasHarness ? '.harness' : '.leerness';
+      const state = inspectWorkspace(cur);
+      if (state.legacy.exists || state.canonical.exists) {
+        let wd;
+        try { wd = resolveWorkspaceDirName(cur); }
+        catch (error) {
+          if (error.code === 'E_WORKSPACE_DIR_CONFLICT') {
+            return { parentRoot: cur, workspaceDir: null, workspaceAbs: null,
+              assets: { designSystem: false, reuseMap: false, agents: exists(path.join(cur, 'AGENTS.md')), skills: false },
+              assetCount: 0, depth: depth + 1, conflict: true };
+          }
+          throw error;
+        }
         const wsAbs = path.join(cur, wd);
         const assets = {
           designSystem: exists(path.join(wsAbs, 'design-system.md')),
@@ -11502,113 +11546,118 @@ function _findParentWorkspace(root, opts = {}) {
   } catch {}
   return null;
 }
-// .harness → .leerness 마이그레이션 (copy + reference guide 생성)
+// Legacy workspace → `.leerness/` transactional migration. Structured state that
+// already lives under `.leerness/` is merged in place; observability runs are
+// remapped so they cannot collide with state runs.
 function _migrateWorkspaceDir(root, opts = {}) {
-  const dryRun = opts.dryRun === true;
-  const srcDir = path.join(root, '.harness');
-  const dstDir = path.join(root, '.leerness');
-  const report = {
-    at: new Date().toISOString(),
+  root = absRoot(root);
+  return migrateLegacyWorkspace(root, {
+    dryRun: opts.dryRun === true,
+    force: opts.force === true,
     version: VERSION,
-    src: srcDir,
-    dst: dstDir,
-    srcExists: exists(srcDir),
-    dstExists: exists(dstDir),
-    copiedFiles: [],
-    skippedFiles: [],
-    errors: [],
-    dryRun
-  };
-  // 1.36.126 (T-0107): 이 명령은 **배달할 수 없는 것을 배달했다고 말하고 있었다**. 실측 —
-  //   복사(58파일)는 성공하고 "✓ 마이그레이션 완료 → 다음 handoff부터 .leerness 우선 사용" 이라고 찍는데,
-  //   그 직후 `task add` 는 여전히 `.harness` 에 쓴다. 결과물은 마이그레이션이 아니라 **얼어붙은 사본**이고,
-  //   같이 만들어지는 WHERE_TO_FIND.md 는 AI 를 그 낡은 상태로 안내한다 — 우리가 막으려는 바로 그 실패다.
-  //   그래서 복사를 하지 않는다. 반쯤 된 상태를 만들 바에는 **아무것도 만들지 않는 편이 낫다**(fail-closed).
-  //   되살리려면 하드코딩 252곳을 해석기로 바꾸는 것이 선행 조건이다(T-0107).
-  //   ⚠ `allowUnsupported` 는 **내부 시험 전용 통로**다. 복사 구현(심링크 미추종 등 1.36.33 안전 속성)을
-  //     도달 불가로 만들면 그 보호가 조용히 썩는다 — T-0107 이 풀리면 다시 살아날 코드이므로 계속 시험한다.
-  //     CLI 경로는 이 옵션을 절대 넘기지 않는다(e2e 가 호출부를 열거해 단언한다).
-  if (!WORKSPACE_DIR_ALT_SUPPORTED && opts.allowUnsupported !== true) {
-    report.blocked = true;
-    report.blockedReason = 'workspace-dir-alt-unsupported';
-    //   ⚠ 이 숫자를 손으로 적어 뒀더니 곧바로 낡았다(적을 땐 252, 이 라운드 편집 후 실제 255 — 검수 P2).
-    //     "실측" 이라 말하면서 낡은 수를 보여 주는 것은 이 라운드가 고치는 결함과 같은 클래스다. 실행 시 센다.
-    report.measured = _measureWorkspaceHardcoding();
-    report.errors.push('이 빌드는 .leerness 를 살아 있는 저장소로 쓰지 못합니다 — 복사하면 죽은 사본이 됩니다');
-    return report;
-  }
-  if (!report.srcExists) {
-    report.errors.push('source .harness not found');
-    return report;
-  }
-  if (!dryRun) {
-    mkdirp(dstDir);
-  }
-  // 재귀 copy 헬퍼
-  function copyRec(rel) {
-    const srcAbs = path.join(srcDir, rel);
-    const dstAbs = path.join(dstDir, rel);
-    let stat;
-    // 1.36.33 (#6): lstat 로 symlink/junction 을 따라가지 않음 — 자기참조 링크(.harness 안 →.harness)가 있으면
-    //   종전엔 MAX_PATH 에러로 자기종결할 때까지 수십 단계를 실제 복사(63중첩 실측)했다. 링크는 skip 기록.
-    try { stat = fs.lstatSync(srcAbs); } catch (e) { report.errors.push(`stat ${rel}: ${e.message}`); return; }
-    if (stat.isSymbolicLink()) { report.skippedFiles.push(rel + ' (symlink — 따라가지 않음)'); return; }
-    if (stat.isDirectory()) {
-      if (!dryRun) mkdirp(dstAbs);
-      let entries;
-      try { entries = fs.readdirSync(srcAbs); } catch (e) { report.errors.push(`readdir ${rel}: ${e.message}`); return; }
-      for (const e of entries) copyRec(path.join(rel, e));
-    } else if (stat.isFile()) {
-      // 기존 dst 파일이 있고 우리가 force가 아니면 skip
-      if (exists(dstAbs) && !opts.force) {
-        report.skippedFiles.push(rel);
-        return;
-      }
-      if (!dryRun) {
-        try {
-          fs.copyFileSync(srcAbs, dstAbs);
-          report.copiedFiles.push(rel);
-        } catch (e) {
-          report.errors.push(`copy ${rel}: ${e.message}`);
-        }
-      } else {
-        report.copiedFiles.push(rel);
-      }
+    referenceGuide: _buildWorkspaceReferenceGuide(root, CANONICAL_WORKSPACE_DIR),
+    lockWaitMs: process.env.LEERNESS_WORKSPACE_MIGRATION_LOCK_WAIT_MS,
+  });
+}
+
+let _knownTopLevelCommands = null;
+function _isKnownTopLevelCommand(cmd) {
+  if (_knownTopLevelCommands === null) {
+    _knownTopLevelCommands = new Set(['init']);
+    // The dispatcher is the authority. Deriving this non-mutating guard from
+    // its actual conditions prevents a second hand-maintained command list
+    // from drifting. A parse miss is fail-safe: migration is skipped.
+    const source = main.toString();
+    for (const match of source.matchAll(/\bcmd\s*===\s*(['"])([^'"]+)\1/g)) {
+      _knownTopLevelCommands.add(match[2]);
     }
   }
-  copyRec('');
-  // 마이그레이션 마커 + AI 참조 가이드 작성
-  if (!dryRun) {
-    const marker = `Migrated from .harness at ${report.at} by leerness ${VERSION}\n`;
-    try { writeUtf8(path.join(dstDir, 'MIGRATED_FROM_HARNESS'), marker); } catch (e) { report.errors.push(`marker: ${e.message}`); }
-    const guide = _buildWorkspaceReferenceGuide(root, '.leerness');
-    try { writeUtf8(path.join(dstDir, 'WHERE_TO_FIND.md'), guide); } catch (e) { report.errors.push(`guide: ${e.message}`); }
-    // .harness 에도 redirect 안내 추가 (AI가 .harness 먼저 봐도 .leerness 로 가게)
-    try {
-      const redirect = `# .harness → .leerness migration (${report.at})\n\n` +
-        `이 워크스페이스는 \`.harness\` → \`.leerness\` 로 마이그레이션되었습니다 (leerness ${VERSION}).\n\n` +
-        `**AI 에이전트는 ${'.leerness/'} 디렉토리를 우선 참조하십시오.**\n\n` +
-        `- 신규 메타파일 위치: \`.leerness/\`\n` +
-        `- 참조 가이드: \`.leerness/WHERE_TO_FIND.md\`\n` +
-        `- 마이그레이션 마커: \`.leerness/MIGRATED_FROM_HARNESS\`\n\n` +
-        `\`.harness/\` 는 backward compatibility 를 위해 보존됩니다 (read-only 권장).\n`;
-      writeUtf8(path.join(srcDir, 'MIGRATED_TO_LEERNESS.md'), redirect);
-    } catch (e) { report.errors.push(`redirect: ${e.message}`); }
+  return _knownTopLevelCommands.has(String(cmd || ''));
+}
+
+function _autoMigrateLegacyWorkspace(args, cmd) {
+  if (process.env.LEERNESS_NO_AUTO_WORKSPACE_MIGRATION === '1') return true;
+  if (has('--dry-run') || cmd === 'migrate-workspace-dir' || cmd === 'workspace-dir') return true;
+  // Invalid commands must be observationally pure. In particular, a typo in
+  // a legacy project may not rename project memory before reporting the typo.
+  if (!_isKnownTopLevelCommand(cmd)) return true;
+  const candidates = [];
+  const explicit = arg('--path', null);
+  if (typeof explicit === 'string' && explicit.trim()) candidates.push(explicit);
+  candidates.push(process.cwd());
+  // Never interpret arbitrary command content as a project to mutate. Topics,
+  // titles and output paths may all be path-shaped (for example
+  // `brainstorm ./legacy-design`); scanning every positional token used to
+  // migrate those unrelated directories before command dispatch. Positional
+  // project targets can be migrated explicitly with `migrate-workspace-dir`,
+  // while normal automatic migration is limited to cwd and the unambiguous
+  // global `--path` option.
+  const seen = new Set();
+  for (const candidate of candidates) {
+    let root;
+    try { root = absRoot(candidate); } catch { continue; }
+    if (seen.has(root)) continue;
+    seen.add(root);
+    let state;
+    try { state = inspectWorkspace(root); } catch { continue; }
+    if (!state.legacy.live) continue;
+    const report = _migrateWorkspaceDir(root, { force: false });
+    if (!report.blocked) return true;
+    if (has('--json')) {
+      log(JSON.stringify({ ok: false, code: report.blockedReason, message: (report.errors || []).join('; '), migration: report }, null, 2));
+    } else {
+      fail(`workspace migration blocked (${report.blockedReason}): ${(report.errors || []).join('; ')}`);
+      if ((report.conflicts || []).length) log(`  conflicts: ${report.conflicts.join(', ')}`);
+    }
+    process.exitCode = 1;
+    return false;
   }
-  return report;
+  return true;
+}
+
+function _guardLinkedWorkspaceTargets(args) {
+  const candidates = [process.cwd()];
+  const explicit = arg('--path', null);
+  if (typeof explicit === 'string' && explicit.trim()) candidates.push(explicit);
+  // Positional project arguments vary by command. Inspecting an existing
+  // directory is read-only, so include every such token rather than risk a
+  // hardcoded writer following `<project>/.leerness` outside the project.
+  for (const token of (args || []).slice(1)) {
+    if (typeof token !== 'string' || token.startsWith('-')) continue;
+    try {
+      const candidate = absRoot(token);
+      if (exists(candidate) && fs.statSync(candidate).isDirectory()) candidates.push(candidate);
+    } catch {}
+  }
+  const seen = new Set();
+  for (const candidate of candidates) {
+    let state;
+    try {
+      const root = absRoot(candidate);
+      if (seen.has(root)) continue;
+      seen.add(root);
+      state = inspectWorkspace(root);
+    } catch { continue; }
+    const linked = [state.legacy, state.canonical].find((entry) => entry.isSymbolicLink);
+    if (!linked) continue;
+    failJson(has('--json'), 'workspace_dir_symlink',
+      `workspace directory must not be a symbolic link or junction: ${linked.abs}`);
+    return false;
+  }
+  return true;
 }
 // AI 참조 가이드 빌더 — 워크스페이스 디렉토리 구조 + 파일별 역할 매핑
 // 1.9.377 (UR-0025): 순수 코어 _renderWorkspaceReferenceGuide (lib/pure-utils) + 얇은 래퍼 (root 미사용, version/timestamp 주입).
 function _buildWorkspaceReferenceGuide(root, dirName) {
-  return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString());
+  return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString(), LEGACY_WORKSPACE_DIR);
 }
 
 // 1.9.213: intent inference + scope expansion 게이트 (사용자 명시)
 //   "사용자가 말한 내용만 수정해야하는 경우도 있지만, 관련있는것이나 보강하면 좋을 부분을 파악하여 진행"
 //   "게임 개발에서 맵+캐릭터+기본기능 요청 시 의도 파악"
 //   3원칙: (1) Always-Off Opt-In, (2) Dry-run 기본 (실행 X), (3) 명시 vs 추론 분리 라벨링
-//   .harness/domain-catalog.json 사용자 편집 가능 + default catalog 5종 (game/web/api/cli/data)
-function _domainCatalogPath(root) { return path.join(root, '.harness', 'domain-catalog.json'); }
+//   .leerness/domain-catalog.json 사용자 편집 가능 + default catalog 5종 (game/web/api/cli/data)
+function _domainCatalogPath(root) { return path.join(root, '.leerness', 'domain-catalog.json'); }
 // 1.9.333 패턴 적용: _DEFAULT_DOMAIN_CATALOG → lib/catalogs.js 로 이동 (순수 데이터, require 사용).
 function _loadDomainCatalog(root) {
   try {
@@ -11669,9 +11718,9 @@ function _inferScopeExpansion(text, root) {
 
 // 1.9.203: 자동 라운드 plan 정리 — 사용자 명시
 //   "백그라운드에 다음 작업이 시작가능한 예상 시간 + 일어났을때 해야하는 일을 정리"
-//   라운드 마무리 시 .harness/auto-resume-plan.json 자동 저장 → 다음 wakeup 시 즉시 실행 가능
+//   라운드 마무리 시 .leerness/auto-resume-plan.json 자동 저장 → 다음 wakeup 시 즉시 실행 가능
 //   plan 구조: { savedAt, nextRoundVersion, expectedFireAt, focus, contextSnapshot, nextActions }
-function _autoResumePlanPath(root) { return path.join(root, '.harness', 'auto-resume-plan.json'); }
+function _autoResumePlanPath(root) { return path.join(root, '.leerness', 'auto-resume-plan.json'); }
 function _loadAutoResumePlan(root) {
   try {
     const fp = _autoResumePlanPath(root);
@@ -11685,7 +11734,7 @@ function _loadAutoResumePlan(root) {
 }
 function _writeAutoResumePlan(root, plan) {
   try {
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     const payload = { savedAt: new Date().toISOString(), ...plan };
     writeUtf8(_autoResumePlanPath(root), JSON.stringify(payload, null, 2));
     return true;
@@ -12237,7 +12286,7 @@ function preWakeAuditCmd(root, sub) {
     audit.findings.info.forEach(f => log(dim(`  - [${f.kind}] ${f.detail}`)));
     log('');
   }
-  log(dim(`  → 저장: .harness/pre-wake-report.json (최근 10개 유지)`));
+  log(dim(`  → 저장: .leerness/pre-wake-report.json (최근 10개 유지)`));
   log(dim(`  → 깨어난 후: leerness pre-wake-audit --last`));
 }
 
@@ -12358,43 +12407,34 @@ function workspaceDirCmd(root, sub) {
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
 
   if (!sub || sub === 'get') {
-    const dirName = _workspaceDirName(root);
-    const dirAbs = _workspaceDirAbs(root);
-    const hasHarness = exists(path.join(root, '.harness'));
-    const hasLeerness = exists(path.join(root, '.leerness'));
-    const migrated = exists(path.join(root, '.leerness', 'MIGRATED_FROM_HARNESS'));
-    // 1.36.126 (T-0107): `migrated: true` 를 그대로 보여 주면 "옮겨졌다" 는 **거짓 인상**을 준다 —
-    //   실제로는 그 뒤 모든 쓰기가 .harness 로 간다. 마커의 의미를 사실대로 옮겨 적는다.
-    const ignored = _workspaceDirAltIgnored(root);
-    // 1.36.126 (검수 P2): 마커가 지워진 사본도 잡되, 남의 `.leerness` 는 건드리지 않는다 —
-    //   두 번째 신호는 **우리 생성물의 서명**(가이드 헤더). audit 과 같은 술어를 쓴다.
-    let ourGuide = false;
-    try { ourGuide = exists(path.join(root, '.leerness', 'WHERE_TO_FIND.md'))
-      && /by leerness \d+\.\d+\.\d+/.test(read(path.join(root, '.leerness', 'WHERE_TO_FIND.md'))); } catch {}
-    const staleCopy = (migrated || ourGuide) && dirName === '.harness';
-    const result = { current: dirName, abs: dirAbs, hasHarness, hasLeerness, migrated,
-      altSupported: WORKSPACE_DIR_ALT_SUPPORTED, ignoredSetting: ignored, staleCopy };
+    const state = inspectWorkspace(root);
+    let dirName = null;
+    let conflict = null;
+    try { dirName = resolveWorkspaceDirName(root); }
+    catch (error) { conflict = { code: error.code, message: error.message }; }
+    const result = {
+      current: dirName,
+      abs: dirName ? path.join(root, dirName) : null,
+      canonical: CANONICAL_WORKSPACE_DIR,
+      legacy: LEGACY_WORKSPACE_DIR,
+      hasCanonical: state.canonical.exists,
+      hasLegacy: state.legacy.exists,
+      migrationNeeded: state.legacy.live && !state.canonical.live,
+      migrated: state.canonical.exists && exists(path.join(state.canonical.abs, 'MIGRATED_FROM_HARNESS')),
+      substrateOnly: state.canonical.substrateOnly,
+      conflict,
+    };
+    if (conflict) process.exitCode = 1;
     if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
-    log(cyan(`# leerness workspace-dir (1.36.126)`));
-    log(`  현재 디렉토리: ${grn(dirName + '/')}  ${dim('(읽기·쓰기가 실제로 일어나는 곳)')}`);
-    log(`  abs: ${dirAbs}`);
-    log(`  .harness 존재: ${hasHarness ? '✓' : '✗'}`);
-    log(`  .leerness 존재: ${hasLeerness ? '✓' : '✗'}`);
-    log(`  .leerness 마커: ${migrated ? '✓' : '✗'}`);
-    log('');
-    if (ignored) {
-      log(yel(`  ⚠ ${ignored.env ? `LEERNESS_WORKSPACE_DIR=${ignored.env}` : '.leerness/MIGRATED_FROM_HARNESS 마커'} 는 이 빌드에서 적용되지 않습니다.`));
-      log(`     실제 저장소는 ${grn(ignored.effective + '/')} 입니다 — 설정을 켜 두어도 동작은 바뀌지 않습니다(T-0107).`);
-    }
-    if (staleCopy) {
-      log('');
-      log(yel(`  ⚠ .leerness/ 는 **죽은 사본**입니다 — 마이그레이션 시점에 멈춰 있고 이후 변경이 반영되지 않습니다.`));
-      log(`     .leerness/WHERE_TO_FIND.md 를 AI 에게 주지 마세요(낡은 상태로 안내합니다).`);
-      log(dim(`     안전하게 지우려면: 내용을 .harness 와 비교해 필요한 것이 없는지 확인한 뒤 직접 삭제하세요.`));
-      log(dim(`     (leerness 는 사용자 데이터를 대신 지우지 않습니다)`));
-    } else if (hasHarness && !hasLeerness) {
-      log(dim(`  → 이 빌드는 .harness 만 사용합니다(디렉터리 이름 변경은 T-0107 이후).`));
-    }
+    log(cyan(`# leerness workspace-dir (${VERSION})`));
+    if (dirName) {
+      log(`  현재 디렉토리: ${grn(dirName + '/')}  ${dim('(읽기·쓰기가 실제로 일어나는 곳)')}`);
+      log(`  abs: ${result.abs}`);
+    } else log(yel(`  ⚠ 작업 디렉터리 충돌: ${conflict.message}`));
+    log(`  canonical ${CANONICAL_WORKSPACE_DIR}/ 존재: ${state.canonical.exists ? '✓' : '✗'}`);
+    log(`  legacy ${LEGACY_WORKSPACE_DIR}/ 존재: ${state.legacy.exists ? '✓' : '✗'}`);
+    if (result.migrationNeeded) log(yel(`  → 마이그레이션 필요: leerness migrate-workspace-dir ${root}`));
+    if (state.canonical.substrateOnly) log(dim(`  → 기존 구조화 state substrate 는 마이그레이션 때 보존됩니다.`));
     return;
   }
 
@@ -12476,8 +12516,8 @@ function parentCmd(root, sub) {
         else cand.forEach(c => log(t(`  • ${c.kind} ← ${c.src}`, `  • ${c.kind} ← ${c.src}`)));
         log('');
         log(yel(t(`  ⚠ DRY-RUN — 실제 적용하려면 \`leerness parent adopt --apply\` (사용자 명시 결정).`, `  ⚠ DRY-RUN — to apply, run \`leerness parent adopt --apply\` (explicit user decision).`)));
-        log(dim(t(`    적용해도 자식 design-system.md 는 변경하지 않고, .harness/inherited-from-parent.md 에 '참조'로만 기록(비파괴).`,
-                  `    even on apply, your design-system.md is NOT modified — parent assets are recorded as reference in .harness/inherited-from-parent.md.`)));
+        log(dim(t(`    적용해도 자식 design-system.md 는 변경하지 않고, .leerness/inherited-from-parent.md 에 '참조'로만 기록(비파괴).`,
+                  `    even on apply, your design-system.md is NOT modified — parent assets are recorded as reference in .leerness/inherited-from-parent.md.`)));
       }
       return;
     }
@@ -12522,7 +12562,7 @@ function parentCmd(root, sub) {
   return failJson(has('--json'), 'unknown_subcommand', `알 수 없는 parent 하위명령: ${sub} — leerness parent [detect|adopt] [--select <kinds>] [--apply] [--json]`);  // 1.32.1 (15th리뷰 C2)
 }
 
-// 1.9.211: leerness migrate-workspace-dir — .harness → .leerness 마이그레이션 (사용자 명시)
+// 1.9.211/1.36.162: leerness migrate-workspace-dir — legacy → canonical .leerness 트랜잭션 마이그레이션.
 function migrateWorkspaceDirCmd(root) {
   root = absRoot(root);
   const isTty = process.stdout && process.stdout.isTTY;
@@ -12537,59 +12577,27 @@ function migrateWorkspaceDirCmd(root) {
   const report = _migrateWorkspaceDir(root, { dryRun, force });
 
   if (has('--json')) { log(JSON.stringify(report, null, 2)); if (report.blocked) process.exitCode = 1; return; }
-  // 1.36.126: 못 하는 일을 했다고 말하지 않는다 — 사유와 **실측 근거**를 함께 준다.
+  log(cyan(`# leerness migrate-workspace-dir (${VERSION})${dryRun ? ' [DRY-RUN]' : ''}`));
+  log(`  src: ${report.src}  ${report.srcExists ? '✓' : red('✗ 없음')}`);
+  log(`  dst: ${report.dst}  ${report.dstExists ? yel('⚠ merge') : '(생성)'}`);
   if (report.blocked) {
-    const m = report.measured || {};
-    log(cyan(`# leerness migrate-workspace-dir (1.36.126)`));
     log('');
-    log(red(`  ✗ 이 빌드는 .leerness 로 옮길 수 없습니다 — 복사만 하면 죽은 사본이 됩니다.`));
-    log('');
-    if (m.hardcodedPathSites != null) {
-      log(`  왜: leerness 내부에서 워크스페이스 경로를 만드는 곳 ${m.hardcodedPathSites}곳이 '.harness' 를 그대로 쓰고,`);
-      log(`      경로 해석기를 거치는 곳은 ${m.resolverConsumers}곳뿐입니다(안내 문구 ${m.hardcodedTextMentions}곳은 별도).`);
-    } else {
-      log(`  왜: leerness 내부 대부분이 '.harness' 경로를 그대로 쓰고 있어, 복사해도 그쪽으로는 아무것도 쓰이지 않습니다.`);
-      log(`      (이 실행에서는 소스를 세지 못해 정확한 수를 대지 못합니다 — 판정 자체는 바뀌지 않습니다.)`);
-    }
-    log(`      그래서 복사한 뒤에도 모든 쓰기는 .harness 로 갑니다 — .leerness 는 복사 시점에 멈춘 사본이 되고,`);
-    log(`      함께 만들어지던 WHERE_TO_FIND.md 가 AI 를 그 낡은 상태로 안내합니다.`);
-    log('');
-    log(dim(`  지금 할 수 있는 것: 그대로 .harness 를 쓰시면 됩니다(기능 차이 없음 — 디렉터리 이름만 다릅니다).`));
-    log(dim(`  진행 상황: 이 제약은 T-0107 로 등록돼 있습니다 — 해결되면 이 명령이 다시 동작합니다.`));
+    log(red(`  ✗ 마이그레이션 차단: ${report.blockedReason}`));
+    for (const error of report.errors || []) log(red(`    - ${error}`));
+    if ((report.conflicts || []).length) log(dim(`    충돌: ${report.conflicts.join(', ')}`));
+    log(dim(`  두 디렉터리가 모두 live 상태라면 내용을 합의한 뒤 --force 를 명시하세요. 원본과 덮어쓴 파일은 archive 에 백업됩니다.`));
     process.exitCode = 1;
     return;
   }
-  log(cyan(`# leerness migrate-workspace-dir (1.9.211)${dryRun ? ' [DRY-RUN]' : ''}`));
-  log(`  src: ${report.src}  ${report.srcExists ? '✓' : red('✗ 없음')}`);
-  log(`  dst: ${report.dst}  ${report.dstExists ? yel('⚠ 이미 존재') : '(생성)'}`);
   log('');
-  log(`  📊 copied: ${grn(report.copiedFiles.length)}, skipped: ${report.skippedFiles.length}, errors: ${report.errors.length}`);
-  if (report.copiedFiles.length > 0 && report.copiedFiles.length <= 30) {
-    log('');
-    log(`  복사된 파일:`);
-    report.copiedFiles.slice(0, 20).forEach(f => log(dim(`    + ${f}`)));
-    if (report.copiedFiles.length > 20) log(dim(`    ... +${report.copiedFiles.length - 20}건`));
-  } else if (report.copiedFiles.length > 30) {
-    log(dim(`    (${report.copiedFiles.length}개 — 상세는 --json)`));
-  }
-  if (report.skippedFiles.length > 0) {
-    log('');
-    log(yel(`  스킵된 파일 (이미 존재, --force 로 덮어쓰기 가능):`));
-    report.skippedFiles.slice(0, 5).forEach(f => log(dim(`    - ${f}`)));
-    if (report.skippedFiles.length > 5) log(dim(`    ... +${report.skippedFiles.length - 5}건`));
-  }
-  if (report.errors.length > 0) {
-    log('');
-    log(red(`  ⚠ 에러:`));
-    report.errors.forEach(e => log(red(`    - ${e}`)));
-  }
-  log('');
-  if (!dryRun && report.copiedFiles.length > 0) {
-    log(grn(`✓ 마이그레이션 완료 — .leerness/WHERE_TO_FIND.md + MIGRATED_FROM_HARNESS 마커 생성`));
-    log(dim(`  → 다음 handoff부터 .leerness 우선 사용`));
-    log(dim(`  → .harness/MIGRATED_TO_LEERNESS.md 안내 추가됨 (backward compat 보존)`));
+  log(`  📊 copy ${grn(report.copiedFiles.length)} · identical ${report.skippedFiles.length} · remap ${report.mappedFiles.length} · overwrite ${report.overwrittenFiles.length}`);
+  if (report.alreadyCanonical) {
+    log(grn(`✓ 이미 canonical ${CANONICAL_WORKSPACE_DIR}/ 를 사용 중입니다.`));
   } else if (dryRun) {
-    log(yel(`  (dry-run — 실제 변경 없음. 실행: leerness migrate-workspace-dir)`));
+    log(yel(`  (dry-run — 실제 변경 없음)`));
+  } else if (report.migrated) {
+    log(grn(`✓ 마이그레이션 완료 — 모든 후속 읽기/쓰기는 ${CANONICAL_WORKSPACE_DIR}/ 만 사용합니다.`));
+    log(dim(`  legacy backup: ${report.backupDir}`));
   }
 }
 
@@ -12618,7 +12626,7 @@ function _runIdempotencyAudit(root) {
       if (seen.has(key)) {
         audit.violations.push({
           kind: 'rule-duplicate',
-          location: '.harness/rules.md',
+          location: '.leerness/rules.md',
           detail: `중복 룰: ${r.id} == ${seen.get(key)} (${r.trigger}: ${r.rule.slice(0, 60)})`,
           severity: 'medium',
           fix: `leerness rule remove ${r.id}`
@@ -12635,7 +12643,7 @@ function _runIdempotencyAudit(root) {
   // 2) progress-tracker.md 중복 request 검사
   //    포맷: | T-XXXX | status | request | evidence | nextAction | date |
   try {
-    const pt = path.join(root, '.harness', 'progress-tracker.md');
+    const pt = path.join(root, '.leerness', 'progress-tracker.md');
     if (exists(pt)) {
       const content = read(pt);
       const lines = content.split(/\r?\n/);
@@ -12654,7 +12662,7 @@ function _runIdempotencyAudit(root) {
           const prev = requests.get(text);
           audit.violations.push({
             kind: 'task-duplicate-request',
-            location: '.harness/progress-tracker.md',
+            location: '.leerness/progress-tracker.md',
             detail: `중복 request: "${text.slice(0, 50)}…" (${prev.id} & ${id})`,
             severity: 'medium',
             fix: `중복 task 중 하나를 leerness task drop <id> 처리`
@@ -12679,7 +12687,7 @@ function _runIdempotencyAudit(root) {
       if (seen.has(k)) {
         audit.violations.push({
           kind: 'user-request-duplicate',
-          location: '.harness/user-requests.json',
+          location: '.leerness/user-requests.json',
           detail: `중복 open 요청: ${r.id} == ${seen.get(k)} ("${k.slice(0, 50)}…")`,
           severity: 'low',
           fix: `leerness requests drop ${r.id}`
@@ -12702,7 +12710,7 @@ function _runIdempotencyAudit(root) {
       if (seenT.has(w.expectedFireAt)) {
         audit.violations.push({
           kind: 'wakeup-duplicate',
-          location: '.harness/active-wakeups.json',
+          location: '.leerness/active-wakeups.json',
           detail: `동일 expectedFireAt 중복: ${w.expectedFireAt}`,
           severity: 'high',
           fix: `leerness 자동 _recordWakeup filter dedup 검토 필요`
@@ -12734,7 +12742,7 @@ function _autoFixIdempotency(root) {
   const fixed = [];
   // 1) progress-tracker.md task 중복
   try {
-    const pt = path.join(root, '.harness', 'progress-tracker.md');
+    const pt = path.join(root, '.leerness', 'progress-tracker.md');
     if (exists(pt)) {
       // 1.36.130 (P2-a, 실측 3/3 유실): 이 구획은 **락 없이** 읽고 다시 썼다 — 그 사이에 착지한
       //   동시 `task add` 의 행이 통째로 사라졌고 양쪽 모두 exit 0 이었다(조용한 유실).
@@ -12978,16 +12986,16 @@ function intentCmd(root, sub, ...rest) {
 // 1.36.129 (UR-0068 / P-0016 P1): 세션 프레즌스 — 같은 프로젝트를 만지는 다른 AI 세션을 **알아채게** 한다.
 //   판정 로직은 전부 lib/session-presence.js(순수)에 있고, 여기는 IO 심(락·쓰기·프루닝)만 담는다.
 //
-//   저장 위치가 `.harness/cache/sessions/` 인 이유(실측):
-//     · `.gitignore` 의 `.harness/cache/` 는 **이미 존재**하고 `init` 의 라인 병합에도 들어 있어
-//       **기존 설치본까지 전부 이미 무시 중**이다. `.harness/sessions/` 는 그 목록에 없어서, 그 경로를 쓰면
+//   저장 위치가 `.leerness/cache/sessions/` 인 이유(실측):
+//     · `.gitignore` 의 `.leerness/cache/` 는 **이미 존재**하고 `init` 의 라인 병합에도 들어 있어
+//       **기존 설치본까지 전부 이미 무시 중**이다. `.leerness/sessions/` 는 그 목록에 없어서, 그 경로를 쓰면
 //       업그레이드하지 않은 설치본이 세션 파일을 **커밋**하게 된다(머지 충돌 + 호스트/시각이 git 이력에 박힘).
 //     · 프레즌스는 파생 휘발 상태이지 사용자 데이터가 아니다 — `cache/` 가 그 의미의 기존 자리다.
 //
 //   쓰기 지점은 **정확히 두 곳**(handoff · session close)이다. "모든 CLI 호출마다 갱신" 은 채택하지 않았다:
 //     실측 — `leerness selftest` 1회가 leerness 프로세스 **129개**를 띄우고 그중 68개가 cwd 로 귀속된다.
 //     handoff 는 이미 `_recordLastHandoff` 로 쓰고 있어, 같은 게이트에 얹으면 **새 쓰기 표면이 0** 이다.
-const _SESSION_STORE_REL = ['.harness', 'cache', 'sessions'];
+const _SESSION_STORE_REL = ['.leerness', 'cache', 'sessions'];
 const SESSION_FILE_RE = /^[A-Za-z0-9_-]{8,64}\.json$/;
 function _sessionStoreDir(root) { return path.join(absRoot(root), ..._SESSION_STORE_REL); }
 //   ⚠ (검수 P1) 무염 SHA-256 은 되돌릴 수 없는 값이 아니다 — `DESKTOP-<이름>` 같은 저엔트로피 hostname 은
@@ -13039,7 +13047,7 @@ function _sessionPresenceRecord(root, phase) {
   const SP = require('../lib/session-presence');
   try {
     root = absRoot(root);
-    const hasHarness = exists(path.join(root, '.harness'));
+    const hasHarness = exists(path.join(root, '.leerness'));
     const reason = SP.suppressionReason(process.env, hasHarness);
     if (reason) return { written: false, reason };
     const key = SP.deriveSessionKey(process.env);
@@ -13190,7 +13198,7 @@ function _sessionSignal(root, opts = {}) {
     storeError: snap.storeError || null,
     selfRegistered: !!mine,
     selfAddressed: !!selfKey,                                 // 주소는 있다(등록됐다와 다르다)
-    selfSuppressedReason: SP.suppressionReason(process.env, exists(path.join(root, '.harness'))) || (selfKey ? null : 'not-identifiable'),
+    selfSuppressedReason: SP.suppressionReason(process.env, exists(path.join(root, '.leerness'))) || (selfKey ? null : 'not-identifiable'),
     unreadableRecords: snap.unreadable || 0,
     //   못 보는 것을 함께 적는다 — "0건" 이 '아무도 없다' 로 읽히면 그건 과대주장이다.
     //   1.36.132 (검수 P3): codex 는 이제 주소가 있다 — 사람 표면과 기계 표면이 같은 사실을 말해야 한다.
@@ -13217,12 +13225,12 @@ function _sessionSignalFlags(ss) {
   if (ss.invalidExplicitKey) out.push(`⚠ LEERNESS_SESSION_ID 형식 오류("${ss.invalidExplicitKey}") — 무시됨`);
   return out;
 }
-// 1.36.132 (UR-0069): `.harness/agent-reminders.md` 는 leerness 안의 유일한 "에이전트에게 보내는 메시지" 파일인데
+// 1.36.132 (UR-0069): `.leerness/agent-reminders.md` 는 leerness 안의 유일한 "에이전트에게 보내는 메시지" 파일인데
 //   **읽는 배선이 없었다** — 실측: handoff 200줄에 0건, `hook session-start` 319바이트에 0건, 현재 관리 문서 지시 0건
 //   (아카이브 README 에만 남아 있다). 파일 자신이 "사용자가 이 파일을 보고 메인 에이전트에 전달 가능" 이라고 적어
 //   배달을 사람에게 떠넘긴다. drift critical 때 만들어 놓고 아무도 보여주지 않으면 그것은 기능이 아니라 침묵이다.
 function _agentReminderSignal(root) {
-  const p = path.join(root, '.harness', 'agent-reminders.md');
+  const p = path.join(root, '.leerness', 'agent-reminders.md');
   if (!exists(p)) return null;
   //   1.36.132 (검수 P2): 통째로 읽으면 커진 파일에서 복제·분할 비용이 그대로 터진다(64MiB 에서 2.16초 실측).
   //   헤드라인에 쓰는 것은 앞 몇 줄뿐이니 앞부분만 읽는다. 줄 수는 '읽은 범위 기준' 이라고 표시한다.
@@ -13258,12 +13266,12 @@ function sessionsCmd(root) {
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   const selfKey = SP.deriveSessionKey(process.env);
   // 1.36.132 (검수): **조회 명령이 남의 디렉토리에 파일을 만들었다** — 빈 디렉토리에 `sessions --json` 1회로
-  //   .harness/ · cache/ · sessions/ · .host-salt 4개 생성(exit 0). 읽기는 읽기여야 한다.
+  //   .leerness/ · cache/ · sessions/ · .host-salt 4개 생성(exit 0). 읽기는 읽기여야 한다.
   //   염이 없으면 hostId 를 모른다 → hostRelation 이 이미 3상태라 'unknown' 으로 정직하게 답한다.
   const selfHost = _sessionHostIdIfPresent(root);
   const _scan = _readSessionEntries(root);
   const recs = _scan.entries.map(e => e.record).sort((a, b) => (Date.parse(b.lastHandoffAt || b.openedAt || '') || 0) - (Date.parse(a.lastHandoffAt || a.openedAt || '') || 0));
-  const suppressed = SP.suppressionReason(process.env, exists(path.join(root, '.harness')));
+  const suppressed = SP.suppressionReason(process.env, exists(path.join(root, '.leerness')));
   //   ⚠ (검수 P1) `selfRegistered` 가 "지금 환경이 등록 가능한가" 를 뜻하고 있었다 — 그건 **등록 여부가 아니다**.
   //     아직 handoff 안 한 새 프로젝트에서 true 가 나오고, 레코드가 있는데 opt-out 으로 읽으면 false 가 나왔다.
   //     실제 레코드 유무로 답하고, '왜 지금은 등록이 안 되는가' 는 **따로** 말한다.
@@ -13360,8 +13368,8 @@ function sessionsCmd(root) {
   log(dim(t('  이 목록이 보지 못하는 것:', '  what this list cannot see:')));
   for (const b of blindSpots) log(dim(`   · ${b}`));
 }
-function _lastHandoffPath(root) { return path.join(root, '.harness', 'last-handoff.json'); }
-const _HANDOFF_FRESHNESS_REL = ['.harness', 'cache', 'handoffs'];
+function _lastHandoffPath(root) { return path.join(root, '.leerness', 'last-handoff.json'); }
+const _HANDOFF_FRESHNESS_REL = ['.leerness', 'cache', 'handoffs'];
 const HANDOFF_FRESHNESS_RE = /^[A-Za-z0-9_-]{8,64}\.json$/;
 function _handoffFreshnessDir(root) { return path.join(absRoot(root), ..._HANDOFF_FRESHNESS_REL); }
 function _handoffFreshnessKey() {
@@ -13380,7 +13388,7 @@ function _handoffFreshnessPath(root, key) {
 function _recordHandoffFreshness(root) {
   try {
     root = absRoot(root);
-    if (!exists(path.join(root, '.harness'))) return { written: false, reason: 'not-a-leerness-project' };
+    if (!exists(path.join(root, '.leerness'))) return { written: false, reason: 'not-a-leerness-project' };
     const key = _handoffFreshnessKey();
     const dir = _handoffFreshnessDir(root);
     const fp = _handoffFreshnessPath(root, key);
@@ -13429,7 +13437,7 @@ function _latestHandoffFreshness(root) {
 }
 function _recordLastHandoff(root) {
   try {
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     const fp = _lastHandoffPath(root);
     _withLock(fp, () => {
       let history = [];
@@ -13477,7 +13485,7 @@ function _getLastHandoffGap(root) {
 }
 function _handoffVersionSkew(root) {
   try {
-    const versionFile = path.join(absRoot(root), '.harness', 'HARNESS_VERSION');
+    const versionFile = path.join(absRoot(root), '.leerness', 'HARNESS_VERSION');
     if (!exists(versionFile)) return null;
     const parsed = parseHarnessVersion(read(versionFile));
     const harnessVersion = parsed.plus || parsed.base;
@@ -13561,10 +13569,10 @@ function _loadMultiAgentConsensusHistory(root, keyword) {
 }
 
 // 1.9.201: E축 (게으름 방지) 9.5→10 보강 — next-action queue 자동 저장 + take 명령
-//   handoff 가 제안한 next-action top 항목을 .harness/next-action-queue.json 에 저장 →
+//   handoff 가 제안한 next-action top 항목을 .leerness/next-action-queue.json 에 저장 →
 //   `leerness next-action take` 호출 시 큐에서 pop + leerness task add 자동 실행 →
 //   AI/사용자가 직접 추적/타이핑 없이 1-step 으로 task 진입
-function _nextActionQueuePath(root) { return path.join(root, '.harness', 'next-action-queue.json'); }
+function _nextActionQueuePath(root) { return path.join(root, '.leerness', 'next-action-queue.json'); }
 function _loadNextActionQueue(root) {
   try {
     const fp = _nextActionQueuePath(root);
@@ -13575,7 +13583,7 @@ function _loadNextActionQueue(root) {
 }
 function _writeNextActionQueue(root, queue) {
   try {
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     _assertStoreParsable(_nextActionQueuePath(root), 'next-action-queue');   // 1.36.114: 손상 스토어 덮어쓰기 거부
     writeUtf8(_nextActionQueuePath(root), JSON.stringify({ queue, at: new Date().toISOString() }, null, 2));
     return true;
@@ -13807,9 +13815,9 @@ function _autoInstallQueryFromHandoff(root) {
 // 1.9.192: 공식 organization skill catalog 24h 캐시 — C축 (공식 표준 스킬 자동 활용) 보강
 //   사용자 명시 (1.9.191): "공식 표준화된 스킬을 적재적소로 자동 활용 ... 게으름 방지등등 최고의 도구"
 //   handoff 마다 GitHub Contents API 호출하지 않도록 24h TTL → offline / rate-limit 회피
-//   캐시 위치: .harness/skill-auto-cache.json (체크인 가능 — 비시크릿)
+//   캐시 위치: .leerness/skill-auto-cache.json (체크인 가능 — 비시크릿)
 const _OFFICIAL_SKILL_CACHE_TTL_MS = 24 * 3600 * 1000;
-function _officialSkillCachePath(root) { return path.join(root, '.harness', 'skill-auto-cache.json'); }
+function _officialSkillCachePath(root) { return path.join(root, '.leerness', 'skill-auto-cache.json'); }
 function _loadOfficialSkillCache(root) {
   try {
     const fp = _officialSkillCachePath(root);
@@ -13822,7 +13830,7 @@ function _loadOfficialSkillCache(root) {
 }
 function _writeOfficialSkillCache(root, entries, presets) {
   try {
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     writeUtf8(_officialSkillCachePath(root), JSON.stringify({ at: new Date().toISOString(), presets, entries }, null, 2));
     return true;
   } catch { return false; }
@@ -13872,7 +13880,7 @@ function skillExportCmd(root, id) {
   if (!data) { fail(`skill 없음: ${id}`); return process.exit(1); }
   const description = data.description || data.displayNameKo || (data.capabilities && data.capabilities[0]) || id;   // 1.36.25 (P0): 트리거 서술 description 이 있으면 displayNameKo("~스킬")보다 우선 — 종전 순서는 좋은 description 을 무시했다
   const body = `---\nname: ${id}\ndescription: ${description.slice(0, 200)}\n---\n\n# ${data.displayNameKo || id}\n\n## Capabilities\n${(data.capabilities || []).map(c => '- ' + c).join('\n') || '-'}\n\n## Sources\n${(data.sources || []).map(s => '- ' + (s.url || s)).join('\n') || '-'}\n\n## Patterns\n${(data.patterns || []).map(p => `- \`${p.command}\` — ${p.note || ''}`).join('\n') || '-'}\n`;
-  const outDir = arg('--out', path.join(root, '.harness', 'skills-export', id));
+  const outDir = arg('--out', path.join(root, '.leerness', 'skills-export', id));
   mkdirp(outDir);
   const outPath = path.join(outDir, 'SKILL.md');
   writeUtf8(outPath, body);
@@ -13881,15 +13889,15 @@ function skillExportCmd(root, id) {
   log(`💡 공유 가능 — 다른 도구가 \`leerness skill install ${outPath}\` 또는 URL로 import`);
 }
 
-const planPath = root => path.join(root, '.harness/plan.md');
-const progressPath = root => path.join(root, '.harness/progress-tracker.md');
-const taskLogPath = root => path.join(root, '.harness/task-log.md');
-const evidencePath = root => path.join(root, '.harness/review-evidence.md');
-const handoffPath = root => path.join(root, '.harness/session-handoff.md');
-const currentStatePath = root => path.join(root, '.harness/current-state.md');
-const decisionsPath = root => path.join(root, '.harness/decisions.md');
+const planPath = root => path.join(root, '.leerness/plan.md');
+const progressPath = root => path.join(root, '.leerness/progress-tracker.md');
+const taskLogPath = root => path.join(root, '.leerness/task-log.md');
+const evidencePath = root => path.join(root, '.leerness/review-evidence.md');
+const handoffPath = root => path.join(root, '.leerness/session-handoff.md');
+const currentStatePath = root => path.join(root, '.leerness/current-state.md');
+const decisionsPath = root => path.join(root, '.leerness/decisions.md');
 // 1.9.339 (UR-0053): decisions canonical = JSON, decisions.md 는 projection.
-const decisionsJsonPath = root => path.join(root, '.harness/decisions.json');
+const decisionsJsonPath = root => path.join(root, '.leerness/decisions.json');
 // canonical 로더 — decisions.json(우선) → decisions.md 파싱 fallback. 읽기 안전(부작용 없음). audit/health/context/MCP 단일 진실소스.
 function _loadDecisions(root) {
   const jp = decisionsJsonPath(root);
@@ -13903,15 +13911,15 @@ function _loadDecisions(root) {
 function _saveDecisions(root, decisions) {
   const arr = Array.isArray(decisions) ? decisions : [];
   // 1.36.114 (스토어 전수 대조에서 발견): 손상된 decisions.json 을 빈 배열로 오인해 덮어써 **영구 기억이 사라졌다**.
-  //   표적 사냥(creds 등)으로는 못 봤고, .harness 아래 JSON 스토어를 **열거해 하나씩 손상시키는** 전수 스윕이 잡았다.
+  //   표적 사냥(creds 등)으로는 못 봤고, .leerness 아래 JSON 스토어를 **열거해 하나씩 손상시키는** 전수 스윕이 잡았다.
   _assertStoreParsable(decisionsJsonPath(root), 'decisions');
   mkdirp(path.dirname(decisionsJsonPath(root)));
   writeUtf8(decisionsJsonPath(root), JSON.stringify(arr, null, 2) + '\n');
   writeUtf8(decisionsPath(root), _renderDecisionsMd(arr));
 }
 // 1.9.371 (UR-0073 Phase A): agent team 정의 레지스트리 — canonical JSON(teams.json) 주 + teams.md projection. opt-in · 정의 전용(자동 실행 X).
-const teamsJsonPath = root => path.join(root, '.harness/teams.json');
-const teamsPath = root => path.join(root, '.harness/teams.md');
+const teamsJsonPath = root => path.join(root, '.leerness/teams.json');
+const teamsPath = root => path.join(root, '.leerness/teams.md');
 // 1.36.78 (10차 헌트 F1): teams.json 이 "파싱은 되지만 형상 무효"(객체 루트 {teams:[...]}/항목 비객체/id 없음)일 때
 //   종전엔 조용히 []로 coerce → list 는 count:0(무경고), 이어지는 add 가 배열을 써서 원본을 통째로 덮었다(데이터 손실).
 //   previews/state 와 동일 규율: 로더가 invalid 를 함께 반환하고 변경 진입점은 거부. 유효 항목은 members/personas 를 배열로 정규화(string→[]).
@@ -13945,8 +13953,8 @@ const _tech = require('../lib/tech-profile');  // 1.36.53 (UR-0062): 기술 프�
 function teamCmd(root, sub, id, opts = {}) { return _team.teamCmd(root, sub, id, opts, { VERSION, _loadTeams, _loadTeamsChecked, _saveTeams, _detectShellCtx, arg, has, _withLock, failJson }); }   // 1.36.31: add 경합 락 · 1.36.78: 형상무효 가드 + failJson
 
 // 1.9.112: 전용 lessons.md (Memory Write Surface 5번째)
-const lessonsPath = root => path.join(root, '.harness/lessons.md');
-const lessonsJsonPath = root => path.join(root, '.harness/lessons.json');
+const lessonsPath = root => path.join(root, '.leerness/lessons.md');
+const lessonsJsonPath = root => path.join(root, '.leerness/lessons.json');
 function _loadLessons(root) {
   const jp = lessonsJsonPath(root);
   if (exists(jp)) {
@@ -14010,7 +14018,7 @@ function progressHeader(root) {
   //   세션마다 중복 누적의 원인이었음. 정식 헤더를 재구성해 반환 → 다음 write 시 자동 복구.
   if (idx < 0) {
     // 1.36.63 (검수 #1): 손상 헤더 복구도 프로젝트 언어로 — en 프로젝트가 ko frontmatter 로 회귀하지 않게
-    let _phLang = 'ko'; try { _phLang = read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch {}
+    let _phLang = 'ko'; try { _phLang = read(path.join(root, '.leerness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch {}
     return _canonicalProgressHeader(_phLang);
   }
   return text.slice(0, text.indexOf('\n', idx)).trimEnd();
@@ -14034,7 +14042,7 @@ function writeProgressRows(root, header, rows, opts = {}) {
       }
       if (_parsable < _shaped) {
         const _msg = `progress-tracker.md 행 손실 위험 — 행-모양 ${_shaped}건 중 ${_parsable}건만 파싱 가능(셀 부족/형식 이상). ` +
-          `쓰면 나머지 ${_shaped - _parsable}행이 사라지므로 중단합니다(데이터 보호): ${progressPath(root)} 의 해당 행을 6칸으로 고치거나 .harness/archive 백업 복원 후 재시도`;
+          `쓰면 나머지 ${_shaped - _parsable}행이 사라지므로 중단합니다(데이터 보호): ${progressPath(root)} 의 해당 행을 6칸으로 고치거나 .leerness/archive 백업 복원 후 재시도`;
         throw Object.assign(new Error(_msg), { code: 'E_PROGRESS_ROW_LOSS' });
       }
       const _expect = Number.isInteger(opts.expectedShrink) ? Math.max(0, opts.expectedShrink) : 0;
@@ -14223,7 +14231,7 @@ function planDrop(root, text) {
   });
   // 1.9.449 (12th 외부평가 Sonnet P3, UR-0143): progress-tracker 에 dropped task(T-) 행 생성 제거 — plan drop 은 plan.md "Out of Scope / Dropped"(D-) 에만 기록.
   //   기존엔 scope 드랍이 phantom T- task 로도 생겨 plan↔progress 역할 혼선 + task list 노이즈. 드랍 기록의 단일 출처 = plan.md.
-  ok(`plan dropped: ${id} → .harness/plan.md (Out of Scope / Dropped)`);
+  ok(`plan dropped: ${id} → .leerness/plan.md (Out of Scope / Dropped)`);
 }
 function planProgress(root, opts = {}) {
   // 1.9.447 (12th 외부평가 Codex P3, UR-0145): 읽기 전용 진행 요약 — 완료율%+상태별+마일스톤 수. --json 지원.
@@ -14246,7 +14254,7 @@ function planProgress(root, opts = {}) {
 //   Memory Surface DELETE 5종 완전 완성 (task drop / decision drop / lesson drop / rule remove / plan remove)
 function planRemoveCmd(root, target) {
   root = absRoot(root);
-  if (!target) return fail('plan remove <M-XXXX|title-substring> 필요 — 매칭되는 milestone 블록을 제거하고 .harness/plan.archive.md에 보존');
+  if (!target) return fail('plan remove <M-XXXX|title-substring> 필요 — 매칭되는 milestone 블록을 제거하고 .leerness/plan.archive.md에 보존');
   const pp = planPath(root);
   if (!exists(pp)) return fail('plan.md 없음');
   let removed = 0;
@@ -14278,7 +14286,7 @@ function planRemoveCmd(root, target) {
       const isTitleTarget = title.includes(target);
       if (isIdTarget || isTitleTarget) {
         removed++;
-        const archivePath = path.join(root, '.harness/plan.archive.md');
+        const archivePath = path.join(root, '.leerness/plan.archive.md');
         const archiveHeader = exists(archivePath) ? '' : '# Plan archive\n\n';
         append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${target}")\n${b}\n`);
         continue;
@@ -14290,7 +14298,7 @@ function planRemoveCmd(root, target) {
   });
   if (disappeared) return fail('plan.md 없음');
   if (removed === 0) return failJson(has('--json'), 'milestone_not_found', `매칭 milestone 없음: "${target}"`);   // codex P2: --json 에러 구조화
-  ok(`milestone removed: ${removed}건 (보존: .harness/plan.archive.md)`);
+  ok(`milestone removed: ${removed}건 (보존: .leerness/plan.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
 function planSync(root) { append(taskLogPath(root), `\n## ${today()}\n- Synced plan.md and progress-tracker.md.\n`); ok('plan/progress sync noted'); }
@@ -14344,12 +14352,12 @@ function _validateChoice(value, validSet, label) {
 }
 // 1.9.311 (UR-0047, 설치리뷰 3중수렴): init 가드 — 미초기화 디렉토리에서 write 차단.
 //   이전: 미초기화 폴더에서 task/plan/decision/rule/lesson add·brief set·state start 가
-//   부분 .harness(progress-tracker/cache/runs)만 생성 → init 없는 반쪽 상태로 banner/handoff/doctor 혼란.
+//   부분 .leerness(progress-tracker/cache/runs)만 생성 → init 없는 반쪽 상태로 banner/handoff/doctor 혼란.
 //   판별: 워크스페이스 강마커(HARNESS_VERSION/guideline.md) 또는 AGENTS.md 중 하나라도 있으면 초기화로 간주(레거시/마이그레이션 호환, fail-open).
-//   주의: state(.leerness substrate)는 standalone 설계라 가드 대상 아님 — .harness write 진입점만 가드.
+//   주의: state(.leerness substrate)는 standalone 설계라 가드 대상 아님 — .leerness write 진입점만 가드.
 function _isInitialized(root) {
   root = absRoot(root);
-  const ws = _workspaceDirAbs(root);  // .harness(기본) 또는 마이그레이션된 .leerness
+  const ws = _workspaceDirAbs(root);  // 신규·마이그레이션 프로젝트 모두 canonical .leerness
   return exists(path.join(ws, 'HARNESS_VERSION'))
       || exists(path.join(ws, 'guideline.md'))
       || exists(path.join(root, 'AGENTS.md'));
@@ -14369,7 +14377,7 @@ function taskAdd(root, text) {
   // progress-tracker.md 포맷: | T-XXXX | status | request | evidence | nextAction | date |
   if (!has('--force') && text && text.trim()) {
     try {
-      const pt = path.join(absRoot(root), '.harness', 'progress-tracker.md');
+      const pt = path.join(absRoot(root), '.leerness', 'progress-tracker.md');
       if (exists(pt)) {
         const content = read(pt);
         const norm = text.trim();
@@ -14550,7 +14558,7 @@ function memoryStatusCmd(root, opts = {}) {
   // 1.9.130: DELETE 5종 archive entry counts
   const archiveCounts = { decisions: 0, lessons: 0, plan: 0, total: 0 };
   try {
-    const hd = path.join(root, '.harness');
+    const hd = path.join(root, '.leerness');
     for (const [key, file] of [['decisions', 'decisions.archive.md'], ['lessons', 'lessons.archive.md'], ['plan', 'plan.archive.md']]) {
       const fp = path.join(hd, file);
       if (exists(fp)) {
@@ -14591,7 +14599,7 @@ function memoryStatusCmd(root, opts = {}) {
 }
 
 // 1.9.127: memory archive list — DELETE 5종 archive 파일 통합 조회
-//   .harness/decisions.archive.md / lessons.archive.md / plan.archive.md 의 "## 제거 YYYY-MM-DD" 블록 파싱
+//   .leerness/decisions.archive.md / lessons.archive.md / plan.archive.md 의 "## 제거 YYYY-MM-DD" 블록 파싱
 //   --surface decisions|lessons|plan 필터, --json 옵션
 // 1.9.370 (UR-0025): _parseArchiveBlocks → lib/pure-utils (순수 파서).
 function memoryArchiveListCmd(root, opts = {}) {
@@ -14601,7 +14609,7 @@ function memoryArchiveListCmd(root, opts = {}) {
   // 1.9.138: --query 키워드 필터 (target / originalHeader 매칭, case-insensitive)
   const queryFilter = arg('--query', '');
   const queryRe = queryFilter ? new RegExp(queryFilter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
-  const hd = path.join(root, '.harness');
+  const hd = path.join(root, '.leerness');
   const archives = {
     decisions: { path: path.join(hd, 'decisions.archive.md'), entries: [] },
     lessons:   { path: path.join(hd, 'lessons.archive.md'),   entries: [] },
@@ -14676,7 +14684,7 @@ function memoryRestoreCmd(root, surface, target) {
     return fail('memory restore <decisions|lessons|plan> <target> 필요 (target: date YYYY-MM-DD 또는 substring)');
   }
   if (!target) return fail('memory restore <surface> <target> — target 누락');
-  const hd = path.join(root, '.harness');
+  const hd = path.join(root, '.leerness');
   const archivePath = path.join(hd, `${surface}.archive.md`);
   const activePath = surface === 'decisions' ? decisionsPath(root)
                     : surface === 'lessons'   ? lessonsPath(root)
@@ -14826,11 +14834,11 @@ function lessonListCmd(root, opts = {}) {
 function lessonDropCmd(root, target) {
   root = absRoot(root);
   // 1.36.140 (재검수 P3): 락/쓰기 헬퍼가 부모를 만들기 때문에, 오타 난 `--path` 로 실패하면서도
-  //   그 경로와 `.harness/` 를 만들었다(1.36.139 는 안 만들었다 — 대조군). 없으면 아무것도 만들지 않는다.
+  //   그 경로와 `.leerness/` 를 만들었다(1.36.139 는 안 만들었다 — 대조군). 없으면 아무것도 만들지 않는다.
   if (!exists(root)) return failJson(has('--json'), 'path_not_found', `경로가 없습니다: ${root} — 디렉토리를 새로 만들지 않았습니다`);
   if (!target) return fail('lesson drop <date|text-substring> 필요. 예: leerness lesson drop "2026-05-20" 또는 leerness lesson drop "JWT"');
   // archive 보존 — lessons.archive.md 에 projection MD 블록 형태로 추가
-  const archivePath = path.join(root, '.harness/lessons.archive.md');
+  const archivePath = path.join(root, '.leerness/lessons.archive.md');
   // 1.36.140 (재검수 P1, 재현): 종전엔 락 **밖**에서 매칭한 뒤 락 안에서 `${date}|${text}` 복합 키로
   //   개수만큼 지웠다. `date` 안에 `|` 가 있으면 서로 다른 두 항목이 같은 키로 접혀
   //   **무관한 항목이 지워지고 archive 에는 대상이 지워졌다고 적혔다**(실측: 순서를 뒤집으면 대상이 남았다).
@@ -14860,11 +14868,11 @@ function lessonDropCmd(root, target) {
   });
   if (loadErr === 'no_lessons') return failJson(has('--json'), 'no_lessons', 'lessons 없음');   // codex P2: --json 에러 구조화
   if (loadErr === 'lesson_not_found' || !removed.length) return failJson(has('--json'), 'lesson_not_found', `매칭 lesson 없음: "${target}"`);
-  ok(`lesson dropped: ${removed.length}건 (보존: .harness/lessons.archive.md)`);
+  ok(`lesson dropped: ${removed.length}건 (보존: .leerness/lessons.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
 
-// 1.9.112: lesson save — .harness/lessons.md에 새 lesson 추가 (Memory Write Surface 5번째)
+// 1.9.112: lesson save — .leerness/lessons.md에 새 lesson 추가 (Memory Write Surface 5번째)
 function lessonSave(root, text) {
   root = absRoot(root);
   if (!_requireInit(root, 'lesson save')) return;  // 1.9.311 (UR-0047): init 가드
@@ -14935,11 +14943,11 @@ function decisionListCmd(root, opts = {}) {
 function decisionDropCmd(root, target) {
   root = absRoot(root);
   // 1.36.140 (재검수 P3): 락/쓰기 헬퍼가 부모를 만들기 때문에, 오타 난 `--path` 로 실패하면서도
-  //   그 경로와 `.harness/` 를 만들었다(1.36.139 는 안 만들었다 — 대조군). 없으면 아무것도 만들지 않는다.
+  //   그 경로와 `.leerness/` 를 만들었다(1.36.139 는 안 만들었다 — 대조군). 없으면 아무것도 만들지 않는다.
   if (!exists(root)) return failJson(has('--json'), 'path_not_found', `경로가 없습니다: ${root} — 디렉토리를 새로 만들지 않았습니다`);
   if (!target) return fail('decision drop <date|title-substring> 필요. 예: leerness decision drop "2026-05-20" 또는 leerness decision drop "PostgreSQL"');
   // 1.9.339 (UR-0053): canonical JSON 기준 drop (date 또는 title substring 매칭) — JSON+MD projection 동시 갱신.
-  const archivePath = path.join(root, '.harness/decisions.archive.md');
+  const archivePath = path.join(root, '.leerness/decisions.archive.md');
   // 1.36.138 (동시성 감사 실측): `decision add` 는 락 안인데 **drop 은 락 밖**이었다 —
   //   드롭이 위에서 읽은 낡은 배열을 그대로 되써서 **락 안에서 커밋된 add 를 파괴**했다(8동시에서 1~3건).
   //   위험한 조합은 add+add 가 아니라 **add + drop** 이다.
@@ -14970,7 +14978,7 @@ function decisionDropCmd(root, target) {
   });
   if (loadErr === 'no_decisions') return failJson(has('--json'), 'no_decisions', 'decisions 없음');   // codex P2: --json 에러 구조화
   if (loadErr === 'decision_not_found' || !removed.length) return failJson(has('--json'), 'decision_not_found', `매칭 decision 없음: "${target}"`);
-  ok(`decision dropped: ${removed.length}건 (보존: .harness/decisions.archive.md)`);
+  ok(`decision dropped: ${removed.length}건 (보존: .leerness/decisions.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
 
@@ -15130,12 +15138,12 @@ function status(root) {
   const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);  // 1.23.1 (UR-0010 Phase 6)
   // 1.9.434 (11th 외부평가 Opus P2, UR-0136): 미존재 경로는 healthy 위조 금지 — failJson + exit 1.
   if (!exists(root)) { failJson(has('--json'), 'path_not_found', t(`경로 없음: ${root}`, `path not found: ${root}`)); return; }
-  const verF = path.join(root,'.harness/HARNESS_VERSION');
+  const verF = path.join(root,'.leerness/HARNESS_VERSION');
   const ver = exists(verF) ? read(verF).trim() : 'not installed';
-  const lang = exists(path.join(root,'.harness/LANGUAGE')) ? read(path.join(root,'.harness/LANGUAGE')).trim() : 'ko';
+  const lang = exists(path.join(root,'.leerness/LANGUAGE')) ? read(path.join(root,'.leerness/LANGUAGE')).trim() : 'ko';
   // 1.9.287 (Codex 리뷰 수렴): --minimal 설치는 manifest.minimal=true → 의도적으로 생략된 파일을 missing 으로 경고하지 않음.
   let isMinimal = false;
-  try { const mf = path.join(root, '.harness/manifest.json'); if (exists(mf)) isMinimal = !!JSON.parse(read(mf)).minimal; } catch {}
+  try { const mf = path.join(root, '.leerness/manifest.json'); if (exists(mf)) isMinimal = !!JSON.parse(read(mf)).minimal; } catch {}
   const files = Object.keys(coreFiles(root, lang, [], { minimal: isMinimal }));
   const missing = files.filter(f => !exists(path.join(root,f)));
   // 1.9.384 (5번째 외부평가/UR-0085): --json 일관성 — AI 에이전트용 구조화 출력.
@@ -15152,7 +15160,7 @@ function verify(root) {
   const failures = [];
   const required = REQUIRED_WORKSPACE_FILES;  // 1.9.380 (UR-0025): lib/catalogs 단일출처
   for (const f of required) { if (!exists(path.join(root,f))) failures.push(`missing: ${f}`); }
-  const g = exists(path.join(root,'.harness/guideline.md')) ? read(path.join(root,'.harness/guideline.md')) : '';
+  const g = exists(path.join(root,'.leerness/guideline.md')) ? read(path.join(root,'.leerness/guideline.md')) : '';
   if (!g.includes('plan.md') || !g.includes('progress-tracker.md')) failures.push('guideline.md must reference plan.md and progress-tracker.md');
   const a = exists(path.join(root,'AGENTS.md')) ? read(path.join(root,'AGENTS.md')) : '';
   if (!a.includes('protected-files.md')) failures.push('AGENTS.md must reference protected-files.md');
@@ -15217,7 +15225,7 @@ function installSafetyCmd(opts = {}) {
 }
 function debug(root) {
   root = absRoot(root); let warnings = 0, failures = 0;
-  const checks = ['.harness/context-routing.md','.harness/writeback-policy.md','.harness/plan-progress-boundary.md','.harness/consistency-policy.md','.harness/reuse-map.md','.harness/leerness-maintenance.md','.harness/anti-lazy-work-policy.md','.harness/encoding-policy.md','.harness/secret-policy.md'];
+  const checks = ['.leerness/context-routing.md','.leerness/writeback-policy.md','.leerness/plan-progress-boundary.md','.leerness/consistency-policy.md','.leerness/reuse-map.md','.leerness/leerness-maintenance.md','.leerness/anti-lazy-work-policy.md','.leerness/encoding-policy.md','.leerness/secret-policy.md'];
   for (const f of checks) { if (exists(path.join(root,f))) ok(f); else { warnings++; warn('missing: ' + f); } }
   const pg = exists(planPath(root)) && exists(progressPath(root));
   if (pg) ok('plan/progress files exist'); else { failures++; fail('plan/progress missing'); }
@@ -15234,7 +15242,7 @@ function audit(root, opts = {}) { return _audit.audit(root, opts, { VERSION, arg
 //         Anthropic 패턴은 `_` 미포함 + 후행 \b 로 실제 sk-ant-api03- 키(언더스코어 사용)를 놓침.
 //   보강: OpenAI modern(proj/svcacct/admin) · GitHub 변종(gho_/ghu_/ghs_/ghr_) · Stripe · npm · Google OAuth · AWS 임시(ASIA).
 // 1.9.343 (UR-0025 심층): SECRET_PATTERNS (13 시크릿 값 스캔 정규식) 는 lib/catalogs.js 로 이전 (import). 보안 응집.
-const SCAN_SKIP_DIRS = new Set(['.git','node_modules','.harness/archive','.viewwork','dist','build','.next','.turbo','.cache','coverage','_pkg-source','out','tmp','temp','.svelte-kit','.parcel-cache']);
+const SCAN_SKIP_DIRS = new Set(['.git','node_modules','.leerness/archive','.viewwork','dist','build','.next','.turbo','.cache','coverage','_pkg-source','out','tmp','temp','.svelte-kit','.parcel-cache']);
 // 1.9.4 E: .leerness-skip-dirs 파일에서 추가 skip 디렉토리 읽기
 function getExtraSkipDirs(root) {
   const f = path.join(absRoot(root || '.'), '.leerness-skip-dirs');
@@ -15273,6 +15281,10 @@ function _isLikelyGitignored(root, fileRel) {
 function _collectSecretFindings(root) {
   root = absRoot(root);
   const findings = [];
+  // legacy workspace 시절 베이스라인 지문은 파일 경로를 포함한다. 워크스페이스
+  // 마이그레이션 뒤에도 같은 값·같은 상대 파일만 인정되도록 현재 지문에서
+  // 계산 가능한 legacy 별칭을 메모리에만 보관한다. 원문 값이나 별칭은 출력하지 않는다.
+  const baselineAliases = new Map();
   // 1.36.56 (검수 #3): .gitignore 는 수집당 1회만 로드 — 종전엔 적격 파일마다 재읽기(5천 파일 실측 5천회)
   let _giText = null; try { _giText = read(path.join(root, '.gitignore')); } catch {}
   const _giMatch = (fileRel) => _giText != null && _gitignoreMatch(_giText, fileRel);
@@ -15330,7 +15342,12 @@ function _collectSecretFindings(root) {
         // 1.36.104 (codex 검수 HIGH#1): 지문은 **전체 매치값**으로 만든다. 표시용 snippet 은 32자로 잘리는데
         //   그걸 해싱하면 앞 32자가 같은 다른 키가 같은 지문이 돼 자동으로 인정된다(실측 재현: 인정 2 / 미인정 0).
         //   fp 는 여기서 계산해 finding 에 실어 보낸다 — 전체 값을 finding 에 담으면 --json 이 시크릿을 더 노출한다.
-        findings.push({ file: fileRel, line, name, snippet: m[0].slice(0, 32), gitignored, fp: _fpOf(fileRel, name, m[0]) });
+        const fp = _fpOf(fileRel, name, m[0]);
+        if (fileRel === '.leerness' || fileRel.startsWith('.leerness/')) {
+          const legacyFile = LEGACY_WORKSPACE_DIR + fileRel.slice(CANONICAL_WORKSPACE_DIR.length);
+          baselineAliases.set(fp, _fpOf(legacyFile, name, m[0]));
+        }
+        findings.push({ file: fileRel, line, name, snippet: m[0].slice(0, 32), gitignored, fp });
         // 16th 버그헌트 F1: break 제거 — 같은 패턴이 한 파일에 여러 번(예: secret: + api_key: 둘 다 'Hardcoded password') 나오면 모두 보고(보안 FN 차단). zero-width 매치는 lastIndex 전진으로 무한루프 방지.
         if (re.lastIndex === m.index) re.lastIndex++;
       }
@@ -15346,15 +15363,24 @@ function _collectSecretFindings(root) {
   //   지문에 내용이 들어가므로 값이 바뀌면 자동으로 다시 미인정이 된다.
   const base = _loadSecretBaseline(root);
   const acknowledged = [], unacknowledged = [];
-  for (const f of committed) (base.has(_secretFp(f)) ? acknowledged : unacknowledged).push(f);
+  for (const f of committed) {
+    const fp = _secretFp(f);
+    (base.has(fp) || base.has(baselineAliases.get(fp)) ? acknowledged : unacknowledged).push(f);
+  }
   // 베이스라인 부패 방지 — 기록만 남고 대응 발견이 사라진 항목은 알린다(조용히 불어나지 않게).
-  const live = new Set(committed.map(_secretFp));
+  const live = new Set();
+  for (const f of committed) {
+    const fp = _secretFp(f);
+    if (fp) live.add(fp);
+    const legacyFp = baselineAliases.get(fp);
+    if (legacyFp) live.add(legacyFp);
+  }
   const stale = [...base].filter(fp => !live.has(fp));
   return { findings, committed, ignored, acknowledged, unacknowledged, staleBaseline: stale };
 }
 // 1.36.104 (P-0014): 지문은 파일+패턴명+스니펫. **줄 번호는 뺀다** — 서식 변경으로 재알림하면 아무도 안 쓴다.
 //   반대로 내용은 넣는다 — 같은 자리의 값이 진짜 키로 바뀌면 인정이 자동 해제돼야 한다.
-// 1.36.104: handoff 가 회복 판정 시 .harness/agent-reminders.md 를 **무조건** unlink 했다.
+// 1.36.104: handoff 가 회복 판정 시 .leerness/agent-reminders.md 를 **무조건** unlink 했다.
 //   그 파일은 drift critical 일 때 도구가 만드는 자동 산출물이지만, 본문 스스로 "사용자가 이 파일을 보고
 //   리마인더 전달 가능" 이라 안내한다 — 그리고 CLAUDE.md 는 보호 파일 삭제를 금지한다.
 //   실측: 사용자가 쓴 줄을 넣고 `leerness handoff .` 한 번 → 파일 통째 삭제, exit 0, 안내 없음, 백업 없음.
@@ -15370,7 +15396,7 @@ function _reminderBodyHash(body) {
 function _autoReminderText(body) { return `${_AUTO_REMINDER_MARK} sha=${_reminderBodyHash(body)} -->\n${body}`; }
 function _cleanAutoReminder(root) {
   try {
-    const p = path.join(root, '.harness', 'agent-reminders.md');
+    const p = path.join(root, '.leerness', 'agent-reminders.md');
     if (!exists(p)) return;
     const txt = read(p);
     const nl = txt.indexOf('\n');
@@ -15390,7 +15416,7 @@ function _fpOf(file, name, fullValue) {
 }
 //   구버전 finding(fp 없음)은 잘린 snippet 으로 폴백하지 않는다 — 폴백하면 위 결함이 그대로 살아난다.
 function _secretFp(f) { return f && f.fp ? f.fp : null; }
-function _secretBaselinePath(root) { return path.join(absRoot(root), '.harness', 'secret-baseline.json'); }
+function _secretBaselinePath(root) { return path.join(absRoot(root), '.leerness', 'secret-baseline.json'); }
 function _loadSecretBaseline(root) {
   try {
     const p = _secretBaselinePath(root);
@@ -15409,7 +15435,7 @@ function scanSecrets(root, opts = {}) {
   // 1.36.104 (P-0014): --baseline 은 현재 커밋 대상 발견을 '인정' 으로 기록한다.
   //   위험 수용 행위이므로 무엇을 인정했는지 파일·패턴별로 반드시 출력한다(조용히 잠재우지 않는다).
   if (has('--baseline')) {
-    // codex 검수 MEDIUM#4: `scan secrets <파일> --baseline` 은 <파일>/.harness 를 만들려다 ENOTDIR 로 죽었다.
+    // codex 검수 MEDIUM#4: `scan secrets <파일> --baseline` 은 <파일>/.leerness 를 만들려다 ENOTDIR 로 죽었다.
     //   베이스라인은 프로젝트 단위 결정이므로, 파일 스캔과의 조합은 스캔 전에 분명히 거절한다.
     let _isFile = false; try { _isFile = fs.statSync(root).isFile(); } catch {}
     if (_isFile) { failJson(jsonMode, 'baseline_needs_project', `--baseline 은 프로젝트 디렉토리에서만 씁니다 (받은 값: 파일 ${root}) — 상위 프로젝트 경로로 실행하세요`); return; }
@@ -15550,7 +15576,7 @@ function lazyDetect(root, opts = {}) {
   if (!hasTestRun) { issues++; _warn('review-evidence.md has no recorded test/typecheck/lint run',
     { kind: 'no_test_run', severity: 'warn' }); }
   // 1.9.7 C: TODO 자동 추적 강화 — 위치+텍스트 캡처, known-todos 비교, --auto-track 등록
-  const knownPath = path.join(root, '.harness/known-todos.json');
+  const knownPath = path.join(root, '.leerness/known-todos.json');
   let knownList = [];
   if (exists(knownPath)) { try { knownList = JSON.parse(read(knownPath)); } catch {} }
   const knownSet = new Set(knownList.map(k => `${k.file}:${k.line}:${k.text}`));
@@ -15565,7 +15591,7 @@ function lazyDetect(root, opts = {}) {
   for (const file of walk(root)) {
     const ext = path.extname(file).toLowerCase();
     if (!SCAN_TEXT_EXT.has(ext) || todoProseExt.has(ext)) continue;
-    if (file.includes('.harness')) continue;
+    if (file.includes('.leerness')) continue;
     if (path.resolve(file) === cliSelf) continue;
     if (/[\\/]bin[\\/]harness\.js$/.test(file)) continue;
     let text; try { text = read(file); } catch { continue; }
@@ -15672,15 +15698,15 @@ function preCheck(root) {
   const json = has('--json');  // 1.9.428 (10th 외부평가 UR-0128): check --json 순수 JSON
   const checks = [];
   let issues = 0;
-  const required = ['.harness/plan.md','.harness/progress-tracker.md','.harness/protected-files.md','AGENTS.md'];
+  const required = ['.leerness/plan.md','.leerness/progress-tracker.md','.leerness/protected-files.md','AGENTS.md'];
   for (const f of required) { const present = exists(path.join(root,f)); checks.push({ name: f, kind: 'required', ok: present }); if (!present) { issues++; if (!json) fail(`missing: ${f}`); } }
   for (const [name, p] of [['session-handoff', handoffPath(root)], ['current-state', currentStatePath(root)], ['plan', planPath(root)]]) { const present = exists(p); checks.push({ name, kind: 'state', ok: present }); if (present && !json) ok(`${name} present`); }
-  const pfPath = path.join(root,'.harness/protected-files.md');
+  const pfPath = path.join(root,'.leerness/protected-files.md');
   const pf = exists(pfPath) ? read(pfPath) : '';
   const pfOk = pf.includes('AGENTS.md');
   checks.push({ name: 'protected-files.md AGENTS.md', kind: 'integrity', ok: pfOk });
   if (!pfOk) { issues++; if (!json) fail('protected-files.md missing AGENTS.md'); }
-  // 1.36.1 (클린룸 리뷰 FN): .harness/*.json 상태파일 JSON 무결성 — 손상 시 하드 실패(exit 1). check 는 pre-action 게이트이므로 손상 상태를 통과시키지 않는다.
+  // 1.36.1 (클린룸 리뷰 FN): .leerness/*.json 상태파일 JSON 무결성 — 손상 시 하드 실패(exit 1). check 는 pre-action 게이트이므로 손상 상태를 통과시키지 않는다.
   //   (audit=warning / health=degraded 와 달리 check 는 차단 신호. 비-크래시: 헬퍼가 파서 예외를 흡수.)
   try {
     const corrupted = _findCorruptedStateJson(root);
@@ -15688,7 +15714,7 @@ function preCheck(root) {
       for (const c of corrupted) { checks.push({ name: c.file, kind: 'json-integrity', ok: false, error: c.error }); issues++; if (!json) fail(`corrupted JSON: ${c.file} (${c.error})`); }
     } else {
       checks.push({ name: 'state JSON integrity', kind: 'json-integrity', ok: true });
-      if (!json) ok('state JSON integrity OK (.harness/*.json)');
+      if (!json) ok('state JSON integrity OK (.leerness/*.json)');
     }
   } catch {}
   if (json) { log(JSON.stringify({ root, healthy: issues === 0, issues, checks }, null, 2)); if (issues) process.exitCode = 1; return; }
@@ -15701,7 +15727,7 @@ function memorySearch(root, query) {
   const jsonMode = has('--json'); const results = [];  // 외부리뷰 C3: --json 일관성(이전엔 --json 무시하고 텍스트만)
   if (!query) { failJson(jsonMode, 'query_required', 'query required (e.g., memory search "키워드")'); return; }
   // 1.13.1 (15th 블라인드 리뷰 P1, Sonnet): lessons.md + rules.md 누락 수정 — memory search 가 5종 메모리 표면을 표방하나 lesson/rule 을 검색 못 해(lesson add/rule add 로 저장한 교훈·룰이 'no matches') 모순감지 핵심 용도가 훼손됐음.
-  const files = ['.harness/decisions.md','.harness/lessons.md','.harness/rules.md','.harness/task-log.md','.harness/session-handoff.md','.harness/progress-tracker.md','.harness/plan.md','.harness/review-evidence.md','.harness/architecture.md'];
+  const files = ['.leerness/decisions.md','.leerness/lessons.md','.leerness/rules.md','.leerness/task-log.md','.leerness/session-handoff.md','.leerness/progress-tracker.md','.leerness/plan.md','.leerness/review-evidence.md','.leerness/architecture.md'];
   // 1.36.23: (1) 동의어 확장으로 리콜 "순증" — 실측 `핸드오프` 0 hits / `handoff` 37 hits 비대칭 해소. 기존 regex 에 OR 로 더하므로
   //   현 동작의 상위집합(히트 감소 0). --no-synonyms 로 종전 동작. (2) 히트를 BM25 로 정렬한 뒤 --limit 적용 — 종전엔 파일당
   //   "앞 N건" 임의 절단이었다(최고 N건이 아니라). ★ 리콜은 substring 유지: 한국어 조사 때문에 토큰화 리콜은 지금 찾히는 문서를
@@ -15849,7 +15875,7 @@ function handoff(root) {
       // 1.9.130: archive 카운트 통합
       const archiveCountsH = { decisions: 0, lessons: 0, plan: 0, total: 0 };
       try {
-        const hdH = path.join(root, '.harness');
+        const hdH = path.join(root, '.leerness');
         for (const [key, file] of [['decisions', 'decisions.archive.md'], ['lessons', 'lessons.archive.md'], ['plan', 'plan.archive.md']]) {
           const fpH = path.join(hdH, file);
           if (exists(fpH)) {
@@ -16116,7 +16142,7 @@ function handoff(root) {
   }
   // 1.36.132 (UR-0069): 리마인더를 **본문 맨 앞**에 둔다 — 이 파일은 drift critical 때 "다음 세션이 읽도록" 만들어졌는데
   //   1.9.38 이후 지금까지 어떤 표면도 내용을 보여주지 않았다(handoff 200줄 0건 · hook 319B 0건 · 관리문서 지시 0건).
-  block('🔔 Agent Reminders (pending)', path.join(root, '.harness', 'agent-reminders.md'));
+  block('🔔 Agent Reminders (pending)', path.join(root, '.leerness', 'agent-reminders.md'));
   block('Session Handoff', handoffPath(root));
   block('Current State', currentStatePath(root));
   block('Plan', planPath(root));
@@ -16175,7 +16201,7 @@ function handoff(root) {
       //   방치돼 인계받는 AI 가 "프로젝트가 무엇인지/범위"를 못 받던 근본원인 → 세션시작 헤드라인에 표면화(파묻힌 init task 대신 가시화).
       try {
         const _naM = '<!-- leerness:na';
-        const _bf = path.join(root, '.harness/project-brief.md');
+        const _bf = path.join(root, '.leerness/project-brief.md');
         const _briefTxt = exists(_bf) ? read(_bf) : '';
         const _planTxt = exists(planPath(root)) ? read(planPath(root)) : '';
         const briefGap = !_briefTxt.includes(_naM) && _briefUnfilled(_briefTxt);
@@ -16230,7 +16256,7 @@ function handoff(root) {
       } catch {}
       // 4) skill match history 누적
       try {
-        const histPath = path.join(root, '.harness', 'skill-suggestions.md');
+        const histPath = path.join(root, '.leerness', 'skill-suggestions.md');
         if (exists(histPath)) {
           const txt = read(histPath);
           const cnt = (txt.match(/^## [\d-]+ [\d:]+ — query/gm) || []).length;
@@ -16400,7 +16426,7 @@ function handoff(root) {
       // 15) 1.9.215: 현재 활성 task에서 constraints/intent 자동 분석 (1.9.208/213 통합)
       try {
         // progress-tracker.md 의 첫 active task request 추출
-        const ptPath = path.join(root, '.harness', 'progress-tracker.md');
+        const ptPath = path.join(root, '.leerness', 'progress-tracker.md');
         if (exists(ptPath)) {
           const content = read(ptPath);
           for (const line of content.split(/\r?\n/)) {
@@ -16611,7 +16637,7 @@ function handoff(root) {
   } catch {}
 
   // 1.9.245: API skill cache 자동 참조 (사용자 명시 UR-0015)
-  //   현재 task 키워드 기반으로 .harness/api-skills/ 매칭 → 사용자가 정리해둔 API 문서 자동 노출
+  //   현재 task 키워드 기반으로 .leerness/api-skills/ 매칭 → 사용자가 정리해둔 API 문서 자동 노출
   try {
     const allSkills = _listAPISkills(root);
     if (allSkills.length > 0) {
@@ -16722,8 +16748,8 @@ function handoff(root) {
   if (_projectMode(root) === 'minimal' || !_tgl.toggleOn(root, 'full-reread')) {
     const _en = _uiLang(root) === 'en';
     log(_en
-      ? `(document bodies omitted. Read on demand: .harness/current-state.md · plan.md · progress-tracker.md · decisions.md)`
-      : `(문서 본문 생략. 필요할 때 읽으세요: .harness/current-state.md · plan.md · progress-tracker.md · decisions.md)`);
+      ? `(document bodies omitted. Read on demand: .leerness/current-state.md · plan.md · progress-tracker.md · decisions.md)`
+      : `(문서 본문 생략. 필요할 때 읽으세요: .leerness/current-state.md · plan.md · progress-tracker.md · decisions.md)`);
     log(_en ? `Restore: leerness toggle set full-reread on  ·  tier: leerness mode set standard`
       : `되돌리기: leerness toggle set full-reread on  ·  등급: leerness mode set standard`);
   } else {
@@ -16823,7 +16849,7 @@ function handoff(root) {
                       log(dim(`  [${h.at}] query "${h.query}"`));
                       for (const ml of matchLines) log(dim(`  ${ml.trim()}`));
                     }
-                    log(dim(`  → 전체 이력: cat .harness/skill-suggestions.md`));
+                    log(dim(`  → 전체 이력: cat .leerness/skill-suggestions.md`));
                     log('');
                   }
                 }
@@ -16854,7 +16880,7 @@ function handoff(root) {
                 }
                 // 1.9.192: 공식 organization skill catalog 자동 매칭 (C축 보강 — 사용자 의도)
                 //   "공식 표준화된 스킬을 적재적소로 자동 활용 ... 최고의 도구" — handoff 시 keyword 기반 자동 추천
-                //   캐시 (.harness/skill-auto-cache.json, 24h TTL) 사용 → GitHub API 부담 X
+                //   캐시 (.leerness/skill-auto-cache.json, 24h TTL) 사용 → GitHub API 부담 X
                 //   1.9.193: cache age > 7일 → 자동 refresh 권장 hint 강화
                 //   끄기: --no-official-skills 또는 LEERNESS_NO_OFFICIAL_SKILLS=1
                 if (!has('--no-official-skills') && !has('--quiet') && process.env.LEERNESS_NO_OFFICIAL_SKILLS !== '1') {
@@ -17010,7 +17036,7 @@ function handoff(root) {
                   if (matches.length > 1) {
                     log(dim(`  최근30일+: ${matches[0].date} — ${matches[0].title}`));
                   }
-                  log(dim(`  → 전체 회고: cat .harness/lessons.md`));
+                  log(dim(`  → 전체 회고: cat .leerness/lessons.md`));
                   log('');
                 }
               }
@@ -17192,7 +17218,7 @@ function handoff(root) {
     } catch {}
   }
   // 1.9.129: handoff 7번째 자동 회수 — 🗑 최근 24h archive 알림
-  //   DELETE 5종 archive 파일 (.harness/decisions.archive.md, lessons.archive.md, plan.archive.md)
+  //   DELETE 5종 archive 파일 (.leerness/decisions.archive.md, lessons.archive.md, plan.archive.md)
   //   에 최근 24h 내 추가된 entry 카운트를 노출. AI가 잘못 제거한 항목을 즉시 인지 + restore 후보 회수.
   //   `leerness memory archive list` / `leerness memory restore <surface> <target>` 안내 포함.
   if (!has('--no-mem-delta') && !has('--compact') && !has('--quiet') && process.env.LEERNESS_NO_MEM_DELTA !== '1') {
@@ -17200,7 +17226,7 @@ function handoff(root) {
       const isTtyArc = process.stdout && process.stdout.isTTY;
       const arcCy = s => isTtyArc ? `\x1b[36m${s}\x1b[0m` : s;
       const arcDim = s => isTtyArc ? `\x1b[2m${s}\x1b[0m` : s;
-      const hd = path.join(root, '.harness');
+      const hd = path.join(root, '.leerness');
       const cutoffArchive = Date.now() - 24 * 60 * 60 * 1000;
       const today = new Date().toISOString().slice(0, 10);
       const yest = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -17234,7 +17260,7 @@ function handoff(root) {
     } catch {}
   }
   // 1.9.141: handoff 8번째 자동 회수 — 🔗 Feature Causality Graph impact (현재 task 키워드 자동 매칭)
-  //   .harness/feature-graph.md 의 노드를 현재 in-progress task의 키워드로 매칭 → 영향받는 feature 목록을 즉시 노출.
+  //   .leerness/feature-graph.md 의 노드를 현재 in-progress task의 키워드로 매칭 → 영향받는 feature 목록을 즉시 노출.
   //   1+10=20 cascade 방지 위해 코드 작성 전 영향 범위 인지가 최우선.
   if (!has('--no-feature-impact') && !has('--compact') && !has('--quiet') && process.env.LEERNESS_NO_FEATURE_IMPACT !== '1') {
     try {
@@ -17381,7 +17407,7 @@ function handoff(root) {
   // 같은 채팅 세션의 AI 청크가 이전 버전 마인드셋이어도 새 도구를 즉시 인지하도록.
   if (!has('--no-workflow-guide') && !has('--compact')) {
     try {
-      const reportPath = path.join(root, '.harness', 'migration-report.md');
+      const reportPath = path.join(root, '.leerness', 'migration-report.md');
       if (exists(reportPath)) {
         const stat = fs.statSync(reportPath);
         const ageHr = (Date.now() - stat.mtimeMs) / 3600000;
@@ -17413,7 +17439,7 @@ function handoff(root) {
     const t = (ko, en) => (_uiLang(root) === 'en' ? en : ko); // 1.30.5 (#156 F3): headline t() 스코프 밖 — 로컬 t() (1.29.1 교훈)
     log('');
     log(cy(t('## 🛠 세션 워크플로 6단계 (1.9.39+, AI 하네스 엔지니어링)', '## 🛠 Session workflow — 6 steps (AI harness engineering)')));
-    log(d(t('  상세: ', '  details: ')) + cy('.harness/session-workflow.md'));
+    log(d(t('  상세: ', '  details: ')) + cy('.leerness/session-workflow.md'));
     log(`  1. ${b(t('요청 분석', 'Analyze request'))}     ${t('handoff(이미 완료) · drift check · 모호하면 명확화', 'handoff (done) · drift check · clarify if ambiguous')}`);
     log(`  2. ${b(t('계획 수립', 'Plan'))}     ${t('plan add / TodoWrite · reuse-map으로 기존 자원 우선', 'plan add / TodoWrite · prefer existing via reuse-map')}`);
     log(`  3. ${b(t('업무 분배', 'Distribute'))}     ${t('agents list/recommend · 작업유형별 sub-agent 매핑', 'agents list/recommend · map sub-agents by task type')}`);
@@ -17571,7 +17597,7 @@ function hookSessionStartCmd(root) {
   if (has('--no-context-inject') || process.env.LEERNESS_NO_CONTEXT_INJECT === '1') return;   // opt-out → 무출력 exit 0
   try {
     root = absRoot(root || process.cwd());
-    if (!exists(root) || !exists(path.join(root, '.harness'))) return;   // 미초기화/없는 경로 → 조용히 무출력(hook 은 어디서나 실행됨)
+    if (!exists(root) || !exists(path.join(root, '.leerness'))) return;   // 미초기화/없는 경로 → 조용히 무출력(hook 은 어디서나 실행됨)
     const rows = readProgressRows(root);
     const byStatus = {};
     for (const r of rows) byStatus[r.status] = (byStatus[r.status] || 0) + 1;
@@ -17596,7 +17622,7 @@ function hookSessionStartCmd(root) {
   } catch { /* 세션 시작을 절대 깨지 않는다 — 무출력 exit 0 */ }
 }
 function handoffCmd(root) {
-  // 1.36.21 (전수 sweep P2/high): 존재하지 않는 경로에 디렉토리 트리 + .harness 를 "생성"하고 깨끗한 빈 프로젝트로 보고하던 것 차단.
+  // 1.36.21 (전수 sweep P2/high): 존재하지 않는 경로에 디렉토리 트리 + .leerness 를 "생성"하고 깨끗한 빈 프로젝트로 보고하던 것 차단.
   //   오타 경로에 handoff 하면 쓰레기 트리가 생기고, --json 은 ok/error 없는 정상 JSON + exit 0 이라 기계 소비자가 오타를 감지 못 했음.
   //   status/health/drift/lazy detect/scan secrets/session close 는 이미 path_not_found + exit 1(UR-0136) — handoff/env detect 만 누락된 관례 갭.
   //   --pulse/--all-apps 분기보다 "앞"에 둬야 전 모드가 커버됨.
@@ -17612,13 +17638,13 @@ function handoffCmd(root) {
   }
   // 1.9.199: timestamp 기록/측정은 handoff() 내부에서 수행 (중복 방지)
   // 1.9.37: drift 자동 경고 (메인 에이전트가 leerness를 점점 안 쓰는 현상 감지)
-  // 1.9.38 (A): drift 임계 시 .harness/agent-reminders.md 자동 생성 — 메인 에이전트 프롬프트에 표시되도록.
+  // 1.9.38 (A): drift 임계 시 .leerness/agent-reminders.md 자동 생성 — 메인 에이전트 프롬프트에 표시되도록.
   // 1.9.38 (D): skip 횟수 학습 — --no-drift-check 빈도 ≥5 시 임계 완화 (1d → 2d).
   const absR0 = absRoot(root || process.cwd());
   // 1.36.79 (도그푸딩 P1-B, 실 프로젝트 27/37 해당): 이 사람용 drift 배너가 --json 모드에서도 stdout 에 찍혀
   //   handoff --json 등의 응답을 통째로 파싱 불가로 만들었다(실측: JSON.parse 실패). stale 프로젝트에서만 발화해
   //   합성 픽스처 헌트가 못 봤다. --json 이면 배너 억제(구조화 필드/텍스트 모드로만 노출).
-  if (exists(path.join(absR0, '.harness')) && process.env.LEERNESS_NO_DRIFT_CHECK !== '1' && !has('--json')) {
+  if (exists(path.join(absR0, '.leerness')) && process.env.LEERNESS_NO_DRIFT_CHECK !== '1' && !has('--json')) {
     // skip 카운트
     if (has('--no-drift-check')) {
       try {
@@ -17680,10 +17706,10 @@ function handoffCmd(root) {
             }
           }
           log('');
-          // 1.9.38 (A): critical 시 .harness/agent-reminders.md 자동 생성 — 다음 세션 시작 시 메인 에이전트가 읽도록.
+          // 1.9.38 (A): critical 시 .leerness/agent-reminders.md 자동 생성 — 다음 세션 시작 시 메인 에이전트가 읽도록.
           if (sevStale && has('--writeback') && process.env.LEERNESS_HOOK !== '1') {
             try {
-              const remPath = path.join(absR0, '.harness', 'agent-reminders.md');
+              const remPath = path.join(absR0, '.leerness', 'agent-reminders.md');
               const body = `# 🔔 메인 에이전트용 자동 reminder\n\n_생성: ${new Date().toISOString()}_\n\n## drift critical 감지\n현재 워크스페이스의 메타파일이 매우 stale합니다. 이번 라운드 작업 끝에 반드시 다음 명령을 호출하세요:\n\n\`\`\`bash\nleerness session close .\n\`\`\`\n\n또는 상세 점검:\n\`\`\`bash\nleerness drift check .\n\`\`\`\n\nstale 신호:\n${shAge !== null ? `- session-handoff.md: ${shAge.toFixed(1)}일 stale\n` : ''}${ptAge !== null ? `- progress-tracker: ${ptAge.toFixed(1)}일 stale\n` : ''}\n\n_이 파일은 leerness 1.9.38+가 자동 갱신합니다. session close 후 자동 삭제.\n_사용자가 이 파일을 보고 메인 에이전트에 reminder 전달 가능._\n`;
               writeUtf8(remPath, _autoReminderText(body));   // 1.36.104: 표식 줄에 본문 해시 — 사람이 고치면 청소 대상에서 빠진다
             } catch {}
@@ -17698,10 +17724,10 @@ function handoffCmd(root) {
       } catch {}
     }
   }
-  // 1.9.35 개선 #1: .harness 부재 시 즉시 경고 (자동 init 권장)
+  // 1.9.35 개선 #1: .leerness 부재 시 즉시 경고 (자동 init 권장)
   // 사용자가 신규 디렉토리에서 handoff 호출 시 sub-agent 작업이 길을 잃지 않도록.
   const absR = absRoot(root || process.cwd());
-  if (!exists(path.join(absR, '.harness')) && !has('--no-init-check') && !has('--json')) {  // 1.10.5 (13th 버그헌트 P2, UR-0168): --json 시 사람용 미-init 배너 억제(순수 JSON, 앞부분 비-JSON 누출 차단)
+  if (!exists(path.join(absR, '.leerness')) && !has('--no-init-check') && !has('--json')) {  // 1.10.5 (13th 버그헌트 P2, UR-0168): --json 시 사람용 미-init 배너 억제(순수 JSON, 앞부분 비-JSON 누출 차단)
     const isTty = process.stdout && process.stdout.isTTY;
     const yel = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
     const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
@@ -17742,7 +17768,7 @@ function _extractDependsOn(notes) {
 }
 
 function _readReuseMap(root) {
-  const p = path.join(root, '.harness', 'reuse-map.md');
+  const p = path.join(root, '.leerness', 'reuse-map.md');
   if (!exists(p)) return [];
   const txt = read(p);
   const lines = txt.split('\n');
@@ -17924,7 +17950,10 @@ function _gitState(root) {
   //   한 payload 안에 `installed:true` 와 `gitState:'not-a-repo'` 가 동시에 나왔다(자기모순).
   //   훅 경로는 git 에게 묻는데 상태만 파일 존재로 판정하면 두 답이 갈린다. **git 에게 물어 한 답으로 만든다.**
   const r = _gitSpawn(['-C', root, 'rev-parse', '--git-dir'], { encoding: 'utf8', timeout: 10000 });
-  if ((r.error && r.error.code === 'ENOENT') || r.status === null) return 'no-git';
+  // portable-process는 Windows PATH에서 안전한 실행 대상을 찾지 못하면 shell/cwd로
+  // 폴백하지 않고 127(미해결) 또는 126(지원하지 않는 shim)을 명시적으로 돌려준다.
+  // 이를 일반 git 실패로 합치면 실제 저장소를 "손상" 또는 "저장소 아님"으로 오진한다.
+  if ((r.error && r.error.code === 'ENOENT') || r.status === null || r.status === 126 || r.status === 127) return 'no-git';
   if (r.status !== 0) return exists(path.join(root, '.git')) ? 'broken' : 'not-a-repo';
   // 1.36.134 (검수 P1): bare 저장소에는 워킹트리가 없어 `git commit`/pre-commit 경로 자체가 없다 —
   //   훅을 걸고 "강제됨" 이라 답하면 거짓이다. 실측: `git init --bare` 에서 ok:true, verified:'fired' 였다.
@@ -17952,7 +17981,7 @@ function _gitWorkingTree(root) {
   if (r.error && r.error.code === 'ENOENT') return { ok: false, reason: 'no-git' };
   if (r.error && r.error.code === 'ENOBUFS') return { ok: false, reason: 'output-too-large' };
   if (r.error) return { ok: false, reason: 'git-error', detail: String(r.error.code || '').slice(0, 40) };
-  if (r.status === null) return { ok: false, reason: 'no-git' };            // 죽거나 실행 자체가 안 됨
+  if (r.status === null || r.status === 126 || r.status === 127) return { ok: false, reason: 'no-git' }; // 죽거나 안전한 실행 대상이 없음
   if (r.status !== 0) return { ok: false, reason: 'not-a-git-repo' };   // 1.36.133 (검수 P1): 기존 공개 JSON 값을 유지한다 — 새 사유는 **추가**만 한다
   const files = new Set();
   for (const rec of String(r.stdout || '').split('\0')) {
@@ -18218,8 +18247,8 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   const gitApplicable = !!gitChanged && gitChanged.size > 0 && files.length > 0;
   const claimedInGit = gitApplicable ? files.filter(f => _claimFileInGit(f, gitChanged)) : [];
   const claimedNotInGit = gitApplicable ? files.filter(f => !_claimFileInGit(f, gitChanged)) : [];
-  // 1.13.2 (Karpathy 가이드라인 3 "외과적 변경", UR-0030): 역방향 교차검증 — git 에 변경됐으나 evidence/주장에 없는 파일(scope-creep / 요청 범위 밖 변경 신호). 하네스 자체 기록(.harness 등)은 제외. advisory(오탐 방지 — 기본 FAIL 아님, 표면화만).
-  const _SCOPE_SKIP = /^(\.harness[\\/]|\.git[\\/]|node_modules[\\/]|\.claude[\\/]|dist[\\/]|build[\\/])/;
+  // 1.13.2 (Karpathy 가이드라인 3 "외과적 변경", UR-0030): 역방향 교차검증 — git 에 변경됐으나 evidence/주장에 없는 파일(scope-creep / 요청 범위 밖 변경 신호). 하네스 자체 기록(.leerness 등)은 제외. advisory(오탐 방지 — 기본 FAIL 아님, 표면화만).
+  const _SCOPE_SKIP = /^(\.leerness[\\/]|\.git[\\/]|node_modules[\\/]|\.claude[\\/]|dist[\\/]|build[\\/])/;
   const changedNotClaimed = gitApplicable ? [...gitChanged].filter(g => !_SCOPE_SKIP.test(g) && !files.some(f => _claimFileInGit(f, new Set([g])))) : [];
   // 테스트 카운트 (1.17.4, UR-0047): 주장된 테스트 파일 우선 + 관례 글롭(pytest test_*.py·*_test.py / 루트·tests/ 의 *.test.*·*.spec.*) 인식.
   //   이전엔 tests/test.js 등 3개 하드코딩 — pytest/node:test 루트 관례가 안 보여 "파일 못 찾음"인데 ✓ pass 로 표기(측정실패=통과 역전, 5축 실증 P2 공통).
@@ -18263,7 +18292,7 @@ function verifyClaimCmd(root, taskId, opts = {}) {
   } else if (has('--run-tests')) {
     let testCmd = arg('--test-cmd', null);
     if (!testCmd) {
-      try { const cfg = JSON.parse(read(path.join(root, '.harness', 'leerness-config.json'))); if (cfg && typeof cfg.testCommand === 'string' && cfg.testCommand.trim()) testCmd = cfg.testCommand.trim(); } catch {}
+      try { const cfg = JSON.parse(read(path.join(root, '.leerness', 'leerness-config.json'))); if (cfg && typeof cfg.testCommand === 'string' && cfg.testCommand.trim()) testCmd = cfg.testCommand.trim(); } catch {}
     }
     if (!testCmd) {
       const pkgPath = path.join(root, 'package.json');
@@ -18275,7 +18304,7 @@ function verifyClaimCmd(root, taskId, opts = {}) {
       }
     }
     if (!testCmd) {
-      runResult = { skipped: true, reason: '테스트 명령 미지정 — 비-JS 프로젝트는 --test-cmd "<명령>" 또는 .harness/leerness-config.json 의 "testCommand" 로 지정 (불일치 판정 아님)' };
+      runResult = { skipped: true, reason: '테스트 명령 미지정 — 비-JS 프로젝트는 --test-cmd "<명령>" 또는 .leerness/leerness-config.json 의 "testCommand" 로 지정 (불일치 판정 아님)' };
     } else {
       {
         // 1.9.299 (UR-0039): 신뢰 못 할 워크스페이스 테스트 실행 → runCommandSafe + scrubSecrets (시크릿 노출 차단 + cwd jail).
@@ -18643,11 +18672,28 @@ function verifyClaimAllCmd(root) {
 // 1.9.22: orchestrate — Ollama 로컬 LLM으로 best-of-N 멀티 에이전트 시뮬
 // 정책 (사용자 명시 1.9.22):
 //   1) 자동 적용 금지. LEERNESS_OLLAMA_BASE_URL 환경변수 감지 opt-in 전용
-//   2) .env 파일 자동 로드 (간단 파서)
+//   2) .env 파일에서 Leerness 설정과 명시적으로 허용한 provider/release 키만 로드
 //   3) --agents N 가변 (1~256)
 //   4) 환경변수 없으면 명령 거부 + 안내
+const _DOTENV_EXPLICIT_KEYS = new Set([
+  'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENAI_BASE_URL',
+  'GOOGLE_API_KEY', 'GEMINI_API_KEY', 'GROK_API_KEY', 'XAI_API_KEY',
+  'DASHSCOPE_API_KEY', 'OPENROUTER_API_KEY', 'AZURE_OPENAI_API_KEY',
+  'AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_API_VERSION', 'AZURE_OPENAI_DEPLOYMENT',
+  'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN',
+  'AWS_REGION', 'AWS_DEFAULT_REGION', 'AWS_PROFILE',
+  'COHERE_API_KEY', 'MISTRAL_API_KEY', 'DEEPSEEK_API_KEY', 'TOGETHER_API_KEY',
+  'GROQ_API_KEY', 'PERPLEXITY_API_KEY', 'HF_TOKEN',
+  'GITHUB_TOKEN', 'GH_TOKEN', 'NPM_TOKEN',
+  'OLLAMA_HOST', 'LMSTUDIO_HOST', 'LLAMACPP_HOST',
+]);
+function _dotenvKeyAllowed(key) {
+  return typeof key === 'string' && (key.startsWith('LEERNESS_') || _DOTENV_EXPLICIT_KEYS.has(key));
+}
 function _loadEnvFile(root) {
-  // root 경로(또는 cwd)의 .env 파일을 간단 파싱해 process.env에 머지 (이미 있는 키는 덮어쓰지 않음)
+  // 프로젝트 파일은 프로세스 제어 경계다. NODE_OPTIONS/NODE_PATH/NPM_EXECPATH/PATH 같은
+  // 임의 대문자 키를 주입하지 않고, 제품 설정과 명시 provider/release 키만 머지한다.
+  // 이미 있는 키는 덮어쓰지 않는다.
   const envFile = path.join(root || process.cwd(), '.env');
   let loadedEnv = false;
   if (exists(envFile)) {
@@ -18657,6 +18703,7 @@ function _loadEnvFile(root) {
         const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
         if (!m) continue;
         const key = m[1];
+        if (!_dotenvKeyAllowed(key)) continue;
         let val = m[2];
         // 주석 제거
         if (val.startsWith('#')) continue;
@@ -18667,17 +18714,17 @@ function _loadEnvFile(root) {
       loadedEnv = true;
     } catch {}
   }
-  // 1.9.187: .env 로드 후 비시크릿 LEERNESS_* 도 .harness/leerness-config.json 에서 자동 inject.
-  //   우선순위: process.env (이미 있음) > .env > .harness/leerness-config.json > defaults.
+  // 1.9.187: .env 로드 후 비시크릿 LEERNESS_* 도 .leerness/leerness-config.json 에서 자동 inject.
+  //   우선순위: process.env (이미 있음) > .env > .leerness/leerness-config.json > defaults.
   try { _loadLeernessConfig(root); } catch {}
   return loadedEnv;
 }
 
-// 1.9.187 (사용자 명시): 비시크릿 LEERNESS_* 설정을 .env에서 .harness/leerness-config.json 으로 분리.
+// 1.9.187 (사용자 명시): 비시크릿 LEERNESS_* 설정을 .env에서 .leerness/leerness-config.json 으로 분리.
 //   배경: .env 는 .gitignore + 시크릿용 → 다른 AI 에이전트 (Claude Code, Cursor 등) 가 워크스페이스 읽을 때 보안 정책상 자동 노출 X.
-//   비시크릿 (활성화 플래그, 모델 이름, 공개 URL) 은 .harness/leerness-config.json (git checked-in) 으로 옮기면 AI 가시성 ↑.
+//   비시크릿 (활성화 플래그, 모델 이름, 공개 URL) 은 .leerness/leerness-config.json (git checked-in) 으로 옮기면 AI 가시성 ↑.
 //   호환성: 시작 시점에 config 파일 읽어서 process.env에 inject. 기존 process.env.LEERNESS_* 코드 그대로 작동.
-//   우선순위: 1) process.env (이미 설정된 값) > 2) .env 파일 > 3) .harness/leerness-config.json > 4) defaults.
+//   우선순위: 1) process.env (이미 설정된 값) > 2) .env 파일 > 3) .leerness/leerness-config.json > 4) defaults.
 const _LEERNESS_NONSECRET_KEYS = new Set([
   'LEERNESS_OLLAMA_BASE_URL',    // 일반 localhost URL — 비밀 X
   'LEERNESS_OLLAMA_MODEL',       // 모델 이름 — 비밀 X
@@ -18696,9 +18743,9 @@ const _LEERNESS_NONSECRET_KEYS = new Set([
   'LEERNESS_SKILL_AUTO_INSTALL',
   'LEERNESS_SKILL_AUTO_PRESETS'
 ]);
-// 시크릿은 절대 .harness/leerness-config.json 으로 옮기지 않음 (TOKEN 패턴 자동 차단)
+// 시크릿은 절대 .leerness/leerness-config.json 으로 옮기지 않음 (TOKEN 패턴 자동 차단)
 // _isSecretKey → lib/pure-utils.js 로 이동 (1.9.274 UR-0025 1단계)
-function _leernessConfigPath(root) { return path.join(absRoot(root || process.cwd()), '.harness', 'leerness-config.json'); }
+function _leernessConfigPath(root) { return path.join(absRoot(root || process.cwd()), '.leerness', 'leerness-config.json'); }
 function _loadLeernessConfig(root) {
   const f = _leernessConfigPath(root);
   if (!exists(f)) return false;
@@ -18714,7 +18761,7 @@ function _loadLeernessConfig(root) {
     return true;
   } catch { return false; }
 }
-// 1.9.187: 기존 .env 에 비시크릿 LEERNESS_* 가 있으면 → .harness/leerness-config.json 으로 옮기고 .env 에서 제거.
+// 1.9.187: 기존 .env 에 비시크릿 LEERNESS_* 가 있으면 → .leerness/leerness-config.json 으로 옮기고 .env 에서 제거.
 //   사용자가 1.9.186 이전 버전으로 만든 .env 를 1.9.187 로 마이그레이트할 때 자동 정리.
 //   .env 의 시크릿 (TOKEN/KEY/PASSWORD) 은 절대 건드리지 않음. 보안 first.
 function _migrateNonsecretFromEnv(root) {
@@ -18967,13 +19014,13 @@ async function orchestrateCmd(root, goalParts) {
     log(best.reply.slice(0, 600));
   }
 
-  // .harness/orchestrate-log.md 누적 (1.9.22 후보 4)
-  const logFile = path.join(root, '.harness', 'orchestrate-log.md');
+  // .leerness/orchestrate-log.md 누적 (1.9.22 후보 4)
+  const logFile = path.join(root, '.leerness', 'orchestrate-log.md');
   if (!exists(path.dirname(logFile))) fs.mkdirSync(path.dirname(logFile), { recursive: true });
   const entry = `\n## ${now()}\nmodel=${model} agents=${agentCount} success=${ok.length}/${agentCount} goal=${goal.slice(0, 100)}\n`;
   append(logFile, exists(logFile) ? entry : `# Orchestrate Log\n${entry}`);
   log('');
-  log(`📜 누적 기록: .harness/orchestrate-log.md`);
+  log(`📜 누적 기록: .leerness/orchestrate-log.md`);
 }
 
 // 1.9.24: leerness deps <capability> — depends-on 그래프 역방향 추적 + 자동 회귀 sweep
@@ -19235,8 +19282,8 @@ function optimismCheckCmd(root, taskId) {
 function _resolvePersona(root, id) {
   // 1) 내장
   if (BUILT_IN_PERSONAS[id]) return BUILT_IN_PERSONAS[id];
-  // 2) .harness/personas/<id>.md (사용자 정의)
-  const customPath = path.join(root, '.harness', 'personas', `${id}.md`);
+  // 2) .leerness/personas/<id>.md (사용자 정의)
+  const customPath = path.join(root, '.leerness', 'personas', `${id}.md`);
   if (exists(customPath)) {
     const txt = read(customPath);
     const nameMatch = txt.match(/^#\s+(.+)$/m);
@@ -19247,8 +19294,8 @@ function _resolvePersona(root, id) {
 
 // 1.9.291 (UR-0025 2단계): 외부 에이전트 레지스트리(EXTERNAL_AGENTS + AGENT_SLASH_COMMANDS) 데이터 모듈 분리 (비파괴, require-based). selftest 3종 검증.
 const { EXTERNAL_AGENTS, AGENT_SLASH_COMMANDS } = require('../lib/agent-registry');
-function _agentSlashFile(root) { return path.join(absRoot(root), '.harness', 'agent-slash-commands.json'); }
-// 사용자 override 병합 — .harness/agent-slash-commands.json 에 동일 agent id 가 있으면 commands 를 교체(최신화).
+function _agentSlashFile(root) { return path.join(absRoot(root), '.leerness', 'agent-slash-commands.json'); }
+// 사용자 override 병합 — .leerness/agent-slash-commands.json 에 동일 agent id 가 있으면 commands 를 교체(최신화).
 //   파일 형식: { schemaVersion:1, agents: { <id>: { label?, asOf?, invoke?, note?, commands:[{cmd,desc}] } } }
 function _loadAgentSlashCommands(root) {
   const merged = {};
@@ -19277,7 +19324,7 @@ function _loadAgentSlashCommands(root) {
   } catch {}
   return merged;
 }
-// 워크스페이스 기록 — 빌트인 레지스트리를 .harness/agent-slash-commands.json 으로 출력 (사용자가 편집해 최신화 가능).
+// 워크스페이스 기록 — 빌트인 레지스트리를 .leerness/agent-slash-commands.json 으로 출력 (사용자가 편집해 최신화 가능).
 //   기존 사용자 override 가 있으면 보존(병합 결과 기록). force 시 빌트인으로 덮어쓰기.
 function _recordAgentSlashCommands(root, opts = {}) {
   const f = _agentSlashFile(root);
@@ -19335,7 +19382,7 @@ function _probeAgentSlash(extDef, opts = {}) {
   const probeArgs = [...base, '--help'];
   let r;
   try {
-    r = cp.spawnSync(extDef.bin, probeArgs, { encoding: 'utf8', timeout, windowsHide: true });
+    r = spawnPortableSync(extDef.bin, probeArgs, { encoding: 'utf8', timeout, windowsHide: true });
   } catch (e) {
     return { ok: false, commands: [], reason: `spawn 예외: ${e.message}` };
   }
@@ -19345,7 +19392,7 @@ function _probeAgentSlash(extDef, opts = {}) {
   if (!commands.length) return { ok: false, commands: [], reason: `${extDef.bin} --help 출력에서 ${invoke === 'subcommand' ? '하위명령' : '슬래시 명령'} 미검출 (큐레이션 유지)` };
   return { ok: true, commands, reason: `${commands.length}건 검출`, probeArgs: probeArgs.join(' ') };
 }
-// 1.9.267 (UR-0021 3단계): probe 결과를 .harness/agent-slash-commands.json 으로 병합 기록 (성공 agent 만 갱신, 나머지 보존).
+// 1.9.267 (UR-0021 3단계): probe 결과를 .leerness/agent-slash-commands.json 으로 병합 기록 (성공 agent 만 갱신, 나머지 보존).
 function _refreshAgentSlashCommands(root, targets, opts = {}) {
   const merged = _loadAgentSlashCommands(root); // 현재(builtin+user) 상태 보존 기반
   const results = [];
@@ -19399,7 +19446,7 @@ function slashCommandsCmd(root, agentArg, opts = {}) {
   if (opts.detect) {
     installed = {};
     for (const a of EXTERNAL_AGENTS) {
-      try { const r = cp.spawnSync(a.bin, a.versionArgs || ['--version'], { encoding: 'utf8', timeout: 4000 }); installed[a.id] = !r.error && (r.status === 0 || !!(r.stdout || '').trim()); }
+      try { const r = spawnPortableSync(a.bin, a.versionArgs || ['--version'], { encoding: 'utf8', timeout: 4000 }); installed[a.id] = !r.error && (r.status === 0 || !!(r.stdout || '').trim()); }
       catch { installed[a.id] = false; }
     }
   }
@@ -19469,10 +19516,10 @@ function slashCommandsCmd(root, agentArg, opts = {}) {
   log(dm(`  기록: leerness slash-commands --record  ·  단일: leerness slash-commands claude  ·  설치 감지: --detect  ·  자동 갱신: --refresh [--dry-run]`));
 }
 
-// 1.9.157: Provider Registry — 사용자 정의 provider 동적 추가 (.harness/providers.json)
+// 1.9.157: Provider Registry — 사용자 정의 provider 동적 추가 (.leerness/providers.json)
 //   빌트인 10종 (EXTERNAL_AGENTS: claude/codex/agy/grok/opencode/qwen/aider/goose/copilot/ollama) + 사용자 정의를 merge. OpenRouter / Bedrock 등 새 CLI 즉시 흡수 가능.
 //   파일 형식: { "schemaVersion": 1, "providers": [{ id, bin, envFlag, versionArgs, desc, installHint }] }
-function _providersFile(root) { return path.join(absRoot(root), '.harness', 'providers.json'); }
+function _providersFile(root) { return path.join(absRoot(root), '.leerness', 'providers.json'); }
 function _readUserProviders(root) {
   const p = _providersFile(root);
   if (!exists(p)) return [];
@@ -19520,7 +19567,7 @@ function _allProviders(root) {
       userOverrides.set(u.id, {
         id: u.id,
         bin: _bin,
-        ...(_binOk ? {} : { binRejectedReason: `providers.json 의 bin 이 실행파일 이름/경로가 아니어서 실행하지 않았습니다(공백·셸 메타문자 불가): ${String(_bin).slice(0, 80)}` }),
+        ...(_binOk ? {} : { binRejectedReason: `providers.json 의 bin 이 실행파일 이름/경로가 아니어서 실행하지 않았습니다(선행 -·공백·셸 메타문자 불가): ${String(_bin).slice(0, 80)}` }),
         envFlag: u.envFlag || (_bi && _bi.envFlag) || `LEERNESS_ENABLE_${String(u.id).toUpperCase()}`,
         versionArgs: _uvaOk ? _uva : _fallbackVa,
         ...((_uva && !_uvaOk) ? { versionArgsRejectedReason: `providers.json 의 versionArgs 에 셸 메타문자가 있어 실행하지 않았습니다: ${JSON.stringify(_uva).slice(0, 120)}` } : {}),
@@ -19777,7 +19824,7 @@ async function _probeProviderEndpoints(root, timeoutMs) {
   ];
   for (const t of cliTargets) {
     try {
-      const r = cp.spawnSync(t.bin, ['--version'], { encoding: 'utf8', timeout: timeoutMs, shell: true });
+      const r = _spawnPortableArgvSync(t.bin, ['--version'], { encoding: 'utf8', timeout: timeoutMs });
       // exit 0 또는 stdout 에 "vX.Y.Z" 비슷한 형태가 있으면 found 처리
       const out = (r.stdout || '').trim();
       const errOut = (r.stderr || '').trim();
@@ -19811,9 +19858,9 @@ async function _probeProviderEndpoints(root, timeoutMs) {
 // 1.9.197: A축 9.5→10 보강 — provider probe 결과 60분 캐시 (handoff 자동 통합)
 //   사용자 명시 (1.9.191): "범용 AI 하네스 ... 최고의 도구"
 //   매 handoff 마다 11 backend probe 비용 (~1.5초)을 캐시로 흡수 → 1/60 라운드만 실제 probe
-//   캐시 위치: .harness/provider-probe-cache.json (비시크릿, 체크인 가능)
+//   캐시 위치: .leerness/provider-probe-cache.json (비시크릿, 체크인 가능)
 const _PROVIDER_PROBE_CACHE_TTL_MS = 60 * 60 * 1000;
-function _providerProbeCachePath(root) { return path.join(root, '.harness', 'provider-probe-cache.json'); }
+function _providerProbeCachePath(root) { return path.join(root, '.leerness', 'provider-probe-cache.json'); }
 function _loadProviderProbeCache(root) {
   try {
     const fp = _providerProbeCachePath(root);
@@ -19826,7 +19873,7 @@ function _loadProviderProbeCache(root) {
 }
 function _writeProviderProbeCache(root, result) {
   try {
-    mkdirp(path.join(root, '.harness'));
+    mkdirp(path.join(root, '.leerness'));
     writeUtf8(_providerProbeCachePath(root), JSON.stringify({ at: new Date().toISOString(), result }, null, 2));
     return true;
   } catch { return false; }
@@ -19886,7 +19933,7 @@ function _recommendAgent(task) {
   return { target: null, reason: '' };
 }
 
-//   args 는 shell:true 로 실행되므로(윈도우 .cmd 심 해석에 필요) **셸 메타문자가 없어야** 한다.
+//   args 는 Windows .cmd 호환 단일 셸 명령으로 합쳐지므로 **셸 메타문자가 없어야** 한다.
 //   있으면 인용이 깨져 엉뚱한 실행이 되고(실측: 따옴표 포함 args 가 파싱 실패로 exit 1), 주입 표면도 된다.
 //   1.36.94: 이 술어가 authCheck 안쪽에만 있어서 **바로 위의 versionArgs 는 무방비였다** — providers.json 을
 //   손으로 고치거나 `provider sync` 로 받은 catalog 에 `versionArgs` 를 넣으면 `agents list` 한 번으로
@@ -19905,13 +19952,15 @@ function _argsSafe(a) {
   return Array.isArray(a) && a.length > 0 && a.every(_shellAtomSafe);
 }
 
-//   bin 은 **실행파일 이름/경로**여야 한다 — 명령줄이 아니다. `shell:true` 로 넘기므로 여기에 공백이나
+//   bin 은 **실행파일 이름/경로**여야 한다 — 명령줄이 아니다. 단일 셸 명령에 합치므로 여기에 공백이나
 //   메타문자가 있으면 그 자체가 두 번째 명령이 된다(`cmd /c whoami & rem`). versionArgs 만 막고 닫혔다고
 //   말했던 것이 검수에서 반증됐다: `provider sync` 는 원격 catalog 의 `bin` 을 그대로 저장하고,
 //   그 값은 읽기성 명령인 `agents list/check` 에서 실행된다. 공백을 막는 것은 회귀가 아니다 —
-//   `shell:true` 에서 공백 있는 bin 은 지금도 첫 토큰만 명령으로 해석돼 어차피 동작하지 않는다.
+//   인용 전 공백 있는 bin 은 첫 토큰만 실행파일로 오인될 수 있어 기존 계약에서도 지원하지 않는다.
 function _binSafe(b) {
-  return typeof b === 'string' && b.length <= 260 && _shellAtomSafe(b);
+  if (typeof b !== 'string' || b.length > 260 || !_shellAtomSafe(b)) return false;
+  const leaf = b.replace(/\\/g, '/').split('/').pop();
+  return !!leaf && !leaf.startsWith('-');
 }
 
 //   같은 실행파일을 가리키는 **정상적인 별칭**까지 다른 것으로 보면, 이번에 되살린 인증 차단이
@@ -19931,11 +19980,11 @@ function _checkAgent(agent, opts = {}) {
   const _vaRaw = agent.versionArgs;
   const _vaSafe = _argsSafe(_vaRaw);
   const _versionArgs = _vaSafe ? _vaRaw : ['--version'];
-  //   bin 이 실행파일 이름/경로가 아니면 **아무것도 실행하지 않는다** — 여기가 shell:true 명령 위치다.
+  //   bin 이 실행파일 이름/경로가 아니면 **아무것도 실행하지 않는다** — 여기가 외부 명령 실행 위치다.
   const _binOk = _binSafe(agent.bin);
   try {
     if (!_binOk) throw new Error('bin 형식 거부');
-    const r = cp.spawnSync(agent.bin, _versionArgs, { encoding: 'utf8', timeout: 5000, shell: true });
+    const r = _spawnPortableArgvSync(agent.bin, _versionArgs, { encoding: 'utf8', timeout: 5000 });
     if (r.status === 0 || (r.stdout && r.stdout.trim())) {
       installed = true;
       version = (r.stdout || r.stderr || '').trim().split('\n')[0].slice(0, 80);
@@ -19952,8 +20001,8 @@ function _checkAgent(agent, opts = {}) {
   if (installed && opts.auth && agent.authCheck && _argsSafe(agent.authCheck.args)) {
     authSource = `${agent.bin} ${agent.authCheck.args.join(' ')}`;
     try {
-      const ar = cp.spawnSync(agent.bin, agent.authCheck.args, {
-        encoding: 'utf8', timeout: agent.authCheck.timeoutMs || 8000, shell: true, stdio: ['ignore', 'pipe', 'pipe'],
+      const ar = _spawnPortableArgvSync(agent.bin, agent.authCheck.args, {
+        encoding: 'utf8', timeout: agent.authCheck.timeoutMs || 8000, stdio: ['ignore', 'pipe', 'pipe'],
       });
       const aout = ((ar.stdout || '') + (ar.stderr || '')).trim();
       // **"실행하지 못함"을 "확실히 미인증"으로 둔갑시키지 않는다.** `no` 는 고위험 작업을 차단하므로,
@@ -20002,7 +20051,7 @@ function _checkAgent(agent, opts = {}) {
 async function _warnIfStale(root, opts = {}) {
   if (process.env.LEERNESS_NO_STALE_CHECK === '1') return null;
   const offline = process.env.LEERNESS_OFFLINE === '1';
-  // 24h 캐시: .harness/cache/update-check.json 재사용 — 캐시 fresh면 OFFLINE이어도 비교는 수행
+  // 24h 캐시: .leerness/cache/update-check.json 재사용 — 캐시 fresh면 OFFLINE이어도 비교는 수행
   try {
     let latest = null;
     const cached = readUpdateCache(root);
@@ -20393,8 +20442,7 @@ function _upsertEnvLine(envPath, key, value) {
 function _tryInstallAgent(agent) {
   if (!agent.installCmd) return { ok: false, message: 'installCmd 정의 없음' };
   log(`  ▶ 실행: ${agent.installCmd}`);
-  const parts = agent.installCmd.split(/\s+/);
-  const r = cp.spawnSync(parts[0], parts.slice(1), { encoding: 'utf8', timeout: 120000, shell: true, stdio: 'inherit' });
+  const r = cp.spawnSync(agent.installCmd, { encoding: 'utf8', timeout: 120000, shell: true, stdio: 'inherit' });
   if (r.status === 0) return { ok: true, message: '설치 성공' };
   return { ok: false, message: `exit ${r.status}` + (r.error ? ` (${r.error.code || r.error.message})` : '') };
 }
@@ -20514,12 +20562,12 @@ function _dispatchCommand(agentId, task, writeMode, model) {
 
 const _agents = require('../lib/agents');
 // 1.9.424 (UR-0025/UR-0125 큰 핸들러 모듈화 9번째): agentsCmd → lib/agents.js (DI 위임, rest→array)
-function agentsCmd(root, sub, ...args) { return _agents.agentsCmd(root, sub, args, { VERSION, has, arg, _agentSlashHint, _allProviders, _checkAgent, _cliChat, _dispatchCommand, _harnessBrief: _tgl.toggleOn(root, 'delegation-brief') ? _harnessBrief : undefined, _loadEnvFile, _normalizeRole, _policyEnforce, _readUserProviders, _recommendAgent, _recordRun, _resolveRole, _shellQuoteArg, lessonsPath, taskLogPath }); }   // 1.36.30: delegation-brief 토글 OFF 면 브리프 미접두(=--raw 경로)
+function agentsCmd(root, sub, ...args) { return _agents.agentsCmd(root, sub, args, { VERSION, has, arg, _agentSlashHint, _allProviders, _checkAgent, _cliChat, _dispatchCommand, _harnessBrief: _tgl.toggleOn(root, 'delegation-brief') ? _harnessBrief : undefined, _loadEnvFile, _normalizeRole, _policyEnforce, _readUserProviders, _recommendAgent, _recordRun, _resolveRole, lessonsPath, taskLogPath }); }   // 1.36.30: delegation-brief 토글 OFF 면 브리프 미접두(=--raw 경로)
 
 function personaCmd(root, sub, idOrName, ...rest) {
   root = absRoot(root || process.cwd());
   if (!sub || sub === 'list') {
-    const customDir = path.join(root, '.harness', 'personas');
+    const customDir = path.join(root, '.leerness', 'personas');
     const custom = exists(customDir) ? fs.readdirSync(customDir).filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, '')) : [];
     if (has('--json')) {
       log(JSON.stringify({
@@ -20532,7 +20580,7 @@ function personaCmd(root, sub, idOrName, ...rest) {
     log(`\n## 내장 (${Object.keys(BUILT_IN_PERSONAS).length})`);
     for (const p of Object.values(BUILT_IN_PERSONAS)) log(`  - ${p.id}: ${p.name} — ${p.description}`);
     if (custom.length) {
-      log(`\n## 사용자 정의 (${custom.length}, .harness/personas/)`);
+      log(`\n## 사용자 정의 (${custom.length}, .leerness/personas/)`);
       for (const c of custom) log(`  - ${c}`);
     }
     log(`\n💡 활용: \`leerness review <file> --persona ${Object.keys(BUILT_IN_PERSONAS)[0]}\``);
@@ -20551,7 +20599,7 @@ function personaCmd(root, sub, idOrName, ...rest) {
   }
   if (sub === 'add') {
     if (!idOrName) { fail('persona add <id> 필요'); return process.exit(1); }
-    const customDir = path.join(root, '.harness', 'personas');
+    const customDir = path.join(root, '.leerness', 'personas');
     if (!exists(customDir)) fs.mkdirSync(customDir, { recursive: true });
     const fp = path.join(customDir, `${idOrName}.md`);
     if (exists(fp)) { fail(`이미 존재: ${fp}`); return process.exit(1); }
@@ -20620,7 +20668,7 @@ function reviewCmd(root, target) {
 
   if (emit === 'md') {
     // 파일로도 저장
-    const outDir = path.join(root, '.harness', 'reviews');
+    const outDir = path.join(root, '.leerness', 'reviews');
     if (!exists(outDir)) fs.mkdirSync(outDir, { recursive: true });
     const tag = personas.map(p => p.id).join('-');
     const outFile = path.join(outDir, `${path.basename(target).replace(/\./g, '_')}-${tag}-${today()}.md`);
@@ -20681,7 +20729,7 @@ function llmBenchRecordCmd(root) {
   const scoreN = Number(score);
   if (!Number.isFinite(scoreN) || scoreN < 0) { failJson(has('--json'), 'invalid_score', `--score 는 0 이상의 유한 숫자여야 합니다 (받음: ${score})`); return; }
   const _bcell = v => String(v == null ? '' : v).slice(0, 200).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
-  const histFile = path.join(root, '.harness', 'llm-bench-history.md');
+  const histFile = path.join(root, '.leerness', 'llm-bench-history.md');
   if (!exists(path.dirname(histFile))) fs.mkdirSync(path.dirname(histFile), { recursive: true });
   const row = `| ${today()} | ${_bcell(model)} | ${_bcell(label)} | ${scoreN} | ${_bcell(tokens) || '?'} |\n`;
   if (!exists(histFile)) {
@@ -20702,19 +20750,19 @@ function sessionClose(root, opts = {}) { // 1.36.132 (검수): handoff 는 --no-
 function readmeCmd(root) { syncReadme(absRoot(root)); }
 function consistencyCheck(root) {
   root = absRoot(root);
-  const cands = ['designguide.md','design-guide.md','.harness/designguide.md','docs/designguide.md','docs/design-guide.md'];
+  const cands = ['designguide.md','design-guide.md','.leerness/designguide.md','docs/designguide.md','docs/design-guide.md'];
   const found = cands.filter(f => exists(path.join(root,f)));
   // 1.36.103: --json 이 전역 플래그로 광고되는데 여기선 구현이 없어 사람용 텍스트가 나갔다(게시본에서도 동일).
   //   기계 소비자에겐 파싱 불가 = 미구현과 같다 — 같은 데이터를 JSON 으로 낸다.
-  if (has('--json')) { log(JSON.stringify({ ok: true, root, canonical: '.harness/design-system.md', mergeCandidates: found }, null, 2)); return; }
-  log('Canonical design file: .harness/design-system.md');
+  if (has('--json')) { log(JSON.stringify({ ok: true, root, canonical: '.leerness/design-system.md', mergeCandidates: found }, null, 2)); return; }
+  log('Canonical design file: .leerness/design-system.md');
   if (found.length) { warn('merge candidates found:'); found.forEach(x => log('- ' + x)); }
   else ok('no duplicate design guide candidates');
 }
 function mergeDesign(root) {
   root = absRoot(root);
-  const canonical = path.join(root,'.harness/design-system.md');
-  const cands = ['designguide.md','design-guide.md','.harness/designguide.md','docs/designguide.md','docs/design-guide.md'];
+  const canonical = path.join(root,'.leerness/design-system.md');
+  const cands = ['designguide.md','design-guide.md','.leerness/designguide.md','docs/designguide.md','docs/design-guide.md'];
   // 1.36.42 (codex 5차 #7): (a) --dry-run 인데 실기록, (b) 재실행마다 같은 내용 중복 append(비멱등) — 둘 다 교정.
   const dry = has('--dry-run');
   const already = exists(canonical) ? read(canonical) : '';
@@ -20728,7 +20776,7 @@ function mergeDesign(root) {
   }
   if (dry) { ok(`[dry-run] ${merged ? '병합 예정' : '병합 대상 없음'}${skipped.length ? ` · 이미 병합됨(skip): ${skipped.join(', ')}` : ''} — 실제 변경 0`); return; }
   if (merged) append(canonical, merged);
-  ok(merged ? `design guides merged into .harness/design-system.md${skipped.length ? ` (이미 병합 skip: ${skipped.join(', ')})` : ''}` : (skipped.length ? `nothing to merge (이미 전부 병합됨: ${skipped.join(', ')})` : 'nothing to merge'));
+  ok(merged ? `design guides merged into .leerness/design-system.md${skipped.length ? ` (이미 병합 skip: ${skipped.join(', ')})` : ''}` : (skipped.length ? `nothing to merge (이미 전부 병합됨: ${skipped.join(', ')})` : 'nothing to merge'));
 }
 
 // 1.9.2: self check를 update --check의 thin wrapper로 통합 (단일 출처).
@@ -20817,7 +20865,7 @@ function gate(root) {
 }
 
 // ===== 1.9.13: Retrospective / Insights / Brainstorming =====
-function sessionCounterPath(root) { return path.join(root, '.harness/cache/session-counter.json'); }
+function sessionCounterPath(root) { return path.join(root, '.leerness/cache/session-counter.json'); }
 function readSessionCounter(root) {
   if (!exists(sessionCounterPath(root))) return { count: 0, lastCloseAt: null, lastDeepRetroAt: null };
   try { return JSON.parse(read(sessionCounterPath(root))); } catch { return { count: 0, lastCloseAt: null, lastDeepRetroAt: null }; }
@@ -20866,7 +20914,7 @@ function _retroAggregate(root, cutoff) {
   })).reverse();
 
   // 3) 스킬 활용
-  const skillsDir = path.join(root, '.harness/skills');
+  const skillsDir = path.join(root, '.leerness/skills');
   const skillUsage = [];
   if (exists(skillsDir)) {
     for (const id of fs.readdirSync(skillsDir)) {
@@ -20958,14 +21006,14 @@ function _retroOneLine(agg, lang) {
 
 // 1.9.15: --all-apps / --include 경로 모음
 // 1.9.169 fix: --include 명시되면 cwd 자동 추가 안 함 (explicit-only).
-//   기존: cwd/.harness 자동 추가 → 잔존 .harness 시 의도치 않은 카운트 증가 (e2e flake 원인)
+//   기존: cwd/.leerness 자동 추가 → 잔존 .leerness 시 의도치 않은 카운트 증가 (e2e flake 원인)
 //   변경: --include 시 사용자가 명시한 경로만 사용. --all-apps 단독은 기존 동작 유지.
 function _collectWorkspacePaths(rootBase) {
   const set = new Set();
   const include = arg('--include', null);
   // --include 명시 시 cwd 자동 추가 스킵 (explicit-only 보장)
   if (!include) {
-    if (exists(path.join(rootBase, '.harness'))) set.add(rootBase);
+    if (exists(path.join(rootBase, '.leerness'))) set.add(rootBase);
   }
   if (has('--all-apps')) {
     const baseCandidates = [path.resolve(rootBase, '_apps'), path.resolve(rootBase, '..', '_apps')];
@@ -20976,7 +21024,7 @@ function _collectWorkspacePaths(rootBase) {
       for (const e of fs.readdirSync(base)) {
         const p = path.join(base, e);
         try {
-          if (fs.statSync(p).isDirectory() && exists(path.join(p, '.harness'))) set.add(p);
+          if (fs.statSync(p).isDirectory() && exists(path.join(p, '.leerness'))) set.add(p);
         } catch {}
       }
     }
@@ -20984,8 +21032,8 @@ function _collectWorkspacePaths(rootBase) {
   if (include) {
     for (const p of String(include).split(',')) {
       const abs = path.resolve(p.trim());
-      if (exists(path.join(abs, '.harness'))) set.add(abs);
-      else warn(`--include 무시: ${abs} (.harness 없음)`);
+      if (exists(path.join(abs, '.leerness'))) set.add(abs);
+      else warn(`--include 무시: ${abs} (.leerness 없음)`);
     }
   }
   return Array.from(set);
@@ -21207,7 +21255,7 @@ function _brainstormFor(root, topic) {
       hits.decisions.push({ title: t, preview: b.slice(0, 200).replace(/\n+/g, ' '), line: lineNo });
     }
   }
-  const skillsDir = path.join(root, '.harness/skills');
+  const skillsDir = path.join(root, '.leerness/skills');
   if (exists(skillsDir)) {
     for (const id of fs.readdirSync(skillsDir)) {
       const f = path.join(skillsDir, id, 'skill.json');
@@ -21252,7 +21300,7 @@ function _brainstormFor(root, topic) {
     }
   }
   // 1.9.72: skill-suggestions.md rolling history hits
-  const histPath = path.join(root, '.harness', 'skill-suggestions.md');
+  const histPath = path.join(root, '.leerness', 'skill-suggestions.md');
   if (exists(histPath)) {
     const histTxt = read(histPath);
     for (const { block: block, line: _ln } of _blocksWithOffset(histTxt, /\n(?=## )/)) {
@@ -21291,7 +21339,7 @@ function _brainstormFor(root, topic) {
     }
   }
   // 1.9.72: task-log.md 실패 라인 hits
-  const tlogPath = path.join(root, '.harness', 'task-log.md');
+  const tlogPath = path.join(root, '.leerness', 'task-log.md');
   if (exists(tlogPath)) {
     const tlog = read(tlogPath);
     const lines = tlog.split('\n');
@@ -21311,7 +21359,7 @@ function _brainstormFor(root, topic) {
     { key: 'plan',      file: 'plan.archive.md' }
   ];
   for (const src of archiveSources_bsFor) {
-    const fp = path.join(root, '.harness', src.file);
+    const fp = path.join(root, '.leerness', src.file);
     if (!exists(fp)) continue;
     const txt = read(fp);
     const blocks = _blocksWithOffset(txt, /\n(?=## 제거 )/);
@@ -21495,27 +21543,27 @@ function brainstormCmd(root, topic) {
   // 1.9.15: 모든 출력에 출처 파일:라인 표시
   if (hits.decisions.length) {
     log(`\n## 🧠 관련 결정 (${hits.decisions.length})`);
-    hits.decisions.slice(0, 5).forEach(d => log(`  - .harness/decisions.md:${d.line || '?'} — ${_lineSafe(d.title)}`));
+    hits.decisions.slice(0, 5).forEach(d => log(`  - .leerness/decisions.md:${d.line || '?'} — ${_lineSafe(d.title)}`));
   }
   if (hits.skills.length) {
     log(`\n## 📚 관련 스킬 (${hits.skills.length}) — 시작 전 \`skill info <id>\` 권장`);
-    hits.skills.forEach(s => log(`  - .harness/skills/${s.id}/skill.json — ${s.id} (${s.displayNameKo}) · 사용 ${s.usage?.count || 0}회 · cap ${(s.capabilities || []).length}`));
+    hits.skills.forEach(s => log(`  - .leerness/skills/${s.id}/skill.json — ${s.id} (${s.displayNameKo}) · 사용 ${s.usage?.count || 0}회 · cap ${(s.capabilities || []).length}`));
   }
   if (hits.tasks.length) {
     log(`\n## 📌 관련 과거 task (${hits.tasks.length})`);
-    hits.tasks.slice(0, 5).forEach(t => log(`  - .harness/progress-tracker.md:${t.line || '?'} — ${t.id} [${t.status}] ${t.request} (matched: ${t._fields.join('+')})`));
+    hits.tasks.slice(0, 5).forEach(t => log(`  - .leerness/progress-tracker.md:${t.line || '?'} — ${t.id} [${t.status}] ${t.request} (matched: ${t._fields.join('+')})`));
   }
   if (hits.rules.length) {
     log(`\n## ⚡ 관련 룰 (${hits.rules.length})`);
-    hits.rules.forEach(r => log(`  - .harness/rules.md:${r.line || '?'} — ${r.id} [${r.trigger}] ${r.rule}`));
+    hits.rules.forEach(r => log(`  - .leerness/rules.md:${r.line || '?'} — ${r.id} [${r.trigger}] ${r.rule}`));
   }
   if (hits.evidence.length) {
     log(`\n## 🧪 관련 검증 기록 (${hits.evidence.length})`);
-    hits.evidence.slice(0, 5).forEach(e => log(`  - .harness/review-evidence.md:${e.line || '?'} — ${e.title}`));
+    hits.evidence.slice(0, 5).forEach(e => log(`  - .leerness/review-evidence.md:${e.line || '?'} — ${e.title}`));
   }
   if (hits.lessons.length) {
     log(`\n## ⚠ 같은 주제 과거 실패/롤백 (${hits.lessons.length}) — 같은 실수 방지`);
-    hits.lessons.slice(0, 5).forEach(l => log(`  - .harness/review-evidence.md:${l.line || '?'} — ${l.title}`));
+    hits.lessons.slice(0, 5).forEach(l => log(`  - .leerness/review-evidence.md:${l.line || '?'} — ${l.title}`));
   }
   // 1.36.86: `--include-code` 결과를 사람용에도 렌더한다 — 이전엔 --json 만 code 를 보여주고
   //   사람용은 같은 입력에 "관련 자원 없음" 을 출력했다(실측 확인된 두 경로 불일치).
@@ -21528,22 +21576,22 @@ function brainstormCmd(root, topic) {
   // 1.9.72: skill-suggestions.md rolling history hits
   if (hits.skillHistory.length) {
     log(`\n## 📒 같은 주제 이전 skill match 이력 (${hits.skillHistory.length}) — 1.9.68 누적`);
-    hits.skillHistory.slice(0, 5).forEach(h => log(`  - .harness/skill-suggestions.md:${h.line || '?'} — [${h.at}] "${h.query}"`));
+    hits.skillHistory.slice(0, 5).forEach(h => log(`  - .leerness/skill-suggestions.md:${h.line || '?'} — [${h.at}] "${h.query}"`));
   }
   // 1.9.72: task-log.md 실패 라인 hits
   if (hits.taskLogFails.length) {
     log(`\n## 📜 task-log 실패 라인 (${hits.taskLogFails.length}) — 1.9.67 인덱스 + brainstorm`);
-    hits.taskLogFails.slice(0, 5).forEach(t => log(`  - .harness/task-log.md:${t.line || '?'} — ${t.title}`));
+    hits.taskLogFails.slice(0, 5).forEach(t => log(`  - .leerness/task-log.md:${t.line || '?'} — ${t.title}`));
   }
   // 1.9.133: lessonsExplicit display (데이터는 1.9.116에서 수집, display 누락 fix)
   if (hits.lessonsExplicit && hits.lessonsExplicit.length) {
     log(`\n## 💡 관련 lessons (${hits.lessonsExplicit.length}) — Memory Surface lessons.md 직접 매칭 (1.9.116)`);
-    hits.lessonsExplicit.slice(0, 5).forEach(l => log(`  - .harness/lessons.md:${l.line || '?'} — ${l.title}`));
+    hits.lessonsExplicit.slice(0, 5).forEach(l => log(`  - .leerness/lessons.md:${l.line || '?'} — ${l.title}`));
   }
   // 1.9.133: planMilestones display (데이터는 1.9.116에서 수집, display 누락 fix)
   if (hits.planMilestones && hits.planMilestones.length) {
     log(`\n## 🗺  관련 plan milestones (${hits.planMilestones.length}) — plan.md 매칭 (1.9.116)`);
-    hits.planMilestones.slice(0, 5).forEach(m => log(`  - .harness/plan.md:${m.line || '?'} — ${m.id} ${m.title}`));
+    hits.planMilestones.slice(0, 5).forEach(m => log(`  - .leerness/plan.md:${m.line || '?'} — ${m.id} ${m.title}`));
   }
   // 1.9.131: 3 archive 파일 hits — DELETE 5종 archive 도 brainstorm 후보
   if (hits.archive) {
@@ -21554,7 +21602,7 @@ function brainstormCmd(root, topic) {
         const items = hits.archive[key] || [];
         if (items.length) {
           for (const a of items.slice(0, 3)) {
-            log(`  - ${emoji} .harness/${label}:${a.line || '?'} — ${a.date} "${a.target}"${a.originalHeader ? ' (orig: ' + a.originalHeader.slice(0, 80) + ')' : ''}`);
+            log(`  - ${emoji} .leerness/${label}:${a.line || '?'} — ${a.date} "${a.target}"${a.originalHeader ? ' (orig: ' + a.originalHeader.slice(0, 80) + ')' : ''}`);
           }
         }
       }
@@ -21604,7 +21652,7 @@ function _roadmapData(root) {
   }));
   // skills
   const skills = [];
-  const skillsDir = path.join(root, '.harness/skills');
+  const skillsDir = path.join(root, '.leerness/skills');
   if (exists(skillsDir)) {
     for (const id of fs.readdirSync(skillsDir)) {
       const f = path.join(skillsDir, id, 'skill.json');
@@ -21636,11 +21684,11 @@ function _roadmapData(root) {
   }
   return {
     project: path.basename(root),
-    version: exists(path.join(root, '.harness/HARNESS_VERSION')) ? read(path.join(root, '.harness/HARNESS_VERSION')).trim() : 'unknown',
+    version: exists(path.join(root, '.leerness/HARNESS_VERSION')) ? read(path.join(root, '.leerness/HARNESS_VERSION')).trim() : 'unknown',
     milestones, tasks, skills, rules,
     currentState: { now, next, blockers },
     decisions,
-    designTokens: _roadmapParseTokens(exists(path.join(root, '.harness/design-system.md')) ? read(path.join(root, '.harness/design-system.md')) : ''),
+    designTokens: _roadmapParseTokens(exists(path.join(root, '.leerness/design-system.md')) ? read(path.join(root, '.leerness/design-system.md')) : ''),
     cssVariables: _roadmapParseCssVars(root)
   };
 }
@@ -21804,7 +21852,7 @@ function _roadmapHTML(data) {
 
 function roadmapCmd(root) {
   root = absRoot(root);
-  if (!exists(path.join(root, '.harness'))) return fail(`leerness 미설치: ${root}/.harness 없음 — 먼저 \`leerness init .\``);
+  if (!exists(path.join(root, '.leerness'))) return fail(`leerness 미설치: ${root}/.leerness 없음 — 먼저 \`leerness init .\``);
   const outFile = path.resolve(arg('--out', null) || path.join(root, 'roadmap.html'));
   const data = _roadmapData(root);
   writeUtf8(outFile, _roadmapHTML(data));
@@ -21813,7 +21861,7 @@ function roadmapCmd(root) {
 }
 
 // 1.9.12: auto roadmap (install / session-close / 옵트인 data-change 트리거)
-function _autoRoadmapConfigPath(root) { return path.join(root, '.harness/cache/auto-roadmap.json'); }
+function _autoRoadmapConfigPath(root) { return path.join(root, '.leerness/cache/auto-roadmap.json'); }
 function _autoRoadmapConfig(root) {
   const f = _autoRoadmapConfigPath(root);
   const def = { enabled: true, onEveryChange: false, outFile: null };
@@ -21826,7 +21874,7 @@ function _saveAutoRoadmapConfig(root, cfg) {
 function _autoRoadmap(root, trigger) {
   try {
     if (process.env.LEERNESS_NO_AUTO_ROADMAP === '1') return false;
-    if (!exists(path.join(root, '.harness'))) return false;
+    if (!exists(path.join(root, '.leerness'))) return false;
     const cfg = _autoRoadmapConfig(root);
     if (!cfg.enabled) return false;
     if (trigger === 'data-change' && !cfg.onEveryChange) return false;
@@ -21847,7 +21895,7 @@ function _autoRoadmap(root, trigger) {
 
 function roadmapAutoCmd(root, sub) {
   root = absRoot(root);
-  if (!exists(path.join(root, '.harness'))) return fail(`leerness 미설치: ${root}/.harness 없음`);
+  if (!exists(path.join(root, '.leerness'))) return fail(`leerness 미설치: ${root}/.leerness 없음`);
   const cfg = _autoRoadmapConfig(root);
   if (sub === 'on') {
     cfg.enabled = true;
@@ -21873,9 +21921,9 @@ function roadmapAutoCmd(root, sub) {
 }
 
 // ===== 1.9.8: User Rules (자연어 등록 + 매 세션 자동 노출/검증) =====
-function rulesPath(root) { return path.join(root, '.harness/rules.md'); }
-function rulesArchivePath(root) { return path.join(root, '.harness/rules.archive.md'); }
-function rulesCachePath(root) { return path.join(root, '.harness/cache/rule-state.json'); }
+function rulesPath(root) { return path.join(root, '.leerness/rules.md'); }
+function rulesArchivePath(root) { return path.join(root, '.leerness/rules.archive.md'); }
+function rulesCachePath(root) { return path.join(root, '.leerness/cache/rule-state.json'); }
 
 function _rulesHeader(lang = 'ko') {
   // 1.36.63 (F-05 5회차): en 프로젝트 rules 헤더 영어 — 파서(readRules)는 '| R-' 라인앵커+위치 기반이라 라벨 무관
@@ -21957,7 +22005,7 @@ function writeRules(root, rules) {
   const damaged = _unparsableRuleLines(root).filter(l => !rules.some(r => l.startsWith(`| ${r.id} `)));
   const tail = damaged.length ? '\n<!-- ⚠ 아래 행은 손상돼 파싱 불가 — 삭제하지 않고 보존함. 수동 복구 후 위 표로 병합하세요 -->\n' + damaged.join('\n') + '\n' : '';
   // 1.36.63: 저장 시 헤더 언어 = 프로젝트 언어 (en rules.md 가 rule add 로 ko 회귀하지 않게)
-  let _rlLang = 'ko'; try { _rlLang = read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch {}
+  let _rlLang = 'ko'; try { _rlLang = read(path.join(root, '.leerness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch {}
   // 1.36.130 (P2-c, 실측 재현): 이 함수는 헤더+행+손상tail 로 **전체를 재구성**해 왔다 — 즉 표가 아닌
   //   사용자 텍스트(머리말·꼬리 절·메모)는 존재하지 않는 것과 같았고, `session close` 마다 조용히 사라졌다.
   //   실측: rules.md 에 머리말/꼬리말을 넣고 `session close` → 931B → 807B, 두 문구 모두 grep 0건.
@@ -22131,7 +22179,7 @@ function ruleRemove(root, id) {
     return removed;
   });
   if (res.error) return failJson(has('--json'), 'rule_not_found', `rule not found: ${id}`);   // codex P2: --json 에러 구조화
-  ok(`rule removed: ${id} (보존: .harness/rules.archive.md)`);
+  ok(`rule removed: ${id} (보존: .leerness/rules.archive.md)`);
 }
 
 function rulePause(root, id) {
@@ -22188,7 +22236,7 @@ function captureProjectState(root) {
   if (exists(pkgFile)) { try { state.packageVersion = JSON.parse(read(pkgFile)).version; } catch {} }
   const cl = path.join(root, 'CHANGELOG.md');
   if (exists(cl)) { try { state.changelogMtime = fs.statSync(cl).mtime.getTime(); state.changelogSize = fs.statSync(cl).size; } catch {} }
-  const hv = path.join(root, '.harness/HARNESS_VERSION');
+  const hv = path.join(root, '.leerness/HARNESS_VERSION');
   if (exists(hv)) state.harnessVersion = read(hv).trim();
   return state;
 }
@@ -22291,7 +22339,7 @@ function releaseBump(root) {
   if (kind === 'major') next = isPre && min === 0 && pat === 0 ? `${maj}.0.0` : `${maj + 1}.0.0`;
   else if (kind === 'minor') next = isPre && pat === 0 ? `${maj}.${min}.0` : `${maj}.${min + 1}.0`;
   else next = isPre ? `${maj}.${min}.${pat}` : `${maj}.${min}.${pat + 1}`;
-  const hv = path.join(root, '.harness/HARNESS_VERSION');
+  const hv = path.join(root, '.leerness/HARNESS_VERSION');
   const updateHarnessVersion = exists(hv) && /^\d+\.\d+\.\d+/.test(read(hv).trim());
   // 1.36.156 (외부 Codex P2): package/HARNESS_VERSION 을 먼저 쓴 뒤 bin/README 검증이 실패하면
   //   출하 버전 표면이 반쯤 갱신됐다. 자체 패키지 표면을 모두 preflight 하고, 이후 쓰기는 snapshot
@@ -22371,7 +22419,7 @@ function releaseNote(root, text) {
 
 // 1.9.10: git remote 자동 감지 + gh-release + gh-pages 배포
 function detectGitRemote(root) {
-  const r = _gitSpawn(['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', shell: true });
+  const r = _gitSpawn(['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8' });
   if (r.status !== 0) return null;
   const url = (r.stdout || '').trim();
   if (!url) return null;
@@ -22395,20 +22443,20 @@ function deployGhPages(root, sourceFile) {
   log(`Source: ${rel(root, src)}`);
   log(`Target: gh-pages branch of ${remote.owner}/${remote.repo}`);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const wt = path.join(root, '.harness/cache', `ghpages-${stamp}`);
+  const wt = path.join(root, '.leerness/cache', `ghpages-${stamp}`);
   mkdirp(path.dirname(wt));
   // worktree (기존 gh-pages 있으면 fetch, 없으면 orphan)
-  const fetchR = _gitSpawn(['fetch', 'origin', 'gh-pages'], { cwd: root, encoding: 'utf8', shell: true });
+  const fetchR = _gitSpawn(['fetch', 'origin', 'gh-pages'], { cwd: root, encoding: 'utf8' });
   const hasBranch = fetchR.status === 0;
   let wtArgs;
   if (hasBranch) wtArgs = ['worktree', 'add', wt, 'origin/gh-pages'];
   else wtArgs = ['worktree', 'add', '--orphan', '-b', 'gh-pages', wt];
-  const wtR = _gitSpawn(wtArgs, { cwd: root, encoding: 'utf8', shell: true });   // 1.36.133: 초크포인트 경유(전수 0 유지)
+  const wtR = _gitSpawn(wtArgs, { cwd: root, encoding: 'utf8' });   // 1.36.133: 초크포인트 경유(전수 0 유지)
   if (wtR.status !== 0) { fail('worktree 생성 실패: ' + (wtR.stderr || '').slice(0, 200)); process.exitCode = 1; return; }
   try {
     // orphan인 경우 초기화
     if (!hasBranch) {
-      _gitSpawn(['rm', '-rf', '.'], { cwd: wt, encoding: 'utf8', shell: true });
+      _gitSpawn(['rm', '-rf', '.'], { cwd: wt, encoding: 'utf8' });
     }
     // 소스 복사 (index.html로 이름 변경)
     const destName = path.basename(src) === 'index.html' ? 'index.html' : 'index.html';
@@ -22426,7 +22474,7 @@ function deployGhPages(root, sourceFile) {
       else ok(`gh-pages push 완료 → https://${remote.owner}.github.io/${remote.repo}/`);
     }
   } finally {
-    _gitSpawn(['worktree', 'remove', '--force', wt], { cwd: root, encoding: 'utf8', shell: true });
+    _gitSpawn(['worktree', 'remove', '--force', wt], { cwd: root, encoding: 'utf8' });
   }
 }
 
@@ -22800,7 +22848,7 @@ async function releasePackCmd(root) {
   // 3. 부모 워크스페이스 self-host migrate (dogfooding gap 차단)
   if (parentMigrate) {
     const parent = path.resolve(root, '..');
-    if (exists(path.join(parent, '.harness'))) {
+    if (exists(path.join(parent, '.leerness'))) {
       log(`\n[parent self-host migrate] ${parent}`);
       if (!dryRun) {
         try {
@@ -22811,7 +22859,7 @@ async function releasePackCmd(root) {
         log(`  (dry-run) ${parent} migrate 스킵`);
       }
     } else {
-      log('  (parent에 .harness 없음 — migrate 스킵)');
+      log('  (parent에 .leerness 없음 — migrate 스킵)');
     }
   }
 
@@ -22881,10 +22929,10 @@ function releasePublish(root) {
       log('(dry-run) git push / git push --tags 생략 (실행 안 함)');
     } else {
       log('git push:');
-      const r1 = _gitSpawn(['push'], { cwd: root, encoding: 'utf8', shell: true });
+      const r1 = _gitSpawn(['push'], { cwd: root, encoding: 'utf8' });
       log((r1.stdout || r1.stderr || '').slice(-200) || '(no output)');
       if (r1.status !== 0) { fail('git push 실패'); pubFail = true; }
-      const r2 = _gitSpawn(['push', '--tags'], { cwd: root, encoding: 'utf8', shell: true });
+      const r2 = _gitSpawn(['push', '--tags'], { cwd: root, encoding: 'utf8' });
       log((r2.stdout || r2.stderr || '').slice(-200) || '(no output)');
       if (r2.status !== 0) { fail('git push --tags 실패'); pubFail = true; }
     }
@@ -22903,7 +22951,7 @@ function releasePublish(root) {
         const tarball = path.join(root, `${JSON.parse(read(path.join(root, 'package.json'))).name}-${v}.tgz`);
         if (exists(tarball)) ghArgs.push(tarball);
         log(`gh ${ghArgs.join(' ')}`);
-        const ghR = cp.spawnSync('gh', ghArgs, { cwd: root, encoding: 'utf8', shell: true });
+        const ghR = _spawnPortableArgvSync('gh', ghArgs, { cwd: root, encoding: 'utf8' });
         log((ghR.stdout || ghR.stderr || '').slice(-300) || '(no output)');
         if (ghR.status !== 0) warn('gh release 생성 실패 (이미 존재할 수 있음)');
         else ok(`GitHub Release 생성: ${tag}`);
@@ -23009,7 +23057,7 @@ function verifyCodeCmd(root) {
     '```'
   ].join('\n');
   append(evidencePath(root), evBlock + '\n');
-  ok(`evidence 기록: .harness/review-evidence.md`);
+  ok(`evidence 기록: .leerness/review-evidence.md`);
   if (failedCnt) { process.exitCode = 1; warn(`${failedCnt}개 task 실패 — progress의 해당 row를 incomplete로 표시하세요.`); }
 }
 
@@ -23107,7 +23155,7 @@ function lessonsCmd(root) {
 
 // ===== 1.9.141: Feature Causality Graph — 인과관계 추적 (사용자 요청) =====
 // 신규 기능 추가 / 데이터 형식 변경 시 영향 범위 자동 감지. 코드 작성 전 참조 우선순위 1순위.
-// File: .harness/feature-graph.md
+// File: .leerness/feature-graph.md
 // Format per node (markdown):
 //   ## F-XXXX <title>
 //   - depends-on: F-YYYY, F-ZZZZ
@@ -23119,7 +23167,7 @@ function lessonsCmd(root) {
 //   - error-modes: e1, e2
 //   - tests: tests/foo.test.ts
 //   - notes: 자유 메모
-function featureGraphPath(root) { return path.join(absRoot(root), '.harness', 'feature-graph.md'); }
+function featureGraphPath(root) { return path.join(absRoot(root), '.leerness', 'feature-graph.md'); }
 function _readFeatureGraph(root) {
   const p = featureGraphPath(root);
   if (!exists(p)) return { nodes: [], text: '' };
@@ -23150,12 +23198,12 @@ const _feature = require('../lib/feature');
 function _featureDeps() { return { _ensureFeatureGraph, _readFeatureGraph, _writeFeatureGraph, arg, has, _requireInit }; }  // 1.36.2: _requireInit 주입 — feature add 미초기화 dir scaffold 게이트
 // 1.36.108 (T-0097): feature add/link 는 읽기~쓰기 RMW 다(그래프 전체를 다시 렌더링해 저장).
 //   락을 여기서 감싼다 — lib/feature.js 는 I/O 를 주입받으므로 호출 경계가 가장 좁은 병목이다.
-//   단 **`.harness` 가 이미 있을 때만** 감싼다. `_withLock` 은 락 파일을 만들려고 디렉토리를 만드는데,
+//   단 **`.leerness` 가 이미 있을 때만** 감싼다. `_withLock` 은 락 파일을 만들려고 디렉토리를 만드는데,
 //   미초기화 디렉토리에서 이 명령은 scaffold 게이트로 막혀야 하고 잔여 파일을 남기지 않아야 한다(1.36.2 계약).
 //   게이트에 걸릴 경우엔 아무것도 쓰지 않으므로 락도 필요 없다.
 function _featureLocked(root, fn) {
   const r = absRoot(root);
-  return exists(path.join(r, '.harness')) ? _withLock(featureGraphPath(r), fn) : fn();
+  return exists(path.join(r, '.leerness')) ? _withLock(featureGraphPath(r), fn) : fn();
 }
 function featureAddCmd(root, title) { return _featureLocked(root, () => _feature.featureAddCmd(root, title, _featureDeps())); }
 function featureLinkCmd(root, fromId) { return _featureLocked(root, () => _feature.featureLinkCmd(root, fromId, _featureDeps())); }
@@ -23239,9 +23287,9 @@ function impactCmd(root, target) {
   return { target: targetRel, high, medium, low };
 }
 
-function reuseMapPath(root) { return path.join(root, '.harness/reuse-map.md'); }
-function designSystemPath(root) { return path.join(root, '.harness/design-system.md'); }
-function featureContractsPath(root) { return path.join(root, '.harness/feature-contracts.md'); }
+function reuseMapPath(root) { return path.join(root, '.leerness/reuse-map.md'); }
+function designSystemPath(root) { return path.join(root, '.leerness/design-system.md'); }
+function featureContractsPath(root) { return path.join(root, '.leerness/feature-contracts.md'); }
 
 function reuseFind(root, query) {
   if (!query) return fail('query required');
@@ -23258,7 +23306,7 @@ function reuseFind(root, query) {
   }
   // 코드 export/식별자 검색
   for (const f of walkCode(root)) {
-    if (rel(root, f).startsWith('.harness/')) continue;
+    if (rel(root, f).startsWith('.leerness/')) continue;
     let text; try { text = read(f); } catch { continue; }
     const lines = text.split('\n');
     const exportRe = new RegExp(`(?:export\\s+(?:default\\s+)?(?:async\\s+)?(?:function|const|class|let|var)\\s+(\\w*${escapeRegex(query)}\\w*)|class\\s+(\\w*${escapeRegex(query)}\\w*)|<(\\w*${escapeRegex(query)}\\w*)\\b)`, 'i');
@@ -23318,7 +23366,7 @@ function uiConsistency(root) {
   const findings = [];
   for (const f of walkCode(root)) {
     const r = rel(root, f);
-    if (r.startsWith('.harness/')) continue;
+    if (r.startsWith('.leerness/')) continue;
     // 1.9.12: leerness가 자동 생성하는 roadmap.html은 ui consistency 검사 대상 아님
     if (r === 'roadmap.html' || /\/roadmap\.html$/.test(r)) continue;
     if (!/\.(css|scss|sass|less|html|jsx|tsx|vue|svelte|js|ts)$/i.test(f)) continue;
@@ -23355,7 +23403,7 @@ function graphCmd(root) {
   root = absRoot(root);
   const edges = [];
   for (const f of walkCode(root)) {
-    if (rel(root, f).startsWith('.harness/')) continue;
+    if (rel(root, f).startsWith('.leerness/')) continue;
     let text; try { text = read(f); } catch { continue; }
     const re = /(?:import\s+[^;\n]*?from\s+['"]|require\(['"]|@import\s+['"]|href=["']|src=["'])([^'")\s]+)/g;
     let m;
@@ -23430,7 +23478,7 @@ function guideCmd(root, target) {
 
 // ===== Auto update =====
 // compareVer, parseHarnessVersion → lib/pure-utils.js 로 이동 (1.9.274 UR-0025 1단계)
-function updateCachePath(root) { return path.join(root, '.harness/cache/update-check.json'); }
+function updateCachePath(root) { return path.join(root, '.leerness/cache/update-check.json'); }
 function readUpdateCache(root) { try { const p = updateCachePath(root); if (!exists(p)) return null; return JSON.parse(read(p)); } catch { return null; } }
 function writeUpdateCache(root, obj) { writeUtf8(updateCachePath(root), JSON.stringify({ at: Date.now(), ...obj }, null, 2) + '\n'); }
 function cacheFresh(c, hours) { return c && c.at && (Date.now() - c.at < hours * 3600 * 1000); }
@@ -23440,19 +23488,13 @@ function fetchNpmLatest(pkg) {
     // 1.9.300 (UR-0040, 외부리뷰 Sonnet): cp.exec 템플릿리터럴 → execFile(args 배열) + pkg charset 검증 = 셸 주입 이중 차단.
     //   이전: `npm view ${pkg} version` 가 셸 문자열이라 pkg 에 메타문자(; && $() 공백)면 주입 가능.
     if (!/^@?[a-z0-9][a-z0-9._/-]*$/i.test(String(pkg || ''))) return resolve(null);  // 패키지명 charset (메타문자 0)
-    // 1.9.360 (외부리뷰 CV-2/UR-0077): 신형 Node(18.20.2+/20.12.2+/21.7.3+/22+/26)는 shell 없이 .cmd 실행 시
-    //   spawn EINVAL(CVE-2024-27980 수정 부작용). UR-0066(1.9.352)의 npm.cmd 직접 execFile 이 이를 유발 → update --check 무력화.
-    //   win 은 cmd.exe /d /s /c npm ... 로 호출(cmd.exe 는 .exe 라 EINVAL 없음 · shell:true 미사용으로 DEP0190 도 회피).
-    //   pkg 는 charset 검증(메타문자 0)이라 cmd 주입 불가. execFile 동기 throw 도 try/catch 로 흡수(이전엔 Promise reject).
-    const isWin = process.platform === 'win32';
-    const file = isWin ? (process.env.comspec || 'cmd.exe') : 'npm';
-    const cmdArgs = isWin ? ['/d', '/s', '/c', 'npm', 'view', pkg, 'version'] : ['view', pkg, 'version'];
+    // 1.36.162: cmd.exe/npm.cmd fallback은 cwd shadow 및 argv 재해석 표면을 만든다.
+    // 공용 npm JS 진입점을 현재 Node로 직접 실행해 모든 플랫폼에서 shell:false를 유지한다.
     try {
-      cp.execFile(file, cmdArgs, { timeout: 12000, windowsHide: true }, (err, stdout) => {
-        if (err) return resolve(null);
-        const v = String(stdout || '').trim();
-        resolve(/^\d+\.\d+\.\d+/.test(v) ? v : null);
-      });
+      const r = spawnNpmSync(['view', pkg, 'version'], { encoding: 'utf8', timeout: 12000, windowsHide: true });
+      if (r.status !== 0) return resolve(null);
+      const v = String(r.stdout || '').trim();
+      resolve(/^\d+\.\d+\.\d+/.test(v) ? v : null);
     } catch { resolve(null); }
   });
 }
@@ -23465,7 +23507,7 @@ async function updateCmd(root, opts = {}) {
   // 1.36.102: --json 은 사람용 줄을 섞으면 안 된다(계약: 단일 유효 JSON). quiet 과 별개로 둔다 —
   //   `const quiet = ...` 줄 자체는 다른 selftest 가 문자열로 붙잡고 있어 건드리지 않는다.
   const _humanQuiet = quiet || has('--json');
-  const verF = path.join(root, '.harness/HARNESS_VERSION');
+  const verF = path.join(root, '.leerness/HARNESS_VERSION');
   const cur = exists(verF) ? parseHarnessVersion(read(verF)) : { plus: null, base: null, raw: '(not installed)' };
   if (!_humanQuiet) log(`# leerness update`);
   if (!_humanQuiet) log(`Current: ${cur.raw}`);
@@ -23524,16 +23566,15 @@ async function updateCmd(root, opts = {}) {
   const runningIsLatest = compareVer(VERSION, nextLeerness) >= 0 && !fromTar;
   if (!runningIsLatest && !fromTar) {
     log(`\nDelegating to npx leerness@${nextLeerness} migrate (this fetches the new CLI)…`);
-    const r = cp.spawnSync('npx', ['-y', `leerness@${nextLeerness}`, 'migrate', root, '--yes'], { stdio: 'inherit', shell: process.platform === 'win32' });
+    const r = spawnNpmSync(['exec', '--yes', '--package', `leerness@${nextLeerness}`, '--', 'leerness', 'migrate', root, '--yes'], { stdio: 'inherit' });
     if (r.status !== 0) { fail(`delegated migrate exited ${r.status}`); process.exitCode = 1; return; }
   } else if (fromTar) {
     log(`\nDelegating to npx -p ${fromTar} leerness migrate (local tarball)…`);
-    // 1.36.34 (codex 3차 #4): Windows shell:true 는 인자를 공백에서 재분할 — 공백 포함 경로를 따옴표로 보호.
-    const _qw = a => (process.platform === 'win32' && /\s/.test(String(a))) ? `"${a}"` : a;
-    const r = cp.spawnSync('npx', ['-y', '-p', _qw(fromTar), 'leerness', 'migrate', _qw(root), '--yes'], { stdio: 'inherit', shell: process.platform === 'win32' });
+    // npm-cli.js를 Node로 직접 실행해 공백 포함 tarball/root도 argv 그대로 보존한다.
+    const r = spawnNpmSync(['exec', '--yes', '--package', fromTar, '--', 'leerness', 'migrate', root, '--yes'], { stdio: 'inherit' });
     if (r.status !== 0) { fail(`delegated migrate exited ${r.status}`); process.exitCode = 1; return; }
     // 1.36.34 (#4b): 이력에 실행 CLI 버전이 아니라 실제 설치된 버전 기록 — 마이그레이션 후 HARNESS_VERSION 재판독.
-    try { const _hv = read(path.join(root, '.harness', 'HARNESS_VERSION')).trim(); if (_hv) nextLeerness = _hv; } catch {}
+    try { const _hv = read(path.join(root, '.leerness', 'HARNESS_VERSION')).trim(); if (_hv) nextLeerness = _hv; } catch {}
   } else {
     log(`\nRunning in-process migrate (already on latest ${VERSION})…`);
     await install(root, { force: !!opts.force, dry: false, migration: true, nonInteractive: true });   // 1.36.66 (8차 헌트 F6): --force 전달 — no-op 우회해 손상 템플릿 재작성
@@ -23579,7 +23620,7 @@ function autoUpdateInstall(root) {
   writeUtf8(settingsFile, JSON.stringify(settings, null, 2) + '\n');
   // 1.36.62 (검수 #1): en 프로젝트의 /update 를 한국어로 되덮던 것 — 언어 인지 렌더
   // 1.36.66 (8차 헌트 F5): raw writeUtf8 은 managed 파일 커스텀을 파괴했다 — coreFiles 와 동일 병합 경로(writeIfSafe mergeManaged)로.
-  const _updLang = (() => { try { return read(path.join(root, '.harness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch { return 'ko'; } })();
+  const _updLang = (() => { try { return read(path.join(root, '.leerness', 'LANGUAGE')).trim().toLowerCase() === 'en' ? 'en' : 'ko'; } catch { return 'ko'; } })();
   const _updContent = _updLang === 'en'
     ? `# /update\n\nRun the leerness auto-update (detect → migrate → verify).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\nCheck only:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`
     : `# /update\n\nleerness 자동 업데이트 (감지 → 마이그레이션 → 검증).\n\n\`\`\`\n!leerness update --yes\n\`\`\`\n\n체크만:\n\n\`\`\`\n!leerness update --check\n\`\`\`\n`;
@@ -23610,7 +23651,7 @@ function driftCheckCmd(root, opts = {}) { return _drift.driftCheckCmd(root, opts
 // handoff에서 같은 키워드 과거 추천 결과를 즉시 노출 (재매칭 불필요)
 const _SKILL_HISTORY_CACHE = new Map();
 function _loadSkillHistory(root) {
-  const p = path.join(absRoot(root), '.harness', 'skill-suggestions.md');
+  const p = path.join(absRoot(root), '.leerness', 'skill-suggestions.md');
   if (!exists(p)) return { mtime: 0, blocks: [] };
   let mtime = 0;
   try { mtime = fs.statSync(p).mtimeMs; } catch {}
@@ -23698,7 +23739,7 @@ function _loadLessonsIndex(root) {
 // 1.9.38: 사용 통계 (cumulative count, command별)
 // 1.9.65: 같은 프로세스 lifetime 메모리 캐시 — 다중 호출 시 디스크 I/O 절감
 const _USAGE_CACHE = new Map(); // root → { stats, mtime }
-function _usageStatsPath(root) { return path.join(absRoot(root), '.harness', 'cache', 'usage-stats.json'); }
+function _usageStatsPath(root) { return path.join(absRoot(root), '.leerness', 'cache', 'usage-stats.json'); }
 function _readUsageStats(root) {
   const p = _usageStatsPath(root);
   if (!exists(p)) return { commands: {}, drift: { criticalSeen: 0, skipped: 0, autoResolved: 0 }, since: today() };
@@ -23746,7 +23787,7 @@ function _bumpMcpUsage(root, toolName) {
   try {
     // 1.36.76 (9차 헌트 #2a): read-only 호출조차 텔레메트리가 대상 프로젝트에 디렉토리·파일을 만들었다
     //   (존재하지 않는 대상까지 통째로 생성). 통계는 이미 초기화된 하네스에만 기록 — 읽기가 대상을 변형하지 않는다.
-    if (!exists(path.join(absRoot(root), '.harness'))) return;
+    if (!exists(path.join(absRoot(root), '.leerness'))) return;
     const stats = _readUsageStats(root);
     if (!stats.mcp) stats.mcp = { tools: {} };
     if (!stats.mcp.tools) stats.mcp.tools = {};
@@ -23771,8 +23812,8 @@ function _createArchive(cwd, sourceDir, outPath) {
   // 1) tar.gz (POSIX 환경에서 가장 안정)
   if (/\.(tgz|tar\.gz)$/i.test(outPath)) {
     tried.push('tar');
-    const r = cp.spawnSync('tar', ['-czf', outPath, sourceDir], {
-      encoding: 'utf8', timeout: 30000, shell: true, cwd
+    const r = _spawnPortableArgvSync('tar', ['-czf', outPath, sourceDir], {
+      encoding: 'utf8', timeout: 30000, shell: false, cwd
     });
     if (r.status === 0 && exists(outPath)) return { ok: true, path: outPath, method: 'tar', tried };
   }
@@ -23780,17 +23821,20 @@ function _createArchive(cwd, sourceDir, outPath) {
   const zipPath = outPath.replace(/\.(tgz|tar\.gz)$/i, '.zip');
   tried.push('powershell Compress-Archive');
   if (process.platform === 'win32' || process.env.SHELL === undefined) {
-    // -Force 로 덮어쓰기, -CompressionLevel Optimal
-    const psCmd = `Compress-Archive -Path "${path.join(cwd, sourceDir).replace(/\\/g, '\\\\')}" -DestinationPath "${zipPath.replace(/\\/g, '\\\\')}" -Force`;
-    const r = cp.spawnSync('powershell.exe', ['-NoProfile', '-Command', psCmd], {
-      encoding: 'utf8', timeout: 30000
+    // Paths are data, not PowerShell source. Environment values preserve $(), backticks,
+    // quotes, spaces, and trailing slashes without interpolation.
+    const archiveSource = path.join(cwd, sourceDir);
+    const psCmd = 'Compress-Archive -LiteralPath $env:LEERNESS_ARCHIVE_SOURCE -DestinationPath $env:LEERNESS_ARCHIVE_DEST -Force';
+    const r = _spawnPortableArgvSync('powershell.exe', ['-NoProfile', '-Command', psCmd], {
+      encoding: 'utf8', timeout: 30000,
+      env: { ...process.env, LEERNESS_ARCHIVE_SOURCE: archiveSource, LEERNESS_ARCHIVE_DEST: zipPath },
     });
     if (r.status === 0 && exists(zipPath)) return { ok: true, path: zipPath, method: 'powershell Compress-Archive', tried };
   }
   // 3) zip 명령 (POSIX zip 또는 Linux 도구)
   tried.push('zip');
-  const r3 = cp.spawnSync('zip', ['-r', zipPath, sourceDir], {
-    encoding: 'utf8', timeout: 30000, shell: true, cwd
+  const r3 = _spawnPortableArgvSync('zip', ['-r', zipPath, sourceDir], {
+    encoding: 'utf8', timeout: 30000, shell: false, cwd
   });
   if (r3.status === 0 && exists(zipPath)) return { ok: true, path: zipPath, method: 'zip', tried };
   return { ok: false, tried };
@@ -23798,7 +23842,7 @@ function _createArchive(cwd, sourceDir, outPath) {
 
 // 1.9.47: leerness skill publish — 자체 skill을 외부 공유 가능 tarball/번들로 publish
 // 옵션:
-//   --bundle-only      : tarball만 생성 (.harness/skills-publish/leerness-skills-<ver>.tgz)
+//   --bundle-only      : tarball만 생성 (.leerness/skills-publish/leerness-skills-<ver>.tgz)
 //   --gh-release       : GitHub release에 attach (gh CLI 필요)
 //   --include <ids>    : 특정 skill만 (콤마 구분, 기본은 모두)
 function skillPublishCmd(root) {
@@ -23827,7 +23871,7 @@ function skillPublishCmd(root) {
     }
   }
   // 1) 자체 skill 모두 SKILL.md로 export (skill export-all 활용)
-  const exportDir = path.join(root, '.harness', 'skills-publish');
+  const exportDir = path.join(root, '.leerness', 'skills-publish');
   mkdirp(exportDir);
   const all = listAllSkills(root);
   let ids = Object.keys(all);
@@ -23858,19 +23902,19 @@ function skillPublishCmd(root) {
   // 3) tarball
   if (bundleOnly || ghRelease) {
     const tarName = `leerness-skills-${VERSION}.tgz`;
-    const tarPath = path.join(root, '.harness', 'skills-publish-tarball', tarName);
+    const tarPath = path.join(root, '.leerness', 'skills-publish-tarball', tarName);
     mkdirp(path.dirname(tarPath));
     // npm pack-style이 아니라 tar로 직접 (cross-platform tar 필요)
     // Windows에서는 tar가 기본 설치되어 있음 (PowerShell 5.1+).
     // 1.9.48: cross-platform 압축 chain — tar (POSIX) → PowerShell Compress-Archive (Windows ZIP) → graceful
-    const made = _createArchive(path.join(root, '.harness'), 'skills-publish', tarPath);
+    const made = _createArchive(path.join(root, '.leerness'), 'skills-publish', tarPath);
     if (made.ok) log(`✓ archive 생성: ${rel(root, made.path)} (${made.method})`);
     else warn(`archive 실패 — 수동 압축 권장 (${rel(root, exportDir)}/) · 시도: ${made.tried.join(', ')}`);
     // 4) GitHub release
     if (ghRelease) {
       const v = `v${VERSION}-skills`;
-      const r = cp.spawnSync('gh', ['release', 'create', v, tarPath, '--title', `leerness-skills ${v}`, '--notes', `agentskills.io 표준 호환 ${ids.length}개 SKILL.md 번들`], {
-        encoding: 'utf8', timeout: 60000, shell: true, cwd: root
+      const r = _spawnPortableArgvSync('gh', ['release', 'create', v, tarPath, '--title', `leerness-skills ${v}`, '--notes', `agentskills.io 표준 호환 ${ids.length}개 SKILL.md 번들`], {
+        encoding: 'utf8', timeout: 60000, shell: false, cwd: root
       });
       if (r.status === 0) log(`✓ GitHub release 생성: ${v}`);
       else warn(`gh release 실패 — gh auth status 또는 수동 업로드 필요`);
@@ -23924,7 +23968,7 @@ const BENCHMARK_SCENARIOS = {
     label: 'drift 감지 (메타파일 stale)',
     description: '인공적으로 session-handoff stale 만들고 drift check가 잡는지',
     setup: (dir) => {
-      const sh = path.join(dir, '.harness', 'session-handoff.md');
+      const sh = path.join(dir, '.leerness', 'session-handoff.md');
       if (exists(sh)) {
         let body = read(sh);
         body = body.replace(/Last generated:.*/, 'Last generated: 2020-01-01T00:00:00.000Z');
@@ -23953,7 +23997,7 @@ const BENCHMARK_SCENARIOS = {
       const r = cp.spawnSync(process.execPath, [__filename, 'skill', 'install',
         path.join(dir, 'bom-test.md'), '--path', dir],
         { encoding: 'utf8', timeout: 15000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1' } });
-      const f = path.join(dir, '.harness', 'skills', 'bom-test', 'SKILL.md');
+      const f = path.join(dir, '.leerness', 'skills', 'bom-test', 'SKILL.md');
       return { detected: r.status === 0 && exists(f), sample: r.stdout.slice(0, 200) };
     }
   }
@@ -23982,8 +24026,9 @@ async function _benchmarkMeasure(root, task) {
     else if (agent.id === 'agy') { cmd = 'agy'; cliArgs = ['-p', task]; }
     else continue;
     const t0 = Date.now();
-    // 1.9.150: runCommandSafe — agent CLI bench sandbox (env scrub + observability)
-    const r = runCommandSafe(cmd, cliArgs, { cwd: process.cwd(), root, timeout: 60000, allowShell: true, kind: 'agent_bench', label: `bench-${agent.id}`, allowOutsideCwd: true });
+    // 1.9.150/1.36.162: agent CLI bench도 공용 portable argv runner로 실행한다.
+    // task의 %, !, 따옴표, 개행을 셸 인용 대상으로 바꾸지 않고 원래 argv 그대로 전달한다.
+    const r = runCommandSafe(cmd, cliArgs, { cwd: process.cwd(), root, timeout: 60000, kind: 'agent_bench', label: `bench-${agent.id}`, allowOutsideCwd: true });
     const baseTime = Date.now() - t0;
     // leerness 검수 layer time 추정 (verify-claim 형식)
     const t1 = Date.now();
@@ -24048,12 +24093,12 @@ function benchmarkCmd(root) {
     });
   }
   // 1.36.39 (codex 4차 #7): 미초기화 디렉토리(증거 0)에 497/600 을 주던 것 — 측정 대상이 아니므로 거부.
-  if (!exists(path.join(root, '.harness'))) { failJson(has('--json'), 'harness_missing', `측정 불가: ${root} 에 .harness 없음 — leerness init 후 사용`); return; }
+  if (!exists(path.join(root, '.leerness'))) { failJson(has('--json'), 'harness_missing', `측정 불가: ${root} 에 .leerness 없음 — leerness init 후 사용`); return; }
   const rows = readProgressRows(root);
   const done = rows.filter(r => r.status === 'done').length;
   const totalTasks = rows.length;
-  const reuseLines = exists(path.join(root, '.harness', 'reuse-map.md'))
-    ? read(path.join(root, '.harness', 'reuse-map.md')).split('\n').filter(l => l.startsWith('|') && !/Capability|---/.test(l)).length
+  const reuseLines = exists(path.join(root, '.leerness', 'reuse-map.md'))
+    ? read(path.join(root, '.leerness', 'reuse-map.md')).split('\n').filter(l => l.startsWith('|') && !/Capability|---/.test(l)).length
     : 0;
   let usage = { commands: {}, drift: {} };
   try {
@@ -24166,7 +24211,7 @@ function skillSuggestCmd(root) {
   } catch {}
   // 4) 1.9.79: skill-suggestions.md rolling history 빈도 — 반복 검색된 키워드는 학습 신호로 강화
   try {
-    const histPath = path.join(root, '.harness', 'skill-suggestions.md');
+    const histPath = path.join(root, '.leerness', 'skill-suggestions.md');
     if (exists(histPath)) {
       const histTxt = read(histPath);
       const queryFreq = {};
@@ -24235,7 +24280,7 @@ function _jaccard(a, b) {
 }
 
 function _readInstalledSkills(root) {
-  const dir = path.join(root, '.harness', 'skills');
+  const dir = path.join(root, '.leerness', 'skills');
   if (!exists(dir)) return [];
   const list = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -24372,7 +24417,7 @@ async function skillMatchCmd(root, query) {
     })).sort((a, b) => b.score - a.score);
   }
   const top = ranked.filter(r => r.score > 0).slice(0, 5);
-  // 1.9.68: rolling history 자동 누적 (.harness/skill-suggestions.md) — default ON
+  // 1.9.68: rolling history 자동 누적 (.leerness/skill-suggestions.md) — default ON
   // 끄기: --no-save 또는 LEERNESS_NO_SKILL_HISTORY=1
   if (!has('--no-save') && process.env.LEERNESS_NO_SKILL_HISTORY !== '1') {
     try {
@@ -24398,13 +24443,13 @@ async function skillMatchCmd(root, query) {
   }
   log('');
   log(`💡 사용: \`cat ${rel(root, top[0].dir)}/SKILL.md\` 또는 메인 에이전트가 이 skill 본문을 참고`);
-  log(`📒 자동 누적: .harness/skill-suggestions.md (--no-save로 끄기)`);
+  log(`📒 자동 누적: .leerness/skill-suggestions.md (--no-save로 끄기)`);
 }
 
-// 1.9.68: skill match rolling history append (.harness/skill-suggestions.md)
+// 1.9.68: skill match rolling history append (.leerness/skill-suggestions.md)
 // AI가 다음 세션에 이전 추천을 참조 가능 — readWhen: '세션 시작', 'skill 결정 전'
 function _appendSkillSuggestion(root, { query, useEmbedding, top }) {
-  const p = path.join(absRoot(root), '.harness', 'skill-suggestions.md');
+  const p = path.join(absRoot(root), '.leerness', 'skill-suggestions.md');
   if (!exists(p)) {
     // 신규 파일 — frontmatter + 안내
     const fm = `---\nleernessRole: skill-suggestions\nreadWhen:\n  - skill 결정 전\n  - 세션 시작\nupdateWhen:\n  - leerness skill match 호출 시 자동 누적 (1.9.68)\ndoNotStore:\n  - 실제 토큰\n  - 비밀번호\n  - 운영 쿠키\n  - 민감한 개인정보 원문\n---\n<!-- leerness:managed -->\n# Skill Suggestions (Rolling History)\n\n매 \`leerness skill match\` 호출이 여기 누적됩니다. AI 에이전트는 다음 세션에 같은 키워드를 다시 검색하지 말고 이력을 먼저 참조하세요.\n\n`;
@@ -24431,7 +24476,7 @@ function skillExportAllCmd(root) {
   root = absRoot(root || process.cwd());
   const all = listAllSkills(root);
   const ids = Object.keys(all);
-  const outDir = arg('--out', path.join(root, '.harness', 'skills-export'));
+  const outDir = arg('--out', path.join(root, '.leerness', 'skills-export'));
   mkdirp(outDir);
   let exported = 0;
   log(`# leerness skill export-all (1.9.43)`);
@@ -25073,8 +25118,8 @@ function envSyncCmd(root) {
 
 // ===== 1.9.145: 실행 환경 자동 감지 (사용자 명시 요청) =====
 // 사용자 시나리오: "X은(는) 내부 또는 외부 명령... 아닙니다" 같은 PATH/도구 누락 오류 사전 방지.
-// .harness/environment.json 에 OS/하드웨어/언어/도구를 기록 + 변동 감지.
-function _envSnapshotPath(root) { return path.join(absRoot(root), '.harness', 'environment.json'); }
+// .leerness/environment.json 에 OS/하드웨어/언어/도구를 기록 + 변동 감지.
+function _envSnapshotPath(root) { return path.join(absRoot(root), '.leerness', 'environment.json'); }
 // 보안 정책: 절대경로 토큰 (사용자명 등)을 마스킹 (시크릿 정책)
 function _maskPath(p) {
   if (!p || typeof p !== 'string') return p;
@@ -25086,12 +25131,24 @@ function _maskPath(p) {
 }
 // 단일 도구 감지 — 있으면 { version, path }, 없으면 null
 function _detectTool(cmd, versionArgs = ['--version'], maxLen = 80) {
-  const r = cp.spawnSync(cmd, versionArgs, { encoding: 'utf8', timeout: 4000, shell: false });
+  const r = cmd === 'npm'
+    ? spawnNpmSync(versionArgs, { encoding: 'utf8', timeout: 4000, cwd: process.cwd() })
+    : spawnPortableSync(cmd, versionArgs, { encoding: 'utf8', timeout: 4000 });
   if (r.error || r.status !== 0) return null;
-  // Windows where / Unix which 로 경로 추출
+  // Windows는 portable resolver가 이미 absolute System32 where + PATH-only 필터를 거쳤다.
+  // bare `where`를 다시 실행하면 untrusted cwd의 where.exe가 먼저 실행될 수 있다.
   const isWin = process.platform === 'win32';
-  const locator = cp.spawnSync(isWin ? 'where' : 'which', [cmd], { encoding: 'utf8', timeout: 3000, shell: false });
-  const toolPath = locator.status === 0 ? (locator.stdout || '').split(/\r?\n/)[0].trim() : null;
+  let toolPath = null;
+  if (isWin) {
+    try {
+      toolPath = cmd === 'npm'
+        ? resolveNpmCliPath({ env: process.env, cwd: process.cwd() })
+        : resolvePortableLaunch(cmd, { env: process.env, cwd: process.cwd() }).source || null;
+    } catch {}
+  } else {
+    const locator = cp.spawnSync('which', [cmd], { encoding: 'utf8', timeout: 3000, shell: false });
+    toolPath = locator.status === 0 ? (locator.stdout || '').split(/\r?\n/)[0].trim() : null;
+  }
   const version = (r.stdout || r.stderr || '').split(/\r?\n/)[0].trim().slice(0, maxLen);
   return { version, path: toolPath ? _maskPath(toolPath) : null };
 }
@@ -25166,7 +25223,18 @@ function _detectEnvironment(root) {
             // 흔한 빌트인은 스킵 (echo, set, cd, exit)
             if (['echo', 'set', 'cd', 'exit', 'rm', 'mv', 'cp', 'ls', 'mkdir', 'true', 'false'].includes(tk)) continue;
             seen.add(tk);
-            const found = !!snap.tools[tk] || (cp.spawnSync(process.platform === 'win32' ? 'where' : 'which', [tk], { encoding: 'utf8', timeout: 3000 }).status === 0);
+            let found = !!snap.tools[tk];
+            if (!found) {
+              if (process.platform === 'win32') {
+                try {
+                  // bare `where`는 cwd의 where.exe를 실행할 수 있다. 공용 resolver의
+                  // absolute System32 where + PATH-only 후보 판정만 사용하고 도구 자체는 실행하지 않는다.
+                  found = resolvePortableLaunch(tk, { env: process.env, cwd: process.cwd() }).kind !== 'unresolved';
+                } catch { found = false; }
+              } else {
+                found = cp.spawnSync('which', [tk], { encoding: 'utf8', timeout: 3000, shell: false }).status === 0;
+              }
+            }
             snap.scriptDependencies.push({ command: tk, foundInPath: found, usedBy: name });
           }
         }
@@ -25215,10 +25283,10 @@ function _diffEnvSnapshots(prev, curr) {
 }
 function envDetectCmd(root, opts = {}) {
   root = absRoot(root || process.cwd());
-  // 1.36.21 (전수 sweep P2/high): handoff 와 동일 갭 — 없는 경로에 .harness/environment.json 을 만들며 exit 0. UR-0136 관례로 정렬.
+  // 1.36.21 (전수 sweep P2/high): handoff 와 동일 갭 — 없는 경로에 .leerness/environment.json 을 만들며 exit 0. UR-0136 관례로 정렬.
   if (!exists(root) || !fs.statSync(root).isDirectory()) { failJson(has('--json') || opts.json, 'path_not_found', `경로 없음 또는 디렉토리 아님: ${root}`); return; }
   const jsonMode = has('--json') || opts.json;
-  const writeMode = !has('--no-write');  // default: 캡처 후 .harness/environment.json 에 저장
+  const writeMode = !has('--no-write');  // default: 캡처 후 .leerness/environment.json 에 저장
   const snap = _detectEnvironment(root);
   const prev = _readEnvSnapshot(root);
   const diff = _diffEnvSnapshots(prev, snap);
@@ -25254,22 +25322,22 @@ function envDetectCmd(root, opts = {}) {
     log('');
     ok('환경 변동 없음 (이전 캡처와 동일)');
   }
-  if (writeMode) log(`\n📁 .harness/environment.json 갱신됨`);
+  if (writeMode) log(`\n📁 .leerness/environment.json 갱신됨`);
   // missing 1건 이상이면 exit 1 (CI 가시화)
   if (diff.missing && diff.missing.length) process.exitCode = 1;
 }
 
 // ===== 1.9.146: Agent 권한 시스템 (사용자 명시 요청 #5) =====
-// .harness/agent-permissions.json — leerness agent 명령 실행 시 적용. 기본 deny-by-default.
-function _permissionsPath(root) { return path.join(absRoot(root), '.harness', 'agent-permissions.json'); }
+// .leerness/agent-permissions.json — leerness agent 명령 실행 시 적용. 기본 deny-by-default.
+function _permissionsPath(root) { return path.join(absRoot(root), '.leerness', 'agent-permissions.json'); }
 function _permissionsPreset(mode) {
-  // basic: 안전 — .harness/ 안만 쓰기
+  // basic: 안전 — .leerness/ 안만 쓰기
   // extended: 프로젝트 폴더 + shell allowlist
   // full: 전체 (mouse/keyboard/web/admin) — IDE 통합 시
   const presets = {
     basic: {
       mode: 'basic',
-      filesystem: { read: true, write: true, restrictTo: ['.harness/', 'progress-tracker.md', 'session-handoff.md'], delete: false },
+      filesystem: { read: true, write: true, restrictTo: ['.leerness/', 'progress-tracker.md', 'session-handoff.md'], delete: false },
       shell: { exec: false, allowList: [] },
       network: { fetch: false, outboundAllowList: [] },
       mouse: false, keyboard: false, browser: false, admin: false,
@@ -25362,7 +25430,7 @@ function permissionCheck(root, action, target) {
 
 // ===== 1.9.146: leerness agent — OpenClaw/Hermes 스타일 오픈소스 CLI 에이전트 모드 (사용자 명시 요청 #4) =====
 // MVP: handoff 컨텍스트 자동 로드 → 활성 CLI (claude/codex/agy/ollama) 1개에 작업 위임.
-// 권한은 .harness/agent-permissions.json 기준. 실제 LLM 호출은 외부 CLI 또는 Ollama HTTP API.
+// 권한은 .leerness/agent-permissions.json 기준. 실제 LLM 호출은 외부 CLI 또는 Ollama HTTP API.
 function _activeCliAgents() {
   const out = [];
   if (process.env.LEERNESS_ENABLE_CLAUDE === '1') out.push('claude');
@@ -25476,7 +25544,7 @@ async function _cliChatStream(root, provider, promptText, opts) {
   // 1.9.186 (사용자 명시 fix): claude --output-format=stream-json 가 일부 버전에서 빈 응답.
   //   default 를 plain --print 로 변경 → _cliChat 과 동일한 인자, 작동 검증된 패턴.
   //   stream 형식 사용 opt-in: LEERNESS_REPL_STREAM_FORMAT=json (실시간 thinking/tool_use 보고 싶을 때).
-  // 1.9.188 (사용자 명시 fix): shell:true + Windows cmd.exe + 한글/특수문자 promptText → args escape 실패.
+  // 1.9.188 (사용자 명시 fix): Windows cmd.exe + 한글/특수문자 promptText → args escape 실패.
   //   사용자 보고: "이 폴더에 파이썬 프로그램 제작" 보냈으나 claude는 "역할:" fragment만 받음.
   //   해결: promptText 를 args 에서 제거하고 stdin 으로 전달 (shell escape 우회).
   const useStreamJson = process.env.LEERNESS_REPL_STREAM_FORMAT === 'json';
@@ -25495,8 +25563,8 @@ async function _cliChatStream(root, provider, promptText, opts) {
     useStdinForPrompt = true;
   }
   // 1.9.289 (Codex #3): agy/copilot 은 인자 모드만 지원 → shell:true 조인 시 프롬프트가 분리/주입될 수 있어 _shellQuoteArg 로 안전 인용.
-  else if (provider === 'agy')  { cmd = 'agy'; args = ['-p', _shellQuoteArg(promptText)]; }  // agy -p 는 인자 모드만 지원
-  else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', _shellQuoteArg(promptText)]; }
+  else if (provider === 'agy')  { cmd = 'agy'; args = ['-p', promptText]; }  // agy -p 는 인자 모드만 지원
+  else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', promptText]; }
   else return { ok: false, error: `provider ${provider} 미지원`, provider };
   const t0 = Date.now();
   return new Promise(resolve => {
@@ -25555,15 +25623,14 @@ async function _cliChatStream(root, provider, promptText, opts) {
     process.stdout.write(dim(`\n  ── ${provider} stream ──\n`));
     let child;
     try {
-      // 1.9.186 + 1.9.188 (사용자 명시 fix):
-      //   Windows .cmd 호환을 위해 shell: true 유지.
+      // 1.9.186 + 1.9.188 + 1.36.162:
+      //   Windows npm shim은 portable-process가 Node 진입점으로 해석해 shell:false로 실행한다.
       //   1.9.188: promptText 가 한글/특수문자일 때 shell escape 실패 → stdin 으로 전달.
       //     useStdinForPrompt=true 시 stdio[0]='pipe' + child.stdin.write(promptText) + end().
-      //     shell 인자에는 escape-safe flags 만 남김 ('--print' 등).
-      child = cp.spawn(cmd, args, {
+      //     argv에는 flags만 남기고 프롬프트는 셸을 거치지 않는 stdin으로 전달한다.
+      child = _spawnPortableArgv(cmd, args, {
         cwd: process.cwd(),
         env: _scrubEnv({}),
-        shell: true,
         stdio: [useStdinForPrompt ? 'pipe' : 'ignore', 'pipe', 'pipe']
       });
       // 1.9.188: promptText 를 stdin 으로 안전 전달
@@ -25665,7 +25732,7 @@ async function _cliChatStream(root, provider, promptText, opts) {
 }
 
 // 1.9.149: observability lite — 모든 agent 호출의 traceId + duration + exit + failureCause 기록
-function _runsDir(root) { return path.join(absRoot(root), '.harness', 'runs'); }
+function _runsDir(root) { return path.join(absRoot(root), '.leerness', 'cache', 'agent-runs'); }
 function _recordRun(root, entry) {
   try {
     const dir = _runsDir(root); mkdirp(dir);
@@ -25681,11 +25748,12 @@ function _recordRun(root, entry) {
 // 1.9.150: Sandboxing — runCommandSafe wrapper (Codex 권고: 3중 LLM 합의 #3)
 // cwd jail (root 밖 거부) + shell:false 기본 + timeout + env scrub + permissions allowList 검증 + _recordRun 자동
 const _ENV_SAFE_KEYS = new Set([
-  'PATH', 'HOME', 'USERPROFILE', 'TEMP', 'TMP', 'TMPDIR', 'NODE_PATH', 'NODE_ENV',
+  'PATH', 'PATHEXT', 'HOME', 'USERPROFILE', 'TEMP', 'TMP', 'TMPDIR', 'NODE_ENV',
   'LANG', 'LC_ALL', 'LC_CTYPE', 'SHELL', 'COMSPEC', 'SYSTEMROOT', 'WINDIR', 'OS',
   'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'NUMBER_OF_PROCESSORS',
   'PROGRAMFILES', 'PROGRAMFILES(X86)', 'APPDATA', 'LOCALAPPDATA',
-  'GITHUB_TOKEN', 'NPM_TOKEN', 'CI', 'GH_TOKEN'
+  'GITHUB_TOKEN', 'NPM_TOKEN', 'CI', 'GH_TOKEN',
+  ..._DOTENV_EXPLICIT_KEYS,
 ]);
 function _scrubEnv(extraEnv) {
   const out = {};
@@ -25784,7 +25852,7 @@ function runCommandSafe(cmd, args, opts) {
     if (useShell) {
       // shell:true 모드 — cmd 는 셸 명령 문자열(의도적 raw), argList 는 개별 인자라 _shellQuoteArg 로 인용(셸 주입 차단).
       // 1.9.300 (UR-0040, 외부리뷰 Codex): 이전 argList.join(' ') 는 인자의 메타문자(;&|$())를 셸이 해석 → 인용 추가.
-      r = cp.spawnSync(cmdStr + (argList.length ? ' ' + argList.map(_shellQuoteArg).join(' ') : ''), [], spawnOpts);
+      r = cp.spawnSync(cmdStr + (argList.length ? ' ' + argList.map(_shellQuoteArg).join(' ') : ''), spawnOpts);
     } else {
       // 단일 명령어로 들어온 경우 자동 분리
       let bin = cmdStr, finalArgs = argList;
@@ -25792,7 +25860,8 @@ function runCommandSafe(cmd, args, opts) {
         const parts = cmdStr.split(/\s+/);
         bin = parts[0]; finalArgs = parts.slice(1);
       }
-      r = cp.spawnSync(bin, finalArgs, spawnOpts);
+      // Windows npm .cmd shim도 argv 경계를 잃지 않고 실행한다. shell:true 폴백은 금지한다.
+      r = spawnPortableSync(bin, finalArgs, spawnOpts);
     }
   } catch (e) {
     r = { status: 1, stdout: '', stderr: e.message, error: 'spawn_exception' };
@@ -25905,7 +25974,7 @@ function _pickModel(provider, kind) {
   if (kind === 'fast') { const m = list.find(x => /haiku|mini|flash|oss/i.test(x.id)); return (m || list[list.length - 1]).id; }
   return list[0].id; // top
 }
-function _rolesFile(root) { return path.join(absRoot(root), '.harness', 'agent-roles.json'); }
+function _rolesFile(root) { return path.join(absRoot(root), '.leerness', 'agent-roles.json'); }
 function _loadRoles(root) {
   const f = _rolesFile(root);
   if (!exists(f)) return {};
@@ -25951,7 +26020,7 @@ function _suggestRoles(root) {
 // leerness roles <list|set|unset|catalog|suggest|verify>
 function rolesCmd(root, sub, ...args) {
   root = absRoot(root || process.cwd());
-  // 1.36.140 (재검수 P3, 재현): 오타 난 `--path` 로 `roles unset` 하면 **실패하면서 그 경로와 `.harness/` 를 만들었다**.
+  // 1.36.140 (재검수 P3, 재현): 오타 난 `--path` 로 `roles unset` 하면 **실패하면서 그 경로와 `.leerness/` 를 만들었다**.
   //   락/쓰기 헬퍼가 부모 디렉토리를 만들기 때문이다. 없는 경로면 아무것도 만들지 않고 그 사실을 말한다.
   //   ⚠ 첫 판은 이 검사를 **명령 진입부**에 뒀는데, 그러자 없는 경로에서도 잘 돌던
   //     `roles catalog`(정적 목록) · `roles list`(읽기) 가 exit 1 이 됐다(대조군으로 확인: 1.36.139 는 둘 다 exit 0).
@@ -26192,7 +26261,7 @@ function policyCmd(root, sub, ...args) {
 }
 
 // ===== 1.9.278 (UR-0032, GPT-5.5 범용 하네스 방향): .leerness/ JSON 상태 스키마 =====
-//   목적: 마크다운(.harness/)과 병행하는 "구조화 상태 substrate". 에이전트 간 인수인계 표준 —
+//   목적: 마크다운(.leerness/)과 병행하는 "구조화 상태 substrate". 에이전트 간 인수인계 표준 —
 //   Claude Code 가 한 작업을 Goose/Codex 가 JSON 으로 정확히 이어받음. 비파괴 (신규 .leerness/ 디렉토리).
 //   향후 UR-0031(MCP verb)/UR-0033(adapter) 가 이 스키마를 공통 호출 표면으로 사용.
 function _leernessStateDir(root) { return path.join(absRoot(root), '.leerness'); }
@@ -26309,7 +26378,7 @@ function _leernessIdentity() {
     isNot: '실행기/코딩 에이전트가 아님 — 어떤 에이전트 위에도 얹는 공통 운영 계층',
     tagline: '어떤 AI 코딩 에이전트에도 적용되는 범용 운영 레이어 — 기억·정책·인수인계·검증·감사',
     layers: [
-      { key: 'memory', ko: '기억', desc: '프로젝트 상태/결정/진행을 .harness/ 에 영속화 (task/decision/lesson/plan; 선택 state substrate 는 .leerness/)' },
+      { key: 'memory', ko: '기억', desc: '프로젝트 상태/결정/진행을 .leerness/ 에 영속화 (task/decision/lesson/plan; 선택 state substrate 는 .leerness/)' },
       { key: 'policy', ko: '정책', desc: '8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트' },
       { key: 'handoff', ko: '인수인계', desc: '에이전트 간 컨텍스트 표준 전달 (Claude→Codex→Goose), get_project_context 1콜 온보딩' },
       { key: 'verification', ko: '검증', desc: '근거 기반 완료 검증 (verify-claim --require-evidence) — 허위 완료 감지 (권고; CI 게이트 시 차단)' },
@@ -26345,10 +26414,10 @@ function aboutCmd(opts = {}) {
   return id;
 }
 // ===== 1.9.307 (UR-0055 사용자명시): 프로젝트 청사진(brief) =====
-//   프로젝트 개요/소개/목적/기능을 .harness/project-brief.md(정본)에 유지 + README 개요 섹션 동기화 + 복사용 blueprint export.
+//   프로젝트 개요/소개/목적/기능을 .leerness/project-brief.md(정본)에 유지 + README 개요 섹션 동기화 + 복사용 blueprint export.
 //   "복사하면 신규 프로젝트를 기초부터 재시작할 수 있는" 자기완결 청사진. 기존 project-brief.md 확장(비파괴).
 // 1.9.330 (UR-0025): _BRIEF_FIELDS (10필드 config) → lib/pure-utils.js 로 이동 (순수 데이터, require 사용).
-function _briefPath(root) { return path.join(absRoot(root), '.harness', 'project-brief.md'); }
+function _briefPath(root) { return path.join(absRoot(root), '.leerness', 'project-brief.md'); }
 function _loadBrief(root) {
   const brief = { project: detectProjectName(absRoot(root)), directionHistory: [] };
   for (const f of _BRIEF_FIELDS) brief[f.key] = f.multi ? [] : '';
@@ -26407,7 +26476,7 @@ function briefCmd(root, sub) {
     if (!changed) { fail('brief set: 최소 하나의 필드 필요 (--intro --purpose --problem --features --stack --architecture --users --success --non-goals --current-state --project)'); return; }
     _saveBrief(root, brief);
     _syncBriefReadme(root, brief);
-    ok(`brief 갱신 (${changed}개 필드) → .harness/project-brief.md + README 개요 섹션 동기화`);
+    ok(`brief 갱신 (${changed}개 필드) → .leerness/project-brief.md + README 개요 섹션 동기화`);
     return;
   }
   if (sub === 'show') {
@@ -26554,7 +26623,7 @@ function stateCmd(root, sub, ...args) {
   };
 
   if (sub === 'start') {
-    // 1.9.311 (UR-0047): state 는 .leerness substrate(standalone) — .harness init 가드 미적용 (회귀 방지)
+    // 1.9.311 (UR-0047): state 는 .leerness substrate(standalone) — .leerness init 가드 미적용 (회귀 방지)
     const goal = (args.find(a => a && !a.startsWith('-')) || arg('--goal', '')).trim();
     const state = _loadLeernessState(root);
     // 1.36.147 (재검수 P1, 재현): 같은 세션 키로 두 번 `start` 하면 둘 다 성공하고
@@ -26839,7 +26908,7 @@ function glossaryCmd(root, sub) {
   }
   // build (default)
   const md = _renderGlossaryMd(entries, { lang: arg('--lang', 'both'), gaps });
-  const hd = path.join(root, '.harness'); mkdirp(hd);
+  const hd = path.join(root, '.leerness'); mkdirp(hd);
   // 1.36.41 (codex 5차 #3): 통파일 덮어쓰기가 마커 밖 수동 서문/부록을 삭제 — 기존 파일에 마커가 있으면
   //   생성 블록만 splice(마커가 존재하는 이유 그대로), 밖 내용은 보존.
   const _gf = path.join(hd, 'glossary.md');
@@ -26855,8 +26924,8 @@ function glossaryCmd(root, sub) {
   }
   writeUtf8(_gf, _gOut);
   writeUtf8(path.join(hd, 'glossary.json'), JSON.stringify({ generated: today(), ...stats, entries, gaps }, null, 2) + '\n');
-  if (jsonMode) { log(JSON.stringify({ ok: true, action: 'glossary build', ...stats, file: '.harness/glossary.md' }, null, 2)); return; }
-  ok(`glossary 생성: .harness/glossary.md (${stats.defined}/${stats.total} 정의${stats.gaps ? ` · ${stats.gaps} 미정의 → AI 보완 프롬프트 포함` : ''})`);
+  if (jsonMode) { log(JSON.stringify({ ok: true, action: 'glossary build', ...stats, file: '.leerness/glossary.md' }, null, 2)); return; }
+  ok(`glossary 생성: .leerness/glossary.md (${stats.defined}/${stats.total} 정의${stats.gaps ? ` · ${stats.gaps} 미정의 → AI 보완 프롬프트 포함` : ''})`);
 }
 function adapterCmd(root, tool, opts = {}) {
   root = absRoot(root || process.cwd());
@@ -26879,7 +26948,7 @@ function adapterCmd(root, tool, opts = {}) {
     return;
   }
   // 1.36.45 (사용자 버그 후속 — codex goal 모드가 프로젝트 문서를 안 읽음): codex 는 전역 ~/.codex/AGENTS.md 를
-  //   모든 모드에서 읽는다 — 조건부("`.harness/` 있는 프로젝트에서만") 전역 지침을 설치해 goal 모드까지 커버.
+  //   모든 모드에서 읽는다 — 조건부("`.leerness/` 있는 프로젝트에서만") 전역 지침을 설치해 goal 모드까지 커버.
   //   비-leerness 프로젝트 무영향(조건부) + 마커 블록 병합(사용자 전역 내용 보존) + --remove 로 깨끗이 해제.
   if (tool === 'codex' && has('--global')) {
     const gf = path.join(os.homedir(), '.codex', 'AGENTS.md');
@@ -26896,7 +26965,7 @@ function adapterCmd(root, tool, opts = {}) {
       START,
       '# leerness — 조건부 지침 (이 블록은 `leerness adapter codex --global` 이 관리)',
       '',
-      '**현재 작업 중인 프로젝트 루트에 `.harness/` 디렉토리가 있을 때만** 아래를 따른다 (없으면 이 블록 전체 무시):',
+      '**현재 작업 중인 프로젝트 루트에 `.leerness/` 디렉토리가 있을 때만** 아래를 따른다 (없으면 이 블록 전체 무시):',
       '1. 작업 시작: `leerness handoff .` — 프로젝트 컨텍스트/활성 룰 적재',
       '2. 완료 주장 전: `leerness verify-claim <T-ID>` — 증거 검증 (거짓 완료 차단)',
       '3. 세션 종료: `leerness session close .` — 마감 보고 + 인수인계',
@@ -26907,13 +26976,13 @@ function adapterCmd(root, tool, opts = {}) {
     mkdirp(path.dirname(gf));
     writeUtf8(gf, _mergeReadmeSection(existing, block, START, END));
     ok(`codex 전역 지침 설치 — ${gf}`);
-    log('  조건부: .harness/ 있는 프로젝트에서만 발동 (goal 모드 포함 전 모드 커버)');
+    log('  조건부: .leerness/ 있는 프로젝트에서만 발동 (goal 모드 포함 전 모드 커버)');
     log('  해제: leerness adapter codex --global --remove');
     return;
   }
   const a = ADAPTERS[tool];
   if (!a) return fail(`알 수 없는 adapter: ${tool} (가능: ${Object.keys(ADAPTERS).join(', ')})`);
-  const lang = exists(path.join(root, '.harness/LANGUAGE')) ? read(path.join(root, '.harness/LANGUAGE')).trim() : 'ko';
+  const lang = exists(path.join(root, '.leerness/LANGUAGE')) ? read(path.join(root, '.leerness/LANGUAGE')).trim() : 'ko';
   // 1.36.116 (검수 #11): adapter 가 manifest 의 설치 등급을 **안 읽고** 항상 standard 템플릿을 만들었다 —
   //   `init --minimal` 로 232B 로 줄여 놓은 CLAUDE.md 가 adapter 한 번에 1099B standard 로 되돌아간다.
   //   사용자가 고른 침투성 등급을 다른 명령이 조용히 뒤집으면 그 설정은 의미가 없다.
@@ -26921,16 +26990,16 @@ function adapterCmd(root, tool, opts = {}) {
   //   이 저장소의 손상-스토어 계약대로 원본 보존 + 중단이다(검수 P2).
   let _instMode = null;
   {
-    const _mf = path.join(root, '.harness', 'manifest.json');
+    const _mf = path.join(root, '.leerness', 'manifest.json');
     if (exists(_mf)) {
-      _assertStoreParsable(_mf, '.harness/manifest.json');
+      _assertStoreParsable(_mf, '.leerness/manifest.json');
       // 1.36.118 (검수 P1): `_assertStoreParsable` 은 **문법**만 본다. `null`·`[]`·`false`·`"x"` 는 유효 JSON 이라
       //   통과한 뒤 `.mode` 가 없어 조용히 standard 로 떨어졌다 — minimal 설치가 다시 뒤집힌다.
       //   "손상이면 중단" 계약은 형상까지 봐야 지켜진다.
       let _mo = null;
       try { _mo = JSON.parse(read(_mf)); } catch { _mo = undefined; }
       if (!_mo || typeof _mo !== 'object' || Array.isArray(_mo)) {
-        throw Object.assign(new Error(`.harness/manifest.json 이 객체가 아님(${Array.isArray(_mo) ? 'array' : typeof _mo}) — 설치 등급을 읽을 수 없어 중단합니다: ${_mf}`), { code: 'E_STORE_CORRUPT', file: _mf });
+        throw Object.assign(new Error(`.leerness/manifest.json 이 객체가 아님(${Array.isArray(_mo) ? 'array' : typeof _mo}) — 설치 등급을 읽을 수 없어 중단합니다: ${_mf}`), { code: 'E_STORE_CORRUPT', file: _mf });
       }
       _instMode = _mo.mode || null;
     }
@@ -27046,7 +27115,7 @@ function reuseCheckCmd(root, feature, opts = {}) {
   for (const q of REUSE_CHECKLIST) log(`  [ ] ${q}`);
   log('');
   log(`## 결정`);
-  log(`  → 위 체크 통과하는 OSS 가 있으면 재사용, 없으면 신규 구현 (이유를 .harness/reuse-map.md 또는 decisions 에 기록).`);
+  log(`  → 위 체크 통과하는 OSS 가 있으면 재사용, 없으면 신규 구현 (이유를 .leerness/reuse-map.md 또는 decisions 에 기록).`);
   log(dm(`  ※ 오프라인 게이트입니다. 실제 GitHub/HuggingFace 탐색·검증은 호스트 AI 가 수행하세요 (leerness 는 네트워크 자동 호출 안 함).`));
   return;
 }
@@ -27062,7 +27131,7 @@ function skillImpactCmd(root) {
   // 설치 스킬 + 사용 빈도 (skill-suggestions.md rolling history 의 id 언급 카운트)
   let skills = [];
   try { skills = Object.entries(listAllSkills(root)).map(([k, s]) => ({ id: (s && (s.id || s.name)) || k, name: (s && (s.displayNameKo || s.name)) || k })).filter(s => s.id); } catch {}
-  const histPath = path.join(absRoot(root), '.harness', 'skill-suggestions.md');
+  const histPath = path.join(absRoot(root), '.leerness', 'skill-suggestions.md');
   const hist = exists(histPath) ? read(histPath) : '';
   const uses = {};
   for (const s of skills) { const re = new RegExp(String(s.id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'); uses[s.id] = (hist.match(re) || []).length; }
@@ -27145,7 +27214,7 @@ async function _agentRepl(root, opts) {
     autoFallback: opts.autoFallback === true || process.env.LEERNESS_REPL_AUTO_FALLBACK === '1'
   };
   if (process.env.LEERNESS_REPL_STREAM === '0') state.streamMode = false;
-  const sessionPath = () => path.join(absRoot(root), '.harness', 'agent-sessions', `${state.sessionId}.jsonl`);
+  const sessionPath = () => path.join(absRoot(root), '.leerness', 'cache', 'agent-sessions', `${state.sessionId}.jsonl`);
   const saveSession = () => {
     try {
       mkdirp(path.dirname(sessionPath()));
@@ -27348,9 +27417,9 @@ async function _agentRepl(root, opts) {
       const readlineLib = require('readline');
       readlineLib.emitKeypressEvents(process.stdin, rl);
       const getProviders = () => {
-        // 빌트인 5종 + 사용자 정의 provider (.harness/providers.json)
+        // 빌트인 5종 + 사용자 정의 provider (.leerness/providers.json)
         try {
-          const userPath = path.join(absRoot(root), '.harness', 'providers.json');
+          const userPath = path.join(absRoot(root), '.leerness', 'providers.json');
           if (fs.existsSync(userPath)) {
             const j = JSON.parse(fs.readFileSync(userPath, 'utf8'));
             const userIds = (j.providers || []).map(p => p.id).filter(id => !_PROVIDER_CYCLE_ORDER.includes(id));
@@ -27663,7 +27732,7 @@ async function _agentRepl(root, opts) {
         log(C.bold(`  🔐 현재 권한 모드: ${C.cy(p.mode || 'basic')}`));
         log('');
         log(C.dim('  변경:'));
-        log(`    ${C.green(':permissions basic')}     — 안전 (.harness 만 쓰기, 권장)`);
+        log(`    ${C.green(':permissions basic')}     — 안전 (.leerness 만 쓰기, 권장)`);
         log(`    ${C.yel(':permissions extended')}  — 프로젝트 폴더 + shell allowlist`);
         log(`    ${C.mag(':permissions full')}      — ⚠ 전체 (마우스/키보드/웹, IDE 통합 시만)`);
         log('');
@@ -28030,12 +28099,12 @@ async function agentCmd(root, taskArg) {
 //   4) deploy auto — Firebase/Cloudflare/Vercel adapter (24h 토큰 만료 알림)
 //
 // 보안 정책 (1.9.71/75 연장):
-//   - .harness/credentials.local.json 에 실제 토큰 절대 미저장 (env-ref 만)
+//   - .leerness/credentials.local.json 에 실제 토큰 절대 미저장 (env-ref 만)
 //   - .gitignore + .npmignore 자동 등록
-//   - .harness/incidents/*.json 도 비공개 (시크릿 페이로드 누출 방지)
+//   - .leerness/incidents/*.json 도 비공개 (시크릿 페이로드 누출 방지)
 
 // ---- (1) Credentials Registry ----
-function _credentialsPath(root) { return path.join(absRoot(root), '.harness', 'credentials.local.json'); }
+function _credentialsPath(root) { return path.join(absRoot(root), '.leerness', 'credentials.local.json'); }
 function _readCredentials(root) {
   const p = _credentialsPath(root);
   if (!exists(p)) return { schemaVersion: 1, services: {} };
@@ -28056,7 +28125,7 @@ function _writeCredentials(root, data) {
     if (exists(giPath)) {
       const gi = read(giPath);
       if (!gi.includes('credentials.local.json')) {
-        writeUtf8(giPath, gi.trimEnd() + '\n.harness/credentials.local.json\n');
+        writeUtf8(giPath, gi.trimEnd() + '\n.leerness/credentials.local.json\n');
       }
     }
   } catch {}
@@ -28163,7 +28232,7 @@ function credsRefreshTimestampCmd(root, service) {
 }
 
 // ---- (2) Incident Handler ----
-function _incidentsDir(root) { return path.join(absRoot(root), '.harness', 'incidents'); }
+function _incidentsDir(root) { return path.join(absRoot(root), '.leerness', 'incidents'); }
 function _saveIncident(root, payload) {
   const dir = _incidentsDir(root);
   mkdirp(dir);
@@ -28641,9 +28710,9 @@ function reuseAutodetectCmd(root) {
   //   applied/added 를 human/json 양쪽에 반영. 에러도 --json 시 구조화(failJson).
   let applied = false, added = 0;
   if (has('--apply')) {
-    const reusePath = path.join(root, '.harness', 'reuse-map.md');
+    const reusePath = path.join(root, '.leerness', 'reuse-map.md');
     if (!exists(reusePath)) {
-      failJson(has('--json'), 'no_reuse_map', `.harness/reuse-map.md 없음 — leerness init 먼저 실행`);
+      failJson(has('--json'), 'no_reuse_map', `.leerness/reuse-map.md 없음 — leerness init 먼저 실행`);
       return process.exit(process.exitCode || 1);
     }
     let body = read(reusePath);
@@ -28682,7 +28751,7 @@ function _tryLoadPlaywright() {
   }
   // 글로벌 npm root 시도
   try {
-    const r = cp.spawnSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 5000, shell: true });
+    const r = spawnNpmSync(['root', '-g'], { encoding: 'utf8', timeout: 5000 });
     if (r.status === 0) {
       const globalRoot = (r.stdout || '').trim();
       for (const id of candidates) {
@@ -28799,7 +28868,7 @@ function _tryLoadPCAutomation() {
   }
   // 글로벌 npm root 시도
   try {
-    const r = cp.spawnSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 5000, shell: true });
+    const r = spawnNpmSync(['root', '-g'], { encoding: 'utf8', timeout: 5000 });
     if (r.status === 0) {
       const globalRoot = (r.stdout || '').trim();
       for (const id of candidates) {
@@ -28959,7 +29028,7 @@ function _tryLoadLSP() {
   }
   // 글로벌 npm root 시도
   try {
-    const r = cp.spawnSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 5000, shell: true });
+    const r = spawnNpmSync(['root', '-g'], { encoding: 'utf8', timeout: 5000 });
     if (r.status === 0) {
       const globalRoot = (r.stdout || '').trim();
       for (const id of candidates) {
@@ -29161,7 +29230,7 @@ function _maybeAutoGraph(root) {
   if (process.env.LEERNESS_AUTO_GRAPH !== '1') return;
   try {
     const r0 = absRoot(root || process.cwd());
-    if (!exists(path.join(r0, '.harness'))) return;
+    if (!exists(path.join(r0, '.leerness'))) return;
     const s = _graph.graphHtmlCmd(r0, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, quiet: true });
     if (!has('--json') && !has('--quiet') && !has('--compact')) log(`📊 ontology graph auto-regenerated: leerness.html (${s.nodes} nodes · ${s.edges} links) — LEERNESS_AUTO_GRAPH=1`);  // --json 출력 오염 방지
   } catch {}
@@ -29180,7 +29249,7 @@ Usage: leerness <command> [path] [options]
 
 SETUP & UPDATE
   init [path] [--language auto|ko|en] [--skills recommended|all|a,b] [--minimal] [--yes]
-                                  Install the .harness/ workspace into your project
+                                  Install the .leerness/ workspace into your project
   migrate [path] [--dry-run] [--force]            Non-destructive cross-version migration
   migrate audit|apply|plan [path] [--json]        Diagnose / backfill / compare migration
   update [path] [--check|--yes|--force]           Auto-detect version + migrate
@@ -29279,7 +29348,7 @@ function help() {
   leerness context [path] [--json]            # 에이전트 온보딩 컨텍스트 (1.9.292, UR-0065)
   leerness health [path] [--json] · leerness doctor [--json]   # health: 프로젝트 상태 · doctor: CLI 설치/환경(경로 인자 없음)
   leerness pulse [path] · leerness milestones [path] · leerness round-history [path]   # 종합 지표
-  leerness decision add "<title>" [--reason ...] | decision list|drop <id>   # 결정 메모리 (.harness, canonical JSON)
+  leerness decision add "<title>" [--reason ...] | decision list|drop <id>   # 결정 메모리 (.leerness, canonical JSON)
   leerness lesson save "<text>" [--tag t] | lesson list|drop <date|text>     # 교훈 메모리
   leerness intent classify|expand|domains "<text>"    # 의도 추론 + scope 확장 게이트 (1.9.213)
   leerness constraints list|check|add "<text>"         # 플랫폼/API 제약 사전 점검 (1.9.208)
@@ -29298,6 +29367,8 @@ async function main() {
     return log(VERSION);
   }
   if (has('--help') || has('-h')) return help();
+  if (cmd !== 'migrate-workspace-dir' && !_guardLinkedWorkspaceTargets(args)) return;
+  if (!_autoMigrateLegacyWorkspace(args, cmd)) return;
   // 1.36.144 (T-0117, 전수 실측): `--dry-run` 을 받았으면 쓰기를 막는다 — 구현한 명령은 애초에 안 쓰므로
   //   영향이 없고, 무시하던 명령은 첫 쓰기에서 멈춰 **아무것도 바꾸지 않은 채** 사유를 말한다.
   if (has('--dry-run')) { setDryRunGuard(true); try { require('../lib/git').setGitDryRun(true); } catch {} }
@@ -29391,7 +29462,7 @@ async function main() {
     }
   }
   // 1.36.143 (전수 스윕): 위 가드는 **이름 목록**(_strict)이라 소비자를 못 따라갔다 — 검수는 3건을 지목했지만
-  //   모든 명령에 없는 `--path` 를 주고 실측하니 **33건**이 그 경로를 만들었다(`.harness` 25 · `.leerness` 7 · 기타).
+  //   모든 명령에 없는 `--path` 를 주고 실측하니 **33건**이 그 경로를 만들었다(canonical 25 · legacy workspace 7 · 기타).
   //   그중 다수는 **성공이라 말하면서** 만든다(`provider add` · `team add` · `skill learn` · `glossary` · `wakeup-interval`).
   //   `roles` · `decision drop` · `lesson drop` 을 개별 등록한 게 세 번째였다 — 네 번째를 만들지 않으려면 이름이 아니라
   //   **성질**로 막아야 한다: 사용자가 `--path` 로 **명시한** 경로는 존재해야 한다. 부재가 정상 입력인 명령만 뺀다.
@@ -29420,7 +29491,7 @@ async function main() {
         return;
       }
       // 1.36.148 (재검수 P2): 존재성만 봐서 **일반 파일**이 프로젝트 root 로 통과했고,
-      //   그 아래에 `.harness` 가 있을 리 없으니 "빈 상태" 를 정상 결과처럼 보고했다.
+      //   그 아래에 `.leerness` 가 있을 리 없으니 "빈 상태" 를 정상 결과처럼 보고했다.
       //   프로젝트 root 는 디렉토리다. 파일이면 그렇다고 말한다(스캔처럼 파일이 정상 입력인 경로는 위 _strict 가 따로 다룬다).
       try {
         if (!fs.statSync(_abs).isDirectory()) {
@@ -29433,7 +29504,7 @@ async function main() {
       } catch { /* stat 실패는 위 존재 검사에서 이미 걸러졌다 */ }
     }
   }
-  // 1.13.1 (15th 블라인드 리뷰 P1, codex gpt-5.5): 무명령 + 옵션만(예: leerness --json) 은 묵시적 init 쓰기를 하지 않음 — cwd 에 .harness 가 의도치 않게 생성되던 부작용 차단. 명시 명령 없이 옵션만이면 help (bare leerness 온보딩 init 은 유지).
+  // 1.13.1 (15th 블라인드 리뷰 P1, codex gpt-5.5): 무명령 + 옵션만(예: leerness --json) 은 묵시적 init 쓰기를 하지 않음 — cwd 에 .leerness 가 의도치 않게 생성되던 부작용 차단. 명시 명령 없이 옵션만이면 help (bare leerness 온보딩 init 은 유지).
   if (!args[0] && process.argv.slice(2).some(a => a.startsWith('-'))) { help(); return; }
   // 1.9.38 (B): 사용 통계 카운터 — usage stats 명령 자체와 비차단 경로는 제외
   // 1.9.317 (UR-0051, 설치리뷰): 내부 auto-call(LEERNESS_INTERNAL=1) 은 usage 집계 제외 — 텔레메트리 오염(거짓 skill 추천) 방지.
@@ -29442,20 +29513,20 @@ async function main() {
   //   (실측: 대상 프로젝트는 "사용 기록 없음", 무관한 cwd 는 "총 3회 호출"). 도구별 귀속은 _bumpMcpUsage 가 이미 한다.
   if (process.env.LEERNESS_INTERNAL !== '1' && cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== 'mcp' && cmd !== '--version' && cmd !== '--help') {
     try {
-      // 1.9.352 (UR-0069 외부리뷰): usage 루트 — --path 우선, 없으면 args[1] 이 .harness 보유 디렉토리일 때만 path(positional 보존), 아니면 cwd. (이전: args[1] 무조건 path 가정 → subcommand[decision add 등] root=cwd/add → .harness 못 찾아 미집계)
+      // 1.9.352 (UR-0069 외부리뷰): usage 루트 — --path 우선, 없으면 args[1] 이 .leerness 보유 디렉토리일 때만 path(positional 보존), 아니면 cwd. (이전: args[1] 무조건 path 가정 → subcommand[decision add 등] root=cwd/add → .leerness 못 찾아 미집계)
       const _pathArg = arg('--path', null);
       let root;
       if (_pathArg) root = absRoot(_pathArg);
-      else if (args[1] && !args[1].startsWith('-') && exists(path.join(absRoot(args[1]), '.harness'))) root = absRoot(args[1]);
+      else if (args[1] && !args[1].startsWith('-') && exists(path.join(absRoot(args[1]), '.leerness'))) root = absRoot(args[1]);
       // 1.36.38 (codex 4차 #9): subcommand 형(예: memory status <B>)은 대상 경로가 args[2] — 종전엔 cwd(A)에 오귀속됐다.
-      else if (args[2] && !args[2].startsWith('-') && exists(path.join(absRoot(args[2]), '.harness'))) root = absRoot(args[2]);
+      else if (args[2] && !args[2].startsWith('-') && exists(path.join(absRoot(args[2]), '.leerness'))) root = absRoot(args[2]);
       else root = absRoot(process.cwd());
-      if (exists(path.join(root, '.harness'))) _bumpUsage(root, cmd);
+      if (exists(path.join(root, '.leerness'))) _bumpUsage(root, cmd);
     } catch {}
   }
   // 1.9.183 (사용자 명시): 모든 명령 시점에서 구버전 감지 + 경고 + 업데이트 명령어 안내.
   //   init/migrate 는 이미 _warnIfStale 호출하므로 제외. mcp/version/help 등 출력 민감 명령도 제외.
-  //   24h 캐시 (.harness/cache/update-check.json) 활용 — 네트워크 비차단.
+  //   24h 캐시 (.leerness/cache/update-check.json) 활용 — 네트워크 비차단.
   const _staleSkip = new Set(['init', 'migrate', 'usage', 'mcp', 'release', 'session-close', '--version', '--help', 'help', 'update', 'whats-new']);
   if (!_staleSkip.has(cmd) && process.env.LEERNESS_NO_STALE_CHECK !== '1' && !has('--no-stale-check')) {
     try {
@@ -29476,7 +29547,7 @@ async function main() {
     const _cy = s => _tty ? `\x1b[36m${s}\x1b[0m` : s, _dm = s => _tty ? `\x1b[2m${s}\x1b[0m` : s;
     const _mRoot = absRoot(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
     const _mj = has('--json');
-    if (!exists(path.join(_mRoot, '.harness'))) { failJson(_mj, 'harness_missing', `leerness 미설치: ${_mRoot} — 먼저 leerness init`); return; }
+    if (!exists(path.join(_mRoot, '.leerness'))) { failJson(_mj, 'harness_missing', `leerness 미설치: ${_mRoot} — 먼저 leerness init`); return; }
     const sub = args[1] && !args[1].startsWith('-') && !_MODES.includes(args[1]) && !/^[.\/\\]|^[A-Za-z]:/.test(args[1]) ? args[1] : (_MODES.includes(args[1]) ? 'set' : 'get');
     const cur = _projectMode(_mRoot);
     // 1.36.107: 손상을 조용히 'standard' 로 보고하지 않는다 — 사용자는 설정이 날아간 걸 알아야 한다.
@@ -29533,7 +29604,7 @@ async function main() {
           //   altTemplate 에는 **직전 등급의 템플릿**을 준다. 안 주면 옛 템플릿이 "사용자 커스텀" 으로 오인돼
           //   Preserved 에 통째 이월되고, `mode set minimal` 이 파일을 줄이는 대신 키운다(실측 7,627 → 8,392B).
           //   이 차감은 1.36.60 이 언어 전환용으로 만든 것과 같은 기제다 — 축만 다르다.
-          writeUtf8(p, managedMerge(k, gen[k], prev, path.join(_mRoot, '.harness', 'archive'),
+          writeUtf8(p, managedMerge(k, gen[k], prev, path.join(_mRoot, '.leerness', 'archive'),
             { lang: _l, root: _mRoot, altTemplate: (prevGen && prevGen[k]) || '' }));
           regenerated++;
         }
@@ -29555,7 +29626,7 @@ async function main() {
     //   손대는 표면은 영어화까지 하고 간다(leerness 는 한국어 우선 도구가 아니다). 아래 `_bt` 로 고른다.
     const _bEn = _uiLang(_bRoot) === 'en';
     const _bt = (ko, en) => (_bEn ? en : ko);
-    if (!exists(path.join(_bRoot, '.harness'))) { failJson(_bj, 'harness_missing', _bt(`leerness 미설치: ${_bRoot} — 먼저 leerness init`, `leerness not installed: ${_bRoot} — run leerness init first`)); return; }
+    if (!exists(path.join(_bRoot, '.leerness'))) { failJson(_bj, 'harness_missing', _bt(`leerness 미설치: ${_bRoot} — 먼저 leerness init`, `leerness not installed: ${_bRoot} — run leerness init first`)); return; }
     const _tok = (s) => Math.round(String(s || '').length / 3.2);   // 한글 혼합 대략치 — 절대값이 아니라 추세/비교용
     const parts = [];
     // 1.36.112: 지침 파일을 **관리분 / 이월분**으로 갈라 잰다.
@@ -29579,7 +29650,7 @@ async function main() {
       parts.push({ key: f, what: f, bytes: fs.statSync(p).size, tokens: _tok(txt), carriedTokens: cT });
     }
     // 이월 안내는 "전체 원본 백업: `<경로>`" 라고 **약속**한다. "옮겨도 안전하다" 는 권고는 그 약속 위에 서 있으므로
-    //   권고하기 전에 백업이 실재하는지 확인한다(설치본 표본 22건 중 4건은 .harness/archive 없이 복사된 사본이었다).
+    //   권고하기 전에 백업이 실재하는지 확인한다(설치본 표본 22건 중 4건은 .leerness/archive 없이 복사된 사본이었다).
     //   판정은 **이월분을 가진 파일 전부**에 대해 한다. 종전엔 첫 파일(AGENTS.md)만 보고 그 결과를 두 파일에
     //   적용해, AGENTS 만 백업된 상태에서 "원본은 이미 보관돼 있습니다" 라고 말했다(검수 재현). 하나라도 없으면 false.
     let _archive = null;
@@ -29595,8 +29666,8 @@ async function main() {
           // 안내 문구는 **프로젝트 파일에서 온 입력**이다. `../` 탈출이나 절대경로로 프로젝트 밖을 가리키면
           //   남의 디렉토리 구조를 백업으로 인정하게 된다(검수 재현: `../outside` → exists:true). 루트 안으로 가둔다.
           if (abs !== _bRoot && !abs.startsWith(_bRoot + path.sep)) { allOk = false; continue; }
-          // 안내는 두 형식으로 존재한다 — 스냅샷 경로(`.harness/archive/leerness-1.36.100-…`)와
-          //   아카이브 루트(`.harness/archive`, archiveRel 미주입 시의 폴백). 한쪽만 상정하면 백업이
+          // 안내는 두 형식으로 존재한다 — 스냅샷 경로(`.leerness/archive/leerness-1.36.100-…`)와
+          //   아카이브 루트(`.leerness/archive`, archiveRel 미주입 시의 폴백). 한쪽만 상정하면 백업이
           //   멀쩡한 프로젝트에 "백업이 없습니다" 라고 말한다(작성 중 실제로 냈다 — 오경보는 이 경고를 못 믿게 만든다).
           let found = exists(path.join(abs, 'files', c.file));
           if (!found && exists(abs)) {
@@ -29608,7 +29679,7 @@ async function main() {
       }
       if (shown) _archive = { path: shown, exists: allOk, files: _carryFiles.length };
     }
-    // 1.36.105 (codex 검수 HIGH#7): AGENTS.md 가 "읽어라" 고 지목하는 .harness 문서를 빼고 재면 예산이 거짓이 된다
+    // 1.36.105 (codex 검수 HIGH#7): AGENTS.md 가 "읽어라" 고 지목하는 .leerness 문서를 빼고 재면 예산이 거짓이 된다
     //   (검수 재현: session-workflow.md 에 100,000자를 넣어도 ok:true). 지목된 문서를 합산에 넣는다.
     //   1.36.112 (독립 검수, 실제 설치본에서 조건 확인): 지목은 **파일 전체**에서 세야 맞다(이월 블록 안의
     //   언급도 AI 는 그대로 읽는다). 그러나 등급 절감으로 칠 수 있는 것은 **관리분 안의 지목뿐**이다 —
@@ -29619,7 +29690,7 @@ async function main() {
     try {
       const agp = path.join(_bRoot, 'AGENTS.md');
       const _agTxt = exists(agp) ? read(agp) : '';
-      const _REF_RE = /\.harness\/[A-Za-z0-9._-]+\.md/g;
+      const _REF_RE = /\.leerness\/[A-Za-z0-9._-]+\.md/g;
       const refs = [...new Set(_agTxt.match(_REF_RE) || [])];
       const _managedRefs = new Set(_splitPreserved(_agTxt).managed.match(_REF_RE) || []);
       let rb = 0, rt = 0, rn = 0;
@@ -29752,7 +29823,7 @@ async function main() {
       // 1.10.3 (UR-0173): json:true → 배너/진행바 억제(TTY 누출 차단), nonInteractive:true → 대화 메뉴 차단(머신 계약).
       setQuiet(true);
       try { await install(_initRoot, { ..._initOpts, json: true, nonInteractive: true }); } finally { setQuiet(false); }
-      let harnessFiles = 0; try { harnessFiles = exists(path.join(_initRoot, '.harness')) ? fs.readdirSync(path.join(_initRoot, '.harness')).length : 0; } catch {}
+      let harnessFiles = 0; try { harnessFiles = exists(path.join(_initRoot, '.leerness')) ? fs.readdirSync(path.join(_initRoot, '.leerness')).length : 0; } catch {}
       log(JSON.stringify({ ok: true, action: 'init', version: VERSION, path: _initRoot, harnessFiles, dryRun: !!_initOpts.dry, minimal: !!_initOpts.minimal }, null, 2));
       return;
     }
@@ -29832,7 +29903,7 @@ async function main() {
     }
     // _providerAuth (1.36.91): 인증 축을 라우팅이 소비한다 — 확인 가능한 provider 만 ok/no, 나머지는 unknown.
     //   확인 명령이 없는 provider 는 프로세스를 띄우지 않는다(불필요한 지연 방지).
-    //   codex 30차 #1: 종전엔 EXTERNAL_AGENTS 만 봐서 **프로젝트의 provider 재정의(.harness)를 무시**했다 —
+    //   codex 30차 #1: 종전엔 EXTERNAL_AGENTS 만 봐서 **프로젝트의 provider 재정의(.leerness)를 무시**했다 —
     //   `agents check` 는 재정의된 CLI 를, 라우팅은 전역 동명 CLI 를 확인하는 불일치가 생긴다. 같은 해석기를 쓴다.
     const _authRoot = arg('--path', process.cwd());
     const _authCache = new Map();
@@ -30130,8 +30201,8 @@ async function main() {
     return require('../lib/bugfix').bugfixCmd(_bfRoot || process.cwd(), _bfSub, _bfRest,
       { has, arg, _withLock, _taskExists: (r, id) => readProgressRows(r).some(x => x.id === id) });
   }
-  // 1.36.90 (P-0006, 사용자 승인 범위=대시보드만): .harness 읽기 전용 대시보드. 코드는 npm 패키지가 소유하고
-  //   `.harness` 는 데이터만 갖는다 — 실행 코드를 설치 프로젝트에 복사하지 않는다(업그레이드 드리프트 차단).
+  // 1.36.90 (P-0006, 사용자 승인 범위=대시보드만): .leerness 읽기 전용 대시보드. 코드는 npm 패키지가 소유하고
+  //   `.leerness` 는 데이터만 갖는다 — 실행 코드를 설치 프로젝트에 복사하지 않는다(업그레이드 드리프트 차단).
   if (cmd === 'dashboard') {
     return require('../lib/dashboard').dashboardCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), {
       has, arg, VERSION, _roadmapData, _loadDecisions, _loadLessons,
@@ -30224,8 +30295,8 @@ async function main() {
     }
     return parentCmd(_pAbs, args[1]);
   }
-  // 1.9.211: leerness migrate-workspace-dir — .harness → .leerness 마이그레이션 (사용자 명시)
-  if (cmd === 'migrate-workspace-dir')              return migrateWorkspaceDirCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());   // 1.36.33: positional path 무시 → cwd 오염 (1.36.21/24 계열 잔존 — 실제로 이 버그로 소스 저장소가 오염될 뻔)
+  // 1.9.211: leerness migrate-workspace-dir — legacy workspace → canonical .leerness 마이그레이션 (사용자 명시)
+  if (cmd === 'migrate-workspace-dir')              return migrateWorkspaceDirCmd(arg('--path', null) || (args[1] && !args[1].startsWith('-') ? args[1] : null) || process.cwd());   // 1.36.162: bare relative path도 이 명령에서는 명백한 project target이다.
   // 1.9.212: leerness idempotency audit — 멱등성 위반 탐지 (사용자 명시)
   if (cmd === 'idempotency')                        return idempotencyCmd(arg('--path', process.cwd()), args[1]);
   // 1.9.213: leerness intent <classify|expand|domains> — intent inference + scope expansion (사용자 명시)
@@ -30266,7 +30337,7 @@ async function main() {
   if (cmd === 'release' && args[1] === 'cadence')   return releaseCadenceCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()));  // 1.9.374 (UR-0074): 릴리스 빈도 진단
   // 1.9.141: feature causality graph
   // 1.36.2 (clean-room, UR-0184): add/show/link/impact 도 trailing positional path 인식 — list(1.9.412)만 지원하던 것을 일관 확대.
-  //   기존엔 add 가 모든 non-flag positional 을 NAME 으로 join → 경로가 이름에 흡수 + cwd 에 stray .harness scaffold(조용한 오독).
+  //   기존엔 add 가 모든 non-flag positional 을 NAME 으로 join → 경로가 이름에 흡수 + cwd 에 stray .leerness scaffold(조용한 오독).
   //   해석: --path > path-like positional(_taskPositionalPath) > cwd. add 의 NAME 은 _parseAddTitle 로 첫 경로/플래그에서 절단(경로 흡수 차단).
   //   add 는 featureAddCmd 내부 _requireInit 게이트로 미초기화 dir scaffold 대신 에러(--force 우회). show/link/impact 는 read-only(scaffold 안 함).
   const _featRoot = () => absRoot(arg('--path', null) || _taskPositionalPath(args, 2) || process.cwd());
@@ -30485,6 +30556,7 @@ module.exports = {
   _shellQuoteArg,
   // 1.18.1: 명령 실행 권한 결정 (재실증 신규 P1: --test-cmd 비-JS 인터프리터 거짓차단) — 단위 테스트
   _isCommandPermitted, RUN_CORE_ALLOW, _uiLang, _tx,
+  _loadEnvFile, _dotenvKeyAllowed, _scrubEnv,
   // 1.18.2: verify-claim 위장 스텁(빈 export 껍데기) 판정 — 단위 테스트
   _vcImplIsEmpty, _VC_EMPTY_SHELL_RE,
   // 1.18.3 (UR-0003): 분야별 자기질문 품질 렌즈 — 단위 테스트. 1.19.2: 파일→도메인 매핑(완료-검증 advisory)

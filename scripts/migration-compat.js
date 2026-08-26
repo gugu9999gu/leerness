@@ -4,12 +4,13 @@
 //  (c) 연쇄 업그레이드 (구버전 → 중간 → 현재)
 //  (d) 사용자가 **템플릿과 같은 문장**을 의도적으로 쓴 경우(차감이 지우면 안 된다)
 const fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
+const { spawnNpmSync } = require('../lib/npm-process');
 const CUR = require('path').join(__dirname, '..', 'bin', 'leerness.js');   // 저장소 어디에 있든 동작
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mh2-'));
 const E = (sb) => Object.assign({}, process.env, { LEERNESS_OFFLINE: '1', LEERNESS_NO_AUTO_ROADMAP: '1', TMPDIR: sb, TEMP: sb, TMP: sb });
 let bad = 0;
 const t = (k, ok, n) => { if (!ok) bad++; console.log((ok ? '  ok  ' : '  ✗   ') + k.padEnd(52) + (n || '')); };
-const FILES = ['AGENTS.md', 'CLAUDE.md', '.harness/current-state.md', '.harness/plan.md', '.harness/decisions.md', '.harness/project-brief.md'];
+const FILES = ['AGENTS.md', 'CLAUDE.md', '.leerness/current-state.md', '.leerness/plan.md', '.leerness/decisions.md', '.leerness/project-brief.md'];
 const plant = (proj, tag) => { const done = []; for (const rel of FILES) { const p = path.join(proj, rel); if (!fs.existsSync(p)) continue; fs.appendFileSync(p, `\nUSERMARK-${tag}-${rel.replace(/[^\w]/g, '')}\n`); done.push(rel); } return done; };
 const liveHas = (proj, tag, rel) => { const p = path.join(proj, rel); if (!fs.existsSync(p)) return false; return fs.readFileSync(p, 'utf8').includes(`USERMARK-${tag}-${rel.replace(/[^\w]/g, '')}`); };
 const anywhere = (proj, needle) => { let f = false; (function w(y) { for (const e of fs.readdirSync(y, { withFileTypes: true })) { const q = path.join(y, e.name); if (e.isDirectory()) { if (!/node_modules|\.git$/.test(e.name)) w(q); } else if (!f) { try { if (fs.readFileSync(q, 'utf8').includes(needle)) f = true; } catch { } } } })(proj); return f; };
@@ -18,7 +19,7 @@ const R = (sb, cli, a, cwd) => cp.spawnSync(process.execPath, [cli, ...a], { cwd
 function setupOld(ver, tag) {
   const sb = path.join(root, tag); fs.mkdirSync(sb, { recursive: true });
   fs.writeFileSync(path.join(sb, 'package.json'), JSON.stringify({ name: 'h', version: '0.1.0', private: true }));
-  const inst = cp.spawnSync('npm', ['i', 'leerness@' + ver, '--no-audit', '--no-fund'], { cwd: sb, encoding: 'utf8', shell: true, timeout: 900000 });
+  const inst = spawnNpmSync(['i', 'leerness@' + ver, '--no-audit', '--no-fund'], { cwd: sb, encoding: 'utf8', timeout: 900000 });
   if (inst.status !== 0) return null;
   const OLD = path.join(sb, 'node_modules', 'leerness', 'bin', 'leerness.js');
   const proj = path.join(sb, 'proj'); fs.mkdirSync(proj, { recursive: true });
@@ -68,7 +69,7 @@ console.log('\n■ (c) 연쇄 업그레이드 1.30.0 → 1.33.0 → 현재');
     const planted = plant(s.proj, 'CHAIN');
     const mid = path.join(s.sb, 'mid'); fs.mkdirSync(mid, { recursive: true });
     fs.writeFileSync(path.join(mid, 'package.json'), JSON.stringify({ name: 'm', version: '0.1.0', private: true }));
-    const i2 = cp.spawnSync('npm', ['i', 'leerness@1.33.0', '--no-audit', '--no-fund'], { cwd: mid, encoding: 'utf8', shell: true, timeout: 900000 });
+    const i2 = spawnNpmSync(['i', 'leerness@1.33.0', '--no-audit', '--no-fund'], { cwd: mid, encoding: 'utf8', timeout: 900000 });
     if (i2.status === 0) R(s.sb, path.join(mid, 'node_modules', 'leerness', 'bin', 'leerness.js'), ['init', s.proj, '--yes'], s.proj);
     R(s.sb, CUR, ['init', s.proj, '--yes'], s.proj);
     const gone = planted.filter(rel => !anywhere(s.proj, `USERMARK-CHAIN-${rel.replace(/[^\w]/g, '')}`));

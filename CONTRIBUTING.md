@@ -9,13 +9,15 @@
 
 ## Test tiers
 
-Three tiers, fastest to slowest:
+The main three tiers, fastest to slowest:
 
 | Command | What it runs | Time | Use it for |
 |---|---|---|---|
 | `npm run test:fast` | `selftest` + smoke (commands run without crashing) | < 1 min | the dev loop |
 | `npm run test:core` | `selftest` + a flagship behavioral suite — `verify-claim` / `gate` / `contract` / `scan` actually reject bad input and pass honest input | ~20 s | pre-commit, quick CI |
-| `npm test` | `--version` + `selftest` + the entire e2e suite | **10+ minutes by design** | the release gate |
+| `npm test` | `--version` + `selftest` + the entire e2e suite + a packed-artifact cleanroom | **10+ minutes by design** | the release gate |
+
+Focused suites are also available: `npm run test:commands` drives the broad CLI command surface, while `npm run test:installed` packs the package, installs it into a separate consumer, verifies canonical workspace migration and concurrent handoff isolation, then reruns that command surface from the installed artifact.
 
 `npm test` is the gate that must pass before publishing. It is deliberately slow: the e2e suite drives the published CLI surface end-to-end rather than mocking it.
 

@@ -3,11 +3,11 @@
 
 Follow AGENTS.md. Always run `leerness handoff .` at the start and `leerness session close .` before ending a session.
 
-**⭐ 매 세션 첫 행동**: `.harness/session-workflow.md`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 `leerness drift check --auto-fix`로 자동 회복.
+**⭐ 매 세션 첫 행동**: `.leerness/session-workflow.md`의 6단계 워크플로(요청분석→계획→분배→sub-agent→종합검증→마감)를 따라야 함. drift critical 시 `leerness drift check --auto-fix`로 자동 회복.
 
 **완료 주장 전**: `leerness verify-claim <T-ID>` — 증거 없이 "완료" 라고 말하지 않는다.
 
-Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md before claiming completion.
+Protected files must not be deleted. Read .leerness/anti-lazy-work-policy.md before claiming completion.
 
 ## 자연어 영구 룰
 사용자가 "매 X마다 Y를 해줘" 같은 자연어 룰을 말하면 즉시 `leerness rule add "Y" --trigger every-X`로 등록하세요. 등록된 룰은 매 세션 `handoff`가 자동 출력하고, `session close`가 자동 검증해 보고합니다. 사용자가 "중지" / "그만" / "끄기"를 명시할 때만 `rule pause/remove`를 호출합니다.
@@ -18,12 +18,12 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 <!-- leerness:migration-preserved -->
 ## Preserved previous content
 
-> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.100-2026-08-05T01-57-13-913Z`
+> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.leerness/archive/leerness-1.36.100-2026-08-05T01-57-13-913Z`
 
 ## 사용자 명시 신규 7종 (1.9.207~213) — 백로그 완전 소진
 ### 1.9.207 — 사용자 요청 누락 확인 절차
 - `leerness requests audit|add|list|complete|drop` — 사용자 명시 요청 누적 추적
-- `.harness/user-requests.json` 자동 ID(UR-XXXX) + 중복 방지
+- `.leerness/user-requests.json` 자동 ID(UR-XXXX) + 중복 방지
 - handoff 헤드라인 자동 노출 — `📥 미답 요청 N건` (critical) 또는 `📥 요청 N (tracked)`
 ### 1.9.208 — 플랫폼/API 제약 사전 체크
 - `leerness constraints list|check|add` — Stripe/OpenAI/Anthropic/GitHub/Discord/Twitter 6종 기본 catalog
@@ -36,11 +36,11 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 - `leerness wakeup-interval get|set|auto|history|record` — 600~2700s 범위 자동 조절
 - user-trigger 3+/2h → 15min / 활동 0 → 35min / pre-wake critical → 20min
 - opt-out: `LEERNESS_FIXED_INTERVAL` env 또는 `set <secs>`
-### 1.9.211 — .harness → .leerness opt-in 마이그레이션
-- `leerness migrate-workspace-dir` (`--dry-run` / `--force`) — 전체 재귀 copy + 자동 마커
+### 1.9.211 / 1.36.162 — .harness → .leerness 트랜잭션 마이그레이션
+- `leerness migrate-workspace-dir` (`--dry-run` / `--force`) — 백업·해시 검증·구조화 상태 병합·충돌/링크 fail-closed
 - `leerness workspace-dir get|guide` — 현재 디렉토리 + AI 참조 가이드
 - 자동 생성: `.leerness/WHERE_TO_FIND.md` (디렉토리 구조 + 자주 묻는 위치)
-- 기본 동작: `.harness` 유지 (breaking change 0)
+- 기본 동작: 신규 설치는 `.leerness`, 기존 `.harness` 프로젝트는 첫 일반 명령에서 자동 마이그레이션
 ### 1.9.212 — 멱등성 감사 + dedup 보강
 - `ruleAdd` / `taskAdd` — 같은 텍스트 + 활성 상태 시 자동 skip (`--force` 우회)
 - `leerness idempotency audit` — 4영역 점검 (rules / tasks / user-requests / wakeups) + severity 분류
@@ -138,7 +138,7 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 - `leerness env` + `env encoding [--apply]` — .ps1/.bat 비-ASCII + BOM 없음 → CP949 오인식 감지
 - JSON 10번째 필드 `envInfo` + drift --auto-fix 통합 + CJK 분류 (Korean/Japanese/Chinese)
 ### 1.9.245 — UR-0015: API skill cache
-- `leerness api-skill add <url> --direction "..."` — 공식 문서 + 관련 링크 자동 정리 (`.harness/api-skills/`)
+- `leerness api-skill add <url> --direction "..."` — 공식 문서 + 관련 링크 자동 정리 (`.leerness/api-skills/`)
 - handoff 자동 매칭 노출 + audit `api_skill_missing` finding (1.9.247)
 ### 1.9.246~247 — UR-0016: REPL agent UX/UI
 - 컨텍스트 게이지 + 서브에이전트 가시화 + 정상완료 초록색 강조 (status bar)
@@ -169,7 +169,7 @@ Protected files must not be deleted. Read .harness/anti-lazy-work-policy.md befo
 - `leerness shell-guard "<command>"` — 실행 전 셸 호환성 정적 분석 6 규칙:
   - **ps5-chain**: Windows PowerShell 5.1 `&&`/`||` 미지원 → `A; if ($?) { B }` 제안
   - ps-devnull / ps-inline-env / ps-rm-rf / cmd-semicolon / ps-version-unknown
-- `.harness/shell-failures.json` 실패 메모리 (200 cap) + 환경 버전 변동 감지 (environment.json 스냅샷 대비)
+- `.leerness/shell-failures.json` 실패 메모리 (200 cap) + 환경 버전 변동 감지 (environment.json 스냅샷 대비)
 - **MCP 72번째 `leerness_shell_guard`** (외부 AI 실행 전 점검) + selftest 케이스 통합 (CLI+MCP+selftest 3중 노출)
 ## 자율 모드 마일스톤 — 1.9.261 시점
 - **R217 누적 라운드** (baseline v1.9.6)

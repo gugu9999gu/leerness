@@ -21,9 +21,9 @@ const norm = p => { try { return path.resolve(String(p)); } catch { return Strin
 // tombstone을 상태로 세면 해제용 rename/owner 삭제가 사용자 쓰기로 오인되고, 공개 락을 계속 held로
 // 누적하면 이후의 정상 쓰기까지 "서로 다른 락" 아래에서 일어난 것처럼 보이는 거짓 실패가 난다.
 const LOCK_INTERNAL = /\.lock(?:\.release-[0-9a-f]+)?(?:[\\/]|$)/i;
-const isState = p => /[\\/]\.harness[\\/]/.test(p) && !/[\\/]archive[\\/]/.test(p)
+const isState = p => /[\\/]\.leerness[\\/]/.test(p) && !/[\\/]archive[\\/]/.test(p)
   && !LOCK_INTERNAL.test(p) && !/\.tmp-\d+-\d+$/.test(p);
-const relOf = p => (p.split(/[\\/]\.harness[\\/]/)[1] || p).replace(/\\/g, '/');
+const relOf = p => (p.split(/[\\/]\.leerness[\\/]/)[1] || p).replace(/\\/g, '/');
 // 선택형 경쟁 창 확대. 제품에는 영향을 주지 않으며, 테스트가 명시적으로 이 모듈을 preload 하고
 // LOCKPROBE_STALL_TARGET/LOCKPROBE_STALL_MS 를 함께 준 경우에만 최종 rename 직전에 멈춘다.
 // 락이 있는 명령은 이 대기 동안에도 같은 락을 유지하고, 락이 없는 이전 RMW는 뒤늦은 쓰기가 새 데이터를 덮는다.
@@ -119,7 +119,7 @@ process.on('exit', () => {
 if (require.main === module) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lock-probe-selftest-'));
   try {
-    const harness = path.join(root, '.harness');
+    const harness = path.join(root, '.leerness');
     const state = path.join(harness, 'state.json');
     const lock = `${state}.lock`;
     const tombstone = `${lock}.release-0123456789abcdef0123456789abcdef`;

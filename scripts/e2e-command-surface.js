@@ -148,13 +148,13 @@ async function main() {
   r = run(root, ['creds', 'list', '--json']);
   const credsList = parseJson(r);
   check('creds list returns the registered service', r.status === 0 && credsList?.services?.surface?.envVars?.includes(TEST_TOKEN_NAME), r.stdout || r.stderr);
-  const credentialsText = fs.readFileSync(path.join(root, '.harness', 'credentials.local.json'), 'utf8');
+  const credentialsText = fs.readFileSync(path.join(root, '.leerness', 'credentials.local.json'), 'utf8');
   check('creds registry never persists the credential value', !credentialsText.includes(TEST_TOKEN_VALUE));
   r = run(root, ['creds', 'check', 'surface', '--json']);
   const credsCheck = parseJson(r);
   check('creds check confirms the injected env value', r.status === 0 && credsCheck?.ok === true && credsCheck?.services?.surface?.envSet === true, r.stdout || r.stderr);
   r = run(root, ['creds', 'refresh', 'surface']);
-  const refreshed = JSON.parse(fs.readFileSync(path.join(root, '.harness', 'credentials.local.json'), 'utf8'));
+  const refreshed = JSON.parse(fs.readFileSync(path.join(root, '.leerness', 'credentials.local.json'), 'utf8'));
   check('creds refresh records a valid timestamp', r.status === 0 && !Number.isNaN(Date.parse(refreshed.services.surface.lastRefreshed)), r.stderr || r.stdout);
 
   // env check/sync/detect: keys synchronize, values do not leak.
@@ -172,7 +172,7 @@ async function main() {
   check('env check is clean after sync', r.status === 0 && envAfter?.inEnvOnly?.length === 0, r.stdout || r.stderr);
   r = run(root, ['env', 'detect', '--json'], { timeout: 90000 });
   const detected = parseJson(r);
-  check('env detect persists a machine-readable snapshot', r.status === 0 && detected?.persisted === true && fs.existsSync(path.join(root, '.harness', 'environment.json')), r.stdout || r.stderr);
+  check('env detect persists a machine-readable snapshot', r.status === 0 && detected?.persisted === true && fs.existsSync(path.join(root, '.leerness', 'environment.json')), r.stdout || r.stderr);
 
   // Adaptive wakeup interval state round-trip.
   r = run(root, ['wakeup-interval', 'set', '600', '--json']);
@@ -190,16 +190,16 @@ async function main() {
 
   // Workspace directory, feature toggles, glossary, and policy.
   r = run(root, ['workspace-dir', 'get', '--json']);
-  check('workspace-dir get reports .harness as the active store', r.status === 0 && parseJson(r)?.current === '.harness', r.stdout || r.stderr);
+  check('workspace-dir get reports .leerness as the active store', r.status === 0 && parseJson(r)?.current === '.leerness', r.stdout || r.stderr);
   r = run(root, ['workspace-dir', 'guide']);
-  check('workspace-dir guide explains the canonical directory', r.status === 0 && r.stdout.includes('.harness'), r.stderr || r.stdout);
+  check('workspace-dir guide explains the canonical directory', r.status === 0 && r.stdout.includes('.leerness'), r.stderr || r.stdout);
   r = run(root, ['toggle', 'set', 'workflow-distribute', 'off', '--json']);
   check('toggle set persists an explicit OFF value', r.status === 0 && parseJson(r)?.value === false, r.stdout || r.stderr);
   r = run(root, ['toggle', 'list', '--json']);
   check('toggle list returns the persisted value', r.status === 0 && parseJson(r)?.toggles?.['workflow-distribute'] === false, r.stdout || r.stderr);
   r = run(root, ['glossary', 'build', '--json']);
   const glossaryBuild = parseJson(r);
-  check('glossary build writes both rendered and JSON artifacts', r.status === 0 && glossaryBuild?.ok === true && fs.existsSync(path.join(root, '.harness', 'glossary.md')) && fs.existsSync(path.join(root, '.harness', 'glossary.json')), r.stdout || r.stderr);
+  check('glossary build writes both rendered and JSON artifacts', r.status === 0 && glossaryBuild?.ok === true && fs.existsSync(path.join(root, '.leerness', 'glossary.md')) && fs.existsSync(path.join(root, '.leerness', 'glossary.json')), r.stdout || r.stderr);
   r = run(root, ['glossary', 'show', '--json']);
   const glossaryShow = parseJson(r);
   check('glossary show exposes defined entries and unresolved gaps', r.status === 0 && glossaryShow?.entries?.some(e => e.term === 'react') && glossaryShow?.gaps?.some(e => e.term === 'surface-unknown-dep'), r.stdout || r.stderr);
@@ -258,7 +258,7 @@ async function main() {
     check('webhook serve answers localhost health', health.status === 200 && healthJson.ok === true && healthJson.port === port, health.body);
     const accepted = await request(port, 'POST', '/incident', { error: 'surface fixture incident' });
     const acceptedJson = JSON.parse(accepted.body);
-    check('webhook serve accepts and persists a local incident', accepted.status === 202 && /^inc-/.test(acceptedJson.incident || '') && fs.existsSync(path.join(root, '.harness', 'incidents')), accepted.body);
+    check('webhook serve accepts and persists a local incident', accepted.status === 202 && /^inc-/.test(acceptedJson.incident || '') && fs.existsSync(path.join(root, '.leerness', 'incidents')), accepted.body);
   } finally {
     await stopChild(webhook);
     children.delete(webhook);

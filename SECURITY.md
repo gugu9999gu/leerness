@@ -11,14 +11,14 @@ leerness is a **powerful CLI harness** (child_process, git, external AI CLIs, au
 
 - **런타임 의존성 0** — `npm audit` 취약점 0. / Zero runtime dependencies.
 - **postinstall 없음** — 설치만으로 코드가 실행되지 않음. / No postinstall scripts.
-- **변경 전 자동 백업** — 모든 메타파일 변경 전 `.harness/archive/` 에 백업. / Auto-backup before any change.
+- **변경 전 자동 백업** — 모든 메타파일 변경 전 `.leerness/archive/` 에 백업. / Auto-backup before any change.
 - **동의 없는 자동 호출 금지** — 사용자 동의 없이 외부 LLM/API/CLI 를 자동 호출하지 않음. / Never auto-calls external LLMs/APIs/CLIs without consent.
 
 ## 권한 표면 / Capability surface
 
 | 영역 / Area | 위험 / Risk | 설명 / What | opt-out |
 |---|---|---|---|
-| filesystem | 🟢 low | `.harness/` 메타파일 생성·갱신, 변경 전 백업. 소스코드 직접 수정 안 함. | 핵심 동작 (백업으로 보호) |
+| filesystem | 🟢 low | `.leerness/` 메타파일 생성·갱신, 변경 전 백업. 소스코드 직접 수정 안 함. | 핵심 동작 (백업으로 보호) |
 | network | 🟢 low | `update --check` 의 npm 최신 버전 비교만. 외부 URL 자동 fetch 안 함. | `LEERNESS_OFFLINE=1` |
 | childProcess | 🟡 medium | git(명시 명령 시), `npm test`(verify-code), 외부 CLI `--version` 감지. | verify 계열 한정 · 외부 CLI 는 opt-in |
 | externalAgents | 🟡 medium | `agents dispatch/multi` — 기본은 명령 텍스트만 생성, `multi --execute` 시 실제 spawn. | `LEERNESS_ENABLE_*` 미설정 시 비활성 (기본 off) |
@@ -31,7 +31,7 @@ leerness is a **powerful CLI harness** (child_process, git, external AI CLIs, au
 
 | 명령 / Command | 동작 / Action |
 |---|---|
-| `init` | `.harness/` 50+ 파일 + `.claude` hook 생성 (변경 전 백업) |
+| `init` | `.leerness/` 50+ 파일 + `.claude` hook 생성 (변경 전 백업) |
 | `update --yes` | 자동 마이그레이션 — 메타파일 갱신 |
 | `agents multi --execute` | 외부 AI CLI 실제 spawn (병렬) |
 | `release publish` / `sync-main` | git push + npm publish + GitHub release |

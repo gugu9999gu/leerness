@@ -22,9 +22,9 @@ function versionFromSource(file) {
 function copyFixture(root) {
   for (const dir of ['bin', 'lib']) fs.cpSync(path.join(sourceRoot, dir), path.join(root, dir), { recursive: true });
   for (const file of ['package.json', 'README.md']) fs.copyFileSync(path.join(sourceRoot, file), path.join(root, file));
-  fs.mkdirSync(path.join(root, '.harness'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.leerness'), { recursive: true });
   const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
-  fs.writeFileSync(path.join(root, '.harness', 'HARNESS_VERSION'), `${version}\n`);
+  fs.writeFileSync(path.join(root, '.leerness', 'HARNESS_VERSION'), `${version}\n`);
 }
 
 function runProbe(root) {
@@ -40,7 +40,7 @@ function runProbe(root) {
     timeout: 30000
   });
   const after = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
-  const harnessVersion = fs.readFileSync(path.join(root, '.harness', 'HARNESS_VERSION'), 'utf8').trim();
+  const harnessVersion = fs.readFileSync(path.join(root, '.leerness', 'HARNESS_VERSION'), 'utf8').trim();
   const binVersion = versionFromSource(cli);
   const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
   const unknownFlag = /unknown flag|알 수 없는 플래그/i.test(`${run.stdout}\n${run.stderr}`);
@@ -73,7 +73,7 @@ function runPreflightFailureProbe(root) {
   fs.writeFileSync(cli, source.replace(/^const VERSION = '([^']+)';$/m, "const VERSION = String('$1');"));
   const targets = [
     path.join(root, 'package.json'),
-    path.join(root, '.harness', 'HARNESS_VERSION'),
+    path.join(root, '.leerness', 'HARNESS_VERSION'),
     cli,
     path.join(root, 'README.md')
   ];
@@ -93,7 +93,7 @@ function runPartialRollbackProbe(root) {
   const cli = path.join(root, 'bin', 'leerness.js');
   const targets = [
     path.join(root, 'package.json'),
-    path.join(root, '.harness', 'HARNESS_VERSION'),
+    path.join(root, '.leerness', 'HARNESS_VERSION'),
     cli,
     path.join(root, 'README.md')
   ];

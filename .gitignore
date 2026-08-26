@@ -3,9 +3,10 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
-.harness/cache/
-.harness/archive/
-.harness/migration-report.md
+.leerness/cache/
+.leerness/archive/
+.leerness/migration-report.md
+.leerness-backup/
 .env
 .env.local
 *.local.json
@@ -15,16 +16,16 @@ tmp-*-test/
 _reports/
 *.private.md
 *.private.json
-.harness/skill-publish.local.json
-.harness/**/*.local.json
+.leerness/skill-publish.local.json
+.leerness/**/*.local.json
 .env.production
 .env.*.local
 *.pem
 credentials.json
-.harness/credentials.local.json
-.harness/incidents/
-.harness/agent-sessions/
-.harness/runs/
+.leerness/credentials.local.json
+.leerness/incidents/
+.leerness/cache/agent-sessions/
+.leerness/cache/agent-runs/
 
 # npm 인증 토큰 보호 (1.9.267)
 .npmrc

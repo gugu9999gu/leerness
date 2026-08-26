@@ -5,6 +5,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const cp = require('child_process');
+const { spawnNpmSync } = require('../lib/npm-process');
+const { withRedirectWarnings } = require('./runtime-warning-gate');
 
 // 1.9.12: e2e 안정성을 위해 자식 프로세스의 npm 호출 차단 (hang 방지)
 // 1.36.87: 일부 e2e 타임아웃을 상향했다 — 격리 실측(agents list 5.2s · init --language 8.5s) 대비
@@ -24,7 +26,76 @@ process.env.LEERNESS_NO_AUTO_ROADMAP = '1';
 const CLI = path.resolve(__dirname, '..', 'bin', 'leerness.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-e2e-'));
 let failed = 0; let total = 0;
+const runtimeDep0190 = [];
+const runtimeWarningFile = path.join(tmp, 'node-runtime-warnings.log');
+const parentWarningGuard = withRedirectWarnings(process.env, runtimeWarningFile);
+if (parentWarningGuard.reasons.length) {
+  runtimeDep0190.push(`caller warning suppression rejected: ${parentWarningGuard.reasons.join(', ')}`);
+}
+for (const key of Object.keys(process.env)) {
+  if (['node_options', 'node_no_warnings'].includes(key.toLowerCase())) delete process.env[key];
+}
+process.env.NODE_OPTIONS = parentWarningGuard.env.NODE_OPTIONS;
+process.on('warning', warning => {
+  if (warning && (warning.code === 'DEP0190' || /shell option true/i.test(String(warning.message || '')))) {
+    runtimeDep0190.push(String(warning.stack || warning.message || warning));
+  }
+});
+// stderr가 pipe인 동기 자식은 즉시 집계한다. stdio:ignore 및 async/detached Node 자식은
+// 공유 --redirect-warnings 파일로 집계한다. 명시 env도 이 옵션만 보존해 시크릿/격리 정책은 건드리지 않는다.
+function _injectRuntimeWarningEnv(spawnArgs) {
+  const next = spawnArgs.slice();
+  let sameNode = false;
+  try { sameNode = path.resolve(String(next[0])) === path.resolve(process.execPath); } catch {}
+  if (!sameNode) return next;
+  const optsIndex = Array.isArray(next[1]) ? 2 : 1;
+  if (!next[optsIndex] || !next[optsIndex].env) return next; // 기본 상속은 위 process.env가 이미 포함
+  const opts = { ...next[optsIndex] };
+  const guarded = withRedirectWarnings(opts.env, runtimeWarningFile);
+  if (guarded.reasons.length) {
+    runtimeDep0190.push(`child warning suppression rejected: ${guarded.reasons.join(', ')}`);
+  }
+  opts.env = guarded.env;
+  next[optsIndex] = opts;
+  return next;
+}
+const _rawSpawnSync = cp.spawnSync.bind(cp);
+cp.spawnSync = function e2eSpawnSyncWithRuntimeWarningGate(...spawnArgs) {
+  const result = _rawSpawnSync(..._injectRuntimeWarningEnv(spawnArgs));
+  const stderr = String(result && result.stderr || '');
+  if (/DEP0190|DeprecationWarning:[^\r\n]*shell option true/i.test(stderr)) {
+    const file = typeof spawnArgs[0] === 'string' ? spawnArgs[0] : '(unknown child)';
+    runtimeDep0190.push(`child stderr (${file}):\n${stderr.slice(0, 4000)}`);
+  }
+  return result;
+};
+const _rawSpawn = cp.spawn.bind(cp);
+cp.spawn = function e2eSpawnWithRuntimeWarningGate(...spawnArgs) {
+  return _rawSpawn(..._injectRuntimeWarningEnv(spawnArgs));
+};
 const _e2eStart = Date.now();  // 1.9.284 (UR-0029): 총 소요시간 투명성
+
+// Windows의 portable runner는 임의 .cmd/.bat를 shell로 실행하지 않고, npm이
+// 생성하는 `"%dp0%\\entry.js" %*` 형태만 안전하게 해석한다. 외부 CLI fixture도
+// 그 실제 배포 형태를 써야 hardening을 우회하지 않으면서 PATH probe를 계측한다.
+function writePortableCliShim(dir, name, source) {
+  const body = `'use strict';\n${source}\n`;
+  if (process.platform === 'win32') {
+    const entry = path.join(dir, `${name}-shim-entry.js`);
+    const shim = path.join(dir, `${name}.cmd`);
+    fs.writeFileSync(entry, body);
+    fs.writeFileSync(shim, [
+      '@ECHO off',
+      'SET "_prog=node"',
+      `"%_prog%" "%dp0%\\${path.basename(entry)}" %*`,
+    ].join('\r\n') + '\r\n');
+    return shim;
+  }
+  const shim = path.join(dir, name);
+  fs.writeFileSync(shim, `#!/usr/bin/env node\n${source}\n`);
+  try { fs.chmodSync(shim, 0o755); } catch {}
+  return shim;
+}
 
 function run(label, args, opts = {}) {
   total++;
@@ -57,13 +128,13 @@ run('task add',            ['task', 'add', '사용자 요청 X', '--status', 're
 run('task update T-0001',  ['task', 'update', 'T-0001', '--status', 'in-progress', '--next', '검증 실행', '--path', tmp]);
 run('task update T-0001 done', ['task', 'update', 'T-0001', '--status', 'done', '--evidence', 'review-evidence:e2e', '--path', tmp]);
 
-const tracker = fs.readFileSync(path.join(tmp, '.harness/progress-tracker.md'), 'utf8');
+const tracker = fs.readFileSync(path.join(tmp, '.leerness/progress-tracker.md'), 'utf8');
 const t1Count = (tracker.match(/^\| T-0001 \|/gm) || []).length;
 total++;
 if (t1Count === 1) console.log('✓ B1 in-place update: T-0001 row count = 1');
 else { failed++; console.log(`✗ B1 in-place update FAILED: T-0001 row count = ${t1Count} (expected 1)`); }
 
-fs.appendFileSync(path.join(tmp, '.harness/review-evidence.md'),
+fs.appendFileSync(path.join(tmp, '.leerness/review-evidence.md'),
   '\n## e2e\nTask: T-0001\nCommand: npm test\nExit: 0\nNote: e2e smoke\n');
 
 run('session close',       ['session', 'close', tmp]);
@@ -100,7 +171,7 @@ total++;
 // 1.9.1 P6 회귀: evidence가 plan:M-XXXX + 검증 키워드면 lazy detect가 통과해야 한다.
 total++;
 {
-  const trackerPath = path.join(tmp, '.harness/progress-tracker.md');
+  const trackerPath = path.join(tmp, '.leerness/progress-tracker.md');
   let cur = fs.readFileSync(trackerPath, 'utf8');
   cur = cur.replace(/^\| T-0001 \|.*$/m, '| T-0001 | done | mile A | tests:32/32 (plan:M-0002) | next | 2026-05-08 |');
   fs.writeFileSync(trackerPath, cur, 'utf8');
@@ -112,7 +183,7 @@ total++;
 // 1.9.1 P6 negative: plan:M-XXXX 단독은 여전히 경고
 total++;
 {
-  const trackerPath = path.join(tmp, '.harness/progress-tracker.md');
+  const trackerPath = path.join(tmp, '.leerness/progress-tracker.md');
   let cur = fs.readFileSync(trackerPath, 'utf8');
   cur = cur.replace(/^\| T-0001 \|.*$/m, '| T-0001 | done | mile A | plan:M-0002 | next | 2026-05-08 |');
   fs.writeFileSync(trackerPath, cur, 'utf8');
@@ -144,7 +215,7 @@ total++;
 // 1.9.1 P4 회귀: NA 마커가 있으면 audit이 placeholder 경고를 스킵.
 total++;
 {
-  const ds = path.join(tmp, '.harness/design-system.md');
+  const ds = path.join(tmp, '.leerness/design-system.md');
   fs.appendFileSync(ds, '\n<!-- leerness:na CLI 프로젝트라 디자인 토큰 없음 -->\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'audit', tmp], { encoding: 'utf8' });
   const ok = !/design-system\.md tokens not customized/.test(r.stdout) && /marked NA/.test(r.stdout);
@@ -157,7 +228,7 @@ total++;
 {
   const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-e2e-p7-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmp2, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8' });
-  const tracker = fs.readFileSync(path.join(tmp2, '.harness/progress-tracker.md'), 'utf8');
+  const tracker = fs.readFileSync(path.join(tmp2, '.leerness/progress-tracker.md'), 'utf8');
   const ok = /M-0001/.test(tracker);
   console.log(ok ? '✓ B(P7) init: M-0001 → progress row 자동 생성' : '✗ B(P7) progress에 M-0001 row 없음');
   if (!ok) failed++;
@@ -177,14 +248,14 @@ run('skill optimize',      ['skill', 'optimize', 'open-meteo', '--before', 'no c
 
 total++;
 {
-  const f = path.join(tmp, '.harness/skills/open-meteo/skill.json');
+  const f = path.join(tmp, '.leerness/skills/open-meteo/skill.json');
   const ok = fs.existsSync(f) && JSON.parse(fs.readFileSync(f, 'utf8')).optimizations.length === 1;
   console.log(ok ? '✓ skill.json optimizations 누적' : '✗ skill.json optimizations 누적 실패');
   if (!ok) failed++;
 }
 total++;
 {
-  const data = JSON.parse(fs.readFileSync(path.join(tmp, '.harness/skills/open-meteo/skill.json'), 'utf8'));
+  const data = JSON.parse(fs.readFileSync(path.join(tmp, '.leerness/skills/open-meteo/skill.json'), 'utf8'));
   const ok = data.usage.count === 1 && data.sources.length >= 1 && data.patterns.length >= 1;
   console.log(ok ? '✓ skill usage/sources/patterns 누적' : '✗ skill usage/sources/patterns 누적 실패');
   if (!ok) failed++;
@@ -194,7 +265,7 @@ run('skill consolidate',   ['skill', 'consolidate', '--threshold', '0.1', '--pat
 run('skill remove (user)', ['skill', 'remove', 'open-meteo', '--path', tmp]);
 total++;
 {
-  const ok = !fs.existsSync(path.join(tmp, '.harness/skills/open-meteo'));
+  const ok = !fs.existsSync(path.join(tmp, '.leerness/skills/open-meteo'));
   console.log(ok ? '✓ skill remove: 디렉토리 삭제' : '✗ skill remove: 디렉토리 잔존');
   if (!ok) failed++;
 }
@@ -209,7 +280,7 @@ fs.writeFileSync(path.join(tmp, 'src/components/Card.html'), `<div class="card">
 fs.writeFileSync(path.join(tmp, 'src/pages/home.html'), `<link href="../styles/tokens.css"><include src="../components/Card.html"/>\n`);
 fs.writeFileSync(path.join(tmp, 'src/pages/about.html'), `<link href="../styles/tokens.css"><include src="../components/Card.html"/>\n`);
 // design-system 토큰 채우기 (#ff5722 / #222222 등록)
-const dsPath = path.join(tmp, '.harness/design-system.md');
+const dsPath = path.join(tmp, '.leerness/design-system.md');
 let dsText = fs.readFileSync(dsPath, 'utf8');
 dsText = dsText.replace('| color.primary | (실제 값으로 업데이트) | |', '| color.primary | #ff5722 | 메인 컬러 |');
 dsText = dsText.replace('| color.surface | | |', '| color.surface | #222222 | 본문 텍스트 |');
@@ -221,7 +292,7 @@ run('reuse register: Card',            ['reuse', 'register', 'Card', '--where', 
 
 total++;
 {
-  const reuse = fs.readFileSync(path.join(tmp, '.harness/reuse-map.md'), 'utf8');
+  const reuse = fs.readFileSync(path.join(tmp, '.leerness/reuse-map.md'), 'utf8');
   const ok = /\| Card \| src\/components\/Card\.html \| component \|/.test(reuse);
   console.log(ok ? '✓ reuse-map.md에 Card row 자동 추가' : '✗ Card row 미등록');
   if (!ok) failed++;
@@ -262,8 +333,8 @@ total++;
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bsb-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  fs.appendFileSync(path.join(tmpA, '.harness/decisions.md'), '\n### 2026-05-13 — 캐시 정책\n- Reason: rate limit\n');
-  fs.appendFileSync(path.join(tmpB, '.harness/decisions.md'), '\n### 2026-05-13 — 캐시 분산\n- Reason: 확장성\n');
+  fs.appendFileSync(path.join(tmpA, '.leerness/decisions.md'), '\n### 2026-05-13 — 캐시 정책\n- Reason: rate limit\n');
+  fs.appendFileSync(path.join(tmpB, '.leerness/decisions.md'), '\n### 2026-05-13 — 캐시 분산\n- Reason: 확장성\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'brainstorm', '캐시', '--include', `${tmpA},${tmpB}`], { encoding: 'utf8', timeout: 15000, cwd: os.tmpdir() });
   const ok = r.status === 0 && /Cross-project Brainstorm — "캐시" — 2개/.test(r.stdout) && /워크스페이스 총합: 2건/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.16) brainstorm --include 통합' : '✗ brainstorm --include 실패');
@@ -275,7 +346,7 @@ total++;
   // --json 단일 brainstorm
   const tmpJ = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-json-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpJ, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  fs.appendFileSync(path.join(tmpJ, '.harness/decisions.md'), '\n### 2026-05-13 — JSON 결정\n- ...\n');
+  fs.appendFileSync(path.join(tmpJ, '.leerness/decisions.md'), '\n### 2026-05-13 — JSON 결정\n- ...\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'brainstorm', 'JSON', '--json', '--path', tmpJ], { encoding: 'utf8', timeout: 15000 });
   let parsed = null;
   try { parsed = JSON.parse(r.stdout); } catch {}
@@ -368,8 +439,8 @@ total++;
   // 양쪽에 같은 capability "Cache" 추가 → 중복 감지 기대
   const rowA = '| Cache | src/cache.js | util | LRU |\n';
   const rowB = '| Cache | src/foo.js | util | Memoize |\n';
-  fs.appendFileSync(path.join(tmpA, '.harness/reuse-map.md'), rowA);
-  fs.appendFileSync(path.join(tmpB, '.harness/reuse-map.md'), rowB);
+  fs.appendFileSync(path.join(tmpA, '.leerness/reuse-map.md'), rowA);
+  fs.appendFileSync(path.join(tmpB, '.leerness/reuse-map.md'), rowB);
   // 단일
   const rs = cp.spawnSync(process.execPath, [CLI, 'reuse-map', tmpA], { encoding: 'utf8', timeout: 15000 });
   const okSingle = rs.status === 0 && /Reuse Map/.test(rs.stdout) && /Cache/.test(rs.stdout);
@@ -396,7 +467,7 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   // 오늘 날짜로 T-row 추가
   const today = new Date().toISOString().slice(0,10);
-  fs.appendFileSync(path.join(tmpA, '.harness/progress-tracker.md'), `| T-9999 | done | 신규 기능 | src/x.js | M-NEW | ${today} |\n`);
+  fs.appendFileSync(path.join(tmpA, '.leerness/progress-tracker.md'), `| T-9999 | done | 신규 기능 | src/x.js | M-NEW | ${today} |\n`);
   const r = cp.spawnSync(process.execPath, [CLI, 'handoff', '--include', `${tmpA},${tmpB}`, '--since', '1d'], { encoding: 'utf8', timeout: 15000, cwd: os.tmpdir() });
   const ok = r.status === 0 && /1\.9\.\d+/.test(r.stdout) && /Filter: since 1d/.test(r.stdout) && /🆕/.test(r.stdout) && /최근 변경/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.18) handoff --since: 최근 변경 강조' : '✗ handoff --since 실패');
@@ -422,8 +493,8 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   // 같은 함수 escapeHtml을 다른 capability 이름으로 등록
-  fs.appendFileSync(path.join(tmpA, '.harness/reuse-map.md'), '| HtmlEscape | src/util.js (escapeHtml) | util | XSS 방지 |\n');
-  fs.appendFileSync(path.join(tmpB, '.harness/reuse-map.md'), '| EscapeHtml | src/build.js (escapeHtml) | util | 마크업 이스케이프 |\n');
+  fs.appendFileSync(path.join(tmpA, '.leerness/reuse-map.md'), '| HtmlEscape | src/util.js (escapeHtml) | util | XSS 방지 |\n');
+  fs.appendFileSync(path.join(tmpB, '.leerness/reuse-map.md'), '| EscapeHtml | src/build.js (escapeHtml) | util | 마크업 이스케이프 |\n');
   // 기본 모드 → 정확 중복 0
   const r1 = cp.spawnSync(process.execPath, [CLI, 'reuse-map', '--include', `${tmpA},${tmpB}`], { encoding: 'utf8', timeout: 15000, cwd: os.tmpdir() });
   const okDefault = r1.status === 0 && /정확 중복 capability/.test(r1.stdout) && /\(없음\)/.test(r1.stdout);
@@ -445,7 +516,7 @@ total++;
   // reuse-map depends-on: notes 컬럼에서 의존 추출
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-deps-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  fs.appendFileSync(path.join(tmpA, '.harness/reuse-map.md'),
+  fs.appendFileSync(path.join(tmpA, '.leerness/reuse-map.md'),
     '| EscapeHtml | src/build.js (escapeHtml) | util | XSS 방지 |\n' +
     '| RssFeed | src/build.js (buildFeed) | util | RSS 2.0 (depends-on: EscapeHtml) |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'reuse-map', '--include', tmpA], { encoding: 'utf8', timeout: 15000, cwd: os.tmpdir() });
@@ -467,7 +538,7 @@ total++;
   // T-row를 evidence와 함께 추가
   // 1.17.4 (UR-0047): evidence 에 명시적 개수 주장(테스트 5개) 포함 — 카운트 검증이 실제로 수행되는 경로를 테스트.
   //   이전 evidence 는 "(5/5 통과)"(pass 비율)만 있어 개수 주장이 없었는데도 옛 코드가 "✓ pass (실측 ≥ 주장)" 으로 표기(측정실패=통과 모순의 일부) — 정직화로 "⊘ (주장 없음)" 이 되므로 의도(카운트 검증)에 맞게 주장을 명시.
-  fs.appendFileSync(path.join(tmpV, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpV, '.leerness/progress-tracker.md'),
     '| T-0099 | done | 신모듈 | src/myMod.js + tests/test.js 테스트 5개 (5/5 통과) | next | 2026-05-14 |\n');
   // 정상: 파일 존재 + 테스트 5개 (주장 5 = 실측 5)
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0099', '--path', tmpV], { encoding: 'utf8', timeout: 15000 });
@@ -502,7 +573,7 @@ total++;
   // 5 check 호출 + "5/5 passed" 직접 출력 (간단한 fixture)
   fs.writeFileSync(path.join(tmpR, 'tests/test.js'),
     "let p=0;function check(c){if(c)p++;}check(1);check(1);check(1);check(1);check(1);console.log(p+'/5 passed');if(p!==5)process.exit(1);\n");
-  fs.appendFileSync(path.join(tmpR, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpR, '.leerness/progress-tracker.md'),
     '| T-0050 | done | rt 작업 | src/mod.js + tests/test.js (5/5 통과) | next | 2026-05-14 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0050', '--path', tmpR, '--run-tests'], { encoding: 'utf8', timeout: 60000 });
   const ok = r.status === 0
@@ -525,7 +596,7 @@ total++;
   fs.writeFileSync(path.join(tmpF, 'src/mod.js'), 'module.exports = { ok: true };\n');
   fs.writeFileSync(path.join(tmpF, 'tests/test.js'),
     "console.log('3/5 passed'); process.exit(1);\n");
-  fs.appendFileSync(path.join(tmpF, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpF, '.leerness/progress-tracker.md'),
     '| T-0051 | done | 거짓 | src/mod.js + tests/test.js (5/5 통과) | next | 2026-05-14 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0051', '--path', tmpF, '--run-tests'], { encoding: 'utf8', timeout: 60000 });
   const ok = r.status !== 0
@@ -543,14 +614,14 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   // 같은 파일 + 같은 함수 (다른 capability 이름) — 진짜 중복 가능
-  fs.appendFileSync(path.join(tmpA, '.harness/reuse-map.md'),
+  fs.appendFileSync(path.join(tmpA, '.leerness/reuse-map.md'),
     '| FormatX | src/util.js (format) | util | A |\n');
-  fs.appendFileSync(path.join(tmpB, '.harness/reuse-map.md'),
+  fs.appendFileSync(path.join(tmpB, '.leerness/reuse-map.md'),
     '| FormatY | src/util.js (format) | util | B |\n');
   // 다른 파일 + 같은 함수 — 의도 분리 가능
-  fs.appendFileSync(path.join(tmpA, '.harness/reuse-map.md'),
+  fs.appendFileSync(path.join(tmpA, '.leerness/reuse-map.md'),
     '| Stats1 | src/memo.js (stats) | util | A |\n');
-  fs.appendFileSync(path.join(tmpB, '.harness/reuse-map.md'),
+  fs.appendFileSync(path.join(tmpB, '.leerness/reuse-map.md'),
     '| Stats2 | bin/cli.js (stats) | command | B |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'reuse-map', '--include', `${tmpA},${tmpB}`, '--strict-elements'], { encoding: 'utf8', timeout: 15000, cwd: os.tmpdir() });
   const ok = r.status === 0
@@ -573,7 +644,7 @@ total++;
   fs.mkdirSync(path.join(tmpG, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(tmpG, 'scenes/main.tscn'), '[gd_scene]\n');
   fs.writeFileSync(path.join(tmpG, 'scripts/network.gd'), 'extends Node\n');
-  fs.appendFileSync(path.join(tmpG, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpG, '.leerness/progress-tracker.md'),
     '| T-0020 | done | Godot 클라 | project.godot + scenes/main.tscn + scripts/network.gd | next | 2026-05-14 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0020', '--path', tmpG, '--lenient'], { encoding: 'utf8', timeout: 15000 });  // FILE_RE 추출 테스트 — evidence 게이트와 분리(1.9.309)
   const ok = r.status === 0
@@ -593,7 +664,7 @@ total++;
   fs.writeFileSync(path.join(tmpC, 'export_presets.cfg'), '[preset.0]\n');
   fs.writeFileSync(path.join(tmpC, 'config.ini'), '[main]\n');
   fs.writeFileSync(path.join(tmpC, 'Cargo.lock'), '# lock\n');
-  fs.appendFileSync(path.join(tmpC, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpC, '.leerness/progress-tracker.md'),
     '| T-0030 | done | 설정 | export_presets.cfg + config.ini + Cargo.lock | next | 2026-05-14 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0030', '--path', tmpC, '--lenient'], { encoding: 'utf8', timeout: 15000 });  // FILE_RE 추출 테스트 — evidence 게이트와 분리(1.9.309)
   const ok = r.status === 0
@@ -644,10 +715,10 @@ total++;
   // 정적 코드: API/DB 호출 없음
   fs.writeFileSync(path.join(tmpO, 'src/app.js'), "function pureCompute(n) { return n * 2; }\nmodule.exports = { pureCompute };\n");
   // 낙관적 evidence: API 호출 주장
-  fs.appendFileSync(path.join(tmpO, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpO, '.leerness/progress-tracker.md'),
     '| T-9001 | done | API 등록 | POST /users API 호출 완료, HTTP 201 응답 확인 | (완료) | 2026-05-15 |\n');
   // 정상 evidence: 단순 계산
-  fs.appendFileSync(path.join(tmpO, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpO, '.leerness/progress-tracker.md'),
     '| T-9002 | done | pure compute | src/app.js pureCompute 함수 구현 | (완료) | 2026-05-15 |\n');
   // T-9001 (거짓) → exit 1 + 의심 감지
   const r1 = cp.spawnSync(process.execPath, [CLI, 'optimism-check', 'T-9001', '--path', tmpO], { encoding: 'utf8', timeout: 10000 });
@@ -667,7 +738,7 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpS, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpS, 'src'), { recursive: true });
   fs.writeFileSync(path.join(tmpS, 'src/x.js'), 'module.exports = { ok: true };\n');
-  fs.appendFileSync(path.join(tmpS, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpS, '.leerness/progress-tracker.md'),
     '| T-0050 | done | DB 마이그레이션 | 사용자 데이터 DB에 저장, 1000건 insert 성공 | (완료) | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0050', '--path', tmpS, '--strict-claims'], { encoding: 'utf8', timeout: 10000 });
   const ok = r.status !== 0 && /낙관적 표시[^\n]*⚠ FAIL/.test(r.stdout) && /DB 호출/.test(r.stdout);  // 1.11.2 (UR-0175): 라벨-무관(done 기본/--strict-claims) — optimism FAIL 검증
@@ -685,7 +756,7 @@ total++;
   // 다른 목적의 http.request (Ollama 호출 패턴)
   fs.writeFileSync(path.join(tmpU, 'src/ollama.js'), "http.request({host:'localhost',path:'/api/tags',method:'GET'})");
   // evidence: 전혀 다른 경로 주장
-  fs.appendFileSync(path.join(tmpU, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpU, '.leerness/progress-tracker.md'),
     '| T-9001 | done | API 사용자 등록 | POST /users API 호출 완료, HTTP 201 응답 확인 | next | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'optimism-check', 'T-9001', '--path', tmpU], { encoding: 'utf8', timeout: 10000 });
   const ok = r.status !== 0
@@ -703,7 +774,7 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpN, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpN, 'src'), { recursive: true });
   fs.writeFileSync(path.join(tmpN, 'src/x.js'), 'module.exports = { ok: true };\n');
-  fs.appendFileSync(path.join(tmpN, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpN, '.leerness/progress-tracker.md'),
     '| T-9100 | done | Slack 알림 | 슬랙 알림 발송 완료, #general 채널에 통보 | next | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'optimism-check', 'T-9100', '--path', tmpN], { encoding: 'utf8', timeout: 10000 });
   const ok = r.status !== 0 && /\[Notify\]/.test(r.stdout) && /슬랙\/Discord 알림/.test(r.stdout);
@@ -718,7 +789,7 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpC, 'src'), { recursive: true });
   fs.writeFileSync(path.join(tmpC, 'src/x.js'), 'module.exports = { ok: true };\n');
-  fs.appendFileSync(path.join(tmpC, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpC, '.leerness/progress-tracker.md'),
     '| T-9200 | done | pure compute | src/x.js 모듈 추가 | next | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'optimism-check', 'T-9200', '--path', tmpC, '--json'], { encoding: 'utf8', timeout: 10000 });
   let parsed = null;
@@ -735,7 +806,7 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpK, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   fs.mkdirSync(path.join(tmpK, 'src'), { recursive: true });
   fs.writeFileSync(path.join(tmpK, 'src/x.js'), 'module.exports = { ok: true };\n');
-  fs.appendFileSync(path.join(tmpK, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpK, '.leerness/progress-tracker.md'),
     '| T-9100 | done | 결제 | 카카오페이 결제 승인 완료 | next | 2026-05-15 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'optimism-check', 'T-9100', '--path', tmpK, '--json'], { encoding: 'utf8', timeout: 10000 });
   let parsed = null;
@@ -803,8 +874,8 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'persona', 'add', 'my-domain', '--path', tmpC], { encoding: 'utf8', timeout: 10000 });
   const okAdd = r.status === 0
-    && fs.existsSync(path.join(tmpC, '.harness/personas/my-domain.md'))
-    && /\.harness\/personas\/my-domain\.md/.test(r.stdout.replace(/\\/g, '/'));
+    && fs.existsSync(path.join(tmpC, '.leerness/personas/my-domain.md'))
+    && /\.leerness\/personas\/my-domain\.md/.test(r.stdout.replace(/\\/g, '/'));
   // list 시 사용자 정의 포함
   const r2 = cp.spawnSync(process.execPath, [CLI, 'persona', 'list', '--path', tmpC], { encoding: 'utf8', timeout: 10000 });
   const okList = /사용자 정의 \(1/.test(r2.stdout) && /my-domain/.test(r2.stdout);
@@ -962,7 +1033,7 @@ total++;
   // 캐시에 미래 버전을 심어 stale 시뮬레이션 → 경고 출력 + init은 계속 진행
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-stale-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended', '--no-stale-check'], { stdio: 'ignore', timeout: 30000 });
-  const cacheDir = path.join(tmpC, '.harness', 'cache');
+  const cacheDir = path.join(tmpC, '.leerness', 'cache');
   fs.mkdirSync(cacheDir, { recursive: true });
   fs.writeFileSync(path.join(cacheDir, 'update-check.json'), JSON.stringify({ at: Date.now(), nextLeerness: '99.99.99', runningCli: require('../package.json').version }), 'utf8');
   const r = cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
@@ -1006,7 +1077,7 @@ total++;
   const src = path.join(tmpC, 'sk.md');
   fs.writeFileSync(src, '---\nname: install-alias-test\ndescription: 별칭 검증\n---\n# Body\n', 'utf8');
   const r = cp.spawnSync(process.execPath, [CLI, 'install', src, '--path', tmpC], { encoding: 'utf8', timeout: 15000 });
-  const f = path.join(tmpC, '.harness', 'skills', 'install-alias-test', 'SKILL.md');
+  const f = path.join(tmpC, '.leerness', 'skills', 'install-alias-test', 'SKILL.md');
   const ok = r.status === 0 && fs.existsSync(f);
   console.log(ok ? '✓ B(1.9.64) install <SKILL.md>: skill install 별칭 동작' : `✗ install 별칭 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 300)); }
@@ -1058,7 +1129,7 @@ total++;
   // fuzzy 매칭 — 어간 변형 (webhook ↔ webhooks)
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fz-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  fs.writeFileSync(path.join(tmpC, '.harness', 'review-evidence.md'),
+  fs.writeFileSync(path.join(tmpC, '.leerness', 'review-evidence.md'),
     '## 2026-04\nNote: ✗ webhooks payload 실패\n', 'utf8');
   cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'webhook 작업', '--status', 'in-progress', '--path', tmpC], { stdio: 'ignore', timeout: 10000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC, '--no-drift-check', '--no-workflow-guide'], { encoding: 'utf8', timeout: 15000 });
@@ -1096,7 +1167,7 @@ total++;
   // handoff 자동 lessons 재상기
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ha-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  fs.writeFileSync(path.join(tmpC, '.harness', 'review-evidence.md'),
+  fs.writeFileSync(path.join(tmpC, '.leerness', 'review-evidence.md'),
     '## 2026-04-01\nNote: ✗ webhook 처리 실패\n', 'utf8');
   cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'webhook 처리 개선', '--status', 'in-progress', '--path', tmpC], { stdio: 'ignore', timeout: 10000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC, '--no-drift-check', '--no-workflow-guide'], { encoding: 'utf8', timeout: 15000 });
@@ -1122,7 +1193,7 @@ total++;
   // lessons --auto 키워드 자동 추출
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-la-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  fs.writeFileSync(path.join(tmpC, '.harness', 'review-evidence.md'),
+  fs.writeFileSync(path.join(tmpC, '.leerness', 'review-evidence.md'),
     '## 2026-04-01\nNote: ✗ payment 처리 실패 — 검수 누락\n', 'utf8');
   cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'payment 검증 작업', '--status', 'in-progress', '--path', tmpC], { stdio: 'ignore', timeout: 10000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'lessons', '--path', tmpC, '--auto', '--limit', '5'], { encoding: 'utf8', timeout: 15000 });
@@ -1213,7 +1284,7 @@ total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-arc-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'publish', '--path', tmpC, '--bundle-only'], { encoding: 'utf8', timeout: 30000 });
-  const tarballDir = path.join(tmpC, '.harness', 'skills-publish-tarball');
+  const tarballDir = path.join(tmpC, '.leerness', 'skills-publish-tarball');
   const files = fs.existsSync(tarballDir) ? fs.readdirSync(tarballDir) : [];
   const archive = files.find(f => /\.(tgz|zip)$/.test(f));
   const ok = r.status === 0 && (archive || /archive 생성/.test(r.stdout));
@@ -1282,7 +1353,7 @@ total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pub-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'publish', '--path', tmpC, '--bundle-only'], { encoding: 'utf8', timeout: 30000 });
-  const publishDir = path.join(tmpC, '.harness', 'skills-publish');
+  const publishDir = path.join(tmpC, '.leerness', 'skills-publish');
   const manifestFile = path.join(publishDir, 'manifest.json');
   let manifest = null;
   try { manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8')); } catch {}
@@ -1305,7 +1376,7 @@ total++;
   const buf = Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from('---\nname: bom-skill\ndescription: BOM 처리 검증\n---\n\n# Body\n', 'utf8')]);
   fs.writeFileSync(src, buf);
   const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'install', src, '--path', tmpC], { encoding: 'utf8', timeout: 15000 });
-  const installedFile = path.join(tmpC, '.harness', 'skills', 'bom-skill', 'SKILL.md');
+  const installedFile = path.join(tmpC, '.leerness', 'skills', 'bom-skill', 'SKILL.md');
   const ok = r.status === 0 && fs.existsSync(installedFile);
   console.log(ok ? '✓ B(1.9.44) skill install: UTF-8 BOM 자동 제거 후 frontmatter 파싱' : `✗ BOM 처리 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
@@ -1318,7 +1389,7 @@ total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-exall-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'all'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'export-all', '--path', tmpC], { encoding: 'utf8', timeout: 30000 });
-  const exportDir = path.join(tmpC, '.harness', 'skills-export');
+  const exportDir = path.join(tmpC, '.leerness', 'skills-export');
   const exists2 = fs.existsSync(exportDir);
   const count = exists2 ? fs.readdirSync(exportDir).length : 0;
   const ok = r.status === 0 && exists2 && count >= 2;   // 1.36.80: 내장 카탈로그 축소(도메인 7종 제거)
@@ -1407,7 +1478,7 @@ total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-skex-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'export', 'feature-implementation', '--path', tmpC], { encoding: 'utf8', timeout: 15000 });
-  const skillFile = path.join(tmpC, '.harness', 'skills-export', 'feature-implementation', 'SKILL.md');
+  const skillFile = path.join(tmpC, '.leerness', 'skills-export', 'feature-implementation', 'SKILL.md');
   const exists2 = fs.existsSync(skillFile);
   const body = exists2 ? fs.readFileSync(skillFile, 'utf8') : '';
   const ok = r.status === 0
@@ -1420,18 +1491,18 @@ total++;
 
 total++;
 {
-  // skill install: 로컬 SKILL.md import → .harness/skills/<id>/SKILL.md 자동 배치
+  // skill install: 로컬 SKILL.md import → .leerness/skills/<id>/SKILL.md 자동 배치
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-skin-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   // 로컬 SKILL.md 직접 작성
   const skillSrc = path.join(tmpC, 'test-skill.md');
   fs.writeFileSync(skillSrc, '---\nname: my-test-skill\ndescription: agentskills.io 표준 호환 e2e 검증\n---\n\n# Test Skill\n\n본문 내용.\n', 'utf8');
   const r = cp.spawnSync(process.execPath, [CLI, 'skill', 'install', skillSrc, '--path', tmpC], { encoding: 'utf8', timeout: 15000 });
-  const installedFile = path.join(tmpC, '.harness', 'skills', 'my-test-skill', 'SKILL.md');
+  const installedFile = path.join(tmpC, '.leerness', 'skills', 'my-test-skill', 'SKILL.md');
   const ok = r.status === 0
     && fs.existsSync(installedFile)
     && /my-test-skill/.test(fs.readFileSync(installedFile, 'utf8'));
-  console.log(ok ? '✓ B(1.9.42) skill install: 로컬 SKILL.md → .harness/skills/<id>/ 배치' : `✗ install 실패`);
+  console.log(ok ? '✓ B(1.9.42) skill install: 로컬 SKILL.md → .leerness/skills/<id>/ 배치' : `✗ install 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
@@ -1443,7 +1514,7 @@ total++;
   const skillSrc = path.join(tmpC, 'test-skill2.md');
   fs.writeFileSync(skillSrc, '---\nname: dual-format\ndescription: skill.json + SKILL.md 양쪽 자동 생성\n---\n\n# Dual\n', 'utf8');
   cp.spawnSync(process.execPath, [CLI, 'skill', 'install', skillSrc, '--path', tmpC], { stdio: 'ignore', timeout: 15000 });
-  const jsonFile = path.join(tmpC, '.harness', 'skills', 'dual-format', 'skill.json');
+  const jsonFile = path.join(tmpC, '.leerness', 'skills', 'dual-format', 'skill.json');
   const json = fs.existsSync(jsonFile) ? JSON.parse(fs.readFileSync(jsonFile, 'utf8')) : null;
   const ok = json
     && json.name === 'dual-format'
@@ -1475,8 +1546,8 @@ total++;
   // migrate가 fromV가 있는 경우 AI must re-read 블록을 stdout에 출력
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mig-'));
   // 1.9.30 표시로 init한 척 (HARNESS_VERSION 직접 작성)
-  fs.mkdirSync(path.join(tmpC, '.harness'), { recursive: true });
-  fs.writeFileSync(path.join(tmpC, '.harness', 'HARNESS_VERSION'), 'leerness@1.9.36\n', 'utf8');
+  fs.mkdirSync(path.join(tmpC, '.leerness'), { recursive: true });
+  fs.writeFileSync(path.join(tmpC, '.leerness', 'HARNESS_VERSION'), 'leerness@1.9.36\n', 'utf8');
   const r = cp.spawnSync(process.execPath, [CLI, 'migrate', tmpC, '--yes', '--no-banner', '--no-stale-check'], { encoding: 'utf8', timeout: 60000 });
   const ok = r.status === 0
     && /AI must re-read/.test(r.stdout)
@@ -1490,10 +1561,10 @@ total++;
 {
   // migration-report.md에 AI must re-read 섹션 영구 기록
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mig2-'));
-  fs.mkdirSync(path.join(tmpC, '.harness'), { recursive: true });
-  fs.writeFileSync(path.join(tmpC, '.harness', 'HARNESS_VERSION'), 'leerness@1.9.30\n', 'utf8');
+  fs.mkdirSync(path.join(tmpC, '.leerness'), { recursive: true });
+  fs.writeFileSync(path.join(tmpC, '.leerness', 'HARNESS_VERSION'), 'leerness@1.9.30\n', 'utf8');
   cp.spawnSync(process.execPath, [CLI, 'migrate', tmpC, '--yes', '--no-banner', '--no-stale-check'], { stdio: 'ignore', timeout: 60000 });
-  const reportPath = path.join(tmpC, '.harness', 'migration-report.md');
+  const reportPath = path.join(tmpC, '.leerness', 'migration-report.md');
   const body = fs.existsSync(reportPath) ? fs.readFileSync(reportPath, 'utf8') : '';
   const ok = /## 🤖 AI must re-read/.test(body) && /Previous: 1\.9\.30/.test(body);
   console.log(ok ? '✓ B(1.9.41) migration-report.md: AI must re-read 섹션 + Previous 버전 기록' : `✗ report 기록 실패`);
@@ -1504,8 +1575,8 @@ total++;
 {
   // handoff가 fresh migration-report (24h 내) 시 자동 알림
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fresh-'));
-  fs.mkdirSync(path.join(tmpC, '.harness'), { recursive: true });
-  fs.writeFileSync(path.join(tmpC, '.harness', 'HARNESS_VERSION'), 'leerness@1.9.30\n', 'utf8');
+  fs.mkdirSync(path.join(tmpC, '.leerness'), { recursive: true });
+  fs.writeFileSync(path.join(tmpC, '.leerness', 'HARNESS_VERSION'), 'leerness@1.9.30\n', 'utf8');
   cp.spawnSync(process.execPath, [CLI, 'migrate', tmpC, '--yes', '--no-banner', '--no-stale-check'], { stdio: 'ignore', timeout: 60000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC, '--no-drift-check'], { encoding: 'utf8', timeout: 15000 });
   const ok = r.status === 0
@@ -1527,7 +1598,7 @@ total++;
   //     (같은 실행이 "mode: dry-run" 과 "(dry-run) npm pack 스킵" 을 찍으면서 task 는 진짜로 추가했다).
   //     dry 는 "하겠다" 고만 말해야 한다. 그리고 **플래그 없는 실행은 여전히 등록해야** 하므로 대조군으로 같이 잰다
   //     (한쪽만 재면 "아무것도 안 하는 release pack" 이 통과한다).
-  const _tracker = path.join(tmpC, '.harness', 'progress-tracker.md');
+  const _tracker = path.join(tmpC, '.leerness', 'progress-tracker.md');
   const _before = (() => { try { return fs.readFileSync(_tracker, 'utf8'); } catch { return ''; } })();
   const r = cp.spawnSync(process.execPath, [CLI, 'release', 'pack', tmpC, '--dry-run', '--task-add', '1.9.40 e2e 검증', '--no-readme-sync'], { encoding: 'utf8', timeout: 30000 });
   const _afterDry = (() => { try { return fs.readFileSync(_tracker, 'utf8'); } catch { return ''; } })();
@@ -1546,7 +1617,7 @@ total++;
 
 total++;
 {
-  // release pack --parent-migrate (인공 parent .harness 생성)
+  // release pack --parent-migrate (인공 parent .leerness 생성)
   const tmpParent = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rp-parent-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpParent, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   const tmpChild = path.join(tmpParent, 'child');
@@ -1555,7 +1626,7 @@ total++;
   fs.writeFileSync(path.join(tmpChild, 'package.json'), JSON.stringify({ name: 'rp-child', version: '0.0.1' }), 'utf8');
   const r = cp.spawnSync(process.execPath, [CLI, 'release', 'pack', tmpChild, '--dry-run', '--parent-migrate', '--no-readme-sync'], { encoding: 'utf8', timeout: 30000 });
   const ok = r.status === 0 && /parent self-host migrate/.test(r.stdout);
-  console.log(ok ? '✓ B(1.9.40) release pack --parent-migrate: 부모 .harness 자동 감지' : `✗ parent-migrate 실패`);
+  console.log(ok ? '✓ B(1.9.40) release pack --parent-migrate: 부모 .leerness 자동 감지' : `✗ parent-migrate 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
 
@@ -1607,11 +1678,11 @@ total++;
   // session-workflow.md 파일이 init 시 생성
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-wf2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  const wfFile = path.join(tmpC, '.harness', 'session-workflow.md');
+  const wfFile = path.join(tmpC, '.leerness', 'session-workflow.md');
   const ok = fs.existsSync(wfFile)
     && /6단계/.test(fs.readFileSync(wfFile, 'utf8'))
     && /sub-agent/.test(fs.readFileSync(wfFile, 'utf8'));
-  console.log(ok ? '✓ B(1.9.39) .harness/session-workflow.md init 시 자동 생성' : `✗ workflow 파일 실패`);
+  console.log(ok ? '✓ B(1.9.39) .leerness/session-workflow.md init 시 자동 생성' : `✗ workflow 파일 실패`);
   if (!ok) { failed++; if (fs.existsSync(wfFile)) console.log(fs.readFileSync(wfFile, 'utf8').slice(0, 300)); else console.log('파일 없음'); }
 }
 
@@ -1687,7 +1758,7 @@ total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rem-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   // session-handoff.md를 5일 전으로
-  const shPath = path.join(tmpC, '.harness', 'session-handoff.md');
+  const shPath = path.join(tmpC, '.leerness', 'session-handoff.md');
   if (fs.existsSync(shPath)) {
     const oldDate = new Date(Date.now() - 5 * 86400000).toISOString();
     let body = fs.readFileSync(shPath, 'utf8');
@@ -1697,7 +1768,7 @@ total++;
   }
   // handoff 호출 → reminder 자동 생성
   cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC, '--compact', '--writeback'], { encoding: 'utf8', timeout: 10000 });
-  const remPath = path.join(tmpC, '.harness', 'agent-reminders.md');
+  const remPath = path.join(tmpC, '.leerness', 'agent-reminders.md');
   const ok = fs.existsSync(remPath) && /drift critical/.test(fs.readFileSync(remPath, 'utf8'));
   console.log(ok ? '✓ B(1.9.38) drift critical → agent-reminders.md 자동 생성' : `✗ reminder 파일 실패`);
   if (!ok) { failed++; if (fs.existsSync(remPath)) console.log(fs.readFileSync(remPath, 'utf8').slice(0, 400)); else console.log('(reminder 파일 없음)'); }
@@ -1712,7 +1783,7 @@ total++;
   for (let i = 0; i < 5; i++) {
     cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC, '--compact', '--no-drift-check'], { stdio: 'ignore', timeout: 10000 });
   }
-  const stats = JSON.parse(fs.readFileSync(path.join(tmpC, '.harness', 'cache', 'usage-stats.json'), 'utf8'));
+  const stats = JSON.parse(fs.readFileSync(path.join(tmpC, '.leerness', 'cache', 'usage-stats.json'), 'utf8'));
   const ok = stats.drift && stats.drift.skipped >= 5;
   console.log(ok ? '✓ B(1.9.38) drift 학습: --no-drift-check 5회 누적 (skipped≥5)' : `✗ drift 학습 실패`);
   if (!ok) { failed++; console.log(JSON.stringify(stats.drift || {})); }
@@ -1756,7 +1827,7 @@ total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-drift3-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   // session-handoff.md에 옛 날짜 주입
-  const shPath = path.join(tmpC, '.harness', 'session-handoff.md');
+  const shPath = path.join(tmpC, '.leerness', 'session-handoff.md');
   if (fs.existsSync(shPath)) {
     let body = fs.readFileSync(shPath, 'utf8');
     const oldDate = new Date(Date.now() - 5 * 86400000).toISOString();
@@ -1775,7 +1846,7 @@ total++;
   // LEERNESS_NO_DRIFT_CHECK=1: 자동 경고 스킵
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-drift4-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--no-banner', '--no-stale-check', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  const shPath = path.join(tmpC, '.harness', 'session-handoff.md');
+  const shPath = path.join(tmpC, '.leerness', 'session-handoff.md');
   if (fs.existsSync(shPath)) {
     const oldDate = new Date(Date.now() - 5 * 86400000).toISOString();
     let body = fs.readFileSync(shPath, 'utf8');
@@ -1848,11 +1919,11 @@ total++;
 // 1.9.35 회귀: 5개 신규 기능
 total++;
 {
-  // 개선#1: handoff 시 .harness 부재 자동 경고
+  // 개선#1: handoff 시 .leerness 부재 자동 경고
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noinit-'));
   const r = cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC], { encoding: 'utf8', timeout: 10000 });
   const ok = /leerness init 미실행 디렉토리/.test(r.stdout) || /leerness init/.test(r.stdout);
-  console.log(ok ? '✓ B(1.9.35) handoff: .harness 부재 자동 경고' : `✗ #1 handoff 경고 실패`);
+  console.log(ok ? '✓ B(1.9.35) handoff: .leerness 부재 자동 경고' : `✗ #1 handoff 경고 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
@@ -1959,7 +2030,7 @@ total++;
   // --no-stale-check / LEERNESS_NO_STALE_CHECK=1: 경고 스킵
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-stale2-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended', '--no-stale-check'], { stdio: 'ignore', timeout: 30000 });
-  const cacheDir = path.join(tmpC, '.harness', 'cache');
+  const cacheDir = path.join(tmpC, '.leerness', 'cache');
   fs.mkdirSync(cacheDir, { recursive: true });
   fs.writeFileSync(path.join(cacheDir, 'update-check.json'), JSON.stringify({ at: Date.now(), nextLeerness: '99.99.99' }), 'utf8');
   // --no-stale-check
@@ -2027,8 +2098,8 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpL, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'llm-bench', 'record', '--path', tmpL, '--score', '7.5', '--model', 'llama3.1:8b', '--label', 'A_leerness', '--tokens', '1754'], { encoding: 'utf8', timeout: 10000 });
   const ok = r.status === 0
-    && fs.existsSync(path.join(tmpL, '.harness', 'llm-bench-history.md'))
-    && fs.readFileSync(path.join(tmpL, '.harness', 'llm-bench-history.md'), 'utf8').includes('llama3.1:8b');
+    && fs.existsSync(path.join(tmpL, '.leerness', 'llm-bench-history.md'))
+    && fs.readFileSync(path.join(tmpL, '.leerness', 'llm-bench-history.md'), 'utf8').includes('llama3.1:8b');
   console.log(ok ? '✓ B(1.9.22) llm-bench record: 히스토리 누적 저장' : '✗ llm-bench record 실패');
   if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
 }
@@ -2043,7 +2114,7 @@ total++;
   fs.mkdirSync(path.join(tmpJ, 'tests'), { recursive: true });
   fs.writeFileSync(path.join(tmpJ, 'src/foo.js'), 'module.exports = { ok: true };\n');
   fs.writeFileSync(path.join(tmpJ, 'tests/test.js'), "console.log('Tests:       12 passed, 12 total');\n");
-  fs.appendFileSync(path.join(tmpJ, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpJ, '.leerness/progress-tracker.md'),
     '| T-0021 | done | jest 스타일 | src/foo.js + Tests: 12 passed, 12 total | next | 2026-05-14 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0021', '--path', tmpJ, '--run-tests'], { encoding: 'utf8', timeout: 60000 });
   const okEv = /주장 \(pass\): 12\/12/.test(r.stdout);
@@ -2063,7 +2134,7 @@ total++;
   fs.mkdirSync(path.join(tmpM, 'tests'), { recursive: true });
   fs.writeFileSync(path.join(tmpM, 'src/x.js'), 'module.exports = { ok: true };\n');
   fs.writeFileSync(path.join(tmpM, 'tests/test.js'), "console.log('  7 passing (12ms)');\n");
-  fs.appendFileSync(path.join(tmpM, '.harness/progress-tracker.md'),
+  fs.appendFileSync(path.join(tmpM, '.leerness/progress-tracker.md'),
     '| T-0022 | done | mocha | src/x.js + 7 passing | next | 2026-05-14 |\n');
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0022', '--path', tmpM, '--run-tests'], { encoding: 'utf8', timeout: 60000 });
   const ok = r.status === 0 && /주장 \(pass\): 7\/7/.test(r.stdout) && /실행 결과: 7\/7 passed/.test(r.stdout);
@@ -2087,7 +2158,7 @@ total++;
   const okBaseline = rNoBench.status === 0 && /verify-code \(1개\)/.test(rNoBench.stdout) && !/^## bench:/m.test(rNoBench.stdout);
   const rWith = cp.spawnSync(process.execPath, [CLI, 'verify-code', tmpB, '--bench'], { encoding: 'utf8', timeout: 60000 });
   const okBench = rWith.status === 0 && /verify-code \(2개\)/.test(rWith.stdout) && /bench passed/.test(rWith.stdout);
-  const evidence = fs.readFileSync(path.join(tmpB, '.harness/review-evidence.md'), 'utf8');
+  const evidence = fs.readFileSync(path.join(tmpB, '.leerness/review-evidence.md'), 'utf8');
   const okEvidence = /bench/.test(evidence) && /node tests\/bench\.js/.test(evidence);
   const ok = okBaseline && okBench && okEvidence;
   console.log(ok ? '✓ B(1.9.20) verify-code --bench: scripts.bench 자동 실행 + evidence 누적' : `✗ --bench 실패 (base=${okBaseline} bench=${okBench} ev=${okEvidence})`);
@@ -2099,10 +2170,10 @@ total++;
 {
   const tmpL = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-line-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpL, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  fs.appendFileSync(path.join(tmpL, '.harness/decisions.md'), '\n### 2026-05-13 — 캐시 정책 결정\n- Reason: rate limit 회피\n');
+  fs.appendFileSync(path.join(tmpL, '.leerness/decisions.md'), '\n### 2026-05-13 — 캐시 정책 결정\n- Reason: rate limit 회피\n');
   cp.spawnSync(process.execPath, [CLI, 'plan', 'add', '캐시 helper 구현', '--path', tmpL], { stdio: 'ignore', timeout: 10000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'brainstorm', '캐시', '--path', tmpL], { encoding: 'utf8', timeout: 15000 });
-  const ok = /\.harness\/decisions\.md:\d+/.test(r.stdout) && /\.harness\/progress-tracker\.md:\d+/.test(r.stdout) && /matched: request/.test(r.stdout);
+  const ok = /\.leerness\/decisions\.md:\d+/.test(r.stdout) && /\.leerness\/progress-tracker\.md:\d+/.test(r.stdout) && /matched: request/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.15) brainstorm: 파일:라인 + 매치 필드 표시' : `✗ 1.9.15 brainstorm 위치 실패\n${r.stdout.slice(0,500)}`);
   if (!ok) failed++;
 }
@@ -2134,7 +2205,7 @@ total++;
 }
 total++;
 {
-  // 잘못된 --include 경로 — warn 출력 + .harness 있는 것만 처리
+  // 잘못된 --include 경로 — warn 출력 + .leerness 있는 것만 처리
   const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bad-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpA, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   const bad = '/tmp/nonexistent-leerness-' + Date.now();
@@ -2160,7 +2231,7 @@ total++;
   // B: brainstorm 토큰 매칭 — "API"는 매치, "AP"는 부분 매치라 안 잡힘
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-B-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  fs.appendFileSync(path.join(tmpB, '.harness/decisions.md'), '\n### 2026-05-13 — API rate limit 정책\n- Reason: ...\n');
+  fs.appendFileSync(path.join(tmpB, '.leerness/decisions.md'), '\n### 2026-05-13 — API rate limit 정책\n- Reason: ...\n');
   // "limit" 매치
   const r1 = cp.spawnSync(process.execPath, [CLI, 'brainstorm', 'limit', '--path', tmpB], { encoding: 'utf8', timeout: 15000 });
   // "lim" 부분 매치 — 매치되면 안 됨
@@ -2175,7 +2246,7 @@ total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-C-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpC, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   // 모든 task 제거 후 planned만 추가
-  fs.writeFileSync(path.join(tmpC, '.harness/progress-tracker.md'), `# Progress Tracker\nStatus values: requested, planned, in-progress, waiting, on-hold, blocked, incomplete, done, dropped\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n|---|---|---|---|---|---|\n| T-0001 | planned | 미래 작업 | plan:M-0001 | 시작 예정 | 2026-05-13 |\n`);
+  fs.writeFileSync(path.join(tmpC, '.leerness/progress-tracker.md'), `# Progress Tracker\nStatus values: requested, planned, in-progress, waiting, on-hold, blocked, incomplete, done, dropped\n\n| ID | Status | Request | Evidence | Next Action | Updated |\n|---|---|---|---|---|---|\n| T-0001 | planned | 미래 작업 | plan:M-0001 | 시작 예정 | 2026-05-13 |\n`);
   const r = cp.spawnSync(process.execPath, [CLI, 'retro', tmpC], { encoding: 'utf8', timeout: 15000 });
   const ok = r.status === 0 && /T-0001 \[planned\]/.test(r.stdout) && !/없음 — 새 plan add 권장/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.14-C) retro 다음 우선 작업에 planned 포함' : '✗ C 실패');
@@ -2186,7 +2257,7 @@ total++;
   // D: init decisions.md가 ```md 코드블록으로 감싸짐
   const tmpD = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-D-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpD, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  const dec = fs.readFileSync(path.join(tmpD, '.harness/decisions.md'), 'utf8');
+  const dec = fs.readFileSync(path.join(tmpD, '.leerness/decisions.md'), 'utf8');
   const ok = /```md\n### \d{4}-\d{2}-\d{2} — Decision/.test(dec) && /^## Template/m.test(dec);
   console.log(ok ? '✓ B(1.9.14-D) decisions.md template 코드블록 감싸짐' : '✗ D 실패');
   if (!ok) { failed++; console.log(dec.slice(0, 400)); }
@@ -2201,8 +2272,8 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'plan', 'add', '인증 helper', '--status', 'in-progress', '--path', tmpR], { stdio: 'ignore', timeout: 10000 });
   // 1.36.38: retro 가 --days 기간필터를 실제 적용하므로 픽스처 날짜는 오늘(창 안) — 고정 과거 날짜는 필터에 걸러지는 게 의도된 동작.
   const _todayR = new Date().toISOString().slice(0, 10);
-  fs.appendFileSync(path.join(tmpR, '.harness/decisions.md'), `\n### ${_todayR} — 캐시 차등 TTL 결정\n- Reason: ...\n`);
-  fs.appendFileSync(path.join(tmpR, '.harness/review-evidence.md'), `\n## ${_todayR} verify-code\nexit=0 (250ms)\nexit=0 (180ms)\nexit=0 (120ms)\nexit=0 (90ms)\n`);
+  fs.appendFileSync(path.join(tmpR, '.leerness/decisions.md'), `\n### ${_todayR} — 캐시 차등 TTL 결정\n- Reason: ...\n`);
+  fs.appendFileSync(path.join(tmpR, '.leerness/review-evidence.md'), `\n## ${_todayR} verify-code\nexit=0 (250ms)\nexit=0 (180ms)\nexit=0 (120ms)\nexit=0 (90ms)\n`);
   const r = cp.spawnSync(process.execPath, [CLI, 'retro', tmpR], { encoding: 'utf8', timeout: 15000 });
   const ok = r.status === 0 && /한 줄 요약/.test(r.stdout) && /작업 상태 분포/.test(r.stdout) && /다음 우선 작업/.test(r.stdout) && /검증 시간 추세/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.13) retro: 한 줄 요약 + 다음 우선 작업 + 검증 시간 추세' : '✗ retro 실패');
@@ -2223,7 +2294,7 @@ total++;
 {
   const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-brain-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpB, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
-  fs.appendFileSync(path.join(tmpB, '.harness/decisions.md'), `\n### 2026-05-13 — 캐시 차등 TTL 결정\n- Reason: open-meteo 응답 최적화\n`);
+  fs.appendFileSync(path.join(tmpB, '.leerness/decisions.md'), `\n### 2026-05-13 — 캐시 차등 TTL 결정\n- Reason: open-meteo 응답 최적화\n`);
   cp.spawnSync(process.execPath, [CLI, 'plan', 'add', '캐시 helper 구현', '--path', tmpB], { stdio: 'ignore', timeout: 10000 });
   const r = cp.spawnSync(process.execPath, [CLI, 'brainstorm', '캐시', '--path', tmpB], { encoding: 'utf8', timeout: 15000 });
   const ok = r.status === 0 && /Brainstorm — "캐시"/.test(r.stdout) && /관련 결정/.test(r.stdout) && /시작 전 권장 액션/.test(r.stdout);
@@ -2248,8 +2319,8 @@ total++;
   const tmpD = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-deep-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpD, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore', timeout: 30000 });
   // 카운터를 4로 설정 → 다음 close가 5번째
-  fs.mkdirSync(path.join(tmpD, '.harness/cache'), { recursive: true });
-  fs.writeFileSync(path.join(tmpD, '.harness/cache/session-counter.json'), JSON.stringify({ count: 4 }));
+  fs.mkdirSync(path.join(tmpD, '.leerness/cache'), { recursive: true });
+  fs.writeFileSync(path.join(tmpD, '.leerness/cache/session-counter.json'), JSON.stringify({ count: 4 }));
   const r = cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpD], { encoding: 'utf8', timeout: 15000 });
   const ok = r.status === 0 && /5세션 마일스톤/.test(r.stdout) && /회고 \(retro\)/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.13) 5세션 마일스톤: 자동 깊은 회고' : '✗ 5세션 자동 회고 실패');
@@ -2359,9 +2430,9 @@ total++;
   // 사용자 design-system 토큰 주입
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm3-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
-  let ds = fs.readFileSync(path.join(tmpR, '.harness/design-system.md'), 'utf8');
+  let ds = fs.readFileSync(path.join(tmpR, '.leerness/design-system.md'), 'utf8');
   ds = ds.replace('| color.primary | (실제 값으로 업데이트) | |', '| color.primary | #ff5722 | |');
-  fs.writeFileSync(path.join(tmpR, '.harness/design-system.md'), ds);
+  fs.writeFileSync(path.join(tmpR, '.leerness/design-system.md'), ds);
   cp.spawnSync(process.execPath, [CLI, 'roadmap', tmpR], { stdio: 'ignore' });
   const html = fs.readFileSync(path.join(tmpR, 'roadmap.html'), 'utf8');
   const ok = /--lr-primary: #ff5722/.test(html);
@@ -2373,7 +2444,7 @@ total++;
   // recommended에 project-roadmap-generator 자동 포함
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rm4-'));
   cp.spawnSync(process.execPath, [CLI, 'init', tmpR, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
-  const skillsDir = path.join(tmpR, '.harness/skills/project-roadmap-generator');
+  const skillsDir = path.join(tmpR, '.leerness/skills/project-roadmap-generator');
   const ok = fs.existsSync(skillsDir) && fs.existsSync(path.join(skillsDir, 'skill.json'));
   console.log(ok ? '✓ B(1.9.11) recommended에 project-roadmap-generator 자동 설치' : '✗ 자동 설치 실패');
   if (!ok) failed++;
@@ -2416,8 +2487,8 @@ total++;
 {
   // tmp는 git init이 없음 → detectGitRemote는 null → publish 호출 시 'Git remote: 없음' 출력
   // 시뮬: tmp에 git init + remote add
-  cp.spawnSync('git', ['init'], { cwd: tmp, encoding: 'utf8', shell: true });
-  cp.spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/test/repo.git'], { cwd: tmp, encoding: 'utf8', shell: true });
+  cp.spawnSync('git', ['init'], { cwd: tmp, encoding: 'utf8', shell: false });
+  cp.spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/test/repo.git'], { cwd: tmp, encoding: 'utf8', shell: false });
   // package.json도 필요
   if (!fs.existsSync(path.join(tmp, 'package.json'))) {
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'e2e-test', version: '0.1.0' }));
@@ -2531,7 +2602,7 @@ total++;
   cp.spawnSync(process.execPath, [CLI, 'init', tmpV, '--yes', '--language', 'ko', '--skills', 'recommended'], { stdio: 'ignore' });
   fs.writeFileSync(path.join(tmpV, 'package.json'), JSON.stringify({ name: 't', version: '0.0.1', scripts: { test: 'node -e "console.log(\\"OK\\");process.exit(0)"' } }));
   const r = cp.spawnSync(process.execPath, [CLI, 'verify-code', tmpV], { encoding: 'utf8' });
-  const ev = fs.readFileSync(path.join(tmpV, '.harness/review-evidence.md'), 'utf8');
+  const ev = fs.readFileSync(path.join(tmpV, '.leerness/review-evidence.md'), 'utf8');
   const ok = r.status === 0 && /test passed/.test(r.stdout) && /verify-code \(자동\)/.test(ev);
   console.log(ok ? '✓ B(1.9.7-A) verify-code: 통과 + evidence 자동 기록' : `✗ A 실패\n${r.stdout}`);
   if (!ok) failed++;
@@ -2552,8 +2623,8 @@ total++;
 // 1.9.7 B: lessons — decisions/evidence에 시드 후 query로 회수
 total++;
 {
-  fs.appendFileSync(path.join(tmp, '.harness/decisions.md'), `\n### 2026-05-08 — Decision: 캐시 차등 TTL 도입\n- Reason: 단일 5분 TTL이 daily 데이터에 비효율\n- Impact: open-meteo 응답 캐시 적중률 ↑\n`);
-  fs.appendFileSync(path.join(tmp, '.harness/review-evidence.md'), `\n## 2026-05-08 e2e\n✗ 캐시 키 불안정 — 좌표 정규화 부재 (롤백 후 fix)\n`);
+  fs.appendFileSync(path.join(tmp, '.leerness/decisions.md'), `\n### 2026-05-08 — Decision: 캐시 차등 TTL 도입\n- Reason: 단일 5분 TTL이 daily 데이터에 비효율\n- Impact: open-meteo 응답 캐시 적중률 ↑\n`);
+  fs.appendFileSync(path.join(tmp, '.leerness/review-evidence.md'), `\n## 2026-05-08 e2e\n✗ 캐시 키 불안정 — 좌표 정규화 부재 (롤백 후 fix)\n`);
   const r = cp.spawnSync(process.execPath, [CLI, 'lessons', '--query', '캐시', '--path', tmp], { encoding: 'utf8' });
   const ok = r.status === 0 && /Lessons.*query="캐시"/.test(r.stdout) && /decisions\.md/.test(r.stdout) && /review-evidence\.md/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.7-B) lessons: decisions+evidence 회수' : `✗ B 실패\n${r.stdout}`);
@@ -2578,13 +2649,13 @@ total++;
   fs.mkdirSync(path.join(tmpC, 'src'), { recursive: true });
   fs.writeFileSync(path.join(tmpC, 'src/a.js'), `// TODO: 추적해야 할 미완료 작업\nfunction foo() {}\n`);
   // review-evidence에 npm test 키워드 추가 (lazy detect의 다른 신호 우회)
-  fs.appendFileSync(path.join(tmpC, '.harness/review-evidence.md'), '\n## seed\nCommand: npm test\n');
+  fs.appendFileSync(path.join(tmpC, '.leerness/review-evidence.md'), '\n## seed\nCommand: npm test\n');
   // session close로 handoff 채우기
   cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpC], { stdio: 'ignore' });
   // --auto-track 실행
   const r = cp.spawnSync(process.execPath, [CLI, 'lazy', 'detect', tmpC, '--auto-track'], { encoding: 'utf8' });
-  const tracker = fs.readFileSync(path.join(tmpC, '.harness/progress-tracker.md'), 'utf8');
-  const known = fs.existsSync(path.join(tmpC, '.harness/known-todos.json')) ? JSON.parse(fs.readFileSync(path.join(tmpC, '.harness/known-todos.json'), 'utf8')) : [];
+  const tracker = fs.readFileSync(path.join(tmpC, '.leerness/progress-tracker.md'), 'utf8');
+  const known = fs.existsSync(path.join(tmpC, '.leerness/known-todos.json')) ? JSON.parse(fs.readFileSync(path.join(tmpC, '.leerness/known-todos.json'), 'utf8')) : [];
   const ok = /TODO src\/a\.js:1/.test(tracker) && /auto-tracked/.test(tracker) && known.length === 1;
   console.log(ok ? '✓ B(1.9.7-C) lazy detect --auto-track: 자동 등록 + known-todos.json' : `✗ C 실패\nTracker:\n${tracker.split('\n').filter(l=>l.startsWith('| T-')).slice(-3).join('\n')}\nKnown: ${JSON.stringify(known)}`);
   if (!ok) failed++;
@@ -2601,8 +2672,8 @@ total++;
   fs.mkdirSync(path.join(tmpC2, 'src'), { recursive: true });
   fs.writeFileSync(path.join(tmpC2, 'src/a.js'), `// TODO: 추적된 항목\n`);
   // known-todos.json에 미리 등록
-  fs.writeFileSync(path.join(tmpC2, '.harness/known-todos.json'), JSON.stringify([{ file: 'src/a.js', line: 1, text: '// TODO: 추적된 항목', ackAt: '2026-05-08T00:00:00Z' }]));
-  fs.appendFileSync(path.join(tmpC2, '.harness/review-evidence.md'), '\n## seed\nCommand: npm test\n');
+  fs.writeFileSync(path.join(tmpC2, '.leerness/known-todos.json'), JSON.stringify([{ file: 'src/a.js', line: 1, text: '// TODO: 추적된 항목', ackAt: '2026-05-08T00:00:00Z' }]));
+  fs.appendFileSync(path.join(tmpC2, '.leerness/review-evidence.md'), '\n## seed\nCommand: npm test\n');
   cp.spawnSync(process.execPath, [CLI, 'session', 'close', tmpC2], { stdio: 'ignore' });
   const r = cp.spawnSync(process.execPath, [CLI, 'lazy', 'detect', tmpC2], { encoding: 'utf8' });
   // newTodos가 0이므로 "new: 0" 또는 TODO 카운트가 1이지만 progress 추적에 자동 등록 안 됨
@@ -2616,12 +2687,12 @@ total++;
 total++;
 {
   // plan.md에 새 milestone 추가, progress엔 link 없는 비슷한 row 추가
-  const planPath_ = path.join(tmp, '.harness/plan.md');
+  const planPath_ = path.join(tmp, '.leerness/plan.md');
   fs.appendFileSync(planPath_,
     `\n### M-9001. 캐시 헬퍼 모듈\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] 캐시 helper\n` +
     `\n### M-9002. 인증 헬퍼 모듈\nStatus: planned\nProgress: 0%\n\nTasks:\n- [ ] 인증 helper\n`);
   // progress에 link 없는 비슷한 row 2개 추가
-  const trackerPath_ = path.join(tmp, '.harness/progress-tracker.md');
+  const trackerPath_ = path.join(tmp, '.leerness/progress-tracker.md');
   fs.appendFileSync(trackerPath_,
     `| T-9001 | done | 캐시 helper 구현 | tests:5/5 (link lost) | 다음 단계 | 2026-05-08 |\n` +
     `| T-9002 | done | 인증 helper 구현 | tests:8/8 (link lost) | 다음 단계 | 2026-05-08 |\n`);
@@ -2636,7 +2707,7 @@ total++;
 {
   // --apply
   const r2 = cp.spawnSync(process.execPath, [CLI, 'task', 'relink', '--apply', '--path', tmp], { encoding: 'utf8' });
-  const tracker = fs.readFileSync(path.join(tmp, '.harness/progress-tracker.md'), 'utf8');
+  const tracker = fs.readFileSync(path.join(tmp, '.leerness/progress-tracker.md'), 'utf8');
   const okApply = r2.status === 0 && /M-9001/.test(tracker) && /M-9002/.test(tracker);
   console.log(okApply ? '✓ B(1.9.6) task relink --apply: 자동 복구' : '✗ B(1.9.6) --apply 실패');
   if (!okApply) failed++;
@@ -2645,7 +2716,7 @@ total++;
 {
   // audit이 task relink 안내를 출력하는지 (이번엔 link 복구 후라 미연결 milestone 없을 것)
   // 일부러 새 milestone 추가 후 audit
-  fs.appendFileSync(path.join(tmp, '.harness/plan.md'),
+  fs.appendFileSync(path.join(tmp, '.leerness/plan.md'),
     `\n### M-9999. 매칭 후보 없는 milestone\nStatus: planned\n\nTasks:\n- [ ] x\n`);
   const r3 = cp.spawnSync(process.execPath, [CLI, 'audit', tmp], { encoding: 'utf8' });
   const ok = /milestones without progress entry/.test(r3.stdout) && /M-9999/.test(r3.stdout) && /leerness task relink/.test(r3.stdout);
@@ -2698,7 +2769,7 @@ total++;
 total++;
 {
   // T-0001 evidence를 placeholder로 (test before가 'review-evidence:e2e' 였음 → 'user-request'로 바꿈)
-  const trackerPath = path.join(tmp, '.harness/progress-tracker.md');
+  const trackerPath = path.join(tmp, '.leerness/progress-tracker.md');
   let cur = fs.readFileSync(trackerPath, 'utf8');
   cur = cur.replace(/^\| T-0001 \|.*$/m, '| T-0001 | done | mile A | user-request | next | 2026-05-08 |');
   fs.writeFileSync(trackerPath, cur);
@@ -2712,7 +2783,7 @@ total++;
 total++;
 {
   // T-0001 evidence를 plan:M-0002 링크 포함한 placeholder로 (1.9.5 link 보존 검증용 시드)
-  const trackerPath2 = path.join(tmp, '.harness/progress-tracker.md');
+  const trackerPath2 = path.join(tmp, '.leerness/progress-tracker.md');
   let cur = fs.readFileSync(trackerPath2, 'utf8');
   cur = cur.replace(/^\| T-0001 \|.*$/m, '| T-0001 | done | mile A | plan:M-0002 | next | 2026-05-08 |');
   fs.writeFileSync(trackerPath2, cur);
@@ -2726,7 +2797,7 @@ total++;
 // 1.9.5 F 회귀: --set 시 plan:M-XXXX 링크 자동 보존
 total++;
 {
-  const tracker = fs.readFileSync(path.join(tmp, '.harness/progress-tracker.md'), 'utf8');
+  const tracker = fs.readFileSync(path.join(tmp, '.leerness/progress-tracker.md'), 'utf8');
   const ok = /npm test 통과 \(e2e\) \(plan:M-0002\)/.test(tracker);
   console.log(ok ? '✓ B(F) fix-evidence --set: link 자동 보존' : `✗ B(F) link 손실\n${tracker}`);
   if (!ok) failed++;
@@ -2736,7 +2807,7 @@ total++;
 total++;
 {
   // T-0002 같은 row를 placeholder로 시드
-  const trackerPath3 = path.join(tmp, '.harness/progress-tracker.md');
+  const trackerPath3 = path.join(tmp, '.leerness/progress-tracker.md');
   let cur = fs.readFileSync(trackerPath3, 'utf8');
   // T-0001을 다시 plan:M-0099로 교체
   cur = cur.replace(/^\| T-0001 \|.*$/m, '| T-0001 | done | mile A | plan:M-0099 | next | 2026-05-08 |');
@@ -2768,7 +2839,7 @@ run('consistency check',   ['consistency', 'check', tmp]);
 run('--version',           ['--version']);
 run('--help',              ['--help']);
 
-// 1.9.269 회귀 (UR-0022): 빈 디렉토리 신규 init + auto → OS 시스템 언어로 .harness/LANGUAGE 결정
+// 1.9.269 회귀 (UR-0022): 빈 디렉토리 신규 init + auto → OS 시스템 언어로 .leerness/LANGUAGE 결정
 total++;
 {
   const tmpEn = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lang-en-'));
@@ -2779,8 +2850,8 @@ total++;
   // --language 미지정(auto) + 빈 디렉토리 → 시스템 언어 적용
   cp.spawnSync(process.execPath, [CLI, 'init', tmpEn, '--yes', '--skills', 'recommended'], { encoding: 'utf8', env: envEn, timeout: 30000 });
   cp.spawnSync(process.execPath, [CLI, 'init', tmpKo, '--yes', '--skills', 'recommended'], { encoding: 'utf8', env: envKo, timeout: 30000 });
-  const langEn = fs.existsSync(path.join(tmpEn, '.harness', 'LANGUAGE')) ? fs.readFileSync(path.join(tmpEn, '.harness', 'LANGUAGE'), 'utf8').trim() : '';
-  const langKo = fs.existsSync(path.join(tmpKo, '.harness', 'LANGUAGE')) ? fs.readFileSync(path.join(tmpKo, '.harness', 'LANGUAGE'), 'utf8').trim() : '';
+  const langEn = fs.existsSync(path.join(tmpEn, '.leerness', 'LANGUAGE')) ? fs.readFileSync(path.join(tmpEn, '.leerness', 'LANGUAGE'), 'utf8').trim() : '';
+  const langKo = fs.existsSync(path.join(tmpKo, '.leerness', 'LANGUAGE')) ? fs.readFileSync(path.join(tmpKo, '.leerness', 'LANGUAGE'), 'utf8').trim() : '';
   const ok = langEn === 'en' && langKo === 'ko';
   console.log(ok ? '✓ B(1.9.269) init auto: 빈 디렉토리 → OS 시스템 언어 (en→en, ko→ko)' : `✗ system-lang init 실패 (en=${langEn} ko=${langKo})`);
   if (!ok) failed++;
@@ -2892,16 +2963,16 @@ total++;
   const dDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dry-'));
   const rDry = cp.spawnSync(process.execPath, [CLI, 'init', dDir, '--dry-run', '--yes'], { encoding: 'utf8', timeout: 30000 });
   const dryNoFiles = fs.readdirSync(dDir).length === 0;
-  const drySummary = /\[dry-run\] 요약/.test(rDry.stdout) && !fs.existsSync(path.join(dDir, '.harness'));
+  const drySummary = /\[dry-run\] 요약/.test(rDry.stdout) && !fs.existsSync(path.join(dDir, '.leerness'));
   // --minimal --no-env: 핵심 유지 + 비핵심/.env/.cursor/roadmap 제외
   const mDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-min-'));
   cp.spawnSync(process.execPath, [CLI, 'init', mDir, '--minimal', '--no-env', '--yes'], { encoding: 'utf8', timeout: 30000 });
   const fDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-full-'));
   cp.spawnSync(process.execPath, [CLI, 'init', fDir, '--yes'], { encoding: 'utf8', timeout: 30000 });
-  const minCount = fs.existsSync(path.join(mDir, '.harness')) ? fs.readdirSync(path.join(mDir, '.harness')).length : 0;
-  const fullCount = fs.existsSync(path.join(fDir, '.harness')) ? fs.readdirSync(path.join(fDir, '.harness')).length : 0;
+  const minCount = fs.existsSync(path.join(mDir, '.leerness')) ? fs.readdirSync(path.join(mDir, '.leerness')).length : 0;
+  const fullCount = fs.existsSync(path.join(fDir, '.leerness')) ? fs.readdirSync(path.join(fDir, '.leerness')).length : 0;
   const minimalOk = minCount > 0 && minCount < fullCount
-    && fs.existsSync(path.join(mDir, '.harness', 'plan.md')) && fs.existsSync(path.join(mDir, 'AGENTS.md'))
+    && fs.existsSync(path.join(mDir, '.leerness', 'plan.md')) && fs.existsSync(path.join(mDir, 'AGENTS.md'))
     && !fs.existsSync(path.join(mDir, '.env')) && !fs.existsSync(path.join(mDir, '.cursor')) && !fs.existsSync(path.join(mDir, 'roadmap.html'));
   // minimal 이어도 verify 통과(필수 파일 보존)
   const rVerify = cp.spawnSync(process.execPath, [CLI, 'verify', mDir], { encoding: 'utf8', timeout: 20000 });
@@ -3052,7 +3123,7 @@ total++;
   let lowOk = false;
   try { const j = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'skill', 'impact', iDir, '--json'], { encoding: 'utf8', timeout: 15000 }).stdout); lowOk = Array.isArray(j.skills) && j.sampleSize === 0 && /표본 부족/.test(j.advisory) && j.network === false; } catch {}
   // review-evidence 에 pass/fail 6건 시드 → 통과율 계산
-  const evFile = path.join(iDir, '.harness', 'review-evidence.md');
+  const evFile = path.join(iDir, '.leerness', 'review-evidence.md');
   let seed = '# Review Evidence\n';
   for (let k = 0; k < 5; k++) seed += `\n## 2026-06-03 0${k}:00\nCommand: npm test\nExit: 0\n`;
   seed += `\n## 2026-06-03 06:00\nCommand: build\nExit: 1\n`;
@@ -3082,12 +3153,12 @@ total++;
   const rGood = cp.spawnSync(process.execPath, [CLI, 'verify-claim', 'T-0002', '--require-evidence', '--path', cDir], { encoding: 'utf8', timeout: 20000, env });
   const goodPass = rGood.status === 0 && /evidence 완전성.*pass/.test(rGood.stdout);
   // B) handoff 펜스 sanitize — review-evidence 에 ``` 넣고 session close → session-handoff 에 ``` 불균형 없음
-  fs.appendFileSync(path.join(cDir, '.harness', 'review-evidence.md'), '\n## 2026-06-03\n```js\nconst x=1;\n```\n');
+  fs.appendFileSync(path.join(cDir, '.leerness', 'review-evidence.md'), '\n## 2026-06-03\n```js\nconst x=1;\n```\n');
   cp.spawnSync(process.execPath, [CLI, 'session', 'close', cDir], { encoding: 'utf8', timeout: 20000, env });
   // 펜스 균형: 감싸는 wrapper ``` 는 허용하되, review-evidence 의 inner ``` 는 '''로 sanitize 되어 불균형이 없어야 함.
   let fenceOk = false;
   try {
-    const sh = fs.readFileSync(path.join(cDir, '.harness', 'session-handoff.md'), 'utf8');
+    const sh = fs.readFileSync(path.join(cDir, '.leerness', 'session-handoff.md'), 'utf8');
     const bareFences = sh.split('\n').filter(l => l.trim() === '`'.repeat(3)).length;
     fenceOk = (bareFences % 2 === 0) && sh.includes("'''");  // 균형(짝수) + inner sanitize 적용 확인
   } catch {}
@@ -3218,7 +3289,7 @@ total++;
   try {
     const idemDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-idem-'));
     cp.spawnSync(process.execPath, [CLI, 'init', idemDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    const pt = path.join(idemDir, '.harness', 'progress-tracker.md');
+    const pt = path.join(idemDir, '.leerness', 'progress-tracker.md');
     // (1) 헤더 유실 + 완전중복 + 동일텍스트 중복 시뮬레이션 (과거 손상 패턴)
     const dupRow = '| T-7001 | in-progress | 중복작업ABC | - | - | 2026-06-04 |';
     const sameText = '| T-7002 | in-progress | 중복작업ABC | - | - | 2026-06-04 |';
@@ -3338,13 +3409,13 @@ total++;
       cp.spawnSync(process.execPath, [CLI, 'task', 'add', `원자성 테스트 T-${i}`, '--path', aDir], { encoding: 'utf8', timeout: 15000 });
       cp.spawnSync(process.execPath, [CLI, 'decision', 'add', `결정 ${i}`, '--reason', 'r', '--path', aDir], { encoding: 'utf8', timeout: 15000 });
     }
-    const pt = fs.readFileSync(path.join(aDir, '.harness', 'progress-tracker.md'), 'utf8');
+    const pt = fs.readFileSync(path.join(aDir, '.leerness', 'progress-tracker.md'), 'utf8');
     // (1) 3개 task 모두 기록 + 구분자 라인 1개(중복/손상 없음). 라인 기준 카운트(|---|---| 한 줄에 부분매치 다수 방지).
     const sepLines = pt.split('\n').filter(l => /^\|---\|/.test(l)).length;
     const tasksOk = /원자성 테스트 T-0/.test(pt) && /원자성 테스트 T-2/.test(pt) && sepLines === 1;
-    // (2) .harness 어디에도 .tmp- 잔여 파일 없음 (rename 완료)
+    // (2) .leerness 어디에도 .tmp- 잔여 파일 없음 (rename 완료)
     const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
-    const tmpLeftover = walk(path.join(aDir, '.harness')).filter(f => /\.tmp-\d+-\d+$/.test(f));
+    const tmpLeftover = walk(path.join(aDir, '.leerness')).filter(f => /\.tmp-\d+-\d+$/.test(f));
     // (3) 소스에 renameSync 원자 패턴 존재
     //   1.36.132: 종전엔 `fs.renameSync(tmp, p)` 리터럴을 붙잡았다 — rename 재시도를 헬퍼로 빼자 그 자리에서 깨졌다.
     //   지키려는 것은 **임시파일에 쓰고 rename 으로 교체**하는 형태지 호출 문자열이 아니다 — 의도로 단언한다.
@@ -3375,7 +3446,7 @@ total++;
     });
     const out = (r.stdout || '') + (r.stderr || '');
     // 대조군: 같은 스크립트를 스크럽 없이 직접 실행하면 exit 1 (토큰 노출 확인 — 테스트 자체 유효성)
-    const ctrl = cp.spawnSync('npm test', [], { cwd: secDir, shell: true, encoding: 'utf8', timeout: 30000, env: { ...process.env, NPM_TOKEN: 'leaktok' } });
+    const ctrl = spawnNpmSync(['test'], { cwd: secDir, encoding: 'utf8', timeout: 30000, env: { ...process.env, NPM_TOKEN: 'leaktok' } });
     ok = /✓ test passed/.test(out) && !/✗ test/.test(out) && ctrl.status === 1;
     fs.rmSync(secDir, { recursive: true, force: true });
   } catch {}
@@ -3479,7 +3550,7 @@ total++;
     //   제품 락은 CPU 포화 하 5/5 무결(dup=0/sep=1) 독립검증됨 → spawn 실패만 동기 재시도로 보강(동시성 유지). 락 무결성(dup/sep/lost-update) 검증은 그대로.
     const spawnOne = i => { const p = cp.spawn(process.execPath, [CLI, 'task', 'add', 'LOCKTEST-' + i, '--path', lDir, '--no-review'], { stdio: 'ignore' }); p.on('error', () => { try { cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'LOCKTEST-' + i, '--path', lDir, '--no-review'], { timeout: 30000 }); } catch {} }); return p; };
     for (let i = 0; i < N; i++) procs.push(spawnOne(i));
-    const ptPath = path.join(lDir, '.harness', 'progress-tracker.md');
+    const ptPath = path.join(lDir, '.leerness', 'progress-tracker.md');
     // 자식들이 OS 프로세스로 독립 진행 → 부모는 파일을 sync 폴링(원자쓰기라 부분읽기 없음)
     const start = Date.now(); let found = 0;
     // 1.9.321/1.9.375 (UR-0084): 폴 타임아웃 60s→120s — 전체 e2e CPU 포화(561s 실측 시 1회 flake) 대비 헤드룸 2배(격리 실측 0.4s, 대폭 여유)
@@ -3580,12 +3651,12 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', bDir, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
     const run = (...a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: bDir, encoding: 'utf8', timeout: 20000 });
     run('brief', 'set', '--path', bDir, '--intro', '할 일 관리 앱', '--purpose', '팀 생산성', '--features', '태스크CRUD, 알림');
-    const briefMd = fs.readFileSync(path.join(bDir, '.harness', 'project-brief.md'), 'utf8');
+    const briefMd = fs.readFileSync(path.join(bDir, '.leerness', 'project-brief.md'), 'utf8');
     const readme = fs.readFileSync(path.join(bDir, 'README.md'), 'utf8');
     const setOk = /## Intro\n할 일 관리 앱/.test(briefMd) && /태스크CRUD/.test(briefMd) && readme.includes('<!-- leerness:project-brief:start -->') && /## 프로젝트 개요/.test(readme) && /할 일 관리 앱/.test(readme);
     // 멱등 업데이트: 방향 변경(--purpose 만 갱신) → intro/features 보존
     run('brief', 'set', '--path', bDir, '--purpose', '엔터프라이즈 확대');
-    const md2 = fs.readFileSync(path.join(bDir, '.harness', 'project-brief.md'), 'utf8');
+    const md2 = fs.readFileSync(path.join(bDir, '.leerness', 'project-brief.md'), 'utf8');
     const updateOk = /엔터프라이즈 확대/.test(md2) && /할 일 관리 앱/.test(md2) && /태스크CRUD/.test(md2);
     // README 섹션 중복 없음 (재sync)
     const readme2 = fs.readFileSync(path.join(bDir, 'README.md'), 'utf8');
@@ -3611,7 +3682,7 @@ total++;
     run('brief', 'set', '--path', b2, '--intro', '앱', '--features', 'CRUD');
     run('brief', 'update', '--path', b2, '--direction', 'AI 자동분류 확대');
     run('brief', 'update', '--path', b2, '--direction', '모바일 지원 추가');
-    const md = fs.readFileSync(path.join(b2, '.harness', 'project-brief.md'), 'utf8');
+    const md = fs.readFileSync(path.join(b2, '.leerness', 'project-brief.md'), 'utf8');
     const histOk = /## Direction History/.test(md) && /AI 자동분류 확대/.test(md) && /모바일 지원 추가/.test(md);  // 이력 누적
     const readme = fs.readFileSync(path.join(b2, 'README.md'), 'utf8');
     const readmeOk = /최근 개발 방향 변경/.test(readme) && /모바일 지원 추가/.test(readme);
@@ -3679,12 +3750,12 @@ total++;
   if (!ok) failed++;
 }
 
-// 1.9.311 회귀 (UR-0047 설치리뷰): init 가드 — 미초기화 디렉토리 write 차단, .harness 미생성, --force 우회, init 후 정상
+// 1.9.311 회귀 (UR-0047 설치리뷰): init 가드 — 미초기화 디렉토리 write 차단, .leerness 미생성, --force 우회, init 후 정상
 total++;
 {
   let ok = false;
   try {
-    // dir1: 미초기화 7개 write 차단(exit 1) + .harness 미생성 + --force 우회
+    // dir1: 미초기화 7개 write 차단(exit 1) + .leerness 미생성 + --force 우회
     const ig = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-initguard-'));
     const st = (...a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', ig], { cwd: ig, encoding: 'utf8', timeout: 20000 }).status;
     const blocked = st('task', 'add', 't') === 1
@@ -3694,8 +3765,16 @@ total++;
       && st('plan', 'add', 'p') === 1
       && st('lesson', 'save', 'l') === 1
       && st('brief', 'set', '--intro', 'x') === 1;
+    // Runtime telemetry may create the recognized `.leerness/cache` substrate,
+    // but blocked commands must not scaffold managed project state.
+    const beforeStateEntries = fs.existsSync(path.join(ig, '.leerness'))
+      ? fs.readdirSync(path.join(ig, '.leerness')) : [];
+    const noManagedState = beforeStateEntries.every((entry) => entry === 'cache')
+      && !fs.existsSync(path.join(ig, '.leerness', 'HARNESS_VERSION'))
+      && !fs.existsSync(path.join(ig, '.leerness', 'progress-tracker.md'));
     const stateOk = st('state', 'start', 'g') === 0;              // state 는 .leerness substrate(standalone) → 가드 미적용(0)
-    const noHarness = !fs.existsSync(path.join(ig, '.harness'));   // .harness write 차단 시 부분 .harness 미생성
+    const substrateCreated = fs.existsSync(path.join(ig, '.leerness', 'state.json'))
+      && !fs.existsSync(path.join(ig, '.harness')); // workspace-dir-legacy-fixture
     const forced = st('task', 'add', 'tf', '--force') === 0;       // --force 우회
     fs.rmSync(ig, { recursive: true, force: true });
     // dir2: init 후 정상 write
@@ -3703,9 +3782,9 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', ig2, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
     const afterInit = cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'ti', '--path', ig2], { cwd: ig2, encoding: 'utf8', timeout: 20000 }).status === 0;
     fs.rmSync(ig2, { recursive: true, force: true });
-    ok = blocked && stateOk && noHarness && forced && afterInit;
+    ok = blocked && noManagedState && stateOk && substrateCreated && forced && afterInit;
   } catch {}
-  console.log(ok ? '✓ B(1.9.311) init 가드: 미초기화 .harness write 7종 차단 + state(.leerness) 예외 + --force 우회 + init 후 정상 (UR-0047)' : '✗ init 가드 실패');
+  console.log(ok ? '✓ B(1.9.311) init 가드: 미초기화 .leerness write 7종 차단 + state(.leerness) 예외 + --force 우회 + init 후 정상 (UR-0047)' : '✗ init 가드 실패');
   if (!ok) failed++;
 }
 
@@ -3813,7 +3892,7 @@ total++;
   try {
     const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-driftmark-'));
     cp.spawnSync(process.execPath, [CLI, 'init', dd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    const shp = path.join(dd, '.harness', 'session-handoff.md');
+    const shp = path.join(dd, '.leerness', 'session-handoff.md');
     // 손상 시뮬: 구 timestamp + 본문 '---' (프론트매터 없는 파일)
     fs.writeFileSync(shp, '# Session Handoff\n\nLast generated: 2026-01-01T00:00:00.000Z\n\n## Completed\n- old\n\n---\n## x\n');
     cp.spawnSync(process.execPath, [CLI, 'session', 'close', dd], { encoding: 'utf8', timeout: 30000 });
@@ -3836,7 +3915,7 @@ total++;
   try {
     const td = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-telem-'));
     cp.spawnSync(process.execPath, [CLI, 'init', td, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    const usagePath = path.join(td, '.harness', 'cache', 'usage-stats.json');
+    const usagePath = path.join(td, '.leerness', 'cache', 'usage-stats.json');
     const cmds = () => { try { return JSON.parse(fs.readFileSync(usagePath, 'utf8')).commands || {}; } catch { return {}; } };
     // task add → 내부 review-request auto-call 이 usage 오염 안 함 (task 만 집계, review-request 없음)
     cp.spawnSync(process.execPath, [CLI, 'task', 'add', '텔레메트리 테스트', '--path', td], { encoding: 'utf8', timeout: 20000 });
@@ -4294,7 +4373,7 @@ total++;
     // 소비 명령 회귀: optimism-check (harness wrapper → _puDetectOptimism(OPTIMISM_PATTERNS, ...) 경로)
     const od = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-opt-'));
     cp.spawnSync(process.execPath, [CLI, 'init', od, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    fs.appendFileSync(path.join(od, '.harness', 'progress-tracker.md'), '| T-9999 | done | API 통합 | API 호출 완료, POST /users 처리함 | M-1 | 2026-06-05 |\n');
+    fs.appendFileSync(path.join(od, '.leerness', 'progress-tracker.md'), '| T-9999 | done | API 통합 | API 호출 완료, POST /users 처리함 | M-1 | 2026-06-05 |\n');
     const or = cp.spawnSync(process.execPath, [CLI, 'optimism-check', 'T-9999', '--path', od, '--json'], { encoding: 'utf8', timeout: 20000 });
     let cmdOk = false;
     try { const j = JSON.parse(or.stdout); cmdOk = Array.isArray(j.suspects) && j.suspects.some(s => s.kind === 'API') && typeof j.confidence === 'number' && j.confidence < 0.5; } catch {}
@@ -4376,9 +4455,9 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', dd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
     cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'PG 채택', '--reason', '관계형', '--alternatives', 'Mongo', '--path', dd], { encoding: 'utf8', timeout: 20000 });
     cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'Redis', '--reason', '속도', '--path', dd], { encoding: 'utf8', timeout: 20000 });
-    const jsonExists = fs.existsSync(path.join(dd, '.harness', 'decisions.json'));
-    const canon = jsonExists ? JSON.parse(fs.readFileSync(path.join(dd, '.harness', 'decisions.json'), 'utf8')) : [];
-    const mdProj = fs.existsSync(path.join(dd, '.harness', 'decisions.md')) ? fs.readFileSync(path.join(dd, '.harness', 'decisions.md'), 'utf8') : '';
+    const jsonExists = fs.existsSync(path.join(dd, '.leerness', 'decisions.json'));
+    const canon = jsonExists ? JSON.parse(fs.readFileSync(path.join(dd, '.leerness', 'decisions.json'), 'utf8')) : [];
+    const mdProj = fs.existsSync(path.join(dd, '.leerness', 'decisions.md')) ? fs.readFileSync(path.join(dd, '.leerness', 'decisions.md'), 'utf8') : '';
     const writeOk = jsonExists && canon.length === 2 && canon[0].alternatives === 'Mongo' && canon[1].alternatives === null
       && mdProj.includes('PG 채택') && mdProj.includes('Redis');
     // list + context count = canonical 단일소스
@@ -4389,17 +4468,17 @@ total++;
     try { const j = JSON.parse(cr.stdout); ctxOk = j.memory && j.memory.decisions === 2; } catch {}
     // drop + archive
     cp.spawnSync(process.execPath, [CLI, 'decision', 'drop', 'PG', '--path', dd], { encoding: 'utf8', timeout: 20000 });
-    const afterDrop = JSON.parse(fs.readFileSync(path.join(dd, '.harness', 'decisions.json'), 'utf8'));
-    const dropOk = afterDrop.length === 1 && afterDrop[0].title === 'Redis' && fs.existsSync(path.join(dd, '.harness', 'decisions.archive.md'));
+    const afterDrop = JSON.parse(fs.readFileSync(path.join(dd, '.leerness', 'decisions.json'), 'utf8'));
+    const dropOk = afterDrop.length === 1 && afterDrop[0].title === 'Redis' && fs.existsSync(path.join(dd, '.leerness', 'decisions.archive.md'));
     fs.rmSync(dd, { recursive: true, force: true });
     // 백필: MD-only(JSON 없음) → list 가 MD 파싱(template 제외), 읽기 무부작용
     const bd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bf-'));
     cp.spawnSync(process.execPath, [CLI, 'init', bd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    fs.rmSync(path.join(bd, '.harness', 'decisions.json'), { force: true });
-    fs.writeFileSync(path.join(bd, '.harness', 'decisions.md'), '# Decisions\n\n## Template\n\n' + '```md\n### YYYY-MM-DD — 제목\n- Decision:\n```\n\n### 2026-06-01 — 기존A\n- Decision: A\n\n### 2026-06-02 — 기존B\n- Decision: B\n', 'utf8');
+    fs.rmSync(path.join(bd, '.leerness', 'decisions.json'), { force: true });
+    fs.writeFileSync(path.join(bd, '.leerness', 'decisions.md'), '# Decisions\n\n## Template\n\n' + '```md\n### YYYY-MM-DD — 제목\n- Decision:\n```\n\n### 2026-06-01 — 기존A\n- Decision: A\n\n### 2026-06-02 — 기존B\n- Decision: B\n', 'utf8');
     const br = cp.spawnSync(process.execPath, [CLI, 'decision', 'list', '--path', bd, '--json'], { encoding: 'utf8', timeout: 20000 });
     let backfillOk = false;
-    try { const j = JSON.parse(br.stdout); backfillOk = j.total === 2 && !fs.existsSync(path.join(bd, '.harness', 'decisions.json')); } catch {}
+    try { const j = JSON.parse(br.stdout); backfillOk = j.total === 2 && !fs.existsSync(path.join(bd, '.leerness', 'decisions.json')); } catch {}
     fs.rmSync(bd, { recursive: true, force: true });
     ok = pureOk && writeOk && listOk && ctxOk && dropOk && backfillOk;
   } catch {}
@@ -4422,9 +4501,9 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', ld, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
     cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', 'JWT 짧게', '--tag', 'security', '--path', ld], { encoding: 'utf8', timeout: 20000 });
     cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', '캐시 TTL', '--path', ld], { encoding: 'utf8', timeout: 20000 });
-    const jsonExists = fs.existsSync(path.join(ld, '.harness', 'lessons.json'));
-    const canon = jsonExists ? JSON.parse(fs.readFileSync(path.join(ld, '.harness', 'lessons.json'), 'utf8')) : [];
-    const mdProj = fs.existsSync(path.join(ld, '.harness', 'lessons.md')) ? fs.readFileSync(path.join(ld, '.harness', 'lessons.md'), 'utf8') : '';
+    const jsonExists = fs.existsSync(path.join(ld, '.leerness', 'lessons.json'));
+    const canon = jsonExists ? JSON.parse(fs.readFileSync(path.join(ld, '.leerness', 'lessons.json'), 'utf8')) : [];
+    const mdProj = fs.existsSync(path.join(ld, '.leerness', 'lessons.md')) ? fs.readFileSync(path.join(ld, '.leerness', 'lessons.md'), 'utf8') : '';
     const writeOk = jsonExists && canon.length === 2 && canon[0].tag === 'security' && canon[1].tag === null
       && mdProj.includes('JWT 짧게') && mdProj.includes('캐시 TTL') && mdProj.includes('- Tag: security');
     // list + tag filter
@@ -4435,17 +4514,17 @@ total++;
     try { tagOk = JSON.parse(tr.stdout).total === 1; } catch {}
     // drop + archive
     cp.spawnSync(process.execPath, [CLI, 'lesson', 'drop', 'JWT', '--path', ld], { encoding: 'utf8', timeout: 20000 });
-    const afterDrop = JSON.parse(fs.readFileSync(path.join(ld, '.harness', 'lessons.json'), 'utf8'));
-    const dropOk = afterDrop.length === 1 && afterDrop[0].text === '캐시 TTL' && fs.existsSync(path.join(ld, '.harness', 'lessons.archive.md'));
+    const afterDrop = JSON.parse(fs.readFileSync(path.join(ld, '.leerness', 'lessons.json'), 'utf8'));
+    const dropOk = afterDrop.length === 1 && afterDrop[0].text === '캐시 TTL' && fs.existsSync(path.join(ld, '.leerness', 'lessons.archive.md'));
     fs.rmSync(ld, { recursive: true, force: true });
     // 백필: MD-only(JSON 없음) → list 가 MD 파싱, 읽기 무부작용
     const bd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lbf-'));
     cp.spawnSync(process.execPath, [CLI, 'init', bd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    fs.rmSync(path.join(bd, '.harness', 'lessons.json'), { force: true });
-    fs.writeFileSync(path.join(bd, '.harness', 'lessons.md'), '# Lessons\n\n### 2026-06-01\n- Lesson: 기존1\n- Tag: t1\n\n### 2026-06-02\n- Lesson: 기존2\n', 'utf8');
+    fs.rmSync(path.join(bd, '.leerness', 'lessons.json'), { force: true });
+    fs.writeFileSync(path.join(bd, '.leerness', 'lessons.md'), '# Lessons\n\n### 2026-06-01\n- Lesson: 기존1\n- Tag: t1\n\n### 2026-06-02\n- Lesson: 기존2\n', 'utf8');
     const br = cp.spawnSync(process.execPath, [CLI, 'lesson', 'list', '--path', bd, '--json'], { encoding: 'utf8', timeout: 20000 });
     let backfillOk = false;
-    try { backfillOk = JSON.parse(br.stdout).total === 2 && !fs.existsSync(path.join(bd, '.harness', 'lessons.json')); } catch {}
+    try { backfillOk = JSON.parse(br.stdout).total === 2 && !fs.existsSync(path.join(bd, '.leerness', 'lessons.json')); } catch {}
     fs.rmSync(bd, { recursive: true, force: true });
     ok = pureOk && writeOk && listOk && tagOk && dropOk && backfillOk;
   } catch {}
@@ -4586,7 +4665,7 @@ total++;
     // 소비 회귀: roadmap.html 이 악성 task 제목을 이스케이프 (인젝션 방지)
     const rd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-esc-'));
     cp.spawnSync(process.execPath, [CLI, 'init', rd, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    fs.appendFileSync(path.join(rd, '.harness', 'progress-tracker.md'), '| T-7777 | done | <img src=x onerror=alert(1)> | src/x.js | M-1 | 2026-06-05 |\n');
+    fs.appendFileSync(path.join(rd, '.leerness', 'progress-tracker.md'), '| T-7777 | done | <img src=x onerror=alert(1)> | src/x.js | M-1 | 2026-06-05 |\n');
     cp.spawnSync(process.execPath, [CLI, 'roadmap', rd], { encoding: 'utf8', timeout: 20000 });
     const rf = path.join(rd, 'roadmap.html');
     const html = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8') : '';
@@ -4644,7 +4723,7 @@ total++;
     const smdPath = path.join(sd, 's.md');
     fs.writeFileSync(smdPath, Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from('---\nname: e2e-skill\ndescription: BOM 처리\n---\n# Body', 'utf8')]));
     cp.spawnSync(process.execPath, [CLI, 'skill', 'install', smdPath, '--path', sd], { encoding: 'utf8', timeout: 20000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_PROMPT: '1' } });
-    const installOk = fs.existsSync(path.join(sd, '.harness', 'skills', 'e2e-skill', 'SKILL.md'));
+    const installOk = fs.existsSync(path.join(sd, '.leerness', 'skills', 'e2e-skill', 'SKILL.md'));
     ok = pureOk && movedOut && installOk;
     fs.rmSync(sd, { recursive: true, force: true });
   } catch {}
@@ -4661,8 +4740,8 @@ total++;
     const Bd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pb-'));
     cp.spawnSync(process.execPath, [CLI, 'init', A, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     cp.spawnSync(process.execPath, [CLI, 'init', Bd, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    fs.appendFileSync(path.join(A, '.harness', 'progress-tracker.md'), '| T-0001 | done | AONLYMARK | x | M-1 | 2026-06-05 |\n');
-    fs.appendFileSync(path.join(Bd, '.harness', 'progress-tracker.md'), '| T-0002 | done | BONLYMARK | x | M-1 | 2026-06-05 |\n');
+    fs.appendFileSync(path.join(A, '.leerness', 'progress-tracker.md'), '| T-0001 | done | AONLYMARK | x | M-1 | 2026-06-05 |\n');
+    fs.appendFileSync(path.join(Bd, '.leerness', 'progress-tracker.md'), '| T-0002 | done | BONLYMARK | x | M-1 | 2026-06-05 |\n');
     const runIn = (cwd, a) => (cp.spawnSync(process.execPath, [CLI, ...a], { cwd, encoding: 'utf8', timeout: 20000 }).stdout || '');
     const flagOut = runIn(A, ['handoff', '--path', Bd]);  // A(cwd)에서 --path B
     const posOut = runIn(A, ['handoff', Bd]);             // positional B
@@ -4683,7 +4762,7 @@ total++;
 {
   let ok = false; let _liDbg = null;
   try {
-    const ni = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noinit-'));  // .harness 없는 비초기화 dir
+    const ni = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noinit-'));  // .leerness 없는 비초기화 dir
     // 1.36.85: selftest 가 소스문자열 검사 → **행위 검사**로 바뀌며 4초대 → 약 13초가 됐다(CLI spawn 비용).
     //   30s 는 4초 시절 기준이라 전체 e2e 부하에서 타임아웃으로 터졌다(격리 재현 3/3 통과 = 검사 자체는 정상).
     //   여유를 넉넉히 준다 — 이 블록이 재는 것은 "비초기화 dir 에서도 통과하는가"이지 속도가 아니다.
@@ -4723,7 +4802,7 @@ total++;
     const skf = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-skf-'));
     fs.writeFileSync(path.join(skf, 'SKILL.md'), '---\nname: ..\ndescription: t\n---\n# b');
     const ir = cp.spawnSync(process.execPath, [CLI, 'skill', 'install', skf, '--path', sd], { encoding: 'utf8', timeout: 20000 });
-    const travBlocked = /traversal|유효하지 않은 skill id|jail/.test((ir.stdout || '') + (ir.stderr || '')) && !fs.existsSync(path.join(sd, '.harness', 'SKILL.md'));
+    const travBlocked = /traversal|유효하지 않은 skill id|jail/.test((ir.stdout || '') + (ir.stderr || '')) && !fs.existsSync(path.join(sd, '.leerness', 'SKILL.md'));
     fs.rmSync(skf, { recursive: true, force: true });
     // UR-0060: 사용자 harness.js 파일도 스캔(false-neg 제거) + 신규 GitLab 패턴 탐지
     const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-scan-'));
@@ -4738,7 +4817,7 @@ total++;
   if (!ok) failed++;
 }
 
-// 1.9.351 회귀 (외부리뷰 UR-0064/0065): decision/lesson 제목 오염 차단 + 문서 정합(AGENTS.md .harness / --help 누락 명령)
+// 1.9.351 회귀 (외부리뷰 UR-0064/0065): decision/lesson 제목 오염 차단 + 문서 정합(AGENTS.md .leerness / --help 누락 명령)
 total++;
 {
   let ok = false;
@@ -4747,11 +4826,11 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     // UR-0064: decision add 제목에 경로형 positional 미흡수
     cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'PG 채택', '--reason', '관계형', '/abs/leak/path', '--path', d], { encoding: 'utf8', timeout: 20000 });
-    const dj = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'decisions.json'), 'utf8'));
+    const dj = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'decisions.json'), 'utf8'));
     const titleOk = dj.length === 1 && dj[0].title === 'PG 채택' && !dj[0].title.includes('/abs/leak');
-    // UR-0065 AGENTS.md: .harness 메인 워크스페이스 명시 + state substrate 별개
+    // UR-0065 AGENTS.md: .leerness 메인 워크스페이스 명시 + state substrate 별개
     const agents = fs.readFileSync(path.join(d, 'AGENTS.md'), 'utf8');
-    const agentsOk = agents.includes('기본 워크스페이스 `.harness/`') && agents.includes('메인 워크스페이스(.harness)와 별개');
+    const agentsOk = agents.includes('기본 워크스페이스 `.leerness/`') && agents.includes('메인 워크스페이스(.leerness)와 별개');
     fs.rmSync(d, { recursive: true, force: true });
     // UR-0065 --help: 이전 누락 명령 노출
     const hr = cp.spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8', timeout: 20000 });
@@ -4861,7 +4940,7 @@ total++;
     const Bd = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mgb-'));
     cp.spawnSync(process.execPath, [CLI, 'init', A, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     cp.spawnSync(process.execPath, [CLI, 'init', Bd, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    fs.writeFileSync(path.join(Bd, '.harness', 'HARNESS_VERSION'), '1.9.6\n');
+    fs.writeFileSync(path.join(Bd, '.leerness', 'HARNESS_VERSION'), '1.9.6\n');
     const ur = cp.spawnSync(process.execPath, [CLI, 'update', '--check', '--path', Bd], { cwd: A, encoding: 'utf8', timeout: 30000, env: { ...process.env, LEERNESS_OFFLINE: '1' } });
     const pathOk = /1\.9\.6/.test((ur.stdout || '') + (ur.stderr || ''));
     fs.rmSync(A, { recursive: true, force: true });
@@ -4884,14 +4963,14 @@ total++;
     let cleanOk = false;
     try { cleanOk = JSON.parse(c1.stdout).willChange === 0; } catch {}
     // 구버전 + decisions.md(canonical 없음) → version-drift + canonical-pending
-    fs.writeFileSync(path.join(d, '.harness', 'HARNESS_VERSION'), '1.9.6\n');
-    fs.writeFileSync(path.join(d, '.harness', 'decisions.md'), '# Decisions\n\n### 2026-06-01 — A\n- Decision: x\n');
-    fs.rmSync(path.join(d, '.harness', 'decisions.json'), { force: true });
+    fs.writeFileSync(path.join(d, '.leerness', 'HARNESS_VERSION'), '1.9.6\n');
+    fs.writeFileSync(path.join(d, '.leerness', 'decisions.md'), '# Decisions\n\n### 2026-06-01 — A\n- Decision: x\n');
+    fs.rmSync(path.join(d, '.leerness', 'decisions.json'), { force: true });
     const c2 = cp.spawnSync(process.execPath, [CLI, 'migrate', 'audit', '--path', d, '--json'], { encoding: 'utf8', timeout: 20000 });
     let driftOk = false;
     try { const j = JSON.parse(c2.stdout); const kinds = j.findings.map(f => f.kind); driftOk = j.projectVersion === '1.9.6' && j.willChange >= 2 && kinds.includes('version-drift') && kinds.includes('canonical-pending'); } catch {}
     // dry-run: decisions.json 미생성(비파괴)
-    const nonDestructive = !fs.existsSync(path.join(d, '.harness', 'decisions.json'));
+    const nonDestructive = !fs.existsSync(path.join(d, '.leerness', 'decisions.json'));
     fs.rmSync(d, { recursive: true, force: true });
     ok = cleanOk && driftOk && nonDestructive;
   } catch {}
@@ -4906,14 +4985,14 @@ total++;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-app-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    fs.writeFileSync(path.join(d, '.harness', 'decisions.md'), '# Decisions\n\n### 2026-06-01 — A\n- Decision: x\n');
-    fs.rmSync(path.join(d, '.harness', 'decisions.json'), { force: true });
+    fs.writeFileSync(path.join(d, '.leerness', 'decisions.md'), '# Decisions\n\n### 2026-06-01 — A\n- Decision: x\n');
+    fs.rmSync(path.join(d, '.leerness', 'decisions.json'), { force: true });
     // dry-run: json 미생성(비파괴)
     cp.spawnSync(process.execPath, [CLI, 'migrate', 'apply', '--path', d], { encoding: 'utf8', timeout: 20000 });
-    const dryNoWrite = !fs.existsSync(path.join(d, '.harness', 'decisions.json'));
+    const dryNoWrite = !fs.existsSync(path.join(d, '.leerness', 'decisions.json'));
     // --yes: canonical json 생성
     cp.spawnSync(process.execPath, [CLI, 'migrate', 'apply', '--path', d, '--yes'], { encoding: 'utf8', timeout: 20000 });
-    const appliedOk = fs.existsSync(path.join(d, '.harness', 'decisions.json'));
+    const appliedOk = fs.existsSync(path.join(d, '.leerness', 'decisions.json'));
     // 멱등: 재실행 시 applied 0
     const c3 = cp.spawnSync(process.execPath, [CLI, 'migrate', 'apply', '--path', d, '--json'], { encoding: 'utf8', timeout: 20000 });
     let idem = false;
@@ -4937,12 +5016,12 @@ total++;
     let cleanOk = false, tmpOk = false;
     try { const j = JSON.parse(c1.stdout); cleanOk = j.willChange === 0 && j.missingFiles.length === 0; tmpOk = j.tempInstallOk === true; } catch {}
     // 코어 관리 파일 삭제 → missing 감지
-    fs.rmSync(path.join(d, '.harness', 'reuse-map.md'), { force: true });
+    fs.rmSync(path.join(d, '.leerness', 'reuse-map.md'), { force: true });
     const c2 = cp.spawnSync(process.execPath, [CLI, 'migrate', 'plan', '--path', d, '--json'], { encoding: 'utf8', timeout: 90000 });
     let missOk = false;
-    try { const j = JSON.parse(c2.stdout); missOk = j.missingFiles.includes('.harness/reuse-map.md') && j.willChange >= 1; } catch {}
+    try { const j = JSON.parse(c2.stdout); missOk = j.missingFiles.includes('.leerness/reuse-map.md') && j.willChange >= 1; } catch {}
     // 읽기전용: 플랜은 프로젝트를 수정하지 않음 (reuse-map.md 재생성 안 됨)
-    const readOnly = !fs.existsSync(path.join(d, '.harness', 'reuse-map.md'));
+    const readOnly = !fs.existsSync(path.join(d, '.leerness', 'reuse-map.md'));
     fs.rmSync(d, { recursive: true, force: true });
     ok = cleanOk && tmpOk && missOk && readOnly;
   } catch {}
@@ -4990,7 +5069,7 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', a, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     cp.spawnSync(process.execPath, [CLI, 'init', b, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     // A 의 session-handoff 삭제 → cwd=B 에서 session close --path A → A 가 작동하면 A 에 재생성(아니면 cwd B 만 갱신)
-    const aHandoff = path.join(a, '.harness', 'session-handoff.md');
+    const aHandoff = path.join(a, '.leerness', 'session-handoff.md');
     fs.rmSync(aHandoff, { force: true });
     cp.spawnSync(process.execPath, [CLI, 'session', 'close', '--path', a], { cwd: b, encoding: 'utf8', timeout: 30000 });
     const aRecreated = fs.existsSync(aHandoff);
@@ -5032,7 +5111,7 @@ total++;
       fs.appendFileSync(path.join(d, 'AGENTS.md'), `\nRETENTION PROBE ${i}\n`);
       cp.spawnSync(process.execPath, [CLI, 'migrate', d, '--keep', '2'], { encoding: 'utf8', timeout: 30000 });
     }
-    const adir = path.join(d, '.harness', 'archive');
+    const adir = path.join(d, '.leerness', 'archive');
     const cnt = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length;
     fs.rmSync(d, { recursive: true, force: true });
     ok = cnt === 2;  // init + migrate x3 = 4 스냅샷 → --keep 2 로 prune → 2
@@ -5313,8 +5392,8 @@ total++;
 }
 
 // 1.36.122 (자기 저장소 도그푸딩): 보존 블록의 **백업 포인터**가 재실행에 덮여 사라졌다.
-//   `adapter` 처럼 새 백업을 만들지 않는 실행이 일반 경로(`.harness/archive`)를 채워 넘겨서,
-//   이전 마이그레이션이 적어 둔 구체 경로(`.harness/archive/leerness-1.36.100-…`)를 덮었다.
+//   `adapter` 처럼 새 백업을 만들지 않는 실행이 일반 경로(`.leerness/archive`)를 채워 넘겨서,
+//   이전 마이그레이션이 적어 둔 구체 경로(`.leerness/archive/leerness-1.36.100-…`)를 덮었다.
 //   그 문장은 "삭제하지 않았다" 는 약속의 근거이므로 격하는 곧 정보 손실이다. 세 방향을 모두 잰다.
 total++;
 {
@@ -5325,12 +5404,12 @@ total++;
     const prev = '# T\nmanaged\nCUSTOM-LINE\n';
     const ptr = (s) => { const m = /(?:전체 원본 백업|Full original backup):\s*`([^`]+)`/.exec(s); return m && m[1]; };
     // ① 이전 포인터가 없고 새 백업도 없으면 기본값
-    if (ptr(PUx._managedMerge('CLAUDE.md', next, prev, null, null)) !== '.harness/archive') bad.push('기본값아님');
+    if (ptr(PUx._managedMerge('CLAUDE.md', next, prev, null, null)) !== '.leerness/archive') bad.push('기본값아님');
     // ② 이전 포인터가 **구체 경로**면 새 백업이 없을 때 그대로 둔다(격하 금지)
-    const prev2 = prev + '\n> 전체 원본 백업: `.harness/archive/leerness-1.2.3-STAMP`\n';
-    if (ptr(PUx._managedMerge('CLAUDE.md', next, prev2, null, null)) !== '.harness/archive/leerness-1.2.3-STAMP') bad.push('구체경로가_격하됨');
+    const prev2 = prev + '\n> 전체 원본 백업: `.leerness/archive/leerness-1.2.3-STAMP`\n';
+    if (ptr(PUx._managedMerge('CLAUDE.md', next, prev2, null, null)) !== '.leerness/archive/leerness-1.2.3-STAMP') bad.push('구체경로가_격하됨');
     // ③ 새 백업이 있으면 그쪽으로 갱신(보존이 과해 최신 백업을 못 가리키면 안 된다)
-    if (ptr(PUx._managedMerge('CLAUDE.md', next, prev2, '.harness/archive/NEW', null)) !== '.harness/archive/NEW') bad.push('새백업으로_갱신안됨');
+    if (ptr(PUx._managedMerge('CLAUDE.md', next, prev2, '.leerness/archive/NEW', null)) !== '.leerness/archive/NEW') bad.push('새백업으로_갱신안됨');
     // ④ 실제 CLI 경로 — 새 백업 없이 adapter 를 두 번 돌려도 포인터가 유지돼야 한다
     const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ptr122-'));
     try {
@@ -5341,10 +5420,10 @@ total++;
       const cf = path.join(d, 'CLAUDE.md');
       // 사용자 커스텀 + 구체 백업 포인터를 가진 보존 블록을 만든다
       fs.writeFileSync(cf, fs.readFileSync(cf, 'utf8')
-        + '\n<!-- leerness:migration-preserved -->\n## Preserved previous content\n\n> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-9.9.9-STAMP`\n\nUSER-KEEP-LINE\n');
+        + '\n<!-- leerness:migration-preserved -->\n## Preserved previous content\n\n> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.leerness/archive/leerness-9.9.9-STAMP`\n\nUSER-KEEP-LINE\n');
       // ⚠ adapter 가 **실제로 무언가 했는지**부터 확인한다 — no-op/실패여도 미리 심은 포인터와 사용자 줄은
       //   그대로 남아 이 단언이 공허하게 통과한다(검수 P2). 아카이브도 실재해야 유지가 정당하다.
-      fs.mkdirSync(path.join(d, '.harness', 'archive', 'leerness-9.9.9-STAMP'), { recursive: true });
+      fs.mkdirSync(path.join(d, '.leerness', 'archive', 'leerness-9.9.9-STAMP'), { recursive: true });
       fs.rmSync(path.join(d, '.mcp.json'), { force: true });
       const rAd = cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENVp });
       if (rAd.status !== 0) bad.push(`adapter실패(exit=${rAd.status})`);
@@ -5359,11 +5438,11 @@ total++;
       cp.spawnSync(process.execPath, [CLI, 'init', dgone, '--yes'], { cwd: dgone, encoding: 'utf8', timeout: 300000, env: ENVp });
       const gf = path.join(dgone, 'CLAUDE.md');
       fs.writeFileSync(gf, fs.readFileSync(gf, 'utf8')
-        + '\n<!-- leerness:migration-preserved -->\n## Preserved previous content\n\n> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/GONE-9.9.9`\n\nUSER-KEEP-LINE\n');
+        + '\n<!-- leerness:migration-preserved -->\n## Preserved previous content\n\n> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.leerness/archive/GONE-9.9.9`\n\nUSER-KEEP-LINE\n');
       cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', dgone], { cwd: dgone, encoding: 'utf8', timeout: 300000, env: ENVp });
       const gAfter = fs.readFileSync(gf, 'utf8');
       if (/GONE-9\.9\.9/.test(gAfter)) bad.push('없어진_아카이브를_계속_가리킴');
-      if (!/전체 원본 백업: `\.harness\/archive`/.test(gAfter)) bad.push('없어진_아카이브인데_일반경로로_안내림');
+      if (!/전체 원본 백업: `\.leerness\/archive`/.test(gAfter)) bad.push('없어진_아카이브인데_일반경로로_안내림');
       if (!gAfter.includes('USER-KEEP-LINE')) bad.push('격하시_사용자라인_유실');
     } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
     ok = bad.length === 0;
@@ -5380,12 +5459,12 @@ total++;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-min-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko', '--minimal'], { encoding: 'utf8', timeout: 30000 });
-    const skipAbsent = !fs.existsSync(path.join(d, '.harness', 'architecture.md'));  // MINIMAL_SKIP_KEYS
-    const corePresent = fs.existsSync(path.join(d, '.harness', 'plan.md'));  // core 유지
+    const skipAbsent = !fs.existsSync(path.join(d, '.leerness', 'architecture.md'));  // MINIMAL_SKIP_KEYS
+    const corePresent = fs.existsSync(path.join(d, '.leerness', 'plan.md'));  // core 유지
     fs.rmSync(d, { recursive: true, force: true });
     const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-rec-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d2, '--yes', '--language', 'ko', '--skills', 'recommended'], { encoding: 'utf8', timeout: 30000 });
-    const recInstalled = fs.existsSync(path.join(d2, '.harness', 'skills', 'feature-implementation'));  // recommended → office 포함
+    const recInstalled = fs.existsSync(path.join(d2, '.leerness', 'skills', 'feature-implementation'));  // recommended → office 포함
     fs.rmSync(d2, { recursive: true, force: true });
     ok = skipAbsent && corePresent && recInstalled;
   } catch {}
@@ -5420,8 +5499,8 @@ total++;
     const lj = cp.spawnSync(process.execPath, [CLI, 'team', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
     let addOk = false;
     try { const j = JSON.parse(lj.stdout); addOk = j.count === 1 && j.teams[0].id === 'rev' && j.teams[0].personas.length === 2 && j.teams[0].schedule === 'every-session'; } catch {}
-    const jsonExists = fs.existsSync(path.join(d, '.harness', 'teams.json'));
-    const mdExists = fs.existsSync(path.join(d, '.harness', 'teams.md'));
+    const jsonExists = fs.existsSync(path.join(d, '.leerness', 'teams.json'));
+    const mdExists = fs.existsSync(path.join(d, '.leerness', 'teams.md'));
     cp.spawnSync(process.execPath, [CLI, 'team', 'remove', 'rev', '--path', d], { encoding: 'utf8', timeout: 15000 });
     const lj2 = cp.spawnSync(process.execPath, [CLI, 'team', 'list', '--path', d, '--json'], { encoding: 'utf8', timeout: 15000 });
     let removeOk = false;
@@ -5445,7 +5524,7 @@ total++;
     let planOk = false;
     try { const j = JSON.parse(pj.stdout); planOk = j.dryRun === true && j.task === '점검' && j.steps.length === 2 && j.steps[0].suggestedCommand.includes('agents dispatch') && j.steps[0].suggestedCommand.includes('--to claude') && j.steps[0].dispatchPrompt.includes('security'); } catch {}
     // dry-run: preview 가 어떤 파일도 변경하지 않음 (teams.json mtime 불변)
-    const tj = path.join(d, '.harness', 'teams.json');
+    const tj = path.join(d, '.leerness', 'teams.json');
     const before = fs.statSync(tj).mtimeMs;
     cp.spawnSync(process.execPath, [CLI, 'team', 'preview', 'rev', '--path', d], { encoding: 'utf8', timeout: 15000 });
     const after = fs.statSync(tj).mtimeMs;
@@ -5524,13 +5603,12 @@ total++;
   let ok = false;
   try {
     const pu = require(path.resolve(__dirname, '..', 'lib', 'pure-utils'));
-    const g = pu._renderWorkspaceReferenceGuide('.harness', '1.2.3', '2026-01-01T00:00:00.000Z');
-    ok = typeof g === 'string' && g.includes('.harness/progress-tracker.md') && g.includes('by leerness 1.2.3')
+    const g = pu._renderWorkspaceReferenceGuide('.leerness', '1.2.3', '2026-01-01T00:00:00.000Z', '.harness'); // workspace-dir-legacy-fixture
+    ok = typeof g === 'string' && g.includes('.leerness/progress-tracker.md') && g.includes('by leerness 1.2.3')
       && g.includes('## 📁 디렉토리 구조 (핵심)') && g.includes('## 🧭 자주 묻는 위치') && g.includes('plan.md')
-      // 1.36.126 (T-0107): 여기도 제목 리터럴('## 🔄 마이그레이션 안내')을 붙잡고 있었다 — selftest 쪽만 고치고
-      //   이 **복제본**을 놓쳐 게이트가 깨졌다(같은 단언이 두 표면에 있으면 둘 다 고쳐야 한다).
-      //   제목이 아니라 계약을 건다: 가이드는 `.leerness` 를 다루되 그리로 **가라고 지시하지 않는다**.
-      && /\.leerness/.test(g) && !/우선 사용/.test(g) && !/로 가야 함/.test(g) && /읽지 마십시오/.test(g);
+      && g.includes('canonical workspace') && g.includes('.leerness-backup/')
+      && g.includes('workspace-dir-conflict') && g.includes('.leerness/cache/agent-runs/')
+      && g.includes('.harness/'); // workspace-dir-legacy-fixture
   } catch {}
   console.log(ok ? '✓ B(1.9.377) UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 (빌더 동작 + 핵심 섹션)' : '✗ workspace guide 빌더 실패');
   if (!ok) failed++;
@@ -5803,7 +5881,7 @@ total++;
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-auditchk-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     const kinds = (root) => { const r = cp.spawnSync(process.execPath, [CLI, 'audit', root, '--json', '--no-npm-audit'], { encoding: 'utf8', timeout: 20000 }); try { return (JSON.parse(r.stdout).findings || []).map(f => f.kind); } catch { return null; } };
-    const readme = path.join(d, 'README.md'), pkg = path.join(d, 'package.json'), csp = path.join(d, '.harness', 'current-state.md');
+    const readme = path.join(d, 'README.md'), pkg = path.join(d, 'package.json'), csp = path.join(d, '.leerness', 'current-state.md');
     // ① README 배지(1.0.0) ≠ package.json(2.0.0) → readme_version_mismatch
     fs.writeFileSync(readme, '# T\n![v](https://img.shields.io/badge/version-1.0.0-green)\n');
     fs.writeFileSync(pkg, '{"name":"t","version":"2.0.0"}\n');
@@ -5832,7 +5910,7 @@ total++;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-taskdrop-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    const ptPath = path.join(d, '.harness', 'progress-tracker.md');
+    const ptPath = path.join(d, '.leerness', 'progress-tracker.md');
     const before = fs.readFileSync(ptPath, 'utf8');
     const rNo = cp.spawnSync(process.execPath, [CLI, 'task', 'drop', 'T-9999', '--path', d], { encoding: 'utf8', timeout: 15000 });
     const after = fs.readFileSync(ptPath, 'utf8');
@@ -5960,7 +6038,7 @@ total++;
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-mdinj-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     cp.spawnSync(process.execPath, [CLI, 'decision', 'add', 'realdec\n### 2099-01-01 — FAKE\n- Decision: forged', '--reason', 'r', '--path', d], { encoding: 'utf8', timeout: 15000 });
-    const md = fs.readFileSync(path.join(d, '.harness', 'decisions.md'), 'utf8');
+    const md = fs.readFileSync(path.join(d, '.leerness', 'decisions.md'), 'utf8');
     const noFakeBlock = !/^### 2099-01-01 — FAKE/m.test(md);  // 개행 공백화 → 별도 ### 헤더 라인 안 생김(인라인 텍스트는 무관)
     const hasReal = md.includes('realdec');  // 실 결정은 기록됨
     // MD-fallback 재파싱: 위조 결정 미증식(실 결정 1개만, template 제외)
@@ -6056,12 +6134,12 @@ total++;
     // decision: 2개 순차 → 2 보존
     run(['decision', 'add', 'lock dec A', '--reason', 'r']);
     run(['decision', 'add', 'lock dec B', '--reason', 'r']);
-    const decs = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'decisions.json'), 'utf8'));
+    const decs = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'decisions.json'), 'utf8'));
     const decOk = decs.length === 2;
     // lesson: 2개 순차 → 2 보존
     run(['lesson', 'save', 'lock lesson A']);
     run(['lesson', 'save', 'lock lesson B']);
-    const les = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'lessons.json'), 'utf8'));
+    const les = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'lessons.json'), 'utf8'));
     const lesOk = les.length === 2;
     fs.rmSync(d, { recursive: true, force: true });
     ok = ruleOk && decOk && lesOk;
@@ -6209,7 +6287,7 @@ total++;
 }
 
 // 1.36.2 회귀 (클린룸 리뷰, UR-0184): feature add/show/link/impact 도 trailing positional path 인식 —
-//   기존엔 add 가 모든 non-flag positional 을 NAME 으로 join → 경로가 이름에 흡수 + 비-프로젝트 cwd 에 stray .harness scaffold(조용한 오독).
+//   기존엔 add 가 모든 non-flag positional 을 NAME 으로 join → 경로가 이름에 흡수 + 비-프로젝트 cwd 에 stray .leerness scaffold(조용한 오독).
 //   fix: --path > path-like positional > cwd; add 의 NAME 은 _parseAddTitle 로 절단; 미초기화 dir 은 _requireInit 게이트(scaffold 대신 에러).
 total++;
 {
@@ -6219,15 +6297,15 @@ total++;
     const outsider = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-featpos-x-'));  // 비-프로젝트 cwd
     cp.spawnSync(process.execPath, [CLI, 'init', target, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     const at = (dir, a) => cp.spawnSync(process.execPath, [CLI, ...a], { encoding: 'utf8', timeout: 20000, cwd: dir });
-    const graphOf = (dir) => { try { return fs.readFileSync(path.join(dir, '.harness', 'feature-graph.md'), 'utf8'); } catch { return ''; } };
+    const graphOf = (dir) => { try { return fs.readFileSync(path.join(dir, '.leerness', 'feature-graph.md'), 'utf8'); } catch { return ''; } };
     // (a) 비-프로젝트 cwd 에서 positional path → 타깃 등록 + 이름 clean(경로 흡수 없음)
     at(outsider, ['feature', 'add', 'PosFeat', target]);
     const addedClean = /^## F-\d{4} PosFeat\s*$/m.test(graphOf(target));
-    // (b) 비-프로젝트 cwd 에 stray .harness scaffold 안 함
-    const noStray = !fs.existsSync(path.join(outsider, '.harness'));
+    // (b) 비-프로젝트 cwd 에 stray .leerness scaffold 안 함
+    const noStray = !fs.existsSync(path.join(outsider, '.leerness'));
     // (c) 경로 미지정 + 미초기화 dir → init 게이트 exit 1 + scaffold 없음
     const orphan = at(outsider, ['feature', 'add', 'Orphan']);
-    const gated = orphan.status === 1 && !fs.existsSync(path.join(outsider, '.harness'));
+    const gated = orphan.status === 1 && !fs.existsSync(path.join(outsider, '.leerness'));
     // (d) show/link/impact 도 positional path 존중 (cwd 아님)
     at(outsider, ['feature', 'add', 'PosFeat2', target]);
     const showP = at(outsider, ['feature', 'show', 'F-0001', target]);
@@ -6237,7 +6315,7 @@ total++;
     const impactOk = impactP.status === 0 && /F-0002/.test(impactP.stdout || '');
     // (e) --path 우선 보존(회귀 없음) + --files 의 path-like 값이 root 로 오인 안 됨
     at(outsider, ['feature', 'add', 'ViaFlag', '--files', './src/x.js', '--path', target]);
-    const flagOk = /^## F-\d{4} ViaFlag\s*$/m.test(graphOf(target)) && !fs.existsSync(path.join(outsider, '.harness'));
+    const flagOk = /^## F-\d{4} ViaFlag\s*$/m.test(graphOf(target)) && !fs.existsSync(path.join(outsider, '.leerness'));
     fs.rmSync(target, { recursive: true, force: true });
     fs.rmSync(outsider, { recursive: true, force: true });
     ok = addedClean && noStray && gated && showOk && impactOk && flagOk;
@@ -6500,7 +6578,7 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', sub, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     // (1) parent detect --json from sub → parent detected, applied:false, assetCount≥1
     const pj = cp.spawnSync(process.execPath, [CLI, 'parent', 'detect', '--path', sub, '--json'], { encoding: 'utf8', timeout: 15000 });
-    let detectOk = false; try { const j = JSON.parse(pj.stdout); detectOk = j.applied === false && j.parent && j.parent.workspaceDir === '.harness' && j.parent.assetCount >= 1; } catch {}
+    let detectOk = false; try { const j = JSON.parse(pj.stdout); detectOk = j.applied === false && j.parent && j.parent.workspaceDir === '.leerness' && j.parent.assetCount >= 1; } catch {}
     // (2) parent detect from standalone → null
     const alone = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-alone-'));
     cp.spawnSync(process.execPath, [CLI, 'init', alone, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
@@ -6531,10 +6609,10 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', par, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     const sub = path.join(par, 'sub');
     cp.spawnSync(process.execPath, [CLI, 'init', sub, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    const childDs = path.join(sub, '.harness', 'design-system.md');
+    const childDs = path.join(sub, '.leerness', 'design-system.md');
     const childDsBefore = fs.readFileSync(childDs, 'utf8');
-    const inherited = path.join(sub, '.harness', 'inherited-from-parent.md');
-    const link = path.join(sub, '.harness', 'PARENT_LINK.json');
+    const inherited = path.join(sub, '.leerness', 'inherited-from-parent.md');
+    const link = path.join(sub, '.leerness', 'PARENT_LINK.json');
     // (1) DRY-RUN: 쓰기 0
     cp.spawnSync(process.execPath, [CLI, 'parent', 'adopt', '--path', sub], { encoding: 'utf8', timeout: 15000 });
     const dryNoWrite = !fs.existsSync(inherited) && !fs.existsSync(link);
@@ -6686,16 +6764,16 @@ total++;
     // C2 human path preserved: non-json check → exit1 (no JSON)
     const human = run(['constraints', 'check', '--path', child]); const humanOk = human.status === 1 && !isJson(human.stdout);
     // A1: parent adopt --apply --json on write error → non-empty structured JSON {applied:false, error}
-    const inh = path.join(child, '.harness', 'inherited-from-parent.md');
+    const inh = path.join(child, '.leerness', 'inherited-from-parent.md');
     try { fs.mkdirSync(inh); } catch {}
     const a1r = run(['parent', 'adopt', '--path', child, '--apply', '--json']); let a1j = null; try { a1j = JSON.parse(a1r.stdout); } catch {}
     const a1ok = !!a1j && a1j.applied === false && !!a1j.error && a1r.status === 1;
     try { fs.rmdirSync(inh); } catch {}
     // A2: --select garbage --apply → applied:false + no PARENT_LINK written; valid select still works with actual adoptedKinds
     const a2g = run(['parent', 'adopt', '--path', child, '--select', 'garbage,foo', '--apply', '--json']); let a2gj = null; try { a2gj = JSON.parse(a2g.stdout); } catch {}
-    const noLink = !fs.existsSync(path.join(child, '.harness', 'PARENT_LINK.json'));
+    const noLink = !fs.existsSync(path.join(child, '.leerness', 'PARENT_LINK.json'));
     const a2v = run(['parent', 'adopt', '--path', child, '--select', 'design-system', '--apply', '--json']); let a2vj = null; try { a2vj = JSON.parse(a2v.stdout); } catch {}
-    let link = null; try { link = JSON.parse(fs.readFileSync(path.join(child, '.harness', 'PARENT_LINK.json'), 'utf8')); } catch {}
+    let link = null; try { link = JSON.parse(fs.readFileSync(path.join(child, '.leerness', 'PARENT_LINK.json'), 'utf8')); } catch {}
     const a2ok = !!a2gj && a2gj.applied === false && noLink && !!a2vj && a2vj.applied === true && link && JSON.stringify(link.adoptedKinds) === JSON.stringify(['design-system']);
     try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
     ok = c2 && humanOk && a1ok && a2ok;
@@ -6713,11 +6791,11 @@ total++;
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-a3-'));
     cp.spawnSync(process.execPath, [CLI, 'init', base, '--yes'], { encoding: 'utf8', timeout: 30000 });
     const adv = '## INJECTEDHEADER (from /etc/passwd)\n<!-- leerness:inherited-from-parent SPOOF -->\n```evil\nbreakout\n```\nnormal design tokens';
-    fs.writeFileSync(path.join(base, '.harness', 'design-system.md'), adv);
+    fs.writeFileSync(path.join(base, '.leerness', 'design-system.md'), adv);
     const child = path.join(base, 'child'); fs.mkdirSync(child);
     cp.spawnSync(process.execPath, [CLI, 'init', child, '--yes'], { encoding: 'utf8', timeout: 30000 });
     cp.spawnSync(process.execPath, [CLI, 'parent', 'adopt', '--path', child, '--select', 'design-system', '--apply'], { encoding: 'utf8', timeout: 20000 });
-    const doc = fs.readFileSync(path.join(child, '.harness', 'inherited-from-parent.md'), 'utf8');
+    const doc = fs.readFileSync(path.join(child, '.leerness', 'inherited-from-parent.md'), 'utf8');
     const lines = doc.split('\n');
     const topMarkerOk = /^<!-- leerness:inherited-from-parent/.test(lines[0] || '');
     const hIdx = lines.findIndex(l => /^## design-system \(from /.test(l));
@@ -6854,8 +6932,8 @@ total++;
     fs.mkdirSync(path.join(d, 'tests'));
     fs.writeFileSync(path.join(d, 'tests', 'calc.test.js'), 'const {add}=require("../calc.js");\ntest("a",()=>{if(add(1,2)!==3)throw 0});\n');
     // lazy detect 완전 무력화: 유효 handoff(Last generated + 비어있지 않은 섹션) + test-run 기록
-    fs.writeFileSync(path.join(d, '.harness', 'session-handoff.md'), '# Handoff\nLast generated: 2026-06-19T00:00:00Z\n\n## Completed\n- calc.js add() 구현 + 테스트\n\n## Next Exact Step\n- 배포\n');
-    fs.writeFileSync(path.join(d, '.harness', 'review-evidence.md'), '# Evidence\n## Test run\n- npm test: 1/1 passing\n');
+    fs.writeFileSync(path.join(d, '.leerness', 'session-handoff.md'), '# Handoff\nLast generated: 2026-06-19T00:00:00Z\n\n## Completed\n- calc.js add() 구현 + 테스트\n\n## Next Exact Step\n- 배포\n');
+    fs.writeFileSync(path.join(d, '.leerness', 'review-evidence.md'), '# Evidence\n## Test run\n- npm test: 1/1 passing\n');
     // 콘텐츠-레벨 거짓: 실파일/실테스트 존재하나 evidence 가 테스트 50개 통과(실제 1개) 부풀림
     const id = (R(['task', 'add', 'calc 구현']).stdout.match(/T-\d{4,}/) || [])[0];
     R(['task', 'update', id, '--status', 'done', '--evidence', 'calc.js + tests/calc.test.js 테스트 50개 통과']);
@@ -7104,9 +7182,9 @@ total++;
     const cwd2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cwd-'));
     cp.spawnSync(process.execPath, [CLI, 'init', ws, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
     cp.spawnSync(process.execPath, [CLI, 'task', 'add', '포지셔널e2e', ws, '--no-review'], { encoding: 'utf8', timeout: 15000, cwd: cwd2 });
-    const tracker = path.join(ws, '.harness', 'progress-tracker.md');
+    const tracker = path.join(ws, '.leerness', 'progress-tracker.md');
     const savedToWs = fs.existsSync(tracker) && fs.readFileSync(tracker, 'utf8').includes('포지셔널e2e');
-    const cwdClean = !fs.existsSync(path.join(cwd2, '.harness'));
+    const cwdClean = !fs.existsSync(path.join(cwd2, '.leerness'));
     fs.rmSync(ws, { recursive: true, force: true });
     fs.rmSync(cwd2, { recursive: true, force: true });
     ok = savedToWs && cwdClean;
@@ -7169,13 +7247,13 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'decision', 'add', '결정E2E', ws, '--reason', 'r'], { encoding: 'utf8', timeout: 15000, cwd: cwd3 });
     cp.spawnSync(process.execPath, [CLI, 'lesson', 'save', '교훈E2E', ws], { encoding: 'utf8', timeout: 15000, cwd: cwd3 });
     cp.spawnSync(process.execPath, [CLI, 'rule', 'add', '룰E2E', '--trigger', 'every-update', ws], { encoding: 'utf8', timeout: 15000, cwd: cwd3 });
-    const hdir = path.join(ws, '.harness');
+    const hdir = path.join(ws, '.leerness');
     let savedAll = false;
     try {
       const blob = fs.readdirSync(hdir).map(f => { try { return fs.readFileSync(path.join(hdir, f), 'utf8'); } catch { return ''; } }).join('\n');
       savedAll = blob.includes('결정E2E') && blob.includes('교훈E2E') && blob.includes('룰E2E');
     } catch {}
-    const cwdClean = !fs.existsSync(path.join(cwd3, '.harness'));
+    const cwdClean = !fs.existsSync(path.join(cwd3, '.leerness'));
     fs.rmSync(ws, { recursive: true, force: true });
     fs.rmSync(cwd3, { recursive: true, force: true });
     ok = savedAll && cwdClean;
@@ -7246,11 +7324,11 @@ total++;
     const hoKoOk = /보안 요약/.test(hoKo);
     fs.rmSync(dh, { recursive: true, force: true });
     // ⑨ (1.29.2) handoff env-detect 블록: 환경 스냅샷 변동 시 → en 영어(블록 라인 한글 0) + ko 기본 한글.
-    //   블록은 첫 핸드오프 후 .harness/environment.json 변동이 있어야 발동 → 스냅샷의 node.version 을 인위 변경해 강제.
+    //   블록은 첫 핸드오프 후 .leerness/environment.json 변동이 있어야 발동 → 스냅샷의 node.version 을 인위 변경해 강제.
     //   (1.29.1 과 같은 블록-스코프 t 함정 가드 — env-detect 도 headline t() 스코프 밖이라 로컬 t() 필요.)
     const de = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-env-'));
     cp.spawnSync(process.execPath, [CLI, 'init', de, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    const snap = path.join(de, '.harness', 'environment.json');
+    const snap = path.join(de, '.leerness', 'environment.json');
     const forceEnvChange = () => { try { const s = JSON.parse(fs.readFileSync(snap, 'utf8')); if (s.node) s.node.version = 'v0.0.0-test'; fs.writeFileSync(snap, JSON.stringify(s, null, 2) + '\n'); } catch {} };
     cp.spawnSync(process.execPath, [CLI, 'handoff', de, '--writeback'], { encoding: 'utf8', timeout: 25000 }); // 첫 legacy projection 캡처(silent)
     forceEnvChange();
@@ -7262,11 +7340,11 @@ total++;
     const edKoOk = /실행 환경/.test(edKo);
     fs.rmSync(de, { recursive: true, force: true });
     // ⑩ (1.29.3) handoff shell-guard 블록: 셸 실패 기록 + 환경 스냅샷 변동 → en 영어(블록 라인 한글 0) + ko 기본 한글.
-    //   블록은 hasFailures(.harness/shell-failures.json) 또는 hasDrift(스냅샷 변동) 시 발동. 둘 다 인위 구성.
+    //   블록은 hasFailures(.leerness/shell-failures.json) 또는 hasDrift(스냅샷 변동) 시 발동. 둘 다 인위 구성.
     const ds = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-sh-'));
     cp.spawnSync(process.execPath, [CLI, 'init', ds, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    const ssnap = path.join(ds, '.harness', 'environment.json');
-    const sfail = path.join(ds, '.harness', 'shell-failures.json');
+    const ssnap = path.join(ds, '.leerness', 'environment.json');
+    const sfail = path.join(ds, '.leerness', 'shell-failures.json');
     const seedSh = () => {
       try { const s = JSON.parse(fs.readFileSync(ssnap, 'utf8')); if (s.node) s.node.version = 'v0.0.0-test'; fs.writeFileSync(ssnap, JSON.stringify(s, null, 2) + '\n'); } catch {}
       fs.writeFileSync(sfail, JSON.stringify({ failures: [{ cmd: 'ls && pwd', exitCode: 1, shell: 'powershell-5.1', issues: ['ps5-chain'] }] }, null, 2) + '\n');
@@ -7425,7 +7503,7 @@ total++;
   if (!ok) failed++;
 }
 
-// 1.36.1 회귀 (클린룸 리뷰 FN): 상태파일 JSON 무결성 — 손상 .harness/*.json 을 audit(warning)/health(degraded)/check(exit 1) 가 표면화.
+// 1.36.1 회귀 (클린룸 리뷰 FN): 상태파일 JSON 무결성 — 손상 .leerness/*.json 을 audit(warning)/health(degraded)/check(exit 1) 가 표면화.
 //   배경: 그레이스풀 폴백이 깨진 상태 JSON 을 "healthy"/exit 0 으로 감추던 false-negative(health/doctor/check 전부). 클린(유효 JSON)엔 무오탐.
 total++;
 {
@@ -7443,11 +7521,11 @@ total++;
     const hc0 = healthJson();
     const cleanHealth = !!(hc0 && hc0.checks && hc0.checks.stateIntegrity && hc0.checks.stateIntegrity.ok === true);
     // 손상 주입(리뷰 재현): manifest.json → 깨진 JSON
-    fs.writeFileSync(path.join(d, '.harness', 'manifest.json'), '{ this is : not valid json ]]]');
+    fs.writeFileSync(path.join(d, '.leerness', 'manifest.json'), '{ this is : not valid json ]]]');
     const badAudit = hasK(auditJson(), 'corrupted_state_json');
     const badCheck = checkExit() === 1;
     const hc1 = healthJson();
-    const badHealth = !!(hc1 && hc1.healthy === false && hc1.checks.stateIntegrity && hc1.checks.stateIntegrity.corruptedCount === 1 && (hc1.checks.stateIntegrity.corrupted || []).some(c => c.file === '.harness/manifest.json'));
+    const badHealth = !!(hc1 && hc1.healthy === false && hc1.checks.stateIntegrity && hc1.checks.stateIntegrity.corruptedCount === 1 && (hc1.checks.stateIntegrity.corrupted || []).some(c => c.file === '.leerness/manifest.json'));
     // audit --strict: warning 승격 → exit 1 (게이트 친화)
     const strictExit = cp.spawnSync(process.execPath, [CLI, 'audit', d, '--strict', '--no-npm-audit'], { encoding: 'utf8', timeout: 40000, env: { ...process.env, LEERNESS_OFFLINE: '1' } }).status;
     const strictBlocks = strictExit === 1;
@@ -7531,12 +7609,12 @@ total++;
     const de = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-en5-')); _dirs.push(de);
     const r1 = cp.spawnSync(process.execPath, [CLI, 'init', de, '--yes', '--language', 'en', '--no-env'], { encoding: 'utf8', timeout: 30000 });
     // 1.36.61 (3회차): 정책·시드 문서군까지 확대 — 대표 10종 무한글
-    const five = ['AGENTS.md', 'CLAUDE.md', '.harness/session-workflow.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md',
-      '.harness/guideline.md', '.harness/guardrails.md', '.harness/anti-lazy-work-policy.md', '.harness/plan.md', '.harness/secret-policy.md'];
+    const five = ['AGENTS.md', 'CLAUDE.md', '.leerness/session-workflow.md', '.cursor/rules/leerness.mdc', '.github/copilot-instructions.md',
+      '.leerness/guideline.md', '.leerness/guardrails.md', '.leerness/anti-lazy-work-policy.md', '.leerness/plan.md', '.leerness/secret-policy.md'];
     const enOk = r1.status === 0 && five.every(p => { const t = fs.readFileSync(path.join(de, p), 'utf8'); return t.length > 100 && !H.test(t); });
     // en 지시 본문의 핵심 계약 존재(번역이 빈 껍데기가 아님) — 검수 #2 반영: lens 질문/체크리스트/안티패턴/자동화 지시까지
     const ag = fs.readFileSync(path.join(de, 'AGENTS.md'), 'utf8');
-    const wf = fs.readFileSync(path.join(de, '.harness/session-workflow.md'), 'utf8');
+    const wf = fs.readFileSync(path.join(de, '.leerness/session-workflow.md'), 'utf8');
     const substOk = ag.includes('Ask-on-ambiguity duty') && ag.includes('Preview-approval duty') && ag.includes('senior developer') && ag.includes('leerness release bump')
       && wf.includes('## Step 6') && wf.includes('Quick checklist') && wf.includes('Anti-patterns') && wf.includes('LEERNESS_AUTO_SECURITY_FIX');
     // (검수 #4) en 재init: 커스텀 라인 정확히 1회 생존 + exit 0
@@ -7546,7 +7624,7 @@ total++;
     const custOk = r2.status === 0 && (ag2.match(/MY EN CUSTOM LINE/g) || []).length === 1 && ag2.includes('Ask-on-ambiguity duty');
     const dk = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ko5-')); _dirs.push(dk);
     const r3 = cp.spawnSync(process.execPath, [CLI, 'init', dk, '--yes', '--language', 'ko', '--no-env'], { encoding: 'utf8', timeout: 30000 });
-    const koOk = r3.status === 0 && H.test(fs.readFileSync(path.join(dk, 'AGENTS.md'), 'utf8')) && fs.readFileSync(path.join(dk, '.harness/session-workflow.md'), 'utf8').includes('6단계');
+    const koOk = r3.status === 0 && H.test(fs.readFileSync(path.join(dk, 'AGENTS.md'), 'utf8')) && fs.readFileSync(path.join(dk, '.leerness/session-workflow.md'), 'utf8').includes('6단계');
     ok = enOk && substOk && custOk && koOk;
     if (!ok) console.log(`   [en5 디버그] en=${enOk} subst=${substOk} cust=${custOk} ko=${koOk}`);
   } catch (e) {} finally { _dirs.forEach(d => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }); }
@@ -7563,12 +7641,12 @@ total++;
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-noop-')); _d.push(d);
     const R = () => cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env'], { encoding: 'utf8', timeout: 40000 });
     R();
-    const arch1 = fs.readdirSync(path.join(d, '.harness', 'archive')).length;
-    const mf1 = fs.readFileSync(path.join(d, '.harness', 'manifest.json'), 'utf8');
+    const arch1 = fs.readdirSync(path.join(d, '.leerness', 'archive')).length;
+    const mf1 = fs.readFileSync(path.join(d, '.leerness', 'manifest.json'), 'utf8');
     const r2 = R();
     const noopOk = r2.status === 0 && /no-op/.test(r2.stdout)
-      && fs.readdirSync(path.join(d, '.harness', 'archive')).length === arch1
-      && fs.readFileSync(path.join(d, '.harness', 'manifest.json'), 'utf8') === mf1;
+      && fs.readdirSync(path.join(d, '.leerness', 'archive')).length === arch1
+      && fs.readFileSync(path.join(d, '.leerness', 'manifest.json'), 'utf8') === mf1;
     // 커스텀 추가 → 설치 수행(백업 생성) → 이후 다시 no-op + 커스텀 1회 유지
     fs.appendFileSync(path.join(d, 'AGENTS.md'), '\nNOOP CUSTOM LINE\n');
     const r3 = R();
@@ -7576,7 +7654,7 @@ total++;
     const r4 = R();
     const stableOk = /no-op/.test(r4.stdout) && (fs.readFileSync(path.join(d, 'AGENTS.md'), 'utf8').match(/NOOP CUSTOM LINE/g) || []).length === 1;
     // 구버전 마커 → 정상 설치
-    fs.writeFileSync(path.join(d, '.harness', 'HARNESS_VERSION'), '1.36.60\n');
+    fs.writeFileSync(path.join(d, '.leerness', 'HARNESS_VERSION'), '1.36.60\n');
     const r5 = R();
     const verOk = /backup created/.test(r5.stdout);
     ok = noopOk && changedOk && stableOk && verOk;
@@ -7667,9 +7745,9 @@ total++;
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-migcap-')); _d.push(d);
     // (검수 #2) --no-stale-check: 빈 캐시에서 npm 조회로 최대 8초 지연되던 것 차단
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
-    fs.writeFileSync(path.join(d, '.harness', 'HARNESS_VERSION'), '1.9.33');
+    fs.writeFileSync(path.join(d, '.leerness', 'HARNESS_VERSION'), '1.9.33');
     cp.spawnSync(process.execPath, [CLI, 'migrate', d], { encoding: 'utf8', timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
-    const rep = fs.readFileSync(path.join(d, '.harness', 'migration-report.md'), 'utf8');
+    const rep = fs.readFileSync(path.join(d, '.leerness', 'migration-report.md'), 'utf8');
     const sizeOk = rep.length < 30 * 1024;
     // (검수 #3) 헤딩을 파싱해 shown/total 정합 + 헤드라인 행수 + 오버플로 수치 정확 일치로 단언 강화
     const hm = rep.match(/최신 (\d+)\/(\d+)/);
@@ -7759,8 +7837,8 @@ total++;
     // (검수 #3) exit 단언 + 정렬 집합 정확 비교 — 카운트만 비교하면 2차 init 실패를 1차 결과가 가렸다
     const i1 = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'en', '--skills', 'all', '--no-stale-check', '--no-env'], { encoding: 'utf8', timeout: 40000 });
     const i2 = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'en', '--skills', 'recommended', '--no-stale-check', '--no-env'], { encoding: 'utf8', timeout: 40000 });
-    const dirSet = fs.readdirSync(path.join(d, '.harness', 'skills'), { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name).sort();
-    const lockSet = Object.keys(JSON.parse(fs.readFileSync(path.join(d, '.harness', 'skills-lock.json'), 'utf8')).installedSkills).sort();
+    const dirSet = fs.readdirSync(path.join(d, '.leerness', 'skills'), { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name).sort();
+    const lockSet = Object.keys(JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'skills-lock.json'), 'utf8')).installedSkills).sort();
     const f12Ok = i1.status === 0 && i2.status === 0 && dirSet.length >= 2 && JSON.stringify(dirSet) === JSON.stringify(lockSet);   // 1.36.80: 내장 축소 — 개수 하한 대신 집합 일치가 본질
     // F9: 실 CLI migrate 경유 — 구판 KO canonical 을 en 프로젝트 CLAUDE.md 에 심고 migrate
     const d9 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-f9-')); _d.push(d9);
@@ -7768,7 +7846,7 @@ total++;
     const cl = path.join(d9, 'CLAUDE.md');
     const ko = Array.from({ length: 15 }, (_, i) => '한국어 구판 템플릿 라인 ' + i).join('\n');
     fs.appendFileSync(cl, '\n' + ko + '\nMY_CUSTOM_KEEP_42\n');
-    fs.writeFileSync(path.join(d9, '.harness', 'HARNESS_VERSION'), '1.36.0');
+    fs.writeFileSync(path.join(d9, '.leerness', 'HARNESS_VERSION'), '1.36.0');
     const mg = cp.spawnSync(process.execPath, [CLI, 'migrate', d9], { encoding: 'utf8', timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
     const after = fs.readFileSync(cl, 'utf8');
     const mg2 = cp.spawnSync(process.execPath, [CLI, 'migrate', d9], { encoding: 'utf8', timeout: 60000, maxBuffer: 32 * 1024 * 1024 });
@@ -7832,7 +7910,7 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'init', d2b, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
     const D2 = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d2b], { encoding: 'utf8', timeout: 20000 });
     D2(['decision', 'add', 'Dup Title', '--reason', 'first']); D2(['decision', 'drop', 'Dup Title']);
-    const ap2 = path.join(d2b, '.harness', 'decisions.archive.md');
+    const ap2 = path.join(d2b, '.leerness', 'decisions.archive.md');
     if (fs.existsSync(ap2)) fs.writeFileSync(ap2, fs.readFileSync(ap2, 'utf8').replace(/### \d{4}-\d{2}-\d{2}/g, '### 2020-01-01'));
     D2(['decision', 'add', 'Dup Title', '--reason', 'second']);
     const logicalOk = D2(['memory', 'restore', 'decisions', 'Dup Title']).status === 1;
@@ -7842,7 +7920,7 @@ total++;
     const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9a-')); _d.push(d3);
     const A = (u, dir) => cp.spawnSync(process.execPath, [CLI, 'api-skill', 'add', u, '--skeleton', '--no-crawl', '--direction', dir, '--path', d3, '--json'], { encoding: 'utf8', timeout: 25000 });
     A('ftp://example.test/docs?alpha', 'alpha-direction'); A('ftp://example.test/docs?beta', 'beta-direction');
-    const askDir = path.join(d3, '.harness', 'api-skills');
+    const askDir = path.join(d3, '.leerness', 'api-skills');
     const all = fs.existsSync(askDir) ? fs.readdirSync(askDir).map(f => fs.readFileSync(path.join(askDir, f), 'utf8')).join('\n') : '';
     const apiOk = /alpha-direction/.test(all) && /beta-direction/.test(all);
     // #7 개행 없는 마지막 MCP 요청도 응답
@@ -7851,8 +7929,8 @@ total++;
     try { mcpOk = JSON.parse((noNl.stdout || '').trim()).id === 101; } catch {}
     // #6 손상 frontmatter 표시 + api-skill --json 계약(사람용 텍스트 오염 0)
     const d4 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9c-')); _d.push(d4);
-    fs.mkdirSync(path.join(d4, '.harness', 'api-skills'), { recursive: true });
-    fs.writeFileSync(path.join(d4, '.harness', 'api-skills', 'bad.md'), '---\nid: intended\nname: X\n# no closing');
+    fs.mkdirSync(path.join(d4, '.leerness', 'api-skills'), { recursive: true });
+    fs.writeFileSync(path.join(d4, '.leerness', 'api-skills', 'bad.md'), '---\nid: intended\nname: X\n# no closing');
     let corruptOk = false, jsonOk = false;
     try { const j = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'api-skill', 'list', '--path', d4, '--json'], { encoding: 'utf8', timeout: 20000 }).stdout); corruptOk = j.corruptCount === 1 && j.skills[0].corrupt === true; } catch {}
     try { const j = JSON.parse(cp.spawnSync(process.execPath, [CLI, 'api-skill', 'add', 'not-a-url', '--path', d4, '--json'], { encoding: 'utf8', timeout: 25000 }).stdout); jsonOk = j.ok === false && j.code === 'fetch_failed'; } catch {}
@@ -7877,11 +7955,11 @@ total++;
     const detectOk = add.status === 0 && /preview mockup P-0001/.test(add.stdout);
     // 스캐폴드 생성 + 스토어 기록
     const mk = P(['mockup', 'P-0001']);
-    const mkFile = path.join(d, '.harness', 'previews', 'P-0001-mockup.html');
+    const mkFile = path.join(d, '.leerness', 'previews', 'P-0001-mockup.html');
     const html = fs.readFileSync(mkFile, 'utf8');
     const mkOk = mk.status === 0 && html.includes('신규 랜딩 페이지 제작') && html.includes('leerness:mockup P-0001');
     let showOk = false;
-    try { showOk = JSON.parse(P(['show', 'P-0001', '--json']).stdout).mockupPath === '.harness/previews/P-0001-mockup.html'; } catch {}
+    try { showOk = JSON.parse(P(['show', 'P-0001', '--json']).stdout).mockupPath === '.leerness/previews/P-0001-mockup.html'; } catch {}
     // 재실행은 AI 가 채운 시안을 보호 (--force 로만 재생성)
     fs.appendFileSync(mkFile, '<!-- AI-FILLED -->');
     const protectOk = P(['mockup', 'P-0001']).status === 0 && fs.readFileSync(mkFile, 'utf8').includes('AI-FILLED')
@@ -7889,7 +7967,7 @@ total++;
     // XSS: 제목의 스크립트가 시안에 이스케이프
     P(['add', '<script>alert(1)</script> 페이지', '--design', 'x']);
     P(['mockup', 'P-0002']);
-    const xssOk = !fs.readFileSync(path.join(d, '.harness', 'previews', 'P-0002-mockup.html'), 'utf8').includes('<script>alert');
+    const xssOk = !fs.readFileSync(path.join(d, '.leerness', 'previews', 'P-0002-mockup.html'), 'utf8').includes('<script>alert');
     // --mockup 첨부 (존재 검증 포함)
     fs.writeFileSync(path.join(d, 'my-mockup.html'), '<h1>시안</h1>');
     let attachOk = false;
@@ -7904,7 +7982,7 @@ total++;
     const outOk = P(['add', 'd-out', '--mockup', outFile]).status === 1;
     try { fs.rmSync(outFile, { force: true }); } catch {}
     // (검수 High) 조작된 id 는 previews 디렉토리 밖 쓰기 불가
-    const evil = path.join(d, '.harness', 'previews.json');
+    const evil = path.join(d, '.leerness', 'previews.json');
     const saved = fs.readFileSync(evil, 'utf8');
     fs.writeFileSync(evil, JSON.stringify([{ id: '..\\..\\owned', title: 'x', status: 'proposed' }]));
     const evilOk = cp.spawnSync(process.execPath, [CLI, 'preview', 'mockup', '..\\..\\owned', '--path', d], { encoding: 'utf8', timeout: 20000 }).status === 1
@@ -7961,7 +8039,7 @@ total++;
     todo.forEach(t => { if (t.content === 'fix order status') t.status = 'completed'; });
     fs.writeFileSync(path.join(d2, 'todo.json'), JSON.stringify(todo));
     const bs = R(['task', 'sync', '--from', path.join(d2, 'todo.json'), '--path', d2]);
-    const tracker = fs.readFileSync(path.join(d2, '.harness', 'progress-tracker.md'), 'utf8');
+    const tracker = fs.readFileSync(path.join(d2, '.leerness', 'progress-tracker.md'), 'utf8');
     B = bs.s === 1 && !(new RegExp('\\|\\s*' + ID2 + '\\s*\\|\\s*done\\s*\\|').test(tracker));
     // C: 재오픈 시나리오 — 1라운드에서 이미 done 인 task 가 회귀했을 때도 막아야 한다(이 기능의 동기)
     const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-bfgate3-')); _d.push(d3);
@@ -8057,7 +8135,7 @@ total++;
     H2 = dep.s === 1 && /"reviewer_not_independent"/.test(dep.o) && !/"human_approval_required"/.test(dep.o);
     // codex 28차 #6: 손으로 편집한 역할 설정의 **빈 provider** 가 "해석됨"으로 통과했다 —
     //   `roles set` 은 빈 값을 안 받으므로 이 상태는 파일 편집으로만 생긴다. 그래서 파일을 직접 만들어 검증한다.
-    const rolesFile = path.join(d, '.harness', 'agent-roles.json');
+    const rolesFile = path.join(d, '.leerness', 'agent-roles.json');
     const savedRoles = fs.existsSync(rolesFile) ? fs.readFileSync(rolesFile, 'utf8') : null;
     //   스키마는 `{roles:{...}}` 다 — 최상위에 쓰면 _loadRoles 가 {} 를 돌려줘 "역할 없음"으로 통과하고,
     //   빈 provider 를 검증한 것이 아니라 **셋업 실패를 통과로 읽는다**(실측으로 잡았다).
@@ -8077,7 +8155,7 @@ total++;
         && Array.isArray(e.signals) && e.signals.some(s => /^high-risk:/.test(s)))
       && ents.some(e => e.confirmed === false && Array.isArray(e.refusals) && e.refusals.length > 0);   // 거부된 시도도 남는다
     // 손상 감사로그를 조용히 덮어쓰지 않는다(codex 28차 #8)
-    const lp = path.join(d, '.harness', 'routing-log.json');
+    const lp = path.join(d, '.leerness', 'routing-log.json');
     const savedLog = fs.readFileSync(lp, 'utf8');
     fs.writeFileSync(lp, '{"소중한":"기록"}');
     R(['agents', 'route', '무해한 조회', '--path', d]);
@@ -8111,7 +8189,7 @@ total++;
 }
 
 // 1.36.90 (P-0006, 사용자 승인 범위=대시보드만): 읽기 전용 대시보드 + **넘지 않기로 한 경계**를 가드로 못 박는다.
-//   경계가 문서에만 있으면 다음 라운드에 조용히 넘는다 — .harness 실행코드 0 · 루트 실행기 미생성 ·
+//   경계가 문서에만 있으면 다음 라운드에 조용히 넘는다 — .leerness 실행코드 0 · 루트 실행기 미생성 ·
 //   게이트 미판정 · 정적 leerness.html 존속을 테스트가 강제한다.
 total++;
 {
@@ -8136,7 +8214,7 @@ total++;
     const html = require(path.join(path.dirname(CLI), '..', 'lib', 'dashboard.js')).renderHtml(snap);
     X1 = !/<script>alert\(1\)<\/script>/.test(html) && !/<img\s/i.test(html) && /&lt;script&gt;/.test(html);
     // B1~B3: **승인 시 기록한 경계** — 넘으면 실패.
-    //   codex 29차 #4: 종전엔 `.harness` 최상위만 봐서 `.harness/dashboard/server.js` 가 통과했고,
+    //   codex 29차 #4: 종전엔 `.leerness` 최상위만 봐서 `.leerness/dashboard/server.js` 가 통과했고,
     //   `leerness.*` 정확 일치만 봐서 `start-leerness.js` 가 통과했으며, init 이 이미 만든 leerness.html 을
     //   확인해 `graph --html` 이 깨져도 통과했다. 셋 다 좁혔다.
     const EXEC_EXT = /\.(js|mjs|cjs|ts|py|sh|bash|ps1|bat|cmd|exe)$/i;
@@ -8147,30 +8225,30 @@ total++;
       }
       return acc;
     };
-    B1 = walk(path.join(d, '.harness')).filter(f => EXEC_EXT.test(f)).length === 0;      // .harness 실행코드 0 (재귀)
+    B1 = walk(path.join(d, '.leerness')).filter(f => EXEC_EXT.test(f)).length === 0;      // .leerness 실행코드 0 (재귀)
     B2 = !fs.readdirSync(d).some(f => /leerness/i.test(f) && EXEC_EXT.test(f));           // 루트 실행기 미생성 (이름 변형 포함)
     const gp = path.join(d, 'leerness.html');
     try { fs.rmSync(gp, { force: true }); } catch {}
     const gr = R(['graph', '--html', '--path', d]);
     B3 = gr.s === 0 && fs.existsSync(gp) && fs.statSync(gp).size > 1000;                  // 정적 단일파일 뷰 존속(실제 재생성)
     // B4: **읽기 전용의 정확한 범위** — 하네스 상태 파일은 대시보드 실행으로 바뀌지 않는다.
-    //   (CLI 는 모든 명령에서 .harness/cache/usage-stats.json 을 갱신한다 — 그건 제외하고 단언해야
+    //   (CLI 는 모든 명령에서 .leerness/cache/usage-stats.json 을 갱신한다 — 그건 제외하고 단언해야
     //    "아무것도 안 쓴다"는 과장 대신 실제로 참인 불변식을 지킨다. 화면 문구도 그렇게 적었다.)
-    const stateSig = () => fs.readdirSync(path.join(d, '.harness'), { withFileTypes: true })
-      .filter(e => e.isFile()).map(e => { const p = path.join(d, '.harness', e.name); const st = fs.statSync(p); return `${e.name}:${st.size}:${Math.round(st.mtimeMs)}`; }).sort().join('|');
+    const stateSig = () => fs.readdirSync(path.join(d, '.leerness'), { withFileTypes: true })
+      .filter(e => e.isFile()).map(e => { const p = path.join(d, '.leerness', e.name); const st = fs.statSync(p); return `${e.name}:${st.size}:${Math.round(st.mtimeMs)}`; }).sort().join('|');
     const sigBefore = stateSig();
     R(['dashboard', '--path', d, '--json']);
     B4 = stateSig() === sigBefore;
     // R1~R3 (codex 29차 #1/#2/#3): 형상 이상 스토어로 죽지 않고 · 시크릿을 내보내지 않고 · 게이트와 같은 술어를 쓴다
-    fs.writeFileSync(path.join(d, '.harness', 'previews.json'), '[null]');
+    fs.writeFileSync(path.join(d, '.leerness', 'previews.json'), '[null]');
     const crash = R(['dashboard', '--path', d, '--json']);
-    fs.writeFileSync(path.join(d, '.harness', 'previews.json'), '{}');
+    fs.writeFileSync(path.join(d, '.leerness', 'previews.json'), '{}');
     const nonArr = R(['dashboard', '--path', d, '--json']);
     let nj = null; try { nj = JSON.parse(nonArr.o.slice(nonArr.o.indexOf('{'))); } catch {}
     R1 = crash.s === 0 && !/TypeError|Cannot read/.test(crash.o)
       && nonArr.s === 0 && !!nj && (nj.notes || []).some(n => /previews\.json/.test(n));   // 조용히 "비어 있음"으로 보이면 안 된다
-    fs.writeFileSync(path.join(d, '.harness', 'previews.json'), '[]');
-    fs.writeFileSync(path.join(d, '.harness', 'bugfix-receipts.json'), JSON.stringify([
+    fs.writeFileSync(path.join(d, '.leerness', 'previews.json'), '[]');
+    fs.writeFileSync(path.join(d, '.leerness', 'bugfix-receipts.json'), JSON.stringify([
       { id: 'T-0777', repro: 'API_TOKEN=sk-live-LEAKME npm test', expectBad: 'x', baseline: { failed: true, exit: 1 }, rootCause: 'rc', siblingScope: { checked: [] } },
     ]));
     const leak = R(['dashboard', '--path', d, '--json']);
@@ -8178,14 +8256,14 @@ total++;
     R2 = !!lj && !/sk-live-LEAKME/.test(leak.o) && /API_TOKEN=\*\*\*/.test(JSON.stringify(lj));
     //   빈 checked 는 게이트가 "미완"으로 보므로 대시보드도 미기록이어야 한다(표면마다 다른 판정 금지)
     R3 = !!lj && Array.isArray(lj.bugfix) && lj.bugfix.length === 1 && lj.bugfix[0].siblingScope === false;
-    fs.rmSync(path.join(d, '.harness', 'bugfix-receipts.json'), { force: true });
+    fs.rmSync(path.join(d, '.leerness', 'bugfix-receipts.json'), { force: true });
     // 범위 밖 포트/타임아웃은 크래시가 아니라 명확한 거부(codex 29차 #6)
     P1 = R(['dashboard', '--path', d, '--port', '99999']).s === 1 && R(['dashboard', '--path', d, '--timeout', '2147484']).s === 1;
     ok = S1 && S2 && S3 && X1 && B1 && B2 && B3 && B4 && R1 && R2 && R3 && P1;
     if (!ok) console.log(`   [dashboard 디버그] 스냅샷=${S1} 토글상태=${S2} 고지=${S3} XSS=${X1} harness실행코드0=${B1} 루트실행기없음=${B2} 정적뷰존속=${B3} 상태무변경=${B4} 형상내성=${R1} 시크릿마스킹=${R2} 술어일치=${R3} 범위검증=${P1}`);
   } catch (e) { console.log('   [dashboard 디버그] 예외: ' + ((e && e.message) || e)); }
   finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
-  console.log(ok ? '✓ B(1.36.90) dashboard 읽기전용: 스냅샷/토글상태 · 게이트 미판정·정적뷰 존속 고지 · XSS 이스케이프 · 경계 3종(재귀 .harness 실행코드0 · 루트 실행기 미생성 · leerness.html 실제 재생성) · 상태 무변경 · 형상내성/시크릿마스킹/게이트와 동일 술어 · 포트·타임아웃 범위검증' : '✗ dashboard 실패');
+  console.log(ok ? '✓ B(1.36.90) dashboard 읽기전용: 스냅샷/토글상태 · 게이트 미판정·정적뷰 존속 고지 · XSS 이스케이프 · 경계 3종(재귀 .leerness 실행코드0 · 루트 실행기 미생성 · leerness.html 실제 재생성) · 상태 무변경 · 형상내성/시크릿마스킹/게이트와 동일 술어 · 포트·타임아웃 범위검증' : '✗ dashboard 실패');
   if (!ok) failed++;
 }
 
@@ -8316,10 +8394,13 @@ total++;
     const shimLog = path.join(shimDir, 'calls.log');
     const isWin = process.platform === 'win32';
     //   codex 32차 #8: shim 이 codex 하나뿐이면 다른 provider 로 새는 회귀를 못 잡는다 — 배치된 provider 전부에 건다.
-    for (const binName of ['codex', 'claude']) {
-      if (isWin) fs.writeFileSync(path.join(shimDir, `${binName}.cmd`), `@echo off\r\n>>"${shimLog}" echo ${binName} %*\r\nif "%1"=="--version" (echo ${binName}-shim 1.0.0& exit /b 0)\r\necho Logged in using shim\r\nexit /b 0\r\n`);
-      else { const p = path.join(shimDir, binName); fs.writeFileSync(p, `#!/bin/sh\necho "${binName} $@" >> "${shimLog}"\nif [ "$1" = "--version" ]; then echo "${binName}-shim 1.0.0"; exit 0; fi\necho "Logged in using shim"\nexit 0\n`); try { fs.chmodSync(p, 0o755); } catch {} }
-    }
+    for (const binName of ['codex', 'claude']) writePortableCliShim(shimDir, binName, [
+      `const fs = require('fs');`,
+      `const argv = process.argv.slice(2);`,
+      `fs.appendFileSync(${JSON.stringify(shimLog)}, ${JSON.stringify(binName + ' ')} + argv.join(' ') + '\\n');`,
+      `if (argv[0] === '--version') { console.log(${JSON.stringify(binName + '-shim 1.0.0')}); process.exit(0); }`,
+      `console.log('Logged in using shim');`,
+    ].join('\n'));
     //   provider opt-in 을 **켠 상태**로 돌린다 — 그래야 "확정에서는 실행된다"는 대조가 성립하고,
     //   아래 N1b 가 "끄면 실행되지 않는다"를 별도로 확인한다(문서화된 opt-out 의 실제 검증).
     const env = Object.assign({}, process.env, {
@@ -8366,19 +8447,19 @@ total++;
     const aid = ((RS(['task', 'add', '대상 작업', '--path', d2, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
     fs.writeFileSync(path.join(d2, 'app.js'), 'console.error("BUG_HERE"); process.exit(3);');
     const stRes = RS(['bugfix', 'start', aid, '--repro', 'node app.js', '--expect-bad', 'BUG_HERE', d2]);
-    N4 = stRes.s === 0 && fs.existsSync(path.join(d2, '.harness', 'bugfix-receipts.json'));
+    N4 = stRes.s === 0 && fs.existsSync(path.join(d2, '.leerness', 'bugfix-receipts.json'));
     // N5: Bearer/Basic 토큰 마스킹 + 손상 토글 무경고 금지
     const red = require(path.join(path.dirname(CLI), '..', 'lib', 'pure-utils.js')).redactSecrets;
     const maskOk = !red('Authorization: Bearer sk-live-ABCDEFGH12345', 200).includes('sk-live-ABCDEFGH12345')
       && !red('curl -H "Authorization: Basic dXNlcjpwYXNz" api', 200).includes('dXNlcjpwYXNz');
-    fs.writeFileSync(path.join(d, '.harness', 'toggles.json'), '{손상');
+    fs.writeFileSync(path.join(d, '.leerness', 'toggles.json'), '{손상');
     const tl = RS(['toggle', 'list', '--path', d]);
     let tj = null; try { const o = RS(['toggle', 'list', '--path', d, '--json']).o; tj = JSON.parse(o.slice(o.indexOf('{'))); } catch {}
     //   감사 기록은 **입력 원문**(분류용 정규화본이 아님)을 남기되, git 추적 파일이므로 시크릿은 가린다
     const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h2c-')); _d.push(d3);
     RS(['init', d3, '--yes', '--language', 'ko', '--no-stale-check']);
     RS(['agents', 'route', 'ＰＡＹＭＥＮＴ 수정 API_TOKEN=sk-live-SECRET123', '--path', d3]);
-    const lgRaw = fs.readFileSync(path.join(d3, '.harness', 'routing-log.json'), 'utf8');
+    const lgRaw = fs.readFileSync(path.join(d3, '.leerness', 'routing-log.json'), 'utf8');
     const auditOk = !/sk-live-SECRET123/.test(lgRaw) && /API_TOKEN=\*\*\*/.test(lgRaw) && /ＰＡＹＭＥＮＴ/.test(lgRaw);
     N5 = maskOk && auditOk && /toggles\.json 손상/.test(tl.o) && !!tj && tj.corrupt === true;
     ok = N1 && N2 && N3 && N4 && N5;
@@ -8405,7 +8486,7 @@ total++;
     R(['task', 'add', 'A', '--path', d, '--status', 'completed', '--json', '--no-review']);
     R(['plan', 'add', 'B', '--path', d, '--status', 'completed', '--json']);
     R(['plan', 'add', 'C', '--path', d, '--status', 'verified', '--json']);
-    const rows = fs.readFileSync(path.join(d, '.harness', 'progress-tracker.md'), 'utf8')
+    const rows = fs.readFileSync(path.join(d, '.leerness', 'progress-tracker.md'), 'utf8')
       .split('\n').filter(l => /^\|\s*T-\d/.test(l)).map(l => l.split('|').map(s => s.trim())[2]);
     const doneCount = rows.filter(s => s === 'done').length;
     let vcTotal = null; try { const o = R(['verify-claim', '--all', '--path', d, '--json']).o; vcTotal = JSON.parse(o.slice(o.indexOf('{'))).total; } catch {}
@@ -8469,7 +8550,7 @@ total++;
     const mkTpl = (lang) => {
       const w = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-tpl95-')); _d.push(w);
       R(['init', w, '--yes', '--language', lang, '--no-stale-check']);
-      return fs.readFileSync(path.join(w, '.harness', 'session-workflow.md'), 'utf8');
+      return fs.readFileSync(path.join(w, '.leerness', 'session-workflow.md'), 'utf8');
     };
     const ko = mkTpl('ko'), en = mkTpl('en');
 
@@ -8493,7 +8574,7 @@ total++;
     //   1.36.60 이 넣어 둔 자동생성 이력 필터가 그때 발화해 **간접적으로** 삭제가 일어났다(검수 실측:
     //   설치본 21개의 이력 731줄 중 346줄 삭제 + 사용자 문장 유실). 그 필터를 걷어냈고, 여기서 못 박는다.
     const PU = require(path.join(path.dirname(CLI), '..', 'lib', 'pure-utils.js'));
-    const MG = (prev) => PU._managedMerge('.harness/session-workflow.md', ko, prev, '.harness/archive', new Set(), { lang: 'ko' });
+    const MG = (prev) => PU._managedMerge('.leerness/session-workflow.md', ko, prev, '.leerness/archive', new Set(), { lang: 'ko' });
     //   (a) 옛 필터의 시그니처와 겹치는 **사용자 문장** — 필터가 살아 있으면 삭제된다
     const userProse = [
       '- 사용자 메모: MCP **77 도구** 는 우리 내부 표현이며 삭제 금지',
@@ -8527,7 +8608,7 @@ total++;
     //   수정 과정에서 세 번의 회귀가 있었고(헤더 잡아먹음 · O(n²) · 유니코드 파손) 전부 여기서 잡는다.
     const w5 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-hd95-')); _d.push(w5);
     R(['init', w5, '--yes', '--language', 'ko', '--no-stale-check']);
-    const decPath = path.join(w5, '.harness', 'decisions.md');
+    const decPath = path.join(w5, '.leerness', 'decisions.md');
     const mkDec = (n, pad) => '# Decisions\n' + Array.from({ length: n }, (_, i) => `- 결정 ${String(i + 1).padStart(3, '0')} ` + 'x'.repeat(pad)).join('\n') + '\n';
     const seg = (o) => o.slice(o.indexOf('=== Decisions'), o.indexOf('=== Task Log') > 0 ? o.indexOf('=== Task Log') : undefined);
     //   (a) 마지막 40줄이 **끊김 없이** 나온다 — 양 끝만 보면 중간 유실을 놓친다.
@@ -8554,7 +8635,7 @@ total++;
     const oU = R(['handoff', w5]).o;
     const uniOk = !/�/.test(oU) && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(oU);
     //   (e) Task Log 도 같은 계약(Decisions 만 보면 tailLines 누락 변이가 산다). 총 줄 수는 헤더 포함 201.
-    fs.writeFileSync(path.join(w5, '.harness', 'task-log.md'), '# Task Log\n' + Array.from({ length: 200 }, (_, i) => `- 작업 ${String(i + 1).padStart(3, '0')}`).join('\n') + '\n');
+    fs.writeFileSync(path.join(w5, '.leerness', 'task-log.md'), '# Task Log\n' + Array.from({ length: 200 }, (_, i) => `- 작업 ${String(i + 1).padStart(3, '0')}`).join('\n') + '\n');
     const oT = R(['handoff', w5]).o;
     const sT = oT.slice(oT.indexOf('=== Task Log'));
     //   **실제로 60줄인지** 세야 한다 — 라벨만 보면 tailLines 를 59 로 바꾼 변이가 통과한다(검수 실측).
@@ -8563,7 +8644,7 @@ total++;
       && taskIds.every((v, i) => i === 0 || v === taskIds[i - 1] + 1) && /60\/201 줄/.test(sT);
     //   (f) 빈 파일을 `1/1 줄` 이라고 말하면 안 된다(`''.split('\n')` 가 `['']` 이다)
     fs.writeFileSync(decPath, '');
-    fs.writeFileSync(path.join(w5, '.harness', 'task-log.md'), '');
+    fs.writeFileSync(path.join(w5, '.leerness', 'task-log.md'), '');
     const emptyOk = !/1\/1 줄/.test(R(['handoff', w5]).o);
     //   (g) --json 은 누적 로그의 **뒤를** 남긴다(같은 명령이 표면마다 반대 방향이면 안 된다).
     //   totalChars 는 원문 길이와 정확히 같아야 하고, content 는 마커 포함 8,000자를 넘지 않아야 한다.
@@ -8582,17 +8663,17 @@ total++;
     try { const t = R(['handoff', w5, '--json']).o; jd2 = JSON.parse(t.slice(t.indexOf('{'))).files.decisions; } catch (e) { dbg.json2 = String(e && e.message).slice(0, 30); }
     const jsonUniOk = !!jd2 && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(jd2.content) && !/�/.test(jd2.content);
     //   (h) non-tail 파일(plan)은 **앞을** 남겨야 한다 — 방향을 뒤집어도 decisions 만 보면 통과한다.
-    fs.writeFileSync(path.join(w5, '.harness', 'plan.md'), '# Plan\nFIRST_MARKER\n' + 'p'.repeat(9000) + '\nLAST_MARKER\n');
+    fs.writeFileSync(path.join(w5, '.leerness', 'plan.md'), '# Plan\nFIRST_MARKER\n' + 'p'.repeat(9000) + '\nLAST_MARKER\n');
     let jp = null;
     try { const t = R(['handoff', w5, '--json']).o; jp = JSON.parse(t.slice(t.indexOf('{'))).files.plan; } catch (e) { dbg.plan = String(e && e.message).slice(0, 30); }
     //   head 방향에도 **같은 계약**이 걸린다 — totalChars 정확성과 마커 예산을 tail 에서만 재면
     //   non-tail 쪽 변이(totalChars 0 · 마커 예산 미적용으로 8,013자)가 그대로 통과한다(검수 실측).
-    const planRaw = fs.readFileSync(path.join(w5, '.harness', 'plan.md'), 'utf8');
+    const planRaw = fs.readFileSync(path.join(w5, '.leerness', 'plan.md'), 'utf8');
     const jsonHeadOk = !!jp && jp.kept === 'head' && /FIRST_MARKER/.test(jp.content) && !/LAST_MARKER/.test(jp.content)
       && jp.totalChars === planRaw.length && jp.content.length <= 8000 && jp.truncated === true;
     //   (i) 본문 상한이 **선형**이어야 한다 — 줄마다 join() 하는 구현은 O(n²) 라 48,000줄에서 30초대였다.
     //   임계값 20초는 정상(수 초)과 회귀(30초대) 사이에 넉넉히 있어 느린 머신에서도 오탐하지 않는다.
-    fs.writeFileSync(path.join(w5, '.harness', 'progress-tracker.md'),
+    fs.writeFileSync(path.join(w5, '.leerness', 'progress-tracker.md'),
       '# P\n' + Array.from({ length: 48000 }, (_, i) => `| T-${String(i).padStart(5, '0')} | done | ` + 'x'.repeat(80) + ' |').join('\n') + '\n');
     const _t0 = Date.now();
     R(['handoff', w5]);
@@ -8608,7 +8689,7 @@ total++;
   if (!ok) failed++;
 }
 
-// 1.36.96 (P-0010, 사용자 승인 범위): leerness.html 에 📄 문서 탭 — .harness 핵심 문서 7종을 그대로 읽는다.
+// 1.36.96 (P-0010, 사용자 승인 범위): leerness.html 에 📄 문서 탭 — .leerness 핵심 문서 7종을 그대로 읽는다.
 //   사용자 요청은 "exe 실행기"였지만 실행기는 **런타임 의존성 0 · install script 0** 경계를 깬다(1.36.90 에서
 //   같은 경계를 테스트로 못박았다). 같은 목적을 정적 단일 파일 안에서 이룬다.
 //   렌더러는 **최소 부분집합**만 해석한다(제목·목록·코드펜스·표·링크·강조). 나머지는 이스케이프된 평문 —
@@ -8627,7 +8708,7 @@ total++;
     const w = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-docs96-')); _d.push(w);
     fs.writeFileSync(path.join(w, 'package.json'), JSON.stringify({ name: 'd96', version: '0.1.0' }, null, 2));
     cp.spawnSync(process.execPath, [CLI, 'init', w, '--yes', '--no-stale-check'], { encoding: 'utf8', timeout: 180000 });
-    const H = path.join(w, '.harness');
+    const H = path.join(w, '.leerness');
     const setupOk = fs.existsSync(H);            // 셋업이 조용히 실패하면 아래 단언이 공허해진다
 
     // ── T1: 렌더러 — 허용 부분집합만 해석하고, 그 밖은 전부 이스케이프된 평문.
@@ -8665,7 +8746,7 @@ total++;
       && /href="http:\/\/e\.test\/a"/.test(I2('[d](http://e.test/a)'))
       && /href="mailto:a@b\.c"/.test(I2('[d](mailto:a@b.c)'))
       && /href="#앵커"/.test(I2('[d](#앵커)'))
-      && /href="\.harness\/plan\.md"/.test(I2('[d](.harness/plan.md)'))
+      && /href="\.leerness\/plan\.md"/.test(I2('[d](.leerness/plan.md)'))
       //   상한은 **이스케이프 후** 길이에 걸린다 — 원문 796자 URL 이 &amp; 팽창으로 거부됐다(검수 실측).
       //   픽스처가 1,192자라 상한을 1,200 으로 낮추는 변이가 통과했다 — 4,000 에 가까운 길이로 판별한다.
       && I2('[d](https://e.test/q?' + Array.from({ length: 260 }, (_, i) => 'k' + i + '=v' + i).join('&') + ')').includes('<a ')
@@ -8908,7 +8989,7 @@ total++;
     //   **출구 전수 조사** — "고친 출구 하나만 보고 안전을 선언"한 실수를 되풀이하지 않으려면 출구를 세어야 한다.
     //   사용자 텍스트가 leerness.html 로 나가는 경로를 하나씩 오염시켜, 어느 하나라도 새면 실패한다.
     //   표지는 **마스킹이 못 잡는 쿠키 형태**로 심는다(마스킹에 가려 통과하는 것을 막는다).
-    const H2 = path.join(w2, '.harness');
+    const H2 = path.join(w2, '.leerness');
     const SURF = [
       ['lesson', () => L2(['lesson', 'save', 'Cookie: session=LEAKLESSON_QwErTyUiOpAsDfGh', '--path', w2])],
       ['rule', () => L2(['rule', 'add', 'Cookie: session=LEAKRULE_QwErTyUiOpAsDfGh', '--trigger', 'every-round', '--path', w2])],
@@ -9085,19 +9166,21 @@ total++;
     const metaFile = path.join(shimDir, 'META.txt');
     //   심은 **판별형**이어야 한다: 모르는 하위명령에는 로그아웃 문구가 아니라 usage 오류를 낸다.
     //   그러지 않으면 상속 args 를 엉뚱한 값으로 바꾸는 변이가 같은 출력을 내며 통과한다(검수 지적).
-    const codexBody = isWin
-      ? '@echo off\r\nif "%1"=="--version" (echo codex-shim 1.0.0& exit /b 0)\r\nif "%1"=="login" (if "%2"=="status" (echo You are not logged in. Run codex login.& exit /b 1))\r\necho usage: codex [--version^|login status]\r\nexit /b 2\r\n'
-      : '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-shim 1.0.0"; exit 0; fi\nif [ "$1" = "login" ] && [ "$2" = "status" ]; then echo "You are not logged in. Run codex login."; exit 1; fi\necho "usage: codex [--version|login status]"\nexit 2\n';
-    if (isWin) {
-      fs.writeFileSync(path.join(shimDir, 'codex.cmd'), codexBody);
-      fs.writeFileSync(path.join(shimDir, 'claude.cmd'), '@echo off\r\nif "%1"=="--version" (echo claude-shim 1.0.0& exit /b 0)\r\necho ok\r\nexit /b 0\r\n');
-      fs.writeFileSync(path.join(shimDir, 'evil.cmd'), '@echo off\r\nif "%1"=="--version" (echo evil-shim 1.0.0& exit /b 0)\r\n>"' + pwned + '" echo ran\r\nexit /b 0\r\n');
-    } else {
-      const wsh = (n, body) => { const p = path.join(shimDir, n); fs.writeFileSync(p, body); try { fs.chmodSync(p, 0o755); } catch {} };
-      wsh('codex', codexBody);
-      wsh('claude', '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "claude-shim 1.0.0"; exit 0; fi\necho ok\nexit 0\n');
-      wsh('evil', '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "evil-shim 1.0.0"; exit 0; fi\necho ran > "' + pwned + '"\nexit 0\n');
-    }
+    writePortableCliShim(shimDir, 'codex', [
+      `const argv = process.argv.slice(2);`,
+      `if (argv[0] === '--version') { console.log('codex-shim 1.0.0'); process.exit(0); }`,
+      `if (argv[0] === 'login' && argv[1] === 'status') { console.log('You are not logged in. Run codex login.'); process.exit(1); }`,
+      `console.log('usage: codex [--version|login status]'); process.exit(2);`,
+    ].join('\n'));
+    writePortableCliShim(shimDir, 'claude', [
+      `const argv = process.argv.slice(2);`,
+      `if (argv[0] === '--version') console.log('claude-shim 1.0.0'); else console.log('ok');`,
+    ].join('\n'));
+    writePortableCliShim(shimDir, 'evil', [
+      `const fs = require('fs'); const argv = process.argv.slice(2);`,
+      `if (argv[0] === '--version') { console.log('evil-shim 1.0.0'); process.exit(0); }`,
+      `fs.writeFileSync(${JSON.stringify(pwned)}, 'ran\\n');`,
+    ].join('\n'));
     const env = Object.assign({}, process.env, {
       PATH: shimDir + path.delimiter + process.env.PATH,
       LEERNESS_ENABLE_CODEX: '1', LEERNESS_ENABLE_CLAUDE: '1', LEERNESS_ENABLE_EVIL: '1',
@@ -9115,13 +9198,13 @@ total++;
     const idQ = ((RS(['task', 'add', 'probe 없는 작업', '--path', d, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
     fs.writeFileSync(path.join(d, 'app.js'), 'console.error("BUG_HERE"); process.exit(3);');
     const stReg = RS(['bugfix', 'start', idP, '--repro', 'node app.js', '--expect-bad', 'BUG_HERE', '--path', d, '--json']);
-    const storeF = path.join(d, '.harness', 'bugfix-receipts.json');
+    const storeF = path.join(d, '.leerness', 'bugfix-receipts.json');
     fs.writeFileSync(storeF, CORRUPT);
     const forced = RS(['bugfix', 'drop', idP, '--force', '--path', d]);
     //   파일이 사라지면 예외가 아니라 **단언 실패**로 떨어져야 한다 — 크래시는 "검증한 척"이라 사유를 못 남긴다.
     let survived = false;
     try { survived = fs.readFileSync(storeF, 'utf8') === CORRUPT; } catch { survived = false; }
-    const noBackups = fs.readdirSync(path.join(d, '.harness')).filter(f => /corrupt-/.test(f)).length === 0;
+    const noBackups = fs.readdirSync(path.join(d, '.leerness')).filter(f => /corrupt-/.test(f)).length === 0;
     //   셋업이 조용히 실패하면 아래 단언이 공허해진다 — 등록 성공을 먼저 못 박는다.
     dbg.setup = stReg.s;
     E1 = stReg.s === 0 && forced.s === 1 && survived && noBackups
@@ -9158,7 +9241,7 @@ total++;
     RS(['init', dB, '--yes', '--language', 'ko', '--no-stale-check']);
     RS(['toggle', 'set', 'bugfix-receipt', 'on', '--path', dB]);
     const idB = ((RS(['task', 'add', '대상 작업', '--path', dB, '--json', '--no-review']).o.match(/"id"\s*:\s*"([^"]+)"/)) || [])[1];
-    fs.writeFileSync(path.join(dB, '.harness', 'bugfix-receipts.json'), CORRUPT);
+    fs.writeFileSync(path.join(dB, '.leerness', 'bugfix-receipts.json'), CORRUPT);
     const cross = RS(['task', 'update', idB, '--status', 'done', '--path', dB], { cwd: d });
     //   판별: 회복 문장은 스토어 절대경로를 담으므로 그것만 보면 `--path` 부착이 무력화돼도 통과한다.
     //   그래서 **다른 사유**(probe 가 아직 실패 — 공통 푸터가 붙는 코드)로 한 번 더 막고, 그 푸터가
@@ -9176,7 +9259,7 @@ total++;
     try { const td = JSON.parse(fs.readFileSync(todoC, 'utf8')); td.forEach(t => { t.status = 'completed'; }); fs.writeFileSync(todoC, JSON.stringify(td)); } catch {}
     const stillSync = RS(['task', 'sync', '--from', todoC, '--path', dC2], { cwd: d });
     const footer = (((stillJson || {}).recovery) || []).find(l => /탈출구/.test(l)) || '';
-    E3 = !!idB && cross.s === 1 && cross.o.includes(path.join(dB, '.harness')) && !cross.o.includes(path.join(d, '.harness'))
+    E3 = !!idB && cross.s === 1 && cross.o.includes(path.join(dB, '.leerness')) && !cross.o.includes(path.join(d, '.leerness'))
       && regC.s === 0 && stillPlain.s === 1
       //   푸터가 존재하고 · 대상 절대경로를 달고 있고 · 세 표면이 같은 문장을 쓴다
       && !!footer && footer.includes(dC2) && /--path/.test(footer)
@@ -9195,7 +9278,7 @@ total++;
         const ar = RS(['provider', 'add', 'codex', '--bin', over, '--path', w]);
         let saved = false;
         try {
-          const raw = JSON.parse(fs.readFileSync(path.join(w, '.harness', 'providers.json'), 'utf8'));
+          const raw = JSON.parse(fs.readFileSync(path.join(w, '.leerness', 'providers.json'), 'utf8'));
           saved = (Array.isArray(raw) ? raw : (raw.providers || [])).some(p => p.id === 'codex' && p.bin === over);
         } catch {}
         if (ar.s !== 0 || !saved) return null;
@@ -9226,7 +9309,7 @@ total++;
 
     // ── E5: providers.json 은 **실행 가능한 값을 주는 통로가 아니다**(authCheck · versionArgs 둘 다).
     const inject = (w, id, patch) => {
-      const pf = path.join(w, '.harness', 'providers.json');
+      const pf = path.join(w, '.leerness', 'providers.json');
       const raw = JSON.parse(fs.readFileSync(pf, 'utf8'));
       (Array.isArray(raw) ? raw : (raw.providers || [])).forEach(p => { if (p.id === id) Object.assign(p, patch); });
       fs.writeFileSync(pf, JSON.stringify(raw, null, 2));
@@ -9262,9 +9345,7 @@ total++;
     const ktA = (((kJ || {}).agents) || []).find(a => a.id === 'ktool') || {};
     //   거부 시 폴백이 **남의 하위명령을 다른 bin 에 쏘면 안 된다**(`kubectl copilot --version`).
     //   심이 받은 인자를 그대로 출력하므로 version 문자열로 관측한다 — 사유 필드만 보면 구분되지 않는다.
-    const echoBin = isWin ? 'echoargs.cmd' : 'echoargs';
-    if (isWin) fs.writeFileSync(path.join(shimDir, echoBin), '@echo off\r\necho ARGS %*\r\nexit /b 0\r\n');
-    else { const p = path.join(shimDir, echoBin); fs.writeFileSync(p, '#!/bin/sh\necho "ARGS $@"\nexit 0\n'); try { fs.chmodSync(p, 0o755); } catch {} }
+    writePortableCliShim(shimDir, 'echoargs', `console.log('ARGS ' + process.argv.slice(2).join(' '));`);
     RS(['provider', 'add', 'copilot', '--bin', 'echoargs', '--path', wF]);
     inject(wF, 'copilot', { versionArgs: ['--version', '&', 'x'] });
     const cpJ = JS(RS(['agents', 'check', '--path', wF, '--json']));
@@ -9292,7 +9373,7 @@ s.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[3],String(s.address().p
       //   대상은 **루프백 서버**이므로 "테스트가 네트워크에 의존하지 않는다"는 보장은 그대로다.
       if (port) RS(['provider', 'sync', `http://127.0.0.1:${port}/c.json`, '--path', wF], { env: Object.assign({}, env, { LEERNESS_OFFLINE: '0' }) });
       try { child.kill(); } catch {}
-      try { return JSON.parse(fs.readFileSync(path.join(wF, '.harness', 'providers.json'), 'utf8')); } catch { return null; }
+      try { return JSON.parse(fs.readFileSync(path.join(wF, '.leerness', 'providers.json'), 'utf8')); } catch { return null; }
     };
     const asList = (raw) => (Array.isArray(raw) ? raw : ((raw && raw.providers) || []));
     let syncedVa = null, syncSkippedBadBin = false;
@@ -9334,7 +9415,7 @@ total++;
     // #3 U+FFFD 아카이브 → 복원 거부 + 아카이브 무변경
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-h9x3-')); _d.push(d);
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
-    const ap = path.join(d, '.harness', 'decisions.archive.md');
+    const ap = path.join(d, '.leerness', 'decisions.archive.md');
     const bytes = Buffer.from('# Decisions archive\n\n## 제거 2026-07-25 (target: "Trunc")\n\n### 2026-07-25 — Trunc\n- Decision: 데이터', 'utf8');
     fs.writeFileSync(ap, bytes.slice(0, bytes.length - 1));
     const before = fs.readFileSync(ap);
@@ -9345,13 +9426,13 @@ total++;
     cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'leerness_state_show', arguments: { path: ghost } } }) + '\n' });
     const ghostOk = !fs.existsSync(ghost);
     cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'leerness_pulse', arguments: { path: d } } }) + '\n' });
-    const statsOk = fs.existsSync(path.join(d, '.harness', 'cache', 'usage-stats.json'));
+    const statsOk = fs.existsSync(path.join(d, '.leerness', 'cache', 'usage-stats.json'));
     // #2b MCP env_detect 는 environment.json 을 쓰지 않음 / CLI 직접 호출은 persist
-    fs.rmSync(path.join(d, '.harness', 'environment.json'), { force: true });
+    fs.rmSync(path.join(d, '.leerness', 'environment.json'), { force: true });
     const envResp = cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], { encoding: 'utf8', timeout: 25000, input: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'leerness_env_detect', arguments: { path: d } } }) + '\n' });
-    const noWriteOk = /snapshot/.test(envResp.stdout) && !fs.existsSync(path.join(d, '.harness', 'environment.json'));
+    const noWriteOk = /snapshot/.test(envResp.stdout) && !fs.existsSync(path.join(d, '.leerness', 'environment.json'));
     cp.spawnSync(process.execPath, [CLI, 'env', 'detect', d, '--json'], { encoding: 'utf8', timeout: 20000 });
-    const cliPersistOk = fs.existsSync(path.join(d, '.harness', 'environment.json'));
+    const cliPersistOk = fs.existsSync(path.join(d, '.leerness', 'environment.json'));
     // #8 긴/이상 URL 파생 id — raw ENOENT 없이 저장, 정상 id 는 종전과 동일
     const A = (u) => cp.spawnSync(process.execPath, [CLI, 'api-skill', 'add', u, '--skeleton', '--no-crawl', '--path', d, '--json'], { encoding: 'utf8', timeout: 25000 });
     let longOk = false, normOk = false;
@@ -9383,8 +9464,8 @@ total++;
     const clOk = cl && cl.ambiguous === true && Array.isArray(cl.questions) && cl.questions.length >= 2;
     const ad = inner(MCP('leerness_preview', { action: 'add', title: '신규 페이지 디자인', design: '밝게', path: d }));
     const mk = inner(MCP('leerness_preview', { action: 'mockup', id: 'P-0001', path: d }));
-    const flowOk = ad && ad.id === 'P-0001' && mk && mk.mockupPath === '.harness/previews/P-0001-mockup.html'
-      && fs.existsSync(path.join(d, '.harness', 'previews', 'P-0001-mockup.html'));
+    const flowOk = ad && ad.id === 'P-0001' && mk && mk.mockupPath === '.leerness/previews/P-0001-mockup.html'
+      && fs.existsSync(path.join(d, '.leerness', 'previews', 'P-0001-mockup.html'));
     const ap = inner(MCP('leerness_preview', { action: 'approve', id: 'P-0001', path: d }));
     const noteErr = MCP('leerness_preview', { action: 'revise', id: 'P-0001', path: d });
     const contractOk = ap && ap.status === 'approved' && noteErr && noteErr.isError === true;
@@ -9410,7 +9491,7 @@ total++;
     const T = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { encoding: 'utf8', timeout: 20000 });
     const J = (r) => { try { return JSON.parse(r.stdout); } catch { return null; } };
     // F1: 객체 루트 teams.json → 변경 거부 + 원본 보존
-    const tj = path.join(d, '.harness', 'teams.json');
+    const tj = path.join(d, '.leerness', 'teams.json');
     fs.writeFileSync(tj, '{"teams":[{"id":"preserved","members":["codex"]}],"metadata":{"revision":7}}');
     const beforeT = fs.readFileSync(tj, 'utf8');
     const f1a = T(['team', 'add', 'newteam', '--members', 'claude', '--json']);
@@ -9430,7 +9511,7 @@ total++;
     const depJson = T(['team', 'deploy', 'alpha', '--json']);
     const f4depOk = depHuman.status === depJson.status && depHuman.status === 1 && J(depJson) != null;
     // F2: 무효 constraint 거부 + dedup
-    const _pcf = path.join(d, '.harness', 'platform-constraints.json');   // 무효 add 는 파일 자체를 안 만들 수 있음(부재 = 미저장)
+    const _pcf = path.join(d, '.leerness', 'platform-constraints.json');   // 무효 add 는 파일 자체를 안 만들 수 있음(부재 = 미저장)
     const f2malOk = T(['constraints', 'add', 'x1', '--alias', 'x1', '--constraint', 'rate-limit', '--json']).status === 1
       && T(['constraints', 'add', 'x2', '--alias', 'x2', '--constraint', 'auth:', '--json']).status === 1
       && !(fs.existsSync(_pcf) && fs.readFileSync(_pcf, 'utf8').includes('"x1"'));
@@ -9438,7 +9519,7 @@ total++;
     const dup2 = J(T(['constraints', 'add', 'dp', '--alias', 'dp', '--constraint', 'auth:token required', '--json']));
     const f2dupOk = dup2 && dup2.constraints.length === 1;
     // F3: 손상 constraints store 표면화
-    fs.writeFileSync(path.join(d, '.harness', 'platform-constraints.json'), '{"platforms":');
+    fs.writeFileSync(path.join(d, '.leerness', 'platform-constraints.json'), '{"platforms":');
     const f3Ok = J(T(['constraints', 'list', '--json'])).corruptStore === true
       && J(T(['constraints', 'check', 'stripe API', '--json'])).corruptStore === true;
     // F5: agents recommend 존재
@@ -9449,7 +9530,7 @@ total++;
     const f6Ok = cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'SPEC.md'), path.join(d, 'impl.js'), '--json'], { encoding: 'utf8', timeout: 20000 }).status === 1
       && cp.spawnSync(process.execPath, [CLI, 'contract', 'verify', path.join(d, 'SPEC.md'), path.join(d, 'impl.js'), '--json', '--allow-empty'], { encoding: 'utf8', timeout: 20000 }).status === 0;
     // (검수 #3) 배열형 platforms 도 손상 표면화 + add 거부(metadata 보존)
-    const pc = path.join(d, '.harness', 'platform-constraints.json');
+    const pc = path.join(d, '.leerness', 'platform-constraints.json');
     fs.writeFileSync(pc, '{"platforms":[],"metadata":{"revision":7}}');
     const beforePc = fs.readFileSync(pc, 'utf8');
     const arrOk = J(T(['constraints', 'list', '--json'])).corruptStore === true
@@ -9477,7 +9558,7 @@ total++;
     // P1-A: 비-T/M/D 행(R-/UR-)이 쓰기 경로에서 소실되면 안 된다 + 클래스 가드
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-a-')); _d.push(d);
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
-    const pt = path.join(d, '.harness', 'progress-tracker.md');
+    const pt = path.join(d, '.leerness', 'progress-tracker.md');
     fs.writeFileSync(pt, fs.readFileSync(pt, 'utf8').trimEnd() + '\n| R-0001 | done | 사용자 이력 | 증거 | - | 2026-05-07 |\n| UR-0002 | done | 다른 요청 | 증거2 | - | 2026-05-07 |\n');
     const rowsOf = () => (fs.readFileSync(pt, 'utf8').match(/^\|\s*[A-Z]{1,3}-\d{3,}\s*\|/gm) || []).length;
     const beforeRows = rowsOf();
@@ -9487,7 +9568,7 @@ total++;
     // 클래스 가드: 파서가 못 읽는 행-모양 라인(셀 부족)이 있으면 쓰기 중단 + 원본 보존 (자체 재설계 후 실동작)
     const dG = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-a2-')); _d.push(dG);
     cp.spawnSync(process.execPath, [CLI, 'init', dG, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
-    const ptG = path.join(dG, '.harness', 'progress-tracker.md');
+    const ptG = path.join(dG, '.leerness', 'progress-tracker.md');
     fs.appendFileSync(ptG, '| R-0007 | done | 셀부족행 |\n');
     const beforeG = fs.readFileSync(ptG, 'utf8');
     const guardR = cp.spawnSync(process.execPath, [CLI, 'task', 'add', 'x', '--path', dG], { encoding: 'utf8', timeout: 20000 });
@@ -9495,7 +9576,7 @@ total++;
     // (검수 #2) 무관한 참조표는 task 로 흡수되지 않고, 표 뒤 사용자 콘텐츠는 재작성에도 보존
     const dS = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-a3-')); _d.push(dS);
     cp.spawnSync(process.execPath, [CLI, 'init', dS, '--yes', '--minimal', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
-    const ptS = path.join(dS, '.harness', 'progress-tracker.md');
+    const ptS = path.join(dS, '.leerness', 'progress-tracker.md');
     fs.appendFileSync(ptS, '\n## 참고표\n\n| Code | Owner | Note |\n|---|---|---|\n| API-123 | owner | 무관 참조 |\n');
     let absorbed = true;
     try { absorbed = (JSON.parse(cp.spawnSync(process.execPath, [CLI, 'task', 'list', '--path', dS, '--json'], { encoding: 'utf8', timeout: 20000 }).stdout).tasks || []).some(t => t.id === 'API-123'); } catch {}
@@ -9504,9 +9585,9 @@ total++;
     // P1-B: stale 프로젝트에서도 handoff --json 은 순수 JSON (사람용 drift 배너 미오염)
     const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-b-')); _d.push(d2);
     cp.spawnSync(process.execPath, [CLI, 'init', d2, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
-    const hp = path.join(d2, '.harness', 'session-handoff.md');
+    const hp = path.join(d2, '.leerness', 'session-handoff.md');
     if (fs.existsSync(hp)) fs.writeFileSync(hp, fs.readFileSync(hp, 'utf8').replace(/Last generated:.*/, 'Last generated: 2026-01-01T00:00:00.000Z'));
-    const pt2 = path.join(d2, '.harness', 'progress-tracker.md');
+    const pt2 = path.join(d2, '.leerness', 'progress-tracker.md');
     if (fs.existsSync(pt2)) fs.writeFileSync(pt2, fs.readFileSync(pt2, 'utf8').replace(/2026-\d\d-\d\d/g, '2026-01-01'));
     const hj = cp.spawnSync(process.execPath, [CLI, 'handoff', d2, '--json'], { encoding: 'utf8', timeout: 40000, maxBuffer: 32 * 1024 * 1024 });
     let jsonPure = false; try { JSON.parse(hj.stdout); jsonPure = true; } catch {}
@@ -9537,7 +9618,7 @@ total++;
     // P1-E: 코어 문서가 대량 사라진 설치를 audit 이 healthy 로 보고하면 안 된다(integrity 와 정합)
     const d6 = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-dog-e-')); _d.push(d6);
     cp.spawnSync(process.execPath, [CLI, 'init', d6, '--yes', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
-    const hd = path.join(d6, '.harness');
+    const hd = path.join(d6, '.leerness');
     const keep = new Set(['progress-tracker.md', 'HARNESS_VERSION', 'plan.md']);
     for (const f of fs.readdirSync(hd)) { if (!keep.has(f)) { try { fs.rmSync(path.join(hd, f), { recursive: true, force: true }); } catch {} } }
     let auditOk = false;
@@ -9591,7 +9672,7 @@ total++;
       && p2 && p2.ok === false && /exit 0|통과시킴/.test(_rz(p2))      // 심어둔 결함을 못 잡음
       && p3 && p3.ok === false && p3.expectMatched === false && /사유 불일치|런처/.test(_rz(p3));
     // 지문(stale): 캘리브레이션 후 명령이 바뀌면 신뢰 철회
-    const store = path.join(d, '.harness', 'referees.json');
+    const store = path.join(d, '.leerness', 'referees.json');
     const js = JSON.parse(fs.readFileSync(store, 'utf8'));
     js.find(x => x.id === 'okref').bad = N('process.exit(1)');
     fs.writeFileSync(store, JSON.stringify(js, null, 2));
@@ -9658,11 +9739,11 @@ total++;
     const skillOk = Object.keys(CAT).length === 2 && !CAT['commerce-api'] && CAT['feature-implementation']
       && Object.values(CAT).every(v => v.verification !== 'passed');
     // 기존 설치분 보존(비파괴): 카탈로그에서 빠진 스킬도 락에 남는다
-    fs.mkdirSync(path.join(d, '.harness', 'skills', 'commerce-api'), { recursive: true });
-    fs.writeFileSync(path.join(d, '.harness', 'skills', 'commerce-api', 'skill.json'), '{"name":"commerce-api"}');
+    fs.mkdirSync(path.join(d, '.leerness', 'skills', 'commerce-api'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.leerness', 'skills', 'commerce-api', 'skill.json'), '{"name":"commerce-api"}');
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--skills', 'recommended', '--no-env', '--no-stale-check'], { encoding: 'utf8', timeout: 40000 });
     let keepOk = false;
-    try { keepOk = Object.keys(JSON.parse(fs.readFileSync(path.join(d, '.harness', 'skills-lock.json'), 'utf8')).installedSkills).includes('commerce-api') && fs.existsSync(path.join(d, '.harness', 'skills', 'commerce-api')); } catch {}
+    try { keepOk = Object.keys(JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'skills-lock.json'), 'utf8')).installedSkills).includes('commerce-api') && fs.existsSync(path.join(d, '.leerness', 'skills', 'commerce-api')); } catch {}
     // 라이브 미리보기: mode 미설정 → 질문 노출, self 기본
     R(['preview', 'add', '새 페이지', '--design', '밝게']);
     R(['preview', 'mockup', 'P-0001']);
@@ -9751,7 +9832,7 @@ total++;
   try {
     fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'p', version: '0.1.0' }));
     R(['init', d, '--yes', '--language', 'ko', '--skills', 'recommended']);
-    const csp = path.join(d, '.harness', 'current-state.md');
+    const csp = path.join(d, '.leerness', 'current-state.md');
     const authored = ['# Current State', 'Updated: 2026-08-01', '', '## Now', '- 사람이 쓴 진행 메모', '- 미해결 항목 1건', '',
       '## Next', '- 사람이 쓴 다음 계획', '', '## Blockers', '- 사람이 쓴 차단 사유', '',
       '## 결정 로그', '- 2026-07-28: 재시도 상한 5회', '', '## 인수인계 메모', '- docs/x.md 부터 읽을 것', ''].join('\n');
@@ -9834,7 +9915,7 @@ total++;
     W('leerness.html', '<style>:root{--panel:#111;--mut:#888}</style><div class="px-3 py-1 rounded-lg">dash</div>\n');
     const id = (/(P-\d{4,})/.exec(out(R(['preview', 'add', '장바구니 개편', '--design', '기존 카드 재사용']))) || [])[1];
     const mk = out(R(['preview', 'mockup', id, '--target', 'src/pages/Cart.tsx']));
-    const html = fs.readFileSync(path.join(d, '.harness', 'previews', id + '-mockup.html'), 'utf8');
+    const html = fs.readFileSync(path.join(d, '.leerness', 'previews', id + '-mockup.html'), 'utf8');
     const materials = /--brand-500:\s*#2563eb/.test(html) && /Button/.test(html) && /Card/.test(html) && /rounded-lg/.test(html) && /tailwind/.test(html);
     const targeted = /Cart\.tsx/.test(html) && /p-6 rounded-lg bg-surface-1/.test(html) && /&lt;main&gt;/.test(html);
     //   leerness 가 만든 대시보드 변수를 사용자 토큰인 척 싣지 않는다(실측: 실제 프로젝트마다 3~10개 유령 토큰이 있었다)
@@ -9842,7 +9923,7 @@ total++;
     const offline = !/(?:src|href)\s*=\s*["'](?!#)/i.test(html) && !/<script/i.test(html);
     //   대상이 루트 밖이면 읽지 않는다
     R(['preview', 'mockup', id, '--target', '../../etc/passwd', '--force']);
-    const esc = fs.readFileSync(path.join(d, '.harness', 'previews', id + '-mockup.html'), 'utf8');
+    const esc = fs.readFileSync(path.join(d, '.leerness', 'previews', id + '-mockup.html'), 'utf8');
     const guarded = /루트 밖/.test(esc);
     const reports = /재료: 컴포넌트 \d+/.test(mk);
     Object.assign(dbg, { materials, targeted, noOwn, offline, guarded, reports, len: html.length });
@@ -9868,7 +9949,7 @@ total++;
     W('src/components/Button.tsx', 'export function Button(){ return <button className="px-3 py-1 rounded-lg">go</button> }\n');
     const id = (/(P-\d{4,})/.exec(out(R(['preview', 'add', '장바구니', '--design', 'x']))) || [])[1];
     R(['preview', 'mockup', id]);
-    const mp = path.join(d, '.harness', 'previews', id + '-mockup.html');
+    const mp = path.join(d, '.leerness', 'previews', id + '-mockup.html');
     // 안 그린 시안을 승인하면 계약이 비었다고 말한다(조용히 빈 계약을 만들지 않는다)
     const ap0 = out(R(['preview', 'approve', id]));
     const warnsEmpty = /아직 안 그렸습니다/.test(ap0);
@@ -9879,7 +9960,7 @@ total++;
     fs.writeFileSync(mp, html.replace(/(leerness:draw-start[^>]*-->)[\s\S]*?(<!-- leerness:draw-end)/, `$1${drawn}$2`));
     const ap = out(R(['preview', 'approve', id]));
     const fixed = /계약 고정: 클래스 [1-9]/.test(ap);
-    const store = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'previews.json'), 'utf8'));
+    const store = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'previews.json'), 'utf8'));
     const rec = ((store.previews || store) || []).find(x => x.id === id);
     const stored = !!(rec && rec.contract && rec.contract.classes.includes('topbar') && rec.contract.tokens.includes('--brand-500'))
       && !rec.contract.classes.some(c => ['mock', 'notes', 'chips', 'placeholder'].includes(c));   // 스캐폴드 장식은 계약이 아니다
@@ -9933,7 +10014,7 @@ total++;
     dbg.jsonOk = jsonOk && !W.test(jr.stdout || '');
     // 등호형(--flag=value)이 다음 토큰까지 먹지 않는다 — 인라인 목록을 공유 집합으로 바꾸며 내가 만든 회귀(codex 검수 #5~#8)
     R(['preview', 'add', '--select=ZZEQ', 'equals title']);
-    const pvp = path.join(d, '.harness', 'previews.json');
+    const pvp = path.join(d, '.leerness', 'previews.json');
     const pvt = fs.existsSync(pvp) ? fs.readFileSync(pvp, 'utf8') : '';
     dbg.equals = pvt.includes('equals title') && !pvt.includes('ZZEQ');
     const rEq = R(['agents', 'route', '--tier=normal', 'fix the parser']);
@@ -10005,7 +10086,7 @@ total++;
     for (const x of [cwdDir, target]) { fs.mkdirSync(x, { recursive: true }); fs.writeFileSync(path.join(x, 'package.json'), '{"name":"x","version":"0.1.0"}'); }
     const R = (a, cwd) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: cwd || cwdDir, encoding: 'utf8', timeout: 120000 });
     R(['init', cwdDir, '--yes'], cwdDir); R(['init', target, '--yes'], target);
-    const tp = (x) => path.join(x, '.harness', 'tech-profile.json');
+    const tp = (x) => path.join(x, '.leerness', 'tech-profile.json');
     const clear = (...ps) => { for (const p of ps) { try { fs.unlinkSync(p); } catch {} } };
     clear(tp(cwdDir), tp(target)); R(['tech', target]);
     dbg.wroteTarget = fs.existsSync(tp(target)) && !fs.existsSync(tp(cwdDir));
@@ -10085,7 +10166,7 @@ total++;
     const b0 = J(['scan', 'secrets', '--json']);
     dbg.before = !!b0 && b0.unacknowledgedCount === 2 && b0.ok === false;
     const rec = J(['scan', 'secrets', '--baseline', '--json']);
-    const stored = fs.readFileSync(path.join(d, '.harness', 'secret-baseline.json'), 'utf8');
+    const stored = fs.readFileSync(path.join(d, '.leerness', 'secret-baseline.json'), 'utf8');
     dbg.recorded = !!rec && rec.recorded === 2;
     dbg.noPlaintext = !stored.includes('FakeFixtureKey');          // 원문 시크릿을 베이스라인에 남기지 않는다
     const b1 = J(['scan', 'secrets', '--json']);
@@ -10103,7 +10184,7 @@ total++;
     dbg.rearms = !!b3 && b3.unacknowledgedCount === 1 && b3.acknowledgedCount === 1
       && Array.isArray(b3.staleBaseline) && b3.staleBaseline.length === 1;
     // 대조군 ③ 손상된 베이스라인은 fail-safe(인정 0) — 오경보는 나도 누락은 안 난다
-    fs.writeFileSync(path.join(d, '.harness', 'secret-baseline.json'), '{ broken json');
+    fs.writeFileSync(path.join(d, '.leerness', 'secret-baseline.json'), '{ broken json');
     const b4 = J(['scan', 'secrets', '--json']);
     dbg.failSafe = !!b4 && b4.acknowledgedCount === 0 && b4.unacknowledgedCount === 2;
     // 대조군 ④ (codex 검수 HIGH#1) 표시용 snippet 은 32자로 잘린다 — 그걸 해싱하면 앞 32자가 같은
@@ -10146,9 +10227,9 @@ total++;
       const d = path.join(arena, tag); fs.mkdirSync(d, { recursive: true });
       fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
       cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 120000 });
-      fs.writeFileSync(path.join(d, '.harness', 'agent-reminders.md'), body);
+      fs.writeFileSync(path.join(d, '.leerness', 'agent-reminders.md'), body);
       cp.spawnSync(process.execPath, [CLI, 'handoff', '.', '--writeback'], { cwd: d, encoding: 'utf8', timeout: 180000 });
-      return path.join(d, '.harness', 'agent-reminders.md');
+      return path.join(d, '.leerness', 'agent-reminders.md');
     };
     const B = '# 🔔 자동 reminder\ndrift critical 감지\n';
     const human = mk('human', '# 내 리마인더\nHUMAN-KEEPME 사용자가 직접 쓴 줄\n');
@@ -10223,13 +10304,13 @@ total++;
     const pu2 = require(path.join(__dirname, '..', 'lib', 'pure-utils.js'));
     const nx = '# T\ncanon\n';
     const pv = '# T\ncanon\nNEWEST-PREPENDED\n' + Array.from({ length: 40 }, (_, i) => `- old ${i}`).join('\n') + '\n';
-    const mg = pu2._managedMerge('CLAUDE.md', nx, pv, '.harness/archive', null, { preservedCap: 5 });
+    const mg = pu2._managedMerge('CLAUDE.md', nx, pv, '.leerness/archive', null, { preservedCap: 5 });
     dbg.noPreservedDrop = mg.includes('NEWEST-PREPENDED') && mg.includes('- old 0') && mg.includes('- old 39');
     // strict 는 제거됐다 — 없는 등급을 광고하지 않는다
     dbg.noFakeTier = !/strict/.test((R(sw, ['mode']).stdout) || '') && (J(sw, ['mode', '--json']) || {}).modes.length === 2;
     // 측정은 읽기여야 한다 — budget 이 last-handoff stamp / tech-profile 을 바꾸면 세션 탐지가 오염된다
     //   (자체 적대 검사로 실제 발견: budget 한 번이 두 파일을 바꿨다)
-    const hSnap = (x) => { const m = {}; (function w(y, rel) { for (const e of fs.readdirSync(y, { withFileTypes: true })) { const p = path.join(y, e.name); const r = rel + '/' + e.name; if (e.isDirectory()) w(p, r); else if (!/environment\.json|cache\//.test(r)) { try { m[r] = fs.readFileSync(p, 'utf8'); } catch { m[r] = 'x'; } } } })(path.join(x, '.harness'), ''); return m; };
+    const hSnap = (x) => { const m = {}; (function w(y, rel) { for (const e of fs.readdirSync(y, { withFileTypes: true })) { const p = path.join(y, e.name); const r = rel + '/' + e.name; if (e.isDirectory()) w(p, r); else if (!/environment\.json|cache\//.test(r)) { try { m[r] = fs.readFileSync(p, 'utf8'); } catch { m[r] = 'x'; } } } })(path.join(x, '.leerness'), ''); return m; };
     const preB = hSnap(std); R(std, ['context', 'budget']); const postB = hSnap(std);
     dbg.budgetReadOnly = Object.keys({ ...preB, ...postB }).every(k => preB[k] === postB[k]);
     // 예산 초과는 조용히 넘어가지 않는다
@@ -10283,8 +10364,8 @@ total++;
     dbg.signalKept = /헤드라인/.test(h1) && /toggle set full-reread on/.test(h1);
     // 토글은 **지시문만** 끈다 — 지속 상태를 바꾸면 계약 위반이다(검수 MEDIUM#9: double-verify OFF 가
     //   next-action 큐를 지웠다). 특정 파일에 기대면 그 파일이 안 생기는 픽스처에서 단언이 공허해지므로
-    //   (실측: 이 픽스처에선 큐가 0B/0B 라 판별력이 없었다) **.harness 전체를 스냅샷 대조**한다.
-    const hs = (x) => { const m = {}; (function w(y, rel) { for (const e of fs.readdirSync(y, { withFileTypes: true })) { const p = path.join(y, e.name); const r = rel + '/' + e.name; if (e.isDirectory()) w(p, r); else if (!/environment\.json|last-handoff\.json|cache\/|toggles\.json|pre-wake-report\.json/.test(r)) { try { m[r] = fs.readFileSync(p, 'utf8'); } catch { m[r] = 'x'; } } } })(path.join(x, '.harness'), ''); return m; };
+    //   (실측: 이 픽스처에선 큐가 0B/0B 라 판별력이 없었다) **.leerness 전체를 스냅샷 대조**한다.
+    const hs = (x) => { const m = {}; (function w(y, rel) { for (const e of fs.readdirSync(y, { withFileTypes: true })) { const p = path.join(y, e.name); const r = rel + '/' + e.name; if (e.isDirectory()) w(p, r); else if (!/environment\.json|last-handoff\.json|cache\/|toggles\.json|pre-wake-report\.json/.test(r)) { try { m[r] = fs.readFileSync(p, 'utf8'); } catch { m[r] = 'x'; } } } })(path.join(x, '.leerness'), ''); return m; };
     R(['toggle', 'set', 'double-verify', 'on']); R(['handoff', '.']);
     const stOn = hs(d);
     R(['toggle', 'set', 'double-verify', 'off']); R(['handoff', '.']);
@@ -10328,7 +10409,10 @@ total++;
     const count = () => { try { return fs.readdirSync(sandbox).filter(x => /^(__leerness_|leerness-)/.test(x)).length; } catch { return -1; } };
     const delta = (a) => { const b = count(); R(a); return count() - b; };
     dbg.selftest = delta(['selftest']);
-    dbg.doctor = delta(['doctor']);
+    const beforeDoctorCount = count();
+    const baselineDoctorResult = R(['doctor', '--json']);
+    dbg.doctor = count() - beforeDoctorCount;
+    let baselineDoctor = null; try { baselineDoctor = JSON.parse(baselineDoctorResult.stdout || ''); } catch {}
     dbg.handoff = delta(['handoff', '.']);       // 대조군 — 원래 0
     dbg.audit = delta(['audit']);                // 대조군 — 원래 0
     // 반복해도 누적되지 않는가 (한 번만 0 이고 두 번째부터 새면 의미 없다)
@@ -10340,7 +10424,13 @@ total++;
     R(['doctor']);
     dbg.doctorReadOnly = count() - beforeReport === 0;    // doctor 는 지우지 않는다(사용자 디스크)
     dbg.reportsLeftover = !!dj && !!dj.tmpLeftover && dj.tmpLeftover.count >= 250;
-    dbg.healthyUnaffected = !!dj && dj.healthy === true;   // 잔존은 '문제 감지' 가 아니다
+    // Temp leftovers are advisory: they must not change the health verdict.
+    // Compare against the same environment's baseline instead of assuming all
+    // unrelated diagnostics are healthy on every machine.
+    dbg.healthyUnaffected = !!dj && !!baselineDoctor
+      && dj.healthy === baselineDoctor.healthy
+      && JSON.stringify(dj.selftest && dj.selftest.failed || [])
+        === JSON.stringify(baselineDoctor.selftest && baselineDoctor.selftest.failed || []);
     // codex 검수 LOW#4: **파일**을 "임시 디렉토리" 로 세면 안 된다 (leerness-note.txt 210개는 잔존 0)
     const fbox = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fbox-'));
     for (let i = 0; i < 210; i++) fs.writeFileSync(path.join(fbox, 'leerness-user-note-' + i + '.txt'), 'x');
@@ -10378,7 +10468,7 @@ total++;
     const res = [];
     for (const [tag, body] of Object.entries(kinds)) {
       const d = mk('c-' + tag);
-      const mf = path.join(d, '.harness', 'manifest.json');
+      const mf = path.join(d, '.leerness', 'manifest.json');
       const orig = fs.readFileSync(mf, 'utf8');
       fs.writeFileSync(mf, body);
       const rg = R(d, ['mode']);
@@ -10394,7 +10484,7 @@ total++;
     dbg.corruptHandled = res.length === 3 && res.every(Boolean);
     // 대조군 — 정상 매니페스트는 종전대로 동작하고 기존 필드가 전부 살아남는다
     const good = mk('good');
-    const gmf = path.join(good, '.harness', 'manifest.json');
+    const gmf = path.join(good, '.leerness', 'manifest.json');
     const before = JSON.parse(fs.readFileSync(gmf, 'utf8'));
     const gr = R(good, ['mode']);
     dbg.noFalseAlarm = gr.status === 0 && !/손상/.test((gr.stdout || '') + (gr.stderr || ''));
@@ -10406,7 +10496,7 @@ total++;
     //   손상인데 `mode` 는 exit 1 + corrupt, `context budget` 은 exit 0 + ok 였다 — 같은 파일을 두고 두 표면이 갈렸다.
     //   술어를 공유하지 않으면 "예산 이내" 라는 판정이 읽지 못한 등급의 기본값 위에서 나온다.
     const dsurf = mk('surf');
-    const smf = path.join(dsurf, '.harness', 'manifest.json');
+    const smf = path.join(dsurf, '.leerness', 'manifest.json');
     const sorig = fs.readFileSync(smf, 'utf8');
     fs.writeFileSync(smf, '{ not valid json');
     const rb = R(dsurf, ['context', 'budget', '--json']);
@@ -10437,7 +10527,7 @@ total++;
     const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb });
     const R = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a], { cwd: d, encoding: 'utf8', timeout: 180000, env: ENV });
     const mk = (tag, extra) => { const d = path.join(sb, tag); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}'); R(d, ['init', d, '--yes'].concat(extra || [])); return d; };
-    const M = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, '.harness', 'manifest.json'), 'utf8')); } catch { return {}; } };
+    const M = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'manifest.json'), 'utf8')); } catch { return {}; } };
 
     // 1) 재init 이 등급/설치시각을 되돌리지 않는다 (원래 결함)
     const d1 = mk('keep', ['--mode', 'minimal']);
@@ -10463,7 +10553,7 @@ total++;
 
     // 3) 손상 위 재init 은 복구 경로 — 크래시 없이 경고 + 유효 매니페스트
     const d2 = mk('corrupt', ['--mode', 'minimal']);
-    fs.writeFileSync(path.join(d2, '.harness', 'manifest.json'), '{ broken ]]]');
+    fs.writeFileSync(path.join(d2, '.leerness', 'manifest.json'), '{ broken ]]]');
     const rc = R(d2, ['init', d2, '--yes']);
     const rebuilt = M(d2);
     // '손상' 한 단어로 잡으면 안 된다 — init 이 부르는 state-integrity 점검도 같은 낱말을 쓴다.
@@ -10479,7 +10569,7 @@ total++;
     // 5) codex 검수(재현됨): Object.assign 은 __proto__ 키를 [[Set]] 으로 지나가 **조용히 버린다**.
     //   "남은 필드를 전부 보존" 이 이 라운드의 계약이므로 예외를 두면 계약이 거짓이 된다.
     const d4 = mk('proto');
-    const mf4 = path.join(d4, '.harness', 'manifest.json');
+    const mf4 = path.join(d4, '.leerness', 'manifest.json');
     const j4 = JSON.parse(fs.readFileSync(mf4, 'utf8'));
     fs.writeFileSync(mf4, JSON.stringify(Object.assign({ __PH__: 0 }, j4), null, 2).replace('"__PH__": 0', '"__proto__": {"a":1}') + '\n');
     const rp = R(d4, ['mode', 'set', 'minimal']);
@@ -10555,9 +10645,9 @@ total++;
       //   ⚠ 신규 프로젝트에서는 current-state 가 신선해 audit --fix 가 그 파일을 **아예 쓰지 않는다** —
       //   조건을 만들지 않으면 이 케이스는 조용히 아무것도 관측하지 못한다(변이 시험이 그걸 잡아냈다).
       ['audit --fix', ['audit', '.', '--fix'], (d) => {
-        const cs = path.join(d, '.harness', 'current-state.md');
+        const cs = path.join(d, '.leerness', 'current-state.md');
         if (fs.existsSync(cs)) fs.writeFileSync(cs, fs.readFileSync(cs, 'utf8').replace(/Updated: \d{4}-\d{2}-\d{2}/, 'Updated: 2000-01-01'));
-        const sh = path.join(d, '.harness', 'session-handoff.md');
+        const sh = path.join(d, '.leerness', 'session-handoff.md');
         if (fs.existsSync(sh) && !/Last generated:/.test(fs.readFileSync(sh, 'utf8'))) fs.appendFileSync(sh, '\nLast generated: (자동)\n');
       }],
     ];
@@ -10929,7 +11019,7 @@ total++;
     const agp = path.join(carried, 'AGENTS.md');
     const base = fs.readFileSync(agp, 'utf8');
     const legacy = Array.from({ length: 150 }, (_, i) => `- LEGACY-CARRY-${i} 과거 릴리스 이력 항목 (1.9.${100 + i})`).join('\n');
-    const merged = PU._managedMerge('AGENTS.md', base, base + '\n' + legacy + '\n', '.harness/archive', new Set(), {});
+    const merged = PU._managedMerge('AGENTS.md', base, base + '\n' + legacy + '\n', '.leerness/archive', new Set(), {});
     dbg.writerMadeBlock = merged.includes(PU.PRESERVED_TAG) && merged.includes('LEGACY-CARRY-149');
     fs.writeFileSync(agp, merged);
 
@@ -10957,10 +11047,10 @@ total++;
 
     // ⑤ 백업 존재 판정은 **양방향**으로 움직여야 한다. 한 방향만 보면 상수를 반환해도 통과한다.
     //   (작성 중 실제로 오경보를 냈다 — 안내가 아카이브 '루트' 를 가리키는 형식을 상정하지 않아서였다.)
-    const arch = path.join(carried, '.harness', 'archive', 'leerness-1.0.0-x', 'files');
+    const arch = path.join(carried, '.leerness', 'archive', 'leerness-1.0.0-x', 'files');
     fs.mkdirSync(arch, { recursive: true }); fs.writeFileSync(path.join(arch, 'AGENTS.md'), base);
     const withArch = J(carried, ['context', 'budget']);
-    fs.rmSync(path.join(carried, '.harness', 'archive'), { recursive: true, force: true });
+    fs.rmSync(path.join(carried, '.leerness', 'archive'), { recursive: true, force: true });
     const noArch = J(carried, ['context', 'budget']);
     dbg.archiveBothWays = !!withArch && !!noArch
       && withArch.carried.archive && withArch.carried.archive.exists === true
@@ -10984,7 +11074,7 @@ total++;
     const bagp = path.join(big, 'AGENTS.md');
     const bbase = fs.readFileSync(bagp, 'utf8');
     const huge = Array.from({ length: 1200 }, (_, i) => `- LEGACY-BIG-${i} 과거 릴리스 이력 항목 (1.9.${i})`).join('\n');
-    fs.writeFileSync(bagp, PU._managedMerge('AGENTS.md', bbase, bbase + '\n' + huge + '\n', '.harness/archive', new Set(), {}));
+    fs.writeFileSync(bagp, PU._managedMerge('AGENTS.md', bbase, bbase + '\n' + huge + '\n', '.leerness/archive', new Set(), {}));
     const bStd = J(big, ['context', 'budget']);
     const bRef = bStd && bStd.parts.find(p => p.key === 'referencedDocs');
     const bLines = remLines(big);
@@ -11011,14 +11101,14 @@ total++;
     {
       const p = path.join(en, 'AGENTS.md'); const t = fs.readFileSync(p, 'utf8');
       const extra = Array.from({ length: 200 }, (_, i) => `- CARRY-EN-${i} legacy release note`).join('\n');
-      fs.writeFileSync(p, PU._managedMerge('AGENTS.md', t, t + '\n' + extra + '\n', '.harness/archive', new Set(), { lang: 'en' }));
+      fs.writeFileSync(p, PU._managedMerge('AGENTS.md', t, t + '\n' + extra + '\n', '.leerness/archive', new Set(), { lang: 'en' }));
       fs.appendFileSync(path.join(en, 'CLAUDE.md'), '\n' + 'x'.repeat(40000) + '\n');
     }
     const enOut = String(R(en, ['context', 'budget'], enEnv).stdout || '');
     const enJ = J(en, ['context', 'budget'], enEnv);
     // 손상 경고까지 영어여야 한다 — 사유 문자열이 한국어면 그 줄은 여전히 누출이다(별도 프로젝트로 분리 측정).
     const enCorrupt = mk('en_corrupt', 'en');
-    fs.writeFileSync(path.join(enCorrupt, '.harness', 'manifest.json'), '{ not json');
+    fs.writeFileSync(path.join(enCorrupt, '.leerness', 'manifest.json'), '{ not json');
     const enCorruptOut = String(R(enCorrupt, ['context', 'budget'], enEnv).stdout || '');
     dbg.enClean = enOut.split('\n').filter(l => /[가-힣ㄱ-ㆎ]/.test(l)).length === 0
       && enCorruptOut.split('\n').filter(l => /[가-힣ㄱ-ㆎ]/.test(l)).length === 0
@@ -11036,7 +11126,7 @@ total++;
     for (const f of ['AGENTS.md', 'CLAUDE.md']) {
       const p = path.join(both, f); const t = fs.readFileSync(p, 'utf8');
       const extra = Array.from({ length: f === 'AGENTS.md' ? 140 : 55 }, (_, i) => `- CARRY-${f}-${i} 과거 항목`).join('\n');
-      fs.writeFileSync(p, PU._managedMerge(f, t, t + '\n' + extra + '\n', '.harness/archive', new Set(), {}));
+      fs.writeFileSync(p, PU._managedMerge(f, t, t + '\n' + extra + '\n', '.leerness/archive', new Set(), {}));
     }
     const twoJ = J(both, ['context', 'budget']);
     const pA = twoJ && twoJ.parts.find(p => p.key === 'AGENTS.md');
@@ -11047,7 +11137,7 @@ total++;
       && twoJ.carried.bytes > twoJ.carried.tokens;                               // bytes 가 tokens 의 복사본이 아님(계약 필드 커버리지)
 
     // ⑩ 백업 판정은 이월분을 가진 **모든** 파일을 본다. AGENTS 만 백업된 상태에서 "보관돼 있습니다" 는 거짓이다.
-    const snap2 = path.join(both, '.harness', 'archive', 'leerness-1.0.0-x', 'files');
+    const snap2 = path.join(both, '.leerness', 'archive', 'leerness-1.0.0-x', 'files');
     fs.mkdirSync(snap2, { recursive: true }); fs.writeFileSync(path.join(snap2, 'AGENTS.md'), 'x');
     const partial = J(both, ['context', 'budget']);
     fs.writeFileSync(path.join(snap2, 'CLAUDE.md'), 'x');
@@ -11062,21 +11152,21 @@ total++;
       const outside = path.join(sb, 'outside', 'files'); fs.mkdirSync(outside, { recursive: true });
       fs.writeFileSync(path.join(outside, 'AGENTS.md'), 'x');
       const p = path.join(esc, 'AGENTS.md'); const t = fs.readFileSync(p, 'utf8');
-      fs.writeFileSync(p, PU._managedMerge('AGENTS.md', t, t + '\n- CARRY-ESC\n', '.harness/archive', new Set(), {})
-        .replace('`.harness/archive`', '`../outside`'));
+      fs.writeFileSync(p, PU._managedMerge('AGENTS.md', t, t + '\n- CARRY-ESC\n', '.leerness/archive', new Set(), {})
+        .replace('`.leerness/archive`', '`../outside`'));
     }
     const escJ = J(esc, ['context', 'budget']);
     dbg.noEscape = !!escJ && !!escJ.carried.archive && escJ.carried.archive.exists === false;
 
-    // ⑫ 이월 블록 **안의** `.harness/*.md` 지목은 등급 절감으로 치지 않는다 — 등급을 낮춰도 그 언급은 남기 때문이다.
+    // ⑫ 이월 블록 **안의** `.leerness/*.md` 지목은 등급 절감으로 치지 않는다 — 등급을 낮춰도 그 언급은 남기 때문이다.
     //   독립 검수가 이 머신의 실제 설치본(_bench/v19-demo)에서 옛 문서 목록이 통째로 이월된 형태를 확인했다.
     //   구분하지 않으면 "등급을 낮추면 N tok 이 빠진다" 가 최악의 경우 **전부 허수**가 된다.
     const refc = mk('refcarry');
     {
       const p = path.join(refc, 'AGENTS.md');
-      const stripped = fs.readFileSync(p, 'utf8').replace(/\.harness\//g, 'dot-harness/');   // 관리분에서 지목 제거
+      const stripped = fs.readFileSync(p, 'utf8').replace(/\.leerness\//g, 'dot-harness/');   // 관리분에서 지목 제거
       fs.writeFileSync(p, PU._managedMerge('AGENTS.md', stripped,
-        stripped + '\n- 읽어라: .harness/plan.md\n- 읽어라: .harness/decisions.md\n', '.harness/archive', new Set(), {}));
+        stripped + '\n- 읽어라: .leerness/plan.md\n- 읽어라: .leerness/decisions.md\n', '.leerness/archive', new Set(), {}));
       fs.appendFileSync(path.join(refc, 'CLAUDE.md'), '\n' + 'x'.repeat(60000) + '\n');       // 예산 초과 유도
     }
     const refJ = J(refc, ['context', 'budget']);
@@ -11088,9 +11178,9 @@ total++;
     const refm = mk('refmanaged');
     {
       const p = path.join(refm, 'AGENTS.md');
-      const stripped = fs.readFileSync(p, 'utf8').replace(/\.harness\//g, 'dot-harness/');
-      const withRefs = stripped + '\n- 읽어라: .harness/plan.md\n- 읽어라: .harness/decisions.md\n';
-      fs.writeFileSync(p, PU._managedMerge('AGENTS.md', withRefs, withRefs + '\n- CARRY-FILLER\n', '.harness/archive', new Set(), {}));
+      const stripped = fs.readFileSync(p, 'utf8').replace(/\.leerness\//g, 'dot-harness/');
+      const withRefs = stripped + '\n- 읽어라: .leerness/plan.md\n- 읽어라: .leerness/decisions.md\n';
+      fs.writeFileSync(p, PU._managedMerge('AGENTS.md', withRefs, withRefs + '\n- CARRY-FILLER\n', '.leerness/archive', new Set(), {}));
       fs.appendFileSync(path.join(refm, 'CLAUDE.md'), '\n' + 'x'.repeat(60000) + '\n');
     }
     const refmJ = J(refm, ['context', 'budget']);
@@ -11171,7 +11261,7 @@ total++;
       // 계측 판별력 — 목록이 **첫 줄 표식을 실제로 보여줘야** "위조 없음" 이 의미를 갖는다(무출력은 통과가 아니다)
       if (outs.some(o => o.includes(M + 'A'))) sawFirst++; else bad.push(`${name}:항목미노출`);
       if (outs.some(forged)) bad.push(`${name}:목록위조`);
-      const H = path.join(d, '.harness');
+      const H = path.join(d, '.leerness');
       for (const f of fs.readdirSync(H)) {
         if (f.endsWith('.md') && forged(fs.readFileSync(path.join(H, f), 'utf8'))) bad.push(`${name}:파일오염(${f})`);
       }
@@ -11194,7 +11284,7 @@ total++;
       if (name === 'plan') {
         const d3 = mk();
         R(d3, ['plan', 'add', `진짜 ${M}A`, '--progress', `0%\n### M-9999. 위조 ${M}FORGED\nStatus: planned\nProgress: 0`]);
-        const pf = fs.readFileSync(path.join(d3, '.harness', 'plan.md'), 'utf8');
+        const pf = fs.readFileSync(path.join(d3, '.leerness', 'plan.md'), 'utf8');
         // ⚠ 판정은 **구조**로 한다. 안전화되면 주입 문자열은 `Progress:` 값 안에 한 줄로 남으므로
         //   단순 `M-9999` 부분일치는 고쳐진 뒤에도 참이다(작성 중 실제로 오탐을 냈다).
         if (/^### M-9999\./m.test(pf)) bad.push('plan:progress플래그로_파일위조');
@@ -11220,7 +11310,7 @@ total++;
     {
       // incident — payload 는 **외부 webhook 입력**이다. 목록·처리·후속명령 세 줄 모두 본다.
       const d = mk();
-      const idir = path.join(d, '.harness', 'incidents'); fs.mkdirSync(idir, { recursive: true });
+      const idir = path.join(d, '.leerness', 'incidents'); fs.mkdirSync(idir, { recursive: true });
       fs.writeFileSync(path.join(idir, 'inc-1.json'), JSON.stringify({
         id: 'inc-1', at: new Date().toISOString(), source: 'webhook', status: 'open',
         payload: { error: `실제 ${M}A\n  inc-9999 · 위조 ${M}FORGED` } }, null, 2));
@@ -11294,7 +11384,7 @@ total++;
     for (const [name, file, first, second] of STORES) {
       const d = mk();
       const r1 = R(d, first);
-      const fp = path.join(d, '.harness', file);
+      const fp = path.join(d, '.leerness', file);
       if (r1.status !== 0 || !fs.existsSync(fp)) { bad.push(`${name}:셋업실패`); continue; }   // 조용한 셋업 실패가 '통과' 로 둔갑하지 못하게
       setupOk++;
       fs.writeFileSync(fp, '{ "broken": ');
@@ -11326,7 +11416,7 @@ total++;
       // 오차단 방지 — 정상 스토어에서는 성공해야 하고, **실제로 저장돼야** 한다.
       //   종전엔 exit code 만 봐서 조용한 no-op(성공 코드 + 성공 메시지, 저장 없음)이 통과했다(검수 지적).
       const d2 = mk(); R(d2, first);
-      const fp2 = path.join(d2, '.harness', file);
+      const fp2 = path.join(d2, '.leerness', file);
       const pre = fs.existsSync(fp2) ? fs.readFileSync(fp2, 'utf8') : null;
       if (R(d2, second).status !== 0) bad.push(`${name}:정상스토어_오차단`);
       const post = fs.existsSync(fp2) ? fs.readFileSync(fp2, 'utf8') : null;
@@ -11350,7 +11440,7 @@ total++;
       if (o.split('\n').some(l => l.includes('ZR4F') && !l.includes('ZR4A'))) bad.push(`${name}:개행위조`);
     }
 
-    // ── 전수 대조: `.harness` 아래 **사용자 데이터 JSON 스토어 전부**를 하나씩 손상시키고 변경 명령을 돌린다.
+    // ── 전수 대조: `.leerness` 아래 **사용자 데이터 JSON 스토어 전부**를 하나씩 손상시키고 변경 명령을 돌린다.
     //   표적 사냥으로는 4종만 봤는데, 이 열거식 스윕이 decisions.json · lessons.json 을 더 찾았다
     //   (leerness 가 내세우는 '영구 메모리' 표면이 손상 위에 덮어써져 사라지고 있었다).
     //   목록을 박아 두면 **가드 없는 새 스토어가 추가될 때** 실패한다 — 개별 발견이 아니라 목록을 지키는 가드다.
@@ -11370,14 +11460,14 @@ total++;
       (function w(x, rel) { for (const e of fs.readdirSync(x, { withFileTypes: true })) {
         const p = path.join(x, e.name), r = rel ? rel + '/' + e.name : e.name;
         if (e.isDirectory()) { if (!/cache|archive|skills$/.test(e.name)) w(p, r); }
-        else if (/\.json$/.test(e.name)) stores.push(r); } })(path.join(base, '.harness'), '');
+        else if (/\.json$/.test(e.name)) stores.push(r); } })(path.join(base, '.leerness'), '');
       const userStores = stores.filter(f => !DERIVED.has(path.basename(f)));
       dbg.stores = userStores.length;
       // 계측 판별력 — 스토어가 갑자기 줄면(시드 실패 등) "유실 0" 이 공허해진다. 실측 9종 이상.
       if (userStores.length < 9) bad.push(`스토어열거부족(${userStores.length})`);
       for (const rel of userStores) {
         const d = seeded();
-        const fp = path.join(d, '.harness', rel.replace(/\//g, path.sep));
+        const fp = path.join(d, '.leerness', rel.replace(/\//g, path.sep));
         if (!fs.existsSync(fp)) continue;
         fs.writeFileSync(fp, '{ "broken": ');
         const broken = fs.readFileSync(fp, 'utf8');
@@ -11395,7 +11485,7 @@ total++;
     {
       const codeOf = (r) => { try { return (JSON.parse(String(r.stdout || '').trim()) || {}).code; } catch { return null; } };
       const seedCreds = (d) => R(d, ['creds', 'register', 'svc', '--env-var', 'K']);
-      const corrupt = (d, f) => fs.writeFileSync(path.join(d, '.harness', f), '{ "broken": ');
+      const corrupt = (d, f) => fs.writeFileSync(path.join(d, '.leerness', f), '{ "broken": ');
       // (a) 손상 → store_corrupt 로 진단
       for (const [label, seed, file, act] of [
         ['creds check',      seedCreds, 'credentials.local.json', ['creds', 'check']],
@@ -11530,24 +11620,24 @@ total++;
       for (const shape of ['null', '[]', 'false', '0', '"minimal"']) {
         const dsh = mk(['--mode', 'minimal']);
         const shLen = fs.readFileSync(path.join(dsh, 'CLAUDE.md'), 'utf8').length;
-        fs.writeFileSync(path.join(dsh, '.harness', 'manifest.json'), shape);
+        fs.writeFileSync(path.join(dsh, '.leerness', 'manifest.json'), shape);
         const rsh = cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', dsh], { cwd: dsh, encoding: 'utf8', timeout: 300000, env: ENV });
         if (rsh.status === 0) bad.push(`manifest형상:${shape}에서_중단안함`);
         if (fs.readFileSync(path.join(dsh, 'CLAUDE.md'), 'utf8').length !== shLen) bad.push(`manifest형상:${shape}에서_등급뒤집힘`);
       }
       // 판별력 — 정상 객체(구형: mode 없음)는 통과해야 한다(형상 검사가 과하면 기존 설치가 깨진다)
       const dok = mk(['--mode', 'minimal']);
-      fs.writeFileSync(path.join(dok, '.harness', 'manifest.json'), JSON.stringify({ installedAt: '2026-01-01' }, null, 2));
+      fs.writeFileSync(path.join(dok, '.leerness', 'manifest.json'), JSON.stringify({ installedAt: '2026-01-01' }, null, 2));
       if (cp.spawnSync(process.execPath, [CLI, 'adapter', 'claude', '--path', dok], { cwd: dok, encoding: 'utf8', timeout: 300000, env: ENV }).status !== 0) bad.push('manifest형상:정상객체를_거부');
       // (검수 P2) `export`/`prompt` 는 같은 명령의 별칭이다 — 손상을 구조화해 내야 자동화가 구분한다
       const dex = mk(['--mode', 'minimal']);
-      fs.writeFileSync(path.join(dex, '.harness', 'manifest.json'), 'false');
+      fs.writeFileSync(path.join(dex, '.leerness', 'manifest.json'), 'false');
       const rex = cp.spawnSync(process.execPath, [CLI, 'export', 'claude', '--path', dex, '--json'], { cwd: dex, encoding: 'utf8', timeout: 300000, env: ENV });
       let jex = null; try { jex = JSON.parse(String(rex.stdout || '').trim()); } catch {}
       if (!jex || jex.code !== 'store_corrupt' || rex.status === 0) bad.push(`export별칭:손상코드아님(${jex && jex.code}/${rex.status})`);
       // (검수 P3) `prompt` 도 같은 별칭이다 — `export` 만 검사하면 `prompt` 를 가드 밖으로 빼는 변이가 산다.
       const dpr = mk(['--mode', 'minimal']);
-      fs.writeFileSync(path.join(dpr, '.harness', 'manifest.json'), 'false');
+      fs.writeFileSync(path.join(dpr, '.leerness', 'manifest.json'), 'false');
       const rpr = cp.spawnSync(process.execPath, [CLI, 'prompt', 'claude', '--path', dpr, '--json'], { cwd: dpr, encoding: 'utf8', timeout: 300000, env: ENV });
       let jpr = null; try { jpr = JSON.parse(String(rpr.stdout || '').trim()); } catch {}
       if (!jpr || jpr.code !== 'store_corrupt' || rpr.status === 0) bad.push(`prompt별칭:손상코드아님(${jpr && jpr.code}/${rpr.status})`);
@@ -12484,7 +12574,7 @@ total++;
       if (ru.status !== 0) { bad.push(`${label}:task update 실패(${ru.status})`); return; }
     }
     // 셋업이 조용히 실패하면 아래 판정이 공허해진다 — done 행이 실제로 N개인지 먼저 확인한다.
-    const tracker = fs.readFileSync(path.join(d, '.harness', 'progress-tracker.md'), 'utf8');
+    const tracker = fs.readFileSync(path.join(d, '.leerness', 'progress-tracker.md'), 'utf8');
     const doneRows = tracker.split('\n').filter(l => /^\|\s*T-\d+/.test(l) && /\|\s*done\s*\|/.test(l)).length;
     if (doneRows !== N) { bad.push(`${label}:셋업done행 ${doneRows}(기대 ${N})`); return; }
     try { fs.unlinkSync(counter); } catch {}
@@ -12511,12 +12601,9 @@ total++;
   if (!ok) failed++;
 }
 
-// 1.36.126 (T-0107): `migrate-workspace-dir` 는 **배달할 수 없는 것을 배달했다고** 말하고 있었다.
-//   실측: 58파일을 복사하고 "✓ 마이그레이션 완료 → 다음 handoff부터 .leerness 우선 사용" 이라 찍은 뒤,
-//   바로 이어지는 `task add` 는 여전히 `.harness` 에 썼다(env 를 켜도 동일). 즉 `.leerness` 는 복사 시점에
-//   얼어붙은 사본이 되고, 같이 생성되는 WHERE_TO_FIND.md 가 **AI 를 그 낡은 상태로 안내**한다.
-//   배선 비용 실측: 경로 구성 252곳 + 안내 문자열 634곳 vs 해석기 소비처 9곳 → 이번 라운드에 배선 불가.
-//   그래서 ① 함정을 만들지 않고(fail-closed) ② 이미 당한 프로젝트를 알리고 ③ 평범한 프로젝트는 조용하다.
+// 1.36.126 → 1.36.162 (T-0107): `.leerness/` 가 공식 canonical 이 된 뒤의
+//   호환 계약. 과거에는 대체 디렉터리를 거부했지만, 이제는 fresh init·idempotency·
+//   marker가 권위를 낮추지 않는 dual-live fail-closed·부모 자산 해석을 검증한다.
 total++;
 {
   let ok = false; const bad = []; const dbg = {};
@@ -12533,46 +12620,42 @@ total++;
   const RW = (d, args, extra) => cp.spawnSync(process.execPath, [CLI, ...args],
     { cwd: d, encoding: 'utf8', timeout: 600000, env: Object.assign({}, envW, extra || {}), maxBuffer: 32 * 1024 * 1024 });
   try {
-    // ① 함정을 만들지 않는다 — 복사 0 · 명시적 실패 · 사유와 실측 근거를 함께 말한다
+    // ① fresh init 은 canonical 이며, canonical 재마이그레이션은 무복사 idempotent 성공이다.
     const A = mkP('A');
     const m = RW(A, ['migrate-workspace-dir', '--apply', '--path', A]);
-    if (fs.existsSync(path.join(A, '.leerness'))) bad.push('①.leerness가생성됨');
-    if (m.status === 0) bad.push('①조용한성공(exit 0)');
-    if (!/죽은 사본|옮길 수 없습니다/.test(m.stdout || '')) bad.push('①사유없음');
-    //   ⚠ 여기에 리터럴(252)을 박아 뒀더니 다음 편집에서 곧바로 틀렸다 — 사유의 숫자는 **실측과 같은지**로 본다.
-    //   실제 대조는 아래 ⑥(제품 보고 == e2e 실측). 여기서는 "숫자를 아예 안 대는" 경우만 잡는다.
-    if (!/\d{2,}곳이 '\.harness'/.test(m.stdout || '')) bad.push('①실측근거없음');
+    if (!fs.existsSync(path.join(A, '.leerness', 'HARNESS_VERSION'))) bad.push('①canonical미생성');
+    if (fs.existsSync(path.join(A, '.harness'))) bad.push('①fresh에legacy생성'); // workspace-dir-legacy-fixture
+    if (m.status !== 0) bad.push(`①canonical멱등실패(${m.status})`);
     const mj = RW(A, ['migrate-workspace-dir', '--apply', '--path', A, '--json']);
     let mjj = null; try { mjj = JSON.parse(mj.stdout); } catch { bad.push('①JSON아님'); }
-    if (mjj && mjj.blocked !== true) bad.push('①json:blocked아님');
-    if (mjj && mjj.blockedReason !== 'workspace-dir-alt-unsupported') bad.push(`①json:reason=${mjj && mjj.blockedReason}`);
-    if (mj.status === 0) bad.push('①json:exit 0');
+    if (mjj && mjj.blocked === true) bad.push(`①json:blocked=${mjj.blockedReason}`);
+    if (mjj && mjj.alreadyCanonical !== true) bad.push('①json:alreadyCanonical아님');
+    if (mj.status !== 0) bad.push(`①json:exit ${mj.status}`);
     if (mjj && Array.isArray(mjj.copiedFiles) && mjj.copiedFiles.length) bad.push('①json:복사보고');
-    dbg.A = { exit: m.status, created: fs.existsSync(path.join(A, '.leerness')) };
+    dbg.A = { exit: m.status, canonical: fs.existsSync(path.join(A, '.leerness')), alreadyCanonical: mjj && mjj.alreadyCanonical };
 
-    // ② 이미 당한 프로젝트 — 옛 버전이 남긴 상태를 재현(옛 바이너리가 없으므로 손으로 만든다)
+    // ② provenance marker는 canonical live state를 disposable copy로 만들지 않는다.
+    //    legacy와 canonical이 모두 live면 marker 유무와 무관하게 차단하고 양쪽을 보존한다.
     const B = mkP('B');
-    fs.mkdirSync(path.join(B, '.leerness'), { recursive: true });
-    fs.copyFileSync(path.join(B, '.harness', 'progress-tracker.md'), path.join(B, '.leerness', 'progress-tracker.md'));
-    fs.writeFileSync(path.join(B, '.leerness', 'MIGRATED_FROM_HARNESS'), 'migrated');
-    fs.writeFileSync(path.join(B, '.leerness', 'WHERE_TO_FIND.md'), '# 어디서 찾나\n');
-    RW(B, ['task', 'add', '사본 이후 작업', '--path', B, '--json']);
-    const au = RW(B, ['audit', '--path', B, '--json']);
-    let aj = null; try { aj = JSON.parse(au.stdout); } catch { bad.push('②auditJSON아님'); }
-    const fnd = aj && Array.isArray(aj.findings) ? aj.findings.find(x => x.kind === 'stale_workspace_copy') : null;
-    if (!fnd) bad.push('②죽은사본_미탐지');
-    else if (fnd.guidePresent !== true) bad.push('②가이드파일_미보고');
-    const wdj = RW(B, ['workspace-dir', 'get', '--path', B, '--json']);
-    let wj = null; try { wj = JSON.parse(wdj.stdout); } catch { bad.push('②wdJSON아님'); }
-    if (wj && wj.current !== '.harness') bad.push(`②현재=${wj.current}`);
-    if (wj && wj.staleCopy !== true) bad.push('②staleCopy아님');
-    if (wj && wj.altSupported !== false) bad.push('②altSupported참');
-    if (!/죽은 사본/.test(RW(B, ['workspace-dir', 'get', '--path', B]).stdout || '')) bad.push('②사람용경고없음');
-    //   마커·env 가 있어도 **쓰기는 정상**이어야 한다(예전엔 _isInitialized 가 .leerness 를 봐서 "미초기화" 거부했다)
+    fs.writeFileSync(path.join(B, '.leerness', 'MIGRATED_FROM_HARNESS'), 'provenance only\n');
+    fs.mkdirSync(path.join(B, '.harness'), { recursive: true }); // workspace-dir-legacy-fixture
+    fs.writeFileSync(path.join(B, '.harness', 'HARNESS_VERSION'), '1.36.161\n'); // workspace-dir-legacy-fixture
+    fs.writeFileSync(path.join(B, '.harness', 'progress-tracker.md'), '# independent legacy\n'); // workspace-dir-legacy-fixture
+    const canonicalBefore = fs.readFileSync(path.join(B, '.leerness', 'progress-tracker.md'), 'utf8');
+    const legacyBefore = fs.readFileSync(path.join(B, '.harness', 'progress-tracker.md'), 'utf8'); // workspace-dir-legacy-fixture
+    const conflict = RW(B, ['migrate-workspace-dir', '--path', B, '--json']);
+    let conflictJson = null; try { conflictJson = JSON.parse(conflict.stdout); } catch { bad.push('②conflictJSON아님'); }
+    if (conflict.status === 0) bad.push('②dual-live통과');
+    if (!conflictJson || conflictJson.blockedReason !== 'workspace-dir-conflict') bad.push(`②사유=${conflictJson && conflictJson.blockedReason}`);
+    if (fs.readFileSync(path.join(B, '.leerness', 'progress-tracker.md'), 'utf8') !== canonicalBefore) bad.push('②canonical변경');
+    if (fs.readFileSync(path.join(B, '.harness', 'progress-tracker.md'), 'utf8') !== legacyBefore) bad.push('②legacy변경'); // workspace-dir-legacy-fixture
+    if (fs.existsSync(path.join(B, '.leerness-backup'))) bad.push('②차단인데백업생성');
+    fs.rmSync(path.join(B, '.harness'), { recursive: true, force: true }); // workspace-dir-legacy-fixture
+    // marker가 남은 정상 canonical 쓰기는 계속 정상이다.
     const w = RW(B, ['task', 'add', '마커 있어도 쓰기', '--path', B, '--json'], { LEERNESS_WORKSPACE_DIR: '.leerness' });
     if (w.status !== 0) bad.push(`②마커상태쓰기실패(${w.status})`);
-    if (!fs.readFileSync(path.join(B, '.harness', 'progress-tracker.md'), 'utf8').includes('마커 있어도 쓰기')) bad.push('②쓰기가.harness에없음');
-    dbg.B = { finding: !!fnd, staleCopy: wj && wj.staleCopy, writeExit: w.status };
+    if (!fs.readFileSync(path.join(B, '.leerness', 'progress-tracker.md'), 'utf8').includes('마커 있어도 쓰기')) bad.push('②쓰기가.leerness에없음');
+    dbg.B = { conflict: conflictJson && conflictJson.blockedReason, writeExit: w.status };
 
     // ③ 대조군 — 평범한 프로젝트는 조용하다(오탐이 이 경고를 죽인다)
     const C = mkP('C');
@@ -12584,18 +12667,18 @@ total++;
     if (/죽은 사본|적용되지 않습니다/.test(wd2)) bad.push('③대조군에경고문구');
     dbg.C = { falsePositives: n2 };
 
-    // ③-c 마커가 지워진 사본도 잡는다(검수 P2) + **남의 `.leerness` 는 건드리지 않는다**(오탐이 경고를 죽인다)
+    // ③-c canonical 안의 provenance/guide 파일은 stale 판정 근거가 아니다.
+    //      `.leerness` 자체가 공식 저장소이므로 marker 유무와 무관하게 오탐이 0이어야 한다.
     {
-      const D = mkP('D');                                   // 마커 없음 · 우리 가이드 파일만 남음
+      const D = mkP('D');                                   // marker 없음 · 우리 guide 있음
       fs.mkdirSync(path.join(D, '.leerness'), { recursive: true });
       fs.writeFileSync(path.join(D, '.leerness', 'WHERE_TO_FIND.md'), 'Generated: 2026-01-01T00:00:00.000Z by leerness 1.36.100\n');
       const ad = RW(D, ['audit', '--path', D, '--json']);
       let adj = null; try { adj = JSON.parse(ad.stdout); } catch { bad.push('③c auditJSON아님'); }
-      const fd = adj && Array.isArray(adj.findings) ? adj.findings.find(x => x.kind === 'stale_workspace_copy') : null;
-      if (!fd) bad.push('③c마커없는사본_미탐지');
-      else if (fd.markerPresent !== false || fd.guideIsOurs !== true) bad.push(`③c근거오류(${fd.markerPresent}/${fd.guideIsOurs})`);
+      const fdCount = adj && Array.isArray(adj.findings) ? adj.findings.filter(x => x.kind === 'stale_workspace_copy').length : -1;
+      if (fdCount !== 0) bad.push(`③ccanonical오탐 ${fdCount}건`);
 
-      const E = mkP('E');                                   // 남의 도구가 만든 .leerness — 우리 서명 없음
+      const E = mkP('E');                                   // 추가 foreign-looking 파일도 canonical 권위를 낮추지 않음
       fs.mkdirSync(path.join(E, '.leerness'), { recursive: true });
       fs.writeFileSync(path.join(E, '.leerness', 'WHERE_TO_FIND.md'), '# someone else\n');
       fs.writeFileSync(path.join(E, '.leerness', 'config.yml'), 'a: 1\n');
@@ -12603,18 +12686,15 @@ total++;
       let aej = null; try { aej = JSON.parse(ae.stdout); } catch { bad.push('③c(대조)auditJSON아님'); }
       const fe = aej && Array.isArray(aej.findings) ? aej.findings.filter(x => x.kind === 'stale_workspace_copy').length : -1;
       if (fe !== 0) bad.push(`③c남의.leerness오탐 ${fe}건`);
-      dbg.D = { detected: !!fd, foreignFalsePositives: fe };
+      dbg.D = { canonicalFalsePositives: fdCount, foreignFalsePositives: fe };
     }
 
-    // ③-b 부모 자산 — 부모에 죽은 사본이 있어도 **살아 있는 저장소**의 자산을 물려받아야 한다.
-    //   (`_findParentWorkspace` 는 해석기를 안 쓰고 자체 로직으로 `.leerness` 를 우선하고 있었다 —
-    //    같은 클래스가 다른 자리에 남아 있던 경우. 자식이 낡은 design-system 을 물려받는다.)
+    // ③-b 부모 자산 — provenance marker가 있어도 canonical 부모 자산을 그대로 물려받는다.
     {
       const P = mkP('P');                                   // 부모
-      fs.writeFileSync(path.join(P, '.harness', 'design-system.md'), '# LIVE\n');
+      fs.writeFileSync(path.join(P, '.leerness', 'design-system.md'), '# LIVE\n');
       fs.mkdirSync(path.join(P, '.leerness'), { recursive: true });
       fs.writeFileSync(path.join(P, '.leerness', 'MIGRATED_FROM_HARNESS'), 'x');
-      fs.writeFileSync(path.join(P, '.leerness', 'design-system.md'), '# STALE\n');
       const kid = path.join(P, 'kid'); fs.mkdirSync(kid, { recursive: true });
       fs.writeFileSync(path.join(kid, 'package.json'), '{"name":"kid","version":"0.1.0"}');
       const pw = RW(kid, ['parent', 'detect', '--path', kid, '--json']);
@@ -12622,8 +12702,8 @@ total++;
       const par = pj && pj.parent;
       if (!par) bad.push('③b부모미탐지(셋업실패면 아래 단언이 공허해진다)');
       else {
-        if (par.workspaceDir !== '.harness') bad.push(`③b부모워크스페이스=${par.workspaceDir}`);
-        if (!String(par.workspaceAbs || '').endsWith('.harness')) bad.push('③b부모abs가.harness아님');
+        if (par.workspaceDir !== '.leerness') bad.push(`③b부모워크스페이스=${par.workspaceDir}`);
+        if (!String(par.workspaceAbs || '').endsWith('.leerness')) bad.push('③b부모abs가.leerness아님');
         if (par.assets && par.assets.designSystem !== true) bad.push('③b살아있는자산미탐지(계측붕괴)');
         // 판별: 실제로 읽히는 파일이 LIVE 인가(경로만 맞고 내용이 STALE 이면 의미 없다)
         const body = fs.readFileSync(path.join(par.workspaceAbs, 'design-system.md'), 'utf8');
@@ -12632,45 +12712,30 @@ total++;
       dbg.P = { workspaceDir: par && par.workspaceDir, depth: par && par.depth };
     }
 
-    // ④ 순서 강제 — 하드코딩이 남아 있는 한 "지원함" 이라 말할 수 없다.
-    //   (selftest 는 자기 소스를 못 읽는다 — 1.36.84 메타가드. 그래서 이 불변식은 여기서 건다.)
+    // ④ canonical/legacy 정책은 단일 모듈에서 내보내고 핵심 API를 소비해야 한다.
     const binSrc = fs.readFileSync(CLI, 'utf8');
     const libDir = path.resolve(path.dirname(CLI), '..', 'lib');   // CLI 에서 유도 — 실행 위치에 의존하지 않는다
     let libSrc = '';
     for (const f of fs.readdirSync(libDir)) if (f.endsWith('.js')) libSrc += '\n' + fs.readFileSync(path.join(libDir, f), 'utf8');
-    const hard = ((binSrc + libSrc).match(/path\.join\([^)]*'\.harness'/g) || []).length;
-    if (hard < 50) bad.push(`④하드코딩계측붕괴(${hard})`);            // 0건이면 측정이 깨진 것 — 공허통과 금지
-    const claims = /const WORKSPACE_DIR_ALT_SUPPORTED = (true|false);/.exec(binSrc);
-    if (!claims) bad.push('④지원상수없음');
-    else if (claims[1] === 'true' && hard > 0) bad.push(`④하드코딩 ${hard}곳인데 지원함이라 주장`);
-    // ⑤ 내부 시험 통로가 **제품 경로**로 새지 않는다.
-    //   (검수 P3) 정확 카운트는 안전한 리팩터만으로 깨진다 — 개수가 아니라 **어디에 있는가**로 본다:
-    //   selftest 케이스 영역(_selfTestCases) 밖에 이 옵션을 넘기는 곳이 있으면 제품 경로 누출이다.
-    const selfStart = binSrc.indexOf('function _selfTestCases(');
-    const selfEnd = selfStart < 0 ? -1 : binSrc.indexOf('\nfunction ', selfStart + 10);
-    if (selfStart < 0 || selfEnd < 0) bad.push('⑤selftest영역경계못찾음');
-    else {
-      const outside = binSrc.slice(0, selfStart) + binSrc.slice(selfEnd);
-      const inside = binSrc.slice(selfStart, selfEnd);
-      //   "언급" 이 아니라 **넘기는 것**만 센다 — 주석·선언(`opts.allowUnsupported !== true`)은 호출이 아니다.
-      const passes = (s) => (s.match(/allowUnsupported\s*:/g) || []).length;
-      const leaked = passes(outside);
-      if (leaked > 0) bad.push(`⑤시험통로가 제품 경로에 ${leaked}곳`);
-      if (passes(inside) < 1) bad.push('⑤시험통로를 아무도 안 태움(보호가 썩는다)');
-      dbg.seam = { leaked, insideUses: passes(inside) };
-    }
-    dbg.src = { hard, claims: claims && claims[1] };
-    // ⑥ 거부 사유의 숫자는 **실행 시 측정**이어야 한다(검수 P2: 손으로 적은 252가 곧 255로 낡았다).
-    //   제품이 보고한 수와 여기서 센 수가 같아야 한다 — 다르면 둘 중 하나가 거짓말이다.
-    if (mjj && mjj.measured) {
-      if (mjj.measured.hardcodedPathSites !== hard) bad.push(`⑥보고=${mjj.measured.hardcodedPathSites} vs 실측=${hard}`);
-      if (!(mjj.measured.resolverConsumers > 0)) bad.push('⑥해석기 소비처 0(계측붕괴)');
-    } else bad.push('⑥measured 없음');
+    const wsPolicy = require('../lib/workspace-dir');
+    if (wsPolicy.CANONICAL_WORKSPACE_DIR !== '.leerness') bad.push(`④canonical=${wsPolicy.CANONICAL_WORKSPACE_DIR}`);
+    if (wsPolicy.LEGACY_WORKSPACE_DIR !== '.harness') bad.push(`④legacy=${wsPolicy.LEGACY_WORKSPACE_DIR}`); // workspace-dir-legacy-fixture
+    if (wsPolicy.LEGACY_BACKUP_WORKSPACE_DIR !== '.leerness-backup') bad.push(`④backup=${wsPolicy.LEGACY_BACKUP_WORKSPACE_DIR}`);
+    if (typeof wsPolicy.resolveWorkspaceDirName !== 'function') bad.push('④resolver없음');
+    if (typeof wsPolicy.migrateLegacyWorkspace !== 'function') bad.push('④migrator없음');
+    const resolverConsumers = ((binSrc + libSrc).match(/workspace-dir/g) || []).length;
+    if (resolverConsumers < 2) bad.push(`④해석기소비계측붕괴(${resolverConsumers})`);
+    dbg.src = {
+      canonical: wsPolicy.CANONICAL_WORKSPACE_DIR,
+      legacy: wsPolicy.LEGACY_WORKSPACE_DIR,
+      backup: wsPolicy.LEGACY_BACKUP_WORKSPACE_DIR,
+      resolverConsumers,
+    };
     ok = bad.length === 0;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 200); }
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
-  console.log(ok ? `✓ V(1.36.126/T-0107) 워크스페이스 대체 디렉터리: migrate 가 죽은 사본을 만들지 않고 명시적으로 실패(사유+실측) · 이미 당한 프로젝트를 audit/workspace-dir 가 알림 · 마커·env 가 있어도 쓰기 정상(.harness) · 대조군 오탐 0 ${JSON.stringify(dbg)}`
-    : '✗ 1.36.126 워크스페이스 대체 디렉터리 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
+  console.log(ok ? `✓ V(1.36.126/T-0107) canonical 워크스페이스: fresh .leerness · idempotent migration · dual-live fail-closed · provenance marker 비권위 · 부모 자산 · audit 오탐 0 ${JSON.stringify(dbg)}`
+    : '✗ 1.36.126 canonical 워크스페이스 계약 실패 ' + JSON.stringify({ bad: bad.slice(0, 8), dbg }));
   if (!ok) failed++;
 }
 
@@ -12883,7 +12948,7 @@ total++;
     'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG', 'LEERNESS_MCP_PROFILE', 'LEERNESS_MCP_TIMEOUT_MS']) delete envS[k];
   //   캐너리 키는 **실행 시 생성**한다 — 소스에 적으면 이 파일이 러너로 읽히는 자기참조 함정(8회차)에 걸린다.
   const KEY = (tag) => `sess-${process.pid.toString(36)}-${tag}`;
-  const STORE = ['.harness', 'cache', 'sessions'];
+  const STORE = ['.leerness', 'cache', 'sessions'];
   const storeDir = (d) => path.join(d, ...STORE);
   const nRec = (d) => { try { return fs.readdirSync(storeDir(d)).filter(f => /\.json$/.test(f)).length; } catch { return 0; } };
   const RS = (d, args, extra) => cp.spawnSync(process.execPath, [CLI, ...args],
@@ -12979,19 +13044,19 @@ total++;
     }
 
     // ⑦ git 유출 없음 — 세션 파일과 기본 handoff의 동적 projection은 보이지 않고,
-    //    **의도적으로 만든 다른 .harness 파일은 보인다**(git 이 실제로 관측 중임을 증명).
+    //    **의도적으로 만든 다른 .leerness 파일은 보인다**(git 이 실제로 관측 중임을 증명).
     const dG = mkS('git');
     const gi = cp.spawnSync('git', ['init', '-q'], { cwd: dG, encoding: 'utf8', timeout: 60000 });
     if (gi.status !== 0) bad.push('⑦git init 실패 — 이 검사는 스킵이 아니라 실패다(측정 붕괴를 통과로 세지 않는다)');
     else {
       RS(dG, ['handoff', dG], { CLAUDE_CODE_SESSION_ID: KEY('g') }); cliCases++;
-      fs.writeFileSync(path.join(dG, '.harness', 'git-visible-control.txt'), 'control\n');
-      //   ⚠ `--porcelain` 만 쓰면 untracked 디렉터리가 `?? .harness/` 한 줄로 **접혀서** 양쪽 판정이 모두
+      fs.writeFileSync(path.join(dG, '.leerness', 'git-visible-control.txt'), 'control\n');
+      //   ⚠ `--porcelain` 만 쓰면 untracked 디렉터리가 `?? .leerness/` 한 줄로 **접혀서** 양쪽 판정이 모두
       //     공허해진다(내 대조군이 실제로 그걸 잡았다). `-uall` 로 파일 단위 열거를 강제한다.
       const st = String(cp.spawnSync('git', ['status', '--porcelain', '-uall'], { cwd: dG, encoding: 'utf8', timeout: 60000 }).stdout || '');
       if (/cache[\\/]sessions/.test(st)) bad.push('⑦세션 파일이 git 에 노출됨');
       if (/environment\.json|last-handoff\.json|tech-profile\.json/.test(st)) bad.push('⑦기본 handoff 동적 projection이 git 에 노출됨');
-      if (!/git-visible-control\.txt/.test(st)) bad.push('⑦대조군 실패 — git 이 .harness 를 아예 안 보고 있음(위 판정이 공허)');
+      if (!/git-visible-control\.txt/.test(st)) bad.push('⑦대조군 실패 — git 이 .leerness 를 아예 안 보고 있음(위 판정이 공허)');
       observedRecords += nRec(dG);
     }
 
@@ -13128,7 +13193,7 @@ total++;
       const d = mkP('rules', true);
       const ra = RP(d, ['rule', 'add', '매 세션 점검', '--trigger', 'every-session', '--path', d, '--json']);
       if (ra.status !== 0) bad.push(`①rule add exit=${ra.status}`);
-      const rp = path.join(d, '.harness', 'rules.md');
+      const rp = path.join(d, '.leerness', 'rules.md');
       const HEAD = 'HEADNOTE' + process.pid.toString(36), TAIL = 'TAILNOTE' + process.pid.toString(36);
       fs.writeFileSync(rp, `# ${HEAD}\n\n` + fs.readFileSync(rp, 'utf8')
         + `\n\n## ${TAIL}\n자유 서술 문단.\n\n| 이름 | 담당 |\n|---|---|\n| 김 | 백엔드 |\n`);
@@ -13156,7 +13221,7 @@ total++;
     // ①b 선두 frontmatter 가 없고 본문 중간에 `---` 가 있는 파일 — 첫 판은 그 뒤 전부를 삼켰다.
     {
       const d = mkP('rules-nofm', true);
-      const rp = path.join(d, '.harness', 'rules.md');
+      const rp = path.join(d, '.leerness', 'rules.md');
       fs.writeFileSync(rp, '# 메모\n앞 문단 HEADSENT\n---\n뒤 문단 TAILSENT\n');
       const ra = RP(d, ['rule', 'add', '첫 룰', '--trigger', 'every-session', '--path', d, '--json']);
       if (ra.status !== 0) bad.push(`①b rule add exit=${ra.status}(셋업 실패 — 아래 단언이 공허해진다)`);
@@ -13173,7 +13238,7 @@ total++;
     //    두 축을 다 재야 한다: 락만 재면 "아무것도 안 하는 구현"이 통과하고, 기능만 재면 무락이 통과한다.
     {
       const d = mkP('autofix', false);
-      const pt = path.join(d, '.harness', 'progress-tracker.md');
+      const pt = path.join(d, '.leerness', 'progress-tracker.md');
       const RID = 'T-7' + String(process.pid % 1000).padStart(3, '0');
       const row = `| ${RID} | requested | 중복행 | - | - | 2026-08-18 |`;
       fs.writeFileSync(pt, fs.readFileSync(pt, 'utf8').replace(/\n?$/, '\n') + row + '\n' + row + '\n');
@@ -13188,7 +13253,7 @@ total++;
     //    쓰기가 실제로 일어나는 상태를 만들어야 한다 — writeUtf8 은 동일 내용이면 쓰지 않는다(1.36.65).
     {
       const d = mkP('verifyrules', true);
-      const rp = path.join(d, '.harness', 'rules.md');
+      const rp = path.join(d, '.leerness', 'rules.md');
       const ra = RP(d, ['rule', 'add', '매 커밋마다 버전 bump', '--trigger', 'every-commit', '--path', d, '--json']);
       if (ra.status !== 0) bad.push(`③rule add exit=${ra.status}`);
       const rv = RP(d, ['rule', 'verify', '--path', d]);
@@ -13202,7 +13267,7 @@ total++;
     // ④ auto-fix 가 **실패했는데 성공으로 보고**하지 않는다(고칠 수 없는 손상행이 섞인 경우).
     {
       const d = mkP('falsesuccess', false);
-      const pt = path.join(d, '.harness', 'progress-tracker.md');
+      const pt = path.join(d, '.leerness', 'progress-tracker.md');
       const RID = 'T-8' + String(process.pid % 1000).padStart(3, '0');
       const row = `| ${RID} | requested | 중복행 | - | - | 2026-08-18 |`;
       fs.writeFileSync(pt, fs.readFileSync(pt, 'utf8').replace(/\n?$/, '\n') + row + '\n' + row + '\n| T-9999 | requested | 셀부족 |\n');
@@ -13295,7 +13360,7 @@ total++;
       while (fs.readdirSync(mk).length < N && Date.now() < deadline) sleep(100);
       const marks = fs.readdirSync(mk).map(f => { try { return JSON.parse(fs.readFileSync(path.join(mk, f), 'utf8')); } catch { return { code: -1 }; } });
       const codes = marks.map(m => m.code); const errs = marks.map(m => m.err).filter(Boolean);
-      const txt = fs.readFileSync(path.join(d, '.harness', 'progress-tracker.md'), 'utf8');
+      const txt = fs.readFileSync(path.join(d, '.leerness', 'progress-tracker.md'), 'utf8');
       let present = 0; for (let i = 0; i < N; i++) if (txt.includes(`동시-${i}-`)) present++;
       const crashed = codes.filter(c => c !== 0).length;
       if (codes.length < N) bad.push(`①자식 ${codes.length}/${N} 만 종료(계측 붕괴)`);
@@ -13318,18 +13383,18 @@ total++;
       //    다른 세션 기록을 실제 제품으로 만든다(픽스처 손조립 금지 — hostId 를 손으로 적으면 계측이 거짓이 된다).
       const ro = RP(d, ['handoff', d], { LEERNESS_SESSION_ID: 'peersession00001' });
       if (ro.status !== 0) bad.push(`②피어 handoff exit=${ro.status}`);
-      fs.writeFileSync(path.join(d, '.harness', 'agent-reminders.md'), '# 리마인더\n- DELIVERTEST 이 줄이 보여야 한다\n');
+      fs.writeFileSync(path.join(d, '.leerness', 'agent-reminders.md'), '# 리마인더\n- DELIVERTEST 이 줄이 보여야 한다\n');
       const me = { LEERNESS_SESSION_ID: 'mysession00000001' };
       const plain = RP(d, ['handoff', d], me);
       const compact = RP(d, ['handoff', d, '--compact'], me);
       const jsonR = RP(d, ['handoff', d, '--json'], me);
-      //   1.36.132 (검수 P1): 최상위 엔트리만 세면 `.harness/cache/sessions/.host-salt` 생성을 놓친다 —
+      //   1.36.132 (검수 P1): 최상위 엔트리만 세면 `.leerness/cache/sessions/.host-salt` 생성을 놓친다 —
       //   실제로 그 회귀가 있었고 이 검사가 공허하게 통과했다. **재귀 전수 목록**으로 비교한다.
       const walk = (dir) => { const out = []; for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const fp = path.join(dir, e.name); if (e.isDirectory()) out.push(...walk(fp)); else out.push(fp); } return out.sort(); };
-      const before = walk(path.join(d, '.harness'));
+      const before = walk(path.join(d, '.leerness'));
       const hook = RP(d, ['hook', 'session-start'], me);
-      const after = walk(path.join(d, '.harness'));
+      const after = walk(path.join(d, '.leerness'));
       const P = String(plain.stdout || ''), C = String(compact.stdout || ''), H = String(hook.stdout || '');
       let J = null; try { J = JSON.parse(String(jsonR.stdout || '')); } catch { bad.push('②--json 이 JSON 이 아님'); }
       if (!/👥 다른 세션 기록 1건/.test(P)) bad.push('②평문 헤드라인에 다른 세션 없음');
@@ -13343,7 +13408,7 @@ total++;
       //    훅은 **쓰기 0** 계약이다 — 신호를 얹으면서 염 파일을 만들면 그 계약이 깨진다.
       if (after.length !== before.length) bad.push(`②훅이 파일을 만들었다(${after.filter(f => !before.includes(f)).map(f => path.basename(f)).join(',')}) — 쓰기 0 계약 위반`);
       //   내용까지 본다 — 개수가 같아도 덮어썼을 수 있다(무효 salt 가 새 랜덤으로 교체된 실제 회귀).
-      const saltP = path.join(d, '.harness', 'cache', 'sessions', '.host-salt');
+      const saltP = path.join(d, '.leerness', 'cache', 'sessions', '.host-salt');
       if (fs.existsSync(saltP)) {
         const s0 = fs.readFileSync(saltP, 'utf8');
         RP(d, ['hook', 'session-start'], me);
@@ -13358,7 +13423,7 @@ total++;
       const d = mkP('address', true);
       const codexEnv = { CODEX_MANAGED_BY_NPM: '1' };
       const r1 = RP(d, ['handoff', d], codexEnv);
-      const dir = path.join(d, '.harness', 'cache', 'sessions');
+      const dir = path.join(d, '.leerness', 'cache', 'sessions');
       const n1 = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /\.json$/.test(f)).length : 0;
       if (n1 !== 0) bad.push(`③주소 없는 세션이 등록됨(${n1}) — 식별 불가인데 기록했다`);
       if (!/🙈/.test(String(r1.stdout || ''))) bad.push('③주소 없는 세션에게 "안 보인다"고 말하지 않음(비대칭이 조용하다)');
@@ -13393,7 +13458,7 @@ total++;
 
     // ⑥ 선결 결함 3종 — 전부 이번 라운드가 만든/드러낸 것이고 전부 재현했다.
     {
-      //    (a) **조회 명령이 남의 디렉토리에 쓴다**: 빈 디렉토리에 `sessions --json` 1회 → .harness/·cache/·sessions/·.host-salt 4개 생성(exit 0).
+      //    (a) **조회 명령이 남의 디렉토리에 쓴다**: 빈 디렉토리에 `sessions --json` 1회 → .leerness/·cache/·sessions/·.host-salt 4개 생성(exit 0).
       const empty = path.join(sb, 'empty-not-a-project'); fs.mkdirSync(empty, { recursive: true });
       const rq = RP(empty, ['sessions', empty, '--json']);
       const made = fs.readdirSync(empty).length;
@@ -13403,7 +13468,7 @@ total++;
       const d2 = mkP('norecord', false);
       const me2 = { LEERNESS_SESSION_ID: 'norecordsess0001' };
       RP(d2, ['handoff', d2, '--no-record'], me2);
-      const dir2 = path.join(d2, '.harness', 'cache', 'sessions');
+      const dir2 = path.join(d2, '.leerness', 'cache', 'sessions');
       const afterHandoff = fs.existsSync(dir2) ? fs.readdirSync(dir2).filter(f => /[.]json$/.test(f)).length : 0;
       RP(d2, ['session', 'close', d2, '--no-record'], me2);
       const afterClose = fs.existsSync(dir2) ? fs.readdirSync(dir2).filter(f => /[.]json$/.test(f)).length : 0;
@@ -13431,7 +13496,7 @@ total++;
       const r2 = RP(d, ['handoff', d], { CODEX_MANAGED_BY_NPM: '1', LEERNESS_SESSION_ID: KEY });
       const warned = /주소 공유/.test(String(r2.stderr || ''));
       if (!warned) bad.push('⑦같은 주소를 다른 에이전트가 써도 조용함(조용한 병합)');
-      let rec = null; try { rec = JSON.parse(fs.readFileSync(path.join(d, '.harness', 'cache', 'sessions', KEY + '.json'), 'utf8')); } catch {}
+      let rec = null; try { rec = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'cache', 'sessions', KEY + '.json'), 'utf8')); } catch {}
       if (!rec || !rec.sharedKeyAgents) bad.push('⑦레코드에 공유 표식 없음');
       const shEnv = { CODEX_MANAGED_BY_NPM: '1', LEERNESS_SESSION_ID: KEY };
       const cOut = String(RP(d, ['handoff', d, '--compact'], shEnv).stdout || '');
@@ -13459,7 +13524,7 @@ total++;
       //    (a) `--no-record` 인데 selfRegistered=true 였다(주소 있음 ≠ 등록됨). 그리고 세션 파일·염을 만들면 안 된다.
       const jr = RP(d, ['handoff', d, '--json', '--no-record'], me);
       let J = null; try { J = JSON.parse(String(jr.stdout || '')); } catch { bad.push('⑧--no-record --json 파싱 실패'); }
-      const sdir = path.join(d, '.harness', 'cache', 'sessions');
+      const sdir = path.join(d, '.leerness', 'cache', 'sessions');
       const madeAny = fs.existsSync(sdir) ? fs.readdirSync(sdir).length : 0;
       if (madeAny !== 0) bad.push(`⑧--no-record 가 세션 스토어에 ${madeAny}개를 만들었다(염 포함)`);
       if (!J || J.sessions.selfRegistered !== false) bad.push('⑧--no-record 인데 selfRegistered=true (거짓 성공)');
@@ -13480,14 +13545,14 @@ total++;
       const d2 = mkP('casefold', true);
       RP(d2, ['handoff', d2], { LEERNESS_SESSION_ID: 'CaseKey01ABCD' });
       RP(d2, ['handoff', d2], { LEERNESS_SESSION_ID: 'casekey01abcd' });
-      const cdir = path.join(d2, '.harness', 'cache', 'sessions');
+      const cdir = path.join(d2, '.leerness', 'cache', 'sessions');
       const cf = fs.readdirSync(cdir).filter(f => /casekey/i.test(f));
       if (!(cf.length === 1 && cf[0] === 'casekey01abcd.json')) bad.push(`⑧대소문자 주소 처리 불일치(${cf.join(',')})`);
       let cr = null; try { cr = JSON.parse(fs.readFileSync(path.join(cdir, cf[0]), 'utf8')); } catch {}
       if (!cr || cr.sessionKey !== 'casekey01abcd') bad.push(`⑧레코드 키가 파일명과 불일치(${cr && cr.sessionKey})`);
       //    (e) 리마인더 내용이 제어문자·비밀값 그대로 표면에 나가지 않는다.
       const d3 = mkP('sanitize', true);
-      fs.writeFileSync(path.join(d3, '.harness', 'agent-reminders.md'),
+      fs.writeFileSync(path.join(d3, '.leerness', 'agent-reminders.md'),
         '# R\n- ' + String.fromCharCode(27) + '[2J' + ' token sk_live_' + 'ABCDEFGHIJKLMNOP1234\n');
       const jr3 = RP(d3, ['handoff', d3, '--json'], { LEERNESS_SESSION_ID: 'sanitizesess0001' });
       let J3 = null; try { J3 = JSON.parse(String(jr3.stdout || '')); } catch {}
@@ -13663,7 +13728,7 @@ total++;
       if (ri.status !== 0) bad.push(`④init exit=${ri.status}`);
       const KEY = 'carrysession0001', me = { LEERNESS_SESSION_ID: KEY };
       RP(d, ['handoff', d], me);
-      const fp = path.join(d, '.harness', 'cache', 'sessions', KEY + '.json');
+      const fp = path.join(d, '.leerness', 'cache', 'sessions', KEY + '.json');
       if (!fs.existsSync(fp)) bad.push('④세션 레코드가 만들어지지 않음(셋업 실패)');
       else {
         const j = JSON.parse(fs.readFileSync(fp, 'utf8'));
@@ -13756,7 +13821,7 @@ total++;
   // CLI and the git hook inspect the same ignored marker instead of the presence lifecycle/legacy projection.
   const ENFORCE_SESSION = 'e2e-enforce-runtime';
   envP.LEERNESS_SESSION_ID = ENFORCE_SESSION;
-  const handoffRecord = (d) => path.join(d, '.harness', 'cache', 'handoffs', ENFORCE_SESSION + '.json');
+  const handoffRecord = (d) => path.join(d, '.leerness', 'cache', 'handoffs', ENFORCE_SESSION + '.json');
   const RP = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 300000, env: envP, maxBuffer: 32 * 1024 * 1024 });
   //   ⚠ 1.36.140 (재검수 P1): 픽스처가 사용자의 **전역/시스템 git 설정을 상속**하면,
@@ -13912,7 +13977,7 @@ total++;
     }
 
     //   ⑬ **하위 디렉토리 설치가 실제 커밋에서 우회되지 않는다.** (검수 P1, 재현)
-    //      훅은 git **toplevel** 에서 돈다. `.harness` 가 하위에 있으면 종전엔 `-d ".harness"` 가 거짓이라
+    //      훅은 git **toplevel** 에서 돈다. `.leerness` 가 하위에 있으면 종전엔 `-d ".leerness"` 가 거짓이라
     //      조용히 통과했다 — 설치는 `verified:'fired'` 인데 루트 커밋이 그냥 지나갔다.
     //      설치 시점에 toplevel 기준 상대경로를 훅에 박고, **검증도 toplevel 을 cwd 로** 쓴다.
     {
@@ -13967,7 +14032,7 @@ total++;
       //    (c) **실패한 설치는 흔적을 남기지 않는다.** 실제로 실패하는 경우로 잰다(bare 저장소).
       //        ⚠ `core.hooksPath` 를 없는 디렉토리로 두는 것은 실패 케이스가 아니다 — 제품이 그 디렉토리를 만들고
       //          git 도 그 경로를 쓰므로 설치가 **정상 성공**한다(내 첫 픽스처가 틀렸다).
-      const failLeft = fs.existsSync(path.join(b, '.harness', 'enforce.json'));
+      const failLeft = fs.existsSync(path.join(b, '.leerness', 'enforce.json'));
       if (failLeft) bad.push('⑭실패한 설치(bare)가 enforce.json 을 남김');
       const bareHook = path.join(b, '.git', 'hooks', 'pre-commit');
       if (fs.existsSync(bareHook)) bad.push('⑭실패한 설치(bare)가 훅 파일을 남김');
@@ -14084,7 +14149,7 @@ total++;
     {
       const d = mk('cfgfail', commit);
       RP(d, ['handoff', d]);
-      const cfg = path.join(d, '.harness', 'enforce.json');
+      const cfg = path.join(d, '.leerness', 'enforce.json');
       try { if (fs.existsSync(cfg)) fs.rmSync(cfg, { force: true }); } catch {}
       fs.mkdirSync(cfg, { recursive: true });                 // 디렉토리라 파일 쓰기가 실패한다
       const r = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
@@ -14232,7 +14297,7 @@ total++;
       if (files.length < 3) bad.push(`④소스 열거가 ${files.length}건 — 계측이 붕괴했다`);
       const sites = files.map((f) => {
         let src = ''; try { src = fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8'); } catch { return [f, 0]; }
-        return [f, (src.match(/spawnSync\('git'/g) || []).length + (src.match(/execSync\('git/g) || []).length];
+        return [f, (src.match(/\b(?:spawnPortableSync|spawnSync|execSync)\s*\(\s*['"]git['"]/g) || []).length];
       }).filter(([, n]) => n > 0);
       if (sites.length !== 1 || sites[0][0] !== 'lib/git.js') {
         bad.push(`④git 실행 지점이 하나가 아니다: ${JSON.stringify(sites)}`);
@@ -14307,13 +14372,13 @@ total++;
       const res = {};
       for (const order of ['target-first', 'bystander-first']) {
         const d = mk('drop-' + order);
-        const lp = path.join(d, '.harness', 'lessons.json');
+        const lp = path.join(d, '.leerness', 'lessons.json');
         const A = { date: '2026-08-20', text: 'foo|bar', tag: 'TARGET' };       // 'foo|bar' 는 이것만 매칭
         const B = { date: '2026-08-20|foo', text: 'bar', tag: 'BYSTANDER' };    // 복합 키로는 A 와 같아진다
         fs.writeFileSync(lp, JSON.stringify(order === 'target-first' ? [A, B] : [B, A], null, 2) + '\n');
         RP(d, ['lesson', 'drop', 'foo|bar', '--path', d]);
         const after = JSON.parse(fs.readFileSync(lp, 'utf8')).map((x) => x.tag);
-        let arc = ''; try { arc = fs.readFileSync(path.join(d, '.harness', 'lessons.archive.md'), 'utf8'); } catch {}
+        let arc = ''; try { arc = fs.readFileSync(path.join(d, '.leerness', 'lessons.archive.md'), 'utf8'); } catch {}
         res[order] = { after, archiveHasBystander: arc.includes('BYSTANDER') };
         if (after.length !== 1 || after[0] !== 'BYSTANDER') bad.push(`①${order}: 무관 항목이 지워짐(남은 것=${JSON.stringify(after)})`);
         if (arc.includes('BYSTANDER')) bad.push(`①${order}: archive 가 지우지 않은 항목을 지웠다고 기록`);
@@ -14358,7 +14423,7 @@ total++;
     // ③ 동시 drop 둘 중 **하나만** 성공하고 archive 도 한 번만 쌓인다(복원이 중복을 만들지 않는다).
     {
       const d = mk('dupdrop');
-      const dj = path.join(d, '.harness', 'decisions.json');
+      const dj = path.join(d, '.leerness', 'decisions.json');
       fs.writeFileSync(dj, JSON.stringify([{ date: '2026-08-20', title: 'dup-title', decision: 'D', reason: 'R' }], null, 2) + '\n');
       const marks = path.join(sb, 'marks'); fs.mkdirSync(marks, { recursive: true });
       const runner = path.join(sb, 'dropr.js');
@@ -14375,7 +14440,7 @@ total++;
       const dl = Date.now() + 180000;
       while (fs.readdirSync(marks).length < 2 && Date.now() < dl) sleep(100);
       const codes = fs.readdirSync(marks).map((f) => fs.readFileSync(path.join(marks, f), 'utf8')).sort();
-      let arc = ''; try { arc = fs.readFileSync(path.join(d, '.harness', 'decisions.archive.md'), 'utf8'); } catch {}
+      let arc = ''; try { arc = fs.readFileSync(path.join(d, '.leerness', 'decisions.archive.md'), 'utf8'); } catch {}
       const blocks = (arc.match(/^## 제거 /gm) || []).length;
       RP(d, ['memory', 'restore', 'decisions', 'dup-title', '--path', d]);
       let restored = []; try { restored = JSON.parse(fs.readFileSync(dj, 'utf8')); } catch {}
@@ -14696,7 +14761,7 @@ total++;
       else {
         try {
           fs.mkdirSync(actual, { recursive: true });
-          fs.mkdirSync(path.join(sibling, '.harness'), { recursive: true });
+          fs.mkdirSync(path.join(sibling, '.leerness'), { recursive: true });
           fs.symlinkSync(actual, alias, process.platform === 'win32' ? 'junction' : 'dir');
           linked = true;
         } catch (e) {
@@ -14809,7 +14874,7 @@ total++;
       dbg.dryRun = { wrote: wrote.length, notRefused: notRefused.length, realExits: okExits };
     }
     // ①a T-0117 재검수: 기존 픽스처는 세션 주소를 지워 프레즌스 기록 경로가 아예 실행되지 않았다.
-    //     그러면 `session close --dry-run` 이 .harness/cache/sessions/.host-salt와 세션 JSON을
+    //     그러면 `session close --dry-run` 이 .leerness/cache/sessions/.host-salt와 세션 JSON을
     //     남기는 실제 변경을 "트리 불변"으로 오판한다. 주소가 있는 실제 Codex/Claude 환경을 명시해
     //     캐시도 dry-run 계약(영속 파일 변경 0)의 대상임을 실행으로 고정한다.
     {
@@ -14818,7 +14883,7 @@ total++;
       const before = snap(d);
       const r = RP(d, ['session', 'close', '--dry-run', '--path', d], sessionEnv);
       const changed = diffKeys(before, snap(d));
-      const sessionDir = path.join(d, '.harness', 'cache', 'sessions');
+      const sessionDir = path.join(d, '.leerness', 'cache', 'sessions');
       if (r.status === 0) bad.push('①a session close --dry-run 이 쓰기 차단 뒤에도 성공이라 보고');
       if (changed.length) bad.push(`①a 세션 주소가 있을 때 --dry-run 이 바꾼 것: ${changed.slice(0, 4).join(',')}`);
       if (fs.existsSync(sessionDir)) bad.push('①a --dry-run 이 session-presence cache를 생성');
@@ -15063,7 +15128,7 @@ total++;
       const d = path.join(holder, 'proj'); fs.mkdirSync(d, { recursive: true });
       fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0"}');
       RP(d, ['init', d, '--yes', '--minimal']);
-      const dj = path.join(d, '.harness', 'decisions.json');
+      const dj = path.join(d, '.leerness', 'decisions.json');
       const before = (() => { try { return fs.readFileSync(dj, 'utf8'); } catch { return ''; } })();
       const r = RP(d, ['decision', 'add', 'CACHEPATH', '--reason', 'r', '--dry-run', '--path', d]);
       const after = (() => { try { return fs.readFileSync(dj, 'utf8'); } catch { return ''; } })();
@@ -15078,7 +15143,7 @@ total++;
     // ④ MCP 의 빈 `path` 가 서버 root 로 대체되지 않는다.
     {
       const server = mk(path.join(sb, 'mcpserver'));
-      const dj = path.join(server, '.harness', 'decisions.json');
+      const dj = path.join(server, '.leerness', 'decisions.json');
       const before = (() => { try { return fs.readFileSync(dj, 'utf8'); } catch { return ''; } })();
       const req = [
         JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 't', version: '1' } } }),
@@ -15293,7 +15358,7 @@ total++;
       const d = mk('team');
       const marker = path.join(sb, 'DEPLOYED.txt');
       RP(d, ['team', 'add', 'zz', '--path', d]);
-      const tf = path.join(d, '.harness', 'teams.json');
+      const tf = path.join(d, '.leerness', 'teams.json');
       let prepared = false;
       try {
         const t = JSON.parse(fs.readFileSync(tf, 'utf8'));
@@ -15426,7 +15491,7 @@ total++;
       const callerHook = path.isAbsolute(raw) ? raw : path.join(d, raw);
       const old = new Date(Date.now() - 72 * 3600 * 1000);
       // 1.36.155부터 enforce freshness는 presence가 아니라 handoff 전용 marker를 본다.
-      fs.utimesSync(path.join(d, '.harness', 'cache', 'handoffs', 'e2e-enforce-nosystem.json'), old, old);
+      fs.utimesSync(path.join(d, '.leerness', 'cache', 'handoffs', 'e2e-enforce-nosystem.json'), old, old);
       fs.writeFileSync(path.join(d, 'after.txt'), 'after\n'); G(d, ['add', '-A']);
       const commit = G(d, ['commit', '-qm', 'must-be-blocked']);
       const gitModule = require(path.resolve(__dirname, '..', 'lib', 'git.js'));
@@ -15469,5 +15534,25 @@ total++;
   if (!ok) failed++;
 }
 
-console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
-if (failed > 0) process.exit(1);
+// emitWarning는 동기 E2E 본문이 끝난 뒤 nextTick에서 전달된다. setImmediate까지 기다린 뒤
+// 부모 이벤트 + captured stderr + stdio:ignore/async 자식의 redirect 파일을 함께 집계한다.
+setImmediate(() => {
+  try {
+    const redirected = fs.existsSync(runtimeWarningFile) ? fs.readFileSync(runtimeWarningFile, 'utf8') : '';
+    if (/DEP0190|DeprecationWarning:[^\r\n]*shell option true/i.test(redirected)) {
+      runtimeDep0190.push(`redirected child warnings:\n${redirected.slice(0, 12000)}`);
+    }
+  } catch (error) {
+    runtimeDep0190.push(`warning redirect gate read failed: ${error.message}`);
+  }
+  total++;
+  if (runtimeDep0190.length === 0) {
+    console.log('✓ AP(1.36.162/T-0139) 전체 E2E 부모+동기·ignore·async 자식 런타임 DEP0190 0건');
+  } else {
+    failed++;
+    console.log(`✗ T-0139 DEP0190 런타임 경고 ${runtimeDep0190.length}건`);
+    process.stderr.write(runtimeDep0190.join('\n---\n') + '\n');
+  }
+  console.log(`\nE2E result: ${total - failed}/${total} passed · ${((Date.now() - _e2eStart) / 1000).toFixed(0)}s`);
+  if (failed > 0) process.exitCode = 1;
+});

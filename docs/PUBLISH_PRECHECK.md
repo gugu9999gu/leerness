@@ -51,7 +51,7 @@ node ./scripts/e2e.js              # 30+개 시나리오 통과
 mkdir /tmp/lr-old; cd /tmp/lr-old
 npx -y leerness@1.8.0 init . --language ko --skills recommended
 LEERNESS_OFFLINE=1 npx -y -p /path/to/leerness-1.9.0.tgz leerness update . --yes
-cat .harness/HARNESS_VERSION       # → 1.9.0
+cat .leerness/HARNESS_VERSION       # → 1.9.0
 ```
 
 ## 5. publish dry-run

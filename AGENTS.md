@@ -2,34 +2,34 @@
 # Leerness Agent Instructions
 
 ## ⭐ 매 세션 첫 행동
-**반드시 `.harness/session-workflow.md`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.
+**반드시 `.leerness/session-workflow.md`를 먼저 읽고 6단계 워크플로를 따른다**: 요청분석→계획→분배→sub-agent작업→종합검증→마감. 라운드 길이/복잡도 무관, drift 방지를 위해 모든 작업에 동일 흐름 유지.
 
 ## 정적 vs 동적 — leerness 역할 경계
 **AGENTS.md = 정적 프로젝트 지침** (코딩 규칙·테스트 명령·금지 사항·배포 절차 — 자주 안 변함).
 **leerness = 동적 작업 상태·기억·검증·인수인계** (현재 목표·수정 파일·실패 시도·검증 결과·다음 에이전트 인계 — 매 작업 변함).
 - 규칙/명령/금지는 여기 AGENTS.md 에 적는다.
-- 동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 `.harness/`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). `leerness handoff` · `decision add` · `lesson save` 등이 여기에 쓴다.
-- (선택) `leerness state show|start|record|verify|handoff` (또는 MCP `leerness_state_*`) 의 JSON 상태 substrate 는 `.leerness/` (에이전트 간 인수인계 표준 — state 명령 사용 시 생성). 메인 워크스페이스(.harness)와 별개.
+- 동적 상태(결정/교훈/계획/진행/검증/인수인계)는 leerness 가 **기본 워크스페이스 `.leerness/`** 에 기록한다 (decisions.md / lessons.md / plan.md / progress-tracker.md / session-handoff.md). `leerness handoff` · `decision add` · `lesson save` 등이 여기에 쓴다.
+- (선택) `leerness state show|start|record|verify|handoff` (또는 MCP `leerness_state_*`) 의 JSON 상태 substrate도 같은 `.leerness/` 안의 전용 `state.json`/`runs` 영역을 사용하며, 문서형 메모리와 충돌 없이 공존한다.
 - leerness 는 AGENTS.md 를 **대체하지 않고 보완**한다. 정적 지침은 여기, 동적 상태는 leerness.
 
 ## Mandatory read order (session start)
-1. **.harness/session-workflow.md** (6단계 워크플로 — 최우선)
-2. .harness/context-routing.md
-3. .harness/session-handoff.md
-4. .harness/current-state.md
-5. .harness/plan.md
-6. .harness/progress-tracker.md
-7. .harness/guideline.md
-8. .harness/protected-files.md
-9. .harness/writeback-policy.md
-10. .harness/anti-lazy-work-policy.md
-11. **.harness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)
+1. **.leerness/session-workflow.md** (6단계 워크플로 — 최우선)
+2. .leerness/context-routing.md
+3. .leerness/session-handoff.md
+4. .leerness/current-state.md
+5. .leerness/plan.md
+6. .leerness/progress-tracker.md
+7. .leerness/guideline.md
+8. .leerness/protected-files.md
+9. .leerness/writeback-policy.md
+10. .leerness/anti-lazy-work-policy.md
+11. **.leerness/rules.md** (사용자 정의 영구 룰 — 매 세션 반드시 따름)
 
 ## Required behavior
 - 작업 시작 시 `leerness handoff .`를 실행해 컨텍스트를 적재합니다 (handoff가 active rules를 자동 출력).
 - **모호성 질문 의무**: 사용자 요청에 판단이 갈리는 부분(모호한 수식어/지시대명사/복수 선택지/불명확한 범위)이 있으면 **추측으로 구현하지 말고 먼저 사용자에게 질문**합니다. `leerness clarify "<요청>"` 이 감지한 질문 목록을 그대로 사용자에게 물어보세요. 신호가 없어도 스스로 판단이 갈리면 질문이 우선입니다.
 - **미리보기 승인 의무 (신규 기능)**: 사용자가 신규 기능 추가/구현을 요청하면 **코드를 먼저 작성하지 않습니다**. ① `leerness preview add "<기능>" --design "<디자인/UX 설명>" --features "<기능 목록>"` 으로 미리보기를 등록하고 ② 그 내용을 사용자에게 제시해 승인 또는 수정사항을 질문으로 받습니다. ③ 사용자가 승인하면 `leerness preview approve <P-ID>`, 수정 요구면 `leerness preview revise <P-ID> --note "..."` 후 미리보기를 고쳐 다시 제시합니다. **approve 전에는 해당 기능의 코드를 작성하지 않습니다.**
-- **디자인 시안 의무 (웹페이지/디자인 작업)**: 신규 페이지 제작·디자인/리디자인 요청이면 텍스트 설명만으로 끝내지 않습니다. `leerness preview mockup <P-ID>` 로 자립형 HTML 시안 스캐폴드(`.harness/previews/<P-ID>-mockup.html`)를 만들고, **placeholder 영역을 실제 레이아웃 초안(HTML/CSS, 외부 리소스 없이)으로 교체**한 뒤 사용자에게 브라우저로 열어 보여주고 수정/승인을 질문으로 받습니다. 수정 요구가 오면 시안 파일을 고쳐 다시 제시하고, **approve 전에는 실제 페이지/기능 코드를 작성하지 않습니다.** (이미 만든 시안이 있으면 `preview add ... --mockup <파일>` 로 첨부)
+- **디자인 시안 의무 (웹페이지/디자인 작업)**: 신규 페이지 제작·디자인/리디자인 요청이면 텍스트 설명만으로 끝내지 않습니다. `leerness preview mockup <P-ID>` 로 자립형 HTML 시안 스캐폴드(`.leerness/previews/<P-ID>-mockup.html`)를 만들고, **placeholder 영역을 실제 레이아웃 초안(HTML/CSS, 외부 리소스 없이)으로 교체**한 뒤 사용자에게 브라우저로 열어 보여주고 수정/승인을 질문으로 받습니다. 수정 요구가 오면 시안 파일을 고쳐 다시 제시하고, **approve 전에는 실제 페이지/기능 코드를 작성하지 않습니다.** (이미 만든 시안이 있으면 `preview add ... --mockup <파일>` 로 첨부)
 - 작업 분류는 `leerness route <task-type>`로 확인합니다 (planning, feature, bugfix, refactor, research, consistency, release, migration, session-start, session-close, harness-maintenance).
 - 보호 파일/관리 섹션을 삭제하지 않습니다. 머지·아카이브·deprecated 표시를 사용합니다.
 - 의미 있는 변경 후 progress-tracker, current-state, task-log, session-handoff를 갱신합니다.
@@ -79,7 +79,7 @@ leerness가 자동 검증 가능한 trigger:
 <!-- leerness:migration-preserved -->
 ## Preserved previous content
 
-> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.harness/archive/leerness-1.36.100-2026-08-05T01-57-13-913Z`
+> 이전 버전에서 이어진 사용자/프로젝트 커스텀 내용 — 마이그레이션마다 자동 이월됩니다. 전체 원본 백업: `.leerness/archive/leerness-1.36.100-2026-08-05T01-57-13-913Z`
 
 - 완료 선언 전 `leerness check .` 또는 `leerness lazy detect .`로 자기검증합니다.
 ## 사용자 명시 신규 7종 (1.9.207~213) — 백로그 완전 소진
@@ -89,7 +89,7 @@ leerness가 자동 검증 가능한 trigger:
 | 1.9.208 | 플랫폼/API 제약 사전 체크 (6종 기본) | `constraints list\|check\|add` |
 | 1.9.209 | pre-wake sub-agent audit (6 영역) | `pre-wake-audit [--last]` |
 | 1.9.210 | adaptive wakeup interval (10~45min) | `wakeup-interval get\|set\|auto\|history\|record` |
-| 1.9.211 | .harness → .leerness opt-in migration — **비활성(1.36.126)**: 복사만 되고 이후 쓰기는 `.harness` 로 가 죽은 사본이 됨. `migrate-workspace-dir` 는 사유를 설명하고 거부한다 (T-0107) | `workspace-dir get\|guide` |
+| 1.9.211 / 1.36.162 | `.harness` → `.leerness` 트랜잭션 마이그레이션 — 구조화 상태 병합·run remap·archive 백업·충돌/링크 fail-closed (T-0107) | `migrate-workspace-dir` / `workspace-dir get\|guide` |
 | 1.9.212 | 멱등성 감사 + ruleAdd/taskAdd dedup | `idempotency audit` + `rule add` / `task add` 자동 dedup |
 | 1.9.213 | intent inference + 5도메인 scope expansion | `intent classify\|expand\|domains` |
 ### handoff 헤드라인 자동 노출 (1.9.215+)
@@ -164,7 +164,7 @@ leerness가 자동 검증 가능한 trigger:
 | 1.9.258~259 | `leerness selftest` — 코어 함수 무결성 (15 케이스) | MCP 71 + npm test 게이트 (fast-fail) |
 | 1.9.260~261 | UR-0020 `leerness shell-guard "<cmd>"` — 셸 호환성 린터 | PS5.1 && 미지원 등 6 규칙 + 실패 메모리 + MCP 72 (CLI+MCP+selftest 3중) |
 **require.main 가드** (1.9.255): CLI 직접 실행 시에만 main() → `require('harness.js')` 로 내부 함수 단위 테스트 가능 (init 부작용 0).
-**shell-guard 6 규칙**: ps5-chain(PS5.1 &&→`A; if ($?) {B}`) / ps-devnull(`2>$null`) / ps-inline-env(`$env:VAR`) / ps-rm-rf(`Remove-Item`) / cmd-semicolon / ps-version-unknown. `.harness/shell-failures.json` 실패 메모리 + environment.json 버전 변동 감지.
+**shell-guard 6 규칙**: ps5-chain(PS5.1 &&→`A; if ($?) {B}`) / ps-devnull(`2>$null`) / ps-inline-env(`$env:VAR`) / ps-rm-rf(`Remove-Item`) / cmd-semicolon / ps-version-unknown. `.leerness/shell-failures.json` 실패 메모리 + environment.json 버전 변동 감지.
 ### 자율 모드 마일스톤 — 1.9.261 시점
 - **R217 누적 라운드** · **123 main-push streak** · **84 npm publish streak**
 - handoff/session close/health JSON **11 통합 필드** (3 × 11 = 33 포인트)

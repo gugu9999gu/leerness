@@ -21,11 +21,13 @@
 ## Try it in 30 seconds
 
 ```bash
-npx -y leerness init . --yes   # adds .harness/ memory + guard files to your project
+npx -y leerness init . --yes   # adds .leerness/ memory + guard files to your project
 npx leerness handoff .         # everything your AI should know right now, in one call
 ```
 
-`handoff` is safe to run from several AI sessions at once: by default it does not rewrite Git-tracked harness files and updates only an ignored per-session record under `.harness/cache/sessions/`. Use `handoff --writeback` only when legacy automation explicitly needs refreshed `current-state.md`, `environment.json`, `last-handoff.json`, or generated graph projections.
+`handoff` is safe to run from several AI sessions at once: by default it does not rewrite Git-tracked harness files and updates only an ignored per-session record under `.leerness/cache/sessions/`. Use `handoff --writeback` only when legacy automation explicitly needs refreshed `current-state.md`, `environment.json`, `last-handoff.json`, or generated graph projections.
+
+Existing projects that still use `.harness/` are upgraded to `.leerness/` transactionally on the first normal command run from that project (or targeted with `--path`). To inspect first, run `leerness migrate-workspace-dir . --dry-run`; to migrate an explicit positional project path, omit `--dry-run`. The migration preserves the byte-for-byte legacy tree by atomically renaming it to the ignored `.leerness-backup/` only after canonical copies and hashes verify, preserves an existing structured-state substrate in `.leerness/`, remaps old observability runs into `.leerness/cache/agent-runs/`, and rewrites operational path references. It fails closed when both directories contain independently live state, the backup name already exists, or a link/junction could escape the project. Arbitrary path-shaped command text is never treated as a migration target.
 
 For Cursor, run `npx leerness adapter cursor --path .` once. It preserves existing project hooks and adds a local `sessionStart` bridge that maps Cursor's session address to `LEERNESS_SESSION_ID`, so concurrent Cursor/Claude/Codex sessions remain separately traceable. Cursor Cloud currently does not run `sessionStart`/`sessionEnd` hooks; in that environment the agent must provide an explicit session address or run `handoff` itself.
 
@@ -65,7 +67,7 @@ Built-in harnesses remember what the AI **said**. leerness verifies what the AI 
 |---|---|---|
 | Memory | per-agent, free-form notes | structured tasks / decisions / lessons / rules — agent-independent files in your repo |
 | "Done" claims | trusted as written | **evidence-gated**: claimed files, test counts, and run output are checked against reality — bluffs exit 1 |
-| Switching agents (Claude → Codex → Cursor) | context lost | same `.harness/` state, same one-call handoff |
+| Switching agents (Claude → Codex → Cursor) | context lost | same `.leerness/` state, same one-call handoff |
 | Secrets · encoding · drift guards | none | `scan secrets` · `encoding check` · `drift check --auto-fix` — CI-ready |
 | Lock-in | one vendor | any agent, any language, 0 runtime dependencies |
 
@@ -126,13 +128,13 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.36.161 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.36.162 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
 Leerness 는 **실행기/코딩 에이전트가 아니라**, 어떤 AI 코딩 에이전트(Claude Code · Codex · Cursor · Goose 등) 위에도 얹는 **범용 운영 레이어**입니다. 5개 공통 계층을 제공합니다:
 
-- **기억(Memory)** — 프로젝트 상태/결정/진행을 `.harness/` 에 영속화
+- **기억(Memory)** — 프로젝트 상태/결정/진행을 `.leerness/` 에 영속화
 - **정책(Policy)** — 8단계 권한 등급 + enforce (read-only→publish), MCP 호출 게이트
 - **인수인계(Handoff)** — 에이전트 간 컨텍스트 표준 전달 + `get_project_context` 1콜 온보딩
 - **검증(Verification)** — 근거 기반 완료 검증으로 허위 완료 감지 (권고; CI 게이트 필수화 시 차단)
@@ -180,7 +182,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.36.161는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **89개 도구**를 노출:
+Leerness v1.36.162는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **89개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -201,7 +203,7 @@ Leerness v1.36.161는 stdio JSON-RPC MCP server를 내장합니다 — Claude Co
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) 회귀 테스트 갱신 → 4) 전체 e2e 스위트 통과 → 5) npm publish + git tag → 6) main push → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **v1.9.x → 1.36.161 릴리스 태그 이력** (수백 라운드) · _reports/는 비공개 보존.
+현재 누적: **v1.9.x → 1.36.162 릴리스 태그 이력** (수백 라운드) · _reports/는 비공개 보존.
 
 ### 성능 가이드
 
@@ -233,11 +235,11 @@ leerness release pack --close --auto-main-push
 
 ### Planning Files
 
-- `.harness/plan.md`: 전체 목표, milestone, 제외/드랍 범위
-- `.harness/progress-tracker.md`: 요청 단위 상태와 증거
-- `.harness/current-state.md`: 지금 이어서 할 작업
-- `.harness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
-- `.harness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
+- `.leerness/plan.md`: 전체 목표, milestone, 제외/드랍 범위
+- `.leerness/progress-tracker.md`: 요청 단위 상태와 증거
+- `.leerness/current-state.md`: 지금 이어서 할 작업
+- `.leerness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
+- `.leerness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.36.161: 2026-08-25
+Last synced by Leerness v1.36.162: 2026-08-26
 <!-- leerness:project-readme:end -->

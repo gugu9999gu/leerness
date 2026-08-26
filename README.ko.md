@@ -25,7 +25,7 @@ AI 코딩 에이전트(Claude Code, Cursor, Codex, Aider, Goose 등)는 코드�
 2. **거짓 완료를 선언합니다** — 증거(파일·테스트·로그) 없이 "완료했습니다"라고 말합니다.
 3. **표준이 없습니다** — 여러 에이전트 간 인수인계, 보안/인코딩 점검, 드리프트 관리가 제각각입니다.
 
-leerness는 이 문제들을 해결하는 **외부 운영 substrate**입니다. 어떤 에이전트 위에도 얹어, 프로젝트의 상태를 `.harness/` 파일로 영속화하고 CLI · MCP 도구로 노출합니다. **leerness 자체는 LLM을 호출하거나 코드를 실행하지 않습니다.**
+leerness는 이 문제들을 해결하는 **외부 운영 substrate**입니다. 어떤 에이전트 위에도 얹어, 프로젝트의 상태를 `.leerness/` 파일로 영속화하고 CLI · MCP 도구로 노출합니다. **leerness 자체는 LLM을 호출하거나 코드를 실행하지 않습니다.**
 
 ---
 
@@ -55,7 +55,7 @@ MIT, **런타임 의존성 0**, offline-first, 모든 상태가 *당신의* 저�
 # 설치 (런타임 의존성 0 — 추가 패키지 없음)
 npm install -g leerness
 
-# 프로젝트 초기화 (.harness/ 거버넌스 문서 + .claude/.cursor/.github 어댑터 생성)
+# 프로젝트 초기화 (.leerness/ 거버넌스 문서 + .claude/.cursor/.github 어댑터 생성)
 leerness init .
 
 # 세션 시작 — 이전 맥락/기억/다음 작업을 1콜로 회수
@@ -69,7 +69,9 @@ leerness gate .                 # verify + audit + scan secrets + encoding + laz
 leerness session close .
 ```
 
-기본 `handoff`는 여러 AI 세션에서 동시에 실행해도 Git 추적 하네스 파일을 다시 쓰지 않고, `.harness/cache/sessions/` 아래 ignored 세션별 레코드만 갱신합니다. 구형 자동화가 `current-state.md`, `environment.json`, `last-handoff.json`, 생성 그래프 projection 갱신을 명시적으로 필요로 할 때만 `handoff --writeback`을 사용하세요.
+기본 `handoff`는 여러 AI 세션에서 동시에 실행해도 Git 추적 하네스 파일을 다시 쓰지 않고, `.leerness/cache/sessions/` 아래 ignored 세션별 레코드만 갱신합니다. 구형 자동화가 `current-state.md`, `environment.json`, `last-handoff.json`, 생성 그래프 projection 갱신을 명시적으로 필요로 할 때만 `handoff --writeback`을 사용하세요.
+
+기존 `.harness/` 프로젝트는 그 프로젝트에서 실행하거나 `--path`로 명시한 첫 일반 명령에서 `.leerness/`로 트랜잭션 마이그레이션됩니다. positional 프로젝트 경로는 먼저 `leerness migrate-workspace-dir <path> --dry-run`으로 확인하고, 적용할 때 `--dry-run`을 빼세요. canonical 복사와 해시 검증이 모두 끝난 뒤에만 레거시 원본 트리를 ignored `.leerness-backup/`으로 원자적 이동해 바이트 단위로 보존하고, 기존 `.leerness/` 구조화 상태 substrate도 유지합니다. 구형 관측 run은 `.leerness/cache/agent-runs/`로 분리하고 실제 경로 참조만 갱신합니다. 두 디렉터리에 독립적인 live 상태가 있거나 백업 이름이 이미 존재하거나 링크/junction이 프로젝트 밖을 가리키면 자동 병합하지 않고 차단합니다. 경로처럼 보이는 일반 명령 본문은 마이그레이션 대상으로 해석하지 않습니다.
 
 Cursor 프로젝트에는 `leerness adapter cursor --path .`를 한 번 실행하세요. 기존 project hook을 보존하면서 로컬 `sessionStart` 브리지를 추가해 Cursor 세션 주소를 `LEERNESS_SESSION_ID`로 전달하므로 Cursor/Claude/Codex 동시 세션을 각각 추적할 수 있습니다. Cursor Cloud는 현재 `sessionStart`/`sessionEnd` hook을 실행하지 않으므로, 그 환경에서는 에이전트가 명시 세션 주소를 전달하거나 직접 `handoff`를 실행해야 합니다.
 
