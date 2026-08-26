@@ -1,0 +1,553 @@
+{
+  "schemaVersion": 1,
+  "kind": "leerness-claims-baseline",
+  "createdAt": "2026-08-26T11:42:54.196Z",
+  "createdByVersion": "1.36.167",
+  "beforeTaskId": "T-0145",
+  "policy": "exact-progress-row-and-reasons",
+  "evaluatedBefore": 109,
+  "rawFailedBefore": 68,
+  "entries": [
+    {
+      "id": "T-0008",
+      "fingerprint": "92e4be9b28e97fc5c6f3ebe8ed64e73312e4b1839249e939fa50ced4bf185371",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0009",
+      "fingerprint": "9a200de4ce3082fa7f4b9d39a5fe5e37894c1c3646fb1c4c10502bb30ff50d63",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0010",
+      "fingerprint": "ef1a43e6c8a87f00b69c588ed2425921d272a4fe35d91caae6a73bc5aaa8b88b",
+      "reasons": [
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0011",
+      "fingerprint": "21ef6efe85c682fb9f7f31969a4544033007c0928a71a87ffc1d866b68b084cc",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0012",
+      "fingerprint": "7d71758393063dce3903c00d6e19c5be9e4433f3be0558170022c44ea0885dcb",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0013",
+      "fingerprint": "9c6b756b547f6a39164a558e187f6908349bcf01416d571f5c7921aa026e88fd",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0014",
+      "fingerprint": "df73d2142d157b025c06cc08fb043a65bf3ea8794f848bdc873dc67a48436195",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0015",
+      "fingerprint": "f229480bc90ed14239861c76ce753a9136a87e5d5a09cc871ea382924f38e66b",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0016",
+      "fingerprint": "afc6eab511a91bc8cd3c42622c526a82f616abc1ee47b5583bcd7fb1dc370e65",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0020",
+      "fingerprint": "9569d4fc58a9f4fde32b473f12c4af0a5eb235ffa780b239869a8ac57701633a",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0021",
+      "fingerprint": "723c7c492de6041f0a1f8c9fbbdf0bbb6e16ce4ed30d45f3efebc8e0f58a10f2",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0024",
+      "fingerprint": "b817a0a2d692b7aab1491afa61dd43607111f9001845df0862b03832801bd371",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0025",
+      "fingerprint": "3e71e0c7bf20f398bbd9ccd30b7a6078c7ebf5d148e199531b5abfad92fbc1ed",
+      "reasons": [
+        "files-missing"
+      ]
+    },
+    {
+      "id": "T-0026",
+      "fingerprint": "9f7cb0b0ce3e3823e21cf796a37dd16dcb2ce1e9821edc7872cd8d1e2b5778a0",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0027",
+      "fingerprint": "f24f762b0bea423962bd3320e668ca39eb38b6dc1c7f505b54abfc0959398b77",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0028",
+      "fingerprint": "746533fb88c62d50c296fdb6049b6e2f2ae45dfc4ecf3478159d4ce6d8bb7d5f",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0029",
+      "fingerprint": "5ffb54ea5f27e0cfc610cf3d5bbfb16ae579564d969b3684a3789dc2f183289b",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0030",
+      "fingerprint": "39129b2561035aad33106db2f60ae6618bf52dc78317ef0a5320d07e2ec0e1bb",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0033",
+      "fingerprint": "c452831374d1fb2479dd1cee4129a69a36741ab41a63fa798049bd5918537c74",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0034",
+      "fingerprint": "6f5093607adcd8f2bf16cf55b2cb6447a4b6f7e6d8cac851a81b99e4f0a1b116",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0035",
+      "fingerprint": "919c2f0e07f5ba56fab9625dd18514c1d2a96b1d6b056aa3894d827694a081ec",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0036",
+      "fingerprint": "3969c6e38a45cc7229ff28d02961c5f06f21b89ce74954c953b1164c21e4a192",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0037",
+      "fingerprint": "286f0d2da4c5b89f9f156e0b2932d85458244337802887b8b16cde6f37ccd245",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0038",
+      "fingerprint": "37f633d921d6e1e9c9e9d486f7b965589ee63c3eeba86d718cded1e283389a35",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0039",
+      "fingerprint": "8b54b6f21123fcd869cd80b473a4194420b21873b0ac8958224e25c1da3c1461",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0040",
+      "fingerprint": "a757f8ea4a6b5ccb289cf68df1c2c074075c696ce7813f97b2b376933b3aa170",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0041",
+      "fingerprint": "5632b867cb488eaddd259690b223e52950e916c53441cb16bb6cb884cf00113c",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0042",
+      "fingerprint": "c08c2580d67b6585c8c7d1632c9f4d91a1be68319ea19fd8798d2817597b0626",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0043",
+      "fingerprint": "c1f0675b965094262287abd171f02358bb47ab7362d6a041c3a7ec56deb4abd0",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0044",
+      "fingerprint": "b1ef9fbf3dd5ddd3ce38bd4ec98b410bde1b1c0b54ad17792c7aa75fa3158c70",
+      "reasons": [
+        "files-missing"
+      ]
+    },
+    {
+      "id": "T-0045",
+      "fingerprint": "1ac2ecb69ccefb2326c3465a074b282f4ec8bd3df652aa6bfe637981b979d32f",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0046",
+      "fingerprint": "e4f64e5312e400ab5c70c5615b7b8189f8574d0bb3fa6308f2b09451fa690758",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0047",
+      "fingerprint": "3cfdd88fb971b13fed03a58d108178e239bc69b3c990f7aaabdab18e30f85427",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0048",
+      "fingerprint": "8cb159c64f3ae464c0683891ed155669b84280a7129357b0afc803cfb0aa4def",
+      "reasons": [
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0049",
+      "fingerprint": "f2d85da0bfec3512ab0ff869e92a3abbc4a8db716f24532c0e7b38b584dca054",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0050",
+      "fingerprint": "1eaae7db69c53a258bf4af37629984eed9ddaafe6b184f17599f8d00a9dd927a",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0051",
+      "fingerprint": "8c6b4950be943f7565ef08f8921ddfb5c08973eb0be36d951cda1a2c34ed3f70",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0052",
+      "fingerprint": "f48ff07e5755c9d38136fa07b2d019e59c6a2cd951cb58d50ad1a8d66c359a88",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0053",
+      "fingerprint": "fd2fa0db3c8b25a4a70d7f81e97443aab6aeea9139821f9cbf6ccc9b9aaf36a2",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0054",
+      "fingerprint": "3c4ed682d1d5a22ce815ad718d30e69254f36fd1025878efe274095bed1beec7",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0055",
+      "fingerprint": "32694aa2e98c6cc12595113277668be1d247a8940f521d2feb91d58254406f02",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0056",
+      "fingerprint": "7db0d7060120c7cc17051dec6365864ca4f7839a3bc7cec886231b4a966f713e",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0057",
+      "fingerprint": "59c108458618f92d42847c7bf3adc54b99caeb2bbd67ed7696ab75a4d5c584ef",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0058",
+      "fingerprint": "a5cf40464035858b2ae124810d8a61ad30222dc709cd2b115aa50e786b326997",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0059",
+      "fingerprint": "741c3daff2a2390a6bc6032e26770485cae6dd20d5aba21eba30609020ff7a96",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0060",
+      "fingerprint": "849ce671b322b0929d52653078b1194b14ea4dd56bf9739bafa128f671a30557",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0061",
+      "fingerprint": "72cefe8764ee07ce498192079193825fdc75cc1cd7be3138444a8fc39e8f472f",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0062",
+      "fingerprint": "a7706e9a6393f9b88a247a60d4aad6a91757ee95a8db8d97d6bcf0588d0a64f3",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0063",
+      "fingerprint": "9d0185fd9fb54874d77730e6ee60dbecf82622826dd8b164301ce68e97cf2215",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0064",
+      "fingerprint": "a8148c107f2b93be976a2ffdcb92cead565d32c0906395c2b6b4df5e1a34d0f8",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0065",
+      "fingerprint": "5fef499e118aee082b35396b038b5c36366b11c5572949d3d3991a5b19aaae8e",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0066",
+      "fingerprint": "1507a5603c7ff5f16c5904de4a475c2a98ade514f8da81bddf343653a060002d",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0067",
+      "fingerprint": "70fad6871a20fd7e852325af53aab9fb2e978ac44bc2ee1b439ea8b4aeea2b93",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0068",
+      "fingerprint": "863c34979a894acdaeeccac28a262df0555f3f4f2d9baf5fd918d99e72a573da",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0069",
+      "fingerprint": "7b1cfc97a8b7c956f81cc103b64799bf571d3e099c6dabb3400342d708aa3194",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0070",
+      "fingerprint": "fa3b4c887db5084b2758205b6c6cd13e14995af5a4910fb1a61b28a5ae077770",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0071",
+      "fingerprint": "a13bcd8a1d3941c8dcb3d8f1f22231a00086cba5c2673e48b37c637d7add54c1",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0072",
+      "fingerprint": "7d8acb4ab03a4246bbe02e6fc6957def263ec98e94d65dd51326be36cf0a7b5b",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0073",
+      "fingerprint": "0f9caf0b452c4f2c63b83c7af6b1c4268bbe74052b73e62792656e1c3549e04c",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0074",
+      "fingerprint": "94fb9ccb2a143f375cca2b4d2509a20ac87f83d915ea04769ee9970628ec5c69",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0075",
+      "fingerprint": "6e45c4e174348037f37bebec35e9add8dbeafd2b4dffde9a0d2c7d09b7afa005",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0076",
+      "fingerprint": "875b4e145eb6ce6ed1b22226ef582b251d7ab93496ddf1d7da8f19ab0e9b47b9",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0077",
+      "fingerprint": "1c29227a8a442fc55627b4cede86c48121ba80702d0f5d8493c8be84112a5d29",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0078",
+      "fingerprint": "c35fa3292c792c6e4024774b6667acecafab37f260230b3be59d87ae5cb373ec",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0079",
+      "fingerprint": "0270f12ce6600d12f2dd60465976ee7bb1d7f40dc2cc05e6179b3a6c4f235cdc",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0080",
+      "fingerprint": "3f6ae1dd6f03bbaae466c5ec06512e1a81990c9fdcc8604d0d22694c4eec4d59",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0081",
+      "fingerprint": "695e930ecce405d62458e64141f83a06865bf081231be67419f149e8629c1468",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    },
+    {
+      "id": "T-0123",
+      "fingerprint": "74c9abf456ee9dc18d5e290c641ee40ab7f1ac06096ee64388979c8e887c76c9",
+      "reasons": [
+        "evidence-incomplete",
+        "unverifiable-claim"
+      ]
+    }
+  ],
+  "integrity": "sha256:98bf356495339798c98c285cc8ac60764d8c8f7e824aa8e917915eee9bf3075d"
+}

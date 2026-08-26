@@ -105,3 +105,9 @@
 - Reason: 이 변수는 저장소 대상을 바꾸지 않고 시스템 Git 설정 가시성만 바꾼다. 내부 git에서만 삭제하면 enforce 설치 경로와 같은 셸의 실제 git commit 경로가 달라져 훅이 우회된다.
 - Alternatives: GIT_CONFIG_NOSYSTEM을 내부 Git에서만 제거하는 방식은 거부한다. 설치기와 호출자 Git의 설정 가시성이 달라진다.
 - Impact: enforce 설치와 같은 셸의 Git commit이 동일한 시스템 Git 설정 가시성을 사용한다.
+
+### 2026-08-26 — 레거시 claims baseline은 명시적 경계와 행 지문에만 적용
+- Decision: 레거시 claims baseline은 명시적 경계와 행 지문에만 적용
+- Reason: 평가 보고서와 실제 109건을 대조하면 과거 증거를 소급 수정하는 방식은 역사 왜곡이고, 전 실패 자동 면제는 새 거짓완료를 숨긴다.
+- Alternatives: 과거 evidence 일괄 보강(기각: 변조), gate 완화(기각: 신규 실패 은폐), 현재 실패 전부 자동 면제(기각: 경계 없음)
+- Impact: verify-claim baseline create --before <T-ID> --yes로만 생성하며, 원본 행·실패사유 지문이 달라지거나 신규 실패·손상 baseline이면 fail-closed한다.

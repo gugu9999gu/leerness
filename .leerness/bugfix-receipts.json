@@ -408,5 +408,27 @@
       ]
     },
     "previousGuardGap": "기존 E2E는 정상 플래그와 일부 typo warning만 확인해 known-but-foreign flags, malformed equals/missing forms, failure-call no-write ordering을 함께 검증하지 않았다."
+  },
+  {
+    "id": "T-0145",
+    "repro": "node bin/leerness.js gate . --claims --json",
+    "expectBad": "\"ok\": false",
+    "baseline": {
+      "at": "2026-08-26T11:28:11.502Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 25197
+    },
+    "rootCause": "verify-claim --all과 gate --claims가 검증기 도입 시점 이전 완료 행과 신규 완료 행을 구분할 버전·경계 정책 없이 같은 실패 집합으로 취급했다.",
+    "siblingScope": {
+      "checked": [
+        "verify-claim --all",
+        "gate --claims",
+        "leerness_verify_claim_all"
+      ]
+    },
+    "previousGuardGap": "기존 E2E는 fresh init에서 만든 최신 evidence만 검사해 장기 운영 tracker를 새 엄격 검증기로 업그레이드할 때 누적 실패가 신규 작업을 영구 차단하는 시나리오가 없었다."
   }
 ]

@@ -85,6 +85,16 @@ The generated workflow is production-grade: it **pins the leerness version** (re
 
 Then make that check **required** in GitHub branch protection. Now a PR that skips verification (or whose claims fail) **cannot merge** — the gate runs independently of the agent, returns a non-zero exit code, and blocks. That is the difference between a guideline and a guardrail. For exact per-claim enforcement, run `leerness gate --claims` — it adds a 6th check that runs `verify-claim` on **every** completed task and fails the gate if any "done" task's evidence doesn't match reality (the default 5-check gate already blocks false-done via heuristics; `--claims` makes it precise).
 
+For a mature repository that predates strict claim verification, do not rewrite historical evidence merely to make the gate green. Create an explicit, reviewed debt boundary instead:
+
+```bash
+leerness verify-claim baseline create --before T-0123 --yes
+leerness verify-claim --all          # applies exact-match legacy debt policy
+leerness verify-claim --all --raw    # ignores the baseline and audits raw verdicts
+```
+
+The baseline stores no replacement evidence. It accepts only failures before the named tracker row whose **complete row and failure reasons still match their SHA-256 fingerprint**. A changed legacy row, a newly failing task, an entry at/after the boundary, or a corrupt baseline fails closed. `verify-claim <T-ID>` always remains raw for focused audits. Creation is one-shot: the CLI refuses to recalculate or overwrite an existing baseline, so a changed historical row cannot be relaundered by rerunning the command. The tracked `.leerness/claims-baseline.json` is repository policy, not a signature against a malicious repository writer: protect any removal or replacement with ordinary branch review and CODEOWNERS when the threat model requires that separation.
+
 For secrets, pair the gate with a **dedicated scanner** in the same workflow. `scan secrets` gives your agent the same signal locally; a dedicated scanner is the hard-guarantee layer:
 
 ```yaml
@@ -105,7 +115,7 @@ For secrets, pair the gate with a **dedicated scanner** in the same workflow. `s
 
 - **Memory** — `task` / `plan` / `decision` / `lesson` / `rule`: canonical JSON + markdown projections, archive/restore.
 - **Handoff** — `handoff` (session start context) · `session close` (closing report). Survives agent swaps.
-- **Verification** — `verify-claim` (evidence vs reality, stub/fake-test/inflated-count detection, `--run-tests --test-cmd` for any language; `--all` checks **every** completed claim at once for CI) · `contract verify` (spec ↔ impl) · `gate` (one-call CI gate).
+- **Verification** — `verify-claim` (evidence vs reality, stub/fake-test/inflated-count detection, `--run-tests --test-cmd` for any language; `--all` checks every completed claim for CI; `baseline create --before <T-ID> --yes` isolates fingerprint-bound legacy debt; `--raw` audits the original verdicts) · `contract verify` (spec ↔ impl) · `gate` (one-call CI gate).
 - **Audit** — `audit` · `lazy detect` · `drift check` keep the workspace honest over time.
 - **Security** — `scan secrets` (committed-secret detection) · `encoding check` (BOM/CP949) — also runs at `session close`.
 - **Visualize** — `graph --html` writes a self-contained interactive ontology graph (`leerness.html`) of the whole harness (memory surfaces + skills + feature-graph) — click a node to read its content. Optional tracked auto-refresh: `LEERNESS_AUTO_GRAPH=1 leerness handoff . --writeback`.
@@ -128,7 +138,7 @@ MIT
 <!-- leerness:project-readme:start -->
 ## Leerness Project Harness
 
-이 프로젝트는 Leerness v1.36.166 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
+이 프로젝트는 Leerness v1.36.167 하네스를 사용합니다. AI 에이전트는 작업 전 `leerness handoff`로 컨텍스트를 적재하고, 작업 후 `leerness check`/`leerness audit`/`leerness session close`를 수행해야 합니다.
 
 ### 정체성 — AI 에이전트 운영 레이어 (UR-0030)
 
@@ -182,7 +192,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.36.166는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **89개 도구**를 노출:
+Leerness v1.36.167는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **89개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -203,7 +213,7 @@ Leerness v1.36.166는 stdio JSON-RPC MCP server를 내장합니다 — Claude Co
 `<<autonomous-loop-dynamic>>` 신호만 보내면 AI가:
 1) 다음 라운드 후보 선정 → 2) 코드 변경 → 3) 회귀 테스트 갱신 → 4) 전체 e2e 스위트 통과 → 5) npm publish + git tag → 6) main push → 7) session close → 8) 다음 라운드 예약.
 
-현재 누적: **v1.9.x → 1.36.166 릴리스 태그 이력** (수백 라운드) · _reports/는 비공개 보존.
+현재 누적: **v1.9.x → 1.36.167 릴리스 태그 이력** (수백 라운드) · _reports/는 비공개 보존.
 
 ### 성능 가이드
 
@@ -241,5 +251,5 @@ leerness release pack --close --auto-main-push
 - `.leerness/session-handoff.md`: 다음 세션 인수인계 (자동 작성)
 - `.leerness/lessons.md` / `decisions.md` / `rules.md`: 영구 메모리 (5 surface)
 
-Last synced by Leerness v1.36.166: 2026-08-26
+Last synced by Leerness v1.36.167: 2026-08-26
 <!-- leerness:project-readme:end -->

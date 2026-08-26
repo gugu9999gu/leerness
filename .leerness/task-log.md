@@ -139,6 +139,14 @@ doNotStore:
 ## 2026-08-26 session-close
 - Generated session-handoff.md and refreshed current-state.md.
 
+## 2026-08-26 — T-0145 legacy claims baseline
+
+- `verify-claim baseline create --before <T-ID> --yes`를 추가해 과거 evidence를 소급 수정하지 않고 경계 이전의 현재 실패만 전체 tracker 행+실패 사유 SHA-256 지문으로 격리했다.
+- `verify-claim --all`·`gate --claims`·MCP를 baseline-aware로 통합하고 `--raw`/개별 검증은 원판정을 유지했다. 신규·변경·경계 밖·손상 baseline은 fail-closed하며 gate JSON에도 구체 진단을 보존한다.
+- 독립 리뷰에서 발견한 기존 baseline 재세탁, gate JSON 진단 누락, 동시 최초 생성 TOCTOU를 모두 재현·수정했다. create는 기존 정책을 덮어쓰지 않고 저장 락 안에서 destination 부재를 다시 확인한다.
+- 검증: `npm test` exit 0 — E2E 467/467, selftest 354/354, core 46/46, handoff 75/75, command surface 40/40, installed cleanroom 10/10, claims baseline 27/27, 동시 생성 7/7. 실제 프로젝트 gate는 rawFailed 68 · baselined 68 · failed 0. 독립 리뷰 P0/P1/P2 없음.
+- 다음: v1.36.167 GitHub/npm/leerness.com 배포·공개 검증 후 T-0146 Windows `which` shim-pair false-positive 교정.
+
 ## 2026-08-26 — T-0143 release verification
 
 - leerness 1.36.165를 npm, GitHub Release, leerness.com production에 게시하고 exact version/integrity/tag target/site marker를 재검증했다.

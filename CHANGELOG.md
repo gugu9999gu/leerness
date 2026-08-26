@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.167 — 2026-08-26
+
+- T-0145: 장기 운영 프로젝트의 레거시 완료 증거를 소급 수정하지 않고 명시적 tracker 경계 이전의 현재 실패만 exact 행+사유 SHA-256 지문으로 격리하는 claims baseline을 추가했습니다. verify-claim --all과 gate --claims는 원판정 실패·baseline 부채·현재 차단 및 진단 상세를 분리해 보고하고, --raw/개별 검증은 원판정을 유지합니다. 행 변경·신규 실패·경계 밖 항목·손상 baseline은 fail-closed하며, 생성 명령은 기존 baseline을 덮어쓰지 않아 변경 행의 재승인을 차단합니다. CLI·MCP·클린룸 프로브로 검증합니다.
+
 ## 1.36.166 — 2026-08-26
 
 - T-0144: unknown/foreign/malformed CLI 플래그를 migration과 쓰기 전에 exit 1로 거부하고 commands 카탈로그의 verify-code·contract verify 누락을 보완했습니다. 명령별 strict route와 값 누락·부울 equals·language 선택값 회귀 probe를 npm test에 추가했습니다.

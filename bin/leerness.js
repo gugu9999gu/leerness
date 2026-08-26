@@ -36,6 +36,7 @@ const { CAPABILITY_SURFACE, POWERFUL_COMMANDS, ADAPTERS, REUSE_CATEGORIES, REUSE
 const { tokenizeForRank: _tokenizeForRank, expandQuery: _expandQuery, scoreHits: _scoreHits, suggestTerms: _suggestTerms } = require('../lib/search-core');  // 1.36.23: memory search 랭킹 코어(순수·0-deps)
 const { findCorruptedStateJson: _findCorruptedStateJson } = require('../lib/state-integrity');  // 1.36.1 (클린룸 리뷰 FN): .leerness/*.json 상태 무결성 (audit/health/check 공유)
 const _cursorHook = require('../lib/cursor-session-hook');
+const _claimsBaseline = require('../lib/claims-baseline');
 const {
   CANONICAL_WORKSPACE_DIR,
   LEGACY_WORKSPACE_DIR,
@@ -47,7 +48,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.166';
+const VERSION = '1.36.167';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -1318,7 +1319,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
     '.leerness/test-evidence-policy.md': fm('test-evidence-policy', ['검증 결과 기록 시'], ['검증 형식 변경'], `# Test Evidence Policy\n\n매 검증은 \`.leerness/review-evidence.md\`에 누적 기록합니다.\n\n## Format\n\`\`\`\n## YYYY-MM-DD HH:MM\nTask: T-XXXX\nCommand: <명령>\nExit: <코드>\nNote: <주요 결과 요약>\nArtifacts: <스크린샷/로그 경로>\n\`\`\`\n`),
     '.leerness/review-evidence.md': fm('review-evidence', ['진행 보고','릴리즈 검토'], ['검증 결과 기록'], `# Review Evidence\n\nVerification command/result history. Append-only.\n`),
     '.leerness/AX_PLAN_GUIDE.md': fm('ax-plan-guide', ['계획 수립/변경','신규 프로젝트'], ['계획 가이드 변경'], `# AX Plan Guide\n\n1. 사용자 요청이 기존 plan.md 범위 내인지 확인합니다.\n2. 새 범위라면 plan.md(milestone)와 progress-tracker.md(T-id) 양쪽에 추가합니다.\n3. 사용자가 범위를 드랍하면 삭제 대신 dropped 표기를 추가합니다.\n4. 신규 프로젝트는 코딩 전에 plan.md/project-brief.md를 채웁니다.\n`),
-    '.leerness/AX_MIGRATION_GUIDE.md': fm('ax-migration-guide', ['마이그레이션 전'], ['마이그레이션 정책 변경'], `# AX Migration Guide\n\n- Back up before changes (\`.leerness/archive/\`).\n- 기존 프로젝트 메모리 보존 (preserve-by-default).\n- .env.example/.gitignore는 라인 단위 머지.\n- 보호 파일을 삭제하지 않습니다.\n- 마이그레이션 보고서는 \`.leerness/migration-report.md\`.\n- 자동: \`leerness update --yes\`가 위 절차를 백업·머지·검증까지 한번에 수행합니다.\n`),
+    '.leerness/AX_MIGRATION_GUIDE.md': fm('ax-migration-guide', ['마이그레이션 전'], ['마이그레이션 정책 변경'], `# AX Migration Guide\n\n- Back up before changes (\`.leerness/archive/\`).\n- 기존 프로젝트 메모리 보존 (preserve-by-default).\n- .env.example/.gitignore는 라인 단위 머지.\n- 보호 파일을 삭제하지 않습니다.\n- 마이그레이션 보고서는 \`.leerness/migration-report.md\`.\n- 자동: \`leerness update --yes\`가 위 절차를 백업·머지·검증까지 한번에 수행합니다.\n- 레거시 완료 증거는 소급 수정하지 않습니다. 명시적 경계 이전의 현재 실패만 \`leerness verify-claim baseline create --before <T-ID> --yes\`로 격리합니다.\n- claims baseline은 전체 tracker 행+실패 사유 지문이 같을 때만 적용됩니다. 변경·신규 실패·손상 baseline은 fail-closed하며 \`verify-claim --all --raw\`로 원판정을 감사합니다.\n- 생성된 claims baseline은 CLI로 덮어쓰지 않습니다. 새 정책이 필요하면 기존 tracked 파일의 제거/교체를 별도 코드리뷰로 승인합니다.\n`),
     '.leerness/AX_NEW_PROJECT_GUIDE.md': fm('ax-new-project-guide', ['신규 프로젝트 감지'], ['신규 설치 정책 변경'], `# AX New Project Guide\n\nBefore coding, ask or infer the project goal, users, scope, out-of-scope, stack, deployment target, and milestones. Then fill plan.md and project-brief.md.\n`),
     '.leerness/AX_SKILL_LIBRARY_GUIDE.md': fm('ax-skill-library-guide', ['스킬 학습/검증/업로드'], ['스킬 정책 변경'], `# AX Skill Library Guide\n\nValidated skills require metadata, sensitive data scan, AI verification, dry-run publish, and explicit execute approval.\n`),
     '.leerness/skill-index.md': fm('skill-index', ['작업별 스킬 선택'], ['스킬 추가/삭제'], `# Skill Index\n\n| ID | Korean Name | Capabilities | Last Updated | Verification |\n|---|---|---|---|---|\n${skillRows}\n`),
@@ -1342,7 +1343,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
     _files['.leerness/test-evidence-policy.md'] = fm('test-evidence-policy', ['recording verification results'], ['verification format changes'], `# Test Evidence Policy\n\nEvery verification is appended to \`.leerness/review-evidence.md\`.\n\n## Format\n\`\`\`\n## YYYY-MM-DD HH:MM\nTask: T-XXXX\nCommand: <command>\nExit: <code>\nNote: <key result summary>\nArtifacts: <screenshot/log paths>\n\`\`\`\n`, 'en');
     _files['.leerness/review-evidence.md'] = fm('review-evidence', ['progress reports', 'release review'], ['verification results recorded'], `# Review Evidence\n\nVerification command/result history. Append-only.\n`, 'en');
     _files['.leerness/AX_PLAN_GUIDE.md'] = fm('ax-plan-guide', ['planning/plan changes', 'new project'], ['plan guide changes'], `# AX Plan Guide\n\n1. Check whether the user's request is within the current plan.md scope.\n2. If it is new scope, add it to both plan.md (milestone) and progress-tracker.md (T-id).\n3. When the user drops scope, mark it dropped instead of deleting.\n4. For new projects, fill plan.md/project-brief.md before coding.\n`, 'en');
-    _files['.leerness/AX_MIGRATION_GUIDE.md'] = fm('ax-migration-guide', ['before migration'], ['migration policy changes'], `# AX Migration Guide\n\n- Back up before changes (\`.leerness/archive/\`).\n- Preserve existing project memory (preserve-by-default).\n- Merge .env.example/.gitignore line by line.\n- Never delete protected files.\n- Migration report: \`.leerness/migration-report.md\`.\n- Automatic: \`leerness update --yes\` performs backup, merge, and verification in one step.\n`, 'en');
+    _files['.leerness/AX_MIGRATION_GUIDE.md'] = fm('ax-migration-guide', ['before migration'], ['migration policy changes'], `# AX Migration Guide\n\n- Back up before changes (\`.leerness/archive/\`).\n- Preserve existing project memory (preserve-by-default).\n- Merge .env.example/.gitignore line by line.\n- Never delete protected files.\n- Migration report: \`.leerness/migration-report.md\`.\n- Automatic: \`leerness update --yes\` performs backup, merge, and verification in one step.\n- Never rewrite legacy completion evidence. Isolate only current failures before an explicit boundary with \`leerness verify-claim baseline create --before <T-ID> --yes\`.\n- A claims baseline applies only while the full tracker row and failure reasons match. Changed/new failures or a corrupt baseline fail closed; audit raw verdicts with \`verify-claim --all --raw\`.\n- The CLI never overwrites a created claims baseline. Approve removal or replacement of the tracked policy file as a separate code-reviewed change.\n`, 'en');
     _files['.leerness/AX_NEW_PROJECT_GUIDE.md'] = fm('ax-new-project-guide', ['new project detected'], ['fresh-install policy changes'], `# AX New Project Guide\n\nBefore coding, ask or infer the project goal, users, scope, out-of-scope, stack, deployment target, and milestones. Then fill plan.md and project-brief.md.\n`, 'en');
     _files['.leerness/AX_SKILL_LIBRARY_GUIDE.md'] = fm('ax-skill-library-guide', ['skill learning/verification/upload'], ['skill policy changes'], `# AX Skill Library Guide\n\nValidated skills require metadata, sensitive data scan, AI verification, dry-run publish, and explicit execute approval.\n`, 'en');
     _files['.leerness/skill-index.md'] = fm('skill-index', ['choosing skills per task'], ['skills added/removed'], `# Skill Index\n\n| ID | Korean Name | Capabilities | Last Updated | Verification |\n|---|---|---|---|---|\n${skillRows}\n`, 'en');
@@ -5552,19 +5553,39 @@ function _selfTestCases() {
     } },
     { name: '1.33.3 (verify-claim --all → gate+MCP): _verifyClaimsAll 코어(exit 없음) + gate --claims opt-in 6번째(기본 5 유지) + MCP leerness_verify_claim_all def↔case', run: () => {
       const src = read(__filename);
-      const coreDef = src.match(/function _verifyClaimsAll\(root\) \{[\s\S]*?\n\}/);  // 함수 본문만 캡처(첫 줄머리 } 까지)
-      const core = !!coreDef && coreDef[0].includes('return { ok: failed.length === 0, total: doneRows.length, failed: failed.length, results };') && !/process\.exit\(/.test(coreDef[0]);  // 코어는 절대 process.exit( 안 함(게이트 step 집계 보호)
+      const coreDef = src.match(/function _verifyClaimsAll\(root, options = \{\}\) \{[\s\S]*?\n\}/);  // 함수 본문만 캡처(첫 줄머리 } 까지)
+      const core = !!coreDef && coreDef[0].includes('const raw = { ok: failed.length === 0, total: doneRows.length, failed: failed.length, results };')
+        && coreDef[0].includes('_claimsBaseline.applyBaseline(rows, raw') && !/process\.exit\(/.test(coreDef[0]);  // 코어는 절대 process.exit( 안 함(게이트 step 집계 보호)
       // 1.36.82: 헤더 문자열을 **정확 리터럴**로 잡으면 그 줄을 만질 때마다 자기 줄만 매칭해 조용히 통과한다
       //   (이번 라운드에만 두 번 그렇게 됐다). 표현이 아니라 **불변식**을 본다:
       //   헤더가 withClaims 로 5/6 을 계산하고, --claims 일 때만 verify-claims 단계가 붙는다.
       const gateOptIn = src.includes("const withClaims = has('--claims');")
         && /# leerness gate \(\$\{[^}]*withClaims \? 6 : 5[^}]*\} checks\)/.test(src)
-        && src.includes("if (withClaims) step('verify-claims', () => { const r = _verifyClaimsAll(root);");
-      const reuse = src.includes('const res = _verifyClaimsAll(root);');  // CLI 도 코어 공유(분기 없음)
+        && /if \(withClaims\) step\('verify-claims',[\s\S]{0,100}?const r = _verifyClaimsAll\(root\)/.test(src);
+      const reuse = src.includes("const res = _verifyClaimsAll(root, { raw: has('--raw') });");  // CLI 도 코어 공유(분기 없음)
       const tools = require('../lib/mcp-tools');
       const def = tools.find(t => t.name === 'leerness_verify_claim_all');
       const mcpOk = !!def && def.requiredTier === 'read-only' && src.includes("case 'leerness_verify_claim_all':") && /case 'leerness_verify_claim_all':[\s\S]{0,160}'verify-claim', '--all'[\s\S]{0,80}'--json'/.test(src);
       return core && gateOptIn && reuse && mcpOk && tools.length >= 84;
+    } },
+    { name: '1.36.167 (T-0145): claims baseline은 경계 이전 exact 행+사유만 승인하고 새/변경 실패·손상은 fail-closed (행위)', run: () => {
+      const b = require('../lib/claims-baseline');
+      const row = (id, status, evidence, nextAction = 'next') => ({ id, status, request: `request ${id}`, evidence, nextAction, updated: '2026-08-26' });
+      const rows = [row('T-0001', 'done', 'legacy prose'), row('T-0002', 'in-progress', 'boundary'), row('T-0003', 'done', 'new prose')];
+      const raw = { ok: false, total: 2, failed: 2, results: [
+        { id: 'T-0001', request: 'request T-0001', status: 'done', ok: false, reasons: ['unverifiable-claim'] },
+        { id: 'T-0003', request: 'request T-0003', status: 'done', ok: false, reasons: ['unverifiable-claim'] },
+      ] };
+      const built = b.buildBaseline(rows, raw, { beforeTaskId: 'T-0002', version: VERSION, createdAt: '2026-08-26T00:00:00.000Z' });
+      const valid = b.validateBaseline(built.doc).ok && built.doc.entries.length === 1;
+      const applied = b.applyBaseline(rows, raw, { state: 'valid', file: 'fixture', doc: built.doc });
+      const changedRows = [{ ...rows[0], nextAction: 'changed' }, rows[1], rows[2]];
+      const changed = b.applyBaseline(changedRows, raw, { state: 'valid', file: 'fixture', doc: built.doc });
+      const corrupt = b.validateBaseline({ ...built.doc, integrity: 'sha256:' + '0'.repeat(64) });
+      return valid && applied.ok === false && applied.baselined === 1 && applied.failed === 1
+        && applied.baseline.newFailures.includes('T-0003')
+        && changed.baselined === 0 && changed.failed === 2 && changed.baseline.mismatched.includes('T-0001')
+        && corrupt.ok === false && corrupt.problems.includes('integrity-mismatch');
     } },
     { name: '14th 버그헌트 P2 (UR-0178/0179/0180): completed→done 정규화 + rule archive _cellSafe + nextRuleId 아카이브 스캔 (1.11.3)', run: () => {
       if (_normTaskStatus('completed') !== 'done' || _normTaskStatus('verified') !== 'done' || _normTaskStatus('in-progress') !== 'in-progress') return false;
@@ -10967,7 +10988,7 @@ function commandsCmd(root) {
       { cmd: 'scan secrets [path]', desc: '시크릿 탐지', descEn: 'secret detection' },
       { cmd: 'encoding check [path]', desc: '인코딩 검증', descEn: 'encoding verification' },
       { cmd: 'lazy detect [path] [--json]', desc: '게으른 작업 감지 (1.9.101)', descEn: 'detect lazy/incomplete work (1.9.101)' },
-      { cmd: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<명령>"] [--strict-claims] [--require-evidence]', cmdEn: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<command>"] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --all: 모든 done 주장 일괄 검증(CI·스케일, 1.33.2) · --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287) · --test-cmd: 비-JS 테스트 명령 (1.17.2)', descEn: 'verify a claim (1.9.18~26) — --all: verify every done claim at once (CI/scale, 1.33.2) · --require-evidence: require file + test evidence on done claims (1.9.287) · --test-cmd: non-JS test command (1.17.2)' },
+      { cmd: 'verify-claim <T-ID|--all> [--run-tests] [--strict-claims] [--raw] · baseline create --before <T-ID> --yes|show', cmdEn: 'verify-claim <T-ID|--all> [--run-tests] [--strict-claims] [--raw] · baseline create --before <T-ID> --yes|show', desc: '주장 검증 — --all은 명시적 legacy baseline 적용, --raw는 원판정 감사. baseline create는 경계 이전 exact 행+사유 실패만 격리하며 evidence를 수정하지 않음 (1.36.167)', descEn: 'claim verification — --all applies an explicit legacy baseline; --raw audits raw verdicts. baseline create isolates only exact row+reason failures before a boundary without editing evidence (1.36.167)' },
       { cmd: 'verify-code [path] [--build] [--bench] [--strict]', desc: '프로젝트 테스트·린트·타입검사 자동 감지 실행 + 검증 증거 기록', descEn: 'auto-detect and run project tests/lint/typecheck, then record verification evidence' },
       { cmd: 'contract verify <spec.md> <impl.js> [--allow-empty] [--json]', desc: '명세의 함수·필드 선언과 구현 export 정적 대조', descEn: 'statically compare functions and fields declared in a spec with implementation exports' },
       { cmd: `lens [${_lensDomainList()}] [--json]`, desc: '분야별 자기질문 품질 렌즈 + 분야간 인과관계 (1.18.3 · database/contract/recovery/observability 는 심화, axes 는 8축 경량 점검)', descEn: 'per-domain self-question quality lenses + cross-domain causality (1.18.3 · database/contract/recovery/observability are deep dives, axes is a light 8-axis check)' },
@@ -14628,11 +14649,15 @@ const _STRICT_COMMAND_FLAGS = {
   about: { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'about [--json]' },
   identity: { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'identity [--json]' },
   gate: { allowed: ['--claims', '--require-referee'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'gate [path] [--claims] [--require-referee <id>] [--json]' },
+  'verify-claim': { allowed: ['--all', '--run-tests', '--test-cmd', '--strict-claims', '--require-evidence', '--lenient', '--referee', '--raw'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'verify-claim <T-ID|--all> [--run-tests] [--strict-claims] [--raw] [--json]' },
+  'verify-claim baseline create': { allowed: ['--before', '--yes'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'verify-claim baseline create --before <T-ID> --yes [--json]' },
+  'verify-claim baseline show': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'verify-claim baseline show [--json]' },
   'verify-code': { allowed: ['--build', '--bench', '--strict'], globals: [..._COMMON_COMMAND_FLAGS], usage: 'verify-code [path] [--build] [--bench] [--strict]' },
   'contract verify': { allowed: ['--allow-empty'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'contract verify <spec.md> <impl.js> [--allow-empty] [--json]' },
 };
 function _validateCommandFlags(cmd, args) {
-  const route = cmd === 'contract' && args[1] === 'verify' ? 'contract verify' : cmd;
+  let route = cmd === 'contract' && args[1] === 'verify' ? 'contract verify' : cmd;
+  if (cmd === 'verify-claim' && args[1] === 'baseline') route = `verify-claim baseline ${args[2] || ''}`.trim();
   const cfg = _STRICT_COMMAND_FLAGS[route];
   if (!cfg) return true;
   return _rejectUnknownFlags(cfg.allowed, cfg.usage, { globals: cfg.globals });
@@ -18849,7 +18874,10 @@ function verifyClaimCmd(root, taskId, opts = {}) {
 //   1.34.1 (16th리뷰 정직화): 기본 게이트 5체크는 워크스페이스-상태 휴리스틱(handoff/test-run/evidence 부재 등)으로 거짓완료를 잡고, 콘텐츠-레벨 주장(파일 존재·테스트 카운트·스텁·optimism)은 검사하지 않음. verify-claim --all 은 그 콘텐츠 차원을 추가 — lazy detect 가 깨끗한(handoff·테스트기록 완비) 성숙 프로젝트에선 5체크가 통과해도 이 검사만 콘텐츠 거짓을 잡음(실증: gate 기본 exit 0 vs --claims exit 1).
 // 1.33.3: 일괄 검증 코어 — 렌더/exit 없이 결과만 반환. verifyClaimAllCmd(CLI 렌더+exit) 와 gate --claims(opt-in 체크) 가 공유.
 //   gate 의 step() 은 process.exit 가 아니라 process.exitCode 로 실패를 감지하므로, 코어는 절대 process.exit 하지 않음(게이트 프로세스 조기종료 방지).
-function _verifyClaimsAll(root) {
+// 1.36.167 (T-0145): 오래된 프로젝트의 검증기 도입 이전 완료 행을 소급 수정하지 않으면서도 새 실패를
+//   계속 차단한다. 기준선은 명시적 tracker 경계 이전의 **현재 실패만** 담고, 전체 행+사유 지문이 같을 때만
+//   정책상 승인한다. 행/사유 변경·새 실패·손상 파일은 fail-closed. --raw 는 원판정을 계속 감사한다.
+function _verifyClaimsAll(root, options = {}) {
   root = absRoot(root);
   const rows = readProgressRows(root);
   const doneRows = rows.filter(r => /done|완료|completed/i.test(String(r.status || '')));
@@ -18858,30 +18886,111 @@ function _verifyClaimsAll(root) {
   const runMemo = {};
   const results = doneRows.map(r => verifyClaimCmd(root, r.id, { collect: true, runMemo }));
   const failed = results.filter(x => x && !x.ok);
-  return { ok: failed.length === 0, total: doneRows.length, failed: failed.length, results };
+  const raw = { ok: failed.length === 0, total: doneRows.length, failed: failed.length, results };
+  return _claimsBaseline.applyBaseline(rows, raw, options.raw ? null : _claimsBaseline.loadBaseline(root), { raw: !!options.raw });
 }
 function verifyClaimAllCmd(root) {
   root = absRoot(root);
   const _j = has('--json');
   const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
-  const res = _verifyClaimsAll(root);
+  const res = _verifyClaimsAll(root, { raw: has('--raw') });
   const { results, total } = res;
   if (_j) {
-    log(JSON.stringify({ ok: res.ok, root: path.basename(root), total, failed: res.failed, results }, null, 2));
-    if (res.failed) process.exitCode = 1;
+    log(JSON.stringify({ ok: res.ok, root: path.basename(root), total, failed: res.failed, rawFailed: res.rawFailed, baselined: res.baselined, baseline: res.baseline, errors: res.errors, results }, null, 2));
+    if (!res.ok) process.exitCode = 1;
     return;
   }
-  log(`# verify-claim --all (${path.basename(root)})`);
+  log(`# verify-claim --all${has('--raw') ? ' --raw' : ''} (${path.basename(root)})`);
+  if (res.errors && res.errors.length) {
+    fail(t(`claims baseline 사용 불가: ${res.errors.join(', ')} (${(res.baseline && res.baseline.problems || []).join(', ') || 'context invalid'})`, `claims baseline unusable: ${res.errors.join(', ')} (${(res.baseline && res.baseline.problems || []).join(', ') || 'context invalid'})`));
+    return process.exit(1);
+  }
   if (!total) { log(t('  완료(done) 주장이 없어 검증할 항목이 없습니다.', '  No completed (done) claims to verify.')); return; }
-  log(t(`  완료 주장 ${total}건 검증 — 통과 ${total - res.failed} · 실패 ${res.failed}`, `  Verified ${total} completed claim(s) — pass ${total - res.failed} · fail ${res.failed}`));
+  log(t(`  완료 주장 ${total}건 — 원판정 실패 ${res.rawFailed} · 레거시 부채 승인 ${res.baselined} · 현재 차단 ${res.failed}`, `  ${total} completed claim(s) — raw failures ${res.rawFailed} · accepted legacy debt ${res.baselined} · blocking now ${res.failed}`));
   log('');
   for (const r of results) {
-    if (r.ok) log(`  ✓ ${r.id}  ${String(r.request || '').slice(0, 60)}`);
+    if (r && r.baselineAccepted) log(`  ≈ ${r.id}  ${String(r.request || '').slice(0, 48)}  ${t('← 레거시 부채', '← legacy debt')}: ${(r.baselineReasons || []).join(', ')}`);
+    else if (r.ok) log(`  ✓ ${r.id}  ${String(r.request || '').slice(0, 60)}`);
     else log(`  ✗ ${r.id}  ${String(r.request || '').slice(0, 50)}  ${t('← 불일치', '← mismatch')}: ${r.reasons.join(', ')}`);
   }
   log('');
   if (res.failed) { log(t(`  ⚠ ${res.failed}건의 완료 주장이 증거와 불일치 — 재검토 권장 (개별 상세: leerness verify-claim <T-ID>)`, `  ⚠ ${res.failed} completed claim(s) do not match evidence — review (per-task detail: leerness verify-claim <T-ID>)`)); return process.exit(1); }
-  log(t(`  ✓ 모든 완료 주장이 증거와 일치`, `  ✓ all completed claims match evidence`));
+  if (res.baselined) log(t(`  ✓ 신규·변경된 완료 주장에 차단 실패 없음 (레거시 부채 ${res.baselined}건은 baseline에 격리; --raw로 원판정 감사)`, `  ✓ no blocking failure in new or changed claims (${res.baselined} legacy debt item(s) isolated by baseline; audit raw verdicts with --raw)`));
+  else log(t(`  ✓ 모든 완료 주장이 증거와 일치`, `  ✓ all completed claims match evidence`));
+}
+
+function claimBaselineCmd(root, sub) {
+  root = absRoot(root);
+  const json = has('--json');
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
+  const loaded = _claimsBaseline.loadBaseline(root);
+  if (sub === 'show') {
+    if (loaded.state === 'invalid') {
+      failJson(json, 'baseline_invalid', t(`claims-baseline.json 손상/형상 무효: ${(loaded.problems || []).join(', ')}`, `claims-baseline.json is corrupt or invalid: ${(loaded.problems || []).join(', ')}`));
+      return;
+    }
+    if (json) {
+      log(JSON.stringify({ ok: true, state: loaded.state, path: loaded.file, baseline: loaded.doc }, null, 2));
+      return;
+    }
+    if (loaded.state === 'absent') { log(t('claims baseline 없음', 'no claims baseline')); return; }
+    log(`# claims baseline (${path.basename(root)})`);
+    log(t(`  경계: ${loaded.doc.beforeTaskId} 이전 · 부채 ${loaded.doc.entries.length}건 · 생성 ${loaded.doc.createdAt}`, `  boundary: before ${loaded.doc.beforeTaskId} · debt ${loaded.doc.entries.length} · created ${loaded.doc.createdAt}`));
+    return;
+  }
+  if (sub !== 'create') {
+    failJson(json, 'unknown_subcommand', t('사용법: leerness verify-claim baseline create --before <T-ID> --yes | baseline show', 'usage: leerness verify-claim baseline create --before <T-ID> --yes | baseline show'));
+    return;
+  }
+  if (!has('--yes')) {
+    failJson(json, 'confirmation_required', t('레거시 실패를 정책 부채로 승인하려면 --yes가 필요합니다 (evidence 원문은 수정하지 않음)', '--yes is required to acknowledge legacy failures as policy debt (historical evidence is not modified)'));
+    return;
+  }
+  const beforeTaskId = arg('--before', null);
+  if (!beforeTaskId || beforeTaskId === true) {
+    failJson(json, 'missing_boundary', t('--before <T-ID>가 필요합니다. 이 경계와 이후의 실패는 절대 baseline에 포함되지 않습니다.', '--before <T-ID> is required. Failures at or after that boundary are never baselined.'));
+    return;
+  }
+  if (loaded.state === 'invalid') {
+    failJson(json, 'baseline_invalid', t(`기존 claims-baseline.json이 손상되어 덮어쓰지 않습니다: ${(loaded.problems || []).join(', ')}`, `existing claims-baseline.json is invalid and will not be overwritten: ${(loaded.problems || []).join(', ')}`));
+    return;
+  }
+  if (loaded.state === 'valid') {
+    failJson(json, 'baseline_exists', t('기존 claims-baseline.json은 불변 정책으로 취급되어 다시 계산하거나 덮어쓰지 않습니다. 새 정책이 필요하면 tracked 파일 변경을 별도 코드리뷰로 승인하세요.', 'existing claims-baseline.json is treated as immutable policy and will not be recalculated or overwritten. Approve any tracked policy-file change in a separate code review.'));
+    return;
+  }
+  const rows = readProgressRows(root);
+  const raw = _verifyClaimsAll(root, { raw: true });
+  let built;
+  try { built = _claimsBaseline.buildBaseline(rows, raw, { beforeTaskId, version: VERSION, createdAt: now() }); }
+  catch (error) {
+    failJson(json, error && error.code === 'E_CLAIMS_BASELINE_BOUNDARY' ? 'boundary_not_found' : 'baseline_create_failed', error.message);
+    return;
+  }
+  if (!built.doc.entries.length) {
+    failJson(json, 'nothing_to_baseline', t(`${beforeTaskId} 이전에 실패한 완료 주장이 없습니다. 빈 기준선은 만들지 않습니다.`, `there are no failed completed claims before ${beforeTaskId}; an empty baseline was not created.`));
+    return;
+  }
+  let file;
+  try { file = _claimsBaseline.saveBaseline(root, built.doc, _withLock); }
+  catch (error) {
+    failJson(json, error && error.code === 'E_CLAIMS_BASELINE_EXISTS' ? 'baseline_exists' : 'baseline_write_failed', error.message);
+    return;
+  }
+  const out = {
+    ok: true,
+    path: file,
+    beforeTaskId,
+    evaluatedBefore: built.stats.evaluatedBefore,
+    baselined: built.stats.baselined,
+    blockingAtOrAfterBoundary: built.stats.failuresAtOrAfterBoundary,
+    historicalEvidenceModified: false,
+    integrity: built.doc.integrity,
+    replaced: false,
+  };
+  if (json) { log(JSON.stringify(out, null, 2)); return; }
+  ok(t(`claims baseline 생성: ${built.stats.baselined}건 격리 · ${beforeTaskId}와 이후는 제외`, `claims baseline created: ${built.stats.baselined} isolated · ${beforeTaskId} and later excluded`));
+  log(t(`  evidence 원문 수정 0 · 행/사유 변경 시 면제 무효 · 새 실패 차단 ${out.blockingAtOrAfterBoundary}건`, `  historical evidence edits 0 · any row/reason change invalidates its exemption · ${out.blockingAtOrAfterBoundary} new failure(s) still block`));
 }
 
 // 1.9.22: orchestrate — Ollama 로컬 LLM으로 best-of-N 멀티 에이전트 시뮬
@@ -21040,7 +21149,21 @@ function gate(root) {
   step('encoding check', () => encodingCheck(root));
   step('lazy detect', () => lazyDetect(root));
   // 1.33.3: opt-in 정밀 per-claim 검증. 코어(_verifyClaimsAll)는 exit 안 하고 결과만 반환 → step 의 exitCode 감지로 실패 집계. 비-json 모드는 불일치 task 를 fail() 로 표면화.
-  if (withClaims) step('verify-claims', () => { const r = _verifyClaimsAll(root); if (!r.ok) { process.exitCode = 1; if (!jsonMode) r.results.filter(x => x && !x.ok).forEach(x => fail(`${x.id} 불일치: ${x.reasons.join(', ')}`)); } });
+  // 1.36.167: 기준선이 있으면 정확히 일치하는 과거 실패만 별도 부채로 승인한다. JSON은 원판정/승인/현재차단을
+  //   모두 노출해 "실패가 사라졌다"고 오해하지 않게 하고, 손상 baseline은 별도 오류로 fail-closed한다.
+  if (withClaims) step('verify-claims', () => {
+    const r = _verifyClaimsAll(root);
+    _stepDetail = { total: r.total, failed: r.failed, rawFailed: r.rawFailed, baselined: r.baselined, baselineState: r.baseline && r.baseline.state, baseline: r.baseline, ...(r.errors && r.errors.length ? { errors: r.errors } : {}) };
+    if (!r.ok) {
+      process.exitCode = 1;
+      if (!jsonMode) {
+        if (r.errors && r.errors.length) fail(`claims baseline 사용 불가: ${r.errors.join(', ')} (${(r.baseline && r.baseline.problems || []).join(', ')})`);
+        r.results.filter(x => x && !x.ok).forEach(x => fail(`${x.id} 불일치: ${x.reasons.join(', ')}`));
+      }
+    } else if (!jsonMode && r.baselined) {
+      log(`  ⓘ 레거시 부채 ${r.baselined}건은 지문 일치 baseline으로 격리됨 (원판정 실패 ${r.rawFailed}건 · --raw 감사 가능)`);
+    }
+  });
   // 1.36.82 (공허한 가드 스윕 High #2, 실측 확인): `referee verify` 성공 시 툴이 사용자에게
   //   "이제 gate --require-referee <id> 가 이 검증기를 신뢰합니다" 라고 **안내하는데 gate 는 이 플래그를 읽지도 않았다**.
   //   사용자는 안내받은 명령을 CI 에 넣고 검증기가 머지를 막는다고 믿지만 아무 일도 일어나지 않았고,
@@ -24964,7 +25087,7 @@ function _mcpToCliArgs(name, args, targetPath) {
           case 'leerness_drift_check':     cliArgs = ['drift', 'check', targetPath, '--json']; break;
           case 'leerness_audit':           cliArgs = ['audit', targetPath, '--json', ...(args.fix ? ['--fix'] : []), ...(args.strict ? ['--strict'] : [])]; break;
           case 'leerness_verify_claim':    cliArgs = ['verify-claim', args.taskId, '--path', targetPath, ...(args.refereeId ? ['--referee', String(args.refereeId)] : []), ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : [])]; break;
-          case 'leerness_verify_claim_all': cliArgs = ['verify-claim', '--all', '--path', targetPath, '--json', ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : [])]; break;  // 1.33.3: 모든 done 주장 일괄 검증(--json 강제 → process.exitCode 만, 하드 exit 없음)
+          case 'leerness_verify_claim_all': cliArgs = ['verify-claim', '--all', '--path', targetPath, '--json', ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : []), ...(args.raw ? ['--raw'] : [])]; break;  // 1.33.3/1.36.167: 일괄검증 + 원판정 감사
           case 'leerness_contract_verify': cliArgs = ['contract', 'verify', args.spec, args.impl]; break;
           case 'leerness_agents_list':     cliArgs = ['agents', 'list', '--json']; break;
           case 'leerness_reuse_map':       cliArgs = ['reuse-map', targetPath, ...(args.allApps ? ['--all-apps'] : []), ...(args.strictElements ? ['--strict-elements'] : []), '--json']; break;
@@ -29726,8 +29849,10 @@ STATUS & DIAGNOSTICS
   whats-new [path]                Recent version changes
 
 VERIFICATION (evidence-gated "done")
-  verify-claim <T-ID> [--run-tests] [--test-cmd "..."] [--json]
-                                  Check evidence vs reality (stub / fake-test / inflated-count detection)
+  verify-claim <T-ID|--all> [--run-tests] [--raw] [--json]
+                                  Check evidence vs reality; --raw ignores a legacy baseline
+  verify-claim baseline create --before <T-ID> --yes | baseline show
+                                  Isolate fingerprint-bound legacy debt without editing evidence
   contract verify <spec.md> <impl.js> [--json] [--allow-empty]   Spec <-> implementation match (empty spec rejected unless --allow-empty)
   verify-code [path] [--build] [--bench]          Run tests/lint/typecheck, record evidence
   gate [path]                     One-call CI gate: verify + audit + scan + encoding + lazy
@@ -30326,7 +30451,13 @@ async function main() {
   //   측정이 관측 대상을 바꾸면 안 된다.
   if (cmd === 'handoff')      { const _hp = arg('--path', args[1] || process.cwd()); const _hr = handoffCmd(_hp); if (has('--writeback') && process.env.LEERNESS_HOOK !== '1') { try { _tech.refreshTechProfile(_hp); } catch {} _maybeAutoGraph(_hp); } return _hr; }   // T-0136: 기본은 추적 파일 쓰기 0. 명시적 --writeback 만 기존 프로필/그래프 투영을 갱신한다.
   if (cmd === 'reuse-map')    return reuseMapCmd(arg('--path', args[1] || process.cwd()));
-  if (cmd === 'verify-claim') { const _p = arg('--path', process.cwd()); if (args[1] === '--all' || has('--all')) return verifyClaimAllCmd(_p); return verifyClaimCmd(_p, args[1]); }  // 1.33.2: --all → 모든 done 주장 일괄 검증
+  if (cmd === 'verify-claim') {
+    const _p = arg('--path', process.cwd());
+    if (args[1] === 'baseline') return claimBaselineCmd(_p, args[2]);
+    if (args[1] === '--all' || has('--all')) return verifyClaimAllCmd(_p);
+    if (has('--raw')) return failJson(has('--json'), 'raw_requires_all', '--raw 는 verify-claim --all 에서만 사용합니다. 개별 task 판정은 항상 원판정입니다.');
+    return verifyClaimCmd(_p, args[1]);
+  }  // 1.33.2/1.36.167: --all 일괄검증 + 명시적 legacy baseline
   if (cmd === 'orchestrate')  return await orchestrateCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')));
   if (cmd === 'llm-bench' && args[1] === 'record') return llmBenchRecordCmd(arg('--path', process.cwd()));
   if (cmd === 'deps')         return depsImpactCmd(arg('--path', process.cwd()), args[1]);

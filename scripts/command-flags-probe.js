@@ -270,6 +270,26 @@ try {
   check('verify-claim retains its supported --test-cmd contract',
     claimOwnsTestCommand.status === 1 && json(claimOwnsTestCommand)?.code !== 'unknown_flag',
     claimOwnsTestCommand);
+
+  const claimRaw = run(['verify-claim', '--all', '--raw', '--path', emptyProject, '--json']);
+  check('verify-claim --all retains its supported raw-audit contract',
+    claimRaw.status === 0 && json(claimRaw)?.baseline?.state === 'ignored',
+    claimRaw);
+
+  const claimForeignBoundary = run(['verify-claim', 'T-NOT-FOUND', '--before', 'T-0002', '--path', emptyProject, '--json']);
+  check('per-task verify-claim rejects the baseline-only --before flag',
+    claimForeignBoundary.status === 1 && json(claimForeignBoundary)?.code === 'unknown_flag',
+    claimForeignBoundary);
+
+  const baselineForeignRun = run(['verify-claim', 'baseline', 'show', '--run-tests', '--path', emptyProject, '--json']);
+  check('claims baseline show rejects verification-only mutation flags',
+    baselineForeignRun.status === 1 && json(baselineForeignRun)?.code === 'unknown_flag',
+    baselineForeignRun);
+
+  const gateForeignRaw = run(['gate', emptyProject, '--raw', '--json']);
+  check('gate rejects --raw because raw audit belongs to verify-claim --all',
+    gateForeignRaw.status === 1 && json(gateForeignRaw)?.code === 'unknown_flag',
+    gateForeignRaw);
 } finally {
   fs.rmSync(emptyProject, { recursive: true, force: true });
 }
