@@ -7112,12 +7112,24 @@ total++;
 total++;
 {
   let ok = false;
+  let d = null;
+  let fbin = null;
   try {
-    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-disp-'));
+    d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-disp-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
-    // 1.36.55 (외부감사 이식성): 실제 codex 미설치 환경 자기완결 — 즉시 종료하는 fake codex 실행파일을 PATH 앞에 주입
-    const fbin = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fakecodex-'));
-    if (process.platform === 'win32') fs.writeFileSync(path.join(fbin, 'codex.cmd'), '@echo fake-codex\r\n');
+    // 1.36.164: 임의 .cmd 는 portable-process가 의도적으로 fail-closed(126)한다. 종전
+    // 픽스처는 러너에 설치된 실제 Codex로 우연히 폴백해 Node/이미지별로 흔들렸다.
+    // Windows에서는 실제 npm shim 형식(.cmd -> 고정 JS entry)을 만들어 자기완결한다.
+    fbin = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fakecodex-'));
+    if (process.platform === 'win32') {
+      fs.writeFileSync(path.join(fbin, 'codex.js'), "process.stdout.write('fake-codex\\n');\n");
+      fs.writeFileSync(path.join(fbin, 'codex.cmd'), [
+        '@ECHO off',
+        'SET "dp0=%~dp0"',
+        'SET "_prog=node"',
+        '"%_prog%" "%dp0%\\codex.js" %*',
+      ].join('\r\n') + '\r\n');
+    }
     else { fs.writeFileSync(path.join(fbin, 'codex'), '#!/bin/sh\necho fake-codex\n'); fs.chmodSync(path.join(fbin, 'codex'), 0o755); }
     const env = { ...process.env, LEERNESS_ENABLE_CODEX: '1', PATH: fbin + path.delimiter + process.env.PATH };
     const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'dispatch', 'REVIEWTASK', '--to', 'codex', '--path', d], { encoding: 'utf8', timeout: 20000, env });
@@ -7129,8 +7141,12 @@ total++;
     const outRaw = rRaw.stdout || '';
     const rawOk = /"REVIEWTASK"/.test(outRaw) && !/"REVIEWTASK codex"/.test(outRaw) && !/REVIEWTASK.*tmp/.test(outRaw) && !/위임 프로토콜/.test(outRaw);
     ok = briefOk && rawOk;
-    fs.rmSync(d, { recursive: true, force: true });
   } catch {}
+  finally {
+    for (const dir of [d, fbin]) {
+      if (dir) try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
   console.log(ok ? '✓ B(1.9.435/1.35.6) UR-0137: agents dispatch task 에 --to/경로 값 흡수 없음 (브리프 접두 + --raw 원형)' : '✗ agents dispatch flag bleed');
   if (!ok) failed++;
 }

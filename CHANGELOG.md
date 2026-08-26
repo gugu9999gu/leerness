@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.36.164 — 2026-08-26
+
+- `release publish --npm-publish`가 `release sync-main`과 동일한 보안 배포 경로를 사용하도록 통합했습니다. `prepublishOnly`와 pack은 npm/provider/cloud 시크릿 및 npm auth/OTP를 제거한 환경과 별도의 0바이트 임시 userconfig에서 실행하고, 그 단계가 생성한 exact `.tgz`를 권한 제한 임시 `.npmrc`와 `--ignore-scripts`로 그대로 업로드합니다. 따라서 npm이 기본 사용자 `.npmrc` 경로를 lifecycle에 다시 주입하거나 postpack이 작업 디렉터리를 바꿔도 인증정보와 검증 산출물의 경계가 유지됩니다. 토큰·OTP는 argv에 싣지 않으며 임시 인증 파일은 zeroize·삭제를 재시도합니다. 정리 실패와 `sync-main`의 npm 실패도 전체 명령 실패로 전파하고, registry 오류는 알려진 credential을 비식별화합니다. 긴 오류의 `EPUBLISHCONFLICT`도 전체 출력에서 분류한 뒤 exact version 재조회가 성공할 때만 멱등 성공으로 인정합니다. 토큰이 없으면 스크립트를 끈 업로드 단계에서만 기존 npm userconfig 로그인을 유지하며 dry-run은 인증 파일과 lifecycle을 모두 생략해 프로젝트 무쓰기를 보장합니다. 이 경계들을 실제 npm CLI·로컬 Git remote 공격성 프로브로 검증합니다.
+- Windows 전체 E2E의 가짜 Codex를 임의 `.cmd`에서 검증 가능한 npm형 JS shim으로 바꿨습니다. 보안 실행기가 임의 배치 파일을 정상적으로 거부한 뒤 러너에 우연히 설치된 실제 Codex로 폴백하던 Node 22/24 비결정성을 제거했습니다.
+
 ## 1.36.163 — 2026-08-26
 
 - GitHub CI에서 재현된 동시 최초 .harness→.leerness 마이그레이션의 stale snapshot 경쟁을 최신 상태 재검사로 수렴시켰습니다. Windows Node 24/26 런타임 probe는 8.3/긴 경로 별칭을 realpath 파일 동일성으로 판정하고 unsupported shim의 안정된 fail-closed 계약을 검증합니다.

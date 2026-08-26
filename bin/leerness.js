@@ -47,7 +47,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.163';
+const VERSION = '1.36.164';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5354,7 +5354,7 @@ function _selfTestCases() {
         && m._taskPositionalPath(['rule', 'add', '룰', '--trigger', 'every-update'], 2) === null;
       return rule && lesson && decision && trig;
     } },
-    { name: 'R-0011/UR-0160: npm 배포 minor-gate _shouldPublishNpm + _publishToNpm 와이어 (1.9.446)', run: () => {
+    { name: 'R-0011/UR-0160: npm 배포 minor-gate + token-safe publish 공유 (1.9.446/1.36.164)', run: () => {
       const m = require('../lib/pure-utils');
       if (typeof m._shouldPublishNpm !== 'function' || m._shouldPublishNpm !== _shouldPublishNpm) return false;
       const f = m._shouldPublishNpm;
@@ -5368,7 +5368,9 @@ function _selfTestCases() {
         && m._minorKey('1.9.445') === '1.9' && m._minorKey('1.10.0') === '1.10';
       const src = read(__filename);
       const wired = src.includes('const gate = _shouldPublishNpm(pkgVersion, publishedLatest, false);')
-        && src.includes("forcePublish: has('--publish-npm')");
+        && src.includes("forcePublish: has('--publish-npm')")
+        && src.includes('const npmResult = _publishToNpm(root, {')
+        && src.includes('allowNpmConfig: true,');
       return pure && wired;
     } },
     { name: '12th 외부평가 Codex P3 (UR-0145): plan progress 읽기전용 요약(완료율%/--json) + 변경의도 인자 경고 (1.9.447)', run: () => {
@@ -22543,7 +22545,16 @@ function releaseSyncMainCmd(root) {
   //   opt-out: --no-npm 또는 LEERNESS_NO_NPM_PUBLISH=1
   //   토큰 미설정 시 친절한 안내 후 skip (실패 X).
   if (!has('--no-npm') && process.env.LEERNESS_NO_NPM_PUBLISH !== '1') {
-    try { _publishToNpm(root, { dryRun: has('--dry-run-npm'), forcePublish: has('--publish-npm') }); } catch (e) { warn('npm publish 시도 실패 (계속): ' + e.message); }  // 1.9.446 (UR-0160): --publish-npm 으로 minor-gate 강제 우회
+    try {
+      const npmResult = _publishToNpm(root, { dryRun: has('--dry-run-npm'), forcePublish: has('--publish-npm') });
+      if (npmResult && npmResult.ok === false) {
+        fail('sync-main: npm publish 실패');
+        process.exitCode = 1;
+      }
+    } catch (e) {
+      warn('npm publish 시도 실패: ' + _redactNpmPublishOutput(e && e.message || 'unknown error'));
+      process.exitCode = 1;
+    }  // 1.9.446 (UR-0160): --publish-npm 으로 minor-gate 강제 우회
   }
 }
 
@@ -22683,6 +22694,102 @@ function releaseChannelCmd(root) {
   log('');
   log(`  실험 채널 publish: leerness release sync-main --npm-tag next  (또는 LEERNESS_NPM_TAG=next)`);
 }
+
+const _NPM_PUBLISH_SECRET_ENV = /^(?:LEERNESS_NPM_TOKEN|NPM_TOKEN|LEERNESS_NPM_OTP)$/i;
+function _isPublishSecretEnvKey(key) {
+  const name = String(key || '');
+  return _NPM_PUBLISH_SECRET_ENV.test(name)
+    || _isSecretKey(name)
+    || /(?:^|_)(?:OTP|AUTH)(?:_|$)/i.test(name)
+    || /^NPM_CONFIG_USERCONFIG$/i.test(name);
+}
+function _npmPublishChildEnv(base = process.env, overrides = {}) {
+  const env = { ...(base || {}), ...(overrides || {}) };
+  // npm lifecycle scripts are project code. Authentication is supplied only to
+  // npm itself through a short-lived userconfig, never through inherited env.
+  // Use the product-wide secret-key classifier so provider/cloud credentials do
+  // not leak merely because this command happens to publish an npm package.
+  for (const key of Object.keys(env)) {
+    if (_isPublishSecretEnvKey(key)) delete env[key];
+  }
+  return env;
+}
+function _npmPublishUploadEnv(base = process.env, overrides = {}, preserveUserconfig = false) {
+  const env = _npmPublishChildEnv(base, overrides);
+  if (preserveUserconfig) {
+    for (const [key, value] of Object.entries(base || {})) {
+      if (/^NPM_CONFIG_USERCONFIG$/i.test(key) && value != null) env[key] = String(value);
+    }
+  }
+  return env;
+}
+function _cleanupNpmTempDir(tmpDir, sensitiveFile = null) {
+  if (!tmpDir) return true;
+  let cleaned = false;
+  for (let attempt = 0; attempt < 3 && !cleaned; attempt++) {
+    try {
+      // Credential files are zeroized before unlink. Empty lifecycle config files
+      // use the same cleanup path so a failed removal is observable and fail-closed.
+      if (sensitiveFile && exists(sensitiveFile)) {
+        try { fs.chmodSync(sensitiveFile, 0o600); } catch {}
+        fs.writeFileSync(sensitiveFile, '', { mode: 0o600 });
+      }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      cleaned = !exists(tmpDir);
+    } catch {}
+  }
+  return cleaned;
+}
+function _withEmptyNpmLifecycleUserconfig(callback) {
+  const outcome = { result: null, error: null, cleanupOk: false };
+  let tmpDir = null;
+  let userconfig = null;
+  try {
+    // Removing NPM_CONFIG_USERCONFIG from env is insufficient: npm recreates its
+    // default ~/.npmrc path in lifecycle env. Force a mode-0600 empty config so
+    // prepublishOnly/prepack/prepare never receive the authenticated user config.
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-npm-lifecycle-'));
+    userconfig = path.join(tmpDir, '.npmrc');
+    fs.writeFileSync(userconfig, '', { mode: 0o600 });
+    outcome.result = callback(userconfig);
+  } catch (error) {
+    outcome.error = error;
+  } finally {
+    outcome.cleanupOk = _cleanupNpmTempDir(tmpDir);
+  }
+  return outcome;
+}
+function _redactNpmPublishOutput(value, extraSecrets = []) {
+  let out = String(value || '');
+  const secrets = [];
+  for (const [key, secret] of Object.entries(process.env || {})) {
+    if (_isPublishSecretEnvKey(key) && secret) secrets.push(String(secret));
+  }
+  for (const secret of extraSecrets || []) if (secret) secrets.push(String(secret));
+  for (const secret of [...new Set(secrets)].sort((a, b) => b.length - a.length)) {
+    for (const form of [...new Set([secret, encodeURIComponent(secret)])]) {
+      if (form) out = out.split(form).join('[REDACTED_NPM_SECRET]');
+    }
+  }
+  // Defense in depth for registry/tool output that reformats a modern npm token.
+  return out.replace(/\bnpm_[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_NPM_TOKEN]');
+}
+function _npmPackedArtifact(root, stdout) {
+  const text = String(stdout || '');
+  const candidates = [];
+  for (const match of text.matchAll(/"filename"\s*:\s*"([^"\r\n]+\.tgz)"/g)) candidates.push(match[1]);
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.trim().match(/^([^\s"']+\.tgz)$/);
+    if (match) candidates.push(match[1]);
+  }
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const artifact = path.resolve(root, candidates[i]);
+    const relative = path.relative(root, artifact);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) continue;
+    try { if (fs.statSync(artifact).isFile()) return artifact; } catch {}
+  }
+  return null;
+}
 function _publishToNpm(root, opts = {}) {
   root = absRoot(root || process.cwd());
   // .env 자동 로드 — root + 상위 3단계까지 탐색 (워크스페이스 root 의 .env 도 인식).
@@ -22698,21 +22805,31 @@ function _publishToNpm(root, opts = {}) {
     }
   }
   const token = process.env.LEERNESS_NPM_TOKEN || process.env.NPM_TOKEN;
-  if (!token) {
+  const otp = process.env.LEERNESS_NPM_OTP || arg('--npm-otp', null) || opts.otp;
+  const publishChildEnv = _npmPublishChildEnv(process.env, { npm_config_loglevel: 'warn' });
+  // Upload has scripts disabled. When no dedicated token exists, preserve only
+  // an explicitly selected npm userconfig path for normal `npm login` users;
+  // raw auth/OTP env remains excluded.
+  const publishUploadEnv = _npmPublishUploadEnv(process.env, { npm_config_loglevel: 'warn' }, !token);
+  // Never put OTP on argv: OS process listings can expose it. Token-backed
+  // uploads keep OTP in the same short-lived npmrc; login/userconfig fallback
+  // receives it only in the upload process env (scripts are --ignore-scripts).
+  if (otp && !token) publishUploadEnv.npm_config_otp = String(otp);
+  if (!token && !opts.allowNpmConfig) {
     log(`  ⚠ npm 자동 배포 스킵: NPM_TOKEN 미설정 (.env 에 NPM_TOKEN=npm_xxxxx 추가)`);
-    return;
+    return { ok: true, status: 'token-missing' };
   }
   // package.json 확인
   const pkgPath = path.join(root, 'package.json');
   if (!exists(pkgPath)) {
     log(`  ⚠ npm 자동 배포 스킵: package.json 없음 (${rel(root, pkgPath)})`);
-    return;
+    return { ok: !opts.requirePublish, status: 'package-missing' };
   }
   let pkg;
-  try { pkg = JSON.parse(read(pkgPath)); } catch (e) { warn(`package.json 파싱 실패: ${e.message}`); return; }
+  try { pkg = JSON.parse(read(pkgPath)); } catch (e) { warn(`package.json 파싱 실패: ${e.message}`); return { ok: false, status: 'invalid-package' }; }
   if (!pkg.name || !pkg.version) {
     log(`  ⚠ npm 자동 배포 스킵: name/version 누락`);
-    return;
+    return { ok: !opts.requirePublish, status: 'package-metadata-missing' };
   }
   const pkgName = pkg.name;
   const pkgVersion = pkg.version;
@@ -22723,11 +22840,11 @@ function _publishToNpm(root, opts = {}) {
   // 1) 이미 publish된 버전인지 확인 (npm view <pkg>@<version> version)
   try {
     const viewR = spawnNpmSync(['view', `${pkgName}@${pkgVersion}`, 'version'], {
-      cwd: root, encoding: 'utf8', timeout: 15000
+      cwd: root, encoding: 'utf8', timeout: 15000, env: publishUploadEnv
     });
     if (viewR.status === 0 && (viewR.stdout || '').trim() === pkgVersion) {
       log(`   ✓ 이미 npm registry에 publish됨 — skip`);
-      return;
+      return { ok: true, status: 'already-published', package: pkgName, version: pkgVersion };
     }
   } catch {}  // 네트워크 실패 시 그냥 publish 시도
 
@@ -22735,41 +22852,154 @@ function _publishToNpm(root, opts = {}) {
   if (!opts.forcePublish) {
     let publishedLatest = null;
     try {
-      const latestR = spawnNpmSync(['view', pkgName, 'version'], { cwd: root, encoding: 'utf8', timeout: 15000 });
+      const latestR = spawnNpmSync(['view', pkgName, 'version'], { cwd: root, encoding: 'utf8', timeout: 15000, env: publishUploadEnv });
       if (latestR.status === 0) publishedLatest = (latestR.stdout || '').trim();
     } catch {}
     const gate = _shouldPublishNpm(pkgVersion, publishedLatest, false);
     if (!gate.publish) {
       log(`   ⏸ npm 배포 스킵 (R-0011): patch(${pkgVersion}) 는 npm 미배포 — 직전 npm minor(${_minorKey(publishedLatest) || '?'}) 와 동일. minor 올릴 때만 안정 버전으로 배포. (강제: release sync-main . --publish-npm)`);
-      return;
+      return { ok: true, status: 'policy-skipped', package: pkgName, version: pkgVersion };
     }
     if (gate.reason === 'minor_bump') log(`   ▶ minor 변동(${_minorKey(publishedLatest)} → ${_minorKey(pkgVersion)}) — npm 안정 배포 진행`);
   }
 
-  // 2) 임시 .npmrc 생성 (토큰 노출 방지)
+  // 2) Run the publish-only lifecycle and create the exact artifact before any
+  // credential file exists. Uploading this same .tgz avoids a second cwd pack
+  // after postpack/prepare has changed the workspace.
+  let packedArtifact = null;
+  if (!opts.dryRun) {
+    const lifecycle = _withEmptyNpmLifecycleUserconfig((emptyUserconfig) => {
+      const prepublishR = spawnNpmSync(['run', 'prepublishOnly', '--if-present', '--userconfig', emptyUserconfig], {
+        cwd: root, encoding: 'utf8', timeout: 120000, env: publishChildEnv
+      });
+      if (prepublishR.status !== 0) return { prepublishR, prepR: null };
+      const prepR = spawnNpmSync(['pack', '--json', '--userconfig', emptyUserconfig], {
+        cwd: root, encoding: 'utf8', timeout: 120000, env: publishChildEnv
+      });
+      return { prepublishR, prepR };
+    });
+    if (!lifecycle.cleanupOk) {
+      warn('npm lifecycle용 빈 userconfig 정리 실패 — 배포를 실패로 처리합니다. OS 임시 디렉터리의 leerness-npm-lifecycle-* 수동 점검이 필요합니다.');
+      process.exitCode = 1;
+      return { ok: false, status: 'lifecycle-config-cleanup-failed', package: pkgName, version: pkgVersion };
+    }
+    if (lifecycle.error || !lifecycle.result) {
+      const setupErr = _redactNpmPublishOutput(lifecycle.error && lifecycle.error.message || 'unknown lifecycle setup error', [token, otp]);
+      warn(`npm lifecycle 격리 설정 실패: ${setupErr}`);
+      return { ok: false, status: 'lifecycle-config-failed', package: pkgName, version: pkgVersion };
+    }
+    const { prepublishR, prepR } = lifecycle.result;
+    if (prepublishR.status !== 0) {
+      const prepublishErr = _redactNpmPublishOutput(prepublishR.stderr || prepublishR.stdout || '', [token, otp]).slice(-400);
+      warn(`npm prepublishOnly 실패 (exit ${prepublishR.status}): ${prepublishErr.split('\n').slice(0, 3).join(' ')}`);
+      try { _recordRun(root, { kind: 'npm_publish', package: pkgName, version: pkgVersion, ok: false, error: prepublishErr.slice(0, 200) }); } catch {}
+      return { ok: false, status: 'prepublish-lifecycle-failed', package: pkgName, version: pkgVersion };
+    }
+    if (prepR.status !== 0) {
+      const prepErr = _redactNpmPublishOutput(prepR.stderr || prepR.stdout || '', [token, otp]).slice(-400);
+      warn(`npm publish 사전 lifecycle/pack 실패 (exit ${prepR.status}): ${prepErr.split('\n').slice(0, 3).join(' ')}`);
+      try { _recordRun(root, { kind: 'npm_publish', package: pkgName, version: pkgVersion, ok: false, error: prepErr.slice(0, 200) }); } catch {}
+      return { ok: false, status: 'lifecycle-pack-failed', package: pkgName, version: pkgVersion };
+    }
+    packedArtifact = _npmPackedArtifact(root, prepR.stdout);
+    if (!packedArtifact) {
+      warn('npm pack은 성공했지만 생성된 .tgz 산출물을 확인하지 못했습니다.');
+      return { ok: false, status: 'packed-artifact-missing', package: pkgName, version: pkgVersion };
+    }
+    ok(`npm lifecycle/pack 사전 준비 완료: ${path.basename(packedArtifact)}`);
+  }
+
+  // 3) 임시 .npmrc 생성 (토큰 노출 방지)
   let tmpDir;
+  let tmpNpmrc;
+  let completedPublish = null;
   try {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-npmrc-'));
-    const tmpNpmrc = path.join(tmpDir, '.npmrc');
-    fs.writeFileSync(tmpNpmrc, `//registry.npmjs.org/:_authToken=${token}\n`, { mode: 0o600 });
-    // 3) npm publish (--userconfig 로 임시 .npmrc 사용, --access public)
+    tmpNpmrc = null;
+    if (token && !opts.dryRun) {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-npmrc-'));
+      tmpNpmrc = path.join(tmpDir, '.npmrc');
+      fs.writeFileSync(tmpNpmrc,
+        `//registry.npmjs.org/:_authToken=${token}\n${otp ? `otp=${otp}\n` : ''}`,
+        { mode: 0o600 });
+    } else if (token) {
+      log('   (dry-run) npm 인증 임시 파일 생성 생략');
+    } else {
+      log('   npm 인증: 기존 npm user config 사용');
+    }
+    // 4) npm publish (--userconfig 로 임시 .npmrc 사용, --access public)
     // 1.9.178+: 2FA OTP 지원 — LEERNESS_NPM_OTP 환경변수 또는 --npm-otp 인자
-    const otp = process.env.LEERNESS_NPM_OTP || arg('--npm-otp', null) || opts.otp;
     // 1.9.275 (UR-0026): dist-tag — latest(안정)/next(실험). 기본 latest.
     const npmTag = _resolveNpmTag(opts.tag || arg('--npm-tag', null));
-    const baseArgs = ['publish', '--userconfig', tmpNpmrc, '--access', 'public', '--tag', npmTag];
-    if (otp) baseArgs.push(`--otp=${otp}`);
+    const baseArgs = ['publish'];
+    if (packedArtifact) baseArgs.push(packedArtifact);
+    if (tmpNpmrc) baseArgs.push('--userconfig', tmpNpmrc);
+    // Lifecycle already ran without credentials. Do not let project scripts read
+    // npm_config_userconfig or the temporary credential file during upload.
+    baseArgs.push('--access', 'public', '--tag', npmTag, '--ignore-scripts');
     const args = opts.dryRun ? [...baseArgs, '--dry-run'] : baseArgs;
     log(`   ${opts.dryRun ? '(dry-run) ' : ''}npm publish 시도 중... (dist-tag: ${npmTag})`);
     const pubR = spawnNpmSync(args, {
       cwd: root, encoding: 'utf8', timeout: 60000,
-      env: { ...process.env, npm_config_loglevel: 'warn' }
+      env: publishUploadEnv
     });
     if (pubR.status === 0) {
-      ok(`npm publish 완료: ${pkgName}@${pkgVersion}`);
-      try { _recordRun(root, { kind: 'npm_publish', package: pkgName, version: pkgVersion, dryRun: !!opts.dryRun, ok: true }); } catch {}
-      // 1.9.203: 라운드 마무리 시 다음 라운드 plan 자동 저장
-      try {
+      completedPublish = { status: opts.dryRun ? 'dry-run' : 'published', artifact: packedArtifact && path.basename(packedArtifact) };
+      return { ok: true, status: opts.dryRun ? 'dry-run' : 'published', package: pkgName, version: pkgVersion };
+    } else {
+      // Classify on the complete redacted output. Truncating first can discard
+      // the leading npm error code and turn a confirmed race into a false fail.
+      const fullErrOut = _redactNpmPublishOutput(pubR.stderr || pubR.stdout || '', [token, otp]);
+      const errOut = fullErrOut.slice(-400);
+      if (/EPUBLISHCONFLICT|already exists|cannot publish over/i.test(fullErrOut)) {
+        let confirmed = false;
+        try {
+          const confirmR = spawnNpmSync(['view', `${pkgName}@${pkgVersion}`, 'version'], {
+            cwd: root, encoding: 'utf8', timeout: 15000, env: publishUploadEnv
+          });
+          confirmed = confirmR.status === 0 && (confirmR.stdout || '').trim() === pkgVersion;
+        } catch {}
+        if (confirmed) {
+          completedPublish = { status: 'already-published-race' };
+          return { ok: true, status: 'already-published-race', package: pkgName, version: pkgVersion };
+        }
+        warn('npm publish conflict를 registry exact version으로 재확인하지 못했습니다 — 실패로 처리합니다.');
+      } else if (/EOTP|one-time password|--otp=/i.test(fullErrOut)) {
+        // 1.9.178+: 2FA 활성화된 계정 — Automation 토큰 또는 OTP 필요
+        warn(`npm publish 실패: 2FA OTP 필요 (NPM 계정에 2FA 활성화됨).`);
+        log(`     해결 1: LEERNESS_NPM_OTP=<6자리코드> 또는 --npm-otp <code> 옵션 사용`);
+        log(`     해결 2: Automation 토큰 발급 — npm token create --read-only=false (2FA bypass)`);
+        log(`            발급 후 .env 의 NPM_TOKEN 을 새 토큰으로 교체`);
+      } else if (/EAUTH|forbidden|401|403/i.test(fullErrOut)) {
+        warn(`npm publish 실패: 토큰 권한 부족 또는 만료 — .env NPM_TOKEN 재발급 필요`);
+      } else if (/ENEEDAUTH/i.test(fullErrOut)) {
+        warn(`npm publish 실패: 인증 미작동 — 토큰 형식 확인 (npm_xxxxx)`);
+      } else {
+        warn(`npm publish 실패 (exit ${pubR.status}): ${errOut.split('\n').slice(0, 3).join(' ')}`);
+      }
+      try { _recordRun(root, { kind: 'npm_publish', package: pkgName, version: pkgVersion, ok: false, error: errOut.slice(0, 200) }); } catch {}
+      return { ok: false, status: 'publish-failed', package: pkgName, version: pkgVersion };
+    }
+  } finally {
+    // 5) 임시 .npmrc 즉시 삭제 (토큰 잔존 방지)
+    if (tmpDir) {
+      const cleaned = _cleanupNpmTempDir(tmpDir, tmpNpmrc);
+      if (!cleaned) {
+        warn('npm 인증 임시 파일 정리 실패 — 배포를 실패로 처리합니다. OS 임시 디렉터리의 leerness-npmrc-* 수동 점검이 필요합니다.');
+        process.exitCode = 1;
+        return { ok: false, status: 'credential-cleanup-failed', package: pkgName, version: pkgVersion };
+      }
+    }
+    if (completedPublish) {
+      if (completedPublish.status === 'already-published-race') {
+        log(`   ✓ registry exact version 재확인 — 이미 publish됨 (race condition)`);
+      } else {
+        ok(`npm publish ${completedPublish.status === 'dry-run' ? 'dry-run 검증' : '완료'}: ${pkgName}@${pkgVersion}`);
+      }
+      if (!opts.dryRun) {
+        try { _recordRun(root, { kind: 'npm_publish', package: pkgName, version: pkgVersion, artifact: completedPublish.artifact || null, dryRun: false, ok: true, status: completedPublish.status }); } catch {}
+      }
+      // 1.9.203: 실제 배포가 완료되고 credential cleanup까지 성공한 뒤에만 다음 라운드 plan을 저장.
+      if (!opts.dryRun && completedPublish.status === 'published') try {
         const plan = _buildAutoResumePlan(root, {
           nextRoundVersion: `next after ${pkgVersion}`,
           focus: '다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강',
@@ -22777,7 +23007,6 @@ function _publishToNpm(root, opts = {}) {
           note: `다음 wakeup 시: 1) leerness resume . 으로 plan 확인  2) leerness handoff . 실행  3) leerness next-action take 로 즉시 task 진입`
         });
         _writeAutoResumePlan(root, plan);
-        // 1.9.205: 다음 wakeup 등록 추적 (사용자 명시 갱신용)
         _recordWakeup(root, {
           expectedFireAt: plan.expectedFireAt,
           intervalMin: plan.intervalMin || 25,
@@ -22786,29 +23015,6 @@ function _publishToNpm(root, opts = {}) {
           fromVersion: pkgVersion
         });
       } catch {}
-    } else {
-      const errOut = (pubR.stderr || pubR.stdout || '').slice(-400);
-      if (/EPUBLISHCONFLICT|already exists|cannot publish over/i.test(errOut)) {
-        log(`   ✓ 이미 publish됨 (race condition) — skip`);
-      } else if (/EOTP|one-time password|--otp=/i.test(errOut)) {
-        // 1.9.178+: 2FA 활성화된 계정 — Automation 토큰 또는 OTP 필요
-        warn(`npm publish 실패: 2FA OTP 필요 (NPM 계정에 2FA 활성화됨).`);
-        log(`     해결 1: LEERNESS_NPM_OTP=<6자리코드> 또는 --npm-otp <code> 옵션 사용`);
-        log(`     해결 2: Automation 토큰 발급 — npm token create --read-only=false (2FA bypass)`);
-        log(`            발급 후 .env 의 NPM_TOKEN 을 새 토큰으로 교체`);
-      } else if (/EAUTH|forbidden|401|403/i.test(errOut)) {
-        warn(`npm publish 실패: 토큰 권한 부족 또는 만료 — .env NPM_TOKEN 재발급 필요`);
-      } else if (/ENEEDAUTH/i.test(errOut)) {
-        warn(`npm publish 실패: 인증 미작동 — 토큰 형식 확인 (npm_xxxxx)`);
-      } else {
-        warn(`npm publish 실패 (exit ${pubR.status}): ${errOut.split('\n').slice(0, 3).join(' ')}`);
-      }
-      try { _recordRun(root, { kind: 'npm_publish', package: pkgName, version: pkgVersion, ok: false, error: errOut.slice(0, 200) }); } catch {}
-    }
-  } finally {
-    // 4) 임시 .npmrc 즉시 삭제 (토큰 잔존 방지)
-    if (tmpDir) {
-      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
     }
   }
 }
@@ -22836,8 +23042,18 @@ async function releasePackCmd(root) {
 
   // 2. npm pack
   if (!dryRun) {
-    const r = spawnNpmSync(['pack'], { cwd: root, encoding: 'utf8' });
-    if (r.status !== 0) { fail('npm pack 실패'); log(r.stderr); process.exitCode = 1; return; }
+    const isolated = _withEmptyNpmLifecycleUserconfig((emptyUserconfig) => spawnNpmSync(
+      ['pack', '--userconfig', emptyUserconfig],
+      { cwd: root, encoding: 'utf8', env: _npmPublishChildEnv(process.env) }
+    ));
+    if (!isolated.cleanupOk || isolated.error || !isolated.result) {
+      fail('npm pack lifecycle 격리/정리 실패');
+      if (isolated.error) log(_redactNpmPublishOutput(isolated.error.message));
+      process.exitCode = 1;
+      return;
+    }
+    const r = isolated.result;
+    if (r.status !== 0) { fail('npm pack 실패'); log(_redactNpmPublishOutput(r.stderr || r.stdout || '')); process.exitCode = 1; return; }
     const tarMatch = (r.stdout || '').match(/[^\s]+\.tgz/);
     if (tarMatch) ok(`npm pack → ${tarMatch[0]}`);
     else ok('npm pack 완료');
@@ -22914,11 +23130,23 @@ function releasePublish(root) {
   // 1.9.288 (Codex gpt-5.5 리뷰 #2 수렴): dry-run 은 모든 외부 side effect 를 계획 출력으로만 + 각 단계 status 실패 시 non-zero.
   let pubFail = false;
   // 2. npm pack (필요한 경우 — pack-only도 의미 있음)
-  if (has('--pack') || has('--npm-publish') || (!has('--git-push') && !has('--gh-release') && !has('--gh-pages'))) {
+  const standalonePack = !has('--npm-publish')
+    && (has('--pack') || (!has('--git-push') && !has('--gh-release') && !has('--gh-pages')));
+  if (standalonePack) {
     if (dryRun) { log('(dry-run) npm pack 생략 (실행 안 함)'); }
     else {
-      const packR = spawnNpmSync(['pack'], { cwd: root, encoding: 'utf8' });
-      if (packR.status !== 0) { fail('npm pack 실패'); log(packR.stderr); process.exitCode = 1; return; }
+      const isolated = _withEmptyNpmLifecycleUserconfig((emptyUserconfig) => spawnNpmSync(
+        ['pack', '--userconfig', emptyUserconfig],
+        { cwd: root, encoding: 'utf8', env: _npmPublishChildEnv(process.env) }
+      ));
+      if (!isolated.cleanupOk || isolated.error || !isolated.result) {
+        fail('npm pack lifecycle 격리/정리 실패');
+        if (isolated.error) log(_redactNpmPublishOutput(isolated.error.message));
+        process.exitCode = 1;
+        return;
+      }
+      const packR = isolated.result;
+      if (packR.status !== 0) { fail('npm pack 실패'); log(_redactNpmPublishOutput(packR.stderr || packR.stdout || '')); process.exitCode = 1; return; }
       ok('npm pack 완료');
     }
   }
@@ -22970,13 +23198,16 @@ function releasePublish(root) {
 
   // 6. npm publish (--npm-publish)
   if (has('--npm-publish')) {
-    // 1.9.275 (UR-0026): dist-tag 지원 (latest/next)
-    const npmTag = _resolveNpmTag(arg('--npm-tag', null));
-    const args = dryRun ? ['publish', '--dry-run', '--tag', npmTag] : ['publish', '--access', 'public', '--tag', npmTag];
-    log('npm ' + args.join(' '));
-    const r = spawnNpmSync(args, { cwd: root, encoding: 'utf8' });
-    log((r.stdout || '').split('\n').slice(-5).join('\n'));
-    if (r.status !== 0) { fail('npm publish 실패'); process.exitCode = 1; return; }
+    // Explicit publish shares the token-safe implementation used by sync-main.
+    // With no .env token it preserves npm's normal login/userconfig behavior.
+    const npmResult = _publishToNpm(root, {
+      dryRun,
+      forcePublish: true,
+      allowNpmConfig: true,
+      requirePublish: true,
+      tag: _resolveNpmTag(arg('--npm-tag', null)),
+    });
+    if (!npmResult || npmResult.ok === false) { fail('npm publish 실패'); process.exitCode = 1; return; }
   }
   // 1.9.288 (Codex #2): 단계 실패가 있으면 완료를 성공으로 출력하지 않고 non-zero 종료.
   if (pubFail) { fail('release publish: 일부 단계 실패 (위 로그 확인)'); process.exitCode = 1; return; }

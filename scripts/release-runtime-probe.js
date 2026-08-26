@@ -152,13 +152,23 @@ try {
   fs.writeFileSync(fakeNpmCli, [
     "'use strict';",
     "const fs = require('fs');",
+    "const path = require('path');",
     'const args = process.argv.slice(2);',
     "if (process.env.LEERNESS_NPM_PROBE_LOG) fs.appendFileSync(process.env.LEERNESS_NPM_PROBE_LOG, JSON.stringify(args) + '\\n');",
+    "const leakedSecretKey = Object.keys(process.env).find(key => /TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE/i.test(key) || /(?:^|_)(?:OTP|AUTH)(?:_|$)/i.test(key));",
+    "if (process.env.LEERNESS_NPM_PROBE_REJECT_CREDENTIAL_ENV === '1' && leakedSecretKey) { process.stderr.write('NPM_CHILD_SECRET_LEAK:' + leakedSecretKey + '\\n'); process.exit(9); }",
+    "if (process.env.LEERNESS_NPM_PROBE_REQUIRE_EMPTY_USERCONFIG === '1' && (args[0] === 'run' || args[0] === 'pack')) { const at = args.indexOf('--userconfig'); const file = at >= 0 ? args[at + 1] : ''; let bytes = -1; try { bytes = fs.readFileSync(file).length; } catch {} if (!file || bytes !== 0) { process.stderr.write('NPM_LIFECYCLE_USERCONFIG_NOT_EMPTY:' + bytes + '\\n'); process.exit(12); } }",
+    "const conflictMarker = process.env.LEERNESS_NPM_PROBE_CONFLICT_MARKER;",
     "if (args[0] === '--version') process.stdout.write('99.0.0\\n');",
     "else if (args[0] === 'view' && args.includes('dist-tags')) process.stdout.write(JSON.stringify({ latest: '9.9.9', next: '10.0.0-next.1' }) + '\\n');",
-    "else if (args[0] === 'view') process.stdout.write('9.9.9\\n');",
-    "else if (args[0] === 'pack') process.stdout.write('release-runtime-probe-9.9.9.tgz\\n');",
+    "else if (args[0] === 'view') process.stdout.write((conflictMarker && fs.existsSync(conflictMarker) ? '9.9.10' : '9.9.9') + '\\n');",
+    "else if (args[0] === 'pack') { const filename = 'release-runtime-probe-9.9.9.tgz'; const content = process.env.LEERNESS_NPM_PROBE_PACK_CONTENT || 'packed-artifact'; fs.writeFileSync(path.join(process.cwd(), filename), content); if (process.env.LEERNESS_NPM_PROBE_POSTPACK_DELETE) { try { fs.rmSync(process.env.LEERNESS_NPM_PROBE_POSTPACK_DELETE, { force: true }); } catch {} } process.stdout.write(args.includes('--json') ? JSON.stringify([{ filename }]) + '\\n' : filename + '\\n'); }",
     "else if (args[0] === 'publish') process.stdout.write('+ release-runtime-probe@9.9.9\\n');",
+    "if (args[0] === 'publish' && process.env.LEERNESS_NPM_PROBE_REQUIRE_PACK_CONTENT) { const artifact = args[1]; let content = ''; try { content = fs.readFileSync(artifact, 'utf8'); } catch {} if (content !== process.env.LEERNESS_NPM_PROBE_REQUIRE_PACK_CONTENT) { process.stderr.write('PUBLISHED_ARTIFACT_MISMATCH\\n'); process.exit(11); } }",
+    "if (args[0] === 'publish' && process.env.LEERNESS_NPM_PROBE_EXPECT_CODE) { const code = process.env.LEERNESS_NPM_PROBE_EXPECT_CODE; const at = args.indexOf('--userconfig'); let config = ''; if (at >= 0) { try { config = fs.readFileSync(args[at + 1], 'utf8'); } catch {} } const safe = !args.some(value => /^--otp=/i.test(value)) && (at >= 0 ? config.includes('otp=' + code) : process.env.npm_config_otp === code); if (!safe) { process.stderr.write('NPM_OTP_CHANNEL_UNSAFE\\n'); process.exit(13); } }",
+    "if (args[0] === 'publish' && process.env.LEERNESS_NPM_PROBE_ECHO_VALUE) process.stderr.write('LIFECYCLE_TOKEN=' + process.env.LEERNESS_NPM_PROBE_ECHO_VALUE + '\\n');",
+    "if (args[0] === 'publish' && process.env.LEERNESS_NPM_PROBE_CONFLICT === '1') { if (process.env.LEERNESS_NPM_PROBE_CONFLICT_CONFIRM === '1' && conflictMarker) fs.writeFileSync(conflictMarker, 'published'); const tail = 'x'.repeat(Number(process.env.LEERNESS_NPM_PROBE_CONFLICT_TAIL || 0)); process.stderr.write('npm ERR! code EPUBLISHCONFLICT\\n' + tail + '\\n'); process.exit(1); }",
+    "if (args[0] === 'publish' && process.env.LEERNESS_NPM_PROBE_PUBLISH_EXIT) process.exit(Number(process.env.LEERNESS_NPM_PROBE_PUBLISH_EXIT));",
     'const exitCode = Number(process.env.LEERNESS_NPM_PROBE_EXIT || 0);',
     'if (Number.isFinite(exitCode) && exitCode !== 0) process.exit(exitCode);',
   ].join('\n') + '\n');
@@ -797,6 +807,227 @@ try {
   if (channelFailure.status !== 0 || !channelFailureJson || channelFailureJson.distTags !== null) {
     failures.push(`release channel npm view 실패 폴백 오류: exit=${channelFailure.status}`);
   }
+
+  // Explicit release publish must reuse the same token-safe path as sync-main.
+  // A project .env token is passed only through a short-lived userconfig, while
+  // an already-authenticated npm user remains supported when no token is set.
+  const publishToken = 'npm_probe_token_must_never_be_logged';
+  const npmAuthProbe = 'c3ludGhldGljOnBhc3M=';
+  const npmOtpProbe = '654321';
+  const securePublishDir = path.join(sandbox, 'secure-publish-fixture');
+  fs.mkdirSync(securePublishDir, { recursive: true });
+  fs.writeFileSync(path.join(securePublishDir, 'package.json'), JSON.stringify({ name: 'secure-publish-probe', version: '9.9.10' }) + '\n');
+  fs.writeFileSync(path.join(securePublishDir, '.env'), `LEERNESS_NPM_TOKEN=${publishToken}\n`);
+  const postpackArtifact = path.join(securePublishDir, 'dist-artifact.txt');
+  fs.writeFileSync(postpackArtifact, 'prepared-artifact');
+  fs.writeFileSync(fakeNpmLog, '');
+  const secureEnv = overrideEnvCaseInsensitive(fakeEnv, {
+    LEERNESS_NPM_TOKEN: publishToken,
+    LEERNESS_NPM_OTP: npmOtpProbe,
+    LEERNESS_NPM_PROBE_REJECT_CREDENTIAL_ENV: '1',
+    LEERNESS_NPM_PROBE_REQUIRE_EMPTY_USERCONFIG: '1',
+    LEERNESS_NPM_PROBE_EXPECT_CODE: npmOtpProbe,
+    OPENAI_API_KEY: 'sk-review-synthetic-not-real',
+    NPM_CONFIG__AUTH: npmAuthProbe,
+    NPM_CONFIG_OTP: npmOtpProbe,
+    LEERNESS_NPM_PROBE_PACK_CONTENT: 'prepared-artifact',
+    LEERNESS_NPM_PROBE_REQUIRE_PACK_CONTENT: 'prepared-artifact',
+    LEERNESS_NPM_PROBE_POSTPACK_DELETE: postpackArtifact,
+  });
+  const securePublish = runCli(['release', 'publish', securePublishDir, '--npm-publish'], secureEnv);
+  const secureCalls = readFakeCalls();
+  const securePublishCall = secureCalls.find(call => call[0] === 'publish');
+  const userconfigAt = securePublishCall ? securePublishCall.indexOf('--userconfig') : -1;
+  const temporaryUserconfig = userconfigAt >= 0 ? securePublishCall[userconfigAt + 1] : null;
+  const publishedArtifact = securePublishCall && /\.tgz$/i.test(String(securePublishCall[1] || '')) ? securePublishCall[1] : null;
+  const lifecycleCalls = secureCalls.filter(call => call[0] === 'run' || call[0] === 'pack');
+  const lifecycleUserconfigs = lifecycleCalls.map(call => {
+    const at = call.indexOf('--userconfig');
+    return at >= 0 ? call[at + 1] : null;
+  });
+  const secureOutput = `${String(securePublish.stdout || '')}\n${String(securePublish.stderr || '')}`;
+  if (securePublish.status !== 0 || !securePublishCall || userconfigAt < 0
+      || securePublishCall.includes('--dry-run') || !securePublishCall.includes('--ignore-scripts')
+      || securePublishCall.some(value => /^--otp=/i.test(String(value)))
+      || !publishedArtifact || !fs.existsSync(publishedArtifact) || fs.existsSync(postpackArtifact)
+      || !secureCalls.some(call => call[0] === 'run' && call[1] === 'prepublishOnly' && call.includes('--if-present'))
+      || lifecycleUserconfigs.length !== 2 || lifecycleUserconfigs.some(file => !file)
+      || new Set(lifecycleUserconfigs).size !== 1 || lifecycleUserconfigs.some(file => fs.existsSync(file))
+      || lifecycleUserconfigs.includes(temporaryUserconfig)
+      || !temporaryUserconfig || fs.existsSync(temporaryUserconfig)
+      || secureOutput.includes(publishToken)) {
+    failures.push(`release publish token-safe/exact-artifact 공유 경로 오류: ${JSON.stringify({ status: securePublish.status, calls: secureCalls, call: securePublishCall, lifecycleUserconfigs, lifecycleConfigsGone: lifecycleUserconfigs.every(file => file && !fs.existsSync(file)), artifact: publishedArtifact, artifactExists: !!(publishedArtifact && fs.existsSync(publishedArtifact)), postpackRemoved: !fs.existsSync(postpackArtifact), tempGone: temporaryUserconfig ? !fs.existsSync(temporaryUserconfig) : false, tokenLeaked: secureOutput.includes(publishToken), stdout: String(securePublish.stdout || '').slice(0, 1200), stderr: String(securePublish.stderr || '').slice(0, 600) })}`);
+  }
+
+  // npm 자체가 --userconfig 값을 lifecycle의 npm_config_userconfig로 다시 주입한다.
+  // 실제 npm을 한 번 실행해 그 값이 우리가 만든 빈 파일이며 인증 내용이 0B인지 고정한다.
+  const actualLifecycleDir = path.join(sandbox, 'actual-npm-lifecycle-fixture');
+  const actualEmptyDir = path.join(sandbox, 'actual-npm-empty-config');
+  const actualEmptyConfig = path.join(actualEmptyDir, '.npmrc');
+  const actualLifecycleMarker = path.join(actualLifecycleDir, 'observed.json');
+  fs.mkdirSync(actualLifecycleDir, { recursive: true });
+  fs.mkdirSync(actualEmptyDir, { recursive: true });
+  fs.writeFileSync(actualEmptyConfig, '', { mode: 0o600 });
+  fs.writeFileSync(path.join(actualLifecycleDir, 'observe.js'), [
+    "'use strict';",
+    "const fs = require('fs'); const path = require('path');",
+    "const userconfig = process.env.npm_config_userconfig || '';",
+    "let bytes = -1; try { bytes = fs.readFileSync(userconfig).length; } catch {}",
+    "fs.writeFileSync(path.join(process.cwd(), 'observed.json'), JSON.stringify({ userconfig, bytes }));",
+    "if (path.resolve(userconfig) !== path.resolve(process.env.LEERNESS_EXPECT_EMPTY_USERCONFIG || '') || bytes !== 0) process.exit(7);",
+  ].join('\n') + '\n');
+  fs.writeFileSync(path.join(actualLifecycleDir, 'package.json'), JSON.stringify({
+    name: 'leerness-actual-npm-lifecycle-probe', version: '0.0.0', private: true,
+    scripts: { prepack: 'node observe.js' },
+    files: ['observe.js'],
+  }) + '\n');
+  const actualLifecycleEnv = overrideEnvCaseInsensitive(process.env, {
+    LEERNESS_EXPECT_EMPTY_USERCONFIG: actualEmptyConfig,
+    NPM_CONFIG_USERCONFIG: '',
+    NPM_CONFIG_OTP: '',
+    NPM_CONFIG__AUTH: '',
+  });
+  const actualPack = require(npmProcessPath).spawnNpmSync(
+    ['pack', '--json', '--userconfig', actualEmptyConfig],
+    { cwd: actualLifecycleDir, env: actualLifecycleEnv, encoding: 'utf8', timeout: 120000 }
+  );
+  let actualObserved = null;
+  try { actualObserved = JSON.parse(fs.readFileSync(actualLifecycleMarker, 'utf8')); } catch {}
+  if (actualPack.status !== 0 || !actualObserved || !sameFsPath(actualObserved.userconfig, actualEmptyConfig)
+      || actualObserved.bytes !== 0 || fs.statSync(actualEmptyConfig).size !== 0) {
+    failures.push(`실제 npm lifecycle 빈 userconfig 격리 오류: ${JSON.stringify({ status: actualPack.status, observed: actualObserved, stderr: String(actualPack.stderr || '').slice(0, 500) })}`);
+  }
+
+  fs.writeFileSync(fakeNpmLog, '');
+  const redactionPublish = runCli(['release', 'publish', securePublishDir, '--npm-publish'], overrideEnvCaseInsensitive(fakeEnv, {
+    LEERNESS_NPM_TOKEN: publishToken,
+    NPM_CONFIG__AUTH: npmAuthProbe,
+    NPM_CONFIG_OTP: npmOtpProbe,
+    LEERNESS_NPM_PROBE_ECHO_VALUE: npmAuthProbe,
+    LEERNESS_NPM_PROBE_PUBLISH_EXIT: '7',
+  }));
+  const redactionOutput = `${String(redactionPublish.stdout || '')}\n${String(redactionPublish.stderr || '')}`;
+  if (redactionPublish.status !== 1 || redactionOutput.includes(publishToken)
+      || redactionOutput.includes(npmAuthProbe) || redactionOutput.includes(npmOtpProbe)
+      || !/REDACTED_NPM_(?:SECRET|TOKEN)/.test(redactionOutput)) {
+    failures.push(`release publish 오류 credential redaction 오류: ${JSON.stringify({ status: redactionPublish.status, leaked: redactionOutput.includes(publishToken) || redactionOutput.includes(npmAuthProbe) || redactionOutput.includes(npmOtpProbe), stdout: String(redactionPublish.stdout || '').slice(0, 900), stderr: String(redactionPublish.stderr || '').slice(0, 300) })}`);
+  }
+
+  const npmConfigPublishDir = path.join(sandbox, 'npm-config-publish-fixture');
+  fs.mkdirSync(npmConfigPublishDir, { recursive: true });
+  fs.writeFileSync(path.join(npmConfigPublishDir, 'package.json'), JSON.stringify({ name: 'npm-config-publish-probe', version: '9.9.10' }) + '\n');
+  const npmConfigEnv = { ...fakeEnv };
+  for (const key of Object.keys(npmConfigEnv)) {
+    if (/^(?:LEERNESS_NPM_TOKEN|NPM_TOKEN)$/i.test(key)) delete npmConfigEnv[key];
+  }
+  fs.writeFileSync(fakeNpmLog, '');
+  const npmConfigPublish = runCli(['release', 'publish', npmConfigPublishDir, '--dry-run', '--npm-publish'], npmConfigEnv);
+  const npmConfigCall = readFakeCalls().find(call => call[0] === 'publish');
+  if (npmConfigPublish.status !== 0 || !npmConfigCall || npmConfigCall.includes('--userconfig')
+      || !npmConfigCall.includes('--dry-run') || !npmConfigCall.includes('--ignore-scripts')) {
+    failures.push(`release publish npm userconfig 폴백 오류: ${JSON.stringify({ status: npmConfigPublish.status, call: npmConfigCall })}`);
+  }
+
+  fs.writeFileSync(fakeNpmLog, '');
+  const tokenlessOtpPublish = runCli(['release', 'publish', npmConfigPublishDir, '--dry-run', '--npm-publish'], {
+    ...npmConfigEnv,
+    LEERNESS_NPM_OTP: npmOtpProbe,
+    LEERNESS_NPM_PROBE_EXPECT_CODE: npmOtpProbe,
+  });
+  const tokenlessOtpCall = readFakeCalls().find(call => call[0] === 'publish');
+  if (tokenlessOtpPublish.status !== 0 || !tokenlessOtpCall
+      || tokenlessOtpCall.some(value => /^--otp=/i.test(String(value)))) {
+    failures.push(`release publish tokenless OTP upload-only env 오류: ${JSON.stringify({ status: tokenlessOtpPublish.status, call: tokenlessOtpCall, stderr: String(tokenlessOtpPublish.stderr || '').slice(0, 300) })}`);
+  }
+
+  fs.writeFileSync(fakeNpmLog, '');
+  const spoofedConflict = runCli(['release', 'publish', npmConfigPublishDir, '--npm-publish'], {
+    ...npmConfigEnv,
+    LEERNESS_NPM_PROBE_CONFLICT: '1',
+  });
+  if (spoofedConflict.status !== 1 || !/exact version으로 재확인하지 못했/.test(String(spoofedConflict.stdout || ''))) {
+    failures.push(`release publish spoofed conflict false-success: ${JSON.stringify({ status: spoofedConflict.status, stdout: String(spoofedConflict.stdout || '').slice(0, 700), stderr: String(spoofedConflict.stderr || '').slice(0, 300) })}`);
+  }
+
+  const conflictMarker = path.join(sandbox, 'confirmed-publish.marker');
+  fs.writeFileSync(fakeNpmLog, '');
+  const confirmedConflict = runCli(['release', 'publish', npmConfigPublishDir, '--npm-publish'], {
+    ...npmConfigEnv,
+    LEERNESS_NPM_PROBE_CONFLICT: '1',
+    LEERNESS_NPM_PROBE_CONFLICT_CONFIRM: '1',
+    LEERNESS_NPM_PROBE_CONFLICT_MARKER: conflictMarker,
+    LEERNESS_NPM_PROBE_CONFLICT_TAIL: '1200',
+  });
+  if (confirmedConflict.status !== 0 || !/registry exact version 재확인/.test(String(confirmedConflict.stdout || ''))) {
+    failures.push(`release publish confirmed conflict 멱등 처리 오류: ${JSON.stringify({ status: confirmedConflict.status, stdout: String(confirmedConflict.stdout || '').slice(0, 700), stderr: String(confirmedConflict.stderr || '').slice(0, 300) })}`);
+  }
+
+  const cleanupPreload = path.join(sandbox, 'block-npmrc-cleanup.js');
+  fs.writeFileSync(cleanupPreload, [
+    "'use strict';",
+    "const fs = require('fs');",
+    'const realRmSync = fs.rmSync.bind(fs);',
+    'const realWriteFileSync = fs.writeFileSync.bind(fs);',
+    "const target = value => /(?:^|[\\\\/])leerness-npmrc-[^\\\\/]+(?:[\\\\/]|$)/.test(String(value || ''));",
+    "fs.rmSync = function(file, options) { if (target(file)) { const e = new Error('cleanup blocked'); e.code = 'EACCES'; throw e; } return realRmSync(file, options); };",
+    "fs.writeFileSync = function(file, data, options) { if (target(file) && String(data) === '') { const e = new Error('zeroize blocked'); e.code = 'EACCES'; throw e; } return realWriteFileSync(file, data, options); };",
+  ].join('\n') + '\n');
+  fs.writeFileSync(fakeNpmLog, '');
+  const cleanupFailure = runCli(['release', 'publish', securePublishDir, '--npm-publish'], overrideEnvCaseInsensitive(fakeEnv, {
+    LEERNESS_NPM_TOKEN: publishToken,
+    LEERNESS_NPM_PROBE_REJECT_CREDENTIAL_ENV: '1',
+    OPENAI_API_KEY: 'sk-review-synthetic-not-real',
+    NODE_OPTIONS: `--require=${cleanupPreload.replace(/\\/g, '/')}`,
+  }));
+  const cleanupCall = readFakeCalls().find(call => call[0] === 'publish');
+  const cleanupUserconfigAt = cleanupCall ? cleanupCall.indexOf('--userconfig') : -1;
+  const strandedNpmrc = cleanupUserconfigAt >= 0 ? cleanupCall[cleanupUserconfigAt + 1] : null;
+  const cleanupFailureOutput = `${String(cleanupFailure.stdout || '')}\n${String(cleanupFailure.stderr || '')}`;
+  const cleanupFailureDetected = cleanupFailure.status === 1
+    && /인증 임시 파일 정리 실패/.test(cleanupFailureOutput)
+    && !/npm publish 완료:/.test(cleanupFailureOutput)
+    && strandedNpmrc && fs.existsSync(strandedNpmrc);
+  if (strandedNpmrc && fs.existsSync(strandedNpmrc)) {
+    try { fs.writeFileSync(strandedNpmrc, '', { mode: 0o600 }); } catch {}
+    try { fs.rmSync(path.dirname(strandedNpmrc), { recursive: true, force: true }); } catch {}
+  }
+  if (!cleanupFailureDetected) {
+    failures.push(`release publish credential cleanup 실패 전파 오류: ${JSON.stringify({ status: cleanupFailure.status, call: cleanupCall, stranded: !!(strandedNpmrc && fs.existsSync(strandedNpmrc)), stdout: String(cleanupFailure.stdout || '').slice(0, 900), stderr: String(cleanupFailure.stderr || '').slice(0, 300) })}`);
+  }
+
+  const syncMainRepo = path.join(sandbox, 'sync-main-publish-failure');
+  const syncMainBare = path.join(sandbox, 'sync-main-origin.git');
+  fs.mkdirSync(syncMainRepo, { recursive: true });
+  const gitFor = (cwd, args) => require(gitProcessPath).gitSpawn(args, { cwd, encoding: 'utf8', timeout: 30000 });
+  const syncGitSteps = [
+    gitFor(sandbox, ['init', '--bare', syncMainBare]),
+    gitFor(syncMainRepo, ['init', '-b', 'main']),
+    gitFor(syncMainRepo, ['config', 'user.email', 'release-probe@example.invalid']),
+    gitFor(syncMainRepo, ['config', 'user.name', 'Release Probe']),
+  ];
+  fs.writeFileSync(path.join(syncMainRepo, 'package.json'), JSON.stringify({ name: 'sync-main-publish-probe', version: '9.9.10' }) + '\n');
+  fs.writeFileSync(path.join(syncMainRepo, 'value.txt'), 'main\n');
+  syncGitSteps.push(
+    gitFor(syncMainRepo, ['add', '.']),
+    gitFor(syncMainRepo, ['commit', '-m', 'main fixture']),
+    gitFor(syncMainRepo, ['remote', 'add', 'origin', syncMainBare]),
+    gitFor(syncMainRepo, ['push', '-u', 'origin', 'main']),
+    gitFor(syncMainRepo, ['checkout', '-b', 'release/9.9.10']),
+  );
+  fs.writeFileSync(path.join(syncMainRepo, 'value.txt'), 'release\n');
+  syncGitSteps.push(gitFor(syncMainRepo, ['add', 'value.txt']), gitFor(syncMainRepo, ['commit', '-m', 'release fixture']));
+  fs.writeFileSync(fakeNpmLog, '');
+  const syncMainPublishFailure = runCli(['release', 'sync-main', syncMainRepo, '--publish-npm'], overrideEnvCaseInsensitive(fakeEnv, {
+    LEERNESS_NPM_TOKEN: publishToken,
+    LEERNESS_NPM_PROBE_PUBLISH_EXIT: '7',
+    LEERNESS_NPM_PROBE_REJECT_CREDENTIAL_ENV: '1',
+  }));
+  if (syncGitSteps.some(step => step.status !== 0) || syncMainPublishFailure.status !== 1
+      || !/main pushed/.test(String(syncMainPublishFailure.stdout || ''))
+      || !/sync-main: npm publish 실패/.test(String(syncMainPublishFailure.stdout || ''))) {
+    failures.push(`release sync-main npm 실패 exit 전파 오류: ${JSON.stringify({ git: syncGitSteps.map(step => step.status), status: syncMainPublishFailure.status, stdout: String(syncMainPublishFailure.stdout || '').slice(0, 1400), stderr: String(syncMainPublishFailure.stderr || '').slice(0, 500) })}`);
+  }
+
   const packFailure = runCli(['release', 'pack', sandbox, '--no-readme-sync'], failingEnv);
   if (packFailure.status !== 1 || !/npm pack 실패/.test(String(packFailure.stdout || ''))) {
     failures.push(`release pack npm 실패 전파 오류: exit=${packFailure.status}`);

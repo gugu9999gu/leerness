@@ -327,5 +327,27 @@
     "rootCause": null,
     "siblingScope": null,
     "previousGuardGap": null
+  },
+  {
+    "id": "T-0142",
+    "repro": "node -e \"const fs=require('fs');const s=fs.readFileSync('scripts/e2e.js','utf8');if(s.includes('@echo fake-codex')){console.error('non-portable fake codex shim');process.exit(1)}\"",
+    "expectBad": "non-portable fake codex shim",
+    "baseline": {
+      "at": "2026-08-26T02:13:21.251Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 65
+    },
+    "rootCause": "Windows E2E가 portable-process에서 거부하는 임의 codex.cmd를 사용해 러너에 설치된 실제 Codex 존재 여부에 의존함",
+    "siblingScope": {
+      "checked": [
+        "agents dispatch fake CLI",
+        "portable Windows npm shim",
+        "임시 디렉터리 cleanup"
+      ]
+    },
+    "previousGuardGap": null
   }
 ]
