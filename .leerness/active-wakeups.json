@@ -1,14 +1,6 @@
 {
   "wakeups": [
     {
-      "expectedFireAt": "2026-06-10T07:41:56.957Z",
-      "intervalMin": 25,
-      "source": "release-sync-main",
-      "status": "missed",
-      "fromVersion": "1.18.0",
-      "registeredAt": "2026-06-10T07:16:56.960Z"
-    },
-    {
       "expectedFireAt": "2026-06-14T11:01:56.459Z",
       "intervalMin": 25,
       "source": "release-sync-main",
@@ -159,7 +151,15 @@
       "status": "pending",
       "fromVersion": "1.36.165",
       "registeredAt": "2026-08-26T06:38:33.921Z"
+    },
+    {
+      "expectedFireAt": "2026-08-26T11:10:29.437Z",
+      "intervalMin": 25,
+      "source": "release-sync-main",
+      "status": "pending",
+      "fromVersion": "1.36.166",
+      "registeredAt": "2026-08-26T10:45:29.443Z"
     }
   ],
-  "updatedAt": "2026-08-26T06:38:33.922Z"
+  "updatedAt": "2026-08-26T10:45:29.443Z"
 }

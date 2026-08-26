@@ -923,12 +923,14 @@
       "id": "UR-0081",
       "text": "다음 작업 이어서 진행 — T-0144 commands --json 및 unknown flag 정합화",
       "recordedAt": "2026-08-26T06:57:49.568Z",
-      "status": "open",
+      "status": "completed",
       "linkedTaskIds": [],
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
-      "notes": ""
+      "notes": "",
+      "updatedAt": "2026-08-26T10:50:48.738Z",
+      "completedAt": "2026-08-26T10:50:48.738Z"
     }
   ],
-  "updatedAt": "2026-08-26T06:57:49.568Z"
+  "updatedAt": "2026-08-26T10:50:48.738Z"
 }
