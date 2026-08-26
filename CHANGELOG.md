@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.168 — 2026-08-26
+
+- Windows which가 동일 npm 설치의 extensionless/.cmd/.ps1 shim을 실제 package bin target과 npm 실행문까지 검증한 뒤 한 설치로 그룹화하고, pathCandidates 원문은 유지한 채 pathInstallations를 추가해 PATH 충돌 오탐을 제거. 독립 검토에서 잡힌 주석·더미 인자 우회까지 막아 변조·미증명·다른 디렉터리·비표준 .bat·POSIX 후보를 보수적으로 분리하며 15개 회귀 프로브와 제품 배선 가드 추가.
+
 ## 1.36.167 — 2026-08-26
 
 - T-0145: 장기 운영 프로젝트의 레거시 완료 증거를 소급 수정하지 않고 명시적 tracker 경계 이전의 현재 실패만 exact 행+사유 SHA-256 지문으로 격리하는 claims baseline을 추가했습니다. verify-claim --all과 gate --claims는 원판정 실패·baseline 부채·현재 차단 및 진단 상세를 분리해 보고하고, --raw/개별 검증은 원판정을 유지합니다. 행 변경·신규 실패·경계 밖 항목·손상 baseline은 fail-closed하며, 생성 명령은 기존 baseline을 덮어쓰지 않아 변경 행의 재승인을 차단합니다. CLI·MCP·클린룸 프로브로 검증합니다.

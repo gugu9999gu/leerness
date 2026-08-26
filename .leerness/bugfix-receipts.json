@@ -430,5 +430,29 @@
       ]
     },
     "previousGuardGap": "기존 E2E는 fresh init에서 만든 최신 evidence만 검사해 장기 운영 tracker를 새 엄격 검증기로 업그레이드할 때 누적 실패가 신규 작업을 영구 차단하는 시나리오가 없었다."
+  },
+  {
+    "id": "T-0146",
+    "repro": "node scripts/which-shim-probe.js",
+    "expectBad": "which shim grouping failures",
+    "baseline": {
+      "at": "2026-08-26T14:53:11.901Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 78
+    },
+    "rootCause": "whichCmd가 where.exe의 실행파일 shim 목록(pathCandidates)을 설치 목록으로 간주해 raw 후보 수가 2보다 크면 충돌로 경고했다.",
+    "siblingScope": {
+      "checked": [
+        "Windows extensionless/.cmd/.ps1 npm shims",
+        "different PATH directories",
+        "unproven or tampered shims",
+        "non-standard .bat",
+        "POSIX candidates"
+      ]
+    },
+    "previousGuardGap": "기존 회귀 가드는 PATH-only 안전 수집만 확인했고 raw executable candidates와 logical installations의 의미 차이를 검사하지 않았다."
   }
 ]

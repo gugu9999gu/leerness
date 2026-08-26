@@ -1124,8 +1124,11 @@ try {
       || /spawnSync\(['"]where(?:\.exe)?['"]/.test(npmSource)) {
     failures.push('공용 npm resolver가 bare where 또는 동적 cmd wrapper로 후퇴함');
   }
-  if (!diagnosticsSource.includes("windowsPathCandidates('leerness'") || /spawnSync\(tool,/.test(diagnosticsSource)) {
-    failures.push('which 진단이 Windows bare where를 다시 실행함');
+  if (!diagnosticsSource.includes("windowsPathCandidates('leerness'")
+      || !diagnosticsSource.includes('out.pathInstallations = _groupPathInstallations')
+      || !diagnosticsSource.includes('if (out.pathInstallations.length > 1)')
+      || /spawnSync\(tool,/.test(diagnosticsSource)) {
+    failures.push('which 진단이 안전한 Windows PATH 수집 또는 설치 단위 그룹화를 잃음');
   }
   if (cliSource.includes("cp.execSync('npm root -g'") || cliSource.includes("cp.spawnSync('chcp.com'")
       || cliSource.includes("cp.spawnSync('powershell'") || cliSource.includes("cp.spawnSync('powershell.exe'")) {

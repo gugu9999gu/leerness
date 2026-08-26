@@ -111,3 +111,9 @@
 - Reason: 평가 보고서와 실제 109건을 대조하면 과거 증거를 소급 수정하는 방식은 역사 왜곡이고, 전 실패 자동 면제는 새 거짓완료를 숨긴다.
 - Alternatives: 과거 evidence 일괄 보강(기각: 변조), gate 완화(기각: 신규 실패 은폐), 현재 실패 전부 자동 면제(기각: 경계 없음)
 - Impact: verify-claim baseline create --before <T-ID> --yes로만 생성하며, 원본 행·실패사유 지문이 달라지거나 신규 실패·손상 baseline이면 fail-closed한다.
+
+### 2026-08-26 — which의 raw PATH 후보와 검증된 설치 단위를 분리
+- Decision: which의 raw PATH 후보와 검증된 설치 단위를 분리
+- Reason: 호환성을 위해 pathCandidates 원문은 보존하되 Windows npm 표준 shim이 같은 canonical 디렉터리에서 동일 package.json bin target을 가리킬 때만 pathInstallations 한 건으로 묶는다. 미증명·변조·다른 디렉터리·POSIX 후보는 분리한다.
+- Alternatives:
+- Impact:
