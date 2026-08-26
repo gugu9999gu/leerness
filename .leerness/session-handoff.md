@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-26T13:42:56.057Z
+Last generated: 2026-08-26T17:10:07.720Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -127,6 +127,8 @@ Last generated: 2026-08-26T13:42:56.057Z
 - T-0143 ox-alpha의 leerness v1.36.161 평가 보고서를 현재 1.36.164에서 보수적으로 재검증하고 확인된 다음 작업을 진행 → next: T-0144 commands --json 및 unknown flag 정합화
 - T-0144 commands --json 누락 및 명령별 unknown flag 거부 정합화 → next: T-0145 legacy gate --claims evidence migration policy
 - T-0145 gate --claims가 레거시 완료 증거 68/108건 때문에 신규 작업과 무관하게 실패하는 상태의 마이그레이션·베이스라인 정책 정립 → next: T-0146 Windows which shim-pair false-positive 교정
+- T-0146 Windows which 진단이 단일 npm 글로벌 설치의 leerness 및 leerness.cmd shim 쌍을 2개 PATH 충돌로 오인하는 false-positive 교정 → next: GitHub Actions run 32992266329 완료 확인 및 push 자동-trigger 누락 원인 관찰
+- T-0148 T-0146 Windows which npm shim-pair false-positive 조사·수정·검증 → next: v1.36.168 release publish
 
 ## In Progress
 - 없음
@@ -138,6 +140,7 @@ Last generated: 2026-08-26T13:42:56.057Z
 - T-0017 FINAL review of redesigned _maskComments: realistic false-blank, missed-comment, caller-integration, and crash/hang defects only → next: 없음
 - T-0018 T-0017 _maskComments final adversarial review: realistic false-blank, missed-comment, caller-integration, and hang checks → next: 없음
 - T-0019 FINAL adversarial review of redesigned line-leading-only _maskComments: realistic false-BLANK, missed full-line comments, caller integration, and crash/hang → next: 없음
+- T-0147 Windows which 진단이 단일 npm 글로벌 설치의 leerness 및 leerness.cmd shim 쌍을 2개 PATH 충돌로 오인하는 false-positive 교정 . → next: 없음
 
 ## Verification
 ```

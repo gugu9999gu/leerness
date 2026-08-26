@@ -935,12 +935,14 @@
       "id": "UR-0082",
       "text": "다음 작업 이어서 진행 — T-0146 Windows which npm shim-pair PATH 충돌 오탐 교정과 GitHub·npm·leerness.com 배포 검증 .",
       "recordedAt": "2026-08-26T14:49:14.250Z",
-      "status": "open",
+      "status": "completed",
       "linkedTaskIds": [],
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
-      "notes": ""
+      "notes": "",
+      "updatedAt": "2026-08-26T17:07:41.182Z",
+      "completedAt": "2026-08-26T17:07:41.182Z"
     }
   ],
-  "updatedAt": "2026-08-26T14:49:14.250Z"
+  "updatedAt": "2026-08-26T17:07:41.183Z"
 }

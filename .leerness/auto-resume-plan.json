@@ -1,16 +1,16 @@
 {
-  "savedAt": "2026-08-26T13:34:12.660Z",
-  "nextRoundVersion": "next after 1.36.167",
-  "expectedFireAt": "2026-08-26T13:59:12.656Z",
+  "savedAt": "2026-08-26T17:01:27.989Z",
+  "nextRoundVersion": "next after 1.36.168",
+  "expectedFireAt": "2026-08-26T17:26:27.986Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.36.167",
+    "currentVersion": "1.36.168",
     "activeTaskId": null,
     "activeTaskRequest": null,
     "memorySurface": {
       "tasksInProgress": 0,
-      "decisions": 17,
+      "decisions": 18,
       "rulesActive": 2,
       "lessons": 14
     },
@@ -19,17 +19,17 @@
   "nextActions": [
     {
       "icon": "🧬",
-      "title": "stress-v211 마지막 갱신 2015h 전 — 새 stress test 작성 권장",
-      "command": "node _apps/leerness-stress/bin/stress-v212.js"
-    },
-    {
-      "icon": "🧬",
       "title": "stress-v211 마지막 갱신 2016h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js"
     },
     {
       "icon": "🧬",
       "title": "stress-v211 마지막 갱신 2058h 전 — 새 stress test 작성 권장",
+      "command": "node _apps/leerness-stress/bin/stress-v212.js"
+    },
+    {
+      "icon": "🧬",
+      "title": "stress-v211 마지막 갱신 2069h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js"
     }
   ],

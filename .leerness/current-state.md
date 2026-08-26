@@ -24,8 +24,8 @@ Updated: 2026-08-26
 - pre-wake critical 1건은 이번 릴리스 결함이 아니라 기존 영상 요청 UR-0028/UR-0051의 task/plan/decision 링크 누락
 
 ## Next
-- T-0146: Windows `which`가 같은 npm 설치의 `leerness`/`leerness.cmd` shim pair를 PATH 충돌로 오인하는 false-positive 교정
 - R2: 온톨로지 그래프 기본 활성(install 자동생성) + roadmap 탭 통합 + 기능 토글 스위치(gate 등, toggles.json + CLI + handoff 노출 + gate 준수) <!-- leerness:auto -->
+- T-0146: Windows `which`가 같은 npm 설치의 `leerness`/`leerness.cmd` shim pair를 PATH 충돌로 오인하는 false-positive 교정
 
 ## Blockers
 - (없음) <!-- leerness:auto -->
