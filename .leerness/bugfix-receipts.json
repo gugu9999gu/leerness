@@ -349,5 +349,33 @@
       ]
     },
     "previousGuardGap": null
+  },
+  {
+    "id": "T-0143",
+    "repro": "node scripts/verify-code-cross-runtime-probe.js",
+    "expectBad": "cross-runtime verify blocked/failed",
+    "baseline": {
+      "at": "2026-08-26T04:39:32.197Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 1610
+    },
+    "rootCause": "verify-code는 자동 감지한 비-Node 러너에 fresh basic 권한의 호출 단위 허용을 전달하지 않았고, generic test 이름 중복 제거가 Node 테스트 존재 시 Python 테스트를 숨겼다. 이어 lazy detect는 최신 결과/exit가 아니라 러너 문자열만 찾아 차단·실패 증거도 성공으로 오인했다.",
+    "siblingScope": {
+      "checked": [
+        "Python pytest runner",
+        "Go runner",
+        "Rust runner",
+        "Node plus Python hybrid selection",
+        "npm placeholder script",
+        "JavaScript-only tests directory",
+        "lazy latest evidence parsing",
+        "gate lazy step",
+        "Node 18 runtime"
+      ]
+    },
+    "previousGuardGap": "기존 행위 테스트는 Node 실행과 러너 단어 존재만 확인했고 fresh basic 권한의 비-Node 실행, 혼합 런타임 선택, 실패에서 성공으로의 최신 증거 전이, Node 18 실행을 함께 검증하지 않았다."
   }
 ]

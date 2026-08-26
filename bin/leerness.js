@@ -47,7 +47,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.164';
+const VERSION = '1.36.165';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -5774,6 +5774,29 @@ function _selfTestCases() {
       const coreStillOk = _isCommandPermitted(basic, 'npm test', {}) === true;                      // JS 핵심도구는 그대로 허용(회귀 가드)
       const extOk = _isCommandPermitted({ mode: 'extended', shell: { exec: true, allowList: [] } }, 'python x.py', {}) === true;  // exec:true → 허용
       return blockedDefault && blockedPy && allowedAuth && coreStillOk && extOk;
+    } },
+    { name: 'T-0143: verify-code 고정 비-JS 러너만 basic 호출단위 허용 + 임의 python 차단 유지 (행위)', run: () => {
+      const basic = { mode: 'basic', shell: { exec: false, allowList: [] } };
+      const scoped = { commandAllowList: VERIFY_CODE_RUNNER_ALLOW };
+      return _isCommandPermitted(basic, 'pytest -q', scoped) === true
+        && _isCommandPermitted(basic, 'go test ./...', scoped) === true
+        && _isCommandPermitted(basic, 'cargo test', scoped) === true
+        && _isCommandPermitted(basic, 'python arbitrary.py', scoped) === false
+        && _isCommandPermitted(basic, 'pytest -q', {}) === false;
+    } },
+    { name: 'T-0143: 최신 실패/권한차단 증거는 no_test_run, 성공·optional skip 조합만 인정 (행위)', run: () => {
+      const pass = '## 2026-08-26T04:00 verify-code\nCommand: pytest -q\n- test: exit=0\n';
+      const blocked = pass + '\n## 2026-08-26T04:01 verify-code\nCommand: pytest -q\n- test: exit=126\n';
+      const recovered = blocked + '\n## 2026-08-26T04:02 verify-code\nCommand: pytest -q\n- test: exit=0\n';
+      const mixed = '## 2026-08-26T04:00 verify-code\nCommand: npm test\n- test: exit=0\n- typecheck: exit=127\n';
+      const failed = '## 2026-08-26\n```\ncargo test\n1 failed\n```\n';
+      const legacyPass = '## 2026-08-26\n```\ncargo test --all\n42 passed; 0 failed\n```\n';
+      const passingTail = '## 2026-08-26T04:00 verify-code\n- test: exit=0 — `pytest -q`\nTail:\n- child: exit=1\n';
+      const manualFail = '## 2026-08-26\nCommand: pytest -q\nExit: 0\nFAIL: expected exit=0 but got 1\n';
+      return _hasSuccessfulTestRunEvidence(pass) && !_hasSuccessfulTestRunEvidence(blocked)
+        && _hasSuccessfulTestRunEvidence(recovered) && _hasSuccessfulTestRunEvidence(mixed) && !_hasSuccessfulTestRunEvidence(failed)
+        && _hasSuccessfulTestRunEvidence(legacyPass) && _hasSuccessfulTestRunEvidence(passingTail)
+        && !_hasSuccessfulTestRunEvidence(manualFail);
     } },
     { name: '재실증 P1 (1.18.1): verify-claim 차단 실행은 skip(불일치 판정 아님) + 종합 라벨이 실제 cmd (소스 가드)', run: () => {
       const src = read(__filename);
@@ -15539,6 +15562,38 @@ function encodingCheck(root, opts = {}) {
   }
 }
 
+const _TEST_RUN_EVIDENCE_RE = /\b(npm test|pnpm test|yarn test|pytest|jest|vitest|tsc|eslint|playwright|cypress|go test|cargo test|cargo nextest|rspec|rake test|rake spec|phpunit|dotnet test|mvn test|mvn verify|gradle test|gradlew test|bun test|deno test|mocha|ctest|make test|make check|mix test|swift test|flutter test|dart test|tox|unittest|nose2)\b/i;
+
+function _hasSuccessfulTestRunEvidence(text) {
+  // 실제 verify-code는 ISO `YYYY-MM-DDTHH:mm`, 정책 예시는 공백형
+  // `YYYY-MM-DD HH:mm`을 쓴다. 둘 다 독립 블록으로 나눠 최신 결과만 본다.
+  const blocks = String(text || '').split(/\n(?=##\s+\d{4}-\d{2}-\d{2}(?:T|\s))/);
+  const relevant = blocks.filter(block => _TEST_RUN_EVIDENCE_RE.test(block));
+  if (!relevant.length) return false;
+  const latest = relevant[relevant.length - 1];
+  // verify-code Tail은 테스트의 정상적인 negative-path 로그도 담는다. 그 안의
+  // "expected child exit=1" 같은 문자열을 실행 결과로 오인하지 않고, 도구가 쓴
+  // summary 행만 신뢰한다. 수동 증거의 Exit: 행은 아래 별도 경로에서 처리한다.
+  const summary = latest.split(/^Tail:\s*$/im)[0];
+  const exits = Array.from(summary.matchAll(/^\s*-\s+.+?:\s*exit\s*=\s*(null|-?\d+)\b/gim), match => {
+    return match[1].toLowerCase() === 'null' ? null : Number(match[1]);
+  });
+  if (exits.length) {
+    // 127 is verify-code's explicit optional-runner skip. A block still needs at
+    // least one actual success, and permission denial (126) is never evidence.
+    return exits.some(code => code === 0) && exits.every(code => code === 0 || code === 127);
+  }
+  const explicitFailure = /(?:^|\n)\s*(?:✗|FAIL\b)/im.test(latest)
+    || /\b(?:test|lint|typecheck|build|bench)\s+failed\b/i.test(latest)
+    || /\b[1-9]\d*\s+failed\b/i.test(latest);
+  if (explicitFailure) return false;
+  const manualExits = Array.from(latest.matchAll(/^\s*Exit\s*:\s*(null|-?\d+)\b/gim), match => {
+    return match[1].toLowerCase() === 'null' ? null : Number(match[1]);
+  });
+  if (manualExits.length) return manualExits.some(code => code === 0) && manualExits.every(code => code === 0);
+  return true;
+}
+
 // 1.9.101: lazy detect 결과를 JSON으로 노출 (외부 AI/MCP 통합용). opts.json=true 시 verbose 출력 억제 후 JSON만.
 function lazyDetect(root, opts = {}) {
   root = absRoot(root);
@@ -15573,8 +15628,11 @@ function lazyDetect(root, opts = {}) {
       { kind: 'handoff_empty', severity: 'warn' });
   }
   const ev = exists(evidencePath(root)) ? read(evidencePath(root)) : '';
-  // 1.35.16 (lazy 헌트 FP): JS+pytest 중심 목록에 비-JS 러너 추가 — Go/Rust/Ruby/PHP/.NET/Java/Elixir/Swift/Dart/C 등이 실제 테스트를 돌려도 no_test_run 오탐(active 프로젝트에선 blocking → gate 거짓 실패)하던 것 차단. (negative finding 억제라 추가는 FP-safe.)
-  const hasTestRun = /\b(npm test|pnpm test|yarn test|pytest|jest|vitest|tsc|eslint|playwright|cypress|go test|cargo test|cargo nextest|rspec|rake test|rake spec|phpunit|dotnet test|mvn test|mvn verify|gradle test|gradlew test|bun test|deno test|mocha|ctest|make test|make check|mix test|swift test|flutter test|dart test|tox|unittest|nose2)\b/i.test(ev);
+  // 1.35.16 (lazy 헌트 FP): JS+pytest 중심 목록에 비-JS 러너 추가 — Go/Rust/Ruby/PHP/.NET/Java/Elixir/Swift/Dart/C 등이 실제 테스트를 돌려도 no_test_run 오탐(active 프로젝트에선 blocking → gate 거짓 실패)하던 것 차단.
+  // T-0143: 러너 이름만 찾으면 verify-code 가 exit=126/1 을 기록한 직후에도 lazy/gate 가 초록이 됐다.
+  // 가장 최근 관련 증거 블록에 구조화 exit 가 있으면 성공(0)과 optional skip(127)만 허용하고,
+  // 구조화되지 않은 기존 수동 증거는 명시적 실패 신호가 없을 때만 이전 호환 동작을 유지한다.
+  const hasTestRun = _hasSuccessfulTestRunEvidence(ev);
   if (!hasTestRun) { issues++; _warn('review-evidence.md has no recorded test/typecheck/lint run',
     { kind: 'no_test_run', severity: 'warn' }); }
   // 1.9.7 C: TODO 자동 추적 강화 — 위치+텍스트 캡처, known-todos 비교, --auto-track 등록
@@ -23227,7 +23285,9 @@ function verifyCodeCmd(root) {
     try { pkg = JSON.parse(read(pkgFile)); } catch (e) { return fail('package.json 파싱 실패: ' + e.message); }
     const scripts = pkg.scripts || {};
     const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-    if (scripts.test) tasks.push({ name: 'test', cmd: 'npm test', runtime: 'node' });
+    // npm init 기본 placeholder는 실제 검증이 아니며 Python 테스트를 가리면 안 된다.
+    const nodeTest = typeof scripts.test === 'string' && !/no test specified/i.test(scripts.test);
+    if (nodeTest) tasks.push({ name: 'test', cmd: 'npm test', runtime: 'node' });
     else if (scripts['test:smoke']) tasks.push({ name: 'test', cmd: 'npm run test:smoke', runtime: 'node' });
     // 1.9.148: 명시 script 없어도 인기 러너 의존성 발견 시 시도
     else if (deps.vitest) tasks.push({ name: 'test', cmd: 'npx --yes vitest run', runtime: 'node' });
@@ -23240,9 +23300,19 @@ function verifyCodeCmd(root) {
     if (has('--build') && scripts.build) tasks.push({ name: 'build', cmd: 'npm run build', runtime: 'node' });
     if (has('--bench') && scripts.bench) tasks.push({ name: 'bench', cmd: 'npm run bench', runtime: 'node', optional: true });
   }
-  // (2) Python: pyproject.toml / setup.py / tests/ 존재 시 pytest 시도
-  if (exists(path.join(root, 'pyproject.toml')) || exists(path.join(root, 'setup.py')) || exists(path.join(root, 'tests'))) {
-    if (!tasks.find(t => t.name === 'test')) tasks.push({ name: 'test', cmd: 'pytest -q', runtime: 'python', optional: true });
+  // (2) Python: Python 표식이 있으면 Node test와 독립적으로 pytest를 실행한다.
+  // `tests/` 이름만으로는 JS 프로젝트를 오인하므로 그 경로는 실제 .py 파일이 있을 때만 표식이다.
+  const testsDir = path.join(root, 'tests');
+  let hasPythonTests = false;
+  if (exists(testsDir)) {
+    try {
+      if (fs.statSync(testsDir).isDirectory()) {
+        for (const file of walk(testsDir)) { if (/\.py$/i.test(file)) { hasPythonTests = true; break; } }
+      }
+    } catch {}
+  }
+  if (exists(path.join(root, 'pyproject.toml')) || exists(path.join(root, 'setup.py')) || hasPythonTests) {
+    tasks.push({ name: 'test:python', cmd: 'pytest -q', runtime: 'python', optional: true });
   }
   // (3) Go: go.mod 존재 시 go test ./...
   if (exists(path.join(root, 'go.mod'))) {
@@ -23268,7 +23338,7 @@ function verifyCodeCmd(root) {
     const start = Date.now();
     // 1.9.150: runCommandSafe — cwd jail + env scrub + observability 자동 (shell:true 유지 — npm/pytest 호환)
     // 1.9.299 (UR-0039): scrubSecrets — 신뢰 못 할 워크스페이스 test/build 스크립트에 publish 토큰/시크릿 노출 차단.
-    const r = runCommandSafe(t.cmd, [], { cwd: root, root, timeout: 5 * 60 * 1000, allowShell: true, scrubSecrets: true, kind: 'verify_code_task', label: `verify-${t.name}` });
+    const r = runCommandSafe(t.cmd, [], { cwd: root, root, timeout: 5 * 60 * 1000, allowShell: true, scrubSecrets: true, commandAllowList: VERIFY_CODE_RUNNER_ALLOW, kind: 'verify_code_task', label: `verify-${t.name}` });
     const dur = Date.now() - start;
     if (r.status === 0) ok(`${t.name} passed (${dur}ms)`);
     else if (t.optional && r.status === 127) warn(`${t.name} 스킵 (${t.cmd} 없음)`);
@@ -26025,6 +26095,9 @@ function _isCwdSafe(root, cwd) {
 }
 // basic 모드에서도 항상 허용하는 핵심 도구 (release/install 흐름 유지)
 const RUN_CORE_ALLOW = ['git', 'npm', 'npx', 'node', 'pnpm', 'yarn'];
+// verify-code가 파일 표식에서 직접 고정 생성하는 비-JS 러너만 호출 단위로 허용한다.
+// 전역 core allow에 넣지 않아 다른 명령 표면의 basic 권한은 넓어지지 않는다.
+const VERIFY_CODE_RUNNER_ALLOW = ['pytest', 'go', 'cargo'];
 // 1.18.1 (재실증 신규 P1): 명령 실행 권한 결정 — 순수 함수(테스트 가능). cwd jail 은 별도(여기서 판단 안 함).
 //   userAuthorized: 사용자가 명시적으로 입력한 명령(예: verify-claim --test-cmd "<명령>" 또는 config testCommand)
 //   → basic 모드 allowList 우회(명시 권한). 이전엔 coreAllow(JS 도구)만 허용해 --test-cmd "python ..." 가
@@ -26036,12 +26109,13 @@ function _isCommandPermitted(perms, cmdStr, opts) {
   const exec = perms.shell && perms.shell.exec !== false;
   if (exec) return true;  // extended/full 모드 (또는 exec:true)
   const allow = (perms.shell && perms.shell.allowList) || [];
+  const scopedAllow = Array.isArray(opts.commandAllowList) ? opts.commandAllowList : [];
   const first = String(cmdStr || '').trim().split(/\s+/)[0];
-  return RUN_CORE_ALLOW.includes(first) || allow.includes('*') || allow.includes(first);
+  return RUN_CORE_ALLOW.includes(first) || scopedAllow.includes(first) || allow.includes('*') || allow.includes(first);
 }
 
 function runCommandSafe(cmd, args, opts) {
-  // opts: { cwd, root, timeout, env, stdio, kind, label, allowShell, encoding, input, allowOutsideCwd, userAuthorized }
+  // opts: { cwd, root, timeout, env, stdio, kind, label, allowShell, encoding, input, allowOutsideCwd, userAuthorized, commandAllowList }
   opts = opts || {};
   const root = opts.root || opts.cwd || process.cwd();
   const cwd = opts.cwd || root;
@@ -30786,7 +30860,7 @@ module.exports = {
   // 1.9.289: shell-safe 인용 (Codex #3) — 단위 테스트
   _shellQuoteArg,
   // 1.18.1: 명령 실행 권한 결정 (재실증 신규 P1: --test-cmd 비-JS 인터프리터 거짓차단) — 단위 테스트
-  _isCommandPermitted, RUN_CORE_ALLOW, _uiLang, _tx,
+  _isCommandPermitted, RUN_CORE_ALLOW, VERIFY_CODE_RUNNER_ALLOW, _hasSuccessfulTestRunEvidence, _uiLang, _tx,
   _loadEnvFile, _dotenvKeyAllowed, _scrubEnv,
   // 1.18.2: verify-claim 위장 스텁(빈 export 껍데기) 판정 — 단위 테스트
   _vcImplIsEmpty, _VC_EMPTY_SHELL_RE,

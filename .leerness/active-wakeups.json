@@ -156,10 +156,10 @@
       "expectedFireAt": "2026-08-26T03:02:32.130Z",
       "intervalMin": 25,
       "source": "release-sync-main",
-      "status": "pending",
+      "status": "missed",
       "fromVersion": "1.36.164",
       "registeredAt": "2026-08-26T02:37:32.139Z"
     }
   ],
-  "updatedAt": "2026-08-26T02:37:32.139Z"
+  "updatedAt": "2026-08-26T04:30:51.975Z"
 }
