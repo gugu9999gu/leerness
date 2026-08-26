@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-26T04:23:18.689Z
+Last generated: 2026-08-26T06:49:17.648Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -124,6 +124,7 @@ Last generated: 2026-08-26T04:23:18.689Z
 - T-0140 별도 클린룸에 패키징된 leerness와 leerness-gate를 설치해 가능한 모든 안전 CLI·게이트·통합 표면을 직접 실행하고 결함을 디버그 → next: 완료 — public product and Gate clean-room coverage verified
 - T-0141 npm 인증 권한을 복구해 leerness 1.36.163과 leerness-gate 0.0.3을 registry latest로 게시하고 설치본을 재검증 → next: 완료 — future publishes use credential-isolated exact-tarball path
 - T-0142 Windows Node 22 agents dispatch E2E fixture 안정화 . → next: 완료 — Windows agents dispatch fixture verified in 1.36.164 CI
+- T-0143 ox-alpha의 leerness v1.36.161 평가 보고서를 현재 1.36.164에서 보수적으로 재검증하고 확인된 다음 작업을 진행 → next: T-0144 commands --json 및 unknown flag 정합화
 
 ## In Progress
 - 없음
@@ -138,23 +139,6 @@ Last generated: 2026-08-26T04:23:18.689Z
 
 ## Verification
 ```
-## 2026-08-23 — T-0122 validation (UTC)
-
-- `npm run lint` — PASS.
-- `node scripts/release-bump-probe.js` — PASS; 자체 패키지 버전 표면 동기화와 일반 패키지 격리를 확인.
-- `node scripts/e2e-core.js` — PASS (42/42).
-
-## 2026-08-24 — T-0126 project brief grounding
-
-- Project-brief structure assertion — PASS: Project, Purpose, Users, Success Criteria, Boundaries 5개 섹션 존재; 초기 자리표시자 0개.
-- `node bin/leerness.js audit . --json` — PASS: healthy, failures 0. 기존 design-system/reuse-map/orphan-guard/milestone-link 경고 4건만 유지.
-- `node bin/leerness.js check . --json` — PASS: healthy, issues 0.
-- `node bin/leerness.js verify-claim T-0126 --path . --json` — PASS after evidence normalization. 첫 실행은 `README.md/package.json/docs/...`를 한 경로로 기록한 증거 형식 오류를 정확히 거부했고, 파일별 경로와 Command/Exit 로그로 수정 후 통과.
-- `node bin/leerness.js scan secrets . --json` — PASS: unacknowledged 0; 승인된 기존 테스트 패턴 16건. `encoding check` — PASS: findings 0.
-- `git diff --check` — PASS. `drift check` — PASS: score 0.
-- `lazy detect . --json` — KNOWN FAIL: 이번 변경과 무관한 기존 T-0031 evidence 누락 및 README.ko.md의 설명 문구 TODO 오탐/미추적 2건.
-- Manual Codex cross-review — README/package metadata/CLI source/interoperability/clean-room 한계와 문구를 대조. `verify-claim`의 기본 done evidence 정책과 명시적 `--lenient` 완화를 소스에서 재확인해 “증거 없는 완료 차단” 기준을 유지했고, 휴리스틱이 의미적 정확성을 증명하지 않는다는 경계를 명시함.
-
 ## 2026-08-24 — T-0127 / T-0001 context map grounding
 
 - Context-map contract assertion — PASS: 실행 흐름·소스/런타임·상태·검증/배포·변경 라우팅 섹션, package entry, 핵심 앵커를 확인했고 초기 `src/**`/`tests/**` 자리표시자 행은 0개.
@@ -167,6 +151,22 @@ Last generated: 2026-08-26T04:23:18.689Z
 - `lazy detect . --json` — KNOWN FAIL: 이번 변경과 무관한 기존 T-0031 evidence 누락 및 README.ko.md 설명 문구 TODO 오탐/미추적 2건.
 - Manual Codex cross-review — `state-integrity.js`를 순수 모듈로 오분류한 표현, 누락된 `session-presence.js`, 추적 파일 `.env.example`까지 포함할 수 있던 `.env*` 표기를 발견·재현해 읽기 전용 integrity 경계, 세션 모듈, 정확한 ignore 패턴으로 수정. 에이전트별 진입도 “CLI와 MCP 모두”가 아닌 “CLI 또는 MCP”로 정밀화.
 - Scope note — 이 라운드는 하네스 문서/상태만 변경했으므로 애플리케이션 테스트 스위트나 배포는 실행하지 않음.
+
+## 2026-08-26 — T-0143 cross-runtime verify-code/gate regression
+
+Task: T-0143
+Command: npm test
+Exit: 0
+Note: selftest 353/353, core behavior 46/46, handoff 75/75 (parallel 8), command surface 40/40, installed cleanroom 10/10, full E2E 467/467. Python/Go/Rust, Node+Python 혼합, npm placeholder, JS-only tests 디렉터리, 실패 후 성공 회복, lazy/gate 증거 판정을 전용 probe로 검증했고 Node 18에서도 통과. 독립 리뷰 결과 P0/P1 없음.
+Artifacts: bin/leerness.js, scripts/verify-code-cross-runtime-probe.js, package.json, CHANGELOG.md, README.md
+
+## 2026-08-26 — T-0143 release verification
+
+Task: T-0143
+Command: npm view leerness@1.36.165 version dist.integrity dist.shasum; gh release view v1.36.165; node pipeline/verify-deploy.cjs --url https://leerness.com --expect 1.36.165; npm test; npm run test:installed; npm run deploy:dry-run
+Exit: 0
+Note: npm latest/exact는 1.36.165이고 registry integrity는 sha512-6WtoXVVRKfLEfneeXWWZ+mwll45YPgk0wpQM0pLiU3LJJ5tQV9tfasjFMhstrWjcVWOdMMUFbYnM/DpwEHQuZg==, shasum은 c33c15759c32954f626c38b2783f031159ce88af. GitHub release v1.36.165는 commit 8a388c7edc91d7f16b690b03391a3a0ed909dfa5를 가리킨다. leerness.com production은 1.36.165를 반환한다. leerness-gate 0.0.3은 92/92 단위 테스트, 12/12 설치 클린룸, Worker dry-run, leerness verify-code/check/lazy/gate/secret/encoding 및 1.36.165 migration audit(willChange 0)를 통과했다. 전역 설치·사용자 로컬 설치·npx exact 실행도 모두 1.36.165로 정합화했다.
+Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.165, https://www.npmjs.com/package/leerness/v/1.36.165, https://leerness.com/changelog/1.36.165/, ../leerness-gate/package.json
 ```
 
 ## Recommended Direction

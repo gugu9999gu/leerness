@@ -1,11 +1,11 @@
 {
-  "savedAt": "2026-08-26T02:37:32.136Z",
-  "nextRoundVersion": "next after 1.36.164",
-  "expectedFireAt": "2026-08-26T03:02:32.130Z",
+  "savedAt": "2026-08-26T06:38:33.919Z",
+  "nextRoundVersion": "next after 1.36.165",
+  "expectedFireAt": "2026-08-26T07:03:33.915Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.36.164",
+    "currentVersion": "1.36.165",
     "activeTaskId": null,
     "activeTaskRequest": null,
     "memorySurface": {
@@ -19,17 +19,17 @@
   "nextActions": [
     {
       "icon": "🧬",
-      "title": "stress-v211 마지막 갱신 2012h 전 — 새 stress test 작성 권장",
-      "command": "node _apps/leerness-stress/bin/stress-v212.js"
-    },
-    {
-      "icon": "🧬",
       "title": "stress-v211 마지막 갱신 2015h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js"
     },
     {
       "icon": "🧬",
       "title": "stress-v211 마지막 갱신 2016h 전 — 새 stress test 작성 권장",
+      "command": "node _apps/leerness-stress/bin/stress-v212.js"
+    },
+    {
+      "icon": "🧬",
+      "title": "stress-v211 마지막 갱신 2058h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js"
     }
   ],
