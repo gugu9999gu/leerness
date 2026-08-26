@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-25T12:41:41.705Z
+Last generated: 2026-08-26T04:23:18.689Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -96,6 +96,7 @@ Last generated: 2026-08-25T12:41:41.705Z
 - T-0099 e2e 미실행 명령 16종 잔여 — 이번 라운드가 requests/next-action/incident/brief/preview 경로를 덮었으므로 나머지(creds list|register|check|refresh · env check|sync|detect · wakeup-interval · workspace-dir · toggle · glossary · policy · path-setup · web|pc|lsp bridge · webhook serve · deploy auto · release sync-main)를 같은 방식으로 훑는다. 방법: (1) 커버리지 카운터에 다빈도 명령 대조군을 박고 수를 먼저 신뢰 가능하게 만든다 (2) 사용자 데이터/외부 입력을 쓰는 표면부터 (creds 가 최우선 — 자격증명 표면인데 e2e 실행 0회) (3) 발견은 인자 단위로 스윕한다(1.36.113 에서 같은 문장의 옆 인자를 놓쳤다). → next: 16개 잔여 CLI 명령군을 격리 픽스처·dry-run·권한거부로 전수 실행
 - T-0100 개행 주입 위조 클래스 스윕 (1.36.113 완료분) → next: 다음 액션 작성
 - T-0102 방치 명령 클래스 스윕 (1.36.114 완료분) → next: 다음 액션 작성
+- T-0107 LEERNESS_WORKSPACE_DIR / migrate-workspace-dir 스플릿브레인: 해석기(_workspaceDirName) 소비처 9곳 vs '.leerness' 하드코딩 299곳(bin 261+lib 38). env 를 켜면 init 은 .leerness 를 만들고 _isInitialized 는 .leerness 를 보다 AGENTS.md 폴백으로 가려진다(실측: selftest 339/343). migrate-workspace-dir 는 copy 라 마이그레이션 후 .leerness 가 죽은 사본이 되어 '마이그레이션 성공' 이 거짓 주장이 된다. 조사→결정(전면 배선 / 기능 제거 / 불가 시 명시적 실패) 필요. → next: 완료 — .leerness canonical workspace migration and public release verified
 - T-0114 T-0112 진행분(1.36.134 워킹트리, e2e·게이트 미반영): 검수 P1 5건 중 4건 수정+실측 확인 — (a)bare 저장소 거부 (b)설치 중 사용자 기존 훅 실행 0회(훅에 LEERNESS_ENFORCE_PROBE 조기종료 추가) (c)sh 부재를 성공이라 하지 않음(verify_unavailable, --skip-verify opt-out) (d)실패 시 롤백+enforce.json 미생성(초기 쓰기 제거). 남은 것: (e)하위 디렉토리 설치가 실제 커밋에서 우회되는 문제 미수정 · 실패 코드가 'error' 로 뭉개짐 · 이 4건에 대한 e2e 단언 미작성 · 게이트 재실행 필요 · 재검수 필요. → next: 후속: Windows 셸에서 enforce 자체검증/CI 계약을 안정화
 - T-0115 동시성 P1-A 무락 RMW 4종(실측·대조군 확보): roles set/unset/suggest --apply (agent-roles.json, 4동시 28.8% 유실·16동시 11~15/16) · creds register/refresh (credentials.local.json, 2동시 17.5%) · decision drop/lesson drop/team remove/memory restore (드롭이 락 밖이라 **락 안에서 커밋된 add 를 파괴** 1~3/8) · _bumpUsage(bin:22224, usage-stats.json — 모든 명령이 공유하는 유일한 파일, 2동시부터 38~46% 유실). 전부 exit 0·경고 0·JSON 손상 0(조용한 lost-update). 대조군: 락 무력화 복사본 16동시 task add 9~11/16 vs 락 켜면 16/16, 24동시 24/24 고유 ID. → next: 후속: release bump가 --patch 플래그를 경고 없이 수용하고 버전 표면을 함께 동기화하는지 회귀로 보강
 - T-0116 동시성 P1-B 완료 게이트가 뒤집힌다: .leerness/state.json currentRunId 전역 단일 슬롯 — 8 sub-agent 가 start→record→verify 하면 오귀속 7/8. 판별 케이스: A 가 실제 작업+테스트하고 verify pass 를 불렀는데 증거가 B 의 run 에 붙어 **B 가 completion_claim_allowed:true, 실제 작업자 A 가 false**. 락으로 못 고침(세션 스코프 부재) · run 레코드에 세션 필드가 없어 사후 추적 불가. 1.36.132 세션 주소 재사용 검토. → next: 다음 액션 작성
@@ -119,6 +120,10 @@ Last generated: 2026-08-25T12:41:41.705Z
 - T-0136 handoff를 동시 세션 안전한 읽기 경로로 분리하고 Cursor 주소·버전 skew·공용 추적파일 쓰기를 함께 해결 → next: 릴리스 승인 시 GitHub/npm/사이트 배포를 검증하고, Cursor 작업이 멈춘 뒤 hive-analytics에서 leerness update --yes 및 adapter cursor 실증
 - T-0137 v1.36.154를 GitHub·npm·leerness.com에 배포하고 각 게시본을 재검증하며 R-0002 자동 배포 룰을 적용 → next: 후속 라운드: GitHub Actions Node 20 런타임 경고와 npm publish shell:true 폐기 경고를 재현·수정하고 R-0001/R-0002 게이트로 다음 버전을 출하
 - T-0138 GitHub Actions Node 20 런타임 경고와 npm publish shell:true 폐기 경고를 재현·수정하고 R-0001/R-0002 게이트로 다음 버전을 출하 → next: T-0139에서 역사적 full-E2E 픽스처의 DEP0190 경고를 별도로 제거하고 비릴리스 spawn 표면을 감사
+- T-0139 전체 E2E의 역사적 shell:true 테스트 픽스처 DEP0190 경고 제거 및 비릴리스 npm·diagnostics spawn 표면 전수 감사 → next: 완료 — portable process and DEP0190 regression gates verified
+- T-0140 별도 클린룸에 패키징된 leerness와 leerness-gate를 설치해 가능한 모든 안전 CLI·게이트·통합 표면을 직접 실행하고 결함을 디버그 → next: 완료 — public product and Gate clean-room coverage verified
+- T-0141 npm 인증 권한을 복구해 leerness 1.36.163과 leerness-gate 0.0.3을 registry latest로 게시하고 설치본을 재검증 → next: 완료 — future publishes use credential-isolated exact-tarball path
+- T-0142 Windows Node 22 agents dispatch E2E fixture 안정화 . → next: 완료 — Windows agents dispatch fixture verified in 1.36.164 CI
 
 ## In Progress
 - 없음

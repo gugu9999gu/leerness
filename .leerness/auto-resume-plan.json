@@ -1,11 +1,11 @@
 {
-  "savedAt": "2026-08-25T04:47:43.244Z",
-  "nextRoundVersion": "next after 1.36.160",
-  "expectedFireAt": "2026-08-25T05:04:46.419Z",
+  "savedAt": "2026-08-26T02:37:32.136Z",
+  "nextRoundVersion": "next after 1.36.164",
+  "expectedFireAt": "2026-08-26T03:02:32.130Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.36.160",
+    "currentVersion": "1.36.164",
     "activeTaskId": null,
     "activeTaskRequest": null,
     "memorySurface": {
@@ -18,18 +18,18 @@
   },
   "nextActions": [
     {
-      "icon": "🛡",
-      "title": "과거 실패 회피 — lessons.md 에 \"leerness\" 관련 1건",
-      "command": "leerness lessons --auto --path ."
-    },
-    {
-      "icon": "💭",
-      "title": "decisions.md \"leerness\" 관련 결정 7건 영향 확인",
-      "command": "leerness decision list --filter \"leerness\""
+      "icon": "🧬",
+      "title": "stress-v211 마지막 갱신 2012h 전 — 새 stress test 작성 권장",
+      "command": "node _apps/leerness-stress/bin/stress-v212.js"
     },
     {
       "icon": "🧬",
-      "title": "stress-v211 마지막 갱신 2035h 전 — 새 stress test 작성 권장",
+      "title": "stress-v211 마지막 갱신 2015h 전 — 새 stress test 작성 권장",
+      "command": "node _apps/leerness-stress/bin/stress-v212.js"
+    },
+    {
+      "icon": "🧬",
+      "title": "stress-v211 마지막 갱신 2016h 전 — 새 stress test 작성 권장",
       "command": "node _apps/leerness-stress/bin/stress-v212.js"
     }
   ],
