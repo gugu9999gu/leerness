@@ -85,6 +85,18 @@ function parseAgentProbeOutput(value) {
   try { return JSON.parse(line); } catch { return null; }
 }
 
+function comparableFsPath(value) {
+  let resolved;
+  try { resolved = fs.realpathSync.native(String(value)); }
+  catch { resolved = path.resolve(String(value)); }
+  const normalized = path.normalize(resolved);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function sameFsPath(left, right) {
+  return comparableFsPath(left) === comparableFsPath(right);
+}
+
 try {
   const warningSuppressions = [
     { NODE_OPTIONS: '--no-deprecation' },
@@ -258,7 +270,7 @@ try {
     try { nativeNpmResult = JSON.parse(String(nativeNpmChild.stdout || '')); } catch {}
     try { nativeNpmCall = JSON.parse(fs.readFileSync(nativeNpmLog, 'utf8')); } catch {}
     if (nativeNpmChild.status !== 0 || !nativeNpmResult || nativeNpmResult.status !== 0
-        || !nativeNpmCall || path.normalize(nativeNpmCall.execPath).toLowerCase() !== path.normalize(path.join(nativeNpmDir, 'npm.exe')).toLowerCase()
+        || !nativeNpmCall || !sameFsPath(nativeNpmCall.execPath, path.join(nativeNpmDir, 'npm.exe'))
         || JSON.stringify(nativeNpmCall.argv) !== JSON.stringify(['space value', 'amp&pipe|', '%NO_EXPAND%'])) {
       failures.push(`Windows native npm.exe PATH fallback/cwd-shadow 방어 실패: ${JSON.stringify({ child: nativeNpmChild.status, result: nativeNpmResult, call: nativeNpmCall, stderr: String(nativeNpmChild.stderr || '').slice(0, 300) })}`);
     }
@@ -540,8 +552,12 @@ try {
     const unsupportedResult = spawnPortableSync('unsupported-cmd-probe', hostileArgv, {
       env: portableEnv, cwd: sandbox, encoding: 'utf8', timeout: 30000,
     });
+    const unsupportedStderr = String(unsupportedResult.stderr || '');
     if (unsupportedLaunch.kind !== 'unsupported-shell-script' || unsupportedResult.status !== 126
-        || !String(unsupportedResult.stderr || '').includes(unsupportedCmd) || fs.existsSync(unsupportedMarker)) {
+        || !sameFsPath(unsupportedLaunch.source, unsupportedCmd)
+        || !unsupportedStderr.includes('unsupported Windows command shim')
+        || !unsupportedStderr.toLowerCase().includes(path.basename(unsupportedCmd).toLowerCase())
+        || fs.existsSync(unsupportedMarker)) {
       failures.push(`해석 불가 .cmd가 fail-closed하지 않음: ${JSON.stringify({ launch: unsupportedLaunch, status: unsupportedResult.status, error: unsupportedResult.error && unsupportedResult.error.code })}`);
     }
 
@@ -637,7 +653,7 @@ try {
     const nativeResult = spawnPortableSync('claude-native-probe', ['/?'], {
       env: portableEnv, cwd: sandbox, encoding: 'utf8', timeout: 30000,
     });
-    if (nativeLaunch.kind !== 'npm-native-shim' || nativeLaunch.file !== fakeNativeEntry || nativeResult.status !== 0) {
+    if (nativeLaunch.kind !== 'npm-native-shim' || !sameFsPath(nativeLaunch.file, fakeNativeEntry) || nativeResult.status !== 0) {
       failures.push(`Claude형 .exe npm shim 해석 실패: ${JSON.stringify({ launch: nativeLaunch, status: nativeResult.status, stderr: String(nativeResult.stderr || '').slice(0, 200) })}`);
     }
     if (fs.existsSync(fakeNativeMarker)) failures.push('Claude형 .exe npm shim이 cmd.exe로 실행됨');

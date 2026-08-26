@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.163 — 2026-08-26
+
+- GitHub CI에서 재현된 동시 최초 .harness→.leerness 마이그레이션의 stale snapshot 경쟁을 최신 상태 재검사로 수렴시켰습니다. Windows Node 24/26 런타임 probe는 8.3/긴 경로 별칭을 realpath 파일 동일성으로 판정하고 unsupported shim의 안정된 fail-closed 계약을 검증합니다.
+
 ## 1.36.162 — 2026-08-26
 
 - 기본 작업 디렉터리를 `.leerness/`로 전환하고 기존 `.harness/` 상태를 충돌 감지·백업·검증·롤백이 가능한 방식으로 자동 마이그레이션했습니다. 동시 세션 핸드오프 경로 격리, 설치형 클린룸, 소스 ratchet 검증도 함께 보강했습니다.
