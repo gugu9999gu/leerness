@@ -47,7 +47,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.165';
+const VERSION = '1.36.166';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -711,16 +711,56 @@ function _optSub(a) {
   if (/^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(v)) return undefined;   // 선행 구분자 path-like → 하위명령 아님
   return v;
 }
-function nonFlagArgs() {
+// 같은 이름이 route 에 따라 boolean/value 두 계약을 갖는 역사적 표면.
+//   update --check                  (boolean)
+//   referee add --check "command"   (value)
+//   preview serve --keep            (boolean)
+//   init/release cleanup --keep N   (value)
+// 전역 registry 하나로 arity 를 추측하면 정상 명령을 거부하거나 positional 값을 삼키므로,
+// 명령/하위명령이 확인된 뒤 두 번째 pass 에서만 좁게 override 한다.
+function _commandBooleanValueFlags(cmd, sub) {
+  const out = new Set();
+  if (cmd === 'update') out.add('--check');
+  if (cmd === 'preview' && sub === 'serve') out.add('--keep');
+  return out;
+}
+function _nonFlagArgsPass(booleanValueFlags = new Set()) {
   const out = [];
   const withValue = _VALUE_FLAGS;
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
-    if (x.startsWith('-')) { if (withValue.has(x) && a[i+1] && !a[i+1].startsWith('-')) i++; continue; }
+    if (x.startsWith('-')) {
+      const name = x.split('=')[0];
+      if (withValue.has(name) && !booleanValueFlags.has(name) && !x.includes('=') && a[i+1] && !a[i+1].startsWith('-')) i++;
+      continue;
+    }
     out.push(x);
   }
   return out;
+}
+function _commandSubHint(cmd) {
+  const raw = process.argv.slice(2);
+  const at = raw.indexOf(cmd);
+  if (at < 0) return undefined;
+  for (let i = at + 1; i < raw.length; i++) {
+    const token = raw[i];
+    if (token.startsWith('-')) {
+      const name = token.split('=')[0];
+      // preview 의 --keep 은 serve 를 알아야 boolean 임을 알 수 있고, serve 는 --keep 뒤에도 올 수 있다.
+      // 이 1개만 subcommand 탐색에서 provisional boolean 으로 보고 실제 arity 는 route 확정 후 검증한다.
+      const ambiguousBeforeSubcommand = cmd === 'preview' && name === '--keep';
+      if (!ambiguousBeforeSubcommand && _VALUE_FLAGS.has(name) && !token.includes('=') && raw[i + 1] && !raw[i + 1].startsWith('-')) i++;
+      continue;
+    }
+    return token;
+  }
+  return undefined;
+}
+function nonFlagArgs() {
+  const initial = _nonFlagArgsPass();
+  const overrides = _commandBooleanValueFlags(initial[0], _commandSubHint(initial[0]) || initial[1]);
+  return overrides.size ? _nonFlagArgsPass(overrides) : initial;
 }
 function argAll(name) {
   const out = []; const a = process.argv;
@@ -4823,7 +4863,7 @@ function _selfTestCases() {
     { name: 'CV-2/UR-0077: fetchNpmLatest 신형 Node win EINVAL 회피 (npm JS 진입점 + try/catch)', run: () => { if (typeof fetchNpmLatest !== 'function') return false; const src = read(__filename); const i = src.indexOf('function fetchNpmLatest'); if (i < 0) return false; const body = src.slice(i, i + 1600); return body.includes("spawnNpmSync(['view', pkg, 'version']") && /try \{/.test(body) && !/execFile\(|cmd\.exe \/d/.test(body); } },
     { name: 'CV-1/UR-0076: arg() --path=값 파싱 + _resolveRoot(--path>positional>cwd) 행위', run: () => { if (typeof _resolveRoot !== 'function') return false; const save = process.argv; try { process.argv = ['node', 'h', 'context', '--path=/tmp/eqform']; const eq = arg('--path', null) === '/tmp/eqform'; process.argv = ['node', 'h', 'context', 'X', '--path', '/tmp/flag']; const flagWins = _resolveRoot('X') === '/tmp/flag'; process.argv = ['node', 'h', 'context', '/tmp/pos']; const posWins = _resolveRoot('/tmp/pos') === '/tmp/pos'; process.argv = ['node', 'h', 'context']; const cwdFb = _resolveRoot(undefined) === process.cwd(); return eq && flagWins && posWins && cwdFb; } finally { process.argv = save; } } },
     { name: 'CV-4/UR-0079: _pruneArchives archive retention (최신 keep 유지, 오래된 prune) 행위', run: () => { if (typeof _pruneArchives !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_prune_')); try { const adir = path.join(tmp, '.leerness', 'archive'); fs.mkdirSync(adir, { recursive: true }); for (let i = 0; i < 5; i++) fs.mkdirSync(path.join(adir, 'leerness-1.9.' + i + '-stamp')); const pruned = _pruneArchives(tmp, 2); const left = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length; return pruned === 3 && left === 2; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
-    { name: 'CV-7/UR-0082: commands 카탈로그 + help 에 누락 명령군 등재 (표면 drift 가드)', run: () => { const src = read(__filename); const ci = src.indexOf('function commandsCmd'); const hi = src.indexOf('function help('); if (ci < 0 || hi < 0) return false; const cbody = src.slice(ci, ci + 8000); const hbody = src.slice(hi, hi + 7000); const must = ['install-safety', 'feature add', 'creds list', 'incident list', 'webhook serve', 'deploy auto', 'runs list', 'permissions list', 'whats-new', 'migrate audit']; return must.every(c => cbody.includes(c)) && hbody.includes('install-safety') && hbody.includes('feature add'); } },
+    { name: 'CV-7/UR-0082: commands 카탈로그 + help 에 누락 명령군 등재 (표면 drift 가드)', run: () => { const src = read(__filename); const ci = src.indexOf('function commandsCmd'); const hi = src.indexOf('function help('); if (ci < 0 || hi < 0) return false; const cbody = src.slice(ci, ci + 8000); const hbody = src.slice(hi, hi + 7000); const must = ['verify-code', 'contract verify', 'install-safety', 'feature add', 'creds list', 'incident list', 'webhook serve', 'deploy auto', 'runs list', 'permissions list', 'whats-new', 'migrate audit']; return must.every(c => cbody.includes(c)) && hbody.includes('install-safety') && hbody.includes('feature add'); } },
     { name: 'UR-0083(4th외부평가 9.3): auto-update hook 비침투 (update --quiet 모드 + hook --check --quiet + 업그레이드)', run: () => { const src = read(__filename); const quietMode = /const quiet = !!opts\.quiet \|\| has\('--quiet'\)/.test(src); const hookQuiet = src.includes("command: 'leerness update --check --quiet'"); const upgrade = /includes\('leerness update --check'\) && !h\.command\.includes\('--quiet'\)/.test(src); return quietMode && hookQuiet && upgrade; } },
     { name: 'CV-6/UR-0081: 시크릿 스캐너 FP/FN — _isPlaceholderSecret + _looksSecretLike 행위', run: () => { if (typeof _isPlaceholderSecret !== 'function' || typeof _looksSecretLike !== 'function') return false; const fp = _isPlaceholderSecret('change-me') && _isPlaceholderSecret('your-api-key-here') && _isPlaceholderSecret('<token>') && _isPlaceholderSecret('') && !_isPlaceholderSecret('hunter2realpass'); const fn = _looksSecretLike('secret123') && _looksSecretLike('a'.repeat(24)) && !_looksSecretLike('processEnv') && !_looksSecretLike('reqBodyPassword'); return fp && fn; } },
     { name: 'UR-0025: _mergeLines/_mergeEnvLines 순수 코어 모듈 분리 + 행위 (1.9.367)', run: () => { if (typeof _mergeLines !== 'function' || typeof _mergeEnvLines !== 'function') return false; const m = require('../lib/pure-utils'); const moved = m._mergeLines === _mergeLines && m._mergeEnvLines === _mergeEnvLines; const ml = _mergeLines('a\n', ['a', 'b']) === 'a\nb\n'; const meKeep = _mergeEnvLines('FOO=keep\n', ['FOO=new']) === 'FOO=keep\n'; const meAdd = _mergeEnvLines('FOO=keep\n', ['BAR=add']).includes('BAR=add'); return moved && ml && meKeep && meAdd; } },
@@ -5755,7 +5795,7 @@ function _selfTestCases() {
     } },
     { name: '범용성 P2 (UR-0048): task update unknown flag 거부 + did-you-mean(인수인계 유실 차단) (1.17.5)', run: () => {
       const src = read(__filename);
-      const wired = src.includes('function _rejectUnknownFlags(allowed, usageHint)') && src.includes("'unknown_flag'") && src.includes("_rejectUnknownFlags(['--status', '--evidence', '--next', '--note']");
+      const wired = src.includes('function _rejectUnknownFlags(allowed, usageHint, options = {})') && src.includes("'unknown_flag'") && src.includes("_rejectUnknownFlags(['--status', '--evidence', '--next', '--note']");
       // did-you-mean prefix 로직: --next-action 은 --next 를 prefix 로 가짐
       const dymOk = '--next-action'.startsWith('--next');
       return wired && dymOk;
@@ -10481,21 +10521,24 @@ function _p0103FlagsOk() {
     const eqOk = pv2.includes('equals form title') && !pv2.includes('ZZEQ');
     const rtEq = R(['agents', 'route', '--tier=normal', 'fix the parser']);
     const eqRoute = !/비어 있|empty_task/.test((rtEq.stdout || '') + (rtEq.stderr || ''));
-    // ④ 동적 레지스트리 플래그(brief set 은 arg('--'+f.flag) 로 만든다)에 오탐 경고가 없어야 한다 — 판별 대조군 포함
+    // ④ 동적 레지스트리 플래그(brief set 은 arg('--'+f.flag) 로 만든다)에 오탐 실패가 없어야 한다 — 판별 대조군 포함
     const W2 = /알 수 없는 플래그|Unknown flag/;
-    const dynOk = !W2.test((R(['brief', 'set', '--intro', 'hello']).stderr) || '')
-      && W2.test((R(['brief', 'set', '--introo', 'x']).stderr) || '');
-    // ⑤ 오타 가시성 — 판별 대조군: 실재 플래그는 조용하고, 없는 플래그만 경고한다.
+    const dynGood = R(['brief', 'set', '--intro', 'hello']);
+    const dynBad = R(['brief', 'set', '--introo', 'x']);
+    const dynOk = !W2.test((dynGood.stdout || '') + (dynGood.stderr || ''))
+      && dynBad.status !== 0 && W2.test((dynBad.stdout || '') + (dynBad.stderr || ''));
+    // ⑤ 오타 fail-closed — 판별 대조군: 실재 플래그는 조용하고, 없는 플래그만 구조화 실패한다.
     const good = R(['pulse', '--json']);
     const typo = R(['pulse', '--json', '--nosuchflagzz']);
     const quietOnReal = !/알 수 없는 플래그|Unknown flag/.test(good.stderr || '');
     // 프로젝트가 OS locale 에 따라 en 으로 초기화돼도 같은 계약을 검증한다.
     // 경고 정규식은 바로 위의 ko/en 공용 단일출처를 재사용해 CI locale 에 종속되지 않게 한다.
-    const warnsOnTypo = W2.test(typo.stderr || '') && (typo.stderr || '').includes('--nosuchflagzz');
-    // 경고는 stderr 전용 — stdout(기계 소비자) 은 오염되지 않는다
-    const stdoutClean = !/알 수 없는 플래그|Unknown flag/.test(typo.stdout || '');
-    let jsonStillValid = false; try { JSON.parse((typo.stdout || '').trim()); jsonStillValid = true; } catch { jsonStillValid = false; }
-    return titleClean && pathClean && eqOk && eqRoute && dynOk && quietOnReal && warnsOnTypo && stdoutClean && jsonStillValid;
+    let typoJson = null; try { typoJson = JSON.parse((typo.stdout || '').trim()); } catch { typoJson = null; }
+    const rejectsTypo = typo.status !== 0 && typoJson?.code === 'unknown_flag'
+      && String(typoJson?.error || '').includes('--nosuchflagzz');
+    // JSON 오류는 stdout 단일 객체, stderr 무오염이다.
+    const stderrClean = !(typo.stderr || '').trim();
+    return titleClean && pathClean && eqOk && eqRoute && dynOk && quietOnReal && rejectsTypo && stderrClean;
   } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
 }
 // 1.36.102 (명령 표면 감사 P1 2건): 회귀 가드.
@@ -10925,6 +10968,8 @@ function commandsCmd(root) {
       { cmd: 'encoding check [path]', desc: '인코딩 검증', descEn: 'encoding verification' },
       { cmd: 'lazy detect [path] [--json]', desc: '게으른 작업 감지 (1.9.101)', descEn: 'detect lazy/incomplete work (1.9.101)' },
       { cmd: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<명령>"] [--strict-claims] [--require-evidence]', cmdEn: 'verify-claim <T-ID|--all> [--run-tests] [--test-cmd "<command>"] [--strict-claims] [--require-evidence]', desc: '주장 검증 (1.9.18~26) — --all: 모든 done 주장 일괄 검증(CI·스케일, 1.33.2) · --require-evidence: done 주장에 파일+테스트 근거 강제 (1.9.287) · --test-cmd: 비-JS 테스트 명령 (1.17.2)', descEn: 'verify a claim (1.9.18~26) — --all: verify every done claim at once (CI/scale, 1.33.2) · --require-evidence: require file + test evidence on done claims (1.9.287) · --test-cmd: non-JS test command (1.17.2)' },
+      { cmd: 'verify-code [path] [--build] [--bench] [--strict]', desc: '프로젝트 테스트·린트·타입검사 자동 감지 실행 + 검증 증거 기록', descEn: 'auto-detect and run project tests/lint/typecheck, then record verification evidence' },
+      { cmd: 'contract verify <spec.md> <impl.js> [--allow-empty] [--json]', desc: '명세의 함수·필드 선언과 구현 export 정적 대조', descEn: 'statically compare functions and fields declared in a spec with implementation exports' },
       { cmd: `lens [${_lensDomainList()}] [--json]`, desc: '분야별 자기질문 품질 렌즈 + 분야간 인과관계 (1.18.3 · database/contract/recovery/observability 는 심화, axes 는 8축 경량 점검)', descEn: 'per-domain self-question quality lenses + cross-domain causality (1.18.3 · database/contract/recovery/observability are deep dives, axes is a light 8-axis check)' },
       // 1.36.101 (명령 표면 감사): 1.36.98 에서 디스패처에만 붙이고 commands/--help 에 등재하지 않아 '있는데 안 보이는' 명령이었다.
       { cmd: 'library [show|page] [path] [--json] [--ai]', desc: '재사용 인벤토리 — 컴포넌트·디자인 토큰을 저장소에서 추출. page: 오프라인 단일 HTML · --ai: 에이전트용 압축 JSON (1.36.98 P-0013)', descEn: 'reuse inventory — extracts components and design tokens from the repo. page: offline single HTML · --ai: compact JSON for agents (1.36.98 P-0013)' },
@@ -14473,14 +14518,124 @@ function taskAdd(root, text) {
 // 1.17.5 (UR-0048, 5축 실증 P2): 모르는 옵션 조용히 무시 차단 — `task update --next-action "x"` 처럼 오타/미존재 플래그가
 //   "✓ task updated" 와 함께 값을 버려, 쓴 에이전트는 기록됐다고 믿고 다음 에이전트는 placeholder 를 받는(인수인계 유실) 최악의 실패 양식.
 //   prefix 기반 did-you-mean(--next-action → --next) + exit 1. 전역 플래그(--path/--json/--force/--lenient)는 항상 허용.
-function _rejectUnknownFlags(allowed, usageHint) {
-  const all = new Set([...allowed, '--path', '--json', '--force', '--lenient']);
-  const seen = process.argv.slice(2).filter(a => a.startsWith('--')).map(a => a.split('=')[0]);
+// T-0144: 명령별 검증은 options.globals 로 그 명령이 실제 지원하는 공통 플래그만 지정한다.
+//   기본값은 기존 task update 계약을 보존하고, exact 명령만 좁혀 과거의 묵시적 무시를 차단한다.
+function _rejectUnknownFlags(allowed, usageHint, options = {}) {
+  const globals = Array.isArray(options.globals) ? options.globals : ['--path', '--json', '--force', '--lenient'];
+  const all = new Set([...allowed, ...globals]);
+  const seen = _argvLongFlagNames();
   const unknown = [...new Set(seen.filter(f => !all.has(f)))];
   if (!unknown.length) return true;
   const dym = (u) => { const c = [...all].find(k => u.startsWith(k) || k.startsWith(u)); return c ? ` — 혹시 ${c}?` : ''; };
-  failJson(has('--json'), 'unknown_flag', `알 수 없는 옵션: ${unknown.map(u => u + dym(u)).join(', ')}  (지원: ${[...allowed].join(' ')}${usageHint ? ' · ' + usageHint : ''}) — 값이 조용히 버려지는 것을 방지하기 위해 거부`);
+  const detail = unknown.map(u => u + dym(u)).join(', ');
+  const supported = [...all].join(' ');
+  const en = _uiLang(process.cwd()) === 'en';
+  failJson(has('--json'), 'unknown_flag', en
+    ? `Unsupported option for this command: ${detail} (supported: ${supported}${usageHint ? ' · ' + usageHint : ''}) — rejected instead of silently discarding its value`
+    : `이 명령에서 지원하지 않는 옵션: ${detail} (지원: ${supported}${usageHint ? ' · ' + usageHint : ''}) — 값이 조용히 버려지는 것을 방지하기 위해 거부`);
   return false;
+}
+
+function _argvLongFlagNames() {
+  return [...new Set(process.argv.slice(2)
+    .filter(a => typeof a === 'string' && a.startsWith('--') && a !== '--')
+    .map(a => a.split('=')[0]))];
+}
+
+// T-0144: 모든 명령에서 이름 자체가 없는 플래그는 migration/usage/write 이전에 fail-closed.
+function _rejectUnregisteredFlags() {
+  const unknown = _argvLongFlagNames().filter(name => !_VALUE_FLAGS.has(name) && !_BOOL_FLAGS.has(name));
+  if (!unknown.length) return true;
+  const en = _uiLang(process.cwd()) === 'en';
+  const human = en
+    ? `Unknown flag: ${unknown.join(' ')} — no such flag in leerness. Its value could otherwise be absorbed into text or a path. Check: leerness --help`
+    : `알 수 없는 플래그: ${unknown.join(' ')} — leerness 에 없는 이름입니다. 값이 본문이나 경로 인자에 섞이지 않도록 거부했습니다. 확인: leerness --help`;
+  if (has('--json')) {
+    // JSON 본문 자체는 stdout 의 단일 문서다. 예전 경고 문구를 그대로 넣으면 소비자가 이를
+    // "JSON 앞에 섞인 warning" 으로 오인하므로 code를 단일출처로 두고 메시지는 구조화 용어를 쓴다.
+    failJson(true, 'unknown_flag', en
+      ? `Unregistered option: ${unknown.join(' ')} — rejected before its value could alter text or path arguments`
+      : `등록되지 않은 옵션: ${unknown.join(' ')} — 값이 본문이나 경로 인자에 섞이기 전에 거부했습니다`);
+  } else {
+    // 사람용 계약은 기존 stderr 가시성을 보존하되, T-0144부터 exit 1로 fail-closed 한다.
+    console.error('⚠ ' + human);
+    process.exitCode = 1;
+  }
+  return false;
+}
+
+// 알려진 플래그도 형태가 틀리면 소비자가 기본값으로 조용히 폴백할 수 있다.
+// `--strict=true`는 has('--strict')가 false이고, `--language --json`은 language 값이 비어도 둘 다 성공했다.
+function _rejectMalformedFlagForms(cmd, args) {
+  const raw = process.argv.slice(2);
+  const errors = [];
+  const valueChoices = { '--language': new Set(['auto', 'ko', 'en']) };
+  const commandBooleans = _commandBooleanValueFlags(cmd, args && args[1]);
+  for (let i = 0; i < raw.length; i++) {
+    const token = raw[i];
+    if (typeof token !== 'string' || !token.startsWith('--') || token === '--') continue;
+    const eqAt = token.indexOf('=');
+    const name = eqAt >= 0 ? token.slice(0, eqAt) : token;
+    const booleanHere = _BOOL_FLAGS.has(name) || commandBooleans.has(name);
+    if (booleanHere && eqAt >= 0) {
+      errors.push({ kind: 'boolean_value', name, token });
+      continue;
+    }
+    if (_VALUE_FLAGS.has(name) && !commandBooleans.has(name)) {
+      const missingEqualsValue = eqAt >= 0 && token.slice(eqAt + 1) === '';
+      const missingNextValue = eqAt < 0 && (raw[i + 1] == null || String(raw[i + 1]).startsWith('--'));
+      if (missingEqualsValue || missingNextValue) {
+        // gate 는 누락 referee 를 자체 check 배열(referee_missing_value)로 진단한다. 그 구조를
+        // migration 전에 보존하는 early read-only 경로가 main 에 있으므로 여기서 평탄화하지 않는다.
+        if (cmd === 'gate' && name === '--require-referee') continue;
+        errors.push({ kind: 'missing_value', name, token });
+      }
+      else if (valueChoices[name]) {
+        const value = eqAt >= 0 ? token.slice(eqAt + 1) : String(raw[i + 1]);
+        if (!valueChoices[name].has(value.toLowerCase())) errors.push({ kind: 'invalid_value', name, token, value, choices: [...valueChoices[name]] });
+      }
+    }
+  }
+  if (!errors.length) return true;
+  const onlyMissing = errors.every(e => e.kind === 'missing_value');
+  const onlyInvalidValue = errors.every(e => e.kind === 'invalid_value');
+  const en = _uiLang(process.cwd()) === 'en';
+  const detail = errors.map(e => {
+    if (e.kind === 'missing_value') {
+      if (e.name === '--path') return en
+        ? '--path was given without a value (see command usage)'
+        : '--path 에 값이 없습니다 (명령 사용법 확인)';
+      return `${e.name} (${en ? 'value required; see command usage' : '값 필요; 명령 사용법 확인'})`;
+    }
+    if (e.kind === 'invalid_value') return `${e.name}=${e.value} (${en ? 'choose' : '허용값'}: ${e.choices.join('|')})`;
+    return `${e.token} (${en ? `boolean flag; use ${e.name}` : `부울 플래그 — ${e.name} 형태로 사용`})`;
+  }).join(', ');
+  const code = onlyMissing ? 'missing_flag_value' : (onlyInvalidValue ? 'invalid_flag_value' : 'invalid_flag_syntax');
+  failJson(has('--json'), code, en
+    ? `Invalid flag syntax: ${detail}`
+    : `잘못된 플래그 형식: ${detail}`);
+  return false;
+}
+
+// 전역 registry는 "값을 갖는가"만 답한다. 아래 audit 완료 route는 현재 명령이 그 플래그를
+// 실제 소비하는지도 검사한다. 확인하지 않은 97개 표면을 추측 allowlist로 막지 않고 검증된 route부터 확장한다.
+// --path 는 기존 공용 호출 래퍼가 모든 명령에 붙이는 호환 플래그다. 명령이 별도 positional 파일을
+// 쓰더라도 이를 거부하면 정상 호출을 false-BLOCK 하므로 공통으로 보존한다.
+const _COMMON_COMMAND_FLAGS = ['--language', '--no-stale-check', '--path'];
+const _STRICT_COMMAND_FLAGS = {
+  commands: { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'commands [--json] [--language en|ko] [--path <path>]' },
+  lens: { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'lens [domain] [--json]' },
+  about: { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'about [--json]' },
+  identity: { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'identity [--json]' },
+  gate: { allowed: ['--claims', '--require-referee'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'gate [path] [--claims] [--require-referee <id>] [--json]' },
+  'verify-code': { allowed: ['--build', '--bench', '--strict'], globals: [..._COMMON_COMMAND_FLAGS], usage: 'verify-code [path] [--build] [--bench] [--strict]' },
+  'contract verify': { allowed: ['--allow-empty'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'contract verify <spec.md> <impl.js> [--allow-empty] [--json]' },
+};
+function _validateCommandFlags(cmd, args) {
+  const route = cmd === 'contract' && args[1] === 'verify' ? 'contract verify' : cmd;
+  const cfg = _STRICT_COMMAND_FLAGS[route];
+  if (!cfg) return true;
+  return _rejectUnknownFlags(cfg.allowed, cfg.usage, { globals: cfg.globals });
 }
 
 function taskUpdate(root, id) {
@@ -29672,35 +29827,13 @@ async function main() {
     return log(VERSION);
   }
   if (has('--help') || has('-h')) return help();
-  if (cmd !== 'migrate-workspace-dir' && !_guardLinkedWorkspaceTargets(args)) return;
-  if (!_autoMigrateLegacyWorkspace(args, cmd)) return;
-  // 1.36.144 (T-0117, 전수 실측): `--dry-run` 을 받았으면 쓰기를 막는다 — 구현한 명령은 애초에 안 쓰므로
-  //   영향이 없고, 무시하던 명령은 첫 쓰기에서 멈춰 **아무것도 바꾸지 않은 채** 사유를 말한다.
-  if (has('--dry-run')) { setDryRunGuard(true); try { require('../lib/git').setGitDryRun(true); } catch {} }
-  // 1.36.103: 실재하지 않는 플래그(오타)를 조용히 삼키지 않는다.
-  //   값-플래그 미등록 45종은 _VALUE_FLAGS 등록으로 닫았지만, 사용자 오타(--prio, --resaon)는 여전히
-  //   그 값이 본문에 붙는다(실측: `decision add "use redis" --resaon faster` → 저장된 제목 "use redis faster").
-  //   파싱 기본값을 뒤집으면 미분류 부울 리터럴 쪽에서 positional 을 삼키는 새 회귀가 나므로, 동작 대신
-  //   가시성을 준다 — stderr 로만 알리고 stdout/--json/exit code 는 건드리지 않는다(기계 소비자 무영향).
-  {
-    const _unknownFlags = [];
-    for (const _tok of process.argv.slice(2)) {
-      if (typeof _tok !== 'string' || !_tok.startsWith('--') || _tok === '--') continue;
-      const _name = _tok.split('=')[0];
-      if (_VALUE_FLAGS.has(_name) || _BOOL_FLAGS.has(_name)) continue;
-      if (!_unknownFlags.includes(_name)) _unknownFlags.push(_name);
-    }
-    if (_unknownFlags.length) {
-      const _L = _uiLang(process.cwd());
-      console.error(_L === 'en'
-        ? `⚠ Unknown flag: ${_unknownFlags.join(' ')} — no such flag in leerness. Its value can be absorbed into the text or path argument. Check: leerness --help`
-        : `⚠ 알 수 없는 플래그: ${_unknownFlags.join(' ')} — leerness 에 없는 이름입니다. 그 값이 본문이나 경로 인자에 섞일 수 있습니다. 확인: leerness --help`);
-    }
-  }
-  // 1.36.103 (codex 검수 #9): --keep 은 소비처가 둘인데 한쪽(release cleanup)은 거부하고 다른 쪽(아카이브 retention)은
-  //   조용히 기본값 10 이 됐다 — `init . --keep abc --json` 이 exit 0 + {ok:true} 로 끝났다.
-  //   "준 값을 조용히 바꾸지 않는다" 를 소비처마다 반복하지 않고 진입점 한 곳에서 강제한다.
-  {
+  // 입력 오류는 자동 legacy migration·usage 기록보다 먼저 거부해야 실패 호출이 상태를 바꾸지 않는다.
+  if (!_rejectUnregisteredFlags()) return;
+  if (!_rejectMalformedFlagForms(cmd, args)) return;
+  if (!_validateCommandFlags(cmd, args)) return;
+  // 값이 존재하지만 의미가 잘못된 --keep 도 legacy migration/write 전에 거부한다.
+  // preview serve 의 --keep 은 route별 boolean 계약이므로 숫자 검증 대상이 아니다.
+  if (!_commandBooleanValueFlags(cmd, args[1]).has('--keep')) {
     const _k = arg('--keep', null);
     if (_k !== null) {
       const _kn = Number(_k);
@@ -29713,6 +29846,14 @@ async function main() {
       }
     }
   }
+  if (cmd !== 'migrate-workspace-dir' && !_guardLinkedWorkspaceTargets(args)) return;
+  // gate 의 누락 referee 는 기존의 진단 가능한 checks[] 계약을 유지하되, 잘못된 호출이
+  // legacy workspace migration을 일으키기 전에 읽기전용으로 종료한다.
+  if (cmd === 'gate' && _argAllStrict('--require-referee').missing) return gate(arg('--path', args[1] || process.cwd()));
+  if (!_autoMigrateLegacyWorkspace(args, cmd)) return;
+  // 1.36.144 (T-0117, 전수 실측): `--dry-run` 을 받았으면 쓰기를 막는다 — 구현한 명령은 애초에 안 쓰므로
+  //   영향이 없고, 무시하던 명령은 첫 쓰기에서 멈춰 **아무것도 바꾸지 않은 채** 사유를 말한다.
+  if (has('--dry-run')) { setDryRunGuard(true); try { require('../lib/git').setGitDryRun(true); } catch {} }
   // 1.36.101 (명령 표면 감사): '없는 경로에 초록 보고' 클래스를 디스패처 한 곳에서 막는다.
   //   실측 — 32개 조사 대상 중 16개가 존재하지 않는 디렉토리에 exit 0 과 정상 보고를 냈다
   //   (pulse/round-history/milestones/session-resume 는 "✓ 비정상 종료 신호 없음 · R0 · 정상 운영 중" 까지 찍었다 — 오타가 안심 보고가 된다).
@@ -30448,12 +30589,9 @@ async function main() {
   // 1.36.51 (사용자 요청 UR-0061): 모호성 질문 + 미리보기 승인 워크플로
   if (cmd === 'clarify')                           return _clar.clarifyCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')).join(' '), { has });
   if (cmd === 'preview') {
-    // 미지 플래그(--design/--features/--note)의 값이 positional 로 새는 것 차단 — 원시 argv 에서 플래그+값 스킵 (1.36.49 release note 패턴)
-    const _pvRaw = process.argv.slice(2); const _pvI = _pvRaw.indexOf('preview'); const _pvToks = [];
-    for (let i = _pvI + 1; i < _pvRaw.length && _pvI >= 0; i++) {
-      if (_pvRaw[i].startsWith('--')) { if (!_pvRaw[i].includes('=') && _VALUE_FLAGS.has(_pvRaw[i]) && _pvRaw[i + 1]) i++; continue; }   // 1.36.75 (검수 #2): --mockup 값이 제목에 흡수되던 것. 1.36.103: 인라인 목록 → _VALUE_FLAGS (--select 등이 제목에 붙던 것) + 등호형은 다음 토큰을 먹지 않음(codex 검수 #5 재현)
-      _pvToks.push(_pvRaw[i]);
-    }
+    // 전역 2-pass 파서가 command별 arity까지 반영한 positional 단일출처다.
+    // preview 전용 raw 재파싱은 --keep 을 다시 value로 오인해 뒤의 P-ID를 삼켰다(T-0144 교차검토).
+    const _pvToks = args.slice(1);
     // 1.36.80 (UR-0067): 라이브 미리보기 — serve(로컬 서버) / mode(self|project) 는 별도 모듈로 위임
     const _pvRoot = arg('--path', process.cwd());
     if (_pvToks[0] === 'serve') return _pvsrv.previewServeCmd(_pvRoot, _pvToks[1], { has, arg, previews: _clar._loadPreviews(_pvRoot) });

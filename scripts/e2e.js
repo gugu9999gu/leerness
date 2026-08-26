@@ -10630,7 +10630,7 @@ total++;
       { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV0 });
     const CASES = [
       ['task add', ['task', 'add', '락프로브']],
-      ['decision add', ['decision', 'add', '락프로브', '--why', 'x']],
+      ['decision add', ['decision', 'add', '락프로브', '--reason', 'x']],
       ['lesson save', ['lesson', 'save', '락프로브']],
       ['rule add', ['rule', 'add', '락프로브', '--trigger', 'every-session']],
       ['rule pause', ['rule', 'pause', 'R-0001'], ['rule', 'add', '씨앗룰', '--trigger', 'every-session']],
@@ -10640,7 +10640,7 @@ total++;
       ['creds refresh', ['creds', 'refresh', '락프로브'], d => SEED(d, ['creds', 'register', '락프로브', '--env-var', 'LOCK_PROBE'])],
       // team ID는 ASCII slug만 허용한다. 표시 라벨과 달리 seed/삭제 대상은 실제 유효 ID를 쓴다.
       ['team remove', ['team', 'remove', 'lock-probe'], d => SEED(d, ['team', 'add', 'lock-probe', '--name', 'lock'])],
-      ['memory restore decisions', ['memory', 'restore', 'decisions', '락프로브'], d => { SEED(d, ['decision', 'add', '락프로브', '--why', 'x']); SEED(d, ['decision', 'drop', '락프로브']); }],
+      ['memory restore decisions', ['memory', 'restore', 'decisions', '락프로브'], d => { SEED(d, ['decision', 'add', '락프로브', '--reason', 'x']); SEED(d, ['decision', 'drop', '락프로브']); }],
       ['memory restore lessons', ['memory', 'restore', 'lessons', '락프로브'], d => { SEED(d, ['lesson', 'save', '락프로브']); SEED(d, ['lesson', 'drop', '락프로브']); }],
       ['memory restore plan', ['memory', 'restore', 'plan', '락프로브'], d => { SEED(d, ['plan', 'add', '락프로브']); SEED(d, ['plan', 'remove', '락프로브']); }],
       ['plan drop', ['plan', 'drop', '락프로브']],
@@ -10940,7 +10940,7 @@ total++;
     const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
     // 상태를 조금 만든다 — 빈 프로젝트는 출력이 짧아 누출을 과소평가한다. 입력은 전부 영어.
     R(['task', 'add', 'Implement the parser']);
-    R(['decision', 'add', 'Use JSON storage', '--why', 'simplest']);
+    R(['decision', 'add', 'Use JSON storage', '--reason', 'simplest']);
     R(['plan', 'add', 'Ship v1']);
     const HANGUL = /[가-힣ㄱ-ㆎ]/;
     // 측정 대상은 **도구가 말하는 표면**이다. 사용자 데이터(프로젝트명·과거 기록)는 한국어여도 정상이므로
@@ -11255,7 +11255,7 @@ total++;
     const SURFACES = [
       ['requests',    (d, t) => R(d, ['requests', 'add', t]),                         (d) => [R(d, ['requests', 'list']), R(d, ['requests', 'audit'])]],
       ['task',        (d, t) => R(d, ['task', 'add', t]),                             (d) => [R(d, ['task', 'list'])]],
-      ['decision',    (d, t) => R(d, ['decision', 'add', t, '--why', 'r']),           (d) => [R(d, ['decision', 'list'])]],
+      ['decision',    (d, t) => R(d, ['decision', 'add', t, '--reason', 'r']),        (d) => [R(d, ['decision', 'list'])]],
       ['lesson',      (d, t) => R(d, ['lesson', 'save', t]),                          (d) => [R(d, ['lesson', 'list'])]],
       ['rule',        (d, t) => R(d, ['rule', 'add', t, '--trigger', 'every-round']), (d) => [R(d, ['rule', 'list'])]],
       ['plan',        (d, t) => R(d, ['plan', 'add', t]),                             (d) => [R(d, ['plan', 'list'])]],
@@ -11464,11 +11464,11 @@ total++;
       const SEED = [['requests', 'add', 'seed'], ['preview', 'add', 'seed'], ['toggle', 'set', 'gate', 'off'],
         ['creds', 'register', 'seed', '--env-var', 'K'], ['permissions', 'set', 'extended'], ['wakeup-interval', 'set', '900'],
         ['next-action', 'add', 'seed'], ['constraints', 'add', 'seed', '--constraint', 'k:v'],
-        ['decision', 'add', 'seed', '--why', 'r'], ['lesson', 'save', 'seed']];
+        ['decision', 'add', 'seed', '--reason', 'r'], ['lesson', 'save', 'seed']];
       const MUT = [['requests', 'add', 'x2'], ['preview', 'add', 'x2'], ['toggle', 'set', 'lens', 'off'],
         ['creds', 'register', 'x2', '--env-var', 'K2'], ['permissions', 'set', 'basic'], ['wakeup-interval', 'set', '1200'],
         ['next-action', 'add', 'x2'], ['constraints', 'add', 'x2', '--constraint', 'k:v'],
-        ['decision', 'add', 'x2', '--why', 'r'], ['lesson', 'save', 'x2'], ['task', 'add', 'x2'], ['plan', 'add', 'x2']];
+        ['decision', 'add', 'x2', '--reason', 'r'], ['lesson', 'save', 'x2'], ['task', 'add', 'x2'], ['plan', 'add', 'x2']];
       const DERIVED = new Set(['manifest.json', 'skills-lock.json', 'leerness-config.json', 'environment.json']);
       const seeded = () => { const d = mk(); for (const a of SEED) R(d, a); return d; };
       const base = seeded();

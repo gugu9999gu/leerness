@@ -104,9 +104,9 @@ async function race(name, config) {
   }));
   results.push(await race('memory-restore-decisions', {
     stallTarget: 'decisions.json',
-    seed: d => { run(d, ['decision', 'add', 'archived', '--why', 'test']); run(d, ['decision', 'drop', 'archived']); },
+    seed: d => { run(d, ['decision', 'add', 'archived', '--reason', 'test']); run(d, ['decision', 'drop', 'archived']); },
     first: ['memory', 'restore', 'decisions', 'archived'],
-    second: ['decision', 'add', 'survivor', '--why', 'test'],
+    second: ['decision', 'add', 'survivor', '--reason', 'test'],
     inspect: d => {
       const titles = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'decisions.json'), 'utf8')).map(item => item.title);
       return { titles, preserved: titles.some(title => title.includes('archived')) && titles.some(title => title.includes('survivor')) };

@@ -377,5 +377,36 @@
       ]
     },
     "previousGuardGap": "기존 행위 테스트는 Node 실행과 러너 단어 존재만 확인했고 fresh basic 권한의 비-Node 실행, 혼합 런타임 선택, 실패에서 성공으로의 최신 증거 전이, Node 18 실행을 함께 검증하지 않았다."
+  },
+  {
+    "id": "T-0144",
+    "repro": "node scripts/command-flags-probe.js",
+    "expectBad": "UNKNOWN_FLAGS_ACCEPTED",
+    "baseline": {
+      "at": "2026-08-26T07:01:48.126Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 1265
+    },
+    "rootCause": "전역 플래그 registry가 이름별 값 arity만 알고 현재 command consumer와 값 semantics를 검증하지 않았고, 입력 거부보다 legacy migration이 먼저 실행됐다.",
+    "siblingScope": {
+      "checked": [
+        "commands catalog",
+        "lens positional parsing",
+        "about and identity",
+        "contract verify",
+        "verify-code",
+        "value flag missing values",
+        "boolean equals forms",
+        "preview keep dual arity",
+        "update/referee check dual arity",
+        "gate referee write flags",
+        "legacy migration ordering",
+        "human and JSON diagnostics"
+      ]
+    },
+    "previousGuardGap": "기존 E2E는 정상 플래그와 일부 typo warning만 확인해 known-but-foreign flags, malformed equals/missing forms, failure-call no-write ordering을 함께 검증하지 않았다."
   }
 ]

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.166 — 2026-08-26
+
+- T-0144: unknown/foreign/malformed CLI 플래그를 migration과 쓰기 전에 exit 1로 거부하고 commands 카탈로그의 verify-code·contract verify 누락을 보완했습니다. 명령별 strict route와 값 누락·부울 equals·language 선택값 회귀 probe를 npm test에 추가했습니다.
+
 ## 1.36.165 — 2026-08-26
 
 - verify-code가 fresh basic 권한에서도 Python/Go/Rust 러너를 제한적으로 실행하고, 혼합 Node/Python 테스트와 npm placeholder를 올바르게 판별하며, 실패·차단된 최신 증거가 lazy/gate를 거짓 통과하지 않도록 수정 (T-0143)
