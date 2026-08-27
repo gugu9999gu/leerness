@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.172 — 2026-08-27
+
+- GitHub CI에서 재현된 동시 최초 .harness→.leerness 마이그레이션 TOCTOU를 수정했습니다. 라이브 마이그레이션이 두 번째 상태 검사와 충돌 스캔 전에 프로젝트 잠금을 획득하며, 실제 peer EEXIST와 잠금 해제 직전까지의 대기를 검증하는 결정론적 회귀를 fast/core/full 게이트에 연결했습니다.
+
 ## 1.36.171 — 2026-08-27
 
 - MCP handoff/session-close가 호출별 sessionKey로 presence를 등록·종료하고, Windows 환경변수 casing·일회성 marker·legacy case variant·손상 closedAt를 안전하게 처리하도록 개선했습니다. 전용 MCP presence 회귀 22/22와 전체 E2E 467/467를 추가·통과했습니다.

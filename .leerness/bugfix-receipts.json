@@ -550,5 +550,32 @@
       ]
     },
     "previousGuardGap": "기존 MCP/세션 검사는 상태 run 격리와 직접 CLI presence를 따로 확인했으며 MCP lifecycle 등록, invalid-key no-write, marker scope, 열린 peer 20건 초과, case-sensitive legacy migration을 한 경계에서 실행하지 않았다."
+  },
+  {
+    "id": "T-0154",
+    "repro": "node scripts/workspace-dir-lock-order-probe.js",
+    "expectBad": "WORKSPACE_LOCK_ORDER_RACE",
+    "baseline": {
+      "at": "2026-08-27T14:20:47.000Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 4987
+    },
+    "rootCause": "라이브 최초 마이그레이션이 두 번째 workspace 검사와 source/destination conflict preflight 뒤에 잠금을 획득해, 그 사이 peer가 만든 canonical 복사 중간상태를 사용자 작성 충돌로 오판했다",
+    "siblingScope": {
+      "checked": [
+        "명시 migrate-workspace-dir",
+        "일반 명령 자동 마이그레이션",
+        "Windows transient lock 재시도",
+        "lock timeout",
+        "dry-run 무쓰기",
+        "canonical no-op",
+        "foreign lock 보존",
+        "rollback"
+      ]
+    },
+    "previousGuardGap": "기존 6-process 검사는 스케줄러 우연에 의존해 로컬에서 12회 통과했지만 CI Linux/Windows에서 실패했다. 새 probe는 두 번째 canonical 검사에서 peer를 삽입하고 실제 EEXIST 및 잠금 해제 직전까지의 차단을 확인한다."
   }
 ]
