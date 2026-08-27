@@ -30,3 +30,12 @@ doNotStore:
 - Errors: Metadata/read/parse/target verification failure is fail-conservative and leaves candidates ungrouped.
 - Related files: `lib/diagnostics.js`, `lib/portable-process.js`, `scripts/which-shim-probe.js`, `scripts/release-runtime-probe.js`.
 - Test evidence ID: T-0146
+
+## Memory DELETE commands — `--json` single-document contract
+- Feature: `task drop`, `decision drop`, `lesson drop`, `rule remove`, and `plan remove` preserve their existing mutation/archive behavior while supporting machine-readable output.
+- Input: The existing task/rule ID or decision/lesson/milestone match target plus optional `--json`.
+- Output: Human mode keeps the existing success message. JSON mode writes exactly one success object to stdout, writes no human success text to stderr, and identifies the affected surface and removal count/status. Enabled auto-roadmap refreshes remain active but silent in JSON mode.
+- States: Mutation and archive/update side effects complete before the success document is emitted. `task drop` records dropped state; the other four surfaces remove active records while preserving their existing archive files.
+- Errors: Missing targets, missing stores, and unmatched records use structured nonzero `failJson` responses when `--json` is present.
+- Related files: `bin/leerness.js`, `scripts/e2e-core.js`.
+- Test evidence ID: T-0093

@@ -76,6 +76,19 @@ doNotStore:
 - [x] 게시 시점 GitHub main/tag/release가 구현 커밋 `d9a6f543b88749a7707aa821894d7b74af67cb9e`로 일치; 후속 세션 증거는 `[skip ci]` 커밋으로 분리
 - [x] npm latest/exact 1.36.172; integrity `sha512-8sQ9vISjRemmUXzMoJumGG2NNhb3kqm7eY3js70L2n3Hzvwg47Qli0Wv1B6tW/nQ/8utgIiDGd2/hkveNYXTJg==`, shasum `5071bb558eae9d31a801db23a66d937deda7ead7`, fresh-prefix 설치와 런타임 의존성 0 확인
 - [x] 사이트 커밋 `7feb5a7c0bb4d9550ec5c1e854679afa912c36fb`, Astro 696 pages, Cloudflare deployment `928f3211`; leerness.com production 루트와 v1.36.172 changelog HTTP 200 확인
-- [ ] GitHub Actions run 33093298655: Linux/Windows fast와 Ubuntu Node 18/20/22 전체 E2E 포함 9/13 성공, 실패 0; Windows Node 18/20/22/24 전체 E2E 실행 중
+- [x] GitHub Actions run 33093298655 전체 13/13 성공: Linux/Windows fast, release-runtime 4종, Ubuntu Node 18/20/22와 Windows Node 18/20/22/24 전체 E2E 통과
 - [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요
 - [x] 롤백 기준: npm exact `leerness@1.36.171` 재설치, GitHub tag `v1.36.171`, 직전 사이트 커밋 `98f559e`
+
+## 2026-08-28 — v1.36.173
+
+- [x] T-0093 공개본 1.36.172 격리 재현: Memory DELETE 5종 성공 `--json` 경로가 빈 stdout/사람용 stderr를 내는 동일 클래스 확인
+- [x] task/decision/lesson/rule/plan DELETE 성공·오류 JSON을 단일 문서/clean stderr로 통일하고, `onEveryChange` auto-roadmap을 JSON 모드에서 조용히 갱신
+- [x] 각 명령 전에 기존 `leerness.html`을 제거하는 비공허 회귀로 다섯 명령의 실제 재생성을 독립 검증
+- [x] 외부 Codex 1차 P2(자동 로드맵 stdout 혼입)와 재검토 P2 2건(rule remove 누락, 기존 산출물로 인한 허위 통과)을 모두 재현·수정
+- [x] `npm run test:fast` 13/13 및 전체 `npm test` 통과: lint 61 JS + 1 JSON, selftest 355/355, core 51/51, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467 (5,417초)
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.173 동기화
+- [x] Leerness verify/audit/check/lazy/gate/claim 게이트: gate 6/6, claims 122건 신규 실패 0, T-0093 strict claim 통과(scope creep 0)
+- [ ] GitHub main/tag/release, npm latest/exact/fresh install, leerness.com production 배포·검증
+- [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요
+- [x] 롤백 기준: npm exact `leerness@1.36.172` 재설치, GitHub tag `v1.36.172`, 직전 사이트 커밋 `7feb5a7`

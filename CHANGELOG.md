@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.173 — 2026-08-27
+
+- Memory DELETE 5종(task/decision/lesson/rule/plan)의 성공 --json 경로를 단일 JSON 문서·clean stderr 계약으로 통일했습니다. onEveryChange 자동 로드맵은 JSON 출력에 사람용 로그를 섞지 않으면서 다섯 명령 각각 갱신되며, 명령별 산출물 재생성과 외부 Codex P2 재현을 회귀로 고정했습니다.
+
 ## 1.36.172 — 2026-08-27
 
 - GitHub CI에서 재현된 동시 최초 .harness→.leerness 마이그레이션 TOCTOU를 수정했습니다. 라이브 마이그레이션이 두 번째 상태 검사와 충돌 스캔 전에 프로젝트 잠금을 획득하며, 실제 peer EEXIST와 잠금 해제 직전까지의 대기를 검증하는 결정론적 회귀를 fast/core/full 게이트에 연결했습니다.

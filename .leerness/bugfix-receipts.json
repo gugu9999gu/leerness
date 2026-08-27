@@ -577,5 +577,30 @@
       ]
     },
     "previousGuardGap": "기존 6-process 검사는 스케줄러 우연에 의존해 로컬에서 12회 통과했지만 CI Linux/Windows에서 실패했다. 새 probe는 두 번째 canonical 검사에서 peer를 삽입하고 실제 EEXIST 및 잠금 해제 직전까지의 차단을 확인한다."
+  },
+  {
+    "id": "T-0093",
+    "repro": "node -e \"const fs=require('fs'),os=require('os'),path=require('path'),cp=require('child_process');const cli=path.resolve('bin/leerness.js'),a=fs.mkdtempSync(path.join(os.tmpdir(),'leerness-t0093-')),p=path.join(a,'p'),e={...process.env,LEERNESS_NO_BANNER:'1',LEERNESS_OFFLINE:'1',LEERNESS_NO_AUTO_ROADMAP:'1'};fs.mkdirSync(p);const r=x=>cp.spawnSync(process.execPath,[cli,...x],{encoding:'utf8',env:e,timeout:180000});try{r(['init',p,'--yes','--no-stale-check']);const add=r(['task','add','json-contract-task','--path',p,'--json']),id=JSON.parse(add.stdout).id;r(['lesson','save','json-contract-lesson','--path',p]);const out=[r(['task','drop',id,'--path',p,'--json']),r(['lesson','drop','json-contract-lesson','--path',p,'--json'])],ok=out.every(x=>{try{JSON.parse((x.stdout||'').trim());return x.status===0&&!(x.stderr||'').trim()}catch{return false}});if(!ok){console.error('T0093_JSON_DROP_CONTRACT_BROKEN');process.exitCode=1}else console.log('T0093_JSON_DROP_CONTRACT_OK')}finally{const q=path.resolve(a),t=path.resolve(os.tmpdir());if(path.dirname(q)===t&&path.basename(q).startsWith('leerness-t0093-'))fs.rmSync(q,{recursive:true,force:true});else throw Error('unsafe cleanup')}\"",
+    "expectBad": "T0093_JSON_DROP_CONTRACT_BROKEN",
+    "baseline": {
+      "at": "2026-08-27T18:25:59.929Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 2858
+    },
+    "rootCause": "Memory DELETE 성공 핸들러가 --json 분기 없이 사람용 ok()를 호출했고, 후속 JSON 분기에서도 auto-roadmap의 사람용 stdout을 조용히 하지 않아 단일 문서 계약이 깨졌다.",
+    "siblingScope": {
+      "checked": [
+        "taskDrop",
+        "decisionDropCmd",
+        "lessonDropCmd",
+        "ruleRemove",
+        "planRemove",
+        "_autoRoadmap"
+      ]
+    },
+    "previousGuardGap": "기존 회귀는 오류 JSON과 일부 성공 JSON만 확인했고, DELETE 성공 5종 및 auto-roadmap onEveryChange 조건을 명령별 새 산출물로 관측하지 않아 빈 stdout, stderr 혼입, stale graph를 놓쳤다."
   }
 ]

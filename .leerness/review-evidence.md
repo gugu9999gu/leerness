@@ -119,3 +119,11 @@ Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.172, https:
 - `verify-claim T-0153 --strict-claims --json` — PASS after correcting the evidence boundary so the package verifier no longer interprets the site repository's `pipeline/verify-deploy.cjs` as a missing package file; evidence complete, claims consistent, git cross-check true, scope creep 0.
 - `verify-claim T-0154 --strict-claims --json` — PASS was recorded before implementation commit `d9a6f543b88749a7707aa821894d7b74af67cb9e`. A post-commit rerun correctly reports git-mismatch because the implementation files are no longer in the working diff; `--lenient` then passes file/test/log existence without misrepresenting that distinction.
 - GitHub Actions run 33093298655 partial close snapshot — 9/13 jobs success, 0 failure: Linux/Windows fast, all four release-runtime jobs, and Ubuntu Node 18/20/22 full E2E passed. Windows Node 18/20/22/24 full E2E remains in progress and is explicitly carried as the next action.
+
+## 2026-08-28 — T-0093 Memory DELETE JSON contract
+
+Task: T-0093 / T-0155
+Command: isolated published-v1.36.172 probes; auto-roadmap-on five-command probe; `npm run test:fast`; `npm test`; external `codex exec review --uncommitted --ephemeral`
+Exit: 0
+Note: 공개본 1.36.172의 task/decision/lesson/rule/plan DELETE 성공 경로는 mutation 뒤 단일 JSON을 내지 않거나 사람용 출력을 섞었다. 5개 핸들러를 성공/오류 모두 구조화하고, auto-roadmap은 side effect를 유지하되 JSON 모드에서 조용히 실행한다. 외부 Codex 1차는 auto-roadmap stdout 혼입 P2를, 재검토는 rule remove 갱신 누락과 기존 HTML로 인한 비공허 회귀 P2 두 건을 재현했다. 모두 반영한 뒤 `test:fast` 13/13과 전체 `npm test`가 통과했다: lint 61 JS + 1 JSON, selftest 355/355, core 51/51, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467 (5,417초). Leerness verify/audit/check/lazy/gate 6/6과 122 claims(신규 실패 0)가 통과했고, `verify-claim T-0093 --strict-claims`는 Git 교차검증 7/7 및 scope creep 0으로 통과했다. v1.36.172 GitHub Actions run 33093298655도 최종 13/13 성공을 확인했다.
+Artifacts: bin/leerness.js, scripts/e2e-core.js, .leerness/feature-contracts.md, .leerness/bugfix-receipts.json, CHANGELOG.md

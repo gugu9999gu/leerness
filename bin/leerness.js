@@ -48,7 +48,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.172';
+const VERSION = '1.36.173';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -10619,7 +10619,37 @@ function _p0103JsonOk() {
     // ④ --json 이 아예 구현되지 않아 사람용 텍스트를 내던 표면(게시본 3/30) — 계약 스윕
     const sweepBad = [['consistency', 'check', '--json'], ['agent-mode', 'tick', '--json'], ['graph', '--json']]
       .filter(a => !parse(R(a)));
-    return failuresOk && successOk && keepOk && sweepBad.length === 0;
+    // ⑤ Memory DELETE 성공 경로도 같은 계약을 지킨다. 종전에는 mutation은 끝냈지만
+    // stdout은 비고 사람용 ✓ 문구만 stderr에 남아 JSON 소비자가 성공할 때만 깨졌다(T-0093).
+    const taskAdded = parse(R(['task', 'add', 'json-delete-task', '--json']));
+    R(['decision', 'add', 'json-delete-decision']);
+    R(['lesson', 'save', 'json-delete-lesson']);
+    const ruleAdded = parse(R(['rule', 'add', 'json-delete-rule', '--trigger', 'every-session', '--json']));
+    R(['plan', 'add', 'json-delete-plan']);
+    if (!taskAdded?.id || !ruleAdded?.id) return false;
+    fs.mkdirSync(path.join(proj, '.leerness', 'cache'), { recursive: true });
+    fs.writeFileSync(path.join(proj, '.leerness', 'cache', 'auto-roadmap.json'), JSON.stringify({ enabled: true, onEveryChange: true }));
+    const liveEnv = Object.assign({}, process.env, { LEERNESS_OFFLINE: '1' });
+    delete liveEnv.LEERNESS_NO_AUTO_ROADMAP;
+    const RLive = (a) => cp2.spawnSync(process.execPath, [__filename, ...a], { cwd: proj, encoding: 'utf8', timeout: 180000, env: liveEnv });
+    const deleteArgs = [
+      ['task', 'drop', taskAdded.id, '--json'],
+      ['decision', 'drop', 'json-delete-decision', '--json'],
+      ['lesson', 'drop', 'json-delete-lesson', '--json'],
+      ['rule', 'remove', ruleAdded.id, '--json'],
+      ['plan', 'remove', 'json-delete-plan', '--json'],
+    ];
+    const graphPath = path.join(proj, 'leerness.html');
+    const deleteResults = [];
+    let roadmapOk = true;
+    for (const args of deleteArgs) {
+      fs.rmSync(graphPath, { force: true });
+      deleteResults.push(RLive(args));
+      roadmapOk = roadmapOk && fs.existsSync(graphPath);
+    }
+    const deleteOk = deleteResults.every(r => r.status === 0 && !(r.stderr || '').trim() && parse(r)?.ok === true)
+      && roadmapOk;
+    return failuresOk && successOk && keepOk && sweepBad.length === 0 && deleteOk;
   } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
 }
 // 1.36.103: 값-플래그 등록 완전성 + 오타 가시성 회귀 가드.
@@ -14688,9 +14718,9 @@ function planProgress(root, opts = {}) {
 //   Memory Surface DELETE 5종 완전 완성 (task drop / decision drop / lesson drop / rule remove / plan remove)
 function planRemoveCmd(root, target) {
   root = absRoot(root);
-  if (!target) return fail('plan remove <M-XXXX|title-substring> 필요 — 매칭되는 milestone 블록을 제거하고 .leerness/plan.archive.md에 보존');
+  if (!target) return failJson(has('--json'), 'missing_target', 'plan remove <M-XXXX|title-substring> 필요 — 매칭되는 milestone 블록을 제거하고 .leerness/plan.archive.md에 보존');
   const pp = planPath(root);
-  if (!exists(pp)) return fail('plan.md 없음');
+  if (!exists(pp)) return failJson(has('--json'), 'plan_not_found', 'plan.md 없음');
   let removed = 0;
   let disappeared = false;
   // 1.36.152 (T-0115): plan restore/add와 archive를 공유한다. 락 안에서 다시 읽어야 새 milestone을 덮지 않는다.
@@ -14730,8 +14760,13 @@ function planRemoveCmd(root, target) {
     if (removed === 0) return;
     writeUtf8(pp, kept.join('\n'));
   });
-  if (disappeared) return fail('plan.md 없음');
+  if (disappeared) return failJson(has('--json'), 'plan_not_found', 'plan.md 없음');
   if (removed === 0) return failJson(has('--json'), 'milestone_not_found', `매칭 milestone 없음: "${target}"`);   // codex P2: --json 에러 구조화
+  if (has('--json')) {
+    _autoRoadmap(absRoot(root), 'data-change', { quiet: true });
+    log(JSON.stringify({ ok: true, surface: 'plan', action: 'remove', target, removedCount: removed, archive: '.leerness/plan.archive.md' }, null, 2));
+    return;
+  }
   ok(`milestone removed: ${removed}건 (보존: .leerness/plan.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -15065,12 +15100,19 @@ function taskUpdate(root, id) {
 }
 function taskDrop(root, id) {
   if (!_requireInit(root, 'task drop')) return;  // 1.9.396 (6번째 외부평가/codex P1-B): init 가드
-  if (!id) return fail('id required');
+  if (!id) return failJson(has('--json'), 'missing_id', 'id required');
   const rows = readProgressRows(root);
   // 1.9.396 (6번째 외부평가/codex P1-B): 없는 task drop 시 가짜 row(request undefined) 생성 = 데이터 손상 → task update 와 동일하게 존재 확인 후 fail(no-op).
   if (!rows.find(r => r.id === id)) { failJson(has('--json'), 'task_not_found', `task ${id} not found in progress-tracker.md`); return; }  // codex P2: --json 에러 구조화
   const _tdEn = _uiLang(root) === 'en';   // 1.36.63 (검수 #2)
-  upsertProgress(root, { id, status: 'dropped', evidence: arg('--reason', _tdEn ? 'dropped by user request' : '사용자 요청으로 제외'), nextAction: _tdEn ? 'none' : '없음' });
+  const evidence = arg('--reason', _tdEn ? 'dropped by user request' : '사용자 요청으로 제외');
+  const nextAction = _tdEn ? 'none' : '없음';
+  upsertProgress(root, { id, status: 'dropped', evidence, nextAction });
+  if (has('--json')) {
+    _autoRoadmap(absRoot(root), 'data-change', { quiet: true });
+    log(JSON.stringify({ ok: true, surface: 'tasks', action: 'drop', id, status: 'dropped', evidence, nextAction }, null, 2));
+    return;
+  }
   ok(`task dropped: ${id}`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -15385,7 +15427,7 @@ function lessonDropCmd(root, target) {
   // 1.36.140 (재검수 P3): 락/쓰기 헬퍼가 부모를 만들기 때문에, 오타 난 `--path` 로 실패하면서도
   //   그 경로와 `.leerness/` 를 만들었다(1.36.139 는 안 만들었다 — 대조군). 없으면 아무것도 만들지 않는다.
   if (!exists(root)) return failJson(has('--json'), 'path_not_found', `경로가 없습니다: ${root} — 디렉토리를 새로 만들지 않았습니다`);
-  if (!target) return fail('lesson drop <date|text-substring> 필요. 예: leerness lesson drop "2026-05-20" 또는 leerness lesson drop "JWT"');
+  if (!target) return failJson(has('--json'), 'missing_target', 'lesson drop <date|text-substring> 필요. 예: leerness lesson drop "2026-05-20" 또는 leerness lesson drop "JWT"');
   // archive 보존 — lessons.archive.md 에 projection MD 블록 형태로 추가
   const archivePath = path.join(root, '.leerness/lessons.archive.md');
   // 1.36.140 (재검수 P1, 재현): 종전엔 락 **밖**에서 매칭한 뒤 락 안에서 `${date}|${text}` 복합 키로
@@ -15417,6 +15459,11 @@ function lessonDropCmd(root, target) {
   });
   if (loadErr === 'no_lessons') return failJson(has('--json'), 'no_lessons', 'lessons 없음');   // codex P2: --json 에러 구조화
   if (loadErr === 'lesson_not_found' || !removed.length) return failJson(has('--json'), 'lesson_not_found', `매칭 lesson 없음: "${target}"`);
+  if (has('--json')) {
+    _autoRoadmap(absRoot(root), 'data-change', { quiet: true });
+    log(JSON.stringify({ ok: true, surface: 'lessons', action: 'drop', target, removedCount: removed.length, archive: '.leerness/lessons.archive.md' }, null, 2));
+    return;
+  }
   ok(`lesson dropped: ${removed.length}건 (보존: .leerness/lessons.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -15494,7 +15541,7 @@ function decisionDropCmd(root, target) {
   // 1.36.140 (재검수 P3): 락/쓰기 헬퍼가 부모를 만들기 때문에, 오타 난 `--path` 로 실패하면서도
   //   그 경로와 `.leerness/` 를 만들었다(1.36.139 는 안 만들었다 — 대조군). 없으면 아무것도 만들지 않는다.
   if (!exists(root)) return failJson(has('--json'), 'path_not_found', `경로가 없습니다: ${root} — 디렉토리를 새로 만들지 않았습니다`);
-  if (!target) return fail('decision drop <date|title-substring> 필요. 예: leerness decision drop "2026-05-20" 또는 leerness decision drop "PostgreSQL"');
+  if (!target) return failJson(has('--json'), 'missing_target', 'decision drop <date|title-substring> 필요. 예: leerness decision drop "2026-05-20" 또는 leerness decision drop "PostgreSQL"');
   // 1.9.339 (UR-0053): canonical JSON 기준 drop (date 또는 title substring 매칭) — JSON+MD projection 동시 갱신.
   const archivePath = path.join(root, '.leerness/decisions.archive.md');
   // 1.36.138 (동시성 감사 실측): `decision add` 는 락 안인데 **drop 은 락 밖**이었다 —
@@ -15527,6 +15574,11 @@ function decisionDropCmd(root, target) {
   });
   if (loadErr === 'no_decisions') return failJson(has('--json'), 'no_decisions', 'decisions 없음');   // codex P2: --json 에러 구조화
   if (loadErr === 'decision_not_found' || !removed.length) return failJson(has('--json'), 'decision_not_found', `매칭 decision 없음: "${target}"`);
+  if (has('--json')) {
+    _autoRoadmap(absRoot(root), 'data-change', { quiet: true });
+    log(JSON.stringify({ ok: true, surface: 'decisions', action: 'drop', target, removedCount: removed.length, archive: '.leerness/decisions.archive.md' }, null, 2));
+    return;
+  }
   ok(`decision dropped: ${removed.length}건 (보존: .leerness/decisions.archive.md)`);
   _autoRoadmap(absRoot(root), 'data-change');
 }
@@ -22555,7 +22607,8 @@ function _autoRoadmapConfig(root) {
 function _saveAutoRoadmapConfig(root, cfg) {
   writeUtf8(_autoRoadmapConfigPath(root), JSON.stringify(cfg, null, 2) + '\n');
 }
-function _autoRoadmap(root, trigger) {
+function _autoRoadmap(root, trigger, opts = {}) {
+  const quiet = !!(opts && opts.quiet);
   try {
     if (process.env.LEERNESS_NO_AUTO_ROADMAP === '1') return false;
     if (!exists(path.join(root, '.leerness'))) return false;
@@ -22569,10 +22622,10 @@ function _autoRoadmap(root, trigger) {
     const outFile = path.resolve(cfg.outFile || path.join(root, 'leerness.html'));
     const s = _graph.graphHtmlCmd(root, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, quiet: true }, outFile);
     const _en = _uiLang(root) === 'en';
-    log(_en ? `✓ ontology graph auto-updated (${trigger}) — ${rel(root, outFile)} (graph+roadmap+toggles)` : `✓ 온톨로지 그래프 자동 갱신 (${trigger}) — ${rel(root, outFile)} (그래프+로드맵+토글 탭)`);
+    if (!quiet) log(_en ? `✓ ontology graph auto-updated (${trigger}) — ${rel(root, outFile)} (graph+roadmap+toggles)` : `✓ 온톨로지 그래프 자동 갱신 (${trigger}) — ${rel(root, outFile)} (그래프+로드맵+토글 탭)`);
     return true;
   } catch (e) {
-    warn((_uiLang(root) === 'en' ? 'roadmap auto-update failed: ' : 'roadmap 자동 갱신 실패: ') + (e && e.message ? e.message : e));
+    if (!quiet) warn((_uiLang(root) === 'en' ? 'roadmap auto-update failed: ' : 'roadmap 자동 갱신 실패: ') + (e && e.message ? e.message : e));
     return false;
   }
 }
@@ -22850,7 +22903,7 @@ function _updateRules(root, mutate) {
 
 function ruleRemove(root, id) {
   root = absRoot(root);
-  if (!id) return fail('id required');
+  if (!id) return failJson(has('--json'), 'missing_id', 'id required');
   let removed = null;
   const res = _updateRules(root, (rules) => {
     const i = rules.findIndex(r => r.id === id);
@@ -22863,7 +22916,13 @@ function ruleRemove(root, id) {
     return removed;
   });
   if (res.error) return failJson(has('--json'), 'rule_not_found', `rule not found: ${id}`);   // codex P2: --json 에러 구조화
+  if (has('--json')) {
+    _autoRoadmap(root, 'data-change', { quiet: true });
+    log(JSON.stringify({ ok: true, surface: 'rules', action: 'remove', id, removedCount: 1, archive: '.leerness/rules.archive.md' }, null, 2));
+    return;
+  }
   ok(`rule removed: ${id} (보존: .leerness/rules.archive.md)`);
+  _autoRoadmap(root, 'data-change');
 }
 
 function rulePause(root, id) {

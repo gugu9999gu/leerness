@@ -26,7 +26,21 @@
       "title": "decisions.md \"context가\" 관련 결정 1건 영향 확인",
       "command": "leerness decision list --query \"context가\"",
       "addedAt": "2026-08-27T10:25:55.677Z"
+    },
+    {
+      "actionKey": "lessons:leerness",
+      "icon": "🛡",
+      "title": "과거 실패 회피 — lessons.md 에 \"leerness\" 관련 1건",
+      "command": "leerness lessons --auto --path .",
+      "addedAt": "2026-08-27T18:20:29.086Z"
+    },
+    {
+      "actionKey": "decision:leerness",
+      "icon": "💭",
+      "title": "decisions.md \"leerness\" 관련 결정 7건 영향 확인",
+      "command": "leerness decision list --query \"leerness\"",
+      "addedAt": "2026-08-27T18:20:29.086Z"
     }
   ],
-  "at": "2026-08-27T10:25:55.678Z"
+  "at": "2026-08-27T18:20:29.087Z"
 }

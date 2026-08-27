@@ -207,12 +207,40 @@ console.log('# leerness core (test:core) — flagship behavioral guarantees');
 // (10) --json 무결성: 변형/조회 명령이 성공 경로에서도 유효 JSON (1.36.0, 클린룸 리뷰 B)
 {
   const d = fresh();
-  const okJson = (r) => { try { JSON.parse((r.stdout || '').trim()); return true; } catch { return false; } };
-  run(d, ['task', 'add', 'sample']);
+  const jsonResult = (r) => { try { return JSON.parse((r.stdout || '').trim()); } catch { return null; } };
+  const okJson = (r) => { const payload = jsonResult(r); return r.status === 0 && !(r.stderr || '').trim() && payload !== null && payload.ok !== false; };
+  const addedTask = jsonResult(run(d, ['task', 'add', 'sample', '--json']));
   assert('json: task update --status done --json → valid JSON (was plain text)', okJson(run(d, ['task', 'update', 'T-0002', '--status', 'done', '--json'])));
   assert('json: plan add --json → valid JSON', okJson(run(d, ['plan', 'add', 'a milestone', '--json'])));
   assert('json: rule verify --json → valid JSON', okJson(run(d, ['rule', 'verify', '--json'])));
   assert('json: reuse find --json → valid JSON', okJson(run(d, ['reuse', 'find', 'button', '--json'])));
+
+  // T-0093: Memory DELETE 다섯 표면은 mutation은 성공하면서 JSON을 전혀 내지 않고
+  // 사람용 ✓ 문구만 stderr에 썼다. 성공 payload와 stderr-0을 함께 고정한다.
+  run(d, ['decision', 'add', 'json delete decision']);
+  run(d, ['lesson', 'save', 'json delete lesson']);
+  const addedRule = jsonResult(run(d, ['rule', 'add', 'json delete rule', '--trigger', 'every-session', '--json']));
+  run(d, ['plan', 'add', 'json delete milestone']);
+  run(d, ['roadmap', 'auto', 'on', '--on-every-change']);
+  const deleteCases = [
+    ['task drop', ['task', 'drop', addedTask.id, '--json'], 'tasks'],
+    ['decision drop', ['decision', 'drop', 'json delete decision', '--json'], 'decisions'],
+    ['lesson drop', ['lesson', 'drop', 'json delete lesson', '--json'], 'lessons'],
+    ['rule remove', ['rule', 'remove', addedRule.id, '--json'], 'rules'],
+    ['plan remove', ['plan', 'remove', 'json delete milestone', '--json'], 'plan'],
+  ];
+  const graphPath = path.join(d, 'leerness.html');
+  for (const [label, args, surface] of deleteCases) {
+    fs.rmSync(graphPath, { force: true });
+    const result = run(d, args);
+    const payload = jsonResult(result);
+    assert(`json: ${label} --json → one success document + clean stderr + silent roadmap refresh`,
+      result.status === 0 && !(result.stderr || '').trim() && payload?.ok === true
+      && payload.surface === surface
+      && (surface === 'tasks' ? payload.status === 'dropped' : payload.removedCount === 1)
+      && fs.existsSync(graphPath),
+      `status=${result.status} stdout=${result.stdout} stderr=${result.stderr}`);
+  }
   fs.rmSync(d, { recursive: true, force: true });
 }
 
