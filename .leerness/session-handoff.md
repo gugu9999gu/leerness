@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-27T10:20:41.408Z
+Last generated: 2026-08-27T17:11:13.033Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -100,6 +100,7 @@ Last generated: 2026-08-27T10:20:41.408Z
 - T-0102 방치 명령 클래스 스윕 (1.36.114 완료분) → next: 다음 액션 작성
 - T-0107 LEERNESS_WORKSPACE_DIR / migrate-workspace-dir 스플릿브레인: 해석기(_workspaceDirName) 소비처 9곳 vs '.leerness' 하드코딩 299곳(bin 261+lib 38). env 를 켜면 init 은 .leerness 를 만들고 _isInitialized 는 .leerness 를 보다 AGENTS.md 폴백으로 가려진다(실측: selftest 339/343). migrate-workspace-dir 는 copy 라 마이그레이션 후 .leerness 가 죽은 사본이 되어 '마이그레이션 성공' 이 거짓 주장이 된다. 조사→결정(전면 배선 / 기능 제거 / 불가 시 명시적 실패) 필요. → next: 완료 — .leerness canonical workspace migration and public release verified
 - T-0108 P2 잔여 락 인구조사(정찰 실측): plan.md 가 progress 락으로 잠기는 오락(진입점 5곳) · decisions.json/lessons.json 진입점 4곳 중 1곳만 보호 · last-handoff.json 무락 · rules.md 부트스트랩/verifyRules 무락. 각 스토어마다 update 초크포인트를 만들어 모든 진입점을 태우고, 락 순서(progress→plan, progress→user-requests) 역순 금지를 가드로 고정한다. 1.36.130 은 실측된 유실 2건(rules.md 손글씨 파괴 · auto-fix 무락)만 고쳤다. → next: v1.36.169 GitHub/npm/leerness.com 배포 및 공개 검증
+- T-0110 미해결 3종(1.36.132 기록): .leerness/state.json currentRunId 단일 슬롯 크로스토크(재현됨) · --compact/훅에서 범위 텍스트가 nextAction 으로 대체돼 소실 · MCP 도구는 LEERNESS_INTERNAL=1 로 스폰돼 프레즌스 미등록 → next: v1.36.171 공개 배포 검증
 - T-0114 T-0112 진행분(1.36.134 워킹트리, e2e·게이트 미반영): 검수 P1 5건 중 4건 수정+실측 확인 — (a)bare 저장소 거부 (b)설치 중 사용자 기존 훅 실행 0회(훅에 LEERNESS_ENFORCE_PROBE 조기종료 추가) (c)sh 부재를 성공이라 하지 않음(verify_unavailable, --skip-verify opt-out) (d)실패 시 롤백+enforce.json 미생성(초기 쓰기 제거). 남은 것: (e)하위 디렉토리 설치가 실제 커밋에서 우회되는 문제 미수정 · 실패 코드가 'error' 로 뭉개짐 · 이 4건에 대한 e2e 단언 미작성 · 게이트 재실행 필요 · 재검수 필요. → next: 후속: Windows 셸에서 enforce 자체검증/CI 계약을 안정화
 - T-0115 동시성 P1-A 무락 RMW 4종(실측·대조군 확보): roles set/unset/suggest --apply (agent-roles.json, 4동시 28.8% 유실·16동시 11~15/16) · creds register/refresh (credentials.local.json, 2동시 17.5%) · decision drop/lesson drop/team remove/memory restore (드롭이 락 밖이라 **락 안에서 커밋된 add 를 파괴** 1~3/8) · _bumpUsage(bin:22224, usage-stats.json — 모든 명령이 공유하는 유일한 파일, 2동시부터 38~46% 유실). 전부 exit 0·경고 0·JSON 손상 0(조용한 lost-update). 대조군: 락 무력화 복사본 16동시 task add 9~11/16 vs 락 켜면 16/16, 24동시 24/24 고유 ID. → next: 후속: release bump가 --patch 플래그를 경고 없이 수용하고 버전 표면을 함께 동기화하는지 회귀로 보강
 - T-0116 동시성 P1-B 완료 게이트가 뒤집힌다: .leerness/state.json currentRunId 전역 단일 슬롯 — 8 sub-agent 가 start→record→verify 하면 오귀속 7/8. 판별 케이스: A 가 실제 작업+테스트하고 verify pass 를 불렀는데 증거가 B 의 run 에 붙어 **B 가 completion_claim_allowed:true, 실제 작업자 A 가 false**. 락으로 못 고침(세션 스코프 부재) · run 레코드에 세션 필드가 없어 사후 추적 불가. 1.36.132 세션 주소 재사용 검토. → next: 다음 액션 작성
@@ -136,6 +137,8 @@ Last generated: 2026-08-27T10:20:41.408Z
 - T-0150 자동 next-action 큐가 지원하지 않는 --filter와 존재하지 않는 stress 파일 실행을 제안하는 결함 수정 → next: v1.36.169 GitHub/npm/leerness.com 배포 및 공개 설치본 검증
 - T-0151 v1.36.169 GitHub/npm/leerness.com 배포 및 CI 검증 → next: v1.36.170 release publish
 - T-0152 auto-resume/context가 legacy next-action을 정규화하지 않는 결함 수정 → next: v1.36.170 GitHub/npm/leerness.com release publish and verify
+- T-0153 v1.36.170 CI 최종 확인 후 현재 미해결 백로그를 선택해 다음 작업 진행 → next: GitHub Actions run 33093298655의 Windows Node 18/20/22/24 전체 E2E 종료 결과 후속 확인
+- T-0154 CI에서 동시 최초 .harness→.leerness 마이그레이션이 복사 중간상태를 사용자 충돌로 오판하는 레이스 수정 → next: v1.36.172 GitHub/npm/leerness.com 배포 및 Linux/Windows CI 확인
 
 ## In Progress
 - 없음
@@ -151,27 +154,6 @@ Last generated: 2026-08-27T10:20:41.408Z
 
 ## Verification
 ```
-## 2026-08-24 — T-0127 / T-0001 context map grounding
-
-- Context-map contract assertion — PASS: 실행 흐름·소스/런타임·상태·검증/배포·변경 라우팅 섹션, package entry, 핵심 앵커를 확인했고 초기 `src/**`/`tests/**` 자리표시자 행은 0개.
-- Referenced-path audit — PASS: 문서에 인용한 핵심 파일/디렉터리 56개가 모두 존재. `package.json`의 `main`과 `bin.leerness`는 모두 `bin/leerness.js`, npm `files`에는 `.leerness`가 포함되지 않음을 대조.
-- `node bin/leerness.js verify . --json` — PASS: healthy, failures 0. `check . --json` — PASS: healthy, issues 0.
-- `node bin/leerness.js verify-claim T-0127 --path . --json` 및 `verify-claim T-0001` — PASS.
-- `node bin/leerness.js audit . --json` — PASS: healthy, failures 0. 기존 design-system/reuse-map/orphan-guard/milestone-link 경고 4건만 유지.
-- `node bin/leerness.js health . --json` — PASS: healthy, stateIntegrity corrupted 0, criticalSecurity false. `drift check` — PASS: score 0.
-- Secret/encoding guards — PASS: unacknowledged secrets 0, encoding findings 0. `git diff --check` — PASS.
-- `lazy detect . --json` — KNOWN FAIL: 이번 변경과 무관한 기존 T-0031 evidence 누락 및 README.ko.md 설명 문구 TODO 오탐/미추적 2건.
-- Manual Codex cross-review — `state-integrity.js`를 순수 모듈로 오분류한 표현, 누락된 `session-presence.js`, 추적 파일 `.env.example`까지 포함할 수 있던 `.env*` 표기를 발견·재현해 읽기 전용 integrity 경계, 세션 모듈, 정확한 ignore 패턴으로 수정. 에이전트별 진입도 “CLI와 MCP 모두”가 아닌 “CLI 또는 MCP”로 정밀화.
-- Scope note — 이 라운드는 하네스 문서/상태만 변경했으므로 애플리케이션 테스트 스위트나 배포는 실행하지 않음.
-
-## 2026-08-26 — T-0143 cross-runtime verify-code/gate regression
-
-Task: T-0143
-Command: npm test
-Exit: 0
-Note: selftest 353/353, core behavior 46/46, handoff 75/75 (parallel 8), command surface 40/40, installed cleanroom 10/10, full E2E 467/467. Python/Go/Rust, Node+Python 혼합, npm placeholder, JS-only tests 디렉터리, 실패 후 성공 회복, lazy/gate 증거 판정을 전용 probe로 검증했고 Node 18에서도 통과. 독립 리뷰 결과 P0/P1 없음.
-Artifacts: bin/leerness.js, scripts/verify-code-cross-runtime-probe.js, package.json, CHANGELOG.md, README.md
-
 ## 2026-08-26 — T-0143 release verification
 
 Task: T-0143
@@ -179,6 +161,28 @@ Command: npm view leerness@1.36.165 version dist.integrity dist.shasum; gh relea
 Exit: 0
 Note: npm latest/exact는 1.36.165이고 registry integrity는 sha512-6WtoXVVRKfLEfneeXWWZ+mwll45YPgk0wpQM0pLiU3LJJ5tQV9tfasjFMhstrWjcVWOdMMUFbYnM/DpwEHQuZg==, shasum은 c33c15759c32954f626c38b2783f031159ce88af. GitHub release v1.36.165는 commit 8a388c7edc91d7f16b690b03391a3a0ed909dfa5를 가리킨다. leerness.com production은 1.36.165를 반환한다. leerness-gate 0.0.3은 92/92 단위 테스트, 12/12 설치 클린룸, Worker dry-run, leerness verify-code/check/lazy/gate/secret/encoding 및 1.36.165 migration audit(willChange 0)를 통과했다. 전역 설치·사용자 로컬 설치·npx exact 실행도 모두 1.36.165로 정합화했다.
 Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.165, https://www.npmjs.com/package/leerness/v/1.36.165, https://leerness.com/changelog/1.36.165/, ../leerness-gate/package.json
+
+## 2026-08-28 — T-0154 concurrent first-migration lock order
+
+Task: T-0154
+Command: node scripts/workspace-dir-lock-order-probe.js (10회 반복); npm run test:fast; npm test
+Exit: 0
+Note: v1.36.171 GitHub Actions run 33080411100의 Linux/Windows fast job에서 동시 최초 `.harness`→`.leerness` 마이그레이션이 `workspace-dir-file-conflict`로 실패한 것을 재현했다. 라이브 마이그레이션이 두 번째 workspace 검사·충돌 스캔 전에 프로젝트 잠금을 획득하도록 수정했다. 결정론적 probe는 peer의 실제 `open(..., 'wx')` EEXIST와 victim 잠금 해제 직전까지의 차단을 단언하며 10/10 반복 통과했다. `npm run test:fast`는 lint 61 JS + 1 JSON, migration 18/18, MCP presence 22/22, smoke 13/13을 통과했다. 전체 `npm test`는 selftest 355/355, core 46/46, handoff 75/75, command surface 40/40, installed cleanroom 10/10, full E2E 467/467을 5,447초에 통과했다. 외부 Codex 최초 검토의 P1/P2 2건(legacy-path ratchet, probe short-lock false-pass)을 수정한 뒤 재검토 결과 P0/P1/P2 없음.
+Artifacts: lib/workspace-dir.js, scripts/workspace-dir-lock-order-probe.js, package.json, CHANGELOG.md, README.md, .leerness/bugfix-receipts.json, .leerness/release-checklist.md
+
+## 2026-08-28 — v1.36.172 public release verification
+
+Task: T-0154
+Command: git ls-remote origin refs/heads/main refs/tags/v1.36.172; gh release view v1.36.172; npm view leerness@latest; fresh-prefix registry install; npm run site:build; npm run site:deploy; node pipeline/verify-deploy.cjs --url https://leerness.com --expect 1.36.172
+Exit: 0
+Note: GitHub main/tag/release가 구현 SHA `d9a6f543b88749a7707aa821894d7b74af67cb9e`로 일치한다. npm latest/exact는 1.36.172이며 registry integrity는 `sha512-8sQ9vISjRemmUXzMoJumGG2NNhb3kqm7eY3js70L2n3Hzvwg47Qli0Wv1B6tW/nQ/8utgIiDGd2/hkveNYXTJg==`, shasum은 `5071bb558eae9d31a801db23a66d937deda7ead7`; fresh-prefix 설치본은 v1.36.172, 런타임 의존성 0, install script 없음이고 설치된 tarball의 `workspace-dir-lock-order-probe.js`도 `WORKSPACE_LOCK_ORDER_OK`로 통과했다. 사이트는 commit `7feb5a7c0bb4d9550ec5c1e854679afa912c36fb`에서 696 pages를 빌드하고 Cloudflare deployment `928f3211`로 게시했다. `https://leerness.com/`과 `/changelog/1.36.172/`은 HTTP 200이며 첫 production 검증 시도에서 최신 버전과 TOCTOU 수정 내용을 노출했다. GitHub Actions run 33093298655의 Linux/Windows fast 잡은 모두 성공했고 전체 행렬은 기록 시점 실행 중이다.
+Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.172, https://www.npmjs.com/package/leerness/v/1.36.172, https://leerness.com/changelog/1.36.172/, https://github.com/gugu9999gu/leerness/actions/runs/33093298655
+
+## 2026-08-28 — T-0153 close verification and CI partial result
+
+- `verify-claim T-0153 --strict-claims --json` — PASS after correcting the evidence boundary so the package verifier no longer interprets the site repository's `pipeline/verify-deploy.cjs` as a missing package file; evidence complete, claims consistent, git cross-check true, scope creep 0.
+- `verify-claim T-0154 --strict-claims --json` — PASS was recorded before implementation commit `d9a6f543b88749a7707aa821894d7b74af67cb9e`. A post-commit rerun correctly reports git-mismatch because the implementation files are no longer in the working diff; `--lenient` then passes file/test/log existence without misrepresenting that distinction.
+- GitHub Actions run 33093298655 partial close snapshot — 9/13 jobs success, 0 failure: Linux/Windows fast, all four release-runtime jobs, and Ubuntu Node 18/20/22 full E2E passed. Windows Node 18/20/22/24 full E2E remains in progress and is explicitly carried as the next action.
 ```
 
 ## Recommended Direction

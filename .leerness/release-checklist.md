@@ -73,9 +73,9 @@ doNotStore:
 - [x] 외부 Codex 최초 검토 P1/P2 2건 수정 후 재검토에서 P0/P1/P2 없음
 - [x] `npm run test:fast`: lint 61 JS + 1 JSON, migration 18/18, MCP presence 22/22, smoke 13/13 통과
 - [x] selftest 355/355, core 46/46, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467 및 `verify-claim T-0154 --strict-claims` 통과
-- [ ] GitHub main/tag/release가 동일 구현 커밋을 가리키는지 확인
-- [ ] npm latest/exact 1.36.172, integrity/shasum, fresh-prefix 설치 확인
-- [ ] leerness.com production 루트와 v1.36.172 changelog 확인
-- [ ] GitHub Actions Linux/Windows fast 포함 전체 작업 성공 확인
+- [x] 게시 시점 GitHub main/tag/release가 구현 커밋 `d9a6f543b88749a7707aa821894d7b74af67cb9e`로 일치; 후속 세션 증거는 `[skip ci]` 커밋으로 분리
+- [x] npm latest/exact 1.36.172; integrity `sha512-8sQ9vISjRemmUXzMoJumGG2NNhb3kqm7eY3js70L2n3Hzvwg47Qli0Wv1B6tW/nQ/8utgIiDGd2/hkveNYXTJg==`, shasum `5071bb558eae9d31a801db23a66d937deda7ead7`, fresh-prefix 설치와 런타임 의존성 0 확인
+- [x] 사이트 커밋 `7feb5a7c0bb4d9550ec5c1e854679afa912c36fb`, Astro 696 pages, Cloudflare deployment `928f3211`; leerness.com production 루트와 v1.36.172 changelog HTTP 200 확인
+- [ ] GitHub Actions run 33093298655: Linux/Windows fast와 Ubuntu Node 18/20/22 전체 E2E 포함 9/13 성공, 실패 0; Windows Node 18/20/22/24 전체 E2E 실행 중
 - [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요
 - [x] 롤백 기준: npm exact `leerness@1.36.171` 재설치, GitHub tag `v1.36.171`, 직전 사이트 커밋 `98f559e`

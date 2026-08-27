@@ -1,11 +1,11 @@
 {
-  "savedAt": "2026-08-27T14:06:38.479Z",
-  "nextRoundVersion": "next after 1.36.171",
-  "expectedFireAt": "2026-08-27T14:31:38.476Z",
+  "savedAt": "2026-08-27T16:27:33.190Z",
+  "nextRoundVersion": "next after 1.36.172",
+  "expectedFireAt": "2026-08-27T16:52:33.187Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.36.171",
+    "currentVersion": "1.36.172",
     "activeTaskId": null,
     "activeTaskRequest": null,
     "memorySurface": {
