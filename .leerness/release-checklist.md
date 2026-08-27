@@ -89,6 +89,6 @@ doNotStore:
 - [x] `npm run test:fast` 13/13 및 전체 `npm test` 통과: lint 61 JS + 1 JSON, selftest 355/355, core 51/51, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467 (5,417초)
 - [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.173 동기화
 - [x] Leerness verify/audit/check/lazy/gate/claim 게이트: gate 6/6, claims 122건 신규 실패 0, T-0093 strict claim 통과(scope creep 0)
-- [ ] GitHub main/tag/release, npm latest/exact/fresh install, leerness.com production 배포·검증
+- [x] GitHub main/tag/release SHA `fe0cf4cd36cd8aef49d77e0e92fbfacca9d01980`, Actions run 33116152701 13/13 성공, npm latest/exact/fresh install, 사이트 commit `cc8c951`·deployment `1513bc64`·HTTP 200 완료
 - [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요
 - [x] 롤백 기준: npm exact `leerness@1.36.172` 재설치, GitHub tag `v1.36.172`, 직전 사이트 커밋 `7feb5a7`

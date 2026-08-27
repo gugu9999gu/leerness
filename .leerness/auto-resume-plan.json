@@ -1,15 +1,15 @@
 {
-  "savedAt": "2026-08-27T16:27:33.190Z",
-  "nextRoundVersion": "next after 1.36.172",
-  "expectedFireAt": "2026-08-27T16:52:33.187Z",
+  "savedAt": "2026-08-27T21:03:00.294Z",
+  "nextRoundVersion": "next after 1.36.173",
+  "expectedFireAt": "2026-08-27T21:28:00.289Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.36.172",
-    "activeTaskId": null,
-    "activeTaskRequest": null,
+    "currentVersion": "1.36.173",
+    "activeTaskId": "T-0155",
+    "activeTaskRequest": "다음작업진행",
     "memorySurface": {
-      "tasksInProgress": 0,
+      "tasksInProgress": 1,
       "decisions": 18,
       "rulesActive": 2,
       "lessons": 14
@@ -19,18 +19,18 @@
   "nextActions": [
     {
       "icon": "💭",
-      "title": "decisions.md \"install\" 관련 결정 1건 영향 확인",
-      "command": "leerness decision list --query \"install\""
+      "title": "decisions.md \"context가\" 관련 결정 1건 영향 확인",
+      "command": "leerness decision list --query \"context가\""
     },
     {
-      "icon": "🧬",
-      "title": "stress-v211 오래됨 — 새 stress test 작성 권장",
-      "command": null
+      "icon": "🛡",
+      "title": "과거 실패 회피 — lessons.md 에 \"leerness\" 관련 1건",
+      "command": "leerness lessons --auto --path ."
     },
     {
       "icon": "💭",
-      "title": "decisions.md \"context가\" 관련 결정 1건 영향 확인",
-      "command": "leerness decision list --query \"context가\""
+      "title": "decisions.md \"leerness\" 관련 결정 7건 영향 확인",
+      "command": "leerness decision list --query \"leerness\""
     }
   ],
   "note": "다음 wakeup 시: 1) leerness resume . 으로 plan 확인  2) leerness handoff . 실행  3) leerness next-action take 로 즉시 task 진입"
