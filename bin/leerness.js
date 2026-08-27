@@ -48,7 +48,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.168';
+const VERSION = '1.36.169';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -4384,9 +4384,26 @@ function _selfTestCases() {
       // 1.36.47: 어색 조사 병기 소거 + 장문은 단어 경계 절단(…) — 실적용에서 발견된 품질 결함 회귀 방지
       const dLong = p._draftAnchors({ pkgDescription: '가나다 라마바사 아자차카 타파하 '.repeat(20) });
       const phraseOk = !dLong.goal.join('').includes('를(을)') && dLong.goal.some(l => l.includes('…')) && !/[가-힣]{2}…[가-힣]/.test(dLong.goal.join(''));
-      // 재초안: draft 마커 잔존 섹션은 gap 취급 (배선 소스가드)
-      const s47 = read(__filename);
-      const redraftOk = s47.includes("_mdSectionBody(briefTxt, 'Purpose') || '').includes(_draftM)");
+      // 재초안: draft 마커 잔존 섹션은 gap 취급 — 실제 CLI 핸들러가 두 파일을 교체하는지 검증한다.
+      const redraw = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_anchor_redraft_'));
+      let redraftOk = false;
+      const savedArgv = process.argv, savedWrite = process.stdout.write;
+      try {
+        mkdirp(path.join(redraw, '.leerness'));
+        writeUtf8(path.join(redraw, 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.0', description: '새 정체성 신호' }));
+        writeUtf8(path.join(redraw, '.leerness', 'project-brief.md'), '# Brief\n\n## Purpose\n<!-- draft: leerness anchors old -->\n- OLD_PURPOSE_SENTINEL\n');
+        writeUtf8(path.join(redraw, '.leerness', 'plan.md'), '# Plan\n\n## Goal\n<!-- draft: leerness anchors old -->\n- OLD_GOAL_SENTINEL\n');
+        process.argv = ['node', 'leerness', 'anchors', 'draft', '--apply'];
+        process.stdout.write = () => true;
+        anchorsCmd(redraw, 'draft');
+        const rb = read(path.join(redraw, '.leerness', 'project-brief.md'));
+        const rp = read(path.join(redraw, '.leerness', 'plan.md'));
+        redraftOk = !rb.includes('OLD_PURPOSE_SENTINEL') && !rp.includes('OLD_GOAL_SENTINEL')
+          && rb.includes('새 정체성 신호') && rp.includes('새 정체성 신호');
+      } catch {} finally {
+        process.argv = savedArgv; process.stdout.write = savedWrite;
+        try { fs.rmSync(redraw, { recursive: true, force: true }); } catch {}
+      }
       if (!(phraseOk && redraftOk)) return false;
       // 무신호 시 발명 금지
       const empty = p._draftAnchors({});
@@ -4400,6 +4417,60 @@ function _selfTestCases() {
       const s = read(__filename);
       const wired = typeof anchorsCmd === 'function' && s.includes("cmd === 'anchors'") && s.includes('→ leerness anchors draft');
       return draftOk && noInvent && secOk && noSec && wired;
+    } },
+    { name: 'next-action 자동 제안 실행 가능성 (1.36.169/Codex P2): 일반 프로젝트 명령 + stable-key 마이그레이션/중복 갱신', run: () => {
+      const arena = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_next_action_'));
+      const root = path.join(arena, 'project');
+      try {
+        const hd = path.join(root, '.leerness');
+        const stressDir = path.join(arena, '_apps', 'leerness-stress', 'bin');
+        mkdirp(hd); mkdirp(stressDir);
+        writeUtf8(path.join(hd, 'plan.md'), '# Plan\n\n### M-0001. install release\nStatus: planned\n');
+        writeUtf8(path.join(hd, 'decisions.md'), '# Decisions\n\n### 2026-08-27 — install policy\n- Reason: probe\n');
+        writeUtf8(path.join(hd, 'review-evidence.md'), 'verified\n'.repeat(20));
+        const stressFile = path.join(stressDir, 'stress-v211.js');
+        writeUtf8(stressFile, '// existing baseline\n');
+        const old = new Date(Date.now() - 48 * 3600000); fs.utimesSync(stressFile, old, old);
+
+        const actions = _suggestNextActions(root, { id: 'T-0001', request: 'install 기능 보강' }, 'install');
+        const plan = actions.find(a => a.icon === '🎯');
+        const decision = actions.find(a => a.icon === '💭');
+        const stress = actions.find(a => a.icon === '🧬');
+        const generatedOk = plan?.command === 'leerness plan list --path .'
+          && decision?.command === 'leerness decision list --query "install"'
+          && stress?.title === 'stress-v211 오래됨 — 새 stress test 작성 권장'
+          && !Object.prototype.hasOwnProperty.call(stress, 'command')
+          && plan?.actionKey === 'plan:M-0001' && decision?.actionKey === 'decision:install'
+          && stress?.actionKey === 'stress-refresh';
+
+        const legacy = [
+          { icon: '🧬', title: 'stress-v210 마지막 갱신 46h 전 — 새 stress test 작성 권장', command: 'node _apps/leerness-stress/bin/stress-v211.js' },
+          { icon: '🧬', title: 'stress-v211 마지막 갱신 48h 전 — 새 stress test 작성 권장', command: 'node _apps/leerness-stress/bin/stress-v212.js' },
+          { icon: '🎯', title: plan.title, command: 'leerness plan list --filter "install"' },
+          { icon: '💭', title: decision.title, command: 'leerness decision list --filter "install"' },
+          { icon: '🧪', title: 'review-evidence.md 비어있음 — e2e 또는 verify-code 실행', command: 'node ./scripts/e2e.js' },
+          { icon: '🔄', title: 'progress-tracker 24h 정체 — task T-0001 status 갱신', command: 'leerness task update T-0001 --status completed' },
+          { icon: '🔄', title: 'progress-tracker 25h 정체 — task T-0001 status 갱신', command: 'leerness task update T-0001 --status completed' }
+        ];
+        writeUtf8(_nextActionQueuePath(root), JSON.stringify({ queue: legacy, at: new Date().toISOString() }, null, 2));
+        _enqueueNextActions(root, []);  // 새 제안이 없는 handoff도 legacy 큐를 고쳐야 한다.
+        _enqueueNextActions(root, [{ actionKey: 'stress-refresh', icon: '🧬', title: 'stress-v212 오래됨 — 새 stress test 작성 권장' }]);
+        const migrated = JSON.parse(read(_nextActionQueuePath(root))).queue;
+        const migratedStress = migrated.filter(a => a.icon === '🧬');
+        const migratedPlan = migrated.find(a => a.icon === '🎯');
+        const migratedDecision = migrated.find(a => a.icon === '💭');
+        const migratedEvidence = migrated.find(a => a.icon === '🧪');
+        const migratedProgress = migrated.find(a => a.icon === '🔄');
+        return generatedOk && migrated.length === 5 && migratedStress.length === 1
+          && migratedStress[0].title === 'stress-v212 오래됨 — 새 stress test 작성 권장'
+          && !Object.prototype.hasOwnProperty.call(migratedStress[0], 'command')
+          && migratedPlan.command === plan.command && migratedDecision.command === decision.command
+          && migratedEvidence.command === 'leerness verify-code .'
+          && migratedProgress.title === 'progress-tracker 정체 — task T-0001 상태 검토'
+          && migratedProgress.command === 'leerness task list --path .'
+          && migrated.every(a => typeof a.actionKey === 'string' && a.actionKey.length > 0);
+      } catch { return false; }
+      finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
     } },
     { name: 'managed 파일 force 병합 (1.36.37, 1.9.441 드리프트 실측): writeIfSafe 가 --force 여도 managed 는 라인-diff 병합 — CLAUDE 커스텀 보존 (행위검사)', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wif_'));
@@ -8393,8 +8464,10 @@ function anchorsCmd(root, sub) {
   const _draftM = '<!-- draft: leerness anchors';
   // 1.36.49 (codex 6차 #4): 헤딩 자체가 없는 파일도 gap — 종전 _sectionUnfilled 는 "섹션 없음→미플래그"(감지용 보수 기본)라
   //   ## Goal 이 아예 없는 plan.md 가 "작성됨"으로 보고되고 draft --apply 도 무동작이었다. apply 시 헤딩을 신설한다.
-  const briefGap = !!briefTxt && !briefTxt.includes(naM) && (_briefUnfilled(briefTxt) || _mdSectionBody(briefTxt, 'Purpose') == null || (_mdSectionBody(briefTxt, 'Purpose') || '').includes(_draftM));
-  const planGap = !!planTxt && !planTxt.includes(naM) && (_planGoalUnfilled(planTxt) || _mdSectionBody(planTxt, 'Goal') == null || (_mdSectionBody(planTxt, 'Goal') || '').includes(_draftM));
+  const _briefHasGap = txt => !!txt && !txt.includes(naM) && (_briefUnfilled(txt) || _mdSectionBody(txt, 'Purpose') == null || (_mdSectionBody(txt, 'Purpose') || '').includes(_draftM));
+  const _planHasGap = txt => !!txt && !txt.includes(naM) && (_planGoalUnfilled(txt) || _mdSectionBody(txt, 'Goal') == null || (_mdSectionBody(txt, 'Goal') || '').includes(_draftM));
+  const briefGap = _briefHasGap(briefTxt);
+  const planGap = _planHasGap(planTxt);
   if (!sub || sub === 'status') {
     if (json) { log(JSON.stringify({ briefUnfilled: briefGap, planGoalUnfilled: planGap }, null, 2)); return; }
     log(`# leerness anchors — 정체성앵커 상태`);
@@ -8416,16 +8489,31 @@ function anchorsCmd(root, sub) {
     const apply = has('--apply');
     const applied = [];
     if (briefGap && draft.purpose.length) {
-      if (apply) { writeUtf8(bf, _replaceMdSection(briefTxt, 'Purpose', draft.purpose, { appendIfMissing: true })); applied.push('project-brief.md#Purpose'); }
+      if (apply) {
+        // 1.36.169 (T-0108): 초안 계산 뒤 다른 세션이 채운 내용을 낡은 snapshot으로 덮지 않는다.
+        _withLock(bf, () => {
+          const current = exists(bf) ? read(bf) : '';
+          if (!_briefHasGap(current)) return;
+          writeUtf8(bf, _replaceMdSection(current, 'Purpose', draft.purpose, { appendIfMissing: true }));
+          applied.push('project-brief.md#Purpose');
+        });
+      }
     }
     if (planGap && draft.goal.length) {
-      if (apply) { writeUtf8(pf, _replaceMdSection(planTxt, 'Goal', draft.goal, { appendIfMissing: true })); applied.push('plan.md#Goal'); }
+      if (apply) {
+        _withPlanLock(root, () => {
+          const current = exists(pf) ? read(pf) : '';
+          if (!_planHasGap(current)) return;
+          writeUtf8(pf, _replaceMdSection(current, 'Goal', draft.goal, { appendIfMissing: true }));
+          applied.push('plan.md#Goal');
+        });
+      }
     }
     if (json) { log(JSON.stringify({ briefUnfilled: briefGap, planGoalUnfilled: planGap, draft: { purpose: draft.purpose, goal: draft.goal }, applied, dryRun: !apply }, null, 2)); return; }
     log(`# leerness anchors draft ${apply ? '(적용)' : '(dry-run — 적용: --apply)'}`);
-    if (briefGap) { log(`\n## project-brief Purpose ${apply ? '← 적용됨' : '초안'}`); draft.purpose.forEach(l => log('  ' + l)); }
+    if (briefGap) { log(`\n## project-brief Purpose ${apply ? (applied.includes('project-brief.md#Purpose') ? '← 적용됨' : '← 다른 세션 변경 감지로 건드리지 않음') : '초안'}`); draft.purpose.forEach(l => log('  ' + l)); }
     else log(`\n  ✓ project-brief Purpose 는 이미 작성됨 — 건드리지 않음`);
-    if (planGap) { log(`\n## plan Goal ${apply ? '← 적용됨' : '초안'}`); draft.goal.forEach(l => log('  ' + l)); }
+    if (planGap) { log(`\n## plan Goal ${apply ? (applied.includes('plan.md#Goal') ? '← 적용됨' : '← 다른 세션 변경 감지로 건드리지 않음') : '초안'}`); draft.goal.forEach(l => log('  ' + l)); }
     else log(`  ✓ plan Goal 은 이미 작성됨 — 건드리지 않음`);
     if (apply && applied.length) log(`\n✓ 적용: ${applied.join(', ')} (초안 표식 주석 포함 — 검토 후 주석 제거로 확정)`);
     return;
@@ -13686,24 +13774,102 @@ function _writeNextActionQueue(root, queue) {
     return false;
   }
 }
-// handoff 에서 제안된 next-action 들을 큐에 자동 저장 (중복 방지: 이미 있는 title 은 skip)
+// handoff 에서 제안된 next-action 들을 큐에 자동 저장 (중복 방지: 안정된 actionKey 는 갱신)
 // 1.36.108 (T-0097): 읽기~쓰기를 락으로 직렬화. 이 큐는 handoff 가 자동으로도 채우기 때문에
 //   사용자가 `next-action add` 하는 순간 handoff 가 겹칠 수 있다 — 실사용에서 가장 겹치기 쉬운 조합이다.
+function _normalizeSuggestedAction(action) {
+  const a = { ...(action || {}) };
+  // 1.36.169 (Codex 교차검수 P2): 예전 생성기는 존재하지 않는 --filter를 안내했다.
+  // 이미 큐에 들어간 항목도 다음 enqueue 때 실행 가능한 현재 CLI 문법으로 마이그레이션한다.
+  if (a.icon === '💭' && /^leerness decision list --filter\s+/.test(String(a.command || ''))) {
+    a.command = String(a.command).replace('decision list --filter', 'decision list --query');
+  }
+  if (a.icon === '🎯' && /^leerness plan list --filter\s+/.test(String(a.command || ''))) {
+    a.command = 'leerness plan list --path .';
+  }
+  const plan = String(a.title || '').match(/plan\.md milestone (M-\d{4,})/);
+  if (a.icon === '🎯' && plan) a.actionKey = `plan:${plan[1]}`;
+  const decision = String(a.command || '').match(/decision list --(?:query|filter)\s+"([^"]+)"/)
+    || String(a.title || '').match(/decisions\.md "([^"]+)"/);
+  if (a.icon === '💭' && decision) a.actionKey = `decision:${decision[1]}`;
+  const lesson = String(a.title || '').match(/lessons\.md 에 "([^"]+)" 관련/);
+  if (a.icon === '🛡' && lesson) a.actionKey = `lessons:${lesson[1]}`;
+  // 패키지를 적용한 일반 프로젝트에는 leerness 자체의 scripts/e2e.js가 없다. 이전 제안도
+  // 업그레이드 직후 list/take에서 바로 실행 가능한 공개 CLI로 바꾼다.
+  if (a.icon === '🧪' && (/review-evidence\.md/.test(String(a.title || ''))
+    || String(a.command || '') === 'node ./scripts/e2e.js')) {
+    a.command = 'leerness verify-code .';
+    a.actionKey = 'verification:evidence';
+  }
+  // 경과 시간이 제목에 들어가면 24h/25h가 서로 다른 큐 항목이 된다. 상태를 단정해 done으로
+  // 바꾸는 명령 대신 현재 task 목록을 확인하는 안전한 명령을 안내한다.
+  const stalled = String(a.title || '').match(/^progress-tracker(?: \d+h)? 정체 — task (T-\d{4,}) (?:status 갱신|상태 검토)$/);
+  if (a.icon === '🔄' && stalled) {
+    a.title = `progress-tracker 정체 — task ${stalled[1]} 상태 검토`;
+    a.command = 'leerness task list --path .';
+    a.actionKey = `task-status:${stalled[1]}`;
+  }
+  if (a.icon === '📝' && /버전 변동 task — CHANGELOG\.md \/ README\.md 갱신 확인/.test(String(a.title || ''))) {
+    a.actionKey = 'release-docs';
+  }
+  // 시간값이 제목에 들어가 매 handoff마다 같은 제안이 새 항목으로 쌓였고, command는 아직 만들지
+  // 않은 stress-v(N+1)를 실행해 항상 ENOENT였다. 작업 제안은 유지하되 안정된 제목으로 합치고
+  // 실행 명령은 싣지 않는다(next-action take가 이 제목으로 추적 task를 만든다).
+  const stress = String(a.title || '').match(/^stress-v(\d+) (?:마지막 갱신 \d+h 전 — |오래됨 — )새 stress test 작성 권장$/);
+  if (a.icon === '🧬' && stress) {
+    a.title = `stress-v${stress[1]} 오래됨 — 새 stress test 작성 권장`;
+    delete a.command;
+    a.actionKey = 'stress-refresh';
+  }
+  return a;
+}
+function _nextActionIdentity(action) {
+  const key = String(action && action.actionKey || '').trim();
+  if (key) return `key:${key}`;
+  return `title:${String(action && action.icon || '')}\u0000${String(action && action.title || '')}`;
+}
+function _compactNextActionQueue(queue) {
+  const compacted = [];
+  const seen = new Set();
+  // 최신 항목을 보존한다. stress 버전/경과 시간처럼 표시값이 달라도 actionKey가 같으면 하나다.
+  for (let i = (Array.isArray(queue) ? queue.length : 0) - 1; i >= 0; i--) {
+    const action = _normalizeSuggestedAction(queue[i]);
+    const identity = _nextActionIdentity(action);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    compacted.unshift(action);
+  }
+  return compacted;
+}
+function _normalizedNextActionState(root) {
+  const state = _loadNextActionQueue(root);
+  return { ...state, queue: _compactNextActionQueue(state.queue) };
+}
 function _enqueueNextActions(root, actions) {
-  if (!Array.isArray(actions) || actions.length === 0) return 0;
+  if (!Array.isArray(actions)) return 0;
   return _withLock(_nextActionQueuePath(root), () => {
     const state = _loadNextActionQueue(root);
-    const existingTitles = new Set(state.queue.map(a => a.title));
+    const before = JSON.stringify(state.queue);
+    state.queue = _compactNextActionQueue(state.queue);
+    const existing = new Map(state.queue.map((a, i) => [_nextActionIdentity(a), i]));
     let added = 0;
-    for (const a of actions) {
-      if (existingTitles.has(a.title)) continue;
-      state.queue.push({ ...a, addedAt: new Date().toISOString() });
-      existingTitles.add(a.title);
-      added++;
+    for (const raw of actions) {
+      const a = _normalizeSuggestedAction(raw);
+      const identity = _nextActionIdentity(a);
+      if (existing.has(identity)) {
+        const i = existing.get(identity);
+        const previous = state.queue[i];
+        // 새 관측값(최신 stress 버전/결정 hit 수)은 같은 위치에서 갱신하되 최초 추가 시각은 보존한다.
+        state.queue[i] = { ...previous, ...a, addedAt: previous.addedAt || a.addedAt || new Date().toISOString() };
+      } else {
+        state.queue.push({ ...a, addedAt: new Date().toISOString() });
+        existing.set(identity, state.queue.length - 1);
+        added++;
+      }
     }
     // 최근 20개만 유지
     if (state.queue.length > 20) state.queue = state.queue.slice(-20);
-    if (added > 0) _writeNextActionQueue(root, state.queue);
+    if (added > 0 || before !== JSON.stringify(state.queue)) _writeNextActionQueue(root, state.queue);
     return added;
   });
 }
@@ -13711,8 +13877,9 @@ function _enqueueNextActions(root, actions) {
 // 1.9.201: next-action CLI 명령 — handoff 가 저장한 queue 에서 take/list/clear
 async function nextActionCmd(root, sub, ...rest) {
   root = absRoot(root);
-  const state = _loadNextActionQueue(root);
   if (!sub || sub === 'list') {
+    // 조회 자체는 쓰지 않지만, 업그레이드 직후에도 legacy 명령/중복을 노출하지 않는다.
+    const state = _normalizedNextActionState(root);
     if (has('--json')) { log(JSON.stringify(state, null, 2)); return; }
     log(`# leerness next-action list (1.9.201)`);
     if (state.queue.length === 0) {
@@ -13732,28 +13899,41 @@ async function nextActionCmd(root, sub, ...rest) {
     return;
   }
   if (sub === 'take') {
-    const n = rest[0] !== undefined ? Number(rest[0]) : state.queue.length - 1;
-    // 1.36.114 (검수 #3, 재현됨): 로더가 손상 파일을 **빈 큐**로 폴백해 "큐 비어있음 — handoff 먼저 실행" 이라고
-    //   오진했다. 사용자는 큐가 비었다고 믿고 handoff 를 다시 돌린다 — 원인(손상)은 끝까지 안 보인다.
-    //   읽기 자체는 종전대로 resilient 하게 두고, **판정 지점에서만** 빈 것과 손상된 것을 가른다.
-    if (state.queue.length === 0) { _assertStoreParsable(_nextActionQueuePath(root), 'next-action-queue'); fail('큐 비어있음 — handoff 먼저 실행'); return process.exit(1); }
-    if (isNaN(n) || n < 0 || n >= state.queue.length) { fail(`잘못된 index: ${n} (0~${state.queue.length - 1})`); return process.exit(1); }
-    const action = state.queue[n];
+    let taken;
+    try {
+      // 1.36.169 (Codex 재검수 P2): 선택을 락 밖에서 하고 제목으로 다시 찾으면, 그 사이 legacy
+      // 정규화가 제목을 바꿨을 때 task는 만들면서 큐에는 항목을 남겼다. 정규화·선택·제거를 한
+      // canonical queue transaction으로 묶고 index도 그 스냅샷에서 해석한다.
+      taken = _withLock(_nextActionQueuePath(root), () => {
+        const fresh = _loadNextActionQueue(root);
+        const queue = _compactNextActionQueue(fresh.queue);
+        // 1.36.114: 로더의 손상→빈 배열 fallback과 실제 빈 큐를 판정 지점에서 구분한다.
+        if (queue.length === 0) {
+          _assertStoreParsable(_nextActionQueuePath(root), 'next-action-queue');
+          return { error: 'empty' };
+        }
+        const n = rest[0] !== undefined ? Number(rest[0]) : queue.length - 1;
+        if (isNaN(n) || n < 0 || n >= queue.length) return { error: 'index', n, max: queue.length - 1 };
+        const action = queue[n];
+        queue.splice(n, 1);
+        if (!_writeNextActionQueue(root, queue)) throw new Error('next-action 큐 저장 실패 — task를 만들지 않습니다');
+        return { action, n };
+      });
+    } catch (e) {
+      if (e && e.code === 'E_STORE_CORRUPT') throw e;
+      fail(`next-action take 실패: ${_lineSafe(e && e.message ? e.message : e)}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (taken.error === 'empty') { fail('큐 비어있음 — handoff 먼저 실행'); process.exitCode = 1; return; }
+    if (taken.error === 'index') { fail(`잘못된 index: ${taken.n} (0~${taken.max})`); process.exitCode = 1; return; }
+    const { action, n } = taken;
     log(`# leerness next-action take [${n}] (1.9.201)`);
     log(`  ${action.icon || '•'} ${_lineSafe(action.title)}`);
     if (action.command) log(`  \`${_lineSafe(action.command)}\``);
     // task add 자동 호출
     try {
       const taskTitle = action.title.replace(/^[^\w가-힣]+/, '').slice(0, 100);
-      // 큐에서 제거 → write
-      // 1.36.108 (T-0097): 락 안에서 **다시 읽고** 제거한다. 함수 머리에서 읽은 state 로 지우면
-      //   그 사이에 handoff 가 큐에 넣은 항목이 통째로 사라진다(handoff 는 자동으로 이 큐를 채운다).
-      _withLock(_nextActionQueuePath(root), () => {
-        const fresh = _loadNextActionQueue(root);
-        const idx = fresh.queue.findIndex(a => a && a.title === action.title);
-        if (idx >= 0) fresh.queue.splice(idx, 1);
-        _writeNextActionQueue(root, fresh.queue);
-      });
       // leerness task add 호출
       const taskResult = cp.spawnSync(process.execPath, [__filename, 'task', 'add', taskTitle, '--path', root], { encoding: 'utf8', timeout: 8000, env: { ...process.env, LEERNESS_INTERNAL: '1' } });
       if (taskResult.status === 0) {
@@ -13773,8 +13953,12 @@ async function nextActionCmd(root, sub, ...rest) {
     return;
   }
   if (sub === 'clear') {
-    _writeNextActionQueue(root, []);
-    ok(`next-action 큐 초기화 (${state.queue.length}건 제거)`);
+    const removed = _withLock(_nextActionQueuePath(root), () => {
+      const fresh = _loadNextActionQueue(root);
+      if (!_writeNextActionQueue(root, [])) throw new Error('next-action 큐 저장 실패');
+      return fresh.queue.length;
+    });
+    ok(`next-action 큐 초기화 (${removed}건 제거)`);
     return;
   }
   if (sub === 'add') {
@@ -13811,7 +13995,7 @@ function _suggestNextActions(root, latestRow, keyword) {
       const blocks = lt.split(/\n### /);
       const hits = blocks.filter(b => fuzzyRe.test(b) && /(실패|fail|롤백|버그|incomplete)/i.test(b));
       if (hits.length > 0) {
-        actions.push({ icon: '🛡', title: `과거 실패 회피 — lessons.md 에 "${keyword}" 관련 ${hits.length}건`, command: `leerness lessons --auto --path .` });
+        actions.push({ actionKey: `lessons:${keyword}`, icon: '🛡', title: `과거 실패 회피 — lessons.md 에 "${keyword}" 관련 ${hits.length}건`, command: `leerness lessons --auto --path .` });
       }
     }
   } catch {}
@@ -13823,7 +14007,7 @@ function _suggestNextActions(root, latestRow, keyword) {
       const milestones = (pt.match(/^### (M-\d{4,})\..*$/gm) || []).filter(l => fuzzyRe.test(l));
       if (milestones.length > 0) {
         const m = milestones[0].match(/M-\d{4,}/);
-        if (m) actions.push({ icon: '🎯', title: `plan.md milestone ${m[0]} 검증 — "${keyword}" 관련`, command: `leerness plan list --filter "${keyword}"` });
+        if (m) actions.push({ actionKey: `plan:${m[0]}`, icon: '🎯', title: `plan.md milestone ${m[0]} 검증 — "${keyword}" 관련`, command: 'leerness plan list --path .' });
       }
     }
   } catch {}
@@ -13835,7 +14019,7 @@ function _suggestNextActions(root, latestRow, keyword) {
       const blocks = _extractDecisionBlocks(dt);
       const hits = blocks.filter(b => fuzzyRe.test(b));
       if (hits.length > 0) {
-        actions.push({ icon: '💭', title: `decisions.md "${keyword}" 관련 결정 ${hits.length}건 영향 확인`, command: `leerness decision list --filter "${keyword}"` });
+        actions.push({ actionKey: `decision:${keyword}`, icon: '💭', title: `decisions.md "${keyword}" 관련 결정 ${hits.length}건 영향 확인`, command: `leerness decision list --query "${keyword}"` });
       }
     }
   } catch {}
@@ -13843,7 +14027,7 @@ function _suggestNextActions(root, latestRow, keyword) {
   // 4) review-evidence.md 부재 → e2e
   try {
     if (!exists(evidencePath(root)) || fs.statSync(evidencePath(root)).size < 100) {
-      actions.push({ icon: '🧪', title: `review-evidence.md 비어있음 — e2e 또는 verify-code 실행`, command: `node ./scripts/e2e.js` });
+      actions.push({ actionKey: 'verification:evidence', icon: '🧪', title: `review-evidence.md 비어있음 — verify-code 실행`, command: `leerness verify-code .` });
     }
   } catch {}
 
@@ -13853,7 +14037,7 @@ function _suggestNextActions(root, latestRow, keyword) {
     if (exists(pp)) {
       const ageHours = Math.floor((Date.now() - fs.statSync(pp).mtimeMs) / 3600000);
       if (ageHours >= 24 && latestRow.id) {
-        actions.push({ icon: '🔄', title: `progress-tracker ${ageHours}h 정체 — task ${latestRow.id} status 갱신`, command: `leerness task update ${latestRow.id} --status completed` });
+        actions.push({ actionKey: `task-status:${latestRow.id}`, icon: '🔄', title: `progress-tracker 정체 — task ${latestRow.id} 상태 검토`, command: `leerness task list --path .` });
       }
     }
   } catch {}
@@ -13861,7 +14045,7 @@ function _suggestNextActions(root, latestRow, keyword) {
   // 6) CHANGELOG / README 버전 일치 확인 (1.9.X bump 후 자주 누락되는 단계)
   try {
     if (/(\d\.\d\.\d+)/.test(taskText) || /(bump|version|release)/i.test(taskText)) {
-      actions.push({ icon: '📝', title: `버전 변동 task — CHANGELOG.md / README.md 갱신 확인`, command: `leerness whats-new .` });
+      actions.push({ actionKey: 'release-docs', icon: '📝', title: `버전 변동 task — CHANGELOG.md / README.md 갱신 확인`, command: `leerness whats-new .` });
     }
   } catch {}
 
@@ -13877,16 +14061,16 @@ function _suggestNextActions(root, latestRow, keyword) {
         const latestFile = path.join(stressDir, `stress-v${latest}.js`);
         const ageHours = Math.floor((Date.now() - fs.statSync(latestFile).mtimeMs) / 3600000);
         if (ageHours >= 24 && /(bump|version|보강|추가|기능)/.test(taskText)) {
-          actions.push({ icon: '🧬', title: `stress-v${latest} 마지막 갱신 ${ageHours}h 전 — 새 stress test 작성 권장`, command: `node _apps/leerness-stress/bin/stress-v${latest+1}.js` });
+          actions.push({ actionKey: 'stress-refresh', icon: '🧬', title: `stress-v${latest} 오래됨 — 새 stress test 작성 권장` });
         }
       }
     }
   } catch {}
 
-  // 중복 제거 (icon+title 기준) + top 3
+  // 중복 제거 (시간/버전과 무관한 actionKey 기준) + top 3
   const seen = new Set();
   return actions.filter(a => {
-    const key = a.icon + a.title.slice(0, 30);
+    const key = _nextActionIdentity(a);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -14207,10 +14391,20 @@ function upsertProgress(root, row) {
 }
 
 function planShow(root) { const p = planPath(root); const has_ = exists(p); const content = has_ ? read(p) : ''; if (has('--json')) { const milestones = (content.match(/^### (M-\d{4,})\b.*$/gm) || []).map(l => l.replace(/^###\s*/, '').trim()); log(JSON.stringify({ exists: has_, milestones, raw: content }, null, 2)); return; } log(has_ ? content : 'plan.md not found'); }  // 1.9.428 (UR-0128): plan show --json 구조화
-// plan.md와 progress-tracker.md를 함께 다루는 모든 RMW의 공통 키. plan restore도 이 키를 써야
-// plan add/drop/remove과 같은 스냅샷을 본다 (1.36.152/T-0115).
-function _withPlanTransaction(root, fn) { return _withLock(progressPath(root), fn); }
-function planInit(root) { const goal = arg('--goal', ''); if (!exists(planPath(root))) return install(root); append(planPath(root), `\n## User Goal\n- ${goal || '사용자 목적을 작성하세요.'}\n`); ok('plan goal appended'); }
+// plan.md 단독 RMW의 canonical lock. plan/progress를 함께 바꾸는 경로는 항상
+// progress → plan 순서로 잡아 역순 교착과 서로 다른 락 아래의 lost-update를 함께 막는다.
+function _withPlanLock(root, fn) { return _withLock(planPath(root), fn); }
+function _withPlanTransaction(root, fn) {
+  return _withLock(progressPath(root), () => _withPlanLock(root, fn));
+}
+function planInit(root) {
+  const goal = arg('--goal', '');
+  if (!exists(planPath(root))) return install(root);
+  // 1.36.169 (T-0108): plan add/drop/remove/restore와 같은 plan.md 락을 쓴다.
+  // 종전 append는 성공했어도 동시에 진행된 plan remove의 낡은 전체파일 rename에 지워졌다.
+  _withPlanLock(root, () => append(planPath(root), `\n## User Goal\n- ${goal || '사용자 목적을 작성하세요.'}\n`));
+  ok('plan goal appended');
+}
 // 1.9.119: plan list — plan.md 의 모든 milestone (M-XXXX) 조회 (CLI + --json + MCP)
 function planListCmd(root, opts = {}) {
   root = absRoot(root);
@@ -14895,10 +15089,11 @@ function memoryRestoreCmd(root, surface, target) {
                     : surface === 'lessons'   ? lessonsPath(root)
                     : planPath(root);
   // 1.36.152 (T-0115): restore는 active canonical store와 archive를 함께 RMW한다.
-  // decisions/lessons는 add/drop의 JSON 키, plan은 plan add/drop의 progress 키를 공유해야 한다.
+  // 1.36.169 (T-0108): plan 전용 경로는 progress의 대리 락이 아니라 plan.md canonical 락을 쓴다.
+  // plan+progress 동시 변경은 _withPlanTransaction이 progress → plan 순서로 같은 락에 합류한다.
   const memoryLockPath = surface === 'decisions' ? decisionsJsonPath(root)
                        : surface === 'lessons'   ? lessonsJsonPath(root)
-                       : progressPath(root);
+                       : planPath(root);
   const restoredCount = _withLock(memoryLockPath, () => {
   if (!exists(archivePath)) return fail(`${surface}.archive.md 없음 — 복원할 항목 없음`);
   // 1.36.76 (9차 헌트 #3 P1) → (검수 #2): 잘린/깨진 UTF-8 아카이브가 손상 데이터를 active 로 유입시키던 것.
@@ -15378,7 +15573,7 @@ function verify(root) {
 //   harness 는 deps(VERSION·canonical 메모리 함수·카탈로그·compareVer·harness 경로)를 1회 구성해 위임(thin wrapper). 호출부/동작 무변경.
 const _migrate = require('../lib/migrate');
 function _migrateDeps() {
-  return { VERSION, compareVer, REQUIRED_WORKSPACE_FILES, decisionsPath, decisionsJsonPath, lessonsPath, lessonsJsonPath, _loadDecisions, _saveDecisions, _loadLessons, _saveLessons, harnessPath: __filename };
+  return { VERSION, compareVer, REQUIRED_WORKSPACE_FILES, decisionsPath, decisionsJsonPath, lessonsPath, lessonsJsonPath, _loadDecisions, _saveDecisions, _loadLessons, _saveLessons, _withLock, harnessPath: __filename };
 }
 function migrateAuditCmd(root, opts = {}) { return _migrate.migrateAuditCmd(root, opts, _migrateDeps()); }
 function migrateApplyCmd(root, opts = {}) { return _migrate.migrateApplyCmd(root, opts, _migrateDeps()); }
@@ -17170,6 +17365,8 @@ function handoff(root) {
           if (!has('--no-next-actions') && !has('--quiet') && process.env.LEERNESS_NO_NEXT_ACTIONS !== '1') {
             try {
               const actions = _suggestNextActions(root, latestRow, keyword);
+              // 새 제안이 없어도 legacy queue의 잘못된 명령/시간가변 중복은 정규화한다.
+              const added = _enqueueNextActions(root, actions);
               if (actions.length > 0) {
                 const isTty = process.stdout && process.stdout.isTTY;
                 const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
@@ -17183,10 +17380,7 @@ function handoff(root) {
                   }
                 }
                 // 1.9.201: queue 자동 저장 — `leerness next-action take` 로 즉시 task add 가능 (토글과 무관: 상태다)
-                try {
-                  const added = _enqueueNextActions(root, actions);
-                  if (added > 0 && _showAdvice) log(dim(`  → 즉시 task add: leerness next-action take  (큐 +${added}건 저장됨, 1.9.201)`));
-                } catch {}
+                if (added > 0 && _showAdvice) log(dim(`  → 즉시 task add: leerness next-action take  (큐 +${added}건 저장됨, 1.9.201)`));
                 if (_showAdvice) { log(dim(`  → 직접 입력: leerness next-action add "<text>"`)); log(''); }
               }
             } catch {}
@@ -22581,6 +22775,15 @@ function captureProjectState(root) {
 
 function verifyRules(root) {
   root = absRoot(root);
+  // 활성 룰이 없으면 읽기 전용으로 끝낸다. cache 디렉터리를 잠금 부작용만으로 만들지 않는다.
+  if (!readRules(root).some(r => r.status === 'active')) return [];
+  // 1.36.169 (T-0108): baseline read → project capture → rule merge → baseline write를 한
+  // cache transaction으로 직렬화한다. 종전에는 오래된 verify가 늦게 끝나 최신 baseline을
+  // 되돌려 다음 세션이 이미 수행한 version/changelog 변경을 다시 pass로 오인할 수 있었다.
+  return _withLock(rulesCachePath(root), () => _verifyRulesLocked(root));
+}
+
+function _verifyRulesLocked(root) {
   const rules = readRules(root);
   const active = rules.filter(r => r.status === 'active');
   if (!active.length) return [];

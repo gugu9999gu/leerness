@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.36.169 — 2026-08-27
+
+- 멀티세션 lost-update 방지: plan/anchors canonical lock, decisions·lessons migration transaction, rule baseline verification serialization, 11-pair forced-interleaving regressions
+- 외부 Codex 교차 검수에서 재현한 자동 next-action 오류를 수정했습니다. decision/plan 제안은 실제 지원 명령만 안내하고, 일반 적용 프로젝트에 없는 `scripts/e2e.js` 대신 `leerness verify-code .`를 사용하며, 아직 생성되지 않은 stress 파일 실행을 제거합니다.
+- next-action에 시간·버전과 무관한 안정 키를 도입해 stress 버전 및 progress 경과시간 중복을 하나로 갱신합니다. 업그레이드 직후 list/take도 legacy 큐를 즉시 정규화하고, take의 선택·정규화·제거를 한 잠금 트랜잭션으로 묶어 동시 handoff가 제목을 바꿔도 task와 큐 상태가 갈라지지 않게 했습니다.
+
 ## 1.36.168 — 2026-08-26
 
 - Windows which가 동일 npm 설치의 extensionless/.cmd/.ps1 shim을 실제 package bin target과 npm 실행문까지 검증한 뒤 한 설치로 그룹화하고, pathCandidates 원문은 유지한 채 pathInstallations를 추가해 PATH 충돌 오탐을 제거. 독립 검토에서 잡힌 주석·더미 인자 우회까지 막아 변조·미증명·다른 디렉터리·비표준 .bat·POSIX 후보를 보수적으로 분리하며 15개 회귀 프로브와 제품 배선 가드 추가.

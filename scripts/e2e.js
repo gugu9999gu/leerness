@@ -10688,7 +10688,10 @@ total++;
     if (syncUrl) CASES.push(['provider sync', ['provider', 'sync', syncUrl]]);
     dbg.syncCovered = !!syncUrl;
     const offenders = [], failedCmds = [];
-    const keysByFile = {};   // 파일 → 그 파일을 쓸 때 쥐고 있던 락 키 집합(명령을 가로질러 모은다)
+    // 파일 → 모든 쓰기에서 공통으로 쥔 락 키의 교집합. 보조 락이 더해져도 canonical 락이
+    // 공통이면 상호배제는 유지된다(예: progress → plan 순서의 2파일 transaction).
+    const commonKeysByFile = {};
+    const keySetsByFile = {};
     let lockedSeen = 0, rows = 0;
     for (const [label, argv, seed] of CASES) {
       const d = path.join(sb, label.replace(/[^a-z0-9]+/gi, '_'));
@@ -10713,8 +10716,10 @@ total++;
         byFile[l.file] = (l.file in byFile ? byFile[l.file] : true) && l.locked;
         // 어느 락 키로 지켰는지 모은다 — 파일 자신의 락이 아니면 다른 명령과 서로 배제되지 않는다.
         if (l.locked && !DERIVED.test(l.file) && !EXEMPT[l.file]) {
-          (keysByFile[l.file] = keysByFile[l.file] || new Set());
-          for (const k of (l.heldOn || [])) keysByFile[l.file].add(k);
+          const held = new Set(l.heldOn || []);
+          (keySetsByFile[l.file] = keySetsByFile[l.file] || new Set()).add([...held].sort().join(' + ') || '(none)');
+          if (!commonKeysByFile[l.file]) commonKeysByFile[l.file] = held;
+          else commonKeysByFile[l.file] = new Set([...commonKeysByFile[l.file]].filter(k => held.has(k)));
         }
       }
       for (const [f, lockedOk] of Object.entries(byFile)) {
@@ -10728,11 +10733,12 @@ total++;
     // codex 검수 P2(재현됨): "락을 하나라도 쥐었나" 는 너무 약하다. 상호배제는 **같은 키**를 쥘 때만 성립한다.
     //   session close 는 session-handoff.md.lock 을 쥔 채 current-state.md 를 썼고 audit --fix 는
     //   current-state.md.lock 을 쥐었다 — 둘 다 '락 보유' 인 채로 audit 의 갱신이 덮였다.
-    //   올바른 불변식은 "자기 이름의 락" 이 아니라 **"그 파일의 모든 쓰기가 같은 키를 쓴다"** 이다.
-    //   (decisions.md 를 decisions.json.lock 아래에서 쓰는 것은 정상 — 그 파일을 쓰는 유일한 경로가 거기뿐이면.)
+    //   올바른 불변식은 "자기 이름의 락" 이 아니라 **"그 파일의 모든 쓰기가 적어도 한 canonical 키를 공유한다"** 이다.
+    //   (decisions.md 를 decisions.json.lock 아래에서 쓰는 것은 정상이고, progress→plan transaction처럼
+    //   보조 락이 더해진 쓰기도 공통 plan.md.lock/progress-tracker.md.lock가 남으면 정상이다.)
     const wrongKey = [];
-    for (const [f, keys] of Object.entries(keysByFile)) {
-      if (keys.size !== 1) wrongKey.push(f + ' ← 서로 다른 락 ' + [...keys].sort().join(' / '));
+    for (const [f, common] of Object.entries(commonKeysByFile)) {
+      if (common.size === 0) wrongKey.push(f + ' ← 공통 락 없음 (' + [...keySetsByFile[f]].sort().join(' / ') + ')');
     }
     dbg.wrongKey = wrongKey;
     dbg.offenders = offenders;
@@ -10746,7 +10752,7 @@ total++;
     ok = dbg.probeAlive && dbg.coverage && dbg.syncCovered && offenders.length === 0 && wrongKey.length === 0;
     try { srv.kill(); } catch {}
   } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
-  console.log(ok ? `✓ L(1.36.108/T-0097) 사용자 상태 쓰기 ${dbg.rows}건 전부 락 안 + 파일당 락 키 일관 (락 관측 ${dbg.lockedSeen}건 = 계측 살아있음 · 명령 실패 0)`
+  console.log(ok ? `✓ L(1.36.108/T-0097, 1.36.169/T-0108) 사용자 상태 쓰기 ${dbg.rows}건 전부 락 안 + 파일별 canonical 락 교집합 존재 (락 관측 ${dbg.lockedSeen}건 = 계측 살아있음 · 명령 실패 0)`
     : '✗ 1.36.108 락 불변식 위반 ' + JSON.stringify(dbg));
   if (!ok) failed++;
 }
@@ -15527,8 +15533,8 @@ total++;
 }
 
 total++;
-// AO(1.36.152/T-0115) — write 시점의 락 관측만으로는 "읽은 사본도 락 안인가"를 증명할 수 없다.
-// 첫 프로세스의 최종 rename을 강제로 멈추고 두 번째 쓰기를 붙여, 서로 다른 RMW 여섯 쌍이 모두 생존하는지 확인한다.
+// AO(1.36.152/T-0115, 1.36.169/T-0108 확장) — write 시점의 락 관측만으로는 "읽은 사본도 락 안인가"를 증명할 수 없다.
+// 첫 프로세스의 최종 rename을 강제로 멈추고 두 번째 쓰기를 붙여, 서로 다른 RMW 11쌍이 모두 생존하는지 확인한다.
 {
   let ok = false; const dbg = {};
   try {
@@ -15543,9 +15549,9 @@ total++;
     dbg.exit = race.status; dbg.report = report;
     if (!report) dbg.stderr = String(race.stderr || '').slice(0, 500);
     ok = race.status === 0 && !!report && report.ok === true
-      && Array.isArray(report.results) && report.results.length === 6 && report.results.every(r => r.ok === true);
+      && Array.isArray(report.results) && report.results.length === 11 && report.results.every(r => r.ok === true);
   } catch (e) { dbg.err = String(e && e.message || e).slice(0, 200); }
-  console.log(ok ? '✓ AO(1.36.152/T-0115) 지연 경쟁 6쌍 모두 exit 0 + 양쪽 기록 보존'
+  console.log(ok ? '✓ AO(1.36.152/T-0115, 1.36.169/T-0108) 지연 경쟁 11쌍 모두 exit 0 + 양쪽 기록 보존'
     : '✗ 1.36.152 동시 RMW 회귀 ' + JSON.stringify(dbg));
   if (!ok) failed++;
 }

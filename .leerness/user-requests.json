@@ -942,7 +942,17 @@
       "notes": "",
       "updatedAt": "2026-08-26T17:07:41.182Z",
       "completedAt": "2026-08-26T17:07:41.182Z"
+    },
+    {
+      "id": "UR-0083",
+      "text": "이어서 진행",
+      "recordedAt": "2026-08-26T23:30:11.982Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-08-26T17:07:41.183Z"
+  "updatedAt": "2026-08-26T23:30:11.983Z"
 }

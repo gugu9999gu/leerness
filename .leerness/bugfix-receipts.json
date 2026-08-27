@@ -454,5 +454,51 @@
       ]
     },
     "previousGuardGap": "기존 회귀 가드는 PATH-only 안전 수집만 확인했고 raw executable candidates와 logical installations의 의미 차이를 검사하지 않았다."
+  },
+  {
+    "id": "T-0108",
+    "repro": "node scripts/e2e-concurrency.js bin/leerness.js",
+    "expectBad": "plan-init-vs-remove",
+    "baseline": {
+      "at": "2026-08-26T23:39:09.350Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 22883
+    },
+    "rootCause": "같은 canonical 상태 파일의 RMW 진입점들이 proxy 락 또는 무락을 혼용해, 늦게 끝난 stale snapshot rename이 이미 성공한 다른 세션의 기록을 덮어썼다.",
+    "siblingScope": {
+      "checked": [
+        "plan init/add/drop/remove/restore/anchors",
+        "decision add/drop/restore/migrate",
+        "lesson save/drop/restore/migrate",
+        "rule add/mutate/verify cache",
+        "last-handoff/freshness"
+      ]
+    },
+    "previousGuardGap": "기존 동시성 회귀가 흔한 add/remove 조합과 write 시점만 검사해 드문 plan init·anchors·migrate 백필 및 baseline cache의 read-before-lock 경로를 실행하지 않았다."
+  },
+  {
+    "id": "T-0150",
+    "repro": "node scripts/next-action-suggestion-probe.js",
+    "expectBad": "invalid-next-action-suggestion",
+    "baseline": {
+      "at": "2026-08-27T03:39:38.632Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 82
+    },
+    "rootCause": "자동 제안기가 실제 CLI 계약과 분리된 명령 문자열 및 시간·버전 기반 제목을 저장했고, list/take 선택도 안정된 identity 없이 락 밖 snapshot에 의존했다.",
+    "siblingScope": {
+      "checked": [
+        "decision·plan·review-evidence·stress·progress 제안",
+        "legacy queue lazy migration",
+        "list/take/clear 동시 접근을 함께 조사하고 회귀 probe로 고정."
+      ]
+    },
+    "previousGuardGap": "기존 테스트는 세 가지 문자열만 확인해 일반 소비자 프로젝트의 실제 명령 실행, cross-version/hour dedup, take-vs-normalization interleaving을 검증하지 않았다."
   }
 ]

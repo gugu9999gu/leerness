@@ -44,8 +44,11 @@ function spawn(d, args, stallTarget) {
 }
 
 function waitForStall(d, target) {
-  const re = new RegExp('^' + target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.tmp-');
-  const hd = path.join(d, '.leerness');
+  const normalized = target.replace(/\\/g, '/');
+  const targetDir = path.dirname(normalized) === '.' ? '' : path.dirname(normalized);
+  const targetName = path.basename(normalized);
+  const re = new RegExp('^' + targetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.tmp-');
+  const hd = path.join(d, '.leerness', targetDir);
   for (let i = 0; i < 800; i++) {
     try { if (fs.readdirSync(hd).some(name => re.test(name))) return true; } catch {}
     nap(10);
@@ -60,6 +63,7 @@ async function race(name, config) {
     if (config.seed) config.seed(d);
     const first = spawn(d, config.first, config.stallTarget);
     const stalled = waitForStall(d, config.stallTarget);
+    if (config.beforeSecond) config.beforeSecond(d);
     const second = spawn(d, config.second);
     const exits = await Promise.all([wait(first), wait(second)]);
     const inspected = config.inspect(d);
@@ -130,6 +134,73 @@ async function race(name, config) {
     inspect: d => {
       const plan = fs.readFileSync(path.join(d, '.leerness', 'plan.md'), 'utf8');
       return { archived: plan.includes('archived'), survivor: plan.includes('survivor'), preserved: plan.includes('archived') && plan.includes('survivor') };
+    }
+  }));
+  results.push(await race('plan-init-vs-remove', {
+    stallTarget: 'plan.md',
+    seed: d => run(d, ['plan', 'add', 'victim']),
+    first: ['plan', 'remove', 'victim'],
+    second: ['plan', 'init', '--goal', 'survivor-goal'],
+    inspect: d => {
+      const plan = fs.readFileSync(path.join(d, '.leerness', 'plan.md'), 'utf8');
+      return {
+        victimRemoved: !plan.includes('victim'),
+        survivorPreserved: plan.includes('survivor-goal'),
+        preserved: !plan.includes('victim') && plan.includes('survivor-goal')
+      };
+    }
+  }));
+  results.push(await race('anchors-plan-vs-plan-add', {
+    stallTarget: 'plan.md',
+    seed: d => fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.0', description: 'coordination probe' })),
+    first: ['anchors', 'draft', '--apply'],
+    second: ['plan', 'add', 'survivor-milestone'],
+    inspect: d => {
+      const plan = fs.readFileSync(path.join(d, '.leerness', 'plan.md'), 'utf8');
+      return { survivorPreserved: plan.includes('survivor-milestone'), preserved: plan.includes('survivor-milestone') };
+    }
+  }));
+  results.push(await race('migrate-decisions-vs-add', {
+    stallTarget: 'decisions.json',
+    seed: d => {
+      run(d, ['decision', 'add', 'legacy-decision']);
+      fs.unlinkSync(path.join(d, '.leerness', 'decisions.json'));
+    },
+    first: ['migrate', 'apply', '--yes'],
+    second: ['decision', 'add', 'survivor-decision'],
+    inspect: d => {
+      const titles = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'decisions.json'), 'utf8')).map(item => item.title);
+      return { titles, preserved: titles.includes('legacy-decision') && titles.includes('survivor-decision') };
+    }
+  }));
+  results.push(await race('migrate-lessons-vs-save', {
+    stallTarget: 'lessons.json',
+    seed: d => {
+      run(d, ['lesson', 'save', 'legacy-lesson']);
+      fs.unlinkSync(path.join(d, '.leerness', 'lessons.json'));
+    },
+    first: ['migrate', 'apply', '--yes'],
+    second: ['lesson', 'save', 'survivor-lesson'],
+    inspect: d => {
+      const texts = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'lessons.json'), 'utf8')).map(item => item.text);
+      return { texts, preserved: texts.includes('legacy-lesson') && texts.includes('survivor-lesson') };
+    }
+  }));
+  results.push(await race('rule-cache-verify-vs-verify', {
+    stallTarget: 'cache/rule-state.json',
+    seed: d => {
+      const pkg = version => fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'probe', version }));
+      pkg('1.0.0');
+      run(d, ['rule', 'add', 'version bump required', '--trigger', 'every-update']);
+      run(d, ['rule', 'verify']);
+      pkg('1.0.1');
+    },
+    beforeSecond: d => fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.2' })),
+    first: ['rule', 'verify'],
+    second: ['rule', 'verify'],
+    inspect: d => {
+      const cached = JSON.parse(fs.readFileSync(path.join(d, '.leerness', 'cache', 'rule-state.json'), 'utf8'));
+      return { cachedVersion: cached.packageVersion, preserved: cached.packageVersion === '1.0.2' };
     }
   }));
   const ok = results.every(result => result.ok);
