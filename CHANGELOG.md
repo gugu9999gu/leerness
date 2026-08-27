@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.36.170 — 2026-08-27
+
+- next-action의 정규화 계약을 모든 읽기 표면으로 확장했습니다. release-time auto-resume plan 생성과 외부 에이전트용 `context`가 legacy `--filter`, 자동 완료 명령, 시간 기반 중복, 존재하지 않는 stress 실행을 다시 노출하지 않습니다.
+- 1.36.169 이전에 저장된 `auto-resume-plan.json`도 `resume`/`handoff`에서 지연 정규화하며, pre-wake audit가 폐기된 `pending` 필드 대신 canonical queue를 세어 대기 작업을 정확히 보고합니다.
+- 회귀 probe가 `next-action list/take`뿐 아니라 release plan, 기존 plan 재개, context JSON, pre-wake pending count까지 실제 CLI로 검증합니다. 외부 Codex 교차 리뷰 결과 P0/P1/P2는 없었습니다.
+
 ## 1.36.169 — 2026-08-27
 
 - 멀티세션 lost-update 방지: plan/anchors canonical lock, decisions·lessons migration transaction, rule baseline verification serialization, 11-pair forced-interleaving regressions

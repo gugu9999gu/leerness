@@ -16,6 +16,11 @@ if (start < 0 || end <= start) {
 }
 
 const generator = source.slice(start, end);
+const resumeBuildStart = source.indexOf('function _buildAutoResumePlan(');
+const resumeBuildEnd = source.indexOf('function resumeCmd(', resumeBuildStart);
+const resumeBuilder = resumeBuildStart >= 0 && resumeBuildEnd > resumeBuildStart
+  ? source.slice(resumeBuildStart, resumeBuildEnd)
+  : '';
 const offenders = [];
 const run = (args, cwd) => cp.spawnSync(process.execPath, [cliPath, ...args], {
   cwd,
@@ -30,6 +35,13 @@ const writeQueue = (root, queue) => {
 };
 const commandArgs = (command) => (String(command).match(/"[^"]*"|\S+/g) || []).map(x => x.startsWith('"') ? x.slice(1, -1) : x);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const hasLegacySuggestion = actions => (Array.isArray(actions) ? actions : []).some(a =>
+  /\s--filter(?:\s|$)/.test(String(a.command || ''))
+  || String(a.command || '').includes('./scripts/e2e.js')
+  || /task update .* --status completed/.test(String(a.command || ''))
+  || (/^progress-tracker \d+h 정체/.test(String(a.title || '')))
+  || (/^node _apps\/leerness-stress/.test(String(a.command || '')))
+);
 
 async function reproduceTakeMigrationRace(root) {
   const queuePath = path.join(root, '.leerness', 'next-action-queue.json');
@@ -74,6 +86,7 @@ async function main() {
   if (generator.includes('leerness plan list --filter')) offenders.push('plan-list-filter');
   if (/stress-v\$\{latest\+1\}/.test(generator)) offenders.push('missing-stress-execution');
   if (generator.includes('node ./scripts/e2e.js')) offenders.push('consumer-missing-e2e');
+  if (!resumeBuilder.includes('_normalizedNextActionState(root)')) offenders.push('auto-resume-build-raw-queue');
 
   const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-next-action-probe-'));
   try {
@@ -104,6 +117,41 @@ async function main() {
     if (queue.filter(a => a.icon === '🔄').length !== 1) offenders.push('hour-changing-progress-dedup');
     if (queue.some(a => a.icon === '🔄' && /\d+h/.test(String(a.title)))) offenders.push('dynamic-progress-title');
     if (queue.filter(a => ['🎯', '💭', '🧪', '🧬', '🔄'].includes(a.icon)).some(a => !a.actionKey)) offenders.push('stable-action-key');
+
+    // Every read surface must expose the same normalized contract as next-action list/take.
+    // A published release writes auto-resume-plan from this snapshot, while context is consumed
+    // by external agents; leaking legacy commands through either surface reintroduces the bug.
+    const planRoot = path.join(arena, 'resume-project');
+    fs.mkdirSync(path.join(planRoot, '.leerness'), { recursive: true });
+    fs.writeFileSync(path.join(planRoot, '.leerness', 'auto-resume-plan.json'), JSON.stringify({
+      savedAt: new Date().toISOString(),
+      expectedFireAt: new Date(Date.now() + 60000).toISOString(),
+      nextRoundVersion: 'next after 1.36.169',
+      nextActions: legacy
+    }, null, 2), 'utf8');
+    const resumed = run(['resume', '--path', planRoot, '--json'], planRoot);
+    let resumedActions = [];
+    try { resumedActions = JSON.parse(resumed.stdout).nextActions; } catch { offenders.push('resume-json-contract'); }
+    if (resumed.status !== 0) offenders.push('resume-exit');
+    if (hasLegacySuggestion(resumedActions)) offenders.push('legacy-auto-resume-plan');
+    if ((resumedActions || []).filter(a => a.icon === '🧬').length !== 1
+      || (resumedActions || []).filter(a => a.icon === '🔄').length !== 1) offenders.push('auto-resume-plan-dedup');
+
+    const contextual = run(['context', '--path', listRoot, '--json'], listRoot);
+    let contextActions = [];
+    try { contextActions = JSON.parse(contextual.stdout).nextActions; } catch { offenders.push('context-json-contract'); }
+    if (contextual.status !== 0) offenders.push('context-exit');
+    if (hasLegacySuggestion(contextActions)) offenders.push('context-raw-queue');
+
+    const preWake = run(['pre-wake-audit', '--path', listRoot, '--json'], listRoot);
+    let pendingFinding = null;
+    try {
+      const report = JSON.parse(preWake.stdout);
+      pendingFinding = (report.findings.info || []).find(f => f.kind === 'next-action-pending');
+    } catch { offenders.push('pre-wake-json-contract'); }
+    if (preWake.status !== 0) offenders.push('pre-wake-exit');
+    if (!pendingFinding) offenders.push('pre-wake-missing-next-action');
+    else if (pendingFinding.count !== queue.length) offenders.push('pre-wake-raw-next-action-count');
 
     // Execute corrected generated commands against an ordinary project. This guards command
     // existence and flags, rather than merely asserting that selected source strings changed.

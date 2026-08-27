@@ -500,5 +500,29 @@
       ]
     },
     "previousGuardGap": "기존 테스트는 세 가지 문자열만 확인해 일반 소비자 프로젝트의 실제 명령 실행, cross-version/hour dedup, take-vs-normalization interleaving을 검증하지 않았다."
+  },
+  {
+    "id": "T-0152",
+    "repro": "node scripts/next-action-suggestion-probe.js",
+    "expectBad": "auto-resume-build-raw-queue",
+    "baseline": {
+      "at": "2026-08-27T07:41:25.147Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 3717
+    },
+    "rootCause": "next-action list/take만 canonical 정규화를 사용하고 auto-resume load/build, context, pre-wake audit는 raw loader 또는 폐기된 pending 필드 계약을 사용했다.",
+    "siblingScope": {
+      "checked": [
+        "auto-resume plan load/build",
+        "context JSON",
+        "pre-wake audit",
+        "next-action list/take/clear",
+        "release publish writer"
+      ]
+    },
+    "previousGuardGap": "기존 probe는 list/take의 legacy migration과 동시성만 검증했고 release가 저장하는 plan, 기존 plan 재개, 외부 에이전트 context, pre-wake pending count를 실행하지 않았다."
   }
 ]

@@ -48,7 +48,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.169';
+const VERSION = '1.36.170';
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
@@ -11400,12 +11400,14 @@ function _runPreWakeAudit(root) {
 
   // 6) next-action queue 잔여 (1.9.201)
   try {
-    const q = _loadNextActionQueue(root);
-    if (q && q.pending && q.pending.length > 0) {
+    // loader 계약은 { queue, at }이다. 과거 `pending`을 읽어 이 검사가 항상 무언
+    // no-op이었고, raw 큐 수를 쓰면 legacy 중복까지 과대 계수된다.
+    const q = _normalizedNextActionState(root);
+    if (q.queue.length > 0) {
       audit.findings.info.push({
         kind: 'next-action-pending',
-        count: q.pending.length,
-        detail: `${q.pending.length}건 next-action 대기 — leerness next-action take 로 즉시 처리`
+        count: q.queue.length,
+        detail: `${q.queue.length}건 next-action 대기 — leerness next-action take 로 즉시 처리`
       });
     }
   } catch {}
@@ -11908,7 +11910,11 @@ function _loadAutoResumePlan(root) {
     if (!j.savedAt) return null;
     const ageMs = Date.now() - new Date(j.savedAt).getTime();
     const expiredMs = j.expectedFireAt ? Date.now() - new Date(j.expectedFireAt).getTime() : 0;
-    return { ...j, ageMs, ageMin: Math.floor(ageMs / 60000), elapsedFromExpected: Math.floor(expiredMs / 60000) };
+    // 1.36.170: 1.36.169 이전에 저장한 plan도 resume/handoff에서 곧바로 현재 명령 계약으로
+    // 읽는다. 큐 list/take만 정규화하면 release 직후 저장된 plan이 legacy --filter,
+    // 자동 done 명령, 존재하지 않는 stress 파일 실행을 다시 노출할 수 있다.
+    const nextActions = _compactNextActionQueue(Array.isArray(j.nextActions) ? j.nextActions : []);
+    return { ...j, nextActions, ageMs, ageMin: Math.floor(ageMs / 60000), elapsedFromExpected: Math.floor(expiredMs / 60000) };
   } catch { return null; }
 }
 function _writeAutoResumePlan(root, plan) {
@@ -11931,7 +11937,7 @@ function _buildAutoResumePlan(root, opts) {
   // 현재 VERSION
   const currentVersion = VERSION;
   // next-action queue snapshot
-  const queueState = _loadNextActionQueue(root);
+  const queueState = _normalizedNextActionState(root);
   const queueTop = queueState.queue.length > 0 ? queueState.queue[queueState.queue.length - 1] : null;
   // memory surface counts
   const memorySurface = {
@@ -27306,7 +27312,8 @@ function contextCmd(root, opts = {}) {
   const _decs = _loadDecisions(root);
   const decisionCount = _decs.length;
   const recentDecisions = _decs.slice(-3).reverse().map(d => ({ date: d.date || null, title: (d.title || '').slice(0, 100) }));
-  const queueState = _loadNextActionQueue(root);
+  // 외부 에이전트 context도 next-action list/take와 같은 정규화 계약을 공유한다.
+  const queueState = _normalizedNextActionState(root);
   const nextActions = (queueState.queue || []).slice(-3).reverse().map(a => ({ title: a.title, command: a.command || null }));
   const memory = {
     tasksInProgress: rows.filter(r => r.status === 'in-progress').length,
