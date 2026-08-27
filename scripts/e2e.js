@@ -15029,6 +15029,7 @@ total++;
       if (!s1 || !s2 || s1.started === s2.started) bad.push('①MCP 두 세션이 같은 run 을 받음 — 판별 불가');
       else {
         if (!rec || rec.recorded !== s1.started) bad.push(`①MCP: A 의 증거가 A 의 run 이 아닌 곳에 붙음(${rec && rec.recorded})`);
+        if (!ver || ver.result !== 'pass' || !ver.run || ver.run.verification_result !== 'pass') bad.push(`①MCP: B verify pass 응답이 없거나 실패(${JSON.stringify(ver)})`);
         const allowed = ver && ver.completion_claim_allowed && ver.completion_claim_allowed.allowed;
         if (allowed) bad.push('①MCP: 일하지 않은 세션이 완료 허용을 받음 — 증거 게이트가 뒤집힘');
       }
@@ -15345,6 +15346,7 @@ total++;
       if (!s1 || !s2 || s1.started === s2.started) bad.push('②자식 env 에서 두 세션이 같은 run — 판별 불가');
       else {
         if (!rec || rec.recorded !== s1.started) bad.push(`②자식 env 에서 증거가 엉뚱한 run 에 붙음(${rec && rec.recorded})`);
+        if (!ver || ver.result !== 'pass' || !ver.run || ver.run.verification_result !== 'pass') bad.push(`②자식 env verify pass 응답이 없거나 실패(${JSON.stringify(ver)})`);
         if (ver && ver.completion_claim_allowed && ver.completion_claim_allowed.allowed) bad.push('②자식 env 에서 놀던 세션이 완료 허용을 받음');
       }
       dbg.mcpChild = { A: s1 && s1.started, recordedTo: rec && rec.recorded,

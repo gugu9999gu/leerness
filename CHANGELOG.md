@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.171 — 2026-08-27
+
+- MCP handoff/session-close가 호출별 sessionKey로 presence를 등록·종료하고, Windows 환경변수 casing·일회성 marker·legacy case variant·손상 closedAt를 안전하게 처리하도록 개선했습니다. 전용 MCP presence 회귀 22/22와 전체 E2E 467/467를 추가·통과했습니다.
+
 ## 1.36.170 — 2026-08-27
 
 - next-action의 정규화 계약을 모든 읽기 표면으로 확장했습니다. release-time auto-resume plan 생성과 외부 에이전트용 `context`가 legacy `--filter`, 자동 완료 명령, 시간 기반 중복, 존재하지 않는 stress 실행을 다시 노출하지 않습니다.

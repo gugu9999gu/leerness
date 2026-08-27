@@ -524,5 +524,31 @@
       ]
     },
     "previousGuardGap": "기존 probe는 list/take의 legacy migration과 동시성만 검증했고 release가 저장하는 plan, 기존 plan 재개, 외부 에이전트 context, pre-wake pending count를 실행하지 않았다."
+  },
+  {
+    "id": "T-0153",
+    "repro": "node scripts/mcp-presence-probe.js",
+    "expectBad": "MCP presence probe: 3/9 passed",
+    "baseline": {
+      "at": "2026-08-27T10:33:57.918Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 11396
+    },
+    "rootCause": "MCP 자식 CLI의 LEERNESS_INTERNAL 억제가 호출별 lifecycle 주소도 막았고, dispatcher가 sessionKey를 선언 도구·유효 형식·lifecycle marker 범위로 제한하지 않아 잘못된 주소 폴백과 nested marker 전파가 가능했다. presence reader/pruner도 legacy case identity와 열린 peer 보존을 함께 다루지 않았다.",
+    "siblingScope": {
+      "checked": [
+        "MCP handoff/session-close lifecycle",
+        "MCP state show/start/record/verify/handoff",
+        "agent-mode nested spawn",
+        "invalid/blank/reserved sessionKey and inherited server IDs",
+        "hook/CI/child/internal suppression",
+        "open peer pruning",
+        "POSIX legacy case records"
+      ]
+    },
+    "previousGuardGap": "기존 MCP/세션 검사는 상태 run 격리와 직접 CLI presence를 따로 확인했으며 MCP lifecycle 등록, invalid-key no-write, marker scope, 열린 peer 20건 초과, case-sensitive legacy migration을 한 경계에서 실행하지 않았다."
   }
 ]

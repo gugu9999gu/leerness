@@ -48,13 +48,33 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.170';
+const VERSION = '1.36.171';
+
+// MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
+// 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
+let _directMcpPresenceMarkerPending = false;
+function _deleteEnvKeyCaseInsensitive(env, canonical) {
+  const folded = String(canonical).toLowerCase();
+  for (const key of Object.keys(env || {})) {
+    if (key.toLowerCase() === folded) delete env[key];
+  }
+}
+function _captureDirectMcpPresenceMarker() {
+  const markerKey = process.platform === 'win32'
+    ? Object.keys(process.env).find(key => key.toLowerCase() === 'leerness_mcp_address_explicit')
+    : (Object.prototype.hasOwnProperty.call(process.env, 'LEERNESS_MCP_ADDRESS_EXPLICIT')
+      ? 'LEERNESS_MCP_ADDRESS_EXPLICIT' : null);
+  if (markerKey && process.env[markerKey] === '1') _directMcpPresenceMarkerPending = true;
+  // 인식 여부와 무관하게 모든 casing을 떼어 자식 프로세스에 일회성 marker가 새지 않게 한다.
+  _deleteEnvKeyCaseInsensitive(process.env, 'LEERNESS_MCP_ADDRESS_EXPLICIT');
+}
 
 // 1.9.290 (UR-0037, Codex gpt-5.5 #4 수렴): CLI 전용 부작용은 require 시 실행하지 않는다.
 //   이전: warning listener 제거 / NODE_OPTIONS 변경 / chcp IIFE 가 top-level 즉시 실행 → require('harness') 시 호스트 프로세스 오염.
 //   해결: 부작용을 _cliBootstrap() 으로 묶고 파일 끝 require.main 가드에서만 호출. import/단위테스트는 부작용 0.
 // 1.9.249 (UR-0018): 터미널 출력 한국어 깨짐 사전 방지 (stdout UTF-8 + Windows 비-65001 시 chcp 65001 자동, opt-out LEERNESS_NO_AUTOCHCP=1).
 function _ensureStdoutEncoding() {
+  _captureDirectMcpPresenceMarker();
   try {
     if (process.stdout && process.stdout.setEncoding) process.stdout.setEncoding('utf8');
     if (process.stderr && process.stderr.setEncoding) process.stderr.setEncoding('utf8');
@@ -7491,15 +7511,22 @@ function _selfTestCases() {
       if (SP.suppressionReason(Object.assign({}, base, { LEERNESS_NO_SESSION_PRESENCE: '1' }), true) !== 'opt-out') return false;
       if (SP.suppressionReason(base, false) !== 'not-a-leerness-project') return false;
       if (SP.suppressionReason({}, true) !== 'not-identifiable') return false;
-      // ⑤ 프루닝 — 입력은 {name, record}, 반환은 **파일명**. 상한을 넘기면 자르되 자기 것은 안 자르고,
-      //    적으면 아무것도 안 자른다(상한만 재면 "전부 삭제"가 통과한다).
+      const addressedMcp = Object.assign({}, base, { LEERNESS_INTERNAL: '1', LEERNESS_SESSION_ID: 'mcpdirect01', LEERNESS_MCP_ADDRESS_EXPLICIT: '1' });
+      if (SP.suppressionReason(addressedMcp, true) !== null) return false;
+      if (SP.suppressionReason(Object.assign({}, addressedMcp, { LEERNESS_HOOK: '1' }), true) !== 'hook') return false;
+      if (SP.suppressionReason(Object.assign({}, addressedMcp, { CI: '1' }), true) !== 'ci') return false;
+      // ⑤ 프루닝 — 입력은 {name, record}, 반환은 **파일명**. 열린 동료 레코드는 상한을 넘어도
+      //    절대 자르지 않고, 닫힌 tombstone에만 상한/TTL을 적용한다.
       const mkE = (i, extra) => ({ name: `key${String(i).padStart(5, '0')}.json`,
         record: Object.assign({ sessionKey: `key${String(i).padStart(5, '0')}`, openedAt: new Date(1700000000000 + i * 1000).toISOString(), closedAt: null }, extra || {}) });
       const many = Array.from({ length: 30 }, (_, i) => mkE(i));
       const pruned = SP.selectPrunable(many, { selfKey: 'key00000', nowMs: Date.now() });
-      if (pruned.includes('key00000.json')) return false;                    // 자기 것은 안 자른다
-      if ((30 - pruned.length) > SP.SESSIONS_KEEP + 1) return false;         // 상한이 실제로 걸린다
-      if (!pruned.length) return false;                                      // 계측 생존
+      if (pruned.length !== 0) return false;                                 // 열린 peer 30건 모두 보존
+      const manyClosed = many.map((e, i) => mkE(i, { closedAt: new Date(Date.now() - i * 1000).toISOString() }));
+      const prunedClosed = SP.selectPrunable(manyClosed, { selfKey: 'key00000', nowMs: Date.now() });
+      if (prunedClosed.includes('key00000.json')) return false;              // 자기 것은 안 자른다
+      if ((30 - prunedClosed.length) > SP.SESSIONS_KEEP + 1) return false;   // 닫힌 레코드 상한은 실제로 걸린다
+      if (!prunedClosed.length) return false;
       const few = Array.from({ length: 5 }, (_, i) => mkE(i));
       if (SP.selectPrunable(few, { selfKey: 'key00000', nowMs: Date.now() }).length !== 0) return false;
       //    close 기록이 TTL 을 넘긴 것은 자르고, 갓 닫힌 것은 안 자른다
@@ -7507,6 +7534,20 @@ function _selfTestCases() {
       if (SP.selectPrunable(closedOld, { selfKey: 'other123', nowMs: Date.now() }).length !== 1) return false;
       const closedNew = [mkE(1, { closedAt: new Date(Date.now() - 60000).toISOString() })];
       if (SP.selectPrunable(closedNew, { selfKey: 'other123', nowMs: Date.now() }).length !== 0) return false;
+      //    canonical toISOString이 아닌 close 값은 종료 증거가 아니다. Date.parse가 관대하게 받는
+      //    숫자/불가능한 달력 날짜도 20개 상한이나 payload mismatch 정리로 지우지 않고,
+      //    같은 host의 다른 세션 기록으로 계속 센다.
+      const malformedValues = ['not-a-date', '0', '1', '2024-02-30T00:00:00.000Z', '2024-02-30T00:00:00Z'];
+      const malformed = Array.from({ length: 21 }, (_, i) => mkE(i, { closedAt: malformedValues[i % malformedValues.length] }));
+      malformed.push({ name: 'wrongpeer.json', record: { sessionKey: 'otherpeer', hostId: 'hostAAA', closedAt: 'not-a-date' } });
+      if (SP.selectPrunable(malformed, { selfKey: 'me000000', nowMs: Date.now() }).length !== 0) return false;
+      if (malformed.some(e => SP.hasConfirmedClose(e.record))) return false;
+      if (SP.confirmedCloseMs({ closedAt: new Date(1700000000000).toISOString() }) !== 1700000000000) return false;
+      const caseConflict = SP.caseVariantConflict([
+        Object.assign({}, { name: 'CasePeer01.json', record: { sessionKey: 'CasePeer01', closedAt: null } }),
+        Object.assign({}, { name: 'casepeer01.json', record: { sessionKey: 'casepeer01', closedAt: 'not-a-date' } }),
+      ]);
+      if (!caseConflict || caseConflict.count !== 2 || caseConflict.reason !== 'ambiguous-open-case-variants') return false;
       //    (검수 P2, 실측 재현) **파일명과 키가 어긋난 레코드**가 남을 지우면 안 된다 — 자기 파일만 정리된다
       const victim = { name: 'victimxx.json', record: { sessionKey: 'victimxx', openedAt: new Date().toISOString(), lastHandoffAt: new Date().toISOString(), closedAt: null } };
       const forged = { name: 'fakefake.json', record: { sessionKey: 'victimxx', openedAt: new Date(1700000000000).toISOString(), closedAt: new Date(1700000000000).toISOString() } };
@@ -7526,6 +7567,8 @@ function _selfTestCases() {
         { sessionKey: 'otherkk3', hostId: 'hostBBB', closedAt: null },
       ];
       if (SP.countOtherSessions(recs, 'selfkey1', H) !== 1) return false;
+      if (SP.countOtherSessions([{ sessionKey: 'otherkk1', hostId: H, closedAt: 'not-a-date' }], 'selfkey1', H) !== 1) return false;
+      if (SP.countOtherSessions([{ sessionKey: 'SelfKey1', hostId: H, closedAt: null }], 'selfkey1', H) !== 0) return false;
       if (SP.countOtherSessions([recs[0]], 'selfkey1', H) !== 0) return false;              // 자기만 → 0(침묵)
       if (SP.countOtherSessions([recs[3]], 'selfkey1', H) !== 0) return false;              // 다른 머신뿐 → 0(침묵)
       //    (검수 P2) hostId 를 모르면 '다른 머신' 이라고 단정하지 않는다 — 3상태
@@ -13206,24 +13249,62 @@ function _sessionHostId(root) {
     return require('crypto').createHash('sha256').update(salt + '|' + String(os.hostname())).digest('hex').slice(0, 12);
   } catch { return null; }
 }
+function _sessionRecordActivityMs(record) {
+  const r = record || {};
+  return Math.max(Date.parse(r.lastHandoffAt || '') || 0, Date.parse(r.closedAt || '') || 0,
+    Date.parse(r.openedAt || '') || 0);
+}
+// 1.36.171 (외부 Codex P2): 1.36.132 이전 POSIX 저장소에는 CaseKey.json/`CaseKey`와
+// casekey.json/`casekey`가 동시에 남을 수 있다. 읽기 명령은 파일을 바꾸지 않되, 같은 case-fold 주소를
+// 하나의 논리 레코드로 접어 자기 자신을 '다른 세션'으로 세지 않는다.
+function _collapseSessionEntries(rawEntries) {
+  const SP = require('../lib/session-presence');
+  const passthrough = [];
+  const grouped = new Map();
+  for (const entry of (rawEntries || [])) {
+    const fileKey = String(entry && entry.name || '').replace(/\.json$/, '');
+    const recordKey = entry && entry.record && entry.record.sessionKey;
+    if (!SP.isValidKey(recordKey) || fileKey.toLowerCase() !== String(recordKey).toLowerCase()) {
+      passthrough.push(entry); continue;
+    }
+    const folded = String(recordKey).toLowerCase();
+    const normalizedRecord = Object.assign({}, entry.record, { sessionKey: folded });
+    // 저장된 표식은 현재 물리 파일 집합으로 다시 계산한다. variant가 사라졌는데 경고만 남는 stale 상태를 막는다.
+    delete normalizedRecord.caseVariantConflict;
+    const candidate = { name: `${folded}.json`, record: normalizedRecord };
+    const prev = grouped.get(folded);
+    if (!prev) { grouped.set(folded, { logical: candidate, sourceName: entry.name, sources: [entry] }); continue; }
+    prev.sources.push(entry);
+    const pa = _sessionRecordActivityMs(prev.logical.record), ca = _sessionRecordActivityMs(candidate.record);
+    const candidateWins = ca > pa
+      || (ca === pa && !SP.hasConfirmedClose(candidate.record) && SP.hasConfirmedClose(prev.logical.record))
+      || (ca === pa && SP.hasConfirmedClose(candidate.record) === SP.hasConfirmedClose(prev.logical.record) && entry.name === `${folded}.json`);
+    if (candidateWins) { prev.logical = candidate; prev.sourceName = entry.name; }
+  }
+  return passthrough.concat([...grouped.values()].map((group) => {
+    const conflict = SP.caseVariantConflict(group.sources);
+    if (conflict) group.logical.record.caseVariantConflict = conflict;
+    return group.logical;
+  }));
+}
 //   ⚠ (검수 P1) 예전엔 읽기 실패를 빈 배열로 삼켰다 — 그러면 "기록이 없다" 와 "확인할 수 없다" 가
 //     같은 출력이 된다(조용한 0). 못 읽은 사실을 **함께 돌려준다**.
 function _readSessionEntries(root) {
   const dir = _sessionStoreDir(root);
-  const entries = [];
+  const rawEntries = [];
   let names = [];
   let unreadable = 0, storeError = null;
   try { names = fs.readdirSync(dir); }
   catch (e) {
-    if (e && e.code === 'ENOENT') return { entries, unreadable: 0, storeError: null };   // 아직 아무도 안 썼다 = 진짜 0
-    return { entries, unreadable: 0, storeError: String((e && e.code) || 'EREAD') };
+    if (e && e.code === 'ENOENT') return { entries: [], rawEntries: [], unreadable: 0, storeError: null };   // 아직 아무도 안 썼다 = 진짜 0
+    return { entries: [], rawEntries: [], unreadable: 0, storeError: String((e && e.code) || 'EREAD') };
   }
   for (const n of names) {
     if (!SESSION_FILE_RE.test(n)) continue;               // 염 파일·tmp·lock 잔재는 목록에서 제외
-    try { const j = JSON.parse(read(path.join(dir, n))); if (j && j.sessionKey) entries.push({ name: n, record: j }); else unreadable++; }
+    try { const j = JSON.parse(read(path.join(dir, n))); if (j && j.sessionKey) rawEntries.push({ name: n, record: j }); else unreadable++; }
     catch { unreadable++; }                               // 손상은 '없음' 이 아니라 '못 읽음' 이다
   }
-  return { entries, unreadable, storeError };
+  return { entries: _collapseSessionEntries(rawEntries), rawEntries, unreadable, storeError };
 }
 function _readSessionRecords(root) { return _readSessionEntries(root).entries.map(e => e.record); }
 //   phase: 'open' (handoff) | 'close' (session close)
@@ -13232,21 +13313,30 @@ function _sessionPresenceRecord(root, phase) {
   const SP = require('../lib/session-presence');
   try {
     root = absRoot(root);
+    // CLI bootstrap에서 떼어 둔 MCP direct-lifecycle marker는 이 기록 시도 한 번에만 복원한다.
+    // require 기반 호출도 안전하도록 여기서 한 번 더 capture한다.
+    _captureDirectMcpPresenceMarker();
+    const presenceEnv = SP.normalizePresenceEnv(process.env);
+    if (_directMcpPresenceMarkerPending) {
+      presenceEnv.LEERNESS_MCP_ADDRESS_EXPLICIT = '1';
+      _directMcpPresenceMarkerPending = false;
+    }
     const hasHarness = exists(path.join(root, '.leerness'));
-    const reason = SP.suppressionReason(process.env, hasHarness);
+    const reason = SP.suppressionReason(presenceEnv, hasHarness);
     if (reason) return { written: false, reason };
-    const key = SP.deriveSessionKey(process.env);
+    const key = SP.deriveSessionKey(presenceEnv);
     if (!SP.isValidKey(key)) return { written: false, reason: 'not-identifiable' };
     const dir = _sessionStoreDir(root);
     mkdirp(dir);
     const fp = path.join(dir, `${key}.json`);
     //   경로 가둠 — 키 정규식이 이미 막지만, 실제 해석 결과가 스토어 밖이면 쓰지 않는다(이중 방어).
     if (path.dirname(path.resolve(fp)) !== path.resolve(dir)) return { written: false, reason: 'path-escape' };
-    const det = SP.detectOutermostAgent(process.env);
+    const det = SP.detectOutermostAgent(presenceEnv);
     const nowIso = new Date().toISOString();
     let res = { written: false, reason: 'lock' };
     _withLock(fp, () => {
       let prev = null;
+      const legacyVariants = [];
       if (exists(fp)) {
         try { prev = JSON.parse(read(fp)); } catch {
           //   손상 레코드는 **지우고 새로 쓴다**. `writeUtf8` 의 손상 구조 경로는 stderr 경고를 내는데,
@@ -13255,12 +13345,45 @@ function _sessionPresenceRecord(root, phase) {
           try { fs.unlinkSync(fp); } catch { /* 지우지 못해도 아래 쓰기가 덮는다 */ }
         }
       }
+      const canonicalPrev = prev;
+      // OS 이름으로 case sensitivity를 추측하지 않는다. 디렉터리의 exact canonical entry가 없는데
+      // canonical path가 이미 resolve되면 같은 물리 파일을 가리키는 case-insensitive 저장소다.
+      // 반대로 exact entry가 있거나 canonical path가 resolve되지 않으면 variant는 별도 파일이다.
+      try {
+        const storedNames = fs.readdirSync(dir);
+        const canonicalName = `${key}.json`;
+        const distinctCaseEntries = storedNames.includes(canonicalName) || !exists(fp);
+        if (distinctCaseEntries) {
+          for (const name of storedNames) {
+            if (!SESSION_FILE_RE.test(name) || name === `${key}.json`
+              || name.replace(/\.json$/, '').toLowerCase() !== key) continue;
+            const variantPath = path.join(dir, name);
+            try {
+              const rawText = read(variantPath);
+              const record = JSON.parse(rawText);
+              if (!record || !record.sessionKey || String(record.sessionKey).toLowerCase() !== key) continue;
+              legacyVariants.push({ name, path: variantPath, rawText, record });
+            } catch { /* 손상 variant는 읽기 표면에서 unreadable로 남기며 여기서 지우지 않는다 */ }
+          }
+        }
+      } catch { /* 저장소 열거 실패는 본 canonical 기록을 막지 않는다 */ }
+      const caseConflict = SP.caseVariantConflict([
+        ...(canonicalPrev ? [{ name: `${key}.json`, record: canonicalPrev }] : []),
+        ...legacyVariants,
+      ]);
+      // 열린 variant가 둘 이상이면 서로 다른 구버전 세션이었을 수 있다. 어느 하나도 병합 근거로
+      // 사용하지 않고 물리 파일도 보존한다. 충돌이 없을 때만 최신 legacy 상태를 이월한다.
+      if (!caseConflict) {
+        for (const variant of legacyVariants) {
+          if (!prev || _sessionRecordActivityMs(variant.record) > _sessionRecordActivityMs(prev)) prev = variant.record;
+        }
+      }
       const _prevAgent = prev && prev.outermostAgent;
       //   1.36.132 (검수 P2): 라벨 순서를 안 맞추면 `A<->B` 와 `B<->A` 가 번갈아 기록되며 **매 handoff 마다** 새 경고가 났다.
       //   같은 두 에이전트는 같은 표식이어야 한다 — 정렬해서 순서를 없앤다.
       const _sharedAgents = (_prevAgent && _prevAgent !== 'unknown' && det.agent !== 'unknown' && _prevAgent !== det.agent)
         ? [_prevAgent, det.agent].sort().join('<->') : ((prev && prev.sharedKeyAgents) || null);
-      if (_sharedAgents && !(prev && prev.sharedKeyAgents === _sharedAgents) && process.env.LEERNESS_NO_LOCK_WARN !== '1') {
+      if (_sharedAgents && !(prev && prev.sharedKeyAgents === _sharedAgents) && presenceEnv.LEERNESS_NO_LOCK_WARN !== '1') {
         try { process.stderr.write(`⚠ 세션 주소 공유 감지: ${key} 를 서로 다른 에이전트(${_sharedAgents})가 쓰고 있습니다 — 두 세션이 한 기록으로 합쳐져 서로를 못 봅니다. 세션마다 다른 LEERNESS_SESSION_ID 를 쓰세요.\n`); } catch {}
       }
       const _handoffHistory = Array.isArray(prev && prev.handoffHistory) ? prev.handoffHistory.slice(-10) : [];
@@ -13268,7 +13391,7 @@ function _sessionPresenceRecord(root, phase) {
       const rec = {
         schemaVersion: 1,
         sessionKey: key,
-        keySource: SP.keySource(process.env),   // 1.36.132: 3종(LEERNESS_SESSION_ID 우선) — 손으로 적은 삼항은 새 출처를 놓친다
+        keySource: SP.keySource(presenceEnv),   // 1.36.132: 3종(LEERNESS_SESSION_ID 우선) — 손으로 적은 삼항은 새 출처를 놓친다
         outermostAgent: det.agent,
         agentEvidence: det.evidence,                 // 결론이 아니라 원증거 키 이름 — 규칙이 틀려도 원자료가 남는다
         hostId: _sessionHostId(root),
@@ -13285,6 +13408,7 @@ function _sessionPresenceRecord(root, phase) {
         //   라벨이 마지막 기록자로 덮임). 라벨이 **둘 다 unknown 이 아니면서** 바뀌었다면 그건 공유의 증거다.
         //   unknown 을 제외하는 이유: 셸마다 env 가시성이 달라 라벨이 흔들릴 때 오탐이 난다(실측).
         sharedKeyAgents: _sharedAgents,
+        caseVariantConflict: caseConflict,
       };
       // 1.36.133 (정찰 실측): `rec` 는 닫힌 리터럴이라 **우리가 모르는 키는 다음 handoff 에서 사라졌다** —
       //   주입한 `scope`/`futureField` 가 handoff 한 번에 소멸, exit 0, **stderr 0바이트**. 버전 혼재가 이 기계에 실재한다
@@ -13315,6 +13439,17 @@ function _sessionPresenceRecord(root, phase) {
       if (_carried.length) rec.carriedUnknownKeys = _carried;
       if (_dropped.length) rec.droppedUnknownKeys = _dropped.slice(0, 10);
       writeUtf8(fp, JSON.stringify(rec, null, 2) + '\n');
+      for (const variant of legacyVariants) {
+        if (caseConflict && !SP.hasConfirmedClose(variant.record)) continue; // 모호한 열린 세션은 절대 자동 삭제하지 않는다
+        try {
+          _withLock(variant.path, () => {
+            let current = null;
+            try { current = read(variant.path); } catch { return; }
+            if (current !== variant.rawText) return;           // 구버전 writer가 갱신함 — 다음 회차로 미룬다
+            try { fs.unlinkSync(variant.path); } catch { /* canonical은 이미 안전하게 기록됨 */ }
+          }, { maxWaitMs: 250 });
+        } catch { /* 잠금을 못 얻으면 variant를 보존한다 */ }
+      }
       res = { written: true, reason: null };
     });
     //   프루닝은 락 밖(자기 파일 락과 무관한 남의 파일 삭제) — 상한이 없으면 무한히 자란다.
@@ -13322,7 +13457,8 @@ function _sessionPresenceRecord(root, phase) {
       //   ⚠ (검수 P2) 프루너가 **삭제 대상의 락을 안 잡아서** 남이 방금 갱신한 레코드를 지울 수 있었다.
       //     파일별 락을 잡고, 락 안에서 **다시 읽어** 여전히 삭제 대상인지 확인한 뒤에만 지운다.
       const snap = _readSessionEntries(root);
-      const doomed = SP.selectPrunable(snap.entries, { selfKey: key, nowMs: Date.now() });
+      const physical = snap.rawEntries || snap.entries;
+      const doomed = SP.selectPrunable(physical, { selfKey: key, nowMs: Date.now() });
       for (const name of doomed) {
         if (!SESSION_FILE_RE.test(name)) continue;
         const victim = path.join(dir, name);
@@ -13333,7 +13469,7 @@ function _sessionPresenceRecord(root, phase) {
           let cur = null;
           try { cur = JSON.parse(read(victim)); } catch { cur = null; }
           const still = SP.selectPrunable([{ name, record: cur }].concat(
-            snap.entries.filter(e => e.name !== name)), { selfKey: key, nowMs: Date.now() });
+            physical.filter(e => e.name !== name)), { selfKey: key, nowMs: Date.now() });
           if (!still.includes(name)) return;                              // 조건이 사라졌다 → 보존
           try { fs.unlinkSync(victim); } catch { /* 남아도 다음에 다시 시도 */ }
         });
@@ -13374,9 +13510,11 @@ function _sessionSignal(root, opts = {}) {
   let mine = null;
   try { mine = selfKey ? (snap.entries.find(e => e.record && e.record.sessionKey === selfKey) || null) : null; } catch {}
   const sharedKeyAgents = (mine && mine.record && mine.record.sharedKeyAgents) || null;
+  const caseVariantConflict = (mine && mine.record && mine.record.caseVariantConflict) || null;
   return {
     others,                                                   // 다른 세션 **기록** 수(활성 여부는 판정하지 않는다)
     sharedKeyAgents,
+    caseVariantConflict,
     //   1.36.132 (검수 P1): 명시 주소가 형식에 안 맞으면 종전엔 조용히 다음 출처로 넘어갔다(오타를 안 알림).
     invalidExplicitKey: SP.invalidExplicitKey(process.env),
     //   1.36.132 (검수 P1): 저장소를 못 읽은 것을 `others:0` 으로 축약하지 않는다 — 이 저장소의 규율이다.
@@ -13390,7 +13528,7 @@ function _sessionSignal(root, opts = {}) {
     //   1.36.133: **서브에이전트가 빠져 있었다.** 이 프로젝트의 session-workflow 는 파일 경로를 나눠 주는
     //   병렬 sub-agent 를 의무화하는데, 그들은 `child-agent` 로 억제돼 레지스트리에 아예 안 나타난다 —
     //   즉 겹침이 가장 잘 나는 주체가 구조적으로 안 보인다. 못 보는 것을 안 적으면 "0건" 이 거짓말이 된다.
-    blindSpots: ['handoff 를 부르지 않는 세션', 'MCP 전용 클라이언트(LEERNESS_INTERNAL)',
+    blindSpots: ['handoff 를 부르지 않는 세션', 'sessionKey 없이 lifecycle handoff/close 를 호출하는 MCP 클라이언트',
       '병렬 sub-agent (CLAUDE_CODE_CHILD_SESSION — 억제되어 등록되지 않음)',
       '주소가 없는 에이전트(cursor/vscode/grok 등 · codex 는 CODEX_THREAD_ID 가 없는 실행에서만, TUI 미검증)',
       '다른 머신', '구버전 설치본'],
@@ -13406,6 +13544,7 @@ function _sessionSignalFlags(ss) {
     out.push(`🙈 나는 안 보임(${ss.selfSuppressedReason})`);
   }
   if (ss.sharedKeyAgents) out.push(`⚠ 주소 공유(${ss.sharedKeyAgents})`);
+  if (ss.caseVariantConflict) out.push(`⚠ 대소문자 세션 충돌(${ss.caseVariantConflict.count || '?'})`);
   if (ss.storeError) out.push(`⚠ 세션저장소 읽기실패(${ss.storeError})`);
   if (ss.invalidExplicitKey) out.push(`⚠ LEERNESS_SESSION_ID 형식 오류("${ss.invalidExplicitKey}") — 무시됨`);
   return out;
@@ -13480,14 +13619,15 @@ function sessionsCmd(root) {
     outermostAgent: r.outermostAgent || 'unknown',
     //   ⚠ (검수 P2) `hostId` 가 없으면 '다른 머신' 이 아니라 **모르는 것**이다 — 3상태로 답한다.
     hostRelation: SP.hostRelation(r.hostId, selfHost),
-    closeRecorded: !!r.closedAt,
+    closeRecorded: SP.hasConfirmedClose(r),
     lastHandoffAt: r.lastHandoffAt || null,
     handoffCount: Number(r.handoffCount || 0) || 0,
     leernessVersion: r.leernessVersion || null,
+    caseVariantConflict: r.caseVariantConflict || null,
   }));
   const blindSpots = [
     t('leerness handoff 를 돌리지 않은 에이전트 세션', 'agent sessions that never ran `leerness handoff`'),
-    t('MCP 도구만 쓰는 클라이언트', 'clients that only use MCP tools'),
+    t('sessionKey 없이 lifecycle handoff/close를 호출하는 MCP 클라이언트', 'MCP clients calling lifecycle handoff/close without a sessionKey'),
     t(`${VERSION} 이전 버전으로 시작된 세션`, `sessions started on a version older than ${VERSION}`),
     //   1.36.132: 종전엔 '세션키가 없는 에이전트(codex/cursor 등)' 이라고 적었는데 codex 는 이제 주소가 있다.
     //   자기 도구의 능력을 과소·과대 주장하지 않는다 — 실측 범위를 그대로 적는다(codex exec 경로에서 확인).
@@ -13546,7 +13686,10 @@ function sessionsCmd(root) {
         : (r.hostRelation === 'different'
           ? t('다른 머신 — 확인 불가', 'another machine — unverifiable')
           : t('머신 판별 불가 — 확인 불가', 'machine unknown — unverifiable'));
-      log(`  ${who}  ${String(r.sessionKey).slice(0, 8)}…  ${String(r.outermostAgent).padEnd(13)} ${when}`);
+      const collision = r.caseVariantConflict
+        ? t(` · ⚠ 대소문자 충돌 ${r.caseVariantConflict.count || '?'}건`, ` · ⚠ ${r.caseVariantConflict.count || '?'} case variants conflict`)
+        : '';
+      log(`  ${who}  ${String(r.sessionKey).slice(0, 8)}…  ${String(r.outermostAgent).padEnd(13)} ${when}${collision}`);
     }
   }
   log('');
@@ -16245,6 +16388,8 @@ function memorySearch(root, query) {
 
 function handoff(root) {
   root = absRoot(root);
+  // hook/--no-record 경로도 marker를 child env로 넘기지 않도록 기록 gate보다 먼저 소비한다.
+  _captureDirectMcpPresenceMarker();
   const _versionSkew = _handoffVersionSkew(root);
   // 1.9.199: handoff 진입 시 1) 이전 timestamp 보존 → 2) 현재 timestamp 기록
   //   detector 가 prior gap 을 정확히 측정 (overwrite 전 값 필요). 함수 최상단에 선언.
@@ -21268,6 +21413,7 @@ const _sessionClose = require('../lib/session-close');
 // 1.9.425 (UR-0025/UR-0125 큰 핸들러 모듈화 10번째): sessionClose → lib/session-close.js (DI 위임)
 function sessionClose(root, opts = {}) { // 1.36.132 (검수): handoff 는 --no-record/LEERNESS_HOOK 게이트 뒤에서 기록하는데 여기는 **게이트 없이** 기록했다
   //   (실측: handoff --no-record → 0건, session close --no-record → 1건). 같은 스토어의 같은 계약은 같은 문장으로.
+  _captureDirectMcpPresenceMarker(); // hook/--no-record여도 nested skill/drift child에는 일회성 MCP marker를 물려주지 않는다
   if (!has('--no-record') && process.env.LEERNESS_HOOK !== '1') { try { _sessionPresenceRecord(root, 'close'); } catch {} }     // 1.36.129 (P-0016 P1): close 는 '기록됨' 일 뿐 '프로세스가 죽었다' 가 아니다
   return _sessionClose.sessionClose(root, opts, { VERSION, STATUSES, MARK, has, arg, uiLang: _uiLang(root), harnessPath: __filename, readProgressRows, evidencePath, handoffPath, currentStatePath, taskLogPath, verifyRules, _autoRoadmap, _readUsageStats, readSessionCounter, writeSessionCounter, _retroAggregate, _retroOneLine, retroCmd, _loadDecisions, readRules, planPath, _loadLessons, _readFeatureGraph, _auditUserRequests, _detectDeliveredRequests, _computeRoundHistory, _computeMilestones, _computeRecentChanges, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _scanShellScriptsEncoding, _listAPISkills, _matchAPISkills, _loadShellFailures, _shellEnvDrift, _runPreWakeAudit, _saveAndAppendPreWakeReport, _runIdempotencyAudit, _detectAbnormalShutdown, _updateUserRequest, _detectOptimism, _scanCodeForPatterns, _collectSecretFindings, _withLock }); }  // 1.17.6 (UR-0049): 마감 정합 — done 낙관 재확인 + 시크릿 재확인 · 1.36.108: 락 주입(T-0097)
 
@@ -25661,10 +25807,20 @@ function mcpServeCmd(root) {
   //   자식 프로세스로 돌리므로 **env 로 주소를 넘길 수 있다** — 호출마다 다른 주소를 준다.
   function callLeerness(cliArgs, extraEnv) {
     const budget = _mcpTimeoutFor(cliArgs);
+    const childEnv = { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_WORKFLOW_GUIDE: '1' };
+    // MCP 서버 프로세스가 바깥 호출의 일회성 presence marker를 물려받았더라도 다음 호출로
+    // 재사용하지 않는다. 검증된 direct lifecycle 호출만 아래 extraEnv에서 다시 부여한다.
+    _deleteEnvKeyCaseInsensitive(childEnv, 'LEERNESS_MCP_ADDRESS_EXPLICIT');
+    // Windows child_process는 env 이름을 대소문자 비구분으로 하나만 전달한다. 호출별 주소를
+    // 덮을 때 상속된 다른 casing이 남아 있으면 어느 값이 선택될지 정렬 순서에 의존한다.
+    if (extraEnv && Object.prototype.hasOwnProperty.call(extraEnv, 'LEERNESS_SESSION_ID')) {
+      _deleteEnvKeyCaseInsensitive(childEnv, 'LEERNESS_SESSION_ID');
+    }
+    Object.assign(childEnv, extraEnv || {});
     const r = cp.spawnSync(process.execPath, [__filename, ...cliArgs], {
       encoding: 'utf8',
       timeout: budget,
-      env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1', LEERNESS_NO_STALE_CHECK: '1', LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_PROMPT: '1', LEERNESS_NO_WORKFLOW_GUIDE: '1', ...(extraEnv || {}) }
+      env: childEnv
     });
     const cmd = `leerness ${cliArgs.map(_shQuote).join(' ')}`;
     const partial = ((r.stdout || '') + (r.stderr || '')).trim();
@@ -25720,14 +25876,14 @@ function mcpServeCmd(root) {
         return send({ jsonrpc: '2.0', id, error: { code: -32602, message: 'Invalid params: arguments must be an object' } });
       }
       const args = _rawArgs || {};
+      const _toolDef = TOOLS.find(t => t.name === name) || null;
       // 1.36.58 (F-09): core 프로필에서는 노출 집합 = 호출 가능 집합 (광고 안 한 도구 호출은 unknown 과 동일 처리)
-      if (_profile === 'core' && !TOOLS.some(t => t.name === name)) {
+      if (_profile === 'core' && !_toolDef) {
         return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name} (core profile — full: leerness mcp serve --profile full)` } });
       }
       // 1.36.39 (#3): 도구 inputSchema 기반 타입 검증 — {"title":{...}} 같은 비문자열이 "[object Object]" 로 영속되던 것 차단.
       {
-        const _td = TOOLS.find(t => t.name === name);
-        const _props = _td && _td.inputSchema && _td.inputSchema.properties || null;
+        const _props = _toolDef && _toolDef.inputSchema && _toolDef.inputSchema.properties || null;
         if (_props) {
           for (const [k, spec] of Object.entries(_props)) {
             const v = args[k];
@@ -25736,10 +25892,27 @@ function mcpServeCmd(root) {
             if (spec.type === 'number' && typeof v !== 'number') return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: '${k}' must be a number` } });
             if (spec.type === 'boolean' && typeof v !== 'boolean') return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: '${k}' must be a boolean` } });
           }
-          for (const rk of (_td.inputSchema.required || [])) {
+          for (const rk of (_toolDef.inputSchema.required || [])) {
             if (args[rk] === undefined || args[rk] === null) return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: missing required '${rk}'` } });
           }
         }
+      }
+      // 1.36.171 (외부 Codex P1/P2): sessionKey는 광고한 도구에서만 받으며, 명시된 값은
+      // MCP 경계에서 완전히 검증한다. 잘못된 값을 CLI가 무시해 서버의 CODEX_THREAD_ID나 전역
+      // currentRunId로 떨어뜨리면 서로 다른 에이전트의 증거가 다시 섞인다.
+      let _sk = null;
+      const _hasSessionKey = Object.prototype.hasOwnProperty.call(args, 'sessionKey');
+      if (_hasSessionKey && _toolDef) {
+        const _props = _toolDef.inputSchema && _toolDef.inputSchema.properties || {};
+        if (!Object.prototype.hasOwnProperty.call(_props, 'sessionKey')) {
+          return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: '${name}' does not accept 'sessionKey'` } });
+        }
+        const _candidate = typeof args.sessionKey === 'string' ? args.sessionKey : '';
+        const _SPmcp = require('../lib/session-presence');
+        if (!_SPmcp.isValidKey(_candidate)) {
+          return send({ jsonrpc: '2.0', id, error: { code: -32602, message: "Invalid params: 'sessionKey' must be 8-64 letters, numbers, '_' or '-' and not a reserved key" } });
+        }
+        _sk = _candidate.toLowerCase();
       }
       // 1.12.2 (14th 버그헌트, UR-0181): MCP 서버는 generic 설계 — cwd 에서 실행 후 각 호출의 path 로 대상 프로젝트 지정(의도된 기능, e2e 가 검증). 즉 path-타게팅 자체는 취약점 아님(신뢰된 로컬 MCP). policy 도 대상-프로젝트별로 path 에서 로드(올바름).
       //   진짜 버그는 unknown tool 도 _bumpMcpUsage 가 임의 경로에 무조건 쓰던 것 → 사용 통계를 unknown-tool 검증 "후"로 이동. (프로젝트-scoped 가둠은 opt-in 플래그로 별도 검토 — UR backlog)
@@ -25761,15 +25934,19 @@ function mcpServeCmd(root) {
         //   cliArgs(실제 실행 명령) 로 required tier 판정 → enforce ON 이고 초과 시 JSON-RPC error 반환(실행 안 함).
         try {
           // 1.9.301 (UR-0041): 도구 선언 requiredTier(메타데이터) + cliArgs regex 중 더 엄격한 tier 로 판정 (under-classify 갭 차단).
-          const _toolDef = TOOLS.find(t => t.name === name);
           const pol = _policyEnforce(targetPath, cliArgs.join(' '), _toolDef && _toolDef.requiredTier);
           if (!pol.allowed) {
             return send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `정책 차단(policy): ${pol.reason}` }], isError: true } });
           }
         } catch {}
-        //   세션 주소를 그대로 전달한다(문자열일 때만). 형식이 안 맞으면 CLI 가 무시하고 그 사실을 말한다.
-        const _sk = (args && typeof args.sessionKey === 'string' && args.sessionKey.trim()) ? args.sessionKey.trim() : null;
-        const r = callLeerness(cliArgs, _sk ? { LEERNESS_SESSION_ID: _sk } : null);
+        // T-0110: lifecycle MCP 호출은 명시 sessionKey가 있어도 callLeerness의
+        // LEERNESS_INTERNAL=1 때문에 presence에서 억제됐다. 이 marker는 서버가 호출별 주소를
+        // 실제로 받은 **직접 handoff/close**에만 붙인다. state/agent-mode/일반 내부 스폰은
+        // presence 억제 예외가 아니며, sessionKey 자체는 상태 귀속용 env로만 전달한다.
+        const _lifecycle = name === 'leerness_handoff' || name === 'leerness_session_close';
+        const _mcpEnv = _sk ? { LEERNESS_SESSION_ID: _sk } : null;
+        if (_mcpEnv && _lifecycle) _mcpEnv.LEERNESS_MCP_ADDRESS_EXPLICIT = '1';
+        const r = callLeerness(cliArgs, _mcpEnv);
         // 1.9.61: cursor 기반 페이지네이션 — 긴 출력은 cursor offset로 다음 청크
         const fullText = r.stdout || r.stderr || '(no output)';
         // 1.12.4 (15th 버그헌트 P2, UR-0016): _chunkSize 를 양의 정수로 클램프 — 음수/소수면 slice 빈 출력 + nextCursor 음수 → 무한 빈-루프(데이터 손실)였음.

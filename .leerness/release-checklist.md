@@ -48,5 +48,19 @@ doNotStore:
 - [x] 게시 시점 GitHub main/tag/release가 구현 커밋 `5bdf406f871849d6df76a3bc684f36bf0260f033`으로 일치; 후속 세션 증거는 `[skip ci]` 커밋으로 분리
 - [x] npm latest/exact 1.36.170; integrity `sha512-AYLuecUlUuZPgOcNqaeTPeefKL6ngSiDieIlJ71nv+CXix5vHpSutuxj2eoHLHuk5CQ5+sEAPxZqybRQ95kNEQ==`, shasum `971f90a26e3cf7b2fab986a0349f5a0d1bd4acdf`, fresh-prefix 설치 확인
 - [x] 사이트 커밋 `04b2623dcf094b2c9ad2e3edbb1b803f766d9477`, Astro 694 pages, Cloudflare deployment `5ba4d9bb`, leerness.com 루트와 v1.36.170 changelog HTTP 200
-- [ ] GitHub Actions run 33060937403 전체 13개 작업 성공 확인 (진행 중)
+- [x] GitHub Actions run 33060937403 전체 13개 작업 성공 확인
 - [x] 롤백 기준: npm exact `leerness@1.36.169` 재설치, GitHub tag `v1.36.169`, 직전 사이트 커밋 `2977c14`
+
+## 2026-08-27 — v1.36.171
+
+- [x] `leerness verify`, `audit`, `check`, `scan secrets`, `encoding check`, `lazy detect` 통과
+- [x] lint 60 JS + 1 JSON; selftest 355/355, MCP presence 22/22, core 46/46, handoff 75/75, command surface 40/40, installed cleanroom 10/10, full E2E 467/467
+- [x] Cursor/Codex/Claude 세션별 state/evidence 격리와 MCP lifecycle presence 직접 회귀 통과
+- [x] 외부 Codex 재검토 P0/P1/P2 없음
+- [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요
+- [x] CHANGELOG/README/package version 1.36.171 동기화 및 npm pack dry-run 확인
+- [ ] GitHub main/tag/release가 동일 구현 커밋을 가리키는지 확인
+- [ ] npm latest/exact 1.36.171, integrity/shasum, fresh-prefix 설치 확인
+- [ ] leerness.com production 루트와 v1.36.171 changelog 확인
+- [ ] GitHub Actions 전체 작업 성공 확인
+- [x] 롤백 기준: npm exact `leerness@1.36.170` 재설치, GitHub tag `v1.36.170`, 직전 사이트 커밋 `04b2623`
