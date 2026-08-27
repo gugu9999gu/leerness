@@ -1,11 +1,11 @@
 {
-  "savedAt": "2026-08-26T17:01:27.989Z",
-  "nextRoundVersion": "next after 1.36.168",
-  "expectedFireAt": "2026-08-26T17:26:27.986Z",
+  "savedAt": "2026-08-27T09:58:04.262Z",
+  "nextRoundVersion": "next after 1.36.170",
+  "expectedFireAt": "2026-08-27T10:23:04.257Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.36.168",
+    "currentVersion": "1.36.170",
     "activeTaskId": null,
     "activeTaskRequest": null,
     "memorySurface": {
@@ -18,19 +18,19 @@
   },
   "nextActions": [
     {
-      "icon": "🧬",
-      "title": "stress-v211 마지막 갱신 2016h 전 — 새 stress test 작성 권장",
-      "command": "node _apps/leerness-stress/bin/stress-v212.js"
+      "icon": "🔄",
+      "title": "progress-tracker 정체 — task T-0032 상태 검토",
+      "command": "leerness task list --path ."
+    },
+    {
+      "icon": "💭",
+      "title": "decisions.md \"install\" 관련 결정 1건 영향 확인",
+      "command": "leerness decision list --query \"install\""
     },
     {
       "icon": "🧬",
-      "title": "stress-v211 마지막 갱신 2058h 전 — 새 stress test 작성 권장",
-      "command": "node _apps/leerness-stress/bin/stress-v212.js"
-    },
-    {
-      "icon": "🧬",
-      "title": "stress-v211 마지막 갱신 2069h 전 — 새 stress test 작성 권장",
-      "command": "node _apps/leerness-stress/bin/stress-v212.js"
+      "title": "stress-v211 오래됨 — 새 stress test 작성 권장",
+      "command": null
     }
   ],
   "note": "다음 wakeup 시: 1) leerness resume . 으로 plan 확인  2) leerness handoff . 실행  3) leerness next-action take 로 즉시 task 진입"

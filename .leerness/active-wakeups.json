@@ -1,22 +1,6 @@
 {
   "wakeups": [
     {
-      "expectedFireAt": "2026-06-15T03:13:20.586Z",
-      "intervalMin": 25,
-      "source": "release-sync-main",
-      "status": "missed",
-      "fromVersion": "1.21.0",
-      "registeredAt": "2026-06-15T02:48:20.589Z"
-    },
-    {
-      "expectedFireAt": "2026-06-15T04:25:14.915Z",
-      "intervalMin": 25,
-      "source": "release-sync-main",
-      "status": "missed",
-      "fromVersion": "1.22.0",
-      "registeredAt": "2026-06-15T04:00:14.916Z"
-    },
-    {
       "expectedFireAt": "2026-06-15T05:47:06.980Z",
       "intervalMin": 25,
       "source": "release-sync-main",
@@ -163,7 +147,23 @@
       "status": "missed",
       "fromVersion": "1.36.168",
       "registeredAt": "2026-08-26T17:01:27.990Z"
+    },
+    {
+      "expectedFireAt": "2026-08-27T07:55:09.253Z",
+      "intervalMin": 25,
+      "source": "release-sync-main",
+      "status": "pending",
+      "fromVersion": "1.36.169",
+      "registeredAt": "2026-08-27T07:30:09.256Z"
+    },
+    {
+      "expectedFireAt": "2026-08-27T10:23:04.257Z",
+      "intervalMin": 25,
+      "source": "release-sync-main",
+      "status": "pending",
+      "fromVersion": "1.36.170",
+      "registeredAt": "2026-08-27T09:58:04.265Z"
     }
   ],
-  "updatedAt": "2026-08-26T23:30:02.840Z"
+  "updatedAt": "2026-08-27T09:58:04.265Z"
 }

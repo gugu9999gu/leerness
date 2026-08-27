@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-26T17:10:07.720Z
+Last generated: 2026-08-27T10:20:41.408Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -42,6 +42,7 @@ Last generated: 2026-08-26T17:10:07.720Z
 - T-0029 skill lint P1/P2 (1.36.26) — _lintSkillMeta 순수함수(2티어 severity, ko 트리거절, CJK 본문예산) + skill lint CLI → next: 다음 액션 작성
 - T-0030 debug 렌즈 (1.36.27) — systematic-debugging 을 자기질문 6문항으로(강제게이트 미이식/자기보고 명시/파일매핑 미확장) + route bugfix 힌트 + 표면 5곳 → next: 다음 액션 작성
 - T-0031 R1: agents multi(--execute 포함) 위임 브리프 접두 — 백그라운드 AI 가 leerness 프로토콜을 받도록 (dispatch 만 접두하던 갭) → next: 완료 — delegation-brief 토글과 --raw opt-out 유지
+- T-0032 R2: 온톨로지 그래프 기본 활성(install 자동생성) + roadmap 탭 통합 + 기능 토글 스위치(gate 등, toggles.json + CLI + handoff 노출 + gate 준수) → next: 중복 종료 — T-0033이 canonical 구현 task
 - T-0033 R1+R2 (1.36.29/30) — multi 위임 브리프 + 온톨로지 그래프 기본활성/roadmap 통합/토글 → next: 다음 액션 작성
 - T-0034 동시성 직렬화 (1.36.31) — codex #1/#2/#5/#7: state 락 직렬화 + team add 락내 재로드 + EPERM 재시도 + pre-wake 테이블 매처 → next: 다음 액션 작성
 - T-0035 e2e 그린 복원 + 게이트 exit 마스킹 교정 (1.36.32, 자기 감사) — 1.36.30/31 e2e 실패 게시 정정 → next: 다음 액션 작성
@@ -92,11 +93,13 @@ Last generated: 2026-08-26T17:10:07.720Z
 - T-0080 10차 헌트 7건+검수 3건 (1.36.78) → next: 다음 액션 작성
 - T-0081 도그푸딩 P1 5건 + 검수 7건 (1.36.79) → next: 다음 액션 작성
 - T-0087 1.36.97 렌즈 3축 심화 구현 → next: 다음 액션 작성
+- T-0088 session close 가 current-state.md 를 덮어쓴다 — 사용자 보고(hive-analytics): AI 이력에 '또 덮어썼습니다. 복원하겠습니다' 가 남음. 데이터 손실 계열이라 재현 후 보존 경로 확인 필요 → next: 중복/미갱신 백로그 종결 — 보존 회귀 유지
 - T-0097 context budget 가 이월분(Preserved)을 분해해 보이도록 — 두 번 미뤄진 부채의 비용을 처음으로 계량 → next: 다음 액션 작성
 - T-0099 e2e 미실행 명령 16종 잔여 — 이번 라운드가 requests/next-action/incident/brief/preview 경로를 덮었으므로 나머지(creds list|register|check|refresh · env check|sync|detect · wakeup-interval · workspace-dir · toggle · glossary · policy · path-setup · web|pc|lsp bridge · webhook serve · deploy auto · release sync-main)를 같은 방식으로 훑는다. 방법: (1) 커버리지 카운터에 다빈도 명령 대조군을 박고 수를 먼저 신뢰 가능하게 만든다 (2) 사용자 데이터/외부 입력을 쓰는 표면부터 (creds 가 최우선 — 자격증명 표면인데 e2e 실행 0회) (3) 발견은 인자 단위로 스윕한다(1.36.113 에서 같은 문장의 옆 인자를 놓쳤다). → next: 16개 잔여 CLI 명령군을 격리 픽스처·dry-run·권한거부로 전수 실행
 - T-0100 개행 주입 위조 클래스 스윕 (1.36.113 완료분) → next: 다음 액션 작성
 - T-0102 방치 명령 클래스 스윕 (1.36.114 완료분) → next: 다음 액션 작성
 - T-0107 LEERNESS_WORKSPACE_DIR / migrate-workspace-dir 스플릿브레인: 해석기(_workspaceDirName) 소비처 9곳 vs '.leerness' 하드코딩 299곳(bin 261+lib 38). env 를 켜면 init 은 .leerness 를 만들고 _isInitialized 는 .leerness 를 보다 AGENTS.md 폴백으로 가려진다(실측: selftest 339/343). migrate-workspace-dir 는 copy 라 마이그레이션 후 .leerness 가 죽은 사본이 되어 '마이그레이션 성공' 이 거짓 주장이 된다. 조사→결정(전면 배선 / 기능 제거 / 불가 시 명시적 실패) 필요. → next: 완료 — .leerness canonical workspace migration and public release verified
+- T-0108 P2 잔여 락 인구조사(정찰 실측): plan.md 가 progress 락으로 잠기는 오락(진입점 5곳) · decisions.json/lessons.json 진입점 4곳 중 1곳만 보호 · last-handoff.json 무락 · rules.md 부트스트랩/verifyRules 무락. 각 스토어마다 update 초크포인트를 만들어 모든 진입점을 태우고, 락 순서(progress→plan, progress→user-requests) 역순 금지를 가드로 고정한다. 1.36.130 은 실측된 유실 2건(rules.md 손글씨 파괴 · auto-fix 무락)만 고쳤다. → next: v1.36.169 GitHub/npm/leerness.com 배포 및 공개 검증
 - T-0114 T-0112 진행분(1.36.134 워킹트리, e2e·게이트 미반영): 검수 P1 5건 중 4건 수정+실측 확인 — (a)bare 저장소 거부 (b)설치 중 사용자 기존 훅 실행 0회(훅에 LEERNESS_ENFORCE_PROBE 조기종료 추가) (c)sh 부재를 성공이라 하지 않음(verify_unavailable, --skip-verify opt-out) (d)실패 시 롤백+enforce.json 미생성(초기 쓰기 제거). 남은 것: (e)하위 디렉토리 설치가 실제 커밋에서 우회되는 문제 미수정 · 실패 코드가 'error' 로 뭉개짐 · 이 4건에 대한 e2e 단언 미작성 · 게이트 재실행 필요 · 재검수 필요. → next: 후속: Windows 셸에서 enforce 자체검증/CI 계약을 안정화
 - T-0115 동시성 P1-A 무락 RMW 4종(실측·대조군 확보): roles set/unset/suggest --apply (agent-roles.json, 4동시 28.8% 유실·16동시 11~15/16) · creds register/refresh (credentials.local.json, 2동시 17.5%) · decision drop/lesson drop/team remove/memory restore (드롭이 락 밖이라 **락 안에서 커밋된 add 를 파괴** 1~3/8) · _bumpUsage(bin:22224, usage-stats.json — 모든 명령이 공유하는 유일한 파일, 2동시부터 38~46% 유실). 전부 exit 0·경고 0·JSON 손상 0(조용한 lost-update). 대조군: 락 무력화 복사본 16동시 task add 9~11/16 vs 락 켜면 16/16, 24동시 24/24 고유 ID. → next: 후속: release bump가 --patch 플래그를 경고 없이 수용하고 버전 표면을 함께 동기화하는지 회귀로 보강
 - T-0116 동시성 P1-B 완료 게이트가 뒤집힌다: .leerness/state.json currentRunId 전역 단일 슬롯 — 8 sub-agent 가 start→record→verify 하면 오귀속 7/8. 판별 케이스: A 가 실제 작업+테스트하고 verify pass 를 불렀는데 증거가 B 의 run 에 붙어 **B 가 completion_claim_allowed:true, 실제 작업자 A 가 false**. 락으로 못 고침(세션 스코프 부재) · run 레코드에 세션 필드가 없어 사후 추적 불가. 1.36.132 세션 주소 재사용 검토. → next: 다음 액션 작성
@@ -129,6 +132,10 @@ Last generated: 2026-08-26T17:10:07.720Z
 - T-0145 gate --claims가 레거시 완료 증거 68/108건 때문에 신규 작업과 무관하게 실패하는 상태의 마이그레이션·베이스라인 정책 정립 → next: T-0146 Windows which shim-pair false-positive 교정
 - T-0146 Windows which 진단이 단일 npm 글로벌 설치의 leerness 및 leerness.cmd shim 쌍을 2개 PATH 충돌로 오인하는 false-positive 교정 → next: GitHub Actions run 32992266329 완료 확인 및 push 자동-trigger 누락 원인 관찰
 - T-0148 T-0146 Windows which npm shim-pair false-positive 조사·수정·검증 → next: v1.36.168 release publish
+- T-0149 v1.36.168 CI 완료 확인과 자동 push 트리거 누락 원인 조사 후 다음 백로그 진행 → next: v1.36.169 release publish and CI verification
+- T-0150 자동 next-action 큐가 지원하지 않는 --filter와 존재하지 않는 stress 파일 실행을 제안하는 결함 수정 → next: v1.36.169 GitHub/npm/leerness.com 배포 및 공개 설치본 검증
+- T-0151 v1.36.169 GitHub/npm/leerness.com 배포 및 CI 검증 → next: v1.36.170 release publish
+- T-0152 auto-resume/context가 legacy next-action을 정규화하지 않는 결함 수정 → next: v1.36.170 GitHub/npm/leerness.com release publish and verify
 
 ## In Progress
 - 없음
@@ -175,7 +182,7 @@ Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.165, https:
 ```
 
 ## Recommended Direction
-- R2: 온톨로지 그래프 기본 활성(install 자동생성) + roadmap 탭 통합 + 기능 토글 스위치(gate 등, toggles.json + CLI + handoff 노출 + gate 준수)
+- 게시본 1.36.13~1.36.15 누적 신규 표면 클린룸 리뷰 (database 렌즈 8→12문항, cap 16, selftest 앵커) — codex 적대 검증 + 맹신 X
 
 ## Next Exact Step
-- T-0033의 R2 완료 증거와 대조해 중복이면 done/superseded로 정리하고, 차이가 있으면 미구현 범위만 식별
+- 다음 액션 작성

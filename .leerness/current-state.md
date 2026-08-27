@@ -15,17 +15,18 @@ doNotStore:
 <!-- leerness:managed -->
 # Current State
 
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Now
 - 대기 중 <!-- leerness:auto -->
-- v1.36.167 구현 커밋 `9412a32`, GitHub Release·npm latest·leerness.com production 게시 완료; 공개 게시본/해시/격리 설치 검증 통과
-- GitHub CI run 32974961842 전체 OS·Node E2E 매트릭스 진행 중
-- pre-wake critical 1건은 이번 릴리스 결함이 아니라 기존 영상 요청 UR-0028/UR-0051의 task/plan/decision 링크 누락
+- T-0152에서 release auto-resume plan·기존 plan resume·context·pre-wake audit가 동일한 canonical next-action 정규화를 사용하도록 수정
+- 구현 커밋 `5bdf406f871849d6df76a3bc684f36bf0260f033`; GitHub Release v1.36.170, npm latest 1.36.170, leerness.com production 게시 및 공개 응답 검증 완료
+- GitHub Actions run 33060937403: fast/runtime 작업 성공, 전체 OS·Node E2E 매트릭스 진행 중
+- release가 다시 기록한 `.leerness/auto-resume-plan.json`에서 동적 시간, `--status completed`, `--filter`, 내부 `_apps` 실행 제안이 모두 제거됨
 
 ## Next
-- R2: 온톨로지 그래프 기본 활성(install 자동생성) + roadmap 탭 통합 + 기능 토글 스위치(gate 등, toggles.json + CLI + handoff 노출 + gate 준수) <!-- leerness:auto -->
-- T-0146: Windows `which`가 같은 npm 설치의 `leerness`/`leerness.cmd` shim pair를 PATH 충돌로 오인하는 false-positive 교정
+- 게시본 1.36.13~1.36.15 누적 신규 표면 클린룸 리뷰 (database 렌즈 8→12문항, cap 16, selftest 앵커) — codex 적대 검증 + 맹신 X <!-- leerness:auto -->
+- 다음 백로그 선택 전 `task list`의 장기 정체 항목과 R2 범위를 현재 제품 우선순위에 맞게 재검토
 
 ## Blockers
 - (없음) <!-- leerness:auto -->
