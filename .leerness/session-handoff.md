@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-27T22:46:21.139Z
+Last generated: 2026-08-28T08:12:28.855Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -94,7 +94,8 @@ Last generated: 2026-08-27T22:46:21.139Z
 - T-0081 도그푸딩 P1 5건 + 검수 7건 (1.36.79) → next: 다음 액션 작성
 - T-0087 1.36.97 렌즈 3축 심화 구현 → next: 다음 액션 작성
 - T-0088 session close 가 current-state.md 를 덮어쓴다 — 사용자 보고(hive-analytics): AI 이력에 '또 덮어썼습니다. 복원하겠습니다' 가 남음. 데이터 손실 계열이라 재현 후 보존 경로 확인 필요 → next: 중복/미갱신 백로그 종결 — 보존 회귀 유지
-- T-0093 명령 표면 감사 잔여 — invalid-json 5건(task drop --json / lesson drop --json / gate <bogus> --json / release cleanup <non-git> --json / reuse-map --include nosuchproj --json 및 retro·insights)이 --json 모드에서 JSON 아닌 출력 혼입. --json 계약은 '단일 유효 JSON 문서' 여야 한다 → next: v1.36.173 공개 배포 및 production 검증
+- T-0093 명령 표면 감사 잔여 — invalid-json 5건(task drop --json / lesson drop --json / gate <bogus> --json / release cleanup <non-git> --json / reuse-map --include nosuchproj --json 및 retro·insights)이 --json 모드에서 JSON 아닌 출력 혼입. --json 계약은 '단일 유효 JSON 문서' 여야 한다 → next: 완료 — v1.36.173 공개 배포 및 production/CI 검증 완료
+- T-0094 명령 표면 감사 잔여 — dead-flag 9건: memory archive / intent expand --expand-all·--select / auto-update status / release cleanup --keep 0·--keep -3 / setup-agents --no-setup-agents / provider add --env-flag·--version-args·--desc / reuse-map --strict-elements / api-skill add --no-crawl / parent adopt --select / toggle get gate — 광고된 플래그가 동작하지 않음 → next: 완료 — v1.36.174 공개 배포·CI 13/13 검증 완료; 다음 미해결 백로그 선택
 - T-0097 context budget 가 이월분(Preserved)을 분해해 보이도록 — 두 번 미뤄진 부채의 비용을 처음으로 계량 → next: 다음 액션 작성
 - T-0099 e2e 미실행 명령 16종 잔여 — 이번 라운드가 requests/next-action/incident/brief/preview 경로를 덮었으므로 나머지(creds list|register|check|refresh · env check|sync|detect · wakeup-interval · workspace-dir · toggle · glossary · policy · path-setup · web|pc|lsp bridge · webhook serve · deploy auto · release sync-main)를 같은 방식으로 훑는다. 방법: (1) 커버리지 카운터에 다빈도 명령 대조군을 박고 수를 먼저 신뢰 가능하게 만든다 (2) 사용자 데이터/외부 입력을 쓰는 표면부터 (creds 가 최우선 — 자격증명 표면인데 e2e 실행 0회) (3) 발견은 인자 단위로 스윕한다(1.36.113 에서 같은 문장의 옆 인자를 놓쳤다). → next: 16개 잔여 CLI 명령군을 격리 픽스처·dry-run·권한거부로 전수 실행
 - T-0100 개행 주입 위조 클래스 스윕 (1.36.113 완료분) → next: 다음 액션 작성
@@ -156,22 +157,6 @@ Last generated: 2026-08-27T22:46:21.139Z
 
 ## Verification
 ```
-## 2026-08-28 — v1.36.172 public release verification
-
-Task: T-0154
-Command: git ls-remote origin refs/heads/main refs/tags/v1.36.172; gh release view v1.36.172; npm view leerness@latest; fresh-prefix registry install; npm run site:build; npm run site:deploy; node pipeline/verify-deploy.cjs --url https://leerness.com --expect 1.36.172
-Exit: 0
-Note: GitHub main/tag/release가 구현 SHA `d9a6f543b88749a7707aa821894d7b74af67cb9e`로 일치한다. npm latest/exact는 1.36.172이며 registry integrity는 `sha512-8sQ9vISjRemmUXzMoJumGG2NNhb3kqm7eY3js70L2n3Hzvwg47Qli0Wv1B6tW/nQ/8utgIiDGd2/hkveNYXTJg==`, shasum은 `5071bb558eae9d31a801db23a66d937deda7ead7`; fresh-prefix 설치본은 v1.36.172, 런타임 의존성 0, install script 없음이고 설치된 tarball의 `workspace-dir-lock-order-probe.js`도 `WORKSPACE_LOCK_ORDER_OK`로 통과했다. 사이트는 commit `7feb5a7c0bb4d9550ec5c1e854679afa912c36fb`에서 696 pages를 빌드하고 Cloudflare deployment `928f3211`로 게시했다. `https://leerness.com/`과 `/changelog/1.36.172/`은 HTTP 200이며 첫 production 검증 시도에서 최신 버전과 TOCTOU 수정 내용을 노출했다. GitHub Actions run 33093298655의 Linux/Windows fast 잡은 모두 성공했고 전체 행렬은 기록 시점 실행 중이다.
-Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.172, https://www.npmjs.com/package/leerness/v/1.36.172, https://leerness.com/changelog/1.36.172/, https://github.com/gugu9999gu/leerness/actions/runs/33093298655
-
-## 2026-08-28 — T-0153 close verification and CI partial result
-
-- `verify-claim T-0153 --strict-claims --json` — PASS after correcting the evidence boundary so the package verifier no longer interprets the site repository's `pipeline/verify-deploy.cjs` as a missing package file; evidence complete, claims consistent, git cross-check true, scope creep 0.
-- `verify-claim T-0154 --strict-claims --json` — PASS was recorded before implementation commit `d9a6f543b88749a7707aa821894d7b74af67cb9e`. A post-commit rerun correctly reports git-mismatch because the implementation files are no longer in the working diff; `--lenient` then passes file/test/log existence without misrepresenting that distinction.
-- GitHub Actions run 33093298655 partial close snapshot — 9/13 jobs success, 0 failure: Linux/Windows fast, all four release-runtime jobs, and Ubuntu Node 18/20/22 full E2E passed. Windows Node 18/20/22/24 full E2E remains in progress and is explicitly carried as the next action.
-
-## 2026-08-28 — T-0093 Memory DELETE JSON contract
-
 Task: T-0093 / T-0155
 Command: isolated published-v1.36.172 probes; auto-roadmap-on five-command probe; `npm run test:fast`; `npm test`; external `codex exec review --uncommitted --ephemeral`
 Exit: 0
@@ -185,6 +170,22 @@ Command: git ls-remote origin refs/heads/main refs/tags/v1.36.173; gh release vi
 Exit: 0
 Note: GitHub main과 annotated tag peeled target, 공개 Release가 구현 SHA `fe0cf4cd36cd8aef49d77e0e92fbfacca9d01980`으로 일치한다. npm latest/exact는 1.36.173이고 integrity `sha512-jDRe4nRI+qeqpcbichL1LF9AbfZ/zCUr8mXP/MXuckc/lXc8kHwUanOlzRo75QEDkRAK4LItP6DWcq/3UrzFAA==`, shasum `d1a009235c8f829cc517536cb53dde3b15a5b670`; 새 cache/prefix 설치본은 `.leerness`만 생성하고 DELETE JSON 5/5 및 명령별 roadmap 재생성을 통과했다. 사이트는 commit `cc8c951`에서 697 pages를 빌드하고 Cloudflare production deployment `1513bc64-e0c4-4410-b908-d754eb49b290`로 게시했다. leerness.com 루트, v1.36.173 changelog, Pages 원본은 모두 HTTP 200이고 최신 버전/수정 내용을 노출한다. GitHub Actions run 33116152701은 구현 SHA에서 fast Ubuntu/Windows, Ubuntu Node 18/20/22, Windows Node 18/20/22/24, release-runtime Ubuntu/Windows Node 24/26 전체 13/13이 성공했고 실패·취소·skip은 0이다.
 Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.173, https://www.npmjs.com/package/leerness/v/1.36.173, https://leerness.com/changelog/1.36.173/, https://github.com/gugu9999gu/leerness/actions/runs/33116152701
+
+## 2026-08-28 — T-0094 dead-flag and multi-session validation
+
+Task: T-0094
+Command: node scripts/dead-flags-probe.js; npm run test:fast; npm test; npm pack --dry-run; external `codex exec` read-only review
+Exit: 0
+Note: 10개 의심 표면을 실제 CLI/MCP 프로세스로 감사해 6개 결함 표면(intent expand, auto-update, setup-agents, provider, api-skill, toggle)을 수정하고 4개(memory archive, release cleanup, reuse-map strict-elements, parent adopt select)는 기존 정상 동작으로 보수적으로 확정했다. 외부 Codex 검토가 api-skill positional 흡수, auto-update lookalike/손상 hook 형상, init opt-out provider 덮어쓰기, toggle prototype ID를 재현했고 모두 회귀로 고정한 뒤 최종 `NO_P0_P1_P2`로 수렴했다. `npm run test:fast` 13/13, 전체 `npm test`는 selftest 355/355, core 51/51, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467을 6,673초에 통과했다. 멀티세션은 동시 24쓰기 전부 보존, 사용자 상태 쓰기 41종 canonical 락, sessionKey별 evidence/run/handoff/presence 격리, Claude↔Codex 상호 가시성, read-only handoff 추적 파일 쓰기 0으로 확인했다. `.harness`→`.leerness` canonical migration과 fresh 설치의 `.leerness` 단독 생성도 통과했다. `npm pack --dry-run`은 72 files/1.9 MB, 예상 shasum `75bff52f2c1977547a3ebabea7f9e3c4ed954042`; `npm audit --omit=dev`는 의도적으로 lockfile이 없는 0-runtime-dependency 패키지라 ENOLOCK으로 비적용이며 lockfile은 생성하지 않았다.
+Artifacts: bin/leerness.js, lib/agent-registry.js, lib/mcp-tools.js, lib/toggles.js, scripts/dead-flags-probe.js, scripts/e2e.js, package.json, CHANGELOG.md, README.md, .leerness/feature-contracts.md, .leerness/bugfix-receipts.json
+
+## 2026-08-28 — v1.36.174 public release verification
+
+Task: T-0094
+Command: release publish --git-push/--npm-publish/--gh-release; npm latest/exact metadata; fresh-cache/fresh-prefix registry install; npm run site:build; npm run site:deploy; verify-deploy --expect 1.36.174; direct production HTTP checks
+Exit: 0
+Note: GitHub main, annotated tag peeled target, 공개 Release가 구현 SHA `0cb57225b72d7b93e83172ad53818d72e1ae1cf8`로 일치하고 동일 `leerness-1.36.174.tgz`를 자산으로 첨부했다. GitHub 자산과 로컬 SHA-256은 `84a24c9a9079b60f2114064418a27936f1315885b9e6416845ffc21619097711`로 일치한다. npm latest/exact는 1.36.174이고 integrity `sha512-Xsc+FGWyyyfpOQM2vzVJfh8YOmB/XuEMGGyqNWmjxMZ0brT3zuUoi6TDZTqYJPkAnTGRrKv46xohcCHbaHKvuA==`, shasum `75bff52f2c1977547a3ebabea7f9e3c4ed954042`는 로컬 tarball SHA-1과 일치한다. 새 cache/prefix 설치본은 v1.36.174, runtime deps 0, install scripts 0이며 dead-flag probe와 fresh init의 `.leerness` 생성/`.harness` 미생성을 통과했다. 별도 `leerness-gate` 0.0.3은 92/92, installed cleanroom 12/12, Worker dry-run을 통과했고 공개 CLI의 migration plan은 1.36.165→1.36.174 version drift 외 missing/canonical pending 0건이었다. 활성 T-0025와 untracked harness를 방해하지 않도록 실제 update/writeback은 수행하지 않았다. 사이트는 commit `b50d537fa7225ff4c758382a3a7e11c4a79d1e88`에서 698 pages를 빌드하고 Cloudflare production deployment `383c96e7-0fdc-4438-84e1-03afd78bf9ba`로 게시했다. leerness.com 루트와 v1.36.174 changelog는 첫 production probe에서 HTTP 200과 최신 버전을 노출했다. GitHub Actions run 33148033939는 구현 SHA에서 양 OS fast, release-runtime Ubuntu/Windows Node 24/26, Ubuntu Node 18/20/22 및 Windows Node 18/20/22/24 전체 E2E까지 13/13 성공했고 실패·취소·skip은 0이다.
+Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.174, https://www.npmjs.com/package/leerness/v/1.36.174, https://leerness.com/changelog/1.36.174/, https://github.com/gugu9999gu/leerness/actions/runs/33148033939
 ```
 
 ## Recommended Direction

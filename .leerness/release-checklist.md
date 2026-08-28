@@ -103,7 +103,9 @@ doNotStore:
 - [x] `verify`, `audit`, `check`, `lazy detect`, `gate --claims`, `verify-claim T-0094 --strict-claims`, secrets/encoding/lens 통과
 - [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.174 동기화, `npm pack --dry-run` 72 files 확인
 - [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요 (`npm audit --omit=dev`는 의도적으로 lockfile이 없는 0-dependency 패키지라 ENOLOCK/N/A)
-- [ ] GitHub main/tag/release와 Actions 전체 작업 성공 확인
-- [ ] npm latest/exact 1.36.174, tarball shasum/integrity 및 fresh-prefix 설치 확인
-- [ ] leerness.com 루트와 v1.36.174 changelog 배포·HTTP 200 확인
+- [x] GitHub main/tag/release가 구현 SHA `0cb57225b72d7b93e83172ad53818d72e1ae1cf8`로 일치하고 exact tarball 자산 첨부 확인
+- [x] GitHub Actions run 33148033939 전체 13/13 성공: 양 OS fast, release-runtime Ubuntu/Windows Node 24/26, Ubuntu Node 18/20/22와 Windows Node 18/20/22/24 전체 E2E; 실패·취소·skip 0
+- [x] npm latest/exact 1.36.174; integrity `sha512-Xsc+FGWyyyfpOQM2vzVJfh8YOmB/XuEMGGyqNWmjxMZ0brT3zuUoi6TDZTqYJPkAnTGRrKv46xohcCHbaHKvuA==`, shasum `75bff52f2c1977547a3ebabea7f9e3c4ed954042`, fresh-prefix 설치 확인
+- [x] 사이트 커밋 `b50d537fa7225ff4c758382a3a7e11c4a79d1e88`, Astro 698 pages, Cloudflare deployment `383c96e7-0fdc-4438-84e1-03afd78bf9ba`; leerness.com 루트와 v1.36.174 changelog HTTP 200 확인
+- [x] 별도 `leerness-gate` 0.0.3 도그푸딩: 92/92, installed cleanroom 12/12, Worker dry-run 통과; 공개 leerness 1.36.174 migration plan은 missing/canonical pending 0, version drift 1건만 보고
 - [x] 롤백 기준: npm exact `leerness@1.36.173` 재설치, GitHub tag `v1.36.173`, 직전 사이트 커밋 `cc8c951`
