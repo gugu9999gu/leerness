@@ -602,5 +602,26 @@
       ]
     },
     "previousGuardGap": "기존 회귀는 오류 JSON과 일부 성공 JSON만 확인했고, DELETE 성공 5종 및 auto-roadmap onEveryChange 조건을 명령별 새 산출물로 관측하지 않아 빈 stdout, stderr 혼입, stale graph를 놓쳤다."
+  },
+  {
+    "id": "T-0094",
+    "repro": "node scripts/dead-flags-probe.js",
+    "expectBad": "DEAD_FLAGS_PROBE_FAILED",
+    "baseline": {
+      "at": "2026-08-28T00:55:15.599Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 5622
+    },
+    "rootCause": "문서·카탈로그·전역 플래그 등록과 실제 하위명령 dispatcher/JSON 출력이 분리되어 일부 옵션이 성공처럼 무시되거나 조회 명령이 라우팅되지 않았다",
+    "siblingScope": {
+      "checked": [
+        "동일 감사 10개 표면을 실 CLI 프로브로 대조: 6개 결함 수정",
+        "memory archive·release cleanup·reuse-map strict-elements·parent adopt select 4개는 현재 행위 정상으로 확인"
+      ]
+    },
+    "previousGuardGap": "기존 감사가 소스의 플래그 이름과 약한 픽스처를 확인했지만, 각 옵션의 결과·쓰기·네트워크 차이를 하나의 실행 매트릭스로 검증하지 않았다. 기준선은 동일 제품 코드와 probe를 상위 워크스페이스에서 2회 재현한 기록을 이 저장소에 이관했다."
   }
 ]

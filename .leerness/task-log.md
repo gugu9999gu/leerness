@@ -172,6 +172,12 @@ doNotStore:
 ## 2026-08-27 session-close
 - Generated session-handoff.md and refreshed current-state.md.
 
+## 2026-08-28 — T-0094 dead-flag audit
+
+- 광고됐지만 무시되던 6개 명령 표면을 fail-closed 또는 관측 가능한 계약으로 배선하고, 정상 4개 표면은 변경 없이 회귀로 고정했다.
+- 외부 Codex가 재현한 후속 경계 결함을 모두 수정한 뒤 P0/P1/P2 없음으로 수렴했다.
+- 빠른 게이트 13/13과 전체 E2E 467/467을 포함한 `npm test`가 통과했다. 다음 단계는 v1.36.174 GitHub/npm/leerness.com 게시와 공개본 검증이다.
+
 ## 2026-08-27 session-close
 - Generated session-handoff.md and refreshed current-state.md.
 

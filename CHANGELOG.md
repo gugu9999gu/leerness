@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.174 — 2026-08-28
+
+- T-0094 dead-flag 감사를 실행 회귀로 고정했습니다. intent expand의 가짜 승인 플래그는 fail-closed하고, auto-update status·toggle get·setup-agents opt-out을 실제 배선했으며 provider/api-skill 옵션 결과를 JSON과 사람 출력에서 관측 가능하게 했습니다. provider 영어 모드에서 내장 provider 설명·요약·안내의 한국어 누수도 0으로 고정했습니다. auto-update 상태는 정확한 matcher/실행 명령과 유효한 `/update` 본문만 설치로 인정해 `echo` 문자열·빈 파일 오탐을 차단하고, parse 가능한 비객체 settings와 scalar/mistyped SessionStart hook 항목도 손상으로 거부해 원본 바이트를 보존합니다. `init --no-setup-agents`는 기존 provider 활성화 값을 보존하며, toggle ID는 프로토타입 키를 유효한 ID로 오인하지 않습니다. archive/release/reuse/parent 4개 표면은 기존 정상 동작을 보수적으로 확인했습니다.
+
 ## 1.36.173 — 2026-08-27
 
 - Memory DELETE 5종(task/decision/lesson/rule/plan)의 성공 --json 경로를 단일 JSON 문서·clean stderr 계약으로 통일했습니다. onEveryChange 자동 로드맵은 JSON 출력에 사람용 로그를 섞지 않으면서 다섯 명령 각각 갱신되며, 명령별 산출물 재생성과 외부 Codex P2 재현을 회귀로 고정했습니다.

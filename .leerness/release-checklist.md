@@ -92,3 +92,18 @@ doNotStore:
 - [x] GitHub main/tag/release SHA `fe0cf4cd36cd8aef49d77e0e92fbfacca9d01980`, Actions run 33116152701 13/13 성공, npm latest/exact/fresh install, 사이트 commit `cc8c951`·deployment `1513bc64`·HTTP 200 완료
 - [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요
 - [x] 롤백 기준: npm exact `leerness@1.36.172` 재설치, GitHub tag `v1.36.172`, 직전 사이트 커밋 `7feb5a7`
+
+## 2026-08-28 — v1.36.174
+
+- [x] T-0094 dead-flag probe 11/11 통과: intent/setup-agents/provider/api-skill/auto-update/toggle의 문서화 옵션을 실제 동작 또는 명시적 거부로 고정
+- [x] `npm run test:fast` 및 전체 `npm test` 통과: lint 62 JS + 1 JSON, selftest 355/355, core 51/51, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467
+- [x] Cursor/Codex/Claude 멀티세션 직접 E2E: 24개 동시 쓰기 보존, 세션별 evidence/handoff/presence 귀속, sibling 차단과 hook 무쓰기 보장
+- [x] `.harness/` → `.leerness/` fresh install·canonical migration·dual-live fail-closed 회귀 통과
+- [x] 외부 Codex 반복 검토에서 발견한 P1/P2를 수정하고 최종 재검토 `NO_P0_P1_P2`
+- [x] `verify`, `audit`, `check`, `lazy detect`, `gate --claims`, `verify-claim T-0094 --strict-claims`, secrets/encoding/lens 통과
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.174 동기화, `npm pack --dry-run` 72 files 확인
+- [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요 (`npm audit --omit=dev`는 의도적으로 lockfile이 없는 0-dependency 패키지라 ENOLOCK/N/A)
+- [ ] GitHub main/tag/release와 Actions 전체 작업 성공 확인
+- [ ] npm latest/exact 1.36.174, tarball shasum/integrity 및 fresh-prefix 설치 확인
+- [ ] leerness.com 루트와 v1.36.174 changelog 배포·HTTP 200 확인
+- [x] 롤백 기준: npm exact `leerness@1.36.173` 재설치, GitHub tag `v1.36.173`, 직전 사이트 커밋 `cc8c951`

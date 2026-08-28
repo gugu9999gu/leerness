@@ -39,3 +39,12 @@ doNotStore:
 - Errors: Missing targets, missing stores, and unmatched records use structured nonzero `failJson` responses when `--json` is present.
 - Related files: `bin/leerness.js`, `scripts/e2e-core.js`.
 - Test evidence ID: T-0093
+
+## Command option behavior matrix — advertised flags are observable or rejected
+- Feature: Keep ten historically suspect command-option surfaces aligned with their documented behavior instead of accepting inert flags.
+- Input: `memory archive list`, `intent expand`, `auto-update status`, `release cleanup --keep`, `setup-agents --no-setup-agents`, `provider add`, `reuse-map --strict-elements`, `api-skill add --no-crawl`, `parent adopt --select`, and `toggle get` through real CLI processes.
+- Output: `auto-update status` and `toggle get` are read-only JSON/human queries; setup opt-out returns an explicit skip; provider list exposes persisted `versionArgs` and emits no Korean UI text in English mode; API-skill JSON exposes whether crawl ran. `intent expand --expand-all|--select` fails with `unknown_flag` because expansion remains presentation-only and approved work is registered separately with `task add`.
+- States: Missing auto-update settings are a healthy `installed:false` state; malformed settings (including parseable non-object containers, non-array SessionStart values, scalar hook entries, and mistyped known hook fields) fail nonzero without rewriting bytes. Exact SessionStart matcher/command pairs plus both `/update` directives are required for `installed:true`; inert `echo` lookalikes and empty files remain uninstalled and `install` repairs them. `init --no-setup-agents` preserves existing provider activation values and makes no provider choice in a fresh config. `--no-crawl` fetches the requested URL but makes no secondary request. Existing archive/release/reuse/parent behavior remains unchanged.
+- Errors: Foreign intent flags and invalid negative cleanup retention fail closed; corrupt status input is `settings_corrupt`; unknown toggle IDs, including object-prototype names such as `toString`, remain errors.
+- Related files: `bin/leerness.js`, `lib/toggles.js`, `scripts/dead-flags-probe.js`, `package.json`.
+- Test evidence ID: T-0094

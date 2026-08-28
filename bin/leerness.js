@@ -48,7 +48,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.173';
+const VERSION = '1.36.174';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -718,7 +718,7 @@ for (const _bf of _BRIEF_FIELDS) { if (_bf && _bf.flag) _VALUE_FLAGS.add('--' + 
 //   판정에만 쓰이고 파싱 동작에는 관여하지 않으므로, 넓게 잡아도 안전하다(과다 포함 = 경고 억제).
 const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--baseline','--all-presets','--allow-empty','--allow-unrelated','--apply','--audit','--auto','--auto-apply-delivered','--auto-cleanup-branches','--auto-fix','--auto-fix-bom','--auto-fix-encoding','--auto-main-push','--auto-recover','--auto-track','--banner','--bench','--build','--bundle-only','--claims','--close','--compact','--detect','--dry-run','--dry-run-npm','--embedding','--enforce','--fail-on-candidates','--fail-on-violation','--force','--gh-pages','--gh-release','--git-push','--global','--guide','--help','--html','--include-code','--interactive','--json','--last','--lenient','--major','--minimal','--minor','--no-animate','--no-auto-roadmap','--no-auto-update','--no-banner','--no-brainstorm-hits','--no-cache','--no-context-inject','--no-crawl','--no-drift-check','--no-enforce','--no-env','--no-env-detect','--no-feature-impact','--no-headline','--no-init-check','--no-interactive-select','--no-lazy-warn','--no-lessons','--no-longterm-recall','--no-mcp','--no-mem-delta','--no-multiagent-hint','--no-next-actions','--no-npm','--no-official-skills','--no-on-every-change','--no-pre-wake','--no-preserve-link','--no-readme-sync','--no-record','--no-repl','--no-review','--no-save','--no-security-check','--no-security-summary','--no-setup-agents','--no-skill-suggest','--no-stale-check','--no-suggest','--no-synonyms','--no-team-reminders','--no-wakeup-miss','--no-workflow-guide','--no-write','--npm-publish','--offline','--on-every-change','--pack','--parent-migrate','--patch','--publish-npm','--pulse','--quiet','--record','--refresh','--remove','--repair','--repl','--require-evidence','--run-tests','--skeleton','--skip-verify','--strict','--strict-claims','--strict-elements','--strict-exit','--suggest','--version','--writeback','--yes',
   // 소스에 리터럴로만 존재해 소비 형태를 기계 추출하지 못한 것들 — 실재하는 플래그이므로 오타로 오인하면 안 된다
-  '--commands','--decision','--errors','--expand-all','--fix','--list','--notes','--print','--raw','--select-all','--skip-git-repo-check','--tests','--verbose','--yolo',
+  '--commands','--decision','--errors','--fix','--list','--notes','--print','--raw','--select-all','--skip-git-repo-check','--tests','--verbose','--yolo',
   // lib/*.js 의 부울 소비자 — bin/ 만 훑었다면 `agents route --confirm` 같은 실재 문법에 오탐 경고를 냈을 것이다
   '--confirm','--dispatch','--execute','--ladder','--log','--multi','--no-env-check','--no-feature-check','--no-gitignore-check','--no-npm-audit','--no-secret-scan','--readonly','--write']);
 // 1.36.103: 하위명령이 '선택' 인 명령에서 `<cmd> <경로>` 의 경로가 하위명령 자리로 읽히던 것 차단.
@@ -1791,7 +1791,8 @@ async function resolveInstallOptions(root, opts = {}) {
   // 1.9.151: CLI 에이전트 활성화 — 복수 선택 (사용자 명시 요청)
   //   _selectMany 로 Space 토글, a 전체, n 해제, Enter 확정. 선택된 에이전트들만 .env.example에 LEERNESS_ENABLE_* 활성화.
   let agentsOptIn = null;   // string[] (다중) 또는 'none' (선택 안함)
-  if (shouldAsk && !opts._skipAgentsPrompt) {
+  const skipAgentSetup = opts.noSetupAgents === true || has('--no-setup-agents');
+  if (shouldAsk && !opts._skipAgentsPrompt && !skipAgentSetup) {
     // 1.9.206: 선택된 언어로 prompt 표시
     const _agLang = lang === 'en' ? 'en' : 'ko';
     if (useInteractive) {
@@ -1830,7 +1831,7 @@ async function resolveInstallOptions(root, opts = {}) {
   // 1.18.3 (사용자 명시): 설치 직후 REPL agent 모드 진입 문항 제거 — REPL 은 완성도가 올라가면 그때 구현 예정.
   //   수동 진입(`leerness agent`)은 그대로 유지.
   const startRepl = false;
-  return { lang, skills, agentsOptIn, permissionMode, startRepl };
+  return { lang, skills, agentsOptIn, skipAgentSetup, permissionMode, startRepl };
 }
 
 async function install(root, opts = {}) {
@@ -1891,6 +1892,7 @@ async function install(root, opts = {}) {
     const list = Array.isArray(resolved.agentsOptIn) ? resolved.agentsOptIn.join(', ') : String(resolved.agentsOptIn);
     log(`Agents 활성화: ${list}`);
   }
+  if (resolved.skipAgentSetup) log(`Agents 설정 보존: --no-setup-agents (기존 활성화 값을 읽거나 덮어쓰지 않음)`);
   if (resolved.permissionMode) log(`Agent 권한 모드: ${resolved.permissionMode}  (1.9.174 — REPL에서 \`:permissions extended|full\` 로 즉시 변경 가능)`);
   // 1.9.10: 스킬 카탈로그 출처 안내
   // 1.9.184 (사용자 명시): leerness-skillpack 미사용 정책 — 안내 메시지 제거. builtin catalog 만 사용.
@@ -2062,7 +2064,16 @@ async function install(root, opts = {}) {
     }
     // 1.9.187: 비시크릿 LEERNESS_* 설정 → .leerness/leerness-config.json (AI 가시성)
     try {
-      _writeLeernessConfig(root, {
+      const leernessConfig = {
+        LEERNESS_SKILL_DISCOVER_URL: '',
+        LEERNESS_SKILL_AUTO_DISCOVER: '0',
+        LEERNESS_SKILL_AUTO_INSTALL: '0',
+        LEERNESS_SKILL_AUTO_PRESETS: 'vercel,anthropic'
+      };
+      // Explicit opt-out means preserve, not "select none". Omitting these keys
+      // lets _writeLeernessConfig retain existing values and keeps a fresh init
+      // free of an implicit ten-provider decision.
+      if (!resolved.skipAgentSetup) Object.assign(leernessConfig, {
         LEERNESS_OLLAMA_BASE_URL: enable('ollama') ? 'http://localhost:11434' : '',
         LEERNESS_OLLAMA_MODEL: '',
         LEERNESS_ENABLE_CLAUDE: enable('claude') ? '1' : '0',
@@ -2075,11 +2086,8 @@ async function install(root, opts = {}) {
         LEERNESS_ENABLE_GOOSE: enable('goose') ? '1' : '0',
         LEERNESS_ENABLE_COPILOT: enable('copilot') ? '1' : '0',
         LEERNESS_ENABLE_OLLAMA: enable('ollama') ? '1' : '0',
-        LEERNESS_SKILL_DISCOVER_URL: '',
-        LEERNESS_SKILL_AUTO_DISCOVER: '0',
-        LEERNESS_SKILL_AUTO_INSTALL: '0',
-        LEERNESS_SKILL_AUTO_PRESETS: 'vercel,anthropic'
       });
+      _writeLeernessConfig(root, leernessConfig);
     } catch (e) {
       warn(`.leerness/leerness-config.json 생성 실패 (계속 진행): ${e.message}`);
     }
@@ -4340,7 +4348,7 @@ function _selfTestCases() {
       const s = read(__filename);
       const forceGuard = s.includes("const effForce = opts.force && !_USER_STATE.has(f);") && s.includes("'.leerness/progress-tracker.md', '.leerness/plan.md', '.leerness/task-log.md'");
       const skillGuard = s.includes('유효하지 않은 skill name (path traversal/경로 문자 차단)') && s.includes('이미 설치된 skill: ${skillId} — 내용이 다릅니다');
-      const settingsGuard = s.includes('settings.local.json 이 손상돼(JSON 파싱 실패) hook 설치를 중단');
+      const settingsGuard = s.includes('settings.local.json 이 손상돼(JSON 파싱/형상 실패) hook 설치를 중단');
       // Workspace migration fails closed on links/junctions; it never follows
       // them and never reports a partial migration as success.
       let symlinkGuard = false;
@@ -4779,8 +4787,10 @@ function _selfTestCases() {
       const jsonContract = hookBody.includes("hookEventName: 'SessionStart'") && hookBody.includes('additionalContext');
       const optOut = hookBody.includes("has('--no-context-inject')") && hookBody.includes("LEERNESS_NO_CONTEXT_INJECT");
       const selfLabel = hookBody.includes('위는 요약');                                          // 1.9.272 투명성: 요약임을 자기 라벨링
-      const matcherCompact = s.includes("{ matcher: 'startup|clear|compact', command: 'leerness hook session-start' }");   // 실측 결함(compaction) 커버
-      const idempotent = s.includes("some(h => h.command && h.command.includes('leerness hook session-start'))");
+      const matcherCompact = _AUTO_UPDATE_CONTEXT_HOOK.matcher === 'startup|clear|compact'
+        && _AUTO_UPDATE_CONTEXT_HOOK.command === 'leerness hook session-start';   // 실측 결함(compaction) 커버
+      const idempotent = _exactHook({ matcher: 'startup|clear|compact', command: 'leerness hook session-start' }, _AUTO_UPDATE_CONTEXT_HOOK)
+        && !_exactHook({ matcher: 'startup', command: 'echo leerness hook session-start' }, _AUTO_UPDATE_CONTEXT_HOOK);
       return surface && zeroWrite && noHandoffCall && jsonContract && optOut && selfLabel && matcherCompact && idempotent;
     } },
     { name: '경로/EOL/형태 견고성 4종 (1.36.21, 전수 sweep P2): handoff·env detect 없는경로 가드 + CRLF plan tasks + migrate 오타설치 차단 + user-requests 미인식 쓰기차단 — 소스가드 + 순수 행위', run: () => {
@@ -4956,7 +4966,35 @@ function _selfTestCases() {
     { name: 'CV-1/UR-0076: arg() --path=값 파싱 + _resolveRoot(--path>positional>cwd) 행위', run: () => { if (typeof _resolveRoot !== 'function') return false; const save = process.argv; try { process.argv = ['node', 'h', 'context', '--path=/tmp/eqform']; const eq = arg('--path', null) === '/tmp/eqform'; process.argv = ['node', 'h', 'context', 'X', '--path', '/tmp/flag']; const flagWins = _resolveRoot('X') === '/tmp/flag'; process.argv = ['node', 'h', 'context', '/tmp/pos']; const posWins = _resolveRoot('/tmp/pos') === '/tmp/pos'; process.argv = ['node', 'h', 'context']; const cwdFb = _resolveRoot(undefined) === process.cwd(); return eq && flagWins && posWins && cwdFb; } finally { process.argv = save; } } },
     { name: 'CV-4/UR-0079: _pruneArchives archive retention (최신 keep 유지, 오래된 prune) 행위', run: () => { if (typeof _pruneArchives !== 'function') return false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_prune_')); try { const adir = path.join(tmp, '.leerness', 'archive'); fs.mkdirSync(adir, { recursive: true }); for (let i = 0; i < 5; i++) fs.mkdirSync(path.join(adir, 'leerness-1.9.' + i + '-stamp')); const pruned = _pruneArchives(tmp, 2); const left = fs.readdirSync(adir).filter(n => /^leerness-/.test(n)).length; return pruned === 3 && left === 2; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
     { name: 'CV-7/UR-0082: commands 카탈로그 + help 에 누락 명령군 등재 (표면 drift 가드)', run: () => { const src = read(__filename); const ci = src.indexOf('function commandsCmd'); const hi = src.indexOf('function help('); if (ci < 0 || hi < 0) return false; const cbody = src.slice(ci, ci + 8000); const hbody = src.slice(hi, hi + 7000); const must = ['verify-code', 'contract verify', 'install-safety', 'feature add', 'creds list', 'incident list', 'webhook serve', 'deploy auto', 'runs list', 'permissions list', 'whats-new', 'migrate audit']; return must.every(c => cbody.includes(c)) && hbody.includes('install-safety') && hbody.includes('feature add'); } },
-    { name: 'UR-0083(4th외부평가 9.3): auto-update hook 비침투 (update --quiet 모드 + hook --check --quiet + 업그레이드)', run: () => { const src = read(__filename); const quietMode = /const quiet = !!opts\.quiet \|\| has\('--quiet'\)/.test(src); const hookQuiet = src.includes("command: 'leerness update --check --quiet'"); const upgrade = /includes\('leerness update --check'\) && !h\.command\.includes\('--quiet'\)/.test(src); return quietMode && hookQuiet && upgrade; } },
+    { name: 'UR-0083(4th외부평가 9.3): auto-update hook 비침투 (update --quiet 모드 + hook --check --quiet + 업그레이드)', run: () => {
+      const src = read(__filename);
+      const quietMode = /const quiet = !!opts\.quiet \|\| has\('--quiet'\)/.test(src);
+      const exactness = _exactHook({ matcher: '*', command: 'leerness update --check --quiet' }, _AUTO_UPDATE_CHECK_HOOK)
+        && !_exactHook({ matcher: '*', command: 'echo leerness update --check --quiet' }, _AUTO_UPDATE_CHECK_HOOK);
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_auto_update_self_'));
+      try {
+        mkdirp(path.join(tmp, '.claude'));
+        writeUtf8(path.join(tmp, '.claude', 'settings.local.json'), JSON.stringify({ hooks: { SessionStart: [
+          { matcher: '*', command: 'leerness update --check' },
+        ] } }, null, 2) + '\n');
+        const installed = cp.spawnSync(process.execPath, [__filename, 'auto-update', 'install', tmp], { encoding: 'utf8', timeout: 20000 });
+        const settings = JSON.parse(read(path.join(tmp, '.claude', 'settings.local.json')));
+        const hooks = settings.hooks.SessionStart || [];
+        const upgraded = installed.status === 0
+          && !hooks.some(h => h && h.command === 'leerness update --check')
+          && hooks.some(h => _exactHook(h, _AUTO_UPDATE_CHECK_HOOK))
+          && hooks.some(h => _exactHook(h, _AUTO_UPDATE_CONTEXT_HOOK))
+          && _validUpdateSlashCommand(path.join(tmp, '.claude', 'commands', 'update.md'));
+        const settingsFile = path.join(tmp, '.claude', 'settings.local.json');
+        const malformedBytes = '{"hooks":{"SessionStart":[42]}}';
+        writeUtf8(settingsFile, malformedBytes);
+        const malformedStatus = cp.spawnSync(process.execPath, [__filename, 'auto-update', 'status', tmp, '--json'], { encoding: 'utf8', timeout: 20000 });
+        const malformedInstall = cp.spawnSync(process.execPath, [__filename, 'auto-update', 'install', tmp], { encoding: 'utf8', timeout: 20000 });
+        const malformedRejected = malformedStatus.status !== 0 && malformedInstall.status !== 0
+          && read(settingsFile) === malformedBytes;
+        return quietMode && exactness && upgraded && malformedRejected;
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
     { name: 'CV-6/UR-0081: 시크릿 스캐너 FP/FN — _isPlaceholderSecret + _looksSecretLike 행위', run: () => { if (typeof _isPlaceholderSecret !== 'function' || typeof _looksSecretLike !== 'function') return false; const fp = _isPlaceholderSecret('change-me') && _isPlaceholderSecret('your-api-key-here') && _isPlaceholderSecret('<token>') && _isPlaceholderSecret('') && !_isPlaceholderSecret('hunter2realpass'); const fn = _looksSecretLike('secret123') && _looksSecretLike('a'.repeat(24)) && !_looksSecretLike('processEnv') && !_looksSecretLike('reqBodyPassword'); return fp && fn; } },
     { name: 'UR-0025: _mergeLines/_mergeEnvLines 순수 코어 모듈 분리 + 행위 (1.9.367)', run: () => { if (typeof _mergeLines !== 'function' || typeof _mergeEnvLines !== 'function') return false; const m = require('../lib/pure-utils'); const moved = m._mergeLines === _mergeLines && m._mergeEnvLines === _mergeEnvLines; const ml = _mergeLines('a\n', ['a', 'b']) === 'a\nb\n'; const meKeep = _mergeEnvLines('FOO=keep\n', ['FOO=new']) === 'FOO=keep\n'; const meAdd = _mergeEnvLines('FOO=keep\n', ['BAR=add']).includes('BAR=add'); return moved && ml && meKeep && meAdd; } },
     { name: 'UR-0025: _mergeReadmeSection/_managedMerge + MERGE_OVERWRITE_FILES 모듈 분리 + 행위 (1.9.368)', run: () => { const m = require('../lib/pure-utils'); const c = require('../lib/catalogs'); if (typeof _mergeReadmeSection !== 'function' || typeof _managedMerge !== 'function') return false; const moved = m._mergeReadmeSection === _mergeReadmeSection && m._managedMerge === _managedMerge && MERGE_OVERWRITE_FILES === c.MERGE_OVERWRITE_FILES; const rd = _mergeReadmeSection('', 'BLOCK', '<s>', '<e>') === '# Project\n\nBLOCK\n'; const mm = _managedMerge('a.md', 'NEW', 'OLD', '.h', new Set()).includes('migration-preserved'); const ow = _managedMerge('.leerness/manifest.json', 'NEW', 'OLD', '.h', c.MERGE_OVERWRITE_FILES) === 'NEW'; const same = _managedMerge('a.md', 'X', 'X', '.h', new Set()) === 'X'; return moved && rd && mm && ow && same; } },
@@ -6696,7 +6734,7 @@ function _selfTestCases() {
       //   수신 변수 매칭에 단어 경계는 필수 — 없으면 `s.includes` 가 `tps.includes` 에 걸려 오탐이 난다(자체 실측).
       const litRe = /(\w+)\.includes\((['"`])((?:\\.|(?!\2)[\s\S])*?)\2\)/g;
       const codeish = (L) => /[(){}=;]|=>|\|\||&&/.test(L) && /[a-zA-Z_$]{3,}/.test(L);
-      let offenders = 0;
+      const offenders = [];
       for (const body of chunks) {
         if (body.includes(MARK)) continue;                 // 이 메타가드 자신 (표식은 소스에 그대로 존재)
         if (!/read\(__filename\)/.test(body)) continue;
@@ -6711,13 +6749,18 @@ function _selfTestCases() {
           //   (검수 High#2) 1차판이 따옴표까지 싸잡아 제외해 16개 가드가 무방비가 됐다 — 실측 우회 재현됨.
           if (lm[2] === '`' && L.includes('${')) continue;
           const haystack = binVars.has(lm[1]) ? binOutside : outside;
-          if (!haystack.includes(L)) { offenders++; break; }
+          if (!haystack.includes(L)) {
+            const caseName = (/\{ name: ['"]([^'"]+)/.exec(body) || [])[1] || 'unknown selftest';
+            offenders.push(`${caseName}: ${L.slice(0, 120)}`);
+            break;
+          }
         }
       }
       // 1.36.83: 잔여 부채 **0** — 1.36.82 가 baseline 12 로 유예했던 것을 이 라운드에서 전부 수리했다
       //   (각 가드는 지키던 동작을 실제로 깨뜨렸을 때 실패함을 변이로 증명). 이제 하나라도 생기면 즉시 실패한다.
       //   유예 수치를 남겨두면 그 안에서 조용히 썩으므로, 갚은 뒤에는 반드시 0 으로 조인다.
-      return offenders === 0;
+      if (offenders.length) throw new Error(`stale source guard: ${offenders.join(' | ')}`);
+      return true;
     } },
     { name: '동봉 문서의 낡을 수치 주장 금지 (1.36.82): README/docs 의 MCP 도구·selftest 케이스 수가 실측과 불일치 시 실패 (메타가드)', run: () => {
       // 사고: docs/interoperability.md 가 "86 도구"(3릴리스 낡음), README.ko.md 가 "selftest 210 케이스"(실제 335) 를
@@ -8937,8 +8980,10 @@ async function apiSkillCmd(root, sub) {
     while (i < argv.length) {
       const a = argv[i];
       if (a.startsWith('--')) {
-        // --key value 패턴이면 value 도 skip
-        if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) i += 2;
+        // 값 플래그만 다음 token을 소비한다. 종전에는 `--no-crawl <url>`의
+        // boolean flag가 URL까지 삼켜 위치에 따라 missing_args가 나왔다.
+        const name = a.split('=')[0];
+        if (_VALUE_FLAGS.has(name) && !a.includes('=') && i + 1 < argv.length && !argv[i + 1].startsWith('--')) i += 2;
         else i += 1;
         continue;
       }
@@ -8990,7 +9035,9 @@ async function apiSkillCmd(root, sub) {
     _hlog(cy(`# leerness api-skill add (1.9.245, UR-0015)`));
     _hlog(`  URL: ${url}`);
     if (direction) _hlog(`  방향: ${direction}`);
-    _hlog(dm(`  Fetch + crawl (depth=1, same-domain, max 10)...`));
+    _hlog(dm(noCrawl
+      ? `  Fetch only (--no-crawl: related links are not requested)...`
+      : `  Fetch + crawl (depth=1, same-domain, max 10)...`));
     try {
       const doc = await _collectAPIDoc(url, { direction, noCrawl });
       const skillName = name || doc.title || new URL(url).hostname;
@@ -9011,7 +9058,7 @@ async function apiSkillCmd(root, sub) {
       _hlog(dm(`  title: ${doc.title || '(none)'}`));
       _hlog(dm(`  related links: ${(doc.related_links || []).length}`));
       _hlog(dm(`  text size: ${doc.text.length} chars`));
-      if (_j) log(JSON.stringify({ ok: true, id, name: skillName, url, related_count: (doc.related_links || []).length }, null, 2));
+      if (_j) log(JSON.stringify({ ok: true, id, name: skillName, url, crawl: !noCrawl, related_count: (doc.related_links || []).length }, null, 2));
     } catch (e) {
       _hlog(rd(`✗ Fetch 실패: ${e.message}`));
       // 1.9.245: --skeleton fallback — Cloudflare/WAF 차단된 URL 도 빈 .md 골격 생성 → 사용자가 수동 채움
@@ -9038,9 +9085,9 @@ async function apiSkillCmd(root, sub) {
         _hlog(yl(`⚠ 빈 골격 생성 (--skeleton fallback): .leerness/api-skills/${id}.md`));
         _hlog(dm(`  → 직접 ${url} 내용을 복사해서 .md 파일에 채워넣어주세요`));
         _hlog(dm(`  → 이후 leerness handoff 가 매칭 시 참조됩니다`));
-        if (_j) log(JSON.stringify({ ok: true, id, skeleton: true, url, name: skillName, fetchError: e.message }, null, 2));
+        if (_j) log(JSON.stringify({ ok: true, id, skeleton: true, url, name: skillName, crawl: !noCrawl, related_count: 0, fetchError: e.message }, null, 2));
       } else {
-        if (_j) log(JSON.stringify({ ok: false, code: 'fetch_failed', error: e.message, url }, null, 2));   // 실패도 구조화(종전: --json 에 사람용 텍스트만)
+        if (_j) log(JSON.stringify({ ok: false, code: 'fetch_failed', error: e.message, url, crawl: !noCrawl }, null, 2));   // 실패도 구조화(종전: --json 에 사람용 텍스트만)
         process.exitCode = 1;
       }
     }
@@ -11963,7 +12010,7 @@ function _inferScopeExpansion(text, root) {
     result.expansionCandidates = [];
     result.note = `intent: precise — 명시 요청만 진행, AI 추론 확장 비활성 (사용자 의도 보호)`;
   } else if (classify.intent === 'broad') {
-    result.note = `intent: broad — ${result.expansionCandidates.length} 확장 후보 제시 (--expand-all 또는 --select N 으로 명시 승인 필요)`;
+    result.note = `intent: broad — ${result.expansionCandidates.length} 확장 후보 제시(dry-run); 선택한 후보는 leerness task add 로 별도 등록`;
   } else {
     result.note = `intent: default — 명시 ${result.explicitMentions.length}건만 우선, 확장 후보 ${result.expansionCandidates.length}건 검토용`;
   }
@@ -15032,10 +15079,12 @@ const _STRICT_COMMAND_FLAGS = {
   'verify-claim baseline show': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'verify-claim baseline show [--json]' },
   'verify-code': { allowed: ['--build', '--bench', '--strict'], globals: [..._COMMON_COMMAND_FLAGS], usage: 'verify-code [path] [--build] [--bench] [--strict]' },
   'contract verify': { allowed: ['--allow-empty'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'contract verify <spec.md> <impl.js> [--allow-empty] [--json]' },
+  'intent expand': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'intent expand "<request>" [--json]' },
 };
 function _validateCommandFlags(cmd, args) {
   let route = cmd === 'contract' && args[1] === 'verify' ? 'contract verify' : cmd;
   if (cmd === 'verify-claim' && args[1] === 'baseline') route = `verify-claim baseline ${args[2] || ''}`.trim();
+  if (cmd === 'intent' && args[1] === 'expand') route = 'intent expand';
   const cfg = _STRICT_COMMAND_FLAGS[route];
   if (!cfg) return true;
   return _rejectUnknownFlags(cfg.allowed, cfg.usage, { globals: cfg.globals });
@@ -20293,6 +20342,7 @@ function _allProviders(root) {
         versionArgs: _uvaOk ? _uva : _fallbackVa,
         ...((_uva && !_uvaOk) ? { versionArgsRejectedReason: `providers.json 의 versionArgs 에 셸 메타문자가 있어 실행하지 않았습니다: ${JSON.stringify(_uva).slice(0, 120)}` } : {}),
         desc: u.desc || (_bi && _bi.desc) || `(user) ${u.id}`,
+        descEn: u.desc || (_bi && _bi.descEn) || (_bi && _bi.desc) || `(user) ${u.id}`,
         installHint: u.installHint || (_bi && _bi.installHint) || '',
         installCmd: u.installCmd || (_bi && _bi.installCmd) || '',
         ...(_inherited ? { authCheck: _inherited } : {}),
@@ -20329,22 +20379,36 @@ function providerCmd(root, sub, ...args) {
         total: all.length,
         builtin: EXTERNAL_AGENTS.length,
         user: userList.length,
-        providers: all.map(p => ({ id: p.id, bin: p.bin, envFlag: p.envFlag, source: userIds.has(p.id) ? 'user' : 'builtin', desc: p.desc }))
+        providers: all.map(p => ({
+          id: p.id,
+          bin: p.bin,
+          envFlag: p.envFlag,
+          versionArgs: Array.isArray(p.versionArgs) ? p.versionArgs.slice() : [],
+          desc: p.desc || '',
+          installHint: p.installHint || '',
+          source: userIds.has(p.id) ? 'user' : 'builtin'
+        }))
       }, null, 2));
       return;
     }
+    const en = _uiLang(root) === 'en';
+    const cell = v => String(v == null ? '' : v).replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
     log(`# leerness provider list (1.9.157)`);
-    log(`총 ${all.length}개 (빌트인 ${EXTERNAL_AGENTS.length} + 사용자 ${userList.length})`);
+    log(en
+      ? `Total ${all.length} (${EXTERNAL_AGENTS.length} built-in + ${userList.length} user-defined)`
+      : `총 ${all.length}개 (빌트인 ${EXTERNAL_AGENTS.length} + 사용자 ${userList.length})`);
     log('');
-    log(`| id | source | bin | envFlag |`);
-    log(`|---|---|---|---|`);
+    log(`| id | source | bin | envFlag | versionArgs | description |`);
+    log(`|---|---|---|---|---|---|`);
     for (const p of all) {
       const src = userIds.has(p.id) ? (EXTERNAL_AGENTS.some(b => b.id === p.id) ? 'user(override)' : 'user') : 'builtin';
-      log(`| ${p.id} | ${src} | ${p.bin} | ${p.envFlag} |`);
+      log(`| ${cell(p.id)} | ${src} | ${cell(p.bin)} | ${cell(p.envFlag)} | ${cell((p.versionArgs || []).join(' '))} | ${cell(en ? (p.descEn || p.desc) : p.desc)} |`);
     }
     if (!userList.length) {
       log('');
-      log(`💡 사용자 정의 provider 추가: leerness provider add <id> --bin <cmd> [--env-flag F] [--version-args ARGS] [--desc D]`);
+      log(en
+        ? `💡 Add a user-defined provider: leerness provider add <id> --bin <cmd> [--env-flag F] [--version-args ARGS] [--desc D]`
+        : `💡 사용자 정의 provider 추가: leerness provider add <id> --bin <cmd> [--env-flag F] [--version-args ARGS] [--desc D]`);
     }
     return;
   }
@@ -21172,6 +21236,14 @@ function _tryInstallAgent(agent) {
 // 1.9.34: 방향키/스페이스 multi-select 도입 (LEERNESS_NO_INTERACTIVE=1 → 기존 yes/no 폴백)
 async function setupAgentsCmd(root, opts = {}) {
   root = absRoot(root || process.cwd());
+  // T-0094: init 의 agent 선택을 건너뛰는 opt-out. standalone 에 붙어도
+  // 플래그를 경로로 오독하거나 설정 화면을 띄우지 않는 명시적 no-op 으로 유지한다.
+  if (has('--no-setup-agents')) {
+    const payload = { ok: true, skipped: true, reason: 'no_setup_agents', root };
+    if (has('--json')) log(JSON.stringify(payload, null, 2));
+    else log(`⏭ 외부 AI CLI 설정 건너뜀 (--no-setup-agents): ${root}`);
+    return payload;
+  }
   _loadEnvFile(root);
   _loadEnvFile(path.join(root, '..'));
   const envPath = path.join(root, '.env');
@@ -24581,6 +24653,47 @@ async function updateCmd(root, opts = {}) {
   ok('update complete');
 }
 
+const _AUTO_UPDATE_CHECK_HOOK = Object.freeze({ matcher: '*', command: 'leerness update --check --quiet' });
+const _AUTO_UPDATE_CONTEXT_HOOK = Object.freeze({ matcher: 'startup|clear|compact', command: 'leerness hook session-start' });
+function _exactHook(hook, expected) {
+  return !!(hook && typeof hook.command === 'string' && typeof hook.matcher === 'string' &&
+    hook.command.trim() === expected.command && hook.matcher.trim() === expected.matcher);
+}
+function _validUpdateSlashCommand(file) {
+  if (!exists(file)) return false;
+  try {
+    const content = read(file);
+    return /^\s*!leerness\s+update\s+--yes\s*$/m.test(content) &&
+      /^\s*!leerness\s+update\s+--check\s*$/m.test(content);
+  } catch { return false; }
+}
+function _validAutoUpdateSettingsShape(settings) {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return false;
+  const own = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+  if (own(settings, 'hooks') && (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks))) return false;
+  if (settings.hooks && own(settings.hooks, 'SessionStart')) {
+    if (!Array.isArray(settings.hooks.SessionStart)) return false;
+    // Preserve foreign/modern hook objects, but never treat scalar/array entries or
+    // mistyped fields as a writable settings document. Otherwise install's filter
+    // silently retains the bad entry and rewrites the user's file around it.
+    const validHookEntry = hook => {
+      if (!hook || typeof hook !== 'object' || Array.isArray(hook)) return false;
+      if (own(hook, 'matcher') && typeof hook.matcher !== 'string') return false;
+      if (own(hook, 'command') && typeof hook.command !== 'string') return false;
+      if (own(hook, 'type') && typeof hook.type !== 'string') return false;
+      if (own(hook, 'hooks')) {
+        if (!Array.isArray(hook.hooks)) return false;
+        if (!hook.hooks.every(nested => nested && typeof nested === 'object' && !Array.isArray(nested)
+          && (!own(nested, 'command') || typeof nested.command === 'string')
+          && (!own(nested, 'type') || typeof nested.type === 'string'))) return false;
+      }
+      return true;
+    };
+    if (!settings.hooks.SessionStart.every(validHookEntry)) return false;
+  }
+  return true;
+}
+
 function autoUpdateInstall(root) {
   root = absRoot(root);
   const settingsDir = path.join(root, '.claude');
@@ -24590,25 +24703,28 @@ function autoUpdateInstall(root) {
   // 1.36.33 (codex 3차 #3, 1.36.28 손상-스토어 클래스): 손상 settings 를 빈 객체로 오인해 hooks-only 로 덮어쓰면
   //   사용자의 permissions 등 무관 설정이 유실된다. 파싱 실패 시 원본 보존 + 중단.
   if (exists(settingsFile)) {
-    try { settings = JSON.parse(read(settingsFile)); }
-    catch { fail(`.claude/settings.local.json 이 손상돼(JSON 파싱 실패) hook 설치를 중단합니다 — 파일을 복구한 뒤 재시도: ${settingsFile}`); process.exitCode = 1; return; }
+    try {
+      settings = JSON.parse(read(settingsFile));
+      if (!_validAutoUpdateSettingsShape(settings)) throw new Error('settings schema invalid');
+    } catch { fail(`.claude/settings.local.json 이 손상돼(JSON 파싱/형상 실패) hook 설치를 중단합니다 — 파일을 복구한 뒤 재시도: ${settingsFile}`); process.exitCode = 1; return; }
   }
   settings.hooks = settings.hooks || {};
   // 1.9.1 P1: legacy 'leerness-plus update' hook 자동 제거 (이전 fork 시절 잔재).
   let removedLegacy = 0, upgradedQuiet = 0;
   settings.hooks.SessionStart = (settings.hooks.SessionStart || []).filter(h => {
-    if (h && h.command && /\bleerness-plus update\b/.test(h.command)) { removedLegacy++; return false; }
+    const command = h && typeof h.command === 'string' ? h.command.trim() : '';
+    if (/^leerness-plus\s+update(?:\s|$)/.test(command)) { removedLegacy++; return false; }
     // 1.9.364 (4번째 외부평가 9.3): 비-quiet 'leerness update --check' 를 quiet 버전으로 업그레이드 (기존 설치 매세션 노이즈 제거)
-    if (h && h.command && h.command.includes('leerness update --check') && !h.command.includes('--quiet')) { upgradedQuiet++; return false; }
+    if (command === 'leerness update --check') { upgradedQuiet++; return false; }
     return true;
   });
-  if (!settings.hooks.SessionStart.some(h => h.command && h.command.includes('leerness update'))) {
-    settings.hooks.SessionStart.push({ matcher: '*', command: 'leerness update --check --quiet' });
+  if (!settings.hooks.SessionStart.some(h => _exactHook(h, _AUTO_UPDATE_CHECK_HOOK))) {
+    settings.hooks.SessionStart.push({ ..._AUTO_UPDATE_CHECK_HOOK });
   }
   // 1.36.22: 2번째 SessionStart hook — 컨텍스트 주입. matcher 에 compact 를 포함하는 게 핵심(실측 결함: compaction/resume 후
   //   에이전트가 세션시작 handoff 의례를 건너뜀). 기존 설치는 이 멱등 push 로 자동 취득(1.9.364 업그레이드 패턴 재사용).
-  if (!settings.hooks.SessionStart.some(h => h.command && h.command.includes('leerness hook session-start'))) {
-    settings.hooks.SessionStart.push({ matcher: 'startup|clear|compact', command: 'leerness hook session-start' });
+  if (!settings.hooks.SessionStart.some(h => _exactHook(h, _AUTO_UPDATE_CONTEXT_HOOK))) {
+    settings.hooks.SessionStart.push({ ..._AUTO_UPDATE_CONTEXT_HOOK });
   }
   writeUtf8(settingsFile, JSON.stringify(settings, null, 2) + '\n');
   // 1.36.62 (검수 #1): en 프로젝트의 /update 를 한국어로 되덮던 것 — 언어 인지 렌더
@@ -24628,6 +24744,71 @@ function autoUpdateInstall(root) {
   // 1.36.22: 2번째 hook 투명성 — 무엇을(요약 주입)/언제(startup·clear·compact)/왜(compaction 후 컨텍스트 유실)/어떻게 끄는지.
   log(`  ⓘ 2번째 hook \`leerness hook session-start\` 는 세션 시작·clear·compaction 시 진행상황 요약 2~3줄을 컨텍스트에 주입합니다 (쓰기 0 · 미초기화 프로젝트면 무음 · 끄기: LEERNESS_NO_CONTEXT_INJECT=1).`);
   log(`  ⓘ 제거: ${rel(root, settingsFile)} 의 hooks.SessionStart 항목 삭제  ·  설치 시 끄기: leerness init . --no-auto-update`);
+}
+
+// T-0094: help/command catalog 에 공개돼 있던 read-only 상태 표면. 설치 명령과 같은
+// 세 구성요소(update check hook, context hook, /update command)를 보고하며 파일은 만들거나 고치지 않는다.
+function autoUpdateStatus(root) {
+  root = absRoot(root || process.cwd());
+  if (exists(root) && !fs.statSync(root).isDirectory()) {
+    const payload = { ok: false, code: 'path_not_directory', root, error: `프로젝트 경로가 디렉토리가 아닙니다: ${root}` };
+    if (has('--json')) log(JSON.stringify(payload, null, 2));
+    else fail(payload.error);
+    process.exitCode = 1;
+    return payload;
+  }
+  const settingsFile = path.join(root, '.claude', 'settings.local.json');
+  const slashFile = path.join(root, '.claude', 'commands', 'update.md');
+  const base = {
+    ok: true,
+    root,
+    settingsFile,
+    exists: exists(settingsFile),
+    valid: true,
+    installed: false,
+    hooks: { updateCheck: false, updateQuiet: false, contextInjection: false },
+    slashCommand: _validUpdateSlashCommand(slashFile),
+  };
+  if (!base.exists) {
+    if (has('--json')) log(JSON.stringify(base, null, 2));
+    else {
+      log(`# leerness auto-update status`);
+      log(`  ⚪ 미설치 — ${settingsFile} 없음`);
+      log(`  설치: leerness auto-update install ${root}`);
+    }
+    return base;
+  }
+  let settings;
+  try {
+    settings = JSON.parse(read(settingsFile));
+    if (!_validAutoUpdateSettingsShape(settings)) throw new Error('settings schema invalid');
+  }
+  catch {
+    const payload = { ...base, ok: false, valid: false, code: 'settings_corrupt', error: `.claude/settings.local.json JSON 파싱/형상 실패: ${settingsFile}` };
+    if (has('--json')) log(JSON.stringify(payload, null, 2));
+    else fail(`auto-update 상태 확인 실패 — settings JSON 손상(파일은 변경하지 않음): ${settingsFile}`);
+    process.exitCode = 1;
+    return payload;
+  }
+  const sessionStart = settings && settings.hooks && Array.isArray(settings.hooks.SessionStart)
+    ? settings.hooks.SessionStart : [];
+  base.hooks.updateQuiet = sessionStart.some(h => _exactHook(h, _AUTO_UPDATE_CHECK_HOOK));
+  base.hooks.updateCheck = base.hooks.updateQuiet || sessionStart.some(h =>
+    h && typeof h.command === 'string' && typeof h.matcher === 'string' &&
+    h.command.trim() === 'leerness update --check' && h.matcher.trim() === _AUTO_UPDATE_CHECK_HOOK.matcher);
+  base.hooks.contextInjection = sessionStart.some(h => _exactHook(h, _AUTO_UPDATE_CONTEXT_HOOK));
+  // install이 생성하는 정확한 훅(`--quiet` 포함)이 아니면 일부 설치로 보고한다.
+  base.installed = base.hooks.updateCheck && base.hooks.updateQuiet && base.hooks.contextInjection && base.slashCommand;
+  if (has('--json')) log(JSON.stringify(base, null, 2));
+  else {
+    log(`# leerness auto-update status`);
+    log(`  ${base.installed ? '🟢 설치됨' : '🟡 일부 설치'} — ${settingsFile}`);
+    log(`  ${base.hooks.updateCheck ? '✓' : '✗'} update check hook${base.hooks.updateCheck && !base.hooks.updateQuiet ? ' (⚠ --quiet 없음)' : ''}`);
+    log(`  ${base.hooks.contextInjection ? '✓' : '✗'} context injection hook`);
+    log(`  ${base.slashCommand ? '✓' : '✗'} /update command (${slashFile})`);
+    if (!base.installed) log(`  복구/설치: leerness auto-update install ${root}`);
+  }
+  return base;
 }
 
 // 1.9.151: ViewWork hook 제거 (사용자 명시 — leerness와 무관한 외부 도구)
@@ -25669,6 +25850,8 @@ function _mcpToCliArgs(name, args, targetPath) {
             cliArgs = ['api-skill', args.sub || 'list', '--path', targetPath, '--json'];
             if (args.sub === 'add' && args.url) cliArgs.push('--url', args.url);
             if (args.sub === 'add' && args.direction) cliArgs.push('--direction', args.direction);
+            if (args.sub === 'add' && args.name) cliArgs.push('--name', args.name);
+            if (args.sub === 'add' && args.noCrawl === true) cliArgs.push('--no-crawl');
             if ((args.sub === 'show' || args.sub === 'drop') && args.id) cliArgs.push('--id', args.id);
             if (args.sub === 'match' && args.query) cliArgs.push('--query', args.query);
             break;
@@ -30277,12 +30460,12 @@ Korean-first by default; this English help shows with --language en or LEERNESS_
 Usage: leerness <command> [path] [options]
 
 SETUP & UPDATE
-  init [path] [--language auto|ko|en] [--skills recommended|all|a,b] [--minimal] [--yes]
+  init [path] [--language auto|ko|en] [--skills recommended|all|a,b] [--minimal] [--yes] [--no-setup-agents]
                                   Install the .leerness/ workspace into your project
   migrate [path] [--dry-run] [--force]            Non-destructive cross-version migration
   migrate audit|apply|plan [path] [--json]        Diagnose / backfill / compare migration
   update [path] [--check|--yes|--force]           Auto-detect version + migrate
-  auto-update install [path]                      Install the auto-update hook
+  auto-update install|status [path]               Install or inspect the auto-update hook (status is read-only)
   path-setup [--apply]                            Register the leerness CLI on PATH
 
 STATUS & DIAGNOSTICS
@@ -30880,7 +31063,12 @@ async function main() {
     return await install(arg('--path', _msub || process.cwd()), { force:has('--force'), dry:has('--dry-run'), migration:true });  // 1.9.355 (UR-0075): --path 지원
   }
   if (cmd === 'update')    return await updateCmd(arg('--path', args[1] || process.cwd()), { checkOnly: has('--check'), yes: has('--yes'), force: has('--force') });  // 1.9.355 (UR-0075): --path 지원
-  if (cmd === 'auto-update' && args[1] === 'install') return autoUpdateInstall(arg('--path', args[2] || process.cwd()));
+  if (cmd === 'auto-update') {
+    if (args[1] === 'install') return autoUpdateInstall(_resolveRoot(args[2]));
+    if (args[1] === 'status') return autoUpdateStatus(_resolveRoot(args[2]));
+    failJson(has('--json'), 'unknown_subcommand', `알 수 없는 auto-update 하위명령: ${args[1] || '(없음)'} — leerness auto-update install|status [path]`);
+    return;
+  }
   if (cmd === 'status')    return status(arg('--path', args[1] || process.cwd()));
   if (cmd === 'verify')    return verify(arg('--path', args[1] || process.cwd()));
   if (cmd === 'debug')     return debug(arg('--path', args[1] || process.cwd()));
@@ -31016,7 +31204,8 @@ async function main() {
   if (cmd === 'health') return healthCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'whats-new') return whatsNewCmd(args[1] || arg('--path', process.cwd()));
   if (cmd === 'reuse' && args[1] === 'autodetect') return reuseAutodetectCmd(args[2] || arg('--path', process.cwd()));
-  if (cmd === 'setup-agents' || cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(args[1] && args[1] !== 'agents' ? args[1] : (arg('--path', args[2] || process.cwd())));
+  if (cmd === 'setup-agents') return await setupAgentsCmd(_resolveRoot(args[1]));
+  if (cmd === 'setup' && args[1] === 'agents') return await setupAgentsCmd(_resolveRoot(args[2]));
   if (cmd === 'session' && args[1] === 'close') return sessionClose(_resolveRoot(args[2]), { json: has('--json') });
   // 1.9.151: viewwork 명령 제거 (사용자 명시 — leerness 와 무관). session close 의 viewworkEmit 콜도 함께 제거.
   if (cmd === 'ci' && (args[1] === 'init' || args[1] == null)) return ciInitCmd(absRoot(_resolveRoot(args[2])), { force: has('--force'), json: has('--json') });  // 1.9.444 (UR-0152): CI gate 워크플로 생성
