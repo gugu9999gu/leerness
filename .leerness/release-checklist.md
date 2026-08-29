@@ -109,3 +109,21 @@ doNotStore:
 - [x] 사이트 커밋 `b50d537fa7225ff4c758382a3a7e11c4a79d1e88`, Astro 698 pages, Cloudflare deployment `383c96e7-0fdc-4438-84e1-03afd78bf9ba`; leerness.com 루트와 v1.36.174 changelog HTTP 200 확인
 - [x] 별도 `leerness-gate` 0.0.3 도그푸딩: 92/92, installed cleanroom 12/12, Worker dry-run 통과; 공개 leerness 1.36.174 migration plan은 missing/canonical pending 0, version drift 1건만 보고
 - [x] 롤백 기준: npm exact `leerness@1.36.173` 재설치, GitHub tag `v1.36.173`, 직전 사이트 커밋 `cc8c951`
+
+## 2026-08-29 — v1.36.176
+
+- [x] T-0109 중단 규칙 적용: 가장 좁은 명시적 세션 범위 설계도 경고율 63.1%로 사전 기준 40%를 초과해 구현을 되돌리고 `dropped`로 보존
+- [x] T-0089 수정: `agents bench`가 opt-in 되지 않은 provider의 외부 CLI/version probe를 실행하지 않도록 후보를 먼저 제한
+- [x] PATH 실행 마커 직접 프로브 3/3 통과(394/362/342ms, 최대 394ms, 기존 15초 제한 대비 약 38.1배 여유)
+- [x] 외부 Codex 리뷰의 P1/P2를 재현·수정하고 최종 재검토 `NO_P0_P1_P2`
+- [x] `npm run test:fast` 및 전체 `npm test` 통과: lint 63 JS + 1 JSON, selftest 355/355, core 51/51, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467(6,535초)
+- [x] 멀티 세션 E2E: 동시 24쓰기 무손실, 41개 사용자 상태 쓰기 canonical 락, Claude↔Codex 상호 가시성, sessionKey별 evidence/run/handoff/presence 격리, 다른 세션 증거 차용 차단
+- [x] `.harness/` → `.leerness/` fresh 설치·canonical migration·dual-live fail-closed·설치본 legacy run remap 통과
+- [x] `verify`, `audit`, `check`, secrets, encoding, lazy, lens, rules 및 `gate --claims` 6/6 통과; claims 133건의 신규 실패 0, T-0089 strict claim 통과
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.176 동기화; `npm pack --dry-run` 73 files, shasum `08477513fada829c678f0090709862c29bda1900`
+- [x] GitHub main/tag/release가 구현 SHA `b0be547de857776b9299d5093f09dfe3c055b13d`로 일치
+- [x] npm latest/exact 1.36.176; integrity `sha512-LY3Fv6DLRrArlpdnWtZJ5RaYSZdzMz/pplk1pIUBQF3nSKikjsDXi/+L2r1deZaFgtJp8NxMh7TT3RSH5SQ6zg==`, shasum 로컬 일치, fresh-prefix 공개 설치본 selftest 355/355
+- [x] 사이트 커밋 `899aefd`, Astro 700 pages, Cloudflare production deployment `46e84679-2464-49a0-8495-e03a2bf768e5`; leerness.com 루트·v1.36.176 changelog·Pages 원본 HTTP 200
+- [x] GitHub Actions run 33240896988 전체 13/13 성공, 실패 0; 구현 SHA `b0be547de857776b9299d5093f09dfe3c055b13d` 확인
+- [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요
+- [x] 롤백 기준: npm exact `leerness@1.36.175` 재설치, GitHub tag `v1.36.175`, 직전 사이트 커밋 `dd0de8c`

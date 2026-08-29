@@ -151,3 +151,19 @@ Command: release publish --git-push/--npm-publish/--gh-release; npm latest/exact
 Exit: 0
 Note: GitHub main, annotated tag peeled target, 공개 Release가 구현 SHA `0cb57225b72d7b93e83172ad53818d72e1ae1cf8`로 일치하고 동일 `leerness-1.36.174.tgz`를 자산으로 첨부했다. GitHub 자산과 로컬 SHA-256은 `84a24c9a9079b60f2114064418a27936f1315885b9e6416845ffc21619097711`로 일치한다. npm latest/exact는 1.36.174이고 integrity `sha512-Xsc+FGWyyyfpOQM2vzVJfh8YOmB/XuEMGGyqNWmjxMZ0brT3zuUoi6TDZTqYJPkAnTGRrKv46xohcCHbaHKvuA==`, shasum `75bff52f2c1977547a3ebabea7f9e3c4ed954042`는 로컬 tarball SHA-1과 일치한다. 새 cache/prefix 설치본은 v1.36.174, runtime deps 0, install scripts 0이며 dead-flag probe와 fresh init의 `.leerness` 생성/`.harness` 미생성을 통과했다. 별도 `leerness-gate` 0.0.3은 92/92, installed cleanroom 12/12, Worker dry-run을 통과했고 공개 CLI의 migration plan은 1.36.165→1.36.174 version drift 외 missing/canonical pending 0건이었다. 활성 T-0025와 untracked harness를 방해하지 않도록 실제 update/writeback은 수행하지 않았다. 사이트는 commit `b50d537fa7225ff4c758382a3a7e11c4a79d1e88`에서 698 pages를 빌드하고 Cloudflare production deployment `383c96e7-0fdc-4438-84e1-03afd78bf9ba`로 게시했다. leerness.com 루트와 v1.36.174 changelog는 첫 production probe에서 HTTP 200과 최신 버전을 노출했다. GitHub Actions run 33148033939는 구현 SHA에서 양 OS fast, release-runtime Ubuntu/Windows Node 24/26, Ubuntu Node 18/20/22 및 Windows Node 18/20/22/24 전체 E2E까지 13/13 성공했고 실패·취소·skip은 0이다.
 Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.174, https://www.npmjs.com/package/leerness/v/1.36.174, https://leerness.com/changelog/1.36.174/, https://github.com/gugu9999gu/leerness/actions/runs/33148033939
+
+## 2026-08-29 — T-0089 disabled-provider bench isolation
+
+Task: T-0089 / T-0157
+Command: disabled-provider PATH marker probe; `node scripts/release-runtime-probe.js`; `npm run test:fast`; `npm test`; `gate --claims`; `verify-claim T-0089 --strict-claims`; external Codex focused review
+Exit: 0
+Note: `agents bench`가 비활성 provider를 `_checkAgent` 전에 제외하도록 수정했다. 10개 provider 플래그를 모두 0으로 둔 PATH 마커 프로브는 외부 Codex 실행 0회로 394/362/342ms에 3/3 통과했고 기존 15초 제한은 최대값 대비 약 38.1배 여유다. opt-in 단일 provider 행렬은 각 대상만 정확히 한 번 검사한다. 빠른 게이트 13/13과 전체 `npm test`가 통과했다: lint 63 JS + 1 JSON, selftest 355/355, core 51/51, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467(6,535초). 외부 리뷰는 최초 P1과 타이밍 증거 P2를 수정한 뒤 `NO_P0_P1_P2`로 수렴했다. T-0109는 명시적 범위 설계의 실측 경고율 63.1%가 사전 중단 기준 40%를 넘어서 보수적으로 드랍했다.
+Artifacts: lib/agents.js, scripts/e2e.js, scripts/release-runtime-probe.js, CHANGELOG.md, .leerness/progress-tracker.md
+
+## 2026-08-29 — v1.36.176 public release verification
+
+Task: T-0157 / UR-0087
+Command: `release publish --git-push --npm-publish --gh-release`; `git ls-remote`; `gh release view`; npm latest/exact metadata; fresh-prefix registry install and installed selftest; `npm run site:build`; `npm run site:deploy`; production HTTP probes
+Exit: 0
+Note: GitHub main과 tag `v1.36.176`은 구현 SHA `b0be547de857776b9299d5093f09dfe3c055b13d`로 일치하고 공개 Release가 생성됐다. npm latest/exact는 1.36.176이며 registry integrity는 `sha512-LY3Fv6DLRrArlpdnWtZJ5RaYSZdzMz/pplk1pIUBQF3nSKikjsDXi/+L2r1deZaFgtJp8NxMh7TT3RSH5SQ6zg==`, shasum은 `08477513fada829c678f0090709862c29bda1900`으로 로컬 pack과 일치한다. 작업공간 밖 공개 설치본은 version 1.36.176과 selftest 355/355를 확인했다. 사이트는 commit `899aefd`에서 700 pages를 빌드하고 Cloudflare production deployment `46e84679-2464-49a0-8495-e03a2bf768e5`로 게시했다. leerness.com 루트, v1.36.176 changelog, Pages 원본은 HTTP 200이며 버전과 agents bench 변경을 노출한다. GitHub Actions run 33240896988은 구현 SHA에서 전체 13/13 성공, 실패 0으로 완료됐다.
+Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.176, https://www.npmjs.com/package/leerness/v/1.36.176, https://leerness.com/changelog/1.36.176/, https://github.com/gugu9999gu/leerness/actions/runs/33240896988
