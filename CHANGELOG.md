@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.178 — 2026-08-29
+
+- CI: env encoding-check --apply 전체 E2E를 Windows BOM 교체와 POSIX byte-exact no-op 계약으로 분기해 v1.36.177 Linux/Node 22의 466/467 실패를 수정.
+
 ## 1.36.177 — 2026-08-29
 
 - T-0022 데이터 무결성: env/drift/session BOM 수정을 공용 CAS·Windows ReplaceFile 경계로 통합하고 CP949·모호 인코딩·손상 BOM·메타데이터·동시 writer/ADS·부분진행 복구를 실패-폐쇄 처리. auto-fix 전 단계 JSON/exit 정직화, 스캔 I/O 오류 및 unborn/실행불가 Git 구분, OS 매트릭스 mutation-integrity 회귀 추가.

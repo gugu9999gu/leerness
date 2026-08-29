@@ -140,8 +140,21 @@ doNotStore:
 - [x] `verify-claim T-0022 --strict-claims --require-evidence`: evidence complete, claims consistent, Git 13/13, scope creep 0
 - [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.177 동기화; `npm pack --dry-run` 75 files, shasum `d2f2dbaac4d23e157ef3b0f575ae5f320c4066ce`
 - [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요
-- [ ] GitHub main/tag/release SHA 및 첨부 tarball 검증
-- [ ] npm latest/exact 1.36.177, registry integrity/shasum, fresh-prefix 설치 검증
-- [ ] leerness.com 루트·v1.36.177 changelog·Pages 원본 HTTP 200 검증
-- [ ] GitHub Actions 전체 행렬 성공 검증
+- [x] GitHub main/tag/release가 구현 SHA `211177a0c284f4c86b47fc2734abab2b43090948`로 일치하고 공개 Release 확인
+- [x] npm latest/exact 1.36.177; registry integrity `sha512-XSFjIkRiRb8/r7GpP5kPVcYU1/5PsrSdRMDM0TD5GMHdHA+bhtPwbVDRenYk17XFQK0enal4gJx0qptoVwaGzA==`, shasum `d2f2dbaac4d23e157ef3b0f575ae5f320c4066ce`, fresh-prefix selftest 355/355
+- [x] 사이트 commit `16d9481`, Astro 701 pages, Cloudflare deployment `c3ab4a30`; leerness.com 루트·v1.36.177 changelog·Pages 원본 HTTP 200
+- [ ] GitHub Actions run 33265056280: Ubuntu Node 18/20/22 full E2E가 실패했으며 Node 22 로그의 단일 실패는 구 POSIX `.ps1` BOM 기대(`encoding-check BOM 스킵 실패`). v1.36.178에서 플랫폼 계약을 교정해 대체 검증
 - [x] 롤백 기준: npm exact `leerness@1.36.176` 재설치, GitHub tag `v1.36.176`, 직전 사이트 커밋 `899aefd`
+
+## 2026-08-30 — v1.36.178
+
+- [x] v1.36.177 공개 CI 실패 범위 확인: Ubuntu Node 18/20/22 3개 작업 실패, Windows/POSIX 제품 계약과 구 full-E2E 기대 불일치로 격리
+- [x] `scripts/e2e.js`가 `.sh` 전체 바이트를 보존하고, unambiguous UTF-8 `.ps1`은 Windows에서만 BOM+원문을 정확히 요구하며 POSIX에서는 byte-exact no-op을 요구하도록 수정
+- [x] 외부 Codex 읽기 전용 교차 리뷰 최종 `No findings`; 구문·fixture eligibility·전용 mutation-integrity 계약과의 일치 확인
+- [x] `npm run test:fast` 통과: lint 65 JS + 1 JSON, mutation-integrity, MCP presence 22/22, false-claim 199/199, smoke 13/13 포함
+- [x] `verify`, `audit`, `scan secrets`, `encoding check`, `check`, `lazy detect` 및 code/test/recovery/contract lens 통과; failures/issues/blocking 0, 미승인 secret 0, encoding finding 0
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.178 동기화; 새 런타임 의존성·lifecycle script·환경변수 없음
+- [x] `npm pack --dry-run`: 75 files, shasum `0d348ea077730cf5ac196776c4cd29ca3d37fe8b`, integrity `sha512-7EnoHp2CR7xt11ZeXIhiBORr6tqLkguDJzPU9iNYEdFEa+JCkFihzNP2nWuaUvgY5WJtLT3sH/bhdi5jLduTUw==`, `scripts/e2e.js` 포함
+- [ ] GitHub main/tag/release, npm latest/exact/fresh-prefix, leerness.com 루트·changelog·Pages 원본 검증
+- [ ] GitHub Actions 전체 13/13 성공 검증
+- [x] 롤백 기준: npm exact `leerness@1.36.177` 재설치, GitHub tag `v1.36.177`, 직전 사이트 커밋 `16d9481`

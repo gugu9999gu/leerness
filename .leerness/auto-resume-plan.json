@@ -1,15 +1,15 @@
 {
-  "savedAt": "2026-08-29T07:28:00.264Z",
-  "nextRoundVersion": "next after 1.36.176",
-  "expectedFireAt": "2026-08-29T07:53:00.261Z",
+  "savedAt": "2026-08-29T17:13:45.659Z",
+  "nextRoundVersion": "next after 1.36.177",
+  "expectedFireAt": "2026-08-29T17:38:45.655Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.36.176",
-    "activeTaskId": "T-0157",
-    "activeTaskRequest": "다음 작업 이어서 진행 .",
+    "currentVersion": "1.36.177",
+    "activeTaskId": null,
+    "activeTaskRequest": null,
     "memorySurface": {
-      "tasksInProgress": 1,
+      "tasksInProgress": 0,
       "decisions": 18,
       "rulesActive": 2,
       "lessons": 14
