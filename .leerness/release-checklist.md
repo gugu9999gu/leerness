@@ -155,6 +155,6 @@ doNotStore:
 - [x] `verify`, `audit`, `scan secrets`, `encoding check`, `check`, `lazy detect` 및 code/test/recovery/contract lens 통과; failures/issues/blocking 0, 미승인 secret 0, encoding finding 0
 - [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.178 동기화; 새 런타임 의존성·lifecycle script·환경변수 없음
 - [x] `npm pack --dry-run`: 75 files, shasum `0d348ea077730cf5ac196776c4cd29ca3d37fe8b`, integrity `sha512-7EnoHp2CR7xt11ZeXIhiBORr6tqLkguDJzPU9iNYEdFEa+JCkFihzNP2nWuaUvgY5WJtLT3sH/bhdi5jLduTUw==`, `scripts/e2e.js` 포함
-- [ ] GitHub main/tag/release, npm latest/exact/fresh-prefix, leerness.com 루트·changelog·Pages 원본 검증
-- [ ] GitHub Actions 전체 13/13 성공 검증
+- [x] 공개 시점 GitHub main/tag/release가 구현 SHA `45c45b63a4544e58d084426c05400deab0e9c605`로 일치; npm latest/exact 1.36.178과 registry shasum/integrity가 로컬 pack과 일치하고 fresh-prefix selftest 통과; 사이트 commit `87c8eec`, Astro 702 pages, Cloudflare deployment `e45ef150`; leerness.com 루트·v1.36.178 changelog·Pages 원본 첫 시도 검증 통과
+- [x] GitHub Actions run 33268510915이 구현 SHA `45c45b63a4544e58d084426c05400deab0e9c605`에서 전체 13/13 성공, 실패·취소·스킵 0; Ubuntu Node 18/20/22 및 Windows Node 18/20/22/24 full E2E 전부 통과
 - [x] 롤백 기준: npm exact `leerness@1.36.177` 재설치, GitHub tag `v1.36.177`, 직전 사이트 커밋 `16d9481`
