@@ -27,7 +27,7 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, _mergeLines, _merg
   _withBuiltinSource, _esc, _roadmapTokenStyles, _parseSkillMd, _lintSkillMeta,
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
-  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm,
+  _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _milestoneSurface, _recentChangesAggregate, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm,
   _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd, _briefUnfilled, _planGoalUnfilled, _draftAnchors, _replaceMdSection, _mdSectionBody, _blocksWithOffset, _decisionBlocksWithOffset } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리 · 1.36.36 anchors
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
@@ -48,7 +48,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.174';
+const VERSION = '1.36.175';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -3173,59 +3173,169 @@ function _detectDeliveredRequests(root) {
 
 // 1.9.324 (UR-0025): _compareSemver 제거 — pure-utils compareVer 와 동일 기능(중복) → compareVer 단일화.
 
+// Git refs may contain `|`, while shortened refs can change when another ref is
+// ambiguous. Use the full tag ref plus NUL (forbidden in ref names), then accept
+// only the exact refs/tags/vX.Y.Z namespace and a real calendar/offset value.
+const _ROUND_TAG_FORMAT = '%(refname)%00%(creatordate:iso8601)';
+function _validRoundTagDate(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) ([+-])(\d{2})(\d{2})$/.exec(value);
+  if (!m) return false;
+  const year = Number(m[1]), month = Number(m[2]), day = Number(m[3]);
+  const hour = Number(m[4]), minute = Number(m[5]), second = Number(m[6]);
+  const offsetHour = Number(m[8]), offsetMinute = Number(m[9]);
+  if (year < 1 || month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59
+      || offsetHour > 14 || offsetMinute > 59 || (offsetHour === 14 && offsetMinute !== 0)) return false;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day >= 1 && day <= days[month - 1];
+}
+function _parseRoundTagOutput(stdout) {
+  const tags = [];
+  for (const record of String(stdout || '').split(/\r?\n/)) {
+    if (!record) continue;
+    const sep = record.indexOf('\0');
+    if (sep <= 0) continue;
+    const ref = record.slice(0, sep);
+    const date = record.slice(sep + 1).trim();
+    const match = /^refs\/tags\/(v\d+\.\d+\.\d+)$/.exec(ref);
+    if (!match || !_validRoundTagDate(date)) continue;
+    const name = match[1];
+    tags.push({ name, version: name.slice(1), date });
+  }
+  return tags;
+}
+function _gitHistoryFailure(reason, detail) {
+  const clean = _lineSafe(detail || 'Git history could not be measured');
+  return { code: 'git_history_unavailable', reason, error: clean };
+}
+function _gitHistoryFailureFromResult(r) {
+  let reason = 'git_failed';
+  let detail = '';
+  if (r && r.error) {
+    reason = String(r.error.code || '') === 'ETIMEDOUT' ? 'timeout' : String(r.error.code || 'spawn_error').toLowerCase();
+    detail = r.error.message || String(r.error);
+  } else if (r && r.signal) {
+    reason = 'signal';
+    detail = `git terminated by signal ${r.signal}`;
+  } else if (r && r.status != null) {
+    reason = `exit_${r.status}`;
+    detail = String(r.stderr || `git exited with status ${r.status}`).trim();
+  }
+  return _gitHistoryFailure(reason, detail);
+}
+function _readRoundTags(root) {
+  let r;
+  try {
+    r = _gitSpawn(['tag', '--list', 'v*', '--sort=creatordate', `--format=${_ROUND_TAG_FORMAT}`], {
+      cwd: root, encoding: 'utf8', timeout: 5000
+    });
+  } catch (err) {
+    return { state: 'unavailable', tags: [], error: _gitHistoryFailure('spawn_exception', err && err.message) };
+  }
+  if (r && r.status === 0) {
+    return { state: 'available', tags: r.stdout ? _parseRoundTagOutput(r.stdout) : [], error: null };
+  }
+  return { state: 'unavailable', tags: [], error: _gitHistoryFailureFromResult(r) };
+}
+function _throwGitHistoryUnavailable(error) {
+  const detail = error && error.error ? error.error : 'Git history could not be measured';
+  throw Object.assign(new Error(detail), { code: 'E_GIT_HISTORY_UNAVAILABLE', historyError: error || null });
+}
+
 // 1.9.226: round-history — git tag v1.9.X 기반 자율 라운드 통계 + 다음 마일스톤
-//   git이 없거나 tag가 없으면 graceful fallback (current version + 0 history)
-//   응답: { currentVersion, roundCount, baselineVersion, latestTags[], nextMilestone, roundsToNextMilestone, firstTagAt, latestTagAt, daysActive, avgRoundsPerDay }
-function _computeRoundHistory(root) {
+//   태그 0건은 실제 0으로, Git 실행 실패는 unavailable/null 로 구분한다.
+//   currentVersion 은 호환 별칭일 뿐이며 반드시 currentVersionScope 와 함께 해석한다.
+//   응답: { cliVersion, harnessVersion, currentVersion(deprecated alias), currentVersionScope, roundCount, ... }
+function _computeRoundHistory(root, opts = {}) {
   const result = {
+    cliVersion: VERSION,
+    harnessVersion: null,
+    harnessVersionState: 'missing',
+    // Backward compatibility for 1.9.226+ consumers. This never meant an app/project version.
     currentVersion: VERSION,
+    currentVersionScope: 'leerness_cli',
     roundCount: 0,
     baselineVersion: null,
+    latestTagVersion: null,
     latestTags: [],
     nextMilestone: null,
     roundsToNextMilestone: null,
     firstTagAt: null,
     latestTagAt: null,
     daysActive: 0,
-    avgRoundsPerDay: 0
+    avgRoundsPerDay: 0,
+    gitHistoryState: 'available',
+    gitHistoryError: null
   };
+  {
+    const history = _readRoundTags(root);
+    result.gitHistoryState = history.state;
+    result.gitHistoryError = history.error;
+    if (history.state !== 'available') {
+      result.roundCount = null;
+      result.latestTags = null;
+      result.daysActive = null;
+      result.avgRoundsPerDay = null;
+    }
+    const tags = history.tags;
+    if (tags.length > 0) {
+        result.roundCount = tags.length;
+        result.baselineVersion = tags[0].version;
+        result.firstTagAt = tags[0].date;
+        result.latestTagAt = tags[tags.length - 1].date;
+        result.latestTagVersion = tags[tags.length - 1].version;
+        // `date` is a public field from 1.9.226. Git's iso8601 formatter uses a
+        // space separator, so splitting it silently removed its time/offset in
+        // 1.36.175. Preserve that established value and add a date-only view.
+        result.latestTags = tags.slice(-10).reverse().map(t => ({
+          version: t.version,
+          date: t.date,
+          dateOnly: t.date.split(' ')[0],
+        }));
+        const milestones = [50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500];
+        const next = milestones.find(m => m > result.roundCount);
+        if (next != null) {
+          result.nextMilestone = next;
+          result.roundsToNextMilestone = next - result.roundCount;
+        }
+        const first = new Date(result.firstTagAt).getTime();
+        const last = new Date(result.latestTagAt).getTime();
+        const spanDays = (last - first) / 86400000;
+        if (tags.length >= 2 && spanDays > 0) {
+          result.daysActive = Math.max(1, Math.floor(spanDays));
+          result.avgRoundsPerDay = Math.round((result.roundCount / spanDays) * 100) / 100;
+        }
+    }
+  }
+
+  // Git history and workspace provenance are independent evidence sources.
+  // Aggregate callers may retain the measured tag count while exposing a
+  // workspace-policy error; direct round-history/cadence calls still fail.
+  let hv;
   try {
-    // git tag --list 'v1.9.*' --sort=creatordate (시간순)
-    const r = _gitSpawn(['tag', '--list', 'v*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
-      cwd: root, encoding: 'utf8', timeout: 5000
-    });
-    if (r.status !== 0 || !r.stdout) return result;
-    const lines = r.stdout.split('\n').filter(l => l.trim() && /^v\d+\.\d+\.\d+\|/.test(l));
-    if (lines.length === 0) return result;
-    const tags = lines.map(l => {
-      const [name, date] = l.split('|');
-      return { name: name.trim(), version: name.replace(/^v/, '').trim(), date: date.trim() };
-    });
-    result.roundCount = tags.length;
-    result.baselineVersion = tags[0].version;
-    result.firstTagAt = tags[0].date;
-    result.latestTagAt = tags[tags.length - 1].date;
-    // 최근 10개
-    result.latestTags = tags.slice(-10).reverse().map(t => ({ version: t.version, date: t.date.split('T')[0] }));
-    // 다음 마일스톤 (50/100/150/200/300/...)
-    const milestones = [50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500];
-    const next = milestones.find(m => m > result.roundCount);
-    if (next != null) {
-      result.nextMilestone = next;
-      result.roundsToNextMilestone = next - result.roundCount;
+    hv = path.join(_workspaceDirAbs(root), 'HARNESS_VERSION');
+  } catch (err) {
+    if (opts.allowWorkspaceError && err && /^E_WORKSPACE_DIR_[A-Z_]+$/.test(String(err.code || ''))) {
+      result.harnessVersionState = 'workspace-error';
+      result.workspaceError = {
+        code: String(err.code).slice(2).toLowerCase(),
+        error: _lineSafe(err.message || String(err)),
+      };
+      return result;
     }
-    // 일일 평균 — 1.36.78 (F8): 태그 2+ & 양의 구간일 때만(1개면 속도 관측 불가 → 0 유지)
-    const first = new Date(result.firstTagAt).getTime();
-    const last = new Date(result.latestTagAt).getTime();
-    const spanDays = (last - first) / 86400000;
-    if (tags.length >= 2 && spanDays > 0) {
-      result.daysActive = Math.max(1, Math.floor(spanDays));
-      result.avgRoundsPerDay = Math.round((result.roundCount / spanDays) * 100) / 100;
-    } else {
-      result.daysActive = 0;
-      result.avgRoundsPerDay = 0;
+    throw err;
+  }
+  try {
+    // Positional read-only calls select the legacy workspace without renaming
+    // it, while still reporting the version actually installed there.
+    if (exists(hv)) {
+      const parsed = parseHarnessVersion(read(hv));
+      // `leerness@X+plus@Y`의 설치 Leerness 버전은 X다. plus는 옛
+      // 호환 레이어 버전이며 프로젝트 하네스 버전을 대신할 수 없다.
+      result.harnessVersion = parsed.base || null;
+      result.harnessVersionState = result.harnessVersion ? 'valid' : 'invalid';
     }
-  } catch {}
+  } catch { result.harnessVersionState = 'unreadable'; }
   return result;
 }
 
@@ -3238,19 +3348,22 @@ function _computeMilestones(root) {
     reached: [],
     next: null,
     avgRoundsPerDay: 0,
-    baselineAt: null
+    baselineAt: null,
+    gitHistoryState: 'available',
+    gitHistoryError: null
   };
-  try {
-    const r = _gitSpawn(['tag', '--list', 'v*', '--sort=creatordate', '--format=%(refname:short)|%(creatordate:iso8601)'], {
-      cwd: root, encoding: 'utf8', timeout: 5000
-    });
-    if (r.status !== 0 || !r.stdout) return result;
-    const lines = r.stdout.split('\n').filter(l => l.trim() && /^v\d+\.\d+\.\d+\|/.test(l));
-    if (lines.length === 0) return result;
-    const tags = lines.map(l => {
-      const [name, date] = l.split('|');
-      return { name: name.trim(), version: name.replace(/^v/, '').trim(), date: date.trim() };
-    });
+  {
+    const history = _readRoundTags(root);
+    result.gitHistoryState = history.state;
+    result.gitHistoryError = history.error;
+    if (history.state !== 'available') {
+      result.totalRounds = null;
+      result.reached = null;
+      result.avgRoundsPerDay = null;
+      return result;
+    }
+    const tags = history.tags;
+    if (tags.length === 0) return result;
     result.totalRounds = tags.length;
     result.baselineAt = tags[0].date;
     const milestones = [25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500];
@@ -3288,7 +3401,7 @@ function _computeMilestones(root) {
       // 속도 관측 불가 — 다음 마일스톤은 표시하되 ETA 는 null(추정 없음)
       result.next = { milestone: nextM, roundsRemaining: nextM - tags.length, etaDays: null, etaDate: null };
     }
-  } catch {}
+  }
   return result;
 }
 
@@ -3300,6 +3413,7 @@ function milestonesCmd(root) {
   const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   const data = _computeMilestones(root);
+  if (data.gitHistoryState !== 'available') _throwGitHistoryUnavailable(data.gitHistoryError);
   if (has('--json')) { log(JSON.stringify(data, null, 2)); return; }
   log(cy(`# leerness milestones (1.9.229) — 도달 마일스톤 + 다음 ETA`));
   log('');
@@ -3503,34 +3617,39 @@ function agentModeCmd(root, sub) {
   process.exitCode = 1;
 }
 
-// 1.9.234: recentChanges — 최근 N 라운드의 핵심 변경 요약 (git tag commit subject)
-//   응답: [{ version, date, subject }] (가장 최근부터)
-function _computeRecentChanges(root, limit = 5) {
+// 1.9.234/1.36.175: recentChanges — 최근 N 라운드의 핵심 변경 요약.
+//   shortened decoration과 `|` 구분자는 모호하다. full ref와 NUL 필드를
+//   사용하고, Git 실패는 빈 배열이 아니라 unavailable/items:null 이다.
+const _RECENT_CHANGE_FORMAT = '%(refname)%00%(creatordate:iso8601)%00%(*subject)%00%(subject)';
+function _parseRecentChangeOutput(stdout, limit = 5) {
   const items = [];
+  for (const record of String(stdout || '').split(/\r?\n/)) {
+    if (!record) continue;
+    const fields = record.split('\0');
+    if (fields.length !== 4) continue;
+    const match = /^refs\/tags\/v(\d+\.\d+\.\d+)$/.exec(fields[0]);
+    const date = String(fields[1] || '').trim();
+    if (!match || !_validRoundTagDate(date)) continue;
+    const subject = _lineSafe(fields[2] || fields[3] || '')
+      .replace(/^\d+\.\d+\.\d+\s*[—-]\s*/, '').trim().slice(0, 100);
+    items.push({ version: match[1], date: date.split(' ')[0], subject });
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+function _computeRecentChanges(root, limit = 5) {
+  let r;
   try {
-    const r = _gitSpawn(['log', '--tags', '--simplify-by-decoration', '--pretty=format:%H|%D|%ad|%s', '--date=short', '-n', String(limit * 3)], {
+    r = _gitSpawn(['for-each-ref', '--sort=-creatordate', `--format=${_RECENT_CHANGE_FORMAT}`, 'refs/tags/v*'], {
       cwd: root, encoding: 'utf8', timeout: 5000
     });
-    if (r.status !== 0 || !r.stdout) return items;
-    const lines = r.stdout.split('\n').filter(l => l.trim());
-    for (const line of lines) {
-      const idx1 = line.indexOf('|');
-      if (idx1 < 0) continue;
-      const idx2 = line.indexOf('|', idx1 + 1);
-      const idx3 = line.indexOf('|', idx2 + 1);
-      if (idx2 < 0 || idx3 < 0) continue;
-      const refs = line.slice(idx1 + 1, idx2);
-      const date = line.slice(idx2 + 1, idx3);
-      const subject = line.slice(idx3 + 1);
-      const m = refs.match(/tag: v(\d+\.\d+\.\d+)/);
-      if (!m) continue;
-      const version = m[1];
-      const cleanSubject = subject.replace(/^\d+\.\d+\.\d+\s*[—-]\s*/, '').trim();
-      items.push({ version, date, subject: cleanSubject.slice(0, 100) });
-      if (items.length >= limit) break;
-    }
-  } catch {}
-  return items;
+  } catch (err) {
+    return { state: 'unavailable', error: _gitHistoryFailure('spawn_exception', err && err.message), items: null };
+  }
+  if (!r || r.status !== 0) {
+    return { state: 'unavailable', error: _gitHistoryFailureFromResult(r), items: null };
+  }
+  return { state: 'available', error: null, items: _parseRecentChangeOutput(r.stdout, limit) };
 }
 
 // 1.9.241: 환경 정보 종합 수집 + 셸 스크립트 인코딩 위험 감지 (사용자 명시 UR-0014)
@@ -4051,7 +4170,7 @@ function _selfTestCases() {
     { name: '_isSecretKey: 비시크릿 LEERNESS_* 통과', run: () => _isSecretKey('LEERNESS_ENABLE_AGY') === false && _isSecretKey('LANG') === false },
     { name: 'compareVer: 대소 비교', run: () => compareVer('1.9.258', '1.9.257') === 1 && compareVer('1.9.0', '1.10.0') === -1 && compareVer('2.0.0', '2.0.0') === 0 },
     { name: 'compareVer: 누락 파트/null 안전', run: () => compareVer('1.9', '1.9.0') === 0 && compareVer(null, '0.0.0') === 0 },
-    { name: 'parseHarnessVersion: canonical + legacy plus', run: () => parseHarnessVersion('1.9.0').base === '1.9.0' && parseHarnessVersion('leerness@1.8.0+plus@1.0.1').plus === '1.0.1' },
+    { name: 'parseHarnessVersion: exact canonical/legacy formats only', run: () => parseHarnessVersion('1.9.0').base === '1.9.0' && parseHarnessVersion('leerness@1.8.0+plus@1.0.1').plus === '1.0.1' && parseHarnessVersion('leerness@1.8.0').base === '1.8.0' && parseHarnessVersion('garbage leerness@1.8.0 trailing').base === null && parseHarnessVersion('leerness@1.8.0.1').base === null && parseHarnessVersion('plus@1.0.1 junk').plus === null },
     { name: '_classifyCJK: 한국어 감지', run: () => { const b = Buffer.from('안녕', 'utf8'); return _classifyCJK(b, b.length).korean > 0; } },
     { name: '_classifyCJK: 중국어/일본어 구분', run: () => { const z = Buffer.from('中', 'utf8'), j = Buffer.from('ひ', 'utf8'); return _classifyCJK(z, z.length).chinese > 0 && _classifyCJK(j, j.length).japanese > 0; } },
     { name: '_riskLabel: korean→CP949 / chinese→CP936', run: () => /CP949/.test(_riskLabel({ korean: 3, japanese: 0, chinese: 0, other: 0 }).risk) && /CP936/.test(_riskLabel({ korean: 0, japanese: 0, chinese: 3, other: 0 }).risk) },
@@ -5003,12 +5122,12 @@ function _selfTestCases() {
     { name: 'UR-0073 Phase A: team 정의 레지스트리 (_renderTeamsMd + canonical load/save) 행위 (1.9.371)', run: () => { const m = require('../lib/pure-utils'); if (typeof teamCmd !== 'function' || typeof _renderTeamsMd !== 'function' || m._renderTeamsMd !== _renderTeamsMd) return false; const md = _renderTeamsMd([{ id: 't1', name: 'N', personas: ['security'], members: ['claude'], schedule: 'daily', status: 'active' }]); const mdOk = md.includes('## t1') && md.includes('security') && md.includes('daily') && md.includes('정의 전용'); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_team_')); let rtOk = false; try { _saveTeams(tmp, [{ id: 'x', name: 'X', personas: [], members: [], schedule: 'manual', status: 'active' }]); const loaded = _loadTeams(tmp); rtOk = loaded.length === 1 && loaded[0].id === 'x' && fs.existsSync(path.join(tmp, '.leerness', 'teams.json')) && fs.existsSync(path.join(tmp, '.leerness', 'teams.md')); } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return mdOk && rtOk; } },
     { name: 'UR-0073 Phase B: _composeTeamPlan dry-run 실행 계획 (멤버별 dispatch, 실행 없음) 행위 (1.9.372)', run: () => { const m = require('../lib/pure-utils'); if (typeof _composeTeamPlan !== 'function' || m._composeTeamPlan !== _composeTeamPlan) return false; const team = { id: 'rev', name: 'R', purpose: 'PR 리뷰', personas: ['security', 'perf'], members: ['claude', 'codex'], schedule: 'manual' }; const p1 = _composeTeamPlan(team, '점검'); const ok1 = p1.steps.length === 2 && p1.task === '점검' && p1.steps[0].member === 'claude' && p1.steps[0].suggestedCommand.includes('agents dispatch') && p1.steps[0].suggestedCommand.includes('--to claude') && p1.steps[0].dispatchPrompt.includes('security'); const p2 = _composeTeamPlan(team, null); const ok2 = p2.task === 'PR 리뷰'; const p3 = _composeTeamPlan({ id: 'e', personas: [], members: [] }, 'x'); const ok3 = p3.steps.length === 0 && p3.memberCount === 0; return ok1 && ok2 && ok3; } },
     { name: 'UR-0073 Phase C: _teamHandoffReminders 스케줄 알림 (비-manual·active 만, 실행 트리거 아님) 행위 (1.9.373) + i18n en(1.31.3)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamHandoffReminders !== 'function' || m._teamHandoffReminders !== _teamHandoffReminders) return false; const r = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'] }, { id: 'man', schedule: 'manual', status: 'active' }, { id: 'paused', schedule: 'daily', status: 'paused' }]); const behaviorOk = r.length === 1 && r[0].includes('rev') && r[0].includes('every-session') && r[0].includes('team preview rev') && !r.join('|').includes('man') && !r.join('|').includes('paused'); const _H = /[가-힣]/; const en = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'], review: true }], 'en')[0] || ''; const ko = _teamHandoffReminders([{ id: 'rev', schedule: 'every-session', status: 'active', members: ['a', 'b'], review: true }])[0] || ''; const i18nOk = !_H.test(en) && /2 members/.test(en) && /review needed/.test(en) && /preview:/.test(en) && _H.test(ko) && /2명/.test(ko) && /검수필요/.test(ko); return behaviorOk && i18nOk; } },
-    { name: 'UR-0074: _cadenceAssessment 릴리스 빈도 평가 (임계값) 행위 (1.9.374)', run: () => { const m = require('../lib/pure-utils'); if (typeof _cadenceAssessment !== 'function' || m._cadenceAssessment !== _cadenceAssessment || typeof releaseCadenceCmd !== 'function') return false; return _cadenceAssessment(7, 1, 1).level === 'very-high' && _cadenceAssessment(3, 1, 1).level === 'high' && _cadenceAssessment(1, 1, 1).level === 'moderate' && _cadenceAssessment(0.2, 1, 1).level === 'healthy' && _cadenceAssessment(7, 1, 1).recommendation.length > 0; } },
+    { name: 'UR-0074: _cadenceAssessment 릴리스 빈도 평가 (임계값) 행위 (1.9.374)', run: () => { const m = require('../lib/pure-utils'); if (typeof _cadenceAssessment !== 'function' || m._cadenceAssessment !== _cadenceAssessment || typeof releaseCadenceCmd !== 'function') return false; return _cadenceAssessment(7, 10, 2).level === 'very-high' && _cadenceAssessment(3, 10, 2).level === 'high' && _cadenceAssessment(1, 10, 2).level === 'moderate' && _cadenceAssessment(0.2, 10, 2).level === 'healthy' && _cadenceAssessment(7, 1, 0).level === 'insufficient-data' && _cadenceAssessment(7, 10, 2).recommendation.length > 0; } },
     { name: 'UR-0084 + 1.36.160: _withLock 35s 대기 + 토큰 소유권 + owner fail-closed 행위', run: () => _p0160LockOwnershipOk() },
     { name: 'UR-0073 Phase D: _teamDeployGate 이중 게이트 (dry-run 기본/env 게이트/실행) 행위 (1.9.376)', run: () => { const m = require('../lib/pure-utils'); if (typeof _teamDeployGate !== 'function' || m._teamDeployGate !== _teamDeployGate) return false; const team = { id: 'd', deployCommand: 'echo hi' }; const noCmd = _teamDeployGate({ id: 'x' }, { yes: true, envOn: true }).mode === 'no-command'; const dry = _teamDeployGate(team, { yes: false, envOn: true }).mode === 'dry-run'; const gated = _teamDeployGate(team, { yes: true, envOn: false }).mode === 'gated'; const exec = _teamDeployGate(team, { yes: true, envOn: true }).mode === 'execute'; return noCmd && dry && gated && exec; } },
     { name: 'UR-0025: _renderWorkspaceReferenceGuide 모듈 분리 + canonical migration 안내 (1.36.162)', run: () => { const m = require('../lib/pure-utils'); if (typeof _renderWorkspaceReferenceGuide !== 'function' || m._renderWorkspaceReferenceGuide !== _renderWorkspaceReferenceGuide) return false; const g = _renderWorkspaceReferenceGuide(CANONICAL_WORKSPACE_DIR, '9.9.9', '2026-01-01T00:00:00.000Z', LEGACY_WORKSPACE_DIR); const wrapperThin = read(__filename).includes('return _renderWorkspaceReferenceGuide(dirName, VERSION, new Date().toISOString(), LEGACY_WORKSPACE_DIR)'); const guideSafe = g.includes('canonical workspace') && g.includes('workspace-dir-conflict') && g.includes('.leerness/cache/agent-runs/') && g.includes(`${LEGACY_WORKSPACE_DIR}/`); return g.includes('.leerness/progress-tracker.md') && g.includes('9.9.9') && g.includes('자주 묻는 위치') && guideSafe && wrapperThin; } },
     { name: 'UR-0073: team MCP 도구 2종(read-only) 정의 + dispatch 와이어 (1.9.378)', run: () => { const tools = require('../lib/mcp-tools'); const src = read(__filename); const tl = tools.find(t => t.name === 'leerness_team_list'); const tp = tools.find(t => t.name === 'leerness_team_preview'); const defsOk = tl && tl.requiredTier === 'read-only' && tp && tp.requiredTier === 'read-only' && tp.inputSchema.required && tp.inputSchema.required.includes('id'); const wired = src.includes("case " + "'leerness_team_list':") && src.includes("case " + "'leerness_team_preview':") && /cliArgs = \['team', 'list'/.test(src) && /cliArgs = \['team', 'preview'/.test(src); return !!defsOk && wired; } },
-    { name: 'UR-0025 심화: pulse 렌더 코어 분리 — _memorySurface + _renderPulseLine 행위 (1.9.379)', run: () => { const m = require('../lib/pure-utils'); if (typeof _memorySurface !== 'function' || typeof _renderPulseLine !== 'function' || m._memorySurface !== _memorySurface || m._renderPulseLine !== _renderPulseLine) return false; const ms = _memorySurface({ tasks: 1, decisions: 2, rules: 3, milestones: 4, lessons: 5 }) === 'T1/D2/R3/P4/L5' && _memorySurface({}) === 'T0/D0/R0/P0/L0'; const base = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'T0/D1/R0/P2/L0' }); const ln = base.includes('v1.0.0') && base.includes('R7') && base.includes('MCP 85') && base.includes('T0/D1/R0/P2/L0') && !base.includes('🎯') && !base.includes('abnormal'); const full = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'x', nextMilestone: 400, etaDays: 6, abnormalShutdown: 'high' }); const ln2 = full.includes('🎯 R400 (6d)') && full.includes('abnormal:high'); const wired = read(__filename).includes('const line = _renderPulseLine(data)') && read(__filename).includes('data.memorySurface = _memorySurface('); return ms && ln && ln2 && wired; } },
+    { name: 'UR-0025/T-0095: pulse 렌더 코어 + Git 이력 unavailable 정직 표기', run: () => { const m = require('../lib/pure-utils'); if (typeof _memorySurface !== 'function' || typeof _renderPulseLine !== 'function' || m._memorySurface !== _memorySurface || m._renderPulseLine !== _renderPulseLine) return false; const ms = _memorySurface({ tasks: 1, decisions: 2, rules: 3, milestones: 4, lessons: 5 }) === 'T1/D2/R3/P4/L5' && _memorySurface({}) === 'T0/D0/R0/P0/L0'; const base = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'T0/D1/R0/P2/L0' }); const ln = base.includes('v1.0.0') && base.includes('R7') && base.includes('MCP 85') && base.includes('T0/D1/R0/P2/L0') && !base.includes('🎯') && !base.includes('abnormal'); const full = _renderPulseLine({ version: '1.0.0', roundCount: 7, mcpTools: 85, memorySurface: 'x', nextMilestone: 400, etaDays: 6, abnormalShutdown: 'high' }); const ln2 = full.includes('🎯 R400 (6d)') && full.includes('abnormal:high'); const unavailable = _renderPulseLine({ version: '1.0.0', roundCount: null, mcpTools: 85, memorySurface: 'x' }); const unavailableOk = unavailable.includes('unavailable') && !unavailable.includes('Rnull'); const wired = read(__filename).includes('const line = _renderPulseLine(data)') && read(__filename).includes('data.memorySurface = _memorySurface('); return ms && ln && ln2 && unavailableOk && wired; } },
     { name: 'UR-0025: REQUIRED_WORKSPACE_FILES 단일출처 — verify/migrate audit·apply 3중 중복 제거 (1.9.380)', run: () => { const c = require('../lib/catalogs'); if (REQUIRED_WORKSPACE_FILES !== c.REQUIRED_WORKSPACE_FILES) return false; const listOk = Array.isArray(c.REQUIRED_WORKSPACE_FILES) && c.REQUIRED_WORKSPACE_FILES.length === 9 && c.REQUIRED_WORKSPACE_FILES.includes('AGENTS.md') && c.REQUIRED_WORKSPACE_FILES.includes('.leerness/plan.md'); const harnessUses = (read(__filename).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 1; const migUses = (read(path.join(path.dirname(__filename), '..', 'lib', 'migrate.js')).match(/const required = REQUIRED_WORKSPACE_FILES;/g) || []).length >= 2; return listOk && harnessUses && migUses; } },
     { name: 'UR-0025: KEYWORD_STOPWORDS 단일출처 — handoff/lessons 키워드 stopwords 2중 중복 제거 (1.9.381)', run: () => { const c = require('../lib/catalogs'); if (KEYWORD_STOPWORDS !== c.KEYWORD_STOPWORDS) return false; const setOk = c.KEYWORD_STOPWORDS instanceof Set && c.KEYWORD_STOPWORDS.has('작업') && c.KEYWORD_STOPWORDS.has('task') && !c.KEYWORD_STOPWORDS.has('고유단어') && c.KEYWORD_STOPWORDS.size >= 25; const usesConst = (read(__filename).match(/const stopwords = KEYWORD_STOPWORDS;/g) || []).length >= 2 && !/const stopwords = new Set\(\[/.test(read(__filename)); return setOk && usesConst; } },
     { name: 'UR-0025 큰핸들러토대: lib/io.js 프리미티브(log/ok/warn/fail/today/now) 모듈 분리 + 동작 (1.9.382)', run: () => { const io = require('../lib/io'); const exportsOk = ['log', 'ok', 'warn', 'fail', 'today', 'now'].every(k => typeof io[k] === 'function') && io.log === log && io.fail === fail && io.now === now; const todayOk = /^\d{4}-\d{2}-\d{2}$/.test(io.today()) && /^\d{4}-\d{2}-\d{2}T/.test(io.now()); const src = read(__filename); const moved = src.includes("require('../lib/io')") && !/^function fail\(s\) \{ log/m.test(src) && !/^function now\(\) \{ return new Date/m.test(src); let exitOk = false; const saved = process.exitCode; const _w = process.stdout.write, _e = process.stderr.write; try { process.stdout.write = () => true; process.stderr.write = () => true; process.exitCode = 0; io.fail('probe'); exitOk = process.exitCode === 1; } finally { process.stdout.write = _w; process.stderr.write = _e; process.exitCode = saved; io.setQuiet(false); } return exportsOk && todayOk && moved && exitOk; } },
@@ -5041,10 +5160,10 @@ function _selfTestCases() {
     { name: 'T-0077 후속 graph auto-gen: handoff opt-in 배선 + quiet 무로그 (1.34.4)', run: () => { const m = require('../lib/graph'); const src = read(__filename); const wired = src.includes('_maybeAuto' + 'Graph(_hp)') && src.includes('LEERNESS_AUTO_' + 'GRAPH'); let quietOk = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_autograph_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.leerness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | x | - | - | 2026-06-26 |\n'); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, { _roadmapData, _loadDecisions, _loadLessons, quiet: true }, out); quietOk = !!r && r.ok === true && fs.existsSync(out) && so === ''; } catch (e) { quietOk = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return wired && quietOk; } },
     { name: 'graph --html: 빈/미초기화 하네스 무크래시 + 유효 빈 HTML (1.35.0 방어가드)', run: () => { const m = require('../lib/graph'); let ok = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_emptyg_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); const data = m.buildGraphData(tmp, {}); const out = path.join(tmp, 'leerness.html'); const r = m.graphHtmlCmd(tmp, { quiet: true }, out); const html = fs.readFileSync(out, 'utf8'); const closers = html.split('</' + 'script>').length - 1; const dm = html.match(/var DATA = (\{[\s\S]*?\});/); let parsed = null; try { parsed = JSON.parse(dm[1]); } catch (e) {} ok = !!data && Array.isArray(data.nodes) && data.nodes.length === 0 && !!r && r.ok === true && r.nodes === 0 && fs.existsSync(out) && closers === 1 && !!parsed && parsed.nodes.length === 0 && so === ''; } catch (e) { ok = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return ok; } },
     { name: 'graph --html: 임베드 script JS 신택스 유효성(U+2028/정규식 리터럴 회귀 영구 차단, 1.35.2)', run: () => { const m = require('../lib/graph'); let ok = false; const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_gjs_')); const _w = process.stdout.write; let so = ''; try { process.stdout.write = s => { so += s; return true; }; fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(tmp, '.leerness', 'progress-tracker.md'), '| ID | Status | Request | Evidence | Next | Updated |\n|---|---|---|---|---|---|\n| T-0001 | done | x </scr' + 'ipt> & <b> ' + String.fromCharCode(0x24) + '{y} | M-0002 | - | 2026-06-26 |\n'); const out = path.join(tmp, 'leerness.html'); m.graphHtmlCmd(tmp, { _roadmapData, _loadDecisions, _loadLessons, quiet: true }, out); const html = fs.readFileSync(out, 'utf8'); const o = '<scr' + 'ipt>', c = '</scr' + 'ipt>'; const js = html.slice(html.indexOf(o) + o.length, html.lastIndexOf(c)); let synOk = false; try { new Function(js); synOk = true; } catch (e) { synOk = false; } ok = js.length > 200 && synOk; } catch (e) { ok = false; } finally { process.stdout.write = _w; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } return ok; } },
-    { name: '7번째 버그헌트 P1-A (UR-0104): 테이블셀 안전화 _cellSafe/_cellUnescape (파이프/개행 injection 차단) (1.9.399)', run: () => { const m = require('../lib/pure-utils'); if (m._cellSafe !== _cellSafe || m._cellUnescape !== _cellUnescape) return false; const safe = _cellSafe('fix | bug\nrow2'); const noRaw = !/(?<!\\)\|/.test(safe) && !/[\r\n]/.test(safe); const pipeRt = _cellUnescape(_cellSafe('a | b | c')) === 'a | b | c'; const nlGone = _cellSafe('a\nb') === 'a b'; const src = read(__filename); const wired = src.includes('_cellSafe(r.request)') && src.includes('_cellSafe(r.rule)'); return noRaw && pipeRt && nlGone && wired; } },
+    { name: '7번째 버그헌트 P1-A (UR-0104): 테이블셀 안전화 _cellSafe/_cellUnescape (파이프/개행 injection 차단) (1.9.399/1.36.175)', run: () => { const m = require('../lib/pure-utils'); if (m._cellSafe !== _cellSafe || m._cellUnescape !== _cellUnescape) return false; const safe = _cellSafe('fix | bug\nrow2\u2028row3\u2029row4'); const noRaw = !/(?<!\\)\|/.test(safe) && !/[\r\n\u2028\u2029]/.test(safe); const pipeRt = _cellUnescape(_cellSafe('a | b | c')) === 'a | b | c'; const nlGone = _cellSafe('a\nb\u2028c\u2029d') === 'a b c d'; const src = read(__filename); const wired = src.includes('_cellSafe(r.request)') && src.includes('_cellSafe(r.rule)'); return noRaw && pipeRt && nlGone && wired; } },
     { name: '7번째 버그헌트 P1-B (UR-0105): verify-claim/optimism-check/honesty-check --json 에러 구조화 (1.9.400)', run: () => { const src = read(__filename); const vc = /function verifyClaimCmd[\s\S]{0,1200}?failJson\(_j, 'not_found'/.test(src); const oc = /function optimismCheckCmd[\s\S]{0,700}?failJson\(_j, 'not_found'/.test(src); const hc = /function honestyCheckCmd[\s\S]{0,900}?failJson\(has\('--json'\), 'not_found'/.test(src); return vc && oc && hc; } },  // 1.30.5: {0,400}→{0,700} (F4 가 missing_args 라인을 en/ko 로 늘려 not_found 가 창 밖) · 1.33.2: vc {0,700}→{0,1200} (opts.collect 가드 라인이 not_found 를 더 밀어냄)
     { name: '7번째 버그헌트 P1-C (UR-0106): 시크릿 FN — gitignore 부정(!) + placeholder substring 정밀화 (1.9.401)', run: () => { const m = require('../lib/pure-utils'); const gm = m._gitignoreMatch; const negOk = gm('*.example\n!.env.example', '.env.example') === false && gm('*.log', 'a.log') === true && gm('a.log\n!a.log', 'a.log') === false && gm('.env', '.env') === true; const ph = m._isPlaceholderSecret; const phOk = ph('sk-EXAMPLEab12cd34ef56gh78ij90kl') === false && ph('sk-proj-realKEYexample9988776655') === false && ph('your-key-here') === true && ph('changeme') === true && ph('example') === true && ph('xxxxxxxxxxxxxxxxxxxxxxxxxxxx') === true; return negOk && phOk; } },
-    { name: '7번째 버그헌트 P1-A 잔여 (UR-0108): decisions/lessons MD projection 개행 주입 차단 _lineSafe (1.9.402)', run: () => { const m = require('../lib/pure-utils'); if (m._lineSafe !== _lineSafe) return false; const lsOk = _lineSafe('a\nb\r\nc') === 'a b c'; const md = m._renderDecisionsMd([{ date: '2026-06-07', title: 'real\n### 2099-01-01 — FAKE\n- Decision: forged', decision: 'd', reason: 'r' }]); const re = m._decisionsFromMd(md); const noInject = re.length === 1 && !/^### 2099-01-01 — FAKE/m.test(md); const lmd = m._renderLessonsMd([{ date: '2026-06-07', text: 'l1\n### FAKE\n- Lesson: x', tag: 't' }]); const lre = m._parseLessonEntries(lmd); const lNoInject = lre.length === 1; return lsOk && noInject && lNoInject; } },
+    { name: '7번째 버그헌트 P1-A 잔여 (UR-0108/T-0095): MD/터미널 제어문자 주입 차단 _lineSafe (1.9.402/1.36.175)', run: () => { const m = require('../lib/pure-utils'); if (m._lineSafe !== _lineSafe) return false; const lsOk = _lineSafe('a\nb\r\nc\u2028d\u2029e') === 'a b c d e'; const controls = _lineSafe('a\u000b\u000c\u001b[2J\u007f\u0085b'); const controlsOk = !/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(controls); const md = m._renderDecisionsMd([{ date: '2026-06-07', title: 'real\n### 2099-01-01 — FAKE\n- Decision: forged', decision: 'd', reason: 'r' }]); const re = m._decisionsFromMd(md); const noInject = re.length === 1 && !/^### 2099-01-01 — FAKE/m.test(md); const lmd = m._renderLessonsMd([{ date: '2026-06-07', text: 'l1\n### FAKE\n- Lesson: x', tag: 't' }]); const lre = m._parseLessonEntries(lmd); const lNoInject = lre.length === 1; return lsOk && controlsOk && noInject && lNoInject; } },
     { name: '7번째 버그헌트 P2 (UR-0107): api-skill show/drop 에러 exit code 1 (1.9.403)', run: () => {
       // 낡은 소스-리터럴(인라인 `process.exitCode = 1`) 대신 **행위 검사**: 1.36.74 에서 에러 경로가 failJson 으로
       //   리팩터되며 리터럴이 가드 자기 줄에만 남아 공허참이 됐다. 실제로 호출해 exit code 를 확인한다.
@@ -7240,9 +7359,9 @@ function _selfTestCases() {
         fs.mkdirSync(path.join(tmp, '.leerness'), { recursive: true });
         fs.writeFileSync(c._previewsPath(tmp), '{"legacy":{"id":"P-0042"}}');
         const chk1 = c._loadPreviewsChecked(tmp);
-        fs.writeFileSync(c._previewsPath(tmp), '[{"id":"P-0001","title":"ok"},null]');
+        fs.writeFileSync(c._previewsPath(tmp), '[{"id":"P-0001","title":"ok","status":"proposed"},null]');
         const chk2 = c._loadPreviewsChecked(tmp);
-        fs.writeFileSync(c._previewsPath(tmp), '[{"id":"P-0001","title":"ok"}]');
+        fs.writeFileSync(c._previewsPath(tmp), '[{"id":"P-0001","title":"ok","status":"proposed"}]');
         const chk3 = c._loadPreviewsChecked(tmp);
         shape = chk1.invalid && chk2.invalid && !chk3.invalid && chk3.list.length === 1;
       } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
@@ -9121,7 +9240,7 @@ function pulseCmd(root) {
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   const data = {
     version: VERSION,
-    roundCount: 0,
+    roundCount: null,
     mcpTools: 0,
     memorySurface: 'T0/D0/R0/P0/L0',
     // 1.36.39 (codex 4차 #8): pulse 는 이 3종을 계산하지 않는다 — 상태값처럼 보이던 'unknown' placeholder 가
@@ -9132,10 +9251,26 @@ function pulseCmd(root) {
     notComputed: ['security', 'health', 'driftScore'],
     nextMilestone: null,
     etaDays: null,
-    abnormalShutdown: 'none'
+    abnormalShutdown: 'none',
+    roundHistoryError: null,
+    gitHistoryState: null,
+    gitHistoryError: null,
+    workspaceError: null
   };
   // 라운드 카운트
-  try { data.roundCount = _computeRoundHistory(root).roundCount; } catch {}
+  try {
+    const rh = _computeRoundHistory(root, { allowWorkspaceError: true });
+    data.roundCount = rh.roundCount;
+    data.gitHistoryState = rh.gitHistoryState;
+    data.gitHistoryError = rh.gitHistoryError;
+    data.workspaceError = rh.workspaceError || null;
+    data.roundHistoryError = rh.gitHistoryError || rh.workspaceError || null;
+  } catch (err) {
+    const failure = _gitHistoryFailure('compute_exception', err && err.message);
+    data.gitHistoryState = 'unavailable';
+    data.gitHistoryError = failure;
+    data.roundHistoryError = failure;
+  }
   // MCP 도구 수 (1.9.297: lib/mcp-tools.js 단일 출처)
   try { data.mcpTools = _mcpToolCount(); } catch {}
   // Memory Surface (T/D/R/P/L) — 1.9.232 BUG fix: memoryStatusCmd 와 동일한 패턴 사용
@@ -9172,6 +9307,7 @@ function pulseCmd(root) {
   log(cy(`# leerness pulse (1.9.231/1.9.232) — 한 줄 종합 요약`));
   log('');
   log(`  ${line}`);
+  if (data.roundHistoryError) warn(`  round-history provenance unavailable: ${data.roundHistoryError.code}`);
   log('');
   log(dm(`  → 상세: leerness handoff . | health . | round-history | milestones`));
 }
@@ -9591,7 +9727,7 @@ const _GROUP_USAGE_KO = {
   rule: 'rule add "<텍스트>" --trigger <트리거> | rule list | rule pause/resume/remove <ID> | rule verify',
   skill: 'skill list | skill add <id> | skill use <id> | skill search "<키>" | skill match "<텍스트>"',
   feature: 'feature add "<이름>" | feature list | feature show <ID> | feature link <A> <B> | feature impact <ID>',
-  memory: 'memory search "<키>" [--json] | memory status | memory archive | memory restore',
+  memory: 'memory search "<키>" [--json] | memory status | memory archive list | memory restore <surface> <target>',
   readme: 'readme sync [path]',
   contract: 'contract verify <spec.md> <impl.js> [--json] [--allow-empty]',
   self: 'self check [path]',
@@ -9608,7 +9744,7 @@ const _GROUP_USAGE_EN = {
   rule: 'rule add "<text>" --trigger <trigger> | rule list | rule pause/resume/remove <ID> | rule verify',
   skill: 'skill list | skill add <id> | skill use <id> | skill search "<key>" | skill match "<text>"',
   feature: 'feature add "<name>" | feature list | feature show <ID> | feature link <A> <B> | feature impact <ID>',
-  memory: 'memory search "<key>" [--json] | memory status | memory archive | memory restore',
+  memory: 'memory search "<key>" [--json] | memory status | memory archive list | memory restore <surface> <target>',
   readme: 'readme sync [path]',
   contract: 'contract verify <spec.md> <impl.js> [--json] [--allow-empty]',
   self: 'self check [path]',
@@ -10610,26 +10746,33 @@ function _p0104UsageOk() {
       fs.writeFileSync(path.join(d, 'package.json'), '{"name":"x","version":"0.1.0"}');
       cp2.spawnSync(process.execPath, [__filename, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 180000, env: env2 });
     }
-    const mcp = (name) => cp2.spawnSync(process.execPath, [__filename, 'mcp', 'serve'], {
+    const mcp = (name, toolArgs = {}) => cp2.spawnSync(process.execPath, [__filename, 'mcp', 'serve'], {
       cwd: cwdP, encoding: 'utf8', timeout: 180000, env: env2, maxBuffer: 32 * 1024 * 1024,
       input: [
         { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'g', version: '1' } } },
         { jsonrpc: '2.0', method: 'notifications/initialized' },
-        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: { path: tgt } } },
+        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: { ...toolArgs, path: tgt } } },
       ].map(r => JSON.stringify(r)).join('\n') + '\n'
     });
+    // Observation-only MCP calls must not mutate their target merely to count
+    // themselves. Writable calls still provide attributable usage evidence.
     mcp('leerness_about'); mcp('leerness_pulse');
     const U = (d) => ((cp2.spawnSync(process.execPath, [__filename, 'usage', '--path', d], { cwd: cwdP, encoding: 'utf8', timeout: 120000, env: env2 }).stdout) || '');
+    const uReadOnly = U(tgt);
+    const readOnlyClean = !/leerness_about|leerness_pulse/.test(uReadOnly);
+    mcp('leerness_task_add', { text: 'usage attribution fixture' });
+    mcp('leerness_decision_add', { title: 'usage attribution fixture' });
     const uT = U(tgt), uC = U(cwdP);
-    // ① 실제로 일한 프로젝트가 그 사실을 말한다
-    const shows = /leerness_about/.test(uT) && /leerness_pulse/.test(uT) && !/\(사용 기록 없음\)/.test(uT);
+    // ① 실제로 쓴 프로젝트가 그 사실을 말하고, 관찰 호출은 기록하지 않는다
+    const shows = /leerness_task_add/.test(uT) && /leerness_decision_add/.test(uT)
+      && !/leerness_about|leerness_pulse/.test(uT) && !/\(사용 기록 없음\)/.test(uT);
     // ② 서버가 우연히 서 있던 프로젝트에 남의 활동이 기록되지 않는다
     const cwdClean = !/\|\s*mcp\s*\|/.test(uC);
     // ③ 대조군 — 평범한 CLI 경로는 그대로 명령 표에 남는다(표시 조건을 바꾸며 죽이지 않았는가)
     cp2.spawnSync(process.execPath, [__filename, 'audit', '--path', tgt], { cwd: cwdP, encoding: 'utf8', timeout: 180000, env: env2 });
     const uT2 = U(tgt);
-    const cliStillCounted = /\|\s*audit\s*\|/.test(uT2) && /leerness_about/.test(uT2);
-    return shows && cwdClean && cliStillCounted;
+    const cliStillCounted = /\|\s*audit\s*\|/.test(uT2) && /leerness_task_add/.test(uT2);
+    return readOnlyClean && shows && cwdClean && cliStillCounted;
   } catch { return false; } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch { /* 정리 실패는 판정과 무관 */ } }
 }
 // 1.36.103: --json 계약 회귀 가드 — "실패해도 stdout 은 항상 파싱 가능한 JSON 하나".
@@ -11331,10 +11474,12 @@ function commandsCmd(root) {
 function releaseCadenceCmd(root) {
   root = absRoot(root);
   const rh = _computeRoundHistory(root);
+  if (rh.gitHistoryState !== 'available') _throwGitHistoryUnavailable(rh.gitHistoryError);
   const a = _cadenceAssessment(rh.avgRoundsPerDay, rh.roundCount, rh.daysActive);
-  if (has('--json')) { log(JSON.stringify({ version: VERSION, currentVersion: rh.currentVersion, baselineVersion: rh.baselineVersion, ...a }, null, 2)); return; }
+  if (has('--json')) { log(JSON.stringify({ version: VERSION, cliVersion: rh.cliVersion, harnessVersion: rh.harnessVersion, harnessVersionState: rh.harnessVersionState, currentVersion: rh.currentVersion, currentVersionScope: rh.currentVersionScope, baselineVersion: rh.baselineVersion, latestTagVersion: rh.latestTagVersion, gitHistoryState: rh.gitHistoryState, gitHistoryError: rh.gitHistoryError, ...a }, null, 2)); return; }
   log(`# leerness release cadence (1.9.374, UR-0074) — 릴리스 빈도 진단 (읽기 전용)`);
-  log(`  누적 릴리스: ${a.total}  ·  활동일: ${a.daysActive}일  ·  빈도: ${a.releasesPerDay}/day`);
+  const observedRate = a.dataSufficient ? `${a.releasesPerDay}/day` : '관측 불가 (서로 다른 시각의 태그 2개 이상 필요)';
+  log(`  누적 릴리스: ${a.total}  ·  활동일: ${a.daysActive}일  ·  빈도: ${observedRate}`);
   log(`  수준: ${a.level}`);
   log(`  권장: ${a.recommendation}`);
   log(`\n  관련: leerness release channel (stable/next 정책)  ·  leerness install-safety (공급망 신뢰)`);
@@ -11347,10 +11492,15 @@ function roundHistoryCmd(root) {
   const yl = s => isTty ? `\x1b[33m${s}\x1b[0m` : s;
   const dm = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
   const data = _computeRoundHistory(root);
+  if (data.gitHistoryState !== 'available') _throwGitHistoryUnavailable(data.gitHistoryError);
   if (has('--json')) { log(JSON.stringify(data, null, 2)); return; }
   log(cy(`# leerness round-history (1.9.226) — 자율 라운드 통계`));
   log('');
-  log(`  📦 현재 버전: ${gr(data.currentVersion)}`);
+  log(`  📦 leerness CLI: ${gr(data.cliVersion)}`);
+  if (data.harnessVersion) log(`  🧩 프로젝트 하네스: ${gr(data.harnessVersion)}`);
+  else if (data.harnessVersionState === 'invalid' || data.harnessVersionState === 'unreadable') log(yl(`  🧩 프로젝트 하네스: 판독 불가 (${data.harnessVersionState})`));
+  else if (data.harnessVersionState === 'missing') log(yl(`  🧩 프로젝트 하네스: 없음 (missing)`));
+  if (data.latestTagVersion) log(`  🏷️ 저장소 최근 태그: v${data.latestTagVersion}`);
   log(`  🔄 누적 라운드: ${gr(String(data.roundCount))}`);
   if (data.baselineVersion) log(`  📍 baseline: v${data.baselineVersion} (${(data.firstTagAt || '').split('T')[0]})`);
   if (data.latestTagAt) log(`  ⏰ 최근 tag: ${(data.latestTagAt || '').split('T')[0]}`);
@@ -11876,23 +12026,49 @@ function _isKnownTopLevelCommand(cmd) {
   return _knownTopLevelCommands.has(String(cmd || ''));
 }
 
+// Single authority for CLI routes that explicitly promise observation only.
+// The default is stateful: a newly added command cannot accidentally gain a
+// read-only exemption merely because a heuristic failed to recognize it.
+const _OBSERVATION_ONLY_COMMANDS = new Set([
+  'about', 'identity', 'status', 'commands', 'install-safety', 'capabilities',
+  'security-surface', 'dashboard', 'round-history', 'milestones', 'pulse',
+]);
+const _OBSERVATION_ONLY_SUBCOMMANDS = new Map([
+  ['release', new Set(['cadence'])],
+  ['auto-update', new Set(['status'])],
+  ['preview', new Set(['list', 'show'])],
+]);
+function _cliMutationClass(args, cmd) {
+  if (cmd === 'mcp') return 'observation-only'; // server startup must not mutate its incidental cwd
+  if (_OBSERVATION_ONLY_COMMANDS.has(cmd)) return 'observation-only';
+  // `preview` with no explicit child is an exact alias for `preview list`.
+  // Classify the alias before auto-migration/telemetry so adding --json/--path
+  // cannot turn a read into a write merely because no child token exists.
+  if (cmd === 'preview' && (!args || !args[1] || String(args[1]).startsWith('-'))) return 'observation-only';
+  const children = _OBSERVATION_ONLY_SUBCOMMANDS.get(cmd);
+  return children && args && children.has(args[1]) ? 'observation-only' : 'stateful';
+}
+function _mustRemainReadOnly(args, cmd) { return _cliMutationClass(args, cmd) === 'observation-only'; }
+
 function _autoMigrateLegacyWorkspace(args, cmd) {
   if (process.env.LEERNESS_NO_AUTO_WORKSPACE_MIGRATION === '1') return true;
   if (has('--dry-run') || cmd === 'migrate-workspace-dir' || cmd === 'workspace-dir') return true;
+  if (_mustRemainReadOnly(args, cmd)) return true;
   // Invalid commands must be observationally pure. In particular, a typo in
   // a legacy project may not rename project memory before reporting the typo.
   if (!_isKnownTopLevelCommand(cmd)) return true;
   const candidates = [];
   const explicit = arg('--path', null);
   if (typeof explicit === 'string' && explicit.trim()) candidates.push(explicit);
-  candidates.push(process.cwd());
+  else candidates.push(process.cwd());
   // Never interpret arbitrary command content as a project to mutate. Topics,
   // titles and output paths may all be path-shaped (for example
   // `brainstorm ./legacy-design`); scanning every positional token used to
   // migrate those unrelated directories before command dispatch. Positional
   // project targets can be migrated explicitly with `migrate-workspace-dir`,
   // while normal automatic migration is limited to cwd and the unambiguous
-  // global `--path` option.
+  // global `--path` option. When it is present, the unrelated process cwd is
+  // not another migration target.
   const seen = new Set();
   for (const candidate of candidates) {
     let root;
@@ -13893,8 +14069,10 @@ function _handoffVersionSkew(root) {
     const versionFile = path.join(absRoot(root), '.leerness', 'HARNESS_VERSION');
     if (!exists(versionFile)) return null;
     const parsed = parseHarnessVersion(read(versionFile));
-    const harnessVersion = parsed.plus || parsed.base;
-    if (!harnessVersion) return { detected: true, kind: 'invalid-harness-version', cliVersion: VERSION, harnessVersion: parsed.raw };
+    // `leerness@X+plus@Y`에서 X가 설치된 Leerness 버전이고 Y는 옛 compatibility suffix다.
+    // round-history/status와 같은 출처를 사용해야 skew 방향이 뒤집히지 않는다.
+    const harnessVersion = parsed.base;
+    if (!harnessVersion) return { detected: true, kind: 'invalid-harness-version', cliVersion: VERSION, harnessVersion: _lineSafe(parsed.raw) };
     const order = compareVer(VERSION, harnessVersion);
     if (order === 0) return null;
     return {
@@ -13909,11 +14087,11 @@ function _handoffVersionSkew(root) {
 function _emitHandoffVersionSkew(skew) {
   if (!skew) return;
   if (skew.kind === 'cli-older') {
-    warn(`버전 불일치: 실행 CLI v${skew.cliVersion} < 프로젝트 하네스 v${skew.harnessVersion} — 쓰기 명령 전 CLI를 업데이트하세요`);
+    warn(`버전 불일치: 실행 CLI v${_lineSafe(skew.cliVersion)} < 프로젝트 하네스 v${_lineSafe(skew.harnessVersion)} — 쓰기 명령 전 CLI를 업데이트하세요`);
   } else if (skew.kind === 'harness-older') {
-    warn(`버전 불일치: 실행 CLI v${skew.cliVersion} > 프로젝트 하네스 v${skew.harnessVersion} — leerness update --yes 권장`);
+    warn(`버전 불일치: 실행 CLI v${_lineSafe(skew.cliVersion)} > 프로젝트 하네스 v${_lineSafe(skew.harnessVersion)} — leerness update --yes 권장`);
   } else {
-    warn(`프로젝트 HARNESS_VERSION 을 해석할 수 없습니다: ${skew.harnessVersion}`);
+    warn(`프로젝트 HARNESS_VERSION 을 해석할 수 없습니다: ${_lineSafe(skew.harnessVersion)}`);
   }
 }
 // 1.36.7 (메타-테스트 도그푸드): 세션에서 작업 중(task/decision add)인데 handoff 가 오래됨/미실행이면 넛지.
@@ -15785,21 +15963,46 @@ function route(name) {
 
 function status(root) {
   root = absRoot(root);
-  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);  // 1.23.1 (UR-0010 Phase 6)
   // 1.9.434 (11th 외부평가 Opus P2, UR-0136): 미존재 경로는 healthy 위조 금지 — failJson + exit 1.
-  if (!exists(root)) { failJson(has('--json'), 'path_not_found', t(`경로 없음: ${root}`, `path not found: ${root}`)); return; }
-  const verF = path.join(root,'.leerness/HARNESS_VERSION');
-  const ver = exists(verF) ? read(verF).trim() : 'not installed';
-  const lang = exists(path.join(root,'.leerness/LANGUAGE')) ? read(path.join(root,'.leerness/LANGUAGE')).trim() : 'ko';
+  if (!exists(root)) {
+    const missingLang = _uiLang(root);
+    failJson(has('--json'), 'path_not_found', missingLang === 'en' ? `path not found: ${root}` : `경로 없음: ${root}`);
+    return;
+  }
+  // Resolve the active workspace exactly once. A live legacy installation is
+  // observable in place; status must neither migrate it nor report canonical
+  // paths as missing. Conflict/override errors remain fail-closed in main().
+  const workspaceDir = _workspaceDirName(root);
+  const workspaceAbs = path.join(root, workspaceDir);
+  const verF = path.join(workspaceAbs, 'HARNESS_VERSION');
+  let ver = null;
+  let versionState = 'missing';
+  if (exists(verF)) {
+    try {
+      const parsed = parseHarnessVersion(read(verF));
+      ver = parsed.base || null;
+      versionState = ver ? 'valid' : 'invalid';
+    } catch { versionState = 'unreadable'; }
+  }
+  const langF = path.join(workspaceAbs, 'LANGUAGE');
+  const lang = exists(langF) ? read(langF).trim() : 'ko';
+  const requestedLang = String(arg('--language', '') || process.env.LEERNESS_LANG || '').toLowerCase();
+  const _L = requestedLang === 'en' || requestedLang === 'ko' ? requestedLang : (lang === 'en' ? 'en' : 'ko');
+  const t = (ko, en) => (_L === 'en' ? en : ko);  // 1.23.1 (UR-0010 Phase 6)
   // 1.9.287 (Codex 리뷰 수렴): --minimal 설치는 manifest.minimal=true → 의도적으로 생략된 파일을 missing 으로 경고하지 않음.
   let isMinimal = false;
-  try { const mf = path.join(root, '.leerness/manifest.json'); if (exists(mf)) isMinimal = !!JSON.parse(read(mf)).minimal; } catch {}
-  const files = Object.keys(coreFiles(root, lang, [], { minimal: isMinimal }));
-  const missing = files.filter(f => !exists(path.join(root,f)));
+  try { const mf = path.join(workspaceAbs, 'manifest.json'); if (exists(mf)) isMinimal = !!JSON.parse(read(mf)).minimal; } catch {}
+  const canonicalFiles = Object.keys(coreFiles(root, lang, [], { minimal: isMinimal }));
+  const files = canonicalFiles.map(f => f === CANONICAL_WORKSPACE_DIR
+    ? workspaceDir
+    : (f.startsWith(CANONICAL_WORKSPACE_DIR + '/')
+      ? workspaceDir + f.slice(CANONICAL_WORKSPACE_DIR.length)
+      : f));
+  const missing = files.filter(f => !exists(path.join(root, f)));
   // 1.9.384 (5번째 외부평가/UR-0085): --json 일관성 — AI 에이전트용 구조화 출력.
   // 1.9.418 (9th 외부평가 Codex P2): healthy 의 의미를 명시(설치 파일 존재 ≠ 프로젝트 안전). 프로젝트 안전은 gate/scan secrets 사용.
-  if (has('--json')) { log(JSON.stringify({ version: ver, language: lang, minimal: isMinimal, scope: 'install', total: files.length, present: files.length - missing.length, missing, healthy: missing.length === 0, healthyMeaning: t('설치 파일 존재 여부(프로젝트 안전 아님 — 보안/품질은 leerness gate / scan secrets 사용)', 'install-file presence only (not project safety — use leerness gate / scan secrets for security/quality)') }, null, 2)); return; }
-  log(`Leerness: ${ver}${isMinimal ? ' (minimal)' : ''}`);
+  if (has('--json')) { log(JSON.stringify({ version: ver, versionState, workspaceDir, language: lang, minimal: isMinimal, scope: 'install', total: files.length, present: files.length - missing.length, missing, healthy: missing.length === 0, healthyMeaning: t('설치 파일 존재 여부(프로젝트 안전 아님 — 보안/품질은 leerness gate / scan secrets 사용)', 'install-file presence only (not project safety — use leerness gate / scan secrets for security/quality)') }, null, 2)); return; }
+  log(`Leerness: ${ver || versionState}${isMinimal ? ' (minimal)' : ''}`);
   log(`Files: ${files.length - missing.length}/${files.length}`);
   if (missing.length) missing.forEach(x => warn('missing: ' + x));
   else ok(`required files present${isMinimal ? ' (minimal set)' : ''}`);
@@ -16620,30 +16823,33 @@ function handoff(root) {
       } catch {}
       // 1.9.227: roundHistory 통합 (handoff JSON 6번째 통합 필드) — 자율 진행도 외부 회수
       try {
-        const rh = _computeRoundHistory(root);
+        const rh = _computeRoundHistory(root, { allowWorkspaceError: true });
         result.roundHistory = {
           roundCount: rh.roundCount,
           baselineVersion: rh.baselineVersion,
           nextMilestone: rh.nextMilestone,
           roundsToNextMilestone: rh.roundsToNextMilestone,
           daysActive: rh.daysActive,
-          avgRoundsPerDay: rh.avgRoundsPerDay
+          avgRoundsPerDay: rh.avgRoundsPerDay,
+          harnessVersionState: rh.harnessVersionState,
+          workspaceError: rh.workspaceError || null,
+          gitHistoryState: rh.gitHistoryState,
+          gitHistoryError: rh.gitHistoryError
         };
       } catch {}
       // 1.9.230: milestones 통합 (handoff JSON 7번째 통합 필드) — 도달 마일스톤 + ETA
       try {
         const ms = _computeMilestones(root);
-        result.milestones = {
-          reachedCount: ms.reached.length,
-          reached: ms.reached.map(m => ({ milestone: m.milestone, version: m.version, reachedAt: m.reachedAt })),
-          next: ms.next,
-          avgRoundsPerDay: ms.avgRoundsPerDay
-        };
-      } catch {}
+        result.milestones = _milestoneSurface(ms);
+      } catch (err) {
+        result.milestones = _milestoneSurface({ gitHistoryState: 'unavailable', gitHistoryError: _gitHistoryFailure('aggregate_exception', err && err.message) });
+      }
       // 1.9.234: recentChanges 통합 (handoff JSON 8번째 통합 필드) — 최근 5 라운드 변경 요약
       try {
-        result.recentChanges = _computeRecentChanges(root, 5);
-      } catch {}
+        Object.assign(result, _recentChangesAggregate(_computeRecentChanges(root, 5)));
+      } catch (err) {
+        Object.assign(result, _recentChangesAggregate({ state: 'unavailable', error: _gitHistoryFailure('aggregate_exception', err && err.message) }));
+      }
       // 1.9.240: pyFiles 통합 (handoff JSON 9번째 통합 필드) — Python 다중 언어 가시화 (UR-0013 2단계)
       try {
         const pyFiles = _collectPyFiles(root, 200);
@@ -16751,6 +16957,10 @@ function handoff(root) {
     //   채널(메일박스)을 새로 만들기 전에, 이미 있는 신호가 도달하게 하는 것이 먼저다.
     try { result.sessions = _sessionSignal(root); } catch { /* 레지스트리를 못 읽어도 handoff 는 진행 */ }
     try { const _rem = _agentReminderSignal(root); if (_rem) result.agentReminders = _rem; } catch {}
+    // A corrupt preview workflow is not equivalent to "0 pending". Machine
+    // consumers must keep the approval gate unknown until previews.json is
+    // repaired, rather than silently treating malformed/missing statuses as done.
+    result.previewApproval = _previewApprovalSurface(root);
     log(JSON.stringify(result, null, 2));
     return;
   }
@@ -16780,6 +16990,11 @@ function handoff(root) {
     //   이 경로가 MCP handoff·REPL·agent-mode 가 실제로 쓰는 경로이고, 종전엔 여기서 헤드라인이 통째로 사라졌다(200줄→3줄).
     try { const _ss = _sessionSignal(root); flags.push(..._sessionSignalFlags(_ss)); } catch {}
     try { const _rm = _agentReminderSignal(root); if (_rm) flags.push(`🔔 리마인더 ${_rm.lines}줄`); } catch {}
+    // 1.36.175 (T-0095): MCP handoff 가 바로 이 compact 경로를 사용한다. 승인 저장소가
+    //   손상됐는데도 아무 표시가 없으면 에이전트가 `미승인 0`으로 오독하므로 known/count/code를
+    //   compact 텍스트에도 명시한다. 0건도 known=true로 써서 "침묵=확인됨" 추론을 없앤다.
+    const _pa = _previewApprovalSurface(root, false);
+    flags.push(`${_pa.known ? '🎨' : '⚠'} ${_previewApprovalText(_pa)}`);
     log(_lineSafe(`leerness compact: ${detectProjectName(root)} · ${done}/${rows.length}(${pct}%) done · WIP ${wip} · T${wip}/D${decN}/R${rulesActive}/P${mileN}/L${lessN}${flags.length ? ' · ' + flags.join(' · ') : ''}`));   // 1.36.18 (codex F4): projectName 개행 주입 차단
     if (nx) log(_lineSafe(`다음: ${nx.id} [${nx.status}] ${nx.nextAction || nx.request || ''}`).slice(0, 200));
     log('핵심 규칙: 의존성0 · 한국어주석 · UTF-8noBOM · reuse-map등록 · anti-lazy-work · verify-claim자동검수');
@@ -17030,8 +17245,12 @@ function handoff(root) {
       // 17) 1.9.226: round-history 헤드라인 — 자율 라운드 카운터 + 다음 마일스톤 (5 라운드 이상 시만 표시)
       // 1.9.230: 다음 마일스톤 ETA (10R 이내 + ETA 7일 이내일 때 강조)
       try {
-        const rh = _computeRoundHistory(root);
-        if (rh.roundCount >= 5) {
+        const rh = _computeRoundHistory(root, { allowWorkspaceError: true });
+        if (rh.gitHistoryError) {
+          parts.push(`⚠ Git history unavailable:${rh.gitHistoryError.reason}`);
+        } else if (rh.workspaceError) {
+          parts.push(`⚠ workspace provenance unavailable:${rh.workspaceError.code}`);
+        } else if (rh.roundCount >= 5) {
           let label = `🔄 R${rh.roundCount}`;
           if (rh.nextMilestone != null && rh.roundsToNextMilestone <= 20) {
             label += ` → R${rh.nextMilestone} (${rh.roundsToNextMilestone}R ${t('남음', 'left')})`;
@@ -17088,9 +17307,15 @@ function handoff(root) {
       } catch {}
       // 1.36.51 (UR-0061): 미승인 미리보기 — 사용자 답을 기다리는 기능이 있으면 헤드라인 노출 (코드 작성 보류 계약)
       try {
-        const _pp = _clar.pendingPreviews(root);
-        if (_pp.length) parts.push(t(`🎨 미승인 미리보기 ${_pp.length}건 (approve 전 코드 금지)`, `🎨 ${_pp.length} preview(s) awaiting approval (no code before approve)`));
-      } catch {}
+        const _pa = _previewApprovalSurface(root, false);
+        if (!_pa.known) {
+          parts.push(t(`⚠ 미리보기 승인 상태 불명 (${_pa.code}) — 복구 전 승인 완료로 간주 금지`, `⚠ preview approval unknown (${_pa.code}) — do not treat as approved until repaired`));
+        } else if (_pa.pendingCount) {
+          parts.push(t(`🎨 미승인 미리보기 ${_pa.pendingCount}건 (approve 전 코드 금지)`, `🎨 ${_pa.pendingCount} preview(s) awaiting approval (no code before approve)`));
+        }
+      } catch (e) {
+        parts.push(t('⚠ 미리보기 승인 상태 확인 실패 — 복구 전 승인 완료로 간주 금지', '⚠ preview approval check failed — do not treat as approved until repaired'));
+      }
       // 14) 1.9.209: pre-wake-audit 최근 보고서 (사용자 명시) — 깨어남 직후 자동 노출
       try {
         const pwState = _loadPreWakeReport(root);
@@ -18166,6 +18391,48 @@ function _parseSince(s) {
   return cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
+// 승인 상태는 단일/멀티 handoff와 MCP가 같은 필드 계약을 공유한다. `known=true`일 때도
+// code=null을 생략하지 않아 compact 텍스트를 파싱하는 에이전트가 침묵을 추론하지 않게 한다.
+function _previewApprovalSurface(root, includeItems = true) {
+  try {
+    const state = _clar.previewApprovalState(root);
+    return {
+      known: !!state.known,
+      pendingCount: state.known ? state.count : null,
+      code: state.known ? null : _lineSafe(String(state.code || 'approval_state_unavailable')),
+      items: includeItems && state.known
+        ? state.items.slice(0, 10).map(p => ({ id: p.id, title: p.title, status: p.status }))
+        : [],
+    };
+  } catch (e) {
+    return {
+      known: false,
+      pendingCount: null,
+      code: _lineSafe(String((e && e.code) || 'approval_state_unavailable')),
+      items: [],
+    };
+  }
+}
+
+function _previewApprovalText(state) {
+  return state.known
+    ? `previewApproval known=true count=${state.pendingCount} code=null`
+    : `previewApproval known=false count=null code=${state.code || 'approval_state_unavailable'}`;
+}
+
+function _workspacePreviewApproval(projects) {
+  const unknown = projects.filter(p => !p.previewApproval.known);
+  const codes = Array.from(new Set(unknown.map(p => p.previewApproval.code || 'approval_state_unavailable')));
+  return {
+    known: unknown.length === 0,
+    pendingCount: unknown.length === 0
+      ? projects.reduce((sum, p) => sum + (p.previewApproval.pendingCount || 0), 0)
+      : null,
+    code: unknown.length === 0 ? null : (codes.length === 1 ? codes[0] : 'multiple_approval_state_errors'),
+    unknownProjects: unknown.map(p => ({ project: p.project, path: p.path, code: p.previewApproval.code })),
+  };
+}
+
 // 1.9.17→1.9.18: 워크스페이스 통합 handoff — 4개 agent 동시 작업 시 메인 agent용 한 줄 요약
 // 1.9.18: --since <duration> 추가, 최근 수정된 T-row 강조 (🆕 마크 + 별도 섹션)
 function _handoffWorkspace(rootBase) {
@@ -18197,10 +18464,11 @@ function _handoffWorkspace(rootBase) {
         blocked: (buckets['blocked'] || []).length,
         activeRules,
         nextAction: (buckets['in-progress']?.[0]?.nextAction) || (buckets['planned']?.[0]?.nextAction) || (buckets['requested']?.[0]?.nextAction) || null,
+        previewApproval: _previewApprovalSurface(p),
         recent: recent.map(r => ({ id: r.id, status: r.status, request: r.request, updated: r.updated }))
       };
     });
-    log(JSON.stringify({ workspace: path.basename(rootBase), since: sinceCutoff, projects, totals: {
+    log(JSON.stringify({ workspace: path.basename(rootBase), since: sinceCutoff, previewApproval: _workspacePreviewApproval(projects), projects, totals: {
       tasks: projects.reduce((a, b) => a + b.total, 0),
       done: projects.reduce((a, b) => a + b.done, 0),
       inProgress: projects.reduce((a, b) => a + b.inProgress, 0),
@@ -18213,6 +18481,7 @@ function _handoffWorkspace(rootBase) {
   if (has('--compact')) {
     let totalDone = 0, totalTasks = 0, totalWIP = 0, totalRecent = 0;
     const projSummaries = [];
+    const projectApprovals = [];
     for (const p of paths) {
       const rows = readProgressRows(p);
       const buckets = {};
@@ -18222,9 +18491,12 @@ function _handoffWorkspace(rootBase) {
       const recent = sinceCutoff ? rows.filter(isRecent).length : 0;
       totalDone += done; totalTasks += rows.length; totalWIP += wip; totalRecent += recent;
       const pct = rows.length ? Math.round(done / rows.length * 100) : 0;
-      projSummaries.push(`${path.basename(p)} ${done}/${rows.length}(${pct}%)`);
+      const previewApproval = _previewApprovalSurface(p, false);
+      projectApprovals.push({ project: path.basename(p), path: p, previewApproval });
+      projSummaries.push(`${path.basename(p)} ${done}/${rows.length}(${pct}%) · ${_previewApprovalText(previewApproval)}`);
     }
-    log(`leerness compact (1.9.22): ${paths.length}프로젝트 · ${totalDone}/${totalTasks}(${totalTasks?Math.round(totalDone/totalTasks*100):0}%) done · WIP ${totalWIP}${sinceCutoff?` · 🆕${totalRecent}`:''}`);
+    const workspaceApproval = _workspacePreviewApproval(projectApprovals);
+    log(`leerness compact (1.9.22): ${paths.length}프로젝트 · ${totalDone}/${totalTasks}(${totalTasks?Math.round(totalDone/totalTasks*100):0}%) done · WIP ${totalWIP}${sinceCutoff?` · 🆕${totalRecent}`:''} · ${_previewApprovalText(workspaceApproval)}`);
     log(`projects: ${projSummaries.join(' | ')}`);
     log(`핵심 규칙: 의존성0 · 한국어주석 · UTF-8noBOM · reuse-map등록 · anti-lazy-work · verify-claim자동검수`);
     return;
@@ -18236,6 +18508,7 @@ function _handoffWorkspace(rootBase) {
   log('## 프로젝트별 진행 상태');
   let totalDone = 0, totalTasks = 0, totalWIP = 0, totalBlocked = 0, totalRecent = 0;
   const allRecent = [];
+  const projectApprovals = [];
   for (const p of paths) {
     const rows = readProgressRows(p);
     const buckets = {};
@@ -18250,7 +18523,9 @@ function _handoffWorkspace(rootBase) {
     const nx = (buckets['in-progress']?.[0]) || (buckets['planned']?.[0]) || null;
     const pct = rows.length ? Math.round(done / rows.length * 100) : 0;
     const recentBadge = recent.length ? ` · 🆕 ${recent.length}` : '';
-    log(`  ${path.basename(p)}: ${done}/${rows.length} (${pct}%) · WIP ${wip} · planned ${planned}${blocked ? ` · 🚫 blocked ${blocked}` : ''}${recentBadge}`);
+    const previewApproval = _previewApprovalSurface(p, false);
+    projectApprovals.push({ project: path.basename(p), path: p, previewApproval });
+    log(`  ${path.basename(p)}: ${done}/${rows.length} (${pct}%) · WIP ${wip} · planned ${planned}${blocked ? ` · 🚫 blocked ${blocked}` : ''}${recentBadge} · ${_previewApprovalText(previewApproval)}`);
     if (nx) log(`    └ 다음: ${nx.id} [${nx.status}] ${nx.nextAction || nx.request}`);
   }
   // 1.9.18: --since 모드일 때 최근 추가/수정 섹션
@@ -18266,6 +18541,7 @@ function _handoffWorkspace(rootBase) {
   log(`## 📊 워크스페이스 총합`);
   log(`  - 누적 task: ${totalTasks} (done ${totalDone}, ${totalTasks ? Math.round(totalDone / totalTasks * 100) : 0}%)`);
   log(`  - 진행중 (WIP): ${totalWIP} · 차단: ${totalBlocked}${sinceCutoff ? ` · 🆕 최근 ${totalRecent}` : ''}`);
+  log(`  - 미리보기 승인: ${_previewApprovalText(_workspacePreviewApproval(projectApprovals))}`);
   if (totalBlocked > 0) log(`  - ⚠ ${totalBlocked}건이 blocked — 우선 처리 검토`);
   log('');
   log(`## 💡 멀티에이전트 오케스트레이션 권장`);
@@ -21539,7 +21815,7 @@ function sessionClose(root, opts = {}) { // 1.36.132 (검수): handoff 는 --no-
   //   (실측: handoff --no-record → 0건, session close --no-record → 1건). 같은 스토어의 같은 계약은 같은 문장으로.
   _captureDirectMcpPresenceMarker(); // hook/--no-record여도 nested skill/drift child에는 일회성 MCP marker를 물려주지 않는다
   if (!has('--no-record') && process.env.LEERNESS_HOOK !== '1') { try { _sessionPresenceRecord(root, 'close'); } catch {} }     // 1.36.129 (P-0016 P1): close 는 '기록됨' 일 뿐 '프로세스가 죽었다' 가 아니다
-  return _sessionClose.sessionClose(root, opts, { VERSION, STATUSES, MARK, has, arg, uiLang: _uiLang(root), harnessPath: __filename, readProgressRows, evidencePath, handoffPath, currentStatePath, taskLogPath, verifyRules, _autoRoadmap, _readUsageStats, readSessionCounter, writeSessionCounter, _retroAggregate, _retroOneLine, retroCmd, _loadDecisions, readRules, planPath, _loadLessons, _readFeatureGraph, _auditUserRequests, _detectDeliveredRequests, _computeRoundHistory, _computeMilestones, _computeRecentChanges, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _scanShellScriptsEncoding, _listAPISkills, _matchAPISkills, _loadShellFailures, _shellEnvDrift, _runPreWakeAudit, _saveAndAppendPreWakeReport, _runIdempotencyAudit, _detectAbnormalShutdown, _updateUserRequest, _detectOptimism, _scanCodeForPatterns, _collectSecretFindings, _withLock }); }  // 1.17.6 (UR-0049): 마감 정합 — done 낙관 재확인 + 시크릿 재확인 · 1.36.108: 락 주입(T-0097)
+  return _sessionClose.sessionClose(root, opts, { VERSION, STATUSES, MARK, has, arg, uiLang: _uiLang(root), harnessPath: __filename, readProgressRows, evidencePath, handoffPath, currentStatePath, taskLogPath, verifyRules, _autoRoadmap, _readUsageStats, readSessionCounter, writeSessionCounter, _retroAggregate, _retroOneLine, retroCmd, _loadDecisions, readRules, planPath, _loadLessons, _readFeatureGraph, _auditUserRequests, _detectDeliveredRequests, _computeRoundHistory, _computeMilestones, _computeRecentChanges, _collectPyFiles, _analyzePyFile, _collectRuntimeEnv, _scanShellScriptsEncoding, _listAPISkills, _matchAPISkills, _loadShellFailures, _shellEnvDrift, _runPreWakeAudit, _saveAndAppendPreWakeReport, _runIdempotencyAudit, _detectAbnormalShutdown, _updateUserRequest, _detectOptimism, _scanCodeForPatterns, _collectSecretFindings, previewApprovalState: _clar.previewApprovalState, _withLock }); }  // 1.17.6 (UR-0049): 마감 정합 — done 낙관 재확인 + 시크릿 재확인 · 1.36.108: 락 주입(T-0097)
 
 function readmeCmd(root) { syncReadme(absRoot(root)); }
 function consistencyCheck(root) {
@@ -26170,7 +26446,10 @@ function mcpServeCmd(root) {
       try {
         cliArgs = _mcpToCliArgs(name, args, targetPath);
         if (cliArgs === null) return send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${name}` } });
-        try { _bumpMcpUsage(targetPath, name); } catch {}  // 알려진 도구만 통계 기록(unknown tool 의 임의경로 쓰기 차단)
+        const _mcpReadOnly = !!(_toolDef && _toolDef.requiredTier === 'read-only');
+        // A read-only tool may not mutate the target merely to count itself.
+        // Writable tools retain existing per-project MCP telemetry.
+        if (!_mcpReadOnly) { try { _bumpMcpUsage(targetPath, name); } catch {} }
         // 1.9.288 (Codex gpt-5.5 리뷰 #1 수렴): MCP 도구도 policy enforce 적용 — read-only enforce 시 write 도구 차단.
         //   이전: _policyEnforce 는 agents multi --execute 한 곳뿐 → MCP state_start 등이 정책 우회하고 .leerness 기록.
         //   cliArgs(실제 실행 명령) 로 required tier 판정 → enforce ON 이고 초과 시 JSON-RPC error 반환(실행 안 함).
@@ -26186,8 +26465,10 @@ function mcpServeCmd(root) {
         // 실제로 받은 **직접 handoff/close**에만 붙인다. state/agent-mode/일반 내부 스폰은
         // presence 억제 예외가 아니며, sessionKey 자체는 상태 귀속용 env로만 전달한다.
         const _lifecycle = name === 'leerness_handoff' || name === 'leerness_session_close';
-        const _mcpEnv = _sk ? { LEERNESS_SESSION_ID: _sk } : null;
-        if (_mcpEnv && _lifecycle) _mcpEnv.LEERNESS_MCP_ADDRESS_EXPLICIT = '1';
+        const _mcpEnv = {};
+        if (_sk) _mcpEnv.LEERNESS_SESSION_ID = _sk;
+        if (_sk && _lifecycle) _mcpEnv.LEERNESS_MCP_ADDRESS_EXPLICIT = '1';
+        if (_mcpReadOnly) _mcpEnv.LEERNESS_NO_AUTO_WORKSPACE_MIGRATION = '1';
         const r = callLeerness(cliArgs, _mcpEnv);
         // 1.9.61: cursor 기반 페이지네이션 — 긴 출력은 cursor offset로 다음 청크
         const fullText = r.stdout || r.stderr || '(no output)';
@@ -30620,7 +30901,7 @@ async function main() {
     //   (scan secrets 처럼 '파일 경로' 가 정상 입력인 명령도 있어, 디렉토리 강제는 그 명령들엔 맞지 않는다.)
     const _strict = new Set(['pulse', 'round-history', 'milestones', 'session-resume',
       'tech', 'library', 'retro', 'insights', 'reuse-map', 'py-check', 'pre-wake-audit']);
-    const _strictPair = { memory: 'status', consistency: 'check', env: 'check', idempotency: 'audit', 'api-skill': 'list' };
+    const _strictPair = { memory: 'status', consistency: 'check', env: 'check', idempotency: 'audit', 'api-skill': 'list', release: 'cadence' };
     const _isStrict = _strict.has(cmd) || (_strictPair[cmd] && args[1] === _strictPair[cmd]);
     if (_isStrict) {
       // 사용자가 '경로를 명시했을 때만' 검사한다 — 미지정(cwd)은 항상 존재하므로 검사할 것이 없다.
@@ -30634,7 +30915,9 @@ async function main() {
       //   (좁히다가 false-BLOCK 을 false-PASS 로 바꾸면 1.36.101 이 잡던 바로 그 증상이 되돌아온다).
       const _SUBS = { library: new Set(['page']) };
       const _looksPath = (a) => /^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(a);
-      let _cands = [args[1], args[2]];
+      // Paired commands own args[1] as their subcommand. Keep args[2] as a
+      // positional path even when its literal text happens to equal that verb.
+      let _cands = (_strictPair[cmd] && args[1] === _strictPair[cmd]) ? [args[2]] : [args[1], args[2]];
       if (_SUBS[cmd] && args[1] && !args[1].startsWith('-')) {
         if (_SUBS[cmd].has(args[1])) _cands = [null, args[2]];                      // 하위명령 — 경로 아님
         // codex 검수 #4 는 "존재하는 디렉토리면 맨이름도 경로로 받아 달라" 였다 — 받지 않는다.
@@ -30649,13 +30932,13 @@ async function main() {
           return;
         }
       }
-      const _explicit = arg('--path', null) || _cands.find(a => a && !a.startsWith('-') && a !== _strictPair[cmd]);
+      const _explicit = arg('--path', null) || _cands.find(a => a && !a.startsWith('-'));
       if (_explicit) {
         const _abs = absRoot(_explicit);
         if (!exists(_abs) || !fs.statSync(_abs).isDirectory()) {
           // 로케일을 붙인다 — en 프로젝트에서 이 가드만 한국어를 내면 그 자체가 i18n 누수다.
           const _en = _uiLang(_abs) === 'en' || _uiLang(process.cwd()) === 'en';
-          failJson(has('--json'), 'path_not_found', _en ? `path not found or not a directory: ${_abs}` : `경로 없음 또는 디렉토리 아님: ${_abs}`);
+          failJson(has('--json'), 'path_not_found', _lineSafe(_en ? `path not found or not a directory: ${_abs}` : `경로 없음 또는 디렉토리 아님: ${_abs}`));
           return;
         }
       }
@@ -30685,9 +30968,9 @@ async function main() {
       const _abs = absRoot(_p);
       if (!exists(_abs)) {
         const _en = _uiLang(process.cwd()) === 'en';
-        failJson(has('--json'), 'path_not_found', _en
+        failJson(has('--json'), 'path_not_found', _lineSafe(_en
           ? `path not found: ${_abs} — no directory was created`
-          : `경로 없음: ${_abs} — 디렉토리를 새로 만들지 않았습니다`);
+          : `경로 없음: ${_abs} — 디렉토리를 새로 만들지 않았습니다`));
         return;
       }
       // 1.36.148 (재검수 P2): 존재성만 봐서 **일반 파일**이 프로젝트 root 로 통과했고,
@@ -30696,9 +30979,9 @@ async function main() {
       try {
         if (!fs.statSync(_abs).isDirectory()) {
           const _en2 = _uiLang(process.cwd()) === 'en';
-          failJson(has('--json'), 'path_not_a_directory', _en2
+          failJson(has('--json'), 'path_not_a_directory', _lineSafe(_en2
             ? `--path is not a directory: ${_abs}`
-            : `--path 가 디렉토리가 아닙니다: ${_abs}`);
+            : `--path 가 디렉토리가 아닙니다: ${_abs}`));
           return;
         }
       } catch { /* stat 실패는 위 존재 검사에서 이미 걸러졌다 */ }
@@ -30711,7 +30994,7 @@ async function main() {
   // 1.36.104: 'mcp' 를 제외한다. MCP 서버는 프로젝트 명령이 아니라 상주 프로세스라, 서버의 cwd 가 우연히
   //   leerness 프로젝트면 거기에 `mcp: N` 이 쌓였다 — 사용자가 그 프로젝트에서 쓴 적 없는 '명령' 이 통계에 뜬다
   //   (실측: 대상 프로젝트는 "사용 기록 없음", 무관한 cwd 는 "총 3회 호출"). 도구별 귀속은 _bumpMcpUsage 가 이미 한다.
-  if (process.env.LEERNESS_INTERNAL !== '1' && cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== 'mcp' && cmd !== '--version' && cmd !== '--help') {
+  if (process.env.LEERNESS_INTERNAL !== '1' && !_mustRemainReadOnly(args, cmd) && cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== 'mcp' && cmd !== '--version' && cmd !== '--help') {
     try {
       // 1.9.352 (UR-0069 외부리뷰): usage 루트 — --path 우선, 없으면 args[1] 이 .leerness 보유 디렉토리일 때만 path(positional 보존), 아니면 cwd. (이전: args[1] 무조건 path 가정 → subcommand[decision add 등] root=cwd/add → .leerness 못 찾아 미집계)
       const _pathArg = arg('--path', null);
@@ -31360,7 +31643,11 @@ async function main() {
     const _pvToks = args.slice(1);
     // 1.36.80 (UR-0067): 라이브 미리보기 — serve(로컬 서버) / mode(self|project) 는 별도 모듈로 위임
     const _pvRoot = arg('--path', process.cwd());
-    if (_pvToks[0] === 'serve') return _pvsrv.previewServeCmd(_pvRoot, _pvToks[1], { has, arg, previews: _clar._loadPreviews(_pvRoot) });
+    if (_pvToks[0] === 'serve') {
+      const _pvChecked = _clar._loadPreviewsChecked(_pvRoot);
+      if (_clar._failInvalidPreviewStore(_pvRoot, _pvChecked, has('--json'))) return;
+      return _pvsrv.previewServeCmd(_pvRoot, _pvToks[1], { has, arg, previews: _pvChecked.list });
+    }
     if (_pvToks[0] === 'mode') return _pvsrv.previewModeCmd(_pvRoot, _pvToks[1], { has, arg });
     return _clar.previewCmd(_pvRoot, _pvToks[0], _pvToks.slice(1), { has, arg, _withLock, _onResolved: (id) => _pvsrv.cleanupServeDir(_pvRoot, id) });   // 1.36.54 (#2): 변경은 락 직렬화 · 1.36.80: 승인/수정 시 임시 워크스페이스 정리
   }
@@ -31543,7 +31830,7 @@ async function main() {
   if (cmd === 'release' && args[1] === 'cleanup')   return releaseCleanupCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()));
   // 1.9.275 (UR-0026): leerness release channel — 안정/실험 채널 정책 (npm dist-tag)
   if (cmd === 'release' && args[1] === 'channel')   return releaseChannelCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()));
-  if (cmd === 'release' && args[1] === 'cadence')   return releaseCadenceCmd((args[2] && !args[2].startsWith('-')) ? args[2] : arg('--path', process.cwd()));  // 1.9.374 (UR-0074): 릴리스 빈도 진단
+  if (cmd === 'release' && args[1] === 'cadence')   return releaseCadenceCmd(_resolveRoot(args[2]));  // 1.9.374/T-0095: --path > positional > cwd 단일 해석
   // 1.9.141: feature causality graph
   // 1.36.2 (clean-room, UR-0184): add/show/link/impact 도 trailing positional path 인식 — list(1.9.412)만 지원하던 것을 일관 확대.
   //   기존엔 add 가 모든 non-flag positional 을 NAME 으로 join → 경로가 이름에 흡수 + cwd 에 stray .leerness scaffold(조용한 오독).
@@ -31618,10 +31905,34 @@ async function main() {
     const root = absRoot(arg('--path', args[3] && !args[3].startsWith('-') ? args[3] : process.cwd()));
     return memoryArchiveListCmd(root, { json: has('--json') });
   }
+  if (cmd === 'memory' && args[1] === 'archive') {
+    const child = args[2] || null;
+    const _memLang = _uiLang(arg('--path', process.cwd()));
+    if (!child) {
+      failJson(has('--json'), 'subcommand_required', _tx(_memLang,
+        'memory archive 하위명령 필요 — 사용법: leerness memory archive list',
+        'memory archive subcommand required — usage: leerness memory archive list'));
+    } else {
+      const safeChild = _lineSafe(child);
+      failJson(has('--json'), 'unknown_subcommand', _tx(_memLang,
+        `알 수 없는 memory archive 하위명령: ${safeChild} — 가능: list`,
+        `Unknown memory archive subcommand: ${safeChild} — valid: list`));
+    }
+    return process.exit(process.exitCode || 1);
+  }
   // 1.9.128: memory restore — archive 블록을 active 파일로 복귀 (DELETE→RESTORE cycle)
   if (cmd === 'memory' && args[1] === 'restore') {
     const root = absRoot(arg('--path', process.cwd()));
     return memoryRestoreCmd(root, args[2], args[3]);
+  }
+  if (cmd === 'memory' && args[1]) {
+    const sub = args[1];
+    const safeSub = _lineSafe(sub);
+    const _memLang = _uiLang(arg('--path', process.cwd()));
+    failJson(has('--json'), 'unknown_subcommand', _tx(_memLang,
+      `알 수 없는 memory 하위명령: ${safeSub} — leerness memory search <query> | status | archive list | restore <surface> <target>`,
+      `Unknown memory subcommand: ${safeSub} — leerness memory search <query> | status | archive list | restore <surface> <target>`));
+    return process.exit(process.exitCode || 1);
   }
   // 1.9.112: lesson save — lessons.md에 새 lesson 추가
   // 1.9.117: lesson list — lessons.md 조회 + --tag 필터 + --json
@@ -31702,6 +32013,19 @@ if (require.main === module) {
           `이 명령은 --dry-run 을 구현하지 않았습니다 — ${err.file} 을(를) 쓰려다 멈췄습니다. 변경된 것은 없습니다(--dry-run 을 빼고 실행하세요).`);
         process.exit(1);
       }
+      if (err && /^E_WORKSPACE_DIR_[A-Z_]+$/.test(String(err.code || ''))) {
+        // Resolver policy failures are part of the public read/status result.
+        // Do not downgrade split-brain/invalid overrides to a generic error or
+        // to harnessVersionState:"unreadable".
+        failJson(process.argv.includes('--json'), String(err.code).slice(2).toLowerCase(),
+          _lineSafe(err && err.message ? err.message : String(err)));
+        process.exit(1);
+      }
+      if (err && err.code === 'E_GIT_HISTORY_UNAVAILABLE') {
+        failJson(process.argv.includes('--json'), 'git_history_unavailable',
+          _lineSafe(err && err.message ? err.message : 'Git history could not be measured'));
+        process.exit(1);
+      }
       fail(err && err.message ? err.message : String(err));
       // 1.36.88: 완료 게이트는 upsertProgress 에서 던진다 — taskUpdate/taskSync 외의 경로로 올라와도
       //   스택 트레이스 대신 탈출구를 보여준다(막힌 사용자가 빠져나갈 방법을 알아야 한다).
@@ -31720,6 +32044,7 @@ if (require.main === module) {
 //   _isSecretKey (시크릿 차단, 보안), compareVer (버전 비교, stale-check 정확성), parseHarnessVersion (버전 파싱).
 module.exports = {
   VERSION,
+  _cliMutationClass, _mustRemainReadOnly,
   _npmGlobalBin, _dirInPath, _leernessResolvable, _pathDiagnose, _registerPath,
   _winPathPsScript, _unixPathBlock, pathSetupCmd,
   _isSecretKey, compareVer, parseHarnessVersion,
@@ -31776,5 +32101,6 @@ module.exports = {
   _capLensDomains, _scanLensSignals,
   _handoffNudgeState, _getLastHandoffGap, _recordLastHandoff, _recordHandoffFreshness,
   _releaseFileSnapshot, _runReleaseTransaction,
-  _detectOptimism, _scanCodeForPatterns
+  _detectOptimism, _scanCodeForPatterns,
+  _parseRoundTagOutput, _parseRecentChangeOutput, _computeRoundHistory, _computeMilestones, _computeRecentChanges, _gitHistoryFailureFromResult
 };

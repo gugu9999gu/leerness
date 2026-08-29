@@ -623,5 +623,32 @@
       ]
     },
     "previousGuardGap": "기존 감사가 소스의 플래그 이름과 약한 픽스처를 확인했지만, 각 옵션의 결과·쓰기·네트워크 차이를 하나의 실행 매트릭스로 검증하지 않았다. 기준선은 동일 제품 코드와 probe를 상위 워크스페이스에서 2회 재현한 기록을 이 저장소에 이관했다."
+  },
+  {
+    "id": "T-0095",
+    "repro": "node scripts/false-claim-probe.js",
+    "expectBad": "false-claim probe failed",
+    "baseline": {
+      "at": "2026-08-28T09:29:57.996Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 5705
+    },
+    "rootCause": "읽기·상태 표면이 측정 출처와 실패 상태를 보존하지 않고 성공형 기본값으로 축약했으며, preview 승인 스키마 검증과 불명 상태가 단일·다중 handoff/MCP/session-close/dashboard에 일관되게 전파되지 않았다.",
+    "siblingScope": {
+      "checked": [
+        "round-history/release cadence/version provenance",
+        "status legacy/canonical workspace provenance",
+        "health/handoff/session-close Git aggregate provenance",
+        "preview list/show/serve/mutation schema and realpath guards",
+        "single/MCP/include/all-apps handoff approval output",
+        "dashboard JSON/HTML approval output",
+        "observation-only telemetry and migration",
+        "Git test fixture persistent config isolation"
+      ]
+    },
+    "previousGuardGap": "기존 검사는 개별 성공·오류 경로와 단일 프로젝트 일부 출력만 확인해 unavailable/null 출처, 손상 preview의 승인 불명 상태, 다중 프로젝트 집계와 프로젝트별 토큰, persistent Git config에 의한 외부 hook 실행을 하나의 실행 계약으로 묶지 못했다."
   }
 ]

@@ -18,7 +18,7 @@ doNotStore:
 Updated: 2026-08-28
 
 ## Now
-- 대기 중 <!-- leerness:auto -->
+- 명령 표면 감사 잔여 — false-claim 17건 중 핵심: update --check 가 레지스트리 조회 실패(오프라인)를 '최신입니다' 로 단정(P1) · round-history 가 leerness 도구 버전을 프로젝트 '현재 버전' 으로 표기 · plan init <path> 가 인자를 무시하고 cwd 에 71파일 워크스페이스 설치(P1) · memory bogus 가 'memory 를 모른다' 고 거짓 안내 · selftest/self check/preview show(손상 스토어) 오보고 <!-- leerness:auto -->
 - T-0152에서 release auto-resume plan·기존 plan resume·context·pre-wake audit가 동일한 canonical next-action 정규화를 사용하도록 수정
 - 구현 커밋 `5bdf406f871849d6df76a3bc684f36bf0260f033`; GitHub Release v1.36.170, npm latest 1.36.170, leerness.com production 게시 및 공개 응답 검증 완료
 - GitHub Actions run 33060937403: fast/runtime 작업 성공, 전체 OS·Node E2E 매트릭스 진행 중

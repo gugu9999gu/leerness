@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const cp = require('child_process');
 const { spawnNpmSync } = require('../lib/npm-process');
+const { gitSpawn } = require('../lib/git');
 const { withRedirectWarnings } = require('./runtime-warning-gate');
 
 // 1.9.12: e2e 안정성을 위해 자식 프로세스의 npm 호출 차단 (hang 방지)
@@ -25,6 +26,17 @@ process.env.LANGUAGE = 'ko';
 process.env.LEERNESS_NO_AUTO_ROADMAP = '1';
 const CLI = path.resolve(__dirname, '..', 'bin', 'leerness.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-e2e-'));
+// Product Git calls intentionally honor persistent global/system configuration,
+// because a user's real commit sees the same hooksPath. Test fixtures must not:
+// an inherited hooksPath can execute an unrelated repository's hook while this
+// suite creates commits. Point both persistent config layers at empty temp files.
+for (const key of Object.keys(process.env)) {
+  if (key.toUpperCase() === 'GIT_CONFIG_GLOBAL' || key.toUpperCase() === 'GIT_CONFIG_SYSTEM') delete process.env[key];
+}
+process.env.GIT_CONFIG_GLOBAL = path.join(tmp, 'fixture-global.gitconfig');
+process.env.GIT_CONFIG_SYSTEM = path.join(tmp, 'fixture-system.gitconfig');
+fs.writeFileSync(process.env.GIT_CONFIG_GLOBAL, '', 'utf8');
+fs.writeFileSync(process.env.GIT_CONFIG_SYSTEM, '', 'utf8');
 let failed = 0; let total = 0;
 const runtimeDep0190 = [];
 const runtimeWarningFile = path.join(tmp, 'node-runtime-warnings.log');
@@ -2487,8 +2499,8 @@ total++;
 {
   // tmp는 git init이 없음 → detectGitRemote는 null → publish 호출 시 'Git remote: 없음' 출력
   // 시뮬: tmp에 git init + remote add
-  cp.spawnSync('git', ['init'], { cwd: tmp, encoding: 'utf8', shell: false });
-  cp.spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/test/repo.git'], { cwd: tmp, encoding: 'utf8', shell: false });
+  gitSpawn(['init'], { cwd: tmp, encoding: 'utf8' });
+  gitSpawn(['remote', 'add', 'origin', 'https://github.com/test/repo.git'], { cwd: tmp, encoding: 'utf8' });
   // package.json도 필요
   if (!fs.existsSync(path.join(tmp, 'package.json'))) {
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'e2e-test', version: '0.1.0' }));
@@ -3514,7 +3526,7 @@ total++;
   let ok = false;
   try {
     const vDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-vc-'));
-    const git = (...a) => cp.spawnSync('git', ['-C', vDir, ...a], { encoding: 'utf8', timeout: 15000 });
+    const git = (...a) => gitSpawn(a, { cwd: vDir, encoding: 'utf8', timeout: 15000 });
     const gi = git('init');
     if (gi.status !== 0) throw new Error('git 없음');  // git 미설치 환경 → skip(아래 catch 로 ok=false 방지 위해 통과 처리)
     git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
@@ -5563,10 +5575,13 @@ total++;
   try {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-cad-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    // `git_history_unavailable` and a measured repository with zero tags are
+    // different public states. Make this fixture the latter explicitly.
+    const gi = gitSpawn(['init', '-q'], { cwd: d, encoding: 'utf8', timeout: 20000 });
     const r = cp.spawnSync(process.execPath, [CLI, 'release', 'cadence', d, '--json'], { encoding: 'utf8', timeout: 20000 });
     const j = JSON.parse(r.stdout);
     fs.rmSync(d, { recursive: true, force: true });
-    ok = ['very-high', 'high', 'moderate', 'healthy'].includes(j.level) && typeof j.releasesPerDay === 'number' && typeof j.recommendation === 'string' && j.recommendation.length > 0;
+    ok = gi.status === 0 && r.status === 0 && j.level === 'insufficient-data' && j.dataSufficient === false && typeof j.releasesPerDay === 'number' && typeof j.recommendation === 'string' && j.recommendation.length > 0;
   } catch {}
   console.log(ok ? '✓ B(1.9.374) UR-0074: release cadence 진단 (--json level/recommendation/releasesPerDay)' : '✗ release cadence 실패');
   if (!ok) failed++;
@@ -5648,10 +5663,11 @@ total++;
     // pulse CLI 가 한 줄 출력 유지
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-pulse-'));
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'ko'], { encoding: 'utf8', timeout: 30000 });
+    const gi = gitSpawn(['init', '-q'], { cwd: d, encoding: 'utf8', timeout: 20000 });
     const r = cp.spawnSync(process.execPath, [CLI, 'pulse', d], { encoding: 'utf8', timeout: 15000 });
     const cliOk = /📍 v[\d.]+ · 🔄 R\d+ · 🔌 MCP \d+ · 🧠 T\d+\/D\d+\/R\d+\/P\d+\/L\d+/.test(r.stdout || '');
     fs.rmSync(d, { recursive: true, force: true });
-    ok = msOk && lnOk && cliOk;
+    ok = msOk && lnOk && gi.status === 0 && r.status === 0 && cliOk;
   } catch {}
   console.log(ok ? '✓ B(1.9.379) UR-0025 심화: pulse 렌더 코어 분리 (_memorySurface/_renderPulseLine + CLI 출력 유지)' : '✗ pulse 렌더 코어 실패');
   if (!ok) failed++;
@@ -8228,6 +8244,11 @@ total++;
     // X1: HTML 이스케이프 — task 제목이 그대로 실행되면 안 된다(사람이 여는 화면이다).
     //   판정은 **원시 태그 존재**로 한다 — `onerror=alert(1)` 문자열은 이스케이프된 텍스트에도 남아 지표가 못 된다(실측).
     const html = require(path.join(path.dirname(CLI), '..', 'lib', 'dashboard.js')).renderHtml(snap);
+    // 1.36.175: observation-only 라우팅 도입 뒤에도 "모든 명령이 usage를 쓴다"고 고지하면
+    // 실제 무기록 계약과 모순된다. 읽기 전용 예외를 정확히 말하고 옛 문구는 남기지 않는다.
+    S3 = S3
+      && /읽기 전용 명령은 사용량 카운터도 갱신하지 않/.test(html)
+      && !/모든 명령에서 로컬 사용량 카운터/.test(html);
     X1 = !/<script>alert\(1\)<\/script>/.test(html) && !/<img\s/i.test(html) && /&lt;script&gt;/.test(html);
     // B1~B3: **승인 시 기록한 경계** — 넘으면 실패.
     //   codex 29차 #4: 종전엔 `.leerness` 최상위만 봐서 `.leerness/dashboard/server.js` 가 통과했고,
@@ -8247,9 +8268,7 @@ total++;
     try { fs.rmSync(gp, { force: true }); } catch {}
     const gr = R(['graph', '--html', '--path', d]);
     B3 = gr.s === 0 && fs.existsSync(gp) && fs.statSync(gp).size > 1000;                  // 정적 단일파일 뷰 존속(실제 재생성)
-    // B4: **읽기 전용의 정확한 범위** — 하네스 상태 파일은 대시보드 실행으로 바뀌지 않는다.
-    //   (CLI 는 모든 명령에서 .leerness/cache/usage-stats.json 을 갱신한다 — 그건 제외하고 단언해야
-    //    "아무것도 안 쓴다"는 과장 대신 실제로 참인 불변식을 지킨다. 화면 문구도 그렇게 적었다.)
+    // B4: **읽기 전용의 정확한 범위** — 대시보드는 하네스 상태뿐 아니라 usage 카운터도 바꾸지 않는다.
     const stateSig = () => fs.readdirSync(path.join(d, '.leerness'), { withFileTypes: true })
       .filter(e => e.isFile()).map(e => { const p = path.join(d, '.leerness', e.name); const st = fs.statSync(p); return `${e.name}:${st.size}:${Math.round(st.mtimeMs)}`; }).sort().join('|');
     const sigBefore = stateSig();
@@ -10140,24 +10159,31 @@ total++;
       fs.writeFileSync(path.join(x, 'package.json'), '{"name":"x","version":"0.1.0"}');
       cp.spawnSync(process.execPath, [CLI, 'init', x, '--yes'], { cwd: x, encoding: 'utf8', timeout: 120000 });
     }
-    const mcp = (name) => cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], {
+    const mcp = (name, args = { path: tgt }) => cp.spawnSync(process.execPath, [CLI, 'mcp', 'serve'], {
       cwd: cwdP, encoding: 'utf8', timeout: 120000, maxBuffer: 32 * 1024 * 1024,
       input: [
         { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'e', version: '1' } } },
         { jsonrpc: '2.0', method: 'notifications/initialized' },
-        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: { path: tgt } } },
+        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: args } },
       ].map(r => JSON.stringify(r)).join('\n') + '\n'
     });
+    // Observation-only MCP tools intentionally write no usage telemetry.
     mcp('leerness_about'); mcp('leerness_pulse');
     const U = (x) => ((cp.spawnSync(process.execPath, [CLI, 'usage', '--path', x], { cwd: cwdP, encoding: 'utf8', timeout: 60000 }).stdout) || '');
+    const readOnlyUsage = U(tgt) + U(cwdP);
+    dbg.readOnlyClean = !/leerness_about|leerness_pulse/.test(readOnlyUsage);
+    // A real safe-write call must still be attributed to its explicit target,
+    // never to the MCP server's incidental cwd.
+    const writeCall = mcp('leerness_task_add', { path: tgt, text: 'MCP usage attribution probe' });
     const uT = U(tgt), uC = U(cwdP);
-    dbg.showsMcp = /leerness_about/.test(uT) && /leerness_pulse/.test(uT) && !/\(사용 기록 없음\)/.test(uT);
+    dbg.writeCallExit = writeCall.status;
+    dbg.showsMcp = /leerness_task_add/.test(uT) && !/\(사용 기록 없음\)/.test(uT);
     dbg.cwdClean = !/\|\s*mcp\s*\|/.test(uC);
     // 대조군 — 평범한 CLI 경로는 여전히 명령 표에 남는다
     cp.spawnSync(process.execPath, [CLI, 'audit', '--path', tgt], { cwd: cwdP, encoding: 'utf8', timeout: 120000 });
     const uT2 = U(tgt);
-    dbg.cliStill = /\|\s*audit\s*\|/.test(uT2) && /leerness_about/.test(uT2);
-    ok = dbg.showsMcp && dbg.cwdClean && dbg.cliStill;
+    dbg.cliStill = /\|\s*audit\s*\|/.test(uT2) && /leerness_task_add/.test(uT2);
+    ok = dbg.readOnlyClean && dbg.writeCallExit === 0 && dbg.showsMcp && dbg.cwdClean && dbg.cliStill;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 160); } finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
   console.log(ok ? '✓ D(1.36.104) MCP 사용량이 실제 대상 프로젝트에 보고됨 + 서버 cwd 무오염 + CLI 집계 무회귀'
     : '✗ 1.36.104 usage 귀속 실패 ' + JSON.stringify(dbg));
@@ -10943,6 +10969,8 @@ total++;
     fs.mkdirSync(d, { recursive: true });
     fs.writeFileSync(path.join(d, 'package.json'), '{"name":"proj","version":"0.1.0"}');
     cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes', '--language', 'en'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+    const gitInit = gitSpawn(['init', '-q'], { cwd: d, encoding: 'utf8', timeout: 20000, env: ENV });
+    dbg.gitInit = gitInit.status === 0;
     const R = (a) => cp.spawnSync(process.execPath, [CLI, ...a, '--path', d], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
     // 상태를 조금 만든다 — 빈 프로젝트는 출력이 짧아 누출을 과소평가한다. 입력은 전부 영어.
     R(['task', 'add', 'Implement the parser']);
@@ -11000,7 +11028,7 @@ total++;
       && Object.values(cj.categories).every(list => list.every(e => typeof e.cmd === 'string' && typeof e.desc === 'string'
         && e.descEn === undefined && e.cmdEn === undefined))     // 내부 번역 키가 payload 로 새면 70% 부풀었다(검수 P1 실측)
       && cj.lang === 'en';                                        // 로케일 의존을 **명시**한다 — 암묵적으로 흔들리지 않는다
-    ok = dbg.probeAlive && dbg.coverage && dbg.withinRatchet && dbg.commandsClean && dbg.koIntact && dbg.jsonContract;
+    ok = dbg.gitInit && dbg.probeAlive && dbg.coverage && dbg.withinRatchet && dbg.commandsClean && dbg.koIntact && dbg.jsonContract;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
   console.log(ok ? `✓ O(1.36.111/T-0092) 영어 누출 ${dbg.leaky}줄 ≤ 래칫 ${dbg.baseline} · commands 표면 0 · 한국어 출력 불변 · --json 계약 유지 · 계측 살아있음`
     : '✗ 1.36.111 i18n 래칫 위반 ' + JSON.stringify(dbg));
@@ -13069,14 +13097,14 @@ total++;
     // ⑦ git 유출 없음 — 세션 파일과 기본 handoff의 동적 projection은 보이지 않고,
     //    **의도적으로 만든 다른 .leerness 파일은 보인다**(git 이 실제로 관측 중임을 증명).
     const dG = mkS('git');
-    const gi = cp.spawnSync('git', ['init', '-q'], { cwd: dG, encoding: 'utf8', timeout: 60000 });
+    const gi = gitSpawn(['init', '-q'], { cwd: dG, encoding: 'utf8', timeout: 60000 });
     if (gi.status !== 0) bad.push('⑦git init 실패 — 이 검사는 스킵이 아니라 실패다(측정 붕괴를 통과로 세지 않는다)');
     else {
       RS(dG, ['handoff', dG], { CLAUDE_CODE_SESSION_ID: KEY('g') }); cliCases++;
       fs.writeFileSync(path.join(dG, '.leerness', 'git-visible-control.txt'), 'control\n');
       //   ⚠ `--porcelain` 만 쓰면 untracked 디렉터리가 `?? .leerness/` 한 줄로 **접혀서** 양쪽 판정이 모두
       //     공허해진다(내 대조군이 실제로 그걸 잡았다). `-uall` 로 파일 단위 열거를 강제한다.
-      const st = String(cp.spawnSync('git', ['status', '--porcelain', '-uall'], { cwd: dG, encoding: 'utf8', timeout: 60000 }).stdout || '');
+      const st = String(gitSpawn(['status', '--porcelain', '-uall'], { cwd: dG, encoding: 'utf8', timeout: 60000 }).stdout || '');
       if (/cache[\\/]sessions/.test(st)) bad.push('⑦세션 파일이 git 에 노출됨');
       if (/environment\.json|last-handoff\.json|tech-profile\.json/.test(st)) bad.push('⑦기본 handoff 동적 projection이 git 에 노출됨');
       if (!/git-visible-control\.txt/.test(st)) bad.push('⑦대조군 실패 — git 이 .leerness 를 아예 안 보고 있음(위 판정이 공허)');
@@ -13628,7 +13656,7 @@ total++;
     'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG']) delete envP[k];
   const RP = (d, a, extra) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 600000, env: Object.assign({}, envP, extra || {}), maxBuffer: 32 * 1024 * 1024 });
-  const G = (d, a) => cp.spawnSync('git', ['--no-optional-locks', '-C', d, ...a], { encoding: 'utf8', timeout: 60000 });
+  const G = (d, a) => gitSpawn(a, { cwd: d, encoding: 'utf8', timeout: 60000 });
   const mkRepo = (name) => {
     const d = path.join(sb, name); fs.mkdirSync(d, { recursive: true });
     G(d, ['init', '-q', '.']); G(d, ['config', 'user.email', 't@t']); G(d, ['config', 'user.name', 't']);
@@ -13853,7 +13881,7 @@ total++;
   envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gitconfig-global');
   envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gitconfig-system');
   try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
-  const G = (d, a) => cp.spawnSync('git', ['--no-optional-locks', '-C', d, ...a], { encoding: 'utf8', timeout: 60000, env: envP });
+  const G = (d, a) => gitSpawn(a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
   const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
   //   git 자신이 말하는 훅 경로(core.hooksPath 반영) — 하드코딩하면 이 클래스를 못 잡는다.
   const _gitHookOf = (d) => {
@@ -14049,7 +14077,7 @@ total++;
       fs.writeFileSync(path.join(b, 'package.json'), '{"name":"p","version":"0.1.0"}');
       RP(b, ['init', b, '--yes', '--minimal']);
       try { fs.rmSync(path.join(b, '.git'), { recursive: true, force: true }); } catch {}
-      cp.spawnSync('git', ['--no-optional-locks', 'init', '-q', '--bare', path.join(b, '.git')], { encoding: 'utf8' });
+      gitSpawn(['init', '-q', '--bare', path.join(b, '.git')], { encoding: 'utf8' });
       const bi = J(RP(b, ['enforce', 'install', '--path', b, '--json']));
       if (bi && bi.ok === true) bad.push('⑭bare 저장소에 "설치됨" 이라 답함(강제될 수 없는 곳이다)');
       //    (c) **실패한 설치는 흔적을 남기지 않는다.** 실제로 실패하는 경우로 잰다(bare 저장소).
@@ -14082,8 +14110,8 @@ total++;
       const lhp = handoffRecord(d);
       const old = new Date(Date.now() - 200 * 3600000); try { fs.utimesSync(lhp, old, old); } catch {}
       fs.writeFileSync(path.join(d, 'p1.txt'), '1'); G(d, ['add', '-A']);
-      const viaEnv = cp.spawnSync('git', ['--no-optional-locks', '-C', d, 'commit', '-m', 'env'],
-        { encoding: 'utf8', timeout: 60000, env: Object.assign({}, envP, { LEERNESS_ENFORCE_PROBE: '1' }) });
+      const viaEnv = gitSpawn(['commit', '-m', 'env'],
+        { cwd: d, encoding: 'utf8', timeout: 60000, env: Object.assign({}, envP, { LEERNESS_ENFORCE_PROBE: '1' }) });
       if (viaEnv.status === 0) bad.push('⑮환경변수로 강제가 우회됨');
       const viaRun = G(d, ['hook', 'run', 'pre-commit', '--', '--leerness-probe']);
       if (viaRun.status === 0) bad.push('⑮`git hook run` 에 인자를 넘겨 강제가 우회됨');
@@ -14262,7 +14290,7 @@ total++;
   envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gitconfig-global');
   envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gitconfig-system');
   try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
-  const G = (d, a, env) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP });
+  const G = (d, a, env) => gitSpawn(a, { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP });
   const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 300000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
   const mkRepo = (name, nBranches) => {
@@ -14377,7 +14405,7 @@ total++;
   envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gitconfig-global');
   envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gitconfig-system');
   try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
-  const G = (d, a) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
+  const G = (d, a) => gitSpawn(a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
   const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 300000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
   const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
@@ -14684,7 +14712,7 @@ total++;
   envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gitconfig-global');
   envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gitconfig-system');
   try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
-  const G = (d, a) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
+  const G = (d, a) => gitSpawn(a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
   const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
   const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
@@ -14848,7 +14876,7 @@ total++;
     'GIT_DIR', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_NOSYSTEM']) delete envP[k];
   envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gcg'); envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gcs');
   try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
-  const G = (d, a) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
+  const G = (d, a) => gitSpawn(a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
   const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
   const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
@@ -15102,7 +15130,7 @@ total++;
     'CLAUDECODE', 'CURSOR_AGENT', 'CODEX_MANAGED_BY_NPM', 'LEERNESS_WORKSPACE_DIR', 'LEERNESS_LANG', 'GIT_DIR']) delete envP[k];
   envP.GIT_CONFIG_GLOBAL = path.join(sb, 'gcg'); envP.GIT_CONFIG_SYSTEM = path.join(sb, 'gcs');
   try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
-  const G = (d, a) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
+  const G = (d, a) => gitSpawn(a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
   const RP = (d, a) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 120000, env: envP, maxBuffer: 32 * 1024 * 1024 });
   const mk = (dir, branches) => {
@@ -15490,7 +15518,7 @@ total++;
   envP.GIT_CONFIG_GLOBAL = path.join(sb, 'global.gitconfig');
   envP.GIT_CONFIG_SYSTEM = path.join(sb, 'system.gitconfig');
   envP.GIT_CONFIG_NOSYSTEM = '1';
-  const G = (d, a, env) => cp.spawnSync('git', a, { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP });
+  const G = (d, a, env) => gitSpawn(a, { cwd: d, encoding: 'utf8', timeout: 60000, env: env || envP });
   const RP = (d, a, env) => cp.spawnSync(process.execPath, [CLI, ...a],
     { cwd: d, encoding: 'utf8', timeout: 120000, env: env || envP, maxBuffer: 32 * 1024 * 1024 });
   const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };

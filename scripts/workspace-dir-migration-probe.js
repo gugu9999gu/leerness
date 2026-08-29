@@ -232,7 +232,9 @@ try {
   const autoTarget = path.join(tempRoot, 'auto-path-target');
   write(path.join(autoTarget, '.harness', 'HARNESS_VERSION'), '1.36.161\n');
   write(path.join(autoTarget, '.harness', 'progress-tracker.md'), '# auto-target\n');
-  const autoStatus = run(['status', '--path', autoTarget, '--json']);
+  // Handoff is intentionally stateful even with --no-record: it is a normal
+  // workflow entrypoint, unlike observation-only status/about/identity routes.
+  const autoStatus = run(['handoff', '--path', autoTarget, '--json', '--no-record', '--no-drift-check', '--no-headline']);
   const autoIgnore = fs.readFileSync(path.join(autoTarget, '.gitignore'), 'utf8').split(/\r?\n/);
   passed = check(
     !fs.existsSync(path.join(autoTarget, '.harness'))

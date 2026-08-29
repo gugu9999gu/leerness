@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-28T08:12:28.855Z
+Last generated: 2026-08-28T11:42:23.442Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -144,7 +144,8 @@ Last generated: 2026-08-28T08:12:28.855Z
 - T-0155 다음작업진행 → next: 완료 — 다음 미해결 백로그를 새 라운드에서 선택
 
 ## In Progress
-- 없음
+- T-0095 명령 표면 감사 잔여 — false-claim 17건 중 핵심: update --check 가 레지스트리 조회 실패(오프라인)를 '최신입니다' 로 단정(P1) · round-history 가 leerness 도구 버전을 프로젝트 '현재 버전' 으로 표기 · plan init <path> 가 인자를 무시하고 cwd 에 71파일 워크스페이스 설치(P1) · memory bogus 가 'memory 를 모른다' 고 거짓 안내 · selftest/self check/preview show(손상 스토어) 오보고 → next: 1.36.174 false-claim 후보 5종 격리 재현
+- T-0156 다음 작업 이어서 진행하고, 남은 작업 뭐가있는지 알려줘 . → next: T-0095 재현 및 남은 작업 상태 정리
 
 ## Incomplete / Waiting / On Hold / Blocked
 - 없음
@@ -189,7 +190,7 @@ Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.174, https:
 ```
 
 ## Recommended Direction
-- 게시본 1.36.13~1.36.15 누적 신규 표면 클린룸 리뷰 (database 렌즈 8→12문항, cap 16, selftest 앵커) — codex 적대 검증 + 맹신 X
+- 명령 표면 감사 잔여 — false-claim 17건 중 핵심: update --check 가 레지스트리 조회 실패(오프라인)를 '최신입니다' 로 단정(P1) · round-history 가 leerness 도구 버전을 프로젝트 '현재 버전' 으로 표기 · plan init <path> 가 인자를 무시하고 cwd 에 71파일 워크스페이스 설치(P1) · memory bogus 가 'memory 를 모른다' 고 거짓 안내 · selftest/self check/preview show(손상 스토어) 오보고
 
 ## Next Exact Step
-- 다음 액션 작성
+- 1.36.174 false-claim 후보 5종 격리 재현
