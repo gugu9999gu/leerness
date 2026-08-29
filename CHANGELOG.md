@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.177 — 2026-08-29
+
+- T-0022 데이터 무결성: env/drift/session BOM 수정을 공용 CAS·Windows ReplaceFile 경계로 통합하고 CP949·모호 인코딩·손상 BOM·메타데이터·동시 writer/ADS·부분진행 복구를 실패-폐쇄 처리. auto-fix 전 단계 JSON/exit 정직화, 스캔 I/O 오류 및 unborn/실행불가 Git 구분, OS 매트릭스 mutation-integrity 회귀 추가.
+
 ## 1.36.176 — 2026-08-29
 
 - T-0089: agents bench가 활성화되지 않은 provider의 버전 명령까지 실행하던 환경 의존성을 제거했습니다. bench 후보를 opt-in provider로 먼저 제한하고, E2E는 레지스트리의 10개 플래그를 모두 비활성화한 뒤 PATH 선두 실행 마커가 생성되지 않는지 검증합니다. 수정 후 동일 Windows Node 26 환경 직접 프로브 3회는 394/362/342ms(최대 394ms)였으며, 기존 15초 제한은 최댓값 대비 약 38.1배 여유라 불필요한 상향을 하지 않습니다.

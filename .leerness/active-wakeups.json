@@ -120,7 +120,7 @@
       "expectedFireAt": "2026-08-27T14:31:38.476Z",
       "intervalMin": 25,
       "source": "release-sync-main",
-      "status": "pending",
+      "status": "missed",
       "fromVersion": "1.36.171",
       "registeredAt": "2026-08-27T14:06:38.480Z"
     },
@@ -128,7 +128,7 @@
       "expectedFireAt": "2026-08-27T16:52:33.187Z",
       "intervalMin": 25,
       "source": "release-sync-main",
-      "status": "pending",
+      "status": "missed",
       "fromVersion": "1.36.172",
       "registeredAt": "2026-08-27T16:27:33.194Z"
     },
@@ -160,10 +160,10 @@
       "expectedFireAt": "2026-08-29T07:53:00.261Z",
       "intervalMin": 25,
       "source": "release-sync-main",
-      "status": "pending",
+      "status": "missed",
       "fromVersion": "1.36.176",
       "registeredAt": "2026-08-29T07:28:00.267Z"
     }
   ],
-  "updatedAt": "2026-08-29T07:28:00.267Z"
+  "updatedAt": "2026-08-29T10:07:39.269Z"
 }

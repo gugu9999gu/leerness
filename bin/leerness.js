@@ -7,6 +7,7 @@ const cp = require('child_process');
 const { log, ok, warn, fail, failJson, setQuiet, today, now, absRoot, exists, read, readBuf, mkdirp, writeUtf8, append, rel, setDryRunGuard, mkdirpRaw } = require('../lib/io');  // 1.9.382/383 (UR-0025): 출력/시간/파일 프리미티브 공유 모듈 · 1.10.2 (UR-0146): setQuiet
 const { resolveNpmCliPath, spawnNpmSync } = require('../lib/npm-process');
 const { resolvePortableLaunch, spawnPortable, spawnPortableSync } = require('../lib/portable-process');
+const { scanShellScriptsEncoding, applyShellScriptUtf8Bom } = require('../lib/shell-encoding');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
@@ -48,7 +49,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.176';
+const VERSION = '1.36.177';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -3798,52 +3799,7 @@ function _terminalEncodingNotice(opts = {}) {
 // 셸 스크립트 (.ps1/.bat/.cmd/.sh) 인코딩 위험 감지
 //   위험 시그널: 한국어 (또는 비-ASCII) 문자 + BOM 없음 + Windows 환경
 function _scanShellScriptsEncoding(root) {
-  const result = { scanned: 0, atRisk: [], notes: [] };
-  function walk(dir, depth = 0) {
-    if (depth > 3) return;  // 너무 깊이 들어가지 않음
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      const fp = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (/^(node_modules|\.git|__pycache__|venv|\.venv|dist|build)$/.test(e.name)) continue;
-        walk(fp, depth + 1);
-      } else if (e.isFile() && /\.(ps1|bat|cmd|sh)$/i.test(e.name)) {
-        result.scanned++;
-        try {
-          const buf = fs.readFileSync(fp);
-          const hasBOM = buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF;
-          // 비-ASCII (≥ 0x80) 바이트 존재 여부 검사
-          let nonAscii = false;
-          for (let i = 0; i < Math.min(buf.length, 4096); i++) {
-            if (buf[i] >= 0x80) { nonAscii = true; break; }
-          }
-          if (nonAscii && !hasBOM) {
-            // 1.9.243: CJK 분류 추가
-            const cjk = _classifyCJK(buf, 4096);
-            const label = _riskLabel(cjk);
-            result.atRisk.push({
-              file: path.relative(root, fp),
-              ext: path.extname(fp),
-              hasBOM: false,
-              nonAscii: true,
-              riskType: label.type,
-              cjk,
-              risk: label.risk
-            });
-          }
-        } catch {}
-      }
-    }
-  }
-  walk(root);
-  if (result.atRisk.length > 0) {
-    result.notes.push('해결: 파일 시작에 UTF-8 BOM 추가 (EF BB BF) 또는 .ps1 첫 줄에 $OutputEncoding/[Console]::OutputEncoding 설정');
-  }
-  // 1.9.243: 분류별 통계 요약
-  const types = result.atRisk.reduce((m, r) => { m[r.riskType] = (m[r.riskType] || 0) + 1; return m; }, {});
-  result.riskTypeCounts = types;
-  return result;
+  return scanShellScriptsEncoding(root, { classifyCJK: _classifyCJK, riskLabel: _riskLabel });
 }
 
 function envCmd(root, sub) {
@@ -3863,40 +3819,21 @@ function envCmd(root, sub) {
       for (const r of result.atRisk) {
         try {
           const fullPath = path.join(root, r.file);
-          const orig = fs.readFileSync(fullPath);
-          // 1.9.409 (8번째 버그헌트, UR-0113): .sh / shebang(#!) 파일은 BOM 추가 금지.
-          //   BOM(EF BB BF)이 shebang 앞에 붙으면 커널이 '#!' 를 인식 못 해 스크립트 실행 불가 → encoding check 가 자기 도구로 .sh 를 깨뜨리던 모순 차단.
-          const isShebang = orig.length >= 2 && orig[0] === 0x23 && orig[1] === 0x21;  // '#!'
-          if (/\.sh$/i.test(r.file) || isShebang) {
-            result.applied.push({ file: r.file, action: 'skipped-shebang (BOM은 shebang을 깨뜨림 — .sh는 no-BOM UTF-8 유지)' });
-            continue;
-          }
-          // 1.35.15 (encoding 헌트, codex #2): .bat/.cmd 는 BOM 추가 금지 — cmd.exe 는 BOM 으로 코드페이지를 바꾸지 않음(첫 줄 'chcp 65001' 이 올바른 해법). BOM 은 무익하고 일부 Windows 에선 첫 명령을 깨뜨림 → 거짓 수정 대신 chcp 안내.
-          if (/\.(bat|cmd)$/i.test(r.file)) {
-            result.applied.push({ file: r.file, action: 'skipped-batch (cmd.exe: 첫 줄에 chcp 65001 추가가 정답 — BOM은 코드페이지를 안 바꿈)' });
-            continue;
-          }
-          // 1.35.15 (encoding 헌트, codex #4 DESTRUCTIVE): 본문이 유효 UTF-8 일 때만 BOM 추가. CP949/Latin-1 등 비-UTF-8 본문에 BOM 만 붙이면 'UTF-8 이라 주장하는 CP949' 손상본이 됨(transcode 없이 파괴적) → skip + 수동 transcode 안내. (mojibake 를 더 악화시키던 자기-파괴 차단, .sh 가드와 동류.)
-          const isValidUtf8 = Buffer.from(orig.toString('utf8'), 'utf8').equals(orig);
-          if (!isValidUtf8) {
-            result.applied.push({ file: r.file, action: 'skipped-nonutf8 (본문이 비-UTF-8(CP949 등) — BOM 추가는 손상. UTF-8 로 먼저 transcode 필요)' });
-            continue;
-          }
-          const bom = Buffer.from([0xEF, 0xBB, 0xBF]);
-          const fixed = Buffer.concat([bom, orig]);
-          fs.writeFileSync(fullPath, fixed);
-          result.applied.push({ file: r.file, action: 'utf8-bom-added' });
+          // 1.36.177 (T-0022): drift/session-close와 같은 최종 사전조건 및
+          // 원자적 binary write를 공유한다. 스캔 뒤 파일이 바뀌어도 쓰기 직전 재검사한다.
+          result.applied.push(applyShellScriptUtf8Bom(fullPath, r.file));
         } catch (e) {
-          result.applied.push({ file: r.file, action: 'failed', error: e.message });
+          result.applied.push({ file: r.file, action: 'failed', code: e.code || 'error', error: e.message, ...(e.backupFile ? { backupFile: e.backupFile } : {}), ...(e.recoveryArtifacts ? { recoveryArtifacts: e.recoveryArtifacts } : {}) });
         }
       }
     }
     // 1.36.20 (codex fresh-QA #7): apply 실패(read-only EPERM 등)를 exit code 에 반영 — 종전엔 action:'failed' 를 기록만 하고 exit 0.
-    if (apply && (result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1;
+    if (result.scanErrors.length > 0 || (apply && (result.applied || []).some(a => a.action === 'failed'))) process.exitCode = 1;
     if (has('--json')) { log(JSON.stringify(result, null, 2)); return; }
     log(cy(`# leerness env encoding-check (1.9.241/242, UR-0014) — 셸 스크립트 인코딩 위험 감지`));
     log('');
     log(`  스캔: ${gr(String(result.scanned))} 파일 (.ps1/.bat/.cmd/.sh)`);
+    if (result.scanErrors.length > 0) log(rd(`  ⚠ 읽기 실패 ${result.scanErrors.length}건 — 검사가 불완전함`));
     if (result.atRisk.length === 0) {
       log(gr(`  ✓ 인코딩 위험 없음`));
     } else {
@@ -3908,8 +3845,10 @@ function envCmd(root, sub) {
       log('');
       if (apply) {
         const okCnt = (result.applied || []).filter(a => a.action === 'utf8-bom-added').length;
+        const skipCnt = (result.applied || []).filter(a => a.action.startsWith('skipped-')).length;
         const failCnt = (result.applied || []).filter(a => a.action === 'failed').length;
-        log(gr(`  ✓ UTF-8 BOM 추가 ${okCnt}건${failCnt > 0 ? ` (실패 ${failCnt}건)` : ''} (1.9.242 --apply)`));
+        log(gr(`  ✓ UTF-8 BOM 추가 ${okCnt}건${skipCnt > 0 ? ` · 안전상 건너뜀 ${skipCnt}건` : ''}${failCnt > 0 ? ` · 실패 ${failCnt}건` : ''} (1.9.242 --apply)`));
+        for (const a of (result.applied || []).filter(a => a.backupFile)) log(yl(`  ↳ 원본/동시 편집 복구본 보존: ${a.backupFile}`));
       } else {
         result.notes.forEach(n => log(yl(`  💡 ${n}`)));
         log(dm(`  → 자동 수정: leerness env encoding --apply (BOM 자동 추가)`));
@@ -4345,7 +4284,7 @@ function _selfTestCases() {
       const s = read(__filename);
       const reuseOk = s.includes('project: path.basename(root), found, applied, added') && s.includes("failJson(has('--json'), 'no_reuse_map'");   // reuse: apply 먼저 → json 에 applied/added
       const releaseOk = s.includes('deleteCount: toDelete.length, deleted, deleteFailed') && s.includes('if (deleteFailed > 0) process.exitCode = 1');  // release: 삭제 먼저 → json 에 deleted
-      const encOk = s.includes("(result.applied || []).some(a => a.action === 'failed')) process.exitCode = 1");   // encoding: 실패 exit1
+      const encOk = s.includes("result.scanErrors.length > 0 || (apply && (result.applied || []).some(a => a.action === 'failed'))");   // encoding: 스캔/적용 실패 exit1
       return reuseOk && releaseOk && encOk;
     } },
     { name: '미검토표면 헌트 (1.36.28, codex): #8 impact 역의존 전이 + #10 alias 단어경계 + #3 손상스토어 클로버 차단 + #4 URL 해시 — 순수/소스 행위검사', run: () => {
@@ -5188,7 +5127,31 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0110): rule/decision/lesson add 동시쓰기 _withLock 직렬화 (UR-0043 갭 메움) (1.9.406)', run: () => { const src = read(__filename); const L = '_withLock('; const ruleLock = src.includes(L + 'rulesPath' + '(root), () =>'); const decLock = src.includes(L + 'decisionsJsonPath' + '(root), () =>'); const lesLock = src.includes(L + 'lessonsJsonPath' + '(root), () =>'); return ruleLock && decLock && lesLock; } },
     { name: '8번째 버그헌트 (UR-0111): MCP feature_link safe-write tier(권한경계) + _parseLimit NaN/음수 가드 (1.9.407)', run: () => { const m = require('../lib/pure-utils'); const pl = m._parseLimit('abc', 10) === 10 && m._parseLimit('-5', 10) === 10 && m._parseLimit('0', 10) === 10 && m._parseLimit('3', 10) === 3 && m._parseLimit('7.9', 10) === 7; const tools = require('../lib/mcp-tools'); const arr = Array.isArray(tools) ? tools : (tools.MCP_TOOLS || []); const fl = arr.find(x => x.name === 'leerness_feature_link'); const tierOk = !!fl && fl.requiredTier === 'safe-write'; return pl && tierOk; } },
     { name: '8번째 버그헌트 (UR-0112): _parseSkillMd CRLF/CR 줄바꿈 정규화 (Windows SKILL.md meta 소실 차단) (1.9.408)', run: () => { const m = require('../lib/pure-utils'); const lf = m._parseSkillMd('---\nname: s\ndescription: d\n---\nbody'); const crlf = m._parseSkillMd('---\r\nname: s\r\ndescription: d\r\n---\r\nbody'); const cr = m._parseSkillMd('---\rname: s\rdescription: d\r---\rbody'); const bom = m._parseSkillMd('﻿---\r\nname: s\r\n---\r\nbody'); return lf.meta.name === 's' && crlf.meta.name === 's' && crlf.meta.description === 'd' && cr.meta.name === 's' && bom.meta.name === 's'; } },
-    { name: '8번째 버그헌트 (UR-0113): env encoding-check --apply 가 .sh/shebang 에 BOM 미추가(shebang 보존) (1.9.409)', run: () => { const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_bom_')); try { const sh = path.join(tmp, 's.sh'); fs.writeFileSync(sh, '#!/bin/bash\n# 한글\necho hi\n'); const ps = path.join(tmp, 's.ps1'); fs.writeFileSync(ps, '# 한글\nWrite-Host hi\n'); const save = process.argv; let out = ''; const _w = process.stdout.write; try { process.argv = ['node', 'h', 'env', 'encoding-check', '--path', tmp, '--apply', '--json']; process.stdout.write = s => { out += s; return true; }; envCmd(tmp, 'encoding-check'); } catch {} finally { process.stdout.write = _w; process.argv = save; } const shBuf = fs.readFileSync(sh); const psBuf = fs.readFileSync(ps); const shNoBom = !(shBuf[0] === 0xEF && shBuf[1] === 0xBB && shBuf[2] === 0xBF) && shBuf[0] === 0x23 && shBuf[1] === 0x21; const psBom = psBuf[0] === 0xEF && psBuf[1] === 0xBB && psBuf[2] === 0xBF; return shNoBom && psBom; } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} } } },
+    { name: '8번째 버그헌트 (UR-0113): env encoding-check --apply 셸/플랫폼/모호 인코딩 안전계약 (1.9.409/T-0022)', run: () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_bom_'));
+      try {
+        const sh = path.join(tmp, 's.sh');
+        const ps = path.join(tmp, 's.ps1');
+        const ambiguous = path.join(tmp, 'ambiguous.ps1');
+        fs.writeFileSync(sh, '#!/bin/bash\n# 한글\necho hi\n');
+        fs.writeFileSync(ps, 'Write-Host "😀"\n');
+        fs.writeFileSync(ambiguous, Buffer.from([0x41, 0xC2, 0xA1, 0x42]));
+        const save = process.argv; let out = ''; const _w = process.stdout.write;
+        try {
+          process.argv = ['node', 'h', 'env', 'encoding-check', '--path', tmp, '--apply', '--json'];
+          process.stdout.write = s => { out += s; return true; };
+          envCmd(tmp, 'encoding-check');
+        } catch {} finally { process.stdout.write = _w; process.argv = save; }
+        const shBuf = fs.readFileSync(sh);
+        const psBuf = fs.readFileSync(ps);
+        const ambiguousBuf = fs.readFileSync(ambiguous);
+        const shNoBom = !shBuf.subarray(0, 3).equals(Buffer.from([0xEF, 0xBB, 0xBF])) && shBuf[0] === 0x23 && shBuf[1] === 0x21;
+        const platformOk = process.platform === 'win32'
+          ? psBuf.subarray(0, 3).equals(Buffer.from([0xEF, 0xBB, 0xBF]))
+          : psBuf.equals(Buffer.from('Write-Host "😀"\n'));
+        return shNoBom && platformOk && ambiguousBuf.equals(Buffer.from([0x41, 0xC2, 0xA1, 0x42]));
+      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+    } },
     { name: '8번째 버그헌트 (UR-0114): absRoot 비문자열(--path 값없음 boolean true) → cwd 폴백(raw TypeError 차단) (1.9.410)', run: () => { const io = require('../lib/io'); const cwd = process.cwd(); const tBool = io.absRoot(true) === cwd; const tEmpty = io.absRoot('') === cwd; const tUndef = io.absRoot(undefined) === cwd; const tSpace = io.absRoot('   ') === cwd; const tReal = io.absRoot(os.tmpdir()) === path.resolve(os.tmpdir()); return tBool && tEmpty && tUndef && tSpace && tReal; } },
     { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
     { name: '6번째 외부평가 Opus P1 (UR-0100): list-family(decision/feature/plan/runs/team list) positional path 지원 (조용한 cwd 오독 차단) (1.9.412)', run: () => { const src = read(__filename); const L = '_resolveRoot('; const decOk = src.includes("decisionListCmd(absRoot(" + L + "args[2]))"); const planOk = src.includes("planListCmd(absRoot(" + L + "args[2]))"); const featOk = src.includes("featureListCmd(absRoot(" + L + "args[2]))"); const runsOk = src.includes("runsListCmd(absRoot(" + L + "args[2]))"); const teamOk = src.includes(L + "args[1] === 'list' ? args[2] : null)"); return decOk && planOk && featOk && runsOk && teamOk; } },
@@ -5381,7 +5344,7 @@ function _selfTestCases() {
       const delegated = src.includes("require('../lib/drift')") && src.includes('_drift.driftCheckCmd(root, opts,');
       const modSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'drift.js'));
       const bodyMarker = 'auto-fix 활성 ' + '(1.9.82)';  // drift 본문 고유(split-literal 자기참조 회피)
-      const recursionWired = modSrc.includes('driftCheckCmd(root, { ...opts, _noAutoFix: true }, deps)');  // 재귀에 deps 전달 + depth 가드(1.9.432)
+      const recursionWired = /driftCheckCmd\(root,\s*\{\s*\.\.\.opts,\s*_noAutoFix:\s*true,\s*_encodingFixErrors:\s*encodingFixErrors,\s*_encodingAutoFix:\s*encodingAutoFix,\s*_autoFixSummary:\s*autoFixSummary\s*\},\s*deps\)/.test(modSrc);  // 재귀에 deps + 전체 단계 실패/요약 누적 전달 + depth 가드
       const movedToLib = modSrc.includes("require('./io')") && recursionWired && modSrc.includes(bodyMarker) && !src.includes(bodyMarker);
       let behavOk = false;
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_drift_'));
@@ -5498,7 +5461,7 @@ function _selfTestCases() {
     { name: '10th 외부평가 UR-0131 잔여: drift --auto-fix 재귀 depth 가드(_noAutoFix) — 무한재귀 방지 (1.9.432)', run: () => {
       const modSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'drift.js'));
       const guard = modSrc.includes("has('--auto-fix') && !opts._noAutoFix");
-      const recurseGuarded = (modSrc.match(/driftCheckCmd\(root, \{ \.\.\.opts, _noAutoFix: true \}, deps\)/g) || []).length === 2;
+      const recurseGuarded = (modSrc.match(/driftCheckCmd\(root,\s*\{\s*\.\.\.opts,\s*_noAutoFix:\s*true,\s*_encodingFixErrors:\s*encodingFixErrors,\s*_encodingAutoFix:\s*encodingAutoFix,\s*_autoFixSummary:\s*autoFixSummary\s*\},\s*deps\)/g) || []).length === 1;
       return guard && recurseGuarded;
     } },
     { name: '11th 외부평가 Codex/Opus P1: contract spec backtick-bullet 함수/필드 강선언 인식 (1.9.433)', run: () => {
@@ -16876,6 +16839,8 @@ function handoff(root) {
           shellScriptsScanned: encScan.scanned,
           encodingRiskCount: encScan.atRisk.length,
           encodingRiskFiles: encScan.atRisk.slice(0, 5).map(r => r.file),
+          encodingScanErrorCount: (encScan.scanErrors || []).length,
+          encodingScanErrors: (encScan.scanErrors || []).slice(0, 5),
           // 1.9.249 (UR-0018): 터미널 출력 인코딩 안전 여부 + 자동 회복 결과
           terminalEncodingOk: runtimeEnv.locale.codepage === 65001 || !runtimeEnv.locale.isKoreanWindows,
           autoChcpApplied: process.env._LEERNESS_AUTOCHCP_APPLIED || null,
@@ -17434,6 +17399,11 @@ function handoff(root) {
   //   한국어 Windows + .ps1/.bat 비-ASCII + BOM 없음 → CP949 오인식 위험
   try {
     const scan = _scanShellScriptsEncoding(root);
+    if (scan.scanErrors && scan.scanErrors.length > 0) {
+      log('');
+      log(`## ⚠ 셸 스크립트 인코딩 스캔 읽기 실패 ${scan.scanErrors.length}건 — 결과 불완전`);
+      scan.scanErrors.slice(0, 3).forEach(e => log(`  • ${e.file}: ${e.code}`));
+    }
     if (scan.atRisk && scan.atRisk.length > 0) {
       const isTty = process.stdout && process.stdout.isTTY;
       const rd5 = s => isTty ? `\x1b[31m${s}\x1b[0m` : s;

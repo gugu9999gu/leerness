@@ -650,5 +650,37 @@
       ]
     },
     "previousGuardGap": "기존 검사는 개별 성공·오류 경로와 단일 프로젝트 일부 출력만 확인해 unavailable/null 출처, 손상 preview의 승인 불명 상태, 다중 프로젝트 집계와 프로젝트별 토큰, persistent Git config에 의한 외부 hook 실행을 하나의 실행 계약으로 묶지 못했다."
+  },
+  {
+    "id": "T-0022",
+    "repro": "node scripts/mutation-integrity-probe.js",
+    "expectBad": "MUTATION_INTEGRITY_FAILED",
+    "baseline": {
+      "at": "2026-08-29T09:34:35.214Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 9001
+    },
+    "rootCause": "세 BOM 수정 경로가 각자 검증·직접쓰기를 수행해 인코딩 출처, 파일 정체성, Windows ReplaceFile 부분 진행과 후발 열린 핸들 쓰기, JSON/조기-return 단계를 일관되게 보존하지 못했다. CP949 decoder 부재와 unborn Git 상태도 실패-폐쇄로 구분하지 못했다.",
+    "siblingScope": {
+      "checked": [
+        "env encoding-check --apply",
+        "drift check --auto-fix",
+        "drift security plus encoding",
+        "session close --auto-fix-encoding human and JSON",
+        "CP949 and ambiguous UTF-8",
+        "BOM body validation",
+        "Windows ReplaceFile 1177 and sharing retry",
+        "late file and ADS handles",
+        "hardlink symlink readonly metadata",
+        "scanner IO errors",
+        "drift all-stage summary",
+        "unborn and unavailable Git",
+        "CI fast core full matrix"
+      ]
+    },
+    "previousGuardGap": "기존 회귀는 env 성공 경로와 최종 바이트만 확인해 호출자별 우회, 인코딩 판별기 부재, 메타데이터와 파일 정체성, 최종 replace 경합, 후발 핸들 쓰기, 복구 산출물 역할, 비인코딩 단계 실패를 관찰하지 않았다."
   }
 ]

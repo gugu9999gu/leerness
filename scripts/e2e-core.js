@@ -122,12 +122,23 @@ console.log('# leerness core (test:core) — flagship behavioral guarantees');
   cp.spawnSync(process.execPath, [CLI, 'env', 'encoding-check', '--apply', '--path', d], { encoding: 'utf8', timeout: 40000 });
   const after = fs.readFileSync(path.join(d, 'cp949.ps1'));
   assert('encoding --apply: CP949 .ps1 NOT mutated (no destructive BOM-on-CP949)', after.equals(cp949) && !(after[0] === 0xEF && after[1] === 0xBB && after[2] === 0xBF));
-  // 유효 UTF-8 .ps1(한글, no BOM)은 정당하게 BOM 추가되어야 함
-  fs.writeFileSync(path.join(d, 'utf8.ps1'), Buffer.from('Write-Host "안녕"\r\n', 'utf8'));
+  // UTF-8/CP949 양쪽으로 유효한 바이트는 의미가 다를 수 있어 보수적으로 skip.
+  const ambiguous = Buffer.from([0x41, 0xC2, 0xA1, 0x42]); // UTF-8 A¡B / CP949 A징B
+  fs.writeFileSync(path.join(d, 'ambiguous.ps1'), ambiguous);
+  // Emoji의 0x80 trail은 CP949에서 무효이므로 UTF-8 출처를 바이트로 증명할 수 있다.
+  const utf8Only = Buffer.from('Write-Host "😀"\r\n', 'utf8');
+  fs.writeFileSync(path.join(d, 'utf8.ps1'), utf8Only);
   cp.spawnSync(process.execPath, [CLI, 'env', 'encoding-check', '--apply', '--path', d], { encoding: 'utf8', timeout: 40000 });
   const u = fs.readFileSync(path.join(d, 'utf8.ps1'));
+  const a = fs.readFileSync(path.join(d, 'ambiguous.ps1'));
   const uValid = Buffer.from(u.toString('utf8'), 'utf8').equals(u);
-  assert('encoding --apply: valid-UTF-8 .ps1 gets BOM (still valid)', u[0] === 0xEF && u[1] === 0xBB && u[2] === 0xBF && uValid);
+  assert('encoding --apply: UTF-8/CP949 ambiguous .ps1 remains exact', a.equals(ambiguous));
+  assert('encoding --apply: unambiguous UTF-8 .ps1 follows platform contract', process.platform === 'win32'
+    ? (u[0] === 0xEF && u[1] === 0xBB && u[2] === 0xBF && uValid)
+    : u.equals(utf8Only));
+  for (const e of fs.readdirSync(d, { withFileTypes: true }).filter(e => e.isDirectory() && e.name.startsWith('.leerness-write-'))) {
+    fs.rmSync(path.join(d, e.name), { recursive: true, force: true });
+  }
   fs.rmSync(d, { recursive: true, force: true });
 }
 

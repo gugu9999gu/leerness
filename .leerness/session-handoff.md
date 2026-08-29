@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-29T09:15:50.156Z
+Last generated: 2026-08-29T10:39:15.777Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -153,7 +153,7 @@ Last generated: 2026-08-29T09:15:50.156Z
 - T-0157 다음 작업 이어서 진행 . → next: Start T-0022 data-integrity mutation hunt, then T-0091 flaky selftest and T-0092 i18n leakage.
 
 ## In Progress
-- 없음
+- T-0022 파일변경(--apply/--fix/mutate) 명령 데이터무결성 헌트: precondition 미검증 mutate·부분쓰기·인코딩 파괴 (rotate targets + auto-fix-detect-before-mutate 교훈) → next: Inventory all advertised --apply/--fix and direct mutation paths; reproduce precondition-order, partial-write, and encoding-preservation failures in isolated fixtures before editing source.
 
 ## Incomplete / Waiting / On Hold / Blocked
 - 없음
@@ -206,4 +206,4 @@ Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.176, https:
 - 파일변경(--apply/--fix/mutate) 명령 데이터무결성 헌트: precondition 미검증 mutate·부분쓰기·인코딩 파괴 (rotate targets + auto-fix-detect-before-mutate 교훈)
 
 ## Next Exact Step
-- 다음 액션 작성
+- Inventory all advertised --apply/--fix and direct mutation paths; reproduce precondition-order, partial-write, and encoding-preservation failures in isolated fixtures before editing source.

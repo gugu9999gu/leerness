@@ -127,3 +127,21 @@ doNotStore:
 - [x] GitHub Actions run 33240896988 전체 13/13 성공, 실패 0; 구현 SHA `b0be547de857776b9299d5093f09dfe3c055b13d` 확인
 - [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요
 - [x] 롤백 기준: npm exact `leerness@1.36.175` 재설치, GitHub tag `v1.36.175`, 직전 사이트 커밋 `dd0de8c`
+
+## 2026-08-30 — v1.36.177
+
+- [x] T-0022 공용 CAS/Windows ReplaceFileW 데이터 무결성 경계와 공용 encoding scan/plan/apply 구현
+- [x] 외부 Codex 리뷰 P2 3건을 직접 재현하고 수정: CP949 decoder 부재 fail-closed, read-only 비변경 skip 순서, unborn/missing Git 구분
+- [x] mutation-integrity: CP949·모호 UTF-8·손상 BOM·shebang/batch·스캔 I/O·stale plan·ADS/open handle·hard link·동시 writer·partial replacement·cleanup 실패·bounded retry 전부 통과
+- [x] `npm run test:fast` 및 전체 `npm test` 통과: lint 65 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467(6,747초)
+- [x] 멀티 세션 E2E: 동시 24쓰기 무손실, 사용자 상태 writer 41종 canonical 락, Claude↔Codex 상호 가시성, sessionKey별 evidence/run/handoff/presence 격리, 지연 경쟁 11쌍 통과
+- [x] `.harness/` → `.leerness/` fresh 설치·canonical migration·dual-live fail-closed·설치본 legacy run remap 통과
+- [x] `scan secrets`, `encoding check`, `check`, `lazy detect`, code/test/recovery/contract lens, rules 및 `gate --claims` 6/6 통과; claims 135건 신규 실패 0
+- [x] `verify-claim T-0022 --strict-claims --require-evidence`: evidence complete, claims consistent, Git 13/13, scope creep 0
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.177 동기화; `npm pack --dry-run` 75 files, shasum `d2f2dbaac4d23e157ef3b0f575ae5f320c4066ce`
+- [x] 새 런타임 의존성·lifecycle script·환경변수 없음; `.env.example` 변경 불필요
+- [ ] GitHub main/tag/release SHA 및 첨부 tarball 검증
+- [ ] npm latest/exact 1.36.177, registry integrity/shasum, fresh-prefix 설치 검증
+- [ ] leerness.com 루트·v1.36.177 changelog·Pages 원본 HTTP 200 검증
+- [ ] GitHub Actions 전체 행렬 성공 검증
+- [x] 롤백 기준: npm exact `leerness@1.36.176` 재설치, GitHub tag `v1.36.176`, 직전 사이트 커밋 `899aefd`

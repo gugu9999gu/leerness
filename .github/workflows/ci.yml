@@ -63,6 +63,13 @@ jobs:
         env:
           LEERNESS_OFFLINE: "1"
         run: node ./scripts/e2e-core.js
+      # File-mutating commands share one compare-and-set boundary. Keep this
+      # probe explicit in the full OS/Node matrix so package-script refactors
+      # cannot silently orphan the data-integrity regression suite.
+      - name: mutation-integrity
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: node ./scripts/mutation-integrity-probe.js
       - name: e2e-command-surface
         env:
           LEERNESS_OFFLINE: "1"
