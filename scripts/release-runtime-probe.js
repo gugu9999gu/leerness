@@ -439,6 +439,8 @@ try {
     '  const rows = [];',
     '  for (const target of EXTERNAL_AGENTS) {',
     '    const calls = [];',
+    '    const checked = [];',
+    "    for (const agent of EXTERNAL_AGENTS) process.env[agent.envFlag] = agent.id === target.id ? '1' : '0';",
     '    const fakeSpawn = (file, args, options) => {',
     '      calls.push({ file, args, stdin: options && options.stdio && options.stdio[0] });',
     '      const child = new EventEmitter();',
@@ -448,10 +450,10 @@ try {
     '    };',
     "    const arg = (_name, fallback) => fallback; const has = () => false;",
     "    const results = await agentsCmd(process.cwd(), 'bench', ['matrix task'], {",
-    "      has, arg, _loadEnvFile: () => {}, _checkAgent: agent => ({ status: agent.id === target.id ? 'ready' : 'disabled' }),",
+    "      has, arg, _loadEnvFile: () => {}, _checkAgent: agent => { checked.push(agent.id); return { status: agent.id === target.id ? 'ready' : 'disabled' }; },",
     '      _spawnPortable: fakeSpawn,',
     '    });',
-    '    rows.push({ id: target.id, calls, results });',
+    '    rows.push({ id: target.id, checked, calls, results });',
     '  }',
     '  process.stdout.write(JSON.stringify(rows));',
     '})().catch(error => { process.stderr.write(error.stack || error.message); process.exit(1); });',
@@ -468,6 +470,7 @@ try {
       const supported = row.id !== 'ollama';
       if (!Array.isArray(row.results) || row.results.length !== 1
           || row.results[0].id !== row.id
+          || !Array.isArray(row.checked) || row.checked.length !== 1 || row.checked[0] !== row.id
           || (supported && (row.calls.length !== 1 || row.calls[0].stdin !== 'ignore' || row.results[0].ok !== true))
           || (!supported && (row.calls.length !== 0 || !/explicit model/.test(String(row.results[0].error || ''))))) {
         failures.push(`agents bench ${row.id} 단독-ready settled 결과 오류: ${JSON.stringify(row)}`);

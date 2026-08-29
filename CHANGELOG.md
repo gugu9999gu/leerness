@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.176 — 2026-08-29
+
+- T-0089: agents bench가 활성화되지 않은 provider의 버전 명령까지 실행하던 환경 의존성을 제거했습니다. bench 후보를 opt-in provider로 먼저 제한하고, E2E는 레지스트리의 10개 플래그를 모두 비활성화한 뒤 PATH 선두 실행 마커가 생성되지 않는지 검증합니다. 수정 후 동일 Windows Node 26 환경 직접 프로브 3회는 394/362/342ms(최대 394ms)였으며, 기존 15초 제한은 최댓값 대비 약 38.1배 여유라 불필요한 상향을 하지 않습니다.
+
 ## 1.36.175 — 2026-08-29
 
 - T-0095 false-claim 감사를 199개 회귀 프로브로 고정했습니다. round-history와 release cadence는 CLI·프로젝트 하네스·저장소 태그 버전 및 하네스 판독 상태의 출처를 분리하고 기존 currentVersion 별칭에 leerness_cli 범위를 명시합니다. observation-only로 명시 분류한 `about`·`identity`·`status`·`commands`·`install-safety`·`capabilities`·`round-history`·`milestones`·`pulse`·`release cadence`와 MCP 서버 시작은 레거시 `.harness/`를 마이그레이션하거나 사용량 텔레메트리를 쓰지 않습니다. 읽기 전용 MCP 도구도 서버의 우연한 cwd와 명시 대상을 보존합니다. 이 계약은 상위 프로세스의 `LEERNESS_INTERNAL`까지 명시적으로 제거한 격리 환경에서 canonical 대상의 실제 usage 파일로 검증하며, 쓰기 MCP 호출은 대상 프로젝트에만 계속 귀속됩니다. `status`는 선택된 `.harness/` 또는 `.leerness/`를 한 번만 해석해 실제 버전·누락 경로·`workspaceDir`을 보고합니다. `.harness/`·`.leerness/` 충돌이나 잘못된 workspace override는 `unreadable` 성공으로 삼키지 않고 정확한 `workspace_dir_*` 오류로 종료하며, pulse/handoff 집계는 workspace 출처 오류를 구조화해 노출하면서 독립적으로 측정한 Git 라운드 수를 보존합니다. Git 누락·spawn 예외·timeout·signal·nonzero exit이면 round-history·milestones·release cadence는 `git_history_unavailable`로 실패하고 pulse/handoff/health/session-close는 `roundCount:null`, milestone의 `totalRounds/reachedCount/reached/avgRoundsPerDay:null`, `recentChanges:null`과 `recentChangesState/recentChangesError`를 보존해 R0/빈 이력으로 위장하지 않습니다. Git 측정 성공 시에는 기존 `recentChanges` 배열 계약을 그대로 유지하고, `latestTags[].date`의 전체 타임스탬프 계약도 보존하면서 별도 `dateOnly`를 제공합니다. 예외·timeout·signal·nonzero 네 시나리오는 일곱 공개 표면 전부에서 각각 실행합니다. cadence는 `--path > positional > cwd` 단일 우선순위를 검증과 실행에 함께 쓰고, 태그 간격이 없으면 healthy가 아니라 `insufficient-data`로 판정을 보류합니다. E2E/적대 프로브의 Git 픽스처도 공용 `gitSpawn`을 사용해 상위 셸의 외부 저장소·index·일회성 config 주입을 제거하며, persistent global/system Git config도 빈 임시 파일로 격리해 외부 hooksPath가 픽스처에서 실행되지 않게 합니다.

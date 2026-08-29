@@ -993,7 +993,17 @@
       "notes": "",
       "updatedAt": "2026-08-29T00:29:52.830Z",
       "completedAt": "2026-08-29T00:29:52.830Z"
+    },
+    {
+      "id": "UR-0087",
+      "text": "다음 작업 이어서 진행 .",
+      "recordedAt": "2026-08-29T01:35:32.824Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-08-29T00:29:52.831Z"
+  "updatedAt": "2026-08-29T01:35:32.824Z"
 }

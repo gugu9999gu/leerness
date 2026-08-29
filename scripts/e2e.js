@@ -7,6 +7,7 @@ const path = require('path');
 const cp = require('child_process');
 const { spawnNpmSync } = require('../lib/npm-process');
 const { gitSpawn } = require('../lib/git');
+const { EXTERNAL_AGENTS } = require('../lib/agent-registry');
 const { withRedirectWarnings } = require('./runtime-warning-gate');
 
 // 1.9.12: e2e 안정성을 위해 자식 프로세스의 npm 호출 차단 (hang 방지)
@@ -1912,10 +1913,20 @@ total++;
 total++;
 {
   // bench 명령: ready CLI 없을 때 거부
-  const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_COPILOT: '0' };
+  // 빌트인 provider가 늘어나도 상속 환경에서 실제 agent가 실행되지 않도록 레지스트리 전체를 끈다.
+  // PATH 선두의 실행 마커는 disabled provider가 version probe조차 받지 않는지를 검증한다.
+  const fakeBin = path.join(tmp, 'bench-disabled-bin');
+  const marker = path.join(tmp, 'bench-disabled-provider-ran.txt');
+  fs.mkdirSync(fakeBin, { recursive: true });
+  writePortableCliShim(fakeBin, 'codex', `require('fs').writeFileSync(process.env.LEERNESS_E2E_MARKER, 'ran'); console.log('codex fixture');`);
+  const env = { ...process.env, ...Object.fromEntries(EXTERNAL_AGENTS.map(a => [a.envFlag, '0'])) };
+  const pathKey = Object.keys(env).find(k => k.toUpperCase() === 'PATH') || 'PATH';
+  env[pathKey] = `${fakeBin}${path.delimiter}${env[pathKey] || ''}`;
+  env.LEERNESS_E2E_MARKER = marker;
+  // 1.36.176/T-0089: disabled provider를 probe 전 제거하므로 15s 안에서 기능과 무실행 계약을 함께 검사한다.
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'bench', 'test'], { encoding: 'utf8', timeout: 15000, env });
-  const ok = r.status !== 0 && /ready CLI 없음/.test(r.stdout);
-  console.log(ok ? '✓ B(1.9.36) agents bench: ready 없을 때 거부' : `✗ bench 거부 실패`);
+  const ok = r.status !== 0 && /ready CLI 없음/.test(r.stdout) && !fs.existsSync(marker);
+  console.log(ok ? '✓ B(1.9.36) agents bench: ready 없을 때 거부 + disabled CLI 무실행' : `✗ bench 거부/격리 실패`);
   if (!ok) { failed++; console.log(r.stdout.slice(0, 300)); }
 }
 
