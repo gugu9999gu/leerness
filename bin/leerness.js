@@ -49,7 +49,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.178';
+const VERSION = '1.36.179';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -5283,10 +5283,11 @@ function _selfTestCases() {
       //   (b) positional path 가 root 로 쓰이고 cwd 는 오염되지 않는지 확인한다.
       const m = require('../lib/pure-utils');
       const u = m._parseAddTitle(['rule', 'add', '세션', '점검', '--trigger', 'every-session', '/p'], 2) === '세션 점검';
-      const proj = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ruleproj_'));
-      const cwd = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rulecwd_'));
+      let proj = null, cwd = null;
       let wired = false;
       try {
+        proj = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_ruleproj_'));
+        cwd = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_rulecwd_'));
         for (const d of [proj, cwd]) { fs.mkdirSync(path.join(d, '.leerness'), { recursive: true }); fs.writeFileSync(path.join(d, '.leerness', 'HARNESS_VERSION'), VERSION); }
         const r = cp.spawnSync(process.execPath, [__filename, 'rule', 'add', '세션', '점검', '--trigger', 'every-session', proj, '--json'], { encoding: 'utf8', cwd, timeout: 30000, env: { ...process.env, LEERNESS_INTERNAL: '1', LEERNESS_NO_BANNER: '1' } });
         const line = (r.stdout || '').split(/\r?\n/).map(x => x.trim()).filter(x => x.startsWith('{')).pop();
@@ -5294,7 +5295,7 @@ function _selfTestCases() {
         const titleOk = j.ok === true && j.rule === '세션 점검' && j.trigger === 'every-session';
         const rootOk = fs.existsSync(path.join(proj, '.leerness', 'rules.md')) && !fs.existsSync(path.join(cwd, '.leerness', 'rules.md'));
         wired = titleOk && rootOk;
-      } catch (e) { wired = false; } finally { for (const d of [proj, cwd]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} } }
+      } catch (e) { wired = false; } finally { for (const d of [proj, cwd]) { if (d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} } } }
       return wired && u;
     } },
     { name: '클린룸 (UR-0184): feature add/show/link/impact positional-path 와이어 + 미초기화 게이트 + _taskPositionalPath 값-플래그 skip (1.36.2)', run: () => {
@@ -7090,18 +7091,24 @@ function _selfTestCases() {
     } },
     { name: 'parent detect (1.30.2 #157): 상위 leerness 부모 탐지(행위) + 독립 null + assetCount', run: () => {
       const osx = require('os'); const fsx = require('fs');
-      const base = fsx.mkdtempSync(path.join(osx.tmpdir(), 'leer-parent-st-'));
-      const alone = fsx.mkdtempSync(path.join(osx.tmpdir(), 'leer-alone-st-'));
+      let base = null, alone = null;
       try {
+        base = fsx.mkdtempSync(path.join(osx.tmpdir(), 'leer-parent-st-'));
+        alone = fsx.mkdtempSync(path.join(osx.tmpdir(), 'leer-alone-st-'));
         fsx.mkdirSync(path.join(base, '.leerness'), { recursive: true });
         fsx.writeFileSync(path.join(base, '.leerness', 'design-system.md'), '# ds');
         const sub = path.join(base, 'sub'); fsx.mkdirSync(sub, { recursive: true });
-        const found = _findParentWorkspace(sub);
-        const standalone = _findParentWorkspace(alone);
+        // The fixture owns only the immediate parent. Do not let an unrelated
+        // workspace above os.tmpdir() change this selftest's standalone control.
+        const found = _findParentWorkspace(sub, { maxDepth: 1 });
+        const standalone = _findParentWorkspace(alone, { maxDepth: 1 });
         // 부모 탐지: 워크스페이스 .leerness + assetCount≥1(design-system) · 독립: null · read-only(소스에 파일쓰기 없음 — adopt 미구현)
         const readOnly = /이 명령은 아무 파일도 쓰지 않는다/.test(read(__filename));
         return !!found && found.workspaceDir === '.leerness' && found.assetCount >= 1 && standalone === null && readOnly;
-      } finally { try { fsx.rmSync(base, { recursive: true, force: true }); } catch {}; try { fsx.rmSync(alone, { recursive: true, force: true }); } catch {} }
+      } finally {
+        if (base) { try { fsx.rmSync(base, { recursive: true, force: true }); } catch {} }
+        if (alone) { try { fsx.rmSync(alone, { recursive: true, force: true }); } catch {} }
+      }
     } },
     { name: 'VERSION 형식 (x.y.z)', run: () => /^\d+\.\d+\.\d+$/.test(VERSION) },
     { name: 'VERSION ↔ package.json 일치 (1.30.2: 한쪽만 bump 하던 실수 2초 내 차단)', run: () => {

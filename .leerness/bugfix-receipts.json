@@ -682,5 +682,25 @@
       ]
     },
     "previousGuardGap": "기존 회귀는 env 성공 경로와 최종 바이트만 확인해 호출자별 우회, 인코딩 판별기 부재, 메타데이터와 파일 정체성, 최종 replace 경합, 후발 핸들 쓰기, 복구 산출물 역할, 비인코딩 단계 실패를 관찰하지 않았다."
+  },
+  {
+    "id": "T-0091",
+    "repro": "node scripts/parent-detect-selftest-probe.js",
+    "expectBad": "\"contaminatedAncestorPass\": false",
+    "baseline": {
+      "at": "2026-08-30T03:11:14.728Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 300
+    },
+    "rootCause": "parent-detect standalone 대조군이 os.tmpdir 아래에서 기본 8단계 상위 탐색을 사용해 외부 .leerness에 오염됐고, 두 temp 할당이 try 앞에 있어 두 번째 실패 시 첫 디렉터리가 누수됐다",
+    "siblingScope": {
+      "checked": [
+        "rule add selftest의 두 temp 할당도 같은 수명 결함이라 함께 수정; secret 대조군 쌍은 이미 try 내부였고 나머지 tmp2/tmp3는 각자 순차 finally 경계라 제외"
+      ]
+    },
+    "previousGuardGap": null
   }
 ]

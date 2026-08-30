@@ -22,6 +22,15 @@ doNotStore:
 - Related files:
 - Test evidence ID:
 
+## Parent-detect selftest — ambient-temp isolation and partial-setup cleanup
+- Feature: The `parent detect (1.30.2 #157)` selftest measures only its own fixture and cleans every directory it successfully creates.
+- Input: A normal OS temp directory, a temp directory whose ancestor contains an unrelated `.leerness/`, and an injected failure on the second `mkdtempSync` call.
+- Output: The positive fixture finds its immediate `.leerness/` parent, the standalone control remains `null`, and the first setup directory is absent after a second-setup failure.
+- States: Fixture setup variables begin as `null`; each successful allocation becomes cleanup-owned before the next allocation. The parent lookup is depth-bounded to the immediate fixture parent while the public helper keeps its normal default depth.
+- Errors: Setup failures remain visible to the selftest runner and cannot leak a previously created directory. Ambient parent workspaces cannot turn the standalone control into a false failure.
+- Related files: `bin/leerness.js`, `scripts/parent-detect-selftest-probe.js`, `package.json`.
+- Test evidence ID: T-0091
+
 ## Honest read/status surfaces — version provenance, child routing, damaged previews
 - Feature: Read-only/status commands preserve the provenance and failure state of what they inspected instead of collapsing it into a successful generic fallback.
 - Input: `round-history [path]`, `release cadence [path]`, `memory <subcommand>`, and `preview list|show|serve` against valid, missing, malformed-JSON, and schema-invalid stores.

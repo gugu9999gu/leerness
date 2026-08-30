@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.179 — 2026-08-30
+
+- T-0091: parent-detect selftest를 OS 임시 디렉터리 상위의 외부 .leerness와 격리하고, 두 번째 temp 생성 실패 시 첫 fixture를 정리하도록 셋업 수명을 보강. 동일한 rule-add selftest 형제 경로와 결정론적 회귀 probe를 fast/core/full 게이트에 연결.
+
 ## 1.36.178 — 2026-08-29
 
 - CI: env encoding-check --apply 전체 E2E를 Windows BOM 교체와 POSIX byte-exact no-op 계약으로 분기해 v1.36.177 Linux/Node 22의 466/467 실패를 수정.
