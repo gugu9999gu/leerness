@@ -158,3 +158,19 @@ doNotStore:
 - [x] 공개 시점 GitHub main/tag/release가 구현 SHA `45c45b63a4544e58d084426c05400deab0e9c605`로 일치; npm latest/exact 1.36.178과 registry shasum/integrity가 로컬 pack과 일치하고 fresh-prefix selftest 통과; 사이트 commit `87c8eec`, Astro 702 pages, Cloudflare deployment `e45ef150`; leerness.com 루트·v1.36.178 changelog·Pages 원본 첫 시도 검증 통과
 - [x] GitHub Actions run 33268510915이 구현 SHA `45c45b63a4544e58d084426c05400deab0e9c605`에서 전체 13/13 성공, 실패·취소·스킵 0; Ubuntu Node 18/20/22 및 Windows Node 18/20/22/24 full E2E 전부 통과
 - [x] 롤백 기준: npm exact `leerness@1.36.177` 재설치, GitHub tag `v1.36.177`, 직전 사이트 커밋 `16d9481`
+
+## 2026-08-30 — v1.36.180
+
+- [x] T-0092 우선순위 i18n 부채 상환: English `agents list`, 기본·워크스페이스 `insights`, `toggle list|get|set` 및 오류 경로 현지화
+- [x] 외부 Codex 읽기 전용 리뷰 P2 3건을 직접 재현하고 수정: provider rejection 진단, workspace insights, 저장 언어·한국어 대조군 프로브
+- [x] 전용 i18n 프로브가 English 우선 표면의 Hangul 누출 0, 한국어 대조군 3/3, canonical JSON shape 보존을 확인; 39-command ratchet 104줄에서 58줄로 강화
+- [x] `npm run lint`, `npm run test:core`, 전체 `npm test` 통과: lint 67 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, command surface 40/40, installed cleanroom 10/10, full E2E 467/467(5,553초)
+- [x] 멀티 세션 E2E: 동시 24쓰기 무손실, session-scoped evidence/run/handoff/presence 격리, ownership·worktree/path guard 및 강제 경쟁 11/11 통과
+- [x] `scan secrets`, `encoding check`, `check`, `lazy detect`, code/test/contract/debug lens 및 `gate --claims` 6/6 통과; claims 137건 신규 실패 0
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.180 동기화; 새 런타임 의존성·lifecycle script·환경변수 없음
+- [x] `npm pack --dry-run`: 77 files, size 1,996,113 bytes, shasum `b8397bfb7e49039f7b720e4d70f7636e2b03483a`, integrity `sha512-H3iSd0omv9lZZBgM5Yi2Io/vx5rOSSeMSd6TqJGGn9saD6jcK9NBXhYDC1TIVRftngFytpr7YuoEfkZUvcnq4A==`
+- [ ] GitHub main/tag/release 및 Release asset 검증
+- [ ] npm latest/exact, registry integrity/shasum 및 fresh-prefix 설치 검증
+- [ ] 사이트 build/deploy와 leerness.com 루트·v1.36.180 changelog·Pages 원본 검증
+- [ ] GitHub Actions 구현 SHA 전체 작업 검증
+- [x] 롤백 기준: npm exact `leerness@1.36.179` 재설치, GitHub tag `v1.36.179`, 직전 사이트 커밋 `1312d18`

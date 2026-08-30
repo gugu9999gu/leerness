@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.180 — 2026-08-30
+
+- English-mode agents list, insights, and toggle output now contain zero Hangul; a dedicated red/green probe and 39-command ratchet reduce measured leakage from 104 to 58 lines while preserving Korean output.
+
 ## 1.36.179 — 2026-08-30
 
 - T-0091: parent-detect selftest를 OS 임시 디렉터리 상위의 외부 .leerness와 격리하고, 두 번째 temp 생성 실패 시 첫 fixture를 정리하도록 셋업 수명을 보강. 동일한 rule-add selftest 형제 경로와 결정론적 회귀 probe를 fast/core/full 게이트에 연결.

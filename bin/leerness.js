@@ -49,7 +49,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.179';
+const VERSION = '1.36.180';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -21608,7 +21608,7 @@ function _dispatchCommand(agentId, task, writeMode, model) {
 
 const _agents = require('../lib/agents');
 // 1.9.424 (UR-0025/UR-0125 큰 핸들러 모듈화 9번째): agentsCmd → lib/agents.js (DI 위임, rest→array)
-function agentsCmd(root, sub, ...args) { return _agents.agentsCmd(root, sub, args, { VERSION, has, arg, _agentSlashHint, _allProviders, _checkAgent, _cliChat, _dispatchCommand, _harnessBrief: _tgl.toggleOn(root, 'delegation-brief') ? _harnessBrief : undefined, _loadEnvFile, _normalizeRole, _policyEnforce, _readUserProviders, _recommendAgent, _recordRun, _resolveRole, lessonsPath, taskLogPath }); }   // 1.36.30: delegation-brief 토글 OFF 면 브리프 미접두(=--raw 경로)
+function agentsCmd(root, sub, ...args) { return _agents.agentsCmd(root, sub, args, { VERSION, has, arg, uiLang: _uiLang(root), _agentSlashHint, _allProviders, _checkAgent, _cliChat, _dispatchCommand, _harnessBrief: _tgl.toggleOn(root, 'delegation-brief') ? _harnessBrief : undefined, _loadEnvFile, _normalizeRole, _policyEnforce, _readUserProviders, _recommendAgent, _recordRun, _resolveRole, lessonsPath, taskLogPath }); }   // 1.36.30: delegation-brief 토글 OFF 면 브리프 미접두(=--raw 경로)
 
 function personaCmd(root, sub, idOrName, ...rest) {
   root = absRoot(root || process.cwd());
@@ -22069,7 +22069,8 @@ function _retroOneLine(agg, lang) {
 // 1.9.169 fix: --include 명시되면 cwd 자동 추가 안 함 (explicit-only).
 //   기존: cwd/.leerness 자동 추가 → 잔존 .leerness 시 의도치 않은 카운트 증가 (e2e flake 원인)
 //   변경: --include 시 사용자가 명시한 경로만 사용. --all-apps 단독은 기존 동작 유지.
-function _collectWorkspacePaths(rootBase) {
+function _collectWorkspacePaths(rootBase, uiLang = 'ko') {
+  const t = (ko, en) => (uiLang === 'en' ? en : ko);
   const set = new Set();
   const include = arg('--include', null);
   // --include 명시 시 cwd 자동 추가 스킵 (explicit-only 보장)
@@ -22094,7 +22095,7 @@ function _collectWorkspacePaths(rootBase) {
     for (const p of String(include).split(',')) {
       const abs = path.resolve(p.trim());
       if (exists(path.join(abs, '.leerness'))) set.add(abs);
-      else warn(`--include 무시: ${abs} (.leerness 없음)`);
+      else warn(t(`--include 무시: ${abs} (.leerness 없음)`, `Ignoring --include: ${abs} (no .leerness directory)`));
     }
   }
   return Array.from(set);
@@ -22221,9 +22222,10 @@ function _retroWorkspace(rootBase, cutoff) {
 
 function insightsCmd(root) {
   root = absRoot(root);
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
   // 1.9.15: --all-apps / --include 통합 모드
   if (has('--all-apps') || arg('--include', null)) {
-    return _insightsWorkspace(root);
+    return _insightsWorkspace(root, _L);
   }
   const agg = _retroAggregate(root);   // insights 는 누적 지표 명령 — 기간 필터 없음(retro 만 --days). 1.36.38 광역치환 오적용 교정.
   // 1.9.16: --json
@@ -22233,49 +22235,50 @@ function insightsCmd(root) {
     return;
   }
   const sc = readSessionCounter(root);
-  log(`# Insights — 누적 통계`);
-  log(`\n## 📊 핵심 지표`);
-  log(`  - 누적 task: ${agg.totalTasks} (done ${agg.doneCount}, in-progress ${agg.statusCounts['in-progress']}, planned ${agg.statusCounts.planned})`);
-  log(`  - 누적 결정 (decisions.md): ${agg.decisionBlocks}건`);
-  log(`  - 누적 스킬: ${agg.skillUsage.length}종`);
-  log(`  - 총 스킬 사용: ${agg.totalSkillUsage}회`);
-  log(`  - 총 최적화 누적: ${agg.totalOptimizations}건`);
-  log(`  - 활성 룰: ${agg.activeRules}건 (검증 ${agg.verifiedRules}건)`);
-  log(`  - session close 횟수: ${sc.count}회${sc.lastCloseAt ? ' (마지막: ' + sc.lastCloseAt.slice(0, 16) + ')' : ''}`);
+  log(t(`# Insights — 누적 통계`, `# Insights — cumulative statistics`));
+  log(t(`\n## 📊 핵심 지표`, `\n## 📊 Key metrics`));
+  log(t(`  - 누적 task: ${agg.totalTasks} (done ${agg.doneCount}, in-progress ${agg.statusCounts['in-progress']}, planned ${agg.statusCounts.planned})`, `  - Tasks: ${agg.totalTasks} (done ${agg.doneCount}, in-progress ${agg.statusCounts['in-progress']}, planned ${agg.statusCounts.planned})`));
+  log(t(`  - 누적 결정 (decisions.md): ${agg.decisionBlocks}건`, `  - Decisions (decisions.md): ${agg.decisionBlocks}`));
+  log(t(`  - 누적 스킬: ${agg.skillUsage.length}종`, `  - Skills: ${agg.skillUsage.length}`));
+  log(t(`  - 총 스킬 사용: ${agg.totalSkillUsage}회`, `  - Total skill uses: ${agg.totalSkillUsage}`));
+  log(t(`  - 총 최적화 누적: ${agg.totalOptimizations}건`, `  - Total optimizations: ${agg.totalOptimizations}`));
+  log(t(`  - 활성 룰: ${agg.activeRules}건 (검증 ${agg.verifiedRules}건)`, `  - Active rules: ${agg.activeRules} (${agg.verifiedRules} verified)`));
+  log(t(`  - session close 횟수: ${sc.count}회${sc.lastCloseAt ? ' (마지막: ' + sc.lastCloseAt.slice(0, 16) + ')' : ''}`, `  - Session closes: ${sc.count}${sc.lastCloseAt ? ' (last: ' + sc.lastCloseAt.slice(0, 16) + ')' : ''}`));
 
   if (agg.skillUsage.length) {
-    log(`\n## 🏆 가장 활용도 높은 스킬 (top 5)`);
-    agg.skillUsage.slice(0, 5).forEach((s, i) => log(`  ${i + 1}. ${s.id} (${s.displayNameKo}) — 사용 ${s.count}회, 최적화 ${s.optimizations}건`));
+    log(t(`\n## 🏆 가장 활용도 높은 스킬 (top 5)`, `\n## 🏆 Most-used skills (top 5)`));
+    agg.skillUsage.slice(0, 5).forEach((s, i) => log(t(`  ${i + 1}. ${s.id} (${s.displayNameKo}) — 사용 ${s.count}회, 최적화 ${s.optimizations}건`, `  ${i + 1}. ${s.id} — ${s.count} uses, ${s.optimizations} optimizations`)));
   }
 
   if (agg.durations.length) {
     const total = agg.durations.reduce((a, b) => a + b, 0);
-    log(`\n## ⏱ 검증 시간 (verify-code)`);
-    log(`  - 실행: ${agg.durations.length}회 / 총 ${total}ms / 평균 ${Math.round(total / agg.durations.length)}ms`);
-    log(`  - 최소 ${Math.min(...agg.durations)}ms / 최대 ${Math.max(...agg.durations)}ms`);
+    log(t(`\n## ⏱ 검증 시간 (verify-code)`, `\n## ⏱ Verification time (verify-code)`));
+    log(t(`  - 실행: ${agg.durations.length}회 / 총 ${total}ms / 평균 ${Math.round(total / agg.durations.length)}ms`, `  - Runs: ${agg.durations.length} / total ${total}ms / average ${Math.round(total / agg.durations.length)}ms`));
+    log(t(`  - 최소 ${Math.min(...agg.durations)}ms / 최대 ${Math.max(...agg.durations)}ms`, `  - Minimum ${Math.min(...agg.durations)}ms / maximum ${Math.max(...agg.durations)}ms`));
   }
 
-  log(`\n## 🔁 안정성 지표`);
-  log(`  - pass 시그널: ${agg.passSignals} · fix 시그널: ${agg.fixSignals}`);
+  log(t(`\n## 🔁 안정성 지표`, `\n## 🔁 Stability signals`));
+  log(t(`  - pass 시그널: ${agg.passSignals} · fix 시그널: ${agg.fixSignals}`, `  - Pass signals: ${agg.passSignals} · fix signals: ${agg.fixSignals}`));
   const ratio = agg.fixSignals > 0 ? (agg.passSignals / agg.fixSignals).toFixed(2) : '∞';
-  log(`  - pass/fix 비율: ${ratio}${ratio === '∞' || parseFloat(ratio) > 3 ? ' (안정)' : parseFloat(ratio) < 1 ? ' (디버그 위주)' : ' (보통)'}`);
+  log(t(`  - pass/fix 비율: ${ratio}${ratio === '∞' || parseFloat(ratio) > 3 ? ' (안정)' : parseFloat(ratio) < 1 ? ' (디버그 위주)' : ' (보통)'}`, `  - Pass/fix ratio: ${ratio}${ratio === '∞' || parseFloat(ratio) > 3 ? ' (stable)' : parseFloat(ratio) < 1 ? ' (debug-heavy)' : ' (normal)'}`));
 
-  log(`\n## 📈 권장`);
-  if (agg.totalOptimizations === 0) log(`  - 스킬에 최적화 누적 없음 — \`leerness skill optimize <id> --before --after\`로 더 나은 방법 기록`);
-  if (sc.count >= 5 && sc.count % 5 === 0) log(`  - 5세션마다 자동 깊은 회고가 예정되어 있습니다 — session close가 자동 호출`);
-  if (agg.statusCounts.blocked > 0) log(`  - blocked 작업 ${agg.statusCounts.blocked}건 — \`leerness lessons --query "blocked"\`로 과거 패턴 회수`);
+  log(t(`\n## 📈 권장`, `\n## 📈 Recommendations`));
+  if (agg.totalOptimizations === 0) log(t(`  - 스킬에 최적화 누적 없음 — \`leerness skill optimize <id> --before --after\`로 더 나은 방법 기록`, `  - No skill optimizations recorded — use \`leerness skill optimize <id> --before --after\` to record a better method`));
+  if (sc.count >= 5 && sc.count % 5 === 0) log(t(`  - 5세션마다 자동 깊은 회고가 예정되어 있습니다 — session close가 자동 호출`, `  - An automatic deep retrospective is scheduled every five sessions and runs during session close`));
+  if (agg.statusCounts.blocked > 0) log(t(`  - blocked 작업 ${agg.statusCounts.blocked}건 — \`leerness lessons --query "blocked"\`로 과거 패턴 회수`, `  - ${agg.statusCounts.blocked} blocked task(s) — use \`leerness lessons --query "blocked"\` to retrieve past patterns`));
 }
 
-function _insightsWorkspace(rootBase) {
-  const paths = _collectWorkspacePaths(rootBase);
-  if (!paths.length) return fail('대상 프로젝트 없음. --include 또는 --all-apps 사용.');
+function _insightsWorkspace(rootBase, uiLang = _uiLang(rootBase)) {
+  const t = (ko, en) => (uiLang === 'en' ? en : ko);
+  const paths = _collectWorkspacePaths(rootBase, uiLang);
+  if (!paths.length) return fail(t('대상 프로젝트 없음. --include 또는 --all-apps 사용.', 'No target projects. Use --include or --all-apps.'));
   // 1.9.16: --json
   if (has('--json')) {
     const projects = paths.map(p => ({ project: path.basename(p), path: p, data: _retroJsonData(_retroAggregate(p)) }));
     log(JSON.stringify({ projects, projectCount: paths.length }, null, 2));
     return;
   }
-  log(`# Workspace Insights — ${paths.length}개 프로젝트`);
+  log(t(`# Workspace Insights — ${paths.length}개 프로젝트`, `# Workspace Insights — ${paths.length} project(s)`));
   log(`\n| Project | Task | Done % | Decisions | Skills | Usage | Opts | Pass/Fix |`);
   log(`|---|---|---|---|---|---|---|---|`);
   const totals = { tasks: 0, done: 0, decisions: 0, skills: 0, usage: 0, opts: 0, pass: 0, fix: 0 };
@@ -22291,11 +22294,11 @@ function _insightsWorkspace(rootBase) {
   const tpf = totals.fix ? (totals.pass / totals.fix).toFixed(1) : '∞';
   const tDonePct = totals.tasks ? Math.round(totals.done / totals.tasks * 100) : 0;
   log(`| **TOTAL** | **${totals.tasks}** | **${tDonePct}%** | **${totals.decisions}** | **${totals.skills}** | **${totals.usage}** | **${totals.opts}** | **${totals.pass}/${totals.fix} (${tpf})** |`);
-  log(`\n## 📈 평가`);
-  if (totals.pass > totals.fix * 3) log(`  - 안정성: 우수 (pass÷fix = ${tpf})`);
-  else if (totals.pass > totals.fix) log(`  - 안정성: 보통 (pass÷fix = ${tpf})`);
-  else if (totals.fix > 0) log(`  - 안정성: 주의 (fix가 pass보다 많음) — verify-code 자동화 검토`);
-  if (totals.opts === 0) log(`  - 최적화 누적 없음 — \`leerness skill optimize\` 활용 권장`);
+  log(t(`\n## 📈 평가`, `\n## 📈 Assessment`));
+  if (totals.pass > totals.fix * 3) log(t(`  - 안정성: 우수 (pass÷fix = ${tpf})`, `  - Stability: strong (pass÷fix = ${tpf})`));
+  else if (totals.pass > totals.fix) log(t(`  - 안정성: 보통 (pass÷fix = ${tpf})`, `  - Stability: moderate (pass÷fix = ${tpf})`));
+  else if (totals.fix > 0) log(t(`  - 안정성: 주의 (fix가 pass보다 많음) — verify-code 자동화 검토`, `  - Stability: caution (more fix than pass signals) — consider automating verify-code`));
+  if (totals.opts === 0) log(t(`  - 최적화 누적 없음 — \`leerness skill optimize\` 활용 권장`, `  - No optimizations recorded — consider using \`leerness skill optimize\``));
 }
 
 // 1.9.16: brainstorm 핵심 로직 분리 — 단일 프로젝트 결과 반환
@@ -31603,7 +31606,7 @@ async function main() {
   if (cmd === 'anchors')                           return anchorsCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), args[1] && !args[1].startsWith('-') ? args[1] : null);   // 1.36.36: 정체성앵커 초안
   // 1.36.108 (T-0097): _withLock 을 넘긴다 — lib 모듈이 락을 deps 로 받는 기존 관례(clarify·referee·routing·bugfix)에
   //   toggles 만 빠져 있어 `toggle set` 이 락 밖 read-modify-write 였다(런타임 계측으로 실측).
-  if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION, _withLock });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
+  if (cmd === 'toggle')                            return _tgl.toggleCmd(arg('--path', process.cwd()), args[1], args[2], args[3], { has, VERSION, uiLang: _uiLang(arg('--path', process.cwd())), _withLock });   // 1.36.30: 기능 토글 (그래프 ⚙ 탭 연동)
   // 1.36.53 (UR-0062): 기술 프로필 · 1.36.67 (F15): 변경 시 기존 leerness.html 동반 갱신(있을 때만)
   if (cmd === 'tech')                              return _tech.techCmd(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd(), _optSub(args), { has, regenGraph: (r) => { if (exists(path.join(r, 'leerness.html'))) _graph.graphHtmlCmd(r, { _roadmapData, _loadDecisions, _loadLessons, _parseFeatureGraph, _loadToggles: _tgl.loadToggles, _toggleRegistry: _tgl.TOGGLE_REGISTRY, _loadTechProfile: _tech.loadTechProfile, quiet: true }); } });
   // 1.36.98 (P-0013): 재사용 인벤토리 — 새 화면 조각을 만들기 전에 '이미 있는 것' 을 먼저 본다(reuse-map 의 UI 판).

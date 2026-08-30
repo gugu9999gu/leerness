@@ -11027,7 +11027,8 @@ total++;
     // 1.36.112: 106 으로 조인다. `context budget` 을 손대는 김에 영어화해 5줄을 갚았다(111 → 106, 실측).
     //   갚은 만큼만 낮춘다 — 여유를 남기면 그 안에서 조용히 썩는다(1.36.82 의 자기참조 가드에서 겪은 형태).
     // 1.36.174: provider list 영어 모드의 요약/안내 두 줄을 영어화해 104로 조임(39개 명령 실측).
-    const BASELINE = 104;
+    // 1.36.180: agents list(18) + insights(17) + toggle list(11) 우선 표면을 영어화해 58로 조임.
+    const BASELINE = 58;
     dbg.baseline = BASELINE;
     dbg.withinRatchet = leaky <= BASELINE;
     // 이번 라운드가 고친 표면은 **0 이어야** 한다 — 래칫과 별개로 회귀를 직접 막는다.

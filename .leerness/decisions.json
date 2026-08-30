@@ -140,7 +140,15 @@
     "title": "which의 raw PATH 후보와 검증된 설치 단위를 분리",
     "decision": "which의 raw PATH 후보와 검증된 설치 단위를 분리",
     "reason": "호환성을 위해 pathCandidates 원문은 보존하되 Windows npm 표준 shim이 같은 canonical 디렉터리에서 동일 package.json bin target을 가리킬 때만 pathInstallations 한 건으로 묶는다. 미증명·변조·다른 디렉터리·POSIX 후보는 분리한다.",
-    "alternatives": null,
-    "impact": null
+    "alternatives": "기존 raw 후보를 제거하거나 Windows 전용 경로만 유지하는 방안은 호환성과 진단 증거를 잃으므로 채택하지 않았다.",
+    "impact": "기존 pathCandidates 계약은 유지되고, 검증된 설치 단위 소비자는 pathInstallations를 사용할 수 있다."
+  },
+  {
+    "date": "2026-08-30",
+    "title": "T-0092 i18n debt is repaid by measured highest-volume surfaces and a zero-leak probe",
+    "decision": "T-0092 i18n debt is repaid by measured highest-volume surfaces and a zero-leak probe",
+    "reason": "The 39-command audit measured 104 leaked Hangul lines; agents list, insights, and toggle list accounted for 46. A dedicated red-green probe prevents aggregate-ratchet slack from hiding regressions while the ratchet tightens to the measured remainder of 58.",
+    "alternatives": "Localize every remaining surface in one round (rejected: broader release risk); loosen the aggregate ratchet (rejected: would hide regressions).",
+    "impact": "English users receive localized priority output now, while the remaining 58-line debt stays explicitly measured and ratcheted for the next rounds."
   }
 ]

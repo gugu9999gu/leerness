@@ -66,3 +66,12 @@ doNotStore:
 - Errors: Foreign intent flags and invalid negative cleanup retention fail closed; corrupt status input is `settings_corrupt`; unknown toggle IDs, including object-prototype names such as `toString`, remain errors.
 - Related files: `bin/leerness.js`, `lib/toggles.js`, `scripts/dead-flags-probe.js`, `package.json`.
 - Test evidence ID: T-0094
+
+## English priority command surfaces — zero-Hangul human output
+- Feature: The three highest-volume English-mode leakage surfaces render their human UI in English while preserving the Korean default and stable machine payloads.
+- Input: `agents list`, `insights`, and `toggle list|get|set` in a fresh project with `--language en` or `LEERNESS_LANG=en`; the same toggle list with Korean selected as a control.
+- Output: The default human output of `agents list`, `insights`, and `toggle list` contains zero Hangul. Agent installation/status labels, insight headings/units/recommendations, and toggle descriptions/guidance all follow the resolved project UI language. Korean mode retains Hangul and its established wording. Toggle JSON continues to expose the canonical `TOGGLE_REGISTRY` shape rather than locale-only projection fields.
+- States: `uiLang` is resolved once at the CLI boundary and injected into modular handlers. A missing language selection remains Korean for backward compatibility. The 39-command aggregate English leakage ratchet decreases only by directly measured lines, from 104 to 58.
+- Errors: Unknown toggle/subcommand/value and corrupt/unreadable toggle diagnostics use English wording in English mode. A command failure or silent output cannot count as a clean localization result, and the Korean control must remain distinguishable.
+- Related files: `bin/leerness.js`, `lib/agents.js`, `lib/toggles.js`, `scripts/i18n-priority-surface-probe.js`, `scripts/e2e.js`, `package.json`.
+- Test evidence ID: T-0092

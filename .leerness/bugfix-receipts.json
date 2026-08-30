@@ -702,5 +702,28 @@
       ]
     },
     "previousGuardGap": null
+  },
+  {
+    "id": "T-0092",
+    "repro": "node scripts/i18n-priority-surface-probe.js",
+    "expectBad": "English UI leaked Hangul",
+    "baseline": {
+      "at": "2026-08-30T08:07:17.745Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 17375
+    },
+    "rootCause": "agents and toggles list renderers never received the project UI language, while insights hard-coded Korean strings instead of consulting _uiLang.",
+    "siblingScope": {
+      "checked": [
+        "agents list",
+        "insights",
+        "toggle list",
+        "39-command i18n ratchet"
+      ]
+    },
+    "previousGuardGap": "The aggregate ratchet allowed 104 known leaked lines and did not require the three highest-volume surfaces to reach zero."
   }
 ]

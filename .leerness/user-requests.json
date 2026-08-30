@@ -1029,7 +1029,17 @@
       "notes": "",
       "updatedAt": "2026-08-30T07:13:58.139Z",
       "completedAt": "2026-08-30T07:13:58.139Z"
+    },
+    {
+      "id": "UR-0090",
+      "text": "다음 작업을 이어서 진행하고, leerness 설치 프로젝트의 시안 제안은 별도 목업이 아니라 실제 해당 페이지 또는 기능을 초안/시안으로 직접 구현하고 명확히 표시한 뒤 사용자 승인을 받도록 변경",
+      "recordedAt": "2026-08-30T08:01:11.108Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-08-30T07:13:58.139Z"
+  "updatedAt": "2026-08-30T08:01:11.109Z"
 }

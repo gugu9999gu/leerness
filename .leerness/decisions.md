@@ -13,50 +13,50 @@
 ### 2026-06-08 — 용어집/가이드 기능 설계 결론(외부 AI 3-에이전트 평가 종합): 광범위 버전(가이드+기능맵+프로젝트설명)은 brief/feature-graph/context-map/guide/api-skill 와 ~70-80% 중복이라 제외. 유일한 진짜 공백 = '의존성 용어집'(package.json/requirements deps→비개발자용 한줄설명). 회의론자의 '저품질' 우려는 코드-식별자 정적추출(S2)엔 타당하나, 큐레이션 카탈로그(_TOOL_CATALOG, 기존 constraints 카탈로그처럼 ~30-50개 손작성)엔 미해당 — 고품질+무LLM+비중복. 사용자가 비개발자 명시 → 대상 검증됨.
 - Decision: 용어집/가이드 기능 설계 결론(외부 AI 3-에이전트 평가 종합): 광범위 버전(가이드+기능맵+프로젝트설명)은 brief/feature-graph/context-map/guide/api-skill 와 ~70-80% 중복이라 제외. 유일한 진짜 공백 = '의존성 용어집'(package.json/requirements deps→비개발자용 한줄설명). 회의론자의 '저품질' 우려는 코드-식별자 정적추출(S2)엔 타당하나, 큐레이션 카탈로그(_TOOL_CATALOG, 기존 constraints 카탈로그처럼 ~30-50개 손작성)엔 미해당 — 고품질+무LLM+비중복. 사용자가 비개발자 명시 → 대상 검증됨.
 - Reason: build new 가 아니라 curated catalog 로 좁게: 중복 회피 + leerness 제약(무LLM/0deps) 부합 + 비개발자 실가치
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-06-09 — 외부 리뷰는 '블라인드'로: README 를 물리적으로 숨기고(mv) leerness 소개 없이 코드/행위만 분석시켜 외부 분석가 관점 확보 → 그 결과로 README 재구성. 모델 지시 의존 대신 파일 제거로 강제(맹신 X).
 - Decision: 외부 리뷰는 '블라인드'로: README 를 물리적으로 숨기고(mv) leerness 소개 없이 코드/행위만 분석시켜 외부 분석가 관점 확보 → 그 결과로 README 재구성. 모델 지시 의존 대신 파일 제거로 강제(맹신 X).
 - Reason: 
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-06-10 — 범용 AI 코딩 하네스 포지셔닝: 5축 클린룸 실증 결과 '조건부 가능' — 관리층(장부·인수인계·증거요구)은 즉시 범용, 검증층(테스트 실행·카운트)은 JS 전용이라 P1 2건 해소 후 '범용 검증' 표방. 당분간 포지셔닝 문구는 '증거 없이는 끝났다고 말할 수 없게 만드는 작업 장부 하네스'
 - Decision: 범용 AI 코딩 하네스 포지셔닝: 5축 클린룸 실증 결과 '조건부 가능' — 관리층(장부·인수인계·증거요구)은 즉시 범용, 검증층(테스트 실행·카운트)은 JS 전용이라 P1 2건 해소 후 '범용 검증' 표방. 당분간 포지셔닝 문구는 '증거 없이는 끝났다고 말할 수 없게 만드는 작업 장부 하네스'
 - Reason: 5개 독립 클린룸 리포트 + P1 직접 재현 확정
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-06-10 — 영상 변주 시스템 설계: Date.now/random 금지(멱등) — 버전 문자열 해시를 시드로 씬 구성(4종 스토리 구조)·카피 풀·스타일(배경/타이포/모션)·씬 길이를 결정적으로 변주. published.json 이력으로 직전 영상과 같은 변주면 시프트. verify-video 게이트 + 프리뷰 2버전 프레임 비교로 '실제로 다름' 검증
 - Decision: 영상 변주 시스템 설계: Date.now/random 금지(멱등) — 버전 문자열 해시를 시드로 씬 구성(4종 스토리 구조)·카피 풀·스타일(배경/타이포/모션)·씬 길이를 결정적으로 변주. published.json 이력으로 직전 영상과 같은 변주면 시프트. verify-video 게이트 + 프리뷰 2버전 프레임 비교로 '실제로 다름' 검증
 - Reason: 사용자 명시: 매 영상이 구성부터 스타일까지 달라야 함
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-07-09 — 정직성 감사→소진: 1.36.4 recall FN, 1.36.5 성숙도 판정 과장, 1.36.6 강제력/종합-health 문구 정직화
 - Decision: 정직성 감사→소진: 1.36.4 recall FN, 1.36.5 성숙도 판정 과장, 1.36.6 강제력/종합-health 문구 정직화
 - Reason: 심층 멀티에이전트 정직성 감사(35에이전트 9표면 20확정)에서 성숙도 판정 과장(P1)을 1.36.5로, handoff health토큰/policy차단/KO identity 허위완료차단/README measures(P2/P3)을 1.36.6으로 정직화. 전부 selftest+e2e 386 게이트 통과 후 배포·클린룸 재실증. 세션-길이 leerness참조 감쇠 메타테스트: 반박(workspace-ops 평탄, 작업종류 교란) 단 compaction재개시 handoff ritual 누락 gap 1건
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-07-09 — 1.36.7 handoff 넛지: 메타-테스트가 도그푸드한 세션-시작 리추얼 사각지대를 기능으로 메꿈
 - Decision: 1.36.7 handoff 넛지: 메타-테스트가 도그푸드한 세션-시작 리추얼 사각지대를 기능으로 메꿈
 - Reason: task/decision add 시 마지막 handoff gap>120min이면 넛지(_getLastHandoffGap 재사용). FP가드(기록부재→무넛지)·opt-out·selftest 281·게시본 재실증. 실측→기능화 루프
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-07-09 — 1.36.8 심층 정직성 감사 완결: encoding passed 스코프 + self-heal 범위 정직화 + 넛지 task update 확장
 - Decision: 1.36.8 심층 정직성 감사 완결: encoding passed 스코프 + self-heal 범위 정직화 + 넛지 task update 확장
 - Reason: 1.36.5 감사 확정 20건 중 수정 대상 전부 소진(1.36.5 성숙도 P1 → 1.36.6 강제력 P2/P3 → 1.36.8 marginal P3). 잔여는 과거 CHANGELOG 역사 기록으로 소급 수정 안 함. selftest 282 + e2e 386 + 게시본 재실증
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-07-10 — 17th 클린룸 리뷰(게시본 1.36.10) 4/4 채택 → 1.36.11: deps --json 환경의존 누수 + UNC 꼬리매치 우회 + DB렌즈 prose FP + en 렌즈 i18n
 - Decision: 17th 클린룸 리뷰(게시본 1.36.10) 4/4 채택 → 1.36.11: deps --json 환경의존 누수 + UNC 꼬리매치 우회 + DB렌즈 prose FP + en 렌즈 i18n
 - Reason: codex 클린룸 행위검증이 dev 트리에서 절대 안 잡히는 환경 의존 경로(P1-A: _apps 없는 곳에서만 노출되는 deps plain-text 누수 → 설치본 selftest 283/284)를 잡음 — 클린룸 리뷰 존재 이유 재실증. 게시본 재실증: 설치본 selftest 285/285
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-07-11 — requests 위생 라운드: 미답 10건 중 7건 소진(완료-미마킹 6 + 행위반박 1), 잔여 3건은 실백로그로 유지
 - Decision: requests 위생 라운드: 미답 10건 중 7건 소진(완료-미마킹 6 + 행위반박 1), 잔여 3건은 실백로그로 유지
@@ -115,5 +115,11 @@
 ### 2026-08-26 — which의 raw PATH 후보와 검증된 설치 단위를 분리
 - Decision: which의 raw PATH 후보와 검증된 설치 단위를 분리
 - Reason: 호환성을 위해 pathCandidates 원문은 보존하되 Windows npm 표준 shim이 같은 canonical 디렉터리에서 동일 package.json bin target을 가리킬 때만 pathInstallations 한 건으로 묶는다. 미증명·변조·다른 디렉터리·POSIX 후보는 분리한다.
-- Alternatives:
-- Impact:
+- Alternatives: 기존 raw 후보를 제거하거나 Windows 전용 경로만 유지하는 방안은 호환성과 진단 증거를 잃으므로 채택하지 않았다.
+- Impact: 기존 pathCandidates 계약은 유지되고, 검증된 설치 단위 소비자는 pathInstallations를 사용할 수 있다.
+
+### 2026-08-30 — T-0092 i18n debt is repaid by measured highest-volume surfaces and a zero-leak probe
+- Decision: T-0092 i18n debt is repaid by measured highest-volume surfaces and a zero-leak probe
+- Reason: The 39-command audit measured 104 leaked Hangul lines; agents list, insights, and toggle list accounted for 46. A dedicated red-green probe prevents aggregate-ratchet slack from hiding regressions while the ratchet tightens to the measured remainder of 58.
+- Alternatives: Localize every remaining surface in one round (rejected: broader release risk); loosen the aggregate ratchet (rejected: would hide regressions).
+- Impact: English users receive localized priority output now, while the remaining 58-line debt stays explicitly measured and ratcheted for the next rounds.

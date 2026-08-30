@@ -1,6 +1,6 @@
 {
   "name": "leerness",
-  "version": "1.36.179",
+  "version": "1.36.180",
   "description": "The AI-coding operations layer that makes \"done\" require evidence — persistent memory, evidence-gated completion checks, and clean handoffs for any AI agent (Claude Code, Codex, Cursor). State lives as plain files in your repo. CLI + MCP, 0 runtime dependencies.",
   "keywords": [
     "leerness",
@@ -48,18 +48,19 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node ./scripts/lint.js && node ./scripts/workspace-dir-source-ratchet.js && node ./scripts/workspace-dir-migration-probe.js && node ./scripts/workspace-dir-lock-order-probe.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./scripts/parent-detect-selftest-probe.js && node ./scripts/verify-code-cross-runtime-probe.js && node ./scripts/release-runtime-probe.js && node ./scripts/which-shim-probe.js && node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e-core.js && node ./scripts/mutation-integrity-probe.js && node ./scripts/handoff-readonly-probe.js && node ./scripts/mcp-presence-probe.js && npm run test:commands && npm run test:installed && node ./scripts/e2e.js",
-    "test:core": "node ./scripts/lint.js && node ./scripts/workspace-dir-source-ratchet.js && node ./scripts/workspace-dir-migration-probe.js && node ./scripts/workspace-dir-lock-order-probe.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./scripts/parent-detect-selftest-probe.js && node ./scripts/verify-code-cross-runtime-probe.js && node ./scripts/release-runtime-probe.js && node ./scripts/which-shim-probe.js && node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e-core.js && node ./scripts/mutation-integrity-probe.js && node ./scripts/handoff-readonly-probe.js && node ./scripts/mcp-presence-probe.js",
+    "test": "node ./scripts/lint.js && node ./scripts/workspace-dir-source-ratchet.js && node ./scripts/workspace-dir-migration-probe.js && node ./scripts/workspace-dir-lock-order-probe.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./scripts/parent-detect-selftest-probe.js && node ./scripts/verify-code-cross-runtime-probe.js && node ./scripts/release-runtime-probe.js && node ./scripts/which-shim-probe.js && node ./scripts/i18n-priority-surface-probe.js && node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e-core.js && node ./scripts/mutation-integrity-probe.js && node ./scripts/handoff-readonly-probe.js && node ./scripts/mcp-presence-probe.js && npm run test:commands && npm run test:installed && node ./scripts/e2e.js",
+    "test:core": "node ./scripts/lint.js && node ./scripts/workspace-dir-source-ratchet.js && node ./scripts/workspace-dir-migration-probe.js && node ./scripts/workspace-dir-lock-order-probe.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./scripts/parent-detect-selftest-probe.js && node ./scripts/verify-code-cross-runtime-probe.js && node ./scripts/release-runtime-probe.js && node ./scripts/which-shim-probe.js && node ./scripts/i18n-priority-surface-probe.js && node ./bin/leerness.js --version && node ./bin/leerness.js selftest && node ./scripts/e2e-core.js && node ./scripts/mutation-integrity-probe.js && node ./scripts/handoff-readonly-probe.js && node ./scripts/mcp-presence-probe.js",
     "test:commands": "node ./scripts/command-flags-probe.js && node ./scripts/dead-flags-probe.js && node ./scripts/false-claim-probe.js && node ./scripts/next-action-suggestion-probe.js && node ./scripts/claims-baseline-probe.js && node ./scripts/claims-baseline-concurrency-probe.js && node ./scripts/e2e-command-surface.js",
     "test:next-actions": "node ./scripts/next-action-suggestion-probe.js",
     "test:installed": "node ./scripts/installed-cleanroom-probe.js",
     "test:handoff": "node ./scripts/handoff-readonly-probe.js",
-    "test:fast": "node ./scripts/lint.js && node ./scripts/workspace-dir-source-ratchet.js && node ./scripts/workspace-dir-migration-probe.js && node ./scripts/workspace-dir-lock-order-probe.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./scripts/parent-detect-selftest-probe.js && node ./scripts/release-runtime-probe.js && node ./scripts/which-shim-probe.js && node ./scripts/mutation-integrity-probe.js && node ./scripts/mcp-presence-probe.js && node ./scripts/false-claim-probe.js && node ./scripts/smoke.js",
+    "test:fast": "node ./scripts/lint.js && node ./scripts/workspace-dir-source-ratchet.js && node ./scripts/workspace-dir-migration-probe.js && node ./scripts/workspace-dir-lock-order-probe.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./scripts/parent-detect-selftest-probe.js && node ./scripts/release-runtime-probe.js && node ./scripts/which-shim-probe.js && node ./scripts/i18n-priority-surface-probe.js && node ./scripts/mutation-integrity-probe.js && node ./scripts/mcp-presence-probe.js && node ./scripts/false-claim-probe.js && node ./scripts/smoke.js",
     "test:false-claims": "node ./scripts/false-claim-probe.js",
     "test:workspace-lock-order": "node ./scripts/workspace-dir-lock-order-probe.js",
     "test:mcp-presence": "node ./scripts/mcp-presence-probe.js",
     "test:smoke": "node ./scripts/smoke.js",
     "test:parent-detect": "node ./scripts/parent-detect-selftest-probe.js",
+    "test:i18n": "node ./scripts/i18n-priority-surface-probe.js",
     "lint": "node ./scripts/lint.js",
     "prepack": "node ./bin/leerness.js readme sync . && node ./bin/leerness.js --version"
   },
