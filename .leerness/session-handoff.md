@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-30T07:17:24.856Z
+Last generated: 2026-08-30T12:25:12.018Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -154,12 +154,13 @@ Last generated: 2026-08-30T07:17:24.856Z
 - T-0156 다음 작업 이어서 진행하고, 남은 작업 뭐가있는지 알려줘 . → next: Recommended next: T-0109 explicit per-session scope for collision avoidance, then T-0089 CI timeout/headroom.
 - T-0157 다음 작업 이어서 진행 . → next: Start T-0022 data-integrity mutation hunt, then T-0091 flaky selftest and T-0092 i18n leakage.
 - T-0158 다음 작업 이어서 진행 → next: T-0092 영문 모드 i18n 누수 재현 범위 축소 및 첫 수정 라운드
+- T-0160 Release v1.36.180 i18n priority-surface repayment and publication → next: Ask the mandatory UR-0090 clarification, then continue T-0092 from the measured 58-line ratchet with release cadence/idempotency audit/plan list/round-history.
 
 ## In Progress
-- 없음
+- T-0092 명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/insights/persona/agent-mode/py-check/api-skill 이 --language en·LEERNESS_LANG=en·en 프로젝트에서도 한국어 출력. 대조군: health 는 완전 영어(플래그 배선은 존재). 1,488회 실행 감사(2026-08-05) → next: Repay next measured leakage cluster among release cadence, idempotency audit, plan list, and round-history; keep exact 58-line ratchet
 
 ## Incomplete / Waiting / On Hold / Blocked
-- 없음
+- T-0159 실제 프로젝트 코드 기반 시안 구현·표시·승인 워크플로로 전환 (UR-0090) → next: 사용자에게 페이지 또는 기능 중 어느 쪽인지, 또는 둘 다인지 확인한 뒤 preview add로 설계 승인 요청
 
 ## Dropped
 - T-0005 게시본 1.36.13~1.36.15 누적 신규 표면 클린룸 리뷰 (database 렌즈 8→12문항, cap 16, selftest 앵커) — codex 적대 검증 + 맹신 X → next: 없음
@@ -175,22 +176,6 @@ Last generated: 2026-08-30T07:17:24.856Z
 ## Verification
 ```
 Task: T-0022 / UR-0088
-Command: `node scripts/mutation-integrity-probe.js`; `npm run test:fast`; `npm test`; `gate --claims`; `verify-claim T-0022 --strict-claims --require-evidence`; `npm pack --dry-run --json`; external Codex focused review plus direct reproductions
-Exit: 0
-Note: env encoding apply, drift auto-fix, and session close encoding repair now share one scan/plan/apply boundary and the common CAS writer. Windows replacement uses ReplaceFileW with a retained displaced original, explicit artifact roles, identity rechecks, bounded sharing-violation retry, and visible cleanup/partial-progress failures; unsupported or ambiguous CP949, corrupt BOM, shebang/batch, scanner I/O failure, stale plans, ADS/open handles, hard links, and concurrent last-window writers fail closed or preserve recoverable bytes. Auto-fix reports every stage in JSON and does not stop critical session recovery after a security repair. External Codex review reproduced three P2 findings (missing CP949 decoder, read-only non-mutating skip ordering, unborn/missing Git distinction); all were fixed and added to the mutation probe. `npm test` passed with lint 65 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, and full E2E 467/467 in 6,747 seconds. Multi-session coverage retained 24 concurrent writes, 41 canonical-lock state writers, Claude↔Codex visibility, per-session evidence/run/handoff/presence isolation, and 11 delayed race pairs. The explicit per-session work-scope P3 remains unimplemented and is not claimed here. Final gate passed 6/6 with 135 claims, zero new failures; strict T-0022 evidence is complete with scope creep 0. Pack dry-run contains 75 files and includes the new encoding module and mutation probe.
-Artifacts: lib/io.js, lib/shell-encoding.js, lib/drift.js, lib/session-close.js, lib/health.js, bin/leerness.js, scripts/mutation-integrity-probe.js, scripts/e2e-core.js, package.json, .github/workflows/ci.yml, CHANGELOG.md, README.md
-
-## 2026-08-30 — v1.36.177 public release verification
-
-Task: T-0022 / UR-0088
-Command: `release publish --git-push --npm-publish --gh-release`; `git ls-remote`; `gh release view`; npm latest/exact metadata; fresh-cache/fresh-prefix registry install and installed selftest; site build/deploy; production HTTP probes
-Exit: 0 for publication checks; the GitHub Actions matrix later exposed a CI-only contract mismatch
-Note: GitHub main and tag `v1.36.177` resolve to implementation SHA `211177a0c284f4c86b47fc2734abab2b43090948`; the public non-draft, non-prerelease Release exists. npm latest and exact are 1.36.177 with integrity `sha512-XSFjIkRiRb8/r7GpP5kPVcYU1/5PsrSdRMDM0TD5GMHdHA+bhtPwbVDRenYk17XFQK0enal4gJx0qptoVwaGzA==` and shasum `d2f2dbaac4d23e157ef3b0f575ae5f320c4066ce`, matching the local pack dry-run. A fresh registry install has version/CLI 1.36.177, runtime dependencies 0, install scripts 0, both new shipped files present, and selftest 355/355. The site source commit is `16d9481`; 701 pages built, Cloudflare Pages deployment `c3ab4a30` completed, and the production root, `/changelog/1.36.177/`, and the Pages origin all returned HTTP 200 with version 1.36.177 on the first probe. GitHub Actions run 33265056280 targets the implementation SHA; Ubuntu Node 18/20/22 full-E2E jobs failed, and the inspected Node 22 log reported exactly one stale assertion (`encoding-check BOM 스킵 실패`, 466/467) against the intentional POSIX byte-exact no-op contract.
-Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.177, https://www.npmjs.com/package/leerness/v/1.36.177, https://leerness.com/changelog/1.36.177/, https://github.com/gugu9999gu/leerness/actions/runs/33265056280, https://c3ab4a30.leerness-site.pages.dev/
-
-## 2026-08-30 — v1.36.178 CI contract correction pre-release verification
-
-Task: T-0022 / UR-0088
 Command: focused `scripts/e2e.js` correction; `npm run test:fast`; `verify`, `audit`, `scan secrets`, `encoding check`, `check`, `lazy detect`; code/test/recovery/contract lenses; external Codex read-only focused review
 Exit: 0
 Note: The full-E2E fixture now uses an unambiguous UTF-8 emoji payload, requires `.sh` to remain byte-exact, requires Windows `.ps1` output to be exactly BOM plus the original payload, requires POSIX `.ps1` to remain byte-exact, and checks the CLI exit status. This matches the already-passing dedicated mutation-integrity and e2e-core platform contracts. `npm run test:fast` passed with lint 65 JS + 1 JSON, mutation-integrity, MCP presence 22/22, false-claim 199/199, and smoke 13/13. Leerness guards reported verify healthy, audit failures 0, unacknowledged secrets 0, encoding findings 0, check issues 0, and lazy blocking issues 0. The external Codex review checked syntax, fixture eligibility, exact-byte assertions, platform branching, failure semantics, and version surfaces, then concluded `No findings`. Lenses were answered conservatively: the change is a single explicit branch, the assertion can fail and invokes the real CLI, unknown mutation states remain fail-closed, and the shipped platform contract is unchanged. `npm pack --dry-run` produced 75 files with shasum `0d348ea077730cf5ac196776c4cd29ca3d37fe8b` and integrity `sha512-7EnoHp2CR7xt11ZeXIhiBORr6tqLkguDJzPU9iNYEdFEa+JCkFihzNP2nWuaUvgY5WJtLT3sH/bhdi5jLduTUw==`.
@@ -203,10 +188,26 @@ Command: `release publish --git-push --npm-publish --gh-release`; `git ls-remote
 Exit: 0
 Note: At publication, GitHub main and tag `v1.36.178` resolved to implementation SHA `45c45b63a4544e58d084426c05400deab0e9c605`; the public non-draft, non-prerelease Release includes `leerness-1.36.178.tgz`. npm latest/exact are 1.36.178 and registry integrity `sha512-7EnoHp2CR7xt11ZeXIhiBORr6tqLkguDJzPU9iNYEdFEa+JCkFihzNP2nWuaUvgY5WJtLT3sH/bhdi5jLduTUw==` plus shasum `0d348ea077730cf5ac196776c4cd29ca3d37fe8b` match the local pack. A fresh public install reported package/CLI 1.36.178, zero runtime dependencies, no lifecycle install scripts, and selftest `ok=true`. The site built 702 pages, committed generated release data as `87c8eec`, and deployed to Cloudflare Pages `e45ef150`; leerness.com root, `/changelog/1.36.178/`, and the Pages origin exposed 1.36.178 on the first probe. GitHub Actions run 33268510915 completed on the implementation SHA with 13/13 jobs successful and failures 0: fast Ubuntu/Windows, four release-runtime jobs, Ubuntu Node 18/20/22 full E2E, and Windows Node 18/20/22/24 full E2E all passed. This supersedes the v1.36.177 CI-only stale POSIX assertion without changing the shipped platform behavior.
 Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.178, https://www.npmjs.com/package/leerness/v/1.36.178, https://leerness.com/changelog/1.36.178/, https://e45ef150.leerness-site.pages.dev/, https://github.com/gugu9999gu/leerness/actions/runs/33268510915
+
+## 2026-08-30 — T-0092 i18n priority-surface repayment
+
+Task: T-0092 / T-0160
+Command: `node scripts/i18n-priority-surface-probe.js`; `npm run lint`; `npm run test:core`; `npm test`; `gate --claims`; secrets/encoding/check/lazy/lenses; external Codex read-only focused review
+Exit: 0
+Note: English `agents list`, default and workspace `insights`, and `toggle list|get|set` human output now use the effective project language, including provider rejection, invalid include, unknown toggle, and corrupt-registry diagnostics. The dedicated red/green probe reports zero Hangul across the priority English surfaces, 3/3 Korean controls, and unchanged canonical JSON shape. The measured 39-command leakage ratchet tightened from 104 to 58 lines; T-0092 remains in progress for the explicit remainder. External Codex review reproduced three P2 gaps—provider rejection diagnostics, workspace insights, and insufficient stored-language/Korean-control coverage—and all were fixed and re-probed. Full verification passed with lint 67 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, and full E2E 467/467 in 5,553 seconds. Multi-session coverage retained 24 concurrent writes, session-scoped evidence/run/handoff/presence, ownership and worktree/path guards, and 11/11 forced race pairs. Claims gate passed 6/6 with 137 claims and zero new failures.
+Artifacts: bin/leerness.js, lib/agents.js, lib/toggles.js, scripts/i18n-priority-surface-probe.js, scripts/e2e.js, package.json, CHANGELOG.md, README.md
+
+## 2026-08-30 — v1.36.180 public release and CI verification
+
+Task: T-0160
+Command: `release publish --git-push --npm-publish --gh-release`; GitHub main/tag/Release and asset digest checks; npm latest/exact metadata plus fresh-prefix selftest; site build/deploy and three public HTTP probes; `gh run view 33307199260`
+Exit: 0
+Note: At publication, GitHub main and tag `v1.36.180` resolved to implementation SHA `6660a53785fb2e22ee0a8aafadb877c315771136`; the public Release asset is 1,996,113 bytes and its SHA-256 `b47b19c06f52e999235f802833e97819799be79e33ef18ef62c0a70fb38f1f9e` matches the local tarball. npm latest/exact are 1.36.180; registry shasum `b8397bfb7e49039f7b720e4d70f7636e2b03483a` and integrity `sha512-H3iSd0omv9lZZBgM5Yi2Io/vx5rOSSeMSd6TqJGGn9saD6jcK9NBXhYDC1TIVRftngFytpr7YuoEfkZUvcnq4A==` match the local pack, and a separate fresh-prefix public install passed selftest 355/355. The site generated 704 pages, committed measured data as `a9e17d2`, and deployed Cloudflare production deployment `b79a1938-dc18-43de-8fa2-0d27acc4591b`; leerness.com root, `/changelog/1.36.180/`, and the Pages origin all returned HTTP 200 with the version marker on the first probe. GitHub Actions run 33307199260 completed on the implementation SHA with all 13 jobs successful and failure/cancelled/skipped counts zero, including Ubuntu Node 18/20/22 and Windows Node 18/20/22/24 full E2E.
+Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.180, https://www.npmjs.com/package/leerness/v/1.36.180, https://leerness.com/changelog/1.36.180/, https://b79a1938.leerness-site.pages.dev/, https://github.com/gugu9999gu/leerness/actions/runs/33307199260
 ```
 
 ## Recommended Direction
 - 명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/insights/persona/agent-mode/py-check/api-skill 이 --language en·LEERNESS_LANG=en·en 프로젝트에서도 한국어 출력. 대조군: health 는 완전 영어(플래그 배선은 존재). 1,488회 실행 감사(2026-08-05)
 
 ## Next Exact Step
-- 영문 모드 픽스처에서 누수 명령을 재측정하고 공통 출력 경로부터 최소 수정
+- Ask whether UR-0090 applies to pages, features, or both; after the answer, register the actual-code preview design for approval. Then repay the next measured T-0092 leakage cluster while keeping the exact 58-line ratchet.

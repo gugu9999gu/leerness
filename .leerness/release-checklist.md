@@ -169,8 +169,8 @@ doNotStore:
 - [x] `scan secrets`, `encoding check`, `check`, `lazy detect`, code/test/contract/debug lens 및 `gate --claims` 6/6 통과; claims 137건 신규 실패 0
 - [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.180 동기화; 새 런타임 의존성·lifecycle script·환경변수 없음
 - [x] `npm pack --dry-run`: 77 files, size 1,996,113 bytes, shasum `b8397bfb7e49039f7b720e4d70f7636e2b03483a`, integrity `sha512-H3iSd0omv9lZZBgM5Yi2Io/vx5rOSSeMSd6TqJGGn9saD6jcK9NBXhYDC1TIVRftngFytpr7YuoEfkZUvcnq4A==`
-- [ ] GitHub main/tag/release 및 Release asset 검증
-- [ ] npm latest/exact, registry integrity/shasum 및 fresh-prefix 설치 검증
-- [ ] 사이트 build/deploy와 leerness.com 루트·v1.36.180 changelog·Pages 원본 검증
-- [ ] GitHub Actions 구현 SHA 전체 작업 검증
+- [x] 공개 시점 GitHub main/tag/release가 구현 SHA `6660a53785fb2e22ee0a8aafadb877c315771136`로 일치; Release asset 1,996,113 bytes, SHA-256 `b47b19c06f52e999235f802833e97819799be79e33ef18ef62c0a70fb38f1f9e` 로컬 일치
+- [x] npm latest/exact 1.36.180; registry shasum `b8397bfb7e49039f7b720e4d70f7636e2b03483a`·integrity 로컬 pack 일치, 별도 fresh-prefix 공개 설치본 selftest 355/355
+- [x] 사이트 commit `a9e17d2`, Astro 704 pages, Cloudflare production deployment `b79a1938-dc18-43de-8fa2-0d27acc4591b`; leerness.com 루트·v1.36.180 changelog·Pages 원본 첫 시도 HTTP 200 및 버전 표식 확인
+- [x] GitHub Actions run 33307199260이 구현 SHA `6660a53785fb2e22ee0a8aafadb877c315771136`에서 전체 13/13 성공; 실패·취소·스킵 0, Ubuntu Node 18/20/22와 Windows Node 18/20/22/24 full E2E 전부 통과
 - [x] 롤백 기준: npm exact `leerness@1.36.179` 재설치, GitHub tag `v1.36.179`, 직전 사이트 커밋 `1312d18`
