@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-29T20:27:51.948Z
+Last generated: 2026-08-30T07:17:24.856Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -98,6 +98,7 @@ Last generated: 2026-08-29T20:27:51.948Z
 - T-0088 session close 가 current-state.md 를 덮어쓴다 — 사용자 보고(hive-analytics): AI 이력에 '또 덮어썼습니다. 복원하겠습니다' 가 남음. 데이터 손실 계열이라 재현 후 보존 경로 확인 필요 → next: 중복/미갱신 백로그 종결 — 보존 회귀 유지
 - T-0089 e2e 타임아웃 여유 스윕 — doctor(30s→120s)만 고쳤고 agents/session 계열 11곳이 여유 1.2~2.6배로 남음. 각 호출의 하위명령별 실제 비용을 측정해 3배 미만인 곳만 상향(근거: 1.36.87 선례 '검사 대상은 속도가 아니라 동작'). 명령 단위 근사 실측: doctor 35.7s selftest 35.3s session 11.4s agents 8.2s (e2e 환경) → next: Publish and verify v1.36.176 under T-0157.
 - T-0090 leerness 자체 테스트가 임시 디렉토리를 누수 — os.tmpdir()에 leerness 계열 79,591개 잔존(총 90,407 항목). e2e/selftest 블록 다수가 mkdtempSync 후 rmSync를 finally 밖에 두거나 아예 안 함. mkdtempSync 자체는 아직 1ms로 정상이나 사용자 디스크를 계속 먹는다. 정리 루틴 + 누수 블록 스윕 필요 → next: Closed; runtime leak guard retained.
+- T-0091 selftest 'parent detect (1.30.2 #157)' 간헐 실패 — 게시된 1.36.100 에서도 재현되고 깨끗한 복사본에선 미발생, 게이트에선 통과. mkdtempSync 2회가 try 블록 밖이라 예외 시 테스트가 그대로 터진다. 원인 규명 + 셋업을 try 안으로 → next: 완료 — v1.36.179 GitHub/npm/leerness.com 공개 배포와 Actions 13/13 검증
 - T-0093 명령 표면 감사 잔여 — invalid-json 5건(task drop --json / lesson drop --json / gate <bogus> --json / release cleanup <non-git> --json / reuse-map --include nosuchproj --json 및 retro·insights)이 --json 모드에서 JSON 아닌 출력 혼입. --json 계약은 '단일 유효 JSON 문서' 여야 한다 → next: 완료 — v1.36.173 공개 배포 및 production/CI 검증 완료
 - T-0094 명령 표면 감사 잔여 — dead-flag 9건: memory archive / intent expand --expand-all·--select / auto-update status / release cleanup --keep 0·--keep -3 / setup-agents --no-setup-agents / provider add --env-flag·--version-args·--desc / reuse-map --strict-elements / api-skill add --no-crawl / parent adopt --select / toggle get gate — 광고된 플래그가 동작하지 않음 → next: 완료 — v1.36.174 공개 배포·CI 13/13 검증 완료; 다음 미해결 백로그 선택
 - T-0095 명령 표면 감사 잔여 — false-claim 17건 중 핵심: update --check 가 레지스트리 조회 실패(오프라인)를 '최신입니다' 로 단정(P1) · round-history 가 leerness 도구 버전을 프로젝트 '현재 버전' 으로 표기 · plan init <path> 가 인자를 무시하고 cwd 에 71파일 워크스페이스 설치(P1) · memory bogus 가 'memory 를 모른다' 고 거짓 안내 · selftest/self check/preview show(손상 스토어) 오보고 → next: Complete; choose next real backlog item.
@@ -152,6 +153,7 @@ Last generated: 2026-08-29T20:27:51.948Z
 - T-0155 다음작업진행 → next: 완료 — 다음 미해결 백로그를 새 라운드에서 선택
 - T-0156 다음 작업 이어서 진행하고, 남은 작업 뭐가있는지 알려줘 . → next: Recommended next: T-0109 explicit per-session scope for collision avoidance, then T-0089 CI timeout/headroom.
 - T-0157 다음 작업 이어서 진행 . → next: Start T-0022 data-integrity mutation hunt, then T-0091 flaky selftest and T-0092 i18n leakage.
+- T-0158 다음 작업 이어서 진행 → next: T-0092 영문 모드 i18n 누수 재현 범위 축소 및 첫 수정 라운드
 
 ## In Progress
 - 없음
@@ -204,7 +206,7 @@ Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.178, https:
 ```
 
 ## Recommended Direction
-- T-0091 selftest `parent detect (1.30.2 #157)` 간헐 실패를 먼저 재현해 원인과 셋업 수명 경계를 확정한다. 이후 T-0092 i18n 누수 감사를 진행한다.
+- 명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/insights/persona/agent-mode/py-check/api-skill 이 --language en·LEERNESS_LANG=en·en 프로젝트에서도 한국어 출력. 대조군: health 는 완전 영어(플래그 배선은 존재). 1,488회 실행 감사(2026-08-05)
 
 ## Next Exact Step
-- T-0091 관련 `mkdtempSync` 두 호출과 parent-detect selftest를 격리 픽스처에서 반복 실행하고, 예외 발생 시 정리·실패 보고가 보존되는지 확인한다.
+- 영문 모드 픽스처에서 누수 명령을 재측정하고 공통 출력 경로부터 최소 수정

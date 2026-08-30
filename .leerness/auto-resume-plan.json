@@ -1,13 +1,13 @@
 {
-  "savedAt": "2026-08-29T18:31:58.142Z",
-  "nextRoundVersion": "next after 1.36.178",
-  "expectedFireAt": "2026-08-29T18:56:58.138Z",
+  "savedAt": "2026-08-30T05:18:59.044Z",
+  "nextRoundVersion": "next after 1.36.179",
+  "expectedFireAt": "2026-08-30T05:43:59.041Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.36.178",
-    "activeTaskId": "T-0022",
-    "activeTaskRequest": "파일변경(--apply/--fix/mutate) 명령 데이터무결성 헌트: precondition 미검증 mutate·부분쓰기·인코딩 파괴 (rotate targets + auto-fix-detect-before-mutate 교훈)",
+    "currentVersion": "1.36.179",
+    "activeTaskId": "T-0158",
+    "activeTaskRequest": "다음 작업 이어서 진행",
     "memorySurface": {
       "tasksInProgress": 1,
       "decisions": 18,

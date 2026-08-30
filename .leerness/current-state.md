@@ -15,7 +15,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Current State
 
-Updated: 2026-08-29
+Updated: 2026-08-30
 
 ## Now
 - 대기 중 <!-- leerness:auto -->
@@ -25,7 +25,7 @@ Updated: 2026-08-29
 - release가 다시 기록한 `.leerness/auto-resume-plan.json`에서 동적 시간, `--status completed`, `--filter`, 내부 `_apps` 실행 제안이 모두 제거됨
 
 ## Next
-- T-0091 selftest `parent detect (1.30.2 #157)` 간헐 실패를 격리 재현하고, `mkdtempSync` 셋업 수명·예외 경계를 감사한다 <!-- leerness:auto -->
+- 명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/insights/persona/agent-mode/py-check/api-skill 이 --language en·LEERNESS_LANG=en·en 프로젝트에서도 한국어 출력. 대조군: health 는 완전 영어(플래그 배선은 존재). 1,488회 실행 감사(2026-08-05) <!-- leerness:auto -->
 - 다음 백로그 선택 전 `task list`의 장기 정체 항목과 R2 범위를 현재 제품 우선순위에 맞게 재검토
 
 ## Blockers

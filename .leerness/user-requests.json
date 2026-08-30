@@ -1022,12 +1022,14 @@
       "id": "UR-0089",
       "text": "다음 작업 이어서 진행",
       "recordedAt": "2026-08-30T03:07:16.883Z",
-      "status": "open",
+      "status": "completed",
       "linkedTaskIds": [],
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
-      "notes": ""
+      "notes": "",
+      "updatedAt": "2026-08-30T07:13:58.139Z",
+      "completedAt": "2026-08-30T07:13:58.139Z"
     }
   ],
-  "updatedAt": "2026-08-30T03:07:16.884Z"
+  "updatedAt": "2026-08-30T07:13:58.139Z"
 }
