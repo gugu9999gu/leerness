@@ -174,3 +174,19 @@ doNotStore:
 - [x] 사이트 commit `a9e17d2`, Astro 704 pages, Cloudflare production deployment `b79a1938-dc18-43de-8fa2-0d27acc4591b`; leerness.com 루트·v1.36.180 changelog·Pages 원본 첫 시도 HTTP 200 및 버전 표식 확인
 - [x] GitHub Actions run 33307199260이 구현 SHA `6660a53785fb2e22ee0a8aafadb877c315771136`에서 전체 13/13 성공; 실패·취소·스킵 0, Ubuntu Node 18/20/22와 Windows Node 18/20/22/24 full E2E 전부 통과
 - [x] 롤백 기준: npm exact `leerness@1.36.179` 재설치, GitHub tag `v1.36.179`, 직전 사이트 커밋 `1312d18`
+
+## 2026-08-31 — v1.36.182
+
+- [x] T-0092 `milestones` English human output 누수 4줄을 0으로 현지화하고 저장 언어·환경변수·명시 플래그, Korean 대조군, JSON 계약을 실제 CLI로 검증
+- [x] 외부 Codex P2 2건을 재현·수정: UTC 자정 경계의 ETA JSON 비교 불안정과 25-tag fixture의 500+ 종료 분기 미도달
+- [x] `npm run test:core` 및 전체 `npm test` 통과: lint 68 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467(5,354초)
+- [x] 멀티세션 E2E: 동시 24쓰기 무손실, 사용자 상태 writer 41종 canonical 락, Claude↔Codex 상호 가시성, sessionKey별 evidence/run/handoff/presence 격리, 지연 경쟁 11쌍 통과
+- [x] `.harness/` → `.leerness/` fresh 설치·canonical migration·dual-live fail-closed·설치본 legacy run remap 통과
+- [x] `verify`, `audit`, `check`, `scan secrets`, `encoding check`, `lazy detect`, code/test/contract/recovery/debug lens 및 `gate --claims` 6/6 통과; claims 139건 신규 실패 0
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.182 동기화; 새 런타임 의존성·lifecycle script·환경변수 없음
+- [x] `npm pack --dry-run`: 78 files, size 2,001,971 bytes, shasum `e45b8bcf12c064181d488866e729c02d73debd92`, integrity `sha512-xbj2jAvu+7P5njufeD/il+eKIuqPre1I5jtBC2Ad2TJr48NMCAdmh6Glgd7WbIFOhb9DM1i96esCKvggDfe5/Q==`
+- [ ] GitHub main/tag/release와 exact tarball 자산 검증
+- [ ] npm latest/exact·registry integrity·fresh-prefix 설치본 selftest 검증
+- [ ] leerness.com 루트·v1.36.182 changelog·llms 표면과 Cloudflare deployment 검증
+- [ ] GitHub Actions 구현 SHA 전체 13/13 성공 및 실패·취소·skip 0 확인
+- [x] 롤백 기준: npm exact `leerness@1.36.181` 재설치, GitHub tag `v1.36.181`, 직전 사이트 커밋 `b6c7e62`

@@ -49,7 +49,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.181';
+const VERSION = '1.36.182';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -3408,6 +3408,7 @@ function _computeMilestones(root) {
 
 function milestonesCmd(root) {
   root = absRoot(root);
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
   const isTty = process.stdout && process.stdout.isTTY;
   const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
   const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
@@ -3416,29 +3417,31 @@ function milestonesCmd(root) {
   const data = _computeMilestones(root);
   if (data.gitHistoryState !== 'available') _throwGitHistoryUnavailable(data.gitHistoryError);
   if (has('--json')) { log(JSON.stringify(data, null, 2)); return; }
-  log(cy(`# leerness milestones (1.9.229) — 도달 마일스톤 + 다음 ETA`));
+  log(cy(t(`# leerness milestones (1.9.229) — 도달 마일스톤 + 다음 ETA`, `# leerness milestones (1.9.229) — reached milestones + next ETA`)));
   log('');
-  log(`  📦 총 라운드: ${gr(String(data.totalRounds))}`);
+  log(t(`  📦 총 라운드: ${gr(String(data.totalRounds))}`, `  📦 total rounds: ${gr(String(data.totalRounds))}`));
   if (data.baselineAt) log(`  📍 baseline: ${(data.baselineAt || '').split(' ')[0]}`);
-  if (data.avgRoundsPerDay) log(`  📊 평균: ${gr(data.avgRoundsPerDay + ' rounds/day')}`);
+  if (data.avgRoundsPerDay) log(t(`  📊 평균: ${gr(data.avgRoundsPerDay + ' rounds/day')}`, `  📊 average: ${gr(data.avgRoundsPerDay + ' rounds/day')}`));
   log('');
   if (data.reached.length === 0) {
-    log(dm(`  (도달 마일스톤 없음 — 첫 R25 마일스톤 진행 중)`));
+    log(dm(t(`  (도달 마일스톤 없음 — 첫 R25 마일스톤 진행 중)`, `  (no milestones reached — progressing toward the first R25 milestone)`)));
   } else {
-    log(`  도달 마일스톤 ${data.reached.length}개:`);
+    log(t(`  도달 마일스톤 ${data.reached.length}개:`, `  ${data.reached.length} milestone${data.reached.length === 1 ? '' : 's'} reached:`));
     for (const m of data.reached) {
       log(`    ✓ R${m.milestone} ${gr(`(v${m.version}, ${m.reachedAt}, +${m.daysFromBaseline}d)`)}`);
     }
   }
   log('');
   if (data.next) {
-    log(yl(`  🎯 다음 마일스톤: R${data.next.milestone}`));
-    log(`    • ${data.next.roundsRemaining} 라운드 남음`);
+    log(yl(t(`  🎯 다음 마일스톤: R${data.next.milestone}`, `  🎯 next milestone: R${data.next.milestone}`)));
+    log(t(`    • ${data.next.roundsRemaining} 라운드 남음`, `    • ${data.next.roundsRemaining} rounds remaining`));
     if (data.next.etaDays != null) {
-      log(`    • ETA: ${data.next.etaDate} (~${data.next.etaDays}일 후, 현재 속도 기준)`);
+      log(t(`    • ETA: ${data.next.etaDate} (~${data.next.etaDays}일 후, 현재 속도 기준)`, `    • ETA: ${data.next.etaDate} (~${data.next.etaDays} days from now, based on current pace)`));
     }
   } else {
-    log(data && (data.roundCount || data.totalRounds) ? gr(`  🎉 모든 마일스톤 달성 (500+)`) : dm(`  (이 저장소 계보의 릴리스 태그 이력 없음)`));   // 1.36.38 (#4): 이력 0 인데 달성 축하 금지
+    log(data && (data.roundCount || data.totalRounds)
+      ? gr(t(`  🎉 모든 마일스톤 달성 (500+)`, `  🎉 all milestones reached (500+)`))
+      : dm(t(`  (이 저장소 계보의 릴리스 태그 이력 없음)`, `  (no release-tag history for this repository lineage)`)));   // 1.36.38 (#4): 이력 0 인데 달성 축하 금지
   }
 }
 

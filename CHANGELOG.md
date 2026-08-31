@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.182 — 2026-08-31
+
+- T-0162: English-mode milestones now contains zero Hangul across stored, environment, and explicit locale paths while preserving Korean and locale-independent JSON contracts. The 39-command aggregate leakage ratchet tightens exactly from 38 to 34 lines. External Codex review findings are covered by UTC-midnight-safe ETA comparison and real CLI coverage of the 500+ terminal branch.
+
 ## 1.36.181 — 2026-08-30
 
 - T-0161: English-mode release cadence, idempotency audit, plan list, and round-history now contain zero Hangul across stored, environment, and explicit locale paths. A dedicated edge-state probe preserves Korean output, legacy plan sentinels, locale-independent auto-fix JSON/state writes, and the 39-command leakage ratchet tightens exactly from 58 to 38 lines so improvements cannot mask regressions elsewhere.

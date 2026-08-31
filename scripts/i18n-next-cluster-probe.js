@@ -31,12 +31,13 @@ function run(args, env = baseEnv) {
   });
 }
 
-function git(args, extraEnv = {}) {
+function git(args, extraEnv = {}, input) {
   return cp.spawnSync('git', args, {
     cwd: project,
     env: { ...baseEnv, ...extraEnv },
     encoding: 'utf8',
     timeout: 30000,
+    input,
   });
 }
 
@@ -78,6 +79,17 @@ function normalizedJson(label, result) {
     throw new Error(`${label} did not return one JSON document: ${error.message}`);
   }
   if (parsed && typeof parsed === 'object') delete parsed.auditedAt;
+  // Milestone ETA is intentionally based on the wall clock. English and Korean
+  // probes run in separate processes, so they can legitimately straddle UTC
+  // midnight. Validate the public date shape, then remove only that volatility
+  // before comparing the locale-independent payloads.
+  if (parsed && parsed.next && Object.prototype.hasOwnProperty.call(parsed.next, 'etaDate')) {
+    const etaDate = parsed.next.etaDate;
+    if (etaDate !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(etaDate))) {
+      throw new Error(`${label} returned an invalid milestone etaDate: ${etaDate}`);
+    }
+    if (etaDate !== null) parsed.next.etaDate = '<clock-derived-date>';
+  }
   return parsed;
 }
 
@@ -92,6 +104,7 @@ const surfaces = [
   ['idempotency audit', ['idempotency', 'audit', '--path', project]],
   ['plan list', ['plan', 'list', '--path', project]],
   ['round-history', ['round-history', '--path', project]],
+  ['milestones', ['milestones', '--path', project]],
 ];
 
 try {
@@ -206,8 +219,19 @@ try {
   requireGitSuccess('git tag second snapshot', git(['tag', '-a', 'v1.0.1', '-m', 'v1.0.1'], {
     GIT_COMMITTER_DATE: secondDate,
   }));
+  // Reach R25 without manufacturing another 23 commits. Annotated tags have
+  // independent creation times, which is exactly the evidence milestones
+  // consumes, and exercise reached/next/ETA rendering in one small fixture.
+  for (let i = 2; i < 25; i++) {
+    const version = `v1.0.${i}`;
+    const tagDate = `2026-08-29T00:${String(i).padStart(2, '0')}:00+09:00`;
+    requireGitSuccess(`git tag ${version}`, git(['tag', '-a', version, '-m', version], {
+      GIT_COMMITTER_DATE: tagDate,
+    }));
+  }
   requireNoHangul('release cadence with measured history', run(['release', 'cadence', '--path', project]));
   requireNoHangul('round-history with tags', run(['round-history', '--path', project]));
+  requireNoHangul('milestones with reached history', run(['milestones', '--path', project]));
 
   // Machine payloads remain the canonical, locale-independent contract. The
   // idempotency timestamp is intentionally volatile and is normalized only
@@ -226,6 +250,7 @@ try {
     ['idempotency audit', ['위반 발견', '중복 룰']],
     ['plan list', ['완료기준(Done-When)', 'Tasks:', '완료)']],
     ['round-history', ['자율 라운드 통계', '누적 라운드', '최근 10 tags']],
+    ['milestones', ['도달 마일스톤', '총 라운드', '다음 마일스톤', '라운드 남음']],
   ]);
   for (const [label, args] of surfaces) {
     const output = requireSuccess(`${label} Korean control`, run(args, koEnv));
@@ -233,7 +258,30 @@ try {
     if (missing.length) throw new Error(`${label} Korean control lost anchors: ${missing.join(', ')}`);
   }
 
-  console.log('✓ Four next-cluster English surfaces contain no Hangul across locale paths and edge states; 4/4 Korean controls and JSON contracts remain intact');
+  // Exercise the terminal 500+ renderer without spawning another 475 `git tag`
+  // processes. Lightweight semver refs are valid release tags and one atomic
+  // update-ref process gives the real CLI a 500-tag history.
+  const headResult = git(['rev-parse', 'HEAD']);
+  requireGitSuccess('git resolve terminal milestone fixture', headResult);
+  const head = String(headResult.stdout || '').trim();
+  const refs = [];
+  for (let i = 25; i < 500; i++) refs.push(`create refs/tags/v1.0.${i} ${head}`);
+  requireGitSuccess('git create terminal milestone fixture', git(['update-ref', '--stdin'], {}, refs.join('\n') + '\n'));
+  const terminalEn = requireNoHangul('milestones all reached (English)', run(['milestones', '--path', project, '--language', 'en']));
+  if (!terminalEn.includes('all milestones reached (500+)')) {
+    throw new Error('milestones English terminal branch lost its 500+ completion marker');
+  }
+  const terminalKo = requireSuccess('milestones all reached (Korean)', run(['milestones', '--path', project], koEnv));
+  if (!terminalKo.includes('모든 마일스톤 달성 (500+)')) {
+    throw new Error('milestones Korean terminal branch lost its 500+ completion marker');
+  }
+  const terminalJson = normalizedJson('milestones terminal JSON', run(['milestones', '--path', project, '--json']));
+  if (terminalJson.totalRounds !== 500 || terminalJson.next !== null
+      || !Array.isArray(terminalJson.reached) || terminalJson.reached.at(-1)?.milestone !== 500) {
+    throw new Error('milestones terminal JSON did not preserve the 500-round contract');
+  }
+
+  console.log('✓ Five next-cluster English surfaces contain no Hangul across locale paths and edge states; 5/5 Korean controls and JSON contracts remain intact');
 } catch (error) {
   console.error(`✗ ${error && error.message ? error.message : error}`);
   process.exitCode = 1;

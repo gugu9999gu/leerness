@@ -1051,7 +1051,17 @@
       "notes": "",
       "updatedAt": "2026-08-31T04:22:41.166Z",
       "completedAt": "2026-08-31T04:22:41.166Z"
+    },
+    {
+      "id": "UR-0092",
+      "text": "다음작업 진행",
+      "recordedAt": "2026-08-31T04:47:32.363Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-08-31T04:22:41.167Z"
+  "updatedAt": "2026-08-31T04:47:32.363Z"
 }

@@ -11030,7 +11030,8 @@ total++;
     // 1.36.174: provider list 영어 모드의 요약/안내 두 줄을 영어화해 104로 조임(39개 명령 실측).
     // 1.36.180: agents list(18) + insights(17) + toggle list(11) 우선 표면을 영어화해 58로 조임.
     // 1.36.181: 공동 최상위 release cadence/idempotency audit/plan list/round-history(각 5)를 영어화해 38로 조임.
-    const BASELINE = 38;
+    // 1.36.182: milestones 빈 이력 표면 4줄을 영어화해 34로 조임. 도달/ETA 분기도 전용 probe가 고정한다.
+    const BASELINE = 34;
     dbg.baseline = BASELINE;
     // 합계가 우연히 낮아진 뒤 다른 명령의 회귀가 그 여유를 소비하지 못하게 exact 로 잠근다.
     // 번역이 더 진행되면 실측값과 BASELINE을 같은 변경에서 함께 낮춰야 한다.
@@ -11038,7 +11039,7 @@ total++;
     // 이번 라운드가 고친 표면은 **0 이어야** 한다 — 래칫과 별개로 회귀를 직접 막는다.
     const cmdOut = String(R(['commands']).stdout || '');
     dbg.commandsClean = cmdOut.split('\n').filter(l => HANGUL.test(l)).length === 0;
-    dbg.nextClusterClean = ['release cadence', 'idempotency audit', 'plan list', 'round-history']
+    dbg.nextClusterClean = ['release cadence', 'idempotency audit', 'plan list', 'round-history', 'milestones']
       .every(cmd => measured.get(cmd) === 0);
     // 한국어 사용자가 보던 것은 **바뀌면 안 된다**. 영어화하면서 `개` 단위를 양쪽에서 없애는 회귀를 냈고
     //   직전 커밋과의 바이트 비교가 잡았다. 여기서는 한국어 출력이 여전히 한국어 관례를 지키는지 단언한다.
