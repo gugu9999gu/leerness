@@ -1,110 +1,6 @@
 {
   "reports": [
     {
-      "auditedAt": "2026-08-27T22:46:21.843Z",
-      "auditVersion": "1.36.173",
-      "findings": {
-        "critical": [
-          {
-            "kind": "missing-user-requests",
-            "count": 2,
-            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
-            "items": [
-              {
-                "id": "UR-0028",
-                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
-              },
-              {
-                "id": "UR-0051",
-                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
-              }
-            ]
-          },
-          {
-            "kind": "wakeup-missed",
-            "deltaMin": 78,
-            "detail": "wakeup 78분 지남 — 다음 라운드 진입 늦음"
-          }
-        ],
-        "warning": [
-          {
-            "kind": "stale-user-requests",
-            "count": 19,
-            "detail": "19건 사용자 요청이 7일+ open 상태"
-          }
-        ],
-        "info": [
-          {
-            "kind": "auto-resume-plan-ready",
-            "detail": "nextRoundVersion=next after 1.36.173, focus=다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 "
-          },
-          {
-            "kind": "next-action-pending",
-            "count": 6,
-            "detail": "6건 next-action 대기 — leerness next-action take 로 즉시 처리"
-          }
-        ]
-      },
-      "summary": {
-        "criticalCount": 2,
-        "warningCount": 1,
-        "infoCount": 2,
-        "needsAttention": true
-      }
-    },
-    {
-      "auditedAt": "2026-08-28T08:12:31.867Z",
-      "auditVersion": "1.36.174",
-      "findings": {
-        "critical": [
-          {
-            "kind": "missing-user-requests",
-            "count": 2,
-            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
-            "items": [
-              {
-                "id": "UR-0028",
-                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
-              },
-              {
-                "id": "UR-0051",
-                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
-              }
-            ]
-          },
-          {
-            "kind": "wakeup-missed",
-            "deltaMin": 78,
-            "detail": "wakeup 78분 지남 — 다음 라운드 진입 늦음"
-          }
-        ],
-        "warning": [
-          {
-            "kind": "stale-user-requests",
-            "count": 19,
-            "detail": "19건 사용자 요청이 7일+ open 상태"
-          }
-        ],
-        "info": [
-          {
-            "kind": "auto-resume-plan-ready",
-            "detail": "nextRoundVersion=next after 1.36.174, focus=다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 "
-          },
-          {
-            "kind": "next-action-pending",
-            "count": 6,
-            "detail": "6건 next-action 대기 — leerness next-action take 로 즉시 처리"
-          }
-        ]
-      },
-      "summary": {
-        "criticalCount": 2,
-        "warningCount": 1,
-        "infoCount": 2,
-        "needsAttention": true
-      }
-    },
-    {
       "auditedAt": "2026-08-28T10:30:58.830Z",
       "auditVersion": "1.36.175",
       "findings": {
@@ -514,7 +410,111 @@
         "infoCount": 2,
         "needsAttention": true
       }
+    },
+    {
+      "auditedAt": "2026-08-31T04:25:30.911Z",
+      "auditVersion": "1.36.174",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          },
+          {
+            "kind": "wakeup-missed",
+            "deltaMin": 89,
+            "detail": "wakeup 89분 지남 — 다음 라운드 진입 늦음"
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 19,
+            "detail": "19건 사용자 요청이 7일+ open 상태"
+          }
+        ],
+        "info": [
+          {
+            "kind": "auto-resume-plan-ready",
+            "detail": "nextRoundVersion=next after 1.36.181, focus=다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 "
+          },
+          {
+            "kind": "next-action-pending",
+            "count": 6,
+            "detail": "6건 next-action 대기 — leerness next-action take 로 즉시 처리"
+          }
+        ]
+      },
+      "summary": {
+        "criticalCount": 2,
+        "warningCount": 1,
+        "infoCount": 2,
+        "needsAttention": true
+      }
+    },
+    {
+      "auditedAt": "2026-08-31T04:30:02.469Z",
+      "auditVersion": "1.36.181",
+      "findings": {
+        "critical": [
+          {
+            "kind": "missing-user-requests",
+            "count": 2,
+            "detail": "2건 사용자 요청이 task-log/plan/decisions 에 매칭 안 됨",
+            "items": [
+              {
+                "id": "UR-0028",
+                "text": "[영상 Phase 2~4 후속] 시각 다양화(테마별 일러스트/모션)·한영 TTS 내레이션·미니 터미널 데모 씬. Phase 1(릴리스별 upda"
+              },
+              {
+                "id": "UR-0051",
+                "text": "영상 폰트 안정화: ctacmd 모노 박스가 일부 렌더에서 serif fallback(구글폰트 외부 로드 비결정성, hyperframes lin"
+              }
+            ]
+          },
+          {
+            "kind": "wakeup-missed",
+            "deltaMin": 94,
+            "detail": "wakeup 94분 지남 — 다음 라운드 진입 늦음"
+          }
+        ],
+        "warning": [
+          {
+            "kind": "stale-user-requests",
+            "count": 19,
+            "detail": "19건 사용자 요청이 7일+ open 상태"
+          }
+        ],
+        "info": [
+          {
+            "kind": "auto-resume-plan-ready",
+            "detail": "nextRoundVersion=next after 1.36.181, focus=다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 "
+          },
+          {
+            "kind": "next-action-pending",
+            "count": 6,
+            "detail": "6건 next-action 대기 — leerness next-action take 로 즉시 처리"
+          }
+        ]
+      },
+      "summary": {
+        "criticalCount": 2,
+        "warningCount": 1,
+        "infoCount": 2,
+        "needsAttention": true
+      }
     }
   ],
-  "updatedAt": "2026-08-30T12:25:12.698Z"
+  "updatedAt": "2026-08-31T04:30:02.482Z"
 }

@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-08-30T12:25:12.018Z
+Last generated: 2026-08-31T04:30:01.714Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -155,9 +155,10 @@ Last generated: 2026-08-30T12:25:12.018Z
 - T-0157 다음 작업 이어서 진행 . → next: Start T-0022 data-integrity mutation hunt, then T-0091 flaky selftest and T-0092 i18n leakage.
 - T-0158 다음 작업 이어서 진행 → next: T-0092 영문 모드 i18n 누수 재현 범위 축소 및 첫 수정 라운드
 - T-0160 Release v1.36.180 i18n priority-surface repayment and publication → next: Ask the mandatory UR-0090 clarification, then continue T-0092 from the measured 58-line ratchet with release cadence/idempotency audit/plan list/round-history.
+- T-0161 T-0092 영문 i18n 잔여 상위 클러스터 현지화 및 v1.36.181 출하 . → next: Continue T-0092 from exact 38-line ratchet; next largest clusters are milestones or skill list (4 each), after mandatory T-0159 scope clarification.
 
 ## In Progress
-- T-0092 명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/insights/persona/agent-mode/py-check/api-skill 이 --language en·LEERNESS_LANG=en·en 프로젝트에서도 한국어 출력. 대조군: health 는 완전 영어(플래그 배선은 존재). 1,488회 실행 감사(2026-08-05) → next: Repay next measured leakage cluster among release cadence, idempotency audit, plan list, and round-history; keep exact 58-line ratchet
+- T-0092 명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/insights/persona/agent-mode/py-check/api-skill 이 --language en·LEERNESS_LANG=en·en 프로젝트에서도 한국어 출력. 대조군: health 는 완전 영어(플래그 배선은 존재). 1,488회 실행 감사(2026-08-05) → next: Continue from exact 38 lines across 18 commands; prioritize milestones or skill list (4 each), then mode/roles/permissions/session-resume (3 each).
 
 ## Incomplete / Waiting / On Hold / Blocked
 - T-0159 실제 프로젝트 코드 기반 시안 구현·표시·승인 워크플로로 전환 (UR-0090) → next: 사용자에게 페이지 또는 기능 중 어느 쪽인지, 또는 둘 다인지 확인한 뒤 preview add로 설계 승인 요청
@@ -204,10 +205,18 @@ Command: `release publish --git-push --npm-publish --gh-release`; GitHub main/ta
 Exit: 0
 Note: At publication, GitHub main and tag `v1.36.180` resolved to implementation SHA `6660a53785fb2e22ee0a8aafadb877c315771136`; the public Release asset is 1,996,113 bytes and its SHA-256 `b47b19c06f52e999235f802833e97819799be79e33ef18ef62c0a70fb38f1f9e` matches the local tarball. npm latest/exact are 1.36.180; registry shasum `b8397bfb7e49039f7b720e4d70f7636e2b03483a` and integrity `sha512-H3iSd0omv9lZZBgM5Yi2Io/vx5rOSSeMSd6TqJGGn9saD6jcK9NBXhYDC1TIVRftngFytpr7YuoEfkZUvcnq4A==` match the local pack, and a separate fresh-prefix public install passed selftest 355/355. The site generated 704 pages, committed measured data as `a9e17d2`, and deployed Cloudflare production deployment `b79a1938-dc18-43de-8fa2-0d27acc4591b`; leerness.com root, `/changelog/1.36.180/`, and the Pages origin all returned HTTP 200 with the version marker on the first probe. GitHub Actions run 33307199260 completed on the implementation SHA with all 13 jobs successful and failure/cancelled/skipped counts zero, including Ubuntu Node 18/20/22 and Windows Node 18/20/22/24 full E2E.
 Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.180, https://www.npmjs.com/package/leerness/v/1.36.180, https://leerness.com/changelog/1.36.180/, https://b79a1938.leerness-site.pages.dev/, https://github.com/gugu9999gu/leerness/actions/runs/33307199260
+
+## 2026-08-31 — v1.36.181 i18n cluster repayment and public release
+
+Task: T-0161 / T-0092 / UR-0091
+Command: `npm run test:i18n`; `npm run test:core`; `npm test`; external Codex focused review; GitHub/npm/site publication and public probes; `gh run view 33350904862`; global `leerness@1.36.181` install/selftest; `leerness verify-claim T-0161 --strict-claims`; `leerness gate . --claims`
+Exit: 0
+Note: English `release cadence`, `idempotency audit`, `plan list`, and `round-history` human output now have zero Hangul leakage while canonical JSON, progress markdown bytes, user-request semantics, Korean controls, and legacy unset rendering remain stable. The exact 39-command leakage ratchet tightened from 58 to 38 lines across 18 remaining commands. Full E2E passed 467/467; external Codex final review found no P0/P1/P2; the public npm fresh install and synchronized global install both passed selftest 355/355. GitHub Release/tag and npm latest are 1.36.181, leerness.com root/changelog/llms returned HTTP 200 with 1.36.181, and Actions run 33350904862 completed 13/13 with failure/cancelled/skipped counts zero. The latest 1.36.181 claims gate passed 6/6 with 139 claims and zero new failures.
+Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.181, https://www.npmjs.com/package/leerness/v/1.36.181, https://leerness.com/changelog/1.36.181/, https://bee5c320.leerness-site.pages.dev/, https://github.com/gugu9999gu/leerness/actions/runs/33350904862
 ```
 
 ## Recommended Direction
 - 명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/insights/persona/agent-mode/py-check/api-skill 이 --language en·LEERNESS_LANG=en·en 프로젝트에서도 한국어 출력. 대조군: health 는 완전 영어(플래그 배선은 존재). 1,488회 실행 감사(2026-08-05)
 
 ## Next Exact Step
-- Ask whether UR-0090 applies to pages, features, or both; after the answer, register the actual-code preview design for approval. Then repay the next measured T-0092 leakage cluster while keeping the exact 58-line ratchet.
+- Ask whether the actual-code preview workflow in T-0159 applies to pages, features, or both. After the answer and preview approval, continue T-0092 from the exact 38-line ratchet with milestones or skill list (4 each), then mode/roles/permissions/session-resume (3 each).

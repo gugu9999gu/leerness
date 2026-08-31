@@ -25,4 +25,4 @@ doNotStore:
 | ID | Trigger | Rule | Added | Status | Last Verified |
 |---|---|---|---|---|---|
 | R-0001 | every-round | 매 작업(라운드)마다 출하 전 codex 를 호출해 변경분 검수(교차 리뷰)를 수행하고 발견을 재현/반박 후 반영 | 2026-07-21 | active | - |
-| R-0002 | session-close | 모든 의미 있는 변경 라운드마다 GitHub push, npm 최신 버전 게시, leerness.com 갱신 및 세 대상 배포 검증 | 2026-08-24 | active | 2026-08-30 |
+| R-0002 | session-close | 모든 의미 있는 변경 라운드마다 GitHub push, npm 최신 버전 게시, leerness.com 갱신 및 세 대상 배포 검증 | 2026-08-24 | active | 2026-08-31 |
