@@ -11006,7 +11006,7 @@ total++;
       ['provider', 'list'], ['skill', 'list'], ['next-action', 'list'], ['session-resume'],
       ['idempotency', 'audit'], ['context', 'budget'], ['drift', 'check'], ['verify'],
       ['encoding', 'check'], ['scan', 'secrets'], ['which'], ['glossary'], ['release', 'cadence']];
-    let leaky = 0, produced = 0; const worst = [], silent = [];
+    let leaky = 0, produced = 0; const worst = [], silent = [], measured = new Map();
     for (const a of CMDS) {
       const r = R(a);
       const out = String(r.stdout || '') + String(r.stderr || '');
@@ -11015,6 +11015,7 @@ total++;
       if (r.status === 0 && out.trim()) produced++; else silent.push(a.join(' ') + '(exit=' + r.status + ')');
       const n = out.split('\n').filter(l => HANGUL.test(l)).length;
       leaky += n;
+      measured.set(a.join(' '), n);
       if (n) worst.push(a.join(' ') + ':' + n);
     }
     dbg.leaky = leaky; dbg.produced = produced; dbg.worst = worst.slice(0, 8); dbg.silent = silent;
@@ -11028,12 +11029,17 @@ total++;
     //   갚은 만큼만 낮춘다 — 여유를 남기면 그 안에서 조용히 썩는다(1.36.82 의 자기참조 가드에서 겪은 형태).
     // 1.36.174: provider list 영어 모드의 요약/안내 두 줄을 영어화해 104로 조임(39개 명령 실측).
     // 1.36.180: agents list(18) + insights(17) + toggle list(11) 우선 표면을 영어화해 58로 조임.
-    const BASELINE = 58;
+    // 1.36.181: 공동 최상위 release cadence/idempotency audit/plan list/round-history(각 5)를 영어화해 38로 조임.
+    const BASELINE = 38;
     dbg.baseline = BASELINE;
-    dbg.withinRatchet = leaky <= BASELINE;
+    // 합계가 우연히 낮아진 뒤 다른 명령의 회귀가 그 여유를 소비하지 못하게 exact 로 잠근다.
+    // 번역이 더 진행되면 실측값과 BASELINE을 같은 변경에서 함께 낮춰야 한다.
+    dbg.exactRatchet = leaky === BASELINE;
     // 이번 라운드가 고친 표면은 **0 이어야** 한다 — 래칫과 별개로 회귀를 직접 막는다.
     const cmdOut = String(R(['commands']).stdout || '');
     dbg.commandsClean = cmdOut.split('\n').filter(l => HANGUL.test(l)).length === 0;
+    dbg.nextClusterClean = ['release cadence', 'idempotency audit', 'plan list', 'round-history']
+      .every(cmd => measured.get(cmd) === 0);
     // 한국어 사용자가 보던 것은 **바뀌면 안 된다**. 영어화하면서 `개` 단위를 양쪽에서 없애는 회귀를 냈고
     //   직전 커밋과의 바이트 비교가 잡았다. 여기서는 한국어 출력이 여전히 한국어 관례를 지키는지 단언한다.
     const koEnv = Object.assign({}, ENV, { LEERNESS_LANG: 'ko' });
@@ -11046,9 +11052,9 @@ total++;
       && Object.values(cj.categories).every(list => list.every(e => typeof e.cmd === 'string' && typeof e.desc === 'string'
         && e.descEn === undefined && e.cmdEn === undefined))     // 내부 번역 키가 payload 로 새면 70% 부풀었다(검수 P1 실측)
       && cj.lang === 'en';                                        // 로케일 의존을 **명시**한다 — 암묵적으로 흔들리지 않는다
-    ok = dbg.gitInit && dbg.probeAlive && dbg.coverage && dbg.withinRatchet && dbg.commandsClean && dbg.koIntact && dbg.jsonContract;
+    ok = dbg.gitInit && dbg.probeAlive && dbg.coverage && dbg.exactRatchet && dbg.commandsClean && dbg.nextClusterClean && dbg.koIntact && dbg.jsonContract;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
-  console.log(ok ? `✓ O(1.36.111/T-0092) 영어 누출 ${dbg.leaky}줄 ≤ 래칫 ${dbg.baseline} · commands 표면 0 · 한국어 출력 불변 · --json 계약 유지 · 계측 살아있음`
+  console.log(ok ? `✓ O(1.36.111/T-0092) 영어 누출 ${dbg.leaky}줄 = exact 래칫 ${dbg.baseline} · commands/next-cluster 표면 0 · 한국어 출력 불변 · --json 계약 유지 · 계측 살아있음`
     : '✗ 1.36.111 i18n 래칫 위반 ' + JSON.stringify(dbg));
   if (!ok) failed++;
 }

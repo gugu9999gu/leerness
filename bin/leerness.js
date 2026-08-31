@@ -49,7 +49,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.180';
+const VERSION = '1.36.181';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -11443,19 +11443,28 @@ function commandsCmd(root) {
 // 1.9.374 (UR-0074): release cadence — 릴리스 빈도 진단 + 권장 (외부리뷰 반복 지적 "릴리스 케이던스 과다" 가시화). git tag 재사용, 읽기 전용.
 function releaseCadenceCmd(root) {
   root = absRoot(root);
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
   const rh = _computeRoundHistory(root);
   if (rh.gitHistoryState !== 'available') _throwGitHistoryUnavailable(rh.gitHistoryError);
   const a = _cadenceAssessment(rh.avgRoundsPerDay, rh.roundCount, rh.daysActive);
   if (has('--json')) { log(JSON.stringify({ version: VERSION, cliVersion: rh.cliVersion, harnessVersion: rh.harnessVersion, harnessVersionState: rh.harnessVersionState, currentVersion: rh.currentVersion, currentVersionScope: rh.currentVersionScope, baselineVersion: rh.baselineVersion, latestTagVersion: rh.latestTagVersion, gitHistoryState: rh.gitHistoryState, gitHistoryError: rh.gitHistoryError, ...a }, null, 2)); return; }
-  log(`# leerness release cadence (1.9.374, UR-0074) — 릴리스 빈도 진단 (읽기 전용)`);
-  const observedRate = a.dataSufficient ? `${a.releasesPerDay}/day` : '관측 불가 (서로 다른 시각의 태그 2개 이상 필요)';
-  log(`  누적 릴리스: ${a.total}  ·  활동일: ${a.daysActive}일  ·  빈도: ${observedRate}`);
-  log(`  수준: ${a.level}`);
-  log(`  권장: ${a.recommendation}`);
-  log(`\n  관련: leerness release channel (stable/next 정책)  ·  leerness install-safety (공급망 신뢰)`);
+  const recommendationEn = {
+    'insufficient-data': 'Defer the cadence assessment until at least two release tags have distinct timestamps.',
+    'very-high': 'Strongly consider batched minor releases: group related patches into one or two minor releases per week, separate stable/next channels, and recommend stable to users.',
+    high: 'Cadence is high: group related changes to reduce publish frequency and document runtime and verification evidence in each release note.',
+    moderate: 'Cadence is moderate; consider batching into minor releases when stability is the priority.',
+    healthy: 'Cadence is healthy.',
+  }[a.level] || a.recommendation;
+  log(t(`# leerness release cadence (1.9.374, UR-0074) — 릴리스 빈도 진단 (읽기 전용)`, `# leerness release cadence (1.9.374, UR-0074) — release-frequency diagnosis (read-only)`));
+  const observedRate = a.dataSufficient ? `${a.releasesPerDay}/day` : t('관측 불가 (서로 다른 시각의 태그 2개 이상 필요)', 'unavailable (requires at least two tags with distinct timestamps)');
+  log(t(`  누적 릴리스: ${a.total}  ·  활동일: ${a.daysActive}일  ·  빈도: ${observedRate}`, `  total releases: ${a.total}  ·  active days: ${a.daysActive}  ·  frequency: ${observedRate}`));
+  log(t(`  수준: ${a.level}`, `  level: ${a.level}`));
+  log(t(`  권장: ${a.recommendation}`, `  recommendation: ${recommendationEn}`));
+  log(t(`\n  관련: leerness release channel (stable/next 정책)  ·  leerness install-safety (공급망 신뢰)`, `\n  related: leerness release channel (stable/next policy)  ·  leerness install-safety (supply-chain trust)`));
 }
 function roundHistoryCmd(root) {
   root = absRoot(root);
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
   const isTty = process.stdout && process.stdout.isTTY;
   const cy = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
   const gr = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
@@ -11464,25 +11473,27 @@ function roundHistoryCmd(root) {
   const data = _computeRoundHistory(root);
   if (data.gitHistoryState !== 'available') _throwGitHistoryUnavailable(data.gitHistoryError);
   if (has('--json')) { log(JSON.stringify(data, null, 2)); return; }
-  log(cy(`# leerness round-history (1.9.226) — 자율 라운드 통계`));
+  log(cy(t(`# leerness round-history (1.9.226) — 자율 라운드 통계`, `# leerness round-history (1.9.226) — autonomous-round statistics`)));
   log('');
   log(`  📦 leerness CLI: ${gr(data.cliVersion)}`);
-  if (data.harnessVersion) log(`  🧩 프로젝트 하네스: ${gr(data.harnessVersion)}`);
-  else if (data.harnessVersionState === 'invalid' || data.harnessVersionState === 'unreadable') log(yl(`  🧩 프로젝트 하네스: 판독 불가 (${data.harnessVersionState})`));
-  else if (data.harnessVersionState === 'missing') log(yl(`  🧩 프로젝트 하네스: 없음 (missing)`));
-  if (data.latestTagVersion) log(`  🏷️ 저장소 최근 태그: v${data.latestTagVersion}`);
-  log(`  🔄 누적 라운드: ${gr(String(data.roundCount))}`);
+  if (data.harnessVersion) log(t(`  🧩 프로젝트 하네스: ${gr(data.harnessVersion)}`, `  🧩 project harness: ${gr(data.harnessVersion)}`));
+  else if (data.harnessVersionState === 'invalid' || data.harnessVersionState === 'unreadable') log(yl(t(`  🧩 프로젝트 하네스: 판독 불가 (${data.harnessVersionState})`, `  🧩 project harness: unreadable (${data.harnessVersionState})`)));
+  else if (data.harnessVersionState === 'missing') log(yl(t(`  🧩 프로젝트 하네스: 없음 (missing)`, `  🧩 project harness: missing`)));
+  if (data.latestTagVersion) log(t(`  🏷️ 저장소 최근 태그: v${data.latestTagVersion}`, `  🏷️ latest repository tag: v${data.latestTagVersion}`));
+  log(t(`  🔄 누적 라운드: ${gr(String(data.roundCount))}`, `  🔄 total rounds: ${gr(String(data.roundCount))}`));
   if (data.baselineVersion) log(`  📍 baseline: v${data.baselineVersion} (${(data.firstTagAt || '').split('T')[0]})`);
-  if (data.latestTagAt) log(`  ⏰ 최근 tag: ${(data.latestTagAt || '').split('T')[0]}`);
-  if (data.daysActive > 0) log(`  📊 활동: ${data.daysActive}일 / 평균 ${gr(data.avgRoundsPerDay + ' rounds/day')}`);
+  if (data.latestTagAt) log(t(`  ⏰ 최근 tag: ${(data.latestTagAt || '').split('T')[0]}`, `  ⏰ latest tag: ${(data.latestTagAt || '').split('T')[0]}`));
+  if (data.daysActive > 0) log(t(`  📊 활동: ${data.daysActive}일 / 평균 ${gr(data.avgRoundsPerDay + ' rounds/day')}`, `  📊 activity: ${data.daysActive} days / average ${gr(data.avgRoundsPerDay + ' rounds/day')}`));
   log('');
   if (data.nextMilestone != null) {
-    log(yl(`  🎯 다음 마일스톤: R${data.nextMilestone} (${data.roundsToNextMilestone} 라운드 남음)`));
+    log(yl(t(`  🎯 다음 마일스톤: R${data.nextMilestone} (${data.roundsToNextMilestone} 라운드 남음)`, `  🎯 next milestone: R${data.nextMilestone} (${data.roundsToNextMilestone} rounds remaining)`)));
   } else {
-    log(data && (data.roundCount || data.totalRounds) ? gr(`  🎉 모든 마일스톤 달성 (500+)`) : dm(`  (이 저장소 계보의 릴리스 태그 이력 없음)`));   // 1.36.38 (#4): 이력 0 인데 달성 축하 금지
+    log(data && (data.roundCount || data.totalRounds)
+      ? gr(t(`  🎉 모든 마일스톤 달성 (500+)`, `  🎉 all milestones reached (500+)`))
+      : dm(t(`  (이 저장소 계보의 릴리스 태그 이력 없음)`, `  (no release-tag history for this repository lineage)`)));   // 1.36.38 (#4): 이력 0 인데 달성 축하 금지
   }
   log('');
-  log(`  최근 10 tags:`);
+  log(t(`  최근 10 tags:`, `  latest 10 tags:`));
   data.latestTags.forEach(t => log(`    • v${t.version} (${t.date})`));
 }
 
@@ -13060,7 +13071,9 @@ function migrateWorkspaceDirCmd(root) {
 //     3. user-requests.json — 동일 텍스트 + open (1.9.207 자체 dedup 검증)
 //     4. active-wakeups.json — 동일 expectedFireAt 중복 (1.9.205 dedup 검증)
 //     5. next-action-queue.json — 동일 title 중복 (1.9.201 dedup 검증)
-function _runIdempotencyAudit(root) {
+function _runIdempotencyAudit(root, lang = 'ko') {
+  const t = (ko, en) => (lang === 'en' ? en : ko);
+  const auditError = (area, error) => t(String(error && (error.message || error) || 'audit error'), `Could not audit ${area} safely (${String(error && error.code || 'read-error')})`);
   const audit = {
     auditedAt: new Date().toISOString(),
     auditVersion: VERSION,
@@ -13078,7 +13091,7 @@ function _runIdempotencyAudit(root) {
         audit.violations.push({
           kind: 'rule-duplicate',
           location: '.leerness/rules.md',
-          detail: `중복 룰: ${r.id} == ${seen.get(key)} (${r.trigger}: ${r.rule.slice(0, 60)})`,
+          detail: t(`중복 룰: ${r.id} == ${seen.get(key)} (${r.trigger}: ${r.rule.slice(0, 60)})`, `Duplicate rule: ${r.id} == ${seen.get(key)} (${r.trigger}: ${r.rule.slice(0, 60)})`),
           severity: 'medium',
           fix: `leerness rule remove ${r.id}`
         });
@@ -13087,9 +13100,9 @@ function _runIdempotencyAudit(root) {
       }
     }
     if (audit.violations.filter(v => v.kind === 'rule-duplicate').length === 0) {
-      audit.verified.push({ kind: 'rules', detail: `${active.length} active rules, 중복 0건` });
+      audit.verified.push({ kind: 'rules', detail: t(`${active.length} active rules, 중복 0건`, `${active.length} active rules, 0 duplicates`) });
     }
-  } catch (e) { audit.violations.push({ kind: 'audit-error', area: 'rules', detail: String(e.message || e), severity: 'low' }); }
+  } catch (e) { audit.violations.push({ kind: 'audit-error', area: 'rules', detail: auditError('rules', e), severity: 'low' }); }
 
   // 2) progress-tracker.md 중복 request 검사
   //    포맷: | T-XXXX | status | request | evidence | nextAction | date |
@@ -13114,19 +13127,19 @@ function _runIdempotencyAudit(root) {
           audit.violations.push({
             kind: 'task-duplicate-request',
             location: '.leerness/progress-tracker.md',
-            detail: `중복 request: "${text.slice(0, 50)}…" (${prev.id} & ${id})`,
+            detail: t(`중복 request: "${text.slice(0, 50)}…" (${prev.id} & ${id})`, `Duplicate request: "${text.slice(0, 50)}…" (${prev.id} & ${id})`),
             severity: 'medium',
-            fix: `중복 task 중 하나를 leerness task drop <id> 처리`
+            fix: t(`중복 task 중 하나를 leerness task drop <id> 처리`, `drop one duplicate with leerness task drop <id>`)
           });
         } else {
           requests.set(text, { id, status, line: i + 1 });
         }
       }
       if (audit.violations.filter(v => v.kind === 'task-duplicate-request').length === 0) {
-        audit.verified.push({ kind: 'tasks', detail: `${requests.size} active tasks, request 중복 0건` });
+        audit.verified.push({ kind: 'tasks', detail: t(`${requests.size} active tasks, request 중복 0건`, `${requests.size} active tasks, 0 duplicate requests`) });
       }
     }
-  } catch (e) { audit.violations.push({ kind: 'audit-error', area: 'tasks', detail: String(e.message || e), severity: 'low' }); }
+  } catch (e) { audit.violations.push({ kind: 'audit-error', area: 'tasks', detail: auditError('tasks', e), severity: 'low' }); }
 
   // 3) user-requests.json 자체 dedup 검증 (1.9.207)
   try {
@@ -13139,7 +13152,7 @@ function _runIdempotencyAudit(root) {
         audit.violations.push({
           kind: 'user-request-duplicate',
           location: '.leerness/user-requests.json',
-          detail: `중복 open 요청: ${r.id} == ${seen.get(k)} ("${k.slice(0, 50)}…")`,
+          detail: t(`중복 open 요청: ${r.id} == ${seen.get(k)} ("${k.slice(0, 50)}…")`, `Duplicate open request: ${r.id} == ${seen.get(k)} ("${k.slice(0, 50)}…")`),
           severity: 'low',
           fix: `leerness requests drop ${r.id}`
         });
@@ -13148,9 +13161,9 @@ function _runIdempotencyAudit(root) {
       }
     }
     if (audit.violations.filter(v => v.kind === 'user-request-duplicate').length === 0) {
-      audit.verified.push({ kind: 'user-requests', detail: `${seen.size} open requests, 중복 0건 (1.9.207 dedup OK)` });
+      audit.verified.push({ kind: 'user-requests', detail: t(`${seen.size} open requests, 중복 0건 (1.9.207 dedup OK)`, `${seen.size} open requests, 0 duplicates (1.9.207 dedup OK)`) });
     }
-  } catch (e) { audit.violations.push({ kind: 'audit-error', area: 'user-requests', detail: String(e.message || e), severity: 'low' }); }
+  } catch (e) { audit.violations.push({ kind: 'audit-error', area: 'user-requests', detail: auditError('user-requests', e), severity: 'low' }); }
 
   // 4) active-wakeups.json 검증 (1.9.205)
   try {
@@ -13162,16 +13175,16 @@ function _runIdempotencyAudit(root) {
         audit.violations.push({
           kind: 'wakeup-duplicate',
           location: '.leerness/active-wakeups.json',
-          detail: `동일 expectedFireAt 중복: ${w.expectedFireAt}`,
+          detail: t(`동일 expectedFireAt 중복: ${w.expectedFireAt}`, `Duplicate expectedFireAt: ${w.expectedFireAt}`),
           severity: 'high',
-          fix: `leerness 자동 _recordWakeup filter dedup 검토 필요`
+          fix: t(`leerness 자동 _recordWakeup filter dedup 검토 필요`, `inspect the automatic leerness _recordWakeup dedup filter`)
         });
       } else {
         seenT.set(w.expectedFireAt, true);
       }
     }
     if (audit.violations.filter(v => v.kind === 'wakeup-duplicate').length === 0) {
-      audit.verified.push({ kind: 'wakeups', detail: `${pending.length} pending wakeups, 중복 0건 (1.9.205 dedup OK)` });
+      audit.verified.push({ kind: 'wakeups', detail: t(`${pending.length} pending wakeups, 중복 0건 (1.9.205 dedup OK)`, `${pending.length} pending wakeups, 0 duplicates (1.9.205 dedup OK)`) });
     }
   } catch {}
 
@@ -13252,6 +13265,7 @@ function _autoFixIdempotency(root) {
 }
 function idempotencyCmd(root, sub) {
   root = absRoot(root);
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
   const isTty = process.stdout && process.stdout.isTTY;
   const cyan = s => isTty ? `\x1b[36m${s}\x1b[0m` : s;
   const grn = s => isTty ? `\x1b[32m${s}\x1b[0m` : s;
@@ -13260,23 +13274,22 @@ function idempotencyCmd(root, sub) {
   const dim = s => isTty ? `\x1b[2m${s}\x1b[0m` : s;
 
   if (!sub || sub === 'help' || sub === '--help') {
-    const _L = _uiLang(root); const _t = (ko, en) => _L === 'en' ? en : ko;  // 1.23.2 (UR-0010 Phase 7)
-    log(_t(`# leerness idempotency (1.9.212) — 멱등성 위반 탐지`, `# leerness idempotency — detect idempotency violations`));
+    log(t(`# leerness idempotency (1.9.212) — 멱등성 위반 탐지`, `# leerness idempotency — detect idempotency violations`));
     log('');
-    log(_t(`  audit               → 워크스페이스 멱등성 점검 (rules / tasks / user-requests / wakeups)  (--json 가능)`, `  audit               → check workspace idempotency (rules / tasks / user-requests / wakeups)  (--json)`));
-    log(_t(`  audit --auto-fix    → task 완전중복 행 제거 + active 동일텍스트 dropped 처리 + user-request open 중복 정리 (1.9.293)`, `  audit --auto-fix    → remove exact-duplicate tasks + mark same-text active as dropped + dedup open user-requests`));
+    log(t(`  audit               → 워크스페이스 멱등성 점검 (rules / tasks / user-requests / wakeups)  (--json 가능)`, `  audit               → check workspace idempotency (rules / tasks / user-requests / wakeups)  (--json)`));
+    log(t(`  audit --auto-fix    → task 완전중복 행 제거 + active 동일텍스트 dropped 처리 + user-request open 중복 정리 (1.9.293)`, `  audit --auto-fix    → remove exact-duplicate tasks + mark same-text active as dropped + dedup open user-requests`));
     log('');
-    log(dim(_t(`  dedup 적용 영역: ruleAdd / taskAdd (1.9.212) + _recordUserRequest (1.9.207) + _recordWakeup (1.9.205)`, `  dedup applies to: ruleAdd / taskAdd + _recordUserRequest + _recordWakeup`)));
-    log(dim(_t(`  --auto-fix 안전: 완전 동일 행만 제거 / 동일텍스트는 status=dropped 로 보존(id 유지) / git 회복 가능 / 멱등`, `  --auto-fix safety: removes only exact dupes / same-text kept as status=dropped (id preserved) / git-recoverable / idempotent`)));
-    log(dim(_t(`  자동화: drift check --auto-fix 가 idempotency 중복도 자동 정리 (1.9.293)`, `  automation: drift check --auto-fix also dedups idempotency violations`)));
-    log(dim(_t(`  opt-out: --force 플래그로 dedup 우회 가능`, `  opt-out: pass --force to bypass dedup`)));
+    log(dim(t(`  dedup 적용 영역: ruleAdd / taskAdd (1.9.212) + _recordUserRequest (1.9.207) + _recordWakeup (1.9.205)`, `  dedup applies to: ruleAdd / taskAdd + _recordUserRequest + _recordWakeup`)));
+    log(dim(t(`  --auto-fix 안전: 완전 동일 행만 제거 / 동일텍스트는 status=dropped 로 보존(id 유지) / git 회복 가능 / 멱등`, `  --auto-fix safety: removes only exact dupes / same-text kept as status=dropped (id preserved) / git-recoverable / idempotent`)));
+    log(dim(t(`  자동화: drift check --auto-fix 가 idempotency 중복도 자동 정리 (1.9.293)`, `  automation: drift check --auto-fix also dedups idempotency violations`)));
+    log(dim(t(`  opt-out: --force 플래그로 dedup 우회 가능`, `  opt-out: pass --force to bypass dedup`)));
     return;
   }
 
   if (sub === 'audit') {
     const autoFix = has('--auto-fix');
     const fixes = autoFix ? _autoFixIdempotency(root) : [];
-    const audit = _runIdempotencyAudit(root);  // auto-fix 후 상태 반영
+    const audit = _runIdempotencyAudit(root, has('--json') ? 'ko' : _L);  // JSON 은 기존 canonical payload, 사람 출력만 locale 적용
     if (autoFix) audit.autoFixed = fixes;
     // 1.36.131 (검수 P1): --json 도 같은 계약 — auto-fix 가 실패했으면 성공 종료코드로 나가지 않는다.
     if (autoFix && fixes.some(f => f.action === 'error')) { audit.autoFixFailed = fixes.filter(f => f.action === 'error').length; process.exitCode = 1; }
@@ -13286,9 +13299,9 @@ function idempotencyCmd(root, sub) {
     log('');
     const s = audit.summary;
     if (s.overall === 'clean') {
-      log(grn(`  ✓ 멱등성 위반 없음 — verified ${s.verifiedAreas} 영역`));
+      log(grn(t(`  ✓ 멱등성 위반 없음 — verified ${s.verifiedAreas} 영역`, `  ✓ no idempotency violations — verified ${s.verifiedAreas} areas`)));
     } else {
-      log(red(`  ⚠ ${s.totalViolations} 위반 발견 (high: ${s.highSeverity}, medium: ${s.mediumSeverity}, low: ${s.lowSeverity})`));
+      log(red(t(`  ⚠ ${s.totalViolations} 위반 발견 (high: ${s.highSeverity}, medium: ${s.mediumSeverity}, low: ${s.lowSeverity})`, `  ⚠ ${s.totalViolations} violations found (high: ${s.highSeverity}, medium: ${s.mediumSeverity}, low: ${s.lowSeverity})`)));
     }
     log('');
     if (audit.verified.length) {
@@ -13313,18 +13326,18 @@ function idempotencyCmd(root, sub) {
       const _applied = fixes.filter(f => f.action !== 'error');
       const _failedFix = fixes.filter(f => f.action === 'error');
       if (_applied.length) {
-        log(grn(`## 🔧 auto-fix 적용 (${_applied.length})`));
+        log(grn(t(`## 🔧 auto-fix 적용 (${_applied.length})`, `## 🔧 auto-fix applied (${_applied.length})`)));
         _applied.forEach(f => {
-          if (f.kind === 'task-duplicate-request') log(`  - [tasks] 완전중복 ${f.removedExact || 0}행 제거 · 동일텍스트 ${f.droppedSameText || 0}건 dropped 처리`);
-          else if (f.kind === 'user-request-duplicate') log(`  - [user-requests] open 중복 ${f.count || 0}건 dropped 처리`);
+          if (f.kind === 'task-duplicate-request') log(t(`  - [tasks] 완전중복 ${f.removedExact || 0}행 제거 · 동일텍스트 ${f.droppedSameText || 0}건 dropped 처리`, `  - [tasks] removed ${f.removedExact || 0} exact duplicate rows · marked ${f.droppedSameText || 0} same-text tasks as dropped`));
+          else if (f.kind === 'user-request-duplicate') log(t(`  - [user-requests] open 중복 ${f.count || 0}건 dropped 처리`, `  - [user-requests] marked ${f.count || 0} duplicate open requests as dropped`));
           else log(dim(`  - [${f.kind}] ${f.action}${f.detail ? ' — ' + f.detail : ''}`));
         });
       } else if (!_failedFix.length) {
-        log(dim('  🔧 auto-fix: 적용할 중복 없음 (이미 정합)'));
+        log(dim(t('  🔧 auto-fix: 적용할 중복 없음 (이미 정합)', '  🔧 auto-fix: no duplicates to apply (already consistent)')));
       }
       if (_failedFix.length) {
-        log(red(`## ❌ auto-fix 실패 (${_failedFix.length}) — 고쳐지지 않았다. 수동 확인 필요`));
-        _failedFix.forEach(f => log(`  - [${f.kind}] ${f.detail || '원인 미상'}`));
+        log(red(t(`## ❌ auto-fix 실패 (${_failedFix.length}) — 고쳐지지 않았다. 수동 확인 필요`, `## ❌ auto-fix failed (${_failedFix.length}) — state was not repaired; inspect it manually`)));
+        _failedFix.forEach(f => log(`  - [${f.kind}] ${_L === 'en' ? 'could not repair safely' : (f.detail || '원인 미상')}`));
         process.exitCode = 1;
       }
     }
@@ -14782,6 +14795,7 @@ function planInit(root) {
 // 1.9.119: plan list — plan.md 의 모든 milestone (M-XXXX) 조회 (CLI + --json + MCP)
 function planListCmd(root, opts = {}) {
   root = absRoot(root);
+  const _L = _uiLang(root); const t = (ko, en) => (_L === 'en' ? en : ko);
   const jsonMode = !!opts.json || has('--json');
   const pp = planPath(root);
   if (!exists(pp)) {
@@ -14789,7 +14803,7 @@ function planListCmd(root, opts = {}) {
       process.stdout.write(JSON.stringify({ version: VERSION, root, total: 0, milestones: [] }, null, 2) + '\n');
       return;
     }
-    return ok('plan.md 없음 — leerness plan add "<text>" 로 첫 milestone 등록');
+    return ok(t('plan.md 없음 — leerness plan add "<text>" 로 첫 milestone 등록', 'plan.md not found — add the first milestone with leerness plan add "<text>"'));
   }
   // 1.36.21 (codex #8a, 전수 sweep 3 에이전트 수렴): CRLF plan.md 에서 모든 마일스톤의 tasks 가 조용히 [] 로 증발하던 것 수정.
   //   체크박스 정규식(/^-\s*\[([\sx])\]\s*(.+)$/)이 /m 없이 후행 \r 앞에서 $ 를 못 잡아 실패 — id/title/status/progress 는 /m 이라 정상 파싱되어
@@ -14831,14 +14845,15 @@ function planListCmd(root, opts = {}) {
     return;
   }
   log(`# 🗺  Plan (1.9.119)\n`);
-  if (!milestones.length) return ok('plan milestones 비어있음');
-  log(`총 ${milestones.length}개 milestone:`);
+  if (!milestones.length) return ok(t('plan milestones 비어있음', 'plan milestones are empty'));
+  log(t(`총 ${milestones.length}개 milestone:`, `${milestones.length} milestones:`));
   for (const m of milestones) {
     log(`\n[${m.id}] ${m.title}`);
     if (m.status) log(`  Status: ${m.status}`);
     if (m.progress) log(`  Progress: ${m.progress}`);
-    log(`  완료기준(Done-When): ${m.doneWhen || '⚠ 미정 — plan add ... --done-when "<검증가능 조건>" 권장 (Karpathy 원칙4)'}`);
-    if (m.tasks.length) log(`  Tasks: ${m.tasks.length}개 (${m.tasks.filter(t => t.done).length} 완료)`);
+    const doneWhen = _L === 'en' && m.doneWhen === '(미정)' ? '(unset)' : m.doneWhen;
+    log(t(`  완료기준(Done-When): ${doneWhen || '⚠ 미정 — plan add ... --done-when "<검증가능 조건>" 권장 (Karpathy 원칙4)'}`, `  Done-When: ${doneWhen || '⚠ unset — consider plan add ... --done-when "<verifiable condition>" (Karpathy principle 4)'}`));
+    if (m.tasks.length) log(t(`  Tasks: ${m.tasks.length}개 (${m.tasks.filter(task => task.done).length} 완료)`, `  Tasks: ${m.tasks.length} (${m.tasks.filter(task => task.done).length} done)`));
   }
 }
 

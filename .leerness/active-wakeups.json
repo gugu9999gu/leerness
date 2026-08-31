@@ -72,17 +72,21 @@
       "expectedFireAt": "2026-08-27T07:55:09.253Z",
       "intervalMin": 25,
       "source": "release-sync-main",
-      "status": "pending",
+      "status": "superseded",
       "fromVersion": "1.36.169",
-      "registeredAt": "2026-08-27T07:30:09.256Z"
+      "registeredAt": "2026-08-27T07:30:09.256Z",
+      "supersededReason": "auto-fix-1.9.222-abnormal-shutdown",
+      "supersededAt": "2026-08-30T13:03:18.509Z"
     },
     {
       "expectedFireAt": "2026-08-27T10:23:04.257Z",
       "intervalMin": 25,
       "source": "release-sync-main",
-      "status": "pending",
+      "status": "superseded",
       "fromVersion": "1.36.170",
-      "registeredAt": "2026-08-27T09:58:04.265Z"
+      "registeredAt": "2026-08-27T09:58:04.265Z",
+      "supersededReason": "auto-fix-1.9.222-abnormal-shutdown",
+      "supersededAt": "2026-08-30T13:03:18.509Z"
     },
     {
       "expectedFireAt": "2026-08-27T14:31:38.476Z",
@@ -160,10 +164,10 @@
       "expectedFireAt": "2026-08-30T11:09:27.791Z",
       "intervalMin": 25,
       "source": "release-sync-main",
-      "status": "pending",
+      "status": "missed",
       "fromVersion": "1.36.180",
       "registeredAt": "2026-08-30T10:44:27.798Z"
     }
   ],
-  "updatedAt": "2026-08-30T10:44:27.798Z"
+  "updatedAt": "2026-08-30T13:03:18.509Z"
 }

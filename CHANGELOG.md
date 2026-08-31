@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.181 — 2026-08-30
+
+- T-0161: English-mode release cadence, idempotency audit, plan list, and round-history now contain zero Hangul across stored, environment, and explicit locale paths. A dedicated edge-state probe preserves Korean output, legacy plan sentinels, locale-independent auto-fix JSON/state writes, and the 39-command leakage ratchet tightens exactly from 58 to 38 lines so improvements cannot mask regressions elsewhere.
+
 ## 1.36.180 — 2026-08-30
 
 - English-mode agents list, insights, and toggle output now contain zero Hangul; a dedicated red/green probe and 39-command ratchet reduce measured leakage from 104 to 58 lines while preserving Korean output.

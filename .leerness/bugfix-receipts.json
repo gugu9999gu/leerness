@@ -725,5 +725,25 @@
       ]
     },
     "previousGuardGap": "The aggregate ratchet allowed 104 known leaked lines and did not require the three highest-volume surfaces to reach zero."
+  },
+  {
+    "id": "T-0161",
+    "repro": "node scripts/i18n-next-cluster-probe.js",
+    "expectBad": "leaked 5 Hangul line(s)",
+    "baseline": {
+      "at": "2026-08-30T13:08:53.726Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 3448
+    },
+    "rootCause": "Four human renderers bypassed _uiLang and emitted hard-coded Korean; idempotency details and auto-fix summaries also shared canonical Korean strings with human output.",
+    "siblingScope": {
+      "checked": [
+        "Stored/env/explicit locale paths; empty and missing plans; empty/tagged Git history; clean/violation/auto-fix idempotency paths; Korean controls; locale-invariant JSON payloads."
+      ]
+    },
+    "previousGuardGap": null
   }
 ]
