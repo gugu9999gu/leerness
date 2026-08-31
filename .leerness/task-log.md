@@ -225,3 +225,13 @@ doNotStore:
 
 ## 2026-08-31 session-close
 - Generated session-handoff.md and refreshed current-state.md.
+
+## 2026-09-01 — v1.36.183 public release and CI verification
+
+- GitHub main/tag/Release가 구현 SHA `6e412c7089bb88151776b12d77a0296c4c131383`에서 일치하고, 2,008,240-byte asset SHA-256이 canonical main 공개 tarball과 일치한다.
+- npm latest/exact 1.36.183의 integrity/shasum이 공개 tarball과 일치하고 fresh-prefix 설치본 CLI 1.36.183 및 selftest 355/355가 통과했다.
+- 사이트 commit `74796968600763bec42bc449a7ce0f1ce622ec1d`, Cloudflare deployment `475ed5c0-6d47-48a4-a80d-a509777c5d2c`, production 4개 URL HTTP 200을 검증했다.
+- GitHub Actions run 33402089854가 구현 SHA에서 13/13 성공했고 failure/cancelled/skipped는 모두 0이다. T-0163과 UR-0093을 완료했으며 T-0159는 waiting 그대로 두었다.
+
+## 2026-09-01 session-close
+- Generated session-handoff.md and refreshed current-state.md.
