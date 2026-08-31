@@ -182,11 +182,11 @@ doNotStore:
 - [x] `npm run test:core` 및 전체 `npm test` 통과: lint 68 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467(5,354초)
 - [x] 멀티세션 E2E: 동시 24쓰기 무손실, 사용자 상태 writer 41종 canonical 락, Claude↔Codex 상호 가시성, sessionKey별 evidence/run/handoff/presence 격리, 지연 경쟁 11쌍 통과
 - [x] `.harness/` → `.leerness/` fresh 설치·canonical migration·dual-live fail-closed·설치본 legacy run remap 통과
-- [x] `verify`, `audit`, `check`, `scan secrets`, `encoding check`, `lazy detect`, code/test/contract/recovery/debug lens 및 `gate --claims` 6/6 통과; claims 139건 신규 실패 0
+- [x] `verify`, `audit`, `check`, `scan secrets`, `encoding check`, `lazy detect`, code/test/contract/recovery/debug lens 및 최종 `gate --claims` 6/6 통과; 완료 claims 140건 신규 실패 0
 - [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.182 동기화; 새 런타임 의존성·lifecycle script·환경변수 없음
 - [x] `npm pack --dry-run`: 78 files, size 2,001,971 bytes, shasum `e45b8bcf12c064181d488866e729c02d73debd92`, integrity `sha512-xbj2jAvu+7P5njufeD/il+eKIuqPre1I5jtBC2Ad2TJr48NMCAdmh6Glgd7WbIFOhb9DM1i96esCKvggDfe5/Q==`
-- [ ] GitHub main/tag/release와 exact tarball 자산 검증
-- [ ] npm latest/exact·registry integrity·fresh-prefix 설치본 selftest 검증
-- [ ] leerness.com 루트·v1.36.182 changelog·llms 표면과 Cloudflare deployment 검증
-- [ ] GitHub Actions 구현 SHA 전체 13/13 성공 및 실패·취소·skip 0 확인
+- [x] GitHub main/tag/release가 구현 SHA `8308fc8b792a75b648df21031b3e83955b2c1cd7`로 일치; exact tarball 자산 2,001,971 bytes, SHA-256 `1f6b6872942b5c89689c1bb25c151c68bd5634a1a3691e7bc4aa72306e33f35c` 로컬 일치
+- [x] npm latest/exact 1.36.182; registry integrity `sha512-xbj2jAvu+7P5njufeD/il+eKIuqPre1I5jtBC2Ad2TJr48NMCAdmh6Glgd7WbIFOhb9DM1i96esCKvggDfe5/Q==`, shasum `e45b8bcf12c064181d488866e729c02d73debd92`; fresh-prefix 설치본 selftest 355/355 및 전역 CLI 1.36.182 확인
+- [x] 사이트 commit `b0dbd63`, Astro 706 pages, Cloudflare production deployment `d974d5f2-970d-43ba-90af-7944f0551262`; leerness.com 루트·v1.36.182 changelog·llms·Pages 원본 HTTP 200 및 `verify-deploy` 첫 시도 통과
+- [x] GitHub Actions run 33368507960이 구현 SHA에서 전체 13/13 성공; 실패·취소·skip 0, Ubuntu Node 18/20/22와 Windows Node 18/20/22/24 full E2E 전부 통과
 - [x] 롤백 기준: npm exact `leerness@1.36.181` 재설치, GitHub tag `v1.36.181`, 직전 사이트 커밋 `b6c7e62`

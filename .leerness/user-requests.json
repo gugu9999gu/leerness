@@ -1056,12 +1056,14 @@
       "id": "UR-0092",
       "text": "다음작업 진행",
       "recordedAt": "2026-08-31T04:47:32.363Z",
-      "status": "open",
+      "status": "completed",
       "linkedTaskIds": [],
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
-      "notes": ""
+      "notes": "",
+      "updatedAt": "2026-08-31T09:15:48.966Z",
+      "completedAt": "2026-08-31T09:15:48.966Z"
     }
   ],
-  "updatedAt": "2026-08-31T04:47:32.363Z"
+  "updatedAt": "2026-08-31T09:15:48.967Z"
 }
