@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.183 — 2026-08-31
+
+- T-0163: English skill list now emits zero Hangul across stored, environment, and explicit locale paths while preserving Korean bytes and locale-independent JSON values. Adversarial external-skill metadata and injective ID rendering are covered, and the 39-command leakage ratchet tightens exactly from 34 to 30 lines.
+
 ## 1.36.182 — 2026-08-31
 
 - T-0162: English-mode milestones now contains zero Hangul across stored, environment, and explicit locale paths while preserving Korean and locale-independent JSON contracts. The 39-command aggregate leakage ratchet tightens exactly from 38 to 34 lines. External Codex review findings are covered by UTC-midnight-safe ETA comparison and real CLI coverage of the 500+ terminal branch.

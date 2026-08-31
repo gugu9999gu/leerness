@@ -217,5 +217,11 @@ doNotStore:
 ## 2026-08-31 session-close
 - Generated session-handoff.md and refreshed current-state.md.
 
+## 2026-08-31 — T-0163 pre-release verification
+
+- English `skill list` 누수 4줄을 stored/env/explicit locale 실제 CLI에서 0으로 줄였고, 한국어 바이트·canonical JSON 값·적대적 외부 메타데이터 계약을 보존했다.
+- 외부 Codex P2 4건을 재현·수정한 뒤 최종 재검토가 actionable P0/P1/P2 없음으로 수렴했다.
+- 전체 E2E 467/467(5,068초), 지연 경쟁 11/11, 범프 후 fast smoke 13/13, claims gate 6/6을 통과했다. 39-command 잔여는 정확히 30줄/16명령이며 다음 단계는 v1.36.183 공개 및 CI 13/13 검증이다.
+
 ## 2026-08-31 session-close
 - Generated session-handoff.md and refreshed current-state.md.

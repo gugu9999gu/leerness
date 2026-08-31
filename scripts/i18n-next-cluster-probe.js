@@ -6,7 +6,7 @@ const path = require('path');
 const cp = require('child_process');
 
 const CLI = path.resolve(__dirname, '..', 'bin', 'leerness.js');
-const HANGUL = /[가-힣ㄱ-ㆎ]/;
+const HANGUL = /\p{Script=Hangul}/u;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-i18n-next-'));
 const project = path.join(tmp, 'project');
 
@@ -21,10 +21,11 @@ const baseEnv = {
   LEERNESS_OFFLINE: '1',
 };
 delete baseEnv.LEERNESS_LANG;
+delete baseEnv.LEERNESS_SKILLPACK_PATH;
 
-function run(args, env = baseEnv) {
+function run(args, env = baseEnv, cwd = project) {
   return cp.spawnSync(process.execPath, [CLI, ...args], {
-    cwd: project,
+    cwd,
     env,
     encoding: 'utf8',
     timeout: 300000,
@@ -105,6 +106,7 @@ const surfaces = [
   ['plan list', ['plan', 'list', '--path', project]],
   ['round-history', ['round-history', '--path', project]],
   ['milestones', ['milestones', '--path', project]],
+  ['skill list', ['skill', 'list', '--path', project]],
 ];
 
 try {
@@ -119,20 +121,237 @@ try {
   requireSuccess('decision add', run(['decision', 'add', 'Use JSON storage', '--reason', 'simplest', '--path', project]));
   requireSuccess('plan add', run(['plan', 'add', 'Ship the parser', '--path', project]));
 
+  // A user skill may predate English catalog fields or contain malformed
+  // legacy usage metadata. English mode must not fall back to Korean-only
+  // presentation fields, leak a non-numeric count, or call string methods on
+  // a numeric timestamp. JSON keeps those canonical source values unchanged.
+  const koreanOnlySkillDir = path.join(project, '.leerness', 'skills', 'korean-only');
+  fs.mkdirSync(koreanOnlySkillDir, { recursive: true });
+  fs.writeFileSync(path.join(koreanOnlySkillDir, 'skill.json'), JSON.stringify({
+    name: 'korean-only',
+    displayNameKo: '한국어 전용 사용자 스킬',
+    displayNameEn: 'ㄴ invalid English label',
+    version: '1.0.0',
+    lastUpdated: '마지막',
+    verification: 'unverified',
+    capabilities: ['한국어 기능 설명'],
+    capabilitiesEn: ['ㄷ invalid English capability'],
+    usage: { count: '한국어 횟수', lastUsed: 1725062400000 },
+  }, null, 2) + '\n');
+  const unsafeCellsSkillDir = path.join(project, '.leerness', 'skills', 'unsafe-cells');
+  fs.mkdirSync(unsafeCellsSkillDir, { recursive: true });
+  fs.writeFileSync(path.join(unsafeCellsSkillDir, 'skill.json'), JSON.stringify({
+    name: 'unsafe-cells',
+    displayNameKo: '안전하지 않은 셀',
+    displayNameEn: 'Safe name\n| forged-name |',
+    lastUpdated: '2026-01-01\n| forged-last |',
+    capabilities: ['한국어 기능 설명'],
+    capabilitiesEn: ['safe | capability\ncontinued'],
+    usage: { count: '', lastUsed: 0 },
+  }, null, 2) + '\n');
+  const falsyJsonSkillDir = path.join(project, '.leerness', 'skills', 'falsy-json');
+  fs.mkdirSync(falsyJsonSkillDir, { recursive: true });
+  fs.writeFileSync(path.join(falsyJsonSkillDir, 'skill.json'), JSON.stringify({
+    name: 'falsy-json',
+    displayNameKo: '',
+    lastUpdated: false,
+    capabilities: false,
+    usage: { count: null, lastUsed: false },
+  }, null, 2) + '\n');
+  const hostileObjectSkillDir = path.join(project, '.leerness', 'skills', 'hostile-object');
+  fs.mkdirSync(hostileObjectSkillDir, { recursive: true });
+  fs.writeFileSync(path.join(hostileObjectSkillDir, 'skill.json'), JSON.stringify({
+    name: 'hostile-object',
+    displayNameKo: { toString: null },
+    lastUpdated: { toString: null },
+    capabilities: [{ toString: null }],
+    usage: { count: { toString: null }, lastUsed: { toString: null } },
+  }, null, 2) + '\n');
+  const hangulIdSkillDir = path.join(project, '.leerness', 'skills', '옛스킬');
+  fs.mkdirSync(hangulIdSkillDir, { recursive: true });
+  fs.writeFileSync(path.join(hangulIdSkillDir, 'skill.json'), JSON.stringify({
+    name: '옛스킬',
+    displayNameKo: '옛 사용자 스킬',
+    lastUpdated: '마지막',
+    capabilities: ['한국어 기능 설명'],
+    usage: { count: 0, lastUsed: null },
+  }, null, 2) + '\n');
+
+  const manifestFile = path.join(project, '.leerness', 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+
   // Stored project language, environment override, and explicit flag must all
   // reach the same English renderer. Flip the stored language to Korean before
   // checking overrides so a disconnected env/flag path cannot pass by falling
   // back to the already-English manifest.
+  const storedEnglish = new Map();
   for (const [label, args] of surfaces) {
-    requireNoHangul(`${label} (stored language)`, run(args));
+    storedEnglish.set(label, requireNoHangul(`${label} (stored language)`, run(args)));
   }
-  const manifestFile = path.join(project, '.leerness', 'manifest.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  const storedSkillList = storedEnglish.get('skill list');
+  const skillEnglishAnchors = [
+    '# skillpack not installed — using builtin fallback (catalog bundled with leerness)',
+    '| ID | Name | Source | Capabilities (summary) | Uses | Last |',
+    '| feature-implementation | Feature implementation standard skill | catalog+local | feature contract authoring / reuse-first checks / test evidence collection … |',
+    '| project-roadmap-generator | Project roadmap generator skill | catalog+local | Parse integrated .leerness/* state (plan/progress/skills/rules/decisions/handoff/current-state) / Left-to-right SVG tree with vertical centering / Seven status colors (done/in progress/on hold/review/planned/incomplete/error) … |',
+    '| korean-only | korean-only | user | - | 0 | - |',
+    '| unsafe-cells | Safe name &#124; forged-name &#124; | user | safe &#124; capability continued | 0 | 2026-01-01 &#124; forged-last &#124; |',
+    '| falsy-json | falsy-json | user | - | 0 | - |',
+    '| hostile-object | hostile-object | user | - | 0 | - |',
+    '| \\uC61B\\uC2A4\\uD0AC | \\uC61B\\uC2A4\\uD0AC | user | - | 0 | - |',
+  ];
+  for (const anchor of skillEnglishAnchors) {
+    if (!storedSkillList.includes(anchor)) throw new Error(`skill list English output lost anchor: ${anchor}`);
+  }
+  if (storedSkillList.split(/\r?\n/).some(line => /^\|\s*forged-/.test(line))) {
+    throw new Error('skill list English metadata forged a physical Markdown row');
+  }
+  // A real stored-Korean route prevents a default-English implementation from
+  // passing the stored-locale test accidentally. Run outside the target cwd so
+  // the locale must come from --path rather than cwd.
+  manifest.language = 'ko';
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
+  const storedKoreanSkillList = requireSuccess('skill list stored Korean control', run(
+    ['skill', 'list', '--path', project], baseEnv, tmp
+  ));
+  if (!storedKoreanSkillList.includes('| ID | 한글명 | 출처 | 능력(요약) | 사용횟수 | 최종 |')) {
+    throw new Error('skill list ignored the stored Korean locale selected through --path');
+  }
+  manifest.language = 'en';
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
+  // --path must outrank a conflicting positional root when resolving the
+  // stored locale. The pre-fix dispatcher passed args[2] straight through.
+  const koreanPositionalProject = path.join(tmp, 'korean-positional-project');
+  fs.mkdirSync(koreanPositionalProject, { recursive: true });
+  fs.writeFileSync(path.join(koreanPositionalProject, 'package.json'), '{"name":"korean-positional","version":"0.1.0"}\n');
+  requireSuccess('init Korean positional project', run(['init', koreanPositionalProject, '--yes', '--language', 'ko']));
+  requireNoHangul('skill list --path precedence', run(
+    ['skill', 'list', koreanPositionalProject, '--path', project], baseEnv, tmp
+  ));
+
+  // A separately loaded skillpack exercises the loader projection, including
+  // explicit English fields, legacy English fields, non-Latin text, complete
+  // Hangul-script coverage, and Markdown control-character sanitation.
+  const ambientSkillpackDir = path.join(project, 'node_modules', 'leerness-skillpack');
+  fs.mkdirSync(ambientSkillpackDir, { recursive: true });
+  fs.writeFileSync(path.join(ambientSkillpackDir, 'catalog.json'), JSON.stringify({
+    name: 'Ambient pack', version: '0.0.0', skills: [{ id: 'ambient-pack', displayNameEn: 'Ambient pack' }],
+  }, null, 2) + '\n');
+  const skillpackDir = path.join(tmp, 'skillpack');
+  fs.mkdirSync(skillpackDir, { recursive: true });
+  const nfdHangul = '한글'.normalize('NFD');
+  const literalEscapeId = String.raw`\uC61B`;
+  fs.writeFileSync(path.join(skillpackDir, 'catalog.json'), JSON.stringify({
+    name: 'External pack\n| forged-pack |',
+    version: { toString: null },
+    skills: [
+      { id: 'translated-pack', displayNameKo: '번역 스킬', displayNameEn: 'Translated pack skill', capabilities: ['한국어 기능'], capabilitiesEn: ['English capability'] },
+      { id: 'legacy-pack', displayNameKo: '레거시 스킬', displayName: 'Legacy pack name', capabilities: ['Legacy capability'] },
+      { id: 'legacy-name-pack', displayNameKo: '레거시 이름 스킬', name: 'Legacy name pack', capabilities: ['Legacy name capability'] },
+      { id: 'japanese-pack', displayNameKo: '日本語名', capabilities: ['日本語機能'] },
+      { id: 'jamo-pack', displayNameKo: '자모 스킬', displayNameEn: 'ㄴ invalid label', capabilities: ['한국어 기능'], capabilitiesEn: ['ㄷ invalid capability'] },
+      { id: nfdHangul, displayNameKo: '분해 자모 스킬', displayNameEn: nfdHangul, capabilities: ['한국어 기능'], capabilitiesEn: [nfdHangul] },
+      { id: 'a|b', displayNameEn: 'Pipe ID' },
+      { id: 'a&#124;b', displayNameEn: 'Literal entity ID' },
+      { id: 'a b', displayNameEn: 'Single-space ID' },
+      { id: 'a  b', displayNameEn: 'Double-space ID' },
+      { id: ' ', displayNameEn: 'Space-only ID' },
+      { id: '-', displayNameEn: 'Dash ID' },
+      { id: literalEscapeId, displayNameEn: 'Literal escape ID' },
+      { id: '옛', displayNameEn: 'Hangul ID' },
+      null,
+      { id: { toString: null }, displayNameEn: 'Malformed ID' },
+    ],
+  }, null, 2) + '\n');
+  const skillpackOutput = requireNoHangul('skill list external skillpack', run(
+    ['skill', 'list', '--path', project],
+    { ...baseEnv, LEERNESS_LANG: 'en', LEERNESS_SKILLPACK_PATH: skillpackDir }
+  ));
+  for (const anchor of [
+    '# skillpack source: env (External pack &#124; forged-pack &#124;)',
+    '| translated-pack | Translated pack skill | skillpack | English capability |',
+    '| legacy-pack | Legacy pack name | skillpack | Legacy capability |',
+    '| legacy-name-pack | Legacy name pack | skillpack | Legacy name capability |',
+    '| japanese-pack | japanese-pack | skillpack | - |',
+    '| jamo-pack | jamo-pack | skillpack | - |',
+    '| \\u1112\\u1161\\u11AB\\u1100\\u1173\\u11AF | \\u1112\\u1161\\u11AB\\u1100\\u1173\\u11AF | skillpack | - |',
+    '| a\\u007Cb | Pipe ID | skillpack | - |',
+    '| a&#124;b | Literal entity ID | skillpack | - |',
+    '| a\\u0020b | Single-space ID | skillpack | - |',
+    '| a\\u0020\\u0020b | Double-space ID | skillpack | - |',
+    '| \\u0020 | Space-only ID | skillpack | - |',
+    '| - | Dash ID | skillpack | - |',
+    '| \\\\uC61B | Literal escape ID | skillpack | - |',
+    '| \\uC61B | Hangul ID | skillpack | - |',
+  ]) {
+    if (!skillpackOutput.includes(anchor)) throw new Error(`skill list external skillpack lost anchor: ${anchor}`);
+  }
+  if (skillpackOutput.includes('日本語') || skillpackOutput.split(/\r?\n/).some(line => /^\|\s*forged-/.test(line))) {
+    throw new Error('skill list external metadata bypassed English fallback or forged a Markdown row');
+  }
+  const skillpackJsonEnv = normalizedJson('skill list external skillpack environment JSON', run(
+    ['skill', 'list', '--path', project, '--json'],
+    { ...baseEnv, LEERNESS_LANG: 'en', LEERNESS_SKILLPACK_PATH: skillpackDir }, tmp
+  ));
+  const skillpackJsonExplicit = normalizedJson('skill list external skillpack explicit JSON', run(
+    ['skill', 'list', '--path', project, '--json', '--language', 'en'],
+    { ...baseEnv, LEERNESS_LANG: 'ko', LEERNESS_SKILLPACK_PATH: skillpackDir }, tmp
+  ));
+  const skillpackJsonKorean = normalizedJson('skill list external skillpack Korean JSON', run(
+    ['skill', 'list', '--path', project, '--json'],
+    { ...baseEnv, LEERNESS_LANG: 'ko', LEERNESS_SKILLPACK_PATH: skillpackDir }, tmp
+  ));
+  const canonicalSkillKeys = ['capabilities', 'displayNameKo', 'id', 'lastUpdated', 'lastUsed', 'source', 'usageCount'];
+  const externalTranslatedJson = skillpackJsonEnv.items && skillpackJsonEnv.items.find(item => item.id === 'translated-pack');
+  if (JSON.stringify(skillpackJsonEnv) !== JSON.stringify(skillpackJsonExplicit)
+      || JSON.stringify(skillpackJsonEnv) !== JSON.stringify(skillpackJsonKorean)
+      || skillpackJsonEnv.skillpack !== 'env'
+      || !skillpackJsonEnv.items.every(item => JSON.stringify(Object.keys(item).sort()) === JSON.stringify(canonicalSkillKeys))
+      || skillpackJsonEnv.items.some(item => item.id === 'ambient-pack' || typeof item.id !== 'string')
+      || !skillpackJsonEnv.items.some(item => item.id === 'a|b')
+      || !skillpackJsonEnv.items.some(item => item.id === 'a b')
+      || !skillpackJsonEnv.items.some(item => item.id === 'a  b')
+      || !skillpackJsonEnv.items.some(item => item.id === ' ')
+      || !skillpackJsonEnv.items.some(item => item.id === '-')
+      || !skillpackJsonEnv.items.some(item => item.id === literalEscapeId)
+      || !externalTranslatedJson || externalTranslatedJson.displayNameKo !== '번역 스킬'
+      || externalTranslatedJson.capabilities[0] !== '한국어 기능') {
+    throw new Error('skill list external skillpack JSON changed across locale routes or exposed presentation-only fields');
+  }
+  // Valid Korean free text is a compatibility surface: unlike the English
+  // Markdown-safe projection it must retain repeated spaces byte-for-byte.
+  // Keep an ambient pack present so this also exercises explicit env priority.
+  const koreanBytePackDir = path.join(tmp, 'korean-byte-pack');
+  fs.mkdirSync(koreanBytePackDir, { recursive: true });
+  fs.writeFileSync(path.join(koreanBytePackDir, 'catalog.json'), JSON.stringify({
+    name: '외부  팩',
+    version: '1  2',
+    skills: [{
+      id: 'ko-space-pack',
+      displayNameKo: '가  나',
+      capabilities: ['첫  기능'],
+      lastUpdated: '2026  08',
+    }],
+  }, null, 2) + '\n');
+  const koreanByteOutput = requireSuccess('skill list external skillpack Korean byte preservation', run(
+    ['skill', 'list', '--path', project],
+    { ...baseEnv, LEERNESS_LANG: 'ko', LEERNESS_SKILLPACK_PATH: koreanBytePackDir }, tmp
+  ));
+  for (const anchor of [
+    '# skillpack 출처: env (외부  팩 v1  2)',
+    '| ko-space-pack | 가  나 | skillpack | 첫  기능 | 0 | 2026  08 |',
+  ]) {
+    if (!koreanByteOutput.includes(anchor)) throw new Error(`skill list Korean valid metadata changed bytes: ${anchor}`);
+  }
+  fs.rmSync(path.join(project, 'node_modules'), { recursive: true, force: true });
   manifest.language = 'ko';
   fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
   for (const [label, args] of surfaces) {
-    requireNoHangul(`${label} (environment language)`, run(args, { ...baseEnv, LEERNESS_LANG: 'en' }));
-    requireNoHangul(`${label} (explicit language)`, run([...args, '--language', 'en'], { ...baseEnv, LEERNESS_LANG: 'ko' }));
+    const envEnglish = requireNoHangul(`${label} (environment language)`, run(args, { ...baseEnv, LEERNESS_LANG: 'en' }));
+    const explicitEnglish = requireNoHangul(`${label} (explicit language)`, run([...args, '--language', 'en'], { ...baseEnv, LEERNESS_LANG: 'ko' }));
+    if (label === 'skill list' && (envEnglish !== storedSkillList || explicitEnglish !== storedSkillList)) {
+      throw new Error('skill list English output differs across stored, environment, or explicit locale routes');
+    }
   }
   manifest.language = 'en';
   fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
@@ -243,6 +462,27 @@ try {
       throw new Error(`${label} JSON contract changed with UI language`);
     }
   }
+  const skillJson = normalizedJson('skill list canonical JSON shape', run(['skill', 'list', '--path', project, '--json']));
+  const koreanOnlyJson = skillJson.items && skillJson.items.find(item => item.id === 'korean-only');
+  const unsafeCellsJson = skillJson.items && skillJson.items.find(item => item.id === 'unsafe-cells');
+  const falsyJson = skillJson.items && skillJson.items.find(item => item.id === 'falsy-json');
+  const hostileObjectJson = skillJson.items && skillJson.items.find(item => item.id === 'hostile-object');
+  const featureJson = skillJson.items && skillJson.items.find(item => item.id === 'feature-implementation');
+  const roadmapJson = skillJson.items && skillJson.items.find(item => item.id === 'project-roadmap-generator');
+  if (!skillJson || skillJson.skillpack !== 'builtin' || skillJson.total !== skillJson.items.length
+      || !koreanOnlyJson || koreanOnlyJson.displayNameKo !== '한국어 전용 사용자 스킬'
+      || koreanOnlyJson.capabilities[0] !== '한국어 기능 설명' || koreanOnlyJson.lastUpdated !== '마지막'
+      || koreanOnlyJson.usageCount !== '한국어 횟수' || koreanOnlyJson.lastUsed !== 1725062400000
+      || !unsafeCellsJson || unsafeCellsJson.usageCount !== '' || unsafeCellsJson.lastUsed !== 0
+      || !falsyJson || falsyJson.displayNameKo !== '' || falsyJson.capabilities !== false
+      || falsyJson.usageCount !== null || falsyJson.lastUsed !== false || falsyJson.lastUpdated !== false
+      || !hostileObjectJson || hostileObjectJson.usageCount.toString !== null
+      || hostileObjectJson.lastUsed.toString !== null || hostileObjectJson.lastUpdated.toString !== null
+      || !featureJson || featureJson.displayNameKo !== '기능 구현 표준 스킬' || featureJson.capabilities[0] !== 'feature-contracts 작성'
+      || !roadmapJson || roadmapJson.displayNameKo !== '프로젝트 로드맵 자동 생성 스킬' || !roadmapJson.capabilities[1].includes('좌→우 수평 트리')
+      || !skillJson.items.every(item => JSON.stringify(Object.keys(item).sort()) === JSON.stringify(canonicalSkillKeys))) {
+    throw new Error('skill list JSON no longer exposes the canonical locale-independent shape');
+  }
 
   const koEnv = { ...baseEnv, LEERNESS_LANG: 'ko' };
   const koreanAnchors = new Map([
@@ -251,6 +491,7 @@ try {
     ['plan list', ['완료기준(Done-When)', 'Tasks:', '완료)']],
     ['round-history', ['자율 라운드 통계', '누적 라운드', '최근 10 tags']],
     ['milestones', ['도달 마일스톤', '총 라운드', '다음 마일스톤', '라운드 남음']],
+    ['skill list', ['skillpack 미설치', '| ID | 한글명 | 출처 | 능력(요약) | 사용횟수 | 최종 |', '| feature-implementation | 기능 구현 표준 스킬 | catalog+local | feature-contracts 작성 / 재사용 우선 검사 / 테스트 증거 수집 … |', '| project-roadmap-generator | 프로젝트 로드맵 자동 생성 스킬 | catalog+local | leerness .leerness/* 통합 파싱 (plan/progress/skills/rules/decisions/handoff/current-state) / 좌→우 수평 트리 + 상하 중앙정렬 SVG / 7개 상태 색상 (완료/진행/보류/검토/예정/미완료/오류) … |', '한국어 전용 사용자 스킬', '옛 사용자 스킬', '| hostile-object | hostile-object | user |  | 0 | - |']],
   ]);
   for (const [label, args] of surfaces) {
     const output = requireSuccess(`${label} Korean control`, run(args, koEnv));
@@ -281,7 +522,7 @@ try {
     throw new Error('milestones terminal JSON did not preserve the 500-round contract');
   }
 
-  console.log('✓ Five next-cluster English surfaces contain no Hangul across locale paths and edge states; 5/5 Korean controls and JSON contracts remain intact');
+  console.log('✓ Six next-cluster English surfaces contain no Hangul across locale paths and edge states; 6/6 Korean controls and JSON contracts remain intact');
 } catch (error) {
   console.error(`✗ ${error && error.message ? error.message : error}`);
   process.exitCode = 1;

@@ -190,3 +190,18 @@ doNotStore:
 - [x] 사이트 commit `b0dbd63`, Astro 706 pages, Cloudflare production deployment `d974d5f2-970d-43ba-90af-7944f0551262`; leerness.com 루트·v1.36.182 changelog·llms·Pages 원본 HTTP 200 및 `verify-deploy` 첫 시도 통과
 - [x] GitHub Actions run 33368507960이 구현 SHA에서 전체 13/13 성공; 실패·취소·skip 0, Ubuntu Node 18/20/22와 Windows Node 18/20/22/24 full E2E 전부 통과
 - [x] 롤백 기준: npm exact `leerness@1.36.181` 재설치, GitHub tag `v1.36.181`, 직전 사이트 커밋 `b6c7e62`
+
+## 2026-08-31 — v1.36.183
+
+- [x] English `skill list`의 기존 4줄 Hangul 누수를 stored language, `LEERNESS_LANG=en`, explicit `--language en` 실제 CLI에서 모두 0으로 고정
+- [x] 한국어 유효 메타데이터 바이트·canonical JSON 값 보존, 적대적 외부 skillpack 메타데이터와 injective ID 렌더링 회귀 통과
+- [x] 외부 Codex read-only 검토의 P2 4건을 재현·수정하고 최종 재검토에서 actionable P0/P1/P2 없음
+- [x] 전체 `npm test`: lint 68 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP 22/22, command surface 40/40, installed cleanroom 10/10, full E2E 467/467(5,068초), 지연 경쟁 11/11
+- [x] 범프 후 `npm run test:fast`와 smoke 13/13, gate 6/6, 완료 claims 140건 신규 실패 0, secret/encoding/lazy blocker 0
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.183 동기화; 새 런타임 dependency·lifecycle install script·환경변수 없음
+- [x] `npm pack --dry-run`: 78 files, 2,007,684 bytes, shasum `cc99507aaf54bd07d90a0828b21375bf23709e29`, integrity `sha512-iN2qOT1njBYjr7MZckeXltlqGV1QUtWXwFa+TwSufSB21VWm3Hp2/92+ZWOCnKZxr3FhNst/5X+w0/Fj+uSnDA==`
+- [ ] GitHub main/tag/release/asset와 구현 SHA·digest 일치
+- [ ] npm latest/exact 1.36.183, registry integrity/shasum 일치, fresh-prefix selftest 통과
+- [ ] leerness.com production 루트·changelog·llms·Pages origin 검증
+- [ ] GitHub Actions 13/13 성공, failure/cancelled/skipped 0
+- [ ] 롤백 기준: npm exact `leerness@1.36.182` 재설치, GitHub tag `v1.36.182`, 직전 사이트 커밋 `b0dbd63`

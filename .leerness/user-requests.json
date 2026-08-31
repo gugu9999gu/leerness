@@ -1063,7 +1063,17 @@
       "notes": "",
       "updatedAt": "2026-08-31T09:15:48.966Z",
       "completedAt": "2026-08-31T09:15:48.966Z"
+    },
+    {
+      "id": "UR-0093",
+      "text": "Continue T-0092 by localizing only the four-line English skill list leak, preserving Korean and JSON contracts, then publish and verify the patch release.",
+      "recordedAt": "2026-08-31T09:58:36.418Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-08-31T09:15:48.967Z"
+  "updatedAt": "2026-08-31T09:58:36.418Z"
 }

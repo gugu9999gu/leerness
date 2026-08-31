@@ -40,7 +40,14 @@
       "title": "decisions.md \"leerness\" 관련 결정 7건 영향 확인",
       "command": "leerness decision list --query \"leerness\"",
       "addedAt": "2026-08-27T18:20:29.086Z"
+    },
+    {
+      "actionKey": "release-docs",
+      "icon": "📝",
+      "title": "버전 변동 task — CHANGELOG.md / README.md 갱신 확인",
+      "command": "leerness whats-new .",
+      "addedAt": "2026-08-31T10:01:03.036Z"
     }
   ],
-  "at": "2026-08-27T18:20:29.087Z"
+  "at": "2026-08-31T10:01:03.038Z"
 }

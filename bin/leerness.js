@@ -49,7 +49,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.182';
+const VERSION = '1.36.183';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -129,6 +129,16 @@ const README_END = '<!-- leerness:project-readme:end -->';
 
 // 1.9.10: leerness-skillpack 동적 로드 (선택). 없으면 BUILTIN 사용.
 function _tryLoadSkillpack() {
+  // 0) Explicit path overrides ambient installs. Besides matching user intent,
+  // this keeps a pinned pack deterministic on hosts that also have another
+  // copy in cwd or the global npm root.
+  if (process.env.LEERNESS_SKILLPACK_PATH) {
+    try {
+      const f = path.resolve(process.env.LEERNESS_SKILLPACK_PATH);
+      const target = f.endsWith('.json') ? f : path.join(f, 'catalog.json');
+      if (fs.existsSync(target)) return { src: 'env', data: JSON.parse(fs.readFileSync(target, 'utf8')) };
+    } catch {}
+  }
   // 1) 정상 require resolution
   try { return { src: 'require', data: require('leerness-skillpack/catalog.json') }; } catch {}
   // 2) cwd/node_modules
@@ -146,14 +156,6 @@ function _tryLoadSkillpack() {
       if (fs.existsSync(f)) return { src: 'global', data: JSON.parse(fs.readFileSync(f, 'utf8')) };
     }
   } catch {}
-  // 4) 환경변수 명시 경로
-  if (process.env.LEERNESS_SKILLPACK_PATH) {
-    try {
-      const f = path.resolve(process.env.LEERNESS_SKILLPACK_PATH);
-      const target = f.endsWith('.json') ? f : path.join(f, 'catalog.json');
-      if (fs.existsSync(target)) return { src: 'env', data: JSON.parse(fs.readFileSync(target, 'utf8')) };
-    } catch {}
-  }
   return null;
 }
 
@@ -166,12 +168,17 @@ function _loadSkillCatalog() {
     SKILLPACK_META = { name: sp.data.name, version: sp.data.version };
     const out = {};
     for (const s of sp.data.skills) {
+      if (!s || typeof s !== 'object' || typeof s.id !== 'string' || !s.id) continue;
       out[s.id] = {
         displayNameKo: s.displayNameKo,
+        displayNameEn: s.displayNameEn,
+        displayName: s.displayName,
+        name: s.name,
         version: s.version,
         lastUpdated: s.lastUpdated,
         verification: s.verification,
         capabilities: s.capabilities,
+        capabilitiesEn: s.capabilitiesEn,
         _source: 'skillpack'
       };
     }
@@ -2321,6 +2328,81 @@ function _buildAllSkills(root) {
   }
   return out;
 }
+// English human output never guesses a translation. Prefer explicit English
+// metadata, accept already-English legacy metadata, then fall back to the
+// stable skill ID / an empty capability cell. Canonical JSON remains untouched.
+const _SKILL_HANGUL = /\p{Script=Hangul}/u;
+const _SKILL_LETTER = /\p{Letter}/u;
+const _SKILL_LATIN = /\p{Script=Latin}/u;
+function _skillHumanCell(value) {
+  let text = '';
+  try {
+    if (typeof value === 'string') text = value;
+    else if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') text = String(value);
+    else {
+      const encoded = JSON.stringify(value);
+      text = typeof encoded === 'string' ? encoded : '';
+    }
+  } catch {}
+  return text
+    .replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ')
+    .replace(/\|/g, '&#124;')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+// Korean mode keeps the legacy byte representation for valid scalar metadata.
+// Only malformed values need a total, non-throwing fallback; presentation
+// normalization belongs exclusively to the English table.
+function _skillKoreanValue(value) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+  try {
+    const encoded = JSON.stringify(value);
+    return typeof encoded === 'string' ? encoded : '';
+  } catch { return ''; }
+}
+function _skillOwnValue(object, key, fallback) {
+  if (object == null || !Object.prototype.hasOwnProperty.call(Object(object), key)) return fallback;
+  const value = object[key];
+  // `undefined` is not representable in a source JSON document and would make
+  // JSON.stringify omit the public key. Preserve every representable falsy or
+  // object value, while retaining the canonical fallback for absent fields.
+  return value === undefined ? fallback : value;
+}
+function _isEnglishSkillText(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return !!text && !_SKILL_HANGUL.test(text)
+    && Array.from(text).every(char => !_SKILL_LETTER.test(char) || _SKILL_LATIN.test(char));
+}
+function _englishSafeSkillId(id) {
+  const projected = Array.from(String(id)).map(char => {
+    const codePoint = char.codePointAt(0);
+    if (char === '\\') return '\\\\';
+    // Spaces must be escaped too: _skillHumanCell intentionally collapses and
+    // trims free text, which would otherwise make `a b`/`a  b` and ` `/`-`
+    // collide. The projected alphabet contains no character that sanitizer
+    // rewrites, while doubled input backslashes distinguish literal escapes.
+    if (codePoint >= 0x21 && codePoint <= 0x7E && char !== '|') return char;
+    return codePoint <= 0xFFFF
+      ? `\\u${codePoint.toString(16).toUpperCase().padStart(4, '0')}`
+      : `\\u{${codePoint.toString(16).toUpperCase()}}`;
+  }).join('');
+  return _skillHumanCell(projected) || '-';
+}
+function _englishSkillText(candidates, fallback) {
+  for (const candidate of candidates) {
+    if (_isEnglishSkillText(candidate)) return _skillHumanCell(candidate);
+  }
+  return _skillHumanCell(fallback);
+}
+function _englishSkillCapabilities(skill) {
+  const preferred = Array.isArray(skill.capabilitiesEn) ? skill.capabilitiesEn : [];
+  const legacy = Array.isArray(skill.capabilities) ? skill.capabilities : [];
+  const clean = values => values.filter(_isEnglishSkillText).map(_skillHumanCell).filter(Boolean);
+  const translated = clean(preferred);
+  return translated.length ? translated : clean(legacy);
+}
+
 // 1.9.66: skill 추가/제거 시 캐시 invalidate (외부 helper)
 function skillList(root) {
   const all = listAllSkills(root);
@@ -2328,25 +2410,58 @@ function skillList(root) {
   if (has('--json')) {
     const items = Object.entries(all).map(([id, v]) => ({
       id,
-      displayNameKo: v.displayNameKo || id,
+      displayNameKo: _skillOwnValue(v, 'displayNameKo', id),
       source: v._source,
-      capabilities: v.capabilities || [],
-      usageCount: v.usage?.count || 0,
-      lastUsed: v.usage?.lastUsed || null,
-      lastUpdated: v.lastUpdated || null
+      capabilities: _skillOwnValue(v, 'capabilities', []),
+      usageCount: _skillOwnValue(v.usage, 'count', 0),
+      lastUsed: _skillOwnValue(v.usage, 'lastUsed', null),
+      lastUpdated: _skillOwnValue(v, 'lastUpdated', null)
     }));
     log(JSON.stringify({ skillpack: SKILLPACK_SOURCE, total: items.length, items }, null, 2));
     return;
   }
-  if (SKILLPACK_SOURCE !== 'builtin') log(`# skillpack 출처: ${SKILLPACK_SOURCE}${SKILLPACK_META ? ` (${SKILLPACK_META.name} v${SKILLPACK_META.version})` : ''}`);
-  else log('# skillpack 미설치 — builtin fallback 사용 (leerness 본 패키지 내장 카탈로그)');
-  log('| ID | 한글명 | 출처 | 능력(요약) | 사용횟수 | 최종 |');
+  const english = _uiLang(root) === 'en';
+  if (SKILLPACK_SOURCE !== 'builtin') {
+    const koreanMeta = SKILLPACK_META
+      ? ` (${_skillKoreanValue(SKILLPACK_META.name)} v${_skillKoreanValue(SKILLPACK_META.version)})`
+      : '';
+    const englishMetaName = SKILLPACK_META ? _englishSkillText([SKILLPACK_META.name], '') : '';
+    const englishMetaVersion = SKILLPACK_META ? _englishSkillText([SKILLPACK_META.version], '') : '';
+    const englishMeta = englishMetaName
+      ? ` (${englishMetaName}${englishMetaVersion ? ` v${englishMetaVersion}` : ''})`
+      : '';
+    log(english ? `# skillpack source: ${SKILLPACK_SOURCE}${englishMeta}` : `# skillpack 출처: ${SKILLPACK_SOURCE}${koreanMeta}`);
+  } else {
+    log(english
+      ? '# skillpack not installed — using builtin fallback (catalog bundled with leerness)'
+      : '# skillpack 미설치 — builtin fallback 사용 (leerness 본 패키지 내장 카탈로그)');
+  }
+  log(english
+    ? '| ID | Name | Source | Capabilities (summary) | Uses | Last |'
+    : '| ID | 한글명 | 출처 | 능력(요약) | 사용횟수 | 최종 |');
   log('|---|---|---|---|---|---|');
   for (const [id, v] of Object.entries(all)) {
-    const cap = (v.capabilities || []).slice(0, 3).join(' / ') + ((v.capabilities || []).length > 3 ? ' …' : '');
-    const usage = v.usage?.count || 0;
-    const last = v.usage?.lastUsed?.slice(0, 10) || v.lastUpdated || '-';
-    log(`| ${id} | ${v.displayNameKo || id} | ${v._source} | ${cap} | ${usage} | ${last} |`);
+    const displayId = english ? _englishSafeSkillId(id) : id;
+    const capabilities = english
+      ? _englishSkillCapabilities(v)
+      : (Array.isArray(v.capabilities) ? v.capabilities.filter(value => typeof value === 'string') : []);
+    const cap = capabilities.length
+      ? capabilities.slice(0, 3).join(' / ') + (capabilities.length > 3 ? ' …' : '')
+      : (english ? '-' : '');
+    const name = english
+      ? _englishSkillText([v.displayNameEn, v.displayName, v.name, v.displayNameKo], displayId)
+      : (typeof v.displayNameKo === 'string' && v.displayNameKo.trim() ? v.displayNameKo : id);
+    const canonicalUsage = v.usage?.count;
+    const usage = typeof canonicalUsage === 'number' && Number.isFinite(canonicalUsage) && canonicalUsage >= 0
+      ? canonicalUsage
+      : 0;
+    const rawLastUsed = typeof v.usage?.lastUsed === 'string' ? v.usage.lastUsed.slice(0, 10) : null;
+    const rawLastUpdated = typeof v.lastUpdated === 'string' ? v.lastUpdated : null;
+    const canonicalLast = rawLastUsed || rawLastUpdated || '-';
+    const last = english ? _englishSkillText([canonicalLast], '-') : canonicalLast;
+    log(english
+      ? `| ${_skillHumanCell(displayId)} | ${_skillHumanCell(name)} | ${_skillHumanCell(v._source)} | ${_skillHumanCell(cap)} | ${_skillHumanCell(usage)} | ${_skillHumanCell(last)} |`
+      : `| ${displayId} | ${name} | ${v._source} | ${cap} | ${usage} | ${last} |`);
   }
 }
 
@@ -31497,7 +31612,7 @@ async function main() {
   if (cmd === 'consistency' && args[1] === 'check')              return consistencyCheck(arg('--path', args[2] || process.cwd()));
   if (cmd === 'consistency' && args[1] === 'merge-design-guide') return mergeDesign(arg('--path', args[2] || process.cwd()));
   if (cmd === 'skill' && args[1] === 'lint')        return skillLintCmd(arg('--path', args[2] && !args[2].startsWith('-') && /^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(args[2]) ? args[2] : process.cwd()), args[2] && !args[2].startsWith('-') && !/^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(args[2]) ? args[2] : null);  // 1.36.26: 메타 품질 lint
-  if (cmd === 'skill' && args[1] === 'list')        return skillList(args[2] || arg('--path', process.cwd()));
+  if (cmd === 'skill' && args[1] === 'list')        return skillList(_resolveRoot(args[2]));
   if (cmd === 'skill' && args[1] === 'info')        return skillInfo(args[2], absRoot(arg('--path', process.cwd())));
   if (cmd === 'skill' && args[1] === 'add')         return addSkill(absRoot(arg('--path', process.cwd())), args[2]);
   if (cmd === 'skill' && args[1] === 'learn')       return skillLearn(absRoot(arg('--path', process.cwd())), args[2]);
