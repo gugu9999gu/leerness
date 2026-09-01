@@ -218,8 +218,9 @@ doNotStore:
 - [x] gate 6/6, 완료 claims 141건 신규 실패 0; 39-command 누수 exact 30→27, `mode` 3→0
 - [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.184 동기화; 새 런타임 dependency·lifecycle install script·환경변수 없음
 - [x] `npm pack --dry-run`: 78 files, 2,016,064 bytes, shasum `191e2e10b53a2c09ea6add9b93634dcab99f44e4`, integrity `sha512-GXxV42SZKohwG9dfrlf4nEviqChcIJ943Yq0RYBLkjip4YMPVS+7Io0ss31K9Fr9I75HXwKVdYV8VKAiKES8XQ==`
-- [ ] GitHub main/tag/release/asset가 구현 SHA와 일치하고 exact tarball digest 검증
-- [ ] npm latest/exact 1.36.184, registry integrity/shasum 일치, fresh-prefix CLI와 selftest 355/355 검증
-- [ ] leerness.com production 루트·changelog·llms·Pages origin HTTP 200 및 1.36.184 노출
-- [ ] GitHub Actions 13/13 성공, failure/cancelled/skipped 0
+- [x] 공개 시점 GitHub main/tag/release가 구현 SHA `4a504ac304c23c38640bd117382984b2bf3559b7`로 일치; Release asset 2,016,064 bytes, SHA-256 `940f8490f46316ee9a05d71888bc7e7c18d20acf170df893fdf654567bc80704` 로컬 일치
+- [x] npm latest/exact 1.36.184; registry shasum `191e2e10b53a2c09ea6add9b93634dcab99f44e4`·integrity `sha512-GXxV42SZKohwG9dfrlf4nEviqChcIJ943Yq0RYBLkjip4YMPVS+7Io0ss31K9Fr9I75HXwKVdYV8VKAiKES8XQ==` 로컬 pack 일치, fresh-prefix CLI/package 1.36.184와 selftest 355/355 통과
+- [x] 사이트 commit `48657ca454de9555c431087951d5d68b275050ae`, Astro 708 pages, Cloudflare production deployment `7c957a08-0ade-4040-a9ec-60e5c727a65c`; leerness.com 루트·v1.36.184 changelog·llms·Pages origin 첫 시도 HTTP 200 및 버전 표식 확인
+- [x] GitHub Actions run 33469212506이 구현 SHA에서 13/13 성공; failure/cancelled/skipped 0, annotation 0, Ubuntu Node 18/20/22와 Windows Node 18/20/22/24 full E2E 전부 통과
+- [x] 최종 `verify-claim T-0164 --require-evidence` 통과: evidence complete, claims consistent, Git cross-check true, implementation substance true, scope creep 0; 최종 gate 6/6, 완료 claims 142건 신규 실패 0
 - [x] 롤백 기준: npm exact `leerness@1.36.183` 재설치, GitHub tag `v1.36.183`, 직전 사이트 커밋 `74796968600763bec42bc449a7ce0f1ce622ec1d`

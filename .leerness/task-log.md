@@ -244,3 +244,16 @@ doNotStore:
 - `npm run test:fast`와 전체 `npm test`가 통과했다: lint 68 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP 22/22, command surface 40/40, installed cleanroom 10/10, E2E 467/467(6,363초), 지연 경쟁 11/11.
 - 최종 pre-release 가드는 secrets 미승인 0, encoding 0, check healthy, lazy blocker 0, idempotency 위반 0, gate 6/6·claims 141 신규 실패 0이다. pack dry-run은 78 files, shasum `191e2e10b53a2c09ea6add9b93634dcab99f44e4`, integrity `sha512-GXxV42SZKohwG9dfrlf4nEviqChcIJ943Yq0RYBLkjip4YMPVS+7Io0ss31K9Fr9I75HXwKVdYV8VKAiKES8XQ==`를 산출했다.
 - 다음: v1.36.184를 GitHub/npm/leerness.com에 게시하고 공개 설치본·사이트·Actions 13/13을 확인한다. T-0159는 waiting 그대로 유지한다.
+
+## 2026-09-01 — v1.36.184 public release and CI verification
+
+- GitHub main/tag/Release가 구현 SHA `4a504ac304c23c38640bd117382984b2bf3559b7`에서 일치하고, 2,016,064-byte asset SHA-256이 로컬 tarball과 일치한다.
+- npm latest/exact 1.36.184의 integrity/shasum이 로컬 pack과 일치하며, fresh-prefix 설치본 CLI/package 1.36.184와 selftest 355/355가 통과했다.
+- 사이트 commit `48657ca454de9555c431087951d5d68b275050ae`, Astro 708 pages, Cloudflare production deployment `7c957a08-0ade-4040-a9ec-60e5c727a65c`를 게시했고 production 4개 URL이 첫 검증에서 HTTP 200과 1.36.184를 노출했다.
+- GitHub Actions run 33469212506은 구현 SHA에서 13/13 성공했고 failure/cancelled/skipped와 annotation은 모두 0이다. T-0164와 UR-0094를 완료했으며 T-0159는 waiting 그대로 두었다.
+
+## 2026-09-01 session-close
+- Generated session-handoff.md and refreshed current-state.md.
+
+## 2026-09-01 session-close
+- Generated session-handoff.md and refreshed current-state.md.

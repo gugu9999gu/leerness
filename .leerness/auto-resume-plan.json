@@ -1,11 +1,11 @@
 {
-  "savedAt": "2026-08-31T07:28:23.009Z",
-  "nextRoundVersion": "next after 1.36.182",
-  "expectedFireAt": "2026-08-31T07:53:23.003Z",
+  "savedAt": "2026-09-01T04:18:28.879Z",
+  "nextRoundVersion": "next after 1.36.184",
+  "expectedFireAt": "2026-09-01T04:43:28.872Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.36.182",
+    "currentVersion": "1.36.184",
     "activeTaskId": "T-0092",
     "activeTaskRequest": "명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/i",
     "memorySurface": {
@@ -18,11 +18,6 @@
   },
   "nextActions": [
     {
-      "icon": "💭",
-      "title": "decisions.md \"context가\" 관련 결정 1건 영향 확인",
-      "command": "leerness decision list --query \"context가\""
-    },
-    {
       "icon": "🛡",
       "title": "과거 실패 회피 — lessons.md 에 \"leerness\" 관련 1건",
       "command": "leerness lessons --auto --path ."
@@ -31,6 +26,11 @@
       "icon": "💭",
       "title": "decisions.md \"leerness\" 관련 결정 7건 영향 확인",
       "command": "leerness decision list --query \"leerness\""
+    },
+    {
+      "icon": "📝",
+      "title": "버전 변동 task — CHANGELOG.md / README.md 갱신 확인",
+      "command": "leerness whats-new ."
     }
   ],
   "note": "다음 wakeup 시: 1) leerness resume . 으로 plan 확인  2) leerness handoff . 실행  3) leerness next-action take 로 즉시 task 진입"

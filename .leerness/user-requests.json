@@ -1080,12 +1080,16 @@
       "id": "UR-0094",
       "text": "다음작업이어서 진행",
       "recordedAt": "2026-08-31T23:43:48.047Z",
-      "status": "open",
-      "linkedTaskIds": [],
+      "status": "completed",
+      "linkedTaskIds": [
+        "T-0164"
+      ],
       "linkedPlanIds": [],
       "linkedDecisionIds": [],
-      "notes": ""
+      "notes": "v1.36.184 mode i18n localization, regression, external review, GitHub/npm/leerness.com publication, fresh public install, and Actions 13/13 verification completed.",
+      "updatedAt": "2026-09-01T06:10:08.408Z",
+      "completedAt": "2026-09-01T06:10:08.408Z"
     }
   ],
-  "updatedAt": "2026-08-31T23:43:48.047Z"
+  "updatedAt": "2026-09-01T06:10:08.409Z"
 }
