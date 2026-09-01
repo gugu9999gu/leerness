@@ -205,3 +205,21 @@ doNotStore:
 - [x] leerness.com production 루트·changelog·llms·Pages origin 모두 HTTP 200 및 1.36.183 노출
 - [x] GitHub Actions run 33402089854가 구현 SHA에서 13/13 성공, failure/cancelled/skipped 0
 - [x] 롤백 기준: npm exact `leerness@1.36.182` 재설치, GitHub tag `v1.36.182`, 직전 사이트 커밋 `b0dbd63`
+
+## 2026-09-01 — v1.36.184
+
+- [x] English `mode`의 3줄 Hangul 누수를 stored/env/explicit locale와 pre-dispatch/stale/error 경로에서 0으로 고정; 한국어와 canonical JSON 계약 보존
+- [x] lock-time manifest 손상은 원본 보존·문서 재생성 0·실패-폐쇄 처리하고, 동시 hostile valid mode 값은 쓰기 전 total normalization
+- [x] 실제 `EEXIST`·pre-lock read·owner-token-held reread를 추적하는 결정론적 회귀와 status-null/signal 거부 추가
+- [x] 외부 Codex 반복 read-only 검토의 발견사항을 재현·수정하고 최종 `No actionable P0/P1/P2 findings.`
+- [x] `npm run test:fast` 통과: smoke 13/13, false-claim 199/199, MCP presence 22/22 포함
+- [x] 전체 `npm test` 통과: lint 68 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP 22/22, command surface 40/40, installed cleanroom 10/10, E2E 467/467(6,363초), 지연 경쟁 11/11
+- [x] secrets 미승인 0, encoding 0, check healthy, lazy blocker 0, idempotency 위반 0, code lens 통과
+- [x] gate 6/6, 완료 claims 141건 신규 실패 0; 39-command 누수 exact 30→27, `mode` 3→0
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.184 동기화; 새 런타임 dependency·lifecycle install script·환경변수 없음
+- [x] `npm pack --dry-run`: 78 files, 2,016,064 bytes, shasum `191e2e10b53a2c09ea6add9b93634dcab99f44e4`, integrity `sha512-GXxV42SZKohwG9dfrlf4nEviqChcIJ943Yq0RYBLkjip4YMPVS+7Io0ss31K9Fr9I75HXwKVdYV8VKAiKES8XQ==`
+- [ ] GitHub main/tag/release/asset가 구현 SHA와 일치하고 exact tarball digest 검증
+- [ ] npm latest/exact 1.36.184, registry integrity/shasum 일치, fresh-prefix CLI와 selftest 355/355 검증
+- [ ] leerness.com production 루트·changelog·llms·Pages origin HTTP 200 및 1.36.184 노출
+- [ ] GitHub Actions 13/13 성공, failure/cancelled/skipped 0
+- [x] 롤백 기준: npm exact `leerness@1.36.183` 재설치, GitHub tag `v1.36.183`, 직전 사이트 커밋 `74796968600763bec42bc449a7ce0f1ce622ec1d`

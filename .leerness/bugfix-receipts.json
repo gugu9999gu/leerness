@@ -752,5 +752,46 @@
       ]
     },
     "previousGuardGap": null
+  },
+  {
+    "id": "T-0164",
+    "repro": "node -e \"const cp=require('child_process');const r=cp.spawnSync(process.execPath,['bin/leerness.js','mode','--language','en','--path','.'],{encoding:'utf8'});const o=String(r.stdout||'')+String(r.stderr||'');if(/\\p{Script=Hangul}/u.test(o)){console.error('MODE_HANGUL_LEAK');process.exit(1)}\"",
+    "expectBad": "MODE_HANGUL_LEAK",
+    "baseline": {
+      "at": "2026-08-31T23:46:28.205Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 345
+    },
+    "rootCause": "mode dispatcher had hard-coded Korean human branches and no shared root/locale resolution; initial localization accidentally localized machine errors. Shared pre-dispatch errors and stale checks used cwd/fixed argv positions, leading-global parsing assumed argv[2], raw leakage probes conflated user paths with product prose, lock-time manifest corruption was silently returned from the callback so docs regenerated and success was reported, and fresh previous-mode normalization originally happened after the manifest write so a hostile concurrent valid mode value could cause a partial manifest-only commit.",
+    "siblingScope": {
+      "checked": [
+        "healthy get",
+        "successful explicit set",
+        "corrupt read/set",
+        "missing harness",
+        "invalid value",
+        "unknown subcommand",
+        "stored/env/explicit locale",
+        "leading-global locale ordering",
+        "cwd/positional/--path precedence",
+        "target-root predispatch human errors",
+        "healthy/error JSON",
+        "predispatch missing/file/missing-value/unregistered JSON",
+        "stale cache human/JSON/positional root",
+        "Korean controls",
+        "JSON state",
+        "not-object/read-failed/json-parse reasons",
+        "lock-time manifest corruption/no-regeneration",
+        "deterministic lock contention and read-order handshake",
+        "status-null/signal rejection",
+        "hostile object mode normalization before write",
+        "39-command ratchet",
+        "Hangul paths."
+      ]
+    },
+    "previousGuardGap": "aggregate block measured only healthy mode and disabled/avoided stale state; dedicated probe excluded mode and assumed ASCII paths, so sibling/pre-dispatch/diagnostic JSON, leading-global order, target-root locale/cache, lock-time corruption, hostile valid mode values, and echo classification were not locked. The first race regression also used an unsynchronized timer, then observed only contention without read phases, while failure helpers accepted status:null."
   }
 ]

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.184 — 2026-09-01
+
+- T-0164: English-mode mode output now emits zero Hangul across stored, environment, and explicit locale paths, including pre-dispatch and stale-version diagnostics, while preserving Korean and locale-independent JSON contracts. Lock-time manifest rereads fail closed on corruption and normalize concurrent valid mode values before writing, with deterministic real-EEXIST regressions; the 39-command leakage ratchet tightens exactly from 30 to 27 lines.
+
 ## 1.36.183 — 2026-08-31
 
 - T-0163: English skill list now emits zero Hangul across stored, environment, and explicit locale paths while preserving Korean bytes and locale-independent JSON values. Adversarial external-skill metadata and injective ID rendering are covered, and the 39-command leakage ratchet tightens exactly from 34 to 30 lines.

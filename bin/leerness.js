@@ -49,7 +49,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.183';
+const VERSION = '1.36.184';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -851,6 +851,24 @@ function _uiLang(root) {
   } catch {}
   return 'ko';
 }
+// `mode` accepts both `--path` and path-like positionals after get/set. Keep
+// every pre-dispatch diagnostic, stale check, and handler branch on the same
+// target instead of letting each layer guess a different argv index.
+function _modeRoot(args = nonFlagArgs(), fallback = process.cwd()) {
+  return absRoot(arg('--path', null) || _taskPositionalPath(args, 1) || fallback);
+}
+// T-0164: mode machine errors predate localization and use Korean canonical
+// text. Preserve that byte contract even when an error is raised by a shared
+// pre-dispatch guard before the mode handler can select its own renderer.
+function _errorUiLang(root, command) {
+  // Global flags may legally precede the command. Use the same parser as main
+  // instead of assuming argv[2] is the command, or `--language en mode ...`
+  // makes shared pre-dispatch JSON errors language-dependent again.
+  const parsed = nonFlagArgs();
+  const resolvedCommand = command || parsed[0];
+  if (resolvedCommand === 'mode' && has('--json')) return 'ko';
+  return _uiLang(resolvedCommand === 'mode' ? _modeRoot(parsed, root) : root);
+}
 // ko/en 쌍에서 해석된 UI 언어로 선택 (Phase 1: 첫 화면 한정 사용).
 function _tx(lang, ko, en) { return lang === 'en' ? en : ko; }
 function fm(role, readWhen, updateWhen, body, lang = 'ko') {
@@ -1123,7 +1141,11 @@ function skillLock(skills, root) {
 //   생성물도 동작도 standard 와 **바이트 동일**이었다 — 이름만 있는 등급이었다. 없는 것을 광고하지 않는다.
 //   두 등급이 정직하게 도는 편이 셋 중 하나가 거짓말하는 것보다 낫다. strict 는 실제 게이트를 갖출 때 다시 연다.
 const _MODES = ['minimal', 'standard'];
-function _normMode(v) { const s = String(v || '').toLowerCase(); return _MODES.includes(s) ? s : 'standard'; }
+function _normMode(v) {
+  let s = '';
+  try { s = String(v || '').toLowerCase(); } catch { s = ''; }
+  return _MODES.includes(s) ? s : 'standard';
+}
 // 1.36.107: 재init 이 사용자의 선택을 되돌리지 않게 하는 두 술어. 우선순위는 **명시 플래그 > 기존 저장값 > 기본값**.
 //   opts.mode 는 호출부에서 정규화하지 않고 원본을 넘겨야 한다 — 미리 _normMode 를 걸면 '미지정' 과 '--mode standard'
 //   가 구분되지 않아 명시적으로 standard 로 올리는 것과 그냥 재init 한 것이 같아진다.
@@ -9973,7 +9995,8 @@ function _p0015ModeOk() {
     const normOk = _normMode('minimal') === 'minimal' && _normMode('standard') === 'standard'
       && _normMode('') === 'standard' && _normMode('MINIMAL') === 'minimal'
       && _normMode('banana') === 'standard' && _normMode(null) === 'standard'
-      && _normMode('strict') === 'standard' && _MODES.length === 2;
+      && _normMode('strict') === 'standard' && _normMode({ toString: null }) === 'standard'
+      && _MODES.length === 2;
     // ② 생성물이 실제로 갈린다 — 이름만 바뀌면 이 기능은 무의미하다
     const full = coreFiles('.', 'ko', [], {});
     const min = coreFiles('.', 'ko', [], { mode: 'minimal' });
@@ -15256,7 +15279,7 @@ function _rejectUnknownFlags(allowed, usageHint, options = {}) {
   const dym = (u) => { const c = [...all].find(k => u.startsWith(k) || k.startsWith(u)); return c ? ` — 혹시 ${c}?` : ''; };
   const detail = unknown.map(u => u + dym(u)).join(', ');
   const supported = [...all].join(' ');
-  const en = _uiLang(process.cwd()) === 'en';
+  const en = _errorUiLang(process.cwd()) === 'en';
   failJson(has('--json'), 'unknown_flag', en
     ? `Unsupported option for this command: ${detail} (supported: ${supported}${usageHint ? ' · ' + usageHint : ''}) — rejected instead of silently discarding its value`
     : `이 명령에서 지원하지 않는 옵션: ${detail} (지원: ${supported}${usageHint ? ' · ' + usageHint : ''}) — 값이 조용히 버려지는 것을 방지하기 위해 거부`);
@@ -15273,7 +15296,7 @@ function _argvLongFlagNames() {
 function _rejectUnregisteredFlags() {
   const unknown = _argvLongFlagNames().filter(name => !_VALUE_FLAGS.has(name) && !_BOOL_FLAGS.has(name));
   if (!unknown.length) return true;
-  const en = _uiLang(process.cwd()) === 'en';
+  const en = _errorUiLang(process.cwd()) === 'en';
   const human = en
     ? `Unknown flag: ${unknown.join(' ')} — no such flag in leerness. Its value could otherwise be absorbed into text or a path. Check: leerness --help`
     : `알 수 없는 플래그: ${unknown.join(' ')} — leerness 에 없는 이름입니다. 값이 본문이나 경로 인자에 섞이지 않도록 거부했습니다. 확인: leerness --help`;
@@ -15326,7 +15349,7 @@ function _rejectMalformedFlagForms(cmd, args) {
   if (!errors.length) return true;
   const onlyMissing = errors.every(e => e.kind === 'missing_value');
   const onlyInvalidValue = errors.every(e => e.kind === 'invalid_value');
-  const en = _uiLang(process.cwd()) === 'en';
+  const en = _errorUiLang(process.cwd(), cmd) === 'en';
   const detail = errors.map(e => {
     if (e.kind === 'missing_value') {
       if (e.name === '--path') return en
@@ -30986,7 +31009,7 @@ async function main() {
     if (_k !== null) {
       const _kn = Number(_k);
       if (!Number.isInteger(_kn) || _kn < 0) {
-        const _enK = _uiLang(process.cwd()) === 'en';
+        const _enK = _errorUiLang(process.cwd(), cmd) === 'en';
         failJson(has('--json'), 'invalid_keep', _enK
           ? `--keep must be an integer >= 0 (got: ${_k})`
           : `--keep 은 0 이상의 정수여야 합니다 (받은 값: ${_k})`);
@@ -31071,7 +31094,7 @@ async function main() {
     //   플래그를 적었는데 값이 없으면 그건 오타다. 조용히 cwd 로 떨어뜨리지 않는다.
     const _pathTyped = process.argv.slice(2).some((t) => t === '--path' || (typeof t === 'string' && t.startsWith('--path=')));
     if (_pathTyped && (typeof _p !== 'string' || !_p.trim())) {
-      const _en = _uiLang(process.cwd()) === 'en';
+      const _en = _errorUiLang(process.cwd(), cmd) === 'en';
       failJson(has('--json'), 'path_missing_value', _en
         ? '--path was given without a value — nothing was done'
         : '--path 에 값이 없습니다 — 아무것도 하지 않았습니다');
@@ -31080,7 +31103,7 @@ async function main() {
     if (_p && !_PATH_MAY_BE_ABSENT.has(cmd)) {
       const _abs = absRoot(_p);
       if (!exists(_abs)) {
-        const _en = _uiLang(process.cwd()) === 'en';
+        const _en = _errorUiLang(process.cwd(), cmd) === 'en';
         failJson(has('--json'), 'path_not_found', _lineSafe(_en
           ? `path not found: ${_abs} — no directory was created`
           : `경로 없음: ${_abs} — 디렉토리를 새로 만들지 않았습니다`));
@@ -31091,7 +31114,7 @@ async function main() {
       //   프로젝트 root 는 디렉토리다. 파일이면 그렇다고 말한다(스캔처럼 파일이 정상 입력인 경로는 위 _strict 가 따로 다룬다).
       try {
         if (!fs.statSync(_abs).isDirectory()) {
-          const _en2 = _uiLang(process.cwd()) === 'en';
+          const _en2 = _errorUiLang(process.cwd(), cmd) === 'en';
           failJson(has('--json'), 'path_not_a_directory', _lineSafe(_en2
             ? `--path is not a directory: ${_abs}`
             : `--path 가 디렉토리가 아닙니다: ${_abs}`));
@@ -31124,15 +31147,23 @@ async function main() {
   //   init/migrate 는 이미 _warnIfStale 호출하므로 제외. mcp/version/help 등 출력 민감 명령도 제외.
   //   24h 캐시 (.leerness/cache/update-check.json) 활용 — 네트워크 비차단.
   const _staleSkip = new Set(['init', 'migrate', 'usage', 'mcp', 'release', 'session-close', '--version', '--help', 'help', 'update', 'whats-new']);
-  if (!_staleSkip.has(cmd) && process.env.LEERNESS_NO_STALE_CHECK !== '1' && !has('--no-stale-check')) {
+  if (!_staleSkip.has(cmd) && !has('--json') && process.env.LEERNESS_NO_STALE_CHECK !== '1' && !has('--no-stale-check')) {
     try {
-      const root = absRoot(arg('--path', args[1] && !args[1].startsWith('-') ? args[1] : process.cwd()));
+      const root = cmd === 'mode'
+        ? _modeRoot(args)
+        : absRoot(arg('--path', args[1] && !args[1].startsWith('-') ? args[1] : process.cwd()));
       // 캐시 fresh 시에만 즉시 비교 (네트워크 호출 X — 비차단). offline + cache 없으면 skip.
       const cached = readUpdateCache(root);
       if (cacheFresh(cached, 24) && cached.nextLeerness && compareVer(cached.nextLeerness, VERSION) > 0) {
         const isTty = process.stdout && process.stdout.isTTY;
         const C = isTty ? { y: s => `\x1b[33m${s}\x1b[0m`, b: s => `\x1b[1m${s}\x1b[0m`, d: s => `\x1b[2m${s}\x1b[0m` } : { y: s => s, b: s => s, d: s => s };
-        process.stderr.write(C.y('  ⚠ ') + C.b(`leerness v${VERSION} → v${cached.nextLeerness} 사용 가능`) + C.d(` · ${C.b('npm i leerness@latest')} 권장 (LEERNESS_NO_STALE_CHECK=1 로 끄기)`) + '\n');
+        const _staleEn = _uiLang(root) === 'en';
+        process.stderr.write(C.y('  ⚠ ') + C.b(_staleEn
+          ? `leerness v${VERSION} → v${cached.nextLeerness} available`
+          : `leerness v${VERSION} → v${cached.nextLeerness} 사용 가능`)
+          + C.d(_staleEn
+            ? ` · ${C.b('npm i leerness@latest')} recommended (set LEERNESS_NO_STALE_CHECK=1 to disable)`
+            : ` · ${C.b('npm i leerness@latest')} 권장 (LEERNESS_NO_STALE_CHECK=1 로 끄기)`) + '\n');
       }
     } catch {}
   }
@@ -31141,9 +31172,23 @@ async function main() {
   if (cmd === 'mode') {
     const _tty = process.stdout && process.stdout.isTTY;
     const _cy = s => _tty ? `\x1b[36m${s}\x1b[0m` : s, _dm = s => _tty ? `\x1b[2m${s}\x1b[0m` : s;
-    const _mRoot = absRoot(arg('--path', null) || _taskPositionalPath(args, 1) || process.cwd());
+    const _mRoot = _modeRoot(args);
     const _mj = has('--json');
-    if (!exists(path.join(_mRoot, '.leerness'))) { failJson(_mj, 'harness_missing', `leerness 미설치: ${_mRoot} — 먼저 leerness init`); return; }
+    const _mEn = _uiLang(_mRoot) === 'en';
+    // Machine errors keep their established canonical text; language selection
+    // is presentation-only, as with the other T-0092 priority surfaces.
+    const _mt = (ko, en) => (_mEn && !_mj ? en : ko);
+    const _mReason = chk => (_mEn
+      ? ({ read_failed: 'read failed', json_parse_failed: 'JSON parse failed', not_an_object: 'top level is not an object' }[chk.code] || 'unknown manifest error')
+      : chk.reason);
+    const _mRejectCorrupt = chk => failJson(_mj, 'manifest_corrupt', _mt(
+      `manifest.json 손상(${chk.reason}) — 덮어쓰기 거부: ${chk.path}\n  복구 후 재시도하세요(지금 쓰면 project/language 등 남은 필드가 사라집니다)`,
+      `manifest.json is corrupt (${_mReason(chk)}) — refusing to overwrite: ${chk.path}\n  Repair it and retry (writing now would remove remaining fields such as project/language)`,
+    ));
+    if (!exists(path.join(_mRoot, '.leerness'))) {
+      failJson(_mj, 'harness_missing', _mt(`leerness 미설치: ${_mRoot} — 먼저 leerness init`, `leerness is not installed: ${_mRoot} — run leerness init first`));
+      return;
+    }
     const sub = args[1] && !args[1].startsWith('-') && !_MODES.includes(args[1]) && !/^[.\/\\]|^[A-Za-z]:/.test(args[1]) ? args[1] : (_MODES.includes(args[1]) ? 'set' : 'get');
     const cur = _projectMode(_mRoot);
     // 1.36.107: 손상을 조용히 'standard' 로 보고하지 않는다 — 사용자는 설정이 날아간 걸 알아야 한다.
@@ -31151,44 +31196,65 @@ async function main() {
     if (sub === 'get') {
       if (_mj) { log(JSON.stringify({ ok: !_mChk.corrupt, root: _mRoot, mode: cur, modes: _MODES, corrupt: !!_mChk.corrupt, corruptReason: _mChk.reason || null }, null, 2)); if (_mChk.corrupt) process.exitCode = 1; return; }
       log(_cy(`# leerness mode — ${cur}`));
-      if (_mChk.corrupt) log(`  ⚠ manifest.json 손상(${_mChk.reason}) — 위 값은 **저장값이 아니라 기본값**입니다: ${_mChk.path}`);
-      log(`  minimal   핵심 3종만 읽힌다 (handoff · verify-claim · session close)`);
-      log(`  standard  현재 기본 — 전체 지침/상태 문서`);
+      if (_mChk.corrupt) log(_mt(
+        `  ⚠ manifest.json 손상(${_mChk.reason}) — 위 값은 **저장값이 아니라 기본값**입니다: ${_mChk.path}`,
+        `  ⚠ manifest.json is corrupt (${_mReason(_mChk)}) — the value above is the default, not the stored value: ${_mChk.path}`,
+      ));
+      log(_mt(
+        `  minimal   핵심 3종만 읽힌다 (handoff · verify-claim · session close)`,
+        `  minimal   loads only the core three (handoff · verify-claim · session close)`,
+      ));
+      log(_mt(
+        `  standard  현재 기본 — 전체 지침/상태 문서`,
+        `  standard  current default — all instruction/state documents`,
+      ));
       // 목록은 _MODES 에서 유도한다 — 하드코딩하면 등급을 뺐을 때 안내만 남아 없는 등급을 계속 광고한다
       //   (실제로 strict 제거 후 이 줄만 살아남아 게이트가 잡았다).
-      log(_dm(`  변경: leerness mode set <${_MODES.join('|')}>  ·  적재량: leerness context budget`));
+      log(_dm(_mt(
+        `  변경: leerness mode set <${_MODES.join('|')}>  ·  적재량: leerness context budget`,
+        `  Change: leerness mode set <${_MODES.join('|')}>  ·  Load: leerness context budget`,
+      )));
       return;
     }
     if (sub === 'set') {
       const want = _normMode(args.find(a => _MODES.includes(a)));
-      if (!args.some(a => _MODES.includes(a))) { failJson(_mj, 'invalid_mode', `mode 는 ${_MODES.join('|')} 중 하나입니다`); return; }
+      if (!args.some(a => _MODES.includes(a))) {
+        failJson(_mj, 'invalid_mode', _mt(`mode 는 ${_MODES.join('|')} 중 하나입니다`, `mode must be one of ${_MODES.join('|')}`));
+        return;
+      }
       // 1.36.107 (손상 스토어 사냥): 종전엔 `catch { m = {} }` 후 덮어썼다 — 손상 매니페스트 위에 새로 쓰면서
       //   project·language·installedAt 등 **남아 있던 필드까지 통째로 날렸다**(실측 3/3 손상 유형에서 재현).
       //   1.36.49 가 토글에 세운 규율과 같다: 변경 진입점은 fail-closed. 읽지 못하면 쓰지 않는다.
       if (_mChk.corrupt) {
-        failJson(_mj, 'manifest_corrupt', `manifest.json 손상(${_mChk.reason}) — 덮어쓰기 거부: ${_mChk.path}\n  복구 후 재시도하세요(지금 쓰면 project/language 등 남은 필드가 사라집니다)`);
+        _mRejectCorrupt(_mChk);
         return;
       }
       const mf = _mChk.path;
       // 1.36.108 (T-0097): 락 안에서 **다시 읽는다**. 1.36.107 은 손상 판정과 필드 보존을 넣었지만 그 사이 창은 남아 있었다 —
       //   codex 검수가 rename 직전에 writer 를 주입해 그 writer 의 project/language/installedAt 이 전부 사라지는 것을 재현했다.
       //   락 밖에서 읽은 _mChk.data 로 쓰면 "보존" 하는 것이 **낡은 스냅샷**이라 옆 프로세스의 변경을 지운다.
-      _withLock(mf, () => {
+      const _modeWrite = _withLock(mf, () => {
         const fresh = _readManifestChecked(_mRoot);
-        if (fresh.corrupt) return;                       // 락 대기 중 손상됐다면 쓰지 않는다(fail-closed 유지)
+        if (fresh.corrupt) return { ok: false, check: fresh };  // 호출부도 성공/재생성을 중단해야 fail-closed 다
         // 1.36.107 (codex 검수, 재현됨): Object.assign 은 [[Set]] 을 쓰므로 `__proto__` 키에서 setter 가 걸려
         //   그 필드를 **조용히 버린다**(실측: 주입 후 mode set → 파일에서 사라짐). 스프레드는 CreateDataProperty 라 보존한다.
         //   병적인 입력이긴 하나 이 수정이 내건 계약이 "남은 필드를 전부 보존" 이므로, 예외를 두면 계약이 거짓이 된다.
+        // T-0164 재검수 P2: 이전 값을 쓰기 **전에** total 정규화한다. 쓰고 나서 hostile object 변환이 throw 하면
+        //   manifest 만 바뀌고 지침 재생성은 빠지는 부분 커밋이 된다.
+        const previous = _normMode(fresh.data.mode);
         const m = { ...fresh.data };
         m.mode = want; writeUtf8(mf, JSON.stringify(m, null, 2) + '\n');
+        return { ok: true, previous };
       });
+      if (!_modeWrite.ok) { _mRejectCorrupt(_modeWrite.check); return; }
+      const previous = _modeWrite.previous;
       // 지침 파일은 등급의 산출물이므로 즉시 재생성한다 — 안 그러면 mode 는 이름만 바뀌고 읽히는 양은 그대로다.
       let regenerated = 0;
       try {
         const _l = _uiLang(_mRoot);
         const gen = coreFiles(_mRoot, _l, [], { mode: want });
         let prevGen = null;
-        try { prevGen = coreFiles(_mRoot, _l, [], { mode: cur }); } catch { prevGen = null; }   // 직전 등급 템플릿(차감용)
+        try { prevGen = coreFiles(_mRoot, _l, [], { mode: previous }); } catch { prevGen = null; }   // 직전 등급 템플릿(차감용)
         for (const k of ['AGENTS.md', 'CLAUDE.md']) {
           if (!gen[k]) continue;
           const p = path.join(_mRoot, k);
@@ -31205,12 +31271,15 @@ async function main() {
           regenerated++;
         }
       } catch {}
-      if (_mj) { log(JSON.stringify({ ok: true, root: _mRoot, mode: want, previous: cur, regenerated }, null, 2)); return; }
-      ok(`운영 등급: ${cur} → ${want} (지침 ${regenerated}개 재생성)`);
-      log(_dm(`  적재량 확인: leerness context budget`));
+      if (_mj) { log(JSON.stringify({ ok: true, root: _mRoot, mode: want, previous, regenerated }, null, 2)); return; }
+      ok(_mt(
+        `운영 등급: ${previous} → ${want} (지침 ${regenerated}개 재생성)`,
+        `Operating mode: ${previous} → ${want} (${regenerated} instruction file${regenerated === 1 ? '' : 's'} regenerated)`,
+      ));
+      log(_dm(_mt(`  적재량 확인: leerness context budget`, `  Check load: leerness context budget`)));
       return;
     }
-    failJson(_mj, 'unknown_subcommand', `알 수 없는 mode 하위명령: ${sub} (가능: get, set)`);
+    failJson(_mj, 'unknown_subcommand', _mt(`알 수 없는 mode 하위명령: ${sub} (가능: get, set)`, `Unknown mode subcommand: ${sub} (valid: get, set)`));
     return;
   }
   if (cmd === 'context' && args[1] === 'budget') {

@@ -10994,8 +10994,26 @@ total++;
     R(['decision', 'add', 'Use JSON storage', '--reason', 'simplest']);
     R(['plan', 'add', 'Ship v1']);
     const HANGUL = /\p{Script=Hangul}/u;
-    // 측정 대상은 **도구가 말하는 표면**이다. 사용자 데이터(프로젝트명·과거 기록)는 한국어여도 정상이므로
-    //   여기서는 영어 입력만 넣은 새 프로젝트를 쓴다 — 나오는 한글은 전부 도구의 것이다.
+    // 측정 대상은 **도구가 말하는 표면**이다. 사용자 데이터(프로젝트명·과거 기록·경로)는 한국어여도 정상이다.
+    //   알려진 입력/환경 경로만 정확히 지운 뒤 검사한다. 주변 제품 문구까지 지우면 래칫이 거짓 통과하므로
+    //   아래 대조군에서 경로만 사라지고 별도 한국어 문장은 남는지 함께 고정한다.
+    const _echoRoots = [sb, d, tmp, CLI, path.resolve(__dirname, '..'), os.tmpdir(), os.homedir(), process.cwd()];
+    const _stripAllowedEchoes = (output, extra = []) => {
+      let text = String(output);
+      const forms = new Set();
+      for (const value of [..._echoRoots, ...extra]) {
+        if (typeof value !== 'string' || !value) continue;
+        forms.add(value);
+        forms.add(value.replace(/\\/g, '/'));
+        forms.add(JSON.stringify(value).slice(1, -1));
+      }
+      for (const value of [...forms].sort((a, b) => b.length - a.length)) text = text.split(value).join('<user-path>');
+      return text;
+    };
+    const _hangulLines = (output, extra = []) => _stripAllowedEchoes(output, extra).split('\n').filter(l => HANGUL.test(l));
+    const _syntheticHangulPath = path.join(sb, '사용자-경로');
+    dbg.echoFilter = _hangulLines(`path: ${_syntheticHangulPath}`, [_syntheticHangulPath]).length === 0
+      && _hangulLines(`path: ${_syntheticHangulPath}\ntool text 한글`, [_syntheticHangulPath]).length === 1;
     // codex 검수 P2(재현됨): 목록이 좁으면 누출이 **목록 밖으로 옮겨가** 래칫을 빠져나간다.
     //   커버리지를 넓히고, 아래에서 목록 크기 자체도 단언한다(누가 케이스를 지워 통과시키지 못하게).
     const CMDS = [['commands'], ['status'], ['health'], ['pulse'], ['check'], ['mode'], ['toggle', 'list'],
@@ -11010,7 +11028,7 @@ total++;
     // this vector, a +1 regression can consume an unrelated -1 improvement and
     // still satisfy the aggregate 30-line ratchet.
     const EXPECTED_LEAKS = new Map([
-      ['commands', 0], ['status', 0], ['health', 0], ['pulse', 2], ['check', 0], ['mode', 3],
+      ['commands', 0], ['status', 0], ['health', 0], ['pulse', 2], ['check', 0], ['mode', 0],
       ['toggle list', 0], ['task list', 0], ['decision list', 1], ['plan list', 0], ['lesson list', 1],
       ['rule list', 1], ['lens', 0], ['route feature', 0], ['milestones', 0], ['round-history', 0],
       ['memory status', 2], ['reuse-map', 2], ['preview list', 2], ['feature list', 2], ['requests list', 1],
@@ -11026,7 +11044,7 @@ total++;
       // codex 검수 P2(재현됨): 명령이 죽으면 출력이 없어 "누출 0" 이 되고, 그게 곧 통과였다 —
       //   **깨진 명령이 래칫을 낮춰 주는** 형태다. 실패도 무출력도 그 자체로 실패로 본다.
       if (r.status === 0 && out.trim()) produced++; else silent.push(a.join(' ') + '(exit=' + r.status + ')');
-      const n = out.split('\n').filter(l => HANGUL.test(l)).length;
+      const n = _hangulLines(out).length;
       leaky += n;
       measured.set(a.join(' '), n);
       if (n) worst.push(a.join(' ') + ':' + n);
@@ -11050,15 +11068,16 @@ total++;
     // 1.36.181: 공동 최상위 release cadence/idempotency audit/plan list/round-history(각 5)를 영어화해 38로 조임.
     // 1.36.182: milestones 빈 이력 표면 4줄을 영어화해 34로 조임. 도달/ETA 분기도 전용 probe가 고정한다.
     // 1.36.183: skill list 기본 카탈로그 4줄을 영어화해 30으로 조임. stored/env/flag·ko·JSON은 전용 probe가 고정한다.
-    const BASELINE = 30;
+    // 1.36.184: mode 조회 표면 3줄을 영어화해 27로 조임. set/손상/오입력 형제 분기도 전용 probe가 고정한다.
+    const BASELINE = 27;
     dbg.baseline = BASELINE;
     // 합계가 우연히 낮아진 뒤 다른 명령의 회귀가 그 여유를 소비하지 못하게 exact 로 잠근다.
     // 번역이 더 진행되면 실측값과 BASELINE을 같은 변경에서 함께 낮춰야 한다.
     dbg.exactRatchet = leaky === BASELINE;
     // 이번 라운드가 고친 표면은 **0 이어야** 한다 — 래칫과 별개로 회귀를 직접 막는다.
     const cmdOut = String(R(['commands']).stdout || '');
-    dbg.commandsClean = cmdOut.split('\n').filter(l => HANGUL.test(l)).length === 0;
-    dbg.nextClusterClean = ['release cadence', 'idempotency audit', 'plan list', 'round-history', 'milestones', 'skill list']
+    dbg.commandsClean = _hangulLines(cmdOut).length === 0;
+    dbg.nextClusterClean = ['release cadence', 'idempotency audit', 'plan list', 'round-history', 'milestones', 'skill list', 'mode']
       .every(cmd => measured.get(cmd) === 0);
     // 한국어 사용자가 보던 것은 **바뀌면 안 된다**. 영어화하면서 `개` 단위를 양쪽에서 없애는 회귀를 냈고
     //   직전 커밋과의 바이트 비교가 잡았다. 여기서는 한국어 출력이 여전히 한국어 관례를 지키는지 단언한다.
@@ -11072,7 +11091,7 @@ total++;
       && Object.values(cj.categories).every(list => list.every(e => typeof e.cmd === 'string' && typeof e.desc === 'string'
         && e.descEn === undefined && e.cmdEn === undefined))     // 내부 번역 키가 payload 로 새면 70% 부풀었다(검수 P1 실측)
       && cj.lang === 'en';                                        // 로케일 의존을 **명시**한다 — 암묵적으로 흔들리지 않는다
-    ok = dbg.gitInit && dbg.probeAlive && dbg.coverage && dbg.exactRatchet && dbg.perCommandRatchet
+    ok = dbg.gitInit && dbg.echoFilter && dbg.probeAlive && dbg.coverage && dbg.exactRatchet && dbg.perCommandRatchet
       && dbg.commandsClean && dbg.nextClusterClean && dbg.koIntact && dbg.jsonContract;
   } catch (e) { dbg.err = String(e && e.message).slice(0, 200); } finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
   console.log(ok ? `✓ O(1.36.111/T-0092) 영어 누출 ${dbg.leaky}줄 = exact 래칫 ${dbg.baseline} · commands/next-cluster 표면 0 · 한국어 출력 불변 · --json 계약 유지 · 계측 살아있음`

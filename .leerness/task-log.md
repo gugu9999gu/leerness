@@ -235,3 +235,12 @@ doNotStore:
 
 ## 2026-09-01 session-close
 - Generated session-handoff.md and refreshed current-state.md.
+
+## 2026-09-01 — T-0164 mode i18n pre-release verification
+
+- English `mode`의 기존 3줄 누수를 stored/env/explicit locale, 공통 pre-dispatch 오류, stale-cache 및 positional/`--path` 우선순위에서 0으로 줄였다. 한국어 출력과 canonical JSON 오류/상태 계약은 보존했다.
+- 잠금 획득 후 manifest 재읽기가 손상이면 원본 보존·문서 재생성 0·`manifest_corrupt` 실패로 종료한다. 동시 유효 hostile mode 값은 파일 쓰기 전에 total normalization하여 manifest-only 부분 커밋을 차단했다.
+- 실제 `EEXIST` 경합, valid pre-lock read, owner-token-held reread, corrupt/object mutation을 추적하는 결정론적 회귀를 추가했다. 외부 Codex의 반복 검토 결과는 최종 `No actionable P0/P1/P2 findings.`다.
+- `npm run test:fast`와 전체 `npm test`가 통과했다: lint 68 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP 22/22, command surface 40/40, installed cleanroom 10/10, E2E 467/467(6,363초), 지연 경쟁 11/11.
+- 최종 pre-release 가드는 secrets 미승인 0, encoding 0, check healthy, lazy blocker 0, idempotency 위반 0, gate 6/6·claims 141 신규 실패 0이다. pack dry-run은 78 files, shasum `191e2e10b53a2c09ea6add9b93634dcab99f44e4`, integrity `sha512-GXxV42SZKohwG9dfrlf4nEviqChcIJ943Yq0RYBLkjip4YMPVS+7Io0ss31K9Fr9I75HXwKVdYV8VKAiKES8XQ==`를 산출했다.
+- 다음: v1.36.184를 GitHub/npm/leerness.com에 게시하고 공개 설치본·사이트·Actions 13/13을 확인한다. T-0159는 waiting 그대로 유지한다.
