@@ -987,7 +987,8 @@ total++;
     && Array.isArray(parsed.policy.versionChecksAttempted)
     && parsed.policy.versionChecksAttempted.length === 0
     && Array.isArray(parsed.policy.presenceOnlyChecks)
-    && parsed.policy.presenceOnlyChecks.length >= 10
+    && parsed.policy.presenceOnlyChecks.length === parsed.quota.filter(q => q.presenceCheckOnly).length
+    && parsed.quota.filter(q => q.presenceCheckOnly).every(q => parsed.policy.presenceOnlyChecks.includes(q.id))
     && parsed.policy.browserSessionReuse === false && parsed.policy.guiScraping === false
     && parsed.policy.liveModelCalls === false
     && parsed.policy.capacityValuesRequireOfficialContract === true

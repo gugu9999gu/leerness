@@ -129,3 +129,9 @@
 - Reason: 범용 CLI 또는 로컬 인증 상태만으로 특정 모델 권한이나 남은 한도를 증명할 수 없다. 공급자 관측 자식 프로세스에는 프로젝트 자격증명 환경변수를 넘기지 않고, 비활성 공급자는 실행하지 않으며, 인증 미확인은 eligible이 아니라 unverified로 남긴다. 정확한 수치는 공급자의 공식 비대화형 계약과 검증된 전용 어댑터가 있을 때만 제공한다.
 - Alternatives: 설치 또는 로그인 상태에서 잔여량·모델 권한을 추정하는 방식은 거짓 상태와 보안 노출 위험 때문에 기각. 브라우저 세션/자격증명 저장소 스크래핑도 기각.
 - Impact: agents quota schema v2가 설치·활성·인증·routing·model callability·quota를 분리한다. 비활성 provider는 presence-only이고, credential-like env는 probe 전에 제거된다. 기존 quota 필드는 호환을 위해 null/not-observed로 유지한다.
+
+### 2026-09-02 — 세션 충돌 방지는 광범위 추론 경고가 아니라 명시적 exact-file TTL lease로 제공
+- Decision: 세션 충돌 방지는 광범위 추론 경고가 아니라 명시적 exact-file TTL lease로 제공
+- Reason: T-0109 ambient scope advisory는 측정 발화율 63.1%로 사전 중단 기준 40%를 초과했다. 새 기능은 사용자가 직접 획득한 한 파일에만 동기식 충돌을 반환하고 handoff/dashboard에 자동 경고를 추가하지 않는다.
+- Alternatives: 경로 prefix·Git diff·task text로 범위를 추론하는 방식은 높은 오탐 때문에 기각. 강제 전역 파일 잠금은 Leerness를 호출하지 않는 편집기를 제어할 수 없어 기각.
+- Impact: 별도 worktree별 .leerness/cache/file-leases.json에 짧은 lease만 저장한다. 외부 직접 편집은 차단하지 못하며 advisory coordination primitive로만 동작한다.

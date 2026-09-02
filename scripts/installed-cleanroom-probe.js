@@ -69,18 +69,36 @@ function write(file, value) {
   fs.writeFileSync(file, value, 'utf8');
 }
 
+const PRESENCE_CONTROL_ENV = new Set([
+  'CI', 'GITHUB_ACTIONS', 'LEERNESS_NO_SESSION_PRESENCE', 'LEERNESS_HOOK', 'LEERNESS_INTERNAL',
+  'CLAUDE_CODE_CHILD_SESSION', 'LEERNESS_MCP_ADDRESS_EXPLICIT', 'LEERNESS_SESSION_ID',
+  'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CODEX_THREAD_ID',
+].map((key) => key.toLowerCase()));
+
+function isolatedHandoffEnv(sessionId) {
+  // This assertion measures explicit session-address persistence. Ambient CI/hook/internal
+  // markers deliberately suppress product presence, so inheriting the runner's environment
+  // would test the host rather than the packed artifact. Scrub case-insensitively because
+  // Windows environment keys are case-insensitive even after object spreading.
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (PRESENCE_CONTROL_ENV.has(key.toLowerCase())) delete env[key];
+  }
+  return {
+    ...env,
+    LEERNESS_OFFLINE: '1',
+    LEERNESS_NO_PROMPT: '1',
+    LEERNESS_NO_AUTOCHCP: '1',
+    LEERNESS_SESSION_ID: sessionId,
+  };
+}
+
 function spawnHandoff(cli, sessionId) {
   return new Promise((resolve) => {
     const child = cp.spawn(process.execPath,
       [cli, 'handoff', project, '--quiet', '--no-drift-check'], {
         cwd: project,
-        env: {
-          ...process.env,
-          LEERNESS_OFFLINE: '1',
-          LEERNESS_NO_PROMPT: '1',
-          LEERNESS_NO_AUTOCHCP: '1',
-          LEERNESS_SESSION_ID: sessionId,
-        },
+        env: isolatedHandoffEnv(sessionId),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     let stdout = '';
@@ -152,16 +170,25 @@ async function main() {
   const sessionIds = ['cleanroom-codex-01', 'cleanroom-claude-01', 'cleanroom-cursor-01', 'cleanroom-agent-04'];
   const handoffs = await Promise.all(sessionIds.map((id) => spawnHandoff(cli, id)));
   const sessionsDir = path.join(project, '.leerness', 'cache', 'sessions');
-  const isolated = sessionIds.every((id) => {
+  const observedSessions = Object.fromEntries(sessionIds.map((id) => {
     const file = path.join(sessionsDir, `${id}.json`);
-    if (!fs.existsSync(file)) return false;
-    const record = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return record.sessionKey === id && record.handoffCount === 1
+    if (!fs.existsSync(file)) return [id, null];
+    try { return [id, JSON.parse(fs.readFileSync(file, 'utf8'))]; }
+    catch (error) { return [id, { readError: String(error && error.message || error) }]; }
+  }));
+  const isolated = sessionIds.every((id) => {
+    const record = observedSessions[id];
+    return record && record.sessionKey === id && record.handoffCount === 1
       && Array.isArray(record.handoffHistory) && record.handoffHistory.length === 1;
   });
   check('parallel installed handoffs keep four independent session records',
     handoffs.every((item) => item.status === 0) && isolated,
-    JSON.stringify(handoffs.map(({ sessionId, status, stderr }) => ({ sessionId, status, stderr }))));
+    JSON.stringify({
+      inheritedSuppressionEnv: Object.fromEntries(Object.entries(process.env)
+        .filter(([key]) => PRESENCE_CONTROL_ENV.has(key.toLowerCase()))),
+      handoffs: handoffs.map(({ sessionId, status, stderr }) => ({ sessionId, status, stderr })),
+      observedSessions,
+    }));
 
   write(path.join(legacy, '.harness', 'HARNESS_VERSION'), '1.36.161\n');
   write(path.join(legacy, '.harness', 'progress-tracker.md'), '# legacy authoritative state\n');

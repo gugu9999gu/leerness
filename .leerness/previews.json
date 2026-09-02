@@ -388,5 +388,25 @@
         "event": "approved"
       }
     ]
+  },
+  {
+    "id": "P-0018",
+    "title": "Exact-file session lease",
+    "design": "Opt-in CLI coordination primitive. A session explicitly acquires a lease for one exact project file for a short bounded TTL. Only synchronous acquire/check/release results are shown; there are no ambient handoff/dashboard warnings.",
+    "features": [
+      "Exact path or existing-file identity conflict; unrelated sibling files do not conflict; same-session reacquire renews; owner-only release; expired lease stops blocking; list/check remain read-only; corrupt store and outward symlink fail closed; separate worktrees remain isolated."
+    ],
+    "status": "approved",
+    "createdAt": "2026-09-02T10:18:15.814Z",
+    "history": [
+      {
+        "at": "2026-09-02T10:18:15.814Z",
+        "event": "proposed"
+      },
+      {
+        "at": "2026-09-02T10:18:27.855Z",
+        "event": "approved"
+      }
+    ]
   }
 ]

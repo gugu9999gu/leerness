@@ -12,7 +12,7 @@
 > **The AI-coding operations layer that makes "done" require evidence — for any language, any AI agent.**
 > leerness does not write code. It gives your AI agent persistent memory, verified completion, and clean handoffs — stored inside your repo as plain files, exposed via CLI + MCP.
 
-[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-89-blue) · **0 runtime deps** · **0 install scripts** · offline-first · Node ≥ 18 · MIT
+[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-91-blue) · **0 runtime deps** · **0 install scripts** · offline-first · Node ≥ 18 · MIT
 
 **🇰🇷 한국어 전문: [README.ko.md](./README.ko.md)**
 
@@ -192,7 +192,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.36.184는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **89개 도구**를 노출:
+Leerness v1.36.184는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **91개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -205,7 +205,7 @@ Leerness v1.36.184는 stdio JSON-RPC MCP server를 내장합니다 — Claude Co
 // • Workflow: session_close / agents_list / task_export / env_check / usage_stats / reuse_map / whats_new
 
 // MCP server 실행: leerness mcp serve
-// tools/list 응답: 89 도구
+// tools/list 응답: 91 도구
 ```
 
 ### Autonomous mode (자율 모드)

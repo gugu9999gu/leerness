@@ -717,7 +717,7 @@ const _VALUE_FLAGS = new Set(['--language','--skills','--path','--status','--pro
   '--files-changed','--files-read','--members','--only','--personas','--priority','--purpose','--schedule','--mode',
   // --approved-by 는 `agents route` 가 값으로 쓴다(자체 인라인 목록에만 있었다) — 부울로 오분류하면 값이 토큰으로 샌다.
   // --title 도 같다(_TASK_VALUE_FLAGS 소속). 둘 다 완전성 가드가 잡아냈다 — 손으로 분류한 것은 손으로 틀린다.
-  '--approved-by', '--title']);
+  '--approved-by', '--title', '--session', '--ttl']);
 // 1.36.103 (codex 검수 #10/#11): `brief set` 은 플래그를 정적 리터럴이 아니라 레지스트리에서 만든다
 //   (`arg('--' + f.flag)`). 정적 추출로는 보이지 않아 `brief set --intro hello` 가 "알 수 없는 플래그" 오탐을 냈다.
 //   손으로 10개를 베껴 적으면 그 목록이 또 뒤처진다 — 레지스트리에서 **유도**한다(이 라운드의 요지 그대로).
@@ -11512,6 +11512,7 @@ function commandsCmd(root) {
       { cmd: 'update [--check|--yes|--force]', desc: '자가 업데이트', descEn: 'self-update' },
       { cmd: 'wakeup-interval get|set|auto|history|record', desc: 'adaptive wakeup (1.9.210)', descEn: 'adaptive wakeup interval (1.9.210)' },
       { cmd: 'sessions [path] [--json]', desc: '이 프로젝트에 남은 **다른 AI 세션 기록** (1.36.129, P-0016 P1) — 기록만 보여 주고 프로세스 상태는 판정하지 않는다', descEn: 'session records left by other AI sessions in this project (1.36.129, P-0016 P1) — records only; process state is never judged' },
+      { cmd: 'lease acquire|release|list|check [file|lease-id] [--session KEY] [--ttl SEC] [--json]', desc: '명시적 exact-file TTL lease — 동기식 충돌만 반환하는 opt-in 협업 힌트(외부 편집기 강제 잠금·ambient 경고 없음)', descEn: 'explicit exact-file TTL lease — opt-in synchronous coordination hint (no external-editor lock and no ambient warnings)' },
       { cmd: 'workspace-dir get|guide', desc: `워크스페이스 디렉토리 확인 — ${CANONICAL_WORKSPACE_DIR} canonical + 기존 ${LEGACY_WORKSPACE_DIR} 안전 마이그레이션 (T-0107)`, descEn: `show the workspace directory — canonical ${CANONICAL_WORKSPACE_DIR} + safe legacy ${LEGACY_WORKSPACE_DIR} migration (T-0107)` },
       { cmd: 'parent detect|adopt [--select <kinds>] [--apply]', desc: '상위 leerness 부모 탐지 + 자산 게이트형 adopt (1.30.2~3)', descEn: 'detect a parent leerness above + gated asset adoption (1.30.2~3)' },
       { cmd: 'intent classify|expand|domains "<request>"', desc: '의도 파악 + scope (1.9.213)', descEn: 'infer intent + scope (1.9.213)' },
@@ -12159,6 +12160,7 @@ const _OBSERVATION_ONLY_SUBCOMMANDS = new Map([
   ['release', new Set(['cadence'])],
   ['auto-update', new Set(['status'])],
   ['preview', new Set(['list', 'show'])],
+  ['lease', new Set(['list', 'check'])],
 ]);
 function _cliMutationClass(args, cmd) {
   if (cmd === 'mcp') return 'observation-only'; // server startup must not mutate its incidental cwd
@@ -12167,6 +12169,7 @@ function _cliMutationClass(args, cmd) {
   // Classify the alias before auto-migration/telemetry so adding --json/--path
   // cannot turn a read into a write merely because no child token exists.
   if (cmd === 'preview' && (!args || !args[1] || String(args[1]).startsWith('-'))) return 'observation-only';
+  if (cmd === 'lease' && (!args || !args[1] || String(args[1]).startsWith('-'))) return 'observation-only';
   const children = _OBSERVATION_ONLY_SUBCOMMANDS.get(cmd);
   return children && args && children.has(args[1]) ? 'observation-only' : 'stateful';
 }
@@ -13954,6 +13957,122 @@ function _agentReminderSignal(root) {
     String(s).replace(new RegExp('[\u0000-\u001f\u007f]', 'g'), ' ').replace(/^[=\-]{3,}/, ''), 200).trim();
   return { path: rel(root, p), lines: lines.length, truncated, head: lines.slice(0, 6).map(l => _clean(l).slice(0, 200)).filter(Boolean) };
 }
+// Exact-file lease is deliberately separate from `sessions scope`. The discarded ambient
+// scope advisory exceeded its declared noise ceiling; this command acts only after an
+// explicit acquire/check/release request for one exact file and never injects warnings
+// into handoff, status, or dashboards.
+function fileLeaseCmd(root, action, subject, extraOperands) {
+  const L = require('../lib/file-leases');
+  const SP = require('../lib/session-presence');
+  root = absRoot(root || process.cwd());
+  action = action == null ? 'list' : action;
+  const ui = _uiLang(root);
+  const t = (ko, en) => ui === 'en' ? en : ko;
+  const json = has('--json');
+  const safeArg = (value) => _lineSafe(String(value == null ? '' : value)).slice(0, 120);
+  const common = ['--path', '--json', '--language', '--no-stale-check', '--no-banner'];
+  const allowed = {
+    acquire: ['--session', '--ttl', '--note'],
+    release: ['--session'],
+    list: ['--session', '--all'],
+    check: ['--session'],
+  }[action];
+  if (!allowed) {
+    const badAction = safeArg(action || '(missing)');
+    const payload = { ok: false, code: 'unknown_subcommand', error: `Unknown lease subcommand: ${badAction}`, choices: ['acquire', 'release', 'list', 'check'] };
+    if (json) log(JSON.stringify(payload, null, 2));
+    else fail(t(`알 수 없는 lease 하위명령: ${badAction} (가능: acquire, release, list, check)`, `unknown lease subcommand: ${badAction} (choices: acquire, release, list, check)`));
+    process.exitCode = 1;
+    return payload;
+  }
+  if (!_rejectUnknownFlags(allowed, 'lease acquire|release|list|check', { globals: common })) return;
+  if (Array.isArray(extraOperands) && extraOperands.length > 0) {
+    const stray = safeArg(extraOperands[0]);
+    const payload = { ok: false, code: 'too_many_arguments', error: `Unexpected lease argument: ${stray}` };
+    if (json) log(JSON.stringify(payload, null, 2));
+    else fail(t(`불필요한 lease 인자: ${stray}`, `unexpected lease argument: ${stray}`));
+    process.exitCode = 1;
+    return payload;
+  }
+  if ((action === 'list' && subject) || ((action === 'acquire' || action === 'release' || action === 'check') && !subject)) {
+    const code = action === 'list' ? 'too_many_arguments' : (action === 'release' ? 'missing_lease_id' : 'missing_file');
+    const payload = { ok: false, code, error: action === 'list' ? `Unexpected lease argument: ${safeArg(subject)}` : `lease ${action} requires ${action === 'release' ? 'a lease ID' : 'a file path'}.` };
+    if (json) log(JSON.stringify(payload, null, 2));
+    else fail(t(`lease ${action} 인자 오류`, `invalid lease ${action} arguments`));
+    process.exitCode = 1;
+    return payload;
+  }
+
+  const sessionKey = (required) => {
+    const explicit = arg('--session', null);
+    if (explicit != null) return L.normalizeSessionKey(explicit);
+    if (!required) return null;
+    if (typeof SP.invalidExplicitKey === 'function' && SP.invalidExplicitKey(process.env) != null) {
+      throw new L.LeaseError('invalid_session_key', 'LEERNESS_SESSION_ID is explicitly set but invalid; refusing ambient fallback.');
+    }
+    return L.normalizeSessionKey(SP.deriveSessionKey(process.env));
+  };
+  const errorPayload = (error) => {
+    if (error instanceof L.LeaseError) {
+      return { ok: false, code: error.code, error: error.message, ...(error.details ? { details: error.details } : {}) };
+    }
+    return { ok: false, code: 'lease_internal_error', error: String(error && error.message || error || 'unknown error').slice(0, 300) };
+  };
+  try {
+    let result;
+    if (action === 'acquire') {
+      if (!subject) throw new L.LeaseError('missing_file', 'lease acquire requires a file path.');
+      result = L.acquire(root, subject, sessionKey(true), {
+        ttlSeconds: arg('--ttl', null), note: arg('--note', null), withLock: _withLock,
+      });
+    } else if (action === 'release') {
+      if (!subject) throw new L.LeaseError('missing_lease_id', 'lease release requires a lease ID.');
+      result = L.release(root, subject, sessionKey(true), { withLock: _withLock });
+    } else if (action === 'check') {
+      if (!subject) throw new L.LeaseError('missing_file', 'lease check requires a file path.');
+      result = L.check(root, subject, { sessionKey: sessionKey(false) });
+    } else {
+      result = L.list(root, { sessionKey: sessionKey(false), all: has('--all') });
+    }
+
+    if (json) {
+      log(JSON.stringify(result, null, 2));
+    } else if (action === 'acquire') {
+      log(t(`✓ 파일 lease ${result.action === 'renewed' ? '갱신' : '획득'}: ${result.lease.file}`, `✓ file lease ${result.action}: ${result.lease.file}`));
+      log(`  ${result.lease.leaseId} · ${result.lease.sessionKey} · ${result.ttlSeconds}s · ${result.lease.expiresAt}`);
+      log(t('  Leerness-aware 세션 사이의 협업 힌트이며 외부 편집기를 강제로 잠그지 않습니다.', '  Coordination hint between Leerness-aware sessions; external editors are not locked.'));
+    } else if (action === 'release') {
+      log(t(`✓ 파일 lease 해제: ${result.lease.file}`, `✓ file lease released: ${result.lease.file}`));
+      log(`  ${result.lease.leaseId} · ${result.lease.sessionKey}`);
+    } else if (action === 'check') {
+      if (result.available && result.ownedBySession) log(t(`✓ 사용 가능: ${result.target.file} (이 세션 소유)`, `✓ available: ${result.target.file} (owned by this session)`));
+      else if (result.available) log(t(`✓ 사용 가능: ${result.target.file}`, `✓ available: ${result.target.file}`));
+      else {
+        fail(t(`다른 세션 lease: ${result.target.file}`, `leased by another session: ${result.target.file}`));
+        log(`  ${result.lease.leaseId} · ${result.lease.sessionKey} · ${result.lease.expiresAt}`);
+      }
+    } else {
+      log(t('# 파일 lease', '# file leases'));
+      log(t(`저장 ${result.totalStored} · 활성 ${result.active} · 만료 ${result.expired} · 표시 ${result.shown}`, `stored ${result.totalStored} · active ${result.active} · expired ${result.expired} · shown ${result.shown}`));
+      for (const lease of result.leases) log(`  ${lease.status === 'active' ? '●' : '○'} ${lease.file} · ${lease.sessionKey} · ${lease.leaseId} · ${lease.expiresAt}`);
+      if (!result.leases.length) log(t('  lease 없음.', '  no leases.'));
+    }
+    if (action === 'check' && result.available === false) process.exitCode = 1;
+    return result;
+  } catch (error) {
+    const payload = errorPayload(error);
+    if (json) log(JSON.stringify(payload, null, 2));
+    else if (payload.code === 'lease_conflict' && payload.details && payload.details.conflict) {
+      const c = payload.details.conflict;
+      fail(t(`파일 lease 충돌: ${c.file} · 소유 세션 ${c.sessionKey} · 만료 ${c.expiresAt}`, `file lease conflict: ${c.file} · owner ${c.sessionKey} · expires ${c.expiresAt}`));
+    } else {
+      fail(t(`lease 오류(${payload.code}): ${payload.error}`, `lease error (${payload.code}): ${payload.error}`));
+    }
+    process.exitCode = 1;
+    return payload;
+  }
+}
+
 // 1.36.129 (UR-0068 / P-0016 P1): `leerness sessions` — 이 프로젝트에 남은 세션 **기록**을 보여 준다.
 //   ⚠ 문구 원칙: 검증하지 않은 것을 주장하지 않는다. "활성/active" 라는 말을 쓰지 않고,
 //     close 기록이 없다는 사실만 말한다. 그리고 **못 보는 것을 항상 함께 적는다** —
@@ -15293,8 +15412,11 @@ function _argvLongFlagNames() {
 }
 
 // T-0144: 모든 명령에서 이름 자체가 없는 플래그는 migration/usage/write 이전에 fail-closed.
-function _rejectUnregisteredFlags() {
-  const unknown = _argvLongFlagNames().filter(name => !_VALUE_FLAGS.has(name) && !_BOOL_FLAGS.has(name));
+function _rejectUnregisteredFlags(cmd) {
+  const seen = _argvLongFlagNames();
+  const unknown = seen.filter(name => !_VALUE_FLAGS.has(name) && !_BOOL_FLAGS.has(name));
+  const leaseOnlyForeign = cmd === 'lease' ? [] : seen.filter(name => name === '--session' || name === '--ttl');
+  for (const name of leaseOnlyForeign) if (!unknown.includes(name)) unknown.push(name);
   if (!unknown.length) return true;
   const en = _errorUiLang(process.cwd()) === 'en';
   const human = en
@@ -15340,9 +15462,20 @@ function _rejectMalformedFlagForms(cmd, args) {
         if (cmd === 'gate' && name === '--require-referee') continue;
         errors.push({ kind: 'missing_value', name, token });
       }
-      else if (valueChoices[name]) {
+      else {
         const value = eqAt >= 0 ? token.slice(eqAt + 1) : String(raw[i + 1]);
-        if (!valueChoices[name].has(value.toLowerCase())) errors.push({ kind: 'invalid_value', name, token, value, choices: [...valueChoices[name]] });
+        if (valueChoices[name] && !valueChoices[name].has(value.toLowerCase())) {
+          errors.push({ kind: 'invalid_value', name, token, value, choices: [...valueChoices[name]] });
+        }
+        else if (cmd === 'lease' && name === '--ttl') {
+          const ttl = Number(value);
+          if (!Number.isInteger(ttl) || ttl < 30 || ttl > 1800) errors.push({ kind: 'invalid_value', name, token, value, choices: ['integer 30..1800'] });
+        }
+        else if (cmd === 'lease' && name === '--session') {
+          let valid = false;
+          try { valid = require('../lib/session-presence').isValidKey(value); } catch { valid = false; }
+          if (!valid) errors.push({ kind: 'invalid_value', name, token, value: _lineSafe(value), choices: ['stable 8..64 character session key'] });
+        }
       }
     }
   }
@@ -15384,11 +15517,73 @@ const _STRICT_COMMAND_FLAGS = {
   'verify-code': { allowed: ['--build', '--bench', '--strict'], globals: [..._COMMON_COMMAND_FLAGS], usage: 'verify-code [path] [--build] [--bench] [--strict]' },
   'contract verify': { allowed: ['--allow-empty'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'contract verify <spec.md> <impl.js> [--allow-empty] [--json]' },
   'intent expand': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'intent expand "<request>" [--json]' },
+  'lease acquire': { allowed: ['--session', '--ttl', '--note'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'lease acquire <file> --session <key> [--ttl 30..1800] [--note <text>] [--json]' },
+  'lease release': { allowed: ['--session'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'lease release <lease-id> --session <key> [--json]' },
+  'lease list': { allowed: ['--session', '--all'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'lease list [--session <key>] [--all] [--json]' },
+  'lease check': { allowed: ['--session'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'lease check <file> [--session <key>] [--json]' },
 };
+function _validateLeaseCommandShape(cmd, args) {
+  if (cmd !== 'lease') return true;
+  const rawAction = args[1];
+  const action = rawAction == null ? 'list' : rawAction;
+  const choices = new Set(['acquire', 'release', 'list', 'check']);
+  const en = _errorUiLang(process.cwd(), cmd) === 'en';
+  if (!choices.has(action)) {
+    const safe = _lineSafe(String(action == null ? '' : action)).slice(0, 120);
+    failJson(has('--json'), 'unknown_subcommand', en
+      ? `Unknown lease subcommand: ${safe} (choices: acquire, release, list, check)`
+      : `알 수 없는 lease 하위명령: ${safe} (가능: acquire, release, list, check)`);
+    return false;
+  }
+  const expected = action === 'list' ? (rawAction == null ? 1 : 2) : 3;
+  if (args.length < expected || (action !== 'list' && (args[2] == null || args[2] === ''))) {
+    const release = action === 'release';
+    failJson(has('--json'), release ? 'missing_lease_id' : 'missing_file', en
+      ? `lease ${action} requires ${release ? 'a lease ID' : 'a file path'}.`
+      : `lease ${action}에는 ${release ? 'lease ID' : '파일 경로'}가 필요합니다.`);
+    return false;
+  }
+  if (args.length > expected) {
+    const stray = _lineSafe(String(args[expected])).slice(0, 120);
+    failJson(has('--json'), 'too_many_arguments', en
+      ? `Unexpected lease argument: ${stray}`
+      : `불필요한 lease 인자: ${stray}`);
+    return false;
+  }
+  try {
+    const L = require('../lib/file-leases');
+    if (action === 'acquire' || action === 'check') {
+      L.resolveTarget(absRoot(arg('--path', process.cwd())), args[2]);
+    }
+    if (action === 'release' && !/^lease-[0-9a-f]{16}$/.test(String(args[2] || ''))) {
+      throw new L.LeaseError('invalid_lease_id', 'A canonical lease ID is required.');
+    }
+    if (action === 'acquire' || action === 'release') {
+      const SP = require('../lib/session-presence');
+      const explicit = arg('--session', null);
+      if (explicit != null) L.normalizeSessionKey(explicit);
+      else {
+        if (typeof SP.invalidExplicitKey === 'function' && SP.invalidExplicitKey(process.env) != null) {
+          throw new L.LeaseError('invalid_session_key', 'LEERNESS_SESSION_ID is explicitly set but invalid; refusing ambient fallback.');
+        }
+        L.normalizeSessionKey(SP.deriveSessionKey(process.env));
+      }
+    }
+  } catch (error) {
+    const code = error && error.code ? String(error.code) : 'invalid_lease_input';
+    const message = error && error.message ? String(error.message) : 'Invalid lease input.';
+    failJson(has('--json'), code, _lineSafe(message).slice(0, 300));
+    return false;
+  }
+  return true;
+}
+
 function _validateCommandFlags(cmd, args) {
+  if (!_validateLeaseCommandShape(cmd, args)) return false;
   let route = cmd === 'contract' && args[1] === 'verify' ? 'contract verify' : cmd;
   if (cmd === 'verify-claim' && args[1] === 'baseline') route = `verify-claim baseline ${args[2] || ''}`.trim();
   if (cmd === 'intent' && args[1] === 'expand') route = 'intent expand';
+  if (cmd === 'lease') route = `lease ${args[1] == null ? 'list' : args[1]}`;
   const cfg = _STRICT_COMMAND_FLAGS[route];
   if (!cfg) return true;
   return _rejectUnknownFlags(cfg.allowed, cfg.usage, { globals: cfg.globals });
@@ -26156,6 +26351,29 @@ function skillExportAllCmd(root) {
 
 // 1.9.322 (UR-0044, 설치리뷰): MCP tools/call name->cliArgs 매핑을 단일 함수로 통합 (이전: mcpServeCmd 인라인 83-case switch).
 //   일치성 가드(selftest: 모든 도구 def 가 case 보유) + e2e(대표 도구 dispatch) 가 안전망. 미지 도구는 null 반환.
+function _fileLeaseMcpParamError(name, args) {
+  if (name !== 'leerness_file_lease_read' && name !== 'leerness_file_lease_write') return null;
+  const own = key => Object.prototype.hasOwnProperty.call(args, key);
+  const action = args.action;
+  const allowedActions = name === 'leerness_file_lease_read' ? ['list', 'check'] : ['acquire', 'release'];
+  if (!allowedActions.includes(action)) return `Invalid params: 'action' must be one of ${allowedActions.join('|')}`;
+  const common = new Set(['action', 'path', 'sessionKey']);
+  const allowed = new Set(common);
+  if (action === 'list') allowed.add('all');
+  if (action === 'check') allowed.add('file');
+  if (action === 'acquire') { allowed.add('file'); allowed.add('ttl'); allowed.add('note'); }
+  if (action === 'release') allowed.add('leaseId');
+  const extra = Object.keys(args).find(key => !allowed.has(key));
+  if (extra) return `Invalid params: '${extra}' is not accepted for lease action '${action}'`;
+  if ((action === 'check' || action === 'acquire') && (!own('file') || typeof args.file !== 'string' || !args.file.trim())) {
+    return `Invalid params: lease action '${action}' requires a non-empty 'file'`;
+  }
+  if (action === 'release' && (!own('leaseId') || typeof args.leaseId !== 'string' || !args.leaseId)) {
+    return "Invalid params: lease action 'release' requires a non-empty 'leaseId'";
+  }
+  return null;
+}
+
 function _mcpToCliArgs(name, args, targetPath) {
   let cliArgs;
         switch (name) {
@@ -26386,6 +26604,22 @@ function _mcpToCliArgs(name, args, targetPath) {
             } else if (['show', 'verify', 'drop'].includes(_ra)) {
               cliArgs.splice(2, 0, String(args.id || ''));
             }
+            break;
+          }
+          case 'leerness_file_lease_read': {
+            const _la = String(args.action || 'list');
+            cliArgs = ['lease', _la, '--path', targetPath, '--json'];
+            if (_la === 'check') cliArgs.splice(2, 0, String(args.file || ''));
+            if (args.sessionKey) cliArgs.push('--session', String(args.sessionKey));
+            if (args.all) cliArgs.push('--all');
+            break;
+          }
+          case 'leerness_file_lease_write': {
+            const _la = String(args.action || 'acquire');
+            cliArgs = ['lease', _la, '--path', targetPath, '--json', '--session', String(args.sessionKey || '')];
+            cliArgs.splice(2, 0, _la === 'release' ? String(args.leaseId || '') : String(args.file || ''));
+            if (_la === 'acquire' && args.ttl !== undefined) cliArgs.push('--ttl', String(args.ttl));
+            if (_la === 'acquire' && args.note) cliArgs.push('--note', String(args.note));
             break;
           }
           case 'leerness_preview': {
@@ -26620,6 +26854,8 @@ function mcpServeCmd(root) {
           }
         }
       }
+      const _leaseParamError = _fileLeaseMcpParamError(name, args);
+      if (_leaseParamError) return send({ jsonrpc: '2.0', id, error: { code: -32602, message: _leaseParamError } });
       // 1.36.171 (외부 Codex P1/P2): sessionKey는 광고한 도구에서만 받으며, 명시된 값은
       // MCP 경계에서 완전히 검증한다. 잘못된 값을 CLI가 무시해 서버의 CODEX_THREAD_ID나 전역
       // currentRunId로 떨어뜨리면 서로 다른 에이전트의 증거가 다시 섞인다.
@@ -30984,6 +31220,7 @@ SECURITY & HYGIENE
 HANDOFF & SESSION
   handoff [path] [--compact] [--all-apps] [--json] [--writeback]  Session context; tracked writeback is explicit
   session close [path]            Closing report + auto handoff
+  lease acquire|release|list|check [file|lease-id] [--session KEY] [--ttl SEC]  Exact-file opt-in coordination lease
   context [path] [--json]         Agent onboarding context
   retro | insights [path] [--json] [--limit N|--all]   Retrospective / cumulative stats (JSON rows: newest 30 by default; rowsTotal = lifetime count, not the --days window)
 
@@ -31034,7 +31271,7 @@ function help() {
   // 1.23.1 (UR-0010 Phase 6): 영어 opt-in 시 큐레이트 영어판. 기본(ko) 은 아래 한국어 help 그대로.
   if (_uiLang(arg('--path', process.cwd())) === 'en') { _helpEn(); return; }
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 외부 AI CLI 설치·활성·인증을 분리 관측; 모델 호출권한·잔여량은 검증된 공식 어댑터가 있을 때만\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합
-  leerness lens [${_lensDomainList()}] [--json]   # 1.18.3/1.36.97 분야별 자기질문 품질 렌즈 (database·contract·recovery·observability 심화 · axes 8축 경량 — 완료 선언 전 자가 점검)\n  leerness library [show|page] [path] [--json] [--ai]   # 1.36.98 재사용 인벤토리 — 컴포넌트·디자인 토큰 추출 (page: 오프라인 HTML · --ai: 에이전트용 압축)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
+  leerness lens [${_lensDomainList()}] [--json]   # 1.18.3/1.36.97 분야별 자기질문 품질 렌즈 (database·contract·recovery·observability 심화 · axes 8축 경량 — 완료 선언 전 자가 점검)\n  leerness library [show|page] [path] [--json] [--ai]   # 1.36.98 재사용 인벤토리 — 컴포넌트·디자인 토큰 추출 (page: 오프라인 HTML · --ai: 에이전트용 압축)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness lease acquire|release|list|check [file|lease-id] [--session KEY] [--ttl SEC] [--json]  # exact-file opt-in 협업 lease\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -31068,7 +31305,7 @@ async function main() {
   }
   if (has('--help') || has('-h')) return help();
   // 입력 오류는 자동 legacy migration·usage 기록보다 먼저 거부해야 실패 호출이 상태를 바꾸지 않는다.
-  if (!_rejectUnregisteredFlags()) return;
+  if (!_rejectUnregisteredFlags(cmd)) return;
   if (!_rejectMalformedFlagForms(cmd, args)) return;
   if (!_validateCommandFlags(cmd, args)) return;
   // 값이 존재하지만 의미가 잘못된 --keep 도 legacy migration/write 전에 거부한다.
@@ -31888,6 +32125,7 @@ async function main() {
   }
   // 1.36.51 (사용자 요청 UR-0061): 모호성 질문 + 미리보기 승인 워크플로
   if (cmd === 'clarify')                           return _clar.clarifyCmd(arg('--path', process.cwd()), args.slice(1).filter(x => !x.startsWith('-')).join(' '), { has });
+  if (cmd === 'lease')                             return fileLeaseCmd(arg('--path', process.cwd()), args[1], args[2], args.slice(3));
   if (cmd === 'preview') {
     // 전역 2-pass 파서가 command별 arity까지 반영한 positional 단일출처다.
     // preview 전용 raw 재파싱은 --keep 을 다시 value로 오인해 뒤의 P-ID를 삼켰다(T-0144 교차검토).
