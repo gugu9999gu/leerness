@@ -1262,7 +1262,7 @@ leerness drift check .        # 4 신호 + 4단계 레벨
 ## Step 3. 업무 분배 — sub-agent 매핑
 \`\`\`bash
 leerness agents list                  # ready CLI 확인
-leerness agents quota                 # 한도 확인
+leerness agents quota                 # 공급자 상태 관측(잔여량은 검증된 공식 어댑터가 있을 때만)
 leerness agents dispatch "<task>" --to <id>   # 작업 유형 추천 자동
 \`\`\`
 - 작업 유형별 기본 sub-agent 매핑 (leerness 의 **기본 관례**이며 측정된 성능·품질 순위가 아닙니다):
@@ -1435,7 +1435,7 @@ leerness memory restore <surface> <target>   # archive → active 복귀 (DELETE
     _files['.leerness/feature-contracts.md'] = fm('feature-contracts', ['before implementing/changing features'], ['feature IO/state/error changes'], `# Feature Contracts\n\n## Template\n- Feature:\n- Input:\n- Output:\n- States:\n- Errors:\n- Related files:\n- Test evidence ID:\n`, 'en');
     _files['.cursor/rules/leerness.mdc'] = `${MARK}\n---\nalwaysApply: true\n---\nFollow AGENTS.md and .leerness/context-routing.md.\nRun: \`leerness handoff .\` at session start.\nRun: \`leerness session close .\` at session end.\nPreserve Leerness protected files.\n`;
     _files['.github/copilot-instructions.md'] = `${MARK}\n# Copilot Instructions\n\nUse AGENTS.md and .leerness/ as project memory.\nDo not remove protected Leerness files.\nBefore completion, ensure plan.md, progress-tracker.md, current-state.md, session-handoff.md are updated.\n`;
-    _files['.leerness/session-workflow.md'] = fm('session-workflow', ['session start', 'new user request arrives', 'before distributing complex work'], ['workflow step changes'], `# Session Workflow — 6 steps of AI harness engineering\n\n> **At the start of every session the main agent reads this document first and follows the 6 steps as written.**\n> Same flow regardless of round length/complexity — that is what prevents drift.\n\n## Step 1. Analyze the request + check the environment\n\`\`\`bash\nleerness handoff .            # load context + automatic drift warning\nleerness drift check .        # signals + 4-level verdict\n\`\`\`\n- Decompose the request (5W1H). If ambiguous, ask clarifying questions (except autonomous mode).\n- On drift critical, run \`leerness session close .\` or \`drift check --auto-fix\` first.\n\n## Step 2. Plan\n- 3+ steps → use TodoWrite or \`leerness plan add\`.\n- New capability → search existing assets first via \`leerness reuse-map\` / \`reuse find <query>\`.\n- Multiple modules → define an integration spec up front (e.g. TICK_SPEC.md).\n\n## Step 3. Distribute — sub-agent mapping\n\`\`\`bash\nleerness agents list                  # ready CLIs\nleerness agents quota                 # limits\nleerness agents dispatch "<task>" --to <id>\n\`\`\`\n- Best sub-agent by task type: text/translation/analysis → claude · deep code reasoning → codex · direct file edits → agy --yolo · security review → \`leerness review --persona security\`.\n- **Conflict-prevention rules (mandatory)**: give each sub-agent *the exact files only it may modify*; require mtime-verification reports (concurrent writes risk last-writer-wins); verify against the spec afterwards with \`leerness contract verify\`.\n\n## Step 4. Sub-agent work + individual self-verification\n- Each sub-agent reports only after passing its own module tests.\n- Report format: line counts, tests N/N PASS, issues found, mtime verification.\n\n## Step 5. Integrated verification\n\`\`\`bash\nleerness contract verify SPEC.md src/<mod>.js\nleerness verify-claim T-XXX --run-tests --strict-claims\nleerness review <file> --persona security,performance,ux\n\`\`\`\n- The main agent writes and runs its own integration scenario (independent verification).\n- Cross-check that sub-agent verification and main verification *agree*.\n\n## Step 6. Close + handoff + next-round suggestion\n\`\`\`bash\nleerness session close .             # --suggest on by default\nleerness session close . --no-suggest\n\n# or separately:\nleerness skill suggest .\nleerness drift check .\nleerness audit . --fix\n\`\`\`\n\n## 🧠 Memory CRUD Quick Reference\n\n| Surface | CREATE | READ | DELETE | RESTORE |\n|---|---|---|---|---|\n| **tasks** | task add | task list --json | task drop | task update |\n| **decisions** | decision add | decision list --json | decision drop | memory restore decisions |\n| **lessons** | lesson save | lesson list [--tag] | lesson drop | memory restore lessons |\n| **plan** | plan add | plan list --json | plan remove | memory restore plan |\n| **rules** | rule add | rule list --json | rule remove | (rule pause/resume) |\n\n\`\`\`bash\nleerness memory status [--json]\nleerness memory archive list [--surface s]\nleerness memory restore <surface> <target>\n\`\`\`\n\n**Recovering a wrongly saved item**:\n1. \`memory archive list\` — list restore candidates\n2. \`memory restore decisions "PostgreSQL"\` — archive → active\n3. handoff automatically notes archive activity within 24h every session\n\n## Auto-recovery & security\n- A skipped session close triggers drift critical at the next session start — recover with \`drift check --auto-fix\` (runs session close automatically on critical).\n- handoff auto-recalls past lessons (by current task keywords) and auto-suggests installed skills.\n- handoff prints a 1–2 line security summary (.env ↔ .env.example sync + .gitignore secret gaps); a missing .env in .gitignore is 🚨 CRITICAL — \`LEERNESS_AUTO_SECURITY_FIX=1\` runs \`audit --fix\` automatically.\n- \`leerness health\` gives a one-line combined check (drift + security + skills + usage + tasks).\n\n---\n\n## Quick checklist (before the session ends)\n- [ ] This round's tasks are registered in plan/progress-tracker (or task sync)\n- [ ] Every done item has evidence attached (verify-claim PASS)\n- [ ] contract verify PASS when sub-agents were used\n- [ ] drift score ≤ 30 — \`leerness drift check\`\n- [ ] session close was run\n- [ ] \`leerness health\` overall check\n- [ ] If .env is used: .gitignore secret patterns OK + .env.example synced\n- [ ] On security critical: \`LEERNESS_AUTO_SECURITY_FIX=1\` or \`audit --fix\`\n\n## Anti-patterns (drift signals)\n- ⚠ "work is done, just report and stop" → missed session close → drift critical next session\n- ⚠ "only TodoWrite updated, leerness unused" → \`task sync --from\` or \`task add\` is mandatory\n- ⚠ distributing to sub-agents without explicit file paths → concurrent-write conflicts\n- ⚠ self-reported "tests ran, PASS" only → verify-claim --run-tests not executed\n- ⚠ skipping contract verify → spec-mismatch bugs reach the user\n`, 'en');
+    _files['.leerness/session-workflow.md'] = fm('session-workflow', ['session start', 'new user request arrives', 'before distributing complex work'], ['workflow step changes'], `# Session Workflow — 6 steps of AI harness engineering\n\n> **At the start of every session the main agent reads this document first and follows the 6 steps as written.**\n> Same flow regardless of round length/complexity — that is what prevents drift.\n\n## Step 1. Analyze the request + check the environment\n\`\`\`bash\nleerness handoff .            # load context + automatic drift warning\nleerness drift check .        # signals + 4-level verdict\n\`\`\`\n- Decompose the request (5W1H). If ambiguous, ask clarifying questions (except autonomous mode).\n- On drift critical, run \`leerness session close .\` or \`drift check --auto-fix\` first.\n\n## Step 2. Plan\n- 3+ steps → use TodoWrite or \`leerness plan add\`.\n- New capability → search existing assets first via \`leerness reuse-map\` / \`reuse find <query>\`.\n- Multiple modules → define an integration spec up front (e.g. TICK_SPEC.md).\n\n## Step 3. Distribute — sub-agent mapping\n\`\`\`bash\nleerness agents list                  # ready CLIs\nleerness agents quota                 # provider status; remaining capacity only via a verified official adapter\nleerness agents dispatch "<task>" --to <id>\n\`\`\`\n- Best sub-agent by task type: text/translation/analysis → claude · deep code reasoning → codex · direct file edits → agy --yolo · security review → \`leerness review --persona security\`.\n- **Conflict-prevention rules (mandatory)**: give each sub-agent *the exact files only it may modify*; require mtime-verification reports (concurrent writes risk last-writer-wins); verify against the spec afterwards with \`leerness contract verify\`.\n\n## Step 4. Sub-agent work + individual self-verification\n- Each sub-agent reports only after passing its own module tests.\n- Report format: line counts, tests N/N PASS, issues found, mtime verification.\n\n## Step 5. Integrated verification\n\`\`\`bash\nleerness contract verify SPEC.md src/<mod>.js\nleerness verify-claim T-XXX --run-tests --strict-claims\nleerness review <file> --persona security,performance,ux\n\`\`\`\n- The main agent writes and runs its own integration scenario (independent verification).\n- Cross-check that sub-agent verification and main verification *agree*.\n\n## Step 6. Close + handoff + next-round suggestion\n\`\`\`bash\nleerness session close .             # --suggest on by default\nleerness session close . --no-suggest\n\n# or separately:\nleerness skill suggest .\nleerness drift check .\nleerness audit . --fix\n\`\`\`\n\n## 🧠 Memory CRUD Quick Reference\n\n| Surface | CREATE | READ | DELETE | RESTORE |\n|---|---|---|---|---|\n| **tasks** | task add | task list --json | task drop | task update |\n| **decisions** | decision add | decision list --json | decision drop | memory restore decisions |\n| **lessons** | lesson save | lesson list [--tag] | lesson drop | memory restore lessons |\n| **plan** | plan add | plan list --json | plan remove | memory restore plan |\n| **rules** | rule add | rule list --json | rule remove | (rule pause/resume) |\n\n\`\`\`bash\nleerness memory status [--json]\nleerness memory archive list [--surface s]\nleerness memory restore <surface> <target>\n\`\`\`\n\n**Recovering a wrongly saved item**:\n1. \`memory archive list\` — list restore candidates\n2. \`memory restore decisions "PostgreSQL"\` — archive → active\n3. handoff automatically notes archive activity within 24h every session\n\n## Auto-recovery & security\n- A skipped session close triggers drift critical at the next session start — recover with \`drift check --auto-fix\` (runs session close automatically on critical).\n- handoff auto-recalls past lessons (by current task keywords) and auto-suggests installed skills.\n- handoff prints a 1–2 line security summary (.env ↔ .env.example sync + .gitignore secret gaps); a missing .env in .gitignore is 🚨 CRITICAL — \`LEERNESS_AUTO_SECURITY_FIX=1\` runs \`audit --fix\` automatically.\n- \`leerness health\` gives a one-line combined check (drift + security + skills + usage + tasks).\n\n---\n\n## Quick checklist (before the session ends)\n- [ ] This round's tasks are registered in plan/progress-tracker (or task sync)\n- [ ] Every done item has evidence attached (verify-claim PASS)\n- [ ] contract verify PASS when sub-agents were used\n- [ ] drift score ≤ 30 — \`leerness drift check\`\n- [ ] session close was run\n- [ ] \`leerness health\` overall check\n- [ ] If .env is used: .gitignore secret patterns OK + .env.example synced\n- [ ] On security critical: \`LEERNESS_AUTO_SECURITY_FIX=1\` or \`audit --fix\`\n\n## Anti-patterns (drift signals)\n- ⚠ "work is done, just report and stop" → missed session close → drift critical next session\n- ⚠ "only TodoWrite updated, leerness unused" → \`task sync --from\` or \`task add\` is mandatory\n- ⚠ distributing to sub-agents without explicit file paths → concurrent-write conflicts\n- ⚠ self-reported "tests ran, PASS" only → verify-claim --run-tests not executed\n- ⚠ skipping contract verify → spec-mismatch bugs reach the user\n`, 'en');
   }
   // T-0136: handoff is a tracked-read boundary. The localized templates predate that contract,
   // so normalize the one stale sentence after language selection from a single place.
@@ -21166,10 +21166,67 @@ function _binKey(b) {
   return process.platform === 'win32' ? s.toLowerCase() : s;
 }
 
+// Presence-only provider inspection. Disabled providers must not be executed merely to
+// populate an observation table. Windows reuses the shell-free portable resolver; POSIX
+// searches PATH and checks executable permission without spawning the candidate.
+function _commandPresentWithoutExecution(bin, options = {}) {
+  if (!_binSafe(bin)) return false;
+  const env = options.env || process.env;
+  const cwd = options.cwd || process.cwd();
+  const isFileExecutable = (candidate) => {
+    try {
+      const stat = fs.statSync(candidate);
+      if (!stat.isFile()) return false;
+      if (process.platform !== 'win32') fs.accessSync(candidate, fs.constants.X_OK);
+      return true;
+    } catch { return false; }
+  };
+  if (process.platform === 'win32') {
+    try {
+      const launch = resolvePortableLaunch(bin, { env, cwd, execPath: process.execPath });
+      if (launch.kind === 'unresolved' || launch.kind === 'unsupported-shell-script') return false;
+      return isFileExecutable(launch.source || launch.file);
+    } catch { return false; }
+  }
+  const value = String(bin);
+  if (/[\/]/.test(value)) {
+    return isFileExecutable(path.isAbsolute(value) ? value : path.resolve(cwd, value));
+  }
+  const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path');
+  const pathValue = pathKey ? String(env[pathKey] || '') : '';
+  for (const rawDir of pathValue.split(path.delimiter)) {
+    const dir = rawDir.trim().replace(/^"|"$/g, '');
+    if (!dir) continue;
+    const absoluteDir = path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
+    if (isFileExecutable(path.join(absoluteDir, value))) return true;
+  }
+  return false;
+}
+
+function _providerProbeEnv() {
+  const out = _scrubTestEnv();
+  // `_scrubTestEnv` is designed for arbitrary project test runners and therefore keeps
+  // explicitly allowed provider/release environment variables. Provider inspection has a
+  // stricter contract: no project credential/profile/endpoint setting is needed for PATH,
+  // version, or local-auth observation. Remove the entire explicit dotenv surface plus
+  // Leerness/NPM configuration before invoking a third-party provider executable.
+  const explicit = new Set([..._DOTENV_EXPLICIT_KEYS].map(key => key.toUpperCase()));
+  for (const key of Object.keys(out)) {
+    const canonical = key.toUpperCase();
+    if (explicit.has(canonical) || canonical.startsWith('LEERNESS_') || canonical.startsWith('NPM_CONFIG_')) delete out[key];
+  }
+  return out;
+}
+
 function _checkAgent(agent, opts = {}) {
   const enabled = process.env[agent.envFlag] === '1';
   // PATH 존재 확인 (which / where)
   let installed = false, version = null, error = null;
+  let versionCheckAttempted = false, versionCheckSucceeded = false, presenceCheckOnly = false;
+  // Provider probes inherit only execution essentials. Project API keys, profiles, endpoints,
+  // Leerness flags, and npm configuration are removed before third-party CLI invocation.
+  const probeEnv = _providerProbeEnv();
+  const executeVersion = opts.executeVersion !== false;
   //   안전하지 않은 versionArgs 는 **실행하지 않고** 빌트인 기본값으로 되돌린다(거부보다 낫다 — 설치 확인 자체는 해야 한다).
   const _vaRaw = agent.versionArgs;
   const _vaSafe = _argsSafe(_vaRaw);
@@ -21178,14 +21235,24 @@ function _checkAgent(agent, opts = {}) {
   const _binOk = _binSafe(agent.bin);
   try {
     if (!_binOk) throw new Error('bin 형식 거부');
-    const r = _spawnPortableArgvSync(agent.bin, _versionArgs, { encoding: 'utf8', timeout: 5000 });
-    if (r.status === 0 || (r.stdout && r.stdout.trim())) {
-      installed = true;
-      version = (r.stdout || r.stderr || '').trim().split('\n')[0].slice(0, 80);
-    } else if (r.error) {
-      error = r.error.code || r.error.message;
+    installed = _commandPresentWithoutExecution(agent.bin, { env: probeEnv, cwd: opts.cwd });
+    if (!installed) {
+      error = 'not found on PATH';
+    } else if (!executeVersion) {
+      presenceCheckOnly = true;
     } else {
-      error = `exit ${r.status}`;
+      versionCheckAttempted = true;
+      const r = _spawnPortableArgvSync(agent.bin, _versionArgs, {
+        encoding: 'utf8', timeout: 5000, env: probeEnv, cwd: opts.cwd || undefined,
+      });
+      if (r.status === 0) {
+        versionCheckSucceeded = true;
+        version = (r.stdout || r.stderr || '').trim().split('\n')[0].slice(0, 80) || null;
+      } else if (r.error) {
+        error = r.error.code || r.error.message;
+      } else {
+        error = `exit ${r.status}`;
+      }
     }
   } catch (e) { error = e.message; }
   // 1.36.91: **설치됨 ≠ 사용가능**. 위 확인은 바이너리가 뜨는지만 본다 — 인증·모델 사용권한·쿼터·과금 권한은
@@ -21193,10 +21260,11 @@ function _checkAgent(agent, opts = {}) {
   //   나머지는 'unknown' 으로 **남긴다**(모르는 것을 안다고 말하지 않는다). opts.auth 일 때만 실행 — 지연 비용이 있다.
   let auth = 'unknown', authEvidence = null, authSource = null;
   if (installed && opts.auth && agent.authCheck && _argsSafe(agent.authCheck.args)) {
-    authSource = `${agent.bin} ${agent.authCheck.args.join(' ')}`;
+    authSource = `${_binKey(agent.bin)} ${agent.authCheck.args.join(' ')}`;
     try {
       const ar = _spawnPortableArgvSync(agent.bin, agent.authCheck.args, {
         encoding: 'utf8', timeout: agent.authCheck.timeoutMs || 8000, stdio: ['ignore', 'pipe', 'pipe'],
+        env: probeEnv, cwd: opts.cwd || undefined,
       });
       const aout = ((ar.stdout || '') + (ar.stderr || '')).trim();
       // **"실행하지 못함"을 "확실히 미인증"으로 둔갑시키지 않는다.** `no` 는 고위험 작업을 차단하므로,
@@ -21226,6 +21294,7 @@ function _checkAgent(agent, opts = {}) {
   return {
     id: agent.id, bin: agent.bin, desc: agent.desc, envFlag: agent.envFlag,
     enabled, installed, version, error,
+    versionCheckAttempted, versionCheckSucceeded, presenceCheckOnly, probeEnvironmentSanitized: true,
     auth, authEvidence, authSource,
     //   확인 명령이 없는 사유를 구분해 전달한다 — "원래 없음"과 "override 로 물려받지 못함"은 다른 말이다(헌트 #21).
     authCheckDroppedReason: agent.authCheckDroppedReason || null,
@@ -30964,7 +31033,7 @@ Docs: https://www.npmjs.com/package/leerness  |  https://leerness.pages.dev
 function help() {
   // 1.23.1 (UR-0010 Phase 6): 영어 opt-in 시 큐레이트 영어판. 기본(ko) 은 아래 한국어 help 그대로.
   if (_uiLang(arg('--path', process.cwd())) === 'en') { _helpEn(); return; }
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/agy/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 외부 AI CLI 설치·활성·인증을 분리 관측; 모델 호출권한·잔여량은 검증된 공식 어댑터가 있을 때만\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합
   leerness lens [${_lensDomainList()}] [--json]   # 1.18.3/1.36.97 분야별 자기질문 품질 렌즈 (database·contract·recovery·observability 심화 · axes 8축 경량 — 완료 선언 전 자가 점검)\n  leerness library [show|page] [path] [--json] [--ai]   # 1.36.98 재사용 인벤토리 — 컴포넌트·디자인 토큰 추출 (page: 오프라인 HTML · --ai: 에이전트용 압축)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)

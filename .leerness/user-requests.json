@@ -1089,7 +1089,20 @@
       "notes": "v1.36.184 mode i18n localization, regression, external review, GitHub/npm/leerness.com publication, fresh public install, and Actions 13/13 verification completed.",
       "updatedAt": "2026-09-01T06:10:08.408Z",
       "completedAt": "2026-09-01T06:10:08.408Z"
+    },
+    {
+      "id": "UR-0095",
+      "text": "공급자 가용성·공식 한도 조회 가능성, 프로젝트 통합 시각화, 역할/폴백 오케스트레이션, 세션 충돌 방지 협업 채널을 검토하고 핵심 가치에 맞는 다음 작업 진행",
+      "recordedAt": "2026-09-02T06:13:40.825Z",
+      "status": "in-progress",
+      "linkedTaskIds": [
+        "T-0165"
+      ],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": "Provider observation stage implemented and fast-verified. It now separates installation, enablement, authentication, routing eligibility, model-call observation, and quota observation; strips credential-like environment variables before provider subprocesses; and never executes disabled providers. Remaining request scope: exact-file session lease, consolidated visualization, and role fallback policy.",
+      "updatedAt": "2026-09-02T09:53:56.986Z"
     }
   ],
-  "updatedAt": "2026-09-01T06:10:08.409Z"
+  "updatedAt": "2026-09-02T09:53:56.986Z"
 }

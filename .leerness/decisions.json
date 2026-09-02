@@ -150,5 +150,13 @@
     "reason": "The 39-command audit measured 104 leaked Hangul lines; agents list, insights, and toggle list accounted for 46. A dedicated red-green probe prevents aggregate-ratchet slack from hiding regressions while the ratchet tightens to the measured remainder of 58.",
     "alternatives": "Localize every remaining surface in one round (rejected: broader release risk); loosen the aggregate ratchet (rejected: would hide regressions).",
     "impact": "English users receive localized priority output now, while the remaining 58-line debt stays explicitly measured and ratcheted for the next rounds."
+  },
+  {
+    "date": "2026-09-02",
+    "title": "공급자 상태는 설치·활성·인증·모델 호출권한·잔여량을 분리하고 관측되지 않은 값은 추정하지 않는다",
+    "decision": "공급자 상태는 설치·활성·인증·모델 호출권한·잔여량을 분리하고 관측되지 않은 값은 추정하지 않는다",
+    "reason": "범용 CLI 또는 로컬 인증 상태만으로 특정 모델 권한이나 남은 한도를 증명할 수 없다. 공급자 관측 자식 프로세스에는 프로젝트 자격증명 환경변수를 넘기지 않고, 비활성 공급자는 실행하지 않으며, 인증 미확인은 eligible이 아니라 unverified로 남긴다. 정확한 수치는 공급자의 공식 비대화형 계약과 검증된 전용 어댑터가 있을 때만 제공한다.",
+    "alternatives": "설치 또는 로그인 상태에서 잔여량·모델 권한을 추정하는 방식은 거짓 상태와 보안 노출 위험 때문에 기각. 브라우저 세션/자격증명 저장소 스크래핑도 기각.",
+    "impact": "agents quota schema v2가 설치·활성·인증·routing·model callability·quota를 분리한다. 비활성 provider는 presence-only이고, credential-like env는 probe 전에 제거된다. 기존 quota 필드는 호환을 위해 null/not-observed로 유지한다."
   }
 ]

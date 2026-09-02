@@ -54,7 +54,7 @@
     "test:next-actions": "node ./scripts/next-action-suggestion-probe.js",
     "test:installed": "node ./scripts/installed-cleanroom-probe.js",
     "test:handoff": "node ./scripts/handoff-readonly-probe.js",
-    "test:fast": "node ./scripts/lint.js && node ./scripts/workspace-dir-source-ratchet.js && node ./scripts/workspace-dir-migration-probe.js && node ./scripts/workspace-dir-lock-order-probe.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./scripts/parent-detect-selftest-probe.js && node ./scripts/release-runtime-probe.js && node ./scripts/which-shim-probe.js && node ./scripts/i18n-priority-surface-probe.js && node ./scripts/i18n-next-cluster-probe.js && node ./scripts/mutation-integrity-probe.js && node ./scripts/mcp-presence-probe.js && node ./scripts/false-claim-probe.js && node ./scripts/smoke.js",
+    "test:fast": "node ./scripts/lint.js && node ./scripts/workspace-dir-source-ratchet.js && node ./scripts/workspace-dir-migration-probe.js && node ./scripts/workspace-dir-lock-order-probe.js && node ./scripts/lock-probe.js && node ./scripts/platform-smoke.js && node ./scripts/parent-detect-selftest-probe.js && node ./scripts/release-runtime-probe.js && node ./scripts/which-shim-probe.js && node ./scripts/i18n-priority-surface-probe.js && node ./scripts/i18n-next-cluster-probe.js && node ./scripts/mutation-integrity-probe.js && node ./scripts/mcp-presence-probe.js && node ./scripts/provider-capacity-probe.js && node ./scripts/false-claim-probe.js && node ./scripts/smoke.js",
     "test:false-claims": "node ./scripts/false-claim-probe.js",
     "test:workspace-lock-order": "node ./scripts/workspace-dir-lock-order-probe.js",
     "test:mcp-presence": "node ./scripts/mcp-presence-probe.js",
@@ -62,7 +62,8 @@
     "test:parent-detect": "node ./scripts/parent-detect-selftest-probe.js",
     "test:i18n": "node ./scripts/i18n-priority-surface-probe.js && node ./scripts/i18n-next-cluster-probe.js",
     "lint": "node ./scripts/lint.js",
-    "prepack": "node ./bin/leerness.js readme sync . && node ./bin/leerness.js --version"
+    "prepack": "node ./bin/leerness.js readme sync . && node ./bin/leerness.js --version",
+    "test:provider-capacity": "node ./scripts/provider-capacity-probe.js"
   },
   "publishConfig": {
     "access": "public"

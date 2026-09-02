@@ -942,32 +942,62 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-// 1.9.31 회귀: agents quota (각 CLI 사용량/quota 조회)
+// 1.36.185 회귀: agents quota는 설치·활성·인증·로컬 라우팅·모델 호출·잔여량을 분리하고 추정하지 않는다
 total++;
 {
-  // agents quota — env=0 시 모두 disabled/not-installed, 안내 메시지 포함
-  const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_GROK: '0', LEERNESS_ENABLE_COPILOT: '0' };
+  // agents quota — env=0 시 인증 확인을 실행하지 않고 disabled/not-installed를 정직하게 표시
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (/^LEERNESS_ENABLE_/i.test(key)) delete env[key];
+  ['CLAUDE', 'CODEX', 'AGY', 'GROK', 'OPENCODE', 'QWEN', 'AIDER', 'GOOSE', 'COPILOT', 'OLLAMA']
+    .forEach(id => { env[`LEERNESS_ENABLE_${id}`] = '0'; });
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota'], { encoding: 'utf8', timeout: 90000, env });
   const okText = r.status === 0
-    && /외부 AI CLI quota 추정 \(1\.9\.31\)/.test(r.stdout)
+    && /외부 AI 공급자 상태 관측 \(Leerness v[0-9.]+\)/.test(r.stdout)
     && /\| claude \|/.test(r.stdout)
     && /\| codex \|/.test(r.stdout)
     && /\| agy \|/.test(r.stdout)
     && /\| grok \|/.test(r.stdout)
     && /\| copilot \|/.test(r.stdout)
-    && /provider 대시보드 참조/.test(r.stdout);
-  // JSON 출력
+    && /프로젝트 \.env는 활성화 설정을 적용하기 위해 로드될 수 있지만/.test(r.stdout)
+    && /이번 실행에서는 공급자 인증 확인 명령을 실행하지 않았/.test(r.stdout);
   const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota', '--json'], { encoding: 'utf8', timeout: 90000, env });
   let parsed = null;
   try { parsed = JSON.parse(r2.stdout); } catch {}
-  // 1.9.277: opencode/qwen/aider/goose → 10 CLI
-  const okJson = parsed && Array.isArray(parsed.quota) && parsed.quota.length === 10
-    && parsed.quota.every(q => typeof q.id === 'string' && typeof q.status === 'string' && (q.hint === null || typeof q.hint === 'string'));
+  const okJson = parsed && parsed.schemaVersion === 2 && parsed.observation === 'provider-capacity'
+    && Array.isArray(parsed.quota) && parsed.quota.length >= 10
+    && parsed.quota.every(q => typeof q.id === 'string' && typeof q.status === 'string'
+      && typeof q.source === 'string' && typeof q.routingEligibility === 'string'
+      && typeof q.routingReason === 'string' && typeof q.versionCheckAttempted === 'boolean'
+      && ['ok', 'failed', 'not-attempted'].includes(q.versionCheckState)
+      && typeof q.presenceCheckOnly === 'boolean' && q.modelCallability === 'not-observed'
+      && q.callability === 'unknown' && q.callabilityReason === 'live_model_call_not_performed'
+      && q.quota === null && q.quotaState === 'not-observed' && q.remaining === null
+      && !Object.prototype.hasOwnProperty.call(q, 'authEvidence'))
+    && parsed.policy && parsed.policy.projectEnvironmentMayBeLoaded === true
+    && parsed.policy.credentialValuesIncludedInOutput === false
+    && parsed.policy.credentialValuesPersistedByCommand === false
+    && parsed.policy.credentialValuesInspectedForCapacity === false
+    && parsed.policy.credentialValuesPassedToProbeCommands === false
+    && parsed.policy.providerCredentialStoresReadDirectly === false
+    && parsed.policy.providerCliMayReadOwnCredentialStore === false
+    && parsed.policy.providerCliMayReadEnvironmentCredentials === false
+    && parsed.policy.disabledProviderCommandsExecuted === false
+    && Array.isArray(parsed.policy.registeredSafeAuthChecksAttempted)
+    && parsed.policy.registeredSafeAuthChecksAttempted.length === 0
+    && Array.isArray(parsed.policy.versionChecksAttempted)
+    && parsed.policy.versionChecksAttempted.length === 0
+    && Array.isArray(parsed.policy.presenceOnlyChecks)
+    && parsed.policy.presenceOnlyChecks.length >= 10
+    && parsed.policy.browserSessionReuse === false && parsed.policy.guiScraping === false
+    && parsed.policy.liveModelCalls === false
+    && parsed.policy.capacityValuesRequireOfficialContract === true
+    && parsed.policy.speculativeCapacityClaims === false
+    && Array.isArray(parsed.limitations)
+    && parsed.limitations.join(',') === 'local_prerequisites_only,authentication_is_not_model_entitlement,exact_capacity_requires_verified_official_adapter,disabled_providers_presence_only,credential_values_not_passed_to_probe_commands';
   const ok = okText && okJson;
-  console.log(ok ? '✓ B(1.9.31+1.9.277) agents quota: 10 CLI 사용량/안내' : `✗ quota 실패 (text=${okText} json=${okJson})`);
-  if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
+  console.log(ok ? '✓ B(1.36.185) agents quota: 관측 축 분리·비밀 비출력·비활성 인증 무실행·추정 금지' : `✗ quota 실패 (text=${okText} json=${okJson})`);
+  if (!ok) { failed++; console.log((r.stdout + '\n' + r2.stdout + '\n' + r2.stderr).slice(0, 1400)); }
 }
-
 total++;
 {
   // 사용법 메시지에 quota 포함
