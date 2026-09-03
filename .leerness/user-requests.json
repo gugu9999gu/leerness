@@ -1096,13 +1096,20 @@
       "recordedAt": "2026-09-02T06:13:40.825Z",
       "status": "in-progress",
       "linkedTaskIds": [
-        "T-0165"
+        "T-0165",
+        "T-0166",
+        "T-0167"
       ],
-      "linkedPlanIds": [],
+      "linkedPlanIds": [
+        "M-0009",
+        "M-0010",
+        "M-0011",
+        "M-0012"
+      ],
       "linkedDecisionIds": [],
-      "notes": "Provider observation stage implemented and fast-verified. It now separates installation, enablement, authentication, routing eligibility, model-call observation, and quota observation; strips credential-like environment variables before provider subprocesses; and never executes disabled providers. Remaining request scope: exact-file session lease, consolidated visualization, and role fallback policy.",
-      "updatedAt": "2026-09-02T09:53:56.986Z"
+      "notes": "Provider observation and exact-file lease stages are implemented. The user-supplied role architecture conversation was reviewed on 2026-09-03 and normalized into the plan: Model, Role, Agent, and Task are separate; Leerness keeps three logical layers (Role Registry, Agent Registry, Routing Policy); a light Router handles low-cost classification; Orchestrator receives summaries/diffs rather than full code; high-risk work requires Architect, independent Tester/Reviewer, human approval, and verify/gate. Initial canonical storage remains JSON to preserve zero runtime dependencies. Remaining scope: schema v2 compatibility/migration, observed-reason fallback policy, and consolidated read-only visualization.",
+      "updatedAt": "2026-09-03T00:25:34.456Z"
     }
   ],
-  "updatedAt": "2026-09-02T09:53:56.986Z"
+  "updatedAt": "2026-09-03T00:25:34.456Z"
 }
