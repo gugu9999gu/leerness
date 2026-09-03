@@ -18,7 +18,7 @@
 
 ### 2026-06-09 — 외부 리뷰는 '블라인드'로: README 를 물리적으로 숨기고(mv) leerness 소개 없이 코드/행위만 분석시켜 외부 분석가 관점 확보 → 그 결과로 README 재구성. 모델 지시 의존 대신 파일 제거로 강제(맹신 X).
 - Decision: 외부 리뷰는 '블라인드'로: README 를 물리적으로 숨기고(mv) leerness 소개 없이 코드/행위만 분석시켜 외부 분석가 관점 확보 → 그 결과로 README 재구성. 모델 지시 의존 대신 파일 제거로 강제(맹신 X).
-- Reason: 
+- Reason:
 - Alternatives:
 - Impact:
 
@@ -61,14 +61,14 @@
 ### 2026-07-11 — requests 위생 라운드: 미답 10건 중 7건 소진(완료-미마킹 6 + 행위반박 1), 잔여 3건은 실백로그로 유지
 - Decision: requests 위생 라운드: 미답 10건 중 7건 소진(완료-미마킹 6 + 행위반박 1), 잔여 3건은 실백로그로 유지
 - Reason: 맹신 X 대조: [완료X.Y.Z] 제목 6건은 CHANGELOG 1.12.2/1.12.3/1.15.1/1.16.1 실재 확인 후 complete(중복 2건 포함). UR-0041(bare leerness auto-init footgun)은 1.36.11 행위 재검에서 생성 파일 0개로 재현 불가 — 이미 해소됨. 잔여: UR-0009(selftest 견고화 저순위), UR-0028/0051(영상 파이프라인 별도 아크)
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-07-21 — ACP 미구현 결정 — Agent Client Protocol(Zed 계열)은 에디터-에이전트 토폴로지라 운영 레이어에 자리 없음(MCP 경유 간접 호환 + enforce 프로토콜 무관 커버), BeeAI ACP(REST)는 오프라인-퍼스트/0-deps 원칙 충돌(.leerness substrate 로 동일 문제 해결). docs/interoperability.md 에 입장 명문화
 - Decision: ACP 미구현 결정 — Agent Client Protocol(Zed 계열)은 에디터-에이전트 토폴로지라 운영 레이어에 자리 없음(MCP 경유 간접 호환 + enforce 프로토콜 무관 커버), BeeAI ACP(REST)는 오프라인-퍼스트/0-deps 원칙 충돌(.leerness substrate 로 동일 문제 해결). docs/interoperability.md 에 입장 명문화
 - Reason: 사용자 질의로 검토 — 미고려가 아닌 고려-후-결정 상태로 전환
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-07-28 — 검증기 캘리브레이션(referee) 채택 — 검증기 자신의 탐지력을 실행으로 증명
 - Decision: 검증기 캘리브레이션(referee) 채택 — 검증기 자신의 탐지력을 실행으로 증명
@@ -79,26 +79,26 @@
 ### 2026-08-04 — P-0013 추출기는 스택 탐지 후 스택별 전략을 쓰고, 증명 가능한 하한만 싣는다
 - Decision: P-0013 추출기는 스택 탐지 후 스택별 전략을 쓰고, 증명 가능한 하한만 싣는다
 - Reason: 실측(실제 12개 프로젝트): 대문자 export 를 컴포넌트로 세면 auto-influencer 83->33, view-work 116->66, Adzento 62->0 으로 2~3배 부풀려진다. Adzento 는 플레인 HTML 이라 순진한 추출기가 가짜 컴포넌트 62개를 만든다. 토큰도 출처가 정반대다 — Tailwind 프로젝트(12개 중 7개)는 CSS 변수가 0~5개이고 유틸 어휘가 74~121종(text-ink-50 417회), Adzento 는 CSS 변수 58개에 Tailwind 0. 한쪽만 보는 추출기는 절반에서 무용지물이 된다.
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-08-04 — 적대적 입력은 시나리오가 아니라 대상의 구조에서 유도한다
 - Decision: 적대적 입력은 시나리오가 아니라 대상의 구조에서 유도한다
 - Reason: 1.36.97: 내 ReDoS 프로브가 12종 병적 입력을 만들고 최악 33ms 로 보고했으나 실제는 227,760ms. 폭발 원인인 (^|\\n)\\s* 는 \\s* 가 개행을 삼켜 모든 \\n 위치에서 되돌림이 생기는 구조였고, 정규식이 이미 최악 입력을 말하고 있었다. 앞으로 수량자마다 '이게 삼킬 수 있는 문자'를 반복해 매칭 실패 입력을 만들고 크기 2배씩 곡선을 그린다.
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-08-05 — 표면 가드는 소스 grep 대신 실제 출력/데이터로 검사한다
 - Decision: 표면 가드는 소스 grep 대신 실제 출력/데이터로 검사한다
 - Reason: 1.36.101: 명령 표면 감사에서 소스 grep 가드가 두 번 연속 무너졌다 — (1) 'const _GROUP_USAGE = {' 문자열이 다른 selftest 의 가드 안에도 있어 슬라이스가 엉뚱한 곳을 집었고 (2) 선언 이름을 바꾸자 옛 가드가 허공을 가리켜 메타가드가 잡았다. 표면은 실제 CLI 출력으로, 병렬맵은 데이터(키 집합)로 단언한다.
-- Alternatives: 
-- Impact: 
+- Alternatives:
+- Impact:
 
 ### 2026-08-18 — P-0016 의 P2 를 '범위 클레임' 에서 '쓰기 측 compare-and-set(로스트 업데이트 가드)' 으로 바꾼다. 근거: P1 정찰/적대적 검수가, 클레임은 leerness 를 부르는 에이전트만 덮는 반면 compare-and-set 은 leerness 를 한 번도 안 부르는 에이전트의 변경까지 잡고 오탐이 원리적으로 불가능(해시가 실제로 달라야 발화)하다고 판단. 클레임은 P3 로 미룬다.
 - Decision: P-0016 의 P2 를 '범위 클레임' 에서 '쓰기 측 compare-and-set(로스트 업데이트 가드)' 으로 바꾼다. 근거: P1 정찰/적대적 검수가, 클레임은 leerness 를 부르는 에이전트만 덮는 반면 compare-and-set 은 leerness 를 한 번도 안 부르는 에이전트의 변경까지 잡고 오탐이 원리적으로 불가능(해시가 실제로 달라야 발화)하다고 판단. 클레임은 P3 로 미룬다.
-- Reason: 
-- Alternatives: 
-- Impact: 
+- Reason:
+- Alternatives:
+- Impact:
 
 ### 2026-08-23 — GIT_CONFIG_NOSYSTEM을 Git 위치 격리 목록에서 제외
 - Decision: GIT_CONFIG_NOSYSTEM을 Git 위치 격리 목록에서 제외
@@ -135,3 +135,9 @@
 - Reason: T-0109 ambient scope advisory는 측정 발화율 63.1%로 사전 중단 기준 40%를 초과했다. 새 기능은 사용자가 직접 획득한 한 파일에만 동기식 충돌을 반환하고 handoff/dashboard에 자동 경고를 추가하지 않는다.
 - Alternatives: 경로 prefix·Git diff·task text로 범위를 추론하는 방식은 높은 오탐 때문에 기각. 강제 전역 파일 잠금은 Leerness를 호출하지 않는 편집기를 제어할 수 없어 기각.
 - Impact: 별도 worktree별 .leerness/cache/file-leases.json에 짧은 lease만 저장한다. 외부 직접 편집은 차단하지 못하며 advisory coordination primitive로만 동작한다.
+
+### 2026-09-03 — Role/Agent/Routing v2는 기존 역할 ID와 legacy 키를 보존하는 순수 호환 계층부터 도입
+- Decision: Role/Agent/Routing v2는 기존 역할 ID와 legacy 키를 보존하는 순수 호환 계층부터 도입
+- Reason: 기존 agent-roles.json과 dispatch 동작을 깨지 않으면서 Role·Agent·Routing을 분리하고, 자동 실행 전에 schema·migration·rollback 계약을 검증해야 한다.
+- Alternatives: orchestrator/implementer를 즉시 canonical ID로 전환(기각: 기존 키와 CLI 호환 파괴); YAML을 canonical로 도입(기각: 0 runtime dependency 및 기존 JSON 무결성 규율과 충돌); provider/model fallback 직접 허용(기각: Role·권한 우회).
+- Impact: Canonical role IDs는 commander/coder/dispatcher 등 기존 ID를 유지하고 새 역할은 additive로 추가한다. v2 파일은 role-definitions.json, agent-instances.json, routing-policy.json이며 legacy agent-roles.json은 보존한다. fallback은 동일 Role의 Agent ID만 허용하고, custom legacy role은 결정적 v2 ID와 read-only 정의로 투영한다. 현재 단계는 순수 validator/projection만 제공하며 runtime migration·dispatch·UI는 변경하지 않는다.

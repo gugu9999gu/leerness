@@ -1,13 +1,13 @@
 # Role / Agent / Routing v2 — compatibility design draft
 
-Status: design draft only; no runtime schema or automatic dispatch behavior is changed by this document.
+Status: schema foundation implemented and tested; no runtime migration, public v2 CLI, automatic dispatch, or v2 store write is enabled yet.
 
 Reviewed inputs:
 - Current implementation in `lib/role-catalog.js`, `lib/agent-registry.js`, `lib/routing.js`, `lib/agents.js` and `.leerness/agent-roles.json` handling.
 - Provider observation and exact-file lease work from `T-0165` and `T-0166`.
 - User-supplied ChatGPT project conversation “추가 개발 직위 추천”, reviewed 2026-09-03.
 
-## 1. Design decision under review
+## 1. Design model
 
 Leerness should represent four different concepts explicitly:
 
@@ -61,49 +61,57 @@ Candidate migration behavior:
 3. Do not rewrite the legacy store on read.
 4. An explicit migration command writes v2 stores atomically and records source provenance.
 5. During a compatibility window, `roles set/unset` updates both the v2 assignment projection and legacy file under one lock.
-6. Unknown fields, schema mismatch or corruption fail closed and preserve original bytes.
+6. Unknown fields, schema mismatch, an existing empty file, or corruption fail closed and preserve original bytes.
+7. Only the original seven v1 persisted IDs map directly to built-in roles. A legacy custom key such as `implementer`, `worker`, `tester`, or `orchestrator` remains a deterministic custom role; new v2 aliases never silently reinterpret old user data.
+8. A disabled v2 Agent cannot be projected as a primary legacy assignment because v1 has no disabled-state field; projection fails closed instead of silently re-enabling it.
 
 ## 4. Three logical configuration layers
 
 The linked conversation proposed `roles.yaml`, `agents.yaml`, and `routing.yaml`. The separation is accepted, but canonical storage should initially remain JSON because Leerness guarantees zero runtime dependencies and already has strict JSON corruption handling.
 
-Exact filenames remain provisional until a negative-fixture review. Candidate names are shown below.
+The schema foundation freezes the following canonical filenames. No command writes them yet.
 
-### 4.1 Role Registry — candidate `.leerness/role-definitions.json`
+### 4.1 Role Registry — `.leerness/role-definitions.json`
 
 ```json
 {
   "schemaVersion": 2,
+  "kind": "role-definitions",
   "roles": {
-    "implementer": {
+    "coder": {
       "label": { "ko": "작업자", "en": "Implementer" },
       "responsibilities": ["implement bounded changes", "write relevant tests"],
-      "permissions": ["project-read", "project-write", "test-run"],
+      "requiredTier": "project-write",
+      "codeWrite": true,
+      "approve": false,
+      "release": false,
       "forbidden": ["approve-own-work", "merge", "release"],
       "requiredInputs": ["task", "allowedFiles", "doneWhen"],
       "requiredOutputs": ["changedFiles", "summary", "tests", "issues", "evidence"],
       "contextPolicy": "assigned-files-and-contract",
       "defaultBudget": { "inputTokens": null, "outputTokens": null, "retries": 1 }
     }
-  }
+  },
+  "source": { "kind": "project-config", "file": "role-definitions.json" }
 }
 ```
 
 Rules:
 - No provider or model IDs in Role definitions.
-- Permissions use existing Leerness policy tiers where possible rather than creating parallel security semantics.
-- `forbidden` and `requiredOutputs` are machine-validated contracts, not documentation-only prose.
+- `requiredTier` and explicit write/approve/release booleans use existing Leerness policy semantics instead of a parallel permission vocabulary.
+- `responsibilities`, `forbidden`, required inputs/outputs, and budgets are machine-validated contracts, not documentation-only prose.
 - Project overrides may narrow permissions but may not silently widen a built-in role without explicit confirmation.
 
-### 4.2 Agent Registry — candidate `.leerness/agents.json`
+### 4.2 Agent Registry — `.leerness/agent-instances.json`
 
 ```json
 {
   "schemaVersion": 2,
+  "kind": "agent-instances",
   "agents": [
     {
       "id": "backend-worker-01",
-      "role": "implementer",
+      "role": "coder",
       "provider": "qwen",
       "model": "project-selected-model",
       "enabled": true,
@@ -113,7 +121,8 @@ Rules:
       "fallback": ["backend-worker-02"],
       "tags": ["backend", "typescript"]
     }
-  ]
+  ],
+  "source": { "kind": "project-config", "file": "agent-instances.json" }
 }
 ```
 
@@ -124,35 +133,61 @@ Rules:
 - `budget` values may be unknown; unknown must not be represented as zero or unlimited.
 - Fallback references Agent IDs, not raw model names, so permissions and role remain stable.
 
-### 4.3 Routing Policy — candidate `.leerness/routing-policy.json`
+### 4.3 Routing Policy — `.leerness/routing-policy.json`
 
 ```json
 {
   "schemaVersion": 2,
+  "kind": "routing-policy",
   "defaultMode": "suggest",
   "pipelines": {
-    "simple": ["implementer", "tester"],
-    "normal": ["orchestrator", "implementer", "tester", "reviewer"],
-    "high-risk": ["architect", "orchestrator", "implementer", "tester", "reviewer"],
+    "tiny": ["coder", "tester"],
+    "normal": ["commander", "coder", "tester", "reviewer"],
+    "high-risk": ["architect", "commander", "coder", "tester", "reviewer"],
     "review-only": ["reviewer"]
   },
   "requirements": {
+    "tiny": {
+      "humanApproval": false,
+      "independentReviewer": false,
+      "verifyClaim": true,
+      "gate": false,
+      "leaseForWrites": true
+    },
+    "normal": {
+      "humanApproval": false,
+      "independentReviewer": true,
+      "verifyClaim": true,
+      "gate": true,
+      "leaseForWrites": true
+    },
     "high-risk": {
       "humanApproval": true,
       "independentReviewer": true,
       "verifyClaim": true,
       "gate": true,
       "leaseForWrites": true
+    },
+    "review-only": {
+      "humanApproval": false,
+      "independentReviewer": false,
+      "verifyClaim": false,
+      "gate": false,
+      "leaseForWrites": false
     }
-  }
+  },
+  "source": { "kind": "project-config", "file": "routing-policy.json" }
 }
 ```
 
 Rules:
+- Every pipeline has an explicit requirement block; missing safety requirements are invalid rather than defaulted.
+- Named pipelines are non-empty and retain their minimum stages in safety order; an `independentReviewer` requirement without a Reviewer stage is invalid.
 - Classification remains deterministic and explainable.
 - `suggest` performs no provider command and no model call.
 - `confirm` may validate configured providers but still does not imply the work executed.
 - Actual execution is a separate dispatch action with explicit permission and cost boundary.
+- Schema validity and execution readiness are separate facts. A structurally valid bundle may expose `assignmentGaps` when a pipeline role has no enabled Agent. `assignmentReady` means only that configured enabled Agent assignments cover the pipelines; provider authentication, model entitlement, capacity, and live callability are not checked and must not be presented as executable-ready.
 
 ## 5. Role lifecycle
 
@@ -293,11 +328,11 @@ UI:
 - Repeated migration is idempotent.
 - Corrupt v1/v2 stores fail closed and remain byte-exact.
 - Unknown fields and unsupported versions are distinct machine errors.
-- Commander/coder/dispatcher aliases round-trip.
+- Original v1 canonical IDs round-trip; later alias-like legacy custom keys remain custom and round-trip without semantic rewriting.
 
 ### Agent and routing
 - Multiple implementers on one model retain distinct IDs and sessions.
-- Simple, normal, high-risk and review-only routes are deterministic.
+- Tiny (UI label: simple), normal, high-risk and review-only routes are deterministic.
 - Suggestion executes zero provider processes.
 - High-risk route rejects missing Architect/Tester/Reviewer assignments.
 - High-risk route rejects non-independent Reviewer.
@@ -325,13 +360,40 @@ UI:
 - Claiming exact quota without a verified official adapter.
 - Replacing external agent CLIs with a new Leerness execution engine.
 
-## 12. Open decisions requiring explicit review
+## 12. Decisions frozen for the schema foundation
 
-1. Whether `orchestrator` and `implementer` become canonical persisted IDs or remain display aliases for `commander` and `coder` in schema v2.
-2. Final filenames for the three logical stores.
-3. Whether Role definitions are project-editable in v2 or built-in-only with narrow overrides.
-4. Whether fallback chains point only to Agent IDs or also allow a provider/model template.
-5. Whether the initial integrated visualization extends `leerness.html` or uses a separate dashboard artifact.
-6. Whether Role configuration UI is bundled with Leerness CLI or maintained in a separate frontend package.
+1. Persisted compatibility IDs remain canonical: `commander`, `coder`, `dispatcher`, `reviewer`, `architect`, `designer`, and `debugger`. `orchestrator` and `implementer` are input/display aliases, not silent persisted rewrites. New role IDs are additive.
+2. The v2 store filenames are `role-definitions.json`, `agent-instances.json`, and `routing-policy.json`. `agent-roles.json` remains the legacy compatibility assignment store.
+3. Role definitions support built-ins plus strict, narrow project definitions/overrides. Provider and model IDs are forbidden from Role definitions.
+4. Fallback chains reference Agent IDs only. Provider/model templates are rejected because they would bypass Role and permission contracts.
+5. The first integrated visualization will extend the existing read-only dashboard snapshot rather than create another state authority.
+6. Configuration UI is deferred until schema validation, migration, diff preview, rollback, and execution permission boundaries are stable.
 
-Until these are resolved, implementation should remain limited to contract inventory, schema prototypes and negative fixtures; no automatic dispatch behavior should change.
+## 13. Implemented schema foundation
+
+`lib/role-agent-schema.js` is a zero-dependency, side-effect-free CommonJS module. Requiring or calling its validation/projection functions does not read or write files, inspect environment credentials, spawn providers, call a clock, or dispatch work.
+
+Implemented contracts:
+- Strict v2 validation for Role definitions, Agent instances, Routing policy, and the cross-document bundle.
+- Distinct errors for invalid JSON, invalid shape, unknown fields, unsupported schema versions, and alias collisions.
+- Deterministic legacy projection with one stable Agent per legacy role assignment.
+- Reverse projection into a supplied legacy document while preserving the original legacy role key and unknown top-level/per-role fields.
+- Existing forced custom legacy role keys, including keys that are not valid v2 IDs, receive deterministic generated v2 IDs and conservative read-only Role definitions. No write authority is inferred.
+- `null` token budgets remain unknown; they are not converted to zero or unlimited.
+- Multiple Agents may share a Role/provider/model while retaining distinct Agent IDs.
+- Cross-document rejection of missing fallback targets, different-Role fallback, self-fallback, fallback cycles, missing Role inheritance targets, Role inheritance cycles, unknown Agent/Pipeline roles, and weakened tiny/normal/high-risk minimum requirements.
+- Tiny requires verify-claim and write leases; normal additionally requires independent review and gate; high-risk additionally requires Architect and human approval.
+- Assignment coverage is reported as `assignmentReady`/`assignmentGaps` with `providerReadinessChecked: false`; provider readiness remains a separate observation surface.
+
+`scripts/role-agent-schema-probe.js` exercises an adversarial matrix, including an existing-CLI compatibility fixture proving that `roles list --json` still reads a valid legacy file without executing a provider and without changing the legacy bytes.
+
+The probe is wired into `test`, `test:core`, `test:fast`, and the dedicated `test:role-agent-schema` script.
+
+## 14. Remaining before runtime migration
+
+- Route the existing legacy loader through explicit parse/schema diagnostics without changing valid `roles list|set|unset|dispatch` behavior.
+- Add an explicit, atomic migration command that writes the three v2 stores only after validation, lock acquisition, preview/confirmation, and rollback preparation.
+- Define the compatibility-window write rule for updating legacy and v2 projections under one lock.
+- Add read-only CLI/MCP validation and projection surfaces with byte-for-byte no-write tests.
+- Re-run installed-package, full regression, multi-runtime, and independent adversarial review before any public runtime activation.
+- Keep automatic fallback, model invocation, configuration UI, and dashboard writes disabled until their later milestones.

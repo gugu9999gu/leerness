@@ -166,5 +166,13 @@
     "reason": "T-0109 ambient scope advisory는 측정 발화율 63.1%로 사전 중단 기준 40%를 초과했다. 새 기능은 사용자가 직접 획득한 한 파일에만 동기식 충돌을 반환하고 handoff/dashboard에 자동 경고를 추가하지 않는다.",
     "alternatives": "경로 prefix·Git diff·task text로 범위를 추론하는 방식은 높은 오탐 때문에 기각. 강제 전역 파일 잠금은 Leerness를 호출하지 않는 편집기를 제어할 수 없어 기각.",
     "impact": "별도 worktree별 .leerness/cache/file-leases.json에 짧은 lease만 저장한다. 외부 직접 편집은 차단하지 못하며 advisory coordination primitive로만 동작한다."
+  },
+  {
+    "date": "2026-09-03",
+    "title": "Role/Agent/Routing v2는 기존 역할 ID와 legacy 키를 보존하는 순수 호환 계층부터 도입",
+    "decision": "Role/Agent/Routing v2는 기존 역할 ID와 legacy 키를 보존하는 순수 호환 계층부터 도입",
+    "reason": "기존 agent-roles.json과 dispatch 동작을 깨지 않으면서 Role·Agent·Routing을 분리하고, 자동 실행 전에 schema·migration·rollback 계약을 검증해야 한다.",
+    "alternatives": "orchestrator/implementer를 즉시 canonical ID로 전환(기각: 기존 키와 CLI 호환 파괴); YAML을 canonical로 도입(기각: 0 runtime dependency 및 기존 JSON 무결성 규율과 충돌); provider/model fallback 직접 허용(기각: Role·권한 우회).",
+    "impact": "Canonical role IDs는 commander/coder/dispatcher 등 기존 ID를 유지하고 새 역할은 additive로 추가한다. v2 파일은 role-definitions.json, agent-instances.json, routing-policy.json이며 legacy agent-roles.json은 보존한다. fallback은 동일 Role의 Agent ID만 허용하고, custom legacy role은 결정적 v2 ID와 read-only 정의로 투영한다. 현재 단계는 순수 validator/projection만 제공하며 runtime migration·dispatch·UI는 변경하지 않는다."
   }
 ]

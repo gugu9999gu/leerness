@@ -256,18 +256,23 @@ Tasks:
 
 ### M-0010. Role / Agent / Routing schema v2와 무손실 호환 설계
 Status: in-progress
-Progress: 30%
+Progress: 75%
 Done-When: 역할·모델·Agent·Task가 분리된 versioned schema, legacy migration, 권한/예산/독립성 불변식이 CLI/MCP 계약과 negative fixtures로 고정된다.
 
 Tasks:
 - [x] 사용자 지정 대화의 역할 구조·토큰 비용·Router 원칙을 현재 구현과 대조
 - [x] 기존 구현 확인: 7-role catalog, `agent-roles.json`, provider registry, hard-coded tier routing, explicit dispatch
-- [x] `docs/role-agent-routing-v2.md`에 현재 계약·gap·schema 후보·fallback·lease·검증 매트릭스 초안 작성
-- [ ] 현재 `commander/coder/dispatcher` 호환을 유지하는 role taxonomy v2 확정
-- [ ] Role Registry / Agent Registry / Routing Policy schema와 저장 파일명 확정
-- [ ] `.leerness/agent-roles.json` 무손실 migration/projection 설계
-- [ ] 복수 Worker/Tester Agent 인스턴스, permissions, concurrency, context/token budget 모델 설계
-- [ ] corrupt/unknown field/version mismatch/legacy round-trip negative fixtures 작성
+- [x] `docs/role-agent-routing-v2.md`에 현재 계약·gap·schema·fallback·lease·검증 매트릭스 작성
+- [x] 호환 ID taxonomy 확정: commander/coder/dispatcher 유지, orchestrator/implementer는 입력 alias, 신규 역할 additive
+- [x] canonical 저장 파일명 확정: role-definitions.json / agent-instances.json / routing-policy.json, legacy agent-roles.json 유지
+- [x] Role은 provider/model과 분리하고, fallback은 동일 Role의 Agent ID만 참조하도록 계약 고정
+- [x] `lib/role-agent-schema.js` 순수 validator + legacy 양방향 projection 구현
+- [x] custom legacy role, unknown field, corrupt/future schema, alias collision, null budget, 복수 Worker, fallback/상속 cycle, high-risk 약화 회귀 고정
+- [x] `scripts/role-agent-schema-probe.js` 73/73 및 기존 `roles list --json` legacy byte-preserving 대조군
+- [ ] 기존 `_loadRoles`를 명시적 진단으로 교체하되 valid roles/dispatch 동작 무회귀 보장
+- [ ] preview/confirm/lock/rollback을 갖춘 explicit v2 migration command 구현
+- [ ] compatibility window의 legacy+v2 동시 갱신 규칙과 read-only CLI/MCP validate/projection 표면 고정
+- [ ] installed/full/multi-runtime/독립 검수 후 runtime activation 여부 판정
 
 ### M-0011. Router pipeline와 역할별 fallback/검증 정책 구현
 Status: planned
@@ -307,4 +312,4 @@ Tasks:
 - [ ] 실제 페이지/기능 시안 승인 워크플로(`T-0159`)와 통합 여부 별도 결정
 
 ## Immediate Next Action
-`M-0010`의 첫 구현 작업으로, 현재 `ROLE_CATALOG`, `.leerness/agent-roles.json`, `EXTERNAL_AGENTS`, `TIER_ROLES`, `agents dispatch`의 실제 입출력 계약을 표로 고정한 뒤 schema v2 초안과 legacy round-trip probe를 작성한다. 이 단계에서는 아직 외부 모델 호출, UI write, 자동 fallback을 추가하지 않는다.
+`M-0010`의 다음 구현 작업으로 기존 `_loadRoles`의 조용한 손상 은폐를 제거한다. 유효한 `agent-roles.json`의 list/set/unset/dispatch 계약은 유지하고, 기존 파일이 빈 문서·손상 JSON·미지원 schema·잘못된 shape이면 읽기와 쓰기 모두 명시적 코드로 fail-closed하며 원본 바이트와 provider 미실행을 회귀로 고정한다. 그 뒤에만 read-only v2 validate/projection 표면과 explicit migration을 설계한다.
