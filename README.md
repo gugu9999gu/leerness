@@ -12,7 +12,7 @@
 > **The AI-coding operations layer that makes "done" require evidence — for any language, any AI agent.**
 > leerness does not write code. It gives your AI agent persistent memory, verified completion, and clean handoffs — stored inside your repo as plain files, exposed via CLI + MCP.
 
-[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-89-blue) · **0 runtime deps** · **0 install scripts** · offline-first · Node ≥ 18 · MIT
+[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-95-blue) · **0 runtime deps** · **0 install scripts** · offline-first · Node ≥ 18 · MIT
 
 **🇰🇷 한국어 전문: [README.ko.md](./README.ko.md)**
 
@@ -55,7 +55,7 @@ You never have to type a command yourself. Paste this into Claude Code, Cursor, 
 
 The agent installs and operates it for you — `leerness init` also writes the instructions into CLAUDE.md / AGENTS.md so future sessions pick them up automatically.
 
-Prefer pure natural language? leerness ships an **MCP server with 80+ tools** (`leerness mcp serve`). Connect it once to Claude Desktop / Claude Code and just ask: *"what was I working on?"*, *"did the AI actually finish T-0001?"*
+Prefer pure natural language? leerness ships an **MCP server with 95 tools** (`leerness mcp serve`). Connect it once to Claude Desktop / Claude Code and just ask: *"what was I working on?"*, *"did the AI actually finish T-0001?"*
 
 ---
 
@@ -70,6 +70,23 @@ Built-in harnesses remember what the AI **said**. leerness verifies what the AI 
 | Switching agents (Claude → Codex → Cursor) | context lost | same `.leerness/` state, same one-call handoff |
 | Secrets · encoding · drift guards | none | `scan secrets` · `encoding check` · `drift check --auto-fix` — CI-ready |
 | Lock-in | one vendor | any agent, any language, 0 runtime dependencies |
+
+---
+
+## Role-first model routing and fallback
+
+Roles remain stable while providers and models are replaceable execution resources. Configure a role with a primary executor, ordered candidates, and a fallback policy, then resolve the current task against separate installation, opt-in, authentication, entitlement, quota, reachability, and policy signals:
+
+```bash
+leerness roles set coder --provider codex --model gpt-model-id \
+  --candidate claude:claude-model-id --policy balanced
+leerness agents resolve "implement the API" --role coder --json
+leerness agents fallback provider "implement the API" --role coder \
+  --provider claude --model claude-model-id --approved-by owner --json
+leerness agents history --json
+```
+
+Resolution never silently executes a fallback. High-risk substitutions require an explicit approver, and high-risk review is selectable only when a different model family is proven. `dispatch` and `fallback` normally prepare or record a choice with `executed:false`; explicit execution commands such as `agents multi --execute` and `agents bench` can spawn opted-in external CLIs and record the actual outcome in the append-only execution ledger.
 
 ---
 
@@ -192,7 +209,7 @@ leerness memory restore decision <date|title>
 
 ### MCP server (외부 AI 통합)
 
-Leerness v1.36.184는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **89개 도구**를 노출:
+Leerness v1.36.184는 stdio JSON-RPC MCP server를 내장합니다 — Claude Code · Cursor · Codex CLI 등 외부 AI에 **95개 도구**를 노출:
 
 ```jsonc
 // 카테고리별
@@ -205,7 +222,7 @@ Leerness v1.36.184는 stdio JSON-RPC MCP server를 내장합니다 — Claude Co
 // • Workflow: session_close / agents_list / task_export / env_check / usage_stats / reuse_map / whats_new
 
 // MCP server 실행: leerness mcp serve
-// tools/list 응답: 89 도구
+// tools/list 응답: 95 도구
 ```
 
 ### Autonomous mode (자율 모드)

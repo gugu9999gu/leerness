@@ -1089,7 +1089,17 @@
       "notes": "v1.36.184 mode i18n localization, regression, external review, GitHub/npm/leerness.com publication, fresh public install, and Actions 13/13 verification completed.",
       "updatedAt": "2026-09-01T06:10:08.408Z",
       "completedAt": "2026-09-01T06:10:08.408Z"
+    },
+    {
+      "id": "UR-0095",
+      "text": "역할별 지정 모델 사용 불가 시 호환 모델 대체·현재 세션 역할 대행·현재 작업자 직접 수행·보류 선택지를 제공하고, 실제 작업자·검수자·대체 사유·검증 결과를 구조화 기록한다",
+      "recordedAt": "2026-09-03T09:20:53.833Z",
+      "status": "open",
+      "linkedTaskIds": [],
+      "linkedPlanIds": [],
+      "linkedDecisionIds": [],
+      "notes": ""
     }
   ],
-  "updatedAt": "2026-09-01T06:10:08.409Z"
+  "updatedAt": "2026-09-03T09:20:53.834Z"
 }

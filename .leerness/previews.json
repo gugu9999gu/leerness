@@ -388,5 +388,30 @@
         "event": "approved"
       }
     ]
+  },
+  {
+    "id": "P-0018",
+    "title": "역할 폴백·실행 이력 기반",
+    "design": "역할은 유지하고 provider/model은 교체 가능한 자원으로 처리한다. primary 사용 불가 시 후보 모델, 현재 세션 역할 대행, 현재 작업자 직접 수행, 보류를 비교해 선택하며 고위험 작업은 자동 대체하지 않는다.",
+    "features": [
+      "역할 설정 schema v2 호환",
+      "다축 availability 상태",
+      "strict/balanced/continuity 폴백 정책",
+      "현재 세션 대행 계약",
+      "구조화 실행 provenance",
+      "구현자-검수자 독립성 판정"
+    ],
+    "status": "approved",
+    "createdAt": "2026-09-03T09:21:32.998Z",
+    "history": [
+      {
+        "at": "2026-09-03T09:21:32.998Z",
+        "event": "proposed"
+      },
+      {
+        "at": "2026-09-03T09:21:50.114Z",
+        "event": "approved"
+      }
+    ]
   }
 ]

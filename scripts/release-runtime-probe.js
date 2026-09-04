@@ -458,8 +458,14 @@ try {
     '  process.stdout.write(JSON.stringify(rows));',
     '})().catch(error => { process.stderr.write(error.stack || error.message); process.exit(1); });',
   ].join('\n');
+  const benchMatrixWorkspaceLedger = path.join(root, '.leerness', 'execution-ledger.jsonl');
+  const benchMatrixWorkspaceLedgerBefore = fs.existsSync(benchMatrixWorkspaceLedger)
+    ? fs.readFileSync(benchMatrixWorkspaceLedger) : null;
   const benchMatrixChild = cp.spawnSync(process.execPath, ['--trace-deprecation', '-e', benchMatrixChildScript], {
-    cwd: root, encoding: 'utf8', timeout: 60000,
+    // The bench path now writes execution provenance. Run the synthetic matrix in
+    // the probe sandbox so a release check never appends fake model calls to the
+    // developer's real workspace ledger.
+    cwd: sandbox, encoding: 'utf8', timeout: 60000,
   });
   let benchMatrix = null;
   try { benchMatrix = JSON.parse(String(benchMatrixChild.stdout || '')); } catch {}
@@ -476,6 +482,15 @@ try {
         failures.push(`agents bench ${row.id} 단독-ready settled 결과 오류: ${JSON.stringify(row)}`);
       }
     }
+  }
+  const benchMatrixWorkspaceLedgerAfter = fs.existsSync(benchMatrixWorkspaceLedger)
+    ? fs.readFileSync(benchMatrixWorkspaceLedger) : null;
+  const benchMatrixPollutedWorkspace = benchMatrixWorkspaceLedgerBefore === null
+    ? benchMatrixWorkspaceLedgerAfter !== null
+    : benchMatrixWorkspaceLedgerAfter === null
+      || !benchMatrixWorkspaceLedgerBefore.equals(benchMatrixWorkspaceLedgerAfter);
+  if (benchMatrixPollutedWorkspace) {
+    failures.push('agents bench synthetic matrix polluted the real workspace execution ledger');
   }
 
   if (process.platform === 'win32') {

@@ -717,7 +717,13 @@ const _VALUE_FLAGS = new Set(['--language','--skills','--path','--status','--pro
   '--files-changed','--files-read','--members','--only','--personas','--priority','--purpose','--schedule','--mode',
   // --approved-by 는 `agents route` 가 값으로 쓴다(자체 인라인 목록에만 있었다) — 부울로 오분류하면 값이 토큰으로 샌다.
   // --title 도 같다(_TASK_VALUE_FLAGS 소속). 둘 다 완전성 가드가 잡아냈다 — 손으로 분류한 것은 손으로 틀린다.
-  '--approved-by', '--title']);
+  '--approved-by', '--title',
+  // T-0165 역할 폴백·실행 provenance: 값 플래그를 중앙 파서에도 등록한다.
+  '--session-id','--session-provider','--session-model','--session-model-family',
+  '--model-family','--agent-model','--agent-model-family','--agent-session',
+  '--candidate','--candidate-family','--remove-candidate','--policy','--fallback-policy',
+  '--auth-state','--entitlement','--quota-state','--policy-state','--reachability',
+  '--retry-after','--expires-at','--ttl-min','--reason']);
 // 1.36.103 (codex 검수 #10/#11): `brief set` 은 플래그를 정적 리터럴이 아니라 레지스트리에서 만든다
 //   (`arg('--' + f.flag)`). 정적 추출로는 보이지 않아 `brief set --intro hello` 가 "알 수 없는 플래그" 오탐을 냈다.
 //   손으로 10개를 베껴 적으면 그 목록이 또 뒤처진다 — 레지스트리에서 **유도**한다(이 라운드의 요지 그대로).
@@ -728,7 +734,7 @@ const _BOOL_FLAGS = new Set(['--ai','--all','--all-apps','--baseline','--all-pre
   // 소스에 리터럴로만 존재해 소비 형태를 기계 추출하지 못한 것들 — 실재하는 플래그이므로 오타로 오인하면 안 된다
   '--commands','--decision','--errors','--fix','--list','--notes','--print','--raw','--select-all','--skip-git-repo-check','--tests','--verbose','--yolo',
   // lib/*.js 의 부울 소비자 — bin/ 만 훑었다면 `agents route --confirm` 같은 실재 문법에 오탐 경고를 냈을 것이다
-  '--confirm','--dispatch','--execute','--ladder','--log','--multi','--no-env-check','--no-feature-check','--no-gitignore-check','--no-npm-audit','--no-secret-scan','--readonly','--write']);
+  '--confirm','--dispatch','--execute','--ladder','--log','--multi','--no-env-check','--no-feature-check','--no-gitignore-check','--no-npm-audit','--no-secret-scan','--readonly','--write','--clear-candidates','--rate-limited']);
 // 1.36.103: 하위명령이 '선택' 인 명령에서 `<cmd> <경로>` 의 경로가 하위명령 자리로 읽히던 것 차단.
 //   tech/library 는 경로가 args[1] 인데 root 해석이 _taskPositionalPath(args, 2) 로 한 칸 늦게 시작해
 //   positional 을 통째로 건너뛰고 cwd 에 썼다(실측: `tech <TARGET>` 이 CWD 에 tech-profile.json 생성).
@@ -5622,9 +5628,12 @@ function _selfTestCases() {
       const src = read(__filename);
       return guard(hSrc) && guard(dSrc) && guard(src);  // status(bin) 도 동일 가드
     } },
-    { name: '11th 외부평가 Codex P2 (UR-0137): agents dispatch task 에 flag 값(--to/--model 등) 흡수 차단 (1.9.435)', run: () => {
-      const modSrc = read(path.join(path.dirname(__filename), '..', 'lib', 'agents.js'));
-      return modSrc.includes('const _taskArg = () =>') && modSrc.includes("const consumed = new Set([arg('--to', null)") && modSrc.includes('if (consumed.has(a)) continue;');
+    { name: '11th 외부평가 Codex P2 (UR-0137): agents task parser 가 flag 값과 사용자 본문을 분리 (1.9.435/T-0165)', run: () => {
+      const parse = require('../lib/agents')._parseAgentPositional;
+      return parse(['fix auth', '--to', 'codex', '--model', 'm1']) === 'fix auth'
+        && parse(['--to', 'codex', 'fix auth', '--role', 'coder']) === 'fix auth'
+        && parse(['provider', 'fix auth', '--approved-by', 'owner'], 1) === 'fix auth'
+        && parse(['--to=codex', '--json', '--', '-literal task']) === '-literal task';
     } },
     { name: '11th 외부평가 Opus P3 (UR-0139): 시크릿 all-X/0 placeholder FP — 동일문자 8+연속은 prefix 무관 더미 (1.9.436)', run: () => {
       const m = require('../lib/pure-utils');
@@ -11465,7 +11474,7 @@ function commandsCmd(root) {
       { cmd: 'session close [path] [--json] [--auto-apply-delivered]', desc: '세션 마감 + 9 카테고리 + 자동 통합', descEn: 'close the session + 9 categories + auto integration' },
       { cmd: 'resume [path]', desc: 'auto-resume-plan 적용 (1.9.203)', descEn: 'apply the auto-resume plan (1.9.203)' },
       { cmd: 'route <task-type>', desc: '작업 유형 분류 (11종)', descEn: 'classify the task type (11 kinds)' },
-      { cmd: 'agents list|check|quota|dispatch|multi|recommend', desc: '외부 AI CLI 오케스트레이션 (dispatch --role 모델 라우팅 1.9.270)', descEn: 'orchestrate external AI CLIs (dispatch --role model routing 1.9.270)' },
+      { cmd: 'agents list|check|quota|resolve|fallback|record|history|dispatch|multi|recommend', desc: '외부 AI CLI 오케스트레이션 + 역할 가용성·폴백 선택·실행 provenance', descEn: 'orchestrate external AI CLIs + role availability, fallback selection, and execution provenance' },
       { cmd: 'roles list|set|unset|catalog|suggest|verify', desc: '모델별 역할 부여 (코딩/검수/지휘/디자인/디버그/설계/분배) — 1.9.270', descEn: 'assign roles per model (coding/review/command/design/debug/architecture/dispatch) — 1.9.270' },
       { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272', descEn: 'disclose the permission/security surface (what it does + opt-outs + commands to watch) — 1.9.272' },
       { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278', descEn: '.leerness/ JSON state substrate (cross-agent handoff standard) — 1.9.278' },
@@ -21747,7 +21756,12 @@ function _harnessBrief() {
 
 function _dispatchCommand(agentId, task, writeMode, model) {
   const q = String(task || '').replace(/"/g, '\\"');
-  const m = model ? String(model).replace(/"/g, '') : '';
+  const m = model ? String(model).trim() : '';
+  if (m && !isValidModelIdentifier(m)) {
+    const error = new Error('model is not a safe model identifier');
+    error.code = 'invalid_model_identifier';
+    throw error;
+  }
   if (agentId === 'claude') return `claude ${writeMode ? '--print --dangerously-skip-permissions' : '--print'}${m ? ` --model ${m}` : ''} "${q}"`;
   if (agentId === 'codex')  return `codex ${writeMode ? 'exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox' : 'exec --skip-git-repo-check'}${m ? ` -m ${m}` : ''} "${q}"`;
   if (agentId === 'agy') return `agy ${writeMode ? '-p --yolo' : '-p'}${m ? ` --model ${m}` : ''} "${q}"`;
@@ -21764,7 +21778,7 @@ function _dispatchCommand(agentId, task, writeMode, model) {
 
 const _agents = require('../lib/agents');
 // 1.9.424 (UR-0025/UR-0125 큰 핸들러 모듈화 9번째): agentsCmd → lib/agents.js (DI 위임, rest→array)
-function agentsCmd(root, sub, ...args) { return _agents.agentsCmd(root, sub, args, { VERSION, has, arg, uiLang: _uiLang(root), _agentSlashHint, _allProviders, _checkAgent, _cliChat, _dispatchCommand, _harnessBrief: _tgl.toggleOn(root, 'delegation-brief') ? _harnessBrief : undefined, _loadEnvFile, _normalizeRole, _policyEnforce, _readUserProviders, _recommendAgent, _recordRun, _resolveRole, lessonsPath, taskLogPath }); }   // 1.36.30: delegation-brief 토글 OFF 면 브리프 미접두(=--raw 경로)
+function agentsCmd(root, sub, ...args) { return _agents.agentsCmd(root, sub, args, { VERSION, has, arg, uiLang: _uiLang(root), _agentSlashHint, _allProviders, _checkAgent, _cliChat, _dispatchCommand, _harnessBrief: _tgl.toggleOn(root, 'delegation-brief') ? _harnessBrief : undefined, _loadEnvFile, _normalizeRole, _policyEnforce, _readUserProviders, _recommendAgent, _recordRun, _resolveRole, _withLock, lessonsPath, taskLogPath }); }   // 1.36.30: delegation-brief 토글 OFF 면 브리프 미접두(=--raw 경로)
 
 function personaCmd(root, sub, idOrName, ...rest) {
   root = absRoot(root || process.cwd());
@@ -26096,7 +26110,80 @@ function _mcpToCliArgs(name, args, targetPath) {
           case 'leerness_verify_claim':    cliArgs = ['verify-claim', args.taskId, '--path', targetPath, ...(args.refereeId ? ['--referee', String(args.refereeId)] : []), ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : [])]; break;
           case 'leerness_verify_claim_all': cliArgs = ['verify-claim', '--all', '--path', targetPath, '--json', ...(args.runTests ? ['--run-tests'] : []), ...(args.strictClaims ? ['--strict-claims'] : []), ...(args.lenient ? ['--lenient'] : []), ...(args.raw ? ['--raw'] : [])]; break;  // 1.33.3/1.36.167: 일괄검증 + 원판정 감사
           case 'leerness_contract_verify': cliArgs = ['contract', 'verify', args.spec, args.impl]; break;
-          case 'leerness_agents_list':     cliArgs = ['agents', 'list', '--json']; break;
+          case 'leerness_agents_list':     cliArgs = ['agents', 'list', '--path', targetPath, '--json']; break;
+          case 'leerness_agents_resolve':
+            cliArgs = ['agents', 'resolve', String(args.task || ''), '--role', String(args.role || ''), '--path', targetPath, '--json'];
+            if (args.tier) cliArgs.push('--tier', String(args.tier));
+            if (args.preset) cliArgs.push('--preset', String(args.preset));
+            if (args.sessionProvider) cliArgs.push('--session-provider', String(args.sessionProvider));
+            if (args.sessionModel) cliArgs.push('--session-model', String(args.sessionModel));
+            if (args.sessionModelFamily) cliArgs.push('--session-model-family', String(args.sessionModelFamily));
+            if (args.implementerProvider) cliArgs.push('--agent', String(args.implementerProvider));
+            if (args.implementerModel) cliArgs.push('--agent-model', String(args.implementerModel));
+            if (args.implementerModelFamily) cliArgs.push('--agent-model-family', String(args.implementerModelFamily));
+            if (args.implementerSession) cliArgs.push('--agent-session', String(args.implementerSession));
+            break;
+          case 'leerness_agents_fallback':
+            cliArgs = ['agents', 'fallback', String(args.action || ''), String(args.task || ''), '--role', String(args.role || ''), '--path', targetPath, '--json'];
+            if (args.taskId) cliArgs.push('--id', String(args.taskId));
+            if (args.provider) cliArgs.push('--provider', String(args.provider));
+            if (args.model) cliArgs.push('--model', String(args.model));
+            if (args.approvedBy) cliArgs.push('--approved-by', String(args.approvedBy));
+            if (args.tier) cliArgs.push('--tier', String(args.tier));
+            if (args.preset) cliArgs.push('--preset', String(args.preset));
+            if (args.write === true) cliArgs.push('--write');
+            if (args.sessionProvider) cliArgs.push('--session-provider', String(args.sessionProvider));
+            if (args.sessionModel) cliArgs.push('--session-model', String(args.sessionModel));
+            if (args.sessionModelFamily) cliArgs.push('--session-model-family', String(args.sessionModelFamily));
+            if (args.implementerProvider) cliArgs.push('--agent', String(args.implementerProvider));
+            if (args.implementerModel) cliArgs.push('--agent-model', String(args.implementerModel));
+            if (args.implementerModelFamily) cliArgs.push('--agent-model-family', String(args.implementerModelFamily));
+            if (args.implementerSession) cliArgs.push('--agent-session', String(args.implementerSession));
+            break;
+          case 'leerness_agents_availability': {
+            const action = String(args.action || 'list');
+            cliArgs = ['agents', 'availability', action];
+            if ((action === 'mark' || action === 'clear') && args.provider) cliArgs.push(String(args.provider));
+            cliArgs.push('--path', targetPath, '--json');
+            if (args.model) cliArgs.push('--model', String(args.model));
+            if (args.modelFamily) cliArgs.push('--model-family', String(args.modelFamily));
+            if (args.reason) cliArgs.push('--reason', String(args.reason));
+            if (args.authenticated) cliArgs.push('--auth-state', String(args.authenticated === 'yes' ? 'ok' : args.authenticated));
+            if (args.entitlement) cliArgs.push('--entitlement', String(args.entitlement));
+            if (args.quota) cliArgs.push('--quota-state', String(args.quota));
+            if (args.policy) cliArgs.push('--policy-state', String(args.policy));
+            if (args.reachability) cliArgs.push('--reachability', String(args.reachability));
+            if (args.rateLimited === true) cliArgs.push('--rate-limited');
+            if (args.retryAfter) cliArgs.push('--retry-after', String(args.retryAfter));
+            if (args.expiresAt) cliArgs.push('--expires-at', String(args.expiresAt));
+            if (typeof args.ttlMin === 'number') cliArgs.push('--ttl-min', String(args.ttlMin));
+            if (typeof args.limit === 'number') cliArgs.push('--limit', String(args.limit));
+            break;
+          }
+          case 'leerness_agents_record':
+            cliArgs = ['agents', 'record', String(args.event || ''), String(args.summary || ''), '--path', targetPath, '--json'];
+            if (args.taskId) cliArgs.push('--task', String(args.taskId));
+            if (args.attemptId) cliArgs.push('--id', String(args.attemptId));
+            if (args.targetAttemptId) cliArgs.push('--target', String(args.targetAttemptId));
+            if (args.role) cliArgs.push('--role', String(args.role));
+            if (args.provider) cliArgs.push('--provider', String(args.provider));
+            if (args.model) cliArgs.push('--model', String(args.model));
+            if (args.modelFamily) cliArgs.push('--model-family', String(args.modelFamily));
+            if (args.status) cliArgs.push('--status', String(args.status));
+            if (args.evidence) cliArgs.push('--evidence', String(args.evidence));
+            if (args.implementerProvider) cliArgs.push('--agent', String(args.implementerProvider));
+            if (args.implementerModel) cliArgs.push('--agent-model', String(args.implementerModel));
+            if (args.implementerModelFamily) cliArgs.push('--agent-model-family', String(args.implementerModelFamily));
+            if (args.implementerSession) cliArgs.push('--agent-session', String(args.implementerSession));
+            if (args.executorSession) cliArgs.push('--session-id', String(args.executorSession));
+            break;
+          case 'leerness_agents_history':
+            cliArgs = ['agents', 'history', '--path', targetPath, '--json'];
+            if (typeof args.limit === 'number') cliArgs.push('--limit', String(args.limit));
+            break;
+          case 'leerness_agents_quota':
+            cliArgs = ['agents', 'quota', '--path', targetPath, '--json'];
+            break;
           case 'leerness_reuse_map':       cliArgs = ['reuse-map', targetPath, ...(args.allApps ? ['--all-apps'] : []), ...(args.strictElements ? ['--strict-elements'] : []), '--json']; break;
           case 'leerness_whats_new':       cliArgs = ['whats-new', '--path', targetPath, ...(args.from ? ['--from', args.from] : []), ...(args.to ? ['--to', args.to] : []), ...(args.all ? ['--all'] : []), ...(args.limit ? ['--limit', String(args.limit)] : []), '--json']; break;   // 1.36.69 (검수 #1): limit/all 전달 — MCP 소비자도 상한 조절 가능
           case 'leerness_usage_stats':     cliArgs = ['usage', 'stats', targetPath, '--json']; break;
@@ -26291,10 +26378,20 @@ function _mcpToCliArgs(name, args, targetPath) {
             if (args.dryRun === true) cliArgs.push('--dry-run');
             break;
           case 'leerness_roles':
-            // 1.9.270 (사용자 명시): 모델별 역할 부여
+            // 역할별 primary/candidate/fallback policy — CLI 단일 구현을 그대로 재사용.
             cliArgs = ['roles', String(args.sub || 'list'), ...(args.role ? [String(args.role)] : []), '--path', targetPath, '--json'];
             if (args.provider) cliArgs.push('--provider', String(args.provider));
             if (args.model) cliArgs.push('--model', String(args.model));
+            if (args.modelFamily) cliArgs.push('--model-family', String(args.modelFamily));
+            const _roleCandidates = Array.isArray(args.candidates) ? args.candidates : (args.candidate ? [args.candidate] : []);
+            const _roleCandidateFamilies = Array.isArray(args.candidateFamilies) ? args.candidateFamilies : (args.candidateFamily ? [args.candidateFamily] : []);
+            const _roleRemoveCandidates = Array.isArray(args.removeCandidates) ? args.removeCandidates : [];
+            for (const candidate of _roleCandidates) cliArgs.push('--candidate', String(candidate));
+            for (const family of _roleCandidateFamilies) cliArgs.push('--candidate-family', String(family));
+            for (const candidate of _roleRemoveCandidates) cliArgs.push('--remove-candidate', String(candidate));
+            if (args.fallbackPolicy) cliArgs.push('--policy', String(args.fallbackPolicy));
+            if (args.persona) cliArgs.push('--persona', String(args.persona));
+            if (args.clearCandidates === true) cliArgs.push('--clear-candidates');
             if (args.apply === true) cliArgs.push('--apply');
             break;
           // 1.9.279 (UR-0031): 상태 substrate MCP 시맨틱 verb
@@ -26539,15 +26636,22 @@ function mcpServeCmd(root) {
       {
         const _props = _toolDef && _toolDef.inputSchema && _toolDef.inputSchema.properties || null;
         if (_props) {
+          const _invalidParam = message => send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: ${message}` } });
           for (const [k, spec] of Object.entries(_props)) {
             const v = args[k];
             if (v === undefined || v === null) continue;
-            if (spec.type === 'string' && typeof v !== 'string') return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: '${k}' must be a string` } });
-            if (spec.type === 'number' && typeof v !== 'number') return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: '${k}' must be a number` } });
-            if (spec.type === 'boolean' && typeof v !== 'boolean') return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: '${k}' must be a boolean` } });
+            if (spec.type === 'string' && typeof v !== 'string') return _invalidParam(`'${k}' must be a string`);
+            if (spec.type === 'number' && typeof v !== 'number') return _invalidParam(`'${k}' must be a number`);
+            if (spec.type === 'boolean' && typeof v !== 'boolean') return _invalidParam(`'${k}' must be a boolean`);
+            if (spec.type === 'array') {
+              if (!Array.isArray(v)) return _invalidParam(`'${k}' must be an array`);
+              if (Number.isInteger(spec.maxItems) && v.length > spec.maxItems) return _invalidParam(`'${k}' must contain at most ${spec.maxItems} item(s)`);
+              if (spec.items && spec.items.type === 'string' && v.some(item => typeof item !== 'string')) return _invalidParam(`'${k}' items must be strings`);
+            }
+            if (Array.isArray(spec.enum) && !spec.enum.includes(v)) return _invalidParam(`'${k}' must be one of ${spec.enum.join('|')}`);
           }
           for (const rk of (_toolDef.inputSchema.required || [])) {
-            if (args[rk] === undefined || args[rk] === null) return send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Invalid params: missing required '${rk}'` } });
+            if (args[rk] === undefined || args[rk] === null) return _invalidParam(`missing required '${rk}'`);
           }
         }
       }
@@ -27120,10 +27224,10 @@ async function _ollamaListModels() {
 async function _cliChat(root, provider, prompt, opts) {
   opts = opts || {};
   const agent = EXTERNAL_AGENTS.find(a => a.id === provider);
-  if (!agent) return { ok: false, error: `unknown provider: ${provider}`, provider };
+  if (!agent) return { ok: false, error: `unknown provider: ${provider}`, provider, executed: false };
   const status = _checkAgent(agent);
   if (status.status !== 'ready') {
-    return { ok: false, error: `${provider} 비활성 (${status.status}) — .env 에서 ${agent.envFlag}=1 + CLI 설치 필요`, provider };
+    return { ok: false, error: `${provider} 비활성 (${status.status}) — .env 에서 ${agent.envFlag}=1 + CLI 설치 필요`, provider, executed: false };
   }
   // CLI 별 비-인터랙티브 호출 인자 매핑 (read-only 모드 — REPL 안에서 파일 수정 X)
   // 1.9.188 (사용자 명시 fix): 한글/특수문자 prompt 시 shell escape 실패 회피 → stdin 으로 전달.
@@ -27132,7 +27236,7 @@ async function _cliChat(root, provider, prompt, opts) {
   else if (provider === 'codex')   { cmd = 'codex';  args = ['exec', '--skip-git-repo-check', '-']; stdinInput = prompt; }
   else if (provider === 'agy')  { cmd = 'agy'; args = ['-p', prompt]; }  // agy (Antigravity) 는 인자 only
   else if (provider === 'copilot') { cmd = 'gh';     args = ['copilot', 'suggest', prompt]; }
-  else return { ok: false, error: `provider ${provider} 미지원`, provider };
+  else return { ok: false, error: `provider ${provider} 미지원`, provider, executed: false };
   // runCommandSafe — env scrub + observability 자동
   const r = runCommandSafe(cmd, args, {
     cwd: process.cwd(), root,
@@ -27142,12 +27246,13 @@ async function _cliChat(root, provider, prompt, opts) {
     input: stdinInput  // 1.9.188: claude/codex 는 stdin 전달
   });
   if (r.status === 0) {
-    return { ok: true, response: (r.stdout || '').trim(), provider, model: provider };
+    return { ok: true, response: (r.stdout || '').trim(), provider, model: provider, executed: true };
   }
   return {
     ok: false,
     error: `exit=${r.status} ${(r.stderr || r.stdout || '').slice(0, 200)}`,
-    provider
+    provider,
+    executed: true,
   };
 }
 
@@ -27587,7 +27692,8 @@ function ciInitCmd(root, opts = {}) {
   log('  ⮕ 다음 단계(가드레일 완성): GitHub branch protection 에서 leerness-gate 를 "required" 체크로 지정 — 그래야 우회 불가.');
 }
 // 1.9.294 (UR-0025 3단계): 역할/모델 카탈로그(_PROVIDER_MODEL_CATALOG + _AGENT_ROLE_PROMPTS + ROLE_CATALOG + _ROLE_ALIASES) 데이터 모듈 분리 (비파괴, require-based).
-const { _PROVIDER_MODEL_CATALOG, _AGENT_ROLE_PROMPTS, ROLE_CATALOG, _ROLE_ALIASES } = require('../lib/role-catalog');
+const { _PROVIDER_MODEL_CATALOG, _AGENT_ROLE_PROMPTS, ROLE_CATALOG, ROLE_REQUIREMENTS, _ROLE_ALIASES, pickCatalogModel } = require('../lib/role-catalog');
+const { FALLBACK_POLICIES, validateRoleDefinitionShape, normalizeRoleDefinition, isValidModelIdentifier, inferModelFamily, normalizeAvailability, readAvailabilityObservations, availabilityExtrasForCandidate } = require('../lib/role-fallback');
 function _normalizeRole(name) {
   const raw = String(name || '').trim();
   if (_ROLE_ALIASES[raw]) return _ROLE_ALIASES[raw];
@@ -27595,18 +27701,48 @@ function _normalizeRole(name) {
   return _ROLE_ALIASES[low] || low;
 }
 // 역할 modelKind 에 맞는 모델 선택 — top(최상위) / code(코드 특화) / fast(빠른). 순수 함수(selftest).
-function _pickModel(provider, kind) {
-  const list = _PROVIDER_MODEL_CATALOG[provider] || [];
-  if (!list.length) return null;
-  if (kind === 'code') { const m = list.find(x => /codex|coder|code/i.test(x.id)); return (m || list[0]).id; }
-  if (kind === 'fast') { const m = list.find(x => /haiku|mini|flash|oss/i.test(x.id)); return (m || list[list.length - 1]).id; }
-  return list[0].id; // top
-}
+function _pickModel(provider, kind) { return pickCatalogModel(provider, kind); }
 function _rolesFile(root) { return path.join(absRoot(root), '.leerness', 'agent-roles.json'); }
-function _loadRoles(root) {
+function _loadRolesChecked(root) {
   const f = _rolesFile(root);
-  if (!exists(f)) return {};
-  try { const j = JSON.parse(read(f)); return (j && j.roles && typeof j.roles === 'object') ? j.roles : {}; } catch { return {}; }
+  if (!exists(f)) return { roles: {}, invalid: false, code: null, reason: null, file: f, schemaVersion: 0 };
+  try {
+    const j = JSON.parse(read(f));
+    if (!j || typeof j !== 'object' || Array.isArray(j)) {
+      return { roles: {}, invalid: true, code: 'store_invalid', reason: '최상위가 객체가 아닙니다', file: f, schemaVersion: null };
+    }
+    const schemaVersion = Object.prototype.hasOwnProperty.call(j, 'schemaVersion') ? j.schemaVersion : 1;
+    if (!Number.isInteger(schemaVersion) || ![1, 2].includes(schemaVersion)) {
+      return { roles: {}, invalid: true, code: 'store_invalid', reason: 'schemaVersion은 1 또는 2여야 합니다', file: f, schemaVersion };
+    }
+    if (!j.roles || typeof j.roles !== 'object' || Array.isArray(j.roles)) {
+      return { roles: {}, invalid: true, code: 'store_invalid', reason: 'roles가 객체가 아닙니다', file: f, schemaVersion };
+    }
+    for (const [role, def] of Object.entries(j.roles)) {
+      if (!role || !def || typeof def !== 'object' || Array.isArray(def)) {
+        return { roles: {}, invalid: true, code: 'store_invalid', reason: `역할 항목 형상 무효: ${role || '(empty)'}`, file: f, schemaVersion };
+      }
+      const shape = validateRoleDefinitionShape(role, def);
+      if (!shape.ok) {
+        return { roles: {}, invalid: true, code: 'store_invalid', reason: shape.error, field: shape.field || null, file: f, schemaVersion };
+      }
+    }
+    return { roles: j.roles, invalid: false, code: null, reason: null, file: f, schemaVersion };
+  } catch (error) {
+    return { roles: {}, invalid: true, code: 'store_corrupt', reason: 'JSON 파싱 실패', file: f, schemaVersion: null, error: error && error.message ? error.message : String(error) };
+  }
+}
+function _roleStoreError(root, checked) {
+  const state = checked || _loadRolesChecked(root);
+  const error = new Error(`agent-roles.json ${state.reason || '형상 무효'} — 원본 보존, 덮어쓰기 거부: ${state.file || _rolesFile(root)}`);
+  error.code = state.code || 'role_store_invalid';
+  error.file = state.file || _rolesFile(root);
+  return error;
+}
+function _loadRoles(root) {
+  const checked = _loadRolesChecked(root);
+  if (checked.invalid) throw _roleStoreError(root, checked);
+  return checked.roles;
 }
 // 1.36.137 (동시성 감사 실측): `roles set/unset/suggest --apply` 는 load→mutate→save 를 **락 없이** 했다 —
 //   4 프로세스만으로 28.8%, 16 프로세스에서 11~15/16 만 살아남았다(exit 0 · 경고 0 · 손상 0).
@@ -27614,7 +27750,9 @@ function _loadRoles(root) {
 //   1.36.108 이 rules.md 에서 만든 형태 그대로다.
 function _updateRoles(root, mutate) {
   return _withLock(_rolesFile(root), () => {
-    const roles = _loadRoles(root);
+    const checked = _loadRolesChecked(root);
+    if (checked.invalid) throw _roleStoreError(root, checked);
+    const roles = checked.roles;
     //   mutate 가 false 를 돌려주면 **쓰지 않는다** — 바꿀 것이 없는데 파일을 건드리지 않는다.
     if (mutate(roles) === false) return null;
     return _saveRoles(root, roles);
@@ -27623,28 +27761,103 @@ function _updateRoles(root, mutate) {
 function _saveRoles(root, roles) {
   const f = _rolesFile(root);
   mkdirp(path.dirname(f));
-  writeUtf8(f, JSON.stringify({ schemaVersion: 1, updatedAt: new Date().toISOString(), roles }, null, 2) + '\n');
+  writeUtf8(f, JSON.stringify({ schemaVersion: 2, updatedAt: new Date().toISOString(), roles }, null, 2) + '\n');
   return f;
 }
 // 역할 → {role, provider, model, persona, source} 해석 (사용자 설정 전용; 미설정 시 null).
 function _resolveRole(root, name) {
   const role = _normalizeRole(name);
-  const roles = _loadRoles(root);
-  if (roles[role] && roles[role].provider) return { role, provider: roles[role].provider, model: roles[role].model || null, persona: roles[role].persona || '', source: 'user' };
-  return null;
+  const checked = _loadRolesChecked(root);
+  if (checked.invalid) throw _roleStoreError(root, checked);
+  const roles = checked.roles;
+  const def = roles[role];
+  if (!def || typeof def !== 'object') return null;
+  const normalized = normalizeRoleDefinition(role, def);
+  const primary = normalized.primary;
+  const provider = primary && typeof primary.provider === 'string' ? primary.provider.trim() : '';
+  if (!provider) return null;
+  return {
+    role,
+    provider,
+    model: primary.model || null,
+    modelFamily: primary.modelFamily || inferModelFamily(primary.model),
+    persona: normalized.persona || '',
+    candidates: normalized.candidates,
+    fallbackPolicy: normalized.fallbackPolicy,
+    requirements: normalized.requirements,
+    primary: { provider, model: primary.model || null, modelFamily: primary.modelFamily || inferModelFamily(primary.model) },
+    source: 'user',
+  };
 }
 // 활성(ready) 에이전트 기반 최적 역할 배치 제안 — "올바른 방향성 판단" (사용자 요청).
 function _suggestRoles(root) {
-  const ready = EXTERNAL_AGENTS.map(a => ({ id: a.id, status: _checkAgent(a) })).filter(x => x.status.status === 'ready').map(x => x.id);
+  const availabilityState = readAvailabilityObservations(root, 2000);
+  if (availabilityState.ok === false || availabilityState.partial) {
+    return { ready: [], suggestions: [], error: { code: availabilityState.code || 'availability_history_partial', message: availabilityState.error || 'availability observation history is incomplete' } };
+  }
+  const providers = _allProviders(root);
+  const inspected = providers.map(definition => {
+    let raw;
+    try { raw = _checkAgent(definition); }
+    catch (error) { raw = { status: 'check-error', error: error && error.message }; }
+    const availability = normalizeAvailability(definition, raw, {
+      provider: definition.id,
+      ...availabilityExtrasForCandidate(availabilityState, { provider: definition.id, model: null }),
+    });
+    return { id: definition.id, definition, availability };
+  });
+  const eligible = inspected.filter(item => item.availability.eligible);
+  const ready = eligible.map(item => item.id);
   const readySet = new Set(ready);
+  const providerOrder = (def) => [...new Set([...(def.prefer || []), ...ready])].filter(id => readySet.has(id));
+  const coderDef = ROLE_CATALOG.coder || { prefer: [] };
+  const coderProvider = providerOrder(coderDef)[0] || null;
   const suggestions = [];
   for (const [role, def] of Object.entries(ROLE_CATALOG)) {
-    const provider = def.prefer.find(p => readySet.has(p)) || null;
-    const model = provider ? _pickModel(provider, def.modelKind) : null;
-    suggestions.push({ role, ko: def.ko, desc: def.desc, provider, model, ready: !!provider, why: def.why, prefer: def.prefer });
+    let ordered = providerOrder(def);
+    if (role === 'reviewer' && coderProvider && ordered.some(id => id !== coderProvider)) {
+      ordered = ordered.filter(id => id !== coderProvider).concat(ordered.filter(id => id === coderProvider));
+    }
+    const provider = role === 'coder' && coderProvider ? coderProvider : (ordered[0] || null);
+    const availability = provider ? inspected.find(item => item.id === provider).availability : null;
+    const candidates = ordered.filter(id => id !== provider).map(id => ({ provider: id, model: null, modelFamily: null }));
+    suggestions.push({
+      role, ko: def.ko, desc: def.desc, provider, model: null, modelFamily: null,
+      ready: !!provider, candidates, availability,
+      modelVerified: false,
+      why: provider ? `${def.why} · provider 실행 준비만 확인; 실제 모델 ID/권한/쿼터는 미검증` : def.why,
+      prefer: def.prefer,
+    });
   }
-  return { ready, suggestions };
+  return { ready, inspected: inspected.map(item => ({ id: item.id, availability: item.availability })), suggestions, availabilityObservationState: { activeCount: availabilityState.activeCount, partial: availabilityState.partial } };
 }
+function _roleFlagValues(argv, name) {
+  const list = Array.isArray(argv) ? argv : [];
+  const out = [];
+  for (let i = 0; i < list.length; i++) {
+    const token = String(list[i] || '');
+    if (token === name && i + 1 < list.length && !String(list[i + 1]).startsWith('-')) out.push(String(list[++i]));
+    else if (token.startsWith(name + '=')) out.push(token.slice(name.length + 1));
+  }
+  return out;
+}
+function _parseRoleCandidateSpec(value, family) {
+  const raw = String(value || '').trim();
+  const at = raw.indexOf(':');
+  const provider = (at >= 0 ? raw.slice(0, at) : raw).trim();
+  const model = (at >= 0 ? raw.slice(at + 1) : '').trim();
+  if (!provider) return null;
+  return { provider, model: model || null, modelFamily: String(family || '').trim().toLowerCase() || inferModelFamily(model) };
+}
+function _roleCandidatesFromFlags(argv) {
+  const specs = _roleFlagValues(argv, '--candidate');
+  const families = _roleFlagValues(argv, '--candidate-family');
+  if (families.length > specs.length) return { error: '--candidate-family 수가 --candidate 수보다 많습니다' };
+  const candidates = specs.map((v, i) => _parseRoleCandidateSpec(v, families[i])).filter(Boolean);
+  const removals = _roleFlagValues(argv, '--remove-candidate').map(v => _parseRoleCandidateSpec(v, null)).filter(Boolean);
+  return { candidates, removals, touched: specs.length > 0 || removals.length > 0 || argv.includes('--clear-candidates') };
+}
+
 // leerness roles <list|set|unset|catalog|suggest|verify>
 function rolesCmd(root, sub, ...args) {
   root = absRoot(root || process.cwd());
@@ -27660,6 +27873,9 @@ function rolesCmd(root, sub, ...args) {
   };
   try { _loadEnvFile(root); _loadEnvFile(path.join(root, '..')); } catch {}
   const json = has('--json');
+  const _storeFailure = (error) => {
+    failJson(json, (error && error.code) || 'role_store_error', (error && error.message) || 'agent-roles.json을 읽거나 쓸 수 없습니다');
+  };
   sub = sub || 'list';
 
   if (sub === 'catalog') {
@@ -27669,7 +27885,7 @@ function rolesCmd(root, sub, ...args) {
       log(`  ${role.padEnd(11)} ${d.ko.padEnd(8)} — ${d.desc}`);
       log(`     선호 provider: ${d.prefer.join(' > ')} · 모델 등급: ${d.modelKind} · 근거: ${d.why}`);
     }
-    log(`\n  설정: leerness roles set <role> --provider <id> [--model <m>] [--persona "..."]`);
+    log(`\n  설정: leerness roles set <role> --provider <id> [--model <m>] [--model-family <f>] [--policy strict|balanced|continuity] [--candidate <provider[:model]> ...]`);
     log(`  자동 제안: leerness roles suggest [--apply]`);
     return;
   }
@@ -27682,16 +27898,75 @@ function rolesCmd(root, sub, ...args) {
     const provider = arg('--provider', null) || arg('--to', null);
     if (!provider) return fail('--provider <id> 필요 (claude/codex/agy/grok/copilot/ollama)');
     if (!_allProviders(root).some(p => p.id === provider) && !has('--force')) return fail(`알 수 없는 provider: ${provider} — 커스텀은 --force 또는 provider add`);
-    let model = arg('--model', null);
-    if (!model) model = _pickModel(provider, (ROLE_CATALOG[role] || {}).modelKind || 'top');
+    const model = arg('--model', null) || null;
+    const modelFamily = String(arg('--model-family', '') || '').trim().toLowerCase() || inferModelFamily(model);
+    const requestedPolicy = arg('--policy', null) || arg('--fallback-policy', null);
+    if (requestedPolicy && !FALLBACK_POLICIES.includes(String(requestedPolicy).toLowerCase())) return fail(`--policy 는 ${FALLBACK_POLICIES.join('|')} (받음: ${requestedPolicy})`);
+    const rawRoleArgv = process.argv.slice(2);
+    const parsedCandidates = _roleCandidatesFromFlags(rawRoleArgv);
+    if (parsedCandidates.error) return fail(parsedCandidates.error);
+    const allProviders = _allProviders(root);
+    const knownProviders = new Set(allProviders.map(p => p.id));
+    const unknownCandidates = parsedCandidates.candidates.concat(parsedCandidates.removals).filter(c => !knownProviders.has(c.provider));
+    if (unknownCandidates.length && !has('--force')) return fail(`알 수 없는 candidate provider: ${[...new Set(unknownCandidates.map(c => c.provider))].join(', ')} — provider add 또는 --force`);
     const persona = arg('--persona', null) || (ROLE_CATALOG[role] ? ROLE_CATALOG[role].desc : '');
     if (_requireExistingPath()) return;
-    const f = _updateRoles(root, (roles) => { roles[role] = { provider, model: model || null, persona }; });
-    // 비활성 provider 경고 (verify 사전 노출)
+    let f, savedRole;
+    try {
+      f = _updateRoles(root, (roles) => {
+        const previous = roles[role] && typeof roles[role] === 'object' ? roles[role] : {};
+        const previousNormalized = normalizeRoleDefinition(role, previous);
+        let candidates = previousNormalized.candidates.map(candidate => ({
+          provider: candidate.provider,
+          model: candidate.model || null,
+          modelFamily: candidate.modelFamily || null,
+        }));
+        if (has('--clear-candidates')) candidates = [];
+        if (parsedCandidates.candidates.length) candidates = parsedCandidates.candidates;
+        if (parsedCandidates.removals.length) {
+          const removed = new Set(parsedCandidates.removals.map(c => `${c.provider}\u0000${c.model || ''}`));
+          candidates = candidates.filter(c => !removed.has(`${c.provider}\u0000${c.model || ''}`));
+        }
+        const normalized = normalizeRoleDefinition(role, {
+          ...previous,
+          primary: { provider, model: model || null, modelFamily },
+          candidates,
+          fallbackPolicy: requestedPolicy || previous.fallbackPolicy || previous.policy || 'balanced',
+          requirements: previous.requirements || ROLE_REQUIREMENTS[role] || {},
+          persona,
+        });
+        savedRole = {
+          ...previous,
+          provider,
+          model: model || null,
+          modelFamily: modelFamily || null,
+          persona,
+          primary: { provider, model: model || null, modelFamily: modelFamily || null },
+          candidates: normalized.candidates.map(c => ({ provider: c.provider, model: c.model || null, modelFamily: c.modelFamily || null })),
+          fallbackPolicy: normalized.fallbackPolicy,
+          requirements: normalized.requirements,
+        };
+        const savedShape = validateRoleDefinitionShape(role, savedRole);
+        if (!savedShape.ok) {
+          const error = new Error(savedShape.error);
+          error.code = savedShape.code || 'role_definition_invalid';
+          error.field = savedShape.field || null;
+          throw error;
+        }
+        roles[role] = savedRole;
+      });
+    } catch (error) { _storeFailure(error); return; }
+    // 비활성 provider 경고 — validation과 같은 사용자 provider 정의를 사용한다.
     let warnMsg = '';
-    try { const st = _checkAgent(EXTERNAL_AGENTS.find(a => a.id === provider) || { id: provider, bin: provider, versionArgs: ['--version'], envFlag: `LEERNESS_ENABLE_${provider.toUpperCase()}` }); if (st.status !== 'ready') warnMsg = `⚠ ${provider} 현재 비활성(${st.status}) — 활성화: LEERNESS_ENABLE_${provider.toUpperCase()}=1 + CLI 설치`; } catch {}
-    if (json) { log(JSON.stringify({ set: role, provider, model: model || null, persona, file: f, warning: warnMsg || null }, null, 2)); return; }
-    ok(`역할 설정: ${role} (${ROLE_CATALOG[role] ? ROLE_CATALOG[role].ko : 'custom'}) → ${provider}${model ? ' / ' + model : ''}`);
+    try {
+      const providerDef = allProviders.find(a => a.id === provider);
+      const st = providerDef ? _checkAgent(providerDef) : { status: 'unknown-provider' };
+      if (st.status !== 'ready') warnMsg = `⚠ ${provider} 현재 비활성(${st.status})${providerDef && providerDef.envFlag ? ` — 활성화: ${providerDef.envFlag}=1 + CLI 설치` : ''}`;
+    } catch {}
+    if (json) { log(JSON.stringify({ set: role, provider, model: model || null, modelFamily: modelFamily || null, persona, fallbackPolicy: savedRole.fallbackPolicy, candidates: savedRole.candidates, file: f, warning: warnMsg || null }, null, 2)); return; }
+    ok(`역할 설정: ${role} (${ROLE_CATALOG[role] ? ROLE_CATALOG[role].ko : 'custom'}) → ${provider}${model ? ' / ' + model : ''}${modelFamily ? ` [family=${modelFamily}]` : ''}`);
+    log(`  policy: ${savedRole.fallbackPolicy} · candidates: ${savedRole.candidates.length}`);
+    savedRole.candidates.forEach((c, i) => log(`    ${i + 1}. ${c.provider}${c.model ? ' / ' + c.model : ''}${c.modelFamily ? ` [family=${c.modelFamily}]` : ''}`));
     if (persona) log(`  persona: ${persona}`);
     if (warnMsg) warn(warnMsg);
     log(`  파일: ${f}  ·  사용: leerness agents dispatch "<task>" --role ${role}`);
@@ -27705,10 +27980,13 @@ function rolesCmd(root, sub, ...args) {
     //   사유는 바깥의 `_unsetErr` 로 전달한다(락 안에서 출력하지 않는다).
     if (_requireExistingPath()) return;
     let _unsetErr = null;
-    const f = _updateRoles(root, (roles) => {
-      if (!roles[role]) { _unsetErr = `설정되지 않은 역할: ${role}`; return false; }
-      delete roles[role];
-    });
+    let f;
+    try {
+      f = _updateRoles(root, (roles) => {
+        if (!roles[role]) { _unsetErr = `설정되지 않은 역할: ${role}`; return false; }
+        delete roles[role];
+      });
+    } catch (error) { _storeFailure(error); return; }
     if (_unsetErr) return fail(_unsetErr);
     if (json) { log(JSON.stringify({ removed: role, file: f }, null, 2)); return; }
     ok(`역할 제거: ${role}`);
@@ -27716,28 +27994,49 @@ function rolesCmd(root, sub, ...args) {
   }
 
   if (sub === 'suggest') {
-    const { ready, suggestions } = _suggestRoles(root);
+    const suggestionResult = _suggestRoles(root);
+    if (suggestionResult.error) { failJson(json, suggestionResult.error.code, suggestionResult.error.message); return; }
+    const { ready, suggestions } = suggestionResult;
     if (has('--apply')) {
       if (_requireExistingPath()) return;
       let applied = 0;
-      const f = _updateRoles(root, (roles) => {
-        applied = 0;
-        for (const s of suggestions) { if (s.ready) { roles[s.role] = { provider: s.provider, model: s.model, persona: ROLE_CATALOG[s.role].desc }; applied++; } }
-      });
-      if (json) { log(JSON.stringify({ applied, ready, file: f, suggestions }, null, 2)); return; }
+      let f;
+      try {
+        f = _updateRoles(root, (roles) => {
+          applied = 0;
+          for (const s of suggestions) {
+            if (!s.ready) continue;
+            const previous = roles[s.role] && typeof roles[s.role] === 'object' ? roles[s.role] : {};
+            const candidates = Array.isArray(previous.candidates) && previous.candidates.length ? previous.candidates : s.candidates;
+            roles[s.role] = {
+              ...previous,
+              provider: s.provider,
+              model: null,
+              modelFamily: null,
+              persona: ROLE_CATALOG[s.role].desc,
+              primary: { provider: s.provider, model: null, modelFamily: null },
+              candidates,
+              fallbackPolicy: previous.fallbackPolicy || 'balanced',
+              requirements: previous.requirements || ROLE_REQUIREMENTS[s.role] || {},
+            };
+            applied++;
+          }
+        });
+      } catch (error) { _storeFailure(error); return; }
+      if (json) { log(JSON.stringify({ applied, ready, file: f, suggestions, availabilityObservationState: suggestionResult.availabilityObservationState }, null, 2)); return; }
       ok(`제안 적용: ${applied}개 역할 → ${f}`);
-      for (const s of suggestions.filter(x => x.ready)) log(`  ${s.role.padEnd(11)} → ${s.provider} / ${s.model}`);
+      for (const s of suggestions.filter(x => x.ready)) log(`  ${s.role.padEnd(11)} → ${s.provider} / (provider default; model unverified)`);
       const unready = suggestions.filter(x => !x.ready);
       if (unready.length) log(`  (미배정 ${unready.length}: ${unready.map(x => x.role).join(', ')} — 활성 provider 없음)`);
       return;
     }
-    if (json) { log(JSON.stringify({ ready, suggestions }, null, 2)); return; }
+    if (json) { log(JSON.stringify({ ready, suggestions, inspected: suggestionResult.inspected, availabilityObservationState: suggestionResult.availabilityObservationState }, null, 2)); return; }
     log(`# leerness roles suggest (1.9.270) — 활성 에이전트 기반 최적 역할 배치`);
     log(`활성(ready): ${ready.join(', ') || '(없음 — LEERNESS_ENABLE_* + CLI 설치 필요)'}`);
     log('');
     for (const s of suggestions) {
       const mark = s.ready ? '✓' : '·';
-      log(`  ${mark} ${s.role.padEnd(11)} ${s.ko.padEnd(8)} → ${s.ready ? `${s.provider} / ${s.model}` : '(미배정 — 선호 ' + s.prefer.join('>') + ' 비활성)'}`);
+      log(`  ${mark} ${s.role.padEnd(11)} ${s.ko.padEnd(8)} → ${s.ready ? `${s.provider} / (provider default; model unverified)` : '(미배정 — 선호 ' + s.prefer.join('>') + ' 비활성)'}`);
       log(`       근거: ${s.why}`);
     }
     log(`\n  적용: leerness roles suggest --apply  ·  개별: leerness roles set <role> --provider <id>`);
@@ -27745,36 +28044,105 @@ function rolesCmd(root, sub, ...args) {
   }
 
   if (sub === 'verify') {
-    const roles = _loadRoles(root);
+    const checked = _loadRolesChecked(root);
+    if (checked.invalid) { _storeFailure(_roleStoreError(root, checked)); return; }
+    const roles = checked.roles;
     const entries = Object.entries(roles);
-    const results = entries.map(([role, def]) => {
-      let status = 'unknown';
-      try { const a = EXTERNAL_AGENTS.find(x => x.id === def.provider); status = a ? _checkAgent(a).status : 'unknown-provider'; } catch {}
-      return { role, provider: def.provider, model: def.model || null, status, ok: status === 'ready' };
+    const availabilityState = readAvailabilityObservations(root, 2000);
+    if (availabilityState.ok === false || availabilityState.partial) {
+      failJson(json, availabilityState.code || 'availability_history_partial', availabilityState.error || 'availability observation history is incomplete');
+      return;
+    }
+    const allProviders = _allProviders(root);
+    const providerMap = new Map(allProviders.map(p => [p.id, p]));
+    const inspect = (candidate) => {
+      const def = candidate && providerMap.get(candidate.provider);
+      let raw = { status: def ? 'unknown' : 'unknown-provider' };
+      try { if (def) raw = _checkAgent(def); } catch (error) { raw = { status: 'check-error', error: error && error.message }; }
+      const availability = normalizeAvailability(def || null, raw, {
+        provider: candidate && candidate.provider,
+        ...availabilityExtrasForCandidate(availabilityState, candidate || {}),
+      });
+      return {
+        provider: candidate && candidate.provider || null,
+        model: candidate && candidate.model || null,
+        modelFamily: candidate && candidate.modelFamily || inferModelFamily(candidate && candidate.model),
+        status: availability.status,
+        ready: availability.eligible,
+        availability,
+      };
+    };
+    const results = entries.map(([role]) => {
+      const resolved = _resolveRole(root, role);
+      const primary = inspect(resolved && resolved.primary);
+      const candidateResults = resolved ? resolved.candidates.map(inspect) : [];
+      const fallbackReady = !!(resolved && resolved.fallbackPolicy !== 'strict' && candidateResults.some(c => c.ready));
+      const routable = primary.ready || fallbackReady;
+      return {
+        role,
+        provider: primary.provider,
+        model: primary.model,
+        modelFamily: resolved && resolved.modelFamily || null,
+        fallbackPolicy: resolved ? resolved.fallbackPolicy : null,
+        status: primary.status,
+        primaryReady: primary.ready,
+        fallbackReady,
+        routable,
+        availability: primary.availability,
+        candidates: candidateResults,
+      };
     });
-    const bad = results.filter(r => !r.ok);
-    if (json) { log(JSON.stringify({ total: entries.length, ready: results.filter(r => r.ok).length, issues: bad, results }, null, 2)); return; }
-    log(`# leerness roles verify (1.9.270)`);
+    const bad = results.filter(r => !r.routable);
+    const degraded = results.filter(r => !r.primaryReady && r.routable);
+    if (json) {
+      log(JSON.stringify({
+        total: entries.length,
+        primaryReady: results.filter(r => r.primaryReady).length,
+        routable: results.filter(r => r.routable).length,
+        degraded: degraded.length,
+        issues: bad,
+        availabilityObservationState: { activeCount: availabilityState.activeCount, partial: availabilityState.partial },
+        results,
+      }, null, 2));
+      if (bad.length) process.exitCode = 1;
+      return;
+    }
+    log(`# leerness roles verify (1.9.270/T-0165)`);
     if (!entries.length) { log('  (설정된 역할 없음 — leerness roles suggest --apply 또는 roles set)'); return; }
-    for (const r of results) log(`  ${r.ok ? '🟢' : '🔴'} ${r.role.padEnd(11)} → ${r.provider}${r.model ? ' / ' + r.model : ''}  [${r.status}]`);
-    if (bad.length) { log(`\n  ⚠ ${bad.length}개 역할이 비활성 provider 배정 — 활성화 또는 roles set 으로 재배정`); process.exitCode = 1; }
-    else log(`\n  ✓ 모든 역할이 활성 provider 에 배정됨`);
+    for (const r of results) {
+      const mark = r.primaryReady ? '🟢' : r.routable ? '🟡' : '🔴';
+      const state = r.primaryReady ? 'primary ready' : r.routable ? 'fallback ready' : 'unroutable';
+      log(`  ${mark} ${r.role.padEnd(11)} → ${r.provider}${r.model ? ' / ' + r.model : ''}  [${r.status}; ${state}; policy=${r.fallbackPolicy}]`);
+      r.candidates.forEach((c, i) => log(`       ${i + 1}. ${c.ready ? '✓' : '×'} ${c.provider}${c.model ? ' / ' + c.model : ''} [${c.status}]`));
+    }
+    if (bad.length) { log(`\n  ⚠ ${bad.length}개 역할은 primary와 허용된 fallback 모두 사용할 수 없습니다`); process.exitCode = 1; }
+    else if (degraded.length) log(`\n  ⚠ ${degraded.length}개 역할은 primary가 비활성이지만 fallback으로 라우팅 가능합니다`);
+    else log(`\n  ✓ 모든 역할의 primary가 활성 provider에 배정됨`);
     return;
   }
 
   // default: list
-  const roles = _loadRoles(root);
+  const checked = _loadRolesChecked(root);
+  if (checked.invalid) { _storeFailure(_roleStoreError(root, checked)); return; }
+  const roles = checked.roles;
   const entries = Object.entries(roles);
-  if (json) { log(JSON.stringify({ roles, count: entries.length }, null, 2)); return; }
+  if (json) {
+    const configurations = entries.map(([role]) => _resolveRole(root, role)).filter(Boolean);
+    log(JSON.stringify({ roles, configurations, count: entries.length }, null, 2)); return;
+  }
   log(`# leerness roles (1.9.270) — 설정된 역할 ${entries.length}개`);
   if (!entries.length) {
     log(`  (없음) — leerness roles suggest 로 활성 에이전트 기반 제안 확인 → roles suggest --apply`);
-    log(`  또는: leerness roles set coder --provider codex --model gpt-5.5`);
+    log(`  또는: leerness roles set coder --provider codex [--model <verified-model-id>]`);
     return;
   }
   for (const [role, def] of entries) {
     const ko = ROLE_CATALOG[role] ? ROLE_CATALOG[role].ko : 'custom';
-    log(`  ${role.padEnd(11)} ${ko.padEnd(8)} → ${def.provider}${def.model ? ' / ' + def.model : ''}`);
+    const resolved = _resolveRole(root, role);
+    const provider = resolved ? resolved.provider : '(invalid)';
+    const model = resolved ? resolved.model : null;
+    log(`  ${role.padEnd(11)} ${ko.padEnd(8)} → ${provider}${model ? ' / ' + model : ''}${resolved && resolved.modelFamily ? ` [family=${resolved.modelFamily}]` : ''}${resolved ? `  [policy=${resolved.fallbackPolicy} · candidates=${resolved.candidates.length}]` : ''}`);
+    if (resolved) resolved.candidates.forEach((c, i) => log(`       ${i + 1}. ${c.provider}${c.model ? ' / ' + c.model : ''}${c.modelFamily ? ` [family=${c.modelFamily}]` : ''}`));
     if (def.persona) log(`       ${def.persona}`);
   }
   log(`\n  사용: leerness agents dispatch "<task>" --role <role>  ·  검증: leerness roles verify`);
@@ -30964,7 +31332,7 @@ Docs: https://www.npmjs.com/package/leerness  |  https://leerness.pages.dev
 function help() {
   // 1.23.1 (UR-0010 Phase 6): 영어 opt-in 시 큐레이트 영어판. 기본(ko) 은 아래 한국어 help 그대로.
   if (_uiLang(arg('--path', process.cwd())) === 'en') { _helpEn(); return; }
-  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 1.9.30/31 외부 AI CLI 가용성 + quota 추정 (claude/codex/agy/copilot)\n  leerness agents dispatch "<task>" --to <id>   # 1.9.30 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합
+  log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 외부 AI CLI 다축 가용성 확인\n  leerness agents resolve \"<task>\" --role <role> [--preset strict|balanced|continuity]   # 역할 유지 + 대체 선택지\n  leerness agents fallback provider|session|direct|hold \"<task>\" --role <role> [--session-provider P --session-model M --session-model-family F]   # 명시 선택·기록\n  leerness agents record completed|failed|reviewed|validated \"<summary>\" [--task T-ID --role R --to P --model M --model-family F --agent P --agent-model M --agent-model-family F --evidence E]\n  leerness agents history [--limit 20]        # 실행자·검수자·결과 provenance\n  leerness agents dispatch \"<task>\" --to <id>   # 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합
   leerness lens [${_lensDomainList()}] [--json]   # 1.18.3/1.36.97 분야별 자기질문 품질 렌즈 (database·contract·recovery·observability 심화 · axes 8축 경량 — 완료 선언 전 자가 점검)\n  leerness library [show|page] [path] [--json] [--ai]   # 1.36.98 재사용 인벤토리 — 컴포넌트·디자인 토큰 추출 (page: 오프라인 HTML · --ai: 에이전트용 압축)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
@@ -32247,7 +32615,7 @@ module.exports = {
   //   (실제 CLI 설치 여부에 의존하는 단언은 그 CLI 가 없는 머신에서 공허해진다).
   _checkAgent,
   // 1.9.270: agent roles — 모델별 역할 부여 (사용자 명시) — 단위 테스트
-  ROLE_CATALOG, _normalizeRole, _pickModel, _rolesFile, _loadRoles, _saveRoles, _resolveRole, _suggestRoles, rolesCmd, _dispatchCommand,
+  ROLE_CATALOG, _normalizeRole, _pickModel, _rolesFile, _loadRoles, _loadRolesChecked, _saveRoles, _resolveRole, _suggestRoles, rolesCmd, _dispatchCommand,
   // 1.9.272: 권한/보안 표면 공개 (GPT-5.5 리뷰) — 단위 테스트
   CAPABILITY_SURFACE, POWERFUL_COMMANDS, capabilitiesCmd,
   // 1.9.275: 릴리스 채널 (npm dist-tag, GPT-5.5 리뷰) — 단위 테스트

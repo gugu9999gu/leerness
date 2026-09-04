@@ -13,7 +13,7 @@
 
 > **어떤 언어, 어떤 AI 에이전트로 작업하든 — "증거 없이는 끝났다고 말할 수 없게" 만드는 AI 코딩 운영 레이어.** 코드를 대신 쓰는 도구가 아니라, AI 에이전트의 **기억·인수인계·검증·감사·보안 가드**를 프로젝트에 영속화하는 CLI + MCP 서버입니다.
 
-[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-89-blue) · **런타임 의존성 0** · **install-script 0** · offline-first · Node ≥ 18 · MIT
+[![npm](https://img.shields.io/npm/v/leerness)](https://www.npmjs.com/package/leerness) · ![MCP tools](https://img.shields.io/badge/MCP--tools-95-blue) · **런타임 의존성 0** · **install-script 0** · offline-first · Node ≥ 18 · MIT
 
 ---
 
@@ -25,7 +25,7 @@ AI 코딩 에이전트(Claude Code, Cursor, Codex, Aider, Goose 등)는 코드�
 2. **거짓 완료를 선언합니다** — 증거(파일·테스트·로그) 없이 "완료했습니다"라고 말합니다.
 3. **표준이 없습니다** — 여러 에이전트 간 인수인계, 보안/인코딩 점검, 드리프트 관리가 제각각입니다.
 
-leerness는 이 문제들을 해결하는 **외부 운영 substrate**입니다. 어떤 에이전트 위에도 얹어, 프로젝트의 상태를 `.leerness/` 파일로 영속화하고 CLI · MCP 도구로 노출합니다. **leerness 자체는 LLM을 호출하거나 코드를 실행하지 않습니다.**
+leerness는 이 문제들을 해결하는 **외부 운영 substrate**입니다. 어떤 에이전트 위에도 얹어, 프로젝트의 상태를 `.leerness/` 파일로 영속화하고 CLI · MCP 도구로 노출합니다. 기본 상태에서는 외부 모델을 임의 호출하지 않습니다. 다만 사용자가 `agents multi --execute`, `agents bench` 같은 실행 명령을 명시하면 opt-in 된 외부 CLI를 시작하고 실제 실행 결과를 원장에 기록할 수 있습니다.
 
 ---
 
@@ -111,10 +111,10 @@ leerness verify-claim T-0001 --require-evidence
 - **메모리**: `task` · `plan` · `decision` · `lesson` · `rule` · `feature` · `memory status/search`
 - **인수인계/세션**: `handoff` · `session close` · `pulse` · `health`
 - **검증/감사**: `check` · `gate` · `audit` · `drift check` · `lazy detect` · `scan secrets` · `encoding check` · `verify-code` · `verify-claim` · `contract verify`
-- **외부 에이전트**: `agents list/check/dispatch` · `provider` · `roles` · `adapter`
+- **외부 에이전트**: `agents list/check/quota/resolve/fallback/availability/record/history/dispatch` · `provider` · `roles` · `adapter`
 - **운영/확장**: `release` · `migrate` · `team` · `install-safety` · `route` · `review`(페르소나)
 - **브리지(opt-in)**: `web`(playwright) · `pc`(robotjs) · `lsp`
-- **MCP**: `mcp serve` — stdio JSON-RPC 서버로 80+ 도구 노출 (verify-claim --all 일괄 검증 포함, 1.33.3)
+- **MCP**: `mcp serve` — stdio JSON-RPC 서버로 95개 도구 노출 (verify-claim --all 일괄 검증 포함)
 
 전체 명령은 `leerness commands` 또는 `leerness --help` 로 확인하세요.
 
@@ -140,15 +140,21 @@ leerness contract verify spec.md src/api.js # 명세 함수/필드 누락 → ex
 leerness verify-claim T-0001 --require-evidence
 ```
 
-**다중 에이전트 조율**
+**역할 우선 다중 에이전트 조율**
 ```bash
-leerness agents list                        # 설치된 외부 AI CLI 가용성
-leerness agents dispatch "코드 리뷰" --to codex   # 실행 명령 생성(직접 실행은 사용자/메인 에이전트)
+leerness roles set coder --provider codex --model gpt-model-id \
+  --candidate claude:claude-model-id --policy balanced
+leerness agents resolve "API 구현" --role coder --json
+leerness agents fallback provider "API 구현" --role coder \
+  --provider claude --model claude-model-id --approved-by owner --json
+leerness agents history --json
 ```
+
+역할은 유지하고 Provider/모델만 교체합니다. 해석 결과는 설치·활성화·인증·모델 권한·쿼터·도달성·정책을 별도 축으로 공개하며, 폴백을 묵시적으로 실행하지 않습니다. 고위험 대체는 명시 승인자가 필요하고, 고위험 검수는 다른 모델 family가 입증된 경우에만 선택할 수 있습니다. `dispatch`와 `fallback`은 기본적으로 명령 준비·선택 기록만 하므로 `executed:false`이며, `agents multi --execute`나 `agents bench`처럼 사용자가 명시한 실행 명령만 opt-in 외부 CLI를 시작합니다.
 
 **MCP (외부 AI 에이전트에 도구로 노출)**
 ```bash
-leerness mcp serve                          # JSON-RPC over stdio, 80+ 도구
+leerness mcp serve                          # JSON-RPC over stdio, 95개 도구
 ```
 
 ---
