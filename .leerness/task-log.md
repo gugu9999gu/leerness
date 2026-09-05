@@ -320,3 +320,6 @@ doNotStore:
 - 전체 npmtest는 초기 runtime 검사 후 마지막 command 회귀에서 archive-only workspace 오인1건을 발견해 중단했다. 진단으로 workspace_ambiguous를 재현하고 네 가지 실제 memory archive 이름만 추가했다. assertions를 낮추지 않았으며 final runtime/commands/full E2E를 다시 검증한다.
 - T-0181의 별도 재현 가능한 selftest 진단 유실·exitCode 누출을 수정했다. 원 Windows Node24 CI errno는 여전히 미확정으로 유지하고 새 CI에서 확인한다.
 - 후보1.36.187의 버전/CHANGELOG와 사이트 데이터·711페이지 build를 준비했다. 아직 GitHub/npm/site 공개 배포 완료 아님; 검증 전 T-0180을 done으로 바꾸지 않는다.
+- 고정 후보2f4ce37의 CI33982239269는4/13 성공,9/13 실패로 종료했다. Linux encoding probe의 플랫폼 가정과 Windows REPL fixture 경로 정규화 차이를 분리 재현했다. Windows22 selftest 로그는 이제 실제 powershell ETIMEDOUT를 보존한다. 이전186 실패의 원인은 소급 확정하지 않는다.
+- 최소 설치 preview add→mockup→revise와 direct builder→cleanup의 정상 경로 회귀를 새 검사로151/154 재현하고 정확한 previews 디렉터리만 인정하도록 수정해154/154를 확인했다. 링크/잘못된 형상/유사 이름/외부 sibling은 거부한다. 기존 linked-output domain 검사는 초기화 대조군으로 보존하고 standalone CLI/direct writer의 선행 거부 검사를 추가했다.
+- Git 자체를 사용할 수 없는 저장소의 health/handoff/session-close는 이제 기록 전 admission 오류다. 기존 history-only fault 주입의 null/error 집계 검사는 그대로 유지하면서 실제 Git 부재 검사는 오류 및 tree bytes 불변으로 구분한다. full commands 재검증 전 통과로 표시하지 않는다.

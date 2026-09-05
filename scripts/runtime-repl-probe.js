@@ -11,7 +11,9 @@ const os = require('os');
 const path = require('path');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
 const PREFIX = 'leerness-runtime-repl-';
-const tempParent = fs.realpathSync(os.tmpdir());
+// Match state-git canonicalDirectory: Windows' JS realpath preserves path case
+// and short-name aliases, so an exact argv guard would reject a valid Git query.
+const tempParent = fs.realpathSync.native(os.tmpdir());
 const REPLY = 'LOCAL_REPL_FIXTURE_REPLY';
 const MESSAGE = 'local fixture conversation';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -35,7 +37,7 @@ function snapshot(root) {
   return rows;
 }
 function assertArena(arena) {
-  assert.strictEqual(fs.realpathSync(arena), arena);
+  assert.strictEqual(fs.realpathSync.native(arena), arena);
   assert.strictEqual(path.dirname(arena), tempParent);
   assert(new RegExp(`^${PREFIX}[A-Za-z0-9]{6}$`).test(path.basename(arena)));
 }
@@ -81,7 +83,7 @@ function compileRepl(root, observations) {
 }
 async function childMain(root) {
   assertArena(path.dirname(root));
-  assert.strictEqual(fs.realpathSync(root), root);
+  assert.strictEqual(fs.realpathSync.native(root), root);
   assert(/^(healthy|blocked-save|blocked-close|blocked-unsaved-save)$/.test(path.basename(root)));
   const environmentBefore = { ...process.env };
   const observations = { admissions: [], providerStubs: 0, startupContextStubs: 0, gitQueries: 0, forbiddenProcesses: 0 };
@@ -212,23 +214,52 @@ async function scenario(arena, label) {
     assert(report.observations.admissions.every(entry => entry.fresh && entry.ownRoot), 'each actual line/close event needs fresh admission');
   } finally { await stop(state); }
 }
+function windowsTempAliasControl() {
+  const environmentBefore = { ...process.env };
+  const alias = tempParent.toUpperCase() !== tempParent ? tempParent.toUpperCase() : tempParent.toLowerCase();
+  assert.notStrictEqual(alias, tempParent);
+  assert.strictEqual(fs.realpathSync.native(alias), tempParent, 'temp alias must name the same real directory');
+  const env = { ...environmentBefore };
+  for (const name of ['TMP', 'TEMP']) {
+    const key = Object.keys(env).find(candidate => candidate.toUpperCase() === name) || name;
+    env[key] = alias;
+  }
+  // Start a fresh copy so os.tmpdir() and all fixture paths see the alias, just
+  // as on hosted Windows runners. Only this child's launch env is changed.
+  const result = cp.spawnSync(process.execPath, [__filename, '--temp-alias-control'], {
+    cwd: path.dirname(CLI), env, encoding: 'utf8', timeout: 45000, windowsHide: true,
+  });
+  assert.strictEqual(result.status, 0, result.stderr || result.stdout || String(result.error));
+  assert(result.stdout.includes('RUNTIME_REPL_PROBE 4/4 passed; skipped 0'));
+  assert(Object.keys(process.env).length === Object.keys(environmentBefore).length
+    && Object.entries(environmentBefore).every(([key, value]) => process.env[key] === value),
+  'temp alias control changed the parent environment');
+}
 async function main() {
   const arena = fs.mkdtempSync(path.join(tempParent, PREFIX));
   const sources = [CLI, path.resolve(__dirname, '../lib/runtime-writes.js'), __filename];
   const before = sources.map(signature);
   let passed = 0;
   let failed = 0;
+  let skipped = 0;
   try {
     for (const label of ['healthy', 'blocked-save', 'blocked-close', 'blocked-unsaved-save']) {
       try { await scenario(arena, label); passed++; console.log(`PASS REPL ${label}`); }
       catch (error) { failed++; console.error(`FAIL REPL ${label}: ${error.stack}`); }
+    }
+    if (process.argv[2] !== '--temp-alias-control') {
+      if (process.platform !== 'win32') { skipped++; console.log('SKIP REPL Windows temp path alias: Windows only'); }
+      else {
+        try { windowsTempAliasControl(); passed++; console.log('PASS REPL Windows temp path alias (4 lifecycle controls)'); }
+        catch (error) { failed++; console.error(`FAIL REPL Windows temp path alias: ${error.stack}`); }
+      }
     }
     assert.deepStrictEqual(sources.map(signature), before, 'source bytes or mtimes changed during probe');
   } finally {
     assertArena(arena);
     fs.rmSync(arena, { recursive: true, force: true });
   }
-  console.log(`RUNTIME_REPL_PROBE ${passed}/${passed + failed} passed; skipped 0`);
+  console.log(`RUNTIME_REPL_PROBE ${passed}/${passed + failed} passed; skipped ${skipped}`);
   if (failed) process.exitCode = 1;
 }
 

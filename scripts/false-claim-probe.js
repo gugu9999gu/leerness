@@ -296,10 +296,16 @@ try {
       { label: 'handoff', args: ['handoff', '--json', '--no-record', '--no-drift-check', '--no-headline'], timeout: 180000 },
       { label: 'session close', args: ['session', 'close', '--json'], timeout: 300000 },
     ]) {
+      const before = treeDigest(root);
       result = run(root, aggregate.args, aggregate.timeout, true, { PATH: noGitPath });
       parsed = json(result);
-      check(`${aggregate.label} preserves null/error provenance when Git is unavailable`,
-        result.status === 0 && aggregateHistoryUnavailable(parsed), result);
+      // These aggregate commands have bookkeeping/writers. Without Git in a
+      // repository they cannot establish layout authority, unlike the pure
+      // history readers above. History-only faults below still exercise all
+      // original null/error aggregation assertions with working topology.
+      check(`${aggregate.label} rejects unresolvable repository authority before writing`,
+        result.status === 1 && parsed?.code === 'runtime_layout_incompatible'
+          && parsed.error.includes('(git_missing)') && treeDigest(root) === before, result);
     }
   } finally {
     fs.rmSync(noGitPath, { recursive: true, force: true });
@@ -1436,6 +1442,29 @@ try {
     fs.writeFileSync(linkedStore, JSON.stringify([{ id: 'P-0001', title: 'linked output', status: 'proposed', features: [], history: [] }]), 'utf8');
     const linkedStoreBefore = digest(linkedStore);
 
+    // A partial standalone store is rejected at admission. An initialized
+    // workspace must still reach the original domain-specific link guards.
+    result = run(linkedOutputRoot, ['preview', 'mockup', 'P-0001', '--json']);
+    parsed = json(result);
+    check('standalone linked preview output is rejected before CLI bookkeeping',
+      result.status === 1 && parsed?.code === 'runtime_layout_incompatible'
+        && parsed.error.includes('(workspace_ambiguous)')
+        && digest(linkedStore) === linkedStoreBefore
+        && !fs.existsSync(path.join(linkedOutputRoot, '.leerness/cache'))
+        && fs.readdirSync(linkedOutputTarget).length === 0, result);
+    const previewServe = require('../lib/preview-serve');
+    for (const operation of [
+      () => previewServe.buildServeWorkspace(linkedOutputRoot, { id: 'P-0001', mockupPath: 'mock.html' }),
+      () => previewServe.cleanupServeDir(linkedOutputRoot, 'P-0001'),
+    ]) {
+      let caught;
+      try { operation(); } catch (error) { caught = error; }
+      check('standalone direct preview writer rejects linked output without writes',
+        caught?.code === 'E_RUNTIME_LAYOUT_INCOMPATIBLE' && caught.reasonCode === 'workspace_ambiguous'
+          && digest(linkedStore) === linkedStoreBefore && fs.readdirSync(linkedOutputTarget).length === 0);
+    }
+    fs.writeFileSync(path.join(linkedOutputRoot, '.leerness/HARNESS_VERSION'), require('../package.json').version);
+
     result = run(linkedOutputRoot, ['preview', 'mockup', 'P-0001', '--json']);
     parsed = json(result);
     check('preview mockup rejects an outward linked output directory before writing outside the project',
@@ -1445,7 +1474,6 @@ try {
         && !fs.existsSync(path.join(linkedOutputTarget, 'P-0001-mockup.html')),
       result);
 
-    const previewServe = require('../lib/preview-serve');
     const linkedBuild = previewServe.buildServeWorkspace(linkedOutputRoot, { id: 'P-0001', mockupPath: 'mock.html' });
     check('buildServeWorkspace rejects an outward linked output directory before writing its temporary HTML',
       linkedBuild.ok === false

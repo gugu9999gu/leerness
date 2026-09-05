@@ -77,6 +77,9 @@ Standalone stores may coexist with their producers' exact lock/release, temporar
 corruption-backup and first-install names. Unknown names, links and incorrect entry
 kinds remain refused; the reader does not open store or recovery contents. This
 preserves concurrent role/provenance writers without accepting an arbitrary folder.
+The exact regular `previews` output directory is also recognized, including the direct
+builder's store-free output. Its contents are not read by admission; preview writers
+still validate each source/output path and refuse linked output directories.
 
 `withRuntimeWrites(root, callback)` provides an operation-local synchronous/async failure
 latch. CLI admission precedes automatic workspace migration and bookkeeping and uses the

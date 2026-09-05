@@ -312,6 +312,60 @@ try {
     write(path.join(root, '.leerness', 'unrelated-private-notes'), sentinel);
     noWrites(() => blocked(root, 'workspace_ambiguous'));
   });
+  check('exact standalone preview directory is admitted without enumerating its contents', () => {
+    const root = directory('preview-directory');
+    const previews = path.join(root, '.leerness', 'previews');
+    write(path.join(previews, 'private-preview.html'), sentinel);
+    noWrites(() => withMethod(fs, 'readdirSync', original => function (file, ...args) {
+      if (String(file) === previews) throw new Error('Preview contents must not be enumerated');
+      return original.call(this, file, ...args);
+    }, () => expect(root, 'legacy_absent')));
+  });
+  check('standalone preview add, mockup, and subsequent revise remain writable', () => {
+    const root = directory('preview-round-trip');
+    fs.mkdirSync(path.join(root, '.leerness'));
+    for (const args of [['preview', 'add', 'fixture'], ['preview', 'mockup', 'P-0001'],
+      ['preview', 'revise', 'P-0001', '--note', 'fixture revision']]) {
+      const result = cp.spawnSync(process.execPath, [CLI, ...args, '--json', '--path', root], {
+        cwd: root, encoding: 'utf8', timeout: 30000, windowsHide: true,
+        env: { ...process.env, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1',
+          LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_AUTO_ROADMAP: '1' },
+      });
+      assert.strictEqual(result.status, 0, String(result.stdout || result.stderr).slice(-2048));
+      assert.strictEqual(JSON.parse(result.stdout).ok, true);
+    }
+    assert(fs.existsSync(path.join(root, '.leerness/previews/P-0001-mockup.html')));
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  check('direct standalone preview build and cleanup work without a preview store', () => {
+    const root = directory('preview-direct');
+    const preview = require('../lib/preview-serve');
+    write(path.join(root, 'mock.html'), '<!doctype html><head></head><body>fixture</body>');
+    const built = preview.buildServeWorkspace(root, { id: 'P-0001', mockupPath: 'mock.html' });
+    assert.strictEqual(built.ok, true);
+    assert(fs.existsSync(path.join(built.dir, 'index.html')));
+    assert.strictEqual(preview.cleanupServeDir(root, 'P-0001'), true);
+    assert(!fs.existsSync(built.dir));
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  for (const variant of ['wrong-kind', 'lookalike', 'foreign-sibling', 'linked']) {
+    check(`standalone preview directory does not admit ${variant}`, () => {
+      const root = directory('preview-invalid');
+      const previews = path.join(root, '.leerness', 'previews');
+      fs.mkdirSync(path.dirname(previews));
+      if (variant === 'wrong-kind') write(previews, sentinel);
+      else if (variant === 'lookalike') fs.mkdirSync(previews + '-private');
+      else if (variant === 'foreign-sibling') {
+        fs.mkdirSync(previews);
+        write(path.join(root, '.leerness/private-note'), sentinel);
+      } else {
+        const outside = directory('preview-target');
+        write(path.join(outside, 'private.html'), sentinel);
+        fs.symlinkSync(outside, previews, linkKind);
+      }
+      noWrites(() => blocked(root, 'workspace_ambiguous'));
+    });
+  }
   check('standalone canonical authority beside a live legacy store is still refused', () => {
     const root = directory('standalone-dual');
     write(path.join(root, '.leerness', 'agent-roles.json'), '{}\n');

@@ -6,6 +6,7 @@
 - fix(runtime): recheck CLI/MCP/REPL, direct I/O, retained descriptors, lock heartbeat, Windows replacement and Git mutation boundaries; preserve standalone concurrent producers
 - perf(state): reuse operation-local Git topology and workspace ownership while re-reading compatibility indicators; add real writer and old-client negative controls
 - fix(selftest): retain bounded UR-0113 encoding failure diagnostics and restore prior exit status; preserve the original Windows Node24 replay failure as inconclusive
+- fix(windows): allow 30 seconds per metadata-preserving replacement attempt; keep uncertain timeouts non-retryable and retain original/recovery artifacts
 
 ## 1.36.186 — 2026-09-05
 

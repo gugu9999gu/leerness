@@ -832,14 +832,10 @@
       "reproduced": 2,
       "ms": 670
     },
-    "rootCause": "UR-0113 selftest discarded captured env encoding-apply JSON and replaced it with a generic assertion while leaving process.exitCode changed by the tested command. This independently reproduced diagnostic loss and exit-code leakage; the original v1.36.186 Windows Node24 CI errno was not captured and remains unknown.",
+    "rootCause": "Confirmed diagnostic discard and exitCode leakage were fixed. Original v186 replay errno remains unknown. New candidate2f4ce37 CI33982239269 Windows22 job101349403402 captured PowerShell ETIMEDOUT with expected-original live target; timeout stage is unknown. A longer bounded per-attempt budget is being validated without timeout retries.",
     "siblingScope": {
       "checked": [
-        "injected replacement exception with oversized diagnostic",
-        "prior exit unset and 23",
-        "successful canonical and junction-backed Windows replacement",
-        "Node26 and exact Node24.19.0",
-        "CI Windows real-controls wiring inspected but not yet executed"
+        "Windows canonical and junction TEMP; Node18/20/22/24 CI; platform-specific BOM contract; oversized bounded diagnostics; prior exit unset and23; uncertain replacement retains recovery artifacts. Do not infer the original186 failure cause from the new timeout."
       ]
     },
     "previousGuardGap": null

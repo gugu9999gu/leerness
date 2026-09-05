@@ -2,8 +2,10 @@
 'use strict';
 
 // T-0181: test the confirmed UR-0113 diagnostic/exit-code defect separately
-// from the unconfirmed Windows CI failure. The default injects a fault before
-// any OS replacement; --real-controls exercises real replacement explicitly.
+// from the unconfirmed Windows CI failure. The default violates the platform's
+// BOM contract: Windows misses its required replacement, whereas POSIX receives
+// a forbidden BOM in the disposable fixture. Both must retain failure details
+// and restore the caller's exit code. --real-controls uses the actual writer.
 const assert = require('assert');
 const cp = require('child_process');
 const fs = require('fs');
@@ -32,6 +34,7 @@ function child(kind, arena, priorExit) {
   const previousTmpdir = os.tmpdir;
   os.tmpdir = () => selected;
   let injectedCalls = 0;
+  let injectedByteChanges = 0;
   let unexpectedReplacementPlans = 0;
   try {
     const encoding = require('../lib/shell-encoding');
@@ -41,6 +44,16 @@ function child(kind, arena, priorExit) {
       encoding.applyShellScriptUtf8Bom = (file, displayFile = file) => {
         if (path.basename(file) === 's.ps1') {
           injectedCalls++;
+          if (process.platform !== 'win32') {
+            // A pre-replacement timeout alone leaves valid POSIX bytes and
+            // therefore does not violate UR-0113's no-change contract. Model
+            // an erroneous POSIX repair instead, confined to this fixture.
+            const original = fs.readFileSync(file);
+            const bom = Buffer.from([0xEF, 0xBB, 0xBF]);
+            assert(!original.subarray(0, bom.length).equals(bom), 'fault fixture already has a BOM');
+            fs.writeFileSync(file, Buffer.concat([bom, original]));
+            injectedByteChanges++;
+          }
           const error = new Error('controlled encoding probe timeout: ' + 'x'.repeat(8192));
           error.code = 'ETIMEDOUT';
           throw error;
@@ -67,6 +80,7 @@ function child(kind, arena, priorExit) {
         length: message.length,
         hasTimeoutCode: message.includes('ETIMEDOUT'),
         hasFileName: message.includes('s.ps1'),
+        platformContractFailed: message.includes('"platformOk":false'),
       };
     }
     const afterExit = process.exitCode;
@@ -76,7 +90,7 @@ function child(kind, arena, priorExit) {
       kind, node: process.version, platform: process.platform,
       beforeExit: beforeExit === undefined ? null : beforeExit,
       afterExit: afterExit === undefined ? null : afterExit,
-      returned, thrown, injectedCalls, unexpectedReplacementPlans,
+      returned, thrown, injectedCalls, injectedByteChanges, unexpectedReplacementPlans,
     }) + '\n');
   } finally {
     os.tmpdir = previousTmpdir;
@@ -98,7 +112,7 @@ function runChild(kind, arena, priorExit = 'unset') {
   const result = cp.spawnSync(process.execPath, [__filename, '--child', kind, arena, priorExit], {
     cwd: arena, env: childEnvironment(arena), encoding: 'utf8',
     shell: false, windowsHide: true,
-    timeout: kind === 'fault' ? 15000 : 30000, maxBuffer: 64 * 1024,
+    timeout: kind === 'fault' ? 15000 : 45000, maxBuffer: 64 * 1024,
   });
   assert(!result.error, `child failed: ${result.error && result.error.code}`);
   assert.strictEqual(result.status, 0,
@@ -111,12 +125,13 @@ function runChild(kind, arena, priorExit = 'unset') {
 
 function summary(result) {
   return JSON.stringify({
-    kind: result.kind, beforeExit: result.beforeExit, afterExit: result.afterExit,
-    returned: result.returned, injectedCalls: result.injectedCalls,
+    kind: result.kind, platform: result.platform, beforeExit: result.beforeExit, afterExit: result.afterExit,
+    returned: result.returned, injectedCalls: result.injectedCalls, injectedByteChanges: result.injectedByteChanges,
     thrown: result.thrown && {
       length: result.thrown.length,
       hasTimeoutCode: result.thrown.hasTimeoutCode,
       hasFileName: result.thrown.hasFileName,
+      platformContractFailed: result.thrown.platformContractFailed,
     },
   });
 }
@@ -128,7 +143,7 @@ function main() {
     throw new Error('usage: node scripts/encoding-selftest-probe.js [--expect-legacy|--repro|--real-controls]');
   }
   if (args[0] === '--help') {
-    process.stdout.write('Default / --repro: require bounded ETIMEDOUT diagnostics and restored exit code.\n'
+    process.stdout.write('Default / --repro: violate the platform BOM contract; require bounded ETIMEDOUT diagnostics and restored exit code.\n'
       + '--expect-legacy: succeed only when silent failure and exit-code leakage are reproduced.\n'
       + '--real-controls: run the real canonical/junction TEMP happy cases separately.\n');
     return;
@@ -162,6 +177,8 @@ function main() {
           assert.strictEqual(result.afterExit, result.beforeExit, summary(result));
         } else {
           assert.strictEqual(result.injectedCalls, 1, 'fault must reach s.ps1 exactly once');
+          assert.strictEqual(result.injectedByteChanges, result.platform === 'win32' ? 0 : 1,
+            'fault must violate the platform BOM contract');
           assert.strictEqual(result.unexpectedReplacementPlans, 0, 'fault probe must not need another replacement');
           const legacy = result.returned === false && !result.thrown
             && result.afterExit === 1 && result.afterExit !== result.beforeExit;
@@ -170,6 +187,7 @@ function main() {
             process.stdout.write(`${MISSING}: reproduced ${label}\n`);
           } else {
             assert(result.thrown && result.thrown.hasTimeoutCode && result.thrown.hasFileName
+              && result.thrown.platformContractFailed
               && result.thrown.length <= MAX_DIAGNOSTIC,
             `${MISSING}: ${summary(result)}`);
             assert.strictEqual(result.afterExit, result.beforeExit,

@@ -19,6 +19,7 @@ Updated: 2026-09-06
 
 ## Now
 - P-0021 사용자 승인 / UR-0100: T-0180 compatibility-only 진단·쓰기 경계 구현 및 통합검증 진행 중. legacy 위치 유지, activation 미구현 <!-- leerness:auto -->
+- v1.36.187 첫 후보2f4ce37 CI33982239269는4/13 성공·9/13 실패로 보존한다. 최소 설치 preview 회귀, 플랫폼별 encoding/REPL fixture를 수정했고 Windows 실제16초 지연 교체 및 불확실 timeout 복구 보존을 검증했다. 최종 delta 실제 Codex 정적 검수 CLEAN; 수정 후보의 전체 지원 CI와 공개 배포는 아직 대기다.
 - docs/worktree-runtime-migration.md에 22개 알려진 표면(전수 writer 검증 아님), session ownership, presence/freshness+hook/structured-state 이전 단위를 분리했다. 구버전은 새 descriptor를 읽지 않으므로 M-0015-A 호환 guard와 실제 migration B를 별도 승인 단계로 나눴다.
 - 검수 반영: Git 호환 guard는 projectKey 밖의 worktree 고정 위치, non-Git guard는 selected workspace와 무관한 canonical 위치로 구현했다. Windows replacement 직전·Git mutation 분류·다른 operation에서 재사용한 FD·MCP telemetry 오류 누락 네 건을 재현·수정했고 실제 Codex 재검토에서 4/4 FIXED를 받았다. 실행 로그의 사용자 task·요청 사본·승인 provenance는 mixed/private로 보존한다.
 - 최신 사용자 요청 UR-0097: State 구조 감사/계획 반영(T-0173) 완료. 5-scope 설계 docs/state-scopes.md, 실제 architecture/reuse-map, M-0014..M-0018 계획을 반영했다. 아래 v1.36.185 항목은 이전 릴리스 이력이다.
