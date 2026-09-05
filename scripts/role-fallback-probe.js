@@ -753,14 +753,59 @@ test('execution-ledger reads and appends bind validation to the opened inode', (
 });
 
 test('dangling execution-ledger symlinks are rejected without creating their target', () => {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ledger-dangling-'));
+  const temp = fs.realpathSync.native(os.tmpdir());
+  const base = fs.mkdtempSync(path.join(temp, 'leerness-ledger-dangling-'));
   const dir = path.join(base, 'project');
   const ledger = path.join(dir, '.leerness', 'execution-ledger.jsonl');
   const missingTarget = path.join(base, 'outside-missing.jsonl');
+  let linkType = 'file';
+  const snapshot = () => {
+    const rows = [];
+    const visit = (file, relative) => {
+      const stat = fs.lstatSync(file, { bigint: true });
+      const row = [relative, String(stat.mode), String(stat.size), String(stat.mtimeNs)];
+      if (stat.isSymbolicLink()) rows.push([...row, 'link', fs.readlinkSync(file)]);
+      else if (stat.isDirectory()) {
+        rows.push([...row, 'directory']);
+        for (const name of fs.readdirSync(file).sort()) visit(path.join(file, name), `${relative}/${name}`);
+      } else {
+        assert.ok(stat.isFile(), `unexpected fixture file kind: ${relative}`);
+        rows.push([...row, 'file', fs.readFileSync(file).toString('base64')]);
+      }
+    };
+    visit(base, '.');
+    return rows;
+  };
   try {
     fs.mkdirSync(path.dirname(ledger), { recursive: true });
-    try { fs.symlinkSync(missingTarget, ledger, 'file'); }
-    catch { return; }
+    fs.writeFileSync(path.join(base, 'outside-sentinel.txt'), 'unchanged\n', 'utf8');
+    assert.strictEqual(fs.existsSync(missingTarget), false);
+    // Keep native file-symlink coverage wherever available, including Windows CI.
+    // Only Windows permission failures fall back to the same lstat guard via a junction.
+    try { fs.symlinkSync(missingTarget, ledger, linkType); }
+    catch (error) {
+      if (process.platform !== 'win32' || !['EPERM', 'EACCES'].includes(error.code)) throw error;
+      linkType = 'junction';
+      fs.symlinkSync(missingTarget, ledger, linkType);
+    }
+    assert.ok(fs.lstatSync(ledger).isSymbolicLink());
+    assert.strictEqual(fs.existsSync(missingTarget), false);
+
+    // A standalone store containing a link is not an accepted workspace. The first
+    // writer refuses admission before the ledger domain can inspect or create its target.
+    const standaloneBefore = snapshot();
+    assert.throws(
+      () => appendExecutionEvent(dir, { event: 'execution.started', taskId: 'T-DANGLING' }),
+      error => error && error.code === 'E_RUNTIME_LAYOUT_INCOMPATIBLE'
+        && error.reasonCode === 'workspace_ambiguous',
+    );
+    assert.strictEqual(fs.existsSync(missingTarget), false);
+    assert.deepStrictEqual(snapshot(), standaloneBefore);
+
+    // A normal initialized marker admits the workspace, preserving the original
+    // read/append domain-link checks instead of replacing them with the admission error.
+    fs.writeFileSync(path.join(dir, '.leerness', 'HARNESS_VERSION'), require('../package.json').version + '\n', 'utf8');
+    const initializedBefore = snapshot();
     const history = readExecutionEvents(dir, 20);
     assert.strictEqual(history.ok, false);
     assert.strictEqual(history.code, 'ledger_not_regular_file');
@@ -769,9 +814,18 @@ test('dangling execution-ledger symlinks are rejected without creating their tar
       error => error && error.code === 'ledger_not_regular_file',
     );
     assert.strictEqual(fs.existsSync(missingTarget), false);
+    assert.deepStrictEqual(snapshot(), initializedBefore);
+    console.log('  DANGLING_LEDGER_BOUNDARIES ' + JSON.stringify({
+      platform: process.platform, linkType, casesRun: 2, skipped: 0,
+      standalone: 'workspace_ambiguous', initialized: 'ledger_not_regular_file', unchanged: true,
+    }));
   } finally {
     try { fs.rmSync(ledger, { force: true }); } catch {}
-    fs.rmSync(base, { recursive: true, force: true });
+    const actual = fs.realpathSync.native(base);
+    assert.strictEqual(actual, base);
+    assert.strictEqual(path.dirname(actual), temp);
+    assert.match(path.basename(actual), /^leerness-ledger-dangling-[A-Za-z0-9]{6}$/);
+    fs.rmSync(actual, { recursive: true, force: true });
   }
 });
 
