@@ -403,6 +403,7 @@ try {
     ['preview', ['preview']],
     ['preview', ['preview', 'list']],
     ['preview', ['preview', 'show', 'P-0001']],
+    ['state', ['state', 'inspect']],
   ].every(([cmd, argv]) => _cliMutationClass(argv, cmd) === 'observation-only'));
   let readOnlyStatusesOk = true;
   for (const args of [
@@ -421,6 +422,7 @@ try {
     ['security-surface', '--json'],
     ['preview', '--json'],
     ['preview', 'list', '--json'],
+    ['state', 'inspect', '--json'],
   ]) {
     const readOnlyResult = run(root, args);
     if (readOnlyResult.status !== 0) readOnlyStatusesOk = false;
@@ -441,6 +443,7 @@ try {
       { args: ['identity', '--json'], status: 0 },
       { args: ['status', '--json'], status: 0 },
       { args: ['auto-update', 'status', '--json'], status: 0 },
+      { args: ['state', 'inspect', '--json'], status: 0 },
       // These surfaces currently require the canonical workspace to render;
       // on legacy input they may fail read-only, but must never migrate it.
       { args: ['dashboard', '--json'], status: 1 },

@@ -275,3 +275,21 @@ doNotStore:
 
 ## 2026-09-05 session-close
 - Generated session-handoff.md and refreshed current-state.md.
+
+## 2026-09-05 — UR-0097 State scope 구조 감사와 계획 반영
+
+- 현재 코드와 실제 main/linked worktree를 읽기 전용으로 대조했다. runtime/cache와 tracked memory/summary가 혼재하며, 기존 mutex와 session ownership만으로 브랜치 merge 문제를 해결할 수 없음을 구분했다.
+- docs/state-scopes.md에 5-scope/3-layer 설계, module boundary, single-writer fencing, strict import, immutable record/provenance, finalize durability, 호환 migration과 검증 매트릭스를 작성했다.
+- 비어 있던 architecture/reuse-map을 실제 구현으로 채웠고 M-0014..M-0018 및 T-0174..T-0178을 등록했다. M-0010 role migration은 새 scope 계약을 공유하도록 우선순위를 조정했다.
+- 독립 검수의 두 문서 지적은 소스와 대조해 수정했고 재검수 2/2 FIXED. 문서 계약 8/8, verify healthy, strict claim 통과. 제품 테스트/제품 코드 변경은 없음.
+- P-0020 1차(scope resolver + read-only state inspect, 기존 데이터 무이동)는 승인 요청 중이다. UR-0097 전체 구현은 미완료로 유지한다. 배포는 미실행이며 R-0002를 완료했다고 표시하지 않는다.
+
+## 2026-09-05 — UR-0098 P-0020 승인 및 T-0174 구현/최적화
+
+- 사용자 명시 승인 기록 후 5-scope path/Git/inventory/inspection 모듈과 strict read-only CLI를 구현했다. 기존 Project resolver snapshot selector를 재사용하며 legacy writer/runtime 경로를 변경하지 않는다.
+- 일반 실행 계측으로 불필요 npm root -g 1회 발견 후 exact inspect 경로에서 제거했다. Git topology 1회(Windows trusted locator 별도), 프로젝트 내용 읽기 0, write 0 및 fixture/cwd/Git byte+mtime 불변을 확인했다.
+- 실제 main+2linked, monorepo, 이동/detached/별도 clone/gitfile/submodule, Windows Unicode/공백/case/junction, 오류·권한·링크 경계를 검증했다. 발견된 nonexistent ceiling과 Windows missing Git status127 분류는 재현 후 수정했다.
+- 현재 selector26/26, scope58/58, CLI20/20(총104), Node18 scope58/CLI20, selftest355/355, command flags/i18n, contract 및 lint84JS/1JSON 통과. 독립 Codex P2 3건은 실패 테스트로 재현 후 수정했고 재검수·전체 npm test·v1.36.186 R-0002 배포는 진행 중이며 아직 완료 주장하지 않는다.
+
+## 2026-09-05 session-close
+- Generated session-handoff.md and refreshed current-state.md.

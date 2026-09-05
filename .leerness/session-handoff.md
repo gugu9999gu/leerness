@@ -14,7 +14,7 @@ doNotStore:
 <!-- leerness:managed -->
 # Session Handoff
 
-Last generated: 2026-09-05T01:57:48.845Z
+Last generated: 2026-09-05T07:41:00.038Z
 
 ## Completed
 - T-0001 프로젝트 계획 정리 → next: stale planned milestone/task 정합성 감사 후 실제 구현 백로그 우선순위 선택
@@ -164,12 +164,14 @@ Last generated: 2026-09-05T01:57:48.845Z
 - T-0167 Role/Agent/Routing schema v2 compatibility design and legacy round-trip probe → next: Implement explicit v2 migration without activating v2 runtime writes implicitly.
 - T-0171 Legacy agent-roles.json bounded fail-closed loader and read-only validation projection → next: Keep legacy reads and writes fail-closed while the explicit v2 migration command is added.
 - T-0172 역할 폴백·실행 이력 기반 v1: availability 계약, 선택지 resolver, 실행 provenance 기록 → next: Continue M-0010 with explicit v2 migration, then resume M-0011 router pipeline work.
+- T-0173 UR-0097 State 구조 감사 및 5-scope 단계별 개발 계획 정합화 → next: P-0020 승인 후 T-0174 scope resolver/read-only state inspect 구현; UR-0097 전체 구현은 미완료
 
 ## In Progress
 - T-0092 명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/insights/persona/agent-mode/py-check/api-skill 이 --language en·LEERNESS_LANG=en·en 프로젝트에서도 한국어 출력. 대조군: health 는 완전 영어(플래그 배선은 존재). 1,488회 실행 감사(2026-08-05) → next: Continue from exact 27 lines across 15 commands. Next largest clusters: roles list, permissions list, session-resume (3 each).
 
 ## Incomplete / Waiting / On Hold / Blocked
 - T-0159 실제 프로젝트 코드 기반 시안 구현·표시·승인 워크플로로 전환 (UR-0090) → next: 사용자에게 페이지 또는 기능 중 어느 쪽인지, 또는 둘 다인지 확인한 뒤 preview add로 설계 승인 요청
+- T-0174 State scopes와 읽기 전용 저장 구조 진단 → next: P-0020 사용자 승인 후 5-scope resolver와 state inspect 구현; 데이터 이동 없음
 
 ## Dropped
 - T-0005 게시본 1.36.13~1.36.15 누적 신규 표면 클린룸 리뷰 (database 렌즈 8→12문항, cap 16, selftest 앵커) — codex 적대 검증 + 맹신 X → next: 없음
@@ -184,21 +186,6 @@ Last generated: 2026-09-05T01:57:48.845Z
 
 ## Verification
 ```
-## 2026-09-01 — v1.36.184 public release and CI verification
-
-Task: T-0092 / T-0164 / UR-0094
-Command: `release publish --gh-release --npm-publish`; GitHub main/tag/Release asset checks; npm latest/exact metadata plus fresh-prefix installed selftest; site worktree-source build/deploy and `verify-deploy`; four production HTTP probes; Cloudflare deployment list; GitHub Actions run/check-runs API
-Exit: 0
-Note: At publication, GitHub main and tag `v1.36.184` resolved to implementation SHA `4a504ac304c23c38640bd117382984b2bf3559b7`; the Release is non-draft/non-prerelease and its `leerness-1.36.184.tgz` asset is 2,016,064 bytes. Asset SHA-256 `940f8490f46316ee9a05d71888bc7e7c18d20acf170df893fdf654567bc80704` matches the local tarball. npm latest/exact are 1.36.184; registry shasum `191e2e10b53a2c09ea6add9b93634dcab99f44e4` and integrity `sha512-GXxV42SZKohwG9dfrlf4nEviqChcIJ943Yq0RYBLkjip4YMPVS+7Io0ss31K9Fr9I75HXwKVdYV8VKAiKES8XQ==` match that artifact. A separate fresh-prefix public install reported CLI/package 1.36.184 and passed selftest with `ok=true`, total 355. The user's dirty saved `main` checkout remained untouched: the site pipeline explicitly consumed this worktree's CHANGELOG and package path, measured facts version 1.36.184 with zero unmeasured facts, built 708 pages, committed generated data as `48657ca454de9555c431087951d5d68b275050ae`, and deployed Cloudflare production deployment `7c957a08-0ade-4040-a9ec-60e5c727a65c`. `https://leerness.com/`, `/changelog/1.36.184/`, `/llms.txt`, and `https://7c957a08.leerness-site.pages.dev/` all returned HTTP 200 with the 1.36.184 marker on the first probe; repository `verify-deploy` passed on attempt 1/6. GitHub Actions run 33469212506 completed on the implementation SHA with 13/13 jobs successful and failure/cancelled/skipped counts zero. The check-runs API independently reported 13 successes and annotation count zero, including both fast jobs, four Node 24/26 release-runtime jobs, Ubuntu Node 18/20/22 full E2E, and Windows Node 18/20/22/24 full E2E. The T-0092 remainder is now exactly 27 Hangul lines across 15 English-mode commands: `pulse` 2; `decision list` 1; `lesson list` 1; `rule list` 1; `memory status` 2; `reuse-map` 2; `preview list` 2; `feature list` 2; `requests list` 1; `roles list` 3; `permissions list` 3; `next-action list` 2; `session-resume` 3; `scan secrets` 1; `glossary` 1. T-0159 remains waiting and untouched.
-Publication-boundary clarification: the main/tag equality above is the publication snapshot. Tag `v1.36.184` and the Release remain fixed at implementation SHA `4a504ac`; final main may add only `[skip ci]` evidence-state successors.
-Final claim and workspace verification: `verify-claim T-0164 --require-evidence --json` exited 0 with all eleven claimed files present, evidence complete, claims consistent, Git cross-check true, implementation substance true, strong mismatch false, scope creep 0, and reasons empty. `gate . --claims --json` passed 6/6 with 142 completed claims, 68 accepted historical baseline entries, and zero new failures. `check` was healthy; lazy blockers, idempotency violations, drift score, unacknowledged secrets, and encoding findings were all zero. The user request audit no longer lists UR-0094 as open. R-0001 is satisfied by the repeated external Codex review and final `No actionable P0/P1/P2 findings.` R-0002 is satisfied by the GitHub push/Release, npm latest publication, Cloudflare production deployment, and public verification above; its automatic same-version close check reports pending only because this final successor changes evidence state without another version bump.
-Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.184, https://www.npmjs.com/package/leerness/v/1.36.184, https://leerness.com/changelog/1.36.184/, https://7c957a08.leerness-site.pages.dev/, https://github.com/gugu9999gu/leerness/actions/runs/33469212506
-
-## 2026-09-05 — v1.36.185 role-agent convergence pre-release verification
-
-Task: T-0165 / T-0166 / T-0167 / T-0171 / T-0172 / UR-0096
-Command: focused provider, exact-file lease, schema, role-store, and fallback probes; `npm test`; repeated independent Codex read-only review
-Exit: 0
 Note: Provider observation now separates installation, opt-in, authentication, entitlement, live model callability, policy, rate-limit, and capacity axes without inventing remaining quota. Exact-file TTL leases fail closed across containment, alias, hard-link, corruption, byte/row bounds, clock movement, and concurrent acquisition. Strict Role/Agent/Routing v2 validators provide deterministic legacy projection and reverse projection while keeping runtime writes on the validated legacy store until an explicit migration exists. Empty, corrupt, malformed UTF-8, future-schema, invalid-shape, oversized, linked, and raced role stores preserve original bytes and stop provider execution. Role fallback exposes provider, current-session, direct, and hold choices, binds decisions to availability/store revisions, preserves execution and review provenance, and fails high-risk reviewer independence closed unless concrete distinct model identities prove it. Focused probes passed provider 24/24, lease 57/57, schema 88/88, role-store 65/65, and fallback 80/80. Full `npm test` passed with lint 77 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP presence 22/22, command surface 40/40, installed cleanroom 10/10, false-claim 199/199, and full E2E 467/467 in 4,947 seconds. The independent Codex final review covered the final test, compatibility wording, ignored ephemeral ledger, and 1.36.185 version delta and concluded `CLEAN`.
 Artifacts: bin/leerness.js, lib/agents.js, lib/file-leases.js, lib/role-agent-schema.js, lib/role-store.js, lib/role-fallback.js, lib/mcp-tools.js, docs/role-agent-routing-v2.md, scripts/provider-capacity-probe.js, scripts/file-lease-probe.js, scripts/role-agent-schema-probe.js, scripts/role-store-loader-probe.js, scripts/role-fallback-probe.js, scripts/e2e.js
 
@@ -212,14 +199,35 @@ Exit: 0
 Note: At publication, GitHub main and tag `v1.36.185` resolved to implementation merge SHA `585c8f421edda7db200cc78c59a7ca889c05dd10`; the non-draft, non-prerelease Release asset `leerness-1.36.185.tgz` is 2,175,087 bytes and its SHA-256 `bd9cb9f18bd89c665a93612d85287e0ac1afecd9d36015105e3f67dc6320dda1` matches the local artifact. npm latest/exact are 1.36.185; registry shasum `67f8673847fb86ea5010493be038900ba8fc7d90`, integrity `sha512-XposOWnUEV9mRS0vq6FT3uRHOPpT/wRKo8QYo0jWnsxnThQzhy+LapEgp6UuxTtFXtQigcL7GG45aPyhTdriHQ==`, 88 files, and unpacked size 7,134,937 bytes match the pack. A separate fresh-prefix public install reported CLI/package 1.36.185, runtime dependencies 0, no install script, and selftest `ok=true`, total 355. The user's dirty saved `main` checkout remained untouched: the site pipeline consumed this isolated worktree's CHANGELOG and package facts, measured v1.36.185 with MCP 98/core 20/selftest 355, found zero hand-written numeric claims, built 709 pages, committed generated data as `b39a79cceb6130d15825496d9d0a72ada5b9023c`, and deployed Cloudflare production deployment `cd2d9405-9741-4f1b-b685-92408d82c698`. `https://leerness.com/`, `/changelog/1.36.185/`, `/llms.txt`, and `https://cd2d9405.leerness-site.pages.dev/` all returned HTTP 200 with the 1.36.185 marker on the first probe. GitHub Actions run `33932206889` completed on the implementation SHA with 13/13 jobs successful and failure/cancelled/skipped/timed_out counts zero; the check-runs API independently reported 13 successes and annotation count zero across both fast jobs, four Node 24/26 release-runtime jobs, Ubuntu Node 18/20/22 full E2E, and Windows Node 18/20/22/24 full E2E.
 Publication-boundary clarification: the main/tag equality above is the publication snapshot. Tag `v1.36.185` and the Release remain fixed at implementation SHA `585c8f4`; final main may add only a `[skip ci]` evidence-state successor.
 Artifacts: https://github.com/gugu9999gu/leerness/releases/tag/v1.36.185, https://www.npmjs.com/package/leerness/v/1.36.185, https://leerness.com/changelog/1.36.185/, https://cd2d9405.leerness-site.pages.dev/, https://github.com/gugu9999gu/leerness/actions/runs/33932206889
-Final close verification: all five task claims returned `ok=true`; the post-close Git advisory correctly reports the already-committed implementation outside the current diff and generated `leerness.html` as scope count 1. Gate passed 6/6 with 147 claims and zero new failures; check is healthy. The two pre-wake critical entries are the old unmatched UR-0028 record and the expected wakeup delay while waiting for the 104-minute Actions matrix, not release failures.
+
+Final close verification: `session close .` exited 0 and refreshed session-handoff, current-state, pre-wake state, and the generated ontology view. Repeated `verify-claim --require-evidence --json` for T-0165, T-0166, T-0167, T-0171, and T-0172 each exited 0 with `ok=true`, files present, evidence complete, claims consistent, implementation substance true, and reasons empty. Because the implementation is already committed and only the generated `leerness.html` is a current non-state diff, the post-close Git advisory honestly reports `gitCrossCheck=false`, `strongMismatch=true`, and scope count 1 rather than repeating the earlier pre-commit `gitCrossCheck=true`; this does not change the successful claim verdict. The repeated gate passed 6/6 with 147 completed claims, 68 accepted historical baseline entries, and zero new failures, and `check` reported healthy with zero issues. The pre-wake report's two critical entries are an old unmatched UR-0028 record and the 80-minute wakeup delay caused by waiting for the 104-minute Actions matrix; neither is a v1.36.185 release failure or current blocker. R-0001 is satisfied by the independent Codex final `CLEAN`; R-0002 is satisfied by the GitHub/npm/site publication and public verification above, while its automatic same-version close check remains `pending` because the evidence successor itself does not bump the already-published version.
+
+## 2026-09-05 — UR-0097 / T-0173 state-scope architecture audit and plan
+
+Task: T-0173 (documentation/planning only); T-0174..T-0178 remain unimplemented.
+Command: read-only Git private/common queries and source inventory; inline Node state-plan-contract; `node bin/leerness.js verify . --json`; `git diff --check`.
+Exit: 0
+Tests: 8/8 inline document-contract assertions passed: proposed scope labels, milestone/task linkage, incomplete request linkage, unapproved preview, populated architecture/reuse map, existing source modules, correct runtime inventory/strict-import caveat, and no product-source mutation.
+Note: The repository's real main and linked-worktree metadata paths confirm private/common separation and main equality. Independent Codex read-only review identified two P2 documentation defects: presence/freshness/REPL stores were conflated, and permissive legacy memory fallback was not explicitly excluded from migration. Both were checked against source and fixed; focused re-review reported 2/2 FIXED with no residual findings and unchanged reviewed-file hashes/mtimes. Product tests were not run because no product code changed.
+
+Claim verification: the first `verify-claim --run-tests --strict-claims --require-evidence` failed because evidence lacked a numeric test count. Recording the actual 8/8 document assertions corrected that evidence omission. The repeated command with `--test-cmd "node bin/leerness.js verify . --json"` passed, with all eight claimed files found in the diff, strongMismatch=false, no reasons and child exit 0. Its executed check is document verification, not product E2E or semantic proof.
+
+Lens: use a narrow additive path resolver first, retain the existing Project resolver, reuse Git/I/O/session identity boundaries, and keep task claims separate from physical file leases. No StateManager runtime, migration, control database, provider execution or new UI has been implemented.
+
+Scope/authorization: P-0020 remains proposed; user approval requested for resolver + read-only state inspect only. UR-0097 remains in-progress, not delivered. R-0001 independent review is satisfied for this documentation delta. R-0002 publication is pending at this implementation-approval boundary; no version bump, push, npm publish or site deployment was performed in this round.
 ```
 
 ## Agent / Model Provenance
-- Independent Codex read-only release review completed with final verdict `CLEAN`; no delegated implementation agent was used.
+- Independent Codex read-only structural/document review: two P2 documentation findings confirmed against source, fixed, and focused re-review 2/2 FIXED. Reviewer changed no files; no delegated implementation or provider execution occurred.
 
 ## Recommended Direction
-- Finish M-0010 before M-0011: add an explicit, user-confirmed Role/Agent/Routing v2 migration with preview, exact-file lock, rollback, and a legacy compatibility window; keep v2 runtime activation off until installed/full/multi-runtime review passes.
+- Follow UR-0097 State scope architecture, not the legacy global first-in-progress task selection. T-0173 audit/planning is complete; M-0014..M-0018 implement the staged architecture. M-0010 Role v2 migration must share its path/compatibility/control contracts. T-0092 remains separate.
 
 ## Next Exact Step
-- Register and present a dedicated preview for the M-0010 explicit migration command; do not write migration code until that preview is approved.
+- User explicitly approved P-0020 and requested optimization (UR-0098). T-0174 inspection/resolver is implemented locally; finish independent Codex review, full regression and v1.36.186 publication verification. Runtime/control/immutable-record migration remains unimplemented.
+
+## Current Round Boundary
+- Applied locally: additive 5-scope modules, pure workspace snapshot selector, strict CLI flags/early dispatch, fixed metadata inventory, proposal-only docs, tests and version 1.36.186. Existing mutable state locations remain unchanged.
+- Optimization: one Git topology query, one existing workspace inspection snapshot; unused skillpack/npm root lookup and migration/usage/presence/stale bookkeeping bypassed only for exact state inspect. No recursive inventory scan or project file content reads.
+- Validation so far: selector26/26 + scope58/58 (including real submodule and Git filesystem errors) + CLI20/20, Node18 scope58/CLI20, selftest355/355, command-flags/i18n and API contract PASS. Initial independent Codex review found three P2s; all were reproduced before fixes. Focused re-review and full npm test are running, not yet claimed complete.
+- R-0002 publication remains pending. User's dirty saved main remains untouched; all package changes are in this isolated worktree. No worktree cleanup, scheduler change or runtime migration is authorized by this stage.

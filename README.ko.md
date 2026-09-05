@@ -162,6 +162,11 @@ leerness mcp serve                          # JSON-RPC over stdio, 98개 도구
 
 ## 아키텍처 (외부 리뷰 검증)
 
+`leerness state inspect . --json`으로 현재 상태 위치와 Project / Worktree /
+Common-Control / Immutable-Record / Generated-View의 제안 경로를 확인할 수 있습니다.
+읽기 전용 진단이며 데이터 이동·runtime 활성화·모델 호출은 하지 않습니다.
+[진단 API](docs/state-paths-api.md)와 [단계별 구조 전환 계획](docs/state-scopes.md)을 참고하세요.
+
 - **런타임 의존성 0 / install-script 0** — `package.json` 의 dependencies/optional/peer 가 전부 비어 있고 postinstall 도 없습니다. 순수 Node stdlib(`fs`/`path`/`child_process`/`readline`). 공급망 공격면 최소. `leerness install-safety` 로 확인 가능.
 - **canonical JSON 단일 진실소스 + 마크다운 projection** — 메모리는 JSON 으로 저장하고 사람이 읽는 `.md` 는 파생물. 파이프(`|`)·개행·백틱·이모지·한글이 마크다운 테이블에서도 안전(셀 이스케이프 + round-trip).
 - **원자적 UTF-8 쓰기** — temp + rename 으로 부분쓰기 손상 방지, BOM 자동 strip.

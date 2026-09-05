@@ -27,10 +27,10 @@ doNotStore:
 - 포함: CLI/MCP 표면, 세션 하네스 문서 생성·마이그레이션, 프로젝트 위생 감사, 자기 검증, 역할/에이전트/라우팅 정책, 명시적 세션 협업 원시 기능, 통합 상태 시각화, 릴리스 파이프라인.
 - 제외: Leerness가 임의로 유료 모델을 호출하거나 사용자의 외부 편집기를 강제로 잠그는 기능. 다른 프로젝트는 읽기 전용 증거원으로만 쓴다.
 
-## Current Priority — 2026-09-03
-1. `UR-0095 / T-0165`의 남은 범위 중 **역할·에이전트·라우팅/폴백 정책**을 먼저 설계하고 기존 구현과의 차이를 닫는다.
-2. 그 구조를 읽기 전용으로 한 화면에 모으는 **통합 시각화**를 만든다.
-3. 실행/배정 UI는 스키마와 검증 규칙이 안정된 뒤 별도 승인 단계로 진행한다.
+## Current Priority — 2026-09-05
+1. `UR-0097 / T-0173`의 구조 감사 결과를 적용하고 **State scope와 저장 수명주기**를 `M-0014..M-0018`로 먼저 정식화한다. 상세 계약은 `docs/state-scopes.md`다.
+2. 첫 구현은 `P-0020 / M-0014 / T-0174`의 additive 경로 resolver와 읽기 전용 `state inspect`. 기존 파일 이동·삭제·runtime 전환 없이 main/linked/non-Git/monorepo 경계를 검증한다. P-0020 승인 전 코드는 작성하지 않는다.
+3. `M-0010` Role v2 migration은 이 scope 계약을 공유한다. 기존 validator와 legacy projection은 유지하고, runtime activation은 `M-0015` 호환 및 `M-0016` control 계약을 충족한 뒤 판정한다. 이후 `M-0011` routing → `M-0012` 읽기 전용 시각화 → `M-0013` 승인형 UI로 진행한다.
 4. `T-0092` i18n 잔여와 `T-0159` 실제 페이지/기능 시안 워크플로는 독립 백로그로 유지하며 이번 역할 아키텍처에 섞지 않는다.
 
 참고 근거: 사용자가 지정한 ChatGPT 프로젝트 대화 **“추가 개발 직위 추천”**의 역할 분리, 토큰 비용, Router/Orchestrator, `Role ≠ Model ≠ Agent ≠ Task` 원칙을 2026-09-03에 검토해 아래 계획으로 정규화했다.
@@ -150,6 +150,18 @@ MVP 핵심 역할:
 - lease 충돌은 해당 Agent dispatch를 동기식으로 거부하고 Orchestrator에 구조화된 충돌 증거를 반환한다.
 - directory-wide/ambient scope 추론과 자동 경고는 도입하지 않는다. 폐기된 `T-0109` 고잡음 범위 경고를 되살리지 않는다.
 - lease는 advisory coordination primitive이며 외부 편집기를 강제로 잠그지 않는다는 한계를 UI/CLI/MCP에 유지한다.
+- 현재 lease는 checkout별 물리 파일 identity를 다룬다. repository 전체의 task claim과 분리하며, `.git` common으로 store 경로만 바꾸지 않는다.
+
+## State Scope and Lifecycle Architecture — UR-0097
+- 채택: Git tracked 영속 지식/정책/완료 기록, Git private runtime, Git common control의 3계층과 Project/Worktree/Common-Control/Immutable-Record/Generated-View의 5개 scope.
+- 기존 사실: progress-tracker는 현재 task 원본이고 decisions/lessons는 이미 JSON 원본 + Markdown 표시본이다. 목표인 event/record 기반 원본과 혼동하지 않는다.
+- Worktree private 내부도 session별로 구분하고 main의 gitDir=gitCommonDir 경우 runtime/control namespace를 분리한다. monorepo projectKey, non-Git, 별도 clone/host, Windows alias를 명시한다.
+- single consolidator는 역할 이름뿐 아니라 owner generation/revision 검증으로 강제한다. 기존 local mutex를 TTL로 강제 탈취하거나 heartbeat를 프로세스 생존 증명으로 보지 않는다.
+- 결정/교훈은 충돌 회피 ID의 immutable record와 supersedes, 실행/검수는 exact commit/diff digest와 actual model/fallback provenance를 보존한다.
+- finalize는 기록 생성뿐 아니라 retained Git revision에서의 durability를 확인해야 cleanup-eligible이다. 외부 직접 worktree 삭제를 완전히 차단한다고 주장하지 않는다.
+- 기존 사용자 원문/legacy ID/증거는 보존한다. migration은 inventory/preview/confirm/quiescence/staging/atomic activation/복구를 갖추고 두 writable source of truth를 만들지 않는다.
+- YAML/SQLite 의존성을 즉시 추가하지 않는다. Node >=18·0 runtime deps를 유지하고 파일 기반 backend의 범위/한계를 테스트한다.
+- 운영 상태가 Git에 남는다는 현재 프로젝트 설명도 단계적 전환 대상으로 기록한다. 모든 `.leerness`를 ignore하거나 기존 문서를 일괄 삭제하지 않는다.
 
 ## Consolidated Visualization Contract
 첫 단계는 읽기 전용 단일 화면이다. 다음 정보를 동일 snapshot 시점과 provenance로 묶는다.
@@ -311,5 +323,56 @@ Tasks:
 - [ ] 비용·실행·검수 독립성 표시
 - [ ] 실제 페이지/기능 시안 승인 워크플로(`T-0159`)와 통합 여부 별도 결정
 
+### M-0014. State scopes와 읽기 전용 저장 구조 진단
+Status: in-progress
+Progress: 70%
+Done-When: P-0020 승인 뒤 5-scope resolver와 state inspect가 main/linked/non-Git/monorepo에서 무쓰기 및 기존 동작 보존 검증 통과
+
+Tasks:
+- [x] T-0174 / P-0020 승인 뒤 additive state-paths resolver 구현 (기존 Project resolver 보존)
+- [x] 현재/목표 경로를 분리한 state inspect JSON과 오류 taxonomy
+- [x] main/linked/non-Git/monorepo/Windows 경로·무쓰기 전용 회귀 104개 (selector26 + scope58 + CLI20); Node18 scope58/CLI20 재검증
+- [ ] 독립 Codex 검수·기존 전체 회귀·지원 플랫폼·출하 검증
+
+### M-0015. Worktree runtime 분리와 명시적 호환 마이그레이션
+Status: planned
+Progress: 0%
+Done-When: 동일 worktree 다중 session 격리, 원본 보존, quiescence, preview/confirm, 중단 복구와 legacy writer 차단이 증명됨
+
+Tasks:
+- [ ] T-0175 runtime writer/reader inventory와 field 단위 분류
+- [ ] session ownership, legacy writer 정지, 원본 snapshot, staged migration 및 단일 activation manifest
+- [ ] interruption/rollback/old client compatibility와 handoff/enforce freshness 회귀
+
+### M-0016. Common ControlStore와 task claim 및 consolidator fencing
+Status: planned
+Progress: 0%
+Done-When: worktree 공통 task claim, revision CAS, stale owner 차단과 crash recovery를 실제 다중 프로세스 테스트로 검증
+
+Tasks:
+- [ ] T-0176 task claim과 physical file lease 분리, project/worktree/session identity
+- [ ] bounded transaction, revision CAS, owner generation/fencing 및 policy revision 검증
+- [ ] 실제 다중 프로세스 경쟁·중단·clock movement·stale writer 회귀
+
+### M-0017. Immutable MemoryStore와 RunRecord finalize
+Status: planned
+Progress: 0%
+Done-When: 결정 supersedes, 독립 review commit binding, 멱등 finalize, ID 충돌 차단 및 Git durability receipt 검증 통과
+
+Tasks:
+- [ ] T-0177 strict legacy import, 고유 record ID, supersedes와 payload 충돌 차단
+- [ ] actual model/fallback 및 reviewed commit/diff에 바인딩한 독립 result/review record
+- [ ] 멱등 finalize와 retained Git durability receipt, 실패/거절 결과와 완료 주장 분리
+
+### M-0018. Generated view 전환과 공통 State API adapter 통합
+Status: planned
+Progress: 0%
+Done-When: 사용자 원문을 보존한 재생성, single consolidator, CLI MCP 동일 계약, cleanup 전 finalize gate와 버전 호환 검증 통과
+
+Tasks:
+- [ ] T-0178 사용자 원문 보존·accepted input digest 기반 결정적 재생성·single consolidator
+- [ ] CLI/MCP, integrity/claims, role migration, read-only snapshot 소비자 연결
+- [ ] Leerness adapter cleanup 전 finalize 검증, 외부 직접 삭제 강제 차단 한계 명시
+
 ## Immediate Next Action
-v1.36.185의 GitHub/npm/leerness.com 공개 검증을 끝낸 직후 `M-0010`의 explicit v2 migration을 시작한다. migration은 세 canonical v2 파일을 preview/confirm/lock/rollback 뒤에만 쓰고, legacy schema v1과의 compatibility-window 동시 갱신 규칙을 먼저 계약 테스트로 고정한다. 그 전에는 v2 projection을 read-only로 유지한다.
+승인된 `P-0020` / `T-0174` 구현의 독립 검수·전체 회귀·배포를 검증한다. `M-0010`의 역할 migration은 독립적으로 다른 저장 구조를 만들지 않고 이 계약에 연결한다. 이후 `M-0015..M-0018`을 단계별 진행하며 기존 v2 projection은 runtime activation 전까지 read-only다.

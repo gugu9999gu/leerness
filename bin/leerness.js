@@ -49,7 +49,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.185';
+const VERSION = '1.36.186';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -190,8 +190,8 @@ function _loadSkillCatalog() {
 
 // 1.9.341 (UR-0025 심층): BUILTIN_CATALOG (9 내장 스킬 catalog) 는 lib/catalogs.js 로 이전 (import).
 
-// 1.9.10: skillCatalog는 skillpack 우선, fallback builtin. _loadSkillCatalog 호출은 BUILTIN_CATALOG 정의 후.
-const skillCatalog = _loadSkillCatalog();
+// Catalog initialization is below the parser declarations so metadata-only
+// inspection can skip irrelevant skillpack discovery (including npm root -g).
 
 const routes = {
   planning:        { read: ['.leerness/plan.md','.leerness/progress-tracker.md','.leerness/project-brief.md','.leerness/current-state.md','.leerness/guideline.md'], update: ['.leerness/plan.md','.leerness/progress-tracker.md','.leerness/current-state.md','.leerness/session-handoff.md'] },
@@ -882,7 +882,12 @@ function _errorUiLang(root, command) {
   const parsed = nonFlagArgs();
   const resolvedCommand = command || parsed[0];
   if (resolvedCommand === 'mode' && has('--json')) return 'ko';
+  if (resolvedCommand === 'state' && parsed[1] === 'inspect') return _inspectionUiLang();
   return _uiLang(resolvedCommand === 'mode' ? _modeRoot(parsed, root) : root);
+}
+function _inspectionUiLang() {
+  const language = String(arg('--language', process.env.LEERNESS_LANG || 'ko')).toLowerCase();
+  return language === 'en' ? 'en' : 'ko';
 }
 // ko/en 쌍에서 해석된 UI 언어로 선택 (Phase 1: 첫 화면 한정 사용).
 function _tx(lang, ko, en) { return lang === 'en' ? en : ko; }
@@ -11487,6 +11492,7 @@ function commandsCmd(root) {
       { cmd: 'roles list|set|unset|catalog|suggest|verify|validate', desc: '모델별 역할 부여 + fail-closed 저장소 검증 — 1.9.270/T-0171', descEn: 'assign roles and validate the role store fail-closed — 1.9.270/T-0171' },
       { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272', descEn: 'disclose the permission/security surface (what it does + opt-outs + commands to watch) — 1.9.272' },
       { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278', descEn: '.leerness/ JSON state substrate (cross-agent handoff standard) — 1.9.278' },
+      { cmd: 'state inspect [path] [--json]', desc: '5-scope 현재/제안 경로와 기존 상태 목록 — 읽기 전용, 이동·활성화 없음', descEn: 'five-scope current/proposed paths and legacy inventory — read-only, no migration or activation' },
       { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280', descEn: 'generate per-tool instructions/.mcp.json selectively (claude/cursor/codex/goose/...) — 1.9.280' },
       { cmd: 'ci init [path] [--force]', desc: 'PR 마다 leerness gate 실행하는 GitHub Actions 워크플로 생성 (.github/workflows/leerness-gate.yml) — 1.9.444', descEn: 'create a GitHub Actions workflow that runs leerness gate on every PR (.github/workflows/leerness-gate.yml) — 1.9.444' },
       { cmd: 'export|prompt --target <agent>', desc: 'adapter 별칭 — 도구별 지침/계약 파일 생성 (claude/cursor/codex/agents-md/...) — 1.9.448', descEn: 'adapter alias — generate per-tool instruction/contract files (claude/cursor/codex/agents-md/...) — 1.9.448' },
@@ -12181,6 +12187,7 @@ const _OBSERVATION_ONLY_SUBCOMMANDS = new Map([
   ['lease', new Set(['list', 'check'])],
   ['roles', new Set(['validate'])],
   ['role', new Set(['validate'])],
+  ['state', new Set(['inspect'])],
 ]);
 function _cliMutationClass(args, cmd) {
   if (cmd === 'mcp') return 'observation-only'; // server startup must not mutate its incidental cwd
@@ -15563,6 +15570,7 @@ const _STRICT_COMMAND_FLAGS = {
   'lease list': { allowed: ['--session', '--all'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'lease list [--session <key>] [--all] [--json]' },
   'lease check': { allowed: ['--session'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'lease check <file> [--session <key>] [--json]' },
   'roles validate': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles validate [--path .] [--json]' },
+  'state inspect': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'state inspect [path] [--path <path>] [--json]' },
   'roles set': { allowed: ['--provider', '--to', '--model', '--model-family', '--policy', '--fallback-policy', '--candidate', '--candidate-family', '--remove-candidate', '--clear-candidates', '--persona', '--force'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles set <role> --provider <id> [--model <id>] [--policy strict|balanced|continuity]' },
   'roles unset': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles unset <role> [--path .] [--json]' },
   'roles suggest': { allowed: ['--apply'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles suggest [--apply] [--path .] [--json]' },
@@ -15644,6 +15652,13 @@ function _validateRolesCommandShape(cmd, args) {
 }
 
 function _validateCommandFlags(cmd, args) {
+  if (cmd === 'state' && args[1] === 'inspect') {
+    if (!_rejectDuplicateValueFlags(['--path'])) return false;
+    if (args.length > 3) {
+      failJson(has('--json'), 'too_many_arguments', 'Usage: state inspect [path] [--path <path>] [--json]');
+      return false;
+    }
+  }
   if (cmd === 'lease' && !_rejectDuplicateValueFlags(['--session', '--ttl', '--note', '--path'])) return false;
   if (cmd === 'agents' && args[1] === 'route'
     && !_rejectDuplicateValueFlags(['--tier', '--approved-by', '--reason', '--path'])) return false;
@@ -15656,6 +15671,7 @@ function _validateCommandFlags(cmd, args) {
   if (cmd === 'intent' && args[1] === 'expand') route = 'intent expand';
   if (cmd === 'lease') route = `lease ${args[1] == null ? 'list' : args[1]}`;
   if (roleSub) route = `roles ${roleSub === 'remove' || roleSub === 'rm' ? 'unset' : roleSub}`;
+  if (cmd === 'state' && args[1] === 'inspect') route = 'state inspect';
   const cfg = _STRICT_COMMAND_FLAGS[route];
   if (!cfg) return true;
   return _rejectUnknownFlags(cfg.allowed, cfg.usage, { globals: cfg.globals });
@@ -28893,6 +28909,21 @@ function _updateRun(root, id, mutator) {
 }
 // 1.9.328 (UR-0025): _splitList → lib/pure-utils.js 로 이동 (순수 콤마 리스트 분할, require 사용).
 
+// Inspect is intentionally independent of all legacy state loaders and writers.
+function stateInspectCmd(root) {
+  try {
+    const { inspectState, formatStateInspection } = require('../lib/state-inspect');
+    const report = inspectState(root);
+    if (has('--json')) return log(JSON.stringify(report, null, 2));
+    // Do not read a project manifest merely to render a metadata-only diagnostic.
+    return log(formatStateInspection(report, _inspectionUiLang()));
+  } catch (error) {
+    const known = error.name === 'StatePathError' || error.name === 'WorkspaceDirectoryError';
+    return failJson(has('--json'), known ? error.code : 'state_inspection_failed',
+      known ? error.message : 'State inspection failed; no files were changed.');
+  }
+}
+
 // leerness state <show|start|record|verify|handoff>
 // 1.9.292 (UR-0031): get_project_context — 외부 에이전트 온보딩용 단일 집약 컨텍스트.
 //   1콜로 현재 작업/미답 요청/최근 결정/활성 룰/next-actions/memory/프로젝트 의도를 구조화 회수.
@@ -31793,6 +31824,7 @@ SETUP & UPDATE
 
 STATUS & DIAGNOSTICS
   status [path]                   Install status (files present)
+  state inspect [path] [--json]   Read-only five-scope paths/inventory; no migration or runtime activation
   health [path] | doctor [--json]   health: project state · doctor: CLI install/environment (no path arg)
   verify [path]                   Required-file verification
   which [--json]                  Resolve current binary/version (npm cache conflicts)
@@ -31874,6 +31906,7 @@ function help() {
   log(`Leerness v${VERSION}\n\nUsage:\n  leerness init [path] [--language auto|ko|en] [--skills recommended|all|a,b]\n  leerness migrate [path] [--dry-run] [--force]\n  leerness update [path] [--check|--yes|--force|--from <tarball>]\n  leerness auto-update install [path]\n  leerness status [path]\n  leerness verify [path]\n  leerness debug [path]\n  leerness audit [path]\n  leerness check [path]\n  leerness scan secrets [path]\n  leerness encoding check [path]\n  leerness lazy detect [path]\n  leerness memory search "query" [--limit 5]\n  leerness handoff [path] [--all-apps] [--include p1,p2] [--since 24h|3d] [--compact] [--json]   # 1.9.17-22 워크스페이스 (--compact: LLM 시스템 프롬프트용 1줄 요약)\n  leerness orchestrate "<목표>" [--agents N] [--model qwen2.5:7b-instruct] [--retry-on-fail K]   # 1.9.22 Ollama opt-in (LEERNESS_OLLAMA_BASE_URL 필요)\n  leerness llm-bench record --score N --model X [--label L] [--tokens T]   # 1.9.22 LLM 벤치 히스토리 누적\n  leerness deps <capability> [--run-tests] [--json]   # 1.9.24 depends-on 역방향 추적 + 자동 회귀 sweep\n  leerness memory search "키" [--include-code]   # 1.9.25 소스 코드 본문도 검색 (모순 감지 핵심)\n  leerness brainstorm "주제" [--include-code]    # 1.9.25 코드 본문 hits 포함\n  leerness register-pending "<요청>" [--agent X] [--note Y]   # 1.9.25 다중 세션 in-progress 즉시 등록\n  leerness optimism-check <T-ID> [--json]   # 1.9.26/27 낙관적 표시 감지 (1.9.27: 10 카테고리 + URL/메서드 매핑 + 신뢰도 점수)\n  leerness persona list|show <id>|add <id>   # 1.9.29 페르소나 카탈로그 (보안/성능/UX/testing/docs 5종 내장)\n  leerness review <file> --persona <id1,id2,...>   # 1.9.29 도메인 페르소나 리뷰 프롬프트 자동 생성\n  leerness agents list|check|quota          # 외부 AI CLI 다축 가용성 확인\n  leerness agents resolve \"<task>\" --role <role> [--preset strict|balanced|continuity]   # 역할 유지 + 대체 선택지\n  leerness agents fallback provider|session|direct|hold \"<task>\" --role <role> [--session-provider P --session-model M --session-model-family F]   # 명시 선택·기록\n  leerness agents record completed|failed|reviewed|validated \"<summary>\" [--task T-ID --role R --to P --model M --model-family F --agent P --agent-model M --agent-model-family F --evidence E]\n  leerness agents history [--limit 20]        # 실행자·검수자·결과 provenance\n  leerness agents dispatch \"<task>\" --to <id>   # 활성 CLI 대상 실행 명령 생성 (실 호출 X, 사용자 실행)\n  leerness agents multi "<task>" [--only c1,c2] [--write] [--execute] [--timeout 60]   # 1.9.152/156 활성 N개 일괄 dispatch (--execute: 실 spawn + consensus)\n  leerness provider list|add|remove [args]   # 1.9.157 Provider Registry — 사용자 정의 CLI provider 동적 추가 (OpenRouter/Bedrock 흡수)\n  leerness agents dispatch "<task>" --multi   # 1.9.152 multi 모드 alias (또는 --to all)\n  leerness setup-agents [path] [--yes|--no-setup-agents]    # 1.9.32 sub-agent CLI 인터랙티브 설정 (.env + 미설치 자동 설치)\n  leerness init [path] [--no-stale-check]                   # 1.9.33 npx 캐시 함정 — 옛 버전 자동 경고 (끄려면 --no-stale-check)\n  leerness which [--json]                                   # 1.9.164 진단: 현재 실행 경로/버전 + npm 캐시 + PATH 후보 (구버전 충돌 해결)\n  leerness selftest [--json]                                # 1.9.258 코어 함수 무결성 자가 검증 (설치 손상/부분설치 감지, CI 친화 exit 1)\n  leerness shell-guard "<command>" [--json]                 # 1.9.260 터미널 명령 셸 호환성 린터 (PowerShell 5.1 && 미지원 등 실행 전 감지, UR-0020)\n  leerness shell-guard --record --cmd "..." --exit N        # 1.9.260 실패한 터미널 명령 기록 → 다음 분석 시 회수\n  leerness path-setup [--apply] [--json]                    # 1.9.254 leerness CLI PATH 자동 등록 (npm global bin 미등록 시)\n  leerness web check|screenshot|extract <url> [--out file.png] [--selector "css"]  # 1.9.165 playwright bridge (opt-in: npm i -g playwright + permissions.browser)\n  leerness pc check|click|type|screenshot [--x N --y N] [--text "s"] [--out f.png]  # 1.9.166 robotjs/nut-tree bridge (opt-in: npm i -g robotjs + permissions.mouse/keyboard, ⚠ full 모드 권장)\n  leerness lsp check|symbols|references <file/name> [--in dir] [--json]  # 1.9.167 LSP 어댑터 MVP (typescript opt-in + regex fallback, 코드 인텔리전스)\n  leerness review-request "<request>" [--json]  # 1.9.176 사용자 요청 사전 검토 (충돌/재사용/효율/권장 단계 — 사용자 명시)\n  leerness contract verify <spec.md> <impl.js> [--json]     # 1.9.35 명세 ↔ 구현 일치 검사 (함수/필드)\n  leerness reuse autodetect [path] [--apply] [--json]       # 1.9.35 src/*.js의 module.exports → reuse-map 후보 등록\n  leerness audit [path] [--fix]                              # 1.9.35 --fix: session-handoff/current-state 자동 갱신\n  leerness verify-claim <T-ID> ... [--strict-claims]   # 1.9.26 verify-claim에 낙관적 표시 자동 검사 통합
   leerness lens [${_lensDomainList()}] [--json]   # 1.18.3/1.36.97 분야별 자기질문 품질 렌즈 (database·contract·recovery·observability 심화 · axes 8축 경량 — 완료 선언 전 자가 점검)\n  leerness library [show|page] [path] [--json] [--ai]   # 1.36.98 재사용 인벤토리 — 컴포넌트·디자인 토큰 추출 (page: 오프라인 HTML · --ai: 에이전트용 압축)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness lease acquire|release|list|check [file|lease-id] [--session KEY] [--ttl SEC] [--json]  # exact-file opt-in 협업 lease
+  leerness state inspect [path] [--json]   # 5-scope 경로/목록 읽기 전용 진단 — 이동·활성화 없음
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -31910,6 +31943,12 @@ async function main() {
   if (!_rejectUnregisteredFlags(cmd)) return;
   if (!_rejectMalformedFlagForms(cmd, args)) return;
   if (!_validateCommandFlags(cmd, args)) return;
+  // Exact early dispatch is both a no-write boundary and a latency boundary:
+  // no workspace migration/guard rescans, usage locks, presence, or stale checks.
+  if (cmd === 'state' && args[1] === 'inspect') {
+    const explicit = arg('--path', null);
+    return stateInspectCmd(explicit !== null ? explicit : args[2] === undefined ? process.cwd() : args[2]);
+  }
   // 값이 존재하지만 의미가 잘못된 --keep 도 legacy migration/write 전에 거부한다.
   // preview serve 의 --keep 은 route별 boolean 계약이므로 숫자 검증 대상이 아니다.
   if (!_commandBooleanValueFlags(cmd, args[1]).has('--keep')) {
@@ -33090,6 +33129,14 @@ async function main() {
   failJson(has('--json'), 'unknown_command', `알 수 없는 명령: ${cmd}  (leerness --help 로 전체 명령 확인)`);
   return;
 }
+
+const skillCatalog = (() => {
+  const args = nonFlagArgs();
+  if (require.main === module && args[0] === 'state' && args[1] === 'inspect') {
+    return _withBuiltinSource(BUILTIN_CATALOG);
+  }
+  return _loadSkillCatalog();
+})();
 
 // 1.9.4 B: main 종료 후 exitCode를 명시적으로 process.exit으로 강제 (셸/wrapper 차 무시).
 // 1.9.255 (UR-0019 2단계): require.main 가드 — `require('harness.js')` 시 main() 미실행 (init 부작용 차단 + 내부 함수 단위 테스트 가능).

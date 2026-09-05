@@ -54,6 +54,10 @@ jobs:
         run: node ./bin/leerness.js --version
       - name: selftest
         run: node ./bin/leerness.js selftest
+      - name: state scopes (read-only topology and CLI)
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: npm run test:state-scopes
       - name: release runtime (shell-free npm)
         run: node ./scripts/release-runtime-probe.js
       # 1.36.127 (T-0105): 이 중간 티어(42블록·66초)는 만들어 놓고 **아무도 부르지 않았다**.

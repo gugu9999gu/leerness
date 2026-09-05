@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.186 — 2026-09-05
+
+- T-0174: add read-only five-scope state inspection with worktree/project isolation and honest legacy inventory; reuse workspace snapshots, skip unused npm skill discovery and bookkeeping, preserve all existing state.
+
 ## 1.36.185 — 2026-09-04
 
 - T-0165/T-0166/T-0167/T-0171/T-0172: adds honest provider-capacity observation, exact-file TTL leases, strict Role/Agent/Routing v2 schemas, a fail-closed legacy role-store loader, and availability-aware role fallback with revision-bound execution provenance. Compatibility fields remain explicit, high-risk reviewer independence requires concrete model identities, corrupt state is preserved without provider execution, and all new surfaces are covered by adversarial regression probes.

@@ -211,7 +211,7 @@
   {
     "id": "P-0010",
     "title": "leerness.html 을 .leerness 문서 뷰어로 확장 (exe 미채택)",
-    "design": "[사용자 요청] \"leerness.html 대신 exe 같은 실행기로 로드맵·그래프·스킬·기술·핸드오프·플랜 마크다운을 그대로 표시할 수 있나?\n  성능에 영향 주면 leerness.html 로 유지하고 거기에 반영.\"\n\n[결론] exe 는 만들지 않는다. 성능 문제가 아니라 **배포 모델 변경**이라서다(사용자 표현을 정정).\n  · package.json dependencies = {} · install script 없음 = 제품의 하드 제약. 현재 패키지 1.4 MB.\n  · exe 는 pkg/nexe(Node 번들 40~80MB × 3 플랫폼) 또는 Electron(100MB+)을 요구. 코드서명 없으면\n    Windows SmartScreen/백신 오탐. 빌드 파이프라인·릴리스 아티팩트·서명키 관리가 새로 생긴다.\n  · \"감사 가능한 npm CLI\" 에서 \"신뢰해야 하는 바이너리\"로 성격이 바뀐다.\n  · 그리고 이득이 없다 — 목적이 \"보기\" 인데 브라우저가 이미 그 뷰어다.\n\n[이미 있는 것 — 중복 제작 금지]\n  · leerness graph --html -> leerness.html : 정적 단일 파일, 더블클릭, 오프라인, 프로세스 0. 현재 22.4KB(빈 프로젝트).\n  · leerness dashboard (1.36.90) : 127.0.0.1 읽기전용 서버. 토글/task/마일스톤/미리보기/라우팅기록을\n    **구조화 필드로** 보여준다. 원문 마크다운은 안 보여준다. _redact 로 시크릿 마스킹 적용 중.\n  -> 사용자가 원하는 \"원문 마크다운 열람\"은 둘 다 아직 안 한다. 그 빈칸을 채우는 것이 이 제안이다.\n\n[제안] leerness.html 에 문서 뷰어 섹션 추가 (graph 는 그대로 유지)\n\n[반드시 지킬 경계 — 이게 이 제안의 핵심이다]\n  1) 시크릿 마스킹 필수. 실측: 이 저장소에서 `leerness scan secrets` 34건. leerness.html 은 사용자가\n     커밋·공유할 수 있는 단일 파일이라 dashboard(로컬 서버, 공유 안 됨)보다 위험이 크다.\n     dashboard 가 쓰는 redactSecrets 를 **같은 술어로 공유**한다(표면마다 다시 구현하면 한쪽만 새는 실패가 재발).\n  2) 크기 상한. 실측 .leerness md 총량: hive_brain 44KB · Adzento 105KB · leerness-pkg 116KB ·\n     **exreview 918KB**(e2e-report 단일 파일 351KB). 전부 담으면 파일이 거대해지고 브라우저가 느려진다.\n     -> 문서 화이트리스트(plan/roadmap/skills/tech-profile/session-handoff/current-state/progress-tracker)\n        + 파일당 상한(예 64KB) + 총량 상한 + 초과 시 \"잘림\" 명시 표기(조용한 절단 금지).\n  3) 마크다운 렌더링은 **최소 부분집합**만. 0-deps 라 파서를 직접 써야 하는데, 손으로 짠 파서가 정상 입력을\n     망가뜨린 전례가 있다(1.36.x 주석 마스커 -> 되돌림). 제목/목록/코드펜스/표/링크/강조까지만 처리하고\n     나머지는 원문 텍스트로 둔다. 전량 이스케이프 후 화이트리스트 태그만 재삽입.\n  4) XSS. 기존 graph HTML 의 XSS 가드·메타가드와 같은 규율을 적용하고 회귀 테스트를 붙인다.\n  5) 스냅샷임을 명시. 생성 시각 + \"이 파일은 생성 시점 스냅샷\" 고지. 열 때마다 최신이 아니다.\n  6) 기본 동작 무변경. leerness.html 자동 생성은 지금도 opt-in(LEERNESS_AUTO_GRAPH=1) 이고 그대로 둔다.\n\n[하지 않을 것] exe/설치형 바이너리 · Electron · 런타임 의존성 추가 · 사용자 저장소 루트에 새 실행기 파일 자동 생성\n  · leerness.html 이 파일시스템을 읽는 동적 기능(정적 단일 파일 성격 유지)\n\n[미결 — 사용자 결정 필요] (a) 어느 문서까지 담을지 (b) 마크다운을 부분집합 렌더링할지 원문 그대로(pre) 보여줄지\n  (c) 시크릿이 탐지된 파일은 마스킹만 할지 아예 제외할지",
+    "design": "[사용자 요청] \"leerness.html 대신 exe 같은 실행기로 로드맵·그래프·스킬·기술·핸드오프·플랜 마크다운을 그대로 표시할 수 있나?   성능에 영향 주면 leerness.html 로 유지하고 거기에 반영.\"  [결론] exe 는 만들지 않는다. 성능 문제가 아니라 **배포 모델 변경**이라서다(사용자 표현을 정정).   · package.json dependencies = {} · install script 없음 = 제품의 하드 제약. 현재 패키지 1.4 MB.   · exe 는 pkg/nexe(Node 번들 40~80MB × 3 플랫폼) 또는 Electron(100MB+)을 요구. 코드서명 없으면     Windows SmartScreen/백신 오탐. 빌드 파이프라인·릴리스 아티팩트·서명키 관리가 새로 생긴다.   · \"감사 가능한 npm CLI\" 에서 \"신뢰해야 하는 바이너리\"로 성격이 바뀐다.   · 그리고 이득이 없다 — 목적이 \"보기\" 인데 브라우저가 이미 그 뷰어다.  [이미 있는 것 — 중복 제작 금지]   · leerness graph --html -> leerness.html : 정적 단일 파일, 더블클릭, 오프라인, 프로세스 0. 현재 22.4KB(빈 프로젝트).   · leerness dashboard (1.36.90) : 127.0.0.1 읽기전용 서버. 토글/task/마일스톤/미리보기/라우팅기록을     **구조화 필드로** 보여준다. 원문 마크다운은 안 보여준다. _redact 로 시크릿 마스킹 적용 중.   -> 사용자가 원하는 \"원문 마크다운 열람\"은 둘 다 아직 안 한다. 그 빈칸을 채우는 것이 이 제안이다.  [제안] leerness.html 에 문서 뷰어 섹션 추가 (graph 는 그대로 유지)  [반드시 지킬 경계 — 이게 이 제안의 핵심이다]   1) 시크릿 마스킹 필수. 실측: 이 저장소에서 `leerness scan secrets` 34건. leerness.html 은 사용자가      커밋·공유할 수 있는 단일 파일이라 dashboard(로컬 서버, 공유 안 됨)보다 위험이 크다.      dashboard 가 쓰는 redactSecrets 를 **같은 술어로 공유**한다(표면마다 다시 구현하면 한쪽만 새는 실패가 재발).   2) 크기 상한. 실측 .leerness md 총량: hive_brain 44KB · Adzento 105KB · leerness-pkg 116KB ·      **exreview 918KB**(e2e-report 단일 파일 351KB). 전부 담으면 파일이 거대해지고 브라우저가 느려진다.      -> 문서 화이트리스트(plan/roadmap/skills/tech-profile/session-handoff/current-state/progress-tracker)         + 파일당 상한(예 64KB) + 총량 상한 + 초과 시 \"잘림\" 명시 표기(조용한 절단 금지).   3) 마크다운 렌더링은 **최소 부분집합**만. 0-deps 라 파서를 직접 써야 하는데, 손으로 짠 파서가 정상 입력을      망가뜨린 전례가 있다(1.36.x 주석 마스커 -> 되돌림). 제목/목록/코드펜스/표/링크/강조까지만 처리하고      나머지는 원문 텍스트로 둔다. 전량 이스케이프 후 화이트리스트 태그만 재삽입.   4) XSS. 기존 graph HTML 의 XSS 가드·메타가드와 같은 규율을 적용하고 회귀 테스트를 붙인다.   5) 스냅샷임을 명시. 생성 시각 + \"이 파일은 생성 시점 스냅샷\" 고지. 열 때마다 최신이 아니다.   6) 기본 동작 무변경. leerness.html 자동 생성은 지금도 opt-in(LEERNESS_AUTO_GRAPH=1) 이고 그대로 둔다.  [하지 않을 것] exe/설치형 바이너리 · Electron · 런타임 의존성 추가 · 사용자 저장소 루트에 새 실행기 파일 자동 생성   · leerness.html 이 파일시스템을 읽는 동적 기능(정적 단일 파일 성격 유지)  [미결 — 사용자 결정 필요] (a) 어느 문서까지 담을지 (b) 마크다운을 부분집합 렌더링할지 원문 그대로(pre) 보여줄지   (c) 시크릿이 탐지된 파일은 마스킹만 할지 아예 제외할지",
     "features": [],
     "status": "proposed",
     "createdAt": "2026-07-31T01:32:42.454Z",
@@ -430,6 +430,26 @@
       },
       {
         "at": "2026-09-03T09:21:50.114Z",
+        "event": "approved"
+      }
+    ]
+  },
+  {
+    "id": "P-0020",
+    "title": "State Manager 1차: 5-scope 경로 해석과 읽기 전용 진단",
+    "design": "현재 저장 위치와 목표 scope를 함께 보여주는 CLI JSON 진단과 공통 경로 API. 기존 CLI의 저장 경로와 사용자 파일은 그대로 보존. 자동 migration, 파일 삭제, 외부 Agent 실행, UI는 없음.",
+    "features": [
+      "Project/Worktree/Common-Control/Immutable-Record/Generated-View scope 계약; Git private/common 절대경로 해석; monorepo project namespace; non-Git fallback 명시; state inspect 읽기 전용 표면; 실제 main 및 linked worktree 회귀 테스트"
+    ],
+    "status": "approved",
+    "createdAt": "2026-09-05T07:27:49.629Z",
+    "history": [
+      {
+        "at": "2026-09-05T07:27:49.629Z",
+        "event": "proposed"
+      },
+      {
+        "at": "2026-09-05T08:39:37.037Z",
         "event": "approved"
       }
     ]

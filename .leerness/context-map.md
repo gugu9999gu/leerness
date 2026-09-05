@@ -69,6 +69,11 @@ MCP client → repo config (`.mcp.json`) → `leerness mcp serve` → bin/leerne
 
 ## Change Routing
 
+T-0174 추가 표면: `lib/state-paths.js`/`state-git.js`의 5-scope resolver와
+`state-inventory.js`/`state-inspect.js`의 읽기 전용 진단. `state inspect`는 기존 substrate
+명령과 별도의 early dispatch이며 자동 migration/usage/skillpack 조회를 거치지 않는다.
+기존 `.leerness` writer 경로는 유지한다. 관련 회귀는 `npm run test:state-scopes`.
+
 | Change | Inspect / Update Together |
 |---|---|
 | CLI 명령 또는 플래그 | `bin/leerness.js` 디스패치·도움말·JSON/exit 계약 → 소유 `lib/*.js` → 관련 selftest/E2E. |

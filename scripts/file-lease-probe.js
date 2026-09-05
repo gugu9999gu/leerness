@@ -1054,7 +1054,7 @@ async function main() {
       && PU._requiredTier('npx --yes leerness lease acquire reports/release publish/status.js') === 'safe-write');
 
   check('command catalog and both help locales advertise exact-file lease',
-    catalog.status === 0 && catalogJson?.totalCommands === 100
+    catalog.status === 0 && catalogJson?.totalCommands === rows.length
       && rows.some(row => /^lease acquire\|release\|list\|check\b/.test(row.cmd))
       && /lease acquire\|release\|list\|check/.test(helpEn.stdout)
       && /leerness lease acquire\|release\|list\|check/.test(helpKo.stdout),

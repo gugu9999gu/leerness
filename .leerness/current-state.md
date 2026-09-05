@@ -18,6 +18,9 @@ doNotStore:
 Updated: 2026-09-05
 
 ## Now
+- 최신 사용자 요청 UR-0097: State 구조 감사/계획 반영(T-0173) 완료. 5-scope 설계 docs/state-scopes.md, 실제 architecture/reuse-map, M-0014..M-0018 계획을 반영했다. 아래 v1.36.185 항목은 이전 릴리스 이력이다.
+- P-0020 사용자 승인과 최적화 요청을 UR-0098로 등록했다. T-0174 5-scope resolver + read-only state inspect 구현 후 검증 중이며 기존 데이터 이동·삭제·runtime 전환은 없다. 전용 104개 검사 및 Node18 scope58/CLI20 통과; 독립 Codex P2 3건을 재현·수정했고 재검수와 전체 회귀·배포 검증은 진행 중이다.
+- 독립 읽기 전용 검수의 문서 지적 2개 수정·재검수 2/2 FIXED, 문서 계약 8/8 및 strict verify-claim 통과. session close/check/lazy는 통과했으나 R-0002 배포는 미실행/pending이다.
 - 명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/insights/persona/agent-mode/py-check/api-skill 이 --language en·LEERNESS_LANG=en·en 프로젝트에서도 한국어 출력. 대조군: health 는 완전 영어(플래그 배선은 존재). 1,488회 실행 감사(2026-08-05) <!-- leerness:auto -->
 - v1.36.185 후보에서 공급자 상태의 설치·활성·인증·모델 호출 가능성·quota 축을 분리하고, 확인하지 않은 잔여량을 `unknown`으로 유지함
 - exact-file TTL lease, strict Role/Agent/Routing v2 schema와 legacy 양방향 projection, bounded fail-closed role-store loader, availability-aware fallback와 revision-bound execution provenance를 구현함
@@ -31,10 +34,10 @@ Updated: 2026-09-05
 - T-0159 실제 프로젝트 코드 기반 시안 워크플로는 페이지·기능·둘 다 중 범위 명확화 대기
 
 ## Next
-- M-0010 explicit Role/Agent/Routing v2 migration <!-- leerness:auto -->
-- explicit v2 migration을 preview/confirm/lock/rollback과 legacy compatibility-window 계약 테스트부터 구현
-- 이어서 M-0011의 Light Router·Tester·conditional gate·lease preflight, 이후 M-0012 read-only 통합 시각화와 M-0013 승인형 UI를 순차 진행
+- T-0174 독립 검수·회귀·배포 검증 후 M-0015 명시적 private runtime migration 범위 설계 <!-- leerness:auto -->
+- M-0015 private runtime → M-0016 common control → M-0017 immutable memory/run finalize → M-0018 generated view/adapter 순서. 기존 원문과 legacy writer 호환을 단계별 검증한다.
+- M-0010 역할 migration은 동일 State scope 계약에 연결하고 M-0011..M-0013은 그 위에서 진행한다. T-0092 i18n은 별도 잔여 백로그다.
 
 ## Blockers
 - (없음) <!-- leerness:auto -->
-- 없음
+- 기술적 차단 없음. P-0020은 승인되었고 구현 검증 중이다. UR-0097 전체 구조 전환은 아직 미완료다.

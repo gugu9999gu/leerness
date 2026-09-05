@@ -1125,7 +1125,40 @@
       "notes": "Concurrent ID collision resolved during convergence: the earlier UR-0095 record retains its ID and this later request is preserved as UR-0096.",
       "updatedAt": "2026-09-04T23:56:04.212Z",
       "completedAt": "2026-09-04T23:56:04.212Z"
+    },
+    {
+      "id": "UR-0097",
+      "text": "Git tracked 영속 기억과 worktree runtime 및 common control을 분리하는 5-scope State Manager 구조 감사, 단계별 계획 반영과 개선 적용",
+      "recordedAt": "2026-09-05T07:27:49.332Z",
+      "status": "in-progress",
+      "linkedTaskIds": [
+        "T-0173",
+        "T-0174",
+        "T-0175",
+        "T-0176",
+        "T-0177",
+        "T-0178"
+      ],
+      "linkedPlanIds": [
+        "M-0014",
+        "M-0015",
+        "M-0016",
+        "M-0017",
+        "M-0018"
+      ],
+      "linkedDecisionIds": [],
+      "notes": "구조 감사 및 계획/architecture/reuse-map 반영. P-0020는 UR-0098로 승인되어 additive 5-scope resolver와 read-only state inspect 구현·검증 진행 중. 데이터 이동·runtime activation 미실행. M-0015..M-0018 전체 구조 전환은 아직 완료 아님."
+    },
+    {
+      "id": "UR-0098",
+      "text": "P-0020 승인: 5-scope resolver와 읽기 전용 state inspect 구현 및 관련 중복 조회와 불필요한 I/O 최적화",
+      "recordedAt": "2026-09-05T08:39:37.365Z",
+      "status": "in-progress",
+      "linkedTaskIds": ["T-0174"],
+      "linkedPlanIds": ["M-0014"],
+      "linkedDecisionIds": [],
+      "notes": "승인된 scope foundation과 관련 최적화 구현. 전용 검증·독립 리뷰·전체 회귀 및 R-0002 출하 검증 뒤 완료 처리. 기존 데이터와 main dirty checkout 보존."
     }
   ],
-  "updatedAt": "2026-09-04T23:56:04.212Z"
+  "updatedAt": "2026-09-05T08:39:37.365Z"
 }

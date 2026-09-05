@@ -182,5 +182,13 @@
     "reason": "The canonical v2 design defines three separate stores; silently writing schemaVersion 2 into agent-roles.json would violate its compatibility contract, while applying a selection after role or availability state changes creates a TOCTOU routing bug.",
     "alternatives": "Rewrite agent-roles.json as v2 (rejected: conflicts with canonical v2 filenames and legacy readers); accept stale selections (rejected: can bypass newer policy denial).",
     "impact": "roles set/unset preserve schema v1 plus validated extension fields; v2 remains projection-only until explicit migration; resolve/fallback/role dispatch record resolutionId and role/availability revisions and fail with resolution_stale when either changes."
+  },
+  {
+    "date": "2026-09-05",
+    "title": "State scope를 먼저 정식화하고 영속 기록과 실행 상태를 명시적 migration으로 분리",
+    "decision": "State scope를 먼저 정식화하고 영속 기록과 실행 상태를 명시적 migration으로 분리",
+    "reason": "실제 소스에서 local file lock과 session ownership은 확인됐지만 tracked mutable arrays 및 wakeup/summary와 ignored provenance가 혼재한다. 5-scope resolver와 무쓰기 진단을 먼저 검증한다.",
+    "alternatives": "전체 .leerness ignore, merge=union, file lease store 경로만 common으로 이동, legacy/v2 동시 writable authority는 기각",
+    "impact": "M-0014..M-0018과 docs/state-scopes.md에 단계 계획을 기록. P-0020 승인 전 runtime 코드와 데이터 이동은 진행하지 않는다. M-0010 role migration은 scope/compat/control 계약을 공유한다."
   }
 ]
