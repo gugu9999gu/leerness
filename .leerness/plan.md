@@ -349,6 +349,8 @@ Tasks:
 
 구현 최적화: 한 operation 안에서 Git topology와 workspace ownership snapshot을 공유한다. compatibility 결과는 캐시하지 않고 descriptor·고정 indicator·경로 identity를 다시 읽는다. 정상 동시 writer의 정확한 lock/release/temp/create 이름만 admission에서 허용하며 unknown/link/wrong-kind는 거부한다. 중앙 CLI root 분배와 `lib/git.js`의 read/write 분류는 실제 handler/인자 우선순위 회귀를 유지한다. 일반 StateManager 추상화·DB·자동 migration은 이 단계에 추가하지 않는다.
 
+기존 standalone producer 보존: `init` 없이 성공한 정식 명령의 산출물이 다음 operation을 막지 않아야 한다. 정확한 저장 파일/디렉터리 이름·종류와 producer 근거를 함께 관리하고, 첫 생성→후속 실행·기존 내용 보존·wrong-kind/link/foreign sibling 거부를 빠른 runtime probe에서 검증한다. 내용을 읽어 소유권을 추측하거나 모든 폴더를 허용하지 않는다. 새 producer 추가 때 admission 분류와 회귀를 같이 갱신하여 장시간 full E2E에서만 발견되는 피드백 지연을 줄인다.
+
 ### M-0016. Common ControlStore와 task claim 및 consolidator fencing
 Status: planned
 Progress: 0%

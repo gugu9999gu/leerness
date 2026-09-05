@@ -241,6 +241,9 @@ Command: inline Node runtime-migration-document-contract rerun; `node bin/leerne
 
 ## 2026-09-06 — Approved compatibility implementation, superseding the approval-wait above
 
+- Latest checkpoint (supersedes candidate notes below): standalone exact-directory/file output admission repaired after genuine1.36.74 regression. Original E2E unchanged, Node20/26 each2/2+11/11 observations; reader305/305 on18/26 after two missing glossary imports were restored. Actual Codex review01a07372-1fca-7df1-b717-4516e9f788bd exit0/CLEAN, static only. Final core is running; freeze/push reviewed successor, then require supported CI and a newly packed exact artifact before R-0002 publication. All earlier187 packs are stale. No public187 or actual migration B yet.
+- Preserve failed evidence: candidate4 e8037bc CI33989990574 fast bothOS/runtime4 succeeded but Linux full E2E466/467 failed at the API producer case. Previous candidates' full Windows jobs are still being collected, not cancelled to erase results. T-0181 original186 errno remains inconclusive. Saved main beb039d with its original five dirty files remains untouched.
+
 - P-0021 approved / UR-0100 / T-0180 in-progress. Candidate1.36.187 implements strict runtime compatibility diagnosis and observed writer rejection; actual migration B, control store, immutable finalize and generated-view transition remain unimplemented.
 - Actual Codex review found four writer defects, all reproduced/fixed and rereviewed4/4 FIXED. Additional actual Codex found exact installer detach auxiliary omission, reproduced with both installers and fixed; independent bounded recheck FIXED. Details and before/after failures are in review-evidence.md.
 - Reader143/143 on Windows26/18, writer79/79, Git108/108, replacement3/3, REPL4/4 on26/18/24, old-client negative3/3. Full npm test and frozen supported CI/publication are not complete at this entry.

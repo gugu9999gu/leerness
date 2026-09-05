@@ -30,7 +30,7 @@ const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, redactSecrets, str
   _migrationGuideText, _parseContractSpec, _gitignoreMatch,
   _featureGraphTemplate, _parseFeatureGraph, _nextFeatureId, _featureBlock, _featureImpactBfs,
   _parseChangelogBetween, _cellSafe, _cellUnescape, _lineSafe, _milestoneSurface, _recentChangesAggregate, _parseLimit, _parseAddTitle, _parseImplExports, _taskPositionalPath, _completionClaimAllowed, _minorKey, _shouldPublishNpm,
-  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd, _briefUnfilled, _planGoalUnfilled, _draftAnchors, _replaceMdSection, _mdSectionBody, _blocksWithOffset, _decisionBlocksWithOffset } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리 · 1.36.36 anchors
+  _matchTool, _parsePackageJsonDeps, _parseRequirementsTxt, _buildGlossary, _renderGlossaryMd, GLOSSARY_START, GLOSSARY_END, _briefUnfilled, _planGoalUnfilled, _draftAnchors, _replaceMdSection, _mdSectionBody, _blocksWithOffset, _decisionBlocksWithOffset } = require('../lib/pure-utils');  // 1.9.318~1.11.4 (UR-0025/.../0007 glossary): 순수 유틸 모듈 분리 · 1.36.36 anchors
 // 1.9.304 (UR-0025): 순수 분석/검증 함수 모듈 분리.
 const { _evidenceQuality, _parseEvidenceStats, _shellGuardAnalyze, _claimFileInGit, _epistemicHonestyCheck } = require('../lib/analyzers');
 // 1.9.295 (UR-0025 4단계): 정적 데이터 카탈로그 모듈 분리 (비파괴, require-based).

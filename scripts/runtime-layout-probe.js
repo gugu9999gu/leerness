@@ -17,7 +17,7 @@ const CLI = path.resolve(__dirname, '../bin/leerness.js');
 const tempDirectory = fs.realpathSync.native(os.tmpdir());
 const arena = fs.mkdtempSync(path.join(tempDirectory, 'leerness-runtime-layout-'));
 const environmentBefore = { ...process.env };
-const sourceFiles = [path.resolve(__dirname, '../lib/runtime-layout.js'), __filename];
+const sourceFiles = [path.resolve(__dirname, '../lib/runtime-layout.js'), CLI, __filename];
 const signature = file => ({
   hash: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),
   mtime: fs.statSync(file, { bigint: true }).mtimeNs.toString(),
@@ -25,6 +25,20 @@ const signature = file => ({
 const sourceBefore = sourceFiles.map(signature);
 const sentinel = 'private-runtime-task-approver-content-must-not-escape';
 const linkKind = process.platform === 'win32' ? 'junction' : 'dir';
+const standaloneOutputDirectories = [
+  'previews', 'api-skills', 'skills', 'personas', 'skills-export', 'reviews',
+  'incidents', 'skills-publish', 'skills-publish-tarball',
+];
+// Literal top-level stores of existing init-free CLI producers. Classification
+// recognizes only each exact filename and regular-file kind, never its body.
+const standaloneOutputFiles = [
+  'user-requests.json', 'shell-failures.json', 'platform-constraints.json',
+  'wakeup-history.json', 'agent-slash-commands.json', 'environment.json',
+  'agent-permissions.json', 'credentials.local.json', 'llm-bench-history.md',
+  'glossary.md', 'glossary.json', 'reuse-map.md', 'design-system.md',
+  'skill-suggestions.md', 'skill-auto-cache.json', 'provider-probe-cache.json',
+  'orchestrate-log.md', 'feature-graph.md', 'enforce.json', 'agent-reminders.md',
+];
 let total = 0;
 let failed = 0;
 let fixture = 0;
@@ -144,6 +158,19 @@ function nodeProbe(program, args = []) {
       LEERNESS_NO_DRIFT_CHECK: '1', LEERNESS_NO_STALE_CHECK: '1' },
   });
   assert.strictEqual(result.status, 0, String(result.stderr || result.stdout || result.error).slice(-8192));
+}
+function standaloneCli(root, args, env = {}) {
+  const result = cp.spawnSync(process.execPath, [CLI, ...args, '--path', root], {
+    cwd: root, encoding: 'utf8', timeout: 30000, maxBuffer: 64 * 1024, windowsHide: true,
+    env: { ...process.env, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1',
+      LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_AUTO_ROADMAP: '1', ...env },
+  });
+  assert.strictEqual(result.error, undefined);
+  assert.strictEqual(result.signal, null);
+  assert.strictEqual(result.status, 0, String(result.stdout || result.stderr).slice(-2048));
+  assert.strictEqual(require('../lib/workspace-dir').inspectWorkspace(root).canonical.live, false,
+    'the standalone CLI fixture must not acquire an initialized workspace marker');
+  return result.stdout;
 }
 
 try {
@@ -312,14 +339,99 @@ try {
     write(path.join(root, '.leerness', 'unrelated-private-notes'), sentinel);
     noWrites(() => blocked(root, 'workspace_ambiguous'));
   });
-  check('exact standalone preview directory is admitted without enumerating its contents', () => {
-    const root = directory('preview-directory');
-    const previews = path.join(root, '.leerness', 'previews');
-    write(path.join(previews, 'private-preview.html'), sentinel);
+  for (const name of standaloneOutputFiles) {
+    check(`exact standalone ${name} file is admitted without reading its contents`, () => {
+      const root = directory('producer-file');
+      const output = path.join(root, '.leerness', name);
+      write(output, sentinel); // Deliberately not a valid domain document.
+      let reads = 0;
+      const forbidBody = original => function (file, ...args) {
+        if (String(file) === output) { reads++; throw new Error('Producer contents must not be read'); }
+        return original.call(this, file, ...args);
+      };
+      noWrites(() => withMethod(fs, 'readFileSync', forbidBody,
+        () => withMethod(fs, 'openSync', forbidBody,
+          () => assert.strictEqual(expect(root, 'legacy_absent', 'project-local').writeDisposition, 'allowed'))));
+      assert.strictEqual(reads, 0, 'admission must not swallow a store content-read failure');
+    });
+    for (const variant of ['wrong-kind', 'linked', 'lookalike', 'foreign-sibling']) {
+      check(`standalone ${name} file does not admit ${variant}`, () => {
+        const root = directory('producer-file-invalid');
+        const output = path.join(root, '.leerness', name);
+        fs.mkdirSync(path.dirname(output));
+        if (variant === 'wrong-kind') write(path.join(output, 'private-file'), sentinel);
+        else if (variant === 'lookalike') write(output + '-private', sentinel);
+        else if (variant === 'foreign-sibling') {
+          write(output, sentinel);
+          write(path.join(root, '.leerness', 'private-note'), sentinel);
+        } else {
+          // The same unprivileged junction/POSIX symlink fixture as directory
+          // negatives: a reserved filename must never authorize following it.
+          const outside = directory('producer-file-link-target');
+          write(path.join(outside, 'private-file'), sentinel);
+          fs.symlinkSync(outside, output, linkKind);
+          assert(fs.lstatSync(output).isSymbolicLink());
+        }
+        noWrites(() => blocked(root, 'workspace_ambiguous'));
+      });
+    }
+  }
+  for (const name of standaloneOutputDirectories) check(`exact standalone ${name} directory is admitted without reading its contents`, () => {
+    const root = directory('producer-directory');
+    const output = path.join(root, '.leerness', name);
+    write(path.join(output, 'private-output.md'), sentinel);
     noWrites(() => withMethod(fs, 'readdirSync', original => function (file, ...args) {
-      if (String(file) === previews) throw new Error('Preview contents must not be enumerated');
+      if (String(file) === output) throw new Error('Producer contents must not be enumerated');
       return original.call(this, file, ...args);
-    }, () => expect(root, 'legacy_absent')));
+    }, () => withMethod(fs, 'readFileSync', original => function (file, ...args) {
+      if (String(file).startsWith(output + path.sep)) throw new Error('Producer contents must not be read');
+      return original.call(this, file, ...args);
+    }, () => expect(root, 'legacy_absent'))));
+  });
+  check('standalone API skill collision, corrupt listing, and JSON error contracts remain intact', () => {
+    const root = directory('api-skill-round-trip');
+    const run = (args, status = 0) => {
+      const result = cp.spawnSync(process.execPath, [CLI, 'api-skill', ...args, '--path', root, '--json'], {
+        cwd: root, encoding: 'utf8', timeout: 30000, windowsHide: true,
+        env: { ...process.env, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1',
+          LEERNESS_NO_AUTOCHCP: '1', LEERNESS_NO_AUTO_ROADMAP: '1' },
+      });
+      assert.strictEqual(result.error, undefined);
+      assert.strictEqual(result.signal, null);
+      assert.strictEqual(result.status, status, String(result.stdout || result.stderr).slice(-2048));
+      return JSON.parse(result.stdout);
+    };
+    const ids = [];
+    // Unsupported FTP is rejected before any request; --skeleton exercises the real writer offline.
+    for (const direction of ['alpha', 'beta']) {
+      const result = run(['add', `ftp://example.test/docs?${direction}`, '--skeleton', '--no-crawl',
+        '--direction', `${direction}-direction`]);
+      assert.strictEqual(result.ok, true);
+      assert.strictEqual(result.skeleton, true);
+      ids.push(result.id);
+    }
+    assert.notStrictEqual(ids[0], ids[1]);
+    const output = path.join(root, '.leerness', 'api-skills');
+    for (const [index, direction] of ['alpha', 'beta'].entries()) {
+      assert(fs.readFileSync(path.join(output, ids[index] + '.md'), 'utf8').includes(`${direction}-direction`));
+      assert(fs.readFileSync(path.join(output, ids[index] + '.md'), 'utf8').includes(`ftp://example.test/docs?${direction}`));
+    }
+    write(path.join(output, 'bad.md'), '---\nid: intended\nname: X\n# no closing');
+    const listing = run(['list']);
+    assert.strictEqual(listing.skills.length, 3);
+    assert.strictEqual(listing.corruptCount, 1);
+    assert.strictEqual(listing.skills.find(skill => skill.id === 'bad').corrupt, true);
+    const error = run(['add', 'not-a-url'], 1);
+    assert.strictEqual(error.ok, false);
+    assert.strictEqual(error.code, 'fetch_failed');
+    noWrites(() => expect(root, 'legacy_absent'));
+    store(localDescriptor(root), 'project-local', { layout: 'worktree-private' });
+    noWrites(() => {
+      const blockedAdd = run(['add', 'ftp://example.test/docs?denied', '--skeleton', '--no-crawl'], 1);
+      assert.strictEqual(blockedAdd.code, 'runtime_layout_incompatible');
+      assert(/\(layout_unsupported\)/.test(blockedAdd.error));
+      blocked(root, 'layout_unsupported');
+    });
   });
   check('standalone preview add, mockup, and subsequent revise remain writable', () => {
     const root = directory('preview-round-trip');
@@ -348,10 +460,192 @@ try {
     assert(!fs.existsSync(built.dir));
     noWrites(() => expect(root, 'legacy_absent'));
   });
-  for (const variant of ['wrong-kind', 'lookalike', 'foreign-sibling', 'linked']) {
-    check(`standalone preview directory does not admit ${variant}`, () => {
-      const root = directory('preview-invalid');
-      const previews = path.join(root, '.leerness', 'previews');
+  check('standalone skill learn remains writable and preserves the first skill', () => {
+    const root = directory('skill-learn-round-trip');
+    standaloneCli(root, ['skill', 'learn', 'compat-first', '--capability', 'first-capability']);
+    const first = path.join(root, '.leerness', 'skills', 'compat-first');
+    const before = snapshot(first);
+    standaloneCli(root, ['skill', 'learn', 'compat-second', '--capability', 'second-capability']);
+    assert.strictEqual(snapshot(first), before);
+    for (const name of ['first', 'second']) {
+      const output = path.join(root, '.leerness', 'skills', `compat-${name}`);
+      const data = JSON.parse(fs.readFileSync(path.join(output, 'skill.json'), 'utf8'));
+      assert.strictEqual(data.name, `compat-${name}`);
+      assert.deepStrictEqual(data.capabilities, [`${name}-capability`]);
+      assert(fs.readFileSync(path.join(output, 'README.md'), 'utf8').includes(`- ${name}-capability`));
+    }
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  check('standalone persona add remains writable and preserves the first persona', () => {
+    const root = directory('persona-round-trip');
+    standaloneCli(root, ['persona', 'add', 'compat-first']);
+    const first = path.join(root, '.leerness', 'personas', 'compat-first.md');
+    assert(fs.readFileSync(first, 'utf8').startsWith('# compat-first\n'));
+    const before = signature(first);
+    standaloneCli(root, ['persona', 'add', 'compat-second']);
+    assert.deepStrictEqual(signature(first), before);
+    assert(fs.readFileSync(path.join(root, '.leerness', 'personas', 'compat-second.md'), 'utf8')
+      .startsWith('# compat-second\n'));
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  check('standalone skill export-all can repeat without losing existing output content', () => {
+    const root = directory('skill-export-round-trip');
+    const catalog = path.join(root, 'catalog.json');
+    write(catalog, JSON.stringify({ skills: [{ id: 'compat-export', displayNameKo: 'Compatibility export',
+      capabilities: ['export-capability'], version: '1.0.0', verification: 'unverified' }] }));
+    const env = { LEERNESS_SKILLPACK_PATH: catalog };
+    standaloneCli(root, ['skill', 'export-all'], env);
+    const output = path.join(root, '.leerness', 'skills-export');
+    const skill = path.join(output, 'compat-export', 'SKILL.md');
+    const before = fs.readFileSync(skill, 'utf8');
+    assert(before.startsWith('---\nname: compat-export\n') && before.includes('- export-capability\n'));
+    const retained = path.join(output, 'retained.md');
+    write(retained, sentinel);
+    const retainedBefore = signature(retained);
+    standaloneCli(root, ['skill', 'export-all'], env);
+    assert.strictEqual(fs.readFileSync(skill, 'utf8'), before);
+    assert.deepStrictEqual(signature(retained), retainedBefore);
+    assert.deepStrictEqual(fs.readdirSync(output).sort(), ['compat-export', 'retained.md']);
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  check('standalone review md can repeat without changing source or retained reviews', () => {
+    const root = directory('review-round-trip');
+    const source = path.join(root, 'local.js');
+    write(source, 'module.exports = 17;\n');
+    const sourceBefore = signature(source);
+    const args = ['review', 'local.js', '--persona', 'security', '--emit', 'md'];
+    assert(standaloneCli(root, args).includes('module.exports = 17;'));
+    const output = path.join(root, '.leerness', 'reviews');
+    assert(fs.statSync(output).isDirectory());
+    const retained = path.join(output, 'retained.md');
+    write(retained, sentinel);
+    const retainedBefore = signature(retained);
+    assert(standaloneCli(root, args).includes('module.exports = 17;'));
+    assert.deepStrictEqual(signature(source), sourceBefore);
+    assert.deepStrictEqual(signature(retained), retainedBefore);
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  // Real fresh-process admissions, not cached readers or no-op controls. These
+  // six local commands never invoke providers, fetch endpoints, or credentials.
+  check('standalone requests add preserves the first request on a second admission', () => {
+    const root = directory('requests-round-trip');
+    const file = path.join(root, '.leerness', 'user-requests.json');
+    standaloneCli(root, ['requests', 'add', 'compat-first', '--json']);
+    const first = JSON.parse(fs.readFileSync(file, 'utf8')).requests;
+    assert.strictEqual(first.length, 1);
+    assert.strictEqual(first[0].id, 'UR-0001');
+    assert.strictEqual(first[0].text, 'compat-first');
+    assert.strictEqual(first[0].status, 'open');
+    standaloneCli(root, ['requests', 'add', 'compat-second', '--json']);
+    const after = JSON.parse(fs.readFileSync(file, 'utf8')).requests;
+    assert.strictEqual(after.length, 2);
+    assert.deepStrictEqual(after[0], first[0]);
+    assert.strictEqual(after[1].id, 'UR-0002');
+    assert.strictEqual(after[1].text, 'compat-second');
+    assert.strictEqual(after[1].status, 'open');
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  check('standalone shell failure recording preserves the first entry on a second admission', () => {
+    const root = directory('shell-failures-round-trip');
+    const file = path.join(root, '.leerness', 'shell-failures.json');
+    // --record stores command text; it does not execute that command.
+    standaloneCli(root, ['shell-guard', '--record', '--cmd', 'echo compat-first', '--shell', 'bash', '--exit', '1', '--json']);
+    const first = JSON.parse(fs.readFileSync(file, 'utf8')).failures;
+    assert.strictEqual(first.length, 1);
+    assert.strictEqual(first[0].cmd, 'echo compat-first');
+    assert.strictEqual(first[0].exitCode, 1);
+    assert.strictEqual(first[0].shell, 'bash');
+    standaloneCli(root, ['shell-guard', '--record', '--cmd', 'echo compat-second', '--shell', 'bash', '--exit', '2', '--json']);
+    const after = JSON.parse(fs.readFileSync(file, 'utf8')).failures;
+    assert.strictEqual(after.length, 2);
+    assert.deepStrictEqual(after[0], first[0]);
+    assert.strictEqual(after[1].cmd, 'echo compat-second');
+    assert.strictEqual(after[1].exitCode, 2);
+    assert.strictEqual(after[1].shell, 'bash');
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  check('standalone wakeup interval updates the persisted override on a second admission', () => {
+    const root = directory('wakeup-interval-round-trip');
+    const file = path.join(root, '.leerness', 'wakeup-history.json');
+    standaloneCli(root, ['wakeup-interval', 'set', '120', '--json']);
+    const first = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.strictEqual(first.override, 120);
+    assert.deepStrictEqual(first.fires, []);
+    standaloneCli(root, ['wakeup-interval', 'set', '240', '--json']);
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.strictEqual(after.override, 240);
+    assert.deepStrictEqual(after.fires, first.fires);
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  check('standalone permissions set persists the requested preset on a second admission', () => {
+    const root = directory('permissions-round-trip');
+    const file = path.join(root, '.leerness', 'agent-permissions.json');
+    standaloneCli(root, ['permissions', 'set', 'basic']);
+    const first = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.strictEqual(first.mode, 'basic');
+    assert.strictEqual(first.shell.exec, false);
+    assert.strictEqual(first.network.fetch, false);
+    assert.strictEqual(first.filesystem.delete, false);
+    standaloneCli(root, ['permissions', 'set', 'extended']);
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.strictEqual(after.mode, 'extended');
+    assert.strictEqual(after.shell.exec, true);
+    assert(after.shell.allowList.includes('node'));
+    assert.deepStrictEqual(after.filesystem.restrictTo, ['./']);
+    assert.strictEqual(after.filesystem.delete, false);
+    assert.strictEqual(after.admin, false);
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  check('standalone manual benchmark recording appends without losing the first row', () => {
+    const root = directory('llm-bench-round-trip');
+    const file = path.join(root, '.leerness', 'llm-bench-history.md');
+    standaloneCli(root, ['llm-bench', 'record', '--model', 'local-record-only', '--label', 'compat-first', '--score', '1', '--tokens', '11']);
+    const first = fs.readFileSync(file, 'utf8');
+    assert(first.startsWith('# LLM Bench History\n'));
+    assert(first.includes('| local-record-only | compat-first | 1 | 11 |\n'));
+    standaloneCli(root, ['llm-bench', 'record', '--model', 'local-record-only', '--label', 'compat-second', '--score', '2', '--tokens', '22']);
+    const after = fs.readFileSync(file, 'utf8');
+    assert(after.startsWith(first));
+    assert(after.slice(first.length).includes('| local-record-only | compat-second | 2 | 22 |\n'));
+    assert.strictEqual(after.split('\n').filter(line => line.includes('| local-record-only |')).length, 2);
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  check('standalone glossary rebuild preserves manual content and the first dependency', () => {
+    const root = directory('glossary-round-trip');
+    const pkg = path.join(root, 'package.json');
+    const markdown = path.join(root, '.leerness', 'glossary.md');
+    const json = path.join(root, '.leerness', 'glossary.json');
+    const description = 'Local fixture dependency description';
+    write(pkg, JSON.stringify({ name: 'compat-glossary', version: '1.0.0', dependencies: { 'compat-first': '1.0.0' } }));
+    write(path.join(root, 'node_modules', 'compat-first', 'package.json'), JSON.stringify({ name: 'compat-first', description }));
+    standaloneCli(root, ['glossary', 'build', '--json']);
+    const first = JSON.parse(fs.readFileSync(json, 'utf8'));
+    assert.strictEqual(first.total, 1);
+    assert.strictEqual(first.defined, 1);
+    assert.strictEqual(first.entries[0].term, 'compat-first');
+    assert.strictEqual(first.entries[0].plainEn, description);
+    assert.strictEqual(first.entries[0].source, 'package-description');
+    const prefix = 'Manual glossary preface\n', suffix = '\nManual glossary appendix\n';
+    write(markdown, prefix + fs.readFileSync(markdown, 'utf8') + suffix);
+    write(pkg, JSON.stringify({ name: 'compat-glossary', version: '1.0.0',
+      dependencies: { 'compat-first': '1.0.0', 'compat-second': '1.0.0' } }));
+    write(path.join(root, 'node_modules', 'compat-second', 'package.json'), JSON.stringify({ name: 'compat-second', description: 'Second local fixture dependency' }));
+    standaloneCli(root, ['glossary', 'build', '--json']);
+    const after = JSON.parse(fs.readFileSync(json, 'utf8'));
+    assert.strictEqual(after.total, 2);
+    assert.strictEqual(after.defined, 2);
+    assert.strictEqual(after.entries.length, 2);
+    assert.deepStrictEqual(after.entries.find(entry => entry.term === 'compat-first'), first.entries[0]);
+    assert.strictEqual(after.entries.find(entry => entry.term === 'compat-second').plainEn, 'Second local fixture dependency');
+    const text = fs.readFileSync(markdown, 'utf8');
+    assert(text.startsWith(prefix) && text.endsWith(suffix));
+    assert(text.includes('compat-first') && text.includes('compat-second'));
+    noWrites(() => expect(root, 'legacy_absent'));
+  });
+  for (const name of standaloneOutputDirectories) for (const variant of ['wrong-kind', 'lookalike', 'foreign-sibling', 'linked']) {
+    check(`standalone ${name} directory does not admit ${variant}`, () => {
+      const root = directory('producer-invalid');
+      const previews = path.join(root, '.leerness', name);
       fs.mkdirSync(path.dirname(previews));
       if (variant === 'wrong-kind') write(previews, sentinel);
       else if (variant === 'lookalike') fs.mkdirSync(previews + '-private');

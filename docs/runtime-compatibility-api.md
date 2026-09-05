@@ -94,9 +94,50 @@ Standalone stores may coexist with their producers' exact lock/release, temporar
 corruption-backup and first-install names. Unknown names, links and incorrect entry
 kinds remain refused; the reader does not open store or recovery contents. This
 preserves concurrent role/provenance writers without accepting an arbitrary folder.
-The exact regular `previews` output directory is also recognized, including the direct
-builder's store-free output. Its contents are not read by admission; preview writers
-still validate each source/output path and refuse linked output directories.
+Existing standalone output directories are recognized by exact name and regular
+directory kind, so a producer's first successful write does not block its next operation:
+
+| Exact top-level directory | Existing producer |
+| --- | --- |
+| `previews` | Preview commands and direct store-free builder |
+| `api-skills` | API document/skeleton storage |
+| `skills` | Local skill learn/install |
+| `personas` | Custom persona templates |
+| `skills-export` | Local skill export/export-all |
+| `reviews` | Review prompt `--emit md` directory |
+| `incidents` | Incident JSON storage |
+| `skills-publish`, `skills-publish-tarball` | Existing local publication staging |
+
+Admission neither enumerates nor reads their contents, and does not certify domain
+records, authorize publication, or bypass a producer's own checks. Linked directories,
+wrong entry kinds, lookalike names and foreign siblings remain refused. The existing
+E2E API collision/corruption/JSON contract is preserved without requiring `init`.
+
+The same exact-name rule covers existing standalone files below, including their
+already-defined lock/temporary/recovery shapes. Metadata recognition is not a claim
+that each command can execute without its own prerequisites or user authorization.
+
+| Exact top-level files | Existing producer |
+| --- | --- |
+| `user-requests.json` | Request recording |
+| `shell-failures.json` | Shell analysis `--record` (not command execution) |
+| `platform-constraints.json` | Custom platform constraints |
+| `wakeup-history.json` | Local wakeup history/interval settings |
+| `agent-slash-commands.json` | Slash-command snapshot recording |
+| `environment.json` | Environment detection writeback |
+| `agent-permissions.json`, `credentials.local.json` | Explicit local settings/credential registration |
+| `llm-bench-history.md` | Manual benchmark recording |
+| `glossary.md`, `glossary.json` | Glossary build |
+| `reuse-map.md`, `design-system.md` | Reuse registration/design-guide merge |
+| `skill-suggestions.md`, `skill-auto-cache.json` | Skill suggestions/official catalog cache |
+| `provider-probe-cache.json`, `orchestrate-log.md` | Provider-probe cache/explicit orchestration log |
+| `feature-graph.md` | Feature graph, with the existing project/explicit-force gate |
+| `enforce.json` | Hook installation, still requiring Git and its installation checks |
+| `agent-reminders.md` | Explicit stale-handoff writeback |
+
+No cache refresh, provider call, server, credential operation, scheduling or publication
+is performed by compatibility inspection. This is a bounded legacy-producer inventory,
+not a new migration manifest or a guarantee about unregistered external writers.
 
 `withRuntimeWrites(root, callback)` provides an operation-local synchronous/async failure
 latch. CLI admission precedes automatic workspace migration and bookkeeping and uses the

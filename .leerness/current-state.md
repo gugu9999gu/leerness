@@ -18,6 +18,7 @@ doNotStore:
 Updated: 2026-09-06
 
 ## Now
+- 최신 검증: e8037bc / CI33989990574 fast 두 OS·release-runtime4개 성공, Linux full E2E는1.36.74에서466/467로 실패했다. 정확한 기존 producer 디렉터리9개/추가파일20개 분류를 보완해 원본E2E 수정 없이 Node20/26 각2/2+관측11/11 통과했다. 새 실제 반복검사가 잡은 기존 glossary import 누락도 최소수정했고 reader305/305(18/26), actual Codex delta CLEAN을 확인했다. 최종 고정 후보 CI/pack/공개187 배포는 아직 대기다.
 - P-0021 사용자 승인 / UR-0100: T-0180 compatibility-only 진단·쓰기 경계 구현 및 통합검증 진행 중. legacy 위치 유지, activation 미구현 <!-- leerness:auto -->
 - v1.36.187 첫 후보2f4ce37 CI33982239269는4/13 성공·9/13 실패로 보존한다. 두 번째d3eaf15 CI33983778451는fast 두 OS 실패를 확인해 취소했다(4개 release-runtime 성공, 7개 full gate 미완료). 동시 복사 중 늦게 진입한 writer의 조기 conflict와 Windows Node20 namespace rollback 중복 admission을 재현·수정했다. 실제 지원 CI 재검증과 공개 배포는 아직 대기다.
 - 잠금 대기는 읽기 전용이며 만료·비정상 잠금은 거부, 공개 compatibility 진단은 즉시 응답한다. 기존 canonical 프로젝트 별칭은 admission을 공유하되 매 대상 정규화와 오류 latch를 유지한다. Node18/20/24/26 migration72/72와 별칭 rollback24/24, 신규 admission21/21 통과. 실제 최종 Codex 검수 및 전체 후보 검증 진행 중이다.
