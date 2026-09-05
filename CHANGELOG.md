@@ -7,6 +7,8 @@
 - perf(state): reuse operation-local Git topology and workspace ownership while re-reading compatibility indicators; add real writer and old-client negative controls
 - fix(selftest): retain bounded UR-0113 encoding failure diagnostics and restore prior exit status; preserve the original Windows Node24 replay failure as inconclusive
 - fix(windows): allow 30 seconds per metadata-preserving replacement attempt; keep uncertain timeouts non-retryable and retain original/recovery artifacts
+- fix(runtime): join in-flight legacy migrations read-only before writer admission and share canonical identity across Windows namespace, short-path and junction aliases; preserve bounded denial and rollback
+- fix(selftest): bound transient Windows cleanup retries for three owned diagnostic fixtures, retain exact directory identity and report exhausted cleanup failures instead of leaving silent leaks
 
 ## 1.36.186 — 2026-09-05
 

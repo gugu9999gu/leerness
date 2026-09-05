@@ -60,6 +60,7 @@
     "test:mcp-presence": "node ./scripts/mcp-presence-probe.js",
     "test:smoke": "node ./scripts/smoke.js",
     "test:parent-detect": "node ./scripts/parent-detect-selftest-probe.js",
+    "test:selftest-cleanup": "node ./scripts/selftest-cleanup-probe.js",
     "test:i18n": "node ./scripts/i18n-priority-surface-probe.js && node ./scripts/i18n-next-cluster-probe.js",
     "lint": "node ./scripts/lint.js",
     "prepack": "node ./bin/leerness.js readme sync . && node ./bin/leerness.js --version",
@@ -69,7 +70,7 @@
     "test:role-store-loader": "node ./scripts/role-store-loader-probe.js",
     "test:role-fallback": "node ./scripts/role-fallback-probe.js",
     "test:state-scopes": "node ./scripts/workspace-selection-probe.js && node ./scripts/state-scopes-probe.js && node ./scripts/state-inspect-cli-probe.js",
-    "test:runtime-compatibility": "node ./scripts/runtime-layout-probe.js && node ./scripts/runtime-write-probe.js && node ./scripts/runtime-repl-probe.js && node ./scripts/runtime-git-write-probe.js && node ./scripts/runtime-replacement-probe.js && node ./scripts/encoding-selftest-probe.js"
+    "test:runtime-compatibility": "node ./scripts/runtime-layout-probe.js && node ./scripts/runtime-admission-probe.js && node ./scripts/runtime-write-probe.js && node ./scripts/runtime-repl-probe.js && node ./scripts/runtime-git-write-probe.js && node ./scripts/runtime-replacement-probe.js && node ./scripts/encoding-selftest-probe.js && node ./scripts/selftest-cleanup-probe.js"
   },
   "publishConfig": {
     "access": "public"

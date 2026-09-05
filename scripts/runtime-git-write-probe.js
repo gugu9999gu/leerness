@@ -17,10 +17,14 @@ portable.spawnPortableSync = (command, args, opts) => {
 const git = require('../lib/git');
 const layout = require('../lib/runtime-layout');
 const runtime = require('../lib/runtime-writes');
-const originalReader = layout.createRuntimeCompatibilityReader;
+const originalAdmission = layout.createRuntimeWriterAdmission;
 let compatible = true;
-layout.createRuntimeCompatibilityReader = () => () => ({
-  compatible, writeDisposition: compatible ? 'allowed' : 'blocked', reasonCode: compatible ? 'legacy_absent' : 'layout_unsupported',
+// This transport-classification fixture supplies observations at the writer
+// admission seam. Real Git discovery/admission is covered by the other probes.
+layout.createRuntimeWriterAdmission = () => ({
+  reader: () => ({ compatible, writeDisposition: compatible ? 'allowed' : 'blocked',
+    reasonCode: compatible ? 'legacy_absent' : 'layout_unsupported' }),
+  waitedForLock: false, lockWaitedMs: 0,
 });
 const source = path.resolve(__dirname, '../lib/git.js');
 const stamp = () => ({ mtime: String(fs.statSync(source, { bigint: true }).mtimeNs),
@@ -74,10 +78,13 @@ try {
     test(`runtime blocks ${args.join(' ')}`, () => {
       compatible = true;
       const count = calls.length;
+      let entered = false;
       assert.throws(() => runtime.withRuntimeWrites(cwd, () => {
+        entered = true;
         compatible = false;
         git.gitSpawn(args, { cwd, encoding: 'utf8' });
-      }), error => error.code === 'E_RUNTIME_LAYOUT_INCOMPATIBLE');
+      }), error => error.code === 'E_RUNTIME_LAYOUT_INCOMPATIBLE' && error.reasonCode === 'layout_unsupported');
+      assert.strictEqual(entered, true, 'fixture must reach the mutation boundary after healthy admission');
       assert.strictEqual(calls.length, count, 'transport reached after rejection');
     });
     test(`dry-run blocks ${args.join(' ')}`, () => {
@@ -103,7 +110,7 @@ try {
 } finally {
   git.setGitDryRun(false);
   portable.spawnPortableSync = originalSpawn;
-  layout.createRuntimeCompatibilityReader = originalReader;
+  layout.createRuntimeWriterAdmission = originalAdmission;
 }
 console.log(`RUNTIME_GIT_WRITE_PROBE ${passed}/${passed + failed} passed; Git processes launched: 0`);
 if (failed) process.exitCode = 1;

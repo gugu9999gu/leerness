@@ -13871,7 +13871,7 @@ total++;
     }
 
     // ③ verify-claim 이 **사실이 아닌 것을 말하지 않는다** — git 이 PATH 에 없을 뿐인 진짜 저장소를
-    //    "저장소가 아니다" 라고 단정했다.
+    //    "저장소가 아니다" 라고 단정하지 않는다. 새 admission 은 git_missing 으로 bookkeeping 전에 거부한다.
     {
       const d = mkRepo('claim');
       fs.writeFileSync(path.join(d, 'a.js'), 'a'); G(d, ['add', '-A']); G(d, ['commit', '-qm', 'i']);
@@ -13885,12 +13885,29 @@ total++;
       };
       const normal = getGit();
       const emptyDir = fs.mkdtempSync(path.join(sb, 'nogitpath-'));
-      const noGit = getGit({ PATH: emptyDir + path.delimiter + path.dirname(process.execPath) });
+      const snapshot = () => {
+        const rows = [];
+        const visit = (p, rel) => {
+          const st = fs.lstatSync(p, { bigint: true });
+          const data = st.isDirectory() ? ['directory'] : st.isFile() ? ['file', fs.readFileSync(p).toString('base64')]
+            : st.isSymbolicLink() ? ['link', fs.readlinkSync(p)] : ['other'];
+          rows.push([rel, String(st.mode), String(st.size), String(st.mtimeNs), data]);
+          if (st.isDirectory()) for (const name of fs.readdirSync(p).sort()) visit(path.join(p, name), rel + '/' + name);
+        };
+        visit(d, '.');
+        return JSON.stringify(rows);
+      };
+      const beforeNoGit = snapshot();
+      const noGitResult = RP(d, ['verify-claim', 'T-0001', '--path', d, '--json'],
+        { PATH: emptyDir + path.delimiter + path.dirname(process.execPath) });
+      const noGit = JSON.parse(String(noGitResult.stdout || ''));
+      const unchanged = snapshot() === beforeNoGit;
       if (!normal || normal.parse === false) bad.push('③정상 PATH 에서 --json 파싱 실패(계측 붕괴)');
-      if (!noGit || noGit.parse === false) bad.push('③git 없는 PATH 에서 --json 파싱 실패');
-      else if (noGit.reason === 'not-a-git-repo' || noGit.reason === 'not-a-repo') bad.push(`③git 부재를 "저장소 아님" 이라 단정(${noGit.reason})`);
-      else if (noGit.reason !== 'no-git') bad.push(`③git 부재 사유=${noGit.reason} (기대 no-git)`);
-      dbg.claim = { normal: normal && normal.reason !== undefined ? normal.reason : (normal && normal.applicable), noGit: noGit && noGit.reason };
+      if (noGitResult.status !== 1 || !noGit || noGit.ok !== false || noGit.code !== 'runtime_layout_incompatible'
+        || !String(noGit.error || '').includes('(git_missing)')) bad.push(`③git 부재 admission 계약 불일치: exit=${noGitResult.status} report=${JSON.stringify(noGit)}`);
+      if (!unchanged) bad.push('③git 부재 거부가 대상 전체 트리의 bytes/mtime 을 바꿈');
+      dbg.claim = { normal: normal && normal.reason !== undefined ? normal.reason : (normal && normal.applicable),
+        noGit: noGit && noGit.code, exit: noGitResult.status, unchanged };
     }
 
     // ④ 세션 레코드가 **모르는 키를 조용히 지우지 않는다**. 버전 혼재가 이 기계에 실재한다(전역본 < 저장소).
@@ -14005,6 +14022,42 @@ total++;
   try { fs.writeFileSync(envP.GIT_CONFIG_GLOBAL, ''); fs.writeFileSync(envP.GIT_CONFIG_SYSTEM, ''); } catch {}
   const G = (d, a) => gitSpawn(a, { cwd: d, encoding: 'utf8', timeout: 60000, env: envP });
   const J = (r) => { try { return JSON.parse(String(r.stdout || '')); } catch { return null; } };
+  const targetSnapshot = (d) => {
+    const rows = [];
+    const visit = (p, rel) => {
+      const st = fs.lstatSync(p, { bigint: true });
+      const data = st.isDirectory() ? ['directory'] : st.isFile() ? ['file', fs.readFileSync(p).toString('base64')]
+        : st.isSymbolicLink() ? ['link', fs.readlinkSync(p)] : null;
+      if (!data) throw new Error('enforce fixture 에 예상하지 않은 파일 종류: ' + rel);
+      rows.push([rel, String(st.mode), String(st.size), String(st.mtimeNs), data]);
+      if (st.isDirectory()) for (const name of fs.readdirSync(p).sort()) visit(path.join(p, name), rel + '/' + name);
+    };
+    visit(d, '.');
+    return JSON.stringify(rows);
+  };
+  // 실제 CLI는 bookkeeping 전 admission에서 거부한다. JSON 누락/다른 오류/성공/어떤 쓰기도 통과시키지 않는다.
+  const deniedEnforce = (d, sub, reason = 'git_repository_unavailable') => {
+    const before = targetSnapshot(d);
+    const r = RP(d, ['enforce', sub, '--path', d, '--json']);
+    const report = JSON.parse(String(r.stdout || ''));
+    const observed = /^Runtime layout blocks writes \(([a-z_]{1,80})\)\./.exec(String(report && report.error || ''));
+    const unchanged = targetSnapshot(d) === before;
+    if (r.status !== 1 || !report || report.ok !== false || report.code !== 'runtime_layout_incompatible'
+      || !observed || observed[1] !== reason) bad.push(`admission ${path.basename(d)}/${sub}: exit=${r.status} report=${JSON.stringify(report)}`);
+    if (!unchanged) bad.push(`admission ${path.basename(d)}/${sub}: 대상 전체 bytes/mtime 변경`);
+    (dbg.admission || (dbg.admission = [])).push({ target: path.basename(d), sub, exit: r.status, reason: observed && observed[1], unchanged });
+    return report;
+  };
+  // 조기 CLI 거부가 기존 저수준 술어/권고 계약 검사를 지우지 않게 실제 제품 함수를 별도 child에서 호출한다.
+  // 제품을 복사/재구현하지 않고 require.main 가드 아래 원본 전체를 메모리 compile해 이 함수만 export한다.
+  const lowLevelEnforce = (d, sub) => cp.spawnSync(process.execPath, ['-e', [
+    "const fs = require('fs'), path = require('path'), Module = require('module');",
+    'const [cli, root, sub] = process.argv.slice(1);',
+    "process.argv = [process.execPath, cli, 'enforce', sub, '--path', root, '--json'];",
+    'const loaded = new Module(cli, module); loaded.filename = cli; loaded.paths = Module._nodeModulePaths(path.dirname(cli));',
+    "loaded._compile(fs.readFileSync(cli, 'utf8') + '\\nmodule.exports.__e2eEnforce = enforceCmd;\\n', cli);",
+    'loaded.exports.__e2eEnforce(root, sub);',
+  ].join('\n'), CLI, d, sub], { cwd: d, encoding: 'utf8', timeout: 300000, env: envP, maxBuffer: 32 * 1024 * 1024 });
   //   git 자신이 말하는 훅 경로(core.hooksPath 반영) — 하드코딩하면 이 클래스를 못 잡는다.
   const _gitHookOf = (d) => {
     const r = G(d, ['rev-parse', '--git-path', 'hooks/pre-commit']);
@@ -14034,8 +14087,10 @@ total++;
     };
     const seen = {};
     for (const [label, d] of Object.entries(cases)) {
-      const st = J(RP(d, ['enforce', 'status', '--path', d, '--json']));
-      const ins = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      const damaged = label === 'brokenHead' || label === 'brokenDir';
+      if (damaged) { deniedEnforce(d, 'status'); deniedEnforce(d, 'install'); }
+      const st = J(damaged ? lowLevelEnforce(d, 'status') : RP(d, ['enforce', 'status', '--path', d, '--json']));
+      const ins = J(damaged ? lowLevelEnforce(d, 'install') : RP(d, ['enforce', 'install', '--path', d, '--json']));
       if (!st) { bad.push(`①${label}: status --json 파싱 실패`); continue; }
       if (!ins) { bad.push(`①${label}: install --json 파싱 실패`); continue; }
       seen[label] = { gitState: st.gitState, installable: st.installable, insOk: ins.ok === true, code: ins.code || null };
@@ -14054,10 +14109,11 @@ total++;
     if (seen['not-a-repo'] && seen['not-a-repo'].gitState === (seen.ok || {}).gitState) bad.push('①git 아님과 정상이 같은 상태로 보고됨');
     if (seen.brokenHead && seen.brokenHead.gitState === (seen.ok || {}).gitState) bad.push('①HEAD 손상과 정상이 같은 상태로 보고됨');
 
-    //   ⑥ audit 도 **같은 어휘**로 답한다(종전엔 install 이 ok:true 인 저장소에서 audit 만 실패했다).
+    //   ⑥ CLI admission과 별도로 저수준 audit 도 **같은 어휘**로 답한다(종전엔 install 이 ok:true 인 저장소에서 audit 만 실패했다).
     {
       const d = cases.brokenHead;
-      const au = J(RP(d, ['enforce', 'audit', '--path', d, '--json']));
+      for (const target of [cases.brokenHead, cases.brokenDir]) deniedEnforce(target, 'audit');
+      const au = J(lowLevelEnforce(d, 'audit'));
       if (!au) bad.push('⑥audit --json 파싱 실패');
       else {
         if (au.ok !== false) bad.push(`⑥손상 저장소인데 audit ok=${au.ok}`);
@@ -14200,7 +14256,7 @@ total++;
       RP(b, ['init', b, '--yes', '--minimal']);
       try { fs.rmSync(path.join(b, '.git'), { recursive: true, force: true }); } catch {}
       gitSpawn(['init', '-q', '--bare', path.join(b, '.git')], { encoding: 'utf8' });
-      const bi = J(RP(b, ['enforce', 'install', '--path', b, '--json']));
+      const bi = deniedEnforce(b, 'install', 'git_bare_unsupported');
       if (bi && bi.ok === true) bad.push('⑭bare 저장소에 "설치됨" 이라 답함(강제될 수 없는 곳이다)');
       //    (c) **실패한 설치는 흔적을 남기지 않는다.** 실제로 실패하는 경우로 잰다(bare 저장소).
       //        ⚠ `core.hooksPath` 를 없는 디렉토리로 두는 것은 실패 케이스가 아니다 — 제품이 그 디렉토리를 만들고
@@ -14307,7 +14363,7 @@ total++;
       const h1 = fs.existsSync(hp) ? fs.readFileSync(hp, 'utf8') : null;
       const c1 = fs.existsSync(cp2) ? fs.readFileSync(cp2, 'utf8') : null;
       G(d, ['config', 'core.bare', 'true']);                 // 재설치를 실패시킨다
-      const i2 = J(RP(d, ['enforce', 'install', '--path', d, '--json']));
+      const i2 = deniedEnforce(d, 'install', 'git_bare_unsupported');
       if (i2 && i2.ok === true) bad.push('⑱실패시켰는데 설치 성공이라 답함(계측 붕괴)');
       const h2 = fs.existsSync(hp) ? fs.readFileSync(hp, 'utf8') : null;
       const c2 = fs.existsSync(cp2) ? fs.readFileSync(cp2, 'utf8') : null;
@@ -14368,19 +14424,22 @@ total++;
     }
 
     //   ⑪ `check` 는 네 번째 표면인데 git 상태를 아예 안 봤다 — 훅이 개념적으로 부르는 표면이라 여기서 조용하면 강제가 조용해진다.
-    //      단 **차단하지는 않는다**(커밋 훅 경로에서 우리 판정 실패로 사용자 커밋을 막지 않는다).
+    //      저수준 권고는 **차단하지 않는다**. CLI 자체는 그보다 먼저 admission에서 명시적으로 거부한다.
     {
-      const ck = J(RP(cases.brokenHead, ['enforce', 'check', '--path', cases.brokenHead, '--json']));
+      for (const target of [cases.brokenHead, cases.brokenDir]) deniedEnforce(target, 'check');
+      const lowCheck = lowLevelEnforce(cases.brokenHead, 'check');
+      const ck = J(lowCheck);
       if (!ck) bad.push('⑪손상 저장소 check --json 파싱 실패');
       else {
         if (!ck.gitState) bad.push('⑪check 가 git 상태를 말하지 않음(조용한 통과)');
         if (ck.enforced !== false) bad.push(`⑪git 을 못 쓰는데 enforced=${ck.enforced}`);
         if (ck.ok !== true) bad.push('⑪check 가 사용자 커밋을 막았다(권고 원칙 위반)');
+        if (lowCheck.status !== 0) bad.push(`⑪저수준 check 권고가 exit=${lowCheck.status} 로 차단`);
       }
       //    대조군 — 정상 저장소에서는 이 경로가 발동하지 않는다.
       const ck2 = J(RP(cases.ok, ['enforce', 'check', '--path', cases.ok, '--json']));
       if (ck2 && ck2.note === 'git_unusable') bad.push('⑪정상 저장소인데 git 사용불가로 판정(오탐)');
-      dbg.check = { broken: ck && ck.gitState, normalNote: ck2 && ck2.note };
+      dbg.check = { broken: ck && ck.gitState, lowLevelExit: lowCheck.status, normalNote: ck2 && ck2.note };
     }
     dbg.states = seen;
     ok = bad.length === 0;

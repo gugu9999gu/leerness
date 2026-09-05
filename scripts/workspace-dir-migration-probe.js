@@ -54,6 +54,21 @@ function json(result) {
   catch { return null; }
 }
 
+function rollbackDiagnostics(result) {
+  const detail = {
+    status: result.status, signal: result.signal || null, error: result.error?.code || null,
+    stdout: String(result.stdout || ''), stderr: String(result.stderr || ''),
+  };
+  // Keep complete reports when they fit (including multiple JSON documents).
+  // Bound the whole diagnostic as UTF-8 JSON, not just the first path prefix.
+  while (Buffer.byteLength(JSON.stringify(detail), 'utf8') > 4096) {
+    const field = detail.stdout.length >= detail.stderr.length ? 'stdout' : 'stderr';
+    detail[field] = detail[field].slice(0, Math.floor(detail[field].length * 0.75));
+    detail[field + 'Truncated'] = true;
+  }
+  return JSON.stringify(detail);
+}
+
 function write(file, text) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, text, 'utf8');
@@ -199,7 +214,7 @@ try {
       && !fs.existsSync(path.join(integrationLinked, '.leerness'))
       && !fs.existsSync(path.join(integrationLinked, '.leerness-backup')),
     'linked-integration-parent-rolls-back-without-outside-write',
-    `exit=${integrationLinkedResult.status} body=${(integrationLinkedResult.stdout || integrationLinkedResult.stderr || '').slice(0, 240)}`,
+    rollbackDiagnostics(integrationLinkedResult),
   ) && passed;
 
   const concurrent = path.join(tempRoot, 'concurrent-first-migration');
@@ -339,7 +354,7 @@ try {
       && !fs.existsSync(path.join(invalidGitignore, '.leerness-backup'))
       && !fs.existsSync(path.join(invalidGitignore, '.leerness')),
     'invalid-gitignore-rolls-back-and-keeps-legacy',
-    `exit=${invalidGitignoreResult.status} body=${(invalidGitignoreResult.stdout || invalidGitignoreResult.stderr || '').slice(0, 240)}`,
+    rollbackDiagnostics(invalidGitignoreResult),
   ) && passed;
 
   const linked = path.join(tempRoot, 'canonical-link-force');

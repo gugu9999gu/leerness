@@ -37,7 +37,7 @@ conversations or inferred migration success. It creates no cache, lock or presen
 
 - createRuntimeCompatibilityReader(root): capture topology/admission and return a fresh observation function.
 - inspectRuntimeCompatibility(root): new admission and one read-only report.
-- assertRuntimeWriteAllowed(root): return an allowed report or throw a bounded compatibility error.
+- assertRuntimeWriteAllowed(root): join writer admission, then return an allowed report or throw a bounded compatibility error.
 
 ## Fields
 
@@ -73,6 +73,23 @@ types/links, topology identity, descriptor bytes and fixed runtime indicators on
 It does not recursively scan runtime records or reclassify an operation's own transient files.
 This distinction preserves existing init and lock-owned legacy workspace migration.
 New public inspections and later writer operations make a new workspace admission.
+New writer operations may read-only wait for an existing regular, single-linked legacy
+workspace migration lock before classifying ownership. They reclassify after the peer
+finishes; waiting never grants lock ownership or permission to overwrite a conflict.
+The existing migration wait budget defaults to 10 seconds, is configurable through
+`LEERNESS_WORKSPACE_MIGRATION_LOCK_WAIT_MS`, and is clamped to 0–60 seconds. Expired or
+non-regular/linked lock observations block with `workspace_dir_migration_locked`; no
+lock is read, reclaimed or deleted by admission. The budget bounds contention waiting,
+not unrelated Git/filesystem I/O. Public `state compatibility` remains immediate.
+An observed non-workspace denial is terminal even if a peer subsequently removes its
+descriptor. A conflict snapshot gets at most one extra classification when no lock is
+seen, covering a peer that completed between observations without accepting persistent
+dual-live state.
+
+Canonical project identities share one admitted reader across 8.3, namespaced and
+junction aliases. Each target is resolved again, so retargeting an alias does not retain
+stale authority. Nested operations on another project receive independent admission;
+an operation never waits for its own migration lock through an equivalent path.
 Standalone stores may coexist with their producers' exact lock/release, temporary,
 corruption-backup and first-install names. Unknown names, links and incorrect entry
 kinds remain refused; the reader does not open store or recovery contents. This
@@ -113,7 +130,8 @@ CLI and already-loaded writer controls demonstrate that older clients ignore the
 Phase B requires separate approval, stopped/upgraded participants, a writer admission
 protocol and verified recovery/retention. None is supplied by an `allowed` report.
 
-`npm run test:runtime-compatibility` runs reader, real CLI/MCP/module/lock/FD, Git transport,
+`npm run test:runtime-compatibility` runs reader, bounded admission/alias/denial controls,
+real CLI/MCP/module/lock/FD, Git transport,
 Windows replacement and encoding-diagnostic probes. Windows-only controls are not implied
 by POSIX results. Release-only old-client controls require an existing installation:
 

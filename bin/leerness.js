@@ -4268,6 +4268,33 @@ function _selftestFixture(lang) {
   return dst;
 }
 
+// Only these in-process diagnostics own this cleanup path. Windows can keep a
+// child-process cwd open briefly; native rmSync retry options do not reliably
+// wait for that case on supported Node versions. Never hide exhausted cleanup.
+function _stRemoveInProcessFixture(target) {
+  const tempRoot = fs.realpathSync.native(os.tmpdir());
+  const initial = fs.lstatSync(target, { bigint: true });
+  const canonical = fs.realpathSync.native(target);
+  const invalid = () => Object.assign(new Error('Selftest fixture cleanup identity changed'), { code: 'E_SELFTEST_FIXTURE_CHANGED' });
+  if (!initial.isDirectory() || initial.isSymbolicLink() || path.dirname(canonical) !== tempRoot
+      || !/^__leerness_(anchor_redraft|next_action|addjson)_[A-Za-z0-9]{6}$/.test(path.basename(canonical))) throw invalid();
+  const deadline = process.hrtime.bigint() + 2500000000n;
+  const waitCell = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    let current;
+    try { current = fs.lstatSync(canonical, { bigint: true }); }
+    catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== initial.dev || current.ino !== initial.ino
+        || fs.realpathSync.native(canonical) !== canonical || fs.realpathSync.native(os.tmpdir()) !== tempRoot) throw invalid();
+    try { fs.rmSync(canonical, { recursive: true, force: true }); return; }
+    catch (error) {
+      const remaining = Number(deadline - process.hrtime.bigint()) / 1e6;
+      if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error.code) || remaining <= 0) throw error;
+      Atomics.wait(waitCell, 0, 0, Math.min(100, remaining));
+    }
+  }
+}
+
 // 1.9.258: leerness selftest — 설치된 leerness 바이너리의 코어 순수 함수 자가 검증.
 //   1.9.255~257 에서 export 한 보안/정확성/인코딩-핵심 함수를 실제 호출해 무결성 확인.
 //   사용자/CI 가 "내 leerness 가 정상인가?" 를 검증 (행위 검사가 포함돼 환경에 따라 수십 초 소요).
@@ -4659,7 +4686,7 @@ function _selfTestCases() {
           && rb.includes('새 정체성 신호') && rp.includes('새 정체성 신호');
       } catch {} finally {
         process.argv = savedArgv; process.stdout.write = savedWrite;
-        try { fs.rmSync(redraw, { recursive: true, force: true }); } catch {}
+        _stRemoveInProcessFixture(redraw);
       }
       if (!(phraseOk && redraftOk)) return false;
       // 무신호 시 발명 금지
@@ -4727,7 +4754,7 @@ function _selfTestCases() {
           && migratedProgress.command === 'leerness task list --path .'
           && migrated.every(a => typeof a.actionKey === 'string' && a.actionKey.length > 0);
       } catch { return false; }
-      finally { try { fs.rmSync(arena, { recursive: true, force: true }); } catch {} }
+      finally { _stRemoveInProcessFixture(arena); }
     } },
     { name: 'managed 파일 force 병합 (1.36.37, 1.9.441 드리프트 실측): writeIfSafe 가 --force 여도 managed 는 라인-diff 병합 — CLAUDE 커스텀 보존 (행위검사)', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_wif_'));
@@ -5369,7 +5396,10 @@ function _selfTestCases() {
         l = cap(['node', 'h', 'lesson', 'save', 'JSON계약 L', '--json', '--tag', 'tg'], () => lessonSave(tmp, 'JSON계약 L'));
         r = cap(['node', 'h', 'rule', 'add', 'JSON계약 R', '--json', '--trigger', 'every-session'], () => ruleAdd(tmp, 'JSON계약 R'));
         rDup = cap(['node', 'h', 'rule', 'add', 'JSON계약 R', '--json', '--trigger', 'every-session'], () => ruleAdd(tmp, 'JSON계약 R'));
-      } catch (e) { return false; } finally { process.stdout.write = _w; process.argv = save; process.exitCode = savedExit; try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+      } catch (e) { return false; } finally {
+        process.stdout.write = _w; process.argv = save; process.exitCode = savedExit;
+        _stRemoveInProcessFixture(tmp);
+      }
       const taskJ = !!t && t.ok === true && /^T-\d{4}/.test(String(t.id)) && t.status === 'requested' && t.request === 'JSON계약 T';
       const decJ = !!d && d.ok === true && d.title === 'JSON계약 D';
       const lesJ = !!l && l.ok === true && l.text === 'JSON계약 L' && l.tag === 'tg';
