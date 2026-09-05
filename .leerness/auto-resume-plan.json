@@ -1,16 +1,16 @@
 {
-  "savedAt": "2026-09-01T04:18:28.879Z",
-  "nextRoundVersion": "next after 1.36.184",
-  "expectedFireAt": "2026-09-01T04:43:28.872Z",
+  "savedAt": "2026-09-05T00:12:51.345Z",
+  "nextRoundVersion": "next after 1.36.185",
+  "expectedFireAt": "2026-09-05T00:37:51.342Z",
   "intervalMin": 25,
   "focus": "다음 라운드: handoff → next-action take → 사용자 명시 또는 5축 매트릭스 보강",
   "contextSnapshot": {
-    "currentVersion": "1.36.184",
+    "currentVersion": "1.36.185",
     "activeTaskId": "T-0092",
     "activeTaskRequest": "명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/i",
     "memorySurface": {
-      "tasksInProgress": 2,
-      "decisions": 19,
+      "tasksInProgress": 1,
+      "decisions": 23,
       "rulesActive": 2,
       "lessons": 14
     },

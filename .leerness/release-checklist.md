@@ -233,8 +233,8 @@ doNotStore:
 - [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.185 동기화; 신규 runtime dependency·lifecycle install script·환경변수 없음
 - [x] 최종 secrets 미승인 0, encoding 0, check/lazy/idempotency 0, 7개 lens 검토, rules 정상, gate 6/6·claims 147 신규 실패 0 및 다섯 task claim 통과
 - [x] `npm pack --dry-run`: 88 files, 2,175,087 bytes, shasum `67f8673847fb86ea5010493be038900ba8fc7d90`, integrity `sha512-XposOWnUEV9mRS0vq6FT3uRHOPpT/wRKo8QYo0jWnsxnThQzhy+LapEgp6UuxTtFXtQigcL7GG45aPyhTdriHQ==`
-- [ ] GitHub main/tag/Release와 구현 SHA 및 asset digest 일치
-- [ ] npm latest/exact metadata, 로컬 pack digest, fresh-prefix 설치본 selftest 일치
-- [ ] leerness.com 사이트 build/deploy, production root/changelog/llms/Pages origin 검증
-- [ ] GitHub Actions 13/13 성공, failure/cancelled/skipped/annotation 0
-- [ ] 롤백 기준: npm exact `leerness@1.36.184`, GitHub tag `v1.36.184`, 직전 사이트 커밋 `48657ca454de9555c431087951d5d68b275050ae`
+- [x] 공개 시점 GitHub main/tag/Release가 구현 SHA `585c8f421edda7db200cc78c59a7ca889c05dd10`에서 일치; Release asset 2,175,087 bytes, SHA-256 `bd9cb9f18bd89c665a93612d85287e0ac1afecd9d36015105e3f67dc6320dda1` 로컬 일치
+- [x] npm latest/exact 1.36.185; registry shasum `67f8673847fb86ea5010493be038900ba8fc7d90`·integrity `sha512-XposOWnUEV9mRS0vq6FT3uRHOPpT/wRKo8QYo0jWnsxnThQzhy+LapEgp6UuxTtFXtQigcL7GG45aPyhTdriHQ==` 로컬 pack 일치, fresh-prefix CLI/package 1.36.185와 selftest 355/355 통과
+- [x] 사이트 commit `b39a79cceb6130d15825496d9d0a72ada5b9023c`, Astro 709 pages, Cloudflare production deployment `cd2d9405-9741-4f1b-b685-92408d82c698`; leerness.com root/changelog/llms/Pages origin이 첫 시도에 HTTP 200 및 1.36.185 표식 노출
+- [x] GitHub Actions run `33932206889`가 구현 SHA에서 13/13 성공; failure/cancelled/skipped/timed_out/annotation 0, Ubuntu Node 18/20/22와 Windows Node 18/20/22/24 full E2E 모두 통과
+- [x] 롤백 기준: npm exact `leerness@1.36.184`, GitHub tag `v1.36.184`, 직전 사이트 커밋 `48657ca454de9555c431087951d5d68b275050ae`

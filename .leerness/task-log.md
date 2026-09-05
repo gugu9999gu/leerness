@@ -259,8 +259,19 @@ doNotStore:
 - 사이트 commit `48657ca454de9555c431087951d5d68b275050ae`, Astro 708 pages, Cloudflare production deployment `7c957a08-0ade-4040-a9ec-60e5c727a65c`를 게시했고 production 4개 URL이 첫 검증에서 HTTP 200과 1.36.184를 노출했다.
 - GitHub Actions run 33469212506은 구현 SHA에서 13/13 성공했고 failure/cancelled/skipped와 annotation은 모두 0이다. T-0164와 UR-0094를 완료했으며 T-0159는 waiting 그대로 두었다.
 
+## 2026-09-05 — v1.36.185 public release and CI verification
+
+- 구현 merge SHA `585c8f421edda7db200cc78c59a7ca889c05dd10`에서 GitHub main/tag/Release가 일치하고, 2,175,087-byte asset SHA-256 `bd9cb9f18bd89c665a93612d85287e0ac1afecd9d36015105e3f67dc6320dda1`이 로컬 tarball과 일치한다.
+- npm latest/exact 1.36.185의 shasum/integrity가 로컬 pack과 일치하며 fresh-prefix 공개 설치본은 CLI/package 1.36.185, runtime dependency 0, install script 없음, selftest 355/355를 확인했다.
+- 사이트 commit `b39a79cceb6130d15825496d9d0a72ada5b9023c`, Astro 709 pages, Cloudflare deployment `cd2d9405-9741-4f1b-b685-92408d82c698`를 게시했고 production root/changelog/llms/Pages origin이 첫 시도에 HTTP 200과 1.36.185를 노출했다.
+- GitHub Actions run `33932206889`는 구현 SHA에서 13/13 성공했고 failure/cancelled/skipped/timed_out/annotation은 모두 0이다.
+- 최종 `session close` 뒤 다섯 task claim은 모두 `ok=true`, gate 6/6·claims 147 신규 실패 0, check healthy다. post-close Git advisory는 이미 커밋된 구현 대신 생성된 `leerness.html`만 현재 diff로 보므로 false/strong-mismatch를 정직하게 기록했다.
+
 ## 2026-09-01 session-close
 - Generated session-handoff.md and refreshed current-state.md.
 
 ## 2026-09-01 session-close
+- Generated session-handoff.md and refreshed current-state.md.
+
+## 2026-09-05 session-close
 - Generated session-handoff.md and refreshed current-state.md.
