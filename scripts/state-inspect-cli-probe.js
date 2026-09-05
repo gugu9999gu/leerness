@@ -10,7 +10,8 @@ const cp = require('child_process');
 const { gitSpawn, _shouldDrop } = require('../lib/git');
 const { LEGACY_WORKSPACE_DIR, CANONICAL_WORKSPACE_DIR } = require('../lib/workspace-dir');
 const CLI = path.resolve(__dirname, '../bin/leerness.js');
-const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-state-inspect-cli-'));
+// Match canonical product paths even when TEMP uses a Windows short-name alias.
+const fixture = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'leerness-state-inspect-cli-'));
 let passed = 0;
 
 function check(label, run) {
