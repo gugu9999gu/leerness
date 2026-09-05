@@ -224,3 +224,17 @@ doNotStore:
 - [x] GitHub Actions run 33469212506이 구현 SHA에서 13/13 성공; failure/cancelled/skipped 0, annotation 0, Ubuntu Node 18/20/22와 Windows Node 18/20/22/24 full E2E 전부 통과
 - [x] 최종 `verify-claim T-0164 --require-evidence` 통과: evidence complete, claims consistent, Git cross-check true, implementation substance true, scope creep 0; 최종 gate 6/6, 완료 claims 142건 신규 실패 0
 - [x] 롤백 기준: npm exact `leerness@1.36.183` 재설치, GitHub tag `v1.36.183`, 직전 사이트 커밋 `74796968600763bec42bc449a7ce0f1ce622ec1d`
+
+## 2026-09-05 — v1.36.185
+
+- [x] provider capacity 24/24, exact-file lease 57/57, Role/Agent/Routing schema 88/88, fail-closed role-store 65/65, role fallback/provenance 80/80 통과
+- [x] 전체 `npm test` 통과: lint 77 JS + 1 JSON, selftest 355/355, core 52/52, handoff 75/75, MCP 22/22, command surface 40/40, installed cleanroom 10/10, false-claim 199/199, E2E 467/467(4,947초)
+- [x] 독립 Codex read-only 최종 검수 `CLEAN`
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG 1.36.185 동기화; 신규 runtime dependency·lifecycle install script·환경변수 없음
+- [x] 최종 secrets 미승인 0, encoding 0, check/lazy/idempotency 0, 7개 lens 검토, rules 정상, gate 6/6·claims 147 신규 실패 0 및 다섯 task claim 통과
+- [x] `npm pack --dry-run`: 88 files, 2,175,087 bytes, shasum `67f8673847fb86ea5010493be038900ba8fc7d90`, integrity `sha512-XposOWnUEV9mRS0vq6FT3uRHOPpT/wRKo8QYo0jWnsxnThQzhy+LapEgp6UuxTtFXtQigcL7GG45aPyhTdriHQ==`
+- [ ] GitHub main/tag/Release와 구현 SHA 및 asset digest 일치
+- [ ] npm latest/exact metadata, 로컬 pack digest, fresh-prefix 설치본 selftest 일치
+- [ ] leerness.com 사이트 build/deploy, production root/changelog/llms/Pages origin 검증
+- [ ] GitHub Actions 13/13 성공, failure/cancelled/skipped/annotation 0
+- [ ] 롤백 기준: npm exact `leerness@1.36.184`, GitHub tag `v1.36.184`, 직전 사이트 커밋 `48657ca454de9555c431087951d5d68b275050ae`

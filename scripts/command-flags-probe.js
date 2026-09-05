@@ -72,14 +72,15 @@ const catalog = run(['commands', '--json']);
 const catalogJson = json(catalog);
 const catalogRows = catalogJson?.categories ? Object.values(catalogJson.categories).flat() : [];
 check('commands --json returns the machine-readable catalog',
-  catalog.status === 0 && catalogJson?.totalCommands === 99 && catalogJson?.categories && !catalog.stderr,
+  catalog.status === 0 && catalogJson?.totalCommands === 100 && catalogJson?.categories && !catalog.stderr,
   catalog);
 check('commands totalCommands equals the category sum',
   catalogJson?.totalCommands === catalogRows.length,
   catalog);
-check('commands catalog includes verify-code and contract verify',
+check('commands catalog includes verify-code, contract verify, and exact-file lease',
   catalogRows.some(row => /^verify-code\b/.test(row.cmd))
-    && catalogRows.some(row => /^contract verify\b/.test(row.cmd)),
+    && catalogRows.some(row => /^contract verify\b/.test(row.cmd))
+    && catalogRows.some(row => /^lease acquire\|release\|list\|check\b/.test(row.cmd)),
   catalog);
 
 const englishCatalog = run(['commands', '--language', 'en', '--json']);
@@ -187,6 +188,42 @@ try {
   check('route-arity fixture initializes successfully',
     initialized.status === 0 && json(initialized)?.ok === true,
     initialized);
+
+  const duplicateRouteBefore = treeSnapshot(emptyProject);
+  const duplicateTier = run(['agents', 'route', 'payment refund', '--tier', 'high-risk', '--tier', 'tiny', '--path', emptyProject, '--json']);
+  const duplicateApproval = run(['agents', 'route', 'payment refund', '--tier', 'normal', '--approved-by', 'owner-a', '--approved-by', 'owner-b', '--reason', 'maintenance window', '--path', emptyProject, '--json']);
+  check('risk-routing selectors are singletons and duplicates fail before any mutation',
+    duplicateTier.status === 1 && json(duplicateTier)?.code === 'duplicate_flag'
+      && duplicateApproval.status === 1 && json(duplicateApproval)?.code === 'duplicate_flag'
+      && treeSnapshot(emptyProject) === duplicateRouteBefore,
+    duplicateTier.status !== 1 ? duplicateTier : duplicateApproval);
+
+  const terminatedTier = run(['agents', 'route', 'payment refund', '--tier', 'high-risk', '--path', emptyProject, '--json', '--', '--tier', 'tiny']);
+  check('the option terminator cannot turn a later security-looking token into a second selector',
+    terminatedTier.status === 0 && json(terminatedTier)?.tier === 'high-risk',
+    terminatedTier);
+
+  const rolesBefore = treeSnapshot(emptyProject);
+  const duplicateRoleProvider = run(['roles', 'set', 'coder', '--provider', 'codex', '--to', 'claude', '--path', emptyProject, '--json']);
+  const duplicateRolePolicy = run(['roles', 'set', 'coder', '--provider', 'codex', '--policy', 'strict', '--fallback-policy', 'balanced', '--path', emptyProject, '--json']);
+  const terminatedRoleFlag = run(['roles', 'set', 'coder', '--provider', 'codex', '--json', '--', '--provider', 'claude', '--path', emptyProject]);
+  check('roles set rejects duplicate singleton aliases and post-terminator pseudo-flags before mutation',
+    duplicateRoleProvider.status === 1 && json(duplicateRoleProvider)?.code === 'duplicate_flag'
+      && duplicateRolePolicy.status === 1 && json(duplicateRolePolicy)?.code === 'duplicate_flag'
+      && terminatedRoleFlag.status === 1 && json(terminatedRoleFlag)?.code === 'too_many_arguments'
+      && treeSnapshot(emptyProject) === rolesBefore,
+    duplicateRoleProvider.status !== 1 ? duplicateRoleProvider
+      : duplicateRolePolicy.status !== 1 ? duplicateRolePolicy : terminatedRoleFlag);
+
+  const typoRoleSubcommand = run(['roles', 'valdiate', '--path', emptyProject, '--json']);
+  const strayRoleTarget = run(['roles', 'validate', 'unexpected-target', '--path', emptyProject, '--json']);
+  const uppercaseRoleValidate = run(['roles', 'VALIDATE', '--path', emptyProject, '--json']);
+  check('roles validates its subcommand and positional arity while retaining case-insensitive valid verbs',
+    typoRoleSubcommand.status === 1 && json(typoRoleSubcommand)?.code === 'unknown_subcommand'
+      && strayRoleTarget.status === 1 && json(strayRoleTarget)?.code === 'too_many_arguments'
+      && uppercaseRoleValidate.status === 0 && json(uppercaseRoleValidate)?.ok === true,
+    typoRoleSubcommand.status !== 1 ? typoRoleSubcommand
+      : strayRoleTarget.status !== 1 ? strayRoleTarget : uppercaseRoleValidate);
 
   for (const mutationFlag of ['--fix', '--baseline', '--auto-track']) {
     const beforeInvalidGate = treeSnapshot(emptyProject);

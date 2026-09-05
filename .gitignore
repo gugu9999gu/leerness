@@ -26,6 +26,7 @@ credentials.json
 .leerness/incidents/
 .leerness/cache/agent-sessions/
 .leerness/cache/agent-runs/
+.leerness/execution-ledger.jsonl
 
 # npm 인증 토큰 보호 (1.9.267)
 .npmrc

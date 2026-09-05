@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.185 — 2026-09-04
+
+- T-0165/T-0166/T-0167/T-0171/T-0172: adds honest provider-capacity observation, exact-file TTL leases, strict Role/Agent/Routing v2 schemas, a fail-closed legacy role-store loader, and availability-aware role fallback with revision-bound execution provenance. Compatibility fields remain explicit, high-risk reviewer independence requires concrete model identities, corrupt state is preserved without provider execution, and all new surfaces are covered by adversarial regression probes.
+
 ## 1.36.184 — 2026-09-01
 
 - T-0164: English-mode mode output now emits zero Hangul across stored, environment, and explicit locale paths, including pre-dispatch and stale-version diagnostics, while preserving Korean and locale-independent JSON contracts. Lock-time manifest rereads fail closed on corruption and normalize concurrent valid mode values before writing, with deterministic real-EEXIST regressions; the 39-command leakage ratchet tightens exactly from 30 to 27 lines.

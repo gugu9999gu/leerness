@@ -236,6 +236,13 @@ doNotStore:
 ## 2026-09-01 session-close
 - Generated session-handoff.md and refreshed current-state.md.
 
+## 2026-09-05 — v1.36.185 convergence pre-release
+
+- T-0165/T-0166/T-0167/T-0171/T-0172를 증거와 함께 done으로 전환하고 UR-0096을 completed로 마감했다.
+- provider 24/24, exact-file lease 57/57, schema 88/88, role-store 65/65, fallback 80/80과 전체 npm test의 E2E 467/467(4,947초)이 통과했다.
+- 독립 Codex 최종 read-only 검수는 `CLEAN`; 다음 단계는 로컬 claim/gate 후 v1.36.185 GitHub/npm/leerness.com 공개 검증이다.
+- 로컬 gate 6/6·claims 147건 신규 실패 0과 다섯 개별 claim이 통과했다. pack dry-run은 88 files, 2,175,087 bytes, shasum `67f8673847fb86ea5010493be038900ba8fc7d90`다.
+
 ## 2026-09-01 — T-0164 mode i18n pre-release verification
 
 - English `mode`의 기존 3줄 누수를 stored/env/explicit locale, 공통 pre-dispatch 오류, stale-cache 및 positional/`--path` 우선순위에서 0으로 줄였다. 한국어 출력과 canonical JSON 오류/상태 계약은 보존했다.

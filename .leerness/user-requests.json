@@ -1092,14 +1092,40 @@
     },
     {
       "id": "UR-0095",
+      "text": "공급자 가용성·공식 한도 조회 가능성, 프로젝트 통합 시각화, 역할/폴백 오케스트레이션, 세션 충돌 방지 협업 채널을 검토하고 핵심 가치에 맞는 다음 작업 진행",
+      "recordedAt": "2026-09-02T06:13:40.825Z",
+      "status": "in-progress",
+      "linkedTaskIds": [
+        "T-0165",
+        "T-0166",
+        "T-0167"
+      ],
+      "linkedPlanIds": [
+        "M-0009",
+        "M-0010",
+        "M-0011",
+        "M-0012"
+      ],
+      "linkedDecisionIds": [],
+      "notes": "Provider observation and exact-file lease stages are implemented. The user-supplied role architecture conversation was reviewed on 2026-09-03 and normalized into the plan: Model, Role, Agent, and Task are separate; Leerness keeps three logical layers (Role Registry, Agent Registry, Routing Policy); a light Router handles low-cost classification; Orchestrator receives summaries/diffs rather than full code; high-risk work requires Architect, independent Tester/Reviewer, human approval, and verify/gate. Initial canonical storage remains JSON to preserve zero runtime dependencies. Remaining scope: schema v2 compatibility/migration, observed-reason fallback policy, and consolidated read-only visualization.",
+      "updatedAt": "2026-09-03T00:25:34.456Z"
+    },
+    {
+      "id": "UR-0096",
       "text": "역할별 지정 모델 사용 불가 시 호환 모델 대체·현재 세션 역할 대행·현재 작업자 직접 수행·보류 선택지를 제공하고, 실제 작업자·검수자·대체 사유·검증 결과를 구조화 기록한다",
       "recordedAt": "2026-09-03T09:20:53.833Z",
-      "status": "open",
-      "linkedTaskIds": [],
-      "linkedPlanIds": [],
+      "status": "completed",
+      "linkedTaskIds": [
+        "T-0172"
+      ],
+      "linkedPlanIds": [
+        "M-0011"
+      ],
       "linkedDecisionIds": [],
-      "notes": ""
+      "notes": "Concurrent ID collision resolved during convergence: the earlier UR-0095 record retains its ID and this later request is preserved as UR-0096.",
+      "updatedAt": "2026-09-04T23:56:04.212Z",
+      "completedAt": "2026-09-04T23:56:04.212Z"
     }
   ],
-  "updatedAt": "2026-09-03T09:20:53.834Z"
+  "updatedAt": "2026-09-04T23:56:04.212Z"
 }

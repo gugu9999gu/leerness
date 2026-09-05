@@ -942,37 +942,71 @@ total++;
   if (!ok) { failed++; console.log(r.stdout.slice(0, 400)); }
 }
 
-// 1.9.31 회귀: agents quota (각 CLI 사용량/quota 조회)
+// 1.36.185 회귀: agents quota는 설치·활성·인증·로컬 라우팅·모델 호출·잔여량을 분리하고 추정하지 않는다
 total++;
 {
-  // agents quota — env=0 시 모두 disabled/not-installed, 안내 메시지 포함
-  const env = { ...process.env, LEERNESS_ENABLE_CLAUDE: '0', LEERNESS_ENABLE_CODEX: '0', LEERNESS_ENABLE_AGY: '0', LEERNESS_ENABLE_GROK: '0', LEERNESS_ENABLE_COPILOT: '0' };
+  // agents quota — env=0 시 인증 확인을 실행하지 않고 disabled/not-installed를 정직하게 표시
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (/^LEERNESS_ENABLE_/i.test(key)) delete env[key];
+  ['CLAUDE', 'CODEX', 'AGY', 'GROK', 'OPENCODE', 'QWEN', 'AIDER', 'GOOSE', 'COPILOT', 'OLLAMA']
+    .forEach(id => { env[`LEERNESS_ENABLE_${id}`] = '0'; });
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota'], { encoding: 'utf8', timeout: 90000, env });
   const okText = r.status === 0
-    && /외부 AI CLI quota 추정 \(1\.9\.31\)/.test(r.stdout)
+    && /외부 AI 공급자 상태 관측 \(Leerness v[0-9.]+\)/.test(r.stdout)
     && /\| claude \|/.test(r.stdout)
     && /\| codex \|/.test(r.stdout)
     && /\| agy \|/.test(r.stdout)
     && /\| grok \|/.test(r.stdout)
     && /\| copilot \|/.test(r.stdout)
-    && /provider 대시보드 참조/.test(r.stdout);
-  // JSON 출력
+    && /프로젝트 \.env는 활성화 설정을 적용하기 위해 로드될 수 있지만/.test(r.stdout)
+    && /이번 실행에서는 공급자 인증 확인 명령을 실행하지 않았/.test(r.stdout);
   const r2 = cp.spawnSync(process.execPath, [CLI, 'agents', 'quota', '--json'], { encoding: 'utf8', timeout: 90000, env });
   let parsed = null;
   try { parsed = JSON.parse(r2.stdout); } catch {}
-  // 1.9.277: opencode/qwen/aider/goose → 10 CLI
-  const okJson = parsed && Array.isArray(parsed.quota) && parsed.quota.length === 10
-    && parsed.quota.every(q => typeof q.id === 'string' && typeof q.status === 'string' && (q.hint === null || typeof q.hint === 'string'));
+  const okJson = parsed && parsed.schemaVersion === 2 && parsed.observation === 'provider-capacity'
+    && Array.isArray(parsed.quota) && parsed.quota.length >= 10
+    && parsed.quota.every(q => typeof q.id === 'string' && typeof q.status === 'string'
+      && typeof q.source === 'string' && typeof q.routingEligibility === 'string'
+      && typeof q.routingReason === 'string' && typeof q.versionCheckAttempted === 'boolean'
+      && ['ok', 'failed', 'not-attempted'].includes(q.versionCheckState)
+      && typeof q.presenceCheckOnly === 'boolean' && q.modelCallability === 'not-observed'
+      && q.callability === 'unknown' && q.callabilityReason === 'live_model_call_not_performed'
+      && q.quota === 'unknown' && q.quotaState === 'not-observed' && q.remaining === null
+      && !Object.prototype.hasOwnProperty.call(q, 'authEvidence'))
+    && parsed.policy && parsed.policy.projectEnvironmentMayBeLoaded === true
+    && parsed.policy.credentialValuesIncludedInOutput === false
+    && parsed.policy.credentialValuesPersistedByCommand === false
+    && parsed.policy.credentialValuesInspectedForCapacity === false
+    && parsed.policy.credentialValuesPassedToProbeCommands === false
+    && parsed.policy.providerCredentialStoresReadDirectly === false
+    && parsed.policy.providerCliMayReadOwnCredentialStore === false
+    && parsed.policy.providerCliMayReadEnvironmentCredentials === false
+    && parsed.policy.disabledProviderCommandsExecuted === false
+    && Array.isArray(parsed.policy.registeredSafeAuthChecksAttempted)
+    && parsed.policy.registeredSafeAuthChecksAttempted.length === 0
+    && Array.isArray(parsed.policy.versionChecksAttempted)
+    && parsed.policy.versionChecksAttempted.length === 0
+    && Array.isArray(parsed.policy.presenceOnlyChecks)
+    && parsed.policy.presenceOnlyChecks.length === parsed.quota.filter(q => q.presenceCheckOnly).length
+    && parsed.quota.filter(q => q.presenceCheckOnly).every(q => parsed.policy.presenceOnlyChecks.includes(q.id))
+    && parsed.policy.browserSessionReuse === false && parsed.policy.guiScraping === false
+    && parsed.policy.liveModelCalls === false
+    && parsed.policy.capacityValuesRequireOfficialContract === true
+    && parsed.policy.speculativeCapacityClaims === false
+    && Array.isArray(parsed.limitations)
+    && parsed.limitations.join(',') === 'local_prerequisites_only,authentication_is_not_model_entitlement,exact_capacity_requires_verified_official_adapter,recorded_availability_is_not_official_capacity,disabled_providers_presence_only,credential_values_not_passed_to_probe_commands';
   const ok = okText && okJson;
-  console.log(ok ? '✓ B(1.9.31+1.9.277) agents quota: 10 CLI 사용량/안내' : `✗ quota 실패 (text=${okText} json=${okJson})`);
-  if (!ok) { failed++; console.log(r.stdout.slice(0, 500)); }
+  console.log(ok ? '✓ B(1.36.185) agents quota: 관측 축 분리·비밀 비출력·비활성 인증 무실행·추정 금지' : `✗ quota 실패 (text=${okText} json=${okJson})`);
+  if (!ok) { failed++; console.log((r.stdout + '\n' + r2.stdout + '\n' + r2.stderr).slice(0, 1400)); }
 }
-
 total++;
 {
   // 사용법 메시지에 quota 포함
   const r = cp.spawnSync(process.execPath, [CLI, 'agents', 'foo'], { encoding: 'utf8', timeout: 10000 });
-  const ok = r.status !== 0 && /list\|check\|quota\|dispatch/.test(r.stdout + r.stderr);
+  const usage = r.stdout + r.stderr;
+  // New agent subcommands may be inserted between quota and dispatch. Keep the
+  // historical contract without freezing their adjacency in the usage string.
+  const ok = r.status !== 0 && /agents list\|check\|quota(?:\|[a-z-]+)*\|dispatch/.test(usage);
   console.log(ok ? '✓ B(1.9.31) agents 사용법에 quota 명시' : `✗ usage 메시지 실패`);
   if (!ok) { failed++; console.log((r.stdout + r.stderr).slice(0, 300)); }
 }
@@ -8157,7 +8191,12 @@ total++;
     // 잘못된 --tier 는 **사유(code)까지** 단언한다 — exit 1 만 보면 검증을 없앴을 때 나는 크래시(TIER_ROLES 미정의)와
     //   구분되지 않아, 검증 제거 변이가 그대로 통과했다(실측 M7 생존).
     const badTier = R(['agents', 'route', 'x', '--tier', 'huge', '--path', d, '--json']);
-    D1 = dec.tier === 'tiny' && dec.confidence === 'declared' && (dec.reasons || []).some(r => /의도한 것인지/.test(r))
+    // 1.36.185: an explicit tier is still visible, but it cannot silently lower
+    // detected high risk without a visible approver and reason.
+    D1 = dec.tier === 'high-risk' && dec.confidence === 'declared'
+      && dec.declaredTier === 'tiny' && dec.detectedTier === 'high-risk'
+      && dec.riskDowngrade && dec.riskDowngrade.accepted === false
+      && (dec.reasons || []).some(r => /의도한 것인지/.test(r))
       && badTier.s === 1 && /"code":\s*"invalid_tier"/.test(badTier.o);
     // 토글 OFF → dispatch 거부 (사유까지)
     const off = R(['agents', 'route', '주문 필터 추가', '--confirm', '--path', d, '--json']);
@@ -8167,33 +8206,40 @@ total++;
     const nr = R(['agents', 'route', '주문 필터 추가', '--confirm', '--path', d, '--json']);
     D3 = nr.s === 1 && /"role_unresolved"/.test(nr.o) && !/"routing_disabled"/.test(nr.o);
     // 역할 설정 후 normal 은 실행 확정
-    R(['roles', 'set', 'commander', '--provider', 'claude', '--path', d]);
-    R(['roles', 'set', 'coder', '--provider', 'codex', '--path', d]);
-    R(['roles', 'set', 'reviewer', '--provider', 'claude', '--path', d]);
+    // Distinct declared family labels are diagnostic only. Concrete, recognizable
+    // model IDs are required to prove reviewer independence.
+    R(['roles', 'set', 'commander', '--provider', 'claude', '--model', 'claude-fixture', '--model-family', 'claude', '--path', d]);
+    R(['roles', 'set', 'coder', '--provider', 'codex', '--model', 'gpt-fixture', '--model-family', 'openai-gpt', '--path', d]);
+    R(['roles', 'set', 'reviewer', '--provider', 'claude', '--model', 'claude-review-fixture', '--model-family', 'claude', '--path', d]);
     const okd = J(R(['agents', 'route', '주문 필터 추가', '--confirm', '--path', d, '--json'])) || {};
     D4 = okd.confirmed === true && okd.plan && okd.plan.reviewerIndependent === true;
     // 고위험: 승인자 없으면 fail-closed (판별: 역할은 다 설정된 상태여야 role_unresolved 가 아님이 증명된다)
-    R(['roles', 'set', 'architect', '--provider', 'codex', '--path', d]);
+    R(['roles', 'set', 'architect', '--provider', 'codex', '--model', 'gpt-architect-fixture', '--model-family', 'openai-gpt', '--path', d]);
     const hr = R(['agents', 'route', '결제 환불 로직 수정', '--confirm', '--path', d, '--json']);
     H1 = hr.s === 1 && /"human_approval_required"/.test(hr.o) && !/"role_unresolved"/.test(hr.o);
     const hr2 = J(R(['agents', 'route', '결제 환불 로직 수정', '--confirm', '--approved-by', '승인자', '--path', d, '--json'])) || {};
     D5 = hr2.confirmed === true;
     // 독립성: 구현자와 검수자가 같은 provider 면 고위험은 거부 (승인자가 있는데도 막혀야 한다 = 판별)
-    R(['roles', 'set', 'reviewer', '--provider', 'codex', '--path', d]);
+    R(['roles', 'set', 'reviewer', '--provider', 'codex', '--model', 'gpt-review-fixture', '--model-family', 'openai-gpt', '--path', d]);
     const dep = R(['agents', 'route', '결제 환불 로직 수정', '--confirm', '--approved-by', '승인자', '--path', d, '--json']);
     H2 = dep.s === 1 && /"reviewer_not_independent"/.test(dep.o) && !/"human_approval_required"/.test(dep.o);
     // codex 28차 #6: 손으로 편집한 역할 설정의 **빈 provider** 가 "해석됨"으로 통과했다 —
     //   `roles set` 은 빈 값을 안 받으므로 이 상태는 파일 편집으로만 생긴다. 그래서 파일을 직접 만들어 검증한다.
     const rolesFile = path.join(d, '.leerness', 'agent-roles.json');
     const savedRoles = fs.existsSync(rolesFile) ? fs.readFileSync(rolesFile, 'utf8') : null;
-    //   스키마는 `{roles:{...}}` 다 — 최상위에 쓰면 _loadRoles 가 {} 를 돌려줘 "역할 없음"으로 통과하고,
-    //   빈 provider 를 검증한 것이 아니라 **셋업 실패를 통과로 읽는다**(실측으로 잡았다).
-    fs.writeFileSync(rolesFile, JSON.stringify({ schemaVersion: 1, roles: { coder: { provider: '   ' } } }));
+    //   스키마는 `{roles:{...}}` 다 — 최상위에 쓰면 빈 provider 를 검증한 것이 아니라
+    //   **셋업 실패를 통과로 읽는다**. 엄격 로더 도입 뒤에는 role_unresolved 로 완화하지 않고
+    //   저장소 자체를 store_invalid 로 거부하며 원본을 그대로 보존해야 한다.
+    const invalidRoles = JSON.stringify({ schemaVersion: 1, roles: { coder: { provider: '   ' } } });
+    fs.writeFileSync(rolesFile, invalidRoles);
     const emptyProv = R(['agents', 'route', '버튼 여백 4px 조정', '--confirm', '--path', d, '--json']);
     const emptyProvJ = J(emptyProv) || {};
-    // 셋업이 유효했는지 함께 단언: coder 가 실제로 목록에 있어야 한다(없으면 다른 이유로 막힌 것)
-    const emptyProvOk = emptyProv.s === 1 && /"role_unresolved"/.test(emptyProv.o)
-      && ((emptyProvJ.plan || {}).assignments || []).some(a => a.role === 'coder' && a.resolved === false);
+    const emptyProvOk = emptyProv.s === 1
+      && emptyProvJ.code === 'store_invalid' && emptyProvJ.state === 'invalid'
+      && emptyProvJ.originalPreserved === true && emptyProvJ.providerCommandsExecuted === false
+      && Array.isArray(emptyProvJ.problems)
+      && emptyProvJ.problems.some(problem => problem.code === 'invalid-legacy-provider')
+      && fs.readFileSync(rolesFile, 'utf8') === invalidRoles;
     if (savedRoles !== null) fs.writeFileSync(rolesFile, savedRoles); else fs.rmSync(rolesFile, { force: true });
     // 감사 기록 — codex 28차 #10: 종전엔 `total >= 8` 만 봐서 **전 항목이 {} 여도 통과**했다. 내용을 본다.
     const lg = J(R(['agents', 'route', '--log', '--path', d, '--json'])) || {};
@@ -8360,7 +8406,10 @@ total++;
     const S_OK = _mkScript('auth_ok.js', 'process.exit(0)');
     const S_NO = _mkScript('auth_no.js', 'console.log("Not logged in"); process.exit(3)');
     const S_ODD = _mkScript('auth_odd.js', 'console.log("config parse failed"); process.exit(2)');
-    const mkAgent = (script) => ({ id: 'synthetic', bin: 'node', envFlag: 'LEERNESS_NO_SUCH_FLAG',
+    // LEERNESS_OFFLINE is deterministically set to 1 at the top of this suite.
+    // Synthetic probes must be enabled explicitly now that disabled providers
+    // are presence-only and never execute version/auth commands.
+    const mkAgent = (script) => ({ id: 'synthetic', bin: 'node', envFlag: 'LEERNESS_OFFLINE',
       versionArgs: [S_OK], desc: 'synthetic',
       authCheck: { args: [script], timeoutMs: 8000, noPattern: 'not logged in|logged out' } });
     const okRes = _ck(mkAgent(S_OK), { auth: true });
@@ -8376,7 +8425,7 @@ total++;
     fs.writeFileSync(crashScript, 'throw new Error("broken check")');
     const leakScript = path.join(d, 'authleak.js').replace(/\\/g, '/');
     fs.writeFileSync(leakScript, 'console.log("token=sk-live-LEAKME ok"); process.exit(0)');
-    const fileAgent = (f) => ({ id: 'syn', bin: 'node', envFlag: 'LEERNESS_NO_SUCH_FLAG', versionArgs: ['-e', 'process.exit(0)'], desc: 's',
+    const fileAgent = (f) => ({ id: 'syn', bin: 'node', envFlag: 'LEERNESS_OFFLINE', versionArgs: ['-e', 'process.exit(0)'], desc: 's',
       authCheck: { args: [f], timeoutMs: 8000 } });
     const crashRes = _ck(fileAgent(crashScript), { auth: true });
     const leakRes = _ck(fileAgent(leakScript), { auth: true });
@@ -9236,6 +9285,7 @@ total++;
     const env = Object.assign({}, process.env, {
       PATH: shimDir + path.delimiter + process.env.PATH,
       LEERNESS_ENABLE_CODEX: '1', LEERNESS_ENABLE_CLAUDE: '1', LEERNESS_ENABLE_EVIL: '1',
+      LEERNESS_ENABLE_X1: '1', LEERNESS_ENABLE_KTOOL: '1', LEERNESS_ENABLE_COPILOT: '1',
     });
     const RS = (a, o) => { const r = cp.spawnSync(process.execPath, [CLI, ...a], Object.assign({ encoding: 'utf8', timeout: 180000, env }, o || {})); return { s: r.status, o: ((r.stdout || '') + (r.stderr || '')).trim() }; };
     const JS = (x) => { try { return JSON.parse(x.o.slice(x.o.indexOf('{'))); } catch { return null; } };
@@ -9322,8 +9372,8 @@ total++;
     const mk = (over) => {
       const w = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-ov94-')); _d.push(w);
       RS(['init', w, '--yes', '--language', 'ko', '--no-stale-check']);
-      ['commander', 'coder', 'architect'].forEach(x => RS(['roles', 'set', x, '--provider', 'codex', '--path', w]));
-      RS(['roles', 'set', 'reviewer', '--provider', 'claude', '--path', w]);
+      ['commander', 'coder', 'architect'].forEach(x => RS(['roles', 'set', x, '--provider', 'codex', '--model', `gpt-${x}-fixture`, '--model-family', 'openai-gpt', '--path', w]));
+      RS(['roles', 'set', 'reviewer', '--provider', 'claude', '--model', 'claude-review-fixture', '--model-family', 'claude', '--path', w]);
       RS(['toggle', 'set', 'difficulty-routing', 'on', '--path', w]);
       //   셋업 실패를 삼키면 A/B 대조가 같아져 변이가 살아남는다 — exit 와 **저장 결과**를 함께 단언한다.
       if (over) {
@@ -9343,13 +9393,11 @@ total++;
     //   다른 blocker 가 끼면 인증이 꺼져도 exit 1 이라 회귀를 놓친다.
     const blockedByAuth = (r) => r.s === 1 && !!r.j && r.j.confirmed === false
       && (r.j.refusals || []).length === 1 && (r.j.refusals || [])[0].code === 'provider_not_authenticated';
-    //   같은 실행파일을 가리키는 **정상 별칭** 전부에서 유지돼야 한다 — 문자열 완전일치로 비교하면
-    //   `codex.cmd`·대문자·절대경로 등록만으로 이번에 되살린 차단이 다시 사라진다(실측).
+    //   같은 PATH 명령을 가리키는 **bare-bin 별칭** 전부에서 유지돼야 한다 — 문자열 완전일치로 비교하면
+    //   `codex.cmd`·대문자 등록만으로 이번에 되살린 차단이 다시 사라진다(실측).
     // POSIX executable names are case-sensitive and do not resolve `.cmd`; those are aliases only on Windows.
     // Treating CODEX as codex on Linux would hide a genuinely different (or missing) executable.
-    const aliases = [null, 'codex']
-      .concat(isWin ? ['CODEX', 'codex.cmd'] : [])
-      .concat([path.join(shimDir, isWin ? 'codex.cmd' : 'codex')]);
+    const aliases = [null, 'codex'].concat(isWin ? ['CODEX', 'codex.cmd'] : []);
     let aliasOk = true, aliasBad = '';
     for (const al of aliases) {
       const w = mk(al);
@@ -9357,7 +9405,17 @@ total++;
       if (axis(w).auth !== 'no' || !blockedByAuth(route(w))) { aliasOk = false; aliasBad = String(al); break; }
     }
     dbg.alias = aliasBad;
-    E4 = aliasOk;
+    // An absolute/workspace path is executable authority, not a trusted alias,
+    // even when its basename is codex. It must not inherit the built-in auth
+    // command; unknown remains non-blocking under the established auth policy.
+    const pathOverride = path.join(shimDir, isWin ? 'codex.cmd' : 'codex');
+    const pathWorkspace = mk(pathOverride);
+    const pathAxis = pathWorkspace ? axis(pathWorkspace) : {};
+    const pathRoute = pathWorkspace ? route(pathWorkspace) : { s: 1, j: null };
+    const pathAuthorityOk = !!pathWorkspace && pathAxis.auth === 'unknown'
+      && /override/.test(String(pathAxis.authCheckDroppedReason || ''))
+      && pathRoute.s === 0 && pathRoute.j && pathRoute.j.confirmed === true;
+    E4 = aliasOk && pathAuthorityOk;
 
     // ── E5: providers.json 은 **실행 가능한 값을 주는 통로가 아니다**(authCheck · versionArgs 둘 다).
     const inject = (w, id, patch) => {
@@ -9454,7 +9512,7 @@ s.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[3],String(s.address().p
     if (!ok) console.log(`   [이월94 디버그] 무파괴=${E1}(setup ${dbg.setup}) 안내전달=${E2} path보존=${E3} 축유지=${E4}(별칭실패 "${dbg.alias}") 주입차단=${E5}(lineC "${dbg.lineC}" syncedVa=${dbg.syncedVa} 폴백="${dbg.fallback}")`);
   } catch (e) { console.log('   [이월94 디버그] 예외: ' + ((e && e.message) || e)); }
   finally { _d.forEach(x => { try { fs.rmSync(x, { recursive: true, force: true }); } catch {} }); }
-  console.log(ok ? '✓ B(1.36.94) 헌트 이월 2건: 손상 스토어를 도구가 건드리지 않음(--force 로도) · 회복 절차가 평문/--json/sync 에 같은 문장으로 도달하고 실제로 통과시킴 · 안내가 --path 유지 · 같은 bin 재등록에도 인증 차단 유지(사유 코드로 판별) · providers.json 의 authCheck/versionArgs 미실행(user·빌트인 두 갈래)' : '✗ 헌트 이월 2건(1.36.94) 실패');
+  console.log(ok ? '✓ B(1.36.94/1.36.185) 헌트 이월 2건: 손상 스토어를 도구가 건드리지 않음(--force 로도) · 회복 절차가 평문/--json/sync 에 같은 문장으로 도달하고 실제로 통과시킴 · 안내가 --path 유지 · 바른 bare-bin 별칭은 인증 차단 유지, 절대경로는 별도 권한으로 분리 · 비활성/providers.json authCheck·versionArgs 미실행(user·빌트인 두 갈래)' : '✗ 헌트 이월 2건(1.36.94) 실패');
   if (!ok) failed++;
 }
 

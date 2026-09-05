@@ -75,3 +75,48 @@ doNotStore:
 - Errors: Unknown toggle/mode subcommands or values and corrupt/unreadable toggle/manifest diagnostics use English wording in English human mode, including an early flag error whose target is a stored-English `--path` project reached from a Korean cwd. Mode JSON errors preserve the established canonical message and stable error code across locales. Known user/environment path substrings are removed before Hangul measurement, while adjacent tool-authored prose remains measurable. A failed, silent, missing, duplicated, or per-command-drifted aggregate probe cannot count as clean; stored-English/stored-Korean/env/flag routes, conflicting cwd/positional/`--path` roots, positional stale-cache lookup, lock-time manifest corruption, explicit-vs-ambient skillpack precedence, Korean valid-byte controls, builtin/external/mode JSON equality and exact shape, mode mutation and fail-closed siblings, falsy/null/object metadata, injective ID collision cases, complete Unicode-script boundaries, and Markdown-row injection must all pass before lowering the ratchet.
 - Related files: `bin/leerness.js`, `lib/agents.js`, `lib/toggles.js`, `lib/catalogs.js`, `scripts/i18n-priority-surface-probe.js`, `scripts/i18n-next-cluster-probe.js`, `scripts/e2e.js`, `package.json`.
 - Test evidence ID: T-0092
+
+## Provider capacity observation — no speculative quota claims
+- Feature: `agents quota` separates local CLI facts and append-only availability observations from provider-verified capacity.
+- Input: Built-in and project provider definitions, enablement environment flags, registered safe authentication probes, and active `agents availability` observations.
+- Output: Versioned JSON reports installation, enablement, authentication, local routing eligibility, model callability, observed quota state, and `verifiedRemainingAmount:null` as separate fields; human output states the same observation boundary.
+- States: Disabled providers receive presence-only checks and no command execution. Authentication may support local routing but never proves model entitlement or remaining credits. Recorded availability is routing evidence, not an official provider balance.
+- Errors: Credential values, account identifiers, raw authentication evidence, browser sessions, GUI state, and inferred token/credit amounts must not be emitted or persisted. Partial or corrupt availability history fails closed.
+- Related files: `lib/agents.js`, `scripts/provider-capacity-probe.js`, `scripts/e2e.js`.
+- Test evidence ID: T-0165
+
+## Exact-file session lease — explicit advisory coordination
+- Feature: `lease acquire|release|list|check` and the paired MCP tools coordinate one exact canonical file with a short TTL without claiming an OS-enforced lock.
+- Input: Project root, exact file path, explicit session key, bounded TTL, optional note, or a lease ID for release.
+- Output: Acquire/release writes a versioned ignored lease store; list/check are byte-for-byte read-only and expose ownership/conflict evidence.
+- States: Lexical aliases and proven file-identity aliases converge; unrelated sibling paths and different project roots remain independent. Expired rows stop blocking and are pruned only during a successful mutation.
+- Errors: Traversal, outward links, alternate data streams, hard-link convergence conflicts, invalid identities/TTL/arity, corrupt or oversized stores, and lock failures fail closed without changing the original bytes. Ambient handoff/status surfaces do not invent lease warnings.
+- Related files: `lib/file-leases.js`, `bin/leerness.js`, `lib/mcp-tools.js`, `scripts/file-lease-probe.js`.
+- Test evidence ID: T-0166
+
+## Role / Agent / Routing schema v2 — lossless compatibility foundation
+- Feature: Pure validators and projections define separate Role, Agent, and Routing Policy documents while preserving the legacy assignment store.
+- Input: Legacy `.leerness/agent-roles.json` or the three canonical v2 documents: `role-definitions.json`, `agent-instances.json`, and `routing-policy.json`.
+- Output: Deterministic legacy-to-v2 projection, strict per-document and bundle validation, and a lossless reverse projection that retains legacy role keys plus unknown top-level/per-role fields.
+- States: `agent-roles.json` remains schema v1 compatibility input/output. V2 schema files remain preview-only and are not automatically written, migrated, or activated at runtime. Null budgets remain unknown; multiple Agent instances may share a Role/provider/model while keeping distinct IDs.
+- Errors: Corrupt/future schema, alias collision, provider/model coupling inside Role definitions, missing or cross-role fallback targets, fallback/inheritance cycles, disabled-primary reverse projection, and weakened pipeline safety requirements fail closed.
+- Related files: `lib/role-agent-schema.js`, `docs/role-agent-routing-v2.md`, `scripts/role-agent-schema-probe.js`.
+- Test evidence ID: T-0167
+
+## Legacy role-store validation — fail closed and preserve bytes
+- Feature: Every legacy role read, write, route, and role-bound dispatch uses one bounded loader, with `roles validate` as a read-only diagnostic/projection preview.
+- Input: Missing, valid, empty, BOM-only, invalid UTF-8, corrupt JSON, unsupported schema, malformed role shape, oversized, linked, or non-regular `.leerness/agent-roles.json`.
+- Output: Missing is an explicit empty configuration; valid stores expose a content revision and read-only v2 projection counts; valid `list|set|unset|dispatch` behavior and unknown extension fields remain compatible.
+- States: Reads never rewrite the store. Writes preserve unknown fields and continue emitting legacy schema version 1, including compatible `primary`, `candidates`, `fallbackPolicy`, and `requirements` extensions.
+- Errors: Invalid stores return stable `store_corrupt|store_invalid|store_unreadable` diagnostics, preserve exact source bytes, and stop provider execution and rescue overwrites.
+- Related files: `lib/role-store.js`, `bin/leerness.js`, `lib/agents.js`, `lib/routing.js`, `scripts/role-store-loader-probe.js`.
+- Test evidence ID: T-0171
+
+## Role fallback and execution provenance v1 — revision-bound decisions
+- Feature: `agents resolve|fallback|dispatch|record|history|availability` exposes explicit role-preserving choices and append-only provenance without silently invoking a model.
+- Input: A valid legacy role assignment with ordered candidates, strict/balanced/continuity policy, observed provider/model availability, task risk signals, explicit selection, and any required visible approval/reason.
+- Output: Resolution includes a unique resolution ID plus role-store and semantic availability revisions. A selected fallback or prepared role dispatch is committed only while both revisions still match. Ledger events expose task/attempt links, requested role/executor, actual executor, evidence, substitution, and review independence.
+- States: For each availability axis, the newest applicable provider-wide or exact-model observation wins. A newer provider-wide denial defeats an older exact-model allow. High-risk reviewer independence is proven only when both providers are explicit and distinct and recognizable concrete model IDs belong to different families; opaque declared family labels remain unverified. A review event derives the implementer identity from exactly one prior implementation terminal event for the same task rather than trusting caller-supplied identity. Role-bound `multi --execute` and `bench` are rejected because provider-default fan-out cannot prove the selected model contract.
+- Errors: Invalid or duplicate presets/roles, corrupt/partial or semantically invalid availability ledgers, stale role or availability snapshots, invisible approval identities, unapproved high-risk substitution, unapproved high-risk tier downgrade, unavailable/ambiguous choices, incomplete or non-canonical terminal provenance, missing/mismatched review targets, duplicate terminal attempts, and unproven reviewer independence fail closed. Credential-bearing keys are redacted even when suffixed with `Input`, `Output`, or `Prompt`; only narrowly named token-count metrics remain visible.
+- Related files: `lib/role-fallback.js`, `lib/role-catalog.js`, `lib/agents.js`, `lib/routing.js`, `bin/leerness.js`, `lib/mcp-tools.js`, `scripts/role-fallback-probe.js`.
+- Test evidence ID: T-0172
