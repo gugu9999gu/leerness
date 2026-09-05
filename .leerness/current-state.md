@@ -18,10 +18,12 @@ doNotStore:
 Updated: 2026-09-05
 
 ## Now
+- T-0174 / UR-0098 승인 범위와 최적화는 v1.36.186 출하·공개 검증 및 session close까지 완료; 다음 방향은 UR-0097 State scope 단계별 전환 <!-- leerness:auto -->
 - 최신 사용자 요청 UR-0097: State 구조 감사/계획 반영(T-0173) 완료. 5-scope 설계 docs/state-scopes.md, 실제 architecture/reuse-map, M-0014..M-0018 계획을 반영했다. 아래 v1.36.185 항목은 이전 릴리스 이력이다.
-- P-0020 사용자 승인과 최적화 요청을 UR-0098로 등록했다. T-0174 5-scope resolver + read-only state inspect 구현 후 검증 중이며 기존 데이터 이동·삭제·runtime 전환은 없다. 전용 104개 검사 및 Node18 scope58/CLI20 통과; 독립 Codex P2 3건을 재현·수정했고 재검수와 전체 회귀·배포 검증은 진행 중이다.
-- 독립 읽기 전용 검수의 문서 지적 2개 수정·재검수 2/2 FIXED, 문서 계약 8/8 및 strict verify-claim 통과. session close/check/lazy는 통과했으나 R-0002 배포는 미실행/pending이다.
-- 명령 표면 감사 잔여 — i18n 누수 클래스 13건: pulse/round-history/milestones/session-resume/clarify/preview/requests/intent/review-request/plan/route/library/skill/web/pc/lsp/toggle/retro/tech/graph/dashboard/deps/insights/persona/agent-mode/py-check/api-skill 이 --language en·LEERNESS_LANG=en·en 프로젝트에서도 한국어 출력. 대조군: health 는 완전 영어(플래그 배선은 존재). 1,488회 실행 감사(2026-08-05) <!-- leerness:auto -->
+- 승인된 T-0174 / P-0020 / UR-0098 / M-0014를 v1.36.186으로 구현·검증·출하했다. 5-scope resolver와 read-only state inspect, 단일 Git 조회·workspace snapshot 재사용·불필요한 I/O/기록 생략을 적용했다. 기존 데이터 이동·삭제·runtime 전환은 없다.
+- 전용104개, Node18 scope58/CLI20, 공개 설치본 selftest355/355 및 state inspect 통과. 독립 Codex P2 3건 재현·수정 뒤 focused re-review CLEAN; 고정 구현 SHA bd33683의 CI33959679140은13/13 성공(전체 E2E467/467, 지원 OS/Node 조합 모두 포함). 로컬 장시간 npm test의 초기 단계는 마지막 수정 전이므로 최종 전용·설치형 재실행과 고정 CI 증거를 함께 보존한다.
+- GitHub main/tag/Release와 npm latest/exact1.36.186의 아티팩트 무결성을 확인했다. 사이트 commit9a11b8b, production deployment ad2a3760-eba1-433d-bc9d-c2d1f4429fcd, root/changelog/llms/Pages 원본 HTTP200 및 버전 표식 검증 통과. main push 자동 CI33964861084는 같은 SHA의 별도 재실행이며 아직 성공으로 세지 않는다.
+- T-0173 문서 검수 지적2개 수정·재검수2/2 FIXED와 문서 계약8/8 이력 보존. 그때 pending이었던 R-0002 출하는 이번 승인 구현 라운드의 v1.36.186 공개 검증으로 이행했다.
 - v1.36.185 후보에서 공급자 상태의 설치·활성·인증·모델 호출 가능성·quota 축을 분리하고, 확인하지 않은 잔여량을 `unknown`으로 유지함
 - exact-file TTL lease, strict Role/Agent/Routing v2 schema와 legacy 양방향 projection, bounded fail-closed role-store loader, availability-aware fallback와 revision-bound execution provenance를 구현함
 - 전용 probe는 provider 24/24, lease 57/57, schema 88/88, role-store 65/65, fallback 80/80 통과. 전체 `npm test`는 selftest 355/355, core 52/52, command surface 40/40, installed cleanroom 10/10, full E2E 467/467(4,947초)로 종료 코드 0
@@ -34,10 +36,10 @@ Updated: 2026-09-05
 - T-0159 실제 프로젝트 코드 기반 시안 워크플로는 페이지·기능·둘 다 중 범위 명확화 대기
 
 ## Next
-- T-0174 독립 검수·회귀·배포 검증 후 M-0015 명시적 private runtime migration 범위 설계 <!-- leerness:auto -->
+- T-0175 / M-0015 reader/writer inventory, session ownership와 명시적 private runtime migration 미리보기 설계·승인 (승인 전 구현하지 않음) <!-- leerness:auto -->
 - M-0015 private runtime → M-0016 common control → M-0017 immutable memory/run finalize → M-0018 generated view/adapter 순서. 기존 원문과 legacy writer 호환을 단계별 검증한다.
 - M-0010 역할 migration은 동일 State scope 계약에 연결하고 M-0011..M-0013은 그 위에서 진행한다. T-0092 i18n은 별도 잔여 백로그다.
 
 ## Blockers
 - (없음) <!-- leerness:auto -->
-- 기술적 차단 없음. P-0020은 승인되었고 구현 검증 중이다. UR-0097 전체 구조 전환은 아직 미완료다.
+- 기술적 차단 없음. P-0020 승인 범위는 출하·검증 완료. UR-0097 전체 구조 전환과 M-0015..M-0018은 아직 미완료다.

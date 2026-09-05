@@ -289,7 +289,14 @@ doNotStore:
 - 사용자 명시 승인 기록 후 5-scope path/Git/inventory/inspection 모듈과 strict read-only CLI를 구현했다. 기존 Project resolver snapshot selector를 재사용하며 legacy writer/runtime 경로를 변경하지 않는다.
 - 일반 실행 계측으로 불필요 npm root -g 1회 발견 후 exact inspect 경로에서 제거했다. Git topology 1회(Windows trusted locator 별도), 프로젝트 내용 읽기 0, write 0 및 fixture/cwd/Git byte+mtime 불변을 확인했다.
 - 실제 main+2linked, monorepo, 이동/detached/별도 clone/gitfile/submodule, Windows Unicode/공백/case/junction, 오류·권한·링크 경계를 검증했다. 발견된 nonexistent ceiling과 Windows missing Git status127 분류는 재현 후 수정했다.
-- 현재 selector26/26, scope58/58, CLI20/20(총104), Node18 scope58/CLI20, selftest355/355, command flags/i18n, contract 및 lint84JS/1JSON 통과. 독립 Codex P2 3건은 실패 테스트로 재현 후 수정했고 재검수·전체 npm test·v1.36.186 R-0002 배포는 진행 중이며 아직 완료 주장하지 않는다.
+- selector26/26, scope58/58, CLI20/20(총104), Node18 scope58/CLI20, selftest355/355, command flags/i18n, contract 및 lint84JS/1JSON 통과. 독립 Codex P2 3건은 실패 테스트로 재현 후 수정했고 focused re-review CLEAN을 받았다. 로컬 npm test는 E2E467/467(5272초)로 종료했으며 최종 수정 후 전용·Node18·설치형 검사를 별도로 재실행했다. bd33683 고정 CI33959679140의 Windows 전체 E2E4개와 v1.36.186 R-0002 배포가 남아 있으므로 T-0174는 아직 in-progress다.
+
+### 최종 출하 검증
+- 위 중간 pending 상태 이후 고정 SHA bd33683의 CI33959679140이13/13 성공했다. GitHub main/tag/Release, npm latest/exact1.36.186와 패키지 digest를 검증했고 공개 설치본 selftest355/355·state inspect가 통과했다. 직접 package-object 검사로 runtime deps0/install scripts0도 확인했다.
+- 사이트 commit9a11b8b 및 production ad2a3760-eba1-433d-bc9d-c2d1f4429fcd의 root/changelog/llms/Pages HTTP200·버전 표식 검증 통과. T-0174 done, UR-0098 completed, M-0014 completed100%. UR-0097과 M-0015..M-0018은 미완료 유지; 다음은 migration 미리보기 설계·승인이다.
+
+## 2026-09-05 session-close
+- Generated session-handoff.md and refreshed current-state.md.
 
 ## 2026-09-05 session-close
 - Generated session-handoff.md and refreshed current-state.md.

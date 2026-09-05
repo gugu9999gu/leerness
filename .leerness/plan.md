@@ -29,7 +29,7 @@ doNotStore:
 
 ## Current Priority — 2026-09-05
 1. `UR-0097 / T-0173`의 구조 감사 결과를 적용하고 **State scope와 저장 수명주기**를 `M-0014..M-0018`로 먼저 정식화한다. 상세 계약은 `docs/state-scopes.md`다.
-2. 첫 구현은 `P-0020 / M-0014 / T-0174`의 additive 경로 resolver와 읽기 전용 `state inspect`. 기존 파일 이동·삭제·runtime 전환 없이 main/linked/non-Git/monorepo 경계를 검증한다. P-0020 승인 전 코드는 작성하지 않는다.
+2. `P-0020 / M-0014 / T-0174`의 additive 경로 resolver와 읽기 전용 `state inspect`는 사용자 승인 뒤 v1.36.186으로 출하·검증했다. 기존 파일 이동·삭제·runtime 전환은 없다. 다음 `M-0015`의 명시적 migration은 별도 미리보기 승인 전 코드를 작성하지 않는다.
 3. `M-0010` Role v2 migration은 이 scope 계약을 공유한다. 기존 validator와 legacy projection은 유지하고, runtime activation은 `M-0015` 호환 및 `M-0016` control 계약을 충족한 뒤 판정한다. 이후 `M-0011` routing → `M-0012` 읽기 전용 시각화 → `M-0013` 승인형 UI로 진행한다.
 4. `T-0092` i18n 잔여와 `T-0159` 실제 페이지/기능 시안 워크플로는 독립 백로그로 유지하며 이번 역할 아키텍처에 섞지 않는다.
 
@@ -324,15 +324,15 @@ Tasks:
 - [ ] 실제 페이지/기능 시안 승인 워크플로(`T-0159`)와 통합 여부 별도 결정
 
 ### M-0014. State scopes와 읽기 전용 저장 구조 진단
-Status: in-progress
-Progress: 70%
+Status: completed
+Progress: 100%
 Done-When: P-0020 승인 뒤 5-scope resolver와 state inspect가 main/linked/non-Git/monorepo에서 무쓰기 및 기존 동작 보존 검증 통과
 
 Tasks:
 - [x] T-0174 / P-0020 승인 뒤 additive state-paths resolver 구현 (기존 Project resolver 보존)
 - [x] 현재/목표 경로를 분리한 state inspect JSON과 오류 taxonomy
 - [x] main/linked/non-Git/monorepo/Windows 경로·무쓰기 전용 회귀 104개 (selector26 + scope58 + CLI20); Node18 scope58/CLI20 재검증
-- [ ] 독립 Codex 검수·기존 전체 회귀·지원 플랫폼·출하 검증
+- [x] 독립 Codex P2 3건 재현·수정 및 재검수 CLEAN; 전체 E2E467/467, 고정 SHA CI33959679140 13/13; GitHub/npm/site v1.36.186와 공개 설치본 selftest355/355 검증
 
 ### M-0015. Worktree runtime 분리와 명시적 호환 마이그레이션
 Status: planned
@@ -375,4 +375,4 @@ Tasks:
 - [ ] Leerness adapter cleanup 전 finalize 검증, 외부 직접 삭제 강제 차단 한계 명시
 
 ## Immediate Next Action
-승인된 `P-0020` / `T-0174` 구현의 독립 검수·전체 회귀·배포를 검증한다. `M-0010`의 역할 migration은 독립적으로 다른 저장 구조를 만들지 않고 이 계약에 연결한다. 이후 `M-0015..M-0018`을 단계별 진행하며 기존 v2 projection은 runtime activation 전까지 read-only다.
+`P-0020` / `T-0174` / `M-0014`는 v1.36.186으로 검수·출하 검증까지 완료했다. 다음은 `T-0175 / M-0015` reader/writer inventory, session ownership, 원본 보존과 중단 복구를 포함한 명시적 migration 미리보기 설계 및 승인이다. `M-0010`의 역할 migration은 독립적으로 다른 저장 구조를 만들지 않고 이 계약에 연결한다. `M-0015..M-0018`은 아직 미구현이며 기존 v2 projection은 runtime activation 전까지 read-only다.

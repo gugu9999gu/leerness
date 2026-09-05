@@ -1147,18 +1147,24 @@
         "M-0018"
       ],
       "linkedDecisionIds": [],
-      "notes": "구조 감사 및 계획/architecture/reuse-map 반영. P-0020는 UR-0098로 승인되어 additive 5-scope resolver와 read-only state inspect 구현·검증 진행 중. 데이터 이동·runtime activation 미실행. M-0015..M-0018 전체 구조 전환은 아직 완료 아님."
+      "notes": "구조 감사 및 계획/architecture/reuse-map 반영. P-0020는 UR-0098로 승인되어 additive 5-scope resolver와 read-only state inspect 및 관련 최적화를 v1.36.186으로 출하·공개 검증 완료. 데이터 이동·runtime activation 미실행. M-0015..M-0018 전체 구조 전환은 아직 완료 아님."
     },
     {
       "id": "UR-0098",
       "text": "P-0020 승인: 5-scope resolver와 읽기 전용 state inspect 구현 및 관련 중복 조회와 불필요한 I/O 최적화",
       "recordedAt": "2026-09-05T08:39:37.365Z",
-      "status": "in-progress",
-      "linkedTaskIds": ["T-0174"],
-      "linkedPlanIds": ["M-0014"],
+      "status": "completed",
+      "linkedTaskIds": [
+        "T-0174"
+      ],
+      "linkedPlanIds": [
+        "M-0014"
+      ],
       "linkedDecisionIds": [],
-      "notes": "승인된 scope foundation과 관련 최적화 구현. 전용 검증·독립 리뷰·전체 회귀 및 R-0002 출하 검증 뒤 완료 처리. 기존 데이터와 main dirty checkout 보존."
+      "notes": "승인된 scope foundation과 관련 최적화를 v1.36.186으로 구현·출하. 전용104개, 독립 Codex 재검수 CLEAN, 고정 CI13/13, GitHub/npm/site 공개 무결성과 설치본 selftest355/355 검증 완료. 기존 데이터와 main dirty checkout 보존. 후속 runtime migration은 별도 미리보기·승인 단계.",
+      "updatedAt": "2026-09-05T12:05:53.252Z",
+      "completedAt": "2026-09-05T12:05:53.252Z"
     }
   ],
-  "updatedAt": "2026-09-05T08:39:37.365Z"
+  "updatedAt": "2026-09-05T12:05:53.252Z"
 }

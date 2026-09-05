@@ -238,3 +238,22 @@ doNotStore:
 - [x] 사이트 commit `b39a79cceb6130d15825496d9d0a72ada5b9023c`, Astro 709 pages, Cloudflare production deployment `cd2d9405-9741-4f1b-b685-92408d82c698`; leerness.com root/changelog/llms/Pages origin이 첫 시도에 HTTP 200 및 1.36.185 표식 노출
 - [x] GitHub Actions run `33932206889`가 구현 SHA에서 13/13 성공; failure/cancelled/skipped/timed_out/annotation 0, Ubuntu Node 18/20/22와 Windows Node 18/20/22/24 full E2E 모두 통과
 - [x] 롤백 기준: npm exact `leerness@1.36.184`, GitHub tag `v1.36.184`, 직전 사이트 커밋 `48657ca454de9555c431087951d5d68b275050ae`
+
+## 2026-09-05 — v1.36.186
+
+- [x] P-0020 사용자 승인 후 5-scope resolver/read-only inspect와 기존 snapshot/Git boundary 재사용 구현
+- [x] 신규 runtime 활성화·자동 migration·control store·finalize·provider 실행 없음; 기존 데이터/reader/writer 위치 보존
+- [x] selector26/scope58/CLI20(Windows104), Node18 scope58/CLI20, alias-backed TEMP scope58/CLI20 통과
+- [x] 독립 Codex P2 3건 재현·수정 및 focused re-review CLEAN; 테스트 TEMP 경로 수정 별도 FIXED 검토
+- [x] 설치형 클린룸10/10, lint84JS/1JSON, command flags/i18n, API contract, secrets 미승인0/encoding0/check/lazy/idempotency/drift0 통과
+- [x] gate6/6, 기존 완료 claims148 신규 실패0; T-0174 증거 검증 통과(정적 증거 검사이며 실제 테스트는 별도 기록)
+- [x] CI33959679140에서 state 검사7개 OS/Node 조합 및 fast2/runtime4 작업 성공
+- [x] 전체 로컬 npm test: E2E467/467(5272초), 지연 경쟁11쌍, DEP0190경고0; 최종 수정 뒤 전용/Node18/설치형 검사 별도 재실행
+- [x] 고정 SHA bd33683의 CI33959679140 13/13 성공: Ubuntu18/20/22와 Windows18/20/22/24 전체 E2E467/467 포함, 실패·취소·skip·timeout·annotation0
+- [x] package/bin/README/HARNESS_VERSION/CHANGELOG1.36.186 동기화; 신규 dependency·install script·환경변수 없음
+- [x] 사이트 후보710페이지, facts version1.36.186/MCP98/core20/deps0/selftest355, unmeasured0, 배포 dry-run 통과
+- [x] 최종 pack97files/2205607bytes, SHA1 2b50abb48c501ee03569017f06d876fa0ffa49bf, 별도 설치 후 scope58/CLI20 통과
+- [x] GitHub asset SHA256 534e8270bd13647b4b41be64fee098aceb30f6fcb6ed51c0c8406ca42dbeace3 및 npm SHA1/integrity가 로컬 pack과 일치; latest/exact1.36.186, 새 공개 설치본 selftest355/355·state inspect 통과, runtime deps0/install scripts0
+- [x] 공개 시점 main/tag/Release는 bd33683 일치; site commit9a11b8b, production ad2a3760-eba1-433d-bc9d-c2d1f4429fcd, root/changelog/llms/Pages 원본 HTTP200 및 버전 표식 확인
+- [x] session close exit0, final gate6/6·완료 claims149·역사 baseline68·신규 실패0; 완료 증거와 다음 T-0175 migration 미리보기/승인 경계 인수인계
+- [x] 롤백 기준: npm exact `leerness@1.36.185`, GitHub tag `v1.36.185`, 직전 사이트 commit `b39a79cceb6130d15825496d9d0a72ada5b9023c`; 실행하지 않은 복구 기준만 기록
