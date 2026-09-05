@@ -88,7 +88,7 @@ async function main() {
     write(path.join(root, '.leerness', 'lessons.archive.md'), '# Lessons archive\n\n## 제거 2026-01-02 (target: "other")\n\n### Other lesson\n');
     const r = run(['memory', 'archive', 'list', '--surface', 'decisions', '--query', 'T-9', root, '--json']);
     const j = json(r);
-    assert(r.status === 0 && j.root === path.resolve(root), `wrong root/status: ${j.root || r.status}`);
+    assert(r.status === 0 && j.root === path.resolve(root), `wrong root/status: ${j.root || r.status}; ${JSON.stringify(j)}`);
     assert(j.totals.decisions === 1 && j.totals.lessons === 0 && j.totals.all === 1, `wrong totals: ${JSON.stringify(j.totals)}`);
   });
 

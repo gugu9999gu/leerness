@@ -335,14 +335,19 @@ Tasks:
 - [x] 독립 Codex P2 3건 재현·수정 및 재검수 CLEAN; 전체 E2E467/467, 고정 SHA CI33959679140 13/13; GitHub/npm/site v1.36.186와 공개 설치본 selftest355/355 검증
 
 ### M-0015. Worktree runtime 분리와 명시적 호환 마이그레이션
-Status: planned
-Progress: 0%
-Done-When: 동일 worktree 다중 session 격리, 원본 보존, quiescence, preview/confirm, 중단 복구와 legacy writer 차단이 증명됨
+Status: in-progress
+Progress: 10%
+Done-When: 동일 worktree 다중 session 격리, 원본 보존, preview/confirm과 중단 복구, 지원 client의 fail-closed 및 구버전 참여 client 정지 확인 또는 전환 보류가 증명됨
 
 Tasks:
-- [ ] T-0175 runtime writer/reader inventory와 field 단위 분류
-- [ ] session ownership, legacy writer 정지, 원본 snapshot, staged migration 및 단일 activation manifest
-- [ ] interruption/rollback/old client compatibility와 handoff/enforce freshness 회귀
+- [x] T-0179 초기 reader/writer·field 분류: docs/worktree-runtime-migration.md의 알려진 22개 표면과 전수 감사 한계, session ownership 및 coupled migration unit 명시 (설계만)
+- [x] P-0021 / T-0180 승인 후 M-0015-A strict layout reader·read-only compatibility 진단·관측 기반 write guard 구현; legacy 저장 유지, activation 없음 (전체 검증·출하는 다음 항목에서 추적)
+- [ ] 모든 지원 writer/startup/MCP/REPL/FD/cache/hook 경로의 guard coverage와 구버전 negative control 검증 및 호환 릴리스
+- [ ] 별도 B preview/승인: 참여 client 정지·업그레이드, admission 계약, 원본 snapshot, staged copy 및 단일 authority activation
+- [ ] presence 단위부터 별도 검증; freshness+enforce hook과 state.json+runs+handoff는 각각 결합 단위로 전환
+- [ ] interruption/rollback/post-activation reconciliation, unknown ownership, metadata 보존과 old client compatibility 회귀
+
+구현 최적화: 한 operation 안에서 Git topology와 workspace ownership snapshot을 공유한다. compatibility 결과는 캐시하지 않고 descriptor·고정 indicator·경로 identity를 다시 읽는다. 정상 동시 writer의 정확한 lock/release/temp/create 이름만 admission에서 허용하며 unknown/link/wrong-kind는 거부한다. 중앙 CLI root 분배와 `lib/git.js`의 read/write 분류는 실제 handler/인자 우선순위 회귀를 유지한다. 일반 StateManager 추상화·DB·자동 migration은 이 단계에 추가하지 않는다.
 
 ### M-0016. Common ControlStore와 task claim 및 consolidator fencing
 Status: planned
@@ -375,4 +380,4 @@ Tasks:
 - [ ] Leerness adapter cleanup 전 finalize 검증, 외부 직접 삭제 강제 차단 한계 명시
 
 ## Immediate Next Action
-`P-0020` / `T-0174` / `M-0014`는 v1.36.186으로 검수·출하 검증까지 완료했다. 다음은 `T-0175 / M-0015` reader/writer inventory, session ownership, 원본 보존과 중단 복구를 포함한 명시적 migration 미리보기 설계 및 승인이다. `M-0010`의 역할 migration은 독립적으로 다른 저장 구조를 만들지 않고 이 계약에 연결한다. `M-0015..M-0018`은 아직 미구현이며 기존 v2 projection은 runtime activation 전까지 read-only다.
+`P-0020` / `T-0174` / `M-0014`는 v1.36.186으로 검수·출하 검증까지 완료했다. `P-0021 / T-0180`은 사용자 승인 후 UR-0100으로 구현 중이다. 기존 데이터 무이동·legacy 저장 유지 조건으로 M-0015-A만 적용한다. 진행 순서: strict reader → 실제 CLI/startup/module/FD/MCP/REPL guard → 기존 init/migration/role/lease 회귀 → 독립 Codex 검수 → supported CI/공개 배포 검증. T-0181은 원 CI 실패와 별도로 확인된 selftest 진단 폐기·exitCode 누출을 수정하고, 원인 미확정 상태를 보존한다. 실제 migration B는 client 정지·admission·원본 보존·복구 계약을 별도 승인받는다. `M-0010` 역할 migration도 이 계약을 공유한다. M-0015 전체와 M-0016..M-0018은 미완료다.

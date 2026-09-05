@@ -1164,7 +1164,33 @@
       "notes": "승인된 scope foundation과 관련 최적화를 v1.36.186으로 구현·출하. 전용104개, 독립 Codex 재검수 CLEAN, 고정 CI13/13, GitHub/npm/site 공개 무결성과 설치본 selftest355/355 검증 완료. 기존 데이터와 main dirty checkout 보존. 후속 runtime migration은 별도 미리보기·승인 단계.",
       "updatedAt": "2026-09-05T12:05:53.252Z",
       "completedAt": "2026-09-05T12:05:53.252Z"
+    },
+    {
+      "id": "UR-0099",
+      "text": "다음작업 진행: T-0175 M-0015 Worktree runtime reader/writer 감사와 명시적 마이그레이션 미리보기 설계",
+      "recordedAt": "2026-09-05T12:46:44.050Z",
+      "status": "in-progress",
+      "linkedTaskIds": [
+        "T-0179",
+        "T-0175",
+        "T-0180"
+      ],
+      "linkedPlanIds": [
+        "M-0015"
+      ],
+      "linkedDecisionIds": [],
+      "notes": "T-0179에서 소스 기반 초기 reader/writer·field 감사와 docs/worktree-runtime-migration.md 설계를 작성. 실제 독립 Codex 지적3건을 소스로 확인·수정했고 읽기 전용 재검수3/3 FIXED. P-0021는 M-0015-A 호환 guard만 제안하며 미승인. 실제 데이터 복사·activation은 별도 승인과 client 정지/admission 계약 필요. 제품 코드 변경·새 출하 없음; M-0015 구현 완료 아님."
+    },
+    {
+      "id": "UR-0100",
+      "text": "P-0021 승인: T-0180 runtime layout compatibility-only 진단과 쓰기 guard 구현, 기존 legacy 데이터 위치 보존; T-0181 Windows Node24 CI 실패 원인 확인 및 검증 후 출하",
+      "recordedAt": "2026-09-05T14:28:53.499Z",
+      "status": "in-progress",
+      "linkedTaskIds": ["T-0180", "T-0181", "T-0175"],
+      "linkedPlanIds": ["M-0015"],
+      "linkedDecisionIds": [],
+      "notes": "P-0021 approved. Compatibility-only reader/write admission implementation and regression in progress. Legacy data paths unchanged; no activation. T-0181 diagnostics defect reproduced separately from the unresolved original CI incident. No release completion claimed."
     }
   ],
-  "updatedAt": "2026-09-05T12:05:53.252Z"
+  "updatedAt": "2026-09-05T14:28:53.499Z"
 }

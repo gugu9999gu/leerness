@@ -72,7 +72,7 @@ const catalog = run(['commands', '--json']);
 const catalogJson = json(catalog);
 const catalogRows = catalogJson?.categories ? Object.values(catalogJson.categories).flat() : [];
 check('commands --json returns the machine-readable catalog',
-  catalog.status === 0 && catalogJson?.totalCommands === 101 && catalogJson?.categories && !catalog.stderr,
+  catalog.status === 0 && catalogJson?.totalCommands === 102 && catalogJson?.categories && !catalog.stderr,
   catalog);
 check('commands totalCommands equals the category sum',
   catalogJson?.totalCommands === catalogRows.length,

@@ -489,6 +489,9 @@ try {
   // Security + critical drift must still run session recovery in the same pass.
   const combinedDir = path.join(tempRoot, 'drift-security-critical');
   fs.mkdirSync(path.join(combinedDir, '.leerness'), { recursive: true });
+  // The DI fixture writes a synthetic usage.json, unlike the real cache path.
+  // Establish workspace ownership before exercising its recovery sequence.
+  fs.writeFileSync(path.join(combinedDir, '.leerness', 'HARNESS_VERSION'), 'fixture\n');
   fs.writeFileSync(path.join(combinedDir, '.env'), 'TOKEN=value\n');
   fs.writeFileSync(path.join(combinedDir, '.gitignore'), 'node_modules/\n');
   fs.writeFileSync(path.join(combinedDir, '.leerness', 'session-handoff.md'), 'Last generated: 2020-01-01T00:00:00.000Z\n');

@@ -686,7 +686,10 @@ test('linked execution-ledger parents are rejected before any external target is
     assert.strictEqual(history.code, 'ledger_parent_linked');
     assert.throws(
       () => appendExecutionEvent(dir, { event: 'execution.started', taskId: 'T-LINK' }),
-      error => error && error.code === 'ledger_parent_linked',
+      // Direct reads retain their ledger diagnostic; writer admission rejects
+      // the linked workspace before entering the append implementation.
+      error => error && error.code === 'E_RUNTIME_LAYOUT_INCOMPATIBLE'
+        && error.reasonCode === 'workspace_dir_symlink',
     );
     assert.strictEqual(fs.existsSync(path.join(outside, 'execution-ledger.jsonl')), false);
     assert.deepStrictEqual(fs.readFileSync(path.join(outside, 'sentinel.txt')), before);
@@ -1999,7 +2002,11 @@ try {
     fs.mkdirSync(ledger);
     const result = run(['agents', 'history', '--path', fixture, '--json'], { env });
     assert.strictEqual(result.status, 1, result.stderr || result.stdout);
-    assert.strictEqual(json(result).code, 'ledger_not_regular_file');
+    // The CLI has startup bookkeeping, so ambiguous standalone ownership is
+    // refused first. The read-only store API still reports its exact reason.
+    assert.strictEqual(json(result).code, 'runtime_layout_incompatible');
+    assert.ok(json(result).error.includes('(workspace_ambiguous)'));
+    assert.strictEqual(readExecutionEvents(fixture, 20).code, 'ledger_not_regular_file');
     assert.ok(fs.statSync(ledger).isDirectory());
   });
 } finally {

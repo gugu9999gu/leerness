@@ -58,6 +58,13 @@ jobs:
         env:
           LEERNESS_OFFLINE: "1"
         run: npm run test:state-scopes
+      - name: runtime compatibility (reader, writer admission, diagnostics)
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: npm run test:runtime-compatibility
+      - name: Windows encoding replacement controls
+        if: runner.os == 'Windows'
+        run: node ./scripts/encoding-selftest-probe.js --real-controls
       - name: release runtime (shell-free npm)
         run: node ./scripts/release-runtime-probe.js
       # 1.36.127 (T-0105): 이 중간 티어(42블록·66초)는 만들어 놓고 **아무도 부르지 않았다**.

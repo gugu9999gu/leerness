@@ -4,10 +4,10 @@ Status: scope inspection implemented; runtime architecture remains proposed (202
 Request: UR-0097; implementation/optimization approval: UR-0098. Audit: T-0173.
 First implementation: T-0174 / approved P-0020. See [the inspection API](state-paths-api.md).
 
-**Only path resolution and `state inspect` are implemented; the stores and migration below are designs.**
-The first implementation covers path resolution and read-only inspection only. Existing writers,
-data locations, task IDs, CLI/MCP contracts and approval gates remain unchanged until an
-explicitly approved migration passes its compatibility tests.
+**Path inspection and an approved compatibility-only write boundary are implemented; stores and migration below remain designs.**
+The first implementation covers path resolution and read-only inspection. P-0021 adds
+`state compatibility` and observed-layout rejection; see [its API](runtime-compatibility-api.md).
+Existing data locations and task IDs stay unchanged. No migration or activation is available.
 
 ## 1. Evidence from the current implementation
 
@@ -184,7 +184,7 @@ its metadata as a side effect of inspect, handoff or migration.
 |---|---|---|
 | Audit and design | T-0173 | Actual state map, reuse inventory, structural risks, compatibility order and preview; no runtime activation. |
 | Scope foundation | M-0014 / T-0174 / P-0020 | Resolver and `state inspect` read-only CLI contract; current/proposed locations distinguished; no stores moved and no new execution adapter. |
-| Private runtime | M-0015 / T-0175 | Explicit inventory/preview/confirm migration of session/runtime surfaces; per-session ownership; interrupted migration recovery. |
+| Private runtime | M-0015 / T-0175 | Compatibility-only guard first (P-0021 proposed / T-0180), then separately approved migration of coupled runtime units; ownership and interrupted recovery. See [source-backed migration design](worktree-runtime-migration.md). |
 | Common control | M-0016 / T-0176 | Task identity, claims, owner generations, version/revision compatibility and bounded ControlStore transactions. |
 | Durable records | M-0017 / T-0177 | Append-only memory import, run/review records and finalize durability receipts; old evidence retained. |
 | Views and adapters | M-0018 / T-0178 | Accepted-input snapshot, single-writer summaries, integrity/claims/CLI/MCP/cleanup integration; legacy window closed only with evidence. |
@@ -205,8 +205,10 @@ Migration rules:
   strict source selection/validation boundary. Invalid canonical data stops migration and
   preserves all original bytes, rather than silently promoting a Markdown fallback.
 - Quiesce all participating writers; a new lock cannot stop an old CLI that does not know it.
-  Detect active legacy clients and refuse activation; do not claim mixed-version safety
-  from a new manifest alone. Old clients must be upgraded/stopped before the boundary moves.
+  Known legacy clients block activation, and absence of observed clients does not prove
+  quiescence. Require an explicit maintenance boundary; unknown participants defer activation.
+  Do not claim mixed-version safety from a new manifest alone. Old clients must be
+  upgraded/stopped before the boundary moves; a pre-write check alone is not fencing.
 - Stage copied data and validate digests, IDs, counters and provenance before activating one
   versioned manifest. Use single-authority writes; do not create two independent writable
   JSON/Markdown or legacy/v2 truths during a compatibility window.

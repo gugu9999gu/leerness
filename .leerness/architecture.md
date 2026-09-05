@@ -16,7 +16,7 @@ doNotStore:
 # Architecture
 
 ## Overview
-- 현재 배포 기준은 v1.36.185. Node >=18 CommonJS CLI(`bin/leerness.js`)와 MCP(`lib/mcp-tools.js`)가 운영·기억·검증 명령을 제공한다. 런타임 의존성은 0이다.
+- 현재 배포 기준은 v1.36.186. Node >=18 CommonJS CLI(`bin/leerness.js`)와 MCP(`lib/mcp-tools.js`)가 운영·기억·검증 명령을 제공한다. 런타임 의존성은 0이다.
 - CLI에는 인자 분배와 state/task/memory writer가 남아 있으며, session-close·provider 실행·role schema/store/fallback·workspace migration 등은 `lib/` 도메인 모듈로 분리되어 있다.
 - `lib/workspace-dir.js`는 Project workspace `.leerness`를 판별하고 `.harness` 호환 migration을 담당한다. Git runtime 경로를 분리하는 StateManager는 아직 없다.
 - UR-0097 구조 감사와 목표 설계는 `docs/state-scopes.md`를 따른다. 목표 구조를 이미 구현된 것처럼 표시하지 않는다.
@@ -35,6 +35,9 @@ doNotStore:
 
 ## Recorded Direction vs Pending Implementation
 - 개발 방향: Project / Worktree / Common-Control / Immutable-Record / Generated-View의 5개 scope, 세션별 runtime owner, 공용 task claim, 불변 기억·결과 기록, 단일 consolidator의 재생성 뷰.
-- 현재 구현 승인 대기: P-0020 / M-0014의 additive scope resolver와 읽기 전용 `state inspect`만. 기존 데이터 자동 이동·삭제·runtime 전환은 포함하지 않는다.
+- 구현·출하 완료: P-0020 / M-0014의 additive scope resolver와 읽기 전용 `state inspect` 및 I/O 최적화(v1.36.186). 기존 데이터 자동 이동·삭제·runtime 전환은 포함하지 않는다.
+- 승인 후 구현·통합검증 중: P-0021 / T-0180 / M-0015-A의 `lib/runtime-layout.js`는 고정 descriptor를 엄격히 읽고 `lib/runtime-writes.js`는 CLI startup·모듈·MCP·REPL·lock/FD 쓰기 경계에 관측 기반 거부를 적용한다. `state compatibility`는 무쓰기 진단이다. `docs/runtime-compatibility-api.md`와 `docs/worktree-runtime-migration.md`의 계약을 따른다. 구버전/외부 writer를 소급 fencing하지 않는다.
+- 실제 데이터 migration은 별도 preview/승인, 참여 client 업그레이드·정지 및 admission 계약 검증 후 진행한다. presence, freshness+hook, structured state는 각각 결합된 이전 단위로 취급하고 mixed 사용자 문서는 보존한다.
+- 구현된 호환 guard는 path-derived projectKey와 분리한 고정 worktree anchor를 사용한다. non-Git은 canonical anchor를 쓰며 alternate/unknown backend 전환을 거부한다. Git topology와 workspace 소유 판별은 operation 시작에 한 번 수행하고, 각 쓰기는 descriptor·고정 indicator·경로 identity를 새로 검사한다. 독립 CLI/MCP/REPL 호출은 새 admission을 수행한다. 관측 로그 안의 사용자 요청·승인 정보도 보존 대상이며 상세 계약은 위 migration 문서를 따른다.
 - 이후 M-0015..M-0018에서 명시적 migration, control fencing, finalize durability, views/CLI/MCP/cleanup 계약을 단계별 검증한다.
 - `workspacePath()`는 Project scope용으로 보존한다. 기존 exact-file lease를 공용 task claim으로 간주하거나 저장 위치만 교체하지 않는다.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.36.187 — 2026-09-05
+
+- feat(state): add read-only runtime compatibility diagnosis and observed-layout write guards; keep legacy storage without migration or activation
+- fix(runtime): recheck CLI/MCP/REPL, direct I/O, retained descriptors, lock heartbeat, Windows replacement and Git mutation boundaries; preserve standalone concurrent producers
+- perf(state): reuse operation-local Git topology and workspace ownership while re-reading compatibility indicators; add real writer and old-client negative controls
+- fix(selftest): retain bounded UR-0113 encoding failure diagnostics and restore prior exit status; preserve the original Windows Node24 replay failure as inconclusive
+
 ## 1.36.186 — 2026-09-05
 
 - T-0174: add read-only five-scope state inspection with worktree/project isolation and honest legacy inventory; reuse workspace snapshots, skip unused npm skill discovery and bookkeeping, preserve all existing state.

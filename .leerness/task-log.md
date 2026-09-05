@@ -300,3 +300,23 @@ doNotStore:
 
 ## 2026-09-05 session-close
 - Generated session-handoff.md and refreshed current-state.md.
+
+## 2026-09-05 — UR-0099 / T-0179 runtime migration 사전 설계
+
+- T-0175 / M-0015의 초기 reader/writer·field 감사와 docs/worktree-runtime-migration.md를 작성했다. 알려진 22개 표면과 전수 writer coverage 한계를 구분하고 presence, freshness+hook, state.json+runs+handoff를 별도 이전 단위로 정의했다.
+- 독립 읽기 전용 감사 두 건은 각각 source8개 SHA256·mtime 불변을 보고했다. 메인이 실제 소스와 대조해 shared policy path, anonymous/inherited session identity, freshness mtime, Windows-only metadata replacement와 구버전 미차단 경계를 확인했다.
+- 실제 codex exec 검수의 P1 두 건·P2 한 건을 소스로 확인해 수정했다: path-derived projectKey로 guard 우회, non-Git selected/canonical authority 불일치, 관측 로그의 사용자 task/요청/승인 정보 보존 누락. 제한된 독립 읽기 전용 재검수는3/3 FIXED 및 잔여 P0-P2 없음; guard 동작 검증으로 세지 않는다.
+- M-0015-A는 고정 호환 guard부터 구현하도록 P-0021 / T-0180를 등록했다. 실제 migration/activation은 별도 승인과 admission/maintenance 계약이 필요하며 현재 legacy 경로와 제품 코드는 그대로다. 새 출하·M-0015 전체 완료로 표시하지 않는다.
+- 최종 문서 계약11/11과 verify/check/lazy/encoding/secrets 검사를 통과했다. R-0001은 실제 Codex 검수 및 지적 확인·수정으로 이행했고 R-0002 새 출하는 승인 경계에서 pending이다. T-0179 설계만 마감하며 P-0021 구현 승인을 요청한다.
+- 마감 후 CI 재조회에서 v1.36.186의 main push 재실행33964861084/job101303078325가 Windows Node24 selftest1/355 실패임을 확인했다. 실패 assertion은 UR-0113 encoding-check apply 안전계약이다. 원인·로컬 재현은 미확인으로 T-0181 planned에 등록했다. 이전 고정 CI33959679140 13/13 성공은 역사적 증거로 보존하며 새 실패를 감추거나 완료로 표시하지 않는다.
+
+## 2026-09-05 session-close
+- Generated session-handoff.md and refreshed current-state.md.
+
+## 2026-09-06 — P-0021 / UR-0100 compatibility implementation
+
+- 승인된 A 범위의 strict descriptor reader, bounded read-only diagnosis와 공유 writer operation을 구현했다. CLI startup/실제 root, MCP/REPL, direct module/FD, lock wait/heartbeat, Windows replacement/Git writer 경계를 연결했다. legacy 저장 위치와 원문은 유지하며 실제 migration·activation은 없다.
+- 실제 Codex 검수4건과 추가 detach 보조 이름1건을 재현·수정하고 제한된 독립 재검토를 마쳤다. Git/ownership snapshot 재사용으로 반복 I/O를 줄였으며 fresh compatibility 검사를 캐시하지 않는다. 전용/실제병렬/설치형/구버전 negative 증거는 review-evidence.md에 보존한다.
+- 전체 npmtest는 초기 runtime 검사 후 마지막 command 회귀에서 archive-only workspace 오인1건을 발견해 중단했다. 진단으로 workspace_ambiguous를 재현하고 네 가지 실제 memory archive 이름만 추가했다. assertions를 낮추지 않았으며 final runtime/commands/full E2E를 다시 검증한다.
+- T-0181의 별도 재현 가능한 selftest 진단 유실·exitCode 누출을 수정했다. 원 Windows Node24 CI errno는 여전히 미확정으로 유지하고 새 CI에서 확인한다.
+- 후보1.36.187의 버전/CHANGELOG와 사이트 데이터·711페이지 build를 준비했다. 아직 GitHub/npm/site 공개 배포 완료 아님; 검증 전 T-0180을 done으로 바꾸지 않는다.

@@ -10,6 +10,7 @@ const { resolvePortableLaunch, spawnPortable, spawnPortableSync } = require('../
 const { scanShellScriptsEncoding, applyShellScriptUtf8Bom } = require('../lib/shell-encoding');
 const os = require('os');  // 1.9.178: _publishToNpm 에서 os.tmpdir() 사용 (전역 import)
 const readline = require('readline');
+const { withRuntimeWrites, withRuntimePathWrite, assertCurrentRuntimeWrite, projectWriter } = require('../lib/runtime-writes');
 // 1.9.274 (UR-0025 1단계): 순수 유틸 함수 모듈 분리 (require-based, 비파괴). selftest 7종이 동작 검증.
 const { _isSecretKey, _isPlaceholderSecret, _looksSecretLike, redactSecrets, stripDefaultIgnorables, _mergeLines, _mergeEnvLines, _mergeReadmeSection, _managedMerge, _parseSkillsValue, _parseArchiveBlocks, _parseSkillCatalog, _renderTeamsMd, _composeTeamPlan, _teamHandoffReminders, _cadenceAssessment, _teamDeployGate, _renderWorkspaceReferenceGuide, _memorySurface, _renderPulseLine, compareVer, parseHarnessVersion, _classifyCJK, _riskLabel, _detectSystemLang, _parseSlashFromHelp,
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _resolveNpmTag, _mcpJsonContent, _newRunRecord,
@@ -49,7 +50,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.186';
+const VERSION = '1.36.187';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -323,23 +324,30 @@ function _ensureLockHeartbeat() {
     const worker = new Worker(`
       'use strict';
       const fs = require('fs');
-      const { parentPort } = require('worker_threads');
+      const { parentPort, workerData } = require('worker_threads');
+      const { withRuntimeWrites } = require(workerData.runtimeWrites);
       const locks = new Map();
-      function touch(ownerPath, token) {
+      function touch(ownerPath, entry) {
         try {
           const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
-          if (!owner || owner.token !== token || owner.lease !== 'worker-v1') { locks.delete(ownerPath); return; }
-          const d = new Date(); fs.utimesSync(ownerPath, d, d);
+          if (!owner || owner.token !== entry.token || owner.lease !== 'worker-v1') { locks.delete(ownerPath); return; }
+          const apply = index => index < entry.roots.length
+            ? withRuntimeWrites(entry.roots[index], () => apply(index + 1))
+            : fs.utimesSync(ownerPath, new Date(), new Date());
+          apply(0);
         } catch { locks.delete(ownerPath); }
       }
       parentPort.on('message', (m) => {
         if (!m || typeof m.ownerPath !== 'string') return;
-        if (m.op === 'add' && typeof m.token === 'string') { locks.set(m.ownerPath, m.token); touch(m.ownerPath, m.token); }
+        if (m.op === 'add' && typeof m.token === 'string') {
+          const entry = { token: m.token, roots: Array.isArray(m.roots) ? m.roots : [] };
+          locks.set(m.ownerPath, entry); touch(m.ownerPath, entry);
+        }
         else if (m.op === 'remove') locks.delete(m.ownerPath);
       });
       const timer = setInterval(() => { for (const [p, t] of locks) touch(p, t); }, 1000);
       if (timer.unref) timer.unref();
-    `, { eval: true });
+    `, { eval: true, workerData: { runtimeWrites: require.resolve('../lib/runtime-writes') } });
     worker.on('error', () => { _lockHeartbeatWorker = null; _lockHeartbeatUnavailable = true; });
     worker.on('exit', (code) => { _lockHeartbeatWorker = null; if (code !== 0) _lockHeartbeatUnavailable = true; });
     worker.unref();
@@ -348,7 +356,7 @@ function _ensureLockHeartbeat() {
   } catch { _lockHeartbeatUnavailable = true; return false; }
 }
 function _lockHeartbeat(op, ownerPath, token) {
-  try { if (_lockHeartbeatWorker) _lockHeartbeatWorker.postMessage({ op, ownerPath, token }); } catch {}
+  try { if (_lockHeartbeatWorker) _lockHeartbeatWorker.postMessage({ op, ownerPath, token, roots: require('../lib/runtime-writes').runtimeWriteRoots() }); } catch {}
 }
 function _newLockOwner(lease) {
   const hostId = _lockHostIdentity();
@@ -420,6 +428,9 @@ function _reclaimStaleLock(lockPath, staleMs) {
 //   경고를 못 전달하는 것은 감수한다 — 그 때문에 성공을 실패로 보고하는 것은 감수하지 않는다.
 for (const _st of [process.stderr, process.stdout]) { try { _st.on('error', (e) => { if (!e || e.code !== 'EPIPE') return; }); } catch {} }
 function _withLock(targetPath, fn, opts = {}) {
+  return withRuntimePathWrite(targetPath, () => _withLockBody(targetPath, fn, opts));
+}
+function _withLockBody(targetPath, fn, opts = {}) {
   const lockPath = targetPath + '.lock';
   // 1.36.144 (T-0117): dry-run 이면 **락을 잡지 않는다** — 쓰기가 어차피 가드에 막히므로 지킬 것이 없고,
   //   락 디렉토리를 만드는 것만으로 "변경 없음" 이 거짓이 된다(실측: `state *` 8건이 빈 `.leerness/` 를 남겼다).
@@ -611,7 +622,7 @@ function _withLock(targetPath, fn, opts = {}) {
     throw e;
   };
   let out;
-  try { out = fn(); }
+  try { assertCurrentRuntimeWrite(targetPath); out = fn(); }
   catch (e) { return releaseAndRethrow(e); }
   let then = null;
   try { then = out && out.then; }
@@ -882,7 +893,7 @@ function _errorUiLang(root, command) {
   const parsed = nonFlagArgs();
   const resolvedCommand = command || parsed[0];
   if (resolvedCommand === 'mode' && has('--json')) return 'ko';
-  if (resolvedCommand === 'state' && parsed[1] === 'inspect') return _inspectionUiLang();
+  if (resolvedCommand === 'state' && ['inspect', 'compatibility'].includes(parsed[1])) return _inspectionUiLang();
   return _uiLang(resolvedCommand === 'mode' ? _modeRoot(parsed, root) : root);
 }
 function _inspectionUiLang() {
@@ -4772,7 +4783,12 @@ function _selfTestCases() {
       const s = read(__filename);
       const tagOk = s.includes("'--list', 'v*'") && !s.includes("'--list', 'v1.9" + ".*'");
       const celebOk = (s.match(/이 저장소 계보의 릴리스 태그 이력 없음/g) || []).length >= 2;
-      const usageOk = s.includes("else if (args[2] && !args[2].startsWith('-') && exists(path.join(absRoot(args[2]), '.leerness')))");
+      const priorArgv = process.argv;
+      let usageOk;
+      try {
+        process.argv = ['node', 'leerness', 'scan', 'secrets', tmp];
+        usageOk = _runtimeProjectRoot(process.argv.slice(2), 'scan') === absRoot(tmp);
+      } finally { process.argv = priorArgv; }
       const cutoffWired = s.includes('_retroAggregate(root, cutoff)');
       return filterOk && sigOk && tagOk && celebOk && usageOk && cutoffWired;
     } },
@@ -5289,6 +5305,7 @@ function _selfTestCases() {
     { name: '8번째 버그헌트 (UR-0112): _parseSkillMd CRLF/CR 줄바꿈 정규화 (Windows SKILL.md meta 소실 차단) (1.9.408)', run: () => { const m = require('../lib/pure-utils'); const lf = m._parseSkillMd('---\nname: s\ndescription: d\n---\nbody'); const crlf = m._parseSkillMd('---\r\nname: s\r\ndescription: d\r\n---\r\nbody'); const cr = m._parseSkillMd('---\rname: s\rdescription: d\r---\rbody'); const bom = m._parseSkillMd('﻿---\r\nname: s\r\n---\r\nbody'); return lf.meta.name === 's' && crlf.meta.name === 's' && crlf.meta.description === 'd' && cr.meta.name === 's' && bom.meta.name === 's'; } },
     { name: '8번째 버그헌트 (UR-0113): env encoding-check --apply 셸/플랫폼/모호 인코딩 안전계약 (1.9.409/T-0022)', run: () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), '__leerness_bom_'));
+      const priorExit = process.exitCode;
       try {
         const sh = path.join(tmp, 's.sh');
         const ps = path.join(tmp, 's.ps1');
@@ -5296,12 +5313,12 @@ function _selfTestCases() {
         fs.writeFileSync(sh, '#!/bin/bash\n# 한글\necho hi\n');
         fs.writeFileSync(ps, 'Write-Host "😀"\n');
         fs.writeFileSync(ambiguous, Buffer.from([0x41, 0xC2, 0xA1, 0x42]));
-        const save = process.argv; let out = ''; const _w = process.stdout.write;
+        const save = process.argv; let out = ''; let thrown = null; const _w = process.stdout.write;
         try {
           process.argv = ['node', 'h', 'env', 'encoding-check', '--path', tmp, '--apply', '--json'];
           process.stdout.write = s => { out += s; return true; };
           envCmd(tmp, 'encoding-check');
-        } catch {} finally { process.stdout.write = _w; process.argv = save; }
+        } catch (error) { thrown = error; } finally { process.stdout.write = _w; process.argv = save; }
         const shBuf = fs.readFileSync(sh);
         const psBuf = fs.readFileSync(ps);
         const ambiguousBuf = fs.readFileSync(ambiguous);
@@ -5309,8 +5326,24 @@ function _selfTestCases() {
         const platformOk = process.platform === 'win32'
           ? psBuf.subarray(0, 3).equals(Buffer.from([0xEF, 0xBB, 0xBF]))
           : psBuf.equals(Buffer.from('Write-Host "😀"\n'));
-        return shNoBom && platformOk && ambiguousBuf.equals(Buffer.from([0x41, 0xC2, 0xA1, 0x42]));
-      } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+        const ambiguousOk = ambiguousBuf.equals(Buffer.from([0x41, 0xC2, 0xA1, 0x42]));
+        if (thrown || !shNoBom || !platformOk || !ambiguousOk) {
+          let report;
+          try { report = JSON.parse(out); } catch { report = null; }
+          // selftest는 실패 판정을 유지하고, 폐기하던 bounded 원인만 전달한다.
+          const detail = {
+            shNoBom, platformOk, ambiguousOk, exit: process.exitCode == null ? null : process.exitCode,
+            thrown: thrown ? { code: String(thrown.code || 'error').slice(0, 80), message: String(thrown.message || '').slice(0, 400) } : null,
+            scanErrors: report && Array.isArray(report.scanErrors) ? report.scanErrors.slice(0, 4).map(item => String(item.code || item.error || item).slice(0, 180)) : [],
+            applied: report && Array.isArray(report.applied) ? report.applied.slice(0, 4).map(item => ({ file: path.basename(String(item.file || '')).slice(0, 80), action: String(item.action || '').slice(0, 80), code: String(item.code || '').slice(0, 80), error: String(item.error || '').slice(0, 300) })) : [],
+          };
+          throw new Error(`UR-0113 encoding contract failed: ${JSON.stringify(detail).slice(0, 3600)}`);
+        }
+        return true;
+      } finally {
+        process.exitCode = priorExit;
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+      }
     } },
     { name: '8번째 버그헌트 (UR-0114): absRoot 비문자열(--path 값없음 boolean true) → cwd 폴백(raw TypeError 차단) (1.9.410)', run: () => { const io = require('../lib/io'); const cwd = process.cwd(); const tBool = io.absRoot(true) === cwd; const tEmpty = io.absRoot('') === cwd; const tUndef = io.absRoot(undefined) === cwd; const tSpace = io.absRoot('   ') === cwd; const tReal = io.absRoot(os.tmpdir()) === path.resolve(os.tmpdir()); return tBool && tEmpty && tUndef && tSpace && tReal; } },
     { name: '8번째 버그헌트 (UR-0115): lazy detect --auto-track 단일 RMW 배치(O(T×N)→O(N+T)) (1.9.411)', run: () => { const src = read(__filename); const batched = src.includes("8번째 버그헌트, UR-0115") && /has\('--auto-track'\)[\s\S]{0,500}?_withLock\(progressPath\(root\), \(\) => \{[\s\S]{0,1200}?writeProgressRows/.test(src); const noPerTodoUpsert = !/for \(const t of newTodos\) \{\s*const id = nextId\(root, 'T'\);/.test(src); return batched && noPerTodoUpsert; } },
@@ -5988,7 +6021,10 @@ function _selfTestCases() {
     { name: '14th 버그헌트 (UR-0181): MCP _bumpMcpUsage 를 unknown-tool 검증 후로 이동(unknown tool 임의경로 쓰기 차단) (1.12.2)', run: () => {
       const src = read(__filename);
       // _bumpMcpUsage 호출이 unknown-tool 가드(cliArgs === null return) "뒤"에 위치 — generic 서버 path-타게팅은 유지(취약점 아님), unknown tool 쓰기만 차단.
-      return /if \(cliArgs === null\) return send[\s\S]{0,400}?_bumpMcpUsage\(targetPath, name\)/.test(src);
+      const dispatch = src.slice(src.indexOf('function ' + 'mcpServeCmd('));
+      const unknownGuard = dispatch.indexOf('if (cliArgs === null) return send');
+      const usageWrite = dispatch.indexOf('_bumpMcpUsage(targetPath, name)');
+      return unknownGuard >= 0 && usageWrite > unknownGuard;
     } },
     { name: '14th 버그헌트 P2/P3 (UR-0182/0183): lazy TODO 파일별 추적 + session close 완료 정직성 advisory (1.12.3)', run: () => {
       const src = read(__filename);
@@ -10845,6 +10881,9 @@ function _p0014SecretBaselineOk() {
     const d3 = path.join(d, 'workspace-dir-migration');
     const canonicalDir = path.join(d3, '.leerness');
     fs.mkdirSync(canonicalDir, { recursive: true });
+    // This is a migrated workspace, not an unowned directory containing an
+    // arbitrary fixture file. Establish the same ownership marker as migration.
+    fs.writeFileSync(path.join(canonicalDir, 'HARNESS_VERSION'), VERSION + '\n');
     const migratedRel = '.leerness/migrated-fixture.test.js';
     const migratedFile = path.join(d3, migratedRel);
     const oldKey = 'sk-proj-MigratedFixtureKey1234567890abcd';
@@ -11493,6 +11532,7 @@ function commandsCmd(root) {
       { cmd: 'capabilities [--json]', desc: '권한·보안 표면 공개 (무엇을 하는지 + opt-out + 주의 명령) — 1.9.272', descEn: 'disclose the permission/security surface (what it does + opt-outs + commands to watch) — 1.9.272' },
       { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278', descEn: '.leerness/ JSON state substrate (cross-agent handoff standard) — 1.9.278' },
       { cmd: 'state inspect [path] [--json]', desc: '5-scope 현재/제안 경로와 기존 상태 목록 — 읽기 전용, 이동·활성화 없음', descEn: 'five-scope current/proposed paths and legacy inventory — read-only, no migration or activation' },
+      { cmd: 'state compatibility [path] [--json]', desc: '관측한 runtime layout의 쓰기 호환성 — 읽기 전용, 이동·활성화 없음', descEn: 'observed runtime-layout write compatibility — read-only, no migration or activation' },
       { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280', descEn: 'generate per-tool instructions/.mcp.json selectively (claude/cursor/codex/goose/...) — 1.9.280' },
       { cmd: 'ci init [path] [--force]', desc: 'PR 마다 leerness gate 실행하는 GitHub Actions 워크플로 생성 (.github/workflows/leerness-gate.yml) — 1.9.444', descEn: 'create a GitHub Actions workflow that runs leerness gate on every PR (.github/workflows/leerness-gate.yml) — 1.9.444' },
       { cmd: 'export|prompt --target <agent>', desc: 'adapter 별칭 — 도구별 지침/계약 파일 생성 (claude/cursor/codex/agents-md/...) — 1.9.448', descEn: 'adapter alias — generate per-tool instruction/contract files (claude/cursor/codex/agents-md/...) — 1.9.448' },
@@ -12187,7 +12227,7 @@ const _OBSERVATION_ONLY_SUBCOMMANDS = new Map([
   ['lease', new Set(['list', 'check'])],
   ['roles', new Set(['validate'])],
   ['role', new Set(['validate'])],
-  ['state', new Set(['inspect'])],
+  ['state', new Set(['inspect', 'compatibility'])],
 ]);
 function _cliMutationClass(args, cmd) {
   if (cmd === 'mcp') return 'observation-only'; // server startup must not mutate its incidental cwd
@@ -12202,6 +12242,88 @@ function _cliMutationClass(args, cmd) {
 }
 function _mustRemainReadOnly(args, cmd) { return _cliMutationClass(args, cmd) === 'observation-only'; }
 
+// 시작 bookkeeping도 실제 handler의 project target을 사용한다. 제목/출력 파일을
+// 디렉터리라는 이유만으로 project로 추측하거나, 명시 target 옆의 cwd를 쓰지 않는다.
+function _runtimeProjectRoot(args, cmd) {
+  const sub = args[1];
+  const cwd = process.cwd();
+  const explicit = arg('--path', null);
+  const at = index => typeof args[index] === 'string' && !args[index].startsWith('-') ? args[index] : null;
+  const choose = (positional, positionalFirst = false) => absRoot(positionalFirst
+    ? positional || explicit || cwd : explicit || positional || cwd);
+  const global = new Set(['mcp', 'about', 'identity', 'help', 'which', 'doctor', 'selftest', 'self-test',
+    'install-safety', 'lens', 'route', 'path', 'path-setup']);
+  if (global.has(cmd) || (cmd === 'adapter' && has('--global')) || !_isKnownTopLevelCommand(cmd)) return null;
+  if (cmd === 'mode') {
+    const root = _modeRoot(args);
+    // Invalid mode targets already have a locale-independent path diagnostic.
+    // They cannot own bookkeeping or a workspace, so leave validation to it.
+    try { if (exists(root) && !fs.statSync(root).isDirectory()) return null; } catch {}
+    return root;
+  }
+
+  // These handlers own files rather than a project target.
+  if (cmd === 'contract' && sub === 'verify') return null;
+  if ((cmd === 'scan' && sub === 'secrets') || (cmd === 'encoding' && sub === 'check')) {
+    const root = choose(at(2));
+    try { if (exists(root) && !fs.statSync(root).isDirectory()) return null; } catch {}
+    return root;
+  }
+  if (cmd === 'self' && sub === 'migrate') return null;
+  if (cmd === 'migrate') {
+    if (has('--guide') || sub === 'guide') return null;
+    return choose(['audit', 'apply', 'plan'].includes(sub) || has('--audit') ? at(2) : at(1));
+  }
+  // install's first positional is a SKILL.md / URL / source directory.
+  if (cmd === 'install') return choose();
+  // plan's positional contracts are intentionally different by subcommand.
+  if (cmd === 'plan') {
+    if (sub === 'init') return choose(at(2), true);
+    return choose(sub === 'list' ? at(2) : null);
+  }
+  if (cmd === 'decision' && sub === 'list') return choose(at(2));
+  if (cmd === 'context' && sub === 'budget') return choose(_taskPositionalPath(args, 2));
+  if (cmd === 'parent') return choose(args.slice(2).find(value => value && !value.startsWith('-')));
+  if (cmd === 'memory' && sub === 'archive' && args[2] === 'list') return choose(at(3));
+  if (cmd === 'skill') {
+    if (sub === 'list') return choose(at(2));
+    if (sub === 'impact') return choose(at(2), true);
+    if (sub === 'lint') return choose(at(2) && /^([A-Za-z]:[\\/]|\/|\.\.?[\\/])/.test(at(2)) ? at(2) : null);
+    return choose();
+  }
+  // Keep invalid operands for the handler to diagnose without bookkeeping.
+  if (cmd === 'bugfix') {
+    if (!sub || sub === 'list') return choose(_taskPositionalPath(args, sub ? 2 : 1));
+    if (['start', 'receipt', 'drop'].includes(sub)) {
+      const trailing = args.slice(3).filter(Boolean);
+      if (!trailing.length) return choose();
+      if (trailing.length !== 1 || explicit || !/^([A-Za-z]:[\\/]|\\\\|\/|\.\.?[\\/])/.test(trailing[0])) return null;
+      return choose(trailing[0]);
+    }
+    return choose();
+  }
+
+  if (['health', 'whats-new', 'benchmark'].includes(cmd)) return choose(at(1), true);
+  if (['drift', 'usage', 'adapter', 'glossary', 'env'].includes(cmd)
+    || (cmd === 'reuse' && sub === 'autodetect')
+    || (cmd === 'release' && ['bump', 'publish', 'pack', 'sync-main', 'cleanup', 'channel'].includes(sub))) return choose(at(2), true);
+
+  const first = new Set(['init', 'update', 'status', 'verify', 'debug', 'audit', 'check',
+    'handoff', 'reuse-map', 'gate', 'verify-code', 'retro', 'insights', 'sessions', 'context',
+    'round-history', 'milestones', 'pulse', 'migrate-workspace-dir', 'graph', 'setup-agents']);
+  if (first.has(cmd) || (cmd === 'roadmap' && sub !== 'auto')) return choose(at(1));
+  const second = new Set(['lazy', 'hook', 'session', 'self', 'readme', 'consistency', 'auto-update']);
+  const secondRoutes = new Set(['release cadence', 'team list', 'feature list', 'runs list',
+    'setup agents', 'ci init', 'ci ', 'memory status', 'ui consistency']);
+  if (second.has(cmd) || secondRoutes.has(`${cmd} ${sub || ''}`)) return choose(at(2));
+  const shapedFirst = new Set(['lessons', 'resume', 'session-resume', 'anchors', 'tech', 'library',
+    'dashboard', 'commands', 'py-check', 'capabilities', 'security-surface']);
+  if (shapedFirst.has(cmd)) return choose(_taskPositionalPath(args, 1));
+  const shapedSecond = new Set(['task', 'decision', 'lesson', 'requests', 'enforce', 'integrity', 'feature']);
+  if (shapedSecond.has(cmd) || (cmd === 'rule' && sub === 'add')) return choose(_taskPositionalPath(args, 2));
+  return choose();
+}
+
 function _autoMigrateLegacyWorkspace(args, cmd) {
   if (process.env.LEERNESS_NO_AUTO_WORKSPACE_MIGRATION === '1') return true;
   if (has('--dry-run') || cmd === 'migrate-workspace-dir' || cmd === 'workspace-dir') return true;
@@ -12209,18 +12331,14 @@ function _autoMigrateLegacyWorkspace(args, cmd) {
   // Invalid commands must be observationally pure. In particular, a typo in
   // a legacy project may not rename project memory before reporting the typo.
   if (!_isKnownTopLevelCommand(cmd)) return true;
-  const candidates = [];
-  const explicit = arg('--path', null);
-  if (typeof explicit === 'string' && explicit.trim()) candidates.push(explicit);
-  else candidates.push(process.cwd());
+  const targetRoot = _runtimeProjectRoot(args, cmd);
+  const candidates = targetRoot ? [targetRoot] : [];
   // Never interpret arbitrary command content as a project to mutate. Topics,
   // titles and output paths may all be path-shaped (for example
   // `brainstorm ./legacy-design`); scanning every positional token used to
   // migrate those unrelated directories before command dispatch. Positional
-  // project targets can be migrated explicitly with `migrate-workspace-dir`,
-  // while normal automatic migration is limited to cwd and the unambiguous
-  // global `--path` option. When it is present, the unrelated process cwd is
-  // not another migration target.
+  // project targets follow the same selector as command dispatch. The unrelated
+  // process cwd is never added as another target when a project is specified.
   const seen = new Set();
   for (const candidate of candidates) {
     let root;
@@ -12245,19 +12363,8 @@ function _autoMigrateLegacyWorkspace(args, cmd) {
 }
 
 function _guardLinkedWorkspaceTargets(args) {
-  const candidates = [process.cwd()];
-  const explicit = arg('--path', null);
-  if (typeof explicit === 'string' && explicit.trim()) candidates.push(explicit);
-  // Positional project arguments vary by command. Inspecting an existing
-  // directory is read-only, so include every such token rather than risk a
-  // hardcoded writer following `<project>/.leerness` outside the project.
-  for (const token of (args || []).slice(1)) {
-    if (typeof token !== 'string' || token.startsWith('-')) continue;
-    try {
-      const candidate = absRoot(token);
-      if (exists(candidate) && fs.statSync(candidate).isDirectory()) candidates.push(candidate);
-    } catch {}
-  }
+  const root = _runtimeProjectRoot(args, args[0] || 'init');
+  const candidates = root ? [root] : [];
   const seen = new Set();
   for (const candidate of candidates) {
     let state;
@@ -15571,6 +15678,7 @@ const _STRICT_COMMAND_FLAGS = {
   'lease check': { allowed: ['--session'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'lease check <file> [--session <key>] [--json]' },
   'roles validate': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles validate [--path .] [--json]' },
   'state inspect': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'state inspect [path] [--path <path>] [--json]' },
+  'state compatibility': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'state compatibility [path] [--path <path>] [--json]' },
   'roles set': { allowed: ['--provider', '--to', '--model', '--model-family', '--policy', '--fallback-policy', '--candidate', '--candidate-family', '--remove-candidate', '--clear-candidates', '--persona', '--force'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles set <role> --provider <id> [--model <id>] [--policy strict|balanced|continuity]' },
   'roles unset': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles unset <role> [--path .] [--json]' },
   'roles suggest': { allowed: ['--apply'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles suggest [--apply] [--path .] [--json]' },
@@ -15652,10 +15760,10 @@ function _validateRolesCommandShape(cmd, args) {
 }
 
 function _validateCommandFlags(cmd, args) {
-  if (cmd === 'state' && args[1] === 'inspect') {
+  if (cmd === 'state' && ['inspect', 'compatibility'].includes(args[1])) {
     if (!_rejectDuplicateValueFlags(['--path'])) return false;
     if (args.length > 3) {
-      failJson(has('--json'), 'too_many_arguments', 'Usage: state inspect [path] [--path <path>] [--json]');
+      failJson(has('--json'), 'too_many_arguments', `Usage: state ${args[1]} [path] [--path <path>] [--json]`);
       return false;
     }
   }
@@ -15671,7 +15779,7 @@ function _validateCommandFlags(cmd, args) {
   if (cmd === 'intent' && args[1] === 'expand') route = 'intent expand';
   if (cmd === 'lease') route = `lease ${args[1] == null ? 'list' : args[1]}`;
   if (roleSub) route = `roles ${roleSub === 'remove' || roleSub === 'rm' ? 'unset' : roleSub}`;
-  if (cmd === 'state' && args[1] === 'inspect') route = 'state inspect';
+  if (cmd === 'state' && ['inspect', 'compatibility'].includes(args[1])) route = `state ${args[1]}`;
   const cfg = _STRICT_COMMAND_FLAGS[route];
   if (!cfg) return true;
   return _rejectUnknownFlags(cfg.allowed, cfg.usage, { globals: cfg.globals });
@@ -25806,6 +25914,9 @@ function _bumpUsageLocked(root, cmdName) {
 
 // 1.9.70: MCP tools/call 자동 사용 통계 — 도구별 호출 카운트
 function _bumpMcpUsage(root, toolName) {
+  return withRuntimeWrites(root, () => _bumpMcpUsageBody(root, toolName));
+}
+function _bumpMcpUsageBody(root, toolName) {
   try {
     // 1.36.76 (9차 헌트 #2a): read-only 호출조차 텔레메트리가 대상 프로젝트에 디렉토리·파일을 만들었다
     //   (존재하지 않는 대상까지 통째로 생성). 통계는 이미 초기화된 하네스에만 기록 — 읽기가 대상을 변형하지 않는다.
@@ -27173,7 +27284,11 @@ function mcpServeCmd(root) {
         const _mcpReadOnly = !!(_toolDef && _toolDef.requiredTier === 'read-only');
         // A read-only tool may not mutate the target merely to count itself.
         // Writable tools retain existing per-project MCP telemetry.
-        if (!_mcpReadOnly) { try { _bumpMcpUsage(targetPath, name); } catch {} }
+        if (!_mcpReadOnly) {
+          require('../lib/runtime-layout').assertRuntimeWriteAllowed(targetPath);
+          try { _bumpMcpUsage(targetPath, name); }
+          catch (error) { if (error.code === 'E_RUNTIME_LAYOUT_INCOMPATIBLE') throw error; }
+        }
         // 1.9.288 (Codex gpt-5.5 리뷰 #1 수렴): MCP 도구도 policy enforce 적용 — read-only enforce 시 write 도구 차단.
         //   이전: _policyEnforce 는 agents multi --execute 한 곳뿐 → MCP state_start 등이 정책 우회하고 .leerness 기록.
         //   cliArgs(실제 실행 명령) 로 required tier 판정 → enforce ON 이고 초과 시 JSON-RPC error 반환(실행 안 함).
@@ -28924,6 +29039,14 @@ function stateInspectCmd(root) {
   }
 }
 
+function stateCompatibilityCmd(root) {
+  const report = require('../lib/runtime-layout').inspectRuntimeCompatibility(root);
+  if (has('--json')) log(JSON.stringify(report, null, 2));
+  else log(`Runtime compatibility: ${report.writeDisposition} (${report.reasonCode})\nScope: ${report.scope}\nWriter protocol: ${report.supportedWriterProtocol}\nActivation: unsupported; legacy storage is unchanged.`);
+  if (!report.compatible) process.exitCode = 1;
+  return report;
+}
+
 // leerness state <show|start|record|verify|handoff>
 // 1.9.292 (UR-0031): get_project_context — 외부 에이전트 온보딩용 단일 집약 컨텍스트.
 //   1콜로 현재 작업/미답 요청/최근 결정/활성 룰/next-actions/memory/프로젝트 의도를 구조화 회수.
@@ -30432,6 +30555,7 @@ async function _agentRepl(root, opts) {
   };
   return new Promise(resolve => {
     rl.on('line', async (line) => {
+      try { await withRuntimeWrites(root, async () => {
       const input = line.trim();
       _lastCycleLines = 0;  // 1.9.189: 사용자 입력 시 cycle overwrite 추적 reset
       if (!input) { promptWithStatus(); return; }
@@ -30560,8 +30684,14 @@ async function _agentRepl(root, opts) {
         } catch {}
       }
       promptWithStatus();
+      }, { fresh: true }); }
+      catch (error) { fail(error.message); rl.close(); resolve(); }
     });
-    rl.on('close', () => { saveSession(); resolve(); });
+    rl.on('close', () => {
+      try { withRuntimeWrites(root, saveSession, { fresh: true }); }
+      catch (error) { fail(error.message); }
+      resolve();
+    });
   });
 }
 
@@ -31825,6 +31955,7 @@ SETUP & UPDATE
 STATUS & DIAGNOSTICS
   status [path]                   Install status (files present)
   state inspect [path] [--json]   Read-only five-scope paths/inventory; no migration or runtime activation
+  state compatibility [path] [--json]   Read-only observed-layout write admission; no activation
   health [path] | doctor [--json]   health: project state · doctor: CLI install/environment (no path arg)
   verify [path]                   Required-file verification
   which [--json]                  Resolve current binary/version (npm cache conflicts)
@@ -31907,6 +32038,7 @@ function help() {
   leerness lens [${_lensDomainList()}] [--json]   # 1.18.3/1.36.97 분야별 자기질문 품질 렌즈 (database·contract·recovery·observability 심화 · axes 8축 경량 — 완료 선언 전 자가 점검)\n  leerness library [show|page] [path] [--json] [--ai]   # 1.36.98 재사용 인벤토리 — 컴포넌트·디자인 토큰 추출 (page: 오프라인 HTML · --ai: 에이전트용 압축)\n  leerness reuse-map [path] [--all-apps] [--include p1,p2] [--strict-elements] [--json] # 1.9.18 중복/잠재중복/depends-on\n  leerness verify-claim <T-ID> [--path .] [--run-tests] [--json]   # 1.9.18-20 evidence 자동 검증 (1.9.20: scenes/scripts 등 도메인 폴더 + jest/mocha 파싱)\n  leerness verify-code [path] [--build] [--bench]  # 1.9.20 --bench: scripts.bench 추가 실행 + evidence 누적\n  leerness session close [path]\n  leerness route <task-type>\n  leerness self check [path]\n  leerness readme sync [path]\n  leerness consistency check [path]\n  leerness consistency merge-design-guide [path]\n  leerness plan show|init|add|drop|progress|sync [args]\n  leerness task list|add|update|drop|fix-evidence|relink [args]\n  leerness skill list|info <name>\n  leerness skill learn <id> --doc <url> --command "..." --capability "..." [--note ...]\n  leerness skill use <id> [--note ...]\n  leerness skill optimize <id> --before "..." --after "..." [--note ...]\n  leerness skill remove <id>\n  leerness skill consolidate [--threshold 0.3]\n  leerness gate [path]                       # verify+audit+scan+encoding+lazy
   leerness lease acquire|release|list|check [file|lease-id] [--session KEY] [--ttl SEC] [--json]  # exact-file opt-in 협업 lease
   leerness state inspect [path] [--json]   # 5-scope 경로/목록 읽기 전용 진단 — 이동·활성화 없음
+  leerness state compatibility [path] [--json]   # 관측 layout 쓰기 호환성 읽기 전용 진단 — 활성화 없음
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -31931,7 +32063,7 @@ function help() {
   leerness release publish [--dry-run] [--pack] [--git-push] [--gh-release] [--gh-pages] [--gh-pages-src file] [--npm-publish] [--auto]  # 통합 배포 (1.9.8 + 1.9.10)\n  leerness impact <target> [--all]           # 변경 전 영향 분석 (기본 strong, --all로 weak 포함)\n  leerness reuse find <query>                # 기존 자원 검색 (재귀 안내)\n  leerness reuse register <name> --where <p> --kind component|hook|util|api [--note ...]\n  leerness ui consistency [path] [--strict] [--fail-on-violation]\n  leerness graph [path] [--out <file>]       # mermaid 의존성 그래프\n  leerness graph [path] --html [--out <file>]  # 온톨로지 그래프 HTML(leerness.html) 자동생성 — 노드 클릭으로 하네스 조회 (1.34.3)\n  leerness guide [target]                    # impact + reuse + ui consistency 통합 가이드\n  leerness migrate audit|apply|plan [path] [--json] [--yes]   # 크로스버전 마이그레이션 진단/적용(canonical 백필)/플랜(임시폴더 비교) (UR-0075, 1.9.356~358)\n  leerness migrate --guide                    # AI 에이전트용 크로스버전 마이그레이션 가이드 (1.9.355)\n  leerness install-safety [--json]            # 설치 안전 프로필 — 0 런타임 deps / 0 install-script (1.9.359)\n  leerness capabilities [--json]              # 권한·보안 표면 공개 (1.9.272)\n  leerness feature add|link|impact|list|show  # 기능 그래프(feature-graph) 추적\n  leerness permissions list|set               # agent 권한 모드 (1.9.174)\n  leerness creds list|register|check|refresh  # 크리덴셜 메타 추적 (값 미저장)\n  leerness incident list|show|handle · webhook serve · deploy auto · runs list|show   # 운영(ops)\n  leerness whats-new [path]                   # 최근 버전 변경 요약\n  leerness team list|add|show|remove|preview|deploy <id> [--personas a,b --members claude,codex --schedule every-session --task "..." --deploy "<배포명령>" --yes]   # 에이전트 팀 정의/미리보기/배포 — UR-0073 A~D, opt-in · 배포는 2중게이트(--yes + LEERNESS_TEAM_DEPLOY=1)\n  leerness release channel|cadence [path] [--json]   # 릴리스 채널 정책 + 빈도 진단 (UR-0074 케이던스 가시화, 1.9.275/374)\n  leerness commands [--json]                  # 전체 명령 전수 목록 (누락 없이 이 명령으로 확인)\n`);
 }
 
-async function main() {
+async function main(runtimeEntered = false) {
   const args = nonFlagArgs(); const cmd = args[0] || 'init';
   if (has('--version') || has('-v')) {
     // 1.9.32: --version은 순수 버전만 (CI/script 친화). 배너는 --banner 시.
@@ -31948,6 +32080,14 @@ async function main() {
   if (cmd === 'state' && args[1] === 'inspect') {
     const explicit = arg('--path', null);
     return stateInspectCmd(explicit !== null ? explicit : args[2] === undefined ? process.cwd() : args[2]);
+  }
+  if (cmd === 'state' && args[1] === 'compatibility') {
+    const explicit = arg('--path', null);
+    return stateCompatibilityCmd(explicit !== null ? explicit : args[2] === undefined ? process.cwd() : args[2]);
+  }
+  const runtimeRoot = _runtimeProjectRoot(args, cmd);
+  if (!runtimeEntered && runtimeRoot && !_mustRemainReadOnly(args, cmd)) {
+    return withRuntimeWrites(runtimeRoot, () => main(true));
   }
   // 값이 존재하지만 의미가 잘못된 --keep 도 legacy migration/write 전에 거부한다.
   // preview serve 의 --keep 은 route별 boolean 계약이므로 숫자 검증 대상이 아니다.
@@ -32077,16 +32217,10 @@ async function main() {
   // 1.36.104: 'mcp' 를 제외한다. MCP 서버는 프로젝트 명령이 아니라 상주 프로세스라, 서버의 cwd 가 우연히
   //   leerness 프로젝트면 거기에 `mcp: N` 이 쌓였다 — 사용자가 그 프로젝트에서 쓴 적 없는 '명령' 이 통계에 뜬다
   //   (실측: 대상 프로젝트는 "사용 기록 없음", 무관한 cwd 는 "총 3회 호출"). 도구별 귀속은 _bumpMcpUsage 가 이미 한다.
-  if (process.env.LEERNESS_INTERNAL !== '1' && !_mustRemainReadOnly(args, cmd) && cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== 'mcp' && cmd !== '--version' && cmd !== '--help') {
+  if (runtimeRoot && process.env.LEERNESS_INTERNAL !== '1' && !_mustRemainReadOnly(args, cmd) && cmd !== 'usage' && cmd !== 'init' && cmd !== 'migrate' && cmd !== 'mcp' && cmd !== '--version' && cmd !== '--help') {
     try {
       // 1.9.352 (UR-0069 외부리뷰): usage 루트 — --path 우선, 없으면 args[1] 이 .leerness 보유 디렉토리일 때만 path(positional 보존), 아니면 cwd. (이전: args[1] 무조건 path 가정 → subcommand[decision add 등] root=cwd/add → .leerness 못 찾아 미집계)
-      const _pathArg = arg('--path', null);
-      let root;
-      if (_pathArg) root = absRoot(_pathArg);
-      else if (args[1] && !args[1].startsWith('-') && exists(path.join(absRoot(args[1]), '.leerness'))) root = absRoot(args[1]);
-      // 1.36.38 (codex 4차 #9): subcommand 형(예: memory status <B>)은 대상 경로가 args[2] — 종전엔 cwd(A)에 오귀속됐다.
-      else if (args[2] && !args[2].startsWith('-') && exists(path.join(absRoot(args[2]), '.leerness'))) root = absRoot(args[2]);
-      else root = absRoot(process.cwd());
+      const root = runtimeRoot;
       if (exists(path.join(root, '.leerness'))) _bumpUsage(root, cmd);
     } catch {}
   }
@@ -33132,7 +33266,7 @@ async function main() {
 
 const skillCatalog = (() => {
   const args = nonFlagArgs();
-  if (require.main === module && args[0] === 'state' && args[1] === 'inspect') {
+  if (require.main === module && args[0] === 'state' && ['inspect', 'compatibility'].includes(args[1])) {
     return _withBuiltinSource(BUILTIN_CATALOG);
   }
   return _loadSkillCatalog();
@@ -33145,6 +33279,26 @@ if (require.main === module) {
   main()
     .then(() => { if (process.exitCode && process.exitCode !== 0) process.exit(process.exitCode); })
     .catch(err => {
+      if (err && err.code === 'E_RUNTIME_LAYOUT_INCOMPATIBLE') {
+        const blockedArgs = nonFlagArgs();
+        const reason = String(err.reasonCode || '');
+        // 기존 workspace 오류의 기계 소비자 계약은 유지한다. 새 layout 오류만
+        // runtime_layout_incompatible로 확장하고, 어느 경우에도 writer를 재실행하지 않는다.
+        if (blockedArgs[0] === 'migrate-workspace-dir' && /^workspace_dir_/.test(reason)) {
+          const current = inspectWorkspace(_runtimeProjectRoot(blockedArgs, blockedArgs[0]));
+          const blockedReason = reason === 'workspace_dir_symlink' && current.canonical.isSymbolicLink
+            ? 'canonical-workspace-symlink' : reason.replace(/_/g, '-');
+          const report = { ok: false, blocked: true, blockedReason, errors: [err.message] };
+          if (process.argv.includes('--json')) log(JSON.stringify(report, null, 2)); else fail(err.message);
+          process.exit(1);
+        }
+        if (/^workspace_dir_/.test(reason)) {
+          failJson(process.argv.includes('--json'), reason, err.message);
+          process.exit(1);
+        }
+        failJson(process.argv.includes('--json'), 'runtime_layout_incompatible', err.message);
+        process.exit(1);
+      }
       // 1.36.144 (T-0117): dry-run 인데 쓰려다 멈춘 것은 크래시가 아니라 **계약 위반 보고**다.
       if (err && err.code === 'E_DRY_RUN_WRITE') {
         failJson(process.argv.includes('--json'), 'dry_run_unsupported',
@@ -33182,7 +33336,7 @@ if (require.main === module) {
 //   _isSecretKey (시크릿 차단, 보안), compareVer (버전 비교, stale-check 정확성), parseHarnessVersion (버전 파싱).
 module.exports = {
   VERSION,
-  _cliMutationClass, _mustRemainReadOnly,
+  _cliMutationClass, _mustRemainReadOnly, _runtimeProjectRoot,
   _npmGlobalBin, _dirInPath, _leernessResolvable, _pathDiagnose, _registerPath,
   _winPathPsScript, _unixPathBlock, pathSetupCmd,
   _isSecretKey, compareVer, parseHarnessVersion,
@@ -33193,7 +33347,7 @@ module.exports = {
   // 1.9.260: shell-guard — 셸 호환성 린터 (UR-0020) 순수 분석 함수 — 단위 테스트
   _shellGuardAnalyze, _detectShellCtx, shellGuardCmd,
   // 1.9.263: shell 실패 메모리 + 환경 버전 변동 (UR-0020 3단계) — handoff 통합 단위 테스트
-  _shellFailuresPath, _loadShellFailures, _recordShellFailure, _shellEnvDrift,
+  _shellFailuresPath, _loadShellFailures, _recordShellFailure: projectWriter(_recordShellFailure), _shellEnvDrift,
   // 1.9.265: CLI 에이전트 슬래시 명령어 레지스트리 (UR-0021 1단계) — 단위 테스트
   AGENT_SLASH_COMMANDS, _agentSlashFile, _loadAgentSlashCommands, _recordAgentSlashCommands, _agentSlashHint, slashCommandsCmd,
   _parseSlashFromHelp, _probeAgentSlash, _refreshAgentSlashCommands,
@@ -33211,9 +33365,12 @@ module.exports = {
   // 1.9.276: init --minimal 파일 필터 (GPT-5.5 2차 리뷰) — 단위 테스트
   MINIMAL_SKIP_KEYS, coreFiles,
   // 1.9.278: .leerness/ 상태 스키마 (UR-0032, GPT-5.5 범용 하네스) — 단위 테스트
-  _newRunRecord, _leernessStateDir, _loadLeernessState, _saveLeernessState, _loadRun, _saveRun, stateCmd,
+  _newRunRecord, _leernessStateDir, _loadLeernessState, _saveLeernessState, _loadRun, _saveRun,
+  stateCmd: projectWriter(stateCmd), stateCompatibilityCmd,
+  _withLock, _recordRun: projectWriter(_recordRun),
+  _bumpMcpUsage,
   // 1.9.280: adapter (UR-0033) — 단위 테스트
-  ADAPTERS, _mcpJsonContent, _mergeMcpJson, adapterCmd,
+  ADAPTERS, _mcpJsonContent, _mergeMcpJson, adapterCmd: projectWriter(adapterCmd),
   // 1.9.281: 권한 등급 (UR-0034) — 단위 테스트
   PERMISSION_TIERS, _tierRank, _requiredTier, _policyAllows, _loadPolicy, _savePolicy, _policyEnforce, policyCmd,
   // 1.9.285: 외부 OSS 재사용 게이트 (UR-0023) — 단위 테스트

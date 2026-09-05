@@ -453,5 +453,31 @@
         "event": "approved"
       }
     ]
+  },
+  {
+    "id": "P-0021",
+    "title": "M-0015-A: runtime 전환 사전 호환 guard",
+    "design": "기존 legacy 저장 위치는 유지한다. Git worktree 단위의 고정 layout descriptor와 non-Git canonical descriptor를 엄격히 읽어 지원하지 않는 전환 상태에서 쓰기를 거부할 준비를 한다. Git의 호환 불가 상태는 해당 worktree 전체에 적용하고 별도 read-only compatibility 진단으로 범위를 알린다. 구버전과 이미 진입한 writer를 소급 차단하지 않는다. 실제 데이터 복사·활성화·삭제·공용 task claim은 별도 승인 단계다.",
+    "features": [
+      "projectKey 및 workspace 선택에 독립적인 versioned descriptor strict reader와 bounded 진단",
+      "CLI startup 및 실제 writer 진입점의 관측 기반 fail-closed guard",
+      "기존 state inspect metadata-only 계약 보존",
+      "Git 없는 비저장소 동작과 legacy 파일 보존",
+      "장수 MCP·REPL 및 direct·FD writer 경계 테스트",
+      "Node18 이상 Windows·POSIX 호환 및 I/O 예산 회귀",
+      "원본 데이터 이동과 runtime activation 없음"
+    ],
+    "status": "approved",
+    "createdAt": "2026-09-05T12:59:54.472Z",
+    "history": [
+      {
+        "at": "2026-09-05T12:59:54.472Z",
+        "event": "proposed"
+      },
+      {
+        "at": "2026-09-05T14:29:06.989Z",
+        "event": "approved"
+      }
+    ]
   }
 ]

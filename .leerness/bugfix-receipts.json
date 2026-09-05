@@ -819,5 +819,29 @@
       ]
     },
     "previousGuardGap": "기존 테스트는 출력의 추정 수치만 검사했고, 자식 프로세스가 실제로 받은 환경과 비활성 provider 실행 횟수, unknown-auth routing 판정을 관측하지 않았다."
+  },
+  {
+    "id": "T-0181",
+    "repro": "node scripts/encoding-selftest-probe.js --repro",
+    "expectBad": "ENCODING_DIAGNOSTICS_MISSING",
+    "baseline": {
+      "at": "2026-09-05T15:49:23.084Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 670
+    },
+    "rootCause": "UR-0113 selftest discarded captured env encoding-apply JSON and replaced it with a generic assertion while leaving process.exitCode changed by the tested command. This independently reproduced diagnostic loss and exit-code leakage; the original v1.36.186 Windows Node24 CI errno was not captured and remains unknown.",
+    "siblingScope": {
+      "checked": [
+        "injected replacement exception with oversized diagnostic",
+        "prior exit unset and 23",
+        "successful canonical and junction-backed Windows replacement",
+        "Node26 and exact Node24.19.0",
+        "CI Windows real-controls wiring inspected but not yet executed"
+      ]
+    },
+    "previousGuardGap": null
   }
 ]

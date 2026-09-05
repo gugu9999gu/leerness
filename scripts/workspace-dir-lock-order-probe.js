@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// A live legacy migration must own its project lock before the second workspace
-// inspection. Otherwise a peer can populate `.leerness/` after validation and
+// A live legacy migration must own its project lock before migration revalidation.
+// Otherwise a peer can populate `.leerness/` after validation and
 // make the first caller misclassify the peer's intermediate copy as a user
 // conflict. This probe forces that interleaving without relying on scheduler luck.
 
@@ -10,9 +10,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const cp = require('child_process');
-const workspace = require('../lib/workspace-dir');
 
 const IS_PEER = process.argv[2] === '--peer';
+const IS_MUTANT = process.argv[2] === '--prelock-validation-mutant';
+const WORKSPACE_MODULE = require.resolve('../lib/workspace-dir');
+const workspace = loadWorkspace();
 const root = IS_PEER
   ? path.resolve(process.argv[3] || '.')
   : fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-lock-order-'));
@@ -22,6 +24,43 @@ const lockFile = path.join(root, '.leerness-workspace-migration.lock');
 const peerReadyFile = path.join(root, '.leerness-lock-order-peer-ready');
 const peerContendedFile = path.join(root, '.leerness-lock-order-peer-contended');
 const peerDoneFile = path.join(root, '.leerness-lock-order-peer-done');
+
+function loadWorkspace() {
+  if (!IS_MUTANT) return require(WORKSPACE_MODULE);
+
+  // Recreate validation-before-lock in memory: bypass the outer early-lock
+  // wrapper so the original migration validates before its fallback lock.
+  // Keep the real writer guard and all other source unchanged; the peer uses
+  // the unmodified module. Never overwrite a product file to run a mutant.
+  const source = fs.readFileSync(WORKSPACE_MODULE, 'utf8');
+  const entry = 'function migrateLegacyWorkspace(root, opts = {}) {';
+  if (source.split(entry).length !== 2) throw new Error('migration mutant entry is not unique');
+  const Module = require('module');
+  const candidate = new Module(WORKSPACE_MODULE, module);
+  candidate.filename = WORKSPACE_MODULE;
+  candidate.paths = Module._nodeModulePaths(path.dirname(WORKSPACE_MODULE));
+  candidate._compile(source.replace(entry, `${entry}\n  return _migrateLegacyWorkspace(root, opts);`), WORKSPACE_MODULE);
+  return candidate.exports;
+}
+
+function isMigrationRevalidation() {
+  const originalPrepare = Error.prepareStackTrace;
+  try {
+    Error.prepareStackTrace = (_error, frames) => frames;
+    const trace = {};
+    Error.captureStackTrace(trace, isMigrationRevalidation);
+    // Direct function boundaries distinguish migration's inspection from
+    // runtime compatibility reads, including reads made inside write guards.
+    // Do not condition this hook on lock existence: that would miss the bug.
+    const callers = trace.stack.slice(1, 4); // skip patchedLstat
+    return ['_inspectDir', 'inspectWorkspace', '_migrateLegacyWorkspace'].every((name, index) => {
+      const frame = callers[index];
+      return frame && frame.getFunctionName() === name && frame.getFileName() === WORKSPACE_MODULE;
+    });
+  } finally {
+    Error.prepareStackTrace = originalPrepare;
+  }
+}
 
 function write(file, body) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -90,7 +129,7 @@ async function main() {
 
   const originalLstat = fs.lstatSync;
   const originalUnlink = fs.unlinkSync;
-  let canonicalInspections = 0;
+  let revalidationSeen = false;
   let peer = null;
   let peerDone = null;
   let earlyLockSeen = false;
@@ -107,7 +146,8 @@ async function main() {
     try { result = originalLstat.call(fs, target, ...rest); }
     catch (error) { thrown = error; }
 
-    if (isCanonicalRoot && ++canonicalInspections === 2) {
+    if (isCanonicalRoot && !revalidationSeen && isMigrationRevalidation()) {
+      revalidationSeen = true;
       earlyLockSeen = fs.existsSync(lockFile);
       peer = cp.spawn(process.execPath, [__filename, '--peer', root], {
         cwd: root,
@@ -124,7 +164,7 @@ async function main() {
 
       // The child records an actual failed `open(..., "wx")`, not merely that
       // it was spawned. This proves it reached lock acquisition while the
-      // victim is paused inside its second canonical workspace inspection.
+      // victim is paused inside migration's canonical workspace revalidation.
       const handshake = waitForPeerHandshake(20000);
       peerReadySeen = handshake.ready;
       peerContentionSeen = handshake.contended;
@@ -159,7 +199,8 @@ async function main() {
   }
 
   const peerStatus = peerDone ? await peerDone : null;
-  const ok = earlyLockSeen
+  const ok = revalidationSeen
+    && earlyLockSeen
     && peerReadySeen
     && peerContentionSeen
     && !peerCompletedBeforeRelease
@@ -173,6 +214,7 @@ async function main() {
 
   if (!ok) {
     process.stderr.write(`WORKSPACE_LOCK_ORDER_RACE ${JSON.stringify({
+      revalidationSeen,
       earlyLockSeen,
       peerReadySeen,
       peerContentionSeen,
@@ -190,6 +232,27 @@ async function main() {
     })}\n`);
     process.exitCode = 1;
   } else {
+    if (!IS_MUTANT) {
+      const mutant = cp.spawnSync(process.execPath, [__filename, '--prelock-validation-mutant'], {
+        cwd: __dirname,
+        encoding: 'utf8',
+        timeout: 60000,
+        windowsHide: true,
+      });
+      const match = (mutant.stderr || '').match(/^WORKSPACE_LOCK_ORDER_RACE (.+)$/m);
+      const report = match ? JSON.parse(match[1]) : null;
+      const caught = !mutant.error && mutant.status === 1 && report
+        && report.revalidationSeen && !report.earlyLockSeen
+        && report.peerReadySeen && !report.peerContentionSeen
+        && report.peerCompletedBeforeRelease && report.peerStatus === 0;
+      if (!caught) {
+        throw new Error(`pre-lock validation mutant was not caught: ${JSON.stringify({
+          status: mutant.status, error: mutant.error && mutant.error.message,
+          stdout: mutant.stdout, stderr: mutant.stderr,
+        })}`);
+      }
+      process.stdout.write('WORKSPACE_LOCK_ORDER_MUTANT_CAUGHT\n');
+    }
     process.stdout.write('WORKSPACE_LOCK_ORDER_OK\n');
   }
 }

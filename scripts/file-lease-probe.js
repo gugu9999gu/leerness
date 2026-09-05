@@ -901,7 +901,10 @@ async function main() {
   makeDirLink(cacheTarget, cacheLink);
   const cacheLinkAcquire = runLease(cacheLinkRoot, ['acquire', 'x.js', '--session', alpha, '--ttl', '300']);
   check('lease cache symlinks or junctions are rejected before writing tracked project paths',
-    cacheLinkAcquire.status === 1 && parseJson(cacheLinkAcquire)?.code === 'cache_symlink'
+    // Runtime admission now rejects the unsafe fixed descriptor parent before
+    // CLI bookkeeping or the lease-specific validator can run.
+    cacheLinkAcquire.status === 1 && parseJson(cacheLinkAcquire)?.code === 'runtime_layout_incompatible'
+      && parseJson(cacheLinkAcquire)?.error.includes('(layout_linked)')
       && !fs.existsSync(path.join(cacheTarget, 'file-leases.json')),
     cacheLinkAcquire.stdout || cacheLinkAcquire.stderr);
 
