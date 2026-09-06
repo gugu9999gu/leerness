@@ -839,5 +839,45 @@
       ]
     },
     "previousGuardGap": null
+  },
+  {
+    "id": "T-0182",
+    "repro": "node scripts/e2e-temp-scope-probe.js",
+    "expectBad": "owned TMP contract failed",
+    "baseline": {
+      "at": "2026-09-06T02:15:03.199Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 334
+    },
+    "rootCause": "The original134 residue assertion enumerated the parent shared os.tmpdir instead of the child TMPDIR/TEMP/TMP sb, producing both foreign-parent false positives and true child-residue false negatives.",
+    "siblingScope": {
+      "checked": [
+        "Original134 child envP and all64 actualCLI/78 Git calls retained; originalAP warning gate; new foreign-parent and child-sb controls on Node18/20/24/26; product temporary-probe creation/finally cleanup unchanged"
+      ]
+    },
+    "previousGuardGap": null
+  },
+  {
+    "id": "T-0183",
+    "repro": "node scripts/e2e-child-diagnostics-probe.js",
+    "expectBad": "E2E child diagnostics contract failed",
+    "baseline": {
+      "at": "2026-09-06T02:34:21.647Z",
+      "failed": true,
+      "exit": 1,
+      "expectMatched": true,
+      "reproduced": 2,
+      "ms": 488
+    },
+    "rootCause": "Original E2E discarded child/setup status, signal, native error and parsed selftest failures. JSON121 also limited doctor to180000ms ahead of its900000ms nested selftest; exact Node18 locally reproduced ETIMEDOUT and blank stdout. Original CI handoff/doc-surface errno remains unknown.",
+    "siblingScope": {
+      "checked": [
+        "Original fresh-handoff migrate/status/regex; doctor commands selftest and dynamic MCP predicates; JSON121 empty/nonJSON/stderr/status/ok branches and all15 commands; null versus empty streams; four Node runtimes; only JSON121 doctor deadline adjusted; no production admission changes"
+      ]
+    },
+    "previousGuardGap": null
   }
 ]

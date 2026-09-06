@@ -18,8 +18,10 @@ doNotStore:
 Updated: 2026-09-06
 
 ## Now
+- T-0180 / P-0021 출하 보완: T-0182 child-TMP 검사와 T-0183 실패 진단/doctor 예산 교정을 적용했다. 네 Node 버전 회귀, 실제 원본134/JSON121 및 독립 Codex 검수 통과 후 새 고정 후보를 준비한다. 공개187 배포는 아직 보류한다 <!-- leerness:auto -->
+- T-0182 각2/2(18/20/24/26), T-0183 각11/11, 원본134+AP2/2(20,183초), 실제JSON121+AP2/2(18,211초)가 통과했다. doctor는194414.6ms에355/355 healthy로 정상 종료해 기존180초보다 오래 걸렸다. 실제 Codex session01a07494의 최종 delta는CLEAN(정적 검수). 제품 bin/lib는e856c57과 같으며 테스트/문서만 수정했다. 새pack114files,2289091bytes와 최종 명령/설치 회귀 및 새CI를 확인한다.
+- 고정 후보 e856c57837f90b09048405df6a684190f7a1ff75의 Linux full E2E3개·fast2개·runtime4개는 성공했다. Windows18은doctor 빈 출력으로466/467,20은handoff와134 잔존으로465/467,22는134 잔존으로466/467,24는doc/surface와134 잔존으로465/467이다. T-0182 수정 전 Node18/20/24/26의 두 대조군 모두 오류(총0/8 계약 통과)를 재현했다. 외부 부모 Temp 파일 오귀속과 실제 child-sb 잔존 누락을 함께 교정하며 기존 전역 파일은 삭제하지 않는다. Node18 원본 JSON121 로컬 재실행은doctor180012.8ms/ETIMEDOUT/SIGTERM/출력0으로 같은 증상을 재현했으나 CI 당시 errno는 미확인이다. 아래 이전 후보·로컬 통과 기록은 이력이며 최종 CI 통과를 대체하지 않는다.
 - 최신 검증: e8037bc / CI33989990574 fast 두 OS·release-runtime4개 성공, Linux full E2E는1.36.74에서466/467로 실패했다. 정확한 기존 producer 디렉터리9개/추가파일20개 분류를 보완해 원본E2E 수정 없이 Node20/26 각2/2+관측11/11 통과했다. 새 실제 반복검사가 잡은 기존 glossary import 누락도 최소수정했고 reader305/305(18/26), actual Codex delta CLEAN을 확인했다. 최종 고정 후보 CI/pack/공개187 배포는 아직 대기다.
-- P-0021 사용자 승인 / UR-0100: T-0180 compatibility-only 진단·쓰기 경계 구현 및 통합검증 진행 중. legacy 위치 유지, activation 미구현 <!-- leerness:auto -->
 - v1.36.187 첫 후보2f4ce37 CI33982239269는4/13 성공·9/13 실패로 보존한다. 두 번째d3eaf15 CI33983778451는fast 두 OS 실패를 확인해 취소했다(4개 release-runtime 성공, 7개 full gate 미완료). 동시 복사 중 늦게 진입한 writer의 조기 conflict와 Windows Node20 namespace rollback 중복 admission을 재현·수정했다. 실제 지원 CI 재검증과 공개 배포는 아직 대기다.
 - 잠금 대기는 읽기 전용이며 만료·비정상 잠금은 거부, 공개 compatibility 진단은 즉시 응답한다. 기존 canonical 프로젝트 별칭은 admission을 공유하되 매 대상 정규화와 오류 latch를 유지한다. Node18/20/24/26 migration72/72와 별칭 rollback24/24, 신규 admission21/21 통과. 실제 최종 Codex 검수 및 전체 후보 검증 진행 중이다.
 - 중간 full E2E는463/467(7061초)로 실패했다. T-0090의 selftest/doctor는 timeout 없이 종료했으나 Windows EPERM/EBUSY가 숨겨져 세 종류 임시 폴더가 남았다. 소유한 진단 fixture에만 JS 제한 재시도·정확한 identity 검사·최종 오류 전파를 적용했다. Git 부재/손상에서 새 선행 거부 응답과 충돌하는 기존 E2E 계약도 zero-write 대조군과 함께 갱신 중이며 전체 재검증/배포는 아직 미완료다.
@@ -44,10 +46,10 @@ Updated: 2026-09-06
 - T-0159 실제 프로젝트 코드 기반 시안 워크플로는 페이지·기능·둘 다 중 범위 명확화 대기
 
 ## Next
-- T-0180 기존 writer 회귀·구버전 대조군·독립 Codex 검수와 지원 runtime 검증. T-0181의 진단 누락 수정과 원인 미확인 CI 실패를 구분하고 출하 전 재검증 <!-- leerness:auto -->
+- 새 고정 후보를 release/1.36.187에 push하고 동일 SHA CI 전체 검증 → 통과 후 정확한 새pack으로 GitHub/npm/site 출하·검증. 실제 migration B는 별도 승인 필요 <!-- leerness:auto -->
 - M-0015 private runtime → M-0016 common control → M-0017 immutable memory/run finalize → M-0018 generated view/adapter 순서. 기존 원문과 legacy writer 호환을 단계별 검증한다.
 - M-0010 역할 migration은 동일 State scope 계약에 연결하고 M-0011..M-0013은 그 위에서 진행한다. T-0092 i18n은 별도 잔여 백로그다.
 
 ## Blockers
-- P-0021 승인 완료. 원 CI 실패의 errno는 미확인; 진단 JSON 폐기·exitCode 누출은 별도 fault injection으로 재현 후 수정·검증 중 <!-- leerness:auto -->
+- 필수 CI의Windows4개 실패로 출하 보류. T-0181 원186 CI errno는 미확인으로 유지하며, 자동 룰의 version pass를 R-0002 공개 배포 성공으로 해석하지 않는다 <!-- leerness:auto -->
 - P-0020 승인 범위는 출하·검증 완료. P-0021는 승인 후 구현·검증 중이며 UR-0097 전체 구조 전환과 M-0015..M-0018은 미완료다. 새 제품 릴리스는 아직 미실행이며 R-0002는 이번 호환 기능 검증·출하 경계에서 이행할 pending으로 유지한다. T-0181 원 CI errno는 미확정이며 진단 누락 수정과 구분한다.

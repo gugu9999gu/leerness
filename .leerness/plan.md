@@ -351,6 +351,12 @@ Tasks:
 
 기존 standalone producer 보존: `init` 없이 성공한 정식 명령의 산출물이 다음 operation을 막지 않아야 한다. 정확한 저장 파일/디렉터리 이름·종류와 producer 근거를 함께 관리하고, 첫 생성→후속 실행·기존 내용 보존·wrong-kind/link/foreign sibling 거부를 빠른 runtime probe에서 검증한다. 내용을 읽어 소유권을 추측하거나 모든 폴더를 허용하지 않는다. 새 producer 추가 때 admission 분류와 회귀를 같이 갱신하여 장시간 full E2E에서만 발견되는 피드백 지연을 줄인다.
 
+후속 검증 비용 최적화 (측정 계획만, 현재 후보 변경 없음): 완료된 candidate4 Ubuntu18/22 E2E는 각각46분8초/38분19초였고, 마지막 green186의 Windows E2E는76분39초~102분8초였다. 개별 로그 간격을 정확한 케이스 시간이나 절감 보장으로 간주하지 않는다. 우선 동일 cwd/env로 실행되는 selftest JSON 두 호출의 실제 컨텍스트·파일 변화·시간을 비교하여 한 실제 결과에 두 assertion 집합을 적용할 수 있는지 측정한다. 비초기화 cwd·T-0090 반복·실제 MCP 호출은 보존한다. 무거운 독립 블록의 최대2-worker 분리는 별도 TMP/경고 파일과 소유한 산출물 검사가 선행되어야 하며, 단독 대비 경쟁/청소/경고 누락/부하를 검증하기 전에는 적용하지 않는다. assertion 축소, OS/Node coverage 삭제, 시간 제한 확대나 건너뛰기로 속도를 주장하지 않는다.
+
+T-0182 검사 정확성 진행: 기존1.36.134는 자식 TMP를 sb로 격리하지만 잔존 검사는 부모 공용 Temp를 센다. Node18/20/24/26 수정 전 두 대조군이 모두 기대와 반대로 동작했다(총0/8). 실제 child arena로 관측 범위를 맞추고, 외부 기존 파일은 무관하며 child 잔존은 여전히 실패하는 두 대조군을 빠른 suite에 유지한다. 원본 전체 assertion과 실제 Git/CLI 실행도 보존한다. 공용 Temp 기존 파일의 생성 작업은 미확인으로 남기며 삭제하지 않는다.
+
+후보5 CI33993125006은9/13 성공·Windows full4개 실패로 종료했다. T-0180 출하 전에 handoff/doc-surface/JSON121 실패가 버린 종료정보를 bounded status/signal/error/elapsed 및 selftest 실패 이름으로 보강한다. Node18 exact JSON121 로컬 doctor는180초 외부 timeout으로 빈 출력이 재현됐다. 내부900초 selftest와 wrapper 예산을 대조하고, 정상 완료 실측·timeout 및 비정상 종료 대조군을 보존한다. 시간 예산 정합성 교정을 성능 향상으로 주장하지 않는다. Node20 handoff와 Node24 doc/surface는 원본 예산·predicate로 로컬 통과하여 CI 당시 원인은 미확인이다. 제품 runtime admission은 완화하지 않는다.
+
 ### M-0016. Common ControlStore와 task claim 및 consolidator fencing
 Status: planned
 Progress: 0%

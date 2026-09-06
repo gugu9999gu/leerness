@@ -25,6 +25,8 @@ jobs:
           node-version: 20
           package-manager-cache: false
       # Bounded quick feedback — full e2e runs in the `test` matrix below.
+      - name: E2E observation controls
+        run: npm run test:e2e-observation
       - name: test:fast
         env:
           LEERNESS_OFFLINE: "1"

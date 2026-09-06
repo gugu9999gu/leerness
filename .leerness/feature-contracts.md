@@ -150,3 +150,16 @@ doNotStore:
 - Limits: The v1.36.186 Windows Node24 CI replay's original errno was not recorded and remains unproven. Fixing diagnostic loss and exit-code leakage does not claim a reproduced/fixed underlying OS failure.
 - Related files: `bin/leerness.js`, `scripts/encoding-selftest-probe.js`, `.github/workflows/ci.yml`.
 - Test evidence ID: T-0181 (before-fix deterministic failures 2/2; after-fix repro 2/2 and actual replacement controls 2/2 on Windows Node26/24; supported CI pending).
+
+## E2E owned temporary-probe observation — T-0182
+- Input: The existing 1.36.134 child processes use TMPDIR/TEMP/TMP set to their freshly owned `sb` directory. The residue assertion must observe that same directory, not the parent process's unrelated shared Temp.
+- Output: A foreign parent prefix file does not fail this child-run check; an actual child-sb prefix file does fail it. Observation must not modify fixture bytes or mtimes, delete foreign files, or suppress failures.
+- Verification: A small regression executes the original counter and failure assertion with real isolated child environments and both controls. Unique source anchors fail closed if the assertion is missing or ambiguous. Keep the original full134 CLI/Git execution and every other assertion unchanged; no product probe-cleanup change.
+- Test evidence ID: T-0182 (pre-fix Node18/20/24/26 each0/2; after-fix each2/2, skip0. Original full134 plus AP warning footer2/2 on Node20,183s; final candidate CI pending).
+
+## E2E child failure diagnostics and JSON121 doctor budget — T-0183
+- Input: Unmodified actual child results from the fresh-migration handoff, doc/surface and JSON121 blocks. Preserve cp.spawnSync, original command arguments, environments, JSON/stderr/status predicates and runtime-warning collection.
+- Output: On failure, record bounded status/null, signal, error code/errno, monotonic elapsed time, actual timeout, output byte counts, short tails, and at most five selftest failure names. Preserve the migrate/init setup result. Never turn a child failure into a pass or infer an unrecorded historical CI errno.
+- Budget: Only JSON121's doctor gets990000ms (its nested selftest limit900000ms plus90000ms for bounded environment probes and startup/teardown). Other14 commands stay180000ms, init300000ms, doc/surface300000ms and fresh handoff/migrate15000/60000ms. This is budget correctness, not a performance improvement; child hangs still fail and final full CI is required.
+- Verification: Actual short-lived Node failure results drive the original blocks in a controlled diagnostic-only integration probe; healthy controls and bounded output are mandatory. Check the actual nested selftest source budget against the effective JSON121 options. Separately rerun real JSON121 and preserve the original134 full CLI/Git and warning gates.
+- Test evidence ID: T-0183 (original Node18 doctor180012.8ms/ETIMEDOUT/blank output reproduced; diagnostic regression and correction pending).

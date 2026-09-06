@@ -10,6 +10,8 @@
 - fix(runtime): join in-flight legacy migrations read-only before writer admission and share canonical identity across Windows namespace, short-path and junction aliases; preserve bounded denial and rollback
 - fix(selftest): bound transient Windows cleanup retries for three owned diagnostic fixtures, retain exact directory identity and report exhausted cleanup failures instead of leaving silent leaks
 - fix(compatibility): preserve successive standalone producer commands with exact output-name/type admission; cover real repeated CLI use early and restore missing glossary marker imports for lossless rebuilds
+- fix(test): observe temporary probe residue in the actual child-owned directory; retain foreign-parent and real-child negative controls without deleting unrelated files
+- fix(test): retain bounded child/setup failure diagnostics for handoff and doctor E2E checks; align only JSON121's doctor wrapper with its nested selftest deadline, preserving original assertions and other command budgets
 
 ## 1.36.186 — 2026-09-05
 

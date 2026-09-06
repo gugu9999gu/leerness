@@ -5,6 +5,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const cp = require('child_process');
+const { performance } = require('perf_hooks');
+const { childDiagnostics } = require('./e2e-child-diagnostics');
 const { spawnNpmSync } = require('../lib/npm-process');
 const { gitSpawn } = require('../lib/git');
 const { EXTERNAL_AGENTS } = require('../lib/agent-registry');
@@ -1624,12 +1626,16 @@ total++;
   const tmpC = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-fresh-'));
   fs.mkdirSync(path.join(tmpC, '.leerness'), { recursive: true });
   fs.writeFileSync(path.join(tmpC, '.leerness', 'HARNESS_VERSION'), 'leerness@1.9.30\n', 'utf8');
-  cp.spawnSync(process.execPath, [CLI, 'migrate', tmpC, '--yes', '--no-banner', '--no-stale-check'], { stdio: 'ignore', timeout: 60000 });
+  const migrateStarted = performance.now();
+  const migrated = cp.spawnSync(process.execPath, [CLI, 'migrate', tmpC, '--yes', '--no-banner', '--no-stale-check'], { stdio: 'ignore', timeout: 60000 });
+  const migrateDiagnostic = childDiagnostics(migrated, performance.now() - migrateStarted, 60000);
+  const handoffStarted = performance.now();
   const r = cp.spawnSync(process.execPath, [CLI, 'handoff', tmpC, '--no-drift-check'], { encoding: 'utf8', timeout: 15000 });
+  const handoffDiagnostic = childDiagnostics(r, performance.now() - handoffStarted, 15000);
   const ok = r.status === 0
     && /최근.*시간 전 migrate 차분|AI must re-read/.test(r.stdout);
   console.log(ok ? '✓ B(1.9.41) handoff: 최근 migrate 차분 자동 표시 (24h 내)' : `✗ handoff 차분 알림 실패`);
-  if (!ok) { failed++; console.log(r.stdout.slice(-500)); }
+  if (!ok) { failed++; console.log(JSON.stringify({ migrate: migrateDiagnostic, handoff: handoffDiagnostic })); }
 }
 
 // 1.9.40 회귀: release pack 통합 명령 + audit README mismatch 감지
@@ -3920,7 +3926,7 @@ total++;
 // 1.9.315 회귀 (UR-0054 설치리뷰): doc/surface 정합 — doctor 진단 명령 + stale MCP 카운트 동적화(commands/banner)
 total++;
 {
-  let ok = false;
+  let ok = false; const dbg = {};
   try {
     // 1.36.100: 이 호출만 30초로 남아 있었다 — doctor 는 selftest 를 내장해 격리 실측 31s(게시된 1.36.98 도 동일)라
     //   전체 스위트 부하에서 간헐 초과했고, 실제로 게이트 한 번을 실패시켰다(내 변경 때문이 아니라 잠복 결함).
@@ -3929,16 +3935,22 @@ total++;
     // 1.36.105: 여유가 1.2배뿐이라 전체 부하에서 반복해 터진다(이번 세션 1회 · 1.36.100 에서 1회).
     //   측정 근거 — **게시된 1.36.104** 격리 실측 doctor 97s / selftest 99s, 작업 트리 101s/94s (동일 수준).
     //   즉 내 변경이 느리게 만든 게 아니라 제한이 처음부터 빠듯했다. 3배 여유로 올린다(검사 대상은 속도가 아니라 동작).
+    const doctorStarted = performance.now();
     const r = cp.spawnSync(process.execPath, [CLI, 'doctor', '--json'], { encoding: 'utf8', timeout: 300000 });
+    const doctorElapsed = performance.now() - doctorStarted;
     let j = null; try { j = JSON.parse(r.stdout); } catch {}
+    dbg.doctor = childDiagnostics(r, doctorElapsed, 300000, j);
     const doctorOk = j && j.version && typeof j.mcpTools === 'number' && j.mcpTools >= 80 && j.selftest && j.selftest.total > 0 && j.healthy === true && r.status === 0;
     // commands 요약 + banner 가 실제 MCP 수 노출 (하드코딩 65/46 아님)
+    const commandsStarted = performance.now();
     const rc = cp.spawnSync(process.execPath, [CLI, 'commands'], { encoding: 'utf8', timeout: 15000 });
+    dbg.commands = childDiagnostics(rc, performance.now() - commandsStarted, 15000);
     const dynOk = j && new RegExp('MCP 도구: ' + j.mcpTools).test(rc.stdout || '') && !/MCP 도구: 65\b/.test(rc.stdout || '');
     ok = doctorOk && dynOk;
-  } catch {}
+    dbg.doctorOk = !!doctorOk; dbg.dynOk = !!dynOk;
+  } catch (error) { dbg.error = String(error && error.message || error).slice(0, 160); }
   console.log(ok ? '✓ B(1.9.315) doc/surface: doctor 진단(selftest+버전+셸) + commands MCP 카운트 동적 (UR-0054)' : '✗ doc/surface 실패');
-  if (!ok) failed++;
+  if (!ok) { failed++; console.log(JSON.stringify(dbg)); }
 }
 
 // 1.9.316 회귀 (drift 마커 버그): session-handoff 'Last generated' 중복 누적 방지 + drift 'session close 누락' 클리어
@@ -5286,27 +5298,36 @@ total++;
 //   그 측정을 래칫으로 고정한다: 성공 경로의 `--json` 은 stderr 가 비어야 한다.
 total++;
 {
-  let ok = false; const bad = [];
+  let ok = false; const bad = []; const diagnostics = {};
   const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-json121-'));
   const ENV = Object.assign({}, process.env, { TMPDIR: sb, TEMP: sb, TMP: sb, LEERNESS_OFFLINE: '1', LEERNESS_NO_PROMPT: '1' });
   try {
     const d = path.join(sb, 'p'); fs.mkdirSync(d, { recursive: true });
     fs.writeFileSync(path.join(d, 'package.json'), '{"name":"p","version":"0.1.0","scripts":{"test":"node t.js"}}');
-    cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+    const initStarted = performance.now();
+    const initialized = cp.spawnSync(process.execPath, [CLI, 'init', d, '--yes'], { cwd: d, encoding: 'utf8', timeout: 300000, env: ENV });
+    diagnostics.init = childDiagnostics(initialized, performance.now() - initStarted, 300000);
     // 성공 경로만 — 인자 없이도 동작하는 조회성 명령 (사용법 오류 경로는 stderr 진단이 관례라 대상 아님)
     const CMDS = ['audit', 'health', 'doctor', 'drift', 'plan', 'task', 'pulse', 'tech', 'handoff',
       'capabilities', 'commands', 'which', 'gate', 'dashboard', 'state'];
     for (const c of CMDS) {
-      const r = cp.spawnSync(process.execPath, [CLI, c, '--path', d, '--json'], { cwd: d, encoding: 'utf8', timeout: 180000, env: ENV });
+      // Node18 reproduced doctor being cut at180s before its nested report. Only
+      // this wrapper covers the900s inner limit plus90s environment/startup budget.
+      const timeoutMs = c === 'doctor' ? 990000 : 180000;
+      const started = performance.now();
+      const r = cp.spawnSync(process.execPath, [CLI, c, '--path', d, '--json'], { cwd: d, encoding: 'utf8', timeout: timeoutMs, env: ENV });
+      const elapsedMs = performance.now() - started;
       const out = String(r.stdout || ''), err = String(r.stderr || '');
-      if (!out.trim()) { bad.push(`${c}:출력없음`); continue; }
+      if (!out.trim()) { bad.push(`${c}:출력없음`); diagnostics[c] = childDiagnostics(r, elapsedMs, timeoutMs); continue; }
       let j = null; try { j = JSON.parse(out.trim()); } catch {}
-      if (!j) { bad.push(`${c}:stdout이JSON아님`); continue; }
+      if (!j) { bad.push(`${c}:stdout이JSON아님`); diagnostics[c] = childDiagnostics(r, elapsedMs, timeoutMs); continue; }
+      const previousFailures = bad.length;
       // 문구가 "0 바이트" 면 검사도 0 바이트여야 한다 — `trim()===''` 은 개행만 있는 출력을 통과시킨다(검수 P3).
       if (err.length !== 0) bad.push(`${c}:stderr잡음(${err.length}B:${err.trim().split('\n')[0].slice(0, 40)})`);
       // "성공 경로 15종" 이라고 말하려면 **성공인지도** 봐야 한다 — 실패 JSON(`ok:false`, exit 1)도 세고 있었다(검수 P2).
       if (r.status !== 0) bad.push(`${c}:exit=${r.status}`);
       if (j.ok === false) bad.push(`${c}:ok=false`);
+      if (bad.length > previousFailures) diagnostics[c] = childDiagnostics(r, elapsedMs, timeoutMs, j);
     }
     // 판별력 — 이 검사가 실제로 무언가를 실행했는지(전부 건너뛰면 공허하게 통과한다)
     if (bad.length === 0 && CMDS.length < 10) bad.push('대상이_너무적음');
@@ -5315,7 +5336,7 @@ total++;
   finally { try { fs.rmSync(sb, { recursive: true, force: true }); } catch {} }
   console.log(ok ? '✓ B(1.36.121) --json stderr 계약 스윕: 조회성 15종 모두 stdout 단일 JSON + stderr 0'
     : '✗ --json stderr 계약 스윕 실패 ' + JSON.stringify(bad.slice(0, 6)));
-  if (!ok) failed++;
+  if (!ok) { failed++; console.log(JSON.stringify(diagnostics)); }
 }
 
 // 1.36.124 — MCP 서버를 **실제 JSON-RPC 로** 두드린다. 단위 테스트가 초록이어도 살아 있는 통신은 깨질 수 있다.
@@ -14294,7 +14315,8 @@ total++;
       const viaRun = G(d, ['hook', 'run', 'pre-commit', '--', '--leerness-probe']);
       if (viaRun.status === 0) bad.push('⑮`git hook run` 에 인자를 넘겨 강제가 우회됨');
       //    ③ 임시 사본이 남지 않는다.
-      const leftovers = fs.readdirSync(os.tmpdir()).filter(f => /^leerness-probe-/.test(f)).length;
+      // 자식 CLI의 전용 TMP만 검사한다. 부모 공용 Temp의 파일은 이 블록 소유가 아니다.
+      const leftovers = fs.readdirSync(sb).filter(f => /^leerness-probe-/.test(f)).length;
       if (leftovers > 0) bad.push(`⑮검증용 임시 사본 ${leftovers}개 잔존`);
       dbg.noSwitch = { hookHasSwitch: hookP && fs.existsSync(hookP) ? /ENFORCE_PROBE|leerness-probe/.test(fs.readFileSync(hookP, 'utf8')) : null,
         envBypass: viaEnv.status === 0, runBypass: viaRun.status === 0, leftovers };

@@ -1186,11 +1186,27 @@
       "text": "P-0021 승인: T-0180 runtime layout compatibility-only 진단과 쓰기 guard 구현, 기존 legacy 데이터 위치 보존; T-0181 Windows Node24 CI 실패 원인 확인 및 검증 후 출하",
       "recordedAt": "2026-09-05T14:28:53.499Z",
       "status": "in-progress",
-      "linkedTaskIds": ["T-0180", "T-0181", "T-0175"],
-      "linkedPlanIds": ["M-0015"],
+      "linkedTaskIds": [
+        "T-0180",
+        "T-0181",
+        "T-0175"
+      ],
+      "linkedPlanIds": [
+        "M-0015"
+      ],
       "linkedDecisionIds": [],
       "notes": "P-0021 approved. Compatibility-only reader/write admission implementation and regression in progress. Legacy data paths unchanged; no activation. T-0181 diagnostics defect reproduced separately from the unresolved original CI incident. No release completion claimed."
+    },
+    {
+      "id": "UR-0101",
+      "text": "이어서 — T-0180 최종 CI 결과 확인과 남은 실패 수정 및 출하 검증 재개",
+      "recordedAt": "2026-09-06T02:04:22.480Z",
+      "status": "in-progress",
+      "linkedTaskIds": ["T-0180", "T-0182", "T-0183"],
+      "linkedPlanIds": ["M-0015"],
+      "linkedDecisionIds": [],
+      "notes": "Candidate e856c57 CI33993125006 completed 9 success/4 Windows full-E2E failure. Continue approved compatibility-only A: reproduce/fix owned-temp observation, diagnose handoff/doctor failures, freeze and reverify before publication. No migration B, activation, cleanup or public187 completion."
     }
   ],
-  "updatedAt": "2026-09-05T14:28:53.499Z"
+  "updatedAt": "2026-09-06T02:04:22.483Z"
 }

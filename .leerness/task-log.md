@@ -276,6 +276,13 @@ doNotStore:
 ## 2026-09-05 session-close
 - Generated session-handoff.md and refreshed current-state.md.
 
+## 2026-09-06 continuation — UR-0101
+- Read candidate5 CI33993125006 final9 success/4 Windows full-E2E failure; kept T-0180 in-progress and public187 pending. Linux3/fast2/runtime4 passed on e856c57, not the four Windows gates.
+- T-0182 actual two-control pre-fix reproduction failed both contracts on Node18/20/24/26. Registered durable repro twice before one-line child-TMP observation correction. No existing global artifact deletion or product cleanup change.
+- Exact frozen Node18 JSON121 doctor reproduced180s ETIMEDOUT with blank output. Original Node20 handoff and Node24 doc/surface passed locally; CI errno remains unknown. Bounded failure diagnostics and wrapper-budget audit precede the next frozen candidate. Original assertions and supported OS/Node coverage remain required.
+- After fixes, temp-scope2/2 and diagnostic11/11 pass on Node18/20/24/26. Original134+AP2/2(183s) and realJSON121+AP2/2(211s,doctor194.4s,selftest355/355) passed without changing original predicates. Independent actual Codex deltaCLEAN, lint98JS and explicit contract1function/15fields passed. No runtime migration/activation or bin/lib changes in this continuation.
+- Prepared a new114-file v187 pack with SHA25641aa832a…d887; old root tarball is stale and must not be published. Final commands/installed/consumer and the next frozen CI remain pending. Source push is authorized by R-0002; public GitHub Release/npm/site remain conditional on complete validation.
+
 ## 2026-09-05 — UR-0097 State scope 구조 감사와 계획 반영
 
 - 현재 코드와 실제 main/linked worktree를 읽기 전용으로 대조했다. runtime/cache와 tracked memory/summary가 혼재하며, 기존 mutex와 session ownership만으로 브랜치 merge 문제를 해결할 수 없음을 구분했다.
@@ -315,6 +322,10 @@ doNotStore:
 
 ## 2026-09-06 — P-0021 / UR-0100 compatibility implementation
 
+- 최종 후보 CI는 두 OS fast와 runtime4가 성공했고 전체 E2E7개는 대기다. 중간 소스의 로컬 E2E는465/467(6848초)로 종료했다. 수정 전 API 사례와134의 부모 공용 Temp 관측을 각각 보존하며, 후자는 T-0182 planned로 등록했다. 관측 파일은 열거나 지우지 않았고 생성 작업은 미확인이다. 아직 공개187 출하·T-0180 완료 아님.
+
+- 최종 검수 후보e856c57을release/1.36.187에만push하고CI33993125006을시작했다. 최종core exit0, installed cleanroom10/10, 정확한pack새설치selftest355/355및원본110/110일치를확인했다. 21:41Z에는runtime4+Ubuntu fast성공/8개pending이며공개187배포는아직없다. 이전후보실패는별도로보존한다.
+
 - 승인된 A 범위의 strict descriptor reader, bounded read-only diagnosis와 공유 writer operation을 구현했다. CLI startup/실제 root, MCP/REPL, direct module/FD, lock wait/heartbeat, Windows replacement/Git writer 경계를 연결했다. legacy 저장 위치와 원문은 유지하며 실제 migration·activation은 없다.
 - 실제 Codex 검수4건과 추가 detach 보조 이름1건을 재현·수정하고 제한된 독립 재검토를 마쳤다. Git/ownership snapshot 재사용으로 반복 I/O를 줄였으며 fresh compatibility 검사를 캐시하지 않는다. 전용/실제병렬/설치형/구버전 negative 증거는 review-evidence.md에 보존한다.
 - 전체 npmtest는 초기 runtime 검사 후 마지막 command 회귀에서 archive-only workspace 오인1건을 발견해 중단했다. 진단으로 workspace_ambiguous를 재현하고 네 가지 실제 memory archive 이름만 추가했다. assertions를 낮추지 않았으며 final runtime/commands/full E2E를 다시 검증한다.
@@ -330,3 +341,6 @@ doNotStore:
 - Windows fast도 동일 dangling fixture79/80임을 실제 로그로 확인했다. 해당블록만 file-first/Windows권한한정junction fallback으로 바꾸고 standalone refusal 및 initialized domain 거부의 전체tree 불변을 각각 유지했다. 네runtime8/8·Node20 full80/80·actual Codex static CLEAN; 제품은ef41542와 동일하다. 테스트만 수정한 후속 후보 CI 및 새pack 검증을 진행한다.
 - 후속e8037bc fast두OS/runtime4는통과했으나 Linux전체E2E466/467에서기존api-skill출력후다음호출차단을발견했다. 원본E2E0/1및추가reader158/160으로재현하고 정확한producer directory9개/추가file20개를분류했다. 원본E2E수정없이20/26각2/2+관측11/11을확인했으며 임의이름/link/wrong-kind및unsupporteddescriptor는계속거부한다.
 - 빠른실제CLI반복회귀에서기존glossary상수import누락을발견했다. initialized대조와186소스에서도확인했고 두export의import만추가했다. 동일reader304/305→305/305(18/26), actualCodexstaticCLEAN, commands202/202및40/40통과. 작업계획에producer등록과초기반복실행회귀동반관리를명시했다. 최종core/고정CI/새pack/공개출하는미완료로남긴다.
+
+## 2026-09-05 session-close
+- Generated session-handoff.md and refreshed current-state.md.
