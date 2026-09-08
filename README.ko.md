@@ -90,6 +90,8 @@ leerness verify-claim T-0001 --require-evidence
 ```
 
 - `optimism-check` · `verify-claim` — evidence의 도메인 주장(API·DB·결제·이메일·큐·캐시·알림·스토리지 등 10종)을 실제 소스 호출과 대조. **JavaScript뿐 아니라 Python·Ruby·Go·C#·Java·PHP·Rust 구현도 인식**합니다(1.13).
+
+`verify-claim`의 통과는 적용된 증거 검사 통과이며 요구사항의 의미적 정확성 보장이 아닙니다. 단건 `--json`의 `evidenceLevel: "executed"`에는 실패한 실행도 포함되고 `semanticVerified`는 항상 `false`입니다. `--run-tests`를 지정해도 명령이 없거나 차단되면 실행을 건너뜁니다. `ok`·`reasons`·`run.skipped`·`run.allPassed`를 함께 확인하세요. [검증 결과 해석 및 실행 예제](docs/verification-evidence.md)를 참고하세요.
 - `lazy detect` — 증거 없는 done, 빈 handoff, 테스트 미실행, 미추적 TODO를 탐지.
 - 정직한 완료는 통과하고 가짜 완료만 exit 1로 차단 — `gate` 또는 CI에 그대로 연결됩니다.
 

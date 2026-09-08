@@ -39,9 +39,9 @@ npx leerness task update T-0002 --status done --evidence "payment.js implemented
 npx leerness verify-claim T-0002   # exit 1 — payment.js does not exist. Claim rejected.
 ```
 
-Now actually write `payment.js`, then run the **same** `verify-claim T-0002` → it exits 0. That is the whole idea: **"done" must match reality.**
+Now write the implementation and record evidence, then run the **same** `verify-claim T-0002` again. A successful check means the applicable evidence checks passed; creating a file alone does not prove that the payment API works.
 
-> Tip: if your evidence claims a specific test count (e.g. "5 tests passed"), leerness counts the test functions actually present and rejects a claim that exceeds them — so claim only what's true. That default is a static count of test declarations, not proof they pass; add `--run-tests --test-cmd "<your test cmd>"` to verify they actually pass by running them.
+> Tip: test counts are static declaration-pattern heuristics, not execution or coverage proof. Add `--run-tests --test-cmd "<your trusted test command>" --json` to check the selected command's exit status and supported reporter output. `evidenceLevel: "executed"` includes failed runs; inspect `ok`, `reasons`, and `run` together. `semanticVerified` remains `false`. See [verification evidence and runnable examples](docs/verification-evidence.md) for skipped runs, unparsed output, and reporting limits.
 
 > Want a smaller footprint? `leerness init . --minimal` installs only the core memory + verification files instead of the full set.
 
