@@ -222,6 +222,8 @@ async function main() {
     // 9 MCP batches x 300s + 10 init/6 CLI x 120s + 180s margin.
     // 내부 timeout을 먼저 관측할 상한이며 정상 실행 시간/성능 목표가 아니다.
     ['mcp-presence-probe.js', /MCP presence probe: (\d+)\/(\d+) passed/, 4800000],
+    // 49 CLI calls x 120s + 420s margin; 정상 실행 시간이나 성능 목표가 아니다.
+    ['memory-guard-order-probe.js', /memory guard order: (\d+)\/(\d+) passed/, 6300000],
   ];
   for (const [script, summaryPattern, timeout] of installedSuites) {
     const result = runNode(path.join(installedRoot, 'scripts', script), [], { cwd: consumer, timeout });

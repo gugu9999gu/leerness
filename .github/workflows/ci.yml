@@ -96,6 +96,25 @@ jobs:
           LEERNESS_OFFLINE: "1"
         run: node ./scripts/e2e.js
 
+  installed:
+    name: installed package (${{ matrix.os }}, node 20)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          package-manager-cache: false
+      # 소스 checkout뿐 아니라 실제 pack/install 경로도 독립 검증한다.
+      - name: installed cleanroom
+        env:
+          LEERNESS_OFFLINE: "1"
+        run: npm run test:installed
+
   release-runtime:
     name: release runtime (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}

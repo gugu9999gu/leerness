@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.36.189 — 2026-09-08
+
+- ci: add Linux and Windows installed-package gates so tarball contents and consumer execution are tested separately from source checkout
+
+- test: validate installed store diagnostics, state inspection, MCP presence and memory guard ordering in isolated consumer projects; retain nonempty result and timeout diagnostics
+
+- fix(memory): reject malformed decision and lesson JSON before duplicate selection, archive writes or restore projection changes; preserve existing read fallback and plan behavior
+
 ## 1.36.188 — 2026-09-08
 
 - Add read-only state stores diagnostics for decision, lesson and role status, bounded reads and explicit fallback provenance; preserve metadata-only state inspect and existing mutation behavior.
