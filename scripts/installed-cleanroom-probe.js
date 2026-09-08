@@ -213,6 +213,24 @@ async function main() {
   const surface = runNode(commandSurface, [], { cwd: consumer, timeout: 900000 });
   check('installed exhaustive command-surface suite passes', surface.status === 0,
     `exit=${surface.status}\n${(surface.stderr || surface.stdout).slice(-1600)}`);
+
+  // 설치본의 실제 진단·세션 프로토콜도 검증한다. 소스 쪽 성공만으로는
+  // 누락된 패키지 파일이나 설치 후 달라진 모듈 경로를 발견할 수 없다.
+  const installedSuites = [
+    ['store-diagnostic-probe.js', /store-diagnostic probe: (\d+)\/(\d+) PASS/, 180000],
+    ['state-inspect-cli-probe.js', /state-inspect CLI probe: (\d+)\/(\d+) PASS/, 900000],
+    // 9 MCP batches x 300s + 10 init/6 CLI x 120s + 180s margin.
+    // 내부 timeout을 먼저 관측할 상한이며 정상 실행 시간/성능 목표가 아니다.
+    ['mcp-presence-probe.js', /MCP presence probe: (\d+)\/(\d+) passed/, 4800000],
+  ];
+  for (const [script, summaryPattern, timeout] of installedSuites) {
+    const result = runNode(path.join(installedRoot, 'scripts', script), [], { cwd: consumer, timeout });
+    const summary = String(result.stdout || '').match(summaryPattern);
+    const measuredPass = summary && Number(summary[2]) > 0 && Number(summary[1]) === Number(summary[2]);
+    check(`installed ${script} passes with a nonempty measured summary`,
+      result.status === 0 && measuredPass,
+      `exit=${result.status} signal=${result.signal || 'none'} error=${result.error?.code || 'none'} timeoutMs=${timeout}\n${(result.stderr || result.stdout).slice(-1600)}`);
+  }
 }
 
 (async () => {
