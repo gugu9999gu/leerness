@@ -72,7 +72,7 @@ const catalog = run(['commands', '--json']);
 const catalogJson = json(catalog);
 const catalogRows = catalogJson?.categories ? Object.values(catalogJson.categories).flat() : [];
 check('commands --json returns the machine-readable catalog',
-  catalog.status === 0 && catalogJson?.totalCommands === 102 && catalogJson?.categories && !catalog.stderr,
+  catalog.status === 0 && catalogJson?.totalCommands === 103 && catalogJson?.categories && !catalog.stderr,
   catalog);
 check('commands totalCommands equals the category sum',
   catalogJson?.totalCommands === catalogRows.length,
@@ -80,7 +80,8 @@ check('commands totalCommands equals the category sum',
 check('commands catalog includes verify-code, contract verify, and exact-file lease',
   catalogRows.some(row => /^verify-code\b/.test(row.cmd))
     && catalogRows.some(row => /^contract verify\b/.test(row.cmd))
-    && catalogRows.some(row => /^lease acquire\|release\|list\|check\b/.test(row.cmd)),
+    && catalogRows.some(row => /^lease acquire\|release\|list\|check\b/.test(row.cmd))
+    && catalogRows.some(row => /^state stores\b/.test(row.cmd)),
   catalog);
 
 const englishCatalog = run(['commands', '--language', 'en', '--json']);

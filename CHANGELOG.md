@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.36.188 — 2026-09-08
+
+- Add read-only state stores diagnostics for decision, lesson and role status, bounded reads and explicit fallback provenance; preserve metadata-only state inspect and existing mutation behavior.
+
 ## 1.36.187 — 2026-09-05
 
 - feat(state): add read-only runtime compatibility diagnosis and observed-layout write guards; keep legacy storage without migration or activation

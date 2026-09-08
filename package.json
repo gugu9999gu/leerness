@@ -1,6 +1,6 @@
 {
   "name": "leerness",
-  "version": "1.36.187",
+  "version": "1.36.188",
   "description": "The AI-coding operations layer that makes \"done\" require evidence — persistent memory, evidence-gated completion checks, and clean handoffs for any AI agent (Claude Code, Codex, Cursor). State lives as plain files in your repo. CLI + MCP, 0 runtime dependencies.",
   "keywords": [
     "leerness",
@@ -70,7 +70,8 @@
     "test:role-agent-schema": "node ./scripts/role-agent-schema-probe.js",
     "test:role-store-loader": "node ./scripts/role-store-loader-probe.js",
     "test:role-fallback": "node ./scripts/role-fallback-probe.js",
-    "test:state-scopes": "node ./scripts/workspace-selection-probe.js && node ./scripts/state-scopes-probe.js && node ./scripts/state-inspect-cli-probe.js",
+    "test:store-diagnostics": "node ./scripts/store-diagnostic-probe.js",
+    "test:state-scopes": "node ./scripts/workspace-selection-probe.js && node ./scripts/state-scopes-probe.js && node ./scripts/state-inspect-cli-probe.js && npm run test:store-diagnostics",
     "test:runtime-compatibility": "node ./scripts/runtime-layout-probe.js && node ./scripts/runtime-admission-probe.js && node ./scripts/runtime-write-probe.js && node ./scripts/runtime-repl-probe.js && node ./scripts/runtime-git-write-probe.js && node ./scripts/runtime-replacement-probe.js && node ./scripts/encoding-selftest-probe.js && node ./scripts/selftest-cleanup-probe.js"
   },
   "publishConfig": {

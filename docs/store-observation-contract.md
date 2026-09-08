@@ -4,6 +4,11 @@ T-0187-B / T-0191. Source baseline: product code at `70b2a124`; the later
 `7694fb8` commit changes verification documentation only. This is a bounded
 inventory and implementation contract, not a claim that the proposed API exists.
 
+Update: the T-0192 implementation candidate adds a separate `state stores` command.
+See [its exact API and remaining limits](store-diagnostics-api.md). The baseline
+table below describes pre-existing behavior; mutation admission and migration B
+remain unimplemented follow-ups.
+
 ## Current behavior
 
 | Surface | What it observes | Missing / invalid / unreadable behavior | Boundary |

@@ -50,7 +50,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.187';
+const VERSION = '1.36.188';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -893,7 +893,7 @@ function _errorUiLang(root, command) {
   const parsed = nonFlagArgs();
   const resolvedCommand = command || parsed[0];
   if (resolvedCommand === 'mode' && has('--json')) return 'ko';
-  if (resolvedCommand === 'state' && ['inspect', 'compatibility'].includes(parsed[1])) return _inspectionUiLang();
+  if (resolvedCommand === 'state' && ['inspect', 'compatibility', 'stores'].includes(parsed[1])) return _inspectionUiLang();
   return _uiLang(resolvedCommand === 'mode' ? _modeRoot(parsed, root) : root);
 }
 function _inspectionUiLang() {
@@ -11563,6 +11563,7 @@ function commandsCmd(root) {
       { cmd: 'state show|start|record|verify|handoff', desc: '.leerness/ JSON 상태 substrate (에이전트 간 인수인계 표준) — 1.9.278', descEn: '.leerness/ JSON state substrate (cross-agent handoff standard) — 1.9.278' },
       { cmd: 'state inspect [path] [--json]', desc: '5-scope 현재/제안 경로와 기존 상태 목록 — 읽기 전용, 이동·활성화 없음', descEn: 'five-scope current/proposed paths and legacy inventory — read-only, no migration or activation' },
       { cmd: 'state compatibility [path] [--json]', desc: '관측한 runtime layout의 쓰기 호환성 — 읽기 전용, 이동·활성화 없음', descEn: 'observed runtime-layout write compatibility — read-only, no migration or activation' },
+      { cmd: 'state stores [path] [--json]', desc: '결정·교훈·역할 저장소 상태와 fallback — 읽기 전용, 본문 비노출', descEn: 'decision, lesson and role store status and fallback — read-only, no payload output' },
       { cmd: 'adapter <tool>|list [--dry-run]', desc: '도구별 지침/.mcp.json 선택 생성 (claude/cursor/codex/goose/...) — 1.9.280', descEn: 'generate per-tool instructions/.mcp.json selectively (claude/cursor/codex/goose/...) — 1.9.280' },
       { cmd: 'ci init [path] [--force]', desc: 'PR 마다 leerness gate 실행하는 GitHub Actions 워크플로 생성 (.github/workflows/leerness-gate.yml) — 1.9.444', descEn: 'create a GitHub Actions workflow that runs leerness gate on every PR (.github/workflows/leerness-gate.yml) — 1.9.444' },
       { cmd: 'export|prompt --target <agent>', desc: 'adapter 별칭 — 도구별 지침/계약 파일 생성 (claude/cursor/codex/agents-md/...) — 1.9.448', descEn: 'adapter alias — generate per-tool instruction/contract files (claude/cursor/codex/agents-md/...) — 1.9.448' },
@@ -12257,7 +12258,7 @@ const _OBSERVATION_ONLY_SUBCOMMANDS = new Map([
   ['lease', new Set(['list', 'check'])],
   ['roles', new Set(['validate'])],
   ['role', new Set(['validate'])],
-  ['state', new Set(['inspect', 'compatibility'])],
+  ['state', new Set(['inspect', 'compatibility', 'stores'])],
 ]);
 function _cliMutationClass(args, cmd) {
   if (cmd === 'mcp') return 'observation-only'; // server startup must not mutate its incidental cwd
@@ -15709,6 +15710,7 @@ const _STRICT_COMMAND_FLAGS = {
   'roles validate': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles validate [--path .] [--json]' },
   'state inspect': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'state inspect [path] [--path <path>] [--json]' },
   'state compatibility': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'state compatibility [path] [--path <path>] [--json]' },
+  'state stores': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'state stores [path] [--path <path>] [--json]' },
   'roles set': { allowed: ['--provider', '--to', '--model', '--model-family', '--policy', '--fallback-policy', '--candidate', '--candidate-family', '--remove-candidate', '--clear-candidates', '--persona', '--force'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles set <role> --provider <id> [--model <id>] [--policy strict|balanced|continuity]' },
   'roles unset': { allowed: [], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles unset <role> [--path .] [--json]' },
   'roles suggest': { allowed: ['--apply'], globals: [..._COMMON_COMMAND_FLAGS, '--json'], usage: 'roles suggest [--apply] [--path .] [--json]' },
@@ -15790,7 +15792,7 @@ function _validateRolesCommandShape(cmd, args) {
 }
 
 function _validateCommandFlags(cmd, args) {
-  if (cmd === 'state' && ['inspect', 'compatibility'].includes(args[1])) {
+  if (cmd === 'state' && ['inspect', 'compatibility', 'stores'].includes(args[1])) {
     if (!_rejectDuplicateValueFlags(['--path'])) return false;
     if (args.length > 3) {
       failJson(has('--json'), 'too_many_arguments', `Usage: state ${args[1]} [path] [--path <path>] [--json]`);
@@ -15809,7 +15811,7 @@ function _validateCommandFlags(cmd, args) {
   if (cmd === 'intent' && args[1] === 'expand') route = 'intent expand';
   if (cmd === 'lease') route = `lease ${args[1] == null ? 'list' : args[1]}`;
   if (roleSub) route = `roles ${roleSub === 'remove' || roleSub === 'rm' ? 'unset' : roleSub}`;
-  if (cmd === 'state' && ['inspect', 'compatibility'].includes(args[1])) route = `state ${args[1]}`;
+  if (cmd === 'state' && ['inspect', 'compatibility', 'stores'].includes(args[1])) route = `state ${args[1]}`;
   const cfg = _STRICT_COMMAND_FLAGS[route];
   if (!cfg) return true;
   return _rejectUnknownFlags(cfg.allowed, cfg.usage, { globals: cfg.globals });
@@ -29077,6 +29079,18 @@ function stateCompatibilityCmd(root) {
   return report;
 }
 
+function stateStoresCmd(root) {
+  try {
+    const { inspectStores, formatStoreDiagnostics } = require('../lib/store-diagnostics');
+    const report = inspectStores(root);
+    log(has('--json') ? JSON.stringify(report, null, 2) : formatStoreDiagnostics(report));
+    if (!report.ok) process.exitCode = 1;
+    return report;
+  } catch {
+    return failJson(has('--json'), 'store_diagnostics_failed', 'Store diagnostics could not be completed; no files were changed.');
+  }
+}
+
 // leerness state <show|start|record|verify|handoff>
 // 1.9.292 (UR-0031): get_project_context — 외부 에이전트 온보딩용 단일 집약 컨텍스트.
 //   1콜로 현재 작업/미답 요청/최근 결정/활성 룰/next-actions/memory/프로젝트 의도를 구조화 회수.
@@ -31986,6 +32000,7 @@ STATUS & DIAGNOSTICS
   status [path]                   Install status (files present)
   state inspect [path] [--json]   Read-only five-scope paths/inventory; no migration or runtime activation
   state compatibility [path] [--json]   Read-only observed-layout write admission; no activation
+  state stores [path] [--json]   Read-only decision/lesson/role diagnostics; no payload output
   health [path] | doctor [--json]   health: project state · doctor: CLI install/environment (no path arg)
   verify [path]                   Required-file verification
   which [--json]                  Resolve current binary/version (npm cache conflicts)
@@ -32069,6 +32084,7 @@ function help() {
   leerness lease acquire|release|list|check [file|lease-id] [--session KEY] [--ttl SEC] [--json]  # exact-file opt-in 협업 lease
   leerness state inspect [path] [--json]   # 5-scope 경로/목록 읽기 전용 진단 — 이동·활성화 없음
   leerness state compatibility [path] [--json]   # 관측 layout 쓰기 호환성 읽기 전용 진단 — 활성화 없음
+  leerness state stores [path] [--json]   # 결정/교훈/역할 상태·fallback 진단 — 읽기 전용, 본문 비노출
   leerness retro [path] [--days 7] [--all-apps] [--include p1,p2] [--json]  # 회고 (1.9.13~1.9.16)
   leerness insights [path] [--all-apps] [--include p1,p2] [--json]         # 누적 통계 (1.9.13~1.9.16)
   leerness brainstorm "<주제>" [--all-apps] [--include p1,p2] [--json]    # 브레인스토밍 (1.9.13~1.9.16)
@@ -32114,6 +32130,10 @@ async function main(runtimeEntered = false) {
   if (cmd === 'state' && args[1] === 'compatibility') {
     const explicit = arg('--path', null);
     return stateCompatibilityCmd(explicit !== null ? explicit : args[2] === undefined ? process.cwd() : args[2]);
+  }
+  if (cmd === 'state' && args[1] === 'stores') {
+    const explicit = arg('--path', null);
+    return stateStoresCmd(explicit !== null ? explicit : args[2] === undefined ? process.cwd() : args[2]);
   }
   const runtimeRoot = _runtimeProjectRoot(args, cmd);
   if (!runtimeEntered && runtimeRoot && !_mustRemainReadOnly(args, cmd)) {
@@ -33296,7 +33316,7 @@ async function main(runtimeEntered = false) {
 
 const skillCatalog = (() => {
   const args = nonFlagArgs();
-  if (require.main === module && args[0] === 'state' && ['inspect', 'compatibility'].includes(args[1])) {
+  if (require.main === module && args[0] === 'state' && ['inspect', 'compatibility', 'stores'].includes(args[1])) {
     return _withBuiltinSource(BUILTIN_CATALOG);
   }
   return _loadSkillCatalog();

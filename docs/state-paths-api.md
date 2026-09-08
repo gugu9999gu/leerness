@@ -7,7 +7,7 @@ It does not move data or activate a new backend. The complete staged design is i
 This API inventories path metadata, not payload validity. A successful inspection
 does not imply that the stores contain valid JSON or domain records. See the
 [store observation boundaries and staged contract](store-observation-contract.md)
-for existing validator differences and the separate, not-yet-implemented payload diagnostic.
+for existing validator differences, and the [separate store diagnostic candidate](store-diagnostics-api.md).
 
 ## CLI
 
