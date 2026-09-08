@@ -9,6 +9,7 @@ const cp = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { childDiagnostics } = require('./e2e-child-diagnostics');
 
 const sourceRoot = path.resolve(__dirname, '..');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'leerness-installed-cleanroom-'));
@@ -19,6 +20,7 @@ const legacy = path.join(tempRoot, 'legacy-project');
 const expectedVersion = require(path.join(sourceRoot, 'package.json')).version;
 let failed = 0;
 let total = 0;
+let preserveTempRoot = false;
 
 function check(label, condition, detail = '') {
   total += 1;
@@ -95,17 +97,31 @@ function isolatedHandoffEnv(sessionId) {
 
 function spawnHandoff(cli, sessionId) {
   return new Promise((resolve) => {
-    const child = cp.spawn(process.execPath,
-      [cli, 'handoff', project, '--quiet', '--no-drift-check'], {
-        cwd: project,
-        env: isolatedHandoffEnv(sessionId),
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('close', (status) => resolve({ sessionId, status, stdout, stderr }));
+    const timeoutMs = 180000;
+    const started = Date.now();
+    let timedOut = false;
+    let settled = false;
+    // Latch before execFile's native kill timer: a late code 0 is still failure.
+    const timer = setTimeout(() => { timedOut = true; }, timeoutMs);
+    const finish = (error, stdout = '', stderr = '') => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ sessionId, status: error ? (typeof error.code === 'number' ? error.code : null) : 0,
+        signal: error?.signal || null, error: error || null, timedOut,
+        elapsedMs: Date.now() - started, timeoutMs, stdout, stderr });
+    };
+    try {
+      // Native buffering bounds both streams and handles launch errors. This
+      // targets the direct child only, not a general descendant-process reaper.
+      const child = cp.execFile(process.execPath,
+        [cli, 'handoff', project, '--quiet', '--no-drift-check'], {
+          cwd: project, env: isolatedHandoffEnv(sessionId), shell: false,
+          timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
+          encoding: 'utf8', windowsHide: true,
+        }, finish);
+      child.stdin.end();
+    } catch (error) { finish(error); }
   });
 }
 
@@ -168,6 +184,8 @@ async function main() {
     workspace.stdout || workspace.stderr);
 
   const sessionIds = ['cleanroom-codex-01', 'cleanroom-claude-01', 'cleanroom-cursor-01', 'cleanroom-agent-04'];
+  // Keep evidence on any handoff failure, including uncertain child termination.
+  preserveTempRoot = true;
   const handoffs = await Promise.all(sessionIds.map((id) => spawnHandoff(cli, id)));
   const sessionsDir = path.join(project, '.leerness', 'cache', 'sessions');
   const observedSessions = Object.fromEntries(sessionIds.map((id) => {
@@ -181,14 +199,17 @@ async function main() {
     return record && record.sessionKey === id && record.handoffCount === 1
       && Array.isArray(record.handoffHistory) && record.handoffHistory.length === 1;
   });
-  check('parallel installed handoffs keep four independent session records',
-    handoffs.every((item) => item.status === 0) && isolated,
+  const handoffsPassed = check('parallel installed handoffs keep four independent session records',
+    handoffs.every((item) => item.status === 0 && !item.error && !item.signal && !item.timedOut) && isolated,
     JSON.stringify({
       inheritedSuppressionEnv: Object.fromEntries(Object.entries(process.env)
         .filter(([key]) => PRESENCE_CONTROL_ENV.has(key.toLowerCase()))),
-      handoffs: handoffs.map(({ sessionId, status, stderr }) => ({ sessionId, status, stderr })),
+      handoffs: handoffs.map((item) => ({ sessionId: item.sessionId, timedOut: item.timedOut,
+        ...childDiagnostics(item, item.elapsedMs, item.timeoutMs) })),
       observedSessions,
     }));
+  if (!handoffsPassed) return;
+  preserveTempRoot = false;
 
   write(path.join(legacy, '.harness', 'HARNESS_VERSION'), '1.36.161\n');
   write(path.join(legacy, '.harness', 'progress-tracker.md'), '# legacy authoritative state\n');
@@ -246,7 +267,8 @@ async function main() {
     if (path.dirname(resolved) !== temp || !resolved.startsWith(temp + path.sep)) {
       throw new Error(`unsafe cleanup target: ${resolved}`);
     }
-    fs.rmSync(resolved, { recursive: true, force: true });
+    if (preserveTempRoot) process.stderr.write(`Retained installed handoff evidence: ${resolved}\n`);
+    else fs.rmSync(resolved, { recursive: true, force: true });
   }
   if (failed) {
     process.stderr.write(`INSTALLED_CLEANROOM_FAILED ${failed}/${total}\n`);
