@@ -245,6 +245,8 @@ async function main() {
     ['mcp-presence-probe.js', /MCP presence probe: (\d+)\/(\d+) passed/, 4800000],
     // 49 CLI calls x 120s + 420s margin; 정상 실행 시간이나 성능 목표가 아니다.
     ['memory-guard-order-probe.js', /memory guard order: (\d+)\/(\d+) passed/, 6300000],
+    // 95 CLI calls x 120s + 420s margin; observes inner deadlines, not a performance target.
+    ['memory-input-preflight-probe.js', /memory input preflight: (\d+)\/(\d+) passed/, 11820000],
   ];
   for (const [script, summaryPattern, timeout] of installedSuites) {
     const result = runNode(path.join(installedRoot, 'scripts', script), [], { cwd: consumer, timeout });

@@ -50,7 +50,7 @@ const {
   migrateLegacyWorkspace,
 } = require('../lib/workspace-dir');
 
-const VERSION = '1.36.189';
+const VERSION = '1.36.190';
 
 // MCP lifecycle 주소 표식은 현재 CLI 호출 한 번에만 유효하다. CLI bootstrap에서 즉시 env에서
 // 떼어 두어 `--no-record`/hook처럼 presence 기록 함수에 도달하지 않는 경로도 후속 child에 유출하지 않는다.
@@ -9059,8 +9059,16 @@ let _integSeq = 0;
 //   카운터 리셋이 run 파일 클로버를 유발하므로 예외적으로 load 에서 던지고 stateCmd 를 _guardStore 로 감싼다.
 function _assertStoreParsable(file, label) {
   if (exists(file)) {
-    try { JSON.parse(read(file)); }
+    try { return JSON.parse(read(file)); }
     catch { throw Object.assign(new Error(`${label} 저장 파일이 손상돼(JSON 파싱 실패) 덮어쓰기를 거부합니다: ${file} — 파일을 복구하거나 삭제 후 재시도하세요`), { code: 'E_STORE_CORRUPT', file }); }
+  }
+}
+// Memory writers must not replace an existing non-array root with the Markdown fallback.
+// Absence remains undefined; null/false/0/empty-string JSON values are not absence.
+function _assertMemoryStoreArray(file, label) {
+  const value = _assertStoreParsable(file, label);
+  if (value !== undefined && !Array.isArray(value)) {
+    throw Object.assign(new Error(`${label} 저장 파일의 JSON 루트가 배열이 아니므로 덮어쓰기를 거부합니다: ${file} — 원본을 보존하고 배열 형식을 확인하세요`), { code: 'E_STORE_INVALID', file });
   }
 }
 // 1.36.114: 동기 try/catch 만 있어 **async 명령에서는 통째로 무력**이었다 — 던진 예외가 거부된 프로미스가 되어
@@ -9068,7 +9076,13 @@ function _assertStoreParsable(file, label) {
 //   code 가 `store_corrupt` 대신 `error` 였다(기계 계약 파손: JSON.parse(stdout) 실패).
 //   1.36.107 이 `_withLock` 에서 고친 것과 같은 형태다 — thenable 이면 프로미스 경로로도 같은 처리를 한다.
 function _guardStore(jsonMode, fn) {
-  const handle = (e) => { if (e && e.code === 'E_STORE_CORRUPT') { failJson(jsonMode, 'store_corrupt', e.message); return undefined; } throw e; };
+  const handle = (e) => {
+    if (e && (e.code === 'E_STORE_CORRUPT' || e.code === 'E_STORE_INVALID')) {
+      failJson(jsonMode, e.code === 'E_STORE_CORRUPT' ? 'store_corrupt' : 'store_invalid', e.message);
+      return undefined;
+    }
+    throw e;
+  };
   let out;
   try { out = fn(); }
   catch (e) { return handle(e); }
@@ -14995,14 +15009,19 @@ function _loadDecisions(root) {
   return exists(mp) ? _decisionsFromMd(read(mp)) : [];
 }
 // canonical 저장 — decisions.json(canonical) + decisions.md(projection) 동시 기록 (단일 진실소스 write path).
-function _saveDecisions(root, decisions) {
+function _saveDecisions(root, decisions, archive = null) {
   const arr = Array.isArray(decisions) ? decisions : [];
   // 1.36.114 (스토어 전수 대조에서 발견): 손상된 decisions.json 을 빈 배열로 오인해 덮어써 **영구 기억이 사라졌다**.
   //   표적 사냥(creds 등)으로는 못 봤고, .leerness 아래 JSON 스토어를 **열거해 하나씩 손상시키는** 전수 스윕이 잡았다.
-  _assertStoreParsable(decisionsJsonPath(root), 'decisions');
+  _assertMemoryStoreArray(decisionsJsonPath(root), 'decisions');
+  // Prepare both outputs before any domain write, including an optional drop archive.
+  // Later I/O failures are still not a multi-file transaction.
+  const json = JSON.stringify(arr, null, 2) + '\n';
+  const markdown = _renderDecisionsMd(arr);
   mkdirp(path.dirname(decisionsJsonPath(root)));
-  writeUtf8(decisionsJsonPath(root), JSON.stringify(arr, null, 2) + '\n');
-  writeUtf8(decisionsPath(root), _renderDecisionsMd(arr));
+  if (archive) append(archive.path, archive.text);
+  writeUtf8(decisionsJsonPath(root), json);
+  writeUtf8(decisionsPath(root), markdown);
 }
 // 1.9.371 (UR-0073 Phase A): agent team 정의 레지스트리 — canonical JSON(teams.json) 주 + teams.md projection. opt-in · 정의 전용(자동 실행 X).
 const teamsJsonPath = root => path.join(root, '.leerness/teams.json');
@@ -15050,12 +15069,15 @@ function _loadLessons(root) {
   const mp = lessonsPath(root);
   return exists(mp) ? _parseLessonEntries(read(mp)) : [];
 }
-function _saveLessons(root, lessons) {
+function _saveLessons(root, lessons, archive = null) {
   const arr = Array.isArray(lessons) ? lessons : [];
-  _assertStoreParsable(lessonsJsonPath(root), 'lessons');   // 1.36.114: decisions 와 같은 클래스 — 손상 위에 덮어써 교훈이 사라졌다
+  _assertMemoryStoreArray(lessonsJsonPath(root), 'lessons');
+  const json = JSON.stringify(arr, null, 2) + '\n';
+  const markdown = _renderLessonsMd(arr);
   mkdirp(path.dirname(lessonsJsonPath(root)));
-  writeUtf8(lessonsJsonPath(root), JSON.stringify(arr, null, 2) + '\n');
-  writeUtf8(lessonsPath(root), _renderLessonsMd(arr));
+  if (archive) append(archive.path, archive.text);
+  writeUtf8(lessonsJsonPath(root), json);
+  writeUtf8(lessonsPath(root), markdown);
 }
 
 function nextId(root, prefix) {
@@ -16062,9 +16084,9 @@ function memoryRestoreCmd(root, surface, target) {
                        : surface === 'lessons'   ? lessonsJsonPath(root)
                        : planPath(root);
   const restoredCount = _withLock(memoryLockPath, () => {
-  // 기존 구문 가드를 복원 append보다 먼저 적용한다. plan/읽기 fallback 계약은 유지.
-  if (surface === 'decisions') _assertStoreParsable(decisionsJsonPath(root), 'decisions');
-  else if (surface === 'lessons') _assertStoreParsable(lessonsJsonPath(root), 'lessons');
+  // 기존 JSON 구문/배열 루트 가드를 복원 append보다 먼저 적용한다. plan/읽기 fallback 계약은 유지.
+  if (surface === 'decisions') _assertMemoryStoreArray(decisionsJsonPath(root), 'decisions');
+  else if (surface === 'lessons') _assertMemoryStoreArray(lessonsJsonPath(root), 'lessons');
   if (!exists(archivePath)) return fail(`${surface}.archive.md 없음 — 복원할 항목 없음`);
   // 1.36.76 (9차 헌트 #3 P1) → (검수 #2): 잘린/깨진 UTF-8 아카이브가 손상 데이터를 active 로 유입시키던 것.
   //   판정은 "디코딩 결과에 U+FFFD 포함"이 아니라 **원시 바이트의 UTF-8 유효성**(fatal decode) — 사용자가 정당하게
@@ -16218,7 +16240,7 @@ function lessonDropCmd(root, target) {
   let removed = [];
   let loadErr = null;
   _withLock(lessonsJsonPath(root), () => {
-    _assertStoreParsable(lessonsJsonPath(root), 'lessons'); // archive 쓰기 전에 손상 거부
+    _assertMemoryStoreArray(lessonsJsonPath(root), 'lessons'); // archive 쓰기 전에 손상/비배열 거부
     const cur = _loadLessons(root);
     if (!cur.length) { loadErr = 'no_lessons'; return; }
     const keep = [], gone = [];
@@ -16233,8 +16255,10 @@ function lessonDropCmd(root, target) {
       `\n### ${_lineSafe(l.date)}\n- Lesson: ${_lineSafe(l.text)}\n${l.tag ? `- Tag: ${_lineSafe(l.tag)}\n` : ''}`
     ).join('');
     const archiveHeader = exists(archivePath) ? '' : '# Lessons archive\n\n';
-    append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`);
-    _saveLessons(root, keep);
+    _saveLessons(root, keep, {
+      path: archivePath,
+      text: archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`,
+    });
     removed = gone;
   });
   if (loadErr === 'no_lessons') return failJson(has('--json'), 'no_lessons', 'lessons 없음');   // codex P2: --json 에러 구조화
@@ -16258,7 +16282,7 @@ function lessonSave(root, text) {
   // 1.30.4 (14th리뷰 F5): task/rule add 와 일관된 dedup — 동일 text 존재 시 skip(--force 우회). 종전엔 무조건 append(중복 누적).
   let _skipped = false;
   _withLock(lessonsJsonPath(root), () => {
-    _assertStoreParsable(lessonsJsonPath(root), 'lessons'); // fallback 중복을 성공으로 오인하지 않음
+    _assertMemoryStoreArray(lessonsJsonPath(root), 'lessons'); // fallback 중복을 성공으로 오인하지 않음
     const all = _loadLessons(root);
     if (!has('--force') && all.some(l => l && l.text === text)) { _skipped = true; return; }
     all.push({ date: today(), text, tag: tag || null });
@@ -16335,7 +16359,7 @@ function decisionDropCmd(root, target) {
   let removed = [];
   let loadErr = null;
   _withLock(decisionsJsonPath(root), () => {
-    _assertStoreParsable(decisionsJsonPath(root), 'decisions'); // archive 쓰기 전에 손상 거부
+    _assertMemoryStoreArray(decisionsJsonPath(root), 'decisions'); // archive 쓰기 전에 손상/비배열 거부
     const cur = _loadDecisions(root);
     if (!cur.length) { loadErr = 'no_decisions'; return; }
     const keep = [], gone = [];
@@ -16350,8 +16374,10 @@ function decisionDropCmd(root, target) {
       return `\n### ${head}\n- Decision: ${_lineSafe(d.decision || '')}\n- Reason: ${_lineSafe(d.reason || '')}\n- Alternatives: ${_lineSafe(d.alternatives || '')}\n- Impact: ${_lineSafe(d.impact || '')}\n`;
     }).join('');
     const archiveHeader = exists(archivePath) ? '' : '# Decisions archive\n\n';
-    append(archivePath, archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`);
-    _saveDecisions(root, keep);
+    _saveDecisions(root, keep, {
+      path: archivePath,
+      text: archiveHeader + `\n## 제거 ${today()} (target: "${_lineSafe(target)}")\n${archiveBlocks}\n`,
+    });
     removed = gone;
   });
   if (loadErr === 'no_decisions') return failJson(has('--json'), 'no_decisions', 'decisions 없음');   // codex P2: --json 에러 구조화
@@ -16378,7 +16404,7 @@ function decisionAdd(root, title) {
   // 1.30.4 (14th리뷰 F5): task/rule add 와 일관된 dedup — 동일 title 존재 시 skip(--force 우회). 종전엔 무조건 append(중복 누적).
   let _skipped = false;
   _withLock(decisionsJsonPath(root), () => {
-    _assertStoreParsable(decisionsJsonPath(root), 'decisions'); // fallback 중복을 성공으로 오인하지 않음
+    _assertMemoryStoreArray(decisionsJsonPath(root), 'decisions'); // fallback 중복을 성공으로 오인하지 않음
     const all = _loadDecisions(root);
     if (!has('--force') && all.some(d => d && (d.title === title || d.decision === title))) { _skipped = true; return; }
     all.push({

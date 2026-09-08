@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.36.190 — 2026-09-08
+
+- fix(memory): reject existing non-array decision/lesson JSON before writes or duplicate success; retain syntax-error codes, absent-file backfill and read-only fallback
+- fix(memory): prepare JSON and Markdown before add/save/drop writes, including drop archives; preserve existing locks and I/O order without claiming multi-file transactions or lossless restore
+- test: cover memory input rejection and output preparation in source and installed consumers with normal CRUD, legacy and migration controls
+- test: carry bounded installed-handoff child lifecycle, completion diagnostics and watchdog coverage into the next release candidate
+
 ## 1.36.189 — 2026-09-08
 
 - ci: add Linux and Windows installed-package gates so tarball contents and consumer execution are tested separately from source checkout
