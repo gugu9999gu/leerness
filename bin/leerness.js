@@ -16062,6 +16062,9 @@ function memoryRestoreCmd(root, surface, target) {
                        : surface === 'lessons'   ? lessonsJsonPath(root)
                        : planPath(root);
   const restoredCount = _withLock(memoryLockPath, () => {
+  // 기존 구문 가드를 복원 append보다 먼저 적용한다. plan/읽기 fallback 계약은 유지.
+  if (surface === 'decisions') _assertStoreParsable(decisionsJsonPath(root), 'decisions');
+  else if (surface === 'lessons') _assertStoreParsable(lessonsJsonPath(root), 'lessons');
   if (!exists(archivePath)) return fail(`${surface}.archive.md 없음 — 복원할 항목 없음`);
   // 1.36.76 (9차 헌트 #3 P1) → (검수 #2): 잘린/깨진 UTF-8 아카이브가 손상 데이터를 active 로 유입시키던 것.
   //   판정은 "디코딩 결과에 U+FFFD 포함"이 아니라 **원시 바이트의 UTF-8 유효성**(fatal decode) — 사용자가 정당하게
@@ -16215,6 +16218,7 @@ function lessonDropCmd(root, target) {
   let removed = [];
   let loadErr = null;
   _withLock(lessonsJsonPath(root), () => {
+    _assertStoreParsable(lessonsJsonPath(root), 'lessons'); // archive 쓰기 전에 손상 거부
     const cur = _loadLessons(root);
     if (!cur.length) { loadErr = 'no_lessons'; return; }
     const keep = [], gone = [];
@@ -16254,6 +16258,7 @@ function lessonSave(root, text) {
   // 1.30.4 (14th리뷰 F5): task/rule add 와 일관된 dedup — 동일 text 존재 시 skip(--force 우회). 종전엔 무조건 append(중복 누적).
   let _skipped = false;
   _withLock(lessonsJsonPath(root), () => {
+    _assertStoreParsable(lessonsJsonPath(root), 'lessons'); // fallback 중복을 성공으로 오인하지 않음
     const all = _loadLessons(root);
     if (!has('--force') && all.some(l => l && l.text === text)) { _skipped = true; return; }
     all.push({ date: today(), text, tag: tag || null });
@@ -16330,6 +16335,7 @@ function decisionDropCmd(root, target) {
   let removed = [];
   let loadErr = null;
   _withLock(decisionsJsonPath(root), () => {
+    _assertStoreParsable(decisionsJsonPath(root), 'decisions'); // archive 쓰기 전에 손상 거부
     const cur = _loadDecisions(root);
     if (!cur.length) { loadErr = 'no_decisions'; return; }
     const keep = [], gone = [];
@@ -16372,6 +16378,7 @@ function decisionAdd(root, title) {
   // 1.30.4 (14th리뷰 F5): task/rule add 와 일관된 dedup — 동일 title 존재 시 skip(--force 우회). 종전엔 무조건 append(중복 누적).
   let _skipped = false;
   _withLock(decisionsJsonPath(root), () => {
+    _assertStoreParsable(decisionsJsonPath(root), 'decisions'); // fallback 중복을 성공으로 오인하지 않음
     const all = _loadDecisions(root);
     if (!has('--force') && all.some(d => d && (d.title === title || d.decision === title))) { _skipped = true; return; }
     all.push({
@@ -33237,7 +33244,7 @@ async function main(runtimeEntered = false) {
   // 1.9.128: memory restore — archive 블록을 active 파일로 복귀 (DELETE→RESTORE cycle)
   if (cmd === 'memory' && args[1] === 'restore') {
     const root = absRoot(arg('--path', process.cwd()));
-    return memoryRestoreCmd(root, args[2], args[3]);
+    return _guardStore(has('--json'), () => memoryRestoreCmd(root, args[2], args[3]));
   }
   if (cmd === 'memory' && args[1]) {
     const sub = args[1];
@@ -33274,7 +33281,7 @@ async function main(runtimeEntered = false) {
         if (args[i].startsWith('--')) break;
         targetParts.push(args[i]);
       }
-      return lessonDropCmd(root, targetParts.join(' '));
+      return _guardStore(has('--json'), () => lessonDropCmd(root, targetParts.join(' ')));
     }
     return fail('lesson save "<text>" [--tag "..."] | lesson list [--tag "..."] [--json] | lesson drop <date|text>');
   }
@@ -33299,7 +33306,7 @@ async function main(runtimeEntered = false) {
         if (args[i].startsWith('--')) break;
         targetParts.push(args[i]);
       }
-      return decisionDropCmd(root, targetParts.join(' '));
+      return _guardStore(has('--json'), () => decisionDropCmd(root, targetParts.join(' ')));
     }
     return fail('decision add "<title>" --reason "..." --alternatives "..." --impact "..." | decision list [--json] | decision drop <date|title>');
   }
