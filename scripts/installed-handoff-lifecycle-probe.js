@@ -149,10 +149,10 @@ async function checkHandoffGate() {
   // Actual call-site statements, controlled result packets, and real owned record
   // files. These are predicate/retention controls, not additional live handoffs.
   const start = "  const sessionIds = ['cleanroom-codex-01'";
-  const end = "  write(path.join(legacy, '.harness', 'HARNESS_VERSION')";
+  const end = '  preserveTempRoot = false;';
   assert.strictEqual(source.split(start).length, 2);
   assert.strictEqual(source.split(end).length, 2);
-  const block = source.slice(source.indexOf(start), source.indexOf(end));
+  const block = source.slice(source.indexOf(start), source.indexOf(end) + end.length);
   const sessions = path.join(arena, '.leerness/cache/sessions');
   fs.mkdirSync(sessions, { recursive: true });
   for (const id of ['cleanroom-codex-01', 'cleanroom-claude-01', 'cleanroom-cursor-01', 'cleanroom-agent-04']) {
