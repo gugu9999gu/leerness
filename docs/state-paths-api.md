@@ -4,6 +4,11 @@ Available in v1.36.186. T-0174 / P-0020 is an additive inspection-only foundatio
 It does not move data or activate a new backend. The complete staged design is in
 [State scopes and migration](state-scopes.md).
 
+This API inventories path metadata, not payload validity. A successful inspection
+does not imply that the stores contain valid JSON or domain records. See the
+[store observation boundaries and staged contract](store-observation-contract.md)
+for existing validator differences and the separate, not-yet-implemented payload diagnostic.
+
 ## CLI
 
 ```sh
